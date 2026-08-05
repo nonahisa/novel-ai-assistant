@@ -1,0 +1,244 @@
+{
+  "name": "novel-ai-assistant",
+  "displayName": "小説AI執筆補助",
+  "description": "小説執筆のための作品管理・文字数計測・AI支援機能",
+  "version": "0.1.0",
+  "publisher": "local",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "novelai",
+          "title": "小説執筆",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "novelai": [
+        {
+          "id": "novelai.works",
+          "name": "作品一覧"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "novelai.works",
+        "contents": "まだ作品が登録されていません。\n[既存フォルダを作品として登録](command:novelai.addWork)\n[新規作品を作成](command:novelai.createWork)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "novelai.addWork",
+        "title": "既存フォルダを作品として登録",
+        "category": "小説執筆",
+        "icon": "$(add)"
+      },
+      {
+        "command": "novelai.createWork",
+        "title": "新規作品を作成",
+        "category": "小説執筆",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "novelai.removeWork",
+        "title": "作品の登録を解除",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.refresh",
+        "title": "再読み込み",
+        "category": "小説執筆",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "novelai.addEpisode",
+        "title": "新規話数ファイルを追加",
+        "category": "小説執筆",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "novelai.openWorkFolder",
+        "title": "作品フォルダを開く",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.showWorkStats",
+        "title": "作品の文字数を表示",
+        "category": "小説執筆",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "novelai.setupAI",
+        "title": "AIの設定",
+        "category": "小説執筆",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "novelai.testAI",
+        "title": "AIの接続を確認",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.extractCharacters",
+        "title": "登場人物を抽出",
+        "category": "小説執筆",
+        "icon": "$(person-add)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "novelai.addWork",
+          "when": "view == novelai.works",
+          "group": "navigation@1"
+        },
+        {
+          "command": "novelai.createWork",
+          "when": "view == novelai.works",
+          "group": "navigation@2"
+        },
+        {
+          "command": "novelai.refresh",
+          "when": "view == novelai.works",
+          "group": "navigation@3"
+        },
+        {
+          "command": "novelai.setupAI",
+          "when": "view == novelai.works",
+          "group": "navigation@4"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "novelai.addEpisode",
+          "when": "view == novelai.works && viewItem == work",
+          "group": "inline"
+        },
+        {
+          "command": "novelai.extractCharacters",
+          "when": "view == novelai.works && viewItem == work",
+          "group": "1_stats"
+        },
+        {
+          "command": "novelai.showWorkStats",
+          "when": "view == novelai.works && viewItem == work",
+          "group": "1_stats"
+        },
+        {
+          "command": "novelai.openWorkFolder",
+          "when": "view == novelai.works && viewItem == work",
+          "group": "2_open"
+        },
+        {
+          "command": "novelai.removeWork",
+          "when": "view == novelai.works && viewItem == work",
+          "group": "9_danger"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "novelai.removeWork",
+          "when": "false"
+        },
+        {
+          "command": "novelai.openWorkFolder",
+          "when": "false"
+        },
+        {
+          "command": "novelai.showWorkStats",
+          "when": "false"
+        },
+        {
+          "command": "novelai.extractCharacters",
+          "when": "true"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "小説AI執筆補助",
+      "properties": {
+        "novelai.countMode": {
+          "type": "string",
+          "enum": [
+            "net",
+            "gross"
+          ],
+          "enumDescriptions": [
+            "純文字数（改行・空白を除く）",
+            "総文字数（改行を除き、空白を含む）"
+          ],
+          "default": "net",
+          "description": "ステータスバーに表示する文字数の種類"
+        },
+        "novelai.excludeRubyFromCount": {
+          "type": "boolean",
+          "default": true,
+          "description": "Markdownのルビ記法 {漢字|かんじ} のルビ部分を文字数から除外する"
+        },
+        "novelai.episodeFileExtension": {
+          "type": "string",
+          "enum": [
+            ".txt",
+            ".md"
+          ],
+          "default": ".txt",
+          "description": "新規話数ファイルを作成するときの既定の拡張子"
+        },
+        "novelai.episodeNumberDigits": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 6,
+          "description": "新規話数ファイル名の数字の桁数（3なら 001.txt）"
+        },
+        "novelai.ollama.endpoint": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "OllamaのエンドポイントURL"
+        },
+        "novelai.ollama.numCtx": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "AIへ渡すコンテキスト長（トークン）。**0で自動**（モデルの上限と16384の小さい方）。Ollamaは既定値が小さく、指定しないと入力が切り捨てられます。大きくするとメモリ消費が増えます。"
+        },
+        "novelai.ollama.timeoutSeconds": {
+          "type": "number",
+          "default": 180,
+          "minimum": 10,
+          "description": "1回のAI呼び出しのタイムアウト（秒）。大きいモデルでは延ばしてください。"
+        },
+        "novelai.chunkChars": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "1チャンクの文字数。0でモデルのコンテキスト長から自動決定。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  }
+}

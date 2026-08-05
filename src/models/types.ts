@@ -1,0 +1,79 @@
+/** 登録された作品 */
+export interface WorkEntry {
+  /** 作品の一意ID */
+  id: string;
+  /** 表示名（既定はフォルダ名） */
+  title: string;
+  /** 作品フォルダの絶対パス */
+  folderPath: string;
+  /** 登録日時 (ISO8601) */
+  registeredAt: string;
+}
+
+/** 本文ファイル1件の情報 */
+export interface EpisodeFile {
+  /** 絶対パス */
+  filePath: string;
+  /** ファイル名（拡張子含む） */
+  fileName: string;
+  /** 拡張子 (".txt" | ".md") */
+  ext: string;
+  /** 開始話数。判定できない場合 null */
+  chapterStart: number | null;
+  /** 終了話数。単話なら chapterStart と同じ */
+  chapterEnd: number | null;
+  /** ファイル名から抽出したサブタイトル。無い場合 null */
+  subtitle: string | null;
+  /** 種別 */
+  kind: EpisodeKind;
+  /** ファイル名が初期状態（数字のみ）か */
+  isInitialName: boolean;
+  /** 文字数（メタデータヘッダーがある場合は本文のみ） */
+  counts: CharCounts;
+  /** 投稿サイト由来のメタデータヘッダーを持つか */
+  hasMetadata: boolean;
+  /** メタデータ内の【タイトル】。話のサブタイトルとして使える */
+  metaTitle: string | null;
+  /** メタデータ内の【文字数】記載値（照合用） */
+  declaredCharCount: number | null;
+  /** メタデータ内の【更新日時】 */
+  metaUpdatedAt: string | null;
+}
+
+export type EpisodeKind = "本編" | "プロローグ" | "エピローグ" | "幕間" | "不明";
+
+/** 文字数の計測結果 */
+export interface CharCounts {
+  /** 総文字数（改行を除く。空白は含む） */
+  gross: number;
+  /** 純文字数（改行・空白をすべて除く） */
+  net: number;
+  /** 行数（空行を含む） */
+  lines: number;
+  /** 段落数（空行で区切られたブロック数） */
+  paragraphs: number;
+}
+
+/** 作品単位の集計 */
+export interface WorkStats {
+  fileCount: number;
+  totals: CharCounts;
+}
+
+/** .aiwriter/config.json の内容（フェーズ0で使う範囲） */
+export interface WorkConfig {
+  schemaVersion: string;
+  workTitle: string;
+  /** 本文フォルダの相対パス（既定 "本文"） */
+  manuscriptDir: string;
+  /** 設定フォルダの相対パス（既定 "設定"） */
+  settingsDir: string;
+  createdAt: string;
+}
+
+export const CONFIG_SCHEMA_VERSION = "0.1";
+export const AIWRITER_DIR = ".aiwriter";
+export const CONFIG_FILE = "config.json";
+export const DEFAULT_MANUSCRIPT_DIR = "本文";
+export const DEFAULT_SETTINGS_DIR = "設定";
+export const SUPPORTED_EXTENSIONS = [".txt", ".md"] as const;
