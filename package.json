@@ -220,6 +220,18 @@
           "minimum": 10,
           "description": "1回のAI呼び出しのタイムアウト（秒）。大きいモデルでは延ばしてください。"
         },
+        "novelai.claude.timeoutSeconds": {
+          "type": "number",
+          "default": 180,
+          "minimum": 10,
+          "description": "Claudeの1回のAI呼び出しのタイムアウト（秒）。"
+        },
+        "novelai.claude.maxOutputTokens": {
+          "type": "number",
+          "default": 8192,
+          "minimum": 1024,
+          "markdownDescription": "Claudeの1回の応答の最大トークン数。**出力トークンは入力より単価が高い**ため、必要以上に大きくしないでください。モデルの上限を超える場合は上限に丸められます。"
+        },
         "novelai.chunkChars": {
           "type": "number",
           "default": 0,
@@ -240,5 +252,8 @@
     "@types/vscode": "^1.90.0",
     "esbuild": "^0.24.0",
     "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0"
   }
 }
