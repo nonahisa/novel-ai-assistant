@@ -25,6 +25,10 @@ Use TypeScript with two-space indentation, double quotes, and strict typing; do 
 
 Vitest covers pure logic and provider boundaries under `test/unit/`; name files `*.test.ts`. The VS Code Electron host runs `src/test/run.ts` against the minimum supported editor. Run `npm run check` for every change and `npm run test:integration` for extension behavior. `npm run test:ollama` is an optional live check. Releases must also pass `npm run verify:vsix`. Never commit manuscript paths, credentials, caches, or generated AI results.
 
+## Sakura AI Smoke Test
+
+The Sakura AI Engine smoke test is a GitHub Actions `workflow_dispatch` workflow only: it never runs automatically on push, pull request, or a schedule. Store its credential only as the repository Actions secret `SAKURA_AI_ACCOUNT_TOKEN`; do not read, create, or commit a local `.env` file. After the workflow is present on the default branch, run **Sakura AI Engine Smoke Test** from the repository **Actions** tab with **Run workflow**. It calls `gemma-4-31B-it` and passes only when the response content is nonempty. A 401 means to check the secret configuration before a deliberate rerun; a 429 means to wait for the rate limit and rerun manually. Neither case should trigger automatic retries or a fallback provider.
+
 ## Commit & Pull Request Guidelines
 
 History uses Conventional Commit-style subjects such as `feat: integrate Claude AI provider`. Write concise, imperative subjects with an appropriate prefix (`feat:`, `fix:`, `docs:`, or `refactor:`). Pull requests should explain the user-visible change, cite relevant design sections or issues, list build/typecheck/manual-test results, and include screenshots or recordings for UI changes. Call out migration, AI-cost, or manuscript-safety implications explicitly.
