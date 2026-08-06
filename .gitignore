@@ -8,3 +8,4 @@ out/
 release/
 _test_*
 *.vsix
+.worktrees/
