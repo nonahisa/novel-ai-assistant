@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
   saveAll: vi.fn(),
   cacheSet: vi.fn(),
   cacheSave: vi.fn(),
+  dirtyDocumentPaths: vi.fn(),
   generate: vi.fn(),
   cachedResults: new Map<string, unknown>(),
   mergeResult: undefined as unknown,
@@ -28,8 +29,14 @@ const state = vi.hoisted(() => ({
 
     constructor(
       message: string,
-      readonly kind: "modified_externally" | "path_conflict",
+      readonly kind:
+        | "modified_externally"
+        | "path_conflict"
+        | "unsaved_changes"
+        | "io_error",
       options?: {
+        persistenceState?: "not_saved" | "ambiguous";
+        recoveryPaths?: string[];
         batchProgress?: {
           completedIds: string[];
           ambiguousIds: string[];
@@ -40,7 +47,11 @@ const state = vi.hoisted(() => ({
       super(message);
       this.name = "CharacterStoreError";
       this.batchProgress = options?.batchProgress;
+      this.persistenceState = options?.persistenceState ?? "not_saved";
+      this.recoveryPaths = options?.recoveryPaths ?? [];
     }
+    readonly persistenceState: "not_saved" | "ambiguous";
+    readonly recoveryPaths: string[];
   },
 }));
 
@@ -105,6 +116,9 @@ vi.mock("../../src/core/characterStore", () => ({
     async loadAll() {
       return { characters: [], errors: [] };
     }
+    async dirtyDocumentPaths() {
+      return state.dirtyDocumentPaths();
+    }
     async saveAll(characters: unknown[]) {
       return state.saveAll(characters);
     }
@@ -140,7 +154,10 @@ vi.mock("../../src/core/chunkCache", () => ({
   },
 }));
 
-import { extractCharacters } from "../../src/features/extractCharacters";
+import {
+  extractCharacters,
+  saveDirtyDocumentsBeforeExtraction,
+} from "../../src/features/extractCharacters";
 import { CharacterStoreError } from "../../src/core/characterStore";
 import { emptyCharacter } from "../../src/models/character";
 
@@ -163,7 +180,9 @@ function successfulResult(name: string): {
   elapsedMs: number;
 } {
   return {
-    text: JSON.stringify({ characters: [{ name }] }),
+    text: JSON.stringify({
+      characters: [{ name, evidence: `${name}が歩いた。` }],
+    }),
     truncated: false,
     elapsedMs: 1,
   };
@@ -175,6 +194,9 @@ describe("AI失敗後の復旧案内", () => {
     ["model_not_found", "利用可能なモデルを選び直してください。"],
     ["timeout", "チャンクを小さくして、もう一度実行してください。"],
     ["bad_response", "出力上限とモデル設定を確認してください。"],
+    ["authentication_failed", "ClaudeのAPIキーを確認して再登録してください。"],
+    ["permission_denied", "Claudeの利用権限または請求設定を確認してください。"],
+    ["rate_limited", "しばらく待ってから、必要な場合に手動で再実行してください。"],
     ["aborted", "必要なら抽出をもう一度実行してください。"],
     ["unknown", "AI設定と拡張機能のログを確認してください。"],
   ] as const)("%s に具体的な復旧操作を1つ示す", (kind, expected) => {
@@ -191,6 +213,7 @@ describe("人物抽出フロー", () => {
     state.saveAll.mockReset().mockResolvedValue(undefined);
     state.cacheSet.mockReset();
     state.cacheSave.mockReset();
+    state.dirtyDocumentPaths.mockReset().mockResolvedValue([]);
     state.cachedResults.clear();
     state.mergeResult = undefined;
     state.providerId = "ollama";
@@ -198,6 +221,44 @@ describe("人物抽出フロー", () => {
     workspace.getConfiguration = () => ({
       get: <T>(_key: string, defaultValue: T): T => defaultValue,
     });
+    workspace.textDocuments = [];
+  });
+
+  test("保存に失敗した文書がある場合はunsafe continueを提示せず中止する", async () => {
+    const save = vi.fn(async () => false);
+    workspace.textDocuments = [{
+      uri: { fsPath: "c:\\NOVELS\\WORK\\本文\\001.txt" },
+      isDirty: true,
+      getText: () => "未保存本文",
+      save,
+    }];
+    const showWarningMessage = vi.fn(async () => "保存して実行");
+    Object.assign(window, { showWarningMessage });
+
+    await expect(saveDirtyDocumentsBeforeExtraction(work)).resolves.toBe(false);
+
+    expect(save).toHaveBeenCalledOnce();
+    expect(showWarningMessage.mock.calls[0]?.slice(1)).toEqual([
+      "保存して実行",
+      "中止",
+    ]);
+    expect(showWarningMessage.mock.calls.flat()).not.toContain("そのまま実行");
+  });
+
+  test("saveがtrueでもdirtyのままなら再検査で中止する", async () => {
+    const document = {
+      uri: { fsPath: "C:\\novels\\work\\設定\\characters\\char_001_灯.json" },
+      isDirty: true,
+      getText: () => "未保存設定",
+      save: vi.fn(async () => true),
+    };
+    workspace.textDocuments = [document];
+    Object.assign(window, {
+      showWarningMessage: vi.fn(async () => "保存して実行"),
+      showErrorMessage: vi.fn(async () => undefined),
+    });
+
+    await expect(saveDirtyDocumentsBeforeExtraction(work)).resolves.toBe(false);
   });
 
   test("切り詰め応答を保存せず出力上限かチャンク縮小を案内する", async () => {
@@ -225,6 +286,83 @@ describe("人物抽出フロー", () => {
     expect(showWarningMessage.mock.calls.at(-1)?.[0]).toContain(
       "出力上限を増やすかチャンクを小さくしてください"
     );
+  });
+
+  test("人物JSONに未保存変更がある場合はAI処理を開始しない", async () => {
+    const showWarningMessage = vi.fn(async () => undefined);
+    Object.assign(window, {
+      showWarningMessage,
+      showInformationMessage: vi.fn(async () => "実行"),
+    });
+    state.dirtyDocumentPaths.mockResolvedValue([
+      "C:\\NOVELS\\WORK\\設定\\characters\\char_001_灯.json",
+    ]);
+
+    await extractCharacters(work, testRegistry());
+
+    expect(state.generate).not.toHaveBeenCalled();
+    expect(state.saveAll).not.toHaveBeenCalled();
+    expect(showWarningMessage.mock.calls.at(-1)?.[0]).toContain(
+      "未保存の人物設定"
+    );
+  });
+
+  test("AI処理中に人物JSONがdirtyになった場合は保存直前に再検査して拒否する", async () => {
+    const showWarningMessage = vi.fn(async () => undefined);
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage,
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    state.dirtyDocumentPaths
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(["C:\\novels\\work\\設定\\characters\\char_001_灯.json"]);
+    state.generate
+      .mockResolvedValueOnce(successfulResult("灯"))
+      .mockResolvedValueOnce(successfulResult("澪"));
+
+    await extractCharacters(work, testRegistry());
+
+    expect(state.saveAll).not.toHaveBeenCalled();
+    expect(showWarningMessage.mock.calls.at(-1)?.[0]).toContain(
+      "保存直前に未保存の人物設定"
+    );
+  });
+
+  test("キャッシュ保存失敗を警告して有効な人物結果の保存を続ける", async () => {
+    const showWarningMessage = vi.fn(async () => undefined);
+    Object.assign(window, {
+      showInformationMessage: vi.fn(
+        async (_message: string, ...actions: string[]) =>
+          actions.includes("実行") ? "実行" : undefined
+      ),
+      showWarningMessage,
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    state.generate
+      .mockResolvedValueOnce(successfulResult("灯"))
+      .mockResolvedValueOnce(successfulResult("澪"));
+    state.cacheSave.mockRejectedValueOnce(
+      new Error("cache path credential=secret-value")
+    );
+
+    await extractCharacters(work, testRegistry());
+
+    expect(state.saveAll).toHaveBeenCalledOnce();
+    const summary = showWarningMessage.mock.calls.at(-1)?.[0];
+    expect(summary).toContain("キャッシュ保存警告 1件");
+    expect(summary).toContain("保存済み 2名");
+    expect(summary).not.toContain("secret-value");
   });
 
   test.each([
@@ -298,7 +436,7 @@ describe("人物抽出フロー", () => {
       .mockResolvedValueOnce({
         text: JSON.stringify({
           characters: [
-            { name: "灯" },
+            { name: "灯", evidence: "灯が歩いた。" },
             { name: "先生", evidence: "灯が歩いた" },
           ],
         }),
@@ -482,6 +620,95 @@ describe("人物抽出フロー", () => {
     expect(summary).toContain("保存先と回復ファイルを手動で照合してください");
     expect(summary).not.toContain("保存済み 1名");
     expect(summary).not.toContain("保存競合による未保存 1名");
+  });
+
+  test("曖昧な保存失敗は型付きの保存先と回復パスだけを詳細表示する", async () => {
+    const destination = "C:\\novels\\work\\設定\\characters\\char_001_灯.json";
+    const recovery = "C:\\novels\\work\\設定\\characters\\.novelai-recovery\\safe.bak";
+    let detailContent = "";
+    Object.assign(workspace, {
+      openTextDocument: vi.fn(async (options: { content: string }) => {
+        detailContent = options.content;
+        return { uri: { fsPath: "recovery-details" } };
+      }),
+    });
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage: vi.fn(async () => undefined),
+      showErrorMessage: vi.fn(
+        async (_message: string, ...actions: string[]) =>
+          actions.includes("回復パスを表示") ? "回復パスを表示" : undefined
+      ),
+      showTextDocument: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    state.generate
+      .mockResolvedValueOnce(successfulResult("灯"))
+      .mockResolvedValueOnce(successfulResult("澪"));
+    state.saveAll.mockRejectedValueOnce(
+      new CharacterStoreError("raw prompt credential=secret-value", "path_conflict", {
+        persistenceState: "ambiguous",
+        recoveryPaths: [destination, recovery],
+        batchProgress: {
+          completedIds: [],
+          ambiguousIds: ["char_001"],
+          remainingIds: ["char_002"],
+        },
+      })
+    );
+
+    await extractCharacters(work, testRegistry());
+
+    expect(detailContent).toContain(destination);
+    expect(detailContent).toContain(recovery);
+    expect(detailContent).not.toContain("secret-value");
+    expect(detailContent).not.toContain("灯が歩いた");
+  });
+
+  test.each([
+    [
+      "permission_denied",
+      "Claudeの利用権限または請求設定を確認してください。",
+      "設定を開く",
+    ],
+    [
+      "rate_limited",
+      "しばらく待ってから、必要な場合に手動で再実行してください。",
+      undefined,
+    ],
+  ] as const)("Claudeの%sを一般応答エラーへ潰さず即停止する", async (
+    kind,
+    recovery,
+    expectedAction
+  ) => {
+    state.providerId = "claude";
+    const showWarningMessage = vi.fn(async () => undefined);
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage,
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    state.generate.mockRejectedValue(
+      new AIError("provider payload", kind, "credential=secret-value")
+    );
+
+    await extractCharacters(work, testRegistry());
+
+    expect(state.generate).toHaveBeenCalledOnce();
+    const call = showWarningMessage.mock.calls.at(-1);
+    expect(call?.[0]).toContain(recovery);
+    if (expectedAction) expect(call?.slice(1)).toContain(expectedAction);
+    expect(call?.[0]).not.toContain("secret-value");
   });
 
   test("AI失敗後に保存競合しても無害化した失敗詳細を表示できる", async () => {
@@ -792,10 +1019,10 @@ describe("人物抽出フロー", () => {
 
   test("全チャンクがキャッシュ済みでもAPIを呼ばず人物JSONへ再反映する", async () => {
     state.cachedResults.set("chunk-1", {
-      characters: [{ name: "灯" }],
+      characters: [{ name: "灯", evidence: "灯が歩いた。" }],
     });
     state.cachedResults.set("chunk-2", {
-      characters: [{ name: "澪" }],
+      characters: [{ name: "澪", evidence: "澪が歩いた。" }],
     });
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => undefined),
@@ -825,7 +1052,7 @@ describe("人物抽出フロー", () => {
   test("キャッシュの生出力も再検証して人物でない候補を除外する", async () => {
     state.cachedResults.set("chunk-1", {
       characters: [
-        { name: "灯" },
+        { name: "灯", evidence: "灯が歩いた。" },
         { name: "先生", evidence: "灯が歩いた" },
       ],
     });
@@ -860,7 +1087,7 @@ describe("人物抽出フロー", () => {
   test("検証前の解析結果をキャッシュして後の規則変更で再評価できるようにする", async () => {
     const rawResult = {
       characters: [
-        { name: "灯" },
+        { name: "灯", evidence: "灯が歩いた。" },
         { name: "先生", evidence: "灯が歩いた" },
       ],
     };

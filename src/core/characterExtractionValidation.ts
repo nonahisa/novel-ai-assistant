@@ -291,12 +291,11 @@ function isGrounded(
   character: ExtractedCharacter,
   chunkText: string
 ): boolean {
-  if (chunkText.includes(character.name)) return true;
-  if (character.aliases?.some((alias) => chunkText.includes(alias))) {
-    return true;
-  }
-  return evidenceSegments(character.evidence).some((segment) =>
-    chunkText.includes(segment)
+  const appellations = [character.name, ...(character.aliases ?? [])];
+  return evidenceSegments(character.evidence).some(
+    (segment) =>
+      chunkText.includes(segment) &&
+      appellations.some((appellation) => segment.includes(appellation))
   );
 }
 

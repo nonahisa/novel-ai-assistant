@@ -47,7 +47,7 @@ describe("AI登場人物抽出結果の検証", () => {
     expect(result.accepted).toEqual([]);
   });
 
-  test("本文中の名前が一致する人物を根拠ありとして通す", () => {
+  test("本文中に名前があっても無関係なevidenceでは人物を通さない", () => {
     const result = validate({
       characters: [
         {
@@ -58,11 +58,11 @@ describe("AI登場人物抽出結果の検証", () => {
       ],
     });
 
-    expect(result.accepted).toHaveLength(1);
-    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toEqual([{ name: "灯", reason: "ungrounded" }]);
   });
 
-  test("4文字以上の引用が本文に一致する人物を根拠ありとして通す", () => {
+  test("本文に一致する引用でも候補名や別名を含まなければ通さない", () => {
     const result = validate({
       characters: [
         {
@@ -71,6 +71,15 @@ describe("AI登場人物抽出結果の検証", () => {
           evidence: `存在しない根拠です。\n「${sourceLine}」`,
         },
       ],
+    });
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toEqual([{ name: "月島", reason: "ungrounded" }]);
+  });
+
+  test("候補名を含む逐語evidenceが本文にある人物だけを通す", () => {
+    const result = validate({
+      characters: [{ name: "灯", entityType: "person", evidence: sourceLine }],
     });
 
     expect(result.accepted).toHaveLength(1);
@@ -84,7 +93,7 @@ describe("AI登場人物抽出結果の検証", () => {
           {
             name: "黒木 玲司",
             aliases: ["  玲司さん  "],
-            evidence: "本文にはない説明",
+            evidence: "玲司さん、こちらへ",
           },
         ],
       },
@@ -175,6 +184,7 @@ describe("AI登場人物抽出結果の検証", () => {
           name: "衛兵A",
           entityType: "person",
           isMob: true,
+          evidence: "衛兵Aは門を守った。",
         },
       ],
     });
@@ -189,9 +199,11 @@ describe("AI登場人物抽出結果の検証", () => {
   test.each(["伊達", "さくら", "こはる", "ジャンヌ・ダルク"])(
     "合理的な人物名 %s を禁止パターンと誤判定しない",
     (name) => {
-      const result = validate({
-        characters: [{ name, evidence: sourceLine }],
-      });
+      const evidence = `${name}は静かに帰宅した`;
+      const result = validate(
+        { characters: [{ name, evidence }] },
+        { ...chunk, text: evidence }
+      );
 
       expect(result.accepted).toHaveLength(1);
       expect(result.rejected).toEqual([]);
@@ -235,7 +247,7 @@ describe("AI登場人物抽出結果の検証", () => {
     [4, 3],
   ])("不正な話数範囲 %s〜%s を展開しない", (chapterStart, chapterEnd) => {
     const result = validate(
-      { characters: [{ name: "灯" }] },
+      { characters: [{ name: "灯", evidence: sourceLine }] },
       { ...chunk, chapterStart, chapterEnd }
     );
 
@@ -244,7 +256,7 @@ describe("AI登場人物抽出結果の検証", () => {
 
   test("正しい話数範囲を昇順に展開する", () => {
     const result = validate(
-      { characters: [{ name: "灯" }] },
+      { characters: [{ name: "灯", evidence: sourceLine }] },
       { ...chunk, chapterStart: 2, chapterEnd: 4 }
     );
 

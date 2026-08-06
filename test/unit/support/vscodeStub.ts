@@ -4,6 +4,7 @@ export const workspace = {
     uri: { fsPath: string };
     isDirty: boolean;
     getText(): string;
+    save?(): Promise<boolean>;
   }>,
   getConfiguration: () => ({
     get: <T>(_key: string, defaultValue: T): T => defaultValue,

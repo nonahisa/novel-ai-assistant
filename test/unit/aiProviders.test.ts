@@ -308,15 +308,15 @@ describe("AIプロバイダ境界", () => {
   test.each([
     [
       new Anthropic.AuthenticationError(401, {}, "invalid API key", new Headers()),
-      "not_running",
+      "authentication_failed",
     ],
     [
       new Anthropic.PermissionDeniedError(403, {}, "permission denied", new Headers()),
-      "bad_response",
+      "permission_denied",
     ],
     [
       new Anthropic.RateLimitError(429, {}, "rate limited", new Headers()),
-      "bad_response",
+      "rate_limited",
     ],
     [new Anthropic.APIConnectionTimeoutError(), "timeout"],
     [new Anthropic.APIUserAbortError(), "aborted"],

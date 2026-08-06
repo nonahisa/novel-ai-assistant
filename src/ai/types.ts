@@ -88,6 +88,9 @@ export class AIError extends Error {
       | "model_not_found"
       | "timeout"
       | "bad_response"
+      | "authentication_failed"
+      | "permission_denied"
+      | "rate_limited"
       | "aborted"
       | "unknown",
     readonly detail?: string
@@ -108,6 +111,12 @@ export function recoveryForAIError(error: AIError): string {
       return "チャンクを小さくして、もう一度実行してください。";
     case "bad_response":
       return "出力上限とモデル設定を確認してください。";
+    case "authentication_failed":
+      return "ClaudeのAPIキーを確認して再登録してください。";
+    case "permission_denied":
+      return "Claudeの利用権限または請求設定を確認してください。";
+    case "rate_limited":
+      return "しばらく待ってから、必要な場合に手動で再実行してください。";
     case "aborted":
       return "必要なら抽出をもう一度実行してください。";
     case "unknown":

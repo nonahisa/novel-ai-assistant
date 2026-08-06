@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { mergeExtractedCharacters } from "../../src/core/characterMerge";
 import { emptyCharacter } from "../../src/models/character";
 
@@ -39,6 +39,46 @@ describe("登場人物マージ", () => {
     expect(result.characters).toHaveLength(1);
   });
 
+  test("既存が名だけで抽出が姓名でも同一人物にする", () => {
+    const result = mergeExtractedCharacters(
+      [emptyCharacter("char_001", "玲司")],
+      [{ data: { name: "黒木 玲司" }, chapters: [2] }]
+    );
+
+    expect(result.characters).toHaveLength(1);
+    expect(result.characters[0].aliases).toContain("黒木 玲司");
+  });
+
+  test("既存の名だけ候補が複数なら抽出姓名を自動統合しない", () => {
+    const first = emptyCharacter("char_001", "玲司");
+    const second = emptyCharacter("char_002", "玲司");
+
+    const result = mergeExtractedCharacters(
+      [first, second],
+      [{ data: { name: "黒木 玲司" }, chapters: [2] }]
+    );
+
+    expect(result.characters).toHaveLength(3);
+  });
+
+  test("同一入力の新規人物マージは時刻が変わっても完全に同じ結果を返す", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-07T00:00:00.000Z"));
+      const first = mergeExtractedCharacters([], [
+        { data: { name: "灯", evidence: "灯は歩いた" }, chapters: [1] },
+      ]);
+      vi.setSystemTime(new Date("2026-08-08T00:00:00.000Z"));
+      const second = mergeExtractedCharacters([], [
+        { data: { name: "灯", evidence: "灯は歩いた" }, chapters: [1] },
+      ]);
+
+      expect(second).toEqual(first);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("同じ名部分を持つ候補が複数なら自動統合しない", () => {
     const blackReiji = emptyCharacter("char_001", "黒木 玲司");
     const whiteReiji = emptyCharacter("char_002", "白木・玲司");
@@ -49,6 +89,20 @@ describe("登場人物マージ", () => {
     );
 
     expect(result.characters).toHaveLength(3);
+  });
+
+  test("品質fixtureの同名別人へ名だけの蓮を根拠なく割り当てない", () => {
+    const result = mergeExtractedCharacters(
+      [
+        emptyCharacter("char_001", "南条 蓮"),
+        emptyCharacter("char_002", "北見 蓮"),
+      ],
+      [{ data: { name: "蓮" }, chapters: [7] }]
+    );
+
+    expect(result.characters).toHaveLength(3);
+    expect(result.characters[0].appearedChapters).toEqual([]);
+    expect(result.characters[1].appearedChapters).toEqual([]);
   });
 
   test("完全一致する名前の候補が複数なら自動統合しない", () => {

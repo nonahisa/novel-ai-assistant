@@ -48,6 +48,39 @@ interface ExtractionSummaryCounts {
   saved: number;
   ambiguous: number;
   unsavedConflicts: number;
+  cacheWarnings: number;
+}
+
+/** 作品内の未保存文書を保存し、成功を再検査できた場合だけ実行を許可する。 */
+export async function saveDirtyDocumentsBeforeExtraction(
+  work: WorkEntry
+): Promise<boolean> {
+  const dirtyDocuments = dirtyDocumentsInside(work.folderPath);
+  if (dirtyDocuments.length === 0) return true;
+
+  const answer = await vscode.window.showWarningMessage(
+    `未保存の変更が ${dirtyDocuments.length} 件あります。保存してから実行しますか？`,
+    "保存して実行",
+    "中止"
+  );
+  if (answer !== "保存して実行") return false;
+
+  for (const document of dirtyDocuments) {
+    if (!document.save || !(await document.save())) {
+      await vscode.window.showWarningMessage(
+        "保存できない文書があるため、人物抽出を中止しました。"
+      );
+      return false;
+    }
+  }
+
+  if (dirtyDocumentsInside(work.folderPath).length > 0) {
+    await vscode.window.showWarningMessage(
+      "保存後も未保存の文書が残っているため、人物抽出を中止しました。"
+    );
+    return false;
+  }
+  return true;
 }
 
 export async function extractCharacters(
@@ -126,6 +159,12 @@ export async function extractCharacters(
   }
 
   const store = new CharacterStore(work);
+  if ((await store.dirtyDocumentPaths()).length > 0) {
+    await vscode.window.showWarningMessage(
+      "未保存の人物設定があります。人物設定を保存してから、もう一度実行してください。"
+    );
+    return;
+  }
   const loaded = await store.loadAll();
 
   if (loaded.errors.length > 0) {
@@ -193,6 +232,7 @@ export async function extractCharacters(
   }> = [];
   const rejectedCandidates: RejectedCharacterCandidate[] = [];
   const failures: ExtractionFailure[] = [];
+  let cacheWarnings = 0;
   let cancelled = false;
 
   await vscode.window.withProgress(
@@ -298,13 +338,22 @@ export async function extractCharacters(
             break;
           }
           failures.push(toExtractionFailure(chunk, e));
+          if (e instanceof AIError && isFatalProviderFailure(e.kind)) {
+            done++;
+            break;
+          }
           // 1チャンクの失敗で全体を止めない
         }
 
         done++;
       }
 
-      await cache.save();
+      try {
+        await cache.save();
+      } catch {
+        // キャッシュは再生成可能。人物抽出結果の永続化は継続する。
+        cacheWarnings++;
+      }
     }
   );
 
@@ -331,9 +380,16 @@ export async function extractCharacters(
     saved: 0,
     ambiguous: 0,
     unsavedConflicts: 0,
+    cacheWarnings,
   };
 
   if (changedCharacters.length > 0) {
+    if ((await store.dirtyDocumentPaths()).length > 0) {
+      await vscode.window.showWarningMessage(
+        "保存直前に未保存の人物設定が見つかりました。作者の変更を保護するため、抽出結果は保存しませんでした。"
+      );
+      return;
+    }
     try {
       await store.saveAll(changedCharacters);
       baseCounts.saved = changedCharacters.length;
@@ -346,18 +402,14 @@ export async function extractCharacters(
       baseCounts.saved = persistence.saved;
       baseCounts.ambiguous = persistence.ambiguous;
       baseCounts.unsavedConflicts = persistence.unsaved;
-      const classification =
-        error.kind === "modified_externally"
-          ? "人物設定が読み込み後に変更されました。"
-          : "人物設定の保存先が競合しました。";
+      const classification = describeCharacterStoreError(error);
       const recovery = describeFailureRecoveries(failures);
-      const hasSettingsFailure = failures.some(
-        (failure) =>
-          failure.kind === "not_running" ||
-          failure.kind === "model_not_found"
+      const hasSettingsFailure = failures.some((failure) =>
+        failure.kind ? shouldOfferSettings(failure.kind) : false
       );
       const actions = [
         ...(failures.length > 0 ? ["詳細を表示"] : []),
+        ...(error.recoveryPaths.length > 0 ? ["回復パスを表示"] : []),
         ...(hasSettingsFailure ? ["設定を開く"] : []),
       ];
       const protectionMessage =
@@ -378,6 +430,8 @@ export async function extractCharacters(
       );
       if (action === "詳細を表示") {
         await showFailureDetails(failures);
+      } else if (action === "回復パスを表示") {
+        await showRecoveryPaths(error.recoveryPaths);
       } else if (action === "設定を開く") {
         await vscode.commands.executeCommand(
           "workbench.action.openSettings",
@@ -391,9 +445,8 @@ export async function extractCharacters(
   const summary = buildExtractionSummary(baseCounts);
   const recovery = describeFailureRecoveries(failures);
   const message = recovery ? `${summary}\n対応: ${recovery}` : summary;
-  const hasSettingsFailure = failures.some(
-    (failure) =>
-      failure.kind === "not_running" || failure.kind === "model_not_found"
+  const hasSettingsFailure = failures.some((failure) =>
+    failure.kind ? shouldOfferSettings(failure.kind) : false
   );
   const actions = [
     ...(failures.length > 0 ? ["詳細を表示"] : []),
@@ -401,7 +454,7 @@ export async function extractCharacters(
     ...(merged ? ["一覧を開く"] : []),
   ];
   const action =
-    failures.length > 0 || !merged
+    failures.length > 0 || cacheWarnings > 0 || !merged
       ? await vscode.window.showWarningMessage(message, ...actions)
       : await vscode.window.showInformationMessage(message, ...actions);
 
@@ -437,6 +490,9 @@ function toExtractionFailure(chunk: Chunk, error: unknown): ExtractionFailure {
     model_not_found: "選択中のモデルを利用できませんでした。",
     timeout: "AIの応答が時間内に完了しませんでした。",
     bad_response: "AIの応答を利用できませんでした。",
+    authentication_failed: "Claudeの認証に失敗しました。",
+    permission_denied: "Claudeの利用権限がありません。",
+    rate_limited: "Claudeのレート上限に達しました。",
     aborted: "AI処理が中断されました。",
     unknown: "AI処理で予期しないエラーが発生しました。",
   };
@@ -462,7 +518,18 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
     `保存済み ${counts.saved}名`,
     `手動確認が必要 ${counts.ambiguous}名`,
     `保存競合による未保存 ${counts.unsavedConflicts}名`,
+    `キャッシュ保存警告 ${counts.cacheWarnings}件`,
   ].join(" / ") + rejectedDetail;
+}
+
+function describeCharacterStoreError(error: CharacterStoreError): string {
+  const labels: Record<CharacterStoreError["kind"], string> = {
+    modified_externally: "人物設定が読み込み後に変更されました。",
+    path_conflict: "人物設定の保存先が競合しました。",
+    unsaved_changes: "人物設定に未保存の変更があります。",
+    io_error: "人物設定の保存中にファイル操作で失敗しました。",
+  };
+  return labels[error.kind];
 }
 
 function persistenceCountsForSaveError(
@@ -515,6 +582,50 @@ async function showFailureDetails(
     language: "text",
   });
   await vscode.window.showTextDocument(doc);
+}
+
+async function showRecoveryPaths(recoveryPaths: string[]): Promise<void> {
+  const content = [...new Set(recoveryPaths)].join("\n");
+  if (!content) return;
+  const doc = await vscode.workspace.openTextDocument({
+    content,
+    language: "text",
+  });
+  await vscode.window.showTextDocument(doc);
+}
+
+function isFatalProviderFailure(kind: AIError["kind"]): boolean {
+  return kind === "authentication_failed" ||
+    kind === "permission_denied" ||
+    kind === "rate_limited";
+}
+
+function shouldOfferSettings(kind: AIError["kind"]): boolean {
+  return kind === "not_running" ||
+    kind === "model_not_found" ||
+    kind === "authentication_failed" ||
+    kind === "permission_denied";
+}
+
+function dirtyDocumentsInside(folderPath: string): vscode.TextDocument[] {
+  return vscode.workspace.textDocuments.filter(
+    (document) => document.isDirty && isPathInside(folderPath, document.uri.fsPath)
+  );
+}
+
+function isPathInside(parentPath: string, candidatePath: string): boolean {
+  const parent = normalizePathForComparison(parentPath);
+  const candidate = normalizePathForComparison(candidatePath);
+  const relative = path.relative(parent, candidate);
+  return relative.length > 0 &&
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative);
+}
+
+function normalizePathForComparison(filePath: string): string {
+  const normalized = path.normalize(filePath);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 /** 実行前に、プロバイダごとの料金上の影響を明示する。 */

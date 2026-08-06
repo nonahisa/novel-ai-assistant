@@ -314,19 +314,22 @@ function findCharacter(
   name: string,
   aliases: string[]
 ): Character | undefined {
-  const keys = [name, ...aliases].map(normalizeName);
+  const incomingNames = [name, ...aliases];
+  const keys = new Set(incomingNames.map(normalizeName));
   const exactMatches = list.filter((c) => {
     const candidates = [c.name, ...c.aliases].map(normalizeName);
-    return candidates.some((cand) => keys.includes(cand));
+    return candidates.some((candidate) => keys.has(candidate));
   });
   if (exactMatches.length === 1) return exactMatches[0];
   if (exactMatches.length > 1) return undefined;
 
   // 部分名は、姓名が空白・中黒で明示的に区切られている場合だけ使う。
   // 推測による部分一致は別人を壊すため、候補が一人に決まる場合に限る。
+  const incomingParts = new Set(incomingNames.flatMap(splitNameParts));
   const partMatches = list.filter((character) =>
     [character.name, ...character.aliases].some((candidate) =>
-      splitNameParts(candidate).some((part) => keys.includes(part))
+      incomingParts.has(normalizeName(candidate)) ||
+      splitNameParts(candidate).some((part) => keys.has(part))
     )
   );
   return partMatches.length === 1 ? partMatches[0] : undefined;

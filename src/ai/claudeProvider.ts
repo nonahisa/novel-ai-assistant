@@ -59,7 +59,7 @@ export class ClaudeProvider implements AIProvider {
     if (!apiKey) {
       throw new AIError(
         "ClaudeのAPIキーが設定されていません。「AIの設定」から登録してください。",
-        "not_running"
+        "authentication_failed"
       );
     }
     return new Anthropic({
@@ -434,7 +434,7 @@ export function toClaudeAIError(error: unknown): AIError {
   if (e instanceof Anthropic.AuthenticationError) {
     return new AIError(
       "ClaudeのAPIキーが正しくありません。再登録してください。",
-      "not_running",
+      "authentication_failed",
       e.message
     );
   }
@@ -448,14 +448,14 @@ export function toClaudeAIError(error: unknown): AIError {
   if (e instanceof Anthropic.PermissionDeniedError) {
     return new AIError(
       "このAPIキーには権限がありません（モデル未開放、または請求設定が未完了の可能性があります）。",
-      "bad_response",
+      "permission_denied",
       e.message
     );
   }
   if (e instanceof Anthropic.RateLimitError) {
     return new AIError(
       "Claudeのレート上限に達しました。しばらく待ってから再実行してください。",
-      "bad_response",
+      "rate_limited",
       e.message
     );
   }
