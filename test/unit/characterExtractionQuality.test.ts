@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, test } from "vitest";
 import type { Chunk } from "../../src/core/chunker";
@@ -7,21 +8,54 @@ import {
   validateCharacterExtractResult,
 } from "../../src/core/characterExtractionValidation";
 import { mergeExtractedCharacters } from "../../src/core/characterMerge";
-import { emptyCharacter } from "../../src/models/character";
+import {
+  emptyCharacter,
+  type Character,
+} from "../../src/models/character";
 import {
   CHARACTER_EXTRACT_SCHEMA,
   CHARACTER_EXTRACT_VERSION,
+  type CharacterExtractResult,
 } from "../../src/prompts/characterExtract";
 
+interface AddressPeriodExpectation {
+  targetName: string;
+  term: string;
+  firstChapter: number;
+  lastChapter: number;
+}
+
+interface IdentityExpectation {
+  id: string;
+  canonicalName: string;
+  members: string[];
+  appearedChapters: number[];
+  addressTerms?: AddressPeriodExpectation[];
+}
+
+interface ProtectedExpectation {
+  identity: string;
+  path: Array<string | number>;
+  value: unknown;
+}
+
 interface QualityFixture {
-  expectedNames: string[];
+  expectedIdentities: IdentityExpectation[];
+  distinctIdentityPairs: Array<[string, string]>;
   forbiddenNames: string[];
   expectedAliases: Record<string, string[]>;
-  expectedAuthorFields: Record<
-    string,
-    { authorNotes: string; exportNote: string }
-  >;
-  responses: Array<{ chunk: Chunk; response: string }>;
+  initialCharacters: Array<{
+    identity: string;
+    id: string;
+    values: Partial<Character>;
+  }>;
+  protectedExpectations: ProtectedExpectation[];
+  expectedConflicts: Array<{
+    characterName: string;
+    field: string;
+    values: string[];
+  }>;
+  responses: Array<{ chunk: Chunk; response: CharacterExtractResult }>;
 }
 
 interface QualityMetrics {
@@ -42,18 +76,16 @@ beforeAll(async () => {
 });
 
 describe("登場人物抽出の品質ゲート", () => {
-  test("固定応答を検証・マージして品質しきい値を満たす", () => {
+  test("固定応答を実経路で検証・マージして品質しきい値を満たす", () => {
     const accepted = fixture.responses.flatMap(({ chunk, response }) => {
-      const parsed = parseResult(response);
+      // fixtureも実際のプロバイダ応答と同じ文字列境界を通す。
+      const parsed = parseResult(JSON.stringify(response));
       if (!parsed) throw new Error("固定応答をJSONとして解析できません。");
       return validateCharacterExtractResult(parsed, chunk).accepted;
     });
 
-    const protectedCharacter = emptyCharacter("char_001", "白瀬 澪");
-    protectedCharacter.authorNotes = fixture.expectedAuthorFields["白瀬 澪"].authorNotes;
-    protectedCharacter.exportNote = fixture.expectedAuthorFields["白瀬 澪"].exportNote;
-
-    const merged = mergeExtractedCharacters([protectedCharacter], accepted);
+    const initialCharacters = buildInitialCharacters(fixture);
+    const merged = mergeExtractedCharacters(initialCharacters, accepted);
     const metrics = calculateMetrics(fixture, merged.characters);
 
     console.log(
@@ -67,16 +99,21 @@ describe("登場人物抽出の品質ゲート", () => {
       authorProtectionViolations: 0,
     });
 
+    for (const forbiddenName of fixture.forbiddenNames) {
+      expect(
+        merged.characters.some((character) => character.name === forbiddenName)
+      ).toBe(false);
+    }
     for (const [name, aliases] of Object.entries(fixture.expectedAliases)) {
       const character = merged.characters.find((item) => item.name === name);
       expect(character?.aliases).toEqual(expect.arrayContaining(aliases));
     }
-    for (const [name, fields] of Object.entries(
-      fixture.expectedAuthorFields
-    )) {
-      const character = merged.characters.find((item) => item.name === name);
-      expect(character).toMatchObject(fields);
-    }
+    expect(merged.conflicts).toEqual(
+      expect.arrayContaining(fixture.expectedConflicts)
+    );
+
+    assertDistinctIdentities(fixture, merged.characters);
+    assertChapterAndAddressPeriods(fixture, merged.characters);
   });
 
   test("v1.5の構造化出力契約を公開する", () => {
@@ -88,42 +125,140 @@ describe("登場人物抽出の品質ゲート", () => {
   });
 });
 
+function buildInitialCharacters(fixture: QualityFixture): Character[] {
+  const identities = new Map(
+    fixture.expectedIdentities.map((identity) => [identity.id, identity])
+  );
+  return fixture.initialCharacters.map((initial) => {
+    const identity = identities.get(initial.identity);
+    if (!identity) throw new Error(`未知のfixture identity: ${initial.identity}`);
+    const character = emptyCharacter(initial.id, identity.canonicalName);
+    Object.assign(character, structuredClone(initial.values));
+    return character;
+  });
+}
+
 function calculateMetrics(
   fixture: QualityFixture,
-  characters: Array<{
-    name: string;
-    aliases: string[];
-    authorNotes: string;
-    exportNote: string;
-  }>
+  characters: Character[]
 ): QualityMetrics {
-  const expectedFound = fixture.expectedNames.filter((name) =>
-    characters.some((character) => character.name === name)
+  const actualByIdentity = new Map(
+    fixture.expectedIdentities.map((identity) => [
+      identity.id,
+      characters.filter((character) => matchesIdentity(character, identity)),
+    ])
+  );
+  const expectedFound = [...actualByIdentity.values()].filter(
+    (actual) => actual.length > 0
   ).length;
-  const falsePositives = characters.filter((character) =>
-    fixture.forbiddenNames.includes(character.name)
+
+  // 許可名リスト方式ではなく、生成された全レコードを期待identityへ照合する。
+  const falsePositives = characters.filter(
+    (character) =>
+      fixture.expectedIdentities.every(
+        (identity) => !matchesIdentity(character, identity)
+      )
   ).length;
-  const falseMerges = Object.entries(fixture.expectedAliases).reduce(
-    (count, [name, aliases]) => {
-      const character = characters.find((item) => item.name === name);
-      return count + aliases.filter((alias) => !character?.aliases.includes(alias)).length;
+
+  const unintendedCollapses = characters.reduce((count, character) => {
+    const matchingGroups = fixture.expectedIdentities.filter((identity) =>
+      matchesIdentity(character, identity)
+    ).length;
+    return count + Math.max(0, matchingGroups - 1);
+  }, 0);
+  const unconsolidatedGroups = [...actualByIdentity.values()].reduce(
+    (count, actual) => count + Math.max(0, actual.length - 1),
+    0
+  );
+
+  const authorProtectionViolations = fixture.protectedExpectations.reduce(
+    (count, expectation) => {
+      const actual = actualByIdentity.get(expectation.identity) ?? [];
+      if (actual.length !== 1) return count + 1;
+      const actualValue = valueAtPath(actual[0], expectation.path);
+      return count + Number(!isDeepStrictEqual(actualValue, expectation.value));
     },
     0
   );
-  const authorProtectionViolations = Object.entries(
-    fixture.expectedAuthorFields
-  ).reduce((count, [name, fields]) => {
-    const character = characters.find((item) => item.name === name);
-    return count + Number(
-      character?.authorNotes !== fields.authorNotes ||
-        character?.exportNote !== fields.exportNote
-    );
-  }, 0);
 
   return {
-    recall: expectedFound / fixture.expectedNames.length,
+    recall: expectedFound / fixture.expectedIdentities.length,
     falsePositives,
-    falseMerges,
+    falseMerges: unintendedCollapses + unconsolidatedGroups,
     authorProtectionViolations,
   };
+}
+
+function matchesIdentity(
+  character: Pick<Character, "name" | "aliases">,
+  identity: IdentityExpectation
+): boolean {
+  const actualNames = new Set([character.name, ...character.aliases]);
+  return identity.members.some((member) => actualNames.has(member));
+}
+
+function valueAtPath(value: unknown, path: Array<string | number>): unknown {
+  let current = value;
+  for (const segment of path) {
+    if (typeof segment === "number") {
+      if (!Array.isArray(current)) return undefined;
+      current = current[segment];
+      continue;
+    }
+    if (typeof current !== "object" || current === null || Array.isArray(current)) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+function assertDistinctIdentities(
+  fixture: QualityFixture,
+  characters: Character[]
+): void {
+  const identities = new Map(
+    fixture.expectedIdentities.map((identity) => [identity.id, identity])
+  );
+  for (const [leftId, rightId] of fixture.distinctIdentityPairs) {
+    const left = identities.get(leftId);
+    const right = identities.get(rightId);
+    if (!left || !right) throw new Error("distinctIdentityPairsが不正です。");
+    const leftRecord = characters.find((character) =>
+      matchesIdentity(character, left)
+    );
+    const rightRecord = characters.find((character) =>
+      matchesIdentity(character, right)
+    );
+    expect(leftRecord?.id).toBeDefined();
+    expect(rightRecord?.id).toBeDefined();
+    expect(leftRecord?.id).not.toBe(rightRecord?.id);
+  }
+}
+
+function assertChapterAndAddressPeriods(
+  fixture: QualityFixture,
+  characters: Character[]
+): void {
+  for (const identity of fixture.expectedIdentities) {
+    const matches = characters.filter((character) =>
+      matchesIdentity(character, identity)
+    );
+    expect(matches, identity.id).toHaveLength(1);
+    expect(matches[0].appearedChapters, identity.id).toEqual(
+      identity.appearedChapters
+    );
+
+    for (const expected of identity.addressTerms ?? []) {
+      const address = matches[0].addressTerms.find(
+        (item) => item.targetName === expected.targetName
+      );
+      const form = address?.forms.find((item) => item.term === expected.term);
+      expect(form, `${identity.id}:${expected.targetName}:${expected.term}`)
+        .toMatchObject({
+          firstChapter: expected.firstChapter,
+          lastChapter: expected.lastChapter,
+        });
+    }
+  }
 }
