@@ -118,6 +118,27 @@ describe("原稿の原子的な保存", () => {
     expect(files.get(destinationPath)).toEqual(changedByAuthor);
   });
 
+  test("回復ディレクトリ準備失敗は配置前の未保存として元内容を保つ", async () => {
+    const original = new Uint8Array([0x05, 0x06]);
+    const replacement = new Uint8Array([0x07, 0x08]);
+    files.set(destinationPath, original);
+    workspace.fs.createDirectory = vi.fn(async () => {
+      throw new FileSystemError("recovery denied", "NoPermissions");
+    });
+
+    await expect(
+      atomicWriteFile(path, replacement, {
+        mode: "replace",
+        expectedHash: sha256(original),
+      })
+    ).rejects.toMatchObject({
+      kind: "path_conflict",
+      persistenceState: "not_saved",
+    });
+
+    expect(files).toEqual(new Map([[destinationPath, original]]));
+  });
+
   test("一時ファイル書き込み中に作られた保存先を上書きしない", async () => {
     const createdByAuthor = new Uint8Array([0x07, 0x08]);
     workspace.fs.writeFile = vi.fn(

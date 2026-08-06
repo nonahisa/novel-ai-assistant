@@ -131,7 +131,7 @@ async function replaceGuarded(
     throw manualRecoveryError(
       `回復ディレクトリを準備できませんでした: ${errorMessage(error)}`,
       [destination.fsPath, recoveryDirectoryFor(destination.fsPath), temporary.fsPath],
-      "ambiguous"
+      "not_saved"
     );
   }
 
