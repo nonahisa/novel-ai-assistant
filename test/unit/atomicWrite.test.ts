@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { atomicWriteFile } from "../../src/core/atomicWrite";
-import { workspace } from "./support/vscodeStub";
+import { Uri, workspace } from "./support/vscodeStub";
 
 const path = "C:\\novels\\001.txt";
+const destinationPath = Uri.file(path).fsPath;
 
 describe("原稿の原子的な保存", () => {
   const files = new Map<string, Uint8Array>();
@@ -39,15 +40,15 @@ describe("原稿の原子的な保存", () => {
       { fsPath: string },
       { overwrite: boolean },
     ];
-    expect(temporary.fsPath).toMatch(/^C:\\novels\\001\.txt\.novelai-\d+-.+\.tmp$/);
-    expect(destination.fsPath).toBe(path);
+    expect(temporary.fsPath).toMatch(/^c:\\novels\\001\.txt\.novelai-\d+-.+\.tmp$/);
+    expect(destination.fsPath).toBe(destinationPath);
     expect(options).toEqual({ overwrite: true });
-    expect(files.get(path)).toEqual(bytes);
+    expect(files.get(destinationPath)).toEqual(bytes);
   });
 
   test("置換に失敗したときは生成した一時ファイルだけを削除する", async () => {
     const original = new Uint8Array([0x8b, 0x8c]);
-    files.set(path, original);
+    files.set(destinationPath, original);
     workspace.fs.rename = vi.fn(async () => {
       throw new Error("置換できません");
     });
@@ -57,8 +58,8 @@ describe("原稿の原子的な保存", () => {
     );
 
     expect(deletedPaths).toHaveLength(1);
-    expect(deletedPaths[0]).not.toBe(path);
-    expect(deletedPaths[0]).toMatch(/^C:\\novels\\001\.txt\.novelai-\d+-.+\.tmp$/);
-    expect(files.get(path)).toEqual(original);
+    expect(deletedPaths[0]).not.toBe(destinationPath);
+    expect(deletedPaths[0]).toMatch(/^c:\\novels\\001\.txt\.novelai-\d+-.+\.tmp$/);
+    expect(files.get(destinationPath)).toEqual(original);
   });
 });

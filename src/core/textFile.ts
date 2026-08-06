@@ -108,13 +108,14 @@ function decodeWithDetection(bytes: Uint8Array): {
  * 読み込み時と同じ形式で書き戻す。
  *
  * @param expectedHash 読み込み時のハッシュ。ディスク上の現在の内容と
- *   一致しない場合は書き込まず false を返す（外部編集による上書き事故の防止）。
+ *   一致しない場合は書き込まず `{ ok: false, reason: "modified_externally" }` を返す
+ *   （外部編集による上書き事故の防止）。
  */
 export async function writeTextFilePreservingFormat(
   filePath: string,
   newText: string,
   original: Pick<TextFileContent, "encoding" | "eol" | "hasTrailingNewline">,
-  expectedHash?: string
+  expectedHash: string
 ): Promise<{ ok: true } | { ok: false; reason: WriteTextFailureReason }> {
   const uri = vscode.Uri.file(filePath);
 
@@ -138,7 +139,7 @@ export async function writeTextFilePreservingFormat(
     return { ok: false, reason: "conflict_markers" };
   }
 
-  if (expectedHash !== undefined && hashBytes(current) !== expectedHash) {
+  if (hashBytes(current) !== expectedHash) {
     return { ok: false, reason: "modified_externally" };
   }
 
@@ -209,7 +210,7 @@ export async function currentFileHash(
  */
 export function getOpenDocumentText(filePath: string): string | undefined {
   const doc = vscode.workspace.textDocuments.find(
-    (d) => d.uri.fsPath === filePath
+    (d) => sameFilePath(d.uri.fsPath, filePath)
   );
   if (!doc) return undefined;
   return doc.getText();
@@ -218,7 +219,16 @@ export function getOpenDocumentText(filePath: string): string | undefined {
 /** 未保存の変更があるか */
 export function hasUnsavedChanges(filePath: string): boolean {
   const doc = vscode.workspace.textDocuments.find(
-    (d) => d.uri.fsPath === filePath
+    (d) => sameFilePath(d.uri.fsPath, filePath)
   );
   return doc?.isDirty ?? false;
+}
+
+function sameFilePath(left: string, right: string): boolean {
+  const normalizedLeft = vscode.Uri.file(left).fsPath;
+  const normalizedRight = vscode.Uri.file(right).fsPath;
+
+  return process.platform === "win32"
+    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    : normalizedLeft === normalizedRight;
 }

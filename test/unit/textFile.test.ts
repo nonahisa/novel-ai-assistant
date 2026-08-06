@@ -4,9 +4,10 @@ import {
   decodeBytes,
   writeTextFilePreservingFormat,
 } from "../../src/core/textFile";
-import { workspace } from "./support/vscodeStub";
+import { Uri, workspace } from "./support/vscodeStub";
 
 const path = "C:\\novels\\001.txt";
+const fileKey = (filePath: string): string => filePath.toLowerCase();
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
 const bom = (bytes: Uint8Array): Uint8Array => {
   const result = new Uint8Array(3 + bytes.length);
@@ -26,24 +27,24 @@ describe("本文形式を保持した保存", () => {
     savedBytes = undefined;
     workspace.textDocuments = [];
     rename = vi.fn(async (from: { fsPath: string }, to: { fsPath: string }) => {
-      const bytes = files.get(from.fsPath);
+      const bytes = files.get(fileKey(from.fsPath));
       if (!bytes) throw new Error("一時ファイルがありません");
       savedBytes = bytes;
-      files.set(to.fsPath, bytes);
-      files.delete(from.fsPath);
+      files.set(fileKey(to.fsPath), bytes);
+      files.delete(fileKey(from.fsPath));
     });
     workspace.fs = {
       readFile: vi.fn(async (uri: { fsPath: string }) => {
-        const bytes = files.get(uri.fsPath);
+        const bytes = files.get(fileKey(uri.fsPath));
         if (!bytes) throw new Error("ファイルがありません");
         return bytes;
       }),
       writeFile: vi.fn(async (uri: { fsPath: string }, bytes: Uint8Array) => {
-        files.set(uri.fsPath, bytes);
+        files.set(fileKey(uri.fsPath), bytes);
       }),
       rename,
       delete: vi.fn(async (uri: { fsPath: string }) => {
-        files.delete(uri.fsPath);
+        files.delete(fileKey(uri.fsPath));
       }),
     };
   });
@@ -54,7 +55,7 @@ describe("本文形式を保持した保存", () => {
     ["Shift_JIS CR", shiftJis("灯\r澪\r"), "shift_jis", "\r", true],
   ])("%sを往復して同じバイト列を保存する", async (_label, bytes, encoding, eol, hasTrailingNewline) => {
     const original = decodeBytes(bytes);
-    files.set(path, bytes);
+    files.set(fileKey(path), bytes);
 
     const result = await writeTextFilePreservingFormat(
       path,
@@ -81,13 +82,48 @@ describe("本文形式を保持した保存", () => {
     expect(rename).not.toHaveBeenCalled();
   });
 
+  test("ハッシュなしの保存要求では元ファイルへ書かない", async () => {
+    const original = decodeBytes(shiftJis("灯\n澪\n"));
+    files.set(fileKey(path), shiftJis("灯\n澪\n"));
+
+    const result = await writeTextFilePreservingFormat(
+      path,
+      original.text,
+      original,
+      undefined as never
+    );
+
+    expect(result).toEqual({ ok: false, reason: "modified_externally" });
+    expect(rename).not.toHaveBeenCalled();
+  });
+
+  test("ドライブ文字の大文字小文字が違う未保存バッファでは元ファイルへ書かない", async () => {
+    const original = decodeBytes(shiftJis("灯\n澪\n"));
+    files.set(fileKey(path), shiftJis("灯\n澪\n"));
+    workspace.textDocuments = [{
+      uri: Uri.file(path),
+      isDirty: true,
+      getText: () => "灯\n澪\n",
+    }];
+
+    const result = await writeTextFilePreservingFormat(
+      path,
+      original.text,
+      original,
+      original.hash
+    );
+
+    expect(result).toEqual({ ok: false, reason: "unsaved_changes" });
+    expect(rename).not.toHaveBeenCalled();
+  });
+
   async function runGuardCase(label: string) {
     const original = decodeBytes(shiftJis("灯\n澪\n"));
-    files.set(path, shiftJis("灯\n澪\n"));
+    files.set(fileKey(path), shiftJis("灯\n澪\n"));
 
     switch (label) {
       case "ハッシュ不一致":
-        files.set(path, shiftJis("灯\n碧\n"));
+        files.set(fileKey(path), shiftJis("灯\n碧\n"));
         return writeTextFilePreservingFormat(path, original.text, original, original.hash);
       case "未保存バッファ":
         workspace.textDocuments = [{
@@ -97,7 +133,7 @@ describe("本文形式を保持した保存", () => {
         }];
         return writeTextFilePreservingFormat(path, original.text, original, original.hash);
       case "現在の競合マーカー":
-        files.set(path, utf8("<<<<<<< HEAD\n灯\n=======\n澪\n>>>>>>> origin/main\n"));
+        files.set(fileKey(path), utf8("<<<<<<< HEAD\n灯\n=======\n澪\n>>>>>>> origin/main\n"));
         return writeTextFilePreservingFormat(path, original.text, original, original.hash);
       case "出力の競合マーカー":
         return writeTextFilePreservingFormat(

@@ -32,7 +32,9 @@ export class FileSystemError extends Error {
 }
 
 export const Uri = {
-  file: (fsPath: string) => ({ fsPath }),
+  file: (fsPath: string) => ({
+    fsPath: fsPath.replace(/^[A-Z]:/, (drive) => drive.toLowerCase()),
+  }),
 };
 
 export enum FileType {
