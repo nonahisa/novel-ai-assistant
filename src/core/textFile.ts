@@ -1,8 +1,15 @@
 import * as vscode from "vscode";
 import * as crypto from "crypto";
+import iconv = require("iconv-lite");
+import { atomicWriteFile } from "./atomicWrite";
 
 export type Encoding = "utf8" | "utf8-bom" | "shift_jis";
 export type Eol = "\n" | "\r\n" | "\r";
+export type WriteTextFailureReason =
+  | "modified_externally"
+  | "conflict_markers"
+  | "unsaved_changes"
+  | "encoding_error";
 
 /**
  * 読み込んだファイルの内容と、書き戻しに必要な形式情報。
@@ -108,19 +115,31 @@ export async function writeTextFilePreservingFormat(
   newText: string,
   original: Pick<TextFileContent, "encoding" | "eol" | "hasTrailingNewline">,
   expectedHash?: string
-): Promise<{ ok: true } | { ok: false; reason: "modified_externally" }> {
+): Promise<{ ok: true } | { ok: false; reason: WriteTextFailureReason }> {
   const uri = vscode.Uri.file(filePath);
 
-  if (expectedHash !== undefined) {
-    try {
-      const current = await vscode.workspace.fs.readFile(uri);
-      if (hashBytes(current) !== expectedHash) {
-        return { ok: false, reason: "modified_externally" };
-      }
-    } catch {
-      // ファイルが消えている場合も外部変更として扱う
-      return { ok: false, reason: "modified_externally" };
-    }
+  if (hasUnsavedChanges(filePath)) {
+    return { ok: false, reason: "unsaved_changes" };
+  }
+
+  if (CONFLICT_PATTERN.test(newText)) {
+    return { ok: false, reason: "conflict_markers" };
+  }
+
+  let current: Uint8Array;
+  try {
+    current = await vscode.workspace.fs.readFile(uri);
+  } catch {
+    // ファイルが消えている場合も外部変更として扱う
+    return { ok: false, reason: "modified_externally" };
+  }
+
+  if (decodeBytes(current).hasConflictMarkers) {
+    return { ok: false, reason: "conflict_markers" };
+  }
+
+  if (expectedHash !== undefined && hashBytes(current) !== expectedHash) {
+    return { ok: false, reason: "modified_externally" };
   }
 
   let out = newText.replace(/\r\n?/g, "\n");
@@ -136,16 +155,20 @@ export async function writeTextFilePreservingFormat(
     out = out.replace(/\n/g, original.eol);
   }
 
-  await vscode.workspace.fs.writeFile(uri, encodeText(out, original.encoding));
+  const bytes = encodeText(out, original.encoding);
+  if (!bytes) {
+    return { ok: false, reason: "encoding_error" };
+  }
+
+  await atomicWriteFile(filePath, bytes);
   return { ok: true };
 }
 
-function encodeText(text: string, encoding: Encoding): Uint8Array {
+function encodeText(text: string, encoding: Encoding): Uint8Array | undefined {
   if (encoding === "shift_jis") {
-    // Node標準ではShift_JISのエンコードができない。
-    // 元がShift_JISでも書き戻しはUTF-8とし、その旨を呼び出し側で通知する。
-    // （文字化けを起こすより、明示的に形式が変わったと伝える方が安全）
-    return new TextEncoder().encode(text);
+    const encoded = iconv.encode(text, "shift_jis");
+    // 代替文字への置換を許すと、保存成功に見えて本文を壊してしまう。
+    return iconv.decode(encoded, "shift_jis") === text ? encoded : undefined;
   }
   const body = new TextEncoder().encode(text);
   if (encoding === "utf8-bom") {

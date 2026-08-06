@@ -1,6 +1,10 @@
 export const workspace = {
-  fs: {} as Record<string, unknown>,
-  textDocuments: [],
+  fs: {} as Record<string, (...args: never[]) => unknown>,
+  textDocuments: [] as Array<{
+    uri: { fsPath: string };
+    isDirty: boolean;
+    getText(): string;
+  }>,
   getConfiguration: () => ({
     get: <T>(_key: string, defaultValue: T): T => defaultValue,
   }),
