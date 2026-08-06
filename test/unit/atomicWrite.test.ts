@@ -119,4 +119,63 @@ describe("原稿の原子的な保存", () => {
 
     expect(files.get(destinationPath)).toEqual(createdByAuthor);
   });
+
+  test("配置後の確認中に新ファイルが消えても元内容の回復ファイルを残す", async () => {
+    const original = new Uint8Array([0x11, 0x12]);
+    const replacement = new Uint8Array([0x13, 0x14]);
+    files.set(destinationPath, original);
+    let backupReads = 0;
+    workspace.fs.readFile = vi.fn(async (uri: { fsPath: string }) => {
+      const bytes = files.get(uri.fsPath);
+      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+      if (uri.fsPath.endsWith(".bak")) {
+        backupReads += 1;
+        if (backupReads === 2) files.delete(destinationPath);
+      }
+      return bytes;
+    });
+
+    await expect(
+      atomicWriteFile(path, replacement, {
+        mode: "replace",
+        expectedHash: sha256(original),
+      })
+    ).rejects.toMatchObject({
+      kind: "path_conflict",
+      message: expect.stringContaining("手動"),
+    });
+
+    const recoveryBytes = [...files.entries()].find(([filePath]) =>
+      filePath.endsWith(".bak")
+    )?.[1];
+    expect(recoveryBytes).toEqual(original);
+  });
+
+  test("旧内容の退避後に読込権限を失っても型付きエラーと回復ファイルを残す", async () => {
+    const original = new Uint8Array([0x21, 0x22]);
+    files.set(destinationPath, original);
+    workspace.fs.readFile = vi.fn(async (uri: { fsPath: string }) => {
+      if (uri.fsPath.endsWith(".bak")) {
+        throw new FileSystemError("backup denied", "NoPermissions");
+      }
+      const bytes = files.get(uri.fsPath);
+      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+      return bytes;
+    });
+
+    await expect(
+      atomicWriteFile(path, new Uint8Array([0x23, 0x24]), {
+        mode: "replace",
+        expectedHash: sha256(original),
+      })
+    ).rejects.toMatchObject({
+      kind: "path_conflict",
+      message: expect.stringContaining("手動"),
+    });
+
+    const recoveryBytes = [...files.entries()].find(([filePath]) =>
+      filePath.endsWith(".bak")
+    )?.[1];
+    expect(recoveryBytes).toEqual(original);
+  });
 });

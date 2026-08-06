@@ -4,7 +4,7 @@ import {
   decodeBytes,
   writeTextFilePreservingFormat,
 } from "../../src/core/textFile";
-import { Uri, workspace } from "./support/vscodeStub";
+import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
 
 const path = "C:\\novels\\001.txt";
 const fileKey = (filePath: string): string => filePath.toLowerCase();
@@ -26,17 +26,26 @@ describe("本文形式を保持した保存", () => {
     files.clear();
     savedBytes = undefined;
     workspace.textDocuments = [];
-    rename = vi.fn(async (from: { fsPath: string }, to: { fsPath: string }) => {
-      const bytes = files.get(fileKey(from.fsPath));
-      if (!bytes) throw new Error("一時ファイルがありません");
-      savedBytes = bytes;
-      files.set(fileKey(to.fsPath), bytes);
-      files.delete(fileKey(from.fsPath));
-    });
+    rename = vi.fn(
+      async (
+        from: { fsPath: string },
+        to: { fsPath: string },
+        options?: { overwrite?: boolean }
+      ) => {
+        const bytes = files.get(fileKey(from.fsPath));
+        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+        if (!options?.overwrite && files.has(fileKey(to.fsPath))) {
+          throw new FileSystemError("exists", "FileExists");
+        }
+        savedBytes = bytes;
+        files.set(fileKey(to.fsPath), bytes);
+        files.delete(fileKey(from.fsPath));
+      }
+    );
     workspace.fs = {
       readFile: vi.fn(async (uri: { fsPath: string }) => {
         const bytes = files.get(fileKey(uri.fsPath));
-        if (!bytes) throw new Error("ファイルがありません");
+        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
         return bytes;
       }),
       writeFile: vi.fn(async (uri: { fsPath: string }, bytes: Uint8Array) => {
@@ -115,6 +124,29 @@ describe("本文形式を保持した保存", () => {
 
     expect(result).toEqual({ ok: false, reason: "unsaved_changes" });
     expect(rename).not.toHaveBeenCalled();
+  });
+
+  test("一時書き込み中の外部編集を上書きも削除もしない", async () => {
+    const originalBytes = utf8("灯\n澪\n");
+    const changedByAuthor = utf8("灯\n碧\n");
+    const original = decodeBytes(originalBytes);
+    files.set(fileKey(path), originalBytes);
+    workspace.fs.writeFile = vi.fn(
+      async (uri: { fsPath: string }, bytes: Uint8Array) => {
+        files.set(fileKey(uri.fsPath), bytes);
+        files.set(fileKey(path), changedByAuthor);
+      }
+    );
+
+    const result = await writeTextFilePreservingFormat(
+      path,
+      "灯\n翠\n",
+      original,
+      original.hash
+    );
+
+    expect(result).toEqual({ ok: false, reason: "modified_externally" });
+    expect(files.get(fileKey(path))).toEqual(changedByAuthor);
   });
 
   async function runGuardCase(label: string) {

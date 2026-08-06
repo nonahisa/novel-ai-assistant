@@ -1,3 +1,4 @@
+import * as crypto from "crypto";
 import * as vscode from "vscode";
 import * as path from "path";
 import { WorkEntry } from "../models/types";
@@ -201,50 +202,46 @@ export class CharacterStore {
     }
 
     if (snapshot && sourcePath && !samePath(sourcePath, prepared.destinationPath)) {
-      const sourceBeforeDelete = await this.readFileIfExists(sourcePath);
+      const sourceBeforeRetire = await this.readFileIfExists(sourcePath);
       if (
-        !sourceBeforeDelete ||
-        hashBytes(sourceBeforeDelete) !== snapshot.hash
+        !sourceBeforeRetire ||
+        hashBytes(sourceBeforeRetire) !== snapshot.hash
       ) {
-        const retraction = await this.retractIfUnchanged(
-          prepared.destinationPath,
-          hashBytes(prepared.bytes)
-        );
-        if (!retraction.ok) {
-          throw this.manualRecoveryError(
-            `旧ファイルが外部変更され、新しい保存先も撤回できませんでした。${retraction.detail}`
-          );
-        }
-        throw new CharacterStoreError(
-          `人物「${prepared.character.id}」は新しい保存先の配置中に変更されました。`,
-          "modified_externally"
+        throw this.manualRecoveryError(
+          `人物「${prepared.character.id}」の旧ファイルが新しい保存先の配置中に変更されました。`,
+          [sourcePath, prepared.destinationPath]
         );
       }
 
+      const recoveryPath =
+        `${sourcePath}.novelai-${process.pid}-${crypto.randomUUID()}.bak`;
       try {
-        await vscode.workspace.fs.delete(vscode.Uri.file(sourcePath));
+        await vscode.workspace.fs.rename(
+          vscode.Uri.file(sourcePath),
+          vscode.Uri.file(recoveryPath),
+          { overwrite: false }
+        );
       } catch (error) {
-        const sourceAfterFailure = await this.readFileIfExists(sourcePath);
-        if (!sourceAfterFailure) {
-          // 削除APIがエラーを返しても実際に削除済みなら、新しい保存先を正とする。
-        } else if (hashBytes(sourceAfterFailure) !== snapshot.hash) {
-          throw this.manualRecoveryError(
-            `旧ファイルの削除中に内容が変更されました: ${errorMessage(error)}`
-          );
-        } else {
-          const retraction = await this.retractIfUnchanged(
-            prepared.destinationPath,
-            hashBytes(prepared.bytes)
-          );
-          if (!retraction.ok) {
-            throw this.manualRecoveryError(
-              `旧ファイルを削除できず、新しい保存先も撤回できませんでした: ${errorMessage(
-                error
-              )}。${retraction.detail}`
-            );
-          }
-          throw error;
-        }
+        throw this.manualRecoveryError(
+          `旧ファイルを回復パスへ移動できませんでした: ${errorMessage(error)}`,
+          [sourcePath, prepared.destinationPath, recoveryPath]
+        );
+      }
+
+      let recoveryBytes: Uint8Array | undefined;
+      try {
+        recoveryBytes = await this.readFileIfExists(recoveryPath);
+      } catch (error) {
+        throw this.manualRecoveryError(
+          `回復ファイルを確認できませんでした: ${errorMessage(error)}`,
+          [prepared.destinationPath, recoveryPath]
+        );
+      }
+      if (!recoveryBytes || hashBytes(recoveryBytes) !== snapshot.hash) {
+        throw this.manualRecoveryError(
+          `回復ファイルが読み込み時の旧内容と一致しません。`,
+          [prepared.destinationPath, recoveryPath]
+        );
       }
     }
 
@@ -336,32 +333,14 @@ export class CharacterStore {
     }
   }
 
-  private async retractIfUnchanged(
-    filePath: string,
-    expectedHash: string
-  ): Promise<{ ok: true } | { ok: false; detail: string }> {
-    const current = await this.readFileIfExists(filePath);
-    if (!current) return { ok: true };
-    if (hashBytes(current) !== expectedHash) {
-      return {
-        ok: false,
-        detail: `撤回対象「${filePath}」が外部変更されています。`,
-      };
-    }
-    try {
-      await vscode.workspace.fs.delete(vscode.Uri.file(filePath));
-      return { ok: true };
-    } catch (error) {
-      return {
-        ok: false,
-        detail: `撤回対象「${filePath}」を削除できません: ${errorMessage(error)}`,
-      };
-    }
-  }
-
-  private manualRecoveryError(message: string): CharacterStoreError {
+  private manualRecoveryError(
+    message: string,
+    paths: string[]
+  ): CharacterStoreError {
     return new CharacterStoreError(
-      `${message} データを失わないため両方のファイルを残しました。手動で確認してください。`,
+      `${message} データを失わないため回復可能なファイルを残しました。手動で確認してください: ${paths.join(
+        ", "
+      )}`,
       "path_conflict"
     );
   }

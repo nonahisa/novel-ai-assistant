@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as crypto from "crypto";
 import iconv = require("iconv-lite");
-import { atomicWriteFile } from "./atomicWrite";
+import { AtomicWriteFileError, atomicWriteFile } from "./atomicWrite";
 
 export type Encoding = "utf8" | "utf8-bom" | "shift_jis";
 export type Eol = "\n" | "\r\n" | "\r";
@@ -161,7 +161,17 @@ export async function writeTextFilePreservingFormat(
     return { ok: false, reason: "encoding_error" };
   }
 
-  await atomicWriteFile(filePath, bytes);
+  try {
+    await atomicWriteFile(filePath, bytes, {
+      mode: "replace",
+      expectedHash,
+    });
+  } catch (error) {
+    if (error instanceof AtomicWriteFileError) {
+      return { ok: false, reason: "modified_externally" };
+    }
+    throw error;
+  }
   return { ok: true };
 }
 

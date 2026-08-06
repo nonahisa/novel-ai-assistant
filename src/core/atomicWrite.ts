@@ -119,21 +119,26 @@ async function replaceGuarded(
         "modified_externally"
       );
     }
-    throw error;
+    throw manualRecoveryError(
+      `元ファイルを回復パスへ移動できませんでした: ${errorMessage(error)}`,
+      [destination.fsPath, backup.fsPath]
+    );
   }
 
-  const backedUp = await readFileIfExists(backup);
-  if (!backedUp || hashBytes(backedUp) !== expectedHash) {
-    const restored = await restoreBackup(backup, destination);
+  let backedUp: Uint8Array | undefined;
+  try {
+    backedUp = await readFileIfExists(backup);
+  } catch (error) {
     await deleteStagedFileBestEffort(temporary, stagedHash);
-    if (restored) {
-      throw new AtomicWriteFileError(
-        `保存先「${destination.fsPath}」は退避直前に変更されました。`,
-        "modified_externally"
-      );
-    }
     throw manualRecoveryError(
-      `外部編集された退避ファイルを元の場所へ戻せませんでした。`,
+      `回復ファイルを確認できませんでした: ${errorMessage(error)}`,
+      [destination.fsPath, backup.fsPath]
+    );
+  }
+  if (!backedUp || hashBytes(backedUp) !== expectedHash) {
+    await deleteStagedFileBestEffort(temporary, stagedHash);
+    throw manualRecoveryError(
+      `回復ファイルが読み込み時の内容と一致しません。`,
       [destination.fsPath, backup.fsPath]
     );
   }
@@ -143,18 +148,22 @@ async function replaceGuarded(
       overwrite: false,
     });
   } catch (error) {
-    const restored = await restoreBackup(backup, destination, expectedHash);
     await deleteStagedFileBestEffort(temporary, stagedHash);
-    if (restored && !isFileExists(error)) {
-      throw error;
-    }
     throw manualRecoveryError(
-      `新しい内容を配置できず、元ファイルを自動復旧できませんでした。`,
+      `新しい内容を配置できませんでした: ${errorMessage(error)}`,
       [destination.fsPath, backup.fsPath]
     );
   }
 
-  const placed = await readFileIfExists(destination);
+  let placed: Uint8Array | undefined;
+  try {
+    placed = await readFileIfExists(destination);
+  } catch (error) {
+    throw manualRecoveryError(
+      `配置したファイルを確認できませんでした: ${errorMessage(error)}`,
+      [destination.fsPath, backup.fsPath]
+    );
+  }
   if (!placed || hashBytes(placed) !== stagedHash) {
     throw manualRecoveryError(
       `配置したファイルが直後に変更されました。`,
@@ -162,38 +171,36 @@ async function replaceGuarded(
     );
   }
 
-  const backupBeforeDelete = await readFileIfExists(backup);
-  if (!backupBeforeDelete || hashBytes(backupBeforeDelete) !== expectedHash) {
-    throw manualRecoveryError(
-      `退避ファイルが変更されたため自動削除しませんでした。`,
-      [destination.fsPath, backup.fsPath]
-    );
-  }
-
+  let recovery: Uint8Array | undefined;
   try {
-    await vscode.workspace.fs.delete(backup);
+    recovery = await readFileIfExists(backup);
   } catch (error) {
     throw manualRecoveryError(
-      `退避ファイルを削除できませんでした: ${errorMessage(error)}`,
+      `回復ファイルを再確認できませんでした: ${errorMessage(error)}`,
       [destination.fsPath, backup.fsPath]
     );
   }
-}
+  if (!recovery || hashBytes(recovery) !== expectedHash) {
+    throw manualRecoveryError(
+      `回復ファイルが変更されたため保持します。`,
+      [destination.fsPath, backup.fsPath]
+    );
+  }
 
-async function restoreBackup(
-  backup: vscode.Uri,
-  destination: vscode.Uri,
-  expectedHash?: string
-): Promise<boolean> {
-  if (await readFileIfExists(destination)) return false;
-  const bytes = await readFileIfExists(backup);
-  if (!bytes) return false;
-  if (expectedHash && hashBytes(bytes) !== expectedHash) return false;
+  let finalPlaced: Uint8Array | undefined;
   try {
-    await vscode.workspace.fs.rename(backup, destination, { overwrite: false });
-    return true;
-  } catch {
-    return false;
+    finalPlaced = await readFileIfExists(destination);
+  } catch (error) {
+    throw manualRecoveryError(
+      `回復ファイル確認後に保存先を再確認できませんでした: ${errorMessage(error)}`,
+      [destination.fsPath, backup.fsPath]
+    );
+  }
+  if (!finalPlaced || hashBytes(finalPlaced) !== stagedHash) {
+    throw manualRecoveryError(
+      `回復ファイル確認中に保存先が変更されました。`,
+      [destination.fsPath, backup.fsPath]
+    );
   }
 }
 
