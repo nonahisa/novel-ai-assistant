@@ -77,7 +77,10 @@ const claudeModel = {
   },
 };
 
-function claudeMessage(content: string, stopReason: "end_turn" | "refusal" = "end_turn") {
+function claudeMessage(
+  content: string,
+  stopReason: "end_turn" | "refusal" | null = "end_turn"
+) {
   return {
     id: "msg_test",
     type: "message",
@@ -328,6 +331,12 @@ describe("AIプロバイダ境界", () => {
     expect(toClaudeAIError(new Error(rawMessage)).message).not.toContain(rawMessage);
   });
 
+  test("Claudeの汎用SyntaxErrorはresponseデコード失敗としては正規化しない", () => {
+    expect(toClaudeAIError(new SyntaxError("local programmer error"))).toMatchObject({
+      kind: "unknown",
+    });
+  });
+
   test("Claude接続確認はSDKの生エラーをUIメッセージに含めない", async () => {
     const rawMessage = "gateway returned credential=secret-value";
     vi.stubGlobal("fetch", vi.fn(async () =>
@@ -424,6 +433,8 @@ describe("AIプロバイダ境界", () => {
   test.each([
     ["nullの成功応答", null],
     ["contentが配列ではない成功応答", { ...claudeMessage("ok"), content: {} }],
+    ["stop_reasonがない成功応答", { ...claudeMessage("ok"), stop_reason: undefined }],
+    ["stop_reasonが未対応の成功応答", { ...claudeMessage("ok"), stop_reason: "unknown" }],
   ])("Claudeは%sをbad_responseとして返す", async (_label, body) => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = input instanceof Request ? input.url : String(input);
@@ -432,6 +443,40 @@ describe("AIプロバイダ境界", () => {
 
     await expect(new ClaudeProvider(claudeContext()).generate(ollamaParams)).rejects.toMatchObject({
       kind: "bad_response",
+    });
+  });
+
+  test.each([
+    ["空のJSON HTTP本文", ""],
+    ["壊れたJSON HTTP本文", "{"],
+  ])("Claudeは%sのSDKデコード失敗をbad_responseとして返す", async (_label, body) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes("/v1/models/")) {
+        return jsonResponse(claudeModel);
+      }
+      return new Response(body, {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }));
+
+    await expect(new ClaudeProvider(claudeContext()).generate(ollamaParams)).rejects.toMatchObject({
+      kind: "bad_response",
+    });
+  });
+
+  test.each([
+    ["end_turn", claudeMessage("ok", "end_turn")],
+    ["null", claudeMessage("ok", null)],
+  ])("Claudeは有効なstop_reason %sを受け入れる", async (_label, body) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      return url.includes("/v1/models/") ? jsonResponse(claudeModel) : jsonResponse(body);
+    }));
+
+    await expect(new ClaudeProvider(claudeContext()).generate(ollamaParams)).resolves.toMatchObject({
+      text: "ok",
     });
   });
 

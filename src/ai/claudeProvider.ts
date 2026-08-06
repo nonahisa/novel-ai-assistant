@@ -13,6 +13,16 @@ import {
 /** APIキーの保存先。設定ファイルではなくOSの資格情報ストアに置く */
 const SECRET_KEY = "novelai.claude.apiKey";
 
+const CLAUDE_STOP_REASONS = new Set<string>([
+  "end_turn",
+  "max_tokens",
+  "stop_sequence",
+  "tool_use",
+  "pause_turn",
+  "refusal",
+  "model_context_window_exceeded",
+]);
+
 /**
  * Claude（Anthropic API）アダプタ。
  *
@@ -217,10 +227,10 @@ export class ClaudeProvider implements AIProvider {
         try {
           res = await client.messages.create(body, { signal: params.signal });
         } catch (e2) {
-          throw toClaudeAIError(e2);
+          throw toClaudeMessageCreateError(e2);
         }
       } else {
-        throw toClaudeAIError(e);
+        throw toClaudeMessageCreateError(e);
       }
     }
 
@@ -390,12 +400,26 @@ function isClaudeMessage(value: unknown): value is Anthropic.Message {
   ) {
     return false;
   }
+  if (!isClaudeStopReason(value.stop_reason)) return false;
   return value.content.every(
     (block) =>
       isRecord(block) &&
       typeof block.type === "string" &&
       (block.type !== "text" || typeof block.text === "string")
   );
+}
+
+function isClaudeStopReason(value: unknown): boolean {
+  return value === null || (typeof value === "string" && CLAUDE_STOP_REASONS.has(value));
+}
+
+function toClaudeMessageCreateError(error: unknown): AIError {
+  // SDKの成功HTTP応答JSONのデコード失敗だけを応答不正として扱う。
+  // 汎用のSyntaxErrorまで変換すると、呼び出し側のプログラム不備を隠してしまう。
+  if (error instanceof SyntaxError) {
+    return new AIError("Claudeから形式が不正な応答が返りました。", "bad_response");
+  }
+  return toClaudeAIError(error);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
