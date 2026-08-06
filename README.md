@@ -2,17 +2,17 @@
 
 小説執筆のための作品管理・文字数計測・AI支援を行うVSCode拡張機能です。
 
-現在の配布版：**0.0.1**（作品管理・文字数計測・AI設定・登場人物抽出）
+現在の配布版：**0.0.2**（原稿・作者設定の保護と登場人物抽出の品質を強化）
 
 ---
 
 ## インストール
 
-認証済みのGitHub CLIを使ってprivate repositoryのReleaseからVSIXをダウンロードし、そのローカルファイルをインストールします。新規インストールと既存の0.0.1の上書き更新の両方に使えます。
+認証済みのGitHub CLIを使ってprivate repositoryのReleaseからVSIXをダウンロードし、そのローカルファイルをインストールします。新規インストールと既存版の上書き更新の両方に使えます。
 
 ```powershell
-gh release download v0.0.1 --repo nonahisa/novel-ai-assistant --pattern "novel-ai-assistant-0.0.1.vsix" --clobber
-code --install-extension ".\novel-ai-assistant-0.0.1.vsix" --force
+gh release download v0.0.2 --repo nonahisa/novel-ai-assistant --pattern "novel-ai-assistant-0.0.2.vsix" --clobber
+code --install-extension ".\novel-ai-assistant-0.0.2.vsix" --force
 ```
 
 画面から操作する場合は、VS Codeの「拡張機能」ビュー右上の `...` →「VSIXからのインストール」を選び、同じVSIXファイルを指定します。
@@ -212,11 +212,12 @@ Claudeを使う場合はAnthropic Consoleで発行したAPIキーが必要です
 
 ---
 
-## 0.0.1の制約
+## 0.0.2の制約
 
-- AIの抽出結果は必ず作者が確認してください。特に小型ローカルモデルでは、代名詞・集団名・話者の取り違えが残る場合があります。
+- AIの抽出結果は決定的な検証で人物以外・根拠不一致を除外しますが、実モデルの精度を保証するものではありません。特に小型ローカルモデルでは、代名詞・話者の取り違えや抽出漏れが残るため、結果を作者が確認してください。
 - 本バージョンは本文をAIで自動修正しません。原稿ファイルは読み取り対象で、抽出結果だけを `設定/characters/` に保存します。
-- Shift_JISは読み取りに対応しています。将来の本文修正機能でShift_JISへ書き戻す処理は未実装です。
+- 原稿書き込みの安全基盤はShift_JISを含む元の文字コード・改行・末尾改行を保持し、競合マーカー、未保存変更、外部変更を拒否します。本文修正機能そのものは未実装です。
+- Ollama、Claude、Sakura AI Engineの実接続確認は通常CIに含めません。資格情報やローカルモデルが必要なため、明示的な手動テストとして実行します。
 - プロット支援、場所・世界観生成、推敲、矛盾検知、Git同期は今後の機能です。
 
 ## アンインストール

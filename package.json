@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "小説AI執筆補助",
   "description": "小説執筆のための作品管理・文字数計測・AI支援機能",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "local",
   "private": true,
   "license": "MIT",
