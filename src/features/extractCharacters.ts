@@ -452,6 +452,10 @@ export function normalizeExtractedCharacter(
     aliases: cleanStringArray(raw.aliases).filter((alias) => alias !== name),
   };
 
+  if (typeof raw.isMob === "boolean") {
+    character.isMob = raw.isMob;
+  }
+
   copyNullableString(character, raw, "role");
   copyNullableString(character, raw, "personality");
   copyNullableString(character, raw, "appearance");

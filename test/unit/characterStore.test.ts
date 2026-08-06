@@ -86,6 +86,7 @@ describe("人物ファイル検証", () => {
       ["addressTerms", [{ targetName: "澪", forms: "澪さん", authorLocked: false }]],
       ["relations", [{ name: "澪", relation: 1 }]],
       ["appearedChapters", [1, "2"]],
+      ["isMob", "true"],
       ["conflicts", [{ field: "age", values: "17", chapters: [1], note: null }]],
     ];
 

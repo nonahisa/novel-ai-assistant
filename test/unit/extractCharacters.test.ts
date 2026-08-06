@@ -43,6 +43,26 @@ describe("AI抽出結果の境界検証", () => {
     ]);
   });
 
+  test("モブ判定の真偽値を抽出結果に保持する", () => {
+    const out: Array<{ data: ExtractedCharacter; chapters: number[] }> = [];
+    collect(
+      out,
+      {
+        characters: [
+          {
+            name: "取調官たち",
+            aliases: [],
+            isMob: true,
+            evidence: "灯は澪を見た",
+          },
+        ],
+      },
+      chunk
+    );
+
+    expect(out[0].data.isMob).toBe(true);
+  });
+
   test("配列でないネスト項目を捨て、マージ処理へ渡さない", () => {
     const parsed = parseResult(
       JSON.stringify({

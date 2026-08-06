@@ -42,4 +42,15 @@ describe("登場人物マージ", () => {
 
     expect(result.changedIds).toEqual(["char_001"]);
   });
+
+  test("AIが集団と判定した新規人物をモブとして保存する", () => {
+    const result = mergeExtractedCharacters([], [
+      {
+        data: { name: "取調官たち", aliases: [], isMob: true },
+        chapters: [1],
+      },
+    ]);
+
+    expect(result.characters[0].isMob).toBe(true);
+  });
 });

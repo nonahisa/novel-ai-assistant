@@ -113,6 +113,11 @@ function applyExtracted(
   }
   target.aliases = [...aliases];
 
+  if (ex.isMob === true && !target.isMob) {
+    target.isMob = true;
+    changed = true;
+  }
+
   // 単純なテキスト項目: 空なら埋める。既にあれば食い違いを記録し、上書きしない
   changed = fillOrConflict(target, "role", ex.role, conflicts) || changed;
   changed =

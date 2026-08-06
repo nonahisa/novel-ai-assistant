@@ -4,7 +4,7 @@
  * プロンプトを変更したら version を上げること。
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
-export const CHARACTER_EXTRACT_VERSION = "1.2";
+export const CHARACTER_EXTRACT_VERSION = "1.4";
 
 export const BASE_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 
@@ -58,6 +58,11 @@ ${known}
   例：「衛兵隊副隊長のエバン」→ name: "エバン", role: "衛兵隊副隊長"
   本名が本文から分からず、役職や関係性でしか呼びようがない人物の場合のみ、
   その役職的な表現をそのまま name として使ってよい。
+- 複数人をまとめた表現（「取調官たち」「金貸したち」のような「〜たち」）や、
+  特定の一人に固定できない汎用的な役割語（「冒険者」のように、本文中で
+  個人ではなく属性・集団として使われている場合）は isMob を true にすること。
+  「老いた門番」のように、無名でも本文中で一貫して特定の一人を指して
+  描写されている場合は個人として扱い、isMob は false のままでよい。
 
 【呼称の抽出ルール】（重要）
 呼称は「誰が誰をどう呼んだか」の方向を持つ情報です。
@@ -91,6 +96,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
         properties: {
           name: { type: "string" },
           aliases: { type: "array", items: { type: "string" } },
+          isMob: { type: "boolean" },
           role: { type: ["string", "null"] },
           personality: { type: ["string", "null"] },
           appearance: { type: ["string", "null"] },
@@ -135,6 +141,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
 export interface ExtractedCharacter {
   name: string;
   aliases?: string[];
+  isMob?: boolean;
   role?: string | null;
   personality?: string | null;
   appearance?: string | null;
