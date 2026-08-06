@@ -3,12 +3,19 @@ import * as path from "path";
 import { WorkEntry } from "../models/types";
 import { Character } from "../models/character";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError, type ProviderId } from "../ai/types";
+import {
+  AIError,
+  recoveryForAIError,
+  type ProviderId,
+} from "../ai/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import { parseEpisodeMetadata } from "../core/metadataParser";
 import { decideChunkSize, splitIntoChunks, Chunk } from "../core/chunker";
-import { CharacterStore } from "../core/characterStore";
+import {
+  CharacterStore,
+  CharacterStoreError,
+} from "../core/characterStore";
 import { mergeExtractedCharacters } from "../core/characterMerge";
 import {
   parseResult,
@@ -25,6 +32,22 @@ import {
   buildCharacterExtractPrompt,
 } from "../prompts/characterExtract";
 import { ChunkCache } from "../core/chunkCache";
+
+interface ExtractionFailure {
+  chunk: Chunk;
+  message: string;
+  kind?: AIError["kind"];
+}
+
+interface ExtractionSummaryCounts {
+  added: number;
+  updated: number;
+  rejected: RejectedCharacterCandidate[];
+  conflicts: number;
+  failedChunks: number;
+  saved: number;
+  unsavedConflicts: number;
+}
 
 export async function extractCharacters(
   work: WorkEntry,
@@ -168,7 +191,7 @@ export async function extractCharacters(
     chapters: number[];
   }> = [];
   const rejectedCandidates: RejectedCharacterCandidate[] = [];
-  const failures: Array<{ chunk: Chunk; message: string }> = [];
+  const failures: ExtractionFailure[] = [];
   let cancelled = false;
 
   await vscode.window.withProgress(
@@ -229,11 +252,35 @@ export async function extractCharacters(
             signal: controller.signal,
           });
 
+          if (res.truncated) {
+            failures.push({
+              chunk,
+              message:
+                "AIの応答が出力上限で切り詰められました。" +
+                "出力上限を増やすかチャンクを小さくしてください。",
+            });
+            done++;
+            continue;
+          }
+
+          if (!res.text.trim()) {
+            failures.push({
+              chunk,
+              message:
+                "AIの応答が空でした。" +
+                "出力上限とモデル設定を確認してください。",
+            });
+            done++;
+            continue;
+          }
+
           const parsed = parseResult(res.text);
           if (!parsed) {
             failures.push({
               chunk,
-              message: "応答をJSONとして解析できませんでした",
+              message:
+                "応答をJSONとして解析できませんでした。" +
+                "出力上限とモデル設定を確認してください。",
             });
           } else {
             const validated = validateCharacterExtractResult(parsed, chunk);
@@ -242,11 +289,14 @@ export async function extractCharacters(
             await cache.set(chunk.hash, cacheKeyBase, parsed);
           }
         } catch (e) {
-          if (e instanceof AIError && e.kind === "aborted") break;
-          failures.push({
-            chunk,
-            message: e instanceof Error ? e.message : String(e),
-          });
+          if (
+            e instanceof AIError &&
+            e.kind === "aborted" &&
+            (cancelled || token.isCancellationRequested)
+          ) {
+            break;
+          }
+          failures.push(toExtractionFailure(chunk, e));
           // 1チャンクの失敗で全体を止めない
         }
 
@@ -264,40 +314,88 @@ export async function extractCharacters(
     return;
   }
 
-  if (extractedAll.length === 0) {
-    vscode.window.showWarningMessage(
-      "登場人物を抽出できませんでした。" +
-        (failures.length > 0 ? `（${failures.length} 件のエラー）` : "")
-    );
-    return;
+  const merged =
+    extractedAll.length > 0
+      ? mergeExtractedCharacters(loaded.characters, extractedAll)
+      : undefined;
+  const changedCharacters = merged
+    ? selectChangedCharacters(merged.characters, merged.changedIds)
+    : [];
+  const baseCounts: ExtractionSummaryCounts = {
+    added: merged?.added.length ?? 0,
+    updated: merged?.updated.length ?? 0,
+    rejected: rejectedCandidates,
+    conflicts: merged?.conflicts.length ?? 0,
+    failedChunks: failures.length,
+    saved: 0,
+    unsavedConflicts: 0,
+  };
+
+  if (changedCharacters.length > 0) {
+    try {
+      await store.saveAll(changedCharacters);
+      baseCounts.saved = changedCharacters.length;
+    } catch (error) {
+      if (!(error instanceof CharacterStoreError)) throw error;
+      baseCounts.unsavedConflicts = changedCharacters.length;
+      const classification =
+        error.kind === "modified_externally"
+          ? "人物設定が読み込み後に変更されました。"
+          : "人物設定の保存先が競合しました。";
+      const recovery = describeFailureRecoveries(failures);
+      const hasSettingsFailure = failures.some(
+        (failure) =>
+          failure.kind === "not_running" ||
+          failure.kind === "model_not_found"
+      );
+      const actions = [
+        ...(failures.length > 0 ? ["詳細を表示"] : []),
+        ...(hasSettingsFailure ? ["設定を開く"] : []),
+      ];
+      const action = await vscode.window.showErrorMessage(
+        `${classification}作者の変更を保護するため保存しませんでした。` +
+          "抽出結果は未保存です。\n" +
+          buildExtractionSummary(baseCounts) +
+          (recovery ? `\n対応: ${recovery}` : ""),
+        ...actions
+      );
+      if (action === "詳細を表示") {
+        await showFailureDetails(failures);
+      } else if (action === "設定を開く") {
+        await vscode.commands.executeCommand(
+          "workbench.action.openSettings",
+          `novelai.${resolved.provider.id}`
+        );
+      }
+      return;
+    }
   }
 
-  const merged = mergeExtractedCharacters(loaded.characters, extractedAll);
-  const finalCharacters = merged.characters;
-  const changedCharacters = selectChangedCharacters(
-    merged.characters,
-    merged.changedIds
+  const summary = buildExtractionSummary(baseCounts);
+  const recovery = describeFailureRecoveries(failures);
+  const message = recovery ? `${summary}\n対応: ${recovery}` : summary;
+  const hasSettingsFailure = failures.some(
+    (failure) =>
+      failure.kind === "not_running" || failure.kind === "model_not_found"
   );
-  await store.saveAll(changedCharacters);
+  const actions = [
+    ...(failures.length > 0 ? ["詳細を表示"] : []),
+    ...(hasSettingsFailure ? ["設定を開く"] : []),
+    ...(merged ? ["一覧を開く"] : []),
+  ];
+  const action =
+    failures.length > 0 || !merged
+      ? await vscode.window.showWarningMessage(message, ...actions)
+      : await vscode.window.showInformationMessage(message, ...actions);
 
-  const parts = [
-    `登場人物 ${finalCharacters.length} 名`,
-    merged.added.length > 0 ? `新規 ${merged.added.length} 名` : null,
-    merged.updated.length > 0 ? `更新 ${merged.updated.length} 名` : null,
-    merged.conflicts.length > 0
-      ? `要確認 ${merged.conflicts.length} 件`
-      : null,
-    rejectedCandidates.length > 0
-      ? describeRejectedCandidates(rejectedCandidates)
-      : null,
-    failures.length > 0 ? `失敗 ${failures.length} チャンク` : null,
-  ].filter(Boolean);
-
-  const action = await vscode.window.showInformationMessage(
-    parts.join(" / "),
-    "一覧を開く"
-  );
-  if (action === "一覧を開く") {
+  if (action === "詳細を表示") {
+    await showFailureDetails(failures);
+  } else if (action === "設定を開く") {
+    await vscode.commands.executeCommand(
+      "workbench.action.openSettings",
+      `novelai.${resolved.provider.id}`
+    );
+  } else if (action === "一覧を開く") {
     const store2 = new CharacterStore(work);
     const dir = await store2.ensureDir();
     await vscode.commands.executeCommand(
@@ -305,6 +403,66 @@ export async function extractCharacters(
       vscode.Uri.file(dir)
     );
   }
+}
+
+function toExtractionFailure(chunk: Chunk, error: unknown): ExtractionFailure {
+  if (!(error instanceof AIError)) {
+    return {
+      chunk,
+      message:
+        "AI処理で予期しないエラーが発生しました。" +
+        "AI設定と拡張機能のログを確認してください。",
+    };
+  }
+
+  const labels: Record<AIError["kind"], string> = {
+    not_running: "AIに接続できませんでした。",
+    model_not_found: "選択中のモデルを利用できませんでした。",
+    timeout: "AIの応答が時間内に完了しませんでした。",
+    bad_response: "AIの応答を利用できませんでした。",
+    aborted: "AI処理が中断されました。",
+    unknown: "AI処理で予期しないエラーが発生しました。",
+  };
+  return {
+    chunk,
+    kind: error.kind,
+    // 例外本文にはプロバイダの応答や認証情報が混ざり得るため表示しない。
+    message: `${labels[error.kind]}${recoveryForAIError(error)}`,
+  };
+}
+
+function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
+  const rejectedDetail =
+    counts.rejected.length > 0
+      ? ` / ${describeRejectedCandidates(counts.rejected)}`
+      : "";
+  return [
+    `新規 ${counts.added}名`,
+    `更新 ${counts.updated}名`,
+    `除外 ${counts.rejected.length}件`,
+    `競合 ${counts.conflicts}件`,
+    `失敗 ${counts.failedChunks}チャンク`,
+    `保存済み ${counts.saved}名`,
+    `保存競合による未保存 ${counts.unsavedConflicts}名`,
+  ].join(" / ") + rejectedDetail;
+}
+
+function describeFailureRecoveries(failures: ExtractionFailure[]): string {
+  return [...new Set(failures.map((failure) => failure.message))].join(" ");
+}
+
+async function showFailureDetails(
+  failures: ExtractionFailure[]
+): Promise<void> {
+  if (failures.length === 0) return;
+  const content = failures
+    .map((failure) => `${describeChunk(failure.chunk)}: ${failure.message}`)
+    .join("\n");
+  const doc = await vscode.workspace.openTextDocument({
+    content,
+    language: "text",
+  });
+  await vscode.window.showTextDocument(doc);
 }
 
 /** 実行前に、プロバイダごとの料金上の影響を明示する。 */

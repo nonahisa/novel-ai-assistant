@@ -96,3 +96,21 @@ export class AIError extends Error {
     this.name = "AIError";
   }
 }
+
+/** 失敗種別ごとに、作者が次に行える具体的な操作を1つ返す。 */
+export function recoveryForAIError(error: AIError): string {
+  switch (error.kind) {
+    case "not_running":
+      return "AIを起動し、接続先設定を確認してください。";
+    case "model_not_found":
+      return "利用可能なモデルを選び直してください。";
+    case "timeout":
+      return "チャンクを小さくして、もう一度実行してください。";
+    case "bad_response":
+      return "出力上限とモデル設定を確認してください。";
+    case "aborted":
+      return "必要なら抽出をもう一度実行してください。";
+    case "unknown":
+      return "AI設定と拡張機能のログを確認してください。";
+  }
+}
