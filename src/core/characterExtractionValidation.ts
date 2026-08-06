@@ -28,8 +28,13 @@ export interface CharacterValidationResult {
 
 const MAX_NAME_LENGTH = 30;
 const SENTENCE_PUNCTUATION = /[、。，,.！？!?；;：:\r\n]/u;
+const WRAPPING_PUNCTUATION =
+  /^(?:[「『“‘"（(【《〈])|(?:[」』”’"）)】》〉])$/u;
+// 助詞だけでは「こはる」のような名前も巻き込むため、文末の活用形まで限定する。
+const SENTENCE_LIKE_NAME_PATTERN =
+  /[はがをにへでとも][^、。！？!?\r\n]{1,20}(?:った|いた|した|された|ていた|ている|している|なかった|だった|でした|ました|ません)$/u;
 const PLACEHOLDER_NAME_PATTERN =
-  /^(null|undefined|不明|なし|n\/?a|none|[（(]?主[）)]?|主人公)$/i;
+  /^(null|undefined|不明|なし|誰か|n\/?a|none|[（(]?主[）)]?|主人公)$/i;
 const COLLECTIVE_SUFFIX_PATTERN = /(?:たち|一同|一行|一団|人々|一族)$/u;
 const PRONOUNS = new Set([
   "私",
@@ -65,6 +70,7 @@ const GENERIC_ROLES = new Set([
   "医師",
   "医者",
   "看護師",
+  "警官",
   "店員",
   "店主",
   "主人",
@@ -90,6 +96,7 @@ const GENERIC_ROLES = new Set([
   "騎士",
   "冒険者",
   "取調官",
+  "村人",
 ]);
 const ENTITY_TYPES = new Set(["person", "group", "location", "unknown"]);
 
@@ -259,7 +266,9 @@ function isValidName(name: string): boolean {
     name.length <= MAX_NAME_LENGTH &&
     !PLACEHOLDER_NAME_PATTERN.test(name) &&
     !PRONOUNS.has(name) &&
-    !SENTENCE_PUNCTUATION.test(name)
+    !SENTENCE_PUNCTUATION.test(name) &&
+    !WRAPPING_PUNCTUATION.test(name) &&
+    !SENTENCE_LIKE_NAME_PATTERN.test(name)
   );
 }
 
@@ -273,7 +282,7 @@ function isValidAlias(alias: string): boolean {
 
 function isCollectiveName(name: string): boolean {
   if (COLLECTIVE_SUFFIX_PATTERN.test(name)) return true;
-  if (!name.endsWith("達")) return false;
+  if (!name.endsWith("達") && !name.endsWith("ら")) return false;
   const singular = name.slice(0, -1);
   return GENERIC_ROLES.has(singular) || PRONOUNS.has(singular);
 }
@@ -283,6 +292,9 @@ function isGrounded(
   chunkText: string
 ): boolean {
   if (chunkText.includes(character.name)) return true;
+  if (character.aliases?.some((alias) => chunkText.includes(alias))) {
+    return true;
+  }
   return evidenceSegments(character.evidence).some((segment) =>
     chunkText.includes(segment)
   );

@@ -33,6 +33,11 @@ describe("AI登場人物抽出結果の検証", () => {
     ["兵士たち", undefined, "collective"],
     ["王都アルバ", "location", "non_person"],
     ["灯は帰った。だから眠った", undefined, "invalid_name"],
+    ["誰か", undefined, "invalid_name"],
+    ["警官", undefined, "non_person"],
+    ["村人ら", undefined, "collective"],
+    ["灯は帰った", undefined, "invalid_name"],
+    ["「灯」", undefined, "invalid_name"],
   ])("人物でない候補 %s を %s として除外する", (name, entityType, reason) => {
     const result = validate({
       characters: [{ name, entityType, evidence: sourceLine }],
@@ -69,6 +74,28 @@ describe("AI登場人物抽出結果の検証", () => {
     });
 
     expect(result.accepted).toHaveLength(1);
+    expect(result.rejected).toEqual([]);
+  });
+
+  test("正式名がなくても正規化済みの別名が本文に一致すれば通す", () => {
+    const result = validate(
+      {
+        characters: [
+          {
+            name: "黒木 玲司",
+            aliases: ["  玲司さん  "],
+            evidence: "本文にはない説明",
+          },
+        ],
+      },
+      {
+        ...chunk,
+        text: "「玲司さん、こちらへ」と灯が呼んだ。",
+      }
+    );
+
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].data.aliases).toEqual(["玲司さん"]);
     expect(result.rejected).toEqual([]);
   });
 
@@ -159,14 +186,17 @@ describe("AI登場人物抽出結果の検証", () => {
     });
   });
 
-  test("実在しうる伊達という姓を集団の達サフィックスと誤判定しない", () => {
-    const result = validate({
-      characters: [{ name: "伊達", evidence: sourceLine }],
-    });
+  test.each(["伊達", "さくら", "こはる", "ジャンヌ・ダルク"])(
+    "合理的な人物名 %s を禁止パターンと誤判定しない",
+    (name) => {
+      const result = validate({
+        characters: [{ name, evidence: sourceLine }],
+      });
 
-    expect(result.accepted).toHaveLength(1);
-    expect(result.rejected).toEqual([]);
-  });
+      expect(result.accepted).toHaveLength(1);
+      expect(result.rejected).toEqual([]);
+    }
+  );
 
   test("漢字の達が付く役割語は集団として除外する", () => {
     const result = validate({
