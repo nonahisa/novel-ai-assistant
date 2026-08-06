@@ -178,7 +178,10 @@ export async function extractCharacters(
         // 既知の人物名を渡して同一人物判定を助ける
         const knownNames = [
           ...loaded.characters.flatMap((c) => [c.name, ...c.aliases]),
-          ...extractedAll.map((e) => e.data.name),
+          ...extractedAll.flatMap((e) => [
+            e.data.name,
+            ...(e.data.aliases ?? []),
+          ]),
         ];
 
         try {
