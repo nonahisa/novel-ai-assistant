@@ -21,6 +21,7 @@ import { scanWork } from "./core/scanner";
 import { SUPPORTED_EXTENSIONS, WorkEntry } from "./models/types";
 import { AIRegistry, runSetupWizard } from "./ai/registry";
 import { extractCharacters } from "./features/extractCharacters";
+import { pathExists } from "./core/fileSystem";
 
 export function activate(context: vscode.ExtensionContext): void {
   const registry = new WorkRegistry(context);
@@ -278,8 +279,8 @@ export function activate(context: vscode.ExtensionContext): void {
         const config = await readWorkConfig(work);
         const p = workPaths(work, config);
 
-        // 本文フォルダが無ければ作る
-        const manuscriptDir = (await exists(p.manuscript))
+        // 本文フォルダを持たない既存作品では、作品ルートへ話数を追加する
+        const manuscriptDir = (await pathExists(p.manuscript))
           ? p.manuscript
           : p.root;
 
@@ -312,7 +313,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!fileName) return;
 
         const filePath = path.join(manuscriptDir, fileName.trim());
-        if (await exists(filePath)) {
+        if (await pathExists(filePath)) {
           vscode.window.showErrorMessage(
             "同じ名前のファイルがすでに存在します。"
           );
@@ -426,13 +427,4 @@ async function resolveWork(
     { title: "作品を選択" }
   );
   return picked?.work;
-}
-
-async function exists(p: string): Promise<boolean> {
-  try {
-    await vscode.workspace.fs.stat(vscode.Uri.file(p));
-    return true;
-  } catch {
-    return false;
-  }
 }

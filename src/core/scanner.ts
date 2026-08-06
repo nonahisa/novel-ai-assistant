@@ -10,6 +10,7 @@ import { addCounts, countChars, emptyCounts } from "./charCount";
 import { parseEpisodeFileName } from "./episodeParser";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { parseEpisodeMetadata } from "./metadataParser";
+import { pathExists } from "./fileSystem";
 
 /**
  * 作品の本文ファイルを走査し、話数解析と文字数計測を行う。
@@ -26,7 +27,7 @@ export async function scanWork(work: WorkEntry): Promise<{
   const config = await readWorkConfig(work);
   const p = workPaths(work, config);
 
-  const targetDir = (await exists(p.manuscript)) ? p.manuscript : p.root;
+  const targetDir = (await pathExists(p.manuscript)) ? p.manuscript : p.root;
   const files = await collectTextFiles(targetDir);
 
   const episodes: EpisodeFile[] = [];
@@ -180,14 +181,5 @@ function decodeText(bytes: Uint8Array): string {
     } catch {
       return new TextDecoder("utf-8").decode(bytes);
     }
-  }
-}
-
-async function exists(p: string): Promise<boolean> {
-  try {
-    await vscode.workspace.fs.stat(vscode.Uri.file(p));
-    return true;
-  } catch {
-    return false;
   }
 }

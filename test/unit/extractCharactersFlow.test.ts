@@ -9,11 +9,13 @@ const state = vi.hoisted(() => ({
   cacheSet: vi.fn(),
   cacheSave: vi.fn(),
   generate: vi.fn(),
+  cachedResults: new Map<string, unknown>(),
+  providerId: "ollama" as "ollama" | "claude",
 }));
 
 vi.mock("../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async () => ({
-    provider: { generate: state.generate },
+    provider: { id: state.providerId, generate: state.generate },
     model: "test-model",
   })),
 }));
@@ -76,8 +78,8 @@ vi.mock("../../src/core/characterStore", () => ({
 vi.mock("../../src/core/chunkCache", () => ({
   ChunkCache: class {
     async load() {}
-    get() {
-      return undefined;
+    get(hash: string) {
+      return state.cachedResults.get(hash);
     }
     async set(...args: unknown[]) {
       return state.cacheSet(...args);
@@ -100,6 +102,8 @@ const work: WorkEntry = {
 describe("人物抽出フロー", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    state.cachedResults.clear();
+    state.providerId = "ollama";
     workspace.getConfiguration = () => ({
       get: <T>(_key: string, defaultValue: T): T => defaultValue,
     });
@@ -219,5 +223,113 @@ describe("人物抽出フロー", () => {
 
     expect(state.cacheSave).toHaveBeenCalledOnce();
     expect(state.saveAll).not.toHaveBeenCalled();
+  });
+
+  test("全チャンクがキャッシュ済みでもAPIを呼ばず人物JSONへ再反映する", async () => {
+    state.cachedResults.set("chunk-1", {
+      characters: [{ name: "灯" }],
+    });
+    state.cachedResults.set("chunk-2", {
+      characters: [{ name: "澪" }],
+    });
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => undefined),
+      showWarningMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    const registry = {
+      resolveModelInfo: vi.fn(async () => ({ contextWindow: 8192 })),
+    } as unknown as AIRegistry;
+
+    await extractCharacters(work, registry);
+
+    expect(state.generate).not.toHaveBeenCalled();
+    expect(state.saveAll).toHaveBeenCalledOnce();
+    expect(
+      state.saveAll.mock.calls[0][0].map((character: { name: string }) =>
+        character.name
+      )
+    ).toEqual(["灯", "澪"]);
+  });
+
+  test("Claudeの実行確認に保守的な入出力トークン量と課金注意を表示する", async () => {
+    state.providerId = "claude";
+    workspace.getConfiguration = () => ({
+      get: <T>(key: string, defaultValue: T): T =>
+        (key === "claude.maxOutputTokens" ? 4096 : defaultValue) as T,
+    });
+    const showInformationMessage = vi.fn(
+      async (_message: string, ...actions: string[]) =>
+        actions.includes("実行") ? "実行" : undefined
+    );
+    Object.assign(window, {
+      showInformationMessage,
+      showWarningMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    state.generate.mockResolvedValue({
+      text: JSON.stringify({ characters: [] }),
+      truncated: false,
+      elapsedMs: 1,
+    });
+    const registry = {
+      resolveModelInfo: vi.fn(async () => ({ contextWindow: 8192 })),
+    } as unknown as AIRegistry;
+
+    await extractCharacters(work, registry);
+
+    const confirmation = showInformationMessage.mock.calls.find((call) =>
+      call.slice(1).includes("実行")
+    )?.[0];
+    expect(confirmation).toMatch(/入力: 約 [\d,]+ トークン/);
+    expect(confirmation).toContain(
+      "出力: 最大 8,192 トークン（設定上限 4,096 × 2 回）"
+    );
+    expect(confirmation).toContain("Claude APIは実行すると課金が発生します");
+    expect(confirmation).toContain("Anthropicの現行料金");
+  });
+
+  test("Ollamaの実行確認は無料のローカル実行と示し課金を予告しない", async () => {
+    const showInformationMessage = vi.fn(
+      async (_message: string, ...actions: string[]) =>
+        actions.includes("実行") ? "実行" : undefined
+    );
+    Object.assign(window, {
+      showInformationMessage,
+      showWarningMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    state.generate.mockResolvedValue({
+      text: JSON.stringify({ characters: [] }),
+      truncated: false,
+      elapsedMs: 1,
+    });
+    const registry = {
+      resolveModelInfo: vi.fn(async () => ({ contextWindow: 8192 })),
+    } as unknown as AIRegistry;
+
+    await extractCharacters(work, registry);
+
+    const confirmation = showInformationMessage.mock.calls.find((call) =>
+      call.slice(1).includes("実行")
+    )?.[0];
+    expect(confirmation).toContain("無料・ローカル実行（API課金なし）");
+    expect(confirmation).not.toContain("課金が発生します");
+    expect(confirmation).not.toContain("Anthropic");
   });
 });
