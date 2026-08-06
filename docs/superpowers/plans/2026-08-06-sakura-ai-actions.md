@@ -130,17 +130,17 @@ Expected: 8 allowlisted files, successful isolated install, zero forbidden strin
 
 Use the user-approved whole worktree scope. Do not stage `.env` or the ignored `release/` directory.
 
-- [ ] **Step 2: Push and open the draft PR**
+- [x] **Step 2: Push and open the draft PR**
 
 Commit the intended files, push `feature/works`, and open a draft PR to `main`; do not merge it. GitHub requires a `workflow_dispatch` workflow to exist on the default branch before it can be manually triggered.
 
-- [ ] **Step 3: Record the default-branch execution gate**
+- [x] **Step 3: Record the default-branch execution gate**
 
 Verify the draft PR contains the workflow and note that `gh workflow run sakura-ai-smoke.yml --ref main` becomes available only after merge. Use the local live Sakura API invocation as the pre-merge external-service evidence.
 
 Expected: draft PR created, workflow visible in its diff, and no merge performed.
 
-- [ ] **Step 4: Record final evidence**
+- [x] **Step 4: Record final evidence**
 
 Add the draft PR URL, local Sakura live-test result, final VSIX SHA-256, local release-gate counts, and review verdict to `docs/進捗と引継ぎ.md`; explicitly record that the GitHub workflow run is gated on merge to `main`. Commit and push that evidence update, then rerun `git diff --check` and `npm run verify:vsix`.
 
