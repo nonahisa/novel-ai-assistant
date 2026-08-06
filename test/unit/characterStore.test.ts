@@ -186,7 +186,6 @@ describe("人物ファイル保存", () => {
       authorNotes: "作者メモ",
       exportNote: "公開用注記",
     });
-    expect(rename).toHaveBeenCalledOnce();
   });
 
   test("新規人物の保存先が読み込み後に作られた場合は上書きしない", async () => {
@@ -225,6 +224,73 @@ describe("人物ファイル保存", () => {
 
     expect(disk.get(oldPath)).toEqual(originalBytes);
     expect(disk.has(newPath)).toBe(false);
+  });
+
+  test("新しい保存先の配置中に編集された旧ファイルを削除しない", async () => {
+    const original = fixedCharacter("char_001", "旧名");
+    const renamed = { ...original, name: "新名" };
+    const oldPath = diskPath(path.join(characterDir, characterFileName(original)));
+    const newPath = diskPath(path.join(characterDir, characterFileName(renamed)));
+    const changedByAuthorBytes = bytesFor({
+      ...original,
+      authorNotes: "保存先の配置中に作者が追記",
+    });
+    disk.set(oldPath, bytesFor(original));
+    const store = new CharacterStore(work);
+    await store.loadAll();
+    rename.mockImplementation(
+      async (
+        from: { fsPath: string },
+        to: { fsPath: string },
+        options?: { overwrite?: boolean }
+      ) => {
+        const bytes = disk.get(from.fsPath);
+        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+        if (!options?.overwrite && disk.has(to.fsPath)) {
+          throw new FileSystemError("exists", "FileExists");
+        }
+        disk.set(to.fsPath, bytes);
+        disk.delete(from.fsPath);
+        if (to.fsPath === newPath) {
+          disk.set(oldPath, changedByAuthorBytes);
+        }
+      }
+    );
+
+    await expect(store.save(renamed)).rejects.toMatchObject({
+      kind: "modified_externally",
+    });
+
+    expect(disk.get(oldPath)).toEqual(changedByAuthorBytes);
+    expect(disk.has(newPath)).toBe(false);
+  });
+
+  test("名前変更の巻き戻し失敗を通知し復旧可能な両ファイルを残す", async () => {
+    const original = fixedCharacter("char_001", "旧名");
+    const renamed = { ...original, name: "新名" };
+    const oldPath = diskPath(path.join(characterDir, characterFileName(original)));
+    const newPath = diskPath(path.join(characterDir, characterFileName(renamed)));
+    const originalBytes = bytesFor(original);
+    disk.set(oldPath, originalBytes);
+    const store = new CharacterStore(work);
+    await store.loadAll();
+    remove.mockImplementation(async (uri: { fsPath: string }) => {
+      if (uri.fsPath === oldPath) {
+        throw new FileSystemError("旧ファイルを削除できません", "NoPermissions");
+      }
+      if (uri.fsPath === newPath) {
+        throw new FileSystemError("新ファイルを撤回できません", "NoPermissions");
+      }
+      disk.delete(uri.fsPath);
+    });
+
+    await expect(store.save(renamed)).rejects.toMatchObject({
+      kind: "path_conflict",
+      message: expect.stringContaining("手動"),
+    });
+
+    expect(disk.get(oldPath)).toEqual(originalBytes);
+    expect(disk.has(newPath)).toBe(true);
   });
 
   test("壊れた作者JSONを上書きしない", async () => {

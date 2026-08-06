@@ -1,9 +1,14 @@
+import * as crypto from "crypto";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { atomicWriteFile } from "../../src/core/atomicWrite";
-import { Uri, workspace } from "./support/vscodeStub";
+import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
 
 const path = "C:\\novels\\001.txt";
 const destinationPath = Uri.file(path).fsPath;
+
+function sha256(bytes: Uint8Array): string {
+  return crypto.createHash("sha256").update(bytes).digest("hex");
+}
 
 describe("原稿の原子的な保存", () => {
   const files = new Map<string, Uint8Array>();
@@ -16,12 +21,26 @@ describe("原稿の原子的な保存", () => {
       writeFile: vi.fn(async (uri: { fsPath: string }, bytes: Uint8Array) => {
         files.set(uri.fsPath, bytes);
       }),
-      rename: vi.fn(async (from: { fsPath: string }, to: { fsPath: string }) => {
-        const bytes = files.get(from.fsPath);
-        if (!bytes) throw new Error("一時ファイルがありません");
-        files.set(to.fsPath, bytes);
-        files.delete(from.fsPath);
+      readFile: vi.fn(async (uri: { fsPath: string }) => {
+        const bytes = files.get(uri.fsPath);
+        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+        return bytes;
       }),
+      rename: vi.fn(
+        async (
+          from: { fsPath: string },
+          to: { fsPath: string },
+          options?: { overwrite?: boolean }
+        ) => {
+          const bytes = files.get(from.fsPath);
+          if (!bytes) throw new Error("一時ファイルがありません");
+          if (!options?.overwrite && files.has(to.fsPath)) {
+            throw new FileSystemError("exists", "FileExists");
+          }
+          files.set(to.fsPath, bytes);
+          files.delete(from.fsPath);
+        }
+      ),
       delete: vi.fn(async (uri: { fsPath: string }) => {
         deletedPaths.push(uri.fsPath);
         files.delete(uri.fsPath);
@@ -61,5 +80,43 @@ describe("原稿の原子的な保存", () => {
     expect(deletedPaths[0]).not.toBe(destinationPath);
     expect(deletedPaths[0]).toMatch(/^c:\\novels\\001\.txt\.novelai-\d+-.+\.tmp$/);
     expect(files.get(destinationPath)).toEqual(original);
+  });
+
+  test("一時ファイル書き込み中の同一パス外部編集を上書きしない", async () => {
+    const original = new Uint8Array([0x01, 0x02]);
+    const changedByAuthor = new Uint8Array([0x03, 0x04]);
+    const replacement = new Uint8Array([0x05, 0x06]);
+    files.set(destinationPath, original);
+    workspace.fs.writeFile = vi.fn(
+      async (uri: { fsPath: string }, bytes: Uint8Array) => {
+        files.set(uri.fsPath, bytes);
+        files.set(destinationPath, changedByAuthor);
+      }
+    );
+
+    await expect(
+      atomicWriteFile(path, replacement, {
+        mode: "replace",
+        expectedHash: sha256(original),
+      })
+    ).rejects.toMatchObject({ kind: "modified_externally" });
+
+    expect(files.get(destinationPath)).toEqual(changedByAuthor);
+  });
+
+  test("一時ファイル書き込み中に作られた保存先を上書きしない", async () => {
+    const createdByAuthor = new Uint8Array([0x07, 0x08]);
+    workspace.fs.writeFile = vi.fn(
+      async (uri: { fsPath: string }, bytes: Uint8Array) => {
+        files.set(uri.fsPath, bytes);
+        files.set(destinationPath, createdByAuthor);
+      }
+    );
+
+    await expect(
+      atomicWriteFile(path, new Uint8Array([0x09, 0x0a]), { mode: "create" })
+    ).rejects.toMatchObject({ kind: "path_conflict" });
+
+    expect(files.get(destinationPath)).toEqual(createdByAuthor);
   });
 });

@@ -7,7 +7,10 @@ import {
   characterFileName,
   parseCharacter,
 } from "../models/character";
-import { atomicWriteFile } from "./atomicWrite";
+import {
+  AtomicWriteFileError,
+  atomicWriteFile,
+} from "./atomicWrite";
 import { hashBytes } from "./textFile";
 
 interface CharacterSnapshot {
@@ -180,21 +183,68 @@ export class CharacterStore {
       prepared.destinationPath,
       prepared.snapshot
     );
-    await atomicWriteFile(prepared.destinationPath, prepared.bytes);
+    const snapshot = prepared.snapshot;
+    const sourcePath = snapshot?.filePath;
+    try {
+      await atomicWriteFile(
+        prepared.destinationPath,
+        prepared.bytes,
+        sourcePath && samePath(sourcePath, prepared.destinationPath)
+          ? { mode: "replace", expectedHash: snapshot.hash }
+          : { mode: "create" }
+      );
+    } catch (error) {
+      if (error instanceof AtomicWriteFileError) {
+        throw new CharacterStoreError(error.message, error.kind);
+      }
+      throw error;
+    }
 
-    const sourcePath = prepared.snapshot?.filePath;
-    if (sourcePath && !samePath(sourcePath, prepared.destinationPath)) {
+    if (snapshot && sourcePath && !samePath(sourcePath, prepared.destinationPath)) {
+      const sourceBeforeDelete = await this.readFileIfExists(sourcePath);
+      if (
+        !sourceBeforeDelete ||
+        hashBytes(sourceBeforeDelete) !== snapshot.hash
+      ) {
+        const retraction = await this.retractIfUnchanged(
+          prepared.destinationPath,
+          hashBytes(prepared.bytes)
+        );
+        if (!retraction.ok) {
+          throw this.manualRecoveryError(
+            `旧ファイルが外部変更され、新しい保存先も撤回できませんでした。${retraction.detail}`
+          );
+        }
+        throw new CharacterStoreError(
+          `人物「${prepared.character.id}」は新しい保存先の配置中に変更されました。`,
+          "modified_externally"
+        );
+      }
+
       try {
         await vscode.workspace.fs.delete(vscode.Uri.file(sourcePath));
       } catch (error) {
-        try {
-          await vscode.workspace.fs.delete(
-            vscode.Uri.file(prepared.destinationPath)
+        const sourceAfterFailure = await this.readFileIfExists(sourcePath);
+        if (!sourceAfterFailure) {
+          // 削除APIがエラーを返しても実際に削除済みなら、新しい保存先を正とする。
+        } else if (hashBytes(sourceAfterFailure) !== snapshot.hash) {
+          throw this.manualRecoveryError(
+            `旧ファイルの削除中に内容が変更されました: ${errorMessage(error)}`
           );
-        } catch {
-          // 正しい旧ファイルを残すことを優先し、元の削除エラーを通知する。
+        } else {
+          const retraction = await this.retractIfUnchanged(
+            prepared.destinationPath,
+            hashBytes(prepared.bytes)
+          );
+          if (!retraction.ok) {
+            throw this.manualRecoveryError(
+              `旧ファイルを削除できず、新しい保存先も撤回できませんでした: ${errorMessage(
+                error
+              )}。${retraction.detail}`
+            );
+          }
+          throw error;
         }
-        throw error;
       }
     }
 
@@ -285,6 +335,36 @@ export class CharacterStore {
       throw error;
     }
   }
+
+  private async retractIfUnchanged(
+    filePath: string,
+    expectedHash: string
+  ): Promise<{ ok: true } | { ok: false; detail: string }> {
+    const current = await this.readFileIfExists(filePath);
+    if (!current) return { ok: true };
+    if (hashBytes(current) !== expectedHash) {
+      return {
+        ok: false,
+        detail: `撤回対象「${filePath}」が外部変更されています。`,
+      };
+    }
+    try {
+      await vscode.workspace.fs.delete(vscode.Uri.file(filePath));
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        detail: `撤回対象「${filePath}」を削除できません: ${errorMessage(error)}`,
+      };
+    }
+  }
+
+  private manualRecoveryError(message: string): CharacterStoreError {
+    return new CharacterStoreError(
+      `${message} データを失わないため両方のファイルを残しました。手動で確認してください。`,
+      "path_conflict"
+    );
+  }
 }
 
 function samePath(left: string, right: string): boolean {
@@ -293,5 +373,9 @@ function samePath(left: string, right: string): boolean {
   return process.platform === "win32"
     ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
     : normalizedLeft === normalizedRight;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
