@@ -29,7 +29,7 @@
 - Consumes: `SAKURA_AI_ACCOUNT_TOKEN`, injected `fetchImpl`, optional `log` callback.
 - Produces: `runSakuraAiSmoke({ token, fetchImpl, log }): Promise<{ model: string; contentLength: number }>` and a direct CLI entrypoint.
 
-- [ ] **Step 1: Write failing behavior tests**
+- [x] **Step 1: Write failing behavior tests**
 
 Create tests that inject a fake `fetchImpl` and verify: a 200 OpenAI-compatible response returns model and content length; the request uses Bearer authentication and the fixed model; a missing token fails before fetching; HTTP 401/429 failures reveal only the status; invalid JSON, absent model, and blank content fail; captured logs never contain the token or response content.
 
@@ -45,17 +45,17 @@ const result = await runSakuraAiSmoke({
 expect(result).toEqual({ model: "gemma-4-31B-it", contentLength: 6 });
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `npm run test:unit -- test/unit/sakuraAiSmoke.test.ts`
 
 Expected: FAIL because `scripts/sakuraAiSmoke.mjs` does not exist.
 
-- [ ] **Step 3: Implement the minimal client and CLI**
+- [x] **Step 3: Implement the minimal client and CLI**
 
 Export endpoint/model constants and `runSakuraAiSmoke`. Send one Japanese user message, `temperature: 0`, `max_tokens: 32`, and `stream: false`. Validate the status and `choices[0].message.content`; log only `Sakura AI smoke test passed: model=<model>, contentLength=<number>`. The CLI passes `process.env.SAKURA_AI_ACCOUNT_TOKEN` and exits nonzero with only the sanitized error message.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `npm run test:unit -- test/unit/sakuraAiSmoke.test.ts && npm run typecheck`
 
@@ -71,21 +71,21 @@ Expected: all focused tests pass and TypeScript type checking exits 0.
 - Consumes: repository secret `${{ secrets.SAKURA_AI_ACCOUNT_TOKEN }}` and `scripts/sakuraAiSmoke.mjs`.
 - Produces: GitHub Actions workflow `Sakura AI Engine Smoke Test`.
 
-- [ ] **Step 1: Write the failing static workflow test**
+- [x] **Step 1: Write the failing static workflow test**
 
 Read the workflow as text and assert it contains `workflow_dispatch`, `contents: read`, `timeout-minutes: 5`, `SAKURA_AI_ACCOUNT_TOKEN: ${{ secrets.SAKURA_AI_ACCOUNT_TOKEN }}`, `node scripts/sakuraAiSmoke.mjs`, and no `push:`, `pull_request:`, or `schedule:` trigger.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `npm run test:unit -- test/unit/sakuraWorkflow.test.ts`
 
 Expected: FAIL because `.github/workflows/sakura-ai-smoke.yml` does not exist.
 
-- [ ] **Step 3: Add the workflow**
+- [x] **Step 3: Add the workflow**
 
 Use `actions/checkout@v4` and `actions/setup-node@v4` with Node 22. Set workflow-level `permissions: { contents: read }`, job `timeout-minutes: 5`, and expose the secret only as the smoke step's environment variable. Do not echo or transform the secret in shell.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `npm run test:unit -- test/unit/sakuraWorkflow.test.ts && npm run check:release`
 
@@ -103,15 +103,15 @@ Expected: static workflow test, all unit tests, typecheck, build, Extension Host
 **Interfaces:**
 - Produces: operator instructions and a VSIX that excludes workflows, smoke scripts, tests, and credentials.
 
-- [ ] **Step 1: Document setup and operation**
+- [x] **Step 1: Document setup and operation**
 
 Document the repository secret name, Actions tab manual-run path, model, expected pass condition, rate-limit behavior, and the fact that the test is never automatic.
 
-- [ ] **Step 2: Confirm packaging exclusions**
+- [x] **Step 2: Confirm packaging exclusions**
 
 Ensure `.github/**`, `scripts/**`, `test/**`, `.env`, and `.env.*` are excluded by `.vscodeignore`; confirm `.env` remains ignored by Git.
 
-- [ ] **Step 3: Rebuild and verify the VSIX**
+- [x] **Step 3: Rebuild and verify the VSIX**
 
 Run: `npm run package:vsix && npm run verify:vsix && npm run test:ollama`
 
@@ -126,7 +126,7 @@ Expected: 8 allowlisted files, successful isolated install, zero forbidden strin
 - Consumes: a commit containing `.github/workflows/sakura-ai-smoke.yml` on the default branch and the registered `SAKURA_AI_ACCOUNT_TOKEN` secret.
 - Produces: a successful GitHub Actions run URL and final evidence for the 0.0.1 release.
 
-- [ ] **Step 1: Confirm publication scope**
+- [x] **Step 1: Confirm publication scope**
 
 Use the user-approved whole worktree scope. Do not stage `.env` or the ignored `release/` directory.
 
@@ -143,3 +143,7 @@ Expected: draft PR created, workflow visible in its diff, and no merge performed
 - [ ] **Step 4: Record final evidence**
 
 Add the draft PR URL, local Sakura live-test result, final VSIX SHA-256, local release-gate counts, and review verdict to `docs/進捗と引継ぎ.md`; explicitly record that the GitHub workflow run is gated on merge to `main`. Commit and push that evidence update, then rerun `git diff --check` and `npm run verify:vsix`.
+
+- [ ] **Post-merge success evidence (credential replacement required)**
+
+Replace the malformed local `ACCOUNT_TOKEN` and the repository secret copied from it, merge only after review, then manually run the workflow from `main`. Record a successful run URL only after the fixed model returns nonempty content.
