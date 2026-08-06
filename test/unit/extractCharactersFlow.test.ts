@@ -81,8 +81,9 @@ vi.mock("../../src/core/chunkCache", () => ({
     get(hash: string) {
       return state.cachedResults.get(hash);
     }
-    async set(...args: unknown[]) {
-      return state.cacheSet(...args);
+    async set(hash: string, key: unknown, value: unknown) {
+      state.cachedResults.set(hash, value);
+      return state.cacheSet(hash, key, value);
     }
     async save() {
       return state.cacheSave();
@@ -255,6 +256,86 @@ describe("人物抽出フロー", () => {
         character.name
       )
     ).toEqual(["灯", "澪"]);
+  });
+
+  test("キャッシュの生出力も再検証して人物でない候補を除外する", async () => {
+    state.cachedResults.set("chunk-1", {
+      characters: [
+        { name: "灯" },
+        { name: "先生", evidence: "灯が歩いた" },
+      ],
+    });
+    state.cachedResults.set("chunk-2", { characters: [] });
+    const showInformationMessage = vi.fn(async () => undefined);
+    Object.assign(window, {
+      showInformationMessage,
+      showWarningMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    const registry = {
+      resolveModelInfo: vi.fn(async () => ({ contextWindow: 8192 })),
+    } as unknown as AIRegistry;
+
+    await extractCharacters(work, registry);
+
+    expect(
+      state.saveAll.mock.calls[0][0].map((character: { name: string }) =>
+        character.name
+      )
+    ).toEqual(["灯"]);
+    expect(showInformationMessage.mock.calls.at(-1)?.[0]).toContain(
+      "AI出力から除外 1 件"
+    );
+  });
+
+  test("検証前の解析結果をキャッシュして後の規則変更で再評価できるようにする", async () => {
+    const rawResult = {
+      characters: [
+        { name: "灯" },
+        { name: "先生", evidence: "灯が歩いた" },
+      ],
+    };
+    state.generate
+      .mockResolvedValueOnce({
+        text: JSON.stringify(rawResult),
+        truncated: false,
+        elapsedMs: 1,
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({ characters: [] }),
+        truncated: false,
+        elapsedMs: 1,
+      });
+    Object.assign(window, {
+      showInformationMessage: vi.fn(
+        async (_message: string, ...actions: string[]) =>
+          actions.includes("実行") ? "実行" : undefined
+      ),
+      showWarningMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    const registry = {
+      resolveModelInfo: vi.fn(async () => ({ contextWindow: 8192 })),
+    } as unknown as AIRegistry;
+
+    await extractCharacters(work, registry);
+
+    expect(state.cachedResults.get("chunk-1")).toEqual(rawResult);
+    expect(
+      state.saveAll.mock.calls[0][0].map((character: { name: string }) =>
+        character.name
+      )
+    ).toEqual(["灯"]);
   });
 
   test("Claudeの実行確認に保守的な入出力トークン量と課金注意を表示する", async () => {

@@ -11,6 +11,12 @@ import { decideChunkSize, splitIntoChunks, Chunk } from "../core/chunker";
 import { CharacterStore } from "../core/characterStore";
 import { mergeExtractedCharacters } from "../core/characterMerge";
 import {
+  parseResult,
+  validateCharacterExtractResult,
+  type CharacterRejectionReason,
+  type RejectedCharacterCandidate,
+} from "../core/characterExtractionValidation";
+import {
   BASE_SYSTEM_PROMPT,
   CHARACTER_EXTRACT_SCHEMA,
   CHARACTER_EXTRACT_VERSION,
@@ -161,6 +167,7 @@ export async function extractCharacters(
     data: ExtractedCharacter;
     chapters: number[];
   }> = [];
+  const rejectedCandidates: RejectedCharacterCandidate[] = [];
   const failures: Array<{ chunk: Chunk; message: string }> = [];
   let cancelled = false;
 
@@ -184,7 +191,12 @@ export async function extractCharacters(
 
         const cached = cache.get(chunk.hash, cacheKeyBase);
         if (cached) {
-          collect(extractedAll, cached as CharacterExtractResult, chunk);
+          const validated = validateCharacterExtractResult(
+            cached as CharacterExtractResult,
+            chunk
+          );
+          extractedAll.push(...validated.accepted);
+          rejectedCandidates.push(...validated.rejected);
           done++;
           continue;
         }
@@ -224,7 +236,9 @@ export async function extractCharacters(
               message: "応答をJSONとして解析できませんでした",
             });
           } else {
-            collect(extractedAll, parsed, chunk);
+            const validated = validateCharacterExtractResult(parsed, chunk);
+            extractedAll.push(...validated.accepted);
+            rejectedCandidates.push(...validated.rejected);
             await cache.set(chunk.hash, cacheKeyBase, parsed);
           }
         } catch (e) {
@@ -259,63 +273,23 @@ export async function extractCharacters(
   }
 
   const merged = mergeExtractedCharacters(loaded.characters, extractedAll);
-
-  // 一人称「僕」や「（主）」のような自称だけの name は、AIの誤抽出である
-  // 可能性が高い一方、稀に本当にそう呼ばれている人物のこともあるため、
-  // 機械的に捨てず作者の承認を求める。新規追加分のみが対象
-  // （既存人物への話数追記は自動保存のままでよい）。
-  const addedSet = new Set(merged.added);
-  const needsApproval = merged.characters.filter(
-    (c) => addedSet.has(c.name) && INVALID_NAME_PATTERN.test(c.name)
-  );
-
-  let rejected: string[] = [];
-  if (needsApproval.length > 0) {
-    const picked = await vscode.window.showQuickPick(
-      needsApproval.map((c) => ({
-        label: c.name,
-        description: c.role ?? undefined,
-        detail:
-          c.evidence?.slice(0, 100) ??
-          "本文中の具体的な名前ではなく、自称や代名詞のような表現がnameになっています。",
-        picked: false,
-        character: c,
-      })),
-      {
-        title: `${needsApproval.length}件の人物名が自称・代名詞のような形になっています。登録するものを選んでください`,
-        canPickMany: true,
-        ignoreFocusOut: true,
-      }
-    );
-    // キャンセル時は安全側に倒し、すべて除外する
-    const approvedNames = new Set((picked ?? []).map((p) => p.character.name));
-    rejected = needsApproval
-      .filter((c) => !approvedNames.has(c.name))
-      .map((c) => c.name);
-  }
-
-  const finalCharacters = merged.characters.filter(
-    (c) => !rejected.includes(c.name)
-  );
+  const finalCharacters = merged.characters;
   const changedCharacters = selectChangedCharacters(
     merged.characters,
-    merged.changedIds,
-    rejected
+    merged.changedIds
   );
   await store.saveAll(changedCharacters);
 
-  const acceptedAddedCount = merged.added.filter(
-    (name) => !rejected.includes(name)
-  ).length;
-
   const parts = [
     `登場人物 ${finalCharacters.length} 名`,
-    acceptedAddedCount > 0 ? `新規 ${acceptedAddedCount} 名` : null,
+    merged.added.length > 0 ? `新規 ${merged.added.length} 名` : null,
     merged.updated.length > 0 ? `更新 ${merged.updated.length} 名` : null,
     merged.conflicts.length > 0
       ? `要確認 ${merged.conflicts.length} 件`
       : null,
-    rejected.length > 0 ? `未承認のため除外 ${rejected.length} 件` : null,
+    rejectedCandidates.length > 0
+      ? describeRejectedCandidates(rejectedCandidates)
+      : null,
     failures.length > 0 ? `失敗 ${failures.length} チャンク` : null,
   ].filter(Boolean);
 
@@ -395,191 +369,33 @@ export function buildKnownCharacterNames(
   return [...new Set(names)];
 }
 
-/** 変更された人物のうち、作者が除外しなかったものだけを書き戻す */
+/** 変更された人物だけを書き戻す */
 export function selectChangedCharacters(
   characters: Character[],
-  changedIds: string[],
-  rejectedNames: string[]
+  changedIds: string[]
 ): Character[] {
   const changed = new Set(changedIds);
-  const rejected = new Set(rejectedNames);
-  return characters.filter(
-    (character) => changed.has(character.id) && !rejected.has(character.name)
-  );
+  return characters.filter((character) => changed.has(character.id));
 }
 
-// AIが「値なし」の代わりに返しがちな文字列（"null"等）や、一人称・代名詞
-// だけの自称（「（主）」等）。空文字と違い trim() では弾けない。
-// 完全に無効な値だけでなく「本当にそう呼ばれている可能性」も残る自称も
-// 含むため、ここでは捨てずに extractCharacters() 側で作者の承認を求める
-export const INVALID_NAME_PATTERN =
-  /^(null|undefined|不明|なし|n\/?a|none|[（(]?主[）)]?|主人公)$/i;
-// characterFileName() のファイル名切り詰め長と合わせた。これを超える場合は
-// 文章まるごとが name に入ってしまっている疑いが強い
-const MAX_NAME_LENGTH = 30;
-
-export function collect(
-  out: Array<{ data: ExtractedCharacter; chapters: number[] }>,
-  result: CharacterExtractResult,
-  chunk: Chunk
-): void {
-  const chapters: number[] = [];
-  if (chunk.chapterStart !== null) {
-    const end = chunk.chapterEnd ?? chunk.chapterStart;
-    for (let n = chunk.chapterStart; n <= end; n++) chapters.push(n);
-  }
-  const rawCharacters: unknown = result.characters;
-  if (!Array.isArray(rawCharacters)) return;
-
-  for (const raw of rawCharacters) {
-    const character = normalizeExtractedCharacter(raw);
-    if (!character) continue;
-    if (!evidenceIsGrounded(character.evidence, chunk.text)) continue;
-    out.push({ data: character, chapters });
-  }
-}
-
-/** AI応答を後段が安全に扱える形へ正規化する */
-export function normalizeExtractedCharacter(
-  raw: unknown
-): ExtractedCharacter | null {
-  if (!isRecord(raw)) return null;
-  const name = cleanRequiredString(raw.name);
-  if (!name || name.length > MAX_NAME_LENGTH) return null;
-
-  const character: ExtractedCharacter = {
-    name,
-    aliases: cleanStringArray(raw.aliases).filter((alias) => alias !== name),
+function describeRejectedCandidates(
+  rejected: RejectedCharacterCandidate[]
+): string {
+  const labels: Record<CharacterRejectionReason, string> = {
+    invalid_shape: "形式不正",
+    invalid_name: "人物名不正",
+    non_person: "人物以外",
+    collective: "集団",
+    ungrounded: "本文根拠なし",
   };
-
-  if (typeof raw.isMob === "boolean") {
-    character.isMob = raw.isMob;
+  const counts = new Map<CharacterRejectionReason, number>();
+  for (const candidate of rejected) {
+    counts.set(candidate.reason, (counts.get(candidate.reason) ?? 0) + 1);
   }
-
-  copyNullableString(character, raw, "role");
-  copyNullableString(character, raw, "personality");
-  copyNullableString(character, raw, "appearance");
-  copyNullableString(character, raw, "firstPerson");
-  copyNullableString(character, raw, "defaultSecondPerson");
-  copyNullableString(character, raw, "evidence");
-
-  if ("addressTerms" in raw) {
-    character.addressTerms = Array.isArray(raw.addressTerms)
-      ? raw.addressTerms.flatMap((item) => {
-          if (!isRecord(item)) return [];
-          const targetName = cleanRequiredString(item.targetName);
-          const term = cleanRequiredString(item.term);
-          if (!targetName || !term) return [];
-          return [
-            {
-              targetName,
-              term,
-              category: cleanNullableString(item.category),
-              context: cleanNullableString(item.context),
-              evidence: cleanNullableString(item.evidence),
-            },
-          ];
-        })
-      : [];
-  }
-
-  if ("relations" in raw) {
-    character.relations = Array.isArray(raw.relations)
-      ? raw.relations.flatMap((item) => {
-          if (!isRecord(item)) return [];
-          const relationName = cleanRequiredString(item.name);
-          const relation = cleanRequiredString(item.relation);
-          return relationName && relation
-            ? [{ name: relationName, relation }]
-            : [];
-        })
-      : [];
-  }
-
-  return character;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function cleanRequiredString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const cleaned = value.trim();
-  return cleaned || null;
-}
-
-function cleanNullableString(value: unknown): string | null {
-  return cleanRequiredString(value);
-}
-
-function cleanStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  const strings = value
-    .map(cleanRequiredString)
-    .filter((item): item is string => item !== null);
-  return [...new Set(strings)];
-}
-
-function copyNullableString<K extends keyof ExtractedCharacter>(
-  target: ExtractedCharacter,
-  source: Record<string, unknown>,
-  key: K
-): void {
-  if (!(key in source)) return;
-  target[key] = cleanNullableString(source[key]) as ExtractedCharacter[K];
-}
-
-/**
- * evidence が本文中に実在するか確認する。
- * 複数の引用が句点・改行区切りで1つの文字列に連結されていることがあるため、
- * いずれか1断片でも本文中に見つかれば根拠ありとする。
- * evidence が無い・短すぎて判定できない場合はAIが単に書かなかっただけの
- * 可能性が高いため、取りこぼしを避けて素通りさせる。
- */
-function evidenceIsGrounded(
-  evidence: string | null | undefined,
-  chunkText: string
-): boolean {
-  if (!evidence || !evidence.trim()) return true;
-  const segments = evidence
-    .split(/[\n。]/)
-    .map((s) => s.replace(/^[「『"'…\s]+|[」』"'…\s]+$/g, ""))
-    .filter((s) => s.length >= 4);
-  if (segments.length === 0) return true;
-  return segments.some((s) => chunkText.includes(s));
-}
-
-/**
- * 応答をJSONとして解析する。
- * 構造化出力を指定していても、モデルによっては前後に文字が付くことがある。
- */
-export function parseResult(text: string): CharacterExtractResult | null {
-  const attempts = [
-    text,
-    text.replace(/^[\s\S]*?```(?:json)?\s*/i, "").replace(/```[\s\S]*$/, ""),
-    extractBraces(text),
-  ];
-
-  for (const candidate of attempts) {
-    if (!candidate) continue;
-    try {
-      const parsed = JSON.parse(candidate.trim());
-      if (parsed && Array.isArray(parsed.characters)) {
-        return parsed as CharacterExtractResult;
-      }
-    } catch {
-      // 次の候補を試す
-    }
-  }
-  return null;
-}
-
-function extractBraces(text: string): string | null {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return null;
-  return text.slice(start, end + 1);
+  const details = [...counts]
+    .map(([reason, count]) => `${labels[reason]} ${count}`)
+    .join("、");
+  return `AI出力から除外 ${rejected.length} 件（${details}）`;
 }
 
 function describeChunk(chunk: Chunk): string {

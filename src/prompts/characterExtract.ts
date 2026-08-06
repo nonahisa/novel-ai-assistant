@@ -141,6 +141,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
 export interface ExtractedCharacter {
   name: string;
   aliases?: string[];
+  entityType?: "person" | "group" | "location" | "unknown";
   isMob?: boolean;
   role?: string | null;
   personality?: string | null;
