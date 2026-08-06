@@ -128,6 +128,50 @@ describe("チャンク処理キャッシュ", () => {
     expect(cache.size).toBe(1);
   });
 
+  test("タイムゾーン付きISO 8601日時だけを採用する", async () => {
+    const validDates = [
+      "2026-08-07T00:00:00Z",
+      "2026-08-07T09:00:00.12+09:00",
+      "2024-02-29T00:00:00Z",
+    ];
+    const invalidDates = [
+      "2026-08-07T00:00:00",
+      "2026-13-01T00:00:00Z",
+      "2026-04-31T00:00:00Z",
+      "2026-06-31T00:00:00Z",
+      "2026-02-29T00:00:00Z",
+      "2024-02-30T00:00:00Z",
+      "2026-08-07T24:00:00Z",
+      "2026-08-07T23:60:00Z",
+      "2026-08-07T23:00:60Z",
+      "2026-08-07T23:00:00+24:00",
+      "2026-08-07T23:00:00+09:60",
+      "August 7, 2026 00:00:00Z",
+    ];
+    disk.set(
+      cachePath,
+      utf8(
+        JSON.stringify([
+          ...validDates.map((createdAt, index) => ({
+            key: `valid-${index}`,
+            createdAt,
+            value: createdAt,
+          })),
+          ...invalidDates.map((createdAt, index) => ({
+            key: `invalid-${index}`,
+            createdAt,
+            value: createdAt,
+          })),
+        ])
+      )
+    );
+    const cache = new ChunkCache(work);
+
+    await cache.load();
+
+    expect(cache.size).toBe(validDates.length);
+  });
+
   test("値を持たない項目を採用しない", async () => {
     disk.set(
       cachePath,
