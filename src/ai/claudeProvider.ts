@@ -162,12 +162,14 @@ export class ClaudeProvider implements AIProvider {
 
   async generate(params: GenerateParams): Promise<GenerateResult> {
     const started = Date.now();
+    throwIfAborted(params.signal);
     const client = await this.client();
 
     // モデルごとの対応状況を見て、送ってよいパラメータだけを組み立てる。
     // 未対応のパラメータを送るとモデルによっては400で弾かれるため。
-    const raw = await this.rawCapabilities(params.model);
-    const maxTokens = await this.resolveMaxTokens(params.model);
+    const raw = await this.rawCapabilities(params.model, params.signal);
+    const maxTokens = await this.resolveMaxTokens(params.model, params.signal);
+    throwIfAborted(params.signal);
 
     const body: Anthropic.MessageCreateParamsNonStreaming = {
       model: params.model,
@@ -222,6 +224,10 @@ export class ClaudeProvider implements AIProvider {
       }
     }
 
+    if (!isClaudeMessage(res)) {
+      throw new AIError("Claudeから形式が不正な応答が返りました。", "bad_response");
+    }
+
     // 安全側の判定を先に行う。refusal のとき content は空か途中までしかない
     if (res.stop_reason === "refusal") {
       throw new AIError(
@@ -259,35 +265,45 @@ export class ClaudeProvider implements AIProvider {
   }
 
   /** 出力トークンの上限。設定値とモデル上限の小さい方 */
-  private async resolveMaxTokens(model: string): Promise<number> {
+  private async resolveMaxTokens(model: string, signal?: AbortSignal): Promise<number> {
+    throwIfAborted(signal);
     const configured = vscode.workspace
       .getConfiguration("novelai")
       .get<number>("claude.maxOutputTokens", 8192);
-    const raw = await this.rawModel(model);
+    const raw = await this.rawModel(model, signal);
     const modelMax = raw?.max_tokens ?? 8192;
     return Math.max(1024, Math.min(configured, modelMax));
   }
 
   private rawModelCache = new Map<string, Anthropic.ModelInfo>();
 
-  private async rawModel(id: string): Promise<Anthropic.ModelInfo | undefined> {
+  private async rawModel(
+    id: string,
+    signal?: AbortSignal
+  ): Promise<Anthropic.ModelInfo | undefined> {
+    throwIfAborted(signal);
     const cached = this.rawModelCache.get(id);
     if (cached) return cached;
     try {
       const client = await this.client();
-      const m = await client.models.retrieve(id);
+      const m = await client.models.retrieve(id, undefined, { signal });
+      // 中止後に返った値をキャッシュすると、次回の要求へ不完全な状態を持ち越す。
+      throwIfAborted(signal);
       this.rawModelCache.set(id, m);
       return m;
-    } catch {
+    } catch (e) {
+      const error = toClaudeAIError(e);
+      if (error.kind === "aborted") throw error;
       // 取得できなければ既定値で進む（呼び出し自体は成功しうる）
       return undefined;
     }
   }
 
   private async rawCapabilities(
-    id: string
+    id: string,
+    signal?: AbortSignal
   ): Promise<Anthropic.ModelCapabilities | undefined> {
-    return (await this.rawModel(id))?.capabilities ?? undefined;
+    return (await this.rawModel(id, signal))?.capabilities ?? undefined;
   }
 }
 
@@ -358,6 +374,34 @@ function describeError(e: unknown): string {
   return err.message;
 }
 
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new AIError("処理が中止されました。", "aborted");
+  }
+}
+
+function isClaudeMessage(value: unknown): value is Anthropic.Message {
+  if (!isRecord(value) || !Array.isArray(value.content) || !isRecord(value.usage)) {
+    return false;
+  }
+  if (
+    typeof value.usage.input_tokens !== "number" ||
+    typeof value.usage.output_tokens !== "number"
+  ) {
+    return false;
+  }
+  return value.content.every(
+    (block) =>
+      isRecord(block) &&
+      typeof block.type === "string" &&
+      (block.type !== "text" || typeof block.text === "string")
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /** SDKの型付き例外を、UIが扱いやすい AIError へ変換する */
 export function toClaudeAIError(error: unknown): AIError {
   const e = error;
@@ -410,7 +454,7 @@ export function toClaudeAIError(error: unknown): AIError {
   }
   if (e instanceof Anthropic.APIError) {
     return new AIError(
-      `Claudeがエラーを返しました: ${e.message}`,
+      "Claudeが予期しない応答を返しました。設定を確認して再実行してください。",
       "bad_response",
       String(e.status)
     );
@@ -420,5 +464,5 @@ export function toClaudeAIError(error: unknown): AIError {
   if (err?.name === "AbortError") {
     return new AIError("処理が中止されました。", "aborted");
   }
-  return new AIError(String(err?.message ?? e), "unknown");
+  return new AIError("Claudeとの通信中に予期しないエラーが発生しました。", "unknown");
 }

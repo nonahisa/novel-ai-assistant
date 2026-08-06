@@ -33,6 +33,31 @@ interface ChatResponse {
   error?: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isChatResponse(value: unknown): value is ChatResponse {
+  if (!isRecord(value)) return false;
+  if (value.error !== undefined && typeof value.error !== "string") return false;
+  if (value.done_reason !== undefined && typeof value.done_reason !== "string") return false;
+  if (
+    value.prompt_eval_count !== undefined &&
+    typeof value.prompt_eval_count !== "number"
+  ) {
+    return false;
+  }
+  if (value.eval_count !== undefined && typeof value.eval_count !== "number") {
+    return false;
+  }
+  if (value.message === undefined) return true;
+  if (!isRecord(value.message)) return false;
+  return (
+    (value.message.content === undefined || typeof value.message.content === "string") &&
+    (value.message.thinking === undefined || typeof value.message.thinking === "string")
+  );
+}
+
 export class OllamaProvider implements AIProvider {
   readonly id = "ollama" as const;
   readonly displayName = "Ollama（ローカル）";
@@ -199,6 +224,10 @@ export class OllamaProvider implements AIProvider {
       throw new AIError(String(e), "unknown");
     }
 
+    if (!isChatResponse(res)) {
+      throw new AIError("Ollamaから形式が不正な応答が返りました。", "bad_response");
+    }
+
     if (res.error) {
       if (/not found|no such model/i.test(res.error)) {
         throw new AIError(
@@ -238,10 +267,19 @@ export class OllamaProvider implements AIProvider {
     externalSignal?: AbortSignal
   ): Promise<T> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-    const onExternalAbort = () => controller.abort();
-    externalSignal?.addEventListener("abort", onExternalAbort);
+    let abortSource: "caller" | "timeout" | undefined;
+    const abort = (source: "caller" | "timeout") => {
+      if (abortSource !== undefined) return;
+      abortSource = source;
+      controller.abort();
+    };
+    const timer = setTimeout(() => abort("timeout"), timeoutMs);
+    const onExternalAbort = () => abort("caller");
+    if (externalSignal?.aborted) {
+      onExternalAbort();
+    } else {
+      externalSignal?.addEventListener("abort", onExternalAbort);
+    }
 
     try {
       const response = await fetch(`${this.endpoint}${path}`, {
@@ -263,12 +301,17 @@ export class OllamaProvider implements AIProvider {
         );
       }
 
-      return (await response.json()) as T;
+      try {
+        return (await response.json()) as T;
+      } catch (e) {
+        if (e instanceof Error && e.name === "AbortError") throw e;
+        throw new AIError("Ollamaから形式が不正な応答が返りました。", "bad_response");
+      }
     } catch (e) {
       if (e instanceof AIError) throw e;
       const err = e as Error;
       if (err.name === "AbortError") {
-        if (externalSignal?.aborted) {
+        if (abortSource === "caller") {
           throw new AIError("処理が中止されました。", "aborted");
         }
         throw new AIError(

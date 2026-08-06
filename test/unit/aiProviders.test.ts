@@ -97,6 +97,20 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(reason: unknown): void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("AIプロバイダ境界", () => {
   beforeEach(() => {
     workspace.getConfiguration = () => ({
@@ -177,6 +191,24 @@ describe("AIプロバイダ境界", () => {
     ).rejects.toMatchObject({ kind: "aborted" });
   });
 
+  test("Ollamaは開始前に中止されたsignalをfetchへ中止済みで渡す", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let receivedSignal: AbortSignal | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      receivedSignal = init?.signal ?? undefined;
+      if (receivedSignal?.aborted) {
+        throw new DOMException("中止", "AbortError");
+      }
+      return ollamaResponse("ok");
+    }));
+
+    await expect(
+      new OllamaProvider().generate({ ...ollamaParams, signal: controller.signal })
+    ).rejects.toMatchObject({ kind: "aborted" });
+    expect(receivedSignal?.aborted).toBe(true);
+  });
+
   test("Ollamaは内部タイムアウトによる中止をtimeoutとして返す", async () => {
     workspace.getConfiguration = () => ({
       get: <T>(key: string, defaultValue: T): T =>
@@ -198,6 +230,50 @@ describe("AIプロバイダ境界", () => {
     });
   });
 
+  test("Ollamaはtimeout後の呼び出し元キャンセル競合でもtimeoutを返す", async () => {
+    vi.useFakeTimers();
+    workspace.getConfiguration = () => ({
+      get: <T>(key: string, defaultValue: T): T =>
+        key === "ollama.timeoutSeconds" ? (1 as T) : defaultValue,
+    });
+    const caller = new AbortController();
+    const pending = deferred<Response>();
+    let fetchSignal: AbortSignal | undefined;
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => {
+      fetchSignal = init?.signal ?? undefined;
+      return pending.promise;
+    }));
+
+    const request = new OllamaProvider().generate({ ...ollamaParams, signal: caller.signal });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetchSignal?.aborted).toBe(true);
+    caller.abort();
+    pending.reject(new DOMException("中止", "AbortError"));
+
+    await expect(request).rejects.toMatchObject({ kind: "timeout" });
+  });
+
+  test("Ollamaは完了後にタイマーと呼び出し元のlistenerを解除する", async () => {
+    vi.useFakeTimers();
+    workspace.getConfiguration = () => ({
+      get: <T>(key: string, defaultValue: T): T =>
+        key === "ollama.timeoutSeconds" ? (1 as T) : defaultValue,
+    });
+    const caller = new AbortController();
+    let fetchSignal: AbortSignal | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      fetchSignal = init?.signal ?? undefined;
+      return ollamaResponse("ok");
+    }));
+
+    await expect(
+      new OllamaProvider().generate({ ...ollamaParams, signal: caller.signal })
+    ).resolves.toMatchObject({ text: "ok" });
+    caller.abort();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetchSignal?.aborted).toBe(false);
+  });
+
   test.each([
     [404, "model_not_found"],
     [500, "bad_response"],
@@ -209,6 +285,17 @@ describe("AIプロバイダ境界", () => {
 
   test("Ollamaは空白だけの応答をbad_responseとして返す", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ollamaResponse(" \n\t ")));
+
+    await expect(new OllamaProvider().generate(ollamaParams)).rejects.toMatchObject({
+      kind: "bad_response",
+    });
+  });
+
+  test.each([
+    ["壊れたJSON", new Response("{", { status: 200 })],
+    ["nullの応答envelope", new Response("null", { status: 200 })],
+  ])("Ollamaは%sをbad_responseとして返す", async (_label, response) => {
+    vi.stubGlobal("fetch", vi.fn(async () => response));
 
     await expect(new OllamaProvider().generate(ollamaParams)).rejects.toMatchObject({
       kind: "bad_response",
@@ -234,6 +321,78 @@ describe("AIプロバイダ境界", () => {
     expect(toClaudeAIError(error)).toMatchObject({ kind });
   });
 
+  test("Claudeの未知SDKエラーを安全な公開メッセージへ正規化する", () => {
+    const rawMessage = "gateway returned credential=secret-value";
+
+    expect(toClaudeAIError(new Error(rawMessage))).toMatchObject({ kind: "unknown" });
+    expect(toClaudeAIError(new Error(rawMessage)).message).not.toContain(rawMessage);
+  });
+
+  test("Claude接続確認はSDKの生エラーをUIメッセージに含めない", async () => {
+    const rawMessage = "gateway returned credential=secret-value";
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      jsonResponse(
+        { type: "error", error: { type: "api_error", message: rawMessage } },
+        500
+      )
+    ));
+
+    const result = await new ClaudeProvider(claudeContext()).testConnection();
+
+    expect(result.ok).toBe(false);
+    expect(result.message).not.toContain(rawMessage);
+  });
+
+  test("Claudeは開始前の中止でメタデータ取得を始めない", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetchMock = vi.fn(async () => jsonResponse(claudeModel));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new ClaudeProvider(claudeContext()).generate({ ...ollamaParams, signal: controller.signal })
+    ).rejects.toMatchObject({ kind: "aborted" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("Claudeはメタデータ取得中の中止を伝播してmessages作成を始めない", async () => {
+    const controller = new AbortController();
+    const modelRequest = deferred<Response>();
+    const modelStarted = deferred<void>();
+    let modelSignal: AbortSignal | undefined;
+    let modelCalls = 0;
+    let messageCalls = 0;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes("/v1/models/")) {
+        modelCalls += 1;
+        if (modelCalls > 1) {
+          return Promise.resolve(jsonResponse(claudeModel));
+        }
+        modelSignal = init?.signal ?? undefined;
+        modelStarted.resolve();
+        return modelRequest.promise;
+      }
+      messageCalls += 1;
+      return Promise.resolve(jsonResponse(claudeMessage("ok")));
+    }));
+
+    const provider = new ClaudeProvider(claudeContext());
+    const request = provider.generate({
+      ...ollamaParams,
+      signal: controller.signal,
+    });
+    await modelStarted.promise;
+    controller.abort();
+    expect(modelSignal?.aborted).toBe(true);
+    modelRequest.resolve(jsonResponse(claudeModel));
+
+    await expect(request).rejects.toMatchObject({ kind: "aborted" });
+    expect(messageCalls).toBe(0);
+    await expect(provider.generate(ollamaParams)).resolves.toMatchObject({ text: "ok" });
+    expect(modelCalls).toBe(2);
+  });
+
   test("Claudeはrefusalをbad_responseとして返す", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = input instanceof Request ? input.url : String(input);
@@ -255,6 +414,20 @@ describe("AIプロバイダ境界", () => {
         return jsonResponse(claudeModel);
       }
       return jsonResponse(claudeMessage(" \n\t "));
+    }));
+
+    await expect(new ClaudeProvider(claudeContext()).generate(ollamaParams)).rejects.toMatchObject({
+      kind: "bad_response",
+    });
+  });
+
+  test.each([
+    ["nullの成功応答", null],
+    ["contentが配列ではない成功応答", { ...claudeMessage("ok"), content: {} }],
+  ])("Claudeは%sをbad_responseとして返す", async (_label, body) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      return url.includes("/v1/models/") ? jsonResponse(claudeModel) : jsonResponse(body);
     }));
 
     await expect(new ClaudeProvider(claudeContext()).generate(ollamaParams)).rejects.toMatchObject({
@@ -309,5 +482,28 @@ describe("AIプロバイダ境界", () => {
       kind: "bad_response",
     });
     expect(messageCalls).toBe(1);
+  });
+
+  test("Claudeはthinking再試行の2回目が失敗したらそれ以上再試行しない", async () => {
+    let messageCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes("/v1/models/")) {
+        return jsonResponse(claudeModel);
+      }
+      messageCalls += 1;
+      return jsonResponse(
+        {
+          type: "error",
+          error: { type: "invalid_request_error", message: "thinking is unsupported" },
+        },
+        400
+      );
+    }));
+
+    await expect(
+      new ClaudeProvider(claudeContext()).generate({ ...ollamaParams, disableThinking: true })
+    ).rejects.toMatchObject({ kind: "bad_response" });
+    expect(messageCalls).toBe(2);
   });
 });
