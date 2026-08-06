@@ -2,11 +2,21 @@
 
 小説執筆のための作品管理・文字数計測・AI支援を行うVSCode拡張機能です。
 
-現在の実装状況：**フェーズ0（作品管理・文字数計測）**
+現在の配布版：**0.0.1**（作品管理・文字数計測・AI設定・登場人物抽出）
 
 ---
 
-## セットアップ
+## インストール
+
+VS Codeの「拡張機能」ビュー右上の `...` →「VSIXからのインストール」を選び、`novel-ai-assistant-0.0.1.vsix` を指定します。コマンドラインでもインストールできます。
+
+```powershell
+code --install-extension .\novel-ai-assistant-0.0.1.vsix --force
+```
+
+インストール後にVS Codeを再読み込みすると、左端のアクティビティバーに本のアイコン（**小説執筆**）が追加されます。対応バージョンはVS Code 1.90.0以降です。
+
+## 開発者向けセットアップ
 
 ### 1. 依存パッケージのインストール
 
@@ -31,6 +41,22 @@ VSCodeで `F5` を押すと、拡張機能が読み込まれた新しいVSCode�
 ```powershell
 npm run watch
 ```
+
+### Sakura AI Engine の手動スモークテスト
+
+さくらのAI Engine の接続確認は、拡張機能からは実行されません。GitHub Actions の
+手動実行専用ワークフローであり、`push`、プルリクエスト、定時実行では自動的に動きません。
+
+1. リポジトリの **Settings** → **Secrets and variables** → **Actions** で、リポジトリシークレット
+   `SAKURA_AI_ACCOUNT_TOKEN` を登録します。トークンをコード、ログ、`.env` に書かないでください。
+2. ワークフローが既定ブランチに入った後、リポジトリの **Actions** タブで
+   **Sakura AI Engine Smoke Test** を選び、**Run workflow** を押して対象ブランチを選択します。
+3. 成功条件は、`gemma-4-31B-it` から空でない応答を受け、ログに
+   `Sakura AI smoke test passed` が表示されることです。応答本文やトークンはログに出ません。
+
+`HTTP 401` の失敗時はシークレット名・値を確認してから、必要時だけ手動で再実行します。
+`HTTP 429` の失敗時はレート制限なので、待ってから手動で再実行します。どちらも秘密情報を
+出さずに失敗する設計であり、自動リトライや自動実行には切り替えません。
 
 ---
 
@@ -117,7 +143,7 @@ UTF-8（BOM有無どちらも）と Shift_JIS を自動判別して読み込み�
 
 サイドバー右上の歯車アイコン、またはコマンドパレット（`Ctrl+Shift+P`）から「小説執筆: AIの設定」を実行します。
 
-1. 使用するAIを選ぶ（現在はOllamaのみ。1つで構いません）
+1. 使用するAIを選ぶ（OllamaまたはClaude。1つで構いません）
 2. 接続テストが自動で走る
 3. 導入済みモデルの一覧から選ぶ（コンテキスト長・対応機能が表示されます）
 
@@ -126,6 +152,8 @@ Ollamaを使う場合、事前に起動してモデルを取得しておいて�
 ```powershell
 ollama pull gemma4:e4b
 ```
+
+Claudeを使う場合はAnthropic Consoleで発行したAPIキーが必要です。キーはVS Codeの資格情報ストアへ保存され、`settings.json` や作品フォルダには書き込みません。Claude APIの利用には従量課金が発生します。
 
 ### 登場人物の抽出
 
@@ -175,7 +203,28 @@ ollama pull gemma4:e4b
 | `novelai.ollama.endpoint` | `http://localhost:11434` | OllamaのURL |
 | `novelai.ollama.numCtx` | `0`（自動） | AIへ渡すコンテキスト長。**Ollamaは既定値が小さく、指定しないと入力が切り捨てられます** |
 | `novelai.ollama.timeoutSeconds` | `180` | 1回の呼び出しのタイムアウト |
+| `novelai.claude.timeoutSeconds` | `180` | Claudeの1回の呼び出しのタイムアウト |
+| `novelai.claude.maxOutputTokens` | `8192` | Claudeの最大出力トークン数 |
 | `novelai.chunkChars` | `0`（自動） | 1チャンクの文字数 |
+
+---
+
+## 0.0.1の制約
+
+- AIの抽出結果は必ず作者が確認してください。特に小型ローカルモデルでは、代名詞・集団名・話者の取り違えが残る場合があります。
+- 本バージョンは本文をAIで自動修正しません。原稿ファイルは読み取り対象で、抽出結果だけを `設定/characters/` に保存します。
+- Shift_JISは読み取りに対応しています。将来の本文修正機能でShift_JISへ書き戻す処理は未実装です。
+- プロット支援、場所・世界観生成、推敲、矛盾検知、Git同期は今後の機能です。
+
+## アンインストール
+
+拡張機能ビューから「小説AI執筆補助」をアンインストールするか、次を実行します。
+
+```powershell
+code --uninstall-extension local.novel-ai-assistant
+```
+
+アンインストールしても、原稿、`.aiwriter/`、`設定/characters/` は削除されません。不要な場合は内容を確認して手動で削除してください。
 
 ---
 

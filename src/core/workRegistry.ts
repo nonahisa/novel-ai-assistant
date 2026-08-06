@@ -60,6 +60,42 @@ export class WorkRegistry {
     return entry;
   }
 
+  /** 既存作品の設定を検証・必要なら作成してから登録する。 */
+  async addExisting(
+    folderPath: string,
+    title?: string
+  ): Promise<WorkEntry | undefined> {
+    const works = this.context.globalState.get<WorkEntry[]>(STORAGE_KEY, []);
+    const normalized = path.normalize(folderPath);
+    if (works.some((w) => path.normalize(w.folderPath) === normalized)) {
+      vscode.window.showWarningMessage(
+        "このフォルダはすでに作品として登録されています。"
+      );
+      return undefined;
+    }
+
+    const entry: WorkEntry = {
+      id: `work_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+      title: title ?? path.basename(normalized),
+      folderPath: normalized,
+      registeredAt: new Date().toISOString(),
+    };
+
+    const existing = await readWorkConfig(entry);
+    if (!existing) {
+      await writeWorkConfig(entry, {
+        schemaVersion: CONFIG_SCHEMA_VERSION,
+        workTitle: entry.title,
+        manuscriptDir: DEFAULT_MANUSCRIPT_DIR,
+        settingsDir: DEFAULT_SETTINGS_DIR,
+        createdAt: entry.registeredAt,
+      });
+    }
+
+    await this.save([...works, entry]);
+    return entry;
+  }
+
   /** 登録を解除する（フォルダ本体は削除しない） */
   async remove(id: string): Promise<void> {
     const works = this.context.globalState.get<WorkEntry[]>(STORAGE_KEY, []);
@@ -77,11 +113,57 @@ export function workPaths(work: WorkEntry, config?: WorkConfig) {
   const settingsDir = config?.settingsDir ?? DEFAULT_SETTINGS_DIR;
   return {
     root: work.folderPath,
-    manuscript: path.join(work.folderPath, manuscriptDir),
-    settings: path.join(work.folderPath, settingsDir),
+    manuscript: resolveInsideWork(work.folderPath, manuscriptDir, "manuscriptDir"),
+    settings: resolveInsideWork(work.folderPath, settingsDir, "settingsDir"),
     aiwriter: path.join(work.folderPath, AIWRITER_DIR),
     configFile: path.join(work.folderPath, AIWRITER_DIR, CONFIG_FILE),
   };
+}
+
+/** JSONから読み込んだ作品設定を実行時に検証する */
+export function parseWorkConfig(raw: unknown): WorkConfig {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error("作品設定はJSONオブジェクトである必要があります。");
+  }
+  const value = raw as Record<string, unknown>;
+  const required = [
+    "schemaVersion",
+    "workTitle",
+    "manuscriptDir",
+    "settingsDir",
+    "createdAt",
+  ] as const;
+
+  for (const key of required) {
+    if (typeof value[key] !== "string" || value[key].trim().length === 0) {
+      throw new Error(`作品設定の ${key} は空でない文字列にしてください。`);
+    }
+  }
+
+  return {
+    schemaVersion: (value.schemaVersion as string).trim(),
+    workTitle: (value.workTitle as string).trim(),
+    manuscriptDir: (value.manuscriptDir as string).trim(),
+    settingsDir: (value.settingsDir as string).trim(),
+    createdAt: (value.createdAt as string).trim(),
+  };
+}
+
+function resolveInsideWork(root: string, subdir: string, key: string): string {
+  if (path.isAbsolute(subdir)) {
+    throw new Error(`${key} は作品フォルダ内の相対パスにしてください。`);
+  }
+  const resolvedRoot = path.resolve(root);
+  const resolved = path.resolve(resolvedRoot, subdir);
+  const relative = path.relative(resolvedRoot, resolved);
+  if (
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error(`${key} は作品フォルダ内の相対パスにしてください。`);
+  }
+  return resolved;
 }
 
 /** .aiwriter/config.json を読む。無ければ undefined */
@@ -91,9 +173,16 @@ export async function readWorkConfig(
   const uri = vscode.Uri.file(workPaths(work).configFile);
   try {
     const bytes = await vscode.workspace.fs.readFile(uri);
-    return JSON.parse(new TextDecoder().decode(bytes)) as WorkConfig;
-  } catch {
-    return undefined;
+    const raw: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    const config = parseWorkConfig(raw);
+    workPaths(work, config);
+    return config;
+  } catch (error) {
+    if (error instanceof vscode.FileSystemError && error.code === "FileNotFound") {
+      return undefined;
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`作品設定を読み込めません: ${detail}`);
   }
 }
 
@@ -102,9 +191,11 @@ export async function writeWorkConfig(
   work: WorkEntry,
   config: WorkConfig
 ): Promise<void> {
+  const validated = parseWorkConfig(config);
+  workPaths(work, validated);
   const p = workPaths(work);
   await vscode.workspace.fs.createDirectory(vscode.Uri.file(p.aiwriter));
-  const body = JSON.stringify(config, null, 2);
+  const body = JSON.stringify(validated, null, 2);
   await vscode.workspace.fs.writeFile(
     vscode.Uri.file(p.configFile),
     new TextEncoder().encode(body)
@@ -117,6 +208,17 @@ export async function scaffoldWorkFolder(
   title: string
 ): Promise<void> {
   const fs = vscode.workspace.fs;
+  try {
+    await fs.stat(vscode.Uri.file(folderPath));
+    throw new Error(
+      `「${folderPath}」はすでに存在します。既存のファイルを保護するため作成を中止しました。`
+    );
+  } catch (error) {
+    if (!(error instanceof vscode.FileSystemError) || error.code !== "FileNotFound") {
+      throw error;
+    }
+  }
+
   const dirs = [
     folderPath,
     path.join(folderPath, DEFAULT_MANUSCRIPT_DIR),

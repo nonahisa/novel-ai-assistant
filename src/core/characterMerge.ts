@@ -22,6 +22,8 @@ export interface MergeResult {
   characters: Character[];
   added: string[];
   updated: string[];
+  /** 実際に追加・更新された人物。不要なJSON再書き込みを避けるために使う */
+  changedIds: string[];
   /** 既存と食い違い、作者の判断が必要になったもの */
   conflicts: Array<{ characterName: string; field: string; values: string[] }>;
 }
@@ -33,6 +35,7 @@ export function mergeExtractedCharacters(
   const result: Character[] = existing.map((c) => ({ ...c }));
   const added: string[] = [];
   const updated: string[] = [];
+  const changedIds = new Set<string>();
   const conflicts: MergeResult["conflicts"] = [];
 
   for (const item of extracted) {
@@ -46,6 +49,7 @@ export function mergeExtractedCharacters(
       applyExtracted(c, ex, item.chapters, conflicts);
       result.push(c);
       added.push(c.name);
+      changedIds.add(c.id);
       continue;
     }
 
@@ -57,15 +61,27 @@ export function mergeExtractedCharacters(
         match.appearedChapters,
         item.chapters
       );
-      if (match.appearedChapters.length !== before) updated.push(match.name);
+      if (match.appearedChapters.length !== before) {
+        updated.push(match.name);
+        changedIds.add(match.id);
+      }
       continue;
     }
 
     const changed = applyExtracted(match, ex, item.chapters, conflicts);
-    if (changed && !updated.includes(match.name)) updated.push(match.name);
+    if (changed) {
+      if (!updated.includes(match.name)) updated.push(match.name);
+      changedIds.add(match.id);
+    }
   }
 
-  return { characters: result, added, updated, conflicts };
+  return {
+    characters: result,
+    added,
+    updated,
+    changedIds: [...changedIds],
+    conflicts,
+  };
 }
 
 /**
@@ -96,6 +112,11 @@ function applyExtracted(
     }
   }
   target.aliases = [...aliases];
+
+  if (ex.isMob === true && !target.isMob) {
+    target.isMob = true;
+    changed = true;
+  }
 
   // 単純なテキスト項目: 空なら埋める。既にあれば食い違いを記録し、上書きしない
   changed = fillOrConflict(target, "role", ex.role, conflicts) || changed;

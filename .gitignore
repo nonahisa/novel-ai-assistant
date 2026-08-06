@@ -1,4 +1,10 @@
 node_modules/
 dist/
 out/
+.env
+.env.*
+!.env.example
+.vscode-test/
+release/
+_test_*
 *.vsix

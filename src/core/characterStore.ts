@@ -5,7 +5,7 @@ import { readWorkConfig, workPaths } from "./workRegistry";
 import {
   Character,
   characterFileName,
-  normalizeCharacter,
+  parseCharacter,
 } from "../models/character";
 
 /**
@@ -38,12 +38,16 @@ export class CharacterStore {
     const d = await this.dir();
     const characters: Character[] = [];
     const errors: Array<{ file: string; message: string }> = [];
+    const loadedIds = new Set<string>();
 
     let entries: [string, vscode.FileType][];
     try {
       entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(d));
-    } catch {
-      return { characters, errors };
+    } catch (error) {
+      if (error instanceof vscode.FileSystemError && error.code === "FileNotFound") {
+        return { characters, errors };
+      }
+      throw error;
     }
 
     for (const [name, type] of entries) {
@@ -56,10 +60,16 @@ export class CharacterStore {
         const bytes = await vscode.workspace.fs.readFile(
           vscode.Uri.file(full)
         );
-        const parsed = JSON.parse(
-          new TextDecoder().decode(bytes)
-        ) as Character;
-        characters.push(normalizeCharacter(parsed));
+        const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+        const character = parseCharacter(parsed);
+        if (name !== `${character.id}.json` && !name.startsWith(`${character.id}_`)) {
+          throw new Error(`ファイル名と人物ID「${character.id}」が一致しません。`);
+        }
+        if (loadedIds.has(character.id)) {
+          throw new Error(`人物ID「${character.id}」が重複しています。`);
+        }
+        loadedIds.add(character.id);
+        characters.push(character);
       } catch (e) {
         // 作者が手で編集して壊れた可能性がある。
         // 勝手に修復・上書きせず、エラーとして報告する。
@@ -75,21 +85,14 @@ export class CharacterStore {
   }
 
   async save(character: Character): Promise<void> {
+    const validated = parseCharacter(character);
     const d = await this.ensureDir();
-    const fileName = characterFileName(character);
+    const fileName = characterFileName(validated);
 
-    // 名前が変わった場合、古いファイルが残らないよう削除する
-    const existing = await this.findFileById(character.id);
-    if (existing && path.basename(existing) !== fileName) {
-      try {
-        await vscode.workspace.fs.delete(vscode.Uri.file(existing));
-      } catch {
-        // 消せなくても新規保存は続行する
-      }
-    }
-
+    // 新しい保存が失敗しても既存データを失わないよう、先に新ファイルを書く。
+    const existing = await this.findFileById(validated.id);
     const body = JSON.stringify(
-      { ...character, updatedAt: new Date().toISOString() },
+      { ...validated, updatedAt: new Date().toISOString() },
       null,
       2
     );
@@ -97,6 +100,12 @@ export class CharacterStore {
       vscode.Uri.file(path.join(d, fileName)),
       new TextEncoder().encode(body + "\n")
     );
+
+    // 名前変更で旧ファイルが残ると同じIDを二重読込するため、
+    // 新ファイルの保存成功後に削除し、失敗は呼び出し側へ通知する。
+    if (existing && path.basename(existing) !== fileName) {
+      await vscode.workspace.fs.delete(vscode.Uri.file(existing));
+    }
   }
 
   async saveAll(characters: Character[]): Promise<void> {
@@ -117,7 +126,10 @@ export class CharacterStore {
           return path.join(d, name);
         }
       }
-    } catch {
+    } catch (error) {
+      if (!(error instanceof vscode.FileSystemError) || error.code !== "FileNotFound") {
+        throw error;
+      }
       // ディレクトリが無い場合は該当なし
     }
     return undefined;

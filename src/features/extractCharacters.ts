@@ -1,8 +1,9 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import { WorkEntry } from "../models/types";
+import { Character } from "../models/character";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError } from "../ai/types";
+import { AIError, type ProviderId } from "../ai/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import { parseEpisodeMetadata } from "../core/metadataParser";
@@ -28,7 +29,13 @@ export async function extractCharacters(
 
   const modelInfo = await registry.resolveModelInfo();
   const contextWindow = modelInfo?.contextWindow ?? 8192;
-  const chunkChars = decideChunkSize(contextWindow);
+  const configuredChunkChars = vscode.workspace
+    .getConfiguration("novelai")
+    .get<number>("chunkChars", 0);
+  const chunkChars =
+    Number.isInteger(configuredChunkChars) && configuredChunkChars >= 1
+      ? configuredChunkChars
+      : decideChunkSize(contextWindow);
 
   // 実際に使うコンテキスト長。モデルの上限をそのまま使うと
   // メモリを大量に消費するため、必要分だけ確保する
@@ -126,26 +133,36 @@ export async function extractCharacters(
 
   if (pending.length === 0) {
     vscode.window.showInformationMessage(
-      "すべてのチャンクが処理済みです。変更されたファイルはありません。"
+      "すべてのチャンクが処理済みです。キャッシュから人物設定を再反映します。"
     );
-    return;
+  } else {
+    const estimateMinutes = Math.ceil((pending.length * 20) / 60);
+    const configuredMaxOutputTokens = vscode.workspace
+      .getConfiguration("novelai")
+      .get<number>("claude.maxOutputTokens", 8192);
+    const costNotice = buildExtractionCostNotice(
+      resolved.provider.id,
+      pending,
+      buildKnownCharacterNames(loaded.characters, []),
+      configuredMaxOutputTokens
+    );
+    const confirm = await vscode.window.showInformationMessage(
+      `${chunks.length} チャンク中 ${pending.length} 件を処理します` +
+        `（処理済み ${chunks.length - pending.length} 件はスキップ）。\n` +
+        `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度\n` +
+        costNotice,
+      "実行",
+      "中止"
+    );
+    if (confirm !== "実行") return;
   }
-
-  const estimateMinutes = Math.ceil((pending.length * 20) / 60);
-  const confirm = await vscode.window.showInformationMessage(
-    `${chunks.length} チャンク中 ${pending.length} 件を処理します` +
-      `（処理済み ${chunks.length - pending.length} 件はスキップ）。\n` +
-      `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度`,
-    "実行",
-    "中止"
-  );
-  if (confirm !== "実行") return;
 
   const extractedAll: Array<{
     data: ExtractedCharacter;
     chapters: number[];
   }> = [];
   const failures: Array<{ chunk: Chunk; message: string }> = [];
+  let cancelled = false;
 
   await vscode.window.withProgress(
     {
@@ -155,7 +172,10 @@ export async function extractCharacters(
     },
     async (progress, token) => {
       const controller = new AbortController();
-      token.onCancellationRequested(() => controller.abort());
+      token.onCancellationRequested(() => {
+        cancelled = true;
+        controller.abort();
+      });
 
       let done = 0;
 
@@ -176,13 +196,10 @@ export async function extractCharacters(
         });
 
         // 既知の人物名を渡して同一人物判定を助ける
-        const knownNames = [
-          ...loaded.characters.flatMap((c) => [c.name, ...c.aliases]),
-          ...extractedAll.flatMap((e) => [
-            e.data.name,
-            ...(e.data.aliases ?? []),
-          ]),
-        ];
+        const knownNames = buildKnownCharacterNames(
+          loaded.characters,
+          extractedAll
+        );
 
         try {
           const res = await resolved.provider.generate({
@@ -190,7 +207,7 @@ export async function extractCharacters(
             userPrompt: buildCharacterExtractPrompt({
               chunkText: chunk.text,
               chapterLabel: label,
-              knownCharacterNames: [...new Set(knownNames)].slice(0, 100),
+              knownCharacterNames: knownNames.slice(0, 100),
             }),
             model: resolved.model,
             temperature: 0.2,
@@ -225,6 +242,13 @@ export async function extractCharacters(
       await cache.save();
     }
   );
+
+  if (cancelled) {
+    vscode.window.showInformationMessage(
+      "登場人物の抽出を中止しました。完了済みの処理は次回再利用されます。"
+    );
+    return;
+  }
 
   if (extractedAll.length === 0) {
     vscode.window.showWarningMessage(
@@ -273,11 +297,20 @@ export async function extractCharacters(
   const finalCharacters = merged.characters.filter(
     (c) => !rejected.includes(c.name)
   );
-  await store.saveAll(finalCharacters);
+  const changedCharacters = selectChangedCharacters(
+    merged.characters,
+    merged.changedIds,
+    rejected
+  );
+  await store.saveAll(changedCharacters);
+
+  const acceptedAddedCount = merged.added.filter(
+    (name) => !rejected.includes(name)
+  ).length;
 
   const parts = [
     `登場人物 ${finalCharacters.length} 名`,
-    merged.added.length > 0 ? `新規 ${merged.added.length} 名` : null,
+    acceptedAddedCount > 0 ? `新規 ${acceptedAddedCount} 名` : null,
     merged.updated.length > 0 ? `更新 ${merged.updated.length} 名` : null,
     merged.conflicts.length > 0
       ? `要確認 ${merged.conflicts.length} 件`
@@ -300,6 +333,81 @@ export async function extractCharacters(
   }
 }
 
+/** 実行前に、プロバイダごとの料金上の影響を明示する。 */
+export function buildExtractionCostNotice(
+  providerId: ProviderId,
+  pendingChunks: Chunk[],
+  knownCharacterNames: string[],
+  configuredMaxOutputTokens: number
+): string {
+  if (providerId === "ollama") {
+    return "料金: 無料・ローカル実行（API課金なし）";
+  }
+  if (providerId !== "claude") return "";
+
+  // UTF-8の各バイトを1トークンとして数え、実際より少なく見せにくい
+  // 上限寄りの概算にする。単価は変わりうるため金額には換算しない。
+  const names = knownCharacterNames.slice(0, 100);
+  const estimatedInputTokens = pendingChunks.reduce((total, chunk) => {
+    const userPrompt = buildCharacterExtractPrompt({
+      chunkText: chunk.text,
+      chapterLabel: describeChunk(chunk),
+      knownCharacterNames: names,
+    });
+    return (
+      total +
+      new TextEncoder().encode(BASE_SYSTEM_PROMPT).length +
+      new TextEncoder().encode(userPrompt).length
+    );
+  }, 0);
+  const perCall =
+    Number.isInteger(configuredMaxOutputTokens) &&
+    configuredMaxOutputTokens >= 1024
+      ? configuredMaxOutputTokens
+      : 8192;
+  const totalOutputTokens = perCall * pendingChunks.length;
+
+  return [
+    "【課金対象トークン量の目安（上限寄り）】",
+    `入力: 約 ${estimatedInputTokens.toLocaleString("ja-JP")} トークン` +
+      "（実際に送る予定のチャンクと指示文をUTF-8バイト数で保守的に概算）",
+    `出力: 最大 ${totalOutputTokens.toLocaleString("ja-JP")} トークン` +
+      `（設定上限 ${perCall.toLocaleString("ja-JP")} × ${pendingChunks.length} 回）`,
+    "Claude APIは実行すると課金が発生します。実際の金額はモデル、実使用量、" +
+      "Anthropicの現行料金によって変わります。",
+  ].join("\n");
+}
+
+/** 次のチャンクへ渡す既知名。直前までに得た別名も含める */
+export function buildKnownCharacterNames(
+  existing: Array<{ name: string; aliases: string[] }>,
+  extracted: Array<{ data: ExtractedCharacter }>
+): string[] {
+  const names = [
+    ...existing.flatMap((character) => [character.name, ...character.aliases]),
+    ...extracted.flatMap((item) => [
+      item.data.name,
+      ...(Array.isArray(item.data.aliases) ? item.data.aliases : []),
+    ]),
+  ]
+    .map((name) => name.trim())
+    .filter(Boolean);
+  return [...new Set(names)];
+}
+
+/** 変更された人物のうち、作者が除外しなかったものだけを書き戻す */
+export function selectChangedCharacters(
+  characters: Character[],
+  changedIds: string[],
+  rejectedNames: string[]
+): Character[] {
+  const changed = new Set(changedIds);
+  const rejected = new Set(rejectedNames);
+  return characters.filter(
+    (character) => changed.has(character.id) && !rejected.has(character.name)
+  );
+}
+
 // AIが「値なし」の代わりに返しがちな文字列（"null"等）や、一人称・代名詞
 // だけの自称（「（主）」等）。空文字と違い trim() では弾けない。
 // 完全に無効な値だけでなく「本当にそう呼ばれている可能性」も残る自称も
@@ -320,14 +428,106 @@ export function collect(
     const end = chunk.chapterEnd ?? chunk.chapterStart;
     for (let n = chunk.chapterStart; n <= end; n++) chapters.push(n);
   }
-  for (const c of result.characters ?? []) {
-    if (!c || typeof c.name !== "string") continue;
-    const name = c.name.trim();
-    if (!name) continue;
-    if (name.length > MAX_NAME_LENGTH) continue;
-    if (!evidenceIsGrounded(c.evidence, chunk.text)) continue;
-    out.push({ data: c, chapters });
+  const rawCharacters: unknown = result.characters;
+  if (!Array.isArray(rawCharacters)) return;
+
+  for (const raw of rawCharacters) {
+    const character = normalizeExtractedCharacter(raw);
+    if (!character) continue;
+    if (!evidenceIsGrounded(character.evidence, chunk.text)) continue;
+    out.push({ data: character, chapters });
   }
+}
+
+/** AI応答を後段が安全に扱える形へ正規化する */
+export function normalizeExtractedCharacter(
+  raw: unknown
+): ExtractedCharacter | null {
+  if (!isRecord(raw)) return null;
+  const name = cleanRequiredString(raw.name);
+  if (!name || name.length > MAX_NAME_LENGTH) return null;
+
+  const character: ExtractedCharacter = {
+    name,
+    aliases: cleanStringArray(raw.aliases).filter((alias) => alias !== name),
+  };
+
+  if (typeof raw.isMob === "boolean") {
+    character.isMob = raw.isMob;
+  }
+
+  copyNullableString(character, raw, "role");
+  copyNullableString(character, raw, "personality");
+  copyNullableString(character, raw, "appearance");
+  copyNullableString(character, raw, "firstPerson");
+  copyNullableString(character, raw, "defaultSecondPerson");
+  copyNullableString(character, raw, "evidence");
+
+  if ("addressTerms" in raw) {
+    character.addressTerms = Array.isArray(raw.addressTerms)
+      ? raw.addressTerms.flatMap((item) => {
+          if (!isRecord(item)) return [];
+          const targetName = cleanRequiredString(item.targetName);
+          const term = cleanRequiredString(item.term);
+          if (!targetName || !term) return [];
+          return [
+            {
+              targetName,
+              term,
+              category: cleanNullableString(item.category),
+              context: cleanNullableString(item.context),
+              evidence: cleanNullableString(item.evidence),
+            },
+          ];
+        })
+      : [];
+  }
+
+  if ("relations" in raw) {
+    character.relations = Array.isArray(raw.relations)
+      ? raw.relations.flatMap((item) => {
+          if (!isRecord(item)) return [];
+          const relationName = cleanRequiredString(item.name);
+          const relation = cleanRequiredString(item.relation);
+          return relationName && relation
+            ? [{ name: relationName, relation }]
+            : [];
+        })
+      : [];
+  }
+
+  return character;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function cleanRequiredString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const cleaned = value.trim();
+  return cleaned || null;
+}
+
+function cleanNullableString(value: unknown): string | null {
+  return cleanRequiredString(value);
+}
+
+function cleanStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const strings = value
+    .map(cleanRequiredString)
+    .filter((item): item is string => item !== null);
+  return [...new Set(strings)];
+}
+
+function copyNullableString<K extends keyof ExtractedCharacter>(
+  target: ExtractedCharacter,
+  source: Record<string, unknown>,
+  key: K
+): void {
+  if (!(key in source)) return;
+  target[key] = cleanNullableString(source[key]) as ExtractedCharacter[K];
 }
 
 /**

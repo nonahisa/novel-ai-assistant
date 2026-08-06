@@ -61,6 +61,9 @@ export function splitIntoChunks(
   options: Partial<ChunkOptions> = {}
 ): Chunk[] {
   const opts = { ...DEFAULT_OPTIONS, ...options };
+  if (!Number.isInteger(opts.maxChars) || opts.maxChars < 1) {
+    throw new Error("maxChars は1以上の整数にしてください。");
+  }
   const normalized = text.replace(/\r\n?/g, "\n");
 
   if (normalized.length <= opts.maxChars) {
@@ -103,10 +106,10 @@ export function splitIntoChunks(
     });
 
     index++;
+    if (end <= cursor) {
+      throw new Error("チャンク分割位置を進められませんでした。");
+    }
     cursor = end;
-
-    // 無限ループ防止
-    if (end <= cursor - 1) break;
   }
 
   return chunks;
