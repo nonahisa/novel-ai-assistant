@@ -126,15 +126,16 @@ src/
 
 ## テスト
 
-正式なテストフレームワークは未導入。ロジックの検証は Node の型ストリップ機能で行える。
+単体テストは Vitest、VS Code統合テストは公式の `@vscode/test-electron` を使う。
 
 ```powershell
-node --experimental-strip-types テストファイル.ts
+npm run test:unit        # 単体テスト
+npm run test:integration # VS Code 1.90.0のExtension Host
+npm run test:ollama      # 任意。ローカルOllama実接続
+npm run check            # 型検査＋単体テスト＋本番ビルド
 ```
 
-ただし**パラメータプロパティ（`constructor(private x: T)`）は非対応**。そのため `models/` にはクラスを置かず、型と純粋関数のみにしている。
-
-テストフレームワークの導入は歓迎するが、その場合はユーザーに理由を説明してから行うこと。
+配布前は `npm run package:vsix` で全リリースゲートを通し、`npm run verify:vsix` で内容・隔離インストール・バージョンを検証する。新しい不具合修正は、先に再現テストを追加する。
 
 ---
 
@@ -142,8 +143,9 @@ node --experimental-strip-types テストファイル.ts
 
 `docs/進捗と引継ぎ.md` を参照。要約すると：
 
-- フェーズ0（作品管理・文字数計測）：完了、実データで検証済み
-- フェーズ1（AI連携・登場人物抽出）：実装完了、**実データでの動作検証はこれから**
+- 0.0.1（作品管理・文字数計測・AI設定・登場人物抽出）：VSIX生成と自動検証済み
+- フェーズ0（作品管理・文字数計測）：完了、実データとVS Code統合テストで検証済み
+- フェーズ1（AI連携・登場人物抽出）：実装済み範囲を実データ・単体テスト・Ollama実接続で検証済み
 - フェーズ2以降：未着手
 
 次にやるべきことは、実際の作品で登場人物抽出を実行し、結果の質を見てプロンプトを調整すること。

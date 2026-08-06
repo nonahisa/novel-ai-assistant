@@ -128,31 +128,17 @@ export function activate(context: vscode.ExtensionContext): void {
       });
       if (title === undefined) return;
 
-      const entry = await registry.add(folderPath, title.trim());
-      if (!entry) return;
-
-      // config.json が無ければ作る（既存フォルダを壊さないよう最小限）
-      const existing = await readWorkConfig(entry);
-      if (!existing) {
-        const p = workPaths(entry);
-        await vscode.workspace.fs.createDirectory(vscode.Uri.file(p.aiwriter));
-        await vscode.workspace.fs.writeFile(
-          vscode.Uri.file(p.configFile),
-          new TextEncoder().encode(
-            JSON.stringify(
-              {
-                schemaVersion: "0.1",
-                workTitle: title.trim(),
-                manuscriptDir: "本文",
-                settingsDir: "設定",
-                createdAt: new Date().toISOString(),
-              },
-              null,
-              2
-            )
-          )
+      let entry: WorkEntry | undefined;
+      try {
+        entry = await registry.addExisting(folderPath, title.trim());
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        await vscode.window.showErrorMessage(
+          `作品フォルダを登録できませんでした。登録状態は変更されていません。\n${detail}`
         );
+        return;
       }
+      if (!entry) return;
 
       const result = await scanWork(entry);
       vscode.window.showInformationMessage(
