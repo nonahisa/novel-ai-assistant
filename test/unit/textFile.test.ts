@@ -1,7 +1,11 @@
 import iconv from "iconv-lite";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  currentFileHash,
   decodeBytes,
+  getOpenDocumentText,
+  hashText,
+  readTextFile,
   writeTextFilePreservingFormat,
 } from "../../src/core/textFile";
 import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
@@ -93,6 +97,36 @@ describe("本文形式を保持した保存", () => {
     expect(original.hasTrailingNewline).toBe(hasTrailingNewline);
     expect(result).toEqual({ ok: true });
     expect(savedBytes).toEqual(bytes);
+  });
+
+  test("VS Codeのファイルシステムから本文と形式情報を読み込む", async () => {
+    const bytes = bom(utf8("灯\r\n澪"));
+    files.set(fileKey(path), bytes);
+
+    const result = await readTextFile(path);
+
+    expect(result).toMatchObject({
+      text: "灯\n澪",
+      encoding: "utf8-bom",
+      eol: "\r\n",
+      hasTrailingNewline: false,
+    });
+  });
+
+  test("元に末尾改行がある場合は修正文にも末尾改行を復元する", async () => {
+    const originalBytes = utf8("灯\n澪\n");
+    const original = decodeBytes(originalBytes);
+    files.set(fileKey(path), originalBytes);
+
+    const result = await writeTextFilePreservingFormat(
+      path,
+      "灯\n翠",
+      original,
+      original.hash
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(new TextDecoder().decode(savedBytes)).toBe("灯\n翠\n");
   });
 
   test.each([
@@ -190,6 +224,59 @@ describe("本文形式を保持した保存", () => {
       detail: expect.stringContaining("手動"),
       recoveryPaths: expect.arrayContaining([expect.stringContaining(".bak")]),
     });
+  });
+
+  test("保存対象が消えている場合は外部変更として扱う", async () => {
+    const original = decodeBytes(utf8("灯\n澪\n"));
+
+    const result = await writeTextFilePreservingFormat(
+      path,
+      original.text,
+      original,
+      original.hash
+    );
+
+    expect(result).toEqual({ ok: false, reason: "modified_externally" });
+    expect(rename).not.toHaveBeenCalled();
+  });
+
+  test("原子的保存の想定外エラーは隠さず伝播する", async () => {
+    const originalBytes = utf8("灯\n澪\n");
+    const original = decodeBytes(originalBytes);
+    files.set(fileKey(path), originalBytes);
+    workspace.fs.writeFile = vi.fn(async () => {
+      throw new Error("write failed");
+    });
+
+    await expect(
+      writeTextFilePreservingFormat(path, original.text, original, original.hash)
+    ).rejects.toThrow("write failed");
+  });
+
+  test("文字列ハッシュは既知のSHA-256値を返す", () => {
+    expect(hashText("灯")).toBe(
+      "28656d470286ce04758c3e218418bfa33ccbe2c5d24fb6bbfbc981044ec2c3cc"
+    );
+  });
+
+  test("現在ファイルのハッシュを返し読めない場合は未取得にする", async () => {
+    files.set(fileKey(path), utf8("灯"));
+
+    await expect(currentFileHash(path)).resolves.toBe(
+      "28656d470286ce04758c3e218418bfa33ccbe2c5d24fb6bbfbc981044ec2c3cc"
+    );
+    await expect(currentFileHash("C:\\novels\\missing.txt")).resolves.toBeUndefined();
+  });
+
+  test("開いている文書の未保存本文を返し閉じた文書は未取得にする", () => {
+    workspace.textDocuments = [{
+      uri: Uri.file(path),
+      isDirty: true,
+      getText: () => "執筆中の本文",
+    }];
+
+    expect(getOpenDocumentText(path)).toBe("執筆中の本文");
+    expect(getOpenDocumentText("C:\\novels\\missing.txt")).toBeUndefined();
   });
 
   async function runGuardCase(label: string) {
