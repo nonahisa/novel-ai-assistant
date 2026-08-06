@@ -20,11 +20,15 @@ import {
 import { scanWork } from "./core/scanner";
 import { SUPPORTED_EXTENSIONS, WorkEntry } from "./models/types";
 import { AIRegistry, runSetupWizard } from "./ai/registry";
-import { extractCharacters } from "./features/extractCharacters";
+import {
+  extractCharacters,
+  saveDirtyDocumentsBeforeExtraction,
+} from "./features/extractCharacters";
 import { pathExists } from "./core/fileSystem";
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const registry = new WorkRegistry(context);
+  await registry.initialize();
   const treeProvider = new WorkTreeProvider(registry);
   const aiRegistry = new AIRegistry(context);
 
@@ -379,23 +383,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const work = await resolveWork(node, registry);
         if (!work) return;
 
-        // 未保存の変更があると、ディスクとバッファが食い違った状態で
-        // 処理することになるため、先に保存を促す
-        const dirty = vscode.workspace.textDocuments.filter(
-          (d) => d.isDirty && d.uri.fsPath.startsWith(work.folderPath)
-        );
-        if (dirty.length > 0) {
-          const answer = await vscode.window.showWarningMessage(
-            `未保存の変更が ${dirty.length} 件あります。保存してから実行しますか？`,
-            "保存して実行",
-            "そのまま実行",
-            "中止"
-          );
-          if (answer === "中止" || answer === undefined) return;
-          if (answer === "保存して実行") {
-            for (const d of dirty) await d.save();
-          }
-        }
+        if (!(await saveDirtyDocumentsBeforeExtraction(work))) return;
 
         await extractCharacters(work, aiRegistry);
         treeProvider.refresh(work.id);

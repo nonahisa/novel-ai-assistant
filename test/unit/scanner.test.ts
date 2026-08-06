@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { FileSystemError, workspace } from "./support/vscodeStub";
+import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
 import { scanWork } from "../../src/core/scanner";
 import type { WorkEntry } from "../../src/models/types";
 
@@ -32,7 +32,7 @@ describe("本文フォルダの選択", () => {
     const result = await scanWork(work);
 
     expect(result.manuscriptDir).toBe(work.folderPath);
-    expect(readDirectory).toHaveBeenCalledWith({ fsPath: work.folderPath });
+    expect(readDirectory).toHaveBeenCalledWith(Uri.file(work.folderPath));
   });
 
   test.each(["NoPermissions", "Unknown"])(

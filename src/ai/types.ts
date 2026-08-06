@@ -88,11 +88,38 @@ export class AIError extends Error {
       | "model_not_found"
       | "timeout"
       | "bad_response"
+      | "authentication_failed"
+      | "permission_denied"
+      | "rate_limited"
       | "aborted"
       | "unknown",
     readonly detail?: string
   ) {
     super(message);
     this.name = "AIError";
+  }
+}
+
+/** 失敗種別ごとに、作者が次に行える具体的な操作を1つ返す。 */
+export function recoveryForAIError(error: AIError): string {
+  switch (error.kind) {
+    case "not_running":
+      return "AIを起動し、接続先設定を確認してください。";
+    case "model_not_found":
+      return "利用可能なモデルを選び直してください。";
+    case "timeout":
+      return "チャンクを小さくして、もう一度実行してください。";
+    case "bad_response":
+      return "出力上限とモデル設定を確認してください。";
+    case "authentication_failed":
+      return "ClaudeのAPIキーを確認して再登録してください。";
+    case "permission_denied":
+      return "Claudeの利用権限または請求設定を確認してください。";
+    case "rate_limited":
+      return "しばらく待ってから、必要な場合に手動で再実行してください。";
+    case "aborted":
+      return "必要なら抽出をもう一度実行してください。";
+    case "unknown":
+      return "AI設定と拡張機能のログを確認してください。";
   }
 }

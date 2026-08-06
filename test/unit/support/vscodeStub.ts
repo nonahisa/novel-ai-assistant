@@ -1,6 +1,11 @@
 export const workspace = {
-  fs: {} as Record<string, unknown>,
-  textDocuments: [],
+  fs: {} as Record<string, (...args: never[]) => unknown>,
+  textDocuments: [] as Array<{
+    uri: { fsPath: string };
+    isDirty: boolean;
+    getText(): string;
+    save?(): Promise<boolean>;
+  }>,
   getConfiguration: () => ({
     get: <T>(_key: string, defaultValue: T): T => defaultValue,
   }),
@@ -28,7 +33,9 @@ export class FileSystemError extends Error {
 }
 
 export const Uri = {
-  file: (fsPath: string) => ({ fsPath }),
+  file: (fsPath: string) => ({
+    fsPath: fsPath.replace(/^[A-Z]:/, (drive) => drive.toLowerCase()),
+  }),
 };
 
 export enum FileType {

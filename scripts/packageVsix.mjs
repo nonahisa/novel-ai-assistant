@@ -2,16 +2,14 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { deriveReleaseMetadata } from "./releaseSupport.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   ".."
 );
 const outputDirectory = path.join(repositoryRoot, "release");
-const outputPath = path.join(
-  outputDirectory,
-  "novel-ai-assistant-0.0.1.vsix"
-);
+const { vsixPath: outputPath } = await deriveReleaseMetadata(repositoryRoot);
 
 await mkdir(outputDirectory, { recursive: true });
 

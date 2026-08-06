@@ -1,6 +1,7 @@
 node_modules/
 dist/
 out/
+coverage/
 .env
 .env.*
 !.env.example
@@ -8,3 +9,4 @@ out/
 release/
 _test_*
 *.vsix
+.worktrees/

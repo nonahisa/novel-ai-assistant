@@ -114,7 +114,8 @@ export function emptyCharacter(id: string, name: string): Character {
     isMob: false,
     evidence: null,
     conflicts: [],
-    updatedAt: new Date().toISOString(),
+    // 永続化境界で保存時刻を付ける。純粋な生成・マージ結果へ壁時計を混ぜない。
+    updatedAt: "",
   };
 }
 

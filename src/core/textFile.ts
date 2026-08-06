@@ -1,8 +1,26 @@
 import * as vscode from "vscode";
 import * as crypto from "crypto";
+import iconv = require("iconv-lite");
+import { diffArrays } from "diff";
+import { AtomicWriteFileError, atomicWriteFile } from "./atomicWrite";
 
 export type Encoding = "utf8" | "utf8-bom" | "shift_jis";
 export type Eol = "\n" | "\r\n" | "\r";
+export type WriteTextFailureReason =
+  | "modified_externally"
+  | "path_conflict"
+  | "conflict_markers"
+  | "unsaved_changes"
+  | "encoding_error";
+
+export type WriteTextFileResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: WriteTextFailureReason;
+      detail?: string;
+      recoveryPaths?: string[];
+    };
 
 /**
  * 読み込んだファイルの内容と、書き戻しに必要な形式情報。
@@ -101,26 +119,39 @@ function decodeWithDetection(bytes: Uint8Array): {
  * 読み込み時と同じ形式で書き戻す。
  *
  * @param expectedHash 読み込み時のハッシュ。ディスク上の現在の内容と
- *   一致しない場合は書き込まず false を返す（外部編集による上書き事故の防止）。
+ *   一致しない場合は書き込まず `{ ok: false, reason: "modified_externally" }` を返す
+ *   （外部編集による上書き事故の防止）。
  */
 export async function writeTextFilePreservingFormat(
   filePath: string,
   newText: string,
   original: Pick<TextFileContent, "encoding" | "eol" | "hasTrailingNewline">,
-  expectedHash?: string
-): Promise<{ ok: true } | { ok: false; reason: "modified_externally" }> {
+  expectedHash: string
+): Promise<WriteTextFileResult> {
   const uri = vscode.Uri.file(filePath);
 
-  if (expectedHash !== undefined) {
-    try {
-      const current = await vscode.workspace.fs.readFile(uri);
-      if (hashBytes(current) !== expectedHash) {
-        return { ok: false, reason: "modified_externally" };
-      }
-    } catch {
-      // ファイルが消えている場合も外部変更として扱う
-      return { ok: false, reason: "modified_externally" };
-    }
+  if (hasUnsavedChanges(filePath)) {
+    return { ok: false, reason: "unsaved_changes" };
+  }
+
+  if (CONFLICT_PATTERN.test(newText)) {
+    return { ok: false, reason: "conflict_markers" };
+  }
+
+  let current: Uint8Array;
+  try {
+    current = await vscode.workspace.fs.readFile(uri);
+  } catch {
+    // ファイルが消えている場合も外部変更として扱う
+    return { ok: false, reason: "modified_externally" };
+  }
+
+  if (decodeBytes(current).hasConflictMarkers) {
+    return { ok: false, reason: "conflict_markers" };
+  }
+
+  if (hashBytes(current) !== expectedHash) {
+    return { ok: false, reason: "modified_externally" };
   }
 
   let out = newText.replace(/\r\n?/g, "\n");
@@ -132,30 +163,168 @@ export async function writeTextFilePreservingFormat(
     out = out.replace(/\n+$/, "");
   }
 
-  if (original.eol !== "\n") {
-    out = out.replace(/\n/g, original.eol);
+  const bytes = encodePreservingUnchangedBytes(
+    current,
+    out,
+    original.encoding,
+    original.eol
+  );
+  if (!bytes) {
+    return { ok: false, reason: "encoding_error" };
   }
 
-  await vscode.workspace.fs.writeFile(uri, encodeText(out, original.encoding));
+  try {
+    await atomicWriteFile(filePath, bytes, {
+      mode: "replace",
+      expectedHash,
+    });
+  } catch (error) {
+    if (error instanceof AtomicWriteFileError) {
+      if (error.kind === "path_conflict") {
+        return {
+          ok: false,
+          reason: "path_conflict",
+          detail: error.message,
+          recoveryPaths: error.recoveryPaths,
+        };
+      }
+      return { ok: false, reason: "modified_externally" };
+    }
+    throw error;
+  }
   return { ok: true };
 }
 
-function encodeText(text: string, encoding: Encoding): Uint8Array {
+interface EncodedToken {
+  text: string;
+  bytes: Uint8Array;
+}
+
+/**
+ * 編集されていない文字の元バイト列を再利用する。
+ * CP932には同じ文字へ復号される複数の符号があるため、全文再エンコードでは
+ * 無変更箇所まで別バイトへ正規化されてしまう。
+ */
+function encodePreservingUnchangedBytes(
+  originalBytes: Uint8Array,
+  normalizedText: string,
+  encoding: Encoding,
+  preferredEol: Eol
+): Uint8Array | undefined {
+  const tokenized = tokenizeOriginalBytes(originalBytes, encoding);
+  if (tokenized.text === normalizedText) {
+    return originalBytes.slice();
+  }
+
+  const desiredTokens = Array.from(normalizedText);
+  const changes = diffArrays(
+    tokenized.tokens.map((token) => token.text),
+    desiredTokens
+  );
+  const output: Uint8Array[] = [];
+  let originalIndex = 0;
+
+  for (const change of changes) {
+    if (change.added) {
+      const encoded = encodeFragment(
+        change.value.join("").replace(/\n/g, preferredEol),
+        encoding
+      );
+      if (!encoded) return undefined;
+      output.push(encoded);
+      continue;
+    }
+
+    const count = change.value.length;
+    if (!change.removed) {
+      for (let index = 0; index < count; index += 1) {
+        output.push(tokenized.tokens[originalIndex + index].bytes);
+      }
+    }
+    originalIndex += count;
+  }
+
+  return concatenateBytes(tokenized.prefix, output);
+}
+
+function tokenizeOriginalBytes(
+  bytes: Uint8Array,
+  encoding: Encoding
+): { prefix: Uint8Array; tokens: EncodedToken[]; text: string } {
+  const bodyStart = encoding === "utf8-bom" ? 3 : 0;
+  const prefix = bytes.slice(0, bodyStart);
+  const tokens: EncodedToken[] = [];
+  let offset = bodyStart;
+
+  while (offset < bytes.length) {
+    const first = bytes[offset];
+    if (first === 0x0d) {
+      const length = bytes[offset + 1] === 0x0a ? 2 : 1;
+      tokens.push({ text: "\n", bytes: bytes.slice(offset, offset + length) });
+      offset += length;
+      continue;
+    }
+    if (first === 0x0a) {
+      tokens.push({ text: "\n", bytes: bytes.slice(offset, offset + 1) });
+      offset += 1;
+      continue;
+    }
+
+    const length = encoding === "shift_jis"
+      ? shiftJisCharacterLength(first)
+      : utf8CharacterLength(first);
+    const raw = bytes.slice(offset, Math.min(offset + length, bytes.length));
+    const text = encoding === "shift_jis"
+      ? iconv.decode(raw, "shift_jis")
+      : new TextDecoder("utf-8").decode(raw);
+    tokens.push({ text, bytes: raw });
+    offset += raw.length;
+  }
+
+  return {
+    prefix,
+    tokens,
+    text: tokens.map((token) => token.text).join(""),
+  };
+}
+
+function shiftJisCharacterLength(first: number): number {
+  return (first >= 0x81 && first <= 0x9f) || (first >= 0xe0 && first <= 0xfc)
+    ? 2
+    : 1;
+}
+
+function utf8CharacterLength(first: number): number {
+  if ((first & 0x80) === 0) return 1;
+  if ((first & 0xe0) === 0xc0) return 2;
+  if ((first & 0xf0) === 0xe0) return 3;
+  if ((first & 0xf8) === 0xf0) return 4;
+  return 1;
+}
+
+function encodeFragment(text: string, encoding: Encoding): Uint8Array | undefined {
   if (encoding === "shift_jis") {
-    // Node標準ではShift_JISのエンコードができない。
-    // 元がShift_JISでも書き戻しはUTF-8とし、その旨を呼び出し側で通知する。
-    // （文字化けを起こすより、明示的に形式が変わったと伝える方が安全）
-    return new TextEncoder().encode(text);
+    const encoded = iconv.encode(text, "shift_jis");
+    // 代替文字への置換を許すと、保存成功に見えて本文を壊してしまう。
+    return iconv.decode(encoded, "shift_jis") === text ? encoded : undefined;
   }
   const body = new TextEncoder().encode(text);
-  if (encoding === "utf8-bom") {
-    const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
-    const out = new Uint8Array(bom.length + body.length);
-    out.set(bom, 0);
-    out.set(body, bom.length);
-    return out;
-  }
   return body;
+}
+
+function concatenateBytes(
+  prefix: Uint8Array,
+  parts: Uint8Array[]
+): Uint8Array {
+  const length = parts.reduce((sum, part) => sum + part.length, prefix.length);
+  const result = new Uint8Array(length);
+  result.set(prefix);
+  let offset = prefix.length;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.length;
+  }
+  return result;
 }
 
 export function hashBytes(bytes: Uint8Array): string {
@@ -186,7 +355,7 @@ export async function currentFileHash(
  */
 export function getOpenDocumentText(filePath: string): string | undefined {
   const doc = vscode.workspace.textDocuments.find(
-    (d) => d.uri.fsPath === filePath
+    (d) => sameFilePath(d.uri.fsPath, filePath)
   );
   if (!doc) return undefined;
   return doc.getText();
@@ -195,7 +364,16 @@ export function getOpenDocumentText(filePath: string): string | undefined {
 /** 未保存の変更があるか */
 export function hasUnsavedChanges(filePath: string): boolean {
   const doc = vscode.workspace.textDocuments.find(
-    (d) => d.uri.fsPath === filePath
+    (d) => sameFilePath(d.uri.fsPath, filePath)
   );
   return doc?.isDirty ?? false;
+}
+
+function sameFilePath(left: string, right: string): boolean {
+  const normalizedLeft = vscode.Uri.file(left).fsPath;
+  const normalizedRight = vscode.Uri.file(right).fsPath;
+
+  return process.platform === "win32"
+    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    : normalizedLeft === normalizedRight;
 }

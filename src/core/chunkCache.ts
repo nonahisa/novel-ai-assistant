@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as crypto from "crypto";
 import { WorkEntry } from "../models/types";
+import { atomicWriteFile } from "./atomicWrite";
 import { workPaths } from "./workRegistry";
 
 export interface CacheKeyBase {
@@ -35,16 +36,19 @@ export class ChunkCache {
   }
 
   async load(): Promise<void> {
+    this.entries.clear();
+    this.dirty = false;
     const file = await this.filePath();
     try {
       const bytes = await vscode.workspace.fs.readFile(
         vscode.Uri.file(file)
       );
-      const parsed = JSON.parse(
-        new TextDecoder().decode(bytes)
-      ) as CacheEntry[];
-      for (const e of parsed) {
-        this.entries.set(e.key, e);
+      const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+      if (!Array.isArray(parsed)) return;
+      for (const entry of parsed) {
+        if (isCacheEntry(entry)) {
+          this.entries.set(entry.key, entry);
+        }
       }
     } catch {
       // キャッシュは失われても再生成できるため、読めなくても続行する
@@ -58,10 +62,7 @@ export class ChunkCache {
       vscode.Uri.file(path.dirname(file))
     );
     const body = JSON.stringify([...this.entries.values()], null, 0);
-    await vscode.workspace.fs.writeFile(
-      vscode.Uri.file(file),
-      new TextEncoder().encode(body)
-    );
+    await atomicWriteFile(file, new TextEncoder().encode(body));
     this.dirty = false;
   }
 
@@ -96,6 +97,76 @@ export class ChunkCache {
   get size(): number {
     return this.entries.size;
   }
+}
+
+function isCacheEntry(value: unknown): value is CacheEntry {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const entry = value as Record<string, unknown>;
+  return (
+    typeof entry.key === "string" &&
+    typeof entry.createdAt === "string" &&
+    isValidIsoDate(entry.createdAt) &&
+    "value" in entry
+  );
+}
+
+function isValidIsoDate(value: string): boolean {
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/.exec(
+      value
+    );
+  if (!match) {
+    return false;
+  }
+  const [
+    ,
+    yearText,
+    monthText,
+    dayText,
+    hourText,
+    minuteText,
+    secondText,
+    offsetHourText,
+    offsetMinuteText,
+  ] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const offsetHour = offsetHourText === undefined ? 0 : Number(offsetHourText);
+  const offsetMinute = offsetMinuteText === undefined ? 0 : Number(offsetMinuteText);
+
+  // Date.parse は 2 月 30 日を翌月へ繰り上げるため、暦日を先に検証する。
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > daysInMonth(year, month) ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    offsetHour > 23 ||
+    offsetMinute > 59
+  ) {
+    return false;
+  }
+  return Number.isFinite(Date.parse(value));
+}
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) {
+    return isLeapYear(year) ? 29 : 28;
+  }
+  const days = [31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return days[month - 1] ?? 0;
+}
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
 
 function makeKey(chunkHash: string, base: CacheKeyBase): string {

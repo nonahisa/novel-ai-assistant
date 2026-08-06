@@ -3,13 +3,26 @@ import * as path from "path";
 import { WorkEntry } from "../models/types";
 import { Character } from "../models/character";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError, type ProviderId } from "../ai/types";
+import {
+  AIError,
+  recoveryForAIError,
+  type ProviderId,
+} from "../ai/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import { parseEpisodeMetadata } from "../core/metadataParser";
 import { decideChunkSize, splitIntoChunks, Chunk } from "../core/chunker";
-import { CharacterStore } from "../core/characterStore";
+import {
+  CharacterStore,
+  CharacterStoreError,
+} from "../core/characterStore";
 import { mergeExtractedCharacters } from "../core/characterMerge";
+import {
+  parseResult,
+  validateCharacterExtractResult,
+  type CharacterRejectionReason,
+  type RejectedCharacterCandidate,
+} from "../core/characterExtractionValidation";
 import {
   BASE_SYSTEM_PROMPT,
   CHARACTER_EXTRACT_SCHEMA,
@@ -19,6 +32,56 @@ import {
   buildCharacterExtractPrompt,
 } from "../prompts/characterExtract";
 import { ChunkCache } from "../core/chunkCache";
+
+interface ExtractionFailure {
+  chunk: Chunk;
+  message: string;
+  kind?: AIError["kind"];
+}
+
+interface ExtractionSummaryCounts {
+  added: number;
+  updated: number;
+  rejected: RejectedCharacterCandidate[];
+  conflicts: number;
+  failedChunks: number;
+  saved: number;
+  ambiguous: number;
+  unsavedConflicts: number;
+  cacheWarnings: number;
+}
+
+/** 作品内の未保存文書を保存し、成功を再検査できた場合だけ実行を許可する。 */
+export async function saveDirtyDocumentsBeforeExtraction(
+  work: WorkEntry
+): Promise<boolean> {
+  const dirtyDocuments = dirtyDocumentsInside(work.folderPath);
+  if (dirtyDocuments.length === 0) return true;
+
+  const answer = await vscode.window.showWarningMessage(
+    `未保存の変更が ${dirtyDocuments.length} 件あります。保存してから実行しますか？`,
+    "保存して実行",
+    "中止"
+  );
+  if (answer !== "保存して実行") return false;
+
+  for (const document of dirtyDocuments) {
+    if (!document.save || !(await document.save())) {
+      await vscode.window.showWarningMessage(
+        "保存できない文書があるため、人物抽出を中止しました。"
+      );
+      return false;
+    }
+  }
+
+  if (dirtyDocumentsInside(work.folderPath).length > 0) {
+    await vscode.window.showWarningMessage(
+      "保存後も未保存の文書が残っているため、人物抽出を中止しました。"
+    );
+    return false;
+  }
+  return true;
+}
 
 export async function extractCharacters(
   work: WorkEntry,
@@ -96,6 +159,12 @@ export async function extractCharacters(
   }
 
   const store = new CharacterStore(work);
+  if ((await store.dirtyDocumentPaths()).length > 0) {
+    await vscode.window.showWarningMessage(
+      "未保存の人物設定があります。人物設定を保存してから、もう一度実行してください。"
+    );
+    return;
+  }
   const loaded = await store.loadAll();
 
   if (loaded.errors.length > 0) {
@@ -161,7 +230,9 @@ export async function extractCharacters(
     data: ExtractedCharacter;
     chapters: number[];
   }> = [];
-  const failures: Array<{ chunk: Chunk; message: string }> = [];
+  const rejectedCandidates: RejectedCharacterCandidate[] = [];
+  const failures: ExtractionFailure[] = [];
+  let cacheWarnings = 0;
   let cancelled = false;
 
   await vscode.window.withProgress(
@@ -184,7 +255,12 @@ export async function extractCharacters(
 
         const cached = cache.get(chunk.hash, cacheKeyBase);
         if (cached) {
-          collect(extractedAll, cached as CharacterExtractResult, chunk);
+          const validated = validateCharacterExtractResult(
+            cached as CharacterExtractResult,
+            chunk
+          );
+          extractedAll.push(...validated.accepted);
+          rejectedCandidates.push(...validated.rejected);
           done++;
           continue;
         }
@@ -217,29 +293,67 @@ export async function extractCharacters(
             signal: controller.signal,
           });
 
+          if (res.truncated) {
+            failures.push({
+              chunk,
+              message:
+                "AIの応答が出力上限で切り詰められました。" +
+                "出力上限を増やすかチャンクを小さくしてください。",
+            });
+            done++;
+            continue;
+          }
+
+          if (!res.text.trim()) {
+            failures.push({
+              chunk,
+              message:
+                "AIの応答が空でした。" +
+                "出力上限とモデル設定を確認してください。",
+            });
+            done++;
+            continue;
+          }
+
           const parsed = parseResult(res.text);
           if (!parsed) {
             failures.push({
               chunk,
-              message: "応答をJSONとして解析できませんでした",
+              message:
+                "応答をJSONとして解析できませんでした。" +
+                "出力上限とモデル設定を確認してください。",
             });
           } else {
-            collect(extractedAll, parsed, chunk);
+            const validated = validateCharacterExtractResult(parsed, chunk);
+            extractedAll.push(...validated.accepted);
+            rejectedCandidates.push(...validated.rejected);
             await cache.set(chunk.hash, cacheKeyBase, parsed);
           }
         } catch (e) {
-          if (e instanceof AIError && e.kind === "aborted") break;
-          failures.push({
-            chunk,
-            message: e instanceof Error ? e.message : String(e),
-          });
+          if (
+            e instanceof AIError &&
+            e.kind === "aborted" &&
+            (cancelled || token.isCancellationRequested)
+          ) {
+            break;
+          }
+          failures.push(toExtractionFailure(chunk, e));
+          if (e instanceof AIError && isFatalProviderFailure(e.kind)) {
+            done++;
+            break;
+          }
           // 1チャンクの失敗で全体を止めない
         }
 
         done++;
       }
 
-      await cache.save();
+      try {
+        await cache.save();
+      } catch {
+        // キャッシュは再生成可能。人物抽出結果の永続化は継続する。
+        cacheWarnings++;
+      }
     }
   );
 
@@ -250,80 +364,108 @@ export async function extractCharacters(
     return;
   }
 
-  if (extractedAll.length === 0) {
-    vscode.window.showWarningMessage(
-      "登場人物を抽出できませんでした。" +
-        (failures.length > 0 ? `（${failures.length} 件のエラー）` : "")
-    );
-    return;
-  }
+  const merged =
+    extractedAll.length > 0
+      ? mergeExtractedCharacters(loaded.characters, extractedAll)
+      : undefined;
+  const changedCharacters = merged
+    ? selectChangedCharacters(merged.characters, merged.changedIds)
+    : [];
+  const baseCounts: ExtractionSummaryCounts = {
+    added: merged?.added.length ?? 0,
+    updated: merged?.updated.length ?? 0,
+    rejected: rejectedCandidates,
+    conflicts: merged?.conflicts.length ?? 0,
+    failedChunks: failures.length,
+    saved: 0,
+    ambiguous: 0,
+    unsavedConflicts: 0,
+    cacheWarnings,
+  };
 
-  const merged = mergeExtractedCharacters(loaded.characters, extractedAll);
-
-  // 一人称「僕」や「（主）」のような自称だけの name は、AIの誤抽出である
-  // 可能性が高い一方、稀に本当にそう呼ばれている人物のこともあるため、
-  // 機械的に捨てず作者の承認を求める。新規追加分のみが対象
-  // （既存人物への話数追記は自動保存のままでよい）。
-  const addedSet = new Set(merged.added);
-  const needsApproval = merged.characters.filter(
-    (c) => addedSet.has(c.name) && INVALID_NAME_PATTERN.test(c.name)
-  );
-
-  let rejected: string[] = [];
-  if (needsApproval.length > 0) {
-    const picked = await vscode.window.showQuickPick(
-      needsApproval.map((c) => ({
-        label: c.name,
-        description: c.role ?? undefined,
-        detail:
-          c.evidence?.slice(0, 100) ??
-          "本文中の具体的な名前ではなく、自称や代名詞のような表現がnameになっています。",
-        picked: false,
-        character: c,
-      })),
-      {
-        title: `${needsApproval.length}件の人物名が自称・代名詞のような形になっています。登録するものを選んでください`,
-        canPickMany: true,
-        ignoreFocusOut: true,
+  if (changedCharacters.length > 0) {
+    if ((await store.dirtyDocumentPaths()).length > 0) {
+      await vscode.window.showWarningMessage(
+        "保存直前に未保存の人物設定が見つかりました。作者の変更を保護するため、抽出結果は保存しませんでした。"
+      );
+      return;
+    }
+    try {
+      await store.saveAll(changedCharacters);
+      baseCounts.saved = changedCharacters.length;
+    } catch (error) {
+      if (!(error instanceof CharacterStoreError)) throw error;
+      const persistence = persistenceCountsForSaveError(
+        error,
+        changedCharacters
+      );
+      baseCounts.saved = persistence.saved;
+      baseCounts.ambiguous = persistence.ambiguous;
+      baseCounts.unsavedConflicts = persistence.unsaved;
+      const classification = describeCharacterStoreError(error);
+      const recovery = describeFailureRecoveries(failures);
+      const hasSettingsFailure = failures.some((failure) =>
+        failure.kind ? shouldOfferSettings(failure.kind) : false
+      );
+      const actions = [
+        ...(failures.length > 0 ? ["詳細を表示"] : []),
+        ...(error.recoveryPaths.length > 0 ? ["回復パスを表示"] : []),
+        ...(hasSettingsFailure ? ["設定を開く"] : []),
+      ];
+      const protectionMessage =
+        persistence.saved === 0 && persistence.ambiguous === 0
+          ? "作者の変更を保護するため保存しませんでした。" +
+            "抽出結果は未保存です。"
+          : "作者の変更を保護するため保存処理を途中で停止しました。";
+      const reconciliationMessage =
+        persistence.ambiguous > 0
+          ? "保存状態を確定できない人物があります。" +
+            "保存先と回復ファイルを手動で照合してください。\n"
+          : "";
+      const action = await vscode.window.showErrorMessage(
+        `${classification}${protectionMessage}\n${reconciliationMessage}` +
+          buildExtractionSummary(baseCounts) +
+          (recovery ? `\n対応: ${recovery}` : ""),
+        ...actions
+      );
+      if (action === "詳細を表示") {
+        await showFailureDetails(failures);
+      } else if (action === "回復パスを表示") {
+        await showRecoveryPaths(error.recoveryPaths);
+      } else if (action === "設定を開く") {
+        await vscode.commands.executeCommand(
+          "workbench.action.openSettings",
+          `novelai.${resolved.provider.id}`
+        );
       }
-    );
-    // キャンセル時は安全側に倒し、すべて除外する
-    const approvedNames = new Set((picked ?? []).map((p) => p.character.name));
-    rejected = needsApproval
-      .filter((c) => !approvedNames.has(c.name))
-      .map((c) => c.name);
+      return;
+    }
   }
 
-  const finalCharacters = merged.characters.filter(
-    (c) => !rejected.includes(c.name)
+  const summary = buildExtractionSummary(baseCounts);
+  const recovery = describeFailureRecoveries(failures);
+  const message = recovery ? `${summary}\n対応: ${recovery}` : summary;
+  const hasSettingsFailure = failures.some((failure) =>
+    failure.kind ? shouldOfferSettings(failure.kind) : false
   );
-  const changedCharacters = selectChangedCharacters(
-    merged.characters,
-    merged.changedIds,
-    rejected
-  );
-  await store.saveAll(changedCharacters);
+  const actions = [
+    ...(failures.length > 0 ? ["詳細を表示"] : []),
+    ...(hasSettingsFailure ? ["設定を開く"] : []),
+    ...(merged ? ["一覧を開く"] : []),
+  ];
+  const action =
+    failures.length > 0 || cacheWarnings > 0 || !merged
+      ? await vscode.window.showWarningMessage(message, ...actions)
+      : await vscode.window.showInformationMessage(message, ...actions);
 
-  const acceptedAddedCount = merged.added.filter(
-    (name) => !rejected.includes(name)
-  ).length;
-
-  const parts = [
-    `登場人物 ${finalCharacters.length} 名`,
-    acceptedAddedCount > 0 ? `新規 ${acceptedAddedCount} 名` : null,
-    merged.updated.length > 0 ? `更新 ${merged.updated.length} 名` : null,
-    merged.conflicts.length > 0
-      ? `要確認 ${merged.conflicts.length} 件`
-      : null,
-    rejected.length > 0 ? `未承認のため除外 ${rejected.length} 件` : null,
-    failures.length > 0 ? `失敗 ${failures.length} チャンク` : null,
-  ].filter(Boolean);
-
-  const action = await vscode.window.showInformationMessage(
-    parts.join(" / "),
-    "一覧を開く"
-  );
-  if (action === "一覧を開く") {
+  if (action === "詳細を表示") {
+    await showFailureDetails(failures);
+  } else if (action === "設定を開く") {
+    await vscode.commands.executeCommand(
+      "workbench.action.openSettings",
+      `novelai.${resolved.provider.id}`
+    );
+  } else if (action === "一覧を開く") {
     const store2 = new CharacterStore(work);
     const dir = await store2.ensureDir();
     await vscode.commands.executeCommand(
@@ -331,6 +473,159 @@ export async function extractCharacters(
       vscode.Uri.file(dir)
     );
   }
+}
+
+function toExtractionFailure(chunk: Chunk, error: unknown): ExtractionFailure {
+  if (!(error instanceof AIError)) {
+    return {
+      chunk,
+      message:
+        "AI処理で予期しないエラーが発生しました。" +
+        "AI設定と拡張機能のログを確認してください。",
+    };
+  }
+
+  const labels: Record<AIError["kind"], string> = {
+    not_running: "AIに接続できませんでした。",
+    model_not_found: "選択中のモデルを利用できませんでした。",
+    timeout: "AIの応答が時間内に完了しませんでした。",
+    bad_response: "AIの応答を利用できませんでした。",
+    authentication_failed: "Claudeの認証に失敗しました。",
+    permission_denied: "Claudeの利用権限がありません。",
+    rate_limited: "Claudeのレート上限に達しました。",
+    aborted: "AI処理が中断されました。",
+    unknown: "AI処理で予期しないエラーが発生しました。",
+  };
+  return {
+    chunk,
+    kind: error.kind,
+    // 例外本文にはプロバイダの応答や認証情報が混ざり得るため表示しない。
+    message: `${labels[error.kind]}${recoveryForAIError(error)}`,
+  };
+}
+
+function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
+  const rejectedDetail =
+    counts.rejected.length > 0
+      ? ` / ${describeRejectedCandidates(counts.rejected)}`
+      : "";
+  return [
+    `新規 ${counts.added}名`,
+    `更新 ${counts.updated}名`,
+    `除外 ${counts.rejected.length}件`,
+    `競合 ${counts.conflicts}件`,
+    `失敗 ${counts.failedChunks}チャンク`,
+    `保存済み ${counts.saved}名`,
+    `手動確認が必要 ${counts.ambiguous}名`,
+    `保存競合による未保存 ${counts.unsavedConflicts}名`,
+    `キャッシュ保存警告 ${counts.cacheWarnings}件`,
+  ].join(" / ") + rejectedDetail;
+}
+
+function describeCharacterStoreError(error: CharacterStoreError): string {
+  const labels: Record<CharacterStoreError["kind"], string> = {
+    modified_externally: "人物設定が読み込み後に変更されました。",
+    path_conflict: "人物設定の保存先が競合しました。",
+    unsaved_changes: "人物設定に未保存の変更があります。",
+    io_error: "人物設定の保存中にファイル操作で失敗しました。",
+  };
+  return labels[error.kind];
+}
+
+function persistenceCountsForSaveError(
+  error: CharacterStoreError,
+  changedCharacters: Character[]
+): { saved: number; ambiguous: number; unsaved: number } {
+  const requestedIds = changedCharacters.map((character) => character.id);
+  const requested = new Set(requestedIds);
+  const claimed = new Set<string>();
+  const takeKnown = (ids: string[]): number => {
+    let count = 0;
+    for (const id of ids) {
+      if (!requested.has(id) || claimed.has(id)) continue;
+      claimed.add(id);
+      count++;
+    }
+    return count;
+  };
+
+  const progress = error.batchProgress;
+  if (!progress) {
+    return { saved: 0, ambiguous: 0, unsaved: requested.size };
+  }
+
+  const saved = takeKnown(progress.completedIds);
+  const ambiguous = takeKnown(progress.ambiguousIds);
+  const reportedUnsaved = takeKnown(progress.remainingIds);
+  // 古いmockや将来の不完全な進捗でも、未分類の人物を保存済みとは扱わない。
+  const unreported = [...requested].filter((id) => !claimed.has(id)).length;
+  return {
+    saved,
+    ambiguous,
+    unsaved: reportedUnsaved + unreported,
+  };
+}
+
+function describeFailureRecoveries(failures: ExtractionFailure[]): string {
+  return [...new Set(failures.map((failure) => failure.message))].join(" ");
+}
+
+async function showFailureDetails(
+  failures: ExtractionFailure[]
+): Promise<void> {
+  if (failures.length === 0) return;
+  const content = failures
+    .map((failure) => `${describeChunk(failure.chunk)}: ${failure.message}`)
+    .join("\n");
+  const doc = await vscode.workspace.openTextDocument({
+    content,
+    language: "text",
+  });
+  await vscode.window.showTextDocument(doc);
+}
+
+async function showRecoveryPaths(recoveryPaths: string[]): Promise<void> {
+  const content = [...new Set(recoveryPaths)].join("\n");
+  if (!content) return;
+  const doc = await vscode.workspace.openTextDocument({
+    content,
+    language: "text",
+  });
+  await vscode.window.showTextDocument(doc);
+}
+
+function isFatalProviderFailure(kind: AIError["kind"]): boolean {
+  return kind === "authentication_failed" ||
+    kind === "permission_denied" ||
+    kind === "rate_limited";
+}
+
+function shouldOfferSettings(kind: AIError["kind"]): boolean {
+  return kind === "not_running" ||
+    kind === "model_not_found" ||
+    kind === "authentication_failed" ||
+    kind === "permission_denied";
+}
+
+function dirtyDocumentsInside(folderPath: string): vscode.TextDocument[] {
+  return vscode.workspace.textDocuments.filter(
+    (document) => document.isDirty && isPathInside(folderPath, document.uri.fsPath)
+  );
+}
+
+function isPathInside(parentPath: string, candidatePath: string): boolean {
+  const parent = normalizePathForComparison(parentPath);
+  const candidate = normalizePathForComparison(candidatePath);
+  const relative = path.relative(parent, candidate);
+  return relative.length > 0 &&
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative);
+}
+
+function normalizePathForComparison(filePath: string): string {
+  const normalized = path.normalize(filePath);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 /** 実行前に、プロバイダごとの料金上の影響を明示する。 */
@@ -395,191 +690,33 @@ export function buildKnownCharacterNames(
   return [...new Set(names)];
 }
 
-/** 変更された人物のうち、作者が除外しなかったものだけを書き戻す */
+/** 変更された人物だけを書き戻す */
 export function selectChangedCharacters(
   characters: Character[],
-  changedIds: string[],
-  rejectedNames: string[]
+  changedIds: string[]
 ): Character[] {
   const changed = new Set(changedIds);
-  const rejected = new Set(rejectedNames);
-  return characters.filter(
-    (character) => changed.has(character.id) && !rejected.has(character.name)
-  );
+  return characters.filter((character) => changed.has(character.id));
 }
 
-// AIが「値なし」の代わりに返しがちな文字列（"null"等）や、一人称・代名詞
-// だけの自称（「（主）」等）。空文字と違い trim() では弾けない。
-// 完全に無効な値だけでなく「本当にそう呼ばれている可能性」も残る自称も
-// 含むため、ここでは捨てずに extractCharacters() 側で作者の承認を求める
-export const INVALID_NAME_PATTERN =
-  /^(null|undefined|不明|なし|n\/?a|none|[（(]?主[）)]?|主人公)$/i;
-// characterFileName() のファイル名切り詰め長と合わせた。これを超える場合は
-// 文章まるごとが name に入ってしまっている疑いが強い
-const MAX_NAME_LENGTH = 30;
-
-export function collect(
-  out: Array<{ data: ExtractedCharacter; chapters: number[] }>,
-  result: CharacterExtractResult,
-  chunk: Chunk
-): void {
-  const chapters: number[] = [];
-  if (chunk.chapterStart !== null) {
-    const end = chunk.chapterEnd ?? chunk.chapterStart;
-    for (let n = chunk.chapterStart; n <= end; n++) chapters.push(n);
-  }
-  const rawCharacters: unknown = result.characters;
-  if (!Array.isArray(rawCharacters)) return;
-
-  for (const raw of rawCharacters) {
-    const character = normalizeExtractedCharacter(raw);
-    if (!character) continue;
-    if (!evidenceIsGrounded(character.evidence, chunk.text)) continue;
-    out.push({ data: character, chapters });
-  }
-}
-
-/** AI応答を後段が安全に扱える形へ正規化する */
-export function normalizeExtractedCharacter(
-  raw: unknown
-): ExtractedCharacter | null {
-  if (!isRecord(raw)) return null;
-  const name = cleanRequiredString(raw.name);
-  if (!name || name.length > MAX_NAME_LENGTH) return null;
-
-  const character: ExtractedCharacter = {
-    name,
-    aliases: cleanStringArray(raw.aliases).filter((alias) => alias !== name),
+function describeRejectedCandidates(
+  rejected: RejectedCharacterCandidate[]
+): string {
+  const labels: Record<CharacterRejectionReason, string> = {
+    invalid_shape: "形式不正",
+    invalid_name: "人物名不正",
+    non_person: "人物以外",
+    collective: "集団",
+    ungrounded: "本文根拠なし",
   };
-
-  if (typeof raw.isMob === "boolean") {
-    character.isMob = raw.isMob;
+  const counts = new Map<CharacterRejectionReason, number>();
+  for (const candidate of rejected) {
+    counts.set(candidate.reason, (counts.get(candidate.reason) ?? 0) + 1);
   }
-
-  copyNullableString(character, raw, "role");
-  copyNullableString(character, raw, "personality");
-  copyNullableString(character, raw, "appearance");
-  copyNullableString(character, raw, "firstPerson");
-  copyNullableString(character, raw, "defaultSecondPerson");
-  copyNullableString(character, raw, "evidence");
-
-  if ("addressTerms" in raw) {
-    character.addressTerms = Array.isArray(raw.addressTerms)
-      ? raw.addressTerms.flatMap((item) => {
-          if (!isRecord(item)) return [];
-          const targetName = cleanRequiredString(item.targetName);
-          const term = cleanRequiredString(item.term);
-          if (!targetName || !term) return [];
-          return [
-            {
-              targetName,
-              term,
-              category: cleanNullableString(item.category),
-              context: cleanNullableString(item.context),
-              evidence: cleanNullableString(item.evidence),
-            },
-          ];
-        })
-      : [];
-  }
-
-  if ("relations" in raw) {
-    character.relations = Array.isArray(raw.relations)
-      ? raw.relations.flatMap((item) => {
-          if (!isRecord(item)) return [];
-          const relationName = cleanRequiredString(item.name);
-          const relation = cleanRequiredString(item.relation);
-          return relationName && relation
-            ? [{ name: relationName, relation }]
-            : [];
-        })
-      : [];
-  }
-
-  return character;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function cleanRequiredString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const cleaned = value.trim();
-  return cleaned || null;
-}
-
-function cleanNullableString(value: unknown): string | null {
-  return cleanRequiredString(value);
-}
-
-function cleanStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  const strings = value
-    .map(cleanRequiredString)
-    .filter((item): item is string => item !== null);
-  return [...new Set(strings)];
-}
-
-function copyNullableString<K extends keyof ExtractedCharacter>(
-  target: ExtractedCharacter,
-  source: Record<string, unknown>,
-  key: K
-): void {
-  if (!(key in source)) return;
-  target[key] = cleanNullableString(source[key]) as ExtractedCharacter[K];
-}
-
-/**
- * evidence が本文中に実在するか確認する。
- * 複数の引用が句点・改行区切りで1つの文字列に連結されていることがあるため、
- * いずれか1断片でも本文中に見つかれば根拠ありとする。
- * evidence が無い・短すぎて判定できない場合はAIが単に書かなかっただけの
- * 可能性が高いため、取りこぼしを避けて素通りさせる。
- */
-function evidenceIsGrounded(
-  evidence: string | null | undefined,
-  chunkText: string
-): boolean {
-  if (!evidence || !evidence.trim()) return true;
-  const segments = evidence
-    .split(/[\n。]/)
-    .map((s) => s.replace(/^[「『"'…\s]+|[」』"'…\s]+$/g, ""))
-    .filter((s) => s.length >= 4);
-  if (segments.length === 0) return true;
-  return segments.some((s) => chunkText.includes(s));
-}
-
-/**
- * 応答をJSONとして解析する。
- * 構造化出力を指定していても、モデルによっては前後に文字が付くことがある。
- */
-export function parseResult(text: string): CharacterExtractResult | null {
-  const attempts = [
-    text,
-    text.replace(/^[\s\S]*?```(?:json)?\s*/i, "").replace(/```[\s\S]*$/, ""),
-    extractBraces(text),
-  ];
-
-  for (const candidate of attempts) {
-    if (!candidate) continue;
-    try {
-      const parsed = JSON.parse(candidate.trim());
-      if (parsed && Array.isArray(parsed.characters)) {
-        return parsed as CharacterExtractResult;
-      }
-    } catch {
-      // 次の候補を試す
-    }
-  }
-  return null;
-}
-
-function extractBraces(text: string): string | null {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return null;
-  return text.slice(start, end + 1);
+  const details = [...counts]
+    .map(([reason, count]) => `${labels[reason]} ${count}`)
+    .join("、");
+  return `AI出力から除外 ${rejected.length} 件（${details}）`;
 }
 
 function describeChunk(chunk: Chunk): string {
