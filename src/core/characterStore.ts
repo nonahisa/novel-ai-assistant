@@ -42,21 +42,30 @@ export type CharacterPersistenceState = "not_saved" | "ambiguous";
 interface CharacterStoreErrorOptions {
   persistenceState?: CharacterPersistenceState;
   batchProgress?: CharacterStoreBatchProgress;
+  recoveryPaths?: string[];
 }
+
+export type CharacterStoreErrorKind =
+  | "modified_externally"
+  | "path_conflict"
+  | "unsaved_changes"
+  | "io_error";
 
 export class CharacterStoreError extends Error {
   readonly persistenceState: CharacterPersistenceState;
   readonly batchProgress: CharacterStoreBatchProgress | undefined;
+  readonly recoveryPaths: string[];
 
   constructor(
     message: string,
-    readonly kind: "modified_externally" | "path_conflict",
+    readonly kind: CharacterStoreErrorKind,
     options: CharacterStoreErrorOptions = {}
   ) {
     super(message);
     this.name = "CharacterStoreError";
     this.persistenceState = options.persistenceState ?? "not_saved";
     this.batchProgress = options.batchProgress;
+    this.recoveryPaths = options.recoveryPaths ?? [];
   }
 }
 
@@ -148,11 +157,28 @@ export class CharacterStore {
     return { characters, errors };
   }
 
+  /** 人物設定ディレクトリ内で、作者がまだ保存していないJSONを返す。 */
+  async dirtyDocumentPaths(): Promise<string[]> {
+    const characterDir = await this.dir();
+    return vscode.workspace.textDocuments
+      .filter((document) => {
+        const filePath = document.uri.fsPath;
+        return document.isDirty &&
+          path.extname(filePath).toLowerCase() === ".json" &&
+          isPathInside(characterDir, filePath);
+      })
+      .map((document) => document.uri.fsPath);
+  }
+
   async save(character: Character): Promise<void> {
     const validated = parseCharacter(character);
-    const prepared = await this.prepareSave(validated);
-    await this.ensureDir();
-    await this.persist(prepared);
+    try {
+      const prepared = await this.prepareSave(validated);
+      await this.ensureDir();
+      await this.persist(prepared);
+    } catch (error) {
+      throw asCharacterStoreError(error);
+    }
   }
 
   async saveAll(characters: Character[]): Promise<void> {
@@ -169,11 +195,27 @@ export class CharacterStore {
     }
 
     // 既知の競合で一部だけ保存されないよう、全件を最初に検証する。
-    const prepared = await Promise.all(
-      validated.map((character) => this.prepareSave(character))
-    );
-    if (prepared.length > 0) {
-      await this.ensureDir();
+    let prepared: PreparedCharacterSave[];
+    try {
+      prepared = await Promise.all(
+        validated.map((character) => this.prepareSave(character))
+      );
+      if (prepared.length > 0) {
+        await this.ensureDir();
+      }
+    } catch (error) {
+      if (error instanceof CharacterStoreError) throw error;
+      throw new CharacterStoreError(
+        "人物設定の保存前確認でファイル操作に失敗しました。",
+        "io_error",
+        {
+          batchProgress: {
+            completedIds: [],
+            ambiguousIds: [],
+            remainingIds: validated.map((character) => character.id),
+          },
+        }
+      );
     }
     const completedIds: string[] = [];
     for (let index = 0; index < prepared.length; index++) {
@@ -182,10 +224,11 @@ export class CharacterStore {
         await this.persist(item);
         completedIds.push(item.character.id);
       } catch (error) {
-        if (!(error instanceof CharacterStoreError)) throw error;
-        const ambiguous = error.persistenceState === "ambiguous";
-        throw new CharacterStoreError(error.message, error.kind, {
-          persistenceState: error.persistenceState,
+        const storeError = asCharacterStoreError(error);
+        const ambiguous = storeError.persistenceState === "ambiguous";
+        throw new CharacterStoreError(storeError.message, storeError.kind, {
+          persistenceState: storeError.persistenceState,
+          recoveryPaths: storeError.recoveryPaths,
           batchProgress: {
             completedIds: [...completedIds],
             ambiguousIds: ambiguous ? [item.character.id] : [],
@@ -243,9 +286,13 @@ export class CharacterStore {
       if (error instanceof AtomicWriteFileError) {
         throw new CharacterStoreError(error.message, error.kind, {
           persistenceState: error.persistenceState,
+          recoveryPaths: error.recoveryPaths,
         });
       }
-      throw error;
+      throw new CharacterStoreError(
+        `人物設定の一時ファイルを書き込めませんでした: ${errorMessage(error)}`,
+        "io_error"
+      );
     }
 
     if (snapshot && sourcePath && !samePath(sourcePath, prepared.destinationPath)) {
@@ -331,6 +378,14 @@ export class CharacterStore {
     destinationPath: string,
     snapshot: CharacterSnapshot | undefined
   ): Promise<void> {
+    const dirtyPaths = await this.dirtyDocumentPaths();
+    if (dirtyPaths.length > 0) {
+      throw new CharacterStoreError(
+        "人物設定に未保存の変更があります。保存してからもう一度実行してください。",
+        "unsaved_changes",
+        { recoveryPaths: dirtyPaths }
+      );
+    }
     const filesById = await this.findFilesById(id);
 
     if (!snapshot) {
@@ -412,12 +467,13 @@ export class CharacterStore {
     message: string,
     paths: string[]
   ): CharacterStoreError {
+    const recoveryPaths = paths.map((filePath) => vscode.Uri.file(filePath).fsPath);
     return new CharacterStoreError(
-      `${message} データを失わないため回復可能なファイルを残しました。手動で確認してください: ${paths.join(
+      `${message} データを失わないため回復可能なファイルを残しました。手動で確認してください: ${recoveryPaths.join(
         ", "
       )}`,
       "path_conflict",
-      { persistenceState: "ambiguous" }
+      { persistenceState: "ambiguous", recoveryPaths }
     );
   }
 }
@@ -428,6 +484,29 @@ function samePath(left: string, right: string): boolean {
   return process.platform === "win32"
     ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
     : normalizedLeft === normalizedRight;
+}
+
+function isPathInside(parentPath: string, candidatePath: string): boolean {
+  const normalizedParent = normalizePathForComparison(parentPath);
+  const normalizedCandidate = normalizePathForComparison(candidatePath);
+  const relative = path.relative(normalizedParent, normalizedCandidate);
+  return relative.length > 0 &&
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative);
+}
+
+function normalizePathForComparison(filePath: string): string {
+  const normalized = path.normalize(filePath);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function asCharacterStoreError(error: unknown): CharacterStoreError {
+  if (error instanceof CharacterStoreError) return error;
+  return new CharacterStoreError(
+    "人物設定の保存中にファイル操作で失敗しました。",
+    "io_error"
+  );
 }
 
 function errorMessage(error: unknown): string {

@@ -9,6 +9,8 @@ import {
   WorkConfig,
   WorkEntry,
 } from "../models/types";
+import { atomicWriteFile } from "./atomicWrite";
+import { hashBytes } from "./textFile";
 
 const STORAGE_KEY = "novelai.works";
 
@@ -92,6 +94,8 @@ export class WorkRegistry {
       });
     }
 
+    await ensureRecoveryIgnoreRule(normalized);
+
     await this.save([...works, entry]);
     return entry;
   }
@@ -105,6 +109,42 @@ export class WorkRegistry {
   refresh(): void {
     this._onDidChange.fire();
   }
+}
+
+/** 既存の作者記述をバイト単位で保ったまま、回復ディレクトリだけ除外する。 */
+async function ensureRecoveryIgnoreRule(folderPath: string): Promise<void> {
+  const gitignorePath = path.join(folderPath, ".gitignore");
+  const uri = vscode.Uri.file(gitignorePath);
+  let existing: Uint8Array;
+  try {
+    existing = await vscode.workspace.fs.readFile(uri);
+  } catch (error) {
+    if (!(error instanceof vscode.FileSystemError) || error.code !== "FileNotFound") {
+      throw error;
+    }
+    await atomicWriteFile(
+      gitignorePath,
+      new TextEncoder().encode(".novelai-recovery/\n"),
+      { mode: "create" }
+    );
+    return;
+  }
+
+  const text = new TextDecoder().decode(existing);
+  if (text.split(/\r\n|\n|\r/).some((line) => line.trim() === ".novelai-recovery/")) {
+    return;
+  }
+
+  const eol = text.includes("\r\n") ? "\r\n" : text.includes("\r") ? "\r" : "\n";
+  const separator = text.length === 0 || /(?:\r\n|\n|\r)$/.test(text) ? "" : eol;
+  const addition = new TextEncoder().encode(`${separator}.novelai-recovery/${eol}`);
+  const next = new Uint8Array(existing.length + addition.length);
+  next.set(existing);
+  next.set(addition, existing.length);
+  await atomicWriteFile(gitignorePath, next, {
+    mode: "replace",
+    expectedHash: hashBytes(existing),
+  });
 }
 
 /** 作品フォルダの各種パスを解決する */

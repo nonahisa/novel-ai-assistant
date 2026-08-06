@@ -1,5 +1,5 @@
 import * as path from "path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import * as workRegistry from "../../src/core/workRegistry";
 import type { WorkConfig, WorkEntry } from "../../src/models/types";
 import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
@@ -89,5 +89,61 @@ describe("作品設定", () => {
       files.get(Uri.file(path.join(root, ".gitignore")).fsPath)
     );
     expect(gitignore.split("\n")).toContain(".novelai-recovery/");
+  });
+
+  test("既存作品のgitignoreへ作者記述を保ったまま回復ルールを一度だけ追加する", async () => {
+    const root = "C:\\novels\\existing-work";
+    const configPath = Uri.file(path.join(root, ".aiwriter", "config.json")).fsPath;
+    const gitignorePath = Uri.file(path.join(root, ".gitignore")).fsPath;
+    const files = new Map<string, Uint8Array>([
+      [configPath, new TextEncoder().encode(JSON.stringify(validConfig))],
+      [gitignorePath, new TextEncoder().encode("# 作者の設定\r\nprivate-notes/\r\n")],
+    ]);
+    workspace.fs = {
+      readFile: async (uri: { fsPath: string }) => {
+        const bytes = files.get(uri.fsPath);
+        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+        return bytes;
+      },
+      createDirectory: async () => undefined,
+      readDirectory: async (uri: { fsPath: string }) =>
+        [...files.keys()]
+          .filter((filePath) => path.dirname(filePath) === uri.fsPath)
+          .map((filePath) => [path.basename(filePath), 1]),
+      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
+        files.set(uri.fsPath, bytes);
+      },
+      rename: async (
+        from: { fsPath: string },
+        to: { fsPath: string },
+        options?: { overwrite?: boolean }
+      ) => {
+        const bytes = files.get(from.fsPath);
+        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+        if (!options?.overwrite && files.has(to.fsPath)) {
+          throw new FileSystemError("exists", "FileExists");
+        }
+        files.set(to.fsPath, bytes);
+        files.delete(from.fsPath);
+      },
+      delete: async (uri: { fsPath: string }) => {
+        files.delete(uri.fsPath);
+      },
+    };
+    const makeContext = () => ({
+      globalState: {
+        get: <T>(_key: string, defaultValue: T): T => defaultValue,
+        update: vi.fn(async () => undefined),
+      },
+    });
+
+    await new workRegistry.WorkRegistry(makeContext() as never)
+      .addExisting(root, "既存作");
+    await new workRegistry.WorkRegistry(makeContext() as never)
+      .addExisting(root, "既存作");
+
+    const gitignore = new TextDecoder().decode(files.get(gitignorePath));
+    expect(gitignore).toContain("# 作者の設定\r\nprivate-notes/\r\n");
+    expect(gitignore.match(/^\.novelai-recovery\/$/gm)).toHaveLength(1);
   });
 });

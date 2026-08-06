@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as crypto from "crypto";
 import iconv = require("iconv-lite");
+import { diffArrays } from "diff";
 import { AtomicWriteFileError, atomicWriteFile } from "./atomicWrite";
 
 export type Encoding = "utf8" | "utf8-bom" | "shift_jis";
@@ -162,11 +163,12 @@ export async function writeTextFilePreservingFormat(
     out = out.replace(/\n+$/, "");
   }
 
-  if (original.eol !== "\n") {
-    out = out.replace(/\n/g, original.eol);
-  }
-
-  const bytes = encodeText(out, original.encoding);
+  const bytes = encodePreservingUnchangedBytes(
+    current,
+    out,
+    original.encoding,
+    original.eol
+  );
   if (!bytes) {
     return { ok: false, reason: "encoding_error" };
   }
@@ -193,21 +195,136 @@ export async function writeTextFilePreservingFormat(
   return { ok: true };
 }
 
-function encodeText(text: string, encoding: Encoding): Uint8Array | undefined {
+interface EncodedToken {
+  text: string;
+  bytes: Uint8Array;
+}
+
+/**
+ * 編集されていない文字の元バイト列を再利用する。
+ * CP932には同じ文字へ復号される複数の符号があるため、全文再エンコードでは
+ * 無変更箇所まで別バイトへ正規化されてしまう。
+ */
+function encodePreservingUnchangedBytes(
+  originalBytes: Uint8Array,
+  normalizedText: string,
+  encoding: Encoding,
+  preferredEol: Eol
+): Uint8Array | undefined {
+  const tokenized = tokenizeOriginalBytes(originalBytes, encoding);
+  if (tokenized.text === normalizedText) {
+    return originalBytes.slice();
+  }
+
+  const desiredTokens = Array.from(normalizedText);
+  const changes = diffArrays(
+    tokenized.tokens.map((token) => token.text),
+    desiredTokens
+  );
+  const output: Uint8Array[] = [];
+  let originalIndex = 0;
+
+  for (const change of changes) {
+    if (change.added) {
+      const encoded = encodeFragment(
+        change.value.join("").replace(/\n/g, preferredEol),
+        encoding
+      );
+      if (!encoded) return undefined;
+      output.push(encoded);
+      continue;
+    }
+
+    const count = change.value.length;
+    if (!change.removed) {
+      for (let index = 0; index < count; index += 1) {
+        output.push(tokenized.tokens[originalIndex + index].bytes);
+      }
+    }
+    originalIndex += count;
+  }
+
+  return concatenateBytes(tokenized.prefix, output);
+}
+
+function tokenizeOriginalBytes(
+  bytes: Uint8Array,
+  encoding: Encoding
+): { prefix: Uint8Array; tokens: EncodedToken[]; text: string } {
+  const bodyStart = encoding === "utf8-bom" ? 3 : 0;
+  const prefix = bytes.slice(0, bodyStart);
+  const tokens: EncodedToken[] = [];
+  let offset = bodyStart;
+
+  while (offset < bytes.length) {
+    const first = bytes[offset];
+    if (first === 0x0d) {
+      const length = bytes[offset + 1] === 0x0a ? 2 : 1;
+      tokens.push({ text: "\n", bytes: bytes.slice(offset, offset + length) });
+      offset += length;
+      continue;
+    }
+    if (first === 0x0a) {
+      tokens.push({ text: "\n", bytes: bytes.slice(offset, offset + 1) });
+      offset += 1;
+      continue;
+    }
+
+    const length = encoding === "shift_jis"
+      ? shiftJisCharacterLength(first)
+      : utf8CharacterLength(first);
+    const raw = bytes.slice(offset, Math.min(offset + length, bytes.length));
+    const text = encoding === "shift_jis"
+      ? iconv.decode(raw, "shift_jis")
+      : new TextDecoder("utf-8").decode(raw);
+    tokens.push({ text, bytes: raw });
+    offset += raw.length;
+  }
+
+  return {
+    prefix,
+    tokens,
+    text: tokens.map((token) => token.text).join(""),
+  };
+}
+
+function shiftJisCharacterLength(first: number): number {
+  return (first >= 0x81 && first <= 0x9f) || (first >= 0xe0 && first <= 0xfc)
+    ? 2
+    : 1;
+}
+
+function utf8CharacterLength(first: number): number {
+  if ((first & 0x80) === 0) return 1;
+  if ((first & 0xe0) === 0xc0) return 2;
+  if ((first & 0xf0) === 0xe0) return 3;
+  if ((first & 0xf8) === 0xf0) return 4;
+  return 1;
+}
+
+function encodeFragment(text: string, encoding: Encoding): Uint8Array | undefined {
   if (encoding === "shift_jis") {
     const encoded = iconv.encode(text, "shift_jis");
     // 代替文字への置換を許すと、保存成功に見えて本文を壊してしまう。
     return iconv.decode(encoded, "shift_jis") === text ? encoded : undefined;
   }
   const body = new TextEncoder().encode(text);
-  if (encoding === "utf8-bom") {
-    const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
-    const out = new Uint8Array(bom.length + body.length);
-    out.set(bom, 0);
-    out.set(body, bom.length);
-    return out;
-  }
   return body;
+}
+
+function concatenateBytes(
+  prefix: Uint8Array,
+  parts: Uint8Array[]
+): Uint8Array {
+  const length = parts.reduce((sum, part) => sum + part.length, prefix.length);
+  const result = new Uint8Array(length);
+  result.set(prefix);
+  let offset = prefix.length;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.length;
+  }
+  return result;
 }
 
 export function hashBytes(bytes: Uint8Array): string {

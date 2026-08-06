@@ -55,6 +55,7 @@ describe("人物ファイル保存", () => {
     disk.clear();
     directories.clear();
     directories.add(characterDir);
+    workspace.textDocuments = [];
 
     rename = vi.fn(
       async (
@@ -123,6 +124,31 @@ describe("人物ファイル保存", () => {
 
     expect(rename).not.toHaveBeenCalled();
     expect(disk.get(characterPath)).toEqual(changedByAuthorBytes);
+  });
+
+  test("大文字小文字が異なるWindowsパスの未保存人物JSONを拒否する", async () => {
+    const original = fixedCharacter("char_001", "灯");
+    const characterPath = diskPath(path.join(characterDir, characterFileName(original)));
+    const originalBytes = bytesFor(original);
+    disk.set(characterPath, originalBytes);
+    const store = new CharacterStore(work);
+    await store.loadAll();
+    workspace.textDocuments = [{
+      uri: Uri.file(characterPath.toUpperCase()),
+      isDirty: true,
+      getText: () => "作者が編集中",
+      save: vi.fn(async () => false),
+    }];
+
+    await expect(
+      store.save({ ...original, personality: "AIが更新" })
+    ).rejects.toMatchObject({
+      kind: "unsaved_changes",
+      persistenceState: "not_saved",
+    });
+
+    expect(rename).not.toHaveBeenCalled();
+    expect(disk.get(characterPath)).toEqual(originalBytes);
   });
 
   test("名前変更先に別ファイルがある場合は両方を残す", async () => {
@@ -254,6 +280,35 @@ describe("人物ファイル保存", () => {
 
     expect(disk.has(firstPath)).toBe(true);
     expect(disk.get(secondPath)).toEqual(createdByAuthor);
+  });
+
+  test("先行保存後の生のステージ書込失敗を型付き進捗へ変換する", async () => {
+    const first = fixedCharacter("char_001", "灯");
+    const second = fixedCharacter("char_002", "澪");
+    const firstPath = diskPath(path.join(characterDir, characterFileName(first)));
+    const secondPath = diskPath(path.join(characterDir, characterFileName(second)));
+    const baseWriteFile = workspace.fs.writeFile;
+    workspace.fs.writeFile = vi.fn(async (uri, bytes) => {
+      if (uri.fsPath.startsWith(`${secondPath}.novelai-`)) {
+        throw new FileSystemError("staging denied", "NoPermissions");
+      }
+      await baseWriteFile(uri, bytes);
+    });
+    const store = new CharacterStore(work);
+    await store.loadAll();
+
+    await expect(store.saveAll([first, second])).rejects.toMatchObject({
+      kind: "io_error",
+      persistenceState: "not_saved",
+      batchProgress: {
+        completedIds: ["char_001"],
+        ambiguousIds: [],
+        remainingIds: ["char_002"],
+      },
+    });
+
+    expect(disk.has(firstPath)).toBe(true);
+    expect(disk.has(secondPath)).toBe(false);
   });
 
   test("未変更の人物は原子的に保存し作者メモと資料注記を保つ", async () => {
@@ -425,6 +480,7 @@ describe("人物ファイル保存", () => {
     await expect(store.saveAll([renamed])).rejects.toMatchObject({
       kind: "path_conflict",
       persistenceState: "ambiguous",
+      recoveryPaths: expect.arrayContaining([oldPath, newPath]),
       batchProgress: {
         completedIds: [],
         ambiguousIds: ["char_001"],

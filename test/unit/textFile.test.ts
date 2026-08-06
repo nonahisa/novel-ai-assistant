@@ -129,6 +129,91 @@ describe("本文形式を保持した保存", () => {
     expect(new TextDecoder().decode(savedBytes)).toBe("灯\n翠\n");
   });
 
+  test("混在したCRLF・LF・CRを無変更箇所では元のバイト列のまま残す", async () => {
+    const originalBytes = utf8("甲\r\n乙\n丙\r丁");
+    const original = decodeBytes(originalBytes);
+    files.set(fileKey(path), originalBytes);
+
+    const result = await writeTextFilePreservingFormat(
+      path,
+      "甲\n乙改\n丙\n丁",
+      original,
+      original.hash
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(savedBytes).toEqual(utf8("甲\r\n乙改\n丙\r丁"));
+  });
+
+  test.each([
+    ["NEC選定IBM拡張文字", [0xee, 0xe0]],
+    ["NEC特殊文字", [0x87, 0x90]],
+    ["IBM拡張文字", [0xed, 0x40]],
+  ])("無変更のCP932 %s (%s) を元のバイト列のまま残す", async (_label, raw) => {
+    const special = new Uint8Array(raw);
+    const suffix = shiftJis("\r\n末尾");
+    const originalBytes = new Uint8Array(special.length + suffix.length);
+    originalBytes.set(special);
+    originalBytes.set(suffix, special.length);
+    const original = decodeBytes(originalBytes);
+    files.set(fileKey(path), originalBytes);
+
+    const result = await writeTextFilePreservingFormat(
+      path,
+      original.text,
+      original,
+      original.hash
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(savedBytes).toEqual(originalBytes);
+  });
+
+  test("CP932の小さな編集は変更文字のバイトだけを差し替える", async () => {
+    const prefix = new Uint8Array([0xee, 0xe0, 0x0d, 0x0a]);
+    const editable = shiftJis("旧");
+    const suffix = new Uint8Array([0x0a, 0x87, 0x90, 0x0d, 0xed, 0x40]);
+    const originalBytes = new Uint8Array(prefix.length + editable.length + suffix.length);
+    originalBytes.set(prefix);
+    originalBytes.set(editable, prefix.length);
+    originalBytes.set(suffix, prefix.length + editable.length);
+    const original = decodeBytes(originalBytes);
+    files.set(fileKey(path), originalBytes);
+
+    const result = await writeTextFilePreservingFormat(
+      path,
+      original.text.replace("旧", "新"),
+      original,
+      original.hash
+    );
+    const changed = shiftJis("新");
+    const expected = new Uint8Array(prefix.length + changed.length + suffix.length);
+    expected.set(prefix);
+    expected.set(changed, prefix.length);
+    expected.set(suffix, prefix.length + changed.length);
+
+    expect(result).toEqual({ ok: true });
+    expect(savedBytes).toEqual(expected);
+  });
+
+  test("大きな本文の一点編集でも周囲の非正規CP932バイトを保持する", async () => {
+    const repeated = Array.from({ length: 20_000 }, () => [0xee, 0xe0, 0x0a]).flat();
+    const originalBytes = new Uint8Array([...repeated, ...shiftJis("旧"), ...repeated]);
+    const original = decodeBytes(originalBytes);
+    files.set(fileKey(path), originalBytes);
+
+    const result = await writeTextFilePreservingFormat(
+      path,
+      original.text.replace("旧", "新"),
+      original,
+      original.hash
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(savedBytes?.slice(0, repeated.length)).toEqual(originalBytes.slice(0, repeated.length));
+    expect(savedBytes?.slice(-repeated.length)).toEqual(originalBytes.slice(-repeated.length));
+  });
+
   test.each([
     ["ハッシュ不一致", "modified_externally"],
     ["未保存バッファ", "unsaved_changes"],

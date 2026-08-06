@@ -118,6 +118,75 @@ describe("原稿の原子的な保存", () => {
     expect(files.get(destinationPath)).toEqual(changedByAuthor);
   });
 
+  test("置換renameが失敗しても正規パスに元内容を残し一時ファイルを片付ける", async () => {
+    const original = new Uint8Array([0x51, 0x52]);
+    const replacement = new Uint8Array([0x53, 0x54]);
+    files.set(destinationPath, original);
+    const baseRename = workspace.fs.rename;
+    workspace.fs.rename = vi.fn(async (from, to, options) => {
+      if (to.fsPath === destinationPath) {
+        throw new FileSystemError("replace denied", "NoPermissions");
+      }
+      await baseRename(from, to, options);
+    });
+
+    await expect(
+      atomicWriteFile(path, replacement, {
+        mode: "replace",
+        expectedHash: sha256(original),
+      })
+    ).rejects.toMatchObject({ persistenceState: "not_saved" });
+
+    expect(files.get(destinationPath)).toEqual(original);
+    expect([...files.keys()].some((filePath) => filePath.endsWith(".tmp"))).toBe(false);
+    expect(
+      [...files.entries()].some(
+        ([filePath, bytes]) => filePath.endsWith(".bak") && bytes === original
+      )
+    ).toBe(true);
+  });
+
+  test("回復コピー作成中の外部編集を検出して正規パスの新しい内容を残す", async () => {
+    const original = new Uint8Array([0x61, 0x62]);
+    const changedByAuthor = new Uint8Array([0x63, 0x64]);
+    const replacement = new Uint8Array([0x65, 0x66]);
+    files.set(destinationPath, original);
+    workspace.fs.createDirectory = vi.fn(async (uri: { fsPath: string }) => {
+      directories.add(uri.fsPath);
+      files.set(destinationPath, changedByAuthor);
+    });
+
+    await expect(
+      atomicWriteFile(path, replacement, {
+        mode: "replace",
+        expectedHash: sha256(original),
+      })
+    ).rejects.toMatchObject({
+      kind: "modified_externally",
+      persistenceState: "not_saved",
+    });
+
+    expect(files.get(destinationPath)).toEqual(changedByAuthor);
+    expect([...files.keys()].some((filePath) => filePath.endsWith(".tmp"))).toBe(false);
+  });
+
+  test("ガード付き置換は正規パスを空にせず一度のoverwrite renameで確定する", async () => {
+    const original = new Uint8Array([0x71, 0x72]);
+    const replacement = new Uint8Array([0x73, 0x74]);
+    files.set(destinationPath, original);
+
+    await atomicWriteFile(path, replacement, {
+      mode: "replace",
+      expectedHash: sha256(original),
+    });
+
+    const rename = workspace.fs.rename as ReturnType<typeof vi.fn>;
+    expect(rename).toHaveBeenCalledTimes(1);
+    expect(rename.mock.calls[0]?.[1]).toMatchObject({ fsPath: destinationPath });
+    expect(rename.mock.calls[0]?.[2]).toEqual({ overwrite: true });
+    expect(files.get(destinationPath)).toEqual(replacement);
+  });
+
   test("回復ディレクトリ準備失敗は配置前の未保存として元内容を保つ", async () => {
     const original = new Uint8Array([0x05, 0x06]);
     const replacement = new Uint8Array([0x07, 0x08]);

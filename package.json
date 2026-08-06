@@ -271,6 +271,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
+    "diff": "^8.0.4",
     "iconv-lite": "^0.7.3"
   },
   "allowScripts": {
