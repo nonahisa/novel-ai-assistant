@@ -353,6 +353,78 @@ describe("人物ファイル保存", () => {
     });
   });
 
+  test("同じパスの未保存提案より先に独立した名前変更と新規人物を完了する", async () => {
+    const samePath = fixedCharacter("char_001", "灯");
+    const renameSource = fixedCharacter("char_002", "旧名");
+    const renamed = { ...renameSource, name: "新名" };
+    const created = fixedCharacter("char_003", "新規");
+    const samePathFile = diskPath(
+      path.join(characterDir, characterFileName(samePath))
+    );
+    const renameSourceFile = diskPath(
+      path.join(characterDir, characterFileName(renameSource))
+    );
+    const renamedFile = diskPath(
+      path.join(characterDir, characterFileName(renamed))
+    );
+    const createdFile = diskPath(
+      path.join(characterDir, characterFileName(created))
+    );
+    const samePathBytes = bytesFor(samePath);
+    const renameSourceBytes = bytesFor(renameSource);
+    disk.set(samePathFile, samePathBytes);
+    disk.set(renameSourceFile, renameSourceBytes);
+    const store = new CharacterStore(work);
+    await store.loadAll();
+
+    let saveError: CharacterStoreError | undefined;
+    try {
+      await store.saveAll([
+        { ...samePath, personality: "手動適用する更新" },
+        renamed,
+        created,
+      ]);
+    } catch (error) {
+      expect(error).toBeInstanceOf(CharacterStoreError);
+      saveError = error as CharacterStoreError;
+    }
+
+    expect(saveError).toMatchObject({
+      kind: "path_conflict",
+      persistenceState: "not_saved",
+      recoveryPaths: expect.arrayContaining([samePathFile]),
+      batchProgress: {
+        completedIds: ["char_002", "char_003"],
+        ambiguousIds: [],
+        remainingIds: ["char_001"],
+      },
+    });
+    const progress = saveError?.batchProgress;
+    expect(new Set([
+      ...(progress?.completedIds ?? []),
+      ...(progress?.ambiguousIds ?? []),
+      ...(progress?.remainingIds ?? []),
+    ]).size).toBe(3);
+    expect(disk.get(samePathFile)).toEqual(samePathBytes);
+    const proposalPath = saveError?.recoveryPaths.find(
+      (filePath) => filePath !== samePathFile
+    );
+    expect(proposalPath).toBeDefined();
+    expect(
+      JSON.parse(new TextDecoder().decode(disk.get(proposalPath!)))
+    ).toMatchObject({ personality: "手動適用する更新" });
+    expect(disk.has(renameSourceFile)).toBe(false);
+    expect(disk.has(renamedFile)).toBe(true);
+    expect(disk.has(createdFile)).toBe(true);
+    expect(
+      [...disk.entries()].some(
+        ([filePath, bytes]) =>
+          path.dirname(filePath).endsWith(".novelai-recovery") &&
+          bytes === renameSourceBytes
+      )
+    ).toBe(true);
+  });
+
   test("新規人物の保存先が読み込み後に作られた場合は上書きしない", async () => {
     const created = fixedCharacter("char_003", "灯");
     const characterPath = diskPath(path.join(characterDir, characterFileName(created)));

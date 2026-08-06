@@ -217,9 +217,15 @@ export class CharacterStore {
         }
       );
     }
+    // 既存パスのガード付き置換は必ず未保存になるため、独立して安全に配置できる
+    // 新規人物・名前変更先を先に処理する。各群の入力順は維持し、曖昧な失敗では停止する。
+    const persistenceOrder = [
+      ...prepared.filter((item) => !isGuardedSamePathSave(item)),
+      ...prepared.filter((item) => isGuardedSamePathSave(item)),
+    ];
     const completedIds: string[] = [];
-    for (let index = 0; index < prepared.length; index++) {
-      const item = prepared[index];
+    for (let index = 0; index < persistenceOrder.length; index++) {
+      const item = persistenceOrder[index];
       try {
         await this.persist(item);
         completedIds.push(item.character.id);
@@ -234,7 +240,7 @@ export class CharacterStore {
             ambiguousIds: ambiguous ? [item.character.id] : [],
             remainingIds: [
               ...(!ambiguous ? [item.character.id] : []),
-              ...prepared
+              ...persistenceOrder
                 .slice(index + 1)
                 .map((pending) => pending.character.id),
             ],
@@ -484,6 +490,11 @@ export class CharacterStore {
       { persistenceState: "ambiguous", recoveryPaths }
     );
   }
+}
+
+function isGuardedSamePathSave(prepared: PreparedCharacterSave): boolean {
+  const sourcePath = prepared.snapshot?.filePath;
+  return sourcePath !== undefined && samePath(sourcePath, prepared.destinationPath);
 }
 
 function samePath(left: string, right: string): boolean {
