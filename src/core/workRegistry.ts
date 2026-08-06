@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "path";
+import { open } from "node:fs/promises";
 import {
   AIWRITER_DIR,
   CONFIG_FILE,
@@ -10,7 +11,6 @@ import {
   WorkEntry,
 } from "../models/types";
 import { atomicWriteFile } from "./atomicWrite";
-import { hashBytes } from "./textFile";
 
 const STORAGE_KEY = "novelai.works";
 
@@ -23,6 +23,24 @@ export class WorkRegistry {
   readonly onDidChange = this._onDidChange.event;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
+
+  /** 旧版ですでに登録済みの作品にも、起動時の安全な冪等migrationを適用する。 */
+  async initialize(): Promise<void> {
+    const failedTitles: string[] = [];
+    for (const work of this.list()) {
+      try {
+        await ensureRecoveryIgnoreRule(work.folderPath);
+      } catch {
+        // 作品登録や起動を壊さず、次回起動でも同じmigrationを再試行する。
+        failedTitles.push(work.title);
+      }
+    }
+    if (failedTitles.length > 0) {
+      await vscode.window.showWarningMessage(
+        `回復ファイルの除外設定を更新できない作品があります。次回起動時に再試行します: ${failedTitles.join("、")}`
+      );
+    }
+  }
 
   list(): WorkEntry[] {
     const raw = this.context.globalState.get<WorkEntry[]>(STORAGE_KEY, []);
@@ -131,20 +149,53 @@ async function ensureRecoveryIgnoreRule(folderPath: string): Promise<void> {
   }
 
   const text = new TextDecoder().decode(existing);
-  if (text.split(/\r\n|\n|\r/).some((line) => line.trim() === ".novelai-recovery/")) {
+  if (hasRecoveryIgnoreRule(existing)) {
     return;
   }
 
   const eol = text.includes("\r\n") ? "\r\n" : text.includes("\r") ? "\r" : "\n";
   const separator = text.length === 0 || /(?:\r\n|\n|\r)$/.test(text) ? "" : eol;
   const addition = new TextEncoder().encode(`${separator}.novelai-recovery/${eol}`);
-  const next = new Uint8Array(existing.length + addition.length);
-  next.set(existing);
-  next.set(addition, existing.length);
-  await atomicWriteFile(gitignorePath, next, {
-    mode: "replace",
-    expectedHash: hashBytes(existing),
-  });
+  // O_APPEND の一回の追記だけを使い、既存の作者バイトを置換・切り詰めしない。
+  const handle = await open(gitignorePath, "a");
+  try {
+    let offset = 0;
+    while (offset < addition.length) {
+      const result = await handle.write(
+        addition,
+        offset,
+        addition.length - offset,
+        null
+      );
+      if (result.bytesWritten === 0) {
+        throw new Error(".gitignore への追記が完了しませんでした。");
+      }
+      offset += result.bytesWritten;
+    }
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+
+  const migrated = await vscode.workspace.fs.readFile(uri);
+  if (
+    migrated.length < existing.length ||
+    !sameBytes(migrated.subarray(0, existing.length), existing) ||
+    !hasRecoveryIgnoreRule(migrated)
+  ) {
+    throw new Error(".gitignore の作者記述を保持したmigrationを確認できませんでした。");
+  }
+}
+
+function hasRecoveryIgnoreRule(bytes: Uint8Array): boolean {
+  return new TextDecoder().decode(bytes)
+    .split(/\r\n|\n|\r/)
+    .some((line) => line.trim() === ".novelai-recovery/");
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.length === right.length &&
+    left.every((byte, index) => byte === right[index]);
 }
 
 /** 作品フォルダの各種パスを解決する */

@@ -26,8 +26,9 @@ import {
 } from "./features/extractCharacters";
 import { pathExists } from "./core/fileSystem";
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const registry = new WorkRegistry(context);
+  await registry.initialize();
   const treeProvider = new WorkTreeProvider(registry);
   const aiRegistry = new AIRegistry(context);
 

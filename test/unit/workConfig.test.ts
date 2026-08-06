@@ -1,4 +1,12 @@
 import * as path from "path";
+import * as os from "os";
+import {
+  mkdir,
+  mkdtemp,
+  readFile as readHostFile,
+  rm,
+  writeFile as writeHostFile,
+} from "node:fs/promises";
 import { describe, expect, test, vi } from "vitest";
 import * as workRegistry from "../../src/core/workRegistry";
 import type { WorkConfig, WorkEntry } from "../../src/models/types";
@@ -92,58 +100,78 @@ describe("作品設定", () => {
   });
 
   test("既存作品のgitignoreへ作者記述を保ったまま回復ルールを一度だけ追加する", async () => {
-    const root = "C:\\novels\\existing-work";
-    const configPath = Uri.file(path.join(root, ".aiwriter", "config.json")).fsPath;
-    const gitignorePath = Uri.file(path.join(root, ".gitignore")).fsPath;
-    const files = new Map<string, Uint8Array>([
-      [configPath, new TextEncoder().encode(JSON.stringify(validConfig))],
-      [gitignorePath, new TextEncoder().encode("# 作者の設定\r\nprivate-notes/\r\n")],
-    ]);
-    workspace.fs = {
-      readFile: async (uri: { fsPath: string }) => {
-        const bytes = files.get(uri.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        return bytes;
-      },
-      createDirectory: async () => undefined,
-      readDirectory: async (uri: { fsPath: string }) =>
-        [...files.keys()]
-          .filter((filePath) => path.dirname(filePath) === uri.fsPath)
-          .map((filePath) => [path.basename(filePath), 1]),
-      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-        files.set(uri.fsPath, bytes);
-      },
-      rename: async (
-        from: { fsPath: string },
-        to: { fsPath: string },
-        options?: { overwrite?: boolean }
-      ) => {
-        const bytes = files.get(from.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        if (!options?.overwrite && files.has(to.fsPath)) {
-          throw new FileSystemError("exists", "FileExists");
-        }
-        files.set(to.fsPath, bytes);
-        files.delete(from.fsPath);
-      },
-      delete: async (uri: { fsPath: string }) => {
-        files.delete(uri.fsPath);
-      },
-    };
-    const makeContext = () => ({
-      globalState: {
-        get: <T>(_key: string, defaultValue: T): T => defaultValue,
-        update: vi.fn(async () => undefined),
-      },
-    });
+    const root = await mkdtemp(path.join(os.tmpdir(), "novelai-existing-work-"));
+    try {
+      const configPath = path.join(root, ".aiwriter", "config.json");
+      const gitignorePath = path.join(root, ".gitignore");
+      const authorBytes = new TextEncoder().encode(
+        "# 作者の設定\r\nprivate-notes/\r\n"
+      );
+      await mkdir(path.dirname(configPath));
+      await writeHostFile(configPath, JSON.stringify(validConfig));
+      await writeHostFile(gitignorePath, authorBytes);
+      workspace.fs = {
+        readFile: async (uri: { fsPath: string }) =>
+          new Uint8Array(await readHostFile(uri.fsPath)),
+      };
+      const makeContext = () => ({
+        globalState: {
+          get: <T>(_key: string, defaultValue: T): T => defaultValue,
+          update: vi.fn(async () => undefined),
+        },
+      });
 
-    await new workRegistry.WorkRegistry(makeContext() as never)
-      .addExisting(root, "既存作");
-    await new workRegistry.WorkRegistry(makeContext() as never)
-      .addExisting(root, "既存作");
+      await new workRegistry.WorkRegistry(makeContext() as never)
+        .addExisting(root, "既存作");
+      await new workRegistry.WorkRegistry(makeContext() as never)
+        .addExisting(root, "既存作");
 
-    const gitignore = new TextDecoder().decode(files.get(gitignorePath));
-    expect(gitignore).toContain("# 作者の設定\r\nprivate-notes/\r\n");
-    expect(gitignore.match(/^\.novelai-recovery\/$/gm)).toHaveLength(1);
+      const migrated = new Uint8Array(await readHostFile(gitignorePath));
+      expect(migrated.slice(0, authorBytes.length)).toEqual(authorBytes);
+      const gitignore = new TextDecoder().decode(migrated);
+      expect(gitignore.match(/^\.novelai-recovery\/$/gm)).toHaveLength(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("登録済み作品を再登録せず起動ごとに冪等migrationする", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "novelai-registry-migration-"));
+    try {
+      const gitignorePath = path.join(root, ".gitignore");
+      const authorBytes = new TextEncoder().encode(
+        "# 作者が管理する除外\r\nprivate-draft/\r\n"
+      );
+      await writeHostFile(gitignorePath, authorBytes);
+      workspace.fs = {
+        readFile: async (uri: { fsPath: string }) =>
+          new Uint8Array(await readHostFile(uri.fsPath)),
+      };
+      const registered = {
+        id: "work_existing",
+        title: "登録済み作品",
+        folderPath: root,
+        registeredAt: "2026-08-06T00:00:00.000Z",
+      };
+      const update = vi.fn(async () => undefined);
+      const context = {
+        globalState: {
+          get: <T>(_key: string, defaultValue: T): T =>
+            [registered] as T,
+          update,
+        },
+      };
+
+      await new workRegistry.WorkRegistry(context as never).initialize();
+      await new workRegistry.WorkRegistry(context as never).initialize();
+
+      const migrated = new Uint8Array(await readHostFile(gitignorePath));
+      expect(migrated.slice(0, authorBytes.length)).toEqual(authorBytes);
+      const text = new TextDecoder().decode(migrated);
+      expect(text.match(/^\.novelai-recovery\/$/gm)).toHaveLength(1);
+      expect(update).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
