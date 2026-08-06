@@ -8,11 +8,13 @@
 
 ## インストール
 
-VS Codeの「拡張機能」ビュー右上の `...` →「VSIXからのインストール」を選び、`novel-ai-assistant-0.0.1.vsix` を指定します。コマンドラインでもインストールできます。
+ダウンロードした `novel-ai-assistant-0.0.1.vsix` と同じフォルダでPowerShellを開き、次を実行します。新規インストールと既存の0.0.1の上書き更新の両方に使えます。
 
 ```powershell
 code --install-extension .\novel-ai-assistant-0.0.1.vsix --force
 ```
+
+画面から操作する場合は、VS Codeの「拡張機能」ビュー右上の `...` →「VSIXからのインストール」を選び、同じVSIXファイルを指定します。
 
 インストール後にVS Codeを再読み込みすると、左端のアクティビティバーに本のアイコン（**小説執筆**）が追加されます。対応バージョンはVS Code 1.90.0以降です。
 
