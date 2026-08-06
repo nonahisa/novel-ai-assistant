@@ -54,8 +54,8 @@ export class ClaudeProvider implements AIProvider {
     }
     return new Anthropic({
       apiKey,
-      // 既定の2回リトライは残す。ただしタイムアウトは呼び出し側の設定に合わせる
-      maxRetries: 2,
+      // 課金を伴うため、SDKの暗黙リトライは行わない。thinking拒否だけ generate 内で1回再試行する。
+      maxRetries: 0,
       timeout: this.requestTimeoutMs,
     });
   }
@@ -115,7 +115,7 @@ export class ClaudeProvider implements AIProvider {
         infos.push(info);
       }
     } catch (e) {
-      throw toAIError(e);
+      throw toClaudeAIError(e);
     }
     return infos;
   }
@@ -156,7 +156,7 @@ export class ClaudeProvider implements AIProvider {
       });
       return res.input_tokens;
     } catch (e) {
-      throw toAIError(e);
+      throw toClaudeAIError(e);
     }
   }
 
@@ -215,10 +215,10 @@ export class ClaudeProvider implements AIProvider {
         try {
           res = await client.messages.create(body, { signal: params.signal });
         } catch (e2) {
-          throw toAIError(e2);
+          throw toClaudeAIError(e2);
         }
       } else {
-        throw toAIError(e);
+        throw toClaudeAIError(e);
       }
     }
 
@@ -354,12 +354,13 @@ function isThinkingRejection(e: unknown): boolean {
 }
 
 function describeError(e: unknown): string {
-  const err = toAIError(e);
+  const err = toClaudeAIError(e);
   return err.message;
 }
 
 /** SDKの型付き例外を、UIが扱いやすい AIError へ変換する */
-function toAIError(e: unknown): AIError {
+export function toClaudeAIError(error: unknown): AIError {
+  const e = error;
   if (e instanceof AIError) return e;
 
   if (e instanceof Anthropic.AuthenticationError) {
@@ -396,6 +397,9 @@ function toAIError(e: unknown): AIError {
       "timeout",
       e.message
     );
+  }
+  if (e instanceof Anthropic.APIUserAbortError) {
+    return new AIError("処理が中止されました。", "aborted", e.message);
   }
   if (e instanceof Anthropic.APIConnectionError) {
     return new AIError(

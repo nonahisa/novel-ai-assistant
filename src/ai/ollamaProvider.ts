@@ -253,7 +253,7 @@ export class OllamaProvider implements AIProvider {
 
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
-        if (response.status === 404 && /model/i.test(detail)) {
+        if (response.status === 404) {
           throw new AIError("モデルが見つかりません。", "model_not_found", detail);
         }
         throw new AIError(
