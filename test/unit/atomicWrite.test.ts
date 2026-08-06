@@ -118,14 +118,14 @@ describe("原稿の原子的な保存", () => {
     expect(files.get(destinationPath)).toEqual(changedByAuthor);
   });
 
-  test("置換renameが失敗しても正規パスに元内容を残し一時ファイルを片付ける", async () => {
+  test("提案内容を回復パスへ移動できなくても正規パスと一時ファイルを残す", async () => {
     const original = new Uint8Array([0x51, 0x52]);
     const replacement = new Uint8Array([0x53, 0x54]);
     files.set(destinationPath, original);
     const baseRename = workspace.fs.rename;
     workspace.fs.rename = vi.fn(async (from, to, options) => {
-      if (to.fsPath === destinationPath) {
-        throw new FileSystemError("replace denied", "NoPermissions");
+      if (to.fsPath.endsWith(".bak")) {
+        throw new FileSystemError("recovery denied", "NoPermissions");
       }
       await baseRename(from, to, options);
     });
@@ -138,12 +138,12 @@ describe("原稿の原子的な保存", () => {
     ).rejects.toMatchObject({ persistenceState: "not_saved" });
 
     expect(files.get(destinationPath)).toEqual(original);
-    expect([...files.keys()].some((filePath) => filePath.endsWith(".tmp"))).toBe(false);
+    expect([...files.keys()].some((filePath) => filePath.endsWith(".tmp"))).toBe(true);
     expect(
       [...files.entries()].some(
-        ([filePath, bytes]) => filePath.endsWith(".bak") && bytes === original
+        ([filePath]) => filePath.endsWith(".bak")
       )
-    ).toBe(true);
+    ).toBe(false);
   });
 
   test("回復コピー作成中の外部編集を検出して正規パスの新しい内容を残す", async () => {
@@ -170,21 +170,64 @@ describe("原稿の原子的な保存", () => {
     expect([...files.keys()].some((filePath) => filePath.endsWith(".tmp"))).toBe(false);
   });
 
-  test("ガード付き置換は正規パスを空にせず一度のoverwrite renameで確定する", async () => {
+  test("ガード付き置換は正規パスに触れず提案内容を回復パスへ残す", async () => {
     const original = new Uint8Array([0x71, 0x72]);
     const replacement = new Uint8Array([0x73, 0x74]);
     files.set(destinationPath, original);
 
-    await atomicWriteFile(path, replacement, {
-      mode: "replace",
-      expectedHash: sha256(original),
+    await expect(
+      atomicWriteFile(path, replacement, {
+        mode: "replace",
+        expectedHash: sha256(original),
+      })
+    ).rejects.toMatchObject({
+      kind: "path_conflict",
+      persistenceState: "not_saved",
+      message: expect.stringContaining("手動"),
     });
 
     const rename = workspace.fs.rename as ReturnType<typeof vi.fn>;
     expect(rename).toHaveBeenCalledTimes(1);
-    expect(rename.mock.calls[0]?.[1]).toMatchObject({ fsPath: destinationPath });
-    expect(rename.mock.calls[0]?.[2]).toEqual({ overwrite: true });
-    expect(files.get(destinationPath)).toEqual(replacement);
+    expect(rename.mock.calls[0]?.[1]?.fsPath).toMatch(/\.bak$/);
+    expect(rename.mock.calls[0]?.[2]).toEqual({ overwrite: false });
+    expect(files.get(destinationPath)).toEqual(original);
+    expect(
+      [...files.entries()].some(
+        ([filePath, bytes]) => filePath.endsWith(".bak") && bytes === replacement
+      )
+    ).toBe(true);
+  });
+
+  test("最終読取後に作者が保存しても安全なCASが無ければoverwriteせずfail closedにする", async () => {
+    const original = new Uint8Array([0x81, 0x82]);
+    const changedByAuthor = new Uint8Array([0x83, 0x84]);
+    const replacement = new Uint8Array([0x85, 0x86]);
+    files.set(destinationPath, original);
+    const baseReadFile = workspace.fs.readFile;
+    let destinationReads = 0;
+    workspace.fs.readFile = vi.fn(async (uri: { fsPath: string }) => {
+      const bytes = await baseReadFile(uri);
+      if (uri.fsPath === destinationPath && ++destinationReads === 1) {
+        queueMicrotask(() => files.set(destinationPath, changedByAuthor));
+      }
+      return bytes;
+    });
+
+    await expect(
+      atomicWriteFile(path, replacement, {
+        mode: "replace",
+        expectedHash: sha256(original),
+      })
+    ).rejects.toMatchObject({
+      kind: "path_conflict",
+      persistenceState: "not_saved",
+    });
+
+    expect(files.get(destinationPath)).toEqual(changedByAuthor);
+    const rename = workspace.fs.rename as ReturnType<typeof vi.fn>;
+    expect(
+      rename.mock.calls.some((call) => call[1]?.fsPath === destinationPath)
+    ).toBe(false);
   });
 
   test("回復ディレクトリ準備失敗は配置前の未保存として元内容を保つ", async () => {
@@ -205,7 +248,12 @@ describe("原稿の原子的な保存", () => {
       persistenceState: "not_saved",
     });
 
-    expect(files).toEqual(new Map([[destinationPath, original]]));
+    expect(files.get(destinationPath)).toEqual(original);
+    expect(
+      [...files.entries()].some(
+        ([filePath, bytes]) => filePath.endsWith(".tmp") && bytes === replacement
+      )
+    ).toBe(true);
   });
 
   test("一時ファイル書き込み中に作られた保存先を上書きしない", async () => {
@@ -227,17 +275,15 @@ describe("原稿の原子的な保存", () => {
     expect(files.get(destinationPath)).toEqual(createdByAuthor);
   });
 
-  test("配置後の確認中に新ファイルが消えても元内容の回復ファイルを残す", async () => {
+  test("提案退避後に保存先を読めなくても未保存として提案内容を残す", async () => {
     const original = new Uint8Array([0x11, 0x12]);
     const replacement = new Uint8Array([0x13, 0x14]);
     files.set(destinationPath, original);
-    let backupReads = 0;
     workspace.fs.readFile = vi.fn(async (uri: { fsPath: string }) => {
       const bytes = files.get(uri.fsPath);
       if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      if (uri.fsPath.endsWith(".bak")) {
-        backupReads += 1;
-        if (backupReads === 2) files.delete(destinationPath);
+      if (uri.fsPath === destinationPath) {
+        throw new FileSystemError("destination denied", "NoPermissions");
       }
       return bytes;
     });
@@ -249,17 +295,18 @@ describe("原稿の原子的な保存", () => {
       })
     ).rejects.toMatchObject({
       kind: "path_conflict",
-      persistenceState: "ambiguous",
+      persistenceState: "not_saved",
       message: expect.stringContaining("手動"),
     });
 
     const recoveryBytes = [...files.entries()].find(([filePath]) =>
       filePath.endsWith(".bak")
     )?.[1];
-    expect(recoveryBytes).toEqual(original);
+    expect(recoveryBytes).toEqual(replacement);
+    expect(files.get(destinationPath)).toEqual(original);
   });
 
-  test("旧内容の退避後に読込権限を失っても型付きエラーと回復ファイルを残す", async () => {
+  test("提案内容の退避後に読込権限を失っても型付きエラーと提案内容を残す", async () => {
     const original = new Uint8Array([0x21, 0x22]);
     files.set(destinationPath, original);
     workspace.fs.readFile = vi.fn(async (uri: { fsPath: string }) => {
@@ -284,7 +331,8 @@ describe("原稿の原子的な保存", () => {
     const recoveryBytes = [...files.entries()].find(([filePath]) =>
       filePath.endsWith(".bak")
     )?.[1];
-    expect(recoveryBytes).toEqual(original);
+    expect(recoveryBytes).toEqual(new Uint8Array([0x23, 0x24]));
+    expect(files.get(destinationPath)).toEqual(original);
   });
 
   test("一時ファイル回収時の権限エラーで元の競合を隠さない", async () => {
@@ -311,21 +359,22 @@ describe("原稿の原子的な保存", () => {
     ).toBe(true);
   });
 
-  test("6回の置換後は管理回復ディレクトリに最新5世代だけ残す", async () => {
+  test("6回の置換提案後は管理回復ディレクトリに最新5世代だけ残す", async () => {
     const recoveryDir = "c:\\novels\\.novelai-recovery";
     const unmanagedPath = `${recoveryDir}\\作者保管.bak`;
     directories.add(recoveryDir);
     files.set(unmanagedPath, new Uint8Array([0x41]));
-    let current = new Uint8Array([0x42]);
-    files.set(destinationPath, current);
+    const original = new Uint8Array([0x42]);
+    files.set(destinationPath, original);
 
     for (let generation = 1; generation <= 6; generation += 1) {
       const next = new Uint8Array([0x42 + generation]);
-      await atomicWriteFile(path, next, {
-        mode: "replace",
-        expectedHash: sha256(current),
-      });
-      current = next;
+      await expect(
+        atomicWriteFile(path, next, {
+          mode: "replace",
+          expectedHash: sha256(original),
+        })
+      ).rejects.toMatchObject({ persistenceState: "not_saved" });
     }
 
     const managed = [...files.entries()].filter(
@@ -336,7 +385,7 @@ describe("原稿の原子的な保存", () => {
     expect(new Set(managed.map(([filePath]) => filePath.split("\\").at(-1)?.split("-")[0])).size)
       .toBe(1);
     expect(files.get(unmanagedPath)).toEqual(new Uint8Array([0x41]));
-    expect(files.get(destinationPath)).toEqual(current);
+    expect(files.get(destinationPath)).toEqual(original);
     expect(
       [...files.keys()].some(
         (filePath) => filePath.startsWith(`${destinationPath}.novelai-`) && filePath.endsWith(".bak")

@@ -79,7 +79,7 @@ export async function run(): Promise<void> {
     }
   });
 
-  await runCase("作者項目を保持してAI変更だけを保存する", failures, async () => {
+  await runCase("作者項目を保持して既存人物を上書きせず提案を残す", failures, async () => {
     const temporaryRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), "novel-ai-assistant-character-merge-")
     );
@@ -107,15 +107,39 @@ export async function run(): Promise<void> {
         },
       ];
       const merged = mergeExtractedCharacters(loaded.characters, extracted);
-      await store.saveAll(
-        merged.characters.filter((item) => merged.changedIds.includes(item.id))
+      const characterPath = path.join(
+        workFolder,
+        "設定",
+        "characters",
+        characterFileName(loaded.characters[0])
+      );
+      const canonicalBefore = await fs.readFile(characterPath);
+      let proposalPath: string | undefined;
+      await assert.rejects(
+        store.saveAll(
+          merged.characters.filter((item) => merged.changedIds.includes(item.id))
+        ),
+        (error: unknown) => {
+          assert.ok(error instanceof CharacterStoreError);
+          assert.equal(error.kind, "path_conflict");
+          assert.equal(error.persistenceState, "not_saved");
+          proposalPath = error.recoveryPaths.find(
+            (filePath) => path.basename(path.dirname(filePath)) === ".novelai-recovery"
+          );
+          assert.ok(proposalPath, "手動適用用の提案パスがありません");
+          return true;
+        }
       );
 
-      const saved = await store.loadAll();
-      assert.equal(saved.errors.length, 0);
-      assert.equal(saved.characters[0].role, "主人公");
-      assert.equal(saved.characters[0].authorNotes, "作者のメモ");
-      assert.equal(saved.characters[0].exportNote, "公開時の注記");
+      assert.deepEqual(await fs.readFile(characterPath), canonicalBefore);
+      const proposed = JSON.parse(await fs.readFile(proposalPath!, "utf8")) as {
+        role: string | null;
+        authorNotes: string;
+        exportNote: string;
+      };
+      assert.equal(proposed.role, "主人公");
+      assert.equal(proposed.authorNotes, "作者のメモ");
+      assert.equal(proposed.exportNote, "公開時の注記");
     } finally {
       await fs.rm(temporaryRoot, { recursive: true, force: true });
     }

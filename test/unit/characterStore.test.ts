@@ -1,6 +1,9 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { CharacterStore } from "../../src/core/characterStore";
+import {
+  CharacterStore,
+  CharacterStoreError,
+} from "../../src/core/characterStore";
 import {
   characterFileName,
   emptyCharacter,
@@ -203,7 +206,6 @@ describe("人物ファイル保存", () => {
     const second = fixedCharacter("char_002", "澪");
     const firstPath = diskPath(path.join(characterDir, characterFileName(first)));
     const secondPath = diskPath(path.join(characterDir, characterFileName(second)));
-    disk.set(firstPath, bytesFor(first));
     disk.set(secondPath, bytesFor(second));
     const store = new CharacterStore(work);
     await store.loadAll();
@@ -311,23 +313,41 @@ describe("人物ファイル保存", () => {
     expect(disk.has(secondPath)).toBe(false);
   });
 
-  test("未変更の人物は原子的に保存し作者メモと資料注記を保つ", async () => {
+  test("既存人物の自動置換をせず作者項目を保った提案内容を回復パスへ残す", async () => {
     const original = {
       ...fixedCharacter("char_001", "灯"),
       authorNotes: "作者メモ",
       exportNote: "公開用注記",
     };
     const characterPath = diskPath(path.join(characterDir, characterFileName(original)));
-    disk.set(characterPath, bytesFor(original));
+    const originalBytes = bytesFor(original);
+    disk.set(characterPath, originalBytes);
     const store = new CharacterStore(work);
     const loaded = await store.loadAll();
 
-    await store.save(loaded.characters[0]);
+    let saveError: CharacterStoreError | undefined;
+    try {
+      await store.save(loaded.characters[0]);
+    } catch (error) {
+      expect(error).toBeInstanceOf(CharacterStoreError);
+      saveError = error as CharacterStoreError;
+    }
 
-    const saved = JSON.parse(
-      new TextDecoder().decode(disk.get(characterPath))
+    expect(saveError).toMatchObject({
+      kind: "path_conflict",
+      persistenceState: "not_saved",
+      recoveryPaths: expect.arrayContaining([characterPath]),
+    });
+    expect(disk.get(characterPath)).toEqual(originalBytes);
+    const proposalPath = saveError?.recoveryPaths.find(
+      (filePath) => filePath !== characterPath
+    );
+    expect(proposalPath).toBeDefined();
+
+    const proposal = JSON.parse(
+      new TextDecoder().decode(disk.get(proposalPath!))
     ) as Record<string, unknown>;
-    expect(saved).toMatchObject({
+    expect(proposal).toMatchObject({
       authorNotes: "作者メモ",
       exportNote: "公開用注記",
     });
@@ -490,6 +510,43 @@ describe("人物ファイル保存", () => {
 
     expect(disk.get(oldPath)).toEqual(originalBytes);
     expect(disk.has(newPath)).toBe(true);
+  });
+
+  test("先行保存後に名前変更元を読めなければ現在人物を曖昧、後続を未保存に分ける", async () => {
+    const original = fixedCharacter("char_001", "旧名");
+    const renamed = { ...original, name: "新名" };
+    const first = fixedCharacter("char_002", "先行");
+    const pending = fixedCharacter("char_003", "後続");
+    const oldPath = diskPath(path.join(characterDir, characterFileName(original)));
+    const newPath = diskPath(path.join(characterDir, characterFileName(renamed)));
+    const firstPath = diskPath(path.join(characterDir, characterFileName(first)));
+    const pendingPath = diskPath(path.join(characterDir, characterFileName(pending)));
+    disk.set(oldPath, bytesFor(original));
+    const store = new CharacterStore(work);
+    await store.loadAll();
+    const baseReadFile = workspace.fs.readFile;
+    workspace.fs.readFile = vi.fn(async (uri: { fsPath: string }) => {
+      if (uri.fsPath === oldPath && disk.has(newPath)) {
+        throw new FileSystemError("old path denied", "NoPermissions");
+      }
+      return baseReadFile(uri);
+    });
+
+    await expect(store.saveAll([first, renamed, pending])).rejects.toMatchObject({
+      kind: "path_conflict",
+      persistenceState: "ambiguous",
+      recoveryPaths: expect.arrayContaining([oldPath, newPath]),
+      batchProgress: {
+        completedIds: ["char_002"],
+        ambiguousIds: ["char_001"],
+        remainingIds: ["char_003"],
+      },
+    });
+
+    expect(disk.has(firstPath)).toBe(true);
+    expect(disk.has(oldPath)).toBe(true);
+    expect(disk.has(newPath)).toBe(true);
+    expect(disk.has(pendingPath)).toBe(false);
   });
 
   test("旧ファイル退避後に新しい保存先が消えた場合は回復物を残して通知する", async () => {

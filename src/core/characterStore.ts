@@ -296,7 +296,15 @@ export class CharacterStore {
     }
 
     if (snapshot && sourcePath && !samePath(sourcePath, prepared.destinationPath)) {
-      const sourceBeforeRetire = await this.readFileIfExists(sourcePath);
+      let sourceBeforeRetire: Uint8Array | undefined;
+      try {
+        sourceBeforeRetire = await this.readFileIfExists(sourcePath);
+      } catch (error) {
+        throw this.manualRecoveryError(
+          `人物「${prepared.character.id}」の旧ファイルを新しい保存先の配置後に確認できませんでした: ${errorMessage(error)}`,
+          [sourcePath, prepared.destinationPath]
+        );
+      }
       if (
         !sourceBeforeRetire ||
         hashBytes(sourceBeforeRetire) !== snapshot.hash

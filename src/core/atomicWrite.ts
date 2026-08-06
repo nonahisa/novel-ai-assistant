@@ -26,9 +26,9 @@ export class AtomicWriteFileError extends Error {
 }
 
 /**
- * 同じディレクトリ内で置換することで、書き込み途中の原稿を残さない。
- * ガード指定時は一時書き込み後にも競合を検証し、元内容の回復コピーを
- * 検証してから一度の上書きrenameで配置する。
+ * 新規作成は同じディレクトリの一時ファイルから配置する。
+ * 既存パスには公開FS APIで利用できる原子的CASがないため、ガード付き置換は
+ * 正規パスへ書込・rename・deleteせず、提案内容を回復パスへ残して失敗を返す。
  */
 export async function atomicWriteFile(
   filePath: string,
@@ -113,22 +113,10 @@ async function replaceGuarded(
   stagedHash: string,
   expectedHash: string
 ): Promise<void> {
-  const current = await readFileIfExists(destination);
-  if (!current || hashBytes(current) !== expectedHash) {
-    await deleteStagedFileBestEffort(temporary, stagedHash);
-    throw new AtomicWriteFileError(
-      `保存先「${destination.fsPath}」は一時書き込み中に変更されました。`,
-      "modified_externally",
-      "not_saved",
-      [destination.fsPath, temporary.fsPath]
-    );
-  }
-
-  let backup: vscode.Uri;
+  let proposal: vscode.Uri;
   try {
-    backup = vscode.Uri.file(await createManagedRecoveryPath(destination.fsPath));
+    proposal = vscode.Uri.file(await createManagedRecoveryPath(destination.fsPath));
   } catch (error) {
-    await deleteStagedFileBestEffort(temporary, stagedHash);
     throw manualRecoveryError(
       `回復ディレクトリを準備できませんでした: ${errorMessage(error)}`,
       [destination.fsPath, recoveryDirectoryFor(destination.fsPath), temporary.fsPath],
@@ -137,132 +125,63 @@ async function replaceGuarded(
   }
 
   try {
-    await vscode.workspace.fs.writeFile(backup, current);
+    await vscode.workspace.fs.rename(temporary, proposal, { overwrite: false });
   } catch (error) {
-    await deleteStagedFileBestEffort(temporary, stagedHash);
     throw manualRecoveryError(
-      `元ファイルを回復パスへコピーできませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, backup.fsPath],
+      `提案内容を回復パスへ移動できませんでした: ${errorMessage(error)}`,
+      [destination.fsPath, proposal.fsPath, temporary.fsPath],
       "not_saved"
     );
   }
 
-  let backedUp: Uint8Array | undefined;
+  let retainedProposal: Uint8Array | undefined;
   try {
-    backedUp = await readFileIfExists(backup);
+    retainedProposal = await readFileIfExists(proposal);
   } catch (error) {
-    await deleteStagedFileBestEffort(temporary, stagedHash);
     throw manualRecoveryError(
-      `回復ファイルを確認できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, backup.fsPath],
+      `提案内容の回復ファイルを確認できませんでした: ${errorMessage(error)}`,
+      [destination.fsPath, proposal.fsPath],
       "not_saved"
     );
   }
-  if (!backedUp || hashBytes(backedUp) !== expectedHash) {
-    await deleteStagedFileBestEffort(temporary, stagedHash);
+  if (!retainedProposal || hashBytes(retainedProposal) !== stagedHash) {
     throw manualRecoveryError(
-      `回復ファイルが読み込み時の内容と一致しません。`,
-      [destination.fsPath, backup.fsPath],
+      `提案内容の回復ファイルが一時書き込み時の内容と一致しません。`,
+      [destination.fsPath, proposal.fsPath],
       "not_saved"
     );
   }
 
-  // 回復コピーの作成中にも作者が編集できるため、置換の直前に再確認する。
-  const immediatelyBeforeReplace = await readFileIfExists(destination);
-  if (
-    !immediatelyBeforeReplace ||
-    hashBytes(immediatelyBeforeReplace) !== expectedHash
-  ) {
-    await deleteStagedFileBestEffort(temporary, stagedHash);
+  let current: Uint8Array | undefined;
+  try {
+    current = await readFileIfExists(destination);
+  } catch (error) {
+    throw manualRecoveryError(
+      `保存先を確認できませんでした: ${errorMessage(error)}`,
+      [destination.fsPath, proposal.fsPath],
+      "not_saved"
+    );
+  }
+  if (!current || hashBytes(current) !== expectedHash) {
+    await pruneManagedRecoveries(destination.fsPath);
     throw new AtomicWriteFileError(
-      `保存先「${destination.fsPath}」は回復コピーの作成中に変更されました。`,
+      `保存先「${destination.fsPath}」は読み込み後に変更されました。提案内容は手動適用用に「${proposal.fsPath}」へ残しました。`,
       "modified_externally",
       "not_saved",
-      [destination.fsPath, backup.fsPath]
+      [destination.fsPath, proposal.fsPath]
     );
   }
 
-  try {
-    await vscode.workspace.fs.rename(temporary, destination, {
-      overwrite: true,
-    });
-  } catch (error) {
-    await deleteStagedFileBestEffort(temporary, stagedHash);
-    const retained = await readFileIfExists(destination);
-    if (retained && hashBytes(retained) === expectedHash) {
-      throw manualRecoveryError(
-        `新しい内容を配置できませんでした: ${errorMessage(error)}`,
-        [destination.fsPath, backup.fsPath],
-        "not_saved"
-      );
-    }
-    if (retained && hashBytes(retained) === stagedHash) {
-      // rename完了後にAPIだけが失敗を返す実装では、検証済みの新内容を成功と扱う。
-      await pruneManagedRecoveries(destination.fsPath);
-      return;
-    }
-    throw manualRecoveryError(
-      `新しい内容を配置できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, backup.fsPath],
-      "ambiguous"
-    );
-  }
-
-  let placed: Uint8Array | undefined;
-  try {
-    placed = await readFileIfExists(destination);
-  } catch (error) {
-    throw manualRecoveryError(
-      `配置したファイルを確認できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, backup.fsPath],
-      "ambiguous"
-    );
-  }
-  if (!placed || hashBytes(placed) !== stagedHash) {
-    throw manualRecoveryError(
-      `配置したファイルが直後に変更されました。`,
-      [destination.fsPath, backup.fsPath],
-      "ambiguous"
-    );
-  }
-
-  let recovery: Uint8Array | undefined;
-  try {
-    recovery = await readFileIfExists(backup);
-  } catch (error) {
-    throw manualRecoveryError(
-      `回復ファイルを再確認できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, backup.fsPath],
-      "ambiguous"
-    );
-  }
-  if (!recovery || hashBytes(recovery) !== expectedHash) {
-    throw manualRecoveryError(
-      `回復ファイルが変更されたため保持します。`,
-      [destination.fsPath, backup.fsPath],
-      "ambiguous"
-    );
-  }
-
-  let finalPlaced: Uint8Array | undefined;
-  try {
-    finalPlaced = await readFileIfExists(destination);
-  } catch (error) {
-    throw manualRecoveryError(
-      `回復ファイル確認後に保存先を再確認できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, backup.fsPath],
-      "ambiguous"
-    );
-  }
-  if (!finalPlaced || hashBytes(finalPlaced) !== stagedHash) {
-    throw manualRecoveryError(
-      `回復ファイル確認中に保存先が変更されました。`,
-      [destination.fsPath, backup.fsPath],
-      "ambiguous"
-    );
-  }
-
+  // 公開FS APIには「期待した版なら置換」を一命令で行うCASがない。
+  // ここから正規パスへ触れないことで、失敗時に拡張機能が正規ファイルを
+  // 消失・上書きしていない、という不変条件を外部保存やクラッシュ越しにも守る。
   await pruneManagedRecoveries(destination.fsPath);
+  throw new AtomicWriteFileError(
+    `安全に既存ファイルを自動置換できないため保存しませんでした。提案内容を「${proposal.fsPath}」から手動で反映してください。`,
+    "path_conflict",
+    "not_saved",
+    [destination.fsPath, proposal.fsPath]
+  );
 }
 
 async function deleteStagedFileBestEffort(
@@ -309,7 +228,7 @@ export async function pruneManagedRecoveries(
     return;
   }
 
-  // 正常保存後だけ、この拡張機能が作った同一ファイルの最新5世代を残す。
+  // 同一ファイルの手動適用用提案は、この拡張機能が作った最新5件だけを残す。
   const obsolete = entries
     .filter(([name, type]) => type === vscode.FileType.File && pattern.test(name))
     .map(([name]) => name)

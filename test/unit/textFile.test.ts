@@ -81,7 +81,7 @@ describe("本文形式を保持した保存", () => {
     ["UTF-8 LF", utf8("灯\n澪\n"), "utf8", "\n", true],
     ["UTF-8 BOM CRLF", bom(utf8("灯\r\n澪")), "utf8-bom", "\r\n", false],
     ["Shift_JIS CR", shiftJis("灯\r澪\r"), "shift_jis", "\r", true],
-  ])("%sを往復して同じバイト列を保存する", async (_label, bytes, encoding, eol, hasTrailingNewline) => {
+  ])("%sを往復して同じバイト列の提案を残す", async (_label, bytes, encoding, eol, hasTrailingNewline) => {
     const original = decodeBytes(bytes);
     files.set(fileKey(path), bytes);
 
@@ -95,7 +95,7 @@ describe("本文形式を保持した保存", () => {
     expect(original.encoding).toBe(encoding);
     expect(original.eol).toBe(eol);
     expect(original.hasTrailingNewline).toBe(hasTrailingNewline);
-    expect(result).toEqual({ ok: true });
+    expectFailClosed(result, bytes);
     expect(savedBytes).toEqual(bytes);
   });
 
@@ -125,7 +125,7 @@ describe("本文形式を保持した保存", () => {
       original.hash
     );
 
-    expect(result).toEqual({ ok: true });
+    expectFailClosed(result, originalBytes);
     expect(new TextDecoder().decode(savedBytes)).toBe("灯\n翠\n");
   });
 
@@ -141,7 +141,7 @@ describe("本文形式を保持した保存", () => {
       original.hash
     );
 
-    expect(result).toEqual({ ok: true });
+    expectFailClosed(result, originalBytes);
     expect(savedBytes).toEqual(utf8("甲\r\n乙改\n丙\r丁"));
   });
 
@@ -165,7 +165,7 @@ describe("本文形式を保持した保存", () => {
       original.hash
     );
 
-    expect(result).toEqual({ ok: true });
+    expectFailClosed(result, originalBytes);
     expect(savedBytes).toEqual(originalBytes);
   });
 
@@ -192,7 +192,7 @@ describe("本文形式を保持した保存", () => {
     expected.set(changed, prefix.length);
     expected.set(suffix, prefix.length + changed.length);
 
-    expect(result).toEqual({ ok: true });
+    expectFailClosed(result, originalBytes);
     expect(savedBytes).toEqual(expected);
   });
 
@@ -209,7 +209,7 @@ describe("本文形式を保持した保存", () => {
       original.hash
     );
 
-    expect(result).toEqual({ ok: true });
+    expectFailClosed(result, originalBytes);
     expect(savedBytes?.slice(0, repeated.length)).toEqual(originalBytes.slice(0, repeated.length));
     expect(savedBytes?.slice(-repeated.length)).toEqual(originalBytes.slice(-repeated.length));
   });
@@ -394,5 +394,21 @@ describe("本文形式を保持した保存", () => {
       default:
         throw new Error(`未対応のテストケースです: ${label}`);
     }
+  }
+
+  function expectFailClosed(
+    result: Awaited<ReturnType<typeof writeTextFilePreservingFormat>>,
+    originalBytes: Uint8Array
+  ): void {
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "path_conflict",
+      detail: expect.stringContaining("手動"),
+      recoveryPaths: expect.arrayContaining([expect.stringContaining(".bak")]),
+    });
+    expect(files.get(fileKey(path))).toEqual(originalBytes);
+    expect(
+      rename.mock.calls.some((call) => fileKey(call[1].fsPath) === fileKey(path))
+    ).toBe(false);
   }
 });
