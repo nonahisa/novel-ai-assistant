@@ -8,10 +8,11 @@
 
 ## インストール
 
-ダウンロードした `novel-ai-assistant-0.0.1.vsix` と同じフォルダでPowerShellを開き、次を実行します。新規インストールと既存の0.0.1の上書き更新の両方に使えます。
+認証済みのGitHub CLIを使ってprivate repositoryのReleaseからVSIXをダウンロードし、そのローカルファイルをインストールします。新規インストールと既存の0.0.1の上書き更新の両方に使えます。
 
 ```powershell
-code --install-extension .\novel-ai-assistant-0.0.1.vsix --force
+gh release download v0.0.1 --repo nonahisa/novel-ai-assistant --pattern "novel-ai-assistant-0.0.1.vsix" --clobber
+code --install-extension ".\novel-ai-assistant-0.0.1.vsix" --force
 ```
 
 画面から操作する場合は、VS Codeの「拡張機能」ビュー右上の `...` →「VSIXからのインストール」を選び、同じVSIXファイルを指定します。
