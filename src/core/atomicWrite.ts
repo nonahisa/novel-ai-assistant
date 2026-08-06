@@ -10,10 +10,14 @@ export type AtomicWriteFileOptions =
   | { mode: "create" }
   | { mode: "replace"; expectedHash: string };
 
+export type AtomicWritePersistenceState = "not_saved" | "ambiguous";
+
 export class AtomicWriteFileError extends Error {
   constructor(
     message: string,
     readonly kind: "modified_externally" | "path_conflict",
+    /** 新しい内容の配置結果。エラー種別から推測せず、失敗地点で確定する。 */
+    readonly persistenceState: AtomicWritePersistenceState,
     readonly recoveryPaths: string[] = []
   ) {
     super(message);
@@ -70,6 +74,7 @@ async function placeNewFile(
     throw new AtomicWriteFileError(
       `保存先「${destination.fsPath}」は一時書き込み中に作成されました。`,
       "path_conflict",
+      "not_saved",
       [destination.fsPath, temporary.fsPath]
     );
   }
@@ -84,6 +89,7 @@ async function placeNewFile(
       throw new AtomicWriteFileError(
         `保存先「${destination.fsPath}」が同時に作成されました。`,
         "path_conflict",
+        "not_saved",
         [destination.fsPath, temporary.fsPath]
       );
     }
@@ -94,7 +100,8 @@ async function placeNewFile(
   if (!placed || hashBytes(placed) !== stagedHash) {
     throw manualRecoveryError(
       `配置直後に保存先「${destination.fsPath}」が変更されました。`,
-      [destination.fsPath]
+      [destination.fsPath],
+      "ambiguous"
     );
   }
 }
@@ -111,6 +118,7 @@ async function replaceGuarded(
     throw new AtomicWriteFileError(
       `保存先「${destination.fsPath}」は一時書き込み中に変更されました。`,
       "modified_externally",
+      "not_saved",
       [destination.fsPath, temporary.fsPath]
     );
   }
@@ -122,7 +130,8 @@ async function replaceGuarded(
     await deleteStagedFileBestEffort(temporary, stagedHash);
     throw manualRecoveryError(
       `回復ディレクトリを準備できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, recoveryDirectoryFor(destination.fsPath), temporary.fsPath]
+      [destination.fsPath, recoveryDirectoryFor(destination.fsPath), temporary.fsPath],
+      "ambiguous"
     );
   }
 
@@ -134,12 +143,14 @@ async function replaceGuarded(
       throw new AtomicWriteFileError(
         `保存先「${destination.fsPath}」は一時書き込み中に変更されました。`,
         "modified_externally",
+        "not_saved",
         [destination.fsPath, temporary.fsPath]
       );
     }
     throw manualRecoveryError(
       `元ファイルを回復パスへ移動できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, backup.fsPath]
+      [destination.fsPath, backup.fsPath],
+      "ambiguous"
     );
   }
 
@@ -150,14 +161,16 @@ async function replaceGuarded(
     await deleteStagedFileBestEffort(temporary, stagedHash);
     throw manualRecoveryError(
       `回復ファイルを確認できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, backup.fsPath]
+      [destination.fsPath, backup.fsPath],
+      "ambiguous"
     );
   }
   if (!backedUp || hashBytes(backedUp) !== expectedHash) {
     await deleteStagedFileBestEffort(temporary, stagedHash);
     throw manualRecoveryError(
       `回復ファイルが読み込み時の内容と一致しません。`,
-      [destination.fsPath, backup.fsPath]
+      [destination.fsPath, backup.fsPath],
+      "ambiguous"
     );
   }
 
@@ -169,7 +182,8 @@ async function replaceGuarded(
     await deleteStagedFileBestEffort(temporary, stagedHash);
     throw manualRecoveryError(
       `新しい内容を配置できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, backup.fsPath]
+      [destination.fsPath, backup.fsPath],
+      "ambiguous"
     );
   }
 
@@ -179,13 +193,15 @@ async function replaceGuarded(
   } catch (error) {
     throw manualRecoveryError(
       `配置したファイルを確認できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, backup.fsPath]
+      [destination.fsPath, backup.fsPath],
+      "ambiguous"
     );
   }
   if (!placed || hashBytes(placed) !== stagedHash) {
     throw manualRecoveryError(
       `配置したファイルが直後に変更されました。`,
-      [destination.fsPath, backup.fsPath]
+      [destination.fsPath, backup.fsPath],
+      "ambiguous"
     );
   }
 
@@ -195,13 +211,15 @@ async function replaceGuarded(
   } catch (error) {
     throw manualRecoveryError(
       `回復ファイルを再確認できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, backup.fsPath]
+      [destination.fsPath, backup.fsPath],
+      "ambiguous"
     );
   }
   if (!recovery || hashBytes(recovery) !== expectedHash) {
     throw manualRecoveryError(
       `回復ファイルが変更されたため保持します。`,
-      [destination.fsPath, backup.fsPath]
+      [destination.fsPath, backup.fsPath],
+      "ambiguous"
     );
   }
 
@@ -211,13 +229,15 @@ async function replaceGuarded(
   } catch (error) {
     throw manualRecoveryError(
       `回復ファイル確認後に保存先を再確認できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, backup.fsPath]
+      [destination.fsPath, backup.fsPath],
+      "ambiguous"
     );
   }
   if (!finalPlaced || hashBytes(finalPlaced) !== stagedHash) {
     throw manualRecoveryError(
       `回復ファイル確認中に保存先が変更されました。`,
-      [destination.fsPath, backup.fsPath]
+      [destination.fsPath, backup.fsPath],
+      "ambiguous"
     );
   }
 
@@ -292,12 +312,17 @@ async function readFileIfExists(uri: vscode.Uri): Promise<Uint8Array | undefined
   }
 }
 
-function manualRecoveryError(message: string, paths: string[]): AtomicWriteFileError {
+function manualRecoveryError(
+  message: string,
+  paths: string[],
+  persistenceState: AtomicWritePersistenceState
+): AtomicWriteFileError {
   return new AtomicWriteFileError(
     `${message} データを失わないため関連ファイルを残しました。手動で確認してください: ${paths.join(
       ", "
     )}`,
     "path_conflict",
+    persistenceState,
     paths
   );
 }

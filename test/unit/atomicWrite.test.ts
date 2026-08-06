@@ -129,7 +129,10 @@ describe("原稿の原子的な保存", () => {
 
     await expect(
       atomicWriteFile(path, new Uint8Array([0x09, 0x0a]), { mode: "create" })
-    ).rejects.toMatchObject({ kind: "path_conflict" });
+    ).rejects.toMatchObject({
+      kind: "path_conflict",
+      persistenceState: "not_saved",
+    });
 
     expect(files.get(destinationPath)).toEqual(createdByAuthor);
   });
@@ -156,6 +159,7 @@ describe("原稿の原子的な保存", () => {
       })
     ).rejects.toMatchObject({
       kind: "path_conflict",
+      persistenceState: "ambiguous",
       message: expect.stringContaining("手動"),
     });
 

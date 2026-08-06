@@ -242,9 +242,7 @@ export class CharacterStore {
     } catch (error) {
       if (error instanceof AtomicWriteFileError) {
         throw new CharacterStoreError(error.message, error.kind, {
-          // path_conflict は配置後の検証失敗も含むため、未保存と断定しない。
-          persistenceState:
-            error.kind === "modified_externally" ? "not_saved" : "ambiguous",
+          persistenceState: error.persistenceState,
         });
       }
       throw error;

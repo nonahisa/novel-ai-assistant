@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
   cacheSave: vi.fn(),
   generate: vi.fn(),
   cachedResults: new Map<string, unknown>(),
+  mergeResult: undefined as unknown,
   providerId: "ollama" as "ollama" | "claude",
   configured: true,
   CharacterStoreError: class CharacterStoreError extends Error {
@@ -110,6 +111,19 @@ vi.mock("../../src/core/characterStore", () => ({
   },
 }));
 
+vi.mock("../../src/core/characterMerge", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../src/core/characterMerge")
+  >();
+  return {
+    ...actual,
+    mergeExtractedCharacters: (
+      ...args: Parameters<typeof actual.mergeExtractedCharacters>
+    ) =>
+      state.mergeResult ?? actual.mergeExtractedCharacters(...args),
+  };
+});
+
 vi.mock("../../src/core/chunkCache", () => ({
   ChunkCache: class {
     async load() {}
@@ -128,6 +142,7 @@ vi.mock("../../src/core/chunkCache", () => ({
 
 import { extractCharacters } from "../../src/features/extractCharacters";
 import { CharacterStoreError } from "../../src/core/characterStore";
+import { emptyCharacter } from "../../src/models/character";
 
 const work: WorkEntry = {
   id: "work_test",
@@ -177,6 +192,7 @@ describe("人物抽出フロー", () => {
     state.cacheSet.mockReset();
     state.cacheSave.mockReset();
     state.cachedResults.clear();
+    state.mergeResult = undefined;
     state.providerId = "ollama";
     state.configured = true;
     workspace.getConfiguration = () => ({
@@ -383,6 +399,47 @@ describe("人物抽出フロー", () => {
     expect(summary).toContain("手動確認が必要 0名");
     expect(summary).toContain("保存競合による未保存 1名");
     expect(summary).not.toContain("保存済み 0名");
+    expect(summary).not.toContain("保存競合による未保存 2名");
+  });
+
+  test("重複IDが含まれても未分類の未保存人数を水増ししない", async () => {
+    const showErrorMessage = vi.fn(async () => undefined);
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage: vi.fn(async () => undefined),
+      showErrorMessage,
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    const duplicate = emptyCharacter("char_001", "灯");
+    state.mergeResult = {
+      characters: [duplicate, structuredClone(duplicate)],
+      added: ["灯"],
+      updated: [],
+      changedIds: ["char_001"],
+      conflicts: [],
+    };
+    state.generate
+      .mockResolvedValueOnce(successfulResult("灯"))
+      .mockResolvedValueOnce(successfulResult("澪"));
+    state.saveAll.mockRejectedValueOnce(
+      new CharacterStoreError("legacy progress", "path_conflict", {
+        batchProgress: {
+          completedIds: [],
+          ambiguousIds: [],
+          remainingIds: [],
+        },
+      })
+    );
+
+    await extractCharacters(work, testRegistry());
+
+    const summary = showErrorMessage.mock.calls.at(-1)?.[0];
+    expect(summary).toContain("保存競合による未保存 1名");
     expect(summary).not.toContain("保存競合による未保存 2名");
   });
 

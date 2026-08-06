@@ -224,6 +224,38 @@ describe("人物ファイル保存", () => {
     expect(disk.get(secondPath)).toEqual(secondChangedByAuthor);
   });
 
+  test("先行保存後の新規保存先衝突は現在人物を曖昧でなく未保存にする", async () => {
+    const first = fixedCharacter("char_001", "灯");
+    const second = fixedCharacter("char_002", "澪");
+    const firstPath = diskPath(path.join(characterDir, characterFileName(first)));
+    const secondPath = diskPath(path.join(characterDir, characterFileName(second)));
+    const createdByAuthor = utf8('{"作者":"同時に作成"}\n');
+    const store = new CharacterStore(work);
+    await store.loadAll();
+    const originalWriteFile = workspace.fs.writeFile;
+    workspace.fs.writeFile = vi.fn(
+      async (uri: { fsPath: string }, bytes: Uint8Array) => {
+        await originalWriteFile(uri, bytes);
+        if (uri.fsPath.startsWith(`${secondPath}.novelai-`)) {
+          disk.set(secondPath, createdByAuthor);
+        }
+      }
+    );
+
+    await expect(store.saveAll([first, second])).rejects.toMatchObject({
+      kind: "path_conflict",
+      persistenceState: "not_saved",
+      batchProgress: {
+        completedIds: ["char_001"],
+        ambiguousIds: [],
+        remainingIds: ["char_002"],
+      },
+    });
+
+    expect(disk.has(firstPath)).toBe(true);
+    expect(disk.get(secondPath)).toEqual(createdByAuthor);
+  });
+
   test("未変更の人物は原子的に保存し作者メモと資料注記を保つ", async () => {
     const original = {
       ...fixedCharacter("char_001", "灯"),
@@ -392,6 +424,7 @@ describe("人物ファイル保存", () => {
 
     await expect(store.saveAll([renamed])).rejects.toMatchObject({
       kind: "path_conflict",
+      persistenceState: "ambiguous",
       batchProgress: {
         completedIds: [],
         ambiguousIds: ["char_001"],

@@ -491,7 +491,7 @@ function persistenceCountsForSaveError(
   const ambiguous = takeKnown(progress.ambiguousIds);
   const reportedUnsaved = takeKnown(progress.remainingIds);
   // 古いmockや将来の不完全な進捗でも、未分類の人物を保存済みとは扱わない。
-  const unreported = requestedIds.filter((id) => !claimed.has(id)).length;
+  const unreported = [...requested].filter((id) => !claimed.has(id)).length;
   return {
     saved,
     ambiguous,
