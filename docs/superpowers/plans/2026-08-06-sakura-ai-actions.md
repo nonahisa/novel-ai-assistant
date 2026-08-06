@@ -142,4 +142,4 @@ Expected: draft PR created, workflow visible in its diff, and no merge performed
 
 - [ ] **Step 4: Record final evidence**
 
-Add the run URL, final VSIX SHA-256, local release-gate counts, and review verdict to `docs/進捗と引継ぎ.md`, then rerun `git diff --check` and `npm run verify:vsix`.
+Add the draft PR URL, local Sakura live-test result, final VSIX SHA-256, local release-gate counts, and review verdict to `docs/進捗と引継ぎ.md`; explicitly record that the GitHub workflow run is gated on merge to `main`. Commit and push that evidence update, then rerun `git diff --check` and `npm run verify:vsix`.
