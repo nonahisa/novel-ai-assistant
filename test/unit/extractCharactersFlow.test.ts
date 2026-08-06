@@ -17,12 +17,28 @@ const state = vi.hoisted(() => ({
   providerId: "ollama" as "ollama" | "claude",
   configured: true,
   CharacterStoreError: class CharacterStoreError extends Error {
+    readonly batchProgress:
+      | {
+          completedIds: string[];
+          ambiguousIds: string[];
+          remainingIds: string[];
+        }
+      | undefined;
+
     constructor(
       message: string,
-      readonly kind: "modified_externally" | "path_conflict"
+      readonly kind: "modified_externally" | "path_conflict",
+      options?: {
+        batchProgress?: {
+          completedIds: string[];
+          ambiguousIds: string[];
+          remainingIds: string[];
+        };
+      }
     ) {
       super(message);
       this.name = "CharacterStoreError";
+      this.batchProgress = options?.batchProgress;
     }
   },
 }));
@@ -324,6 +340,7 @@ describe("人物抽出フロー", () => {
       );
       expect(summary).toContain(classification);
       expect(summary).toContain("保存済み 0名");
+      expect(summary).toContain("手動確認が必要 0名");
       expect(summary).toContain("新規 2名");
       expect(summary).toContain("更新 0名");
       expect(summary).toContain("除外 0件");
@@ -332,6 +349,83 @@ describe("人物抽出フロー", () => {
       expect(summary).toContain("保存競合による未保存 2名");
     }
   );
+
+  test("後続保存競合では先に完了した件数だけを保存済みと報告する", async () => {
+    const showErrorMessage = vi.fn(async () => undefined);
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage: vi.fn(async () => undefined),
+      showErrorMessage,
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    state.generate
+      .mockResolvedValueOnce(successfulResult("灯"))
+      .mockResolvedValueOnce(successfulResult("澪"));
+    state.saveAll.mockRejectedValueOnce(
+      new CharacterStoreError("changed by author", "modified_externally", {
+        batchProgress: {
+          completedIds: ["char_001"],
+          ambiguousIds: [],
+          remainingIds: ["char_002"],
+        },
+      })
+    );
+
+    await extractCharacters(work, testRegistry());
+
+    const summary = showErrorMessage.mock.calls.at(-1)?.[0];
+    expect(summary).toContain("保存済み 1名");
+    expect(summary).toContain("手動確認が必要 0名");
+    expect(summary).toContain("保存競合による未保存 1名");
+    expect(summary).not.toContain("保存済み 0名");
+    expect(summary).not.toContain("保存競合による未保存 2名");
+  });
+
+  test("配置後の退避失敗は保存済みとも未保存とも数えず手動照合を促す", async () => {
+    const showErrorMessage = vi.fn(async () => undefined);
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage: vi.fn(async () => undefined),
+      showErrorMessage,
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    state.generate
+      .mockResolvedValueOnce(successfulResult("灯"))
+      .mockResolvedValueOnce({
+        text: JSON.stringify({ characters: [] }),
+        truncated: false,
+        elapsedMs: 1,
+      });
+    state.saveAll.mockRejectedValueOnce(
+      new CharacterStoreError("manual recovery", "path_conflict", {
+        batchProgress: {
+          completedIds: [],
+          ambiguousIds: ["char_001"],
+          remainingIds: [],
+        },
+      })
+    );
+
+    await extractCharacters(work, testRegistry());
+
+    const summary = showErrorMessage.mock.calls.at(-1)?.[0];
+    expect(summary).toContain("保存済み 0名");
+    expect(summary).toContain("手動確認が必要 1名");
+    expect(summary).toContain("保存競合による未保存 0名");
+    expect(summary).toContain("保存先と回復ファイルを手動で照合してください");
+    expect(summary).not.toContain("保存済み 1名");
+    expect(summary).not.toContain("保存競合による未保存 1名");
+  });
 
   test("AI失敗後に保存競合しても無害化した失敗詳細を表示できる", async () => {
     let detailContent = "";

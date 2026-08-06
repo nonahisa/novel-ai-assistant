@@ -116,7 +116,10 @@ describe("人物ファイル保存", () => {
 
     await expect(
       store.save({ ...original, personality: "AIが更新" })
-    ).rejects.toMatchObject({ kind: "modified_externally" });
+    ).rejects.toMatchObject({
+      kind: "modified_externally",
+      batchProgress: undefined,
+    });
 
     expect(rename).not.toHaveBeenCalled();
     expect(disk.get(characterPath)).toEqual(changedByAuthorBytes);
@@ -160,10 +163,65 @@ describe("人物ファイル保存", () => {
         { ...first, personality: "先に更新されるはずだった人物" },
         { ...second, personality: "競合する人物" },
       ])
-    ).rejects.toMatchObject({ kind: "modified_externally" });
+    ).rejects.toMatchObject({
+      kind: "modified_externally",
+      batchProgress: undefined,
+    });
 
     expect(rename).not.toHaveBeenCalled();
     expect(disk.get(firstPath)).toEqual(firstBytes);
+  });
+
+  test("後続人物の直前競合では先に完了した人物と未保存人物を分けて返す", async () => {
+    const first = fixedCharacter("char_001", "灯");
+    const second = fixedCharacter("char_002", "澪");
+    const firstPath = diskPath(path.join(characterDir, characterFileName(first)));
+    const secondPath = diskPath(path.join(characterDir, characterFileName(second)));
+    disk.set(firstPath, bytesFor(first));
+    disk.set(secondPath, bytesFor(second));
+    const store = new CharacterStore(work);
+    await store.loadAll();
+    const secondChangedByAuthor = bytesFor({
+      ...second,
+      authorNotes: "1件目の保存中に作者が追記",
+    });
+    rename.mockImplementation(
+      async (
+        from: { fsPath: string },
+        to: { fsPath: string },
+        options?: { overwrite?: boolean }
+      ) => {
+        const bytes = disk.get(from.fsPath);
+        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+        if (!options?.overwrite && disk.has(to.fsPath)) {
+          throw new FileSystemError("exists", "FileExists");
+        }
+        disk.set(to.fsPath, bytes);
+        disk.delete(from.fsPath);
+        if (to.fsPath === firstPath && from.fsPath.endsWith(".tmp")) {
+          disk.set(secondPath, secondChangedByAuthor);
+        }
+      }
+    );
+
+    await expect(
+      store.saveAll([
+        { ...first, personality: "保存完了" },
+        { ...second, personality: "保存されない" },
+      ])
+    ).rejects.toMatchObject({
+      kind: "modified_externally",
+      batchProgress: {
+        completedIds: ["char_001"],
+        ambiguousIds: [],
+        remainingIds: ["char_002"],
+      },
+    });
+
+    expect(
+      JSON.parse(new TextDecoder().decode(disk.get(firstPath)))
+    ).toMatchObject({ personality: "保存完了" });
+    expect(disk.get(secondPath)).toEqual(secondChangedByAuthor);
   });
 
   test("未変更の人物は原子的に保存し作者メモと資料注記を保つ", async () => {
@@ -298,6 +356,47 @@ describe("人物ファイル保存", () => {
     await expect(store.save(renamed)).rejects.toMatchObject({
       kind: "path_conflict",
       message: expect.stringContaining("手動"),
+    });
+
+    expect(disk.get(oldPath)).toEqual(originalBytes);
+    expect(disk.has(newPath)).toBe(true);
+  });
+
+  test("名前変更先の配置後に旧ファイル退避が失敗した人物を手動確認扱いにする", async () => {
+    const original = fixedCharacter("char_001", "旧名");
+    const renamed = { ...original, name: "新名" };
+    const oldPath = diskPath(path.join(characterDir, characterFileName(original)));
+    const newPath = diskPath(path.join(characterDir, characterFileName(renamed)));
+    const originalBytes = bytesFor(original);
+    disk.set(oldPath, originalBytes);
+    const store = new CharacterStore(work);
+    await store.loadAll();
+    rename.mockImplementation(
+      async (
+        from: { fsPath: string },
+        to: { fsPath: string },
+        options?: { overwrite?: boolean }
+      ) => {
+        if (from.fsPath === oldPath && to.fsPath.endsWith(".bak")) {
+          throw new FileSystemError("旧ファイルを退避できません", "NoPermissions");
+        }
+        const bytes = disk.get(from.fsPath);
+        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+        if (!options?.overwrite && disk.has(to.fsPath)) {
+          throw new FileSystemError("exists", "FileExists");
+        }
+        disk.set(to.fsPath, bytes);
+        disk.delete(from.fsPath);
+      }
+    );
+
+    await expect(store.saveAll([renamed])).rejects.toMatchObject({
+      kind: "path_conflict",
+      batchProgress: {
+        completedIds: [],
+        ambiguousIds: ["char_001"],
+        remainingIds: [],
+      },
     });
 
     expect(disk.get(oldPath)).toEqual(originalBytes);

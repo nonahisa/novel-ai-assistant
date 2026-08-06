@@ -27,13 +27,36 @@ interface PreparedCharacterSave {
   bytes: Uint8Array;
 }
 
+/** saveAll 失敗時の相互排他的な永続化結果。 */
+export interface CharacterStoreBatchProgress {
+  /** persist が最後まで完了した人物。 */
+  completedIds: string[];
+  /** 関連ファイルを残しており、保存成否を手動確認する人物。 */
+  ambiguousIds: string[];
+  /** 現在件の保存前競合と、まだ処理していない人物。 */
+  remainingIds: string[];
+}
+
+export type CharacterPersistenceState = "not_saved" | "ambiguous";
+
+interface CharacterStoreErrorOptions {
+  persistenceState?: CharacterPersistenceState;
+  batchProgress?: CharacterStoreBatchProgress;
+}
+
 export class CharacterStoreError extends Error {
+  readonly persistenceState: CharacterPersistenceState;
+  readonly batchProgress: CharacterStoreBatchProgress | undefined;
+
   constructor(
     message: string,
-    readonly kind: "modified_externally" | "path_conflict"
+    readonly kind: "modified_externally" | "path_conflict",
+    options: CharacterStoreErrorOptions = {}
   ) {
     super(message);
     this.name = "CharacterStoreError";
+    this.persistenceState = options.persistenceState ?? "not_saved";
+    this.batchProgress = options.batchProgress;
   }
 }
 
@@ -152,8 +175,29 @@ export class CharacterStore {
     if (prepared.length > 0) {
       await this.ensureDir();
     }
-    for (const item of prepared) {
-      await this.persist(item);
+    const completedIds: string[] = [];
+    for (let index = 0; index < prepared.length; index++) {
+      const item = prepared[index];
+      try {
+        await this.persist(item);
+        completedIds.push(item.character.id);
+      } catch (error) {
+        if (!(error instanceof CharacterStoreError)) throw error;
+        const ambiguous = error.persistenceState === "ambiguous";
+        throw new CharacterStoreError(error.message, error.kind, {
+          persistenceState: error.persistenceState,
+          batchProgress: {
+            completedIds: [...completedIds],
+            ambiguousIds: ambiguous ? [item.character.id] : [],
+            remainingIds: [
+              ...(!ambiguous ? [item.character.id] : []),
+              ...prepared
+                .slice(index + 1)
+                .map((pending) => pending.character.id),
+            ],
+          },
+        });
+      }
     }
   }
 
@@ -197,7 +241,11 @@ export class CharacterStore {
       );
     } catch (error) {
       if (error instanceof AtomicWriteFileError) {
-        throw new CharacterStoreError(error.message, error.kind);
+        throw new CharacterStoreError(error.message, error.kind, {
+          // path_conflict は配置後の検証失敗も含むため、未保存と断定しない。
+          persistenceState:
+            error.kind === "modified_externally" ? "not_saved" : "ambiguous",
+        });
       }
       throw error;
     }
@@ -370,7 +418,8 @@ export class CharacterStore {
       `${message} データを失わないため回復可能なファイルを残しました。手動で確認してください: ${paths.join(
         ", "
       )}`,
-      "path_conflict"
+      "path_conflict",
+      { persistenceState: "ambiguous" }
     );
   }
 }

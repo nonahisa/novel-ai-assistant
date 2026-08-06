@@ -46,6 +46,7 @@ interface ExtractionSummaryCounts {
   conflicts: number;
   failedChunks: number;
   saved: number;
+  ambiguous: number;
   unsavedConflicts: number;
 }
 
@@ -328,6 +329,7 @@ export async function extractCharacters(
     conflicts: merged?.conflicts.length ?? 0,
     failedChunks: failures.length,
     saved: 0,
+    ambiguous: 0,
     unsavedConflicts: 0,
   };
 
@@ -337,7 +339,13 @@ export async function extractCharacters(
       baseCounts.saved = changedCharacters.length;
     } catch (error) {
       if (!(error instanceof CharacterStoreError)) throw error;
-      baseCounts.unsavedConflicts = changedCharacters.length;
+      const persistence = persistenceCountsForSaveError(
+        error,
+        changedCharacters
+      );
+      baseCounts.saved = persistence.saved;
+      baseCounts.ambiguous = persistence.ambiguous;
+      baseCounts.unsavedConflicts = persistence.unsaved;
       const classification =
         error.kind === "modified_externally"
           ? "人物設定が読み込み後に変更されました。"
@@ -352,9 +360,18 @@ export async function extractCharacters(
         ...(failures.length > 0 ? ["詳細を表示"] : []),
         ...(hasSettingsFailure ? ["設定を開く"] : []),
       ];
+      const protectionMessage =
+        persistence.saved === 0 && persistence.ambiguous === 0
+          ? "作者の変更を保護するため保存しませんでした。" +
+            "抽出結果は未保存です。"
+          : "作者の変更を保護するため保存処理を途中で停止しました。";
+      const reconciliationMessage =
+        persistence.ambiguous > 0
+          ? "保存状態を確定できない人物があります。" +
+            "保存先と回復ファイルを手動で照合してください。\n"
+          : "";
       const action = await vscode.window.showErrorMessage(
-        `${classification}作者の変更を保護するため保存しませんでした。` +
-          "抽出結果は未保存です。\n" +
+        `${classification}${protectionMessage}\n${reconciliationMessage}` +
           buildExtractionSummary(baseCounts) +
           (recovery ? `\n対応: ${recovery}` : ""),
         ...actions
@@ -443,8 +460,43 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
     `競合 ${counts.conflicts}件`,
     `失敗 ${counts.failedChunks}チャンク`,
     `保存済み ${counts.saved}名`,
+    `手動確認が必要 ${counts.ambiguous}名`,
     `保存競合による未保存 ${counts.unsavedConflicts}名`,
   ].join(" / ") + rejectedDetail;
+}
+
+function persistenceCountsForSaveError(
+  error: CharacterStoreError,
+  changedCharacters: Character[]
+): { saved: number; ambiguous: number; unsaved: number } {
+  const requestedIds = changedCharacters.map((character) => character.id);
+  const requested = new Set(requestedIds);
+  const claimed = new Set<string>();
+  const takeKnown = (ids: string[]): number => {
+    let count = 0;
+    for (const id of ids) {
+      if (!requested.has(id) || claimed.has(id)) continue;
+      claimed.add(id);
+      count++;
+    }
+    return count;
+  };
+
+  const progress = error.batchProgress;
+  if (!progress) {
+    return { saved: 0, ambiguous: 0, unsaved: requested.size };
+  }
+
+  const saved = takeKnown(progress.completedIds);
+  const ambiguous = takeKnown(progress.ambiguousIds);
+  const reportedUnsaved = takeKnown(progress.remainingIds);
+  // 古いmockや将来の不完全な進捗でも、未分類の人物を保存済みとは扱わない。
+  const unreported = requestedIds.filter((id) => !claimed.has(id)).length;
+  return {
+    saved,
+    ambiguous,
+    unsaved: reportedUnsaved + unreported,
+  };
 }
 
 function describeFailureRecoveries(failures: ExtractionFailure[]): string {
