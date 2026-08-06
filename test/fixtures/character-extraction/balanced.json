@@ -1,0 +1,51 @@
+{
+  "expectedNames": ["黒木 玲司", "白瀬 澪", "エバン"],
+  "forbiddenNames": ["僕", "先生", "兵士たち", "王都アルバ"],
+  "expectedAliases": {
+    "黒木 玲司": ["玲司さん"]
+  },
+  "expectedAuthorFields": {
+    "白瀬 澪": {
+      "authorNotes": "作者だけのメモ",
+      "exportNote": "公開設定"
+    }
+  },
+  "responses": [
+    {
+      "chunk": {
+        "filePath": "001-工房.txt",
+        "index": 0,
+        "text": "黒木 玲司は星砂の印章を磨いた。白瀬 澪は硝子の地図を広げた。",
+        "startLine": 0,
+        "chapterStart": 1,
+        "chapterEnd": 1,
+        "hash": "balanced-001"
+      },
+      "response": "{\"characters\":[{\"name\":\"黒木 玲司\",\"aliases\":[],\"entityType\":\"person\",\"evidence\":\"黒木 玲司は星砂の印章を磨いた。\"},{\"name\":\"白瀬 澪\",\"aliases\":[],\"entityType\":\"person\",\"evidence\":\"白瀬 澪は硝子の地図を広げた。\"}],\"confidence\":\"high\"}"
+    },
+    {
+      "chunk": {
+        "filePath": "002-北門.txt",
+        "index": 0,
+        "text": "「玲司さん、北門へ」と白瀬 澪が告げた。エバンは月紋の門を開けた。",
+        "startLine": 0,
+        "chapterStart": 2,
+        "chapterEnd": 2,
+        "hash": "balanced-002"
+      },
+      "response": "{\"characters\":[{\"name\":\"玲司さん\",\"aliases\":[],\"entityType\":\"person\",\"evidence\":\"玲司さん、北門へ\"},{\"name\":\"エバン\",\"aliases\":[],\"entityType\":\"person\",\"evidence\":\"エバンは月紋の門を開けた。\"}],\"confidence\":\"high\"}"
+    },
+    {
+      "chunk": {
+        "filePath": "003-出発.txt",
+        "index": 0,
+        "text": "僕は黙った。先生は兵士たちを王都アルバへ向かわせた。",
+        "startLine": 0,
+        "chapterStart": 3,
+        "chapterEnd": 3,
+        "hash": "balanced-003"
+      },
+      "response": "{\"characters\":[{\"name\":\"僕\",\"aliases\":[],\"entityType\":\"person\",\"evidence\":\"僕は黙った。\"},{\"name\":\"先生\",\"aliases\":[],\"entityType\":\"person\",\"evidence\":\"先生は兵士たちを王都アルバへ向かわせた。\"},{\"name\":\"兵士たち\",\"aliases\":[],\"entityType\":\"group\",\"evidence\":\"先生は兵士たちを王都アルバへ向かわせた。\"},{\"name\":\"王都アルバ\",\"aliases\":[],\"entityType\":\"location\",\"evidence\":\"先生は兵士たちを王都アルバへ向かわせた。\"}],\"confidence\":\"high\"}"
+    }
+  ]
+}

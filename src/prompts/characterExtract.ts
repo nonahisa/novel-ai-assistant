@@ -4,7 +4,7 @@
  * プロンプトを変更したら version を上げること。
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
-export const CHARACTER_EXTRACT_VERSION = "1.4";
+export const CHARACTER_EXTRACT_VERSION = "1.5";
 
 export const BASE_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 
@@ -41,28 +41,22 @@ ${input.chunkText}
 ${known}
 
 【抽出ルール】
-- 名前のある人物、および物語上意味を持つ無名の人物（「老いた門番」等）を対象とする。
+- entityType で候補を person / group / location / unknown に分類すること。characters に
+  出力してよいのは entityType が person の候補だけである。group / location / unknown は
+  レコードを出力しないこと。
+- 一人称・二人称などの代名詞、汎用的な役職語、家族関係語、集団、場所、組織、種族、
+  生物種は人物レコードを作らないこと。特定の人物名が本文から確認できない話者についても、
+  仮の名前や説明的な名前を発明してレコードを作らないこと。
 - 同一人物が別の呼称で登場する場合（本名／通称／あだ名／役職）、既知の登場人物と
   照合し、同一と判断できる場合は既知の名前を name とし、別呼称を aliases に入れること。
   判断できない場合は新規人物として扱うこと。
 - 各項目は、この本文範囲から読み取れる内容のみを書くこと。読み取れない項目は
   null とすること。推測で埋めないこと。
-- 「僕」「私」「俺」等の一人称や、「（主）」のような抽象的な自称だけを name に
-  使わないこと。name は既知の登場人物と照合するための識別子として何度も使われる
-  ため、いったん一人称や自称で登録すると、後の本文で本名が判明しても本名の方が
-  別呼称（alias）として扱われてしまう。この本文範囲にその人物を指す具体的な
-  名前・呼称・役職が一切登場しない場合は、無理に name を作らずレコード自体を
-  作成しないこと。一人称は firstPerson に記録すること。
 - 役職・肩書きと本名が両方本文から読み取れる場合、name には本名のみを書き、
   役職・肩書きは role に書くこと。
   例：「衛兵隊副隊長のエバン」→ name: "エバン", role: "衛兵隊副隊長"
-  本名が本文から分からず、役職や関係性でしか呼びようがない人物の場合のみ、
-  その役職的な表現をそのまま name として使ってよい。
-- 複数人をまとめた表現（「取調官たち」「金貸したち」のような「〜たち」）や、
-  特定の一人に固定できない汎用的な役割語（「冒険者」のように、本文中で
-  個人ではなく属性・集団として使われている場合）は isMob を true にすること。
-  「老いた門番」のように、無名でも本文中で一貫して特定の一人を指して
-  描写されている場合は個人として扱い、isMob は false のままでよい。
+- 各人物には、本文からそのまま抜き出した短い evidence を必ず付けること。
+  evidence は説明や要約ではなく、人物名または本文上の呼称を含む逐語引用にすること。
 
 【呼称の抽出ルール】（重要）
 呼称は「誰が誰をどう呼んだか」の方向を持つ情報です。
@@ -95,6 +89,10 @@ export const CHARACTER_EXTRACT_SCHEMA = {
         type: "object",
         properties: {
           name: { type: "string" },
+          entityType: {
+            type: "string",
+            enum: ["person", "group", "location", "unknown"],
+          },
           aliases: { type: "array", items: { type: "string" } },
           isMob: { type: "boolean" },
           role: { type: ["string", "null"] },
@@ -127,9 +125,9 @@ export const CHARACTER_EXTRACT_SCHEMA = {
               required: ["name", "relation"],
             },
           },
-          evidence: { type: ["string", "null"] },
+          evidence: { type: "string", minLength: 1 },
         },
-        required: ["name"],
+        required: ["name", "entityType", "evidence"],
       },
     },
     confidence: { type: "string", enum: ["high", "medium", "low"] },

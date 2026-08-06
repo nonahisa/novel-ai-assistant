@@ -247,6 +247,7 @@
     "watch": "node esbuild.js --watch",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",
+    "test:quality": "vitest run test/unit/characterExtractionQuality.test.ts --reporter=verbose",
     "test:ollama": "vitest run --config vitest.live.config.mts",
     "compile:integration": "tsc -p tsconfig.test.json",
     "test:integration": "npm run build && npm run compile:integration && node scripts/runIntegrationTests.mjs",
