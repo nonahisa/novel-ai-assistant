@@ -19,11 +19,14 @@ const shiftJis = (text: string): Uint8Array => iconv.encode(text, "shift_jis");
 
 describe("本文形式を保持した保存", () => {
   const files = new Map<string, Uint8Array>();
+  const directories = new Set<string>();
   let savedBytes: Uint8Array | undefined;
   let rename: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     files.clear();
+    directories.clear();
+    directories.add("c:\\novels");
     savedBytes = undefined;
     workspace.textDocuments = [];
     rename = vi.fn(
@@ -43,6 +46,18 @@ describe("本文形式を保持した保存", () => {
       }
     );
     workspace.fs = {
+      createDirectory: vi.fn(async (uri: { fsPath: string }) => {
+        directories.add(fileKey(uri.fsPath));
+      }),
+      readDirectory: vi.fn(async (uri: { fsPath: string }) => {
+        const directory = fileKey(uri.fsPath);
+        if (!directories.has(directory)) {
+          throw new FileSystemError("missing", "FileNotFound");
+        }
+        return [...files.keys()]
+          .filter((filePath) => filePath.slice(0, filePath.lastIndexOf("\\")) === directory)
+          .map((filePath) => [filePath.slice(filePath.lastIndexOf("\\") + 1), 1]);
+      }),
       readFile: vi.fn(async (uri: { fsPath: string }) => {
         const bytes = files.get(fileKey(uri.fsPath));
         if (!bytes) throw new FileSystemError("missing", "FileNotFound");
@@ -147,6 +162,34 @@ describe("本文形式を保持した保存", () => {
 
     expect(result).toEqual({ ok: false, reason: "modified_externally" });
     expect(files.get(fileKey(path))).toEqual(changedByAuthor);
+  });
+
+  test("回復が必要な競合では詳細と回復パスを返す", async () => {
+    const originalBytes = utf8("灯\n澪\n");
+    const original = decodeBytes(originalBytes);
+    files.set(fileKey(path), originalBytes);
+    workspace.fs.readFile = vi.fn(async (uri: { fsPath: string }) => {
+      if (uri.fsPath.endsWith(".bak")) {
+        throw new FileSystemError("backup denied", "NoPermissions");
+      }
+      const bytes = files.get(fileKey(uri.fsPath));
+      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+      return bytes;
+    });
+
+    const result = await writeTextFilePreservingFormat(
+      path,
+      "灯\n翠\n",
+      original,
+      original.hash
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "path_conflict",
+      detail: expect.stringContaining("手動"),
+      recoveryPaths: expect.arrayContaining([expect.stringContaining(".bak")]),
+    });
   });
 
   async function runGuardCase(label: string) {

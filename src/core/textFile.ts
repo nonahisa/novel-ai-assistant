@@ -7,9 +7,19 @@ export type Encoding = "utf8" | "utf8-bom" | "shift_jis";
 export type Eol = "\n" | "\r\n" | "\r";
 export type WriteTextFailureReason =
   | "modified_externally"
+  | "path_conflict"
   | "conflict_markers"
   | "unsaved_changes"
   | "encoding_error";
+
+export type WriteTextFileResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: WriteTextFailureReason;
+      detail?: string;
+      recoveryPaths?: string[];
+    };
 
 /**
  * 読み込んだファイルの内容と、書き戻しに必要な形式情報。
@@ -116,7 +126,7 @@ export async function writeTextFilePreservingFormat(
   newText: string,
   original: Pick<TextFileContent, "encoding" | "eol" | "hasTrailingNewline">,
   expectedHash: string
-): Promise<{ ok: true } | { ok: false; reason: WriteTextFailureReason }> {
+): Promise<WriteTextFileResult> {
   const uri = vscode.Uri.file(filePath);
 
   if (hasUnsavedChanges(filePath)) {
@@ -168,6 +178,14 @@ export async function writeTextFilePreservingFormat(
     });
   } catch (error) {
     if (error instanceof AtomicWriteFileError) {
+      if (error.kind === "path_conflict") {
+        return {
+          ok: false,
+          reason: "path_conflict",
+          detail: error.message,
+          recoveryPaths: error.recoveryPaths,
+        };
+      }
       return { ok: false, reason: "modified_externally" };
     }
     throw error;

@@ -1,4 +1,3 @@
-import * as crypto from "crypto";
 import * as vscode from "vscode";
 import * as path from "path";
 import { WorkEntry } from "../models/types";
@@ -11,6 +10,8 @@ import {
 import {
   AtomicWriteFileError,
   atomicWriteFile,
+  createManagedRecoveryPath,
+  pruneManagedRecoveries,
 } from "./atomicWrite";
 import { hashBytes } from "./textFile";
 
@@ -213,8 +214,15 @@ export class CharacterStore {
         );
       }
 
-      const recoveryPath =
-        `${sourcePath}.novelai-${process.pid}-${crypto.randomUUID()}.bak`;
+      let recoveryPath: string;
+      try {
+        recoveryPath = await createManagedRecoveryPath(sourcePath);
+      } catch (error) {
+        throw this.manualRecoveryError(
+          `旧ファイルの回復先を準備できませんでした: ${errorMessage(error)}`,
+          [sourcePath, prepared.destinationPath]
+        );
+      }
       try {
         await vscode.workspace.fs.rename(
           vscode.Uri.file(sourcePath),
@@ -243,6 +251,27 @@ export class CharacterStore {
           [prepared.destinationPath, recoveryPath]
         );
       }
+
+      let destinationBytes: Uint8Array | undefined;
+      try {
+        destinationBytes = await this.readFileIfExists(prepared.destinationPath);
+      } catch (error) {
+        throw this.manualRecoveryError(
+          `旧ファイル退避後に新しい保存先を確認できませんでした: ${errorMessage(error)}`,
+          [prepared.destinationPath, recoveryPath]
+        );
+      }
+      if (
+        !destinationBytes ||
+        hashBytes(destinationBytes) !== hashBytes(prepared.bytes)
+      ) {
+        throw this.manualRecoveryError(
+          `旧ファイル退避後に新しい保存先が変更されました。`,
+          [prepared.destinationPath, recoveryPath]
+        );
+      }
+
+      await pruneManagedRecoveries(sourcePath);
     }
 
     this.snapshots.set(prepared.character.id, {

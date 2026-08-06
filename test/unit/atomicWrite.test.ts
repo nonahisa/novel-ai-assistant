@@ -12,12 +12,26 @@ function sha256(bytes: Uint8Array): string {
 
 describe("原稿の原子的な保存", () => {
   const files = new Map<string, Uint8Array>();
+  const directories = new Set<string>();
   const deletedPaths: string[] = [];
 
   beforeEach(() => {
     files.clear();
+    directories.clear();
+    directories.add("c:\\novels");
     deletedPaths.length = 0;
     workspace.fs = {
+      createDirectory: vi.fn(async (uri: { fsPath: string }) => {
+        directories.add(uri.fsPath);
+      }),
+      readDirectory: vi.fn(async (uri: { fsPath: string }) => {
+        if (!directories.has(uri.fsPath)) {
+          throw new FileSystemError("missing", "FileNotFound");
+        }
+        return [...files.keys()]
+          .filter((filePath) => filePath.slice(0, filePath.lastIndexOf("\\")) === uri.fsPath)
+          .map((filePath) => [filePath.slice(filePath.lastIndexOf("\\") + 1), 1]);
+      }),
       writeFile: vi.fn(async (uri: { fsPath: string }, bytes: Uint8Array) => {
         files.set(uri.fsPath, bytes);
       }),
@@ -177,5 +191,62 @@ describe("原稿の原子的な保存", () => {
       filePath.endsWith(".bak")
     )?.[1];
     expect(recoveryBytes).toEqual(original);
+  });
+
+  test("一時ファイル回収時の権限エラーで元の競合を隠さない", async () => {
+    const createdByAuthor = new Uint8Array([0x31, 0x32]);
+    files.set(destinationPath, createdByAuthor);
+    let denyCleanup = false;
+    workspace.fs.readFile = vi.fn(async (uri: { fsPath: string }) => {
+      if (denyCleanup) {
+        throw new FileSystemError("directory denied", "NoPermissions");
+      }
+      const bytes = files.get(uri.fsPath);
+      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+      if (uri.fsPath === destinationPath) denyCleanup = true;
+      return bytes;
+    });
+
+    await expect(
+      atomicWriteFile(path, new Uint8Array([0x33, 0x34]), { mode: "create" })
+    ).rejects.toMatchObject({ kind: "path_conflict" });
+
+    expect(files.get(destinationPath)).toEqual(createdByAuthor);
+    expect(
+      [...files.keys()].some((filePath) => filePath.endsWith(".tmp"))
+    ).toBe(true);
+  });
+
+  test("6回の置換後は管理回復ディレクトリに最新5世代だけ残す", async () => {
+    const recoveryDir = "c:\\novels\\.novelai-recovery";
+    const unmanagedPath = `${recoveryDir}\\作者保管.bak`;
+    directories.add(recoveryDir);
+    files.set(unmanagedPath, new Uint8Array([0x41]));
+    let current = new Uint8Array([0x42]);
+    files.set(destinationPath, current);
+
+    for (let generation = 1; generation <= 6; generation += 1) {
+      const next = new Uint8Array([0x42 + generation]);
+      await atomicWriteFile(path, next, {
+        mode: "replace",
+        expectedHash: sha256(current),
+      });
+      current = next;
+    }
+
+    const managed = [...files.entries()].filter(
+      ([filePath]) =>
+        filePath.startsWith(`${recoveryDir}\\`) && filePath !== unmanagedPath
+    );
+    expect(managed).toHaveLength(5);
+    expect(new Set(managed.map(([filePath]) => filePath.split("\\").at(-1)?.split("-")[0])).size)
+      .toBe(1);
+    expect(files.get(unmanagedPath)).toEqual(new Uint8Array([0x41]));
+    expect(files.get(destinationPath)).toEqual(current);
+    expect(
+      [...files.keys()].some(
+        (filePath) => filePath.startsWith(`${destinationPath}.novelai-`) && filePath.endsWith(".bak")
+      )
+    ).toBe(false);
   });
 });

@@ -1,5 +1,10 @@
 import * as crypto from "crypto";
+import * as path from "path";
 import * as vscode from "vscode";
+
+export const RECOVERY_GENERATIONS_PER_FILE = 5;
+const RECOVERY_DIRECTORY_NAME = ".novelai-recovery";
+let recoverySequence = 0;
 
 export type AtomicWriteFileOptions =
   | { mode: "create" }
@@ -8,7 +13,8 @@ export type AtomicWriteFileOptions =
 export class AtomicWriteFileError extends Error {
   constructor(
     message: string,
-    readonly kind: "modified_externally" | "path_conflict"
+    readonly kind: "modified_externally" | "path_conflict",
+    readonly recoveryPaths: string[] = []
   ) {
     super(message);
     this.name = "AtomicWriteFileError";
@@ -46,11 +52,9 @@ export async function atomicWriteFile(
     return;
   }
 
-  const backup = vscode.Uri.file(`${filePath}.novelai-${nonce}.bak`);
   await replaceGuarded(
     destination,
     temporary,
-    backup,
     stagedHash,
     options.expectedHash
   );
@@ -65,7 +69,8 @@ async function placeNewFile(
     await deleteStagedFileBestEffort(temporary, stagedHash);
     throw new AtomicWriteFileError(
       `保存先「${destination.fsPath}」は一時書き込み中に作成されました。`,
-      "path_conflict"
+      "path_conflict",
+      [destination.fsPath, temporary.fsPath]
     );
   }
 
@@ -78,7 +83,8 @@ async function placeNewFile(
     if (isFileExists(error) || await readFileIfExists(destination)) {
       throw new AtomicWriteFileError(
         `保存先「${destination.fsPath}」が同時に作成されました。`,
-        "path_conflict"
+        "path_conflict",
+        [destination.fsPath, temporary.fsPath]
       );
     }
     throw error;
@@ -96,7 +102,6 @@ async function placeNewFile(
 async function replaceGuarded(
   destination: vscode.Uri,
   temporary: vscode.Uri,
-  backup: vscode.Uri,
   stagedHash: string,
   expectedHash: string
 ): Promise<void> {
@@ -105,7 +110,19 @@ async function replaceGuarded(
     await deleteStagedFileBestEffort(temporary, stagedHash);
     throw new AtomicWriteFileError(
       `保存先「${destination.fsPath}」は一時書き込み中に変更されました。`,
-      "modified_externally"
+      "modified_externally",
+      [destination.fsPath, temporary.fsPath]
+    );
+  }
+
+  let backup: vscode.Uri;
+  try {
+    backup = vscode.Uri.file(await createManagedRecoveryPath(destination.fsPath));
+  } catch (error) {
+    await deleteStagedFileBestEffort(temporary, stagedHash);
+    throw manualRecoveryError(
+      `回復ディレクトリを準備できませんでした: ${errorMessage(error)}`,
+      [destination.fsPath, recoveryDirectoryFor(destination.fsPath), temporary.fsPath]
     );
   }
 
@@ -116,7 +133,8 @@ async function replaceGuarded(
     if (isFileNotFound(error)) {
       throw new AtomicWriteFileError(
         `保存先「${destination.fsPath}」は一時書き込み中に変更されました。`,
-        "modified_externally"
+        "modified_externally",
+        [destination.fsPath, temporary.fsPath]
       );
     }
     throw manualRecoveryError(
@@ -202,18 +220,66 @@ async function replaceGuarded(
       [destination.fsPath, backup.fsPath]
     );
   }
+
+  await pruneManagedRecoveries(destination.fsPath);
 }
 
 async function deleteStagedFileBestEffort(
   file: vscode.Uri,
   expectedHash: string
 ): Promise<void> {
-  const bytes = await readFileIfExists(file);
-  if (!bytes || hashBytes(bytes) !== expectedHash) return;
   try {
+    const bytes = await readFileIfExists(file);
+    if (!bytes || hashBytes(bytes) !== expectedHash) return;
     await vscode.workspace.fs.delete(file);
   } catch {
-    // 一時ファイルの回収より、呼び出し元へ本来の競合を返すことを優先する。
+    // 同一性を確認できない一時ファイルは残し、本来の競合を呼び出し元へ返す。
+  }
+}
+
+export async function createManagedRecoveryPath(
+  canonicalPath: string
+): Promise<string> {
+  const directory = recoveryDirectoryFor(canonicalPath);
+  await vscode.workspace.fs.createDirectory(vscode.Uri.file(directory));
+  recoverySequence += 1;
+  const timestamp = String(Date.now()).padStart(13, "0");
+  const sequence = String(recoverySequence).padStart(8, "0");
+  return path.join(
+    directory,
+    `${recoveryKey(canonicalPath)}-${timestamp}-${sequence}-${crypto.randomUUID()}.bak`
+  );
+}
+
+export async function pruneManagedRecoveries(
+  canonicalPath: string
+): Promise<void> {
+  const directory = recoveryDirectoryFor(canonicalPath);
+  const key = recoveryKey(canonicalPath);
+  const pattern = new RegExp(
+    `^${key}-\\d{13}-\\d{8}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.bak$`,
+    "i"
+  );
+
+  let entries: [string, vscode.FileType][];
+  try {
+    entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(directory));
+  } catch {
+    return;
+  }
+
+  // 正常保存後だけ、この拡張機能が作った同一ファイルの最新5世代を残す。
+  const obsolete = entries
+    .filter(([name, type]) => type === vscode.FileType.File && pattern.test(name))
+    .map(([name]) => name)
+    .sort((left, right) => right.localeCompare(left))
+    .slice(RECOVERY_GENERATIONS_PER_FILE);
+  for (const name of obsolete) {
+    try {
+      await vscode.workspace.fs.delete(vscode.Uri.file(path.join(directory, name)));
+    } catch {
+      // 回復物の整理失敗で、完了済みの保存を失敗扱いにしない。
+    }
   }
 }
 
@@ -231,8 +297,21 @@ function manualRecoveryError(message: string, paths: string[]): AtomicWriteFileE
     `${message} データを失わないため関連ファイルを残しました。手動で確認してください: ${paths.join(
       ", "
     )}`,
-    "path_conflict"
+    "path_conflict",
+    paths
   );
+}
+
+function recoveryDirectoryFor(canonicalPath: string): string {
+  return path.join(path.dirname(canonicalPath), RECOVERY_DIRECTORY_NAME);
+}
+
+function recoveryKey(canonicalPath: string): string {
+  const normalized = path.normalize(vscode.Uri.file(canonicalPath).fsPath);
+  const stablePath = process.platform === "win32"
+    ? normalized.toLowerCase()
+    : normalized;
+  return crypto.createHash("sha256").update(stablePath, "utf8").digest("hex");
 }
 
 function errorMessage(error: unknown): string {

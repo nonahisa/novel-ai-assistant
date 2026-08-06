@@ -220,7 +220,7 @@ describe("人物ファイル保存", () => {
     expect(disk.has(newPath)).toBe(true);
     const recoveryBytes = [...disk.entries()].find(
       ([filePath]) =>
-        filePath.startsWith(`${oldPath}.novelai-`) &&
+        path.dirname(filePath).endsWith(".novelai-recovery") &&
         filePath.endsWith(".bak")
     )?.[1];
     expect(recoveryBytes).toEqual(originalBytes);
@@ -261,7 +261,7 @@ describe("人物ファイル保存", () => {
     expect(disk.has(newPath)).toBe(true);
     const recoveryBytes = [...disk.entries()].find(
       ([filePath]) =>
-        filePath.startsWith(`${oldPath}.novelai-`) &&
+        path.dirname(filePath).endsWith(".novelai-recovery") &&
         filePath.endsWith(".bak")
     )?.[1];
     expect(recoveryBytes).toEqual(changedByAuthorBytes);
@@ -302,6 +302,46 @@ describe("人物ファイル保存", () => {
 
     expect(disk.get(oldPath)).toEqual(originalBytes);
     expect(disk.has(newPath)).toBe(true);
+  });
+
+  test("旧ファイル退避後に新しい保存先が消えた場合は回復物を残して通知する", async () => {
+    const original = fixedCharacter("char_001", "旧名");
+    const renamed = { ...original, name: "新名" };
+    const oldPath = diskPath(path.join(characterDir, characterFileName(original)));
+    const newPath = diskPath(path.join(characterDir, characterFileName(renamed)));
+    const originalBytes = bytesFor(original);
+    disk.set(oldPath, originalBytes);
+    const store = new CharacterStore(work);
+    await store.loadAll();
+    rename.mockImplementation(
+      async (
+        from: { fsPath: string },
+        to: { fsPath: string },
+        options?: { overwrite?: boolean }
+      ) => {
+        const bytes = disk.get(from.fsPath);
+        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+        if (!options?.overwrite && disk.has(to.fsPath)) {
+          throw new FileSystemError("exists", "FileExists");
+        }
+        disk.set(to.fsPath, bytes);
+        disk.delete(from.fsPath);
+        if (from.fsPath === oldPath && to.fsPath.endsWith(".bak")) {
+          disk.delete(newPath);
+        }
+      }
+    );
+
+    await expect(store.save(renamed)).rejects.toMatchObject({
+      kind: "path_conflict",
+      message: expect.stringContaining("手動"),
+    });
+
+    const recoveryBytes = [...disk.entries()].find(
+      ([filePath]) => filePath.endsWith(".bak")
+    )?.[1];
+    expect(recoveryBytes).toEqual(originalBytes);
+    expect(disk.has(newPath)).toBe(false);
   });
 
   test("壊れた作者JSONを上書きしない", async () => {

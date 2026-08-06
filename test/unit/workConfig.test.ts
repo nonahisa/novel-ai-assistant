@@ -1,7 +1,8 @@
+import * as path from "path";
 import { describe, expect, test } from "vitest";
 import * as workRegistry from "../../src/core/workRegistry";
 import type { WorkConfig, WorkEntry } from "../../src/models/types";
-import { workspace } from "./support/vscodeStub";
+import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
 
 const parseWorkConfig = (
   workRegistry as unknown as {
@@ -67,5 +68,26 @@ describe("作品設定", () => {
       registry.addExisting("C:\\novels\\broken", "壊れた作品")
     ).rejects.toThrow("作品設定");
     expect(updates).toEqual([]);
+  });
+
+  test("新規作品のgitignoreへ管理回復ディレクトリを追加する", async () => {
+    const root = "C:\\novels\\new-work";
+    const files = new Map<string, Uint8Array>();
+    workspace.fs = {
+      stat: async () => {
+        throw new FileSystemError("missing", "FileNotFound");
+      },
+      createDirectory: async () => undefined,
+      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
+        files.set(uri.fsPath, bytes);
+      },
+    };
+
+    await workRegistry.scaffoldWorkFolder(root, "新作");
+
+    const gitignore = new TextDecoder().decode(
+      files.get(Uri.file(path.join(root, ".gitignore")).fsPath)
+    );
+    expect(gitignore.split("\n")).toContain(".novelai-recovery/");
   });
 });

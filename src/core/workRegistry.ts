@@ -248,6 +248,7 @@ export async function scaffoldWorkFolder(
     ".aiwriter/cache/",
     ".aiwriter/logs/",
     ".aiwriter/exports/",
+    ".novelai-recovery/",
     "",
     "# 設定資料の出力物（再生成可能なため）",
     "exports/",
