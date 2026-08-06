@@ -12,7 +12,7 @@
 
 - The endpoint is exactly `https://api.ai.sakura.ad.jp/v1/chat/completions`.
 - The model is exactly `gemma-4-31B-it` with `stream: false` and `max_tokens: 32`.
-- The only credential source is `SAKURA_AI_ACCOUNT_TOKEN`; never log the token, Authorization header, prompt response body, or local `.env` contents.
+- The only credential source is the repository secret `SAKURA_AI_ACCOUNT_TOKEN`; do not read, create, or use a local `.env`, and never log the token, Authorization header, or prompt response body.
 - The workflow trigger is only `workflow_dispatch`, with `contents: read` and `timeout-minutes: 5`.
 - No npm runtime dependency is added for the smoke client.
 - Local commits, pushing `feature/works`, and opening a draft PR to `main` are authorized; do not merge the PR.
@@ -136,7 +136,7 @@ Commit the intended files, push `feature/works`, and open a draft PR to `main`; 
 
 - [x] **Step 3: Record the default-branch execution gate**
 
-Verify the draft PR contains the workflow and note that `gh workflow run sakura-ai-smoke.yml --ref main` becomes available only after merge. Use the local live Sakura API invocation as the pre-merge external-service evidence.
+Verify the draft PR contains the workflow and note that `gh workflow run sakura-ai-smoke.yml --ref main` becomes available only after merge. Preserve the historical pre-merge `HTTP 401` result, but do not perform another local Sakura invocation; the repository secret was subsequently replaced and the authoritative live evidence must come from GitHub Actions after merge.
 
 Expected: draft PR created, workflow visible in its diff, and no merge performed.
 
@@ -144,6 +144,6 @@ Expected: draft PR created, workflow visible in its diff, and no merge performed
 
 Add the draft PR URL, local Sakura live-test result, final VSIX SHA-256, local release-gate counts, and review verdict to `docs/進捗と引継ぎ.md`; explicitly record that the GitHub workflow run is gated on merge to `main`. Commit and push that evidence update, then rerun `git diff --check` and `npm run verify:vsix`.
 
-- [ ] **Post-merge success evidence (credential replacement required)**
+- [ ] **Post-merge GitHub Actions success evidence**
 
-Replace the malformed local `ACCOUNT_TOKEN` and the repository secret copied from it, merge only after review, then manually run the workflow from `main`. Record a successful run URL only after the fixed model returns nonempty content.
+The repository secret `SAKURA_AI_ACCOUNT_TOKEN` was replaced on 2026-08-06 at `14:45:17Z` without exposing its value. Merge only after review, then manually run the workflow from `main`. Record a successful run URL only after the fixed model returns nonempty content.
