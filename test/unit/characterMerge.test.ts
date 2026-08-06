@@ -42,6 +42,36 @@ describe("登場人物マージ", () => {
     expect(result.characters).toHaveLength(3);
   });
 
+  test("完全一致する名前の候補が複数なら自動統合しない", () => {
+    const first = emptyCharacter("char_001", "玲司");
+    const second = emptyCharacter("char_002", "玲司");
+
+    const result = mergeExtractedCharacters(
+      [first, second],
+      [{ data: { name: "玲司", role: "騎士" }, chapters: [2] }]
+    );
+
+    expect(result.characters).toHaveLength(3);
+    expect(result.characters[0].appearedChapters).toEqual([]);
+    expect(result.characters[1].appearedChapters).toEqual([]);
+  });
+
+  test("完全一致する別名の候補が複数なら自動統合しない", () => {
+    const first = emptyCharacter("char_001", "黒木");
+    first.aliases = ["玲司"];
+    const second = emptyCharacter("char_002", "白木");
+    second.aliases = ["玲司"];
+
+    const result = mergeExtractedCharacters(
+      [first, second],
+      [{ data: { name: "玲司" }, chapters: [2] }]
+    );
+
+    expect(result.characters).toHaveLength(3);
+    expect(result.characters[0].appearedChapters).toEqual([]);
+    expect(result.characters[1].appearedChapters).toEqual([]);
+  });
+
   test("区切りのない部分一致では同一人物にしない", () => {
     const result = mergeExtractedCharacters(
       [emptyCharacter("char_001", "黒木玲司")],
