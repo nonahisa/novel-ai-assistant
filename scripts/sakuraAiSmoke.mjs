@@ -44,14 +44,19 @@ export async function runSakuraAiSmoke({ token, fetchImpl = globalThis.fetch, lo
   if (typeof model !== "string" || model.trim() === "") {
     throw new Error("Sakura AI smoke test failed: response model is missing");
   }
+  if (model !== SAKURA_AI_SMOKE_MODEL) {
+    throw new Error("Sakura AI smoke test failed: unexpected response model");
+  }
 
   const content = payload?.choices?.[0]?.message?.content;
   if (typeof content !== "string" || content.trim() === "") {
     throw new Error("Sakura AI smoke test failed: response content is blank");
   }
 
-  const result = { model, contentLength: content.length };
-  log?.(`Sakura AI smoke test passed: model=${model}, contentLength=${content.length}`);
+  const result = { model: SAKURA_AI_SMOKE_MODEL, contentLength: content.length };
+  log?.(
+    `Sakura AI smoke test passed: model=${SAKURA_AI_SMOKE_MODEL}, contentLength=${content.length}`
+  );
   return result;
 }
 

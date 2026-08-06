@@ -115,6 +115,27 @@ describe("Sakura AI smoke client", () => {
     ).rejects.toThrow("Sakura AI smoke test failed: response model is missing");
   });
 
+  test("想定外の応答モデルを拒否しログへ到達させない", async () => {
+    const logs: string[] = [];
+
+    await expect(
+      runSakuraAiSmoke({
+        token: TOKEN,
+        fetchImpl: async () =>
+          new Response(
+            JSON.stringify({
+              model: "unexpected-model",
+              choices: [{ message: { content: RESPONSE_CONTENT } }],
+            }),
+            { status: 200 }
+          ),
+        log: (line) => logs.push(line),
+      })
+    ).rejects.toThrow("Sakura AI smoke test failed: unexpected response model");
+
+    expect(logs).toEqual([]);
+  });
+
   test("空白だけの本文を拒否する", async () => {
     await expect(
       runSakuraAiSmoke({
