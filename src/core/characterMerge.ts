@@ -32,7 +32,8 @@ export function mergeExtractedCharacters(
   existing: Character[],
   extracted: Array<{ data: ExtractedCharacter; chapters: number[] }>
 ): MergeResult {
-  const result: Character[] = existing.map((c) => ({ ...c }));
+  // 作者が管理している元レコードを、入れ子の配列・オブジェクトを含めて保護する。
+  const result: Character[] = existing.map((character) => structuredClone(character));
   const added: string[] = [];
   const updated: string[] = [];
   const changedIds = new Set<string>();
@@ -95,6 +96,7 @@ function applyExtracted(
   conflicts: MergeResult["conflicts"]
 ): boolean {
   let changed = false;
+  const validChapters = chapters.filter(Number.isFinite);
 
   // 別名は和集合。
   // 抽出時の名前が既存レコードと異なる場合（「玲司」で照合されたが
@@ -139,7 +141,7 @@ function applyExtracted(
         target.firstPerson.variants.push({
           form: ex.firstPerson,
           context: null,
-          chapters: [...chapters],
+          chapters: [...validChapters],
           evidence: ex.evidence ?? null,
         });
         changed = true;
@@ -155,7 +157,7 @@ function applyExtracted(
   // 呼称: 相手ごとにまとめ、異なる呼び方はすべて残す
   for (const at of ex.addressTerms ?? []) {
     if (!at.targetName || !at.term) continue;
-    if (mergeAddressTerm(target, at, chapters)) changed = true;
+    if (mergeAddressTerm(target, at, validChapters)) changed = true;
   }
 
   // 関係
@@ -176,7 +178,7 @@ function applyExtracted(
   }
 
   const before = target.appearedChapters.length;
-  target.appearedChapters = mergeChapters(target.appearedChapters, chapters);
+  target.appearedChapters = mergeChapters(target.appearedChapters, validChapters);
   if (target.appearedChapters.length !== before) changed = true;
 
   return changed;
@@ -313,10 +315,28 @@ function findCharacter(
   aliases: string[]
 ): Character | undefined {
   const keys = [name, ...aliases].map(normalizeName);
-  return list.find((c) => {
+  const exactMatch = list.find((c) => {
     const candidates = [c.name, ...c.aliases].map(normalizeName);
     return candidates.some((cand) => keys.includes(cand));
   });
+  if (exactMatch) return exactMatch;
+
+  // 部分名は、姓名が空白・中黒で明示的に区切られている場合だけ使う。
+  // 推測による部分一致は別人を壊すため、候補が一人に決まる場合に限る。
+  const partMatches = list.filter((character) =>
+    [character.name, ...character.aliases].some((candidate) =>
+      splitNameParts(candidate).some((part) => keys.includes(part))
+    )
+  );
+  return partMatches.length === 1 ? partMatches[0] : undefined;
+}
+
+function splitNameParts(name: string): string[] {
+  if (!/[\s　・･]/.test(name)) return [];
+  return name
+    .split(/[\s　・･]+/)
+    .map(normalizeName)
+    .filter(Boolean);
 }
 
 // 同一人物判定でだけ使う。呼称の使い分け自体は addressTerms 側の

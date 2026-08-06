@@ -3,6 +3,54 @@ import { mergeExtractedCharacters } from "../../src/core/characterMerge";
 import { emptyCharacter } from "../../src/models/character";
 
 describe("登場人物マージ", () => {
+  test("入力人物と作者項目を一切変更しない", () => {
+    const existing = emptyCharacter("char_001", "灯");
+    existing.authorNotes = "作者メモ";
+    existing.exportNote = "公開用注記";
+    existing.firstPerson.default = "僕";
+    const before = structuredClone(existing);
+
+    const result = mergeExtractedCharacters([existing], [
+      { data: { name: "灯", firstPerson: "俺" }, chapters: [2] },
+    ]);
+
+    expect(existing).toEqual(before);
+    expect(result.characters[0]).toMatchObject({
+      authorNotes: "作者メモ",
+      exportNote: "公開用注記",
+    });
+  });
+
+  test("姓名と一意な名だけの呼称を同一人物にする", () => {
+    const result = mergeExtractedCharacters(
+      [emptyCharacter("char_001", "黒木 玲司")],
+      [{ data: { name: "玲司さん" }, chapters: [2] }]
+    );
+
+    expect(result.characters).toHaveLength(1);
+  });
+
+  test("同じ名部分を持つ候補が複数なら自動統合しない", () => {
+    const blackReiji = emptyCharacter("char_001", "黒木 玲司");
+    const whiteReiji = emptyCharacter("char_002", "白木・玲司");
+
+    const result = mergeExtractedCharacters(
+      [blackReiji, whiteReiji],
+      [{ data: { name: "玲司さん" }, chapters: [2] }]
+    );
+
+    expect(result.characters).toHaveLength(3);
+  });
+
+  test("区切りのない部分一致では同一人物にしない", () => {
+    const result = mergeExtractedCharacters(
+      [emptyCharacter("char_001", "黒木玲司")],
+      [{ data: { name: "玲司" }, chapters: [2] }]
+    );
+
+    expect(result.characters).toHaveLength(2);
+  });
+
   test("敬称違いを同一人物として扱い、呼び名を別名に残す", () => {
     const existing = emptyCharacter("char_001", "シル");
     const result = mergeExtractedCharacters([existing], [
@@ -32,6 +80,113 @@ describe("登場人物マージ", () => {
     expect(result.characters[0].appearedChapters).toEqual([3]);
   });
 
+  test("作者がロックした呼称を変更しない", () => {
+    const existing = emptyCharacter("char_001", "灯");
+    existing.addressTerms = [{
+      targetName: "澪",
+      targetId: "char_002",
+      authorLocked: true,
+      forms: [{
+        term: "澪さん",
+        category: "名前+敬称",
+        context: "作者設定",
+        firstChapter: 1,
+        lastChapter: 1,
+        status: "current",
+        evidence: "作者記述",
+      }],
+    }];
+
+    const result = mergeExtractedCharacters([existing], [{
+      data: {
+        name: "灯",
+        addressTerms: [{ targetName: "澪", term: "澪" }],
+      },
+      chapters: [2],
+    }]);
+
+    expect(result.characters[0].addressTerms[0].forms).toHaveLength(1);
+    expect(result.characters[0].addressTerms[0].forms[0].term).toBe("澪さん");
+  });
+
+  test("異なる一人称を変化形として話数付きで残す", () => {
+    const existing = emptyCharacter("char_001", "灯");
+    existing.firstPerson.default = "僕";
+
+    const result = mergeExtractedCharacters([existing], [
+      { data: { name: "灯", firstPerson: "俺", evidence: "俺が行く" }, chapters: [3, 5] },
+    ]);
+
+    expect(result.characters[0].firstPerson).toEqual({
+      default: "僕",
+      variants: [{ form: "俺", context: null, chapters: [3, 5], evidence: "俺が行く" }],
+    });
+  });
+
+  test("既存記述と食い違う情報を上書きせず競合に残す", () => {
+    const existing = emptyCharacter("char_001", "灯");
+    existing.role = "騎士";
+
+    const result = mergeExtractedCharacters([existing], [
+      { data: { name: "灯", role: "魔術師" }, chapters: [2] },
+    ]);
+
+    expect(result.characters[0].role).toBe("騎士");
+    expect(result.conflicts).toEqual([
+      { characterName: "灯", field: "role", values: ["騎士", "魔術師"] },
+    ]);
+  });
+
+  test("同じ関係を重複して追加しない", () => {
+    const existing = emptyCharacter("char_001", "灯");
+    const extracted = {
+      data: { name: "灯", relations: [{ name: "澪", relation: "友人" }] },
+      chapters: [2],
+    };
+
+    const result = mergeExtractedCharacters([existing], [extracted, extracted]);
+
+    expect(result.characters[0].relations).toEqual([{ name: "澪", relation: "友人" }]);
+  });
+
+  test("有限の話数だけを保存する", () => {
+    const existing = emptyCharacter("char_001", "灯");
+    existing.firstPerson.default = "僕";
+
+    const result = mergeExtractedCharacters([existing], [
+      {
+        data: {
+          name: "灯",
+          firstPerson: "俺",
+          addressTerms: [{ targetName: "澪", term: "澪さん" }],
+        },
+        chapters: [5, 2, Number.NaN, Number.POSITIVE_INFINITY],
+      },
+    ]);
+
+    expect(result.characters[0].appearedChapters).toEqual([2, 5]);
+    expect(result.characters[0].firstPerson.variants[0].chapters).toEqual([5, 2]);
+    expect(result.characters[0].addressTerms[0].forms[0]).toMatchObject({
+      firstChapter: 2,
+      lastChapter: 5,
+    });
+  });
+
+  test("複数話の呼称に最初と最後の話数を保存する", () => {
+    const result = mergeExtractedCharacters([emptyCharacter("char_001", "灯")], [{
+      data: {
+        name: "灯",
+        addressTerms: [{ targetName: "澪", term: "澪さん" }],
+      },
+      chapters: [5, 2, 4],
+    }]);
+
+    expect(result.characters[0].addressTerms[0].forms[0]).toMatchObject({
+      firstChapter: 2,
+      lastChapter: 5,
+    });
+  });
+
   test("実際に変更された人物IDだけを返す", () => {
     const changed = emptyCharacter("char_001", "灯");
     const untouched = emptyCharacter("char_002", "澪");
@@ -41,6 +196,17 @@ describe("登場人物マージ", () => {
     ]);
 
     expect(result.changedIds).toEqual(["char_001"]);
+  });
+
+  test("既存と同じ抽出結果では変更IDを返さない", () => {
+    const existing = emptyCharacter("char_001", "灯");
+    existing.appearedChapters = [4];
+
+    const result = mergeExtractedCharacters([existing], [
+      { data: { name: "灯" }, chapters: [4] },
+    ]);
+
+    expect(result.changedIds).toEqual([]);
   });
 
   test("AIが集団と判定した新規人物をモブとして保存する", () => {
