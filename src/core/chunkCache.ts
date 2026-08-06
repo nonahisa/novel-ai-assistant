@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as crypto from "crypto";
 import { WorkEntry } from "../models/types";
+import { atomicWriteFile } from "./atomicWrite";
 import { workPaths } from "./workRegistry";
 
 export interface CacheKeyBase {
@@ -35,16 +36,19 @@ export class ChunkCache {
   }
 
   async load(): Promise<void> {
+    this.entries.clear();
+    this.dirty = false;
     const file = await this.filePath();
     try {
       const bytes = await vscode.workspace.fs.readFile(
         vscode.Uri.file(file)
       );
-      const parsed = JSON.parse(
-        new TextDecoder().decode(bytes)
-      ) as CacheEntry[];
-      for (const e of parsed) {
-        this.entries.set(e.key, e);
+      const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+      if (!Array.isArray(parsed)) return;
+      for (const entry of parsed) {
+        if (isCacheEntry(entry)) {
+          this.entries.set(entry.key, entry);
+        }
       }
     } catch {
       // キャッシュは失われても再生成できるため、読めなくても続行する
@@ -58,10 +62,7 @@ export class ChunkCache {
       vscode.Uri.file(path.dirname(file))
     );
     const body = JSON.stringify([...this.entries.values()], null, 0);
-    await vscode.workspace.fs.writeFile(
-      vscode.Uri.file(file),
-      new TextEncoder().encode(body)
-    );
+    await atomicWriteFile(file, new TextEncoder().encode(body));
     this.dirty = false;
   }
 
@@ -96,6 +97,27 @@ export class ChunkCache {
   get size(): number {
     return this.entries.size;
   }
+}
+
+function isCacheEntry(value: unknown): value is CacheEntry {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const entry = value as Record<string, unknown>;
+  return (
+    typeof entry.key === "string" &&
+    typeof entry.createdAt === "string" &&
+    isValidIsoDate(entry.createdAt) &&
+    "value" in entry
+  );
+}
+
+function isValidIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
+    return false;
+  }
+  const date = new Date(value);
+  return !Number.isNaN(date.getTime()) && date.toISOString() === value;
 }
 
 function makeKey(chunkHash: string, base: CacheKeyBase): string {
