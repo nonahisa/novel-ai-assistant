@@ -18,6 +18,9 @@ const state = vi.hoisted(() => ({
   mergeResult: undefined as unknown,
   providerId: "ollama" as "ollama" | "claude",
   configured: true,
+  testConnection: vi.fn(),
+  /** 既定のチャンク列を上書きしたいテストだけが設定する */
+  chunks: undefined as unknown[] | undefined,
   CharacterStoreError: class CharacterStoreError extends Error {
     readonly batchProgress:
       | {
@@ -59,7 +62,11 @@ vi.mock("../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async () =>
     state.configured
       ? {
-          provider: { id: state.providerId, generate: state.generate },
+          provider: {
+            id: state.providerId,
+            generate: state.generate,
+            testConnection: state.testConnection,
+          },
           model: "test-model",
         }
       : undefined
@@ -105,9 +112,21 @@ const chunks: Chunk[] = [
   },
 ];
 
+/** 追加のチャンクを要するテスト（接続断の打ち切り等）だけが差し替える */
+function chunkFixture(count: number): Chunk[] {
+  return Array.from({ length: count }, (_, index) => ({
+    filePath: "001.txt",
+    index,
+    text: `本文${index + 1}。`,
+    hash: `chunk-${index + 1}`,
+    chapterStart: 1,
+    chapterEnd: 1,
+  }));
+}
+
 vi.mock("../../src/core/chunker", () => ({
   decideChunkSize: vi.fn(() => 1000),
-  splitIntoChunks: vi.fn(() => chunks),
+  splitIntoChunks: vi.fn(() => state.chunks ?? chunks),
 }));
 
 vi.mock("../../src/core/characterStore", () => ({
@@ -218,6 +237,11 @@ describe("人物抽出フロー", () => {
     state.mergeResult = undefined;
     state.providerId = "ollama";
     state.configured = true;
+    state.chunks = undefined;
+    // 既定では疎通できている状態にする。接続断は個別テストで再現する
+    state.testConnection
+      .mockReset()
+      .mockResolvedValue({ ok: true, message: "接続しました", modelCount: 1 });
     workspace.getConfiguration = () => ({
       get: <T>(_key: string, defaultValue: T): T => defaultValue,
     });
@@ -259,6 +283,175 @@ describe("人物抽出フロー", () => {
     });
 
     await expect(saveDirtyDocumentsBeforeExtraction(work)).resolves.toBe(false);
+  });
+
+  test("AIへ接続できないときはAIを呼ばずに警告して中止する", async () => {
+    const showWarningMessage = vi.fn(async () => "中止");
+    const showInformationMessage = vi.fn(async () => "実行");
+    Object.assign(window, {
+      showInformationMessage,
+      showWarningMessage,
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    state.testConnection.mockResolvedValue({
+      ok: false,
+      message:
+        "Ollamaに接続できません（http://localhost:11434）。Ollamaが起動しているか確認してください。",
+    });
+
+    await extractCharacters(work, testRegistry());
+
+    // 接続前に止まるので、AI呼び出しも保存も発生しない
+    expect(state.generate).not.toHaveBeenCalled();
+    expect(state.saveAll).not.toHaveBeenCalled();
+    // 処理量の確認ダイアログまで到達しない
+    expect(showInformationMessage).not.toHaveBeenCalled();
+
+    const warning = showWarningMessage.mock.calls.at(-1);
+    expect(warning?.[0]).toContain("AIに接続できないため");
+    expect(warning?.[0]).toContain("Ollamaが起動しているか確認してください");
+    expect(warning?.slice(1)).toEqual(["再試行", "設定を開く", "中止"]);
+  });
+
+  test("接続失敗の警告で設定を開くとプロバイダの設定画面へ誘導する", async () => {
+    const executeCommand = vi.fn(async () => undefined);
+    Object.assign(commands, { executeCommand });
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage: vi.fn(async () => "設定を開く"),
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    state.providerId = "claude";
+    state.testConnection.mockResolvedValue({
+      ok: false,
+      message: "ClaudeのAPIキーが未設定です。",
+    });
+
+    await extractCharacters(work, testRegistry());
+
+    expect(executeCommand).toHaveBeenCalledWith(
+      "workbench.action.openSettings",
+      "novelai.claude"
+    );
+    expect(state.generate).not.toHaveBeenCalled();
+  });
+
+  test("再試行を選ぶと接続を確認し直し、回復すれば処理を続行する", async () => {
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage: vi.fn(async () => "再試行"),
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    state.testConnection
+      .mockResolvedValueOnce({ ok: false, message: "Ollamaに接続できません" })
+      .mockResolvedValue({ ok: true, message: "接続しました", modelCount: 1 });
+    state.generate.mockResolvedValue(successfulResult("灯"));
+
+    await extractCharacters(work, testRegistry());
+
+    expect(state.testConnection).toHaveBeenCalledTimes(2);
+    expect(state.generate).toHaveBeenCalled();
+  });
+
+  test("実行中に接続が連続で切れたら残りを試さず中断を伝える", async () => {
+    state.chunks = chunkFixture(10);
+    const showWarningMessage = vi.fn(async () => undefined);
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage,
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    // 1件成功したあとにOllamaが落ちた状況
+    state.generate
+      .mockResolvedValueOnce(successfulResult("灯"))
+      .mockRejectedValue(
+        new AIError("Ollamaに接続できません", "not_running")
+      );
+
+    await extractCharacters(work, testRegistry());
+
+    // 成功1回 + 連続失敗3回で打ち切る。10チャンク全部は試さない
+    expect(state.generate).toHaveBeenCalledTimes(4);
+    expect(showWarningMessage.mock.calls.at(-1)?.[0]).toContain(
+      "AIへ接続できなくなったため、残りのチャンクを中断しました"
+    );
+  });
+
+  test("接続失敗が連続しなければ打ち切らず最後まで処理する", async () => {
+    state.chunks = chunkFixture(6);
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage: vi.fn(async () => undefined),
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    // 一時的な揺らぎ（失敗と成功が交互）では中断しない
+    state.generate
+      .mockRejectedValueOnce(new AIError("timeout", "timeout"))
+      .mockResolvedValueOnce(successfulResult("灯"))
+      .mockRejectedValueOnce(new AIError("timeout", "timeout"))
+      .mockResolvedValueOnce(successfulResult("澪"))
+      .mockRejectedValueOnce(new AIError("timeout", "timeout"))
+      .mockResolvedValueOnce(successfulResult("灯"));
+
+    await extractCharacters(work, testRegistry());
+
+    expect(state.generate).toHaveBeenCalledTimes(6);
+  });
+
+  test("キャッシュだけで完結する場合は接続を確認しない", async () => {
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => undefined),
+      showWarningMessage: vi.fn(async () => undefined),
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    state.cachedResults.set("chunk-1", {
+      characters: [{ name: "灯", evidence: "灯が歩いた。" }],
+    });
+    state.cachedResults.set("chunk-2", {
+      characters: [{ name: "澪", evidence: "澪が歩いた。" }],
+    });
+
+    await extractCharacters(work, testRegistry());
+
+    // Ollamaが落ちていてもキャッシュからの再反映はできるべき
+    expect(state.testConnection).not.toHaveBeenCalled();
+    expect(state.generate).not.toHaveBeenCalled();
   });
 
   test("切り詰め応答を保存せず出力上限かチャンク縮小を案内する", async () => {

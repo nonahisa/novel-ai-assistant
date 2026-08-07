@@ -6,6 +6,8 @@ import { AIRegistry, ensureConfigured } from "../ai/registry";
 import {
   AIError,
   recoveryForAIError,
+  type AIProvider,
+  type ConnectionTestResult,
   type ProviderId,
 } from "../ai/types";
 import { scanWork } from "../core/scanner";
@@ -201,10 +203,17 @@ export async function extractCharacters(
   );
 
   if (pending.length === 0) {
+    // キャッシュだけで完結するのでAIには接続しない。
+    // Ollamaが落ちていても再反映はできるため、ここで疎通を求めない。
     vscode.window.showInformationMessage(
       "すべてのチャンクが処理済みです。キャッシュから人物設定を再反映します。"
     );
   } else {
+    // AIを呼ぶ前に疎通を確認する。
+    // ここで確認しないと、接続できないまま全チャンクを順に試し、
+    // 待たされた末に「失敗 N 件」とだけ言われることになる。
+    if (!(await confirmProviderReachable(resolved.provider))) return;
+
     const estimateMinutes = Math.ceil((pending.length * 20) / 60);
     const configuredMaxOutputTokens = vscode.workspace
       .getConfiguration("novelai")
@@ -234,6 +243,9 @@ export async function extractCharacters(
   const failures: ExtractionFailure[] = [];
   let cacheWarnings = 0;
   let cancelled = false;
+  /** 実行中にAIへ接続できなくなり、残りのチャンクを諦めたか */
+  let connectivityLost = false;
+  let consecutiveConnectivityFailures = 0;
 
   await vscode.window.withProgress(
     {
@@ -293,6 +305,9 @@ export async function extractCharacters(
             signal: controller.signal,
           });
 
+          // 応答が返った時点で接続は生きている。連続失敗の数え直し
+          consecutiveConnectivityFailures = 0;
+
           if (res.truncated) {
             failures.push({
               chunk,
@@ -341,6 +356,18 @@ export async function extractCharacters(
           if (e instanceof AIError && isFatalProviderFailure(e.kind)) {
             done++;
             break;
+          }
+          // 実行中にAIが落ちた・回線が切れた場合、残りも同じ理由で失敗する。
+          // 単発の揺らぎは許容しつつ、連続したら待たせずに打ち切る。
+          if (e instanceof AIError && isConnectivityFailure(e.kind)) {
+            consecutiveConnectivityFailures++;
+            if (
+              consecutiveConnectivityFailures >= CONNECTIVITY_FAILURE_LIMIT
+            ) {
+              connectivityLost = true;
+              done++;
+              break;
+            }
           }
           // 1チャンクの失敗で全体を止めない
         }
@@ -444,7 +471,15 @@ export async function extractCharacters(
 
   const summary = buildExtractionSummary(baseCounts);
   const recovery = describeFailureRecoveries(failures);
-  const message = recovery ? `${summary}\n対応: ${recovery}` : summary;
+  // 接続断で打ち切った場合、件数だけ見せても理由が伝わらないので先頭で明示する
+  const connectivityNotice = connectivityLost
+    ? "AIへ接続できなくなったため、残りのチャンクを中断しました。" +
+      "AIが起動しているか、ネットワーク接続を確認してください。" +
+      "完了済みの処理は次回再利用されます。\n"
+    : "";
+  const message =
+    connectivityNotice +
+    (recovery ? `${summary}\n対応: ${recovery}` : summary);
   const hasSettingsFailure = failures.some((failure) =>
     failure.kind ? shouldOfferSettings(failure.kind) : false
   );
@@ -454,7 +489,7 @@ export async function extractCharacters(
     ...(merged ? ["一覧を開く"] : []),
   ];
   const action =
-    failures.length > 0 || cacheWarnings > 0 || !merged
+    failures.length > 0 || cacheWarnings > 0 || connectivityLost || !merged
       ? await vscode.window.showWarningMessage(message, ...actions)
       : await vscode.window.showInformationMessage(message, ...actions);
 
@@ -593,6 +628,68 @@ async function showRecoveryPaths(recoveryPaths: string[]): Promise<void> {
   });
   await vscode.window.showTextDocument(doc);
 }
+
+/**
+ * AIを呼び始める前に疎通を確認する。
+ *
+ * Ollamaが起動していない・ネットワークが切れている場合、
+ * 確認せずに走らせると全チャンクが同じ理由で失敗するだけなので、
+ * 開始前に止めて作者に理由と対処を伝える。
+ */
+async function confirmProviderReachable(
+  provider: Pick<AIProvider, "id" | "testConnection">
+): Promise<boolean> {
+  // testConnection を持たないプロバイダは確認をスキップする（実行自体は妨げない）
+  if (typeof provider.testConnection !== "function") return true;
+
+  for (;;) {
+    let result: ConnectionTestResult;
+    try {
+      result = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "AIに接続できるか確認しています…",
+        },
+        () => provider.testConnection()
+      );
+    } catch (error) {
+      // testConnection 自体が落ちた場合も「接続できない」として扱う
+      result = {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    if (result.ok) return true;
+
+    const action = await vscode.window.showWarningMessage(
+      `AIに接続できないため、登場人物の抽出を開始できません。\n${result.message}`,
+      "再試行",
+      "設定を開く",
+      "中止"
+    );
+    if (action === "再試行") continue;
+    if (action === "設定を開く") {
+      await vscode.commands.executeCommand(
+        "workbench.action.openSettings",
+        `novelai.${provider.id}`
+      );
+    }
+    return false;
+  }
+}
+
+/**
+ * 接続断とみなす失敗の種別。
+ * 単発なら通信の揺らぎかもしれないが、連続するならAI側が落ちている。
+ */
+function isConnectivityFailure(kind: AIError["kind"]): boolean {
+  return kind === "not_running" || kind === "timeout";
+}
+
+/** 連続でこの回数だけ接続に失敗したら、残りのチャンクを試さず中断する */
+const CONNECTIVITY_FAILURE_LIMIT = 3;
 
 function isFatalProviderFailure(kind: AIError["kind"]): boolean {
   return kind === "authentication_failed" ||
