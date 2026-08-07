@@ -27,7 +27,7 @@ Vitest covers pure logic and provider boundaries under `test/unit/`; name files 
 
 ## Sakura AI Smoke Test
 
-The Sakura AI Engine smoke test is a GitHub Actions `workflow_dispatch` workflow only: it never runs automatically on push, pull request, or a schedule. Store its credential only as the repository Actions secret `SAKURA_AI_ACCOUNT_TOKEN`; do not read, create, or commit a local `.env` file. After the workflow is present on the default branch, run **Sakura AI Engine Smoke Test** from the repository **Actions** tab with **Run workflow**. It calls `gemma-4-31B-it` and passes only when the response content is nonempty. A 401 means to check the secret configuration before a deliberate rerun; a 429 means to wait for the rate limit and rerun manually. Neither case should trigger automatic retries or a fallback provider.
+The Sakura AI Engine smoke test runs on `workflow_dispatch` and pull requests targeting `main` (`opened`, `synchronize`, `reopened`) when the PR comes from the same repository. `fork` PRs are skipped because pull request secrets are not available there. Keep the credential in the repository Actions secret `SAKURA_AI_ACCOUNT_TOKEN` only; do not read, create, or commit a local `.env` file. It calls `preview/gemma-4-31B-it` by default and passes only when the response content is nonempty. Repository variable `SAKURA_AI_SMOKE_MODEL` can override the model value for future changes. A 400 usually means request format/model mismatch and should be handled by checking the error detail text; 401 means check secret configuration before a deliberate rerun; 429 means wait for rate limit and rerun manually. Neither case should trigger automatic retries or a fallback provider.
 
 ## Commit & Pull Request Guidelines
 

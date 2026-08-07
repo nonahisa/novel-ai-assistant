@@ -1,13 +1,27 @@
 name: Sakura AI Engine Smoke Test
 
 on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: sakura-smoke-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   smoke:
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -18,4 +32,5 @@ jobs:
       - name: Run Sakura AI smoke test
         env:
           SAKURA_AI_ACCOUNT_TOKEN: ${{ secrets.SAKURA_AI_ACCOUNT_TOKEN }}
+          SAKURA_AI_SMOKE_MODEL: ${{ vars.SAKURA_AI_SMOKE_MODEL }}
         run: node scripts/sakuraAiSmoke.mjs

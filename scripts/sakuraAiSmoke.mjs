@@ -2,12 +2,36 @@ import { fileURLToPath } from "node:url";
 
 export const SAKURA_AI_CHAT_COMPLETIONS_ENDPOINT =
   "https://api.ai.sakura.ad.jp/v1/chat/completions";
-export const SAKURA_AI_SMOKE_MODEL = "gemma-4-31B-it";
+export const SAKURA_AI_SMOKE_MODEL = "preview/gemma-4-31B-it";
+export const SAKURA_AI_SMOKE_MODEL_ENV = "SAKURA_AI_SMOKE_MODEL";
 
-export async function runSakuraAiSmoke({ token, fetchImpl = globalThis.fetch, log }) {
+function resolveSmokeModel(override) {
+  if (typeof override === "string" && override.trim() !== "") {
+    return override.trim();
+  }
+  if (
+    typeof process === "object" &&
+    process !== null &&
+    typeof process.env?.[SAKURA_AI_SMOKE_MODEL_ENV] === "string"
+  ) {
+    const fromEnv = process.env[SAKURA_AI_SMOKE_MODEL_ENV].trim();
+    if (fromEnv !== "") {
+      return fromEnv;
+    }
+  }
+  return SAKURA_AI_SMOKE_MODEL;
+}
+
+export async function runSakuraAiSmoke({
+  token,
+  fetchImpl = globalThis.fetch,
+  log,
+  model: modelOverride,
+}) {
   if (typeof token !== "string" || token.trim() === "") {
     throw new Error("Sakura AI account token is required");
   }
+  const model = resolveSmokeModel(modelOverride);
 
   let response;
   try {
@@ -18,7 +42,7 @@ export async function runSakuraAiSmoke({ token, fetchImpl = globalThis.fetch, lo
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: SAKURA_AI_SMOKE_MODEL,
+        model,
         messages: [{ role: "user", content: "接続確認をお願いします。" }],
         temperature: 0,
         max_tokens: 32,
@@ -30,6 +54,21 @@ export async function runSakuraAiSmoke({ token, fetchImpl = globalThis.fetch, lo
   }
 
   if (!response.ok) {
+    if (response.status !== 401 && response.status !== 429) {
+      let body = "";
+      try {
+        const text = await response.text();
+        body = typeof text === "string" ? text.trim() : "";
+      } catch {
+        body = "";
+      }
+
+      if (body) {
+        const compact = body.replace(/\s+/g, " ").slice(0, 500);
+        throw new Error(`Sakura AI smoke test failed: HTTP ${response.status}: ${compact}`);
+      }
+    }
+
     throw new Error(`Sakura AI smoke test failed: HTTP ${response.status}`);
   }
 
@@ -40,11 +79,11 @@ export async function runSakuraAiSmoke({ token, fetchImpl = globalThis.fetch, lo
     throw new Error("Sakura AI smoke test failed: invalid JSON response");
   }
 
-  const model = payload?.model;
-  if (typeof model !== "string" || model.trim() === "") {
+  const responseModel = payload?.model;
+  if (typeof responseModel !== "string" || responseModel.trim() === "") {
     throw new Error("Sakura AI smoke test failed: response model is missing");
   }
-  if (model !== SAKURA_AI_SMOKE_MODEL) {
+  if (responseModel !== model) {
     throw new Error("Sakura AI smoke test failed: unexpected response model");
   }
 
@@ -53,9 +92,9 @@ export async function runSakuraAiSmoke({ token, fetchImpl = globalThis.fetch, lo
     throw new Error("Sakura AI smoke test failed: response content is blank");
   }
 
-  const result = { model: SAKURA_AI_SMOKE_MODEL, contentLength: content.length };
+  const result = { model, contentLength: content.length };
   log?.(
-    `Sakura AI smoke test passed: model=${SAKURA_AI_SMOKE_MODEL}, contentLength=${content.length}`
+    `Sakura AI smoke test passed: model=${model}, contentLength=${content.length}`
   );
   return result;
 }
