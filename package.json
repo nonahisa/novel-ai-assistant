@@ -91,6 +91,12 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.selectOllamaExecutable",
+        "title": "Ollamaの実行ファイルを選択",
+        "category": "小説執筆",
+        "icon": "$(folder-opened)"
+      },
+      {
         "command": "novelai.extractCharacters",
         "title": "登場人物を抽出",
         "category": "小説執筆",
@@ -207,6 +213,11 @@
           "type": "string",
           "default": "http://localhost:11434",
           "description": "OllamaのエンドポイントURL"
+        },
+        "novelai.ollama.executablePath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "`ollama` 実行ファイルの場所。**空なら自動検出**します（PATHと既定のインストール先を探索）。拡張機能からOllamaを起動するときにだけ使います。自動検出に失敗する場合のみ指定してください。\n\n[ファイルを選択…](command:novelai.selectOllamaExecutable)"
         },
         "novelai.ollama.numCtx": {
           "type": "number",

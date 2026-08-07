@@ -10,6 +10,11 @@ import {
   type ConnectionTestResult,
   type ProviderId,
 } from "../ai/types";
+import {
+  describeStartFailure,
+  isLocalEndpoint,
+  startOllama,
+} from "../ai/ollamaLauncher";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import { parseEpisodeMetadata } from "../core/metadataParser";
@@ -18,7 +23,10 @@ import {
   CharacterStore,
   CharacterStoreError,
 } from "../core/characterStore";
-import { mergeExtractedCharacters } from "../core/characterMerge";
+import {
+  mergeExtractedCharacters,
+  type MergeCandidate,
+} from "../core/characterMerge";
 import {
   parseResult,
   validateCharacterExtractResult,
@@ -51,6 +59,9 @@ interface ExtractionSummaryCounts {
   ambiguous: number;
   unsavedConflicts: number;
   cacheWarnings: number;
+  mergeCandidates: MergeCandidate[];
+  /** モブとして記録された人数。ネームドキャラと区別して示す */
+  mobs: number;
 }
 
 /** 作品内の未保存文書を保存し、成功を再検査できた場合だけ実行を許可する。 */
@@ -92,8 +103,31 @@ export async function extractCharacters(
   const resolved = await ensureConfigured(registry);
   if (!resolved) return;
 
-  const modelInfo = await registry.resolveModelInfo();
-  const contextWindow = modelInfo?.contextWindow ?? 8192;
+  // モデル情報はチャンクサイズを決めるのに使う。
+  // 取得できないまま既定値で進むと、本来より細かく分割され、
+  // ハッシュが変わって既存のキャッシュが全て無駄になる。
+  // そのため取れない場合は、先に疎通を回復させてから取り直す。
+  let modelInfo = await registry.resolveModelInfo();
+  if (!modelInfo) {
+    if (!(await confirmProviderReachable(resolved.provider))) return;
+    modelInfo = await registry.resolveModelInfo();
+  }
+  if (!modelInfo) {
+    const action = await vscode.window.showWarningMessage(
+      `モデル「${resolved.model}」の情報を取得できませんでした。` +
+        "このまま実行すると本文の分割単位が変わり、" +
+        "これまでの処理済みキャッシュが使えなくなります。" +
+        "モデルを選び直してから、もう一度実行してください。",
+      "AIの設定を開く",
+      "中止"
+    );
+    if (action === "AIの設定を開く") {
+      await vscode.commands.executeCommand("novelai.setupAI");
+    }
+    return;
+  }
+
+  const contextWindow = modelInfo.contextWindow;
   const configuredChunkChars = vscode.workspace
     .getConfiguration("novelai")
     .get<number>("chunkChars", 0);
@@ -408,6 +442,8 @@ export async function extractCharacters(
     ambiguous: 0,
     unsavedConflicts: 0,
     cacheWarnings,
+    mergeCandidates: merged?.mergeCandidates ?? [],
+    mobs: merged?.characters.filter((character) => character.isMob).length ?? 0,
   };
 
   if (changedCharacters.length > 0) {
@@ -544,17 +580,38 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
     counts.rejected.length > 0
       ? ` / ${describeRejectedCandidates(counts.rejected)}`
       : "";
-  return [
-    `新規 ${counts.added}名`,
-    `更新 ${counts.updated}名`,
-    `除外 ${counts.rejected.length}件`,
-    `競合 ${counts.conflicts}件`,
-    `失敗 ${counts.failedChunks}チャンク`,
-    `保存済み ${counts.saved}名`,
-    `手動確認が必要 ${counts.ambiguous}名`,
-    `保存競合による未保存 ${counts.unsavedConflicts}名`,
-    `キャッシュ保存警告 ${counts.cacheWarnings}件`,
-  ].join(" / ") + rejectedDetail;
+  // 統合候補は自動では反映しないので、作者が気づけるよう本文に出す
+  const candidateDetail =
+    counts.mergeCandidates.length > 0
+      ? `\n同一人物かもしれない組: ${describeMergeCandidates(
+          counts.mergeCandidates
+        )}（自動では統合していません）`
+      : "";
+  return (
+    [
+      `新規 ${counts.added}名（うちモブ ${counts.mobs}名）`,
+      `更新 ${counts.updated}名`,
+      `除外 ${counts.rejected.length}件`,
+      `競合 ${counts.conflicts}件`,
+      `失敗 ${counts.failedChunks}チャンク`,
+      `保存済み ${counts.saved}名`,
+      `手動確認が必要 ${counts.ambiguous}名`,
+      `保存競合による未保存 ${counts.unsavedConflicts}名`,
+      `キャッシュ保存警告 ${counts.cacheWarnings}件`,
+    ].join(" / ") +
+    rejectedDetail +
+    candidateDetail
+  );
+}
+
+function describeMergeCandidates(candidates: MergeCandidate[]): string {
+  const shown = candidates
+    .slice(0, 5)
+    .map(({ names }) => `「${names[0]}」と「${names[1]}」`)
+    .join("、");
+  const rest =
+    candidates.length > 5 ? ` ほか${candidates.length - 5}組` : "";
+  return shown + rest;
 }
 
 function describeCharacterStoreError(error: CharacterStoreError): string {
@@ -663,12 +720,22 @@ async function confirmProviderReachable(
 
     if (result.ok) return true;
 
+    // ローカルのOllamaなら、この場から起動できる
+    const canStart = provider.id === "ollama" && isLocalOllamaEndpoint();
+
     const action = await vscode.window.showWarningMessage(
       `AIに接続できないため、登場人物の抽出を開始できません。\n${result.message}`,
+      ...(canStart ? ["Ollamaを起動"] : []),
       "再試行",
       "設定を開く",
       "中止"
     );
+
+    if (action === "Ollamaを起動") {
+      const started = await startOllamaWithProgress();
+      if (!started) continue; // 失敗理由は起動側で通知済み。再度この警告へ戻る
+      continue; // 起動できたので疎通を確認し直す
+    }
     if (action === "再試行") continue;
     if (action === "設定を開く") {
       await vscode.commands.executeCommand(
@@ -678,6 +745,54 @@ async function confirmProviderReachable(
     }
     return false;
   }
+}
+
+function ollamaEndpoint(): string {
+  return vscode.workspace
+    .getConfiguration("novelai")
+    .get<string>("ollama.endpoint", "http://localhost:11434");
+}
+
+function isLocalOllamaEndpoint(): boolean {
+  return isLocalEndpoint(ollamaEndpoint());
+}
+
+/** Ollamaを起動し、応答するまで進捗を出しながら待つ */
+async function startOllamaWithProgress(): Promise<boolean> {
+  const outcome = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "Ollamaを起動しています…",
+    },
+    () =>
+      startOllama({
+        endpoint: ollamaEndpoint(),
+        executablePath: vscode.workspace
+          .getConfiguration("novelai")
+          .get<string>("ollama.executablePath", ""),
+      })
+  );
+
+  if (outcome.ok) {
+    vscode.window.showInformationMessage("Ollamaを起動しました。");
+    return true;
+  }
+
+  // 実行ファイルが見つからない場合は、その場で選んでもらえるようにする
+  if (outcome.reason === "not_installed") {
+    const action = await vscode.window.showWarningMessage(
+      describeStartFailure(outcome),
+      "実行ファイルを選択",
+      "閉じる"
+    );
+    if (action === "実行ファイルを選択") {
+      await vscode.commands.executeCommand("novelai.selectOllamaExecutable");
+    }
+    return false;
+  }
+
+  await vscode.window.showWarningMessage(describeStartFailure(outcome));
+  return false;
 }
 
 /**

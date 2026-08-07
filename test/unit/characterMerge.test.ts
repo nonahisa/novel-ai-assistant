@@ -444,3 +444,86 @@ describe("登場人物マージ", () => {
     expect(result.characters[0].isMob).toBe(true);
   });
 });
+
+describe("省略形の統合候補", () => {
+  function merge(names: string[]) {
+    return mergeExtractedCharacters(
+      [],
+      names.map((name) => ({ data: { name }, chapters: [1] }))
+    );
+  }
+
+  test("カタカナの省略形を候補として挙げる", () => {
+    const result = merge(["ギルドマスター", "ギルマス"]);
+
+    // 自動では統合しない。作者が判断できるよう候補として出すだけ
+    expect(result.characters).toHaveLength(2);
+    expect(result.mergeCandidates).toEqual([
+      { names: ["ギルドマスター", "ギルマス"], reason: "abbreviation" },
+    ]);
+  });
+
+  test("頭文字が違う語は候補にしない", () => {
+    const result = merge(["ギルドマスター", "マスター"]);
+
+    expect(result.mergeCandidates).toEqual([]);
+  });
+
+  test("部分列でない語は候補にしない", () => {
+    // グランス と グラックス は先頭が同じだが省略関係ではない
+    const result = merge(["グランス", "グラックス"]);
+
+    expect(result.mergeCandidates).toEqual([]);
+  });
+
+  test("長さが開きすぎる組は候補にしない", () => {
+    const result = merge(["ギ", "ギルドマスター"]);
+
+    expect(result.mergeCandidates).toEqual([]);
+  });
+
+  test("漢字を含む名前は部分一致でも候補にしない", () => {
+    // 「田中」と「田中村」のような別人を巻き込まないため
+    const result = merge(["田中", "田中村"]);
+
+    expect(result.mergeCandidates).toEqual([]);
+  });
+
+  test("すでに別名として統合済みの組は候補にしない", () => {
+    const result = mergeExtractedCharacters(
+      [],
+      [
+        { data: { name: "ギルドマスター", aliases: ["ギルマス"] }, chapters: [1] },
+      ]
+    );
+
+    expect(result.characters).toHaveLength(1);
+    expect(result.mergeCandidates).toEqual([]);
+  });
+
+  test("実データで別人だった組を候補にしない", () => {
+    // 19話の実データに現れた人物名で誤検出が出ないことを確認する
+    const result = merge([
+      "ジャック",
+      "ホンゴー",
+      "ケンプ",
+      "ヒッコリー",
+      "グレイ",
+      "グランス",
+      "ファーレン",
+      "エバン",
+      "ウィズ",
+      "メアリー",
+      "グラックス",
+      "ハルト",
+      "カッパー",
+      "ゴード",
+      "シル",
+      "カーラーン",
+      "アンツ",
+      "ジャンヌ",
+    ]);
+
+    expect(result.mergeCandidates).toEqual([]);
+  });
+});

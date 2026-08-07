@@ -24,6 +24,7 @@ import {
   extractCharacters,
   saveDirtyDocumentsBeforeExtraction,
 } from "./features/extractCharacters";
+import { selectOllamaExecutable } from "./features/selectOllamaExecutable";
 import { pathExists } from "./core/fileSystem";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -344,6 +345,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("novelai.setupAI", async () => {
       await runSetupWizard(aiRegistry);
     })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.selectOllamaExecutable",
+      async () => {
+        await selectOllamaExecutable();
+      }
+    )
   );
 
   context.subscriptions.push(

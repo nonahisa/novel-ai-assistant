@@ -30,12 +30,10 @@ describe("AI登場人物抽出結果の検証", () => {
   ]>([
     ["僕", undefined, "invalid_name"],
     ["先生", undefined, "non_person"],
-    ["兵士たち", undefined, "collective"],
     ["王都アルバ", "location", "non_person"],
+    ["警官", undefined, "non_person"],
     ["灯は帰った。だから眠った", undefined, "invalid_name"],
     ["誰か", undefined, "invalid_name"],
-    ["警官", undefined, "non_person"],
-    ["村人ら", undefined, "collective"],
     ["灯は帰った", undefined, "invalid_name"],
     ["「灯」", undefined, "invalid_name"],
   ])("人物でない候補 %s を %s として除外する", (name, entityType, reason) => {
@@ -45,6 +43,62 @@ describe("AI登場人物抽出結果の検証", () => {
 
     expect(result.rejected).toEqual([{ name, reason }]);
     expect(result.accepted).toEqual([]);
+  });
+
+  test.each([["兵士たち"], ["村人ら"], ["旅人一行"]])(
+    "集団名詞 %s を消さずモブとして残す",
+    (name) => {
+      // 本文に出ている以上、消すと情報が失われる。
+      // ネームドキャラと区別できる印を付けて保持する。
+      const line = `${name}が広場に集まっていた`;
+      const result = validate(
+        { characters: [{ name, evidence: line }] },
+        { ...chunk, text: line }
+      );
+
+      expect(result.rejected).toEqual([]);
+      expect(result.accepted).toHaveLength(1);
+      expect(result.accepted[0].data.isMob).toBe(true);
+    }
+  );
+
+  test.each([
+    ["星環評議会", "group" as const],
+    ["銀翼族", "group" as const],
+    ["先生", undefined],
+    ["姉", undefined],
+  ])("組織・種族・関係語 %s はモブにせず除外する", (name, entityType) => {
+    // entityType: "group" は組織や種族にも使われる。
+    // 「姉」「先生」は特定個人を指す参照であり、群衆ではない。
+    const line = `${name}が広場にいた`;
+    const result = validate(
+      { characters: [{ name, entityType, evidence: line }] },
+      { ...chunk, text: line }
+    );
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toEqual([{ name, reason: "non_person" }]);
+  });
+
+  test("普通の人物にはモブの印を付けない", () => {
+    const result = validate({
+      characters: [{ name: "灯", entityType: "person", evidence: sourceLine }],
+    });
+
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].data.isMob).toBeFalsy();
+  });
+
+  test("モブでも根拠がなければ通さない", () => {
+    // モブ扱いは捏造の免罪符にしない
+    const result = validate({
+      characters: [{ name: "兵士たち", evidence: "兵士たちは空を飛んだ" }],
+    });
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toEqual([
+      { name: "兵士たち", reason: "ungrounded" },
+    ]);
   });
 
   test("本文中に名前があっても無関係なevidenceでは人物を通さない", () => {
@@ -106,6 +160,101 @@ describe("AI登場人物抽出結果の検証", () => {
     expect(result.accepted).toHaveLength(1);
     expect(result.accepted[0].data.aliases).toEqual(["玲司さん"]);
     expect(result.rejected).toEqual([]);
+  });
+
+  test("自分の名前を含まない台詞が根拠でも、本文に実在すれば通す", () => {
+    // 実データで主要人物が11件除外された原因。
+    // 話者は自分の名前を台詞で言わないため、引用内に名前を求めると必ず落ちる。
+    const line = "「なぁホンゴーさん。来月分の保護費、前借りさせてくれよ」";
+    const result = validate(
+      {
+        characters: [
+          {
+            name: "カーラーン",
+            entityType: "person",
+            evidence: line,
+          },
+        ],
+      },
+      {
+        ...chunk,
+        text: `カーラーンが窓口に現れた。\n${line}`,
+      }
+    );
+
+    expect(result.accepted).toHaveLength(1);
+    expect(result.rejected).toEqual([]);
+  });
+
+  test("全角スペースがバイト表記で返っても逐語一致とみなす", () => {
+    // gemma系は全角スペースを <0xE3><0x80><0x80> のまま出力することがある
+    const result = validate(
+      {
+        characters: [
+          {
+            name: "ホンゴー",
+            entityType: "person",
+            evidence: "「ん？<0xE3><0x80><0x80>ホンゴーか？」",
+          },
+        ],
+      },
+      {
+        ...chunk,
+        text: "「ん？　ホンゴーか？」と声がした。",
+      }
+    );
+
+    expect(result.accepted).toHaveLength(1);
+    expect(result.rejected).toEqual([]);
+  });
+
+  test("引用が本文にあっても名前が本文に無ければ除外する", () => {
+    // 名前の捏造は引き続き弾く（緩和で失われていないことの確認）
+    const result = validate({
+      characters: [
+        {
+          name: "存在しない人物",
+          entityType: "person",
+          evidence: sourceLine,
+        },
+      ],
+    });
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toEqual([
+      { name: "存在しない人物", reason: "ungrounded" },
+    ]);
+  });
+
+  test("名前が本文にあっても引用が捏造なら除外する", () => {
+    // 引用の捏造も引き続き弾く
+    const result = validate({
+      characters: [
+        {
+          name: "灯",
+          entityType: "person",
+          evidence: "灯は空を飛んで城へ向かった",
+        },
+      ],
+    });
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toEqual([{ name: "灯", reason: "ungrounded" }]);
+  });
+
+  test("空白しかない引用では通さない", () => {
+    const result = validate({
+      characters: [
+        {
+          name: "灯",
+          entityType: "person",
+          evidence: "「　　　　」",
+        },
+      ],
+    });
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toEqual([{ name: "灯", reason: "ungrounded" }]);
   });
 
   test("名前も引用も本文にない候補を根拠なしとして除外する", () => {
@@ -210,14 +359,16 @@ describe("AI登場人物抽出結果の検証", () => {
     }
   );
 
-  test("漢字の達が付く役割語は集団として除外する", () => {
-    const result = validate({
-      characters: [{ name: "兵士達", evidence: sourceLine }],
-    });
+  test("漢字の達が付く役割語をモブとして残す", () => {
+    const line = "兵士達が門を固めていた";
+    const result = validate(
+      { characters: [{ name: "兵士達", evidence: line }] },
+      { ...chunk, text: line }
+    );
 
-    expect(result.rejected).toEqual([
-      { name: "兵士達", reason: "collective" },
-    ]);
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].data.isMob).toBe(true);
   });
 
   test.each(["null", "あ".repeat(31), "灯、澪"])(

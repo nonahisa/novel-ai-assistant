@@ -285,6 +285,64 @@ describe("人物抽出フロー", () => {
     await expect(saveDirtyDocumentsBeforeExtraction(work)).resolves.toBe(false);
   });
 
+  test("モデル情報を取得できないまま既定値で分割せず中止する", async () => {
+    const showWarningMessage = vi.fn(async () => "中止");
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage,
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    // 疎通はできるがモデル情報だけ取れない（モデルが削除された等）
+    const registry = {
+      resolveModelInfo: vi.fn(async () => undefined),
+    } as unknown as AIRegistry;
+
+    await extractCharacters(work, registry);
+
+    // 既定の8192で細かく刻んでキャッシュを無効化してしまうより、止める
+    expect(state.generate).not.toHaveBeenCalled();
+    expect(showWarningMessage.mock.calls.at(-1)?.[0]).toContain(
+      "これまでの処理済みキャッシュが使えなくなります"
+    );
+  });
+
+  test("接続断でモデル情報が取れない場合は疎通回復後に取り直す", async () => {
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage: vi.fn(async () => "再試行"),
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    // 1回目はOllamaが落ちていて取得失敗、疎通回復後は本来の値が返る
+    const resolveModelInfo = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValue({ contextWindow: 131072 });
+    state.testConnection
+      .mockResolvedValueOnce({ ok: false, message: "Ollamaに接続できません" })
+      .mockResolvedValue({ ok: true, message: "接続しました", modelCount: 1 });
+    state.generate.mockResolvedValue(successfulResult("灯"));
+
+    await extractCharacters(work, {
+      resolveModelInfo,
+    } as unknown as AIRegistry);
+
+    // 取り直した本来のコンテキスト長で処理が進む
+    expect(resolveModelInfo).toHaveBeenCalledTimes(2);
+    expect(state.generate).toHaveBeenCalled();
+  });
+
   test("AIへ接続できないときはAIを呼ばずに警告して中止する", async () => {
     const showWarningMessage = vi.fn(async () => "中止");
     const showInformationMessage = vi.fn(async () => "実行");
@@ -316,7 +374,109 @@ describe("人物抽出フロー", () => {
     const warning = showWarningMessage.mock.calls.at(-1);
     expect(warning?.[0]).toContain("AIに接続できないため");
     expect(warning?.[0]).toContain("Ollamaが起動しているか確認してください");
-    expect(warning?.slice(1)).toEqual(["再試行", "設定を開く", "中止"]);
+    // 既定の接続先はローカルなので、起動ボタンも提示される
+    expect(warning?.slice(1)).toEqual([
+      "Ollamaを起動",
+      "再試行",
+      "設定を開く",
+      "中止",
+    ]);
+  });
+
+  test("ローカルOllamaが落ちているときは起動ボタンを提示する", async () => {
+    const showWarningMessage = vi.fn(async () => "中止");
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage,
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    workspace.getConfiguration = () => ({
+      get: <T>(key: string, defaultValue: T): T =>
+        key === "ollama.endpoint"
+          ? ("http://localhost:11434" as unknown as T)
+          : defaultValue,
+    });
+    state.testConnection.mockResolvedValue({
+      ok: false,
+      message: "Ollamaに接続できません",
+    });
+
+    await extractCharacters(work, testRegistry());
+
+    expect(showWarningMessage.mock.calls.at(-1)?.slice(1)).toEqual([
+      "Ollamaを起動",
+      "再試行",
+      "設定を開く",
+      "中止",
+    ]);
+  });
+
+  test("別マシンのOllamaには起動ボタンを出さない", async () => {
+    const showWarningMessage = vi.fn(async () => "中止");
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage,
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    workspace.getConfiguration = () => ({
+      get: <T>(key: string, defaultValue: T): T =>
+        key === "ollama.endpoint"
+          ? ("http://gpu-server:11434" as unknown as T)
+          : defaultValue,
+    });
+    state.testConnection.mockResolvedValue({
+      ok: false,
+      message: "Ollamaに接続できません",
+    });
+
+    await extractCharacters(work, testRegistry());
+
+    // 別マシンのプロセスは起動できないので提案しない
+    expect(showWarningMessage.mock.calls.at(-1)?.slice(1)).toEqual([
+      "再試行",
+      "設定を開く",
+      "中止",
+    ]);
+  });
+
+  test("Claudeには起動ボタンを出さない", async () => {
+    const showWarningMessage = vi.fn(async () => "中止");
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage,
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    state.providerId = "claude";
+    state.testConnection.mockResolvedValue({
+      ok: false,
+      message: "Claudeに接続できません。ネットワーク接続を確認してください。",
+    });
+
+    await extractCharacters(work, testRegistry());
+
+    expect(showWarningMessage.mock.calls.at(-1)?.slice(1)).toEqual([
+      "再試行",
+      "設定を開く",
+      "中止",
+    ]);
   });
 
   test("接続失敗の警告で設定を開くとプロバイダの設定画面へ誘導する", async () => {

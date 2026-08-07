@@ -100,10 +100,18 @@ describe("登場人物抽出の品質ゲート", () => {
     });
 
     for (const forbiddenName of fixture.forbiddenNames) {
+      // 集団名詞はモブとして残す方針なので、
+      // 禁止対象は「ネームドキャラとして現れないこと」とする。
       expect(
-        merged.characters.some((character) => character.name === forbiddenName)
+        merged.characters.some(
+          (character) => !character.isMob && character.name === forbiddenName
+        )
       ).toBe(false);
     }
+
+    // モブは消さずに残す。黙って失われていないことを確認する。
+    const mobs = merged.characters.filter((character) => character.isMob);
+    expect(mobs.map((character) => character.name)).toEqual(["兵士たち"]);
     for (const [name, aliases] of Object.entries(fixture.expectedAliases)) {
       const character = merged.characters.find((item) => item.name === name);
       expect(character?.aliases).toEqual(expect.arrayContaining(aliases));
@@ -153,8 +161,11 @@ function calculateMetrics(
   ).length;
 
   // 許可名リスト方式ではなく、生成された全レコードを期待identityへ照合する。
+  // モブ（集団名詞）は意図して残している記録なので、
+  // ネームドキャラの純度を測るこの指標からは除く。
   const falsePositives = characters.filter(
     (character) =>
+      !character.isMob &&
       fixture.expectedIdentities.every(
         (identity) => !matchesIdentity(character, identity)
       )

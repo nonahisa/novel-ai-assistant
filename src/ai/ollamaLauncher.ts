@@ -1,0 +1,260 @@
+import { spawn } from "node:child_process";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+
+/**
+ * Ollamaサーバーの起動を支援する。
+ *
+ * Ollamaはインストールしても自動起動しない環境が多く、
+ * 「AIに接続できません」と言われるたびに作者が手動で立ち上げるのは煩わしい。
+ * ただし勝手に起動はせず、必ず作者に確認してから呼ぶこと。
+ */
+
+/** 起動を試みてよいか。リモートのOllamaはこちらからは起動できない */
+export function isLocalEndpoint(endpoint: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+/**
+ * 実行ファイルの候補を、探す順に返す。
+ *
+ * 先頭の "ollama" はPATH解決に任せるもの。
+ * PATHが通っていない環境のために、既定のインストール先も見る。
+ */
+export function executableCandidates(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  homedir: string = os.homedir()
+): string[] {
+  if (platform === "win32") {
+    const localAppData =
+      env.LOCALAPPDATA ?? path.join(homedir, "AppData", "Local");
+    const programFiles = env.ProgramFiles ?? "C:\\Program Files";
+    return [
+      "ollama.exe",
+      path.join(localAppData, "Programs", "Ollama", "ollama.exe"),
+      path.join(programFiles, "Ollama", "ollama.exe"),
+    ];
+  }
+  if (platform === "darwin") {
+    return [
+      "ollama",
+      "/opt/homebrew/bin/ollama",
+      "/usr/local/bin/ollama",
+      "/Applications/Ollama.app/Contents/Resources/ollama",
+    ];
+  }
+  return ["ollama", "/usr/local/bin/ollama", "/usr/bin/ollama"];
+}
+
+/**
+ * 実行ファイルの場所を決める。
+ * 見つからなければ undefined（＝インストールされていない可能性）。
+ */
+export async function resolveExecutable(
+  configuredPath?: string,
+  candidates: string[] = executableCandidates()
+): Promise<string | undefined> {
+  const configured = configuredPath?.trim();
+  if (configured) {
+    // 明示指定は存在確認だけして、そのまま使う（作者の指定を尊重する）
+    return (await isExecutableFile(configured)) ? configured : undefined;
+  }
+
+  for (const candidate of candidates) {
+    // パス区切りを含まないものはPATH解決に任せるため、存在確認をしない
+    if (!candidate.includes(path.sep) && !candidate.includes("/")) {
+      return candidate;
+    }
+    if (await isExecutableFile(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+async function isExecutableFile(filePath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(filePath);
+    return stat.isFile();
+  } catch {
+    return false;
+  }
+}
+
+export type StartOutcome =
+  | { ok: true }
+  | { ok: false; reason: "not_installed" | "spawn_failed" | "timeout"; detail?: string };
+
+export interface StartOptions {
+  endpoint: string;
+  /** 設定で明示された実行ファイルのパス */
+  executablePath?: string;
+  /** 起動を待つ上限。初回起動は数秒かかる */
+  timeoutMs?: number;
+  /** 疎通確認。テストから差し替えられるようにする */
+  probe?: (endpoint: string) => Promise<boolean>;
+}
+
+/**
+ * Ollamaサーバーを起動し、応答するまで待つ。
+ *
+ * VSCodeを閉じてもサーバーが残るよう、切り離した子プロセスとして起動する。
+ * これはOllamaを手動で起動した場合と同じ状態であり、
+ * 拡張機能の終了に巻き込んで止めると、他のツールの利用を妨げるため。
+ */
+export async function startOllama(
+  options: StartOptions
+): Promise<StartOutcome> {
+  const exe = await resolveExecutable(options.executablePath);
+  if (!exe) return { ok: false, reason: "not_installed" };
+
+  const probe = options.probe ?? defaultProbe;
+  const timeoutMs = options.timeoutMs ?? 30000;
+
+  try {
+    const child = spawn(exe, ["serve"], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+
+    // spawn自体の失敗（実行ファイルが無い等）は非同期で飛んでくる
+    const spawnError = await new Promise<Error | undefined>((resolve) => {
+      const onError = (e: Error) => resolve(e);
+      child.once("error", onError);
+      // エラーが来なければ起動したとみなす
+      setTimeout(() => {
+        child.removeListener("error", onError);
+        resolve(undefined);
+      }, 300);
+    });
+    if (spawnError) {
+      return { ok: false, reason: "spawn_failed", detail: spawnError.message };
+    }
+
+    child.unref();
+  } catch (e) {
+    return {
+      ok: false,
+      reason: "spawn_failed",
+      detail: e instanceof Error ? e.message : String(e),
+    };
+  }
+
+  // 起動しても即座には応答しないため、応答するまで待つ
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await probe(options.endpoint)) return { ok: true };
+    await delay(500);
+  }
+  return { ok: false, reason: "timeout" };
+}
+
+async function defaultProbe(endpoint: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2000);
+  try {
+    const res = await fetch(`${endpoint.replace(/\/+$/, "")}/api/tags`, {
+      signal: controller.signal,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 選択された実行ファイルが妥当か検証する。
+ *
+ * 選択ダイアログは何でも選べてしまうため、明らかに違うものを
+ * 設定に書き込む前に気づけるようにする。
+ * ただしOllamaはリネームやラッパー経由でも使われうるので、
+ * 名前が違うだけでは拒否せず「確認が必要」に留める。
+ */
+export type ExecutableCheck =
+  | { verdict: "ok" }
+  | { verdict: "missing" }
+  | { verdict: "suspicious"; reason: string };
+
+export async function checkSelectedExecutable(
+  filePath: string,
+  platform: NodeJS.Platform = process.platform
+): Promise<ExecutableCheck> {
+  if (!(await isExecutableFile(filePath))) return { verdict: "missing" };
+
+  const base = path.basename(filePath).toLowerCase();
+
+  if (platform === "win32" && !base.endsWith(".exe")) {
+    return {
+      verdict: "suspicious",
+      reason: "実行ファイル（.exe）ではないようです。",
+    };
+  }
+
+  // "ollama app.exe" はトレイ常駐アプリで、serve を受け付けない
+  if (base === "ollama app.exe" || base === "ollama app") {
+    return {
+      verdict: "suspicious",
+      reason:
+        "これはトレイ常駐アプリです。サーバーを起動するには ollama.exe を選んでください。",
+    };
+  }
+
+  const stem = base.replace(/\.exe$/, "");
+  if (stem !== "ollama") {
+    return {
+      verdict: "suspicious",
+      reason: `ファイル名が「${path.basename(filePath)}」です。`,
+    };
+  }
+
+  return { verdict: "ok" };
+}
+
+/** 選択ダイアログに渡すフィルタ。プラットフォームで拡張子が異なる */
+export function openDialogFilters(
+  platform: NodeJS.Platform = process.platform
+): Record<string, string[]> | undefined {
+  if (platform === "win32") {
+    return { "実行ファイル": ["exe"], "すべてのファイル": ["*"] };
+  }
+  // macOS/Linuxの実行ファイルに拡張子は無い
+  return undefined;
+}
+
+/** 起動に失敗した理由を、作者が次に取れる操作つきで説明する */
+export function describeStartFailure(outcome: StartOutcome): string {
+  if (outcome.ok) return "";
+  switch (outcome.reason) {
+    case "not_installed":
+      return (
+        "Ollamaの実行ファイルが見つかりませんでした。" +
+        "インストール済みの場合は、設定 novelai.ollama.executablePath に " +
+        "ollama の場所を指定してください。"
+      );
+    case "spawn_failed":
+      return (
+        "Ollamaを起動できませんでした。" +
+        "手動で起動してから、もう一度お試しください。" +
+        (outcome.detail ? `（${outcome.detail}）` : "")
+      );
+    case "timeout":
+      return (
+        "Ollamaを起動しましたが、応答するまでに時間がかかっています。" +
+        "しばらく待ってから「再試行」を押してください。"
+      );
+  }
+}

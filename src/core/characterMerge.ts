@@ -26,6 +26,21 @@ export interface MergeResult {
   changedIds: string[];
   /** 既存と食い違い、作者の判断が必要になったもの */
   conflicts: Array<{ characterName: string; field: string; values: string[] }>;
+  /** 同一人物かもしれない組。自動では統合せず、作者の判断に委ねる */
+  mergeCandidates: MergeCandidate[];
+}
+
+/**
+ * 同一人物の可能性がある組。
+ *
+ * 「ギルドマスター」と「ギルマス」のような省略形は敬称除去では吸収できない。
+ * ただし自動で統合すると、別人を1人にまとめてしまったときに
+ * 作者のデータを壊すことになる（取り消しも難しい）。
+ * 統合し損ねるのは手間で済むが、誤統合は損害になるため、候補の提示に留める。
+ */
+export interface MergeCandidate {
+  names: [string, string];
+  reason: "abbreviation";
 }
 
 export function mergeExtractedCharacters(
@@ -82,6 +97,7 @@ export function mergeExtractedCharacters(
     updated,
     changedIds: [...changedIds],
     conflicts,
+    mergeCandidates: findMergeCandidates(result),
   };
 }
 
@@ -333,6 +349,77 @@ function findCharacter(
     )
   );
   return partMatches.length === 1 ? partMatches[0] : undefined;
+}
+
+// 省略はカタカナ語で起きやすい。漢字を含む名前の部分一致は
+// 別人（「田中」と「田中村」等）の可能性が高いため対象にしない。
+const KATAKANA_ONLY = /^[ァ-ヶーｦ-ﾟ]+$/u;
+/** これ以上に長さが開く組は、省略ではなく別語とみなす */
+const MAX_LENGTH_RATIO = 2.5;
+
+/**
+ * 省略形とみられる組を洗い出す。統合はしない。
+ *
+ * 日本語の省略は元の語から文字を順に抜き出す形が多い
+ * （ギルドマスター → ギルマス）ため、部分列であることを手掛かりにする。
+ */
+export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
+  const candidates: MergeCandidate[] = [];
+
+  for (let i = 0; i < characters.length; i++) {
+    for (let j = i + 1; j < characters.length; j++) {
+      const a = characters[i];
+      const b = characters[j];
+
+      // すでに別名として統合済みの組は候補にしない
+      if (sharesAppellation(a, b)) continue;
+
+      const pair = appellationPairs(a, b).find(([left, right]) =>
+        isAbbreviationOf(left, right)
+      );
+      if (pair) {
+        candidates.push({ names: [a.name, b.name], reason: "abbreviation" });
+      }
+    }
+  }
+  return candidates;
+}
+
+function sharesAppellation(a: Character, b: Character): boolean {
+  const keys = new Set([a.name, ...a.aliases].map(normalizeName));
+  return [b.name, ...b.aliases].some((name) => keys.has(normalizeName(name)));
+}
+
+/** 2人の呼称の総当たりを、短い方・長い方の順で返す */
+function appellationPairs(a: Character, b: Character): Array<[string, string]> {
+  const pairs: Array<[string, string]> = [];
+  for (const left of [a.name, ...a.aliases]) {
+    for (const right of [b.name, ...b.aliases]) {
+      pairs.push(
+        left.length <= right.length ? [left, right] : [right, left]
+      );
+    }
+  }
+  return pairs;
+}
+
+/** shorter が longer の省略形とみられるか */
+export function isAbbreviationOf(shorter: string, longer: string): boolean {
+  if (shorter.length < 2 || shorter.length >= longer.length) return false;
+  if (!KATAKANA_ONLY.test(shorter) || !KATAKANA_ONLY.test(longer)) return false;
+  if (longer.length / shorter.length > MAX_LENGTH_RATIO) return false;
+  // 省略形は語頭を残すのが普通。頭が違うものは別語とみなす
+  if (shorter[0] !== longer[0]) return false;
+  return isSubsequence(shorter, longer);
+}
+
+function isSubsequence(shorter: string, longer: string): boolean {
+  let index = 0;
+  for (const char of longer) {
+    if (char === shorter[index]) index++;
+    if (index === shorter.length) return true;
+  }
+  return index === shorter.length;
 }
 
 function splitNameParts(name: string): string[] {

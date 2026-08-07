@@ -139,11 +139,18 @@ export function validateCharacterExtractResult(
       rejected.push({ name: character.name, reason: "invalid_name" });
       continue;
     }
+    // 「兵士たち」のような集団名詞はモブとして残す。
+    // 本文に出ている以上、消すと情報が失われるため、
+    // ネームドキャラと区別できる印を付けたうえで保持する。
+    //
+    // 対象を集団名詞に限るのは、entityType: "group" が
+    // 「星環評議会」（組織）や「銀翼族」（種族）にも使われるためである。
+    // 組織や種族はモブキャラではないので、これまでどおり除外する。
+    // 「姉」「先生」のような関係語・汎用役職も、特定個人を指す参照であり
+    // 群衆ではないため対象にしない。
     if (isCollectiveName(character.name)) {
-      rejected.push({ name: character.name, reason: "collective" });
-      continue;
-    }
-    if (
+      character.isMob = true;
+    } else if (
       (character.entityType !== undefined &&
         character.entityType !== "person") ||
       GENERIC_ROLES.has(character.name)
@@ -151,6 +158,7 @@ export function validateCharacterExtractResult(
       rejected.push({ name: character.name, reason: "non_person" });
       continue;
     }
+
     if (!isGrounded(character, chunk.text)) {
       rejected.push({ name: character.name, reason: "ungrounded" });
       continue;
@@ -287,18 +295,51 @@ function isCollectiveName(name: string): boolean {
   return GENERIC_ROLES.has(singular) || PRONOUNS.has(singular);
 }
 
+/**
+ * AIが人物と根拠を捏造していないかを本文と照合する。
+ *
+ * 次の2つを別々に確認する。
+ *   1. 呼称が本文に実在すること（名前の捏造を防ぐ）
+ *   2. evidenceの断片が本文に逐語で存在すること（引用の捏造を防ぐ）
+ *
+ * かつて「1つの断片が本文に存在し、かつその断片が呼称を含むこと」を
+ * 求めていたが、会話文が根拠の場合、話者は自分の名前を台詞で言わないため
+ * 構造的に必ず落ちていた（実データで主要人物が11件除外された）。
+ * 引用が「その人物についてのものか」はコードでは判定できないため、
+ * 捏造でないことの確認までに留める。
+ */
 function isGrounded(
   character: ExtractedCharacter,
   chunkText: string
 ): boolean {
-  const appellations = [character.name, ...(character.aliases ?? [])];
-  return evidenceSegments(character.evidence).some(
-    (segment) =>
-      chunkText.includes(segment) &&
-      appellations.some((appellation) => segment.includes(appellation))
+  const appellations = [character.name, ...(character.aliases ?? [])]
+    .map((appellation) => normalizeForComparison(appellation ?? ""))
+    .filter((appellation) => appellation.length > 0);
+  if (appellations.length === 0) return false;
+
+  const normalizedChunk = normalizeForComparison(chunkText);
+
+  if (!appellations.some((appellation) => normalizedChunk.includes(appellation))) {
+    return false;
+  }
+
+  return evidenceSegments(character.evidence).some((segment) =>
+    normalizedChunk.includes(segment)
   );
 }
 
+/**
+ * 照合用に表記の揺れを落とす。
+ *
+ * gemma系は全角スペースを `<0xE3><0x80><0x80>` のようなバイト表記のまま
+ * 出力することがあり、そのままでは逐語一致に失敗する。
+ * 空白の全角・半角差も同じ理由で無視する。
+ */
+function normalizeForComparison(text: string): string {
+  return text.replace(/<0x[0-9A-Fa-f]{2}>/gu, "").replace(/[\s　]/gu, "");
+}
+
+/** 照合に使える長さの断片だけを、正規化した形で返す */
 function evidenceSegments(evidence: string | null | undefined): string[] {
   if (!evidence) return [];
   return evidence
@@ -309,6 +350,9 @@ function evidenceSegments(evidence: string | null | undefined): string[] {
         ""
       )
     )
+    .filter((segment) => segment.length >= 4)
+    .map(normalizeForComparison)
+    // 空白や記号だけの断片は、正規化後に短くなり誤一致の元になる
     .filter((segment) => segment.length >= 4);
 }
 
