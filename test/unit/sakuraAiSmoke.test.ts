@@ -93,6 +93,20 @@ describe("Sakura AI smoke client", () => {
     expect(logs).toEqual([]);
   });
 
+  test("HTTP 400 は応答本文を末尾に含めて表示する", async () => {
+    const body = JSON.stringify({ error: { message: "Invalid request" } });
+
+    const error = await runSakuraAiSmoke({
+      token: TOKEN,
+      fetchImpl: async () => new Response(body, { status: 400 }),
+    }).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      `Sakura AI smoke test failed: HTTP 400: ${body}`
+    );
+  });
+
   test("不正なJSON応答を拒否する", async () => {
     await expect(
       runSakuraAiSmoke({

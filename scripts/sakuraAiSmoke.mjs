@@ -30,6 +30,21 @@ export async function runSakuraAiSmoke({ token, fetchImpl = globalThis.fetch, lo
   }
 
   if (!response.ok) {
+    if (response.status !== 401 && response.status !== 429) {
+      let body = "";
+      try {
+        const text = await response.text();
+        body = typeof text === "string" ? text.trim() : "";
+      } catch {
+        body = "";
+      }
+
+      if (body) {
+        const compact = body.replace(/\s+/g, " ").slice(0, 500);
+        throw new Error(`Sakura AI smoke test failed: HTTP ${response.status}: ${compact}`);
+      }
+    }
+
     throw new Error(`Sakura AI smoke test failed: HTTP ${response.status}`);
   }
 
