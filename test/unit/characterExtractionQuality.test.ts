@@ -124,12 +124,29 @@ describe("登場人物抽出の品質ゲート", () => {
     assertChapterAndAddressPeriods(fixture, merged.characters);
   });
 
-  test("v1.5の構造化出力契約を公開する", () => {
-    expect(CHARACTER_EXTRACT_VERSION).toBe("1.5");
+  test("v2.1の構造化出力契約を公開する", () => {
+    expect(CHARACTER_EXTRACT_VERSION).toBe("2.1");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.properties)
       .toHaveProperty("entityType");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.required)
       .toEqual(expect.arrayContaining(["name", "entityType", "evidence"]));
+  });
+
+  test("人物・能力・場所を1回の呼び出しで返す契約になっている", () => {
+    // 種別ごとにAIを呼ぶと同じ本文を3回読ませることになるため、
+    // 1チャンク1回で3種類とも受け取る形にしている。
+    const properties = CHARACTER_EXTRACT_SCHEMA.properties;
+    expect(properties).toHaveProperty("abilities");
+    expect(properties).toHaveProperty("locations");
+    expect(properties).toHaveProperty("abilitySystem");
+
+    // 捏造を弾けるよう、能力・場所にも逐語根拠を必須にする
+    expect(properties.abilities.items.required).toEqual(
+      expect.arrayContaining(["name", "evidence"])
+    );
+    expect(properties.locations.items.required).toEqual(
+      expect.arrayContaining(["name", "evidence"])
+    );
   });
 });
 

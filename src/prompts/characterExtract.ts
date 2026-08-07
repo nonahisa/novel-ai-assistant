@@ -1,10 +1,17 @@
 /**
- * P-04a 登場人物抽出（チャンク単位）
+ * P-04a 設定抽出（チャンク単位）
+ *
+ * 人物・能力・場所を1回の呼び出しでまとめて抽出する。
+ * 種別ごとにAIを呼ぶと同じ本文を3回読ませることになり、
+ * 時間もコストも3倍かかるため、1チャンク1回に統合している。
+ *
+ * ファイル名と定数名が character のままなのは、
+ * 既存のキャッシュキー・import・テストへの影響を抑えるためである。
  *
  * プロンプトを変更したら version を上げること。
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
-export const CHARACTER_EXTRACT_VERSION = "1.5";
+export const CHARACTER_EXTRACT_VERSION = "2.1";
 
 export const BASE_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 
@@ -22,6 +29,12 @@ export interface CharacterExtractInput {
   chunkText: string;
   chapterLabel: string;
   knownCharacterNames: string[];
+  /** 既知の能力名。同一能力の判定に使う */
+  knownAbilityNames?: string[];
+  /** 既知の場所名。同一場所の判定に使う */
+  knownLocationNames?: string[];
+  /** 既に決まっている能力の総称（「魔法」「スキル」等）。未確定なら省略 */
+  abilityTerm?: string;
 }
 
 export function buildCharacterExtractPrompt(
@@ -31,8 +44,22 @@ export function buildCharacterExtractPrompt(
     input.knownCharacterNames.length > 0
       ? input.knownCharacterNames.join("、")
       : "（まだ登録されていません）";
+  const knownAbilities =
+    input.knownAbilityNames && input.knownAbilityNames.length > 0
+      ? input.knownAbilityNames.join("、")
+      : "（まだ登録されていません）";
+  const knownLocations =
+    input.knownLocationNames && input.knownLocationNames.length > 0
+      ? input.knownLocationNames.join("、")
+      : "（まだ登録されていません）";
+  const abilityTermNote = input.abilityTerm
+    ? `この作品では能力を「${input.abilityTerm}」と総称します。abilitySystem.abilityTerm には同じ語を使ってください。`
+    : `abilitySystem.abilityTerm には、**作品世界の中で能力を総称している語**を、本文の表記のまま入れてください。
+   これは作品のジャンル名ではありません。「ファンタジー」「伝奇」「SF」「現代」などのジャンル名は入れないでください。
+   良い例：本文に「神術」「仙術」とあれば "神術"。「魔法」なら "魔法"。「スキル」なら "スキル"。
+   本文にそのような総称が見当たらない場合は null にしてください。無理に埋めないでください。`;
 
-  return `以下の小説本文から、登場人物の情報を抽出してください。
+  return `以下の小説本文から、登場人物・能力・場所の情報を抽出してください。
 
 【本文】（${input.chapterLabel}）
 ${input.chunkText}
@@ -40,7 +67,13 @@ ${input.chunkText}
 【既知の登場人物】（同一人物の判定に使用）
 ${known}
 
-【抽出ルール】
+【既知の能力】（同一能力の判定に使用）
+${knownAbilities}
+
+【既知の場所】（同一場所の判定に使用）
+${knownLocations}
+
+【登場人物の抽出ルール】
 - entityType で候補を person / group / location / unknown に分類すること。characters に
   出力してよいのは entityType が person の候補だけである。group / location / unknown は
   レコードを出力しないこと。
@@ -71,6 +104,34 @@ ${known}
    本文に出てきた形のまま記録すること。
 6. 「君」「お前」「あなた」など特定の相手を持たない一般的な呼びかけは
    defaultSecondPerson に入れ、addressTerms には入れないこと。
+
+【能力の抽出ルール】
+能力とは、作品世界で人物が行使する特別な力のことです。
+ファンタジーなら魔法、伝奇なら超能力、現代ものなら特筆すべき技能が該当します。
+1. 本文中で実際に使用された、または名指しで言及された能力だけを抽出すること。
+   能力体系を創作したり、本文にない能力を補ったりしないこと。
+2. 能力名は本文の表記をそのまま使うこと。ルビがあれば reading に入れること。
+3. 効果・代償・制約は本文から読み取れる範囲だけを書くこと。
+   読み取れないものは null とし、「おそらく」「〜だろう」と推測しないこと。
+4. 誰が使ったか分かる場合は userNames に人物名を入れること。
+   使い手を特定できない場合は空配列にすること。
+5. 剣術・話術のような一般的な技量は、作品世界で特別な力として
+   扱われている場合にのみ抽出すること。単に「腕が立つ」程度なら抽出しないこと。
+6. ${abilityTermNote}
+
+【場所の抽出ルール】
+1. 物語の舞台となる、または名指しで言及された場所だけを抽出すること。
+2. 「そこ」「あの街」のような指示語は抽出しないこと。固有の名前か、
+   「冒険者ギルドの窓口」のように本文中で一貫して特定の場所を指す表現だけを対象とする。
+3. 上位の地域が本文から読み取れる場合は region に入れること
+   （例：「王都リヴェルスの図書塔」→ name: "図書塔", region: "王都リヴェルス"）。
+   読み取れない場合は null とすること。
+4. 説明は本文から読み取れる範囲だけを書くこと。
+
+【すべてに共通のルール】
+- 各レコードには、本文からそのまま抜き出した短い evidence を必ず付けること。
+  evidence は説明や要約ではなく、その名称を含む逐語引用にすること。
+- 該当するものが本文になければ、空配列を返すこと。無理に埋めないこと。
 
 【出力形式】
 指定されたJSON形式のみを出力してください。`;
@@ -130,9 +191,55 @@ export const CHARACTER_EXTRACT_SCHEMA = {
         required: ["name", "entityType", "evidence"],
       },
     },
+    abilities: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          aliases: { type: "array", items: { type: "string" } },
+          reading: { type: ["string", "null"] },
+          category: { type: ["string", "null"] },
+          description: { type: ["string", "null"] },
+          cost: { type: ["string", "null"] },
+          limitation: { type: ["string", "null"] },
+          userNames: { type: "array", items: { type: "string" } },
+          evidence: { type: "string", minLength: 1 },
+        },
+        required: ["name", "evidence"],
+      },
+    },
+    locations: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          aliases: { type: "array", items: { type: "string" } },
+          reading: { type: ["string", "null"] },
+          region: { type: ["string", "null"] },
+          description: { type: ["string", "null"] },
+          evidence: { type: "string", minLength: 1 },
+        },
+        required: ["name", "evidence"],
+      },
+    },
+    abilitySystem: {
+      type: "object",
+      properties: {
+        // 「読み取れない」という答えも受け取りたいので null を許す。
+        // required に入れるのは、省略されると総称が永久に埋まらないため。
+        abilityTerm: { type: ["string", "null"] },
+        description: { type: ["string", "null"] },
+        rules: { type: "array", items: { type: "string" } },
+      },
+      required: ["abilityTerm"],
+    },
     confidence: { type: "string", enum: ["high", "medium", "low"] },
   },
-  required: ["characters"],
+  // 省略可能にすると、モデルは面倒な項目を黙って落とす。
+  // 空配列・nullで「該当なし」と明示させるため、3種類とも必須にする。
+  required: ["characters", "abilities", "locations", "abilitySystem"],
 } as const;
 
 /** AIから返る抽出結果 */
@@ -157,7 +264,42 @@ export interface ExtractedCharacter {
   evidence?: string | null;
 }
 
+/** AIから返る能力 */
+export interface ExtractedAbility {
+  name: string;
+  aliases?: string[];
+  reading?: string | null;
+  category?: string | null;
+  description?: string | null;
+  cost?: string | null;
+  limitation?: string | null;
+  /** 使い手の人物名。idの解決はコード側で行う */
+  userNames?: string[];
+  evidence?: string | null;
+}
+
+/** AIから返る場所 */
+export interface ExtractedLocation {
+  name: string;
+  aliases?: string[];
+  reading?: string | null;
+  /** 上位の地域（「王都リヴェルス」等） */
+  region?: string | null;
+  description?: string | null;
+  evidence?: string | null;
+}
+
+/** AIから返る能力体系。総称はジャンルで変わるため本文から推定させる */
+export interface ExtractedAbilitySystem {
+  abilityTerm?: string | null;
+  description?: string | null;
+  rules?: string[];
+}
+
 export interface CharacterExtractResult {
   characters: ExtractedCharacter[];
+  abilities?: ExtractedAbility[];
+  locations?: ExtractedLocation[];
+  abilitySystem?: ExtractedAbilitySystem;
   confidence?: string;
 }
