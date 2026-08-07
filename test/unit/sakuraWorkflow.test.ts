@@ -72,11 +72,14 @@ describe("Sakura AI smoke workflow", () => {
     expect(onBlock).toContain("      - synchronize");
     expect(onBlock).toContain("      - reopened");
 
-    const jobLines = workflow
-      .split(/\r?\n/)
-      .filter((line) => line.startsWith("    if:"));
-    expect(jobLines[0] ?? "").toContain("github.event_name != 'pull_request'");
-    expect(jobLines[0] ?? "").toContain("github.event.pull_request.head.repo.full_name == github.repository");
+    const lines = workflow.split(/\r?\n/);
+    const ifIndex = lines.findIndex((line) => line.startsWith("    if: >"));
+    expect(ifIndex).toBeGreaterThanOrEqual(0);
+    const ifBlock = lines.slice(ifIndex, ifIndex + 4).join("\n");
+    expect(ifBlock).toContain("github.event_name != 'pull_request'");
+    expect(ifBlock).toContain(
+      "github.event.pull_request.head.repo.full_name == github.repository"
+    );
 
     expect(workflow).toContain("concurrency:");
     expect(workflow).toContain("  group: sakura-smoke-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}");
