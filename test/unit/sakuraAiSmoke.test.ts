@@ -2,16 +2,18 @@ import { describe, expect, test } from "vitest";
 import {
   SAKURA_AI_CHAT_COMPLETIONS_ENDPOINT,
   SAKURA_AI_SMOKE_MODEL,
+  SAKURA_AI_SMOKE_MODEL_ENV,
   runSakuraAiSmoke,
 } from "../../scripts/sakuraAiSmoke.mjs";
 
 const TOKEN = "uuid:secret";
 const RESPONSE_CONTENT = "接続確認OK";
+const EXPECTED_MODEL = SAKURA_AI_SMOKE_MODEL;
 
-function createSuccessResponse(): Response {
+function createSuccessResponse(model = EXPECTED_MODEL): Response {
   return new Response(
     JSON.stringify({
-      model: "gemma-4-31B-it",
+      model,
       choices: [{ message: { content: RESPONSE_CONTENT } }],
     }),
     { status: 200, headers: { "content-type": "application/json" } }
@@ -25,7 +27,7 @@ describe("Sakura AI smoke client", () => {
       fetchImpl: async () => createSuccessResponse(),
     });
 
-    expect(result).toEqual({ model: "gemma-4-31B-it", contentLength: 6 });
+    expect(result).toEqual({ model: EXPECTED_MODEL, contentLength: 6 });
   });
 
   test("固定モデルとBearer認証を含む接続確認リクエストを送る", async () => {
@@ -44,7 +46,7 @@ describe("Sakura AI smoke client", () => {
     expect(SAKURA_AI_CHAT_COMPLETIONS_ENDPOINT).toBe(
       "https://api.ai.sakura.ad.jp/v1/chat/completions"
     );
-    expect(SAKURA_AI_SMOKE_MODEL).toBe("gemma-4-31B-it");
+    expect(SAKURA_AI_SMOKE_MODEL).toBe(EXPECTED_MODEL);
     expect(requestUrl).toBe("https://api.ai.sakura.ad.jp/v1/chat/completions");
     expect(requestInit?.method).toBe("POST");
     expect(requestInit?.headers).toEqual({
@@ -53,7 +55,7 @@ describe("Sakura AI smoke client", () => {
     });
     const body = JSON.parse(String(requestInit?.body));
     expect(body).toMatchObject({
-      model: "gemma-4-31B-it",
+      model: EXPECTED_MODEL,
       temperature: 0,
       max_tokens: 32,
       stream: false,
@@ -157,7 +159,7 @@ describe("Sakura AI smoke client", () => {
         fetchImpl: async () =>
           new Response(
             JSON.stringify({
-              model: "gemma-4-31B-it",
+              model: EXPECTED_MODEL,
               choices: [{ message: { content: "  \n" } }],
             }),
             { status: 200 }
@@ -176,9 +178,45 @@ describe("Sakura AI smoke client", () => {
     });
 
     expect(logs).toEqual([
-      "Sakura AI smoke test passed: model=gemma-4-31B-it, contentLength=6",
+      `Sakura AI smoke test passed: model=${EXPECTED_MODEL}, contentLength=6`,
     ]);
     expect(logs.join("\n")).not.toContain(TOKEN);
     expect(logs.join("\n")).not.toContain(RESPONSE_CONTENT);
+  });
+
+  test("環境変数でモデルを上書きできる", async () => {
+    const overrideModel = "gemma-4-31B-it";
+    const logs: string[] = [];
+
+    await runSakuraAiSmoke({
+      token: TOKEN,
+      model: overrideModel,
+      fetchImpl: async () => createSuccessResponse(overrideModel),
+      log: (line) => logs.push(line),
+    });
+
+    expect(logs).toEqual([`Sakura AI smoke test passed: model=${overrideModel}, contentLength=6`]);
+
+    const logsByEnv: string[] = [];
+    const original = process.env[SAKURA_AI_SMOKE_MODEL_ENV];
+    process.env[SAKURA_AI_SMOKE_MODEL_ENV] = overrideModel;
+
+    try {
+      await runSakuraAiSmoke({
+        token: TOKEN,
+        fetchImpl: async () => createSuccessResponse(overrideModel),
+        log: (line) => logsByEnv.push(line),
+      });
+    } finally {
+      if (original === undefined) {
+        delete process.env[SAKURA_AI_SMOKE_MODEL_ENV];
+      } else {
+        process.env[SAKURA_AI_SMOKE_MODEL_ENV] = original;
+      }
+    }
+
+    expect(logsByEnv).toEqual([
+      `Sakura AI smoke test passed: model=${overrideModel}, contentLength=6`,
+    ]);
   });
 });

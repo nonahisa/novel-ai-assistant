@@ -50,9 +50,13 @@ describe("Sakura AI smoke workflow", () => {
   test("アカウントトークンはスモーク実行stepだけに渡す", () => {
     const tokenLines = workflow
       .split(/\r?\n/)
-      .filter((line) => line.includes("SAKURA_AI_ACCOUNT_TOKEN"));
+      .filter((line) =>
+        line.includes("SAKURA_AI_ACCOUNT_TOKEN") ||
+        line.includes("SAKURA_AI_SMOKE_MODEL")
+      );
     expect(tokenLines).toEqual([
       "          SAKURA_AI_ACCOUNT_TOKEN: ${{ secrets.SAKURA_AI_ACCOUNT_TOKEN }}",
+      "          SAKURA_AI_SMOKE_MODEL: ${{ vars.SAKURA_AI_SMOKE_MODEL }}",
     ]);
 
     const smokeStep = stepBlocks(workflow).find((step) =>
@@ -60,6 +64,7 @@ describe("Sakura AI smoke workflow", () => {
     );
     expect(smokeStep).toContain("        env:");
     expect(smokeStep).toContain(tokenLines[0]);
+    expect(smokeStep).toContain(tokenLines[1]);
   });
 
   test("PR実行はmain向けのopened/reopen/synchronizeのみ、forkは安全のため実行をスキップ", () => {

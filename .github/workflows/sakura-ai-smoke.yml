@@ -32,4 +32,5 @@ jobs:
       - name: Run Sakura AI smoke test
         env:
           SAKURA_AI_ACCOUNT_TOKEN: ${{ secrets.SAKURA_AI_ACCOUNT_TOKEN }}
+          SAKURA_AI_SMOKE_MODEL: ${{ vars.SAKURA_AI_SMOKE_MODEL }}
         run: node scripts/sakuraAiSmoke.mjs
