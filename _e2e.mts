@@ -23,6 +23,9 @@ const registry = {
 async function main() {
   const t0 = Date.now();
   await extractCharacters(WORK, registry);
+  const vs = require("vscode");
+  console.log("=== UIログ ===");
+  for (const [kind, msg] of vs.__log) console.log(`[${kind}] ${String(msg).slice(0, 600)}`);
   console.log(`完了: ${((Date.now() - t0) / 1000).toFixed(1)}秒`);
 }
 main().catch((e) => { console.error("致命的エラー:", e); process.exit(1); });

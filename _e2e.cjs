@@ -21379,6 +21379,9 @@ var registry2 = {
 async function main() {
   const t0 = Date.now();
   await extractCharacters(WORK, registry2);
+  const vs = require("vscode");
+  console.log("=== UI\u30ED\u30B0 ===");
+  for (const [kind, msg] of vs.__log) console.log(`[${kind}] ${String(msg).slice(0, 600)}`);
   console.log(`\u5B8C\u4E86: ${((Date.now() - t0) / 1e3).toFixed(1)}\u79D2`);
 }
 main().catch((e) => {
