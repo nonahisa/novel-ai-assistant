@@ -45,15 +45,17 @@ VSCodeで `F5` を押すと、拡張機能が読み込まれた新しいVSCode�
 npm run watch
 ```
 
-### Sakura AI Engine の手動スモークテスト
+### Sakura AI Engine スモークテスト
 
-さくらのAI Engine の接続確認は、拡張機能からは実行されません。GitHub Actions の
-手動実行専用ワークフローであり、`push`、プルリクエスト、定時実行では自動的に動きません。
+さくらのAI Engine の接続確認は、拡張機能からは実行されません。GitHub Actions では  
+- `workflow_dispatch`（手動実行）
+- `main` 向け pull_request（`opened`/`synchronize`/`reopened`）  
+で `gemma-4-31B-it` 呼び出しを行います。`fork` PR は Secret が使えないため、安全のためスキップします。
 
 1. リポジトリの **Settings** → **Secrets and variables** → **Actions** で、リポジトリシークレット
    `SAKURA_AI_ACCOUNT_TOKEN` を登録します。トークンをコード、ログ、`.env` に書かないでください。
-2. ワークフローが既定ブランチに入った後、リポジトリの **Actions** タブで
-   **Sakura AI Engine Smoke Test** を選び、**Run workflow** を押して対象ブランチを選択します。
+2. 手動実行する場合は、ワークフローが既定ブランチに入った後、リポジトリの **Actions**
+   タブで **Sakura AI Engine Smoke Test** を選び、**Run workflow** を押して対象ブランチを選択します。
 3. 成功条件は、`gemma-4-31B-it` から空でない応答を受け、ログに
    `Sakura AI smoke test passed` が表示されることです。応答本文やトークンはログに出ません。
 
