@@ -12,6 +12,12 @@ export const workspace = {
 };
 
 export const window = {
+  // 診断ログ。テストでは中身を読まないので、書き込めるだけでよい
+  createOutputChannel: () => ({
+    appendLine() {},
+    show() {},
+    dispose() {},
+  }),
   // 進捗の中止ボタン。テストでは押さないので、作られるだけでよい
   createStatusBarItem: () => ({
     text: "",

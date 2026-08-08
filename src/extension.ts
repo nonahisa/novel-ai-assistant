@@ -34,6 +34,7 @@ import {
   withProgress,
 } from "./views/progress";
 import { pathExists } from "./core/fileSystem";
+import { disposeLog, showLog } from "./core/logger";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const registry = new WorkRegistry(context);
@@ -371,6 +372,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.showLog", () => {
+      showLog();
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand(
       "novelai.selectOllamaExecutable",
       async () => {
@@ -450,7 +457,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export function deactivate(): void {
-  // 後片付けは context.subscriptions に任せる
+  // 後片付けは context.subscriptions に任せる。
+  // ログだけは遅延生成でsubscriptionsに載っていないので個別に閉じる
+  disposeLog();
 }
 
 /** ツリーから呼ばれた場合はそのノード、コマンドパレットからは選択させる */

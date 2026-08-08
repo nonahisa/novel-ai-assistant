@@ -61,6 +61,8 @@ function isChatResponse(value: unknown): value is ChatResponse {
 export class OllamaProvider implements AIProvider {
   readonly id = "ollama" as const;
   readonly displayName = "Ollama（ローカル）";
+  /** 自分の機械で動かすので課金は無い */
+  readonly isPaid = false;
 
   /** モデル詳細のキャッシュ。/api/show は毎回呼ぶと重いため */
   private modelCache = new Map<string, ModelInfo>();

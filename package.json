@@ -95,6 +95,12 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.showLog",
+        "title": "ログを表示",
+        "category": "小説執筆",
+        "icon": "$(output)"
+      },
+      {
         "command": "novelai.selectOllamaExecutable",
         "title": "Ollamaの実行ファイルを選択",
         "category": "小説執筆",
@@ -262,11 +268,45 @@
           "minimum": 10,
           "description": "Claudeの1回のAI呼び出しのタイムアウト（秒）。"
         },
+        "novelai.maxOutputTokens": {
+          "type": "number",
+          "default": 16384,
+          "minimum": 1024,
+          "markdownDescription": "1回の応答で受け取る最大トークン数（Claude・ChatGPT・Gemini共通）。**出力トークンは入力より単価が高い**ため、必要以上に大きくしないでください。モデルの上限を超える場合は上限に丸められます。\n\n小さすぎると応答が途中で切れ、**そのチャンクの結果は丸ごと捨てられます**（部分的なJSONは解析できないため）。呼び出し1回分が無駄になるので、節約しすぎないでください。"
+        },
         "novelai.claude.maxOutputTokens": {
           "type": "number",
-          "default": 8192,
           "minimum": 1024,
-          "markdownDescription": "Claudeの1回の応答の最大トークン数。**出力トークンは入力より単価が高い**ため、必要以上に大きくしないでください。モデルの上限を超える場合は上限に丸められます。"
+          "markdownDescription": "Claude専用だった旧設定。`novelai.maxOutputTokens` を使ってください。",
+          "deprecationMessage": "novelai.maxOutputTokens に統合されました。値を設定している場合はそちらが優先されます。"
+        },
+        "novelai.openai.endpoint": {
+          "type": "string",
+          "default": "https://api.openai.com/v1",
+          "description": "ChatGPT（OpenAI API）のエンドポイントURL。互換サービスを使う場合のみ変更してください。"
+        },
+        "novelai.openai.timeoutSeconds": {
+          "type": "number",
+          "default": 180,
+          "minimum": 10,
+          "description": "ChatGPTの1回のAI呼び出しのタイムアウト（秒）。"
+        },
+        "novelai.openai.contextWindow": {
+          "type": "number",
+          "default": 128000,
+          "minimum": 1024,
+          "markdownDescription": "ChatGPTのモデルのコンテキスト長（トークン）。**OpenAIのモデル一覧APIはこの値を返さない**ため、設定で指定します。本文の分割単位を決めるのに使うので、実際より大きいと入力が黙って切り捨てられます。使用するモデルの仕様に合わせてください。\n\nこの値を変更すると分割単位が変わり、処理済みチャンクのキャッシュが使えなくなります。"
+        },
+        "novelai.gemini.endpoint": {
+          "type": "string",
+          "default": "https://generativelanguage.googleapis.com/v1beta",
+          "description": "GeminiのエンドポイントURL。通常は変更不要です。"
+        },
+        "novelai.gemini.timeoutSeconds": {
+          "type": "number",
+          "default": 180,
+          "minimum": 10,
+          "description": "Geminiの1回のAI呼び出しのタイムアウト（秒）。"
         },
         "novelai.chunkChars": {
           "type": "number",

@@ -45,6 +45,8 @@ import {
   withCancellableProgress,
   withProgress,
 } from "../views/progress";
+import { logFailure, showLog } from "../core/logger";
+import { resolveMaxOutputTokens } from "../ai/outputLimit";
 import { ChunkCache } from "../core/chunkCache";
 import {
   AbilitySystemStore,
@@ -269,9 +271,9 @@ export async function extractCharacters(
     if (!(await confirmProviderReachable(resolved.provider))) return false;
 
     const estimateMinutes = Math.ceil((pending.length * 20) / 60);
-    const configuredMaxOutputTokens = vscode.workspace
-      .getConfiguration("novelai")
-      .get<number>("claude.maxOutputTokens", 8192);
+    // 表示する上限と、実際に送る上限を同じ値にする。
+    // 金額に関わる表示なので、送っていない上限を目安として出さない
+    const configuredMaxOutputTokens = resolveMaxOutputTokens();
     const costNotice = buildExtractionCostNotice(
       resolved.provider.id,
       pending,
@@ -300,6 +302,8 @@ export async function extractCharacters(
   /** 実行中にAIへ接続できなくなり、残りのチャンクを諦めたか */
   let connectivityLost = false;
   let consecutiveConnectivityFailures = 0;
+  /** レート上限で待った回数。無限に待ち続けないための歯止め */
+  let rateLimitWaits = 0;
 
   // 同じAI応答から能力・場所も取り出す。種別ごとにAIを呼ばないための仕組み。
   // 既存の総称が決まっていれば、チャンクごとに揺れないよう引き継ぐ。
@@ -351,8 +355,8 @@ export async function extractCharacters(
           extractedAll
         );
 
-        try {
-          const res = await resolved.provider.generate({
+        const callAI = () =>
+          resolved.provider.generate({
             systemPrompt: BASE_SYSTEM_PROMPT,
             userPrompt: buildCharacterExtractPrompt({
               chunkText: chunk.text,
@@ -373,6 +377,31 @@ export async function extractCharacters(
             disableThinking: true,
             signal: controller.signal,
           });
+
+        try {
+          // 無料枠は毎分の呼び出し回数が少なく、すぐ上限に当たる。
+          // サーバーが待ち時間を指定してきたら守って同じチャンクをやり直す。
+          // 上限で弾かれた呼び出しは課金対象にならないので、
+          // 失敗として捨てるより待って続けるほうが作者の損が少ない。
+          let res: Awaited<ReturnType<typeof callAI>> | undefined;
+          for (;;) {
+            try {
+              res = await callAI();
+              break;
+            } catch (error) {
+              const waitMs = rateLimitWaitMs(error, rateLimitWaits);
+              if (waitMs === undefined) throw error;
+              rateLimitWaits++;
+              progress.report({
+                message:
+                  `${done + 1}/${chunks.length}  ` +
+                  `レート上限のため ${Math.ceil(waitMs / 1000)} 秒待っています`,
+              });
+              if (!(await delay(waitMs, token))) {
+                throw new AIError("処理が中止されました。", "aborted");
+              }
+            }
+          }
 
           // 応答が返った時点で接続は生きている。連続失敗の数え直し
           consecutiveConnectivityFailures = 0;
@@ -422,6 +451,7 @@ export async function extractCharacters(
           ) {
             break;
           }
+
           failures.push(toExtractionFailure(chunk, e));
           if (e instanceof AIError && isFatalProviderFailure(e.kind)) {
             done++;
@@ -570,7 +600,7 @@ export async function extractCharacters(
     failure.kind ? shouldOfferSettings(failure.kind) : false
   );
   const actions = [
-    ...(failures.length > 0 ? ["詳細を表示"] : []),
+    ...(failures.length > 0 ? ["詳細を表示", "ログを表示"] : []),
     ...(hasSettingsFailure ? ["設定を開く"] : []),
     ...(merged ? ["一覧を開く"] : []),
   ];
@@ -581,6 +611,8 @@ export async function extractCharacters(
 
   if (action === "詳細を表示") {
     await showFailureDetails(failures);
+  } else if (action === "ログを表示") {
+    showLog();
   } else if (action === "設定を開く") {
     await vscode.commands.executeCommand(
       "workbench.action.openSettings",
@@ -601,6 +633,19 @@ export async function extractCharacters(
 }
 
 function toExtractionFailure(chunk: Chunk, error: unknown): ExtractionFailure {
+  // 通知には出さない技術的な内容をログへ残す。
+  // これが無いと、作者は「利用できませんでした」だけを見て手詰まりになる
+  logFailure("AI呼び出しの失敗", {
+    ファイル: describeChunk(chunk),
+    種別: error instanceof AIError ? error.kind : "不明",
+    詳細:
+      error instanceof AIError
+        ? error.detail
+        : error instanceof Error
+          ? `${error.name}: ${error.message}`
+          : String(error),
+  });
+
   if (!(error instanceof AIError)) {
     return {
       chunk,
@@ -761,9 +806,16 @@ async function showFailureDetails(
   failures: ExtractionFailure[]
 ): Promise<void> {
   if (failures.length === 0) return;
-  const content = failures
-    .map((failure) => `${describeChunk(failure.chunk)}: ${failure.message}`)
-    .join("\n");
+  const content = [
+    ...failures.map(
+      (failure) =>
+        `${describeChunk(failure.chunk)}: ${failure.message}` +
+        (failure.kind ? `（種別: ${failure.kind}）` : "")
+    ),
+    "",
+    "AIが返した詳細は「表示 > 出力」の「小説AI執筆補助」に記録しています。",
+    "原因が分からない場合は、そこの内容を確認してください。",
+  ].join("\n");
   const doc = await vscode.workspace.openTextDocument({
     content,
     language: "text",
@@ -889,6 +941,52 @@ function isConnectivityFailure(kind: AIError["kind"]): boolean {
   return kind === "not_running" || kind === "timeout";
 }
 
+/** 1回の抽出でレート上限を待てる回数。無限に待ち続けないため */
+const RATE_LIMIT_WAIT_LIMIT = 60;
+/** 1回あたりの待機時間の上限。これを超える指定なら待たずに失敗として扱う */
+const MAX_RATE_LIMIT_WAIT_MS = 90_000;
+
+/**
+ * レート上限で待つべきなら待機時間を返す。待つべきでなければ undefined。
+ *
+ * サーバーが待ち時間を示してこない場合は待たない。
+ * 当てずっぽうで待つと、いつ終わるか分からない処理になる。
+ */
+export function rateLimitWaitMs(
+  error: unknown,
+  waitsSoFar: number
+): number | undefined {
+  if (!(error instanceof AIError)) return undefined;
+  if (error.kind !== "rate_limited") return undefined;
+  if (error.retryAfterMs === undefined) return undefined;
+  if (waitsSoFar >= RATE_LIMIT_WAIT_LIMIT) return undefined;
+
+  // サーバーの指定ちょうどだと際どいので少し余裕を持たせる
+  const waitMs = error.retryAfterMs + 1000;
+  return waitMs > MAX_RATE_LIMIT_WAIT_MS ? undefined : waitMs;
+}
+
+/** 中止できる待機。中止されたら false */
+function delay(
+  ms: number,
+  token: vscode.CancellationToken
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (token.isCancellationRequested) {
+      resolve(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      subscription.dispose();
+      resolve(true);
+    }, ms);
+    const subscription = token.onCancellationRequested(() => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+  });
+}
+
 /** 連続でこの回数だけ接続に失敗したら、残りのチャンクを試さず中断する */
 const CONNECTIVITY_FAILURE_LIMIT = 3;
 
@@ -926,6 +1024,13 @@ function normalizePathForComparison(filePath: string): string {
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
+/** 課金の説明に出すサービス名 */
+const CLOUD_SERVICE_NAMES: Partial<Record<ProviderId, string>> = {
+  claude: "Claude API",
+  openai: "OpenAI API",
+  gemini: "Gemini API",
+};
+
 /** 実行前に、プロバイダごとの料金上の影響を明示する。 */
 export function buildExtractionCostNotice(
   providerId: ProviderId,
@@ -936,7 +1041,6 @@ export function buildExtractionCostNotice(
   if (providerId === "ollama") {
     return "料金: 無料・ローカル実行（API課金なし）";
   }
-  if (providerId !== "claude") return "";
 
   // UTF-8の各バイトを1トークンとして数え、実際より少なく見せにくい
   // 上限寄りの概算にする。単価は変わりうるため金額には換算しない。
@@ -960,14 +1064,16 @@ export function buildExtractionCostNotice(
       : 8192;
   const totalOutputTokens = perCall * pendingChunks.length;
 
+  const serviceName = CLOUD_SERVICE_NAMES[providerId] ?? "利用中のAIサービス";
+
   return [
     "【課金対象トークン量の目安（上限寄り）】",
     `入力: 約 ${estimatedInputTokens.toLocaleString("ja-JP")} トークン` +
       "（実際に送る予定のチャンクと指示文をUTF-8バイト数で保守的に概算）",
     `出力: 最大 ${totalOutputTokens.toLocaleString("ja-JP")} トークン` +
       `（設定上限 ${perCall.toLocaleString("ja-JP")} × ${pendingChunks.length} 回）`,
-    "Claude APIは実行すると課金が発生します。実際の金額はモデル、実使用量、" +
-      "Anthropicの現行料金によって変わります。",
+    `${serviceName}は実行すると利用量が加算されます。実際の金額はモデル、実使用量、` +
+      "各社の現行料金によって変わります。無料枠の有無も提供元の条件によります。",
   ].join("\n");
 }
 

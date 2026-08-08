@@ -29,6 +29,7 @@ const COMMANDS = [
   "novelai.openSettingsPanel",
   "novelai.generateSettingsDocs",
   "novelai.selectOllamaExecutable",
+  "novelai.showLog",
 ];
 
 export async function run(): Promise<void> {

@@ -250,8 +250,10 @@ describe("AI失敗後の復旧案内", () => {
     ["model_not_found", "利用可能なモデルを選び直してください。"],
     ["timeout", "チャンクを小さくして、もう一度実行してください。"],
     ["bad_response", "出力上限とモデル設定を確認してください。"],
-    ["authentication_failed", "ClaudeのAPIキーを確認して再登録してください。"],
-    ["permission_denied", "Claudeの利用権限または請求設定を確認してください。"],
+    // 使っているのがGeminiでも「Claudeの…」と出て混乱させたため、
+    // 案内文にサービス名を書かない
+    ["authentication_failed", "APIキーを確認して再登録してください。"],
+    ["permission_denied", "APIキーの利用権限または請求設定を確認してください。"],
     ["rate_limited", "しばらく待ってから、必要な場合に手動で再実行してください。"],
     ["aborted", "必要なら抽出をもう一度実行してください。"],
     ["unknown", "AI設定と拡張機能のログを確認してください。"],
@@ -1183,7 +1185,7 @@ describe("人物抽出フロー", () => {
   test.each([
     [
       "permission_denied",
-      "Claudeの利用権限または請求設定を確認してください。",
+      "APIキーの利用権限または請求設定を確認してください。",
       "設定を開く",
     ],
     [
@@ -1677,8 +1679,8 @@ describe("人物抽出フロー", () => {
     expect(confirmation).toContain(
       "出力: 最大 8,192 トークン（設定上限 4,096 × 2 回）"
     );
-    expect(confirmation).toContain("Claude APIは実行すると課金が発生します");
-    expect(confirmation).toContain("Anthropicの現行料金");
+    expect(confirmation).toContain("Claude APIは実行すると利用量が加算されます");
+    expect(confirmation).toContain("各社の現行料金");
   });
 
   test("Ollamaの実行確認は無料のローカル実行と示し課金を予告しない", async () => {

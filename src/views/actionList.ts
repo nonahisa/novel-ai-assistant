@@ -82,6 +82,16 @@ const ACTIONS: readonly CommandAction[] = [
       "抽出が失敗するときは、まずここを見てください。",
   },
   {
+    command: "novelai.showLog",
+    label: "ログを表示",
+    description: "",
+    icon: "output",
+    requiresWork: false,
+    detail:
+      "AIが返したエラーの詳細を記録しています。" +
+      "抽出が失敗して理由が分からないときに開いてください。",
+  },
+  {
     command: "novelai.selectOllamaExecutable",
     label: "Ollamaの実行ファイルを選択",
     description: "",

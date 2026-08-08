@@ -2,13 +2,16 @@ import * as vscode from "vscode";
 import Anthropic from "@anthropic-ai/sdk";
 import {
   AIError,
-  AIProvider,
+  ApiKeyHelp,
+  ApiKeyProvider,
   ConnectionTestResult,
   GenerateParams,
   GenerateResult,
   ModelInfo,
   inferTier,
+  validateApiKeyFormat,
 } from "./types";
+import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
 
 /** APIキーの保存先。設定ファイルではなくOSの資格情報ストアに置く */
 const SECRET_KEY = "novelai.claude.apiKey";
@@ -30,9 +33,18 @@ const CLAUDE_STOP_REASONS = new Set<string>([
  * 設計方針どおり自動フォールバックはせず、
  * 使うかどうかは常に作者が明示的に選ぶ。
  */
-export class ClaudeProvider implements AIProvider {
+export class ClaudeProvider implements ApiKeyProvider {
   readonly id = "claude" as const;
   readonly displayName = "Claude（クラウド・有料）";
+  readonly isPaid = true;
+
+  readonly apiKeyHelp: ApiKeyHelp = {
+    title: "ClaudeのAPIキーを入力してください",
+    prompt:
+      "console.anthropic.com の API Keys で発行できます。入力内容は資格情報ストアに保存され、settings.jsonには書き込まれません。",
+    placeHolder: "APIキーを貼り付けてください",
+    validate: validateApiKeyFormat,
+  };
 
   /** モデル情報のキャッシュ。listModels は毎回叩くと遅い */
   private modelCache = new Map<string, ModelInfo>();
@@ -277,12 +289,8 @@ export class ClaudeProvider implements AIProvider {
   /** 出力トークンの上限。設定値とモデル上限の小さい方 */
   private async resolveMaxTokens(model: string, signal?: AbortSignal): Promise<number> {
     throwIfAborted(signal);
-    const configured = vscode.workspace
-      .getConfiguration("novelai")
-      .get<number>("claude.maxOutputTokens", 8192);
     const raw = await this.rawModel(model, signal);
-    const modelMax = raw?.max_tokens ?? 8192;
-    return Math.max(1024, Math.min(configured, modelMax));
+    return clampToModelLimit(resolveMaxOutputTokens(), raw?.max_tokens ?? 8192);
   }
 
   private rawModelCache = new Map<string, Anthropic.ModelInfo>();

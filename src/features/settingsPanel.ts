@@ -44,6 +44,7 @@ import {
 } from "../prompts/settingsDeepDive";
 import { buildSettingsPanelHtml } from "../views/settingsPanelHtml";
 import { withCancellableProgress } from "../views/progress";
+import { logFailure } from "../core/logger";
 
 /**
  * 設定資料パネル。
@@ -675,7 +676,12 @@ function totalChars(excerpts: MentionExcerpt[]): number {
 
 function describeError(error: unknown): string {
   if (error instanceof AIError) {
-    return `AI処理に失敗しました。${recoveryForAIError(error)}`;
+    // 画面には出さない技術的な内容をログへ残す
+    logFailure("設定資料パネルでのAI呼び出しの失敗", {
+      種別: error.kind,
+      詳細: error.detail,
+    });
+    return `AI処理に失敗しました。${recoveryForAIError(error)}（詳細はログを参照）`;
   }
   if (error instanceof SettingsEditError) return error.message;
   if (error instanceof Error) return error.message;

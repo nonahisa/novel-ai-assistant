@@ -1,7 +1,15 @@
 import * as vscode from "vscode";
-import { AIProvider, ModelInfo, ProviderId } from "./types";
+import {
+  AIProvider,
+  ApiKeyProvider,
+  ModelInfo,
+  ProviderId,
+  isApiKeyProvider,
+} from "./types";
 import { OllamaProvider } from "./ollamaProvider";
 import { ClaudeProvider } from "./claudeProvider";
+import { OpenAIProvider } from "./openaiProvider";
+import { GeminiProvider } from "./geminiProvider";
 import { withProgress } from "../views/progress";
 
 const KEY_PROVIDER = "novelai.ai.provider";
@@ -17,11 +25,15 @@ export class AIRegistry {
   private readonly providers = new Map<ProviderId, AIProvider>();
 
   constructor(private readonly context: vscode.ExtensionContext) {
-    const ollama = new OllamaProvider();
-    this.providers.set(ollama.id, ollama);
-    const claude = new ClaudeProvider(context);
-    this.providers.set(claude.id, claude);
-    // Gemini はフェーズ1以降で追加する
+    // 並び順はそのまま選択画面に出る。無料で始められるものを先頭に置く
+    for (const provider of [
+      new OllamaProvider(),
+      new GeminiProvider(context),
+      new OpenAIProvider(context),
+      new ClaudeProvider(context),
+    ] as AIProvider[]) {
+      this.providers.set(provider.id, provider);
+    }
   }
 
   listProviders(): AIProvider[] {
@@ -68,9 +80,7 @@ export class AIRegistry {
     if (!resolved) return undefined;
     const p = resolved.provider;
     // 個別取得できるプロバイダは一覧を引かずに済ませる（呼び出し回数の節約）
-    if (p instanceof OllamaProvider || p instanceof ClaudeProvider) {
-      return p.getModel(resolved.model);
-    }
+    if (p.getModel) return p.getModel(resolved.model);
     const all = await p.listModels();
     return all.find((m) => m.id === resolved.model);
   }
@@ -87,6 +97,8 @@ export async function runSetupWizard(
 
   const providerDescriptions: Partial<Record<ProviderId, string>> = {
     ollama: "無料・オフライン可。ローカル実行",
+    gemini: "無料枠あり。超えると課金される",
+    openai: "実行するたびに課金される",
     claude: "高精度だが実行するたびに課金される",
   };
 
@@ -106,8 +118,8 @@ export async function runSetupWizard(
   const provider = registry.getProvider(providerPick.providerId)!;
 
   // APIキーが要るプロバイダは、接続テストの前に入力してもらう
-  if (provider instanceof ClaudeProvider) {
-    const ok = await ensureClaudeApiKey(provider);
+  if (isApiKeyProvider(provider)) {
+    const ok = await ensureApiKey(provider);
     if (!ok) return false;
   }
 
@@ -181,9 +193,9 @@ export async function runSetupWizard(
       "このモデルは軽量です。矛盾検知など高度な判断が必要な機能では精度が下がる場合があります。"
     );
   }
-  if (provider instanceof ClaudeProvider) {
+  if (provider.isPaid) {
     notes.push(
-      "以降このモデルで実行すると、実行のたびにAnthropicへ課金されます。" +
+      `以降このモデルで実行すると、実行のたびに${provider.displayName}側で利用量が加算されます。` +
         "実行前に処理量の目安を表示します。"
     );
   }
@@ -197,11 +209,12 @@ export async function runSetupWizard(
 }
 
 /**
- * ClaudeのAPIキーを確認し、無ければ入力してもらう。
+ * APIキーを確認し、無ければ入力してもらう。
  * キーは設定ファイルではなくOSの資格情報ストア（SecretStorage）に保存する。
  * settings.json に書くとGitで同期されて漏洩するため。
  */
-async function ensureClaudeApiKey(provider: ClaudeProvider): Promise<boolean> {
+async function ensureApiKey(provider: ApiKeyProvider): Promise<boolean> {
+  const help = provider.apiKeyHelp;
   const existing = await provider.getApiKey();
 
   if (existing) {
@@ -210,27 +223,22 @@ async function ensureClaudeApiKey(provider: ClaudeProvider): Promise<boolean> {
         { label: "登録済みのキーを使う", action: "keep" as const },
         { label: "キーを入力し直す", action: "replace" as const },
       ],
-      { title: "ClaudeのAPIキーは登録済みです", ignoreFocusOut: true }
+      {
+        title: `${provider.displayName}のAPIキーは登録済みです`,
+        ignoreFocusOut: true,
+      }
     );
     if (!answer) return false;
     if (answer.action === "keep") return true;
   }
 
   const key = await vscode.window.showInputBox({
-    title: "ClaudeのAPIキーを入力してください",
-    prompt:
-      "console.anthropic.com の API Keys で発行できます。入力内容は資格情報ストアに保存され、settings.jsonには書き込まれません。",
-    placeHolder: "sk-ant-...",
+    title: help.title,
+    prompt: help.prompt,
+    placeHolder: help.placeHolder,
     password: true,
     ignoreFocusOut: true,
-    validateInput: (value) => {
-      const v = value.trim();
-      if (!v) return "APIキーを入力してください。";
-      if (!v.startsWith("sk-ant-")) {
-        return "ClaudeのAPIキーは sk-ant- で始まります。";
-      }
-      return undefined;
-    },
+    validateInput: (value) => help.validate(value),
   });
   if (!key) return false;
 
