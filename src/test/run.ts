@@ -34,6 +34,7 @@ const COMMANDS = [
   "novelai.showLog",
   "novelai.unifyCharacters",
   "novelai.applyPendingUpdates",
+  "novelai.showSettingsForTerm",
 ];
 
 export async function run(): Promise<void> {
@@ -244,6 +245,41 @@ export async function run(): Promise<void> {
       // 作者が書いた内容は残す
       assert.equal(after.characters[0].authorNotes, "作者のメモ");
       assert.equal(await pending.count(), 0);
+    } finally {
+      await fs.rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  await runCase("新規は作成、既存は退避して作り直す", failures, async () => {
+    // 既存ファイルは上書きできない（replaceGuardedは必ず失敗する）。
+    // 呼び分けを間違えると保存が必ず失敗するので、実ファイルで固定する
+    const temporaryRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "novel-ai-assistant-saveorupdate-")
+    );
+    try {
+      const workFolder = path.join(temporaryRoot, "テスト作品");
+      await scaffoldWorkFolder(workFolder, "テスト作品");
+      const work = makeWork(workFolder);
+      const store = new CharacterStore(work);
+
+      // 新規はそのまま作成できる
+      await store.saveOrUpdate(emptyCharacter("char_001", "灯"));
+      let loaded = await store.loadAll();
+      assert.equal(loaded.characters.length, 1);
+
+      // 既存は同じ呼び出しで書き換えられる
+      await store.saveOrUpdate({ ...loaded.characters[0], role: "主人公" });
+      loaded = await store.loadAll();
+      assert.equal(loaded.errors.length, 0);
+      assert.equal(loaded.characters.length, 1);
+      assert.equal(loaded.characters[0].role, "主人公");
+
+      // 続けて書き換えても壊れない
+      await store.saveOrUpdate({ ...loaded.characters[0], personality: "無鉄砲" });
+      loaded = await store.loadAll();
+      assert.equal(loaded.characters.length, 1);
+      assert.equal(loaded.characters[0].personality, "無鉄砲");
+      assert.equal(loaded.characters[0].role, "主人公");
     } finally {
       await fs.rm(temporaryRoot, { recursive: true, force: true });
     }

@@ -277,7 +277,11 @@ export class GeminiProvider implements ApiKeyProvider {
     params: GenerateParams,
     headers: Record<string, string>
   ): Promise<GenerateContentResponse> {
-    const support = this.supportFor(params.model);
+    // 外す判断は複製に対して行い、通ったときだけ記憶する。
+    // 失敗しただけで書き換えると、原因が別だったときに
+    // 対応している機能まで永久に使わなくなる（Claudeで実際に起きた）
+    const stored = this.supportFor(params.model);
+    const support: GeminiSupport = { ...stored };
 
     const maxOutputTokens = clampToModelLimit(
       resolveMaxOutputTokens(),
@@ -307,17 +311,23 @@ export class GeminiProvider implements ApiKeyProvider {
       };
 
       try {
-        return await this.post(params.model, body, headers, params.signal);
+        const response = await this.post(
+          params.model,
+          body,
+          headers,
+          params.signal
+        );
+        // 通った組み合わせだけを覚える
+        this.rememberSupport(params.model, support);
+        return response;
       } catch (error) {
         // 400以外（認証・上限・通信）は外して直る類ではない
         if (!isInvalidArgument(error)) throw error;
 
         const dropped = dropNextOption(support);
         if (!dropped) throw error;
-        this.rememberSupport(params.model, support);
         logLine(
-          `Geminiが「${dropped}」の指定を受け付けなかったため、外して再試行します（モデル: ${params.model}）。` +
-            "この判定は次回以降も引き継ぎます。"
+          `Geminiが「${dropped}」の指定を受け付けなかったため、外して再試行します（モデル: ${params.model}）。`
         );
         if (attempt >= 3) throw error;
       }
@@ -372,8 +382,9 @@ export class GeminiProvider implements ApiKeyProvider {
   }
 }
 
+/** v2 にしているのは、失敗から学んでいた頃の誤った記録を捨てるため */
 function supportKey(model: string): string {
-  return `novelai.gemini.support.${model}`;
+  return `novelai.gemini.support.v2.${model}`;
 }
 
 /** モデルごとに、任意の指定が使えるか */

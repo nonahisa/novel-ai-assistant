@@ -113,6 +113,25 @@ button.secondary {
 .note .meta { font-size: 11px; opacity: 0.7; margin-bottom: 4px; }
 .note .body { white-space: pre-wrap; }
 .draft { border-color: var(--vscode-focusBorder); }
+.proposal { border-color: var(--vscode-focusBorder); }
+.proposal .field-row {
+  border-top: 1px solid var(--vscode-panel-border);
+  padding: 8px 0;
+}
+.proposal .field-row:first-of-type { border-top: none; }
+.proposal .head { display: flex; align-items: center; gap: 6px; }
+.proposal .head label { font-weight: bold; cursor: pointer; }
+.proposal .before {
+  font-size: 12px;
+  opacity: 0.7;
+  white-space: pre-wrap;
+  margin: 4px 0 4px 20px;
+}
+.proposal textarea, .proposal input { margin-left: 20px; width: calc(100% - 20px); }
+.proposal .overwrite {
+  font-size: 11px;
+  color: var(--vscode-notificationsWarningIcon-foreground, #cca700);
+}
 .draft .banner {
   font-size: 12px;
   margin-bottom: 6px;
@@ -165,6 +184,7 @@ button.secondary {
   let selected = null;
   let detail = null;
   let draft = null;
+  let proposal = null;
   let chatLog = [];
   let busy = false;
 
@@ -232,6 +252,7 @@ button.secondary {
       row.addEventListener("click", function () {
         selected = { kind: activeKind, id: item.id };
         draft = null;
+        proposal = null;
         chatLog = [];
         renderList();
         post("select", { kind: activeKind, id: item.id });
@@ -321,8 +342,35 @@ button.secondary {
     saveRow.appendChild(saveHint);
     el.detail.appendChild(saveRow);
 
+    // ── AIに各項目を埋めさせる（承認制）
+    el.detail.appendChild(heading("AIで項目を充実させる"));
+    const enrichHint = document.createElement("div");
+    enrichHint.className = "readonly";
+    enrichHint.textContent =
+      "本文を読み直して、上の各項目に入れる内容を提案させます。反映するかは項目ごとに選べます。";
+    el.detail.appendChild(enrichHint);
+
+    const enrichRow = document.createElement("div");
+    enrichRow.className = "row";
+    const enrichButton = document.createElement("button");
+    enrichButton.className = "action";
+    enrichButton.textContent = "項目を充実させる";
+    enrichButton.disabled = busy;
+    enrichButton.addEventListener("click", function () {
+      post("enrich", { kind: detail.kind, id: detail.id });
+    });
+    enrichRow.appendChild(enrichButton);
+    el.detail.appendChild(enrichRow);
+
+    if (proposal) el.detail.appendChild(renderProposal());
+
     // ── AIによる掘り下げ（承認制）
     el.detail.appendChild(heading("AIで掘り下げる"));
+    const diveHint = document.createElement("div");
+    diveHint.className = "readonly";
+    diveHint.textContent =
+      "本文から読み取れることを文章で書かせます。項目には入らず、メモとして下に残ります。";
+    el.detail.appendChild(diveHint);
     const topic = document.createElement("input");
     topic.type = "text";
     topic.placeholder = "観点（空欄なら全体的に掘り下げます）";
@@ -372,6 +420,97 @@ button.secondary {
     });
     askRow.appendChild(askButton);
     el.detail.appendChild(askRow);
+  }
+
+  function renderProposal() {
+    const box = document.createElement("div");
+    box.className = "note proposal";
+
+    const banner = document.createElement("div");
+    banner.className = "banner";
+    banner.textContent =
+      "提案です。まだ保存していません。反映する項目にチェックを入れてください。";
+    box.appendChild(banner);
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = proposal.model;
+    box.appendChild(meta);
+
+    const controls = [];
+    for (const item of proposal.proposals) {
+      const row = document.createElement("div");
+      row.className = "field-row";
+
+      const head = document.createElement("div");
+      head.className = "head";
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.checked = item.selected;
+      check.id = "prop-" + item.key;
+      head.appendChild(check);
+      const label = document.createElement("label");
+      label.textContent = item.label;
+      label.htmlFor = check.id;
+      head.appendChild(label);
+      if (item.before) {
+        // 既にある内容を置き換える提案は、目立たせて既定で選ばない
+        const warn = document.createElement("span");
+        warn.className = "overwrite";
+        warn.textContent = "現在の内容を置き換えます";
+        head.appendChild(warn);
+      }
+      row.appendChild(head);
+
+      if (item.before) {
+        const before = document.createElement("div");
+        before.className = "before";
+        before.textContent = "現在: " + item.before;
+        row.appendChild(before);
+      }
+
+      const editor = document.createElement(item.multiline ? "textarea" : "input");
+      editor.value = item.after;
+      if (item.multiline) editor.rows = 3;
+      row.appendChild(editor);
+
+      controls.push({ key: item.key, check: check, editor: editor });
+      box.appendChild(row);
+    }
+
+    const row = document.createElement("div");
+    row.className = "row";
+    const apply = document.createElement("button");
+    apply.className = "action";
+    apply.textContent = "選んだ項目を反映";
+    apply.disabled = busy;
+    apply.addEventListener("click", function () {
+      const values = {};
+      let count = 0;
+      for (const control of controls) {
+        if (!control.check.checked) continue;
+        values[control.key] = control.editor.value;
+        count++;
+      }
+      if (count === 0) {
+        setStatus("反映する項目が選ばれていません。", true);
+        return;
+      }
+      post("applyProposal", { kind: proposal.kind, id: proposal.id, values: values });
+    });
+    row.appendChild(apply);
+
+    const discard = document.createElement("button");
+    discard.className = "action secondary";
+    discard.textContent = "破棄";
+    discard.addEventListener("click", function () {
+      proposal = null;
+      setStatus("提案を破棄しました。保存はしていません。");
+      renderDetail();
+    });
+    row.appendChild(discard);
+    box.appendChild(row);
+    return box;
   }
 
   function renderDraft() {
@@ -503,9 +642,29 @@ button.secondary {
         detail = message.detail;
         renderDetail();
         break;
+      case "focus":
+        // 本文で用語をクリックしたとき。種別タブと一覧の選択も合わせる
+        activeKind = message.kind;
+        selected = { kind: message.kind, id: message.id };
+        detail = message.detail;
+        draft = null;
+        proposal = null;
+        chatLog = [];
+        renderTabs();
+        renderList();
+        renderDetail();
+        el.detail.scrollTop = 0;
+        break;
       case "draft":
         draft = { topic: message.topic, text: message.text, model: message.model, source: "deep_dive" };
         setStatus("下書きができました。まだ保存していません。");
+        renderDetail();
+        break;
+      case "proposal":
+        proposal = message;
+        setStatus(
+          message.proposals.length + " 項目の提案ができました。まだ保存していません。"
+        );
         renderDetail();
         break;
       case "chatAnswer":
@@ -514,6 +673,7 @@ button.secondary {
         break;
       case "saved":
         draft = null;
+        proposal = null;
         detail = message.detail;
         groups = message.groups;
         renderTabs();

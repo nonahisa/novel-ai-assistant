@@ -4,7 +4,12 @@ import { WorkRegistry } from "../core/workRegistry";
 import { CharacterStore } from "../core/characterStore";
 import { createAbilityStore, createLocationStore } from "../core/abilityStore";
 import { AbilitySystemStore } from "../core/abilityStore";
-import { TermIndex, type TermEntry, type TermKind } from "../core/termIndex";
+import {
+  TermIndex,
+  expandNameVariants,
+  type TermEntry,
+  type TermKind,
+} from "../core/termIndex";
 import { SUPPORTED_EXTENSIONS, type WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
 import type { Ability } from "../models/ability";
@@ -154,6 +159,38 @@ export class TermHighlighter implements vscode.Disposable {
     }
   }
 
+  /**
+   * カーソル位置にある用語を返す。
+   *
+   * 本文をクリックしたとき、その人物の資料を右側に出すために使う。
+   * 装飾と違って画面の見える範囲に限らないが、行単位で照合するので
+   * 走査量は小さい。
+   */
+  async termAt(
+    document: vscode.TextDocument,
+    position: vscode.Position
+  ): Promise<{ work: WorkEntry; entry: TermEntry } | undefined> {
+    const ext = path.extname(document.fileName).toLowerCase();
+    if (!(SUPPORTED_EXTENSIONS as readonly string[]).includes(ext)) return;
+
+    const work = await this.findWork(document.uri.fsPath);
+    if (!work) return;
+
+    const settings = await this.load(work);
+    if (!settings || settings.index.size === 0) return;
+
+    const line = document.lineAt(position.line);
+    const column = position.character;
+
+    for (const match of settings.index.find(line.text)) {
+      // 語の直後にカーソルがある場合も、その語を指しているとみなす
+      if (match.start <= column && column <= match.end) {
+        return { work, entry: match.entry };
+      }
+    }
+    return undefined;
+  }
+
   private clear(editor: vscode.TextEditor): void {
     for (const decoration of this.decorations.values()) {
       editor.setDecorations(decoration, []);
@@ -184,7 +221,11 @@ export class TermHighlighter implements vscode.Disposable {
       for (const character of characters) {
         // モブは数が多く、地の文の普通名詞と重なりやすいので装飾しない
         if (character.isMob) continue;
-        for (const text of [character.name, ...character.aliases]) {
+        // 「マルキオ・イークェス」は本文に「マルキオ」としか出ないことが多い
+        for (const text of expandNameVariants([
+          character.name,
+          ...character.aliases,
+        ])) {
           entries.push({
             text,
             kind: "character",
@@ -194,7 +235,10 @@ export class TermHighlighter implements vscode.Disposable {
         }
       }
       for (const location of locations) {
-        for (const text of [location.name, ...location.aliases]) {
+        for (const text of expandNameVariants([
+          location.name,
+          ...location.aliases,
+        ])) {
           entries.push({
             text,
             kind: "location",

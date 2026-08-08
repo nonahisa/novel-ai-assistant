@@ -692,6 +692,17 @@ export async function extractCharacters(
   return true;
 }
 
+/**
+ * 原因がはっきりしていて、こちらで書いた説明をそのまま出すべき失敗か。
+ *
+ * 定型文だけでは何をすればよいか伝わらないものに限る。
+ * プロバイダーの応答本文をそのまま出さないという方針は崩さない
+ * （これらのメッセージはすべて拡張機能側で組み立てている）。
+ */
+function hasSpecificMessage(kind: AIError["kind"]): boolean {
+  return kind === "insufficient_credit";
+}
+
 function toExtractionFailure(chunk: Chunk, error: unknown): ExtractionFailure {
   // 通知には出さない技術的な内容をログへ残す。
   // これが無いと、作者は「利用できませんでした」だけを見て手詰まりになる
@@ -720,9 +731,11 @@ function toExtractionFailure(chunk: Chunk, error: unknown): ExtractionFailure {
     model_not_found: "選択中のモデルを利用できませんでした。",
     timeout: "AIの応答が時間内に完了しませんでした。",
     bad_response: "AIの応答を利用できませんでした。",
-    authentication_failed: "Claudeの認証に失敗しました。",
-    permission_denied: "Claudeの利用権限がありません。",
-    rate_limited: "Claudeのレート上限に達しました。",
+    // 使っているのがGeminiでも「Claudeの…」と出ないよう、サービス名は書かない
+    authentication_failed: "AIの認証に失敗しました。",
+    permission_denied: "AIの利用権限がありません。",
+    insufficient_credit: "AIサービスの残高が不足しています。",
+    rate_limited: "AIのレート上限に達しました。",
     aborted: "AI処理が中断されました。",
     unknown: "AI処理で予期しないエラーが発生しました。",
   };
@@ -730,7 +743,10 @@ function toExtractionFailure(chunk: Chunk, error: unknown): ExtractionFailure {
     chunk,
     kind: error.kind,
     // 例外本文にはプロバイダの応答や認証情報が混ざり得るため表示しない。
-    message: `${labels[error.kind]}${recoveryForAIError(error)}`,
+    // ただし拡張機能側で組み立てた具体的な説明は、そのまま出したほうが役に立つ。
+    message: hasSpecificMessage(error.kind)
+      ? error.message
+      : `${labels[error.kind]}${recoveryForAIError(error)}`,
   };
 }
 
@@ -1086,6 +1102,8 @@ const CONNECTIVITY_FAILURE_LIMIT = 3;
 function isFatalProviderFailure(kind: AIError["kind"]): boolean {
   return kind === "authentication_failed" ||
     kind === "permission_denied" ||
+    // 待っても直らない。残りのチャンクを試すだけ無駄になる
+    kind === "insufficient_credit" ||
     kind === "rate_limited";
 }
 

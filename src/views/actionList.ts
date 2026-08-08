@@ -36,6 +36,16 @@ const ACTIONS: readonly CommandAction[] = [
       "その場で書き換えたり、AIに掘り下げさせたり、質問したりできます。",
   },
   {
+    command: "novelai.showSettingsForTerm",
+    label: "カーソル位置の設定を表示",
+    description: "",
+    icon: "book",
+    requiresWork: true,
+    detail:
+      "本文中の人名などにカーソルを置いて実行すると、その設定を右側に開きます。" +
+      "以後は本文をクリックするたび、その用語の設定へ切り替わります。",
+  },
+  {
     command: "novelai.extractSettings",
     label: "設定資料を抽出",
     description: "AIを使う",

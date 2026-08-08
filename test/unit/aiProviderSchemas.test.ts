@@ -6,6 +6,10 @@ import {
   isInvalidArgument,
 } from "../../src/ai/geminiProvider";
 import { parseRetryAfterMs, toStatusError } from "../../src/ai/httpClient";
+import {
+  dropNextClaudeOption,
+  toClaudeJsonSchema,
+} from "../../src/ai/claudeProvider";
 import { clampToModelLimit } from "../../src/ai/outputLimit";
 import { AIError, validateApiKeyFormat } from "../../src/ai/types";
 import { CHARACTER_EXTRACT_SCHEMA } from "../../src/prompts/characterExtract";
@@ -277,6 +281,56 @@ describe("未対応パラメータの検出", () => {
     expect(isUnsupportedParameter(error, "temperature")).toBe(false);
   });
 
+});
+
+describe("Claudeの要求不正の扱い", () => {
+  test("影響の小さい指定から外し、JSONスキーマは最後まで残す", () => {
+    const support = {
+      effort: true,
+      thinking: true,
+      lengthConstraints: true,
+      jsonSchema: true,
+    };
+
+    expect(dropNextClaudeOption(support)).toBe("推論の深さ(effort)");
+    expect(dropNextClaudeOption(support)).toBe("思考の無効化");
+    expect(dropNextClaudeOption(support)).toBe("文字数の制約");
+    // スキーマは形式を保証してくれる要なので、いちばん最後
+    expect(dropNextClaudeOption(support)).toBe("JSONスキーマ");
+    expect(dropNextClaudeOption(support)).toBeUndefined();
+  });
+
+  test("文字数の制約を落とせる", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        summary: { type: "string", maxLength: 50 },
+        evidence: { type: "string", minLength: 1 },
+      },
+    };
+
+    const kept = JSON.stringify(toClaudeJsonSchema(schema));
+    const dropped = JSON.stringify(
+      toClaudeJsonSchema(schema, { dropLengthConstraints: true })
+    );
+
+    expect(kept).toContain("maxLength");
+    expect(dropped).not.toContain("maxLength");
+    expect(dropped).not.toContain("minLength");
+    // 型の情報までは落とさない
+    expect(dropped).toContain("string");
+  });
+
+  test("null許容にした項目からは文字数の制約を外す", () => {
+    // anyOf と併記できないため、残すと要求ごと拒否される
+    const converted = toClaudeJsonSchema({
+      type: ["string", "null"],
+      maxLength: 50,
+    }) as Record<string, unknown>;
+
+    expect(converted.anyOf).toEqual([{ type: "string" }, { type: "null" }]);
+    expect(converted.maxLength).toBeUndefined();
+  });
 });
 
 describe("Geminiの引数不正の扱い", () => {

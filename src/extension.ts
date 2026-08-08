@@ -26,7 +26,10 @@ import {
 } from "./features/extractCharacters";
 import { selectOllamaExecutable } from "./features/selectOllamaExecutable";
 import { generateSettingsDocs } from "./features/generateSettingsDocs";
-import { openSettingsPanel } from "./features/settingsPanel";
+import {
+  findOpenSettingsPanel,
+  openSettingsPanel,
+} from "./features/settingsPanel";
 import { unifyCharacterRecords } from "./features/unifyCharacters";
 import { applyPendingCharacterUpdates } from "./features/applyPendingUpdates";
 import { TermHighlighter } from "./views/termHighlight";
@@ -51,6 +54,52 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ステータスバーの進捗に添える中止ボタン用（コマンドパレットには出さない）
   context.subscriptions.push(registerProgressCancelCommand());
+
+  // 本文で用語をクリックしたら、右側の資料をその項目へ切り替える。
+  // 資料を開いていないときは何もしない（勝手に画面が割れると邪魔になる）
+  context.subscriptions.push(
+    vscode.window.onDidChangeTextEditorSelection(async (event) => {
+      const panels = registry.list().map((work) => work.id);
+      if (panels.length === 0) return;
+
+      const found = await highlighter.termAt(
+        event.textEditor.document,
+        event.selections[0].active
+      );
+      if (!found) return;
+      findOpenSettingsPanel(found.work.id)?.showRecord(
+        found.entry.kind,
+        found.entry.id
+      );
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.showSettingsForTerm",
+      async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) return;
+        const found = await highlighter.termAt(
+          editor.document,
+          editor.selection.active
+        );
+        if (!found) {
+          vscode.window.showInformationMessage(
+            "カーソル位置に登録済みの用語がありません。"
+          );
+          return;
+        }
+        const panel = await openSettingsPanel(
+          context,
+          found.work,
+          aiRegistry,
+          { beside: true }
+        );
+        panel.showRecord(found.entry.kind, found.entry.id);
+      }
+    )
+  );
 
   const treeView = vscode.window.createTreeView("novelai.works", {
     treeDataProvider: treeProvider,

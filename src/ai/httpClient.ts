@@ -130,6 +130,16 @@ export function toStatusError(
     );
   }
   if (status === 429) {
+    // OpenAIは残高切れも429で返す。待っても回復しないので分ける。
+    // Geminiの無料枠上限は同じ文面でも待てば回復するため、
+    // 明示的な insufficient_quota だけを残高切れとして扱う
+    if (/insufficient_quota/i.test(detail)) {
+      return new AIError(
+        `${label}の残高が不足しています。請求設定を確認してください。`,
+        "insufficient_credit",
+        trimmed
+      );
+    }
     return new AIError(
       `${label}のレート上限に達しました。しばらく待ってから再実行してください。`,
       "rate_limited",

@@ -304,6 +304,18 @@ export class CharacterStore {
   }
 
   /**
+   * 新規なら作成、既存なら書き換える。
+   *
+   * **既存ファイルの上書きはできない**（`atomicWrite` を参照）ので、
+   * 呼び分けを間違えると保存が必ず失敗する。
+   * 呼び出し側に判断させると必ず取り違えるため、ここで決める。
+   */
+  async saveOrUpdate(character: Character): Promise<void> {
+    const known = this.snapshots.has(character.id);
+    return known ? this.update(character) : this.save(character);
+  }
+
+  /**
    * 既存の人物を書き換える。
    *
    * このプロジェクトは正規ファイルを上書きしない（`atomicWrite` を参照）ので、

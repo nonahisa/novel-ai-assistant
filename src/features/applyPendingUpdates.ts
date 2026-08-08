@@ -144,7 +144,7 @@ async function applyAll(
           message: `${index + 1}/${targets.length} ${target.diff.name}`,
         });
         try {
-          await characterStore.update(target.update.character);
+          await characterStore.saveOrUpdate(target.update.character);
           await pendingStore.discard(target.update.filePath);
           applied.push(target.diff.name);
         } catch (error) {

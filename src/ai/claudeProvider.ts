@@ -12,6 +12,7 @@ import {
   validateApiKeyFormat,
 } from "./types";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
+import { logLine } from "../core/logger";
 
 /** APIキーの保存先。設定ファイルではなくOSの資格情報ストアに置く */
 const SECRET_KEY = "novelai.claude.apiKey";
@@ -193,56 +194,82 @@ export class ClaudeProvider implements ApiKeyProvider {
     const maxTokens = await this.resolveMaxTokens(params.model, params.signal);
     throwIfAborted(params.signal);
 
-    const body: Anthropic.MessageCreateParamsNonStreaming = {
-      model: params.model,
-      max_tokens: maxTokens,
-      system: params.systemPrompt,
-      messages: [{ role: "user", content: params.userPrompt }],
-    };
+    // モデルの申告する対応状況だけでは足りない。実際に400で拒否される項目が
+    // あるため、拒否されたら1つずつ外して試し、通った組み合わせを覚える。
+    // Gemini側と同じ方針（エラー文から原因を当てにいかない）。
+    const stored = this.supportFor(params.model);
+    // 外す判断は作業用の複製に対して行う。
+    // 失敗しただけで記憶を書き換えると、原因が別（残高不足など）だったときに
+    // 対応している機能まで永久に使えなくなる（実際にそうなった）
+    const attemptSupport: ClaudeSupport = { ...stored };
+    let res: Anthropic.Message | undefined;
 
-    if (params.jsonSchema && raw?.structured_outputs.supported !== false) {
-      // Claudeの構造化出力はスキーマに追加の制約がある（後述の変換を参照）
-      body.output_config = {
-        format: {
-          type: "json_schema",
-          schema: toClaudeJsonSchema(params.jsonSchema) as Record<
-            string,
-            unknown
-          >,
-        },
+    for (let attempt = 0; ; attempt++) {
+      const body: Anthropic.MessageCreateParamsNonStreaming = {
+        model: params.model,
+        max_tokens: maxTokens,
+        system: params.systemPrompt,
+        messages: [{ role: "user", content: params.userPrompt }],
       };
-    }
 
-    // 思考モードの扱いはモデル世代で逆になっている。
-    //  - adaptive対応の新しいモデル：既定でONなので、切るには明示的にdisabledを送る
-    //  - enabledのみの古いモデル：既定でOFFなので、何も送らなければよい
-    const thinkingIsOnByDefault = raw?.thinking.types.adaptive.supported === true;
-    let sentDisabledThinking = false;
-    if (params.disableThinking && thinkingIsOnByDefault) {
-      body.thinking = { type: "disabled" };
-      sentDisabledThinking = true;
-    }
+      if (
+        params.jsonSchema &&
+        attemptSupport.jsonSchema &&
+        raw?.structured_outputs.supported !== false
+      ) {
+        // Claudeの構造化出力はスキーマに追加の制約がある（後述の変換を参照）
+        body.output_config = {
+          format: {
+            type: "json_schema",
+            schema: toClaudeJsonSchema(params.jsonSchema, {
+              dropLengthConstraints: !attemptSupport.lengthConstraints,
+            }) as Record<string, unknown>,
+          },
+        };
+      }
 
-    // effort は対応モデルのみ。抽出タスクは深い推論を必要としないため低めにする
-    if (raw?.effort.supported && raw.effort.low.supported) {
-      body.output_config = { ...body.output_config, effort: "low" };
-    }
+      // 思考モードの扱いはモデル世代で逆になっている。
+      //  - adaptive対応の新しいモデル：既定でONなので、切るには明示的にdisabledを送る
+      //  - enabledのみの古いモデル：既定でOFFなので、何も送らなければよい
+      const thinkingIsOnByDefault =
+        raw?.thinking.types.adaptive.supported === true;
+      if (
+        params.disableThinking &&
+        thinkingIsOnByDefault &&
+        attemptSupport.thinking
+      ) {
+        body.thinking = { type: "disabled" };
+      }
 
-    let res: Anthropic.Message;
-    try {
-      res = await client.messages.create(body, { signal: params.signal });
-    } catch (e) {
-      // 一部のモデルは thinking の明示的な無効化自体を拒否する。
-      // その場合だけ、思考ONのまま1回だけやり直す（プロバイダの切替はしない）。
-      if (sentDisabledThinking && isThinkingRejection(e)) {
-        delete body.thinking;
-        try {
-          res = await client.messages.create(body, { signal: params.signal });
-        } catch (e2) {
-          throw toClaudeMessageCreateError(e2);
-        }
-      } else {
-        throw toClaudeMessageCreateError(e);
+      // effort は対応モデルのみ。抽出タスクは深い推論を必要としないため低めにする
+      if (
+        attemptSupport.effort &&
+        raw?.effort.supported &&
+        raw.effort.low.supported
+      ) {
+        body.output_config = { ...body.output_config, effort: "low" };
+      }
+
+      try {
+        res = await client.messages.create(body, { signal: params.signal });
+        // 通った組み合わせだけを覚える。失敗から学ぶと誤った結論が残る
+        this.rememberSupport(params.model, attemptSupport);
+        break;
+      } catch (e) {
+        // 残高不足もAnthropicは400で返す。要求の形の問題ではないので、
+        // 機能を外しても直らない。外し続けると対応機能を失うだけ
+        const billing = billingProblem(e);
+        if (billing) throw billing;
+
+        const error = toClaudeMessageCreateError(e);
+        if (error.kind !== "bad_response" || !isInvalidRequest(e)) throw error;
+
+        const dropped = dropNextClaudeOption(attemptSupport);
+        if (!dropped || attempt >= 4) throw error;
+        logLine(
+          `Claudeが「${dropped}」の指定を受け付けなかったため、外して再試行します` +
+            `（モデル: ${params.model}）。`
+        );
       }
     }
 
@@ -323,6 +350,110 @@ export class ClaudeProvider implements ApiKeyProvider {
   ): Promise<Anthropic.ModelCapabilities | undefined> {
     return (await this.rawModel(id, signal))?.capabilities ?? undefined;
   }
+
+  private readonly supportCache = new Map<string, ClaudeSupport>();
+
+  /**
+   * モデルごとに送ってよい指定。分からないうちは全部送れる前提で始める。
+   *
+   * **VS Codeを閉じても覚えておく。** 覚えないと再起動のたびに
+   * 400で弾かれる呼び出しが発生し、そのぶん課金される。
+   */
+  private supportFor(model: string): ClaudeSupport {
+    const cached = this.supportCache.get(model);
+    if (cached) return cached;
+
+    const stored = this.context.globalState.get<ClaudeSupport>(
+      supportKey(model)
+    );
+    const support: ClaudeSupport = {
+      effort: stored?.effort ?? true,
+      thinking: stored?.thinking ?? true,
+      lengthConstraints: stored?.lengthConstraints ?? true,
+      jsonSchema: stored?.jsonSchema ?? true,
+    };
+    this.supportCache.set(model, support);
+    return support;
+  }
+
+  private rememberSupport(model: string, support: ClaudeSupport): void {
+    void this.context.globalState.update(supportKey(model), { ...support });
+  }
+}
+
+/**
+ * 記憶の置き場。
+ *
+ * v2 にしているのは、v1で残高不足を「機能が未対応」と誤って学習した記録を
+ * 捨てるため。古い記録を読み続けると、対応している機能を永久に使わなくなる。
+ */
+function supportKey(model: string): string {
+  return `novelai.claude.support.v2.${model}`;
+}
+
+/**
+ * 残高不足・請求設定の問題か。
+ *
+ * Anthropicはこれも400 invalid_request_error で返してくるため、
+ * 「要求の形が悪い」と区別が付かない。文面で判断するしかない。
+ * 取り違えると、直らない再試行を繰り返したうえに
+ * 対応している機能まで外してしまう。
+ */
+export function billingProblem(error: unknown): AIError | undefined {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!/credit balance|Plans & Billing|billing/i.test(message)) {
+    return undefined;
+  }
+  return new AIError(
+    "Anthropicのクレジット残高が不足しています。" +
+      "console.anthropic.com の Plans & Billing で購入してください。",
+    "insufficient_credit",
+    message
+  );
+}
+
+/** モデルごとに、任意の指定が使えるか */
+export interface ClaudeSupport {
+  effort: boolean;
+  thinking: boolean;
+  /** スキーマ内の minLength / maxLength を送ってよいか */
+  lengthConstraints: boolean;
+  jsonSchema: boolean;
+}
+
+/**
+ * 次に外す指定を決める。外せるものが無ければ undefined。
+ *
+ * 抽出の質への影響が小さいものから外す。
+ * JSONスキーマは形式を保証してくれる要なので、いちばん最後まで残す。
+ */
+export function dropNextClaudeOption(
+  support: ClaudeSupport
+): string | undefined {
+  if (support.effort) {
+    support.effort = false;
+    return "推論の深さ(effort)";
+  }
+  if (support.thinking) {
+    support.thinking = false;
+    return "思考の無効化";
+  }
+  if (support.lengthConstraints) {
+    support.lengthConstraints = false;
+    return "文字数の制約";
+  }
+  if (support.jsonSchema) {
+    support.jsonSchema = false;
+    return "JSONスキーマ";
+  }
+  return undefined;
+}
+
+/** 要求の作りが受け付けられなかったか。認証や上限とは区別する */
+export function isInvalidRequest(error: unknown): boolean {
+  if (error instanceof Anthropic.BadRequestError) return true;
+  if (error instanceof Anthropic.APIError) return error.status === 400;
+  return false;
 }
 
 /** UI表示用に対応機能を短い日本語ラベルへ変換する */
@@ -349,9 +480,21 @@ function describeCapabilities(
  * （プロンプトversionが変わるとキャッシュが全部無効になる）、
  * 送信直前にここで変換する。
  */
-export function toClaudeJsonSchema(schema: unknown): unknown {
+export interface ClaudeSchemaOptions {
+  /**
+   * minLength / maxLength を落とすか。
+   * 対応していないモデルへ送ると要求ごと400で拒否されるため、
+   * 拒否されたときだけ落として再試行する。
+   */
+  dropLengthConstraints?: boolean;
+}
+
+export function toClaudeJsonSchema(
+  schema: unknown,
+  options: ClaudeSchemaOptions = {}
+): unknown {
   if (Array.isArray(schema)) {
-    return schema.map(toClaudeJsonSchema);
+    return schema.map((item) => toClaudeJsonSchema(item, options));
   }
   if (schema === null || typeof schema !== "object") {
     return schema;
@@ -365,11 +508,20 @@ export function toClaudeJsonSchema(schema: unknown): unknown {
       // ["string", "null"] → anyOf: [{type:"string"}, {type:"null"}]
       continue;
     }
-    out[key] = toClaudeJsonSchema(value);
+    if (
+      options.dropLengthConstraints &&
+      (key === "minLength" || key === "maxLength")
+    ) {
+      continue;
+    }
+    out[key] = toClaudeJsonSchema(value, options);
   }
 
   if (Array.isArray(src.type)) {
     out.anyOf = (src.type as unknown[]).map((t) => ({ type: t }));
+    // anyOf と併記できない指定は落とす。型ごとの制約になるため
+    delete out.minLength;
+    delete out.maxLength;
   }
 
   if (out.type === "object" || out.properties !== undefined) {
@@ -379,12 +531,6 @@ export function toClaudeJsonSchema(schema: unknown): unknown {
   }
 
   return out;
-}
-
-/** thinking パラメータ自体を拒否されたか */
-function isThinkingRejection(e: unknown): boolean {
-  if (!(e instanceof Anthropic.BadRequestError)) return false;
-  return /thinking/i.test(e.message);
 }
 
 function describeError(e: unknown): string {
@@ -488,7 +634,9 @@ export function toClaudeAIError(error: unknown): AIError {
     return new AIError(
       "Claudeが予期しない応答を返しました。設定を確認して再実行してください。",
       "bad_response",
-      String(e.status)
+      // ステータスだけ残しても原因にたどり着けない。
+      // 実際にどの項目を拒否されたのかは本文にしか書かれていない
+      `HTTP ${e.status}: ${e.message}`
     );
   }
 

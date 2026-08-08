@@ -30,11 +30,19 @@ function ollamaResponse(content: string): Response {
 }
 
 function claudeContext(): ExtensionContext {
+  // モデルごとの対応状況を覚える置き場。テストごとに独立させる
+  const stored = new Map<string, unknown>();
   return {
     secrets: {
       get: async () => "test-api-key",
       store: async () => undefined,
       delete: async () => undefined,
+    },
+    globalState: {
+      get: (key: string) => stored.get(key),
+      update: async (key: string, value: unknown) => {
+        stored.set(key, value);
+      },
     },
   } as unknown as ExtensionContext;
 }
@@ -529,7 +537,9 @@ describe("AIプロバイダ境界", () => {
     expect(messageCalls).toBe(1);
   });
 
-  test("Claudeはthinking再試行の2回目が失敗したらそれ以上再試行しない", async () => {
+  test("400が続いても、外せる指定を試し終えたら打ち切る", async () => {
+    // 拒否された指定を1つずつ外して再試行するが、無限には試さない。
+    // 課金されるプロバイダーなので、諦める条件を明確にしておく
     let messageCalls = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = input instanceof Request ? input.url : String(input);
@@ -540,7 +550,7 @@ describe("AIプロバイダ境界", () => {
       return jsonResponse(
         {
           type: "error",
-          error: { type: "invalid_request_error", message: "thinking is unsupported" },
+          error: { type: "invalid_request_error", message: "unsupported" },
         },
         400
       );
@@ -549,6 +559,101 @@ describe("AIプロバイダ境界", () => {
     await expect(
       new ClaudeProvider(claudeContext()).generate({ ...ollamaParams, disableThinking: true })
     ).rejects.toMatchObject({ kind: "bad_response" });
-    expect(messageCalls).toBe(2);
+    // 初回 + 外せる指定4つ（effort / thinking / 文字数制約 / JSONスキーマ）
+    expect(messageCalls).toBe(5);
+  });
+
+  test("残高不足を要求の不備と取り違えない", async () => {
+    // Anthropicは残高不足も400 invalid_request_error で返す。
+    // 機能を外しても直らないうえ、外し続けると対応機能を失う
+    let messageCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes("/v1/models/")) {
+        return jsonResponse(claudeModel);
+      }
+      messageCalls += 1;
+      return jsonResponse(
+        {
+          type: "error",
+          error: {
+            type: "invalid_request_error",
+            message:
+              "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.",
+          },
+        },
+        400
+      );
+    }));
+
+    await expect(
+      new ClaudeProvider(claudeContext()).generate({
+        ...ollamaParams,
+        disableThinking: true,
+      })
+    ).rejects.toMatchObject({ kind: "insufficient_credit" });
+    // 直らない再試行を繰り返さない
+    expect(messageCalls).toBe(1);
+  });
+
+  test("失敗しただけでは対応状況を記憶しない", async () => {
+    // 原因が残高不足でも、機能が未対応と覚えてしまうと
+    // 支払ったあとも対応機能を使わなくなる
+    const context = claudeContext();
+    let failing = true;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes("/v1/models/")) {
+        return jsonResponse(claudeModel);
+      }
+      if (failing) {
+        return jsonResponse(
+          {
+            type: "error",
+            error: { type: "invalid_request_error", message: "unsupported" },
+          },
+          400
+        );
+      }
+      return jsonResponse(claudeMessage("ok"));
+    }));
+
+    const provider = new ClaudeProvider(context);
+    await expect(provider.generate(ollamaParams)).rejects.toMatchObject({
+      kind: "bad_response",
+    });
+
+    // 状況が変わって通るようになったら、最初の組み合わせから試し直せる
+    failing = false;
+    await expect(
+      new ClaudeProvider(context).generate(ollamaParams)
+    ).resolves.toMatchObject({ text: "ok" });
+  });
+
+  test("拒否された理由を捨てずにログへ残せる形にする", async () => {
+    // 以前はステータスだけを詳細にしており、原因にたどり着けなかった
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes("/v1/models/")) {
+        return jsonResponse(claudeModel);
+      }
+      return jsonResponse(
+        {
+          type: "error",
+          error: {
+            type: "invalid_request_error",
+            message: "output_config.format: unsupported keyword maxLength",
+          },
+        },
+        400
+      );
+    }));
+
+    await expect(
+      new ClaudeProvider(claudeContext()).generate(ollamaParams)
+    ).rejects.toMatchObject({
+      kind: "bad_response",
+      detail: expect.stringContaining("maxLength"),
+    });
   });
 });

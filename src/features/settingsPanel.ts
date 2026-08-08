@@ -34,6 +34,7 @@ import {
   type MentionExcerpt,
 } from "../core/mentionExcerpts";
 import { loadExcerptSources } from "../core/manuscriptSources";
+import { expandNameVariants } from "../core/termIndex";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
 import {
@@ -42,6 +43,13 @@ import {
   SETTINGS_ASSISTANT_SYSTEM_PROMPT,
   type ChatTurn,
 } from "../prompts/settingsDeepDive";
+import {
+  buildEnrichPrompt,
+  buildEnrichSchema,
+  ENRICHABLE_FIELDS,
+  type EnrichableField,
+} from "../prompts/settingsEnrich";
+import { clampSummary } from "../core/summaryLimit";
 import { buildSettingsPanelHtml } from "../views/settingsPanelHtml";
 import { withCancellableProgress } from "../views/progress";
 import { logFailure } from "../core/logger";
@@ -65,16 +73,25 @@ const openPanels = new Map<string, SettingsPanel>();
 export async function openSettingsPanel(
   context: vscode.ExtensionContext,
   work: WorkEntry,
-  registry: AIRegistry
-): Promise<void> {
+  registry: AIRegistry,
+  options: { beside?: boolean } = {}
+): Promise<SettingsPanel> {
   const existing = openPanels.get(work.id);
   if (existing) {
-    existing.reveal();
-    return;
+    existing.reveal(options.beside);
+    return existing;
   }
-  const panel = new SettingsPanel(context, work, registry);
+  const panel = new SettingsPanel(context, work, registry, options.beside);
   openPanels.set(work.id, panel);
   await panel.initialize();
+  return panel;
+}
+
+/** 開いていれば返す。本文のクリックに追従させるために使う */
+export function findOpenSettingsPanel(
+  workId: string
+): SettingsPanel | undefined {
+  return openPanels.get(workId);
 }
 
 interface ListItem {
@@ -100,7 +117,7 @@ interface DetailView {
   aiNotes: AiNote[];
 }
 
-class SettingsPanel {
+export class SettingsPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly characterStore: CharacterStore;
   private readonly abilityStore: SettingsStore<Ability>;
@@ -121,7 +138,8 @@ class SettingsPanel {
   constructor(
     context: vscode.ExtensionContext,
     private readonly work: WorkEntry,
-    private readonly registry: AIRegistry
+    private readonly registry: AIRegistry,
+    beside = false
   ) {
     this.characterStore = new CharacterStore(work);
     this.abilityStore = createAbilityStore(work);
@@ -131,7 +149,10 @@ class SettingsPanel {
     this.panel = vscode.window.createWebviewPanel(
       "novelai.settings",
       `設定資料: ${work.title}`,
-      vscode.ViewColumn.Active,
+      // 本文の右側に並べる。本文を読みながら設定を見られるようにするため
+      beside
+        ? { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true }
+        : vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true }
     );
     context.subscriptions.push(this.panel);
@@ -142,8 +163,27 @@ class SettingsPanel {
     });
   }
 
-  reveal(): void {
-    this.panel.reveal();
+  reveal(beside = false): void {
+    // preserveFocus を立てるのは、本文を書きながら見るときに
+    // カーソルが資料側へ飛ばないようにするため
+    this.panel.reveal(
+      beside ? vscode.ViewColumn.Beside : undefined,
+      beside
+    );
+  }
+
+  get workId(): string {
+    return this.work.id;
+  }
+
+  /**
+   * 外から特定の1件を選ばせる。本文中の用語をクリックしたときに使う。
+   * 一覧の選択状態も合わせるため、画面側で種別タブごと切り替える。
+   */
+  showRecord(kind: SettingsKind, id: string): void {
+    const detail = this.detailOf(kind, id);
+    if (!detail) return;
+    this.post({ type: "focus", kind, id, detail });
   }
 
   async initialize(): Promise<void> {
@@ -345,6 +385,12 @@ class SettingsPanel {
         case "deepDive":
           await this.handleDeepDive(message.kind, message.id, message.topic);
           return;
+        case "enrich":
+          await this.handleEnrich(message.kind, message.id);
+          return;
+        case "applyProposal":
+          await this.handleApplyProposal(message);
+          return;
         case "approveNote":
           await this.handleApproveNote(message);
           return;
@@ -403,7 +449,9 @@ class SettingsPanel {
     record: Character | Ability | Location
   ): Promise<void> {
     if (kind === "character") {
-      await this.characterStore.save(record as Character);
+      // 既存ファイルは上書きできないため、退避してから作り直す必要がある。
+      // save() を直接呼ぶと保存が必ず失敗する
+      await this.characterStore.saveOrUpdate(record as Character);
       return;
     }
     if (kind === "ability") {
@@ -474,6 +522,107 @@ class SettingsPanel {
       text,
       model: resolved.model,
     });
+  }
+
+  /**
+   * 各項目に入れる値をAIに提案させる。
+   *
+   * 掘り下げ（文章のメモ）と違い、設定資料の項目そのものを埋めるためのもの。
+   * **提案は保存しない。** 項目ごとに現在の値と並べて見せ、
+   * 作者が選んだものだけを書き込む。
+   */
+  private async handleEnrich(kind: SettingsKind, id: string): Promise<void> {
+    const record = this.find(kind, id);
+    if (!record) {
+      this.post({ type: "error", message: "選択した設定が見つかりません。" });
+      return;
+    }
+
+    const resolved = await ensureConfigured(this.registry);
+    if (!resolved) return;
+
+    const excerpts = await this.excerptsFor(record);
+    const prompt = buildEnrichPrompt({
+      workTitle: this.work.title,
+      kind,
+      target: {
+        kindLabel: KIND_LABELS[kind],
+        name: record.name,
+        currentSettings: this.describe(kind, record),
+      },
+      excerpts,
+    });
+
+    const text = await this.generate(
+      prompt,
+      `「${record.name}」の項目を充実させています`,
+      buildEnrichSchema(kind)
+    );
+    if (text === undefined) return;
+
+    const parsed = parseEnrichResult(text);
+    if (!parsed) {
+      this.post({
+        type: "error",
+        message:
+          "AIの応答をJSONとして解析できませんでした。もう一度試してください。",
+      });
+      return;
+    }
+
+    const current = record as unknown as Record<string, unknown>;
+    const proposals: FieldProposal[] = [];
+    for (const field of ENRICHABLE_FIELDS[kind]) {
+      const proposed = clampField(field, parsed[field.key]);
+      if (!proposed) continue;
+      const before = asText(current[field.key]);
+      if (before === proposed) continue;
+      proposals.push({
+        key: field.key,
+        label: field.label,
+        before,
+        after: proposed,
+        multiline: field.multiline === true,
+        // 空欄を埋める提案だけを既定で選ぶ。
+        // 作者が書いた内容の置き換えは、必ず自分で選んでもらう
+        selected: before.length === 0,
+      });
+    }
+
+    if (proposals.length === 0) {
+      this.post({
+        type: "error",
+        message:
+          "本文から新しく書ける内容は見つかりませんでした。抜粋の範囲に手掛かりが無いようです。",
+      });
+      return;
+    }
+
+    this.post({ type: "proposal", kind, id, proposals, model: resolved.model });
+  }
+
+  /** 作者が選んだ項目だけを書き込む */
+  private async handleApplyProposal(
+    message: ApplyProposalMessage
+  ): Promise<void> {
+    const record = this.find(message.kind, message.id);
+    if (!record) {
+      this.post({ type: "error", message: "選択した設定が見つかりません。" });
+      return;
+    }
+
+    const edits: RecordEdits = {};
+    for (const [key, value] of Object.entries(message.values)) {
+      (edits as Record<string, string>)[key] = value;
+    }
+
+    const updated = this.applyEdits(message.kind, record, edits);
+    await this.persist(message.kind, updated);
+    await this.reloadAfterSave(
+      message.kind,
+      message.id,
+      `${Object.keys(message.values).length} 項目を反映しました。`
+    );
   }
 
   private async handleChat(
@@ -577,16 +726,19 @@ class SettingsPanel {
         });
       }
     }
-    return collectMentionExcerpts(this.excerptSources, [
-      record.name,
-      ...record.aliases,
-    ]);
+    // フルネームで登録されていても、本文には片方しか出てこないことが多い。
+    // 広げないと、その人物の場面がほとんど集まらない
+    return collectMentionExcerpts(
+      this.excerptSources,
+      expandNameVariants([record.name, ...record.aliases])
+    );
   }
 
   /** AIを1回呼ぶ。失敗したら理由と次の操作を画面に出す */
   private async generate(
     prompt: string,
-    progressLabel: string
+    progressLabel: string,
+    jsonSchema?: object
   ): Promise<string | undefined> {
     const resolved = await ensureConfigured(this.registry);
     if (!resolved) return undefined;
@@ -611,9 +763,11 @@ class SettingsPanel {
             systemPrompt: SETTINGS_ASSISTANT_SYSTEM_PROMPT,
             userPrompt: prompt,
             model: resolved.model,
-            // 掘り下げは多少ふくらみがあってよい。抽出（0.2）より少し高くする
-            temperature: 0.5,
+            // 掘り下げは多少ふくらみがあってよい。抽出（0.2）より少し高くする。
+            // 項目の提案は設定として書くので、控えめにする
+            temperature: jsonSchema ? 0.3 : 0.5,
             numCtx,
+            jsonSchema,
             disableThinking: true,
             signal: controller.signal,
           });
@@ -675,6 +829,36 @@ function conflictLines(
   }));
 }
 
+/** AIの応答をJSONとして読む。前後に余計な文字が付くことがある */
+function parseEnrichResult(
+  text: string
+): Record<string, unknown> | undefined {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end <= start) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(text.slice(start, end + 1));
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 提案された値を、長さの制限まで含めて整える */
+function clampField(field: EnrichableField, value: unknown): string {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  if (!text) return "";
+  // AIは「不明」「なし」を値として返してくることがある。空欄と同じ扱いにする
+  if (/^(不明|なし|null|N\/A|記載なし)$/i.test(text)) return "";
+  return field.maxChars ? (clampSummary(text, field.maxChars) ?? "") : text;
+}
+
+function asText(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
 function totalChars(excerpts: MentionExcerpt[]): number {
   return excerpts.reduce((sum, excerpt) => sum + excerpt.text.length, 0);
 }
@@ -686,6 +870,9 @@ function describeError(error: unknown): string {
       種別: error.kind,
       詳細: error.detail,
     });
+    // 残高不足は原因がはっきりしているので、そのまま伝える。
+    // 「AI処理に失敗しました」だけでは何をすればよいか分からない
+    if (error.kind === "insufficient_credit") return error.message;
     return `AI処理に失敗しました。${recoveryForAIError(error)}（詳細はログを参照）`;
   }
   if (error instanceof SettingsEditError) return error.message;
@@ -703,8 +890,28 @@ function createNonce(): string {
   return value;
 }
 
+export interface FieldProposal {
+  key: string;
+  label: string;
+  before: string;
+  after: string;
+  multiline: boolean;
+  /** 既定で選ばれているか。空欄を埋める提案だけを既定にする */
+  selected: boolean;
+}
+
+interface ApplyProposalMessage {
+  type: "applyProposal";
+  kind: SettingsKind;
+  id: string;
+  /** 作者が選んだ項目だけ */
+  values: Record<string, string>;
+}
+
 type PanelMessage =
   | { type: "ready" }
+  | { type: "enrich"; kind: SettingsKind; id: string }
+  | ApplyProposalMessage
   | { type: "select"; kind: SettingsKind; id: string }
   | { type: "save"; kind: SettingsKind; id: string; edits: RecordEdits }
   | { type: "deepDive"; kind: SettingsKind; id: string; topic: string }
@@ -729,12 +936,25 @@ type OutgoingMessage =
     }
   | { type: "detail"; detail: DetailView }
   | {
+      type: "focus";
+      kind: SettingsKind;
+      id: string;
+      detail: DetailView;
+    }
+  | {
       type: "saved";
       detail: DetailView | undefined;
       groups: Record<SettingsKind, ListItem[]>;
       notice: string;
     }
   | { type: "draft"; topic: string; text: string; model: string }
+  | {
+      type: "proposal";
+      kind: SettingsKind;
+      id: string;
+      proposals: FieldProposal[];
+      model: string;
+    }
   | { type: "chatAnswer"; text: string; question: string }
   | { type: "busy"; busy: boolean; label: string }
   | { type: "error"; message: string };

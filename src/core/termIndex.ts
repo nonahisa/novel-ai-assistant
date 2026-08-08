@@ -26,6 +26,35 @@ export interface TermMatch {
   entry: TermEntry;
 }
 
+/**
+ * 本文に現れうる呼び方へ広げる。
+ *
+ * 小説では姓名を続けて書かず、片方だけで呼ぶことが多い。
+ * 「マルキオ・イークェス」で登録しても本文には「マルキオ」としか出てこず、
+ * そのままでは一致しない。すると別レコードの「マル」のような
+ * 短い名前だけが引っかかり、途中までしか色が付かない（実データで確認）。
+ *
+ * 中黒・空白で区切られている場合だけ分ける。区切りが無い名前を
+ * 推測で切ると、別人の名前と重なって誤って色が付く。
+ */
+export function expandNameVariants(names: string[]): string[] {
+  const expanded = new Set<string>();
+
+  for (const name of names) {
+    const trimmed = name.trim();
+    if (!trimmed) continue;
+    expanded.add(trimmed);
+
+    if (!/[\s　・･]/.test(trimmed)) continue;
+    for (const part of trimmed.split(/[\s　・･]+/)) {
+      // 1文字の部分は普通名詞と重なりやすいので広げない
+      if (part.length >= 2) expanded.add(part);
+    }
+  }
+
+  return [...expanded];
+}
+
 interface TrieNode {
   children: Map<string, TrieNode>;
   fail: TrieNode | null;

@@ -153,6 +153,11 @@ export class AIError extends Error {
       | "bad_response"
       | "authentication_failed"
       | "permission_denied"
+      /**
+       * 残高・クレジット切れ。
+       * レート上限と違って待っても回復せず、権限の問題とも直し方が違うので分ける。
+       */
+      | "insufficient_credit"
       | "rate_limited"
       | "aborted"
       | "unknown",
@@ -186,6 +191,8 @@ export function recoveryForAIError(error: AIError): string {
       return "APIキーを確認して再登録してください。";
     case "permission_denied":
       return "APIキーの利用権限または請求設定を確認してください。";
+    case "insufficient_credit":
+      return "利用しているAIサービスの請求画面で、クレジットを購入してください。";
     case "rate_limited":
       return "しばらく待ってから、必要な場合に手動で再実行してください。";
     case "aborted":

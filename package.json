@@ -95,6 +95,12 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.showSettingsForTerm",
+        "title": "カーソル位置の設定を右側に表示",
+        "category": "小説執筆",
+        "icon": "$(book)"
+      },
+      {
         "command": "novelai.applyPendingUpdates",
         "title": "更新分を反映",
         "category": "小説執筆",
@@ -190,6 +196,13 @@
           "command": "novelai.removeWork",
           "when": "view == novelai.works && viewItem == work",
           "group": "9_danger"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "novelai.showSettingsForTerm",
+          "when": "resourceExtname == .txt || resourceExtname == .md",
+          "group": "navigation"
         }
       ],
       "commandPalette": [
