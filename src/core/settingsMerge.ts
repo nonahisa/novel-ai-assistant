@@ -15,6 +15,7 @@ import type {
   ExtractedLocation,
 } from "../prompts/characterExtract";
 import { clampSummary } from "./summaryLimit";
+import { fillReading } from "./reading";
 
 /**
  * 能力・場所の抽出結果を既存レコードへマージする。
@@ -176,6 +177,12 @@ function applyAbility(
 
   changed = mergeAliases(target, incoming.name, incoming.aliases) || changed;
   changed = fillOrConflict(target, "reading", incoming.reading, conflicts) || changed;
+  // カタカナならコード側で確実に作る。漢字だけAIの推定に委ねる
+  const derivedReading = fillReading(target.reading, target.name);
+  if (derivedReading !== target.reading) {
+    target.reading = derivedReading;
+    changed = true;
+  }
   // 紹介文の長さはコード側で確かめる。プロンプトの指示だけでは守られない
   changed =
     fillOrConflict(target, "summary", clampSummary(incoming.summary), conflicts) ||
@@ -217,6 +224,12 @@ function applyLocation(
 
   changed = mergeAliases(target, incoming.name, incoming.aliases) || changed;
   changed = fillOrConflict(target, "reading", incoming.reading, conflicts) || changed;
+  // カタカナならコード側で確実に作る。漢字だけAIの推定に委ねる
+  const derivedReading = fillReading(target.reading, target.name);
+  if (derivedReading !== target.reading) {
+    target.reading = derivedReading;
+    changed = true;
+  }
   changed =
     fillOrConflict(target, "summary", clampSummary(incoming.summary), conflicts) ||
     changed;

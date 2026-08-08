@@ -11,7 +11,7 @@
  * プロンプトを変更したら version を上げること。
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
-export const CHARACTER_EXTRACT_VERSION = "2.3";
+export const CHARACTER_EXTRACT_VERSION = "2.4";
 
 export const BASE_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 
@@ -143,6 +143,10 @@ ${knownLocations}
 4. 説明は本文から読み取れる範囲だけを書くこと。
 
 【すべてに共通のルール】
+- reading（読み仮名）は、**名前に漢字が含まれる場合だけ**ひらがなで書くこと。
+  カタカナだけ・ひらがなだけの名前は null にしてよい（こちらで機械的に作るため）。
+  漢字の読みは本文のルビや文脈から判断し、分からなければ最も一般的な読みでよい。
+  例：「月島灯」→ "つきしまあかり"、「白瀬澪」→ "しらせみお"
 - summary は**50字以内**の短い紹介にすること。人物・能力・場所のいずれも同じ。
   一覧で名前の下に並べるための1行なので、詳細は他の項目に分けて書く。
 - 各レコードには、本文からそのまま抜き出した短い evidence を必ず付けること。
@@ -172,6 +176,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           },
           aliases: { type: "array", items: { type: "string" } },
           isMob: { type: "boolean" },
+          reading: { type: ["string", "null"] },
           summary: { type: ["string", "null"], maxLength: 50 },
           affiliation: { type: ["string", "null"] },
           role: { type: ["string", "null"] },
@@ -280,6 +285,7 @@ export interface ExtractedCharacter {
   aliases?: string[];
   entityType?: "person" | "group" | "location" | "unknown";
   isMob?: boolean;
+  reading?: string | null;
   summary?: string | null;
   affiliation?: string | null;
   role?: string | null;

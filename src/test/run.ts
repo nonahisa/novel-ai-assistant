@@ -35,6 +35,7 @@ const COMMANDS = [
   "novelai.unifyCharacters",
   "novelai.applyPendingUpdates",
   "novelai.showSettingsForTerm",
+  "novelai.exportImeDictionary",
 ];
 
 export async function run(): Promise<void> {

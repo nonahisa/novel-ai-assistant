@@ -113,6 +113,16 @@ const ACTIONS: readonly CommandAction[] = [
       "どちらの名前を残すかは作者が選びます。",
   },
   {
+    command: "novelai.exportImeDictionary",
+    label: "IME辞書を書き出す",
+    description: "AIを使わない",
+    icon: "symbol-keyword",
+    requiresWork: true,
+    detail:
+      "登場人物・場所・能力の名前を、IMEのユーザー辞書に取り込める形で書き出します。" +
+      "取り込むと、変換候補に作品の固有名詞が出るようになります。",
+  },
+  {
     command: "novelai.showLog",
     label: "ログを表示",
     description: "",

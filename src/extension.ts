@@ -32,6 +32,7 @@ import {
 } from "./features/settingsPanel";
 import { unifyCharacterRecords } from "./features/unifyCharacters";
 import { applyPendingCharacterUpdates } from "./features/applyPendingUpdates";
+import { exportImeDictionary } from "./features/exportImeDictionary";
 import { TermHighlighter } from "./views/termHighlight";
 import { ActionListProvider } from "./views/actionList";
 import {
@@ -426,6 +427,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("novelai.showLog", () => {
       showLog();
     })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.exportImeDictionary",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await exportImeDictionary(work);
+      }
+    )
   );
 
   context.subscriptions.push(

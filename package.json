@@ -95,6 +95,12 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.exportImeDictionary",
+        "title": "IME辞書を書き出す",
+        "category": "小説執筆",
+        "icon": "$(symbol-keyword)"
+      },
+      {
         "command": "novelai.showSettingsForTerm",
         "title": "カーソル位置の設定を右側に表示",
         "category": "小説執筆",

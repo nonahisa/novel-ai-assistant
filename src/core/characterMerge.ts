@@ -6,6 +6,7 @@ import {
 } from "../models/character";
 import { ExtractedCharacter } from "../prompts/characterExtract";
 import { clampSummary } from "./summaryLimit";
+import { fillReading } from "./reading";
 
 /**
  * 抽出結果を既存の人物一覧へマージする。
@@ -157,6 +158,16 @@ function applyExtracted(
     changed = true;
   }
 
+  // 読みはカタカナならコード側で確実に作る。
+  // 漢字を含む名前だけAIの推定（ex.reading）に委ねる
+  changed =
+    fillOrConflict(target, "reading", ex.reading, conflicts) || changed;
+  const derived = fillReading(target.reading, target.name);
+  if (derived !== target.reading) {
+    target.reading = derived;
+    changed = true;
+  }
+
   // 紹介文は長さをコード側で確かめてから入れる。
   // プロンプトで50字以内と指示しても、モデルは平気で超えてくる
   changed =
@@ -305,7 +316,13 @@ function mergeAddressTerm(
  */
 function fillOrConflict(
   target: Character,
-  field: "summary" | "affiliation" | "role" | "personality" | "appearance",
+  field:
+    | "summary"
+    | "affiliation"
+    | "reading"
+    | "role"
+    | "personality"
+    | "appearance",
   incoming: string | null | undefined,
   conflicts: MergeResult["conflicts"]
 ): boolean {
