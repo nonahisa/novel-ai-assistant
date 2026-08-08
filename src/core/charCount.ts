@@ -41,6 +41,7 @@ export function countChars(rawText: string, excludeRuby = true): CharCounts {
     net,
     lines: lines.length,
     paragraphs,
+    manuscriptLines: countManuscriptLines(normalized, false),
   };
 }
 
@@ -59,7 +60,7 @@ function countCodePoints(s: string): number {
 
 /** 空の集計値 */
 export function emptyCounts(): CharCounts {
-  return { gross: 0, net: 0, lines: 0, paragraphs: 0 };
+  return { gross: 0, net: 0, lines: 0, paragraphs: 0, manuscriptLines: 0 };
 }
 
 /** 集計値を加算する */
@@ -69,6 +70,7 @@ export function addCounts(a: CharCounts, b: CharCounts): CharCounts {
     net: a.net + b.net,
     lines: a.lines + b.lines,
     paragraphs: a.paragraphs + b.paragraphs,
+    manuscriptLines: a.manuscriptLines + b.manuscriptLines,
   };
 }
 
@@ -77,10 +79,45 @@ export function formatCount(n: number): string {
   return n.toLocaleString("ja-JP");
 }
 
+/** 原稿用紙1行あたりの字数 */
+export const MANUSCRIPT_COLUMNS = 20;
+/** 原稿用紙1枚あたりの行数 */
+export const MANUSCRIPT_ROWS = 20;
+
 /**
- * 原稿用紙換算（400字詰め）。
- * 小説投稿では分量の目安としてよく使われる。
+ * 原稿用紙に書いたときに占める行数を数える。
+ *
+ * **文字数を400で割っても枚数にはならない。**
+ * 1行20字で折り返すため、段落の最終行には余白が残る。
+ * たとえば21字の段落は2行を占め、残り19マスは空白になる。
+ * 空行も1行として場所を取る。
+ * このため実際の枚数は、割り算の結果よりかなり多くなる。
+ *
+ * 字下げの全角スペースも1マスを使うので、空白を除いた
+ * 純文字数ではなく、行ごとの見た目の文字数で数える。
+ *
+ * 禁則処理（行頭の句読点を前行へ送る等）は考慮していない。
+ * 見た目の枚数は組版で前後するため、目安として扱う。
  */
-export function toManuscriptPages(netChars: number): number {
-  return Math.ceil(netChars / 400);
+export function countManuscriptLines(rawText: string, excludeRuby = true): number {
+  const text = excludeRuby ? stripRuby(rawText) : rawText;
+  const normalized = text.replace(/\r\n?/g, "\n");
+
+  let total = 0;
+  for (const line of normalized.split("\n")) {
+    const width = countCodePoints(line.replace(/\t/g, "    "));
+    // 空行も原稿用紙では1行分の場所を取る
+    total += width === 0 ? 1 : Math.ceil(width / MANUSCRIPT_COLUMNS);
+  }
+  return total;
+}
+
+/**
+ * 原稿用紙の枚数（20字×20行＝400字詰め）。
+ *
+ * 引数は文字数ではなく行数。文字数から割り算で求めると
+ * 折り返しの余白を数え落とすため（countManuscriptLines を参照）。
+ */
+export function toManuscriptPages(manuscriptLines: number): number {
+  return Math.ceil(manuscriptLines / MANUSCRIPT_ROWS);
 }

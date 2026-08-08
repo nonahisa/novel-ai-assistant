@@ -25,6 +25,12 @@ import {
   saveDirtyDocumentsBeforeExtraction,
 } from "./features/extractCharacters";
 import { selectOllamaExecutable } from "./features/selectOllamaExecutable";
+import { generateSettingsDocs } from "./features/generateSettingsDocs";
+import { TermHighlighter } from "./views/termHighlight";
+import {
+  registerProgressCancelCommand,
+  withProgress,
+} from "./views/progress";
 import { pathExists } from "./core/fileSystem";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -32,6 +38,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   await registry.initialize();
   const treeProvider = new WorkTreeProvider(registry);
   const aiRegistry = new AIRegistry(context);
+
+  // 本文中の用語を種類ごとに色分けし、ホバーで設定を出す
+  const highlighter = new TermHighlighter(registry);
+  context.subscriptions.push(highlighter);
+  void highlighter.refresh();
+
+  // ステータスバーの進捗に添える中止ボタン用（コマンドパレットには出さない）
+  context.subscriptions.push(registerProgressCancelCommand());
 
   const treeView = vscode.window.createTreeView("novelai.works", {
     treeDataProvider: treeProvider,
@@ -90,7 +104,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         `- 純文字数: ${formatCount(counts.net)} 字`,
         `- 総文字数: ${formatCount(counts.gross)} 字`,
         `- 段落数: ${counts.paragraphs}`,
-        `- 原稿用紙換算: 約 ${formatCount(toManuscriptPages(counts.net))} 枚`,
+        `- 原稿用紙換算: 約 ${formatCount(toManuscriptPages(counts.manuscriptLines))} 枚`,
       ].join("\n")
     );
     statusBar.show();
@@ -262,7 +276,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           `純文字数: ${formatCount(t.net)} 字`,
           `総文字数: ${formatCount(t.gross)} 字`,
           `段落数: ${formatCount(t.paragraphs)}`,
-          `原稿用紙換算: 約 ${formatCount(toManuscriptPages(t.net))} 枚`,
+          `原稿用紙換算: 約 ${formatCount(toManuscriptPages(t.manuscriptLines))} 枚`,
         ];
         await vscode.window.showInformationMessage(lines.join("  /  "), {
           modal: true,
@@ -357,6 +371,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.generateSettingsDocs",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await generateSettingsDocs(work);
+      }
+    )
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("novelai.testAI", async () => {
       const resolved = aiRegistry.resolve();
       if (!resolved) {
@@ -365,12 +390,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
         return;
       }
-      const result = await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: "接続を確認しています…",
-        },
-        () => resolved.provider.testConnection()
+      const result = await withProgress("接続を確認しています…", () =>
+        resolved.provider.testConnection()
       );
       if (result.ok) {
         const info = await aiRegistry.resolveModelInfo();

@@ -7,6 +7,14 @@ coverage/
 !.env.example
 .vscode-test/
 release/
+# 検証用の使い捨てスクリプト（アンダースコア始まり）
 _test_*
+_diag*
+_e2e*
+_probe*
+_verify*
+_bench*
+_mksample*
+_peek*
 *.vsix
 .worktrees/

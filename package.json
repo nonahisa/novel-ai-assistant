@@ -101,6 +101,12 @@
         "title": "登場人物を抽出",
         "category": "小説執筆",
         "icon": "$(person-add)"
+      },
+      {
+        "command": "novelai.generateSettingsDocs",
+        "title": "設定資料を生成",
+        "category": "小説執筆",
+        "icon": "$(book)"
       }
     ],
     "menus": {
@@ -151,6 +157,11 @@
           "command": "novelai.removeWork",
           "when": "view == novelai.works && viewItem == work",
           "group": "9_danger"
+        },
+        {
+          "command": "novelai.generateSettingsDocs",
+          "when": "view == novelai.works && viewItem == work",
+          "group": "1_stats"
         }
       ],
       "commandPalette": [

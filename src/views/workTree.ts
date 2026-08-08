@@ -77,7 +77,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
           `- 純文字数: ${formatCount(stats.totals.net)} 字`,
           `- 総文字数: ${formatCount(stats.totals.gross)} 字`,
           `- 原稿用紙換算: 約 ${formatCount(
-            toManuscriptPages(stats.totals.net)
+            toManuscriptPages(stats.totals.manuscriptLines)
           )} 枚`,
           `- ファイル数: ${stats.fileCount}`,
           "",

@@ -40,7 +40,12 @@ export interface MergeResult {
  */
 export interface MergeCandidate {
   names: [string, string];
-  reason: "abbreviation";
+  /**
+   * abbreviation: 省略形とみられる（「ギルマス」と「ギルドマスター」）
+   * ambiguous: 統合先が複数あって決められなかった
+   * same_name: 同じ呼称なのに別レコードになっている
+   */
+  reason: "abbreviation" | "ambiguous" | "same_name";
 }
 
 export function mergeExtractedCharacters(
@@ -53,12 +58,15 @@ export function mergeExtractedCharacters(
   const updated: string[] = [];
   const changedIds = new Set<string>();
   const conflicts: MergeResult["conflicts"] = [];
+  /** 統合先を決められず新規にした組。作者の判断へ回す */
+  const ambiguousPairs: Array<[string, string]> = [];
 
   for (const item of extracted) {
     const ex = item.data;
     if (!ex.name || !ex.name.trim()) continue;
 
-    const match = findCharacter(result, ex.name, ex.aliases ?? []);
+    const lookup = findCharacter(result, ex.name, ex.aliases ?? []);
+    const match = lookup.match;
 
     if (!match) {
       const c = emptyCharacter(nextCharacterId(result), ex.name.trim());
@@ -66,6 +74,12 @@ export function mergeExtractedCharacters(
       result.push(c);
       added.push(c.name);
       changedIds.add(c.id);
+      // 統合先が複数あって決められなかった場合、データは残しつつ
+      // 「どれかと同じかもしれない」ことを作者へ伝える。
+      // 黙って新規にすると重複が増えるだけで気づけない。
+      for (const other of lookup.ambiguous) {
+        ambiguousPairs.push([c.name, other.name]);
+      }
       continue;
     }
 
@@ -97,7 +111,13 @@ export function mergeExtractedCharacters(
     updated,
     changedIds: [...changedIds],
     conflicts,
-    mergeCandidates: findMergeCandidates(result),
+    mergeCandidates: [
+      ...ambiguousPairs.map((names) => ({
+        names,
+        reason: "ambiguous" as const,
+      })),
+      ...findMergeCandidates(result),
+    ],
   };
 }
 
@@ -325,19 +345,32 @@ function fillOrConflict(
   return true;
 }
 
+/**
+ * 統合先の探索結果。
+ *
+ * 「どれに統合すべきか決まらない」ことと「一致するものが無い」ことを
+ * 区別する。前者で黙って新規レコードを作ると、既存2件に加えて3件目ができ、
+ * 重複がかえって増えるため（実データで確認）。
+ */
+interface CharacterLookup {
+  match?: Character;
+  /** 複数一致して決められなかった相手。作者に提示する */
+  ambiguous: Character[];
+}
+
 function findCharacter(
   list: Character[],
   name: string,
   aliases: string[]
-): Character | undefined {
+): CharacterLookup {
   const incomingNames = [name, ...aliases];
   const keys = new Set(incomingNames.map(normalizeName));
   const exactMatches = list.filter((c) => {
     const candidates = [c.name, ...c.aliases].map(normalizeName);
     return candidates.some((candidate) => keys.has(candidate));
   });
-  if (exactMatches.length === 1) return exactMatches[0];
-  if (exactMatches.length > 1) return undefined;
+  if (exactMatches.length === 1) return { match: exactMatches[0], ambiguous: [] };
+  if (exactMatches.length > 1) return { ambiguous: exactMatches };
 
   // 部分名は、姓名が空白・中黒で明示的に区切られている場合だけ使う。
   // 推測による部分一致は別人を壊すため、候補が一人に決まる場合に限る。
@@ -348,7 +381,8 @@ function findCharacter(
       splitNameParts(candidate).some((part) => keys.has(part))
     )
   );
-  return partMatches.length === 1 ? partMatches[0] : undefined;
+  if (partMatches.length === 1) return { match: partMatches[0], ambiguous: [] };
+  return { ambiguous: partMatches.length > 1 ? partMatches : [] };
 }
 
 // 省略はカタカナ語で起きやすい。漢字を含む名前の部分一致は
@@ -371,8 +405,12 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
       const a = characters[i];
       const b = characters[j];
 
-      // すでに別名として統合済みの組は候補にしない
-      if (sharesAppellation(a, b)) continue;
+      // 別レコードなのに呼称が重なっている＝ほぼ確実に同一人物。
+      // 統合先が決まらず新規になった場合などに起きるので、最優先で伝える。
+      if (sharesAppellation(a, b)) {
+        candidates.push({ names: [a.name, b.name], reason: "same_name" });
+        continue;
+      }
 
       const pair = appellationPairs(a, b).find(([left, right]) =>
         isAbbreviationOf(left, right)
@@ -432,7 +470,56 @@ function splitNameParts(name: string): string[] {
 
 // 同一人物判定でだけ使う。呼称の使い分け自体は addressTerms 側の
 // 管理対象なので、name/aliases に保存する文字列はこの敬称を残したままにする
-const HONORIFIC_SUFFIXES = ["さん", "くん", "君", "ちゃん", "様", "さま", "殿", "先輩", "氏"];
+// 「先生」は敬称として名前に付く（「マイナ先生」＝「マイナ」）。
+// 「先生」単独は GENERIC_ROLES 側で人物名から除外されるため、
+// ここに入れても役職語だけのレコードを拾うことはない。
+/**
+ * 名前の後ろに付く敬称。同一人物判定でのみ使い、
+ * name / aliases に保存する文字列からは取り除かない
+ * （呼び分けそのものが addressTerms の管理対象であるため）。
+ *
+ * 「殿下」と「妃殿下」のように一方が他方の末尾になる組があるため、
+ * 照合は長い敬称から行う（HONORIFIC_SUFFIXES を参照）。
+ * 並び順に依存しないよう、定義はここでは自由に足してよい。
+ */
+const HONORIFIC_SUFFIX_SOURCE = [
+  // 一般
+  "さん",
+  "くん",
+  "君",
+  "ちゃん",
+  "ちゃま",
+  "様",
+  "さま",
+  "殿",
+  "氏",
+  "女史",
+  // 立場・職能
+  "先輩",
+  "先生",
+  "師",
+  "卿",
+  "翁",
+  // 王侯貴族・聖職
+  "陛下",
+  "妃殿下",
+  "殿下",
+  "閣下",
+  "猊下",
+  "聖下",
+  "姫",
+  "公",
+];
+
+/**
+ * 長い敬称から順に照合する。
+ *
+ * 「エレナ妃殿下」は「殿下」でも末尾一致するため、
+ * 短い方を先に試すと「エレナ妃」が残ってしまう。
+ */
+const HONORIFIC_SUFFIXES = [...HONORIFIC_SUFFIX_SOURCE].sort(
+  (a, b) => b.length - a.length
+);
 
 /**
  * 表記ゆれを吸収する。全角空白・記号の違いで別人扱いしないため。

@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { AIProvider, ModelInfo, ProviderId } from "./types";
 import { OllamaProvider } from "./ollamaProvider";
 import { ClaudeProvider } from "./claudeProvider";
+import { withProgress } from "../views/progress";
 
 const KEY_PROVIDER = "novelai.ai.provider";
 const KEY_MODEL = "novelai.ai.model";
@@ -111,9 +112,8 @@ export async function runSetupWizard(
   }
 
   // 接続テスト
-  const test = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: "接続を確認しています…" },
-    () => provider.testConnection()
+  const test = await withProgress("接続を確認しています…", () =>
+    provider.testConnection()
   );
 
   if (!test.ok) {
@@ -137,12 +137,8 @@ export async function runSetupWizard(
   }
 
   // モデル一覧を取得
-  const models = await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: "モデル情報を取得しています…",
-    },
-    () => provider.listModels()
+  const models = await withProgress("モデル情報を取得しています…", () =>
+    provider.listModels()
   );
 
   if (models.length === 0) {

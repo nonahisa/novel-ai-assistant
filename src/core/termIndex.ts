@@ -1,0 +1,159 @@
+/**
+ * 本文中の用語（人名・地名・能力名）を探すための索引。
+ *
+ * 設定が増えるほど「用語ごとに本文を走査する」方式は遅くなる。
+ * 73万字の作品で数百語を扱うと編集のたびに固まるため、
+ * 本文を1回だけ走査して全用語を同時に照合する方式にする
+ * （Aho-Corasick法。失敗リンクで後戻りせずに済む）。
+ */
+
+/** 用語の種類。表示色を分けるために使う */
+export type TermKind = "character" | "location" | "ability";
+
+export interface TermEntry {
+  /** 本文中に現れる文字列 */
+  text: string;
+  kind: TermKind;
+  /** 元レコードのid。ホバー時に本体を引く */
+  id: string;
+  /** 正式名称。別名で一致したときに本来の名前を示す */
+  canonicalName: string;
+}
+
+export interface TermMatch {
+  start: number;
+  end: number;
+  entry: TermEntry;
+}
+
+interface TrieNode {
+  children: Map<string, TrieNode>;
+  fail: TrieNode | null;
+  /** このノードで終わる用語 */
+  outputs: TermEntry[];
+  depth: number;
+}
+
+function createNode(depth: number): TrieNode {
+  return { children: new Map(), fail: null, outputs: [], depth };
+}
+
+export class TermIndex {
+  private readonly root = createNode(0);
+  private readonly byId = new Map<string, TermEntry[]>();
+  readonly size: number;
+
+  constructor(entries: TermEntry[]) {
+    const usable = entries.filter((entry) => entry.text.trim().length > 0);
+    this.size = usable.length;
+
+    for (const entry of usable) {
+      this.insert(entry);
+      const list = this.byId.get(entry.id) ?? [];
+      list.push(entry);
+      this.byId.set(entry.id, list);
+    }
+    this.buildFailureLinks();
+  }
+
+  private insert(entry: TermEntry): void {
+    let node = this.root;
+    let depth = 0;
+    for (const char of entry.text) {
+      depth++;
+      let next = node.children.get(char);
+      if (!next) {
+        next = createNode(depth);
+        node.children.set(char, next);
+      }
+      node = next;
+    }
+    node.outputs.push(entry);
+  }
+
+  /** 幅優先で失敗リンクを張る */
+  private buildFailureLinks(): void {
+    const queue: TrieNode[] = [];
+    for (const child of this.root.children.values()) {
+      child.fail = this.root;
+      queue.push(child);
+    }
+
+    while (queue.length > 0) {
+      const node = queue.shift()!;
+      for (const [char, child] of node.children) {
+        let fallback = node.fail;
+        while (fallback && !fallback.children.has(char)) {
+          fallback = fallback.fail;
+        }
+        child.fail = fallback?.children.get(char) ?? this.root;
+        // 失敗先で終わる用語もこのノードの一致として扱う
+        child.outputs.push(...child.fail.outputs);
+        queue.push(child);
+      }
+    }
+  }
+
+  /**
+   * 本文を1回走査して一致を返す。
+   *
+   * 重なった一致は長い方を優先する。「灯」と「灯火」が
+   * 両方登録されている場合、「灯火」の一部を「灯」として
+   * 二重に装飾しないため。
+   */
+  find(text: string): TermMatch[] {
+    if (this.size === 0) return [];
+
+    const raw: TermMatch[] = [];
+    let node = this.root;
+    let index = 0;
+
+    for (const char of text) {
+      // Unicodeのサロゲートペアを1文字として数えるため、
+      // for...of の進み幅をそのまま使う
+      const charLength = char.length;
+
+      while (node !== this.root && !node.children.has(char)) {
+        node = node.fail ?? this.root;
+      }
+      node = node.children.get(char) ?? this.root;
+
+      for (const entry of node.outputs) {
+        const end = index + charLength;
+        raw.push({ start: end - entry.text.length, end, entry });
+      }
+      index += charLength;
+    }
+
+    return resolveOverlaps(raw);
+  }
+
+  entriesFor(id: string): TermEntry[] {
+    return this.byId.get(id) ?? [];
+  }
+}
+
+/**
+ * 重なりを解消する。装飾が重なると色が混ざって読みにくくなるため。
+ *
+ * 前から順に見て、同じ位置から始まる場合は長い方を採る（最左最長）。
+ * 全体最適ではないが、走査1回で済む。
+ * 採用済みを毎回見比べる方式は、用語が数万回出現する作品で
+ * 編集のたびに数秒かかっていた（性能テストで確認）。
+ */
+export function resolveOverlaps(matches: TermMatch[]): TermMatch[] {
+  const sorted = [...matches].sort((a, b) => {
+    if (a.start !== b.start) return a.start - b.start;
+    // 同じ位置なら長い方を先に置き、短い方を捨てる
+    return b.end - a.end;
+  });
+
+  const taken: TermMatch[] = [];
+  let lastEnd = -1;
+  for (const match of sorted) {
+    if (match.start < lastEnd) continue;
+    taken.push(match);
+    lastEnd = match.end;
+  }
+  return taken;
+}

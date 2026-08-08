@@ -527,3 +527,118 @@ describe("省略形の統合候補", () => {
     expect(result.mergeCandidates).toEqual([]);
   });
 });
+
+describe("重複レコードの防止", () => {
+  function merge(
+    entries: Array<{ name: string; aliases?: string[] }>
+  ) {
+    return mergeExtractedCharacters(
+      [],
+      entries.map((data) => ({ data, chapters: [1] }))
+    );
+  }
+
+  test("「先生」付きの呼称を同一人物として統合する", () => {
+    // 実データで「マイナ先生」が2レコードに分裂した。
+    // 「先輩」は敬称リストにあったが「先生」が無かった。
+    const result = merge([{ name: "マイナ" }, { name: "マイナ先生" }]);
+
+    expect(result.characters).toHaveLength(1);
+    expect(result.characters[0].aliases).toContain("マイナ先生");
+  });
+
+  test("統合先が複数あっても新しい重複を作らず作者へ回す", () => {
+    // 「どれに統合すべきか決まらない」ときに黙って新規レコードを作ると、
+    // 既存2件に加えて3件目ができ、重複がかえって増える。
+    const result = merge([
+      { name: "ターナ" },
+      { name: "マイナ" },
+      // 両方に一致してしまう候補
+      { name: "ターナ先生", aliases: ["マイナ"] },
+    ]);
+
+    // データは失わないが、曖昧だったことを候補として提示する
+    expect(result.mergeCandidates.some((c) => c.reason === "ambiguous")).toBe(
+      true
+    );
+  });
+
+  test("同じ呼称なのに別レコードなら候補として挙げる", () => {
+    const a = emptyCharacter("char_001", "ターナ先生");
+    const b = emptyCharacter("char_002", "別名");
+    b.aliases = ["ターナ先生"];
+
+    const result = mergeExtractedCharacters([a, b], []);
+
+    expect(
+      result.mergeCandidates.some(
+        (c) => c.reason === "same_name" && c.names.includes("ターナ先生")
+      )
+    ).toBe(true);
+  });
+
+  test("別人を勝手に統合しない", () => {
+    const result = merge([{ name: "ターナ" }, { name: "マイナ" }]);
+
+    expect(result.characters).toHaveLength(2);
+    expect(result.mergeCandidates).toEqual([]);
+  });
+});
+
+describe("敬称の吸収", () => {
+  function merge(names: string[]) {
+    return mergeExtractedCharacters(
+      [],
+      names.map((name) => ({ data: { name }, chapters: [1] }))
+    );
+  }
+
+  test.each([
+    ["リナ", "リナさん"],
+    ["リナ", "リナくん"],
+    ["リナ", "リナちゃま"],
+    ["リナ", "リナ様"],
+    ["リナ", "リナ殿"],
+    ["リナ", "リナ氏"],
+    ["リナ", "リナ女史"],
+    ["リナ", "リナ先輩"],
+    ["リナ", "リナ先生"],
+    ["リナ", "リナ師"],
+    ["リナ", "リナ卿"],
+    ["リナ", "リナ翁"],
+    ["リナ", "リナ陛下"],
+    ["リナ", "リナ殿下"],
+    ["リナ", "リナ妃殿下"],
+    ["リナ", "リナ閣下"],
+    ["リナ", "リナ猊下"],
+    ["リナ", "リナ聖下"],
+    ["リナ", "リナ姫"],
+    ["リナ", "リナ公"],
+  ])("%s と %s を同一人物として統合する", (plain, honorific) => {
+    const result = merge([plain, honorific]);
+
+    expect(result.characters).toHaveLength(1);
+    expect(result.characters[0].aliases).toContain(honorific);
+  });
+
+  test("長い敬称を先に照合する", () => {
+    // 「妃殿下」は「殿下」でも末尾一致する。短い方を先に試すと
+    // 「エレナ妃」が残り、「エレナ」と別人になってしまう。
+    const result = merge(["エレナ", "エレナ妃殿下"]);
+
+    expect(result.characters).toHaveLength(1);
+  });
+
+  test("敬称だけの名前は切り詰めない", () => {
+    // 「殿」1文字を空文字にすると、あらゆる名前と衝突する
+    const result = merge(["殿", "陛下"]);
+
+    expect(result.characters).toHaveLength(2);
+  });
+
+  test("敬称が付いていない別人を統合しない", () => {
+    const result = merge(["リナ", "レナ", "リン"]);
+
+    expect(result.characters).toHaveLength(3);
+  });
+});

@@ -1,0 +1,155 @@
+import * as vscode from "vscode";
+import * as path from "path";
+import { WorkEntry } from "../models/types";
+import { readWorkConfig, workPaths } from "../core/workRegistry";
+import { atomicWriteFile, AtomicWriteFileError } from "../core/atomicWrite";
+import { CharacterStore } from "../core/characterStore";
+import {
+  AbilitySystemStore,
+  createAbilityStore,
+  createLocationStore,
+} from "../core/abilityStore";
+import {
+  buildAbilityMarkdown,
+  buildCharacterMarkdown,
+  buildLocationMarkdown,
+} from "../core/settingsMarkdown";
+
+/**
+ * 設定資料のMarkdownを生成する。
+ *
+ * 生成のたびに全体を書き直すため、作者が直接手を入れる文書ではない。
+ * 資料に載せたい補足は各JSONの exportNote / authorNotes に書く。
+ * その旨をファイル冒頭にも書いて、手編集が失われる事故を防ぐ。
+ */
+
+const GENERATED_NOTICE =
+  "<!-- このファイルは「設定資料を生成」で自動生成されます。\n" +
+  "     直接編集しても次回の生成で失われます。\n" +
+  "     補足を残したい場合は各JSONの exportNote / authorNotes に書いてください。 -->\n";
+
+interface GeneratedDoc {
+  fileName: string;
+  label: string;
+  content: string;
+  /** 該当が無い種別は書き出さない */
+  hasContent: boolean;
+}
+
+export async function generateSettingsDocs(work: WorkEntry): Promise<void> {
+  const characterStore = new CharacterStore(work);
+  const abilityStore = createAbilityStore(work);
+  const locationStore = createLocationStore(work);
+
+  const loadedCharacters = await characterStore.loadAll();
+  const loadedAbilities = await abilityStore.loadAll();
+  const loadedLocations = await locationStore.loadAll();
+  const abilitySystem = await new AbilitySystemStore(work).load();
+
+  // 壊れたJSONがあるまま資料を作ると、欠けた資料が正しく見えてしまう
+  const errors = [
+    ...loadedCharacters.errors,
+    ...loadedAbilities.errors,
+    ...loadedLocations.errors,
+  ];
+  if (errors.length > 0) {
+    const detail = errors.map((e) => `${e.file}: ${e.message}`).join("\n");
+    const action = await vscode.window.showErrorMessage(
+      "読み込めない設定ファイルがあるため、資料を生成しませんでした。" +
+        "欠けたまま資料を作ると、不足に気づけないためです。",
+      "詳細を表示",
+      "閉じる"
+    );
+    if (action === "詳細を表示") {
+      const doc = await vscode.workspace.openTextDocument({
+        content: detail,
+        language: "text",
+      });
+      await vscode.window.showTextDocument(doc);
+    }
+    return;
+  }
+
+  const options = { workTitle: work.title };
+  const abilityTerm = abilitySystem.abilityTerm || "能力";
+
+  const docs: GeneratedDoc[] = [
+    {
+      fileName: "characters.md",
+      label: "登場人物",
+      content: buildCharacterMarkdown(loadedCharacters.characters, options),
+      hasContent: loadedCharacters.characters.length > 0,
+    },
+    {
+      fileName: "abilities.md",
+      label: abilityTerm,
+      content: buildAbilityMarkdown(
+        loadedAbilities.records,
+        abilitySystem,
+        options
+      ),
+      // 能力体系の無い作品に空の一覧を作らない
+      hasContent: loadedAbilities.records.length > 0,
+    },
+    {
+      fileName: "locations.md",
+      label: "場所",
+      content: buildLocationMarkdown(loadedLocations.records, options),
+      hasContent: loadedLocations.records.length > 0,
+    },
+  ];
+
+  const config = await readWorkConfig(work);
+  const settingsDir = workPaths(work, config).settings;
+  await vscode.workspace.fs.createDirectory(vscode.Uri.file(settingsDir));
+
+  const written: string[] = [];
+  const skipped: string[] = [];
+
+  for (const doc of docs) {
+    if (!doc.hasContent) {
+      skipped.push(doc.label);
+      continue;
+    }
+    const target = path.join(settingsDir, doc.fileName);
+    try {
+      await atomicWriteFile(
+        target,
+        new TextEncoder().encode(GENERATED_NOTICE + "\n" + doc.content)
+      );
+      written.push(doc.label);
+    } catch (error) {
+      const detail =
+        error instanceof AtomicWriteFileError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      await vscode.window.showErrorMessage(
+        `${doc.label}一覧を保存できませんでした。${detail}`
+      );
+      return;
+    }
+  }
+
+  if (written.length === 0) {
+    vscode.window.showInformationMessage(
+      "資料にできる設定がまだありません。先に「登場人物を抽出」を実行してください。"
+    );
+    return;
+  }
+
+  const skippedNote =
+    skipped.length > 0 ? `（${skipped.join("・")}は該当なし）` : "";
+  const action = await vscode.window.showInformationMessage(
+    `${written.join("・")}の一覧を生成しました。${skippedNote}`,
+    "開く"
+  );
+  if (action === "開く") {
+    const first = docs.find((doc) => doc.hasContent)!;
+    const doc = await vscode.workspace.openTextDocument(
+      vscode.Uri.file(path.join(settingsDir, first.fileName))
+    );
+    await vscode.window.showTextDocument(doc);
+  }
+}

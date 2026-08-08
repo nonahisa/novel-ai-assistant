@@ -11,11 +11,51 @@ export const workspace = {
   }),
 };
 
-export const window = {};
+export const window = {
+  // 進捗の中止ボタン。テストでは押さないので、作られるだけでよい
+  createStatusBarItem: () => ({
+    text: "",
+    tooltip: "",
+    command: "",
+    show() {},
+    hide() {},
+    dispose() {},
+  }),
+};
 export const commands = {};
 
 export enum ProgressLocation {
+  Window = 10,
   Notification = 15,
+}
+
+export enum StatusBarAlignment {
+  Left = 1,
+  Right = 2,
+}
+
+export class CancellationTokenSource {
+  private cancelled = false;
+  private readonly listeners: Array<() => void> = [];
+
+  readonly token = {
+    isCancellationRequested: false,
+    onCancellationRequested: (listener: () => void): { dispose(): void } => {
+      this.listeners.push(listener);
+      return { dispose: () => undefined };
+    },
+  };
+
+  cancel(): void {
+    if (this.cancelled) return;
+    this.cancelled = true;
+    this.token.isCancellationRequested = true;
+    for (const listener of this.listeners) listener();
+  }
+
+  dispose(): void {
+    this.listeners.length = 0;
+  }
 }
 
 export class EventEmitter<T> {
