@@ -286,6 +286,59 @@ export async function run(): Promise<void> {
     }
   });
 
+  await runCase("競合マーカーを含むファイルを文字数から除く", failures, async () => {
+    // 設計書3.5.3。マーカーと両方の版が混ざったまま数えると、
+    // 実際より多い字数を本当の進捗として見せてしまう
+    const temporaryRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "novel-ai-assistant-conflict-scan-")
+    );
+    try {
+      const workFolder = path.join(temporaryRoot, "テスト作品");
+      await scaffoldWorkFolder(workFolder, "テスト作品");
+      const work = makeWork(workFolder);
+      const manuscript = path.join(workFolder, "本文");
+
+      await fs.writeFile(
+        path.join(manuscript, "001.txt"),
+        "灯は歩き出した。\n",
+        "utf8"
+      );
+      await fs.writeFile(
+        path.join(manuscript, "002.txt"),
+        [
+          "<<<<<<< HEAD",
+          "灯は歩き出した。",
+          "=======",
+          "灯はゆっくりと歩き出した。",
+          ">>>>>>> origin/main",
+        ].join("\n"),
+        "utf8"
+      );
+
+      const scan = await scanWork(work);
+      const clean = scan.episodes.find((e) => e.fileName === "001.txt");
+      const conflicted = scan.episodes.find((e) => e.fileName === "002.txt");
+      assert.ok(clean && conflicted);
+
+      assert.equal(clean.hasConflictMarkers, false);
+      assert.equal(conflicted.hasConflictMarkers, true);
+      // 競合を含むファイルは数えない
+      assert.equal(conflicted.counts.net, 0);
+      assert.equal(scan.stats.conflictedCount, 1);
+      assert.equal(scan.stats.totals.net, clean.counts.net);
+
+      // .gitignore にキャッシュの除外が入っていること（設計書3.5.7）
+      const ignore = await fs.readFile(
+        path.join(workFolder, ".gitignore"),
+        "utf8"
+      );
+      assert.ok(ignore.includes(".aiwriter/cache/"));
+      assert.ok(ignore.includes(".novelai-recovery/"));
+    } finally {
+      await fs.rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   await runCase("読み込み後の外部編集を検出して保存を拒否する", failures, async () => {
     const temporaryRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), "novel-ai-assistant-character-conflict-")

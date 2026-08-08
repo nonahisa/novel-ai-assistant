@@ -67,9 +67,14 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       );
       item.contextValue = "work";
       item.iconPath = new vscode.ThemeIcon("book");
+      // 未解決の競合は最優先で気づかせる。放置するとAI処理で原稿が壊れる
+      const conflictNote =
+        stats.conflictedCount > 0
+          ? ` / ⚠競合 ${stats.conflictedCount}件`
+          : "";
       item.description = `${stats.fileCount}ファイル / ${formatCount(
         stats.totals.net
-      )}字`;
+      )}字${conflictNote}`;
       item.tooltip = new vscode.MarkdownString(
         [
           `**${work.title}**`,
@@ -80,9 +85,15 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
             toManuscriptPages(stats.totals.manuscriptLines)
           )} 枚`,
           `- ファイル数: ${stats.fileCount}`,
+          stats.conflictedCount > 0
+            ? `\n**未解決の競合が ${stats.conflictedCount} 件あります。**\n` +
+              "これらは文字数に含めていません。解決してから執筆・AI処理を行ってください。"
+            : null,
           "",
           `\`${work.folderPath}\``,
-        ].join("\n")
+        ]
+          .filter((line) => line !== null)
+          .join("\n")
       );
       return item;
     }
@@ -117,7 +128,14 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         : `${formatCount(ep.counts.net)}字`;
     }
 
-    if (ep.isInitialName && !ep.metaTitle) {
+    if (ep.hasConflictMarkers) {
+      // 競合を含むファイルは、話数や文字数より先にそれを伝える
+      item.iconPath = new vscode.ThemeIcon(
+        "warning",
+        new vscode.ThemeColor("problemsWarningIcon.foreground")
+      );
+      item.description = "⚠ 未解決の競合（文字数は未集計）";
+    } else if (ep.isInitialName && !ep.metaTitle) {
       item.iconPath = new vscode.ThemeIcon("circle-outline");
     } else if (ep.kind === "不明") {
       item.iconPath = new vscode.ThemeIcon("question");

@@ -129,7 +129,27 @@ export class WorkRegistry {
   }
 }
 
-/** 既存の作者記述をバイト単位で保ったまま、回復ディレクトリだけ除外する。 */
+/**
+ * 同期対象から外すべきもの。
+ *
+ * 新規作成時のひな形と、既存フォルダーを登録したときの追記で同じものを使う。
+ * 以前は登録時に `.novelai-recovery/` しか追記しておらず、
+ * **キャッシュがGitに入ったままだった**（設計書3.5.7と食い違っていた）。
+ */
+export const IGNORED_PATHS = [
+  ".aiwriter/cache/",
+  ".aiwriter/logs/",
+  ".aiwriter/exports/",
+  ".novelai-recovery/",
+  "exports/",
+] as const;
+
+/**
+ * 既存の作者記述をバイト単位で保ったまま、足りない除外規則だけを追記する。
+ *
+ * 承認待ちの更新案（`.aiwriter/pending-characters/`）と設定資料・IME辞書は
+ * わざと除外しない。作者の判断待ちや読み物であり、別の環境でも見たいため。
+ */
 async function ensureRecoveryIgnoreRule(folderPath: string): Promise<void> {
   const gitignorePath = path.join(folderPath, ".gitignore");
   const uri = vscode.Uri.file(gitignorePath);
@@ -142,20 +162,23 @@ async function ensureRecoveryIgnoreRule(folderPath: string): Promise<void> {
     }
     await atomicWriteFile(
       gitignorePath,
-      new TextEncoder().encode(".novelai-recovery/\n"),
+      new TextEncoder().encode(`${IGNORED_PATHS.join("\n")}\n`),
       { mode: "create" }
     );
     return;
   }
 
   const text = new TextDecoder().decode(existing);
-  if (hasRecoveryIgnoreRule(existing)) {
+  const missing = missingIgnoreRules(existing);
+  if (missing.length === 0) {
     return;
   }
 
   const eol = text.includes("\r\n") ? "\r\n" : text.includes("\r") ? "\r" : "\n";
   const separator = text.length === 0 || /(?:\r\n|\n|\r)$/.test(text) ? "" : eol;
-  const addition = new TextEncoder().encode(`${separator}.novelai-recovery/${eol}`);
+  const addition = new TextEncoder().encode(
+    `${separator}${missing.join(eol)}${eol}`
+  );
   // O_APPEND の一回の追記だけを使い、既存の作者バイトを置換・切り詰めしない。
   const handle = await open(gitignorePath, "a");
   try {
@@ -181,16 +204,21 @@ async function ensureRecoveryIgnoreRule(folderPath: string): Promise<void> {
   if (
     migrated.length < existing.length ||
     !sameBytes(migrated.subarray(0, existing.length), existing) ||
-    !hasRecoveryIgnoreRule(migrated)
+    missingIgnoreRules(migrated).length > 0
   ) {
     throw new Error(".gitignore の作者記述を保持したmigrationを確認できませんでした。");
   }
 }
 
-function hasRecoveryIgnoreRule(bytes: Uint8Array): boolean {
-  return new TextDecoder().decode(bytes)
-    .split(/\r\n|\n|\r/)
-    .some((line) => line.trim() === ".novelai-recovery/");
+/** まだ書かれていない除外規則を返す。既にあるものは重ねて足さない */
+export function missingIgnoreRules(bytes: Uint8Array): string[] {
+  const written = new Set(
+    new TextDecoder()
+      .decode(bytes)
+      .split(/\r\n|\n|\r/)
+      .map((line) => line.trim())
+  );
+  return IGNORED_PATHS.filter((rule) => !written.has(rule));
 }
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
@@ -333,16 +361,11 @@ export async function scaffoldWorkFolder(
     new TextEncoder().encode(JSON.stringify(config, null, 2))
   );
 
-  // .gitignore（キャッシュと出力物を同期対象から外す）
+  // .gitignore（キャッシュと作業ファイルを同期対象から外す）。
+  // 設定資料・IME辞書・承認待ちの更新案は、別の環境でも見たいので除外しない
   const gitignore = [
-    "# 小説AI執筆補助が生成する作業ファイル",
-    ".aiwriter/cache/",
-    ".aiwriter/logs/",
-    ".aiwriter/exports/",
-    ".novelai-recovery/",
-    "",
-    "# 設定資料の出力物（再生成可能なため）",
-    "exports/",
+    "# 小説AI執筆補助が生成する作業ファイル（再生成できるため同期しない）",
+    ...IGNORED_PATHS,
     "",
   ].join("\n");
   await writeIfAbsent(path.join(folderPath, ".gitignore"), gitignore);

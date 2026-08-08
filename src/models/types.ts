@@ -38,6 +38,13 @@ export interface EpisodeFile {
   declaredCharCount: number | null;
   /** メタデータ内の【更新日時】 */
   metaUpdatedAt: string | null;
+  /**
+   * Gitの未解決な競合マーカーを含むか。
+   *
+   * 含むファイルは文字数計測の対象外にする。マーカーと両方の版が
+   * 混ざったまま数えると、実際より多い字数を本当の進捗として見せてしまう。
+   */
+  hasConflictMarkers: boolean;
 }
 
 export type EpisodeKind = "本編" | "プロローグ" | "エピローグ" | "幕間" | "不明";
@@ -67,6 +74,8 @@ export interface CharCounts {
 export interface WorkStats {
   fileCount: number;
   totals: CharCounts;
+  /** 未解決の競合を含むため、集計から除いたファイル数 */
+  conflictedCount: number;
 }
 
 /** .aiwriter/config.json の内容（フェーズ0で使う範囲） */

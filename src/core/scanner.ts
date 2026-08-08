@@ -41,6 +41,7 @@ export async function scanWork(work: WorkEntry): Promise<{
     const parsed = parseEpisodeFileName(fileName);
 
     let counts = emptyCounts();
+    let hasConflictMarkers = false;
     let meta = {
       hasMetadata: false,
       title: null as string | null,
@@ -64,8 +65,13 @@ export async function scanWork(work: WorkEntry): Promise<{
         updatedAt: parsedMeta.updatedAt,
       };
 
-      // ルビ記法はMarkdownのみ対象
-      counts = countChars(parsedMeta.body, ext === ".md" ? excludeRuby : false);
+      hasConflictMarkers = containsConflictMarkers(text);
+      if (!hasConflictMarkers) {
+        // ルビ記法はMarkdownのみ対象
+        counts = countChars(parsedMeta.body, ext === ".md" ? excludeRuby : false);
+      }
+      // 競合マーカーを含む場合は数えない。両方の版とマーカーが混ざったまま
+      // 数えると、実際より多い字数を本当の進捗として見せてしまう
     } catch {
       // 読めないファイルは0字として扱い、走査は止めない
     }
@@ -85,21 +91,38 @@ export async function scanWork(work: WorkEntry): Promise<{
       metaTitle: meta.title,
       declaredCharCount: meta.declaredCharCount,
       metaUpdatedAt: meta.updatedAt,
+      hasConflictMarkers,
     });
   }
 
   episodes.sort(compareEpisodes);
 
   let totals = emptyCounts();
+  let conflictedCount = 0;
   for (const e of episodes) {
+    if (e.hasConflictMarkers) {
+      conflictedCount++;
+      continue;
+    }
     totals = addCounts(totals, e.counts);
   }
 
   return {
     episodes,
-    stats: { fileCount: episodes.length, totals },
+    stats: { fileCount: episodes.length, totals, conflictedCount },
     manuscriptDir: targetDir,
   };
+}
+
+/**
+ * Gitの未解決な競合マーカーを含むか。
+ *
+ * `textFile.ts` にも同じ判定があるが、あちらは読み書きの安全確認用で
+ * 文字コードの復元まで行う。走査は全ファイルを毎回読むため、
+ * 復元を伴わない軽い判定をここに置く。
+ */
+function containsConflictMarkers(text: string): boolean {
+  return /^(?:<{7}|={7}|>{7})(?: |$)/m.test(text);
 }
 
 /** 話数順に並べる。話数不明のものは末尾へ */
