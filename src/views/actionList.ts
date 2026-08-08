@@ -47,13 +47,13 @@ const ACTIONS: readonly CommandAction[] = [
   },
   {
     command: "novelai.generateSettingsDocs",
-    label: "設定資料を作り直す",
+    label: "設定資料集を出力する",
     description: "AIを使わない",
-    icon: "sync",
+    icon: "book",
     requiresWork: true,
     detail:
-      "抽出済みのJSONから設定資料のMarkdownだけを作り直します。" +
-      "JSONを手直ししたあとに使います。AIは呼びません。",
+      "抽出済みのJSONから、読むための設定資料集（characters.md・abilities.md・locations.md）を書き出します。" +
+      "JSONを手直ししたあとや、まとめ・更新の反映後に使います。AIは呼びません。",
   },
   {
     command: "novelai.showWorkStats",

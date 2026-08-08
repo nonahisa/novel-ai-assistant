@@ -52,6 +52,16 @@ export interface Character {
   romaji: string | null;
   icon: string | null;
   iconSource: "external" | "generated" | "none";
+  /**
+   * 一覧で名前の下に出す短い紹介。50字以内。
+   * 長い説明は role / personality に分けて持つ。
+   */
+  summary: string | null;
+  /**
+   * 所属（「生活保護課」「窓口課」など）。設定資料の見出しに使う。
+   * 組織名が本文から読み取れない人物は null のままにする。
+   */
+  affiliation: string | null;
   role: string | null;
   personality: string | null;
   appearance: string | null;
@@ -114,6 +124,8 @@ export function emptyCharacter(id: string, name: string): Character {
     romaji: null,
     icon: null,
     iconSource: "none",
+    summary: null,
+    affiliation: null,
     role: null,
     personality: null,
     appearance: null,
@@ -175,7 +187,8 @@ export function parseCharacter(raw: unknown): Character {
   optionalString(value.schemaVersion, "schemaVersion");
   optionalStringArray(value.aliases, "aliases");
   for (const key of [
-    "reading", "romaji", "icon", "role", "personality", "appearance",
+    "reading", "romaji", "icon", "summary", "affiliation",
+    "role", "personality", "appearance",
     "defaultSecondPerson", "evidence",
   ]) {
     optionalNullableString(value[key], key);

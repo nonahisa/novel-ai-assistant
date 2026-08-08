@@ -132,7 +132,7 @@
       },
       {
         "command": "novelai.generateSettingsDocs",
-        "title": "設定資料を作り直す（AIを使わない）",
+        "title": "設定資料集を出力する（AIを使わない）",
         "category": "小説執筆",
         "icon": "$(sync)"
       }

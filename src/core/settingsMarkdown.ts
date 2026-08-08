@@ -82,6 +82,10 @@ function describeAbility(ability: Ability, term: string): string[] {
   const reading = ability.reading ? `（${ability.reading}）` : "";
   lines.push(`### ${ability.name}${reading}`, "");
 
+  if (ability.summary) {
+    lines.push(ability.summary, "");
+  }
+
   if (ability.aliases.length > 0) {
     lines.push(`- **別名**: ${ability.aliases.join("、")}`);
   }
@@ -154,6 +158,9 @@ export function buildLocationMarkdown(
     for (const location of items) {
       const reading = location.reading ? `（${location.reading}）` : "";
       lines.push(`### ${location.name}${reading}`, "");
+      if (location.summary) {
+        lines.push(location.summary, "");
+      }
       if (location.aliases.length > 0) {
         lines.push(`- **別名**: ${location.aliases.join("、")}`);
       }
@@ -203,8 +210,13 @@ export function buildCharacterMarkdown(
     return lines.join("\n");
   }
 
-  for (const character of named) {
-    lines.push(...describeCharacter(character));
+  // 所属ごとにまとめる。人数が増えると、名前だけ並んでいても
+  // 誰がどの立場なのか掴めなくなるため
+  for (const [affiliation, members] of groupByAffiliation(named)) {
+    lines.push(`## ${affiliation}`, "");
+    for (const character of members) {
+      lines.push(...describeCharacter(character));
+    }
   }
 
   if (mobs.length > 0) {
@@ -222,10 +234,39 @@ export function buildCharacterMarkdown(
   return lines.join("\n");
 }
 
+/**
+ * 所属ごとに分ける。
+ * 所属が読み取れなかった人物は末尾へまとめ、
+ * 「所属不明」という架空の組織があるように見せない。
+ */
+function groupByAffiliation(characters: Character[]): Map<string, Character[]> {
+  const groups = new Map<string, Character[]>();
+  const others: Character[] = [];
+
+  for (const character of characters) {
+    const affiliation = character.affiliation?.trim();
+    if (!affiliation) {
+      others.push(character);
+      continue;
+    }
+    const list = groups.get(affiliation) ?? [];
+    list.push(character);
+    groups.set(affiliation, list);
+  }
+
+  if (others.length > 0) groups.set("所属の記載なし", others);
+  return groups;
+}
+
 function describeCharacter(character: Character): string[] {
   const lines: string[] = [];
   const reading = character.reading ? `（${character.reading}）` : "";
-  lines.push(`## ${character.name}${reading}`, "");
+  lines.push(`### ${character.name}${reading}`, "");
+
+  // 一目で誰なのか分かる1行を先頭に置く
+  if (character.summary) {
+    lines.push(character.summary, "");
+  }
 
   if (character.aliases.length > 0) {
     lines.push(`- **別名**: ${character.aliases.join("、")}`);

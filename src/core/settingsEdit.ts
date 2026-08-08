@@ -2,6 +2,7 @@ import type { Character } from "../models/character";
 import type { Ability } from "../models/ability";
 import type { Location } from "../models/location";
 import { nextAiNoteId, type AiNote, type AiNoteSource } from "../models/aiNote";
+import { clampSummary } from "./summaryLimit";
 
 /**
  * 作者がパネル上で書き換えた内容をレコードへ反映する。
@@ -17,6 +18,9 @@ import { nextAiNoteId, type AiNote, type AiNoteSource } from "../models/aiNote";
 
 export interface RecordEdits {
   name?: string;
+  /** 一覧に出す短い紹介。50字を超える分はコード側で切る */
+  summary?: string;
+  affiliation?: string;
   reading?: string;
   /** 読点・改行区切りの別名 */
   aliases?: string;
@@ -46,6 +50,9 @@ export function applyCharacterEdits(
   return {
     ...character,
     name: editedName(character.name, edits.name),
+    // 作者が書いた紹介文も長さは揃える。一覧の見た目が崩れるため
+    summary: clampSummary(nullableText(character.summary, edits.summary)),
+    affiliation: nullableText(character.affiliation, edits.affiliation),
     reading: nullableText(character.reading, edits.reading),
     aliases: editedAliases(character.aliases, edits.aliases),
     role: nullableText(character.role, edits.role),
@@ -64,6 +71,7 @@ export function applyAbilityEdits(
   return {
     ...ability,
     name: editedName(ability.name, edits.name),
+    summary: clampSummary(nullableText(ability.summary, edits.summary)),
     reading: nullableText(ability.reading, edits.reading),
     aliases: editedAliases(ability.aliases, edits.aliases),
     category: nullableText(ability.category, edits.category),
@@ -83,6 +91,7 @@ export function applyLocationEdits(
   return {
     ...location,
     name: editedName(location.name, edits.name),
+    summary: clampSummary(nullableText(location.summary, edits.summary)),
     reading: nullableText(location.reading, edits.reading),
     aliases: editedAliases(location.aliases, edits.aliases),
     region: nullableText(location.region, edits.region),

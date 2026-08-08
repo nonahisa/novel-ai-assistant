@@ -14,6 +14,7 @@ import type {
   ExtractedAbility,
   ExtractedLocation,
 } from "../prompts/characterExtract";
+import { clampSummary } from "./summaryLimit";
 
 /**
  * 能力・場所の抽出結果を既存レコードへマージする。
@@ -175,6 +176,10 @@ function applyAbility(
 
   changed = mergeAliases(target, incoming.name, incoming.aliases) || changed;
   changed = fillOrConflict(target, "reading", incoming.reading, conflicts) || changed;
+  // 紹介文の長さはコード側で確かめる。プロンプトの指示だけでは守られない
+  changed =
+    fillOrConflict(target, "summary", clampSummary(incoming.summary), conflicts) ||
+    changed;
   changed = fillOrConflict(target, "category", incoming.category, conflicts) || changed;
   changed =
     fillOrConflict(target, "description", incoming.description, conflicts) || changed;
@@ -212,6 +217,9 @@ function applyLocation(
 
   changed = mergeAliases(target, incoming.name, incoming.aliases) || changed;
   changed = fillOrConflict(target, "reading", incoming.reading, conflicts) || changed;
+  changed =
+    fillOrConflict(target, "summary", clampSummary(incoming.summary), conflicts) ||
+    changed;
   changed = fillOrConflict(target, "region", incoming.region, conflicts) || changed;
   changed =
     fillOrConflict(target, "description", incoming.description, conflicts) || changed;

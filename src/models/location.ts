@@ -30,6 +30,8 @@ export interface Location {
   aliases: string[];
   /** 読み仮名。設定資料エクスポートで必要になる */
   reading: string | null;
+  /** 一覧で名前の下に出す短い紹介。50字以内 */
+  summary: string | null;
   /** 上位の地域（「王都リヴェルス」等）。読み取れなければ null */
   region: string | null;
   description: string | null;
@@ -63,6 +65,7 @@ export function emptyLocation(id: string, name: string): Location {
     name,
     aliases: [],
     reading: null,
+    summary: null,
     region: null,
     description: null,
     appearedChapters: [],
@@ -131,7 +134,13 @@ export function parseLocation(raw: unknown): Location {
 
   optionalString(value.schemaVersion, "schemaVersion");
   optionalStringArray(value.aliases, "aliases");
-  for (const key of ["reading", "region", "description", "evidence"]) {
+  for (const key of [
+    "reading",
+    "summary",
+    "region",
+    "description",
+    "evidence",
+  ]) {
     optionalNullableString(value[key], key);
   }
   optionalNumberArray(value.appearedChapters, "appearedChapters");

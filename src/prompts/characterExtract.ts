@@ -11,7 +11,7 @@
  * プロンプトを変更したら version を上げること。
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
-export const CHARACTER_EXTRACT_VERSION = "2.2";
+export const CHARACTER_EXTRACT_VERSION = "2.3";
 
 export const BASE_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 
@@ -83,6 +83,13 @@ ${knownLocations}
 - 同一人物が別の呼称で登場する場合（本名／通称／あだ名／役職）、既知の登場人物と
   照合し、同一と判断できる場合は既知の名前を name とし、別呼称を aliases に入れること。
   判断できない場合は新規人物として扱うこと。
+- summary には、その人物が何者かが一目で分かる紹介を**50字以内**で書くこと。
+  一覧で名前の下に並べる短い説明なので、役割と立場が分かれば十分である。
+  例：「冒険者ギルドの生活保護課ケースワーカー。転移者で制度の考案者。」
+  50字を超える場合は削ること。詳しい内容は role / personality / appearance に分けて書く。
+- affiliation には所属する組織・部署を、本文の表記のまま入れること。
+  例：「生活保護課」「窓口課」「衛兵隊」。組織に属さない人物は null とすること。
+  職業や身分（「冒険者」「平民」）は所属ではないので role に書くこと。
 - role・personality・appearance は必ず出力すること（読み取れなければ null）。
   本文に手掛かりがある場合は必ず埋めること。以下はすべて手掛かりである。
   ・role：肩書き・職業・立場（「王女」「近衛騎士」「ギルド職員」）
@@ -136,6 +143,8 @@ ${knownLocations}
 4. 説明は本文から読み取れる範囲だけを書くこと。
 
 【すべてに共通のルール】
+- summary は**50字以内**の短い紹介にすること。人物・能力・場所のいずれも同じ。
+  一覧で名前の下に並べるための1行なので、詳細は他の項目に分けて書く。
 - 各レコードには、本文からそのまま抜き出した短い evidence を必ず付けること。
   evidence は説明や要約ではなく、その名称を含む逐語引用にすること。
 - 該当するものが本文になければ、空配列を返すこと。無理に埋めないこと。
@@ -163,6 +172,8 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           },
           aliases: { type: "array", items: { type: "string" } },
           isMob: { type: "boolean" },
+          summary: { type: ["string", "null"], maxLength: 50 },
+          affiliation: { type: ["string", "null"] },
           role: { type: ["string", "null"] },
           personality: { type: ["string", "null"] },
           appearance: { type: ["string", "null"] },
@@ -201,6 +212,8 @@ export const CHARACTER_EXTRACT_SCHEMA = {
         required: [
           "name",
           "entityType",
+          "summary",
+          "affiliation",
           "role",
           "personality",
           "appearance",
@@ -216,6 +229,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           name: { type: "string" },
           aliases: { type: "array", items: { type: "string" } },
           reading: { type: ["string", "null"] },
+          summary: { type: ["string", "null"], maxLength: 50 },
           category: { type: ["string", "null"] },
           description: { type: ["string", "null"] },
           cost: { type: ["string", "null"] },
@@ -223,7 +237,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           userNames: { type: "array", items: { type: "string" } },
           evidence: { type: "string", minLength: 1 },
         },
-        required: ["name", "description", "evidence"],
+        required: ["name", "summary", "description", "evidence"],
       },
     },
     locations: {
@@ -234,11 +248,12 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           name: { type: "string" },
           aliases: { type: "array", items: { type: "string" } },
           reading: { type: ["string", "null"] },
+          summary: { type: ["string", "null"], maxLength: 50 },
           region: { type: ["string", "null"] },
           description: { type: ["string", "null"] },
           evidence: { type: "string", minLength: 1 },
         },
-        required: ["name", "description", "evidence"],
+        required: ["name", "summary", "description", "evidence"],
       },
     },
     abilitySystem: {
@@ -265,6 +280,8 @@ export interface ExtractedCharacter {
   aliases?: string[];
   entityType?: "person" | "group" | "location" | "unknown";
   isMob?: boolean;
+  summary?: string | null;
+  affiliation?: string | null;
   role?: string | null;
   personality?: string | null;
   appearance?: string | null;
@@ -286,6 +303,7 @@ export interface ExtractedAbility {
   name: string;
   aliases?: string[];
   reading?: string | null;
+  summary?: string | null;
   category?: string | null;
   description?: string | null;
   cost?: string | null;
@@ -300,6 +318,7 @@ export interface ExtractedLocation {
   name: string;
   aliases?: string[];
   reading?: string | null;
+  summary?: string | null;
   /** 上位の地域（「王都リヴェルス」等） */
   region?: string | null;
   description?: string | null;

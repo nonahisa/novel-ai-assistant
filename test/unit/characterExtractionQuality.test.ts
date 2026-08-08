@@ -124,8 +124,8 @@ describe("登場人物抽出の品質ゲート", () => {
     assertChapterAndAddressPeriods(fixture, merged.characters);
   });
 
-  test("v2.2の構造化出力契約を公開する", () => {
-    expect(CHARACTER_EXTRACT_VERSION).toBe("2.2");
+  test("v2.3の構造化出力契約を公開する", () => {
+    expect(CHARACTER_EXTRACT_VERSION).toBe("2.3");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.properties)
       .toHaveProperty("entityType");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.required)
@@ -144,6 +144,21 @@ describe("登場人物抽出の品質ゲート", () => {
     expect(CHARACTER_EXTRACT_SCHEMA.properties.locations.items.required).toEqual(
       expect.arrayContaining(["description"])
     );
+  });
+
+  test("一覧用の紹介と所属を必ず返させる", () => {
+    const character = CHARACTER_EXTRACT_SCHEMA.properties.characters.items;
+    expect(character.required).toEqual(
+      expect.arrayContaining(["summary", "affiliation"])
+    );
+    // 長さの上限はスキーマにも書くが、守られる保証はないのでコード側でも切る
+    expect(character.properties.summary.maxLength).toBe(50);
+
+    for (const kind of ["abilities", "locations"] as const) {
+      expect(CHARACTER_EXTRACT_SCHEMA.properties[kind].items.required).toEqual(
+        expect.arrayContaining(["summary"])
+      );
+    }
   });
 
   test("人物・能力・場所を1回の呼び出しで返す契約になっている", () => {

@@ -5,6 +5,7 @@ import {
   nextCharacterId,
 } from "../models/character";
 import { ExtractedCharacter } from "../prompts/characterExtract";
+import { clampSummary } from "./summaryLimit";
 
 /**
  * 抽出結果を既存の人物一覧へマージする。
@@ -156,6 +157,14 @@ function applyExtracted(
     changed = true;
   }
 
+  // 紹介文は長さをコード側で確かめてから入れる。
+  // プロンプトで50字以内と指示しても、モデルは平気で超えてくる
+  changed =
+    fillOrConflict(target, "summary", clampSummary(ex.summary), conflicts) ||
+    changed;
+  changed =
+    fillOrConflict(target, "affiliation", ex.affiliation, conflicts) || changed;
+
   // 単純なテキスト項目: 空なら埋める。既にあれば食い違いを記録し、上書きしない
   changed = fillOrConflict(target, "role", ex.role, conflicts) || changed;
   changed =
@@ -296,7 +305,7 @@ function mergeAddressTerm(
  */
 function fillOrConflict(
   target: Character,
-  field: "role" | "personality" | "appearance",
+  field: "summary" | "affiliation" | "role" | "personality" | "appearance",
   incoming: string | null | undefined,
   conflicts: MergeResult["conflicts"]
 ): boolean {

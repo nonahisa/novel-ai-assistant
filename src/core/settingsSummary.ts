@@ -21,8 +21,10 @@ export const KIND_LABELS: Record<SettingsKind, string> = {
 
 export function describeCharacter(character: Character): string {
   const lines: string[] = [`名前: ${character.name}`];
+  push(lines, "紹介", character.summary);
   push(lines, "別名", character.aliases.join("、"));
   push(lines, "読み", character.reading);
+  push(lines, "所属", character.affiliation);
   push(lines, "役割", character.role);
   push(lines, "性格", character.personality);
   push(lines, "外見", character.appearance);
@@ -75,6 +77,7 @@ export function describeAbility(
   system?: AbilitySystem
 ): string {
   const lines: string[] = [`名前: ${ability.name}`];
+  push(lines, "紹介", ability.summary);
   push(lines, "別名", ability.aliases.join("、"));
   push(lines, "読み", ability.reading);
   push(lines, "分類", ability.category);
@@ -95,6 +98,7 @@ export function describeAbility(
 
 export function describeLocation(location: Location): string {
   const lines: string[] = [`名前: ${location.name}`];
+  push(lines, "紹介", location.summary);
   push(lines, "別名", location.aliases.join("、"));
   push(lines, "読み", location.reading);
   push(lines, "地域", location.region);

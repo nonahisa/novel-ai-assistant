@@ -193,7 +193,8 @@ class SettingsPanel {
         id: character.id,
         name: character.name,
         sub: [
-          character.role ?? "",
+          character.summary ?? character.role ?? "",
+          character.affiliation ?? "",
           character.isMob ? "モブ" : "",
           character.aiNotes.length > 0
             ? `掘り下げ${character.aiNotes.length}`
@@ -257,6 +258,8 @@ class SettingsPanel {
         ].filter((entry) => entry.value),
         fields: [
           field("name", "名前", character.name),
+          field("summary", "紹介（50字以内）", character.summary),
+          field("affiliation", "所属", character.affiliation),
           field("reading", "読み", character.reading),
           field("aliases", "別名（読点区切り）", character.aliases.join("、")),
           field("role", "役割", character.role),
@@ -284,6 +287,7 @@ class SettingsPanel {
         ].filter((entry) => entry.value),
         fields: [
           field("name", "名前", ability.name),
+          field("summary", "紹介（50字以内）", ability.summary),
           field("reading", "読み", ability.reading),
           field("aliases", "別名（読点区切り）", ability.aliases.join("、")),
           field("category", "分類", ability.category),
@@ -310,6 +314,7 @@ class SettingsPanel {
       ].filter((entry) => entry.value),
       fields: [
         field("name", "名前", location.name),
+        field("summary", "紹介（50字以内）", location.summary),
         field("reading", "読み", location.reading),
         field("aliases", "別名（読点区切り）", location.aliases.join("、")),
         field("region", "地域", location.region),

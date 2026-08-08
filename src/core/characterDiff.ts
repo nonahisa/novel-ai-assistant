@@ -25,6 +25,8 @@ const TEXT_FIELDS: Array<{
   read: (character: Character) => string;
 }> = [
   { label: "名前", read: (c) => c.name },
+  { label: "紹介", read: (c) => c.summary ?? "" },
+  { label: "所属", read: (c) => c.affiliation ?? "" },
   { label: "読み", read: (c) => c.reading ?? "" },
   { label: "別名", read: (c) => c.aliases.join("、") },
   { label: "役割", read: (c) => c.role ?? "" },
