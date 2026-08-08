@@ -26,10 +26,20 @@ export interface CommandAction {
 
 const ACTIONS: readonly CommandAction[] = [
   {
+    command: "novelai.openSettingsPanel",
+    label: "設定資料を開く",
+    description: "",
+    icon: "book",
+    requiresWork: true,
+    detail:
+      "抽出した登場人物・能力・場所を一覧で見ます。" +
+      "その場で書き換えたり、AIに掘り下げさせたり、質問したりできます。",
+  },
+  {
     command: "novelai.extractSettings",
     label: "設定資料を抽出",
     description: "AIを使う",
-    icon: "book",
+    icon: "sparkle",
     requiresWork: true,
     detail:
       "本文をAIで解析し、登場人物・能力・場所を取り出して保存します。" +

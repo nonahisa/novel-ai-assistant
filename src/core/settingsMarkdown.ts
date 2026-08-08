@@ -1,6 +1,7 @@
 import type { Ability, AbilitySystem } from "../models/ability";
 import type { Location } from "../models/location";
 import type { Character } from "../models/character";
+import type { AiNote } from "../models/aiNote";
 
 /**
  * 設定資料としてそのまま渡せるMarkdownを組み立てる。
@@ -105,7 +106,31 @@ function describeAbility(ability: Ability, term: string): string[] {
       `- **要確認（${conflict.field}）**: ${conflict.values.join(" / ")}`
     );
   }
+  lines.push(...aiNoteLines(ability.aiNotes));
   lines.push("");
+  return lines;
+}
+
+/**
+ * 承認済みの掘り下げメモ。
+ *
+ * 引用形式にして、抽出した事実と見た目で区別する。
+ * 掘り下げは本文からの解釈であり、根拠の逐語照合ができない。
+ * 事実と同じ体裁で並べると、作者が読み返したときに
+ * どこまでが本文に書いてあることなのか分からなくなる。
+ */
+function aiNoteLines(notes: AiNote[]): string[] {
+  if (notes.length === 0) return [];
+
+  const lines: string[] = ["", "**AIによる掘り下げ**（作者が承認したもの。本文からの解釈を含みます）", ""];
+  for (const note of notes) {
+    const label = [note.topic || "全体", note.model].filter((p) => p).join(" / ");
+    lines.push(`> _${label}_`, ">");
+    for (const line of note.text.split("\n")) {
+      lines.push(`> ${line}`);
+    }
+    lines.push("");
+  }
   return lines;
 }
 
@@ -149,6 +174,7 @@ export function buildLocationMarkdown(
           `- **要確認（${conflict.field}）**: ${conflict.values.join(" / ")}`
         );
       }
+      lines.push(...aiNoteLines(location.aiNotes));
       lines.push("");
     }
   }
@@ -267,6 +293,7 @@ function describeCharacter(character: Character): string[] {
       `- **要確認（${conflict.field}）**: ${conflict.values.join(" / ")}`
     );
   }
+  lines.push(...aiNoteLines(character.aiNotes));
   lines.push("");
   return lines;
 }

@@ -26,6 +26,7 @@ import {
 } from "./features/extractCharacters";
 import { selectOllamaExecutable } from "./features/selectOllamaExecutable";
 import { generateSettingsDocs } from "./features/generateSettingsDocs";
+import { openSettingsPanel } from "./features/settingsPanel";
 import { TermHighlighter } from "./views/termHighlight";
 import { ActionListProvider } from "./views/actionList";
 import {
@@ -374,6 +375,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       "novelai.selectOllamaExecutable",
       async () => {
         await selectOllamaExecutable();
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.openSettingsPanel",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await openSettingsPanel(context, work, aiRegistry);
       }
     )
   );

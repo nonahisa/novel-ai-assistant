@@ -26,6 +26,7 @@ const COMMANDS = [
   "novelai.setupAI",
   "novelai.testAI",
   "novelai.extractSettings",
+  "novelai.openSettingsPanel",
   "novelai.generateSettingsDocs",
   "novelai.selectOllamaExecutable",
 ];

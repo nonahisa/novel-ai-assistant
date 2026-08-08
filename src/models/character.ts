@@ -3,6 +3,7 @@ import {
   type AbilityMastery,
   type CharacterAbility,
 } from "./ability";
+import { parseAiNotes, type AiNote } from "./aiNote";
 
 /** 呼称の1形態 */
 export interface AddressForm {
@@ -93,6 +94,11 @@ export interface Character {
     chapters: number[];
     note: string | null;
   }>;
+  /**
+   * AIの掘り下げメモ。作者が承認したものだけが入る。
+   * 本文に根拠のある抽出結果とは別に持ち、既存項目を書き換えない。
+   */
+  aiNotes: AiNote[];
   updatedAt: string;
 }
 
@@ -126,6 +132,7 @@ export function emptyCharacter(id: string, name: string): Character {
     isMob: false,
     evidence: null,
     conflicts: [],
+    aiNotes: [],
     // 永続化境界で保存時刻を付ける。純粋な生成・マージ結果へ壁時計を混ぜない。
     updatedAt: "",
   };
@@ -152,6 +159,7 @@ export function normalizeCharacter(raw: Partial<Character>): Character {
     abilities: raw.abilities ?? [],
     appearedChapters: raw.appearedChapters ?? [],
     conflicts: raw.conflicts ?? [],
+    aiNotes: raw.aiNotes ?? [],
     authorNotes: raw.authorNotes ?? "",
     exportNote: raw.exportNote ?? "",
   } as Character;
@@ -302,6 +310,7 @@ export function parseCharacter(raw: unknown): Character {
     relations,
     abilities,
     conflicts,
+    aiNotes: parseAiNotes(value.aiNotes),
   } as Partial<Character>);
 }
 
