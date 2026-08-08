@@ -27,6 +27,8 @@ import {
 import { selectOllamaExecutable } from "./features/selectOllamaExecutable";
 import { generateSettingsDocs } from "./features/generateSettingsDocs";
 import { openSettingsPanel } from "./features/settingsPanel";
+import { unifyCharacterRecords } from "./features/unifyCharacters";
+import { applyPendingCharacterUpdates } from "./features/applyPendingUpdates";
 import { TermHighlighter } from "./views/termHighlight";
 import { ActionListProvider } from "./views/actionList";
 import {
@@ -375,6 +377,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("novelai.showLog", () => {
       showLog();
     })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.applyPendingUpdates",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await applyPendingCharacterUpdates(work);
+        treeProvider.refresh(work.id);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.unifyCharacters",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await unifyCharacterRecords(work);
+        treeProvider.refresh(work.id);
+      }
+    )
   );
 
   context.subscriptions.push(

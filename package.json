@@ -95,6 +95,18 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.applyPendingUpdates",
+        "title": "更新分を反映",
+        "category": "小説執筆",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "novelai.unifyCharacters",
+        "title": "同一人物をまとめる",
+        "category": "小説執筆",
+        "icon": "$(merge)"
+      },
+      {
         "command": "novelai.showLog",
         "title": "ログを表示",
         "category": "小説執筆",

@@ -11,7 +11,7 @@
  * プロンプトを変更したら version を上げること。
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
-export const CHARACTER_EXTRACT_VERSION = "2.1";
+export const CHARACTER_EXTRACT_VERSION = "2.2";
 
 export const BASE_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 
@@ -83,8 +83,15 @@ ${knownLocations}
 - 同一人物が別の呼称で登場する場合（本名／通称／あだ名／役職）、既知の登場人物と
   照合し、同一と判断できる場合は既知の名前を name とし、別呼称を aliases に入れること。
   判断できない場合は新規人物として扱うこと。
-- 各項目は、この本文範囲から読み取れる内容のみを書くこと。読み取れない項目は
-  null とすること。推測で埋めないこと。
+- role・personality・appearance は必ず出力すること（読み取れなければ null）。
+  本文に手掛かりがある場合は必ず埋めること。以下はすべて手掛かりである。
+  ・role：肩書き・職業・立場（「王女」「近衛騎士」「ギルド職員」）
+  ・personality：言動から分かる性質。地の文の評価だけでなく、
+    発言の調子・態度・他人への接し方も根拠になる
+    （例：命令口調で話す、他人を気遣う発言が多い）
+  ・appearance：髪・目・背丈・服装・持ち物など、外見に関する記述
+- ただし本文に手掛かりが無い項目を、推測で埋めてはならない。
+  「〜だろう」「〜と思われる」と書きたくなる内容は null にすること。
 - 役職・肩書きと本名が両方本文から読み取れる場合、name には本名のみを書き、
   役職・肩書きは role に書くこと。
   例：「衛兵隊副隊長のエバン」→ name: "エバン", role: "衛兵隊副隊長"
@@ -188,7 +195,17 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           },
           evidence: { type: "string", minLength: 1 },
         },
-        required: ["name", "entityType", "evidence"],
+        // role / personality / appearance を必須に入れるのは、
+        // 省略可能にすると小さいモデルが黙って落とすため（実データで確認）。
+        // null は許すので「読み取れなかった」と明示させる形になる。
+        required: [
+          "name",
+          "entityType",
+          "role",
+          "personality",
+          "appearance",
+          "evidence",
+        ],
       },
     },
     abilities: {
@@ -206,7 +223,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           userNames: { type: "array", items: { type: "string" } },
           evidence: { type: "string", minLength: 1 },
         },
-        required: ["name", "evidence"],
+        required: ["name", "description", "evidence"],
       },
     },
     locations: {
@@ -221,7 +238,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           description: { type: ["string", "null"] },
           evidence: { type: "string", minLength: 1 },
         },
-        required: ["name", "evidence"],
+        required: ["name", "description", "evidence"],
       },
     },
     abilitySystem: {

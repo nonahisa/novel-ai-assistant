@@ -124,12 +124,26 @@ describe("登場人物抽出の品質ゲート", () => {
     assertChapterAndAddressPeriods(fixture, merged.characters);
   });
 
-  test("v2.1の構造化出力契約を公開する", () => {
-    expect(CHARACTER_EXTRACT_VERSION).toBe("2.1");
+  test("v2.2の構造化出力契約を公開する", () => {
+    expect(CHARACTER_EXTRACT_VERSION).toBe("2.2");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.properties)
       .toHaveProperty("entityType");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.required)
       .toEqual(expect.arrayContaining(["name", "entityType", "evidence"]));
+  });
+
+  test("説明の項目を必須にして、モデルが黙って落とすのを防ぐ", () => {
+    // 省略可能にすると、小さいモデルは面倒な項目を出力しない。
+    // null は許すので「読み取れなかった」と明示させる形になる
+    expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.required).toEqual(
+      expect.arrayContaining(["role", "personality", "appearance"])
+    );
+    expect(CHARACTER_EXTRACT_SCHEMA.properties.abilities.items.required).toEqual(
+      expect.arrayContaining(["description"])
+    );
+    expect(CHARACTER_EXTRACT_SCHEMA.properties.locations.items.required).toEqual(
+      expect.arrayContaining(["description"])
+    );
   });
 
   test("人物・能力・場所を1回の呼び出しで返す契約になっている", () => {

@@ -47,6 +47,8 @@ import {
 } from "../views/progress";
 import { logFailure, showLog } from "../core/logger";
 import { resolveMaxOutputTokens } from "../ai/outputLimit";
+import { PendingUpdateStore } from "../core/pendingUpdates";
+import { applyPendingCharacterUpdates } from "./applyPendingUpdates";
 import { ChunkCache } from "../core/chunkCache";
 import {
   AbilitySystemStore,
@@ -77,6 +79,8 @@ interface ExtractionSummaryCounts {
   mergeCandidates: MergeCandidate[];
   /** モブとして記録された人数。ネームドキャラと区別して示す */
   mobs: number;
+  /** 既存人物への更新のうち、承認待ちに回した人数 */
+  pendingUpdates: number;
 }
 
 /** 作品内の未保存文書を保存し、成功を再検査できた場合だけ実行を許可する。 */
@@ -302,8 +306,10 @@ export async function extractCharacters(
   /** 実行中にAIへ接続できなくなり、残りのチャンクを諦めたか */
   let connectivityLost = false;
   let consecutiveConnectivityFailures = 0;
-  /** レート上限で待った回数。無限に待ち続けないための歯止め */
-  let rateLimitWaits = 0;
+  /** レート上限で待った回数と合計時間。待ち続けないための歯止め */
+  const rateLimit: RateLimitWaitState = { waits: 0, totalWaitedMs: 0 };
+  /** 待っても解消せず諦めたか。作者への説明を変える */
+  let rateLimitGaveUp = false;
 
   // 同じAI応答から能力・場所も取り出す。種別ごとにAIを呼ばないための仕組み。
   // 既存の総称が決まっていれば、チャンクごとに揺れないよう引き継ぐ。
@@ -389,13 +395,28 @@ export async function extractCharacters(
               res = await callAI();
               break;
             } catch (error) {
-              const waitMs = rateLimitWaitMs(error, rateLimitWaits);
-              if (waitMs === undefined) throw error;
-              rateLimitWaits++;
+              const waitMs = rateLimitWaitMs(error, rateLimit);
+              if (waitMs === undefined) {
+                // 待ちきれなかった場合は、そのことを理由として残す。
+                // 「利用できませんでした」だけでは待った意味が伝わらない
+                if (
+                  error instanceof AIError &&
+                  error.kind === "rate_limited" &&
+                  rateLimit.waits > 0
+                ) {
+                  rateLimitGaveUp = true;
+                }
+                throw error;
+              }
+              rateLimit.waits++;
+              rateLimit.totalWaitedMs += waitMs;
               progress.report({
                 message:
                   `${done + 1}/${chunks.length}  ` +
-                  `レート上限のため ${Math.ceil(waitMs / 1000)} 秒待っています`,
+                  `レート上限のため ${Math.ceil(waitMs / 1000)} 秒待っています` +
+                  `（${rateLimit.waits}回目 / 合計 ${Math.round(
+                    rateLimit.totalWaitedMs / 1000
+                  )} 秒）`,
               });
               if (!(await delay(waitMs, token))) {
                 throw new AIError("処理が中止されました。", "aborted");
@@ -491,6 +512,11 @@ export async function extractCharacters(
     return false;
   }
 
+  /** 承認待ちに回した更新の件数。要約で作者へ知らせる */
+  let pendingUpdateCount = 0;
+  /** 保留に失敗した場合の説明。要約の先頭へ足す */
+  let settingsNoticePrefix = "";
+
   const merged =
     extractedAll.length > 0
       ? mergeExtractedCharacters(loaded.characters, extractedAll)
@@ -510,9 +536,34 @@ export async function extractCharacters(
     cacheWarnings,
     mergeCandidates: merged?.mergeCandidates ?? [],
     mobs: merged?.characters.filter((character) => character.isMob).length ?? 0,
+    pendingUpdates: 0,
   };
 
-  if (changedCharacters.length > 0) {
+  // 既存人物への変更は、その場では書き込まずに保留へ回す。
+  // このプロジェクトは正規ファイルを上書きしないため以前は必ず失敗しており、
+  // 作品を書き進めても既存人物の情報がまったく増えなかった。
+  // 作者が内容を見て承認したときにだけ反映する。
+  const existingIds = new Set(loaded.characters.map((character) => character.id));
+  const newCharacters = changedCharacters.filter(
+    (character) => !existingIds.has(character.id)
+  );
+  const updatedCharacters = changedCharacters.filter((character) =>
+    existingIds.has(character.id)
+  );
+
+  if (updatedCharacters.length > 0) {
+    try {
+      await new PendingUpdateStore(work).stage(updatedCharacters);
+      pendingUpdateCount = updatedCharacters.length;
+      baseCounts.pendingUpdates = pendingUpdateCount;
+    } catch (error) {
+      settingsNoticePrefix =
+        "\n既存人物の更新案を保留できませんでした: " +
+        (error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (newCharacters.length > 0) {
     if ((await store.dirtyDocumentPaths()).length > 0) {
       await vscode.window.showWarningMessage(
         "保存直前に未保存の人物設定が見つかりました。作者の変更を保護するため、抽出結果は保存しませんでした。"
@@ -520,13 +571,13 @@ export async function extractCharacters(
       return false;
     }
     try {
-      await store.saveAll(changedCharacters);
-      baseCounts.saved = changedCharacters.length;
+      await store.saveAll(newCharacters);
+      baseCounts.saved = newCharacters.length;
     } catch (error) {
       if (!(error instanceof CharacterStoreError)) throw error;
       const persistence = persistenceCountsForSaveError(
         error,
-        changedCharacters
+        newCharacters
       );
       baseCounts.saved = persistence.saved;
       baseCounts.ambiguous = persistence.ambiguous;
@@ -573,7 +624,7 @@ export async function extractCharacters(
 
   // 能力・場所を保存する。人物の保存が終わってから行うのは、
   // 人物側で保存を中止した場合に設定だけ書き込まれるのを避けるため。
-  let settingsNotice = "";
+  let settingsNotice = settingsNoticePrefix;
   try {
     const persisted = await settings.persist(work);
     settingsNotice = describeSettingsResult(persisted);
@@ -592,7 +643,9 @@ export async function extractCharacters(
     ? "AIへ接続できなくなったため、残りのチャンクを中断しました。" +
       "AIが起動しているか、ネットワーク接続を確認してください。" +
       "完了済みの処理は次回再利用されます。\n"
-    : "";
+    : rateLimitGaveUp
+      ? `${describeRateLimitGiveUp(rateLimit)}\n`
+      : "";
   const message =
     connectivityNotice +
     (recovery ? `${summary}\n対応: ${recovery}` : summary);
@@ -600,16 +653,23 @@ export async function extractCharacters(
     failure.kind ? shouldOfferSettings(failure.kind) : false
   );
   const actions = [
+    ...(pendingUpdateCount > 0 ? ["更新分を反映"] : []),
     ...(failures.length > 0 ? ["詳細を表示", "ログを表示"] : []),
     ...(hasSettingsFailure ? ["設定を開く"] : []),
     ...(merged ? ["一覧を開く"] : []),
   ];
   const action =
-    failures.length > 0 || cacheWarnings > 0 || connectivityLost || !merged
+    failures.length > 0 ||
+    cacheWarnings > 0 ||
+    connectivityLost ||
+    rateLimitGaveUp ||
+    !merged
       ? await vscode.window.showWarningMessage(message, ...actions)
       : await vscode.window.showInformationMessage(message, ...actions);
 
-  if (action === "詳細を表示") {
+  if (action === "更新分を反映") {
+    await applyPendingCharacterUpdates(work);
+  } else if (action === "詳細を表示") {
     await showFailureDetails(failures);
   } else if (action === "ログを表示") {
     showLog();
@@ -699,7 +759,12 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
       `キャッシュ保存警告 ${counts.cacheWarnings}件`,
     ].join(" / ") +
     rejectedDetail +
-    candidateDetail
+    candidateDetail +
+    // 既存人物への変更は承認待ちに回る。件数を出さないと、
+    // 作者は「更新0名」を見て何も増えなかったと思ってしまう
+    (counts.pendingUpdates > 0
+      ? `\n既存人物への更新 ${counts.pendingUpdates}名は承認待ちです（「更新分を反映」から確認できます）`
+      : "")
   );
 }
 
@@ -941,10 +1006,24 @@ function isConnectivityFailure(kind: AIError["kind"]): boolean {
   return kind === "not_running" || kind === "timeout";
 }
 
-/** 1回の抽出でレート上限を待てる回数。無限に待ち続けないため */
-const RATE_LIMIT_WAIT_LIMIT = 60;
 /** 1回あたりの待機時間の上限。これを超える指定なら待たずに失敗として扱う */
 const MAX_RATE_LIMIT_WAIT_MS = 90_000;
+
+/**
+ * 1回の抽出で待ってよい合計時間。
+ *
+ * 無料枠には毎分の制限とは別に1日あたりの上限があり、
+ * そちらを使い切ると待っても回復しない。それでも待ち続けると
+ * 何十分も終わらない処理になる。
+ * 回数ではなく**合計時間**で区切るのは、1回の待ち時間が
+ * サーバーの都合で変わるため、回数では長さを見積もれないから。
+ */
+const MAX_TOTAL_RATE_LIMIT_WAIT_MS = 180_000;
+
+export interface RateLimitWaitState {
+  waits: number;
+  totalWaitedMs: number;
+}
 
 /**
  * レート上限で待つべきなら待機時間を返す。待つべきでなければ undefined。
@@ -954,16 +1033,30 @@ const MAX_RATE_LIMIT_WAIT_MS = 90_000;
  */
 export function rateLimitWaitMs(
   error: unknown,
-  waitsSoFar: number
+  state: RateLimitWaitState
 ): number | undefined {
   if (!(error instanceof AIError)) return undefined;
   if (error.kind !== "rate_limited") return undefined;
   if (error.retryAfterMs === undefined) return undefined;
-  if (waitsSoFar >= RATE_LIMIT_WAIT_LIMIT) return undefined;
 
   // サーバーの指定ちょうどだと際どいので少し余裕を持たせる
   const waitMs = error.retryAfterMs + 1000;
-  return waitMs > MAX_RATE_LIMIT_WAIT_MS ? undefined : waitMs;
+  if (waitMs > MAX_RATE_LIMIT_WAIT_MS) return undefined;
+  if (state.totalWaitedMs + waitMs > MAX_TOTAL_RATE_LIMIT_WAIT_MS) {
+    return undefined;
+  }
+  return waitMs;
+}
+
+/** 待ちきれずに諦めたときの説明。次に何をすればよいかまで書く */
+export function describeRateLimitGiveUp(state: RateLimitWaitState): string {
+  return (
+    `レート上限のため合計 ${Math.round(state.totalWaitedMs / 1000)} 秒待ちましたが、` +
+    "解消しませんでした。無料枠には1日あたりの上限もあり、" +
+    "使い切っている場合は待っても回復しません。\n" +
+    "時間をおいて再実行するか、呼び出し回数の多い抽出はOllamaで行ってください。" +
+    "完了済みのチャンクは次回再利用されます。"
+  );
 }
 
 /** 中止できる待機。中止されたら false */

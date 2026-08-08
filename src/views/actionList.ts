@@ -82,6 +82,27 @@ const ACTIONS: readonly CommandAction[] = [
       "抽出が失敗するときは、まずここを見てください。",
   },
   {
+    command: "novelai.applyPendingUpdates",
+    label: "更新分を反映",
+    description: "承認制",
+    icon: "check-all",
+    requiresWork: true,
+    detail:
+      "抽出で見つかった既存人物への更新を、内容を確認してから反映します。" +
+      "確認せずに書き換えることはありません。",
+  },
+  {
+    command: "novelai.unifyCharacters",
+    label: "同一人物をまとめる",
+    description: "",
+    icon: "merge",
+    requiresWork: true,
+    detail:
+      "「リン」と「リンセップ・アウクト」のように、" +
+      "同じ人物が別々に登録されてしまった組をまとめます。" +
+      "どちらの名前を残すかは作者が選びます。",
+  },
+  {
     command: "novelai.showLog",
     label: "ログを表示",
     description: "",

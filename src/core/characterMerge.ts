@@ -399,6 +399,7 @@ const MAX_LENGTH_RATIO = 2.5;
  */
 export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
   const candidates: MergeCandidate[] = [];
+  const appellations = buildAppellationIndex(characters);
 
   for (let i = 0; i < characters.length; i++) {
     for (let j = i + 1; j < characters.length; j++) {
@@ -407,7 +408,14 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
 
       // 別レコードなのに呼称が重なっている＝ほぼ確実に同一人物。
       // 統合先が決まらず新規になった場合などに起きるので、最優先で伝える。
-      if (sharesAppellation(a, b)) {
+      const keys = new Set(
+        (appellations.get(a.id) ?? []).map(normalizeName)
+      );
+      if (
+        (appellations.get(b.id) ?? []).some((name) =>
+          keys.has(normalizeName(name))
+        )
+      ) {
         candidates.push({ names: [a.name, b.name], reason: "same_name" });
         continue;
       }
@@ -423,10 +431,66 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
   return candidates;
 }
 
-function sharesAppellation(a: Character, b: Character): boolean {
-  const keys = new Set([a.name, ...a.aliases].map(normalizeName));
-  return [b.name, ...b.aliases].some((name) => keys.has(normalizeName(name)));
+/**
+ * その人物を指す呼称を、全レコードを横断して集める。
+ *
+ * **呼称は「呼ぶ側」のレコードに入る。** 「マルキオがリンセップを『リン』と呼ぶ」
+ * という情報は、リンセップではなくマルキオのレコードに記録される。
+ * そのため1人分のレコードだけを見ても、その人物が何と呼ばれているかは分からない。
+ *
+ * これを見落としていたため、AIが関連を正しく記録していたにもかかわらず、
+ * 「リン」と「リンセップ・アウクト」が別人のまま残っていた（実データで確認）。
+ *
+ * ただし「姫」「殿下」のような肩書きだけの呼称は、
+ * 別人どうしでも一致してしまうため除く。
+ */
+export function buildAppellationIndex(
+  characters: Character[]
+): Map<string, string[]> {
+  const index = new Map<string, string[]>();
+
+  for (const character of characters) {
+    const names = [character.name, ...character.aliases].filter((name) =>
+      name.trim()
+    );
+    const ownKeys = new Set(names.map(normalizeName));
+    const collected = new Set(names);
+
+    // 誰のレコードに書かれていても、宛先がこの人物なら呼称として扱う
+    for (const speaker of characters) {
+      for (const term of speaker.addressTerms) {
+        if (!ownKeys.has(normalizeName(term.targetName))) continue;
+        for (const form of term.forms) {
+          if (isTitleOnly(form.term)) continue;
+          collected.add(form.term);
+        }
+      }
+    }
+    index.set(character.id, [...collected]);
+  }
+
+  return index;
 }
+
+/**
+ * 肩書き・敬称だけの呼称か。
+ * 「姫」「王女殿下」は別の王女とも一致してしまうので同一人物判定に使わない。
+ */
+function isTitleOnly(term: string): boolean {
+  // normalizeName は敬称を落とすので「王女殿下」→「王女」になる
+  const normalized = normalizeName(term);
+  if (!normalized) return true;
+  // 「姫」「殿下」のように敬称そのもの1語だけの呼び方
+  if (HONORIFIC_SUFFIX_SOURCE.includes(normalized)) return true;
+  return TITLE_WORDS.has(normalized);
+}
+
+/** 肩書きだけで人を特定できない語。別の王女とも一致してしまう */
+const TITLE_WORDS = new Set([
+  "王女", "王子", "王", "女王", "国王", "皇帝", "皇后", "王妃",
+  "姫君", "師匠", "隊長", "副隊長", "団長", "会長",
+  "社長", "部長", "課長", "店長", "旦那", "奥様", "お嬢様",
+]);
 
 /** 2人の呼称の総当たりを、短い方・長い方の順で返す */
 function appellationPairs(a: Character, b: Character): Array<[string, string]> {

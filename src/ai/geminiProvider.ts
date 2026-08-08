@@ -314,22 +314,40 @@ export class GeminiProvider implements ApiKeyProvider {
 
         const dropped = dropNextOption(support);
         if (!dropped) throw error;
+        this.rememberSupport(params.model, support);
         logLine(
-          `Geminiが「${dropped}」の指定を受け付けなかったため、外して再試行します（モデル: ${params.model}）`
+          `Geminiが「${dropped}」の指定を受け付けなかったため、外して再試行します（モデル: ${params.model}）。` +
+            "この判定は次回以降も引き継ぎます。"
         );
         if (attempt >= 3) throw error;
       }
     }
   }
 
-  /** モデルごとの対応状況。分からないうちは対応している前提で始める */
+  /**
+   * モデルごとの対応状況。分からないうちは対応している前提で始める。
+   *
+   * **VS Codeを閉じても覚えておく。** 覚えないと再起動のたびに
+   * 必ず1回は400で弾かれる呼び出しが発生し、
+   * 毎分5回しかない無料枠を1つ無駄にする。
+   */
   private supportFor(model: string): GeminiSupport {
-    let support = this.supportCache.get(model);
-    if (!support) {
-      support = { thinkingConfig: true, responseSchema: true };
-      this.supportCache.set(model, support);
-    }
+    const cached = this.supportCache.get(model);
+    if (cached) return cached;
+
+    const stored = this.context.globalState.get<GeminiSupport>(
+      supportKey(model)
+    );
+    const support: GeminiSupport = {
+      thinkingConfig: stored?.thinkingConfig ?? true,
+      responseSchema: stored?.responseSchema ?? true,
+    };
+    this.supportCache.set(model, support);
     return support;
+  }
+
+  private rememberSupport(model: string, support: GeminiSupport): void {
+    void this.context.globalState.update(supportKey(model), { ...support });
   }
 
   private readonly supportCache = new Map<string, GeminiSupport>();
@@ -352,6 +370,10 @@ export class GeminiProvider implements ApiKeyProvider {
       label: LABEL,
     });
   }
+}
+
+function supportKey(model: string): string {
+  return `novelai.gemini.support.${model}`;
 }
 
 /** モデルごとに、任意の指定が使えるか */

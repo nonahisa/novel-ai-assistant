@@ -11,6 +11,7 @@ import { AIError, validateApiKeyFormat } from "../../src/ai/types";
 import { CHARACTER_EXTRACT_SCHEMA } from "../../src/prompts/characterExtract";
 import {
   buildExtractionCostNotice,
+  describeRateLimitGiveUp,
   rateLimitWaitMs,
 } from "../../src/features/extractCharacters";
 
@@ -351,35 +352,53 @@ describe("レート上限の待ち時間", () => {
     expect(parseRetryAfterMs(null, body)).toBe(13000);
   });
 
+  const fresh = () => ({ waits: 0, totalWaitedMs: 0 });
+
   test("待ち時間の指定が無ければ待たない", () => {
     // 当てずっぽうで待つと、いつ終わるか分からない処理になる
     expect(parseRetryAfterMs(null, "just an error")).toBeUndefined();
     expect(
-      rateLimitWaitMs(new AIError("上限", "rate_limited", "detail"), 0)
+      rateLimitWaitMs(new AIError("上限", "rate_limited", "detail"), fresh())
     ).toBeUndefined();
   });
 
   test("指定があれば少し余裕を足して待つ", () => {
     const error = new AIError("上限", "rate_limited", "detail", 6500);
 
-    expect(rateLimitWaitMs(error, 0)).toBe(7500);
+    expect(rateLimitWaitMs(error, fresh())).toBe(7500);
   });
 
-  test("待ちすぎる指定には従わない", () => {
+  test("1回が長すぎる指定には従わない", () => {
     const error = new AIError("上限", "rate_limited", "detail", 600_000);
 
-    expect(rateLimitWaitMs(error, 0)).toBeUndefined();
+    expect(rateLimitWaitMs(error, fresh())).toBeUndefined();
   });
 
-  test("待った回数が上限に達したら諦める", () => {
-    const error = new AIError("上限", "rate_limited", "detail", 5000);
+  test("合計3分を超えるなら待たずに諦める", () => {
+    // 無料枠には1日あたりの上限もあり、使い切っていると待っても回復しない。
+    // 回数で区切ると1回の長さ次第で何十分にもなるため、合計時間で区切る
+    const error = new AIError("上限", "rate_limited", "detail", 60_000);
 
-    expect(rateLimitWaitMs(error, 60)).toBeUndefined();
+    expect(
+      rateLimitWaitMs(error, { waits: 2, totalWaitedMs: 130_000 })
+    ).toBeUndefined();
+    expect(
+      rateLimitWaitMs(error, { waits: 2, totalWaitedMs: 110_000 })
+    ).toBe(61_000);
   });
 
   test("上限以外の失敗では待たない", () => {
     const error = new AIError("失敗", "bad_response", "detail", 5000);
 
-    expect(rateLimitWaitMs(error, 0)).toBeUndefined();
+    expect(rateLimitWaitMs(error, fresh())).toBeUndefined();
+  });
+
+  test("諦めたときは次にすべきことを示す", () => {
+    const message = describeRateLimitGiveUp({ waits: 3, totalWaitedMs: 180_000 });
+
+    expect(message).toContain("180 秒待ちました");
+    expect(message).toContain("1日あたりの上限");
+    expect(message).toContain("Ollama");
+    expect(message).toContain("完了済みのチャンクは次回再利用されます");
   });
 });

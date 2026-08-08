@@ -250,6 +250,87 @@ export class CharacterStore {
     }
   }
 
+  /**
+   * 人物を一覧から取り下げる。同一人物を1件にまとめるときに使う。
+   *
+   * **ファイルを消さず、回復用の場所へ移す。** 別人をまとめてしまった場合、
+   * 消えていると作者は元に戻せない。取り下げは作者の操作なので、
+   * 読み込み後に外部で変更されていないことだけ確認する。
+   */
+  async retire(id: string): Promise<string> {
+    const snapshot = this.snapshots.get(id);
+    if (!snapshot) {
+      throw new CharacterStoreError(
+        `人物「${id}」の保存先が分かりません。読み込み直してください。`,
+        "path_conflict"
+      );
+    }
+
+    const dirtyPaths = await this.dirtyDocumentPaths();
+    if (dirtyPaths.length > 0) {
+      throw new CharacterStoreError(
+        "人物設定に未保存の変更があります。保存してからもう一度実行してください。",
+        "unsaved_changes",
+        { recoveryPaths: dirtyPaths }
+      );
+    }
+
+    const current = await this.readFileIfExists(snapshot.filePath);
+    if (!current || hashBytes(current) !== snapshot.hash) {
+      throw new CharacterStoreError(
+        `人物「${id}」は読み込み後に変更されています。`,
+        "modified_externally"
+      );
+    }
+
+    let recoveryPath: string;
+    try {
+      recoveryPath = await createManagedRecoveryPath(snapshot.filePath);
+      await vscode.workspace.fs.rename(
+        vscode.Uri.file(snapshot.filePath),
+        vscode.Uri.file(recoveryPath),
+        { overwrite: false }
+      );
+    } catch (error) {
+      throw new CharacterStoreError(
+        `人物「${id}」のファイルを退避できませんでした: ${errorMessage(error)}`,
+        "io_error",
+        { recoveryPaths: [snapshot.filePath] }
+      );
+    }
+
+    this.snapshots.delete(id);
+    return recoveryPath;
+  }
+
+  /**
+   * 既存の人物を書き換える。
+   *
+   * このプロジェクトは正規ファイルを上書きしない（`atomicWrite` を参照）ので、
+   * **元ファイルを回復先へ退避してから、新しい内容を新規作成する。**
+   * 名前変更のときに既に使っている手順と同じ。
+   *
+   * 退避に成功して作成に失敗した場合、正規パスにファイルが無い状態になる。
+   * データは回復先に残るので、その場所を必ず例外に載せて作者へ伝える。
+   */
+  async update(character: Character): Promise<void> {
+    const validated = parseCharacter(character);
+    const recoveryPath = await this.retire(validated.id);
+    try {
+      await this.save(validated);
+    } catch (error) {
+      const detail = asCharacterStoreError(error);
+      throw new CharacterStoreError(
+        `${detail.message} 元の内容は「${recoveryPath}」にあります。手動で戻してください。`,
+        detail.kind,
+        {
+          persistenceState: "ambiguous",
+          recoveryPaths: [recoveryPath, ...detail.recoveryPaths],
+        }
+      );
+    }
+  }
+
   private async prepareSave(
     character: Character
   ): Promise<PreparedCharacterSave> {
