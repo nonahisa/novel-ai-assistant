@@ -204,5 +204,7 @@ async function showDiffDocument(items: ReviewItem[]): Promise<void> {
     content,
     language: "markdown",
   });
-  await vscode.window.showTextDocument(document);
+  await vscode.window.showTextDocument(document, { preview: false });
+  // 読むための文書なので、記法のままではなくプレビューで見せる
+  await vscode.commands.executeCommand("markdown.showPreview");
 }

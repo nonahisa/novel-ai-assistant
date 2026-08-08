@@ -112,6 +112,17 @@ button.secondary {
 }
 .note .meta { font-size: 11px; opacity: 0.7; margin-bottom: 4px; }
 .note .body { white-space: pre-wrap; }
+/* Markdownを整形した部分。改行はタグで表すので pre-wrap を外す */
+.rendered { white-space: normal; }
+.rendered p { margin: 0 0 8px; }
+.rendered p:last-child { margin-bottom: 0; }
+.rendered ul { margin: 0 0 8px; padding-left: 20px; }
+.rendered li { margin-bottom: 3px; }
+.rendered code {
+  background: var(--vscode-textCodeBlock-background);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
 .draft { border-color: var(--vscode-focusBorder); }
 .proposal { border-color: var(--vscode-focusBorder); }
 .proposal .field-row {
@@ -575,8 +586,9 @@ button.secondary {
     box.appendChild(meta);
 
     const body = document.createElement("div");
-    body.className = "body";
-    body.textContent = note.text;
+    // html は拡張機能側で無害化・整形済み（core/markdownLite.ts）
+    body.className = "body rendered";
+    body.innerHTML = note.html;
     box.appendChild(body);
 
     const row = document.createElement("div");
@@ -602,7 +614,14 @@ button.secondary {
     box.appendChild(who);
     const body = document.createElement("div");
     body.className = "body";
-    body.textContent = turn.text;
+    if (turn.role === "assistant" && turn.html) {
+      // AIの応答はMarkdownで返ってくる。記号のまま見せない。
+      // html は拡張機能側で無害化・整形済み
+      body.classList.add("rendered");
+      body.innerHTML = turn.html;
+    } else {
+      body.textContent = turn.text;
+    }
     box.appendChild(body);
 
     if (turn.role === "assistant") {
@@ -668,7 +687,12 @@ button.secondary {
         renderDetail();
         break;
       case "chatAnswer":
-        chatLog.push({ role: "assistant", text: message.text, question: message.question });
+        chatLog.push({
+          role: "assistant",
+          text: message.text,
+          html: message.html,
+          question: message.question,
+        });
         renderDetail();
         break;
       case "saved":

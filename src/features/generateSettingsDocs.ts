@@ -166,9 +166,10 @@ export async function generateSettingsDocs(
   );
   if (action === "開く") {
     const first = docs.find((doc) => doc.hasContent)!;
-    const doc = await vscode.workspace.openTextDocument(
+    // 資料は読むためのものなので、記法のままではなくプレビューで開く
+    await vscode.commands.executeCommand(
+      "markdown.showPreview",
       vscode.Uri.file(path.join(settingsDir, first.fileName))
     );
-    await vscode.window.showTextDocument(doc);
   }
 }
