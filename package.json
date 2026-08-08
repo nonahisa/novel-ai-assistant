@@ -29,6 +29,10 @@
         {
           "id": "novelai.works",
           "name": "作品一覧"
+        },
+        {
+          "id": "novelai.actions",
+          "name": "よく使う操作"
         }
       ]
     },
@@ -97,16 +101,16 @@
         "icon": "$(folder-opened)"
       },
       {
-        "command": "novelai.extractCharacters",
-        "title": "登場人物を抽出",
+        "command": "novelai.extractSettings",
+        "title": "設定資料を抽出",
         "category": "小説執筆",
-        "icon": "$(person-add)"
+        "icon": "$(book)"
       },
       {
         "command": "novelai.generateSettingsDocs",
-        "title": "設定資料を生成",
+        "title": "設定資料を作り直す（AIを使わない）",
         "category": "小説執筆",
-        "icon": "$(book)"
+        "icon": "$(sync)"
       }
     ],
     "menus": {
@@ -139,14 +143,14 @@
           "group": "inline"
         },
         {
-          "command": "novelai.extractCharacters",
-          "when": "view == novelai.works && viewItem == work",
-          "group": "1_stats"
-        },
-        {
           "command": "novelai.showWorkStats",
           "when": "view == novelai.works && viewItem == work",
-          "group": "1_stats"
+          "group": "1_stats@1"
+        },
+        {
+          "command": "novelai.extractSettings",
+          "when": "view == novelai.works && viewItem == work",
+          "group": "1_stats@2"
         },
         {
           "command": "novelai.openWorkFolder",
@@ -157,11 +161,6 @@
           "command": "novelai.removeWork",
           "when": "view == novelai.works && viewItem == work",
           "group": "9_danger"
-        },
-        {
-          "command": "novelai.generateSettingsDocs",
-          "when": "view == novelai.works && viewItem == work",
-          "group": "1_stats"
         }
       ],
       "commandPalette": [
@@ -178,7 +177,11 @@
           "when": "false"
         },
         {
-          "command": "novelai.extractCharacters",
+          "command": "novelai.extractSettings",
+          "when": "true"
+        },
+        {
+          "command": "novelai.generateSettingsDocs",
           "when": "true"
         }
       ]

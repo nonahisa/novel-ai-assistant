@@ -653,6 +653,42 @@ describe("人物抽出フロー", () => {
     expect(state.generate).not.toHaveBeenCalled();
   });
 
+  // 抽出のあと資料Markdownを作り直してよいかを、呼び出し側がこの戻り値で決める。
+  // 中止したのに資料まで作り直すと、作者は何が起きたのか分からなくなる。
+  test("保存まで進んだらtrueを返す", async () => {
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage: vi.fn(async () => undefined),
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    state.generate.mockResolvedValue(successfulResult("灯"));
+
+    await expect(extractCharacters(work, testRegistry())).resolves.toBe(true);
+  });
+
+  test("確認で中止したらfalseを返す", async () => {
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "中止"),
+      showWarningMessage: vi.fn(async () => undefined),
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+
+    await expect(extractCharacters(work, testRegistry())).resolves.toBe(false);
+    expect(state.generate).not.toHaveBeenCalled();
+  });
+
   test("1回のAI応答から人物・能力・場所をまとめて保存する", async () => {
     // 種別ごとにAIを呼ぶと同じ本文を3回読ませることになるため、
     // 1チャンク1回の応答を3種類に振り分ける。

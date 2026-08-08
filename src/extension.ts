@@ -27,6 +27,7 @@ import {
 import { selectOllamaExecutable } from "./features/selectOllamaExecutable";
 import { generateSettingsDocs } from "./features/generateSettingsDocs";
 import { TermHighlighter } from "./views/termHighlight";
+import { ActionListProvider } from "./views/actionList";
 import {
   registerProgressCancelCommand,
   withProgress,
@@ -52,6 +53,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     showCollapseAll: true,
   });
   context.subscriptions.push(treeView);
+
+  // コマンドパレットにしかない操作は作者が存在に気づけないため、一覧で出す
+  context.subscriptions.push(
+    vscode.window.createTreeView("novelai.actions", {
+      treeDataProvider: new ActionListProvider(registry),
+    })
+  );
 
   // ─── ステータスバー（現在開いているファイルの文字数） ───
   const statusBar = vscode.window.createStatusBarItem(
@@ -409,15 +417,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
-      "novelai.extractCharacters",
+      "novelai.extractSettings",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
 
         if (!(await saveDirtyDocumentsBeforeExtraction(work))) return;
 
-        await extractCharacters(work, aiRegistry);
+        const extracted = await extractCharacters(work, aiRegistry);
         treeProvider.refresh(work.id);
+
+        // 抽出したJSONから資料Markdownまで一度に作る。
+        // 抽出結果の要約はすでに出しているので、成功は再通知しない。
+        if (extracted) {
+          await generateSettingsDocs(work, { silent: true });
+        }
       }
     )
   );

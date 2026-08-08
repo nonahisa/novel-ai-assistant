@@ -94,7 +94,7 @@ export async function saveDirtyDocumentsBeforeExtraction(
   for (const document of dirtyDocuments) {
     if (!document.save || !(await document.save())) {
       await vscode.window.showWarningMessage(
-        "保存できない文書があるため、人物抽出を中止しました。"
+        "保存できない文書があるため、設定資料の抽出を中止しました。"
       );
       return false;
     }
@@ -102,19 +102,26 @@ export async function saveDirtyDocumentsBeforeExtraction(
 
   if (dirtyDocumentsInside(work.folderPath).length > 0) {
     await vscode.window.showWarningMessage(
-      "保存後も未保存の文書が残っているため、人物抽出を中止しました。"
+      "保存後も未保存の文書が残っているため、設定資料の抽出を中止しました。"
     );
     return false;
   }
   return true;
 }
 
+/**
+ * 本文から登場人物・能力・場所を抽出して保存する。
+ *
+ * 戻り値は「設定が保存されたか」。
+ * 中止・失敗のときに資料Markdownまで作り直しても意味がないため、
+ * 呼び出し側が続けて資料を生成してよいかを判断できるようにしている。
+ */
 export async function extractCharacters(
   work: WorkEntry,
   registry: AIRegistry
-): Promise<void> {
+): Promise<boolean> {
   const resolved = await ensureConfigured(registry);
-  if (!resolved) return;
+  if (!resolved) return false;
 
   // モデル情報はチャンクサイズを決めるのに使う。
   // 取得できないまま既定値で進むと、本来より細かく分割され、
@@ -122,7 +129,7 @@ export async function extractCharacters(
   // そのため取れない場合は、先に疎通を回復させてから取り直す。
   let modelInfo = await registry.resolveModelInfo();
   if (!modelInfo) {
-    if (!(await confirmProviderReachable(resolved.provider))) return;
+    if (!(await confirmProviderReachable(resolved.provider))) return false;
     modelInfo = await registry.resolveModelInfo();
   }
   if (!modelInfo) {
@@ -137,7 +144,7 @@ export async function extractCharacters(
     if (action === "AIの設定を開く") {
       await vscode.commands.executeCommand("novelai.setupAI");
     }
-    return;
+    return false;
   }
 
   const contextWindow = modelInfo.contextWindow;
@@ -162,7 +169,7 @@ export async function extractCharacters(
   const scan = await scanWork(work);
   if (scan.episodes.length === 0) {
     vscode.window.showWarningMessage("本文ファイルが見つかりません。");
-    return;
+    return false;
   }
 
   // 競合マーカーを含むファイルはAI処理をブロックする
@@ -199,12 +206,12 @@ export async function extractCharacters(
       "除外して続行",
       "中止"
     );
-    if (proceed !== "除外して続行") return;
+    if (proceed !== "除外して続行") return false;
   }
 
   if (chunks.length === 0) {
     vscode.window.showWarningMessage("処理できる本文がありません。");
-    return;
+    return false;
   }
 
   const store = new CharacterStore(work);
@@ -212,7 +219,7 @@ export async function extractCharacters(
     await vscode.window.showWarningMessage(
       "未保存の人物設定があります。人物設定を保存してから、もう一度実行してください。"
     );
-    return;
+    return false;
   }
   const loaded = await store.loadAll();
 
@@ -232,7 +239,7 @@ export async function extractCharacters(
       });
       await vscode.window.showTextDocument(doc);
     }
-    return;
+    return false;
   }
 
   const cache = new ChunkCache(work);
@@ -259,7 +266,7 @@ export async function extractCharacters(
     // AIを呼ぶ前に疎通を確認する。
     // ここで確認しないと、接続できないまま全チャンクを順に試し、
     // 待たされた末に「失敗 N 件」とだけ言われることになる。
-    if (!(await confirmProviderReachable(resolved.provider))) return;
+    if (!(await confirmProviderReachable(resolved.provider))) return false;
 
     const estimateMinutes = Math.ceil((pending.length * 20) / 60);
     const configuredMaxOutputTokens = vscode.workspace
@@ -279,7 +286,7 @@ export async function extractCharacters(
       "実行",
       "中止"
     );
-    if (confirm !== "実行") return;
+    if (confirm !== "実行") return false;
   }
 
   const extractedAll: Array<{
@@ -304,7 +311,7 @@ export async function extractCharacters(
   );
 
   await withCancellableProgress(
-    "登場人物を抽出しています",
+    "設定資料を抽出しています",
     async (progress, token) => {
       const controller = new AbortController();
       token.onCancellationRequested(() => {
@@ -449,9 +456,9 @@ export async function extractCharacters(
 
   if (cancelled) {
     vscode.window.showInformationMessage(
-      "登場人物の抽出を中止しました。完了済みの処理は次回再利用されます。"
+      "設定資料の抽出を中止しました。完了済みの処理は次回再利用されます。"
     );
-    return;
+    return false;
   }
 
   const merged =
@@ -480,7 +487,7 @@ export async function extractCharacters(
       await vscode.window.showWarningMessage(
         "保存直前に未保存の人物設定が見つかりました。作者の変更を保護するため、抽出結果は保存しませんでした。"
       );
-      return;
+      return false;
     }
     try {
       await store.saveAll(changedCharacters);
@@ -530,7 +537,7 @@ export async function extractCharacters(
           `novelai.${resolved.provider.id}`
         );
       }
-      return;
+      return false;
     }
   }
 
@@ -587,6 +594,10 @@ export async function extractCharacters(
       vscode.Uri.file(dir)
     );
   }
+
+  // ここまで来ていれば人物・能力・場所の保存を試みている。
+  // 保存件数が0でも、既存の設定から資料は作り直せる
+  return true;
 }
 
 function toExtractionFailure(chunk: Chunk, error: unknown): ExtractionFailure {
@@ -804,7 +815,7 @@ async function confirmProviderReachable(
     const canStart = provider.id === "ollama" && isLocalOllamaEndpoint();
 
     const action = await vscode.window.showWarningMessage(
-      `AIに接続できないため、登場人物の抽出を開始できません。\n${result.message}`,
+      `AIに接続できないため、設定資料の抽出を開始できません。\n${result.message}`,
       ...(canStart ? ["Ollamaを起動"] : []),
       "再試行",
       "設定を開く",

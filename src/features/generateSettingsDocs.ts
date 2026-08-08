@@ -24,7 +24,7 @@ import {
  */
 
 const GENERATED_NOTICE =
-  "<!-- このファイルは「設定資料を生成」で自動生成されます。\n" +
+  "<!-- このファイルは「設定資料を抽出」で自動生成されます。\n" +
   "     直接編集しても次回の生成で失われます。\n" +
   "     補足を残したい場合は各JSONの exportNote / authorNotes に書いてください。 -->\n";
 
@@ -36,7 +36,20 @@ interface GeneratedDoc {
   hasContent: boolean;
 }
 
-export async function generateSettingsDocs(work: WorkEntry): Promise<void> {
+export interface GenerateSettingsDocsOptions {
+  /**
+   * 成功時の通知を出さない。
+   * 抽出の直後に続けて呼ぶときに使う。
+   * 抽出結果の要約をすでに出しているので、通知が二重になるのを避ける。
+   * 失敗は静かにできないため、silent でもそのまま知らせる。
+   */
+  silent?: boolean;
+}
+
+export async function generateSettingsDocs(
+  work: WorkEntry,
+  options: GenerateSettingsDocsOptions = {}
+): Promise<void> {
   const characterStore = new CharacterStore(work);
   const abilityStore = createAbilityStore(work);
   const locationStore = createLocationStore(work);
@@ -70,14 +83,17 @@ export async function generateSettingsDocs(work: WorkEntry): Promise<void> {
     return;
   }
 
-  const options = { workTitle: work.title };
+  const markdownOptions = { workTitle: work.title };
   const abilityTerm = abilitySystem.abilityTerm || "能力";
 
   const docs: GeneratedDoc[] = [
     {
       fileName: "characters.md",
       label: "登場人物",
-      content: buildCharacterMarkdown(loadedCharacters.characters, options),
+      content: buildCharacterMarkdown(
+        loadedCharacters.characters,
+        markdownOptions
+      ),
       hasContent: loadedCharacters.characters.length > 0,
     },
     {
@@ -86,7 +102,7 @@ export async function generateSettingsDocs(work: WorkEntry): Promise<void> {
       content: buildAbilityMarkdown(
         loadedAbilities.records,
         abilitySystem,
-        options
+        markdownOptions
       ),
       // 能力体系の無い作品に空の一覧を作らない
       hasContent: loadedAbilities.records.length > 0,
@@ -94,7 +110,7 @@ export async function generateSettingsDocs(work: WorkEntry): Promise<void> {
     {
       fileName: "locations.md",
       label: "場所",
-      content: buildLocationMarkdown(loadedLocations.records, options),
+      content: buildLocationMarkdown(loadedLocations.records, markdownOptions),
       hasContent: loadedLocations.records.length > 0,
     },
   ];
@@ -133,11 +149,14 @@ export async function generateSettingsDocs(work: WorkEntry): Promise<void> {
   }
 
   if (written.length === 0) {
+    if (options.silent) return;
     vscode.window.showInformationMessage(
-      "資料にできる設定がまだありません。先に「登場人物を抽出」を実行してください。"
+      "資料にできる設定がまだありません。先に「設定資料を抽出」を実行してください。"
     );
     return;
   }
+
+  if (options.silent) return;
 
   const skippedNote =
     skipped.length > 0 ? `（${skipped.join("・")}は該当なし）` : "";

@@ -25,7 +25,9 @@ const COMMANDS = [
   "novelai.showWorkStats",
   "novelai.setupAI",
   "novelai.testAI",
-  "novelai.extractCharacters",
+  "novelai.extractSettings",
+  "novelai.generateSettingsDocs",
+  "novelai.selectOllamaExecutable",
 ];
 
 export async function run(): Promise<void> {
