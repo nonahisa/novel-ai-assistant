@@ -108,7 +108,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push(treeView);
 
-  // コマンドパレットにしかない操作は作者が存在に気づけないため、一覧で出す
+  // コマンドパレットにしかない操作は作者が存在に気づけないため、分類して一覧に出す
   context.subscriptions.push(
     vscode.window.createTreeView("novelai.actions", {
       treeDataProvider: new ActionListProvider(registry),

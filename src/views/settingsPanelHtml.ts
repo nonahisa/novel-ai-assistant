@@ -375,43 +375,21 @@ button.secondary {
 
     if (proposal) el.detail.appendChild(renderProposal());
 
-    // ── AIによる掘り下げ（承認制）
-    el.detail.appendChild(heading("AIで掘り下げる"));
-    const diveHint = document.createElement("div");
-    diveHint.className = "readonly";
-    diveHint.textContent =
-      "本文から読み取れることを文章で書かせます。項目には入らず、メモとして下に残ります。";
-    el.detail.appendChild(diveHint);
-    const topic = document.createElement("input");
-    topic.type = "text";
-    topic.placeholder = "観点（空欄なら全体的に掘り下げます）";
-    el.detail.appendChild(topic);
+    // ── AIに相談する（質問と掘り下げを1つにまとめたもの）
+    el.detail.appendChild(heading("AIに相談する"));
+    const chatHint = document.createElement("div");
+    chatHint.className = "readonly";
+    chatHint.textContent =
+      "質問にも、掘り下げたい観点にも使えます。空欄で押すと全体的に掘り下げます。" +
+      "答えは項目には入らず、残したいものだけメモとして追記できます。";
+    el.detail.appendChild(chatHint);
 
-    const diveRow = document.createElement("div");
-    diveRow.className = "row";
-    const diveButton = document.createElement("button");
-    diveButton.className = "action";
-    diveButton.textContent = "掘り下げる";
-    diveButton.disabled = busy;
-    diveButton.addEventListener("click", function () {
-      post("deepDive", { kind: detail.kind, id: detail.id, topic: topic.value });
-    });
-    diveRow.appendChild(diveButton);
-    el.detail.appendChild(diveRow);
-
+    for (const turn of chatLog) el.detail.appendChild(renderTurn(turn));
     if (draft) el.detail.appendChild(renderDraft());
 
-    if (detail.aiNotes.length > 0) {
-      el.detail.appendChild(heading("追記済みの掘り下げ"));
-      for (const note of detail.aiNotes) el.detail.appendChild(renderNote(note));
-    }
-
-    // ── チャット
-    el.detail.appendChild(heading("この設定について質問する"));
-    for (const turn of chatLog) el.detail.appendChild(renderTurn(turn));
-
     const question = document.createElement("textarea");
-    question.placeholder = "例：この人物が第12話で嘘をついた理由は本文から読み取れますか？";
+    question.placeholder =
+      "例：第12話で嘘をついた理由は本文から読み取れますか？／生い立ち";
     question.rows = 2;
     el.detail.appendChild(question);
 
@@ -419,12 +397,12 @@ button.secondary {
     askRow.className = "row";
     const askButton = document.createElement("button");
     askButton.className = "action";
-    askButton.textContent = "質問する";
+    askButton.textContent = "AIに聞く";
     askButton.disabled = busy;
     askButton.addEventListener("click", function () {
       const text = question.value.trim();
-      if (!text) return;
-      chatLog.push({ role: "author", text: text });
+      // 空欄のまま押されたら全体的な掘り下げとして扱う
+      chatLog.push({ role: "author", text: text || "（全体的に掘り下げる）" });
       post("chat", { kind: detail.kind, id: detail.id, question: text });
       question.value = "";
       renderDetail();
@@ -629,16 +607,19 @@ button.secondary {
       row.className = "row";
       const keep = document.createElement("button");
       keep.className = "action secondary";
-      keep.textContent = "この回答をメモとして追記";
+      keep.textContent = "この回答をメモにする";
       keep.disabled = busy;
       keep.addEventListener("click", function () {
-        post("approveNote", {
-          kind: detail.kind,
-          id: detail.id,
+        // すぐには保存せず、手直しできる下書きにする。
+        // AIの文章をそのまま残したいとは限らない
+        draft = {
           topic: turn.question || "",
           text: turn.text,
+          model: turn.model || "",
           source: "chat",
-        });
+        };
+        setStatus("下書きにしました。内容を確認して「追記する」を押してください。");
+        renderDetail();
       });
       row.appendChild(keep);
       box.appendChild(row);
@@ -692,6 +673,7 @@ button.secondary {
           text: message.text,
           html: message.html,
           question: message.question,
+          model: message.model,
         });
         renderDetail();
         break;

@@ -1,12 +1,41 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import { visibleActions } from "../../src/views/actionList";
+import {
+  ACTION_GROUPS,
+  groupedActions,
+  visibleActions,
+} from "../../src/views/actionList";
 
 interface PackageManifest {
   contributes: { commands: Array<{ command: string }> };
 }
 
-describe("よく使う操作の一覧", () => {
+describe("操作メニューの分類", () => {
+  test("決めた順に分類を並べる", () => {
+    // 作業の流れで並べる。実装単位ではない
+    expect(groupedActions(true).map((entry) => entry.group)).toEqual([
+      ...ACTION_GROUPS,
+    ]);
+  });
+
+  test("すべての操作がどれかの分類に入る", () => {
+    const grouped = groupedActions(true).flatMap((entry) => entry.actions);
+
+    expect(grouped).toHaveLength(visibleActions(true).length);
+  });
+
+  test("中身が無い分類は出さない", () => {
+    // 作品未登録では「資料」「整える」「書き出す」が空になる
+    const groups = groupedActions(false).map((entry) => entry.group);
+
+    expect(groups).toEqual(["AI設定", "困ったとき"]);
+    expect(groupedActions(false).every((entry) => entry.actions.length > 0)).toBe(
+      true
+    );
+  });
+});
+
+describe("操作メニューの一覧", () => {
   test("作品が未登録なら作品向けの操作を出さない", () => {
     // 押しても「作品が登録されていません」と言われるだけの項目は、
     // 押せない理由が作者に伝わらないので最初から並べない

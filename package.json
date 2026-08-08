@@ -32,7 +32,7 @@
         },
         {
           "id": "novelai.actions",
-          "name": "よく使う操作"
+          "name": "操作メニュー"
         }
       ]
     },
@@ -96,7 +96,7 @@
       },
       {
         "command": "novelai.exportImeDictionary",
-        "title": "IME辞書を書き出す",
+        "title": "IME辞書を出力",
         "category": "小説執筆",
         "icon": "$(symbol-keyword)"
       },
@@ -144,7 +144,7 @@
       },
       {
         "command": "novelai.generateSettingsDocs",
-        "title": "設定資料集を出力する（AIを使わない）",
+        "title": "設定資料集を出力（AIを使わない）",
         "category": "小説執筆",
         "icon": "$(sync)"
       }

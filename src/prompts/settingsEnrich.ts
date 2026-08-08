@@ -1,6 +1,6 @@
 import type { MentionExcerpt } from "../core/mentionExcerpts";
 import type { SettingsKind } from "../core/settingsSummary";
-import type { DeepDiveTarget } from "./settingsDeepDive";
+import type { SettingsTarget } from "./settingsChat";
 
 /**
  * P-20 設定項目の充実
@@ -103,7 +103,7 @@ export function buildEnrichSchema(kind: SettingsKind): object {
 export interface EnrichInput {
   workTitle: string;
   kind: SettingsKind;
-  target: DeepDiveTarget;
+  target: SettingsTarget;
   excerpts: MentionExcerpt[];
 }
 

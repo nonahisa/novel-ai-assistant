@@ -18,6 +18,7 @@ import {
   appendAiNote,
   removeAiNote,
   SettingsEditError,
+  type EditOptions,
   type RecordEdits,
 } from "../core/settingsEdit";
 import {
@@ -38,11 +39,10 @@ import { expandNameVariants } from "../core/termIndex";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
 import {
-  buildDeepDivePrompt,
   buildSettingsChatPrompt,
   SETTINGS_ASSISTANT_SYSTEM_PROMPT,
   type ChatTurn,
-} from "../prompts/settingsDeepDive";
+} from "../prompts/settingsChat";
 import {
   buildEnrichPrompt,
   buildEnrichSchema,
@@ -389,9 +389,6 @@ export class SettingsPanel {
         case "save":
           await this.handleSave(message.kind, message.id, message.edits);
           return;
-        case "deepDive":
-          await this.handleDeepDive(message.kind, message.id, message.topic);
-          return;
         case "enrich":
           await this.handleEnrich(message.kind, message.id);
           return;
@@ -442,13 +439,16 @@ export class SettingsPanel {
   private applyEdits(
     kind: SettingsKind,
     record: Character | Ability | Location,
-    edits: RecordEdits
+    edits: RecordEdits,
+    options?: EditOptions
   ): Character | Ability | Location {
     if (kind === "character") {
-      return applyCharacterEdits(record as Character, edits);
+      return applyCharacterEdits(record as Character, edits, options);
     }
-    if (kind === "ability") return applyAbilityEdits(record as Ability, edits);
-    return applyLocationEdits(record as Location, edits);
+    if (kind === "ability") {
+      return applyAbilityEdits(record as Ability, edits, options);
+    }
+    return applyLocationEdits(record as Location, edits, options);
   }
 
   private async persist(
@@ -485,49 +485,6 @@ export class SettingsPanel {
       detail,
       groups: this.groups(),
       notice,
-    });
-  }
-
-  private async handleDeepDive(
-    kind: SettingsKind,
-    id: string,
-    topic: string
-  ): Promise<void> {
-    const record = this.find(kind, id);
-    if (!record) {
-      this.post({ type: "error", message: "選択した設定が見つかりません。" });
-      return;
-    }
-
-    const resolved = await ensureConfigured(this.registry);
-    if (!resolved) return;
-
-    const excerpts = await this.excerptsFor(record);
-    const prompt = buildDeepDivePrompt({
-      workTitle: this.work.title,
-      target: {
-        kindLabel: KIND_LABELS[kind],
-        name: record.name,
-        currentSettings: this.describe(kind, record),
-      },
-      topic,
-      excerpts,
-    });
-
-    const text = await this.generate(
-      prompt,
-      `「${record.name}」を掘り下げています（本文 ${totalChars(
-        excerpts
-      ).toLocaleString("ja-JP")}字を参照）`
-    );
-    if (text === undefined) return;
-
-    // ここでは保存しない。作者が内容を見て「追記する」を押すまで下書きのまま
-    this.post({
-      type: "draft",
-      topic,
-      text,
-      model: resolved.model,
     });
   }
 
@@ -623,12 +580,17 @@ export class SettingsPanel {
       (edits as Record<string, string>)[key] = value;
     }
 
-    const updated = this.applyEdits(message.kind, record, edits);
+    // AIの提案を採用しただけなので、作者が確定させた記述としては扱わない。
+    // 作者確定にすると、その人物は以後の抽出から締め出されてしまう
+    const updated = this.applyEdits(message.kind, record, edits, {
+      authorConfirmed: false,
+    });
     await this.persist(message.kind, updated);
     await this.reloadAfterSave(
       message.kind,
       message.id,
-      `${Object.keys(message.values).length} 項目を反映しました。`
+      `${Object.keys(message.values).length} 項目を反映しました。` +
+        "この内容は以後の抽出で更新されることがあります。"
     );
   }
 
@@ -676,6 +638,7 @@ export class SettingsPanel {
       text,
       html: renderMarkdownLite(text),
       question,
+      model: resolved.model,
     });
   }
 
@@ -872,10 +835,6 @@ function asText(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function totalChars(excerpts: MentionExcerpt[]): number {
-  return excerpts.reduce((sum, excerpt) => sum + excerpt.text.length, 0);
-}
-
 function describeError(error: unknown): string {
   if (error instanceof AIError) {
     // 画面には出さない技術的な内容をログへ残す
@@ -927,7 +886,6 @@ type PanelMessage =
   | ApplyProposalMessage
   | { type: "select"; kind: SettingsKind; id: string }
   | { type: "save"; kind: SettingsKind; id: string; edits: RecordEdits }
-  | { type: "deepDive"; kind: SettingsKind; id: string; topic: string }
   | ApproveNoteMessage
   | { type: "deleteNote"; kind: SettingsKind; id: string; noteId: string }
   | { type: "chat"; kind: SettingsKind; id: string; question: string };
@@ -960,7 +918,6 @@ type OutgoingMessage =
       groups: Record<SettingsKind, ListItem[]>;
       notice: string;
     }
-  | { type: "draft"; topic: string; text: string; model: string }
   | {
       type: "proposal";
       kind: SettingsKind;
@@ -968,6 +925,12 @@ type OutgoingMessage =
       proposals: FieldProposal[];
       model: string;
     }
-  | { type: "chatAnswer"; text: string; html: string; question: string }
+  | {
+      type: "chatAnswer";
+      text: string;
+      html: string;
+      question: string;
+      model: string;
+    }
   | { type: "busy"; busy: boolean; label: string }
   | { type: "error"; message: string };

@@ -1,15 +1,20 @@
 import type { MentionExcerpt } from "../core/mentionExcerpts";
 
 /**
- * P-18 設定の掘り下げ / P-19 設定についての質問
+ * P-18 設定についての相談
  *
  * 抽出（P-04a）が「本文に書いてあることを取り出す」のに対し、
- * こちらは「本文からこう読める」を書かせる。根拠の逐語照合ができないため、
- * 結果は既存の項目へ混ぜず、承認を経て aiNotes に追記するだけにする。
+ * こちらは「本文からこう読める」を文章で書かせる。
+ * 根拠の逐語照合ができないため、結果は既存の項目へ混ぜず、
+ * 承認を経て aiNotes に追記するだけにする。
+ *
+ * 以前は「掘り下げ（観点を指定して書かせる）」と「質問（聞いて答えさせる）」を
+ * 別々の機能にしていたが、**入力が観点か質問かが違うだけで中身は同じ**だった。
+ * 画面も処理も1つにまとめてある。
  *
  * プロンプトを変更したら version を上げること。
  */
-export const SETTINGS_DEEP_DIVE_VERSION = "1.0";
+export const SETTINGS_CHAT_VERSION = "2.0";
 
 export const SETTINGS_ASSISTANT_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 
@@ -22,8 +27,8 @@ export const SETTINGS_ASSISTANT_SYSTEM_PROMPT = `あなたは日本語の小説�
 5. 与えられた本文の抜粋に答えがない場合は、無理に埋めず「本文からは分かりません」と答えること。
    分からないことを分からないと言うほうが、作者の役に立ちます。`;
 
-/** 掘り下げの対象。人物・能力・場所で共通に扱う */
-export interface DeepDiveTarget {
+/** 相談の対象。人物・能力・場所で共通に扱う */
+export interface SettingsTarget {
   /** 「登場人物」「能力」「場所」など、種別の表示名 */
   kindLabel: string;
   name: string;
@@ -31,59 +36,27 @@ export interface DeepDiveTarget {
   currentSettings: string;
 }
 
-export interface DeepDiveInput {
-  workTitle: string;
-  target: DeepDiveTarget;
-  /** 作者が指定した観点。空なら全体的に掘り下げる */
-  topic: string;
-  excerpts: MentionExcerpt[];
-}
-
-/** 観点を指定しなかった場合の既定 */
-export const DEFAULT_DEEP_DIVE_TOPIC =
-  "この設定について、本文から読み取れることを掘り下げる";
-
-export function buildDeepDivePrompt(input: DeepDiveInput): string {
-  const topic = input.topic.trim() || DEFAULT_DEEP_DIVE_TOPIC;
-
-  return `小説「${input.workTitle}」の${input.target.kindLabel}「${
-    input.target.name
-  }」について掘り下げてください。
-
-【現在の設定】
-${input.target.currentSettings}
-
-【本文の抜粋】（この${input.target.kindLabel}が登場する場面）
-${formatExcerpts(input.excerpts)}
-
-【掘り下げる観点】
-${topic}
-
-【書き方】
-- 400字程度の日本語の文章で書いてください。箇条書きでも構いません。
-- 本文から読み取れることを中心に書き、根拠になる場面を「（第12話）」のように示してください。
-- 現在の設定にすでに書かれていることの言い換えは書かないでください。
-  作者が知らないこと、気づいていないことを書いてください。
-- 本文の抜粋に根拠が乏しい場合は、そのことを正直に書いてください。
-  抜粋が足りないなら「本文の抜粋からは分かりません」とだけ答えて構いません。
-- 前置き・後書き・見出しは不要です。本文だけを書いてください。`;
+export interface ChatTurn {
+  role: "author" | "assistant";
+  text: string;
 }
 
 export interface SettingsChatInput {
   workTitle: string;
-  target: DeepDiveTarget;
+  target: SettingsTarget;
+  /** 作者が入力した質問、または掘り下げたい観点 */
   question: string;
   excerpts: MentionExcerpt[];
   /** これまでのやり取り。古いものから順に */
   history: ChatTurn[];
 }
 
-export interface ChatTurn {
-  role: "author" | "assistant";
-  text: string;
-}
+/** 入力が空のときに使う。全体的に掘り下げさせる */
+export const DEFAULT_CHAT_TOPIC =
+  "この設定について、本文から読み取れることを掘り下げてください。";
 
 export function buildSettingsChatPrompt(input: SettingsChatInput): string {
+  const question = input.question.trim() || DEFAULT_CHAT_TOPIC;
   const history =
     input.history.length > 0
       ? `\n【これまでのやり取り】\n${input.history
@@ -96,7 +69,7 @@ export function buildSettingsChatPrompt(input: SettingsChatInput): string {
 
   return `小説「${input.workTitle}」の${input.target.kindLabel}「${
     input.target.name
-  }」について、作者の質問に答えてください。
+  }」について、作者の求めに応じてください。
 
 【現在の設定】
 ${input.target.currentSettings}
@@ -104,15 +77,19 @@ ${input.target.currentSettings}
 【本文の抜粋】（この${input.target.kindLabel}が登場する場面）
 ${formatExcerpts(input.excerpts)}
 ${history}
-【作者の質問】
-${input.question}
+【作者の入力】
+${question}
 
 【答え方】
-- 日本語で、簡潔に答えてください。長くても400字程度にしてください。
+- 日本語で答えてください。長くても400字程度にしてください。
+- 質問なら答え、観点だけが書かれていればその観点で掘り下げてください。
 - 本文に書かれていることと、あなたの推測を区別してください。
 - 根拠になる場面があれば「（第12話）」のように示してください。
+- 現在の設定にすでに書かれていることの言い換えは書かないでください。
+  作者が知らないこと、気づいていないことを書いてください。
 - 抜粋に答えが無ければ「本文の抜粋からは分かりません」と答えてください。
-  作者は自分の作品を知っています。当てずっぽうは邪魔にしかなりません。`;
+  作者は自分の作品を知っています。当てずっぽうは邪魔にしかなりません。
+- 前置き・後書きは不要です。`;
 }
 
 /**
