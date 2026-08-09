@@ -18,6 +18,11 @@ import {
   parseOrganization,
   type Organization,
 } from "../models/organization";
+import {
+  parseWorldItem,
+  worldItemFileName,
+  type WorldItem,
+} from "../models/world";
 
 /** 能力の保存先。1件1ファイルにするのは人物と同じ理由（Gitの競合を避ける） */
 export function createAbilityStore(work: WorkEntry): SettingsStore<Ability> {
@@ -36,6 +41,16 @@ export function createLocationStore(work: WorkEntry): SettingsStore<Location> {
     idPrefix: "loc",
     parse: parseLocation,
     fileName: locationFileName,
+  });
+}
+
+/** 世界観の保存先。1件1ファイルにするのは他と同じ理由 */
+export function createWorldStore(work: WorkEntry): SettingsStore<WorldItem> {
+  return new SettingsStore<WorldItem>(work, {
+    directoryName: "world",
+    idPrefix: "world",
+    parse: parseWorldItem,
+    fileName: worldItemFileName,
   });
 }
 

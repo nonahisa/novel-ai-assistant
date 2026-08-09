@@ -128,8 +128,53 @@ export function logFailure(
  * 万一混ざったときの被害が大きい。念のため伏せる。
  */
 export function redactSecrets(text: string): string {
-  return text
+  // 実際に使っているキーそのものを先に消す。
+  // 接頭辞での判定より確実で、形式が変わっても効く
+  let result = text;
+  for (const secret of knownSecrets) {
+    if (secret && result.includes(secret)) {
+      result = result.split(secret).join("***");
+    }
+  }
+
+  // 登録し損ねたキーへの保険。接頭辞は変わりうるので、これだけに頼らない
+  return result
     .replace(/sk-[A-Za-z0-9_-]{8,}/g, "sk-***")
     .replace(/AIza[A-Za-z0-9_-]{8,}/g, "AIza***")
     .replace(/AQ\.[A-Za-z0-9_-]{8,}/g, "AQ.***");
+}
+
+/**
+ * 伏せ字にすべきキーの実物。
+ *
+ * **接頭辞での判定に頼らない。** このプロジェクトは以前、
+ * 接頭辞（`AIza`）でキーの形式を検証して、Googleが形式を変えた結果
+ * 正しいキーを弾いた。同じ理屈で、接頭辞での伏せ字も将来外れる。
+ *
+ * 実際に使っている値そのものを控えておけば、形式が何であれ消せる。
+ * ログはファイルにも残るようになったので、取りこぼしが残り続ける。
+ */
+const knownSecrets = new Set<string>();
+
+/**
+ * キーを伏せ字の対象に加える。読み込み・保存のたびに呼ぶ。
+ *
+ * 短い値は登録しない。ありふれた文字列を消すと、
+ * ログが伏せ字だらけになって読めなくなる。
+ */
+export function registerSecret(value: string | undefined): void {
+  const secret = value?.trim();
+  if (!secret || secret.length < 8) return;
+  knownSecrets.add(secret);
+}
+
+/** キーを消したときに呼ぶ。控えたままにしない */
+export function forgetSecret(value: string | undefined): void {
+  const secret = value?.trim();
+  if (secret) knownSecrets.delete(secret);
+}
+
+/** テスト用。控えをすべて捨てる */
+export function clearSecrets(): void {
+  knownSecrets.clear();
 }

@@ -13,6 +13,7 @@ import {
 import { fetchJson } from "./httpClient";
 import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
+import { forgetSecret, registerSecret } from "../core/logger";
 
 /** APIキーの保存先。settings.json ではなくOSの資格情報ストア */
 const SECRET_KEY = "novelai.openai.apiKey";
@@ -77,16 +78,21 @@ export class OpenAIProvider implements ApiKeyProvider {
   constructor(private readonly context: vscode.ExtensionContext) {}
 
   async getApiKey(): Promise<string | undefined> {
-    return this.context.secrets.get(SECRET_KEY);
+    const key = await this.context.secrets.get(SECRET_KEY);
+    // 万一ログへ流れても伏せ字になるようにする
+    registerSecret(key);
+    return key;
   }
 
   async setApiKey(key: string): Promise<void> {
     await this.context.secrets.store(SECRET_KEY, key.trim());
+    registerSecret(key);
     // キーが変わればアカウントも変わりうるので、モデル情報を捨てる
     this.modelCache.clear();
   }
 
   async clearApiKey(): Promise<void> {
+    forgetSecret(await this.context.secrets.get(SECRET_KEY));
     await this.context.secrets.delete(SECRET_KEY);
     this.modelCache.clear();
   }

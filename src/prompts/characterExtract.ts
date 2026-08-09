@@ -200,6 +200,25 @@ ${knownLocations}
    読み取れない場合は null とすること。
 4. 説明は本文から読み取れる範囲だけを書くこと。
 
+【世界観の抽出ルール】（P-03）
+世界観とは「**その世界がどうなっているか**」です。
+**物語の出来事そのもの（誰が何をしたか）は入れません。**
+1. category は次のいずれかにすること。
+   ・genre：ジャンル的特徴（現代／異世界／SF／歴史 など、判断の根拠になる記述）
+   ・era：時代背景（年代、文明水準、技術水準）
+   ・rule：世界の法則（能力の仕組み、その制約や代償）
+   ・society：社会構造（国家、身分制度、経済、通貨）
+   ・culture：文化・風習（宗教、言語、暦、儀礼）
+   ・geography：地理（大陸、気候、地形の特徴）
+   ・term：固有の用語・造語とその意味
+2. name には**何についての項目か**が分かる短い見出しを付けること（15字以内）。
+   例：「詠唱の制約」「冒険者の身分」「通貨の単位」
+   本文をそのまま写さないこと。中身は description に書く。
+3. description に中身を書くこと。本文から読み取れる範囲に限る。
+4. **1話かぎりの出来事は入れないこと。** 「第3話で城が燃えた」は出来事であり、
+   世界観ではない。「城は木造で燃えやすい」なら世界観である。
+5. 既に登録されている世界観と同じ内容は出さないこと。
+
 【すべてに共通のルール】
 - reading（読み仮名）は、**名前に漢字が含まれる場合だけ**ひらがなで書くこと。
   カタカナだけ・ひらがなだけの名前は null にしてよい（こちらで機械的に作るため）。
@@ -338,6 +357,30 @@ export const CHARACTER_EXTRACT_SCHEMA = {
         required: ["name", "summary", "description", "evidence"],
       },
     },
+    worldview: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string", maxLength: 20 },
+          category: {
+            type: "string",
+            enum: [
+              "genre",
+              "era",
+              "rule",
+              "society",
+              "culture",
+              "geography",
+              "term",
+            ],
+          },
+          description: { type: ["string", "null"] },
+          evidence: { type: "string", minLength: 1 },
+        },
+        required: ["name", "category", "description", "evidence"],
+      },
+    },
     abilitySystem: {
       type: "object",
       properties: {
@@ -358,6 +401,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
     "abilities",
     "organizations",
     "locations",
+    "worldview",
     "abilitySystem",
   ],
 } as const;

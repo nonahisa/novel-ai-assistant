@@ -12,7 +12,7 @@ import {
   validateApiKeyFormat,
 } from "./types";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
-import { logLine } from "../core/logger";
+import { forgetSecret, logLine, registerSecret } from "../core/logger";
 
 /** APIキーの保存先。設定ファイルではなくOSの資格情報ストアに置く */
 const SECRET_KEY = "novelai.claude.apiKey";
@@ -53,16 +53,21 @@ export class ClaudeProvider implements ApiKeyProvider {
   constructor(private readonly context: vscode.ExtensionContext) {}
 
   async getApiKey(): Promise<string | undefined> {
-    return this.context.secrets.get(SECRET_KEY);
+    const key = await this.context.secrets.get(SECRET_KEY);
+    // 万一ログへ流れても伏せ字になるようにする
+    registerSecret(key);
+    return key;
   }
 
   async setApiKey(key: string): Promise<void> {
     await this.context.secrets.store(SECRET_KEY, key.trim());
+    registerSecret(key);
     // キーが変わればアカウントも変わりうるので、モデル情報を捨てる
     this.modelCache.clear();
   }
 
   async clearApiKey(): Promise<void> {
+    forgetSecret(await this.context.secrets.get(SECRET_KEY));
     await this.context.secrets.delete(SECRET_KEY);
     this.modelCache.clear();
   }

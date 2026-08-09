@@ -12,7 +12,7 @@ import {
 } from "./types";
 import { fetchJson } from "./httpClient";
 import { toGeminiSchema } from "./jsonSchema";
-import { logLine } from "../core/logger";
+import { forgetSecret, logLine, registerSecret } from "../core/logger";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
 
 const SECRET_KEY = "novelai.gemini.apiKey";
@@ -75,15 +75,20 @@ export class GeminiProvider implements ApiKeyProvider {
   constructor(private readonly context: vscode.ExtensionContext) {}
 
   async getApiKey(): Promise<string | undefined> {
-    return this.context.secrets.get(SECRET_KEY);
+    const key = await this.context.secrets.get(SECRET_KEY);
+    // 万一ログへ流れても伏せ字になるようにする
+    registerSecret(key);
+    return key;
   }
 
   async setApiKey(key: string): Promise<void> {
     await this.context.secrets.store(SECRET_KEY, key.trim());
+    registerSecret(key);
     this.modelCache.clear();
   }
 
   async clearApiKey(): Promise<void> {
+    forgetSecret(await this.context.secrets.get(SECRET_KEY));
     await this.context.secrets.delete(SECRET_KEY);
     this.modelCache.clear();
   }
