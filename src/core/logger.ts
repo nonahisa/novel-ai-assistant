@@ -88,8 +88,23 @@ export function showLog(): void {
 }
 
 export function logLine(message: string): void {
-  const time = new Date().toISOString().slice(11, 19);
-  outputChannel().appendLine(`[${time}] ${redactSecrets(message)}`);
+  // 日付も入れる。ファイルには複数日ぶんが残るので、
+  // 時刻だけだと「今日のものか」が分からない
+  const time = new Date().toISOString().slice(0, 19).replace("T", " ");
+  const line = `[${time}] ${redactSecrets(message)}`;
+  outputChannel().appendLine(line);
+  appendToFile(line);
+}
+
+/**
+ * 処理の区切りを記録する。
+ *
+ * **止まったときは失敗が記録されない。** 何番目のチャンクまで進んで、
+ * どこから応答が返らなくなったのかが、あとから追えるようにしておく。
+ * 本文そのものは書かない（原稿がログへ漏れるのを避ける）。
+ */
+export function logStep(message: string): void {
+  logLine(message);
 }
 
 /** 失敗の詳細を、作者が読める形で残す */
