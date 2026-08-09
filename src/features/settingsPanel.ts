@@ -62,6 +62,7 @@ import {
   enrichableFields,
   type EnrichableField,
 } from "../prompts/settingsEnrich";
+import { isMeaningfulValue } from "../core/characterExtractionValidation";
 import { CustomFieldStore } from "../core/customFieldStore";
 import type { CustomFieldDefinition } from "../models/customField";
 import { clampSummary, SUMMARY_MAX_CHARS } from "../core/summaryLimit";
@@ -932,8 +933,9 @@ function clampField(field: EnrichableField, value: unknown): string {
   if (typeof value !== "string") return "";
   const text = value.trim();
   if (!text) return "";
-  // AIは「不明」「なし」を値として返してくることがある。空欄と同じ扱いにする
-  if (/^(不明|なし|null|N\/A|記載なし)$/i.test(text)) return "";
+  // AIは「不明」「なし」「（本文から読み取れる記述なし）」を値として返してくる。
+  // 判定は抽出側と共有する（片方だけ直しても、もう片方から入り込む）
+  if (!isMeaningfulValue(text)) return "";
   return field.maxChars ? (clampSummary(text, field.maxChars) ?? "") : text;
 }
 

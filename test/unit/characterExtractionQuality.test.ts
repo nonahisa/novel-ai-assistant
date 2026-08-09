@@ -125,8 +125,8 @@ describe("登場人物抽出の品質ゲート", () => {
     assertChapterAndAddressPeriods(fixture, merged.characters);
   });
 
-  test("v2.7の構造化出力契約を公開する", () => {
-    expect(CHARACTER_EXTRACT_VERSION).toBe("2.7");
+  test("v2.8の構造化出力契約を公開する", () => {
+    expect(CHARACTER_EXTRACT_VERSION).toBe("2.8");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.properties)
       .toHaveProperty("entityType");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.required)

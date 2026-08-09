@@ -30,11 +30,27 @@ export class AtomicWriteFileError extends Error {
  * 既存パスには公開FS APIで利用できる原子的CASがないため、ガード付き置換は
  * 正規パスへ書込・rename・deleteせず、提案内容を回復パスへ残して失敗を返す。
  */
+/**
+ * 書き込む直前に呼ばれる。設定ファイルの監視が「自分の書き込み」を
+ * 見分けるために使う。
+ *
+ * 書き込み口を1つに絞れているので、ここに1か所だけ置けば済む。
+ * 各ストアへ渡して回すと、渡し忘れたところが外部変更として誤検知される。
+ */
+let writeObserver: ((filePath: string) => void) | undefined;
+
+export function setWriteObserver(
+  observer: ((filePath: string) => void) | undefined
+): void {
+  writeObserver = observer;
+}
+
 export async function atomicWriteFile(
   filePath: string,
   bytes: Uint8Array,
   options?: AtomicWriteFileOptions
 ): Promise<void> {
+  writeObserver?.(filePath);
   const destination = vscode.Uri.file(filePath);
   const nonce = `${process.pid}-${crypto.randomUUID()}`;
   const temporary = vscode.Uri.file(`${filePath}.novelai-${nonce}.tmp`);

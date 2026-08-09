@@ -17,6 +17,8 @@ import {
   buildOrganizationMarkdown,
 } from "../core/settingsMarkdown";
 import { CustomFieldStore } from "../core/customFieldStore";
+import { buildSchemaFiles, SCHEMA_DIR } from "../core/settingsSchema";
+import { logFailure } from "../core/logger";
 
 /**
  * 設定資料のMarkdownを生成する。
@@ -138,6 +140,10 @@ export async function generateSettingsDocs(
   const settingsDir = workPaths(work, config).settings;
   await vscode.workspace.fs.createDirectory(vscode.Uri.file(settingsDir));
 
+  // 他のツール・AIが設定資料を読み書きするための定義を置く。
+  // 資料を作るたびに書き直すので、字数上限などを変えても古びない
+  await writeSchemaFiles(settingsDir, work.title);
+
   const written: string[] = [];
   const skipped: string[] = [];
 
@@ -190,5 +196,35 @@ export async function generateSettingsDocs(
       "markdown.showPreview",
       vscode.Uri.file(path.join(settingsDir, first.fileName))
     );
+  }
+}
+
+/**
+ * 他のツール・AIへ渡す定義を書き出す。
+ *
+ * 生成物なので上書きしてよい。作者が手を入れる文書ではない
+ * （README にもそう書いてある）。
+ *
+ * **書けなくても資料の生成は止めない。** 定義が無いのは不便だが、
+ * 資料そのものが作れないほうが困る。
+ */
+async function writeSchemaFiles(
+  settingsDir: string,
+  workTitle: string
+): Promise<void> {
+  const directory = path.join(settingsDir, SCHEMA_DIR);
+  try {
+    await vscode.workspace.fs.createDirectory(vscode.Uri.file(directory));
+    for (const file of buildSchemaFiles(workTitle)) {
+      await vscode.workspace.fs.writeFile(
+        vscode.Uri.file(path.join(directory, file.fileName)),
+        new TextEncoder().encode(file.content)
+      );
+    }
+  } catch (error) {
+    logFailure("AI向けの定義の書き出し", {
+      作品: workTitle,
+      詳細: error instanceof Error ? error.message : String(error),
+    });
   }
 }

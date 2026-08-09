@@ -45,7 +45,7 @@ import {
   withCancellableProgress,
   withProgress,
 } from "../views/progress";
-import { logFailure, showLog } from "../core/logger";
+import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 import { resolveMaxOutputTokens } from "../ai/outputLimit";
 import { PendingUpdateStore } from "../core/pendingUpdates";
 import { applyPendingCharacterUpdates } from "./applyPendingUpdates";
@@ -249,6 +249,13 @@ export async function extractCharacters(
     return false;
   }
 
+  // 止まったときに後から追えるよう、ここからのログをファイルにも残す
+  useLogFile(work.folderPath);
+  logStep(
+    `抽出を開始: ${work.title} / ${resolved.provider.displayName} / ` +
+      `${resolved.model} / ${chunks.length}チャンク / v${CHARACTER_EXTRACT_VERSION}`
+  );
+
   const cache = new ChunkCache(work);
   await cache.load();
 
@@ -359,6 +366,11 @@ export async function extractCharacters(
           increment: 100 / chunks.length,
         });
 
+        // 応答が返らないまま止まった場合、記録はこの行で終わる。
+        // どのチャンクで止まったかが分かるようにしておく
+        logStep(`AIへ送信: ${done + 1}/${chunks.length} ${label}`);
+        const startedAt = Date.now();
+
         // 既知の人物名を渡して同一人物判定を助ける
         const knownNames = buildKnownCharacterNames(
           loaded.characters,
@@ -433,6 +445,10 @@ export async function extractCharacters(
 
           // 応答が返った時点で接続は生きている。連続失敗の数え直し
           consecutiveConnectivityFailures = 0;
+          logStep(
+            `応答を受信: ${done + 1}/${chunks.length} ${label} ` +
+              `（${Math.round((Date.now() - startedAt) / 1000)}秒）`
+          );
 
           if (res.truncated) {
             failures.push({
@@ -507,6 +523,11 @@ export async function extractCharacters(
 
         done++;
       }
+
+      logStep(
+        `チャンクの処理を終了: ${done}/${chunks.length} ` +
+          `（失敗 ${failures.length}件${cancelled ? " / 中止された" : ""}）`
+      );
 
       try {
         await cache.save();

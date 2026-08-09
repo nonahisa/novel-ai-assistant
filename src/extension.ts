@@ -43,6 +43,12 @@ import {
 import { pathExists } from "./core/fileSystem";
 import { disposeLog, logFailure, showLog } from "./core/logger";
 import { probeGeneration } from "./ai/generationProbe";
+import {
+  SettingsWatcher,
+  notifyExternalChange,
+} from "./features/watchSettings";
+import { SelfWriteTracker } from "./core/externalChanges";
+import { setWriteObserver } from "./core/atomicWrite";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -57,6 +63,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const highlighter = new TermHighlighter(registry);
   context.subscriptions.push(highlighter);
   void highlighter.refresh();
+
+  // 別のプラグインのAIやCLIが設定JSONを直接書くことがある。
+  // エディターの保存イベントは起きないので、ファイルを直接監視する
+  const selfWrites = new SelfWriteTracker();
+  // 拡張機能の書き込みは、書き込み口の1か所で印を付ける。
+  // これが無いと、自分が保存するたび「外部で変更されました」と出る
+  setWriteObserver((filePath) => selfWrites.markWriting(filePath));
+  context.subscriptions.push({ dispose: () => setWriteObserver(undefined) });
+
+  const settingsWatcher = new SettingsWatcher(
+    registry,
+    selfWrites,
+    (work, files) => {
+      void notifyExternalChange(work, files, {
+        // 中身を見て取り込むかを決める。勝手に確定させない
+        review: async () => {
+          await openSettingsPanel(context, work, aiRegistry);
+          highlighter.invalidate();
+          treeProvider.refresh(work.id);
+        },
+        reload: () => {
+          highlighter.invalidate();
+          treeProvider.refresh(work.id);
+        },
+      });
+    }
+  );
+  context.subscriptions.push(settingsWatcher);
 
   // ステータスバーの進捗に添える中止ボタン用（コマンドパレットには出さない）
   context.subscriptions.push(registerProgressCancelCommand());
@@ -481,6 +515,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (!work) return;
         await applyPendingCharacterUpdates(work);
         treeProvider.refresh(work.id);
+        // 名前や別名が変われば、本文で光る範囲も変わる
+        highlighter.invalidate();
       }
     )
   );
@@ -493,6 +529,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (!work) return;
         await unifyCharacterRecords(work);
         treeProvider.refresh(work.id);
+        // まとめた側の名前は別名になる。索引を作り直さないと光らないままになる
+        highlighter.invalidate();
       }
     )
   );
@@ -591,6 +629,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         const extracted = await extractCharacters(work, aiRegistry);
         treeProvider.refresh(work.id);
+        // 抽出で増えた用語を本文のハイライトへ反映する。
+        // 設定JSONは拡張機能が直接書くのでエディタの保存イベントが起きず、
+        // ここで作り直さないと再読み込みまで古い索引のままになる
+        highlighter.invalidate();
 
         // 抽出したJSONから資料Markdownまで一度に作る。
         // 抽出結果の要約はすでに出しているので、成功は再通知しない。
