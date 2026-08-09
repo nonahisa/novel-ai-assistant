@@ -480,7 +480,12 @@ export async function extractCharacters(
             break;
           }
 
-          failures.push(toExtractionFailure(chunk, e));
+          failures.push(
+            toExtractionFailure(chunk, e, {
+              provider: resolved.provider.displayName,
+              model: resolved.model,
+            })
+          );
           if (e instanceof AIError && isFatalProviderFailure(e.kind)) {
             done++;
             break;
@@ -710,11 +715,24 @@ function hasSpecificMessage(kind: AIError["kind"]): boolean {
   return kind === "insufficient_credit";
 }
 
-function toExtractionFailure(chunk: Chunk, error: unknown): ExtractionFailure {
+function toExtractionFailure(
+  chunk: Chunk,
+  error: unknown,
+  /**
+   * どのAIのどのモデルで起きたか。
+   *
+   * これが無いと、AIを切り替えたあとにログを見たとき、
+   * 前のAIの失敗を今のAIのものと取り違える。実際に起きた
+   * （Ollamaへ切り替えたのに、残っていたGeminiの上限エラーを
+   * Ollamaの失敗だと読んでしまった）。
+   */
+  used?: { provider: string; model: string }
+): ExtractionFailure {
   // 通知には出さない技術的な内容をログへ残す。
   // これが無いと、作者は「利用できませんでした」だけを見て手詰まりになる
   logFailure("AI呼び出しの失敗", {
     ファイル: describeChunk(chunk),
+    使用中のAI: used ? `${used.provider} / ${used.model}` : "不明",
     種別: error instanceof AIError ? error.kind : "不明",
     詳細:
       error instanceof AIError

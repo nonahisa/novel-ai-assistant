@@ -44,6 +44,9 @@ import { pathExists } from "./core/fileSystem";
 import { disposeLog, logFailure, showLog } from "./core/logger";
 import { probeGeneration } from "./ai/generationProbe";
 
+/** 操作メニューで開いている分類の記憶先 */
+const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const registry = new WorkRegistry(context);
   await registry.initialize();
@@ -110,12 +113,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push(treeView);
 
-  // コマンドパレットにしかない操作は作者が存在に気づけないため、分類して一覧に出す
-  context.subscriptions.push(
-    vscode.window.createTreeView("novelai.actions", {
-      treeDataProvider: new ActionListProvider(registry),
-    })
-  );
+  // コマンドパレットにしかない操作は作者が存在に気づけないため、分類して一覧に出す。
+  // 分類の開閉は作品をまたいで同じでよいので globalState に置く
+  const actionProvider = new ActionListProvider(registry, {
+    get: () => context.globalState.get<string[]>(ACTION_GROUPS_KEY, []),
+    set: (groups) => void context.globalState.update(ACTION_GROUPS_KEY, groups),
+  });
+  const actionView = vscode.window.createTreeView("novelai.actions", {
+    treeDataProvider: actionProvider,
+  });
+  // 画面での開閉を控えて次回に引き継ぐ。
+  // VS Code は collapsibleState を作った時点の値でしか描かないため、
+  // こちら側で覚えておかないと再読み込みで既定へ戻る
+  actionView.onDidExpandElement((event) => {
+    if (event.element.type === "group") {
+      actionProvider.setExpanded(event.element.group, true);
+    }
+  });
+  actionView.onDidCollapseElement((event) => {
+    if (event.element.type === "group") {
+      actionProvider.setExpanded(event.element.group, false);
+    }
+  });
+  context.subscriptions.push(actionView);
 
   // ─── ステータスバー（現在開いているファイルの文字数） ───
   const statusBar = vscode.window.createStatusBarItem(

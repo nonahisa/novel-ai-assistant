@@ -1,13 +1,50 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
+import { TreeItemCollapsibleState } from "vscode";
 import {
   ACTION_GROUPS,
+  ActionListProvider,
   groupedActions,
+  restoreExpandedGroups,
   visibleActions,
+  type ActionGroup,
+  type GroupStateStore,
 } from "../../src/views/actionList";
+import type { WorkRegistry } from "../../src/core/workRegistry";
 
 interface PackageManifest {
   contributes: { commands: Array<{ command: string }> };
+}
+
+/** 作品が1件ある体にする。分類の中身が空にならないようにするだけ */
+function fakeRegistry(): WorkRegistry {
+  return {
+    list: () => [{ id: "w1" }],
+    onDidChange: () => undefined,
+  } as unknown as WorkRegistry;
+}
+
+function memoryStore(initial: string[] = []): GroupStateStore & {
+  saved: string[];
+} {
+  const state = { saved: [...initial] };
+  return {
+    get saved() {
+      return state.saved;
+    },
+    get: () => state.saved,
+    set: (groups) => {
+      state.saved = groups;
+    },
+  };
+}
+
+function collapsibleOf(
+  provider: ActionListProvider,
+  group: ActionGroup
+): TreeItemCollapsibleState {
+  return provider.getTreeItem({ type: "group", group })
+    .collapsibleState as TreeItemCollapsibleState;
 }
 
 describe("操作メニューの分類", () => {
@@ -32,6 +69,72 @@ describe("操作メニューの分類", () => {
     expect(groupedActions(false).every((entry) => entry.actions.length > 0)).toBe(
       true
     );
+  });
+});
+
+describe("分類の開閉を覚える", () => {
+  test("はじめはすべて閉じておく", () => {
+    // 全部開くと13項目が縦に並び、作品一覧の場所が押し出される
+    const provider = new ActionListProvider(fakeRegistry(), memoryStore());
+
+    for (const group of ACTION_GROUPS) {
+      expect(collapsibleOf(provider, group)).toBe(
+        TreeItemCollapsibleState.Collapsed
+      );
+    }
+  });
+
+  test("開いた分類は次に開いたときも開いている", () => {
+    const store = memoryStore();
+    const first = new ActionListProvider(fakeRegistry(), store);
+    first.setExpanded("資料", true);
+
+    // 保存した内容から作り直す＝次回の起動にあたる
+    const second = new ActionListProvider(fakeRegistry(), store);
+
+    expect(collapsibleOf(second, "資料")).toBe(
+      TreeItemCollapsibleState.Expanded
+    );
+    expect(collapsibleOf(second, "整える")).toBe(
+      TreeItemCollapsibleState.Collapsed
+    );
+  });
+
+  test("閉じ直したら記憶からも消す", () => {
+    const store = memoryStore();
+    const provider = new ActionListProvider(fakeRegistry(), store);
+
+    provider.setExpanded("資料", true);
+    provider.setExpanded("資料", false);
+
+    expect(store.saved).toEqual([]);
+    expect(
+      collapsibleOf(new ActionListProvider(fakeRegistry(), store), "資料")
+    ).toBe(TreeItemCollapsibleState.Collapsed);
+  });
+
+  test("記憶が無くても動く", () => {
+    // 保存先を渡さない場合（テストや将来の呼び出し）でも落ちない
+    const provider = new ActionListProvider(fakeRegistry());
+    provider.setExpanded("資料", true);
+
+    expect(provider.expandedGroups()).toEqual(["資料"]);
+  });
+
+  test("知らない分類名は読み込まない", () => {
+    // 分類名を変えたり減らしたりしたときに、古い名前が残らないようにする
+    expect([...restoreExpandedGroups(["資料", "むかしの分類"])]).toEqual([
+      "資料",
+    ]);
+  });
+
+  test("操作そのものは折りたためない", () => {
+    const provider = new ActionListProvider(fakeRegistry(), memoryStore());
+    const action = visibleActions(true)[0];
+
+    expect(
+      provider.getTreeItem({ type: "action", action }).collapsibleState
+    ).toBe(TreeItemCollapsibleState.None);
   });
 });
 

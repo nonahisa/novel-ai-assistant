@@ -842,7 +842,13 @@ export class SettingsPanel {
       }
       return text;
     } catch (error) {
-      this.post({ type: "error", message: describeError(error) });
+      this.post({
+        type: "error",
+        message: describeError(error, {
+          provider: resolved.provider.displayName,
+          model: resolved.model,
+        }),
+      });
       return undefined;
     } finally {
       this.setBusy(false);
@@ -935,10 +941,15 @@ function asText(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function describeError(error: unknown): string {
+function describeError(
+  error: unknown,
+  /** どのAIのどのモデルで起きたか。切り替え後に前のAIの失敗と取り違えないため */
+  used?: { provider: string; model: string }
+): string {
   if (error instanceof AIError) {
     // 画面には出さない技術的な内容をログへ残す
     logFailure("設定資料パネルでのAI呼び出しの失敗", {
+      使用中のAI: used ? `${used.provider} / ${used.model}` : "不明",
       種別: error.kind,
       詳細: error.detail,
     });

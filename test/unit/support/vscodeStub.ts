@@ -69,6 +69,30 @@ export class EventEmitter<T> {
   fire(_value?: T): void {}
 }
 
+export enum TreeItemCollapsibleState {
+  None = 0,
+  Collapsed = 1,
+  Expanded = 2,
+}
+
+export class TreeItem {
+  description?: string;
+  tooltip?: string;
+  contextValue?: string;
+  id?: string;
+  iconPath?: unknown;
+  command?: unknown;
+
+  constructor(
+    readonly label: string,
+    readonly collapsibleState: TreeItemCollapsibleState = TreeItemCollapsibleState.None
+  ) {}
+}
+
+export class ThemeIcon {
+  constructor(readonly id: string) {}
+}
+
 export class FileSystemError extends Error {
   constructor(
     message: string,

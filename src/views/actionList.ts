@@ -215,9 +215,29 @@ export function groupedActions(
 }
 
 /** ツリーの節点。分類の見出しか、操作そのもの */
-type ActionNode =
+export type ActionNode =
   | { type: "group"; group: ActionGroup }
   | { type: "action"; action: CommandAction };
+
+/**
+ * 分類の開閉状態の保存先。
+ *
+ * VS Code の globalState をそのまま受け取らず細い口にするのは、
+ * この判断をテストできるようにするため。
+ */
+export interface GroupStateStore {
+  get(): string[];
+  set(groups: string[]): void;
+}
+
+/** 保存された値から、開いている分類だけを取り出す */
+export function restoreExpandedGroups(saved: string[]): Set<ActionGroup> {
+  const known = new Set<string>(ACTION_GROUPS);
+  // 分類名を変えたり減らしたりしたときに、古い名前が残らないようにする
+  return new Set(
+    saved.filter((group): group is ActionGroup => known.has(group))
+  );
+}
 
 export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
@@ -225,17 +245,46 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  constructor(private readonly registry: WorkRegistry) {
+  /**
+   * 開いている分類。
+   *
+   * **既定はすべて閉じる。** 全部開くと13項目が縦に並び、
+   * 作品一覧の場所が押し出される。分類名を読んでから開くほうが探しやすい。
+   * 一度開いた状態は次回に引き継ぐ（`setExpanded`）。
+   */
+  private readonly expanded: Set<ActionGroup>;
+
+  constructor(
+    private readonly registry: WorkRegistry,
+    private readonly store?: GroupStateStore
+  ) {
+    this.expanded = restoreExpandedGroups(store?.get() ?? []);
     // 最初の作品を登録した時点で、作品向けの操作を出せるようになる
     registry.onDidChange(() => this._onDidChangeTreeData.fire());
+  }
+
+  /** 画面で開閉したときに呼ぶ。次回起動時もこの状態で開く */
+  setExpanded(group: ActionGroup, open: boolean): void {
+    if (open) {
+      this.expanded.add(group);
+    } else {
+      this.expanded.delete(group);
+    }
+    this.store?.set([...this.expanded]);
+  }
+
+  /** テストと復元の確認用 */
+  expandedGroups(): ActionGroup[] {
+    return [...this.expanded];
   }
 
   getTreeItem(node: ActionNode): vscode.TreeItem {
     if (node.type === "group") {
       const item = new vscode.TreeItem(
         node.group,
-        // 既定で開いておく。畳まれていると探しにくい
-        vscode.TreeItemCollapsibleState.Expanded
+        this.expanded.has(node.group)
+          ? vscode.TreeItemCollapsibleState.Expanded
+          : vscode.TreeItemCollapsibleState.Collapsed
       );
       item.contextValue = "actionGroup";
       return item;
