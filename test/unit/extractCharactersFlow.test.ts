@@ -21,6 +21,7 @@ const state = vi.hoisted(() => ({
   testConnection: vi.fn(),
   savedAbilities: [] as unknown[],
   savedLocations: [] as unknown[],
+  savedOrganizations: [] as unknown[],
   /** 既定のチャンク列を上書きしたいテストだけが設定する */
   chunks: undefined as unknown[] | undefined,
   CharacterStoreError: class CharacterStoreError extends Error {
@@ -192,6 +193,14 @@ vi.mock("../../src/core/abilityStore", () => ({
       state.savedLocations.push(...records);
     },
   }),
+  createOrganizationStore: () => ({
+    async loadAll() {
+      return { records: [], errors: [] };
+    },
+    async saveAll(records: unknown[]) {
+      state.savedOrganizations.push(...records);
+    },
+  }),
 }));
 
 vi.mock("../../src/core/chunkCache", () => ({
@@ -279,6 +288,7 @@ describe("人物抽出フロー", () => {
     state.chunks = undefined;
     state.savedAbilities.length = 0;
     state.savedLocations.length = 0;
+    state.savedOrganizations.length = 0;
     // 既定では疎通できている状態にする。接続断は個別テストで再現する
     state.testConnection
       .mockReset()

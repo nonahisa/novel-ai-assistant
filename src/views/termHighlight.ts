@@ -2,7 +2,11 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { WorkRegistry } from "../core/workRegistry";
 import { CharacterStore } from "../core/characterStore";
-import { createAbilityStore, createLocationStore } from "../core/abilityStore";
+import {
+  createAbilityStore,
+  createLocationStore,
+  createOrganizationStore,
+} from "../core/abilityStore";
 import { AbilitySystemStore } from "../core/abilityStore";
 import {
   TermIndex,
@@ -14,6 +18,7 @@ import { SUPPORTED_EXTENSIONS, type WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
 import type { Ability } from "../models/ability";
 import type { Location } from "../models/location";
+import type { Organization } from "../models/organization";
 import { formatChapters } from "../core/settingsMarkdown";
 
 /**
@@ -35,6 +40,8 @@ const KIND_STYLE: Record<
   location: { light: "#1c7c3c", dark: "#7ee08a", label: "場所" },
   // 能力は紫。地の文で目立ちすぎない明度にする
   ability: { light: "#7a3ea3", dark: "#d3a4f5", label: "能力" },
+  // 組織は橙。人名・地名・能力のどれとも混ざらない色相にする
+  organization: { light: "#9a5b00", dark: "#e8b06a", label: "組織" },
 };
 
 interface WorkSettings {
@@ -42,6 +49,7 @@ interface WorkSettings {
   characters: Map<string, Character>;
   abilities: Map<string, Ability>;
   locations: Map<string, Location>;
+  organizations: Map<string, Organization>;
   abilityTerm: string;
 }
 
@@ -215,6 +223,8 @@ export class TermHighlighter implements vscode.Disposable {
       const characters = (await new CharacterStore(work).loadAll()).characters;
       const abilities = (await createAbilityStore(work).loadAll()).records;
       const locations = (await createLocationStore(work).loadAll()).records;
+      const organizations = (await createOrganizationStore(work).loadAll())
+        .records;
       const system = await new AbilitySystemStore(work).load();
 
       const entries: TermEntry[] = [];
@@ -257,12 +267,25 @@ export class TermHighlighter implements vscode.Disposable {
           });
         }
       }
+      for (const organization of organizations) {
+        // 組織名は区切りで分けない。「冒険者ギルド」を
+        // 「冒険者」「ギルド」に割ると、無関係な語まで装飾してしまう
+        for (const text of [organization.name, ...organization.aliases]) {
+          entries.push({
+            text,
+            kind: "organization",
+            id: organization.id,
+            canonicalName: organization.name,
+          });
+        }
+      }
 
       const settings: WorkSettings = {
         index: new TermIndex(entries),
         characters: new Map(characters.map((c) => [c.id, c])),
         abilities: new Map(abilities.map((a) => [a.id, a])),
         locations: new Map(locations.map((l) => [l.id, l])),
+        organizations: new Map(organizations.map((o) => [o.id, o])),
         abilityTerm: system.abilityTerm || "能力",
       };
       this.cache.set(work.id, settings);
@@ -288,6 +311,7 @@ export function buildHover(
     characters: Map<string, Character>;
     abilities: Map<string, Ability>;
     locations: Map<string, Location>;
+    organizations?: Map<string, Organization>;
     abilityTerm: string;
   }
 ): vscode.MarkdownString {
@@ -331,6 +355,15 @@ export function buildHover(
     appendChapters(md, character.appearedChapters);
     appendConflicts(md, character.conflicts);
     appendNotes(md, character.authorNotes);
+  } else if (entry.kind === "organization") {
+    const organization = settings.organizations?.get(entry.id);
+    if (!organization) return md;
+    appendLine(md, "種別", organization.category);
+    appendLine(md, "上位組織", organization.parent);
+    appendLine(md, "説明", organization.description);
+    appendChapters(md, organization.appearedChapters);
+    appendConflicts(md, organization.conflicts);
+    appendNotes(md, organization.authorNotes);
   } else if (entry.kind === "location") {
     const location = settings.locations.get(entry.id);
     if (!location) return md;

@@ -1,6 +1,7 @@
 import type { Character } from "../models/character";
 import type { Ability } from "../models/ability";
 import type { Location } from "../models/location";
+import type { Organization } from "../models/organization";
 import { deriveReading } from "./reading";
 
 /**
@@ -28,6 +29,7 @@ export interface DictionaryBuildInput {
   characters: Character[];
   abilities: Ability[];
   locations: Location[];
+  organizations?: Organization[];
 }
 
 export interface DictionaryBuildResult {
@@ -81,6 +83,13 @@ export function buildDictionary(
   for (const location of input.locations) {
     add(location.name, location.reading, "地名");
     for (const alias of location.aliases) add(alias, null, "地名");
+  }
+
+  // 組織名は固有名詞だが、IMEに「組織名」という品詞は無い。
+  // 人名でも地名でもないので名詞にする
+  for (const organization of input.organizations ?? []) {
+    add(organization.name, organization.reading, "名詞");
+    for (const alias of organization.aliases) add(alias, null, "名詞");
   }
 
   for (const ability of input.abilities) {

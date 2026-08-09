@@ -3,18 +3,21 @@ import { WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
 import type { Ability, AbilitySystem } from "../models/ability";
 import type { Location } from "../models/location";
+import { membersOf, type Organization } from "../models/organization";
 import type { AiNote, AiNoteSource } from "../models/aiNote";
 import { CharacterStore } from "../core/characterStore";
 import {
   AbilitySystemStore,
   createAbilityStore,
   createLocationStore,
+  createOrganizationStore,
 } from "../core/abilityStore";
 import type { SettingsStore } from "../core/settingsStore";
 import {
   applyAbilityEdits,
   applyCharacterEdits,
   applyLocationEdits,
+  applyOrganizationEdits,
   appendAiNote,
   removeAiNote,
   toRecordEdits,
@@ -27,6 +30,7 @@ import {
   describeAbility,
   describeCharacter,
   describeLocation,
+  describeOrganization,
   KIND_LABELS,
   type SettingsKind,
 } from "../core/settingsSummary";
@@ -35,6 +39,7 @@ import {
   buildAbilityListItems,
   buildCharacterListItems,
   buildLocationListItems,
+  buildOrganizationListItems,
   type SettingsListItem,
 } from "../core/settingsList";
 import {
@@ -59,7 +64,7 @@ import {
 } from "../prompts/settingsEnrich";
 import { CustomFieldStore } from "../core/customFieldStore";
 import type { CustomFieldDefinition } from "../models/customField";
-import { clampSummary } from "../core/summaryLimit";
+import { clampSummary, SUMMARY_MAX_CHARS } from "../core/summaryLimit";
 import { buildSettingsPanelHtml } from "../views/settingsPanelHtml";
 import { renderMarkdownLite } from "../core/markdownLite";
 import { withCancellableProgress } from "../views/progress";
@@ -77,6 +82,9 @@ import { logFailure } from "../core/logger";
  * 抽出結果と同じ扱いで自動保存すると、
  * どこまでが本文に書いてあることなのか分からなくなるため。
  */
+
+/** パネルが扱う設定レコード。種別が増えるたびに union を書き足さないための別名 */
+type SettingsRecord = Character | Ability | Organization | Location;
 
 /** 作品ごとに1枚だけ開く。同じ作品で何枚も開いても混乱するだけ */
 const openPanels = new Map<string, SettingsPanel>();
@@ -139,12 +147,14 @@ export class SettingsPanel {
   private readonly characterStore: CharacterStore;
   private readonly abilityStore: SettingsStore<Ability>;
   private readonly locationStore: SettingsStore<Location>;
+  private readonly organizationStore: SettingsStore<Organization>;
   private readonly systemStore: AbilitySystemStore;
   private readonly customFieldStore: CustomFieldStore;
 
   private characters: Character[] = [];
   private abilities: Ability[] = [];
   private locations: Location[] = [];
+  private organizations: Organization[] = [];
   private abilitySystem: AbilitySystem | undefined;
   private customFields: CustomFieldDefinition[] = [];
   private loadErrors: Array<{ file: string; message: string }> = [];
@@ -163,6 +173,7 @@ export class SettingsPanel {
     this.characterStore = new CharacterStore(work);
     this.abilityStore = createAbilityStore(work);
     this.locationStore = createLocationStore(work);
+    this.organizationStore = createOrganizationStore(work);
     this.systemStore = new AbilitySystemStore(work);
     this.customFieldStore = new CustomFieldStore(work);
 
@@ -219,14 +230,17 @@ export class SettingsPanel {
     const loadedCharacters = await this.characterStore.loadAll();
     const loadedAbilities = await this.abilityStore.loadAll();
     const loadedLocations = await this.locationStore.loadAll();
+    const loadedOrganizations = await this.organizationStore.loadAll();
 
     this.characters = loadedCharacters.characters;
     this.abilities = loadedAbilities.records;
     this.locations = loadedLocations.records;
+    this.organizations = loadedOrganizations.records;
     this.loadErrors = [
       ...loadedCharacters.errors,
       ...loadedAbilities.errors,
       ...loadedLocations.errors,
+      ...loadedOrganizations.errors,
     ];
 
     // 能力体系が壊れていても、人物と場所は読めるので画面は出す
@@ -255,6 +269,10 @@ export class SettingsPanel {
     return {
       character: buildCharacterListItems(this.characters),
       ability: buildAbilityListItems(this.abilities),
+      organization: buildOrganizationListItems(
+        this.organizations,
+        this.characters
+      ),
       location: buildLocationListItems(this.locations),
     };
   }
@@ -262,11 +280,14 @@ export class SettingsPanel {
   private find(
     kind: SettingsKind,
     id: string
-  ): Character | Ability | Location | undefined {
+  ): SettingsRecord | undefined {
     if (kind === "character") {
       return this.characters.find((item) => item.id === id);
     }
     if (kind === "ability") return this.abilities.find((item) => item.id === id);
+    if (kind === "organization") {
+      return this.organizations.find((item) => item.id === id);
+    }
     return this.locations.find((item) => item.id === id);
   }
 
@@ -289,7 +310,7 @@ export class SettingsPanel {
         ].filter((entry) => entry.value),
         fields: [
           field("name", "名前", character.name),
-          field("summary", "紹介（50字以内）", character.summary),
+          field("summary", `紹介（${SUMMARY_MAX_CHARS}字以内）`, character.summary),
           field("gender", "性別", character.gender),
           field("affiliation", "所属", character.affiliation),
           field("reading", "読み", character.reading),
@@ -328,7 +349,7 @@ export class SettingsPanel {
         ].filter((entry) => entry.value),
         fields: [
           field("name", "名前", ability.name),
-          field("summary", "紹介（50字以内）", ability.summary),
+          field("summary", `紹介（${SUMMARY_MAX_CHARS}字以内）`, ability.summary),
           field("reading", "読み", ability.reading),
           field("aliases", "別名（読点区切り）", ability.aliases.join("、")),
           field("category", "分類", ability.category),
@@ -339,6 +360,47 @@ export class SettingsPanel {
           field("exportNote", "資料用の補足", ability.exportNote, true),
         ],
         aiNotes: withRenderedNotes(ability.aiNotes),
+      };
+    }
+
+    if (kind === "organization") {
+      const organization = record as Organization;
+      // 所属は人物側にしかない。組織だけ見ても誰がいるか分からないので引く
+      const members = membersOf(organization, this.characters);
+      return {
+        kind,
+        id,
+        name: organization.name,
+        autoGenerated: organization.autoGenerated,
+        readOnly: [
+          { label: "所属する人物", value: members.join("、") },
+          {
+            label: "登場話",
+            value: formatChapters(organization.appearedChapters),
+          },
+          { label: "抽出根拠", value: organization.evidence ?? "" },
+          ...conflictLines(organization.conflicts),
+        ].filter((entry) => entry.value),
+        fields: [
+          field("name", "名前", organization.name),
+          field(
+            "summary",
+            `紹介（${SUMMARY_MAX_CHARS}字以内）`,
+            organization.summary
+          ),
+          field("reading", "読み", organization.reading),
+          field(
+            "aliases",
+            "別名（読点区切り）",
+            organization.aliases.join("、")
+          ),
+          field("category", "種別", organization.category),
+          field("parent", "上位組織", organization.parent),
+          field("description", "説明", organization.description, true),
+          field("authorNotes", "作者メモ", organization.authorNotes, true),
+          field("exportNote", "資料用の補足", organization.exportNote, true),
+        ],
+        aiNotes: withRenderedNotes(organization.aiNotes),
       };
     }
 
@@ -355,7 +417,7 @@ export class SettingsPanel {
       ].filter((entry) => entry.value),
       fields: [
         field("name", "名前", location.name),
-        field("summary", "紹介（50字以内）", location.summary),
+        field("summary", `紹介（${SUMMARY_MAX_CHARS}字以内）`, location.summary),
         field("reading", "読み", location.reading),
         field("aliases", "別名（読点区切り）", location.aliases.join("、")),
         field("region", "地域", location.region),
@@ -432,22 +494,25 @@ export class SettingsPanel {
 
   private applyEdits(
     kind: SettingsKind,
-    record: Character | Ability | Location,
+    record: SettingsRecord,
     edits: RecordEdits,
     options?: EditOptions
-  ): Character | Ability | Location {
+  ): SettingsRecord {
     if (kind === "character") {
       return applyCharacterEdits(record as Character, edits, options);
     }
     if (kind === "ability") {
       return applyAbilityEdits(record as Ability, edits, options);
     }
+    if (kind === "organization") {
+      return applyOrganizationEdits(record as Organization, edits, options);
+    }
     return applyLocationEdits(record as Location, edits, options);
   }
 
   private async persist(
     kind: SettingsKind,
-    record: Character | Ability | Location
+    record: SettingsRecord
   ): Promise<void> {
     if (kind === "character") {
       // 既存ファイルは上書きできないため、退避してから作り直す必要がある。
@@ -457,6 +522,10 @@ export class SettingsPanel {
     }
     if (kind === "ability") {
       await this.abilityStore.saveAll([record as Ability]);
+      return;
+    }
+    if (kind === "organization") {
+      await this.organizationStore.saveAll([record as Organization]);
       return;
     }
     await this.locationStore.saveAll([record as Location]);
@@ -652,7 +721,7 @@ export class SettingsPanel {
       model: resolved?.model ?? "",
       source: message.source,
     });
-    await this.persist(message.kind, updated as Character | Ability | Location);
+    await this.persist(message.kind, updated as SettingsRecord);
     await this.reloadAfterSave(message.kind, message.id, "掘り下げを追記しました。");
   }
 
@@ -664,13 +733,13 @@ export class SettingsPanel {
     const record = this.find(kind, id);
     if (!record) return;
     const updated = removeAiNote(record, noteId);
-    await this.persist(kind, updated as Character | Ability | Location);
+    await this.persist(kind, updated as SettingsRecord);
     await this.reloadAfterSave(kind, id, "掘り下げを削除しました。");
   }
 
   private describe(
     kind: SettingsKind,
-    record: Character | Ability | Location
+    record: SettingsRecord
   ): string {
     if (kind === "character") {
       return describeCharacter(record as Character, this.customFields);
@@ -678,12 +747,19 @@ export class SettingsPanel {
     if (kind === "ability") {
       return describeAbility(record as Ability, this.abilitySystem);
     }
+    if (kind === "organization") {
+      const organization = record as Organization;
+      return describeOrganization(
+        organization,
+        membersOf(organization, this.characters)
+      );
+    }
     return describeLocation(record as Location);
   }
 
   /** その設定が出てくる場面を本文から集める */
   private async excerptsFor(
-    record: Character | Ability | Location
+    record: SettingsRecord
   ): Promise<MentionExcerpt[]> {
     if (!this.excerptSources) {
       const loaded = await withCancellableProgress(

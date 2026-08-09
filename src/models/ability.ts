@@ -59,7 +59,7 @@ export interface Ability {
   aliases: string[];
   /** ルビ。設定資料エクスポートで必要になる */
   reading: string | null;
-  /** 一覧で名前の下に出す短い紹介。50字以内 */
+  /** 一覧で名前の下に出す短い紹介。上限は SUMMARY_MAX_CHARS */
   summary: string | null;
   /** 作品側の分類語をそのまま使う（「光属性魔法」等） */
   category: string | null;

@@ -16,6 +16,7 @@ import { logFailure } from "../core/logger";
 const REASON_LABELS: Record<MergeCandidate["reason"], string> = {
   same_name: "同じ呼び名が両方に登録されています",
   abbreviation: "省略形とみられます",
+  suffix: "一方が他方の呼び方を含んでいます",
   ambiguous: "統合先を決められませんでした",
 };
 

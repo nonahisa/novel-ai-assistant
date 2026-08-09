@@ -13,27 +13,36 @@ import {
 import { parseAiNotes, type AiNote } from "./aiNote";
 
 /**
- * 場所のデータモデル。
+ * 組織のデータモデル。
  *
- * 設計書3.2節では地域ごとに入れ子の locations.json としていたが、
- * 実装では登場人物と同じ「1件1ファイル」に揃える。
- * 入れ子のJSONひとつだと、別環境で別々の場所を追記しただけで
- * Gitの競合が起き、行単位マージと相性が悪いため。
- * 地域は region フィールドで表し、一覧生成時にまとめる。
+ * 人物の `affiliation`（所属）に対応する。所属は人物側に文字列で持っているが、
+ * 組織そのものの設定（何をする組織か、上位組織は何か）を書く場所が無かった。
+ * 設定資料では所属で人物をまとめているため、組織の説明が要る。
+ *
+ * 場所と同じ「1件1ファイル」にする。入れ子のJSONひとつだと、
+ * 別環境で別々の組織を追記しただけでGitの競合が起きるため。
+ *
+ * **所属する人物はここに持たない。** 人物側の `affiliation` から引く。
+ * 両方に持つと、片方だけ直したときに食い違う。
  */
 
-export interface Location {
+export interface Organization {
   schemaVersion: string;
   id: string;
   name: string;
-  /** 同一場所の別表記 */
+  /** 同一組織の別表記（「ギルド」「冒険者ギルド」など） */
   aliases: string[];
   /** 読み仮名。設定資料エクスポートで必要になる */
   reading: string | null;
   /** 一覧で名前の下に出す短い紹介。上限は SUMMARY_MAX_CHARS */
   summary: string | null;
-  /** 上位の地域（「王都リヴェルス」等）。読み取れなければ null */
-  region: string | null;
+  /**
+   * 上位の組織（「生活保護課」に対する「冒険者ギルド」）。
+   * 読み取れなければ null。場所の region と同じ役割。
+   */
+  parent: string | null;
+  /** 種別（「ギルド」「国家」「部署」「商会」など）。作品側の言い方に従う */
+  category: string | null;
   description: string | null;
   appearedChapters: number[];
   status: "登場済み" | "未登場";
@@ -56,17 +65,18 @@ export interface Location {
   updatedAt: string;
 }
 
-export const LOCATION_SCHEMA_VERSION = "0.1";
+export const ORGANIZATION_SCHEMA_VERSION = "0.1";
 
-export function emptyLocation(id: string, name: string): Location {
+export function emptyOrganization(id: string, name: string): Organization {
   return {
-    schemaVersion: LOCATION_SCHEMA_VERSION,
+    schemaVersion: ORGANIZATION_SCHEMA_VERSION,
     id,
     name,
     aliases: [],
     reading: null,
     summary: null,
-    region: null,
+    parent: null,
+    category: null,
     description: null,
     appearedChapters: [],
     status: "登場済み",
@@ -82,29 +92,36 @@ export function emptyLocation(id: string, name: string): Location {
   };
 }
 
-/** loc_001_図書塔.json の形式にする */
-export function locationFileName(location: Location): string {
-  const safeName = location.name
+/** org_001_冒険者ギルド.json の形式にする */
+export function organizationFileName(organization: Organization): string {
+  const safeName = organization.name
     .replace(/[/\\:*?"<>|\s]/g, "")
     .slice(0, 30);
-  return safeName ? `${location.id}_${safeName}.json` : `${location.id}.json`;
+  return safeName
+    ? `${organization.id}_${safeName}.json`
+    : `${organization.id}.json`;
 }
 
 /** 新しいIDを採番する */
-export function nextLocationId(existing: Location[]): string {
+export function nextOrganizationId(existing: Organization[]): string {
   let max = 0;
-  for (const location of existing) {
-    const matched = location.id.match(/^loc_(\d+)$/);
+  for (const organization of existing) {
+    const matched = organization.id.match(/^org_(\d+)$/);
     if (!matched) continue;
     const value = parseInt(matched[1], 10);
     if (value > max) max = value;
   }
-  return `loc_${String(max + 1).padStart(3, "0")}`;
+  return `org_${String(max + 1).padStart(3, "0")}`;
 }
 
 /** 旧バージョンや手書きJSONでも落ちないよう欠損を補う */
-export function normalizeLocation(raw: Partial<Location>): Location {
-  const base = emptyLocation(raw.id ?? "loc_unknown", raw.name ?? "名称不明");
+export function normalizeOrganization(
+  raw: Partial<Organization>
+): Organization {
+  const base = emptyOrganization(
+    raw.id ?? "org_unknown",
+    raw.name ?? "名称不明"
+  );
   return {
     ...base,
     ...raw,
@@ -114,11 +131,37 @@ export function normalizeLocation(raw: Partial<Location>): Location {
     aiNotes: raw.aiNotes ?? [],
     authorNotes: raw.authorNotes ?? "",
     exportNote: raw.exportNote ?? "",
-  } as Location;
+  } as Organization;
 }
 
-/** 表記ゆれを吸収して同一場所を判定する */
-export function normalizeLocationName(name: string): string {
+/**
+ * その組織に所属する人物の名前を集める。
+ *
+ * 所属は人物側の `affiliation` にしか無い。組織レコードに持たせないのは、
+ * 両方に持つと片方だけ直したときに食い違うためである。
+ * 別名でも引けるようにするのは、本文で「ギルド」と書かれた所属が
+ * 「冒険者ギルド」と同じ組織を指すことがあるため。
+ */
+export function membersOf(
+  organization: Organization,
+  characters: Array<{ name: string; affiliation: string | null }>
+): string[] {
+  const keys = new Set(
+    [organization.name, ...organization.aliases]
+      .map(normalizeOrganizationName)
+      .filter(Boolean)
+  );
+  return characters
+    .filter((character) => {
+      const affiliation = character.affiliation?.trim();
+      if (!affiliation) return false;
+      return keys.has(normalizeOrganizationName(affiliation));
+    })
+    .map((character) => character.name);
+}
+
+/** 表記ゆれを吸収して同一組織を判定する */
+export function normalizeOrganizationName(name: string): string {
   return name
     .replace(/[\s　・･]/g, "")
     .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
@@ -126,10 +169,10 @@ export function normalizeLocationName(name: string): string {
 }
 
 /** 作者が編集できるJSONを検証してから既定値を補う。 */
-export function parseLocation(raw: unknown): Location {
-  const value = objectValue(raw, "location");
+export function parseOrganization(raw: unknown): Organization {
+  const value = objectValue(raw, "organization");
   requireNonEmptyString(value.id, "id");
-  if (!/^loc_\d+$/.test(value.id as string)) invalid("id");
+  if (!/^org_\d+$/.test(value.id as string)) invalid("id");
   requireNonEmptyString(value.name, "name");
 
   optionalString(value.schemaVersion, "schemaVersion");
@@ -137,7 +180,8 @@ export function parseLocation(raw: unknown): Location {
   for (const key of [
     "reading",
     "summary",
-    "region",
+    "parent",
+    "category",
     "description",
     "evidence",
   ]) {
@@ -157,11 +201,11 @@ export function parseLocation(raw: unknown): Location {
 
   const conflicts = parseConflicts(value.conflicts);
 
-  return normalizeLocation({
+  return normalizeOrganization({
     ...value,
     id: value.id as string,
     name: value.name as string,
     conflicts,
     aiNotes: parseAiNotes(value.aiNotes),
-  } as Partial<Location>);
+  } as Partial<Organization>);
 }

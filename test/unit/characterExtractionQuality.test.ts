@@ -17,6 +17,7 @@ import {
   CHARACTER_EXTRACT_VERSION,
   type CharacterExtractResult,
 } from "../../src/prompts/characterExtract";
+import { SUMMARY_MAX_CHARS } from "../../src/core/summaryLimit";
 
 interface AddressPeriodExpectation {
   targetName: string;
@@ -124,8 +125,8 @@ describe("登場人物抽出の品質ゲート", () => {
     assertChapterAndAddressPeriods(fixture, merged.characters);
   });
 
-  test("v2.5の構造化出力契約を公開する", () => {
-    expect(CHARACTER_EXTRACT_VERSION).toBe("2.5");
+  test("v2.7の構造化出力契約を公開する", () => {
+    expect(CHARACTER_EXTRACT_VERSION).toBe("2.7");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.properties)
       .toHaveProperty("entityType");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.required)
@@ -152,7 +153,7 @@ describe("登場人物抽出の品質ゲート", () => {
       expect.arrayContaining(["summary", "affiliation"])
     );
     // 長さの上限はスキーマにも書くが、守られる保証はないのでコード側でも切る
-    expect(character.properties.summary.maxLength).toBe(50);
+    expect(character.properties.summary.maxLength).toBe(SUMMARY_MAX_CHARS);
 
     for (const kind of ["abilities", "locations"] as const) {
       expect(CHARACTER_EXTRACT_SCHEMA.properties[kind].items.required).toEqual(

@@ -171,6 +171,25 @@ export function validateCharacterExtractResult(
   return { accepted, rejected };
 }
 
+/**
+ * AI応答から受け取る、単純な文字列の項目。
+ *
+ * 名前・別名・呼称・関係のように構造を持つものは個別に扱うのでここには入れない。
+ * プロンプトのスキーマと突き合わせるテストがこの配列を参照している。
+ */
+export const EXTRACTED_TEXT_FIELDS = [
+  "reading",
+  "summary",
+  "affiliation",
+  "gender",
+  "role",
+  "personality",
+  "appearance",
+  "firstPerson",
+  "defaultSecondPerson",
+  "evidence",
+] as const;
+
 /** AI応答を後段が安全に扱える形へ正規化する。 */
 export function normalizeExtractedCharacter(
   raw: Record<string, unknown>
@@ -195,12 +214,15 @@ export function normalizeExtractedCharacter(
     character.isMob = raw.isMob;
   }
 
-  copyNullableString(character, raw, "role");
-  copyNullableString(character, raw, "personality");
-  copyNullableString(character, raw, "appearance");
-  copyNullableString(character, raw, "firstPerson");
-  copyNullableString(character, raw, "defaultSecondPerson");
-  copyNullableString(character, raw, "evidence");
+  // ここは受け取る項目の白紙リストである。
+  // **プロンプトに項目を足したら、必ずここにも足すこと。**
+  // 足し忘れると、AIが正しく返していても後段へ届かず、
+  // 画面には「AIが埋められなかった」ようにしか見えない。
+  // 実際に reading / summary / affiliation / gender の4つで起きた。
+  // `EXTRACTED_TEXT_FIELDS` はスキーマとの照合テストが参照している。
+  for (const key of EXTRACTED_TEXT_FIELDS) {
+    copyNullableString(character, raw, key);
+  }
 
   if ("addressTerms" in raw) {
     character.addressTerms = Array.isArray(raw.addressTerms)

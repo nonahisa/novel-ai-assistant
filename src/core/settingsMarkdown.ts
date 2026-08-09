@@ -3,6 +3,7 @@ import type { Location } from "../models/location";
 import type { Character } from "../models/character";
 import type { AiNote } from "../models/aiNote";
 import type { CustomFieldDefinition } from "../models/customField";
+import { membersOf, type Organization } from "../models/organization";
 
 /**
  * 設定資料としてそのまま渡せるMarkdownを組み立てる。
@@ -139,6 +140,98 @@ function aiNoteLines(notes: AiNote[]): string[] {
     lines.push("");
   }
   return lines;
+}
+
+/**
+ * 組織一覧。上位組織ごとにまとめる。
+ *
+ * 所属する人物も出す。人物一覧は所属で章を分けているので、
+ * 組織側からも辿れるようにすると、どちらから読んでも繋がる。
+ */
+export function buildOrganizationMarkdown(
+  organizations: Organization[],
+  characters: Array<{ name: string; affiliation: string | null }>,
+  options: SettingsMarkdownOptions
+): string {
+  const visible = organizations.filter((organization) =>
+    isVisible(organization.spoilerLevel, options.spoilerLevel)
+  );
+  const lines: string[] = [`# ${options.workTitle} 組織一覧`, ""];
+
+  if (visible.length === 0) {
+    lines.push("まだ組織が登録されていません。", "");
+    return lines.join("\n");
+  }
+
+  for (const [parent, items] of groupByParent(visible)) {
+    lines.push(`## ${parent}`, "");
+    for (const organization of items) {
+      const reading = organization.reading ? `（${organization.reading}）` : "";
+      lines.push(`### ${organization.name}${reading}`, "");
+      if (organization.summary) {
+        lines.push(organization.summary, "");
+      }
+      if (organization.aliases.length > 0) {
+        lines.push(`- **別名**: ${organization.aliases.join("、")}`);
+      }
+      if (organization.category) {
+        lines.push(`- **種別**: ${organization.category}`);
+      }
+      if (organization.description) {
+        lines.push(`- **説明**: ${organization.description}`);
+      }
+      const members = membersOf(organization, characters);
+      if (members.length > 0) {
+        lines.push(`- **所属する人物**: ${members.join("、")}`);
+      }
+      if (organization.appearedChapters.length > 0) {
+        lines.push(
+          `- **登場話**: ${formatChapters(organization.appearedChapters)}`
+        );
+      }
+      if (organization.status === "未登場") {
+        lines.push("- **状態**: 未登場（設定のみ）");
+      }
+      if (organization.exportNote.trim()) {
+        lines.push(`- **補足**: ${organization.exportNote.trim()}`);
+      }
+      for (const conflict of organization.conflicts) {
+        lines.push(
+          `- **要確認（${conflict.field}）**: ${conflict.values.join(" / ")}`
+        );
+      }
+      lines.push(...aiNoteLines(organization.aiNotes));
+      lines.push("");
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * 上位組織ごとに分ける。
+ * 上位が読み取れなかった組織は末尾へまとめ、
+ * 「上位組織なし」という架空の組織があるように見せない。
+ */
+function groupByParent(
+  organizations: Organization[]
+): Map<string, Organization[]> {
+  const groups = new Map<string, Organization[]>();
+  const others: Organization[] = [];
+
+  for (const organization of organizations) {
+    const parent = organization.parent?.trim();
+    if (!parent) {
+      others.push(organization);
+      continue;
+    }
+    const list = groups.get(parent) ?? [];
+    list.push(organization);
+    groups.set(parent, list);
+  }
+
+  if (others.length > 0) groups.set("上位組織の記載なし", others);
+  return groups;
 }
 
 /** 場所一覧。地域ごとにまとめる */

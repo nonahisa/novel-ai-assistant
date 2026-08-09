@@ -11,6 +11,8 @@ import { ClaudeProvider } from "./claudeProvider";
 import { OpenAIProvider } from "./openaiProvider";
 import { GeminiProvider } from "./geminiProvider";
 import { withProgress } from "../views/progress";
+import { probeGeneration } from "./generationProbe";
+import { logFailure, showLog } from "../core/logger";
 
 const KEY_PROVIDER = "novelai.ai.provider";
 const KEY_MODEL = "novelai.ai.model";
@@ -183,6 +185,30 @@ export async function runSetupWizard(
     { title: "使用するモデルを選んでください", ignoreFocusOut: true }
   );
   if (!modelPick) return false;
+
+  // 選んだモデルで実際に生成できるか確かめる。
+  // モデル一覧は残高ゼロでも返ってくるので、ここまでの確認では
+  // 「使える」と言い切れない。設定を終えたあと抽出で初めて
+  // 失敗すると、作者は何が悪いのか分からない
+  const probe = await withProgress("実際に生成できるか試しています…", () =>
+    probeGeneration(provider, modelPick.model.id)
+  );
+  if (!probe.ok) {
+    if (probe.error) {
+      logFailure("AIの設定（生成の試行）", {
+        種別: probe.error.kind,
+        詳細: probe.error.detail,
+        モデル: modelPick.model.id,
+      });
+    }
+    const action = await vscode.window.showErrorMessage(
+      `${probe.message ?? "生成できませんでした。"}\n設定は保存していません。`,
+      "ログを表示",
+      "閉じる"
+    );
+    if (action === "ログを表示") showLog();
+    return false;
+  }
 
   await registry.select(providerPick.providerId, modelPick.model.id);
 

@@ -1,34 +1,38 @@
 import { describe, expect, test } from "vitest";
-import { clampSummary } from "../../src/core/summaryLimit";
+import { clampSummary, SUMMARY_MAX_CHARS } from "../../src/core/summaryLimit";
 import { buildCharacterMarkdown } from "../../src/core/settingsMarkdown";
 import { emptyCharacter, type Character } from "../../src/models/character";
 
 describe("紹介文の長さ", () => {
-  test("50字以内はそのまま通す", () => {
+  // 上限は変わることがある（50→60）。テストが直書きしていると
+  // 上限を動かすたびに書き直しになるので、定数から組み立てる
+  test("上限以内はそのまま通す", () => {
     const text = "冒険者ギルドの生活保護課ケースワーカー。転移者で制度の考案者。";
 
     expect(clampSummary(text)).toBe(text);
   });
 
-  test("50字を超えたら切り詰める", () => {
+  test("上限を超えたら切り詰める", () => {
     // プロンプトで指示しても守られないので、コード側で確かめる
-    const long = "あ".repeat(80);
+    const long = "あ".repeat(SUMMARY_MAX_CHARS + 30);
 
-    expect([...(clampSummary(long) ?? "")]).toHaveLength(50);
+    expect([...(clampSummary(long) ?? "")]).toHaveLength(SUMMARY_MAX_CHARS);
   });
 
   test("切るときは句読点の切れ目まで戻す", () => {
-    const text = "あ".repeat(35) + "。" + "い".repeat(30);
+    // 上限の6割より後ろにある句点で終わらせる
+    const head = "あ".repeat(SUMMARY_MAX_CHARS - 15);
+    const text = head + "。" + "い".repeat(30);
 
     // ぶつ切りにせず、読める形で終わらせる
-    expect(clampSummary(text)).toBe("あ".repeat(35) + "。");
+    expect(clampSummary(text)).toBe(head + "。");
   });
 
   test("戻しすぎない", () => {
     // 先頭近くの句点まで戻すと情報がほとんど残らない
-    const text = "あ。" + "い".repeat(80);
+    const text = "あ。" + "い".repeat(SUMMARY_MAX_CHARS + 30);
 
-    expect([...(clampSummary(text) ?? "")]).toHaveLength(50);
+    expect([...(clampSummary(text) ?? "")]).toHaveLength(SUMMARY_MAX_CHARS);
   });
 
   test("空やnullは未設定にする", () => {
@@ -43,9 +47,9 @@ describe("紹介文の長さ", () => {
 
   test("サロゲートペアを1字として数える", () => {
     // 「𠮟」のような字を2字と数えると、実際より短く切れてしまう
-    const text = "𠮟".repeat(60);
+    const text = "𠮟".repeat(SUMMARY_MAX_CHARS + 10);
 
-    expect([...(clampSummary(text) ?? "")]).toHaveLength(50);
+    expect([...(clampSummary(text) ?? "")]).toHaveLength(SUMMARY_MAX_CHARS);
   });
 });
 

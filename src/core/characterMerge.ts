@@ -45,10 +45,11 @@ export interface MergeCandidate {
   names: [string, string];
   /**
    * abbreviation: 省略形とみられる（「ギルマス」と「ギルドマスター」）
+   * suffix: 一方が他方の言い方を含む（「近所のおばあさん」と「ばあさん」）
    * ambiguous: 統合先が複数あって決められなかった
    * same_name: 同じ呼称なのに別レコードになっている
    */
-  reason: "abbreviation" | "ambiguous" | "same_name";
+  reason: "abbreviation" | "suffix" | "ambiguous" | "same_name";
 }
 
 export function mergeExtractedCharacters(
@@ -170,7 +171,7 @@ function applyExtracted(
   }
 
   // 紹介文は長さをコード側で確かめてから入れる。
-  // プロンプトで50字以内と指示しても、モデルは平気で超えてくる
+  // プロンプトで字数を指示しても、モデルは平気で超えてくる
   changed =
     fillOrConflict(target, "summary", clampSummary(ex.summary), conflicts) ||
     changed;
@@ -454,15 +455,63 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
         continue;
       }
 
-      const pair = appellationPairs(a, b).find(([left, right]) =>
-        isAbbreviationOf(left, right)
-      );
-      if (pair) {
+      const pairs = appellationPairs(a, b);
+
+      if (pairs.some(([left, right]) => isAbbreviationOf(left, right))) {
         candidates.push({ names: [a.name, b.name], reason: "abbreviation" });
+        continue;
+      }
+
+      if (pairs.some(([left, right]) => isSuffixCallOf(left, right))) {
+        candidates.push({ names: [a.name, b.name], reason: "suffix" });
       }
     }
   }
   return candidates;
+}
+
+/**
+ * shorter が longer の後ろに含まれる呼び方か
+ * （「ばあさん」と「近所のおばあさん」）。
+ *
+ * 日本語では、同じ人物を「近所のおばあさん」と説明的に書いたり、
+ * 単に「ばあさん」と呼んだりする。AIは場面ごとに違う書き方を拾うため、
+ * 別レコードになりやすい。実データで起きた（「いじめられっ子」）。
+ *
+ * `isAbbreviationOf` はカタカナ語の省略（ギルマス）専用なので、
+ * ひらがな・漢字の呼び方は拾えない。
+ *
+ * **統合はしない。候補として出すだけ。** 別人の可能性は残るので、
+ * 判断は作者に委ねる（`findMergeCandidates` の方針）。
+ */
+export function isSuffixCallOf(shorter: string, longer: string): boolean {
+  // ここでは normalizeName を通さない。あれは敬称を落とすので
+  // 「ばあさん」が「ばあ」になり、短すぎて判定できなくなる。
+  // 呼び方そのものの重なりを見たいので、書かれたまま比べる
+  const left = shorter.trim();
+  const right = longer.trim();
+
+  // 3字未満だと「先生」「さん」「たち」のような語で無関係な組が大量に並ぶ。
+  // 候補が多すぎると作者が全部読まなくなり、機能そのものが死ぬ
+  if (left.length < 3) return false;
+  if (left.length >= right.length) return false;
+  // 離れすぎた長さの組は、たまたま末尾が揃っただけのことが多い
+  if (right.length / left.length > MAX_LENGTH_RATIO) return false;
+
+  if (right.endsWith(left)) return true;
+
+  // 「おばあさん」と「近所のばあさん」のように、
+  // 丁寧の「お」の有無だけが違う場合も同じ呼び方とみなす
+  const bare = stripPolitePrefix(left);
+  return bare.length >= 3 && bare !== left && right.endsWith(bare);
+}
+
+/**
+ * 頭に付く丁寧の「お」「御」を落とす。
+ * 「おばあさん」と「ばあさん」は同じ言い方の丁寧・くだけた形にすぎない。
+ */
+function stripPolitePrefix(name: string): string {
+  return name.replace(/^[お御]/, "");
 }
 
 /**

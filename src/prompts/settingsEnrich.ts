@@ -2,6 +2,7 @@ import type { MentionExcerpt } from "../core/mentionExcerpts";
 import type { SettingsKind } from "../core/settingsSummary";
 import type { SettingsTarget } from "./settingsChat";
 import type { CustomFieldDefinition } from "../models/customField";
+import { SUMMARY_MAX_CHARS } from "../core/summaryLimit";
 
 /**
  * P-20 設定項目の充実
@@ -50,7 +51,7 @@ export const ENRICHABLE_FIELDS: Record<SettingsKind, EnrichableField[]> = {
       key: "summary",
       label: "紹介",
       hint: "その人物が何者かが一目で分かる紹介。役割と立場が分かれば十分",
-      maxChars: 50,
+      maxChars: SUMMARY_MAX_CHARS,
     },
     {
       key: "affiliation",
@@ -78,7 +79,7 @@ export const ENRICHABLE_FIELDS: Record<SettingsKind, EnrichableField[]> = {
     },
   ],
   ability: [
-    { key: "summary", label: "紹介", hint: "どんな能力かが一目で分かる説明", maxChars: 50 },
+    { key: "summary", label: "紹介", hint: "どんな能力かが一目で分かる説明", maxChars: SUMMARY_MAX_CHARS },
     { key: "category", label: "分類", hint: "作品側の分類語をそのまま使う" },
     {
       key: "description",
@@ -89,8 +90,34 @@ export const ENRICHABLE_FIELDS: Record<SettingsKind, EnrichableField[]> = {
     { key: "cost", label: "代償", hint: "発動に必要な代償", multiline: true },
     { key: "limitation", label: "制約", hint: "使えない条件", multiline: true },
   ],
+  organization: [
+    {
+      key: "summary",
+      label: "紹介",
+      hint: "どんな組織かが一目で分かる説明",
+      maxChars: SUMMARY_MAX_CHARS,
+    },
+    {
+      key: "category",
+      label: "種別",
+      hint: "ギルド・国家・部署・商会など。作品側の言い方をそのまま使う",
+    },
+    {
+      key: "parent",
+      label: "上位組織",
+      hint:
+        "この組織が属する上位の組織（「生活保護課」に対する「冒険者ギルド」）。" +
+        "読み取れないなら null",
+    },
+    {
+      key: "description",
+      label: "説明",
+      hint: "何をする組織か。役割・規模・立場",
+      multiline: true,
+    },
+  ],
   location: [
-    { key: "summary", label: "紹介", hint: "どんな場所かが一目で分かる説明", maxChars: 50 },
+    { key: "summary", label: "紹介", hint: "どんな場所かが一目で分かる説明", maxChars: SUMMARY_MAX_CHARS },
     { key: "region", label: "地域", hint: "上位の地域・都市。読み取れないなら null" },
     {
       key: "description",

@@ -41,7 +41,8 @@ import {
   withProgress,
 } from "./views/progress";
 import { pathExists } from "./core/fileSystem";
-import { disposeLog, showLog } from "./core/logger";
+import { disposeLog, logFailure, showLog } from "./core/logger";
+import { probeGeneration } from "./ai/generationProbe";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const registry = new WorkRegistry(context);
@@ -519,17 +520,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const result = await withProgress("接続を確認しています…", () =>
         resolved.provider.testConnection()
       );
-      if (result.ok) {
-        const info = await aiRegistry.resolveModelInfo();
-        const detail = info
-          ? `${info.displayName}（${info.parameterSize ?? "?"} / 文脈 ${
-              info.contextWindow
-            }）`
-          : resolved.model;
-        vscode.window.showInformationMessage(`${result.message}\n使用中: ${detail}`);
-      } else {
+      if (!result.ok) {
         vscode.window.showErrorMessage(result.message);
+        return;
       }
+
+      // モデル一覧が引けても生成できるとは限らない。
+      // 残高不足・権限不足は一覧では表に出ず、
+      // 抽出を走らせたあとで初めて分かることになる（実際に起きた）
+      const probe = await withProgress("実際に生成できるか試しています…", () =>
+        probeGeneration(resolved.provider, resolved.model)
+      );
+      if (!probe.ok) {
+        if (probe.error) {
+          logFailure("AI接続の確認（生成の試行）", {
+            種別: probe.error.kind,
+            詳細: probe.error.detail,
+            モデル: resolved.model,
+          });
+        }
+        const action = await vscode.window.showErrorMessage(
+          probe.message ?? "生成できませんでした。",
+          "ログを表示",
+          "閉じる"
+        );
+        if (action === "ログを表示") showLog();
+        return;
+      }
+
+      const info = await aiRegistry.resolveModelInfo();
+      const detail = info
+        ? `${info.displayName}（${info.parameterSize ?? "?"} / 文脈 ${
+            info.contextWindow
+          }）`
+        : resolved.model;
+      vscode.window.showInformationMessage(
+        `${result.message}\n使用中: ${detail}\n生成も確認しました。`
+      );
     })
   );
 

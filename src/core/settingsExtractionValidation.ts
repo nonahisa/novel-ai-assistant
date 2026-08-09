@@ -3,11 +3,12 @@ import type {
   ExtractedAbility,
   ExtractedAbilitySystem,
   ExtractedLocation,
+  ExtractedOrganization,
 } from "../prompts/characterExtract";
 import { isGroundedInChunk, chaptersForChunk } from "./groundedEvidence";
 
 /**
- * 能力・場所のAI出力を検証する。
+ * 能力・組織・場所のAI出力を検証する。
  *
  * 人物と同じく「名前が本文に実在する」「根拠が本文に逐語で存在する」の
  * 2点を確認し、AIの捏造を保存前に弾く。
@@ -42,6 +43,16 @@ export interface AbilityValidationResult {
 
 export interface LocationValidationResult {
   accepted: AcceptedLocationCandidate[];
+  rejected: RejectedSettingCandidate[];
+}
+
+export interface AcceptedOrganizationCandidate {
+  data: ExtractedOrganization;
+  chapters: number[];
+}
+
+export interface OrganizationValidationResult {
+  accepted: AcceptedOrganizationCandidate[];
   rejected: RejectedSettingCandidate[];
 }
 
@@ -218,6 +229,72 @@ export function validateExtractedLocations(
   return { accepted, rejected };
 }
 
+/**
+ * 組織の抽出結果を検証する。
+ *
+ * 場所と同じく、名前が本文に実在し、根拠が逐語で存在することを確かめる。
+ * ただし「石造りの建物」のような情景描写の判定は使わない。
+ * 組織名は普通名詞の連なり（「生活保護課」「衛兵隊」）が普通で、
+ * 場所の判定を当てると正しい組織まで弾いてしまう。
+ */
+export function validateExtractedOrganizations(
+  raw: unknown,
+  chunk: Chunk
+): OrganizationValidationResult {
+  const accepted: AcceptedOrganizationCandidate[] = [];
+  const rejected: RejectedSettingCandidate[] = [];
+  if (!Array.isArray(raw)) return { accepted, rejected };
+
+  const chapters = chaptersForChunk(chunk);
+
+  for (const entry of raw) {
+    if (!isRecord(entry) || typeof entry.name !== "string") {
+      rejected.push({ name: null, reason: "invalid_shape" });
+      continue;
+    }
+    const organization = normalizeExtractedOrganization(entry);
+    if (!isValidSettingName(organization.name)) {
+      rejected.push({ name: organization.name, reason: "invalid_name" });
+      continue;
+    }
+    // 「そこ」「あの組織」のような指示語は特定の組織を指さない
+    if (DEMONSTRATIVE_PATTERN.test(organization.name)) {
+      rejected.push({ name: organization.name, reason: "invalid_name" });
+      continue;
+    }
+    if (
+      !isGroundedInChunk(
+        [organization.name, ...(organization.aliases ?? [])],
+        organization.evidence,
+        chunk.text
+      )
+    ) {
+      rejected.push({ name: organization.name, reason: "ungrounded" });
+      continue;
+    }
+    accepted.push({ data: organization, chapters: [...chapters] });
+  }
+
+  return { accepted, rejected };
+}
+
+export function normalizeExtractedOrganization(
+  raw: Record<string, unknown>
+): ExtractedOrganization {
+  const name = typeof raw.name === "string" ? raw.name.trim() : "";
+  return {
+    name,
+    aliases: cleanStringArray(raw.aliases).filter((alias) => alias !== name),
+    reading: nullableString(raw.reading),
+    // プロンプトに項目を足したら、必ずここにも足すこと
+    summary: nullableString(raw.summary),
+    parent: nullableString(raw.parent),
+    category: nullableString(raw.category),
+    description: nullableString(raw.description),
+    evidence: nullableString(raw.evidence),
+  };
+}
+
 /** 能力体系の総称。空文字や記号だけの値を弾く */
 export function normalizeExtractedAbilitySystem(
   raw: unknown
@@ -255,6 +332,9 @@ export function normalizeExtractedAbility(
     name,
     aliases: cleanStringArray(raw.aliases).filter((alias) => alias !== name),
     reading: nullableString(raw.reading),
+    // プロンプトに項目を足したら、必ずここにも足すこと。
+    // 足し忘れると、AIが正しく返していても後段へ届かない
+    summary: nullableString(raw.summary),
     category: nullableString(raw.category),
     description: nullableString(raw.description),
     cost: nullableString(raw.cost),
@@ -272,6 +352,7 @@ export function normalizeExtractedLocation(
     name,
     aliases: cleanStringArray(raw.aliases).filter((alias) => alias !== name),
     reading: nullableString(raw.reading),
+    summary: nullableString(raw.summary),
     region: nullableString(raw.region),
     description: nullableString(raw.description),
     evidence: nullableString(raw.evidence),

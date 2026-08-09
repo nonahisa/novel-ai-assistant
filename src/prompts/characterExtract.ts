@@ -1,3 +1,5 @@
+import { SUMMARY_MAX_CHARS } from "../core/summaryLimit";
+
 /**
  * P-04a 設定抽出（チャンク単位）
  *
@@ -11,7 +13,7 @@
  * プロンプトを変更したら version を上げること。
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
-export const CHARACTER_EXTRACT_VERSION = "2.5";
+export const CHARACTER_EXTRACT_VERSION = "2.7";
 
 export const BASE_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 
@@ -33,6 +35,8 @@ export interface CharacterExtractInput {
   knownAbilityNames?: string[];
   /** 既知の場所名。同一場所の判定に使う */
   knownLocationNames?: string[];
+  /** 既知の組織名。同一組織の判定に使う */
+  knownOrganizationNames?: string[];
   /** 既に決まっている能力の総称（「魔法」「スキル」等）。未確定なら省略 */
   abilityTerm?: string;
 }
@@ -52,6 +56,10 @@ export function buildCharacterExtractPrompt(
     input.knownLocationNames && input.knownLocationNames.length > 0
       ? input.knownLocationNames.join("、")
       : "（まだ登録されていません）";
+  const knownOrganizations =
+    input.knownOrganizationNames && input.knownOrganizationNames.length > 0
+      ? input.knownOrganizationNames.join("、")
+      : "（まだ登録されていません）";
   const abilityTermNote = input.abilityTerm
     ? `この作品では能力を「${input.abilityTerm}」と総称します。abilitySystem.abilityTerm には同じ語を使ってください。`
     : `abilitySystem.abilityTerm には、**作品世界の中で能力を総称している語**を、本文の表記のまま入れてください。
@@ -59,7 +67,7 @@ export function buildCharacterExtractPrompt(
    良い例：本文に「神術」「仙術」とあれば "神術"。「魔法」なら "魔法"。「スキル」なら "スキル"。
    本文にそのような総称が見当たらない場合は null にしてください。無理に埋めないでください。`;
 
-  return `以下の小説本文から、登場人物・能力・場所の情報を抽出してください。
+  return `以下の小説本文から、登場人物・能力・組織・場所の情報を抽出してください。
 
 【本文】（${input.chapterLabel}）
 ${input.chunkText}
@@ -69,6 +77,9 @@ ${known}
 
 【既知の能力】（同一能力の判定に使用）
 ${knownAbilities}
+
+【既知の組織】（同一組織の判定に使用）
+${knownOrganizations}
 
 【既知の場所】（同一場所の判定に使用）
 ${knownLocations}
@@ -83,10 +94,10 @@ ${knownLocations}
 - 同一人物が別の呼称で登場する場合（本名／通称／あだ名／役職）、既知の登場人物と
   照合し、同一と判断できる場合は既知の名前を name とし、別呼称を aliases に入れること。
   判断できない場合は新規人物として扱うこと。
-- summary には、その人物が何者かが一目で分かる紹介を**50字以内**で書くこと。
+- summary には、その人物が何者かが一目で分かる紹介を**${SUMMARY_MAX_CHARS}字以内**で書くこと。
   一覧で名前の下に並べる短い説明なので、役割と立場が分かれば十分である。
   例：「冒険者ギルドの生活保護課ケースワーカー。転移者で制度の考案者。」
-  50字を超える場合は削ること。詳しい内容は role / personality / appearance に分けて書く。
+  ${SUMMARY_MAX_CHARS}字を超える場合は削ること。詳しい内容は role / personality / appearance に分けて書く。
 - gender（性別）は、**本文から確認できる場合だけ**書くこと。根拠になるのは
   地の文の「彼」「彼女」、性別を示す語（少年・少女・男・女・父・母など）、
   本人や他人による明言である。
@@ -143,6 +154,24 @@ ${knownLocations}
    扱われている場合にのみ抽出すること。単に「腕が立つ」程度なら抽出しないこと。
 6. ${abilityTermNote}
 
+【組織の抽出ルール】
+組織とは、人物が所属する集まりのことです。
+国家・ギルド・部署・軍・商会・学校・一族などが該当します。
+1. 本文で名指しされた組織だけを抽出すること。組織を創作しないこと。
+2. 人物の affiliation に入れた組織名は、ここにも組織として出すこと。
+   所属だけ書かれていて組織の説明が無い場合は、description を null にして
+   名前だけ出せばよい。
+3. 上位の組織が本文から読み取れる場合は parent に入れること
+   （例：「冒険者ギルドの生活保護課」→ name: "生活保護課", parent: "冒険者ギルド"）。
+   読み取れない場合は null とすること。
+4. category には作品側の言い方をそのまま入れること
+   （「ギルド」「王国」「部署」「商会」「一族」など）。読み取れなければ null。
+5. 「彼ら」「あいつら」のような指示語や、その場限りの集まり
+   （「野次馬」「通行人たち」）は組織ではないので出さないこと。
+6. 場所と組織は分けること。「冒険者ギルド」は組織だが、
+   「冒険者ギルドの受付」は場所である。建物そのものを指すなら場所へ、
+   人の集まりを指すなら組織へ入れる。両方に出してよい。
+
 【場所の抽出ルール】
 1. 物語の舞台となる、または名指しで言及された場所だけを抽出すること。
 2. 「そこ」「あの街」のような指示語は抽出しないこと。固有の名前か、
@@ -157,7 +186,7 @@ ${knownLocations}
   カタカナだけ・ひらがなだけの名前は null にしてよい（こちらで機械的に作るため）。
   漢字の読みは本文のルビや文脈から判断し、分からなければ最も一般的な読みでよい。
   例：「月島灯」→ "つきしまあかり"、「白瀬澪」→ "しらせみお"
-- summary は**50字以内**の短い紹介にすること。人物・能力・場所のいずれも同じ。
+- summary は**${SUMMARY_MAX_CHARS}字以内**の短い紹介にすること。人物・能力・場所のいずれも同じ。
   一覧で名前の下に並べるための1行なので、詳細は他の項目に分けて書く。
 - 各レコードには、本文からそのまま抜き出した短い evidence を必ず付けること。
   evidence は説明や要約ではなく、その名称を含む逐語引用にすること。
@@ -187,7 +216,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           aliases: { type: "array", items: { type: "string" } },
           isMob: { type: "boolean" },
           reading: { type: ["string", "null"] },
-          summary: { type: ["string", "null"], maxLength: 50 },
+          summary: { type: ["string", "null"], maxLength: SUMMARY_MAX_CHARS },
           gender: { type: ["string", "null"] },
           affiliation: { type: ["string", "null"] },
           role: { type: ["string", "null"] },
@@ -246,12 +275,29 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           name: { type: "string" },
           aliases: { type: "array", items: { type: "string" } },
           reading: { type: ["string", "null"] },
-          summary: { type: ["string", "null"], maxLength: 50 },
+          summary: { type: ["string", "null"], maxLength: SUMMARY_MAX_CHARS },
           category: { type: ["string", "null"] },
           description: { type: ["string", "null"] },
           cost: { type: ["string", "null"] },
           limitation: { type: ["string", "null"] },
           userNames: { type: "array", items: { type: "string" } },
+          evidence: { type: "string", minLength: 1 },
+        },
+        required: ["name", "summary", "description", "evidence"],
+      },
+    },
+    organizations: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          aliases: { type: "array", items: { type: "string" } },
+          reading: { type: ["string", "null"] },
+          summary: { type: ["string", "null"], maxLength: SUMMARY_MAX_CHARS },
+          parent: { type: ["string", "null"] },
+          category: { type: ["string", "null"] },
+          description: { type: ["string", "null"] },
           evidence: { type: "string", minLength: 1 },
         },
         required: ["name", "summary", "description", "evidence"],
@@ -265,7 +311,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           name: { type: "string" },
           aliases: { type: "array", items: { type: "string" } },
           reading: { type: ["string", "null"] },
-          summary: { type: ["string", "null"], maxLength: 50 },
+          summary: { type: ["string", "null"], maxLength: SUMMARY_MAX_CHARS },
           region: { type: ["string", "null"] },
           description: { type: ["string", "null"] },
           evidence: { type: "string", minLength: 1 },
@@ -287,8 +333,14 @@ export const CHARACTER_EXTRACT_SCHEMA = {
     confidence: { type: "string", enum: ["high", "medium", "low"] },
   },
   // 省略可能にすると、モデルは面倒な項目を黙って落とす。
-  // 空配列・nullで「該当なし」と明示させるため、3種類とも必須にする。
-  required: ["characters", "abilities", "locations", "abilitySystem"],
+  // 空配列・nullで「該当なし」と明示させるため、4種類とも必須にする。
+  required: [
+    "characters",
+    "abilities",
+    "organizations",
+    "locations",
+    "abilitySystem",
+  ],
 } as const;
 
 /** AIから返る抽出結果 */
@@ -333,6 +385,20 @@ export interface ExtractedAbility {
   evidence?: string | null;
 }
 
+/** AIから返る組織。人物の affiliation に対応する */
+export interface ExtractedOrganization {
+  name: string;
+  aliases?: string[];
+  reading?: string | null;
+  summary?: string | null;
+  /** 上位の組織（「冒険者ギルド」等） */
+  parent?: string | null;
+  /** 種別（「ギルド」「王国」「部署」等）。作品側の言い方に従う */
+  category?: string | null;
+  description?: string | null;
+  evidence?: string | null;
+}
+
 /** AIから返る場所 */
 export interface ExtractedLocation {
   name: string;
@@ -355,6 +421,7 @@ export interface ExtractedAbilitySystem {
 export interface CharacterExtractResult {
   characters: ExtractedCharacter[];
   abilities?: ExtractedAbility[];
+  organizations?: ExtractedOrganization[];
   locations?: ExtractedLocation[];
   abilitySystem?: ExtractedAbilitySystem;
   confidence?: string;

@@ -1,6 +1,7 @@
 import type { Character } from "../models/character";
 import type { Ability } from "../models/ability";
 import type { Location } from "../models/location";
+import { membersOf, type Organization } from "../models/organization";
 
 /**
  * 設定資料パネルの一覧に並べる1件。
@@ -58,6 +59,31 @@ export function buildAbilityListItems(abilities: Ability[]): SettingsListItem[] 
     // 能力と場所にモブの区別は無い
     isMob: false,
   }));
+}
+
+/**
+ * 組織の一覧。名前の下に種別と所属人数を出す。
+ *
+ * 人数を出すのは、人物の所属から作られただけの
+ * 中身が空の組織でも「誰がいるか」で見当が付くようにするため。
+ */
+export function buildOrganizationListItems(
+  organizations: Organization[],
+  characters: Array<{ name: string; affiliation: string | null }> = []
+): SettingsListItem[] {
+  return organizations.map((organization) => {
+    const memberCount = membersOf(organization, characters).length;
+    return {
+      id: organization.id,
+      name: organization.name,
+      sub: joinSub([
+        organization.summary ?? organization.category ?? "",
+        memberCount > 0 ? `${memberCount}人` : "",
+        noteCount(organization.aiNotes.length),
+      ]),
+      isMob: false,
+    };
+  });
 }
 
 export function buildLocationListItems(locations: Location[]): SettingsListItem[] {

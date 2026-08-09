@@ -463,10 +463,29 @@ describe("省略形の統合候補", () => {
     ]);
   });
 
-  test("頭文字が違う語は候補にしない", () => {
+  test("頭文字が違う語は、省略形としては候補にしない", () => {
+    // 省略は語頭を残すのが普通なので、「マスター」は
+    // 「ギルドマスター」の省略形ではない
     const result = merge(["ギルドマスター", "マスター"]);
 
-    expect(result.mergeCandidates).toEqual([]);
+    expect(
+      result.mergeCandidates.some(
+        (candidate) => candidate.reason === "abbreviation"
+      )
+    ).toBe(false);
+  });
+
+  test("後ろが重なる呼び方は、別の手掛かりとして候補に挙げる", () => {
+    // 「ギルドマスター」と呼ばれたり「マスター」と呼ばれたりするのは
+    // 日本語では普通で、AIは場面ごとに別レコードにしてしまう。
+    // 別人（酒場のマスター）の可能性は残るが、候補を出すだけなので
+    // 判断は作者に委ねる。統合し損ねるほうが取り返しがつかない
+    const result = merge(["ギルドマスター", "マスター"]);
+
+    expect(result.characters).toHaveLength(2);
+    expect(result.mergeCandidates).toEqual([
+      { names: ["ギルドマスター", "マスター"], reason: "suffix" },
+    ]);
   });
 
   test("部分列でない語は候補にしない", () => {

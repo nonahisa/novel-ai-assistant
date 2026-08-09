@@ -4,6 +4,7 @@ import {
   buildEnrichSchema,
   ENRICHABLE_FIELDS,
 } from "../../src/prompts/settingsEnrich";
+import { SUMMARY_MAX_CHARS } from "../../src/core/summaryLimit";
 
 describe("項目を充実させる提案", () => {
   test("種別ごとに提案する項目を決める", () => {
@@ -47,7 +48,7 @@ describe("項目を充実させる提案", () => {
       properties: Record<string, { maxLength?: number }>;
     };
 
-    expect(schema.properties.summary.maxLength).toBe(50);
+    expect(schema.properties.summary.maxLength).toBe(SUMMARY_MAX_CHARS);
     expect(schema.properties.role.maxLength).toBeUndefined();
   });
 

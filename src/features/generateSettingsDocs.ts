@@ -8,11 +8,13 @@ import {
   AbilitySystemStore,
   createAbilityStore,
   createLocationStore,
+  createOrganizationStore,
 } from "../core/abilityStore";
 import {
   buildAbilityMarkdown,
   buildCharacterMarkdown,
   buildLocationMarkdown,
+  buildOrganizationMarkdown,
 } from "../core/settingsMarkdown";
 import { CustomFieldStore } from "../core/customFieldStore";
 
@@ -54,10 +56,12 @@ export async function generateSettingsDocs(
   const characterStore = new CharacterStore(work);
   const abilityStore = createAbilityStore(work);
   const locationStore = createLocationStore(work);
+  const organizationStore = createOrganizationStore(work);
 
   const loadedCharacters = await characterStore.loadAll();
   const loadedAbilities = await abilityStore.loadAll();
   const loadedLocations = await locationStore.loadAll();
+  const loadedOrganizations = await organizationStore.loadAll();
   const abilitySystem = await new AbilitySystemStore(work).load();
 
   // 壊れたJSONがあるまま資料を作ると、欠けた資料が正しく見えてしまう
@@ -65,6 +69,7 @@ export async function generateSettingsDocs(
     ...loadedCharacters.errors,
     ...loadedAbilities.errors,
     ...loadedLocations.errors,
+    ...loadedOrganizations.errors,
   ];
   if (errors.length > 0) {
     const detail = errors.map((e) => `${e.file}: ${e.message}`).join("\n");
@@ -110,6 +115,16 @@ export async function generateSettingsDocs(
       ),
       // 能力体系の無い作品に空の一覧を作らない
       hasContent: loadedAbilities.records.length > 0,
+    },
+    {
+      fileName: "organizations.md",
+      label: "組織",
+      content: buildOrganizationMarkdown(
+        loadedOrganizations.records,
+        loadedCharacters.characters,
+        markdownOptions
+      ),
+      hasContent: loadedOrganizations.records.length > 0,
     },
     {
       fileName: "locations.md",

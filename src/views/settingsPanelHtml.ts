@@ -19,14 +19,28 @@ export function buildSettingsPanelHtml(nonce: string, cspSource: string): string
 <title>設定資料</title>
 <style nonce="${nonce}">
 * { box-sizing: border-box; }
+/*
+ * 画面全体をページごとスクロールさせない。
+ *
+ * 以前は #layout に 100vh を与えたうえで #status をその下に置いていたため、
+ * 合計が画面より高くなり、ページ全体が縦にずれていた。
+ * タブや一覧が上へ隠れるうえ、下端の入力欄を押すと同時に画面が動いて
+ * 狙った場所に当たらないことがある。
+ * スクロールするのは中身（#detail と一覧）だけにする。
+ */
 body {
   margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size);
   color: var(--vscode-foreground);
   background: var(--vscode-editor-background);
 }
-#layout { display: flex; height: 100vh; }
+/* min-height: 0 が無いと、中身の高さに引きずられて縮まなくなる */
+#layout { display: flex; flex: 1; min-height: 0; }
 #sidebar {
   width: 260px;
   min-width: 200px;
@@ -49,15 +63,28 @@ body {
   font-weight: bold;
 }
 #search { margin: 8px; padding: 4px 6px; }
+/*
+ * 入力欄は必ず枠線を見せる。
+ *
+ * --vscode-input-border はテーマによっては定義されておらず、
+ * 明るいテーマでは「白地に透明の枠」＝ただの余白にしか見えなくなる。
+ * 実際に「入力フォームと分からない」という報告があった。
+ * 定義があればそれを使い、無ければパネルの境界線で代用する。
+ */
 input, textarea, select {
   width: 100%;
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
-  border: 1px solid var(--vscode-input-border, transparent);
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
   border-radius: 2px;
   padding: 4px 6px;
   font-family: inherit;
   font-size: inherit;
+}
+/* 今どこに書いているかが分かるようにする */
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder);
 }
 textarea { resize: vertical; min-height: 60px; }
 #list { flex: 1; overflow-y: auto; }
@@ -145,18 +172,52 @@ button.secondary {
   padding: 8px 0;
 }
 .proposal .field-row:first-of-type { border-top: none; }
-.proposal .head { display: flex; align-items: center; gap: 6px; }
-.proposal .head label { font-weight: bold; cursor: pointer; }
+/*
+ * 見出しの行。左から チェック → 項目名 → 注意書き の順に詰める。
+ *
+ * 以前は下の .proposal input がチェックにも効いて幅100%になり、
+ * チェックが横いっぱいに広がって項目名が右端へ押し出されていた。
+ * 幅の狭いパネルでは項目名が縦書きのように折り返され、
+ * どのチェックがどの項目のものか読み取れなかった。
+ */
+.proposal .head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.proposal .head input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  flex: 0 0 auto;
+}
+.proposal .head label {
+  font-weight: bold;
+  cursor: pointer;
+  /* 項目名は折り返さず、左に置く */
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .proposal .before {
   font-size: 12px;
   opacity: 0.7;
   white-space: pre-wrap;
-  margin: 4px 0 4px 20px;
+  margin: 4px 0;
 }
-.proposal textarea, .proposal input { margin-left: 20px; width: calc(100% - 20px); }
+.proposal .before .k { opacity: 0.7; margin-right: 4px; }
+/* 入力欄は全幅に戻す。字下げすると、幅の狭いパネルで折り返しが増える */
+.proposal .field-row textarea, .proposal .field-row > input { width: 100%; }
 .proposal .overwrite {
   font-size: 11px;
   color: var(--vscode-notificationsWarningIcon-foreground, #cca700);
+}
+/* 一括操作の行。項目が多いと下まで送るのが手間になるので上にも置く */
+.proposal .bulk {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 .draft .banner {
   font-size: 12px;
@@ -165,17 +226,33 @@ button.secondary {
 }
 .chat-turn { margin-bottom: 10px; }
 .chat-turn .who { font-size: 11px; opacity: 0.7; margin-bottom: 2px; }
+/*
+ * 済んだやり取りは「読むだけ」だと分かる形にする。
+ *
+ * 以前は作者の発言を「透明の地＋全周の枠線」で描いていたため、
+ * 入力欄と見分けが付かなかった（実際に取り違えられた）。
+ * 枠で囲わず、地の色と左の帯で示す。
+ */
 .chat-turn .body {
   white-space: pre-wrap;
-  padding: 6px 8px;
-  border-radius: 3px;
+  padding: 6px 10px;
+  border-radius: 0 3px 3px 0;
   background: var(--vscode-textBlockQuote-background);
+  border-left: 3px solid var(--vscode-textBlockQuote-border, var(--vscode-focusBorder));
 }
-.chat-turn.author .body { background: transparent; border: 1px solid var(--vscode-panel-border); }
+.chat-turn.author .body {
+  border-left-color: var(--vscode-panel-border);
+  opacity: 0.85;
+}
+/* 観点を指定しなかった場合の但し書き。作者が書いた文ではないと分かるように */
+.chat-turn .body.unspecified { font-style: italic; opacity: 0.7; }
 #status {
   padding: 6px 20px;
   font-size: 12px;
   min-height: 26px;
+  /* 高さが変わると上の領域が押し上げられるので、縮まないようにする */
+  flex: 0 0 auto;
+  border-top: 1px solid var(--vscode-panel-border);
 }
 #status.error { color: var(--vscode-errorForeground); }
 .empty { opacity: 0.6; padding: 20px; }
@@ -203,7 +280,14 @@ button.secondary {
 <script nonce="${nonce}">
 (function () {
   const vscode = acquireVsCodeApi();
-  const KIND_LABELS = { character: "登場人物", ability: "能力", location: "場所" };
+  // 組織は場所の手前に置く。人物の所属から辿る流れに合わせる
+  const KINDS = ["character", "ability", "organization", "location"];
+  const KIND_LABELS = {
+    character: "登場人物",
+    ability: "能力",
+    organization: "組織",
+    location: "場所",
+  };
 
   let groups = {};
   let activeKind = "character";
@@ -213,6 +297,27 @@ button.secondary {
   let proposal = null;
   let chatLog = [];
   let busy = false;
+  /**
+   * 相談欄に書きかけの文章。
+   *
+   * renderDetail() は詳細欄をまるごと作り直すので、
+   * 入力欄も毎回作り直される。ここに控えておかないと、
+   * AIの応答・保存・進捗の通知が届いた瞬間に書きかけが消え、
+   * 作者からは「入力できない」ようにしか見えない。
+   */
+  let questionText = "";
+
+  /** 相談欄に出す例。質問の形と、観点だけを書く形の両方を見せる */
+  const CHAT_EXAMPLES = {
+    character:
+      "例：第12話で嘘をついた理由は本文から読み取れますか？／生い立ち",
+    ability:
+      "例：この力を使ったあと何が起きていますか？／代償はどこまで描かれているか",
+    organization:
+      "例：この組織は何を目的に動いていますか？／内部の力関係",
+    location:
+      "例：この場所はどんな雰囲気で描かれていますか？／誰が出入りしているか",
+  };
   /**
    * モブの区画を開いているか。
    * 既定は閉じる。ネームドキャラを探すときに間へ挟まると目当ての名前を見つけにくい。
@@ -238,7 +343,7 @@ button.secondary {
 
   function renderTabs() {
     el.tabs.replaceChildren();
-    for (const kind of ["character", "ability", "location"]) {
+    for (const kind of KINDS) {
       const items = groups[kind] || [];
       const button = document.createElement("button");
       button.textContent = KIND_LABELS[kind] + "(" + items.length + ")";
@@ -320,6 +425,9 @@ button.secondary {
       draft = null;
       proposal = null;
       chatLog = [];
+      // 別の記録へ移ったら書きかけは持ち越さない。
+      // 前の相手への質問が残っていると、誰に聞いているのか分からなくなる
+      questionText = "";
       renderList();
       post("select", { kind: activeKind, id: item.id });
     });
@@ -469,10 +577,18 @@ button.secondary {
     if (draft) el.detail.appendChild(renderDraft());
 
     const question = document.createElement("textarea");
-    question.placeholder =
-      "例：第12話で嘘をついた理由は本文から読み取れますか？／生い立ち";
+    // 例は種別ごとに変える。能力を見ているのに「嘘をついた理由」と出ると、
+    // 何を聞ける機能なのか伝わらない
+    question.placeholder = CHAT_EXAMPLES[detail.kind] || CHAT_EXAMPLES.character;
     question.rows = 2;
-    el.detail.appendChild(question);
+    // 書きかけを復元する。再描画で消えると入力できないのと同じ
+    question.value = questionText;
+    question.addEventListener("input", function () {
+      questionText = question.value;
+    });
+    // 上の項目と同じく見出しを付ける。
+    // 見出しの無い入力欄は、直前のやり取りの続きに見えて気づかれない
+    el.detail.appendChild(labelled("聞きたいこと（空欄でも押せます）", question));
 
     const askRow = document.createElement("div");
     askRow.className = "row";
@@ -482,10 +598,16 @@ button.secondary {
     askButton.disabled = busy;
     askButton.addEventListener("click", function () {
       const text = question.value.trim();
-      // 空欄のまま押されたら全体的な掘り下げとして扱う
-      chatLog.push({ role: "author", text: text || "（全体的に掘り下げる）" });
+      // 空欄のまま押されたら全体的な掘り下げとして扱う。
+      // そのとき出す文は作者が書いたものではないので、
+      // 何を頼んだのかが読んで分かる文にし、字体でも区別する
+      chatLog.push({
+        role: "author",
+        text: text || "観点を指定せず、全体的に掘り下げるよう頼みました。",
+        unspecified: text === "",
+      });
       post("chat", { kind: detail.kind, id: detail.id, question: text });
-      question.value = "";
+      questionText = "";
       renderDetail();
     });
     askRow.appendChild(askButton);
@@ -508,6 +630,9 @@ button.secondary {
     box.appendChild(meta);
 
     const controls = [];
+
+    // 項目が多いと、反映のたびに下まで送ることになる。上にも同じ操作を置く
+    box.appendChild(bulkRow(controls));
     for (const item of proposal.proposals) {
       const row = document.createElement("div");
       row.className = "field-row";
@@ -535,21 +660,64 @@ button.secondary {
       if (item.before) {
         const before = document.createElement("div");
         before.className = "before";
-        before.textContent = "現在: " + item.before;
+        const key = document.createElement("span");
+        key.className = "k";
+        key.textContent = "現在:";
+        before.appendChild(key);
+        before.appendChild(document.createTextNode(item.before));
         row.appendChild(before);
       }
 
       const editor = document.createElement(item.multiline ? "textarea" : "input");
       editor.value = item.after;
       if (item.multiline) editor.rows = 3;
+      // 選択と手直しを提案側へ書き戻す。再描画で元へ戻さないため
+      editor.addEventListener("input", function () {
+        item.after = editor.value;
+      });
+      check.addEventListener("change", function () {
+        item.selected = check.checked;
+      });
       row.appendChild(editor);
 
       controls.push({ key: item.key, check: check, editor: editor });
       box.appendChild(row);
     }
 
+    box.appendChild(bulkRow(controls));
+    return box;
+  }
+
+  /**
+   * 提案の一括操作。上下の両方に同じものを置く。
+   *
+   * controls は行を作りながら push される配列で、
+   * 押された時点の中身を見る。上の行を先に作れるのはそのため。
+   */
+  function bulkRow(controls) {
     const row = document.createElement("div");
-    row.className = "row";
+    row.className = "bulk";
+
+    const selectAll = document.createElement("button");
+    selectAll.className = "action secondary";
+    selectAll.textContent = "すべて選ぶ";
+    selectAll.addEventListener("click", function () {
+      // 現在の内容を置き換える提案も含めて選ぶ。
+      // 押した本人の意思なので、ここで勝手に除かない
+      for (const item of proposal.proposals) item.selected = true;
+      renderDetail();
+    });
+    row.appendChild(selectAll);
+
+    const clearAll = document.createElement("button");
+    clearAll.className = "action secondary";
+    clearAll.textContent = "選択を解除";
+    clearAll.addEventListener("click", function () {
+      for (const item of proposal.proposals) item.selected = false;
+      renderDetail();
+    });
+    row.appendChild(clearAll);
+
     const apply = document.createElement("button");
     apply.className = "action";
     apply.textContent = "選んだ項目を反映";
@@ -579,8 +747,7 @@ button.secondary {
       renderDetail();
     });
     row.appendChild(discard);
-    box.appendChild(row);
-    return box;
+    return row;
   }
 
   function renderDraft() {
@@ -600,6 +767,11 @@ button.secondary {
     const body = document.createElement("textarea");
     body.value = draft.text;
     body.rows = 8;
+    // 手直しした内容を draft 側へ書き戻す。
+    // 再描画で作者の直しが元へ戻るのは、AIの文章より惜しい
+    body.addEventListener("input", function () {
+      draft.text = body.value;
+    });
     box.appendChild(body);
 
     const row = document.createElement("div");
@@ -669,10 +841,15 @@ button.secondary {
     box.className = "chat-turn " + turn.role;
     const who = document.createElement("div");
     who.className = "who";
-    who.textContent = turn.role === "author" ? "あなた" : "AI";
+    // 「あなた」だけでは何の欄か分からない、という指摘があった。
+    // 何を見ているのかが読んで分かる見出しにする
+    who.textContent = turn.role === "author" ? "聞いたこと" : "AIの回答";
     box.appendChild(who);
     const body = document.createElement("div");
     body.className = "body";
+    if (turn.role === "author" && turn.unspecified) {
+      body.classList.add("unspecified");
+    }
     if (turn.role === "assistant" && turn.html) {
       // AIの応答はMarkdownで返ってくる。記号のまま見せない。
       // html は拡張機能側で無害化・整形済み
@@ -731,6 +908,7 @@ button.secondary {
         draft = null;
         proposal = null;
         chatLog = [];
+        questionText = "";
         renderTabs();
         renderList();
         renderDetail();

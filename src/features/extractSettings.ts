@@ -5,22 +5,28 @@ import {
   normalizeExtractedAbilitySystem,
   validateExtractedAbilities,
   validateExtractedLocations,
+  validateExtractedOrganizations,
   type RejectedSettingCandidate,
   type AcceptedAbilityCandidate,
   type AcceptedLocationCandidate,
+  type AcceptedOrganizationCandidate,
 } from "../core/settingsExtractionValidation";
 import {
   mergeExtractedAbilities,
   mergeExtractedLocations,
+  mergeExtractedOrganizations,
+  organizationsFromAffiliations,
   type SettingMergeCandidate,
 } from "../core/settingsMerge";
 import {
   AbilitySystemStore,
   createAbilityStore,
   createLocationStore,
+  createOrganizationStore,
 } from "../core/abilityStore";
 import type { Ability, AbilitySystem } from "../models/ability";
 import type { Location } from "../models/location";
+import type { Organization } from "../models/organization";
 
 /**
  * 人物抽出と同じAI応答から、能力と場所を取り出して保存する。
@@ -34,6 +40,8 @@ export interface SettingsExtractionCounts {
   abilitiesUpdated: number;
   locationsAdded: number;
   locationsUpdated: number;
+  organizationsAdded: number;
+  organizationsUpdated: number;
   rejected: RejectedSettingCandidate[];
   conflicts: number;
   mergeCandidates: SettingMergeCandidate[];
@@ -46,11 +54,19 @@ export interface SettingsPersistResult {
   /** 保存した件数。0なら書き込みは発生していない */
   savedAbilities: number;
   savedLocations: number;
+  savedOrganizations: number;
 }
 
 export class SettingsExtractionAccumulator {
   private readonly abilities: AcceptedAbilityCandidate[] = [];
   private readonly locations: AcceptedLocationCandidate[] = [];
+  private readonly organizations: AcceptedOrganizationCandidate[] = [];
+  /**
+   * 人物側で読み取れた所属。
+   * AIは affiliation に組織名を入れておきながら organizations には
+   * 出さないことがあるため、名前だけでも組織を作れるよう控えておく。
+   */
+  private readonly affiliations = new Set<string>();
   private readonly rejected: RejectedSettingCandidate[] = [];
   private abilityTerm: string | null = null;
   private readonly rules = new Set<string>();
@@ -82,6 +98,23 @@ export class SettingsExtractionAccumulator {
     const names = [
       ...existing.flatMap((location) => [location.name, ...location.aliases]),
       ...this.locations.flatMap((item) => [
+        item.data.name,
+        ...(item.data.aliases ?? []),
+      ]),
+    ]
+      .map((name) => name.trim())
+      .filter(Boolean);
+    return [...new Set(names)];
+  }
+
+  /** 既知の組織名 */
+  knownOrganizationNames(existing: Organization[]): string[] {
+    const names = [
+      ...existing.flatMap((organization) => [
+        organization.name,
+        ...organization.aliases,
+      ]),
+      ...this.organizations.flatMap((item) => [
         item.data.name,
         ...(item.data.aliases ?? []),
       ]),
@@ -123,6 +156,18 @@ export class SettingsExtractionAccumulator {
     const locations = validateExtractedLocations(raw.locations, chunk);
     this.locations.push(...locations.accepted);
     this.rejected.push(...locations.rejected);
+
+    const organizations = validateExtractedOrganizations(
+      raw.organizations,
+      chunk
+    );
+    this.organizations.push(...organizations.accepted);
+    this.rejected.push(...organizations.rejected);
+
+    for (const character of result.characters ?? []) {
+      const affiliation = character.affiliation?.trim();
+      if (affiliation) this.affiliations.add(affiliation);
+    }
   }
 
   /**
@@ -135,6 +180,7 @@ export class SettingsExtractionAccumulator {
   async persist(work: WorkEntry): Promise<SettingsPersistResult> {
     const abilityStore = createAbilityStore(work);
     const locationStore = createLocationStore(work);
+    const organizationStore = createOrganizationStore(work);
 
     const existingAbilities =
       this.abilities.length > 0
@@ -144,6 +190,11 @@ export class SettingsExtractionAccumulator {
       this.locations.length > 0
         ? (await locationStore.loadAll()).records
         : [];
+    const hasOrganizations =
+      this.organizations.length > 0 || this.affiliations.size > 0;
+    const existingOrganizations = hasOrganizations
+      ? (await organizationStore.loadAll()).records
+      : [];
 
     const abilityMerge = mergeExtractedAbilities(
       existingAbilities,
@@ -153,6 +204,16 @@ export class SettingsExtractionAccumulator {
       existingLocations,
       this.locations
     );
+    const organizationMerge = mergeExtractedOrganizations(
+      existingOrganizations,
+      this.organizations
+    );
+    // 所属から作る分は、抽出できた組織を足したあとに見る。
+    // 先に見ると、AIが説明付きで返した組織を名前だけで作ってしまう
+    const fromAffiliations = organizationsFromAffiliations(
+      organizationMerge.organizations,
+      [...this.affiliations]
+    );
 
     const changedAbilities = abilityMerge.abilities.filter((ability) =>
       abilityMerge.changedIds.includes(ability.id)
@@ -160,12 +221,22 @@ export class SettingsExtractionAccumulator {
     const changedLocations = locationMerge.locations.filter((location) =>
       locationMerge.changedIds.includes(location.id)
     );
+    const changedOrganizationIds = new Set([
+      ...organizationMerge.changedIds,
+      ...fromAffiliations.changedIds,
+    ]);
+    const changedOrganizations = fromAffiliations.organizations.filter(
+      (organization) => changedOrganizationIds.has(organization.id)
+    );
 
     if (changedAbilities.length > 0) {
       await abilityStore.saveAll(changedAbilities);
     }
     if (changedLocations.length > 0) {
       await locationStore.saveAll(changedLocations);
+    }
+    if (changedOrganizations.length > 0) {
+      await organizationStore.saveAll(changedOrganizations);
     }
 
     // 総称や規則が読み取れた場合だけ体系の設定を書く
@@ -179,14 +250,20 @@ export class SettingsExtractionAccumulator {
         abilitiesUpdated: abilityMerge.updated.length,
         locationsAdded: locationMerge.added.length,
         locationsUpdated: locationMerge.updated.length,
+        organizationsAdded:
+          organizationMerge.added.length + fromAffiliations.added.length,
+        organizationsUpdated: organizationMerge.updated.length,
         rejected: this.rejected,
         conflicts:
-          abilityMerge.conflicts.length + locationMerge.conflicts.length,
+          abilityMerge.conflicts.length +
+          locationMerge.conflicts.length +
+          organizationMerge.conflicts.length,
         mergeCandidates: abilityMerge.mergeCandidates,
         abilityTerm: this.abilityTerm,
       },
       savedAbilities: changedAbilities.length,
       savedLocations: changedLocations.length,
+      savedOrganizations: changedOrganizations.length,
     };
   }
 

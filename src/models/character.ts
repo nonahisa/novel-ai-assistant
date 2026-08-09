@@ -54,7 +54,7 @@ export interface Character {
   icon: string | null;
   iconSource: "external" | "generated" | "none";
   /**
-   * 一覧で名前の下に出す短い紹介。50字以内。
+   * 一覧で名前の下に出す短い紹介。上限は SUMMARY_MAX_CHARS。
    * 長い説明は role / personality に分けて持つ。
    */
   summary: string | null;

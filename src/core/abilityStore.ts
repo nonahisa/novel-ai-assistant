@@ -13,6 +13,11 @@ import {
   type AbilitySystem,
 } from "../models/ability";
 import { locationFileName, parseLocation, type Location } from "../models/location";
+import {
+  organizationFileName,
+  parseOrganization,
+  type Organization,
+} from "../models/organization";
 
 /** 能力の保存先。1件1ファイルにするのは人物と同じ理由（Gitの競合を避ける） */
 export function createAbilityStore(work: WorkEntry): SettingsStore<Ability> {
@@ -31,6 +36,18 @@ export function createLocationStore(work: WorkEntry): SettingsStore<Location> {
     idPrefix: "loc",
     parse: parseLocation,
     fileName: locationFileName,
+  });
+}
+
+/** 組織の保存先。人物の所属（affiliation）に対応する */
+export function createOrganizationStore(
+  work: WorkEntry
+): SettingsStore<Organization> {
+  return new SettingsStore<Organization>(work, {
+    directoryName: "organizations",
+    idPrefix: "org",
+    parse: parseOrganization,
+    fileName: organizationFileName,
   });
 }
 

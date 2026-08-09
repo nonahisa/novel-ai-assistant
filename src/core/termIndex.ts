@@ -8,7 +8,7 @@
  */
 
 /** 用語の種類。表示色を分けるために使う */
-export type TermKind = "character" | "location" | "ability";
+export type TermKind = "character" | "location" | "ability" | "organization";
 
 export interface TermEntry {
   /** 本文中に現れる文字列 */

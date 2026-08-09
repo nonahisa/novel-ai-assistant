@@ -1,6 +1,7 @@
 import type { Character } from "../models/character";
 import type { Ability, AbilitySystem } from "../models/ability";
 import type { Location } from "../models/location";
+import type { Organization } from "../models/organization";
 import type { CustomFieldDefinition } from "../models/customField";
 import { formatChapters } from "./settingsMarkdown";
 
@@ -12,11 +13,20 @@ import { formatChapters } from "./settingsMarkdown";
  * 肝心の内容が埋もれる。値の入っている項目だけを並べる。
  */
 
-export type SettingsKind = "character" | "ability" | "location";
+/** 組織は場所の手前に置く。人物の所属から辿る流れに合わせる */
+export type SettingsKind = "character" | "ability" | "organization" | "location";
+
+export const SETTINGS_KINDS: SettingsKind[] = [
+  "character",
+  "ability",
+  "organization",
+  "location",
+];
 
 export const KIND_LABELS: Record<SettingsKind, string> = {
   character: "登場人物",
   ability: "能力",
+  organization: "組織",
   location: "場所",
 };
 
@@ -103,6 +113,29 @@ export function describeAbility(
       push(lines, "体系の規則", system.rules.join(" / "));
     }
   }
+  return lines.join("\n");
+}
+
+/**
+ * 組織の説明。所属する人物も添える。
+ *
+ * 所属は人物側の `affiliation` にしかない。組織だけを見ても
+ * 誰がいるのか分からないので、ここで引いて渡す。
+ */
+export function describeOrganization(
+  organization: Organization,
+  memberNames: string[] = []
+): string {
+  const lines: string[] = [`名前: ${organization.name}`];
+  push(lines, "紹介", organization.summary);
+  push(lines, "別名", organization.aliases.join("、"));
+  push(lines, "読み", organization.reading);
+  push(lines, "種別", organization.category);
+  push(lines, "上位組織", organization.parent);
+  push(lines, "説明", organization.description);
+  push(lines, "所属する人物", memberNames.join("、"));
+  push(lines, "登場話", formatChapters(organization.appearedChapters));
+  push(lines, "作者メモ", organization.authorNotes);
   return lines.join("\n");
 }
 

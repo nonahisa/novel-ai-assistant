@@ -3,7 +3,11 @@ import * as path from "path";
 import { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { CharacterStore } from "../core/characterStore";
-import { createAbilityStore, createLocationStore } from "../core/abilityStore";
+import {
+  createAbilityStore,
+  createLocationStore,
+  createOrganizationStore,
+} from "../core/abilityStore";
 import { atomicWriteFile } from "../core/atomicWrite";
 import {
   DICTIONARY_FORMATS,
@@ -24,11 +28,13 @@ export async function exportImeDictionary(work: WorkEntry): Promise<void> {
   const loadedCharacters = await new CharacterStore(work).loadAll();
   const loadedAbilities = await createAbilityStore(work).loadAll();
   const loadedLocations = await createLocationStore(work).loadAll();
+  const loadedOrganizations = await createOrganizationStore(work).loadAll();
 
   const errors = [
     ...loadedCharacters.errors,
     ...loadedAbilities.errors,
     ...loadedLocations.errors,
+    ...loadedOrganizations.errors,
   ];
   if (errors.length > 0) {
     // 読めない設定があるまま書き出すと、欠けた辞書が正しく見えてしまう
@@ -43,6 +49,7 @@ export async function exportImeDictionary(work: WorkEntry): Promise<void> {
     characters: loadedCharacters.characters,
     abilities: loadedAbilities.records,
     locations: loadedLocations.records,
+    organizations: loadedOrganizations.records,
   });
 
   if (built.entries.length === 0) {
