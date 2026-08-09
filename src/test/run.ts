@@ -13,6 +13,8 @@ import { PendingUpdateStore } from "../core/pendingUpdates";
 import { scanWork } from "../core/scanner";
 import { scaffoldWorkFolder } from "../core/workRegistry";
 import { extractCharacters } from "../features/extractCharacters";
+import { isGitAvailable, runGit } from "../core/git";
+import { GitSyncMonitor, describeSyncBadge } from "../features/gitSync";
 import { characterFileName, emptyCharacter } from "../models/character";
 import type { WorkEntry } from "../models/types";
 import { CHARACTER_EXTRACT_VERSION } from "../prompts/characterExtract";
@@ -37,6 +39,9 @@ const COMMANDS = [
   "novelai.showSettingsForTerm",
   "novelai.exportImeDictionary",
   "novelai.manageCustomFields",
+  "novelai.gitSync",
+  "novelai.gitPull",
+  "novelai.gitPush",
 ];
 
 export async function run(): Promise<void> {
@@ -457,8 +462,92 @@ export async function run(): Promise<void> {
     }
   });
 
+  await runCase(
+    "GitHubとの遅れを見つけ、自動では取り込まない",
+    failures,
+    async () => {
+      const temporaryRoot = await fs.mkdtemp(
+        path.join(os.tmpdir(), "novel-ai-assistant-git-")
+      );
+      try {
+        if (!(await isGitAvailable())) {
+          console.log("SKIP gitコマンドが無いため省略");
+          return;
+        }
+
+        // 別環境から更新される状況を、本物のリポジトリで作る
+        const remote = path.join(temporaryRoot, "remote.git");
+        await git(["init", "--bare", "-b", "main", remote], temporaryRoot);
+        await git(["clone", remote, "work"], temporaryRoot);
+        await git(["clone", remote, "other"], temporaryRoot);
+        const workPath = path.join(temporaryRoot, "work");
+        const otherPath = path.join(temporaryRoot, "other");
+
+        await fs.writeFile(path.join(workPath, "001.txt"), "一話\n", "utf8");
+        await git(["add", "."], workPath);
+        await git([...GIT_IDENTITY, "commit", "-m", "初回"], workPath);
+        await git(["push", "-u", "origin", "main"], workPath);
+
+        await git(["pull"], otherPath);
+        await fs.writeFile(path.join(otherPath, "002.txt"), "二話\n", "utf8");
+        await git(["add", "."], otherPath);
+        await git([...GIT_IDENTITY, "commit", "-m", "別環境"], otherPath);
+        await git(["push"], otherPath);
+
+        const work = { ...makeWork(workPath), id: "work_git" };
+        const monitor = new GitSyncMonitor({
+          list: () => [work],
+          onDidChange: () => ({ dispose: () => undefined }),
+        } as unknown as ConstructorParameters<typeof GitSyncMonitor>[0]);
+
+        try {
+          const status = await monitor.refresh(work, {
+            fetch: true,
+            notify: false,
+          });
+
+          assert.equal(status.kind, "tracked", "同期状態を判定できません");
+          assert.equal(
+            status.kind === "tracked" ? status.behind : -1,
+            1,
+            "別環境の変更を未取得として数えられません"
+          );
+          assert.equal(describeSyncBadge(status), "↓1");
+
+          // 自動では取り込まない。作業ツリーが変わっていないことで確かめる
+          const files = await fs.readdir(workPath);
+          assert.ok(
+            !files.includes("002.txt"),
+            "fetchだけのはずが、作業ツリーへ取り込まれています"
+          );
+        } finally {
+          monitor.dispose();
+        }
+      } finally {
+        await fs.rm(temporaryRoot, { recursive: true, force: true });
+      }
+    }
+  );
+
   if (failures.length > 0) {
     throw new Error(`Integration tests failed:\n${failures.join("\n")}`);
+  }
+}
+
+/** テスト用リポジトリの作者情報。実行環境の設定に依存させない */
+const GIT_IDENTITY = [
+  "-c",
+  "user.name=test",
+  "-c",
+  "user.email=test@example.com",
+];
+
+async function git(args: string[], cwd: string): Promise<void> {
+  const result = await runGit(args, cwd, 30_000);
+  if (result.code !== 0) {
+    throw new Error(
+      `git ${args.join(" ")} が失敗しました: ${result.stderr || result.stdout}`
+    );
   }
 }
 

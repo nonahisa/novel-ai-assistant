@@ -14,12 +14,19 @@ import type { WorkRegistry } from "../core/workRegistry";
  */
 
 /** 分類。この順に表示する */
-export type ActionGroup = "資料" | "整える" | "書き出す" | "AI設定" | "困ったとき";
+export type ActionGroup =
+  | "資料"
+  | "整える"
+  | "書き出す"
+  | "同期"
+  | "AI設定"
+  | "困ったとき";
 
 export const ACTION_GROUPS: ActionGroup[] = [
   "資料",
   "整える",
   "書き出す",
+  "同期",
   "AI設定",
   "困ったとき",
 ];
@@ -144,6 +151,41 @@ const ACTIONS: readonly CommandAction[] = [
     requiresWork: true,
     group: "書き出す",
     detail: "文字数と原稿用紙の枚数を作品全体で集計します。",
+  },
+
+  // ── 別の環境と行き来する
+  {
+    command: "novelai.gitSync",
+    label: "GitHubとの同期状態",
+    description: "",
+    icon: "git-branch",
+    requiresWork: true,
+    group: "同期",
+    detail:
+      "別の環境の変更が未取得か、この環境の変更が未送信かを確認します。" +
+      "取り込みと送信もここから行えます。",
+  },
+  {
+    command: "novelai.gitPull",
+    label: "別の環境の変更を取り込む",
+    description: "",
+    icon: "cloud-download",
+    requiresWork: true,
+    group: "同期",
+    detail:
+      "別の環境で書いた分を取り込みます。" +
+      "書きかけの原稿があるときは実行しません。",
+  },
+  {
+    command: "novelai.gitPush",
+    label: "この環境の変更を送信する",
+    description: "",
+    icon: "cloud-upload",
+    requiresWork: true,
+    group: "同期",
+    detail:
+      "この環境のコミットをGitHubへ送ります。" +
+      "別の環境へ移る前に実行しておくと競合を防げます。",
   },
 
   // ── AIの設定

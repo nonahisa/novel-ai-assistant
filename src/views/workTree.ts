@@ -39,7 +39,14 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     { episodes: EpisodeFile[]; stats: WorkStats }
   >();
 
-  constructor(private readonly registry: WorkRegistry) {
+  /**
+   * @param syncBadge GitHub同期の遅れを短く表す文字列を返す。
+   *   ツリーがGit連携そのものに依存しないよう、関数で受け取る。
+   */
+  constructor(
+    private readonly registry: WorkRegistry,
+    private readonly syncBadge?: (workId: string) => string | undefined
+  ) {
     registry.onDidChange(() => this.refresh());
   }
 
@@ -49,6 +56,16 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     } else {
       this.cache.clear();
     }
+    this._onDidChangeTreeData.fire();
+  }
+
+  /**
+   * 走査結果はそのままに、表示だけ作り直す。
+   *
+   * 同期状態の表示のようにファイルの中身と無関係な変化で
+   * `refresh()` を呼ぶと、作品ごとの全ファイル再走査が走ってしまう。
+   */
+  redraw(): void {
     this._onDidChangeTreeData.fire();
   }
 
@@ -72,9 +89,13 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         stats.conflictedCount > 0
           ? ` / ⚠競合 ${stats.conflictedCount}件`
           : "";
+      // GitHubとの差は「↓3 ↑2」の形で短く添える。
+      // 別の環境へ移る前に気づけるかどうかが分かれ目になる（設計書3.5.1）
+      const badge = this.syncBadge?.(work.id);
+      const syncNote = badge ? ` / ${badge}` : "";
       item.description = `${stats.fileCount}ファイル / ${formatCount(
         stats.totals.net
-      )}字${conflictNote}`;
+      )}字${conflictNote}${syncNote}`;
       item.tooltip = new vscode.MarkdownString(
         [
           `**${work.title}**`,

@@ -21,10 +21,15 @@ export const window = {
   // 進捗の中止ボタン。テストでは押さないので、作られるだけでよい
   createStatusBarItem: () => ({
     text: "",
-    tooltip: "",
+    tooltip: "" as unknown,
     command: "",
+    backgroundColor: undefined as unknown,
     show() {},
     hide() {},
+    dispose() {},
+  }),
+  // エディタの切り替え。テストでは発火させないので、購読できるだけでよい
+  onDidChangeActiveTextEditor: (_listener: unknown) => ({
     dispose() {},
   }),
 };
@@ -91,6 +96,14 @@ export class TreeItem {
 
 export class ThemeIcon {
   constructor(readonly id: string) {}
+}
+
+export class ThemeColor {
+  constructor(readonly id: string) {}
+}
+
+export class MarkdownString {
+  constructor(readonly value: string = "") {}
 }
 
 export class FileSystemError extends Error {

@@ -153,6 +153,24 @@
         "title": "設定資料集を出力（AIを使わない）",
         "category": "小説執筆",
         "icon": "$(sync)"
+      },
+      {
+        "command": "novelai.gitSync",
+        "title": "GitHubとの同期状態",
+        "category": "小説執筆",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "novelai.gitPull",
+        "title": "別の環境の変更を取り込む",
+        "category": "小説執筆",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "novelai.gitPush",
+        "title": "この環境の変更を送信する",
+        "category": "小説執筆",
+        "icon": "$(cloud-upload)"
       }
     ],
     "menus": {
@@ -200,9 +218,14 @@
           "group": "1_stats@3"
         },
         {
+          "command": "novelai.gitSync",
+          "when": "view == novelai.works && viewItem == work",
+          "group": "2_open@1"
+        },
+        {
           "command": "novelai.openWorkFolder",
           "when": "view == novelai.works && viewItem == work",
-          "group": "2_open"
+          "group": "2_open@2"
         },
         {
           "command": "novelai.removeWork",
@@ -236,6 +259,18 @@
         },
         {
           "command": "novelai.generateSettingsDocs",
+          "when": "true"
+        },
+        {
+          "command": "novelai.gitSync",
+          "when": "true"
+        },
+        {
+          "command": "novelai.gitPull",
+          "when": "true"
+        },
+        {
+          "command": "novelai.gitPush",
           "when": "true"
         }
       ]
@@ -350,6 +385,17 @@
           "default": 0,
           "minimum": 0,
           "description": "1チャンクの文字数。0でモデルのコンテキスト長から自動決定。"
+        },
+        "novelai.git.autoFetch": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "作品フォルダーがGitリポジトリのとき、起動時と本文を開いたときに `git fetch` を実行し、別の環境の変更が未取得かどうかを確認します。**fetchは取得のみで、原稿にもブランチにも触れません。** 取り込み（pull）と送信（push）は、この設定に関わらず自動では実行しません。"
+        },
+        "novelai.git.autoFetchIntervalMinutes": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "description": "自動fetchの最小間隔（分）。本文を開くたびにネットワークへ出ると、回線の遅い環境で操作が重くなるため、前回からこの時間が経つまでは取りに行きません。"
         }
       }
     }

@@ -49,6 +49,12 @@ import {
 } from "./features/watchSettings";
 import { SelfWriteTracker } from "./core/externalChanges";
 import { setWriteObserver } from "./core/atomicWrite";
+import {
+  GitSyncMonitor,
+  describeStatus,
+  describeSyncBadge,
+  showGitSyncActions,
+} from "./features/gitSync";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -56,7 +62,17 @@ const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const registry = new WorkRegistry(context);
   await registry.initialize();
-  const treeProvider = new WorkTreeProvider(registry);
+
+  // GitHub同期の見張り。自動で走るのはfetch（取得のみ）だけで、
+  // 取り込み・送信は作者がボタンを押したときにしか実行しない（設計書3.5.1）
+  const gitSync = new GitSyncMonitor(registry);
+  context.subscriptions.push(gitSync);
+
+  const treeProvider = new WorkTreeProvider(registry, (workId) =>
+    describeSyncBadge(gitSync.statusFor(workId))
+  );
+  // 同期状態が変わっても本文は変わらないので、再走査はせず描き直すだけにする
+  gitSync.onDidChange(() => treeProvider.redraw());
   const aiRegistry = new AIRegistry(context);
 
   // 本文中の用語を種類ごとに色分けし、ホバーで設定を出す
@@ -367,6 +383,60 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
+      "novelai.gitSync",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await showGitSyncActions(gitSync, work);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.gitPull",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        // 押した時点の状態で判断させるため、先に取得し直す
+        const status = await gitSync.refresh(work, {
+          fetch: true,
+          notify: false,
+        });
+        if (status.kind !== "tracked" || status.behind === 0) {
+          vscode.window.showInformationMessage(
+            `${work.title}: ${describeStatus(status)}`
+          );
+          return;
+        }
+        await gitSync.pull(work);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.gitPush",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        const status = await gitSync.refresh(work, {
+          fetch: true,
+          notify: false,
+        });
+        if (status.kind !== "tracked" || status.ahead === 0) {
+          vscode.window.showInformationMessage(
+            `${work.title}: ${describeStatus(status)}`
+          );
+          return;
+        }
+        await gitSync.push(work);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
       "novelai.openWorkFolder",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -642,6 +712,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     )
   );
+
+  // 起動時に一度だけ全作品の同期状態を確かめる（設計書3.5.1）。
+  // await しないのは、回線が遅い環境で拡張機能の起動を待たせないため。
+  // fetchは取得のみなので、途中で終わってもローカルには何も起きない
+  void gitSync.refreshAll({ fetch: true });
 }
 
 export function deactivate(): void {
