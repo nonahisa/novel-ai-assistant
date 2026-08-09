@@ -57,6 +57,12 @@ const TEXT_FIELDS: Array<{
         )
         .join("、"),
   },
+  // モブ扱いになると一覧の下へ回り、用語ハイライトとIME辞書からも外れる。
+  // 反映すると見え方が変わるので、黙って適用せず差分に出す
+  {
+    label: "モブ扱い",
+    read: (c) => (c.isMob ? "はい" : "いいえ"),
+  },
 ];
 
 export function diffCharacter(

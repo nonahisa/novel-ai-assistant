@@ -32,6 +32,12 @@ import {
 } from "../core/settingsSummary";
 import { formatChapters } from "../core/settingsMarkdown";
 import {
+  buildAbilityListItems,
+  buildCharacterListItems,
+  buildLocationListItems,
+  type SettingsListItem,
+} from "../core/settingsList";
+import {
   collectMentionExcerpts,
   type ExcerptSource,
   type MentionExcerpt,
@@ -99,18 +105,17 @@ export function findOpenSettingsPanel(
   return openPanels.get(workId);
 }
 
-interface ListItem {
-  id: string;
-  name: string;
-  sub: string;
-}
-
 interface DetailField {
   /** 作者が足した項目は `custom:` を付けて区別する */
   key: string;
   label: string;
   value: string;
   multiline: boolean;
+  /**
+   * チェックボックスで見せる項目。
+   * 値は入なら "1"、切なら空文字で受け渡す。
+   */
+  check?: boolean;
 }
 
 interface DetailView {
@@ -246,44 +251,11 @@ export class SettingsPanel {
       .join("、")}）。その項目は一覧に出ていません。`;
   }
 
-  private groups(): Record<SettingsKind, ListItem[]> {
+  private groups(): Record<SettingsKind, SettingsListItem[]> {
     return {
-      character: this.characters.map((character) => ({
-        id: character.id,
-        name: character.name,
-        sub: [
-          character.summary ?? character.role ?? "",
-          character.affiliation ?? "",
-          character.isMob ? "モブ" : "",
-          character.aiNotes.length > 0
-            ? `掘り下げ${character.aiNotes.length}`
-            : "",
-        ]
-          .filter((part) => part)
-          .join(" / "),
-      })),
-      ability: this.abilities.map((ability) => ({
-        id: ability.id,
-        name: ability.name,
-        sub: [
-          ability.category ?? "",
-          ability.aiNotes.length > 0 ? `掘り下げ${ability.aiNotes.length}` : "",
-        ]
-          .filter((part) => part)
-          .join(" / "),
-      })),
-      location: this.locations.map((location) => ({
-        id: location.id,
-        name: location.name,
-        sub: [
-          location.region ?? "",
-          location.aiNotes.length > 0
-            ? `掘り下げ${location.aiNotes.length}`
-            : "",
-        ]
-          .filter((part) => part)
-          .join(" / "),
-      })),
+      character: buildCharacterListItems(this.characters),
+      ability: buildAbilityListItems(this.abilities),
+      location: buildLocationListItems(this.locations),
     };
   }
 
@@ -325,6 +297,13 @@ export class SettingsPanel {
           field("role", "役割", character.role),
           field("personality", "性格", character.personality, true),
           field("appearance", "外見", character.appearance, true),
+          // AIの判定を作者が直せるようにする。外れていると、その人物は
+          // 一覧の下へ回り、用語ハイライトとIME辞書からも消えたままになる
+          checkField(
+            "isMob",
+            "モブ・集団として扱う（一覧の下へまとめ、ハイライトと辞書から外す）",
+            character.isMob
+          ),
           // 作者が足した項目は、既定の項目のあと・メモの前に並べる
           ...customFieldControls(character, this.customFields),
           field("authorNotes", "作者メモ", character.authorNotes, true),
@@ -812,6 +791,19 @@ function field(
   return { key, label, value: value ?? "", multiline };
 }
 
+/**
+ * 入・切だけの項目。
+ * 画面との受け渡しは他の項目と同じ文字列にそろえ、
+ * 入を "1"、切を空文字で表す（保存の経路を分けない）。
+ */
+function checkField(
+  key: keyof RecordEdits,
+  label: string,
+  on: boolean
+): DetailField {
+  return { key, label, value: on ? "1" : "", multiline: false, check: true };
+}
+
 /** 作者が足した項目の入力欄 */
 function customFieldControls(
   character: Character,
@@ -940,7 +932,7 @@ interface ApproveNoteMessage {
 type OutgoingMessage =
   | {
       type: "init";
-      groups: Record<SettingsKind, ListItem[]>;
+      groups: Record<SettingsKind, SettingsListItem[]>;
       notice: string;
     }
   | { type: "detail"; detail: DetailView }
@@ -953,7 +945,7 @@ type OutgoingMessage =
   | {
       type: "saved";
       detail: DetailView | undefined;
-      groups: Record<SettingsKind, ListItem[]>;
+      groups: Record<SettingsKind, SettingsListItem[]>;
       notice: string;
     }
   | {

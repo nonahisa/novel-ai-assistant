@@ -76,6 +76,21 @@ textarea { resize: vertical; min-height: 60px; }
   font-size: 11px;
   opacity: 0.7;
 }
+/* モブ・集団の区切り。一覧の一部だと分かる程度に控えめにする */
+#list .group {
+  padding: 6px 10px;
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: 0.75;
+  border-top: 1px solid var(--vscode-panel-border);
+  user-select: none;
+}
+#list .group.clickable { cursor: pointer; }
+#list .group.clickable:hover { background: var(--vscode-list-hoverBackground); }
+/* チェックボックスの項目。入力欄と違い、ラベルを右に置く */
+.field.check { display: flex; align-items: center; gap: 6px; }
+.field.check input { width: auto; }
+.field.check label { margin: 0; }
 #detail { flex: 1; overflow-y: auto; padding: 16px 20px; }
 h2 { margin: 0 0 4px; font-size: 18px; }
 h3 {
@@ -198,6 +213,11 @@ button.secondary {
   let proposal = null;
   let chatLog = [];
   let busy = false;
+  /**
+   * モブの区画を開いているか。
+   * 既定は閉じる。ネームドキャラを探すときに間へ挟まると目当ての名前を見つけにくい。
+   */
+  let mobsOpen = false;
 
   const el = {
     tabs: document.getElementById("tabs"),
@@ -238,6 +258,8 @@ button.secondary {
       if (!keyword) return true;
       return (item.name + " " + (item.sub || "")).indexOf(keyword) !== -1;
     });
+    const named = items.filter(function (item) { return !item.isMob; });
+    const mobs = items.filter(function (item) { return item.isMob; });
 
     el.list.replaceChildren();
     if (items.length === 0) {
@@ -248,28 +270,60 @@ button.secondary {
       return;
     }
 
-    for (const item of items) {
-      const row = document.createElement("div");
-      row.className = "item" + (selected && selected.id === item.id ? " selected" : "");
-      const name = document.createElement("div");
-      name.textContent = item.name;
-      row.appendChild(name);
-      if (item.sub) {
-        const sub = document.createElement("div");
-        sub.className = "sub";
-        sub.textContent = item.sub;
-        row.appendChild(sub);
-      }
-      row.addEventListener("click", function () {
-        selected = { kind: activeKind, id: item.id };
-        draft = null;
-        proposal = null;
-        chatLog = [];
-        renderList();
-        post("select", { kind: activeKind, id: item.id });
-      });
-      el.list.appendChild(row);
+    for (const item of named) el.list.appendChild(listRow(item));
+
+    if (mobs.length === 0) return;
+    // 絞り込み中は畳まない。探しているものが隠れると、
+    // 出ていないのか無いのかが作者に区別できなくなる
+    const searching = keyword !== "";
+    const open = mobsOpen || searching;
+    el.list.appendChild(mobHeader(mobs.length, open, searching));
+    if (open) {
+      for (const item of mobs) el.list.appendChild(listRow(item));
     }
+  }
+
+  /**
+   * モブの区画の見出し。件数を必ず出す。
+   * 畳んだまま件数が分からないと、そこに何かあること自体に気づけない。
+   */
+  function mobHeader(count, open, searching) {
+    const row = document.createElement("div");
+    row.className = "group";
+    row.textContent =
+      (searching ? "" : (open ? "▼ " : "▶ ")) + "モブ・集団（" + count + "件）";
+    // 絞り込み中は開いたままなので、押しても何も起きないボタンにしない
+    if (!searching) {
+      row.classList.add("clickable");
+      row.addEventListener("click", function () {
+        mobsOpen = !mobsOpen;
+        renderList();
+      });
+    }
+    return row;
+  }
+
+  function listRow(item) {
+    const row = document.createElement("div");
+    row.className = "item" + (selected && selected.id === item.id ? " selected" : "");
+    const name = document.createElement("div");
+    name.textContent = item.name;
+    row.appendChild(name);
+    if (item.sub) {
+      const sub = document.createElement("div");
+      sub.className = "sub";
+      sub.textContent = item.sub;
+      row.appendChild(sub);
+    }
+    row.addEventListener("click", function () {
+      selected = { kind: activeKind, id: item.id };
+      draft = null;
+      proposal = null;
+      chatLog = [];
+      renderList();
+      post("select", { kind: activeKind, id: item.id });
+    });
+    return row;
   }
 
   function labelled(labelText, control) {
@@ -279,6 +333,20 @@ button.secondary {
     label.textContent = labelText;
     wrap.appendChild(label);
     wrap.appendChild(control);
+    return wrap;
+  }
+
+  /** 入・切の項目。ラベルはチェックの右に置き、押しても切り替わるようにする */
+  function checkbox(labelText, box) {
+    const wrap = document.createElement("div");
+    wrap.className = "field check";
+    const label = document.createElement("label");
+    label.textContent = labelText;
+    label.addEventListener("click", function () {
+      box.checked = !box.checked;
+    });
+    wrap.appendChild(box);
+    wrap.appendChild(label);
     return wrap;
   }
 
@@ -326,6 +394,14 @@ button.secondary {
     el.detail.appendChild(heading("設定を書き換える"));
     const inputs = {};
     for (const field of detail.fields) {
+      if (field.check) {
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = field.value === "1";
+        inputs[field.key] = box;
+        el.detail.appendChild(checkbox(field.label, box));
+        continue;
+      }
       const control = document.createElement(field.multiline ? "textarea" : "input");
       control.value = field.value;
       if (field.multiline) control.rows = 3;
@@ -341,7 +417,12 @@ button.secondary {
     saveButton.disabled = busy;
     saveButton.addEventListener("click", function () {
       const edits = {};
-      for (const key of Object.keys(inputs)) edits[key] = inputs[key].value;
+      for (const key of Object.keys(inputs)) {
+        const control = inputs[key];
+        // チェックは value ではなく入・切の状態を送る
+        edits[key] =
+          control.type === "checkbox" ? (control.checked ? "1" : "") : control.value;
+      }
       post("save", { kind: detail.kind, id: detail.id, edits: edits });
     });
     saveRow.appendChild(saveButton);

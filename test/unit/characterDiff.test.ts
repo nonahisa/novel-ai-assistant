@@ -104,4 +104,17 @@ describe("更新案の差分", () => {
 
     expect(diff.changes.map((change) => change.label)).toContain("呼称");
   });
+
+  test("モブ扱いになる変更を差分に出す", () => {
+    // 一覧の下へ回り、用語ハイライトとIME辞書からも外れる。
+    // 黙って反映すると、作者は人物が消えたようにしか見えない
+    const diff = diffCharacter(
+      character({ isMob: false }),
+      character({ isMob: true })
+    );
+
+    expect(diff.changes).toEqual([
+      { label: "モブ扱い", before: "いいえ", after: "はい" },
+    ]);
+  });
 });
