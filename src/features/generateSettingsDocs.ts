@@ -14,6 +14,7 @@ import {
   buildCharacterMarkdown,
   buildLocationMarkdown,
 } from "../core/settingsMarkdown";
+import { CustomFieldStore } from "../core/customFieldStore";
 
 /**
  * 設定資料のMarkdownを生成する。
@@ -83,7 +84,10 @@ export async function generateSettingsDocs(
     return;
   }
 
-  const markdownOptions = { workTitle: work.title };
+  // 項目の定義が読めなくても資料は作る。追加項目の欄が出ないだけで、
+  // 既定の項目まで書き出せなくなるほうが困る
+  const customFields = await new CustomFieldStore(work).loadFields();
+  const markdownOptions = { workTitle: work.title, customFields };
   const abilityTerm = abilitySystem.abilityTerm || "能力";
 
   const docs: GeneratedDoc[] = [

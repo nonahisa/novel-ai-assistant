@@ -33,6 +33,7 @@ import {
 import { unifyCharacterRecords } from "./features/unifyCharacters";
 import { applyPendingCharacterUpdates } from "./features/applyPendingUpdates";
 import { exportImeDictionary } from "./features/exportImeDictionary";
+import { manageCustomFields } from "./features/manageCustomFields";
 import { TermHighlighter } from "./views/termHighlight";
 import { ActionListProvider } from "./views/actionList";
 import {
@@ -436,6 +437,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const work = await resolveWork(node, registry);
         if (!work) return;
         await exportImeDictionary(work);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.manageCustomFields",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await manageCustomFields(work);
       }
     )
   );

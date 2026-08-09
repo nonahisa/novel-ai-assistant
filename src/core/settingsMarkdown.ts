@@ -2,6 +2,7 @@ import type { Ability, AbilitySystem } from "../models/ability";
 import type { Location } from "../models/location";
 import type { Character } from "../models/character";
 import type { AiNote } from "../models/aiNote";
+import type { CustomFieldDefinition } from "../models/customField";
 
 /**
  * 設定資料としてそのまま渡せるMarkdownを組み立てる。
@@ -16,6 +17,8 @@ export interface SettingsMarkdownOptions {
   workTitle: string;
   /** 公開範囲。指定した水準までを出力する */
   spoilerLevel?: "public" | "staff_only" | "author_only";
+  /** 作者が足した項目の定義。人物一覧でのみ使う */
+  customFields?: CustomFieldDefinition[];
 }
 
 const SPOILER_ORDER: Record<string, number> = {
@@ -215,7 +218,7 @@ export function buildCharacterMarkdown(
   for (const [affiliation, members] of groupByAffiliation(named)) {
     lines.push(`## ${affiliation}`, "");
     for (const character of members) {
-      lines.push(...describeCharacter(character));
+      lines.push(...describeCharacter(character, options.customFields ?? []));
     }
   }
 
@@ -258,7 +261,10 @@ function groupByAffiliation(characters: Character[]): Map<string, Character[]> {
   return groups;
 }
 
-function describeCharacter(character: Character): string[] {
+function describeCharacter(
+  character: Character,
+  customFields: CustomFieldDefinition[]
+): string[] {
   const lines: string[] = [];
   const reading = character.reading ? `（${character.reading}）` : "";
   lines.push(`### ${character.name}${reading}`, "");
@@ -271,6 +277,7 @@ function describeCharacter(character: Character): string[] {
   if (character.aliases.length > 0) {
     lines.push(`- **別名**: ${character.aliases.join("、")}`);
   }
+  if (character.gender) lines.push(`- **性別**: ${character.gender}`);
   if (character.role) lines.push(`- **役割**: ${character.role}`);
   if (character.personality) lines.push(`- **性格**: ${character.personality}`);
   if (character.appearance) lines.push(`- **外見**: ${character.appearance}`);
@@ -320,6 +327,12 @@ function describeCharacter(character: Character): string[] {
       .join("、");
     lines.push(`- **関係**: ${relations}`);
   }
+  // 作者が足した項目。定義された順に並べ、値の無い人物では出さない
+  for (const field of customFields) {
+    const value = character.customFields[field.key]?.trim();
+    if (value) lines.push(`- **${field.label}**: ${value}`);
+  }
+
   if (character.appearedChapters.length > 0) {
     lines.push(`- **登場話**: ${formatChapters(character.appearedChapters)}`);
   }

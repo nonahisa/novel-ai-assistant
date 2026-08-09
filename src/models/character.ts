@@ -4,6 +4,7 @@ import {
   type CharacterAbility,
 } from "./ability";
 import { parseAiNotes, type AiNote } from "./aiNote";
+import { parseCustomFieldValues } from "./customField";
 
 /** 呼称の1形態 */
 export interface AddressForm {
@@ -58,6 +59,12 @@ export interface Character {
    */
   summary: string | null;
   /**
+   * 性別。「男性」「女性」のほか作品側の言い方（「男」「女」「不明」など）も
+   * そのまま入る自由記述にしてある。作品によって扱いが違うため、
+   * 拡張機能側で選択肢を決め打ちしない。
+   */
+  gender: string | null;
+  /**
    * 所属（「生活保護課」「窓口課」など）。設定資料の見出しに使う。
    * 組織名が本文から読み取れない人物は null のままにする。
    */
@@ -109,6 +116,14 @@ export interface Character {
    * 本文に根拠のある抽出結果とは別に持ち、既存項目を書き換えない。
    */
   aiNotes: AiNote[];
+  /**
+   * 作者が足した項目の値。キーは `設定/custom_fields.json` の定義に対応する。
+   * 値が空のものは持たない。
+   *
+   * 定義が消えても値は残す。定義を消した＝値を捨ててよい、ではない
+   * （作者が項目名を付け替える途中かもしれない）。
+   */
+  customFields: Record<string, string>;
   updatedAt: string;
 }
 
@@ -125,6 +140,7 @@ export function emptyCharacter(id: string, name: string): Character {
     icon: null,
     iconSource: "none",
     summary: null,
+    gender: null,
     affiliation: null,
     role: null,
     personality: null,
@@ -145,6 +161,7 @@ export function emptyCharacter(id: string, name: string): Character {
     evidence: null,
     conflicts: [],
     aiNotes: [],
+    customFields: {},
     // 永続化境界で保存時刻を付ける。純粋な生成・マージ結果へ壁時計を混ぜない。
     updatedAt: "",
   };
@@ -172,6 +189,7 @@ export function normalizeCharacter(raw: Partial<Character>): Character {
     appearedChapters: raw.appearedChapters ?? [],
     conflicts: raw.conflicts ?? [],
     aiNotes: raw.aiNotes ?? [],
+    customFields: raw.customFields ?? {},
     authorNotes: raw.authorNotes ?? "",
     exportNote: raw.exportNote ?? "",
   } as Character;
@@ -187,7 +205,7 @@ export function parseCharacter(raw: unknown): Character {
   optionalString(value.schemaVersion, "schemaVersion");
   optionalStringArray(value.aliases, "aliases");
   for (const key of [
-    "reading", "romaji", "icon", "summary", "affiliation",
+    "reading", "romaji", "icon", "summary", "gender", "affiliation",
     "role", "personality", "appearance",
     "defaultSecondPerson", "evidence",
   ]) {
@@ -324,6 +342,7 @@ export function parseCharacter(raw: unknown): Character {
     abilities,
     conflicts,
     aiNotes: parseAiNotes(value.aiNotes),
+    customFields: parseCustomFieldValues(value.customFields),
   } as Partial<Character>);
 }
 

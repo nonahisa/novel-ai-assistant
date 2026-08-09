@@ -1,6 +1,7 @@
 import type { Character } from "../models/character";
 import type { Ability, AbilitySystem } from "../models/ability";
 import type { Location } from "../models/location";
+import type { CustomFieldDefinition } from "../models/customField";
 import { formatChapters } from "./settingsMarkdown";
 
 /**
@@ -19,11 +20,15 @@ export const KIND_LABELS: Record<SettingsKind, string> = {
   location: "場所",
 };
 
-export function describeCharacter(character: Character): string {
+export function describeCharacter(
+  character: Character,
+  customFields: CustomFieldDefinition[] = []
+): string {
   const lines: string[] = [`名前: ${character.name}`];
   push(lines, "紹介", character.summary);
   push(lines, "別名", character.aliases.join("、"));
   push(lines, "読み", character.reading);
+  push(lines, "性別", character.gender);
   push(lines, "所属", character.affiliation);
   push(lines, "役割", character.role);
   push(lines, "性格", character.personality);
@@ -66,6 +71,11 @@ export function describeCharacter(character: Character): string {
         )
         .join("、")
     );
+  }
+  // 作者が足した項目は、定義された順に並べる。
+  // 値が入っていないものは出さない（AIに「なし」と読ませないため）
+  for (const field of customFields) {
+    push(lines, field.label, character.customFields[field.key] ?? null);
   }
   push(lines, "登場話", formatChapters(character.appearedChapters));
   push(lines, "作者メモ", character.authorNotes);

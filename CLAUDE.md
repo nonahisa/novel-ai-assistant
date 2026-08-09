@@ -46,27 +46,80 @@ npm run typecheck    # 型チェックのみ
 ```
 src/
 ├─ extension.ts          エントリポイント。コマンド登録とステータスバー
+│
 ├─ models/               データ型の定義のみ。VSCode APIに依存しない
 │  ├─ types.ts           作品・ファイル・文字数
-│  └─ character.ts       登場人物（型 + 純粋関数）
+│  ├─ character.ts       登場人物
+│  ├─ ability.ts         能力・能力体系
+│  ├─ location.ts        場所
+│  ├─ customField.ts     作者が定義する追加項目
+│  ├─ aiNote.ts          AIの掘り下げメモ
+│  └─ jsonValidation.ts  作者が手編集するJSONの検証部品
+│
 ├─ core/                 ドメインロジック
-│  ├─ charCount.ts       文字数計測
+│  【原稿を読む】
+│  ├─ textFile.ts        文字コード・改行を保持した安全な読み書き
+│  ├─ fileSystem.ts      ファイル操作の薄い層
+│  ├─ atomicWrite.ts     既存ファイルを壊さない書き込み（後述の制約あり）
+│  ├─ scanner.ts         作品フォルダの走査
 │  ├─ episodeParser.ts   ファイル名から話数を解析
 │  ├─ metadataParser.ts  投稿サイトのDLファイルのヘッダー解析
-│  ├─ textFile.ts        文字コード・改行を保持した安全な読み書き
+│  ├─ charCount.ts       文字数計測
 │  ├─ chunker.ts         本文のチャンク分割
 │  ├─ chunkCache.ts      処理済みチャンクのキャッシュ
-│  ├─ scanner.ts         作品フォルダの走査
+│  ├─ manuscriptSources.ts / mentionExcerpts.ts  本文からの場面抜粋
+│  【設定資料を持つ】
 │  ├─ workRegistry.ts    作品の登録管理
 │  ├─ characterStore.ts  登場人物の永続化（1人1ファイル）
-│  └─ characterMerge.ts  抽出結果のマージ
+│  ├─ abilityStore.ts / settingsStore.ts  能力・場所の永続化
+│  ├─ customFieldStore.ts 追加項目の定義の永続化
+│  ├─ pendingUpdates.ts  承認待ちの更新
+│  【設定資料を組み立てる】
+│  ├─ characterMerge.ts / settingsMerge.ts  抽出結果のマージ
+│  ├─ characterUnify.ts  同一人物のまとめ
+│  ├─ characterDiff.ts   更新内容の差分
+│  ├─ settingsEdit.ts    作者による書き換え
+│  ├─ gender.ts          性別の表記を揃える
+│  ├─ reading.ts         読み仮名の生成
+│  ├─ summaryLimit.ts    紹介文の字数制限
+│  ├─ characterExtractionValidation.ts / settingsExtractionValidation.ts
+│  ├─ groundedEvidence.ts 抽出根拠が本文に実在するかの照合
+│  【外に出す】
+│  ├─ settingsMarkdown.ts 設定資料集のMarkdown
+│  ├─ settingsSummary.ts  AIへ渡す「現在の設定」
+│  ├─ markdownLite.ts     パネル表示用のMarkdown整形
+│  ├─ imeDictionary.ts    IME辞書
+│  ├─ termIndex.ts        用語の索引（ハイライト用）
+│  └─ logger.ts           失敗の記録（APIキーは伏せる）
+│
 ├─ ai/                   AIプロバイダ抽象化
-│  ├─ types.ts           AIProvider インターフェース
-│  ├─ ollamaProvider.ts  Ollamaアダプタ
-│  └─ registry.ts        プロバイダ選択・セットアップウィザード
+│  ├─ types.ts           AIProvider インターフェース、AIError
+│  ├─ registry.ts        プロバイダ選択・セットアップウィザード
+│  ├─ ollamaProvider.ts / ollamaLauncher.ts
+│  ├─ claudeProvider.ts / openaiProvider.ts / geminiProvider.ts
+│  ├─ httpClient.ts      共通のHTTP・再試行
+│  ├─ jsonSchema.ts      プロバイダ方言へのスキーマ変換
+│  └─ outputLimit.ts     出力トークン上限
+│
 ├─ prompts/              プロンプト定義（バージョン管理あり）
+│  ├─ characterExtract.ts  P-04a 人物・能力・場所の一括抽出
+│  ├─ settingsChat.ts      P-18 設定について相談する
+│  └─ settingsEnrich.ts    P-20 設定項目の充実
+│
 ├─ features/             機能単位のオーケストレーション
-└─ views/                VSCode UI（TreeView等）
+│  ├─ extractSettings.ts / extractCharacters.ts
+│  ├─ applyPendingUpdates.ts / unifyCharacters.ts
+│  ├─ settingsPanel.ts      設定資料パネル
+│  ├─ manageCustomFields.ts 追加項目の管理
+│  ├─ generateSettingsDocs.ts / exportImeDictionary.ts
+│  └─ selectOllamaExecutable.ts
+│
+└─ views/                VSCode UI
+   ├─ workTree.ts          作品一覧
+   ├─ actionList.ts        操作メニュー
+   ├─ settingsPanelHtml.ts パネルのWebView
+   ├─ termHighlight.ts     用語ハイライト
+   └─ progress.ts          進捗表示（中止ボタン付き）
 ```
 
 **依存の方向**：`views` / `features` → `core` → `models`。逆流させない。`models` は VSCode API に依存させない（テストしやすくするため）。
@@ -155,7 +208,7 @@ npm run check            # 型検査＋単体テスト＋本番ビルド
 
 - 0.0.1（作品管理・文字数計測・AI設定・登場人物抽出）：VSIX生成と自動検証済み
 - フェーズ0（作品管理・文字数計測）：完了、実データとVS Code統合テストで検証済み
-- フェーズ1（AI連携・設定資料抽出）：人物・能力・場所の抽出、設定資料パネル（書き換え・項目の充実・掘り下げ・質問）、同一人物のまとめ、更新の承認、用語ハイライトまで実装。Ollamaで実データ検証済み
+- フェーズ1（AI連携・設定資料抽出）：人物・能力・場所の抽出、設定資料パネル（書き換え・項目の充実・AIへの相談）、同一人物のまとめ、更新の承認、作者が定義する追加項目、用語ハイライトまで実装。Ollamaで実データ検証済み。**残るのは世界観まとめ（P-03）とプロットモード**
 - 使えるAI：Ollama・Gemini・ChatGPT・Claude。Geminiは実キーで検証済み。ChatGPTとClaudeは未検証（Claudeは残高不足で到達できず）
 - フェーズ2以降：用語ハイライトのみ実装済み。あらすじ生成、伏線追跡、誤字脱字・矛盾検知は未着手
 

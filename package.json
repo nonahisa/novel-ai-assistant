@@ -101,6 +101,12 @@
         "icon": "$(symbol-keyword)"
       },
       {
+        "command": "novelai.manageCustomFields",
+        "title": "人物設定の項目を増やす",
+        "category": "小説執筆",
+        "icon": "$(list-selection)"
+      },
+      {
         "command": "novelai.showSettingsForTerm",
         "title": "カーソル位置の設定を右側に表示",
         "category": "小説執筆",

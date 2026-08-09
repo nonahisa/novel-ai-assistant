@@ -11,7 +11,7 @@
  * プロンプトを変更したら version を上げること。
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
-export const CHARACTER_EXTRACT_VERSION = "2.4";
+export const CHARACTER_EXTRACT_VERSION = "2.5";
 
 export const BASE_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 
@@ -87,6 +87,16 @@ ${knownLocations}
   一覧で名前の下に並べる短い説明なので、役割と立場が分かれば十分である。
   例：「冒険者ギルドの生活保護課ケースワーカー。転移者で制度の考案者。」
   50字を超える場合は削ること。詳しい内容は role / personality / appearance に分けて書く。
+- gender（性別）は、**本文から確認できる場合だけ**書くこと。根拠になるのは
+  地の文の「彼」「彼女」、性別を示す語（少年・少女・男・女・父・母など）、
+  本人や他人による明言である。
+  ・男性なら **"男性"**、女性なら **"女性"** と書くこと。本文が「男」「少年」
+    「若者」のどう書いていても、この2語のどちらかに揃えること。
+  ・男性・女性のどちらでもない場合だけ、本文の記載に合わせて書くこと
+    （例：「性別を持たない」「両性」）。
+  ・**名前の響きから推測してはならない。** 造語の名前は判断できないのが普通である。
+  ・一人称（「俺」「僕」「私」）だけを根拠にしてはならない。作品によって使い分けは異なる。
+  ・根拠が無ければ null にすること。空欄のほうが、誤った断定より害が少ない。
 - affiliation には所属する組織・部署を、本文の表記のまま入れること。
   例：「生活保護課」「窓口課」「衛兵隊」。組織に属さない人物は null とすること。
   職業や身分（「冒険者」「平民」）は所属ではないので role に書くこと。
@@ -178,6 +188,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           isMob: { type: "boolean" },
           reading: { type: ["string", "null"] },
           summary: { type: ["string", "null"], maxLength: 50 },
+          gender: { type: ["string", "null"] },
           affiliation: { type: ["string", "null"] },
           role: { type: ["string", "null"] },
           personality: { type: ["string", "null"] },
@@ -218,6 +229,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           "name",
           "entityType",
           "summary",
+          "gender",
           "affiliation",
           "role",
           "personality",
@@ -287,6 +299,8 @@ export interface ExtractedCharacter {
   isMob?: boolean;
   reading?: string | null;
   summary?: string | null;
+  /** 男性／女性は2語に統一される。それ以外は本文の記載に合わせた自由記述 */
+  gender?: string | null;
   affiliation?: string | null;
   role?: string | null;
   personality?: string | null;

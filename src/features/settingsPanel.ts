@@ -17,6 +17,8 @@ import {
   applyLocationEdits,
   appendAiNote,
   removeAiNote,
+  toRecordEdits,
+  CUSTOM_FIELD_PREFIX,
   SettingsEditError,
   type EditOptions,
   type RecordEdits,
@@ -46,9 +48,11 @@ import {
 import {
   buildEnrichPrompt,
   buildEnrichSchema,
-  ENRICHABLE_FIELDS,
+  enrichableFields,
   type EnrichableField,
 } from "../prompts/settingsEnrich";
+import { CustomFieldStore } from "../core/customFieldStore";
+import type { CustomFieldDefinition } from "../models/customField";
 import { clampSummary } from "../core/summaryLimit";
 import { buildSettingsPanelHtml } from "../views/settingsPanelHtml";
 import { renderMarkdownLite } from "../core/markdownLite";
@@ -102,7 +106,8 @@ interface ListItem {
 }
 
 interface DetailField {
-  key: keyof RecordEdits;
+  /** 作者が足した項目は `custom:` を付けて区別する */
+  key: string;
   label: string;
   value: string;
   multiline: boolean;
@@ -130,11 +135,13 @@ export class SettingsPanel {
   private readonly abilityStore: SettingsStore<Ability>;
   private readonly locationStore: SettingsStore<Location>;
   private readonly systemStore: AbilitySystemStore;
+  private readonly customFieldStore: CustomFieldStore;
 
   private characters: Character[] = [];
   private abilities: Ability[] = [];
   private locations: Location[] = [];
   private abilitySystem: AbilitySystem | undefined;
+  private customFields: CustomFieldDefinition[] = [];
   private loadErrors: Array<{ file: string; message: string }> = [];
 
   /** 本文は重いので一度読んだら使い回す。パネルを閉じるまで有効 */
@@ -152,6 +159,7 @@ export class SettingsPanel {
     this.abilityStore = createAbilityStore(work);
     this.locationStore = createLocationStore(work);
     this.systemStore = new AbilitySystemStore(work);
+    this.customFieldStore = new CustomFieldStore(work);
 
     this.panel = vscode.window.createWebviewPanel(
       "novelai.settings",
@@ -222,6 +230,10 @@ export class SettingsPanel {
     } catch {
       this.abilitySystem = undefined;
     }
+
+    // 項目の定義が読めなくても、既定の項目は編集できる。
+    // 直し方は「人物設定の項目を増やす」で伝えるので、ここでは黙って空にする
+    this.customFields = await this.customFieldStore.loadFields();
 
     this.post({ type: "init", groups: this.groups(), notice: this.notice() });
   }
@@ -306,12 +318,15 @@ export class SettingsPanel {
         fields: [
           field("name", "名前", character.name),
           field("summary", "紹介（50字以内）", character.summary),
+          field("gender", "性別", character.gender),
           field("affiliation", "所属", character.affiliation),
           field("reading", "読み", character.reading),
           field("aliases", "別名（読点区切り）", character.aliases.join("、")),
           field("role", "役割", character.role),
           field("personality", "性格", character.personality, true),
           field("appearance", "外見", character.appearance, true),
+          // 作者が足した項目は、既定の項目のあと・メモの前に並べる
+          ...customFieldControls(character, this.customFields),
           field("authorNotes", "作者メモ", character.authorNotes, true),
           field("exportNote", "資料用の補足", character.exportNote, true),
         ],
@@ -423,7 +438,7 @@ export class SettingsPanel {
   private async handleSave(
     kind: SettingsKind,
     id: string,
-    edits: RecordEdits
+    edits: Record<string, string>
   ): Promise<void> {
     const record = this.find(kind, id);
     if (!record) {
@@ -431,7 +446,7 @@ export class SettingsPanel {
       return;
     }
 
-    const updated = this.applyEdits(kind, record, edits);
+    const updated = this.applyEdits(kind, record, toRecordEdits(edits));
     await this.persist(kind, updated);
     await this.reloadAfterSave(kind, id, "保存しました。");
   }
@@ -515,12 +530,13 @@ export class SettingsPanel {
         currentSettings: this.describe(kind, record),
       },
       excerpts,
+      customFields: this.customFields,
     });
 
     const text = await this.generate(
       prompt,
       `「${record.name}」の項目を充実させています`,
-      buildEnrichSchema(kind)
+      buildEnrichSchema(kind, this.customFields)
     );
     if (text === undefined) return;
 
@@ -536,13 +552,17 @@ export class SettingsPanel {
 
     const current = record as unknown as Record<string, unknown>;
     const proposals: FieldProposal[] = [];
-    for (const field of ENRICHABLE_FIELDS[kind]) {
+    for (const field of enrichableFields(kind, this.customFields)) {
       const proposed = clampField(field, parsed[field.key]);
       if (!proposed) continue;
-      const before = asText(current[field.key]);
+      // 追加項目の値は customFields の中にある
+      const before = field.custom
+        ? (record as Character).customFields[field.key] ?? ""
+        : asText(current[field.key]);
       if (before === proposed) continue;
       proposals.push({
-        key: field.key,
+        // 反映するときに、既定の項目と同じ経路で書き戻せるようにする
+        key: field.custom ? `${CUSTOM_FIELD_PREFIX}${field.key}` : field.key,
         label: field.label,
         before,
         after: proposed,
@@ -575,10 +595,7 @@ export class SettingsPanel {
       return;
     }
 
-    const edits: RecordEdits = {};
-    for (const [key, value] of Object.entries(message.values)) {
-      (edits as Record<string, string>)[key] = value;
-    }
+    const edits = toRecordEdits(message.values);
 
     // AIの提案を採用しただけなので、作者が確定させた記述としては扱わない。
     // 作者確定にすると、その人物は以後の抽出から締め出されてしまう
@@ -676,7 +693,9 @@ export class SettingsPanel {
     kind: SettingsKind,
     record: Character | Ability | Location
   ): string {
-    if (kind === "character") return describeCharacter(record as Character);
+    if (kind === "character") {
+      return describeCharacter(record as Character, this.customFields);
+    }
     if (kind === "ability") {
       return describeAbility(record as Ability, this.abilitySystem);
     }
@@ -793,6 +812,19 @@ function field(
   return { key, label, value: value ?? "", multiline };
 }
 
+/** 作者が足した項目の入力欄 */
+function customFieldControls(
+  character: Character,
+  definitions: CustomFieldDefinition[]
+): DetailField[] {
+  return definitions.map((definition) => ({
+    key: `${CUSTOM_FIELD_PREFIX}${definition.key}`,
+    label: definition.label,
+    value: character.customFields[definition.key] ?? "",
+    multiline: definition.multiline,
+  }));
+}
+
 /** 食い違いは作者の判断待ち。編集欄ではなく読み取り専用で見せる */
 function conflictLines(
   conflicts: Array<{ field: string; values: string[]; note: string | null }>
@@ -885,7 +917,13 @@ type PanelMessage =
   | { type: "enrich"; kind: SettingsKind; id: string }
   | ApplyProposalMessage
   | { type: "select"; kind: SettingsKind; id: string }
-  | { type: "save"; kind: SettingsKind; id: string; edits: RecordEdits }
+  | {
+      type: "save";
+      kind: SettingsKind;
+      id: string;
+      /** 画面から来る生のキー。`custom:` 付きが混ざる */
+      edits: Record<string, string>;
+    }
   | ApproveNoteMessage
   | { type: "deleteNote"; kind: SettingsKind; id: string; noteId: string }
   | { type: "chat"; kind: SettingsKind; id: string; question: string };

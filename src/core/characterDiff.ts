@@ -1,4 +1,5 @@
 import type { Character } from "../models/character";
+import type { CustomFieldDefinition } from "../models/customField";
 
 /**
  * 既存の人物設定と、抽出で作られた更新案の差分をまとめる。
@@ -26,6 +27,7 @@ const TEXT_FIELDS: Array<{
 }> = [
   { label: "名前", read: (c) => c.name },
   { label: "紹介", read: (c) => c.summary ?? "" },
+  { label: "性別", read: (c) => c.gender ?? "" },
   { label: "所属", read: (c) => c.affiliation ?? "" },
   { label: "読み", read: (c) => c.reading ?? "" },
   { label: "別名", read: (c) => c.aliases.join("、") },
@@ -59,7 +61,8 @@ const TEXT_FIELDS: Array<{
 
 export function diffCharacter(
   before: Character,
-  after: Character
+  after: Character,
+  customFields: CustomFieldDefinition[] = []
 ): CharacterDiff {
   const changes: FieldChange[] = [];
 
@@ -69,6 +72,8 @@ export function diffCharacter(
     if (left === right) continue;
     changes.push({ label: field.label, before: left, after: right });
   }
+
+  changes.push(...customFieldChanges(before, after, customFields));
 
   // 作者メモと資料用の補足は、そもそも抽出で書き換えない約束になっている。
   // 万一変化していたら見逃せないので必ず出す。
@@ -84,6 +89,37 @@ export function diffCharacter(
   }
 
   return { id: after.id, name: after.name, changes };
+}
+
+/**
+ * 作者が足した項目の変化。
+ *
+ * 定義に無いキーも見る。作者が項目を消したあとも値は残るので、
+ * そこが書き換わったのに差分に出ないと、気付けない変更になる。
+ * 見出しは定義があればその名前、無ければキーをそのまま出す。
+ */
+function customFieldChanges(
+  before: Character,
+  after: Character,
+  definitions: CustomFieldDefinition[]
+): FieldChange[] {
+  const labels = new Map(definitions.map((field) => [field.key, field.label]));
+  const keys = [
+    ...definitions.map((field) => field.key),
+    ...Object.keys({ ...before.customFields, ...after.customFields }),
+  ];
+
+  const changes: FieldChange[] = [];
+  const seen = new Set<string>();
+  for (const key of keys) {
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const left = before.customFields[key] ?? "";
+    const right = after.customFields[key] ?? "";
+    if (left === right) continue;
+    changes.push({ label: labels.get(key) ?? key, before: left, after: right });
+  }
+  return changes;
 }
 
 /** 一覧に出す1行の説明。何が増えるのかが分かる粒度にする */

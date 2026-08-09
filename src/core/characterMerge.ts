@@ -7,6 +7,7 @@ import {
 import { ExtractedCharacter } from "../prompts/characterExtract";
 import { clampSummary } from "./summaryLimit";
 import { fillReading } from "./reading";
+import { normalizeGender } from "./gender";
 
 /**
  * 抽出結果を既存の人物一覧へマージする。
@@ -176,6 +177,12 @@ function applyExtracted(
   changed =
     fillOrConflict(target, "affiliation", ex.affiliation, conflicts) || changed;
 
+  // 性別はAIが本文の言い方のまま返してくるので、ここで「男性」「女性」に揃える。
+  // 揃えないと、同じ人物が話ごとに「男」「男性」と揺れて食い違い扱いになる
+  changed =
+    fillOrConflict(target, "gender", normalizeGender(ex.gender), conflicts) ||
+    changed;
+
   // 単純なテキスト項目: 空なら埋める。既にあれば食い違いを記録し、上書きしない
   changed = fillOrConflict(target, "role", ex.role, conflicts) || changed;
   changed =
@@ -319,6 +326,7 @@ function fillOrConflict(
   field:
     | "summary"
     | "affiliation"
+    | "gender"
     | "reading"
     | "role"
     | "personality"

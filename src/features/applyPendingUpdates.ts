@@ -9,6 +9,7 @@ import {
   summarizeDiff,
   type CharacterDiff,
 } from "../core/characterDiff";
+import { CustomFieldStore } from "../core/customFieldStore";
 import { logFailure } from "../core/logger";
 
 /**
@@ -54,6 +55,10 @@ export async function applyPendingCharacterUpdates(
     return;
   }
 
+  // 作者が足した項目の変化も差分に出す。出さないと、
+  // 気付かないうちに書き換わることになる
+  const customFields = await new CustomFieldStore(work).loadFields();
+
   const byId = new Map(loaded.characters.map((c) => [c.id, c]));
   const items: ReviewItem[] = [];
   const orphaned: PendingUpdate[] = [];
@@ -65,7 +70,7 @@ export async function applyPendingCharacterUpdates(
       orphaned.push(update);
       continue;
     }
-    const diff = diffCharacter(current, update.character);
+    const diff = diffCharacter(current, update.character, customFields);
     if (diff.changes.length === 0) {
       orphaned.push(update);
       continue;

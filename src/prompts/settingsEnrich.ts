@@ -1,15 +1,21 @@
 import type { MentionExcerpt } from "../core/mentionExcerpts";
 import type { SettingsKind } from "../core/settingsSummary";
 import type { SettingsTarget } from "./settingsChat";
+import type { CustomFieldDefinition } from "../models/customField";
 
 /**
  * P-20 設定項目の充実
  *
- * 掘り下げ（P-18）が「文章のメモを書く」のに対し、こちらは
+ * 相談（P-18 `settingsChat.ts`）が「文章のメモを書く」のに対し、こちらは
  * **設定資料の各項目に入れる値そのもの**を提案させる。
+ * パネルのAI機能はこの2つだけで、両方とも同じ本文の抜粋を材料にする。
  *
  * 提案は自動では反映しない。項目ごとに現在の値と並べて見せ、
  * 作者が選んだものだけを書き込む。
+ *
+ * ただし**反映しても作者が確定させた記述としては扱わない**
+ * （`EditOptions.authorConfirmed`）。中身はAIが書いたものなので、
+ * 以後の抽出で更新されてよい。
  *
  * プロンプトを変更したら version を上げること。
  */
@@ -24,11 +30,22 @@ export interface EnrichableField {
   maxChars?: number;
   /** 長文になる項目か。画面の入力欄の高さに使う */
   multiline?: boolean;
+  /** 作者が足した項目か。値の置き場所が `customFields` になる */
+  custom?: boolean;
 }
 
 /** 種別ごとに、AIへ提案させる項目 */
 export const ENRICHABLE_FIELDS: Record<SettingsKind, EnrichableField[]> = {
   character: [
+    {
+      key: "gender",
+      label: "性別",
+      hint:
+        "本文から確認できる場合のみ。男性なら「男性」、女性なら「女性」と書く" +
+        "（本文が「男」「少年」でもこの2語に揃える）。" +
+        "どちらでもない場合だけ本文の記載に合わせる。" +
+        "名前の響きや一人称から推測してはならない。根拠が無ければ null",
+    },
     {
       key: "summary",
       label: "紹介",
@@ -84,9 +101,39 @@ export const ENRICHABLE_FIELDS: Record<SettingsKind, EnrichableField[]> = {
   ],
 };
 
+/**
+ * その種別で提案させる項目。作者が足した項目は末尾に付ける。
+ *
+ * 追加項目は人物にだけ付く。能力・場所にも同じ仕組みを広げる前に、
+ * 人物で使ってみて要否を確かめる。
+ */
+export function enrichableFields(
+  kind: SettingsKind,
+  customFields: CustomFieldDefinition[] = []
+): EnrichableField[] {
+  if (kind !== "character" || customFields.length === 0) {
+    return ENRICHABLE_FIELDS[kind];
+  }
+  return [
+    ...ENRICHABLE_FIELDS[kind],
+    ...customFields.map((field) => ({
+      key: field.key,
+      label: field.label,
+      // 説明が無い項目は、見出しから察してもらうしかない。
+      // ここで「〜だろう」と補うと、AIが推測で埋める口実になる
+      hint: field.hint || `${field.label}として本文から読み取れること`,
+      multiline: field.multiline,
+      custom: true,
+    })),
+  ];
+}
+
 /** その種別のJSONスキーマ。全項目を必須にして、面倒な項目を落とさせない */
-export function buildEnrichSchema(kind: SettingsKind): object {
-  const fields = ENRICHABLE_FIELDS[kind];
+export function buildEnrichSchema(
+  kind: SettingsKind,
+  customFields: CustomFieldDefinition[] = []
+): object {
+  const fields = enrichableFields(kind, customFields);
   const properties: Record<string, unknown> = {};
   for (const field of fields) {
     properties[field.key] = field.maxChars
@@ -105,10 +152,12 @@ export interface EnrichInput {
   kind: SettingsKind;
   target: SettingsTarget;
   excerpts: MentionExcerpt[];
+  /** 作者が足した項目。人物のときだけ効く */
+  customFields?: CustomFieldDefinition[];
 }
 
 export function buildEnrichPrompt(input: EnrichInput): string {
-  const fields = ENRICHABLE_FIELDS[input.kind];
+  const fields = enrichableFields(input.kind, input.customFields);
 
   return `小説「${input.workTitle}」の${input.target.kindLabel}「${
     input.target.name

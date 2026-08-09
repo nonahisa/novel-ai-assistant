@@ -36,6 +36,7 @@ const COMMANDS = [
   "novelai.applyPendingUpdates",
   "novelai.showSettingsForTerm",
   "novelai.exportImeDictionary",
+  "novelai.manageCustomFields",
 ];
 
 export async function run(): Promise<void> {

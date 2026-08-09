@@ -75,6 +75,18 @@ const ACTIONS: readonly CommandAction[] = [
       "続けて設定資料集も作ります。",
   },
 
+  {
+    command: "novelai.manageCustomFields",
+    label: "人物設定の項目を増やす",
+    description: "AIを使わない",
+    icon: "list-selection",
+    requiresWork: true,
+    group: "資料",
+    detail:
+      "「誕生日」「身長」のように、作品に必要な項目を人物設定へ足します。" +
+      "足した項目は全員の設定資料に並びます。外しても入力済みの内容は消えません。",
+  },
+
   // ── 抽出した結果を整える
   {
     command: "novelai.applyPendingUpdates",
