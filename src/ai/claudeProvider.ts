@@ -482,43 +482,21 @@ export const CLAUDE_OPTION_LABELS: Record<ClaudeOptionKey, string> = {
   jsonSchema: "JSONスキーマ",
 };
 
-export interface ClaudeAttempt {
-  support: ClaudeSupport;
-  /** この試行で外した指定。空なら全部付けたまま */
-  dropped: ClaudeOptionKey[];
-}
+export type ClaudeAttempt = OptionAttempt<ClaudeOptionKey>;
 
 /**
  * 試す組み合わせを順に並べる。
- *
- * **まず1つずつ外す。** 以前は端から順に積み上げて外していたため、
- * 原因が最後の1つ（JSONスキーマ）だったときに、無実の指定まで
- * 「非対応」として覚えてしまった。実際にClaudeで起き、
- * 思考の無効化とJSONスキーマの両方を永久に失った状態になっていた。
- *
- * 1つずつ試せば、原因が1つのときは犯人だけを覚えられる。
- * どれを外しても直らないときだけ、まとめて外した組み合わせを試す。
+ * 並べ方は Gemini と共通（`optionFallback.ts`）。外す順だけこちらで決める。
  */
 export function claudeAttemptPlan(
   support: ClaudeSupport,
   /** この呼び出しで実際に送る指定だけを渡す */
   applicable: ClaudeOptionKey[]
 ): ClaudeAttempt[] {
-  const active = CLAUDE_OPTION_ORDER.filter(
-    (key) => applicable.includes(key) && support[key]
+  return buildAttemptPlan(
+    support,
+    CLAUDE_OPTION_ORDER.filter((key) => applicable.includes(key))
   );
-  const plan: ClaudeAttempt[] = [{ support: { ...support }, dropped: [] }];
-
-  for (const key of active) {
-    plan.push({ support: { ...support, [key]: false }, dropped: [key] });
-  }
-
-  if (active.length > 1) {
-    const minimal = { ...support };
-    for (const key of active) minimal[key] = false;
-    plan.push({ support: minimal, dropped: [...active] });
-  }
-  return plan;
 }
 
 export function describeDroppedOptions(dropped: ClaudeOptionKey[]): string {
