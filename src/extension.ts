@@ -55,6 +55,16 @@ import {
   describeSyncBadge,
   showGitSyncActions,
 } from "./features/gitSync";
+import { resolveDeviceId } from "./core/device";
+import {
+  SessionStore,
+  describeOtherDeviceSession,
+} from "./core/sessionStore";
+import {
+  CONFLICT_SCHEME,
+  ConflictContentProvider,
+  resolveWorkConflicts,
+} from "./features/resolveConflicts";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -74,6 +84,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 同期状態が変わっても本文は変わらないので、再走査はせず描き直すだけにする
   gitSync.onDidChange(() => treeProvider.redraw());
   const aiRegistry = new AIRegistry(context);
+
+  // 端末ID。「どの環境で書いたか」を区別するのに使う（設計書3.5.2）。
+  // Gitへは同期しない。全環境が同じIDを名乗ると区別できなくなる
+  const deviceId = await resolveDeviceId(context.globalState);
+
+  // 競合の見比べに使う読み取り専用の本文置き場
+  const conflictProvider = new ConflictContentProvider();
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(
+      CONFLICT_SCHEME,
+      conflictProvider
+    ),
+    { dispose: () => conflictProvider.clear() }
+  );
 
   // 本文中の用語を種類ごとに色分けし、ホバーで設定を出す
   const highlighter = new TermHighlighter(registry);
@@ -252,12 +276,56 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         updateStatusBar();
       }
     }),
-    vscode.workspace.onDidSaveTextDocument(() => {
+    vscode.workspace.onDidSaveTextDocument((document) => {
       updateStatusBar();
       treeProvider.refresh();
+      // 「直前にどの環境で書いていたか」を残す（設計書3.5.2）。
+      // 開いただけでは書かない。何も書いていないのに作業ツリーが汚れ、
+      // 未コミットの変更を理由に取り込みが止まるようになるため
+      void recordEditedSession(document.uri.fsPath);
     })
   );
   updateStatusBar();
+
+  /** 保存された本文が属する作品に、この環境の編集記録を残す */
+  async function recordEditedSession(filePath: string): Promise<void> {
+    const ext = path.extname(filePath).toLowerCase();
+    if (!(SUPPORTED_EXTENSIONS as readonly string[]).includes(ext)) return;
+    const work = findWorkForPath(registry, filePath);
+    if (!work) return;
+    try {
+      await new SessionStore(work, deviceId).record(filePath);
+    } catch (error) {
+      // 記録できなくても執筆は続けられる。黙って諦めずログには残す
+      logFailure("最終編集環境の記録に失敗", {
+        作品: work.title,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * 別の環境が最近書いていたら知らせる（設計書3.5.2）。
+   *
+   * ロックはしない。同一人物なので、知らせれば本人が判断できる。
+   * 作品ごとに1回だけ出す。開くたびに出ると読まれなくなる。
+   */
+  const sessionNotified = new Set<string>();
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(async (editor) => {
+      if (!editor) return;
+      const work = findWorkForPath(registry, editor.document.uri.fsPath);
+      if (!work || sessionNotified.has(work.id)) return;
+      sessionNotified.add(work.id);
+
+      const other = await new SessionStore(work, deviceId).newerElsewhere();
+      if (!other) return;
+      vscode.window.showInformationMessage(
+        `「${work.title}」を${describeOtherDeviceSession(other)}` +
+          "取り込み忘れがないか確認してください。"
+      );
+    })
+  );
 
   // ─── コマンド ───
 
@@ -390,6 +458,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await showGitSyncActions(gitSync, work);
       }
     )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.resolveConflicts",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await resolveWorkConflicts(work, { provider: conflictProvider });
+        treeProvider.refresh(work.id);
+      }
+    )
+  );
+
+  // Gitの操作でファイルが入れ替わったら、走査結果と用語の索引を作り直す。
+  // pullで大量に変わるため、変わったことに気づかないまま
+  // 古い文字数・古いハイライトを見せ続けないようにする（設計書3.5.8）
+  context.subscriptions.push(
+    gitSync.onDidChangeFiles(({ work }) => {
+      treeProvider.refresh(work.id);
+      highlighter.invalidate();
+    })
   );
 
   context.subscriptions.push(
@@ -723,6 +813,34 @@ export function deactivate(): void {
   // 後片付けは context.subscriptions に任せる。
   // ログだけは遅延生成でsubscriptionsに載っていないので個別に閉じる
   disposeLog();
+}
+
+/**
+ * そのファイルが属する作品を探す。
+ * 深い作品フォルダを先に見て、入れ子の場合は内側を選ぶ。
+ */
+function findWorkForPath(
+  registry: WorkRegistry,
+  filePath: string
+): WorkEntry | undefined {
+  const normalize = (value: string) => {
+    const normalized = path.normalize(value);
+    return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  };
+  return [...registry.list()]
+    .sort((a, b) => b.folderPath.length - a.folderPath.length)
+    .find((work) => {
+      const relative = path.relative(
+        normalize(work.folderPath),
+        normalize(filePath)
+      );
+      return (
+        relative.length > 0 &&
+        relative !== ".." &&
+        !relative.startsWith(`..${path.sep}`) &&
+        !path.isAbsolute(relative)
+      );
+    });
 }
 
 /** ツリーから呼ばれた場合はそのノード、コマンドパレットからは選択させる */

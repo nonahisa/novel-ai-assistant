@@ -27,9 +27,12 @@ export class WorkRegistry {
   /** 旧版ですでに登録済みの作品にも、起動時の安全な冪等migrationを適用する。 */
   async initialize(): Promise<void> {
     const failedTitles: string[] = [];
+    // キャッシュを同期するかは設定で変えられる。起動のたびに突き合わせ、
+    // 切り替えられていれば `.gitignore` へ打ち消し行を足す（設計書3.5.7）
+    const syncCache = isCacheSyncEnabled();
     for (const work of this.list()) {
       try {
-        await ensureRecoveryIgnoreRule(work.folderPath);
+        await ensureRecoveryIgnoreRule(work.folderPath, { syncCache });
       } catch {
         // 作品登録や起動を壊さず、次回起動でも同じmigrationを再試行する。
         failedTitles.push(work.title);
@@ -112,7 +115,9 @@ export class WorkRegistry {
       });
     }
 
-    await ensureRecoveryIgnoreRule(normalized);
+    await ensureRecoveryIgnoreRule(normalized, {
+      syncCache: isCacheSyncEnabled(),
+    });
 
     await this.save([...works, entry]);
     return entry;
@@ -144,13 +149,51 @@ export const IGNORED_PATHS = [
   "exports/",
 ] as const;
 
+/** キャッシュの除外規則と、それを打ち消す規則（設計書3.5.7） */
+export const CACHE_IGNORE_RULE = ".aiwriter/cache/";
+export const CACHE_UNIGNORE_RULE = "!.aiwriter/cache/";
+
+/** 設定でキャッシュを同期するか。既定は同期しない（設計書3.5.7） */
+export function isCacheSyncEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration("novelai")
+    .get<boolean>("git.syncCache", false);
+}
+
+/**
+ * `.gitignore` の中で、キャッシュについて**最後に**書かれている指示を返す。
+ *
+ * gitの除外規則は後に書いたものが勝つ。`.gitignore` は追記しかできない
+ * （作者の記述をバイト単位で保つため）ので、切り替えは
+ * 「打ち消す行を足す」「もう一度除外する行を足す」で行う。
+ * したがって判断材料になるのは**最後の1行だけ**である。
+ */
+export function lastCacheDirective(
+  bytes: Uint8Array
+): typeof CACHE_IGNORE_RULE | typeof CACHE_UNIGNORE_RULE | undefined {
+  const lines = new TextDecoder()
+    .decode(bytes)
+    .split(/\r\n|\n|\r/)
+    .map((line) => line.trim());
+
+  let found: typeof CACHE_IGNORE_RULE | typeof CACHE_UNIGNORE_RULE | undefined;
+  for (const line of lines) {
+    if (line === CACHE_IGNORE_RULE) found = CACHE_IGNORE_RULE;
+    else if (line === CACHE_UNIGNORE_RULE) found = CACHE_UNIGNORE_RULE;
+  }
+  return found;
+}
+
 /**
  * 既存の作者記述をバイト単位で保ったまま、足りない除外規則だけを追記する。
  *
  * 承認待ちの更新案（`.aiwriter/pending-characters/`）と設定資料・IME辞書は
  * わざと除外しない。作者の判断待ちや読み物であり、別の環境でも見たいため。
  */
-async function ensureRecoveryIgnoreRule(folderPath: string): Promise<void> {
+async function ensureRecoveryIgnoreRule(
+  folderPath: string,
+  options: { syncCache?: boolean } = {}
+): Promise<void> {
   const gitignorePath = path.join(folderPath, ".gitignore");
   const uri = vscode.Uri.file(gitignorePath);
   let existing: Uint8Array;
@@ -160,16 +203,17 @@ async function ensureRecoveryIgnoreRule(folderPath: string): Promise<void> {
     if (!(error instanceof vscode.FileSystemError) || error.code !== "FileNotFound") {
       throw error;
     }
+    const initial = missingIgnoreRules(new Uint8Array(), options);
     await atomicWriteFile(
       gitignorePath,
-      new TextEncoder().encode(`${IGNORED_PATHS.join("\n")}\n`),
+      new TextEncoder().encode(`${initial.join("\n")}\n`),
       { mode: "create" }
     );
     return;
   }
 
   const text = new TextDecoder().decode(existing);
-  const missing = missingIgnoreRules(existing);
+  const missing = missingIgnoreRules(existing, options);
   if (missing.length === 0) {
     return;
   }
@@ -204,21 +248,47 @@ async function ensureRecoveryIgnoreRule(folderPath: string): Promise<void> {
   if (
     migrated.length < existing.length ||
     !sameBytes(migrated.subarray(0, existing.length), existing) ||
-    missingIgnoreRules(migrated).length > 0
+    missingIgnoreRules(migrated, options).length > 0
   ) {
     throw new Error(".gitignore の作者記述を保持したmigrationを確認できませんでした。");
   }
 }
 
-/** まだ書かれていない除外規則を返す。既にあるものは重ねて足さない */
-export function missingIgnoreRules(bytes: Uint8Array): string[] {
+/**
+ * まだ書かれていない除外規則を返す。既にあるものは重ねて足さない。
+ *
+ * キャッシュだけは「同期する／しない」を切り替えられる（設計書3.5.7）ので、
+ * 有無ではなく**最後に書かれている指示**で判断する。
+ */
+export function missingIgnoreRules(
+  bytes: Uint8Array,
+  options: { syncCache?: boolean } = {}
+): string[] {
   const written = new Set(
     new TextDecoder()
       .decode(bytes)
       .split(/\r\n|\n|\r/)
       .map((line) => line.trim())
   );
-  return IGNORED_PATHS.filter((rule) => !written.has(rule));
+  const syncCache = options.syncCache ?? false;
+  const current = lastCacheDirective(bytes);
+
+  const additions: string[] = [];
+  for (const rule of IGNORED_PATHS) {
+    if (rule === CACHE_IGNORE_RULE) {
+      if (syncCache) {
+        // 同期したいのに除外されている場合だけ打ち消す。
+        // もともと何も書かれていなければ足す必要はない
+        if (current === CACHE_IGNORE_RULE) additions.push(CACHE_UNIGNORE_RULE);
+      } else if (current !== CACHE_IGNORE_RULE) {
+        // 未記載でも、打ち消し済みでも、除外し直す
+        additions.push(CACHE_IGNORE_RULE);
+      }
+      continue;
+    }
+    if (!written.has(rule)) additions.push(rule);
+  }
+  return additions;
 }
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
@@ -362,10 +432,11 @@ export async function scaffoldWorkFolder(
   );
 
   // .gitignore（キャッシュと作業ファイルを同期対象から外す）。
-  // 設定資料・IME辞書・承認待ちの更新案は、別の環境でも見たいので除外しない
+  // 設定資料・IME辞書・承認待ちの更新案は、別の環境でも見たいので除外しない。
+  // キャッシュだけは設定で同期できる（設計書3.5.7）
   const gitignore = [
     "# 小説AI執筆補助が生成する作業ファイル（再生成できるため同期しない）",
-    ...IGNORED_PATHS,
+    ...missingIgnoreRules(new Uint8Array(), { syncCache: isCacheSyncEnabled() }),
     "",
   ].join("\n");
   await writeIfAbsent(path.join(folderPath, ".gitignore"), gitignore);

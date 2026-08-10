@@ -312,6 +312,41 @@ function encodeFragment(text: string, encoding: Encoding): Uint8Array | undefine
   return body;
 }
 
+/**
+ * 新しいファイルとして書き出すためのバイト列を作る。
+ *
+ * 競合の「両方を残す」（設計書3.5.4）で、別環境の版を
+ * 別ファイルへ残すときに使う。**元のファイルと同じ文字コード・
+ * 改行コードで書く。** 片方だけUTF-8/LFになると、あとで見比べる
+ * ときに全行が変更扱いになって差分が読めなくなる。
+ *
+ * Shift_JISで表せない文字が混ざっていたら undefined を返す。
+ * 代替文字に置き換えて「保存できた」ことにすると本文が壊れる。
+ */
+export function encodeForNewFile(
+  text: string,
+  original: Pick<TextFileContent, "encoding" | "eol" | "hasTrailingNewline">
+): Uint8Array | undefined {
+  let normalized = text.replace(/\r\n?/g, "\n");
+  if (original.hasTrailingNewline && !normalized.endsWith("\n")) {
+    normalized += "\n";
+  } else if (!original.hasTrailingNewline) {
+    normalized = normalized.replace(/\n+$/, "");
+  }
+
+  const body = encodeFragment(
+    normalized.replace(/\n/g, original.eol),
+    original.encoding
+  );
+  if (!body) return undefined;
+  if (original.encoding !== "utf8-bom") return body;
+
+  const withBom = new Uint8Array(body.length + 3);
+  withBom.set([0xef, 0xbb, 0xbf]);
+  withBom.set(body, 3);
+  return withBom;
+}
+
 function concatenateBytes(
   prefix: Uint8Array,
   parts: Uint8Array[]

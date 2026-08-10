@@ -283,6 +283,106 @@ export async function pullFastForward(
   };
 }
 
+/**
+ * gitがマージ未解決としているファイル（リポジトリ相対）。
+ *
+ * 本文に競合マーカーが残っているだけの状態とは区別する。
+ * こちらは「マージの途中」なので、`checkout --ours` でgitに
+ * 版を書き戻させることができる。
+ */
+export async function unmergedPaths(
+  cwd: string,
+  run: GitCommandRunner = runGit
+): Promise<string[]> {
+  const result = await run(
+    ["diff", "--name-only", "--diff-filter=U", "-z"],
+    cwd,
+    LOCAL_TIMEOUT_MS
+  );
+  if (result.code !== 0) return [];
+  return [...new Set(result.stdout.split("\0").filter((name) => name !== ""))];
+}
+
+/**
+ * 競合したファイルを、選んだ側の版で確定させる。
+ *
+ * **書き込むのはgitである。** この拡張機能は既存の原稿ファイルを
+ * 上書きしないという不変条件を持つ（`atomicWrite.ts` 参照）ので、
+ * 自分でバイト列を書かず、gitに索引から書き戻させる。
+ * 文字コードもgitが持っているものがそのまま出る。
+ */
+export async function checkoutSide(
+  cwd: string,
+  relativePath: string,
+  side: "ours" | "theirs",
+  run: GitCommandRunner = runGit
+): Promise<{ ok: boolean; detail?: string }> {
+  const checkout = await run(
+    ["checkout", `--${side}`, "--", relativePath],
+    cwd,
+    LOCAL_TIMEOUT_MS
+  );
+  if (checkout.code !== 0) {
+    return { ok: false, detail: describeFailure(checkout) };
+  }
+
+  // 解決済みとして印を付けないと、マージが終わらず
+  // 「未解決の競合」が残り続ける
+  const add = await run(["add", "--", relativePath], cwd, LOCAL_TIMEOUT_MS);
+  if (add.code !== 0) return { ok: false, detail: describeFailure(add) };
+  return { ok: true };
+}
+
+/** 索引の特定の版を取り出す。1=共通の祖先 / 2=この環境 / 3=別環境 */
+export async function showStage(
+  cwd: string,
+  relativePath: string,
+  stage: 1 | 2 | 3,
+  run: GitCommandRunner = runGit
+): Promise<string | undefined> {
+  const result = await run(
+    ["show", `:${stage}:${relativePath}`],
+    cwd,
+    LOCAL_TIMEOUT_MS
+  );
+  return result.code === 0 ? result.stdout : undefined;
+}
+
+/** 現在のHEADのコミットID。取れなければ undefined */
+export async function headCommit(
+  cwd: string,
+  run: GitCommandRunner = runGit
+): Promise<string | undefined> {
+  const result = await run(["rev-parse", "HEAD"], cwd, LOCAL_TIMEOUT_MS);
+  if (result.code !== 0) return undefined;
+  const id = result.stdout.trim();
+  return /^[0-9a-f]{7,64}$/i.test(id) ? id : undefined;
+}
+
+/**
+ * 2つのコミットの間で変わったファイル（作品フォルダーからの相対パス）。
+ *
+ * pullで一度に大量のファイルが変わるため、**何が変わったかはgitに聞く**
+ * （設計書3.5.8）。こちらで全ファイルのハッシュを取り直すより速く、
+ * 削除・改名も正確に分かる。
+ */
+export async function changedFilesBetween(
+  cwd: string,
+  from: string,
+  to: string,
+  run: GitCommandRunner = runGit
+): Promise<string[]> {
+  const result = await run(
+    // -z: パスをNUL区切りで出す。日本語や空白を含むパスが
+    // 引用符付きで返るのを避ける（引用の解除で事故りやすい）
+    ["diff", "--name-only", "-z", from, to],
+    cwd,
+    LOCAL_TIMEOUT_MS
+  );
+  if (result.code !== 0) return [];
+  return result.stdout.split("\0").filter((name) => name !== "");
+}
+
 /** 送信する。**必ず作者の操作を起点に呼ぶこと。** */
 export async function push(
   cwd: string,

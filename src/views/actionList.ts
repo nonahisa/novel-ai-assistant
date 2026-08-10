@@ -187,6 +187,17 @@ const ACTIONS: readonly CommandAction[] = [
       "この環境のコミットをGitHubへ送ります。" +
       "別の環境へ移る前に実行しておくと競合を防げます。",
   },
+  {
+    command: "novelai.resolveConflicts",
+    label: "競合を解決する",
+    description: "",
+    icon: "git-merge",
+    requiresWork: true,
+    group: "同期",
+    detail:
+      "同じ話を2つの環境で書いてしまったとき、両方を並べて見比べ、" +
+      "どちらを残すかを選びます。迷ったら両方残せます。",
+  },
 
   // ── AIの設定
   {

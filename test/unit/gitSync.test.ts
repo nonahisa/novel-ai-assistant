@@ -1,8 +1,15 @@
-import { describe, expect, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
+  CACHE_IGNORE_RULE,
+  CACHE_UNIGNORE_RULE,
   IGNORED_PATHS,
+  lastCacheDirective,
   missingIgnoreRules,
 } from "../../src/core/workRegistry";
+import { isGitAvailable, runGit } from "../../src/core/git";
 
 const encode = (text: string) => new TextEncoder().encode(text);
 
@@ -51,4 +58,156 @@ describe("同期対象から外す規則", () => {
 
     expect(missingIgnoreRules(existing)).toEqual([...IGNORED_PATHS]);
   });
+});
+
+describe("キャッシュを同期するオプション（設計書3.5.7）", () => {
+  test("同期しない設定では、これまでどおり除外する", () => {
+    expect(missingIgnoreRules(encode(""), { syncCache: false })).toContain(
+      CACHE_IGNORE_RULE
+    );
+  });
+
+  test("同期する設定では、新しい.gitignoreにキャッシュの除外を書かない", () => {
+    const rules = missingIgnoreRules(encode(""), { syncCache: true });
+
+    expect(rules).not.toContain(CACHE_IGNORE_RULE);
+    expect(rules).not.toContain(CACHE_UNIGNORE_RULE);
+    // 他の規則は今までどおり足す
+    expect(rules).toContain(".novelai-recovery/");
+  });
+
+  test("既に除外済みなら、打ち消す行を足す", () => {
+    // .gitignoreは追記しかできない（作者の記述をバイト単位で保つため）。
+    // 後に書いた規則が勝つ性質を使って切り替える
+    const existing = encode(`${IGNORED_PATHS.join("\n")}\n`);
+
+    expect(missingIgnoreRules(existing, { syncCache: true })).toEqual([
+      CACHE_UNIGNORE_RULE,
+    ]);
+  });
+
+  test("同期をやめたら、もう一度除外する行を足す", () => {
+    const existing = encode(
+      `${CACHE_IGNORE_RULE}\n${CACHE_UNIGNORE_RULE}\n${IGNORED_PATHS.slice(1).join("\n")}\n`
+    );
+
+    expect(missingIgnoreRules(existing, { syncCache: false })).toEqual([
+      CACHE_IGNORE_RULE,
+    ]);
+  });
+
+  test("切り替え済みなら重ねて足さない", () => {
+    const existing = encode(
+      `${CACHE_IGNORE_RULE}\n${CACHE_UNIGNORE_RULE}\n${IGNORED_PATHS.slice(1).join("\n")}\n`
+    );
+
+    expect(missingIgnoreRules(existing, { syncCache: true })).toEqual([]);
+  });
+
+  test("判断に使うのは最後の1行だけ", () => {
+    const flipped = encode(
+      `${CACHE_IGNORE_RULE}\n${CACHE_UNIGNORE_RULE}\n${CACHE_IGNORE_RULE}\n`
+    );
+
+    expect(lastCacheDirective(flipped)).toBe(CACHE_IGNORE_RULE);
+    expect(lastCacheDirective(encode("何も書いていない\n"))).toBeUndefined();
+  });
+});
+
+// ─── 実際のgitで、切り替えが本当に効くか確かめる ───
+//
+// gitignoreの「後勝ち」と、除外したディレクトリの中を再び含める挙動は
+// 思い込みで書くと外しやすい。gitに直接聞いて固定する。
+
+const tempRoot = path.join(os.tmpdir(), "novelai-gitignore-test");
+const gitReady = await isGitAvailable();
+
+beforeAll(async () => {
+  if (!gitReady) return;
+  await fs.rm(tempRoot, { recursive: true, force: true });
+  await fs.mkdir(path.join(tempRoot, ".aiwriter", "cache"), {
+    recursive: true,
+  });
+  await fs.writeFile(
+    path.join(tempRoot, ".aiwriter", "cache", "chunks.json"),
+    "[]",
+    "utf8"
+  );
+  await runGit(["init", "-b", "main"], tempRoot, 30_000);
+}, 60_000);
+
+afterAll(async () => {
+  if (!gitReady) return;
+  await fs.rm(tempRoot, { recursive: true, force: true });
+});
+
+/** gitがそのパスを除外しているか、git自身に聞く */
+async function isIgnoredByGit(relativePath: string): Promise<boolean> {
+  const result = await runGit(
+    ["check-ignore", "-q", "--", relativePath],
+    tempRoot,
+    30_000
+  );
+  // 終了コード0＝除外されている、1＝されていない
+  return result.code === 0;
+}
+
+describe("実際のgitでの確認（キャッシュの同期切り替え）", () => {
+  test.skipIf(!gitReady)(
+    "除外・打ち消し・再除外が、書いた順のとおりに効く",
+    async () => {
+      const gitignore = path.join(tempRoot, ".gitignore");
+      const target = ".aiwriter/cache/chunks.json";
+
+      // 1. 既定（同期しない）
+      await fs.writeFile(
+        gitignore,
+        `${missingIgnoreRules(new Uint8Array(), { syncCache: false }).join("\n")}\n`,
+        "utf8"
+      );
+      expect(await isIgnoredByGit(target)).toBe(true);
+
+      // 2. 同期する設定へ切り替え、打ち消す行を追記する
+      const afterFirst = await fs.readFile(gitignore);
+      const toSync = missingIgnoreRules(afterFirst, { syncCache: true });
+      expect(toSync).toEqual([CACHE_UNIGNORE_RULE]);
+      await fs.appendFile(gitignore, `${toSync.join("\n")}\n`, "utf8");
+
+      // 除外ディレクトリの中を再び含められるか、というのが要点
+      expect(await isIgnoredByGit(target)).toBe(false);
+
+      // 3. 同期をやめる
+      const afterSecond = await fs.readFile(gitignore);
+      const toStop = missingIgnoreRules(afterSecond, { syncCache: false });
+      expect(toStop).toEqual([CACHE_IGNORE_RULE]);
+      await fs.appendFile(gitignore, `${toStop.join("\n")}\n`, "utf8");
+
+      expect(await isIgnoredByGit(target)).toBe(true);
+    },
+    60_000
+  );
+
+  test.skipIf(!gitReady)(
+    "打ち消しても、他の除外は効いたままにする",
+    async () => {
+      const gitignore = path.join(tempRoot, ".gitignore");
+      await fs.writeFile(
+        gitignore,
+        `${IGNORED_PATHS.join("\n")}\n${CACHE_UNIGNORE_RULE}\n`,
+        "utf8"
+      );
+      await fs.mkdir(path.join(tempRoot, ".aiwriter", "logs"), {
+        recursive: true,
+      });
+      await fs.writeFile(
+        path.join(tempRoot, ".aiwriter", "logs", "a.log"),
+        "",
+        "utf8"
+      );
+
+      expect(await isIgnoredByGit(".aiwriter/cache/chunks.json")).toBe(false);
+      expect(await isIgnoredByGit(".aiwriter/logs/a.log")).toBe(true);
+    },
+    60_000
+  );
 });

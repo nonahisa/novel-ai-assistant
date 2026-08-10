@@ -171,6 +171,12 @@
         "title": "この環境の変更を送信する",
         "category": "小説執筆",
         "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "novelai.resolveConflicts",
+        "title": "競合を解決する",
+        "category": "小説執筆",
+        "icon": "$(git-merge)"
       }
     ],
     "menus": {
@@ -271,6 +277,10 @@
         },
         {
           "command": "novelai.gitPush",
+          "when": "true"
+        },
+        {
+          "command": "novelai.resolveConflicts",
           "when": "true"
         }
       ]
@@ -390,6 +400,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "作品フォルダーがGitリポジトリのとき、起動時と本文を開いたときに `git fetch` を実行し、別の環境の変更が未取得かどうかを確認します。**fetchは取得のみで、原稿にもブランチにも触れません。** 取り込み（pull）と送信（push）は、この設定に関わらず自動では実行しません。"
+        },
+        "novelai.git.syncCache": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "AIの処理済みキャッシュ（`.aiwriter/cache/`）をGitで同期します。**複数の環境を渡り歩いて執筆する場合は有効にしてください。** 無効のままだと、別のPCで作業を始めたときに全チャンクをAIで処理し直すことになります。キャッシュのキーには内容ハッシュ・モデル名・プロンプト版が含まれるので、条件が違う結果を再利用することはありません。切り替えると次回起動時に `.gitignore` へ規則を追記します（作者が書いた行は変更しません）。"
         },
         "novelai.git.autoFetchIntervalMinutes": {
           "type": "number",

@@ -3,7 +3,9 @@ import * as path from "path";
 import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import {
+  changedFilesBetween,
   fetchRemote,
+  headCommit,
   pullFastForward,
   push,
   readSyncStatus,
@@ -29,6 +31,14 @@ import { withProgress } from "../views/progress";
 /** 自動fetchの最小間隔の既定値（分） */
 const DEFAULT_AUTO_FETCH_INTERVAL_MINUTES = 10;
 
+/**
+ * これ以上のファイルが一度に入れ替わったら、資料の作り直しを勧める。
+ *
+ * 1〜2件なら作者は今そのファイルを取り込んだところで分かっている。
+ * 毎回勧めると、読まずに閉じる癖がついて意味を失う。
+ */
+const FILE_CHANGE_NOTICE_THRESHOLD = 5;
+
 export interface GitSyncOptions {
   /** テスト用。実際のgit実行を差し替える */
   run?: GitCommandRunner;
@@ -42,9 +52,21 @@ export class GitSyncMonitor implements vscode.Disposable {
   private readonly statusBar: vscode.StatusBarItem;
   private readonly disposables: vscode.Disposable[] = [];
   private readonly changed = new vscode.EventEmitter<void>();
+  /** 直前に見たHEAD。Gitの操作でファイルが入れ替わったのを見つけるのに使う */
+  private readonly lastHead = new Map<string, string>();
+  private readonly filesChanged = new vscode.EventEmitter<{
+    work: WorkEntry;
+    files: string[];
+  }>();
 
   /** 状態が変わったとき。ツリーの作り直しに使う */
   readonly onDidChange = this.changed.event;
+
+  /**
+   * Gitの操作（pull / checkout / merge）でファイルが入れ替わったとき。
+   * 走査結果と用語の索引を作り直すのに使う（設計書3.5.8）。
+   */
+  readonly onDidChangeFiles = this.filesChanged.event;
 
   constructor(
     private readonly registry: WorkRegistry,
@@ -76,6 +98,7 @@ export class GitSyncMonitor implements vscode.Disposable {
   dispose(): void {
     for (const disposable of this.disposables) disposable.dispose();
     this.changed.dispose();
+    this.filesChanged.dispose();
   }
 
   statusFor(workId: string): GitSyncStatus | undefined {
@@ -118,8 +141,70 @@ export class GitSyncMonitor implements vscode.Disposable {
     this.updateStatusBar();
     this.changed.fire();
 
+    await this.detectGitFileChanges(work, status);
     if (options.notify) await this.notifyIfBehind(work, status);
     return status;
+  }
+
+  /**
+   * Gitの操作でファイルが入れ替わったかを見る（設計書3.5.8）。
+   *
+   * 拡張機能からの取り込みだけでなく、**別のGitクライアントでの
+   * pull / checkout / merge も拾う。** 作者は出先でスマートフォンから
+   * 操作することもあるので、こちらの操作だけを見ていては足りない。
+   *
+   * 何が変わったかはgitに聞く。全ファイルのハッシュを取り直すより速く、
+   * 削除・改名も正確に分かる。
+   */
+  private async detectGitFileChanges(
+    work: WorkEntry,
+    status: GitSyncStatus
+  ): Promise<void> {
+    if (status.kind === "git_missing" || status.kind === "not_a_repo") return;
+
+    const head = await headCommit(work.folderPath, this.options.run);
+    if (!head) return;
+
+    const previous = this.lastHead.get(work.id);
+    this.lastHead.set(work.id, head);
+    // 初回は比較相手がいない。ここで通知すると起動のたびに出てしまう
+    if (!previous || previous === head) return;
+
+    const files = await changedFilesBetween(
+      work.folderPath,
+      previous,
+      head,
+      this.options.run
+    );
+    if (files.length === 0) return;
+
+    this.filesChanged.fire({ work, files });
+    await this.notifyFilesChanged(work, files);
+  }
+
+  /**
+   * 入れ替わったファイルを知らせる。
+   *
+   * **AI処理は自動で実行しない。** 費用と時間がかかるので、
+   * 実行するかは作者が決める（設計書3.5.8）。
+   */
+  private async notifyFilesChanged(
+    work: WorkEntry,
+    files: string[]
+  ): Promise<void> {
+    // 1〜2件なら本人が今取り込んだ直後で分かっているので黙っている。
+    // まとめて入れ替わったときだけ、資料の作り直しを勧める
+    if (files.length < FILE_CHANGE_NOTICE_THRESHOLD) return;
+
+    const action = await vscode.window.showInformationMessage(
+      `「${work.title}」で ${files.length} 件のファイルが更新されました。` +
+        "設定資料の抽出をやり直すと、増えた内容を取り込めます。",
+      "設定資料を抽出",
+      "後で"
+    );
+    if (action === "設定資料を抽出") {
+      await vscode.commands.executeCommand("novelai.extractSettings");
+    }
   }
 
   /** 自動fetchしてよいか。設定と最小間隔で決める */

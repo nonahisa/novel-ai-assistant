@@ -13,8 +13,20 @@ import { PendingUpdateStore } from "../core/pendingUpdates";
 import { scanWork } from "../core/scanner";
 import { scaffoldWorkFolder } from "../core/workRegistry";
 import { extractCharacters } from "../features/extractCharacters";
-import { isGitAvailable, runGit } from "../core/git";
+import {
+  checkoutSide,
+  isGitAvailable,
+  runGit,
+  unmergedPaths,
+} from "../core/git";
 import { GitSyncMonitor, describeSyncBadge } from "../features/gitSync";
+import { findConflictedFiles } from "../features/resolveConflicts";
+import {
+  resolveConflicts as buildResolvedText,
+  sideFileName,
+} from "../core/conflictFile";
+import { encodeForNewFile, readTextFile } from "../core/textFile";
+import { atomicWriteFile } from "../core/atomicWrite";
 import { characterFileName, emptyCharacter } from "../models/character";
 import type { WorkEntry } from "../models/types";
 import { CHARACTER_EXTRACT_VERSION } from "../prompts/characterExtract";
@@ -42,6 +54,7 @@ const COMMANDS = [
   "novelai.gitSync",
   "novelai.gitPull",
   "novelai.gitPush",
+  "novelai.resolveConflicts",
 ];
 
 export async function run(): Promise<void> {
@@ -523,6 +536,104 @@ export async function run(): Promise<void> {
         } finally {
           monitor.dispose();
         }
+      } finally {
+        await fs.rm(temporaryRoot, { recursive: true, force: true });
+      }
+    }
+  );
+
+  await runCase(
+    "競合したファイルを見つけ、別環境の版を別ファイルへ残せる",
+    failures,
+    async () => {
+      const temporaryRoot = await fs.mkdtemp(
+        path.join(os.tmpdir(), "novel-ai-assistant-conflict-")
+      );
+      try {
+        if (!(await isGitAvailable())) {
+          console.log("SKIP gitコマンドが無いため省略");
+          return;
+        }
+
+        const remote = path.join(temporaryRoot, "remote.git");
+        await git(["init", "--bare", "-b", "main", remote], temporaryRoot);
+        await git(["clone", remote, "a"], temporaryRoot);
+        await git(["clone", remote, "b"], temporaryRoot);
+        const a = path.join(temporaryRoot, "a");
+        const b = path.join(temporaryRoot, "b");
+
+        await fs.writeFile(path.join(a, "008.txt"), "　もとの文。\n", "utf8");
+        await git(["add", "."], a);
+        await git([...GIT_IDENTITY, "commit", "-m", "初回"], a);
+        await git(["push", "-u", "origin", "main"], a);
+
+        // 同じ話を2つの環境で別々に書いた状態を作る
+        await git(["pull"], b);
+        await fs.writeFile(
+          path.join(b, "008.txt"),
+          "　灯はゆっくりと歩き出した。\n",
+          "utf8"
+        );
+        await git(["add", "."], b);
+        await git([...GIT_IDENTITY, "commit", "-m", "別環境"], b);
+        await git(["push"], b);
+
+        await fs.writeFile(
+          path.join(a, "008.txt"),
+          "　灯は歩き出した。\n",
+          "utf8"
+        );
+        await git(["add", "."], a);
+        await git([...GIT_IDENTITY, "commit", "-m", "この環境"], a);
+        await git(["fetch"], a);
+        const merge = await runGit(
+          [...GIT_IDENTITY, "merge", "origin/main"],
+          a,
+          30_000
+        );
+        assert.notEqual(merge.code, 0, "競合が起きていません");
+
+        const work = { ...makeWork(a), id: "work_conflict" };
+
+        // 走査が競合を見つけ、文字数から外していること（3.5.3）
+        const scanned = await scanWork(work);
+        assert.equal(scanned.stats.conflictedCount, 1);
+
+        const conflicted = await findConflictedFiles(work);
+        assert.equal(conflicted.length, 1, "競合ファイルを検出できません");
+        assert.equal(conflicted[0].relativePath, "008.txt");
+        assert.ok(conflicted[0].unmerged, "マージ未解決として扱えていません");
+        assert.equal(conflicted[0].parsed.hunks.length, 1);
+
+        // 「両方を残す」に相当する流れ：別環境の版を新しいファイルへ書き、
+        // 本文はこの環境の版で確定する
+        const original = await readTextFile(path.join(a, "008.txt"));
+        const theirs = buildResolvedText(original.text, "theirs");
+        const sideName = sideFileName("008.txt", "origin/main");
+        const encoded = encodeForNewFile(theirs, original);
+        assert.ok(encoded, "別環境の版を書き出せません");
+        await atomicWriteFile(path.join(a, sideName), encoded, {
+          mode: "create",
+        });
+
+        const applied = await checkoutSide(a, "008.txt", "ours");
+        assert.ok(applied.ok, "この環境の版で確定できません");
+
+        assert.equal(
+          (await fs.readFile(path.join(a, "008.txt"), "utf8")).replace(
+            /\r\n/g,
+            "\n"
+          ),
+          "　灯は歩き出した。\n"
+        );
+        assert.equal(
+          (await fs.readFile(path.join(a, sideName), "utf8")).replace(
+            /\r\n/g,
+            "\n"
+          ),
+          "　灯はゆっくりと歩き出した。\n"
+        );
+        assert.equal((await unmergedPaths(a)).length, 0);
       } finally {
         await fs.rm(temporaryRoot, { recursive: true, force: true });
       }

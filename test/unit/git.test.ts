@@ -3,16 +3,21 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+  changedFilesBetween,
+  checkoutSide,
   fetchRemote,
+  headCommit,
   isGitAvailable,
   parseAheadBehind,
   parseStatusPorcelain,
   pullFastForward,
   readSyncStatus,
   runGit,
+  unmergedPaths,
   type GitCommandResult,
   type GitCommandRunner,
 } from "../../src/core/git";
+import { parseConflicts } from "../../src/core/conflictFile";
 import {
   describeStatus,
   describeSyncBadge,
@@ -408,5 +413,100 @@ describe("実際のgitでの確認", () => {
       });
     },
     60_000
+  );
+
+  test.skipIf(!gitReady)(
+    "変わったファイルをgitに聞く（日本語のパスでも）",
+    async () => {
+      const before = await headCommit(workDir);
+      await fs.mkdir(path.join(workDir, "本文"), { recursive: true });
+      await fs.writeFile(
+        path.join(workDir, "本文", "004 再会.txt"),
+        "四話\n",
+        "utf8"
+      );
+      await git(["add", "."], workDir);
+      await git([...IDENTITY, "commit", "-m", "第4話"], workDir);
+      const after = await headCommit(workDir);
+
+      const changed = await changedFilesBetween(workDir, before!, after!);
+
+      // NUL区切りで受け取るので、日本語や空白を含むパスが
+      // 引用符付きで返ってくることがない
+      expect(changed).toEqual(["本文/004 再会.txt"]);
+    },
+    60_000
+  );
+});
+
+// ─── 本物のマージ競合を作って、解決まで通す ───
+
+describe("実際の競合の解決", () => {
+  const conflictRoot = path.join(tempRoot, "conflict");
+
+  test.skipIf(!gitReady)(
+    "競合したファイルを検出し、選んだ版で確定できる",
+    async () => {
+      const remote = path.join(conflictRoot, "remote.git");
+      const a = path.join(conflictRoot, "a");
+      const b = path.join(conflictRoot, "b");
+      await fs.mkdir(conflictRoot, { recursive: true });
+      await git(["init", "--bare", "-b", "main", remote], conflictRoot);
+      await git(["clone", remote, "a"], conflictRoot);
+
+      await fs.writeFile(path.join(a, "008.txt"), "　もとの文。\n", "utf8");
+      await git(["add", "."], a);
+      await git([...IDENTITY, "commit", "-m", "初回"], a);
+      await git(["push", "-u", "origin", "main"], a);
+      await git(["clone", remote, "b"], conflictRoot);
+
+      // 同じ話を2つの環境で別々に書いてしまった状態を作る
+      await fs.writeFile(
+        path.join(b, "008.txt"),
+        "　灯はゆっくりと歩き出した。\n",
+        "utf8"
+      );
+      await git(["add", "."], b);
+      await git([...IDENTITY, "commit", "-m", "別環境で加筆"], b);
+      await git(["push"], b);
+
+      await fs.writeFile(
+        path.join(a, "008.txt"),
+        "　灯は歩き出した。\n",
+        "utf8"
+      );
+      await git(["add", "."], a);
+      await git([...IDENTITY, "commit", "-m", "この環境で加筆"], a);
+
+      // 早送りできないので、こちらのpullは断る
+      await fetchRemote(a);
+      const refused = await pullFastForward(a);
+      expect(refused).toEqual({ ok: false, failure: { kind: "diverged" } });
+
+      // 作者が別のGitクライアントでmergeした結果を再現する
+      const merge = await runGit([...IDENTITY, "merge", "origin/main"], a, 30_000);
+      expect(merge.code).not.toBe(0);
+
+      // gitが未解決として挙げてくる
+      expect(await unmergedPaths(a)).toEqual(["008.txt"]);
+
+      // 作業ツリーには競合マーカーが入っている
+      const conflicted = await fs.readFile(path.join(a, "008.txt"), "utf8");
+      const parsed = parseConflicts(conflicted.replace(/\r\n/g, "\n"));
+      expect(parsed.hunks).toHaveLength(1);
+      expect(parsed.hunks[0].ours).toEqual(["　灯は歩き出した。"]);
+      expect(parsed.hunks[0].theirs).toEqual(["　灯はゆっくりと歩き出した。"]);
+
+      // 「別環境のものを採用」をgitに書き戻させる
+      const applied = await checkoutSide(a, "008.txt", "theirs");
+      expect(applied.ok).toBe(true);
+
+      const resolved = await fs.readFile(path.join(a, "008.txt"), "utf8");
+      expect(resolved.replace(/\r\n/g, "\n")).toBe(
+        "　灯はゆっくりと歩き出した。\n"
+      );
+      expect(await unmergedPaths(a)).toEqual([]);
+    },
+    120_000
   );
 });
