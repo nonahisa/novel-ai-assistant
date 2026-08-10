@@ -184,9 +184,12 @@ describe("AIプロバイダ境界", () => {
           type: "object",
           properties: { id: { type: "string" } },
           additionalProperties: false,
+          // 必須でない項目には総数の上限があり、超えると要求ごと拒否される
+          required: ["id"],
         },
       },
       additionalProperties: false,
+      required: ["value", "nested"],
     });
   });
 
@@ -539,7 +542,10 @@ describe("AIプロバイダ境界", () => {
 
   test("400が続いても、外せる指定を試し終えたら打ち切る", async () => {
     // 拒否された指定を1つずつ外して再試行するが、無限には試さない。
-    // 課金されるプロバイダーなので、諦める条件を明確にしておく
+    // 課金されるプロバイダーなので、諦める条件を明確にしておく。
+    // このモデルは effort 非対応で、この呼び出しはJSONスキーマも渡していない。
+    // **送っていない指定は外す候補にしない**（外しても意味がないうえ、
+    // 「非対応」と覚えてしまうと、次に必要になったとき使えなくなる）
     let messageCalls = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = input instanceof Request ? input.url : String(input);
@@ -559,8 +565,8 @@ describe("AIプロバイダ境界", () => {
     await expect(
       new ClaudeProvider(claudeContext()).generate({ ...ollamaParams, disableThinking: true })
     ).rejects.toMatchObject({ kind: "bad_response" });
-    // 初回 + 外せる指定4つ（effort / thinking / 文字数制約 / JSONスキーマ）
-    expect(messageCalls).toBe(5);
+    // 初回 + 思考の無効化を外した1回だけ
+    expect(messageCalls).toBe(2);
   });
 
   test("残高不足を要求の不備と取り違えない", async () => {

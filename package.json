@@ -346,9 +346,9 @@
         },
         "novelai.claude.timeoutSeconds": {
           "type": "number",
-          "default": 180,
+          "default": 300,
           "minimum": 10,
-          "description": "Claudeの1回のAI呼び出しのタイムアウト（秒）。"
+          "markdownDescription": "Claudeの1回のAI呼び出しのタイムアウト（秒）。\n\n新しいモデルは既定で思考しながら答えるため、1話ぶんの本文では3分を超えることがあります。短すぎると、応答が返る直前で打ち切って**そのチャンクを丸ごと失います**（実データで発生）。"
         },
         "novelai.maxOutputTokens": {
           "type": "number",

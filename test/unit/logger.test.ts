@@ -1,5 +1,22 @@
 import { describe, expect, test } from "vitest";
-import { redactSecrets } from "../../src/core/logger";
+import { formatLogTime, redactSecrets } from "../../src/core/logger";
+
+describe("ログの時刻", () => {
+  test("作者の時計に合わせる（UTCで書かない）", () => {
+    // UTCで書くと日本時間とは9時間ずれる。1分前の行が9時間前に見え、
+    // 動いているのに止まったように見えた（実際に作者がそう判断した）
+    const now = new Date(2026, 7, 10, 22, 19, 37);
+
+    expect(formatLogTime(now)).toBe("2026-08-10 22:19:37");
+  });
+
+  test("1桁の月日・時刻を0で埋める", () => {
+    // 桁が揃っていないと、並べたときに読み取りにくい
+    expect(formatLogTime(new Date(2026, 0, 2, 3, 4, 5))).toBe(
+      "2026-01-02 03:04:05"
+    );
+  });
+});
 
 describe("ログの伏せ字", () => {
   test.each([

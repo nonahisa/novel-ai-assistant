@@ -7,7 +7,7 @@ import {
 } from "../../src/ai/geminiProvider";
 import { parseRetryAfterMs, toStatusError } from "../../src/ai/httpClient";
 import {
-  dropNextClaudeOption,
+  claudeAttemptPlan,
   toClaudeJsonSchema,
 } from "../../src/ai/claudeProvider";
 import { clampToModelLimit } from "../../src/ai/outputLimit";
@@ -283,42 +283,119 @@ describe("未対応パラメータの検出", () => {
 
 });
 
+/** スキーマ全体で「properties にあるのに required に無い」項目を数える */
+function countOptionalProperties(schema: unknown): number {
+  if (Array.isArray(schema)) {
+    return schema.reduce<number>(
+      (total, item) => total + countOptionalProperties(item),
+      0
+    );
+  }
+  if (schema === null || typeof schema !== "object") return 0;
+
+  const node = schema as Record<string, unknown>;
+  let count = 0;
+  if (node.properties && typeof node.properties === "object") {
+    const names = Object.keys(node.properties as Record<string, unknown>);
+    const required = Array.isArray(node.required)
+      ? (node.required as string[])
+      : [];
+    count += names.filter((name) => !required.includes(name)).length;
+  }
+  for (const value of Object.values(node)) {
+    count += countOptionalProperties(value);
+  }
+  return count;
+}
+
 describe("Claudeの要求不正の扱い", () => {
-  test("影響の小さい指定から外し、JSONスキーマは最後まで残す", () => {
-    const support = {
-      effort: true,
-      thinking: true,
-      lengthConstraints: true,
-      jsonSchema: true,
-    };
-
-    expect(dropNextClaudeOption(support)).toBe("推論の深さ(effort)");
-    expect(dropNextClaudeOption(support)).toBe("思考の無効化");
-    expect(dropNextClaudeOption(support)).toBe("文字数の制約");
-    // スキーマは形式を保証してくれる要なので、いちばん最後
-    expect(dropNextClaudeOption(support)).toBe("JSONスキーマ");
-    expect(dropNextClaudeOption(support)).toBeUndefined();
-  });
-
-  test("文字数の制約を落とせる", () => {
-    const schema = {
-      type: "object",
-      properties: {
-        summary: { type: "string", maxLength: 50 },
-        evidence: { type: "string", minLength: 1 },
-      },
-    };
-
-    const kept = JSON.stringify(toClaudeJsonSchema(schema));
-    const dropped = JSON.stringify(
-      toClaudeJsonSchema(schema, { dropLengthConstraints: true })
+  test("まず1つずつ外し、どれでも直らないときだけまとめて外す", () => {
+    // 積み上げ式に外すと、原因が最後の1つ（JSONスキーマ）でも、
+    // 先に外した effort と 思考の無効化 まで「非対応」として覚えてしまう。
+    // 実際にそうなり、スキーマ無し・思考ONのまま呼び続ける状態になった
+    const plan = claudeAttemptPlan(
+      { effort: true, thinking: true, jsonSchema: true },
+      ["effort", "thinking", "jsonSchema"]
     );
 
-    expect(kept).toContain("maxLength");
-    expect(dropped).not.toContain("maxLength");
-    expect(dropped).not.toContain("minLength");
+    expect(plan.map((attempt) => attempt.dropped)).toEqual([
+      [],
+      ["effort"],
+      ["thinking"],
+      ["jsonSchema"],
+      ["effort", "thinking", "jsonSchema"],
+    ]);
+    // 1つだけ外した試行では、他の指定は付いたまま
+    expect(plan[3].support).toEqual({
+      effort: true,
+      thinking: true,
+      jsonSchema: false,
+    });
+  });
+
+  test("送っていない指定は外す候補にしない", () => {
+    // 送ってもいない指定を「非対応」と覚えると、次に必要になったとき失う
+    const plan = claudeAttemptPlan(
+      { effort: true, thinking: true, jsonSchema: true },
+      ["thinking"]
+    );
+
+    expect(plan.map((attempt) => attempt.dropped)).toEqual([[], ["thinking"]]);
+  });
+
+  test("すでに非対応と分かっている指定は試し直さない", () => {
+    const plan = claudeAttemptPlan(
+      { effort: false, thinking: true, jsonSchema: true },
+      ["effort", "thinking", "jsonSchema"]
+    );
+
+    expect(plan.map((attempt) => attempt.dropped)).toEqual([
+      [],
+      ["thinking"],
+      ["jsonSchema"],
+      ["thinking", "jsonSchema"],
+    ]);
+  });
+
+  test("必須でない項目を残さない（Anthropicの上限で弾かれる）", () => {
+    // 実データで拒否された応答：
+    // 「Schemas contains too many optional parameters (26) … (limit: 24)」
+    // 個別の指定ではなくスキーマ全体が受け取ってもらえていなかった
+    const converted = toClaudeJsonSchema(CHARACTER_EXTRACT_SCHEMA);
+
+    expect(countOptionalProperties(converted)).toBe(0);
+  });
+
+  test("必須にしても「読み取れなかった」は表せる", () => {
+    // null許容の項目は anyOf に null を含むので、必須にしても意味は変わらない
+    const converted = toClaudeJsonSchema({
+      type: "object",
+      properties: { reading: { type: ["string", "null"] } },
+    }) as Record<string, unknown>;
+
+    expect(converted.required).toEqual(["reading"]);
+    expect(
+      (converted.properties as Record<string, { anyOf: unknown }>).reading.anyOf
+    ).toEqual([{ type: "string" }, { type: "null" }]);
+  });
+
+  test("文字数の制約は最初から送らない", () => {
+    // Anthropicの構造化出力は minLength / maxLength を受け付けない。
+    // 試すだけ無駄なうえ、その400が他の指定への濡れ衣になる
+    const converted = JSON.stringify(
+      toClaudeJsonSchema({
+        type: "object",
+        properties: {
+          summary: { type: "string", maxLength: 50 },
+          evidence: { type: "string", minLength: 1 },
+        },
+      })
+    );
+
+    expect(converted).not.toContain("maxLength");
+    expect(converted).not.toContain("minLength");
     // 型の情報までは落とさない
-    expect(dropped).toContain("string");
+    expect(converted).toContain("string");
   });
 
   test("null許容にした項目からは文字数の制約を外す", () => {

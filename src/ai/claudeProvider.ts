@@ -200,65 +200,78 @@ export class ClaudeProvider implements ApiKeyProvider {
     throwIfAborted(params.signal);
 
     // モデルの申告する対応状況だけでは足りない。実際に400で拒否される項目が
-    // あるため、拒否されたら1つずつ外して試し、通った組み合わせを覚える。
+    // あるため、拒否されたら外して試し、通った組み合わせを覚える。
     // Gemini側と同じ方針（エラー文から原因を当てにいかない）。
     const stored = this.supportFor(params.model);
-    // 外す判断は作業用の複製に対して行う。
-    // 失敗しただけで記憶を書き換えると、原因が別（残高不足など）だったときに
-    // 対応している機能まで永久に使えなくなる（実際にそうなった）
-    const attemptSupport: ClaudeSupport = { ...stored };
-    let res: Anthropic.Message | undefined;
 
-    for (let attempt = 0; ; attempt++) {
+    // 思考モードの扱いはモデル世代で逆になっている。
+    //  - adaptive対応の新しいモデル：既定でONなので、切るには明示的にdisabledを送る
+    //  - enabledのみの古いモデル：既定でOFFなので、何も送らなければよい
+    const thinkingIsOnByDefault =
+      raw?.thinking.types.adaptive.supported === true;
+    const sendsSchema =
+      params.jsonSchema !== undefined &&
+      raw?.structured_outputs.supported !== false;
+    const sendsThinking = params.disableThinking === true && thinkingIsOnByDefault;
+    const sendsEffort =
+      raw?.effort.supported === true && raw.effort.low.supported === true;
+
+    // この呼び出しで実際に送る指定だけを、外す候補にする。
+    // 送ってもいない指定を「非対応」と覚えると、次の呼び出しで失う
+    const applicable: ClaudeOptionKey[] = [];
+    if (sendsEffort) applicable.push("effort");
+    if (sendsThinking) applicable.push("thinking");
+    if (sendsSchema) applicable.push("jsonSchema");
+
+    const buildBody = (
+      support: ClaudeSupport
+    ): Anthropic.MessageCreateParamsNonStreaming => {
       const body: Anthropic.MessageCreateParamsNonStreaming = {
         model: params.model,
         max_tokens: maxTokens,
         system: params.systemPrompt,
         messages: [{ role: "user", content: params.userPrompt }],
       };
-
-      if (
-        params.jsonSchema &&
-        attemptSupport.jsonSchema &&
-        raw?.structured_outputs.supported !== false
-      ) {
+      if (sendsSchema && support.jsonSchema) {
         // Claudeの構造化出力はスキーマに追加の制約がある（後述の変換を参照）
         body.output_config = {
           format: {
             type: "json_schema",
-            schema: toClaudeJsonSchema(params.jsonSchema, {
-              dropLengthConstraints: !attemptSupport.lengthConstraints,
-            }) as Record<string, unknown>,
+            schema: toClaudeJsonSchema(params.jsonSchema) as Record<
+              string,
+              unknown
+            >,
           },
         };
       }
-
-      // 思考モードの扱いはモデル世代で逆になっている。
-      //  - adaptive対応の新しいモデル：既定でONなので、切るには明示的にdisabledを送る
-      //  - enabledのみの古いモデル：既定でOFFなので、何も送らなければよい
-      const thinkingIsOnByDefault =
-        raw?.thinking.types.adaptive.supported === true;
-      if (
-        params.disableThinking &&
-        thinkingIsOnByDefault &&
-        attemptSupport.thinking
-      ) {
+      if (sendsThinking && support.thinking) {
         body.thinking = { type: "disabled" };
       }
-
       // effort は対応モデルのみ。抽出タスクは深い推論を必要としないため低めにする
-      if (
-        attemptSupport.effort &&
-        raw?.effort.supported &&
-        raw.effort.low.supported
-      ) {
+      if (sendsEffort && support.effort) {
         body.output_config = { ...body.output_config, effort: "low" };
       }
+      return body;
+    };
 
+    let res: Anthropic.Message | undefined;
+    let accepted: ClaudeSupport | undefined;
+    let lastError: AIError | undefined;
+
+    for (const attempt of claudeAttemptPlan(stored, applicable)) {
+      throwIfAborted(params.signal);
       try {
-        res = await client.messages.create(body, { signal: params.signal });
+        res = await client.messages.create(buildBody(attempt.support), {
+          signal: params.signal,
+        });
         // 通った組み合わせだけを覚える。失敗から学ぶと誤った結論が残る
-        this.rememberSupport(params.model, attemptSupport);
+        accepted = attempt.support;
+        if (attempt.dropped.length > 0) {
+          logLine(
+            `Claudeは「${describeDroppedOptions(attempt.dropped)}」を外すと通りました` +
+              `（モデル: ${params.model}）。以後この組み合わせで呼び出します。`
+          );
+        }
         break;
       } catch (e) {
         // 残高不足もAnthropicは400で返す。要求の形の問題ではないので、
@@ -269,14 +282,25 @@ export class ClaudeProvider implements ApiKeyProvider {
         const error = toClaudeMessageCreateError(e);
         if (error.kind !== "bad_response" || !isInvalidRequest(e)) throw error;
 
-        const dropped = dropNextClaudeOption(attemptSupport);
-        if (!dropped || attempt >= 4) throw error;
+        lastError = error;
+        // **何を外したときに何と言われたのかを必ず残す。**
+        // 以前はこれを捨てていたため、どの指定が悪いのか誰にも分からず、
+        // 当てずっぽうで機能を外し続けることになった
         logLine(
-          `Claudeが「${dropped}」の指定を受け付けなかったため、外して再試行します` +
-            `（モデル: ${params.model}）。`
+          `Claudeが要求を受け付けませんでした（モデル: ${params.model} / ` +
+            `外した指定: ${describeDroppedOptions(attempt.dropped)}）。` +
+            `応答: ${error.detail ?? "（本文なし）"}`
         );
       }
     }
+
+    if (!res || !accepted) {
+      throw (
+        lastError ??
+        new AIError("Claudeが要求を受け付けませんでした。", "bad_response")
+      );
+    }
+    this.rememberSupport(params.model, accepted);
 
     if (!isClaudeMessage(res)) {
       throw new AIError("Claudeから形式が不正な応答が返りました。", "bad_response");
@@ -374,14 +398,21 @@ export class ClaudeProvider implements ApiKeyProvider {
     const support: ClaudeSupport = {
       effort: stored?.effort ?? true,
       thinking: stored?.thinking ?? true,
-      lengthConstraints: stored?.lengthConstraints ?? true,
       jsonSchema: stored?.jsonSchema ?? true,
     };
     this.supportCache.set(model, support);
     return support;
   }
 
+  /**
+   * 通った組み合わせを覚える。
+   *
+   * **記憶と手元の控えの両方を書き換える。** 以前は保存先だけを更新しており、
+   * 手元の控えが古いままだったため、同じ実行の次のチャンクでまた同じ指定を送り、
+   * 毎回400を4回もらってから通るという動きになっていた（実データのログで確認）。
+   */
   private rememberSupport(model: string, support: ClaudeSupport): void {
+    this.supportCache.set(model, { ...support });
     void this.context.globalState.update(supportKey(model), { ...support });
   }
 }
@@ -389,11 +420,23 @@ export class ClaudeProvider implements ApiKeyProvider {
 /**
  * 記憶の置き場。
  *
- * v2 にしているのは、v1で残高不足を「機能が未対応」と誤って学習した記録を
+ * v2 にしたのは、v1で残高不足を「機能が未対応」と誤って学習した記録を
  * 捨てるため。古い記録を読み続けると、対応している機能を永久に使わなくなる。
+ *
+ * v3 にしたのも同じ理由である。積み上げ式に外していたv2では、原因が
+ * JSONスキーマ1つだけでも、先に外した effort と 思考の無効化 まで
+ * 「非対応」として記録された。その記録が残っていると、直したあとも
+ * スキーマ無し・思考ONのまま呼び続けることになる（実データで発生）。
+ *
+ * v4 は、拒否の原因がモデルではなく**こちらのスキーマ**だったため。
+ * 「必須でない項目が多すぎる」で弾かれていたのを直したので、
+ * 「JSONスキーマ非対応」という記録は誤りになった。
+ *
+ * **`toClaudeJsonSchema` を直したら、ここの版も上げること。**
+ * 上げないと、直す前の判定が残って新しいスキーマを試さない。
  */
 function supportKey(model: string): string {
-  return `novelai.claude.support.v2.${model}`;
+  return `novelai.claude.support.v4.${model}`;
 }
 
 /**
@@ -421,37 +464,66 @@ export function billingProblem(error: unknown): AIError | undefined {
 export interface ClaudeSupport {
   effort: boolean;
   thinking: boolean;
-  /** スキーマ内の minLength / maxLength を送ってよいか */
-  lengthConstraints: boolean;
   jsonSchema: boolean;
 }
 
+export type ClaudeOptionKey = keyof ClaudeSupport;
+
+/** 外す順。抽出の質への影響が小さいものから並べる */
+export const CLAUDE_OPTION_ORDER: ClaudeOptionKey[] = [
+  "effort",
+  "thinking",
+  "jsonSchema",
+];
+
+export const CLAUDE_OPTION_LABELS: Record<ClaudeOptionKey, string> = {
+  effort: "推論の深さ(effort)",
+  thinking: "思考の無効化",
+  jsonSchema: "JSONスキーマ",
+};
+
+export interface ClaudeAttempt {
+  support: ClaudeSupport;
+  /** この試行で外した指定。空なら全部付けたまま */
+  dropped: ClaudeOptionKey[];
+}
+
 /**
- * 次に外す指定を決める。外せるものが無ければ undefined。
+ * 試す組み合わせを順に並べる。
  *
- * 抽出の質への影響が小さいものから外す。
- * JSONスキーマは形式を保証してくれる要なので、いちばん最後まで残す。
+ * **まず1つずつ外す。** 以前は端から順に積み上げて外していたため、
+ * 原因が最後の1つ（JSONスキーマ）だったときに、無実の指定まで
+ * 「非対応」として覚えてしまった。実際にClaudeで起き、
+ * 思考の無効化とJSONスキーマの両方を永久に失った状態になっていた。
+ *
+ * 1つずつ試せば、原因が1つのときは犯人だけを覚えられる。
+ * どれを外しても直らないときだけ、まとめて外した組み合わせを試す。
  */
-export function dropNextClaudeOption(
-  support: ClaudeSupport
-): string | undefined {
-  if (support.effort) {
-    support.effort = false;
-    return "推論の深さ(effort)";
+export function claudeAttemptPlan(
+  support: ClaudeSupport,
+  /** この呼び出しで実際に送る指定だけを渡す */
+  applicable: ClaudeOptionKey[]
+): ClaudeAttempt[] {
+  const active = CLAUDE_OPTION_ORDER.filter(
+    (key) => applicable.includes(key) && support[key]
+  );
+  const plan: ClaudeAttempt[] = [{ support: { ...support }, dropped: [] }];
+
+  for (const key of active) {
+    plan.push({ support: { ...support, [key]: false }, dropped: [key] });
   }
-  if (support.thinking) {
-    support.thinking = false;
-    return "思考の無効化";
+
+  if (active.length > 1) {
+    const minimal = { ...support };
+    for (const key of active) minimal[key] = false;
+    plan.push({ support: minimal, dropped: [...active] });
   }
-  if (support.lengthConstraints) {
-    support.lengthConstraints = false;
-    return "文字数の制約";
-  }
-  if (support.jsonSchema) {
-    support.jsonSchema = false;
-    return "JSONスキーマ";
-  }
-  return undefined;
+  return plan;
+}
+
+export function describeDroppedOptions(dropped: ClaudeOptionKey[]): string {
+  if (dropped.length === 0) return "なし（すべて付けたまま）";
+  return dropped.map((key) => CLAUDE_OPTION_LABELS[key]).join("・");
 }
 
 /** 要求の作りが受け付けられなかったか。認証や上限とは区別する */
@@ -481,25 +553,20 @@ function describeCapabilities(
  * Claudeの構造化出力は
  *   - すべてのobjectに additionalProperties: false が必要
  *   - type: ["string", "null"] のような配列形式は anyOf で書く
+ *   - **minLength / maxLength は受け付けない**
  * という制約がある。Ollama側のスキーマ定義は変更したくないので
  * （プロンプトversionが変わるとキャッシュが全部無効になる）、
  * 送信直前にここで変換する。
+ *
+ * 文字数の制約は、以前は「拒否されたら外す」形にしていた。
+ * しかし**Anthropicの仕様として最初から非対応**であり、
+ * 試す意味がないうえに、その1回の400が他の指定への濡れ衣になった。
+ * 常に落とす。字数はコード側で切っているので（`clampSummary`）、
+ * スキーマから外しても資料の見た目は変わらない。
  */
-export interface ClaudeSchemaOptions {
-  /**
-   * minLength / maxLength を落とすか。
-   * 対応していないモデルへ送ると要求ごと400で拒否されるため、
-   * 拒否されたときだけ落として再試行する。
-   */
-  dropLengthConstraints?: boolean;
-}
-
-export function toClaudeJsonSchema(
-  schema: unknown,
-  options: ClaudeSchemaOptions = {}
-): unknown {
+export function toClaudeJsonSchema(schema: unknown): unknown {
   if (Array.isArray(schema)) {
-    return schema.map((item) => toClaudeJsonSchema(item, options));
+    return schema.map((item) => toClaudeJsonSchema(item));
   }
   if (schema === null || typeof schema !== "object") {
     return schema;
@@ -513,25 +580,36 @@ export function toClaudeJsonSchema(
       // ["string", "null"] → anyOf: [{type:"string"}, {type:"null"}]
       continue;
     }
-    if (
-      options.dropLengthConstraints &&
-      (key === "minLength" || key === "maxLength")
-    ) {
-      continue;
-    }
-    out[key] = toClaudeJsonSchema(value, options);
+    if (key === "minLength" || key === "maxLength") continue;
+    out[key] = toClaudeJsonSchema(value);
   }
 
   if (Array.isArray(src.type)) {
     out.anyOf = (src.type as unknown[]).map((t) => ({ type: t }));
-    // anyOf と併記できない指定は落とす。型ごとの制約になるため
-    delete out.minLength;
-    delete out.maxLength;
   }
 
   if (out.type === "object" || out.properties !== undefined) {
     if (out.additionalProperties === undefined) {
       out.additionalProperties = false;
+    }
+    /**
+     * **すべての項目を必須にする。**
+     *
+     * Anthropicは「必須でない項目」の総数に上限（24）を設けており、
+     * こちらのスキーマは26個で拒否されていた。
+     * 「Schemas contains too many optional parameters (26)」がその応答である。
+     * 個別の指定（effort・思考・文字数）は無関係で、スキーマ全体が
+     * 受け取ってもらえていなかった。
+     *
+     * 必須にしても意味は変わらない。null許容の項目は anyOf に null を
+     * 含んでいるので、「読み取れなかった」は null で表せる。
+     * むしろ**省略可能にすると、モデルは面倒な項目を黙って落とす**
+     * （この作品で何度も確認している）。Ollama側のスキーマでも
+     * 同じ理由で必須を増やしてきた。ここはその方針と揃う。
+     */
+    const properties = out.properties;
+    if (properties && typeof properties === "object") {
+      out.required = Object.keys(properties as Record<string, unknown>);
     }
   }
 

@@ -87,11 +87,27 @@ export function showLog(): void {
   outputChannel().show(true);
 }
 
+/**
+ * ログの時刻。**作者の時計に合わせる（現地時刻）。**
+ *
+ * 以前は `toISOString()`（UTC）で書いていた。日本時間とは9時間ずれるため、
+ * 実際には1分前に書かれた行が「9時間前」に見え、**動いているのに
+ * 止まったように見える。** 実際に作者が「また止まってそう」と判断した
+ * ときの抽出は、その1〜2分前まで正常に進んでいた。
+ *
+ * 日付も入れる。ファイルには複数日ぶんが残るので、
+ * 時刻だけだと「今日のものか」が分からない。
+ */
+export function formatLogTime(now: Date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return (
+    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
+    `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+  );
+}
+
 export function logLine(message: string): void {
-  // 日付も入れる。ファイルには複数日ぶんが残るので、
-  // 時刻だけだと「今日のものか」が分からない
-  const time = new Date().toISOString().slice(0, 19).replace("T", " ");
-  const line = `[${time}] ${redactSecrets(message)}`;
+  const line = `[${formatLogTime()}] ${redactSecrets(message)}`;
   outputChannel().appendLine(line);
   appendToFile(line);
 }

@@ -182,7 +182,9 @@ export function recoveryForAIError(error: AIError): string {
     case "model_not_found":
       return "利用可能なモデルを選び直してください。";
     case "timeout":
-      return "チャンクを小さくして、もう一度実行してください。";
+      // 待ち時間の設定を先に出す。チャンクを小さくすると呼び出し回数が増え、
+      // クラウドAIでは料金も増える。まず待つほうが害が少ない
+      return "設定でタイムアウトの秒数を延ばすか、チャンクを小さくして、もう一度実行してください。";
     case "bad_response":
       return "出力上限とモデル設定を確認してください。";
     // どのプロバイダーでも出る案内なので、特定のサービス名を書かない。
