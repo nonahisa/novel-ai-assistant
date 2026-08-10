@@ -4,6 +4,11 @@ import type { Character } from "../models/character";
 import type { AiNote } from "../models/aiNote";
 import type { CustomFieldDefinition } from "../models/customField";
 import { membersOf, type Organization } from "../models/organization";
+import {
+  WORLD_CATEGORIES,
+  WORLD_CATEGORY_LABELS,
+  type WorldItem,
+} from "../models/world";
 
 /**
  * 設定資料としてそのまま渡せるMarkdownを組み立てる。
@@ -232,6 +237,59 @@ function groupByParent(
 
   if (others.length > 0) groups.set("上位組織の記載なし", others);
   return groups;
+}
+
+/**
+ * 世界観一覧。分類ごとにまとめる。
+ *
+ * 並びは `WORLD_CATEGORIES` の順に固定する。名前順や件数順にすると、
+ * 抽出のたびに節の位置が入れ替わり、作者が場所を覚えられない。
+ * 該当が1件も無い分類の見出しは出さない。
+ */
+export function buildWorldMarkdown(
+  items: WorldItem[],
+  options: SettingsMarkdownOptions
+): string {
+  const visible = items.filter((item) =>
+    isVisible(item.spoilerLevel, options.spoilerLevel)
+  );
+  const lines: string[] = [`# ${options.workTitle} 世界観`, ""];
+
+  if (visible.length === 0) {
+    lines.push("まだ世界観が登録されていません。", "");
+    return lines.join("\n");
+  }
+
+  for (const category of WORLD_CATEGORIES) {
+    const group = visible.filter((item) => item.category === category);
+    if (group.length === 0) continue;
+
+    lines.push(`## ${WORLD_CATEGORY_LABELS[category]}`, "");
+    for (const item of group) {
+      lines.push(`### ${item.name}`, "");
+      if (item.description) {
+        lines.push(item.description, "");
+      }
+      if (item.aliases.length > 0) {
+        lines.push(`- **別の言い方**: ${item.aliases.join("、")}`);
+      }
+      if (item.appearedChapters.length > 0) {
+        lines.push(`- **登場話**: ${formatChapters(item.appearedChapters)}`);
+      }
+      if (item.exportNote.trim()) {
+        lines.push(`- **補足**: ${item.exportNote.trim()}`);
+      }
+      for (const conflict of item.conflicts) {
+        lines.push(
+          `- **要確認（${conflict.field}）**: ${conflict.values.join(" / ")}`
+        );
+      }
+      lines.push(...aiNoteLines(item.aiNotes));
+      lines.push("");
+    }
+  }
+
+  return lines.join("\n");
 }
 
 /** 場所一覧。地域ごとにまとめる */

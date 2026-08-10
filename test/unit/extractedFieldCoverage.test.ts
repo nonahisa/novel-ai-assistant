@@ -6,6 +6,7 @@ import {
 import {
   normalizeExtractedAbility,
   normalizeExtractedLocation,
+  normalizeExtractedWorldItem,
 } from "../../src/core/settingsExtractionValidation";
 import { CHARACTER_EXTRACT_SCHEMA } from "../../src/prompts/characterExtract";
 import { mergeExtractedCharacters } from "../../src/core/characterMerge";
@@ -43,8 +44,8 @@ function schemaTextFields(): string[] {
     .filter((key) => !HANDLED_SEPARATELY.includes(key));
 }
 
-/** 能力・場所は個別に組み立てているので、鍵の集合を突き合わせる */
-function schemaKeysOf(kind: "abilities" | "locations"): string[] {
+/** 能力・場所・世界観は個別に組み立てているので、鍵の集合を突き合わせる */
+function schemaKeysOf(kind: "abilities" | "locations" | "worldview"): string[] {
   const properties = CHARACTER_EXTRACT_SCHEMA.properties[kind].items
     .properties as Record<string, unknown>;
   return Object.keys(properties).filter((key) => key !== "name");
@@ -81,6 +82,19 @@ describe("能力・場所も取りこぼさない", () => {
     }
     for (const key of schemaKeysOf("locations")) {
       expect(location, `場所の ${key} が受け取れていません`).toHaveProperty(key);
+    }
+  });
+
+  test("世界観のスキーマの項目も、そのままレコードへ入る", () => {
+    const item = normalizeExtractedWorldItem({
+      name: "詠唱の制約",
+      category: "rule",
+      description: "詠唱中は移動できない。",
+      evidence: "詠唱を終えるまで足を止めてはならない",
+    });
+
+    for (const key of schemaKeysOf("worldview")) {
+      expect(item, `世界観の ${key} が受け取れていません`).toHaveProperty(key);
     }
   });
 });

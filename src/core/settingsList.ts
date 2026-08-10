@@ -2,6 +2,7 @@ import type { Character } from "../models/character";
 import type { Ability } from "../models/ability";
 import type { Location } from "../models/location";
 import { membersOf, type Organization } from "../models/organization";
+import { WORLD_CATEGORY_LABELS, type WorldItem } from "../models/world";
 
 /**
  * 設定資料パネルの一覧に並べる1件。
@@ -84,6 +85,24 @@ export function buildOrganizationListItems(
       isMob: false,
     };
   });
+}
+
+/**
+ * 世界観の一覧。名前の下に分類を出す。
+ *
+ * 見出しだけでは「詠唱の制約」が世界の法則の話か用語の説明か分からない。
+ * 分類は資料の節の分かれ目でもあるので、一覧でも見えるようにする。
+ */
+export function buildWorldListItems(items: WorldItem[]): SettingsListItem[] {
+  return items.map((item) => ({
+    id: item.id,
+    name: item.name,
+    sub: joinSub([
+      WORLD_CATEGORY_LABELS[item.category] ?? "",
+      noteCount(item.aiNotes.length),
+    ]),
+    isMob: false,
+  }));
 }
 
 export function buildLocationListItems(locations: Location[]): SettingsListItem[] {

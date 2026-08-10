@@ -9,12 +9,14 @@ import {
   createAbilityStore,
   createLocationStore,
   createOrganizationStore,
+  createWorldStore,
 } from "../core/abilityStore";
 import {
   buildAbilityMarkdown,
   buildCharacterMarkdown,
   buildLocationMarkdown,
   buildOrganizationMarkdown,
+  buildWorldMarkdown,
 } from "../core/settingsMarkdown";
 import { CustomFieldStore } from "../core/customFieldStore";
 import { buildSchemaFiles, SCHEMA_DIR } from "../core/settingsSchema";
@@ -28,8 +30,12 @@ import { logFailure } from "../core/logger";
  * その旨をファイル冒頭にも書いて、手編集が失われる事故を防ぐ。
  */
 
+/** 生成物である印。既にあるファイルを上書きしてよいかの判断に使う */
+export const GENERATED_MARKER =
+  "このファイルは「設定資料集を出力」で自動生成されます。";
+
 const GENERATED_NOTICE =
-  "<!-- このファイルは「設定資料集を出力」で自動生成されます。\n" +
+  `<!-- ${GENERATED_MARKER}\n` +
   "     直接編集しても次回の生成で失われます。\n" +
   "     補足を残したい場合は各JSONの exportNote / authorNotes に書いてください。 -->\n";
 
@@ -39,6 +45,36 @@ interface GeneratedDoc {
   content: string;
   /** 該当が無い種別は書き出さない */
   hasContent: boolean;
+}
+
+/**
+ * 既にあるファイルを上書きしてよいか。
+ *
+ * **設計書は `world.md` を「AI自動生成＋作者の加筆」としていた。**
+ * その案で書き始めた作者のファイルが残っている可能性があるため、
+ * 生成物の印が無いファイルは作者が書いたものとみなして触らない。
+ * 上書きしてから謝っても、文章は戻らない。
+ */
+export function isGeneratedDoc(existing: string): boolean {
+  return existing.includes(GENERATED_MARKER);
+}
+
+/** 既存ファイルが作者の手書きなら true（＝書き込んではいけない） */
+async function isAuthorWritten(target: string): Promise<boolean> {
+  try {
+    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+    return !isGeneratedDoc(new TextDecoder().decode(bytes));
+  } catch (error) {
+    // 読めない理由が「まだ無い」なら書いてよい。
+    // 権限などの他の失敗は、書き込み側で改めて失敗させる
+    if (
+      error instanceof vscode.FileSystemError &&
+      error.code === "FileNotFound"
+    ) {
+      return false;
+    }
+    return false;
+  }
 }
 
 export interface GenerateSettingsDocsOptions {
@@ -59,11 +95,13 @@ export async function generateSettingsDocs(
   const abilityStore = createAbilityStore(work);
   const locationStore = createLocationStore(work);
   const organizationStore = createOrganizationStore(work);
+  const worldStore = createWorldStore(work);
 
   const loadedCharacters = await characterStore.loadAll();
   const loadedAbilities = await abilityStore.loadAll();
   const loadedLocations = await locationStore.loadAll();
   const loadedOrganizations = await organizationStore.loadAll();
+  const loadedWorld = await worldStore.loadAll();
   const abilitySystem = await new AbilitySystemStore(work).load();
 
   // 壊れたJSONがあるまま資料を作ると、欠けた資料が正しく見えてしまう
@@ -72,6 +110,7 @@ export async function generateSettingsDocs(
     ...loadedAbilities.errors,
     ...loadedLocations.errors,
     ...loadedOrganizations.errors,
+    ...loadedWorld.errors,
   ];
   if (errors.length > 0) {
     const detail = errors.map((e) => `${e.file}: ${e.message}`).join("\n");
@@ -134,6 +173,12 @@ export async function generateSettingsDocs(
       content: buildLocationMarkdown(loadedLocations.records, markdownOptions),
       hasContent: loadedLocations.records.length > 0,
     },
+    {
+      fileName: "world.md",
+      label: "世界観",
+      content: buildWorldMarkdown(loadedWorld.records, markdownOptions),
+      hasContent: loadedWorld.records.length > 0,
+    },
   ];
 
   const config = await readWorkConfig(work);
@@ -145,7 +190,10 @@ export async function generateSettingsDocs(
   await writeSchemaFiles(settingsDir, work.title);
 
   const written: string[] = [];
+  const writtenFiles: string[] = [];
   const skipped: string[] = [];
+  /** 作者が書いたと判断して触らなかったファイル */
+  const protectedFiles: string[] = [];
 
   for (const doc of docs) {
     if (!doc.hasContent) {
@@ -153,12 +201,17 @@ export async function generateSettingsDocs(
       continue;
     }
     const target = path.join(settingsDir, doc.fileName);
+    if (await isAuthorWritten(target)) {
+      protectedFiles.push(doc.fileName);
+      continue;
+    }
     try {
       await atomicWriteFile(
         target,
         new TextEncoder().encode(GENERATED_NOTICE + "\n" + doc.content)
       );
       written.push(doc.label);
+      writtenFiles.push(doc.fileName);
     } catch (error) {
       const detail =
         error instanceof AtomicWriteFileError
@@ -173,8 +226,18 @@ export async function generateSettingsDocs(
     }
   }
 
+  // 作者のファイルを避けたことは、黙っていると「生成されない」不具合に見える。
+  // 抽出直後（silent）でも必ず伝える
+  if (protectedFiles.length > 0) {
+    void vscode.window.showWarningMessage(
+      `${protectedFiles.join("・")} は作者が書いたファイルのようなので、` +
+        "上書きせずそのままにしました。生成し直す場合は、内容を移してから削除してください。"
+    );
+  }
+
   if (written.length === 0) {
     if (options.silent) return;
+    if (protectedFiles.length > 0) return;
     vscode.window.showInformationMessage(
       "資料にできる設定がまだありません。先に「設定資料を抽出」を実行してください。"
     );
@@ -190,7 +253,9 @@ export async function generateSettingsDocs(
     "開く"
   );
   if (action === "開く") {
-    const first = docs.find((doc) => doc.hasContent)!;
+    // 書いたファイルを開く。避けたファイルを開くと、
+    // 生成できたのか分からないまま古い内容を見せることになる
+    const first = { fileName: writtenFiles[0] };
     // 資料は読むためのものなので、記法のままではなくプレビューで開く
     await vscode.commands.executeCommand(
       "markdown.showPreview",

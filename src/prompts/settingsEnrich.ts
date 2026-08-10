@@ -129,6 +129,19 @@ export const ENRICHABLE_FIELDS: Record<SettingsKind, EnrichableField[]> = {
       multiline: true,
     },
   ],
+  // 世界観は見出しと中身しかない。分類は7種のどれかで、
+  // AIに文字列で選ばせると訳語がぶれる（作者が選択肢から選べば済む）
+  world: [
+    {
+      key: "description",
+      label: "内容",
+      hint:
+        "この見出しについて本文から読み取れること。" +
+        "**その世界がどうなっているか**を書く。物語の出来事は書かない" +
+        "（「城が燃えた」は出来事、「城は木造で燃えやすい」が世界観）",
+      multiline: true,
+    },
+  ],
 };
 
 /**

@@ -1,4 +1,5 @@
 import { SUMMARY_MAX_CHARS } from "./summaryLimit";
+import { WORLD_CATEGORIES } from "../models/world";
 
 /**
  * 設定資料の構造を、他のツールやAIが読める形で書き出す。
@@ -226,6 +227,49 @@ export function locationSchema(): Record<string, unknown> {
 }
 
 /**
+ * 世界観（P-03）。
+ *
+ * 他の種別と違い、`summary`・`reading`・`status` を持たない。
+ * 見出しと説明の2つで足りるうえ、読み仮名を付ける対象でも、
+ * 「未登場」を区別する対象でもないためである。
+ */
+export function worldSchema(): Record<string, unknown> {
+  const properties = commonProperties("^world_\\d+$");
+  for (const key of ["summary", "reading", "status"]) {
+    delete properties[key];
+  }
+  return {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "世界観",
+    type: "object",
+    properties: {
+      ...properties,
+      name: {
+        type: "string",
+        minLength: 1,
+        maxLength: 20,
+        description:
+          "何についての項目かが分かる短い見出し（「詠唱の制約」）。" +
+          "本文の丸写しにしないこと。中身は description に書く",
+      },
+      category: {
+        type: "string",
+        enum: [...WORLD_CATEGORIES],
+        description:
+          "genre=ジャンル的特徴 / era=時代背景 / rule=世界の法則 / " +
+          "society=社会構造 / culture=文化・風習 / geography=地理 / term=固有の用語",
+      },
+      description: {
+        type: ["string", "null"],
+        description: "項目の中身。これが本体",
+      },
+    },
+    required: ["id", "name"],
+    additionalProperties: false,
+  };
+}
+
+/**
  * AIへ渡す注意書き。
  *
  * スキーマでは表せない約束をここに書く。
@@ -246,6 +290,7 @@ export function schemaReadme(workTitle: string): string {
 | \`設定/abilities/\` | 能力 | 1件1ファイル |
 | \`設定/organizations/\` | 組織 | 1件1ファイル |
 | \`設定/locations/\` | 場所 | 1件1ファイル |
+| \`設定/world/\` | 世界観（世界の法則・社会・文化・用語） | 1件1ファイル |
 | \`設定/custom_fields.json\` | 作者が定義した人物の追加項目 | 1ファイル |
 
 ファイル名は \`char_001_月島灯.json\` の形式です。**先頭のIDと中身の \`id\` を必ず一致させてください。**
@@ -272,6 +317,8 @@ export function schemaReadme(workTitle: string): string {
 - \`appearedChapters\`（登場話数）は本文から機械的に求まる値です。手で書かないでください。
 - \`addressTerms\` は「**この人物が他の人物をどう呼ぶか**」です。呼ばれ方ではありません。
 - 同じ相手への複数の呼び方は、まとめずにすべて残してください。
+- 世界観の \`name\` は**短い見出し**（「詠唱の制約」）です。本文の丸写しではなく、中身は \`description\` に書いてください。
+- 世界観には**物語の出来事を書かないでください。**「城が燃えた」は出来事、「城は木造で燃えやすい」が世界観です。
 
 ## 変更したあと
 
@@ -285,6 +332,7 @@ JSONとして壊れている場合は取り込まれず、作者にエラーが�
 - \`ability.schema.json\`
 - \`organization.schema.json\`
 - \`location.schema.json\`
+- \`world.schema.json\`
 
 これらは拡張機能が生成しています。**手で編集しても次の生成で上書きされます。**
 `;
@@ -302,5 +350,6 @@ export function buildSchemaFiles(workTitle: string): GeneratedSchemaFile[] {
       content: json(organizationSchema()),
     },
     { fileName: "location.schema.json", content: json(locationSchema()) },
+    { fileName: "world.schema.json", content: json(worldSchema()) },
   ];
 }

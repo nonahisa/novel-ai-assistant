@@ -6,11 +6,13 @@ import {
   locationSchema,
   organizationSchema,
   schemaReadme,
+  worldSchema,
 } from "../../src/core/settingsSchema";
 import { emptyCharacter } from "../../src/models/character";
 import { emptyAbility } from "../../src/models/ability";
 import { emptyLocation } from "../../src/models/location";
 import { emptyOrganization } from "../../src/models/organization";
+import { emptyWorldItem } from "../../src/models/world";
 import { SUMMARY_MAX_CHARS } from "../../src/core/summaryLimit";
 
 /**
@@ -54,6 +56,14 @@ const CASES = [
     label: "場所",
     schema: locationSchema(),
     record: emptyLocation("loc_001", "図書塔") as unknown as Record<
+      string,
+      unknown
+    >,
+  },
+  {
+    label: "世界観",
+    schema: worldSchema(),
+    record: emptyWorldItem("world_001", "詠唱の制約") as unknown as Record<
       string,
       unknown
     >,
@@ -123,7 +133,7 @@ describe("AIへの注意書き", () => {
 });
 
 describe("書き出すファイル一式", () => {
-  test("スキーマ4種と説明書を出す", () => {
+  test("スキーマ5種と説明書を出す", () => {
     const files = buildSchemaFiles("作品").map((file) => file.fileName);
 
     expect(files).toEqual([
@@ -132,6 +142,7 @@ describe("書き出すファイル一式", () => {
       "ability.schema.json",
       "organization.schema.json",
       "location.schema.json",
+      "world.schema.json",
     ]);
   });
 

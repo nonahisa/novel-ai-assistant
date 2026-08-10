@@ -4,6 +4,11 @@ import type { Character } from "../models/character";
 import type { Ability, AbilitySystem } from "../models/ability";
 import type { Location } from "../models/location";
 import { membersOf, type Organization } from "../models/organization";
+import {
+  WORLD_CATEGORIES,
+  WORLD_CATEGORY_LABELS,
+  type WorldItem,
+} from "../models/world";
 import type { AiNote, AiNoteSource } from "../models/aiNote";
 import { CharacterStore } from "../core/characterStore";
 import {
@@ -11,6 +16,7 @@ import {
   createAbilityStore,
   createLocationStore,
   createOrganizationStore,
+  createWorldStore,
 } from "../core/abilityStore";
 import type { SettingsStore } from "../core/settingsStore";
 import {
@@ -18,6 +24,7 @@ import {
   applyCharacterEdits,
   applyLocationEdits,
   applyOrganizationEdits,
+  applyWorldItemEdits,
   appendAiNote,
   removeAiNote,
   toRecordEdits,
@@ -31,6 +38,7 @@ import {
   describeCharacter,
   describeLocation,
   describeOrganization,
+  describeWorldItem,
   KIND_LABELS,
   type SettingsKind,
 } from "../core/settingsSummary";
@@ -40,6 +48,7 @@ import {
   buildCharacterListItems,
   buildLocationListItems,
   buildOrganizationListItems,
+  buildWorldListItems,
   type SettingsListItem,
 } from "../core/settingsList";
 import {
@@ -49,6 +58,7 @@ import {
 } from "../core/mentionExcerpts";
 import { loadExcerptSources } from "../core/manuscriptSources";
 import { expandNameVariants } from "../core/termIndex";
+import { evidencePhrases } from "../core/groundedEvidence";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
 import {
@@ -85,7 +95,7 @@ import { logFailure } from "../core/logger";
  */
 
 /** パネルが扱う設定レコード。種別が増えるたびに union を書き足さないための別名 */
-type SettingsRecord = Character | Ability | Organization | Location;
+type SettingsRecord = Character | Ability | Organization | Location | WorldItem;
 
 /** 作品ごとに1枚だけ開く。同じ作品で何枚も開いても混乱するだけ */
 const openPanels = new Map<string, SettingsPanel>();
@@ -125,7 +135,15 @@ interface DetailField {
    * 値は入なら "1"、切なら空文字で受け渡す。
    */
   check?: boolean;
+  /** 決まった値から選ぶ項目。画面では選択肢として出す */
+  choices?: Array<{ value: string; label: string }>;
 }
+
+/** 世界観の分類。画面には日本語の見出しを出し、保存するのは英字のキー */
+const WORLD_CATEGORY_CHOICES = WORLD_CATEGORIES.map((category) => ({
+  value: category,
+  label: WORLD_CATEGORY_LABELS[category],
+}));
 
 interface DetailView {
   kind: SettingsKind;
@@ -149,6 +167,7 @@ export class SettingsPanel {
   private readonly abilityStore: SettingsStore<Ability>;
   private readonly locationStore: SettingsStore<Location>;
   private readonly organizationStore: SettingsStore<Organization>;
+  private readonly worldStore: SettingsStore<WorldItem>;
   private readonly systemStore: AbilitySystemStore;
   private readonly customFieldStore: CustomFieldStore;
 
@@ -156,6 +175,7 @@ export class SettingsPanel {
   private abilities: Ability[] = [];
   private locations: Location[] = [];
   private organizations: Organization[] = [];
+  private worldItems: WorldItem[] = [];
   private abilitySystem: AbilitySystem | undefined;
   private customFields: CustomFieldDefinition[] = [];
   private loadErrors: Array<{ file: string; message: string }> = [];
@@ -175,6 +195,7 @@ export class SettingsPanel {
     this.abilityStore = createAbilityStore(work);
     this.locationStore = createLocationStore(work);
     this.organizationStore = createOrganizationStore(work);
+    this.worldStore = createWorldStore(work);
     this.systemStore = new AbilitySystemStore(work);
     this.customFieldStore = new CustomFieldStore(work);
 
@@ -232,16 +253,19 @@ export class SettingsPanel {
     const loadedAbilities = await this.abilityStore.loadAll();
     const loadedLocations = await this.locationStore.loadAll();
     const loadedOrganizations = await this.organizationStore.loadAll();
+    const loadedWorld = await this.worldStore.loadAll();
 
     this.characters = loadedCharacters.characters;
     this.abilities = loadedAbilities.records;
     this.locations = loadedLocations.records;
     this.organizations = loadedOrganizations.records;
+    this.worldItems = loadedWorld.records;
     this.loadErrors = [
       ...loadedCharacters.errors,
       ...loadedAbilities.errors,
       ...loadedLocations.errors,
       ...loadedOrganizations.errors,
+      ...loadedWorld.errors,
     ];
 
     // 能力体系が壊れていても、人物と場所は読めるので画面は出す
@@ -275,6 +299,7 @@ export class SettingsPanel {
         this.characters
       ),
       location: buildLocationListItems(this.locations),
+      world: buildWorldListItems(this.worldItems),
     };
   }
 
@@ -289,6 +314,7 @@ export class SettingsPanel {
     if (kind === "organization") {
       return this.organizations.find((item) => item.id === id);
     }
+    if (kind === "world") return this.worldItems.find((item) => item.id === id);
     return this.locations.find((item) => item.id === id);
   }
 
@@ -405,6 +431,36 @@ export class SettingsPanel {
       };
     }
 
+    if (kind === "world") {
+      const item = record as WorldItem;
+      return {
+        kind,
+        id,
+        name: item.name,
+        autoGenerated: item.autoGenerated,
+        readOnly: [
+          { label: "登場話", value: formatChapters(item.appearedChapters) },
+          { label: "抽出根拠", value: item.evidence ?? "" },
+          ...conflictLines(item.conflicts),
+        ].filter((entry) => entry.value),
+        fields: [
+          field("name", "見出し（15字以内）", item.name),
+          // 分類は決まった7種。自由入力にすると綴りの揺れで
+          // 資料の節が増え、読み込み時の検証でも落ちる
+          choiceField("category", "分類", item.category, WORLD_CATEGORY_CHOICES),
+          field(
+            "aliases",
+            "別の言い方（読点区切り）",
+            item.aliases.join("、")
+          ),
+          field("description", "内容", item.description, true),
+          field("authorNotes", "作者メモ", item.authorNotes, true),
+          field("exportNote", "資料用の補足", item.exportNote, true),
+        ],
+        aiNotes: withRenderedNotes(item.aiNotes),
+      };
+    }
+
     const location = record as Location;
     return {
       kind,
@@ -508,6 +564,9 @@ export class SettingsPanel {
     if (kind === "organization") {
       return applyOrganizationEdits(record as Organization, edits, options);
     }
+    if (kind === "world") {
+      return applyWorldItemEdits(record as WorldItem, edits, options);
+    }
     return applyLocationEdits(record as Location, edits, options);
   }
 
@@ -527,6 +586,10 @@ export class SettingsPanel {
     }
     if (kind === "organization") {
       await this.organizationStore.saveAll([record as Organization]);
+      return;
+    }
+    if (kind === "world") {
+      await this.worldStore.saveAll([record as WorldItem]);
       return;
     }
     await this.locationStore.saveAll([record as Location]);
@@ -569,7 +632,7 @@ export class SettingsPanel {
     const resolved = await ensureConfigured(this.registry);
     if (!resolved) return;
 
-    const excerpts = await this.excerptsFor(record);
+    const excerpts = await this.excerptsFor(kind, record);
     const prompt = buildEnrichPrompt({
       workTitle: this.work.title,
       kind,
@@ -676,7 +739,7 @@ export class SettingsPanel {
 
     const key = `${kind}:${id}`;
     const history = this.chatHistory.get(key) ?? [];
-    const excerpts = await this.excerptsFor(record);
+    const excerpts = await this.excerptsFor(kind, record);
 
     const prompt = buildSettingsChatPrompt({
       workTitle: this.work.title,
@@ -755,11 +818,13 @@ export class SettingsPanel {
         membersOf(organization, this.characters)
       );
     }
+    if (kind === "world") return describeWorldItem(record as WorldItem);
     return describeLocation(record as Location);
   }
 
   /** その設定が出てくる場面を本文から集める */
   private async excerptsFor(
+    kind: SettingsKind,
     record: SettingsRecord
   ): Promise<MentionExcerpt[]> {
     if (!this.excerptSources) {
@@ -781,7 +846,7 @@ export class SettingsPanel {
     // 広げないと、その人物の場面がほとんど集まらない
     return collectMentionExcerpts(
       this.excerptSources,
-      expandNameVariants([record.name, ...record.aliases])
+      searchTermsFor(kind, record)
     );
   }
 
@@ -885,6 +950,33 @@ function checkField(
   on: boolean
 ): DetailField {
   return { key, label, value: on ? "1" : "", multiline: false, check: true };
+}
+
+/**
+ * 本文から場面を集めるときの検索語。
+ *
+ * **世界観だけは名前で引けない。** 見出し（「詠唱の制約」）は
+ * こちらが付けた言葉で、本文には出てこない。名前だけで引くと
+ * 場面が1つも集まらず、相談も項目の充実も材料なしで動くことになる。
+ * 逐語引用である evidence を手掛かりにする。
+ */
+export function searchTermsFor(
+  kind: SettingsKind,
+  record: { name: string; aliases: string[]; evidence?: string | null }
+): string[] {
+  const names = expandNameVariants([record.name, ...record.aliases]);
+  if (kind !== "world") return names;
+  return [...names, ...evidencePhrases(record.evidence)];
+}
+
+/** 決まった値から選ぶ項目 */
+function choiceField(
+  key: keyof RecordEdits,
+  label: string,
+  value: string,
+  choices: Array<{ value: string; label: string }>
+): DetailField {
+  return { key, label, value, multiline: false, choices };
 }
 
 /** 作者が足した項目の入力欄 */

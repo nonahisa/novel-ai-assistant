@@ -6,15 +6,18 @@ import {
   validateExtractedAbilities,
   validateExtractedLocations,
   validateExtractedOrganizations,
+  validateExtractedWorldItems,
   type RejectedSettingCandidate,
   type AcceptedAbilityCandidate,
   type AcceptedLocationCandidate,
   type AcceptedOrganizationCandidate,
+  type AcceptedWorldCandidate,
 } from "../core/settingsExtractionValidation";
 import {
   mergeExtractedAbilities,
   mergeExtractedLocations,
   mergeExtractedOrganizations,
+  mergeExtractedWorldItems,
   organizationsFromAffiliations,
   type SettingMergeCandidate,
 } from "../core/settingsMerge";
@@ -23,10 +26,12 @@ import {
   createAbilityStore,
   createLocationStore,
   createOrganizationStore,
+  createWorldStore,
 } from "../core/abilityStore";
 import type { Ability, AbilitySystem } from "../models/ability";
 import type { Location } from "../models/location";
 import type { Organization } from "../models/organization";
+import type { WorldItem } from "../models/world";
 
 /**
  * 人物抽出と同じAI応答から、能力と場所を取り出して保存する。
@@ -42,6 +47,8 @@ export interface SettingsExtractionCounts {
   locationsUpdated: number;
   organizationsAdded: number;
   organizationsUpdated: number;
+  worldAdded: number;
+  worldUpdated: number;
   rejected: RejectedSettingCandidate[];
   conflicts: number;
   mergeCandidates: SettingMergeCandidate[];
@@ -55,12 +62,14 @@ export interface SettingsPersistResult {
   savedAbilities: number;
   savedLocations: number;
   savedOrganizations: number;
+  savedWorld: number;
 }
 
 export class SettingsExtractionAccumulator {
   private readonly abilities: AcceptedAbilityCandidate[] = [];
   private readonly locations: AcceptedLocationCandidate[] = [];
   private readonly organizations: AcceptedOrganizationCandidate[] = [];
+  private readonly worldItems: AcceptedWorldCandidate[] = [];
   /**
    * 人物側で読み取れた所属。
    * AIは affiliation に組織名を入れておきながら organizations には
@@ -124,6 +133,23 @@ export class SettingsExtractionAccumulator {
     return [...new Set(names)];
   }
 
+  /**
+   * 既知の世界観の見出し。
+   *
+   * 渡さないと、モデルは同じ事柄を毎チャンク書いてくる。
+   * 見出しが揃えばマージで1件にまとまるが、揃わなければ
+   * 「通貨の単位」「お金の単位」のように別項目として増え続ける。
+   */
+  knownWorldNames(existing: WorldItem[]): string[] {
+    const names = [
+      ...existing.flatMap((item) => [item.name, ...item.aliases]),
+      ...this.worldItems.map((item) => item.data.name),
+    ]
+      .map((name) => name.trim())
+      .filter(Boolean);
+    return [...new Set(names)];
+  }
+
   currentAbilityTerm(): string | null {
     return this.abilityTerm;
   }
@@ -164,6 +190,10 @@ export class SettingsExtractionAccumulator {
     this.organizations.push(...organizations.accepted);
     this.rejected.push(...organizations.rejected);
 
+    const worldItems = validateExtractedWorldItems(raw.worldview, chunk);
+    this.worldItems.push(...worldItems.accepted);
+    this.rejected.push(...worldItems.rejected);
+
     for (const character of result.characters ?? []) {
       const affiliation = character.affiliation?.trim();
       if (affiliation) this.affiliations.add(affiliation);
@@ -181,6 +211,7 @@ export class SettingsExtractionAccumulator {
     const abilityStore = createAbilityStore(work);
     const locationStore = createLocationStore(work);
     const organizationStore = createOrganizationStore(work);
+    const worldStore = createWorldStore(work);
 
     const existingAbilities =
       this.abilities.length > 0
@@ -195,6 +226,9 @@ export class SettingsExtractionAccumulator {
     const existingOrganizations = hasOrganizations
       ? (await organizationStore.loadAll()).records
       : [];
+
+    const existingWorld =
+      this.worldItems.length > 0 ? (await worldStore.loadAll()).records : [];
 
     const abilityMerge = mergeExtractedAbilities(
       existingAbilities,
@@ -214,6 +248,8 @@ export class SettingsExtractionAccumulator {
       organizationMerge.organizations,
       [...this.affiliations]
     );
+
+    const worldMerge = mergeExtractedWorldItems(existingWorld, this.worldItems);
 
     const changedAbilities = abilityMerge.abilities.filter((ability) =>
       abilityMerge.changedIds.includes(ability.id)
@@ -238,6 +274,12 @@ export class SettingsExtractionAccumulator {
     if (changedOrganizations.length > 0) {
       await organizationStore.saveAll(changedOrganizations);
     }
+    const changedWorldItems = worldMerge.items.filter((item) =>
+      worldMerge.changedIds.includes(item.id)
+    );
+    if (changedWorldItems.length > 0) {
+      await worldStore.saveAll(changedWorldItems);
+    }
 
     // 総称や規則が読み取れた場合だけ体系の設定を書く
     if (this.abilityTerm || this.abilityDescription || this.rules.size > 0) {
@@ -253,17 +295,21 @@ export class SettingsExtractionAccumulator {
         organizationsAdded:
           organizationMerge.added.length + fromAffiliations.added.length,
         organizationsUpdated: organizationMerge.updated.length,
+        worldAdded: worldMerge.added.length,
+        worldUpdated: worldMerge.updated.length,
         rejected: this.rejected,
         conflicts:
           abilityMerge.conflicts.length +
           locationMerge.conflicts.length +
-          organizationMerge.conflicts.length,
+          organizationMerge.conflicts.length +
+          worldMerge.conflicts.length,
         mergeCandidates: abilityMerge.mergeCandidates,
         abilityTerm: this.abilityTerm,
       },
       savedAbilities: changedAbilities.length,
       savedLocations: changedLocations.length,
       savedOrganizations: changedOrganizations.length,
+      savedWorld: changedWorldItems.length,
     };
   }
 

@@ -13,7 +13,7 @@ import { SUMMARY_MAX_CHARS } from "../core/summaryLimit";
  * プロンプトを変更したら version を上げること。
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
-export const CHARACTER_EXTRACT_VERSION = "2.8";
+export const CHARACTER_EXTRACT_VERSION = "2.9";
 
 export const BASE_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 
@@ -40,6 +40,8 @@ export interface CharacterExtractInput {
   knownLocationNames?: string[];
   /** 既知の組織名。同一組織の判定に使う */
   knownOrganizationNames?: string[];
+  /** 既知の世界観の見出し。同じ内容を繰り返し出させないために使う */
+  knownWorldNames?: string[];
   /** 既に決まっている能力の総称（「魔法」「スキル」等）。未確定なら省略 */
   abilityTerm?: string;
 }
@@ -62,6 +64,10 @@ export function buildCharacterExtractPrompt(
   const knownOrganizations =
     input.knownOrganizationNames && input.knownOrganizationNames.length > 0
       ? input.knownOrganizationNames.join("、")
+      : "（まだ登録されていません）";
+  const knownWorld =
+    input.knownWorldNames && input.knownWorldNames.length > 0
+      ? input.knownWorldNames.join("、")
       : "（まだ登録されていません）";
   const abilityTermNote = input.abilityTerm
     ? `この作品では能力を「${input.abilityTerm}」と総称します。abilitySystem.abilityTerm には同じ語を使ってください。`
@@ -86,6 +92,9 @@ ${knownOrganizations}
 
 【既知の場所】（同一場所の判定に使用）
 ${knownLocations}
+
+【既知の世界観】（同じ内容を繰り返さないために使用）
+${knownWorld}
 
 【登場人物の抽出ルール】
 - entityType で候補を person / group / location / unknown に分類すること。characters に
@@ -217,7 +226,10 @@ ${knownLocations}
 3. description に中身を書くこと。本文から読み取れる範囲に限る。
 4. **1話かぎりの出来事は入れないこと。** 「第3話で城が燃えた」は出来事であり、
    世界観ではない。「城は木造で燃えやすい」なら世界観である。
-5. 既に登録されている世界観と同じ内容は出さないこと。
+5. 【既知の世界観】に挙がっている内容は出さないこと。
+   同じ事柄に本文で新しい情報が加わった場合だけ、同じ見出しで出すこと。
+6. evidence には、その項目の根拠になる本文の一節を**そのまま**入れること。
+   世界観の見出しは本文に出てこない言葉なので、**引用に見出しを含める必要はない**。
 
 【すべてに共通のルール】
 - reading（読み仮名）は、**名前に漢字が含まれる場合だけ**ひらがなで書くこと。
@@ -228,6 +240,7 @@ ${knownLocations}
   一覧で名前の下に並べるための1行なので、詳細は他の項目に分けて書く。
 - 各レコードには、本文からそのまま抜き出した短い evidence を必ず付けること。
   evidence は説明や要約ではなく、その名称を含む逐語引用にすること。
+  （世界観だけは例外で、見出しを含まない引用でよい。上の世界観の規則を参照）
 - 該当するものが本文になければ、空配列を返すこと。無理に埋めないこと。
 
 【出力形式】
@@ -474,6 +487,20 @@ export interface ExtractedLocation {
   evidence?: string | null;
 }
 
+/**
+ * AIから返る世界観（P-03）。
+ *
+ * name は本文の語ではなく、こちらが付けさせる短い見出しである
+ * （「詠唱の制約」）。そのため**名前が本文に実在するかは確かめられない**。
+ * 照合できるのは evidence の逐語一致だけになる。
+ */
+export interface ExtractedWorldItem {
+  name: string;
+  category?: string | null;
+  description?: string | null;
+  evidence?: string | null;
+}
+
 /** AIから返る能力体系。総称はジャンルで変わるため本文から推定させる */
 export interface ExtractedAbilitySystem {
   abilityTerm?: string | null;
@@ -486,6 +513,7 @@ export interface CharacterExtractResult {
   abilities?: ExtractedAbility[];
   organizations?: ExtractedOrganization[];
   locations?: ExtractedLocation[];
+  worldview?: ExtractedWorldItem[];
   abilitySystem?: ExtractedAbilitySystem;
   confidence?: string;
 }

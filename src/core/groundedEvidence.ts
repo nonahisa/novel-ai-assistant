@@ -66,6 +66,34 @@ export function evidenceSegments(
     .filter((segment) => segment.length >= 4);
 }
 
+/**
+ * 本文を検索するための語を evidence から作る。
+ *
+ * 世界観の見出し（「詠唱の制約」）は**本文に出てこない言葉**なので、
+ * 名前で本文を引くと場面が1つも集まらず、AIへの相談も項目の充実も
+ * 材料なしで動くことになる。逐語引用である evidence を手掛かりにする。
+ *
+ * 照合用の `evidenceSegments` と違い、**空白を落とさない**。
+ * こちらは本文そのものを検索するので、表記を変えると一致しなくなる。
+ */
+export function evidencePhrases(
+  evidence: string | null | undefined,
+  minLength = 6,
+  limit = 3
+): string[] {
+  if (!evidence) return [];
+  return evidence
+    .replace(/<0x[0-9A-Fa-f]{2}>/gu, "")
+    .split(/[\r\n。！？!?、,]+/u)
+    .map((segment) =>
+      segment.replace(/^[「『"'“”‘’（(\s…]+|[」』"'“”‘’）)\s…]+$/gu, "")
+    )
+    .filter((segment) => segment.length >= minLength)
+    // 長い断片ほど誤一致しにくい
+    .sort((a, b) => b.length - a.length)
+    .slice(0, limit);
+}
+
 /** チャンクが対応する話数を列挙する */
 export function chaptersForChunk(chunk: Chunk): number[] {
   const start = chunk.chapterStart;

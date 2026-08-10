@@ -3,6 +3,7 @@ import type { Ability, AbilitySystem } from "../models/ability";
 import type { Location } from "../models/location";
 import type { Organization } from "../models/organization";
 import type { CustomFieldDefinition } from "../models/customField";
+import { WORLD_CATEGORY_LABELS, type WorldItem } from "../models/world";
 import { formatChapters } from "./settingsMarkdown";
 
 /**
@@ -13,14 +14,24 @@ import { formatChapters } from "./settingsMarkdown";
  * 肝心の内容が埋もれる。値の入っている項目だけを並べる。
  */
 
-/** 組織は場所の手前に置く。人物の所属から辿る流れに合わせる */
-export type SettingsKind = "character" | "ability" | "organization" | "location";
+/**
+ * 組織は場所の手前に置く。人物の所属から辿る流れに合わせる。
+ * 世界観は末尾に置く。個々の人物・場所を見たあとに読むものであり、
+ * 探し物として開かれる回数がいちばん少ない。
+ */
+export type SettingsKind =
+  | "character"
+  | "ability"
+  | "organization"
+  | "location"
+  | "world";
 
 export const SETTINGS_KINDS: SettingsKind[] = [
   "character",
   "ability",
   "organization",
   "location",
+  "world",
 ];
 
 export const KIND_LABELS: Record<SettingsKind, string> = {
@@ -28,6 +39,7 @@ export const KIND_LABELS: Record<SettingsKind, string> = {
   ability: "能力",
   organization: "組織",
   location: "場所",
+  world: "世界観",
 };
 
 export function describeCharacter(
@@ -148,6 +160,16 @@ export function describeLocation(location: Location): string {
   push(lines, "説明", location.description);
   push(lines, "登場話", formatChapters(location.appearedChapters));
   push(lines, "作者メモ", location.authorNotes);
+  return lines.join("\n");
+}
+
+export function describeWorldItem(item: WorldItem): string {
+  const lines: string[] = [`見出し: ${item.name}`];
+  push(lines, "分類", WORLD_CATEGORY_LABELS[item.category]);
+  push(lines, "別の言い方", item.aliases.join("、"));
+  push(lines, "内容", item.description);
+  push(lines, "登場話", formatChapters(item.appearedChapters));
+  push(lines, "作者メモ", item.authorNotes);
   return lines.join("\n");
 }
 

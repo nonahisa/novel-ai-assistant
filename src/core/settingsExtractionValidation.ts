@@ -4,8 +4,18 @@ import type {
   ExtractedAbilitySystem,
   ExtractedLocation,
   ExtractedOrganization,
+  ExtractedWorldItem,
 } from "../prompts/characterExtract";
-import { isGroundedInChunk, chaptersForChunk } from "./groundedEvidence";
+import {
+  isGroundedInChunk,
+  chaptersForChunk,
+  evidenceSegments,
+  normalizeForComparison,
+} from "./groundedEvidence";
+import { WORLD_CATEGORIES, type WorldCategory } from "../models/world";
+// 「（記述なし）」のような不在を述べる文の判定は人物側と共有する。
+// 片方だけ直しても、もう片方から同じ文言が入り込む
+import { isMeaningfulValue } from "./characterExtractionValidation";
 
 /**
  * 能力・組織・場所のAI出力を検証する。
@@ -19,6 +29,7 @@ export type SettingRejectionReason =
   | "invalid_name"
   | "not_an_ability"
   | "not_a_place"
+  | "not_worldview"
   | "ungrounded";
 
 export interface RejectedSettingCandidate {
@@ -56,7 +67,23 @@ export interface OrganizationValidationResult {
   rejected: RejectedSettingCandidate[];
 }
 
+export interface AcceptedWorldCandidate {
+  data: ExtractedWorldItem;
+  /** 分類は文字列で来るので、ここで既定の7種へ寄せておく */
+  category: WorldCategory;
+  chapters: number[];
+}
+
+export interface WorldValidationResult {
+  accepted: AcceptedWorldCandidate[];
+  rejected: RejectedSettingCandidate[];
+}
+
 const MAX_NAME_LENGTH = 40;
+/** 世界観の見出しの上限。プロンプトは15字、スキーマは20字で指示している */
+const WORLD_NAME_MAX_LENGTH = 20;
+/** 話数を名指しした記述。世界の有り様ではなく、その回の出来事である */
+const EPISODE_REFERENCE_PATTERN = /第[0-9０-９]+話/u;
 const SENTENCE_PUNCTUATION = /[、。，,.！？!?；;：:\r\n]/u;
 const PLACEHOLDER_NAME_PATTERN =
   /^(null|undefined|不明|なし|n\/?a|none|その他|特になし)$/i;
@@ -276,6 +303,112 @@ export function validateExtractedOrganizations(
   }
 
   return { accepted, rejected };
+}
+
+/**
+ * 世界観の抽出結果を検証する。
+ *
+ * **他の種別と違い、名前が本文に実在するかは確かめない。**
+ * 世界観の name は本文の語ではなく、こちらが付けさせた見出し
+ * （「詠唱の制約」）である。名前の一致を求めると、正しく抽出できた
+ * 項目まですべて落ちる。会話文を根拠にした人物が構造的に全滅した
+ * 2026-08-07 の不具合と同じ形になるため、evidence の逐語一致だけを見る。
+ */
+export function validateExtractedWorldItems(
+  raw: unknown,
+  chunk: Chunk
+): WorldValidationResult {
+  const accepted: AcceptedWorldCandidate[] = [];
+  const rejected: RejectedSettingCandidate[] = [];
+  if (!Array.isArray(raw)) return { accepted, rejected };
+
+  const chapters = chaptersForChunk(chunk);
+  const normalizedChunk = normalizeForComparison(chunk.text);
+
+  for (const entry of raw) {
+    if (!isRecord(entry) || typeof entry.name !== "string") {
+      rejected.push({ name: null, reason: "invalid_shape" });
+      continue;
+    }
+    const item = normalizeExtractedWorldItem(entry);
+    if (!isValidWorldName(item.name)) {
+      rejected.push({ name: item.name, reason: "invalid_name" });
+      continue;
+    }
+    // 中身の無い見出しだけを資料に並べても、作者には何も伝わらない
+    if (!isMeaningfulValue(item.description)) {
+      rejected.push({ name: item.name, reason: "not_worldview" });
+      continue;
+    }
+    if (isEventDescription(item.name, item.description)) {
+      rejected.push({ name: item.name, reason: "not_worldview" });
+      continue;
+    }
+    if (
+      !evidenceSegments(item.evidence).some((segment) =>
+        normalizedChunk.includes(segment)
+      )
+    ) {
+      rejected.push({ name: item.name, reason: "ungrounded" });
+      continue;
+    }
+    accepted.push({
+      data: item,
+      category: toWorldCategory(item.category),
+      chapters: [...chapters],
+    });
+  }
+
+  return { accepted, rejected };
+}
+
+export function normalizeExtractedWorldItem(
+  raw: Record<string, unknown>
+): ExtractedWorldItem {
+  return {
+    name: typeof raw.name === "string" ? raw.name.trim() : "",
+    // プロンプトに項目を足したら、必ずここにも足すこと
+    category: nullableString(raw.category),
+    description: nullableString(raw.description),
+    evidence: nullableString(raw.evidence),
+  };
+}
+
+/**
+ * 分類を既定の7種へ寄せる。
+ *
+ * **知らない値でも項目そのものは捨てない。** 分類は資料の見出しを
+ * 決めるだけで、中身の正しさとは関係がない。捨てると本文から読み取れた
+ * 内容まで失われるが、分類の取り違えは作者が画面から直せる。
+ */
+export function toWorldCategory(value: string | null | undefined): WorldCategory {
+  const text = value?.trim().toLowerCase();
+  const matched = WORLD_CATEGORIES.find((category) => category === text);
+  // term（固有の用語）は分類の受け皿として使う
+  return matched ?? "term";
+}
+
+/** 世界観の見出しとして通してよいか。見出しなので短いはず */
+export function isValidWorldName(name: string): boolean {
+  if (!isValidSettingName(name)) return false;
+  if (name.length > WORLD_NAME_MAX_LENGTH) return false;
+  if (DEMONSTRATIVE_PATTERN.test(name)) return false;
+  return true;
+}
+
+/**
+ * 世界観ではなく物語の出来事か。
+ *
+ * 「第3話で城が燃えた」は出来事であり、世界観ではない。
+ * ただし判定は控えめにする。「〜が禁じられた」のように
+ * 過去形でも世界の決まりを述べている文はいくらでもあるため、
+ * **話数を名指ししている場合だけ**を出来事とみなす。
+ */
+export function isEventDescription(
+  name: string,
+  description: string | null | undefined
+): boolean {
+  return EPISODE_REFERENCE_PATTERN.test(`${name} ${description ?? ""}`);
 }
 
 export function normalizeExtractedOrganization(

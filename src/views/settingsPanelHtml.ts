@@ -280,13 +280,15 @@ button.secondary {
 <script nonce="${nonce}">
 (function () {
   const vscode = acquireVsCodeApi();
-  // 組織は場所の手前に置く。人物の所属から辿る流れに合わせる
-  const KINDS = ["character", "ability", "organization", "location"];
+  // 組織は場所の手前に置く。人物の所属から辿る流れに合わせる。
+  // 世界観は末尾。個々の設定を見たあとに読むもので、探し物としては開かれにくい
+  const KINDS = ["character", "ability", "organization", "location", "world"];
   const KIND_LABELS = {
     character: "登場人物",
     ability: "能力",
     organization: "組織",
     location: "場所",
+    world: "世界観",
   };
 
   let groups = {};
@@ -317,6 +319,8 @@ button.secondary {
       "例：この組織は何を目的に動いていますか？／内部の力関係",
     location:
       "例：この場所はどんな雰囲気で描かれていますか？／誰が出入りしているか",
+    world:
+      "例：この決まりは誰にでも当てはまりますか？／例外が描かれている場面",
   };
   /**
    * モブの区画を開いているか。
@@ -508,6 +512,21 @@ button.secondary {
         box.checked = field.value === "1";
         inputs[field.key] = box;
         el.detail.appendChild(checkbox(field.label, box));
+        continue;
+      }
+      // 決まった値から選ぶ項目は選択肢で出す。手入力にすると
+      // 綴りの揺れた値が保存され、読み込み時の検証で落ちる
+      if (field.choices) {
+        const select = document.createElement("select");
+        for (const choice of field.choices) {
+          const option = document.createElement("option");
+          option.value = choice.value;
+          option.textContent = choice.label;
+          if (choice.value === field.value) option.selected = true;
+          select.appendChild(option);
+        }
+        inputs[field.key] = select;
+        el.detail.appendChild(labelled(field.label, select));
         continue;
       }
       const control = document.createElement(field.multiline ? "textarea" : "input");
