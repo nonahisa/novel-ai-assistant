@@ -1,5 +1,5 @@
 /**
- * 競合マーカーの解析（設計書3.5.4）。
+ * 競合マーカーの解析（設計書5.5.4）。
  *
  * 同一人物が環境を渡り歩いて書くため、「どちらが正しいか」は
  * 本人が見れば分かる。機械的なマージを試みるより、
@@ -154,7 +154,7 @@ function endLineOf(lines: string[], startLine: number): number {
  *
  * 判断に迷う場合、片方を消すより両方残す方が安全である。
  * 原稿は失われた時の損害が大きく、あとから統合する手間の方が
- * はるかに軽い（設計書3.5.4）。
+ * はるかに軽い（設計書5.5.4）。
  */
 export function sideFileName(fileName: string, label: string): string {
   const dot = fileName.lastIndexOf(".");

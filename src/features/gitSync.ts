@@ -34,7 +34,7 @@ export function canFetch(status: GitSyncStatus): boolean {
 }
 
 /**
- * GitHub同期の見張り（設計書3.5.1）。
+ * GitHub同期の見張り（設計書5.5.1）。
  *
  * 競合は「二人の意見がぶつかった」のではなく「同期を忘れて二重に書いた」
  * 事故なので、正しい対応は解決ではなく**予防**である。
@@ -82,7 +82,7 @@ export class GitSyncMonitor implements vscode.Disposable {
 
   /**
    * Gitの操作（pull / checkout / merge）でファイルが入れ替わったとき。
-   * 走査結果と用語の索引を作り直すのに使う（設計書3.5.8）。
+   * 走査結果と用語の索引を作り直すのに使う（設計書5.5.8）。
    */
   readonly onDidChangeFiles = this.filesChanged.event;
 
@@ -178,7 +178,7 @@ export class GitSyncMonitor implements vscode.Disposable {
   }
 
   /**
-   * Gitの操作でファイルが入れ替わったかを見る（設計書3.5.8）。
+   * Gitの操作でファイルが入れ替わったかを見る（設計書5.5.8）。
    *
    * 拡張機能からの取り込みだけでなく、**別のGitクライアントでの
    * pull / checkout / merge も拾う。** 作者は出先でスマートフォンから
@@ -217,7 +217,7 @@ export class GitSyncMonitor implements vscode.Disposable {
    * 入れ替わったファイルを知らせる。
    *
    * **AI処理は自動で実行しない。** 費用と時間がかかるので、
-   * 実行するかは作者が決める（設計書3.5.8）。
+   * 実行するかは作者が決める（設計書5.5.8）。
    */
   private async notifyFilesChanged(
     work: WorkEntry,

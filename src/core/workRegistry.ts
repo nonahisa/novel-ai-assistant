@@ -28,7 +28,7 @@ export class WorkRegistry {
   async initialize(): Promise<void> {
     const failedTitles: string[] = [];
     // キャッシュを同期するかは設定で変えられる。起動のたびに突き合わせ、
-    // 切り替えられていれば `.gitignore` へ打ち消し行を足す（設計書3.5.7）
+    // 切り替えられていれば `.gitignore` へ打ち消し行を足す（設計書5.5.7）
     const syncCache = isCacheSyncEnabled();
     for (const work of this.list()) {
       try {
@@ -139,7 +139,7 @@ export class WorkRegistry {
  *
  * 新規作成時のひな形と、既存フォルダーを登録したときの追記で同じものを使う。
  * 以前は登録時に `.novelai-recovery/` しか追記しておらず、
- * **キャッシュがGitに入ったままだった**（設計書3.5.7と食い違っていた）。
+ * **キャッシュがGitに入ったままだった**（設計書5.5.7と食い違っていた）。
  */
 export const IGNORED_PATHS = [
   ".aiwriter/cache/",
@@ -149,11 +149,11 @@ export const IGNORED_PATHS = [
   "exports/",
 ] as const;
 
-/** キャッシュの除外規則と、それを打ち消す規則（設計書3.5.7） */
+/** キャッシュの除外規則と、それを打ち消す規則（設計書5.5.7） */
 export const CACHE_IGNORE_RULE = ".aiwriter/cache/";
 export const CACHE_UNIGNORE_RULE = "!.aiwriter/cache/";
 
-/** 設定でキャッシュを同期するか。既定は同期しない（設計書3.5.7） */
+/** 設定でキャッシュを同期するか。既定は同期しない（設計書5.5.7） */
 export function isCacheSyncEnabled(): boolean {
   return vscode.workspace
     .getConfiguration("novelai")
@@ -257,7 +257,7 @@ async function ensureRecoveryIgnoreRule(
 /**
  * まだ書かれていない除外規則を返す。既にあるものは重ねて足さない。
  *
- * キャッシュだけは「同期する／しない」を切り替えられる（設計書3.5.7）ので、
+ * キャッシュだけは「同期する／しない」を切り替えられる（設計書5.5.7）ので、
  * 有無ではなく**最後に書かれている指示**で判断する。
  */
 export function missingIgnoreRules(
@@ -433,7 +433,7 @@ export async function scaffoldWorkFolder(
 
   // .gitignore（キャッシュと作業ファイルを同期対象から外す）。
   // 設定資料・IME辞書・承認待ちの更新案は、別の環境でも見たいので除外しない。
-  // キャッシュだけは設定で同期できる（設計書3.5.7）
+  // キャッシュだけは設定で同期できる（設計書5.5.7）
   const gitignore = [
     "# 小説AI執筆補助が生成する作業ファイル（再生成できるため同期しない）",
     ...missingIgnoreRules(new Uint8Array(), { syncCache: isCacheSyncEnabled() }),

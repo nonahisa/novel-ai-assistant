@@ -20,7 +20,7 @@ import { countChars, formatCount } from "../core/charCount";
 import { logFailure, showLog } from "../core/logger";
 
 /**
- * 競合の解決（設計書3.5.4）。
+ * 競合の解決（設計書5.5.4）。
  *
  * 同一人物が書いている以上「どちらが正しいか」は本人が見れば分かる。
  * 機械的なマージは試みず、**両方を並べて選ばせる**。

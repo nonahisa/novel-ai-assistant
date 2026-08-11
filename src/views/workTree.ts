@@ -90,7 +90,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
           ? ` / ⚠競合 ${stats.conflictedCount}件`
           : "";
       // GitHubとの差は「↓3 ↑2」の形で短く添える。
-      // 別の環境へ移る前に気づけるかどうかが分かれ目になる（設計書3.5.1）
+      // 別の環境へ移る前に気づけるかどうかが分かれ目になる（設計書5.5.1）
       const badge = this.syncBadge?.(work.id);
       const syncNote = badge ? ` / ${badge}` : "";
       item.description = `${stats.fileCount}ファイル / ${formatCount(

@@ -86,7 +86,8 @@ input:focus, textarea:focus, select:focus {
   outline: none;
   border-color: var(--vscode-focusBorder);
 }
-textarea { resize: vertical; min-height: 60px; }
+/* 高さを中身に合わせて広げる欄があるので、下限は小さくしておく */
+textarea { resize: vertical; min-height: 32px; }
 #list { flex: 1; overflow-y: auto; }
 #list .item {
   padding: 6px 10px;
@@ -468,6 +469,35 @@ button.secondary {
     return node;
   }
 
+  /**
+   * 中身の量に合わせて高さを変える入力欄。
+   *
+   * 行数を固定していたため、紹介文のように少し長い文章が
+   * 途中で隠れていた。書いたものが全部見えないと、
+   * 直すために毎回スクロールすることになる。
+   */
+  let pendingGrow = [];
+  function growWithContent(area) {
+    area.rows = 1;
+    // 高さを中身に合わせるので、内側でスクロールさせない。
+    // 行数を固定した他の欄（相談・下書き）はこれまでどおりスクロールする
+    area.style.overflowY = "hidden";
+    area.addEventListener("input", function () {
+      fitHeight(area);
+    });
+    // 画面に載せる前は高さを測れないので、あとでまとめて合わせる
+    pendingGrow.push(area);
+    return area;
+  }
+  function fitHeight(area) {
+    area.style.height = "auto";
+    area.style.height = area.scrollHeight + 2 + "px";
+  }
+  function applyPendingGrow() {
+    for (const area of pendingGrow) fitHeight(area);
+    pendingGrow = [];
+  }
+
   function renderDetail() {
     el.detail.replaceChildren();
     if (!detail) {
@@ -531,7 +561,9 @@ button.secondary {
       }
       const control = document.createElement(field.multiline ? "textarea" : "input");
       control.value = field.value;
-      if (field.multiline) control.rows = 3;
+      // 中身の量に合わせて高さを変える。固定の行数だと、
+      // 紹介文のように少し長い文章が途中で隠れてしまう
+      if (field.multiline) growWithContent(control);
       inputs[field.key] = control;
       el.detail.appendChild(labelled(field.label, control));
     }
@@ -631,6 +663,26 @@ button.secondary {
     });
     askRow.appendChild(askButton);
     el.detail.appendChild(askRow);
+
+    // ── 参考（食い違い・抽出根拠）
+    // 毎回読むものではないので最後に置く。上に置くと、
+    // 登場話や編集欄が画面の外へ押し出されて読みにくい
+    if (detail.reference && detail.reference.length > 0) {
+      el.detail.appendChild(heading("参考"));
+      for (const entry of detail.reference) {
+        const line = document.createElement("div");
+        line.className = "readonly";
+        const key = document.createElement("span");
+        key.className = "k";
+        key.textContent = entry.label;
+        line.appendChild(key);
+        line.appendChild(document.createTextNode(entry.value));
+        el.detail.appendChild(line);
+      }
+    }
+
+    // 高さは画面に載せてからでないと測れない
+    applyPendingGrow();
   }
 
   function renderProposal() {
@@ -689,7 +741,8 @@ button.secondary {
 
       const editor = document.createElement(item.multiline ? "textarea" : "input");
       editor.value = item.after;
-      if (item.multiline) editor.rows = 3;
+      // 提案は長いことが多い。隠れていると、何を反映するのか読めない
+      if (item.multiline) growWithContent(editor);
       // 選択と手直しを提案側へ書き戻す。再描画で元へ戻さないため
       editor.addEventListener("input", function () {
         item.after = editor.value;

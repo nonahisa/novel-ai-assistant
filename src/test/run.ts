@@ -306,7 +306,7 @@ export async function run(): Promise<void> {
   });
 
   await runCase("競合マーカーを含むファイルを文字数から除く", failures, async () => {
-    // 設計書3.5.3。マーカーと両方の版が混ざったまま数えると、
+    // 設計書5.5.3。マーカーと両方の版が混ざったまま数えると、
     // 実際より多い字数を本当の進捗として見せてしまう
     const temporaryRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), "novel-ai-assistant-conflict-scan-")
@@ -346,7 +346,7 @@ export async function run(): Promise<void> {
       assert.equal(scan.stats.conflictedCount, 1);
       assert.equal(scan.stats.totals.net, clean.counts.net);
 
-      // .gitignore にキャッシュの除外が入っていること（設計書3.5.7）
+      // .gitignore にキャッシュの除外が入っていること（設計書5.5.7）
       const ignore = await fs.readFile(
         path.join(workFolder, ".gitignore"),
         "utf8"
@@ -595,7 +595,7 @@ export async function run(): Promise<void> {
 
         const work = { ...makeWork(a), id: "work_conflict" };
 
-        // 走査が競合を見つけ、文字数から外していること（3.5.3）
+        // 走査が競合を見つけ、文字数から外していること（5.5.3）
         const scanned = await scanWork(work);
         assert.equal(scanned.stats.conflictedCount, 1);
 
