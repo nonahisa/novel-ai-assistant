@@ -16,6 +16,24 @@ import { logFailure, showLog } from "../core/logger";
 import { withProgress } from "../views/progress";
 
 /**
+ * 取りに行ける作品か。
+ *
+ * Gitを使わずに書いている作品や、リモートを設定していない作品では
+ * `git fetch` は必ず失敗する。**直しようのない失敗を毎回ログへ残すと、
+ * 本当の失敗が埋もれる。** 作者は進み具合を見るためにログを開く。
+ *
+ * `no_upstream`（`push -u` がまだ）は取りに行ってよい。
+ * リモート自体はあるので、他の環境の分を取得できる。
+ */
+export function canFetch(status: GitSyncStatus): boolean {
+  return (
+    status.kind === "tracked" ||
+    status.kind === "no_upstream" ||
+    status.kind === "detached"
+  );
+}
+
+/**
  * GitHub同期の見張り（設計書3.5.1）。
  *
  * 競合は「二人の意見がぶつかった」のではなく「同期を忘れて二重に書いた」
@@ -123,7 +141,19 @@ export class GitSyncMonitor implements vscode.Disposable {
     work: WorkEntry,
     options: { fetch: boolean; notify: boolean }
   ): Promise<GitSyncStatus> {
-    if (options.fetch && this.shouldAutoFetch(work)) {
+    // **取りに行く前に、取りに行ける作品かを確かめる。**
+    // Gitを使わずに書いている作品でもfetchを試みていたため、
+    // 起動のたびに「fatal: not a git repository」が失敗として記録されていた。
+    // 作者は進み具合を見るためにログを開くので、
+    // 直しようのない失敗が混ざると、本当の失敗が埋もれる。
+    // この確認はローカルのgitに聞くだけでネットワークには出ない
+    let status = await readSyncStatus(work.folderPath, this.options.run);
+
+    if (
+      options.fetch &&
+      canFetch(status) &&
+      this.shouldAutoFetch(work)
+    ) {
       this.lastFetchAt.set(work.id, Date.now());
       const result = await fetchRemote(work.folderPath, this.options.run);
       if (!result.ok) {
@@ -134,9 +164,10 @@ export class GitSyncMonitor implements vscode.Disposable {
           詳細: result.detail ?? "（詳細なし）",
         });
       }
+      // 取り込んだぶんを反映するので読み直す
+      status = await readSyncStatus(work.folderPath, this.options.run);
     }
 
-    const status = await readSyncStatus(work.folderPath, this.options.run);
     this.statuses.set(work.id, status);
     this.updateStatusBar();
     this.changed.fire();

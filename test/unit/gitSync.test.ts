@@ -10,8 +10,45 @@ import {
   missingIgnoreRules,
 } from "../../src/core/workRegistry";
 import { isGitAvailable, runGit } from "../../src/core/git";
+import { canFetch } from "../../src/features/gitSync";
 
 const encode = (text: string) => new TextEncoder().encode(text);
+
+describe("取りに行ける作品かの判定", () => {
+  test("Gitを使っていない作品では取りに行かない", () => {
+    // 起動のたびに「fatal: not a git repository」が失敗として記録され、
+    // 進み具合を見るために開いたログに、直しようのない失敗が混ざっていた
+    expect(canFetch({ kind: "not_a_repo" })).toBe(false);
+    expect(canFetch({ kind: "git_missing" })).toBe(false);
+  });
+
+  test("リモートが無い作品でも取りに行かない", () => {
+    // ローカルだけで履歴を取っている作品。fetchは必ず失敗する
+    expect(canFetch({ kind: "no_remote", root: "/work" })).toBe(false);
+  });
+
+  test("上流が未設定でも、リモートがあるなら取りに行く", () => {
+    // push -u がまだなだけで、別の環境の分は取得できる
+    expect(
+      canFetch({ kind: "no_upstream", root: "/work", branch: "main" })
+    ).toBe(true);
+  });
+
+  test("追跡できている作品では取りに行く", () => {
+    expect(
+      canFetch({
+        kind: "tracked",
+        root: "/work",
+        branch: "main",
+        upstream: "origin/main",
+        behind: 0,
+        ahead: 0,
+        dirty: 0,
+        unmerged: 0,
+      })
+    ).toBe(true);
+  });
+});
 
 describe("同期対象から外す規則", () => {
   test("キャッシュを必ず除外する", () => {
