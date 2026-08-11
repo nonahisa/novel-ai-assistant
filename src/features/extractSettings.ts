@@ -246,7 +246,9 @@ export class SettingsExtractionAccumulator {
     // 先に見ると、AIが説明付きで返した組織を名前だけで作ってしまう
     const fromAffiliations = organizationsFromAffiliations(
       organizationMerge.organizations,
-      [...this.affiliations]
+      [...this.affiliations],
+      // 地名を所属に書かれても組織を作らないよう、場所の一覧を渡す
+      locationMerge.locations
     );
 
     const worldMerge = mergeExtractedWorldItems(existingWorld, this.worldItems);
@@ -303,7 +305,10 @@ export class SettingsExtractionAccumulator {
           locationMerge.conflicts.length +
           organizationMerge.conflicts.length +
           worldMerge.conflicts.length,
-        mergeCandidates: abilityMerge.mergeCandidates,
+        mergeCandidates: [
+          ...abilityMerge.mergeCandidates,
+          ...worldMerge.mergeCandidates,
+        ],
         abilityTerm: this.abilityTerm,
       },
       savedAbilities: changedAbilities.length,

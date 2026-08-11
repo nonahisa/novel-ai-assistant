@@ -468,9 +468,12 @@ export async function extractCharacters(
               knownOrganizationNames: settings
                 .knownOrganizationNames(existingOrganizations)
                 .slice(0, 50),
+              // 世界観の見出しは15字以内と短く、これを渡す目的は
+              // **同じ事柄が別の見出しで増えるのを防ぐこと**そのものである。
+              // 219話の作品では50件では足りず、途中から効かなくなる
               knownWorldNames: settings
                 .knownWorldNames(existingWorld)
-                .slice(0, 50),
+                .slice(0, 150),
               abilityTerm: settings.currentAbilityTerm() ?? undefined,
             }),
             model: resolved.model,

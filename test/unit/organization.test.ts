@@ -16,6 +16,7 @@ import { describeOrganization } from "../../src/core/settingsSummary";
 import { buildOrganizationListItems } from "../../src/core/settingsList";
 import { applyOrganizationEdits } from "../../src/core/settingsEdit";
 import { emptyCharacter } from "../../src/models/character";
+import { emptyLocation } from "../../src/models/location";
 import { CHARACTER_EXTRACT_SCHEMA } from "../../src/prompts/characterExtract";
 import type { Chunk } from "../../src/core/chunker";
 
@@ -203,6 +204,20 @@ describe("人物の所属から組織を作る", () => {
 
     expect(result.organizations).toHaveLength(1);
     expect(result.added).toEqual([]);
+  });
+
+  test("場所として登録済みの名前では組織を作らない", () => {
+    // AIは所属に「王都」「スカラ子爵領」のような地名を書くことがある。
+    // この経路には検証が無く、そのまま組織レコードになっていた（実データ）
+    const result = organizationsFromAffiliations(
+      [],
+      ["王都", "第十五騎士団"],
+      [emptyLocation("loc_001", "王都")]
+    );
+
+    expect(result.organizations.map((item) => item.name)).toEqual([
+      "第十五騎士団",
+    ]);
   });
 });
 

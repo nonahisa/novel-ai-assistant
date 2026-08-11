@@ -175,6 +175,38 @@ describe("世界観のマージ", () => {
     expect(second.added).toEqual([]);
   });
 
+  test("助詞の違いだけで別項目になった組を統合候補として挙げる", () => {
+    // 実データ（教科書チート）で「戦闘における装備の価値」と
+    // 「戦闘装備の価値」が別項目になった。中身が違うので自動では統合しない
+    const merged = mergeExtractedWorldItems(
+      [],
+      [
+        incoming("戦闘における装備の価値", "最高位の装備品は高価である。", "society"),
+        incoming("戦闘装備の価値", "特殊な素材の武器は防御力の高い敵に有効。", "term"),
+      ]
+    );
+
+    expect(merged.items).toHaveLength(2);
+    expect(merged.mergeCandidates).toEqual([
+      {
+        names: ["戦闘における装備の価値", "戦闘装備の価値"],
+        reason: "same_topic",
+      },
+    ]);
+  });
+
+  test("似ているだけの別項目は候補にしない", () => {
+    const merged = mergeExtractedWorldItems(
+      [],
+      [
+        incoming("魔法の制約", "連続使用には限界がある。"),
+        incoming("通貨の単位", "銀貨が使われる。", "society"),
+      ]
+    );
+
+    expect(merged.mergeCandidates).toEqual([]);
+  });
+
   test("食い違う説明は上書きせず conflicts に残す", () => {
     const first = mergeExtractedWorldItems(
       [],

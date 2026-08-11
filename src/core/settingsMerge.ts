@@ -47,7 +47,11 @@ import { fillReading } from "./reading";
 /** 同一とみなせるか判断がつかない組。自動では統合しない */
 export interface SettingMergeCandidate {
   names: [string, string];
-  reason: "contains";
+  /**
+   * contains: 一方の名前が他方に完全に含まれる
+   * same_topic: 助詞を落とすと同じ見出しになる（世界観で使う）
+   */
+  reason: "contains" | "same_topic";
 }
 
 export interface AbilityMergeResult {
@@ -81,6 +85,7 @@ export interface WorldMergeResult {
   updated: string[];
   changedIds: string[];
   conflicts: Array<{ name: string; field: string; values: string[] }>;
+  mergeCandidates: SettingMergeCandidate[];
 }
 
 /**
@@ -153,7 +158,60 @@ export function mergeExtractedWorldItems(
     updated,
     changedIds: [...changedIds],
     conflicts,
+    mergeCandidates: findWorldMergeCandidates(result),
   };
+}
+
+/**
+ * 同じ事柄を別の見出しで書いた組を候補として挙げる。
+ *
+ * 実データ（教科書チート）で「戦闘における装備の価値」と
+ * 「戦闘装備の価値」が別項目になった。AIには毎回まったく同じ見出しを
+ * 付けることができず、【既知の世界観】を渡しても揺れる。
+ *
+ * **自動では統合しない。** 上の2件は説明の中身が違っていた
+ * （一方は「高価で権威を示す」、他方は「防御力の高い敵に有効」）。
+ * 同じ事柄の別の面を書いている場合もあり、どちらが正しいかは
+ * コードには決められない。作者に判断してもらう。
+ */
+export function findWorldMergeCandidates(
+  items: WorldItem[]
+): SettingMergeCandidate[] {
+  const candidates: SettingMergeCandidate[] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const a = items[i];
+      const b = items[j];
+      const keyA = worldTopicKey(a.name);
+      const keyB = worldTopicKey(b.name);
+      if (keyA.length === 0 || keyB.length === 0) continue;
+
+      if (keyA === keyB) {
+        candidates.push({ names: [a.name, b.name], reason: "same_topic" });
+        continue;
+      }
+      const [shorter, longer] = keyA.length <= keyB.length ? [keyA, keyB] : [keyB, keyA];
+      if (isContainedName(shorter, longer)) {
+        candidates.push({ names: [a.name, b.name], reason: "contains" });
+      }
+    }
+  }
+  return candidates;
+}
+
+/**
+ * 見出しの骨組みを取り出す。「戦闘における装備の価値」→「戦闘装備価値」
+ *
+ * 助詞や記号の違いだけで別項目になるのを見つけるためのもの。
+ * **同一判定には使わない**（`normalizeWorldItemName`）。ここまで削ると
+ * 別の事柄がぶつかることがあり、統合の根拠には弱い。
+ */
+export function worldTopicKey(name: string): string {
+  return normalizeWorldItemName(name).replace(
+    /における|による|としての|について|への|から|まで|など|の|は|が|を|に|で|と|も|や|な/g,
+    ""
+  );
 }
 
 function applyWorldItem(
@@ -382,16 +440,33 @@ export function mergeExtractedOrganizations(
  */
 export function organizationsFromAffiliations(
   existing: Organization[],
-  affiliations: string[]
+  affiliations: string[],
+  /**
+   * 場所として登録済みのもの。
+   *
+   * **同じ名前が場所にあるなら、組織は作らない。** AIは人物の所属に
+   * 「王都」「スカラ子爵領」のような地名を書くことがあり、この経路には
+   * 検証が無いので、そのまま組織レコードができてしまう（実データで発生）。
+   * 所属から作るレコードは説明も根拠も持たない**いちばん弱い記録**なので、
+   * 場所として説明付きで登録されているほうを残す。
+   * 人物側の所属の記述はそのまま残るため、情報は失われない。
+   */
+  locations: Location[] = []
 ): OrganizationMergeResult {
   const result: Organization[] = existing.map((item) => structuredClone(item));
   const added: string[] = [];
   const changedIds = new Set<string>();
+  const placeNames = new Set(
+    locations
+      .flatMap((location) => [location.name, ...location.aliases])
+      .map(normalizeOrganizationName)
+  );
 
   for (const raw of affiliations) {
     const name = raw.trim();
     if (!name) continue;
     if (findByAppellation(result, [name], normalizeOrganizationName)) continue;
+    if (placeNames.has(normalizeOrganizationName(name))) continue;
 
     const created = emptyOrganization(nextOrganizationId(result), name);
     result.push(created);
