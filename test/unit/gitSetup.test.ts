@@ -16,13 +16,17 @@ import {
   DEFAULT_BRANCH,
   commitAll,
   currentBranch,
+  describeNetworkFailure,
   hasCommitIdentity,
   initRepository,
   pushSetUpstream,
   suggestRepositoryName,
   validateRepositoryUrl,
 } from "../../src/core/gitSetup";
-import { nextSetupStep } from "../../src/features/gitOnboarding";
+import {
+  canRecordChanges,
+  nextSetupStep,
+} from "../../src/features/gitOnboarding";
 import type { GitCommandResult, GitCommandRunner } from "../../src/core/git";
 
 /** 呼ばれたコマンドを記録する差し替え口 */
@@ -126,6 +130,39 @@ describe("リポジトリ名の候補", () => {
   });
 });
 
+describe("失敗の理由を言い分ける", () => {
+  test.each([
+    "fatal: unable to access 'https://github.com/x/y.git/': Could not resolve host: github.com",
+    "ssh: connect to host github.com port 22: Network is unreachable",
+    "fatal: unable to access '...': Failed to connect to github.com port 443 after 21000 ms",
+  ])("つながらない: %s", (detail) => {
+    expect(describeNetworkFailure(detail)).toContain(
+      "インターネットにつながっていない"
+    );
+  });
+
+  test.each([
+    "remote: Support for password authentication was removed. fatal: Authentication failed for 'https://github.com/x/y.git/'",
+    "git@github.com: Permission denied (publickey).",
+    "fatal: could not read from remote repository.",
+  ])("ログインできない: %s", (detail) => {
+    expect(describeNetworkFailure(detail)).toContain("ログインができませんでした");
+  });
+
+  test("送り先が無い", () => {
+    expect(describeNetworkFailure("remote: Repository not found.")).toContain(
+      "リポジトリが見つかりません"
+    );
+  });
+
+  test("判定できないものは言い換えない（生の理由を見せる）", () => {
+    // 当てにいって外すより、gitの言い分をそのまま見せるほうが害が小さい
+    expect(describeNetworkFailure("error: pathspec 'x' did not match")).toBeUndefined();
+    expect(describeNetworkFailure(undefined)).toBeUndefined();
+    expect(describeNetworkFailure("")).toBeUndefined();
+  });
+});
+
 describe("状態に応じた次の一手", () => {
   test("リポジトリでなければ、始める操作を出す", () => {
     expect(nextSetupStep({ kind: "not_a_repo" })?.label).toContain(
@@ -160,7 +197,21 @@ describe("状態に応じた次の一手", () => {
     ).toBeUndefined();
   });
 
-  test("gitが無い環境では操作を出さない（直せないため）", () => {
-    expect(nextSetupStep({ kind: "git_missing" })).toBeUndefined();
+  test("gitが無ければ、導入の案内を出す", () => {
+    // 「見つかりません」で終わると、作者はそこから進めない
+    expect(nextSetupStep({ kind: "git_missing" })?.label).toContain(
+      "Gitを導入するには"
+    );
+  });
+});
+
+describe("変更を記録できる状態か", () => {
+  test("送り先が無くても記録できる（GitHubを使わない作者のため）", () => {
+    expect(canRecordChanges({ kind: "no_remote", root: "C:/w" })).toBe(true);
+  });
+
+  test("まだリポジトリでなければ記録できない", () => {
+    expect(canRecordChanges({ kind: "not_a_repo" })).toBe(false);
+    expect(canRecordChanges({ kind: "git_missing" })).toBe(false);
   });
 });

@@ -12,10 +12,13 @@ import {
   type GitCommandRunner,
   type GitSyncStatus,
 } from "../core/git";
+import { describeNetworkFailure } from "../core/gitSetup";
 import { logFailure, showLog } from "../core/logger";
 import { withProgress } from "../views/progress";
 import {
+  canRecordChanges,
   nextSetupStep,
+  recordChanges,
   runSetupStep,
 } from "./gitOnboarding";
 
@@ -327,8 +330,11 @@ export class GitSyncMonitor implements vscode.Disposable {
       作品: work.title,
       詳細: result.failure.detail,
     });
+    // つながらないだけなのか、設定が違うのかで、次にやることが変わる
+    const reason = describeNetworkFailure(result.failure.detail);
     const action = await vscode.window.showErrorMessage(
-      `「${work.title}」の取り込みに失敗しました。`,
+      `「${work.title}」の取り込みに失敗しました。${reason ? `
+${reason}` : ""}`,
       "ログを表示",
       "閉じる"
     );
@@ -366,9 +372,13 @@ export class GitSyncMonitor implements vscode.Disposable {
       作品: work.title,
       詳細: result.detail ?? "（詳細なし）",
     });
+    const reason = describeNetworkFailure(result.detail);
     const action = await vscode.window.showErrorMessage(
       `「${work.title}」の送信に失敗しました。` +
-        "別の環境の変更が先に送られている場合は、先に取り込んでください。",
+        (reason
+          ? `
+${reason}`
+          : "別の環境の変更が先に送られている場合は、先に取り込んでください。"),
       "ログを表示",
       "閉じる"
     );
@@ -519,6 +529,21 @@ export async function showGitSyncActions(
     items.push({ ...setup, action: "setup" });
   }
 
+  // 記録する手段が無いと、初回コミットのあと何も残せない。
+  // GitHubを使わない作者にとっては、これが唯一の使い道になる
+  if (canRecordChanges(status)) {
+    const pending = status.kind === "tracked" ? status.dirty : undefined;
+    items.push({
+      label: "$(save) 変更を記録する",
+      description:
+        pending !== undefined && pending > 0 ? `${pending}件の変更` : "",
+      detail:
+        "いまの内容を履歴に残します（コミット）。" +
+        "残しておくと、書き直す前の原稿へ戻せます。外部へは送りません。",
+      action: "commit",
+    });
+  }
+
   if (status.kind === "tracked") {
     if (status.behind > 0) {
       items.push({
@@ -558,6 +583,12 @@ export async function showGitSyncActions(
   });
   if (!picked) return;
 
+  if (picked.action === "commit") {
+    if (await recordChanges(work)) {
+      await monitor.refresh(work, { fetch: false, notify: false });
+    }
+    return;
+  }
   if (picked.action === "setup") {
     // 1手進むごとに状態が変わるので、続けて次の一手を出す
     if (await runSetupStep(work, status)) {

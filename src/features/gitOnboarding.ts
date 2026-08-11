@@ -6,6 +6,7 @@ import {
   commitAll,
   countTrackableFiles,
   currentBranch,
+  describeNetworkFailure,
   ghAvailable,
   ghCreateRepository,
   hasCommitIdentity,
@@ -35,6 +36,14 @@ export function nextSetupStep(
   status: GitSyncStatus
 ): { label: string; description: string; detail: string } | undefined {
   switch (status.kind) {
+    case "git_missing":
+      return {
+        label: "$(question) Gitを導入するには",
+        description: "同期を使わないなら不要",
+        detail:
+          "履歴と同期にはGitが要ります。導入の方法を案内します。" +
+          "**執筆・文字数・設定資料・あらすじは、Gitが無くてもすべて使えます。**",
+      };
     case "not_a_repo":
       return {
         label: "$(repo) Gitで管理を始める",
@@ -64,6 +73,79 @@ export function nextSetupStep(
   }
 }
 
+/**
+ * 「変更を記録する」を出してよい状態か。
+ *
+ * リポジトリになっていれば、送り先の有無にかかわらず記録できる。
+ * **GitHubを使わない作者にとっては、これが唯一の使い道**である。
+ */
+export function canRecordChanges(status: GitSyncStatus): boolean {
+  return (
+    status.kind === "tracked" ||
+    status.kind === "no_remote" ||
+    status.kind === "no_upstream"
+  );
+}
+
+/**
+ * いまの変更を履歴に残す（コミット）。
+ *
+ * **これが無いと、初回コミットのあと何も記録できない。**
+ * 送信（push）は記録済みのものを送る操作なので、記録する手段が無いままでは
+ * 同期そのものが動かない。
+ *
+ * メッセージはAIに書かせず、日付と件数で作る（P-14は未実装）。
+ * 記録のたびにAIを呼ぶと、料金が執筆の回数に比例してかかる。
+ */
+export async function recordChanges(
+  work: WorkEntry,
+  run: GitCommandRunner = runGit
+): Promise<boolean> {
+  const count = await countTrackableFiles(work.folderPath, run);
+  if (count === 0) {
+    vscode.window.showInformationMessage(
+      `${work.title} に記録していない変更はありません。`
+    );
+    return false;
+  }
+
+  if (!(await hasCommitIdentity(work.folderPath, run))) {
+    if (!(await askCommitIdentity(work, run))) return false;
+  }
+
+  const defaultMessage = `${formatStamp(new Date())} の執筆（${count}件）`;
+  const message = await vscode.window.showInputBox({
+    title: "この記録に付ける説明",
+    value: defaultMessage,
+    prompt: "あとから履歴を辿るときの目印になります",
+    ignoreFocusOut: true,
+    validateInput: (value) =>
+      value.trim().length === 0 ? "空にはできません。" : undefined,
+  });
+  if (!message) return false;
+
+  const committed = await commitAll(work.folderPath, message.trim(), run);
+  if (!committed.ok) {
+    reportFailure("変更の記録", committed.detail);
+    return false;
+  }
+
+  logStep(`変更を記録: ${work.title}（${count}件）`);
+  vscode.window.showInformationMessage(
+    `${count} 件の変更を記録しました。`
+  );
+  return true;
+}
+
+/** 履歴の説明に使う日時。ログと同じく端末の時刻で書く */
+function formatStamp(now: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return (
+    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
+    `${pad(now.getHours())}:${pad(now.getMinutes())}`
+  );
+}
+
 /** 「次の一手」を実行する。進んだら true */
 export async function runSetupStep(
   work: WorkEntry,
@@ -71,6 +153,9 @@ export async function runSetupStep(
   run: GitCommandRunner = runGit
 ): Promise<boolean> {
   switch (status.kind) {
+    case "git_missing":
+      await guideGitInstall();
+      return false;
     case "not_a_repo":
       return startTracking(work, run);
     case "no_remote":
@@ -79,6 +164,41 @@ export async function runSetupStep(
       return firstPush(work, status.branch, run);
     default:
       return false;
+  }
+}
+
+/**
+ * Gitの導入を案内する。
+ *
+ * **勝手にインストールしない。** 環境を変える操作であり、
+ * 管理者の権限が要ることもある。決めるのは作者である。
+ *
+ * あわせて「無くても困らない」ことを伝える。Gitは執筆に必須ではないのに、
+ * 見つからない旨だけを出していると、必要なものが欠けていると誤解させる。
+ */
+async function guideGitInstall(): Promise<void> {
+  const command = "winget install --id Git.Git -e";
+  const answer = await vscode.window.showInformationMessage(
+    "Gitが見つかりません。\n\n" +
+      "履歴を残すこと（書き直す前へ戻す）と、複数の環境で同期することにGitを使います。\n" +
+      "**執筆・文字数・設定資料・あらすじ・誤字脱字などは、Gitが無くてもすべて使えます。**\n\n" +
+      "Windowsなら、ターミナルで次を実行すると入ります。\n" +
+      command,
+    { modal: true },
+    "コマンドをコピー",
+    "配布ページを開く"
+  );
+
+  if (answer === "コマンドをコピー") {
+    await vscode.env.clipboard.writeText(command);
+    vscode.window.showInformationMessage(
+      "コピーしました。ターミナルに貼り付けて実行してください。" +
+        "導入後はVS Codeを開き直すと認識されます。"
+    );
+    return;
+  }
+  if (answer === "配布ページを開く") {
+    await vscode.env.openExternal(vscode.Uri.parse("https://git-scm.com/downloads"));
   }
 }
 
@@ -184,7 +304,9 @@ async function connectRemote(
   run: GitCommandRunner
 ): Promise<boolean> {
   const canUseGh = await ghAvailable();
-  const items: Array<vscode.QuickPickItem & { action: "gh" | "url" }> = [];
+  const items: Array<
+    vscode.QuickPickItem & { action: "gh" | "url" | "local" }
+  > = [];
   if (canUseGh) {
     items.push({
       label: "$(add) 新しいリポジトリを作る",
@@ -202,13 +324,33 @@ async function connectRemote(
       "GitHubで作ったリポジトリのURL（https://github.com/… ）を貼り付けます。",
     action: "url",
   });
+  items.push({
+    label: "$(device-desktop) このままこの端末だけで使う",
+    description: "GitHubのアカウントは要りません",
+    detail:
+      "送り先を決めずに、この端末の中だけで履歴を残します。" +
+      "書き直す前の原稿へ戻せるので、これだけでも役に立ちます。" +
+      "あとからGitHubへつなぐこともできます。",
+    action: "local",
+  });
 
   const picked = await vscode.window.showQuickPick(items, {
     title: `${work.title} の送り先`,
-    placeHolder: "GitHubのどこへ送るかを決めます",
+    placeHolder: "GitHubへ送るか、この端末だけで使うかを決めます",
     ignoreFocusOut: true,
   });
   if (!picked) return false;
+
+  if (picked.action === "local") {
+    // **GitHubを使わないことは正しい選び方である。**
+    // アカウントを持たない作者や、原稿を外部へ置きたくない作者がいる。
+    // 履歴だけでも「消してしまった原稿を戻す」という価値がある
+    vscode.window.showInformationMessage(
+      `${work.title} は、この端末だけで履歴を残します。\n` +
+        "変更を残したいときは「変更を記録する」を実行してください。"
+    );
+    return false;
+  }
 
   if (picked.action === "gh") {
     const suggested = suggestRepositoryName(work.title);
@@ -303,10 +445,16 @@ async function firstPush(
 }
 
 function reportFailure(context: string, detail: string | undefined): void {
+  // ログには生の理由をそのまま残す。言い換えたものだけでは原因を追えない
   logFailure(context, { 内容: detail ?? "（詳細なし）" });
+
+  // つながらないだけなのか、設定が違うのかで、作者が次にやることが変わる
+  const translated = describeNetworkFailure(detail);
   vscode.window
     .showWarningMessage(
-      `${context}に失敗しました。${detail ? `\n${detail.slice(0, 200)}` : ""}`,
+      translated
+        ? `${context}に失敗しました。\n${translated}`
+        : `${context}に失敗しました。${detail ? `\n${detail.slice(0, 200)}` : ""}`,
       "ログを見る"
     )
     .then((answer) => {

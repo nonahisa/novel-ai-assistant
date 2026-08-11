@@ -288,3 +288,58 @@ export const runCommand: CommandRunner = (command, args, cwd, timeoutMs) =>
 function failure(result: GitCommandResult): GitSetupResult {
   return { ok: false, detail: (result.stderr || result.stdout).trim() };
 }
+
+/**
+ * つながらないことが原因の失敗か。
+ *
+ * gitの失敗はそのまま出すと英語で、作者には「何が悪いのか」が分からない。
+ * **回線が無いだけなのか、設定が違うのかで、次にやることが正反対になる。**
+ * 前者なら待てばよく、後者なら設定を直す必要がある。
+ *
+ * 判定できないものは undefined を返し、元の文言をそのまま見せる。
+ * 当てにいって外すより、生の理由を見せるほうが害が小さい。
+ */
+export function describeNetworkFailure(
+  detail: string | undefined
+): string | undefined {
+  if (!detail) return undefined;
+  const text = detail.toLowerCase();
+
+  const offline = [
+    "could not resolve host",
+    "name or service not known",
+    "temporary failure in name resolution",
+    "network is unreachable",
+    "no route to host",
+    "failed to connect",
+    "connection timed out",
+    "connection refused",
+    "operation timed out",
+    "unable to access",
+  ];
+  if (offline.some((pattern) => text.includes(pattern))) {
+    return "インターネットにつながっていないようです。接続してからもう一度お試しください。";
+  }
+
+  const auth = [
+    "authentication failed",
+    "permission denied",
+    "could not read from remote repository",
+    "invalid username or password",
+    "403 forbidden",
+    "terminal prompts disabled",
+  ];
+  if (auth.some((pattern) => text.includes(pattern))) {
+    return (
+      "GitHubへのログインができませんでした。" +
+      "リポジトリのURLと、GitHubの認証（Git Credential Manager や SSH鍵）を確かめてください。"
+    );
+  }
+
+  const notFound = ["repository not found", "does not appear to be a git repository"];
+  if (notFound.some((pattern) => text.includes(pattern))) {
+    return "送り先のリポジトリが見つかりません。URLを確かめてください。";
+  }
+
+  return undefined;
+}
