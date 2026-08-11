@@ -88,6 +88,45 @@ export function decideChunkSize(contextWindow: number): number {
   return Math.max(1500, Math.min(chars, 20000));
 }
 
+/**
+ * 本文以外に毎回送っている分の見積り（字）。
+ * 抽出の指示が約5,600字、既知の名前リストがそれに乗る。
+ */
+const PROMPT_OVERHEAD_CHARS = 7000;
+
+/** 日本語1文字あたりのトークン数（安全側）。`decideChunkSize` と同じ換算 */
+const TOKENS_PER_CHAR = 1 / 0.7;
+
+/**
+ * 実際に確保するコンテキスト長を決める。
+ *
+ * **チャンクの大きさとコンテキスト長を別々に決めていたのが不具合だった。**
+ * `decideChunkSize` はモデルの上限（131,072）から20,000字と決めるのに、
+ * コンテキストは 16,384 に固定していた。20,000字の本文だけで
+ * およそ28,600トークンあり、指示を足すと36,000トークンを超える。
+ * **入力が入り切らず、出力の余地も残らない。**
+ * その結果、応答が上限で切り詰められ、そのチャンクは丸ごと捨てられていた
+ * （実データで39チャンク中33件）。
+ *
+ * 送るものから必要量を計算し、モデルの上限で頭打ちにする。
+ * 上限をそのまま使わないのは、確保した分だけメモリを消費するためである。
+ */
+export function decideContextSize(options: {
+  /** 1チャンクの本文の文字数 */
+  chunkChars: number;
+  /** 応答に見込むトークン数 */
+  outputTokens: number;
+  /** モデルが扱える上限 */
+  contextWindow: number;
+}): number {
+  const inputTokens = Math.ceil(
+    (options.chunkChars + PROMPT_OVERHEAD_CHARS) * TOKENS_PER_CHAR
+  );
+  // 見積りは外れることがあるので1割の余裕を持たせる
+  const needed = Math.ceil((inputTokens + options.outputTokens) * 1.1);
+  return Math.max(4096, Math.min(options.contextWindow, needed));
+}
+
 const DEFAULT_OPTIONS: ChunkOptions = {
   maxChars: 8000,
   overlapChars: 0,
@@ -298,6 +337,49 @@ export function splitMergedChunk(chunk: Chunk): Chunk[] {
       wholeFile: true,
     };
   });
+}
+
+/**
+ * 切り詰められたチャンクを半分に割る。
+ *
+ * まとめていないチャンク（大きいファイルを分割した断片）でも、
+ * 出力が入り切らないことがある。**捨てると、その呼び出しは丸ごと無駄になる。**
+ * 半分にすれば出力も半分で済み、通る見込みがある。
+ *
+ * 短くなりすぎたら諦める（際限なく割り続けないため）。
+ */
+export function splitChunkInHalf(
+  chunk: Chunk,
+  minChars = 1000
+): Chunk[] | undefined {
+  if (chunk.text.length < minChars * 2) return undefined;
+
+  const middle = Math.floor(chunk.text.length / 2);
+  // 文の途中で切ると解析精度が落ちる。段落・行の切れ目を優先する
+  const cut = findBreakPoint(chunk.text, 0, middle);
+  if (cut <= 0 || cut >= chunk.text.length) return undefined;
+
+  const halves = [chunk.text.slice(0, cut), chunk.text.slice(cut)];
+  return halves.map((text, offset) => ({
+    filePath: chunk.filePath,
+    index: chunk.index + offset,
+    text,
+    startLine: chunk.startLine,
+    chapterStart: chunk.chapterStart,
+    chapterEnd: chunk.chapterEnd,
+    hash: hashText(text),
+    segments: [
+      {
+        filePath: chunk.filePath,
+        chapterStart: chunk.chapterStart,
+        chapterEnd: chunk.chapterEnd,
+        start: 0,
+        end: text.length,
+      },
+    ],
+    // 半分にしたものは、もう1ファイルまるごとではない
+    wholeFile: false,
+  }));
 }
 
 /** 区切りに適した位置を後ろから探す */

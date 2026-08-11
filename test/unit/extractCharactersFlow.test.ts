@@ -95,6 +95,9 @@ vi.mock("../../src/core/textFile", () => ({
     text: "灯が歩いた。",
     hasConflictMarkers: false,
   })),
+  // チャンクを分け直すときにハッシュを取り直す。
+  // 中身が違えば違う値になること（キャッシュが誤って当たらないこと）だけ守る
+  hashText: (text: string) => `hash-${text.length}-${text.slice(0, 1)}`,
 }));
 
 const chunks: Chunk[] = [
@@ -628,6 +631,54 @@ describe("人物抽出フロー", () => {
     expect(state.generate).toHaveBeenCalledTimes(4);
     expect(showWarningMessage.mock.calls.at(-1)?.[0]).toContain(
       "AIへ接続できなくなったため、残りのチャンクを中断しました"
+    );
+  });
+
+  test("出力上限で切り詰められたら小さくして試し直し、残りも先に分ける", async () => {
+    // 実データで、39チャンク中33件が同じ理由（出力上限）で失敗した。
+    // 1件ずつ捨てていくと、その回数だけ呼び出しが無駄になる
+    const body = (mark: string) =>
+      `${mark.repeat(3000)}\n\n${mark.repeat(3000)}`;
+    state.chunks = ["あ", "い", "う"].map((mark, index) => ({
+      filePath: "001.txt",
+      index,
+      text: body(mark),
+      hash: `chunk-${index + 1}`,
+      chapterStart: 1,
+      chapterEnd: 1,
+    }));
+
+    const showWarningMessage = vi.fn(async () => undefined);
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage,
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    // 1件目だけ切り詰められ、以降は通る
+    state.generate
+      .mockResolvedValueOnce({ text: "", truncated: true, elapsedMs: 1 })
+      .mockResolvedValue(successfulResult("灯"));
+
+    await extractCharacters(work, testRegistry());
+
+    const lengths = state.generate.mock.calls.map(
+      (call) => (call[0] as { userPrompt: string }).userPrompt.length
+    );
+
+    // 2回目以降は半分の大きさで送られる
+    expect(lengths[0]).toBeGreaterThan(lengths[1]);
+    // 1回目（切り詰め）＋ 3件を半分にした6回。
+    // **同じ失敗を3回繰り返さない**のが要点（実データでは33回繰り返した）
+    expect(state.generate).toHaveBeenCalledTimes(7);
+    // 分け直して処理できたので、失敗として数えない
+    expect(showWarningMessage.mock.calls.at(-1)?.[0]).toContain(
+      "失敗 0チャンク"
     );
   });
 

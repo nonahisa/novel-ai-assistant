@@ -53,9 +53,12 @@ import {
 } from "../core/settingsList";
 import {
   collectMentionExcerpts,
+  EXCERPT_MAX_CHARS,
   type ExcerptSource,
   type MentionExcerpt,
 } from "../core/mentionExcerpts";
+import { decideContextSize } from "../core/chunker";
+import { resolveMaxOutputTokens } from "../ai/outputLimit";
 import { loadExcerptSources } from "../core/manuscriptSources";
 import { expandNameVariants } from "../core/termIndex";
 import { evidencePhrases } from "../core/groundedEvidence";
@@ -863,10 +866,16 @@ export class SettingsPanel {
     const configuredNumCtx = vscode.workspace
       .getConfiguration("novelai")
       .get<number>("ollama.numCtx", 0);
+    // 本文の抜粋は既定で最大12,000字あり、16,384で固定すると入り切らない。
+    // 抽出側と同じく、送るものから必要量を計算する
     const numCtx =
       configuredNumCtx > 0
         ? configuredNumCtx
-        : Math.min(modelInfo?.contextWindow ?? 16384, 16384);
+        : decideContextSize({
+            chunkChars: EXCERPT_MAX_CHARS,
+            outputTokens: resolveMaxOutputTokens(),
+            contextWindow: modelInfo?.contextWindow ?? 16384,
+          });
 
     this.setBusy(true, progressLabel);
     try {

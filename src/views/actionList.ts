@@ -61,7 +61,7 @@ const ACTIONS: readonly CommandAction[] = [
   },
   {
     command: "novelai.showSettingsForTerm",
-    label: "カーソル位置の設定を表示",
+    label: "設定情報を表示",
     description: "",
     icon: "book",
     requiresWork: true,

@@ -20,8 +20,10 @@ import { readTextFile } from "../core/textFile";
 import { parseEpisodeMetadata } from "../core/metadataParser";
 import {
   decideChunkSize,
+  decideContextSize,
   mergeAdjacentChunks,
   segmentsOf,
+  splitChunkInHalf,
   splitIntoChunks,
   splitMergedChunk,
   Chunk,
@@ -172,14 +174,19 @@ export async function extractCharacters(
       : decideChunkSize(contextWindow);
 
   // 実際に使うコンテキスト長。モデルの上限をそのまま使うと
-  // メモリを大量に消費するため、必要分だけ確保する
+  // メモリを大量に消費するため、**送るものから必要量を計算して**確保する。
+  // 以前は 16,384 で固定しており、20,000字のチャンクが入り切らなかった
   const configuredNumCtx = vscode.workspace
     .getConfiguration("novelai")
     .get<number>("ollama.numCtx", 0);
   const numCtx =
     configuredNumCtx > 0
       ? configuredNumCtx
-      : Math.min(contextWindow, 16384);
+      : decideContextSize({
+          chunkChars,
+          outputTokens: resolveMaxOutputTokens(),
+          contextWindow,
+        });
 
   const scan = await scanWork(work);
   if (scan.episodes.length === 0) {
@@ -487,15 +494,34 @@ export async function extractCharacters(
           );
 
           if (res.truncated) {
-            // まとめて送ったせいで出力が入り切らなかったのなら、
-            // 元の話ごとに分け直せば通る見込みがある。
+            // 出力が入り切らなかったチャンクは、小さくして試し直す。
             // 部分的なJSONは解析できないので、ここで諦めると
-            // この呼び出しぶんの料金がまるごと無駄になる
-            const split = splitMergedChunk(chunk);
-            if (split.length > 1) {
+            // この呼び出しぶんがまるごと無駄になる（実データで39件中33件）。
+            //   1. まとめたものなら、元の話ごとに戻す
+            //   2. 1話でも入り切らないなら、半分に割る
+            const split =
+              splitMergedChunk(chunk).length > 1
+                ? splitMergedChunk(chunk)
+                : splitChunkInHalf(chunk);
+            if (split && split.length > 1) {
               queue.push(...split);
+              // **同じ大きさの残りも、先に割っておく。**
+              // 1件ずつ失敗を繰り返すと、その回数だけ呼び出しが無駄になる
+              // （実データでは39チャンク中33件が同じ理由で失敗した）
+              const tooBig = chunk.text.length;
+              let presplit = 0;
+              for (let rest = position + 1; rest < queue.length; rest++) {
+                if (queue[rest].text.length < tooBig) continue;
+                const halves = splitChunkInHalf(queue[rest]);
+                if (!halves) continue;
+                queue.splice(rest, 1, ...halves);
+                presplit++;
+              }
               logStep(
-                `出力上限のため ${describeChunk(chunk)} を ${split.length}件へ分け直します`
+                `出力上限のため ${describeChunk(chunk)} を ${split.length}件へ分け直します` +
+                  (presplit > 0
+                    ? `（同じ大きさの残り ${presplit}件も先に分けます）`
+                    : "")
               );
               done++;
               continue;

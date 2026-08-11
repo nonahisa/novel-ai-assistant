@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
+  decideContextSize,
   mergeAdjacentChunks,
   segmentsOf,
+  splitChunkInHalf,
   splitIntoChunks,
   splitMergedChunk,
   type Chunk,
@@ -111,6 +113,65 @@ describe("まとめたチャンクを元に戻す", () => {
     const single = episode(1, "本文");
 
     expect(splitMergedChunk(single)).toEqual([single]);
+  });
+});
+
+describe("確保するコンテキスト長", () => {
+  test("チャンクと指示と応答が全部入る大きさにする", () => {
+    // 20,000字のチャンクを16,384トークンのコンテキストへ送っていたため、
+    // 入力が入り切らず出力の余地も残らなかった。
+    // 実データで39チャンク中33件が「出力上限で切り詰め」になった
+    const size = decideContextSize({
+      chunkChars: 20000,
+      outputTokens: 16384,
+      contextWindow: 131072,
+    });
+
+    // 本文20,000字＋指示7,000字 ≒ 38,572トークン。これに応答分が乗る
+    expect(size).toBeGreaterThan(38572 + 16384);
+    expect(size).toBeLessThanOrEqual(131072);
+  });
+
+  test("モデルの上限は超えない", () => {
+    // 超える値を渡すと、モデル側で黙って切り捨てられる
+    expect(
+      decideContextSize({
+        chunkChars: 20000,
+        outputTokens: 16384,
+        contextWindow: 8192,
+      })
+    ).toBe(8192);
+  });
+
+  test("本文が短くても、指示の分は必ず見込む", () => {
+    // 本文が10字でも、抽出の指示だけで約7,000字（1万トークン近く）ある。
+    // 本文の長さだけで決めると、指示が入り切らない
+    expect(
+      decideContextSize({
+        chunkChars: 10,
+        outputTokens: 10,
+        contextWindow: 131072,
+      })
+    ).toBeGreaterThan(10000);
+  });
+});
+
+describe("入り切らないチャンクを半分にする", () => {
+  test("段落の切れ目で2つに割る", () => {
+    // 大きいファイルの断片は話ごとに戻せない。捨てると呼び出しが無駄になる
+    const chunk = episode(1, `${"あ".repeat(2000)}\n\n${"い".repeat(2000)}`);
+
+    const halves = splitChunkInHalf(chunk);
+
+    expect(halves).toHaveLength(2);
+    expect(halves?.[0].text.endsWith("\n\n")).toBe(true);
+    expect(halves?.[1].text.startsWith("い")).toBe(true);
+    // 合わせると元の本文に戻る（本文を落とさない）
+    expect(halves?.map((h) => h.text).join("")).toBe(chunk.text);
+  });
+
+  test("短いチャンクは割らない（際限なく割り続けない）", () => {
+    expect(splitChunkInHalf(episode(1, "短い本文"))).toBeUndefined();
   });
 });
 

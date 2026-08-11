@@ -32,10 +32,13 @@ export interface ExcerptOptions {
   maxTotalChars?: number;
 }
 
+/** 抜粋全体の文字数の上限。確保するコンテキスト長の計算にも使う */
+export const EXCERPT_MAX_CHARS = 12000;
+
 const DEFAULTS = {
   windowChars: 400,
   maxExcerpts: 30,
-  maxTotalChars: 12000,
+  maxTotalChars: EXCERPT_MAX_CHARS,
 } as const;
 
 interface Window {
