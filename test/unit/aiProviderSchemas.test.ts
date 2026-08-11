@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { toGeminiSchema, toOpenAIJsonSchema } from "../../src/ai/jsonSchema";
 import { isChatModel, isUnsupportedParameter } from "../../src/ai/openaiProvider";
 import {
-  dropNextOption,
+  geminiAttemptPlan,
   isInvalidArgument,
 } from "../../src/ai/geminiProvider";
 import { parseRetryAfterMs, toStatusError } from "../../src/ai/httpClient";
@@ -434,17 +434,36 @@ describe("Geminiの引数不正の扱い", () => {
   });
 
   test("思考の無効化から先に外し、JSONスキーマは最後まで残す", () => {
-    // スキーマは抽出の質に直結するので、できるだけ手放さない
-    const support = { thinkingConfig: true, responseSchema: true };
+    // スキーマは抽出の質に直結するので、できるだけ手放さない。
+    // Claudeと同じく、まず1つずつ外して犯人を特定する
+    const plan = geminiAttemptPlan(
+      { thinkingConfig: true, responseSchema: true },
+      ["thinkingConfig", "responseSchema"]
+    );
 
-    expect(dropNextOption(support)).toBe("思考の無効化");
-    expect(support).toEqual({ thinkingConfig: false, responseSchema: true });
+    expect(plan.map((attempt) => attempt.dropped)).toEqual([
+      [],
+      ["thinkingConfig"],
+      ["responseSchema"],
+      ["thinkingConfig", "responseSchema"],
+    ]);
+    // 思考だけを外した試行では、スキーマは付いたまま
+    expect(plan[1].support).toEqual({
+      thinkingConfig: false,
+      responseSchema: true,
+    });
+  });
 
-    expect(dropNextOption(support)).toBe("JSONスキーマ");
-    expect(support).toEqual({ thinkingConfig: false, responseSchema: false });
+  test("スキーマを渡していない呼び出しでは、スキーマを外す試行をしない", () => {
+    const plan = geminiAttemptPlan(
+      { thinkingConfig: true, responseSchema: true },
+      ["thinkingConfig"]
+    );
 
-    // 外せるものが無くなったら諦める（無限に試さない）
-    expect(dropNextOption(support)).toBeUndefined();
+    expect(plan.map((attempt) => attempt.dropped)).toEqual([
+      [],
+      ["thinkingConfig"],
+    ]);
   });
 });
 

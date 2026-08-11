@@ -14,6 +14,7 @@ import { fetchJson } from "./httpClient";
 import { toGeminiSchema } from "./jsonSchema";
 import { forgetSecret, logLine, registerSecret } from "../core/logger";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
+import { buildAttemptPlan, type OptionAttempt } from "./optionFallback";
 
 const SECRET_KEY = "novelai.gemini.apiKey";
 const DEFAULT_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta";
@@ -286,14 +287,19 @@ export class GeminiProvider implements ApiKeyProvider {
     // 失敗しただけで書き換えると、原因が別だったときに
     // 対応している機能まで永久に使わなくなる（Claudeで実際に起きた）
     const stored = this.supportFor(params.model);
-    const support: GeminiSupport = { ...stored };
 
     const maxOutputTokens = clampToModelLimit(
       resolveMaxOutputTokens(),
       this.modelCache.get(params.model)?.maxOutputTokens
     );
 
-    for (let attempt = 0; ; attempt++) {
+    // この呼び出しで実際に送る指定だけを、外す候補にする。
+    // 送ってもいない指定を「非対応」と覚えると、次に必要になったとき失う
+    const applicable: GeminiOptionKey[] = [];
+    if (params.disableThinking) applicable.push("thinkingConfig");
+    if (params.jsonSchema) applicable.push("responseSchema");
+
+    const buildBody = (support: GeminiSupport) => {
       const generationConfig: Record<string, unknown> = {
         temperature: params.temperature,
         maxOutputTokens,
@@ -308,35 +314,52 @@ export class GeminiProvider implements ApiKeyProvider {
       if (params.disableThinking && support.thinkingConfig) {
         generationConfig.thinkingConfig = { thinkingBudget: 0 };
       }
-
-      const body = {
+      return {
         systemInstruction: { parts: [{ text: params.systemPrompt }] },
         contents: [{ role: "user", parts: [{ text: params.userPrompt }] }],
         generationConfig,
       };
+    };
 
+    let lastError: unknown;
+
+    for (const attempt of geminiAttemptPlan(stored, applicable)) {
       try {
         const response = await this.post(
           params.model,
-          body,
+          buildBody(attempt.support),
           headers,
           params.signal
         );
         // 通った組み合わせだけを覚える
-        this.rememberSupport(params.model, support);
+        this.rememberSupport(params.model, attempt.support);
+        if (attempt.dropped.length > 0) {
+          logLine(
+            `Geminiは「${describeDroppedGeminiOptions(attempt.dropped)}」を外すと通りました` +
+              `（モデル: ${params.model}）。以後この組み合わせで呼び出します。`
+          );
+        }
         return response;
       } catch (error) {
         // 400以外（認証・上限・通信）は外して直る類ではない
         if (!isInvalidArgument(error)) throw error;
-
-        const dropped = dropNextOption(support);
-        if (!dropped) throw error;
+        lastError = error;
+        // **何を外したときに何と言われたのかを残す。**
+        // Geminiの本文は「invalid argument」だけのことが多いが、
+        // 別の理由（スキーマの作りなど）を書いてくることもある
         logLine(
-          `Geminiが「${dropped}」の指定を受け付けなかったため、外して再試行します（モデル: ${params.model}）。`
+          `Geminiが要求を受け付けませんでした（モデル: ${params.model} / ` +
+            `外した指定: ${describeDroppedGeminiOptions(attempt.dropped)}）。` +
+            `応答: ${
+              error instanceof AIError ? error.detail ?? "（本文なし）" : "（本文なし）"
+            }`
         );
-        if (attempt >= 3) throw error;
       }
     }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new AIError("Geminiが要求を受け付けませんでした。", "bad_response");
   }
 
   /**
@@ -361,7 +384,16 @@ export class GeminiProvider implements ApiKeyProvider {
     return support;
   }
 
+  /**
+   * 通った組み合わせを覚える。
+   *
+   * **記憶と手元の控えの両方を書き換える。** 保存先だけを更新していたため、
+   * 同じ実行の次のチャンクでまた同じ指定を送り、毎チャンク400を1回もらってから
+   * 通るという動きになっていた（実データのログで確認）。
+   * 無料枠は毎分の呼び出し回数が少なく、この1回が上限を早める。
+   */
   private rememberSupport(model: string, support: GeminiSupport): void {
+    this.supportCache.set(model, { ...support });
     void this.context.globalState.update(supportKey(model), { ...support });
   }
 
@@ -387,9 +419,15 @@ export class GeminiProvider implements ApiKeyProvider {
   }
 }
 
-/** v2 にしているのは、失敗から学んでいた頃の誤った記録を捨てるため */
+/**
+ * v2 にしたのは、失敗から学んでいた頃の誤った記録を捨てるため。
+ *
+ * v3 にしたのは、積み上げ式に外していた頃の記録を捨てるため。
+ * 原因がJSONスキーマ1つでも、先に外した思考の無効化まで
+ * 「非対応」として記録されていた可能性がある。
+ */
 function supportKey(model: string): string {
-  return `novelai.gemini.support.v2.${model}`;
+  return `novelai.gemini.support.v3.${model}`;
 }
 
 /** モデルごとに、任意の指定が使えるか */
@@ -417,20 +455,39 @@ export function isInvalidArgument(error: unknown): boolean {
   );
 }
 
+export type GeminiOptionKey = keyof GeminiSupport;
+
 /**
- * 次に外す指定を決める。外せるものが無ければ undefined。
- *
- * 思考の指定から先に外す。JSONスキーマは抽出の質に直結するので、
- * できるだけ最後まで残す。
+ * 外す順。思考の指定から先に外す。
+ * JSONスキーマは抽出の質に直結するので、できるだけ最後まで残す。
  */
-export function dropNextOption(support: GeminiSupport): string | undefined {
-  if (support.thinkingConfig) {
-    support.thinkingConfig = false;
-    return "思考の無効化";
-  }
-  if (support.responseSchema) {
-    support.responseSchema = false;
-    return "JSONスキーマ";
-  }
-  return undefined;
+export const GEMINI_OPTION_ORDER: GeminiOptionKey[] = [
+  "thinkingConfig",
+  "responseSchema",
+];
+
+export const GEMINI_OPTION_LABELS: Record<GeminiOptionKey, string> = {
+  thinkingConfig: "思考の無効化",
+  responseSchema: "JSONスキーマ",
+};
+
+/**
+ * 試す組み合わせを順に並べる。
+ * 並べ方は Claude と共通（`optionFallback.ts`）。外す順だけこちらで決める。
+ */
+export function geminiAttemptPlan(
+  support: GeminiSupport,
+  applicable: GeminiOptionKey[]
+): Array<OptionAttempt<GeminiOptionKey>> {
+  return buildAttemptPlan(
+    support,
+    GEMINI_OPTION_ORDER.filter((key) => applicable.includes(key))
+  );
+}
+
+export function describeDroppedGeminiOptions(
+  dropped: GeminiOptionKey[]
+): string {
+  if (dropped.length === 0) return "なし（すべて付けたまま）";
+  return dropped.map((key) => GEMINI_OPTION_LABELS[key]).join("・");
 }

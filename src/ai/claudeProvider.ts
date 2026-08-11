@@ -12,6 +12,7 @@ import {
   validateApiKeyFormat,
 } from "./types";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
+import { buildAttemptPlan, type OptionAttempt } from "./optionFallback";
 import { forgetSecret, logLine, registerSecret } from "../core/logger";
 
 /** APIキーの保存先。設定ファイルではなくOSの資格情報ストアに置く */
