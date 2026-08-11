@@ -14,6 +14,10 @@ import {
 } from "../core/git";
 import { logFailure, showLog } from "../core/logger";
 import { withProgress } from "../views/progress";
+import {
+  nextSetupStep,
+  runSetupStep,
+} from "./gitOnboarding";
 
 /**
  * 取りに行ける作品か。
@@ -469,21 +473,23 @@ export function describeSyncBadge(
 
 /**
  * 状態を1文で説明する。
- * リポジトリでない・リモートが無いのは**異常ではない**ので、
- * その旨だけを伝えて操作を勧めない。
+ *
+ * リポジトリでない・リモートが無いのは**異常ではない**ので、警告にはしない。
+ * ただし**そこから抜け出す道は示す。** 状態だけを伝えていた頃は、
+ * 作者が次に何をすればよいか分からず、同期機能に触れないままだった。
  */
 export function describeStatus(status: GitSyncStatus): string {
   switch (status.kind) {
     case "git_missing":
       return "gitコマンドが見つかりません。Gitを導入すると同期の状態を見られます。";
     case "not_a_repo":
-      return "この作品はGitリポジトリではありません。同期の確認は行いません。";
+      return "まだGitで管理していません。「Gitで管理を始める」から始められます。";
     case "no_remote":
-      return "リモートが設定されていません。ローカルの履歴だけを取っています。";
+      return "送り先（GitHubのリポジトリ）が未設定です。「GitHubのリポジトリとつなぐ」から設定できます。";
     case "detached":
       return "特定のコミットを直接開いています（ブランチ上にありません）。";
     case "no_upstream":
-      return `ブランチ「${status.branch}」に対応するリモートのブランチがありません。`;
+      return `ブランチ「${status.branch}」はまだ送信していません。「はじめて送信する」から送れます。`;
     case "tracked": {
       const parts: string[] = [];
       if (status.behind > 0) parts.push(`未取得 ${status.behind}件`);
@@ -505,6 +511,13 @@ export async function showGitSyncActions(
 ): Promise<void> {
   const status = await monitor.refresh(work, { fetch: true, notify: false });
   const items: Array<vscode.QuickPickItem & { action: string }> = [];
+
+  // まだ同期を始めていない作品には、次の一手を先頭に出す。
+  // 状態を伝えるだけでは、作者はそこから抜け出せない
+  const setup = nextSetupStep(status);
+  if (setup) {
+    items.push({ ...setup, action: "setup" });
+  }
 
   if (status.kind === "tracked") {
     if (status.behind > 0) {
@@ -545,6 +558,14 @@ export async function showGitSyncActions(
   });
   if (!picked) return;
 
+  if (picked.action === "setup") {
+    // 1手進むごとに状態が変わるので、続けて次の一手を出す
+    if (await runSetupStep(work, status)) {
+      await monitor.refresh(work, { fetch: false, notify: false });
+      await showGitSyncActions(monitor, work);
+    }
+    return;
+  }
   if (picked.action === "pull") await monitor.pull(work);
   else if (picked.action === "push") await monitor.push(work);
   else if (picked.action === "refresh") {
