@@ -73,6 +73,24 @@ describe("短い話をまとめる", () => {
     expect(merged).toHaveLength(2 + long.length);
   });
 
+  test("合本の中の話も、同じファイルのままでまとめられる", () => {
+    // 全話が1ファイルに入っている作品では、話ごとに分けたチャンクが
+    // すべて同じファイルパスになる。ファイルが違うことを条件にしていると
+    // 1つもまとまらず、219話が219回の呼び出しになってしまう
+    const inner = (chapter: number, text: string): Chunk =>
+      splitIntoChunks("N2600GO.txt", text, chapter, chapter, {
+        maxChars: 8000,
+      })[0];
+
+    const merged = mergeAdjacentChunks(
+      [inner(1, "あ".repeat(100)), inner(2, "い".repeat(100))],
+      { maxChars: 1000 }
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(segmentsOf(merged[0]).map((s) => s.chapterStart)).toEqual([1, 2]);
+  });
+
   test("0を渡したら、まとめない", () => {
     const chunks = [episode(1, "あ"), episode(2, "い")];
 

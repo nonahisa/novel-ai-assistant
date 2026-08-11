@@ -10,6 +10,7 @@ import { addCounts, countChars, emptyCounts } from "./charCount";
 import { parseEpisodeFileName } from "./episodeParser";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { parseEpisodeMetadata } from "./metadataParser";
+import { parseCollectedFile, type CollectedEpisode } from "./collectedFile";
 import { pathExists } from "./fileSystem";
 
 /**
@@ -42,6 +43,7 @@ export async function scanWork(work: WorkEntry): Promise<{
 
     let counts = emptyCounts();
     let hasConflictMarkers = false;
+    let collected: CollectedEpisode[] | null = null;
     let meta = {
       hasMetadata: false,
       title: null as string | null,
@@ -65,10 +67,18 @@ export async function scanWork(work: WorkEntry): Promise<{
         updatedAt: parsedMeta.updatedAt,
       };
 
+      // 全話が1ファイルに入っている形（合本）は、話ごとに分けて扱う。
+      // まとめて数えると、後書き・リアクション（作者の物語ではない文章）まで
+      // 進捗に足してしまう。実データの73万字の作品で1万字あった
+      collected = parseCollectedFile(text);
+
       hasConflictMarkers = containsConflictMarkers(text);
       if (!hasConflictMarkers) {
+        const body = collected
+          ? collected.map((episode) => episode.body).join("\n")
+          : parsedMeta.body;
         // ルビ記法はMarkdownのみ対象
-        counts = countChars(parsedMeta.body, ext === ".md" ? excludeRuby : false);
+        counts = countChars(body, ext === ".md" ? excludeRuby : false);
       }
       // 競合マーカーを含む場合は数えない。両方の版とマーカーが混ざったまま
       // 数えると、実際より多い字数を本当の進捗として見せてしまう
@@ -76,12 +86,23 @@ export async function scanWork(work: WorkEntry): Promise<{
       // 読めないファイルは0字として扱い、走査は止めない
     }
 
+    // 合本はファイル名から話数を取れない。中の各話のタイトルから読み取る
+    const collectedChapters = (collected ?? [])
+      .map((episode) => episode.chapter)
+      .filter((chapter): chapter is number => chapter !== null);
+
     episodes.push({
       filePath,
       fileName,
       ext,
-      chapterStart: parsed.chapterStart,
-      chapterEnd: parsed.chapterEnd,
+      chapterStart:
+        collectedChapters.length > 0
+          ? Math.min(...collectedChapters)
+          : parsed.chapterStart,
+      chapterEnd:
+        collectedChapters.length > 0
+          ? Math.max(...collectedChapters)
+          : parsed.chapterEnd,
       // ファイル名にサブタイトルが無ければメタデータのタイトルを使う
       subtitle: parsed.subtitle ?? meta.title,
       kind: parsed.kind,
@@ -92,6 +113,7 @@ export async function scanWork(work: WorkEntry): Promise<{
       declaredCharCount: meta.declaredCharCount,
       metaUpdatedAt: meta.updatedAt,
       hasConflictMarkers,
+      collectedCount: collected ? collected.length : null,
     });
   }
 

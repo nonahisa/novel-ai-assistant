@@ -18,6 +18,7 @@ import {
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import { parseEpisodeMetadata } from "../core/metadataParser";
+import { parseCollectedFile } from "../core/collectedFile";
 import {
   decideChunkSize,
   decideContextSize,
@@ -194,6 +195,18 @@ export async function extractCharacters(
     return false;
   }
 
+  // 1話が短い作品では、本文より指示のほうが大きい（実データで2〜3倍）。
+  // 隣どうしをまとめて1回で送ると、呼び出し回数も送信量も減る。
+  // 0を指定すると結合しない（1話ずつ処理していた頃の動きに戻す）
+  const configuredMergeChars = vscode.workspace
+    .getConfiguration("novelai")
+    .get<number>("mergeChunkChars", 6000);
+  const mergeChars =
+    Number.isInteger(configuredMergeChars) && configuredMergeChars >= 1
+      ? // 分割の目安を超えて詰め込まない
+        Math.min(configuredMergeChars, chunkChars)
+      : 0;
+
   // 競合マーカーを含むファイルはAI処理をブロックする
   const conflicted: string[] = [];
   const rawChunks: Chunk[] = [];
@@ -204,6 +217,39 @@ export async function extractCharacters(
       conflicted.push(ep.fileName);
       continue;
     }
+    // 全話が1ファイルに入っている形（合本）は、話ごとに分けて送る。
+    // まとめて1つの塊にすると、抽出したものに登場話数が1つも付かない。
+    // 後書き・リアクションも本文として送ってしまう
+    const collected = parseCollectedFile(file.text);
+    if (collected) {
+      const perEpisode: Chunk[] = [];
+      for (const episode of collected) {
+        if (!episode.body.trim()) continue;
+        perEpisode.push(
+          ...splitIntoChunks(
+            ep.filePath,
+            episode.body,
+            episode.chapter,
+            episode.chapter,
+            { maxChars: chunkChars }
+          )
+        );
+      }
+      // **話ごとに分けたぶん、送る単位まで小さくしない。**
+      // 合本の中の話はもともと1つのファイルの続きで、分けたのは
+      // 話数を付けるためであって、呼び出しを増やすためではない。
+      // 実データ（219話・70万字）では、6,000字でまとめると174回になり、
+      // 分ける前の41回から4倍以上に増えてしまう。話数はまとめても
+      // 内訳（segments）に残るので、元の大きさまで詰め直してよい。
+      // ただし作者が「まとめない」を選んでいるときは、その指定に従う
+      rawChunks.push(
+        ...(mergeChars > 0
+          ? mergeAdjacentChunks(perEpisode, { maxChars: chunkChars })
+          : perEpisode)
+      );
+      continue;
+    }
+
     const meta = parseEpisodeMetadata(file.text);
     const body = meta.body;
     if (!body.trim()) continue;
@@ -219,17 +265,6 @@ export async function extractCharacters(
     );
   }
 
-  // 1話が短い作品では、本文より指示のほうが大きい（実データで2〜3倍）。
-  // 隣どうしをまとめて1回で送ると、呼び出し回数も送信量も減る。
-  // 0を指定すると結合しない（1話ずつ処理していた頃の動きに戻す）
-  const configuredMergeChars = vscode.workspace
-    .getConfiguration("novelai")
-    .get<number>("mergeChunkChars", 6000);
-  const mergeChars =
-    Number.isInteger(configuredMergeChars) && configuredMergeChars >= 1
-      ? // 分割の目安を超えて詰め込まない
-        Math.min(configuredMergeChars, chunkChars)
-      : 0;
   const chunks =
     mergeChars > 0
       ? mergeAdjacentChunks(rawChunks, { maxChars: mergeChars })

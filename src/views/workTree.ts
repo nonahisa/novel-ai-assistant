@@ -142,7 +142,13 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     // タイトルの無い話でファイル名を出さないのは、行ごとに形が変わって
     // 一覧が読みにくくなるためである。話数はlabelに出ており、
     // ファイル名はホバーで確かめられる
-    item.description = [title, `${formatCount(ep.counts.net)}字`]
+    item.description = [
+      title,
+      // 合本は1ファイルに全話が入っている。何話ぶんかが分からないと、
+      // 巨大な1話に見えてしまう
+      ep.collectedCount !== null ? `${ep.collectedCount}話ぶん` : null,
+      `${formatCount(ep.counts.net)}字`,
+    ]
       .filter((part): part is string => part !== null)
       .join("　");
 
@@ -191,6 +197,9 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         `- ファイル: ${ep.fileName}`,
         `- 種別: ${ep.kind}`,
         `- 話数: ${chapterLabel || "判定不能"}`,
+        ep.collectedCount !== null
+          ? `- 全話が1ファイルに入っています（${ep.collectedCount}話ぶん）。話ごとに分けて扱います`
+          : null,
         `- 純文字数: ${formatCount(ep.counts.net)} 字`,
         `- 総文字数: ${formatCount(ep.counts.gross)} 字`,
         `- 段落数: ${ep.counts.paragraphs}`,

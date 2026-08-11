@@ -45,6 +45,14 @@ export interface EpisodeFile {
    * 混ざったまま数えると、実際より多い字数を本当の進捗として見せてしまう。
    */
   hasConflictMarkers: boolean;
+  /**
+   * 1ファイルに全話が入っている（合本）場合の話数。
+   *
+   * 小説家になろうのダウンロードは、全話を1ファイルにまとめた形を出す。
+   * 1話ずつのファイルと区別が付かないと、219話ぶんを1話として扱ってしまう。
+   * 合本でなければ null。
+   */
+  collectedCount: number | null;
 }
 
 export type EpisodeKind = "本編" | "プロローグ" | "エピローグ" | "幕間" | "不明";

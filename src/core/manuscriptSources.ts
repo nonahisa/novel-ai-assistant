@@ -3,6 +3,7 @@ import type { EpisodeFile } from "../models/types";
 import { scanWork } from "./scanner";
 import { readTextFile } from "./textFile";
 import { parseEpisodeMetadata } from "./metadataParser";
+import { parseCollectedFile, type CollectedEpisode } from "./collectedFile";
 import type { ExcerptSource } from "./mentionExcerpts";
 
 /**
@@ -24,6 +25,20 @@ export async function loadExcerptSources(
       conflicted.push(episode.fileName);
       continue;
     }
+    // 合本は話ごとの出典にする。1つの塊にすると
+    // 「どの話に書いてあったか」を示せない
+    const collected = parseCollectedFile(file.text);
+    if (collected) {
+      for (const inner of collected) {
+        if (!inner.body.trim()) continue;
+        sources.push({
+          label: collectedEpisodeLabel(episode, inner),
+          text: inner.body,
+        });
+      }
+      continue;
+    }
+
     const body = parseEpisodeMetadata(file.text).body;
     if (!body.trim()) continue;
     sources.push({ label: episodeLabel(episode), text: body });
@@ -45,6 +60,21 @@ export function episodeLabel(episode: EpisodeFile): string {
   if (chapter) return chapter;
   if (title) return `${episode.fileName}（${title}）`;
   return episode.fileName;
+}
+
+/**
+ * 合本の中の1話の出典名。
+ *
+ * 話数が読み取れなければファイル内の並び順で示す。
+ * **並び順を話数として出さない**（「プロローグ」を第1話と呼んでしまうため）。
+ */
+export function collectedEpisodeLabel(
+  file: EpisodeFile,
+  inner: CollectedEpisode
+): string {
+  const chapter =
+    inner.chapter !== null ? `第${inner.chapter}話` : `${file.fileName}の${inner.order}番目`;
+  return inner.title ? `${chapter} ${inner.title}` : chapter;
 }
 
 function chapterPart(episode: EpisodeFile): string {
