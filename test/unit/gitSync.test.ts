@@ -52,7 +52,7 @@ describe("取りに行ける作品かの判定", () => {
 
 describe("同期対象から外す規則", () => {
   test("キャッシュを必ず除外する", () => {
-    // 設計書3.5.7。以前は登録した作品で漏れており、
+    // 設計書5.5.7。以前は登録した作品で漏れており、
     // キャッシュがGitに入ったままだった
     expect(IGNORED_PATHS).toContain(".aiwriter/cache/");
   });
@@ -97,7 +97,7 @@ describe("同期対象から外す規則", () => {
   });
 });
 
-describe("キャッシュを同期するオプション（設計書3.5.7）", () => {
+describe("キャッシュを同期するオプション（設計書5.5.7）", () => {
   test("同期しない設定では、これまでどおり除外する", () => {
     expect(missingIgnoreRules(encode(""), { syncCache: false })).toContain(
       CACHE_IGNORE_RULE

@@ -74,7 +74,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   await registry.initialize();
 
   // GitHub同期の見張り。自動で走るのはfetch（取得のみ）だけで、
-  // 取り込み・送信は作者がボタンを押したときにしか実行しない（設計書3.5.1）
+  // 取り込み・送信は作者がボタンを押したときにしか実行しない（設計書5.5.1）
   const gitSync = new GitSyncMonitor(registry);
   context.subscriptions.push(gitSync);
 
@@ -85,7 +85,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   gitSync.onDidChange(() => treeProvider.redraw());
   const aiRegistry = new AIRegistry(context);
 
-  // 端末ID。「どの環境で書いたか」を区別するのに使う（設計書3.5.2）。
+  // 端末ID。「どの環境で書いたか」を区別するのに使う（設計書5.5.2）。
   // Gitへは同期しない。全環境が同じIDを名乗ると区別できなくなる
   const deviceId = await resolveDeviceId(context.globalState);
 
@@ -279,7 +279,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.onDidSaveTextDocument((document) => {
       updateStatusBar();
       treeProvider.refresh();
-      // 「直前にどの環境で書いていたか」を残す（設計書3.5.2）。
+      // 「直前にどの環境で書いていたか」を残す（設計書5.5.2）。
       // 開いただけでは書かない。何も書いていないのに作業ツリーが汚れ、
       // 未コミットの変更を理由に取り込みが止まるようになるため
       void recordEditedSession(document.uri.fsPath);
@@ -305,7 +305,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   /**
-   * 別の環境が最近書いていたら知らせる（設計書3.5.2）。
+   * 別の環境が最近書いていたら知らせる（設計書5.5.2）。
    *
    * ロックはしない。同一人物なので、知らせれば本人が判断できる。
    * 作品ごとに1回だけ出す。開くたびに出ると読まれなくなる。
@@ -474,7 +474,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Gitの操作でファイルが入れ替わったら、走査結果と用語の索引を作り直す。
   // pullで大量に変わるため、変わったことに気づかないまま
-  // 古い文字数・古いハイライトを見せ続けないようにする（設計書3.5.8）
+  // 古い文字数・古いハイライトを見せ続けないようにする（設計書5.5.8）
   context.subscriptions.push(
     gitSync.onDidChangeFiles(({ work }) => {
       treeProvider.refresh(work.id);
@@ -803,7 +803,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     )
   );
 
-  // 起動時に一度だけ全作品の同期状態を確かめる（設計書3.5.1）。
+  // 起動時に一度だけ全作品の同期状態を確かめる（設計書5.5.1）。
   // await しないのは、回線が遅い環境で拡張機能の起動を待たせないため。
   // fetchは取得のみなので、途中で終わってもローカルには何も起きない
   void gitSync.refreshAll({ fetch: true });
