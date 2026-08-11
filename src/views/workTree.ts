@@ -134,20 +134,17 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     };
 
     const chapterLabel = formatChapterLabel(ep);
+    const title = episodeTitle(ep, chapterLabel);
 
     // 話数を先頭に出す。タイトルが長くても話数と文字数が隠れないようにするため。
     // label（太字側）は短く保ち、可変長のタイトルは description に置く。
-    if (ep.metaTitle || ep.subtitle) {
-      item.label = chapterLabel || ep.fileName;
-      item.description = `${ep.metaTitle ?? ep.subtitle}　${formatCount(
-        ep.counts.net
-      )}字`;
-    } else {
-      item.label = chapterLabel || ep.fileName;
-      item.description = chapterLabel
-        ? `${ep.fileName}　${formatCount(ep.counts.net)}字`
-        : `${formatCount(ep.counts.net)}字`;
-    }
+    item.label = chapterLabel || ep.fileName;
+    // タイトルの無い話でファイル名を出さないのは、行ごとに形が変わって
+    // 一覧が読みにくくなるためである。話数はlabelに出ており、
+    // ファイル名はホバーで確かめられる
+    item.description = [title, `${formatCount(ep.counts.net)}字`]
+      .filter((part): part is string => part !== null)
+      .join("　");
 
     if (ep.hasConflictMarkers) {
       // 競合を含むファイルは、話数や文字数より先にそれを伝える
@@ -184,9 +181,14 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
     item.tooltip = new vscode.MarkdownString(
       [
-        `**${ep.metaTitle ?? ep.fileName}**`,
+        `**${
+          ep.metaTitle ??
+          ([chapterLabel, title].filter((part) => part).join("　") ||
+            ep.fileName)
+        }**`,
         "",
-        ep.metaTitle ? `- ファイル: ${ep.fileName}` : null,
+        // 一覧からファイル名を外したので、ホバーでは必ず出す
+        `- ファイル: ${ep.fileName}`,
         `- 種別: ${ep.kind}`,
         `- 話数: ${chapterLabel || "判定不能"}`,
         `- 純文字数: ${formatCount(ep.counts.net)} 字`,
@@ -243,6 +245,28 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   async getEpisodes(work: WorkEntry): Promise<EpisodeFile[]> {
     return (await this.load(work)).episodes;
   }
+}
+
+/**
+ * 一覧に出すタイトル。話数の重複を落とす。
+ *
+ * 投稿サイトからDLしたファイルのヘッダーには「第1話 気がついたら幽霊に」と、
+ * **話数を含んだ形**でタイトルが入っている。label側にも「第1話」を出すので、
+ * そのまま並べると「第1話　第1話 気がついたら幽霊に」と二重になる。
+ *
+ * タイトルが話数だけの場合（「第16話」）は何も返さない。
+ * labelと同じ文字を右にもう一度出しても、作者に伝わる情報が増えないためである。
+ */
+export function episodeTitle(
+  ep: Pick<EpisodeFile, "metaTitle" | "subtitle">,
+  chapterLabel: string
+): string | null {
+  const raw = (ep.metaTitle ?? ep.subtitle)?.trim();
+  if (!raw) return null;
+  if (!chapterLabel || !raw.startsWith(chapterLabel)) return raw;
+  // 「第1話」に続く区切り（空白・記号）も一緒に落とす
+  const rest = raw.slice(chapterLabel.length).replace(/^[\s　:：・．.。、,，\-–—]+/, "");
+  return rest.length > 0 ? rest : null;
 }
 
 function formatChapterLabel(ep: EpisodeFile): string {
