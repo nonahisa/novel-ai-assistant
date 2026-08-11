@@ -1,5 +1,5 @@
 import type { Chunk } from "./chunker";
-import { chaptersForChunk, isGroundedInChunk } from "./groundedEvidence";
+import { chaptersForCandidate, isGroundedInChunk } from "./groundedEvidence";
 import type {
   CharacterExtractResult,
   ExtractedCharacter,
@@ -157,7 +157,6 @@ export function validateCharacterExtractResult(
     };
   }
 
-  const chapters = chaptersForChunk(chunk);
   for (const raw of rawCharacters) {
     if (!isRecord(raw) || typeof raw.name !== "string") {
       rejected.push({ name: candidateName(raw), reason: "invalid_shape" });
@@ -202,7 +201,17 @@ export function validateCharacterExtractResult(
       continue;
     }
 
-    accepted.push({ data: character, chapters: [...chapters] });
+    // 話数は、引用が本文のどの位置にあるかで決める。
+    // 複数の話をまとめて送っているとき、チャンク全体の話数を付けると
+    // 「第3話にしか出ない人物が第1〜4話に登場」になってしまう
+    accepted.push({
+      data: character,
+      chapters: chaptersForCandidate(
+        chunk,
+        [character.name, ...(character.aliases ?? [])],
+        character.evidence
+      ),
+    });
   }
 
   return { accepted, rejected };

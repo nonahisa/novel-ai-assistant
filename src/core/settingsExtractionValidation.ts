@@ -8,7 +8,7 @@ import type {
 } from "../prompts/characterExtract";
 import {
   isGroundedInChunk,
-  chaptersForChunk,
+  chaptersForCandidate,
   evidenceSegments,
   normalizeForComparison,
 } from "./groundedEvidence";
@@ -178,7 +178,6 @@ export function validateExtractedAbilities(
   const rejected: RejectedSettingCandidate[] = [];
   if (!Array.isArray(raw)) return { accepted, rejected };
 
-  const chapters = chaptersForChunk(chunk);
 
   for (const entry of raw) {
     if (!isRecord(entry) || typeof entry.name !== "string") {
@@ -204,7 +203,14 @@ export function validateExtractedAbilities(
       rejected.push({ name: ability.name, reason: "ungrounded" });
       continue;
     }
-    accepted.push({ data: ability, chapters: [...chapters] });
+    accepted.push({
+      data: ability,
+      chapters: chaptersForCandidate(
+        chunk,
+        [ability.name, ...(ability.aliases ?? [])],
+        ability.evidence
+      ),
+    });
   }
 
   return { accepted, rejected };
@@ -218,7 +224,6 @@ export function validateExtractedLocations(
   const rejected: RejectedSettingCandidate[] = [];
   if (!Array.isArray(raw)) return { accepted, rejected };
 
-  const chapters = chaptersForChunk(chunk);
 
   for (const entry of raw) {
     if (!isRecord(entry) || typeof entry.name !== "string") {
@@ -250,7 +255,14 @@ export function validateExtractedLocations(
       rejected.push({ name: location.name, reason: "ungrounded" });
       continue;
     }
-    accepted.push({ data: location, chapters: [...chapters] });
+    accepted.push({
+      data: location,
+      chapters: chaptersForCandidate(
+        chunk,
+        [location.name, ...(location.aliases ?? [])],
+        location.evidence
+      ),
+    });
   }
 
   return { accepted, rejected };
@@ -272,7 +284,6 @@ export function validateExtractedOrganizations(
   const rejected: RejectedSettingCandidate[] = [];
   if (!Array.isArray(raw)) return { accepted, rejected };
 
-  const chapters = chaptersForChunk(chunk);
 
   for (const entry of raw) {
     if (!isRecord(entry) || typeof entry.name !== "string") {
@@ -299,7 +310,14 @@ export function validateExtractedOrganizations(
       rejected.push({ name: organization.name, reason: "ungrounded" });
       continue;
     }
-    accepted.push({ data: organization, chapters: [...chapters] });
+    accepted.push({
+      data: organization,
+      chapters: chaptersForCandidate(
+        chunk,
+        [organization.name, ...(organization.aliases ?? [])],
+        organization.evidence
+      ),
+    });
   }
 
   return { accepted, rejected };
@@ -322,7 +340,6 @@ export function validateExtractedWorldItems(
   const rejected: RejectedSettingCandidate[] = [];
   if (!Array.isArray(raw)) return { accepted, rejected };
 
-  const chapters = chaptersForChunk(chunk);
   const normalizedChunk = normalizeForComparison(chunk.text);
 
   for (const entry of raw) {
@@ -355,7 +372,7 @@ export function validateExtractedWorldItems(
     accepted.push({
       data: item,
       category: toWorldCategory(item.category),
-      chapters: [...chapters],
+      chapters: chaptersForCandidate(chunk, [item.name], item.evidence),
     });
   }
 
