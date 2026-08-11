@@ -128,10 +128,16 @@ function chunkFixture(count: number): Chunk[] {
   }));
 }
 
-vi.mock("../../src/core/chunker", () => ({
-  decideChunkSize: vi.fn(() => 1000),
-  splitIntoChunks: vi.fn(() => state.chunks ?? chunks),
-}));
+vi.mock("../../src/core/chunker", async (importOriginal) => {
+  // 結合と分け直しは本物を使う。テストで作った固定チャンクが
+  // 実際にどうまとめられるかまで見たいため
+  const actual = await importOriginal<typeof import("../../src/core/chunker")>();
+  return {
+    ...actual,
+    decideChunkSize: vi.fn(() => 1000),
+    splitIntoChunks: vi.fn(() => state.chunks ?? chunks),
+  };
+});
 
 vi.mock("../../src/core/characterStore", () => ({
   CharacterStoreError: state.CharacterStoreError,

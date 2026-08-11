@@ -18,7 +18,14 @@ import {
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import { parseEpisodeMetadata } from "../core/metadataParser";
-import { decideChunkSize, splitIntoChunks, Chunk } from "../core/chunker";
+import {
+  decideChunkSize,
+  mergeAdjacentChunks,
+  segmentsOf,
+  splitIntoChunks,
+  splitMergedChunk,
+  Chunk,
+} from "../core/chunker";
 import {
   CharacterStore,
   CharacterStoreError,
@@ -182,7 +189,7 @@ export async function extractCharacters(
 
   // 競合マーカーを含むファイルはAI処理をブロックする
   const conflicted: string[] = [];
-  const chunks: Chunk[] = [];
+  const rawChunks: Chunk[] = [];
 
   for (const ep of scan.episodes) {
     const file = await readTextFile(ep.filePath);
@@ -194,7 +201,7 @@ export async function extractCharacters(
     const body = meta.body;
     if (!body.trim()) continue;
 
-    chunks.push(
+    rawChunks.push(
       ...splitIntoChunks(
         ep.filePath,
         body,
@@ -204,6 +211,22 @@ export async function extractCharacters(
       )
     );
   }
+
+  // 1話が短い作品では、本文より指示のほうが大きい（実データで2〜3倍）。
+  // 隣どうしをまとめて1回で送ると、呼び出し回数も送信量も減る。
+  // 0を指定すると結合しない（1話ずつ処理していた頃の動きに戻す）
+  const configuredMergeChars = vscode.workspace
+    .getConfiguration("novelai")
+    .get<number>("mergeChunkChars", 6000);
+  const mergeChars =
+    Number.isInteger(configuredMergeChars) && configuredMergeChars >= 1
+      ? // 分割の目安を超えて詰め込まない
+        Math.min(configuredMergeChars, chunkChars)
+      : 0;
+  const chunks =
+    mergeChars > 0
+      ? mergeAdjacentChunks(rawChunks, { maxChars: mergeChars })
+      : rawChunks;
 
   if (conflicted.length > 0) {
     const proceed = await vscode.window.showWarningMessage(
@@ -344,7 +367,15 @@ export async function extractCharacters(
 
       let done = 0;
 
-      for (const chunk of chunks) {
+      /**
+       * 処理待ちの列。**処理中に増えることがある。**
+       * まとめて送ったせいで出力が切り詰められた場合、
+       * 元の話ごとに分け直してここへ戻す（丸ごと捨てるより通る見込みがある）。
+       */
+      const queue = [...chunks];
+
+      for (let position = 0; position < queue.length; position++) {
+        const chunk = queue[position];
         if (token.isCancellationRequested) break;
 
         const cached = cache.get(chunk.hash, cacheKeyBase);
@@ -364,13 +395,13 @@ export async function extractCharacters(
 
         const label = describeChunk(chunk);
         progress.report({
-          message: `${done + 1}/${chunks.length}  ${label}`,
-          increment: 100 / chunks.length,
+          message: `${done + 1}/${queue.length}  ${label}`,
+          increment: 100 / queue.length,
         });
 
         // 応答が返らないまま止まった場合、記録はこの行で終わる。
         // どのチャンクで止まったかが分かるようにしておく
-        logStep(`AIへ送信: ${done + 1}/${chunks.length} ${label}`);
+        logStep(`AIへ送信: ${done + 1}/${queue.length} ${label}`);
         const startedAt = Date.now();
 
         // 既知の人物名を渡して同一人物判定を助ける
@@ -436,7 +467,7 @@ export async function extractCharacters(
               rateLimit.totalWaitedMs += waitMs;
               progress.report({
                 message:
-                  `${done + 1}/${chunks.length}  ` +
+                  `${done + 1}/${queue.length}  ` +
                   `レート上限のため ${Math.ceil(waitMs / 1000)} 秒待っています` +
                   `（${rateLimit.waits}回目 / 合計 ${Math.round(
                     rateLimit.totalWaitedMs / 1000
@@ -451,11 +482,24 @@ export async function extractCharacters(
           // 応答が返った時点で接続は生きている。連続失敗の数え直し
           consecutiveConnectivityFailures = 0;
           logStep(
-            `応答を受信: ${done + 1}/${chunks.length} ${label} ` +
+            `応答を受信: ${done + 1}/${queue.length} ${label} ` +
               `（${Math.round((Date.now() - startedAt) / 1000)}秒）`
           );
 
           if (res.truncated) {
+            // まとめて送ったせいで出力が入り切らなかったのなら、
+            // 元の話ごとに分け直せば通る見込みがある。
+            // 部分的なJSONは解析できないので、ここで諦めると
+            // この呼び出しぶんの料金がまるごと無駄になる
+            const split = splitMergedChunk(chunk);
+            if (split.length > 1) {
+              queue.push(...split);
+              logStep(
+                `出力上限のため ${describeChunk(chunk)} を ${split.length}件へ分け直します`
+              );
+              done++;
+              continue;
+            }
             failures.push({
               chunk,
               message:
@@ -530,7 +574,7 @@ export async function extractCharacters(
       }
 
       logStep(
-        `チャンクの処理を終了: ${done}/${chunks.length} ` +
+        `チャンクの処理を終了: ${done}/${queue.length} ` +
           `（失敗 ${failures.length}件${cancelled ? " / 中止された" : ""}）`
       );
 
@@ -1301,6 +1345,16 @@ function describeRejectedCandidates(
 }
 
 function describeChunk(chunk: Chunk): string {
+  // まとめて送っているときは、何話ぶんかが分かるようにする。
+  // 「第1話」とだけ出ると、進み具合と実際の処理量が食い違って見える
+  if (segmentsOf(chunk).length > 1) {
+    const labels = segmentsOf(chunk).map((segment) =>
+      segment.chapterStart === null
+        ? path.basename(segment.filePath)
+        : `第${segment.chapterStart}話`
+    );
+    return `${labels[0]}〜${labels[labels.length - 1]}（${labels.length}話）`;
+  }
   const name = path.basename(chunk.filePath);
   if (chunk.chapterStart === null) return name;
   const ch =
