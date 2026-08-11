@@ -94,6 +94,20 @@ const ACTIONS: readonly CommandAction[] = [
       "足した項目は全員の設定資料に並びます。外しても入力済みの内容は消えません。",
   },
 
+  {
+    command: "novelai.generateSynopses",
+    label: "各話あらすじを作る",
+    description: "AIを使う",
+    icon: "list-ordered",
+    requiresWork: true,
+    group: "資料",
+    detail:
+      "話ごとに150字以内のあらすじを作ります。" +
+      "ファイル名が数字だけの話には、15字以内のサブタイトル案も出します" +
+      "（選ぶとファイル名が変わります）。" +
+      "本文を変えていない話は作り直しません。",
+  },
+
   // ── 抽出した結果を整える
   {
     command: "novelai.applyPendingUpdates",

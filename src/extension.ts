@@ -26,6 +26,7 @@ import {
 } from "./features/extractCharacters";
 import { selectOllamaExecutable } from "./features/selectOllamaExecutable";
 import { generateSettingsDocs } from "./features/generateSettingsDocs";
+import { generateSynopses } from "./features/generateSynopses";
 import {
   findOpenSettingsPanel,
   openSettingsPanel,
@@ -799,6 +800,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (extracted) {
           await generateSettingsDocs(work, { silent: true });
         }
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.generateSynopses",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+
+        // 未保存のまま読むと、画面と違う本文からあらすじを作ってしまう
+        if (!(await saveDirtyDocumentsBeforeExtraction(work))) return;
+
+        await generateSynopses(work, aiRegistry);
+        // サブタイトルの承認でファイル名が変わることがある
+        treeProvider.refresh(work.id);
       }
     )
   );

@@ -149,6 +149,12 @@
         "icon": "$(sparkle)"
       },
       {
+        "command": "novelai.generateSynopses",
+        "title": "各話あらすじを作る",
+        "category": "小説執筆",
+        "icon": "$(list-ordered)"
+      },
+      {
         "command": "novelai.generateSettingsDocs",
         "title": "設定資料集を出力（AIを使わない）",
         "category": "小説執筆",
@@ -224,6 +230,11 @@
           "group": "1_stats@3"
         },
         {
+          "command": "novelai.generateSynopses",
+          "when": "view == novelai.works && viewItem == work",
+          "group": "1_stats@4"
+        },
+        {
           "command": "novelai.gitSync",
           "when": "view == novelai.works && viewItem == work",
           "group": "2_open@1"
@@ -261,6 +272,10 @@
         },
         {
           "command": "novelai.extractSettings",
+          "when": "true"
+        },
+        {
+          "command": "novelai.generateSynopses",
           "when": "true"
         },
         {
