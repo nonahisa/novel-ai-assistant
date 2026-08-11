@@ -28,6 +28,10 @@ import { selectOllamaExecutable } from "./features/selectOllamaExecutable";
 import { generateSettingsDocs } from "./features/generateSettingsDocs";
 import { generateSynopses } from "./features/generateSynopses";
 import {
+  generateCatchphrases,
+  generateWorkBlurb,
+} from "./features/generateBlurb";
+import {
   findOpenSettingsPanel,
   openSettingsPanel,
 } from "./features/settingsPanel";
@@ -817,6 +821,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await generateSynopses(work, aiRegistry);
         // サブタイトルの承認でファイル名が変わることがある
         treeProvider.refresh(work.id);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.generateWorkBlurb",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await generateWorkBlurb(work, aiRegistry);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.generateCatchphrases",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await generateCatchphrases(work, aiRegistry);
       }
     )
   );

@@ -155,6 +155,18 @@
         "icon": "$(list-ordered)"
       },
       {
+        "command": "novelai.generateWorkBlurb",
+        "title": "作品紹介文を作る",
+        "category": "小説執筆",
+        "icon": "$(book)"
+      },
+      {
+        "command": "novelai.generateCatchphrases",
+        "title": "キャッチコピー案を作る",
+        "category": "小説執筆",
+        "icon": "$(megaphone)"
+      },
+      {
         "command": "novelai.generateSettingsDocs",
         "title": "設定資料集を出力（AIを使わない）",
         "category": "小説執筆",
@@ -276,6 +288,14 @@
         },
         {
           "command": "novelai.generateSynopses",
+          "when": "true"
+        },
+        {
+          "command": "novelai.generateWorkBlurb",
+          "when": "true"
+        },
+        {
+          "command": "novelai.generateCatchphrases",
           "when": "true"
         },
         {

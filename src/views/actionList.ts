@@ -108,6 +108,31 @@ const ACTIONS: readonly CommandAction[] = [
       "本文を変えていない話は作り直しません。",
   },
 
+  {
+    command: "novelai.generateWorkBlurb",
+    label: "作品紹介文を作る",
+    description: "AIを使う",
+    icon: "book",
+    requiresWork: true,
+    group: "資料",
+    detail:
+      "プロット・冒頭の本文・各話あらすじから、投稿サイトに載せる紹介文" +
+      "（300〜400字）の案を作ります。見てから採用を決められます。" +
+      "採用すると 設定/synopsis.md に書き込みます。",
+  },
+  {
+    command: "novelai.generateCatchphrases",
+    label: "キャッチコピー案を作る",
+    description: "AIを使う",
+    icon: "megaphone",
+    requiresWork: true,
+    group: "資料",
+    detail:
+      "方向性の違う3案（謎・引き型／感情・関係性型／世界観・スケール型）を" +
+      "30字以内で出します。選ぶ・手直しする・別の案を出す、から選べます。" +
+      "採用しなかった案は覚えておき、次は違う案を出します。",
+  },
+
   // ── 抽出した結果を整える
   {
     command: "novelai.applyPendingUpdates",

@@ -1,0 +1,511 @@
+import * as vscode from "vscode";
+import * as path from "path";
+import type { WorkEntry } from "../models/types";
+import { AIRegistry, ensureConfigured } from "../ai/registry";
+import { AIError, recoveryForAIError } from "../ai/types";
+import { scanWork } from "../core/scanner";
+import { loadEpisodeBodies } from "../core/episodeBodies";
+import { SynopsisStore } from "../core/synopsisStore";
+import { CatchphraseHistory } from "../core/catchphraseHistory";
+import {
+  buildSynopsisMarkdown,
+  parseSynopsisMarkdown,
+  type SynopsisDoc,
+} from "../core/synopsisDoc";
+import { readWorkConfig, workPaths } from "../core/workRegistry";
+import { atomicWriteFile, createManagedRecoveryPath } from "../core/atomicWrite";
+import {
+  BLURB_MAX_CHARS,
+  BLURB_SCHEMA,
+  BLURB_SYSTEM_PROMPT,
+  CATCHPHRASE_MAX_CHARS,
+  CATCHPHRASE_SCHEMA,
+  buildBlurbPrompt,
+  buildCatchphrasePrompt,
+  type CatchphraseCandidate,
+} from "../prompts/blurb";
+import { stripCodeFence } from "../core/synopsisValidation";
+import { withCancellableProgress } from "../views/progress";
+import { logFailure, showLog, useLogFile } from "../core/logger";
+
+/**
+ * 作品紹介文（P-06）とキャッチコピー3案（P-08）。
+ *
+ * **どちらも自動では書き込まない。** 読者に見せる文章に正解は無く、
+ * 決めるのは作者である。案を見せて、選ばれたものだけを
+ * `設定/synopsis.md` へ書く。
+ */
+
+const SYNOPSIS_FILE = "synopsis.md";
+/** AIへ渡す冒頭本文の量。多く送っても紹介文は良くならず、料金だけ増える */
+const OPENING_EXCERPT_CHARS = 6000;
+/** 紹介文の材料にする、各話あらすじの件数 */
+const SYNOPSES_FOR_BLURB = 30;
+
+export async function generateWorkBlurb(
+  work: WorkEntry,
+  registry: AIRegistry
+): Promise<void> {
+  useLogFile(work.folderPath);
+  const resolved = await ensureConfigured(registry);
+  if (!resolved) return;
+
+  const material = await collectMaterial(work);
+  if (!material) return;
+
+  const costNotice = resolved.provider.isPaid
+    ? `\n**${resolved.provider.displayName} は呼び出すたびに課金されます。**`
+    : "";
+  const confirm = await vscode.window.showInformationMessage(
+    `作品紹介文を作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,
+    "実行",
+    "中止"
+  );
+  if (confirm !== "実行") return;
+
+  const response = await withCancellableProgress(
+    "作品紹介文を作っています",
+    async () => {
+      try {
+        return await resolved.provider.generate({
+          systemPrompt: BLURB_SYSTEM_PROMPT,
+          userPrompt: buildBlurbPrompt({
+            workTitle: material.workTitle,
+            plot: material.plot,
+            openingExcerpt: material.openingExcerpt,
+            chapterSynopses: material.chapterSynopses,
+          }),
+          model: resolved.model,
+          // 紹介文は読ませる文章なので、抽出より少し揺らす
+          temperature: 0.5,
+          jsonSchema: BLURB_SCHEMA as unknown as object,
+          disableThinking: true,
+        });
+      } catch (error) {
+        reportAIError("作品紹介文の生成", error);
+        return undefined;
+      }
+    }
+  );
+  if (!response) return;
+
+  const parsed = parseBlurbResponse(response.text);
+  if (!parsed) {
+    logFailure("作品紹介文の生成", {
+      理由: "応答を読み取れません",
+      応答: response.text.slice(0, 400),
+    });
+    vscode.window
+      .showWarningMessage("応答を読み取れませんでした。", "ログを見る")
+      .then((answer) => {
+        if (answer === "ログを見る") showLog();
+      });
+    return;
+  }
+
+  // 字数はコード側で数え直す。長すぎるものは切らずに、そのまま見せて判断させる
+  const overLength = parsed.blurb.length > BLURB_MAX_CHARS;
+  const preview = await previewText(
+    `${material.workTitle} の作品紹介文（${parsed.blurb.length}字）`,
+    [
+      parsed.blurb,
+      "",
+      parsed.spoilerCheck ? `---\n伏せた要素: ${parsed.spoilerCheck}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n")
+  );
+
+  const answer = await vscode.window.showInformationMessage(
+    `作品紹介文ができました（${parsed.blurb.length}字）。` +
+      (overLength ? `\n目安の${BLURB_MAX_CHARS}字を超えています。` : "") +
+      "\n採用すると 設定/synopsis.md に書き込みます。",
+    "採用",
+    "採用しない"
+  );
+  await closePreview(preview);
+  if (answer !== "採用") return;
+
+  await writeSynopsisDoc(work, material.workTitle, (current) => ({
+    ...current,
+    blurb: parsed.blurb,
+  }));
+}
+
+export async function generateCatchphrases(
+  work: WorkEntry,
+  registry: AIRegistry
+): Promise<void> {
+  useLogFile(work.folderPath);
+  const resolved = await ensureConfigured(registry);
+  if (!resolved) return;
+
+  const material = await collectMaterial(work);
+  if (!material) return;
+
+  const history = new CatchphraseHistory(work);
+  const costNotice = resolved.provider.isPaid
+    ? `\n**${resolved.provider.displayName} は呼び出すたびに課金されます。**`
+    : "";
+  const confirm = await vscode.window.showInformationMessage(
+    `キャッチコピーを3案作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,
+    "実行",
+    "中止"
+  );
+  if (confirm !== "実行") return;
+
+  // 「別の案を出す」を選ぶたび、却下した案を渡して繰り返す
+  for (;;) {
+    const rejected = await history.load();
+    const response = await withCancellableProgress(
+      "キャッチコピーを考えています",
+      async () => {
+        try {
+          return await resolved.provider.generate({
+            systemPrompt: BLURB_SYSTEM_PROMPT,
+            userPrompt: buildCatchphrasePrompt({
+              workTitle: material.workTitle,
+              plot: material.plot,
+              blurb: material.currentDoc.blurb,
+              openingExcerpt: material.openingExcerpt,
+              rejected,
+            }),
+            model: resolved.model,
+            // 案を出させるので、いちばん揺らす
+            temperature: 0.9,
+            jsonSchema: CATCHPHRASE_SCHEMA as unknown as object,
+            disableThinking: true,
+          });
+        } catch (error) {
+          reportAIError("キャッチコピーの生成", error);
+          return undefined;
+        }
+      }
+    );
+    if (!response) return;
+
+    const candidates = parseCatchphraseResponse(response.text);
+    const valid = candidates.filter(
+      (candidate) =>
+        candidate.text.length > 0 &&
+        candidate.text.length <= CATCHPHRASE_MAX_CHARS
+    );
+    if (valid.length === 0) {
+      logFailure("キャッチコピーの生成", {
+        理由: "使える案がありません",
+        応答: response.text.slice(0, 400),
+      });
+      const retry = await vscode.window.showWarningMessage(
+        `${CATCHPHRASE_MAX_CHARS}字以内の案が返りませんでした。`,
+        "もう一度",
+        "やめる"
+      );
+      if (retry !== "もう一度") return;
+      continue;
+    }
+
+    const picked = await vscode.window.showQuickPick(
+      [
+        ...valid.map((candidate) => ({
+          label: candidate.text,
+          description: `${candidate.text.length}字 / ${candidate.kind}`,
+          detail: candidate.intent ?? undefined,
+          action: "adopt" as const,
+          candidate,
+        })),
+        {
+          label: "$(edit) 手直しして採用",
+          description: "案をもとに自分で書く",
+          action: "edit" as const,
+          candidate: valid[0],
+        },
+        {
+          label: "$(refresh) 別の案を出す",
+          description: "今の3案は却下として覚え、もう一度作る",
+          action: "again" as const,
+          candidate: undefined,
+        },
+        {
+          label: "$(close) やめる",
+          description: "何も書き込まない",
+          action: "cancel" as const,
+          candidate: undefined,
+        },
+      ],
+      {
+        title: `${material.workTitle} のキャッチコピー`,
+        placeHolder: "採用する案を選んでください",
+        ignoreFocusOut: true,
+      }
+    );
+
+    if (!picked || picked.action === "cancel") return;
+
+    if (picked.action === "again") {
+      await history.add(valid.map((candidate) => candidate.text));
+      continue;
+    }
+
+    let text = picked.candidate.text;
+    if (picked.action === "edit") {
+      const edited = await vscode.window.showInputBox({
+        title: "キャッチコピーを手直し",
+        value: text,
+        prompt: `${CATCHPHRASE_MAX_CHARS}字以内`,
+        ignoreFocusOut: true,
+        validateInput: (value) =>
+          value.trim().length === 0
+            ? "空にはできません。"
+            : value.trim().length > CATCHPHRASE_MAX_CHARS
+              ? `${CATCHPHRASE_MAX_CHARS}字以内にしてください（今 ${value.trim().length}字）。`
+              : undefined,
+      });
+      if (!edited) return;
+      text = edited.trim();
+    }
+
+    // 採用しなかった案は、次に同じものが出ないよう覚えておく
+    await history.add(
+      valid.map((candidate) => candidate.text).filter((item) => item !== text)
+    );
+    await writeSynopsisDoc(work, material.workTitle, (current) => ({
+      ...current,
+      catchphrase: text,
+    }));
+    return;
+  }
+}
+
+interface BlurbMaterial {
+  workTitle: string;
+  plot: string;
+  openingExcerpt: string;
+  chapterSynopses: string[];
+  currentDoc: SynopsisDoc;
+}
+
+/** 紹介文・キャッチコピーの材料を集める */
+async function collectMaterial(
+  work: WorkEntry
+): Promise<BlurbMaterial | undefined> {
+  const scan = await scanWork(work);
+  if (scan.episodes.length === 0) {
+    vscode.window.showWarningMessage("本文ファイルが見つかりません。");
+    return undefined;
+  }
+
+  const bodies = (await loadEpisodeBodies(scan.episodes)).bodies;
+  if (bodies.length === 0) {
+    vscode.window.showWarningMessage("読める本文がありません。");
+    return undefined;
+  }
+
+  // 冒頭から順に、上限まで詰める。紹介文は冒頭の雰囲気が要る
+  let openingExcerpt = "";
+  for (const episode of bodies) {
+    if (openingExcerpt.length >= OPENING_EXCERPT_CHARS) break;
+    openingExcerpt += `${episode.body}\n\n`;
+  }
+  openingExcerpt = openingExcerpt.slice(0, OPENING_EXCERPT_CHARS);
+
+  let chapterSynopses: string[] = [];
+  try {
+    const set = await new SynopsisStore(work).load();
+    chapterSynopses = set.episodes
+      .slice(0, SYNOPSES_FOR_BLURB)
+      .map((item) =>
+        item.chapter !== null
+          ? `第${item.chapter}話: ${item.synopsis}`
+          : item.synopsis
+      );
+  } catch {
+    // あらすじが読めなくても紹介文は作れる。材料が減るだけ
+  }
+
+  return {
+    workTitle: work.title,
+    plot: await readPlot(work),
+    openingExcerpt,
+    chapterSynopses,
+    currentDoc: await readSynopsisDoc(work),
+  };
+}
+
+async function readPlot(work: WorkEntry): Promise<string> {
+  const config = await readWorkConfig(work);
+  const target = path.join(workPaths(work, config).settings, "plot.md");
+  try {
+    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return "";
+  }
+}
+
+async function synopsisPath(work: WorkEntry): Promise<string> {
+  const config = await readWorkConfig(work);
+  return path.join(workPaths(work, config).settings, SYNOPSIS_FILE);
+}
+
+async function readSynopsisDoc(work: WorkEntry): Promise<SynopsisDoc> {
+  try {
+    const bytes = await vscode.workspace.fs.readFile(
+      vscode.Uri.file(await synopsisPath(work))
+    );
+    return parseSynopsisMarkdown(new TextDecoder().decode(bytes));
+  } catch {
+    return { catchphrase: null, blurb: "" };
+  }
+}
+
+/**
+ * `synopsis.md` を書き換える。
+ *
+ * **今ある内容を読んでから、変える部分だけを差し替える。**
+ * 紹介文を作り直しても採用済みのキャッチコピーは残す（その逆も同じ）。
+ * 元の内容は回復先へ退避してから書く（既存ファイルは上書きできない）。
+ */
+async function writeSynopsisDoc(
+  work: WorkEntry,
+  workTitle: string,
+  update: (current: SynopsisDoc) => SynopsisDoc
+): Promise<void> {
+  const target = await synopsisPath(work);
+  const current = await readSynopsisDoc(work);
+  const next = update(current);
+  const body = buildSynopsisMarkdown(workTitle, next);
+
+  await vscode.workspace.fs.createDirectory(
+    vscode.Uri.file(path.dirname(target))
+  );
+
+  let recoveryPath: string | undefined;
+  if (await exists(target)) {
+    try {
+      recoveryPath = await createManagedRecoveryPath(target);
+      await vscode.workspace.fs.rename(
+        vscode.Uri.file(target),
+        vscode.Uri.file(recoveryPath),
+        { overwrite: false }
+      );
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        `${SYNOPSIS_FILE} を退避できませんでした: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return;
+    }
+  }
+
+  try {
+    await atomicWriteFile(target, new TextEncoder().encode(body), {
+      mode: "create",
+    });
+    const opened = await vscode.workspace.openTextDocument(
+      vscode.Uri.file(target)
+    );
+    await vscode.window.showTextDocument(opened, { preview: false });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    vscode.window.showErrorMessage(
+      recoveryPath
+        ? `${SYNOPSIS_FILE} を保存できませんでした: ${detail} 元の内容は「${recoveryPath}」にあります。`
+        : `${SYNOPSIS_FILE} を保存できませんでした: ${detail}`
+    );
+  }
+}
+
+/** 採用前に中身を読んでもらうための一時表示 */
+async function previewText(
+  title: string,
+  content: string
+): Promise<vscode.TextEditor | undefined> {
+  try {
+    const document = await vscode.workspace.openTextDocument({
+      content: `${title}\n\n${content}\n`,
+      language: "markdown",
+    });
+    return await vscode.window.showTextDocument(document, { preview: true });
+  } catch {
+    return undefined;
+  }
+}
+
+async function closePreview(editor: vscode.TextEditor | undefined): Promise<void> {
+  if (!editor) return;
+  try {
+    await vscode.window.showTextDocument(editor.document, {
+      preview: true,
+      preserveFocus: false,
+    });
+    await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+  } catch {
+    // 閉じられなくても実害は無い
+  }
+}
+
+export function parseBlurbResponse(
+  text: string
+): { blurb: string; spoilerCheck: string | null } | null {
+  const value = parseJson(text);
+  if (!value || typeof value.blurb !== "string") return null;
+  const blurb = value.blurb.trim();
+  if (!blurb) return null;
+  return {
+    blurb,
+    spoilerCheck:
+      typeof value.spoilerCheck === "string" ? value.spoilerCheck : null,
+  };
+}
+
+export function parseCatchphraseResponse(text: string): CatchphraseCandidate[] {
+  const value = parseJson(text);
+  if (!value || !Array.isArray(value.catchphrases)) return [];
+  return value.catchphrases
+    .filter(
+      (entry): entry is Record<string, unknown> =>
+        typeof entry === "object" && entry !== null && !Array.isArray(entry)
+    )
+    .filter((entry) => typeof entry.text === "string")
+    .map((entry) => ({
+      text: (entry.text as string).trim().replace(/\s+/g, " "),
+      kind: typeof entry.kind === "string" ? entry.kind : "",
+      intent: typeof entry.intent === "string" ? entry.intent : null,
+    }));
+}
+
+function parseJson(text: string): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(stripCodeFence(text));
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return null;
+    }
+    return value as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function reportAIError(context: string, error: unknown): void {
+  const message =
+    error instanceof AIError
+      ? `${error.message} ${recoveryForAIError(error)}`
+      : error instanceof Error
+        ? error.message
+        : String(error);
+  logFailure(context, {
+    種別: error instanceof AIError ? error.kind : "unknown",
+    内容: message,
+  });
+  vscode.window.showWarningMessage(`${context}に失敗しました: ${message}`);
+}
+
+async function exists(filePath: string): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+    return true;
+  } catch {
+    return false;
+  }
+}
