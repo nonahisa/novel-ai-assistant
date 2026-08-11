@@ -2,6 +2,8 @@ import * as vscode from "vscode";
 import { EpisodeFile, WorkEntry, WorkStats } from "../models/types";
 import { formatCount, toManuscriptPages } from "../core/charCount";
 import { scanWork } from "../core/scanner";
+import { SynopsisStore } from "../core/synopsisStore";
+import { synopsisKey } from "../models/synopsis";
 import { WorkRegistry } from "../core/workRegistry";
 
 export type TreeNode = WorkNode | EpisodeNode | MessageNode;
@@ -40,6 +42,15 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   >();
 
   /**
+   * 各話あらすじ（作品ID -> 話ごとの本文）。
+   *
+   * ホバーに出すために持つ。**あらすじはJSONにしか無く、
+   * 読む場所が無かった。** 一覧の各話にカーソルを置いたときが、
+   * いちばん自然に読める場所である。
+   */
+  private synopses = new Map<string, Map<string, string>>();
+
+  /**
    * @param syncBadge GitHub同期の遅れを短く表す文字列を返す。
    *   ツリーがGit連携そのものに依存しないよう、関数で受け取る。
    */
@@ -53,8 +64,10 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   refresh(workId?: string): void {
     if (workId) {
       this.cache.delete(workId);
+      this.synopses.delete(workId);
     } else {
       this.cache.clear();
+      this.synopses.clear();
     }
     this._onDidChangeTreeData.fire();
   }
@@ -185,6 +198,10 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       }
     }
 
+    // あらすじはJSONにしか無く、読む場所が無かった。
+    // その話にカーソルを置いたときが、いちばん自然に読める場所である
+    const synopsis = this.synopsisFor(node.work, ep);
+
     item.tooltip = new vscode.MarkdownString(
       [
         `**${
@@ -193,6 +210,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
             ep.fileName)
         }**`,
         "",
+        synopsis ? `${synopsis}\n` : null,
         // 一覧からファイル名を外したので、ホバーでは必ず出す
         `- ファイル: ${ep.fileName}`,
         `- 種別: ${ep.kind}`,
@@ -235,10 +253,41 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
           new MessageNode("本文ファイルがありません（txt / md）"),
         ];
       }
+      await this.loadSynopses(node.work);
       return result.episodes.map((e) => new EpisodeNode(node.work, e));
     }
 
     return [];
+  }
+
+  /**
+   * あらすじを読み込む。読めなくても一覧は出す。
+   *
+   * ホバーに添えるだけの情報なので、失敗しても作品一覧を止めない。
+   */
+  private async loadSynopses(work: WorkEntry): Promise<void> {
+    if (this.synopses.has(work.id)) return;
+    const byKey = new Map<string, string>();
+    try {
+      const set = await new SynopsisStore(work).load();
+      for (const episode of set.episodes) {
+        byKey.set(
+          synopsisKey(episode.fileName, episode.chapter),
+          episode.synopsis
+        );
+      }
+    } catch {
+      // 壊れていても一覧は出す。理由は生成時に知らせている
+    }
+    this.synopses.set(work.id, byKey);
+  }
+
+  /** その話のあらすじ。無ければ undefined */
+  private synopsisFor(work: WorkEntry, episode: EpisodeFile): string | undefined {
+    const byKey = this.synopses.get(work.id);
+    if (!byKey) return undefined;
+    // 合本は1ファイルに複数話が入るので、話数だけでは引けない
+    return byKey.get(synopsisKey(episode.fileName, episode.chapterStart));
   }
 
   private async load(work: WorkEntry) {

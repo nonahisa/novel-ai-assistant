@@ -19,6 +19,9 @@ import {
   buildWorldMarkdown,
 } from "../core/settingsMarkdown";
 import { CustomFieldStore } from "../core/customFieldStore";
+import { SynopsisStore } from "../core/synopsisStore";
+import { emptySynopsisSet } from "../models/synopsis";
+import { buildSynopsisListMarkdown } from "../core/synopsisMarkdown";
 import { buildSchemaFiles, SCHEMA_DIR } from "../core/settingsSchema";
 import { logFailure } from "../core/logger";
 
@@ -133,6 +136,14 @@ export async function generateSettingsDocs(
   // 項目の定義が読めなくても資料は作る。追加項目の欄が出ないだけで、
   // 既定の項目まで書き出せなくなるほうが困る
   const customFields = await new CustomFieldStore(work).loadFields();
+
+  // あらすじが読めなくても他の資料は作る。壊れたJSONで全部を止めない
+  let synopses = emptySynopsisSet();
+  try {
+    synopses = await new SynopsisStore(work).load();
+  } catch {
+    // 生成できないのはあらすじの節だけ。理由は生成時に既に知らせている
+  }
   const markdownOptions = { workTitle: work.title, customFields };
   const abilityTerm = abilitySystem.abilityTerm || "能力";
 
@@ -178,6 +189,15 @@ export async function generateSettingsDocs(
       label: "世界観",
       content: buildWorldMarkdown(loadedWorld.records, markdownOptions),
       hasContent: loadedWorld.records.length > 0,
+    },
+    {
+      // あらすじはJSONで持っているが、そのままでは作者が読めない。
+      // 通して読む（前の話から筋が繋がっているかを確かめる）ものなので、
+      // 話数順に並べた1つの文書として書き出す
+      fileName: "synopses.md",
+      label: "各話あらすじ",
+      content: buildSynopsisListMarkdown(synopses, markdownOptions),
+      hasContent: synopses.episodes.length > 0,
     },
   ];
 

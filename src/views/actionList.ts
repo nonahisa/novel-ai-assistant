@@ -102,6 +102,17 @@ const ACTIONS: readonly CommandAction[] = [
   },
 
   {
+    command: "novelai.openSynopsisDocs",
+    label: "紹介文・あらすじを読む",
+    description: "AIを使わない",
+    icon: "book",
+    requiresWork: true,
+    group: "資料",
+    detail:
+      "作品紹介文（synopsis.md）と各話あらすじ（synopses.md）を" +
+      "プレビューで開きます。まだ無ければ、作る操作を案内します。",
+  },
+  {
     command: "novelai.generateWorkBlurb",
     label: "作品紹介文を作る",
     description: "AIを使う",

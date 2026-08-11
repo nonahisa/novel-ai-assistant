@@ -818,9 +818,79 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // 未保存のまま読むと、画面と違う本文からあらすじを作ってしまう
         if (!(await saveDirtyDocumentsBeforeExtraction(work))) return;
 
-        await generateSynopses(work, aiRegistry);
+        const generated = await generateSynopses(work, aiRegistry);
         // サブタイトルの承認でファイル名が変わることがある
         treeProvider.refresh(work.id);
+
+        // JSONのままでは作者が読めない。読める資料まで作って初めて完成する
+        if (generated) {
+          await generateSettingsDocs(work, { silent: true });
+        }
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.openSynopsisDocs",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+
+        // 読む場所は「設定」フォルダの中で、生成物と手書きで分かれている。
+        // 作者にフォルダを探させず、両方を並べて選ばせる
+        const config = await readWorkConfig(work);
+        const settingsDir = workPaths(work, config).settings;
+        const candidates = [
+          {
+            label: "$(book) 作品紹介文",
+            description: "synopsis.md",
+            detail:
+              "投稿サイトに載せる紹介文とキャッチコピー。作者が手で直せます。",
+            file: path.join(settingsDir, "synopsis.md"),
+          },
+          {
+            label: "$(list-ordered) 各話あらすじ",
+            description: "synopses.md",
+            detail:
+              "話数順に並べた読み物。「設定資料集を出力」で作り直されます。",
+            file: path.join(settingsDir, "synopses.md"),
+          },
+        ];
+
+        const available: typeof candidates = [];
+        for (const candidate of candidates) {
+          if (await pathExists(candidate.file)) available.push(candidate);
+        }
+
+        if (available.length === 0) {
+          const action = await vscode.window.showInformationMessage(
+            "まだ紹介文もあらすじもありません。",
+            "各話あらすじを作る",
+            "作品紹介文を作る"
+          );
+          if (action === "各話あらすじを作る") {
+            await vscode.commands.executeCommand("novelai.generateSynopses");
+          } else if (action === "作品紹介文を作る") {
+            await vscode.commands.executeCommand("novelai.generateWorkBlurb");
+          }
+          return;
+        }
+
+        const picked =
+          available.length === 1
+            ? available[0]
+            : await vscode.window.showQuickPick(available, {
+                title: `${work.title} の紹介文・あらすじ`,
+                placeHolder: "開くものを選んでください",
+              });
+        if (!picked) return;
+
+        // Markdownはプレビューで開く。作者が読みたいのは書式の付いた状態
+        await vscode.commands.executeCommand(
+          "markdown.showPreview",
+          vscode.Uri.file(picked.file)
+        );
       }
     )
   );

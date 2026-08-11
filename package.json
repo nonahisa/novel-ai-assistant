@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "小説AI執筆補助",
   "description": "小説執筆のための作品管理・文字数計測・AI支援機能",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "publisher": "local",
   "private": true,
   "license": "MIT",
@@ -155,6 +155,12 @@
         "icon": "$(list-ordered)"
       },
       {
+        "command": "novelai.openSynopsisDocs",
+        "title": "紹介文・あらすじを読む",
+        "category": "小説執筆",
+        "icon": "$(book)"
+      },
+      {
         "command": "novelai.generateWorkBlurb",
         "title": "作品紹介文を作る",
         "category": "小説執筆",
@@ -288,6 +294,10 @@
         },
         {
           "command": "novelai.generateSynopses",
+          "when": "true"
+        },
+        {
+          "command": "novelai.openSynopsisDocs",
           "when": "true"
         },
         {
