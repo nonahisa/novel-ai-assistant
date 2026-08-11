@@ -59,17 +59,10 @@ const ACTIONS: readonly CommandAction[] = [
       "抽出した登場人物・能力・場所を一覧で見ます。" +
       "その場で書き換えたり、AIに項目を埋めさせたり、相談したりできます。",
   },
-  {
-    command: "novelai.showSettingsForTerm",
-    label: "設定情報を表示",
-    description: "",
-    icon: "book",
-    requiresWork: true,
-    group: "資料",
-    detail:
-      "本文中の人名などにカーソルを置いて実行すると、その設定を右側に開きます。" +
-      "以後は本文をクリックするたび、その用語の設定へ切り替わります。",
-  },
+  // 「設定情報を表示」（novelai.showSettingsForTerm）はここに置かない。
+  // 本文にカーソルを置いた状態で実行する操作なので、
+  // 操作メニューから押しても対象が定まらず、動かない。
+  // 本文の右クリックメニューにだけ出す（package.json の editor/context）
   {
     command: "novelai.extractSettings",
     label: "設定資料を抽出",
