@@ -4,6 +4,7 @@ import type { Character } from "../models/character";
 import type { AiNote } from "../models/aiNote";
 import type { CustomFieldDefinition } from "../models/customField";
 import { membersOf, type Organization } from "../models/organization";
+import type { RecordConflict } from "../models/jsonValidation";
 import {
   WORLD_CATEGORIES,
   WORLD_CATEGORY_LABELS,
@@ -116,7 +117,7 @@ function describeAbility(ability: Ability, term: string): string[] {
   // 作者の判断待ちを資料に残す。黙って片方だけ載せない
   for (const conflict of ability.conflicts) {
     lines.push(
-      `- **要確認（${conflict.field}）**: ${conflict.values.join(" / ")}`
+      `- **変化かもしれない（${conflict.field}）**: ${describeConflictValues(conflict)}`
     );
   }
   lines.push(...aiNoteLines(ability.aiNotes));
@@ -202,7 +203,7 @@ export function buildOrganizationMarkdown(
       }
       for (const conflict of organization.conflicts) {
         lines.push(
-          `- **要確認（${conflict.field}）**: ${conflict.values.join(" / ")}`
+          `- **変化かもしれない（${conflict.field}）**: ${describeConflictValues(conflict)}`
         );
       }
       lines.push(...aiNoteLines(organization.aiNotes));
@@ -281,7 +282,7 @@ export function buildWorldMarkdown(
       }
       for (const conflict of item.conflicts) {
         lines.push(
-          `- **要確認（${conflict.field}）**: ${conflict.values.join(" / ")}`
+          `- **変化かもしれない（${conflict.field}）**: ${describeConflictValues(conflict)}`
         );
       }
       lines.push(...aiNoteLines(item.aiNotes));
@@ -332,7 +333,7 @@ export function buildLocationMarkdown(
       }
       for (const conflict of location.conflicts) {
         lines.push(
-          `- **要確認（${conflict.field}）**: ${conflict.values.join(" / ")}`
+          `- **変化かもしれない（${conflict.field}）**: ${describeConflictValues(conflict)}`
         );
       }
       lines.push(...aiNoteLines(location.aiNotes));
@@ -495,12 +496,47 @@ function describeCharacter(
   }
   for (const conflict of character.conflicts) {
     lines.push(
-      `- **要確認（${conflict.field}）**: ${conflict.values.join(" / ")}`
+      `- **変化かもしれない（${conflict.field}）**: ${describeConflictValues(conflict)}`
     );
   }
   lines.push(...aiNoteLines(character.aiNotes));
   lines.push("");
   return lines;
+}
+
+/**
+ * 食い違いを「作中での変化」として読める形にする。
+ *
+ * **小説では登場人物が作中で変わる。** 髪を切る、立場が変わる、口調が変わる。
+ * 値が2つ並んでいるだけでは、AIの取り違えなのか作中での変化なのか
+ * 読み分けられない。**話数と並べれば読み分けられる**（作者の指摘、2026-08-11）。
+ *
+ *   黒髪（それ以前）→ 銀髪（第7話）
+ *
+ * 話数の無い値を「それ以前」と書くのは、
+ * 食い違いに気づく前から入っていた値で、どの話で書かれたかの記録が無いためである。
+ * 推測で埋めると、書いていない話まで含んだ表示になってしまう。
+ */
+export function describeConflictValues(conflict: RecordConflict): string {
+  const observations = conflict.observations;
+  if (!observations || observations.length === 0) {
+    // 古いデータには値ごとの話数が無い。これまでどおり値だけを並べる
+    return conflict.values.join(" / ");
+  }
+  return [...observations]
+    .sort((a, b) => firstChapter(a.chapters) - firstChapter(b.chapters))
+    .map((item) => {
+      const chapters =
+        item.chapters.length > 0 ? formatChapters(item.chapters) : "それ以前";
+      return `${item.value}（${chapters}）`;
+    })
+    // 全角の閉じ括弧が右に余白を持つので、矢印の前に空白は入れない
+    .join("→ ");
+}
+
+/** 並べ替え用。話数が無いものは、気づく前からあった値なので先に置く */
+function firstChapter(chapters: number[]): number {
+  return chapters.length > 0 ? Math.min(...chapters) : -1;
 }
 
 /** 連番は範囲にまとめる。「1, 2, 3, 7」→「1〜3, 7」 */

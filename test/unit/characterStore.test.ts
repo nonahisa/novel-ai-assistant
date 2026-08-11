@@ -748,6 +748,28 @@ describe("人物ファイル検証", () => {
     expect(parsed.authorNotes).toBe("");
   });
 
+  test("食い違いの値ごとの話数を読み込みで落とさない", () => {
+    const parsed = parseCharacter({
+      id: "char_001",
+      name: "灯",
+      conflicts: [
+        {
+          field: "appearance",
+          values: ["黒髪", "銀髪"],
+          observations: [
+            { value: "黒髪", chapters: [1] },
+            { value: "銀髪", chapters: [7] },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.conflicts[0].observations).toEqual([
+      { value: "黒髪", chapters: [1] },
+      { value: "銀髪", chapters: [7] },
+    ]);
+  });
+
   test("ファイル名へ使えない人物IDを拒否する", () => {
     expect(() => parseCharacter({ id: "../outside", name: "灯" })).toThrow("id");
   });

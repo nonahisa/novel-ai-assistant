@@ -42,7 +42,11 @@ import {
   KIND_LABELS,
   type SettingsKind,
 } from "../core/settingsSummary";
-import { formatChapters } from "../core/settingsMarkdown";
+import {
+  describeConflictValues,
+  formatChapters,
+} from "../core/settingsMarkdown";
+import type { RecordConflict } from "../models/jsonValidation";
 import {
   buildAbilityListItems,
   buildCharacterListItems,
@@ -1032,15 +1036,19 @@ function customFieldControls(
  * 抽出根拠が「AIがどこを見てそう書いたか」を確かめる唯一の手掛かりだからである。
  *
  * 食い違いを先に置くのは、こちらだけが作者の操作を待っているため。
+ *
+ * 「食い違い」ではなく「変化かもしれない」と書くのは、
+ * 小説では登場人物が作中で変わるからである。AIの取り違えと
+ * 作中での変化を区別できるよう、値を話数と並べて出す。
  */
 function referenceLines(
-  conflicts: Array<{ field: string; values: string[]; note: string | null }>,
+  conflicts: RecordConflict[],
   evidence: string | null
 ): Array<{ label: string; value: string }> {
   return [
     ...conflicts.map((conflict) => ({
-      label: `食い違い（${conflict.field}）`,
-      value: [conflict.values.join(" / "), conflict.note ?? ""]
+      label: `変化かもしれない（${conflict.field}）`,
+      value: [describeConflictValues(conflict), conflict.note ?? ""]
         .filter((part) => part)
         .join(" — "),
     })),

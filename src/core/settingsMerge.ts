@@ -30,6 +30,10 @@ import type {
   ExtractedWorldItem,
 } from "../prompts/characterExtract";
 import { clampSummary } from "./summaryLimit";
+import {
+  recordObservation,
+  type RecordConflict,
+} from "../models/jsonValidation";
 import { fillReading } from "./reading";
 
 /**
@@ -163,7 +167,7 @@ function applyWorldItem(
 
   changed = mergeAliases(target, incoming.name, []) || changed;
   changed =
-    fillOrConflict(target, "description", incoming.description, conflicts) ||
+    fillOrConflict(target, "description", incoming.description, chapters, conflicts) ||
     changed;
 
   /**
@@ -413,7 +417,7 @@ function applyOrganization(
   let changed = false;
 
   changed = mergeAliases(target, incoming.name, incoming.aliases) || changed;
-  changed = fillOrConflict(target, "reading", incoming.reading, conflicts) || changed;
+  changed = fillOrConflict(target, "reading", incoming.reading, chapters, conflicts) || changed;
   // カタカナならコード側で確実に作る。漢字だけAIの推定に委ねる
   const derivedReading = fillReading(target.reading, target.name);
   if (derivedReading !== target.reading) {
@@ -421,13 +425,13 @@ function applyOrganization(
     changed = true;
   }
   changed =
-    fillOrConflict(target, "summary", clampSummary(incoming.summary), conflicts) ||
+    fillOrConflict(target, "summary", clampSummary(incoming.summary), chapters, conflicts) ||
     changed;
-  changed = fillOrConflict(target, "parent", incoming.parent, conflicts) || changed;
+  changed = fillOrConflict(target, "parent", incoming.parent, chapters, conflicts) || changed;
   changed =
-    fillOrConflict(target, "category", incoming.category, conflicts) || changed;
+    fillOrConflict(target, "category", incoming.category, chapters, conflicts) || changed;
   changed =
-    fillOrConflict(target, "description", incoming.description, conflicts) || changed;
+    fillOrConflict(target, "description", incoming.description, chapters, conflicts) || changed;
 
   if (!target.evidence && incoming.evidence) {
     target.evidence = incoming.evidence;
@@ -450,7 +454,7 @@ function applyAbility(
   let changed = false;
 
   changed = mergeAliases(target, incoming.name, incoming.aliases) || changed;
-  changed = fillOrConflict(target, "reading", incoming.reading, conflicts) || changed;
+  changed = fillOrConflict(target, "reading", incoming.reading, chapters, conflicts) || changed;
   // カタカナならコード側で確実に作る。漢字だけAIの推定に委ねる
   const derivedReading = fillReading(target.reading, target.name);
   if (derivedReading !== target.reading) {
@@ -459,14 +463,14 @@ function applyAbility(
   }
   // 紹介文の長さはコード側で確かめる。プロンプトの指示だけでは守られない
   changed =
-    fillOrConflict(target, "summary", clampSummary(incoming.summary), conflicts) ||
+    fillOrConflict(target, "summary", clampSummary(incoming.summary), chapters, conflicts) ||
     changed;
-  changed = fillOrConflict(target, "category", incoming.category, conflicts) || changed;
+  changed = fillOrConflict(target, "category", incoming.category, chapters, conflicts) || changed;
   changed =
-    fillOrConflict(target, "description", incoming.description, conflicts) || changed;
-  changed = fillOrConflict(target, "cost", incoming.cost, conflicts) || changed;
+    fillOrConflict(target, "description", incoming.description, chapters, conflicts) || changed;
+  changed = fillOrConflict(target, "cost", incoming.cost, chapters, conflicts) || changed;
   changed =
-    fillOrConflict(target, "limitation", incoming.limitation, conflicts) || changed;
+    fillOrConflict(target, "limitation", incoming.limitation, chapters, conflicts) || changed;
 
   for (const user of incoming.userNames ?? []) {
     const trimmed = user.trim();
@@ -497,7 +501,7 @@ function applyLocation(
   let changed = false;
 
   changed = mergeAliases(target, incoming.name, incoming.aliases) || changed;
-  changed = fillOrConflict(target, "reading", incoming.reading, conflicts) || changed;
+  changed = fillOrConflict(target, "reading", incoming.reading, chapters, conflicts) || changed;
   // カタカナならコード側で確実に作る。漢字だけAIの推定に委ねる
   const derivedReading = fillReading(target.reading, target.name);
   if (derivedReading !== target.reading) {
@@ -505,11 +509,11 @@ function applyLocation(
     changed = true;
   }
   changed =
-    fillOrConflict(target, "summary", clampSummary(incoming.summary), conflicts) ||
+    fillOrConflict(target, "summary", clampSummary(incoming.summary), chapters, conflicts) ||
     changed;
-  changed = fillOrConflict(target, "region", incoming.region, conflicts) || changed;
+  changed = fillOrConflict(target, "region", incoming.region, chapters, conflicts) || changed;
   changed =
-    fillOrConflict(target, "description", incoming.description, conflicts) || changed;
+    fillOrConflict(target, "description", incoming.description, chapters, conflicts) || changed;
 
   if (!target.evidence && incoming.evidence) {
     target.evidence = incoming.evidence;
@@ -552,15 +556,12 @@ function mergeAliases(
  * 設定側と本文側のどちらが正しいかはAIには判断できないため、
  * 既存の記述を消さずに作者へ委ねる。
  */
-function fillOrConflict<T extends { name: string; conflicts: Array<{
-  field: string;
-  values: string[];
-  chapters: number[];
-  note: string | null;
-}> }>(
+function fillOrConflict<T extends { name: string; conflicts: RecordConflict[] }>(
   target: T,
   field: keyof T & string,
   incoming: string | null | undefined,
+  /** この値が出てきた話数。食い違いを「作中での変化」として読めるようにする */
+  chapters: number[],
   conflicts: Array<{ name: string; field: string; values: string[] }>
 ): boolean {
   const value = incoming?.trim();
@@ -583,6 +584,7 @@ function fillOrConflict<T extends { name: string; conflicts: Array<{
   if (already) {
     if (!already.values.includes(value)) {
       already.values.push(value);
+      recordObservation(already, value, chapters);
       conflicts.push({ name: target.name, field, values: already.values });
       return true;
     }
@@ -594,6 +596,13 @@ function fillOrConflict<T extends { name: string; conflicts: Array<{
     values: [current, value],
     chapters: [],
     note: null,
+    // 先にあった値がどの話で書かれたかは記録が無いので、空にしておく。
+    // 推測で埋めると「第1〜9話は黒髪」のような、書いていない話まで
+    // 含んだ表示になってしまう
+    observations: [
+      { value: current, chapters: [] },
+      { value, chapters: [...chapters] },
+    ],
   });
   conflicts.push({ name: target.name, field, values: [current, value] });
   return true;

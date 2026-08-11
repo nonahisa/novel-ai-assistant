@@ -3,6 +3,7 @@ import {
   buildAbilityMarkdown,
   buildCharacterMarkdown,
   buildLocationMarkdown,
+  describeConflictValues,
   formatChapters,
 } from "../../src/core/settingsMarkdown";
 import { emptyAbility, emptyAbilitySystem } from "../../src/models/ability";
@@ -84,7 +85,7 @@ describe("能力一覧", () => {
 
     const md = buildAbilityMarkdown([ability], emptyAbilitySystem(), options);
 
-    expect(md).toContain("要確認（cost）");
+    expect(md).toContain("変化かもしれない（cost）");
     expect(md).toContain("魔力 / 詠唱3秒");
   });
 
@@ -225,5 +226,48 @@ describe("登場人物一覧", () => {
     expect(buildCharacterMarkdown([], options)).toContain(
       "まだ登場人物が登録されていません"
     );
+  });
+});
+
+describe("食い違いの表記", () => {
+  test("値ごとの話数を並べて変化として読める形にする", () => {
+    expect(
+      describeConflictValues({
+        field: "appearance",
+        values: ["黒髪", "銀髪"],
+        chapters: [],
+        note: null,
+        observations: [
+          { value: "銀髪", chapters: [7, 8] },
+          { value: "黒髪", chapters: [1, 2, 3] },
+        ],
+      })
+    ).toBe("黒髪（第1〜3話）→ 銀髪（第7、8話）");
+  });
+
+  test("話数の記録が無い値は「それ以前」として先に置く", () => {
+    expect(
+      describeConflictValues({
+        field: "appearance",
+        values: ["黒髪", "銀髪"],
+        chapters: [],
+        note: null,
+        observations: [
+          { value: "黒髪", chapters: [] },
+          { value: "銀髪", chapters: [7] },
+        ],
+      })
+    ).toBe("黒髪（それ以前）→ 銀髪（第7話）");
+  });
+
+  test("値ごとの話数を持たない古いデータは値だけを並べる", () => {
+    expect(
+      describeConflictValues({
+        field: "appearance",
+        values: ["黒髪", "銀髪"],
+        chapters: [1],
+        note: null,
+      })
+    ).toBe("黒髪 / 銀髪");
   });
 });

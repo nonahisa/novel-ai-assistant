@@ -341,6 +341,30 @@ describe("登場人物マージ", () => {
     ]);
   });
 
+  test("食い違った値を話数とともに記録する", () => {
+    const existing = emptyCharacter("char_001", "灯");
+    existing.appearance = "黒髪";
+
+    const first = mergeExtractedCharacters([existing], [
+      { data: { name: "灯", appearance: "銀髪" }, chapters: [7] },
+    ]);
+    // 同じ値が別の話にも出てきたら、話数だけを足す
+    const second = mergeExtractedCharacters(first.characters, [
+      { data: { name: "灯", appearance: "赤髪" }, chapters: [12] },
+    ]);
+
+    expect(first.characters[0].conflicts[0].observations).toEqual([
+      // 元からあった値は、どの話で書かれたかの記録が無いので空
+      { value: "黒髪", chapters: [] },
+      { value: "銀髪", chapters: [7] },
+    ]);
+    expect(second.characters[0].conflicts[0].observations).toEqual([
+      { value: "黒髪", chapters: [] },
+      { value: "銀髪", chapters: [7] },
+      { value: "赤髪", chapters: [12] },
+    ]);
+  });
+
   test("詳細な記述を採用し既存の競合候補を重複なく追加する", () => {
     const existing = emptyCharacter("char_001", "灯");
     existing.role = "騎士";

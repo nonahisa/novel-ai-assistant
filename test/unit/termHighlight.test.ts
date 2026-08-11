@@ -128,7 +128,7 @@ describe("ホバー資料", () => {
       settings({ characters: new Map([["char_001", character]]) })
     );
 
-    expect(md.value).toContain("要確認");
+    expect(md.value).toContain("変化かもしれない");
     expect(md.value).toContain("黒髪");
     expect(md.value).toContain("銀髪");
   });

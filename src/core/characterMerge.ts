@@ -9,6 +9,7 @@ import { clampSummary } from "./summaryLimit";
 import { fillReading } from "./reading";
 import { normalizeGender } from "./gender";
 import { isMeaningfulValue } from "./characterExtractionValidation";
+import { recordObservation } from "../models/jsonValidation";
 
 /**
  * 抽出結果を既存の人物一覧へマージする。
@@ -171,7 +172,7 @@ function applyExtracted(
   // 読みはカタカナならコード側で確実に作る。
   // 漢字を含む名前だけAIの推定（ex.reading）に委ねる
   changed =
-    fillOrConflict(target, "reading", ex.reading, conflicts) || changed;
+    fillOrConflict(target, "reading", ex.reading, validChapters, conflicts) || changed;
   const derived = fillReading(target.reading, target.name);
   if (derived !== target.reading) {
     target.reading = derived;
@@ -181,23 +182,23 @@ function applyExtracted(
   // 紹介文は長さをコード側で確かめてから入れる。
   // プロンプトで字数を指示しても、モデルは平気で超えてくる
   changed =
-    fillOrConflict(target, "summary", clampSummary(ex.summary), conflicts) ||
+    fillOrConflict(target, "summary", clampSummary(ex.summary), validChapters, conflicts) ||
     changed;
   changed =
-    fillOrConflict(target, "affiliation", ex.affiliation, conflicts) || changed;
+    fillOrConflict(target, "affiliation", ex.affiliation, validChapters, conflicts) || changed;
 
   // 性別はAIが本文の言い方のまま返してくるので、ここで「男性」「女性」に揃える。
   // 揃えないと、同じ人物が話ごとに「男」「男性」と揺れて食い違い扱いになる
   changed =
-    fillOrConflict(target, "gender", normalizeGender(ex.gender), conflicts) ||
+    fillOrConflict(target, "gender", normalizeGender(ex.gender), validChapters, conflicts) ||
     changed;
 
   // 単純なテキスト項目: 空なら埋める。既にあれば食い違いを記録し、上書きしない
-  changed = fillOrConflict(target, "role", ex.role, conflicts) || changed;
+  changed = fillOrConflict(target, "role", ex.role, validChapters, conflicts) || changed;
   changed =
-    fillOrConflict(target, "personality", ex.personality, conflicts) || changed;
+    fillOrConflict(target, "personality", ex.personality, validChapters, conflicts) || changed;
   changed =
-    fillOrConflict(target, "appearance", ex.appearance, conflicts) || changed;
+    fillOrConflict(target, "appearance", ex.appearance, validChapters, conflicts) || changed;
 
   // 一人称
   if (ex.firstPerson) {
@@ -341,6 +342,8 @@ function fillOrConflict(
     | "personality"
     | "appearance",
   incoming: string | null | undefined,
+  /** この値が出てきた話数。食い違いを『変化』として読めるようにする */
+  chapters: number[],
   conflicts: MergeResult["conflicts"]
 ): boolean {
   const value = incoming?.trim();
@@ -367,6 +370,7 @@ function fillOrConflict(
   if (already) {
     if (!already.values.includes(value)) {
       already.values.push(value);
+      recordObservation(already, value, chapters);
       conflicts.push({
         characterName: target.name,
         field,
@@ -382,6 +386,13 @@ function fillOrConflict(
     values: [current, value],
     chapters: [...target.appearedChapters],
     note: null,
+    // 値ごとの話数を残す。並べれば「作中で変わった」のか
+    // 「AIが取り違えた」のかを作者が読み分けられる。
+    // 先にあった値がどの話で書かれたかは記録が無いので、空にしておく
+    observations: [
+      { value: current, chapters: [] },
+      { value, chapters: [...chapters] },
+    ],
   });
   conflicts.push({
     characterName: target.name,

@@ -74,6 +74,11 @@ describe("能力のマージ", () => {
     expect(result.conflicts).toEqual([
       { name: "灯火", field: "cost", values: ["微量の魔力", "詠唱3秒"] },
     ]);
+    // 話数と並べれば、作中での変化かどうかを作者が読み分けられる
+    expect(result.abilities[0].conflicts[0].observations).toEqual([
+      { value: "微量の魔力", chapters: [] },
+      { value: "詠唱3秒", chapters: [2] },
+    ]);
   });
 
   test("入力レコードを書き換えない", () => {

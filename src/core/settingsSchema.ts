@@ -80,7 +80,8 @@ function commonProperties(idPattern: string): Record<string, unknown> {
     },
     conflicts: {
       type: "array",
-      description: "設定と本文の食い違い。作者の判断待ちなので勝手に消さない",
+      description:
+        "設定と本文の食い違い（作中での変化かもしれない）。作者の判断待ちなので勝手に消さない",
       items: {
         type: "object",
         properties: {
@@ -88,6 +89,19 @@ function commonProperties(idPattern: string): Record<string, unknown> {
           values: { type: "array", items: { type: "string" } },
           chapters: { type: "array", items: { type: "integer" } },
           note: { type: ["string", "null"] },
+          observations: {
+            type: "array",
+            description:
+              "値ごとに、その値が出てきた話数。作中での変化かどうかを読み分けるためのもの",
+            items: {
+              type: "object",
+              properties: {
+                value: { type: "string" },
+                chapters: { type: "array", items: { type: "integer" } },
+              },
+              required: ["value"],
+            },
+          },
         },
         required: ["field"],
       },

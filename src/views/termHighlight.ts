@@ -19,7 +19,11 @@ import type { Character } from "../models/character";
 import type { Ability } from "../models/ability";
 import type { Location } from "../models/location";
 import type { Organization } from "../models/organization";
-import { formatChapters } from "../core/settingsMarkdown";
+import {
+  describeConflictValues,
+  formatChapters,
+} from "../core/settingsMarkdown";
+import type { RecordConflict } from "../models/jsonValidation";
 
 /**
  * 本文中の用語を色分けし、ホバーで設定を表示する。
@@ -407,15 +411,21 @@ function appendChapters(
   md.appendMarkdown(`- **登場話**: ${formatChapters(chapters)}\n`);
 }
 
-/** 作者の判断待ちはホバーでも見えるようにする */
+/**
+ * 作者の判断待ちはホバーでも見えるようにする。
+ *
+ * 「要確認」ではなく「変化かもしれない」と書き、値を話数と並べる。
+ * 本文を書いている最中に「第7話で銀髪にした」と思い出せれば、
+ * それは直すべき誤りではなく、そのままでよい変化だと分かる。
+ */
 function appendConflicts(
   md: vscode.MarkdownString,
-  conflicts: Array<{ field: string; values: string[] }>
+  conflicts: RecordConflict[]
 ): void {
   for (const conflict of conflicts) {
     md.appendMarkdown(
-      `- $(warning) **要確認（${conflict.field}）**: ${escapeMarkdown(
-        conflict.values.join(" / ")
+      `- $(warning) **変化かもしれない（${conflict.field}）**: ${escapeMarkdown(
+        describeConflictValues(conflict)
       )}\n`
     );
   }
