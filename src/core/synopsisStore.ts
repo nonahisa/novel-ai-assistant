@@ -3,6 +3,7 @@ import * as path from "path";
 import type { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import {
+  dedupeSynopsisEpisodes,
   SYNOPSIS_SCHEMA_VERSION,
   emptySynopsisSet,
   parseSynopsisSet,
@@ -62,8 +63,9 @@ export class SynopsisStore {
       throw error;
     }
 
+    let parsed: ChapterSynopsisSet;
     try {
-      return parseSynopsisSet(JSON.parse(new TextDecoder().decode(bytes)));
+      parsed = parseSynopsisSet(JSON.parse(new TextDecoder().decode(bytes)));
     } catch (error) {
       throw new SynopsisStoreError(
         `${CHAPTER_SYNOPSES_FILE} を読めませんでした: ${
@@ -72,6 +74,18 @@ export class SynopsisStore {
         [target]
       );
     }
+
+    // ファイル名込みのキーだった時期の重複が残っていれば、読み込むたびに片付ける
+    const deduped = dedupeSynopsisEpisodes(parsed.episodes);
+    if (deduped.removed === 0) return parsed;
+
+    const cleaned: ChapterSynopsisSet = { ...parsed, episodes: deduped.episodes };
+    try {
+      await this.save(cleaned);
+    } catch {
+      // 保存できなくても、読み込み結果自体は重複無しで返せる
+    }
+    return cleaned;
   }
 
   /**
