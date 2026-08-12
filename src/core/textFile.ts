@@ -443,7 +443,7 @@ export function hasUnsavedChanges(filePath: string): boolean {
   return doc?.isDirty ?? false;
 }
 
-function sameFilePath(left: string, right: string): boolean {
+export function sameFilePath(left: string, right: string): boolean {
   const normalizedLeft = vscode.Uri.file(left).fsPath;
   const normalizedRight = vscode.Uri.file(right).fsPath;
 

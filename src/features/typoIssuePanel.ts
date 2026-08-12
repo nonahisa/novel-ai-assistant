@@ -3,6 +3,7 @@ import * as path from "path";
 import { WorkEntry } from "../models/types";
 import {
   readTextFile,
+  sameFilePath,
   writeTextFilePreservingFormat,
   type WriteTextFileResult,
 } from "../core/textFile";
@@ -216,6 +217,8 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
       return;
     }
 
+    await revertIfOpen(item.filePath);
+
     this.markStatus(id, "applied");
     await appendAiActionLog(work, {
       category: "typo",
@@ -256,6 +259,37 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
     item.status = status;
     item.statusDetail = detail;
     this.postItems();
+  }
+}
+
+/**
+ * 書き込み後、そのファイルがエディターで開いていれば表示を最新化する。
+ *
+ * `writeTextFilePreservingFormat` は「元の原稿を回復先へ退避 → 新しい内容で
+ * 作り直す」手順（同じパスに新しいファイルを作り直す）で書き込む。
+ * 単純な上書きと違い、この退避→作り直しの動きはVS Codeの
+ * 「外部でファイルが変わったら自動的に読み直す」仕組みで拾われないことがあり、
+ * 保存は成功しているのにエディターの表示だけ古いまま、という事故になる
+ * （実機で発覚、2026-08-12）。ここで明示的に読み直させる。
+ *
+ * 対象がエディターで開かれていなければ何もしない。開いていても
+ * 未保存の変更があれば触れない（`writeTextFilePreservingFormat` 側の
+ * `hasUnsavedChanges` チェックで、そもそもここまで来ないはずだが念のため）。
+ */
+async function revertIfOpen(filePath: string): Promise<void> {
+  const openDoc = vscode.workspace.textDocuments.find(
+    (doc) => sameFilePath(doc.uri.fsPath, filePath) && !doc.isDirty
+  );
+  if (!openDoc) return;
+  try {
+    await vscode.window.showTextDocument(openDoc, {
+      preserveFocus: true,
+      preview: false,
+    });
+    await vscode.commands.executeCommand("workbench.action.files.revert");
+  } catch {
+    // 表示の更新に失敗しても、書き込み自体は既に成功している。
+    // 作者は手動でタブを閉じて開き直せば最新内容を見られる
   }
 }
 
