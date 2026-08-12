@@ -182,7 +182,15 @@ export async function writeTextFilePreservingFormat(
    * 公開FS APIには「期待した版なら置換」を一命令で行う原子的CASが無い
    * （`atomicWrite.ts` の `replaceGuarded` は、そのため正規パスへは触れず
    * 必ず失敗する）。人物設定など既存レコードの更新と同じ
-   * 「①今の原稿を回復先へ退避 → ②新しい内容で作り直す」の手順で書き戻す。
+   * 「①今の原稿を回復先へコピー → ②元ファイルを削除 → ③新しい内容で作り直す」
+   * の手順で書き戻す。
+   *
+   * **退避は `rename` ではなく「コピー＋削除」で行う。** `rename` で退避すると、
+   * そのファイルがエディターで開いている場合にVS Codeが開いたタブを
+   * リネーム先（回復フォルダの中の `.bak` ファイル）へ追従させてしまい、
+   * 開いていたタブが本文と無関係な回復ファイルを指したまま取り残される
+   * （実機で発覚、2026-08-12・2026-08-13）。`delete` はリネームと違い
+   * 「追従先」が無いため、この事故が起きない。
    */
   let recoveryPath: string;
   try {
@@ -195,18 +203,37 @@ export async function writeTextFilePreservingFormat(
     };
   }
 
+  let recheck: Uint8Array;
   try {
     // 退避の直前にもう一度ハッシュを確かめる。ここまでの間に
     // 外部から書き換えられている可能性がわずかに残るため
-    const recheck = await vscode.workspace.fs.readFile(uri);
+    recheck = await vscode.workspace.fs.readFile(uri);
     if (hashBytes(recheck) !== expectedHash) {
       return { ok: false, reason: "modified_externally" };
     }
-    await vscode.workspace.fs.rename(uri, vscode.Uri.file(recoveryPath), {
-      overwrite: false,
-    });
   } catch {
-    // 退避できなければ原稿にはまだ触れていないので、外部変更として扱ってよい
+    return { ok: false, reason: "modified_externally" };
+  }
+
+  try {
+    // 今の原稿を回復先へコピーする（まだ元ファイルには触れない）
+    await atomicWriteFile(recoveryPath, recheck, { mode: "create" });
+  } catch (error) {
+    const detail =
+      error instanceof AtomicWriteFileError
+        ? error.message
+        : describeError(error);
+    return {
+      ok: false,
+      reason: "path_conflict",
+      detail: `回復先へコピーできませんでした: ${detail}`,
+    };
+  }
+
+  try {
+    await vscode.workspace.fs.delete(uri, { useTrash: false });
+  } catch {
+    // 削除できなければ原稿本体にはまだ触れていない。回復先のコピーだけ残るが実害はない
     return { ok: false, reason: "modified_externally" };
   }
 

@@ -100,6 +100,33 @@ describe("本文形式を保持した保存", () => {
     expect(savedBytes).toEqual(bytes);
   });
 
+  test("退避はrenameではなくコピー＋削除で行う（開いているタブが回復先へ追従する事故を防ぐ）", async () => {
+    // rename で退避すると、そのファイルがエディターで開いている場合に
+    // VS Codeがタブをリネーム先（回復フォルダの中の.bakファイル）へ
+    // 追従させてしまい、開いていたタブが本文と無関係な回復ファイルを
+    // 指したまま取り残される（実機で発覚）。rename の「from」に
+    // 元の原稿のパスが渡らないことを固定する
+    const originalBytes = utf8("灯\n澪\n");
+    const original = decodeBytes(originalBytes);
+    files.set(fileKey(path), originalBytes);
+
+    const result = await writeTextFilePreservingFormat(
+      path,
+      "灯\n翠\n",
+      original,
+      original.hash
+    );
+
+    expectSaved(result);
+    const deleteMock = workspace.fs.delete as ReturnType<typeof vi.fn>;
+    expect(
+      deleteMock.mock.calls.some((call) => fileKey(call[0].fsPath) === fileKey(path))
+    ).toBe(true);
+    expect(
+      rename.mock.calls.some((call) => fileKey(call[0].fsPath) === fileKey(path))
+    ).toBe(false);
+  });
+
   test("VS Codeのファイルシステムから本文と形式情報を読み込む", async () => {
     const bytes = bom(utf8("灯\r\n澪"));
     files.set(fileKey(path), bytes);
@@ -342,9 +369,16 @@ describe("本文形式を保持した保存", () => {
     const originalBytes = utf8("灯\n澪\n");
     const original = decodeBytes(originalBytes);
     files.set(fileKey(path), originalBytes);
-    workspace.fs.writeFile = vi.fn(async () => {
-      throw new Error("write failed");
-    });
+    // 回復先へのコピーは通し、元のパスへの書き戻し（配置）だけを失敗させる
+    const baseWriteFile = workspace.fs.writeFile;
+    workspace.fs.writeFile = vi.fn(
+      async (uri: { fsPath: string }, bytes: Uint8Array) => {
+        if (uri.fsPath.includes(".novelai-recovery")) {
+          return baseWriteFile(uri, bytes);
+        }
+        throw new Error("write failed");
+      }
+    );
 
     const result = await writeTextFilePreservingFormat(
       path,
