@@ -275,6 +275,10 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
  * 対象がエディターで開かれていなければ何もしない。開いていても
  * 未保存の変更があれば触れない（`writeTextFilePreservingFormat` 側の
  * `hasUnsavedChanges` チェックで、そもそもここまで来ないはずだが念のため）。
+ *
+ * `revert` はスクロール位置・カーソル位置を保たない（実機で確認）ため、
+ * 読み直す前の表示範囲と選択位置を控えておき、読み直した後に復元する。
+ * 変更は該当行の一部だけなので、行数はほぼ動かず復元先はそのまま有効になる。
  */
 async function revertIfOpen(filePath: string): Promise<void> {
   const openDoc = vscode.workspace.textDocuments.find(
@@ -282,11 +286,19 @@ async function revertIfOpen(filePath: string): Promise<void> {
   );
   if (!openDoc) return;
   try {
-    await vscode.window.showTextDocument(openDoc, {
+    const editor = await vscode.window.showTextDocument(openDoc, {
       preserveFocus: true,
       preview: false,
     });
+    const visibleRange = editor.visibleRanges[0];
+    const selection = editor.selection;
+
     await vscode.commands.executeCommand("workbench.action.files.revert");
+
+    if (visibleRange) {
+      editor.revealRange(visibleRange, vscode.TextEditorRevealType.AtTop);
+    }
+    editor.selection = selection;
   } catch {
     // 表示の更新に失敗しても、書き込み自体は既に成功している。
     // 作者は手動でタブを閉じて開き直せば最新内容を見られる
