@@ -22,6 +22,13 @@
           "title": "小説執筆",
           "icon": "media/icon.svg"
         }
+      ],
+      "panel": [
+        {
+          "id": "novelaiIssues",
+          "title": "AI指摘",
+          "icon": "media/icon.svg"
+        }
       ]
     },
     "views": {
@@ -33,6 +40,13 @@
         {
           "id": "novelai.actions",
           "name": "操作メニュー"
+        }
+      ],
+      "novelaiIssues": [
+        {
+          "id": "novelai.aiIssuesView",
+          "name": "誤字脱字",
+          "type": "webview"
         }
       ]
     },
@@ -147,6 +161,12 @@
         "title": "設定資料を抽出",
         "category": "小説執筆",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "novelai.checkTypos",
+        "title": "誤字脱字を検知",
+        "category": "小説執筆",
+        "icon": "$(search-fuzzy)"
       },
       {
         "command": "novelai.generateSynopses",

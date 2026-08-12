@@ -35,6 +35,14 @@ export const window = {
 };
 export const commands = {};
 
+export const authentication = {
+  getSession: async (
+    _providerId: string,
+    _scopes: readonly string[],
+    _options?: { createIfNone?: boolean }
+  ): Promise<{ accessToken: string } | undefined> => undefined,
+};
+
 export enum ProgressLocation {
   Window = 10,
   Notification = 15,

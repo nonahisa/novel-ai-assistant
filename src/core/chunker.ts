@@ -52,6 +52,20 @@ export interface Chunk {
   wholeFile?: boolean;
 }
 
+/**
+ * チャンク本文の各行に、元ファイル内での行番号（1始まり）を付ける。
+ *
+ * 誤字脱字検知・推敲のように「何行目」をAIに言わせて、
+ * その値をそのまま該当箇所の特定に使う機能で使う。
+ * `chunk.startLine` は0始まりのため、表示・照合に使う行番号は+1する。
+ */
+export function withLineNumbers(chunk: Chunk): string {
+  return chunk.text
+    .split("\n")
+    .map((line, index) => `${chunk.startLine + index + 1}: ${line}`)
+    .join("\n");
+}
+
 /** 内訳を取り出す。持っていなければ、チャンク全体を1件とみなす */
 export function segmentsOf(chunk: Chunk): ChunkSegment[] {
   if (chunk.segments && chunk.segments.length > 0) return chunk.segments;

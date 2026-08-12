@@ -1,0 +1,291 @@
+import * as vscode from "vscode";
+import * as path from "path";
+import { WorkEntry } from "../models/types";
+import {
+  readTextFile,
+  writeTextFilePreservingFormat,
+  type WriteTextFileResult,
+} from "../core/textFile";
+import { appendAiActionLog } from "../core/typoIssueHistory";
+import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
+import type { TypoCheckIssue } from "./checkTypos";
+import { buildTypoIssuePanelHtml } from "../views/typoIssuePanelHtml";
+
+/**
+ * AI指摘パネル（誤字脱字）。
+ *
+ * 出力・デバッグコンソールと同じ下段の領域に表示する
+ * `WebviewViewProvider`。設定資料パネル（`settingsPanel.ts`）は
+ * エディター領域に開く別方式だが、こちらは本文を編集しながら
+ * 常に見えている場所に置きたいという要望のため下段にした。
+ *
+ * 設計書6.10は誤字脱字／推敲／逸脱・間延び／矛盾を同じパネルに
+ * タブ分けで統合する設計。ビューIDとコンテナ名は既にその前提で
+ * 汎用の名前にしてあり、今回は誤字脱字だけを実装する。
+ */
+
+export const AI_ISSUES_VIEW_ID = "novelai.aiIssuesView";
+
+export interface TypoIssueViewItem {
+  id: string;
+  filePath: string;
+  fileName: string;
+  chunkHash: string;
+  line: number;
+  original: string;
+  target: string;
+  suggestion: string;
+  reason: string;
+  confidence: "high" | "medium" | "low";
+  status: "pending" | "applied" | "failed" | "dismissed";
+  statusDetail?: string;
+}
+
+type OutgoingMessage = {
+  type: "issues";
+  workTitle: string;
+  items: TypoIssueViewItem[];
+};
+
+type IncomingMessage =
+  | { type: "jump"; id: string }
+  | { type: "apply"; id: string }
+  | { type: "dismiss"; id: string }
+  | { type: "applyAll" };
+
+export class TypoIssuePanel implements vscode.WebviewViewProvider {
+  private view: vscode.WebviewView | undefined;
+  private work: WorkEntry | undefined;
+  private items: TypoIssueViewItem[] = [];
+
+  resolveWebviewView(webviewView: vscode.WebviewView): void {
+    this.view = webviewView;
+    webviewView.webview.options = { enableScripts: true };
+    const nonce = createNonce();
+    webviewView.webview.html = buildTypoIssuePanelHtml(
+      nonce,
+      webviewView.webview.cspSource
+    );
+    webviewView.webview.onDidReceiveMessage((message: unknown) => {
+      void this.handleMessage(message as IncomingMessage);
+    });
+    webviewView.onDidDispose(() => {
+      if (this.view === webviewView) this.view = undefined;
+    });
+    // 開いたときに、既にある結果（先に検知が終わっていた場合）を反映する
+    this.postItems();
+  }
+
+  /** `checkTypos` の結果を差し替えて表示する */
+  showResults(work: WorkEntry, issues: TypoCheckIssue[]): void {
+    this.work = work;
+    this.items = issues.map((issue, index) => ({
+      id: `${issue.chunkHash}:${issue.line}:${index}`,
+      filePath: issue.filePath,
+      fileName: path.basename(issue.filePath),
+      chunkHash: issue.chunkHash,
+      line: issue.line,
+      original: issue.original,
+      target: issue.target,
+      suggestion: issue.suggestion,
+      reason: issue.reason,
+      confidence: issue.confidence,
+      status: "pending",
+    }));
+    this.postItems();
+    // パネルが開いていなければ前面に出す。開いていれば余計なフォーカス移動はしない
+    void vscode.commands.executeCommand(`${AI_ISSUES_VIEW_ID}.focus`);
+  }
+
+  private postItems(): void {
+    if (!this.view) return;
+    const message: OutgoingMessage = {
+      type: "issues",
+      workTitle: this.work?.title ?? "",
+      items: this.items,
+    };
+    void this.view.webview.postMessage(message);
+  }
+
+  private async handleMessage(message: IncomingMessage): Promise<void> {
+    switch (message.type) {
+      case "jump":
+        await this.jumpTo(message.id);
+        return;
+      case "apply":
+        await this.applyIssue(message.id);
+        return;
+      case "dismiss":
+        await this.dismissIssue(message.id);
+        return;
+      case "applyAll":
+        await this.applyVisible();
+        return;
+    }
+  }
+
+  private async jumpTo(id: string): Promise<void> {
+    const item = this.items.find((i) => i.id === id);
+    if (!item) return;
+    try {
+      const doc = await vscode.workspace.openTextDocument(item.filePath);
+      const editor = await vscode.window.showTextDocument(doc, {
+        preserveFocus: false,
+      });
+      const lineIndex = Math.min(Math.max(item.line - 1, 0), doc.lineCount - 1);
+      const range = doc.lineAt(lineIndex).range;
+      editor.selection = new vscode.Selection(range.start, range.end);
+      editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+    } catch {
+      vscode.window.showWarningMessage("該当のファイルを開けませんでした。");
+    }
+  }
+
+  /**
+   * 表示中（無視・失敗以外）の指摘のうち、high/medium confidence のものだけを
+   * まとめて適用する。既定では画面に出さず、作者が確認ダイアログを経てから呼ぶ。
+   */
+  private async applyVisible(): Promise<void> {
+    const targets = this.items.filter(
+      (item) => item.status === "pending" && item.confidence !== "low"
+    );
+    if (targets.length === 0) return;
+    const confirm = await vscode.window.showWarningMessage(
+      `確信度「高」「中」の指摘 ${targets.length} 件をまとめて適用します。` +
+        "作者による個別確認なしに本文が書き換わります。",
+      { modal: true },
+      "適用する"
+    );
+    if (confirm !== "適用する") return;
+    for (const item of targets) {
+      await this.applyIssue(item.id);
+    }
+  }
+
+  private async applyIssue(id: string): Promise<void> {
+    const item = this.items.find((i) => i.id === id);
+    if (!item || !this.work) return;
+    if (item.status === "applied") return;
+    const work = this.work;
+
+    let file;
+    try {
+      file = await readTextFile(item.filePath);
+    } catch {
+      this.markStatus(id, "failed", "本文を読み込めませんでした。");
+      return;
+    }
+
+    const lines = file.text.split("\n");
+    const lineIndex = item.line - 1;
+    const lineText = lines[lineIndex];
+
+    // 検知からここまでの間に本文が変わっている可能性がある。
+    // 該当行に original がまだ実在するかを再確認してから書き換える
+    if (lineText === undefined || !lineText.includes(item.original)) {
+      this.markStatus(
+        id,
+        "failed",
+        "本文が変更されているため、この指摘の位置を特定できませんでした。" +
+          "もう一度「誤字脱字を検知」をやり直してください。"
+      );
+      return;
+    }
+
+    const originalIndexInLine = lineText.indexOf(item.original);
+    const targetIndexInOriginal = item.original.indexOf(item.target);
+    if (targetIndexInOriginal === -1) {
+      this.markStatus(id, "failed", "指摘の位置を特定できませんでした。");
+      return;
+    }
+
+    const absoluteTargetIndex = originalIndexInLine + targetIndexInOriginal;
+    lines[lineIndex] =
+      lineText.slice(0, absoluteTargetIndex) +
+      item.suggestion +
+      lineText.slice(absoluteTargetIndex + item.target.length);
+
+    const result = await writeTextFilePreservingFormat(
+      item.filePath,
+      lines.join("\n"),
+      file,
+      file.hash
+    );
+    if (!result.ok) {
+      this.markStatus(id, "failed", describeWriteFailure(result));
+      return;
+    }
+
+    this.markStatus(id, "applied");
+    await appendAiActionLog(work, {
+      category: "typo",
+      action: "applied",
+      file: item.fileName,
+      line: item.line,
+      target: item.target,
+      suggestion: item.suggestion,
+    });
+  }
+
+  private async dismissIssue(id: string): Promise<void> {
+    const item = this.items.find((i) => i.id === id);
+    if (!item || !this.work) return;
+    const work = this.work;
+
+    await new TypoDismissedHistory(work).add([
+      dismissKey(item.chunkHash, item),
+    ]);
+    this.markStatus(id, "dismissed");
+    await appendAiActionLog(work, {
+      category: "typo",
+      action: "dismissed",
+      file: item.fileName,
+      line: item.line,
+      target: item.target,
+      suggestion: item.suggestion,
+    });
+  }
+
+  private markStatus(
+    id: string,
+    status: TypoIssueViewItem["status"],
+    detail?: string
+  ): void {
+    const item = this.items.find((i) => i.id === id);
+    if (!item) return;
+    item.status = status;
+    item.statusDetail = detail;
+    this.postItems();
+  }
+}
+
+function describeWriteFailure(
+  result: Extract<WriteTextFileResult, { ok: false }>
+): string {
+  switch (result.reason) {
+    case "modified_externally":
+      return "本文が読み込み後に変更されています。もう一度検知をやり直してください。";
+    case "conflict_markers":
+      return "本文にGitの競合マーカーが含まれているため、適用できません。";
+    case "unsaved_changes":
+      return "エディターに未保存の変更があります。保存してから適用してください。";
+    case "encoding_error":
+      return "この文字コードで表現できない文字が含まれているため、適用できません。";
+    case "path_conflict":
+      return (
+        "保存先が競合しました。" + (result.detail ? `（${result.detail}）` : "")
+      );
+    default:
+      return "適用に失敗しました。";
+  }
+}
+
+function createNonce(): string {
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let value = "";
+  for (let i = 0; i < 32; i++) {
+    value += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return value;
+}

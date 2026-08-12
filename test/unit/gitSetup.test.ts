@@ -15,8 +15,10 @@ vi.mock("vscode", () => ({
 import {
   DEFAULT_BRANCH,
   commitAll,
+  createGithubRepositoryViaApi,
   currentBranch,
   describeNetworkFailure,
+  ensureGithubAuthToken,
   hasCommitIdentity,
   initRepository,
   pushSetUpstream,
@@ -202,6 +204,86 @@ describe("状態に応じた次の一手", () => {
     expect(nextSetupStep({ kind: "git_missing" })?.label).toContain(
       "Gitを導入するには"
     );
+  });
+});
+
+describe("VS Codeのアカウントでリポジトリを作る", () => {
+  test("サインインできればトークンを返す", async () => {
+    const token = await ensureGithubAuthToken(async () => ({
+      accessToken: "tok",
+    }));
+    expect(token).toBe("tok");
+  });
+
+  test("キャンセルされたら undefined を返す（例外を外へ漏らさない）", async () => {
+    const token = await ensureGithubAuthToken(async () => {
+      throw new Error("User did not consent to login.");
+    });
+    expect(token).toBeUndefined();
+  });
+
+  test("セッションが取れなければ undefined を返す", async () => {
+    const token = await ensureGithubAuthToken(async () => undefined);
+    expect(token).toBeUndefined();
+  });
+
+  test("成功したら clone 用のURLを返す", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ clone_url: "https://github.com/x/y.git" }),
+          { status: 201 }
+        )
+    );
+
+    const result = await createGithubRepositoryViaApi(
+      "tok",
+      "y",
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.cloneUrl).toBe("https://github.com/x/y.git");
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe("https://api.github.com/user/repos");
+    expect(JSON.parse(init.body as string)).toEqual({
+      name: "y",
+      private: true,
+    });
+  });
+
+  test("同名のリポジトリが既にあれば分かりやすい理由にする", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ message: "name already exists on this account" }),
+          { status: 422 }
+        )
+    );
+
+    const result = await createGithubRepositoryViaApi(
+      "tok",
+      "y",
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("既にGitHub上にあります");
+  });
+
+  test("接続できなければ理由を残す", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("fetch failed");
+    });
+
+    const result = await createGithubRepositoryViaApi(
+      "tok",
+      "y",
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("fetch failed");
   });
 });
 

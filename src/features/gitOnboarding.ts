@@ -5,8 +5,10 @@ import {
   addRemote,
   commitAll,
   countTrackableFiles,
+  createGithubRepositoryViaApi,
   currentBranch,
   describeNetworkFailure,
+  ensureGithubAuthToken,
   ghAvailable,
   ghCreateRepository,
   hasCommitIdentity,
@@ -298,18 +300,32 @@ async function askCommitIdentity(
   return true;
 }
 
-/** リモートを決める。ghがあれば新規作成、無ければURLを貼ってもらう */
+/**
+ * リモートを決める。
+ *
+ * 新規作成は2通り用意する。VS Codeのアカウントを使う経路は追加インストールが
+ * 要らないので最優先で出す。GitHub CLI（gh）は入っていれば選べる代替経路として残す。
+ */
 async function connectRemote(
   work: WorkEntry,
   run: GitCommandRunner
 ): Promise<boolean> {
   const canUseGh = await ghAvailable();
   const items: Array<
-    vscode.QuickPickItem & { action: "gh" | "url" | "local" }
+    vscode.QuickPickItem & { action: "vscodeAuth" | "gh" | "url" | "local" }
   > = [];
+
+  items.push({
+    label: "$(github) VS Codeのアカウントで新しく作る",
+    description: "非公開（private）・追加インストール不要",
+    detail:
+      "VS Codeにサインインしている（していなければこれからサインインする）" +
+      "GitHubアカウントで新しいリポジトリを作り、送り先として登録します。",
+    action: "vscodeAuth",
+  });
   if (canUseGh) {
     items.push({
-      label: "$(add) 新しいリポジトリを作る",
+      label: "$(add) GitHub CLIで新しく作る",
       description: "非公開（private）",
       detail:
         "GitHub CLI で新しいリポジトリを作り、送り先として登録します。" +
@@ -319,7 +335,7 @@ async function connectRemote(
   }
   items.push({
     label: "$(link) 既にあるリポジトリのURLを指定する",
-    description: canUseGh ? "" : "GitHubの画面で作ってから貼り付け",
+    description: "",
     detail:
       "GitHubで作ったリポジトリのURL（https://github.com/… ）を貼り付けます。",
     action: "url",
@@ -352,33 +368,16 @@ async function connectRemote(
     return false;
   }
 
-  if (picked.action === "gh") {
-    const suggested = suggestRepositoryName(work.title);
-    const name = await vscode.window.showInputBox({
-      title: "新しいリポジトリの名前",
-      // 日本語の作品名からは作れないので、その場合は空欄から入力してもらう
-      value: suggested,
-      prompt: "英数字と - _ . が使えます",
-      ignoreFocusOut: true,
-      validateInput: (value) =>
-        /^[A-Za-z0-9._-]+$/.test(value.trim())
-          ? undefined
-          : "英数字と - _ . だけが使えます。",
-    });
+  if (picked.action === "vscodeAuth") {
+    const name = await askRepositoryName(work);
     if (!name) return false;
+    return createRepositoryViaVscodeAccount(work, name, run);
+  }
 
-    const created = await withProgress("リポジトリを作っています", () =>
-      ghCreateRepository(work.folderPath, name.trim())
-    );
-    if (!created.ok) {
-      reportFailure("リポジトリの作成", created.detail);
-      return false;
-    }
-    logStep(`GitHubにリポジトリを作成: ${name.trim()}（private）`);
-    vscode.window.showInformationMessage(
-      `非公開のリポジトリ ${name.trim()} を作り、送り先に設定しました。`
-    );
-    return true;
+  if (picked.action === "gh") {
+    const name = await askRepositoryName(work);
+    if (!name) return false;
+    return createRepositoryViaGh(work, name);
   }
 
   const url = await vscode.window.showInputBox({
@@ -396,6 +395,85 @@ async function connectRemote(
   }
   logStep(`送り先を登録: ${url.trim()}`);
   vscode.window.showInformationMessage("送り先を登録しました。");
+  return true;
+}
+
+/** 新しいリポジトリの名前を聞く。日本語の作品名からは作れないので空欄から入力してもらう */
+async function askRepositoryName(work: WorkEntry): Promise<string | undefined> {
+  const suggested = suggestRepositoryName(work.title);
+  const name = await vscode.window.showInputBox({
+    title: "新しいリポジトリの名前",
+    value: suggested,
+    prompt: "英数字と - _ . が使えます",
+    ignoreFocusOut: true,
+    validateInput: (value) =>
+      /^[A-Za-z0-9._-]+$/.test(value.trim())
+        ? undefined
+        : "英数字と - _ . だけが使えます。",
+  });
+  const trimmed = name?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+/**
+ * VS Code本体のGitHubアカウントでリポジトリを作る（`gh`コマンド不要）。
+ *
+ * トークンの取得はブラウザでの見慣れた承認画面になる。
+ * 作成したリポジトリのURLは、ここで`git remote add`まで行う
+ * （ghと違い、API呼び出し自体はリモート登録まで面倒を見てくれないため）。
+ */
+async function createRepositoryViaVscodeAccount(
+  work: WorkEntry,
+  name: string,
+  run: GitCommandRunner
+): Promise<boolean> {
+  const token = await withProgress("GitHubへサインインしています", () =>
+    ensureGithubAuthToken()
+  );
+  if (!token) {
+    vscode.window.showWarningMessage(
+      "GitHubへのサインインが完了しなかったため、作成を中止しました。"
+    );
+    return false;
+  }
+
+  const created = await withProgress("リポジトリを作っています", () =>
+    createGithubRepositoryViaApi(token, name)
+  );
+  if (!created.ok || !created.cloneUrl) {
+    reportFailure("リポジトリの作成", created.detail);
+    return false;
+  }
+
+  const added = await addRemote(work.folderPath, created.cloneUrl, run);
+  if (!added.ok) {
+    reportFailure("送り先の登録", added.detail);
+    return false;
+  }
+
+  logStep(`GitHubにリポジトリを作成（VS Codeアカウント）: ${name}（private）`);
+  vscode.window.showInformationMessage(
+    `非公開のリポジトリ ${name} を作り、送り先に設定しました。`
+  );
+  return true;
+}
+
+/** GitHub CLI（gh）でリポジトリを作る。remoteの登録もgh側で完結する */
+async function createRepositoryViaGh(
+  work: WorkEntry,
+  name: string
+): Promise<boolean> {
+  const created = await withProgress("リポジトリを作っています", () =>
+    ghCreateRepository(work.folderPath, name)
+  );
+  if (!created.ok) {
+    reportFailure("リポジトリの作成", created.detail);
+    return false;
+  }
+  logStep(`GitHubにリポジトリを作成: ${name}（private）`);
+  vscode.window.showInformationMessage(
+    `非公開のリポジトリ ${name} を作り、送り先に設定しました。`
+  );
   return true;
 }
 

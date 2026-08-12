@@ -70,6 +70,8 @@ import {
   ConflictContentProvider,
   resolveWorkConflicts,
 } from "./features/resolveConflicts";
+import { checkTypos } from "./features/checkTypos";
+import { AI_ISSUES_VIEW_ID, TypoIssuePanel } from "./features/typoIssuePanel";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -215,6 +217,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
   context.subscriptions.push(actionView);
+
+  // AI指摘パネル（下段・出力やデバッグコンソールと同じ場所）。
+  // 誤字脱字検知の結果をここへ表示する。設定資料パネルと違い
+  // 作品ごとには分けず、直近に検知した作品の結果を1枚で見せる
+  const typoIssuePanel = new TypoIssuePanel();
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(AI_ISSUES_VIEW_ID, typoIssuePanel, {
+      webviewOptions: { retainContextWhenHidden: true },
+    })
+  );
 
   // ─── ステータスバー（現在開いているファイルの文字数） ───
   const statusBar = vscode.window.createStatusBarItem(
@@ -804,6 +816,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (extracted) {
           await generateSettingsDocs(work, { silent: true });
         }
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.checkTypos",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+
+        // 未保存のまま読むと、画面と違う本文を検知してしまう
+        if (!(await saveDirtyDocumentsBeforeExtraction(work, "誤字脱字の検知")))
+          return;
+
+        const result = await checkTypos(work, aiRegistry);
+        if (!result) return;
+
+        typoIssuePanel.showResults(work, result.issues);
+
+        const parts = [`指摘 ${result.issues.length}件`];
+        if (result.failedChunks > 0) parts.push(`失敗 ${result.failedChunks}チャンク`);
+        if (result.rejectedCount > 0) parts.push(`除外 ${result.rejectedCount}件`);
+        vscode.window.showInformationMessage(
+          `誤字脱字検知が完了しました。${parts.join(" / ")}`
+        );
       }
     )
   );

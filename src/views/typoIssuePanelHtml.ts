@@ -1,0 +1,198 @@
+/**
+ * AI指摘パネル（下段・誤字脱字）の中身。
+ *
+ * 設定資料パネルと同じく、値はすべて postMessage で渡し、
+ * HTMLへ文字列として埋め込まない（本文の引用符で画面が壊れるのを防ぐ）。
+ */
+export function buildTypoIssuePanelHtml(
+  nonce: string,
+  cspSource: string
+): string {
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src ${cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI指摘</title>
+<style nonce="${nonce}">
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+}
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  position: sticky;
+  top: 0;
+  background: var(--vscode-editor-background);
+}
+#toolbar .title { font-weight: bold; }
+#toolbar .count { color: var(--vscode-descriptionForeground); }
+#toolbar label { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+button {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: none;
+  border-radius: 2px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-size: inherit;
+}
+button:hover { background: var(--vscode-button-hoverBackground); }
+button.secondary {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
+button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
+button:disabled { opacity: 0.5; cursor: default; }
+#empty {
+  padding: 24px 16px;
+  color: var(--vscode-descriptionForeground);
+}
+#list { padding: 4px 0; }
+.issue {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+.issue.low { display: none; }
+body.show-low .issue.low { display: flex; }
+.issue.applied { opacity: 0.55; }
+.issue.dismissed { display: none; }
+.issue-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+}
+.location {
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+}
+.location:hover { text-decoration: underline; }
+.badge {
+  border-radius: 10px;
+  padding: 0 8px;
+  font-size: 11px;
+  border: 1px solid var(--vscode-panel-border);
+}
+.badge.high { border-color: var(--vscode-testing-iconPassed, #4caf50); }
+.badge.medium { border-color: var(--vscode-editorWarning-foreground, #cca700); }
+.badge.low { border-color: var(--vscode-descriptionForeground); }
+.diff { font-family: var(--vscode-editor-font-family, monospace); }
+.diff .from { color: var(--vscode-errorForeground); text-decoration: line-through; }
+.diff .to { color: var(--vscode-terminal-ansiGreen, #4caf50); }
+.reason { color: var(--vscode-descriptionForeground); font-size: 12px; }
+.actions { display: flex; gap: 6px; }
+.status-detail { font-size: 12px; color: var(--vscode-errorForeground); }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <span class="title">誤字脱字</span>
+  <span class="count" id="count">0件</span>
+  <label><input type="checkbox" id="showLow"> 確信度が低いものも表示</label>
+  <button class="secondary" id="applyAll">表示中をまとめて適用</button>
+</div>
+<div id="empty">まだ検知結果がありません。「誤字脱字を検知」を実行してください。</div>
+<div id="list"></div>
+<script nonce="${nonce}">
+const vscode = acquireVsCodeApi();
+const listEl = document.getElementById('list');
+const emptyEl = document.getElementById('empty');
+const countEl = document.getElementById('count');
+const showLowEl = document.getElementById('showLow');
+const applyAllEl = document.getElementById('applyAll');
+
+showLowEl.addEventListener('change', () => {
+  document.body.classList.toggle('show-low', showLowEl.checked);
+});
+applyAllEl.addEventListener('click', () => {
+  vscode.postMessage({ type: 'applyAll' });
+});
+
+const CONFIDENCE_LABEL = { high: '確信度: 高', medium: '確信度: 中', low: '確信度: 低' };
+const STATUS_LABEL = { applied: '適用済み', dismissed: '無視しました', failed: '失敗' };
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function render(workTitle, items) {
+  const pending = items.filter((item) => item.status !== 'dismissed');
+  countEl.textContent = pending.length + '件';
+  emptyEl.style.display = items.length === 0 ? 'block' : 'none';
+  listEl.innerHTML = items.map(renderItem).join('');
+
+  listEl.querySelectorAll('[data-action]').forEach((el) => {
+    el.addEventListener('click', () => {
+      vscode.postMessage({ type: el.dataset.action, id: el.dataset.id });
+    });
+  });
+}
+
+function renderItem(item) {
+  const classes = ['issue'];
+  if (item.confidence === 'low') classes.push('low');
+  if (item.status === 'applied') classes.push('applied');
+  if (item.status === 'dismissed') classes.push('dismissed');
+
+  const canAct = item.status === 'pending' || item.status === 'failed';
+  const statusText = STATUS_LABEL[item.status]
+    ? '<span class="reason">' + STATUS_LABEL[item.status] + '</span>'
+    : '';
+  const statusDetail = item.statusDetail
+    ? '<div class="status-detail">' + escapeHtml(item.statusDetail) + '</div>'
+    : '';
+
+  return (
+    '<div class="' + classes.join(' ') + '">' +
+    '<div class="issue-head">' +
+    '<span class="location" data-action="jump" data-id="' + item.id + '">' +
+    escapeHtml(item.fileName) + ' ' + item.line + '行目</span>' +
+    '<span class="badge ' + item.confidence + '">' + CONFIDENCE_LABEL[item.confidence] + '</span>' +
+    statusText +
+    '</div>' +
+    '<div class="diff">' +
+    '<span class="from">' + escapeHtml(item.target) + '</span> → ' +
+    '<span class="to">' + escapeHtml(item.suggestion) + '</span>' +
+    '</div>' +
+    '<div class="reason">' + escapeHtml(item.original) + '（' + escapeHtml(item.reason) + '）</div>' +
+    statusDetail +
+    (canAct
+      ? '<div class="actions">' +
+        '<button data-action="apply" data-id="' + item.id + '">適用</button>' +
+        '<button class="secondary" data-action="dismiss" data-id="' + item.id + '">無視</button>' +
+        '</div>'
+      : '') +
+    '</div>'
+  );
+}
+
+window.addEventListener('message', (event) => {
+  const message = event.data;
+  if (message.type === 'issues') {
+    render(message.workTitle, message.items);
+  }
+});
+</script>
+</body>
+</html>`;
+}

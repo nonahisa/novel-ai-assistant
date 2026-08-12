@@ -17,14 +17,17 @@ import type { WorkRegistry } from "../core/workRegistry";
 export type ActionGroup =
   | "資料"
   | "整える"
+  | "校正・校閲"
   | "書き出す"
   | "同期"
   | "AI設定"
   | "困ったとき";
 
+// 作者自身の作業工程「プロット→執筆→推敲→校正→校閲」に合わせた並び
 export const ACTION_GROUPS: ActionGroup[] = [
   "資料",
   "整える",
+  "校正・校閲",
   "書き出す",
   "同期",
   "AI設定",
@@ -160,6 +163,20 @@ const ACTIONS: readonly CommandAction[] = [
       "「リン」と「リンセップ・アウクト」のように、" +
       "同じ人物が別々に登録されてしまった組をまとめます。" +
       "どちらの名前を残すかは作者が選びます。",
+  },
+
+  // ── 校正・校閲
+  {
+    command: "novelai.checkTypos",
+    label: "誤字脱字を検知",
+    description: "AIを使う",
+    icon: "search-fuzzy",
+    requiresWork: true,
+    group: "校正・校閲",
+    detail:
+      "誤変換・脱字・衍字など、明らかな入力ミスだけをAIで検知します。" +
+      "指摘は下段の「AI指摘」パネルに出て、内容を確認してから" +
+      "1件ずつ適用・無視を選べます。自動では書き換えません。",
   },
 
   // ── 外に出す

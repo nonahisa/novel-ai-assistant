@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import * as vscode from "vscode";
 import type { GitCommandResult, GitCommandRunner } from "./git";
 
 /**
@@ -241,6 +242,125 @@ export async function ghCreateRepository(
     return { ok: false, detail: (result.stderr || result.stdout).trim() };
   }
   return { ok: true };
+}
+
+/**
+ * VS Code本体のGitHubアカウントで、非公開リポジトリを直接作る。
+ *
+ * `gh`（GitHub CLI）の追加インストールを要らなくするための経路。
+ * VS Codeには最初からGitHub認証の仕組みが入っており、
+ * Settings Syncなどで既にサインイン済みならそのセッションをそのまま使える。
+ * 未サインインなら、見慣れたブラウザでの承認画面が出る。
+ *
+ * **リポジトリの作成だけをこの経路で行い、実際の push 認証はGitの
+ * 資格情報管理（Windowsなら Git Credential Manager）に任せる。** 両者は別物で、
+ * ここで取ったトークンをgit自体の認証に流用しようとすると、
+ * gitのバージョンや設定次第で失敗し方が変わり、原因の切り分けが難しくなる。
+ */
+
+/** VS Code本体のGitHub認証で要求するスコープ。非公開リポジトリの作成に要る */
+const GITHUB_OAUTH_SCOPES = ["repo"] as const;
+
+/** `vscode.authentication.getSession` の差し替え口（テストで使う） */
+export type GithubAuthenticate = (
+  scopes: readonly string[]
+) => Thenable<{ accessToken: string } | undefined>;
+
+/**
+ * VS Codeのアカウントでサインインし、トークンを取る。
+ *
+ * 作者がブラウザでの承認をキャンセルすると、VS Codeは例外を投げる。
+ * ここでは「サインインしなかった」として吸収し、
+ * 呼び出し側に生の例外を伝播させない。
+ */
+export async function ensureGithubAuthToken(
+  authenticate: GithubAuthenticate = (scopes) =>
+    vscode.authentication.getSession("github", scopes, {
+      createIfNone: true,
+    })
+): Promise<string | undefined> {
+  try {
+    const session = await authenticate(GITHUB_OAUTH_SCOPES);
+    return session?.accessToken;
+  } catch {
+    return undefined;
+  }
+}
+
+const GITHUB_API_BASE = "https://api.github.com";
+// GitHub APIはUser-Agentの無いリクエストを拒否する
+const GITHUB_USER_AGENT = "novel-ai-assistant-vscode-extension";
+
+/**
+ * GitHub REST APIで非公開リポジトリを作る（`gh`コマンドを使わない経路）。
+ *
+ * **必ず private で作る。** 未公開の原稿が世に出る事故は取り返しがつかない。
+ * 公開したい場合は、作者がGitHubの画面で変える。
+ */
+export async function createGithubRepositoryViaApi(
+  token: string,
+  name: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<GitSetupResult & { cloneUrl?: string }> {
+  let response: Response;
+  try {
+    response = await fetchImpl(`${GITHUB_API_BASE}/user/repos`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": GITHUB_USER_AGENT,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name, private: true }),
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  if (!response.ok) {
+    return { ok: false, detail: await githubApiErrorDetail(response) };
+  }
+
+  let body: { clone_url?: string };
+  try {
+    body = (await response.json()) as { clone_url?: string };
+  } catch {
+    return { ok: false, detail: "GitHubの応答を解釈できませんでした。" };
+  }
+  if (!body.clone_url) {
+    return {
+      ok: false,
+      detail: "GitHubの応答にリポジトリのURLが含まれていません。",
+    };
+  }
+  return { ok: true, cloneUrl: body.clone_url };
+}
+
+/** GitHub APIのエラー応答から、作者に見せられる理由を取り出す */
+async function githubApiErrorDetail(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { message?: string };
+    if (body?.message) {
+      if (
+        response.status === 422 &&
+        /name already exists/i.test(body.message)
+      ) {
+        return "同じ名前のリポジトリが既にGitHub上にあります。別の名前を指定してください。";
+      }
+      if (response.status === 401) {
+        return "GitHubへのサインインが有効ではありません。もう一度お試しください。";
+      }
+      return `GitHub: ${body.message}`;
+    }
+  } catch {
+    // JSON以外の応答は下のdefaultへ落とす
+  }
+  return `HTTP ${response.status}`;
 }
 
 /** gh のように git 以外のコマンドも呼べるようにした実行口（テストで差し替える） */

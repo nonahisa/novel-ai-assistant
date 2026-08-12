@@ -3,18 +3,8 @@ import * as path from "path";
 import { WorkEntry } from "../models/types";
 import { Character } from "../models/character";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import {
-  AIError,
-  recoveryForAIError,
-  type AIProvider,
-  type ConnectionTestResult,
-  type ProviderId,
-} from "../ai/types";
-import {
-  describeStartFailure,
-  isLocalEndpoint,
-  startOllama,
-} from "../ai/ollamaLauncher";
+import { AIError, recoveryForAIError, type ProviderId } from "../ai/types";
+import { confirmProviderReachable } from "./aiConnectivity";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import { parseEpisodeMetadata } from "../core/metadataParser";
@@ -51,10 +41,7 @@ import {
   ExtractedCharacter,
   buildCharacterExtractPrompt,
 } from "../prompts/characterExtract";
-import {
-  withCancellableProgress,
-  withProgress,
-} from "../views/progress";
+import { withCancellableProgress } from "../views/progress";
 import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 import { resolveMaxOutputTokens } from "../ai/outputLimit";
 import { PendingUpdateStore } from "../core/pendingUpdates";
@@ -97,7 +84,9 @@ interface ExtractionSummaryCounts {
 
 /** 作品内の未保存文書を保存し、成功を再検査できた場合だけ実行を許可する。 */
 export async function saveDirtyDocumentsBeforeExtraction(
-  work: WorkEntry
+  work: WorkEntry,
+  /** 中止時の文言に埋め込む、実行しようとしている処理名 */
+  actionLabel = "設定資料の抽出"
 ): Promise<boolean> {
   const dirtyDocuments = dirtyDocumentsInside(work.folderPath);
   if (dirtyDocuments.length === 0) return true;
@@ -112,7 +101,7 @@ export async function saveDirtyDocumentsBeforeExtraction(
   for (const document of dirtyDocuments) {
     if (!document.save || !(await document.save())) {
       await vscode.window.showWarningMessage(
-        "保存できない文書があるため、設定資料の抽出を中止しました。"
+        `保存できない文書があるため、${actionLabel}を中止しました。`
       );
       return false;
     }
@@ -120,7 +109,7 @@ export async function saveDirtyDocumentsBeforeExtraction(
 
   if (dirtyDocumentsInside(work.folderPath).length > 0) {
     await vscode.window.showWarningMessage(
-      "保存後も未保存の文書が残っているため、設定資料の抽出を中止しました。"
+      `保存後も未保存の文書が残っているため、${actionLabel}を中止しました。`
     );
     return false;
   }
@@ -147,7 +136,7 @@ export async function extractCharacters(
   // そのため取れない場合は、先に疎通を回復させてから取り直す。
   let modelInfo = await registry.resolveModelInfo();
   if (!modelInfo) {
-    if (!(await confirmProviderReachable(resolved.provider))) return false;
+    if (!(await confirmProviderReachable(resolved.provider, "設定資料の抽出"))) return false;
     modelInfo = await registry.resolveModelInfo();
   }
   if (!modelInfo) {
@@ -346,7 +335,7 @@ export async function extractCharacters(
     // AIを呼ぶ前に疎通を確認する。
     // ここで確認しないと、接続できないまま全チャンクを順に試し、
     // 待たされた末に「失敗 N 件」とだけ言われることになる。
-    if (!(await confirmProviderReachable(resolved.provider))) return false;
+    if (!(await confirmProviderReachable(resolved.provider, "設定資料の抽出"))) return false;
 
     const estimateMinutes = Math.ceil((pending.length * 20) / 60);
     // 表示する上限と、実際に送る上限を同じ値にする。
@@ -1086,106 +1075,6 @@ async function showRecoveryPaths(recoveryPaths: string[]): Promise<void> {
     language: "text",
   });
   await vscode.window.showTextDocument(doc);
-}
-
-/**
- * AIを呼び始める前に疎通を確認する。
- *
- * Ollamaが起動していない・ネットワークが切れている場合、
- * 確認せずに走らせると全チャンクが同じ理由で失敗するだけなので、
- * 開始前に止めて作者に理由と対処を伝える。
- */
-async function confirmProviderReachable(
-  provider: Pick<AIProvider, "id" | "testConnection">
-): Promise<boolean> {
-  // testConnection を持たないプロバイダは確認をスキップする（実行自体は妨げない）
-  if (typeof provider.testConnection !== "function") return true;
-
-  for (;;) {
-    let result: ConnectionTestResult;
-    try {
-      result = await withProgress("AIに接続できるか確認しています…", () =>
-        provider.testConnection()
-      );
-    } catch (error) {
-      // testConnection 自体が落ちた場合も「接続できない」として扱う
-      result = {
-        ok: false,
-        message:
-          error instanceof Error ? error.message : String(error),
-      };
-    }
-
-    if (result.ok) return true;
-
-    // ローカルのOllamaなら、この場から起動できる
-    const canStart = provider.id === "ollama" && isLocalOllamaEndpoint();
-
-    const action = await vscode.window.showWarningMessage(
-      `AIに接続できないため、設定資料の抽出を開始できません。\n${result.message}`,
-      ...(canStart ? ["Ollamaを起動"] : []),
-      "再試行",
-      "設定を開く",
-      "中止"
-    );
-
-    if (action === "Ollamaを起動") {
-      const started = await startOllamaWithProgress();
-      if (!started) continue; // 失敗理由は起動側で通知済み。再度この警告へ戻る
-      continue; // 起動できたので疎通を確認し直す
-    }
-    if (action === "再試行") continue;
-    if (action === "設定を開く") {
-      await vscode.commands.executeCommand(
-        "workbench.action.openSettings",
-        `novelai.${provider.id}`
-      );
-    }
-    return false;
-  }
-}
-
-function ollamaEndpoint(): string {
-  return vscode.workspace
-    .getConfiguration("novelai")
-    .get<string>("ollama.endpoint", "http://localhost:11434");
-}
-
-function isLocalOllamaEndpoint(): boolean {
-  return isLocalEndpoint(ollamaEndpoint());
-}
-
-/** Ollamaを起動し、応答するまで進捗を出しながら待つ */
-async function startOllamaWithProgress(): Promise<boolean> {
-  const outcome = await withProgress("Ollamaを起動しています…", () =>
-    startOllama({
-      endpoint: ollamaEndpoint(),
-      executablePath: vscode.workspace
-        .getConfiguration("novelai")
-        .get<string>("ollama.executablePath", ""),
-    })
-  );
-
-  if (outcome.ok) {
-    vscode.window.showInformationMessage("Ollamaを起動しました。");
-    return true;
-  }
-
-  // 実行ファイルが見つからない場合は、その場で選んでもらえるようにする
-  if (outcome.reason === "not_installed") {
-    const action = await vscode.window.showWarningMessage(
-      describeStartFailure(outcome),
-      "実行ファイルを選択",
-      "閉じる"
-    );
-    if (action === "実行ファイルを選択") {
-      await vscode.commands.executeCommand("novelai.selectOllamaExecutable");
-    }
-    return false;
-  }
-
-  await vscode.window.showWarningMessage(describeStartFailure(outcome));
-  return false;
 }
 
 /**
