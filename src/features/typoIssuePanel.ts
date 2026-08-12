@@ -310,7 +310,18 @@ async function revertIfOpen(filePath: string): Promise<void> {
       }));
 
     if (visibleRange) {
-      after.revealRange(visibleRange, vscode.TextEditorRevealType.AtTop);
+      // revealRange の AtTop は、指定した範囲の先頭行をそのまま画面の
+      // 一番上に置くのではなく、1行分の余白を残して置くようで、
+      // 結果として復元後の表示が1行分下にずれて見える（実機で確認）。
+      // 先頭行を1つ手前にずらして呼ぶことで打ち消す
+      const adjustedTop = new vscode.Position(
+        Math.max(0, visibleRange.start.line - 1),
+        0
+      );
+      after.revealRange(
+        new vscode.Range(adjustedTop, visibleRange.end),
+        vscode.TextEditorRevealType.AtTop
+      );
     }
     after.selection = selection;
   } catch {
