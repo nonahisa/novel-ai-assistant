@@ -81,7 +81,7 @@ describe("本文形式を保持した保存", () => {
     ["UTF-8 LF", utf8("灯\n澪\n"), "utf8", "\n", true],
     ["UTF-8 BOM CRLF", bom(utf8("灯\r\n澪")), "utf8-bom", "\r\n", false],
     ["Shift_JIS CR", shiftJis("灯\r澪\r"), "shift_jis", "\r", true],
-  ])("%sを往復して同じバイト列の提案を残す", async (_label, bytes, encoding, eol, hasTrailingNewline) => {
+  ])("%sを往復しても同じバイト列のまま保存する", async (_label, bytes, encoding, eol, hasTrailingNewline) => {
     const original = decodeBytes(bytes);
     files.set(fileKey(path), bytes);
 
@@ -95,7 +95,8 @@ describe("本文形式を保持した保存", () => {
     expect(original.encoding).toBe(encoding);
     expect(original.eol).toBe(eol);
     expect(original.hasTrailingNewline).toBe(hasTrailingNewline);
-    expectFailClosed(result, bytes);
+    expectSaved(result);
+    expect(files.get(fileKey(path))).toEqual(bytes);
     expect(savedBytes).toEqual(bytes);
   });
 
@@ -125,7 +126,8 @@ describe("本文形式を保持した保存", () => {
       original.hash
     );
 
-    expectFailClosed(result, originalBytes);
+    expectSaved(result);
+    expect(new TextDecoder().decode(files.get(fileKey(path)))).toBe("灯\n翠\n");
     expect(new TextDecoder().decode(savedBytes)).toBe("灯\n翠\n");
   });
 
@@ -141,7 +143,8 @@ describe("本文形式を保持した保存", () => {
       original.hash
     );
 
-    expectFailClosed(result, originalBytes);
+    expectSaved(result);
+    expect(files.get(fileKey(path))).toEqual(utf8("甲\r\n乙改\n丙\r丁"));
     expect(savedBytes).toEqual(utf8("甲\r\n乙改\n丙\r丁"));
   });
 
@@ -149,7 +152,7 @@ describe("本文形式を保持した保存", () => {
     ["NEC選定IBM拡張文字", [0xee, 0xe0]],
     ["NEC特殊文字", [0x87, 0x90]],
     ["IBM拡張文字", [0xed, 0x40]],
-  ])("無変更のCP932 %s (%s) を元のバイト列のまま残す", async (_label, raw) => {
+  ])("無変更のCP932 %s (%s) を元のバイト列のまま保存する", async (_label, raw) => {
     const special = new Uint8Array(raw);
     const suffix = shiftJis("\r\n末尾");
     const originalBytes = new Uint8Array(special.length + suffix.length);
@@ -165,7 +168,8 @@ describe("本文形式を保持した保存", () => {
       original.hash
     );
 
-    expectFailClosed(result, originalBytes);
+    expectSaved(result);
+    expect(files.get(fileKey(path))).toEqual(originalBytes);
     expect(savedBytes).toEqual(originalBytes);
   });
 
@@ -192,7 +196,8 @@ describe("本文形式を保持した保存", () => {
     expected.set(changed, prefix.length);
     expected.set(suffix, prefix.length + changed.length);
 
-    expectFailClosed(result, originalBytes);
+    expectSaved(result);
+    expect(files.get(fileKey(path))).toEqual(expected);
     expect(savedBytes).toEqual(expected);
   });
 
@@ -209,7 +214,7 @@ describe("本文形式を保持した保存", () => {
       original.hash
     );
 
-    expectFailClosed(result, originalBytes);
+    expectSaved(result);
     expect(savedBytes?.slice(0, repeated.length)).toEqual(originalBytes.slice(0, repeated.length));
     expect(savedBytes?.slice(-repeated.length)).toEqual(originalBytes.slice(-repeated.length));
   });
@@ -260,7 +265,9 @@ describe("本文形式を保持した保存", () => {
     expect(rename).not.toHaveBeenCalled();
   });
 
-  test("一時書き込み中の外部編集を上書きも削除もしない", async () => {
+  test("退避後に何者かが同じ場所へ書き込んでいたら、外部の内容を上書きも削除もしない", async () => {
+    // 退避（原稿をrename）は成功したあと、新しい内容を配置する直前に
+    // 何者かが同じパスへ直接書き込んだ状況を再現する
     const originalBytes = utf8("灯\n澪\n");
     const changedByAuthor = utf8("灯\n碧\n");
     const original = decodeBytes(originalBytes);
@@ -279,21 +286,25 @@ describe("本文形式を保持した保存", () => {
       original.hash
     );
 
-    expect(result).toEqual({ ok: false, reason: "modified_externally" });
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "path_conflict",
+      recoveryPaths: expect.arrayContaining([expect.stringContaining(".bak")]),
+    });
+    // 何者かが直接書き込んだ内容は上書きされない
     expect(files.get(fileKey(path))).toEqual(changedByAuthor);
+    // 退避しておいた元の原稿も、回復先でそのまま読める
+    const recoveryPath = result.ok ? undefined : result.recoveryPaths?.[0];
+    expect(recoveryPath).toBeDefined();
+    expect(files.get(fileKey(recoveryPath as string))).toEqual(originalBytes);
   });
 
-  test("回復が必要な競合では詳細と回復パスを返す", async () => {
+  test("回復先ディレクトリを準備できなければ、原稿へは触れずに理由を返す", async () => {
     const originalBytes = utf8("灯\n澪\n");
     const original = decodeBytes(originalBytes);
     files.set(fileKey(path), originalBytes);
-    workspace.fs.readFile = vi.fn(async (uri: { fsPath: string }) => {
-      if (uri.fsPath.endsWith(".bak")) {
-        throw new FileSystemError("backup denied", "NoPermissions");
-      }
-      const bytes = files.get(fileKey(uri.fsPath));
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      return bytes;
+    workspace.fs.createDirectory = vi.fn(async () => {
+      throw new FileSystemError("denied", "NoPermissions");
     });
 
     const result = await writeTextFilePreservingFormat(
@@ -306,9 +317,11 @@ describe("本文形式を保持した保存", () => {
     expect(result).toMatchObject({
       ok: false,
       reason: "path_conflict",
-      detail: expect.stringContaining("手動"),
-      recoveryPaths: expect.arrayContaining([expect.stringContaining(".bak")]),
+      detail: expect.stringContaining("回復先"),
     });
+    // 回復先すら準備できない場合、原稿には一切触れていない
+    expect(rename).not.toHaveBeenCalled();
+    expect(files.get(fileKey(path))).toEqual(originalBytes);
   });
 
   test("保存対象が消えている場合は外部変更として扱う", async () => {
@@ -325,7 +338,7 @@ describe("本文形式を保持した保存", () => {
     expect(rename).not.toHaveBeenCalled();
   });
 
-  test("原子的保存の想定外エラーは隠さず伝播する", async () => {
+  test("新しい内容の配置で想定外のエラーが起きても、原稿は回復先で失われない", async () => {
     const originalBytes = utf8("灯\n澪\n");
     const original = decodeBytes(originalBytes);
     files.set(fileKey(path), originalBytes);
@@ -333,9 +346,22 @@ describe("本文形式を保持した保存", () => {
       throw new Error("write failed");
     });
 
-    await expect(
-      writeTextFilePreservingFormat(path, original.text, original, original.hash)
-    ).rejects.toThrow("write failed");
+    const result = await writeTextFilePreservingFormat(
+      path,
+      original.text,
+      original,
+      original.hash
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "path_conflict",
+      detail: expect.stringContaining("write failed"),
+      recoveryPaths: expect.arrayContaining([expect.stringContaining(".bak")]),
+    });
+    const recoveryPath = result.ok ? undefined : result.recoveryPaths?.[0];
+    expect(recoveryPath).toBeDefined();
+    expect(files.get(fileKey(recoveryPath as string))).toEqual(originalBytes);
   });
 
   test("文字列ハッシュは既知のSHA-256値を返す", () => {
@@ -396,19 +422,11 @@ describe("本文形式を保持した保存", () => {
     }
   }
 
-  function expectFailClosed(
-    result: Awaited<ReturnType<typeof writeTextFilePreservingFormat>>,
-    originalBytes: Uint8Array
+  function expectSaved(
+    result: Awaited<ReturnType<typeof writeTextFilePreservingFormat>>
   ): void {
-    expect(result).toMatchObject({
-      ok: false,
-      reason: "path_conflict",
-      detail: expect.stringContaining("手動"),
-      recoveryPaths: expect.arrayContaining([expect.stringContaining(".bak")]),
-    });
-    expect(files.get(fileKey(path))).toEqual(originalBytes);
-    expect(
-      rename.mock.calls.some((call) => fileKey(call[1].fsPath) === fileKey(path))
-    ).toBe(false);
+    expect(result).toEqual({ ok: true });
+    // 退避（原稿→回復先）と配置（一時ファイル→原稿のパス）の2回、renameが呼ばれる
+    expect(rename).toHaveBeenCalledTimes(2);
   }
 });

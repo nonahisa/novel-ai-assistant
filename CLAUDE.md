@@ -156,7 +156,7 @@ src/
 - `authorLocked: true` の呼称エントリは変更しない。
 - 既存の記述と食い違う情報が出たら、上書きせず `conflicts` に記録して作者に判断させる。
 - 壊れたJSONを勝手に修復・上書きしない。エラーを表示して止める。
-- **既存ファイルは上書きできない。** `atomicWrite.ts` の `replaceGuarded` は必ず失敗する（正規ファイルへ触れずに提案を回復パスへ残す設計）。既存レコードを書き換えるときは「回復先へ退避 → 新規作成」の順で行う。人物では `CharacterStore.saveOrUpdate()` を使い、`save()` を直接呼ばない。この制約を知らずに書いた保存処理が3か所とも失敗した実績がある。
+- **既存ファイルは上書きできない。** `atomicWrite.ts` の `replaceGuarded`（`atomicWriteFile` の `mode: "replace"`）は必ず失敗する（正規ファイルへ触れずに提案を回復パスへ残す設計）。既存レコードを書き換えるときは「回復先へ退避 → 新規作成」の順で行う。人物では `CharacterStore.saveOrUpdate()` を使い、`save()` を直接呼ばない。この制約を知らずに書いた保存処理が3か所とも失敗した実績がある。**本文（.txt）も同じ制約を受ける。** `textFile.ts` の `writeTextFilePreservingFormat` は2026-08-12まで `mode: "replace"` を直接呼んでおり、呼び出し側が現れるまで（誤字脱字検知のAI指摘パネル）気づかれないまま、ハッシュが一致していても常に失敗していた。現在は関数内部で「退避 → 新規作成」を行うため、呼び出し側は手順を意識しなくてよい。**新しく本文を書き換える処理を追加するときは、必ず `writeTextFilePreservingFormat` 経由にする。** `atomicWriteFile` を `mode: "replace"` で直接呼ぶ処理を新設しないこと（4か所目の同じ失敗になる）。
 
 ### 3. AIの出力を信用しない
 

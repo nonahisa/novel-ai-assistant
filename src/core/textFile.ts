@@ -2,7 +2,12 @@ import * as vscode from "vscode";
 import * as crypto from "crypto";
 import iconv = require("iconv-lite");
 import { diffArrays } from "diff";
-import { AtomicWriteFileError, atomicWriteFile } from "./atomicWrite";
+import {
+  AtomicWriteFileError,
+  atomicWriteFile,
+  createManagedRecoveryPath,
+  pruneManagedRecoveries,
+} from "./atomicWrite";
 
 export type Encoding = "utf8" | "utf8-bom" | "shift_jis";
 export type Eol = "\n" | "\r\n" | "\r";
@@ -173,26 +178,60 @@ export async function writeTextFilePreservingFormat(
     return { ok: false, reason: "encoding_error" };
   }
 
+  /**
+   * 公開FS APIには「期待した版なら置換」を一命令で行う原子的CASが無い
+   * （`atomicWrite.ts` の `replaceGuarded` は、そのため正規パスへは触れず
+   * 必ず失敗する）。人物設定など既存レコードの更新と同じ
+   * 「①今の原稿を回復先へ退避 → ②新しい内容で作り直す」の手順で書き戻す。
+   */
+  let recoveryPath: string;
   try {
-    await atomicWriteFile(filePath, bytes, {
-      mode: "replace",
-      expectedHash,
-    });
+    recoveryPath = await createManagedRecoveryPath(filePath);
   } catch (error) {
-    if (error instanceof AtomicWriteFileError) {
-      if (error.kind === "path_conflict") {
-        return {
-          ok: false,
-          reason: "path_conflict",
-          detail: error.message,
-          recoveryPaths: error.recoveryPaths,
-        };
-      }
+    return {
+      ok: false,
+      reason: "path_conflict",
+      detail: `回復先を準備できませんでした: ${describeError(error)}`,
+    };
+  }
+
+  try {
+    // 退避の直前にもう一度ハッシュを確かめる。ここまでの間に
+    // 外部から書き換えられている可能性がわずかに残るため
+    const recheck = await vscode.workspace.fs.readFile(uri);
+    if (hashBytes(recheck) !== expectedHash) {
       return { ok: false, reason: "modified_externally" };
     }
-    throw error;
+    await vscode.workspace.fs.rename(uri, vscode.Uri.file(recoveryPath), {
+      overwrite: false,
+    });
+  } catch {
+    // 退避できなければ原稿にはまだ触れていないので、外部変更として扱ってよい
+    return { ok: false, reason: "modified_externally" };
   }
+
+  try {
+    await atomicWriteFile(filePath, bytes, { mode: "create" });
+  } catch (error) {
+    // 新しい内容の配置に失敗しても、元の原稿は退避先にそのまま残っている
+    const detail =
+      error instanceof AtomicWriteFileError
+        ? error.message
+        : describeError(error);
+    return {
+      ok: false,
+      reason: "path_conflict",
+      detail: `元の原稿は「${recoveryPath}」に退避されています。${detail}`,
+      recoveryPaths: [recoveryPath],
+    };
+  }
+
+  await pruneManagedRecoveries(filePath);
   return { ok: true };
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 interface EncodedToken {
