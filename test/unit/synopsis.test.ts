@@ -197,6 +197,27 @@ describe("重複エントリの統合", () => {
     expect(result.episodes[0].synopsis).toBe("作者が書き直した版");
   });
 
+  test("更新日時が古くても、サブタイトル付きのほうを優先する", () => {
+    // 実機で発覚：更新日時だけを見ていたら、更新日時の新しい方が
+    // たまたま無題側で、サブタイトルが消えてしまった（2026-08-13）
+    const result = dedupeSynopsisEpisodes([
+      episode({
+        chapter: 18,
+        fileName: "018_サブタイトル.txt",
+        title: "因果応報と炎上の波紋",
+        updatedAt: "2026-08-10T00:00:00.000Z",
+      }),
+      episode({
+        chapter: 18,
+        fileName: "018.txt",
+        title: null,
+        updatedAt: "2026-08-13T00:00:00.000Z",
+      }),
+    ]);
+
+    expect(result.episodes[0].title).toBe("因果応報と炎上の波紋");
+  });
+
   test("更新日時が同点（未設定同士）なら、後にあるほう（＝リネーム後）を残す", () => {
     const result = dedupeSynopsisEpisodes([
       episode({ chapter: 17, fileName: "017.txt", synopsis: "旧", updatedAt: null }),
