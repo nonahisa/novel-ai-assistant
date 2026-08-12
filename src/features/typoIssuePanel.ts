@@ -279,6 +279,11 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
  * `revert` はスクロール位置・カーソル位置を保たない（実機で確認）ため、
  * 読み直す前の表示範囲と選択位置を控えておき、読み直した後に復元する。
  * 変更は該当行の一部だけなので、行数はほぼ動かず復元先はそのまま有効になる。
+ *
+ * **`revert` 前に取得した `TextEditor` を使い回さない。** `revert` の後は
+ * 別のエディターインスタンスになっていることがあり、古い参照へ
+ * `selection` を代入しても反映されなかった（実機で確認）。復元は
+ * 読み直した後に改めて取得したエディターに対して行う。
  */
 async function revertIfOpen(filePath: string): Promise<void> {
   const openDoc = vscode.workspace.textDocuments.find(
@@ -286,19 +291,28 @@ async function revertIfOpen(filePath: string): Promise<void> {
   );
   if (!openDoc) return;
   try {
-    const editor = await vscode.window.showTextDocument(openDoc, {
+    const before = await vscode.window.showTextDocument(openDoc, {
       preserveFocus: true,
       preview: false,
     });
-    const visibleRange = editor.visibleRanges[0];
-    const selection = editor.selection;
+    const visibleRange = before.visibleRanges[0];
+    const selection = before.selection;
 
     await vscode.commands.executeCommand("workbench.action.files.revert");
 
+    const after =
+      vscode.window.visibleTextEditors.find(
+        (candidate) => candidate.document.uri.toString() === openDoc.uri.toString()
+      ) ??
+      (await vscode.window.showTextDocument(openDoc, {
+        preserveFocus: true,
+        preview: false,
+      }));
+
     if (visibleRange) {
-      editor.revealRange(visibleRange, vscode.TextEditorRevealType.AtTop);
+      after.revealRange(visibleRange, vscode.TextEditorRevealType.AtTop);
     }
-    editor.selection = selection;
+    after.selection = selection;
   } catch {
     // 表示の更新に失敗しても、書き込み自体は既に成功している。
     // 作者は手動でタブを閉じて開き直せば最新内容を見られる
