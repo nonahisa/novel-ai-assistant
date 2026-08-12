@@ -77,6 +77,64 @@ export class TypoDismissedHistory {
   }
 }
 
+/** 適用済みの「target→suggestion」の組を識別するキー */
+export function appliedFixKey(
+  file: string,
+  target: string,
+  suggestion: string
+): string {
+  return `${file}|${target}|${suggestion}`;
+}
+
+/**
+ * `.aiwriter/logs/ai_actions.log` から、これまでに適用された
+ * 「target→suggestion」の組を読み込む。
+ *
+ * 用途：AIが一度「AをBに直す」を適用させた直後、次の検知で
+ * 「BをAに戻す」を指摘してくる往復ループを防ぐ。実際に
+ * 「良い」→「よい」を適用した直後、次の検知で「よい」→「良い」が
+ * 指摘される事故が起きた（表記ゆれは優劣が無く、プロンプトで
+ * 除外を指示していても小さいモデルは無視することがあるため、
+ * ここでもコード側で二重に弾く）。
+ *
+ * ログが読めない・壊れている場合は空として扱う（検知そのものは動かす）。
+ */
+export async function loadAppliedFixKeys(
+  work: WorkEntry
+): Promise<Set<string>> {
+  const target = path.join(workPaths(work).aiwriter, "logs", "ai_actions.log");
+  const keys = new Set<string>();
+  try {
+    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+    const text = new TextDecoder().decode(bytes);
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const entry: unknown = JSON.parse(line);
+        if (
+          isRecord(entry) &&
+          entry.category === "typo" &&
+          entry.action === "applied" &&
+          typeof entry.file === "string" &&
+          typeof entry.target === "string" &&
+          typeof entry.suggestion === "string"
+        ) {
+          keys.add(appliedFixKey(entry.file, entry.target, entry.suggestion));
+        }
+      } catch {
+        // 壊れた行は無視して次の行へ
+      }
+    }
+  } catch {
+    // ログが無い（初回実行など）場合も空集合のまま返す
+  }
+  return keys;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export interface AiActionLogEntry {
   /** 指摘の種類。誤字脱字検知しか無い段階だが、将来の推敲・矛盾検知でも使う */
   category: "typo";

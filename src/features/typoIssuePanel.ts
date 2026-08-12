@@ -277,8 +277,19 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
  * `hasUnsavedChanges` チェックで、そもそもここまで来ないはずだが念のため）。
  *
  * `revert` はスクロール位置・カーソル位置を保たない（実機で確認）ため、
- * 読み直す前の表示範囲と選択位置を控えておき、読み直した後に復元する。
- * 変更は該当行の一部だけなので、行数はほぼ動かず復元先はそのまま有効になる。
+ * 読み直す前の選択位置を控えておき、読み直した後に復元する。
+ *
+ * スクロール位置そのものを「表示範囲の先頭行をrevealRangeで指定し直す」
+ * 形で厳密に復元しようとしたが、`AtTop`が実際にどこへ置くかが実機で
+ * 安定せず（範囲全体を渡しても・先頭1行だけに絞っても、復元後の表示が
+ * 数行分ずれた）、当てずっぽうの補正を重ねるやり方は行き詰まった
+ * （2026-08-13）。そこで方針を変え、「直前の表示範囲を厳密に再現する」
+ * のではなく、「編集した行がその後も画面内に見えていればそれで良い」
+ * という緩い目標に切り替えた。`InCenterIfOutsideViewport`
+ * は対象がすでに画面内にあれば何もしない（＝適用直前の表示位置が
+ * そのまま保たれる）ため、通常のケース（適用した行を見ながら「適用」を
+ * 押した直後）では一切スクロールが発生しない。対象が画面外に出ていた
+ * 場合だけ、その行が見えるように寄せる。
  *
  * **`revert` 前に取得した `TextEditor` を使い回さない。** `revert` の後は
  * 別のエディターインスタンスになっていることがあり、古い参照へ
@@ -295,7 +306,6 @@ async function revertIfOpen(filePath: string): Promise<void> {
       preserveFocus: true,
       preview: false,
     });
-    const visibleRange = before.visibleRanges[0];
     const selection = before.selection;
 
     await vscode.commands.executeCommand("workbench.action.files.revert");
@@ -309,21 +319,8 @@ async function revertIfOpen(filePath: string): Promise<void> {
         preview: false,
       }));
 
-    if (visibleRange) {
-      // revealRange の AtTop は、指定した範囲の先頭行をそのまま画面の
-      // 一番上に置くのではなく、1行分の余白を残して置くようで、
-      // 結果として復元後の表示が1行分下にずれて見える（実機で確認）。
-      // 先頭行を1つ手前にずらして呼ぶことで打ち消す
-      const adjustedTop = new vscode.Position(
-        Math.max(0, visibleRange.start.line - 1),
-        0
-      );
-      after.revealRange(
-        new vscode.Range(adjustedTop, visibleRange.end),
-        vscode.TextEditorRevealType.AtTop
-      );
-    }
     after.selection = selection;
+    after.revealRange(selection, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
   } catch {
     // 表示の更新に失敗しても、書き込み自体は既に成功している。
     // 作者は手動でタブを閉じて開き直せば最新内容を見られる

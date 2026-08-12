@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
 import {
   appendAiActionLog,
+  appliedFixKey,
   dismissKey,
+  loadAppliedFixKeys,
   TypoDismissedHistory,
 } from "../../src/core/typoIssueHistory";
 import type { WorkEntry } from "../../src/models/types";
@@ -142,5 +144,64 @@ describe("却下履歴とAI操作ログ", () => {
     });
     expect(lines[1]).toMatchObject({ action: "dismissed", file: "002.txt" });
     expect(typeof lines[0].timestamp).toBe("string");
+  });
+
+  describe("適用済みの組の読み込み（往復ループ防止）", () => {
+    test("ログが無ければ空集合を返す", async () => {
+      expect(await loadAppliedFixKeys(work)).toEqual(new Set());
+    });
+
+    test("適用済みの組をキーとして読み込める", async () => {
+      await appendAiActionLog(work, {
+        category: "typo",
+        action: "applied",
+        file: "episode_0009.txt",
+        line: 28,
+        target: "良い",
+        suggestion: "よい",
+      });
+
+      const keys = await loadAppliedFixKeys(work);
+      expect(keys.has(appliedFixKey("episode_0009.txt", "良い", "よい"))).toBe(
+        true
+      );
+    });
+
+    test("却下（無視）は含めない。適用したものだけを対象にする", async () => {
+      await appendAiActionLog(work, {
+        category: "typo",
+        action: "dismissed",
+        file: "001.txt",
+        line: 1,
+        target: "良い",
+        suggestion: "よい",
+      });
+
+      const keys = await loadAppliedFixKeys(work);
+      expect(keys.has(appliedFixKey("001.txt", "良い", "よい"))).toBe(false);
+    });
+
+    test("壊れた行が混ざっていても、読める行は取り込む", async () => {
+      await appendAiActionLog(work, {
+        category: "typo",
+        action: "applied",
+        file: "001.txt",
+        line: 1,
+        target: "以外",
+        suggestion: "意外",
+      });
+      const logPath = Uri.file(
+        "C:\\novels\\テスト作品\\.aiwriter\\logs\\ai_actions.log"
+      ).fsPath;
+      const existing = files.get(logPath)!;
+      const broken = new Uint8Array([
+        ...existing,
+        ...new TextEncoder().encode("これはJSONではない\n"),
+      ]);
+      files.set(logPath, broken);
+
+      const keys = await loadAppliedFixKeys(work);
+      expect(keys.has(appliedFixKey("001.txt", "以外", "意外"))).toBe(true);
+    });
   });
 });

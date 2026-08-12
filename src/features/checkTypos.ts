@@ -28,7 +28,12 @@ import {
   validateTypoIssues,
   type AcceptedTypoIssue,
 } from "../core/typoCheckValidation";
-import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
+import {
+  appliedFixKey,
+  dismissKey,
+  loadAppliedFixKeys,
+  TypoDismissedHistory,
+} from "../core/typoIssueHistory";
 import { checkWritingStyle } from "../core/writingStyleCheck";
 import { CharacterStore } from "../core/characterStore";
 import {
@@ -233,6 +238,7 @@ export async function checkTypos(
 
   const dismissedHistory = new TypoDismissedHistory(work);
   const dismissed = await dismissedHistory.load();
+  const appliedFixKeys = await loadAppliedFixKeys(work);
 
   const filePathByChunk = new Map<string, string>();
   for (const task of tasks) {
@@ -318,6 +324,7 @@ export async function checkTypos(
           filePath,
           protectedNames,
           dismissed,
+          appliedFixKeys,
           issues
         );
         done++;
@@ -403,6 +410,7 @@ export async function checkTypos(
             filePath,
             protectedNames,
             dismissed,
+            appliedFixKeys,
             issues,
             (count) => (rejectedCount += count)
           );
@@ -476,23 +484,40 @@ export async function checkTypos(
   };
 }
 
-/** 検証を通った指摘のうち、無視済みでないものだけを集める */
+/**
+ * 検証を通った指摘のうち、無視済みでないもの・往復ループでないものだけを集める。
+ *
+ * `appliedFixKeys` は、直前に適用済みの「target→suggestion」の組。
+ * 今回の指摘がその逆向き（suggestion→target）なら、AIが表記ゆれなどを
+ * 誤字として往復で指摘し続けている可能性が高いため除外する。
+ */
 function collectIssues(
   result: TypoCheckResult,
   chunk: Chunk,
   filePath: string,
   protectedNames: string[],
   dismissed: Set<string>,
+  appliedFixKeys: ReadonlySet<string>,
   out: TypoCheckIssue[],
   onRejected?: (count: number) => void
 ): void {
   const validated = validateTypoIssues(result, chunk, protectedNames);
-  onRejected?.(validated.rejected.length);
+  let rejectedCount = validated.rejected.length;
+  const fileName = path.basename(filePath);
+
   for (const issue of validated.accepted) {
     const key = dismissKey(chunk.hash, issue);
     if (dismissed.has(key)) continue;
+
+    if (appliedFixKeys.has(appliedFixKey(fileName, issue.suggestion, issue.target))) {
+      rejectedCount++;
+      continue;
+    }
+
     out.push({ ...issue, filePath, chunkHash: chunk.hash });
   }
+
+  onRejected?.(rejectedCount);
 }
 
 /**
