@@ -29,6 +29,7 @@ import {
   type AcceptedTypoIssue,
 } from "../core/typoCheckValidation";
 import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
+import { checkWritingStyle } from "../core/writingStyleCheck";
 import { CharacterStore } from "../core/characterStore";
 import {
   createAbilityStore,
@@ -70,9 +71,18 @@ interface FileChunkTask {
   chunks: Chunk[];
 }
 
+export interface CheckTyposOptions {
+  /**
+   * 対象を絞り込むファイルパス。指定すると、そのファイルだけを検知する
+   * （作品一覧で1話を右クリックしたときなど）。省略すると作品全体が対象。
+   */
+  filePaths?: string[];
+}
+
 export async function checkTypos(
   work: WorkEntry,
-  registry: AIRegistry
+  registry: AIRegistry,
+  options: CheckTyposOptions = {}
 ): Promise<TypoCheckRunResult | undefined> {
   const resolved = await ensureConfigured(registry);
   if (!resolved) return undefined;
@@ -126,10 +136,18 @@ export async function checkTypos(
     return undefined;
   }
 
+  const targetEpisodes = options.filePaths
+    ? scan.episodes.filter((ep) => options.filePaths?.includes(ep.filePath))
+    : scan.episodes;
+  if (targetEpisodes.length === 0) {
+    vscode.window.showWarningMessage("対象のファイルが見つかりません。");
+    return undefined;
+  }
+
   const conflicted: string[] = [];
   const tasks: FileChunkTask[] = [];
 
-  for (const ep of scan.episodes) {
+  for (const ep of targetEpisodes) {
     const file = await readTextFile(ep.filePath);
     if (file.hasConflictMarkers) {
       conflicted.push(ep.fileName);
@@ -213,6 +231,28 @@ export async function checkTypos(
     .map((name) => name.trim())
     .filter(Boolean);
 
+  const dismissedHistory = new TypoDismissedHistory(work);
+  const dismissed = await dismissedHistory.load();
+
+  const filePathByChunk = new Map<string, string>();
+  for (const task of tasks) {
+    for (const chunk of task.chunks) filePathByChunk.set(chunk.hash, task.filePath);
+  }
+
+  const issues: TypoCheckIssue[] = [];
+
+  // 文章作法（三点リーダー・ダッシュの偶数使用、鉤括弧内文末の句点、
+  // 感嘆符・疑問符後の空白）はAIを使わずコードだけで判定できるため、
+  // AIの実行有無・キャッシュに関係なく毎回すべてのチャンクに対して行う
+  for (const chunk of chunks) {
+    const filePath = filePathByChunk.get(chunk.hash) ?? chunk.filePath;
+    for (const issue of checkWritingStyle(chunk)) {
+      const key = dismissKey(chunk.hash, issue);
+      if (dismissed.has(key)) continue;
+      issues.push({ ...issue, filePath, chunkHash: chunk.hash });
+    }
+  }
+
   useLogFile(work.folderPath);
   logStep(
     `誤字脱字検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
@@ -244,21 +284,12 @@ export async function checkTypos(
       "中止"
     );
     if (confirm !== "実行") return undefined;
-  } else {
+  } else if (chunks.length > 0) {
     vscode.window.showInformationMessage(
-      "すべてのチャンクが処理済みです。キャッシュから結果を再表示します。"
+      "AIでの検知はすべてのチャンクが処理済みです。キャッシュから結果を再表示します。"
     );
   }
 
-  const dismissedHistory = new TypoDismissedHistory(work);
-  const dismissed = await dismissedHistory.load();
-
-  const filePathByChunk = new Map<string, string>();
-  for (const task of tasks) {
-    for (const chunk of task.chunks) filePathByChunk.set(chunk.hash, task.filePath);
-  }
-
-  const issues: TypoCheckIssue[] = [];
   let rejectedCount = 0;
   let failedChunks = 0;
   let cancelled = false;

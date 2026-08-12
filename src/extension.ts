@@ -70,7 +70,8 @@ import {
   ConflictContentProvider,
   resolveWorkConflicts,
 } from "./features/resolveConflicts";
-import { checkTypos } from "./features/checkTypos";
+import { checkTypos, type TypoCheckRunResult } from "./features/checkTypos";
+import { hasUnsavedChanges } from "./core/textFile";
 import { AI_ISSUES_VIEW_ID, TypoIssuePanel } from "./features/typoIssuePanel";
 
 /** 操作メニューで開いている分類の記憶先 */
@@ -835,12 +836,70 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (!result) return;
 
         typoIssuePanel.showResults(work, result.issues);
+        reportTypoCheckResult("誤字脱字検知", result);
+      }
+    )
+  );
 
-        const parts = [`指摘 ${result.issues.length}件`];
-        if (result.failedChunks > 0) parts.push(`失敗 ${result.failedChunks}チャンク`);
-        if (result.rejectedCount > 0) parts.push(`除外 ${result.rejectedCount}件`);
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.checkTyposForFile",
+      async (node?: EpisodeNode) => {
+        if (!node) return;
+        const work = node.work;
+
+        // 未保存のまま読むと、画面と違う本文を検知してしまう
+        if (!(await saveDirtyDocumentsBeforeExtraction(work, "誤字脱字の検知")))
+          return;
+
+        const result = await checkTypos(work, aiRegistry, {
+          filePaths: [node.episode.filePath],
+        });
+        if (!result) return;
+
+        typoIssuePanel.showResults(work, result.issues);
+        reportTypoCheckResult(`${node.episode.fileName} の誤字脱字検知`, result);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.deleteEpisodeFile",
+      async (node?: EpisodeNode) => {
+        if (!node) return;
+
+        // 削除は取り消せない操作の入口なので、ごみ箱経由にしたうえで
+        // 未保存の変更があれば併せて捨てられる旨を伝える
+        const dirtyNote = hasUnsavedChanges(node.episode.filePath)
+          ? "未保存の変更も破棄されます。"
+          : "";
+        const answer = await vscode.window.showWarningMessage(
+          `${node.episode.fileName} を削除しますか？`,
+          {
+            modal: true,
+            detail: `ごみ箱に移動します。元に戻すことができます。${dirtyNote}`,
+          },
+          "削除する"
+        );
+        if (answer !== "削除する") return;
+
+        try {
+          await vscode.workspace.fs.delete(
+            vscode.Uri.file(node.episode.filePath),
+            { useTrash: true }
+          );
+        } catch (error) {
+          vscode.window.showErrorMessage(
+            `削除できませんでした: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+          return;
+        }
+        treeProvider.refresh(node.work.id);
         vscode.window.showInformationMessage(
-          `誤字脱字検知が完了しました。${parts.join(" / ")}`
+          `${node.episode.fileName} を削除しました。`
         );
       }
     )
@@ -993,6 +1052,14 @@ function findWorkForPath(
         !path.isAbsolute(relative)
       );
     });
+}
+
+/** 誤字脱字検知の結果を要約して通知する。作品全体・1話単位のどちらからも呼ぶ */
+function reportTypoCheckResult(label: string, result: TypoCheckRunResult): void {
+  const parts = [`指摘 ${result.issues.length}件`];
+  if (result.failedChunks > 0) parts.push(`失敗 ${result.failedChunks}チャンク`);
+  if (result.rejectedCount > 0) parts.push(`除外 ${result.rejectedCount}件`);
+  vscode.window.showInformationMessage(`${label}が完了しました。${parts.join(" / ")}`);
 }
 
 /** ツリーから呼ばれた場合はそのノード、コマンドパレットからは選択させる */

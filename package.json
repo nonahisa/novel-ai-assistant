@@ -169,6 +169,18 @@
         "icon": "$(search-fuzzy)"
       },
       {
+        "command": "novelai.checkTyposForFile",
+        "title": "この話の誤字脱字を検知",
+        "category": "小説執筆",
+        "icon": "$(search-fuzzy)"
+      },
+      {
+        "command": "novelai.deleteEpisodeFile",
+        "title": "ファイルを削除",
+        "category": "小説執筆",
+        "icon": "$(trash)"
+      },
+      {
         "command": "novelai.generateSynopses",
         "title": "各話あらすじを作る",
         "category": "小説執筆",
@@ -286,6 +298,16 @@
           "command": "novelai.removeWork",
           "when": "view == novelai.works && viewItem == work",
           "group": "9_danger"
+        },
+        {
+          "command": "novelai.checkTyposForFile",
+          "when": "view == novelai.works && viewItem == episode",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "novelai.deleteEpisodeFile",
+          "when": "view == novelai.works && viewItem == episode",
+          "group": "9_danger"
         }
       ],
       "editor/context": [
@@ -306,6 +328,14 @@
         },
         {
           "command": "novelai.showWorkStats",
+          "when": "false"
+        },
+        {
+          "command": "novelai.checkTyposForFile",
+          "when": "false"
+        },
+        {
+          "command": "novelai.deleteEpisodeFile",
           "when": "false"
         },
         {
