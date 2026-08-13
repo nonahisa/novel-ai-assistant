@@ -236,6 +236,18 @@ const ACTIONS: readonly CommandAction[] = [
       "目標を設定していれば達成率も出ます。" +
       "話ごとの文字数一覧（長さの偏り）も同じ画面で見られます。",
   },
+  {
+    command: "novelai.showAllWorksWritingStats",
+    label: "全作品の執筆量を見る",
+    description: "AIを使わない",
+    icon: "graph-line",
+    requiresWork: true,
+    group: "書き出す",
+    detail:
+      "登録している全作品を合わせた執筆量をグラフで見ます。" +
+      "目標（1日・1月）は作品を問わず共有なので、達成率もこちらのほうが正確です。" +
+      "作品ごとの内訳も見られます。",
+  },
 
   // ── 別の環境と行き来する
   {

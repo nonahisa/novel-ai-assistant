@@ -7,11 +7,19 @@
  *
  * 値はすべて postMessage で渡し、HTMLへ文字列として埋め込まない
  * （タイトルの引用符で画面が壊れるのを防ぐ）。
+ *
+ * **全作品の執筆量パネルとこのHTMLを共有する。** グラフ・カード・
+ * 内訳テーブルの組み方は1作品でも全作品でも同じで、違うのは
+ * 「話ごとの文字数」タブの有無（全作品では話数の単位が作品ごとに
+ * バラバラで意味を持たない）だけ。別ファイルに複製すると、
+ * グラフの目盛り間引きのような細かい修正が2箇所に必要になる。
  */
 export function buildWritingStatsPanelHtml(
   nonce: string,
-  cspSource: string
+  cspSource: string,
+  options: { hasEpisodesTab?: boolean } = {}
 ): string {
+  const hasEpisodesTab = options.hasEpisodesTab ?? true;
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -121,7 +129,7 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
   <h1 id="title">執筆量</h1>
   <div class="tabs">
     <div class="tab active" data-page="writing">執筆量</div>
-    <div class="tab" data-page="episodes">話ごとの文字数</div>
+    ${hasEpisodesTab ? '<div class="tab" data-page="episodes">話ごとの文字数</div>' : ''}
   </div>
 </header>
 <main>
@@ -132,10 +140,10 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
     <div class="note" id="chart-note"></div>
     <div id="devices"></div>
   </section>
-  <section class="page" id="page-episodes">
+  ${hasEpisodesTab ? `<section class="page" id="page-episodes">
     <div class="cards" id="episode-cards"></div>
     <div id="episode-table"></div>
-  </section>
+  </section>` : ''}
 </main>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
@@ -232,8 +240,9 @@ function renderCards() {
   ));
 
   cards.push(card(
-    '作品の総量', formatCount(state.totals.net) + '字',
-    '原稿用紙 約' + formatCount(state.totals.pages) + '枚 / ' + state.totals.files + 'ファイル',
+    state.totalsCardLabel || '作品の総量', formatCount(state.totals.net) + '字',
+    '原稿用紙 約' + formatCount(state.totals.pages) + '枚 / ' + state.totals.files + 'ファイル' +
+      (state.totals.workCount !== undefined ? ' / ' + state.totals.workCount + '作品' : ''),
     null
   ));
 
@@ -344,16 +353,18 @@ function renderChart() {
 
 function renderDevices() {
   const host = document.getElementById('devices');
-  if (!state || state.devices.length <= 1) {
+  if (!state || !state.devices || state.devices.length <= 1) {
     host.innerHTML = '';
     return;
   }
+  const title = state.devicesTitle || '環境ごとの内訳';
+  const column = state.devicesColumn || '環境';
   host.innerHTML =
-    '<h3>環境ごとの内訳</h3><table><thead><tr><th>環境</th><th class="num">字数</th>' +
-    '<th class="num">書いた日</th></tr></thead><tbody>' +
+    '<h3>' + escapeHtml(title) + '</h3><table><thead><tr><th>' + escapeHtml(column) +
+    '</th><th class="num">字数</th><th class="num">書いた日</th></tr></thead><tbody>' +
     state.devices
       .map((device) =>
-        '<tr><td>' + escapeHtml(device.deviceId) + '</td>' +
+        '<tr><td>' + escapeHtml(device.label) + '</td>' +
         '<td class="num">' + signed(device.net) + '</td>' +
         '<td class="num">' + device.activeDays + '</td></tr>'
       )
@@ -362,7 +373,7 @@ function renderDevices() {
 }
 
 function renderEpisodes() {
-  if (!state) return;
+  if (!state || !state.episodes) return;
   const summary = state.episodes.summary;
   document.getElementById('episode-cards').innerHTML = [
     card('話数', formatCount(summary.countedFiles) + '話',
@@ -420,7 +431,7 @@ window.addEventListener('message', (event) => {
   const message = event.data;
   if (message.type !== 'stats') return;
   state = message.data;
-  document.getElementById('title').textContent = state.workTitle + ' の執筆量';
+  document.getElementById('title').textContent = state.title;
   renderGranularity();
   renderCards();
   renderChart();

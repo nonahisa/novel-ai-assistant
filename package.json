@@ -110,6 +110,12 @@
         "icon": "$(graph-line)"
       },
       {
+        "command": "novelai.showAllWorksWritingStats",
+        "title": "全作品の執筆量を見る",
+        "category": "小説執筆",
+        "icon": "$(graph-line)"
+      },
+      {
         "command": "novelai.setupAI",
         "title": "AIの設定",
         "category": "小説執筆",

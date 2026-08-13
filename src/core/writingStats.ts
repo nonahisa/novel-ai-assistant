@@ -502,6 +502,25 @@ export function deviceTotals(
     .sort((left, right) => right.net - left.net);
 }
 
+/**
+ * ラベル付きの系列（作品・端末など）ごとの合計。
+ *
+ * `deviceTotals` は端末専用だが、全作品の執筆量パネルでは
+ * 「作品ごとの内訳」を同じ形で出したい。系列の中身（誰の記録か）を
+ * 問わない形にして、両方から使えるようにしている。
+ */
+export function totalsByLabel(
+  entries: Array<{ label: string; days: DailyStat[] }>
+): Array<{ label: string; net: number; activeDays: number }> {
+  return entries
+    .map((entry) => ({
+      label: entry.label,
+      net: entry.days.reduce((sum, day) => sum + day.net, 0),
+      activeDays: entry.days.filter((day) => day.net > 0).length,
+    }))
+    .sort((left, right) => right.net - left.net);
+}
+
 /** 期間を指定して合計する。両端を含む */
 export function sumRange(
   days: DailyStat[],

@@ -129,7 +129,7 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
   const table = buildEpisodeCountTable(scanned.episodes);
 
   return {
-    workTitle: work.title,
+    title: `${work.title} の執筆量`,
     buckets,
     // 「今」に当たる棒を色分けするために、粒度ごとの現在のキーを渡す
     currentBucketKey: {
@@ -147,7 +147,13 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
       activeDays: monthTotal.activeDays,
     },
     streak: summary.streak,
-    devices: deviceTotals(sets),
+    devices: deviceTotals(sets).map((device) => ({
+      label: device.deviceId,
+      net: device.net,
+      activeDays: device.activeDays,
+    })),
+    devicesTitle: "環境ごとの内訳",
+    devicesColumn: "環境",
     totals: {
       net: scanned.stats.totals.net,
       gross: scanned.stats.totals.gross,

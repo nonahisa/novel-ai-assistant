@@ -86,6 +86,10 @@ import {
   openWritingStatsPanel,
   refreshWritingStatsPanel,
 } from "./features/writingStatsPanel";
+import {
+  openAllWorksWritingStatsPanel,
+  refreshAllWorksWritingStatsPanel,
+} from "./features/allWorksWritingStatsPanel";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -382,6 +386,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await progress.record(work);
     updateStatusBar();
     await refreshWritingStatsPanel(work, deviceId);
+    await refreshAllWorksWritingStatsPanel(registry, deviceId);
   }
 
   /** 保存された本文が属する作品に、この環境の編集記録を残す */
@@ -688,6 +693,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await openWritingStatsPanel(context, work, deviceId);
       }
     )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.showAllWorksWritingStats", async () => {
+      await openAllWorksWritingStatsPanel(context, registry, deviceId);
+    })
   );
 
   context.subscriptions.push(

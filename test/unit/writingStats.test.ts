@@ -20,6 +20,7 @@ import {
   shouldPersist,
   statsDayKey,
   sumRange,
+  totalsByLabel,
   weekStartKey,
 } from "../../src/core/writingStats";
 import {
@@ -393,6 +394,20 @@ describe("環境をまたいだ合算", () => {
 
     expect(totals[0]).toMatchObject({ deviceId: "desktop-a1b2", net: 2_500 });
     expect(totals[1]).toMatchObject({ deviceId: "laptop-c3d4", net: 300 });
+  });
+
+  test("ラベル付きの内訳（全作品の執筆量パネル用）は多い順に並ぶ", () => {
+    const totals = totalsByLabel([
+      { label: "作品A", days: [day("2026-08-13", 2_000), day("2026-08-12", 500)] },
+      { label: "作品B", days: [day("2026-08-13", 300)] },
+      { label: "作品C", days: [] },
+    ]);
+
+    expect(totals).toEqual([
+      { label: "作品A", net: 2_500, activeDays: 2 },
+      { label: "作品B", net: 300, activeDays: 1 },
+      { label: "作品C", net: 0, activeDays: 0 },
+    ]);
   });
 });
 
