@@ -718,6 +718,188 @@ describe("人物ファイル保存", () => {
     );
     expect(rename).not.toHaveBeenCalled();
   });
+
+  /**
+   * 既存の人物を書き換える経路。
+   *
+   * このプロジェクトは正規ファイルを上書きできないため、
+   * 「回復先へ退避 → 新規作成」の順で行う（`atomicWrite.ts`）。
+   * 手順を間違えると保存が必ず失敗する、要となる処理なのに
+   * 単体テストが無く、実装後に一度も直接確かめられていなかった。
+   */
+  describe("既存人物の書き換え（退避→作り直し）", () => {
+    test("退避してから作り直し、正規パスに新しい内容が残る", async () => {
+      const original = fixedCharacter("char_001", "灯");
+      const characterPath = diskPath(
+        path.join(characterDir, characterFileName(original))
+      );
+      disk.set(characterPath, bytesFor(original));
+
+      const store = new CharacterStore(work);
+      await store.loadAll();
+      await store.update({ ...original, personality: "冷静" });
+
+      const saved = disk.get(characterPath);
+      expect(saved).toBeDefined();
+      expect(JSON.parse(new TextDecoder().decode(saved)).personality).toBe(
+        "冷静"
+      );
+      // 退避した元の内容が回復先に残っている
+      const recovered = [...disk.keys()].filter((p) =>
+        p.includes(".novelai-recovery")
+      );
+      expect(recovered).toHaveLength(1);
+      expect(
+        JSON.parse(new TextDecoder().decode(disk.get(recovered[0])!)).personality
+      ).toBe(original.personality);
+    });
+
+    test("名前を変えると、新しいファイル名で作り直す", async () => {
+      const original = fixedCharacter("char_001", "灯");
+      const oldPath = diskPath(
+        path.join(characterDir, characterFileName(original))
+      );
+      disk.set(oldPath, bytesFor(original));
+
+      const store = new CharacterStore(work);
+      await store.loadAll();
+      const renamed = { ...original, name: "月島灯" };
+      await store.update(renamed);
+
+      expect(disk.has(oldPath)).toBe(false);
+      expect(
+        disk.has(diskPath(path.join(characterDir, characterFileName(renamed))))
+      ).toBe(true);
+    });
+
+    test("読み込み後に外部で変更されていたら、退避もしない", async () => {
+      // 退避してしまうと、作者の変更が回復先へ隠れる
+      const original = fixedCharacter("char_001", "灯");
+      const characterPath = diskPath(
+        path.join(characterDir, characterFileName(original))
+      );
+      disk.set(characterPath, bytesFor(original));
+
+      const store = new CharacterStore(work);
+      await store.loadAll();
+      const editedByAuthor = bytesFor({
+        ...original,
+        authorNotes: "作者が追記",
+      });
+      disk.set(characterPath, editedByAuthor);
+
+      await expect(
+        store.update({ ...original, personality: "AIが更新" })
+      ).rejects.toMatchObject({ kind: "modified_externally" });
+
+      expect(disk.get(characterPath)).toEqual(editedByAuthor);
+      expect(rename).not.toHaveBeenCalled();
+    });
+
+    test("未保存の変更があるときは、退避せずに止める", async () => {
+      const original = fixedCharacter("char_001", "灯");
+      const characterPath = diskPath(
+        path.join(characterDir, characterFileName(original))
+      );
+      disk.set(characterPath, bytesFor(original));
+
+      const store = new CharacterStore(work);
+      await store.loadAll();
+      workspace.textDocuments = [
+        { uri: Uri.file(characterPath), isDirty: true },
+      ];
+
+      await expect(store.retire("char_001")).rejects.toMatchObject({
+        kind: "unsaved_changes",
+      });
+      expect(disk.get(characterPath)).toBeDefined();
+      expect(rename).not.toHaveBeenCalled();
+    });
+
+    test("読み込んでいない人物は退避できない", async () => {
+      const store = new CharacterStore(work);
+      await store.loadAll();
+
+      await expect(store.retire("char_999")).rejects.toMatchObject({
+        kind: "path_conflict",
+      });
+    });
+
+    test("退避できたのに作り直せない場合は、回復先を知らせる", async () => {
+      // 正規パスにファイルが無い状態になる。どこにあるかを必ず伝える
+      const original = fixedCharacter("char_001", "灯");
+      const characterPath = diskPath(
+        path.join(characterDir, characterFileName(original))
+      );
+      disk.set(characterPath, bytesFor(original));
+
+      const store = new CharacterStore(work);
+      await store.loadAll();
+
+      // 退避のrenameだけ通し、作り直しのrenameを失敗させる
+      let calls = 0;
+      rename.mockImplementation(
+        async (from: { fsPath: string }, to: { fsPath: string }) => {
+          calls++;
+          if (calls === 1) {
+            const bytes = disk.get(from.fsPath);
+            if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+            disk.set(to.fsPath, bytes);
+            disk.delete(from.fsPath);
+            return;
+          }
+          throw new FileSystemError("書き込めません", "NoPermissions");
+        }
+      );
+
+      const failure = await store
+        .update({ ...original, personality: "冷静" })
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(CharacterStoreError);
+      const error = failure as CharacterStoreError;
+      expect(error.persistenceState).toBe("ambiguous");
+      expect(
+        error.recoveryPaths.some((p) => p.includes(".novelai-recovery"))
+      ).toBe(true);
+      expect(error.message).toContain("手動で戻してください");
+    });
+  });
+
+  describe("saveOrUpdate の呼び分け", () => {
+    test("読み込んでいない人物は新規作成になる", async () => {
+      const store = new CharacterStore(work);
+      await store.loadAll();
+
+      const created = fixedCharacter("char_001", "灯");
+      await store.saveOrUpdate(created);
+
+      expect(
+        disk.has(diskPath(path.join(characterDir, characterFileName(created))))
+      ).toBe(true);
+      // 新規なので退避は起きない
+      expect(
+        [...disk.keys()].filter((p) => p.includes(".novelai-recovery"))
+      ).toHaveLength(0);
+    });
+
+    test("読み込み済みの人物は書き換えになる", async () => {
+      const original = fixedCharacter("char_001", "灯");
+      disk.set(
+        diskPath(path.join(characterDir, characterFileName(original))),
+        bytesFor(original)
+      );
+
+      const store = new CharacterStore(work);
+      await store.loadAll();
+      await store.saveOrUpdate({ ...original, personality: "冷静" });
+
+      // 書き換えなので退避が起きる
+      expect(
+        [...disk.keys()].filter((p) => p.includes(".novelai-recovery"))
+      ).toHaveLength(1);
+    });
+  });
 });
 
 describe("人物ファイル検証", () => {
