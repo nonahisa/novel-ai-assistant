@@ -156,6 +156,17 @@ function formatCount(value) {
   return Number(value).toLocaleString('ja-JP');
 }
 
+// 目盛りの間引き幅を決めるための概算。全角（漢字・全角スペース等）は
+// 半角の倍近い幅になるため、文字種で分けないと「2025年10月」のような
+// ラベルの必要幅を大きく見誤り、間引きが効かず重なって表示される
+function estimateLabelWidth(label) {
+  let width = 0;
+  for (const ch of String(label)) {
+    width += /[　-鿿＀-￯]/.test(ch) ? 10 : 6;
+  }
+  return width;
+}
+
 function signed(value) {
   return (value > 0 ? '+' : '') + formatCount(value);
 }
@@ -282,6 +293,32 @@ function renderChart() {
   parts.push('<text class="tick" x="4" y="' + (padTop + 8) + '">' + formatCount(maxValue) + '字</text>');
   parts.push('<text class="tick" x="4" y="' + (zeroY + 3) + '">0</text>');
 
+  // 目盛りが詰まると読めない。本数に応じて間引くだけでなく、
+  // ラベルの実際の幅（「2025年10月」のような全角混じりの文字列）も
+  // 考慮しないと、本数が少なくても文字が重なって表示される
+  // （実機で発覚：月次12件でも重なって読めなかった。2026-08-13）
+  const maxLabelWidth = Math.max(1, ...buckets.map((b) => estimateLabelWidth(b.label)));
+  const stepByCount = Math.ceil(buckets.length / 12);
+  const stepByWidth = Math.ceil((maxLabelWidth + 8) / (barWidth + gap));
+  const step = Math.max(stepByCount, stepByWidth, 1);
+
+  // 最新の期間（右端）は常に見せたいが、間引きの都合でその1つ手前と
+  // 近すぎる場合は、手前の目盛りを右端に差し替える（両方出して重ねない）
+  const shownIndices = [];
+  for (let i = 0; i < buckets.length; i += step) shownIndices.push(i);
+  const lastIndex = buckets.length - 1;
+  if (shownIndices.length === 0 || shownIndices[shownIndices.length - 1] !== lastIndex) {
+    const prev = shownIndices[shownIndices.length - 1] ?? -Infinity;
+    if ((lastIndex - prev) * (barWidth + gap) >= maxLabelWidth) {
+      shownIndices.push(lastIndex);
+    } else if (shownIndices.length > 0) {
+      shownIndices[shownIndices.length - 1] = lastIndex;
+    } else {
+      shownIndices.push(lastIndex);
+    }
+  }
+  const shownSet = new Set(shownIndices);
+
   buckets.forEach((bucket, index) => {
     const x = padLeft + index * (barWidth + gap);
     const barHeight = Math.max(bucket.net === 0 ? 0 : 1, scale(bucket.net));
@@ -295,9 +332,7 @@ function renderChart() {
       '<title>' + escapeHtml(bucket.label + '  ' + signed(bucket.net) + '字') + '</title>' +
       '</rect>'
     );
-    // 目盛りが詰まると読めない。本数に応じて間引く
-    const step = Math.ceil(buckets.length / 12);
-    if (index % step === 0 || index === buckets.length - 1) {
+    if (shownSet.has(index)) {
       parts.push(
         '<text class="tick" x="' + (x + barWidth / 2) + '" y="' + (padTop + plotHeight + 16) +
         '" text-anchor="middle">' + escapeHtml(bucket.label) + '</text>'
