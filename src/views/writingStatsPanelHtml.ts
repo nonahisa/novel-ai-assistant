@@ -302,21 +302,11 @@ function renderChart() {
   const stepByWidth = Math.ceil((maxLabelWidth + 8) / (barWidth + gap));
   const step = Math.max(stepByCount, stepByWidth, 1);
 
-  // 最新の期間（右端）は常に見せたいが、間引きの都合でその1つ手前と
-  // 近すぎる場合は、手前の目盛りを右端に差し替える（両方出して重ねない）
+  // 最新の期間（右端）は常に見せたい。先頭からではなく**末尾から**
+  // step間隔で選ぶと、間隔がすべて揃ったまま右端も必ず含められる
+  // （先頭基準だと、右端だけ間隔が変わって不揃いに見えていた。2026-08-13）
   const shownIndices = [];
-  for (let i = 0; i < buckets.length; i += step) shownIndices.push(i);
-  const lastIndex = buckets.length - 1;
-  if (shownIndices.length === 0 || shownIndices[shownIndices.length - 1] !== lastIndex) {
-    const prev = shownIndices[shownIndices.length - 1] ?? -Infinity;
-    if ((lastIndex - prev) * (barWidth + gap) >= maxLabelWidth) {
-      shownIndices.push(lastIndex);
-    } else if (shownIndices.length > 0) {
-      shownIndices[shownIndices.length - 1] = lastIndex;
-    } else {
-      shownIndices.push(lastIndex);
-    }
-  }
+  for (let i = buckets.length - 1; i >= 0; i -= step) shownIndices.push(i);
   const shownSet = new Set(shownIndices);
 
   buckets.forEach((bucket, index) => {
