@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { EpisodeFile, WorkEntry, WorkStats } from "../models/types";
 import { formatCount, toManuscriptPages } from "../core/charCount";
+import { episodeTitle, formatChapterLabel } from "../core/episodeLabel";
 import { scanWork } from "../core/scanner";
 import { SynopsisStore } from "../core/synopsisStore";
 import { synopsisKey } from "../models/synopsis";
@@ -303,40 +304,17 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   async getEpisodes(work: WorkEntry): Promise<EpisodeFile[]> {
     return (await this.load(work)).episodes;
   }
+
+  /**
+   * 走査済みの集計を返す（コマンド側から利用）。
+   *
+   * 執筆量の記録は保存のたびに作品全体の字数を測る。ここを通せば
+   * ツリーの描き直しと走査結果を共有でき、1回の保存で2度走査しない。
+   */
+  async getStats(work: WorkEntry): Promise<WorkStats> {
+    return (await this.load(work)).stats;
+  }
 }
 
-/**
- * 一覧に出すタイトル。話数の重複を落とす。
- *
- * 投稿サイトからDLしたファイルのヘッダーには「第1話 気がついたら幽霊に」と、
- * **話数を含んだ形**でタイトルが入っている。label側にも「第1話」を出すので、
- * そのまま並べると「第1話　第1話 気がついたら幽霊に」と二重になる。
- *
- * タイトルが話数だけの場合（「第16話」）は何も返さない。
- * labelと同じ文字を右にもう一度出しても、作者に伝わる情報が増えないためである。
- */
-export function episodeTitle(
-  ep: Pick<EpisodeFile, "metaTitle" | "subtitle">,
-  chapterLabel: string
-): string | null {
-  const raw = (ep.metaTitle ?? ep.subtitle)?.trim();
-  if (!raw) return null;
-  if (!chapterLabel || !raw.startsWith(chapterLabel)) return raw;
-  // 「第1話」に続く区切り（空白・記号）も一緒に落とす
-  const rest = raw.slice(chapterLabel.length).replace(/^[\s　:：・．.。、,，\-–—]+/, "");
-  return rest.length > 0 ? rest : null;
-}
-
-function formatChapterLabel(ep: EpisodeFile): string {
-  if (ep.kind !== "本編" && ep.kind !== "不明") {
-    // プロローグ・幕間などは種別を見出しにする
-    return ep.chapterStart !== null
-      ? `${ep.kind}${ep.chapterStart}`
-      : ep.kind;
-  }
-  if (ep.chapterStart === null) return "";
-  if (ep.chapterEnd !== null && ep.chapterEnd !== ep.chapterStart) {
-    return `第${ep.chapterStart}〜${ep.chapterEnd}話`;
-  }
-  return `第${ep.chapterStart}話`;
-}
+// 話数の見出しとタイトルの作り方は core/episodeLabel.ts に置いた。
+// 話ごとの文字数一覧でも同じ見出しを使うため、2か所に書かない

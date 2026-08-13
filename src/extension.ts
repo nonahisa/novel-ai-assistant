@@ -73,6 +73,14 @@ import {
 import { checkTypos, type TypoCheckRunResult } from "./features/checkTypos";
 import { hasUnsavedChanges } from "./core/textFile";
 import { AI_ISSUES_VIEW_ID, TypoIssuePanel } from "./features/typoIssuePanel";
+import {
+  WritingProgressTracker,
+  describeStatusBarProgress,
+} from "./features/writingProgress";
+import {
+  openWritingStatsPanel,
+  refreshWritingStatsPanel,
+} from "./features/writingStatsPanel";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -96,6 +104,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 端末ID。「どの環境で書いたか」を区別するのに使う（設計書5.5.2）。
   // Gitへは同期しない。全環境が同じIDを名乗ると区別できなくなる
   const deviceId = await resolveDeviceId(context.globalState);
+
+  // 執筆量の記録（設計書6.3）。走査は作品一覧の結果を借りるので、
+  // 保存のたびにファイルを2度読むことはない
+  const progress = new WritingProgressTracker(deviceId, (work) =>
+    treeProvider.getStats(work)
+  );
 
   // 競合の見比べに使う読み取り専用の本文置き場
   const conflictProvider = new ConflictContentProvider();
@@ -237,7 +251,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   statusBar.tooltip = "小説AI執筆補助: 現在のファイルの文字数";
   context.subscriptions.push(statusBar);
 
+  /**
+   * 表示を作り直した回数。
+   *
+   * 今日の執筆量は記録を読んでから添えるため、書いている最中に
+   * 何度も呼ばれると古い結果が新しい表示を上書きしうる。
+   * 自分より新しい呼び出しがあれば、その結果は捨てる。
+   */
+  let statusBarGeneration = 0;
+
   const updateStatusBar = () => {
+    const generation = ++statusBarGeneration;
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       statusBar.hide();
@@ -272,18 +296,50 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       selectionPart = ` (選択 ${formatCount(selValue)})`;
     }
 
-    statusBar.text = `$(book) ${label}${formatCount(value)}字${selectionPart}`;
-    statusBar.tooltip = new vscode.MarkdownString(
-      [
-        `**${path.basename(editor.document.fileName)}**`,
-        "",
-        `- 純文字数: ${formatCount(counts.net)} 字`,
-        `- 総文字数: ${formatCount(counts.gross)} 字`,
-        `- 段落数: ${counts.paragraphs}`,
-        `- 原稿用紙換算: 約 ${formatCount(toManuscriptPages(counts.manuscriptLines))} 枚`,
-      ].join("\n")
-    );
+    const fileText = `$(book) ${label}${formatCount(value)}字${selectionPart}`;
+    const fileTooltip = [
+      `**${path.basename(editor.document.fileName)}**`,
+      "",
+      `- 純文字数: ${formatCount(counts.net)} 字`,
+      `- 総文字数: ${formatCount(counts.gross)} 字`,
+      `- 段落数: ${counts.paragraphs}`,
+      `- 原稿用紙換算: 約 ${formatCount(toManuscriptPages(counts.manuscriptLines))} 枚`,
+    ];
+    statusBar.text = fileText;
+    statusBar.tooltip = new vscode.MarkdownString(fileTooltip.join("\n"));
     statusBar.show();
+
+    // 今日どれだけ進んだかは、開いているファイルの字数だけでは分からない。
+    // 記録が読めたときにだけ添える（統計を切っていれば何も出ない）
+    const showProgress = cfg.get<boolean>("stats.showInStatusBar", true);
+    const work = showProgress
+      ? findWorkForPath(registry, editor.document.uri.fsPath)
+      : undefined;
+    if (!work) return;
+
+    void progress.summary(work).then((summary) => {
+      if (!summary || generation !== statusBarGeneration) return;
+      statusBar.text = `${fileText}  ${describeStatusBarProgress(summary)}`;
+      statusBar.tooltip = new vscode.MarkdownString(
+        [
+          ...fileTooltip,
+          "",
+          `**${work.title}**`,
+          "",
+          `- 今日: ${formatCount(summary.todayProgress.written)} 字${
+            summary.todayProgress.goal > 0
+              ? `（目標 ${formatCount(summary.todayProgress.goal)} 字 / 達成率 ${
+                  summary.todayProgress.rate
+                }%）`
+              : ""
+          }`,
+          `- 今月: ${formatCount(summary.monthProgress.written)} 字（${
+            summary.monthActiveDays
+          }日）`,
+          `- 連続: ${summary.streak} 日`,
+        ].join("\n")
+      );
+    });
   };
 
   context.subscriptions.push(
@@ -301,9 +357,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // 開いただけでは書かない。何も書いていないのに作業ツリーが汚れ、
       // 未コミットの変更を理由に取り込みが止まるようになるため
       void recordEditedSession(document.uri.fsPath);
+      // 保存した瞬間が、書いた量を数えられる唯一の機会である（設計書6.3）
+      void recordWritingProgress(document.uri.fsPath);
     })
   );
   updateStatusBar();
+
+  /**
+   * 保存された本文の作品で、前回からの増減をその日の執筆量として記録する。
+   *
+   * 記録し終えてからステータスバーを出し直す。保存した直後に
+   * 「今日 +0字」のままだと、書いたのに数えられていないように見える。
+   */
+  async function recordWritingProgress(filePath: string): Promise<void> {
+    const ext = path.extname(filePath).toLowerCase();
+    if (!(SUPPORTED_EXTENSIONS as readonly string[]).includes(ext)) return;
+    const work = findWorkForPath(registry, filePath);
+    if (!work) return;
+    await progress.record(work);
+    updateStatusBar();
+    await refreshWritingStatsPanel(work, deviceId);
+  }
 
   /** 保存された本文が属する作品に、この環境の編集記録を残す */
   async function recordEditedSession(filePath: string): Promise<void> {
@@ -497,6 +571,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     gitSync.onDidChangeFiles(({ work }) => {
       treeProvider.refresh(work.id);
       highlighter.invalidate();
+      // 取り込んだ分は「この環境で書いた量」ではない。
+      // 数えると同じ文章を2台ぶん数えることになるので、基準だけ置き直す
+      void progress.rebaseline(work).then(() => updateStatusBar());
     })
   );
 
@@ -574,9 +651,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           `段落数: ${formatCount(t.paragraphs)}`,
           `原稿用紙換算: 約 ${formatCount(toManuscriptPages(t.manuscriptLines))} 枚`,
         ];
-        await vscode.window.showInformationMessage(lines.join("  /  "), {
-          modal: true,
-        });
+        const action = await vscode.window.showInformationMessage(
+          lines.join("  /  "),
+          { modal: true },
+          "執筆量を見る"
+        );
+        if (action === "執筆量を見る") {
+          await openWritingStatsPanel(context, work, deviceId);
+        }
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.showWritingStats",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await openWritingStatsPanel(context, work, deviceId);
       }
     )
   );

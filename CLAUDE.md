@@ -77,6 +77,10 @@ src/
 │  ├─ episodeParser.ts   ファイル名から話数を解析
 │  ├─ metadataParser.ts  投稿サイトのDLファイルのヘッダー解析
 │  ├─ charCount.ts       文字数計測
+│  ├─ episodeLabel.ts    話数の見出しとタイトル（一覧と統計で共用）
+│  ├─ writingStats.ts    執筆量の集計（日次・週次・月次・年次、目標）
+│  ├─ writingStatsStore.ts 執筆量の記録（端末ごとに1ファイル）
+│  ├─ episodeCharTable.ts 話ごとの文字数一覧（長さの偏り）
 │  ├─ chunker.ts         本文のチャンク分割
 │  ├─ chunkCache.ts      処理済みチャンクのキャッシュ
 │  ├─ manuscriptSources.ts / mentionExcerpts.ts  本文からの場面抜粋
@@ -124,12 +128,15 @@ src/
 │  ├─ settingsPanel.ts      設定資料パネル
 │  ├─ manageCustomFields.ts 追加項目の管理
 │  ├─ generateSettingsDocs.ts / exportImeDictionary.ts
+│  ├─ writingProgress.ts    保存時の執筆量の記録・ステータスバー
+│  ├─ writingStatsPanel.ts  執筆量パネル（グラフ・話ごとの一覧）
 │  └─ selectOllamaExecutable.ts
 │
 └─ views/                VSCode UI
    ├─ workTree.ts          作品一覧
    ├─ actionList.ts        操作メニュー
    ├─ settingsPanelHtml.ts パネルのWebView
+   ├─ writingStatsPanelHtml.ts 執筆量パネル（グラフは自前のSVG）
    ├─ termHighlight.ts     用語ハイライト
    └─ progress.ts          進捗表示（中止ボタン付き）
 ```
@@ -222,7 +229,8 @@ npm run check            # 型検査＋単体テスト＋本番ビルド
 - フェーズ0（作品管理・文字数計測）：完了、実データとVS Code統合テストで検証済み
 - フェーズ1（AI連携・設定資料抽出）：人物・能力・場所の抽出、設定資料パネル（書き換え・項目の充実・AIへの相談）、同一人物のまとめ、更新の承認、作者が定義する追加項目、用語ハイライトまで実装。Ollamaで実データ検証済み。**残るのは世界観まとめ（P-03）とプロットモード**
 - 使えるAI：Ollama・Gemini・ChatGPT・Claude。Geminiは実キーで検証済み。ChatGPTとClaudeは未検証（Claudeは残高不足で到達できず）
-- フェーズ2以降：用語ハイライトのみ実装済み。あらすじ生成、伏線追跡、誤字脱字・矛盾検知は未着手
+- フェーズ2以降：用語ハイライト、あらすじ生成、誤字脱字検知＋AI指摘パネルを実装済み。伏線追跡・推敲・矛盾検知は未着手
+- フェーズ4：執筆量の統計（日次・週次・月次・年次）・目標と達成率・話ごとの文字数一覧は実装済み（設計書6.3）。実データで記録と集計を確認済み、実機（F5）でのパネル表示は未確認
 
 次にやるべきことは `docs/進捗と引継ぎ.md` の「次にやること」を参照。
 

@@ -98,6 +98,12 @@
         "icon": "$(graph)"
       },
       {
+        "command": "novelai.showWritingStats",
+        "title": "執筆量を見る",
+        "category": "小説執筆",
+        "icon": "$(graph-line)"
+      },
+      {
         "command": "novelai.setupAI",
         "title": "AIの設定",
         "category": "小説執筆",
@@ -270,19 +276,24 @@
           "group": "1_stats@1"
         },
         {
-          "command": "novelai.openSettingsPanel",
+          "command": "novelai.showWritingStats",
           "when": "view == novelai.works && viewItem == work",
           "group": "1_stats@2"
         },
         {
-          "command": "novelai.extractSettings",
+          "command": "novelai.openSettingsPanel",
           "when": "view == novelai.works && viewItem == work",
           "group": "1_stats@3"
         },
         {
-          "command": "novelai.generateSynopses",
+          "command": "novelai.extractSettings",
           "when": "view == novelai.works && viewItem == work",
           "group": "1_stats@4"
+        },
+        {
+          "command": "novelai.generateSynopses",
+          "when": "view == novelai.works && viewItem == work",
+          "group": "1_stats@5"
         },
         {
           "command": "novelai.gitSync",
@@ -400,6 +411,48 @@
           "type": "boolean",
           "default": true,
           "description": "Markdownのルビ記法 {漢字|かんじ} のルビ部分を文字数から除外する"
+        },
+        "novelai.stats.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "本文を保存したときに、前回からの増減をその日の執筆量として記録します。記録は作品フォルダーの `.aiwriter/stats/<環境名>.json` に残り、「執筆量を見る」で日次・週次・月次・年次のグラフになります。**環境ごとに別のファイルへ書くため、複数のPCで書いても競合しません**（読むときに合算します）。"
+        },
+        "novelai.stats.showInStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "ステータスバーの文字数の隣に、今日の執筆量（目標を設定していれば達成状況）を表示します。"
+        },
+        "novelai.stats.dailyGoal": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "1日の目標字数。**0で目標なし**。設定するとステータスバーに「今日 560/1,000字」と出て、執筆量グラフに目標線が引かれます。"
+        },
+        "novelai.stats.monthlyGoal": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "1か月の目標字数。**0で目標なし**。設定すると、達成率と「残りの日で1日あたり何字書けばよいか」を執筆量パネルに表示します。"
+        },
+        "novelai.stats.dayBoundaryHour": {
+          "type": "number",
+          "default": 4,
+          "minimum": 0,
+          "maximum": 12,
+          "markdownDescription": "1日の区切りとする時刻（0〜12時）。**深夜0時で切ると、夜中に書いた分が翌日に付きます。** 既定の4時なら、午前3時に書いた分は前日の執筆量になります。"
+        },
+        "novelai.stats.weekStart": {
+          "type": "string",
+          "enum": [
+            "monday",
+            "sunday"
+          ],
+          "enumDescriptions": [
+            "月曜はじまり",
+            "日曜はじまり"
+          ],
+          "default": "monday",
+          "description": "週次グラフで週の始まりとする曜日。"
         },
         "novelai.episodeFileExtension": {
           "type": "string",

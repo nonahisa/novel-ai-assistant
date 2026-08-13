@@ -14,7 +14,7 @@ vi.mock("vscode", () => ({
   Uri: { file: (p: string) => ({ fsPath: p }) },
 }));
 
-import { episodeTitle } from "../../src/views/workTree";
+import { episodeTitle } from "../../src/core/episodeLabel";
 
 describe("一覧に出すタイトル", () => {
   test("投稿サイトのヘッダーに入った話数の重複を落とす", () => {

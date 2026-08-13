@@ -212,6 +212,18 @@ const ACTIONS: readonly CommandAction[] = [
     group: "書き出す",
     detail: "文字数と原稿用紙の枚数を作品全体で集計します。",
   },
+  {
+    command: "novelai.showWritingStats",
+    label: "執筆量を見る",
+    description: "AIを使わない",
+    icon: "graph-line",
+    requiresWork: true,
+    group: "書き出す",
+    detail:
+      "日次・週次・月次・年次の執筆量をグラフで見ます。" +
+      "目標を設定していれば達成率も出ます。" +
+      "話ごとの文字数一覧（長さの偏り）も同じ画面で見られます。",
+  },
 
   // ── 別の環境と行き来する
   {
