@@ -682,6 +682,58 @@ describe("人物抽出フロー", () => {
     );
   });
 
+  test("まとめたチャンクを先に分けるときも、半分ではなく話ごとに戻す", async () => {
+    // 切り詰められた本人は話ごとに戻していたのに、
+    // 「同じ大きさの残り」だけが半分に割られていた。
+    // 半分に割ると内訳（どこからどこまでが何話か）が消え、
+    // **第4話にしか出ない人物が「第4〜6話に登場」になる**
+    state.chunks = ["あ", "い", "う", "え", "お", "か"].map((mark, index) => ({
+      filePath: `00${index + 1}.txt`,
+      index: 0,
+      text: mark.repeat(300),
+      hash: `chunk-${index + 1}`,
+      chapterStart: index + 1,
+      chapterEnd: index + 1,
+      // 1ファイルまるごと。これがないとまとめられない
+      wholeFile: true,
+    }));
+
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage: vi.fn(async () => undefined),
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    // 1件目（第1〜3話をまとめたもの）だけ切り詰められる。
+    // これで残りの「第4〜6話をまとめたもの」が先に分けられる
+    state.generate
+      .mockResolvedValueOnce({ text: "", truncated: true, elapsedMs: 1 })
+      .mockResolvedValue(successfulResult("灯"));
+
+    await extractCharacters(work, testRegistry());
+
+    const prompts = state.generate.mock.calls.map(
+      (call) => (call[0] as { userPrompt: string }).userPrompt
+    );
+    // 指示文にも「あ」「い」等は出るので、まとまった本文だけを数える
+    const marksIn = (prompt: string) =>
+      ["え", "お", "か"].filter((mark) => prompt.includes(mark.repeat(100)));
+
+    // 先に分けた残りが、2話ぶんをまたいだまま送られていない
+    expect(prompts.filter((prompt) => marksIn(prompt).length > 1)).toEqual([]);
+    // 第4〜6話が、それぞれ1話まるごととして送られている
+    for (const mark of ["え", "お", "か"]) {
+      expect(prompts.some((prompt) => prompt.includes(mark.repeat(300)))).toBe(
+        true
+      );
+    }
+  });
+
   test("接続失敗が連続しなければ打ち切らず最後まで処理する", async () => {
     state.chunks = chunkFixture(6);
     Object.assign(window, {

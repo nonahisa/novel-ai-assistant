@@ -10,6 +10,7 @@ import { addCounts, countChars, emptyCounts } from "./charCount";
 import { parseEpisodeFileName } from "./episodeParser";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { parseEpisodeMetadata } from "./metadataParser";
+import { isConflictSideFile } from "./conflictFile";
 import { parseCollectedFile, type CollectedEpisode } from "./collectedFile";
 import { pathExists } from "./fileSystem";
 
@@ -194,6 +195,9 @@ async function collectTextFiles(dir: string): Promise<string[]> {
         if (skipDirs.has(name)) continue;
         await walk(full, depth + 1);
       } else if (type === vscode.FileType.File) {
+        // 競合を「両方を残す」で解決したときの退避ファイルは原稿ではない。
+        // 拾うと同じ話数の本文が2つある状態になる
+        if (isConflictSideFile(name)) continue;
         const ext = path.extname(name).toLowerCase();
         if ((SUPPORTED_EXTENSIONS as readonly string[]).includes(ext)) {
           result.push(full);

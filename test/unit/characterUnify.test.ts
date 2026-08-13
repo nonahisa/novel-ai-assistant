@@ -174,6 +174,51 @@ describe("同一人物をまとめる", () => {
     expect(unified.conflicts).toHaveLength(1);
   });
 
+  test("同じ項目の食い違いは1つにまとめる", () => {
+    // 両方に同じ項目の食い違いがあると、並べただけでは同じ見出しが2つ出る。
+    // さらに、この先のマージは `field` で最初の1件しか見ないので、
+    // 2件目は**表示されるのに二度と更新されない**取り残しになる
+    const { unified } = unifyCharacters(
+      character("char_001", "リン", {
+        conflicts: [
+          {
+            field: "appearance",
+            values: ["黒髪", "銀髪"],
+            chapters: [],
+            note: null,
+            observations: [
+              { value: "黒髪", chapters: [1] },
+              { value: "銀髪", chapters: [7] },
+            ],
+          },
+        ],
+      }),
+      character("char_002", "リンセップ", {
+        conflicts: [
+          {
+            field: "appearance",
+            values: ["銀髪", "赤髪"],
+            chapters: [],
+            note: null,
+            observations: [
+              { value: "銀髪", chapters: [9] },
+              { value: "赤髪", chapters: [12] },
+            ],
+          },
+        ],
+      })
+    );
+
+    expect(unified.conflicts).toHaveLength(1);
+    expect(unified.conflicts[0].values).toEqual(["黒髪", "銀髪", "赤髪"]);
+    // 同じ値の話数は合わせる
+    expect(unified.conflicts[0].observations).toEqual([
+      { value: "黒髪", chapters: [1] },
+      { value: "銀髪", chapters: [7, 9] },
+      { value: "赤髪", chapters: [12] },
+    ]);
+  });
+
   test("同じ人物どうしはまとめられない", () => {
     expect(() =>
       unifyCharacters(character("char_001", "リン"), character("char_001", "リン"))

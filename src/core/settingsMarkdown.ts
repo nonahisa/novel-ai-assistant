@@ -523,7 +523,14 @@ export function describeConflictValues(conflict: RecordConflict): string {
     // 古いデータには値ごとの話数が無い。これまでどおり値だけを並べる
     return conflict.values.join(" / ");
   }
-  return [...observations]
+  // 話数を持たなかった頃のデータに新しい値が足されると、記録は一部の値にしか
+  // 付かない。**記録のある値だけを並べると、既にあった食い違いが表示から消える。**
+  // 値は必ず全部出す。記録の無いものは「それ以前」として扱う
+  const missing = conflict.values
+    .filter((value) => !observations.some((item) => item.value === value))
+    .map((value) => ({ value, chapters: [] as number[] }));
+
+  return [...observations, ...missing]
     .sort((a, b) => firstChapter(a.chapters) - firstChapter(b.chapters))
     .map((item) => {
       const chapters =

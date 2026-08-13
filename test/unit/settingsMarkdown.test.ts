@@ -260,6 +260,21 @@ describe("食い違いの表記", () => {
     ).toBe("黒髪（それ以前）→ 銀髪（第7話）");
   });
 
+  test("話数の記録が一部の値にしか無くても、全ての値を並べる", () => {
+    // 話数を持たなかった頃のデータに新しい値が足されると、
+    // 片方だけ記録された状態になる。記録のある値だけを並べると
+    // **既にあった食い違いが表示から消えて、作者が気づけなくなる**
+    expect(
+      describeConflictValues({
+        field: "appearance",
+        values: ["黒髪", "銀髪", "赤髪"],
+        chapters: [],
+        note: null,
+        observations: [{ value: "赤髪", chapters: [12] }],
+      })
+    ).toBe("黒髪（それ以前）→ 銀髪（それ以前）→ 赤髪（第12話）");
+  });
+
   test("値ごとの話数を持たない古いデータは値だけを並べる", () => {
     expect(
       describeConflictValues({

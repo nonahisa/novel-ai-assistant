@@ -66,6 +66,16 @@ export class SettingsStore<T extends StorableRecord> {
     private readonly options: SettingsStoreOptions<T>
   ) {}
 
+  /**
+   * 保存先のフォルダ名。
+   *
+   * 外部の変更を見張る側（`externalChanges.ts`）が、
+   * 実際の保存先と対応表がずれていないかを確かめるために使う。
+   */
+  get directoryName(): string {
+    return this.options.directoryName;
+  }
+
   private async dir(): Promise<string> {
     const config = await readWorkConfig(this.work);
     return path.join(
@@ -216,9 +226,13 @@ export class SettingsStore<T extends StorableRecord> {
         throw error;
       }
 
-      // 名前が変わった場合、古いファイルが残らないよう削除する
+      // 名前が変わった場合、古いファイルが残らないよう削除する。
+      // **同じファイルかどうかは文字列比較では決まらない。**
+      // Windowsは大文字小文字を区別しないので、`Fire`→`fire` の改名では
+      // 書き込み先と「古いファイル」が同じ1つのファイルになる。
+      // 文字列で比べると別物に見えて、今書いたものを消してしまう
       const previous = this.snapshots.get(record.id);
-      if (previous && previous.filePath !== target) {
+      if (previous && !isSamePath(previous.filePath, target)) {
         try {
           await vscode.workspace.fs.delete(vscode.Uri.file(previous.filePath));
         } catch {
@@ -285,4 +299,15 @@ function isPathInside(parentPath: string, candidatePath: string): boolean {
 function normalizePathForComparison(value: string): string {
   const resolved = path.resolve(value);
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+/**
+ * 同じファイルを指すパスか。
+ *
+ * Windowsは大文字小文字を区別しないため、文字列が違っても
+ * 同じファイルであることがある。人物側（`characterStore.ts` の `samePath`）と
+ * 同じ判定を使う。
+ */
+function isSamePath(left: string, right: string): boolean {
+  return normalizePathForComparison(left) === normalizePathForComparison(right);
 }

@@ -7,6 +7,7 @@ import {
   createAbilityStore,
   createLocationStore,
   createOrganizationStore,
+  createWorldStore,
 } from "../core/abilityStore";
 import { atomicWriteFile } from "../core/atomicWrite";
 import {
@@ -29,12 +30,14 @@ export async function exportImeDictionary(work: WorkEntry): Promise<void> {
   const loadedAbilities = await createAbilityStore(work).loadAll();
   const loadedLocations = await createLocationStore(work).loadAll();
   const loadedOrganizations = await createOrganizationStore(work).loadAll();
+  const loadedWorld = await createWorldStore(work).loadAll();
 
   const errors = [
     ...loadedCharacters.errors,
     ...loadedAbilities.errors,
     ...loadedLocations.errors,
     ...loadedOrganizations.errors,
+    ...loadedWorld.errors,
   ];
   if (errors.length > 0) {
     // 読めない設定があるまま書き出すと、欠けた辞書が正しく見えてしまう
@@ -50,6 +53,7 @@ export async function exportImeDictionary(work: WorkEntry): Promise<void> {
     abilities: loadedAbilities.records,
     locations: loadedLocations.records,
     organizations: loadedOrganizations.records,
+    worldItems: loadedWorld.records,
   });
 
   if (built.entries.length === 0) {

@@ -64,6 +64,17 @@ describe("Markdownの簡易整形", () => {
     expect(renderMarkdownLite("A & B")).toBe("<p>A &amp; B</p>");
   });
 
+  test("応答に制御文字が混ざっても「undefined」を出さない", () => {
+    // コードの取り置きにNULを目印として使っている。
+    // 「本文には現れない」という前提で書かれていたが、現れた場合に
+    // 存在しない取り置きを参照して `<code>undefined</code>` になる
+    const nul = String.fromCharCode(0);
+    const html = renderMarkdownLite(`前${nul}0${nul}後`);
+
+    expect(html).not.toContain("undefined");
+    expect(html).toBe("<p>前0後</p>");
+  });
+
   test("空文字は空を返す", () => {
     expect(renderMarkdownLite("")).toBe("");
     expect(renderMarkdownLite("   \n  ")).toBe("");

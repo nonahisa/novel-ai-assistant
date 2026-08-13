@@ -526,10 +526,7 @@ export async function extractCharacters(
             // この呼び出しぶんがまるごと無駄になる（実データで39件中33件）。
             //   1. まとめたものなら、元の話ごとに戻す
             //   2. 1話でも入り切らないなら、半分に割る
-            const split =
-              splitMergedChunk(chunk).length > 1
-                ? splitMergedChunk(chunk)
-                : splitChunkInHalf(chunk);
+            const split = splitForRetry(chunk);
             if (split && split.length > 1) {
               queue.push(...split);
               // **同じ大きさの残りも、先に割っておく。**
@@ -539,9 +536,11 @@ export async function extractCharacters(
               let presplit = 0;
               for (let rest = position + 1; rest < queue.length; rest++) {
                 if (queue[rest].text.length < tooBig) continue;
-                const halves = splitChunkInHalf(queue[rest]);
-                if (!halves) continue;
-                queue.splice(rest, 1, ...halves);
+                // ここも切り詰められた本人と同じ手順で分ける。
+                // 半分に割るだけだと、まとめたものの内訳が消える
+                const smaller = splitForRetry(queue[rest]);
+                if (!smaller || smaller.length <= 1) continue;
+                queue.splice(rest, 1, ...smaller);
                 presplit++;
               }
               logStep(
@@ -1295,6 +1294,21 @@ function describeRejectedCandidates(
     .map(([reason, count]) => `${labels[reason]} ${count}`)
     .join("、");
   return `AI出力から除外 ${rejected.length} 件（${details}）`;
+}
+
+/**
+ * 出力上限で入り切らなかったチャンクを、やり直せる大きさへ分ける。
+ *
+ * **まとめたものは必ず話ごとに戻す。半分に割ってはいけない。**
+ * 半分に割ると内訳（どこからどこまでが何話か）が消え、
+ * 登場話数がまとめた範囲ぜんぶになる
+ * （第4話にしか出ない人物が「第4〜6話に登場」になる）。
+ * 話ごとに戻せないもの（1話が大きすぎる場合）だけ半分に割る。
+ */
+function splitForRetry(chunk: Chunk): Chunk[] | undefined {
+  const byEpisode = splitMergedChunk(chunk);
+  if (byEpisode.length > 1) return byEpisode;
+  return splitChunkInHalf(chunk);
 }
 
 function describeChunk(chunk: Chunk): string {
