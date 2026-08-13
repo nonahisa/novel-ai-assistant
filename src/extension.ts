@@ -25,6 +25,11 @@ import {
   saveDirtyDocumentsBeforeExtraction,
 } from "./features/extractCharacters";
 import { selectOllamaExecutable } from "./features/selectOllamaExecutable";
+import {
+  chooseWorkStartMode,
+  createFirstEpisodeFile,
+  openPlotFile,
+} from "./features/startWork";
 import { generateSettingsDocs } from "./features/generateSettingsDocs";
 import { generateSynopses } from "./features/generateSynopses";
 import {
@@ -486,9 +491,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       });
       if (!title) return;
 
+      // 始め方はフォルダーを作る前に訊く。作ったあとで取り消されると、
+      // 中身の無い作品フォルダーだけが残る
+      const mode = await chooseWorkStartMode(title.trim());
+      if (!mode) return;
+
       const folderPath = path.join(parent[0].fsPath, title.trim());
       try {
-        await scaffoldWorkFolder(folderPath, title.trim());
+        await scaffoldWorkFolder(folderPath, title.trim(), {
+          withPlot: mode === "plot",
+        });
       } catch (e) {
         vscode.window.showErrorMessage(
           `作品フォルダの作成に失敗しました: ${String(e)}`
@@ -500,19 +512,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!entry) return;
 
       treeProvider.refresh();
-      const open = await vscode.window.showInformationMessage(
-        `「${title.trim()}」を作成しました。プロットから始めますか？`,
-        "plot.mdを開く",
-        "後で"
-      );
-      if (open === "plot.mdを開く") {
-        const plotPath = path.join(folderPath, "設定", "plot.md");
-        const doc = await vscode.workspace.openTextDocument(
-          vscode.Uri.file(plotPath)
-        );
-        await vscode.window.showTextDocument(doc);
+      if (mode === "plot") {
+        await openPlotFile(entry);
+      } else {
+        await createFirstEpisodeFile(entry);
       }
     })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.createPlot",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await openPlotFile(work);
+      }
+    )
   );
 
   context.subscriptions.push(

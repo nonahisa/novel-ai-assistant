@@ -67,6 +67,18 @@ const ACTIONS: readonly CommandAction[] = [
   // 操作メニューから押しても対象が定まらず、動かない。
   // 本文の右クリックメニューにだけ出す（package.json の editor/context）
   {
+    command: "novelai.createPlot",
+    label: "プロットを作る",
+    description: "AIを使わない",
+    icon: "list-tree",
+    requiresWork: true,
+    group: "資料",
+    detail:
+      "設定/plot.md を開きます。まだ無ければ、ログライン・テーマ・世界観・" +
+      "あらすじなどの見出しを用意して作ります。" +
+      "書きかけのプロットがあれば、そのまま開くだけです。",
+  },
+  {
     command: "novelai.extractSettings",
     label: "設定資料を抽出",
     description: "AIを使う",

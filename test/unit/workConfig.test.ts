@@ -33,6 +33,24 @@ const validConfig = {
   createdAt: "2026-08-06T00:00:00.000Z",
 };
 
+/**
+ * 新規作成が書いたファイルを集めるスタブ。
+ * 何を書いたかだけを見たいので、ディスクには触れない。
+ */
+function scaffoldStub(): Map<string, Uint8Array> {
+  const files = new Map<string, Uint8Array>();
+  workspace.fs = {
+    stat: async () => {
+      throw new FileSystemError("missing", "FileNotFound");
+    },
+    createDirectory: async () => undefined,
+    writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
+      files.set(uri.fsPath, bytes);
+    },
+  };
+  return files;
+}
+
 describe("作品設定", () => {
   test("必須項目を持つ設定だけを受理する", () => {
     expect(parseWorkConfig(validConfig)).toEqual(validConfig);
@@ -97,6 +115,47 @@ describe("作品設定", () => {
       files.get(Uri.file(path.join(root, ".gitignore")).fsPath)
     );
     expect(gitignore.split("\n")).toContain(".novelai-recovery/");
+  });
+
+  test("プロットから始めるなら、テンプレートを置く", async () => {
+    const root = "C:\\novels\\with-plot";
+    const files = scaffoldStub();
+
+    await workRegistry.scaffoldWorkFolder(root, "新作", { withPlot: true });
+
+    const plot = files.get(
+      Uri.file(path.join(root, "設定", "plot.md")).fsPath
+    );
+    expect(plot).toBeDefined();
+    expect(new TextDecoder().decode(plot)).toContain("## ログライン");
+  });
+
+  test("本文から始めるなら、プロットは置かない", async () => {
+    // 使わないテンプレートが設定資料に混ざると、紹介文を作るときの材料にも
+    // 空のプロットとして渡ってしまう。あとから「プロットを作る」で足せる
+    const root = "C:\\novels\\without-plot";
+    const files = scaffoldStub();
+
+    await workRegistry.scaffoldWorkFolder(root, "新作", { withPlot: false });
+
+    expect(
+      files.has(Uri.file(path.join(root, "設定", "plot.md")).fsPath)
+    ).toBe(false);
+    // 作品として成立させるものは、選び方に関わらず作る
+    expect(
+      files.has(Uri.file(path.join(root, ".aiwriter", "config.json")).fsPath)
+    ).toBe(true);
+  });
+
+  test("指定しなければ、これまでどおりプロットを置く", async () => {
+    const root = "C:\\novels\\default-plot";
+    const files = scaffoldStub();
+
+    await workRegistry.scaffoldWorkFolder(root, "新作");
+
+    expect(
+      files.has(Uri.file(path.join(root, "設定", "plot.md")).fsPath)
+    ).toBe(true);
   });
 
   test("既存作品のgitignoreへ作者記述を保ったまま回復ルールを一度だけ追加する", async () => {

@@ -78,6 +78,7 @@ src/
 │  ├─ metadataParser.ts  投稿サイトのDLファイルのヘッダー解析
 │  ├─ charCount.ts       文字数計測
 │  ├─ episodeLabel.ts    話数の見出しとタイトル（一覧と統計で共用）
+│  ├─ plotTemplate.ts    プロットの初期テンプレート
 │  ├─ writingStats.ts    執筆量の集計（日次・週次・月次・年次、目標）
 │  ├─ writingStatsStore.ts 執筆量の記録（端末ごとに1ファイル）
 │  ├─ episodeCharTable.ts 話ごとの文字数一覧（長さの偏り）
@@ -128,6 +129,7 @@ src/
 │  ├─ settingsPanel.ts      設定資料パネル
 │  ├─ manageCustomFields.ts 追加項目の管理
 │  ├─ generateSettingsDocs.ts / exportImeDictionary.ts
+│  ├─ startWork.ts          新規作品の始め方（プロット／本文）の選択
 │  ├─ writingProgress.ts    保存時の執筆量の記録・ステータスバー
 │  ├─ writingStatsPanel.ts  執筆量パネル（グラフ・話ごとの一覧）
 │  └─ selectOllamaExecutable.ts

@@ -11,6 +11,7 @@ import {
   WorkEntry,
 } from "../models/types";
 import { atomicWriteFile } from "./atomicWrite";
+import { buildPlotTemplate } from "./plotTemplate";
 
 const STORAGE_KEY = "novelai.works";
 
@@ -391,10 +392,18 @@ export async function writeWorkConfig(
   );
 }
 
-/** 作品フォルダの初期構造を作成する */
+/**
+ * 作品フォルダの初期構造を作成する。
+ *
+ * @param options.withPlot プロットのテンプレート（`設定/plot.md`）を置くか。
+ *   **書きながら考える作者もいる。** 使わないテンプレートを置くと、
+ *   見出しだけのファイルが設定資料に混ざり、紹介文を作るときの材料にも
+ *   空のプロットとして渡ってしまう。あとから「プロットを作る」で足せる。
+ */
 export async function scaffoldWorkFolder(
   folderPath: string,
-  title: string
+  title: string,
+  options: { withPlot?: boolean } = {}
 ): Promise<void> {
   const fs = vscode.workspace.fs;
   try {
@@ -441,40 +450,17 @@ export async function scaffoldWorkFolder(
   ].join("\n");
   await writeIfAbsent(path.join(folderPath, ".gitignore"), gitignore);
 
-  // プロットの初期テンプレート
-  const plotTemplate = [
-    `# ${title}`,
-    "",
-    "## タイトル",
-    "",
-    "## ログライン",
-    "<!-- 誰が / どんな状況で / 何を目指し / 何が障害か を一文で -->",
-    "",
-    "## テーマ",
-    "",
-    "## モチーフ",
-    "",
-    "## 世界観",
-    "",
-    "## 舞台",
-    "",
-    "## 人称",
-    "<!-- 一人称 / 三人称一元 / 三人称多元 -->",
-    "",
-    "## 主人公の行動原理",
-    "",
-    "## あらすじ",
-    "- ",
-    "",
-    "## 主要登場人物",
-    "- ",
-    "",
-  ].join("\n");
-  await writeIfAbsent(
-    path.join(folderPath, DEFAULT_SETTINGS_DIR, "plot.md"),
-    plotTemplate
-  );
+  // プロットの初期テンプレート。要らないと言われたら置かない
+  if (options.withPlot ?? true) {
+    await writeIfAbsent(
+      path.join(folderPath, DEFAULT_SETTINGS_DIR, PLOT_FILE),
+      buildPlotTemplate(title)
+    );
+  }
 }
+
+/** プロットのファイル名。設定フォルダーの直下に置く */
+export const PLOT_FILE = "plot.md";
 
 async function writeIfAbsent(filePath: string, content: string): Promise<void> {
   const uri = vscode.Uri.file(filePath);

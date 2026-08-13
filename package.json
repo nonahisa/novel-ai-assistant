@@ -75,6 +75,12 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.createPlot",
+        "title": "プロットを作る",
+        "category": "小説執筆",
+        "icon": "$(list-tree)"
+      },
+      {
         "command": "novelai.refresh",
         "title": "再読み込み",
         "category": "小説執筆",
@@ -348,6 +354,10 @@
         {
           "command": "novelai.deleteEpisodeFile",
           "when": "false"
+        },
+        {
+          "command": "novelai.createPlot",
+          "when": "true"
         },
         {
           "command": "novelai.extractSettings",
