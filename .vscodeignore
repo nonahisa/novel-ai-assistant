@@ -24,6 +24,7 @@ _test_*
 # 拡張機能の動作には使わないので配布物へ入れない
 _mspages.cjs
 .gitignore
+.gitattributes
 .env
 .env.*
 **/*.map

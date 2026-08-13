@@ -210,6 +210,65 @@ describe("能力・場所の保存", () => {
     expect(disk.has(path.join(abilityDir, abilityFileName(renamed)))).toBe(true);
   });
 
+  test("大文字小文字だけを変えた改名で、その資料を消さない", async () => {
+    // Windowsのファイルシステムは大文字小文字を区別しない。
+    // `abil_001_Fire.json` へ書いたあと `abil_001_fire.json` を消すと、
+    // **同じ1つのファイルなので、今書いたものが消える**（資料が丸ごと失われる）。
+    // 人物側は `samePath` で判定していたが、設定資料側は文字列比較のままだった。
+    const caseInsensitive = process.platform === "win32";
+    const findKey = (filePath: string): string | undefined =>
+      caseInsensitive
+        ? [...disk.keys()].find(
+            (key) => key.toLowerCase() === filePath.toLowerCase()
+          )
+        : disk.has(filePath)
+          ? filePath
+          : undefined;
+    // 実際のプラットフォームに合わせた読み書きにする
+    const base = workspace.fs;
+    workspace.fs = {
+      ...base,
+      readFile: async (uri: { fsPath: string }) => {
+        const key = findKey(uri.fsPath);
+        if (!key) throw new FileSystemError("missing", "FileNotFound");
+        return disk.get(key) as Uint8Array;
+      },
+      rename: async (
+        from: { fsPath: string },
+        to: { fsPath: string },
+        options?: { overwrite?: boolean }
+      ) => {
+        const fromKey = findKey(from.fsPath);
+        if (!fromKey) throw new FileSystemError("missing", "FileNotFound");
+        const toKey = findKey(to.fsPath);
+        if (!options?.overwrite && toKey) {
+          throw new FileSystemError("exists", "FileExists");
+        }
+        const bytes = disk.get(fromKey) as Uint8Array;
+        if (toKey) disk.delete(toKey);
+        disk.delete(fromKey);
+        disk.set(to.fsPath, bytes);
+      },
+      delete: async (uri: { fsPath: string }) => {
+        const key = findKey(uri.fsPath);
+        if (!key) throw new FileSystemError("missing", "FileNotFound");
+        disk.delete(key);
+      },
+    };
+
+    const original = fixedAbility("abil_001", "Fire");
+    disk.set(path.join(abilityDir, abilityFileName(original)), bytesFor(original));
+
+    const store = createAbilityStore(work);
+    const loaded = await store.loadAll();
+    await store.saveAll([{ ...loaded.records[0], name: "fire" }]);
+
+    // 読み直して1件あること。消えていたら0件になる
+    const after = await createAbilityStore(work).loadAll();
+    expect(after.errors).toEqual([]);
+    expect(after.records.map((record) => record.name)).toEqual(["fire"]);
+  });
+
   test("ディレクトリが無くても空として読み込める", async () => {
     directories.delete(abilityDir);
 

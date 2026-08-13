@@ -2,7 +2,8 @@ import type { Character } from "../models/character";
 import type { Ability } from "../models/ability";
 import type { Location } from "../models/location";
 import type { Organization } from "../models/organization";
-import { deriveReading } from "./reading";
+import type { WorldItem } from "../models/world";
+import { deriveReading, toDictionaryReading } from "./reading";
 
 /**
  * IMEのユーザー辞書に取り込むデータを作る。
@@ -30,6 +31,8 @@ export interface DictionaryBuildInput {
   abilities: Ability[];
   locations: Location[];
   organizations?: Organization[];
+  /** 世界観。このうち「固有の用語」だけを辞書に入れる（下記の理由） */
+  worldItems?: WorldItem[];
 }
 
 export interface DictionaryBuildResult {
@@ -60,7 +63,12 @@ export function buildDictionary(
     if (text.length < MIN_SURFACE_LENGTH) return;
 
     // 名前そのものの読みが無ければ、カタカナからは作れるか試す
-    const resolved = (reading?.trim() || deriveReading(text)) ?? "";
+    const raw = reading?.trim() || deriveReading(text);
+    // **IMEの辞書は読みがひらがなでないと取り込めない。**
+    // AIはひらがなを指示してもカタカナで返すことがあり、
+    // そのまま書き出すとその行が取り込みで弾かれる。
+    // 直せるものは直し、直せないものは作者に伝える
+    const resolved = raw ? toDictionaryReading(raw) : undefined;
     if (!resolved) {
       missing.add(text);
       return;
@@ -95,6 +103,19 @@ export function buildDictionary(
   for (const ability of input.abilities) {
     add(ability.name, ability.reading, "名詞");
     for (const alias of ability.aliases) add(alias, null, "名詞");
+  }
+
+  // 世界観は**「固有の用語」だけ**を入れる。
+  // 作品の造語（分類 `term`）こそ変換で出てこないので、
+  // 辞書に無いと作者が毎回打ち直すことになる。
+  // 一方「詠唱の制約」のような見出し（`rule` や `society` など）は
+  // 何についての項目かを示すための言葉で、本文で打つものではない。
+  // 世界観には読みの項目が無い。カタカナの造語なら作れる。
+  // 漢字の造語は読みが決められないので、作者に伝わる（missingReading）
+  for (const item of input.worldItems ?? []) {
+    if (item.category !== "term") continue;
+    add(item.name, null, "名詞");
+    for (const alias of item.aliases) add(alias, null, "名詞");
   }
 
   entries.sort(

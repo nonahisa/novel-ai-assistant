@@ -81,6 +81,25 @@ describe("能力のマージ", () => {
     ]);
   });
 
+  test("同じ値が別の話にも出てきたら話数だけを足す", () => {
+    const result = mergeExtractedAbilities(
+      [],
+      [
+        { data: { name: "灯火", cost: "微量の魔力" }, chapters: [1] },
+        { data: { name: "灯火", cost: "詠唱3秒" }, chapters: [2] },
+        // 同じ「詠唱3秒」が第5話にも出てきた
+        { data: { name: "灯火", cost: "詠唱3秒" }, chapters: [5] },
+        // 先にあった「微量の魔力」も、第6話に出てきた時点で話数が分かる
+        { data: { name: "灯火", cost: "微量の魔力" }, chapters: [6] },
+      ]
+    );
+
+    expect(result.abilities[0].conflicts[0].observations).toEqual([
+      { value: "微量の魔力", chapters: [6] },
+      { value: "詠唱3秒", chapters: [2, 5] },
+    ]);
+  });
+
   test("入力レコードを書き換えない", () => {
     const existing = emptyAbility("abil_001", "灯火");
     const before = structuredClone(existing);

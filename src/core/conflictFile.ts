@@ -156,11 +156,26 @@ function endLineOf(lines: string[], startLine: number): number {
  * 原稿は失われた時の損害が大きく、あとから統合する手間の方が
  * はるかに軽い（設計書5.5.4）。
  */
+/** 退避ファイルの目印。原稿と見分けるために名前へ必ず入る */
+const SIDE_FILE_MARKER = ".conflict-";
+
+/**
+ * 「両方を残す」で作った退避ファイルか。
+ *
+ * **退避ファイルは別環境の版の写しであって、原稿ではない。**
+ * 走査が原稿として拾うと、同じ話数の本文が2つある状態になり、
+ * 文字数が二重に数えられ、AIにも同じ話を2回送ることになる
+ * （クラウドAIならそのまま料金になる）。
+ */
+export function isConflictSideFile(fileName: string): boolean {
+  return fileName.includes(SIDE_FILE_MARKER);
+}
+
 export function sideFileName(fileName: string, label: string): string {
   const dot = fileName.lastIndexOf(".");
   const stem = dot > 0 ? fileName.slice(0, dot) : fileName;
   const extension = dot > 0 ? fileName.slice(dot) : "";
-  return `${stem}.conflict-${sanitizeLabel(label)}${extension}`;
+  return `${stem}${SIDE_FILE_MARKER}${sanitizeLabel(label)}${extension}`;
 }
 
 /**

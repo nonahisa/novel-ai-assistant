@@ -365,6 +365,34 @@ describe("登場人物マージ", () => {
     ]);
   });
 
+  test("同じ値が別の話にも出てきたら話数だけを足す", () => {
+    // 「第7話だけ銀髪」と「第7話と第12話が銀髪」では、
+    // 作中での変化なのかAIの取り違えなのかの読み分けが変わる
+    const existing = emptyCharacter("char_001", "灯");
+    existing.appearance = "黒髪";
+
+    const first = mergeExtractedCharacters([existing], [
+      { data: { name: "灯", appearance: "銀髪" }, chapters: [7] },
+    ]);
+    // 同じ「銀髪」が第12話にも出てきた
+    const second = mergeExtractedCharacters(first.characters, [
+      { data: { name: "灯", appearance: "銀髪" }, chapters: [12] },
+    ]);
+    // 先にあった「黒髪」も、第9話に出てきた時点で話数が分かる
+    const third = mergeExtractedCharacters(second.characters, [
+      { data: { name: "灯", appearance: "黒髪" }, chapters: [9] },
+    ]);
+
+    expect(second.characters[0].conflicts[0].observations).toEqual([
+      { value: "黒髪", chapters: [] },
+      { value: "銀髪", chapters: [7, 12] },
+    ]);
+    expect(third.characters[0].conflicts[0].observations).toEqual([
+      { value: "黒髪", chapters: [9] },
+      { value: "銀髪", chapters: [7, 12] },
+    ]);
+  });
+
   test("詳細な記述を採用し既存の競合候補を重複なく追加する", () => {
     const existing = emptyCharacter("char_001", "灯");
     existing.role = "騎士";

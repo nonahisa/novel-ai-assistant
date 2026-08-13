@@ -4,6 +4,12 @@ import {
   isWatchedSettingsFile,
   kindOfSettingsFile,
 } from "../../src/core/externalChanges";
+import {
+  createAbilityStore,
+  createLocationStore,
+  createOrganizationStore,
+  createWorldStore,
+} from "../../src/core/abilityStore";
 
 /**
  * 外部のAI・ツールが設定資料を書き換えたことを見分ける。
@@ -110,9 +116,37 @@ describe("種別を見分ける", () => {
     expect(kindOfSettingsFile("/work/設定/locations/loc_001.json")).toBe(
       "location"
     );
+    // 世界観だけ登録し忘れていた。ここが漏れると、外部のAIが
+    // 世界観のJSONを書き換えても作者に何も知らせないまま進む
+    expect(kindOfSettingsFile("/work/設定/world/world_001.json")).toBe("world");
     expect(kindOfSettingsFile("/work/設定/custom_fields.json")).toBe(
       "customFields"
     );
+  });
+
+  test("実際の保存先フォルダを全て見分けられる", () => {
+    // 種類を増やしたときの足し忘れを機械的に見つける。
+    // 世界観が抜けていて、外部の変更に気づけない状態になっていた
+    const work = {
+      id: "work_test",
+      title: "作品",
+      folderPath: "/work",
+      registeredAt: "2026-08-06T00:00:00.000Z",
+    };
+    const stores = [
+      createAbilityStore(work),
+      createLocationStore(work),
+      createWorldStore(work),
+      createOrganizationStore(work),
+    ];
+
+    for (const store of stores) {
+      const directory = store.directoryName;
+      expect(
+        kindOfSettingsFile(`/work/設定/${directory}/x_001.json`),
+        `${directory} の種別が決まらない`
+      ).toBeDefined();
+    }
   });
 
   test("知らない場所は種別なしにする", () => {

@@ -78,13 +78,23 @@ export type WatchedKind =
   | "ability"
   | "organization"
   | "location"
+  | "world"
   | "customFields";
 
+/**
+ * 保存先のフォルダ名と種別の対応。
+ *
+ * **設定資料の種類を増やしたら、ここにも足すこと。**
+ * 足し忘れると、外部のAIがそのJSONを書き換えても作者に何も知らせないまま進む。
+ * 実際に世界観（`world`）が抜けていた。
+ * フォルダ名は `abilityStore.ts` の `directoryName` と揃える。
+ */
 const DIRECTORY_KINDS: Array<[string, WatchedKind]> = [
   ["characters", "character"],
   ["abilities", "ability"],
   ["organizations", "organization"],
   ["locations", "location"],
+  ["world", "world"],
 ];
 
 export function kindOfSettingsFile(

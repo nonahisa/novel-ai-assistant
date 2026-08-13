@@ -357,7 +357,14 @@ function fillOrConflict(
     target[field] = value;
     return true;
   }
-  if (current === value) return false;
+  if (current === value) {
+    // 既に食い違いとして記録されている値なら、話数を足す。
+    // 「先にあった値」は記録が無いまま始まるが、同じ値がまた出てきた時点で
+    // どの話に出ているかが分かる。空のままだと、片方だけ話数が付いて
+    // 「第7話から銀髪に変わった」という誤った読み方になる
+    const recorded = target.conflicts.find((c) => c.field === field);
+    return recorded ? recordObservation(recorded, value, chapters) : false;
+  }
 
   // 短い記述が長い記述に含まれる場合は、詳細な方を採用する
   if (value.includes(current)) {
@@ -368,17 +375,17 @@ function fillOrConflict(
 
   const already = target.conflicts.find((c) => c.field === field);
   if (already) {
-    if (!already.values.includes(value)) {
-      already.values.push(value);
-      recordObservation(already, value, chapters);
-      conflicts.push({
-        characterName: target.name,
-        field,
-        values: already.values,
-      });
-      return true;
-    }
-    return false;
+    const isNewValue = !already.values.includes(value);
+    if (isNewValue) already.values.push(value);
+    // 同じ値が別の話にも出てきたら、話数だけを足す
+    const noted = recordObservation(already, value, chapters);
+    if (!isNewValue) return noted;
+    conflicts.push({
+      characterName: target.name,
+      field,
+      values: already.values,
+    });
+    return true;
   }
 
   target.conflicts.push({
@@ -739,7 +746,9 @@ function normalizeName(s: string): string {
 function mergeChapters(existing: number[], incoming: number[]): number[] {
   const set = new Set(existing);
   for (const n of incoming) {
-    if (Number.isFinite(n)) set.add(n);
+    // 話数は整数。`isFinite` だと 1.5 が通り、「第1.5話」と表示される。
+    // 設定資料側（settingsMerge）と食い違っていたので揃えた
+    if (Number.isSafeInteger(n)) set.add(n);
   }
   return [...set].sort((a, b) => a - b);
 }

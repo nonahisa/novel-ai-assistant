@@ -647,7 +647,12 @@ function fillOrConflict<T extends { name: string; conflicts: RecordConflict[] }>
     (target as Record<string, unknown>)[field] = value;
     return true;
   }
-  if (current === value) return false;
+  if (current === value) {
+    // 既に食い違いとして記録されている値なら、話数を足す。
+    // 片方だけ話数が付いていると「第2話から変わった」と誤って読める
+    const recorded = target.conflicts.find((entry) => entry.field === field);
+    return recorded ? recordObservation(recorded, value, chapters) : false;
+  }
   // 短い記述が長い記述に含まれる場合は詳細な方を採る
   if (value.includes(current)) {
     (target as Record<string, unknown>)[field] = value;
@@ -657,13 +662,13 @@ function fillOrConflict<T extends { name: string; conflicts: RecordConflict[] }>
 
   const already = target.conflicts.find((entry) => entry.field === field);
   if (already) {
-    if (!already.values.includes(value)) {
-      already.values.push(value);
-      recordObservation(already, value, chapters);
-      conflicts.push({ name: target.name, field, values: already.values });
-      return true;
-    }
-    return false;
+    const isNewValue = !already.values.includes(value);
+    if (isNewValue) already.values.push(value);
+    // 同じ値が別の話にも出てきたら、話数だけを足す
+    const noted = recordObservation(already, value, chapters);
+    if (!isNewValue) return noted;
+    conflicts.push({ name: target.name, field, values: already.values });
+    return true;
   }
 
   target.conflicts.push({

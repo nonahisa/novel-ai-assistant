@@ -7,6 +7,7 @@ import {
 import { emptyCharacter, type Character } from "../../src/models/character";
 import { emptyLocation, type Location } from "../../src/models/location";
 import { emptyAbility, type Ability } from "../../src/models/ability";
+import { emptyWorldItem } from "../../src/models/world";
 
 function character(
   id: string,
@@ -78,6 +79,54 @@ describe("IME辞書の組み立て", () => {
     expect(result.entries).toEqual([]);
     // 黙って落とすと、なぜ辞書に無いのか分からない
     expect(result.missingReading).toEqual(["月島灯"]);
+  });
+
+  test("カタカナの読みはひらがなへ直して登録する", () => {
+    // IMEの辞書は読みがひらがなでないと取り込めない。
+    // AIはプロンプトでひらがなを指示していてもカタカナで返すことがある。
+    // **AIの出力を信用せずコード側で直す**（他の項目と同じ扱い）
+    const result = build({
+      characters: [
+        character("char_001", "月島灯", { reading: "ツキシマアカリ" }),
+      ],
+    });
+
+    expect(result.entries).toEqual([
+      { reading: "つきしまあかり", surface: "月島灯", partOfSpeech: "人名" },
+    ]);
+    expect(result.missingReading).toEqual([]);
+  });
+
+  test("ひらがなにできない読みは登録せず、作者に知らせる", () => {
+    // 漢字や英字が混ざった読みを書き出すと、取り込みでその行が弾かれる。
+    // 黙って壊れた辞書を渡すより、作者に直してもらう
+    const result = build({
+      characters: [
+        character("char_001", "月島灯", { reading: "月島あかり" }),
+        character("char_002", "白瀬澪", { reading: "shirase mio" }),
+      ],
+    });
+
+    expect(result.entries).toEqual([]);
+    expect(result.missingReading).toEqual(["月島灯", "白瀬澪"]);
+  });
+
+  test("世界観のうち「固有の用語」だけを登録する", () => {
+    // 作品の造語こそ変換で出てこない。辞書に入れないと毎回打ち直しになる。
+    // 一方「詠唱の制約」のような見出しは本文で打つ言葉ではないので入れない
+    const result = buildDictionary({
+      characters: [],
+      abilities: [],
+      locations: [],
+      worldItems: [
+        { ...emptyWorldItem("world_001", "セイモン"), category: "term" },
+        { ...emptyWorldItem("world_002", "詠唱の制約"), category: "rule" },
+      ],
+    });
+
+    expect(result.entries).toEqual([
+      { reading: "せいもん", surface: "セイモン", partOfSpeech: "名詞" },
+    ]);
   });
 
   test("モブは登録しない", () => {

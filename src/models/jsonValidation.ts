@@ -112,15 +112,72 @@ export function recordObservation(
   conflict: RecordConflict,
   value: string,
   chapters: number[]
-): void {
+): boolean {
   const valid = chapters.filter((chapter) => Number.isSafeInteger(chapter));
   if (!conflict.observations) conflict.observations = [];
   const found = conflict.observations.find((item) => item.value === value);
   if (!found) {
-    conflict.observations.push({ value, chapters: [...new Set(valid)].sort((a, b) => a - b) });
-    return;
+    conflict.observations.push({ value, chapters: sortedUnique(valid) });
+    return true;
   }
-  found.chapters = [...new Set([...found.chapters, ...valid])].sort((a, b) => a - b);
+  const merged = sortedUnique([...found.chapters, ...valid]);
+  // 増えていなければ書き換えない。呼ぶたびに「変更あり」と返すと、
+  // 中身が同じままファイルを保存し直すことになる
+  if (merged.length === found.chapters.length) return false;
+  found.chapters = merged;
+  return true;
+}
+
+function sortedUnique(chapters: number[]): number[] {
+  return [...new Set(chapters)].sort((a, b) => a - b);
+}
+
+/**
+ * 2つのレコードの食い違いを、項目ごとに1つへまとめる。
+ *
+ * 同一人物をまとめるときなど、両方に同じ項目の食い違いがあることがある。
+ * **単に並べると、同じ見出しが2つ出るだけでは済まない。**
+ * この先のマージは `field` で最初の1件しか見ないので、2件目は
+ * 表示されるのに二度と更新されない取り残しになる。
+ *
+ * 作者が書いた `note` は捨てず、両方あれば繋ぐ。
+ */
+export function mergeConflicts(
+  left: RecordConflict[],
+  right: RecordConflict[]
+): RecordConflict[] {
+  const merged: RecordConflict[] = [];
+
+  for (const conflict of [...left, ...right]) {
+    const found = merged.find((entry) => entry.field === conflict.field);
+    if (!found) {
+      merged.push({
+        ...conflict,
+        values: [...conflict.values],
+        chapters: [...conflict.chapters],
+        observations: conflict.observations?.map((item) => ({
+          value: item.value,
+          chapters: [...item.chapters],
+        })),
+      });
+      continue;
+    }
+
+    for (const value of conflict.values) {
+      if (!found.values.includes(value)) found.values.push(value);
+    }
+    found.chapters = sortedUnique([...found.chapters, ...conflict.chapters]);
+    for (const item of conflict.observations ?? []) {
+      recordObservation(found, item.value, item.chapters);
+    }
+    // 作者のメモは片方を捨てない
+    const notes = [found.note, conflict.note]
+      .map((note) => note?.trim())
+      .filter((note): note is string => Boolean(note));
+    found.note = notes.length > 0 ? [...new Set(notes)].join("\n") : null;
+  }
+
+  return merged;
 }
 
 export function parseConflicts(

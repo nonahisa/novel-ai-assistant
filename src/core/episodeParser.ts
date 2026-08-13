@@ -61,7 +61,13 @@ export function parseEpisodeFileName(fileName: string): ParsedFileName {
 
   // パターン2: 話数範囲  例: "003-005", "3〜5", "003-005_合本"
   const range = base.match(/^(\d+)\s*[-–—~〜]\s*(\d+)(?:[\s_.．・-]+(.*))?$/);
-  if (range) {
+  // 後ろが小さい組み合わせは話数範囲ではない。
+  // 日付を名前にした下書き（「2026-08-12.txt」）が
+  // 「第2026〜8話」という**ありえない範囲**として読まれていた。
+  // 表示も並び順も壊れ、範囲が逆なので登場話数は空になり、
+  // そのファイルから抽出した人物に話数が1つも付かなくなる。
+  // 範囲として読まず、次の形式（数字＋サブタイトル）へ回す
+  if (range && parseInt(range[2], 10) >= parseInt(range[1], 10)) {
     const start = parseInt(range[1], 10);
     const end = parseInt(range[2], 10);
     return {
@@ -104,7 +110,8 @@ export function parseEpisodeFileName(fileName: string): ParsedFileName {
   const prefixRange = base.match(
     /^[A-Za-z]+[\s_.．・-]*(\d+)\s*[-–—~〜]\s*(\d+)(?:[\s_.．・-]+(.*))?$/
   );
-  if (prefixRange) {
+  // ここも同じ理由で、後ろが小さい組み合わせは範囲として扱わない
+  if (prefixRange && parseInt(prefixRange[2], 10) >= parseInt(prefixRange[1], 10)) {
     return {
       chapterStart: parseInt(prefixRange[1], 10),
       chapterEnd: parseInt(prefixRange[2], 10),

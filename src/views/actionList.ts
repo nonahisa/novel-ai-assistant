@@ -59,7 +59,7 @@ const ACTIONS: readonly CommandAction[] = [
     requiresWork: true,
     group: "資料",
     detail:
-      "抽出した登場人物・能力・場所を一覧で見ます。" +
+      "抽出した登場人物・能力・場所・組織・世界観を一覧で見ます。" +
       "その場で書き換えたり、AIに項目を埋めさせたり、相談したりできます。",
   },
   // 「設定情報を表示」（novelai.showSettingsForTerm）はここに置かない。
@@ -86,7 +86,7 @@ const ACTIONS: readonly CommandAction[] = [
     requiresWork: true,
     group: "資料",
     detail:
-      "本文をAIで解析し、登場人物・能力・場所を取り出して保存します。" +
+      "本文をAIで解析し、登場人物・能力・場所・組織・世界観を取り出して保存します。" +
       "続けて設定資料集も作ります。",
   },
 
@@ -212,7 +212,7 @@ const ACTIONS: readonly CommandAction[] = [
     requiresWork: true,
     group: "書き出す",
     detail:
-      "登場人物・場所・能力の名前を、IMEのユーザー辞書に取り込める形で書き出します。" +
+      "登場人物・場所・能力・組織と、作品の造語を、IMEのユーザー辞書に取り込める形で書き出します。" +
       "取り込むと、変換候補に作品の固有名詞が出るようになります。",
   },
   {
