@@ -20,6 +20,9 @@ AGENTS.md
 CLAUDE.md
 移行手順.md
 _test_*
+# 文字数の数え方を突き合わせるための調査用スクリプト。
+# 拡張機能の動作には使わないので配布物へ入れない
+_mspages.cjs
 .gitignore
 .env
 .env.*

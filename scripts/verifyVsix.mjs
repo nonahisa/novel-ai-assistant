@@ -97,6 +97,10 @@ function run(command, args, options = {}) {
     cwd: repositoryRoot,
     encoding: "utf8",
     windowsHide: true,
+    // 既定の上限は1MB。バンドルはそれを超えており、超えた時点で
+    // 検証そのものが ENOBUFS で落ちる（失敗の理由が「配布物に問題がある」
+    // ように見えてしまう）。配布物の大きさに引きずられない上限にする
+    maxBuffer: 256 * 1024 * 1024,
     ...options,
   });
   if (result.error) throw result.error;
