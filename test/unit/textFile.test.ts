@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   currentFileHash,
   decodeBytes,
+  encodeForNewFile,
   getOpenDocumentText,
   hashText,
   readTextFile,
@@ -463,4 +464,77 @@ describe("本文形式を保持した保存", () => {
     // 退避（原稿→回復先）と配置（一時ファイル→原稿のパス）の2回、renameが呼ばれる
     expect(rename).toHaveBeenCalledTimes(2);
   }
+});
+
+/**
+ * 別ファイルへ書き出すときの符号化。
+ *
+ * 競合を「両方を残す」で解決したとき、捨てる側の版をこれで書く。
+ * **元のファイルと同じ文字コード・改行コードで書く**のが要点で、
+ * 片方だけUTF-8/LFになると、あとで見比べるときに全行が変更扱いになる。
+ */
+describe("別ファイルへ書き出すときの符号化", () => {
+  const original = (
+    overrides: Partial<{
+      encoding: "utf8" | "utf8-bom" | "shift_jis";
+      eol: "\n" | "\r\n";
+      hasTrailingNewline: boolean;
+    }> = {}
+  ) => ({
+    encoding: "utf8" as const,
+    eol: "\n" as const,
+    hasTrailingNewline: true,
+    ...overrides,
+  });
+
+  test("元がShift_JISならShift_JISで書く", () => {
+    const bytes = encodeForNewFile("灯は歩いた。\n", original({ encoding: "shift_jis" }));
+
+    expect(bytes).toBeDefined();
+    expect(iconv.decode(Buffer.from(bytes!), "shift_jis")).toBe("灯は歩いた。\n");
+    // UTF-8で書いていないこと（同じ文字列でもバイト列が違う）
+    expect(bytes).not.toEqual(utf8("灯は歩いた。\n"));
+  });
+
+  test("元がCRLFならCRLFで書く", () => {
+    const bytes = encodeForNewFile("一行目\n二行目\n", original({ eol: "\r\n" }));
+
+    expect(new TextDecoder().decode(bytes!)).toBe("一行目\r\n二行目\r\n");
+  });
+
+  test("元にBOMがあればBOMを付ける", () => {
+    const bytes = encodeForNewFile("灯\n", original({ encoding: "utf8-bom" }));
+
+    expect(Array.from(bytes!.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
+    expect(new TextDecoder().decode(bytes!.slice(3))).toBe("灯\n");
+  });
+
+  test("元に末尾改行が無ければ付けない", () => {
+    const bytes = encodeForNewFile(
+      "灯は歩いた。\n\n",
+      original({ hasTrailingNewline: false })
+    );
+
+    expect(new TextDecoder().decode(bytes!)).toBe("灯は歩いた。");
+  });
+
+  test("元に末尾改行があれば補う", () => {
+    const bytes = encodeForNewFile("灯は歩いた。", original());
+
+    expect(new TextDecoder().decode(bytes!)).toBe("灯は歩いた。\n");
+  });
+
+  test("入力の改行がCRLFでも、元の改行コードに揃える", () => {
+    const bytes = encodeForNewFile("一行目\r\n二行目\r\n", original({ eol: "\n" }));
+
+    expect(new TextDecoder().decode(bytes!)).toBe("一行目\n二行目\n");
+  });
+
+  test("Shift_JISで表せない文字があれば書き出さない", () => {
+    // 代替文字に置き換えて「保存できた」ことにすると本文が壊れる。
+    // 𠮟（サロゲートペア）はShift_JISに無い
+    const bytes = encodeForNewFile("𠮟る\n", original({ encoding: "shift_jis" }));
+
+    expect(bytes).toBeUndefined();
+  });
 });
