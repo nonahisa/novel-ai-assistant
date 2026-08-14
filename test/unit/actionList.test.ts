@@ -179,6 +179,11 @@ describe("AIの印", () => {
       [
         "novelai.checkTypos",
         "novelai.extractSettings",
+        "novelai.extractCharactersOnly",
+        "novelai.extractLocationsOnly",
+        "novelai.extractAbilitiesOnly",
+        "novelai.extractOrganizationsOnly",
+        "novelai.extractWorldOnly",
         "novelai.generateCatchphrases",
         "novelai.generateSynopses",
         "novelai.generateWorkBlurb",
@@ -186,19 +191,39 @@ describe("AIの印", () => {
     );
   });
 
-  test("種別ごとの書き出しにはAIの印を付けない", () => {
+  test("種別ごとの抽出にはAIの印を付ける", () => {
+    // 2種類目からはキャッシュが効いてAIを呼ばないが、初回は呼ぶ。
+    // 「呼ばないこともある」は印を外す理由にならない
+    for (const command of [
+      "novelai.extractCharactersOnly",
+      "novelai.extractLocationsOnly",
+      "novelai.extractAbilitiesOnly",
+      "novelai.extractOrganizationsOnly",
+      "novelai.extractWorldOnly",
+    ]) {
+      const action = allActions().find((entry) => entry.command === command);
+      expect(action?.usesAI, `${command}`).toBe(true);
+    }
+  });
+
+  test("書き出しにはAIの印を付けない", () => {
     // 抽出済みのJSONから書き出すだけなので、AIは呼ばないし料金も出ない
     for (const command of [
-      "novelai.generateCharacterDocs",
-      "novelai.generateLocationDocs",
-      "novelai.generateAbilityDocs",
-      "novelai.generateWorldDocs",
       "novelai.generateSettingsDocs",
       "novelai.exportImeDictionary",
     ]) {
       const action = allActions().find((entry) => entry.command === command);
       expect(action?.usesAI, `${command}`).toBeFalsy();
     }
+  });
+
+  test("表記ゆれ検知にはAIの印を付けない", () => {
+    // ルールだけで判定するので料金がかからない。誤字脱字検知と並ぶため、
+    // 印の有無で見分けられることに意味がある
+    const action = allActions().find(
+      (entry) => entry.command === "novelai.checkNotation"
+    );
+    expect(action?.usesAI).toBeFalsy();
   });
 });
 
@@ -238,7 +263,7 @@ describe("件数の印", () => {
 
     expect(
       provider.provideFileDecoration(
-        actionResourceUri(sectionNode("資料管理", "資料生成"))
+        actionResourceUri(sectionNode("資料管理", "資料抽出"))
       )?.badge
     ).toBe("3");
   });

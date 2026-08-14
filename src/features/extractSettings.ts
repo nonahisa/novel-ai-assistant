@@ -40,6 +40,18 @@ import type { WorldItem } from "../models/world";
  * 収集はチャンクごと、保存は最後に一括で行う。
  */
 
+/**
+ * `persist` が書き込みを絞れる種別。
+ *
+ * 人物（characters）はこのクラスの担当ではない（`extractCharacters.ts` が
+ * 承認待ちの仕組みを含めて別に扱う）ため、ここには含めない。
+ */
+export type SettingsPersistKind =
+  | "locations"
+  | "abilities"
+  | "organizations"
+  | "world";
+
 export interface SettingsExtractionCounts {
   abilitiesAdded: number;
   abilitiesUpdated: number;
@@ -207,7 +219,19 @@ export class SettingsExtractionAccumulator {
    * 能力体系の無い作品に空のファイルを作っても、
    * 作者にとって意味のない項目が増えるだけであるため。
    */
-  async persist(work: WorkEntry): Promise<SettingsPersistResult> {
+  /**
+   * @param kinds 保存する種別。省略すると人物以外のすべて。
+   *   **統合の計算は絞らない。** 組織は場所の一覧を見て「地名を組織にしない」
+   *   判断をするなど、種別をまたいで参照するため。絞るのは書き込みと件数だけ。
+   */
+  async persist(
+    work: WorkEntry,
+    // 呼び出し側は人物を含む集合をそのまま渡せる（人物はここでは見ない）。
+    // 種別名の綴りは saves() の引数側で型に守られる
+    kinds?: ReadonlySet<string>
+  ): Promise<SettingsPersistResult> {
+    const saves = (kind: SettingsPersistKind): boolean =>
+      kinds === undefined || kinds.has(kind);
     const abilityStore = createAbilityStore(work);
     const locationStore = createLocationStore(work);
     const organizationStore = createOrganizationStore(work);
@@ -267,54 +291,70 @@ export class SettingsExtractionAccumulator {
       (organization) => changedOrganizationIds.has(organization.id)
     );
 
-    if (changedAbilities.length > 0) {
-      await abilityStore.saveAll(changedAbilities);
-    }
-    if (changedLocations.length > 0) {
-      await locationStore.saveAll(changedLocations);
-    }
-    if (changedOrganizations.length > 0) {
-      await organizationStore.saveAll(changedOrganizations);
-    }
     const changedWorldItems = worldMerge.items.filter((item) =>
       worldMerge.changedIds.includes(item.id)
     );
-    if (changedWorldItems.length > 0) {
+
+    if (saves("abilities") && changedAbilities.length > 0) {
+      await abilityStore.saveAll(changedAbilities);
+    }
+    if (saves("locations") && changedLocations.length > 0) {
+      await locationStore.saveAll(changedLocations);
+    }
+    if (saves("organizations") && changedOrganizations.length > 0) {
+      await organizationStore.saveAll(changedOrganizations);
+    }
+    if (saves("world") && changedWorldItems.length > 0) {
       await worldStore.saveAll(changedWorldItems);
     }
 
     // 総称や規則が読み取れた場合だけ体系の設定を書く
-    if (this.abilityTerm || this.abilityDescription || this.rules.size > 0) {
+    if (
+      saves("abilities") &&
+      (this.abilityTerm || this.abilityDescription || this.rules.size > 0)
+    ) {
       await this.persistAbilitySystem(work);
     }
 
+    // 保存しなかった種別は、件数も0で返す。
+    // 数えたものと書いたものが食い違うと、要約が嘘になる
+    const zeroUnless = (kind: SettingsPersistKind, value: number): number =>
+      saves(kind) ? value : 0;
+
     return {
       counts: {
-        abilitiesAdded: abilityMerge.added.length,
-        abilitiesUpdated: abilityMerge.updated.length,
-        locationsAdded: locationMerge.added.length,
-        locationsUpdated: locationMerge.updated.length,
-        organizationsAdded:
-          organizationMerge.added.length + fromAffiliations.added.length,
-        organizationsUpdated: organizationMerge.updated.length,
-        worldAdded: worldMerge.added.length,
-        worldUpdated: worldMerge.updated.length,
+        abilitiesAdded: zeroUnless("abilities", abilityMerge.added.length),
+        abilitiesUpdated: zeroUnless("abilities", abilityMerge.updated.length),
+        locationsAdded: zeroUnless("locations", locationMerge.added.length),
+        locationsUpdated: zeroUnless("locations", locationMerge.updated.length),
+        organizationsAdded: zeroUnless(
+          "organizations",
+          organizationMerge.added.length + fromAffiliations.added.length
+        ),
+        organizationsUpdated: zeroUnless(
+          "organizations",
+          organizationMerge.updated.length
+        ),
+        worldAdded: zeroUnless("world", worldMerge.added.length),
+        worldUpdated: zeroUnless("world", worldMerge.updated.length),
         rejected: this.rejected,
         conflicts:
-          abilityMerge.conflicts.length +
-          locationMerge.conflicts.length +
-          organizationMerge.conflicts.length +
-          worldMerge.conflicts.length,
+          zeroUnless("abilities", abilityMerge.conflicts.length) +
+          zeroUnless("locations", locationMerge.conflicts.length) +
+          zeroUnless("organizations", organizationMerge.conflicts.length) +
+          zeroUnless("world", worldMerge.conflicts.length),
         mergeCandidates: [
-          ...abilityMerge.mergeCandidates,
-          ...worldMerge.mergeCandidates,
+          ...(saves("abilities") ? abilityMerge.mergeCandidates : []),
+          ...(saves("world") ? worldMerge.mergeCandidates : []),
         ],
         abilityTerm: this.abilityTerm,
       },
-      savedAbilities: changedAbilities.length,
-      savedLocations: changedLocations.length,
-      savedOrganizations: changedOrganizations.length,
-      savedWorld: changedWorldItems.length,
+      savedAbilities: saves("abilities") ? changedAbilities.length : 0,
+      savedLocations: saves("locations") ? changedLocations.length : 0,
+      savedOrganizations: saves("organizations")
+        ? changedOrganizations.length
+        : 0,
+      savedWorld: saves("world") ? changedWorldItems.length : 0,
     };
   }
 

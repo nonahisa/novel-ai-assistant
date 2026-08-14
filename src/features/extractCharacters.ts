@@ -116,6 +116,38 @@ export async function saveDirtyDocumentsBeforeExtraction(
   return true;
 }
 
+/** 抽出して保存できる設定の種別 */
+export type ExtractKind =
+  | "characters"
+  | "locations"
+  | "abilities"
+  | "organizations"
+  | "world";
+
+export const ALL_EXTRACT_KINDS: readonly ExtractKind[] = [
+  "characters",
+  "locations",
+  "abilities",
+  "organizations",
+  "world",
+];
+
+export interface ExtractCharactersOptions {
+  /**
+   * 保存する種別。省略すると全種別。
+   *
+   * **AIへの問い合わせは絞らない。** P-04aのプロンプトは1回の応答で
+   * 全種別を返すので、種別ごとにAIを呼ぶと本文を読む回数だけが増え、
+   * 料金と時間が種別の数だけ膨らむのに結果は変わらない。
+   *
+   * 応答はチャンク単位でキャッシュされる（`feature: character_extract`）ため、
+   * 「人物だけ抽出」のあとに「場所だけ抽出」を実行しても**AIは呼ばれず**、
+   * 同じ応答から場所を取り出して保存するだけになる。
+   * つまり種別を分けても、作者が払う金額と待ち時間は増えない。
+   */
+  kinds?: readonly ExtractKind[];
+}
+
 /**
  * 本文から登場人物・能力・場所を抽出して保存する。
  *
@@ -125,8 +157,10 @@ export async function saveDirtyDocumentsBeforeExtraction(
  */
 export async function extractCharacters(
   work: WorkEntry,
-  registry: AIRegistry
+  registry: AIRegistry,
+  options: ExtractCharactersOptions = {}
 ): Promise<boolean> {
+  const saveKinds = new Set<ExtractKind>(options.kinds ?? ALL_EXTRACT_KINDS);
   const resolved = await ensureConfigured(registry);
   if (!resolved) return false;
 
@@ -328,8 +362,13 @@ export async function extractCharacters(
   if (pending.length === 0) {
     // キャッシュだけで完結するのでAIには接続しない。
     // Ollamaが落ちていても再反映はできるため、ここで疎通を求めない。
+    //
+    // 種別ごとの抽出が安く済むのはここである。キャッシュの鍵に種別は
+    // 入っていないので、一度どれかを抽出していれば、別の種別を選んでも
+    // AIは呼ばれず、同じ応答から取り出して保存するだけになる
     vscode.window.showInformationMessage(
-      "すべてのチャンクが処理済みです。キャッシュから人物設定を再反映します。"
+      "すべてのチャンクが処理済みです。" +
+        "AIは呼ばず、保存済みの応答から設定を取り出して反映します。"
     );
   } else {
     // AIを呼ぶ前に疎通を確認する。
@@ -651,8 +690,10 @@ export async function extractCharacters(
   /** 保留に失敗した場合の説明。要約の先頭へ足す */
   let settingsNoticePrefix = "";
 
+  // 人物を保存しない指定なら、統合そのものを行わない。
+  // これだけで承認待ちへの保留も新規保存も起きず、件数も0のままになる
   const merged =
-    extractedAll.length > 0
+    saveKinds.has("characters") && extractedAll.length > 0
       ? mergeExtractedCharacters(loaded.characters, extractedAll)
       : undefined;
   const changedCharacters = merged
@@ -760,7 +801,7 @@ export async function extractCharacters(
   // 人物側で保存を中止した場合に設定だけ書き込まれるのを避けるため。
   let settingsNotice = settingsNoticePrefix;
   try {
-    const persisted = await settings.persist(work);
+    const persisted = await settings.persist(work, saveKinds);
     settingsNotice = describeSettingsResult(persisted);
   } catch (error) {
     // 設定の保存に失敗しても、人物の抽出結果は保存済みである。

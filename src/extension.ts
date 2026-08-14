@@ -1029,6 +1029,42 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
   }
 
+  /**
+   * 種別ごとのAI抽出。
+   *
+   * **AIへの問い合わせは絞らない。** 1回の応答に全種別が入っており、
+   * 応答はチャンク単位でキャッシュされる。そのため「人物を抽出」の
+   * あとに「場所を抽出」を実行してもAIは呼ばれず、同じ応答から
+   * 場所を取り出して保存するだけになる（料金も待ち時間も増えない）。
+   */
+  for (const [command, kind, label] of [
+    ["novelai.extractCharactersOnly", "characters", "人物"],
+    ["novelai.extractLocationsOnly", "locations", "場所"],
+    ["novelai.extractAbilitiesOnly", "abilities", "スキル"],
+    ["novelai.extractOrganizationsOnly", "organizations", "組織"],
+    ["novelai.extractWorldOnly", "world", "世界観"],
+  ] as const) {
+    context.subscriptions.push(
+      vscode.commands.registerCommand(command, async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        if (!(await saveDirtyDocumentsBeforeExtraction(work, `${label}の抽出`)))
+          return;
+
+        const saved = await extractCharacters(work, aiRegistry, {
+          kinds: [kind],
+        });
+        if (!saved) return;
+
+        // 保存した種別の資料（Markdown）だけを作り直す
+        await generateSettingsDocs(work, { kinds: [kind] });
+        treeProvider.refresh(work.id);
+        highlighter.invalidate();
+        refreshActionBadges();
+      })
+    );
+  }
+
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.testAI", async () => {
       const resolved = aiRegistry.resolve();

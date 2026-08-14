@@ -339,7 +339,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
     entries: [
       {
         kind: "section",
-        label: "資料生成",
+        label: "資料抽出",
         icon: "wand",
         // 「更新分を反映」がこの中にある。分類を開いた作者が、
         // どの小分類を開けばよいか印だけで辿れるようにする
@@ -348,54 +348,75 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.extractSettings",
-            label: "まとめて生成",
+            label: "まとめて抽出",
             icon: "sparkle",
             requiresWork: true,
             usesAI: true,
             detail:
-              "本文をAIで解析し、登場人物・能力・場所・組織・世界観を" +
+              "本文をAIで読み、登場人物・場所・スキル・組織・世界観を" +
               "まとめて取り出して保存します。続けて設定資料集も作ります。" +
-              "**1回の応答で全種別を取り出す**ので、種別ごとに呼ぶより処理量が少なく済みます。",
+              "種別ごとに実行するより一度で済むので、最初はこれを使ってください。",
           },
+          // 種別ごとの抽出。AIへの問い合わせは絞らない（1回の応答に全種別が
+          // 入っている）が、応答はチャンク単位でキャッシュされるため、
+          // 2種類目からはAIを呼ばずに保存だけを行う。料金も待ち時間も増えない
           {
             kind: "action",
-            command: "novelai.generateCharacterDocs",
-            label: "人物一覧を生成",
-            description: "AIを使わない",
+            command: "novelai.extractCharactersOnly",
+            label: "人物を抽出",
             icon: "person",
             requiresWork: true,
+            usesAI: true,
             detail:
-              "抽出済みの人物設定から characters.md だけを書き出します。" +
-              "人物のJSONを直したあと、資料だけ作り直したいときに使います。",
+              "本文をAIで読み、登場人物だけを取り出して保存します。" +
+              "既にいる人物への変更は、その場では書き換えず「更新分を反映」へ回します。" +
+              "「まとめて抽出」を済ませていれば、AIは呼び直されません。",
           },
           {
             kind: "action",
-            command: "novelai.generateLocationDocs",
-            label: "場所一覧を生成",
-            description: "AIを使わない",
+            command: "novelai.extractLocationsOnly",
+            label: "場所を抽出",
             icon: "location",
             requiresWork: true,
-            detail: "抽出済みの場所設定から locations.md だけを書き出します。",
+            usesAI: true,
+            detail:
+              "本文をAIで読み、場所だけを取り出して保存します。" +
+              "「まとめて抽出」を済ませていれば、AIは呼び直されません。",
           },
           {
             kind: "action",
-            command: "novelai.generateAbilityDocs",
-            label: "スキル一覧を生成",
-            description: "AIを使わない",
+            command: "novelai.extractAbilitiesOnly",
+            label: "スキルを抽出",
             icon: "zap",
             requiresWork: true,
+            usesAI: true,
             detail:
-              "抽出済みの能力（スキル・魔法など、作品での呼び方に合わせます）から" +
-              " abilities.md だけを書き出します。",
+              "本文をAIで読み、能力（スキル・魔法など、作品での呼び方に合わせます）" +
+              "だけを取り出して保存します。" +
+              "「まとめて抽出」を済ませていれば、AIは呼び直されません。",
           },
           {
             kind: "action",
-            command: "novelai.generateWorldDocs",
-            label: "世界観一覧を生成",
-            description: "AIを使わない",
+            command: "novelai.extractOrganizationsOnly",
+            label: "組織を抽出",
+            icon: "organization",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "本文をAIで読み、組織だけを取り出して保存します。" +
+              "人物の所属からも組織を拾います。" +
+              "「まとめて抽出」を済ませていれば、AIは呼び直されません。",
+          },
+          {
+            kind: "action",
+            command: "novelai.extractWorldOnly",
+            label: "世界観を抽出",
             icon: "globe",
             requiresWork: true,
-            detail: "抽出済みの世界観設定から world.md だけを書き出します。",
+            usesAI: true,
+            detail:
+              "本文をAIで読み、世界観だけを取り出して保存します。" +
+              "「まとめて抽出」を済ませていれば、AIは呼び直されません。",
           },
           {
             kind: "action",

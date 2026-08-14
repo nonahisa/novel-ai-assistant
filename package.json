@@ -176,9 +176,39 @@
       },
       {
         "command": "novelai.extractSettings",
-        "title": "設定資料をまとめて生成",
+        "title": "設定資料をまとめて抽出",
         "category": "小説執筆",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "novelai.extractCharactersOnly",
+        "title": "人物を抽出",
+        "category": "小説執筆",
+        "icon": "$(person)"
+      },
+      {
+        "command": "novelai.extractLocationsOnly",
+        "title": "場所を抽出",
+        "category": "小説執筆",
+        "icon": "$(location)"
+      },
+      {
+        "command": "novelai.extractAbilitiesOnly",
+        "title": "スキルを抽出",
+        "category": "小説執筆",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "novelai.extractOrganizationsOnly",
+        "title": "組織を抽出",
+        "category": "小説執筆",
+        "icon": "$(organization)"
+      },
+      {
+        "command": "novelai.extractWorldOnly",
+        "title": "世界観を抽出",
+        "category": "小説執筆",
+        "icon": "$(globe)"
       },
       {
         "command": "novelai.checkTypos",
