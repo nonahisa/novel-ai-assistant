@@ -85,6 +85,7 @@ import {
 import { checkTypos, type TypoCheckRunResult } from "./features/checkTypos";
 import { checkNotation } from "./features/checkNotation";
 import { generatePlot } from "./features/generatePlot";
+import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
 import { parseSynopsisMarkdown } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
 import { hasUnsavedChanges } from "./core/textFile";
@@ -292,6 +293,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(AI_ISSUES_VIEW_ID, typoIssuePanel, {
       webviewOptions: { retainContextWhenHidden: true },
+    })
+  );
+
+  // いま開いている画面について相談するパネル（P-21）
+  const workChatPanel = new WorkChatPanel(registry, aiRegistry);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(WORK_CHAT_VIEW_ID, workChatPanel, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+    // パネルへフォーカスが移ると activeTextEditor は undefined になるので、
+    // 最後に開いていた本文を覚えておく
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      workChatPanel.trackEditor(editor);
     })
   );
 

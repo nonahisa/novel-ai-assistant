@@ -224,6 +224,23 @@ function applyWorldItem(
   let changed = false;
 
   changed = mergeAliases(target, incoming.name, []) || changed;
+
+  /**
+   * カタカナの造語はコード側で確実に読みを作る。
+   * 漢字はここでは決められないので、P-16の推定か作者の入力を待つ。
+   * 抽出結果に読みは含まれない（P-03は読みを返さない）ため、
+   * 他の種別と違って `fillOrConflict` は挟まない。
+   *
+   * 分類を問わず埋めるのは、IME辞書に載るのは `term` だけだが、
+   * 分類は後から具体的なものへ寄せ替わる（すぐ下の判断）ため。
+   * あとで term から動いても、また term へ戻っても、読みは残っていてよい。
+   */
+  const derivedReading = fillReading(target.reading, target.name);
+  if (derivedReading !== target.reading) {
+    target.reading = derivedReading;
+    changed = true;
+  }
+
   changed =
     fillOrConflict(target, "description", incoming.description, chapters, conflicts) ||
     changed;

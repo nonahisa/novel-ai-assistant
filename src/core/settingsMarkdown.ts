@@ -267,7 +267,10 @@ export function buildWorldMarkdown(
 
     lines.push(`## ${WORLD_CATEGORY_LABELS[category]}`, "");
     for (const item of group) {
-      lines.push(`### ${item.name}`, "");
+      // 読みを持つのは基本「固有の用語」だけ。見出しには要らないので、
+      // 他の種別と同じく「あれば出す」に留める
+      const reading = item.reading ? `（${item.reading}）` : "";
+      lines.push(`### ${item.name}${reading}`, "");
       if (item.description) {
         lines.push(item.description, "");
       }

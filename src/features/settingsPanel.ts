@@ -472,6 +472,9 @@ export class SettingsPanel {
           // 分類は決まった7種。自由入力にすると綴りの揺れで
           // 資料の節が増え、読み込み時の検証でも落ちる
           choiceField("category", "分類", item.category, WORLD_CATEGORY_CHOICES),
+          // 読みが要るのは「固有の用語」だけ。見出しは本文に出てこないので
+          // 辞書に入れても変換の役に立たない。何のための欄かを見出しに書く
+          field("reading", "読み（固有の用語のみ。IME辞書に使う）", item.reading),
           field(
             "aliases",
             "別の言い方（読点区切り）",

@@ -224,6 +224,8 @@ export function applyWorldItemEdits(
   return {
     ...item,
     name: editedName(item.name, edits.name),
+    // 漢字の造語はコード側で読みを作れない。ここが作者の入力口になる
+    reading: nullableText(item.reading, edits.reading),
     aliases: editedAliases(item.aliases, edits.aliases),
     category: editedWorldCategory(item.category, edits.category),
     description: nullableText(item.description, edits.description),

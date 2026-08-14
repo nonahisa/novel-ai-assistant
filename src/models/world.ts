@@ -67,6 +67,19 @@ export interface WorldItem {
   name: string;
   /** 表記ゆれ。同じ事柄を別の言い方で書いた場合に入る */
   aliases: string[];
+  /**
+   * 読み仮名（ひらがな）。**IME辞書のために持つ。**
+   *
+   * 「詠唱の制約」のような見出しに読みは要らない。そのため当初は
+   * 項目ごと外していたが、分類 `term`（作品の造語）だけは
+   * **本文で作者が打つ言葉**であり、IME辞書に入れないと毎回打ち直しになる。
+   * 外していた間、**漢字の造語はどうやっても辞書に入らなかった。**
+   *
+   * 漢字の造語は機械的に読みを決められないので、ここが空だと辞書から落ちる。
+   * 埋まる経路は3つ：カタカナならコード側（`fillReading`）、
+   * 漢字ならAIの推定（P-16）か、作者が設定資料パネルで直接入力する。
+   */
+  reading: string | null;
   category: WorldCategory;
   /** 中身。これが本体 */
   description: string | null;
@@ -96,6 +109,7 @@ export function emptyWorldItem(
     id,
     name,
     aliases: [],
+    reading: null,
     category,
     description: null,
     appearedChapters: [],
@@ -135,6 +149,8 @@ export function normalizeWorldItem(raw: Partial<WorldItem>): WorldItem {
     ...base,
     ...raw,
     aliases: raw.aliases ?? [],
+    // 既存のJSONにはこの項目が無い。欠損を null で補うので移行処理は要らない
+    reading: raw.reading ?? null,
     appearedChapters: raw.appearedChapters ?? [],
     conflicts: raw.conflicts ?? [],
     aiNotes: raw.aiNotes ?? [],
@@ -161,7 +177,7 @@ export function parseWorldItem(raw: unknown): WorldItem {
   optionalString(value.schemaVersion, "schemaVersion");
   optionalStringArray(value.aliases, "aliases");
   optionalEnum(value.category, "category", [...WORLD_CATEGORIES]);
-  for (const key of ["description", "evidence"]) {
+  for (const key of ["description", "evidence", "reading"]) {
     optionalNullableString(value[key], key);
   }
   optionalNumberArray(value.appearedChapters, "appearedChapters");

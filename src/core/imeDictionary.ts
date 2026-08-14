@@ -110,11 +110,14 @@ export function buildDictionary(
   // 辞書に無いと作者が毎回打ち直すことになる。
   // 一方「詠唱の制約」のような見出し（`rule` や `society` など）は
   // 何についての項目かを示すための言葉で、本文で打つものではない。
-  // 世界観には読みの項目が無い。カタカナの造語なら作れる。
-  // 漢字の造語は読みが決められないので、作者に伝わる（missingReading）
+  //
+  // 読みは `item.reading` を使う。以前は世界観に読みの項目が無く、
+  // **漢字の造語はどうやっても辞書に入らなかった**（カタカナしか作れなかった）。
+  // 作品の造語こそ変換に出てこないので、そこが抜けているのは痛かった。
   for (const item of input.worldItems ?? []) {
     if (item.category !== "term") continue;
-    add(item.name, null, "名詞");
+    add(item.name, item.reading, "名詞");
+    // 別名は名前の読みを流用できない。カタカナなら作れる
     for (const alias of item.aliases) add(alias, null, "名詞");
   }
 

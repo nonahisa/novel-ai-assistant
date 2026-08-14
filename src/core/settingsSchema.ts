@@ -243,13 +243,17 @@ export function locationSchema(): Record<string, unknown> {
 /**
  * 世界観（P-03）。
  *
- * 他の種別と違い、`summary`・`reading`・`status` を持たない。
- * 見出しと説明の2つで足りるうえ、読み仮名を付ける対象でも、
- * 「未登場」を区別する対象でもないためである。
+ * 他の種別と違い、`summary`・`status` を持たない。
+ * 見出しと説明の2つで足りるうえ、「未登場」を区別する対象でもないためである。
+ *
+ * **`reading` は持つ。** かつては読み仮名を付ける対象でないとして外していたが、
+ * 分類 `term`（作品の造語）だけは**本文で作者が打つ言葉**であり、
+ * IME辞書に入れるために読みが要る。外していた間、
+ * 漢字の造語はどうやっても辞書に入らなかった。
  */
 export function worldSchema(): Record<string, unknown> {
   const properties = commonProperties("^world_\\d+$");
-  for (const key of ["summary", "reading", "status"]) {
+  for (const key of ["summary", "status"]) {
     delete properties[key];
   }
   return {
@@ -258,6 +262,12 @@ export function worldSchema(): Record<string, unknown> {
     type: "object",
     properties: {
       ...properties,
+      reading: {
+        type: ["string", "null"],
+        description:
+          "読み仮名。ひらがな。IME辞書の書き出しに使う。" +
+          "意味があるのは category が term のときだけ（見出しは本文に出てこないため）",
+      },
       name: {
         type: "string",
         minLength: 1,

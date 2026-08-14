@@ -129,6 +129,65 @@ describe("IME辞書の組み立て", () => {
     ]);
   });
 
+  test("漢字の造語も、読みが入っていれば登録する", () => {
+    // 世界観に読みの項目が無かった頃は、漢字の造語は
+    // `deriveReading` が必ず諦めるため**どうやっても辞書に入らなかった**。
+    // 作品の造語こそ変換に出てこないので、ここが抜けているのは痛かった。
+    const result = buildDictionary({
+      characters: [],
+      abilities: [],
+      locations: [],
+      worldItems: [
+        {
+          ...emptyWorldItem("world_001", "神威術"),
+          category: "term",
+          reading: "しんじゅつ",
+        },
+      ],
+    });
+
+    expect(result.entries).toEqual([
+      { reading: "しんじゅつ", surface: "神威術", partOfSpeech: "名詞" },
+    ]);
+    expect(result.missingReading).toEqual([]);
+  });
+
+  test("漢字の造語で読みが空なら、黙って落とさず作者に伝える", () => {
+    const result = buildDictionary({
+      characters: [],
+      abilities: [],
+      locations: [],
+      worldItems: [
+        { ...emptyWorldItem("world_001", "神術"), category: "term" },
+      ],
+    });
+
+    expect(result.entries).toEqual([]);
+    expect(result.missingReading).toEqual(["神術"]);
+  });
+
+  test("世界観の読みがカタカナでも、ひらがなへ直して登録する", () => {
+    // IMEの辞書は読みがひらがなでないと取り込めない。
+    // P-16の推定や作者の入力でカタカナが入る余地があるので、
+    // 他の種別と同じくコード側で直す
+    const result = buildDictionary({
+      characters: [],
+      abilities: [],
+      locations: [],
+      worldItems: [
+        {
+          ...emptyWorldItem("world_001", "神術"),
+          category: "term",
+          reading: "シンジュツ",
+        },
+      ],
+    });
+
+    expect(result.entries).toEqual([
+      { reading: "しんじゅつ", surface: "神術", partOfSpeech: "名詞" },
+    ]);
+  });
+
   test("モブは登録しない", () => {
     // 数が多く、地の文の普通名詞と重なりやすい
     const result = build({

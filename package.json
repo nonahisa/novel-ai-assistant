@@ -21,6 +21,11 @@
           "id": "novelai",
           "title": "小説執筆",
           "icon": "media/icon.svg"
+        },
+        {
+          "id": "novelaiChat",
+          "title": "AIに相談",
+          "icon": "media/icon.svg"
         }
       ],
       "panel": [
@@ -46,6 +51,13 @@
         {
           "id": "novelai.aiIssuesView",
           "name": "誤字脱字",
+          "type": "webview"
+        }
+      ],
+      "novelaiChat": [
+        {
+          "id": "novelai.chatView",
+          "name": "AIに相談",
           "type": "webview"
         }
       ]
