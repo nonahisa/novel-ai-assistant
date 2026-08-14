@@ -941,7 +941,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand(
       "novelai.applyPendingUpdates",
       async (node?: WorkNode) => {
-        const work = await resolveWork(node, registry);
+        const work = await resolveWork(node, registry, {
+          title: "更新分を反映する作品を選択",
+          annotate: async (candidate) => {
+            let count = 0;
+            try {
+              count = await new PendingUpdateStore(candidate).count();
+            } catch {
+              // 読めない作品は0件として扱う。補足が出ないだけ
+            }
+            return {
+              note: count > 0 ? `未反映 ${count}件` : "未反映なし",
+              order: count,
+            };
+          },
+        });
         if (!work) return;
         await applyPendingCharacterUpdates(work);
         treeProvider.refresh(work.id);
@@ -1368,9 +1382,22 @@ function reportTypoCheckResult(label: string, result: TypoCheckRunResult): void 
 }
 
 /** ツリーから呼ばれた場合はそのノード、コマンドパレットからは選択させる */
+interface ResolveWorkOptions {
+  /**
+   * 作品ごとの補足。どれを選ぶべきかの判断材料を出す。
+   *
+   * **件数の印は全作品を合わせた数なので、それだけではどの作品に
+   * 溜まっているのか分からない**（実機で発覚、2026-08-14）。
+   * 承認待ちのように作品ごとに数が違うものは、選ぶ場面で内訳を見せる。
+   */
+  annotate?: (work: WorkEntry) => Promise<{ note?: string; order?: number }>;
+  title?: string;
+}
+
 async function resolveWork(
   node: WorkNode | undefined,
-  registry: WorkRegistry
+  registry: WorkRegistry,
+  options: ResolveWorkOptions = {}
 ): Promise<WorkEntry | undefined> {
   if (node && node.type === "work") return node.work;
 
@@ -1381,9 +1408,27 @@ async function resolveWork(
   }
   if (works.length === 1) return works[0];
 
-  const picked = await vscode.window.showQuickPick(
-    works.map((w) => ({ label: w.title, description: w.folderPath, work: w })),
-    { title: "作品を選択" }
-  );
+  const title = options.title ?? "作品を選択";
+  if (!options.annotate) {
+    const picked = await vscode.window.showQuickPick(
+      works.map((w) => ({ label: w.title, description: w.folderPath, work: w })),
+      { title }
+    );
+    return picked?.work;
+  }
+
+  const notes = await Promise.all(works.map((work) => options.annotate!(work)));
+  const items = works
+    .map((work, index) => ({
+      label: work.title,
+      description: notes[index].note ?? "",
+      detail: work.folderPath,
+      order: notes[index].order ?? 0,
+      work,
+    }))
+    // 溜まっている作品を上に出す。作者はたいていそれを選びたい
+    .sort((left, right) => right.order - left.order);
+
+  const picked = await vscode.window.showQuickPick(items, { title });
   return picked?.work;
 }

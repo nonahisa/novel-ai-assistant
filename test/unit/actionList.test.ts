@@ -54,6 +54,19 @@ function actionNode(command: string): ActionNode {
   return { type: "action", item };
 }
 
+/** 小分類の節点を作る */
+function sectionNode(groupLabel: string, sectionLabel: string): ActionNode {
+  const group = ACTION_TREE.find((entry) => entry.label === groupLabel);
+  if (!group) throw new Error(`分類「${groupLabel}」がありません`);
+  const section = group.entries.find(
+    (entry) => entry.kind === "section" && entry.label === sectionLabel
+  );
+  if (!section || section.kind !== "section") {
+    throw new Error(`小分類「${sectionLabel}」がありません`);
+  }
+  return { type: "section", section, groupLabel };
+}
+
 function commandsOf(hasWork: boolean): string[] {
   return visibleGroups(hasWork).flatMap((group) =>
     group.entries.flatMap((entry) =>
@@ -215,6 +228,30 @@ describe("件数の印", () => {
       provider.provideFileDecoration(actionResourceUri(groupNode("資料管理")))
         ?.badge
     ).toBe("3");
+  });
+
+  test("分類と操作の間の小分類にも出す", async () => {
+    // 分類を開いた作者に見えるのは小分類の行だけ。そこに印が無いと、
+    // どれを開けば件数の元があるのか辿れない（実機で発覚、2026-08-14）
+    const provider = new ActionDecorationProvider(async () => 3);
+    await provider.refresh();
+
+    expect(
+      provider.provideFileDecoration(
+        actionResourceUri(sectionNode("資料管理", "資料生成"))
+      )?.badge
+    ).toBe("3");
+  });
+
+  test("件数を持たない小分類には出さない", async () => {
+    const provider = new ActionDecorationProvider(async () => 3);
+    await provider.refresh();
+
+    expect(
+      provider.provideFileDecoration(
+        actionResourceUri(sectionNode("執筆AI支援", "校正・校閲"))
+      )
+    ).toBeUndefined();
   });
 
   test("3桁以上は99で止める", async () => {

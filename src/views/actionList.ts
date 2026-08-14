@@ -45,6 +45,15 @@ export interface ActionSection {
   label: string;
   icon: string;
   items: ActionItem[];
+  /**
+   * 末尾に件数を出す。0件のときは出さない。
+   *
+   * **分類と操作の両方に出していても、その間の小分類に出さないと
+   * 意味がない。** 分類（資料管理）を開いた作者に見えるのは小分類の
+   * 行だけで、そこに印が無いと、どれを開けば件数の元があるのか分からない
+   * （実機で発覚、2026-08-14）。
+   */
+  counter?: ActionCounter;
 }
 
 export interface ActionGroup {
@@ -332,6 +341,9 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         kind: "section",
         label: "資料生成",
         icon: "wand",
+        // 「更新分を反映」がこの中にある。分類を開いた作者が、
+        // どの小分類を開けばよいか印だけで辿れるようにする
+        counter: "pendingUpdates",
         items: [
           {
             kind: "action",

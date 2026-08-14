@@ -99,13 +99,20 @@ export class ActionDecorationProvider
   }
 }
 
-/** その鍵に件数を出すか。分類の見出しにも出す（閉じたままでも気づけるように） */
+/**
+ * その鍵に件数を出すか。
+ *
+ * **分類・小分類の見出しにも出す。** 閉じたままでも気づけるようにするのと、
+ * 開いたあとに「どれをさらに開けばよいか」を辿れるようにするため。
+ * 小分類の鍵は `nodeKey` と同じく「分類/小分類」の形。
+ */
 function counterFor(key: string): ActionCounter | undefined {
   for (const group of ACTION_TREE) {
     if (group.label === key) return group.counter;
     for (const entry of group.entries) {
       if (entry.kind === "action" && entry.command === key) return entry.counter;
       if (entry.kind === "section") {
+        if (`${group.label}/${entry.label}` === key) return entry.counter;
         for (const item of entry.items) {
           if (item.command === key) return item.counter;
         }
@@ -136,6 +143,7 @@ function usedCounters(): ActionCounter[] {
     for (const entry of group.entries) {
       if (entry.kind === "action" && entry.counter) counters.add(entry.counter);
       if (entry.kind === "section") {
+        if (entry.counter) counters.add(entry.counter);
         for (const item of entry.items) {
           if (item.counter) counters.add(item.counter);
         }
