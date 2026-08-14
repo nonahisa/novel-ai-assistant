@@ -3,6 +3,7 @@ import {
   buildDictionary,
   encodeDictionary,
   formatDictionary,
+  splitByEncodable,
 } from "../../src/core/imeDictionary";
 import { emptyCharacter, type Character } from "../../src/models/character";
 import { emptyLocation, type Location } from "../../src/models/location";
@@ -272,5 +273,56 @@ describe("辞書ファイルの書式", () => {
     const bytes = encodeDictionary("あ", "utf8");
 
     expect([...bytes]).toEqual([0xe3, 0x81, 0x82]);
+  });
+
+  test("ATOKは3列（4列目を持てるか未確認のため足さない）", () => {
+    expect(formatDictionary(entries, "atok", "テスト作品")).toBe(
+      "ほんごー\tホンゴー\t人名\r\n"
+    );
+  });
+
+  test("ATOK向けはShift_JISで書き出す", () => {
+    const bytes = encodeDictionary("あ", "shift_jis");
+
+    // 「あ」= Shift_JIS 0x82A0。BOMは付けない
+    expect([...bytes]).toEqual([0x82, 0xa0]);
+  });
+});
+
+describe("文字コードで表せない語の選り分け", () => {
+  /**
+   * Shift_JISには無い文字がある。`iconv-lite` は黙って `?` に落とすので、
+   * そのまま書き出すと化けた辞書ができあがり、
+   * 作者には「登録したのに変な語が出る」としか見えない。
+   */
+  const ok = { reading: "ほんごー", surface: "ホンゴー", partOfSpeech: "人名" };
+  // 「𠮷」（つちよし）はサロゲートペアでShift_JISに無い。人名では現実的に起きる
+  const lost = { reading: "よしの", surface: "𠮷野", partOfSpeech: "人名" };
+
+  test("Shift_JISで表せない語は書き出さず、名前を返す", () => {
+    const result = splitByEncodable([ok, lost], "shift_jis");
+
+    expect(result.usable).toEqual([ok]);
+    expect(result.unencodable).toEqual(["𠮷野"]);
+  });
+
+  test("小説でよく使う記号はShift_JISでも通る", () => {
+    // 「――」「｜《》」「……」が落ちるなら記号辞書の設計を変える必要がある。
+    // 実測では通ったので、その事実を固定しておく
+    const symbols = [
+      { reading: "だっしゅ", surface: "――", partOfSpeech: "短縮よみ" },
+      { reading: "るび", surface: "｜《》", partOfSpeech: "短縮よみ" },
+      { reading: "さんてん", surface: "……", partOfSpeech: "短縮よみ" },
+    ];
+
+    const result = splitByEncodable(symbols, "shift_jis");
+
+    expect(result.usable).toEqual(symbols);
+    expect(result.unencodable).toEqual([]);
+  });
+
+  test("UTF-8・UTF-16では何も落とさない", () => {
+    expect(splitByEncodable([ok, lost], "utf8").unencodable).toEqual([]);
+    expect(splitByEncodable([ok, lost], "utf16le").unencodable).toEqual([]);
   });
 });
