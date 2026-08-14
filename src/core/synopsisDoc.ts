@@ -20,15 +20,31 @@ export interface SynopsisDoc {
 /** キャッチコピーは引用行に置く。見出しの直後で目に入る */
 const CATCHPHRASE_LINE = /^>\s*(.+?)\s*$/;
 
+/**
+ * 各話あらすじを載せる見出し。
+ *
+ * **この行から下は生成物である。** 作品紹介文と各話あらすじを1つの文書に
+ * まとめたのは作者の要望（2026-08-14）。ただし真実の在り処は別で、
+ * 紹介文はこのファイル自身、各話あらすじは `chapter_synopses.json` にある。
+ * 読み取りではこの見出し以降を捨て、書き込みでは毎回JSONから組み立て直す。
+ */
+export const EPISODE_SECTION_HEADING = "## 各話あらすじ";
+
 export function buildSynopsisMarkdown(
   workTitle: string,
-  doc: SynopsisDoc
+  doc: SynopsisDoc,
+  /** 各話あらすじの本文（`synopsisMarkdown.ts` で組み立てたもの）。無ければ載せない */
+  episodeSection?: string
 ): string {
   const lines = [`# ${workTitle}`, ""];
   if (doc.catchphrase) {
     lines.push(`> ${doc.catchphrase}`, "");
   }
   lines.push(doc.blurb.trim(), "");
+
+  if (episodeSection && episodeSection.trim()) {
+    lines.push(EPISODE_SECTION_HEADING, "", episodeSection.trim(), "");
+  }
   return lines.join("\n");
 }
 
@@ -45,6 +61,10 @@ export function parseSynopsisMarkdown(text: string): SynopsisDoc {
   const body: string[] = [];
 
   for (const line of lines) {
+    // 各話あらすじの見出しから下は生成物なので、紹介文には取り込まない。
+    // 取り込むと、書き戻すたびにあらすじが紹介文の中へ二重に積もる
+    if (line.trim() === EPISODE_SECTION_HEADING) break;
+
     // 先頭の見出しは作品名なので落とす（組み立て直すときに付け直す）
     if (body.length === 0 && catchphrase === null && /^#\s/.test(line)) {
       continue;

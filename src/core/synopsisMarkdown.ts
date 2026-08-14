@@ -13,13 +13,27 @@ import type { ChapterSynopsis, ChapterSynopsisSet } from "../models/synopsis";
 
 export interface SynopsisMarkdownOptions {
   workTitle: string;
+  /**
+   * 見出しの深さ。既定は1（`# 作品名 各話あらすじ`）。
+   *
+   * 作品紹介文と同じ文書へ差し込むときは2を渡す。紹介文の下に
+   * `## 各話あらすじ` があり、その中に話が並ぶため、話の見出しは
+   * 1段深くしないと目次の階層が壊れる。
+   */
+  headingLevel?: 1 | 2;
+  /** 文書の見出し（`# 作品名 各話あらすじ`）を付けるか。既定は付ける */
+  includeTitle?: boolean;
 }
 
 export function buildSynopsisListMarkdown(
   set: ChapterSynopsisSet,
   options: SynopsisMarkdownOptions
 ): string {
-  const lines: string[] = [`# ${options.workTitle} 各話あらすじ`, ""];
+  const includeTitle = options.includeTitle ?? true;
+  const episodeHeading = "#".repeat((options.headingLevel ?? 1) + 1);
+  const lines: string[] = includeTitle
+    ? [`# ${options.workTitle} 各話あらすじ`, ""]
+    : [];
 
   if (set.episodes.length === 0) {
     lines.push("まだあらすじがありません。", "");
@@ -36,7 +50,7 @@ export function buildSynopsisListMarkdown(
   );
 
   for (const episode of set.episodes) {
-    lines.push(`## ${headingFor(episode)}`, "");
+    lines.push(`${episodeHeading} ${headingFor(episode)}`, "");
     lines.push(episode.synopsis, "");
 
     // 作者が書いたものは、AIが作ったものと区別が付くようにする

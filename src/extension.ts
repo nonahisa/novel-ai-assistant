@@ -84,6 +84,8 @@ import {
 } from "./features/resolveConflicts";
 import { checkTypos, type TypoCheckRunResult } from "./features/checkTypos";
 import { checkNotation } from "./features/checkNotation";
+import { parseSynopsisMarkdown } from "./core/synopsisDoc";
+import { SynopsisStore } from "./core/synopsisStore";
 import { hasUnsavedChanges } from "./core/textFile";
 import { AI_ISSUES_VIEW_ID, TypoIssuePanel } from "./features/typoIssuePanel";
 import {
@@ -1289,77 +1291,90 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const work = await resolveWork(node, registry);
         if (!work) return;
 
-        // 読む場所は「設定」フォルダの中で、生成物と手書きで分かれている。
-        // 作者にフォルダを探させず、両方を並べて選ばせる
+        // 紹介文と各話あらすじは1つの文書（設定/synopsis.md）にまとめている。
+        // 中身は独立しているので、**それぞれ在るか無いかを別々に見て伝える**。
+        // 以前は在るファイルだけを並べており、片方しか無いと黙ってそれを開いて
+        // いたため「紹介文がのっていません」と見えていた（実機で発覚、2026-08-14）
         const config = await readWorkConfig(work);
         const settingsDir = workPaths(work, config).settings;
-        const candidates = [
-          {
-            name: "作品紹介文",
-            icon: "book",
-            fileName: "synopsis.md",
-            purpose:
-              "投稿サイトに載せる紹介文とキャッチコピー。作者が手で直せます。",
-            createCommand: "novelai.generateWorkBlurb",
-            createLabel: "作品紹介文を作る",
-          },
-          {
-            name: "各話あらすじ",
-            icon: "list-ordered",
-            fileName: "synopses.md",
-            purpose: "話数順に並べた読み物。話ごとの筋を通して確かめられます。",
-            createCommand: "novelai.generateSynopses",
-            createLabel: "各話あらすじを作る",
-          },
-        ];
+        const file = path.join(settingsDir, "synopsis.md");
 
-        // **無いものも必ず並べる。** 以前は在るものだけを出しており、
-        // 片方しか無いと黙ってそれを開いていた。作者からは
-        // 「紹介文がのっていません」と見え、実は作られていないだけ、
-        // という状態に気づけなかった（実機で発覚、2026-08-14）
-        const items = [];
-        for (const candidate of candidates) {
-          const file = path.join(settingsDir, candidate.fileName);
-          const exists = await pathExists(file);
+        let hasBlurb = false;
+        try {
+          const bytes = await vscode.workspace.fs.readFile(
+            vscode.Uri.file(file)
+          );
+          hasBlurb = Boolean(
+            parseSynopsisMarkdown(new TextDecoder().decode(bytes)).blurb.trim()
+          );
+        } catch {
+          hasBlurb = false;
+        }
+
+        let hasEpisodes = false;
+        try {
+          hasEpisodes =
+            (await new SynopsisStore(work).load()).episodes.length > 0;
+        } catch {
+          hasEpisodes = false;
+        }
+
+        type ViewerItem = vscode.QuickPickItem & {
+          run: () => Thenable<unknown>;
+        };
+        const items: ViewerItem[] = [];
+
+        if (hasBlurb || hasEpisodes) {
+          const contains = [
+            hasBlurb ? "作品紹介文" : "",
+            hasEpisodes ? "各話あらすじ" : "",
+          ].filter(Boolean);
           items.push({
-            name: candidate.name,
-            label: `$(${exists ? candidate.icon : "add"}) ${candidate.name}`,
-            description: exists
-              ? candidate.fileName
-              : "まだありません（選ぶと作ります・AIを使います）",
-            detail: candidate.purpose,
-            file,
-            exists,
-            createCommand: candidate.createCommand,
+            label: "$(book) 開いて読む",
+            description: "synopsis.md",
+            detail: `${contains.join("と")}が入っています。`,
+            // Markdownはプレビューで開く。作者が読みたいのは書式の付いた状態
+            run: () =>
+              vscode.commands.executeCommand(
+                "markdown.showPreview",
+                vscode.Uri.file(file)
+              ),
           });
         }
 
-        const missing = items.filter((item) => !item.exists);
-        const placeHolder =
-          missing.length === 0
-            ? "開くものを選んでください"
-            : missing.length === items.length
-              ? "どちらもまだありません。作るものを選んでください"
-              : `${missing.map((item) => item.name).join("・")}はまだありません`;
-
-        const picked = await vscode.window.showQuickPick(items, {
-          title: `${work.title} の紹介文・あらすじ`,
-          placeHolder,
-        });
-        if (!picked) return;
-
-        if (!picked.exists) {
-          await vscode.commands.executeCommand(picked.createCommand);
-          // 作れていれば、そのまま読めるように開く。
-          // 中止された場合はファイルが無いままなので何もしない
-          if (!(await pathExists(picked.file))) return;
+        // **コマンド経由で呼ばない。** ここでは作品が決まっているのに、
+        // コマンドは引数無しだと作品選択からやり直させてしまう
+        if (!hasBlurb) {
+          items.push({
+            label: "$(add) 作品紹介文を作る",
+            description: "まだありません（AIを使います）",
+            detail:
+              "投稿サイトに載せる紹介文。案を見てから採用を決められます。",
+            run: () => generateWorkBlurb(work, aiRegistry),
+          });
+        }
+        if (!hasEpisodes) {
+          items.push({
+            label: "$(add) 各話あらすじを作る",
+            description: "まだありません（AIを使います）",
+            detail: "話ごとに150字以内のあらすじを作り、この文書へ載せます。",
+            run: () => generateSynopses(work, aiRegistry),
+          });
         }
 
-        // Markdownはプレビューで開く。作者が読みたいのは書式の付いた状態
-        await vscode.commands.executeCommand(
-          "markdown.showPreview",
-          vscode.Uri.file(picked.file)
-        );
+        const missing = [
+          hasBlurb ? "" : "作品紹介文",
+          hasEpisodes ? "" : "各話あらすじ",
+        ].filter(Boolean);
+        const picked = await vscode.window.showQuickPick(items, {
+          title: `${work.title} の紹介文・あらすじ`,
+          placeHolder:
+            missing.length === 0
+              ? "開くものを選んでください"
+              : `${missing.join("・")}はまだありません`,
+        });
+        if (!picked) return;
+        await picked.run();
       }
     )
   );

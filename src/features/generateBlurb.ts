@@ -12,6 +12,7 @@ import {
   parseSynopsisMarkdown,
   type SynopsisDoc,
 } from "../core/synopsisDoc";
+import { buildSynopsisListMarkdown } from "../core/synopsisMarkdown";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { atomicWriteFile, createManagedRecoveryPath } from "../core/atomicWrite";
 import {
@@ -105,25 +106,26 @@ export async function generateWorkBlurb(
 
   // 字数はコード側で数え直す。長すぎるものは切らずに、そのまま見せて判断させる
   const overLength = parsed.blurb.length > BLURB_MAX_CHARS;
-  const preview = await previewText(
-    `${material.workTitle} の作品紹介文（${parsed.blurb.length}字）`,
-    [
-      parsed.blurb,
-      "",
-      parsed.spoilerCheck ? `---\n伏せた要素: ${parsed.spoilerCheck}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n")
-  );
 
+  // **案を見せるのに無題のエディターを開かない。** 以前は開いて閉じていたが、
+  // 無題の文書は常に「未保存」なので、閉じる際にVS Codeが保存先を尋ね、
+  // 採用するかどうかを選んだだけの作者に保存ダイアログが出ていた
+  // （実機で発覚、2026-08-14）。400字ほどなので確認ダイアログに収まる
   const answer = await vscode.window.showInformationMessage(
-    `作品紹介文ができました（${parsed.blurb.length}字）。` +
-      (overLength ? `\n目安の${BLURB_MAX_CHARS}字を超えています。` : "") +
-      "\n採用すると 設定/synopsis.md に書き込みます。",
-    "採用",
-    "採用しない"
+    `作品紹介文ができました（${parsed.blurb.length}字）`,
+    {
+      modal: true,
+      detail: [
+        parsed.blurb,
+        parsed.spoilerCheck ? `\n伏せた要素: ${parsed.spoilerCheck}` : "",
+        overLength ? `\n目安の${BLURB_MAX_CHARS}字を超えています。` : "",
+        "\n採用すると 設定/synopsis.md に書き込みます。",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    },
+    "採用"
   );
-  await closePreview(preview);
   if (answer !== "採用") return;
 
   await writeSynopsisDoc(work, material.workTitle, (current) => ({
@@ -347,6 +349,44 @@ async function synopsisPath(work: WorkEntry): Promise<string> {
   return path.join(workPaths(work, config).settings, SYNOPSIS_FILE);
 }
 
+/**
+ * 各話あらすじの本文を組み立てる。無ければ空文字。
+ *
+ * あらすじの真実は `chapter_synopses.json` にあるので、
+ * 文書へ載せるときは毎回ここから作り直す。
+ */
+async function buildEpisodeSection(
+  work: WorkEntry,
+  workTitle: string
+): Promise<string> {
+  let set;
+  try {
+    set = await new SynopsisStore(work).load();
+  } catch {
+    // あらすじが読めなくても紹介文は書ける。載せないだけにする
+    return "";
+  }
+  if (set.episodes.length === 0) return "";
+  return buildSynopsisListMarkdown(set, {
+    workTitle,
+    headingLevel: 2,
+    includeTitle: false,
+  });
+}
+
+/**
+ * 紹介文は変えず、各話あらすじの部分だけを今の内容へ更新する。
+ *
+ * 「設定資料集を出力」から呼ぶ。あらすじを作り直したあと、
+ * 読み物の側も追随させるため。
+ */
+export async function refreshSynopsisDoc(
+  work: WorkEntry,
+  workTitle: string
+): Promise<void> {
+  await writeSynopsisDoc(work, workTitle, (current) => current);
+}
+
 async function readSynopsisDoc(work: WorkEntry): Promise<SynopsisDoc> {
   try {
     const bytes = await vscode.workspace.fs.readFile(
@@ -373,7 +413,13 @@ async function writeSynopsisDoc(
   const target = await synopsisPath(work);
   const current = await readSynopsisDoc(work);
   const next = update(current);
-  const body = buildSynopsisMarkdown(workTitle, next);
+  // 各話あらすじも同じ文書に載せる（作者の要望、2026-08-14）。
+  // 真実は chapter_synopses.json 側にあるので、書くたびに組み立て直す
+  const body = buildSynopsisMarkdown(
+    workTitle,
+    next,
+    await buildEpisodeSection(work, workTitle)
+  );
 
   await vscode.workspace.fs.createDirectory(
     vscode.Uri.file(path.dirname(target))
@@ -413,35 +459,6 @@ async function writeSynopsisDoc(
         ? `${SYNOPSIS_FILE} を保存できませんでした: ${detail} 元の内容は「${recoveryPath}」にあります。`
         : `${SYNOPSIS_FILE} を保存できませんでした: ${detail}`
     );
-  }
-}
-
-/** 採用前に中身を読んでもらうための一時表示 */
-async function previewText(
-  title: string,
-  content: string
-): Promise<vscode.TextEditor | undefined> {
-  try {
-    const document = await vscode.workspace.openTextDocument({
-      content: `${title}\n\n${content}\n`,
-      language: "markdown",
-    });
-    return await vscode.window.showTextDocument(document, { preview: true });
-  } catch {
-    return undefined;
-  }
-}
-
-async function closePreview(editor: vscode.TextEditor | undefined): Promise<void> {
-  if (!editor) return;
-  try {
-    await vscode.window.showTextDocument(editor.document, {
-      preview: true,
-      preserveFocus: false,
-    });
-    await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
-  } catch {
-    // 閉じられなくても実害は無い
   }
 }
 

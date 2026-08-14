@@ -21,7 +21,7 @@ import {
 import { CustomFieldStore } from "../core/customFieldStore";
 import { SynopsisStore } from "../core/synopsisStore";
 import { emptySynopsisSet } from "../models/synopsis";
-import { buildSynopsisListMarkdown } from "../core/synopsisMarkdown";
+import { refreshSynopsisDoc } from "./generateBlurb";
 import { buildSchemaFiles, SCHEMA_DIR } from "../core/settingsSchema";
 import { logFailure } from "../core/logger";
 
@@ -92,6 +92,15 @@ async function isAuthorWritten(target: string): Promise<boolean> {
     ) {
       return false;
     }
+    return false;
+  }
+}
+
+async function fileExists(target: string): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(vscode.Uri.file(target));
+    return true;
+  } catch {
     return false;
   }
 }
@@ -219,16 +228,6 @@ export async function generateSettingsDocs(
       content: buildWorldMarkdown(loadedWorld.records, markdownOptions),
       hasContent: loadedWorld.records.length > 0,
     },
-    {
-      // あらすじはJSONで持っているが、そのままでは作者が読めない。
-      // 通して読む（前の話から筋が繋がっているかを確かめる）ものなので、
-      // 話数順に並べた1つの文書として書き出す
-      kind: "synopses",
-      fileName: "synopses.md",
-      label: "各話あらすじ",
-      content: buildSynopsisListMarkdown(synopses, markdownOptions),
-      hasContent: synopses.episodes.length > 0,
-    },
   ];
 
   // 種別を絞られていれば、その種別だけを書き出す
@@ -245,6 +244,39 @@ export async function generateSettingsDocs(
   await writeSchemaFiles(settingsDir, work.title);
 
   const written: string[] = [];
+  /**
+   * 各話あらすじは `synopsis.md`（作品紹介文と同じ文書）へ載せる。
+   *
+   * **この文書だけは、下の書き出しループに任せられない。** ループは
+   * 「全体を生成物として書き直す」前提で、作者が書いたと見えるファイルは
+   * 触らない。ところがこの文書には作者の紹介文が含まれるので、その判定に
+   * かかると永久に更新されなくなる。紹介文を残して あらすじ の部分だけを
+   * 差し替える専用の書き手（`refreshSynopsisDoc`）へ回す。
+   */
+  const wantsSynopses = !options.kinds || options.kinds.includes("synopses");
+  if (wantsSynopses && synopses.episodes.length > 0) {
+    try {
+      await refreshSynopsisDoc(work, work.title);
+      written.push("各話あらすじ");
+    } catch (error) {
+      await vscode.window.showErrorMessage(
+        "各話あらすじを保存できませんでした。" +
+          (error instanceof Error ? error.message : String(error))
+      );
+      return;
+    }
+
+    // 統合前に作られた synopses.md が残っていると、古い内容を最新だと
+    // 思って読んでしまう。消すのは作者の判断なので、知らせるだけにする
+    const retired = path.join(settingsDir, "synopses.md");
+    if (!options.silent && (await fileExists(retired))) {
+      void vscode.window.showInformationMessage(
+        "各話あらすじは 設定/synopsis.md へまとめました。" +
+          "古い 設定/synopses.md はもう更新されません。不要なら削除してください。"
+      );
+    }
+  }
+
   const writtenFiles: string[] = [];
   const skipped: string[] = [];
   /** 作者が書いたと判断して触らなかったファイル */

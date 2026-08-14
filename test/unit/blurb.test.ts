@@ -64,6 +64,45 @@ describe("synopsis.md の組み立てと読み取り", () => {
     expect(doc.blurb).toContain("作者が自由に書いたメモ");
     expect(doc.blurb).toContain("箇条書き");
   });
+
+  test("各話あらすじは紹介文の下に載せる", () => {
+    const md = buildSynopsisMarkdown(
+      "作品",
+      { catchphrase: null, blurb: "紹介文。" },
+      "### 第1話\n\n灯が幽霊になる。"
+    );
+
+    expect(md).toContain("紹介文。");
+    expect(md).toContain("## 各話あらすじ");
+    expect(md.indexOf("紹介文。")).toBeLessThan(md.indexOf("## 各話あらすじ"));
+  });
+
+  test("あらすじが無ければ見出しごと出さない", () => {
+    const md = buildSynopsisMarkdown("作品", {
+      catchphrase: null,
+      blurb: "紹介文。",
+    });
+
+    expect(md).not.toContain("## 各話あらすじ");
+  });
+
+  test("読み戻してもあらすじを紹介文に取り込まない（二重に積もらせない）", () => {
+    // 書くたびに あらすじ を紹介文へ吸収すると、保存のたびに文書が
+    // ふくらみ、最後には紹介文がどれか分からなくなる
+    const doc = { catchphrase: "コピー", blurb: "紹介文。" };
+    const first = buildSynopsisMarkdown("作品", doc, "### 第1話\n\nあらすじ本文。");
+
+    const readBack = parseSynopsisMarkdown(first);
+    expect(readBack).toEqual(doc);
+
+    // もう一度組み立てても同じ文書になる
+    const second = buildSynopsisMarkdown(
+      "作品",
+      readBack,
+      "### 第1話\n\nあらすじ本文。"
+    );
+    expect(second).toBe(first);
+  });
 });
 
 describe("応答の読み取り", () => {
