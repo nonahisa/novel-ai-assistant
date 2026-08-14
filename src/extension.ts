@@ -306,6 +306,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // 最後に開いていた本文を覚えておく
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       workChatPanel.trackEditor(editor);
+    }),
+    // アイコンを増やすと、同じ絵柄が並んで何のアイコンか分からなくなる
+    // （実機で指摘、2026-08-15）。左サイドバーの中に置き、
+    // メニューと本文の右クリックから開く形にした
+    vscode.commands.registerCommand("novelai.openChat", async () => {
+      // 呼ぶ前に、今開いている本文を確実に覚えさせる。
+      // このコマンド自体はエディターのフォーカスを奪わないが、
+      // パネルを開いた時点で activeTextEditor は取れなくなる
+      workChatPanel.trackEditor(vscode.window.activeTextEditor);
+      await vscode.commands.executeCommand(`${WORK_CHAT_VIEW_ID}.focus`);
     })
   );
 

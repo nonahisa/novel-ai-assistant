@@ -188,6 +188,7 @@ describe("AIの印", () => {
         "novelai.generatePlot",
         "novelai.generateSynopses",
         "novelai.generateWorkBlurb",
+        "novelai.openChat",
       ].sort()
     );
   });

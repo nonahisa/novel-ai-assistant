@@ -21,11 +21,6 @@
           "id": "novelai",
           "title": "小説執筆",
           "icon": "media/icon.svg"
-        },
-        {
-          "id": "novelaiChat",
-          "title": "AIに相談",
-          "icon": "media/icon.svg"
         }
       ],
       "panel": [
@@ -45,19 +40,18 @@
         {
           "id": "novelai.actions",
           "name": "操作メニュー"
+        },
+        {
+          "id": "novelai.chatView",
+          "name": "AIに相談",
+          "type": "webview",
+          "visibility": "collapsed"
         }
       ],
       "novelaiIssues": [
         {
           "id": "novelai.aiIssuesView",
           "name": "誤字脱字",
-          "type": "webview"
-        }
-      ],
-      "novelaiChat": [
-        {
-          "id": "novelai.chatView",
-          "name": "AIに相談",
           "type": "webview"
         }
       ]
@@ -97,6 +91,12 @@
         "title": "本文からプロットを起こす",
         "category": "小説執筆",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "novelai.openChat",
+        "title": "AIに相談する",
+        "category": "小説執筆",
+        "icon": "$(comment-discussion)"
       },
       {
         "command": "novelai.refresh",
@@ -456,6 +456,11 @@
       "editor/context": [
         {
           "command": "novelai.showSettingsForTerm",
+          "when": "resourceExtname == .txt || resourceExtname == .md",
+          "group": "navigation"
+        },
+        {
+          "command": "novelai.openChat",
           "when": "resourceExtname == .txt || resourceExtname == .md",
           "group": "navigation"
         }

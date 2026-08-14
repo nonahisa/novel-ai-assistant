@@ -215,6 +215,22 @@ export const ACTION_TREE: readonly ActionGroup[] = [
     entries: [
       {
         kind: "action",
+        command: "novelai.openChat",
+        label: "AIに相談する",
+        icon: "comment-discussion",
+        // 作品のファイルを開いていないと材料が無く、
+        // 「作品のファイルを開いてください」としか答えられない
+        requiresWork: true,
+        usesAI: true,
+        detail:
+          "いま開いているファイルについて、日本語で相談できます。" +
+          "本文でもプロットでも設定資料でも構いません。" +
+          "**範囲を選んでから聞くと、そこについての相談として扱います。**" +
+          "返事には次の一手の選択肢が付き、押すだけで話を進められます。" +
+          "AIが原稿や設定を書き換えることはありません。",
+      },
+      {
+        kind: "action",
         command: "novelai.createPlot",
         label: "プロットをつくる",
         icon: "list-tree",
