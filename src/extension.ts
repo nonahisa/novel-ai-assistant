@@ -1295,48 +1295,65 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const settingsDir = workPaths(work, config).settings;
         const candidates = [
           {
-            label: "$(book) 作品紹介文",
-            description: "synopsis.md",
-            detail:
+            name: "作品紹介文",
+            icon: "book",
+            fileName: "synopsis.md",
+            purpose:
               "投稿サイトに載せる紹介文とキャッチコピー。作者が手で直せます。",
-            file: path.join(settingsDir, "synopsis.md"),
+            createCommand: "novelai.generateWorkBlurb",
+            createLabel: "作品紹介文を作る",
           },
           {
-            label: "$(list-ordered) 各話あらすじ",
-            description: "synopses.md",
-            detail:
-              "話数順に並べた読み物。「設定資料集を出力」で作り直されます。",
-            file: path.join(settingsDir, "synopses.md"),
+            name: "各話あらすじ",
+            icon: "list-ordered",
+            fileName: "synopses.md",
+            purpose: "話数順に並べた読み物。話ごとの筋を通して確かめられます。",
+            createCommand: "novelai.generateSynopses",
+            createLabel: "各話あらすじを作る",
           },
         ];
 
-        const available: typeof candidates = [];
+        // **無いものも必ず並べる。** 以前は在るものだけを出しており、
+        // 片方しか無いと黙ってそれを開いていた。作者からは
+        // 「紹介文がのっていません」と見え、実は作られていないだけ、
+        // という状態に気づけなかった（実機で発覚、2026-08-14）
+        const items = [];
         for (const candidate of candidates) {
-          if (await pathExists(candidate.file)) available.push(candidate);
+          const file = path.join(settingsDir, candidate.fileName);
+          const exists = await pathExists(file);
+          items.push({
+            name: candidate.name,
+            label: `$(${exists ? candidate.icon : "add"}) ${candidate.name}`,
+            description: exists
+              ? candidate.fileName
+              : "まだありません（選ぶと作ります・AIを使います）",
+            detail: candidate.purpose,
+            file,
+            exists,
+            createCommand: candidate.createCommand,
+          });
         }
 
-        if (available.length === 0) {
-          const action = await vscode.window.showInformationMessage(
-            "まだ紹介文もあらすじもありません。",
-            "各話あらすじを作る",
-            "作品紹介文を作る"
-          );
-          if (action === "各話あらすじを作る") {
-            await vscode.commands.executeCommand("novelai.generateSynopses");
-          } else if (action === "作品紹介文を作る") {
-            await vscode.commands.executeCommand("novelai.generateWorkBlurb");
-          }
-          return;
-        }
+        const missing = items.filter((item) => !item.exists);
+        const placeHolder =
+          missing.length === 0
+            ? "開くものを選んでください"
+            : missing.length === items.length
+              ? "どちらもまだありません。作るものを選んでください"
+              : `${missing.map((item) => item.name).join("・")}はまだありません`;
 
-        const picked =
-          available.length === 1
-            ? available[0]
-            : await vscode.window.showQuickPick(available, {
-                title: `${work.title} の紹介文・あらすじ`,
-                placeHolder: "開くものを選んでください",
-              });
+        const picked = await vscode.window.showQuickPick(items, {
+          title: `${work.title} の紹介文・あらすじ`,
+          placeHolder,
+        });
         if (!picked) return;
+
+        if (!picked.exists) {
+          await vscode.commands.executeCommand(picked.createCommand);
+          // 作れていれば、そのまま読めるように開く。
+          // 中止された場合はファイルが無いままなので何もしない
+          if (!(await pathExists(picked.file))) return;
+        }
 
         // Markdownはプレビューで開く。作者が読みたいのは書式の付いた状態
         await vscode.commands.executeCommand(
