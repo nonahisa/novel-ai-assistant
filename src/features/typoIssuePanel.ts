@@ -45,6 +45,8 @@ export interface TypoIssueViewItem {
 type OutgoingMessage = {
   type: "issues";
   workTitle: string;
+  /** パネルの見出し。誤字脱字か表記ゆれかで変わる */
+  category: string;
   items: TypoIssueViewItem[];
 };
 
@@ -58,6 +60,7 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private work: WorkEntry | undefined;
   private items: TypoIssueViewItem[] = [];
+  private category = "誤字脱字";
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
@@ -78,8 +81,13 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
   }
 
   /** `checkTypos` の結果を差し替えて表示する */
-  showResults(work: WorkEntry, issues: TypoCheckIssue[]): void {
+  showResults(
+    work: WorkEntry,
+    issues: TypoCheckIssue[],
+    category = "誤字脱字"
+  ): void {
     this.work = work;
+    this.category = category;
     this.items = issues.map((issue, index) => ({
       id: `${issue.chunkHash}:${issue.line}:${index}`,
       filePath: issue.filePath,
@@ -103,6 +111,7 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
     const message: OutgoingMessage = {
       type: "issues",
       workTitle: this.work?.title ?? "",
+      category: this.category,
       items: this.items,
     };
     void this.view.webview.postMessage(message);
@@ -188,7 +197,7 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
         id,
         "failed",
         "本文が変更されているため、この指摘の位置を特定できませんでした。" +
-          "もう一度「誤字脱字を検知」をやり直してください。"
+          `もう一度「${this.category}を検知」をやり直してください。`
       );
       return;
     }

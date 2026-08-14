@@ -102,12 +102,12 @@ body.show-low .issue.low { display: flex; }
 </head>
 <body>
 <div id="toolbar">
-  <span class="title">誤字脱字</span>
+  <span class="title" id="category">誤字脱字</span>
   <span class="count" id="count">0件</span>
   <label><input type="checkbox" id="showLow"> 確信度が低いものも表示</label>
   <button class="secondary" id="applyAll">表示中をまとめて適用</button>
 </div>
-<div id="empty">まだ検知結果がありません。「誤字脱字を検知」を実行してください。</div>
+<div id="empty">まだ検知結果がありません。「誤字脱字を検知」または「表記ゆれを検知」を実行してください。</div>
 <div id="list"></div>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
@@ -189,6 +189,8 @@ function renderItem(item) {
 window.addEventListener('message', (event) => {
   const message = event.data;
   if (message.type === 'issues') {
+    // 見出しは検知の種類で変わる（誤字脱字／表記ゆれ）
+    document.getElementById('category').textContent = message.category || '誤字脱字';
     render(message.workTitle, message.items);
   }
 });

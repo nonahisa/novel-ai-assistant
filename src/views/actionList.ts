@@ -232,6 +232,17 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "指摘は下段の「AI指摘」パネルに出て、内容を確認してから" +
               "1件ずつ適用・無視を選べます。自動では書き換えません。",
           },
+          {
+            kind: "action",
+            command: "novelai.checkNotation",
+            label: "表記ゆれを検知",
+            icon: "symbol-text",
+            requiresWork: true,
+            detail:
+              "「良い／よい」のように、同じ語が2通りの書き方で使われている箇所を" +
+              "作品全体から探します。どちらに揃えるかは組ごとに作者が選びます。" +
+              "AIは使いません。",
+          },
         ],
       },
       {

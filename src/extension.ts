@@ -83,6 +83,7 @@ import {
   resolveWorkConflicts,
 } from "./features/resolveConflicts";
 import { checkTypos, type TypoCheckRunResult } from "./features/checkTypos";
+import { checkNotation } from "./features/checkNotation";
 import { hasUnsavedChanges } from "./core/textFile";
 import { AI_ISSUES_VIEW_ID, TypoIssuePanel } from "./features/typoIssuePanel";
 import {
@@ -1109,6 +1110,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         typoIssuePanel.showResults(work, result.issues);
         reportTypoCheckResult("誤字脱字検知", result);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.checkNotation",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+
+        // 未保存のまま読むと、画面と違う本文を数えてしまう
+        if (!(await saveDirtyDocumentsBeforeExtraction(work, "表記ゆれの検知")))
+          return;
+
+        const result = await checkNotation(work);
+        if (!result || result.cancelled) return;
+
+        typoIssuePanel.showResults(work, result.issues, "表記ゆれ");
+
+        if (result.groupCount === 0) return;
+        const parts = [`${result.groupCount}組を検出`];
+        if (result.unifiedCount > 0) {
+          parts.push(`${result.unifiedCount}組を揃える`);
+        }
+        parts.push(`指摘 ${result.issues.length}件`);
+        if (result.dismissedCount > 0) {
+          parts.push(`無視済み ${result.dismissedCount}件を除外`);
+        }
+        vscode.window.showInformationMessage(
+          `表記ゆれ検知が完了しました。${parts.join(" / ")}`
+        );
       }
     )
   );

@@ -187,6 +187,12 @@
         "icon": "$(search-fuzzy)"
       },
       {
+        "command": "novelai.checkNotation",
+        "title": "表記ゆれを検知",
+        "category": "小説執筆",
+        "icon": "$(symbol-text)"
+      },
+      {
         "command": "novelai.checkTyposForFile",
         "title": "この話の誤字脱字を検知",
         "category": "小説執筆",
