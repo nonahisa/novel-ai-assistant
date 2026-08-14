@@ -185,6 +185,7 @@ describe("AIの印", () => {
         "novelai.extractOrganizationsOnly",
         "novelai.extractWorldOnly",
         "novelai.generateCatchphrases",
+        "novelai.generatePlot",
         "novelai.generateSynopses",
         "novelai.generateWorkBlurb",
       ].sort()

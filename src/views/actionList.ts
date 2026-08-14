@@ -225,6 +225,20 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           "書きかけのプロットがあれば、そのまま開くだけです。",
       },
       {
+        kind: "action",
+        command: "novelai.generatePlot",
+        label: "本文からプロットを起こす",
+        icon: "sparkle",
+        requiresWork: true,
+        usesAI: true,
+        detail:
+          "既に書いた本文から、ログライン・テーマ・世界観・あらすじなどを" +
+          "組み立て直して プロットへ書き込みます。" +
+          "**作者が既に書いた項目は、確認せずに書き換えません**（空の項目だけ埋め、" +
+          "書かれている項目は置き換えるかを選べます）。" +
+          "各話あらすじを材料にするため、先にあらすじを作っておいてください。",
+      },
+      {
         kind: "section",
         label: "校正・校閲",
         icon: "search-fuzzy",

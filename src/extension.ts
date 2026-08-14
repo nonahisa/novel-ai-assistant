@@ -84,6 +84,7 @@ import {
 } from "./features/resolveConflicts";
 import { checkTypos, type TypoCheckRunResult } from "./features/checkTypos";
 import { checkNotation } from "./features/checkNotation";
+import { generatePlot } from "./features/generatePlot";
 import { parseSynopsisMarkdown } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
 import { hasUnsavedChanges } from "./core/textFile";
@@ -599,6 +600,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const work = await resolveWork(node, registry);
         if (!work) return;
         await openPlotFile(work);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.generatePlot",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        // 未保存のまま読むと、画面と違う本文からプロットを組み立ててしまう
+        if (!(await saveDirtyDocumentsBeforeExtraction(work, "プロットの逆算")))
+          return;
+        await generatePlot(work, aiRegistry);
       }
     )
   );

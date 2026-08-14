@@ -81,6 +81,12 @@
         "icon": "$(list-tree)"
       },
       {
+        "command": "novelai.generatePlot",
+        "title": "本文からプロットを起こす",
+        "category": "小説執筆",
+        "icon": "$(sparkle)"
+      },
+      {
         "command": "novelai.refresh",
         "title": "再読み込み",
         "category": "小説執筆",
