@@ -79,6 +79,8 @@ src/
 │  ├─ charCount.ts       文字数計測
 │  ├─ episodeLabel.ts    話数の見出しとタイトル（一覧と統計で共用）
 │  ├─ plotTemplate.ts    プロットの初期テンプレート
+│  ├─ gitHistory.ts      過去の版の一覧と復元（履歴は消さない）
+│  ├─ gitClone.ts        GitHubから作品を取り寄せる
 │  ├─ writingStats.ts    執筆量の集計（日次・週次・月次・年次、目標）
 │  ├─ writingStatsStore.ts 執筆量の記録（端末ごとに1ファイル）
 │  ├─ episodeCharTable.ts 話ごとの文字数一覧（長さの偏り）
@@ -130,13 +132,17 @@ src/
 │  ├─ manageCustomFields.ts 追加項目の管理
 │  ├─ generateSettingsDocs.ts / exportImeDictionary.ts
 │  ├─ startWork.ts          新規作品の始め方（プロット／本文）の選択
+│  ├─ gitRestore.ts         過去の版に戻す
+│  ├─ addWorkFromGithub.ts  GitHubから作品を追加
+│  ├─ setupOllama.ts        Ollamaの導入・起動・モデル取得の案内
 │  ├─ writingProgress.ts    保存時の執筆量の記録・ステータスバー
 │  ├─ writingStatsPanel.ts  執筆量パネル（グラフ・話ごとの一覧）
 │  └─ selectOllamaExecutable.ts
 │
 └─ views/                VSCode UI
    ├─ workTree.ts          作品一覧
-   ├─ actionList.ts        操作メニュー
+   ├─ actionList.ts        操作メニュー（分類→小分類→操作の3階層）
+   ├─ actionDecorations.ts 操作メニュー末尾の印（AI・未反映の件数）
    ├─ settingsPanelHtml.ts パネルのWebView
    ├─ writingStatsPanelHtml.ts 執筆量パネル（グラフは自前のSVG）
    ├─ termHighlight.ts     用語ハイライト

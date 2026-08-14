@@ -398,7 +398,7 @@ export async function writeWorkConfig(
  * @param options.withPlot プロットのテンプレート（`設定/plot.md`）を置くか。
  *   **書きながら考える作者もいる。** 使わないテンプレートを置くと、
  *   見出しだけのファイルが設定資料に混ざり、紹介文を作るときの材料にも
- *   空のプロットとして渡ってしまう。あとから「プロットを作る」で足せる。
+ *   空のプロットとして渡ってしまう。あとから「プロットをつくる」で足せる。
  */
 export async function scaffoldWorkFolder(
   folderPath: string,

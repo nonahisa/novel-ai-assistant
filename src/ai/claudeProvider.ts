@@ -77,7 +77,7 @@ export class ClaudeProvider implements ApiKeyProvider {
     const apiKey = await this.getApiKey();
     if (!apiKey) {
       throw new AIError(
-        "ClaudeのAPIキーが設定されていません。「AIの設定」から登録してください。",
+        "ClaudeのAPIキーが設定されていません。「AI設定」から登録してください。",
         "authentication_failed"
       );
     }

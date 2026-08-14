@@ -113,7 +113,7 @@ export class GeminiProvider implements ApiKeyProvider {
     const apiKey = await this.getApiKey();
     if (!apiKey) {
       throw new AIError(
-        "GeminiのAPIキーが設定されていません。「AIの設定」から登録してください。",
+        "GeminiのAPIキーが設定されていません。「AI設定」から登録してください。",
         "authentication_failed"
       );
     }

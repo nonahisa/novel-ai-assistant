@@ -127,6 +127,17 @@ export const Uri = {
   file: (fsPath: string) => ({
     fsPath: fsPath.replace(/^[A-Z]:/, (drive) => drive.toLowerCase()),
   }),
+  // 操作メニューの印は、実在しないURIを目印に使う（views/actionList.ts）
+  from: (parts: { scheme: string; path?: string }) => ({
+    scheme: parts.scheme,
+    path: parts.path ?? "",
+    fsPath: parts.path ?? "",
+  }),
+  parse: (value: string) => ({
+    scheme: value.split(":")[0] ?? "",
+    path: value,
+    fsPath: value,
+  }),
 };
 
 export enum FileType {

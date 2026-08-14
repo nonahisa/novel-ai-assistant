@@ -58,7 +58,7 @@ export async function exportImeDictionary(work: WorkEntry): Promise<void> {
 
   if (built.entries.length === 0) {
     vscode.window.showInformationMessage(
-      "辞書にできる語がありません。先に「設定資料を抽出」を実行してください。"
+      "辞書にできる語がありません。先に「まとめて生成」で設定資料を作ってください。"
     );
     return;
   }

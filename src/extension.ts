@@ -29,6 +29,7 @@ import {
   chooseWorkStartMode,
   createFirstEpisodeFile,
   openPlotFile,
+  type WorkStartMode,
 } from "./features/startWork";
 import { generateSettingsDocs } from "./features/generateSettingsDocs";
 import { generateSynopses } from "./features/generateSynopses";
@@ -45,7 +46,12 @@ import { applyPendingCharacterUpdates } from "./features/applyPendingUpdates";
 import { exportImeDictionary } from "./features/exportImeDictionary";
 import { manageCustomFields } from "./features/manageCustomFields";
 import { TermHighlighter } from "./views/termHighlight";
-import { ActionListProvider } from "./views/actionList";
+import { ActionListProvider, nodeKey } from "./views/actionList";
+import { ActionDecorationProvider } from "./views/actionDecorations";
+import { PendingUpdateStore } from "./core/pendingUpdates";
+import { addWorkFromGithub } from "./features/addWorkFromGithub";
+import { restoreFromHistory } from "./features/gitRestore";
+import { setupOllama } from "./features/setupOllama";
 import {
   registerProgressCancelCommand,
   withProgress,
@@ -65,6 +71,7 @@ import {
   describeSyncBadge,
   showGitSyncActions,
 } from "./features/gitSync";
+import { nextSetupStep, runSetupStep } from "./features/gitOnboarding";
 import { resolveDeviceId } from "./core/device";
 import {
   SessionStore,
@@ -218,12 +225,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push(treeView);
 
+  // 操作の末尾に出す印（「AI」と未反映の件数）。
+  // 件数は全作品を合わせて数える。作品を選ばずにメニューを見るため、
+  // 「どこかに溜まっている」ことが分かればよい
+  const actionDecorations = new ActionDecorationProvider(async (counter) => {
+    if (counter !== "pendingUpdates") return 0;
+    let total = 0;
+    for (const work of registry.list()) {
+      try {
+        total += await new PendingUpdateStore(work).count();
+      } catch {
+        // 読めない作品は0件として扱う。印が出ないだけで実害はない
+      }
+    }
+    return total;
+  });
+  context.subscriptions.push(
+    actionDecorations,
+    vscode.window.registerFileDecorationProvider(actionDecorations)
+  );
+
   // コマンドパレットにしかない操作は作者が存在に気づけないため、分類して一覧に出す。
   // 分類の開閉は作品をまたいで同じでよいので globalState に置く
-  const actionProvider = new ActionListProvider(registry, {
-    get: () => context.globalState.get<string[]>(ACTION_GROUPS_KEY, []),
-    set: (groups) => void context.globalState.update(ACTION_GROUPS_KEY, groups),
-  });
+  const actionProvider = new ActionListProvider(
+    registry,
+    {
+      get: () => context.globalState.get<string[]>(ACTION_GROUPS_KEY, []),
+      set: (groups) => void context.globalState.update(ACTION_GROUPS_KEY, groups),
+    },
+    (counter) => actionDecorations.countOf(counter)
+  );
   const actionView = vscode.window.createTreeView("novelai.actions", {
     treeDataProvider: actionProvider,
   });
@@ -231,16 +262,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // VS Code は collapsibleState を作った時点の値でしか描かないため、
   // こちら側で覚えておかないと再読み込みで既定へ戻る
   actionView.onDidExpandElement((event) => {
-    if (event.element.type === "group") {
-      actionProvider.setExpanded(event.element.group, true);
+    if (event.element.type !== "action") {
+      actionProvider.setExpanded(nodeKey(event.element), true);
     }
   });
   actionView.onDidCollapseElement((event) => {
-    if (event.element.type === "group") {
-      actionProvider.setExpanded(event.element.group, false);
+    if (event.element.type !== "action") {
+      actionProvider.setExpanded(nodeKey(event.element), false);
     }
   });
   context.subscriptions.push(actionView);
+
+  /** 未反映の件数を数え直す。抽出・反映のあとに呼ぶ */
+  const refreshActionBadges = (): void => {
+    void actionDecorations.refresh().then(() => actionProvider.refresh());
+  };
+  // 起動直後にも数える。前回の抽出で溜まったままのことがある
+  refreshActionBadges();
+  registry.onDidChange(() => refreshActionBadges());
 
   // AI指摘パネル（下段・出力やデバッグコンソールと同じ場所）。
   // 誤字脱字検知の結果をここへ表示する。設定資料パネルと違い
@@ -476,54 +515,79 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.createWork", async () => {
-      const parent = await vscode.window.showOpenDialog({
-        canSelectFolders: true,
-        canSelectFiles: false,
-        canSelectMany: false,
-        openLabel: "ここに作品フォルダを作成",
-        title: "作品フォルダを作成する場所を選択",
-      });
-      if (!parent || parent.length === 0) return;
-
-      const title = await vscode.window.showInputBox({
-        prompt: "作品名を入力してください（フォルダ名になります）",
-        validateInput: (v) => {
-          const t = v.trim();
-          if (t.length === 0) return "作品名を入力してください";
-          if (/[/\\:*?"<>|]/.test(t)) return "フォルダ名に使えない文字が含まれています";
-          return null;
-        },
-      });
-      if (!title) return;
-
-      // 始め方はフォルダーを作る前に訊く。作ったあとで取り消されると、
-      // 中身の無い作品フォルダーだけが残る
-      const mode = await chooseWorkStartMode(title.trim());
-      if (!mode) return;
-
-      const folderPath = path.join(parent[0].fsPath, title.trim());
-      try {
-        await scaffoldWorkFolder(folderPath, title.trim(), {
-          withPlot: mode === "plot",
-        });
-      } catch (e) {
-        vscode.window.showErrorMessage(
-          `作品フォルダの作成に失敗しました: ${String(e)}`
-        );
-        return;
-      }
-
-      const entry = await registry.add(folderPath, title.trim());
-      if (!entry) return;
-
-      treeProvider.refresh();
-      if (mode === "plot") {
-        await openPlotFile(entry);
-      } else {
-        await createFirstEpisodeFile(entry);
-      }
+      await createNewWork();
     })
   );
+
+  // 操作メニューからは始め方を選んだ状態で入る。
+  // 「プロットから開始」を押した作者に、もう一度「どちらから始めますか」と
+  // 訊き返すのは失礼である
+  context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.createWorkWithPlot", async () => {
+      await createNewWork("plot");
+    }),
+    vscode.commands.registerCommand(
+      "novelai.createWorkFromManuscript",
+      async () => {
+        await createNewWork("manuscript");
+      }
+    )
+  );
+
+  /**
+   * 新規作品を作る。
+   *
+   * @param mode 始め方。渡されなければ作者に選んでもらう
+   *   （コマンドパレットの「新規作品を作成」から来た場合）
+   */
+  async function createNewWork(mode?: WorkStartMode): Promise<void> {
+    const parent = await vscode.window.showOpenDialog({
+      canSelectFolders: true,
+      canSelectFiles: false,
+      canSelectMany: false,
+      openLabel: "ここに作品フォルダを作成",
+      title: "作品フォルダを作成する場所を選択",
+    });
+    if (!parent || parent.length === 0) return;
+
+    const title = await vscode.window.showInputBox({
+      prompt: "作品名を入力してください（フォルダ名になります）",
+      validateInput: (v) => {
+        const t = v.trim();
+        if (t.length === 0) return "作品名を入力してください";
+        if (/[/\\:*?"<>|]/.test(t)) return "フォルダ名に使えない文字が含まれています";
+        return null;
+      },
+    });
+    if (!title) return;
+
+    // 始め方はフォルダーを作る前に訊く。作ったあとで取り消されると、
+    // 中身の無い作品フォルダーだけが残る
+    const startMode = mode ?? (await chooseWorkStartMode(title.trim()));
+    if (!startMode) return;
+
+    const folderPath = path.join(parent[0].fsPath, title.trim());
+    try {
+      await scaffoldWorkFolder(folderPath, title.trim(), {
+        withPlot: startMode === "plot",
+      });
+    } catch (e) {
+      vscode.window.showErrorMessage(
+        `作品フォルダの作成に失敗しました: ${String(e)}`
+      );
+      return;
+    }
+
+    const entry = await registry.add(folderPath, title.trim());
+    if (!entry) return;
+
+    treeProvider.refresh();
+    if (startMode === "plot") {
+      await openPlotFile(entry);
+    } else {
+      await createFirstEpisodeFile(entry);
+    }
+  }
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
@@ -534,6 +598,73 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await openPlotFile(work);
       }
     )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.addWorkFromGithub", async () => {
+      const entry = await addWorkFromGithub(registry);
+      if (!entry) return;
+      treeProvider.refresh();
+      // 取り寄せた作品の設定が用語ハイライトの材料になる
+      highlighter.invalidate();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.gitRestore",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await restoreFromHistory(work);
+        // 原稿が入れ替わったので、文字数もハイライトも作り直す
+        treeProvider.refresh(work.id);
+        highlighter.invalidate();
+        refreshActionBadges();
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.setupGithub",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        // 状態を見てから、足りない一手だけを案内する（設計書5.5.4）
+        const status = await gitSync.refresh(work, {
+          fetch: false,
+          notify: false,
+        });
+        const step = nextSetupStep(status);
+        if (!step) {
+          vscode.window.showInformationMessage(
+            `「${work.title}」の同期の準備はすでに整っています。${describeStatus(status)}`
+          );
+          return;
+        }
+        if (await runSetupStep(work, status)) {
+          await gitSync.refresh(work, { fetch: true, notify: false });
+        }
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.setupOllama", async () => {
+      await setupOllama(aiRegistry);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.openExtensionSettings", async () => {
+      // この拡張機能の設定だけに絞る。VS Code全体の設定を開くと、
+      // 作者は目的の項目にたどり着けない
+      await vscode.commands.executeCommand(
+        "workbench.action.openSettings",
+        "@ext:local.novel-ai-assistant"
+      );
+    })
   );
 
   context.subscriptions.push(
@@ -815,6 +946,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         treeProvider.refresh(work.id);
         // 名前や別名が変われば、本文で光る範囲も変わる
         highlighter.invalidate();
+        // 承認待ちが減ったので、操作メニューの件数を数え直す
+        refreshActionBadges();
       }
     )
   );
@@ -864,12 +997,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     )
   );
 
+  // 種別ごとの書き出し。JSONを1種類だけ直したときに、
+  // その一覧だけを作り直せるようにする
+  for (const [command, kind] of [
+    ["novelai.generateCharacterDocs", "characters"],
+    ["novelai.generateLocationDocs", "locations"],
+    ["novelai.generateAbilityDocs", "abilities"],
+    ["novelai.generateWorldDocs", "world"],
+  ] as const) {
+    context.subscriptions.push(
+      vscode.commands.registerCommand(command, async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await generateSettingsDocs(work, { kinds: [kind] });
+      })
+    );
+  }
+
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.testAI", async () => {
       const resolved = aiRegistry.resolve();
       if (!resolved) {
         vscode.window.showInformationMessage(
-          "AIが設定されていません。「AIの設定」から設定してください。"
+          "AIが設定されていません。「AI設定」から設定してください。"
         );
         return;
       }
@@ -927,6 +1077,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         const extracted = await extractCharacters(work, aiRegistry);
         treeProvider.refresh(work.id);
+        // 抽出で承認待ちが増えることがある。押さなくても気づけるよう数え直す
+        refreshActionBadges();
         // 抽出で増えた用語を本文のハイライトへ反映する。
         // 設定JSONは拡張機能が直接書くのでエディタの保存イベントが起きず、
         // ここで作り直さないと再読み込みまで古い索引のままになる

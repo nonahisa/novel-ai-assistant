@@ -1,7 +1,7 @@
 {
   "name": "novel-ai-assistant",
-  "displayName": "小説AI執筆補助",
-  "description": "小説執筆のための作品管理・文字数計測・AI支援機能",
+  "displayName": "統合小説執筆環境",
+  "description": "小説執筆のための統合環境。作品フォルダを登録して、話数ファイルを作成・管理できます。AIによる誤字脱字チェックや、あらすじ・紹介文・キャッチコピーの生成も可能です。",
   "version": "0.1.0",
   "publisher": "local",
   "private": true,
@@ -53,13 +53,13 @@
     "viewsWelcome": [
       {
         "view": "novelai.works",
-        "contents": "まだ作品が登録されていません。\n[既存フォルダを作品として登録](command:novelai.addWork)\n[新規作品を作成](command:novelai.createWork)"
+        "contents": "まだ作品が登録されていません。\n[フォルダから作品を追加](command:novelai.addWork)\n[新規作品を作成](command:novelai.createWork)\n[GitHubから作品を追加](command:novelai.addWorkFromGithub)"
       }
     ],
     "commands": [
       {
         "command": "novelai.addWork",
-        "title": "既存フォルダを作品として登録",
+        "title": "フォルダから作品を追加",
         "category": "小説執筆",
         "icon": "$(add)"
       },
@@ -76,7 +76,7 @@
       },
       {
         "command": "novelai.createPlot",
-        "title": "プロットを作る",
+        "title": "プロットをつくる",
         "category": "小説執筆",
         "icon": "$(list-tree)"
       },
@@ -105,25 +105,25 @@
       },
       {
         "command": "novelai.showWritingStats",
-        "title": "執筆量を見る",
+        "title": "執筆統計を表示",
         "category": "小説執筆",
         "icon": "$(graph-line)"
       },
       {
         "command": "novelai.showAllWorksWritingStats",
-        "title": "全作品の執筆量を見る",
+        "title": "全作品の執筆統計を表示",
         "category": "小説執筆",
         "icon": "$(graph-line)"
       },
       {
         "command": "novelai.setupAI",
-        "title": "AIの設定",
+        "title": "AI設定",
         "category": "小説執筆",
         "icon": "$(settings-gear)"
       },
       {
         "command": "novelai.testAI",
-        "title": "AIの接続を確認",
+        "title": "AI接続の確認",
         "category": "小説執筆"
       },
       {
@@ -134,7 +134,7 @@
       },
       {
         "command": "novelai.manageCustomFields",
-        "title": "人物設定の項目を増やす",
+        "title": "一覧に項目を増やす",
         "category": "小説執筆",
         "icon": "$(list-selection)"
       },
@@ -152,31 +152,31 @@
       },
       {
         "command": "novelai.unifyCharacters",
-        "title": "同一人物をまとめる",
+        "title": "重複をまとめる",
         "category": "小説執筆",
         "icon": "$(merge)"
       },
       {
         "command": "novelai.showLog",
-        "title": "ログを表示",
+        "title": "ログを開く",
         "category": "小説執筆",
         "icon": "$(output)"
       },
       {
         "command": "novelai.selectOllamaExecutable",
-        "title": "Ollamaの実行ファイルを選択",
+        "title": "Ollamaの実行ファイル位置を指定",
         "category": "小説執筆",
         "icon": "$(folder-opened)"
       },
       {
         "command": "novelai.openSettingsPanel",
-        "title": "設定資料を開く",
+        "title": "設定資料集を閲覧",
         "category": "小説執筆",
         "icon": "$(book)"
       },
       {
         "command": "novelai.extractSettings",
-        "title": "設定資料を抽出",
+        "title": "設定資料をまとめて生成",
         "category": "小説執筆",
         "icon": "$(sparkle)"
       },
@@ -200,19 +200,19 @@
       },
       {
         "command": "novelai.generateSynopses",
-        "title": "各話あらすじを作る",
+        "title": "各話あらすじを生成",
         "category": "小説執筆",
         "icon": "$(list-ordered)"
       },
       {
         "command": "novelai.openSynopsisDocs",
-        "title": "紹介文・あらすじを読む",
+        "title": "紹介文・あらすじを閲覧",
         "category": "小説執筆",
         "icon": "$(book)"
       },
       {
         "command": "novelai.generateWorkBlurb",
-        "title": "作品紹介文を作る",
+        "title": "作品紹介文を生成",
         "category": "小説執筆",
         "icon": "$(book)"
       },
@@ -230,7 +230,7 @@
       },
       {
         "command": "novelai.gitSync",
-        "title": "GitHubとの同期状態",
+        "title": "GitHubと同期",
         "category": "小説執筆",
         "icon": "$(git-branch)"
       },
@@ -248,9 +248,75 @@
       },
       {
         "command": "novelai.resolveConflicts",
-        "title": "競合を解決する",
+        "title": "競合解決",
         "category": "小説執筆",
         "icon": "$(git-merge)"
+      },
+      {
+        "command": "novelai.createWorkWithPlot",
+        "title": "新規作品を作成（プロットから）",
+        "category": "小説執筆",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "novelai.createWorkFromManuscript",
+        "title": "新規作品を作成（本文から）",
+        "category": "小説執筆",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "novelai.addWorkFromGithub",
+        "title": "GitHubから作品を追加",
+        "category": "小説執筆",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "novelai.gitRestore",
+        "title": "過去の版に戻す（復元）",
+        "category": "小説執筆",
+        "icon": "$(history)"
+      },
+      {
+        "command": "novelai.setupGithub",
+        "title": "GitHubのセットアップ",
+        "category": "小説執筆",
+        "icon": "$(github)"
+      },
+      {
+        "command": "novelai.setupOllama",
+        "title": "Ollamaのセットアップ",
+        "category": "小説執筆",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "novelai.openExtensionSettings",
+        "title": "設定管理を開く",
+        "category": "小説執筆",
+        "icon": "$(settings)"
+      },
+      {
+        "command": "novelai.generateCharacterDocs",
+        "title": "人物一覧を生成（AIを使わない）",
+        "category": "小説執筆",
+        "icon": "$(person)"
+      },
+      {
+        "command": "novelai.generateLocationDocs",
+        "title": "場所一覧を生成（AIを使わない）",
+        "category": "小説執筆",
+        "icon": "$(location)"
+      },
+      {
+        "command": "novelai.generateAbilityDocs",
+        "title": "スキル一覧を生成（AIを使わない）",
+        "category": "小説執筆",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "novelai.generateWorldDocs",
+        "title": "世界観一覧を生成（AIを使わない）",
+        "category": "小説執筆",
+        "icon": "$(globe)"
       }
     ],
     "menus": {
@@ -404,6 +470,50 @@
         {
           "command": "novelai.resolveConflicts",
           "when": "true"
+        },
+        {
+          "command": "novelai.createWorkWithPlot",
+          "when": "true"
+        },
+        {
+          "command": "novelai.createWorkFromManuscript",
+          "when": "true"
+        },
+        {
+          "command": "novelai.addWorkFromGithub",
+          "when": "true"
+        },
+        {
+          "command": "novelai.gitRestore",
+          "when": "true"
+        },
+        {
+          "command": "novelai.setupGithub",
+          "when": "true"
+        },
+        {
+          "command": "novelai.setupOllama",
+          "when": "true"
+        },
+        {
+          "command": "novelai.openExtensionSettings",
+          "when": "true"
+        },
+        {
+          "command": "novelai.generateCharacterDocs",
+          "when": "true"
+        },
+        {
+          "command": "novelai.generateLocationDocs",
+          "when": "true"
+        },
+        {
+          "command": "novelai.generateAbilityDocs",
+          "when": "true"
+        },
+        {
+          "command": "novelai.generateWorldDocs",
+          "when": "true"
         }
       ]
     },
@@ -431,7 +541,7 @@
         "novelai.stats.enabled": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "本文を保存したときに、前回からの増減をその日の執筆量として記録します。記録は作品フォルダーの `.aiwriter/stats/<環境名>.json` に残り、「執筆量を見る」で日次・週次・月次・年次のグラフになります。**環境ごとに別のファイルへ書くため、複数のPCで書いても競合しません**（読むときに合算します）。"
+          "markdownDescription": "本文を保存したときに、前回からの増減をその日の執筆量として記録します。記録は作品フォルダーの `.aiwriter/stats/<環境名>.json` に残り、「執筆統計を表示」で日次・週次・月次・年次のグラフになります。**環境ごとに別のファイルへ書くため、複数のPCで書いても競合しません**（読むときに合算します）。"
         },
         "novelai.stats.showInStatusBar": {
           "type": "boolean",

@@ -14,7 +14,7 @@ import { PLOT_FILE, readWorkConfig, workPaths } from "../core/workRegistry";
  * もう片方には最初の一歩が見えない。作るときに選んでもらう。
  *
  * 選ばなかったほうへは、あとからでも移れる。プロットは
- * 「プロットを作る」で足せるし、本文は「新規話数ファイルを追加」で作れる。
+ * 「プロットをつくる」で足せるし、本文は「新規話数ファイルを追加」で作れる。
  */
 
 export type WorkStartMode = "plot" | "manuscript";
@@ -41,7 +41,7 @@ export async function chooseWorkStartMode(
         label: "$(edit) 本文から書き始める",
         detail:
           "プロットは作りません。第1話のファイルを作って開きます。" +
-          "プロットはあとから「プロットを作る」で足せます。",
+          "プロットはあとから「プロットをつくる」で足せます。",
         mode: "manuscript" as const,
       },
     ],

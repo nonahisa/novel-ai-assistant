@@ -200,7 +200,7 @@ async function showDiffDocument(items: ReviewItem[]): Promise<void> {
     "# 反映待ちの更新",
     "",
     "この内容はまだ保存されていません。",
-    "確認したら「同一人物をまとめる」の隣の「更新分を反映」から実行してください。",
+    "確認したら「重複をまとめる」の隣の「更新分を反映」から実行してください。",
     "",
     ...items.map((item) => formatDiff(item.diff)),
   ].join("\n");

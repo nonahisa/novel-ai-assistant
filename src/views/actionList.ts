@@ -4,372 +4,596 @@ import type { WorkRegistry } from "../core/workRegistry";
 /**
  * 操作メニュー。
  *
- * コマンドパレットからしか呼べない操作は、
- * 名前を知らないと探せないため、作者は存在に気づけない。
- * かといって右クリックメニューに全部載せると項目が増えて選びにくくなる。
- * そこで、押せる操作の一覧として独立したビューに出す。
+ * コマンドパレットからしか呼べない操作は、名前を知らないと探せないため、
+ * 作者は存在に気づけない。かといって右クリックメニューに全部載せると
+ * 項目が増えて選びにくくなる。そこで、押せる操作の一覧として独立したビューに出す。
  *
- * 数が増えてきたので分類でまとめる。作者が「何をしたいか」から辿れるよう、
- * 機能の実装単位ではなく**作業の流れ**で分ける。
+ * **3階層にする（分類 → 小分類 → 操作）。** 操作が34件になり、2階層では
+ * 1つの分類に10項目以上が並んでしまう。作者が「何をしたいか」から辿れるよう、
+ * 機能の実装単位ではなく**作業の目的**で分ける（設計書6.17）。
  */
 
-/** 分類。この順に表示する */
-export type ActionGroup =
-  | "資料"
-  | "整える"
-  | "校正・校閲"
-  | "書き出す"
-  | "同期"
-  | "AI設定"
-  | "困ったとき";
+/** 件数を出す種類。何の件数かで出し分ける */
+export type ActionCounter = "pendingUpdates";
 
-// 作者自身の作業工程「プロット→執筆→推敲→校正→校閲」に合わせた並び
-export const ACTION_GROUPS: ActionGroup[] = [
-  "資料",
-  "整える",
-  "校正・校閲",
-  "書き出す",
-  "同期",
-  "AI設定",
-  "困ったとき",
-];
-
-export interface CommandAction {
+export interface ActionItem {
+  kind: "action";
   /** 実行するコマンドID */
   command: string;
   label: string;
   /** 一覧で label の右に薄字で出る補足 */
-  description: string;
+  description?: string;
   /** codicon の名前 */
   icon: string;
   /** 押したときに作品を必要とする操作か */
   requiresWork: boolean;
   /** ホバーで出す説明。何が起きるかを1文で伝える */
   detail: string;
-  group: ActionGroup;
+  /**
+   * AIを呼ぶ操作か。末尾に「AI」の印を出す。
+   *
+   * クラウドのAIは実行のたびに課金される。押す前に見分けられないと、
+   * 作者は料金の発生する操作を知らずに押すことになる。
+   */
+  usesAI?: boolean;
+  /** 末尾に件数を出す。0件のときは出さない */
+  counter?: ActionCounter;
 }
 
-const ACTIONS: readonly CommandAction[] = [
-  // ── 資料を見る・作る
-  {
-    command: "novelai.openSettingsPanel",
-    label: "設定資料を開く",
-    description: "",
-    icon: "book",
-    requiresWork: true,
-    group: "資料",
-    detail:
-      "抽出した登場人物・能力・場所・組織・世界観を一覧で見ます。" +
-      "その場で書き換えたり、AIに項目を埋めさせたり、相談したりできます。",
-  },
-  // 「設定情報を表示」（novelai.showSettingsForTerm）はここに置かない。
-  // 本文にカーソルを置いた状態で実行する操作なので、
-  // 操作メニューから押しても対象が定まらず、動かない。
-  // 本文の右クリックメニューにだけ出す（package.json の editor/context）
-  {
-    command: "novelai.createPlot",
-    label: "プロットを作る",
-    description: "AIを使わない",
-    icon: "list-tree",
-    requiresWork: true,
-    group: "資料",
-    detail:
-      "設定/plot.md を開きます。まだ無ければ、ログライン・テーマ・世界観・" +
-      "あらすじなどの見出しを用意して作ります。" +
-      "書きかけのプロットがあれば、そのまま開くだけです。",
-  },
-  {
-    command: "novelai.extractSettings",
-    label: "設定資料を抽出",
-    description: "AIを使う",
-    icon: "sparkle",
-    requiresWork: true,
-    group: "資料",
-    detail:
-      "本文をAIで解析し、登場人物・能力・場所・組織・世界観を取り出して保存します。" +
-      "続けて設定資料集も作ります。",
-  },
+export interface ActionSection {
+  kind: "section";
+  label: string;
+  icon: string;
+  items: ActionItem[];
+}
 
-  {
-    command: "novelai.manageCustomFields",
-    label: "人物設定の項目を増やす",
-    description: "AIを使わない",
-    icon: "list-selection",
-    requiresWork: true,
-    group: "資料",
-    detail:
-      "「誕生日」「身長」のように、作品に必要な項目を人物設定へ足します。" +
-      "足した項目は全員の設定資料に並びます。外しても入力済みの内容は消えません。",
-  },
+export interface ActionGroup {
+  kind: "group";
+  label: string;
+  icon: string;
+  entries: Array<ActionItem | ActionSection>;
+  /** 分類を閉じたままでも気づけるよう、中身の件数をここにも出す */
+  counter?: ActionCounter;
+}
 
+/**
+ * 操作メニューの中身。**この配列が画面の順序そのもの**である。
+ *
+ * 「AIを使う」ものには usesAI を立てる。文言ではなく印で示すのは、
+ * 一覧を眺めたときに料金の発生する操作だけが浮き上がるようにするため。
+ */
+export const ACTION_TREE: readonly ActionGroup[] = [
   {
-    command: "novelai.generateSynopses",
-    label: "各話あらすじを作る",
-    description: "AIを使う",
-    icon: "list-ordered",
-    requiresWork: true,
-    group: "資料",
-    detail:
-      "話ごとに150字以内のあらすじを作ります。" +
-      "ファイル名が数字だけの話には、15字以内のサブタイトル案も出します" +
-      "（選ぶとファイル名が変わります）。" +
-      "本文を変えていない話は作り直しません。",
-  },
-
-  {
-    command: "novelai.openSynopsisDocs",
-    label: "紹介文・あらすじを読む",
-    description: "AIを使わない",
-    icon: "book",
-    requiresWork: true,
-    group: "資料",
-    detail:
-      "作品紹介文（synopsis.md）と各話あらすじ（synopses.md）を" +
-      "プレビューで開きます。まだ無ければ、作る操作を案内します。",
-  },
-  {
-    command: "novelai.generateWorkBlurb",
-    label: "作品紹介文を作る",
-    description: "AIを使う",
-    icon: "book",
-    requiresWork: true,
-    group: "資料",
-    detail:
-      "プロット・冒頭の本文・各話あらすじから、投稿サイトに載せる紹介文" +
-      "（300〜400字）の案を作ります。見てから採用を決められます。" +
-      "採用すると 設定/synopsis.md に書き込みます。",
-  },
-  {
-    command: "novelai.generateCatchphrases",
-    label: "キャッチコピー案を作る",
-    description: "AIを使う",
-    icon: "megaphone",
-    requiresWork: true,
-    group: "資料",
-    detail:
-      "方向性の違う3案（謎・引き型／感情・関係性型／世界観・スケール型）を" +
-      "30字以内で出します。選ぶ・手直しする・別の案を出す、から選べます。" +
-      "採用しなかった案は覚えておき、次は違う案を出します。",
-  },
-
-  // ── 抽出した結果を整える
-  {
-    command: "novelai.applyPendingUpdates",
-    label: "更新分を反映",
-    description: "承認制",
-    icon: "check-all",
-    requiresWork: true,
-    group: "整える",
-    detail:
-      "抽出で見つかった既存人物への更新を、内容を確認してから反映します。" +
-      "確認せずに書き換えることはありません。",
-  },
-  {
-    command: "novelai.unifyCharacters",
-    label: "同一人物をまとめる",
-    description: "",
-    icon: "merge",
-    requiresWork: true,
-    group: "整える",
-    detail:
-      "「リン」と「リンセップ・アウクト」のように、" +
-      "同じ人物が別々に登録されてしまった組をまとめます。" +
-      "どちらの名前を残すかは作者が選びます。",
-  },
-
-  // ── 校正・校閲
-  {
-    command: "novelai.checkTypos",
-    label: "誤字脱字を検知",
-    description: "AIを使う",
-    icon: "search-fuzzy",
-    requiresWork: true,
-    group: "校正・校閲",
-    detail:
-      "誤変換・脱字・衍字など、明らかな入力ミスだけをAIで検知します。" +
-      "指摘は下段の「AI指摘」パネルに出て、内容を確認してから" +
-      "1件ずつ適用・無視を選べます。自動では書き換えません。",
-  },
-
-  // ── 外に出す
-  {
-    command: "novelai.generateSettingsDocs",
-    label: "設定資料集を出力",
-    description: "AIを使わない",
-    icon: "book",
-    requiresWork: true,
-    group: "書き出す",
-    detail:
-      "抽出済みのJSONから、読むための設定資料集" +
-      "（characters.md・abilities.md・locations.md）を書き出します。" +
-      "JSONを手直ししたあとや、まとめ・更新の反映後に使います。AIは呼びません。",
-  },
-  {
-    command: "novelai.exportImeDictionary",
-    label: "IME辞書を出力",
-    description: "AIを使わない",
-    icon: "symbol-keyword",
-    requiresWork: true,
-    group: "書き出す",
-    detail:
-      "登場人物・場所・能力・組織と、作品の造語を、IMEのユーザー辞書に取り込める形で書き出します。" +
-      "取り込むと、変換候補に作品の固有名詞が出るようになります。",
-  },
-  {
-    command: "novelai.showWorkStats",
-    label: "作品の文字数を表示",
-    description: "",
+    kind: "group",
+    label: "執筆データ",
     icon: "graph",
-    requiresWork: true,
-    group: "書き出す",
-    detail: "文字数と原稿用紙の枚数を作品全体で集計します。",
-  },
-  {
-    command: "novelai.showWritingStats",
-    label: "執筆量を見る",
-    description: "AIを使わない",
-    icon: "graph-line",
-    requiresWork: true,
-    group: "書き出す",
-    detail:
-      "日次・週次・月次・年次の執筆量をグラフで見ます。" +
-      "目標を設定していれば達成率も出ます。" +
-      "話ごとの文字数一覧（長さの偏り）も同じ画面で見られます。",
-  },
-  {
-    command: "novelai.showAllWorksWritingStats",
-    label: "全作品の執筆量を見る",
-    description: "AIを使わない",
-    icon: "graph-line",
-    requiresWork: true,
-    group: "書き出す",
-    detail:
-      "登録している全作品を合わせた執筆量をグラフで見ます。" +
-      "目標（1日・1月）は作品を問わず共有なので、達成率もこちらのほうが正確です。" +
-      "作品ごとの内訳も見られます。",
-  },
-
-  // ── 別の環境と行き来する
-  {
-    command: "novelai.gitSync",
-    label: "GitHubとの同期状態",
-    description: "",
-    icon: "git-branch",
-    requiresWork: true,
-    group: "同期",
-    detail:
-      "別の環境の変更が未取得か、この環境の変更が未送信かを確認します。" +
-      "取り込みと送信もここから行えます。",
-  },
-  {
-    command: "novelai.gitPull",
-    label: "別の環境の変更を取り込む",
-    description: "",
-    icon: "cloud-download",
-    requiresWork: true,
-    group: "同期",
-    detail:
-      "別の環境で書いた分を取り込みます。" +
-      "書きかけの原稿があるときは実行しません。",
-  },
-  {
-    command: "novelai.gitPush",
-    label: "この環境の変更を送信する",
-    description: "",
-    icon: "cloud-upload",
-    requiresWork: true,
-    group: "同期",
-    detail:
-      "この環境のコミットをGitHubへ送ります。" +
-      "別の環境へ移る前に実行しておくと競合を防げます。",
-  },
-  {
-    command: "novelai.resolveConflicts",
-    label: "競合を解決する",
-    description: "",
-    icon: "git-merge",
-    requiresWork: true,
-    group: "同期",
-    detail:
-      "同じ話を2つの環境で書いてしまったとき、両方を並べて見比べ、" +
-      "どちらを残すかを選びます。迷ったら両方残せます。",
+    entries: [
+      {
+        kind: "action",
+        command: "novelai.showWritingStats",
+        label: "執筆統計を表示",
+        icon: "graph-line",
+        requiresWork: true,
+        detail:
+          "日次・週次・月次・年次の執筆量をグラフで見ます。" +
+          "目標を設定していれば達成率も出ます。" +
+          "話ごとの文字数一覧（長さの偏り）も同じ画面で見られます。",
+      },
+      {
+        kind: "action",
+        command: "novelai.showAllWorksWritingStats",
+        label: "全作品の執筆統計を表示",
+        icon: "graph-scatter",
+        requiresWork: true,
+        detail:
+          "登録している全作品を合わせた執筆量を見ます。" +
+          "目標（1日・1月）は作品を問わず共有なので、達成率はこちらが正確です。",
+      },
+      {
+        kind: "action",
+        command: "novelai.showWorkStats",
+        label: "作品の文字数を表示",
+        icon: "symbol-numeric",
+        requiresWork: true,
+        detail: "文字数と原稿用紙の枚数を作品全体で集計します。",
+      },
+    ],
   },
 
-  // ── AIの設定
   {
-    command: "novelai.setupAI",
-    label: "AIの設定",
-    description: "",
+    kind: "group",
+    label: "作品管理",
+    icon: "repo",
+    entries: [
+      {
+        kind: "section",
+        label: "GitHubで作品管理",
+        icon: "github",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.gitSync",
+            label: "同期",
+            icon: "sync",
+            requiresWork: true,
+            detail:
+              "別の環境の変更が未取得か、この環境の変更が未送信かを確認します。" +
+              "取り込みと送信もここから行えます。",
+          },
+          {
+            kind: "action",
+            command: "novelai.resolveConflicts",
+            label: "競合解決",
+            icon: "git-merge",
+            requiresWork: true,
+            detail:
+              "同じ話を2つの環境で書いてしまったとき、両方を並べて見比べ、" +
+              "どちらを残すかを選びます。迷ったら両方残せます。",
+          },
+          {
+            kind: "action",
+            command: "novelai.gitRestore",
+            label: "復元",
+            icon: "history",
+            requiresWork: true,
+            detail:
+              "GitHubに送った過去の版から、原稿を今の場所へ戻します。" +
+              "戻す前に今の内容を退避するので、やり直せます。",
+          },
+        ],
+      },
+      {
+        kind: "section",
+        label: "新作開始",
+        icon: "new-folder",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.createWorkWithPlot",
+            label: "プロットから開始",
+            icon: "list-tree",
+            requiresWork: false,
+            detail:
+              "作品フォルダーを作り、設定/plot.md に" +
+              "ログライン・テーマ・世界観・あらすじの見出しを用意して開きます。",
+          },
+          {
+            kind: "action",
+            command: "novelai.createWorkFromManuscript",
+            label: "本文から開始",
+            icon: "edit",
+            requiresWork: false,
+            detail:
+              "作品フォルダーを作り、第1話のファイルを作って開きます。" +
+              "プロットは作りません（あとから「プロットをつくる」で足せます）。",
+          },
+        ],
+      },
+      {
+        kind: "section",
+        label: "既存作追加",
+        icon: "folder-opened",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.addWork",
+            label: "フォルダから追加",
+            icon: "folder-opened",
+            requiresWork: false,
+            detail:
+              "すでに原稿があるフォルダーを作品として登録します。" +
+              "投稿サイトからダウンロードしたファイルを入れたフォルダーでも構いません。",
+          },
+          {
+            kind: "action",
+            command: "novelai.addWorkFromGithub",
+            label: "GitHubから追加",
+            icon: "cloud-download",
+            requiresWork: false,
+            detail:
+              "別の環境で書いている作品を、GitHubから取り寄せて登録します。" +
+              "新しいPCで続きを書き始めるときに使います。",
+          },
+        ],
+      },
+    ],
+  },
+
+  {
+    kind: "group",
+    label: "執筆AI支援",
+    icon: "sparkle",
+    entries: [
+      {
+        kind: "action",
+        command: "novelai.createPlot",
+        label: "プロットをつくる",
+        icon: "list-tree",
+        requiresWork: true,
+        detail:
+          "設定/plot.md を開きます。まだ無ければ、ログライン・テーマ・世界観・" +
+          "あらすじなどの見出しを用意して作ります。" +
+          "書きかけのプロットがあれば、そのまま開くだけです。",
+      },
+      {
+        kind: "section",
+        label: "校正・校閲",
+        icon: "search-fuzzy",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.checkTypos",
+            label: "誤字脱字を検知",
+            icon: "search-fuzzy",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "誤変換・脱字・衍字など、明らかな入力ミスだけをAIで検知します。" +
+              "指摘は下段の「AI指摘」パネルに出て、内容を確認してから" +
+              "1件ずつ適用・無視を選べます。自動では書き換えません。",
+          },
+        ],
+      },
+      {
+        kind: "section",
+        label: "広報支援",
+        icon: "megaphone",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.generateCatchphrases",
+            label: "キャッチコピー案を作る",
+            icon: "megaphone",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "方向性の違う3案（謎・引き型／感情・関係性型／世界観・スケール型）を" +
+              "30字以内で出します。選ぶ・手直しする・別の案を出す、から選べます。" +
+              "採用しなかった案は覚えておき、次は違う案を出します。",
+          },
+          {
+            kind: "action",
+            command: "novelai.generateWorkBlurb",
+            label: "作品紹介文を生成",
+            icon: "book",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "プロット・冒頭の本文・各話あらすじから、投稿サイトに載せる紹介文" +
+              "（300〜400字）の案を作ります。見てから採用を決められます。",
+          },
+          {
+            kind: "action",
+            command: "novelai.generateSynopses",
+            label: "各話あらすじを生成",
+            icon: "list-ordered",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "話ごとに150字以内のあらすじを作ります。" +
+              "ファイル名が数字だけの話には、15字以内のサブタイトル案も出します。" +
+              "本文を変えていない話は作り直しません。",
+          },
+        ],
+      },
+      {
+        kind: "section",
+        label: "その他支援",
+        icon: "export",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.generateSettingsDocs",
+            label: "設定資料集を出力",
+            description: "AIを使わない",
+            icon: "export",
+            requiresWork: true,
+            detail:
+              "抽出済みのJSONから、読むための設定資料集を種別ごとに書き出します" +
+              "（人物・場所・能力・組織・世界観・各話あらすじ）。" +
+              "JSONを手直ししたあとや、まとめ・更新の反映後に使います。AIは呼びません。",
+          },
+          {
+            kind: "action",
+            command: "novelai.exportImeDictionary",
+            label: "IME辞書を出力",
+            description: "AIを使わない",
+            icon: "symbol-keyword",
+            requiresWork: true,
+            detail:
+              "登場人物・場所・能力・組織と、作品の造語を、" +
+              "IMEのユーザー辞書に取り込める形で書き出します。" +
+              "取り込むと、変換候補に作品の固有名詞が出るようになります。",
+          },
+        ],
+      },
+    ],
+  },
+
+  {
+    kind: "group",
+    label: "資料管理",
+    icon: "library",
+    // 承認待ちの更新は、分類を開かないと気づけない。閉じたままでも見えるようにする
+    counter: "pendingUpdates",
+    entries: [
+      {
+        kind: "section",
+        label: "資料生成",
+        icon: "wand",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.extractSettings",
+            label: "まとめて生成",
+            icon: "sparkle",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "本文をAIで解析し、登場人物・能力・場所・組織・世界観を" +
+              "まとめて取り出して保存します。続けて設定資料集も作ります。" +
+              "**1回の応答で全種別を取り出す**ので、種別ごとに呼ぶより処理量が少なく済みます。",
+          },
+          {
+            kind: "action",
+            command: "novelai.generateCharacterDocs",
+            label: "人物一覧を生成",
+            description: "AIを使わない",
+            icon: "person",
+            requiresWork: true,
+            detail:
+              "抽出済みの人物設定から characters.md だけを書き出します。" +
+              "人物のJSONを直したあと、資料だけ作り直したいときに使います。",
+          },
+          {
+            kind: "action",
+            command: "novelai.generateLocationDocs",
+            label: "場所一覧を生成",
+            description: "AIを使わない",
+            icon: "location",
+            requiresWork: true,
+            detail: "抽出済みの場所設定から locations.md だけを書き出します。",
+          },
+          {
+            kind: "action",
+            command: "novelai.generateAbilityDocs",
+            label: "スキル一覧を生成",
+            description: "AIを使わない",
+            icon: "zap",
+            requiresWork: true,
+            detail:
+              "抽出済みの能力（スキル・魔法など、作品での呼び方に合わせます）から" +
+              " abilities.md だけを書き出します。",
+          },
+          {
+            kind: "action",
+            command: "novelai.generateWorldDocs",
+            label: "世界観一覧を生成",
+            description: "AIを使わない",
+            icon: "globe",
+            requiresWork: true,
+            detail: "抽出済みの世界観設定から world.md だけを書き出します。",
+          },
+          {
+            kind: "action",
+            command: "novelai.unifyCharacters",
+            label: "重複をまとめる",
+            icon: "merge",
+            requiresWork: true,
+            detail:
+              "「リン」と「リンセップ・アウクト」のように、" +
+              "同じ人物が別々に登録されてしまった組をまとめます。" +
+              "どちらの名前を残すかは作者が選びます。",
+          },
+          {
+            kind: "action",
+            command: "novelai.manageCustomFields",
+            label: "一覧に項目を増やす",
+            icon: "list-selection",
+            requiresWork: true,
+            detail:
+              "「誕生日」「身長」のように、作品に必要な項目を人物設定へ足します。" +
+              "足した項目は全員の設定資料に並びます。外しても入力済みの内容は消えません。",
+          },
+          {
+            kind: "action",
+            command: "novelai.applyPendingUpdates",
+            label: "更新分を反映",
+            description: "承認制",
+            icon: "check-all",
+            requiresWork: true,
+            counter: "pendingUpdates",
+            detail:
+              "抽出で見つかった既存人物への更新を、内容を確認してから反映します。" +
+              "確認せずに書き換えることはありません。",
+          },
+        ],
+      },
+      {
+        kind: "section",
+        label: "設定資料閲覧",
+        icon: "book",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.openSettingsPanel",
+            label: "設定資料集を閲覧",
+            icon: "book",
+            requiresWork: true,
+            detail:
+              "抽出した登場人物・能力・場所・組織・世界観を一覧で見ます。" +
+              "その場で書き換えたり、AIに項目を埋めさせたり、相談したりできます。",
+          },
+          {
+            kind: "action",
+            command: "novelai.openSynopsisDocs",
+            label: "紹介文・あらすじを閲覧",
+            icon: "preview",
+            requiresWork: true,
+            detail:
+              "作品紹介文（synopsis.md）と各話あらすじ（synopses.md）を" +
+              "プレビューで開きます。まだ無ければ、作る操作を案内します。",
+          },
+        ],
+      },
+    ],
+  },
+
+  {
+    kind: "group",
+    label: "拡張機能の設定",
     icon: "settings-gear",
-    requiresWork: false,
-    group: "AI設定",
-    detail: "使用するAI（Ollama・Gemini・ChatGPT・Claude）とモデルを選びます。",
-  },
-  {
-    command: "novelai.testAI",
-    label: "AIの接続を確認",
-    description: "",
-    icon: "plug",
-    requiresWork: false,
-    group: "AI設定",
-    detail:
-      "設定したAIに接続できるかを確かめます。" +
-      "抽出が失敗するときは、まずここを見てください。",
+    entries: [
+      {
+        kind: "action",
+        command: "novelai.openExtensionSettings",
+        label: "設定管理を開く",
+        icon: "settings",
+        requiresWork: false,
+        detail:
+          "文字数の数え方、執筆目標、AIの応答待ち時間などの設定を開きます。" +
+          "この拡張機能の設定だけを絞り込んで表示します。",
+      },
+      {
+        kind: "section",
+        label: "AI",
+        icon: "hubot",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.setupAI",
+            label: "AI設定",
+            icon: "settings-gear",
+            requiresWork: false,
+            detail:
+              "使用するAI（Ollama・Gemini・ChatGPT・Claude）とモデルを選びます。",
+          },
+          {
+            kind: "action",
+            command: "novelai.testAI",
+            label: "AI接続の確認",
+            icon: "plug",
+            requiresWork: false,
+            detail:
+              "設定したAIに接続できるかを確かめます。" +
+              "抽出が失敗するときは、まずここを見てください。",
+          },
+          {
+            kind: "action",
+            command: "novelai.selectOllamaExecutable",
+            label: "Ollamaの実行ファイル位置を指定",
+            icon: "folder-opened",
+            requiresWork: false,
+            detail:
+              "Ollamaを自動で見つけられない場合に、ollama.exe の場所を指定します。",
+          },
+        ],
+      },
+      {
+        kind: "section",
+        label: "セットアップを開始",
+        icon: "rocket",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.setupOllama",
+            label: "Ollamaのセットアップ",
+            icon: "cloud-download",
+            requiresWork: false,
+            detail:
+              "無料でオフラインでも使えるOllamaを、導入から使える状態まで案内します。" +
+              "入っているか・起動しているか・モデルがあるかを順に確かめ、" +
+              "足りないものだけを案内します。",
+          },
+          {
+            kind: "action",
+            command: "novelai.setupGithub",
+            label: "GitHubのセットアップ",
+            icon: "github",
+            requiresWork: true,
+            detail:
+              "作品をGitHubで同期できるようにします。" +
+              "リポジトリの作成から最初の送信までを順に案内します。" +
+              "**新しく作るリポジトリは非公開に固定します。**",
+          },
+        ],
+      },
+    ],
   },
 
-  // ── 困ったとき
   {
-    command: "novelai.showLog",
-    label: "ログを表示",
-    description: "",
-    icon: "output",
-    requiresWork: false,
-    group: "困ったとき",
-    detail:
-      "AIが返したエラーの詳細を記録しています。" +
-      "抽出が失敗して理由が分からないときに開いてください。",
-  },
-  {
-    command: "novelai.selectOllamaExecutable",
-    label: "Ollamaの実行ファイルを選択",
-    description: "",
-    icon: "folder-opened",
-    requiresWork: false,
-    group: "困ったとき",
-    detail:
-      "Ollamaを自動で見つけられない場合に、ollama.exe の場所を指定します。",
+    kind: "group",
+    label: "ヘルプ",
+    icon: "question",
+    entries: [
+      {
+        kind: "action",
+        command: "novelai.showLog",
+        label: "ログを開く",
+        icon: "output",
+        requiresWork: false,
+        detail:
+          "AIが返したエラーの詳細を記録しています。" +
+          "抽出が失敗して理由が分からないときに開いてください。",
+      },
+    ],
   },
 ];
 
+// 「設定情報を表示」（novelai.showSettingsForTerm）はここに置かない。
+// 本文にカーソルを置いた状態で実行する操作なので、操作メニューから押しても
+// 対象が定まらず動かない。本文の右クリックメニューにだけ出す。
+// 取り込み（gitPull）と送信（gitPush）も置かない。「同期」の中から選べる。
+
 /**
- * 一覧に出す操作を選ぶ。
+ * 表示する分類を選ぶ。
  *
  * 作品が1つも登録されていないと、作品を要する操作は押しても
  * 「作品が登録されていません」と言われるだけなので出さない。
  * 押せないボタンを並べても、作者には理由が分からない。
+ * 中身が空になった小分類・分類も出さない。
  */
-export function visibleActions(hasWork: boolean): CommandAction[] {
-  return ACTIONS.filter((action) => hasWork || !action.requiresWork);
+export function visibleGroups(hasWork: boolean): ActionGroup[] {
+  return ACTION_TREE.map((group) => ({
+    ...group,
+    entries: group.entries
+      .map((entry) =>
+        entry.kind === "section"
+          ? { ...entry, items: entry.items.filter((item) => hasWork || !item.requiresWork) }
+          : entry
+      )
+      .filter((entry) =>
+        entry.kind === "section"
+          ? entry.items.length > 0
+          : hasWork || !entry.requiresWork
+      ),
+  })).filter((group) => group.entries.length > 0);
 }
 
-/** 分類ごとにまとめる。中身が無い分類は出さない */
-export function groupedActions(
-  hasWork: boolean
-): Array<{ group: ActionGroup; actions: CommandAction[] }> {
-  const visible = visibleActions(hasWork);
-  return ACTION_GROUPS.map((group) => ({
-    group,
-    actions: visible.filter((action) => action.group === group),
-  })).filter((entry) => entry.actions.length > 0);
+/** 木の中の操作をすべて取り出す（テストと整合性の確認用） */
+export function allActions(): ActionItem[] {
+  return ACTION_TREE.flatMap((group) =>
+    group.entries.flatMap((entry) =>
+      entry.kind === "section" ? entry.items : [entry]
+    )
+  );
 }
 
-/** ツリーの節点。分類の見出しか、操作そのもの */
+/** ツリーの節点 */
 export type ActionNode =
   | { type: "group"; group: ActionGroup }
-  | { type: "action"; action: CommandAction };
+  | { type: "section"; section: ActionSection; groupLabel: string }
+  | { type: "action"; item: ActionItem };
+
+/** 開閉状態を覚えるための鍵。分類は名前、小分類は「分類/小分類」 */
+export function nodeKey(node: ActionNode): string {
+  if (node.type === "group") return node.group.label;
+  if (node.type === "section") return `${node.groupLabel}/${node.section.label}`;
+  return node.item.command;
+}
 
 /**
- * 分類の開閉状態の保存先。
+ * 開閉状態の保存先。
  *
  * VS Code の globalState をそのまま受け取らず細い口にするのは、
  * この判断をテストできるようにするため。
@@ -379,14 +603,21 @@ export interface GroupStateStore {
   set(groups: string[]): void;
 }
 
-/** 保存された値から、開いている分類だけを取り出す */
-export function restoreExpandedGroups(saved: string[]): Set<ActionGroup> {
-  const known = new Set<string>(ACTION_GROUPS);
+/** 保存された値のうち、いまも存在する分類・小分類だけを残す */
+export function restoreExpandedGroups(saved: string[]): Set<string> {
+  const known = new Set<string>();
+  for (const group of ACTION_TREE) {
+    known.add(group.label);
+    for (const entry of group.entries) {
+      if (entry.kind === "section") known.add(`${group.label}/${entry.label}`);
+    }
+  }
   // 分類名を変えたり減らしたりしたときに、古い名前が残らないようにする
-  return new Set(
-    saved.filter((group): group is ActionGroup => known.has(group))
-  );
+  return new Set(saved.filter((key) => known.has(key)));
 }
+
+/** 件数を答える口。ツリーが数え方そのものに依存しないよう関数で受け取る */
+export type ActionCounts = (counter: ActionCounter) => number;
 
 export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
@@ -395,17 +626,18 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   /**
-   * 開いている分類。
+   * 開いている分類・小分類。
    *
-   * **既定はすべて閉じる。** 全部開くと13項目が縦に並び、
+   * **既定はすべて閉じる。** 全部開くと40項目近くが縦に並び、
    * 作品一覧の場所が押し出される。分類名を読んでから開くほうが探しやすい。
    * 一度開いた状態は次回に引き継ぐ（`setExpanded`）。
    */
-  private readonly expanded: Set<ActionGroup>;
+  private readonly expanded: Set<string>;
 
   constructor(
     private readonly registry: WorkRegistry,
-    private readonly store?: GroupStateStore
+    private readonly store?: GroupStateStore,
+    private readonly counts?: ActionCounts
   ) {
     this.expanded = restoreExpandedGroups(store?.get() ?? []);
     // 最初の作品を登録した時点で、作品向けの操作を出せるようになる
@@ -413,59 +645,114 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
   }
 
   /** 画面で開閉したときに呼ぶ。次回起動時もこの状態で開く */
-  setExpanded(group: ActionGroup, open: boolean): void {
+  setExpanded(key: string, open: boolean): void {
     if (open) {
-      this.expanded.add(group);
+      this.expanded.add(key);
     } else {
-      this.expanded.delete(group);
+      this.expanded.delete(key);
     }
     this.store?.set([...this.expanded]);
   }
 
   /** テストと復元の確認用 */
-  expandedGroups(): ActionGroup[] {
+  expandedGroups(): string[] {
     return [...this.expanded];
   }
 
+  refresh(): void {
+    this._onDidChangeTreeData.fire();
+  }
+
   getTreeItem(node: ActionNode): vscode.TreeItem {
-    if (node.type === "group") {
+    if (node.type === "group" || node.type === "section") {
+      const key = nodeKey(node);
+      const label = node.type === "group" ? node.group.label : node.section.label;
+      const icon = node.type === "group" ? node.group.icon : node.section.icon;
       const item = new vscode.TreeItem(
-        node.group,
-        this.expanded.has(node.group)
+        label,
+        this.expanded.has(key)
           ? vscode.TreeItemCollapsibleState.Expanded
           : vscode.TreeItemCollapsibleState.Collapsed
       );
-      item.contextValue = "actionGroup";
+      item.contextValue = node.type === "group" ? "actionGroup" : "actionSection";
+      item.iconPath = new vscode.ThemeIcon(icon);
+      // 件数の印（FileDecorationProvider）を出すための目印
+      item.resourceUri = actionResourceUri(node);
       return item;
     }
 
-    const { action } = node;
+    const { item: action } = node;
     const item = new vscode.TreeItem(
       action.label,
       vscode.TreeItemCollapsibleState.None
     );
-    item.description = action.description;
+    item.description = action.description ?? "";
     item.iconPath = new vscode.ThemeIcon(action.icon);
-    item.tooltip = action.detail;
+    item.tooltip = new vscode.MarkdownString(
+      [
+        action.usesAI ? "**AIを使います**（クラウドのAIは実行のたびに課金されます）\n" : "",
+        action.detail,
+        this.countOf(action.counter) > 0
+          ? `\n\n未反映: ${this.countOf(action.counter)} 件`
+          : "",
+      ].join("")
+    );
+    // 「AI」と件数の印を出すための目印
+    item.resourceUri = actionResourceUri(node);
     // 引数を渡さないので、作品が複数あれば実行時に選択を求められる
     item.command = { command: action.command, title: action.label };
     return item;
   }
 
+  private countOf(counter: ActionCounter | undefined): number {
+    return counter && this.counts ? this.counts(counter) : 0;
+  }
+
   getChildren(node?: ActionNode): ActionNode[] {
     const hasWork = this.registry.list().length > 0;
+    const groups = visibleGroups(hasWork);
 
     if (!node) {
-      return groupedActions(hasWork).map((entry) => ({
-        type: "group" as const,
-        group: entry.group,
-      }));
+      return groups.map((group) => ({ type: "group" as const, group }));
     }
     if (node.type === "group") {
-      return visibleActions(hasWork)
-        .filter((action) => action.group === node.group)
-        .map((action) => ({ type: "action" as const, action }));
+      return node.group.entries.map((entry) =>
+        entry.kind === "section"
+          ? {
+              type: "section" as const,
+              section: entry,
+              groupLabel: node.group.label,
+            }
+          : { type: "action" as const, item: entry }
+      );
+    }
+    if (node.type === "section") {
+      return node.section.items.map((item) => ({
+        type: "action" as const,
+        item,
+      }));
     }
     return [];
+  }
+}
+
+/** 印を付けるための架空のURI。実在するファイルは指さない */
+export const ACTION_SCHEME = "novelai-action";
+
+export function actionResourceUri(node: ActionNode): vscode.Uri {
+  return vscode.Uri.from({
+    scheme: ACTION_SCHEME,
+    // パスにそのまま入れると、日本語や記号でURIが壊れる
+    path: `/${encodeURIComponent(nodeKey(node))}`,
+  });
+}
+
+/** URIから元の鍵へ戻す */
+export function actionKeyFromUri(uri: vscode.Uri): string | undefined {
+  if (uri.scheme !== ACTION_SCHEME) return undefined;
+  try {
+    return decodeURIComponent(uri.path.replace(/^\//, ""));
+  } catch {
+    return undefined;
   }
 }

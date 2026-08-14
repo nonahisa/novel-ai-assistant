@@ -42,7 +42,23 @@ const GENERATED_NOTICE =
   "     直接編集しても次回の生成で失われます。\n" +
   "     補足を残したい場合は各JSONの exportNote / authorNotes に書いてください。 -->\n";
 
+/**
+ * 資料の種別。
+ *
+ * 種別ごとに書き出せるようにしてあるのは、**JSONを1種類だけ直したときに、
+ * その一覧だけを作り直したい**ことがあるため。全部を書き直しても結果は
+ * 同じだが、何が更新されたのかが分からなくなる。
+ */
+export type SettingsDocKind =
+  | "characters"
+  | "abilities"
+  | "organizations"
+  | "locations"
+  | "world"
+  | "synopses";
+
 interface GeneratedDoc {
+  kind: SettingsDocKind;
   fileName: string;
   label: string;
   content: string;
@@ -88,6 +104,14 @@ export interface GenerateSettingsDocsOptions {
    * 失敗は静かにできないため、silent でもそのまま知らせる。
    */
   silent?: boolean;
+  /**
+   * 書き出す種別。指定しなければ全部。
+   *
+   * **AI向けの定義（`_schema/`）は種別を絞っても毎回書き直す。**
+   * 定義は資料そのものではなく、他のツールが設定JSONを読むための約束なので、
+   * 一部だけ古い状態を残すと食い違いの原因になる。
+   */
+  kinds?: readonly SettingsDocKind[];
 }
 
 export async function generateSettingsDocs(
@@ -147,8 +171,9 @@ export async function generateSettingsDocs(
   const markdownOptions = { workTitle: work.title, customFields };
   const abilityTerm = abilitySystem.abilityTerm || "能力";
 
-  const docs: GeneratedDoc[] = [
+  const allDocs: GeneratedDoc[] = [
     {
+      kind: "characters",
       fileName: "characters.md",
       label: "登場人物",
       content: buildCharacterMarkdown(
@@ -158,6 +183,7 @@ export async function generateSettingsDocs(
       hasContent: loadedCharacters.characters.length > 0,
     },
     {
+      kind: "abilities",
       fileName: "abilities.md",
       label: abilityTerm,
       content: buildAbilityMarkdown(
@@ -169,6 +195,7 @@ export async function generateSettingsDocs(
       hasContent: loadedAbilities.records.length > 0,
     },
     {
+      kind: "organizations",
       fileName: "organizations.md",
       label: "組織",
       content: buildOrganizationMarkdown(
@@ -179,12 +206,14 @@ export async function generateSettingsDocs(
       hasContent: loadedOrganizations.records.length > 0,
     },
     {
+      kind: "locations",
       fileName: "locations.md",
       label: "場所",
       content: buildLocationMarkdown(loadedLocations.records, markdownOptions),
       hasContent: loadedLocations.records.length > 0,
     },
     {
+      kind: "world",
       fileName: "world.md",
       label: "世界観",
       content: buildWorldMarkdown(loadedWorld.records, markdownOptions),
@@ -194,12 +223,18 @@ export async function generateSettingsDocs(
       // あらすじはJSONで持っているが、そのままでは作者が読めない。
       // 通して読む（前の話から筋が繋がっているかを確かめる）ものなので、
       // 話数順に並べた1つの文書として書き出す
+      kind: "synopses",
       fileName: "synopses.md",
       label: "各話あらすじ",
       content: buildSynopsisListMarkdown(synopses, markdownOptions),
       hasContent: synopses.episodes.length > 0,
     },
   ];
+
+  // 種別を絞られていれば、その種別だけを書き出す
+  const docs = options.kinds
+    ? allDocs.filter((doc) => options.kinds!.includes(doc.kind))
+    : allDocs;
 
   const config = await readWorkConfig(work);
   const settingsDir = workPaths(work, config).settings;
@@ -258,8 +293,13 @@ export async function generateSettingsDocs(
   if (written.length === 0) {
     if (options.silent) return;
     if (protectedFiles.length > 0) return;
+    // 種別を絞って呼ばれたときに「資料が無い」とだけ言うと、
+    // 何の資料が無いのか分からない
+    const target = options.kinds
+      ? `${docs.map((doc) => doc.label).join("・")}の設定`
+      : "資料にできる設定";
     vscode.window.showInformationMessage(
-      "資料にできる設定がまだありません。先に「設定資料を抽出」を実行してください。"
+      `${target}がまだありません。先に「まとめて生成」で抽出してください。`
     );
     return;
   }

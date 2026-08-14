@@ -292,7 +292,7 @@ export class SettingsPanel {
     }
 
     // 項目の定義が読めなくても、既定の項目は編集できる。
-    // 直し方は「人物設定の項目を増やす」で伝えるので、ここでは黙って空にする
+    // 直し方は「一覧に項目を増やす」で伝えるので、ここでは黙って空にする
     this.customFields = await this.customFieldStore.loadFields();
 
     this.post({ type: "init", groups: this.groups(), notice: this.notice() });
