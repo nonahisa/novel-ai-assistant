@@ -34,6 +34,7 @@ import {
 import { findTextRange } from "../core/textLocate";
 import { applyChatEdit } from "./applyChatEdit";
 import { confirmPaidUsage } from "./aiConnectivity";
+import { buildFeatureGuide } from "./featureGuide";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { buildWorkChatPanelHtml } from "../views/workChatPanelHtml";
 
@@ -278,6 +279,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
             requestedFiles,
             history: this.history.slice(-HISTORY_TURNS),
             question,
+            // 使い方を聞かれたときに答えられるよう、機能の一覧を渡す。
+            // 組み立ては安いので、毎回作り直してよい（実装と食い違わない）
+            featureGuide: buildFeatureGuide(),
           }),
           model: resolved.model,
           // 相談は考えを広げる場なので、抽出よりは揺らす

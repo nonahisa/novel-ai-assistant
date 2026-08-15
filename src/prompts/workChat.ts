@@ -14,7 +14,7 @@ import type { ChatContextKind } from "../core/chatContext";
  *
  * プロンプトを変更したら version を上げること。
  */
-export const WORK_CHAT_VERSION = "2.2";
+export const WORK_CHAT_VERSION = "2.3";
 
 export const WORK_CHAT_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 作者が今開いている画面（本文・プロット・設定資料など）について相談を受けます。
@@ -68,6 +68,14 @@ run に機能名を入れて提案してください（作者がボタンを押�
 reply には、どちらを勧めるかと、その理由を短く書いてください。
 頼まれていないのに run を付けないこと。
 
+【この拡張機能の使い方を聞かれたとき】
+末尾に機能の一覧を渡してあります。「どうやるの」「そんな機能ある？」と聞かれたら、
+**そこに書いてあることだけを使って**答えてください。
+- どの画面のどこを押すか、順に書くこと（例:「操作メニューの『執筆AI支援』→『校正・校閲』→『誤字脱字を検知』」）
+- **一覧に無い機能を作り出さないこと。** 無ければ「その機能はありません」と答えるほうが役に立ちます
+- AIを使う操作は、料金がかかることを添えること
+- 作品の内容について聞かれているときは、この一覧に触れないこと
+
 【本文の場所を指すとき】
 「ここが気になる」「この場面が」のように**特定の箇所を指して話すときは、locate を付けてください。**
 作者はボタンを押すだけで、その箇所を開いて光らせることができます。
@@ -110,6 +118,15 @@ export interface WorkChatInput {
   /** これまでのやり取り。古いものから順に */
   history: WorkChatTurn[];
   question: string;
+  /**
+   * この拡張機能でできることの一覧（`features/featureGuide.ts`）。
+   *
+   * **毎回渡す。** 「使い方の質問かどうか」を先に判定して出し分ける手も
+   * あるが、判定を外したときに「その機能はありません」と嘘を答えることに
+   * なる。答えられないほうが、少し長い入力より害が大きい。
+   * 代わりに、作品の相談では触れないようプロンプトで釘を刺している。
+   */
+  featureGuide?: string;
 }
 
 export function buildWorkChatPrompt(input: WorkChatInput): string {
@@ -150,6 +167,15 @@ export function buildWorkChatPrompt(input: WorkChatInput): string {
   }
 
   blocks.push(`【作者からの相談】\n${input.question.trim()}`);
+
+  // 機能の一覧は最後に置く。相談の本題より前に長い一覧があると、
+  // 作品の話をしているのに機能の説明を始めることがある
+  if (input.featureGuide?.trim()) {
+    blocks.push(
+      "【この拡張機能でできること（使い方を聞かれたときだけ使う参考資料）】\n" +
+        input.featureGuide.trim()
+    );
+  }
 
   return blocks.join("\n\n");
 }
