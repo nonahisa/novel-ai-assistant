@@ -10,6 +10,7 @@ import {
   type ChapterSynopsisSet,
 } from "../models/synopsis";
 import { atomicWriteFile, createManagedRecoveryPath } from "./atomicWrite";
+import { decodeByteFallback } from "./byteFallback";
 
 /**
  * 各話あらすじの保存先。
@@ -65,7 +66,12 @@ export class SynopsisStore {
 
     let parsed: ChapterSynopsisSet;
     try {
-      parsed = parseSynopsisSet(JSON.parse(new TextDecoder().decode(bytes)));
+      // 既に保存されてしまった文字化けをここで戻す。
+      // 珍しい漢字が `<0xE5><0x9B><0xAE>`（＝囮）のまま入っていた作品がある。
+      // 読むたびに戻せば、次に書き直したときに直った内容が保存される
+      parsed = parseSynopsisSet(
+        JSON.parse(decodeByteFallback(new TextDecoder().decode(bytes)))
+      );
     } catch (error) {
       throw new SynopsisStoreError(
         `${CHAPTER_SYNOPSES_FILE} を読めませんでした: ${

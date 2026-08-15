@@ -20,6 +20,7 @@ import {
 } from "../core/settingsMarkdown";
 import { CustomFieldStore } from "../core/customFieldStore";
 import { SynopsisStore } from "../core/synopsisStore";
+import { SYNOPSIS_FILE } from "../core/synopsisDoc";
 import { emptySynopsisSet } from "../models/synopsis";
 import { refreshSynopsisDoc } from "./generateBlurb";
 import { buildSchemaFiles, SCHEMA_DIR } from "../core/settingsSchema";
@@ -245,6 +246,14 @@ export async function generateSettingsDocs(
 
   const written: string[] = [];
   /**
+   * 作者へ「開く」で見せるファイル。
+   *
+   * **案内文（written）と必ず対にする。** 片方だけに足すと、
+   * 「作りました」と言った資料が開けない（実際にあらすじで起きた）。
+   */
+  const writtenFiles: string[] = [];
+
+  /**
    * 各話あらすじは `synopsis.md`（作品紹介文と同じ文書）へ載せる。
    *
    * **この文書だけは、下の書き出しループに任せられない。** ループは
@@ -258,6 +267,11 @@ export async function generateSettingsDocs(
     try {
       await refreshSynopsisDoc(work, work.title);
       written.push("各話あらすじ");
+      // **開く対象にも入れる。** 案内文（written）にだけ足して
+      // こちら（writtenFiles）へ入れ忘れると、「各話あらすじを
+      // 生成しました」と出るのに開くのは人物一覧になる。
+      // あらすじだけを作ったときは1件も無く、何も開かなかった
+      writtenFiles.push(SYNOPSIS_FILE);
     } catch (error) {
       await vscode.window.showErrorMessage(
         "各話あらすじを保存できませんでした。" +
@@ -277,7 +291,6 @@ export async function generateSettingsDocs(
     }
   }
 
-  const writtenFiles: string[] = [];
   const skipped: string[] = [];
   /** 作者が書いたと判断して触らなかったファイル */
   const protectedFiles: string[] = [];
@@ -345,15 +358,52 @@ export async function generateSettingsDocs(
     "開く"
   );
   if (action === "開く") {
-    // 書いたファイルを開く。避けたファイルを開くと、
-    // 生成できたのか分からないまま古い内容を見せることになる
-    const first = { fileName: writtenFiles[0] };
-    // 資料は読むためのものなので、記法のままではなくプレビューで開く
-    await vscode.commands.executeCommand(
-      "markdown.showPreview",
-      vscode.Uri.file(path.join(settingsDir, first.fileName))
-    );
+    await openGeneratedDoc(settingsDir, writtenFiles);
   }
+}
+
+/**
+ * 生成した資料を開く。
+ *
+ * **どのエディターで開くかを決め打ちしない。** `vscode.open` を使うと、
+ * 作者がVS Codeの「既定のエディター」に設定したもので開く。
+ * VS Codeには記法のまま見る「テキスト エディター」、読むための
+ * 「Markdown Preview」、書式を見ながら書ける「Markdown Editor」があり、
+ * どれが良いかは作者が決めることである。
+ * `markdown.showPreview` を直接呼ぶと、その設定を無視して上書きしてしまう。
+ *
+ * **開く対象が無いときは黙って終わらせない。** 以前は `writtenFiles[0]` を
+ * そのまま渡していたので、1件も無いと `undefined` が混じった行き先になり、
+ * 押しても何も起きなかった（実機で発覚、2026-08-15）。
+ */
+async function openGeneratedDoc(
+  settingsDir: string,
+  writtenFiles: readonly string[]
+): Promise<void> {
+  // あらすじを作ったなら、まずそれを開く。作者が直前に作ったものを見たい
+  const target =
+    writtenFiles.find((name) => name === SYNOPSIS_FILE) ?? writtenFiles[0];
+
+  if (!target) {
+    vscode.window.showWarningMessage(
+      "開ける資料が見つかりませんでした。設定フォルダーを確認してください。"
+    );
+    return;
+  }
+
+  const uri = vscode.Uri.file(path.join(settingsDir, target));
+  try {
+    // 存在を確かめてから開く。無いファイルにプレビューを出すと
+    // 空の画面が出るだけで、失敗したことが作者に伝わらない
+    await vscode.workspace.fs.stat(uri);
+  } catch {
+    vscode.window.showWarningMessage(
+      `${target} が見つかりませんでした。もう一度「設定資料集を出力」をお試しください。`
+    );
+    return;
+  }
+
+  await vscode.commands.executeCommand("vscode.open", uri);
 }
 
 /**

@@ -94,7 +94,7 @@ import { checkTypos, type TypoCheckRunResult } from "./features/checkTypos";
 import { checkNotation } from "./features/checkNotation";
 import { generatePlot } from "./features/generatePlot";
 import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
-import { parseSynopsisMarkdown } from "./core/synopsisDoc";
+import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
 import { hasUnsavedChanges } from "./core/textFile";
 import { AI_ISSUES_VIEW_ID, TypoIssuePanel } from "./features/typoIssuePanel";
@@ -1450,7 +1450,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // いたため「紹介文がのっていません」と見えていた（実機で発覚、2026-08-14）
         const config = await readWorkConfig(work);
         const settingsDir = workPaths(work, config).settings;
-        const file = path.join(settingsDir, "synopsis.md");
+        const file = path.join(settingsDir, SYNOPSIS_FILE);
 
         let hasBlurb = false;
         try {
@@ -1486,10 +1486,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             label: "$(book) 開いて読む",
             description: "synopsis.md",
             detail: `${contains.join("と")}が入っています。`,
-            // Markdownはプレビューで開く。作者が読みたいのは書式の付いた状態
+            // **どのエディターで開くかは決め打ちしない。** `vscode.open` なら
+            // 作者がVS Codeの「既定のエディター」に設定したもの（テキスト
+            // エディター／Markdown Preview／Markdown Editor）で開く
             run: () =>
               vscode.commands.executeCommand(
-                "markdown.showPreview",
+                "vscode.open",
                 vscode.Uri.file(file)
               ),
           });

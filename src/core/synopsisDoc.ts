@@ -28,6 +28,14 @@ const CATCHPHRASE_LINE = /^>\s*(.+?)\s*$/;
  * 紹介文はこのファイル自身、各話あらすじは `chapter_synopses.json` にある。
  * 読み取りではこの見出し以降を捨て、書き込みでは毎回JSONから組み立て直す。
  */
+/**
+ * 作品紹介文と各話あらすじをまとめた文書のファイル名。
+ *
+ * **名前を各所で書かない。** 「作った」と案内する側と「開く」側で
+ * 食い違うと、作りましたと言った資料が開けない（実際に起きた）。
+ */
+export const SYNOPSIS_FILE = "synopsis.md";
+
 export const EPISODE_SECTION_HEADING = "## 各話あらすじ";
 
 /**

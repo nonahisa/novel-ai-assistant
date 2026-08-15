@@ -8,6 +8,8 @@ import {
   ModelInfo,
   inferTier,
 } from "./types";
+import { countByteFallback, decodeByteFallback } from "../core/byteFallback";
+import { logLine } from "../core/logger";
 
 const DEFAULT_ENDPOINT = "http://localhost:11434";
 
@@ -241,7 +243,15 @@ export class OllamaProvider implements AIProvider {
       throw new AIError(res.error, "bad_response", res.error);
     }
 
-    const text = res.message?.content ?? "";
+    // 珍しい漢字が `<0xE5><0x9B><0xAE>` のようなバイト表記のまま
+    // 返ることがある（実データで「囮」がそうなっていた）。
+    // ここで戻さないと、そのまま資料ファイルへ保存されてしまう
+    const raw = res.message?.content ?? "";
+    const text = decodeByteFallback(raw);
+    const repaired = countByteFallback(raw);
+    if (repaired > 0) {
+      logLine(`バイト表記のまま返った文字を ${repaired} 箇所戻しました。`);
+    }
     if (!text.trim()) {
       throw new AIError(
         "AIから空の応答が返りました。",
