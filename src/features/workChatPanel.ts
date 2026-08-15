@@ -24,8 +24,10 @@ import {
 import {
   describeChatEditRejection,
   parseChatEdit,
+  parseChatRun,
   sanitizeRequestedPaths,
   type ChatEdit,
+  type ChatRunKind,
 } from "../core/chatEdit";
 import { applyChatEdit } from "./applyChatEdit";
 import { logFailure, logStep, useLogFile } from "../core/logger";
@@ -68,7 +70,21 @@ type Incoming =
   | { type: "ready" }
   | { type: "ask"; question: string }
   | { type: "clear" }
-  | { type: "applyEdit"; id: string };
+  | { type: "applyEdit"; id: string }
+  | { type: "run"; id: string };
+
+/**
+ * 標準機能を起動する口。
+ *
+ * **相談パネル自身は機能を持たない。** 誤字脱字の検知は結果をAI指摘パネルへ
+ * 出すところまでが一続きで、そのパネルは `extension.ts` が持っている。
+ * ここでコマンド名を組み立てて `executeCommand` を呼ぶより、
+ * 呼び出し側から起動の口を渡してもらうほうが、**何が起動されうるかが
+ * 型で閉じる**（AIの返した文字列がコマンド名になる余地が無い）。
+ */
+export interface ChatRunner {
+  run(work: WorkEntry, kind: ChatRunKind, filePath?: string): Promise<void>;
+}
 
 export class WorkChatPanel implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
@@ -84,6 +100,11 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     string,
     { edit: ChatEdit; work: WorkEntry }
   >();
+  /** 押されるのを待っている機能起動の提案 */
+  private readonly pendingRuns = new Map<
+    string,
+    { kind: ChatRunKind; work: WorkEntry; filePath?: string }
+  >();
   private editSeq = 0;
 
   /**
@@ -97,7 +118,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly registry: WorkRegistry,
-    private readonly ai: AIRegistry
+    private readonly ai: AIRegistry,
+    private readonly runner: ChatRunner
   ) {
     this.lastEditor = vscode.window.activeTextEditor;
   }
@@ -137,6 +159,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
     if (message.type === "applyEdit") {
       await this.applyEdit(message.id);
+      return;
+    }
+    if (message.type === "run") {
+      await this.runFeature(message.id);
     }
   }
 
@@ -228,6 +254,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         reply: answer.reply,
         options: answer.options,
         edit: this.stageEdit(answer.edit, context?.work),
+        run: this.stageRun(answer.run, context),
       });
     } catch (error) {
       const message =
@@ -276,6 +303,66 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       label: parsed.edit.label,
       preview: parsed.edit.content,
     };
+  }
+
+  /**
+   * 標準機能の起動の提案を受け取り、押されるまで持っておく。
+   *
+   * **許可した一覧に無いものは黙って捨てる。** AIが返した文字列が
+   * そのままコマンド名になる余地を残さない。
+   */
+  private stageRun(
+    raw: unknown,
+    context: ResolvedContext | undefined
+  ): { id: string; label: string; usesAI: boolean } | undefined {
+    if (raw === undefined || raw === null || !context) return undefined;
+
+    const parsed = parseChatRun(raw);
+    if (!parsed) return undefined;
+
+    // 「この話だけ」は本文を開いているときにしか意味がない。
+    // 開いていなければ作品全体の検知に読み替える
+    let kind = parsed.kind;
+    let label = parsed.label;
+    if (kind === "checkTyposForFile" && context.kind !== "manuscript") {
+      kind = "checkTypos";
+      label = "誤字脱字を検知する";
+    }
+
+    const id = `run-${++this.editSeq}`;
+    this.pendingRuns.set(id, {
+      kind,
+      work: context.work,
+      filePath: kind === "checkTyposForFile" ? context.filePath : undefined,
+    });
+    return { id, label, usesAI: parsed.usesAI };
+  }
+
+  /** 作者がボタンを押したときだけ、標準機能を起動する */
+  private async runFeature(id: string): Promise<void> {
+    const staged = this.pendingRuns.get(id);
+    if (!staged) {
+      this.postError("この提案はもう使えません。もう一度聞いてください。");
+      return;
+    }
+    this.pendingRuns.delete(id);
+
+    try {
+      await this.runner.run(staged.work, staged.kind, staged.filePath);
+      void this.view?.webview.postMessage({
+        type: "runDone",
+        id,
+        message: "実行しました。結果は下段の「AI指摘」パネルに出ます。",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logFailure("相談からの機能起動", { 内容: message });
+      void this.view?.webview.postMessage({
+        type: "runFailed",
+        id,
+        message: `実行できませんでした: ${message}`,
+      });
+    }
   }
 
   /** 作者がボタンを押したときだけ、ここで実際に書き込む */
@@ -387,6 +474,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     return {
       work,
       kind,
+      filePath,
       label: describeChatContext(
         kind,
         path.basename(filePath),
@@ -443,6 +531,8 @@ interface ResolvedContext {
   work: WorkEntry;
   kind: ChatContextKind;
   label: string;
+  /** 開いているファイルの絶対パス。「この話だけ」の検知に渡す */
+  filePath: string;
   excerpt: string;
   truncated: boolean;
   fromSelection: boolean;

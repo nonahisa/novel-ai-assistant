@@ -14,7 +14,7 @@ import type { ChatContextKind } from "../core/chatContext";
  *
  * プロンプトを変更したら version を上げること。
  */
-export const WORK_CHAT_VERSION = "2.0";
+export const WORK_CHAT_VERSION = "2.1";
 
 export const WORK_CHAT_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 作者が今開いている画面（本文・プロット・設定資料など）について相談を受けます。
@@ -58,8 +58,18 @@ needFiles にそのパスを入れてください（作品フォルダからの�
   edit を使わず reply で「本文は誤字脱字の指摘から直してください」と伝えてください。
 - 書き込みの提案が無いときは edit を省いてください。
 
+【誤字脱字・表記ゆれを頼まれたとき】
+**あなたが本文を読んで誤字を探さないでください。** この拡張機能には専用の機能があり、
+そちらは本文の全体を漏れなく調べ、指摘を1件ずつ確認・適用できる画面に出します。
+run に機能名を入れて提案してください（作者がボタンを押したときだけ動きます）。
+- "checkTypos"：誤字脱字を検知（作品全体）
+- "checkTyposForFile"：誤字脱字を検知（いま開いている話だけ。本文を開いているときのみ）
+- "checkNotation"：表記ゆれを検知（「良い／よい」のような表記の揺れ）
+reply には、どちらを勧めるかと、その理由を短く書いてください。
+頼まれていないのに run を付けないこと。
+
 【出力形式】JSONのみ。前置き・後書き・コードフェンスを含めないこと。
-{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}}`;
+{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "..."}`;
 
 export interface WorkChatTurn {
   role: "author" | "assistant";
@@ -150,6 +160,7 @@ export const WORK_CHAT_SCHEMA = {
       },
       required: ["target", "content"],
     },
+    run: { type: "string" },
   },
   required: ["reply"],
 } as const;
@@ -161,6 +172,8 @@ export interface WorkChatAnswer {
   needFiles: unknown;
   /** 書き込みの提案。呼び出し側で解釈し、作者が押したときだけ適用する */
   edit: unknown;
+  /** 標準機能の起動の提案。許可した一覧と突き合わせてから使う */
+  run: unknown;
 }
 
 /**
@@ -190,6 +203,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
           options?: unknown;
           needFiles?: unknown;
           edit?: unknown;
+          run?: unknown;
         };
         return {
           reply: record.reply.trim(),
@@ -202,6 +216,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
             : [],
           needFiles: record.needFiles,
           edit: record.edit,
+          run: record.run,
         };
       }
     } catch {
@@ -209,7 +224,13 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
     }
   }
 
-  return { reply: text.trim(), options: [], needFiles: undefined, edit: undefined };
+  return {
+    reply: text.trim(),
+    options: [],
+    needFiles: undefined,
+    edit: undefined,
+    run: undefined,
+  };
 }
 
 function extractBraces(text: string): string | null {

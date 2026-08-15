@@ -279,6 +279,36 @@ function appendEdit(turn, edit) {
   turn.appendChild(box);
 }
 
+/**
+ * 標準機能の起動を勧める。
+ *
+ * **押すまで動かない。** AIを呼ぶ機能は料金がかかるので、
+ * 押す前にそれが分かるようにする。
+ */
+function appendRun(turn, run) {
+  const box = document.createElement('div');
+  box.className = 'edit';
+  box.dataset.editId = run.id;
+
+  const row = document.createElement('div');
+  row.className = 'options';
+  const button = document.createElement('button');
+  button.className = 'option';
+  button.innerHTML =
+    '<span class="num">▶</span><span>' +
+    escapeHtml(run.label) +
+    (run.usesAI ? '（AIを使います）' : '（AIを使いません）') +
+    '</span>';
+  button.addEventListener('click', () => {
+    if (busy) return;
+    button.disabled = true;
+    vscode.postMessage({ type: 'run', id: run.id });
+  });
+  row.appendChild(button);
+  box.appendChild(row);
+  turn.appendChild(box);
+}
+
 function markEdit(id, message, ok) {
   const box = document.querySelector('[data-edit-id="' + id + '"]');
   if (!box) return;
@@ -371,6 +401,7 @@ window.addEventListener('message', (event) => {
     thinkingEl.textContent = '考えています…';
     const turn = appendTurn('AI', message.reply);
     if (message.edit) appendEdit(turn, message.edit);
+    if (message.run) appendRun(turn, message.run);
     appendOptions(turn, message.options || []);
     scrollToBottom();
     return;
@@ -389,6 +420,16 @@ window.addEventListener('message', (event) => {
     return;
   }
   if (message.type === 'editFailed') {
+    markEdit(message.id, message.message, false);
+    scrollToBottom();
+    return;
+  }
+  if (message.type === 'runDone') {
+    markEdit(message.id, message.message, true);
+    scrollToBottom();
+    return;
+  }
+  if (message.type === 'runFailed') {
     markEdit(message.id, message.message, false);
     scrollToBottom();
     return;

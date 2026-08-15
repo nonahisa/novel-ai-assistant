@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   describeChatEditTarget,
   parseChatEdit,
+  parseChatRun,
   sanitizeRequestedPaths,
 } from "../../src/core/chatEdit";
 
@@ -82,6 +83,46 @@ describe("書き込み先の解釈", () => {
     expect(
       describeChatEditTarget({ kind: "plot", section: "logline" })
     ).toContain("ログライン");
+  });
+});
+
+describe("起動してよい標準機能", () => {
+  test("許可した3つを起動できる", () => {
+    expect(parseChatRun("checkTypos")?.kind).toBe("checkTypos");
+    expect(parseChatRun("checkTyposForFile")?.kind).toBe("checkTyposForFile");
+    expect(parseChatRun("checkNotation")?.kind).toBe("checkNotation");
+  });
+
+  test("AIを使うかどうかを添える（料金の有無が押す前に分かる）", () => {
+    expect(parseChatRun("checkTypos")?.usesAI).toBe(true);
+    // 表記ゆれはルールだけで判定するので料金がかからない
+    expect(parseChatRun("checkNotation")?.usesAI).toBe(false);
+  });
+
+  test("許可していないものは起動できない", () => {
+    // ここを通すと、AIの返した文字列がそのままコマンド名になり、
+    // 作品の削除を含むあらゆる操作が会話の一言で動かせてしまう
+    for (const value of [
+      "novelai.deleteEpisodeFile",
+      "workbench.action.closeWindow",
+      "extractSettings",
+      "gitPush",
+      "",
+    ]) {
+      expect(parseChatRun(value), value).toBeUndefined();
+    }
+  });
+
+  test("文字列でなければ起動しない", () => {
+    expect(parseChatRun(undefined)).toBeUndefined();
+    expect(parseChatRun({ kind: "checkTypos" })).toBeUndefined();
+    expect(parseChatRun(["checkTypos"])).toBeUndefined();
+  });
+
+  test("大文字小文字の揺れは受け入れる", () => {
+    // 種別名の綴りはAIが揺らしがちで、そこで弾くと使えない機能になる
+    expect(parseChatRun("CHECKTYPOS")?.kind).toBe("checkTypos");
+    expect(parseChatRun(" checknotation ")?.kind).toBe("checkNotation");
   });
 });
 

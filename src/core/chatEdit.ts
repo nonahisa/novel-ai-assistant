@@ -138,6 +138,62 @@ export function describeChatEditRejection(reason: ChatEditRejection): string {
   }
 }
 
+/**
+ * 相談パネルから起動してよい標準機能。
+ *
+ * 作者から「誤字脱字や表記ゆれのチェックを頼まれた場合は、承諾制で
+ * chat画面側から標準機能を起動することを許可」された（2026-08-15）。
+ *
+ * **AIが任意のコマンドを実行できる作りにはしない。** ここに並べたものだけを
+ * 起動できる。AIが返した文字列をそのまま `executeCommand` へ渡すと、
+ * 作品の削除やファイルの上書きを含むあらゆる操作が、会話の一言で
+ * 動かせるようになってしまう。
+ */
+export type ChatRunKind =
+  /** 誤字脱字を検知（作品全体） */
+  | "checkTypos"
+  /** 誤字脱字を検知（いま開いている話だけ） */
+  | "checkTyposForFile"
+  /** 表記ゆれを検知 */
+  | "checkNotation";
+
+export interface ChatRun {
+  kind: ChatRunKind;
+  /** ボタンに出す説明 */
+  label: string;
+  /** AIを呼ぶ（＝料金がかかる）操作か */
+  usesAI: boolean;
+}
+
+const RUNNABLE: ReadonlyMap<string, Omit<ChatRun, "kind">> = new Map([
+  ["checktypos", { label: "誤字脱字を検知する", usesAI: true }],
+  [
+    "checktyposforfile",
+    { label: "この話の誤字脱字を検知する", usesAI: true },
+  ],
+  ["checknotation", { label: "表記ゆれを検知する", usesAI: false }],
+]);
+
+/** 起動したい機能の指定を、許可した一覧と突き合わせる */
+export function parseChatRun(raw: unknown): ChatRun | undefined {
+  const key = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (!key) return undefined;
+
+  const found = RUNNABLE.get(key);
+  if (!found) return undefined;
+
+  // Map のキーは小文字に潰しているので、種別は元の綴りへ戻す
+  const kind = (
+    {
+      checktypos: "checkTypos",
+      checktyposforfile: "checkTyposForFile",
+      checknotation: "checkNotation",
+    } as Record<string, ChatRunKind>
+  )[key];
+
+  return { kind, label: found.label, usesAI: found.usesAI };
+}
+
 function splitOnce(text: string, separator: string): [string, string | undefined] {
   const at = text.indexOf(separator);
   if (at === -1) return [text, undefined];

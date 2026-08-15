@@ -307,7 +307,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // いま開いている画面について相談するパネル（P-21）
-  const workChatPanel = new WorkChatPanel(registry, aiRegistry);
+  // 相談から標準機能を起動する口（作者の許可、2026-08-15）。
+  // **コマンド名を組み立てて executeCommand を呼ばない。** 種別で分岐する
+  // ことで、AIが返した文字列がコマンド名になる余地を無くしている
+  const workChatPanel = new WorkChatPanel(registry, aiRegistry, {
+    run: async (work, kind, filePath) => {
+      // 未保存のまま読むと、画面と違う本文を検知してしまう
+      const label = kind === "checkNotation" ? "表記ゆれの検知" : "誤字脱字の検知";
+      if (!(await saveDirtyDocumentsBeforeExtraction(work, label))) return;
+
+      if (kind === "checkNotation") {
+        const result = await checkNotation(work);
+        if (!result || result.cancelled) return;
+        typoIssuePanel.showResults(work, result.issues, "表記ゆれ");
+        return;
+      }
+
+      const result = await checkTypos(
+        work,
+        aiRegistry,
+        kind === "checkTyposForFile" && filePath
+          ? { filePaths: [filePath] }
+          : {}
+      );
+      if (!result) return;
+      typoIssuePanel.showResults(work, result.issues);
+      reportTypoCheckResult(
+        kind === "checkTyposForFile"
+          ? `${path.basename(filePath ?? "")} の誤字脱字検知`
+          : "誤字脱字検知",
+        result
+      );
+    },
+  });
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(WORK_CHAT_VIEW_ID, workChatPanel, {
       webviewOptions: { retainContextWhenHidden: true },
