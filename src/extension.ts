@@ -58,6 +58,7 @@ import { restoreFromHistory } from "./features/gitRestore";
 import { setupOllama } from "./features/setupOllama";
 import { setupVectorSearch } from "./features/setupVectorSearch";
 import { runFullSetup } from "./features/setupWizard";
+import { showVersion } from "./features/showVersion";
 import { chatLogPath, isChatLogEnabled } from "./core/chatLog";
 import {
   buildVectorIndex,
@@ -805,6 +806,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.setupVectorSearch", async () => {
       await setupVectorSearch();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.showVersion", async () => {
+      await showVersion(context, aiRegistry);
     })
   );
 

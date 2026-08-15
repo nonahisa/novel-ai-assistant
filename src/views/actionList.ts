@@ -679,6 +679,17 @@ export const ACTION_TREE: readonly ActionGroup[] = [
       },
       {
         kind: "action",
+        command: "novelai.showVersion",
+        label: "バージョンを確認",
+        icon: "info",
+        requiresWork: false,
+        detail:
+          "この拡張機能の版と、いまの環境（VS Codeの版・選んでいるAI・" +
+          "意味検索の入切）を表示します。**そのまま貼り付けられる形でコピーできます。**" +
+          "不具合を伝えるときに添えてください。変更履歴もここから開けます。",
+      },
+      {
+        kind: "action",
         command: "novelai.openChatLog",
         label: "相談のログを開く",
         icon: "comment-discussion",

@@ -409,6 +409,12 @@
         "title": "相談のログを開く",
         "category": "小説執筆",
         "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "novelai.showVersion",
+        "title": "バージョンを確認",
+        "category": "小説執筆",
+        "icon": "$(info)"
       }
     ],
     "menus": {
