@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 import { OllamaEmbeddingProvider, DEFAULT_EMBEDDING_MODEL } from "../ai/ollamaEmbedding";
 import { embeddingModelName, isVectorSearchEnabled } from "./vectorSearch";
+import { pullOllamaModel, shortenProgress } from "../core/packageInstall";
+import { withCancellableProgress } from "../views/progress";
 
 /**
  * 意味検索（ベクトルDB）のセットアップ案内。
@@ -46,11 +48,27 @@ export async function setupVectorSearch(): Promise<void> {
           ? "約1.2GB。日本語を含む多言語向けのモデルです"
           : "設定で指定されているモデルです",
       run: async () => {
-        const terminal = vscode.window.createTerminal("Ollama");
-        terminal.show();
-        terminal.sendText(`ollama pull ${model}`);
+        // **終わりを待って、そのまま入にする。** ターミナルへ流すと
+        // 終了を拡張機能が知れず、作者に実行し直しを頼むことになる
+        const outcome = await withCancellableProgress(
+          `${model} を取得しています（約1.2GB）`,
+          async (progress, token) =>
+            pullOllamaModel(model, {
+              onLine: (line) => {
+                if (token.isCancellationRequested) return;
+                progress.report({ message: shortenProgress(line) });
+              },
+            })
+        );
+        if (outcome.kind === "failed") {
+          vscode.window.showErrorMessage(`取得に失敗しました。${outcome.detail}`);
+          return;
+        }
+        await vscode.workspace
+          .getConfiguration("novelai")
+          .update("vectorSearch.enabled", true, vscode.ConfigurationTarget.Global);
         vscode.window.showInformationMessage(
-          "取得を始めました。終わったら、もう一度この画面から「設定を入にする」を選んでください。"
+          "意味検索を使えるようにしました。作品を選んで「検索用の索引を作る」を実行してください。"
         );
       },
     });

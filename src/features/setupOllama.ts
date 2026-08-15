@@ -6,7 +6,9 @@ import {
   startOllama,
 } from "../ai/ollamaLauncher";
 import { AIRegistry, runSetupWizard } from "../ai/registry";
-import { withProgress } from "../views/progress";
+import { pullOllamaModel, shortenProgress } from "../core/packageInstall";
+import { runFullSetup } from "./setupWizard";
+import { withCancellableProgress, withProgress } from "../views/progress";
 
 /**
  * Ollamaを使える状態にするまでの案内（設計書6.16）。
@@ -15,14 +17,14 @@ import { withProgress } from "../views/progress";
  * 選択肢である。しかし導入・起動・モデル取得の3段階があり、どれが欠けても
  * 「AIが動かない」としか見えない。**足りないものを1つずつ、順に案内する。**
  *
- * **勝手にインストールしない。** 環境を変える操作であり、管理者の権限が
- * 要ることもある（設計書5.5でGitについて決めたのと同じ方針）。
+ * **2026-08-15に方針を変えた。** 以前は「勝手にインストールしない。配布
+ * ページを開くだけ」としていたが、作者から自動導入の指定があった。
+ * 本体が見つからないときは統合セットアップ（`setupWizard.ts`）へ渡す。
+ * そちらが何を・どれだけ・なぜ入れるのかを見せてから実行する。
  */
 
 /** 最初に薦めるモデル。作者の環境（8B・131072文脈）で実績がある */
 const RECOMMENDED_MODEL = "gemma4:e4b";
-
-const DOWNLOAD_PAGE = "https://ollama.com/download";
 
 export async function setupOllama(registry: AIRegistry): Promise<void> {
   const endpoint = vscode.workspace
@@ -42,18 +44,9 @@ export async function setupOllama(registry: AIRegistry): Promise<void> {
   );
 
   if (!executable && !connection.ok) {
-    const action = await vscode.window.showInformationMessage(
-      "Ollamaが見つかりませんでした。無料で、インターネットに送らずに使えるAIです。" +
-        "配布ページから入れたあと、もう一度この操作を実行してください。",
-      "配布ページを開く",
-      "実行ファイルの場所を指定",
-      "閉じる"
-    );
-    if (action === "配布ページを開く") {
-      await vscode.env.openExternal(vscode.Uri.parse(DOWNLOAD_PAGE));
-    } else if (action === "実行ファイルの場所を指定") {
-      await vscode.commands.executeCommand("novelai.selectOllamaExecutable");
-    }
+    // 本体から入れる話になる。ここで配布ページを開くより、
+    // 何が要るのかを一覧で見せてから入れたほうが迷わない
+    await runFullSetup(registry);
     return;
   }
 
@@ -82,29 +75,41 @@ export async function setupOllama(registry: AIRegistry): Promise<void> {
 
   // ③ モデルがあるか
   if ((connection.modelCount ?? 0) === 0) {
+    const get = "取得する";
     const action = await vscode.window.showInformationMessage(
       "Ollamaは動いていますが、モデルが1つもありません。" +
-        `まずは ${RECOMMENDED_MODEL} をお勧めします（日本語が扱え、長い本文も読めます）。`,
-      "ターミナルで取得する",
+        `まずは ${RECOMMENDED_MODEL} をお勧めします（日本語が扱え、長い本文も読めます。約9.6GB）。`,
+      get,
       "コマンドをコピー",
       "閉じる"
     );
-    if (action === "ターミナルで取得する") {
-      // 取得は数分かかり、進み具合が出る。拡張機能の中で隠すより、
-      // ターミナルでそのまま見せたほうが状況が分かる
-      const terminal = vscode.window.createTerminal("Ollama");
-      terminal.show();
-      terminal.sendText(`ollama pull ${RECOMMENDED_MODEL}`);
-      vscode.window.showInformationMessage(
-        "取得が終わったら、もう一度「Ollamaのセットアップ」を実行してください。"
+    if (action === get) {
+      // **終わりを待つ。** ターミナルへ流すと終了を拡張機能が知れず、
+      // 「終わったらもう一度実行してください」と頼むことになる
+      const outcome = await withCancellableProgress(
+        `${RECOMMENDED_MODEL} を取得しています`,
+        async (progress, token) =>
+          pullOllamaModel(RECOMMENDED_MODEL, {
+            onLine: (line) => {
+              if (token.isCancellationRequested) return;
+              progress.report({ message: shortenProgress(line) });
+            },
+          })
       );
+      if (outcome.kind === "failed") {
+        vscode.window.showErrorMessage(`取得に失敗しました。${outcome.detail}`);
+        return;
+      }
+      connection = await provider.testConnection();
     } else if (action === "コマンドをコピー") {
       await vscode.env.clipboard.writeText(`ollama pull ${RECOMMENDED_MODEL}`);
       vscode.window.showInformationMessage(
         "コマンドをコピーしました。ターミナルに貼り付けて実行してください。"
       );
+      return;
+    } else {
+      return;
     }
-    return;
   }
 
   // ④ 使うAIとして選ぶ

@@ -54,6 +54,7 @@ import { addWorkFromGithub } from "./features/addWorkFromGithub";
 import { restoreFromHistory } from "./features/gitRestore";
 import { setupOllama } from "./features/setupOllama";
 import { setupVectorSearch } from "./features/setupVectorSearch";
+import { runFullSetup } from "./features/setupWizard";
 import {
   buildVectorIndex,
   isVectorSearchEnabled,
@@ -744,6 +745,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.setupOllama", async () => {
       await setupOllama(aiRegistry);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.runFullSetup", async () => {
+      await runFullSetup(aiRegistry);
     })
   );
 

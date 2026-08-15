@@ -580,6 +580,18 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         items: [
           {
             kind: "action",
+            command: "novelai.runFullSetup",
+            label: "セットアップ（必要なものを入れる）",
+            icon: "checklist",
+            requiresWork: false,
+            detail:
+              "**この拡張機能を入れただけでは、AIを使う機能は動きません。** " +
+              "何が足りていて、それぞれ何のために要るのかを一覧で見せ、" +
+              "選んだものを入れます（Ollama本体・会話モデル・埋め込みモデル・Git・GitHub CLI）。" +
+              "**入れる前に、何を・どれだけ取得するかを必ず確認します。**",
+          },
+          {
+            kind: "action",
             command: "novelai.setupOllama",
             label: "Ollamaのセットアップ",
             icon: "cloud-download",
