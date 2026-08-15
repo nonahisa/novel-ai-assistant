@@ -309,6 +309,26 @@ function appendRun(turn, run) {
   turn.appendChild(box);
 }
 
+/** 「そこを見せて」。押すとファイルを開き、該当箇所を光らせる */
+function appendLocate(turn, locate) {
+  const box = document.createElement('div');
+  box.className = 'edit';
+  box.dataset.editId = locate.id;
+
+  const row = document.createElement('div');
+  row.className = 'options';
+  const button = document.createElement('button');
+  button.className = 'option';
+  button.innerHTML =
+    '<span class="num">◎</span><span>' + escapeHtml(locate.label) + '</span>';
+  button.addEventListener('click', () => {
+    vscode.postMessage({ type: 'locate', id: locate.id });
+  });
+  row.appendChild(button);
+  box.appendChild(row);
+  turn.appendChild(box);
+}
+
 function markEdit(id, message, ok) {
   const box = document.querySelector('[data-edit-id="' + id + '"]');
   if (!box) return;
@@ -400,6 +420,7 @@ window.addEventListener('message', (event) => {
     setBusy(false);
     thinkingEl.textContent = '考えています…';
     const turn = appendTurn('AI', message.reply);
+    if (message.locate) appendLocate(turn, message.locate);
     if (message.edit) appendEdit(turn, message.edit);
     if (message.run) appendRun(turn, message.run);
     appendOptions(turn, message.options || []);
@@ -430,6 +451,16 @@ window.addEventListener('message', (event) => {
     return;
   }
   if (message.type === 'runFailed') {
+    markEdit(message.id, message.message, false);
+    scrollToBottom();
+    return;
+  }
+  if (message.type === 'locateDone') {
+    markEdit(message.id, message.message, true);
+    scrollToBottom();
+    return;
+  }
+  if (message.type === 'locateFailed') {
     markEdit(message.id, message.message, false);
     scrollToBottom();
     return;

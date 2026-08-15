@@ -14,7 +14,7 @@ import type { ChatContextKind } from "../core/chatContext";
  *
  * プロンプトを変更したら version を上げること。
  */
-export const WORK_CHAT_VERSION = "2.1";
+export const WORK_CHAT_VERSION = "2.2";
 
 export const WORK_CHAT_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 作者が今開いている画面（本文・プロット・設定資料など）について相談を受けます。
@@ -68,8 +68,18 @@ run に機能名を入れて提案してください（作者がボタンを押�
 reply には、どちらを勧めるかと、その理由を短く書いてください。
 頼まれていないのに run を付けないこと。
 
+【本文の場所を指すとき】
+「ここが気になる」「この場面が」のように**特定の箇所を指して話すときは、locate を付けてください。**
+作者はボタンを押すだけで、その箇所を開いて光らせることができます。
+- text には、**本文にそのまま出てくる文字列**を写してください（言い換えない）。
+  写し間違えると見つからず、光らせられません。長すぎない一文が適切です。
+- 別のファイルの箇所を指すときだけ path を入れてください（作品フォルダーからの相対パス）。
+  いま開いているファイルの中なら path は不要です。
+- ファイルを開くだけでよいときは text を省いてください。
+- 場所を指していないときは locate を付けないこと。
+
 【出力形式】JSONのみ。前置き・後書き・コードフェンスを含めないこと。
-{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "..."}`;
+{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "locate": {"path": "...", "text": "...", "label": "..."}}`;
 
 export interface WorkChatTurn {
   role: "author" | "assistant";
@@ -161,6 +171,14 @@ export const WORK_CHAT_SCHEMA = {
       required: ["target", "content"],
     },
     run: { type: "string" },
+    locate: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        text: { type: "string" },
+        label: { type: "string" },
+      },
+    },
   },
   required: ["reply"],
 } as const;
@@ -174,6 +192,8 @@ export interface WorkChatAnswer {
   edit: unknown;
   /** 標準機能の起動の提案。許可した一覧と突き合わせてから使う */
   run: unknown;
+  /** 本文の該当箇所を指す提案。呼び出し側で実在を照合する */
+  locate: unknown;
 }
 
 /**
@@ -204,6 +224,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
           needFiles?: unknown;
           edit?: unknown;
           run?: unknown;
+          locate?: unknown;
         };
         return {
           reply: record.reply.trim(),
@@ -217,6 +238,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
           needFiles: record.needFiles,
           edit: record.edit,
           run: record.run,
+          locate: record.locate,
         };
       }
     } catch {
@@ -230,6 +252,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
     needFiles: undefined,
     edit: undefined,
     run: undefined,
+    locate: undefined,
   };
 }
 

@@ -24,11 +24,14 @@ import {
 import {
   describeChatEditRejection,
   parseChatEdit,
+  parseChatLocate,
   parseChatRun,
   sanitizeRequestedPaths,
   type ChatEdit,
+  type ChatLocate,
   type ChatRunKind,
 } from "../core/chatEdit";
+import { findTextRange } from "../core/textLocate";
 import { applyChatEdit } from "./applyChatEdit";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { buildWorkChatPanelHtml } from "../views/workChatPanelHtml";
@@ -65,13 +68,16 @@ const HISTORY_TURNS = 12;
 const MAX_REQUESTED_FILES = 3;
 /** 1ファイルあたりに渡す上限 */
 const REQUESTED_FILE_CHARS = 6_000;
+/** 該当箇所の印を残す時間。見つけたあとは要らないので消す */
+const HIGHLIGHT_MS = 8_000;
 
 type Incoming =
   | { type: "ready" }
   | { type: "ask"; question: string }
   | { type: "clear" }
   | { type: "applyEdit"; id: string }
-  | { type: "run"; id: string };
+  | { type: "run"; id: string }
+  | { type: "locate"; id: string };
 
 /**
  * 標準機能を起動する口。
@@ -105,7 +111,29 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     string,
     { kind: ChatRunKind; work: WorkEntry; filePath?: string }
   >();
+  /** 押されるのを待っている「そこを見せて」の提案 */
+  private readonly pendingLocates = new Map<
+    string,
+    { locate: ChatLocate; work: WorkEntry; fallbackPath: string }
+  >();
   private editSeq = 0;
+
+  /**
+   * 該当箇所に掛ける色。
+   *
+   * 選択（カーソル）だけでも位置は分かるが、作者が本文をクリックすると
+   * 消えてしまう。話の間だけ残る印として重ねる。
+   */
+  private readonly highlight = vscode.window.createTextEditorDecorationType({
+    backgroundColor: new vscode.ThemeColor("editor.findMatchHighlightBackground"),
+    borderRadius: "2px",
+  });
+  private highlightTimer: ReturnType<typeof setTimeout> | undefined;
+
+  dispose(): void {
+    if (this.highlightTimer) clearTimeout(this.highlightTimer);
+    this.highlight.dispose();
+  }
 
   /**
    * 直前に開いていた本文エディター。
@@ -163,6 +191,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
     if (message.type === "run") {
       await this.runFeature(message.id);
+      return;
+    }
+    if (message.type === "locate") {
+      await this.showLocation(message.id);
     }
   }
 
@@ -255,6 +287,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         options: answer.options,
         edit: this.stageEdit(answer.edit, context?.work),
         run: this.stageRun(answer.run, context),
+        locate: this.stageLocate(answer.locate, context),
       });
     } catch (error) {
       const message =
@@ -336,6 +369,115 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       filePath: kind === "checkTyposForFile" ? context.filePath : undefined,
     });
     return { id, label, usesAI: parsed.usesAI };
+  }
+
+  /** 「そこを見せて」の提案を受け取り、押されるまで持っておく */
+  private stageLocate(
+    raw: unknown,
+    context: ResolvedContext | undefined
+  ): { id: string; label: string } | undefined {
+    if (raw === undefined || raw === null || !context) return undefined;
+
+    const locate = parseChatLocate(raw);
+    if (!locate) return undefined;
+
+    const id = `locate-${++this.editSeq}`;
+    this.pendingLocates.set(id, {
+      locate,
+      work: context.work,
+      fallbackPath: context.filePath,
+    });
+    return { id, label: locate.label };
+  }
+
+  /**
+   * 該当箇所を開いて光らせる。
+   *
+   * **AIが引用した文字列が本当にそこにあるかを照合してから光らせる。**
+   * 照合せずに位置だけ信じると、少し言い換えた引用に対して別の場所を
+   * 光らせることになり、作者は「そこは何も問題ないが」と混乱する。
+   * 見つからなければ、ファイルを開くところまでで止めてそう伝える。
+   */
+  private async showLocation(id: string): Promise<void> {
+    const staged = this.pendingLocates.get(id);
+    if (!staged) {
+      this.postError("この提案はもう使えません。もう一度聞いてください。");
+      return;
+    }
+
+    const target = staged.locate.path
+      ? path.resolve(staged.work.folderPath, staged.locate.path)
+      : staged.fallbackPath;
+
+    try {
+      const document = await vscode.workspace.openTextDocument(
+        vscode.Uri.file(target)
+      );
+      const editor = await vscode.window.showTextDocument(document, {
+        preview: false,
+        // 相談を続けられるよう、パネルからフォーカスを奪わない
+        preserveFocus: true,
+      });
+
+      if (!staged.locate.text) {
+        void this.view?.webview.postMessage({
+          type: "locateDone",
+          id,
+          message: `${path.basename(target)} を開きました。`,
+        });
+        return;
+      }
+
+      const found = findTextRange(document.getText(), staged.locate.text);
+      if (!found) {
+        void this.view?.webview.postMessage({
+          type: "locateFailed",
+          id,
+          message:
+            `${path.basename(target)} を開きましたが、` +
+            "その文章は見つかりませんでした（引用が本文と少し違うようです）。",
+        });
+        return;
+      }
+
+      const range = new vscode.Range(
+        found.line,
+        found.character,
+        found.endLine,
+        found.endCharacter
+      );
+      editor.selection = new vscode.Selection(range.start, range.end);
+      editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+      this.applyHighlight(editor, range);
+
+      void this.view?.webview.postMessage({
+        type: "locateDone",
+        id,
+        message: `${path.basename(target)} の ${found.line + 1}行目を開きました。`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      void this.view?.webview.postMessage({
+        type: "locateFailed",
+        id,
+        message: `開けませんでした: ${message}`,
+      });
+    }
+  }
+
+  /**
+   * 印を掛ける。しばらく経ったら消す。
+   *
+   * 消さないと、次に別の話をしていても前の印が残り続ける。
+   * 「どこを指しているか」を示すのが目的なので、見つけたあとは要らない。
+   */
+  private applyHighlight(editor: vscode.TextEditor, range: vscode.Range): void {
+    if (this.highlightTimer) clearTimeout(this.highlightTimer);
+    editor.setDecorations(this.highlight, [range]);
+    this.highlightTimer = setTimeout(() => {
+      editor.setDecorations(this.highlight, []);
+      this.highlightTimer = undefined;
+    }, HIGHLIGHT_MS);
   }
 
   /** 作者がボタンを押したときだけ、標準機能を起動する */

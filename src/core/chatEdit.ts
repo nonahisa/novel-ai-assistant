@@ -194,6 +194,47 @@ export function parseChatRun(raw: unknown): ChatRun | undefined {
   return { kind, label: found.label, usesAI: found.usesAI };
 }
 
+/**
+ * 「この箇所を見せて」の指示。
+ *
+ * 作者から「会話内容に応じて開いている画面の変更」と
+ * 「会話の中の該当箇所をハイライト」を求められた（2026-08-15）。
+ * ファイルを開くことと箇所を光らせることは、作者から見れば
+ * 「そこを見せて」という1つの動きなので、1つの指示にまとめている。
+ *
+ * `path` を省けば「いま開いているファイルの中の、この箇所」。
+ * `text` を省けば「このファイルを開くだけ」。
+ */
+export interface ChatLocate {
+  /** 作品フォルダーからの相対パス。省略時はいま開いているファイル */
+  path?: string;
+  /** 光らせたい箇所の原文（逐語）。省略するとファイルを開くだけ */
+  text?: string;
+  label: string;
+}
+
+export function parseChatLocate(raw: unknown): ChatLocate | undefined {
+  if (!isRecord(raw)) return undefined;
+
+  const rawPath = typeof raw.path === "string" ? raw.path.trim() : "";
+  // パスの安全確認は読み込みと同じ関門を通す。
+  // ここを緩めると、作品の外のファイルを開かせられる
+  const path = rawPath ? sanitizeRequestedPaths([rawPath], 1)[0] : undefined;
+  if (rawPath && !path) return undefined;
+
+  const text = typeof raw.text === "string" ? raw.text.trim() : "";
+  if (!path && !text) return undefined;
+
+  const label =
+    typeof raw.label === "string" && raw.label.trim()
+      ? raw.label.trim()
+      : text
+        ? "該当箇所を開く"
+        : `${path} を開く`;
+
+  return { path, text: text || undefined, label };
+}
+
 function splitOnce(text: string, separator: string): [string, string | undefined] {
   const at = text.indexOf(separator);
   if (at === -1) return [text, undefined];

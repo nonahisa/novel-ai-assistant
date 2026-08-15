@@ -341,6 +341,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   });
   context.subscriptions.push(
+    workChatPanel,
     vscode.window.registerWebviewViewProvider(WORK_CHAT_VIEW_ID, workChatPanel, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
