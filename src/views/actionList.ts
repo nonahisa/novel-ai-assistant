@@ -81,6 +81,20 @@ export const ACTION_TREE: readonly ActionGroup[] = [
     label: "執筆データ",
     icon: "graph",
     entries: [
+      // **全作品を先頭に置く**（作者の指定、2026-08-16）。
+      // 目標（1日・1月）は作品を問わず共有する値なので、達成率はこちらが正しい。
+      // 作品ごとの画面を先に出すと、他の作品へ書いた分が入らない数字を
+      // 先に見ることになる
+      {
+        kind: "action",
+        command: "novelai.showAllWorksWritingStats",
+        label: "全作品の執筆統計を表示",
+        icon: "graph-scatter",
+        requiresWork: true,
+        detail:
+          "登録している全作品を合わせた執筆量を見ます。" +
+          "目標（1日・1月）は作品を問わず共有なので、達成率はこちらが正確です。",
+      },
       {
         kind: "action",
         command: "novelai.showWritingStats",
@@ -91,16 +105,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           "日次・週次・月次・年次の執筆量をグラフで見ます。" +
           "目標を設定していれば達成率も出ます。" +
           "話ごとの文字数一覧（長さの偏り）も同じ画面で見られます。",
-      },
-      {
-        kind: "action",
-        command: "novelai.showAllWorksWritingStats",
-        label: "全作品の執筆統計を表示",
-        icon: "graph-scatter",
-        requiresWork: true,
-        detail:
-          "登録している全作品を合わせた執筆量を見ます。" +
-          "目標（1日・1月）は作品を問わず共有なので、達成率はこちらが正確です。",
       },
       {
         kind: "action",
