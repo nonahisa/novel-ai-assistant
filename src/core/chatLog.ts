@@ -53,6 +53,15 @@ export interface ChatLogEntry {
   provider: string;
   model: string;
   paid: boolean;
+  /**
+   * 使ったプロンプトの版。
+   *
+   * **これが無いと、直したはずの指示が効いているのか分からない。**
+   * 拡張機能開発ホストは再読み込みするまで古いビルドで動くため、
+   * 「直したのに直っていない」の原因がそこなのか、指示が弱いのかを
+   * 切り分けられなかった（実機で実際に迷った、2026-08-15）。
+   */
+  promptVersion?: string;
   /** 何について聞いているか。「第12話 の本文」「登場人物: 太志」など */
   target?: string;
   /** 選択範囲を使ったか */
@@ -157,7 +166,8 @@ export function renderChatLogEntry(
   const lines: string[] = ["", "---", "", `## ${formatLogTime(now)}　${entry.panel}`, ""];
 
   const facts: string[] = [
-    `AI: ${entry.provider}（${entry.model}）${entry.paid ? "・有料" : "・無料"}`,
+    `AI: ${entry.provider}（${entry.model}）${entry.paid ? "・有料" : "・無料"}` +
+      (entry.promptVersion ? `／プロンプト v${entry.promptVersion}` : ""),
   ];
   if (entry.target) {
     facts.push(

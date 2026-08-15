@@ -384,6 +384,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       if (context) {
         appendChatLog(context.work, {
           panel: "相談パネル",
+          promptVersion: WORK_CHAT_VERSION,
           provider: resolved.provider.displayName,
           model: resolved.model,
           paid: resolved.provider.isPaid,
@@ -423,6 +424,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       if (context) {
         appendChatLog(context.work, {
           panel: "相談パネル",
+          promptVersion: WORK_CHAT_VERSION,
           provider: resolved.provider.displayName,
           model: resolved.model,
           paid: resolved.provider.isPaid,
