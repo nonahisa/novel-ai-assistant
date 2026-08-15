@@ -125,8 +125,10 @@ describe("登場人物抽出の品質ゲート", () => {
     assertChapterAndAddressPeriods(fixture, merged.characters);
   });
 
-  test("v3.0の構造化出力契約を公開する", () => {
-    expect(CHARACTER_EXTRACT_VERSION).toBe("3.0");
+  test("v4.0の構造化出力契約を公開する", () => {
+    // 4.0で「要約は推測ではない」を明示した（2026-08-15）。
+    // 版が変わるとキャッシュが無効になり、次回の抽出でAIを呼び直す
+    expect(CHARACTER_EXTRACT_VERSION).toBe("4.0");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.properties)
       .toHaveProperty("entityType");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.required)

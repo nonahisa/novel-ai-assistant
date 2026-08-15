@@ -62,6 +62,27 @@ const ABSENCE_SENTENCE_PATTERN =
   /^[（(]?[^)）]{0,30}(?:記述|描写|言及|記載|情報)(?:は)?(?:なし|無し|ありません|ない)[。.]?[）)]?$/u;
 
 /**
+ * 「本文から読み取れない」型の不在文。
+ *
+ * 上の2つでは**実データを取りこぼしていた**（2026-08-15に発見）。
+ * 「（本文から読み取れない）」は語の前に「本文から」が付くため
+ * `EMPTY_VALUE_PATTERN` に一致せず、「記述は確認できない」は
+ * 「記述」と「ない」の間に動詞が挟まるため `ABSENCE_SENTENCE_PATTERN` にも
+ * 一致しなかった。結果、主人公の性格欄に「（本文から読み取れない）」が
+ * そのまま載っていた。
+ *
+ * 誤って消さないための条件を2つ置く。
+ * 1. **本文・記述・描写などの語を含むこと。** 「感情の起伏がない」のように
+ *    それ自体が性格である値を消さないため
+ * 2. **文の途中に句点が無いこと。** 「（生前の記述は本文中になし。憑依後は
+ *    手足がスラリとしている）」のように、不在を述べたあと中身が続く値を残すため
+ *
+ * 「記述は少ない」を消さないよう、打ち消しの語も限定して並べる（「少ない」は入れない）。
+ */
+const ABSENCE_NEGATION_PATTERN =
+  /^[（(]?[^)）。]{0,50}(?:本文|記述|描写|言及|記載|情報)[^)）。]{0,20}(?:読み取れない|確認できない|見当たらない|判断できない|特定できない|わからない|分からない|ありません|存在しない)[。.]?[）)]?$/u;
+
+/**
  * 中身のある値か。空欄と同じ扱いにするものを弾く。
  *
  * 名前ではなく説明系の項目（性格・外見・説明など）に使う。
@@ -71,7 +92,8 @@ export function isMeaningfulValue(value: string | null | undefined): boolean {
   const text = value.trim();
   if (!text) return false;
   if (EMPTY_VALUE_PATTERN.test(text)) return false;
-  return !ABSENCE_SENTENCE_PATTERN.test(text);
+  if (ABSENCE_SENTENCE_PATTERN.test(text)) return false;
+  return !ABSENCE_NEGATION_PATTERN.test(text);
 }
 const COLLECTIVE_SUFFIX_PATTERN = /(?:たち|一同|一行|一団|人々|一族)$/u;
 const PRONOUNS = new Set([

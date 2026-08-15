@@ -39,6 +39,19 @@ describe("値が無いことを述べた文言を弾く", () => {
     }
   });
 
+  test("語の前後に言葉が付いた不在文も弾く", () => {
+    // 実データで取りこぼしていた形（2026-08-15）。
+    // 「本文から」が前に付く、「記述」と「ない」の間に動詞が挟まる、の2つ
+    for (const value of [
+      "（本文から読み取れない）",
+      "本文からは外見に関する具体的な記述は確認できない。",
+      "本文に情報がありません",
+      "該当する描写は見当たらない",
+    ]) {
+      expect(isMeaningfulValue(value), `${value} を弾けていない`).toBe(false);
+    }
+  });
+
   test("中身のある記述は通す", () => {
     for (const value of [
       "命令口調で指示を出し、部下の反論を最後まで聞かない",
@@ -92,23 +105,51 @@ describe("値が無いことを述べた文言を弾く", () => {
   });
 });
 
-describe("性格だけは推論を認める", () => {
-  test("システムプロンプトに例外を書く", () => {
-    // 原則1が全面禁止のままだと、本文のルールと食い違って指示が効かない
-    expect(BASE_SYSTEM_PROMPT).toContain("personality");
-    expect(BASE_SYSTEM_PROMPT).toContain("推論を認める");
+describe("要約と捏造を区別する", () => {
+  test("要約は推測ではないと明示する", () => {
+    // これを書かないと、AIは「本文に無いことは書けない」と受け取り、
+    // 本文の語句を切り貼りするだけになる（実データで発生、2026-08-15）
+    expect(BASE_SYSTEM_PROMPT).toContain("要約は推測ではない");
+    expect(BASE_SYSTEM_PROMPT).toContain("まとめて言い換える");
   });
 
-  test("根拠となる振る舞いを添えさせる", () => {
+  test("禁じるのは事実の捏造だと書く", () => {
+    expect(BASE_SYSTEM_PROMPT).toContain("本文に無い事実");
+  });
+
+  test("性格は言い切らせ、根拠を添えさせる", () => {
     const prompt = buildCharacterExtractPrompt({
       chunkText: "本文",
       chapterLabel: "第1話",
       knownCharacterNames: [],
     });
 
-    expect(prompt).toContain("どう振る舞ったか");
+    // 以前は「性質だけを書いてはならない」と、要約そのものを禁じていた
+    expect(prompt).toContain("どういう人か");
+    expect(prompt).toContain("根拠を括弧で添える");
+    expect(prompt).not.toContain("性質だけを書いてはならない");
     // 名前や性別からの推論は引き続き禁じる
     expect(prompt).toContain("名前の響き／性別／作品のジャンル");
+  });
+
+  test("所作の羅列を悪い例として示す", () => {
+    const prompt = buildCharacterExtractPrompt({
+      chunkText: "本文",
+      chapterLabel: "第1話",
+      knownCharacterNames: [],
+    });
+
+    expect(prompt).toContain("所作を並べただけ");
+  });
+
+  test("外見に動作を入れさせない", () => {
+    const prompt = buildCharacterExtractPrompt({
+      chunkText: "本文",
+      chapterLabel: "第1話",
+      knownCharacterNames: [],
+    });
+
+    expect(prompt).toContain("動作や仕草は外見ではない");
   });
 
   test("「記述なし」を値として書かせない", () => {
