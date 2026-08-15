@@ -78,6 +78,14 @@ import { expandNameVariants } from "../core/termIndex";
 import { evidencePhrases } from "../core/groundedEvidence";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { confirmPaidUsage } from "./aiConnectivity";
+import { prepareRetrieval, search, type RetrievalContext } from "./vectorSearch";
+import {
+  buildSearchQuery,
+  buildSearchTermsPrompt,
+  parseSearchTerms,
+  SEARCH_TERMS_SCHEMA,
+  SEARCH_TERMS_SYSTEM_PROMPT,
+} from "../prompts/searchTerms";
 import { AIError, recoveryForAIError } from "../ai/types";
 import {
   buildSettingsChatPrompt,
@@ -217,6 +225,8 @@ export class SettingsPanel {
 
   /** 本文は重いので一度読んだら使い回す。パネルを閉じるまで有効 */
   private excerptSources: ExcerptSource[] | undefined;
+  /** 検索の材料。パネルを開いている間は使い回す（毎回読み直すと重い） */
+  private retrieval: RetrievalContext | undefined;
   /** 選択中のレコードごとのやり取り。保存はしない */
   private readonly chatHistory = new Map<string, ChatTurn[]>();
   /** 有料のAIについて確認を取り終えたモデル名。切り替えたら取り直す */
@@ -838,7 +848,8 @@ export class SettingsPanel {
 
     const key = `${kind}:${id}`;
     const history = this.chatHistory.get(key) ?? [];
-    const excerpts = await this.excerptsFor(kind, record);
+    // 質問を渡す。渡さないと、どの質問でも同じ場面が集まってしまう
+    const excerpts = await this.excerptsFor(kind, record, question);
 
     const prompt = buildSettingsChatPrompt({
       workTitle: this.work.title,
@@ -921,8 +932,127 @@ export class SettingsPanel {
     return describeLocation(record as Location);
   }
 
-  /** その設定が出てくる場面を本文から集める */
+  /**
+   * その設定について聞かれたことに近い場面を集める。
+   *
+   * **質問文を検索に使う。** 以前は名前が出てくる場面を集めて作品全体から
+   * 均等に間引くだけで、質問はいっさい使っていなかった。実データ
+   * （978回登場する人物）で測ると、名前を含む場面733件のうち渡していたのは
+   * 30件（4.1%）で、しかもどの質問でも中身が同じだった。
+   * 「答えの語が渡した12,000字に入っているか」で数えて1/5しか当たっていない。
+   *
+   * 質問で並べ替えると3/5、質問を検索語へ直してから意味検索と語句一致を
+   * 半々で詰めると5/5になった。
+   *
+   * 質問が無い場面（項目の充実）では、埋めたい項目名を手掛かりにする。
+   */
   private async excerptsFor(
+    kind: SettingsKind,
+    record: SettingsRecord,
+    question?: string
+  ): Promise<MentionExcerpt[]> {
+    const searched = await this.searchExcerpts(kind, record, question);
+    if (searched) return searched;
+    return this.evenlySampledExcerpts(kind, record);
+  }
+
+  /**
+   * 質問に近い場面を検索で集める。
+   *
+   * 検索の材料が用意できないとき（本文が読めないなど）は undefined を返し、
+   * 呼び出し側が従来のやり方へ落ちる。**相談そのものは止めない。**
+   */
+  private async searchExcerpts(
+    kind: SettingsKind,
+    record: SettingsRecord,
+    question?: string
+  ): Promise<MentionExcerpt[] | undefined> {
+    const hint = question?.trim() || this.enrichHint(kind);
+    if (!hint) return undefined;
+
+    try {
+      if (!this.retrieval) {
+        this.retrieval = await withCancellableProgress(
+          "本文を読み込んでいます",
+          async () => prepareRetrieval(this.work)
+        );
+        if (this.retrieval.conflicted.length > 0) {
+          this.post({
+            type: "error",
+            message: `未解決の競合があるファイルは参照していません（${this.retrieval.conflicted.join(
+              "、"
+            )}）。`,
+          });
+        }
+      }
+
+      const names = searchTermsFor(kind, record);
+      const terms = await this.expandSearchTerms(hint, record.name);
+      const query = buildSearchQuery(hint, terms, record.name);
+
+      const found = await search(this.retrieval, query, {
+        maxChars: EXCERPT_MAX_CHARS,
+        // その設定が出てくる材料に限る。相談の対象が決まっているため
+        mustInclude: names,
+      });
+      if (found.length === 0) return undefined;
+
+      return found.map((candidate) => ({
+        label: `${candidate.item.source}・${candidate.item.label}`,
+        text: candidate.item.text,
+      }));
+    } catch (error) {
+      logFailure("設定資料パネルの検索に失敗（従来のやり方で続行）", {
+        理由: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
+  }
+
+  /**
+   * 質問を検索語へ直す。
+   *
+   * 実データで、この段が無いと「妬ましさを感じる場面」が30位以内に
+   * 入らなかった。「嫉妬」へ直せば1〜2位で出る。
+   * **失敗しても質問文そのままで検索する**（今より悪くはならない）。
+   */
+  private async expandSearchTerms(
+    question: string,
+    focus: string
+  ): Promise<string[]> {
+    try {
+      const resolved = await this.registry.resolve();
+      if (!resolved) return [];
+      const result = await resolved.provider.generate({
+        systemPrompt: SEARCH_TERMS_SYSTEM_PROMPT,
+        userPrompt: buildSearchTermsPrompt({
+          question,
+          focus,
+          knownTerms: this.characters.map((character) => character.name),
+        }),
+        model: resolved.model,
+        temperature: 0.2,
+        jsonSchema: SEARCH_TERMS_SCHEMA,
+        disableThinking: true,
+      });
+      return parseSearchTerms(result.text);
+    } catch (error) {
+      logFailure("検索語の作成に失敗（質問文のまま検索）", {
+        理由: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  /** 項目の充実では質問が無いので、埋めたい項目名を手掛かりにする */
+  private enrichHint(kind: SettingsKind): string {
+    return enrichableFields(kind, this.customFields)
+      .map((field) => field.label)
+      .join(" ");
+  }
+
+  /** 従来のやり方。名前が出てくる場面を作品全体から均等に間引く */
+  private async evenlySampledExcerpts(
     kind: SettingsKind,
     record: SettingsRecord
   ): Promise<MentionExcerpt[]> {

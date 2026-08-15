@@ -426,6 +426,13 @@ window.addEventListener('message', (event) => {
       (message.files || []).join('・') + ' を読んでいます…';
     return;
   }
+  if (message.type === 'searched') {
+    // 質問に近い場面を探した。**どこから拾ったかを見せる。**
+    // 設定資料やあらすじは本文からAIが作ったものなので、
+    // 何由来の答えなのかが分からないと作者が確かめようがない
+    thinkingEl.textContent = message.summary + '。考えています…';
+    return;
+  }
   if (message.type === 'answer') {
     setBusy(false);
     thinkingEl.textContent = '考えています…';

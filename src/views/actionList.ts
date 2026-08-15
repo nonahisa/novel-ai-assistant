@@ -602,6 +602,46 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           },
         ],
       },
+      {
+        kind: "section",
+        label: "相談で使う検索",
+        icon: "search-fuzzy",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.setupVectorSearch",
+            label: "意味検索（ベクトルDB）の準備",
+            icon: "search-fuzzy",
+            requiresWork: false,
+            detail:
+              "相談のときに、質問に近い場面を本文・設定資料・あらすじから探して渡します。" +
+              "**入れなくても、質問を使って探すようになります**（語句一致）。" +
+              "入れると言い換えでの質問にも当たりやすくなりますが、" +
+              "モデルの取得（約1.2GB）と作品ごとの索引づくりが要ります。" +
+              "非力な機械では入れないままで構いません。",
+          },
+          {
+            kind: "action",
+            command: "novelai.buildVectorIndex",
+            label: "検索用の索引を作る・更新する",
+            icon: "database",
+            requiresWork: true,
+            detail:
+              "作品の本文・設定資料・あらすじから索引を作ります。" +
+              "**変わっていない場面は作り直しません。** " +
+              "手元のOllamaで行うので料金はかかりません。",
+          },
+          {
+            kind: "action",
+            command: "novelai.clearVectorIndex",
+            label: "検索用の索引を削除する",
+            icon: "trash",
+            requiresWork: true,
+            detail:
+              "索引を消して置き場所を空けます。消しても本文・設定資料は変わりません。",
+          },
+        ],
+      },
     ],
   },
 

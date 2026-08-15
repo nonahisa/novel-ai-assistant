@@ -35,6 +35,19 @@ import { findTextRange } from "../core/textLocate";
 import { applyChatEdit } from "./applyChatEdit";
 import { confirmPaidUsage } from "./aiConnectivity";
 import { buildFeatureGuide } from "./featureGuide";
+import {
+  prepareRetrieval,
+  search,
+  type RetrievalContext,
+} from "./vectorSearch";
+import { describeRetrieval, formatForPrompt } from "../core/retrieval";
+import {
+  buildSearchQuery,
+  buildSearchTermsPrompt,
+  parseSearchTerms,
+  SEARCH_TERMS_SCHEMA,
+  SEARCH_TERMS_SYSTEM_PROMPT,
+} from "../prompts/searchTerms";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { buildWorkChatPanelHtml } from "../views/workChatPanelHtml";
 
@@ -64,6 +77,14 @@ export const WORK_CHAT_VIEW_ID = "novelai.chatView";
 
 /** 一度に渡す抜粋の上限。長い本文（73万字のファイルがある）を丸ごと渡せない */
 const EXCERPT_CHARS = 4_000;
+
+/**
+ * 質問に近い場面へ割く文字数。
+ *
+ * 開いている画面の抜粋（4,000字）とは別枠。合わせて約12,000字で、
+ * 既存の抜粋の上限と同じ量に収まる。
+ */
+const RELATED_MAX_CHARS = 8_000;
 /** 覚えておくやり取りの数。増やすほど入力が伸びて料金がかかる */
 const HISTORY_TURNS = 12;
 /** AIの求めに応じて読むファイルの上限。読みすぎると入力が膨らむ */
@@ -127,6 +148,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 無料のOllamaから有料のClaudeへ移ったとき、黙って課金が始まっては困る。
    */
   private paidConfirmedFor: string | undefined;
+
+  /** 検索の材料。作品が変わるまで使い回す（毎回読み直すと重い） */
+  private retrieval: RetrievalContext | undefined;
+  private retrievalWorkId: string | undefined;
 
   /**
    * 該当箇所に掛ける色。
@@ -260,6 +285,11 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     const context = await this.resolveContext();
     if (context) useLogFile(context.work.folderPath);
 
+    // **質問に近い場面を作品全体から探して足す。**
+    // 開いている画面の前後だけでは、大きい作品でほとんど答えられなかった
+    // （78.5万字の作品で、実測3問中0問）。
+    const found = context ? await this.findRelated(context.work, question) : [];
+
     try {
       logStep(`相談: v${WORK_CHAT_VERSION} / ${resolved.model}`);
 
@@ -275,7 +305,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
             excerpt: context?.excerpt ?? "",
             excerptTruncated: context?.truncated ?? false,
             fromSelection: context?.fromSelection ?? false,
-            reference: context?.reference ?? [],
+            reference: [...(context?.reference ?? []), ...found],
             requestedFiles,
             history: this.history.slice(-HISTORY_TURNS),
             question,
@@ -673,6 +703,93 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * AIは人物を「主人公」としか呼べず、話が噛み合わない。
    * 設定資料そのものを開いているときは、画面の内容に既に入っているので渡さない。
    */
+  /**
+   * 質問に近い場面を、作品全体から探して渡す。
+   *
+   * 開いている画面の前後だけでは足りない。実データ（78.5万字・219話）で、
+   * 冒頭から詰める従来のやり方は3問中0問しか答えられなかったのに対し、
+   * 質問で探した材料を渡すと3問とも答えられた。
+   *
+   * **失敗しても相談は続ける。** 探せなかっただけで止めると、
+   * 今までできていた「開いている画面についての相談」までできなくなる。
+   */
+  private async findRelated(
+    work: WorkEntry,
+    question: string
+  ): Promise<string[]> {
+    try {
+      // 作品が変わったら作り直す。前の作品の場面を渡さないため
+      if (!this.retrieval || this.retrievalWorkId !== work.id) {
+        this.retrieval = await prepareRetrieval(work);
+        this.retrievalWorkId = work.id;
+      }
+
+      const terms = await this.expandSearchTerms(work, question);
+      const found = await search(
+        this.retrieval,
+        buildSearchQuery(question, terms),
+        { maxChars: RELATED_MAX_CHARS }
+      );
+      if (found.length === 0) return [];
+
+      // 何を参照したかを作者にも見せる。材料が見えないまま答えが出ると、
+      // どこ由来の話なのか確かめようがない
+      void this.view?.webview.postMessage({
+        type: "searched",
+        summary: describeRetrieval(found),
+      });
+
+      return [
+        "【質問に近い場面】（出どころを添えています。" +
+          "設定資料とあらすじは本文からAIが作ったものなので、" +
+          "本文と食い違うときは本文を優先してください）\n" +
+          formatForPrompt(found),
+      ];
+    } catch (error) {
+      logFailure("相談パネルの検索に失敗（開いている画面だけで続行）", {
+        理由: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  /** 質問を検索語へ直す。失敗しても質問文のまま検索する */
+  private async expandSearchTerms(
+    work: WorkEntry,
+    question: string
+  ): Promise<string[]> {
+    try {
+      const resolved = await this.ai.resolve();
+      if (!resolved) return [];
+      const names = await this.characterNames(work);
+      const result = await resolved.provider.generate({
+        systemPrompt: SEARCH_TERMS_SYSTEM_PROMPT,
+        userPrompt: buildSearchTermsPrompt({ question, knownTerms: names }),
+        model: resolved.model,
+        temperature: 0.2,
+        jsonSchema: SEARCH_TERMS_SCHEMA,
+        disableThinking: true,
+      });
+      return parseSearchTerms(result.text);
+    } catch (error) {
+      logFailure("検索語の作成に失敗（質問文のまま検索）", {
+        理由: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  private async characterNames(work: WorkEntry): Promise<string[]> {
+    try {
+      const loaded = await new CharacterStore(work).loadAll();
+      return loaded.characters
+        .filter((character) => !character.isMob)
+        .map((character) => character.name);
+    } catch {
+      return [];
+    }
+  }
+
   private async buildReference(
     work: WorkEntry,
     kind: ChatContextKind

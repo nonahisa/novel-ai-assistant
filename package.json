@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "小説執筆のための統合環境。作品を登録して話数・文字数・執筆量を管理し、本文から登場人物や世界観などの設定資料を抽出します。プロットの逆算、あらすじ・紹介文・キャッチコピーの生成、各話の盛り上がりを見る感情曲線、誤字脱字と表記ゆれの検知、開いている画面についてのAI相談まで、執筆の前後を通して支えます。AIはOllama（無料・ローカル）とClaude・ChatGPT・Geminiから選べ、原稿を勝手に書き換えることはありません。",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "local",
   "private": true,
   "license": "MIT",
@@ -379,6 +379,24 @@
         "title": "世界観一覧を生成（AIを使わない）",
         "category": "小説執筆",
         "icon": "$(globe)"
+      },
+      {
+        "command": "novelai.setupVectorSearch",
+        "title": "意味検索（ベクトルDB）の準備",
+        "category": "小説執筆",
+        "icon": "$(search-fuzzy)"
+      },
+      {
+        "command": "novelai.buildVectorIndex",
+        "title": "検索用の索引を作る・更新する",
+        "category": "小説執筆",
+        "icon": "$(database)"
+      },
+      {
+        "command": "novelai.clearVectorIndex",
+        "title": "検索用の索引を削除する",
+        "category": "小説執筆",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -758,6 +776,21 @@
           "default": 10,
           "minimum": 1,
           "description": "自動fetchの最小間隔（分）。本文を開くたびにネットワークへ出ると、回線の遅い環境で操作が重くなるため、前回からこの時間が経つまでは取りに行きません。"
+        },
+        "novelai.vectorSearch.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "相談で使う「意味検索」（ベクトルDB）を使います。切っていても、質問を使って場面を探すこと自体は行われます（語句一致）。入にすると言い換えでの質問にも当たりやすくなりますが、埋め込みモデルの取得（約1.2GB）と、作品ごとの索引づくりが必要になります。非力な機械では切ったままをおすすめします。"
+        },
+        "novelai.vectorSearch.model": {
+          "type": "string",
+          "default": "bge-m3",
+          "description": "意味検索に使う埋め込みモデル（Ollama）。日本語を含む多言語向けの bge-m3 を既定にしています。変更すると索引は作り直しになります。"
+        },
+        "novelai.vectorSearch.autoUpdate": {
+          "type": "boolean",
+          "default": true,
+          "description": "相談を始めるときに、本文の変更ぶんだけ索引を自動で追加します（変わっていない場面は作り直しません）。切ると、作者が「検索用の索引を作る」を実行するまで更新されません。"
         }
       }
     }

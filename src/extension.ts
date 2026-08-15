@@ -53,6 +53,12 @@ import { PendingUpdateStore } from "./core/pendingUpdates";
 import { addWorkFromGithub } from "./features/addWorkFromGithub";
 import { restoreFromHistory } from "./features/gitRestore";
 import { setupOllama } from "./features/setupOllama";
+import { setupVectorSearch } from "./features/setupVectorSearch";
+import {
+  buildVectorIndex,
+  isVectorSearchEnabled,
+  removeVectorIndex,
+} from "./features/vectorSearch";
 import {
   registerProgressCancelCommand,
   withProgress,
@@ -739,6 +745,61 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("novelai.setupOllama", async () => {
       await setupOllama(aiRegistry);
     })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.setupVectorSearch", async () => {
+      await setupVectorSearch();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.buildVectorIndex",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        if (!isVectorSearchEnabled()) {
+          const open = "準備を開く";
+          const picked = await vscode.window.showInformationMessage(
+            "意味検索が「切」になっています。切のままでも相談は語句一致で場面を探すので、索引は要りません。",
+            open
+          );
+          if (picked === open) {
+            await vscode.commands.executeCommand("novelai.setupVectorSearch");
+          }
+          return;
+        }
+        const result = await buildVectorIndex(work);
+        if (!result) return;
+        const size = (result.bytes / 1024 / 1024).toFixed(1);
+        const head = result.cancelled ? "途中まで保存しました" : "索引ができました";
+        vscode.window.showInformationMessage(
+          `${head}：新しく${result.built}件、そのまま使えたもの${result.reused}件、` +
+            `古くなって消したもの${result.removed}件（全${result.total}件・` +
+            `${result.seconds.toFixed(0)}秒・${size}MB）`
+        );
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.clearVectorIndex",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        const yes = "削除する";
+        const picked = await vscode.window.showWarningMessage(
+          `「${work.title}」の検索用の索引を削除します。本文や設定資料は変わりません。`,
+          { modal: true },
+          yes
+        );
+        if (picked !== yes) return;
+        await removeVectorIndex(work);
+        vscode.window.showInformationMessage("索引を削除しました。");
+      }
+    )
   );
 
   context.subscriptions.push(
