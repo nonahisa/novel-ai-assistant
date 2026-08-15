@@ -30,17 +30,33 @@ const CATCHPHRASE_LINE = /^>\s*(.+?)\s*$/;
  */
 export const EPISODE_SECTION_HEADING = "## 各話あらすじ";
 
+/**
+ * 感情曲線の見出し。
+ *
+ * **読み取りはこの見出しでも打ち切る。** 各話あらすじと同じく、
+ * ここから下は毎回組み立て直す生成物であり、紹介文として取り込むと
+ * 保存のたびに二重に積もる。紹介文の下・あらすじの上に置く
+ * （作者の要望どおりの位置）。
+ */
+export const EMOTION_SECTION_HEADING = "## 感情曲線";
+
 export function buildSynopsisMarkdown(
   workTitle: string,
   doc: SynopsisDoc,
   /** 各話あらすじの本文（`synopsisMarkdown.ts` で組み立てたもの）。無ければ載せない */
-  episodeSection?: string
+  episodeSection?: string,
+  /** 感情曲線（`emotionCurve.ts` で組み立てたもの）。無ければ載せない */
+  emotionSection?: string
 ): string {
   const lines = [`# ${workTitle}`, ""];
   if (doc.catchphrase) {
     lines.push(`> ${doc.catchphrase}`, "");
   }
   lines.push(doc.blurb.trim(), "");
+
+  if (emotionSection && emotionSection.trim()) {
+    lines.push(emotionSection.trim(), "");
+  }
 
   if (episodeSection && episodeSection.trim()) {
     lines.push(EPISODE_SECTION_HEADING, "", episodeSection.trim(), "");
@@ -61,9 +77,15 @@ export function parseSynopsisMarkdown(text: string): SynopsisDoc {
   const body: string[] = [];
 
   for (const line of lines) {
-    // 各話あらすじの見出しから下は生成物なので、紹介文には取り込まない。
-    // 取り込むと、書き戻すたびにあらすじが紹介文の中へ二重に積もる
-    if (line.trim() === EPISODE_SECTION_HEADING) break;
+    // 感情曲線・各話あらすじの見出しから下は生成物なので、紹介文には
+    // 取り込まない。取り込むと、書き戻すたびに二重に積もる。
+    // 感情曲線のほうが上にあるので、こちらで先に止まる
+    if (
+      line.trim() === EMOTION_SECTION_HEADING ||
+      line.trim() === EPISODE_SECTION_HEADING
+    ) {
+      break;
+    }
 
     // 先頭の見出しは作品名なので落とす（組み立て直すときに付け直す）
     if (body.length === 0 && catchphrase === null && /^#\s/.test(line)) {

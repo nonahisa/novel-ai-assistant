@@ -13,6 +13,7 @@ import {
   type SynopsisDoc,
 } from "../core/synopsisDoc";
 import { buildSynopsisListMarkdown } from "../core/synopsisMarkdown";
+import { buildEmotionCurveMarkdown } from "../core/emotionCurve";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { atomicWriteFile, createManagedRecoveryPath } from "../core/atomicWrite";
 import {
@@ -358,20 +359,24 @@ async function synopsisPath(work: WorkEntry): Promise<string> {
 async function buildEpisodeSection(
   work: WorkEntry,
   workTitle: string
-): Promise<string> {
+): Promise<{ episodes: string; emotion: string }> {
   let set;
   try {
     set = await new SynopsisStore(work).load();
   } catch {
     // あらすじが読めなくても紹介文は書ける。載せないだけにする
-    return "";
+    return { episodes: "", emotion: "" };
   }
-  if (set.episodes.length === 0) return "";
-  return buildSynopsisListMarkdown(set, {
-    workTitle,
-    headingLevel: 2,
-    includeTitle: false,
-  });
+  if (set.episodes.length === 0) return { episodes: "", emotion: "" };
+
+  return {
+    episodes: buildSynopsisListMarkdown(set, {
+      workTitle,
+      headingLevel: 2,
+      includeTitle: false,
+    }),
+    emotion: buildEmotionCurveMarkdown(set.episodes),
+  };
 }
 
 /**
@@ -413,12 +418,14 @@ async function writeSynopsisDoc(
   const target = await synopsisPath(work);
   const current = await readSynopsisDoc(work);
   const next = update(current);
-  // 各話あらすじも同じ文書に載せる（作者の要望、2026-08-14）。
+  // 各話あらすじと感情曲線も同じ文書に載せる（作者の要望、2026-08-14／15）。
   // 真実は chapter_synopses.json 側にあるので、書くたびに組み立て直す
+  const sections = await buildEpisodeSection(work, workTitle);
   const body = buildSynopsisMarkdown(
     workTitle,
     next,
-    await buildEpisodeSection(work, workTitle)
+    sections.episodes,
+    sections.emotion
   );
 
   await vscode.workspace.fs.createDirectory(

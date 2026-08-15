@@ -12,7 +12,7 @@
  * プロンプトを変更したら version を上げること。
  * 生成済みのあらすじはこの版と本文のハッシュで作り直しを判断する。
  */
-export const SYNOPSIS_VERSION = "1.0";
+export const SYNOPSIS_VERSION = "2.0";
 
 /** あらすじの上限。コード側でも切り詰める */
 export const SYNOPSIS_MAX_CHARS = 150;
@@ -85,6 +85,14 @@ ${characters}
 - 本文に書かれていない出来事を書かないこと。次の話の予想も書かないこと。
 - 人物は【登場人物】にある表記で書くこと。
 ${subtitleSection}
+【この話の感情を測る】
+物語の起伏を図にするための数値です。**あらすじの文章には書かず、emotion にだけ入れてください。**
+- intensity（盛り上がり）：0〜10の整数。静かな日常の場面が0〜2、対立や転機が5前後、
+  最も張り詰めた場面が8〜10。**作品の中で相対的に**付けること。
+- valence（明暗）：-5〜+5の整数。絶望・喪失が-5、救い・和解・勝利が+5、淡々としていれば0。
+- dominant（主だった感情）：「喜」「怒」「哀」「楽」から1つ。決めがたければ null。
+- reason：そう判断した理由を40字以内で。数値だけでは作者が確かめられないため必ず書くこと。
+
 【出力形式】
 指定されたJSON形式のみを出力してください。`;
 }
@@ -111,8 +119,20 @@ export const SYNOPSIS_SCHEMA = {
       },
     },
     confidence: { type: "string", enum: ["high", "medium", "low"] },
+    // 感情の測り。**全項目を必須にしてnullを許す。** 省略可能にすると
+    // 小さいモデルは面倒な項目を黙って落とす（P-20・P-02で踏んだ教訓）
+    emotion: {
+      type: ["object", "null"],
+      properties: {
+        intensity: { type: ["number", "null"] },
+        valence: { type: ["number", "null"] },
+        dominant: { type: ["string", "null"], enum: ["喜", "怒", "哀", "楽", null] },
+        reason: { type: ["string", "null"] },
+      },
+      required: ["intensity", "valence", "dominant", "reason"],
+    },
   },
-  required: ["synopsis", "subtitles", "confidence"],
+  required: ["synopsis", "subtitles", "confidence", "emotion"],
   additionalProperties: false,
 } as const;
 
@@ -126,4 +146,6 @@ export interface SynopsisResult {
   synopsis: string;
   subtitles: SubtitleSuggestion[];
   confidence: string;
+  /** 感情の測り。検証側で範囲を丸めるため、ここでは素の値を受ける */
+  emotion?: unknown;
 }

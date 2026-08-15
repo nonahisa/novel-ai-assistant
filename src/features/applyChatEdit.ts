@@ -14,6 +14,7 @@ import {
   type SynopsisDoc,
 } from "../core/synopsisDoc";
 import { buildSynopsisListMarkdown } from "../core/synopsisMarkdown";
+import { buildEmotionCurveMarkdown } from "../core/emotionCurve";
 import { SynopsisStore } from "../core/synopsisStore";
 import type { ChatEdit } from "../core/chatEdit";
 
@@ -84,11 +85,14 @@ async function applyToSynopsisDoc(
       : { catchphrase: null, blurb: "" }
   );
 
-  // 各話あらすじも同じ文書に載る（6.6.2）。真実はJSON側なので毎回作り直す
+  // 各話あらすじと感情曲線も同じ文書に載る（6.6.2）。
+  // 真実はJSON側なので毎回作り直す
+  const sections = await buildEpisodeSection(work);
   const body = buildSynopsisMarkdown(
     work.title,
     doc,
-    await buildEpisodeSection(work)
+    sections.episodes,
+    sections.emotion
   );
 
   await replaceFile(target, body);
@@ -139,17 +143,22 @@ async function applyToEpisodeSynopsis(
   return "設定/chapter_synopses.json";
 }
 
-async function buildEpisodeSection(work: WorkEntry): Promise<string> {
+async function buildEpisodeSection(
+  work: WorkEntry
+): Promise<{ episodes: string; emotion: string }> {
   try {
     const set = await new SynopsisStore(work).load();
-    if (set.episodes.length === 0) return "";
-    return buildSynopsisListMarkdown(set, {
-      workTitle: work.title,
-      headingLevel: 2,
-      includeTitle: false,
-    });
+    if (set.episodes.length === 0) return { episodes: "", emotion: "" };
+    return {
+      episodes: buildSynopsisListMarkdown(set, {
+        workTitle: work.title,
+        headingLevel: 2,
+        includeTitle: false,
+      }),
+      emotion: buildEmotionCurveMarkdown(set.episodes),
+    };
   } catch {
-    return "";
+    return { episodes: "", emotion: "" };
   }
 }
 

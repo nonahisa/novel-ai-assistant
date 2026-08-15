@@ -5,6 +5,7 @@ import {
   type SynopsisResult,
 } from "../prompts/synopsis";
 import { clampSummary } from "./summaryLimit";
+import type { ChapterEmotion } from "../models/synopsis";
 
 /**
  * あらすじとサブタイトル案の検証。
@@ -25,6 +26,13 @@ export interface ValidatedSynopsis {
   subtitles: SubtitleSuggestion[];
   /** 落とした案とその理由。作者に何が起きたか示すために残す */
   rejectedSubtitles: Array<{ text: string; reason: SubtitleRejectionReason }>;
+  /**
+   * 感情の測り。範囲外は丸め、読めなければ null。
+   *
+   * **数値の検証はコード側で行う。** AIは「0〜10」と指示しても
+   * 12 や -1 を返すことがあり、そのままグラフに渡すと軸からはみ出す。
+   */
+  emotion: ChapterEmotion | null;
 }
 
 export type SubtitleRejectionReason =
@@ -119,7 +127,52 @@ export function validateSynopsisResult(
     subtitles.push({ ...candidate, text });
   }
 
-  return { synopsis, subtitles, rejectedSubtitles: rejected };
+  return {
+    synopsis,
+    subtitles,
+    rejectedSubtitles: rejected,
+    emotion: validateEmotion(result.emotion),
+  };
+}
+
+/**
+ * 感情の測りを検証する。
+ *
+ * AIは「0〜10の整数」と指示しても、12や-1、小数を返すことがある。
+ * **範囲外は捨てずに丸める。** グラフの軸からはみ出さなければよく、
+ * 捨てるとその話だけ曲線が途切れて、かえって読み取りにくい。
+ */
+function validateEmotion(raw: unknown): ChapterEmotion | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+
+  const intensity = clampNumber(value.intensity, 0, 10);
+  const valence = clampNumber(value.valence, -5, 5);
+  // 2つとも読めなければ、点として打てない
+  if (intensity === null || valence === null) return null;
+
+  const dominant =
+    value.dominant === "喜" ||
+    value.dominant === "怒" ||
+    value.dominant === "哀" ||
+    value.dominant === "楽"
+      ? value.dominant
+      : null;
+
+  const reason = typeof value.reason === "string" ? value.reason.trim() : "";
+
+  return {
+    intensity,
+    valence,
+    dominant,
+    // 理由が長いと表が読みにくい。切り詰めても意味は伝わる
+    reason: reason.length > 40 ? `${reason.slice(0, 40)}…` : reason,
+  };
+}
+
+function clampNumber(value: unknown, min: number, max: number): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 /** 落とした理由を作者向けの言葉にする */
