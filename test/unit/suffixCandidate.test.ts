@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   findMergeCandidates,
+  isFamilyNameForm,
   isSuffixCallOf,
 } from "../../src/core/characterMerge";
 import { emptyCharacter, type Character } from "../../src/models/character";
@@ -49,6 +50,61 @@ describe("後ろに含まれる呼び方", () => {
 
   test("同じ長さ・同じ語では結ばない", () => {
     expect(isSuffixCallOf("ばあさん", "ばあさん")).toBe(false);
+  });
+});
+
+/**
+ * 日本語の名前は空白で区切られないことが多い。「密倉文佳」を分解できないため、
+ * 後から「文佳」が出てくると別人として登録される（実データで発生）。
+ * `isSuffixCallOf` は3字以上しか見ないので、2字の名（文佳・月夜・太志）は通れない。
+ */
+describe("姓名と、名だけの呼び方", () => {
+  test("姓を落とした呼び方を結び付ける", () => {
+    expect(isFamilyNameForm("文佳", "密倉文佳")).toBe(true);
+    expect(isFamilyNameForm("太志", "三門太志")).toBe(true);
+    expect(isFamilyNameForm("月夜", "春原月夜")).toBe(true);
+  });
+
+  test("姓が長すぎる組は結ばない", () => {
+    // 姓は3字まで（長谷川）。それ以上は別の語がくっついているだけ
+    expect(isFamilyNameForm("太志", "長谷川部太志")).toBe(false);
+  });
+
+  test("1字では判定しない", () => {
+    // 「子」「郎」で結ぶと無関係な組が大量に並ぶ
+    expect(isFamilyNameForm("郎", "太郎")).toBe(false);
+  });
+
+  test("ひらがな・カタカナだけの語は対象にしない", () => {
+    // 「ちゃん」「さん」を姓とみなさないため。
+    // カタカナ語の省略は isAbbreviationOf が見る
+    expect(isFamilyNameForm("ふみか", "みくらふみか")).toBe(false);
+    expect(isFamilyNameForm("リン", "アウクトリン")).toBe(false);
+  });
+
+  test("末尾が重ならなければ結ばない", () => {
+    expect(isFamilyNameForm("文佳", "文佳ちゃん")).toBe(false);
+    expect(isFamilyNameForm("密倉", "密倉文佳")).toBe(false);
+  });
+
+  test("候補として挙げる。自動では統合しない", () => {
+    const characters = [character("三門太志"), character("太志")];
+
+    expect(findMergeCandidates(characters)).toContainEqual({
+      names: ["三門太志", "太志"],
+      reason: "name_part",
+    });
+    expect(characters).toHaveLength(2);
+  });
+
+  test("同じ呼び名で既に拾えている組を、二重に挙げない", () => {
+    // 密倉文佳の別名に「文佳」がある。same_name で拾うので name_part は出さない
+    const characters = [character("密倉文佳", ["文佳"]), character("文佳")];
+
+    const reasons = findMergeCandidates(characters).map(
+      (candidate) => candidate.reason
+    );
+    expect(reasons).toEqual(["same_name"]);
   });
 });
 

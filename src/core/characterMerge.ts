@@ -66,10 +66,16 @@ export interface MergeCandidate {
   /**
    * abbreviation: 省略形とみられる（「ギルマス」と「ギルドマスター」）
    * suffix: 一方が他方の言い方を含む（「近所のおばあさん」と「ばあさん」）
+   * name_part: 姓名を繋げた名前と、名だけの名前（「密倉文佳」と「文佳」）
    * ambiguous: 統合先が複数あって決められなかった
    * same_name: 同じ呼称なのに別レコードになっている
    */
-  reason: "abbreviation" | "suffix" | "ambiguous" | "same_name";
+  reason:
+    | "abbreviation"
+    | "suffix"
+    | "name_part"
+    | "ambiguous"
+    | "same_name";
 }
 
 export function mergeExtractedCharacters(
@@ -669,6 +675,11 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
 
       if (pairs.some(([left, right]) => isSuffixCallOf(left, right))) {
         candidates.push({ names: [a.name, b.name], reason: "suffix" });
+        continue;
+      }
+
+      if (pairs.some(([left, right]) => isFamilyNameForm(left, right))) {
+        candidates.push({ names: [a.name, b.name], reason: "name_part" });
       }
     }
   }
@@ -709,6 +720,43 @@ export function isSuffixCallOf(shorter: string, longer: string): boolean {
   // 丁寧の「お」の有無だけが違う場合も同じ呼び方とみなす
   const bare = stripPolitePrefix(left);
   return bare.length >= 3 && bare !== left && right.endsWith(bare);
+}
+
+/** 漢字を1文字でも含むか */
+const HAS_KANJI = /[一-鿿㐀-䶿]/u;
+
+/** 姓とみなせる長さ。「密倉」「三門」「春原」「長谷川」まで */
+const MAX_FAMILY_NAME_LENGTH = 3;
+
+/**
+ * 姓名を繋げた名前と、名だけの名前か（「密倉文佳」と「文佳」）。
+ *
+ * **日本語の名前は空白で区切られないことが多い。** `splitNameParts` は
+ * 空白・中黒がある場合しか分解しないので、「密倉文佳」からは何も取り出せず、
+ * 後から「文佳」が出てきても別人として登録される（実データで起きた）。
+ *
+ * `isSuffixCallOf` は3字以上しか見ない。日本語の名は2字が多いので、
+ * 「文佳」「月夜」「太志」はそこを通れない。3字の下限は
+ * 「先生」「さん」のような語で候補が溢れるのを防ぐためだった。
+ * そこでこちらは**漢字であること**を条件にして、2字から拾えるようにする。
+ *
+ * **統合はしない。候補として出すだけ。** 「太郎」と「金太郎」のように
+ * 別人の可能性は残るので、判断は作者に委ねる（`findMergeCandidates` の方針）。
+ */
+export function isFamilyNameForm(shorter: string, longer: string): boolean {
+  const left = shorter.trim();
+  const right = longer.trim();
+
+  // 1字だと「子」「郎」のような字で無関係な組が大量に並ぶ
+  if (left.length < 2) return false;
+  if (!right.endsWith(left)) return false;
+
+  const family = right.slice(0, right.length - left.length);
+  if (family.length < 1 || family.length > MAX_FAMILY_NAME_LENGTH) return false;
+
+  // 姓と名の両方が漢字であること。カタカナ名の省略は isAbbreviationOf が見る。
+  // ひらがなだけの語（「ちゃん」「さん」）を姓とみなさないためでもある
+  return HAS_KANJI.test(left) && HAS_KANJI.test(family);
 }
 
 /**
