@@ -159,4 +159,41 @@ describe("プロット逆算の応答の検証", () => {
     expect(result.sections.logline).toBe("");
     expect(result.overLimit).toEqual([]);
   });
+
+  test("全項目がnullで返ってきても壊れない", () => {
+    // スキーマで全項目を必須・null許容にしたので、読み取れなかった項目は
+    // 省略ではなく null で返る。落とされるより、明示されるほうが扱いやすい
+    const result = validatePlotReverseResult({
+      logline: null,
+      theme: null,
+      motif: null,
+      worldview: null,
+      setting: null,
+      narrativePerson: null,
+      protagonistMotive: null,
+      outline: null,
+      mainCharacters: null,
+      notes: null,
+    });
+
+    for (const [key, value] of Object.entries(result.sections)) {
+      expect(value, key).toBe("");
+    }
+    expect(result.notes).toBeNull();
+  });
+
+  test("一部だけnullでも、埋まっている項目は取り込む", () => {
+    const result = validatePlotReverseResult({
+      logline: "一文。",
+      theme: null,
+      motif: null,
+      outline: ["出来事"],
+      mainCharacters: null,
+      notes: null,
+    });
+
+    expect(result.sections.logline).toBe("一文。");
+    expect(result.sections.theme).toBe("");
+    expect(result.sections.outline).toBe("- 出来事");
+  });
 });

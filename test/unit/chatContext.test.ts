@@ -146,4 +146,25 @@ describe("相談の応答の読み取り", () => {
 
     expect(answer.options).toEqual(["有効"]);
   });
+
+  test("全項目がnullで返ってきても壊れない", () => {
+    // スキーマで全項目を必須・null許容にしたので、無いものは省略ではなく
+    // null で返る。とくに options が落とされると選択肢の仕組みごと消える
+    const answer = parseWorkChatAnswer(
+      JSON.stringify({
+        reply: "こう読めます。",
+        options: null,
+        needFiles: null,
+        edit: null,
+        run: null,
+        locate: null,
+      })
+    );
+
+    expect(answer.reply).toBe("こう読めます。");
+    expect(answer.options).toEqual([]);
+    expect(answer.edit).toBeNull();
+    expect(answer.run).toBeNull();
+    expect(answer.locate).toBeNull();
+  });
 });

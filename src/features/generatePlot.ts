@@ -158,6 +158,14 @@ export async function generatePlot(
   }
 
   const validated = validatePlotReverseResult(parsed);
+
+  // タイトルはAIに聞かない（既に決まっているものを推測させる意味がない）。
+  // 空のままだと「なぜここだけ埋まらないのか」と見えるので、作品名を入れる。
+  // 別の題を考えている作者は、そのまま書き換えればよい
+  if (!validated.sections.title.trim()) {
+    validated.sections.title = work.title;
+  }
+
   await applyPlot(work, current, validated.sections, {
     overLimit: validated.overLimit,
     notes: validated.notes,

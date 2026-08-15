@@ -12,7 +12,7 @@
  *
  * プロンプトを変更したら version を上げること。
  */
-export const PLOT_REVERSE_VERSION = "2.0";
+export const PLOT_REVERSE_VERSION = "3.0";
 
 /**
  * **解釈を禁じない。** v1.0は「読み取れないものは推測で埋めるな」
@@ -102,20 +102,32 @@ ${section("場所", input.locationNames.join("、"))}
 }`;
 }
 
-/** 構造化出力に渡すJSONスキーマ */
+/**
+ * 構造化出力に渡すJSONスキーマ。
+ *
+ * **全項目を必須にし、nullを許す。** 省略可能にすると、小さいモデルは
+ * 面倒な項目を黙って落とす。これはP-20（設定項目の充実）で既に分かって
+ * いたことだが、v1.0・v2.0では `logline` と `outline` だけを必須に
+ * していたため、**実機ではまさにその2つ以外がすべて空になった**
+ * （2026-08-15）。プロンプトの書き方の問題だと考えて文面を直したが
+ * （v2.0）変わらず、原因はスキーマの側だった。
+ *
+ * nullを返させれば「読み取れなかった」と明示させられる。黙って落とされると、
+ * 読み取れなかったのか手を抜かれたのかが区別できない。
+ */
 export const PLOT_REVERSE_SCHEMA = {
   type: "object",
   properties: {
-    logline: { type: "string" },
-    theme: { type: "string" },
-    motif: { type: "array", items: { type: "string" } },
-    worldview: { type: "string" },
-    setting: { type: "string" },
-    narrativePerson: { type: "string" },
-    protagonistMotive: { type: "string" },
-    outline: { type: "array", items: { type: "string" } },
+    logline: { type: ["string", "null"] },
+    theme: { type: ["string", "null"] },
+    motif: { type: ["array", "null"], items: { type: "string" } },
+    worldview: { type: ["string", "null"] },
+    setting: { type: ["string", "null"] },
+    narrativePerson: { type: ["string", "null"] },
+    protagonistMotive: { type: ["string", "null"] },
+    outline: { type: ["array", "null"], items: { type: "string" } },
     mainCharacters: {
-      type: "array",
+      type: ["array", "null"],
       items: {
         type: "object",
         properties: {
@@ -125,9 +137,20 @@ export const PLOT_REVERSE_SCHEMA = {
         required: ["name", "summary"],
       },
     },
-    notes: { type: "string" },
+    notes: { type: ["string", "null"] },
   },
-  required: ["logline", "outline"],
+  required: [
+    "logline",
+    "theme",
+    "motif",
+    "worldview",
+    "setting",
+    "narrativePerson",
+    "protagonistMotive",
+    "outline",
+    "mainCharacters",
+    "notes",
+  ],
 } as const;
 
 export interface ExtractedPlot {

@@ -180,33 +180,42 @@ export function buildWorkChatPrompt(input: WorkChatInput): string {
   return blocks.join("\n\n");
 }
 
-/** 構造化出力に渡すJSONスキーマ */
+/**
+ * 構造化出力に渡すJSONスキーマ。
+ *
+ * **全項目を必須にし、nullを許す。** 省略可能にすると、小さいモデルは
+ * 面倒な項目を黙って落とす（P-20で分かっていたことで、プロット逆算では
+ * これを忘れて実機で項目が空になった、2026-08-15）。
+ *
+ * とくに `options` が落とされると、**選択肢で会話を進める仕組みそのものが
+ * 消える**。「無い」ことを空配列やnullで明示させるほうが確実である。
+ */
 export const WORK_CHAT_SCHEMA = {
   type: "object",
   properties: {
     reply: { type: "string" },
-    options: { type: "array", items: { type: "string" } },
-    needFiles: { type: "array", items: { type: "string" } },
+    options: { type: ["array", "null"], items: { type: "string" } },
+    needFiles: { type: ["array", "null"], items: { type: "string" } },
     edit: {
-      type: "object",
+      type: ["object", "null"],
       properties: {
         target: { type: "string" },
         content: { type: "string" },
-        label: { type: "string" },
+        label: { type: ["string", "null"] },
       },
       required: ["target", "content"],
     },
-    run: { type: "string" },
+    run: { type: ["string", "null"] },
     locate: {
-      type: "object",
+      type: ["object", "null"],
       properties: {
-        path: { type: "string" },
-        text: { type: "string" },
-        label: { type: "string" },
+        path: { type: ["string", "null"] },
+        text: { type: ["string", "null"] },
+        label: { type: ["string", "null"] },
       },
     },
   },
-  required: ["reply"],
+  required: ["reply", "options", "needFiles", "edit", "run", "locate"],
 } as const;
 
 export interface WorkChatAnswer {
