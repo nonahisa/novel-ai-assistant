@@ -472,15 +472,74 @@ function findCharacter(
 
   // 部分名は、姓名が空白・中黒で明示的に区切られている場合だけ使う。
   // 推測による部分一致は別人を壊すため、候補が一人に決まる場合に限る。
-  const incomingParts = new Set(incomingNames.flatMap(splitNameParts));
+  //
+  // **ただし、複数の人物が共有する部分（＝姓）では同一人物と判定しない。**
+  // 実データで「ジェクティ・コンストラクタ」「ヴォイド・コンストラクタ」
+  // 「イント・コンストラクタ」（母・父・息子）が、姓だけの「コンストラクタ」
+  // という1件へまとめられた。姓だけのレコードが先にできると、家族が
+  // 1人ずつ「候補が一人に決まる」判定を通ってしまい、次々に吸収される。
+  const shared = sharedNameParts(list);
+  const incomingParts = new Set(
+    incomingNames.flatMap(splitNameParts).filter((part) => !shared.has(part))
+  );
+  const usableKeys = new Set([...keys].filter((key) => !shared.has(key)));
+
   const partMatches = list.filter((character) =>
     [character.name, ...character.aliases].some((candidate) =>
       incomingParts.has(normalizeName(candidate)) ||
-      splitNameParts(candidate).some((part) => keys.has(part))
+      splitNameParts(candidate).some((part) => usableKeys.has(part))
     )
   );
   if (partMatches.length === 1) return { match: partMatches[0], ambiguous: [] };
   return { ambiguous: partMatches.length > 1 ? partMatches : [] };
+}
+
+/**
+ * 姓（家名）とみられる部分を集める。
+ *
+ * **姓は同一人物の証拠にならない。** 「イント・コンストラクタ」と
+ * 「ストリナ・コンストラクタ」は別人であり、共有しているのは家名である。
+ *
+ * ## 語順で決めない
+ *
+ * 姓が先か名が先かは作品による（中黒区切りは「名・姓」、和名の空白区切りは
+ * 「姓 名」）。**判定に語順を使わない。**
+ *
+ * ## 「何人が持っているか」ではなく「何と組んでいるか」で決める
+ *
+ * 人数で数えると、**同じ人物の重複レコードで名のほうも姓に見えてしまう。**
+ * 実データでは「ヴォイド・コンストラクタ」が3件に分裂しており、
+ * 人数で数えると「ヴォイド」まで姓と判定された。そうなると
+ * 「ヴォイド」だけで呼ばれたときに本人へ寄せられなくなる。
+ *
+ * 組んだ相手の種類で数えれば、重複しても相手は同じなので増えない。
+ * 実データ84人で、コンストラクタ4・フォートラン4・シーゲン3（いずれも家名）と、
+ * ヴォイド1・ポインタ1（いずれも名）がきれいに分かれた。
+ */
+export function sharedNameParts(characters: readonly Character[]): Set<string> {
+  // 部分 → 一緒に並んでいた別の部分の種類
+  const partners = new Map<string, Set<string>>();
+
+  for (const character of characters) {
+    for (const full of [character.name, ...character.aliases]) {
+      const parts = splitNameParts(full);
+      for (const part of parts) {
+        const set = partners.get(part) ?? new Set<string>();
+        for (const other of parts) {
+          if (other !== part) set.add(other);
+        }
+        partners.set(part, set);
+      }
+    }
+  }
+
+  const shared = new Set<string>();
+  for (const [part, others] of partners) {
+    // 2種類以上と組んでいれば家名とみなす。
+    // 1種類だけなら、その相手との組でしか出てこない＝名とみなす
+    if (others.size >= 2) shared.add(part);
+  }
+  return shared;
 }
 
 // 省略はカタカナ語で起きやすい。漢字を含む名前の部分一致は
@@ -719,6 +778,21 @@ const HONORIFIC_SUFFIX_SOURCE = [
   "聖下",
   "姫",
   "公",
+  // 爵位。「ヴォイド・コンストラクタ男爵」と「ヴォイド・コンストラクタ」を
+  // 別人扱いしないため。**「夫人」付きも落とす**
+  // （「ジェクティ・コンストラクタ男爵夫人」＝「ジェクティ・コンストラクタ」）
+  "大公爵夫人",
+  "公爵夫人",
+  "侯爵夫人",
+  "伯爵夫人",
+  "子爵夫人",
+  "男爵夫人",
+  "大公爵",
+  "公爵",
+  "侯爵",
+  "伯爵",
+  "子爵",
+  "男爵",
 ];
 
 /**
