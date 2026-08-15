@@ -24,7 +24,24 @@ const repositoryRoot = path.resolve(
 const { expectedExtension, rootManifest, vsixPath } =
   await deriveReleaseMetadata(repositoryRoot);
 
-const archiveFiles = run("tar", ["-tf", vsixPath])
+/**
+ * tar には**相対パス**で渡す。
+ *
+ * VSIXはZIPなので、読めるのはlibarchive系のtar（Windows同梱の `tar.exe` や
+ * macOSのbsdtar）だけである。**このスクリプトはPowerShell/cmdから実行する。**
+ * Git Bashから走らせるとGNU tarに解決され、ZIPを読めずに失敗する。
+ *
+ * 相対パスにするのは、そのときの失敗を分かりやすくするためでもある。
+ * 絶対パス（`C:\...`）を渡すとGNU tarはコロンの前をホスト名と解釈し、
+ * 「Cへ接続できない」という筋違いのエラーになって原因が掴めない。
+ * `run` は cwd をリポジトリ直下に固定しているので、相対パスで届く。
+ */
+const vsixRelativePath = path
+  .relative(repositoryRoot, vsixPath)
+  .split(path.sep)
+  .join("/");
+
+const archiveFiles = run("tar", ["-tf", vsixRelativePath])
   .split(/\r?\n/)
   .map((entry) => entry.replace(/\\/g, "/"))
   .filter(Boolean)
@@ -89,7 +106,7 @@ console.log(`Bytes: ${bytes.length}`);
 console.log(`SHA-256: ${sha256}`);
 
 function readArchiveFile(file) {
-  return run("tar", ["-xOf", vsixPath, file]);
+  return run("tar", ["-xOf", vsixRelativePath, file]);
 }
 
 function run(command, args, options = {}) {

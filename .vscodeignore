@@ -3,6 +3,10 @@
 .worktrees/**
 .github/**
 .superpowers/**
+# 開発に使うAIエージェントの設定。**配布物に入れてはならない。**
+# `settings.local.json` には作者の絶対パスと、未公開作品のタイトルが入る。
+# 実際に0.2.0のVSIXへ同梱されていた（2026-08-15に発見して除外）
+.claude/**
 src/**
 test/**
 scripts/**
