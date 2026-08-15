@@ -155,7 +155,33 @@ export type ChatRunKind =
   /** 誤字脱字を検知（いま開いている話だけ） */
   | "checkTyposForFile"
   /** 表記ゆれを検知 */
-  | "checkNotation";
+  | "checkNotation"
+  /** 設定資料をまとめて抽出 */
+  | "extractSettings"
+  /** 種別を絞った抽出 */
+  | "extractCharacters"
+  | "extractLocations"
+  | "extractAbilities"
+  | "extractOrganizations"
+  | "extractWorld"
+  /** 設定資料集のMarkdownを出力 */
+  | "generateSettingsDocs"
+  /** 設定資料集を開く */
+  | "openSettingsPanel"
+  /** 重複した人物をまとめる */
+  | "unifyCharacters"
+  /** 承認待ちの更新を反映 */
+  | "applyPendingUpdates"
+  /** 各話あらすじを生成 */
+  | "generateSynopses"
+  /** 作品紹介文を生成 */
+  | "generateWorkBlurb"
+  /** キャッチコピー案 */
+  | "generateCatchphrases"
+  /** 紹介文・あらすじを開く */
+  | "openSynopsisDocs"
+  /** 本文からプロットを起こす */
+  | "generatePlot";
 
 export interface ChatRun {
   kind: ChatRunKind;
@@ -165,14 +191,55 @@ export interface ChatRun {
   usesAI: boolean;
 }
 
-const RUNNABLE: ReadonlyMap<string, Omit<ChatRun, "kind">> = new Map([
-  ["checktypos", { label: "誤字脱字を検知する", usesAI: true }],
-  [
-    "checktyposforfile",
-    { label: "この話の誤字脱字を検知する", usesAI: true },
-  ],
-  ["checknotation", { label: "表記ゆれを検知する", usesAI: false }],
-]);
+/**
+ * 起動できる機能の一覧。
+ *
+ * **AIが提案しそうな操作を載せておく。** 載っていない操作を提案されると、
+ * 作者は「やります」と言われたのに何も起きない画面を見ることになる
+ * （実機で「資料抽出→設定資料集を出力」を勧められたが起動できなかった）。
+ *
+ * **それでも任意のコマンドは実行させない。** ここに並べたものだけである。
+ * とくに**消す操作・作品の登録を変える操作は入れない。**
+ * 会話の一言でファイルが消えては取り返しがつかない。
+ */
+const RUNNABLE: ReadonlyMap<string, { kind: ChatRunKind } & Omit<ChatRun, "kind">> =
+  new Map(
+    (
+      [
+        // 校正・校閲
+        ["checkTypos", "誤字脱字を検知する", true],
+        ["checkTyposForFile", "この話の誤字脱字を検知する", true],
+        ["checkNotation", "表記ゆれを検知する", false],
+        // 資料をためる
+        ["extractSettings", "設定資料をまとめて抽出する", true],
+        ["extractCharacters", "登場人物を抽出する", true],
+        ["extractLocations", "場所を抽出する", true],
+        ["extractAbilities", "能力を抽出する", true],
+        ["extractOrganizations", "組織を抽出する", true],
+        ["extractWorld", "世界観を抽出する", true],
+        ["generateSettingsDocs", "設定資料集を出力する", false],
+        ["openSettingsPanel", "設定資料集を開く", false],
+        ["unifyCharacters", "重複した人物をまとめる", false],
+        ["applyPendingUpdates", "承認待ちの更新を反映する", false],
+        // 整える
+        ["generateSynopses", "各話あらすじを作る", true],
+        ["generateWorkBlurb", "作品紹介文を作る", true],
+        ["generateCatchphrases", "キャッチコピー案を作る", true],
+        ["openSynopsisDocs", "紹介文・あらすじを開く", false],
+        ["generatePlot", "本文からプロットを起こす", true],
+      ] as Array<[ChatRunKind, string, boolean]>
+    ).map(([kind, label, usesAI]) => [
+      kind.toLowerCase(),
+      { kind, label, usesAI },
+    ])
+  );
+
+/** AIに見せる、起動できる機能の一覧。プロンプトと実装を食い違わせないため */
+export function runnableFeatureList(): string {
+  return [...RUNNABLE.values()]
+    .map((item) => `- ${item.kind}: ${item.label}${item.usesAI ? "（AIを使う）" : ""}`)
+    .join("\n");
+}
 
 /** 起動したい機能の指定を、許可した一覧と突き合わせる */
 export function parseChatRun(raw: unknown): ChatRun | undefined {
@@ -182,16 +249,7 @@ export function parseChatRun(raw: unknown): ChatRun | undefined {
   const found = RUNNABLE.get(key);
   if (!found) return undefined;
 
-  // Map のキーは小文字に潰しているので、種別は元の綴りへ戻す
-  const kind = (
-    {
-      checktypos: "checkTypos",
-      checktyposforfile: "checkTyposForFile",
-      checknotation: "checkNotation",
-    } as Record<string, ChatRunKind>
-  )[key];
-
-  return { kind, label: found.label, usesAI: found.usesAI };
+  return { kind: found.kind, label: found.label, usesAI: found.usesAI };
 }
 
 /**

@@ -209,13 +209,21 @@ function setBusy(value) {
   });
 }
 
-function appendTurn(who, text, kind) {
+/**
+ * 1回ぶんの発言を足す。
+ *
+ * AIはMarkdownで返してくる。**記号のまま見せない。**
+ * 「**強調**」がそのまま星印として並ぶと読みにくい。
+ * 整形済みのHTML（html）が来ていればそれを使い、
+ * 無ければ（作者の発言など）記号を落として素の文として出す。
+ */
+function appendTurn(who, text, kind, html) {
   emptyEl.hidden = true;
   const turn = document.createElement('div');
   turn.className = 'turn ' + (kind || '');
   turn.innerHTML =
     '<div class="who">' + escapeHtml(who) + '</div>' +
-    '<div class="body">' + escapeHtml(text) + '</div>';
+    '<div class="body">' + (html || escapeHtml(text)) + '</div>';
   logEl.appendChild(turn);
   return turn;
 }
@@ -436,7 +444,7 @@ window.addEventListener('message', (event) => {
   if (message.type === 'answer') {
     setBusy(false);
     thinkingEl.textContent = '考えています…';
-    const turn = appendTurn('AI', message.reply);
+    const turn = appendTurn('AI', message.reply, undefined, message.html);
     if (message.locate) appendLocate(turn, message.locate);
     if (message.edit) appendEdit(turn, message.edit);
     if (message.run) appendRun(turn, message.run);

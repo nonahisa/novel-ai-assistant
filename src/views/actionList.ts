@@ -14,7 +14,11 @@ import type { WorkRegistry } from "../core/workRegistry";
  */
 
 /** 件数を出す種類。何の件数かで出し分ける */
-export type ActionCounter = "pendingUpdates" | "staleImeDictionary";
+export type ActionCounter =
+  | "pendingUpdates"
+  | "staleImeDictionary"
+  /** 同一人物とみられる組の数。まとめないと資料が二重になる */
+  | "mergeCandidates";
 
 export interface ActionItem {
   kind: "action";
@@ -464,6 +468,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             label: "重複をまとめる",
             icon: "merge",
             requiresWork: true,
+            counter: "mergeCandidates",
             detail:
               "「リン」と「リンセップ・アウクト」のように、" +
               "同じ人物が別々に登録されてしまった組をまとめます。" +

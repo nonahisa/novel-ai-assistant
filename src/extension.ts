@@ -43,6 +43,9 @@ import {
   openSettingsPanel,
 } from "./features/settingsPanel";
 import { unifyCharacterRecords } from "./features/unifyCharacters";
+import { findMergeCandidates } from "./core/characterMerge";
+import { CharacterStore } from "./core/characterStore";
+import type { ChatRunKind } from "./core/chatEdit";
 import { applyPendingCharacterUpdates } from "./features/applyPendingUpdates";
 import { exportImeDictionary } from "./features/exportImeDictionary";
 import { manageCustomFields } from "./features/manageCustomFields";
@@ -256,6 +259,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             workPaths(work, config).settings
           );
           if (freshness.stale) total += 1;
+        } else if (counter === "mergeCandidates") {
+          // 同じ人物が別々に登録されている組を数える。
+          // **まとめないと資料が二重になる**が、作者は
+          // 「重複をまとめる」を開くまで気づけなかった
+          const loaded = await new CharacterStore(work).loadAll();
+          total += findMergeCandidates(loaded.characters).length;
         }
       } catch {
         // 読めない作品は0件として扱う。印が出ないだけで実害はない
@@ -320,6 +329,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ことで、AIが返した文字列がコマンド名になる余地を無くしている
   const workChatPanel = new WorkChatPanel(registry, aiRegistry, {
     run: async (work, kind, filePath) => {
+      // 校正・校閲以外は、既にコマンドとして登録されているものへ渡す。
+      // **ここで処理を書き直さない。** 二重に持つと、片方だけ直したときに
+      // 「メニューからは動くのに相談からは動かない」という食い違いが出る
+      const command = CHAT_RUN_COMMANDS[kind];
+      if (command) {
+        // 作品を指定して呼ぶ。引数無しだと作品選択からやり直させてしまう
+        const ref: WorkRef = { type: "work", work };
+        await vscode.commands.executeCommand(command, ref);
+        return;
+      }
+
       // 未保存のまま読むと、画面と違う本文を検知してしまう
       const label = kind === "checkNotation" ? "表記ゆれの検知" : "誤字脱字の検知";
       if (!(await saveDirtyDocumentsBeforeExtraction(work, label))) return;
@@ -1160,6 +1180,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         treeProvider.refresh(work.id);
         // まとめた側の名前は別名になる。索引を作り直さないと光らないままになる
         highlighter.invalidate();
+        // 開いたままのパネルは自分では気づかない。
+        // 消えたはずの人物が一覧に残り続ける
+        await findOpenSettingsPanel(work.id)?.refreshFromDisk();
+        refreshActionBadges();
       }
     )
   );
@@ -1645,8 +1669,44 @@ interface ResolveWorkOptions {
   title?: string;
 }
 
+/**
+ * コマンドへ「この作品で」と指定するための最小の入れ物。
+ *
+ * ツリーから呼ばれるときは `WorkNode` が来るが、相談パネルからのように
+ * 作品だけが分かっている場合もある。`resolveWork` は種別と作品しか見ないので、
+ * この形だけを要求する（`WorkNode` はそのまま渡せる）。
+ */
+export type WorkRef = Pick<WorkNode, "type" | "work">;
+
+/**
+ * 相談パネルから起動できる機能と、対応するコマンド。
+ *
+ * **校正・校閲だけは別扱い**（結果をAI指摘パネルへ出すところまでが
+ * 一続きで、そのパネルはここが持っているため）。それ以外は
+ * **既にあるコマンドへそのまま渡す**。処理を二重に持つと、
+ * 片方だけ直したときに「メニューからは動くのに相談からは動かない」
+ * という食い違いが出る。
+ */
+const CHAT_RUN_COMMANDS: Partial<Record<ChatRunKind, string>> = {
+  extractSettings: "novelai.extractSettings",
+  extractCharacters: "novelai.extractCharactersOnly",
+  extractLocations: "novelai.extractLocationsOnly",
+  extractAbilities: "novelai.extractAbilitiesOnly",
+  extractOrganizations: "novelai.extractOrganizationsOnly",
+  extractWorld: "novelai.extractWorldOnly",
+  generateSettingsDocs: "novelai.generateSettingsDocs",
+  openSettingsPanel: "novelai.openSettingsPanel",
+  unifyCharacters: "novelai.unifyCharacters",
+  applyPendingUpdates: "novelai.applyPendingUpdates",
+  generateSynopses: "novelai.generateSynopses",
+  generateWorkBlurb: "novelai.generateWorkBlurb",
+  generateCatchphrases: "novelai.generateCatchphrases",
+  openSynopsisDocs: "novelai.openSynopsisDocs",
+  generatePlot: "novelai.generatePlot",
+};
+
 async function resolveWork(
-  node: WorkNode | undefined,
+  node: WorkRef | undefined,
   registry: WorkRegistry,
   options: ResolveWorkOptions = {}
 ): Promise<WorkEntry | undefined> {

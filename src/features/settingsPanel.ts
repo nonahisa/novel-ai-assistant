@@ -289,6 +289,17 @@ export class SettingsPanel {
     this.post({ type: "focus", kind, id, detail });
   }
 
+  /**
+   * ファイルを外から書き換えたあとに読み直す。
+   *
+   * **開いたままのパネルは、自分では気づかない。** 重複をまとめると
+   * レコードが減るのに、画面には消えたはずの人物が残り続けていた
+   * （実機で発覚、2026-08-15）。古い一覧から選ぶと「見つかりません」になる。
+   */
+  async refreshFromDisk(): Promise<void> {
+    await this.loadAll();
+  }
+
   async initialize(): Promise<void> {
     const nonce = createNonce();
     this.panel.webview.html = buildSettingsPanelHtml(

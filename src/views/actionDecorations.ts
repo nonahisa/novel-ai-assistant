@@ -37,6 +37,9 @@ const COUNTER_TOOLTIPS: Record<ActionCounter, (count: number) => string> = {
   staleImeDictionary: (count) =>
     `${count} 件の作品で、設定資料がIME辞書より新しくなっています。` +
     "書き出し直してIMEへ取り込むまで、増えた語は変換に出ません",
+  mergeCandidates: (count) =>
+    `同じ人物とみられる組が ${count} 件あります。` +
+    "まとめないと、同じ人物の設定が別々に育ってしまいます",
 };
 
 export class ActionDecorationProvider

@@ -105,11 +105,37 @@ describe("起動してよい標準機能", () => {
     for (const value of [
       "novelai.deleteEpisodeFile",
       "workbench.action.closeWindow",
-      "extractSettings",
       "gitPush",
+      "removeWork",
       "",
     ]) {
       expect(parseChatRun(value), value).toBeUndefined();
+    }
+  });
+
+  test("消す操作・作品の登録を変える操作は入れない", () => {
+    // 会話の一言でファイルが消えては取り返しがつかない。
+    // 一覧を広げるときも、この線引きは動かさない
+    for (const value of [
+      "deleteEpisodeFile",
+      "removeWork",
+      "clearVectorIndex",
+      "gitRestore",
+    ]) {
+      expect(parseChatRun(value), value).toBeUndefined();
+    }
+  });
+
+  test("作業を頼まれたときに勧める操作は起動できる", () => {
+    // 一覧に無い操作を勧めると、作者は「やると言ったのに動かない」画面を見る
+    // （実機で「資料抽出→設定資料集を出力」を勧められて起動できなかった）
+    for (const value of [
+      "extractSettings",
+      "generateSettingsDocs",
+      "generateSynopses",
+      "unifyCharacters",
+    ]) {
+      expect(parseChatRun(value)?.kind, value).toBe(value);
     }
   });
 

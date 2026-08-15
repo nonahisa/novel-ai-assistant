@@ -6,6 +6,8 @@ import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { AIRegistry } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
 import { scanWork } from "../core/scanner";
+import { episodeLabel } from "../core/manuscriptSources";
+import { SYNOPSIS_FILE } from "../core/synopsisDoc";
 import { CharacterStore } from "../core/characterStore";
 import {
   buildExcerpt,
@@ -54,6 +56,7 @@ import {
   SEARCH_TERMS_SYSTEM_PROMPT,
 } from "../prompts/searchTerms";
 import { logFailure, logStep, useLogFile } from "../core/logger";
+import { renderMarkdownLite } from "../core/markdownLite";
 import { buildWorkChatPanelHtml } from "../views/workChatPanelHtml";
 
 /**
@@ -98,6 +101,16 @@ const MAX_REQUESTED_FILES = 3;
 const REQUESTED_FILE_CHARS = 6_000;
 /** 該当箇所の印を残す時間。見つけたあとは要らないので消す */
 const HIGHLIGHT_MS = 8_000;
+
+/**
+ * 全体像に並べる話数の上限。
+ *
+ * 219話の作品でそのまま並べると4,000字を超え、
+ * 肝心の本文の抜粋が入らなくなる。
+ */
+const OVERVIEW_EPISODE_LIMIT = 40;
+/** 全体像に載せる紹介文・プロットの上限 */
+const OVERVIEW_FILE_CHARS = 2_000;
 
 type Incoming =
   | { type: "ready" }
@@ -392,6 +405,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       void this.view.webview.postMessage({
         type: "answer",
         reply: answer.reply,
+        // AIはMarkdownで返してくる。記号のまま見せない
+        html: renderMarkdownLite(answer.reply),
         options: answer.options,
         ...staged,
       });
@@ -866,16 +881,101 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     work: WorkEntry,
     kind: ChatContextKind
   ): Promise<string[]> {
-    if (kind === "settingsDoc" || kind === "outside") return [];
+    if (kind === "outside") return [];
+
+    const blocks: string[] = [];
+
+    // **作品の全体像を毎回渡す。** 開いている画面の前後だけでは
+    // 「この作品はどういう話か」に答えられず、作者から
+    // 「作品全体を読み込んでほしい」という指摘を受けた（2026-08-15）。
+    // 全文は渡せないので、**畳んだ形**で渡す。詳しい場面は検索が拾う。
+    const overview = await this.buildOverview(work);
+    if (overview) blocks.push(overview);
+
+    // 設定資料そのものを開いているときは、画面の内容と重なるので名前は省く
+    if (kind !== "settingsDoc") {
+      try {
+        const loaded = await new CharacterStore(work).loadAll();
+        const names = loaded.characters
+          .filter((character) => !character.isMob)
+          .map((character) => character.name);
+        if (names.length > 0) {
+          blocks.push(`登場人物: ${names.slice(0, 60).join("、")}`);
+        }
+      } catch {
+        // 設定資料が無い作品もある。名前が無いだけで相談はできる
+      }
+    }
+
+    return blocks;
+  }
+
+  /**
+   * 作品の全体像を、畳んだ形で組み立てる。
+   *
+   * **全文は渡せない**（78.5万字の作品がある）ので、
+   * 作品紹介文・プロットの要点・話数の一覧という「目次」を渡す。
+   * どこに何があるかが分かれば、AIは needFiles で必要な話を求められる。
+   *
+   * 話数の一覧は上限を設ける。219話の作品でそのまま並べると
+   * 4,000字を超え、肝心の本文の抜粋が入らなくなる。
+   */
+  private async buildOverview(work: WorkEntry): Promise<string | undefined> {
+    const lines: string[] = [];
+
     try {
-      const loaded = await new CharacterStore(work).loadAll();
-      const names = loaded.characters
-        .filter((character) => !character.isMob)
-        .map((character) => character.name);
-      if (names.length === 0) return [];
-      return [`登場人物: ${names.slice(0, 40).join("、")}`];
+      const scan = await scanWork(work);
+      const total = scan.episodes.length;
+      if (total > 0) {
+        lines.push(`全${total}話。`);
+
+        const labels = scan.episodes.map((episode) => episodeLabel(episode));
+        // 多いときは先頭と末尾だけ見せる。**間を省いたことを明記する**
+        // （省略に気づかないと「これで全部」と誤解する）
+        if (labels.length <= OVERVIEW_EPISODE_LIMIT) {
+          lines.push(`話の一覧: ${labels.join(" / ")}`);
+        } else {
+          const head = labels.slice(0, OVERVIEW_EPISODE_LIMIT / 2).join(" / ");
+          const tail = labels.slice(-OVERVIEW_EPISODE_LIMIT / 2).join(" / ");
+          lines.push(
+            `話の一覧（多いため中間を省略）: ${head} …（中略）… ${tail}`
+          );
+        }
+      }
     } catch {
-      return [];
+      // 走査できなくても、紹介文とプロットだけで全体像は伝わる
+    }
+
+    for (const [label, relative] of [
+      ["作品紹介文・各話あらすじ", SYNOPSIS_FILE],
+      ["プロット", "plot.md"],
+    ] as const) {
+      const text = await this.readSettingsFile(work, relative);
+      if (!text) continue;
+      lines.push(
+        `【${label}（${relative}）】\n` +
+          (text.length > OVERVIEW_FILE_CHARS
+            ? `${text.slice(0, OVERVIEW_FILE_CHARS)}\n（以下省略。全文が要るなら needFiles で求めてください）`
+            : text)
+      );
+    }
+
+    if (lines.length === 0) return undefined;
+    return `【作品の全体像】\n${lines.join("\n")}`;
+  }
+
+  private async readSettingsFile(
+    work: WorkEntry,
+    fileName: string
+  ): Promise<string | undefined> {
+    try {
+      const config = await readWorkConfig(work);
+      const target = path.join(workPaths(work, config).settings, fileName);
+      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+      const text = new TextDecoder().decode(bytes).trim();
+      return text || undefined;
+    } catch {
+      return undefined;
     }
   }
 
