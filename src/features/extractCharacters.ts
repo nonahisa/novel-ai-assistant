@@ -70,6 +70,11 @@ interface ExtractionSummaryCounts {
   updated: number;
   rejected: RejectedCharacterCandidate[];
   conflicts: number;
+  /**
+   * 作中の変化として自動で畳んだ件数。
+   * 黙って書き換えたことにしないため、報告に出す（設計書6.18）。
+   */
+  folded: number;
   failedChunks: number;
   saved: number;
   ambiguous: number;
@@ -704,6 +709,7 @@ export async function extractCharacters(
     updated: merged?.updated.length ?? 0,
     rejected: rejectedCandidates,
     conflicts: merged?.conflicts.length ?? 0,
+    folded: merged?.folded.length ?? 0,
     failedChunks: failures.length,
     saved: 0,
     ambiguous: 0,
@@ -956,6 +962,7 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
       `更新 ${counts.updated}名`,
       `除外 ${counts.rejected.length}件`,
       `競合 ${counts.conflicts}件`,
+      `作中の変化として記録 ${counts.folded}件`,
       `失敗 ${counts.failedChunks}チャンク`,
       `保存済み ${counts.saved}名`,
       `手動確認が必要 ${counts.ambiguous}名`,

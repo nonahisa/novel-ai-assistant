@@ -3,6 +3,7 @@ import {
   applyPromotion,
   changedFields,
   changesOfField,
+  isFoldableConflict,
   promoteConflictToChanges,
 } from "../../src/core/recordChanges";
 import { mergeExtractedCharacters } from "../../src/core/characterMerge";
@@ -15,6 +16,7 @@ import {
 import {
   parseChanges,
   type RecordChange,
+  type RecordConflict,
 } from "../../src/models/jsonValidation";
 import {
   buildCharacterMarkdown,
@@ -196,7 +198,7 @@ describe("昇格したあとの再抽出", () => {
     expect(result.conflicts).toEqual([]);
   });
 
-  test("変化のほうに話数が足される", () => {
+  test("変化のほうに話数が足され、今の値も動く", () => {
     const result = mergeExtractedCharacters(
       [promoted()],
       [{ data: { name: "文佳", appearance: "黒髪" }, chapters: [9] }]
@@ -206,17 +208,84 @@ describe("昇格したあとの再抽出", () => {
       (entry) => entry.value === "黒髪"
     );
     expect(change?.chapters).toEqual([1, 2, 3, 9]);
-    expect(result.characters[0].appearance).toBe("銀髪");
+    // 第9話は第7話より後なので、今の姿は「黒髪」に戻っている
+    expect(result.characters[0].appearance).toBe("黒髪");
   });
 
-  test("知らない値なら、これまでどおり食い違いにする", () => {
+  test("知らない値でも、話数が違えば作中の変化として畳む", () => {
     const result = mergeExtractedCharacters(
       [promoted()],
       [{ data: { name: "文佳", appearance: "赤毛" }, chapters: [11] }]
     );
 
+    expect(result.characters[0].conflicts).toEqual([]);
+    expect(result.characters[0].appearance).toBe("赤毛");
+  });
+
+  test("同じ話の中で矛盾したら、これまでどおり食い違いにする", () => {
+    // 「銀髪」は第7話の値。同じ第7話に「赤毛」が出たなら、
+    // 作中の変化では説明できないので作者の判断へ回す
+    const result = mergeExtractedCharacters(
+      [promoted()],
+      [{ data: { name: "文佳", appearance: "赤毛" }, chapters: [7] }]
+    );
+
     expect(result.characters[0].conflicts).toHaveLength(1);
     expect(result.characters[0].conflicts[0].values).toContain("赤毛");
+    expect(result.characters[0].appearance).toBe("銀髪");
+  });
+});
+
+describe("自動で畳んでよいかの判定", () => {
+  function conflict(
+    field: string,
+    observations: Array<[string, number[]]>
+  ): RecordConflict {
+    return {
+      field,
+      values: observations.map(([value]) => value),
+      chapters: [],
+      note: null,
+      observations: observations.map(([value, chapters]) => ({ value, chapters })),
+    };
+  }
+
+  test("話数の違う値どうしなら畳む", () => {
+    expect(
+      isFoldableConflict(conflict("appearance", [["黒髪", [1]], ["銀髪", [7]]]))
+    ).toBe(true);
+  });
+
+  test("同じ話に両方が出ていたら畳まない", () => {
+    // 両方が同時に正しいことはない。作中の変化では説明できない
+    expect(
+      isFoldableConflict(conflict("appearance", [["黒髪", [7]], ["銀髪", [7]]]))
+    ).toBe(false);
+  });
+
+  test("話数の分かる値が1つしか無ければ畳まない", () => {
+    // 比べる相手がいないと前後を決められず、
+    // 作者が手で書いた値をAIの読みで押し流しかねない
+    expect(
+      isFoldableConflict(conflict("role", [["印章師", []], ["偵察員", [1]]]))
+    ).toBe(false);
+  });
+
+  test("話数の分からない値が2つあれば畳まない", () => {
+    expect(
+      isFoldableConflict(
+        conflict("summary", [["A", []], ["B", []], ["C", [5]], ["D", [9]]])
+      )
+    ).toBe(false);
+  });
+
+  test("読み仮名は、話数が違っても畳まない", () => {
+    // 読みは人物の同定情報で、作中では変わらない。
+    // 畳むと「第13話までは『ふとし』だった」という嘘の年表になる
+    // （実データで太志と密倉文佳の両方で起きた）
+    expect(
+      isFoldableConflict(conflict("reading", [["ふとし", [13]], ["たいし", [15]]]))
+    ).toBe(false);
   });
 });
 

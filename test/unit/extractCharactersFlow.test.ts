@@ -1207,6 +1207,7 @@ describe("人物抽出フロー", () => {
       updated: [],
       changedIds: ["char_001"],
       conflicts: [],
+      folded: [],
     };
     state.generate
       .mockResolvedValueOnce(successfulResult("灯"))

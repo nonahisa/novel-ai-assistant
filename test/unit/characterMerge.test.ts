@@ -348,21 +348,61 @@ describe("登場人物マージ", () => {
     const first = mergeExtractedCharacters([existing], [
       { data: { name: "灯", appearance: "銀髪" }, chapters: [7] },
     ]);
-    // 同じ値が別の話にも出てきたら、話数だけを足す
-    const second = mergeExtractedCharacters(first.characters, [
-      { data: { name: "灯", appearance: "赤髪" }, chapters: [12] },
-    ]);
 
+    // 話数の分かる値が「銀髪（第7話）」しかない。比べる相手がいないので
+    // 作中の変化とは言えず、これまでどおり作者の判断へ回す
     expect(first.characters[0].conflicts[0].observations).toEqual([
       // 元からあった値は、どの話で書かれたかの記録が無いので空
       { value: "黒髪", chapters: [] },
       { value: "銀髪", chapters: [7] },
     ]);
-    expect(second.characters[0].conflicts[0].observations).toEqual([
-      { value: "黒髪", chapters: [] },
-      { value: "銀髪", chapters: [7] },
-      { value: "赤髪", chapters: [12] },
+    expect(first.characters[0].appearance).toBe("黒髪");
+  });
+
+  test("話数の分かる値が2つ揃ったら、作中の変化として畳む", () => {
+    // 第7話で銀髪、第12話で赤髪。違う話で違う値なら、作中で変わったと読める。
+    // 畳まないと、話ごとに違う言い方をされた要約が全部積み上がる
+    // （実データで太志のsummaryが9段になった）
+    const existing = emptyCharacter("char_001", "灯");
+    existing.appearance = "黒髪";
+
+    const first = mergeExtractedCharacters([existing], [
+      { data: { name: "灯", appearance: "銀髪" }, chapters: [7] },
     ]);
+    const second = mergeExtractedCharacters(first.characters, [
+      { data: { name: "灯", appearance: "赤髪" }, chapters: [12] },
+    ]);
+
+    expect(second.characters[0].conflicts).toEqual([]);
+    // 値はどれも失われない。いちばん後ろの話の値がレコード本体に入る
+    expect(second.characters[0].changes.map((change) => change.value)).toEqual([
+      "黒髪",
+      "銀髪",
+      "赤髪",
+    ]);
+    expect(second.characters[0].appearance).toBe("赤髪");
+    expect(second.folded).toEqual([{ characterName: "灯", field: "appearance" }]);
+  });
+
+  test("同じ話の中で矛盾したら、畳まずに作者へ回す", () => {
+    // 第7話に黒髪と銀髪が両方あるなら、両方が同時に正しいことはない。
+    // 作中の変化では説明できないので、AIの取り違えとして判断を仰ぐ
+    const existing = emptyCharacter("char_001", "灯");
+
+    const first = mergeExtractedCharacters([existing], [
+      { data: { name: "灯", appearance: "黒髪" }, chapters: [7] },
+    ]);
+    const second = mergeExtractedCharacters(first.characters, [
+      { data: { name: "灯", appearance: "銀髪" }, chapters: [7] },
+    ]);
+
+    expect(second.characters[0].conflicts).toHaveLength(1);
+    expect(second.characters[0].conflicts[0].observations).toEqual([
+      { value: "黒髪", chapters: [7] },
+      { value: "銀髪", chapters: [7] },
+    ]);
+    expect(second.characters[0].appearance).toBe("黒髪");
+    expect(second.folded).toEqual([]);
   });
 
   test("同じ値が別の話にも出てきたら話数だけを足す", () => {
@@ -383,14 +423,23 @@ describe("登場人物マージ", () => {
       { data: { name: "灯", appearance: "黒髪" }, chapters: [9] },
     ]);
 
+    // 話数が分かっているのは「銀髪」だけなので、まだ畳めない
     expect(second.characters[0].conflicts[0].observations).toEqual([
       { value: "黒髪", chapters: [] },
       { value: "銀髪", chapters: [7, 12] },
     ]);
-    expect(third.characters[0].conflicts[0].observations).toEqual([
-      { value: "黒髪", chapters: [9] },
-      { value: "銀髪", chapters: [7, 12] },
+
+    // 第9話で「黒髪」が出た時点で両方の話数が分かり、作中の変化として畳める
+    expect(third.characters[0].conflicts).toEqual([]);
+    expect(
+      third.characters[0].changes.map((change) => [change.value, change.chapters])
+    ).toEqual([
+      ["銀髪", [7, 12]],
+      ["黒髪", [9]],
     ]);
+    // 銀髪は第7話と第12話、黒髪は第9話。いちばん後は第12話の銀髪なので、
+    // 今の姿は銀髪のまま。**最初に出た話ではなく、最後に出た話で決める**
+    expect(third.characters[0].appearance).toBe("銀髪");
   });
 
   test("詳細な記述を採用し既存の競合候補を重複なく追加する", () => {
