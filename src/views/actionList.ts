@@ -693,17 +693,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
       },
       {
         kind: "action",
-        command: "novelai.showVersion",
-        label: "バージョンを確認",
-        icon: "info",
-        requiresWork: false,
-        detail:
-          "この拡張機能の版と、いまの環境（VS Codeの版・選んでいるAI・" +
-          "意味検索の入切）を表示します。**そのまま貼り付けられる形でコピーできます。**" +
-          "不具合を伝えるときに添えてください。変更履歴もここから開けます。",
-      },
-      {
-        kind: "action",
         command: "novelai.openChatLog",
         label: "相談のログを開く",
         icon: "comment-discussion",
@@ -713,6 +702,19 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           "後から確かめられます（渡した場面・検索語・所要時間つき）。" +
           "**原稿の一部を含みます。** GitHubへは送られません。" +
           "残したくない場合は設定 `novelai.chatLog.enabled` を切ってください。",
+      },
+      // **一番下に置く**（作者の指定、2026-08-16）。
+      // 版を見るのは不具合を伝えるときだけで、日々の作業では使わない
+      {
+        kind: "action",
+        command: "novelai.showVersion",
+        label: "バージョンを確認",
+        icon: "info",
+        requiresWork: false,
+        detail:
+          "この拡張機能の版と、いまの環境（VS Codeの版・選んでいるAI・" +
+          "意味検索の入切）を表示します。**そのまま貼り付けられる形でコピーできます。**" +
+          "不具合を伝えるときに添えてください。変更履歴もここから開けます。",
       },
     ],
   },
