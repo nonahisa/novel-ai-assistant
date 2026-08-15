@@ -21,6 +21,13 @@ import {
   WORK_CHAT_VERSION,
   type WorkChatTurn,
 } from "../prompts/workChat";
+import {
+  describeChatEditRejection,
+  parseChatEdit,
+  sanitizeRequestedPaths,
+  type ChatEdit,
+} from "../core/chatEdit";
+import { applyChatEdit } from "./applyChatEdit";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { buildWorkChatPanelHtml } from "../views/workChatPanelHtml";
 
@@ -34,9 +41,16 @@ import { buildWorkChatPanelHtml } from "../views/workChatPanelHtml";
  * 返事には**次の一手の選択肢**が付く。押すだけで話が進むので、
  * 「気に入らないときにどう言い直すか」を作者が毎回考えずに済む。
  *
- * **AIは何も書き換えない。** 相談の結果を原稿や設定へ反映するのは
- * 作者の操作に任せる。会話の途中でAIが勝手にファイルを触ると、
- * どこが変わったのか追えなくなる。
+ * **加筆修正は作者が押したときだけ行う**（作者の許可、2026-08-15）。
+ * AIは書き込む内容を提案するところまでで、実際に書くのはボタンが
+ * 押されたときである。会話の流れでAIが勝手にファイルを触ると、
+ * どこが変わったのか追えなくなる。本文（原稿）は許可の対象外で、
+ * この画面からは書き換えられない。
+ *
+ * **足りない材料はAIから求めさせる。** 作品フォルダーの中に限り、
+ * 「このファイルを見せてほしい」と言われたら渡して聞き直す
+ * （`needFiles`）。毎回すべてを渡すと入力が膨らんで料金がかかるため、
+ * 必要になったときだけ読む。
  */
 
 export const WORK_CHAT_VIEW_ID = "novelai.chatView";
@@ -45,15 +59,32 @@ export const WORK_CHAT_VIEW_ID = "novelai.chatView";
 const EXCERPT_CHARS = 4_000;
 /** 覚えておくやり取りの数。増やすほど入力が伸びて料金がかかる */
 const HISTORY_TURNS = 12;
+/** AIの求めに応じて読むファイルの上限。読みすぎると入力が膨らむ */
+const MAX_REQUESTED_FILES = 3;
+/** 1ファイルあたりに渡す上限 */
+const REQUESTED_FILE_CHARS = 6_000;
 
 type Incoming =
   | { type: "ready" }
   | { type: "ask"; question: string }
-  | { type: "clear" };
+  | { type: "clear" }
+  | { type: "applyEdit"; id: string };
 
 export class WorkChatPanel implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private history: WorkChatTurn[] = [];
+
+  /**
+   * 押されるのを待っている書き込みの提案。
+   *
+   * 会話の中身ではなくここに持つのは、**押した瞬間の内容で書くため**。
+   * 画面の文字列から読み直すと、表示の都合で変わった内容を書きかねない。
+   */
+  private readonly pendingEdits = new Map<
+    string,
+    { edit: ChatEdit; work: WorkEntry }
+  >();
+  private editSeq = 0;
 
   /**
    * 直前に開いていた本文エディター。
@@ -102,6 +133,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
     if (message.type === "ask") {
       await this.ask(message.question);
+      return;
+    }
+    if (message.type === "applyEdit") {
+      await this.applyEdit(message.id);
     }
   }
 
@@ -135,27 +170,49 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
     try {
       logStep(`相談: v${WORK_CHAT_VERSION} / ${resolved.model}`);
-      const response = await resolved.provider.generate({
-        systemPrompt: WORK_CHAT_SYSTEM_PROMPT,
-        userPrompt: buildWorkChatPrompt({
-          workTitle: context?.work.title ?? "（作品を特定できません）",
-          contextKind: context?.kind ?? "outside",
-          contextLabel: context?.label ?? "作品のファイル以外",
-          excerpt: context?.excerpt ?? "",
-          excerptTruncated: context?.truncated ?? false,
-          fromSelection: context?.fromSelection ?? false,
-          reference: context?.reference ?? [],
-          history: this.history.slice(-HISTORY_TURNS),
-          question,
-        }),
-        model: resolved.model,
-        // 相談は考えを広げる場なので、抽出よりは揺らす
-        temperature: 0.7,
-        jsonSchema: WORK_CHAT_SCHEMA as unknown as object,
-        disableThinking: true,
-      });
 
-      const answer = parseWorkChatAnswer(response.text);
+      const call = (
+        requestedFiles?: Array<{ path: string; content: string }>
+      ) =>
+        resolved.provider.generate({
+          systemPrompt: WORK_CHAT_SYSTEM_PROMPT,
+          userPrompt: buildWorkChatPrompt({
+            workTitle: context?.work.title ?? "（作品を特定できません）",
+            contextKind: context?.kind ?? "outside",
+            contextLabel: context?.label ?? "作品のファイル以外",
+            excerpt: context?.excerpt ?? "",
+            excerptTruncated: context?.truncated ?? false,
+            fromSelection: context?.fromSelection ?? false,
+            reference: context?.reference ?? [],
+            requestedFiles,
+            history: this.history.slice(-HISTORY_TURNS),
+            question,
+          }),
+          model: resolved.model,
+          // 相談は考えを広げる場なので、抽出よりは揺らす
+          temperature: 0.7,
+          jsonSchema: WORK_CHAT_SCHEMA as unknown as object,
+          disableThinking: true,
+        });
+
+      let answer = parseWorkChatAnswer((await call()).text);
+
+      // 材料が足りないと言われたら、作品フォルダーの中から渡して聞き直す。
+      // **往復は1回だけ。** 際限なく求められると料金と待ち時間が読めなくなる
+      const wanted = context
+        ? sanitizeRequestedPaths(answer.needFiles, MAX_REQUESTED_FILES)
+        : [];
+      if (wanted.length > 0) {
+        const files = await this.readWorkFiles(context!.work, wanted);
+        if (files.length > 0) {
+          void this.view.webview.postMessage({
+            type: "reading",
+            files: files.map((file) => file.path),
+          });
+          answer = parseWorkChatAnswer((await call(files)).text);
+        }
+      }
+
       if (!answer.reply) {
         this.postError("返事が空でした。もう一度お試しください。");
         return;
@@ -170,6 +227,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         type: "answer",
         reply: answer.reply,
         options: answer.options,
+        edit: this.stageEdit(answer.edit, context?.work),
       });
     } catch (error) {
       const message =
@@ -185,6 +243,102 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
   private postError(message: string): void {
     void this.view?.webview.postMessage({ type: "error", message });
+  }
+
+  /**
+   * 書き込みの提案を受け取り、押されるまで持っておく。
+   *
+   * **ここでは書かない。** 返すのは画面に出すためのボタンの情報だけで、
+   * 実際の書き込みは `applyEdit`（作者が押したとき）で行う。
+   */
+  private stageEdit(
+    raw: unknown,
+    work: WorkEntry | undefined
+  ): { id: string; label: string; preview: string } | undefined {
+    if (raw === undefined || raw === null || !work) return undefined;
+
+    const parsed = parseChatEdit(raw);
+    if (!parsed.ok) {
+      // 本文を書き換えようとした場合など、黙って捨てると理由が伝わらない
+      if (parsed.reason === "manuscript_not_allowed") {
+        void this.view?.webview.postMessage({
+          type: "note",
+          message: describeChatEditRejection(parsed.reason),
+        });
+      }
+      return undefined;
+    }
+
+    const id = `edit-${++this.editSeq}`;
+    this.pendingEdits.set(id, { edit: parsed.edit, work });
+    return {
+      id,
+      label: parsed.edit.label,
+      preview: parsed.edit.content,
+    };
+  }
+
+  /** 作者がボタンを押したときだけ、ここで実際に書き込む */
+  private async applyEdit(id: string): Promise<void> {
+    const staged = this.pendingEdits.get(id);
+    if (!staged) {
+      this.postError("この提案はもう使えません。もう一度聞いてください。");
+      return;
+    }
+
+    try {
+      const where = await applyChatEdit(staged.work, staged.edit);
+      this.pendingEdits.delete(id);
+      void this.view?.webview.postMessage({
+        type: "editApplied",
+        id,
+        message: `${staged.edit.label.replace(/に書き込む$/, "")}に書き込みました（${where}）`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logFailure("相談からの書き込み", { 内容: message });
+      void this.view?.webview.postMessage({
+        type: "editFailed",
+        id,
+        message: `書き込めませんでした: ${message}`,
+      });
+    }
+  }
+
+  /**
+   * AIが求めたファイルを、作品フォルダーの中からだけ読む。
+   *
+   * パスの安全確認は `sanitizeRequestedPaths` で済ませているが、
+   * **解決後のパスが本当に作品フォルダーの中かを、ここでもう一度確かめる。**
+   * 記号リンクなどで外へ出られる余地を残さないため。
+   */
+  private async readWorkFiles(
+    work: WorkEntry,
+    relativePaths: string[]
+  ): Promise<Array<{ path: string; content: string }>> {
+    const root = path.resolve(work.folderPath);
+    const files: Array<{ path: string; content: string }> = [];
+
+    for (const relative of relativePaths) {
+      const target = path.resolve(root, relative);
+      if (target !== root && !target.startsWith(root + path.sep)) continue;
+      try {
+        const bytes = await vscode.workspace.fs.readFile(
+          vscode.Uri.file(target)
+        );
+        const text = new TextDecoder().decode(bytes);
+        files.push({
+          path: relative,
+          content:
+            text.length > REQUESTED_FILE_CHARS
+              ? `${text.slice(0, REQUESTED_FILE_CHARS)}\n（以下省略）`
+              : text,
+        });
+      } catch {
+        // 読めないファイルは黙って飛ばす。AIの言うパスが実在するとは限らない
+      }
+    }
+    return files;
   }
 
   /** 開いているファイルから、相談の材料を組み立てる */

@@ -134,6 +134,25 @@ button.secondary {
 }
 #empty { padding: 16px 10px; color: var(--vscode-descriptionForeground); line-height: 1.8; }
 #empty ul { margin: 6px 0 0; padding-left: 18px; }
+.note { font-size: 12px; color: var(--vscode-descriptionForeground); margin-top: 6px; }
+.edit {
+  margin-top: 8px;
+  border: 1px solid var(--vscode-focusBorder);
+  border-radius: 3px;
+  padding: 8px;
+}
+.edit .what { font-size: 12px; margin-bottom: 4px; }
+.edit .preview {
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow-y: auto;
+  background: var(--vscode-textBlockQuote-background, rgba(127,127,127,0.1));
+  padding: 6px 8px;
+  border-radius: 2px;
+  line-height: 1.6;
+}
+.edit .done { color: var(--vscode-testing-iconPassed, #4caf50); font-size: 12px; }
+.edit .failed { color: var(--vscode-errorForeground); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -222,6 +241,54 @@ function appendOptions(turn, options) {
   updateHint();
 }
 
+/**
+ * 書き込みの提案を出す。
+ *
+ * **押すまで何も起きない。** 何をどこへ書くかと、書く中身を先に見せる。
+ * 中身を見ずに押せる作りにすると、作者は自分の文書に何が入るのか
+ * 分からないまま同意することになる。
+ */
+function appendEdit(turn, edit) {
+  const box = document.createElement('div');
+  box.className = 'edit';
+
+  const what = document.createElement('div');
+  what.className = 'what';
+  what.textContent = edit.label;
+  box.appendChild(what);
+
+  const preview = document.createElement('div');
+  preview.className = 'preview';
+  preview.textContent = edit.preview;
+  box.appendChild(preview);
+
+  const row = document.createElement('div');
+  row.className = 'options';
+  const apply = document.createElement('button');
+  apply.className = 'option';
+  apply.innerHTML = '<span class="num">✓</span><span>' + escapeHtml(edit.label) + '</span>';
+  apply.addEventListener('click', () => {
+    if (busy) return;
+    apply.disabled = true;
+    vscode.postMessage({ type: 'applyEdit', id: edit.id });
+  });
+  row.appendChild(apply);
+  box.appendChild(row);
+
+  box.dataset.editId = edit.id;
+  turn.appendChild(box);
+}
+
+function markEdit(id, message, ok) {
+  const box = document.querySelector('[data-edit-id="' + id + '"]');
+  if (!box) return;
+  box.querySelectorAll('.options').forEach((el) => el.remove());
+  const line = document.createElement('div');
+  line.className = ok ? 'done' : 'failed';
+  line.textContent = message;
+  box.appendChild(line);
+}
+
 function updateHint() {
   hintEl.textContent =
     currentOptions.length > 0
@@ -293,15 +360,42 @@ window.addEventListener('message', (event) => {
       message.provider ? '／ ' + message.provider : '';
     return;
   }
+  if (message.type === 'reading') {
+    // 材料が足りず、AIが別のファイルを求めた。何を見ているかを伝える
+    thinkingEl.textContent =
+      (message.files || []).join('・') + ' を読んでいます…';
+    return;
+  }
   if (message.type === 'answer') {
     setBusy(false);
+    thinkingEl.textContent = '考えています…';
     const turn = appendTurn('AI', message.reply);
+    if (message.edit) appendEdit(turn, message.edit);
     appendOptions(turn, message.options || []);
+    scrollToBottom();
+    return;
+  }
+  if (message.type === 'note') {
+    const note = document.createElement('div');
+    note.className = 'note';
+    note.textContent = message.message;
+    logEl.appendChild(note);
+    scrollToBottom();
+    return;
+  }
+  if (message.type === 'editApplied') {
+    markEdit(message.id, message.message, true);
+    scrollToBottom();
+    return;
+  }
+  if (message.type === 'editFailed') {
+    markEdit(message.id, message.message, false);
     scrollToBottom();
     return;
   }
   if (message.type === 'error') {
     setBusy(false);
+    thinkingEl.textContent = '考えています…';
     appendTurn('エラー', message.message, 'error');
     scrollToBottom();
   }

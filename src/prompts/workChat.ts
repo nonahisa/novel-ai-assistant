@@ -14,7 +14,7 @@ import type { ChatContextKind } from "../core/chatContext";
  *
  * プロンプトを変更したら version を上げること。
  */
-export const WORK_CHAT_VERSION = "1.0";
+export const WORK_CHAT_VERSION = "2.0";
 
 export const WORK_CHAT_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 作者が今開いている画面（本文・プロット・設定資料など）について相談を受けます。
@@ -37,8 +37,29 @@ export const WORK_CHAT_SYSTEM_PROMPT = `あなたは日本語の小説執筆を�
 - 案を複数出すときは reply の中に並べ、options には「どれを選ぶか」ではなく
   「次にどうするか」を入れること。
 
+【材料が足りないとき】
+渡された範囲に答えが無く、**作品の別のファイルを見れば分かる**場合は、
+needFiles にそのパスを入れてください（作品フォルダからの相対パス、最大3件）。
+その場合 reply には「何を確かめたいか」を短く書いてください。
+中身が渡されたうえで、改めて答えることになります。
+- 例: ["設定/plot.md", "episode_0003.txt"]
+- 見なくても答えられるときは needFiles を空配列にしてください。無駄に読みません。
+
+【書き込みを提案するとき】
+作者が「直してほしい」「書いておいて」と求めた場合、edit に書き込む内容を入れてください。
+**あなたが書き込むのではなく、作者がボタンを押したときだけ反映されます。**
+- target は次のいずれか
+  - "plot.logline" "plot.theme" "plot.motif" "plot.worldview" "plot.setting"
+    "plot.narrativePerson" "plot.protagonistMotive" "plot.outline" "plot.mainCharacters" "plot.title"
+  - "blurb"（作品紹介文） / "catchphrase"（キャッチコピー）
+  - "episode.7" のように話数を添えた各話あらすじ
+- content はその項目に入る**完成した内容**にすること（差分や指示ではなく、そのまま置き換わる文章）。
+- **小説の本文（原稿）は書き換えられません。** 本文の直しを求められたら、
+  edit を使わず reply で「本文は誤字脱字の指摘から直してください」と伝えてください。
+- 書き込みの提案が無いときは edit を省いてください。
+
 【出力形式】JSONのみ。前置き・後書き・コードフェンスを含めないこと。
-{"reply": "...", "options": ["...", "..."]}`;
+{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}}`;
 
 export interface WorkChatTurn {
   role: "author" | "assistant";
@@ -59,6 +80,13 @@ export interface WorkChatInput {
   fromSelection: boolean;
   /** 作品の材料（登場人物名など）。文脈に応じて呼び出し側が詰める */
   reference: string[];
+  /**
+   * 前の応答で AI が求めたファイルの中身。
+   *
+   * これがあるということは「材料が足りない」と言った直後なので、
+   * もう一度 needFiles を返させない（同じ問答を繰り返してしまう）。
+   */
+  requestedFiles?: Array<{ path: string; content: string }>;
   /** これまでのやり取り。古いものから順に */
   history: WorkChatTurn[];
   question: string;
@@ -84,6 +112,16 @@ export function buildWorkChatPrompt(input: WorkChatInput): string {
     blocks.push(`【この作品の材料】\n${input.reference.join("\n")}`);
   }
 
+  if (input.requestedFiles && input.requestedFiles.length > 0) {
+    const files = input.requestedFiles
+      .map((file) => `--- ${file.path} ---\n${file.content}`)
+      .join("\n\n");
+    blocks.push(
+      `【あなたが求めたファイル】\n${files}\n\n` +
+        "（これで材料は揃っています。needFiles は空にして、答えを書いてください）"
+    );
+  }
+
   if (input.history.length > 0) {
     const history = input.history
       .map((turn) => `${turn.role === "author" ? "作者" : "あなた"}: ${turn.text}`)
@@ -102,6 +140,16 @@ export const WORK_CHAT_SCHEMA = {
   properties: {
     reply: { type: "string" },
     options: { type: "array", items: { type: "string" } },
+    needFiles: { type: "array", items: { type: "string" } },
+    edit: {
+      type: "object",
+      properties: {
+        target: { type: "string" },
+        content: { type: "string" },
+        label: { type: "string" },
+      },
+      required: ["target", "content"],
+    },
   },
   required: ["reply"],
 } as const;
@@ -109,6 +157,10 @@ export const WORK_CHAT_SCHEMA = {
 export interface WorkChatAnswer {
   reply: string;
   options: string[];
+  /** AIが読みたがったファイル。呼び出し側で安全なものへ絞る */
+  needFiles: unknown;
+  /** 書き込みの提案。呼び出し側で解釈し、作者が押したときだけ適用する */
+  edit: unknown;
 }
 
 /**
@@ -133,7 +185,12 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
         parsed !== null &&
         typeof (parsed as { reply?: unknown }).reply === "string"
       ) {
-        const record = parsed as { reply: string; options?: unknown };
+        const record = parsed as {
+          reply: string;
+          options?: unknown;
+          needFiles?: unknown;
+          edit?: unknown;
+        };
         return {
           reply: record.reply.trim(),
           options: Array.isArray(record.options)
@@ -143,6 +200,8 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
                 .filter(Boolean)
                 .slice(0, 4)
             : [],
+          needFiles: record.needFiles,
+          edit: record.edit,
         };
       }
     } catch {
@@ -150,7 +209,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
     }
   }
 
-  return { reply: text.trim(), options: [] };
+  return { reply: text.trim(), options: [], needFiles: undefined, edit: undefined };
 }
 
 function extractBraces(text: string): string | null {
