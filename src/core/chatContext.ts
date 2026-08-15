@@ -20,6 +20,15 @@ export type ChatContextKind =
   | "settingsDoc"
   /** 作品の中の、上のどれでもないファイル */
   | "otherInWork"
+  /**
+   * ファイルは開いていないが、どの作品かは決まっている。
+   *
+   * **これが無いと、作品を開いていないだけで相談がほぼ使えない。**
+   * 起動ボタンも材料も「開いているファイル」から作っていたため、
+   * 何も開いていないと「聞いてくるだけ」になっていた
+   * （作者の指摘、2026-08-15）。
+   */
+  | "workOnly"
   /** 作品の外。相談は受けるが、作品の材料は渡さない */
   | "outside";
 
@@ -71,6 +80,9 @@ export function describeChatContext(
       return `設定資料（${fileName}）`;
     case "otherInWork":
       return fileName;
+    case "workOnly":
+      // ファイル名の代わりに作品名が渡ってくる
+      return `${fileName}（作品全体）`;
     case "outside":
       return "作品のファイル以外";
   }

@@ -816,6 +816,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.chooseChatWork", async () => {
+      await workChatPanel.chooseWork();
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand(
       "novelai.buildVectorIndex",
       async (node?: WorkNode) => {

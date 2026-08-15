@@ -239,6 +239,16 @@ export const ACTION_TREE: readonly ActionGroup[] = [
       },
       {
         kind: "action",
+        command: "novelai.chooseChatWork",
+        label: "相談する作品を選ぶ",
+        icon: "book",
+        requiresWork: true,
+        detail:
+          "**作品のファイルを開いていないときに**、どの作品について相談するかを決めます。" +
+          "ファイルを開いていれば、そちらが優先されます。",
+      },
+      {
+        kind: "action",
         command: "novelai.createPlot",
         label: "プロットをつくる",
         icon: "list-tree",

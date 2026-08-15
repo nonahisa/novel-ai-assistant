@@ -33,6 +33,7 @@ import {
   type ChatLocate,
   type ChatRunKind,
 } from "../core/chatEdit";
+import { detectRunIntent } from "../core/chatIntent";
 import { findTextRange } from "../core/textLocate";
 import { applyChatEdit } from "./applyChatEdit";
 import { confirmPaidUsage } from "./aiConnectivity";
@@ -170,6 +171,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   /** 検索の材料。作品が変わるまで使い回す（毎回読み直すと重い） */
   private retrieval: RetrievalContext | undefined;
   private retrievalWorkId: string | undefined;
+
+  /**
+   * ファイルを開いていないときに相談する作品。
+   *
+   * 覚えておかないと、質問のたびに選び直すことになる。
+   */
+  private selectedWorkId: string | undefined;
 
   /**
    * 該当箇所に掛ける色。
@@ -375,9 +383,16 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
       // 提案は先に解釈しておく。**記録には解釈後のものを残す。**
       // AIが返した生の値を残しても、実際に押せる形になったかが分からない
+      // **AIが run を落としてもこちらで補う。**
+      // 「抽出して」と頼まれているのに会話の中で書き出してしまい、
+      // 押せるボタンが出ない状態が実機で続いた（2026-08-15）。
+      // 「作業を頼まれたか」は規則で見分けられるので、コード側で決める。
+      const intended = detectRunIntent(question);
       const staged = {
         edit: this.stageEdit(answer.edit, context?.work),
-        run: this.stageRun(answer.run, context),
+        run:
+          this.stageRun(answer.run, context) ??
+          (intended ? this.stageRun(intended, context) : undefined),
         locate: this.stageLocate(answer.locate, context),
       };
 
@@ -713,13 +728,68 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   }
 
   /** 開いているファイルから、相談の材料を組み立てる */
+  /**
+   * ファイルを開いていないときの相談相手を決める。
+   *
+   * **登録が1作品ならそれを使う。** わざわざ選ばせる意味がない。
+   * 複数あるときは、作者が選ぶまで決めない（別の作品の資料を
+   * 抽出し始めては困る）。選んだ作品は覚えておく。
+   */
+  private async workOnlyContext(): Promise<ResolvedContext | undefined> {
+    const works = this.registry.list();
+    if (works.length === 0) return undefined;
+
+    const chosen =
+      works.find((work) => work.id === this.selectedWorkId) ??
+      (works.length === 1 ? works[0] : undefined);
+    if (!chosen) return undefined;
+
+    this.selectedWorkId = chosen.id;
+    return {
+      work: chosen,
+      kind: "workOnly",
+      filePath: chosen.folderPath,
+      label: describeChatContext("workOnly", chosen.title),
+      excerpt: "",
+      truncated: false,
+      fromSelection: false,
+      reference: await this.buildReference(chosen, "workOnly"),
+    };
+  }
+
+  /**
+   * 相談する作品を選び直す。
+   *
+   * 作品を開いていないときの相談相手を、作者が決められるようにする。
+   * 開いているファイルがあれば、そちらが優先される（画面と食い違わないため）。
+   */
+  async chooseWork(): Promise<void> {
+    const works = this.registry.list();
+    if (works.length === 0) {
+      vscode.window.showInformationMessage("作品が登録されていません。");
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      works.map((work) => ({ label: work.title, work })),
+      { title: "どの作品について相談しますか", ignoreFocusOut: true }
+    );
+    if (!picked) return;
+    this.selectedWorkId = picked.work.id;
+    await this.postContext();
+  }
+
   private async resolveContext(): Promise<ResolvedContext | undefined> {
     const editor = this.lastEditor;
-    if (!editor || editor.document.uri.scheme !== "file") return undefined;
+    const filePath =
+      editor && editor.document.uri.scheme === "file"
+        ? editor.document.uri.fsPath
+        : undefined;
+    const work = filePath ? this.findWork(filePath) : undefined;
 
-    const filePath = editor.document.uri.fsPath;
-    const work = this.findWork(filePath);
-    if (!work) return undefined;
+    // **ファイルを開いていなくても相談できるようにする。**
+    // 以前はここで undefined を返しており、作品を開いていないだけで
+    // 起動ボタンも材料も出なかった（作者の指摘、2026-08-15）
+    if (!work || !filePath) return this.workOnlyContext();
 
     const config = await readWorkConfig(work);
     const settingsDirName = path.basename(workPaths(work, config).settings);
@@ -747,11 +817,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       isEpisode,
     });
 
-    const selection = editor.document.getText(editor.selection);
+    // ここへ来る時点でファイルは決まっている（上で workOnly へ分けている）
+    const document = editor!.document;
+    const selection = document.getText(editor!.selection);
     const excerpt = buildExcerpt({
-      text: editor.document.getText(),
+      text: document.getText(),
       selection: selection || undefined,
-      caret: editor.document.offsetAt(editor.selection.active),
+      caret: document.offsetAt(editor!.selection.active),
       maxChars: EXCERPT_CHARS,
     });
 
