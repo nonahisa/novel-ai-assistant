@@ -47,6 +47,7 @@ body {
   flex-wrap: wrap;
 }
 #context .what { color: var(--vscode-foreground); }
+#context .paid { color: var(--vscode-editorWarning-foreground, #cca700); }
 #log { flex: 1; overflow-y: auto; padding: 10px; }
 .turn { margin-bottom: 14px; }
 .turn .who {
@@ -406,8 +407,17 @@ window.addEventListener('message', (event) => {
   const message = event.data;
   if (message.type === 'context') {
     document.getElementById('context-what').textContent = message.label;
-    document.getElementById('context-provider').textContent =
-      message.provider ? '／ ' + message.provider : '';
+    const providerEl = document.getElementById('context-provider');
+    // 有料かどうかは、送る前に常に見えている必要がある
+    providerEl.textContent = message.provider
+      ? '／ ' + message.provider + (message.paid ? '（有料・送るたびに課金）' : '')
+      : '';
+    providerEl.className = message.paid ? 'paid' : '';
+    return;
+  }
+  if (message.type === 'cancelled') {
+    // 料金の確認で取りやめた。送っていないので、入力を戻して待つ
+    setBusy(false);
     return;
   }
   if (message.type === 'reading') {

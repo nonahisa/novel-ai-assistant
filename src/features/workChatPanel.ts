@@ -33,6 +33,7 @@ import {
 } from "../core/chatEdit";
 import { findTextRange } from "../core/textLocate";
 import { applyChatEdit } from "./applyChatEdit";
+import { confirmPaidUsage } from "./aiConnectivity";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { buildWorkChatPanelHtml } from "../views/workChatPanelHtml";
 
@@ -119,6 +120,14 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   private editSeq = 0;
 
   /**
+   * 有料のAIについて確認を取り終えたモデル名。
+   *
+   * モデルを含めて覚えるのは、**AIを切り替えたら確認をやり直すため**。
+   * 無料のOllamaから有料のClaudeへ移ったとき、黙って課金が始まっては困る。
+   */
+  private paidConfirmedFor: string | undefined;
+
+  /**
    * 該当箇所に掛ける色。
    *
    * 選択（カーソル）だけでも位置は分かるが、作者が本文をクリックすると
@@ -179,6 +188,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
     if (message.type === "clear") {
       this.history = [];
+      // 会話をやり直すなら、料金の確認も取り直す
+      this.paidConfirmedFor = undefined;
       return;
     }
     if (message.type === "ask") {
@@ -209,6 +220,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       provider: resolved
         ? `${resolved.provider.displayName}（${resolved.model}）`
         : "AI未設定",
+      // 有料かどうかは、押す前に常に見えている必要がある。
+      // 確認は会話ごとに一度しか出さないため、印は出し続ける
+      paid: resolved?.provider.isPaid ?? false,
     });
   }
 
@@ -221,6 +235,25 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         "AIが設定されていません。操作メニューの「AIの設定」から設定してください。"
       );
       return;
+    }
+
+    // 有料のAIは送るたびに課金される。**会話ごとに一度だけ確認を取る。**
+    // 毎回モーダルを出すと相談にならず、一度も出さないと知らないうちに
+    // 積み上がる。あわせて画面上部に「有料」と出し続ける（postContext）
+    if (resolved.provider.isPaid && this.paidConfirmedFor !== resolved.model) {
+      const ok = await confirmPaidUsage(resolved.provider, {
+        actionLabel: "AIへの相談",
+        model: resolved.model,
+        detail:
+          "**送信するたびに1回ずつ課金されます。**\n" +
+          "会話が続くほど、これまでのやり取りも一緒に送るため入力が長くなります。\n" +
+          "（この確認はこの会話で一度だけです。「最初から」を押すと再び確認します）",
+      });
+      if (!ok) {
+        void this.view.webview.postMessage({ type: "cancelled" });
+        return;
+      }
+      this.paidConfirmedFor = resolved.model;
     }
 
     const context = await this.resolveContext();

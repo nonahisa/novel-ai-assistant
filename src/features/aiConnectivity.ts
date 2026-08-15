@@ -117,3 +117,54 @@ export async function startOllamaWithProgress(): Promise<boolean> {
   await vscode.window.showWarningMessage(describeStartFailure(outcome));
   return false;
 }
+
+/**
+ * 有料のAIを使う前に、料金がかかることを知らせて確認を取る。
+ *
+ * **無料（Ollama）のときは何も出さない。** 毎回確認を挟むと、
+ * ローカルで気軽に試す使い方が成り立たなくなる。
+ *
+ * 抽出（`extractCharacters`）や誤字脱字検知（`checkTypos`）は、
+ * 処理するチャンク数からトークン量を見積もった独自の案内を出している。
+ * こちらは**見積もりの材料が無い操作**（相談・プロット逆算など、
+ * 1回で終わるもの）のための共通の確認である。
+ *
+ * @returns 実行してよければ true
+ */
+export async function confirmPaidUsage(
+  provider: AIProvider,
+  options: {
+    /** 何をするか。「作品紹介文の生成」など */
+    actionLabel: string;
+    model: string;
+    /** AIを何回呼ぶか。分かるときだけ添える */
+    calls?: number;
+    /** 追加の説明。処理の大きさが分かるもの */
+    detail?: string;
+  }
+): Promise<boolean> {
+  if (!provider.isPaid) return true;
+
+  const lines = [
+    `${provider.displayName}（${options.model}）を使います。`,
+    "**実行するとトークンを消費し、利用量が加算されます。**",
+  ];
+  if (options.calls !== undefined) {
+    lines.push(
+      options.calls === 1
+        ? "AIの呼び出しは1回です。"
+        : `AIの呼び出しは ${options.calls} 回です。`
+    );
+  }
+  if (options.detail) lines.push(options.detail);
+  lines.push(
+    "実際の金額はモデル・実使用量・各社の現行料金によって変わります。"
+  );
+
+  const answer = await vscode.window.showInformationMessage(
+    `${options.actionLabel}を実行しますか`,
+    { modal: true, detail: lines.join("\n") },
+    "実行"
+  );
+  return answer === "実行";
+}

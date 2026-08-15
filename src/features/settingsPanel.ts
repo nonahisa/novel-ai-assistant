@@ -67,6 +67,7 @@ import { loadExcerptSources } from "../core/manuscriptSources";
 import { expandNameVariants } from "../core/termIndex";
 import { evidencePhrases } from "../core/groundedEvidence";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
+import { confirmPaidUsage } from "./aiConnectivity";
 import { AIError, recoveryForAIError } from "../ai/types";
 import {
   buildSettingsChatPrompt,
@@ -200,6 +201,8 @@ export class SettingsPanel {
   private excerptSources: ExcerptSource[] | undefined;
   /** 選択中のレコードごとのやり取り。保存はしない */
   private readonly chatHistory = new Map<string, ChatTurn[]>();
+  /** 有料のAIについて確認を取り終えたモデル名。切り替えたら取り直す */
+  private paidConfirmedFor: string | undefined;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -889,6 +892,22 @@ export class SettingsPanel {
   ): Promise<string | undefined> {
     const resolved = await ensureConfigured(this.registry);
     if (!resolved) return undefined;
+
+    // 有料のAIは呼ぶたびに課金される。**このパネルを開いている間に一度だけ
+    // 確認を取る。** 相談も項目の充実も何度も押すものなので、毎回モーダルを
+    // 挟むと使い物にならない。モデルまで覚えるのは、AIを切り替えたときに
+    // 確認をやり直すため（無料から有料へ黙って移らない）
+    if (resolved.provider.isPaid && this.paidConfirmedFor !== resolved.model) {
+      const ok = await confirmPaidUsage(resolved.provider, {
+        actionLabel: progressLabel,
+        model: resolved.model,
+        detail:
+          "**この画面でAIを呼ぶたびに課金されます。**\n" +
+          "（この確認はこの画面で一度だけです）",
+      });
+      if (!ok) return undefined;
+      this.paidConfirmedFor = resolved.model;
+    }
 
     const modelInfo = await this.registry.resolveModelInfo();
     const configuredNumCtx = vscode.workspace
