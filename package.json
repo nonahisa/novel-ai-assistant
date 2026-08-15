@@ -1,8 +1,8 @@
 {
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
-  "description": "小説執筆のための統合環境。作品フォルダを登録して、話数ファイルを作成・管理できます。AIによる誤字脱字チェックや、あらすじ・紹介文・キャッチコピーの生成も可能です。",
-  "version": "0.1.0",
+  "description": "小説執筆のための統合環境。作品を登録して話数・文字数・執筆量を管理し、本文から登場人物や世界観などの設定資料を抽出します。プロットの逆算、あらすじ・紹介文・キャッチコピーの生成、誤字脱字と表記ゆれの検知、開いている画面についてのAI相談まで、執筆の前後を通して支えます。AIはOllama（無料・ローカル）とClaude・ChatGPT・Geminiから選べ、原稿を勝手に書き換えることはありません。",
+  "version": "0.2.0",
   "publisher": "local",
   "private": true,
   "license": "MIT",
@@ -10,7 +10,15 @@
     "vscode": "^1.90.0"
   },
   "categories": [
+    "AI",
     "Other"
+  ],
+  "keywords": [
+    "小説",
+    "執筆",
+    "novel",
+    "writing",
+    "Ollama"
   ],
   "activationEvents": [],
   "main": "./dist/extension.js",
