@@ -13,6 +13,7 @@ import {
   type Character,
 } from "../../src/models/character";
 import {
+  buildCharacterExtractPrompt,
   CHARACTER_EXTRACT_SCHEMA,
   CHARACTER_EXTRACT_VERSION,
   type CharacterExtractResult,
@@ -125,14 +126,34 @@ describe("登場人物抽出の品質ゲート", () => {
     assertChapterAndAddressPeriods(fixture, merged.characters);
   });
 
-  test("v4.0の構造化出力契約を公開する", () => {
+  test("v5.0の構造化出力契約を公開する", () => {
     // 4.0で「要約は推測ではない」を明示した（2026-08-15）。
+    // 5.0で関係の抽出ルールを足し、relations を必須にした（2026-08-15）。
     // 版が変わるとキャッシュが無効になり、次回の抽出でAIを呼び直す
-    expect(CHARACTER_EXTRACT_VERSION).toBe("4.0");
+    expect(CHARACTER_EXTRACT_VERSION).toBe("5.0");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.properties)
       .toHaveProperty("entityType");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.required)
       .toEqual(expect.arrayContaining(["name", "entityType", "evidence"]));
+  });
+
+  test("関係を必須にして、名前や外見から分からない結びつきを残せるようにする", () => {
+    // 憑依・入れ替わり・変装は、名前も外見も相手のものになる。
+    // relations に書けなければ、その情報はどこにも残らない。
+    // 省略可能なうえプロンプトに説明も無く、実データではほぼ常に空だった
+    expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.required).toEqual(
+      expect.arrayContaining(["relations"])
+    );
+
+    const prompt = buildCharacterExtractPrompt({
+      chunkText: "本文",
+      chapterLabel: "第1話",
+      knownCharacterNames: [],
+    });
+    expect(prompt).toContain("【関係の抽出ルール】");
+    // 書いてよい例を挙げないと、モデルは家族・師弟だけを拾って終わる
+    expect(prompt).toContain("憑依");
+    expect(prompt).toContain("入れ替わり");
   });
 
   test("説明の項目を必須にして、モデルが黙って落とすのを防ぐ", () => {
