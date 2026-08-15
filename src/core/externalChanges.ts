@@ -97,6 +97,16 @@ const DIRECTORY_KINDS: Array<[string, WatchedKind]> = [
   ["world", "world"],
 ];
 
+/**
+ * 設定資料が入っているフォルダ名の一覧。
+ *
+ * **上の対応表から作る。** 別に並べ直すと、種類を増やしたときに
+ * 片方だけ直す事故が起きる（世界観が抜けていたのが実例）。
+ */
+export const SETTINGS_DIRECTORY_NAMES: readonly string[] = DIRECTORY_KINDS.map(
+  ([directory]) => directory
+);
+
 export function kindOfSettingsFile(
   filePath: string
 ): WatchedKind | undefined {

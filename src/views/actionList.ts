@@ -14,7 +14,7 @@ import type { WorkRegistry } from "../core/workRegistry";
  */
 
 /** 件数を出す種類。何の件数かで出し分ける */
-export type ActionCounter = "pendingUpdates";
+export type ActionCounter = "pendingUpdates" | "staleImeDictionary";
 
 export interface ActionItem {
   kind: "action";
@@ -212,6 +212,9 @@ export const ACTION_TREE: readonly ActionGroup[] = [
     kind: "group",
     label: "執筆AI支援",
     icon: "sparkle",
+    // IME辞書が古いままだと、抽出した語が変換に出ない。
+    // 閉じたままでも気づけるよう、分類にも出す（6.17.1）
+    counter: "staleImeDictionary",
     entries: [
       {
         kind: "action",
@@ -330,6 +333,8 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         kind: "section",
         label: "その他支援",
         icon: "export",
+        // 分類と操作の両方に出しても、その間の小分類に無いと辿れない（6.17.1）
+        counter: "staleImeDictionary",
         items: [
           {
             kind: "action",
@@ -350,6 +355,10 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             description: "AIを使わない",
             icon: "symbol-keyword",
             requiresWork: true,
+            // 書き出したあと取り込むのは作者の手作業で、自動化する手段が
+            // どのIMEにも無い（6.13.5）。設定資料を増やしても書き出し直すまで
+            // 変換に出ないので、古くなったことを知らせる
+            counter: "staleImeDictionary",
             detail:
               "登場人物・場所・能力・組織と、作品の造語を、" +
               "IMEのユーザー辞書に取り込める形で書き出します。" +

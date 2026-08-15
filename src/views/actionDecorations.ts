@@ -25,6 +25,20 @@ import {
 /** 印は2文字までしか出せない。3桁以上は 99 で止める */
 const MAX_BADGE_COUNT = 99;
 
+/**
+ * 件数の説明。**種類ごとに変える。**
+ *
+ * 以前は「未反映の更新が N 件」で決め打ちだったが、
+ * 件数の種類が増えると、辞書が古いことまで「未反映の更新」と説明されて
+ * 何を指しているのか分からなくなる。
+ */
+const COUNTER_TOOLTIPS: Record<ActionCounter, (count: number) => string> = {
+  pendingUpdates: (count) => `未反映の更新が ${count} 件あります`,
+  staleImeDictionary: (count) =>
+    `${count} 件の作品で、設定資料がIME辞書より新しくなっています。` +
+    "書き出し直してIMEへ取り込むまで、増えた語は変換に出ません",
+};
+
 export class ActionDecorationProvider
   implements vscode.FileDecorationProvider, vscode.Disposable
 {
@@ -78,7 +92,7 @@ export class ActionDecorationProvider
       if (count > 0) {
         return {
           badge: String(Math.min(count, MAX_BADGE_COUNT)),
-          tooltip: `未反映の更新が ${count} 件あります`,
+          tooltip: COUNTER_TOOLTIPS[counter](count),
           color: new vscode.ThemeColor("charts.orange"),
         };
       }

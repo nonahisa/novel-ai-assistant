@@ -6,6 +6,7 @@ import {
   scaffoldWorkFolder,
   workPaths,
 } from "./core/workRegistry";
+import { checkDictionaryFreshness } from "./core/imeDictionaryStatus";
 import { WorkTreeProvider, WorkNode, EpisodeNode } from "./views/workTree";
 import {
   countChars,
@@ -234,11 +235,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 件数は全作品を合わせて数える。作品を選ばずにメニューを見るため、
   // 「どこかに溜まっている」ことが分かればよい
   const actionDecorations = new ActionDecorationProvider(async (counter) => {
-    if (counter !== "pendingUpdates") return 0;
     let total = 0;
     for (const work of registry.list()) {
       try {
-        total += await new PendingUpdateStore(work).count();
+        if (counter === "pendingUpdates") {
+          total += await new PendingUpdateStore(work).count();
+        } else if (counter === "staleImeDictionary") {
+          // 書き出し済みの辞書より設定資料が新しい作品を数える。
+          // 一度も書き出していない作品は数えない（催促にならないため）
+          const config = await readWorkConfig(work);
+          const freshness = await checkDictionaryFreshness(
+            workPaths(work, config).settings
+          );
+          if (freshness.stale) total += 1;
+        }
       } catch {
         // 読めない作品は0件として扱う。印が出ないだけで実害はない
       }
@@ -963,6 +973,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const work = await resolveWork(node, registry);
         if (!work) return;
         await exportImeDictionary(work);
+        // 書き出したので「辞書が古い」の印を消す。
+        // 残ったままだと、押しても消えない印を作者が気にし続けることになる
+        refreshActionBadges();
       }
     )
   );
