@@ -5,7 +5,44 @@ import {
 } from "./ability";
 import { parseAiNotes, type AiNote } from "./aiNote";
 import { parseCustomFieldValues } from "./customField";
-import { parseConflicts, type RecordConflict } from "./jsonValidation";
+import {
+  parseChanges,
+  parseConflicts,
+  type RecordChange,
+  type RecordConflict,
+} from "./jsonValidation";
+
+/**
+ * 食い違いが記録されうる文章項目。
+ *
+ * `fillOrConflict`（抽出のマージ）が扱う項目と、食い違いを変化へ昇格させた
+ * ときに「今の値」を入れ直す項目は同じものでなければならない。
+ * 別々に書くと片方だけ増えて、昇格しても項目が更新されない組が生まれる。
+ */
+export type CharacterTextField =
+  | "summary"
+  | "affiliation"
+  | "gender"
+  | "reading"
+  | "role"
+  | "personality"
+  | "appearance";
+
+export const CHARACTER_TEXT_FIELDS: readonly CharacterTextField[] = [
+  "summary",
+  "affiliation",
+  "gender",
+  "reading",
+  "role",
+  "personality",
+  "appearance",
+];
+
+export function isCharacterTextField(
+  field: string
+): field is CharacterTextField {
+  return (CHARACTER_TEXT_FIELDS as readonly string[]).includes(field);
+}
 
 /** 呼称の1形態 */
 export interface AddressForm {
@@ -108,6 +145,11 @@ export interface Character {
   /** 食い違い（作中での変化かもしれない）。値ごとの話数は observations に入る */
   conflicts: RecordConflict[];
   /**
+   * 作中での変化。作者が食い違いを「これは変化だ」と確定させたものが入る。
+   * 話数と、分かれば作中の時期（`設定/timeline.json`）を持つ（設計書6.18）。
+   */
+  changes: RecordChange[];
+  /**
    * AIの掘り下げメモ。作者が承認したものだけが入る。
    * 本文に根拠のある抽出結果とは別に持ち、既存項目を書き換えない。
    */
@@ -156,6 +198,7 @@ export function emptyCharacter(id: string, name: string): Character {
     isMob: false,
     evidence: null,
     conflicts: [],
+    changes: [],
     aiNotes: [],
     customFields: {},
     // 永続化境界で保存時刻を付ける。純粋な生成・マージ結果へ壁時計を混ぜない。
@@ -184,6 +227,7 @@ export function normalizeCharacter(raw: Partial<Character>): Character {
     abilities: raw.abilities ?? [],
     appearedChapters: raw.appearedChapters ?? [],
     conflicts: raw.conflicts ?? [],
+    changes: raw.changes ?? [],
     aiNotes: raw.aiNotes ?? [],
     customFields: raw.customFields ?? {},
     authorNotes: raw.authorNotes ?? "",
@@ -317,6 +361,7 @@ export function parseCharacter(raw: unknown): Character {
   // 能力・場所・組織・世界観と同じ検証を使う。ここだけ独自に書いていたため
   // 値ごとの話数（observations）が読み込みで落ちていた
   const conflicts = parseConflicts(value.conflicts);
+  const changes = parseChanges(value.changes);
 
   return normalizeCharacter({
     ...value,
@@ -328,6 +373,7 @@ export function parseCharacter(raw: unknown): Character {
     relations,
     abilities,
     conflicts,
+    changes,
     aiNotes: parseAiNotes(value.aiNotes),
     customFields: parseCustomFieldValues(value.customFields),
   } as Partial<Character>);

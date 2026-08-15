@@ -1,5 +1,5 @@
 import type { Character } from "../models/character";
-import { mergeConflicts } from "../models/jsonValidation";
+import { mergeChangeLists, mergeConflicts } from "../models/jsonValidation";
 
 /**
  * 同一人物として登録されてしまった2件を1件にまとめる。
@@ -94,6 +94,8 @@ export function unifyCharacters(keep: Character, absorb: Character): UnifyResult
       // 同じ項目の食い違いは1つにまとめる。並べるだけだと、
       // 以後のマージが最初の1件しか見ないため取り残しになる
       conflicts: mergeConflicts(keep.conflicts, absorb.conflicts),
+      // 作者が確定させた変化。片方にしか無いものも必ず残す
+      changes: mergeChangeLists(keep.changes, absorb.changes),
       aiNotes: [...keep.aiNotes, ...absorb.aiNotes],
     },
     retiredId: absorb.id,

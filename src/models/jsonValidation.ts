@@ -180,6 +180,145 @@ export function mergeConflicts(
   return merged;
 }
 
+/**
+ * 作中での変化。
+ *
+ * `RecordConflict`（食い違い）と役割を分ける。
+ *   - `conflicts` ＝ 値が食い違ったが、**作者がまだ見ていない**もの
+ *   - `changes`   ＝ 作者が「これは作中の変化だ」と**確定させた**もの
+ *
+ * 食い違いのままでは「AIの取り違え」と「作中での変化」を機械が区別できず、
+ * 資料にも「変化かもしれない」としか書けない。作者が一度判断したことを
+ * ここへ移すことで、以後は変化として扱える（設計書6.18）。
+ *
+ * **AIには書かせない。** 記録するのはコードと作者だけである。
+ * 「省略可能な項目は小さいモデルが黙って落とす」という既知の問題は、
+ * AIに書かせる項目の話であり、ここには当てはまらない。
+ */
+export interface RecordChange {
+  /** どの項目が変わったか（"appearance" など） */
+  field: string;
+  /** そのときの値 */
+  value: string;
+  /** その値が書かれていた話数。空なら「それ以前」（記録が無い） */
+  chapters: number[];
+  /**
+   * 作中のいつのことか（`設定/timeline.json` の時期ID）。
+   * 未設定なら null。話数だけでも変化の記録としては成立する。
+   */
+  timepointId: string | null;
+  /** 作者が書いた補足。AIは書き換えない */
+  note: string | null;
+  evidence: string | null;
+  /** extracted ＝ 食い違いからの昇格、author ＝ 作者が直接書いた */
+  source: "extracted" | "author";
+}
+
+export function findChange(
+  changes: RecordChange[],
+  field: string,
+  value: string
+): RecordChange | undefined {
+  return changes.find(
+    (change) => change.field === field && change.value === value
+  );
+}
+
+/**
+ * 既に変化として記録されている値か。
+ *
+ * 抽出のたびに同じ値を食い違いへ戻さないために使う。
+ * 戻してしまうと、作者が昇格させたそばから同じ判断を求められ、
+ * 操作そのものが無意味になる。
+ */
+export function hasChange(
+  changes: RecordChange[],
+  field: string,
+  value: string
+): boolean {
+  return findChange(changes, field, value) !== undefined;
+}
+
+/**
+ * 既に記録されている変化に話数を足す。
+ * 対象が無ければ何もせず false を返す（新しい変化を勝手に作らない）。
+ */
+export function recordChangeChapters(
+  changes: RecordChange[],
+  field: string,
+  value: string,
+  chapters: number[]
+): boolean {
+  const change = findChange(changes, field, value);
+  if (!change) return false;
+  const merged = sortedUnique([
+    ...change.chapters,
+    ...chapters.filter((chapter) => Number.isSafeInteger(chapter)),
+  ]);
+  // 増えていなければ書き換えない。呼ぶたびに「変更あり」と返すと、
+  // 中身が同じままファイルを保存し直すことになる
+  if (merged.length === change.chapters.length) return false;
+  change.chapters = merged;
+  return true;
+}
+
+/**
+ * 2つの変化の記録を1つにまとめる。同一人物をまとめるときに使う。
+ *
+ * **作者が書いた補足は捨てない。** 片方にしかなければそれを残し、
+ * 両方にあれば繋ぐ（`unifyCharacters` の作者メモと同じ方針）。
+ */
+export function mergeChangeLists(
+  left: RecordChange[],
+  right: RecordChange[]
+): RecordChange[] {
+  const merged: RecordChange[] = [];
+
+  for (const change of [...left, ...right]) {
+    const found = findChange(merged, change.field, change.value);
+    if (!found) {
+      merged.push({ ...change, chapters: [...change.chapters] });
+      continue;
+    }
+    found.chapters = sortedUnique([...found.chapters, ...change.chapters]);
+    found.timepointId = found.timepointId ?? change.timepointId;
+    found.evidence = found.evidence ?? change.evidence;
+    const notes = [found.note, change.note]
+      .map((note) => note?.trim())
+      .filter((note): note is string => Boolean(note));
+    found.note = notes.length > 0 ? [...new Set(notes)].join("\n") : null;
+    // 作者が書いたものは、昇格由来のものより強い
+    if (change.source === "author") found.source = "author";
+  }
+
+  return merged;
+}
+
+export function parseChanges(
+  value: unknown,
+  path = "changes"
+): RecordChange[] | undefined {
+  return optionalObjectArray(value, path, (entry, entryPath) => {
+    requireNonEmptyString(entry.field, `${entryPath}.field`);
+    requireNonEmptyString(entry.value, `${entryPath}.value`);
+    optionalNumberArray(entry.chapters, `${entryPath}.chapters`);
+    optionalNullableString(entry.timepointId, `${entryPath}.timepointId`);
+    optionalNullableString(entry.note, `${entryPath}.note`);
+    optionalNullableString(entry.evidence, `${entryPath}.evidence`);
+    optionalEnum(entry.source, `${entryPath}.source`, ["extracted", "author"]);
+    return {
+      field: entry.field as string,
+      value: entry.value as string,
+      chapters: (entry.chapters as number[] | undefined) ?? [],
+      timepointId: (entry.timepointId as string | null | undefined) ?? null,
+      note: (entry.note as string | null | undefined) ?? null,
+      evidence: (entry.evidence as string | null | undefined) ?? null,
+      source:
+        (entry.source as RecordChange["source"] | undefined) ?? "extracted",
+    };
+  });
+}
+
 export function parseConflicts(
   value: unknown,
   path = "conflicts"

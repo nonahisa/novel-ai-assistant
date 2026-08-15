@@ -181,6 +181,30 @@ export function characterSchema(): Record<string, unknown> {
     },
     relations: { type: "array" },
     abilities: { type: "array", description: "この人物が持つ能力" },
+    // 変化を持つのは今のところ人物だけなので、共通の項目には置かない。
+    // 共通側へ入れると、持っていない種別のスキーマにまで現れる
+    changes: {
+      type: "array",
+      description:
+        "作中での変化。作者が食い違いを『これは変化だ』と確定させた記録。" +
+        "**作者の判断そのものなので、AIは新しく作らないこと。既存の記録も書き換えないこと**",
+      items: {
+        type: "object",
+        properties: {
+          field: { type: "string" },
+          value: { type: "string" },
+          chapters: { type: "array", items: { type: "integer" } },
+          timepointId: {
+            type: ["string", "null"],
+            description: "設定/timeline.json の時期ID。未設定なら null",
+          },
+          note: { type: ["string", "null"] },
+          evidence: { type: ["string", "null"] },
+          source: { type: "string", enum: ["extracted", "author"] },
+        },
+        required: ["field", "value"],
+      },
+    },
     isMob: {
       type: "boolean",
       description:

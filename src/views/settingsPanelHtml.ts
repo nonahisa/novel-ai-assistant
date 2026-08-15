@@ -677,6 +677,22 @@ button.secondary {
         key.textContent = entry.label;
         line.appendChild(key);
         line.appendChild(document.createTextNode(entry.value));
+        // 食い違いを「作中の変化」として確定させる操作。
+        // 押した先で消えるのは判断待ちの印だけで、値はどちらも残る
+        if (entry.action) {
+          const field = entry.action.field;
+          const button = document.createElement("button");
+          button.className = "action secondary";
+          button.textContent = entry.action.label;
+          button.addEventListener("click", () => {
+            post("promoteConflict", {
+              kind: detail.kind,
+              id: detail.id,
+              field: field,
+            });
+          });
+          line.appendChild(button);
+        }
         el.detail.appendChild(line);
       }
     }

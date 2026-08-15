@@ -3,13 +3,18 @@ import {
   Character,
   emptyCharacter,
   nextCharacterId,
+  type CharacterTextField,
 } from "../models/character";
 import { ExtractedCharacter } from "../prompts/characterExtract";
 import { clampSummary } from "./summaryLimit";
 import { fillReading } from "./reading";
 import { normalizeGender } from "./gender";
 import { isMeaningfulValue } from "./characterExtractionValidation";
-import { recordObservation } from "../models/jsonValidation";
+import {
+  hasChange,
+  recordChangeChapters,
+  recordObservation,
+} from "../models/jsonValidation";
 
 /**
  * 抽出結果を既存の人物一覧へマージする。
@@ -333,14 +338,7 @@ function mergeAddressTerm(
  */
 function fillOrConflict(
   target: Character,
-  field:
-    | "summary"
-    | "affiliation"
-    | "gender"
-    | "reading"
-    | "role"
-    | "personality"
-    | "appearance",
+  field: CharacterTextField,
   incoming: string | null | undefined,
   /** この値が出てきた話数。食い違いを『変化』として読めるようにする */
   chapters: number[],
@@ -357,6 +355,14 @@ function fillOrConflict(
     target[field] = value;
     return true;
   }
+
+  // 作者が「作中の変化」と確定させた値は、食い違いへ戻さない。
+  // 戻すと、昇格させたそばから同じ判断を求められることになり、
+  // 作者の操作そのものが無意味になる。話数だけを足して記録を育てる
+  if (hasChange(target.changes, field, value)) {
+    return recordChangeChapters(target.changes, field, value, chapters);
+  }
+
   if (current === value) {
     // 既に食い違いとして記録されている値なら、話数を足す。
     // 「先にあった値」は記録が無いまま始まるが、同じ値がまた出てきた時点で

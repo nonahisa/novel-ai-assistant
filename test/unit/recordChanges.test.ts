@@ -1,0 +1,337 @@
+import { describe, expect, test } from "vitest";
+import {
+  applyPromotion,
+  changedFields,
+  changesOfField,
+  promoteConflictToChanges,
+} from "../../src/core/recordChanges";
+import { mergeExtractedCharacters } from "../../src/core/characterMerge";
+import { unifyCharacters } from "../../src/core/characterUnify";
+import {
+  emptyCharacter,
+  parseCharacter,
+  type Character,
+} from "../../src/models/character";
+import {
+  parseChanges,
+  type RecordChange,
+} from "../../src/models/jsonValidation";
+import {
+  buildCharacterMarkdown,
+  describeChangeValues,
+} from "../../src/core/settingsMarkdown";
+import { describeCharacter } from "../../src/core/settingsSummary";
+
+/** 第1〜3話は黒髪、第7話で銀髪になった人物 */
+function withHairConflict(): Character {
+  const character = emptyCharacter("char_001", "文佳");
+  character.appearance = "黒髪";
+  character.conflicts = [
+    {
+      field: "appearance",
+      values: ["黒髪", "銀髪"],
+      chapters: [1, 2, 3, 7],
+      note: null,
+      observations: [
+        { value: "黒髪", chapters: [1, 2, 3] },
+        { value: "銀髪", chapters: [7] },
+      ],
+    },
+  ];
+  return character;
+}
+
+describe("食い違いを作中の変化へ移す", () => {
+  test("値は両方残り、判断待ちの印だけが外れる", () => {
+    const promotion = promoteConflictToChanges(withHairConflict(), "appearance");
+
+    expect(promotion?.conflicts).toEqual([]);
+    expect(promotion?.changes.map((change) => change.value)).toEqual([
+      "黒髪",
+      "銀髪",
+    ]);
+    expect(promotion?.changes[0].chapters).toEqual([1, 2, 3]);
+    expect(promotion?.changes[1].chapters).toEqual([7]);
+  });
+
+  test("いちばん後ろの話に出てきた値が「今の値」になる", () => {
+    // 残さないと、資料の外見が第1話の姿のままになる
+    const promotion = promoteConflictToChanges(withHairConflict(), "appearance");
+    expect(promotion?.currentValue).toBe("銀髪");
+  });
+
+  test("作者が選んだ「今の値」を優先する", () => {
+    const promotion = promoteConflictToChanges(
+      withHairConflict(),
+      "appearance",
+      { currentValue: "黒髪" }
+    );
+    expect(promotion?.currentValue).toBe("黒髪");
+  });
+
+  test("作者が書いた補足を捨てない", () => {
+    // 食い違いの補足は値ごとではなく1件に付いている。
+    // 移す先が無いからと捨てると、作者が書いた文章が消える
+    const character = withHairConflict();
+    character.conflicts[0].note = "第7話で染めた";
+
+    const promotion = promoteConflictToChanges(character, "appearance");
+    expect(promotion?.changes.map((change) => change.note)).toContain(
+      "第7話で染めた"
+    );
+  });
+
+  test("値ごとの話数が無い古いデータでも移せる", () => {
+    const character = emptyCharacter("char_001", "文佳");
+    character.appearance = "黒髪";
+    character.conflicts = [
+      {
+        field: "appearance",
+        values: ["黒髪", "銀髪"],
+        chapters: [],
+        note: null,
+      },
+    ];
+
+    const promotion = promoteConflictToChanges(character, "appearance");
+    expect(promotion?.changes.map((change) => change.value)).toEqual([
+      "黒髪",
+      "銀髪",
+    ]);
+    // どれにも話数が無ければ「今の値」は決められない。元の値を残す
+    expect(promotion?.currentValue).toBeUndefined();
+  });
+
+  test("値ごとの記録が一部にしか無くても、全部の値を拾う", () => {
+    // 記録のある値だけを移すと、既にあった食い違いが表示から消える
+    const character = emptyCharacter("char_001", "文佳");
+    character.conflicts = [
+      {
+        field: "appearance",
+        values: ["黒髪", "銀髪", "白髪"],
+        chapters: [7],
+        note: null,
+        observations: [{ value: "銀髪", chapters: [7] }],
+      },
+    ];
+
+    const promotion = promoteConflictToChanges(character, "appearance");
+    const values = promotion?.changes.map((entry) => entry.value) ?? [];
+    expect(values).toHaveLength(3);
+    expect(values).toContain("黒髪");
+    expect(values).toContain("銀髪");
+    expect(values).toContain("白髪");
+  });
+
+  test("対象の食い違いが無ければ何もしない", () => {
+    expect(
+      promoteConflictToChanges(emptyCharacter("char_001", "文佳"), "appearance")
+    ).toBeUndefined();
+  });
+
+  test("並びは古い順。話数の無い値は先に置く", () => {
+    const character = withHairConflict();
+    character.conflicts[0].observations = [
+      { value: "銀髪", chapters: [7] },
+      { value: "黒髪", chapters: [] },
+    ];
+
+    const promotion = promoteConflictToChanges(character, "appearance");
+    expect(promotion?.changes.map((change) => change.value)).toEqual([
+      "黒髪",
+      "銀髪",
+    ]);
+  });
+});
+
+describe("昇格の結果を人物へ反映する", () => {
+  test("項目には最新の値を入れ直す", () => {
+    const character = withHairConflict();
+    const promotion = promoteConflictToChanges(character, "appearance")!;
+    const updated = applyPromotion(character, "appearance", promotion);
+
+    expect(updated.appearance).toBe("銀髪");
+    expect(updated.conflicts).toEqual([]);
+    expect(changesOfField(updated.changes, "appearance")).toHaveLength(2);
+  });
+
+  test("知らない項目名では、項目を触らない", () => {
+    // 作者が追加した項目などが混ざっても、既定の項目を壊さない
+    const character = withHairConflict();
+    character.conflicts = [
+      { field: "髪型", values: ["長い", "短い"], chapters: [], note: null },
+    ];
+    const promotion = promoteConflictToChanges(character, "髪型")!;
+    const updated = applyPromotion(character, "髪型", promotion);
+
+    expect(updated.appearance).toBe("黒髪");
+    expect(changedFields(updated.changes)).toEqual(["髪型"]);
+  });
+
+  test("autoGenerated は変えない", () => {
+    // 作者が触ったのは1項目の読み方であって、レコード全体を引き取ったのではない
+    const character = withHairConflict();
+    const promotion = promoteConflictToChanges(character, "appearance")!;
+    expect(applyPromotion(character, "appearance", promotion).autoGenerated).toBe(
+      true
+    );
+  });
+});
+
+describe("昇格したあとの再抽出", () => {
+  function promoted(): Character {
+    const character = withHairConflict();
+    const promotion = promoteConflictToChanges(character, "appearance")!;
+    return applyPromotion(character, "appearance", promotion);
+  }
+
+  test("同じ値がまた出てきても、食い違いを立て直さない", () => {
+    // 立て直されると、作者が昇格させたそばから同じ判断を求められる
+    const result = mergeExtractedCharacters(
+      [promoted()],
+      [{ data: { name: "文佳", appearance: "黒髪" }, chapters: [9] }]
+    );
+
+    expect(result.characters[0].conflicts).toEqual([]);
+    expect(result.conflicts).toEqual([]);
+  });
+
+  test("変化のほうに話数が足される", () => {
+    const result = mergeExtractedCharacters(
+      [promoted()],
+      [{ data: { name: "文佳", appearance: "黒髪" }, chapters: [9] }]
+    );
+
+    const change = result.characters[0].changes.find(
+      (entry) => entry.value === "黒髪"
+    );
+    expect(change?.chapters).toEqual([1, 2, 3, 9]);
+    expect(result.characters[0].appearance).toBe("銀髪");
+  });
+
+  test("知らない値なら、これまでどおり食い違いにする", () => {
+    const result = mergeExtractedCharacters(
+      [promoted()],
+      [{ data: { name: "文佳", appearance: "赤毛" }, chapters: [11] }]
+    );
+
+    expect(result.characters[0].conflicts).toHaveLength(1);
+    expect(result.characters[0].conflicts[0].values).toContain("赤毛");
+  });
+});
+
+describe("同一人物をまとめる", () => {
+  test("片方にしか無い変化も残す", () => {
+    const keep = emptyCharacter("char_001", "文佳");
+    keep.changes = [change("appearance", "黒髪", [1])];
+    const absorb = emptyCharacter("char_002", "密倉 文佳");
+    absorb.changes = [change("appearance", "銀髪", [7])];
+
+    const { unified } = unifyCharacters(keep, absorb);
+    expect(unified.changes.map((entry) => entry.value)).toEqual([
+      "黒髪",
+      "銀髪",
+    ]);
+  });
+
+  test("同じ変化は1件にまとめ、話数と補足を残す", () => {
+    const keep = emptyCharacter("char_001", "文佳");
+    keep.changes = [{ ...change("appearance", "黒髪", [1]), note: "地の文" }];
+    const absorb = emptyCharacter("char_002", "密倉 文佳");
+    absorb.changes = [{ ...change("appearance", "黒髪", [3]), note: "台詞" }];
+
+    const { unified } = unifyCharacters(keep, absorb);
+    expect(unified.changes).toHaveLength(1);
+    expect(unified.changes[0].chapters).toEqual([1, 3]);
+    expect(unified.changes[0].note).toBe("地の文\n台詞");
+  });
+});
+
+describe("保存と読み込み", () => {
+  test("書いて読み直しても変化が失われない", () => {
+    const character = withHairConflict();
+    const promotion = promoteConflictToChanges(character, "appearance")!;
+    const updated = applyPromotion(character, "appearance", promotion);
+
+    const reloaded = parseCharacter(JSON.parse(JSON.stringify(updated)));
+    expect(reloaded.changes).toEqual(updated.changes);
+  });
+
+  test("古いJSON（changes が無い）でも読める", () => {
+    const reloaded = parseCharacter({ id: "char_001", name: "文佳" });
+    expect(reloaded.changes).toEqual([]);
+  });
+
+  test("source は既定で extracted", () => {
+    const parsed = parseChanges([{ field: "appearance", value: "黒髪" }]);
+    expect(parsed?.[0]).toMatchObject({
+      source: "extracted",
+      chapters: [],
+      timepointId: null,
+    });
+  });
+
+  test("知らない source は読み込まずに止める", () => {
+    expect(() =>
+      parseChanges([{ field: "appearance", value: "黒髪", source: "ai" }])
+    ).toThrow(/source/);
+  });
+
+  test("値の無い変化は読み込まずに止める", () => {
+    expect(() => parseChanges([{ field: "appearance" }])).toThrow(/value/);
+  });
+});
+
+describe("表示", () => {
+  test("食い違いと同じ書き方で並べる", () => {
+    expect(
+      describeChangeValues([
+        change("appearance", "銀髪", [7]),
+        change("appearance", "黒髪", [1, 2, 3]),
+      ])
+    ).toBe("黒髪（第1〜3話）→ 銀髪（第7話）");
+  });
+
+  test("話数の無い値は「それ以前」と書く", () => {
+    expect(
+      describeChangeValues([
+        change("appearance", "銀髪", [7]),
+        change("appearance", "黒髪", []),
+      ])
+    ).toBe("黒髪（それ以前）→ 銀髪（第7話）");
+  });
+
+  test("設定資料に変化として載る", () => {
+    const character = withHairConflict();
+    const promotion = promoteConflictToChanges(character, "appearance")!;
+    const updated = applyPromotion(character, "appearance", promotion);
+
+    const markdown = buildCharacterMarkdown([updated], { workTitle: "試作" });
+    expect(markdown).toContain("**変化（appearance）**");
+    expect(markdown).not.toContain("変化かもしれない");
+  });
+
+  test("AIへ渡す説明にも変化を含める", () => {
+    // 項目の値だけを見せると「今の姿」しか分からず、
+    // 過去の話について相談したときに食い違う
+    const character = withHairConflict();
+    const promotion = promoteConflictToChanges(character, "appearance")!;
+    const updated = applyPromotion(character, "appearance", promotion);
+
+    expect(describeCharacter(updated)).toContain(
+      "変化（appearance）: 黒髪（第1〜3話）→ 銀髪（第7話）"
+    );
+  });
+});
+
+function change(field: string, value: string, chapters: number[]): RecordChange {
+  return {
+    field,
+    value,
+    chapters,
+    timepointId: null,
+    note: null,
+    evidence: null,
+    source: "extracted",
+  };
+}

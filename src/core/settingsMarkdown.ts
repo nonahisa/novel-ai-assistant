@@ -4,7 +4,8 @@ import type { Character } from "../models/character";
 import type { AiNote } from "../models/aiNote";
 import type { CustomFieldDefinition } from "../models/customField";
 import { membersOf, type Organization } from "../models/organization";
-import type { RecordConflict } from "../models/jsonValidation";
+import type { RecordChange, RecordConflict } from "../models/jsonValidation";
+import { changedFields, changesOfField, sortChanges } from "./recordChanges";
 import {
   WORLD_CATEGORIES,
   WORLD_CATEGORY_LABELS,
@@ -497,6 +498,15 @@ function describeCharacter(
   if (character.exportNote.trim()) {
     lines.push(`- **補足**: ${character.exportNote.trim()}`);
   }
+  // 作者が確定させた変化を、判断待ちの食い違いより先に置く。
+  // こちらは事実として読んでよいものなので、疑いの残るものと混ぜない
+  for (const field of changedFields(character.changes)) {
+    lines.push(
+      `- **変化（${field}）**: ${describeChangeValues(
+        changesOfField(character.changes, field)
+      )}`
+    );
+  }
   for (const conflict of character.conflicts) {
     lines.push(
       `- **変化かもしれない（${conflict.field}）**: ${describeConflictValues(conflict)}`
@@ -539,6 +549,27 @@ export function describeConflictValues(conflict: RecordConflict): string {
       const chapters =
         item.chapters.length > 0 ? formatChapters(item.chapters) : "それ以前";
       return `${item.value}（${chapters}）`;
+    })
+    // 全角の閉じ括弧が右に余白を持つので、矢印の前に空白は入れない
+    .join("→ ");
+}
+
+/**
+ * 作中での変化を1行にする。
+ *
+ * 書き方は `describeConflictValues` と揃える。作者にとっては同じ「変化」で
+ * あり、確定したかどうかが違うだけなので、読み方まで変えない。
+ *
+ *   黒髪（それ以前）→ 銀髪（第7話）
+ */
+export function describeChangeValues(changes: RecordChange[]): string {
+  return sortChanges(changes)
+    .map((change) => {
+      const chapters =
+        change.chapters.length > 0
+          ? formatChapters(change.chapters)
+          : "それ以前";
+      return `${change.value}（${chapters}）`;
     })
     // 全角の閉じ括弧が右に余白を持つので、矢印の前に空白は入れない
     .join("→ ");

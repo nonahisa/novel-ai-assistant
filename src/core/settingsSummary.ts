@@ -4,7 +4,8 @@ import type { Location } from "../models/location";
 import type { Organization } from "../models/organization";
 import type { CustomFieldDefinition } from "../models/customField";
 import { WORLD_CATEGORY_LABELS, type WorldItem } from "../models/world";
-import { formatChapters } from "./settingsMarkdown";
+import { describeChangeValues, formatChapters } from "./settingsMarkdown";
+import { changedFields, changesOfField } from "./recordChanges";
 
 /**
  * 1件分の設定を、人が読める短い文章にする。
@@ -92,6 +93,15 @@ export function describeCharacter(
               .join("」「")}」`
         )
         .join("、")
+    );
+  }
+  // 作中での変化は、AIにも渡す。項目の値だけを見せると
+  // 「今の姿」しか分からず、過去の話について相談したときに食い違う
+  for (const field of changedFields(character.changes)) {
+    push(
+      lines,
+      `変化（${field}）`,
+      describeChangeValues(changesOfField(character.changes, field))
     );
   }
   // 作者が足した項目は、定義された順に並べる。
