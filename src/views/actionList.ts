@@ -672,6 +672,18 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           "AIが返したエラーの詳細を記録しています。" +
           "抽出が失敗して理由が分からないときに開いてください。",
       },
+      {
+        kind: "action",
+        command: "novelai.openChatLog",
+        label: "相談のログを開く",
+        icon: "comment-discussion",
+        requiresWork: true,
+        detail:
+          "AIとの相談のやり取りを残しています。**何を材料にAIが何を答えたか**を" +
+          "後から確かめられます（渡した場面・検索語・所要時間つき）。" +
+          "**原稿の一部を含みます。** GitHubへは送られません。" +
+          "残したくない場合は設定 `novelai.chatLog.enabled` を切ってください。",
+      },
     ],
   },
 ];

@@ -55,6 +55,7 @@ import { restoreFromHistory } from "./features/gitRestore";
 import { setupOllama } from "./features/setupOllama";
 import { setupVectorSearch } from "./features/setupVectorSearch";
 import { runFullSetup } from "./features/setupWizard";
+import { chatLogPath, isChatLogEnabled } from "./core/chatLog";
 import {
   buildVectorIndex,
   isVectorSearchEnabled,
@@ -752,6 +753,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("novelai.runFullSetup", async () => {
       await runFullSetup(aiRegistry);
     })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.openChatLog",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+
+        const file = chatLogPath(work);
+        try {
+          await vscode.workspace.fs.stat(vscode.Uri.file(file));
+        } catch {
+          // 無いことと、切ってあることを区別して伝える。
+          // 「まだ相談していない」のか「記録していない」のかで対処が違う
+          const message = isChatLogEnabled()
+            ? "相談のログはまだありません。AIに相談すると作られます。"
+            : "相談のログは残さない設定になっています（novelai.chatLog.enabled）。";
+          vscode.window.showInformationMessage(message);
+          return;
+        }
+        await vscode.commands.executeCommand(
+          "vscode.open",
+          vscode.Uri.file(file)
+        );
+      }
+    )
   );
 
   context.subscriptions.push(

@@ -106,6 +106,7 @@ import { buildSettingsPanelHtml } from "../views/settingsPanelHtml";
 import { renderMarkdownLite } from "../core/markdownLite";
 import { withCancellableProgress } from "../views/progress";
 import { logFailure } from "../core/logger";
+import { appendChatLog, summarizeMaterials } from "../core/chatLog";
 
 /**
  * 設定資料パネル。
@@ -227,6 +228,8 @@ export class SettingsPanel {
   private excerptSources: ExcerptSource[] | undefined;
   /** 検索の材料。パネルを開いている間は使い回す（毎回読み直すと重い） */
   private retrieval: RetrievalContext | undefined;
+  /** 直近の相談で使った検索語。ログに残して、外した場面の原因を追えるようにする */
+  private lastSearchTerms: string[] = [];
   /** 選択中のレコードごとのやり取り。保存はしない */
   private readonly chatHistory = new Map<string, ChatTurn[]>();
   /** 有料のAIについて確認を取り終えたモデル名。切り替えたら取り直す */
@@ -850,6 +853,7 @@ export class SettingsPanel {
     const history = this.chatHistory.get(key) ?? [];
     // 質問を渡す。渡さないと、どの質問でも同じ場面が集まってしまう
     const excerpts = await this.excerptsFor(kind, record, question);
+    const started = Date.now();
 
     const prompt = buildSettingsChatPrompt({
       workTitle: this.work.title,
@@ -865,6 +869,21 @@ export class SettingsPanel {
 
     const text = await this.generate(prompt, `「${record.name}」について調べています`);
     if (text === undefined) return;
+
+    appendChatLog(this.work, {
+      panel: "設定資料パネル",
+      provider: resolved.provider.displayName,
+      model: resolved.model,
+      paid: resolved.provider.isPaid,
+      target: `${KIND_LABELS[kind]}: ${record.name}`,
+      // 検索語はここでも作っている。何で引いたかが分からないと、
+      // 外した場面が渡ったときに原因を追えない
+      searchTerms: this.lastSearchTerms,
+      materials: summarizeMaterials(excerpts),
+      question,
+      reply: text,
+      elapsedMs: Date.now() - started,
+    });
 
     this.chatHistory.set(key, [
       ...history,
@@ -1035,7 +1054,8 @@ export class SettingsPanel {
         jsonSchema: SEARCH_TERMS_SCHEMA,
         disableThinking: true,
       });
-      return parseSearchTerms(result.text);
+      this.lastSearchTerms = parseSearchTerms(result.text);
+      return this.lastSearchTerms;
     } catch (error) {
       logFailure("検索語の作成に失敗（質問文のまま検索）", {
         理由: error instanceof Error ? error.message : String(error),

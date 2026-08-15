@@ -42,6 +42,11 @@ import {
 } from "./vectorSearch";
 import { describeRetrieval, formatForPrompt } from "../core/retrieval";
 import {
+  appendChatLog,
+  summarizeMaterials,
+  type ChatLogMaterial,
+} from "../core/chatLog";
+import {
   buildSearchQuery,
   buildSearchTermsPrompt,
   parseSearchTerms,
@@ -288,7 +293,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     // **質問に近い場面を作品全体から探して足す。**
     // 開いている画面の前後だけでは、大きい作品でほとんど答えられなかった
     // （78.5万字の作品で、実測3問中0問）。
-    const found = context ? await this.findRelated(context.work, question) : [];
+    const found = context
+      ? await this.findRelated(context.work, question)
+      : { reference: [], searchTerms: [], materials: [] };
+    const started = Date.now();
 
     try {
       logStep(`相談: v${WORK_CHAT_VERSION} / ${resolved.model}`);
@@ -305,7 +313,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
             excerpt: context?.excerpt ?? "",
             excerptTruncated: context?.truncated ?? false,
             fromSelection: context?.fromSelection ?? false,
-            reference: [...(context?.reference ?? []), ...found],
+            reference: [...(context?.reference ?? []), ...found.reference],
             requestedFiles,
             history: this.history.slice(-HISTORY_TURNS),
             question,
@@ -320,7 +328,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           disableThinking: true,
         });
 
-      let answer = parseWorkChatAnswer((await call()).text);
+      let result = await call();
+      let answer = parseWorkChatAnswer(result.text);
+      let readFiles: string[] = [];
 
       // 材料が足りないと言われたら、作品フォルダーの中から渡して聞き直す。
       // **往復は1回だけ。** 際限なく求められると料金と待ち時間が読めなくなる
@@ -330,11 +340,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       if (wanted.length > 0) {
         const files = await this.readWorkFiles(context!.work, wanted);
         if (files.length > 0) {
+          readFiles = files.map((file) => file.path);
           void this.view.webview.postMessage({
             type: "reading",
-            files: files.map((file) => file.path),
+            files: readFiles,
           });
-          answer = parseWorkChatAnswer((await call(files)).text);
+          result = await call(files);
+          answer = parseWorkChatAnswer(result.text);
         }
       }
 
@@ -348,13 +360,40 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         { role: "assistant", text: answer.reply }
       );
 
+      // 提案は先に解釈しておく。**記録には解釈後のものを残す。**
+      // AIが返した生の値を残しても、実際に押せる形になったかが分からない
+      const staged = {
+        edit: this.stageEdit(answer.edit, context?.work),
+        run: this.stageRun(answer.run, context),
+        locate: this.stageLocate(answer.locate, context),
+      };
+
+      if (context) {
+        appendChatLog(context.work, {
+          panel: "相談パネル",
+          provider: resolved.provider.displayName,
+          model: resolved.model,
+          paid: resolved.provider.isPaid,
+          target: context.label,
+          fromSelection: context.fromSelection,
+          searchTerms: found.searchTerms,
+          retrieval: found.retrieval,
+          materials: found.materials,
+          question,
+          reply: answer.reply,
+          options: answer.options,
+          proposals: describeStagedProposals(staged),
+          requestedFiles: readFiles,
+          elapsedMs: Date.now() - started,
+          usage: result.usage,
+        });
+      }
+
       void this.view.webview.postMessage({
         type: "answer",
         reply: answer.reply,
         options: answer.options,
-        edit: this.stageEdit(answer.edit, context?.work),
-        run: this.stageRun(answer.run, context),
-        locate: this.stageLocate(answer.locate, context),
+        ...staged,
       });
     } catch (error) {
       const message =
@@ -364,9 +403,28 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
             ? error.message
             : String(error);
       logFailure("相談", { 内容: message });
+      // 失敗も残す。**うまくいった回だけ記録すると、
+      // 何が起きて答えが返らなかったのかを後から追えない**
+      if (context) {
+        appendChatLog(context.work, {
+          panel: "相談パネル",
+          provider: resolved.provider.displayName,
+          model: resolved.model,
+          paid: resolved.provider.isPaid,
+          target: context.label,
+          searchTerms: found.searchTerms,
+          retrieval: found.retrieval,
+          materials: found.materials,
+          question,
+          reply: "",
+          elapsedMs: Date.now() - started,
+          error: message,
+        });
+      }
       this.postError(message);
     }
   }
+
 
   private postError(message: string): void {
     void this.view?.webview.postMessage({ type: "error", message });
@@ -716,7 +774,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   private async findRelated(
     work: WorkEntry,
     question: string
-  ): Promise<string[]> {
+  ): Promise<{
+    reference: string[];
+    searchTerms: string[];
+    retrieval?: string;
+    materials: ChatLogMaterial[];
+  }> {
+    const empty = { reference: [], searchTerms: [], materials: [] };
     try {
       // 作品が変わったら作り直す。前の作品の場面を渡さないため
       if (!this.retrieval || this.retrievalWorkId !== work.id) {
@@ -730,26 +794,34 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         buildSearchQuery(question, terms),
         { maxChars: RELATED_MAX_CHARS }
       );
-      if (found.length === 0) return [];
+      if (found.length === 0) return { ...empty, searchTerms: terms };
 
       // 何を参照したかを作者にも見せる。材料が見えないまま答えが出ると、
       // どこ由来の話なのか確かめようがない
-      void this.view?.webview.postMessage({
-        type: "searched",
-        summary: describeRetrieval(found),
-      });
+      const retrieval = describeRetrieval(found);
+      void this.view?.webview.postMessage({ type: "searched", summary: retrieval });
 
-      return [
-        "【質問に近い場面】（出どころを添えています。" +
-          "設定資料とあらすじは本文からAIが作ったものなので、" +
-          "本文と食い違うときは本文を優先してください）\n" +
-          formatForPrompt(found),
-      ];
+      return {
+        reference: [
+          "【質問に近い場面】（出どころを添えています。" +
+            "設定資料とあらすじは本文からAIが作ったものなので、" +
+            "本文と食い違うときは本文を優先してください）\n" +
+            formatForPrompt(found),
+        ],
+        searchTerms: terms,
+        retrieval,
+        materials: summarizeMaterials(
+          found.map((candidate) => ({
+            label: `${candidate.item.source}・${candidate.item.label}`,
+            text: candidate.item.text,
+          }))
+        ),
+      };
     } catch (error) {
       logFailure("相談パネルの検索に失敗（開いている画面だけで続行）", {
         理由: error instanceof Error ? error.message : String(error),
       });
-      return [];
+      return empty;
     }
   }
 
@@ -833,6 +905,26 @@ interface ResolvedContext {
   truncated: boolean;
   fromSelection: boolean;
   reference: string[];
+}
+
+/**
+ * 押されるのを待っている提案を、記録用の短い行にする。
+ *
+ * **解釈が通ったものだけを残す。** AIが返した生の値を書いても、
+ * 実際に押せる形になったのかが後から分からない。
+ */
+function describeStagedProposals(staged: {
+  edit?: { label: string } | undefined;
+  run?: { label: string; usesAI: boolean } | undefined;
+  locate?: { label: string } | undefined;
+}): string[] {
+  const out: string[] = [];
+  if (staged.edit) out.push(`書き込み: ${staged.edit.label}`);
+  if (staged.run) {
+    out.push(`機能の起動: ${staged.run.label}${staged.run.usesAI ? "（AIを使う）" : ""}`);
+  }
+  if (staged.locate) out.push(`該当箇所: ${staged.locate.label}`);
+  return out;
 }
 
 function createNonce(): string {

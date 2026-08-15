@@ -2,7 +2,7 @@
 
 小説を書くための作品管理・文字数計測・AI支援を1つにまとめたVSCode拡張機能です。
 
-現在の配布版：**0.5.0**（必要なものを拡張機能の中から入れられるようになりました）
+現在の配布版：**0.6.0**（相談のやり取りを記録し、後から読み返せるようになりました）
 
 ## できること
 
@@ -28,8 +28,8 @@
 認証済みのGitHub CLIを使ってprivate repositoryのReleaseからVSIXをダウンロードし、そのローカルファイルをインストールします。新規インストールと既存版の上書き更新の両方に使えます。
 
 ```powershell
-gh release download v0.5.0 --repo nonahisa/novel-ai-assistant --pattern "novel-ai-assistant-0.5.0.vsix" --clobber
-code --install-extension ".\novel-ai-assistant-0.5.0.vsix" --force
+gh release download v0.6.0 --repo nonahisa/novel-ai-assistant --pattern "novel-ai-assistant-0.6.0.vsix" --clobber
+code --install-extension ".\novel-ai-assistant-0.6.0.vsix" --force
 ```
 
 画面から操作する場合は、VS Codeの「拡張機能」ビュー右上の `...` →「VSIXからのインストール」を選び、同じVSIXファイルを指定します。
@@ -709,6 +709,7 @@ AI処理の記録は「**ログを開く**」（ヘルプ）で開けます。�
 | `novelai.vectorSearch.enabled` | `false` | 相談で使う**意味検索**（ベクトルDB）を使うかどうか。**切っていても、質問を使って場面を探すこと自体は行われます**（語句一致）。入にすると言い換えでの質問にも当たりやすくなりますが、埋め込みモデルの取得（約1.2GB）と作品ごとの索引づくりが要ります。**非力な機械では切ったままで構いません** |
 | `novelai.vectorSearch.model` | `bge-m3` | 意味検索に使う埋め込みモデル（Ollama）。変更すると索引は作り直しになります |
 | `novelai.vectorSearch.autoUpdate` | `true` | 相談を始めるときに、変更ぶんだけ索引を自動で追加します。切ると「検索用の索引を作る」を実行するまで更新されません |
+| `novelai.chatLog.enabled` | `true` | AIとの相談のやり取りを `.aiwriter/logs/chat.md` に残します。**何を材料にAIが何を答えたか**を後から確かめられます。**原稿の一部を含みます**（この場所はGitHubへ送られません）。残したくない場合は切ってください |
 
 `novelai.claude.maxOutputTokens` はClaude専用だった旧設定です。`novelai.maxOutputTokens` に置き換わりました。
 
