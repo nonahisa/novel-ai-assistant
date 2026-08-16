@@ -183,6 +183,15 @@ button.secondary {
   background: var(--vscode-button-secondaryBackground);
   color: var(--vscode-button-secondaryForeground);
 }
+/* 取り下げ。押し間違えると困るので、他のボタンと同じ見た目にしない */
+button.danger {
+  background: transparent;
+  color: var(--vscode-errorForeground);
+  border: 1px solid var(--vscode-errorForeground);
+}
+button.danger:hover {
+  background: var(--vscode-inputValidation-errorBackground);
+}
 .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 .note {
   border: 1px solid var(--vscode-panel-border);
@@ -901,6 +910,31 @@ button.secondary {
         el.detail.appendChild(line);
       }
     }
+
+    // ── 取り下げ
+    // **いちばん下に置く。** AIの抽出は誤った記録を作る（名前が「null」の
+    // 組織が実データにできていた）ので消せる手段は要るが、
+    // 編集欄や相談の近くにあると押し間違える
+    el.detail.appendChild(heading("この記録を取り下げる"));
+    const retireHint = document.createElement("div");
+    retireHint.className = "readonly";
+    retireHint.textContent =
+      "一覧から消します。ファイルは消さず、回復用の場所へ移すのであとから戻せます。" +
+      "AIが作った中身の無い記録を片づけるためのものです。";
+    el.detail.appendChild(retireHint);
+
+    const retireRow = document.createElement("div");
+    retireRow.className = "row";
+    const retireButton = document.createElement("button");
+    retireButton.className = "action danger";
+    retireButton.textContent = "取り下げる";
+    retireButton.disabled = busy;
+    retireButton.addEventListener("click", function () {
+      // 確認は拡張機能側で出す。WebViewのconfirmは使えない
+      post("retire", { kind: detail.kind, id: detail.id });
+    });
+    retireRow.appendChild(retireButton);
+    el.detail.appendChild(retireRow);
 
     // 高さは画面に載せてからでないと測れない
     applyPendingGrow();

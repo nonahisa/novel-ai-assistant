@@ -292,4 +292,106 @@ describe("能力・場所の保存", () => {
       kind: "modified_externally",
     });
   });
+
+  /**
+   * 取り下げ（設定資料パネルから記録を消す操作）。
+   *
+   * AIの抽出は誤った記録を作る。名前が文字列の「null」になった組織が
+   * 実データにできていた（2026-08-16）。消せる手段は要るが、
+   * **消し間違いは取り返しがつかない**ので実体は残す。
+   */
+  describe("取り下げ", () => {
+    test("ファイルを消さず、回復用の場所へ移す", async () => {
+      const original = fixedAbility("abil_001", "灯火");
+      const file = path.join(abilityDir, abilityFileName(original));
+      disk.set(file, bytesFor(original));
+
+      const store = createAbilityStore(work);
+      await store.loadAll();
+
+      const recoveryPath = await store.retire("abil_001");
+
+      // 一覧からは消える
+      expect(disk.has(file)).toBe(false);
+      expect((await store.loadAll()).records).toHaveLength(0);
+      // が、中身はそのまま残っている。
+      // `Uri.file` を通すのは、スタブのディスクがそこで正規化した
+      // 経路（ドライブ文字が小文字）を鍵にしているため
+      const stored = Uri.file(recoveryPath).fsPath;
+      expect(stored).not.toBe(file);
+      expect(new TextDecoder().decode(disk.get(stored)!)).toContain("灯火");
+    });
+
+    test("読み込み後に外部で変更されていたら取り下げない", async () => {
+      // パネルに出ている内容と、いま消すものが違っていては困る
+      const original = fixedAbility("abil_001", "灯火");
+      const file = path.join(abilityDir, abilityFileName(original));
+      disk.set(file, bytesFor(original));
+
+      const store = createAbilityStore(work);
+      await store.loadAll();
+
+      disk.set(file, bytesFor({ ...original, authorNotes: "作者が書いたメモ" }));
+
+      await expect(store.retire("abil_001")).rejects.toMatchObject({
+        kind: "modified_externally",
+      });
+      expect(new TextDecoder().decode(disk.get(file)!)).toContain(
+        "作者が書いたメモ"
+      );
+    });
+
+    test("未保存の変更があれば取り下げない", async () => {
+      const original = fixedAbility("abil_001", "灯火");
+      const file = path.join(abilityDir, abilityFileName(original));
+      disk.set(file, bytesFor(original));
+
+      const store = createAbilityStore(work);
+      await store.loadAll();
+      workspace.textDocuments = [
+        { uri: { fsPath: file }, isDirty: true, getText: () => "" },
+      ];
+
+      await expect(store.retire("abil_001")).rejects.toMatchObject({
+        kind: "unsaved_changes",
+      });
+      expect(disk.has(file)).toBe(true);
+    });
+
+    test("読み込んでいないIDは取り下げられない", async () => {
+      // 保存先が分からないまま消しにいくと、別のファイルへ当たりうる
+      const store = createAbilityStore(work);
+      await store.loadAll();
+
+      await expect(store.retire("abil_999")).rejects.toMatchObject({
+        kind: "path_conflict",
+      });
+    });
+
+    test("既に消えていたら成功として扱う", async () => {
+      // 作者が手で消した後にボタンを押した場合。
+      // 目的は達成されているので、エラーで驚かせない
+      const original = fixedAbility("abil_001", "灯火");
+      const file = path.join(abilityDir, abilityFileName(original));
+      disk.set(file, bytesFor(original));
+
+      const store = createAbilityStore(work);
+      await store.loadAll();
+      disk.delete(file);
+
+      expect(Uri.file(await store.retire("abil_001")).fsPath).toBe(file);
+    });
+
+    test("場所も同じように取り下げられる", async () => {
+      const original = fixedLocation("loc_001", "図書塔");
+      const file = path.join(locationDir, "loc_001_図書塔.json");
+      disk.set(file, bytesFor(original));
+
+      const store = createLocationStore(work);
+      await store.loadAll();
+
+      await store.retire("loc_001");
+      expect(disk.has(file)).toBe(false);
+    });
+  });
 });

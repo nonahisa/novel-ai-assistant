@@ -101,3 +101,31 @@ describe("作品情報を設定資料集で見られる", () => {
     expect(workDetail).not.toContain('post("save"');
   });
 });
+
+/**
+ * 記録の取り下げ（2026-08-16）。
+ *
+ * 名前が文字列の「null」になった組織が実データにできており、
+ * パネルから消す手段が無かった。
+ */
+describe("記録を取り下げられる", () => {
+  test("取り下げボタンがある", () => {
+    expect(script()).toContain('post("retire"');
+  });
+
+  test("他のボタンと見た目を変える", () => {
+    // 編集欄や相談の並びに同じ見た目で置くと押し間違える
+    expect(script()).toContain("action danger");
+    expect(HTML).toContain("button.danger");
+  });
+
+  test("消さずに残ると書く", () => {
+    // 「消えない」と分かっていないと、作者は押せない
+    expect(script()).toContain("回復用の場所");
+  });
+
+  test("確認はWebView側で出さない", () => {
+    // WebViewの confirm は使えない。拡張機能側のモーダルで確かめる
+    expect(script()).not.toContain("confirm(");
+  });
+});

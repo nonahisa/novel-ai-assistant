@@ -3,7 +3,11 @@ import * as path from "path";
 import { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { hashBytes } from "./textFile";
-import { atomicWriteFile, AtomicWriteFileError } from "./atomicWrite";
+import {
+  atomicWriteFile,
+  AtomicWriteFileError,
+  createManagedRecoveryPath,
+} from "./atomicWrite";
 
 /**
  * 能力・場所のような「1件1ファイル」の設定を保存する汎用ストア。
@@ -244,6 +248,85 @@ export class SettingsStore<T extends StorableRecord> {
         hash: hashBytes(new TextEncoder().encode(body)),
       });
     }
+  }
+
+  /**
+   * レコードを取り下げる（人物の `CharacterStore.retire` と同じ考え方）。
+   *
+   * **ファイルを消さず、回復用の場所へ移す。** AIの抽出は誤ったレコードを
+   * 作ることがあり（名前が「null」の組織が実データにできていた）、
+   * 作者が消せる手段は要る。だが消し間違いは取り返しがつかないので、
+   * 実体は `.novelai-recovery` へ残して戻せるようにする。
+   *
+   * 取り下げは作者の操作なので、AIの保存と違って中身は問わない。
+   * ただし**読み込み後に外部で書き換えられていないこと**だけは確かめる。
+   * パネルに出ている内容と、いま消すものが違っていては困る。
+   *
+   * @returns 退避先のパス（作者へ「ここに残っています」と伝えるため）
+   */
+  async retire(id: string): Promise<string> {
+    const snapshot = this.snapshots.get(id);
+    if (!snapshot) {
+      throw new SettingsStoreError(
+        `「${id}」の保存先が分かりません。読み込み直してください。`,
+        "path_conflict"
+      );
+    }
+
+    const unsaved = await this.dirtyDocumentPaths();
+    if (unsaved.length > 0) {
+      throw new SettingsStoreError(
+        "未保存の変更があるため取り下げませんでした。",
+        "unsaved_changes",
+        unsaved
+      );
+    }
+
+    let current: Uint8Array | undefined;
+    try {
+      current = await vscode.workspace.fs.readFile(
+        vscode.Uri.file(snapshot.filePath)
+      );
+    } catch (error) {
+      if (
+        error instanceof vscode.FileSystemError &&
+        error.code === "FileNotFound"
+      ) {
+        // 既に無い。目的は達成されているので、成功として扱う
+        this.snapshots.delete(id);
+        return snapshot.filePath;
+      }
+      throw error;
+    }
+
+    if (hashBytes(current) !== snapshot.hash) {
+      throw new SettingsStoreError(
+        `「${id}」は読み込み後に変更されました。作者の変更を保護するため取り下げませんでした。`,
+        "modified_externally",
+        [snapshot.filePath]
+      );
+    }
+
+    let recoveryPath: string;
+    try {
+      recoveryPath = await createManagedRecoveryPath(snapshot.filePath);
+      await vscode.workspace.fs.rename(
+        vscode.Uri.file(snapshot.filePath),
+        vscode.Uri.file(recoveryPath),
+        { overwrite: false }
+      );
+    } catch (error) {
+      throw new SettingsStoreError(
+        `「${id}」のファイルを退避できませんでした: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        "io_error",
+        [snapshot.filePath]
+      );
+    }
+
+    this.snapshots.delete(id);
+    return recoveryPath;
   }
 
   /**
