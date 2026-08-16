@@ -11,6 +11,7 @@ import { statsDayKey } from "../core/writingStats";
 import { boundaryHour } from "./writingProgress";
 import { readWorkFormat } from "../core/workFormatStore";
 import { episodeUnit } from "../core/episodeLabel";
+import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
  * 作品ごとの目標を決める（設計書6.3.6）。
@@ -68,13 +69,15 @@ export async function setWorkGoals(work: WorkEntry): Promise<void> {
             },
           ]
         : []),
+      // **一覧の中に出口を置く。** Escを知らない作者にも見える
+      { ...cancelItem(), action: "cancel" as const },
     ],
     {
       title: `「${work.title}」の目標`,
       ignoreFocusOut: true,
     }
   );
-  if (!picked) return;
+  if (!picked || isCancelItem(picked)) return;
 
   if (picked.action === "perEpisode") {
     const updated = await editPerEpisode(work, goals);
@@ -98,7 +101,7 @@ async function editPerEpisode(
   goals: WorkGoals
 ): Promise<WorkGoals | undefined> {
   const noun = episodeUnit(await readWorkFormat(work)).noun;
-  const input = await vscode.window.showInputBox({
+  const input = await askText({
     title: `1${noun}あたりの目標文字数`,
     prompt: "空にすると未設定に戻ります",
     value: goals.perEpisodeChars ? String(goals.perEpisodeChars) : "",
@@ -133,6 +136,7 @@ async function editContest(
           action: "open" as const,
           url: site.url,
         })),
+        { ...cancelItem(), action: "cancel" as const, url: undefined },
       ],
       {
         title: "応募先の情報を入れます",
@@ -140,15 +144,16 @@ async function editContest(
         ignoreFocusOut: true,
       }
     );
-    if (!guide) return undefined;
+    if (!guide || isCancelItem(guide)) return undefined;
     if (guide.action === "open") {
       await vscode.env.openExternal(vscode.Uri.parse(guide.url!));
       // 開いたあとも入力へ進む。読んでから戻ってくる手間を省く
     }
   }
 
-  const name = await vscode.window.showInputBox({
+  const name = await askText({
     title: "応募先の名前",
+    prompt: "賞やコンテストの名前を入れてください",
     value: current?.name ?? "",
     placeHolder: "第40回ファンタジア大賞（前期）",
     ignoreFocusOut: true,
@@ -157,7 +162,7 @@ async function editContest(
   });
   if (name === undefined) return undefined;
 
-  const deadline = await vscode.window.showInputBox({
+  const deadline = await askText({
     title: "締切日",
     prompt: "YYYY-MM-DD の形で入れてください",
     value: current?.deadline ?? "",
@@ -170,7 +175,7 @@ async function editContest(
   });
   if (deadline === undefined) return undefined;
 
-  const minChars = await vscode.window.showInputBox({
+  const minChars = await askText({
     title: "作品の文字量（下限）",
     prompt: "「10万字以上」なら 100000。無ければ空のまま",
     value: current?.minChars ? String(current.minChars) : "",
@@ -179,7 +184,7 @@ async function editContest(
   });
   if (minChars === undefined) return undefined;
 
-  const maxChars = await vscode.window.showInputBox({
+  const maxChars = await askText({
     title: "作品の文字量（上限）",
     prompt: "「8,000字以内」なら 8000。無ければ空のまま",
     value: current?.maxChars ? String(current.maxChars) : "",
@@ -198,7 +203,7 @@ async function editContest(
   });
   if (maxChars === undefined) return undefined;
 
-  const dailyGoal = await vscode.window.showInputBox({
+  const dailyGoal = await askText({
     title: "日間目標（任意）",
     prompt:
       "空にすると、残り字数と締切までの日数から自動で割り出します。" +

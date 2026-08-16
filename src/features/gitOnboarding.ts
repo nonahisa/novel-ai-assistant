@@ -21,6 +21,7 @@ import {
 } from "../core/gitSetup";
 import { logFailure, logStep, showLog } from "../core/logger";
 import { withProgress } from "../views/progress";
+import { askText } from "../views/dialogs";
 
 /**
  * GitHub同期を始めるまでの案内。
@@ -116,7 +117,7 @@ export async function recordChanges(
   }
 
   const defaultMessage = `${formatStamp(new Date())} の執筆（${count}件）`;
-  const message = await vscode.window.showInputBox({
+  const message = await askText({
     title: "この記録に付ける説明",
     value: defaultMessage,
     prompt: "あとから履歴を辿るときの目印になります",
@@ -267,7 +268,7 @@ async function askCommitIdentity(
     "入力する"
   );
 
-  const name = await vscode.window.showInputBox({
+  const name = await askText({
     title: "履歴に残す名前",
     prompt: "ペンネームでも構いません",
     ignoreFocusOut: true,
@@ -276,7 +277,7 @@ async function askCommitIdentity(
   });
   if (!name) return false;
 
-  const email = await vscode.window.showInputBox({
+  const email = await askText({
     title: "履歴に残すメールアドレス",
     prompt: "GitHubに登録しているものを推奨します",
     ignoreFocusOut: true,
@@ -380,7 +381,7 @@ async function connectRemote(
     return createRepositoryViaGh(work, name);
   }
 
-  const url = await vscode.window.showInputBox({
+  const url = await askText({
     title: "リポジトリのURL",
     prompt: "https://github.com/ユーザー名/リポジトリ名.git",
     ignoreFocusOut: true,
@@ -401,7 +402,7 @@ async function connectRemote(
 /** 新しいリポジトリの名前を聞く。日本語の作品名からは作れないので空欄から入力してもらう */
 async function askRepositoryName(work: WorkEntry): Promise<string | undefined> {
   const suggested = suggestRepositoryName(work.title);
-  const name = await vscode.window.showInputBox({
+  const name = await askText({
     title: "新しいリポジトリの名前",
     value: suggested,
     prompt: "英数字と - _ . が使えます",

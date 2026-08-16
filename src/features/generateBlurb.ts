@@ -29,6 +29,7 @@ import {
 import { stripCodeFence } from "../core/synopsisValidation";
 import { withCancellableProgress } from "../views/progress";
 import { logFailure, showLog, useLogFile } from "../core/logger";
+import { askText } from "../views/dialogs";
 
 /**
  * 作品紹介文（P-06）とキャッチコピー3案（P-08）。
@@ -251,7 +252,7 @@ export async function generateCatchphrases(
 
     let text = picked.candidate.text;
     if (picked.action === "edit") {
-      const edited = await vscode.window.showInputBox({
+      const edited = await askText({
         title: "キャッチコピーを手直し",
         value: text,
         prompt: `${CATCHPHRASE_MAX_CHARS}字以内`,

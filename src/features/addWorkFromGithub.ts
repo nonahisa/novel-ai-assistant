@@ -8,6 +8,7 @@ import { pathExists } from "../core/fileSystem";
 import { logFailure } from "../core/logger";
 import type { WorkRegistry } from "../core/workRegistry";
 import { withProgress } from "../views/progress";
+import { askText } from "../views/dialogs";
 
 /**
  * GitHubにある作品を取り寄せて登録する（設計書5.5.11）。
@@ -33,7 +34,7 @@ export async function addWorkFromGithub(
     return undefined;
   }
 
-  const url = await vscode.window.showInputBox({
+  const url = await askText({
     title: "GitHubから作品を取り寄せる",
     prompt: "リポジトリのURLを貼り付けてください",
     placeHolder: "https://github.com/ユーザー名/リポジトリ名.git",
@@ -52,7 +53,7 @@ export async function addWorkFromGithub(
   if (!parent || parent.length === 0) return undefined;
 
   const suggested = folderNameFromUrl(url);
-  const folderName = await vscode.window.showInputBox({
+  const folderName = await askText({
     title: "フォルダー名",
     prompt: "作品フォルダーの名前（あとから作品名は変えられます）",
     value: suggested,
@@ -115,7 +116,7 @@ export async function addWorkFromGithub(
     return undefined;
   }
 
-  const title = await vscode.window.showInputBox({
+  const title = await askText({
     title: "作品名",
     prompt: "一覧に表示する作品名",
     value: folderName.trim(),

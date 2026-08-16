@@ -9,6 +9,7 @@ import {
   listGenres,
   type GenreChoice,
 } from "../core/genre";
+import { cancelItem, isCancelItem } from "../views/dialogs";
 import {
   suggestWorkFormat,
   WORK_FORMATS,
@@ -81,14 +82,15 @@ async function pickFormat(
             : undefined,
       detail: format.description,
       format,
-    })),
+    })).concat([{ ...cancelItem(), format: undefined } as never]),
     {
       title: `「${work.title}」の形式`,
       placeHolder: "あとから変えられます",
       ignoreFocusOut: true,
     }
   );
-  return picked?.format;
+  if (!picked || isCancelItem(picked)) return undefined;
+  return picked.format;
 }
 
 /**
@@ -119,6 +121,9 @@ async function pickGenres(): Promise<GenreChoice[] | undefined> {
               : "あとからプロットへ直接書けます",
           site: undefined,
         },
+        // **形式の選択まで取りやめる出口。** 上の「これで決定」とは違う。
+        // 決めたジャンルも、選んだ形式も書き込まずに閉じる
+        { ...cancelItem("すべて取りやめる"), site: undefined },
       ],
       {
         title: "どこのジャンル体系で決めますか",
@@ -126,8 +131,8 @@ async function pickGenres(): Promise<GenreChoice[] | undefined> {
         ignoreFocusOut: true,
       }
     );
-    // 取り消し（Esc）は、全体の取り消しとして扱う
-    if (!site) return undefined;
+    // 取り消し（Escまたは「すべて取りやめる」）は、全体の取り消しとして扱う
+    if (!site || isCancelItem(site)) return undefined;
     if (!site.site) return chosen;
 
     const picked = await vscode.window.showQuickPick(

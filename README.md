@@ -2,7 +2,7 @@
 
 小説を書くための作品管理・文字数計測・AI支援を1つにまとめたVSCode拡張機能です。
 
-現在の配布版：**0.6.27**（実際に使って見つかった不具合の修正）
+現在の配布版：**0.6.28**（実際に使って見つかった不具合の修正）
 
 ## できること
 
@@ -28,8 +28,8 @@
 認証済みのGitHub CLIを使ってprivate repositoryのReleaseからVSIXをダウンロードし、そのローカルファイルをインストールします。新規インストールと既存版の上書き更新の両方に使えます。
 
 ```powershell
-gh release download v0.6.27 --repo nonahisa/novel-ai-assistant --pattern "novel-ai-assistant-0.6.27.vsix" --clobber
-code --install-extension ".\novel-ai-assistant-0.6.27.vsix" --force
+gh release download v0.6.28 --repo nonahisa/novel-ai-assistant --pattern "novel-ai-assistant-0.6.28.vsix" --clobber
+code --install-extension ".\novel-ai-assistant-0.6.28.vsix" --force
 ```
 
 画面から操作する場合は、VS Codeの「拡張機能」ビュー右上の `...` →「VSIXからのインストール」を選び、同じVSIXファイルを指定します。
@@ -269,6 +269,7 @@ npm run watch
 | `novelai.excludeRubyFromCount` | `true` | ルビ部分を文字数から除外する |
 | `novelai.episodeFileExtension` | `.txt` | 新規ファイルの既定の拡張子 |
 | `novelai.episodeNumberDigits` | `3` | 話数のゼロ埋め桁数（3なら `001.txt`） |
+| `novelai.logs.retentionDays` | `7` | ログに残す日数。これより古い行は起動時に消える（`0`で消さない） |
 | `novelai.chatter.enabled` | `true` | 書いている最中に、AIが相談パネルへひとこと差し込む（Ollamaのときだけ） |
 | `novelai.stats.enabled` | `true` | 保存のたびに執筆量を記録する |
 | `novelai.stats.showInStatusBar` | `true` | ステータスバーに今日の執筆量を出す |

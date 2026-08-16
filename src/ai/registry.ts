@@ -13,6 +13,7 @@ import { GeminiProvider } from "./geminiProvider";
 import { withProgress } from "../views/progress";
 import { probeGeneration } from "./generationProbe";
 import { logFailure, showLog } from "../core/logger";
+import { askText } from "../views/dialogs";
 
 const KEY_PROVIDER = "novelai.ai.provider";
 const KEY_MODEL = "novelai.ai.model";
@@ -258,7 +259,7 @@ async function ensureApiKey(provider: ApiKeyProvider): Promise<boolean> {
     if (answer.action === "keep") return true;
   }
 
-  const key = await vscode.window.showInputBox({
+  const key = await askText({
     title: help.title,
     prompt: help.prompt,
     placeHolder: help.placeHolder,

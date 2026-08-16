@@ -109,6 +109,7 @@ import {
 import { statsDayKey } from "./core/writingStats";
 import { setWorkGoals } from "./features/setWorkGoals";
 import { checkContradictions } from "./features/checkContradictions";
+import { pruneAllLogs } from "./features/pruneLogs";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
 import { hasUnsavedChanges } from "./core/textFile";
@@ -126,6 +127,7 @@ import {
   openAllWorksWritingStatsPanel,
   refreshAllWorksWritingStatsPanel,
 } from "./features/allWorksWritingStatsPanel";
+import { askText } from "./views/dialogs";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -462,6 +464,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   chatter.start();
   context.subscriptions.push(chatter);
 
+  // ─── ログの整理（設計書8.3） ───
+  // **起動のときに1回だけ。** 書き込みのたびに全体を読み直すと、
+  // 抽出のように何十回も書く処理が遅くなる。
+  // 失敗しても何も言わない（整理できないことを知らせる必要はない）
+  void pruneAllLogs(registry.list()).catch(() => undefined);
+
   // ─── ステータスバー（現在開いているファイルの文字数） ───
   const statusBar = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
@@ -662,7 +670,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
       const folderPath = picked[0].fsPath;
       const defaultTitle = path.basename(folderPath);
-      const title = await vscode.window.showInputBox({
+      const title = await askText({
         prompt: "作品名を入力してください",
         value: defaultTitle,
         validateInput: (v) =>
@@ -729,7 +737,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
     if (!parent || parent.length === 0) return;
 
-    const title = await vscode.window.showInputBox({
+    const title = await askText({
       prompt: "作品名を入力してください（フォルダ名になります）",
       validateInput: (v) => {
         const t = v.trim();
@@ -1198,7 +1206,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           format === "sns"
             ? `${nextDatedName(parsed, statsDayKey(new Date(), boundaryHour()))}${ext}`
             : `${formatChapterNumber(next, digits)}${ext}`;
-        const fileName = await vscode.window.showInputBox({
+        const fileName = await askText({
           prompt:
             format === "sns" ? "新規投稿ファイルの名前" : "新規話数ファイルの名前",
           value: defaultName,

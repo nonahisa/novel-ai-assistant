@@ -11,6 +11,7 @@ import {
   type CustomFieldDefinition,
 } from "../models/customField";
 import { logFailure } from "../core/logger";
+import { askText } from "../views/dialogs";
 
 /**
  * 人物設定に作者が項目を足す・外す。
@@ -106,7 +107,7 @@ async function pickAction(
 async function addField(
   fields: CustomFieldDefinition[]
 ): Promise<CustomFieldDefinition[] | undefined> {
-  const label = await vscode.window.showInputBox({
+  const label = await askText({
     title: "追加する項目の名前",
     placeHolder: "例: 誕生日 / 身長 / 好きな食べ物 / 家紋",
     prompt: "設定資料に出す見出しになります。",
@@ -116,7 +117,7 @@ async function addField(
 
   const trimmedLabel = label.trim();
 
-  const hint = await vscode.window.showInputBox({
+  const hint = await askText({
     title: `「${trimmedLabel}」の説明（省略できます）`,
     placeHolder: "例: 本文中で誕生日に触れている箇所があれば書く",
     prompt:
