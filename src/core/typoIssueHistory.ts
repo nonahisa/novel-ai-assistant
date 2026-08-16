@@ -136,8 +136,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export interface AiActionLogEntry {
-  /** 指摘の種類。誤字脱字検知しか無い段階だが、将来の推敲・矛盾検知でも使う */
-  category: "typo";
+  /** 指摘の種類。推敲・逸脱検知を足すときも、ここへ名前を増やす */
+  category: "typo" | "contradiction";
   action: "applied" | "dismissed";
   file: string;
   line: number;

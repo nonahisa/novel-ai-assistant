@@ -108,6 +108,7 @@ import {
 } from "./core/workFormatStore";
 import { statsDayKey } from "./core/writingStats";
 import { setWorkGoals } from "./features/setWorkGoals";
+import { checkContradictions } from "./features/checkContradictions";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
 import { hasUnsavedChanges } from "./core/textFile";
@@ -352,8 +353,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
 
       // 未保存のまま読むと、画面と違う本文を検知してしまう
-      const label = kind === "checkNotation" ? "表記ゆれの検知" : "誤字脱字の検知";
+      const label =
+        kind === "checkNotation"
+          ? "表記ゆれの検知"
+          : kind === "checkContradictions"
+            ? "矛盾検知"
+            : "誤字脱字の検知";
       if (!(await saveDirtyDocumentsBeforeExtraction(work, label))) return;
+
+      if (kind === "checkContradictions") {
+        const result = await checkContradictions(work, aiRegistry);
+        if (!result || result.cancelled) return;
+        typoIssuePanel.showContradictions(work, result.issues);
+        return;
+      }
 
       if (kind === "checkNotation") {
         const result = await checkNotation(work);
@@ -1522,6 +1535,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
         vscode.window.showInformationMessage(
           `表記ゆれ検知が完了しました。${parts.join(" / ")}`
+        );
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.checkContradictions",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+
+        // 未保存のまま読むと、画面と違う本文を突き合わせてしまう
+        if (!(await saveDirtyDocumentsBeforeExtraction(work, "矛盾検知"))) return;
+
+        const result = await checkContradictions(work, aiRegistry);
+        if (!result || result.cancelled) return;
+
+        typoIssuePanel.showContradictions(work, result.issues);
+
+        const parts = [`指摘 ${result.issues.length}件`];
+        if (result.rejectedCount > 0) {
+          // 本文に無い箇所を「引用」してくることがある。黙って捨てない
+          parts.push(`本文と合わない指摘 ${result.rejectedCount}件を除外`);
+        }
+        if (result.failedChunks > 0) {
+          parts.push(`読み取れなかった ${result.failedChunks}件`);
+        }
+        vscode.window.showInformationMessage(
+          `矛盾検知が完了しました。${parts.join(" / ")}。` +
+            (result.issues.length > 0
+              ? "**本文は書き換えていません。** 設定と本文のどちらを直すかは作者が決めてください。"
+              : "")
         );
       }
     )

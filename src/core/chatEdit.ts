@@ -156,6 +156,8 @@ export type ChatRunKind =
   | "checkTyposForFile"
   /** 表記ゆれを検知 */
   | "checkNotation"
+  /** 設定資料と本文の矛盾を検知 */
+  | "checkContradictions"
   /** 設定資料をまとめて抽出 */
   | "extractSettings"
   /** 種別を絞った抽出 */
@@ -210,6 +212,7 @@ const RUNNABLE: ReadonlyMap<string, { kind: ChatRunKind } & Omit<ChatRun, "kind"
         ["checkTypos", "誤字脱字を検知する", true],
         ["checkTyposForFile", "この話の誤字脱字を検知する", true],
         ["checkNotation", "表記ゆれを検知する", false],
+        ["checkContradictions", "設定と本文の矛盾を検知する", true],
         // 資料をためる
         ["extractSettings", "設定資料をまとめて抽出する", true],
         ["extractCharacters", "登場人物を抽出する", true],

@@ -330,6 +330,20 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "作品全体から探します。どちらに揃えるかは組ごとに作者が選びます。" +
               "AIは使いません。",
           },
+          {
+            kind: "action",
+            command: "novelai.checkContradictions",
+            label: "矛盾を検知",
+            icon: "warning",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "設定資料と本文が食い違っている箇所を探します。" +
+              "**本文は書き換えません。**「設定ではこう／本文ではこう」を並べるだけで、" +
+              "どちらを直すかは作者が決めます（**設定側が古いこともあります**）。" +
+              "先に設定資料を抽出しておいてください。照らし合わせる相手が無いと、" +
+              "AIは本文だけを見て矛盾を作り出します。",
+          },
         ],
       },
       {

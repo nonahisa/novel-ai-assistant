@@ -10,6 +10,7 @@ import {
 import { appendAiActionLog } from "../core/typoIssueHistory";
 import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
 import type { TypoCheckIssue } from "./checkTypos";
+import type { AcceptedContradiction as ContradictionIssue } from "../core/contradictionValidation";
 import { buildTypoIssuePanelHtml } from "../views/typoIssuePanelHtml";
 
 /**
@@ -42,24 +43,55 @@ export interface TypoIssueViewItem {
   statusDetail?: string;
 }
 
+/**
+ * 矛盾の1件（設計書6.10.1）。
+ *
+ * **`suggestion` を持たない。** 誤字脱字と違い、設定と本文のどちらが
+ * 正しいかは作者にしか決められないので、置き換える案を出さない。
+ */
+export interface ContradictionViewItem {
+  id: string;
+  filePath: string;
+  fileName: string;
+  chunkHash: string;
+  line: number;
+  excerpt: string;
+  category: string;
+  settingSays: string;
+  textSays: string;
+  note: string;
+  confidence: "high" | "medium" | "low";
+  status: "pending" | "dismissed";
+}
+
 type OutgoingMessage = {
   type: "issues";
   workTitle: string;
-  /** パネルの見出し。誤字脱字か表記ゆれかで変わる */
+  /** パネルの見出し。誤字脱字か表記ゆれか矛盾かで変わる */
   category: string;
-  items: TypoIssueViewItem[];
+  items: Array<TypoIssueViewItem | ContradictionViewItem>;
+  /** 「まとめて適用」を出すか。矛盾では出さない */
+  canApplyAll: boolean;
 };
 
 type IncomingMessage =
   | { type: "jump"; id: string }
   | { type: "apply"; id: string }
   | { type: "dismiss"; id: string }
+  | { type: "openSettings"; id: string }
   | { type: "applyAll" };
 
 export class TypoIssuePanel implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private work: WorkEntry | undefined;
   private items: TypoIssueViewItem[] = [];
+  /**
+   * 矛盾の指摘。誤字脱字とは別に持つ。
+   *
+   * **同じ配列へ混ぜない。** 適用・まとめて適用の処理が誤字脱字の形を
+   * 前提にしており、混ぜると矛盾を「適用」しようとして壊れる。
+   */
+  private contradictions: ContradictionViewItem[] = [];
   private category = "誤字脱字";
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -88,6 +120,7 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
   ): void {
     this.work = work;
     this.category = category;
+    this.contradictions = [];
     this.items = issues.map((issue, index) => ({
       id: `${issue.chunkHash}:${issue.line}:${index}`,
       filePath: issue.filePath,
@@ -106,15 +139,80 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
     void vscode.commands.executeCommand(`${AI_ISSUES_VIEW_ID}.focus`);
   }
 
+  /**
+   * 矛盾の結果を差し替えて表示する。
+   *
+   * **適用の口を持たせない。** 設定と本文のどちらが正しいかは
+   * 作者にしか決められないので、見に行く先を出すだけにする。
+   */
+  showContradictions(work: WorkEntry, issues: ContradictionIssue[]): void {
+    this.work = work;
+    this.category = "矛盾";
+    this.items = [];
+    this.contradictions = issues.map((issue, index) => ({
+      id: `c:${issue.chunkHash}:${issue.line}:${index}`,
+      filePath: issue.filePath,
+      fileName: path.basename(issue.filePath),
+      chunkHash: issue.chunkHash,
+      line: issue.line,
+      excerpt: issue.excerpt,
+      category: issue.category,
+      settingSays: issue.settingSays,
+      textSays: issue.textSays,
+      note: issue.note,
+      confidence: issue.confidence,
+      status: "pending",
+    }));
+    this.postItems();
+    void vscode.commands.executeCommand(`${AI_ISSUES_VIEW_ID}.focus`);
+  }
+
   private postItems(): void {
     if (!this.view) return;
+    const contradictionMode = this.contradictions.length > 0;
     const message: OutgoingMessage = {
       type: "issues",
       workTitle: this.work?.title ?? "",
       category: this.category,
-      items: this.items,
+      items: contradictionMode ? this.contradictions : this.items,
+      canApplyAll: !contradictionMode,
     };
     void this.view.webview.postMessage(message);
+  }
+
+  /**
+   * 矛盾を無視する。
+   *
+   * **記録も誤字脱字とは分ける。** あちらは「この置き換えは要らない」で、
+   * こちらは「この食い違いは矛盾ではない（意図した変化である）」という
+   * 別の意味の判断である。
+   */
+  private async dismissContradiction(
+    item: ContradictionViewItem,
+    work: WorkEntry
+  ): Promise<void> {
+    const target = this.contradictions.find((entry) => entry.id === item.id);
+    if (target) target.status = "dismissed";
+    this.postItems();
+
+    await appendAiActionLog(work, {
+      category: "contradiction",
+      action: "dismissed",
+      file: item.fileName,
+      line: item.line,
+      target: item.excerpt,
+      suggestion: `設定「${item.settingSays}」／本文「${item.textSays}」`,
+    });
+  }
+
+  /** 矛盾の相手側（設定資料）を開く。本文だけを直す道を示さないため */
+  private async openSettingsFor(id: string): Promise<void> {
+    const item = this.contradictions.find((entry) => entry.id === id);
+    if (!item || !this.work) return;
+    await vscode.commands.executeCommand("novelai.openSettingsPanel", {
+      type: "work",
+      work: this.work,
+    });
   }
 
   private async handleMessage(message: IncomingMessage): Promise<void> {
@@ -128,6 +226,9 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
       case "dismiss":
         await this.dismissIssue(message.id);
         return;
+      case "openSettings":
+        await this.openSettingsFor(message.id);
+        return;
       case "applyAll":
         await this.applyVisible();
         return;
@@ -135,7 +236,10 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
   }
 
   private async jumpTo(id: string): Promise<void> {
-    const item = this.items.find((i) => i.id === id);
+    // 矛盾も同じ「その行へ飛ぶ」を使う。**両方から探す**
+    const item: { filePath: string; line: number } | undefined =
+      this.items.find((entry) => entry.id === id) ??
+      this.contradictions.find((entry) => entry.id === id);
     if (!item) return;
     try {
       const doc = await vscode.workspace.openTextDocument(item.filePath);
@@ -240,6 +344,12 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
   }
 
   private async dismissIssue(id: string): Promise<void> {
+    const contradiction = this.contradictions.find((entry) => entry.id === id);
+    if (contradiction && this.work) {
+      await this.dismissContradiction(contradiction, this.work);
+      return;
+    }
+
     const item = this.items.find((i) => i.id === id);
     if (!item || !this.work) return;
     const work = this.work;

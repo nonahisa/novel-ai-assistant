@@ -98,6 +98,27 @@ body.show-low .issue.low { display: flex; }
 .reason { color: var(--vscode-descriptionForeground); font-size: 12px; }
 .actions { display: flex; gap: 6px; }
 .status-detail { font-size: 12px; color: var(--vscode-errorForeground); }
+/* 矛盾。置き換えではなく食い違いを並べる */
+.contradiction .quote {
+  font-size: 12px;
+  opacity: 0.85;
+  border-left: 2px solid var(--vscode-panel-border);
+  padding-left: 8px;
+  margin: 4px 0;
+}
+.contradiction .compare { font-size: 13px; line-height: 1.7; }
+.contradiction .side {
+  display: inline-block;
+  min-width: 4.5em;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+.contradiction .note {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 4px;
+}
+.badge.cat { border-color: var(--vscode-focusBorder); }
 </style>
 </head>
 <body>
@@ -148,7 +169,53 @@ function render(workTitle, items) {
   });
 }
 
+/**
+ * 矛盾の1件。
+ *
+ * **適用ボタンを出さない。** 誤字脱字と違い、設定と本文のどちらが
+ * 正しいかは作者にしか決められない（設定側が古いことがある）。
+ * 「設定ではこう／本文ではこう」を並べ、見に行く先を2つ出すだけにする。
+ */
+function renderContradiction(item) {
+  const classes = ['issue', 'contradiction'];
+  if (item.confidence === 'low') classes.push('low');
+  if (item.status === 'dismissed') classes.push('dismissed');
+
+  const canAct = item.status === 'pending';
+  const note = item.note
+    ? '<div class="note">' + escapeHtml(item.note) + '</div>'
+    : '';
+
+  return (
+    '<div class="' + classes.join(' ') + '">' +
+    '<div class="issue-head">' +
+    '<span class="location" data-action="jump" data-id="' + item.id + '">' +
+    escapeHtml(item.fileName) + ' ' + item.line + '行目</span>' +
+    '<span class="badge cat">' + escapeHtml(item.category) + '</span>' +
+    '<span class="badge ' + item.confidence + '">' + CONFIDENCE_LABEL[item.confidence] + '</span>' +
+    (item.status === 'dismissed' ? '<span class="reason">無視しました</span>' : '') +
+    '</div>' +
+    '<div class="quote">' + escapeHtml(item.excerpt) + '</div>' +
+    '<div class="compare">' +
+    '<div><span class="side">設定では</span>' + escapeHtml(item.settingSays) + '</div>' +
+    '<div><span class="side">本文では</span>' + escapeHtml(item.textSays) + '</div>' +
+    '</div>' +
+    note +
+    (canAct
+      ? '<div class="actions">' +
+        '<button data-action="jump" data-id="' + item.id + '">本文を見る</button>' +
+        '<button class="secondary" data-action="openSettings" data-id="' + item.id + '">設定資料を見る</button>' +
+        '<button class="secondary" data-action="dismiss" data-id="' + item.id + '">無視</button>' +
+        '</div>'
+      : '') +
+    '</div>'
+  );
+}
+
 function renderItem(item) {
+  // 矛盾は形が違う。並べるものが「置き換え」ではなく「食い違い」である
+  if (item.excerpt !== undefined) return renderContradiction(item);
+
   const classes = ['issue'];
   if (item.confidence === 'low') classes.push('low');
   if (item.status === 'applied') classes.push('applied');
@@ -191,6 +258,8 @@ window.addEventListener('message', (event) => {
   if (message.type === 'issues') {
     // 見出しは検知の種類で変わる（誤字脱字／表記ゆれ）
     document.getElementById('category').textContent = message.category || '誤字脱字';
+    // 矛盾には「まとめて適用」が無い。どちらが正しいか決められないため
+    applyAllEl.style.display = message.canApplyAll === false ? 'none' : '';
     render(message.workTitle, message.items);
   }
 });
