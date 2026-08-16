@@ -11,7 +11,7 @@ import { createLocationStore, createWorldStore } from "../core/abilityStore";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { atomicWriteFile, createManagedRecoveryPath } from "../core/atomicWrite";
 import {
-  buildPlotMarkdown,
+  updatePlotMarkdown,
   isBlankPlotSection,
   parsePlotMarkdown,
   PLOT_SECTIONS,
@@ -310,7 +310,11 @@ async function applyPlot(
   }
 
   try {
-    await writePlot(work, next, current.extra);
+    // **変える節だけを渡す。** 全部渡すと、触っていない節まで書き直す形になり、
+    // 作者が付けた空行や書き方の癖が失われる
+    const updates: Partial<PlotSections> = {};
+    for (const key of [...filled, ...replaced]) updates[key] = next[key];
+    await writePlot(work, updates);
   } catch (error) {
     vscode.window.showErrorMessage(
       `プロットを保存できませんでした: ${
@@ -360,13 +364,18 @@ async function plotPath(work: WorkEntry): Promise<string> {
 async function readPlot(
   work: WorkEntry
 ): Promise<{ sections: PlotSections; extra: string }> {
+  return parsePlotMarkdown(await readPlotText(work));
+}
+
+/** ファイルの中身をそのまま読む。無ければ空文字 */
+async function readPlotText(work: WorkEntry): Promise<string> {
   try {
     const bytes = await vscode.workspace.fs.readFile(
       vscode.Uri.file(await plotPath(work))
     );
-    return parsePlotMarkdown(new TextDecoder().decode(bytes));
+    return new TextDecoder().decode(bytes);
   } catch {
-    return parsePlotMarkdown("");
+    return "";
   }
 }
 
@@ -379,11 +388,14 @@ async function readPlot(
  */
 async function writePlot(
   work: WorkEntry,
-  sections: PlotSections,
-  extra: string
+  updates: Partial<PlotSections>
 ): Promise<void> {
   const target = await plotPath(work);
-  const body = buildPlotMarkdown(work.title, sections, { extra, hints: true });
+  // **作者の文書の形を変えない。** 節に分解して組み直すと、作者が立てた
+  // 見出しが末尾へ寄り、順番も決まった並びへ戻ってしまう（作者の指示、2026-08-16）
+  const body = updatePlotMarkdown(await readPlotText(work), updates, {
+    workTitle: work.title,
+  });
 
   await vscode.workspace.fs.createDirectory(
     vscode.Uri.file(path.dirname(target))

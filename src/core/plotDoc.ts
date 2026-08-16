@@ -162,6 +162,89 @@ export function isBlankPlotSection(body: string): boolean {
   return meaningful.length === 0;
 }
 
+/**
+ * 既にある `plot.md` へ書き足す。**作者の文書の形を変えない。**
+ *
+ * 以前は `parsePlotMarkdown` で節に分解し、`buildPlotMarkdown` で
+ * 全体を組み直していた。これだと、**作者が自分で立てた見出しは
+ * すべて末尾へ寄せられ、決まった10個の見出しが上に並ぶ。**
+ * 順番を入れ替えても、次にAIが書き足した瞬間に元へ戻る。
+ * それでは自由に書けない（作者の指示、2026-08-16）。
+ *
+ * ここでは行を保ったまま、必要なところだけ差し替える。
+ *
+ * - 見出しがあれば、**その場で**中身を入れ替える（位置は動かさない）
+ * - 見出しが無ければ、**末尾へ足す**（決まった順に割り込ませない）
+ * - 触らない節は1文字も変えない
+ * - **消された見出しを復活させない。** 要らないと判断したものを
+ *   毎回書き戻すのは、作者の編集を無かったことにするのと同じ
+ *
+ * @param text いまのファイルの中身。空なら新しく組み立てる
+ * @param updates 書き足す節だけを入れる
+ */
+export function updatePlotMarkdown(
+  text: string,
+  updates: Partial<PlotSections>,
+  options: { workTitle: string }
+): string {
+  const wanted = new Map<PlotSectionKey, string>();
+  for (const section of PLOT_SECTIONS) {
+    const value = updates[section.key]?.trim();
+    if (value) wanted.set(section.key, value);
+  }
+  if (wanted.size === 0) return text;
+
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const byHeading = new Map<string, PlotSectionKey>();
+  for (const section of PLOT_SECTIONS) byHeading.set(section.heading, section.key);
+
+  const out: string[] = [];
+  const applied = new Set<PlotSectionKey>();
+  /** いま差し替え中の節。中身の行は捨てて、新しい中身を1度だけ置く */
+  let replacing: PlotSectionKey | undefined;
+
+  for (const line of lines) {
+    const heading = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+    if (heading) {
+      replacing = undefined;
+      out.push(line);
+
+      // 節の見出しは `##`。`#`（文書の題）や `###` 以下は節ではない
+      if (heading[1] !== "##") continue;
+      const key = byHeading.get(heading[2]);
+      if (!key || !wanted.has(key)) continue;
+
+      out.push(wanted.get(key)!);
+      applied.add(key);
+      replacing = key;
+      continue;
+    }
+
+    // 差し替え中の節の元の中身は捨てる
+    if (replacing !== undefined) continue;
+    out.push(line);
+  }
+
+  // 見出しが無かったものは末尾へ足す
+  const appended = PLOT_SECTIONS.filter(
+    (section) => wanted.has(section.key) && !applied.has(section.key)
+  );
+  if (appended.length > 0) {
+    // 中身が空のファイル（`"".split` は空行1つになる）は、題から組み立てる
+    if (out.every((line) => line.trim() === "")) {
+      out.length = 0;
+      out.push(`# ${options.workTitle}`, "");
+    }
+    if (out[out.length - 1]?.trim() !== "") out.push("");
+    for (const section of appended) {
+      out.push(`## ${section.heading}`, wanted.get(section.key)!, "");
+    }
+  }
+
+  return trimBlankEdges(out).join(eol) + eol;
+}
+
 export function buildPlotMarkdown(
   workTitle: string,
   sections: PlotSections,

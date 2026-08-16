@@ -4,8 +4,7 @@ import type { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { atomicWriteFile, createManagedRecoveryPath } from "../core/atomicWrite";
 import {
-  buildPlotMarkdown,
-  parsePlotMarkdown,
+  updatePlotMarkdown,
   type PlotSections,
 } from "../core/plotDoc";
 import {
@@ -61,13 +60,13 @@ async function applyToPlot(
 ): Promise<string> {
   const target = await settingsFile(work, "plot.md");
   const current = await readText(target);
-  const parsed = parsePlotMarkdown(current ?? "");
-
-  const sections: PlotSections = { ...parsed.sections, [section]: content };
-  const body = buildPlotMarkdown(work.title, sections, {
-    extra: parsed.extra,
-    hints: true,
-  });
+  // **作者の文書の形を変えない。** 節に分解して組み直すと、作者が立てた
+  // 見出しが末尾へ寄り、順番も決まった並びへ戻る（作者の指示、2026-08-16）
+  const body = updatePlotMarkdown(
+    current ?? "",
+    { [section]: content },
+    { workTitle: work.title }
+  );
 
   await replaceFile(target, body);
   return "設定/plot.md";

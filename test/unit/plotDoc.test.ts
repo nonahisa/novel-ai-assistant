@@ -3,6 +3,7 @@ import {
   buildPlotMarkdown,
   emptyPlotSections,
   isBlankPlotSection,
+  updatePlotMarkdown,
   parsePlotMarkdown,
 } from "../../src/core/plotDoc";
 import { buildPlotTemplate } from "../../src/core/plotTemplate";
@@ -64,19 +65,21 @@ describe("プロットの読み取りと組み立て", () => {
     expect(isBlankPlotSection("- 出来事")).toBe(false);
   });
 
-  test("読み書きを繰り返しても内容が増えない", () => {
-    // 組み立て側は案内コメントを毎回付け直す。読み取りで落としておかないと
-    // 前回の案内が中身として残り、保存のたびに二重・三重に積もる
-    const first = buildPlotTemplate("作品");
-    const second = buildPlotMarkdown("作品", parsePlotMarkdown(first).sections, {
-      hints: true,
-    });
-    const third = buildPlotMarkdown("作品", parsePlotMarkdown(second).sections, {
-      hints: true,
-    });
+  test("同じ内容を書き足しても増えない", () => {
+    // 保存のたびに同じ節が二重・三重に積もっては使いものにならない
+    const first = updatePlotMarkdown(
+      buildPlotTemplate("作品"),
+      { theme: "喪失と再生" },
+      { workTitle: "作品" }
+    );
+    const second = updatePlotMarkdown(
+      first,
+      { theme: "喪失と再生" },
+      { workTitle: "作品" }
+    );
 
     expect(second).toBe(first);
-    expect(third).toBe(first);
+    expect(first.match(/## テーマ/g)).toHaveLength(1);
   });
 
   test("作者が書いたコメントは残す", () => {
@@ -86,6 +89,169 @@ describe("プロットの読み取りと組み立て", () => {
     );
 
     expect(parsed.sections.theme).toBe("<!-- あとで考える -->");
+  });
+});
+
+/**
+ * プロットは**自由に書けるMarkdown**である（作者の指示、2026-08-16）。
+ *
+ * 以前は決まった10個の見出しへ分解して全体を組み直しており、
+ * 作者が立てた見出しは末尾へ寄せられ、順番も毎回元へ戻されていた。
+ * それでは自由に書けない。
+ */
+describe("書き足しても、作者の文書の形を変えない", () => {
+  test("見出しがあれば、その場所で入れ替える", () => {
+    const before = [
+      "# 作品",
+      "",
+      "## あらすじ",
+      "- 昔書いたもの",
+      "",
+      "## テーマ",
+      "旧",
+      "",
+      "## 参考にした作品",
+      "- あの小説",
+      "",
+    ].join("\n");
+
+    const after = updatePlotMarkdown(
+      before,
+      { theme: "新" },
+      { workTitle: "作品" }
+    );
+
+    // 位置が動いていない
+    expect(after.indexOf("## あらすじ")).toBeLessThan(after.indexOf("## テーマ"));
+    expect(after.indexOf("## テーマ")).toBeLessThan(
+      after.indexOf("## 参考にした作品")
+    );
+    expect(after).toContain("新");
+    expect(after).not.toContain("旧");
+  });
+
+  test("作者が立てた見出しを末尾へ寄せない", () => {
+    // ここが以前の作りのいちばんの問題だった
+    const before = "# 作品\n\n## 参考にした作品\n- あの小説\n\n## テーマ\n旧\n";
+
+    const after = updatePlotMarkdown(
+      before,
+      { theme: "新" },
+      { workTitle: "作品" }
+    );
+
+    expect(after.indexOf("## 参考にした作品")).toBeLessThan(
+      after.indexOf("## テーマ")
+    );
+  });
+
+  test("見出しが無ければ末尾へ足す（決まった順に割り込ませない）", () => {
+    const before = "# 作品\n\n## 参考にした作品\n- あの小説\n";
+
+    const after = updatePlotMarkdown(
+      before,
+      { logline: "一文。" },
+      { workTitle: "作品" }
+    );
+
+    expect(after.indexOf("## 参考にした作品")).toBeLessThan(
+      after.indexOf("## ログライン")
+    );
+  });
+
+  test("消された見出しを復活させない", () => {
+    // 要らないと判断したものを毎回書き戻すのは、作者の編集を
+    // 無かったことにするのと同じ
+    const before = "# 作品\n\n## テーマ\n旧\n";
+
+    const after = updatePlotMarkdown(
+      before,
+      { theme: "新" },
+      { workTitle: "作品" }
+    );
+
+    expect(after).not.toContain("## モチーフ");
+    expect(after).not.toContain("## 人称");
+  });
+
+  test("触らない節は1文字も変えない", () => {
+    // 作者が付けた空行や書き方の癖を、書き足しのついでに均さない
+    const before = "# 作品\n\n## あらすじ\n\n\n-   ゆるい書き方\n\n\n## テーマ\n旧\n";
+
+    const after = updatePlotMarkdown(
+      before,
+      { theme: "新" },
+      { workTitle: "作品" }
+    );
+
+    expect(after).toContain("\n\n\n-   ゆるい書き方\n\n\n");
+  });
+
+  test("見出しの無い文章も残す", () => {
+    // 「思いついたことだけ書き並べる」書き方を壊さない
+    const before = "# 作品\n\n主人公が海辺で誰かを待っている場面から始めたい。\n";
+
+    const after = updatePlotMarkdown(
+      before,
+      { theme: "喪失と再生" },
+      { workTitle: "作品" }
+    );
+
+    expect(after).toContain("主人公が海辺で誰かを待っている場面から始めたい。");
+    expect(after).toContain("## テーマ");
+  });
+
+  test("ファイルが無くても組み立てられる", () => {
+    const after = updatePlotMarkdown(
+      "",
+      { logline: "一文。" },
+      { workTitle: "作品" }
+    );
+
+    expect(after).toContain("# 作品");
+    expect(after).toContain("## ログライン");
+  });
+
+  test("書き足すものが無ければ、1文字も触らない", () => {
+    const before = "# 作品\n\n## テーマ\n旧\n";
+
+    expect(updatePlotMarkdown(before, {}, { workTitle: "作品" })).toBe(before);
+  });
+
+  test("改行コードを変えない", () => {
+    // 作者の環境や外部ツールが決めたものを、書き足しのついでに揃えない
+    const before = "# 作品\r\n\r\n## テーマ\r\n旧\r\n";
+
+    const after = updatePlotMarkdown(
+      before,
+      { theme: "新" },
+      { workTitle: "作品" }
+    );
+
+    expect(after).toContain("\r\n");
+    expect(after).not.toMatch(/[^\r]\n/);
+  });
+});
+
+describe("書き出し（テンプレート）", () => {
+  test("埋める欄を並べない", () => {
+    // 開いた瞬間に空欄が10個あるのは、自由に書く文書ではなく記入用紙である
+    const template = buildPlotTemplate("作品");
+    const headings = template.match(/^## /gm) ?? [];
+
+    expect(headings.length).toBeLessThanOrEqual(2);
+  });
+
+  test("自由に書いてよいことを書く", () => {
+    expect(buildPlotTemplate("作品")).toContain("自由に書けます");
+  });
+
+  test("使える見出しの名前は載せる", () => {
+    // 使いたい人には名前が要る。使わない人には空欄が要らない
+    const template = buildPlotTemplate("作品");
+
+    expect(template).toContain("モチーフ");
+    expect(template).toContain("主人公の行動原理");
   });
 });
 
