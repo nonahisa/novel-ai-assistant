@@ -455,10 +455,11 @@ async function writeSynopsisDoc(
     await atomicWriteFile(target, new TextEncoder().encode(body), {
       mode: "create",
     });
-    const opened = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(target)
-    );
-    await vscode.window.showTextDocument(opened, { preview: false });
+    // **書いたら開いて見せる。** 「どこに入ったのか分からない」と
+    // 言われていた（作者の指摘、2026-08-16）。
+    // どのエディターで開くかは決め打ちしない。`vscode.open` なら
+    // 作者が既定にしたもの（Markdown Editor など）で開く
+    await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(target));
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     vscode.window.showErrorMessage(

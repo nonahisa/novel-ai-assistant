@@ -48,15 +48,45 @@ body {
   display: flex;
   flex-direction: column;
 }
-#tabs { display: flex; border-bottom: 1px solid var(--vscode-panel-border); }
+/*
+ * 一覧は畳めるようにする（作者の要望、2026-08-16）。
+ * 種類が6つになってタブが詰まり、資料そのものを読む幅も狭かった。
+ * 畳むと右側が全幅になる。
+ */
+body.collapsed #sidebar { display: none; }
+#sidebar-toggle {
+  border: none;
+  background: transparent;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  padding: 6px 8px;
+  font-size: 12px;
+  text-align: left;
+  opacity: 0.85;
+}
+#sidebar-toggle:hover { opacity: 1; background: var(--vscode-list-hoverBackground); }
+/* 畳んでいるときの戻すボタン。詳細の左上に小さく出す */
+#reopen { display: none; }
+body.collapsed #reopen { display: block; }
+/*
+ * **タブは折り返す。** 6種類を1行へ押し込むと1つ40字幅ほどになり、
+ * 「登場人／物(84)」のように語の途中で改行されていた（実機で発覚）。
+ */
+#tabs {
+  display: flex;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
 #tabs button {
-  flex: 1;
-  padding: 8px 4px;
+  flex: 1 1 auto;
+  min-width: 78px;
+  padding: 6px 4px;
   border: none;
   background: transparent;
   color: var(--vscode-foreground);
   cursor: pointer;
   font-size: 12px;
+  white-space: nowrap;
 }
 #tabs button.active {
   border-bottom: 2px solid var(--vscode-focusBorder);
@@ -128,6 +158,13 @@ h3 {
   border-bottom: 1px solid var(--vscode-panel-border);
   padding-bottom: 4px;
 }
+/* 作品情報（紹介文・キャッチコピー・各話あらすじ）。読むための区画 */
+.work-body p {
+  margin: 0 0 12px;
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+.work-body h3:first-of-type { margin-top: 12px; }
 .field { margin-bottom: 10px; }
 .field label { display: block; font-size: 12px; opacity: 0.8; margin-bottom: 3px; }
 .readonly { font-size: 12px; opacity: 0.85; margin-bottom: 6px; }
@@ -271,11 +308,15 @@ button.secondary {
 <body>
 <div id="layout">
   <div id="sidebar">
+    <button id="sidebar-toggle" type="button" title="一覧を畳む">◀ 一覧を畳む</button>
     <div id="tabs"></div>
     <input id="search" type="text" placeholder="名前で絞り込む">
     <div id="list"></div>
   </div>
-  <div id="detail"><div class="empty">左の一覧から選んでください。</div></div>
+  <div id="detail">
+    <button id="reopen" type="button" title="一覧を出す">▶ 一覧を出す</button>
+    <div class="empty">左の一覧から選んでください。</div>
+  </div>
 </div>
 <div id="status"></div>
 <script nonce="${nonce}">
@@ -335,7 +376,29 @@ button.secondary {
     list: document.getElementById("list"),
     detail: document.getElementById("detail"),
     status: document.getElementById("status"),
+    toggle: document.getElementById("sidebar-toggle"),
+    reopen: document.getElementById("reopen"),
   };
+
+  /**
+   * 一覧を畳む（作者の要望、2026-08-16）。
+   *
+   * **戻すボタンは詳細の外に置けない。** 詳細は選び直すたびに
+   * replaceChildren で作り直されるので、中へ入れると消える。
+   * body の class で出し分け、ボタンは describeDetail の外に持っておく。
+   */
+  function setCollapsed(value) {
+    document.body.classList.toggle("collapsed", value);
+    el.toggle.textContent = "◀ 一覧を畳む";
+    // 畳んだ状態は覚える。開くたびに畳み直すのは手間になる
+    vscode.setState(Object.assign({}, vscode.getState() || {}, {
+      collapsed: value,
+    }));
+  }
+
+  el.toggle.addEventListener("click", function () { setCollapsed(true); });
+  el.reopen.addEventListener("click", function () { setCollapsed(false); });
+  setCollapsed(Boolean((vscode.getState() || {}).collapsed));
 
   function setStatus(text, isError) {
     el.status.textContent = text || "";
@@ -346,15 +409,41 @@ button.secondary {
     vscode.postMessage(Object.assign({ type: type }, payload || {}));
   }
 
+  /**
+   * 作品全体の資料（紹介文・キャッチコピー・各話あらすじ）の見出し。
+   * **人物などのレコードとは別扱い**で、読むだけの区画である。
+   */
+  const WORK_ITEMS = [
+    { id: "blurb", name: "作品紹介文" },
+    { id: "catchphrase", name: "キャッチコピー" },
+    { id: "episodes", name: "各話あらすじ" },
+  ];
+
+  function workItemCount() {
+    let n = 0;
+    if (workInfo.blurb) n++;
+    if (workInfo.catchphrase) n++;
+    if ((workInfo.episodes || []).length > 0) n++;
+    return n;
+  }
+
   function renderTabs() {
     el.tabs.replaceChildren();
+    // 作品全体のものを先頭に置く。作品を開いてまず見るのはここ
+    const entries = [{ kind: "work", label: "作品情報", count: workItemCount() }];
     for (const kind of KINDS) {
-      const items = groups[kind] || [];
+      entries.push({
+        kind: kind,
+        label: KIND_LABELS[kind],
+        count: (groups[kind] || []).length,
+      });
+    }
+    for (const entry of entries) {
       const button = document.createElement("button");
-      button.textContent = KIND_LABELS[kind] + "(" + items.length + ")";
-      if (kind === activeKind) button.className = "active";
+      button.textContent = entry.label + "(" + entry.count + ")";
+      if (entry.kind === activeKind) button.className = "active";
       button.addEventListener("click", function () {
-        activeKind = kind;
+        activeKind = entry.kind;
         renderTabs();
         renderList();
       });
@@ -363,6 +452,10 @@ button.secondary {
   }
 
   function renderList() {
+    if (activeKind === "work") {
+      renderWorkList();
+      return;
+    }
     const keyword = el.search.value.trim();
     const items = (groups[activeKind] || []).filter(function (item) {
       if (!keyword) return true;
@@ -498,8 +591,120 @@ button.secondary {
     pendingGrow = [];
   }
 
+  /** 作品情報の一覧。3つ固定なので絞り込みは要らない */
+  function renderWorkList() {
+    el.list.replaceChildren();
+    for (const item of WORK_ITEMS) {
+      const row = document.createElement("div");
+      row.className = "item" + (workSelected === item.id ? " selected" : "");
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = item.name;
+      row.appendChild(name);
+
+      const sub = document.createElement("div");
+      sub.className = "sub";
+      sub.textContent = describeWorkItem(item.id);
+      row.appendChild(sub);
+
+      row.addEventListener("click", function () {
+        workSelected = item.id;
+        detail = null;
+        renderWorkList();
+        renderDetail();
+      });
+      el.list.appendChild(row);
+    }
+  }
+
+  /** 一覧の各行に添える、中身の有無 */
+  function describeWorkItem(id) {
+    if (id === "blurb") {
+      return workInfo.blurb ? workInfo.blurb.length + "字" : "まだありません";
+    }
+    if (id === "catchphrase") {
+      return workInfo.catchphrase || "まだありません";
+    }
+    const count = (workInfo.episodes || []).length;
+    return count > 0 ? count + "話ぶん" : "まだありません";
+  }
+
+  /**
+   * 作品情報の中身。**読むだけにする。**
+   *
+   * 紹介文は「作品紹介文を生成」、あらすじは「各話あらすじを生成」が
+   * 真実の在り処を持っている。ここで書き換えられると、
+   * どちらが正しいのか分からなくなる。
+   */
+  function renderWorkDetail() {
+    el.detail.replaceChildren(el.reopen);
+
+    const item = WORK_ITEMS.find(function (x) { return x.id === workSelected; });
+    if (!item) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "左の一覧から選んでください。";
+      el.detail.appendChild(empty);
+      return;
+    }
+
+    const title = document.createElement("h2");
+    title.textContent = item.name;
+    el.detail.appendChild(title);
+
+    const body = document.createElement("div");
+    body.className = "work-body";
+
+    if (item.id === "episodes") {
+      const episodes = workInfo.episodes || [];
+      if (episodes.length === 0) {
+        body.appendChild(missingNote("各話あらすじを生成"));
+      } else {
+        for (const episode of episodes) {
+          const heading = document.createElement("h3");
+          heading.textContent = episode.label;
+          body.appendChild(heading);
+          const text = document.createElement("p");
+          text.textContent = episode.synopsis;
+          body.appendChild(text);
+        }
+      }
+    } else {
+      const value = item.id === "blurb" ? workInfo.blurb : workInfo.catchphrase;
+      if (!value) {
+        body.appendChild(
+          missingNote(item.id === "blurb" ? "作品紹介文を生成" : "キャッチコピー案を作る")
+        );
+      } else {
+        const text = document.createElement("p");
+        text.textContent = value;
+        body.appendChild(text);
+        const count = document.createElement("div");
+        count.className = "sub";
+        count.textContent = value.length + "字";
+        body.appendChild(count);
+      }
+    }
+
+    el.detail.appendChild(body);
+  }
+
+  /** まだ無いときは、どこで作れるかまで書く */
+  function missingNote(action) {
+    const note = document.createElement("div");
+    note.className = "empty";
+    note.textContent =
+      "まだありません。操作メニューの「執筆AI支援 → " + action + "」で作れます。";
+    return note;
+  }
+
   function renderDetail() {
-    el.detail.replaceChildren();
+    if (activeKind === "work") {
+      renderWorkDetail();
+      return;
+    }
+    // 戻すボタンは作り直さない。中身だけ入れ替える
+    el.detail.replaceChildren(el.reopen);
     if (!detail) {
       const empty = document.createElement("div");
       empty.className = "empty";
@@ -980,6 +1185,7 @@ button.secondary {
     switch (message.type) {
       case "init":
         groups = message.groups;
+        if (message.workInfo) workInfo = message.workInfo;
         renderTabs();
         renderList();
         setStatus(message.notice || "");
@@ -1029,6 +1235,7 @@ button.secondary {
         proposal = null;
         detail = message.detail;
         groups = message.groups;
+        if (message.workInfo) workInfo = message.workInfo;
         renderTabs();
         renderList();
         renderDetail();

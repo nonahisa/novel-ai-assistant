@@ -107,6 +107,10 @@ import { renderMarkdownLite } from "../core/markdownLite";
 import { withCancellableProgress } from "../views/progress";
 import { logFailure } from "../core/logger";
 import { appendChatLog, summarizeMaterials } from "../core/chatLog";
+import * as path from "path";
+import { readWorkConfig, workPaths } from "../core/workRegistry";
+import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "../core/synopsisDoc";
+import { SynopsisStore } from "../core/synopsisStore";
 
 /**
  * 設定資料パネル。
@@ -230,6 +234,8 @@ export class SettingsPanel {
   private retrieval: RetrievalContext | undefined;
   /** 直近の相談で使った検索語。ログに残して、外した場面の原因を追えるようにする */
   private lastSearchTerms: string[] = [];
+  /** 作品全体の資料（紹介文・キャッチコピー・各話あらすじ）。読むだけ */
+  private workInfo: WorkInfoView = { blurb: "", catchphrase: "", episodes: [] };
   /** 選択中のレコードごとのやり取り。保存はしない */
   private readonly chatHistory = new Map<string, ChatTurn[]>();
   /** 有料のAIについて確認を取り終えたモデル名。切り替えたら取り直す */
@@ -339,8 +345,14 @@ export class SettingsPanel {
     // 項目の定義が読めなくても、既定の項目は編集できる。
     // 直し方は「一覧に項目を増やす」で伝えるので、ここでは黙って空にする
     this.customFields = await this.customFieldStore.loadFields();
+    this.workInfo = await this.loadWorkInfo();
 
-    this.post({ type: "init", groups: this.groups(), notice: this.notice() });
+    this.post({
+      type: "init",
+      groups: this.groups(),
+      workInfo: this.workInfo,
+      notice: this.notice(),
+    });
   }
 
   private notice(): string {
@@ -349,6 +361,52 @@ export class SettingsPanel {
     return `読み込めない設定ファイルが ${this.loadErrors.length} 件あります（${this.loadErrors
       .map((error) => error.file)
       .join("、")}）。その項目は一覧に出ていません。`;
+  }
+
+  /**
+   * 作品全体の資料（紹介文・キャッチコピー・各話あらすじ）を集める。
+   *
+   * **設定資料集にも載せる**（作者の要望、2026-08-16）。人物や場所と並んで
+   * 作品の資料なのに、`設定/synopsis.md` を自分で開くしか見る方法が無く、
+   * 「閲覧がわかりにくい」と言われていた。
+   *
+   * **読むだけにする。** 紹介文は「作品紹介文を生成」、あらすじは
+   * 「各話あらすじを生成」が真実の在り処を持っている。ここで書き換えられると、
+   * どちらが正しいのか分からなくなる。
+   */
+  private async loadWorkInfo(): Promise<WorkInfoView> {
+    const info: WorkInfoView = { blurb: "", catchphrase: "", episodes: [] };
+
+    try {
+      const config = await readWorkConfig(this.work);
+      const file = path.join(
+        workPaths(this.work, config).settings,
+        SYNOPSIS_FILE
+      );
+      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(file));
+      const doc = parseSynopsisMarkdown(new TextDecoder().decode(bytes));
+      info.blurb = doc.blurb.trim();
+      info.catchphrase = (doc.catchphrase ?? "").trim();
+    } catch {
+      // まだ作っていない作品では、この文書自体が無い
+    }
+
+    try {
+      const set = await new SynopsisStore(this.work).load();
+      info.episodes = set.episodes
+        .filter((episode) => episode.synopsis.trim())
+        .map((episode) => ({
+          label:
+            episode.chapter !== null
+              ? `第${episode.chapter}話${episode.title ? ` ${episode.title}` : ""}`
+              : episode.fileName,
+          synopsis: episode.synopsis.trim(),
+        }));
+    } catch {
+      // あらすじが読めなくても、紹介文だけは見せられる
+    }
+
+    return info;
   }
 
   private groups(): Record<SettingsKind, SettingsListItem[]> {
@@ -573,6 +631,7 @@ export class SettingsPanel {
           this.post({
             type: "init",
             groups: this.groups(),
+            workInfo: this.workInfo,
             notice: this.notice(),
           });
           return;
@@ -734,6 +793,7 @@ export class SettingsPanel {
       type: "saved",
       detail,
       groups: this.groups(),
+      workInfo: this.workInfo,
       notice,
     });
   }
@@ -1432,10 +1492,20 @@ interface ApproveNoteMessage {
   source: AiNoteSource;
 }
 
+/**
+ * 作品全体の資料。人物などのレコードとは違い、読むだけの区画。
+ */
+export interface WorkInfoView {
+  blurb: string;
+  catchphrase: string;
+  episodes: Array<{ label: string; synopsis: string }>;
+}
+
 type OutgoingMessage =
   | {
       type: "init";
       groups: Record<SettingsKind, SettingsListItem[]>;
+      workInfo: WorkInfoView;
       notice: string;
     }
   | { type: "detail"; detail: DetailView }
@@ -1449,6 +1519,7 @@ type OutgoingMessage =
       type: "saved";
       detail: DetailView | undefined;
       groups: Record<SettingsKind, SettingsListItem[]>;
+      workInfo: WorkInfoView;
       notice: string;
     }
   | {
