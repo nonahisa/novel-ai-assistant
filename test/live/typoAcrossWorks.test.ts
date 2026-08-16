@@ -29,6 +29,25 @@ const ROOT = process.env.NOVELAI_WORKS?.trim();
 const REPORT_PATH =
   process.env.NOVELAI_REPORT?.trim() ?? "typo-across-works.txt";
 
+/**
+ * 固有名詞の辞書（`extractAcrossWorks` が書き出したもの）。
+ *
+ * **指定すれば「設定資料を先に抽出しておくと誤検出が減る」を確かめられる。**
+ * 指定しなければ辞書は空で、**設定資料をまだ抽出していない作品**の姿になる。
+ */
+function loadDictionary(): Record<string, string[]> {
+  const configured = process.env.NOVELAI_DICTIONARY?.trim();
+  if (!configured) return {};
+  try {
+    return JSON.parse(fs.readFileSync(configured, "utf-8")) as Record<
+      string,
+      string[]
+    >;
+  } catch {
+    return {};
+  }
+}
+
 function worksIn(root: string): Array<{ name: string; files: string[] }> {
   return fs
     .readdirSync(root, { withFileTypes: true })
@@ -74,6 +93,8 @@ describe.skipIf(!ROOT)(
       "辞書が空でも、造語を誤字にしないか",
       async () => {
         const works = worksIn(ROOT!);
+        const dictionary = loadDictionary();
+        const dictSize = Object.values(dictionary).flat().length;
         expect(works.length, "作品が読めない").toBeGreaterThan(1);
 
         const byReject = new Map<string, number>();
@@ -95,15 +116,18 @@ describe.skipIf(!ROOT)(
             const raw = await ask(
               buildTypoCheckPrompt({
                 chunkTextWithLineNumbers: withLineNumbers(chunk),
-                // **わざと空にする。** 新しい作品ではこれが実際の姿
-                properNounDictionary: [],
+                properNounDictionary: dictionary[work.name] ?? [],
               })
             );
             const parsed = parseTypoCheckResult(raw);
             if (!parsed) continue;
             raised += parsed.issues.length;
 
-            const validated = validateTypoIssues(parsed, chunk, []);
+            const validated = validateTypoIssues(
+              parsed,
+              chunk,
+              dictionary[work.name] ?? []
+            );
             for (const entry of validated.rejected) {
               byReject.set(entry.reason, (byReject.get(entry.reason) ?? 0) + 1);
             }
@@ -119,7 +143,7 @@ describe.skipIf(!ROOT)(
         }
 
         const report = [
-          `=== 誤字脱字（${LIVE_MODEL}） / 辞書は空 / ` +
+          `=== 誤字脱字（${LIVE_MODEL}） / 辞書 ${dictSize}語 / ` +
             `${works.length}作品 / ${chars.toLocaleString("ja-JP")}字 / ` +
             `${looked}チャンク ===`,
           `AIが挙げた: ${raised}件`,
