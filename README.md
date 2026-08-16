@@ -2,7 +2,7 @@
 
 小説を書くための作品管理・文字数計測・AI支援を1つにまとめたVSCode拡張機能です。
 
-現在の配布版：**0.6.30**（実際に使って見つかった不具合の修正）
+現在の配布版：**0.6.31**（実際に使って見つかった不具合の修正）
 
 ## できること
 
@@ -28,8 +28,8 @@
 認証済みのGitHub CLIを使ってprivate repositoryのReleaseからVSIXをダウンロードし、そのローカルファイルをインストールします。新規インストールと既存版の上書き更新の両方に使えます。
 
 ```powershell
-gh release download v0.6.30 --repo nonahisa/novel-ai-assistant --pattern "novel-ai-assistant-0.6.30.vsix" --clobber
-code --install-extension ".\novel-ai-assistant-0.6.30.vsix" --force
+gh release download v0.6.31 --repo nonahisa/novel-ai-assistant --pattern "novel-ai-assistant-0.6.31.vsix" --clobber
+code --install-extension ".\novel-ai-assistant-0.6.31.vsix" --force
 ```
 
 画面から操作する場合は、VS Codeの「拡張機能」ビュー右上の `...` →「VSIXからのインストール」を選び、同じVSIXファイルを指定します。
@@ -115,7 +115,7 @@ npm run watch
 起動したウィンドウの左端アクティビティバーに、キーボードと万年筆のアイコン（**小説執筆**）が追加されます。開くと2つのビューが並びます。
 
 - **作品一覧**：登録した作品と話数ファイル。右クリックで作品ごとの操作ができます。
-- **操作メニュー**：押せる操作の一覧です。コマンド名を覚えていなくても、ここから選べます。作品を登録していない間は、作品を必要とする操作は出ません。
+- **操作メニュー**：できることの一覧です。コマンド名を覚えていなくても、ここから選べます。作品を登録していない間、作品を必要とする操作は**灰色になり「作品を登録すると使えます」と出ます**（消えはしません）。
 
   **分類 → 小分類 → 操作**の3階層です。
 

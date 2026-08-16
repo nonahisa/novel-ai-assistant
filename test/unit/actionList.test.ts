@@ -6,6 +6,8 @@ import {
   ActionListProvider,
   actionResourceUri,
   allActions,
+  isActionEnabled,
+  REQUIRES_WORK_HINT,
   restoreExpandedGroups,
   visibleGroups,
   type ActionNode,
@@ -113,14 +115,31 @@ describe("操作メニューの構成", () => {
     }
   });
 
-  test("作品が未登録なら作品向けの操作を出さない", () => {
-    // 押しても「作品が登録されていません」と言われるだけの項目は、
-    // 押せない理由が作者に伝わらないので最初から並べない
+  test("作品が未登録でも、操作は消さずに出す", () => {
+    // **消していた。** そのため作品を登録していない状態では、6つある
+    // 分類のうち3つが丸ごと消え、残る操作は13件だけだった。
+    // 初めて使う人には、そもそも何ができる拡張機能なのかが分からない
+    // （作者の指示、2026-08-17）
     const commands = commandsOf(false);
 
-    expect(commands).not.toContain("novelai.extractSettings");
-    expect(commands).not.toContain("novelai.showWorkStats");
-    expect(commands).not.toContain("novelai.gitSync");
+    expect(commands).toContain("novelai.extractSettings");
+    expect(commands).toContain("novelai.showWorkStats");
+    expect(commands).toContain("novelai.gitSync");
+  });
+
+  test("作品が無ければ、作品を要する操作は押せない", () => {
+    for (const action of allActions()) {
+      expect(isActionEnabled(action, false), action.command).toBe(
+        !action.requiresWork
+      );
+      // 作品があれば、すべて押せる
+      expect(isActionEnabled(action, true), action.command).toBe(true);
+    }
+  });
+
+  test("押せない理由を、どうすれば使えるかまで書く", () => {
+    // 「使えない」だけでは、次に何をすればよいか分からない
+    expect(REQUIRES_WORK_HINT).toContain("作品を登録すると");
   });
 
   test("作品が未登録でも、始める操作と設定は出す", () => {
@@ -134,12 +153,14 @@ describe("操作メニューの構成", () => {
     expect(commands).toContain("novelai.showLog");
   });
 
-  test("中身が空になった小分類・分類は出さない", () => {
-    // 作品未登録では「執筆データ」「資料管理」が丸ごと空になる
-    const labels = visibleGroups(false).map((group) => group.label);
+  test("作品の有無で、並ぶものが変わらない", () => {
+    // **分類が丸ごと消えると、何ができる拡張機能か分からなくなる**
+    const withWork = visibleGroups(true).map((group) => group.label);
+    const without = visibleGroups(false).map((group) => group.label);
 
-    expect(labels).not.toContain("執筆データ");
-    expect(labels).not.toContain("資料管理");
+    expect(without).toEqual(withWork);
+    expect(without).toContain("執筆データ");
+    expect(without).toContain("資料管理");
     for (const group of visibleGroups(false)) {
       expect(group.entries.length).toBeGreaterThan(0);
       for (const entry of group.entries) {
@@ -150,7 +171,7 @@ describe("操作メニューの構成", () => {
     }
   });
 
-  test("作品を要さない小分類は、作品が無くても中身が残る", () => {
+  test("小分類も、作品が無くても消えない", () => {
     const 作品管理 = visibleGroups(false).find(
       (group) => group.label === "作品管理"
     );
@@ -158,8 +179,9 @@ describe("操作メニューの構成", () => {
       (entry) => entry.kind === "section"
     );
 
-    // 「GitHubで作品管理」は作品が要るので消え、「新作開始」「既存作追加」は残る
+    // 「GitHubで作品管理」は作品が要るが、**消さずに出して押せなくする**
     expect(sections.map((section) => section.label)).toEqual([
+      "GitHubで作品管理",
       "新作開始",
       "既存作追加",
     ]);

@@ -787,21 +787,33 @@ export const ACTION_TREE: readonly ActionGroup[] = [
  * 押せないボタンを並べても、作者には理由が分からない。
  * 中身が空になった小分類・分類も出さない。
  */
-export function visibleGroups(hasWork: boolean): ActionGroup[] {
-  return ACTION_TREE.map((group) => ({
-    ...group,
-    entries: group.entries
-      .map((entry) =>
-        entry.kind === "section"
-          ? { ...entry, items: entry.items.filter((item) => hasWork || !item.requiresWork) }
-          : entry
-      )
-      .filter((entry) =>
-        entry.kind === "section"
-          ? entry.items.length > 0
-          : hasWork || !entry.requiresWork
-      ),
-  })).filter((group) => group.entries.length > 0);
+/**
+ * 作品が無いときに、作品を必要とする操作をどう扱うか。
+ *
+ * **消さずに出して、押せなくする**（作者の指示、2026-08-17）。
+ *
+ * 以前は消していた。そのため作品を登録していない状態では、
+ * 6つある分類のうち**3つが丸ごと消え**（執筆データ・執筆AI支援・資料管理）、
+ * 残る操作は13件だけだった。**初めて使う人には、そもそも何ができる
+ * 拡張機能なのかが分からない。**
+ *
+ * 押せない項目には理由を添える。**「使えない」だけでは、どうすれば
+ * 使えるのかが分からない。**
+ */
+export const REQUIRES_WORK_HINT = "作品を登録すると使えます";
+
+/**
+ * いま出す分類。**作品の有無で中身は変わらない。**
+ *
+ * 押せるかどうかは `isActionEnabled` で決める。
+ */
+export function visibleGroups(_hasWork: boolean = true): readonly ActionGroup[] {
+  return ACTION_TREE;
+}
+
+/** その操作をいま押せるか */
+export function isActionEnabled(item: ActionItem, hasWork: boolean): boolean {
+  return hasWork || !item.requiresWork;
 }
 
 /** 木の中の操作をすべて取り出す（テストと整合性の確認用） */
@@ -916,14 +928,30 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     }
 
     const { item: action } = node;
+    const enabled = isActionEnabled(action, this.registry.list().length > 0);
+
     const item = new vscode.TreeItem(
       action.label,
       vscode.TreeItemCollapsibleState.None
     );
-    item.description = action.description ?? "";
-    item.iconPath = new vscode.ThemeIcon(action.icon);
+    // **押せない理由を、その場に出す。** 「使えない」だけでは、
+    // どうすれば使えるのかが分からない
+    item.description = enabled
+      ? (action.description ?? "")
+      : REQUIRES_WORK_HINT;
+    item.iconPath = enabled
+      ? new vscode.ThemeIcon(action.icon)
+      : // 色を落として、押せるものと見分けられるようにする
+        new vscode.ThemeIcon(
+          action.icon,
+          new vscode.ThemeColor("disabledForeground")
+        );
     item.tooltip = new vscode.MarkdownString(
       [
+        enabled
+          ? ""
+          : `**${REQUIRES_WORK_HINT}。** ` +
+            "「作品一覧」の「フォルダから作品を追加」または「新規作品を作成」から登録してください。\n\n",
         action.usesAI ? "**AIを使います**（クラウドのAIは実行のたびに課金されます）\n" : "",
         action.detail,
         this.countOf(action.counter) > 0
@@ -933,8 +961,13 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     );
     // 「AI」と件数の印を出すための目印
     item.resourceUri = actionResourceUri(node);
-    // 引数を渡さないので、作品が複数あれば実行時に選択を求められる
-    item.command = { command: action.command, title: action.label };
+    if (enabled) {
+      // 引数を渡さないので、作品が複数あれば実行時に選択を求められる
+      item.command = { command: action.command, title: action.label };
+    }
+    // **押せないものは command を持たせない。** 押しても何も起きない
+    // ことより、押したら「作品を選んでください」と訊かれて何も選べない
+    // ほうが分かりにくい
     return item;
   }
 
