@@ -2,6 +2,12 @@ import { describe, expect, test } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { CONTRADICTION_CHECK_SCHEMA } from "../../src/prompts/contradictionCheck";
+import {
+  liveWorkPath,
+  LIVE_MODEL,
+  OLLAMA_ENDPOINT,
+  SKIP_REASON,
+} from "./support/liveEnv";
 
 /**
  * プロンプトを比べる（実データ・実Ollama）。
@@ -15,9 +21,6 @@ import { CONTRADICTION_CHECK_SCHEMA } from "../../src/prompts/contradictionCheck
  *
  *   npx vitest run --config vitest.live.config.mts test/live/contradictionTuning.test.ts
  */
-const WORK = "C:/Users/nonah/Documents/いじめられっ子";
-const MODEL = process.env.NOVELAI_MODEL ?? "gemma4:e4b";
-const ENDPOINT = "http://localhost:11434";
 
 const SETTING = "太志\n- 一人称: 僕\n- 外見: 黒髪の少年\n- 状態: 第1話で死亡し、幽霊になっている";
 
@@ -102,11 +105,11 @@ const VARIANTS = [
 ];
 
 async function ask(system: string, user: string): Promise<unknown[]> {
-  const response = await fetch(`${ENDPOINT}/api/chat`, {
+  const response = await fetch(`${OLLAMA_ENDPOINT}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: MODEL,
+      model: LIVE_MODEL,
       stream: false,
       think: false,
       format: CONTRADICTION_CHECK_SCHEMA,
@@ -128,12 +131,18 @@ async function ask(system: string, user: string): Promise<unknown[]> {
   }
 }
 
-describe("プロンプトの比較", () => {
+/**
+ * 作者の手元の作品フォルダー。**ソースへ絶対パスを書かない。**
+ * 決めていなければ、この試験は飛ばす（失敗にしない）。
+ */
+const WORK = liveWorkPath();
+describe.skipIf(WORK === undefined)(
+  `プロンプトの比較${WORK ? "" : `（飛ばしました: ${SKIP_REASON}）`}`, () => {
   test(
     "見逃しと誤検出を同時に測る",
     async () => {
       const source = fs
-        .readFileSync(path.join(WORK, "episode_0009.txt"), "utf-8")
+        .readFileSync(path.join(WORK!, "episode_0009.txt"), "utf-8")
         .slice(0, 1500);
 
       for (const variant of VARIANTS) {

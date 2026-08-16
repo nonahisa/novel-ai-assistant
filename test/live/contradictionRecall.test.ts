@@ -12,6 +12,12 @@ import {
   validateContradictions,
 } from "../../src/core/contradictionValidation";
 import { splitIntoChunks, withLineNumbers } from "../../src/core/chunker";
+import {
+  liveWorkPath,
+  LIVE_MODEL,
+  OLLAMA_ENDPOINT,
+  SKIP_REASON,
+} from "./support/liveEnv";
 
 /**
  * 矛盾検知の**見逃し**を測る。
@@ -22,9 +28,6 @@ import { splitIntoChunks, withLineNumbers } from "../../src/core/chunker";
  *
  *   npx vitest run --config vitest.live.config.mts test/live/contradictionRecall.test.ts
  */
-const WORK = "C:/Users/nonah/Documents/いじめられっ子";
-const MODEL = process.env.NOVELAI_MODEL ?? "gemma4:e4b";
-const ENDPOINT = "http://localhost:11434";
 
 /** 仕込む矛盾。設定と明らかに食い違う1文を本文の末尾へ足す */
 const PLANTED = [
@@ -49,11 +52,11 @@ const PLANTED = [
 ];
 
 async function ask(prompt: string): Promise<string> {
-  const response = await fetch(`${ENDPOINT}/api/chat`, {
+  const response = await fetch(`${OLLAMA_ENDPOINT}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: MODEL,
+      model: LIVE_MODEL,
       stream: false,
       think: false,
       format: CONTRADICTION_CHECK_SCHEMA,
@@ -68,12 +71,18 @@ async function ask(prompt: string): Promise<string> {
   return body.message?.content ?? "";
 }
 
-describe("仕込んだ矛盾を拾えるか", () => {
+/**
+ * 作者の手元の作品フォルダー。**ソースへ絶対パスを書かない。**
+ * 決めていなければ、この試験は飛ばす（失敗にしない）。
+ */
+const WORK = liveWorkPath();
+describe.skipIf(WORK === undefined)(
+  `仕込んだ矛盾を拾えるか${WORK ? "" : `（飛ばしました: ${SKIP_REASON}）`}`, () => {
   test(
     "設定と食い違う1文を見つける",
     async () => {
       const source = fs.readFileSync(
-        path.join(WORK, "episode_0009.txt"),
+        path.join(WORK!, "episode_0009.txt"),
         "utf-8"
       );
       // 長すぎると探す範囲が広がる。冒頭だけを使う
@@ -121,7 +130,7 @@ describe("仕込んだ矛盾を拾えるか", () => {
         }
       }
 
-      console.log(`\n=== ${MODEL}: ${found}/${PLANTED.length} 件を検出 ===\n`);
+      console.log(`\n=== ${LIVE_MODEL}: ${found}/${PLANTED.length} 件を検出 ===\n`);
       expect(true).toBe(true);
     },
     20 * 60 * 1000

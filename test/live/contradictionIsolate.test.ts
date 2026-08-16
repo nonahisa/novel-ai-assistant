@@ -8,6 +8,12 @@ import {
   LIGHT_CATEGORIES,
 } from "../../src/prompts/contradictionCheck";
 import { splitIntoChunks, withLineNumbers } from "../../src/core/chunker";
+import {
+  liveWorkPath,
+  LIVE_MODEL,
+  OLLAMA_ENDPOINT,
+  SKIP_REASON,
+} from "./support/liveEnv";
 
 /**
  * **本物のプロンプトで**見逃しを測り直す。
@@ -15,9 +21,6 @@ import { splitIntoChunks, withLineNumbers } from "../../src/core/chunker";
  * 比較用に短く書き直した版は3/3拾ったのに、本物は0/3だった。
  * 材料の違いか、プロンプトの文言の違いかを切り分ける。
  */
-const WORK = "C:/Users/nonah/Documents/いじめられっ子";
-const MODEL = process.env.NOVELAI_MODEL ?? "gemma4:e4b";
-const ENDPOINT = "http://localhost:11434";
 
 const FULL_SETTING =
   "太志\n- 一人称: 僕\n- 外見: 黒髪の少年\n- 状態: 第1話で死亡し、幽霊になっている";
@@ -32,11 +35,11 @@ const PLANTED = [
 ];
 
 async function ask(user: string): Promise<Array<Record<string, string>>> {
-  const response = await fetch(`${ENDPOINT}/api/chat`, {
+  const response = await fetch(`${OLLAMA_ENDPOINT}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: MODEL,
+      model: LIVE_MODEL,
       stream: false,
       think: false,
       format: CONTRADICTION_CHECK_SCHEMA,
@@ -58,12 +61,18 @@ async function ask(user: string): Promise<Array<Record<string, string>>> {
   }
 }
 
-describe("本物のプロンプト", () => {
+/**
+ * 作者の手元の作品フォルダー。**ソースへ絶対パスを書かない。**
+ * 決めていなければ、この試験は飛ばす（失敗にしない）。
+ */
+const WORK = liveWorkPath();
+describe.skipIf(WORK === undefined)(
+  `本物のプロンプト${WORK ? "" : `（飛ばしました: ${SKIP_REASON}）`}`, () => {
   test(
     "材料を揃えて測り直す",
     async () => {
       const source = fs
-        .readFileSync(path.join(WORK, "episode_0009.txt"), "utf-8")
+        .readFileSync(path.join(WORK!, "episode_0009.txt"), "utf-8")
         .slice(0, 1500);
 
       let hits = 0;
@@ -120,7 +129,7 @@ describe("本物のプロンプト", () => {
       );
 
       console.log(
-        `\n=== 本物のプロンプト（${MODEL}）: 検出 ${hits}/${PLANTED.length} / ` +
+        `\n=== 本物のプロンプト（${LIVE_MODEL}）: 検出 ${hits}/${PLANTED.length} / ` +
           `仕込み無しでの指摘 ${clean.length}件 ===`
       );
       for (const item of clean) {

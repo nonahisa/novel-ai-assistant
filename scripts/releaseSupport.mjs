@@ -10,6 +10,8 @@ export const EXPECTED_ARCHIVE_FILES = [
   // **これが抜けた配布物は条件を満たさない**
   "extension/THIRD-PARTY-NOTICES.md",
   "extension/changelog.md",
+  // Marketplace の顔になるアイコン。**PNGしか受け付けない**（8.4）
+  "extension/media/icon.png",
   "extension/package.json",
   "extension/readme.md",
   "extension/dist/extension.js",

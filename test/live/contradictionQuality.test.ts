@@ -13,6 +13,12 @@ import {
   validateContradictions,
 } from "../../src/core/contradictionValidation";
 import { splitIntoChunks, withLineNumbers } from "../../src/core/chunker";
+import {
+  liveWorkPath,
+  LIVE_MODEL,
+  OLLAMA_ENDPOINT,
+  SKIP_REASON,
+} from "./support/liveEnv";
 
 /**
  * 矛盾検知を実データで測る。
@@ -22,9 +28,6 @@ import { splitIntoChunks, withLineNumbers } from "../../src/core/chunker";
  *
  *   npx vitest run --config vitest.ollama.config.ts test/ollama/contradictionQuality.test.ts
  */
-const WORK = "C:/Users/nonah/Documents/いじめられっ子";
-const MODEL = process.env.NOVELAI_MODEL ?? "gemma4:e4b";
-const ENDPOINT = "http://localhost:11434";
 
 interface CharacterJson {
   name: string;
@@ -64,11 +67,11 @@ function describePerson(character: CharacterJson): string {
 }
 
 async function ask(prompt: string): Promise<string> {
-  const response = await fetch(`${ENDPOINT}/api/chat`, {
+  const response = await fetch(`${OLLAMA_ENDPOINT}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: MODEL,
+      model: LIVE_MODEL,
       stream: false,
       think: false,
       format: CONTRADICTION_CHECK_SCHEMA,
@@ -83,21 +86,27 @@ async function ask(prompt: string): Promise<string> {
   return body.message?.content ?? "";
 }
 
-describe("矛盾検知の品質（実データ）", () => {
+/**
+ * 作者の手元の作品フォルダー。**ソースへ絶対パスを書かない。**
+ * 決めていなければ、この試験は飛ばす（失敗にしない）。
+ */
+const WORK = liveWorkPath();
+describe.skipIf(WORK === undefined)(
+  `矛盾検知の品質（実データ）${WORK ? "" : `（飛ばしました: ${SKIP_REASON}）`}`, () => {
   test(
     "指摘の量と中身を測る",
     async () => {
-      const characters = readJsonDir(path.join(WORK, "設定", "characters"))
+      const characters = readJsonDir(path.join(WORK!, "設定", "characters"))
         .filter((character) => !character.isMob);
       expect(characters.length, "人物設定が読めない").toBeGreaterThan(0);
 
-      const worldview = readJsonDir(path.join(WORK, "設定", "world"))
+      const worldview = readJsonDir(path.join(WORK!, "設定", "world"))
         .map((item) => JSON.stringify(item))
         .slice(0, 5)
         .join("\n");
 
       const episodes = fs
-        .readdirSync(WORK)
+        .readdirSync(WORK!)
         .filter((name) => name.startsWith("episode_") && name.endsWith(".txt"))
         .sort();
 
@@ -111,7 +120,7 @@ describe("矛盾検知の品質（実データ）", () => {
       const sample = [episodes[0], episodes[8], episodes[episodes.length - 1]];
 
       for (const fileName of sample) {
-        const filePath = path.join(WORK, fileName);
+        const filePath = path.join(WORK!, fileName);
         const text = fs.readFileSync(filePath, "utf-8");
         const chunks = splitIntoChunks(filePath, text, null, null, {
           maxChars: 4000,
@@ -156,7 +165,7 @@ describe("矛盾検知の品質（実データ）", () => {
         }
       }
 
-      console.log(`\n=== モデル: ${MODEL} / ${sample.join(", ")} ===`);
+      console.log(`\n=== モデル: ${LIVE_MODEL} / ${sample.join(", ")} ===`);
       console.log(`AIが挙げた: ${raised}件`);
       console.log(`弾いた: ${rejected}件`);
       for (const [reason, count] of rejectReasons) {
