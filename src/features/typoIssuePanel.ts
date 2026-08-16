@@ -11,6 +11,7 @@ import { appendAiActionLog } from "../core/typoIssueHistory";
 import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
 import type { TypoCheckIssue } from "./checkTypos";
 import type { AcceptedContradiction as ContradictionIssue } from "../core/contradictionValidation";
+import type { DeviationIssue } from "./checkDeviations";
 import { buildTypoIssuePanelHtml } from "../views/typoIssuePanelHtml";
 
 /**
@@ -62,6 +63,16 @@ export interface ContradictionViewItem {
   note: string;
   confidence: "high" | "medium" | "low";
   status: "pending" | "dismissed";
+  /**
+   * 並べる2つの見出し。
+   *
+   * **矛盾とプロット逸脱で言葉が違う**（設定では／本文では、
+   * プロットでは／この話では）。同じ描画を使い回すために持たせる。
+   */
+  leftLabel: string;
+  rightLabel: string;
+  /** 「設定資料を見る」の代わりに何を開くか */
+  openTarget: "settings" | "plot";
 }
 
 type OutgoingMessage = {
@@ -162,6 +173,44 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
       note: issue.note,
       confidence: issue.confidence,
       status: "pending",
+      leftLabel: "設定では",
+      rightLabel: "本文では",
+      openTarget: "settings",
+    }));
+    this.postItems();
+    void vscode.commands.executeCommand(`${AI_ISSUES_VIEW_ID}.focus`);
+  }
+
+  /**
+   * プロット逸脱・間延びの結果を差し替えて表示する。
+   *
+   * 矛盾と同じく**適用の口を持たせない。** プロットと本文のどちらが
+   * 正しいかは作者にしか決められない（**プロットのほうが古いこともある**）。
+   */
+  showDeviations(work: WorkEntry, issues: DeviationIssue[]): void {
+    this.work = work;
+    this.category = "プロット逸脱";
+    this.items = [];
+    this.contradictions = issues.map((issue, index) => ({
+      id: `d:${issue.chunkHash}:${issue.lineStart}:${index}`,
+      filePath: issue.filePath,
+      fileName: path.basename(issue.filePath),
+      chunkHash: issue.chunkHash,
+      line: issue.lineStart,
+      excerpt: issue.excerpt,
+      category: issue.type,
+      settingSays: issue.plotReference,
+      textSays: issue.reason,
+      // 範囲は補足に出す。行番号だけでは、どこまでの話か分からない
+      note:
+        issue.lineEnd > issue.lineStart
+          ? `${issue.lineStart}〜${issue.lineEnd}行目`
+          : "",
+      confidence: issue.confidence,
+      status: "pending",
+      leftLabel: "プロットでは",
+      rightLabel: "この話では",
+      openTarget: "plot",
     }));
     this.postItems();
     void vscode.commands.executeCommand(`${AI_ISSUES_VIEW_ID}.focus`);
@@ -205,14 +254,21 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
     });
   }
 
-  /** 矛盾の相手側（設定資料）を開く。本文だけを直す道を示さないため */
+  /**
+   * 照らした相手側を開く。**本文だけを直す道を示さないため。**
+   *
+   * 矛盾なら設定資料、プロット逸脱ならプロット。
+   */
   private async openSettingsFor(id: string): Promise<void> {
     const item = this.contradictions.find((entry) => entry.id === id);
     if (!item || !this.work) return;
-    await vscode.commands.executeCommand("novelai.openSettingsPanel", {
-      type: "work",
-      work: this.work,
-    });
+    const ref = { type: "work", work: this.work };
+    await vscode.commands.executeCommand(
+      item.openTarget === "plot"
+        ? "novelai.createPlot"
+        : "novelai.openSettingsPanel",
+      ref
+    );
   }
 
   private async handleMessage(message: IncomingMessage): Promise<void> {

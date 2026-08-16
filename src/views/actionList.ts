@@ -346,6 +346,21 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.checkDeviations",
+            label: "プロットからの逸脱を検知",
+            icon: "compass",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "書いたプロットと本文を照らし合わせ、**プロットに無い展開**や" +
+              "**物語が前へ進んでいない箇所**を探します。" +
+              "**本文は書き換えません。プロットのほうが古いこともあります。**" +
+              "先にプロットを書いておいてください（「プロットをつくる」または" +
+              "「本文からプロットを起こす」）。" +
+              "**伏線や人物の掘り下げは逸脱として扱いません。**",
+          },
+          {
+            kind: "action",
             command: "novelai.checkContradictions",
             label: "矛盾を検知",
             icon: "warning",

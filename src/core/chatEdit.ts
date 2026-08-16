@@ -158,6 +158,8 @@ export type ChatRunKind =
   | "checkNotation"
   /** 推敲（冗長・同語反復・係り受け・長文） */
   | "checkProofread"
+  /** プロットからの逸脱・間延びを検知 */
+  | "checkDeviations"
   /** 設定資料と本文の矛盾を検知 */
   | "checkContradictions"
   /** 設定資料をまとめて抽出 */
@@ -216,6 +218,7 @@ const RUNNABLE: ReadonlyMap<string, { kind: ChatRunKind } & Omit<ChatRun, "kind"
         ["checkNotation", "表記ゆれを検知する", false],
         ["checkProofread", "推敲する", true],
         ["checkContradictions", "設定と本文の矛盾を検知する", true],
+        ["checkDeviations", "プロットからの逸脱を検知する", true],
         // 資料をためる
         ["extractSettings", "設定資料をまとめて抽出する", true],
         ["extractCharacters", "登場人物を抽出する", true],

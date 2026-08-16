@@ -1,0 +1,366 @@
+import * as vscode from "vscode";
+import type { WorkEntry } from "../models/types";
+import { AIRegistry, ensureConfigured } from "../ai/registry";
+import { AIError, recoveryForAIError } from "../ai/types";
+import { scanWork } from "../core/scanner";
+import { readTextFile, hashText } from "../core/textFile";
+import { ChunkCache } from "../core/chunkCache";
+import { SynopsisStore } from "../core/synopsisStore";
+import { readPlotText } from "../core/plotFile";
+import { isBlankPlotSection, parsePlotMarkdown } from "../core/plotDoc";
+import { formatChapterLabel } from "../core/episodeLabel";
+import { readWorkFormat } from "../core/workFormatStore";
+import {
+  buildDeviationCheckPrompt,
+  deviationBudget,
+  DEVIATION_CHECK_SCHEMA,
+  DEVIATION_CHECK_SYSTEM_PROMPT,
+  DEVIATION_CHECK_VERSION,
+  DEVIATION_TYPES,
+  LIGHT_DEVIATION_TYPES,
+  type DeviationType,
+} from "../prompts/deviationCheck";
+import {
+  parseDeviationResult,
+  sortDeviations,
+  validateDeviations,
+  type AcceptedDeviation,
+} from "../core/deviationValidation";
+import { withCancellableProgress } from "../views/progress";
+import { confirmProviderReachable } from "./aiConnectivity";
+import { confirmFormatFit } from "./formatFitPrompt";
+import { logFailure, logStep, useLogFile } from "../core/logger";
+
+/**
+ * プロット逸脱・間延び検知（P-11、設計書6.10.2）。
+ *
+ * **話ごとに見る。** チャンクへ割ると、切れ目の前後がどちらも
+ * 「進んでいない」ように見え、間延びの判定が壊れる。
+ *
+ * **本文は書き換えない。** 逸脱は「プロットと違う」であって
+ * 「間違い」ではない。**プロットのほうが古いこともある**（矛盾検知と同じ）。
+ *
+ * **プロットが無ければ実行しない。** 照らし合わせる相手が無いのに問うと、
+ * AIは本文だけを見て「逸脱していそうなこと」を作り出す。
+ */
+
+export interface DeviationIssue extends AcceptedDeviation {
+  filePath: string;
+  chunkHash: string;
+}
+
+export interface DeviationRunResult {
+  issues: DeviationIssue[];
+  rejectedCount: number;
+  /** 照らした先がプロットに無かった件数（作者へ伝える価値がある） */
+  ungroundedCount: number;
+  failedChunks: number;
+  cancelled: boolean;
+}
+
+/** 1回で渡す本文の上限。長い話はここで切る */
+const MAX_CHAPTER_CHARS = 12_000;
+
+export async function checkDeviations(
+  work: WorkEntry,
+  registry: AIRegistry
+): Promise<DeviationRunResult | undefined> {
+  useLogFile(work.folderPath);
+
+  // 短編集・SNS記事では、話が続かないので「プロットからの逸脱」が成り立たない
+  if (!(await confirmFormatFit(work, "plotReverse"))) return undefined;
+
+  const plot = await loadPlot(work);
+  if (!plot) return undefined;
+
+  const resolved = await ensureConfigured(registry);
+  if (!resolved) return undefined;
+
+  const episodes = await collectEpisodes(work);
+  if (episodes.length === 0) {
+    vscode.window.showWarningMessage("検知できる本文がありませんでした。");
+    return undefined;
+  }
+
+  const synopses = await loadSynopses(work);
+
+  const cache = new ChunkCache(work);
+  await cache.load();
+  // **プロットが変われば、同じ本文でも答えが変わる。**
+  // 含めないと、プロットを直したのに古い指摘が出続ける（矛盾検知と同じ）
+  const cacheKeyBase = {
+    feature: "deviation_check",
+    promptVersion: `${DEVIATION_CHECK_VERSION}:${hashText(plot).slice(0, 16)}`,
+    model: resolved.model,
+  };
+
+  const pending = episodes.filter(
+    (episode) => !cache.get(episode.hash, cacheKeyBase)
+  );
+  if (pending.length > 0) {
+    if (!(await confirmProviderReachable(resolved.provider, "プロット逸脱の検知"))) {
+      return undefined;
+    }
+    const confirm = await vscode.window.showInformationMessage(
+      `${work.title} のプロット逸脱を検知します。`,
+      {
+        modal: true,
+        detail: [
+          `${episodes.length}話中 ${pending.length}話を処理します` +
+            `（処理済み ${episodes.length - pending.length}話はスキップ）。`,
+          "",
+          "**本文は書き換えません。** プロットと違う箇所を並べるだけで、",
+          "**プロットのほうが古いこともあります。**",
+          // **実測に基づく断り。** 黙って動かして0件を返すより、
+          // 先に「効かない」と言うほうがよい（設計書6.10.2）
+          resolved.provider.id === "ollama"
+            ? "\n**この機能は、手元のAI（Ollama）ではほとんど働きません。**\n" +
+              "実データで5回測ったところ、プロットに載せた話と外した話を\n" +
+              "見分けられませんでした。Claude・ChatGPT・Gemini をお使いください。\n" +
+              "（このモデルでは「間延び」も見ません。判定が難しく的外れが増えるため）"
+            : "",
+          resolved.provider.isPaid
+            ? `\n**${resolved.provider.displayName} は話ごとに課金されます。**`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      },
+      "実行"
+    );
+    if (confirm !== "実行") return undefined;
+  }
+
+  logStep(
+    `プロット逸脱検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
+      `${resolved.model} / ${episodes.length}話 / v${DEVIATION_CHECK_VERSION}`
+  );
+
+  const plotText = plot;
+  const types: readonly DeviationType[] =
+    resolved.provider.id === "ollama" ? LIGHT_DEVIATION_TYPES : DEVIATION_TYPES;
+  const provider = resolved.provider;
+  const model = resolved.model;
+
+  const issues: DeviationIssue[] = [];
+  let rejectedCount = 0;
+  let ungroundedCount = 0;
+  let failedChunks = 0;
+  let cancelled = false;
+
+  await withCancellableProgress(
+    "プロットとの食い違いを見ています",
+    async (progress, token) => {
+      const controller = new AbortController();
+      token.onCancellationRequested(() => {
+        cancelled = true;
+        controller.abort();
+      });
+
+      let done = 0;
+      for (const episode of episodes) {
+        if (token.isCancellationRequested) break;
+
+        const cached = cache.get(episode.hash, cacheKeyBase);
+        const raw = cached ?? (await ask(episode));
+        done++;
+        progress.report({
+          message: `${done}/${episodes.length}`,
+          increment: 100 / episodes.length,
+        });
+        if (raw === undefined) continue;
+
+        const validated = validateDeviations(raw, {
+          text: episode.text,
+          plot,
+        });
+        rejectedCount += validated.rejected.length;
+        ungroundedCount += validated.rejected.filter(
+          (entry) => entry.reason === "plot_reference_not_found"
+        ).length;
+        for (const item of validated.accepted) {
+          issues.push({
+            ...item,
+            filePath: episode.filePath,
+            chunkHash: episode.hash,
+          });
+        }
+      }
+
+      async function ask(episode: Episode): Promise<unknown | undefined> {
+        try {
+          const response = await provider.generate({
+            systemPrompt: DEVIATION_CHECK_SYSTEM_PROMPT,
+            userPrompt: buildDeviationCheckPrompt({
+              chapterLabel: episode.label,
+              plot: plotText,
+              chapterTextWithLineNumbers: withLineNumbers(episode.text),
+              surroundingSynopses: nearbySynopses(synopses, episode.chapter),
+              types,
+              maxIssues: deviationBudget(episode.text.length),
+            }),
+            model,
+            // 判断を伴うので、事実の突き合わせより少しだけ揺らす
+            temperature: 0.2,
+            jsonSchema: DEVIATION_CHECK_SCHEMA as unknown as object,
+            disableThinking: true,
+            signal: controller.signal,
+          });
+
+          const parsed = parseDeviationResult(response.text);
+          if (!parsed) {
+            failedChunks++;
+            logFailure("プロット逸脱検知", {
+              話: episode.label,
+              理由: "応答を読み取れません",
+              応答: response.text.slice(0, 300),
+            });
+            return undefined;
+          }
+          await cache.set(episode.hash, cacheKeyBase, parsed);
+          return parsed;
+        } catch (error) {
+          if (error instanceof AIError && error.kind === "aborted") {
+            return undefined;
+          }
+          failedChunks++;
+          logFailure("プロット逸脱検知", {
+            話: episode.label,
+            詳細:
+              error instanceof AIError
+                ? `${error.message} ${recoveryForAIError(error)}`
+                : error instanceof Error
+                  ? error.message
+                  : String(error),
+          });
+          return undefined;
+        }
+      }
+    }
+  );
+
+  await cache.save();
+
+  return {
+    issues: sortDeviations(issues) as DeviationIssue[],
+    rejectedCount,
+    ungroundedCount,
+    failedChunks,
+    cancelled,
+  };
+}
+
+/**
+ * プロットを読む。
+ *
+ * **中身が空なら実行しない。** 見出しだけのテンプレートを渡しても、
+ * 照らし合わせる相手にはならない。
+ */
+async function loadPlot(work: WorkEntry): Promise<string | undefined> {
+  const text = await readPlotText(work);
+  const sections = parsePlotMarkdown(text).sections;
+  const written = Object.values(sections).filter(
+    (body) => !isBlankPlotSection(body)
+  );
+
+  if (written.length === 0) {
+    const answer = await vscode.window.showWarningMessage(
+      "照らし合わせるプロットがまだありません。",
+      {
+        modal: true,
+        detail:
+          "この機能は、書いたプロットと本文を照らし合わせます。" +
+          "プロットが無いまま実行すると、AIは本文だけを見て" +
+          "「逸脱していそうなこと」を作り出します。\n\n" +
+          "「プロットをつくる」で書くか、「本文からプロットを起こす」で" +
+          "作ってから実行してください。",
+      },
+      "本文からプロットを起こす"
+    );
+    if (answer === "本文からプロットを起こす") {
+      await vscode.commands.executeCommand("novelai.generatePlot", {
+        type: "work",
+        work,
+      });
+    }
+    return undefined;
+  }
+  return text;
+}
+
+interface Episode {
+  filePath: string;
+  label: string;
+  chapter: number | null;
+  text: string;
+  hash: string;
+}
+
+async function collectEpisodes(work: WorkEntry): Promise<Episode[]> {
+  const scan = await scanWork(work);
+  const format = await readWorkFormat(work);
+  const out: Episode[] = [];
+
+  for (const episode of scan.episodes) {
+    // 競合マーカーのあるファイルはAI処理をブロックする
+    if (episode.hasConflictMarkers) continue;
+    let text: string;
+    try {
+      text = (await readTextFile(episode.filePath)).text;
+    } catch {
+      continue;
+    }
+    // **長い話は切る。** 切ったことは指摘の行番号から分かる
+    const body = text.slice(0, MAX_CHAPTER_CHARS);
+    out.push({
+      filePath: episode.filePath,
+      label: formatChapterLabel(episode, format) || episode.fileName,
+      chapter: episode.chapterStart,
+      text: body,
+      hash: hashText(body),
+    });
+  }
+  return out;
+}
+
+async function loadSynopses(
+  work: WorkEntry
+): Promise<Array<{ chapter: number | null; synopsis: string }>> {
+  try {
+    return (await new SynopsisStore(work).load()).episodes.map((item) => ({
+      chapter: item.chapter,
+      synopsis: item.synopsis,
+    }));
+  } catch {
+    // あらすじが無くても逸脱は見られる。前後の繋がりが弱くなるだけ
+    return [];
+  }
+}
+
+/**
+ * 前後の話のあらすじ。
+ *
+ * **前後だけにする。** 全部渡すと入力が膨らむうえ、離れた話との
+ * 食い違いまで「この話の逸脱」として挙げてくる。
+ */
+function nearbySynopses(
+  synopses: Array<{ chapter: number | null; synopsis: string }>,
+  chapter: number | null
+): string {
+  if (chapter === null) return "";
+  return synopses
+    .filter(
+      (item) =>
+        item.chapter !== null && Math.abs(item.chapter - chapter) <= 2
+    )
+    .map((item) => `第${item.chapter}話: ${item.synopsis}`)
+    .join("\n");
+}
+
+/** 行番号を振る。`chunker.ts` の同名関数は Chunk 用なのでここに持つ */
+function withLineNumbers(text: string): string {
+  return text
+    .split("\n")
+    .map((line, index) => `${index + 1}: ${line}`)
+    .join("\n");
+}

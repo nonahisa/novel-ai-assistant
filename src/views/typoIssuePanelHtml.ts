@@ -197,14 +197,14 @@ function renderContradiction(item) {
     '</div>' +
     '<div class="quote">' + escapeHtml(item.excerpt) + '</div>' +
     '<div class="compare">' +
-    '<div><span class="side">設定では</span>' + escapeHtml(item.settingSays) + '</div>' +
-    '<div><span class="side">本文では</span>' + escapeHtml(item.textSays) + '</div>' +
+    '<div><span class="side">' + escapeHtml(item.leftLabel || '設定では') + '</span>' + escapeHtml(item.settingSays) + '</div>' +
+    '<div><span class="side">' + escapeHtml(item.rightLabel || '本文では') + '</span>' + escapeHtml(item.textSays) + '</div>' +
     '</div>' +
     note +
     (canAct
       ? '<div class="actions">' +
         '<button data-action="jump" data-id="' + item.id + '">本文を見る</button>' +
-        '<button class="secondary" data-action="openSettings" data-id="' + item.id + '">設定資料を見る</button>' +
+        '<button class="secondary" data-action="openSettings" data-id="' + item.id + '">' + (item.openTarget === 'plot' ? 'プロットを見る' : '設定資料を見る') + '</button>' +
         '<button class="secondary" data-action="dismiss" data-id="' + item.id + '">無視</button>' +
         '</div>'
       : '') +

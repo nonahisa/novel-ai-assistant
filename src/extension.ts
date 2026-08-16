@@ -110,6 +110,7 @@ import { statsDayKey } from "./core/writingStats";
 import { setWorkGoals } from "./features/setWorkGoals";
 import { checkContradictions } from "./features/checkContradictions";
 import { checkProofread } from "./features/checkProofread";
+import { checkDeviations } from "./features/checkDeviations";
 import { pruneAllLogs } from "./features/pruneLogs";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
@@ -363,8 +364,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             ? "矛盾検知"
             : kind === "checkProofread"
               ? "推敲"
+              : kind === "checkDeviations"
+                ? "プロット逸脱の検知"
             : "誤字脱字の検知";
       if (!(await saveDirtyDocumentsBeforeExtraction(work, label))) return;
+
+      if (kind === "checkDeviations") {
+        const result = await checkDeviations(work, aiRegistry);
+        if (!result || result.cancelled) return;
+        typoIssuePanel.showDeviations(work, result.issues);
+        return;
+      }
 
       if (kind === "checkProofread") {
         const result = await checkProofread(work, aiRegistry);
@@ -1553,6 +1563,45 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
         vscode.window.showInformationMessage(
           `表記ゆれ検知が完了しました。${parts.join(" / ")}`
+        );
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.checkDeviations",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+
+        // 未保存のまま読むと、画面と違う本文を照らしてしまう
+        if (
+          !(await saveDirtyDocumentsBeforeExtraction(work, "プロット逸脱の検知"))
+        ) {
+          return;
+        }
+
+        const result = await checkDeviations(work, aiRegistry);
+        if (!result || result.cancelled) return;
+
+        typoIssuePanel.showDeviations(work, result.issues);
+
+        const parts = [`指摘 ${result.issues.length}件`];
+        if (result.ungroundedCount > 0) {
+          // 照らした先がプロットに無いものは、根拠を持たない指摘である
+          parts.push(
+            `プロットに無いものを引いた ${result.ungroundedCount}件を除外`
+          );
+        }
+        if (result.failedChunks > 0) {
+          parts.push(`読み取れなかった ${result.failedChunks}話`);
+        }
+        vscode.window.showInformationMessage(
+          `プロット逸脱の検知が完了しました。${parts.join(" / ")}。` +
+            (result.issues.length > 0
+              ? "**本文は書き換えていません。** プロットのほうが古いこともあります。"
+              : "")
         );
       }
     )

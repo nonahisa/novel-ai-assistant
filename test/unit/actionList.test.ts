@@ -202,6 +202,7 @@ describe("AIの印", () => {
         "novelai.checkTypos",
         "novelai.checkProofread",
         "novelai.checkContradictions",
+        "novelai.checkDeviations",
         "novelai.extractSettings",
         "novelai.extractCharactersOnly",
         "novelai.extractLocationsOnly",
