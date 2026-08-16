@@ -24,9 +24,9 @@ export interface EpisodeCountRow {
   gross: number;
   /** 原稿用紙の枚数（20字×20行） */
   pages: number;
-  /** 平均に対する比。1.0が平均ちょうど */
+  /** 基準に対する比。1.0が基準ちょうど（基準は `summary.basis`） */
   ratio: number;
-  /** 平均から大きく外れている話の印 */
+  /** 基準から大きく外れている話の印 */
   flag: "short" | "long" | null;
   /** 1ファイルに複数話が入っている場合の話数 */
   collectedCount: number | null;
@@ -35,6 +35,16 @@ export interface EpisodeCountRow {
 }
 
 export interface EpisodeCountSummary {
+  /**
+   * 長short・長longの判定に使った基準。
+   *
+   * **目標を決めていれば目標が基準になる**（設計書6.3.6）。
+   * 作者が「1話3,000字」と決めているのに平均と比べても、
+   * 全部が短い作品では「どれも平均どおり」としか出ない。
+   */
+  basis: "goal" | "average";
+  /** 基準の字数。`basis` に対応する */
+  basisChars: number;
   /** 字数を数えた話数（競合を除く） */
   countedFiles: number;
   /** 競合で数えられなかった話数 */
@@ -66,20 +76,35 @@ export const MIN_FILES_FOR_FLAGS = 4;
 
 export function buildEpisodeCountTable(
   episodes: EpisodeFile[],
-  /** SNS記事では「第3話」ではなく「投稿3」と並べる */
-  format?: WorkFormatKey
+  options: {
+    /** SNS記事では「第3話」ではなく「投稿3」と並べる */
+    format?: WorkFormatKey;
+    /** 1話あたりの目標字数。決めていれば、これが偏りの基準になる */
+    perEpisodeGoal?: number | null;
+  } = {}
 ): {
   rows: EpisodeCountRow[];
   summary: EpisodeCountSummary;
 } {
+  const { format, perEpisodeGoal } = options;
   const counted = episodes.filter((episode) => !episode.hasConflictMarkers);
   const totalNet = counted.reduce((sum, episode) => sum + episode.counts.net, 0);
   const average = counted.length > 0 ? totalNet / counted.length : 0;
-  const flagsEnabled = counted.length >= MIN_FILES_FOR_FLAGS && average > 0;
+
+  // **目標を決めていれば目標が基準。** 作者が「1話3,000字」と決めているのに
+  // 平均と比べても、全部が短い作品では「どれも平均どおり」としか出ない
+  const goal = perEpisodeGoal && perEpisodeGoal > 0 ? perEpisodeGoal : null;
+  const basis: "goal" | "average" = goal !== null ? "goal" : "average";
+  const basisChars = goal ?? average;
+
+  // 目標が基準なら、話数が少なくても印を付けてよい。
+  // 平均は少数だと当てにならないが、**目標は1話目から決まっている**
+  const flagsEnabled =
+    basisChars > 0 && (goal !== null || counted.length >= MIN_FILES_FOR_FLAGS);
 
   const rows: EpisodeCountRow[] = episodes.map((episode) => {
     const chapterLabel = formatChapterLabel(episode, format);
-    const ratio = average > 0 ? episode.counts.net / average : 0;
+    const ratio = basisChars > 0 ? episode.counts.net / basisChars : 0;
     return {
       filePath: episode.filePath,
       fileName: episode.fileName,
@@ -108,6 +133,8 @@ export function buildEpisodeCountTable(
   return {
     rows,
     summary: {
+      basis,
+      basisChars: Math.round(basisChars),
       countedFiles: countedRows.length,
       conflictedFiles: rows.length - countedRows.length,
       totalNet,

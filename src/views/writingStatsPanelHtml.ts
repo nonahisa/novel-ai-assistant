@@ -67,6 +67,16 @@ main { padding: 16px; }
 section.page { display: none; }
 section.page.active { display: block; }
 .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+/* 締切の帯。応募作ではここが最初に目に入る場所になる */
+.contest {
+  border-left: 3px solid var(--vscode-focusBorder);
+  padding: 8px 12px;
+  margin-bottom: 16px;
+  background: var(--vscode-textBlockQuote-background, rgba(127,127,127,0.08));
+}
+.contest.warn { border-left-color: var(--vscode-errorForeground); }
+.contest-head { font-weight: 600; margin-bottom: 4px; }
+.contest-detail { font-size: 12px; opacity: 0.85; }
 .card {
   border: 1px solid var(--vscode-panel-border);
   border-radius: 6px;
@@ -136,6 +146,7 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
 </header>
 <main>
   <section class="page active" id="page-writing">
+    <div id="contest"></div>
     <div class="cards" id="cards"></div>
     <div class="controls" id="granularity"></div>
     <div class="chart-wrap"><svg id="chart" width="100%" height="240"></svg></div>
@@ -206,6 +217,45 @@ function renderGranularity() {
       renderChart();
     });
   });
+}
+
+/**
+ * 締切のある作品の帯。
+ *
+ * **いちばん上に出す。** 応募作を書いているとき、まず知りたいのは
+ * 「あと何日で、あと何字か」である。グラフより先に目に入る場所に置く。
+ */
+function renderContest() {
+  const box = document.getElementById('contest');
+  const contest = state && state.contest;
+  if (!contest) {
+    box.innerHTML = '';
+    return;
+  }
+
+  const rows = [];
+  rows.push('<div class="contest-head">' + escapeHtml(contest.headline) + '</div>');
+
+  const detail = [];
+  detail.push('締切 ' + escapeHtml(contest.deadline));
+  if (contest.targetChars !== null) {
+    detail.push('目標 ' + formatCount(contest.targetChars) + '字');
+  }
+  detail.push('現在 ' + formatCount(contest.written) + '字');
+  if (contest.neededPerDay !== null) {
+    detail.push('1日 ' + formatCount(contest.neededPerDay) + '字');
+  }
+  rows.push('<div class="contest-detail">' + detail.join(' ／ ') + '</div>');
+
+  // 募集要項は変わることがある。作者が確かめ直せるように残す
+  if (contest.url) {
+    rows.push(
+      '<div class="contest-detail"><a href="' + escapeHtml(contest.url) + '">募集要項を見る</a></div>'
+    );
+  }
+
+  const state2 = contest.overdue || contest.overMax ? ' warn' : '';
+  box.innerHTML = '<div class="contest' + state2 + '">' + rows.join('') + '</div>';
 }
 
 function renderCards() {
@@ -435,6 +485,7 @@ window.addEventListener('message', (event) => {
   state = message.data;
   document.getElementById('title').textContent = state.title;
   renderGranularity();
+  renderContest();
   renderCards();
   renderChart();
   renderDevices();

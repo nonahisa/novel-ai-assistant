@@ -114,6 +114,19 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         requiresWork: true,
         detail: "文字数と原稿用紙の枚数を作品全体で集計します。",
       },
+      {
+        kind: "action",
+        command: "novelai.setWorkGoals",
+        label: "この作品の目標を決める",
+        icon: "target",
+        requiresWork: true,
+        detail:
+          "**作品ごと**の目標です（設定の1日・1月の目標は全作品で共有です）。" +
+          "1記事あたりの目標文字数を決めると、文字数一覧の「長い・短い」を" +
+          "平均ではなく目標と比べます。" +
+          "応募先の**締切日・作品の文字量・日間目標**を入れると、" +
+          "執筆量パネルに「あと何日・あと何字・1日あたり何字」が出ます。",
+      },
     ],
   },
 

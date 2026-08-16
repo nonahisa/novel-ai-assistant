@@ -102,6 +102,7 @@ import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
 import { ChatterService } from "./features/chatterService";
 import { setPlotBasics } from "./features/setPlotBasics";
 import { invalidateWorkFormat } from "./core/workFormatStore";
+import { setWorkGoals } from "./features/setWorkGoals";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
 import { hasUnsavedChanges } from "./core/textFile";
@@ -783,6 +784,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const work = await resolveWork(node, registry);
         if (!work) return;
         await setPlotBasics(work);
+      }
+    ),
+    vscode.commands.registerCommand(
+      "novelai.setWorkGoals",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await setWorkGoals(work);
+        // 目標を変えたら、開いているパネルの「あと何字」を出し直す
+        await refreshWritingStatsPanel(work, deviceId);
       }
     )
   );

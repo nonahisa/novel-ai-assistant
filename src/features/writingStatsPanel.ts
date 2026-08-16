@@ -20,6 +20,11 @@ import { WritingStatsStore } from "../core/writingStatsStore";
 import { buildWritingStatsPanelHtml } from "../views/writingStatsPanelHtml";
 import { episodeUnit } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
+import { readWorkGoalsOrEmpty } from "../core/workGoalsStore";
+import {
+  buildContestProgress,
+  describeContestProgress,
+} from "../core/contestProgress";
 import {
   boundaryHour,
   dailyGoal,
@@ -130,10 +135,12 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
     ])
   );
 
-  const table = buildEpisodeCountTable(
-    scanned.episodes,
-    await readWorkFormat(work)
-  );
+  const goals = await readWorkGoalsOrEmpty(work);
+  const table = buildEpisodeCountTable(scanned.episodes, {
+    format: await readWorkFormat(work),
+    perEpisodeGoal: goals.perEpisodeChars,
+  });
+  const contest = buildContestProgress(goals, scanned.stats.totals.net, today);
 
   return {
     title: `${work.title} の執筆量`,
@@ -168,6 +175,23 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
       files: scanned.stats.fileCount,
     },
     episodes: table,
+    // 締切のある作品では、いちばん上に「あと何日・あと何字」を出す。
+    // 数字だけでは間に合うか判断できないので、文にして添える
+    contest: contest
+      ? {
+          headline: describeContestProgress(contest),
+          name: contest.contest.name,
+          url: contest.contest.url,
+          deadline: contest.contest.deadline,
+          daysLeft: contest.daysLeft,
+          overdue: contest.overdue,
+          overMax: contest.overMax,
+          written: contest.written,
+          targetChars: contest.targetChars,
+          remainingChars: contest.remainingChars,
+          neededPerDay: contest.neededPerDay,
+        }
+      : null,
     notice:
       days.length === 0
         ? "まだ記録がありません。本文を保存すると、前回からの差がその日の執筆量になります" +
