@@ -61,4 +61,10 @@ describe("拡張機能のライセンス", () => {
     expect(LICENSE).not.toContain("contributors");
     expect(LICENSE).toMatch(/Copyright \(c\) \d{4} \S+/);
   });
+
+  test("連名の著作権者が両方載っている", () => {
+    // **片方を落とすと、その人の権利表示が配布物から消える。**
+    // 版を上げるときの一括置換などで、うっかり消えないよう固定する
+    expect(LICENSE).toContain("Copyright (c) 2026 nonahisa, kmizu");
+  });
 });
