@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import * as path from "path";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
@@ -8,16 +7,14 @@ import { loadEpisodeBodies } from "../core/episodeBodies";
 import { SynopsisStore } from "../core/synopsisStore";
 import { CharacterStore } from "../core/characterStore";
 import { createLocationStore, createWorldStore } from "../core/abilityStore";
-import { readWorkConfig, workPaths } from "../core/workRegistry";
-import { atomicWriteFile, createManagedRecoveryPath } from "../core/atomicWrite";
 import {
-  updatePlotMarkdown,
   isBlankPlotSection,
   parsePlotMarkdown,
   PLOT_SECTIONS,
   type PlotSectionKey,
   type PlotSections,
 } from "../core/plotDoc";
+import { plotPath, readPlotText, writePlotSections } from "../core/plotFile";
 import {
   parsePlotReverseResult,
   plotSectionLabel,
@@ -47,7 +44,6 @@ import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
  */
 
 const OPENING_EXCERPT_CHARS = 3_000;
-const PLOT_FILE = "plot.md";
 
 export async function generatePlot(
   work: WorkEntry,
@@ -314,7 +310,7 @@ async function applyPlot(
     // 作者が付けた空行や書き方の癖が失われる
     const updates: Partial<PlotSections> = {};
     for (const key of [...filled, ...replaced]) updates[key] = next[key];
-    await writePlot(work, updates);
+    await writePlotSections(work, updates);
   } catch (error) {
     vscode.window.showErrorMessage(
       `プロットを保存できませんでした: ${
@@ -356,10 +352,6 @@ function oneLine(text: string): string {
   return flat.length > 60 ? `${flat.slice(0, 60)}…` : flat;
 }
 
-async function plotPath(work: WorkEntry): Promise<string> {
-  const config = await readWorkConfig(work);
-  return path.join(workPaths(work, config).settings, PLOT_FILE);
-}
 
 async function readPlot(
   work: WorkEntry
@@ -367,59 +359,4 @@ async function readPlot(
   return parsePlotMarkdown(await readPlotText(work));
 }
 
-/** ファイルの中身をそのまま読む。無ければ空文字 */
-async function readPlotText(work: WorkEntry): Promise<string> {
-  try {
-    const bytes = await vscode.workspace.fs.readFile(
-      vscode.Uri.file(await plotPath(work))
-    );
-    return new TextDecoder().decode(bytes);
-  } catch {
-    return "";
-  }
-}
 
-/**
- * プロットを書き戻す。
- *
- * 既存ファイルは上書きできない（`atomicWrite.ts`）ため、
- * 元の内容を回復先へ退避してから作り直す。作者の文書なので、
- * 失敗しても元が残るようにしておく。
- */
-async function writePlot(
-  work: WorkEntry,
-  updates: Partial<PlotSections>
-): Promise<void> {
-  const target = await plotPath(work);
-  // **作者の文書の形を変えない。** 節に分解して組み直すと、作者が立てた
-  // 見出しが末尾へ寄り、順番も決まった並びへ戻ってしまう（作者の指示、2026-08-16）
-  const body = updatePlotMarkdown(await readPlotText(work), updates, {
-    workTitle: work.title,
-  });
-
-  await vscode.workspace.fs.createDirectory(
-    vscode.Uri.file(path.dirname(target))
-  );
-
-  if (await exists(target)) {
-    const recoveryPath = await createManagedRecoveryPath(target);
-    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
-    await atomicWriteFile(recoveryPath, bytes, { mode: "create" });
-    await vscode.workspace.fs.delete(vscode.Uri.file(target), {
-      useTrash: false,
-    });
-  }
-
-  await atomicWriteFile(target, new TextEncoder().encode(body), {
-    mode: "create",
-  });
-}
-
-async function exists(filePath: string): Promise<boolean> {
-  try {
-    await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
-    return true;
-  } catch {
-    return false;
-  }
-}

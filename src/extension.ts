@@ -100,6 +100,7 @@ import { checkNotation } from "./features/checkNotation";
 import { generatePlot } from "./features/generatePlot";
 import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
 import { ChatterService } from "./features/chatterService";
+import { setPlotBasics } from "./features/setPlotBasics";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
 import { hasUnsavedChanges } from "./core/textFile";
@@ -768,6 +769,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const work = await resolveWork(node, registry);
         if (!work) return;
         await openPlotFile(work);
+      }
+    ),
+    vscode.commands.registerCommand(
+      "novelai.setPlotBasics",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await setPlotBasics(work);
       }
     )
   );

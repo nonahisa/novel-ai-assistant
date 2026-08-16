@@ -44,6 +44,8 @@ const LIMIT_BY_KEY = new Map(PLOT_LIMITS.map((limit) => [limit.key, limit]));
 /** 見出しの表示名。超過の知らせに使う */
 const LABELS: Record<PlotSectionKey, string> = {
   title: "タイトル",
+  format: "形式",
+  genre: "ジャンル",
   logline: "ログライン",
   theme: "テーマ",
   motif: "モチーフ",

@@ -14,6 +14,8 @@
 
 export type PlotSectionKey =
   | "title"
+  | "format"
+  | "genre"
   | "logline"
   | "theme"
   | "motif"
@@ -37,6 +39,19 @@ export interface PlotSectionDef {
 /** この順に並べる。画面にもこの順で出る */
 export const PLOT_SECTIONS: readonly PlotSectionDef[] = [
   { key: "title", heading: "タイトル" },
+  // 形式とジャンルは題の次に置く。**何を書こうとしているのかは、
+  // 中身より先に決まっている**ことが多く、探して埋めるものではない
+  {
+    key: "format",
+    heading: "形式",
+    hint: "短編 / 短編集 / 長編 / 大長編 / SNS記事",
+  },
+  {
+    key: "genre",
+    heading: "ジャンル",
+    hint: "投稿先ごとに体系が違う。どこのジャンルかを添える（例: ハイファンタジー（小説家になろう））",
+    list: true,
+  },
   {
     key: "logline",
     heading: "ログライン",
