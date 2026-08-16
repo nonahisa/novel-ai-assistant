@@ -25,7 +25,18 @@
 
 ## インストール
 
-認証済みのGitHub CLIを使ってprivate repositoryのReleaseからVSIXをダウンロードし、そのローカルファイルをインストールします。新規インストールと既存版の上書き更新の両方に使えます。
+VS Codeの拡張機能ビュー（`Ctrl + Shift + X`）で「**統合小説執筆環境**」を検索して「インストール」を押してください。コマンドでも入れられます。
+
+```powershell
+code --install-extension nonahisa.novel-ai-assistant
+```
+
+更新はVS Codeが自動で行います。
+
+<details>
+<summary>VSIXファイルから入れる（配布前の版を試す場合）</summary>
+
+GitHubのReleaseに置いたVSIXから入れることもできます。新規インストールと上書き更新の両方に使えます。
 
 ```powershell
 gh release download v0.6.35 --repo nonahisa/novel-ai-assistant --pattern "novel-ai-assistant-0.6.35.vsix" --clobber
@@ -33,6 +44,8 @@ code --install-extension ".\novel-ai-assistant-0.6.35.vsix" --force
 ```
 
 画面から操作する場合は、VS Codeの「拡張機能」ビュー右上の `...` →「VSIXからのインストール」を選び、同じVSIXファイルを指定します。
+
+</details>
 
 インストール後にVS Codeを再読み込みすると、左端のアクティビティバーにキーボードと万年筆のアイコン（**小説執筆**）が追加されます。対応バージョンはVS Code 1.90.0以降です。
 
@@ -728,10 +741,10 @@ AI処理の記録は「**ログを開く**」（ヘルプ）で開けます。�
 
 ## アンインストール
 
-拡張機能ビューから「小説AI執筆補助」をアンインストールするか、次を実行します。
+拡張機能ビューから「統合小説執筆環境」をアンインストールするか、次を実行します。
 
 ```powershell
-code --uninstall-extension local.novel-ai-assistant
+code --uninstall-extension nonahisa.novel-ai-assistant
 ```
 
 アンインストールしても、原稿、`.aiwriter/`、`設定/characters/` は削除されません。不要な場合は内容を確認して手動で削除してください。
