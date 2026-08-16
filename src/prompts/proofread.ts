@@ -1,0 +1,150 @@
+/**
+ * P-10 推敲支援（チャンク単位）。
+ *
+ * **この機能でいちばん危ないのは、出しすぎること。**
+ * 誤字脱字と違い、推敲には「正解」が無い。AIに任せると
+ * **どの文にも何かしら言える**ので、際限なく提案が出て作者が疲弊する。
+ *
+ * したがって、
+ *
+ * - **提案してよい対象を4つに限る**（冗長・同語反復・係り受け・長すぎる文）
+ * - **作者の文体には触れない。** 体言止め、短文の連続、独特な比喩は
+ *   その作者の書き方であって、直すものではない
+ * - **1000字あたり3件まで。** プロンプトで言い、**コード側でも切る**
+ *   （8Bモデルはこの手の上限を守らない）
+ * - **0件でよい。** 無理に探させない
+ *
+ * プロンプトを変更したら version を上げること。
+ * キャッシュのキーに含まれており、版が変わると再処理される。
+ */
+export const PROOFREAD_VERSION = "1.1";
+
+export const PROOFREAD_SYSTEM_PROMPT = `あなたは日本語の小説を読み、明らかに読みにくい箇所だけを指摘する校正アシスタントです。
+
+**作者は既に完成した文章として書いています。** あなたの役割は改善ではなく、
+読者がつまずく箇所を見つけることです。**指摘が0件でも構いません。**
+
+出力は指定されたJSON形式のみとし、前置き・後書き・説明文・
+マークダウンのコードフェンスを一切含めないこと。`;
+
+/** 指摘してよい種類。これ以外はコード側で弾く */
+export const PROOFREAD_REASONS = [
+  "冗長",
+  "同語反復",
+  "係り受け",
+  "長文",
+] as const;
+
+export type ProofreadReason = (typeof PROOFREAD_REASONS)[number];
+
+/**
+ * 1000字あたりの指摘の上限（プロンプト設計書P-10）。
+ *
+ * **AIが際限なく提案を出して作者を疲弊させるのを防ぐ。**
+ * プロンプトにも書くが、守らないので `core/proofreadValidation.ts` で切る。
+ */
+export const MAX_ISSUES_PER_1000_CHARS = 3;
+
+export interface ProofreadInput {
+  /** 行番号付きの本文 */
+  chunkTextWithLineNumbers: string;
+  /** 作品の人称・文体。分かる範囲で。無ければ空文字 */
+  narrativeStyle: string;
+  /** このチャンクで出してよい件数の上限 */
+  maxIssues: number;
+}
+
+export function buildProofreadPrompt(input: ProofreadInput): string {
+  const style = input.narrativeStyle.trim() || "（登録されていません）";
+
+  return `以下の小説本文について、推敲の提案を行ってください。
+
+【本文】
+${input.chunkTextWithLineNumbers}
+
+【作品の人称・文体】${style}
+
+【提案してよい対象（これ以外は提案しないこと）】
+1. 冗長：同じ意味の言葉が重なっている（「まず最初に」「約10分ほど」）
+2. 同語反復：近い範囲で同じ語・言い回しが繰り返され、単調になっている
+3. 係り受け：修飾の関係が2通り以上に読めてしまう
+4. 長文：一文が長すぎて意味が取りにくい（目安：80字を超え、読点が5個以上）
+
+【絶対に提案しないもの】
+- 語彙をより良い（と思われる）ものに置き換える提案
+- 文体を整える提案、リズムを変える提案
+- 描写を増やす／減らす提案
+- 表現を「小説らしく」する提案
+- **作者の文体的特徴（体言止め、短文の連続、独特な比喩など）への干渉**
+
+【重要】
+**作者は既に完成した文章として書いています。** 探すのは、読者がつまずく箇所だけです。
+**指摘が0件でも構いません。無理に探さないでください。**
+**この本文で挙げてよいのは最大${input.maxIssues}件です。**
+迷ったものより、はっきり読みにくいものを優先してください。
+
+【修正案（suggestion）について】
+- **機械的に直せるものだけ、修正案を書いてください。**
+  例：「まず最初に」→「まず」、「約10分ほど」→「約10分」
+- **直し方が文体の書き換えになるものは、修正案を空文字にしてください。**
+  長すぎる文をどう割るか、繰り返しをどう変えるかは**作者が決めることです。**
+  空でも指摘として役に立ちます（読みにくい箇所が分かるため）。
+
+【出力形式】JSONのみ
+reason には次のどれか1つだけを入れてください：${PROOFREAD_REASONS.join("、")}
+original は**本文からそのまま写して**ください（言い換えない）。
+
+{
+  "issues": [
+    {
+      "line": 42,
+      "original": "該当箇所の原文（本文からそのまま写す。50字以内）",
+      "suggestion": "修正案。文体の書き換えになるなら空文字",
+      "reason": "${PROOFREAD_REASONS[0]}",
+      "explanation": "なぜ読みにくいかの説明（40字以内）",
+      "confidence": "high|medium|low"
+    }
+  ]
+}`;
+}
+
+/**
+ * 出力の形。
+ *
+ * **すべて required にする。** 任意項目にすると、小さいモデルは
+ * 埋めずに落とす（この作品で繰り返し起きた）。
+ */
+export const PROOFREAD_SCHEMA = {
+  type: "object",
+  properties: {
+    issues: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          line: { type: "number" },
+          original: { type: "string" },
+          suggestion: { type: "string" },
+          reason: { type: "string" },
+          explanation: { type: "string" },
+          confidence: { type: "string" },
+        },
+        required: [
+          "line",
+          "original",
+          "suggestion",
+          "reason",
+          "explanation",
+          "confidence",
+        ],
+      },
+    },
+  },
+  required: ["issues"],
+} as const;
+
+/** その本文で挙げてよい件数 */
+export function issueBudget(chars: number): number {
+  // 短いチャンクでも1件は挙げられるようにする。0件だと何も指摘できない
+  return Math.max(1, Math.round((chars / 1000) * MAX_ISSUES_PER_1000_CHARS));
+}

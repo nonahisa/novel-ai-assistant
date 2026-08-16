@@ -109,6 +109,7 @@ import {
 import { statsDayKey } from "./core/writingStats";
 import { setWorkGoals } from "./features/setWorkGoals";
 import { checkContradictions } from "./features/checkContradictions";
+import { checkProofread } from "./features/checkProofread";
 import { pruneAllLogs } from "./features/pruneLogs";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
@@ -360,8 +361,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           ? "表記ゆれの検知"
           : kind === "checkContradictions"
             ? "矛盾検知"
+            : kind === "checkProofread"
+              ? "推敲"
             : "誤字脱字の検知";
       if (!(await saveDirtyDocumentsBeforeExtraction(work, label))) return;
+
+      if (kind === "checkProofread") {
+        const result = await checkProofread(work, aiRegistry);
+        if (!result || result.cancelled) return;
+        typoIssuePanel.showResults(work, result.issues, "推敲");
+        return;
+      }
 
       if (kind === "checkContradictions") {
         const result = await checkContradictions(work, aiRegistry);
@@ -1543,6 +1553,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
         vscode.window.showInformationMessage(
           `表記ゆれ検知が完了しました。${parts.join(" / ")}`
+        );
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.checkProofread",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+
+        // 未保存のまま読むと、画面と違う本文を推敲してしまう
+        if (!(await saveDirtyDocumentsBeforeExtraction(work, "推敲"))) return;
+
+        const result = await checkProofread(work, aiRegistry);
+        if (!result || result.cancelled) return;
+
+        typoIssuePanel.showResults(work, result.issues, "推敲");
+
+        const parts = [`指摘 ${result.issues.length}件`];
+        if (result.overBudgetCount > 0) {
+          // 黙って絞ると「これで全部」と受け取られる
+          parts.push(`多すぎたぶん ${result.overBudgetCount}件を絞り込み`);
+        }
+        if (result.failedChunks > 0) {
+          parts.push(`読み取れなかった ${result.failedChunks}件`);
+        }
+        vscode.window.showInformationMessage(
+          `推敲が完了しました。${parts.join(" / ")}。`
         );
       }
     )

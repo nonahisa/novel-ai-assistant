@@ -332,6 +332,20 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.checkProofread",
+            label: "推敲する",
+            icon: "edit",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "**読みにくい箇所だけ**を指摘します。見るのは4つ" +
+              "（冗長な言い回し・同じ語の繰り返し・係り受けの曖昧さ・長すぎる文）。" +
+              "**語彙や文体、描写の増減には触れません。**" +
+              "体言止めや短文の連続といった書き方の癖も、直す対象にしません。" +
+              "指摘は1000字あたり3件までに絞ります。",
+          },
+          {
+            kind: "action",
             command: "novelai.checkContradictions",
             label: "矛盾を検知",
             icon: "warning",

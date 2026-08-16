@@ -221,6 +221,10 @@ function renderItem(item) {
   if (item.status === 'applied') classes.push('applied');
   if (item.status === 'dismissed') classes.push('dismissed');
 
+  // **修正案の無い指摘がある**（推敲）。長すぎる文をどう割るかは
+  // 文体の書き換えになるので、直し方は作者が決める。
+  // 押しても何も起きないボタンを出さない
+  const hasFix = Boolean(item.suggestion);
   const canAct = item.status === 'pending' || item.status === 'failed';
   const statusText = STATUS_LABEL[item.status]
     ? '<span class="reason">' + STATUS_LABEL[item.status] + '</span>'
@@ -228,6 +232,16 @@ function renderItem(item) {
   const statusDetail = item.statusDetail
     ? '<div class="status-detail">' + escapeHtml(item.statusDetail) + '</div>'
     : '';
+
+  const body = hasFix
+    ? '<div class="diff">' +
+      '<span class="from">' + escapeHtml(item.target) + '</span> → ' +
+      '<span class="to">' + escapeHtml(item.suggestion) + '</span>' +
+      '</div>' +
+      '<div class="reason">' + escapeHtml(item.original) + '（' + escapeHtml(item.reason) + '）</div>'
+    : '<div class="quote">' + escapeHtml(item.original) + '</div>' +
+      '<div class="reason">' + escapeHtml(item.reason) +
+      '（直し方は作者が決めてください）</div>';
 
   return (
     '<div class="' + classes.join(' ') + '">' +
@@ -237,15 +251,13 @@ function renderItem(item) {
     '<span class="badge ' + item.confidence + '">' + CONFIDENCE_LABEL[item.confidence] + '</span>' +
     statusText +
     '</div>' +
-    '<div class="diff">' +
-    '<span class="from">' + escapeHtml(item.target) + '</span> → ' +
-    '<span class="to">' + escapeHtml(item.suggestion) + '</span>' +
-    '</div>' +
-    '<div class="reason">' + escapeHtml(item.original) + '（' + escapeHtml(item.reason) + '）</div>' +
+    body +
     statusDetail +
     (canAct
       ? '<div class="actions">' +
-        '<button data-action="apply" data-id="' + item.id + '">適用</button>' +
+        (hasFix
+          ? '<button data-action="apply" data-id="' + item.id + '">適用</button>'
+          : '<button data-action="jump" data-id="' + item.id + '">本文を見る</button>') +
         '<button class="secondary" data-action="dismiss" data-id="' + item.id + '">無視</button>' +
         '</div>'
       : '') +

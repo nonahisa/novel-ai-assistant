@@ -261,7 +261,11 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
    */
   private async applyVisible(): Promise<void> {
     const targets = this.items.filter(
-      (item) => item.status === "pending" && item.confidence !== "low"
+      // **修正案の無い指摘は掴まない**（推敲）。適用しても何も起きない
+      (item) =>
+        item.status === "pending" &&
+        item.confidence !== "low" &&
+        Boolean(item.suggestion)
     );
     if (targets.length === 0) return;
     const confirm = await vscode.window.showWarningMessage(

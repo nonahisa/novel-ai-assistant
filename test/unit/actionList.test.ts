@@ -178,6 +178,7 @@ describe("AIの印", () => {
     expect(aiCommands).toEqual(
       [
         "novelai.checkTypos",
+        "novelai.checkProofread",
         "novelai.checkContradictions",
         "novelai.extractSettings",
         "novelai.extractCharactersOnly",
