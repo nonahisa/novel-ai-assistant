@@ -30,6 +30,7 @@ import type {
   ExtractedWorldItem,
 } from "../prompts/characterExtract";
 import { clampSummary } from "./summaryLimit";
+import { isValidSettingName } from "./settingsExtractionValidation";
 import {
   recordObservation,
   type RecordConflict,
@@ -482,6 +483,12 @@ export function organizationsFromAffiliations(
   for (const raw of affiliations) {
     const name = raw.trim();
     if (!name) continue;
+    // **名前として通る形かを、ここでも確かめる。**
+    // 抽出の経路（validateExtractedOrganizations）は通しているのに、
+    // こちらは素通しだった。AIが所属へ "null" と書いた作品で、
+    // 名前が「null」の組織ができていた（実データで発見、2026-08-16）。
+    // この経路のレコードは説明も根拠も持たないので、いちばん厳しくてよい
+    if (!isValidSettingName(name)) continue;
     if (findByAppellation(result, [name], normalizeOrganizationName)) continue;
     if (placeNames.has(normalizeOrganizationName(name))) continue;
 
