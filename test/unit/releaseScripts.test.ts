@@ -4,16 +4,14 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 
 const temporaryDirectories: string[] = [];
-const expectedArchiveFiles = [
-  "[Content_Types].xml",
-  "extension.vsixmanifest",
-  "extension/LICENSE.txt",
-  "extension/changelog.md",
-  "extension/package.json",
-  "extension/readme.md",
-  "extension/dist/extension.js",
-  "extension/media/icon.svg",
-];
+/**
+ * **本物の一覧を読む。** ここに書き写していたため、配布物へファイルを
+ * 足したときに（同梱ライブラリのライセンス表示）テストだけが古い一覧を
+ * 持ったまま落ちた。写すと必ずずれる。
+ */
+const { EXPECTED_ARCHIVE_FILES: expectedArchiveFiles } = (await import(
+  "../../scripts/releaseSupport.mjs"
+)) as { EXPECTED_ARCHIVE_FILES: string[] };
 
 afterEach(async () => {
   await Promise.all(

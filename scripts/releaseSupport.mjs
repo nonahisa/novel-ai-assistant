@@ -5,6 +5,10 @@ export const EXPECTED_ARCHIVE_FILES = [
   "[Content_Types].xml",
   "extension.vsixmanifest",
   "extension/LICENSE.txt",
+  // 同梱ライブラリのライセンス表示。MITもBSD-3-Clauseも「著作権表示と
+  // ライセンス本文を配布物へ添えること」を条件にしているので、
+  // **これが抜けた配布物は条件を満たさない**
+  "extension/THIRD-PARTY-NOTICES.md",
   "extension/changelog.md",
   "extension/package.json",
   "extension/readme.md",

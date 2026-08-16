@@ -2,7 +2,7 @@
 
 小説を書くための作品管理・文字数計測・AI支援を1つにまとめたVSCode拡張機能です。
 
-現在の配布版：**0.6.23**（実際に使って見つかった不具合の修正）
+現在の配布版：**0.6.24**（実際に使って見つかった不具合の修正）
 
 ## できること
 
@@ -28,8 +28,8 @@
 認証済みのGitHub CLIを使ってprivate repositoryのReleaseからVSIXをダウンロードし、そのローカルファイルをインストールします。新規インストールと既存版の上書き更新の両方に使えます。
 
 ```powershell
-gh release download v0.6.23 --repo nonahisa/novel-ai-assistant --pattern "novel-ai-assistant-0.6.23.vsix" --clobber
-code --install-extension ".\novel-ai-assistant-0.6.23.vsix" --force
+gh release download v0.6.24 --repo nonahisa/novel-ai-assistant --pattern "novel-ai-assistant-0.6.24.vsix" --clobber
+code --install-extension ".\novel-ai-assistant-0.6.24.vsix" --force
 ```
 
 画面から操作する場合は、VS Codeの「拡張機能」ビュー右上の `...` →「VSIXからのインストール」を選び、同じVSIXファイルを指定します。
@@ -744,6 +744,21 @@ code --uninstall-extension local.novel-ai-assistant
 - **矛盾検知**：設定資料と本文の食い違いの検出
 - **プロットモード**：対話しながらプロットを組み立てる専用画面（本文からの逆算は実装済み）
 - **ルビ機能**：`{漢字|かんじ}` 記法のプレビューと、投稿サイト記法への変換
-- **締切からの逆算**：作品ごとの目標総字数と締切から、間に合うかを見る
 - **設定資料エクスポート**：コミカライズ・映像化・翻訳など、提供先に合わせた書き出し
 - **設定資料への書き込み**：相談パネルから人物・場所などを直せるようにする
+
+---
+
+## ライセンス
+
+この拡張機能は **MIT ライセンス**です（[LICENSE](LICENSE)）。自由に使い、改変し、再配布できます。作者は何の保証も負いません。
+
+**あなたが書いた小説・プロット・設定資料は、このライセンスの対象外です。** 作品の権利はあなたのものです。この拡張機能が作ったファイル（設定資料集・IME辞書・あらすじなど）についても同じです。
+
+拡張機能には次のライブラリを組み込んで配布しています。著作権はそれぞれの権利者に属します。全文は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) にあります。
+
+| ライブラリ | ライセンス | 用途 |
+|---|---|---|
+| `@anthropic-ai/sdk` | MIT | Claudeへの接続 |
+| `iconv-lite` | MIT | Shift_JIS の読み書き |
+| `diff` | BSD-3-Clause | 本文の差分 |
