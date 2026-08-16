@@ -9,9 +9,11 @@
  * 出どころ付きでプロットへ書く（「ハイファンタジー（なろう）」）。
  * 勝手に対応付けると、実際には無いジャンルを名乗ることになる。
  *
- * 出どころ：
+ * 出どころ（2026-08-16に確認）：
  * - https://syosetu.com/helpcenter/helppage/helppageid/59
  * - https://kakuyomu.jp/help/entry/genre
+ * - https://www.alphapolis.co.jp/novel/index
+ * - https://www.neopage.com/search
  *
  * **サイトの都合で変わるものなので、変わったらここを直す。**
  * コードの他の場所へ散らさないこと。
@@ -19,7 +21,7 @@
  * VS Code APIに依存しない。
  */
 
-export type GenreSiteKey = "narou" | "kakuyomu";
+export type GenreSiteKey = "narou" | "kakuyomu" | "alphapolis" | "neopage";
 
 export interface GenreSite {
   key: GenreSiteKey;
@@ -86,7 +88,149 @@ const KAKUYOMU: GenreSite = {
   ],
 };
 
-export const GENRE_SITES: readonly GenreSite[] = [NAROU, KAKUYOMU];
+/** アルファポリス（並列に16） */
+const ALPHAPOLIS: GenreSite = {
+  key: "alphapolis",
+  label: "アルファポリス",
+  grouped: false,
+  groups: [
+    {
+      label: "ジャンル",
+      genres: [
+        "ファンタジー",
+        "恋愛",
+        "ミステリー",
+        "ホラー",
+        "SF",
+        "キャラ文芸",
+        "ライト文芸",
+        "青春",
+        "現代文学",
+        "大衆娯楽",
+        "経済・企業",
+        "歴史・時代",
+        "児童書・童話",
+        "絵本",
+        "BL",
+        "エッセイ・ノンフィクション",
+      ],
+    },
+  ],
+};
+
+/**
+ * ネオページ（ジャンル12 / サブジャンル54）。
+ *
+ * **サブジャンルまで持つ。** なろうの大ジャンルと同じ扱いで、
+ * ジャンル名だけでは「恋愛 > 現代恋愛」と「現実世界 > 現代ドラマ」の
+ * ような近い区分を選び分けられない。
+ */
+const NEOPAGE: GenreSite = {
+  key: "neopage",
+  label: "ネオページ",
+  grouped: true,
+  groups: [
+    {
+      label: "恋愛",
+      genres: [
+        "現代恋愛",
+        "オフィスラブ",
+        "結婚生活",
+        "Ｓ彼・俺様",
+        "夜の世界",
+        "スクールラブ",
+      ],
+    },
+    {
+      label: "異世界恋愛",
+      genres: [
+        "ロマファン",
+        "悪役令嬢",
+        "和風・中華",
+        "人外ラブ",
+        "フューチャーラブ",
+        "恋愛ゲーム",
+      ],
+    },
+    {
+      label: "異世界ファンタジー",
+      genres: [
+        "冒険・バトル",
+        "内政・領地経営",
+        "スローライフ",
+        "戦記",
+        "ダークファンタジー",
+      ],
+    },
+    {
+      label: "現代ファンタジー",
+      genres: [
+        "現代ダンジョン",
+        "都市ファンタジー",
+        "異能バトル",
+        "スーパーヒーロー",
+      ],
+    },
+    {
+      label: "現実世界",
+      genres: [
+        "ラブコメ",
+        "青春学園",
+        "現代ドラマ",
+        "グルメ・料理",
+        "仕事・職場",
+        "裏社会",
+        "スポーツ",
+      ],
+    },
+    {
+      label: "BL",
+      genres: [
+        "現代BL",
+        "学園BL",
+        "ファンタジーBL",
+        "歴史創作BL",
+        "オメガバース",
+      ],
+    },
+    { label: "ゲーム", genres: ["VRゲーム", "ゲーム世界", "配信・ゲーマー"] },
+    {
+      label: "SF",
+      genres: [
+        "宇宙",
+        "空想科学",
+        "ポストアポカリプス",
+        "時間SF",
+        "SFコレクション",
+      ],
+    },
+    {
+      label: "歴史・時代",
+      genres: ["日本歴史", "戦国", "江戸・幕末", "三国", "外国歴史"],
+    },
+    { label: "ミステリー", genres: ["推理・本格", "サスペンス", "警察・探偵"] },
+    { label: "ホラー", genres: ["怪談", "都市伝説", "ホラーコレクション"] },
+    {
+      label: "文芸・その他",
+      genres: [
+        "雑文・エッセイ",
+        "純文学",
+        "童話",
+        "詩",
+        "ショートショート",
+        "ノンフィクション",
+        "ノンジャンル",
+      ],
+    },
+  ],
+};
+
+export const GENRE_SITES: readonly GenreSite[] = [
+  NAROU,
+  KAKUYOMU,
+  ALPHAPOLIS,
+  NEOPAGE,
+];
 
 export function genreSite(key: GenreSiteKey): GenreSite {
   const found = GENRE_SITES.find((site) => site.key === key);

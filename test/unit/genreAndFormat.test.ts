@@ -73,9 +73,46 @@ describe("ジャンル", () => {
     expect(listGenres(genreSite("kakuyomu"))).toHaveLength(12);
   });
 
+  test("アルファポリスは16", () => {
+    expect(listGenres(genreSite("alphapolis"))).toHaveLength(16);
+  });
+
+  test("ネオページはジャンル12・サブジャンル59", () => {
+    // 59はサイトの発表（「サブジャンル59種類」）とも一致する
+    const neopage = genreSite("neopage");
+
+    expect(neopage.groups).toHaveLength(12);
+    expect(listGenres(neopage)).toHaveLength(59);
+  });
+
+  test("ネオページの「和風・中華」と「人外ラブ」は別のサブジャンル", () => {
+    // 一続きに読めてしまう並びなので、取り違えを固定しておく
+    const names = listGenres(genreSite("neopage")).map((c) => c.genre);
+
+    expect(names).toContain("和風・中華");
+    expect(names).toContain("人外ラブ");
+    expect(names).not.toContain("和風・中華人外ラブ");
+  });
+
   test("体系をひとつに揃えない", () => {
     // 勝手に対応付けると、実際には無いジャンルを名乗ることになる
-    expect(GENRE_SITES).toHaveLength(2);
+    expect(GENRE_SITES.map((site) => site.key)).toEqual([
+      "narou",
+      "kakuyomu",
+      "alphapolis",
+      "neopage",
+    ]);
+  });
+
+  test("同じ体系の中で、同じ名前を二度出さない", () => {
+    // ネオページは大ジャンルとサブジャンルに同じ語が現れる
+    // （SF > 宇宙／SF）。選択肢に同じ行が並ぶと選び分けられない
+    for (const site of GENRE_SITES) {
+      const shown = listGenres(site).map((choice) =>
+        choice.group ? `${choice.group} > ${choice.genre}` : choice.genre
+      );
+      expect(new Set(shown).size, site.label).toBe(shown.length);
+    }
   });
 
   test("どこの体系のジャンルかを必ず添える", () => {
