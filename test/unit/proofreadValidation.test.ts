@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   hasLongSentence,
   hasRepetition,
+  isDialogueOnly,
   mentionsForbiddenAspect,
   normalizeReason,
   parseProofreadResult,
@@ -191,6 +192,61 @@ describe("実データで見つかった、通してはいけない提案", () =
     );
     // 2文字の並び（「ている」など）はどの文にも出るので、境は3文字
     expect(hasRepetition("彼は走った。")).toBe(false);
+  });
+
+  /**
+   * 作者の10作品・44,000字で測ったときに実際に挙がったもの
+   * （gemma4:e4b、2026-08-17）。
+   *
+   * **繰り返しは本当にあるが、それは人物の喋り方だった。**
+   * `hasRepetition` は数えるだけなので、ここは素通りしていた。
+   */
+  describe("台詞の中の繰り返しは、人物の話し方として通さない", () => {
+    test.each([
+      // 関西弁（長命ハイエルフの投資運用）
+      "「あんた、クォーターやろ？　なんゆうてまんのや？　そやかて」",
+      // わざと崩した喋り（短編 N1071IJ）
+      "「わた、く、しは、で　んかを、あいして　い ます……」",
+      // 強調の反復（長命ハイエルフの投資運用）
+      "「商人は帝国を打倒したりせぇへん。商人は商人らしく、遠慮なく稼いだれ」",
+      // 台詞が2つ続く場合も、地の文は無い
+      "「行こう」「行かない」",
+    ])("弾く: %s", (original) => {
+      expect(isDialogueOnly(original)).toBe(true);
+    });
+
+    test.each([
+      // 地の文の対句。直すかどうかは作者が決める
+      "ある者は主人に報告に、ある者は店員を呼び集めるために駆け込んでいく。",
+      // 台詞に地の文が続く形
+      "「行こう」と彼は言った。彼はまた言った。",
+      // 台詞そのものが無い
+      "母さんも怒鳴り返している。母さんが怒鳴っている。",
+    ])("通す: %s", (original) => {
+      expect(isDialogueOnly(original)).toBe(false);
+    });
+
+    test("検証の流れの中でも弾かれる", () => {
+      const line = "「商人は打倒せぇへん。商人は商人らしく稼いだれ」";
+      const result = validateProofreadIssues(
+        {
+          issues: [
+            {
+              line: 11,
+              original: line,
+              suggestion: "",
+              reason: "同語反復",
+              explanation: "「商人は」が繰り返されています",
+              confidence: "medium",
+            },
+          ],
+        },
+        chunkOf(line)
+      );
+
+      expect(result.accepted).toHaveLength(0);
+      expect(result.rejected[0].reason).toBe("dialogue_voice");
+    });
   });
 
   test.each([

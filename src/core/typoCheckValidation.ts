@@ -1,6 +1,7 @@
 import type { Chunk } from "./chunker";
 import type { ExtractedTypoIssue, TypoCheckResult } from "../prompts/typoCheck";
 import { normalizeForComparison } from "./groundedEvidence";
+import { isPlaceholderText } from "./placeholderText";
 
 /**
  * P-09 誤字脱字検知のAI出力を検証する。
@@ -15,7 +16,9 @@ export type TypoRejectionReason =
   | "out_of_range"
   | "ungrounded"
   | "target_not_in_original"
-  | "protected_term";
+  | "protected_term"
+  /** 修正案が「空文字」「なし」など、中身の無いことを書いた言葉 */
+  | "placeholder_suggestion";
 
 export interface RejectedTypoIssue {
   line: number | null;
@@ -132,6 +135,19 @@ export function validateTypoIssues(
         line: issue.line,
         target: issue.target,
         reason: "protected_term",
+      });
+      continue;
+    }
+
+    // **AIが「中身が無い」ことを中身として書いてくる。**
+    // 推敲で `"suggestion": "空文字"` が返り、押すと本文がその3文字に
+    // 置き換わるところだった（2026-08-17、実データ）。
+    // 誤字脱字は直し方が必ずあるはずなので、指摘ごと落とす
+    if (isPlaceholderText(issue.suggestion)) {
+      rejected.push({
+        line: issue.line,
+        target: issue.target,
+        reason: "placeholder_suggestion",
       });
       continue;
     }

@@ -1,5 +1,6 @@
 import type { Chunk } from "./chunker";
 import { normalizeForComparison } from "./groundedEvidence";
+import { isPlaceholderText } from "./placeholderText";
 import {
   issueBudget,
   PROOFREAD_REASONS,
@@ -50,6 +51,8 @@ export interface RejectedProofreadIssue {
     | "not_long"
     /** 「同語反復」の札だが、繰り返しが無い */
     | "not_repeated"
+    /** 「同語反復」の札だが、台詞の中＝人物の話し方である */
+    | "dialogue_voice"
     /** 説明が、禁じた観点（語彙・文体など）を語っている */
     | "forbidden_aspect";
 }
@@ -103,6 +106,33 @@ export function hasRepetition(text: string): boolean {
     if (body.indexOf(piece, start + REPEAT_MIN_LENGTH) >= 0) return true;
   }
   return false;
+}
+
+/**
+ * 指摘の当たっている先が、まるごと台詞かどうか。
+ *
+ * **台詞の中の繰り返しは、文章の癖ではなく人物の話し方である。**
+ * 作者の10作品で測ったところ（2026-08-17）、`同語反復` として挙がった
+ * ものの多くが台詞だった。
+ *
+ * - 「あんた、クォーターやろ？　なんゆうてまんのや？」→ **関西弁**
+ * - 「わた、く、しは、で　んかを、あいして　い ます……」→ **わざと崩した喋り**
+ * - 「商人は帝国を打倒したりせぇへん。……商人は商人らしく」→ **強調の反復**
+ *
+ * どれも直したら人物が壊れる。地の文の重複とは別物なので、ここで切る。
+ *
+ * 地の文が少しでも混じっていれば台詞だけの指摘ではないので、通す。
+ * 「ある者は……ある者は」のような**地の文の対句は作者に見せる**
+ * （直すかどうかは作者が決めることで、機械が決めることではない）。
+ */
+export function isDialogueOnly(text: string): boolean {
+  // 台詞を取り除いた残りに、意味のある文字が残るか
+  const outside = text
+    .replace(/[「『][^」』]*[」』]?/gu, "")
+    // 閉じ括弧が先に来る形（台詞の途中を抜き出した場合）も落とす
+    .replace(/^[^「『]*[」』]/u, "")
+    .replace(/[\s　、。！？…―ー）\)]/gu, "");
+  return outside.length === 0 && /[「『]/u.test(text);
 }
 
 /**
@@ -196,6 +226,12 @@ export function validateProofreadIssues(
       rejected.push({ raw: item, reason: "not_repeated" });
       continue;
     }
+    // **台詞の中の繰り返しは人物の話し方である。** 方言も、わざと崩した
+    // 喋りも、強調の反復も、直したら人物が変わってしまう
+    if (reason === "同語反復" && isDialogueOnly(original)) {
+      rejected.push({ raw: item, reason: "dialogue_voice" });
+      continue;
+    }
     // **札ではなく中身を見る。** 語彙や文体の話が、許した札を着て入ってくる
     if (mentionsForbiddenAspect(asString(item.explanation))) {
       rejected.push({ raw: item, reason: "forbidden_aspect" });
@@ -211,11 +247,19 @@ export function validateProofreadIssues(
       rejected.push({ raw: item, reason: "original_not_found" });
       continue;
     }
+    // **「空文字」という3文字を修正案として返してくる。**
+    // プロンプトの「空文字にしてください」をそのまま書いたもので、
+    // 押すと本文の一文がその3文字に置き換わる（2026-08-17、実データ）。
+    // 中身が無いという意味なので、指摘としては残し、修正案だけ空にする
+    const usableSuggestion = isPlaceholderText(suggestion, true)
+      ? ""
+      : suggestion;
     // 原文と同じものを「修正案」として返してくる。押しても何も起きない。
     // **空は別物**（直し方を作者に委ねる指摘であって、間違いではない）
     if (
-      suggestion &&
-      normalizeForComparison(original) === normalizeForComparison(suggestion)
+      usableSuggestion &&
+      normalizeForComparison(original) ===
+        normalizeForComparison(usableSuggestion)
     ) {
       rejected.push({ raw: item, reason: "no_change" });
       continue;
@@ -226,7 +270,7 @@ export function validateProofreadIssues(
       original,
       // 推敲は原文まるごとを置き換える（誤字脱字のような部分置換ではない）
       target: original,
-      suggestion,
+      suggestion: usableSuggestion,
       reason,
       explanation: asString(item.explanation),
       confidence: level(item.confidence),
