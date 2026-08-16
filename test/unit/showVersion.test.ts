@@ -74,4 +74,26 @@ describe("版の出どころ", () => {
 
     expect(readme).toContain(`**${pkg.version}**`);
   });
+
+  test("設計書の版も一致する", () => {
+    // 設計書だけ文書用の通し番号（0.9）を振っていたので、
+    // 拡張機能が 0.6.x を名乗っているのにどちらが新しいか分からなかった
+    const pkg = JSON.parse(readFileSync("package.json", "utf-8")) as {
+      version: string;
+    };
+    const design = readFileSync("docs/設計書.md", "utf-8");
+
+    expect(design).toContain(`version ${pkg.version} /`);
+  });
+
+  test("引継ぎ書の「いまの状態」の版も一致する", () => {
+    // 次のセッションが最初に読む表なので、ここが古いと現状を取り違える。
+    // 実際に 0.6.9 のまま 5回分の修正が積み上がっていた
+    const pkg = JSON.parse(readFileSync("package.json", "utf-8")) as {
+      version: string;
+    };
+    const handover = readFileSync("docs/進捗と引継ぎ.md", "utf-8");
+
+    expect(handover).toContain(`| 版 | **${pkg.version}**`);
+  });
 });

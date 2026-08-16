@@ -42,10 +42,18 @@ function entry(overrides: Partial<TermEntry>): TermEntry {
   };
 }
 
+/**
+ * ホバーは**紹介だけ**にした（作者の指示、2026-08-16）。
+ *
+ * 以前は役割・性格・外見・一人称・能力・関係・登場話・食い違い・作者メモを
+ * すべて並べており、本文の上に十数行の枠が覆いかぶさっていた。
+ * 詳細は右クリック →「設定情報を表示」で開ける。
+ */
 describe("ホバー資料", () => {
-  test("人物の要点を並べる", () => {
+  test("名前・種別・紹介の3つだけを出す", () => {
     const character = {
       ...emptyCharacter("char_001", "月島 灯"),
+      summary: "図書塔に住む見習い司書",
       role: "主人公",
       personality: "内向的だが芯が強い",
       appearedChapters: [1, 2, 3],
@@ -59,9 +67,47 @@ describe("ホバー資料", () => {
 
     expect(md.value).toContain("**月島 灯**");
     expect(md.value).toContain("登場人物");
-    expect(md.value).toContain("- **役割**: 主人公");
-    expect(md.value).toContain("- **一人称**: 僕");
-    expect(md.value).toContain("第1〜3話");
+    expect(md.value).toContain("図書塔に住む見習い司書");
+
+    // 詳細はパネルにある。同じものを2か所へ出さない
+    expect(md.value).not.toContain("一人称");
+    expect(md.value).not.toContain("内向的");
+    expect(md.value).not.toContain("第1〜3話");
+  });
+
+  test("どこで詳しく見られるかを書く", () => {
+    // 出す量を減らすなら、残りがどこにあるかは示さないと只の欠落になる
+    const character = emptyCharacter("char_001", "灯");
+
+    const md = buildHover(
+      entry({}),
+      settings({ characters: new Map([["char_001", character]]) })
+    );
+
+    expect(md.value).toContain("設定情報を表示");
+  });
+
+  test("紹介が無ければ役割で代える", () => {
+    // 古い作品のデータや、作者が手で足した記録には summary が無い
+    const character = { ...emptyCharacter("char_001", "灯"), role: "主人公" };
+
+    const md = buildHover(
+      entry({}),
+      settings({ characters: new Map([["char_001", character]]) })
+    );
+
+    expect(md.value).toContain("主人公");
+  });
+
+  test("紹介も役割も無ければ、無いと書く", () => {
+    const md = buildHover(
+      entry({}),
+      settings({
+        characters: new Map([["char_001", emptyCharacter("char_001", "灯")]]),
+      })
+    );
+
+    expect(md.value).toContain("紹介はまだありません");
   });
 
   test("別名で一致したらどの呼び方かを示す", () => {
@@ -91,10 +137,12 @@ describe("ホバー資料", () => {
 
     // 現代ものに「魔法」と出さないのと同じ理由で、総称は作品側の呼称を使う
     expect(md.value).toContain("_神術_");
-    expect(md.value).toContain("- **効果**: 指先に光を灯す");
+    // 紹介が無いので、説明が代わりに出る
+    expect(md.value).toContain("指先に光を灯す");
+    expect(md.value).not.toContain("**効果**");
   });
 
-  test("場所の地域と説明を出す", () => {
+  test("場所も紹介だけにする", () => {
     const location = {
       ...emptyLocation("loc_001", "図書塔"),
       region: "王都リヴェルス",
@@ -107,10 +155,13 @@ describe("ホバー資料", () => {
     );
 
     expect(md.value).toContain("_場所_");
-    expect(md.value).toContain("- **地域**: 王都リヴェルス");
+    expect(md.value).toContain("魔導書庫");
+    expect(md.value).not.toContain("王都リヴェルス");
   });
 
-  test("作者の判断待ちをホバーでも見せる", () => {
+  test("作者の判断待ちは、どの項目かだけ見せる", () => {
+    // これは資料ではなく報せなので残す。作者が自分で見に行くものではない。
+    // ただし値を並べると、これだけで枠が数行になる
     const character = {
       ...emptyCharacter("char_001", "灯"),
       conflicts: [
@@ -128,14 +179,15 @@ describe("ホバー資料", () => {
       settings({ characters: new Map([["char_001", character]]) })
     );
 
-    expect(md.value).toContain("変化かもしれない");
-    expect(md.value).toContain("黒髪");
-    expect(md.value).toContain("銀髪");
+    expect(md.value).toContain("変化かもしれない：appearance");
+    expect(md.value).not.toContain("黒髪");
   });
 
-  test("作者メモを末尾に添える", () => {
+  test("作者メモは出さない", () => {
+    // 作者が自分で書いたものなので、書いた本人に読み返させる必要はない
     const character = {
       ...emptyCharacter("char_001", "灯"),
+      summary: "見習い司書",
       authorNotes: "第12話で正体が判明する",
     };
 
@@ -144,14 +196,14 @@ describe("ホバー資料", () => {
       settings({ characters: new Map([["char_001", character]]) })
     );
 
-    expect(md.value).toContain("第12話で正体が判明する");
+    expect(md.value).not.toContain("第12話で正体が判明する");
   });
 
   test("設定内のMarkdown記法をそのまま読ませる", () => {
     // 「*強調*」のような表記が設定に入っていても、装飾として解釈させない
     const character = {
       ...emptyCharacter("char_001", "灯"),
-      personality: "*とても*内向的",
+      summary: "*とても*内向的",
     };
 
     const md = buildHover(

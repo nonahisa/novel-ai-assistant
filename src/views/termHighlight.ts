@@ -19,10 +19,6 @@ import type { Character } from "../models/character";
 import type { Ability } from "../models/ability";
 import type { Location } from "../models/location";
 import type { Organization } from "../models/organization";
-import {
-  describeConflictValues,
-  formatChapters,
-} from "../core/settingsMarkdown";
 import type { RecordConflict } from "../models/jsonValidation";
 
 /**
@@ -308,7 +304,22 @@ export class TermHighlighter implements vscode.Disposable {
   }
 }
 
-/** ホバーに出す資料。長くなりすぎないよう要点だけ並べる */
+/**
+ * ホバーに出す資料。**紹介だけにする**（作者の指示、2026-08-16）。
+ *
+ * 以前は役割・性格・外見・一人称・能力・関係・登場話・食い違い・作者メモを
+ * すべて並べていた。本文を書いている最中にカーソルが用語へ触れるたび、
+ * 十数行の枠が本文の上に覆いかぶさる。**思い出すための機能なのに、
+ * 読み直す量のほうが多かった。**
+ *
+ * 詳細は右クリック →「設定情報を表示」で設定資料集パネルが開く。
+ * 同じものを2か所へ出す必要は無い。ここは「これは誰だったか」に
+ * 1行で答えるところに絞る。
+ *
+ * **食い違いの印だけは残す。** これは資料ではなく報せである。
+ * 作者が自分で見に行くものではないので、ここで出さないと気づかれない。
+ * ただし値は並べず、どの項目かだけを出す（詳細はパネルにある）。
+ */
 export function buildHover(
   entry: TermEntry,
   settings: {
@@ -326,115 +337,83 @@ export function buildHover(
     entry.kind === "ability" ? settings.abilityTerm : KIND_STYLE[entry.kind].label;
   md.appendMarkdown(`**${entry.canonicalName}**　_${kindLabel}_\n\n`);
 
-  // 別名で一致した場合、どの呼び方で当たったかを示す
+  // 別名で一致した場合、どの呼び方で当たったかを示す。
+  // なぜこの語が光っているのかが分からないと、誤検出と区別できない
   if (entry.text !== entry.canonicalName) {
     md.appendMarkdown(`「${entry.text}」として登場\n\n`);
   }
 
-  if (entry.kind === "character") {
-    const character = settings.characters.get(entry.id);
-    if (!character) return md;
-    appendLine(md, "役割", character.role);
-    appendLine(md, "性格", character.personality);
-    appendLine(md, "外見", character.appearance);
-    if (character.firstPerson.default) {
-      appendLine(md, "一人称", character.firstPerson.default);
-    }
-    if (character.abilities.length > 0) {
-      appendLine(
-        md,
-        settings.abilityTerm,
-        character.abilities.map((a) => a.name).join("、")
-      );
-    }
-    if (character.relations.length > 0) {
-      appendLine(
-        md,
-        "関係",
-        character.relations
-          .map((r) => `${r.name}（${r.relation}）`)
-          .join("、")
-      );
-    }
-    appendChapters(md, character.appearedChapters);
-    appendConflicts(md, character.conflicts);
-    appendNotes(md, character.authorNotes);
-  } else if (entry.kind === "organization") {
-    const organization = settings.organizations?.get(entry.id);
-    if (!organization) return md;
-    appendLine(md, "種別", organization.category);
-    appendLine(md, "上位組織", organization.parent);
-    appendLine(md, "説明", organization.description);
-    appendChapters(md, organization.appearedChapters);
-    appendConflicts(md, organization.conflicts);
-    appendNotes(md, organization.authorNotes);
-  } else if (entry.kind === "location") {
-    const location = settings.locations.get(entry.id);
-    if (!location) return md;
-    appendLine(md, "地域", location.region);
-    appendLine(md, "説明", location.description);
-    appendChapters(md, location.appearedChapters);
-    appendConflicts(md, location.conflicts);
-    appendNotes(md, location.authorNotes);
-  } else {
-    const ability = settings.abilities.get(entry.id);
-    if (!ability) return md;
-    appendLine(md, "分類", ability.category);
-    appendLine(md, "効果", ability.description);
-    appendLine(md, "代償", ability.cost);
-    appendLine(md, "制約", ability.limitation);
-    if (ability.userNames.length > 0) {
-      appendLine(md, "使い手", ability.userNames.join("、"));
-    }
-    appendChapters(md, ability.appearedChapters);
-    appendConflicts(md, ability.conflicts);
-    appendNotes(md, ability.authorNotes);
-  }
+  const record = findRecord(entry, settings);
+  if (!record) return md;
+
+  md.appendMarkdown(`${escapeMarkdown(introOf(record))}\n\n`);
+  appendConflicts(md, record.conflicts);
+  md.appendMarkdown(
+    `\n_右クリック →「設定情報を表示」で詳しく見られます_\n`
+  );
 
   return md;
 }
 
-function appendLine(
-  md: vscode.MarkdownString,
-  label: string,
-  value: string | null | undefined
-): void {
-  if (!value) return;
-  md.appendMarkdown(`- **${label}**: ${escapeMarkdown(value)}\n`);
+type HoverRecord = Character | Ability | Location | Organization;
+
+function findRecord(
+  entry: TermEntry,
+  settings: {
+    characters: Map<string, Character>;
+    abilities: Map<string, Ability>;
+    locations: Map<string, Location>;
+    organizations?: Map<string, Organization>;
+  }
+): HoverRecord | undefined {
+  if (entry.kind === "character") return settings.characters.get(entry.id);
+  if (entry.kind === "organization") {
+    return settings.organizations?.get(entry.id);
+  }
+  if (entry.kind === "location") return settings.locations.get(entry.id);
+  return settings.abilities.get(entry.id);
 }
 
-function appendChapters(
-  md: vscode.MarkdownString,
-  chapters: number[]
-): void {
-  if (chapters.length === 0) return;
-  md.appendMarkdown(`- **登場話**: ${formatChapters(chapters)}\n`);
+/**
+ * 1行の紹介を選ぶ。
+ *
+ * `summary` は抽出時に字数を絞って作られる項目なので、あればそれが最適。
+ * **無いことは珍しくない**（古い作品のデータ、作者が手で足した記録）ので、
+ * その場合は同じ役目を果たす項目へ落ちる。空の枠を出すよりはよい。
+ */
+function introOf(record: HoverRecord): string {
+  const candidates: Array<string | null | undefined> = [record.summary];
+  if ("role" in record) {
+    // 人物：役割 →性格 の順。「主人公」だけでも誰か思い出せる
+    candidates.push(record.role, record.personality);
+  } else if ("description" in record) {
+    candidates.push(record.description);
+  }
+
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim();
+    if (trimmed) return trimmed;
+  }
+  return "紹介はまだありません。";
 }
 
 /**
  * 作者の判断待ちはホバーでも見えるようにする。
  *
- * 「要確認」ではなく「変化かもしれない」と書き、値を話数と並べる。
+ * 「要確認」ではなく「変化かもしれない」と書く。
  * 本文を書いている最中に「第7話で銀髪にした」と思い出せれば、
  * それは直すべき誤りではなく、そのままでよい変化だと分かる。
+ *
+ * **値は並べない。** 話数付きの値を全部出すと、これだけで枠が数行になる。
+ * どの項目が引っかかっているかが分かれば、見に行く判断はできる。
  */
 function appendConflicts(
   md: vscode.MarkdownString,
   conflicts: RecordConflict[]
 ): void {
-  for (const conflict of conflicts) {
-    md.appendMarkdown(
-      `- $(warning) **変化かもしれない（${conflict.field}）**: ${escapeMarkdown(
-        describeConflictValues(conflict)
-      )}\n`
-    );
-  }
-}
-
-function appendNotes(md: vscode.MarkdownString, notes: string): void {
-  const trimmed = notes.trim();
-  if (!trimmed) return;
-  md.appendMarkdown(`\n---\n\n${escapeMarkdown(trimmed)}\n`);
+  if (conflicts.length === 0) return;
+  const fields = conflicts.map((conflict) => conflict.field).join("、");
+  md.appendMarkdown(`$(warning) 変化かもしれない：${escapeMarkdown(fields)}\n`);
 }
 
 /**
