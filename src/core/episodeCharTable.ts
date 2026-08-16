@@ -1,6 +1,7 @@
 import type { EpisodeFile } from "../models/types";
 import { toManuscriptPages } from "./charCount";
 import { episodeTitle, formatChapterLabel } from "./episodeLabel";
+import type { WorkFormatKey } from "./workFormat";
 
 /**
  * 話ごとの文字数一覧（設計書6.3）。
@@ -63,7 +64,11 @@ export const LONG_RATIO = 2.0;
  */
 export const MIN_FILES_FOR_FLAGS = 4;
 
-export function buildEpisodeCountTable(episodes: EpisodeFile[]): {
+export function buildEpisodeCountTable(
+  episodes: EpisodeFile[],
+  /** SNS記事では「第3話」ではなく「投稿3」と並べる */
+  format?: WorkFormatKey
+): {
   rows: EpisodeCountRow[];
   summary: EpisodeCountSummary;
 } {
@@ -73,7 +78,7 @@ export function buildEpisodeCountTable(episodes: EpisodeFile[]): {
   const flagsEnabled = counted.length >= MIN_FILES_FOR_FLAGS && average > 0;
 
   const rows: EpisodeCountRow[] = episodes.map((episode) => {
-    const chapterLabel = formatChapterLabel(episode);
+    const chapterLabel = formatChapterLabel(episode, format);
     const ratio = average > 0 ? episode.counts.net / average : 0;
     return {
       filePath: episode.filePath,

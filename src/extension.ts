@@ -101,6 +101,7 @@ import { generatePlot } from "./features/generatePlot";
 import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
 import { ChatterService } from "./features/chatterService";
 import { setPlotBasics } from "./features/setPlotBasics";
+import { invalidateWorkFormat } from "./core/workFormatStore";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
 import { hasUnsavedChanges } from "./core/textFile";
@@ -550,6 +551,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     vscode.workspace.onDidSaveTextDocument((document) => {
       updateStatusBar();
+      // プロットを書き換えたら形式を読み直す。作者が「## 形式」を
+      // 直したのに一覧が「第3話」のままでは、直った気がしない
+      if (path.basename(document.fileName).toLowerCase() === "plot.md") {
+        invalidateWorkFormat();
+      }
       treeProvider.refresh();
       // 「直前にどの環境で書いていたか」を残す（設計書5.5.2）。
       // 開いただけでは書かない。何も書いていないのに作業ツリーが汚れ、

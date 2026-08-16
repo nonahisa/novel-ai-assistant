@@ -2,6 +2,8 @@ import * as vscode from "vscode";
 import { EpisodeFile, WorkEntry, WorkStats } from "../models/types";
 import { formatCount, toManuscriptPages } from "../core/charCount";
 import { episodeTitle, formatChapterLabel } from "../core/episodeLabel";
+import { readWorkFormat } from "../core/workFormatStore";
+import type { WorkFormatKey } from "../core/workFormat";
 import { scanWork } from "../core/scanner";
 import { SynopsisStore } from "../core/synopsisStore";
 import { synopsisKey } from "../models/synopsis";
@@ -21,7 +23,14 @@ export class EpisodeNode {
   readonly type = "episode" as const;
   constructor(
     public readonly work: WorkEntry,
-    public readonly episode: EpisodeFile
+    public readonly episode: EpisodeFile,
+    /**
+     * 作品の形式。SNS記事では「第3話」ではなく「投稿3」と出す。
+     *
+     * **描画（`getTreeItem`）は同期なので、ここで持たせておく。**
+     * 描画のたびにプロットを読むと、1回の描画でファイルを何十回も読む
+     */
+    public readonly format?: WorkFormatKey
   ) {}
 }
 
@@ -147,7 +156,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       arguments: [vscode.Uri.file(ep.filePath)],
     };
 
-    const chapterLabel = formatChapterLabel(ep);
+    const chapterLabel = formatChapterLabel(ep, node.format);
     const title = episodeTitle(ep, chapterLabel);
 
     // 話数を先頭に出す。タイトルが長くても話数と文字数が隠れないようにするため。
@@ -255,7 +264,10 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         ];
       }
       await this.loadSynopses(node.work);
-      return result.episodes.map((e) => new EpisodeNode(node.work, e));
+      const format = await readWorkFormat(node.work);
+      return result.episodes.map(
+        (e) => new EpisodeNode(node.work, e, format)
+      );
     }
 
     return [];

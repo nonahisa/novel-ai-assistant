@@ -32,6 +32,7 @@ import { CharacterStore } from "../core/characterStore";
 import { withCancellableProgress } from "../views/progress";
 import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 import { renameEpisodeFile } from "../core/episodeRename";
+import { confirmFormatFit } from "./formatFitPrompt";
 
 /**
  * 各話あらすじの生成（P-07）と、サブタイトルの提案・リネーム。
@@ -52,6 +53,9 @@ export async function generateSynopses(
   registry: AIRegistry
 ): Promise<boolean> {
   useLogFile(work.folderPath);
+
+  // 短編では1件しか作れず、感情曲線も線にならない（設計書6.4.5）
+  if (!(await confirmFormatFit(work, "episodeSynopses"))) return false;
 
   const resolved = await ensureConfigured(registry);
   if (!resolved) return false;

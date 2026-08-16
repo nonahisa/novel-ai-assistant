@@ -18,6 +18,8 @@ import {
 } from "../core/writingStats";
 import { WritingStatsStore } from "../core/writingStatsStore";
 import { buildWritingStatsPanelHtml } from "../views/writingStatsPanelHtml";
+import { episodeUnit } from "../core/episodeLabel";
+import { readWorkFormat } from "../core/workFormatStore";
 import {
   boundaryHour,
   dailyGoal,
@@ -63,7 +65,9 @@ export async function openWritingStatsPanel(
   const nonce = createNonce();
   panel.webview.html = buildWritingStatsPanelHtml(
     nonce,
-    panel.webview.cspSource
+    panel.webview.cspSource,
+    // SNS記事では「投稿ごとの文字数」。話数ではなく投稿の並びである
+    { unitNoun: episodeUnit(await readWorkFormat(work)).noun }
   );
 
   panel.webview.onDidReceiveMessage(async (message: unknown) => {
@@ -126,7 +130,10 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
     ])
   );
 
-  const table = buildEpisodeCountTable(scanned.episodes);
+  const table = buildEpisodeCountTable(
+    scanned.episodes,
+    await readWorkFormat(work)
+  );
 
   return {
     title: `${work.title} の執筆量`,

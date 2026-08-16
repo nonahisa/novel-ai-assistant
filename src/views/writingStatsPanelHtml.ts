@@ -17,9 +17,11 @@
 export function buildWritingStatsPanelHtml(
   nonce: string,
   cspSource: string,
-  options: { hasEpisodesTab?: boolean } = {}
+  options: { hasEpisodesTab?: boolean; unitNoun?: string } = {}
 ): string {
   const hasEpisodesTab = options.hasEpisodesTab ?? true;
+  // SNS記事は「話」ではなく「投稿」。数えるものが違えば呼び方も違う
+  const unitNoun = options.unitNoun ?? "話";
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -129,7 +131,7 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
   <h1 id="title">執筆量</h1>
   <div class="tabs">
     <div class="tab active" data-page="writing">執筆量</div>
-    ${hasEpisodesTab ? '<div class="tab" data-page="episodes">話ごとの文字数</div>' : ''}
+    ${hasEpisodesTab ? `<div class="tab" data-page="episodes">${unitNoun}ごとの文字数</div>` : ''}
   </div>
 </header>
 <main>

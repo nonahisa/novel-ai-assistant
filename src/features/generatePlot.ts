@@ -27,6 +27,7 @@ import {
   PLOT_REVERSE_VERSION,
 } from "../prompts/plotReverse";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { confirmFormatFit } from "./formatFitPrompt";
 import { withCancellableProgress } from "../views/progress";
 import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 
@@ -50,6 +51,11 @@ export async function generatePlot(
   registry: AIRegistry
 ): Promise<void> {
   useLogFile(work.folderPath);
+
+  // 短編集・SNS記事では、あらすじを時系列に並べても筋にならない（設計書6.4.5）。
+  // **AIの設定より先に訊く。** 合わないと分かっているものに、
+  // 未設定なら設定させてから断るのでは順序が逆である
+  if (!(await confirmFormatFit(work, "plotReverse"))) return;
 
   const resolved = await ensureConfigured(registry);
   if (!resolved) return;

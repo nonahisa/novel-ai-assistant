@@ -1,4 +1,5 @@
 import type { EpisodeFile } from "../models/types";
+import type { WorkFormatKey } from "./workFormat";
 
 /**
  * 話の見出しの作り方。
@@ -9,21 +10,57 @@ import type { EpisodeFile } from "../models/types";
  */
 
 /**
- * 「第3話」「プロローグ」のような話数の見出し。
+ * 数えるものの呼び方（設計書6.4.5）。
+ *
+ * **SNS記事は「話」ではない。** 同じアカウントの投稿を並べたもので、
+ * 続きものではない。「第3話」と出すと、読み手にも書き手にも
+ * 連なった物語に見える。
+ *
+ * 形式が決まっていない作品では今までどおり「話」にする。
+ * **「決めていない」を「SNS記事ではない」と読み替えない**ための既定ではなく、
+ * これまでの振る舞いを変えないための既定である。
+ */
+export interface EpisodeUnit {
+  /** 1件の呼び方。「話」「投稿」 */
+  noun: string;
+  /** 通し番号の見出しを作る */
+  label: (from: number, to?: number) => string;
+}
+
+const CHAPTER_UNIT: EpisodeUnit = {
+  noun: "話",
+  label: (from, to) =>
+    to !== undefined && to !== from ? `第${from}〜${to}話` : `第${from}話`,
+};
+
+const POST_UNIT: EpisodeUnit = {
+  noun: "投稿",
+  // 「第3投稿」とは言わない。数えるものが違えば言い方も違う
+  label: (from, to) =>
+    to !== undefined && to !== from ? `投稿${from}〜${to}` : `投稿${from}`,
+};
+
+export function episodeUnit(format?: WorkFormatKey): EpisodeUnit {
+  return format === "sns" ? POST_UNIT : CHAPTER_UNIT;
+}
+
+/**
+ * 「第3話」「投稿3」「プロローグ」のような見出し。
  * 話数が読み取れない本編には何も返さない（想像で番号を振らない）。
  */
 export function formatChapterLabel(
-  ep: Pick<EpisodeFile, "kind" | "chapterStart" | "chapterEnd">
+  ep: Pick<EpisodeFile, "kind" | "chapterStart" | "chapterEnd">,
+  format?: WorkFormatKey
 ): string {
   if (ep.kind !== "本編" && ep.kind !== "不明") {
     // プロローグ・幕間などは種別を見出しにする
     return ep.chapterStart !== null ? `${ep.kind}${ep.chapterStart}` : ep.kind;
   }
   if (ep.chapterStart === null) return "";
-  if (ep.chapterEnd !== null && ep.chapterEnd !== ep.chapterStart) {
-    return `第${ep.chapterStart}〜${ep.chapterEnd}話`;
-  }
-  return `第${ep.chapterStart}話`;
+  return episodeUnit(format).label(
+    ep.chapterStart,
+    ep.chapterEnd ?? undefined
+  );
 }
 
 /**
