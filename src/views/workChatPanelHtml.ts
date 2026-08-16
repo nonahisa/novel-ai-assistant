@@ -63,6 +63,17 @@ body {
   border-radius: 2px;
 }
 .turn.error .body { color: var(--vscode-errorForeground); }
+/*
+ * 独り言。**聞かれてもいないのに出るもの**なので、
+ * 答えと同じ見た目にしない。控えめな字にして左に線を引き、
+ * 読み飛ばせるようにする。
+ */
+.turn.chatter .body {
+  color: var(--vscode-descriptionForeground);
+  border-left: 2px solid var(--vscode-descriptionForeground);
+  padding: 2px 0 2px 8px;
+  font-size: 12px;
+}
 .options { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
 .option {
   display: flex;
@@ -449,6 +460,17 @@ window.addEventListener('message', (event) => {
     if (message.edit) appendEdit(turn, message.edit);
     if (message.run) appendRun(turn, message.run);
     appendOptions(turn, message.options || []);
+    scrollToBottom();
+    return;
+  }
+  if (message.type === 'chatter') {
+    // 独り言。**考え中の表示は触らない。** 質問の答えを待っている最中に
+    // 割り込むことがあり、そこで「考えています…」を消すと待ちが止まって見える
+    const turn = appendTurn(message.who || 'AI', message.text, 'chatter');
+    if (message.run) appendRun(turn, message.run);
+    if (message.options && message.options.length > 0) {
+      appendOptions(turn, message.options);
+    }
     scrollToBottom();
     return;
   }

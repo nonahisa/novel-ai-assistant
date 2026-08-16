@@ -99,6 +99,7 @@ import { checkTypos, type TypoCheckRunResult } from "./features/checkTypos";
 import { checkNotation } from "./features/checkNotation";
 import { generatePlot } from "./features/generatePlot";
 import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
+import { ChatterService } from "./features/chatterService";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
 import { hasUnsavedChanges } from "./core/textFile";
@@ -388,8 +389,56 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // パネルを開いた時点で activeTextEditor は取れなくなる
       workChatPanel.trackEditor(vscode.window.activeTextEditor);
       await vscode.commands.executeCommand(`${WORK_CHAT_VIEW_ID}.focus`);
+    }),
+    vscode.commands.registerCommand("novelai.exitChatFocus", async () => {
+      await setChatFocus(false);
     })
   );
+
+  /**
+   * 相談に集中する表示にする／戻す（設計書6.21.2）。
+   *
+   * 作品一覧と操作メニューを引っ込め、相談パネルへ場所を譲る。
+   * `package.json` のビューの `when` が、この印を見て出し入れする。
+   *
+   * **戻す口を必ず用意する。** 消えたまま戻し方が分からないと、
+   * 拡張機能が壊れたようにしか見えない。相談パネルの見出しに
+   * 「作品一覧と操作メニューを出す」ボタンが出る。
+   */
+  async function setChatFocus(on: boolean): Promise<void> {
+    await vscode.commands.executeCommand(
+      "setContext",
+      "novelai.focusChat",
+      on
+    );
+  }
+
+  // ─── AIの独り言（設計書6.21） ───
+  const chatter = new ChatterService({
+    resolveAi: () => {
+      const resolved = aiRegistry.resolve();
+      return resolved ? { paid: resolved.provider.isPaid } : undefined;
+    },
+    panelVisible: () => workChatPanel.isVisible(),
+    post: (item, work, filePath) =>
+      workChatPanel.postChatter(item, work, filePath),
+    summary: async (work) => {
+      const summary = await progress.summary(work);
+      return summary
+        ? {
+            today: summary.today,
+            written: summary.todayProgress.written,
+            streak: summary.streak,
+          }
+        : undefined;
+    },
+    counts: () => ({
+      pendingUpdates: actionDecorations.countOf("pendingUpdates"),
+      mergeCandidates: actionDecorations.countOf("mergeCandidates"),
+    }),
+  });
+  chatter.start();
+  context.subscriptions.push(chatter);
 
   // ─── ステータスバー（現在開いているファイルの文字数） ───
   const statusBar = vscode.window.createStatusBarItem(
@@ -522,6 +571,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (!(SUPPORTED_EXTENSIONS as readonly string[]).includes(ext)) return;
     const work = findWorkForPath(registry, filePath);
     if (!work) return;
+    // 保存を「手を動かした」印として独り言へ渡す。
+    // 書いている最中に話しかけないための基準になる
+    chatter.noteEdit(work, filePath);
     await progress.record(work);
     updateStatusBar();
     await refreshWritingStatsPanel(work, deviceId);
@@ -684,9 +736,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     treeProvider.refresh();
     if (startMode === "plot") {
       await openPlotFile(entry);
+      await startPlotAdvice(entry);
     } else {
       await createFirstEpisodeFile(entry);
     }
+  }
+
+  /**
+   * 新しい作品のプロット相談を始める（設計書6.21.2）。
+   *
+   * **プロットから始めるときだけ出す。** 「本文から書き始める」を選んだ作者は
+   * 先に書きたいのであって、相談したいわけではない。
+   *
+   * 相談パネルへ場所を譲るため、作品一覧と操作メニューを引っ込める。
+   * 白紙のプロットと相談窓を並べたいところなので、
+   * 左側に一覧が3つ並んでいると相談窓が数行しか見えない。
+   */
+  async function startPlotAdvice(work: WorkEntry): Promise<void> {
+    await setChatFocus(true);
+    await vscode.commands.executeCommand(`${WORK_CHAT_VIEW_ID}.focus`);
+    await workChatPanel.startPlotAdvice(work);
+    // プロットを書く場所へ戻す。相談窓に居座ると、
+    // 話を聞いたあとに書き始められない
+    await openPlotFile(work);
   }
 
   context.subscriptions.push(

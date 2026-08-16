@@ -33,6 +33,7 @@ import {
   type ChatLocate,
   type ChatRunKind,
 } from "../core/chatEdit";
+import type { Chatter } from "../core/chatter";
 import { detectRunIntent } from "../core/chatIntent";
 import { findTextRange } from "../core/textLocate";
 import { applyChatEdit } from "./applyChatEdit";
@@ -211,6 +212,16 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     private readonly runner: ChatRunner
   ) {
     this.lastEditor = vscode.window.activeTextEditor;
+  }
+
+  /**
+   * パネルが画面に出ているか。
+   *
+   * 独り言は、見ていないところへ書き溜めても意味がない。
+   * 畳まれている（`visible === false`）ときは黙る。
+   */
+  isVisible(): boolean {
+    return this.view?.visible ?? false;
   }
 
   /** エディターが変わったら覚え直す。拡張機能側から呼ぶ */
@@ -778,6 +789,85 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     await this.postContext();
   }
 
+  /**
+   * 相談する作品を、画面を介さずに決める。
+   *
+   * 新規作品を作った直後に、その作品についてのプロット相談を始めるために使う。
+   * 作ったばかりの作品はまだ何も開いていないので、
+   * 何について相談しているのかがパネルに出ない。
+   */
+  async focusWork(work: WorkEntry): Promise<void> {
+    this.selectedWorkId = work.id;
+    // 別の作品を開いたまま新規作成した場合、そちらが優先されてしまう。
+    // 作りたてのほうを見るために、覚えているエディターを手放す
+    this.lastEditor = undefined;
+    await this.postContext();
+  }
+
+  /**
+   * AIの独り言を差し込む（設計書6.21）。
+   *
+   * **作者が聞いていない発言である。** 会話の履歴（`history`）には積まない。
+   * 積むと、次の質問のたびに「1,000文字を超えました」まで一緒に
+   * AIへ送ることになり、入力が伸びるうえ答えの邪魔になる。
+   *
+   * 押せる口（`run`）は、質問への答えと同じ仕組みで持っておく。
+   * ここでも**一覧に無い操作は起動できない**（`stageRun`）。
+   */
+  postChatter(
+    chatter: Chatter,
+    work: WorkEntry,
+    filePath?: string
+  ): void {
+    if (!this.view) return;
+
+    let run: { id: string; label: string; usesAI: boolean } | undefined;
+    // 許可した一覧と突き合わせてから持つ。**独り言でも例外にしない。**
+    // AIを使うかどうかも一覧側の値を使う（ボタンに出すため）
+    const parsed = chatter.run ? parseChatRun(chatter.run.kind) : undefined;
+    if (parsed) {
+      const id = `run-${++this.editSeq}`;
+      this.pendingRuns.set(id, {
+        kind: parsed.kind,
+        work,
+        filePath: parsed.kind === "checkTyposForFile" ? filePath : undefined,
+      });
+      run = { id, label: parsed.label, usesAI: parsed.usesAI };
+    }
+
+    void this.view.webview.postMessage({
+      type: "chatter",
+      who: "AI（独り言）",
+      text: chatter.text,
+      run,
+    });
+  }
+
+  /**
+   * プロット作りの相談を始める（設計書6.21.2）。
+   *
+   * **こちらから最初の一言を出す。** 白紙の入力欄だけ出されても、
+   * プロットの何をどう聞けばよいのかは分からない。
+   * 聞ける例を並べて、押すだけで始められるようにする。
+   *
+   * 例はコードで持つ。ここでAIを呼ぶと、作品を作った直後の
+   * いちばん待たされたくないところで数十秒待たせることになる。
+   */
+  async startPlotAdvice(work: WorkEntry): Promise<void> {
+    await this.focusWork(work);
+    if (!this.view) return;
+
+    void this.view.webview.postMessage({
+      type: "chatter",
+      who: "AI",
+      text:
+        `「${work.title}」を始めましたね。プロットを一緒に考えましょうか。\n` +
+        "思いついていることを何でも書いてください。断片でかまいません。\n" +
+        "下の例を押しても始められます。",
+      options: PLOT_ADVICE_OPTIONS,
+    });
+  }
+
   private async resolveContext(): Promise<ResolvedContext | undefined> {
     const editor = this.lastEditor;
     const filePath =
@@ -1100,6 +1190,20 @@ function describeStagedProposals(staged: {
   if (staged.locate) out.push(`該当箇所: ${staged.locate.label}`);
   return out;
 }
+
+/**
+ * プロット相談の口火に出す例。
+ *
+ * **「プロットを作って」を先頭に置かない。** まだ何も書いていない作品では、
+ * AIは材料なしに筋書きを丸ごと作ることになり、作者のものではない話が出てくる。
+ * **作者の中にあるものを引き出す問いから始める。**
+ */
+const PLOT_ADVICE_OPTIONS = [
+  "書きたい場面が1つだけあります。そこから話を広げるにはどうしますか？",
+  "主人公をどう決めればよいか相談したいです",
+  "プロットに何を書いておくと、あとで迷わずに済みますか？",
+  "似た題材の作品と、どこで差を付ければよいでしょうか",
+] as const;
 
 function createNonce(): string {
   const chars =

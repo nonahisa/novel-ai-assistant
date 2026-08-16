@@ -10,6 +10,7 @@ import {
 } from "./types";
 import { countByteFallback, decodeByteFallback } from "../core/byteFallback";
 import { logLine } from "../core/logger";
+import { withAiWork } from "../core/aiActivity";
 
 const DEFAULT_ENDPOINT = "http://localhost:11434";
 
@@ -189,7 +190,20 @@ export class OllamaProvider implements AIProvider {
     }
   }
 
+  /**
+   * 独り言（`core/chatter.ts`）が「いま話しかけてよいか」を見るので、
+   * 依頼のあいだは仕事中の印を立てる。
+   *
+   * **Ollamaにだけ入れている。** 独り言は無料のローカルAIでしか動かさない
+   * （有料のAIで勝手に課金しないため）ので、他のプロバイダでは要らない。
+   */
   async generate(params: GenerateParams): Promise<GenerateResult> {
+    return withAiWork(() => this.generateInner(params));
+  }
+
+  private async generateInner(
+    params: GenerateParams
+  ): Promise<GenerateResult> {
     const started = Date.now();
 
     const body: Record<string, unknown> = {
