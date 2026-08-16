@@ -19,7 +19,6 @@ import type { Character } from "../models/character";
 import type { Ability } from "../models/ability";
 import type { Location } from "../models/location";
 import type { Organization } from "../models/organization";
-import type { RecordConflict } from "../models/jsonValidation";
 
 /**
  * 本文中の用語を色分けし、ホバーで設定を表示する。
@@ -316,9 +315,10 @@ export class TermHighlighter implements vscode.Disposable {
  * 同じものを2か所へ出す必要は無い。ここは「これは誰だったか」に
  * 1行で答えるところに絞る。
  *
- * **食い違いの印だけは残す。** これは資料ではなく報せである。
- * 作者が自分で見に行くものではないので、ここで出さないと気づかれない。
- * ただし値は並べず、どの項目かだけを出す（詳細はパネルにある）。
+ * **食い違いの印も出さない。** はじめは「資料ではなく報せだから」と
+ * 残したが、作者が要らないと判断した。書いている最中に警告が出ると、
+ * それは思い出す助けではなく手を止めさせるものになる。
+ * 食い違いは設定資料集パネルの「参考」で見る。
  */
 export function buildHover(
   entry: TermEntry,
@@ -347,10 +347,7 @@ export function buildHover(
   if (!record) return md;
 
   md.appendMarkdown(`${escapeMarkdown(introOf(record))}\n\n`);
-  appendConflicts(md, record.conflicts);
-  md.appendMarkdown(
-    `\n_右クリック →「設定情報を表示」で詳しく見られます_\n`
-  );
+  md.appendMarkdown(`_右クリック →「設定情報を表示」で詳しく見られます_\n`);
 
   return md;
 }
@@ -395,25 +392,6 @@ function introOf(record: HoverRecord): string {
     if (trimmed) return trimmed;
   }
   return "紹介はまだありません。";
-}
-
-/**
- * 作者の判断待ちはホバーでも見えるようにする。
- *
- * 「要確認」ではなく「変化かもしれない」と書く。
- * 本文を書いている最中に「第7話で銀髪にした」と思い出せれば、
- * それは直すべき誤りではなく、そのままでよい変化だと分かる。
- *
- * **値は並べない。** 話数付きの値を全部出すと、これだけで枠が数行になる。
- * どの項目が引っかかっているかが分かれば、見に行く判断はできる。
- */
-function appendConflicts(
-  md: vscode.MarkdownString,
-  conflicts: RecordConflict[]
-): void {
-  if (conflicts.length === 0) return;
-  const fields = conflicts.map((conflict) => conflict.field).join("、");
-  md.appendMarkdown(`$(warning) 変化かもしれない：${escapeMarkdown(fields)}\n`);
 }
 
 /**

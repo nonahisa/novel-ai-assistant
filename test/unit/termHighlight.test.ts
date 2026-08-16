@@ -159,11 +159,13 @@ describe("ホバー資料", () => {
     expect(md.value).not.toContain("王都リヴェルス");
   });
 
-  test("作者の判断待ちは、どの項目かだけ見せる", () => {
-    // これは資料ではなく報せなので残す。作者が自分で見に行くものではない。
-    // ただし値を並べると、これだけで枠が数行になる
+  test("作者の判断待ちも出さない", () => {
+    // はじめは「資料ではなく報せだから」と残したが、作者が要らないと判断した。
+    // 書いている最中に警告が出ると、思い出す助けではなく手を止めさせるものになる。
+    // 食い違いは設定資料集パネルの「参考」で見る
     const character = {
       ...emptyCharacter("char_001", "灯"),
+      summary: "見習い司書",
       conflicts: [
         {
           field: "appearance",
@@ -179,7 +181,8 @@ describe("ホバー資料", () => {
       settings({ characters: new Map([["char_001", character]]) })
     );
 
-    expect(md.value).toContain("変化かもしれない：appearance");
+    expect(md.value).not.toContain("変化かもしれない");
+    expect(md.value).not.toContain("appearance");
     expect(md.value).not.toContain("黒髪");
   });
 
