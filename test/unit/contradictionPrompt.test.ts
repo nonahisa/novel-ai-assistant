@@ -69,13 +69,24 @@ describe("プロンプト", () => {
     expect(prompt).not.toContain("世界法則：");
   });
 
-  test("絞った観点だけを出力の選択肢に出す", () => {
-    // 渡していない観点を返されると、検証で弾くことになる
+  test("分類の選択肢を、値の見本として書かない", () => {
+    // **実データで、モデルは見本をそのまま写して返した**
+    // （`"category": "人物|状態|時系列"`）。3件すべてがこの形になり、
+    // 検証が unknown_category で全部捨てて**見逃し0/3**になった
     const prompt = buildContradictionCheckPrompt(
       input({ categories: LIGHT_CATEGORIES })
     );
 
-    expect(prompt).toContain('"category": "人物|状態|時系列"');
+    expect(prompt).not.toContain('"category": "人物|状態|時系列"');
+    expect(prompt).toContain('"category": "人物"');
+  });
+
+  test("選べる分類は、値とは別の行で示す", () => {
+    const prompt = buildContradictionCheckPrompt(
+      input({ categories: LIGHT_CATEGORIES })
+    );
+
+    expect(prompt).toContain("1つだけ**を入れてください：人物、状態、時系列");
   });
 
   test("引用は本文から写させる", () => {

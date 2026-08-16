@@ -12,7 +12,7 @@
  * プロンプトを変更したら version を上げること。
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
-export const CONTRADICTION_CHECK_VERSION = "1.0";
+export const CONTRADICTION_CHECK_VERSION = "1.1";
 
 export const CONTRADICTION_CHECK_SYSTEM_PROMPT = `あなたは日本語の小説の設定矛盾だけを検出する編集アシスタントです。
 
@@ -114,12 +114,14 @@ ${items}
   照らし合わせる相手が無いものは矛盾とは言えません。
 
 【出力形式】JSONのみ
+category には次のどれか**1つだけ**を入れてください：${input.categories.join("、")}
+
 {
   "contradictions": [
     {
       "line": 42,
       "excerpt": "該当箇所の引用（本文からそのまま写す。40字以内）",
-      "category": "${input.categories.join("|")}",
+      "category": "${input.categories[0]}",
       "settingSays": "設定ではどうなっているか",
       "textSays": "本文ではどうなっているか",
       "note": "補足（意図的な変化の可能性など）。無ければ空文字",

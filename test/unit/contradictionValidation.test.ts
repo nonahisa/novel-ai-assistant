@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
   contradictionKey,
+  deniesContradiction,
+  lacksSetting,
+  normalizeCategory,
   parseContradictionResult,
   sortContradictions,
   validateContradictions,
@@ -139,6 +142,94 @@ describe("弾く指摘", () => {
   test("応答そのものが空でも落ちない", () => {
     expect(validateContradictions(null, chunk).accepted).toEqual([]);
     expect(validateContradictions({}, chunk).accepted).toEqual([]);
+  });
+});
+
+/**
+ * 実データ（いじめられっ子・gemma4:e4b）で実際に返ってきたものを固定する。
+ *
+ * **測る前は、どれも起きると思っていなかった。**
+ */
+describe("実データで見つかった、通してはいけない指摘", () => {
+  test("選択肢をそのまま写した分類を受け取る", () => {
+    // 3件すべてがこの形で返り、**正しい指摘を全部捨てていた**（見逃し0/3）
+    for (const raw of ["人物|状態|時系列", "人物|外見", "人物：一人称、口調"]) {
+      expect(normalizeCategory(raw), raw).toBe("人物");
+    }
+  });
+
+  test("知らない語しか無ければ、やはり弾く", () => {
+    expect(normalizeCategory("雰囲気")).toBeUndefined();
+    expect(normalizeCategory("")).toBeUndefined();
+  });
+
+  test("「矛盾していません」と書いてある指摘を弾く", () => {
+    // 配列があると、モデルは何かを埋めようとする
+    const result = validateContradictions(
+      {
+        contradictions: [
+          item({ note: "設定と本文は矛盾していません。" }),
+        ],
+      },
+      chunk
+    );
+
+    expect(result.rejected[0].reason).toBe("self_denied");
+  });
+
+  test.each([
+    "具体的な接触の可否に関する矛盾ではない。",
+    "幽霊であるという設定と一致しています。",
+    "設定と食い違いはありません。",
+  ])("否定の言い回しを拾う: %s", (note) => {
+    expect(deniesContradiction(note)).toBe(true);
+  });
+
+  test.each([
+    "本文の描写（金髪）と設定（黒髪）が矛盾しています。",
+    "設定と矛盾する可能性があります。",
+    "意図的な変化の可能性があります。",
+  ])("本当の指摘を否定と読み違えない: %s", (note) => {
+    expect(deniesContradiction(note)).toBe(false);
+  });
+
+  test("設定の側が「設定が無い」と言っている指摘を弾く", () => {
+    // 照らし合わせる相手が無いのだから、それは矛盾ではない
+    const result = validateContradictions(
+      { contradictions: [item({ settingSays: "設定情報なし" })] },
+      chunk
+    );
+
+    expect(result.rejected[0].reason).toBe("no_setting");
+  });
+
+  test.each([
+    "設定情報なし",
+    "本文からは読み取れない。",
+    "具体的な設定は見当たりません。",
+    "年齢に関する記述はありません。",
+  ])("設定が無いと言っている文を拾う: %s", (says) => {
+    expect(lacksSetting(says)).toBe(true);
+  });
+
+  test.each(["一人称は「僕」", "黒髪の少年", "第1話で死亡し、幽霊になっている"])(
+    "本当の設定を読み違えない: %s",
+    (says) => {
+      expect(lacksSetting(says)).toBe(false);
+    }
+  );
+
+  test("設定と本文に同じことが書いてあれば弾く", () => {
+    const result = validateContradictions(
+      {
+        contradictions: [
+          item({ settingSays: "一人称は「僕」", textSays: "一人称は「僕」" }),
+        ],
+      },
+      chunk
+    );
+
+    expect(result.rejected[0].reason).toBe("not_different");
   });
 });
 
