@@ -28,6 +28,13 @@ export interface EpisodeFile {
   kind: EpisodeKind;
   /** ファイル名が初期状態（数字のみ）か */
   isInitialName: boolean;
+  /**
+   * 日付で名付けられたファイルの投稿日（`YYYY-MM-DD`）。無ければ null。
+   * SNS記事は投稿日で管理する（設計書6.4.6）
+   */
+  date?: string | null;
+  /** 同じ日の中での並び（`2026-08-16_2` の 2）。1日に何本でも書ける */
+  dateSeq?: number | null;
   /** 文字数（メタデータヘッダーがある場合は本文のみ） */
   counts: CharCounts;
   /** 投稿サイト由来のメタデータヘッダーを持つか */

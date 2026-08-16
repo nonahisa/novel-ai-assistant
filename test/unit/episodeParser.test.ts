@@ -24,17 +24,25 @@ describe("話数ファイル名", () => {
     });
   });
 
-  test("後ろが小さい範囲は話数範囲として扱わない", () => {
-    // 日付を名前にした下書き（「2026-08-12.txt」）が、
-    // 「第2026〜8話」という**ありえない範囲**として読まれていた。
-    // 表示も並び順も壊れるうえ、範囲が逆なので登場話数は空になり、
-    // そのファイルから抽出した人物に話数が1つも付かない
+  test("日付の名前は、話数ではなく日付として読む", () => {
+    // 「2026-08-12.txt」は「第2026〜8話」という**ありえない範囲**として
+    // 読まれていた。範囲を弾いたあとも「第2026話『08-12』」になっており、
+    // 一覧にも並び順にも出鱈目な話数が出ていた（設計書6.4.6）
     const parsed = parseEpisodeFileName("2026-08-12.txt");
 
-    expect(parsed.chapterEnd).not.toBeNull();
-    expect(parsed.chapterStart).not.toBeNull();
+    expect(parsed.date).toBe("2026-08-12");
+    expect(parsed.chapterStart).toBeNull();
+    expect(parsed.subtitle).toBeNull();
+  });
+
+  test("後ろが小さい範囲は話数範囲として扱わない", () => {
+    // 日付ではない「9-3」のような名前でも、逆向きの範囲は作らない
+    const parsed = parseEpisodeFileName("9-3.txt");
+
     expect(
-      (parsed.chapterEnd as number) >= (parsed.chapterStart as number)
+      parsed.chapterStart === null ||
+        parsed.chapterEnd === null ||
+        (parsed.chapterEnd as number) >= (parsed.chapterStart as number)
     ).toBe(true);
   });
 

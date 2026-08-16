@@ -49,9 +49,17 @@ export function episodeUnit(format?: WorkFormatKey): EpisodeUnit {
  * 話数が読み取れない本編には何も返さない（想像で番号を振らない）。
  */
 export function formatChapterLabel(
-  ep: Pick<EpisodeFile, "kind" | "chapterStart" | "chapterEnd">,
+  ep: Pick<
+    EpisodeFile,
+    "kind" | "chapterStart" | "chapterEnd" | "date" | "dateSeq"
+  >,
   format?: WorkFormatKey
 ): string {
+  // 日付で名付けられたファイルは、日付そのものが見出しになる。
+  // **同じ日に何本も書ける**ので、2本目以降は並びの数字を添える
+  if (ep.date) {
+    return ep.dateSeq ? `${ep.date}（${ep.dateSeq}）` : ep.date;
+  }
   if (ep.kind !== "本編" && ep.kind !== "不明") {
     // プロローグ・幕間などは種別を見出しにする
     return ep.chapterStart !== null ? `${ep.kind}${ep.chapterStart}` : ep.kind;

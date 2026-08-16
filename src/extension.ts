@@ -16,6 +16,7 @@ import {
 import {
   formatChapterNumber,
   nextChapterNumber,
+  nextDatedName,
   parseEpisodeFileName,
 } from "./core/episodeParser";
 import { scanWork } from "./core/scanner";
@@ -101,7 +102,11 @@ import { generatePlot } from "./features/generatePlot";
 import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
 import { ChatterService } from "./features/chatterService";
 import { setPlotBasics } from "./features/setPlotBasics";
-import { invalidateWorkFormat } from "./core/workFormatStore";
+import {
+  invalidateWorkFormat,
+  readWorkFormat,
+} from "./core/workFormatStore";
+import { statsDayKey } from "./core/writingStats";
 import { setWorkGoals } from "./features/setWorkGoals";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
@@ -109,6 +114,7 @@ import { hasUnsavedChanges } from "./core/textFile";
 import { AI_ISSUES_VIEW_ID, TypoIssuePanel } from "./features/typoIssuePanel";
 import {
   WritingProgressTracker,
+  boundaryHour,
   describeStatusBarProgress,
 } from "./features/writingProgress";
 import {
@@ -1172,9 +1178,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const digits = cfg.get<number>("episodeNumberDigits", 3);
         const ext = cfg.get<string>("episodeFileExtension", ".txt");
 
-        const defaultName = `${formatChapterNumber(next, digits)}${ext}`;
+        // SNS記事は投稿日で管理する（設計書6.4.6）。**同じ日に何本でも書ける**ので、
+        // 今日の日付が埋まっていれば `_2`, `_3` と番号を足す
+        const format = await readWorkFormat(work);
+        const defaultName =
+          format === "sns"
+            ? `${nextDatedName(parsed, statsDayKey(new Date(), boundaryHour()))}${ext}`
+            : `${formatChapterNumber(next, digits)}${ext}`;
         const fileName = await vscode.window.showInputBox({
-          prompt: "新規話数ファイルの名前",
+          prompt:
+            format === "sns" ? "新規投稿ファイルの名前" : "新規話数ファイルの名前",
           value: defaultName,
           valueSelection: [0, defaultName.length - ext.length],
           validateInput: (v) => {
