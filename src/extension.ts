@@ -1019,10 +1019,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.openExtensionSettings", async () => {
       // この拡張機能の設定だけに絞る。VS Code全体の設定を開くと、
-      // 作者は目的の項目にたどり着けない
+      // 作者は目的の項目にたどり着けない。
+      //
+      // **IDを書き下さない。** `local.novel-ai-assistant` と決め打ちして
+      // あったが、Marketplaceへ出すために publisher を `nonahisa` へ
+      // 変えたときに追随せず、**設定画面が空になっていた**
+      // （2026-08-18、配布直前の統合テストで発覚）。
+      // `context.extension.id` なら publisher が変わっても付いてくる
       await vscode.commands.executeCommand(
         "workbench.action.openSettings",
-        "@ext:local.novel-ai-assistant"
+        `@ext:${context.extension.id}`
       );
     })
   );

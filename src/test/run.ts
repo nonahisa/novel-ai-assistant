@@ -63,8 +63,17 @@ const COMMANDS = [
 export async function run(): Promise<void> {
   const failures: string[] = [];
   await runCase("拡張機能を起動し、全コマンドを登録する", failures, async () => {
-    const extension = vscode.extensions.getExtension("local.novel-ai-assistant");
-    assert.ok(extension, "拡張機能 local.novel-ai-assistant が見つかりません");
+    // **IDを書き下さない。** publisher を変えると付いてこられない
+    // （`local` → `nonahisa` の変更で実際に落ちた。2026-08-18）
+    const pkg = JSON.parse(
+      await fs.readFile(
+        path.join(__dirname, "..", "..", "..", "package.json"),
+        "utf-8"
+      )
+    ) as { publisher: string; name: string };
+    const id = `${pkg.publisher}.${pkg.name}`;
+    const extension = vscode.extensions.getExtension(id);
+    assert.ok(extension, `拡張機能 ${id} が見つかりません`);
     await extension.activate();
     const registered = await vscode.commands.getCommands(true);
     for (const command of COMMANDS) {
