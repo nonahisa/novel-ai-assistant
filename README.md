@@ -2,7 +2,7 @@
 
 小説を書くための作品管理・文字数計測・AI支援を1つにまとめたVSCode拡張機能です。
 
-現在の配布版：**0.6.36**（実際に使って見つかった不具合の修正）
+現在の配布版：**0.6.37**（実際に使って見つかった不具合の修正）
 
 ## できること
 
@@ -14,7 +14,7 @@
 | 書く | 話数・文字数の自動集計、原稿用紙換算、執筆量の記録とグラフ、用語ハイライト |
 | 資料をためる | 本文から登場人物・場所・スキル・組織・世界観を抽出して設定資料にする |
 | 整える | プロットを本文から逆算する。各話あらすじ・作品紹介文・キャッチコピーを作る。各話の盛り上がりを感情曲線で見る |
-| 直す | 誤字脱字の検知、表記ゆれの検知。指摘は1件ずつ確認して適用する |
+| 直す | 誤字脱字・表記ゆれの検知、推敲の提案、プロットからの逸脱と矛盾の検知。**指摘は1件ずつ確認して適用する。** 方言や口癖は「直さない語」に登録して守れる |
 | 相談する | 開いている画面についてAIに日本語で質問する。**質問に近い場面を作品全体から探して答えます。** この拡張機能の使い方も聞ける |
 | 持ち運ぶ | GitHubで複数の環境を行き来する。競合は並べて見比べて解決する |
 | 書き出す | 設定資料集のMarkdown、IME辞書（Google日本語入力・MS-IME・ATOK） |
@@ -25,29 +25,36 @@
 
 ## インストール
 
-VS Codeの拡張機能ビュー（`Ctrl + Shift + X`）で「**統合小説執筆環境**」を検索して「インストール」を押してください。コマンドでも入れられます。
+VS Codeの拡張機能ビュー（`Ctrl + Shift + X`）を開き、「**統合小説執筆環境**」を検索して「インストール」を押してください。
+
+**更新はVS Codeが自動で行います。**
+
+コマンドで入れることもできます。
 
 ```powershell
 code --install-extension nonahisa.novel-ai-assistant
 ```
 
-更新はVS Codeが自動で行います。
+インストール後にVS Codeを再読み込みすると、左端のアクティビティバーに**キーボードと万年筆のアイコン**（**小説執筆**）が追加されます。**対応バージョンはVS Code 1.90.0以降です。**
+
+はじめて使う方向けの手順は [note用のインストール手順](docs/note-インストール手順.md) にもあります（パソコンに詳しくない前提で書いてあります）。
 
 <details>
 <summary>VSIXファイルから入れる（配布前の版を試す場合）</summary>
 
-GitHubのReleaseに置いたVSIXから入れることもできます。新規インストールと上書き更新の両方に使えます。
+GitHubのReleaseに置いたVSIXからも入れられます。新規インストールと上書き更新の両方に使えます。
+
+**版はそのときの最新に読み替えてください。** リリース一覧は `gh release list --repo nonahisa/novel-ai-assistant` で見られます。
 
 ```powershell
-gh release download v0.6.36 --repo nonahisa/novel-ai-assistant --pattern "novel-ai-assistant-0.6.36.vsix" --clobber
-code --install-extension ".\novel-ai-assistant-0.6.36.vsix" --force
+$v = (gh release list --repo nonahisa/novel-ai-assistant --limit 1 --json tagName | ConvertFrom-Json).tagName
+gh release download $v --repo nonahisa/novel-ai-assistant --pattern "*.vsix" --clobber
+code --install-extension ".\novel-ai-assistant-$($v.TrimStart('v')).vsix" --force
 ```
 
 画面から操作する場合は、VS Codeの「拡張機能」ビュー右上の `...` →「VSIXからのインストール」を選び、同じVSIXファイルを指定します。
 
 </details>
-
-インストール後にVS Codeを再読み込みすると、左端のアクティビティバーにキーボードと万年筆のアイコン（**小説執筆**）が追加されます。対応バージョンはVS Code 1.90.0以降です。
 
 ### 最初にやること（セットアップ）
 
@@ -72,56 +79,6 @@ code --install-extension ".\novel-ai-assistant-0.6.36.vsix" --force
 **入れる前に、何を・どれだけ取得するかを必ず確認します。** 途中で中止できます。回線の速さによっては数十分かかります。
 
 入れたものを消したくなったら、モデルは `ollama rm <モデル名>`、本体は Windows の「アプリと機能」から削除できます。**消しても作品のファイルや設定資料は変わりません。**
-
-## 開発者向けセットアップ
-
-### 1. 依存パッケージのインストール
-
-このフォルダをVSCodeで開き、ターミナル（`Ctrl + @`）で実行します。
-
-```powershell
-npm install
-```
-
-### 2. ビルド
-
-```powershell
-npm run build
-```
-
-### 3. デバッグ起動
-
-VSCodeで `F5` を押すと、拡張機能が読み込まれた新しいVSCodeウィンドウ（拡張機能開発ホスト）が起動します。
-
-開発中は以下を実行しておくと、保存のたびに自動でビルドされます。
-
-```powershell
-npm run watch
-```
-
-### Sakura AI Engine スモークテスト
-
-さくらのAI Engine の接続確認は、拡張機能からは実行されません。GitHub Actions では  
-- `workflow_dispatch`（手動実行）
-- `main` 向け pull_request（`opened`/`synchronize`/`reopened`）  
-で `preview/gemma-4-31B-it` 呼び出しを行います。`fork` PR は Secret が使えないため、安全のためスキップします。
-
-1. リポジトリの **Settings** → **Secrets and variables** → **Actions** で、リポジトリシークレット
-   `SAKURA_AI_ACCOUNT_TOKEN` を登録します。トークンをコード、ログ、`.env` に書かないでください。
-2. 手動実行する場合は、ワークフローが既定ブランチに入った後、リポジトリの **Actions**
-   タブで **Sakura AI Engine Smoke Test** を選び、**Run workflow** を押して対象ブランチを選択します。
-   必要ならリポジトリ変数 `SAKURA_AI_SMOKE_MODEL` に `preview/gemma-4-31B-it` など利用可能なモデル名を設定してください。
-3. 成功条件は、`preview/gemma-4-31B-it` から空でない応答を受け、ログに
-   `Sakura AI smoke test passed` が表示されることです。応答本文やトークンはログに出ません。
-
-`HTTP 401` の失敗時はシークレット名・値を確認してから、必要時だけ手動で再実行します。  
-`HTTP 429` の失敗時はレート制限なので、待ってから手動で再実行します。どちらも秘密情報を  
-出さずに失敗する設計であり、自動リトライや自動実行には切り替えません。
-`HTTP 400` の失敗時は、トークンは届いているもののリクエスト内容（モデル名やパラメータ）に
-問題がある可能性があります。エラーメッセージの本文が出る場合は、その内容を元にモデル名の
-見直し（またはプロバイダ設定）を行ってください。
-
----
 
 ## 使い方
 
@@ -753,13 +710,60 @@ code --uninstall-extension nonahisa.novel-ai-assistant
 
 ## 今後の実装予定
 
-- **推敲**：冗長な表現、同語反復、係り受けの不明瞭さ、長すぎる文の指摘
-- **プロット逸脱・間延び検知**：書いた話がプロットから離れていないかの確認
-- **矛盾検知**：設定資料と本文の食い違いの検出
 - **プロットモード**：対話しながらプロットを組み立てる専用画面（本文からの逆算は実装済み）
 - **ルビ機能**：`{漢字|かんじ}` 記法のプレビューと、投稿サイト記法への変換
 - **設定資料エクスポート**：コミカライズ・映像化・翻訳など、提供先に合わせた書き出し
 - **設定資料への書き込み**：相談パネルから人物・場所などを直せるようにする
+
+---
+
+## 開発者向けセットアップ
+
+### 1. 依存パッケージのインストール
+
+このフォルダをVSCodeで開き、ターミナル（`Ctrl + @`）で実行します。
+
+```powershell
+npm install
+```
+
+### 2. ビルド
+
+```powershell
+npm run build
+```
+
+### 3. デバッグ起動
+
+VSCodeで `F5` を押すと、拡張機能が読み込まれた新しいVSCodeウィンドウ（拡張機能開発ホスト）が起動します。
+
+開発中は以下を実行しておくと、保存のたびに自動でビルドされます。
+
+```powershell
+npm run watch
+```
+
+### Sakura AI Engine スモークテスト
+
+さくらのAI Engine の接続確認は、拡張機能からは実行されません。GitHub Actions では  
+- `workflow_dispatch`（手動実行）
+- `main` 向け pull_request（`opened`/`synchronize`/`reopened`）  
+で `preview/gemma-4-31B-it` 呼び出しを行います。`fork` PR は Secret が使えないため、安全のためスキップします。
+
+1. リポジトリの **Settings** → **Secrets and variables** → **Actions** で、リポジトリシークレット
+   `SAKURA_AI_ACCOUNT_TOKEN` を登録します。トークンをコード、ログ、`.env` に書かないでください。
+2. 手動実行する場合は、ワークフローが既定ブランチに入った後、リポジトリの **Actions**
+   タブで **Sakura AI Engine Smoke Test** を選び、**Run workflow** を押して対象ブランチを選択します。
+   必要ならリポジトリ変数 `SAKURA_AI_SMOKE_MODEL` に `preview/gemma-4-31B-it` など利用可能なモデル名を設定してください。
+3. 成功条件は、`preview/gemma-4-31B-it` から空でない応答を受け、ログに
+   `Sakura AI smoke test passed` が表示されることです。応答本文やトークンはログに出ません。
+
+`HTTP 401` の失敗時はシークレット名・値を確認してから、必要時だけ手動で再実行します。  
+`HTTP 429` の失敗時はレート制限なので、待ってから手動で再実行します。どちらも秘密情報を  
+出さずに失敗する設計であり、自動リトライや自動実行には切り替えません。
+`HTTP 400` の失敗時は、トークンは届いているもののリクエスト内容（モデル名やパラメータ）に
+問題がある可能性があります。エラーメッセージの本文が出る場合は、その内容を元にモデル名の
+見直し（またはプロバイダ設定）を行ってください。
 
 ---
 
