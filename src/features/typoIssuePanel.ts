@@ -13,6 +13,8 @@ import type { TypoCheckIssue } from "./checkTypos";
 import type { AcceptedContradiction as ContradictionIssue } from "../core/contradictionValidation";
 import type { DeviationIssue } from "./checkDeviations";
 import { buildTypoIssuePanelHtml } from "../views/typoIssuePanelHtml";
+import { KeepWordStore } from "../core/keepWordStore";
+import { validateKeepWord } from "../models/keepWord";
 
 /**
  * AI指摘パネル（誤字脱字）。
@@ -89,6 +91,7 @@ type IncomingMessage =
   | { type: "jump"; id: string }
   | { type: "apply"; id: string }
   | { type: "dismiss"; id: string }
+  | { type: "keepWord"; id: string }
   | { type: "openSettings"; id: string }
   | { type: "applyAll" };
 
@@ -279,6 +282,9 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
       case "apply":
         await this.applyIssue(message.id);
         return;
+      case "keepWord":
+        await this.keepWord(message.id);
+        break;
       case "dismiss":
         await this.dismissIssue(message.id);
         return;
@@ -401,6 +407,48 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
       target: item.target,
       suggestion: item.suggestion,
     });
+  }
+
+  /**
+   * この語を「今後直さない」として登録する。
+   *
+   * **方言・口癖は固有名詞の辞書では守れない。** 作者の10作品で測ったところ、
+   * 設定資料を抽出して固有名詞113語を渡してもなお「はよ」→「早く」、
+   * 「急いどるんやろ？」→「急いでるんやろ？」が出た（2026-08-17）。
+   * **作者が名指しで守るしかない。**
+   *
+   * 登録したうえで、この指摘は無視したものとして畳む。
+   */
+  private async keepWord(id: string): Promise<void> {
+    const item = this.items.find((entry) => entry.id === id);
+    if (!item || !this.work) return;
+    const work = this.work;
+
+    const problem = validateKeepWord(item.target);
+    if (problem) {
+      void vscode.window.showWarningMessage(problem);
+      return;
+    }
+
+    try {
+      const added = await new KeepWordStore(work).add(
+        item.target,
+        `「${item.suggestion}」への指摘を断った（${item.fileName}）`
+      );
+      void vscode.window.showInformationMessage(
+        added
+          ? `「${item.target}」を今後直しません。` +
+              "設定/keep_words.json に控えました。"
+          : `「${item.target}」は既に登録されています。`
+      );
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        error instanceof Error ? error.message : String(error)
+      );
+      return;
+    }
+
+    await this.dismissIssue(id);
   }
 
   private async dismissIssue(id: string): Promise<void> {

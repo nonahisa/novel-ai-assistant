@@ -1,6 +1,7 @@
 import type { Chunk } from "./chunker";
 import { normalizeForComparison } from "./groundedEvidence";
 import { isPlaceholderText } from "./placeholderText";
+import { isKeptWord, type KeepWord } from "../models/keepWord";
 import {
   issueBudget,
   PROOFREAD_REASONS,
@@ -51,6 +52,8 @@ export interface RejectedProofreadIssue {
     | "not_long"
     /** 「同語反復」の札だが、繰り返しが無い */
     | "not_repeated"
+    /** 作者が「直さない」と決めた語を含む */
+    | "kept_word"
     /** 「同語反復」の札だが、台詞の中＝人物の話し方である */
     | "dialogue_voice"
     /** 説明が、禁じた観点（語彙・文体など）を語っている */
@@ -176,7 +179,14 @@ export function parseProofreadResult(
 
 export function validateProofreadIssues(
   raw: unknown,
-  chunk: Chunk
+  chunk: Chunk,
+  /**
+   * 作者が「直さない」と決めた語（`設定/keep_words.json`）。
+   *
+   * **推敲は原文まるごとを置き換える**ので、守る語が原文に含まれていたら
+   * その指摘ごと出さない。言い換えれば必ず巻き込むためである。
+   */
+  keepWords: KeepWord[] = []
 ): {
   accepted: AcceptedProofreadIssue[];
   rejected: RejectedProofreadIssue[];
@@ -213,6 +223,14 @@ export function validateProofreadIssues(
     if (!reason) {
       // 決めた4種類以外は、文体への干渉が紛れ込む口になる
       rejected.push({ raw: item, reason: "unknown_reason" });
+      continue;
+    }
+    // **作者が名指しで守った語を含むなら、この指摘は出さない。**
+    // 推敲は原文まるごとを書き換えるので、含まれていれば必ず巻き込む。
+    // **札が正しいかを調べる前に外す。** 作者が「触るな」と言ったものを、
+    // こちらの都合で分類し直す意味は無い
+    if (isKeptWord(original, keepWords)) {
+      rejected.push({ raw: item, reason: "kept_word" });
       continue;
     }
     // **「長文」だけは数で決まるので、確かめられる。**

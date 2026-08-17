@@ -2,7 +2,7 @@
 
 小説を書くための作品管理・文字数計測・AI支援を1つにまとめたVSCode拡張機能です。
 
-現在の配布版：**0.6.35**（実際に使って見つかった不具合の修正）
+現在の配布版：**0.6.36**（実際に使って見つかった不具合の修正）
 
 ## できること
 
@@ -39,8 +39,8 @@ code --install-extension nonahisa.novel-ai-assistant
 GitHubのReleaseに置いたVSIXから入れることもできます。新規インストールと上書き更新の両方に使えます。
 
 ```powershell
-gh release download v0.6.35 --repo nonahisa/novel-ai-assistant --pattern "novel-ai-assistant-0.6.35.vsix" --clobber
-code --install-extension ".\novel-ai-assistant-0.6.35.vsix" --force
+gh release download v0.6.36 --repo nonahisa/novel-ai-assistant --pattern "novel-ai-assistant-0.6.36.vsix" --clobber
+code --install-extension ".\novel-ai-assistant-0.6.36.vsix" --force
 ```
 
 画面から操作する場合は、VS Codeの「拡張機能」ビュー右上の `...` →「VSIXからのインストール」を選び、同じVSIXファイルを指定します。

@@ -12,6 +12,7 @@ import {
 } from "../../src/core/typoCheckValidation";
 import { splitIntoChunks, withLineNumbers } from "../../src/core/chunker";
 import { decodeByteFallback } from "../../src/core/byteFallback";
+import type { KeepWord } from "../../src/models/keepWord";
 import { LIVE_MODEL, OLLAMA_ENDPOINT } from "./support/liveEnv";
 
 /**
@@ -43,6 +44,30 @@ function loadDictionary(): Record<string, string[]> {
       string,
       string[]
     >;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 作者が「直さない」と決めた語（`設定/keep_words.json` の代わり）。
+ *
+ * **辞書では守れないものを、名指しで守れるか**を測るために渡す。
+ */
+function loadKeepWords(): Record<string, KeepWord[]> {
+  const configured = process.env.NOVELAI_KEEP?.trim();
+  if (!configured) return {};
+  try {
+    const raw = JSON.parse(fs.readFileSync(configured, "utf-8")) as Record<
+      string,
+      string[]
+    >;
+    return Object.fromEntries(
+      Object.entries(raw).map(([work, words]) => [
+        work,
+        words.map((word) => ({ word, note: "", addedAt: "" })),
+      ])
+    );
   } catch {
     return {};
   }
@@ -95,6 +120,8 @@ describe.skipIf(!ROOT)(
         const works = worksIn(ROOT!);
         const dictionary = loadDictionary();
         const dictSize = Object.values(dictionary).flat().length;
+        const keepWords = loadKeepWords();
+        const keepSize = Object.values(keepWords).flat().length;
         expect(works.length, "作品が読めない").toBeGreaterThan(1);
 
         const byReject = new Map<string, number>();
@@ -126,7 +153,8 @@ describe.skipIf(!ROOT)(
             const validated = validateTypoIssues(
               parsed,
               chunk,
-              dictionary[work.name] ?? []
+              dictionary[work.name] ?? [],
+              keepWords[work.name] ?? []
             );
             for (const entry of validated.rejected) {
               byReject.set(entry.reason, (byReject.get(entry.reason) ?? 0) + 1);
@@ -143,7 +171,7 @@ describe.skipIf(!ROOT)(
         }
 
         const report = [
-          `=== 誤字脱字（${LIVE_MODEL}） / 辞書 ${dictSize}語 / ` +
+          `=== 誤字脱字（${LIVE_MODEL}） / 辞書 ${dictSize}語 / 直さない語 ${keepSize}語 / ` +
             `${works.length}作品 / ${chars.toLocaleString("ja-JP")}字 / ` +
             `${looked}チャンク ===`,
           `AIが挙げた: ${raised}件`,

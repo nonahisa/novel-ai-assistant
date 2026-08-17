@@ -259,10 +259,20 @@ function renderItem(item) {
           ? '<button data-action="apply" data-id="' + item.id + '">適用</button>'
           : '<button data-action="jump" data-id="' + item.id + '">本文を見る</button>') +
         '<button class="secondary" data-action="dismiss" data-id="' + item.id + '">無視</button>' +
+        (canKeep(item)
+          ? '<button class="secondary" data-action="keepWord" data-id="' + item.id + '" title="この語を今後どの話でも指摘しません">今後直さない</button>'
+          : '') +
         '</div>'
       : '') +
     '</div>'
   );
+}
+
+// **方言や口癖は、指摘を見たその場で守れるのがいちばん自然。**
+// 語として登録できる長さのときだけ出す（推敲は一文まるごとを指すので出ない）
+function canKeep(item) {
+  const word = (item.target || '').trim();
+  return word.length >= 2 && word.length <= 20;
 }
 
 window.addEventListener('message', (event) => {

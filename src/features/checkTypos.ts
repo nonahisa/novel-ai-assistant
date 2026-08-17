@@ -49,6 +49,8 @@ import {
   describeRateLimitGiveUp,
   type RateLimitWaitState,
 } from "./extractCharacters";
+import { KeepWordStore } from "../core/keepWordStore";
+import type { KeepWord } from "../models/keepWord";
 
 /**
  * 誤字脱字検知（P-09）のオーケストレーション。
@@ -236,6 +238,9 @@ export async function checkTypos(
     .map((name) => name.trim())
     .filter(Boolean);
 
+  // **方言・口癖は固有名詞の辞書に入らない。** 作者が名指しで守った語を別に読む
+  const keepWords = await new KeepWordStore(work).loadWords();
+
   const dismissedHistory = new TypoDismissedHistory(work);
   const dismissed = await dismissedHistory.load();
   const appliedFixKeys = await loadAppliedFixKeys(work);
@@ -323,6 +328,7 @@ export async function checkTypos(
           chunk,
           filePath,
           protectedNames,
+          keepWords,
           dismissed,
           appliedFixKeys,
           issues
@@ -344,7 +350,11 @@ export async function checkTypos(
           systemPrompt: TYPO_CHECK_SYSTEM_PROMPT,
           userPrompt: buildTypoCheckPrompt({
             chunkTextWithLineNumbers: withLineNumbers(chunk),
-            properNounDictionary: protectedNames.slice(0, 200),
+            // 守る語もAIへ渡す。検査でも弾くが、先に伝えれば挙がる数が減る
+            properNounDictionary: [
+              ...protectedNames,
+              ...keepWords.map((entry) => entry.word),
+            ].slice(0, 200),
           }),
           model: resolved.model,
           temperature: 0.0,
@@ -409,6 +419,7 @@ export async function checkTypos(
             chunk,
             filePath,
             protectedNames,
+            keepWords,
             dismissed,
             appliedFixKeys,
             issues,
@@ -496,12 +507,13 @@ function collectIssues(
   chunk: Chunk,
   filePath: string,
   protectedNames: string[],
+  keepWords: KeepWord[],
   dismissed: Set<string>,
   appliedFixKeys: ReadonlySet<string>,
   out: TypoCheckIssue[],
   onRejected?: (count: number) => void
 ): void {
-  const validated = validateTypoIssues(result, chunk, protectedNames);
+  const validated = validateTypoIssues(result, chunk, protectedNames, keepWords);
   let rejectedCount = validated.rejected.length;
   const fileName = path.basename(filePath);
 

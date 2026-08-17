@@ -30,6 +30,7 @@ import {
 import { withCancellableProgress } from "../views/progress";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { logFailure, logStep, useLogFile } from "../core/logger";
+import { KeepWordStore } from "../core/keepWordStore";
 
 /**
  * 推敲支援（P-10、設計書6.9.1）。
@@ -84,6 +85,9 @@ export async function checkProofread(
   }
 
   const narrativeStyle = await readNarrativeStyle(work);
+  // 作者が「直さない」と決めた語。推敲は原文まるごとを置き換えるので、
+  // 含まれていたら指摘ごと出さない
+  const keepWords = await new KeepWordStore(work).loadWords();
 
   const cache = new ChunkCache(work);
   await cache.load();
@@ -162,7 +166,7 @@ export async function checkProofread(
       });
       if (raw === undefined) continue;
 
-      const validated = validateProofreadIssues(raw, chunk);
+      const validated = validateProofreadIssues(raw, chunk, keepWords);
       rejectedCount += validated.rejected.length;
       overBudgetCount += validated.rejected.filter(
         (entry) => entry.reason === "over_budget"

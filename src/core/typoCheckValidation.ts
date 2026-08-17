@@ -2,6 +2,7 @@ import type { Chunk } from "./chunker";
 import type { ExtractedTypoIssue, TypoCheckResult } from "../prompts/typoCheck";
 import { normalizeForComparison } from "./groundedEvidence";
 import { isPlaceholderText } from "./placeholderText";
+import { isKeptWord, type KeepWord } from "../models/keepWord";
 
 /**
  * P-09 誤字脱字検知のAI出力を検証する。
@@ -17,6 +18,8 @@ export type TypoRejectionReason =
   | "ungrounded"
   | "target_not_in_original"
   | "protected_term"
+  /** 作者が「直さない」と決めた語を含む */
+  | "kept_word"
   /** 修正案が「空文字」「なし」など、中身の無いことを書いた言葉 */
   | "placeholder_suggestion"
   /** 修正案が元の語と同じ。押しても何も起きない */
@@ -84,7 +87,14 @@ export function parseTypoCheckResult(text: string): TypoCheckResult | null {
 export function validateTypoIssues(
   raw: unknown,
   chunk: Chunk,
-  protectedNames: string[]
+  protectedNames: string[],
+  /**
+   * 作者が「直さない」と決めた語（`設定/keep_words.json`）。
+   *
+   * **固有名詞の辞書とは別に要る。** 方言・口癖は固有名詞ではないので、
+   * 人物や場所をいくら抽出しても入ってこない（実データで確かめた）。
+   */
+  keepWords: KeepWord[] = []
 ): TypoValidationResult {
   const accepted: AcceptedTypoIssue[] = [];
   const rejected: RejectedTypoIssue[] = [];
@@ -143,6 +153,18 @@ export function validateTypoIssues(
         line: issue.line,
         target: issue.target,
         reason: "protected_term",
+      });
+      continue;
+    }
+
+    // **作者が名指しで守った語は直さない。**
+    // 完全一致ではなく含むかで見る。方言は活用するためである
+    // （「急いどる」を登録したら「急いどるんやろ？」も守る）
+    if (isKeptWord(issue.target, keepWords)) {
+      rejected.push({
+        line: issue.line,
+        target: issue.target,
+        reason: "kept_word",
       });
       continue;
     }

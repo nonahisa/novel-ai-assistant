@@ -321,6 +321,18 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.manageKeepWords",
+            label: "直さない語を管理",
+            icon: "circle-slash",
+            requiresWork: true,
+            detail:
+              "方言・口癖・独自の言い回しを登録すると、誤字脱字と推敲で" +
+              "指摘されなくなります。固有名詞は自動で守られますが、" +
+              "「はよ」「あらへん」のような話し方は固有名詞ではないので" +
+              "ここへ足してください。設定/keep_words.json に控えます。",
+          },
+          {
+            kind: "action",
             command: "novelai.checkNotation",
             label: "表記ゆれを検知",
             icon: "symbol-text",

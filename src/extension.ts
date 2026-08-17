@@ -130,6 +130,7 @@ import {
   refreshAllWorksWritingStatsPanel,
 } from "./features/allWorksWritingStatsPanel";
 import { askText } from "./views/dialogs";
+import { manageKeepWords } from "./features/manageKeepWords";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -1512,6 +1513,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (extracted) {
           await generateSettingsDocs(work, { silent: true });
         }
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.manageKeepWords",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await manageKeepWords(work);
       }
     )
   );
