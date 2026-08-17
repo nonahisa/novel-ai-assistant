@@ -168,7 +168,7 @@ describe("読み込みを求められたパスの絞り込み", () => {
       [
         "../別の作品/秘密.txt",
         "/etc/passwd",
-        "C:/Users/nonah/Documents/秘密.txt",
+        "C:/Users/author/Documents/秘密.txt",
         "設定/../../外.txt",
       ],
       5
