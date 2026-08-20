@@ -124,7 +124,7 @@ export async function chooseScope(
       {
         label: `$(book) 作品全体（${candidates.length}話）`,
         detail:
-          "すべての話を見ます。**AIは呼び直しません**（変わっていない話は前の結果を使います）。",
+          "すべての話を見ます。AIは呼び直しません（変わっていない話は前の結果を使います）。",
         scope: "all" as const,
       },
       cancelItem(),

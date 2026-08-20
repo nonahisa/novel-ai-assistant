@@ -133,7 +133,7 @@ export async function splitCollectedFile(
   } catch (error) {
     void vscode.window.showWarningMessage(
       `${created.length}件へ分けましたが、元のファイルを退避できませんでした。` +
-        "**このままだと同じ本文を二重に数えます。** " +
+        "このままだと同じ本文を二重に数えます。 " +
         `${path.basename(filePath)} を手で移動してください。`
     );
     logFailure("合本の退避に失敗", {
@@ -193,8 +193,8 @@ async function confirm(filePath: string, plan: SplitPlan): Promise<boolean> {
       modal: true,
       detail:
         `${preview}${rest}\n\n` +
-        "**前書き・後書き・リアクションも、そのまま残します。**\n" +
-        "**元のファイルは消さず、回復用の場所へ移します。**\n" +
+        "前書き・後書き・リアクションも、そのまま残します。\n" +
+        "元のファイルは消さず、回復用の場所へ移します。\n" +
         (unnumbered > 0
           ? `\n${unnumbered}件は話数を読み取れないため、並び順で番号を付けます。`
           : ""),

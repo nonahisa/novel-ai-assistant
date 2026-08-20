@@ -1252,7 +1252,7 @@ export class SettingsPanel {
         actionLabel: progressLabel,
         model: resolved.model,
         detail:
-          "**この画面でAIを呼ぶたびに課金されます。**\n" +
+          "この画面でAIを呼ぶたびに課金されます。\n" +
           "（この確認はこの画面で一度だけです）",
       });
       if (!ok) return undefined;

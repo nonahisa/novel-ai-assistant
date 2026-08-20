@@ -5,6 +5,7 @@ import { CharacterStore, CharacterStoreError } from "../core/characterStore";
 import { PendingUpdateStore, type PendingUpdate } from "../core/pendingUpdates";
 import {
   diffCharacter,
+  diffLinesForPanel,
   formatDiff,
   summarizeDiff,
   type CharacterDiff,
@@ -106,7 +107,7 @@ export async function applyPendingCharacterUpdates(
         id: item.update.filePath,
         name: item.diff.name,
         // **何がどう変わるかを全部並べる。** 折り畳むと読まずに押される
-        changes: formatDiff(item.diff).split("\n").filter(Boolean),
+        changes: diffLinesForPanel(item.diff),
         source: summarizeDiff(item.diff),
         status: "pending" as const,
       })),

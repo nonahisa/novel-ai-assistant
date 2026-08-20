@@ -114,11 +114,11 @@ export async function checkProofread(
           `${chunks.length}チャンク中 ${pending.length}件を処理します` +
             `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
           "",
-          "**見るのは4つだけです**（冗長・同語反復・係り受け・長すぎる文）。",
+          "見るのは4つだけです（冗長・同語反復・係り受け・長すぎる文）。",
           "語彙や文体、描写の増減には触れません。",
           `指摘は多くても ${maxIssues}件までに絞ります（1000字あたり3件）。`,
           "",
-          "**本文は書き換えません。** 指摘を1件ずつ確認して適用します。",
+          "本文は書き換えません。 指摘を1件ずつ確認して適用します。",
           resolved.provider.isPaid
             ? `\n**${resolved.provider.displayName} はチャンクごとに課金されます。**`
             : "",

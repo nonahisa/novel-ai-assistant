@@ -151,3 +151,24 @@ export function formatDiff(diff: CharacterDiff): string {
   }
   return lines.join("\n");
 }
+
+/**
+ * 提案パネルに出す差分。**Markdownの記号を付けない。**
+ *
+ * `formatDiff` は文書に貼る形（`##` `###` `-`）で作っている。これを
+ * パネルへそのまま流したところ、`###` が記号のまま画面に出た
+ * （2026-08-20、作者が実機で発見）。**パネルはHTMLを自分で組み立てる**ので、
+ * 渡すのは記法ではなく行の並びだけにする。
+ *
+ * 名前は見出しとして別に出しているため、ここには含めない。
+ */
+export function diffLinesForPanel(diff: CharacterDiff): string[] {
+  if (diff.changes.length === 0) return ["変更はありません。"];
+  const lines: string[] = [];
+  for (const change of diff.changes) {
+    lines.push(change.label);
+    lines.push(`　現在: ${change.before || "（未設定）"}`);
+    lines.push(`　更新案: ${change.after || "（未設定）"}`);
+  }
+  return lines;
+}

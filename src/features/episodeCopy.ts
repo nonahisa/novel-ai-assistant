@@ -100,7 +100,7 @@ export async function renameWithSubtitle(
       modal: true,
       detail:
         `${episode.fileName}\n  ↓\n${next}\n\n` +
-        "**中身は変えません。名前だけです。**\n" +
+        "中身は変えません。名前だけです。\n" +
         "話数の部分（並び順を決めている部分）はそのまま残します。",
     },
     "変える"

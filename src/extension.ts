@@ -1668,7 +1668,7 @@ export async function activate(
         vscode.window.showInformationMessage(
           `プロット逸脱の検知が完了しました。${parts.join(" / ")}。` +
             (result.issues.length > 0
-              ? "**本文は書き換えていません。** プロットのほうが古いこともあります。"
+              ? "本文は書き換えていません。 プロットのほうが古いこともあります。"
               : "")
         );
       }
@@ -1731,7 +1731,7 @@ export async function activate(
         vscode.window.showInformationMessage(
           `矛盾検知が完了しました。${parts.join(" / ")}。` +
             (result.issues.length > 0
-              ? "**本文は書き換えていません。** 設定と本文のどちらを直すかは作者が決めてください。"
+              ? "本文は書き換えていません。 設定と本文のどちらを直すかは作者が決めてください。"
               : "")
         );
       }

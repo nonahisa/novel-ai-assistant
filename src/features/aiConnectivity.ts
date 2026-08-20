@@ -147,7 +147,7 @@ export async function confirmPaidUsage(
 
   const lines = [
     `${provider.displayName}（${options.model}）を使います。`,
-    "**実行するとトークンを消費し、利用量が加算されます。**",
+    "実行するとトークンを消費し、利用量が加算されます。",
   ];
   if (options.calls !== undefined) {
     lines.push(

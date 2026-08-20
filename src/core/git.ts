@@ -527,10 +527,10 @@ export function rewritesLineEndings(autoCrlf: string | undefined): boolean {
 /** 作者へ伝える文。**何が起きるか・どうすれば止まるかの両方を言う** */
 export function describeAutoCrlfRisk(): string {
   return (
-    "Gitの設定（core.autocrlf）が有効なため、**取り込みのときに改行コードが" +
-    "書き換わることがあります。**\n\n" +
-    "この拡張機能は改行を保ったまま書き戻しますが、**Gitによる書き換えまでは" +
-    "止められません。**投稿サイトからダウンロードした原稿をそのまま置いている" +
+    "Gitの設定（core.autocrlf）が有効なため、取り込みのときに改行コードが" +
+    "書き換わることがあります。\n\n" +
+    "この拡張機能は改行を保ったまま書き戻しますが、Gitによる書き換えまでは" +
+    "止められません。投稿サイトからダウンロードした原稿をそのまま置いている" +
     "場合、元の形と変わってしまうことがあります。\n\n" +
     "気になる場合は、この作品のフォルダーで次を実行してください。\n\n" +
     "  git config core.autocrlf false"

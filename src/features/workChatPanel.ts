@@ -308,7 +308,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         actionLabel: "AIへの相談",
         model: resolved.model,
         detail:
-          "**送信するたびに1回ずつ課金されます。**\n" +
+          "送信するたびに1回ずつ課金されます。\n" +
           "会話が続くほど、これまでのやり取りも一緒に送るため入力が長くなります。\n" +
           "（この確認はこの会話で一度だけです。「最初から」を押すと再び確認します）",
       });

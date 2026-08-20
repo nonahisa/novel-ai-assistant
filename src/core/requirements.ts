@@ -69,7 +69,7 @@ export const REQUIREMENTS: Requirement[] = [
     id: "ollama",
     label: "Ollama（AIの実行環境）",
     purpose:
-      "自分のパソコンの中でAIを動かします。**無料で、原稿を外部へ送りません。**",
+      "自分のパソコンの中でAIを動かします。無料で、原稿を外部へ送りません。",
     withoutIt:
       "AIを使う機能は、Claude・ChatGPT・GeminiのAPIキーを登録しないと使えません（こちらは従量課金です）。",
     level: "必須",
@@ -80,7 +80,7 @@ export const REQUIREMENTS: Requirement[] = [
       command: "curl -fsSL https://ollama.com/install.sh | sh",
       page: "https://ollama.com/download",
       note:
-        "Linuxでは、この1行で入ります。**取ってきたスクリプトをそのまま実行する形**なので、" +
+        "Linuxでは、この1行で入ります。取ってきたスクリプトをそのまま実行する形なので、" +
         "気になる場合は先に https://ollama.com/install.sh を開いて中身をご覧ください。",
     },
   },
@@ -97,10 +97,10 @@ export const REQUIREMENTS: Requirement[] = [
     id: "embeddingModel",
     label: `埋め込みモデル（${RECOMMENDED_EMBEDDING_MODEL}）`,
     purpose:
-      "相談のときに、**質問に近い場面を作品全体から探す**ために使います（意味検索）。" +
+      "相談のときに、質問に近い場面を作品全体から探すために使います（意味検索）。" +
       "「妬ましさを感じる場面は？」のような言い換えでも見つけられるようになります。",
     withoutIt:
-      "相談は語句一致で場面を探します。**これでも十分に使えます**（実データで6問中4問。入れると5問）。" +
+      "相談は語句一致で場面を探します。これでも十分に使えます（実データで6問中4問。入れると5問）。" +
       "非力なパソコンでは入れないほうが軽く動きます。",
     level: "任意",
     size: "約1.2GB",
@@ -124,7 +124,7 @@ export const REQUIREMENTS: Requirement[] = [
     id: "gh",
     label: "GitHub CLI",
     purpose:
-      "**非公開の**リポジトリをGitHubへ作ったり取り寄せたりするために使います。",
+      "非公開のリポジトリをGitHubへ作ったり取り寄せたりするために使います。",
     withoutIt:
       "GitHubの同期は使えますが、リポジトリの新規作成と非公開リポジトリの取り寄せは手作業になります。",
     level: "任意",

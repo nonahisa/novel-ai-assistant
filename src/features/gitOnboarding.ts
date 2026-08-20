@@ -45,7 +45,7 @@ export function nextSetupStep(
         description: "同期を使わないなら不要",
         detail:
           "履歴と同期にはGitが要ります。導入の方法を案内します。" +
-          "**執筆・文字数・設定資料・あらすじは、Gitが無くてもすべて使えます。**",
+          "執筆・文字数・設定資料・あらすじは、Gitが無くてもすべて使えます。",
       };
     case "not_a_repo":
       return {
@@ -68,7 +68,7 @@ export function nextSetupStep(
         label: "$(cloud-upload) はじめて送信する",
         description: `${status.branch} をGitHubへ`,
         detail:
-          "作品をGitHubへ送ります。**原稿が外部のサービスへ渡ります。**" +
+          "作品をGitHubへ送ります。原稿が外部のサービスへ渡ります。" +
           "送る前に件数と送り先を確認します。",
       };
     default:
@@ -184,7 +184,7 @@ async function guideGitInstall(): Promise<void> {
   const answer = await vscode.window.showInformationMessage(
     "Gitが見つかりません。\n\n" +
       "履歴を残すこと（書き直す前へ戻す）と、複数の環境で同期することにGitを使います。\n" +
-      "**執筆・文字数・設定資料・あらすじ・誤字脱字などは、Gitが無くてもすべて使えます。**\n\n" +
+      "執筆・文字数・設定資料・あらすじ・誤字脱字などは、Gitが無くてもすべて使えます。\n\n" +
       "Windowsなら、ターミナルで次を実行すると入ります。\n" +
       command,
     { modal: true },
@@ -501,7 +501,7 @@ async function firstPush(
   const confirm = await vscode.window.showWarningMessage(
     `${work.title} をGitHubへ送ります。\n\n` +
       `送り先: ${target}\n\n` +
-      "**原稿と設定資料が外部のサービスへ渡ります。** " +
+      "原稿と設定資料が外部のサービスへ渡ります。 " +
       "送り先が非公開かどうかを、GitHubの画面で確かめてから実行してください。",
     { modal: true },
     "送信する"

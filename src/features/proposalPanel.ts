@@ -508,7 +508,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       {
         modal: true,
         detail:
-          "**作者が確定させた記述が書き換わります。** " +
+          "作者が確定させた記述が書き換わります。 " +
           "内容は一覧に出ています。1件ずつ見てから決めることもできます。",
       },
       "反映する"
