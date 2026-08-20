@@ -56,6 +56,10 @@ import { ActionDecorationProvider } from "./views/actionDecorations";
 import { PendingUpdateStore } from "./core/pendingUpdates";
 import { addWorkFromGithub } from "./features/addWorkFromGithub";
 import { tryRegisterAsCollection } from "./features/addCollection";
+import {
+  shareWithEditor,
+  collectEditorProposals,
+} from "./features/shareWithEditor";
 import { restoreFromHistory } from "./features/gitRestore";
 import { setupOllama } from "./features/setupOllama";
 import { setupVectorSearch } from "./features/setupVectorSearch";
@@ -1988,6 +1992,24 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         await toggleReviewLock(work);
+      }
+    ),
+    // 編集部へ渡す／提案を取り込む（設計書5.7.5）。
+    // **作品集へ編集部を招けない**ので、その作品だけを切り出して渡す
+    vscode.commands.registerCommand(
+      "novelai.shareWithEditor",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await shareWithEditor(work);
+      }
+    ),
+    vscode.commands.registerCommand(
+      "novelai.collectEditorProposals",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await collectEditorProposals(work);
       }
     )
   );

@@ -192,6 +192,33 @@ export const ACTION_TREE: readonly ActionGroup[] = [
       },
       {
         kind: "section",
+        label: "編集部とやり取り",
+        icon: "organization",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.shareWithEditor",
+            label: "編集部へ渡す",
+            icon: "repo-push",
+            requiresWork: true,
+            detail:
+              "この作品だけを入れた非公開リポジトリを作り、本文と設定資料を送ります。" +
+              "ほかの作品は渡りません。編集部が書けるのは提案だけで、本文は書き換わりません。",
+          },
+          {
+            kind: "action",
+            command: "novelai.collectEditorProposals",
+            label: "編集部の提案を取り込む",
+            icon: "repo-pull",
+            requiresWork: true,
+            detail:
+              "編集部が書いた提案を取り寄せて、提案パネルへ並べます。" +
+              "本文には触りません。採るかどうかは1件ずつ作者が決めます。",
+          },
+        ],
+      },
+      {
+        kind: "section",
         label: "新作開始",
         icon: "new-folder",
         items: [

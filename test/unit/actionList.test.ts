@@ -182,6 +182,7 @@ describe("操作メニューの構成", () => {
     // 「GitHubで作品管理」は作品が要るが、**消さずに出して押せなくする**
     expect(sections.map((section) => section.label)).toEqual([
       "GitHubで作品管理",
+      "編集部とやり取り",
       "新作開始",
       "既存作追加",
     ]);
