@@ -134,6 +134,13 @@ export async function notifyExternalChange(
   actions: {
     review: () => Promise<void>;
     reload: () => void;
+    /**
+     * この変更を「人が確定させたもの」として守る。
+     *
+     * **編集部はGitHub経由で直すので、拡張機能の画面を通らない。**
+     * 印を付けないと、次の抽出でAIが上書きしてしまう（設計書5.5）。
+     */
+    protect: () => Promise<void>;
   }
 ): Promise<void> {
   const names = files
@@ -144,14 +151,19 @@ export async function notifyExternalChange(
 
   const answer = await vscode.window.showInformationMessage(
     `「${work.title}」の設定資料が拡張機能の外で変更されました（${names}${rest}）。` +
-      "内容を確認しますか？",
+      "内容を確認しますか？（「この変更を守る」を押すと、今後AIで上書きしません）",
     "変更を確認",
+    "この変更を守る",
     "読み込み直すだけ",
     "閉じる"
   );
 
   if (answer === "変更を確認") {
     await actions.review();
+    return;
+  }
+  if (answer === "この変更を守る") {
+    await actions.protect();
     return;
   }
   if (answer === "読み込み直すだけ") {

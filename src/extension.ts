@@ -78,6 +78,7 @@ import {
   notifyExternalChange,
 } from "./features/watchSettings";
 import { SelfWriteTracker } from "./core/externalChanges";
+import { protectExternalEdits } from "./features/protectExternalEdits";
 import { setWriteObserver } from "./core/atomicWrite";
 import {
   GitSyncMonitor,
@@ -199,6 +200,14 @@ export async function activate(
         // 中身を見て取り込むかを決める。勝手に確定させない
         review: async () => {
           await openSettingsPanel(context, work, aiRegistry);
+          highlighter.invalidate();
+          treeProvider.refresh(work.id);
+        },
+        // **編集部の直しをAIから守る**（設計書5.5）。
+        // GitHub経由の編集は拡張機能の画面を通らないので、
+        // 印を付けないと次の抽出で上書きされる
+        protect: async () => {
+          await protectExternalEdits(work);
           highlighter.invalidate();
           treeProvider.refresh(work.id);
         },
