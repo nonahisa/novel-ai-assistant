@@ -706,6 +706,18 @@ export const ACTION_TREE: readonly ActionGroup[] = [
     entries: [
       {
         kind: "action",
+        command: "novelai.switchMode",
+        label: "作者／編集者を切り替える",
+        icon: "person",
+        requiresWork: false,
+        detail:
+          "この環境を「編集者」として使うと、**本文の校正・校閲だけ**を行える" +
+          "状態になります。編集部の方と一緒に書くときに使います。" +
+          "**編集者モードでは、本文を書き換えず提案として置きます。** " +
+          "いつでも作者へ戻せます。",
+      },
+      {
+        kind: "action",
         command: "novelai.openExtensionSettings",
         label: "設定管理を開く",
         icon: "settings",

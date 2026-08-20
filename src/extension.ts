@@ -151,6 +151,7 @@ import {
 } from "./features/episodeCopy";
 import { countUnextractedEpisodes } from "./features/extractionFreshness";
 import { chooseScope, recordCheck } from "./features/typoCheckScope";
+import { switchMode } from "./features/switchMode";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -2023,6 +2024,14 @@ export async function activate(
         treeProvider.refresh(node.work.id);
       }
     )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.switchMode", async () => {
+      await switchMode();
+      // 押せる操作が変わるので、メニューを作り直す
+      actionProvider.refresh();
+    })
   );
 
   // 起動時に一度だけ全作品の同期状態を確かめる（設計書5.5.1）。

@@ -49,6 +49,9 @@ const EDITOR_ALLOWED = new Set<string>([
   "novelai.toggleReviewLock",
   "novelai.reviewProposals",
 
+  // **戻る道を必ず残す。** 入ったら出られない、が起きてはならない
+  "novelai.switchMode",
+
   // 困ったときのために残す
   "novelai.openExtensionSettings",
   "novelai.showVersion",

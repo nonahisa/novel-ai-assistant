@@ -538,6 +538,12 @@
         "title": "ファイル名にサブタイトルを付ける",
         "icon": "$(edit)",
         "category": "小説執筆"
+      },
+      {
+        "command": "novelai.switchMode",
+        "title": "作者／編集者を切り替える",
+        "category": "小説執筆",
+        "icon": "$(person)"
       }
     ],
     "menus": {
