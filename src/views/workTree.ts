@@ -12,6 +12,11 @@ import { scanWork } from "../core/scanner";
 import { SynopsisStore } from "../core/synopsisStore";
 import { synopsisKey } from "../models/synopsis";
 import { WorkRegistry } from "../core/workRegistry";
+import {
+  currentCountMode,
+  pickCount,
+  countModeLabel,
+} from "../core/countSettings";
 
 export type TreeNode = WorkNode | EpisodeNode | MessageNode;
 
@@ -103,6 +108,12 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       return item;
     }
 
+    // **ステータスバーと同じ数え方にする。** 以前はここだけ純文字数で
+    // 固定しており、総文字数を選んでいる作者には右下と一覧で違う数字が
+    // 出続けていた（2026-08-21、作者の指摘）
+    const mode = currentCountMode();
+    const modeLabel = countModeLabel(mode);
+
     if (node.type === "work") {
       const { work, stats } = node;
       const item = new vscode.TreeItem(
@@ -120,8 +131,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       // 別の環境へ移る前に気づけるかどうかが分かれ目になる（設計書5.5.1）
       const badge = this.syncBadge?.(work.id);
       const syncNote = badge ? ` / ${badge}` : "";
-      item.description = `${stats.fileCount}ファイル / ${formatCount(
-        stats.totals.net
+      item.description = `${stats.fileCount}ファイル / ${modeLabel}${formatCount(
+        pickCount(stats.totals, mode)
       )}字${conflictNote}${syncNote}`;
       item.tooltip = new vscode.MarkdownString(
         [
@@ -180,7 +191,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       // **同じ一覧の中で行の形だけが変わって読みにくい**
       // （2026-08-21、作者が実機で気づいた）
       isCollectedFile(ep.collectedCount) ? `${ep.collectedCount}話ぶん` : null,
-      `${formatCount(ep.counts.net)}字`,
+      `${modeLabel}${formatCount(pickCount(ep.counts, mode))}字`,
     ]
       .filter((part): part is string => part !== null)
       .join("　");

@@ -57,6 +57,14 @@ import { PendingUpdateStore } from "./core/pendingUpdates";
 import { addWorkFromGithub } from "./features/addWorkFromGithub";
 import { tryRegisterAsCollection } from "./features/addCollection";
 import {
+  currentCountMode,
+  countModeLabel,
+  excludeRubyFromCount,
+  pickCount,
+  needsRedraw,
+  needsRescan,
+} from "./core/countSettings";
+import {
   shareWithEditor,
   collectEditorProposals,
 } from "./features/shareWithEditor";
@@ -561,16 +569,16 @@ export async function activate(
       return;
     }
 
-    const cfg = vscode.workspace.getConfiguration("novelai");
-    const mode = cfg.get<string>("countMode", "net");
-    const excludeRuby = cfg.get<boolean>("excludeRubyFromCount", true);
+    // 作品一覧と同じ部品を使う。別々に読むと、片方だけ直したときにずれる
+    const mode = currentCountMode();
+    const excludeRuby = excludeRubyFromCount();
 
     const counts = countChars(
       editor.document.getText(),
       ext === ".md" ? excludeRuby : false
     );
-    const value = mode === "gross" ? counts.gross : counts.net;
-    const label = mode === "gross" ? "総" : "";
+    const value = pickCount(counts, mode);
+    const label = countModeLabel(mode);
 
     // 選択範囲があればその文字数も出す
     const sel = editor.selection;
@@ -580,7 +588,7 @@ export async function activate(
         editor.document.getText(sel),
         ext === ".md" ? excludeRuby : false
       );
-      const selValue = mode === "gross" ? selCounts.gross : selCounts.net;
+      const selValue = pickCount(selCounts, mode);
       selectionPart = ` (選択 ${formatCount(selValue)})`;
     }
 
@@ -599,7 +607,9 @@ export async function activate(
 
     // 今日どれだけ進んだかは、開いているファイルの字数だけでは分からない。
     // 記録が読めたときにだけ添える（統計を切っていれば何も出ない）
-    const showProgress = cfg.get<boolean>("stats.showInStatusBar", true);
+    const showProgress = vscode.workspace
+      .getConfiguration("novelai")
+      .get<boolean>("stats.showInStatusBar", true);
     const work = showProgress
       ? findWorkForPath(registry, editor.document.uri.fsPath)
       : undefined;
@@ -633,6 +643,19 @@ export async function activate(
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor(updateStatusBar),
     vscode.window.onDidChangeTextEditorSelection(updateStatusBar),
+    // **数え方の設定を変えたら、その場で反映する。** これまで受け口が
+    // 無く、ファイルを開き直すまで古い数字のままだった（2026-08-21）
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (!needsRedraw(event)) return;
+      updateStatusBar();
+      // ルビの扱いは走査のときに効くので、変わったら読み直す。
+      // 純／総の切り替えは両方を数えてあるので、描き直すだけでよい
+      if (needsRescan(event)) {
+        treeProvider.refresh();
+      } else {
+        treeProvider.redraw();
+      }
+    }),
     vscode.workspace.onDidChangeTextDocument((e) => {
       if (e.document === vscode.window.activeTextEditor?.document) {
         updateStatusBar();
