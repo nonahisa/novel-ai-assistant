@@ -445,3 +445,45 @@ function describeFailure(result: GitCommandResult): string {
     .join(" / ");
   return detail || `gitが終了コード ${result.code} で終了しました`;
 }
+
+/**
+ * この環境の git の `user.name`。
+ *
+ * **編集履歴と競合画面で、同じ名前を出すために使う**（設計書5.6）。
+ * 履歴では「誰が直したか」、競合では「どちらの版か」を示すが、
+ * **別々の名前を出すと、作者は同じ人だと分からない。**
+ */
+export async function gitUserName(
+  cwd: string,
+  run: GitCommandRunner = runGit
+): Promise<string | undefined> {
+  const result = await run(["config", "user.name"], cwd, LOCAL_TIMEOUT_MS);
+  if (result.code !== 0) return undefined;
+  const name = result.stdout.trim();
+  return name || undefined;
+}
+
+/**
+ * そのファイルを最後に触ったコミットの著者名。
+ *
+ * **競合の画面で「誰の版か」を出すために使う**（設計書5.5.4）。
+ * 「別環境の版」とだけ出すと、**編集部の直しが自分の書き忘れに見える。**
+ *
+ * @param revision 見たい側。競合中なら `MERGE_HEAD`（取り込もうとしている側）
+ */
+export async function lastAuthorOf(
+  cwd: string,
+  relativePath: string,
+  revision: string,
+  run: GitCommandRunner = runGit
+): Promise<string | undefined> {
+  const result = await run(
+    // %an は著者名。-1 で最後の1件だけ
+    ["log", "-1", "--format=%an", revision, "--", relativePath],
+    cwd,
+    LOCAL_TIMEOUT_MS
+  );
+  if (result.code !== 0) return undefined;
+  const name = result.stdout.trim();
+  return name || undefined;
+}

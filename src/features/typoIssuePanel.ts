@@ -15,6 +15,7 @@ import type { DeviationIssue } from "./checkDeviations";
 import { buildTypoIssuePanelHtml } from "../views/typoIssuePanelHtml";
 import { KeepWordStore } from "../core/keepWordStore";
 import { validateKeepWord } from "../models/keepWord";
+import { manualActor, recordEdit } from "../core/actorContext";
 
 /**
  * AI指摘パネル（誤字脱字）。
@@ -399,6 +400,16 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
     await revertIfOpen(item.filePath);
 
     this.markStatus(id, "applied");
+    // **同期される編集履歴にも残す**（設計書5.6）。
+    // ai_actions.log は .gitignore で同期から外れているので、
+    // これだけでは作者にも編集部にも互いの操作が見えない。
+    // AIの提案を人が承諾して反映したものなので、種別は "ai"
+    await recordEdit(work, {
+      actor: "ai",
+      action: `${this.category}の指摘を反映した`,
+      file: item.fileName,
+      detail: `${item.line}行 「${item.target}」→「${item.suggestion}」`,
+    });
     await appendAiActionLog(work, {
       category: "typo",
       action: "applied",
@@ -448,6 +459,12 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
       return;
     }
 
+    await recordEdit(work, {
+      actor: manualActor(),
+      action: "「直さない語」に登録した",
+      file: item.fileName,
+      detail: item.target,
+    });
     await this.dismissIssue(id);
   }
 

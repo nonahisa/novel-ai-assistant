@@ -137,6 +137,7 @@ import {
   type MarkdownItLike,
 } from "./core/markdownItRuby";
 import { addRuby, copyForPosting, importRuby } from "./features/ruby";
+import { showEditHistory } from "./features/editHistoryPanel";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -1913,6 +1914,17 @@ export async function activate(
     vscode.commands.registerCommand("novelai.addRuby", addRuby),
     vscode.commands.registerCommand("novelai.copyForPosting", copyForPosting),
     vscode.commands.registerCommand("novelai.importRuby", importRuby)
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.showEditHistory",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await showEditHistory(context, work);
+      }
+    )
   );
 
   // 起動時に一度だけ全作品の同期状態を確かめる（設計書5.5.1）。

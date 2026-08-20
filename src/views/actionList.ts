@@ -1,5 +1,12 @@
 import * as vscode from "vscode";
 import type { WorkRegistry } from "../core/workRegistry";
+import {
+  describeBlocked,
+  EDITOR_BLOCKED_HINT,
+  isCommandAllowed,
+  type WorkMode,
+} from "../core/editorMode";
+import { currentMode } from "../core/actorContext";
 
 /**
  * 操作メニュー。
@@ -105,6 +112,17 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           "日次・週次・月次・年次の執筆量をグラフで見ます。" +
           "目標を設定していれば達成率も出ます。" +
           "話ごとの文字数一覧（長さの偏り）も同じ画面で見られます。",
+      },
+      {
+        kind: "action",
+        command: "novelai.showEditHistory",
+        label: "編集履歴を見る",
+        icon: "history",
+        requiresWork: true,
+        detail:
+          "誰が何を直したかを、作者・編集者・AIの3つに色分けして並べます。" +
+          "編集部と一緒に書いているとき、相手の直しを見落とさないための画面です。" +
+          "この画面から履歴は変えられません。",
       },
       {
         kind: "action",
@@ -873,9 +891,45 @@ export function visibleGroups(_hasWork: boolean = true): readonly ActionGroup[] 
   return ACTION_TREE;
 }
 
-/** その操作をいま押せるか */
-export function isActionEnabled(item: ActionItem, hasWork: boolean): boolean {
+/**
+ * その操作をいま押せるか。
+ *
+ * **編集者モードでは、本文の校正・校閲だけを押せる**（設計書5.6）。
+ * 消さずに押せなくするのは、既存の「作品を登録すると使えます」と同じ考えで、
+ * **何ができないのかが見えないと、編集部は壊れていると思う**ためである。
+ */
+export function isActionEnabled(
+  item: ActionItem,
+  hasWork: boolean,
+  mode: WorkMode = "author"
+): boolean {
+  if (!isCommandAllowed(item.command, mode)) return false;
   return hasWork || !item.requiresWork;
+}
+
+/** 押せない理由。**「使えない」だけでは、どうすればよいか分からない** */
+export function disabledHint(
+  item: ActionItem,
+  hasWork: boolean,
+  mode: WorkMode = "author"
+): string | undefined {
+  if (!isCommandAllowed(item.command, mode)) return EDITOR_BLOCKED_HINT;
+  if (!hasWork && item.requiresWork) return REQUIRES_WORK_HINT;
+  return undefined;
+}
+
+/**
+ * 押せない理由に、次に取れる手を添える。
+ *
+ * **理由だけでは動けない。** 作品が無いなら登録の道を、
+ * 編集者モードなら「作者の環境で」を言う。
+ */
+export function explainDisabled(
+  item: ActionItem,
+  hint: string | undefined
+): string {
+  if (hint === EDITOR_BLOCKED_HINT) return describeBlocked(item.command);
+  return "「作品一覧」の「フォルダから作品を追加」または「新規作品を作成」から登録してください。";
 }
 
 /** 木の中の操作をすべて取り出す（テストと整合性の確認用） */
@@ -990,7 +1044,10 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     }
 
     const { item: action } = node;
-    const enabled = isActionEnabled(action, this.registry.list().length > 0);
+    const hasWork = this.registry.list().length > 0;
+    const mode = currentMode();
+    const enabled = isActionEnabled(action, hasWork, mode);
+    const hint = disabledHint(action, hasWork, mode);
 
     const item = new vscode.TreeItem(
       action.label,
@@ -998,9 +1055,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     );
     // **押せない理由を、その場に出す。** 「使えない」だけでは、
     // どうすれば使えるのかが分からない
-    item.description = enabled
-      ? (action.description ?? "")
-      : REQUIRES_WORK_HINT;
+    item.description = enabled ? (action.description ?? "") : (hint ?? "");
     item.iconPath = enabled
       ? new vscode.ThemeIcon(action.icon)
       : // 色を落として、押せるものと見分けられるようにする

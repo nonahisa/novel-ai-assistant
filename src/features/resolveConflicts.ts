@@ -18,6 +18,7 @@ import {
 } from "../core/conflictFile";
 import { countChars, formatCount } from "../core/charCount";
 import { logFailure, showLog } from "../core/logger";
+import { lastAuthorOf } from "../core/git";
 
 /**
  * 競合の解決（設計書5.5.4）。
@@ -160,16 +161,34 @@ async function reviewConflict(
   const theirsLabel = file.parsed.hunks[0].theirsLabel || "別環境";
   const oursLabel = file.parsed.hunks[0].oursLabel || "この環境";
 
+  // **誰の版かを出す**（設計書5.5.4）。
+  // 「別環境の版」とだけ出すと、編集部の直しが自分の書き忘れに見える。
+  // 見分けが付かないまま捨てさせない。
+  //
+  // 取れなくても止めない。名前が無いだけで、比較そのものはできる
+  const theirsAuthor = await lastAuthorOf(
+    work.folderPath,
+    file.relativePath,
+    "MERGE_HEAD"
+  ).catch(() => undefined);
+  const oursAuthor = await lastAuthorOf(
+    work.folderPath,
+    file.relativePath,
+    "HEAD"
+  ).catch(() => undefined);
+  const oursWho = oursAuthor ? `／${oursAuthor}` : "";
+  const theirsWho = theirsAuthor ? `／${theirsAuthor}` : "";
+
   // 両方を並べて見せる。左がこの環境、右が別環境
   const key = `${work.id}-${Date.now()}`;
   const leftUri = options.provider.register(
     key,
-    `この環境（${oursLabel}）`,
+    `この環境（${oursLabel}${oursWho}）`,
     ours
   );
   const rightUri = options.provider.register(
     key,
-    `別環境（${theirsLabel}）`,
+    `別環境（${theirsLabel}${theirsWho}）`,
     theirs
   );
   await vscode.commands.executeCommand(
@@ -187,14 +206,20 @@ async function reviewConflict(
     [
       {
         label: "$(arrow-left) こちらを採用",
-        description: `この環境の版（${formatCount(oursCount)}字）`,
+        description:
+          `この環境の版（${formatCount(oursCount)}字）` +
+          (oursAuthor ? `／最後に触ったのは ${oursAuthor}` : ""),
         detail: "別環境の変更は捨てられます。",
         action: "ours" as const,
       },
       {
         label: "$(arrow-right) 別環境のものを採用",
-        description: `別環境の版（${formatCount(theirsCount)}字）`,
-        detail: "この環境の変更は捨てられます。",
+        description:
+          `別環境の版（${formatCount(theirsCount)}字）` +
+          (theirsAuthor ? `／最後に触ったのは ${theirsAuthor}` : ""),
+        detail: theirsAuthor
+          ? `この環境の変更は捨てられます。${theirsAuthor} の直しを採ります。`
+          : "この環境の変更は捨てられます。",
         action: "theirs" as const,
       },
       {
