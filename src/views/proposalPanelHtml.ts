@@ -126,7 +126,7 @@ body.show-low .issue.low { display: flex; }
   <span class="title" id="category">誤字脱字</span>
   <span class="count" id="count">0件</span>
   <label><input type="checkbox" id="showLow"> 確信度が低いものも表示</label>
-  <button class="secondary" id="applyAll">表示中をまとめて適用</button>
+  <button class="secondary" id="applyAll" title="確信度が「高」「中」で、修正案のあるものだけが対象です">まとめて適用</button>
 </div>
 <div id="empty">まだ検知結果がありません。「誤字脱字を検知」または「表記ゆれを検知」を実行してください。</div>
 <div id="list"></div>

@@ -415,14 +415,29 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * まとめて適用する。既定では画面に出さず、作者が確認ダイアログを経てから呼ぶ。
    */
   private async applyVisible(): Promise<void> {
-    const targets = this.items.filter(
+    // **設定資料の更新も「まとめて」の対象である。**
+    // ここを見ていなかったため、更新の一覧で押しても何も起きなかった
+    // （2026-08-19、作者が実機で発見）
+    if (this.recordUpdates.length > 0) {
+      await this.applyAllRecordUpdates();
+      return;
+    }
+
+    const pending = this.items.filter((item) => item.status === "pending");
+    const targets = pending.filter(
       // **修正案の無い指摘は掴まない**（推敲）。適用しても何も起きない
-      (item) =>
-        item.status === "pending" &&
-        item.confidence !== "low" &&
-        Boolean(item.suggestion)
+      (item) => item.confidence !== "low" && Boolean(item.suggestion)
     );
-    if (targets.length === 0) return;
+
+    // **黙って何もしない、をやめる。**
+    // 押したのに無反応だと「壊れている」としか見えない
+    if (targets.length === 0) {
+      void vscode.window.showInformationMessage(
+        this.describeNoTarget(pending)
+      );
+      return;
+    }
+
     const confirm = await vscode.window.showWarningMessage(
       `確信度「高」「中」の指摘 ${targets.length} 件をまとめて適用します。` +
         "作者による個別確認なしに本文が書き換わります。",
@@ -430,9 +445,83 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       "適用する"
     );
     if (confirm !== "適用する") return;
+
     for (const item of targets) {
       await this.applyIssue(item.id);
     }
+
+    // **終わったことを伝える。** 何件入って何件入らなかったのかが
+    // 分からないと、作者は一覧を上から数え直すことになる
+    const applied = targets.filter(
+      (item) =>
+        this.items.find((entry) => entry.id === item.id)?.status === "applied"
+    ).length;
+    void vscode.window.showInformationMessage(
+      applied === targets.length
+        ? `${applied}件を適用しました。`
+        : `${applied}/${targets.length}件を適用しました。` +
+            "残りは一覧に理由が出ています。"
+    );
+  }
+
+  /**
+   * まとめて適用できるものが無い理由。
+   *
+   * **「ありません」だけでは、作者は何をすればよいか分からない。**
+   * 推敲は修正案の無い指摘が多く、そのときは1件ずつ見るしかない。
+   */
+  private describeNoTarget(pending: readonly ProposalViewItem[]): string {
+    if (pending.length === 0) {
+      return "まとめて適用できる指摘がありません（未処理の指摘がありません）。";
+    }
+    const low = pending.filter((item) => item.confidence === "low").length;
+    const noFix = pending.filter((item) => !item.suggestion).length;
+
+    const reasons: string[] = [];
+    if (noFix > 0) {
+      reasons.push(
+        `${noFix}件は修正案がありません（直し方は作者が決めるものです）`
+      );
+    }
+    if (low > 0) reasons.push(`${low}件は確信度が「低」です`);
+
+    return (
+      "まとめて適用できる指摘がありません。" +
+      (reasons.length > 0 ? reasons.join("。") + "。" : "") +
+      "1件ずつご確認ください。"
+    );
+  }
+
+  /** 設定資料の更新をまとめて反映する */
+  private async applyAllRecordUpdates(): Promise<void> {
+    const targets = this.recordUpdates.filter(
+      (entry) => entry.status === "pending" || entry.status === "failed"
+    );
+    if (targets.length === 0) {
+      void vscode.window.showInformationMessage(
+        "反映できる更新がありません。"
+      );
+      return;
+    }
+    const confirm = await vscode.window.showWarningMessage(
+      `${targets.length}件の更新をまとめて反映します。`,
+      {
+        modal: true,
+        detail:
+          "**作者が確定させた記述が書き換わります。** " +
+          "内容は一覧に出ています。1件ずつ見てから決めることもできます。",
+      },
+      "反映する"
+    );
+    if (confirm !== "反映する") return;
+
+    for (const target of targets) {
+      await this.applyIssue(target.id);
+    }
+    const applied = this.recordUpdates.filter(
+      (entry) => entry.status === "applied"
+    ).length;
+    void vscode.window.showInformationMessage(`${applied}件を反映しました。`);
   }
 
   private async applyIssue(id: string): Promise<void> {
