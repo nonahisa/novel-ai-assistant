@@ -9,6 +9,7 @@ import { logFailure } from "../core/logger";
 import type { WorkRegistry } from "../core/workRegistry";
 import { withProgress } from "../views/progress";
 import { askText } from "../views/dialogs";
+import { tryRegisterAsCollection } from "./addCollection";
 
 /**
  * GitHubにある作品を取り寄せて登録する（設計書5.5.11）。
@@ -19,7 +20,7 @@ import { askText } from "../views/dialogs";
  */
 export async function addWorkFromGithub(
   registry: WorkRegistry
-): Promise<WorkEntry | undefined> {
+): Promise<WorkEntry[]> {
   if (!(await isGitAvailable())) {
     const action = await vscode.window.showInformationMessage(
       "Gitが見つかりませんでした。GitHubから取り寄せるにはGitが必要です。",
@@ -31,7 +32,7 @@ export async function addWorkFromGithub(
         vscode.Uri.parse("https://git-scm.com/downloads")
       );
     }
-    return undefined;
+    return [];
   }
 
   const url = await askText({
@@ -41,7 +42,7 @@ export async function addWorkFromGithub(
     ignoreFocusOut: true,
     validateInput: (value) => validateRepositoryUrl(value) ?? null,
   });
-  if (!url) return undefined;
+  if (!url) return [];
 
   const parent = await vscode.window.showOpenDialog({
     canSelectFolders: true,
@@ -50,7 +51,7 @@ export async function addWorkFromGithub(
     openLabel: "ここに取り寄せる",
     title: "作品フォルダを置く場所を選択",
   });
-  if (!parent || parent.length === 0) return undefined;
+  if (!parent || parent.length === 0) return [];
 
   const suggested = folderNameFromUrl(url);
   const folderName = await askText({
@@ -67,7 +68,7 @@ export async function addWorkFromGithub(
       return null;
     },
   });
-  if (!folderName) return undefined;
+  if (!folderName) return [];
 
   const destination = path.join(parent[0].fsPath, folderName.trim());
   if (await pathExists(destination)) {
@@ -75,7 +76,7 @@ export async function addWorkFromGithub(
       `「${destination}」はすでに存在します。` +
         "中身を失わないため、取り寄せを中止しました。別の名前を指定してください。"
     );
-    return undefined;
+    return [];
   }
 
   let result = await withProgress("GitHubから取り寄せています…", () =>
@@ -113,8 +114,14 @@ export async function addWorkFromGithub(
     if (action === "ログを表示") {
       await vscode.commands.executeCommand("novelai.showLog");
     }
-    return undefined;
+    return [];
   }
+
+  // **取り寄せたものが作品集かもしれない。** 中に作品フォルダーが並んでいたら、
+  // まとめて登録する（設計書5.7）。作者は1リポジトリに複数作品を置いており、
+  // 以前はリポジトリ全体が1作品として登録されていた
+  const collection = await tryRegisterAsCollection(registry, destination);
+  if (collection.handled) return collection.added;
 
   const title = await askText({
     title: "作品名",
@@ -129,10 +136,10 @@ export async function addWorkFromGithub(
     destination,
     (title ?? folderName).trim()
   );
-  if (!entry) return undefined;
+  if (!entry) return [];
 
   vscode.window.showInformationMessage(
     `「${entry.title}」を取り寄せて登録しました。`
   );
-  return entry;
+  return [entry];
 }

@@ -12,6 +12,8 @@ import {
 } from "../models/types";
 import { atomicWriteFile } from "./atomicWrite";
 import { buildPlotTemplate } from "./plotTemplate";
+import { canRegisterWork, describeWorkLimit } from "./editorMode";
+import { currentMode } from "./actorContext";
 
 const STORAGE_KEY = "novelai.works";
 
@@ -61,6 +63,20 @@ export class WorkRegistry {
     this._onDidChange.fire();
   }
 
+  /**
+   * 編集者モードの上限に引っかかっていないか（設計書5.7.4）。
+   *
+   * **登録の入口をここ1か所にまとめる。** `add` と `addExisting` の
+   * どちらからでも通るので、片方だけ塞いで素通りする、が起きない。
+   */
+  private blockedByEditorLimit(works: WorkEntry[]): boolean {
+    if (canRegisterWork(currentMode(), works.length)) return false;
+    void vscode.window.showWarningMessage(
+      describeWorkLimit(works[0]?.title ?? "登録済みの作品")
+    );
+    return true;
+  }
+
   /** 既存フォルダを作品として登録する */
   async add(folderPath: string, title?: string): Promise<WorkEntry | undefined> {
     const works = this.context.globalState.get<WorkEntry[]>(STORAGE_KEY, []);
@@ -72,6 +88,7 @@ export class WorkRegistry {
       );
       return undefined;
     }
+    if (this.blockedByEditorLimit(works)) return undefined;
 
     const entry: WorkEntry = {
       id: `work_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
@@ -97,6 +114,7 @@ export class WorkRegistry {
       );
       return undefined;
     }
+    if (this.blockedByEditorLimit(works)) return undefined;
 
     const entry: WorkEntry = {
       id: `work_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,

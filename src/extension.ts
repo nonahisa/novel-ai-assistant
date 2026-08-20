@@ -55,6 +55,7 @@ import { ActionListProvider, nodeKey } from "./views/actionList";
 import { ActionDecorationProvider } from "./views/actionDecorations";
 import { PendingUpdateStore } from "./core/pendingUpdates";
 import { addWorkFromGithub } from "./features/addWorkFromGithub";
+import { tryRegisterAsCollection } from "./features/addCollection";
 import { restoreFromHistory } from "./features/gitRestore";
 import { setupOllama } from "./features/setupOllama";
 import { setupVectorSearch } from "./features/setupVectorSearch";
@@ -725,6 +726,18 @@ export async function activate(
       if (!picked || picked.length === 0) return;
 
       const folderPath = picked[0].fsPath;
+
+      // **作品集かもしれない。** 中に作品フォルダーが並んでいたら、
+      // まとめて登録する（設計書5.7）。作品そのものならこれまで通り進む
+      const collection = await tryRegisterAsCollection(registry, folderPath);
+      if (collection.handled) {
+        if (collection.added.length > 0) {
+          treeProvider.refresh();
+          highlighter.invalidate();
+        }
+        return;
+      }
+
       const defaultTitle = path.basename(folderPath);
       const title = await askText({
         prompt: "作品名を入力してください",
@@ -897,8 +910,8 @@ export async function activate(
 
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.addWorkFromGithub", async () => {
-      const entry = await addWorkFromGithub(registry);
-      if (!entry) return;
+      const entries = await addWorkFromGithub(registry);
+      if (entries.length === 0) return;
       treeProvider.refresh();
       // 取り寄せた作品の設定が用語ハイライトの材料になる
       highlighter.invalidate();
