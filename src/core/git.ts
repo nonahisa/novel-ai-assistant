@@ -487,3 +487,52 @@ export async function lastAuthorOf(
   const name = result.stdout.trim();
   return name || undefined;
 }
+
+/**
+ * この作品での `core.autocrlf` の設定。
+ *
+ * **gitの書き換えは、この拡張機能の管轄外である**（設計書5.5.1）。
+ * 本拡張機能は「文字コード・改行コードを保持して書き戻す」を最優先の
+ * 決まりにしているが、`git pull` は `core.autocrlf` が有効だと
+ * **チェックアウトのときに改行を書き換える。**
+ *
+ * Windowsでは既定で `true` になっていることが多い。**LFで書いた原稿が、
+ * 取り込んだだけでCRLFに変わる。** 投稿サイトのダウンロード形式を
+ * そのまま置いている作品では、元の場所へ戻せなくなる。
+ *
+ * 止める手立ては無いので、**起きうることを伝える**。
+ */
+export async function readAutoCrlf(
+  cwd: string,
+  run: GitCommandRunner = runGit
+): Promise<string | undefined> {
+  const result = await run(["config", "core.autocrlf"], cwd, LOCAL_TIMEOUT_MS);
+  // 設定が無ければ非0で返る。それは「未設定」であって失敗ではない
+  if (result.code !== 0) return undefined;
+  const value = result.stdout.trim().toLowerCase();
+  return value || undefined;
+}
+
+/**
+ * その設定だと、取り込みで改行が書き換わりうるか。
+ *
+ * - `true` … チェックアウトでCRLFへ、コミットでLFへ変える。**書き換わる**
+ * - `input` … コミットでLFへ変えるだけ。チェックアウトでは触らない
+ * - `false` / 未設定 … 触らない
+ */
+export function rewritesLineEndings(autoCrlf: string | undefined): boolean {
+  return autoCrlf === "true";
+}
+
+/** 作者へ伝える文。**何が起きるか・どうすれば止まるかの両方を言う** */
+export function describeAutoCrlfRisk(): string {
+  return (
+    "Gitの設定（core.autocrlf）が有効なため、**取り込みのときに改行コードが" +
+    "書き換わることがあります。**\n\n" +
+    "この拡張機能は改行を保ったまま書き戻しますが、**Gitによる書き換えまでは" +
+    "止められません。**投稿サイトからダウンロードした原稿をそのまま置いている" +
+    "場合、元の形と変わってしまうことがあります。\n\n" +
+    "気になる場合は、この作品のフォルダーで次を実行してください。\n\n" +
+    "  git config core.autocrlf false"
+  );
+}

@@ -6,7 +6,10 @@ import {
   changedFilesBetween,
   fetchRemote,
   headCommit,
+  describeAutoCrlfRisk,
   pullFastForward,
+  readAutoCrlf,
+  rewritesLineEndings,
   push,
   readSyncStatus,
   type GitCommandRunner,
@@ -293,8 +296,53 @@ export class GitSyncMonitor implements vscode.Disposable {
     if (action === "取り込む") await this.pull(work);
   }
 
+  /**
+   * 改行が書き換わりうることを、作品ごとに一度だけ伝える。
+   *
+   * **止める手立ては無い**（gitの書き換えはこちらの管轄外）。起きうることを
+   * 知らせて、気になるなら設定を変えられることまで伝える。
+   *
+   * **読めなくても黙って進む。** gitが無い・設定が無いのは異常ではない。
+   */
+  private async warnAutoCrlfOnce(work: WorkEntry): Promise<void> {
+    if (this.autoCrlfWarned.has(work.id)) return;
+    this.autoCrlfWarned.add(work.id);
+
+    let setting: string | undefined;
+    try {
+      setting = await readAutoCrlf(work.folderPath, this.options.run);
+    } catch {
+      return;
+    }
+    if (!rewritesLineEndings(setting)) return;
+
+    logFailure("取り込みで改行が変わる可能性", {
+      作品: work.title,
+      設定: `core.autocrlf=${setting}`,
+    });
+    const answer = await vscode.window.showWarningMessage(
+      `「${work.title}」の取り込みで、改行コードが変わることがあります。`,
+      { detail: describeAutoCrlfRisk(), modal: true },
+      "このまま取り込む",
+      "設定の直し方をコピー"
+    );
+    if (answer === "設定の直し方をコピー") {
+      await vscode.env.clipboard.writeText("git config core.autocrlf false");
+      void vscode.window.showInformationMessage(
+        "コマンドをクリップボードへ入れました。" +
+          "作品のフォルダーでターミナルを開いて貼り付けてください。"
+      );
+    }
+  }
+
+  /** 一度伝えた作品。**取り込むたびに出すと、消せない表示になる** */
+  private readonly autoCrlfWarned = new Set<string>();
+
   /** 取り込む（作者の操作が起点） */
   async pull(work: WorkEntry): Promise<boolean> {
+    // **取り込みで改行が書き換わりうることを、先に伝える**（設計書5.5.1）
+    await this.warnAutoCrlfOnce(work);
+
     const result = await withProgress("別の環境の変更を取り込んでいます…", () =>
       pullFastForward(work.folderPath, this.options.run)
     );
