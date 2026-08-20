@@ -150,6 +150,7 @@ import {
   renameWithSubtitle,
 } from "./features/episodeCopy";
 import { countUnextractedEpisodes } from "./features/extractionFreshness";
+import { chooseScope, recordCheck } from "./features/typoCheckScope";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -1578,11 +1579,26 @@ export async function activate(
         if (!(await saveDirtyDocumentsBeforeExtraction(work, "誤字脱字の検知")))
           return;
 
-        const result = await checkTypos(work, aiRegistry);
+        // **前回から書いた分だけに絞れる**（設計書6.8.7）。
+        // 聞く意味があるときだけ聞く（一度も検知していない・全部が対象・
+        // 1件も無い、のいずれでも聞かない）
+        const scope = await chooseScope(work);
+        if (!scope) return;
+
+        const result = await checkTypos(work, aiRegistry, {
+          filePaths: scope.filePaths,
+        });
         if (!result) return;
 
+        // **絞って見たときも「検知した」と記録する。**
+        // 記録しないと、次回また同じ話が「前回から書いた分」に出る
+        await recordCheck(work);
+
         proposalPanel.showResults(work, result.issues);
-        reportTypoCheckResult("誤字脱字検知", result);
+        reportTypoCheckResult(
+          scope.kind === "changed" ? "誤字脱字検知（前回から書いた分）" : "誤字脱字検知",
+          result
+        );
       }
     )
   );
