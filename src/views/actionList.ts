@@ -906,16 +906,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
 export const REQUIRES_WORK_HINT = "作品を登録すると使えます";
 
 /**
- * AIを使う操作に添える印。
- *
- * **押す前に見分けられる必要がある。** クラウドのAIは実行のたびに課金される。
- *
- * 囲むのは作者の指示（2026-08-19）。素の「AI」だと、後ろに続く説明文と
- * 地続きに見えて印だと分からない。
- */
-export const AI_MARK = "[AI]";
-
-/**
  * いま出す分類。**作品の有無で中身は変わらない。**
  *
  * 押せるかどうかは `isActionEnabled` で決める。
@@ -1088,16 +1078,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     );
     // **押せない理由を、その場に出す。** 「使えない」だけでは、
     // どうすれば使えるのかが分からない
-    // **「AI」を四角で囲む**（作者の指示、2026-08-19）。
-    //
-    // 末尾のバッジ（`FileDecorationProvider`）は**2文字までしか出せない**ので、
-    // `[AI]` は入らない。囲み文字（🄰🄸）はUTF-16で4つぶんになり、
-    // 切り捨てられて壊れる。**説明欄へ移して囲む。**
-    item.description = enabled
-      ? [action.usesAI ? AI_MARK : "", action.description ?? ""]
-          .filter(Boolean)
-          .join(" ")
-      : (hint ?? "");
+    item.description = enabled ? (action.description ?? "") : (hint ?? "");
     item.iconPath = enabled
       ? new vscode.ThemeIcon(action.icon)
       : // 色を落として、押せるものと見分けられるようにする
