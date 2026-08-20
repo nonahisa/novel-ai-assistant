@@ -143,6 +143,7 @@ import {
   toggleReviewLock,
 } from "./features/reviewProposals";
 import { offerFirstRunSetupInVsCode } from "./features/firstRun";
+import { splitCollectedFile } from "./features/splitCollectedFile";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -1947,6 +1948,23 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         await toggleReviewLock(work);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.splitCollectedFile",
+      async (node?: EpisodeNode) => {
+        if (!node) return;
+        // 未保存のまま読むと、画面と違う本文を分けてしまう
+        if (
+          !(await saveDirtyDocumentsBeforeExtraction(node.work, "ファイルの分割"))
+        ) {
+          return;
+        }
+        await splitCollectedFile(node.work, node.episode.filePath);
+        treeProvider.refresh(node.work.id);
       }
     )
   );
