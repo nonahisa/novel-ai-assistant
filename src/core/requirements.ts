@@ -42,6 +42,21 @@ export interface Requirement {
   size?: string;
   /** winget のパッケージID。モデルは winget では入らないので持たない */
   wingetId?: string;
+  /** Homebrew の formula 名（macOS） */
+  brewFormula?: string;
+  /**
+   * 自分で入れる場合の手順。**Linuxと、Homebrewの無いmacOSで使う。**
+   *
+   * **走らせる中身をそのまま見せる。** Linuxの公式の案内は
+   * 「取ってきたスクリプトを実行する」形なので、拡張機能が黙って
+   * 実行してよいものではない。
+   */
+  manualSteps?: {
+    /** 打ち込む1行。無ければ配布ページだけ示す */
+    command?: string;
+    page: string;
+    note: string;
+  };
 }
 
 /** 最初に薦める会話モデル。作者の環境（8B・131072文脈）で実績がある */
@@ -60,6 +75,14 @@ export const REQUIREMENTS: Requirement[] = [
     level: "必須",
     size: "約1GB",
     wingetId: "Ollama.Ollama",
+    brewFormula: "ollama",
+    manualSteps: {
+      command: "curl -fsSL https://ollama.com/install.sh | sh",
+      page: "https://ollama.com/download",
+      note:
+        "Linuxでは、この1行で入ります。**取ってきたスクリプトをそのまま実行する形**なので、" +
+        "気になる場合は先に https://ollama.com/install.sh を開いて中身をご覧ください。",
+    },
   },
   {
     id: "chatModel",
@@ -91,6 +114,11 @@ export const REQUIREMENTS: Requirement[] = [
     level: "任意",
     size: "約60MB",
     wingetId: "Git.Git",
+    brewFormula: "git",
+    manualSteps: {
+      page: "https://git-scm.com/downloads",
+      note: "多くのLinuxでは、パッケージ管理から入ります（例：sudo apt install git）。",
+    },
   },
   {
     id: "gh",
@@ -102,6 +130,11 @@ export const REQUIREMENTS: Requirement[] = [
     level: "任意",
     size: "約12MB",
     wingetId: "GitHub.cli",
+    brewFormula: "gh",
+    manualSteps: {
+      page: "https://cli.github.com/",
+      note: "多くのLinuxでは、パッケージ管理から入ります（例：sudo apt install gh）。",
+    },
   },
 ];
 

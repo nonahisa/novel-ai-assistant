@@ -15,6 +15,7 @@ import {
   RECOMMENDED_EMBEDDING_MODEL,
   REQUIREMENTS,
   totalSizeLabel,
+  type Requirement,
   type RequirementId,
   type RequirementState,
   type SetupPlan,
@@ -23,6 +24,8 @@ import {
 import {
   detectPackageManager,
   installPackage,
+  installWithBrew,
+  type PackageManager,
   pullOllamaModel,
   shortenProgress,
   type InstallOutcome,
@@ -153,7 +156,7 @@ async function showComplete(
 async function showPlan(
   registry: AIRegistry,
   plan: SetupPlan,
-  manager: "winget" | "none"
+  manager: PackageManager
 ): Promise<void> {
   const items: Array<vscode.QuickPickItem & { action: () => Promise<void> }> = [];
 
@@ -287,7 +290,7 @@ export function buildSetupDocument(plan: SetupPlan): string {
 async function installEntries(
   registry: AIRegistry,
   entries: readonly SetupPlanEntry[],
-  manager: "winget" | "none"
+  manager: PackageManager
 ): Promise<void> {
   const names = entries.map((entry) => entry.requirement.label).join("\n・");
   const proceed = "入れる";
@@ -337,9 +340,71 @@ async function installEntries(
   await showPlan(registry, after, manager);
 }
 
+/**
+ * 自分で入れてもらう案内。
+ *
+ * **「自動で入れられません」で終わらせない。** 何を打てばよいかと、
+ * 配布ページの両方を出す。コマンドはクリップボードへ入れられるようにする
+ * （打ち間違いで詰まるのがいちばん多い）。
+ */
+async function guideManualInstall(
+  requirement: Requirement,
+  manager: PackageManager
+): Promise<InstallOutcome> {
+  const steps = requirement.manualSteps;
+  if (!steps) {
+    return {
+      kind: "failed",
+      detail: "この環境では自動で入れられません。配布ページから入れてください。",
+    };
+  }
+
+  const why =
+    manager === "manual" && process.platform === "darwin"
+      ? "Homebrew が見つかりませんでした。"
+      : "この環境では自動で入れられません。";
+
+  const actions = steps.command
+    ? ["コマンドをコピー", "配布ページを開く"]
+    : ["配布ページを開く"];
+  const answer = await vscode.window.showWarningMessage(
+    `${requirement.label} は、ご自身で入れていただく必要があります。`,
+    {
+      modal: true,
+      detail: [
+        why,
+        "",
+        steps.command
+          ? `ターミナルで次の1行を実行してください。\n\n  ${steps.command}\n`
+          : "",
+        steps.note,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    },
+    ...actions
+  );
+
+  if (answer === "コマンドをコピー" && steps.command) {
+    await vscode.env.clipboard.writeText(steps.command);
+    void vscode.window.showInformationMessage(
+      "コマンドをクリップボードへ入れました。ターミナルへ貼り付けて実行してください。"
+    );
+  } else if (answer === "配布ページを開く") {
+    await vscode.env.openExternal(vscode.Uri.parse(steps.page));
+  }
+
+  // 入れ終わったかは分からない。**入ったことにしない**
+  return {
+    kind: "failed",
+    detail:
+      "入れ終わったら、もう一度「セットアップ（必要なものを入れる）」を実行してください。",
+  };
+}
+
 async function installOne(
   id: RequirementId,
-  manager: "winget" | "none"
+  manager: PackageManager
 ): Promise<InstallOutcome> {
   const requirement = REQUIREMENTS.find((item) => item.id === id);
   if (!requirement) return { kind: "failed", detail: "不明な項目です。" };
@@ -374,15 +439,36 @@ async function installOne(
     );
   }
 
+  // **自分で入れてもらう場合は、何を打つかをそのまま見せる。**
+  // Linuxの公式の案内は「取ってきたスクリプトを実行する」形で、
+  // 拡張機能が黙って走らせてよいものではない
+  if (manager === "manual" || manager === "none") {
+    return guideManualInstall(requirement, manager);
+  }
+
+  if (manager === "brew") {
+    if (!requirement.brewFormula) {
+      return guideManualInstall(requirement, "manual");
+    }
+    logStep(`セットアップ: brew install ${requirement.brewFormula}`);
+    return withCancellableProgress(
+      `${requirement.label} を入れています`,
+      async (progress, token) => {
+        const outcome = await installWithBrew(requirement.brewFormula!, {
+          onLine: (line) => {
+            if (token.isCancellationRequested) return;
+            progress.report({ message: shortenProgress(line) });
+          },
+        });
+        return token.isCancellationRequested
+          ? ({ kind: "cancelled" } as InstallOutcome)
+          : outcome;
+      }
+    );
+  }
+
   if (!requirement.wingetId) {
     return { kind: "failed", detail: "自動で入れる方法がありません。" };
-  }
-  if (manager === "none") {
-    return {
-      kind: "failed",
-      detail:
-        "この環境には winget がないため自動で入れられません。配布ページから入れてください。",
-    };
   }
 
   logStep(`セットアップ: ${requirement.wingetId} を導入`);

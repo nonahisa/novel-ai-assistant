@@ -22,7 +22,15 @@ import { spawn } from "child_process";
  * VS Code APIに依存しない（進捗の見せ方は呼び出し側が決める）。
  */
 
-export type PackageManager = "winget" | "none";
+/**
+ * 使えるパッケージ管理。
+ *
+ * **`manual` は「入れられない」ではなく「手順を示す」。**
+ * Linuxは公式の案内が `curl … | sh` の形だが、**ネットから取ってきた
+ * スクリプトを拡張機能が黙って実行するのは筋が悪い。** 何が走るのかを
+ * 見せて、作者に判断してもらう。
+ */
+export type PackageManager = "winget" | "brew" | "manual" | "none";
 
 export interface CommandResult {
   code: number;
@@ -94,13 +102,72 @@ export const runCommand: CommandRunner = (command, args, options = {}) =>
     child.on("close", (code) => finish(code ?? -1));
   });
 
-/** 使えるパッケージ管理を調べる。いまはWindowsのwingetだけ */
+/**
+ * 使えるパッケージ管理を調べる。
+ *
+ * - Windows：winget（標準で入っている）
+ * - macOS：Homebrew（入っていれば）。無ければ手順を示す
+ * - Linux：手順を示す
+ *
+ * **Homebrewが無くても「入れられない」で終わらせない。** 配布ページから
+ * 入れる道は残っている。
+ */
 export async function detectPackageManager(
-  run: CommandRunner = runCommand
+  run: CommandRunner = runCommand,
+  platform: NodeJS.Platform = process.platform
 ): Promise<PackageManager> {
-  if (process.platform !== "win32") return "none";
-  const result = await run("winget", ["--version"], { timeoutMs: 15000 });
-  return result.code === 0 ? "winget" : "none";
+  if (platform === "win32") {
+    const result = await run("winget", ["--version"], { timeoutMs: 15000 });
+    return result.code === 0 ? "winget" : "none";
+  }
+  if (platform === "darwin") {
+    const result = await run("brew", ["--version"], { timeoutMs: 15000 });
+    return result.code === 0 ? "brew" : "manual";
+  }
+  if (platform === "linux") return "manual";
+  return "none";
+}
+
+/**
+ * Homebrew で1つ入れる。
+ *
+ * wingetと違い同意待ちにならないので、余分な指定は付けない。
+ */
+export async function installWithBrew(
+  formula: string,
+  options: { onLine?: (line: string) => void; run?: CommandRunner } = {}
+): Promise<InstallOutcome> {
+  const run = options.run ?? runCommand;
+  const result = await run("brew", ["install", formula], {
+    timeoutMs: 20 * 60 * 1000,
+    onLine: options.onLine,
+  });
+  return interpretBrewResult(result);
+}
+
+/**
+ * brewの結果を読む。
+ *
+ * **終了コードだけで決めない**（wingetと同じ理由）。すでに入っている場合も
+ * 0以外を返すことがあるので、文言と合わせて判定する。
+ */
+export function interpretBrewResult(result: CommandResult): InstallOutcome {
+  const text = `${result.stdout}\n${result.stderr}`;
+  if (result.code === 0) return { kind: "installed" };
+  if (/already installed|up-to-date|最新/i.test(text)) {
+    return { kind: "already" };
+  }
+  if (result.code === -1) {
+    return {
+      kind: "failed",
+      detail: "時間内に終わりませんでした。回線の状態を確認してください。",
+    };
+  }
+  return {
+    kind: "failed",
+    detail:
+      text.trim().split("\n").slice(-3).join(" ") || "原因が分かりません。",
+  };
 }
 
 export type InstallOutcome =
