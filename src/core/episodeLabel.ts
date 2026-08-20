@@ -111,3 +111,24 @@ export function stripChapterLabel(
     .replace(/^[\s　:：・．.。、,，\-–—]+/, "");
   return rest.length > 0 ? rest : null;
 }
+
+/**
+ * 合本（1ファイルに複数話）と見なす最小の話数。
+ *
+ * **1話しか入っていないものを合本とは呼ばない。** 投稿サイトの
+ * ダウンロードには、1話ずつ別ファイルなのに区切り行
+ * （`------- エピソードN開始 -------`）が入っている形がある。
+ * `parseCollectedFile` は区切り行が1つでもあれば話に分けて返すので、
+ * 「1話ぶん」という印が全ファイルに付いていた（2026-08-21、作者が実機で気づいた）。
+ *
+ * 印の目的は「巨大な1話に見えてしまう」のを防ぐことなので、
+ * **2話以上のときにだけ意味がある。**
+ */
+export const MIN_COLLECTED_EPISODES = 2;
+
+/** その話は合本として扱うか。**作品一覧と執筆統計で同じ判定を使う** */
+export function isCollectedFile(
+  collectedCount: number | null | undefined
+): boolean {
+  return (collectedCount ?? 0) >= MIN_COLLECTED_EPISODES;
+}

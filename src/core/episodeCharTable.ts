@@ -1,6 +1,10 @@
 import type { EpisodeFile } from "../models/types";
 import { toManuscriptPages } from "./charCount";
-import { episodeTitle, formatChapterLabel } from "./episodeLabel";
+import {
+  episodeTitle,
+  formatChapterLabel,
+  isCollectedFile,
+} from "./episodeLabel";
 import type { WorkFormatKey } from "./workFormat";
 
 /**
@@ -122,7 +126,9 @@ export function buildEpisodeCountTable(
             : ratio > LONG_RATIO
               ? "long"
               : null,
-      collectedCount: episode.collectedCount,
+      collectedCount: isCollectedFile(episode.collectedCount)
+        ? episode.collectedCount
+        : null,
       conflicted: episode.hasConflictMarkers,
     };
   });

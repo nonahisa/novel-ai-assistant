@@ -1,7 +1,11 @@
 import * as vscode from "vscode";
 import { EpisodeFile, WorkEntry, WorkStats } from "../models/types";
 import { formatCount, toManuscriptPages } from "../core/charCount";
-import { episodeTitle, formatChapterLabel } from "../core/episodeLabel";
+import {
+  episodeTitle,
+  formatChapterLabel,
+  isCollectedFile,
+} from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
 import { scanWork } from "../core/scanner";
@@ -168,8 +172,14 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     item.description = [
       title,
       // 合本は1ファイルに全話が入っている。何話ぶんかが分からないと、
-      // 巨大な1話に見えてしまう
-      ep.collectedCount !== null ? `${ep.collectedCount}話ぶん` : null,
+      // 巨大な1話に見えてしまう。
+      //
+      // **2話以上のときだけ出す。** 投稿サイトのダウンロードには、
+      // 1話ずつ別ファイルなのに区切り行（「エピソードN開始」）が
+      // 入っている形がある。そこに「1話ぶん」と出しても何も伝わらず、
+      // **同じ一覧の中で行の形だけが変わって読みにくい**
+      // （2026-08-21、作者が実機で気づいた）
+      isCollectedFile(ep.collectedCount) ? `${ep.collectedCount}話ぶん` : null,
       `${formatCount(ep.counts.net)}字`,
     ]
       .filter((part): part is string => part !== null)
@@ -225,7 +235,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         `- ファイル: ${ep.fileName}`,
         `- 種別: ${ep.kind}`,
         `- 話数: ${chapterLabel || "判定不能"}`,
-        ep.collectedCount !== null
+        isCollectedFile(ep.collectedCount)
           ? `- 全話が1ファイルに入っています（${ep.collectedCount}話ぶん）。話ごとに分けて扱います`
           : null,
         `- 純文字数: ${formatCount(ep.counts.net)} 字`,
