@@ -71,3 +71,46 @@ describe("各話あらすじの読み物", () => {
     ).toContain("まだあらすじがありません");
   });
 });
+
+/**
+ * **見出しの二重**（2026-08-19、作者が実機で発見）。
+ *
+ * 投稿サイトの題は「第1話　気がついたら幽霊」のように**話数を含む**。
+ * 見出し側にも「第1話」を出すので、そのまま並べると二重になる。
+ *
+ * 一覧（`workTree`）と文字数表（`episodeCharTable`）は `episodeTitle` を
+ * 通していたが、**あらすじだけが漏れていた。**
+ */
+describe("見出しに話数を二重に出さない", () => {
+  const build = (title: string | null) =>
+    buildSynopsisListMarkdown(
+      { schemaVersion: "0.1", episodes: [episode({ chapter: 1, title })] },
+      options
+    );
+
+  test("題に「第1話」が入っていたら、片方を落とす", () => {
+    const md = build("第1話　気がついたら幽霊");
+
+    expect(md).toContain("## 第1話 気がついたら幽霊");
+    expect(md).not.toContain("第1話 第1話");
+  });
+
+  test("区切りが記号でも落とす", () => {
+    expect(build("第1話：気がついたら幽霊")).toContain(
+      "## 第1話 気がついたら幽霊"
+    );
+  });
+
+  test("題が話数だけなら、題を出さない", () => {
+    // **同じ文字を右にもう一度出しても、伝わる情報が増えない**
+    expect(build("第1話")).not.toContain("第1話 第1話");
+  });
+
+  test("話数を含まない題は、そのまま出す", () => {
+    expect(build("気がついたら幽霊")).toContain("## 第1話 気がついたら幽霊");
+  });
+
+  test("題が無ければ、見出しは話数だけ", () => {
+    expect(build(null)).toContain("## 第1話");
+  });
+});

@@ -1,4 +1,5 @@
 import type { ChapterSynopsis, ChapterSynopsisSet } from "../models/synopsis";
+import { stripChapterLabel } from "./episodeLabel";
 
 /**
  * 各話あらすじを読める形にする。
@@ -71,5 +72,9 @@ export function buildSynopsisListMarkdown(
 function headingFor(episode: ChapterSynopsis): string {
   const chapter =
     episode.chapter !== null ? `第${episode.chapter}話` : episode.fileName;
-  return episode.title ? `${chapter} ${episode.title}` : chapter;
+  // **題にも「第1話」が入っていることがある**（投稿サイトの題がそうなっている）。
+  // そのまま並べると「第1話 第1話　気がついたら幽霊」になる
+  // （2026-08-19、作者が実機で発見）
+  const title = stripChapterLabel(episode.title, chapter);
+  return title ? `${chapter} ${title}` : chapter;
 }

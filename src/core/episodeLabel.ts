@@ -85,7 +85,24 @@ export function episodeTitle(
   ep: Pick<EpisodeFile, "metaTitle" | "subtitle">,
   chapterLabel: string
 ): string | null {
-  const raw = (ep.metaTitle ?? ep.subtitle)?.trim();
+  return stripChapterLabel((ep.metaTitle ?? ep.subtitle)?.trim(), chapterLabel);
+}
+
+/**
+ * 見出しと重なる部分を、題から落とす。
+ *
+ * **見出しを付ける側は、必ずここを通すこと。**
+ * 通し忘れると「第1話　第1話　気がついたら幽霊」になる。
+ * 各話あらすじの見出しで実際に起きた（2026-08-19、作者が実機で発見）。
+ *
+ * 題が話数だけの場合（「第16話」）は何も返さない。
+ * 見出しと同じ文字を右にもう一度出しても、伝わる情報が増えない。
+ */
+export function stripChapterLabel(
+  title: string | null | undefined,
+  chapterLabel: string
+): string | null {
+  const raw = title?.trim();
   if (!raw) return null;
   if (!chapterLabel || !raw.startsWith(chapterLabel)) return raw;
   // 「第1話」に続く区切り（空白・記号）も一緒に落とす
