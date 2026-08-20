@@ -171,16 +171,49 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     this.postItems();
   }
 
+  /**
+   * 表示するものを丸ごと入れ替える。
+   *
+   * **渡さなかった入れ物は空になる。** 以前は表示口ごとに「他の入れ物を
+   * 空にする」処理を書いており、5つのうち4つが `recordUpdates` を
+   * 空にし忘れていた。描画は `recordUpdates` を最優先で出すので、
+   * **一度でも設定資料の更新を出すと、以後の誤字脱字がすべて隠れていた**
+   * （2026-08-21、作者が実機で発見。見出しだけ「誤字脱字」に変わり、
+   * 中身は前の更新のままだった）。
+   *
+   * 入れ物を増やしたときに書き忘れる形の失敗なので、**入れ替えを
+   * ここ1か所に集める。**
+   */
+  private replaceContents(
+    work: WorkEntry,
+    category: string,
+    contents: {
+      items?: ProposalViewItem[];
+      contradictions?: ContradictionViewItem[];
+      recordUpdates?: RecordUpdateViewItem[];
+      applyRecordUpdate?: (
+        id: string
+      ) => Promise<{ ok: boolean; reason?: string }>;
+    }
+  ): void {
+    this.work = work;
+    this.category = category;
+    this.items = contents.items ?? [];
+    this.contradictions = contents.contradictions ?? [];
+    this.recordUpdates = contents.recordUpdates ?? [];
+    this.applyRecordUpdate = contents.applyRecordUpdate;
+    this.postItems();
+    // パネルが開いていなければ前面に出す。開いていれば余計なフォーカス移動はしない
+    void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
+  }
+
   /** `checkTypos` の結果を差し替えて表示する */
   showResults(
     work: WorkEntry,
     issues: TypoCheckIssue[],
     category = "誤字脱字"
   ): void {
-    this.work = work;
-    this.category = category;
-    this.contradictions = [];
-    this.items = issues.map((issue, index) => ({
+    const items: ProposalViewItem[] = issues.map((issue, index) => ({
       id: `${issue.chunkHash}:${issue.line}:${index}`,
       filePath: issue.filePath,
       fileName: path.basename(issue.filePath),
@@ -193,9 +226,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       confidence: issue.confidence,
       status: "pending",
     }));
-    this.postItems();
-    // パネルが開いていなければ前面に出す。開いていれば余計なフォーカス移動はしない
-    void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
+    this.replaceContents(work, category, { items });
   }
 
   /**
@@ -205,10 +236,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * 作者にしか決められないので、見に行く先を出すだけにする。
    */
   showContradictions(work: WorkEntry, issues: ContradictionIssue[]): void {
-    this.work = work;
-    this.category = "矛盾";
-    this.items = [];
-    this.contradictions = issues.map((issue, index) => ({
+    const contradictions: ContradictionViewItem[] = issues.map((issue, index) => ({
       id: `c:${issue.chunkHash}:${issue.line}:${index}`,
       filePath: issue.filePath,
       fileName: path.basename(issue.filePath),
@@ -225,8 +253,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       rightLabel: "本文では",
       openTarget: "settings",
     }));
-    this.postItems();
-    void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
+    this.replaceContents(work, "矛盾", { contradictions });
   }
 
   /**
@@ -236,10 +263,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * 正しいかは作者にしか決められない（**プロットのほうが古いこともある**）。
    */
   showDeviations(work: WorkEntry, issues: DeviationIssue[]): void {
-    this.work = work;
-    this.category = "プロット逸脱";
-    this.items = [];
-    this.contradictions = issues.map((issue, index) => ({
+    const contradictions: ContradictionViewItem[] = issues.map((issue, index) => ({
       id: `d:${issue.chunkHash}:${issue.lineStart}:${index}`,
       filePath: issue.filePath,
       fileName: path.basename(issue.filePath),
@@ -260,8 +284,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       rightLabel: "この話では",
       openTarget: "plot",
     }));
-    this.postItems();
-    void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
+    this.replaceContents(work, "プロット逸脱", { contradictions });
   }
 
   /**
@@ -271,18 +294,14 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * 本文を書き換える処理を新しく作らない。
    */
   showProposals(work: WorkEntry, items: ProposalViewItem[]): void {
-    this.work = work;
-    this.category = "編集部からの提案";
-    this.contradictions = [];
-    this.items = items.map((item) => ({
+    const resolved: ProposalViewItem[] = items.map((item) => ({
       ...item,
       // 提案のファイルは作品フォルダーからの相対パス。開くには繋ぐ
       filePath: path.isAbsolute(item.filePath)
         ? item.filePath
         : path.join(work.folderPath, item.filePath),
     }));
-    this.postItems();
-    void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
+    this.replaceContents(work, "編集部からの提案", { items: resolved });
   }
 
   /**
@@ -296,14 +315,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     items: RecordUpdateViewItem[],
     apply: (id: string) => Promise<{ ok: boolean; reason?: string }>
   ): void {
-    this.work = work;
-    this.category = "設定資料の更新";
-    this.items = [];
-    this.contradictions = [];
-    this.recordUpdates = items;
-    this.applyRecordUpdate = apply;
-    this.postItems();
-    void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
+    this.replaceContents(work, "設定資料の更新", {
+      recordUpdates: items,
+      applyRecordUpdate: apply,
+    });
   }
 
   private postItems(): void {
