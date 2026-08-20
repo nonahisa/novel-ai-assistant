@@ -135,6 +135,31 @@ export async function runSetupWizard(
   );
 
   if (!test.ok) {
+    // **Ollamaだけは、入っていない・起動していないことがある。**
+    // 「設定を開く」と言われても、まだ何も入れていない人は何もできない。
+    // 何が要るのかを一覧で見せる道へ案内する（作者の指示、2026-08-19）。
+    //
+    // クラウドのAIは鍵の入力で先に躓くので、ここへは来ない
+    if (providerPick.providerId === "ollama") {
+      const action = await vscode.window.showWarningMessage(
+        "Ollamaにつながりませんでした。",
+        {
+          modal: true,
+          detail:
+            test.message +
+            "\n\nOllamaは、お使いのパソコンの中でAIを動かす土台です。" +
+            "無料で、原稿を外へ送りません。\n" +
+            "まだ入れていない場合は、何がどれだけ要るのかを一覧でお見せします。",
+        },
+        "セットアップを始める"
+      );
+      if (action === "セットアップを始める") {
+        // コマンド経由で呼ぶ。直接 import すると読み込みが循環する
+        await vscode.commands.executeCommand("novelai.setupOllama");
+      }
+      return false;
+    }
+
     const action = await vscode.window.showErrorMessage(
       test.message,
       "設定を開く",

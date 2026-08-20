@@ -142,6 +142,7 @@ import {
   reviewProposals,
   toggleReviewLock,
 } from "./features/reviewProposals";
+import { offerFirstRunSetupInVsCode } from "./features/firstRun";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -1954,6 +1955,10 @@ export async function activate(
   // await しないのは、回線が遅い環境で拡張機能の起動を待たせないため。
   // fetchは取得のみなので、途中で終わってもローカルには何も起きない
   void gitSync.refreshAll({ fetch: true });
+
+  // **はじめて開いたときだけ、使うAIを選んでもらう**（作者の指示、2026-08-19）。
+  // await しないのは、選び終わるまで拡張機能の初期化が止まるのを避けるため
+  void offerFirstRunSetupInVsCode(context, aiRegistry);
 
   // **VS Code 標準のMarkdownプレビューへ差し込む**（設計書6.12）。
   // 独自のプレビュー画面を作らないのは、作者が既に使っている

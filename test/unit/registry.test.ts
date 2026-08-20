@@ -55,7 +55,14 @@ describe("AI設定ウィザード", () => {
     expect(select).toHaveBeenCalledWith("ollama", "model-1");
   });
 
-  test("接続失敗時に選択したプロバイダの設定を開ける", async () => {
+  /**
+   * **Ollamaだけは扱いが違う**（2026-08-19、作者の指示）。
+   *
+   * 「設定を開く」と言われても、**まだ何も入れていない人は何もできない。**
+   * 何が要るのかを一覧で見せる道（`novelai.setupOllama`）へ案内する。
+   * クラウドのAIは鍵の入力で先に躓くので、この分岐へは来ない。
+   */
+  test("Ollamaにつながらなければ、セットアップの案内へ繋ぐ", async () => {
     const provider: AIProvider = {
       id: "ollama",
       displayName: "Ollama",
@@ -78,15 +85,12 @@ describe("AI設定ウィザード", () => {
       showQuickPick: vi.fn(async () => ({ providerId: "ollama" })),
       withProgress: vi.fn(async (_options, task) => task()),
       showErrorMessage: vi.fn(async () => "設定を開く"),
-      showWarningMessage: vi.fn(async () => undefined),
+      showWarningMessage: vi.fn(async () => "セットアップを始める"),
       showInformationMessage: vi.fn(async () => undefined),
     });
 
     await expect(runSetupWizard(registry)).resolves.toBe(false);
-    expect(executeCommand).toHaveBeenCalledWith(
-      "workbench.action.openSettings",
-      "novelai.ollama"
-    );
+    expect(executeCommand).toHaveBeenCalledWith("novelai.setupOllama");
     expect(provider.listModels).not.toHaveBeenCalled();
   });
 
