@@ -20,6 +20,8 @@ export type TypoRejectionReason =
   | "protected_term"
   /** 作者が「直さない」と決めた語を含む */
   | "kept_word"
+  /** 一人称・二人称を別のものへ入れ替えようとしている */
+  | "pronoun_change"
   /** 修正案が「空文字」「なし」など、中身の無いことを書いた言葉 */
   | "placeholder_suggestion"
   /** 修正案が元の語と同じ。押しても何も起きない */
@@ -169,6 +171,20 @@ export function validateTypoIssues(
       continue;
     }
 
+    // **一人称を入れ替えてくる。**
+    // 実データで「僕が所属する」→「私が所属する」、「僕ら」→「私たち」が
+    // 返った（2026-08-18）。**一人称は作品の根幹で、直されたら語り手が
+    // 別人になる。** 方言と違ってどの小説にも必ずあるので、作者が
+    // 登録するのを待たず、最初から守る
+    if (isPronounSwap(issue.target, issue.suggestion)) {
+      rejected.push({
+        line: issue.line,
+        target: issue.target,
+        reason: "pronoun_change",
+      });
+      continue;
+    }
+
     // **同じ語を「修正案」として返してくる。**
     // 作者の10作品で測ったところ、通った62件のうち**25件がこれだった**
     // （「保険」→「保険」、「跨いだ」→「跨いだ」）。押しても何も起きないのに、
@@ -248,6 +264,91 @@ export function validateTypoIssues(
   }
 
   return { accepted, rejected };
+}
+
+/**
+ * 違いが人称の入れ替えだけか。
+ *
+ * **一人称は作品の根幹である。** 「僕」で書かれた小説を「私」に直されたら、
+ * 語り手が別人になる。誤字ではない。
+ *
+ * 実データで返ってきたもの（2026-08-18）：
+ *
+ *     「僕が所属する」→「私が所属する」
+ *     「僕ら」→「私たち」
+ *
+ * **人称をすべて同じ印に置き換えて、残りが一致するかで見る。**
+ * 一致するなら、違いは人称だけということになる。
+ *
+ * 複数形（「僕ら」「私たち」）も並べる。並べないと
+ * 「僕ら」→「〓ら」、「私たち」→「〓たち」となって一致せず、素通りする。
+ *
+ * **長いものから当てる。** 「私」を先に当てると「私たち」の「たち」が残る。
+ */
+const PRONOUN_FORMS = [
+  // 一人称（複数）
+  "わたくしたち",
+  "わたしたち",
+  "あたしたち",
+  "私たち",
+  "僕たち",
+  "俺たち",
+  "我々",
+  "吾々",
+  "私達",
+  "僕達",
+  "俺達",
+  "僕ら",
+  "俺ら",
+  "私ら",
+  "我ら",
+  // 一人称（単数）
+  "わたくし",
+  "わたし",
+  "あたし",
+  "自分",
+  "小生",
+  "拙者",
+  "吾輩",
+  "我輩",
+  "私",
+  "僕",
+  "ぼく",
+  "俺",
+  "おれ",
+  "儂",
+  "わし",
+  // 二人称
+  "あなたたち",
+  "あなた方",
+  "あんたら",
+  "君たち",
+  "お前ら",
+  "お前たち",
+  "あなた",
+  "あんた",
+  "貴方",
+  "お前",
+  "おまえ",
+  "君",
+  "きみ",
+];
+
+/** 人称を1つの印に潰す。長いものから当てないと途中で切れる */
+function maskPronouns(text: string): string {
+  let masked = text;
+  for (const form of PRONOUN_FORMS) {
+    masked = masked.split(form).join("〓");
+  }
+  return masked;
+}
+
+export function isPronounSwap(target: string, suggestion: string): boolean {
+  if (target === suggestion) return false;
+  const a = maskPronouns(target);
+  const b = maskPronouns(suggestion);
+  // 潰す前は違うのに、潰したら同じ ＝ 違いは人称だけ
+  return a === b && a !== target;
 }
 
 /**
