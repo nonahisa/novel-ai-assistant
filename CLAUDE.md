@@ -85,7 +85,11 @@ src/
 │  ├─ location.ts        場所
 │  ├─ customField.ts     作者が定義する追加項目
 │  ├─ aiNote.ts          AIの掘り下げメモ
-│  └─ jsonValidation.ts  作者が手編集するJSONの検証部品
+│  ├─ jsonValidation.ts  作者が手編集するJSONの検証部品
+│  ├─ keepWord.ts       作者が「直さない」と決めた語（方言・口癖）
+│  ├─ actor.ts          誰の操作か（作者・編集者・AI）
+│  ├─ proposal.ts       編集部からの提案と、その承認・却下
+│  └─ fileLock.ts       校閲中のファイルのロック（ファイル単位）
 │
 ├─ core/                 ドメインロジック
 │  【原稿を読む】
@@ -128,13 +132,27 @@ src/
 │  ├─ markdownLite.ts     パネル表示用のMarkdown整形
 │  ├─ imeDictionary.ts    IME辞書
 │  ├─ termIndex.ts        用語の索引（ハイライト用）
-│  └─ logger.ts           失敗の記録（APIキーは伏せる）
+│  ├─ logger.ts           失敗の記録（APIキーは伏せる）
+│  ├─ ruby.ts            ルビ記法の変換（投稿サイト↔｛漢字｜かんじ｝）
+│  ├─ markdownItRuby.ts  標準のMarkdownプレビューへルビを差し込む
+│  └─ markdownConversion.ts .txt を .md へ（名前だけ変える）
+│  【AIの出力から原稿を守る】
+│  ├─ placeholderText.ts 「空文字」など、中身の無い言葉を修正案にしない
+│  ├─ keepWordStore.ts   直さない語の永続化
+│  └─ protectExternalEdits.ts 外で直された資料をAIから守る印
+│  【編集部と一緒に書く】
+│  ├─ editorMode.ts      編集者モードで使える操作（許すものを並べる）
+│  ├─ actorContext.ts    いまの環境が誰として動いているか
+│  ├─ editHistory.ts     編集履歴（同期される。追記だけ）
+│  ├─ proposalStore.ts   編集部からの提案（同期される。追記だけ）
+│  └─ fileLockStore.ts   校閲ロック（同期される。追記だけ）
 │
 ├─ ai/                   AIプロバイダ抽象化
 │  ├─ types.ts           AIProvider インターフェース、AIError
 │  ├─ registry.ts        プロバイダ選択・セットアップウィザード
 │  ├─ ollamaProvider.ts / ollamaLauncher.ts
 │  ├─ claudeProvider.ts / openaiProvider.ts / geminiProvider.ts
+│  ├─ sakuraProvider.ts  さくらのAI Engine（OpenAI互換）
 │  ├─ httpClient.ts      共通のHTTP・再試行
 │  ├─ jsonSchema.ts      プロバイダ方言へのスキーマ変換
 │  └─ outputLimit.ts     出力トークン上限
@@ -156,7 +174,13 @@ src/
 │  ├─ setupOllama.ts        Ollamaの導入・起動・モデル取得の案内
 │  ├─ writingProgress.ts    保存時の執筆量の記録・ステータスバー
 │  ├─ writingStatsPanel.ts  執筆量パネル（グラフ・話ごとの一覧）
-│  └─ selectOllamaExecutable.ts
+│  ├─ selectOllamaExecutable.ts
+│  ├─ proposalPanel.ts     提案パネル（旧「AI指摘」。作者への提案は全部ここ）
+│  ├─ reviewProposals.ts   編集部の提案の確認と、校閲ロックの開始・終了
+│  ├─ editHistoryPanel.ts  編集履歴（作者・編集者・AIで色分け）
+│  ├─ manageKeepWords.ts   直さない語の管理
+│  ├─ protectExternalEdits.ts 外で直された資料を守る
+│  └─ ruby.ts              ルビを振る・投稿サイト用に変換・取り込む
 │
 └─ views/                VSCode UI
    ├─ workTree.ts          作品一覧
@@ -165,7 +189,9 @@ src/
    ├─ settingsPanelHtml.ts パネルのWebView
    ├─ writingStatsPanelHtml.ts 執筆量パネル（グラフは自前のSVG）
    ├─ termHighlight.ts     用語ハイライト
-   └─ progress.ts          進捗表示（中止ボタン付き）
+   ├─ progress.ts          進捗表示（中止ボタン付き）
+   ├─ proposalPanelHtml.ts 提案パネルのWebView
+   └─ editHistoryPanelHtml.ts 編集履歴のWebView
 ```
 
 **依存の方向**：`views` / `features` → `core` → `models`。逆流させない。`models` は VSCode API に依存させない（テストしやすくするため）。
@@ -268,19 +294,23 @@ npm run check            # 型検査＋単体テスト＋本番ビルド
 
 ## 現在の状況
 
-`docs/進捗と引継ぎ.md` を参照。要約すると：
+`docs/進捗と引継ぎ.md` の「いまの状態」を参照。**この節は要約なので、細かい進捗はそちらが正しい。**
 
-- 0.0.1（作品管理・文字数計測・AI設定・登場人物抽出）：VSIX生成と自動検証済み
-- フェーズ0（作品管理・文字数計測）：完了、実データとVS Code統合テストで検証済み
-- フェーズ1（AI連携・設定資料抽出）：人物・能力・場所の抽出、設定資料パネル（書き換え・項目の充実・AIへの相談）、同一人物のまとめ、更新の承認、作者が定義する追加項目、用語ハイライトまで実装。Ollamaで実データ検証済み。**残るのは世界観まとめ（P-03）とプロットモード**
-- 使えるAI：Ollama・Gemini・ChatGPT・Claude。Geminiは実キーで検証済み。ChatGPTとClaudeは未検証（Claudeは残高不足で到達できず）
-- フェーズ2以降：用語ハイライト、あらすじ生成、誤字脱字検知＋AI指摘パネルを実装済み。伏線追跡・推敲・矛盾検知は未着手
-- フェーズ4：執筆量の統計（日次・週次・月次・年次）・目標と達成率・話ごとの文字数一覧は実装済み（設計書6.3）。実データで記録と集計を確認済み、実機（F5）でのパネル表示は未確認
+- **Marketplace で公開済み**（発行者 `nonahisa`）。手元の版のほうが先へ進んでいることがあるので、**出す前に必ず引継ぎ書で確認する**
+- フェーズ0〜3はすべて実装済み：作品管理・文字数・執筆統計／設定資料の抽出と閲覧／プロット逆算・あらすじ・紹介文・キャッチコピー・感情曲線／**誤字脱字・表記ゆれ・推敲・矛盾・プロット逸脱**／GitHub同期／IME辞書／ルビ
+- **未着手**：世界観まとめ（P-03）、プロットモード専用画面、伏線追跡、設定資料エクスポート
+- 使えるAI：Ollama・Gemini・Claude・ChatGPT・**さくらのAI Engine**。実キーで確かめたのは Ollama と Gemini だけ
+- **編集部と一緒に書ける**（設計書5.6）。編集者モード・提案・校閲ロック・編集履歴。**編集部は本文を書き換えず、提案として置く**
 
-次にやるべきことは `docs/進捗と引継ぎ.md` の「次にやること」を参照。
+次にやるべきことは `docs/進捗と引継ぎ.md` の「次にやること」を参照。**最優先は実機（F5）での確認**で、0.6.13以降の画面をほとんど実機で見ていない。
 
-**この作品で繰り返し起きた失敗**：単体テストが通っても実データで動かないことが何度もあった。データ構造の理解が誤っていたり、設計上の制約（既存ファイルの上書き禁止など）を知らずに書いたため。**実際に動かして確かめるまで「できました」と言わない。**
+**この作品で繰り返し起きた失敗**
 
+1. **単体テストが通っても実データで動かない。** データ構造の理解が誤っていたり、設計上の制約（既存ファイルの上書き禁止など）を知らずに書いたため。**実際に動かして確かめるまで「できました」と言わない。**
+2. **AIの機能は、実データで測るまで壊れているか分からない。** 誤字脱字は64件中62件が素通り、推敲は修正案が10件中10件空、逸脱検知は全話0件だった。**見逃しと誤検出の両方を測ること。** 片方だけでは、何も指摘しない実装が満点になる
+3. **指示の言葉が、答えの中身として返ってくる。** `"suggestion": "空文字"`、`"category": "人物|状態|時系列"`。**新しくプロンプトへ書く指示語は、そのまま返ってくる前提で検査を書く**
+4. **外の状態（公開されているか等）を文書だけで判断しない。** 引継ぎ書が古く、公開済みなのに「未公開」と報告した
+5. **実接続の測定は、製品と同じ検証を通す。** 迂回すると、製品に無い不具合を見つけたことになる（1日に2度踏んだ）
 ---
 
 ## ユーザーの環境
