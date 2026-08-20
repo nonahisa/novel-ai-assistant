@@ -144,6 +144,11 @@ import {
 } from "./features/reviewProposals";
 import { offerFirstRunSetupInVsCode } from "./features/firstRun";
 import { splitCollectedFile } from "./features/splitCollectedFile";
+import {
+  copyBodyForPosting,
+  copySubtitle,
+  renameWithSubtitle,
+} from "./features/episodeCopy";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -1964,6 +1969,36 @@ export async function activate(
           return;
         }
         await splitCollectedFile(node.work, node.episode.filePath);
+        treeProvider.refresh(node.work.id);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.copySubtitle",
+      async (node?: EpisodeNode) => {
+        if (node) await copySubtitle(node.episode);
+      }
+    ),
+    vscode.commands.registerCommand(
+      "novelai.copyBodyForPosting",
+      async (node?: EpisodeNode) => {
+        if (!node) return;
+        // 未保存のままコピーすると、画面と違う本文を渡してしまう
+        if (
+          !(await saveDirtyDocumentsBeforeExtraction(node.work, "本文のコピー"))
+        ) {
+          return;
+        }
+        await copyBodyForPosting(node.episode);
+      }
+    ),
+    vscode.commands.registerCommand(
+      "novelai.renameWithSubtitle",
+      async (node?: EpisodeNode) => {
+        if (!node) return;
+        await renameWithSubtitle(node.work, node.episode);
         treeProvider.refresh(node.work.id);
       }
     )

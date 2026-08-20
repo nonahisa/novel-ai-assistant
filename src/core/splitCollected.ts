@@ -165,8 +165,9 @@ function buildName(
   extension: string
 ): string {
   const head = `${prefix}${formatChapterNumber(number, digits)}`;
-  // **サブタイトルは付けない。** 記号や長さでファイル名が壊れるより、
-  // 番号だけのほうが確実である（作者はあとから自由に変えられる）
+  // **サブタイトルを付ける**（作者の指示、2026-08-19）。
+  // 番号だけだと、一覧から何の話か分からない。
+  // 記号はファイル名に使えるものへ落とす（`sanitizeFileName`）
   const safe = title ? sanitizeFileName(title) : "";
   const body = safe ? `${head}_${safe}` : head;
   return `${body}${extension}`;
