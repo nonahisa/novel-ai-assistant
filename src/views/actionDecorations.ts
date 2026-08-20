@@ -3,7 +3,6 @@ import {
   ACTION_TREE,
   actionKeyFromUri,
   type ActionCounter,
-  type ActionItem,
 } from "./actionList";
 
 /**
@@ -101,13 +100,15 @@ export class ActionDecorationProvider
       }
     }
 
-    if (actionByCommand(key)?.usesAI) {
-      return {
-        badge: "AI",
-        tooltip: "AIを使います（クラウドのAIは実行のたびに課金されます）",
-        color: new vscode.ThemeColor("charts.purple"),
-      };
-    }
+    // **AIの印はここでは出さない**（2026-08-19）。
+    //
+    // 作者から「四角で囲んでほしい」と指定があったが、**バッジは2文字までしか
+    // 出せない**ので `[AI]` が入らない。囲み文字（🄰🄸）はUTF-16で4つぶんに
+    // なり、切り捨てられて壊れる。
+    //
+    // そこで説明欄（`actionList.ts` の `AI_MARK`）へ移した。
+    // **紫色は失われる**が、囲みのほうが印として分かりやすい。
+    // ここへ戻す場合は、囲みを諦めることになる。
     return undefined;
   }
 
@@ -139,18 +140,6 @@ function counterFor(key: string): ActionCounter | undefined {
   return undefined;
 }
 
-function actionByCommand(command: string): ActionItem | undefined {
-  for (const group of ACTION_TREE) {
-    for (const entry of group.entries) {
-      if (entry.kind === "action" && entry.command === command) return entry;
-      if (entry.kind === "section") {
-        const found = entry.items.find((item) => item.command === command);
-        if (found) return found;
-      }
-    }
-  }
-  return undefined;
-}
 
 /** 実際に使われている件数の種類だけを数える */
 function usedCounters(): ActionCounter[] {

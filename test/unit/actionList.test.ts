@@ -5,6 +5,7 @@ import {
   ACTION_TREE,
   ActionListProvider,
   actionResourceUri,
+  AI_MARK,
   allActions,
   isActionEnabled,
   REQUIRES_WORK_HINT,
@@ -318,19 +319,46 @@ describe("件数の印", () => {
     ).toBe("99");
   });
 
-  test("AIを呼ぶ操作には「AI」と出す", () => {
+  /**
+   * **AIの印は、末尾のバッジから説明欄へ移した**（作者の指示、2026-08-19）。
+   *
+   * 「四角で囲んでほしい」という指定だったが、**バッジは2文字までしか
+   * 出せない**ので `[AI]` が入らない。囲み文字（🄰🄸）はUTF-16で4つぶんに
+   * なり、切り捨てられて壊れる。
+   */
+  test("AIの印は、もうバッジには出さない", () => {
     const provider = new ActionDecorationProvider(async () => 0);
 
     expect(
       provider.provideFileDecoration(
         actionResourceUri(actionNode("novelai.checkTypos"))
-      )?.badge
-    ).toBe("AI");
+      )
+    ).toBeUndefined();
+  });
+
+  test("AIを使わない操作にも、何も出さない", () => {
+    const provider = new ActionDecorationProvider(async () => 0);
+
     expect(
       provider.provideFileDecoration(
         actionResourceUri(actionNode("novelai.generateSettingsDocs"))
       )
     ).toBeUndefined();
+  });
+
+  test("印は四角で囲む", () => {
+    // **素の「AI」だと、後ろに続く説明文と地続きに見えて印だと分からない**
+    expect(AI_MARK).toBe("[AI]");
+  });
+
+  test("AIを使う操作は、いまも見分けられる", () => {
+    // 印の出し方を変えても、**どれがAIを呼ぶのかは分かる必要がある**
+    const usesAI = allActions().filter((action) => action.usesAI);
+
+    expect(usesAI.map((a) => a.command)).toContain("novelai.checkTypos");
+    expect(usesAI.map((a) => a.command)).not.toContain(
+      "novelai.generateSettingsDocs"
+    );
   });
 
   test("数えられなくてもメニューは出す", async () => {
