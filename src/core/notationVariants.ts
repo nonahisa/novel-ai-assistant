@@ -1,3 +1,4 @@
+import { OKURIGANA_GROUPS } from "./okuriganaVariants";
 /**
  * 表記ゆれ検知（P-13）の判定部分。
  *
@@ -42,7 +43,7 @@ export interface NotationVariantForm {
 
 export interface NotationVariantGroup {
   /** 何を手掛かりに見つけた組か */
-  kind: "proper_noun" | "kana_kanji";
+  kind: "proper_noun" | "kana_kanji" | "okurigana";
   /** 組を一意に識別するキー。無視の記録に使う */
   key: string;
   /** 画面に出す見出し（例:「良い ↔ よい」） */
@@ -111,6 +112,7 @@ export function detectNotationVariants(
   const groups: NotationVariantGroup[] = [
     ...detectProperNounVariants(sources, options.properNouns),
     ...detectKanaKanjiVariants(sources),
+    ...detectOkuriganaVariants(sources),
   ];
 
   // 揺れの大きい（出現数の多い）組から見せる。作者は上から片付けられる
@@ -184,6 +186,46 @@ function detectKanaKanjiVariants(
     groups.push({
       kind: "kana_kanji",
       key: `kana_kanji:${pair.kanji}|${pair.kana}`,
+      label: forms.map((form) => form.surface).join(" ↔ "),
+      forms,
+    });
+  }
+
+  return groups;
+}
+
+/**
+ * 送り仮名ゆれ（設計書6.13.6）。
+ *
+ * **厳選した一覧で見る**（`OKURIGANA_GROUPS`）。
+ * 汎用の検出は実データで壊れた。語の切れ目を決めるには形態素解析が要り、
+ * 無いままだと「今 / 今なら / 今さら」のような組が数百件挙がる。
+ *
+ * **長い表記から先に数える。** 「打合せ」を先に数えると、
+ * 「打ち合わせ」の中の「合わせ」までは拾わないが、
+ * 「申込」は「申込み」の一部なので**二重に数える**。
+ * 長いほうを先に数え、短いほうからは除いてある。
+ */
+function detectOkuriganaVariants(
+  sources: NotationSource[]
+): NotationVariantGroup[] {
+  const groups: NotationVariantGroup[] = [];
+
+  for (const group of OKURIGANA_GROUPS) {
+    // 長い順に並べ、短いものは「より長いもの」を除外して数える
+    const ordered = [...group].sort((a, b) => b.length - a.length);
+    const forms = collectForms(
+      sources,
+      ordered.map((surface, index) => ({
+        surface,
+        exclude: ordered.slice(0, index),
+      }))
+    );
+    if (forms.length < 2) continue;
+
+    groups.push({
+      kind: "okurigana",
+      key: `okurigana:${ordered.join("|")}`,
       label: forms.map((form) => form.surface).join(" ↔ "),
       forms,
     });
