@@ -9,6 +9,7 @@ import {
 import { OllamaProvider } from "./ollamaProvider";
 import { ClaudeProvider } from "./claudeProvider";
 import { OpenAIProvider } from "./openaiProvider";
+import { SakuraProvider } from "./sakuraProvider";
 import { GeminiProvider } from "./geminiProvider";
 import { withProgress } from "../views/progress";
 import { probeGeneration } from "./generationProbe";
@@ -33,6 +34,7 @@ export class AIRegistry {
       new OllamaProvider(),
       new GeminiProvider(context),
       new OpenAIProvider(context),
+      new SakuraProvider(context),
       new ClaudeProvider(context),
     ] as AIProvider[]) {
       this.providers.set(provider.id, provider);
@@ -102,6 +104,7 @@ export async function runSetupWizard(
     ollama: "無料・オフライン可。ローカル実行",
     gemini: "無料枠あり。超えると課金される",
     openai: "実行するたびに課金される",
+    sakura: "国内のサービス。実行するたびに課金される",
     claude: "高精度だが実行するたびに課金される",
   };
 

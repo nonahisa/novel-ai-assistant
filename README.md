@@ -2,7 +2,7 @@
 
 小説を書くための作品管理・文字数計測・AI支援を1つにまとめたVSCode拡張機能です。
 
-このリポジトリの版：**0.7.2**（実際に使って見つかった不具合の修正）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.7.3**（実際に使って見つかった不具合の修正）。Marketplace に出ている版はこれより遅れることがあります。
 
 ## できること
 
@@ -299,6 +299,16 @@ ollama pull gemma4:e4b
 OpenAIのモデル一覧APIはコンテキスト長を返しません。そのため設定 `novelai.openai.contextWindow`（既定128000）の値を使います。**この値は本文の分割単位を決めるので、実際のモデルより大きいと入力が黙って切り捨てられます。** 使用するモデルの仕様に合わせて設定してください。
 
 GeminiとOllamaはモデル側から取得できるため、設定は不要です。
+
+#### さくらのAI Engineを使う場合の注意
+
+**国内のサービスなので、原稿の送り先が国内で完結します。** Ollama（手元のパソコン）ほどではありませんが、海外のクラウドへ送るより気が楽な場合の選択肢です。
+
+ChatGPTと同じく、モデル一覧APIはコンテキスト長を返しません。`novelai.sakura.contextWindow`（既定32000）を、使うモデルに合わせて設定してください。**実際より大きいと入力が黙って切り捨てられます。**
+
+**モデルの大きさに見合った扱いをします。** さくらが提供しているのは公開重みのモデル（`preview/gemma-4-31B-it` など）で、名前に大きさが入っています。そこを読んで、Ollamaと同じ物差しで能力を見積もります。「クラウドだから最上位」とは扱いません。31Bのモデルに、もっと大きなモデル向けの長さの指示を送っても、うまくいかないためです。
+
+**JSON形式の強制が効かない場合は、自動で外して出し直します。** その旨はログに残ります。
 
 ### 設定資料の抽出
 
@@ -671,6 +681,9 @@ AI処理の記録は「**ログを開く**」（ヘルプ）で開けます。�
 | `novelai.openai.timeoutSeconds` | `180` | ChatGPTの1回の呼び出しのタイムアウト |
 | `novelai.openai.contextWindow` | `128000` | ChatGPTのコンテキスト長。**APIから取得できないため、実際より大きいと入力が切り捨てられます** |
 | `novelai.gemini.endpoint` | `https://generativelanguage.googleapis.com/v1beta` | GeminiのURL。通常は変更不要です |
+| `novelai.sakura.endpoint` | `https://api.ai.sakura.ad.jp/v1` | さくらのAI EngineのURL。OpenAI互換の口を使います。通常は変更不要です |
+| `novelai.sakura.timeoutSeconds` | `180` | さくらのAI Engineの1回の呼び出しのタイムアウト |
+| `novelai.sakura.contextWindow` | `32000` | さくらのAI Engineのコンテキスト長。**APIから取得できないため、実際より大きいと入力が切り捨てられます** |
 | `novelai.gemini.timeoutSeconds` | `180` | Geminiの1回の呼び出しのタイムアウト |
 | `novelai.maxOutputTokens` | `16384` | 1回の応答で受け取る最大トークン数。Claude・ChatGPT・Geminiへはこの値をそのまま送ります。**出力は入力より単価が高い**ので、必要以上に大きくしないでください。Ollamaへは送りませんが、確保するコンテキスト長の計算には使われます |
 | `novelai.chunkChars` | `0`（自動） | 1チャンクの文字数 |

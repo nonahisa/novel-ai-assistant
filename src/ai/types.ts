@@ -1,5 +1,10 @@
 /** 対応プロバイダ */
-export type ProviderId = "ollama" | "gemini" | "claude" | "openai";
+export type ProviderId =
+  | "ollama"
+  | "gemini"
+  | "claude"
+  | "openai"
+  | "sakura";
 
 /** モデルの能力ティア。プロンプトとチャンクサイズの自動調整に使う */
 export type CapabilityTier = "high" | "standard" | "light";
