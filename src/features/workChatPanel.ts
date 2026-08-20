@@ -125,7 +125,7 @@ type Incoming =
 /**
  * 標準機能を起動する口。
  *
- * **相談パネル自身は機能を持たない。** 誤字脱字の検知は結果をAI指摘パネルへ
+ * **相談パネル自身は機能を持たない。** 誤字脱字の検知は結果を提案パネルへ
  * 出すところまでが一続きで、そのパネルは `extension.ts` が持っている。
  * ここでコマンド名を組み立てて `executeCommand` を呼ぶより、
  * 呼び出し側から起動の口を渡してもらうほうが、**何が起動されうるかが
@@ -662,7 +662,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       void this.view?.webview.postMessage({
         type: "runDone",
         id,
-        message: "実行しました。結果は下段の「AI指摘」パネルに出ます。",
+        message: "実行しました。結果は下段の「提案」パネルに出ます。",
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

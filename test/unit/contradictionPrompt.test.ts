@@ -6,7 +6,7 @@ import {
   CONTRADICTION_CHECK_SYSTEM_PROMPT,
   LIGHT_CATEGORIES,
 } from "../../src/prompts/contradictionCheck";
-import { buildTypoIssuePanelHtml } from "../../src/views/typoIssuePanelHtml";
+import { buildProposalPanelHtml } from "../../src/views/proposalPanelHtml";
 
 /**
  * 矛盾検知のプロンプトと画面（設計書6.10.1）。
@@ -126,7 +126,7 @@ describe("出力の形", () => {
 });
 
 describe("画面", () => {
-  const HTML = buildTypoIssuePanelHtml("test-nonce", "vscode-resource:");
+  const HTML = buildProposalPanelHtml("test-nonce", "vscode-resource:");
 
   function script(): string {
     const found = HTML.match(/<script nonce="test-nonce">([\s\S]*?)<\/script>/);

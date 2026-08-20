@@ -8,7 +8,7 @@ import { formatLogTime } from "./logger";
 import type { AcceptedTypoIssue } from "./typoCheckValidation";
 
 /**
- * AI指摘（誤字脱字など）の「無視」履歴と、承認・却下の操作ログ。
+ * 提案（誤字脱字など）の「無視」履歴と、承認・却下の操作ログ。
  *
  * 設計書6.11「承認済み・却下済みの履歴は `.aiwriter/logs/ai_actions.log` に
  * 保存し、あとから見返せるようにする」に対応する。

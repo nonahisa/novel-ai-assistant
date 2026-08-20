@@ -116,7 +116,7 @@ import { pruneAllLogs } from "./features/pruneLogs";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
 import { hasUnsavedChanges } from "./core/textFile";
-import { AI_ISSUES_VIEW_ID, TypoIssuePanel } from "./features/typoIssuePanel";
+import { PROPOSALS_VIEW_ID, ProposalPanel } from "./features/proposalPanel";
 import {
   WritingProgressTracker,
   boundaryHour,
@@ -351,12 +351,12 @@ export async function activate(
   refreshActionBadges();
   registry.onDidChange(() => refreshActionBadges());
 
-  // AI指摘パネル（下段・出力やデバッグコンソールと同じ場所）。
+  // 提案パネル（下段・出力やデバッグコンソールと同じ場所）。
   // 誤字脱字検知の結果をここへ表示する。設定資料パネルと違い
   // 作品ごとには分けず、直近に検知した作品の結果を1枚で見せる
-  const typoIssuePanel = new TypoIssuePanel();
+  const proposalPanel = new ProposalPanel();
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(AI_ISSUES_VIEW_ID, typoIssuePanel, {
+    vscode.window.registerWebviewViewProvider(PROPOSALS_VIEW_ID, proposalPanel, {
       webviewOptions: { retainContextWhenHidden: true },
     })
   );
@@ -394,28 +394,28 @@ export async function activate(
       if (kind === "checkDeviations") {
         const result = await checkDeviations(work, aiRegistry);
         if (!result || result.cancelled) return;
-        typoIssuePanel.showDeviations(work, result.issues);
+        proposalPanel.showDeviations(work, result.issues);
         return;
       }
 
       if (kind === "checkProofread") {
         const result = await checkProofread(work, aiRegistry);
         if (!result || result.cancelled) return;
-        typoIssuePanel.showResults(work, result.issues, "推敲");
+        proposalPanel.showResults(work, result.issues, "推敲");
         return;
       }
 
       if (kind === "checkContradictions") {
         const result = await checkContradictions(work, aiRegistry);
         if (!result || result.cancelled) return;
-        typoIssuePanel.showContradictions(work, result.issues);
+        proposalPanel.showContradictions(work, result.issues);
         return;
       }
 
       if (kind === "checkNotation") {
         const result = await checkNotation(work);
         if (!result || result.cancelled) return;
-        typoIssuePanel.showResults(work, result.issues, "表記ゆれ");
+        proposalPanel.showResults(work, result.issues, "表記ゆれ");
         return;
       }
 
@@ -427,7 +427,7 @@ export async function activate(
           : {}
       );
       if (!result) return;
-      typoIssuePanel.showResults(work, result.issues);
+      proposalPanel.showResults(work, result.issues);
       reportTypoCheckResult(
         kind === "checkTyposForFile"
           ? `${path.basename(filePath ?? "")} の誤字脱字検知`
@@ -1353,7 +1353,7 @@ export async function activate(
           },
         });
         if (!work) return;
-        await applyPendingCharacterUpdates(work);
+        await applyPendingCharacterUpdates(work, proposalPanel);
         treeProvider.refresh(work.id);
         // 名前や別名が変われば、本文で光る範囲も変わる
         highlighter.invalidate();
@@ -1569,7 +1569,7 @@ export async function activate(
         const result = await checkTypos(work, aiRegistry);
         if (!result) return;
 
-        typoIssuePanel.showResults(work, result.issues);
+        proposalPanel.showResults(work, result.issues);
         reportTypoCheckResult("誤字脱字検知", result);
       }
     )
@@ -1589,7 +1589,7 @@ export async function activate(
         const result = await checkNotation(work);
         if (!result || result.cancelled) return;
 
-        typoIssuePanel.showResults(work, result.issues, "表記ゆれ");
+        proposalPanel.showResults(work, result.issues, "表記ゆれ");
 
         if (result.groupCount === 0) return;
         const parts = [`${result.groupCount}組を検出`];
@@ -1624,7 +1624,7 @@ export async function activate(
         const result = await checkDeviations(work, aiRegistry);
         if (!result || result.cancelled) return;
 
-        typoIssuePanel.showDeviations(work, result.issues);
+        proposalPanel.showDeviations(work, result.issues);
 
         const parts = [`指摘 ${result.issues.length}件`];
         if (result.ungroundedCount > 0) {
@@ -1659,7 +1659,7 @@ export async function activate(
         const result = await checkProofread(work, aiRegistry);
         if (!result || result.cancelled) return;
 
-        typoIssuePanel.showResults(work, result.issues, "推敲");
+        proposalPanel.showResults(work, result.issues, "推敲");
 
         const parts = [`指摘 ${result.issues.length}件`];
         if (result.overBudgetCount > 0) {
@@ -1689,7 +1689,7 @@ export async function activate(
         const result = await checkContradictions(work, aiRegistry);
         if (!result || result.cancelled) return;
 
-        typoIssuePanel.showContradictions(work, result.issues);
+        proposalPanel.showContradictions(work, result.issues);
 
         const parts = [`指摘 ${result.issues.length}件`];
         if (result.rejectedCount > 0) {
@@ -1725,7 +1725,7 @@ export async function activate(
         });
         if (!result) return;
 
-        typoIssuePanel.showResults(work, result.issues);
+        proposalPanel.showResults(work, result.issues);
         reportTypoCheckResult(`${node.episode.fileName} の誤字脱字検知`, result);
       }
     )
@@ -1937,7 +1937,7 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
-        await reviewProposals(work, typoIssuePanel);
+        await reviewProposals(work, proposalPanel);
       }
     ),
     vscode.commands.registerCommand(
@@ -2032,7 +2032,7 @@ export type WorkRef = Pick<WorkNode, "type" | "work">;
 /**
  * 相談パネルから起動できる機能と、対応するコマンド。
  *
- * **校正・校閲だけは別扱い**（結果をAI指摘パネルへ出すところまでが
+ * **校正・校閲だけは別扱い**（結果を提案パネルへ出すところまでが
  * 一続きで、そのパネルはここが持っているため）。それ以外は
  * **既にあるコマンドへそのまま渡す**。処理を二重に持つと、
  * 片方だけ直したときに「メニューからは動くのに相談からは動かない」

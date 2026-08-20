@@ -50,7 +50,7 @@ describe("使い方の説明", () => {
   });
 
   test("画面の説明を含む（操作メニューに出ないもの）", () => {
-    for (const name of ["AI指摘", "設定資料", "作品一覧", "右クリック"]) {
+    for (const name of ["提案", "設定資料", "作品一覧", "右クリック"]) {
       expect(guide, name).toContain(name);
     }
   });

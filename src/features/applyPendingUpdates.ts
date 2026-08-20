@@ -11,6 +11,7 @@ import {
 } from "../core/characterDiff";
 import { CustomFieldStore } from "../core/customFieldStore";
 import { logFailure } from "../core/logger";
+import type { ProposalPanel } from "./proposalPanel";
 
 /**
  * 抽出で作られた既存人物の更新案を、作者が確認して反映する。
@@ -28,7 +29,14 @@ interface ReviewItem {
 }
 
 export async function applyPendingCharacterUpdates(
-  work: WorkEntry
+  work: WorkEntry,
+  /**
+   * 提案パネル。**渡されたらそちらへ出す**（設計書5.6）。
+   *
+   * 作者への提案の窓口を1つにする。本文の直しは提案パネル、設定資料の
+   * 更新は別のダイアログ、では**片方を見落とす。**
+   */
+  panel?: ProposalPanel
 ): Promise<void> {
   const pendingStore = new PendingUpdateStore(work);
   const characterStore = new CharacterStore(work);
@@ -85,6 +93,45 @@ export async function applyPendingCharacterUpdates(
   if (items.length === 0) {
     vscode.window.showInformationMessage(
       "反映が必要な更新はありませんでした。古い更新案は片付けました。"
+    );
+    return;
+  }
+
+  // **提案の窓口を1つにする**（設計書5.6）。本文の直しは提案パネル、
+  // 設定資料の更新は別のダイアログ、では作者が片方を見落とす
+  if (panel) {
+    panel.showRecordUpdates(
+      work,
+      items.map((item) => ({
+        id: item.update.filePath,
+        name: item.diff.name,
+        // **何がどう変わるかを全部並べる。** 折り畳むと読まずに押される
+        changes: formatDiff(item.diff).split("\n").filter(Boolean),
+        source: summarizeDiff(item.diff),
+        status: "pending" as const,
+      })),
+      async (id) => {
+        const target = items.find((item) => item.update.filePath === id);
+        if (!target) return { ok: false, reason: "対象が見つかりません。" };
+        try {
+          // 既存ファイルは上書きできないので saveOrUpdate を通す
+          await characterStore.saveOrUpdate(target.update.character);
+          await pendingStore.discard(target.update.filePath);
+          return { ok: true };
+        } catch (error) {
+          const message =
+            error instanceof CharacterStoreError
+              ? error.message
+              : error instanceof Error
+                ? error.message
+                : String(error);
+          logFailure("更新の反映に失敗", {
+            人物: target.diff.name,
+            詳細: message,
+          });
+          return { ok: false, reason: message };
+        }
+      }
     );
     return;
   }

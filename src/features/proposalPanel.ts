@@ -12,7 +12,7 @@ import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
 import type { TypoCheckIssue } from "./checkTypos";
 import type { AcceptedContradiction as ContradictionIssue } from "../core/contradictionValidation";
 import type { DeviationIssue } from "./checkDeviations";
-import { buildTypoIssuePanelHtml } from "../views/typoIssuePanelHtml";
+import { buildProposalPanelHtml } from "../views/proposalPanelHtml";
 import { KeepWordStore } from "../core/keepWordStore";
 import { validateKeepWord } from "../models/keepWord";
 import { manualActor, recordEdit } from "../core/actorContext";
@@ -25,7 +25,7 @@ import { gitUserName } from "../core/git";
 import { acceptProposal, rejectProposal } from "./reviewProposals";
 
 /**
- * AI指摘パネル（誤字脱字）。
+ * 提案パネル（誤字脱字）。
  *
  * 出力・デバッグコンソールと同じ下段の領域に表示する
  * `WebviewViewProvider`。設定資料パネル（`settingsPanel.ts`）は
@@ -37,9 +37,9 @@ import { acceptProposal, rejectProposal } from "./reviewProposals";
  * 汎用の名前にしてあり、今回は誤字脱字だけを実装する。
  */
 
-export const AI_ISSUES_VIEW_ID = "novelai.aiIssuesView";
+export const PROPOSALS_VIEW_ID = "novelai.proposalsView";
 
-export interface TypoIssueViewItem {
+export interface ProposalViewItem {
   id: string;
   filePath: string;
   fileName: string;
@@ -92,12 +92,33 @@ export interface ContradictionViewItem {
   openTarget: "settings" | "plot";
 }
 
+/**
+ * 設定資料の更新の1件（設計書5.6）。
+ *
+ * **本文の置き換えとは形が違う。** 行と文字ではなく、レコードと項目である。
+ * それでも**作者への提案であることは同じ**なので、同じパネルに出す。
+ * 提案の窓口が2つあると、片方を見落とす。
+ */
+export interface RecordUpdateViewItem {
+  id: string;
+  /** 何のレコードか（人物名など） */
+  name: string;
+  /** 何が変わるか。1行ずつの説明 */
+  changes: string[];
+  /** どこから来た提案か */
+  source: string;
+  status: "pending" | "applied" | "failed" | "dismissed";
+  statusDetail?: string;
+}
+
 type OutgoingMessage = {
   type: "issues";
   workTitle: string;
   /** パネルの見出し。誤字脱字か表記ゆれか矛盾かで変わる */
   category: string;
-  items: Array<TypoIssueViewItem | ContradictionViewItem>;
+  items: Array<
+    ProposalViewItem | ContradictionViewItem | RecordUpdateViewItem
+  >;
   /** 「まとめて適用」を出すか。矛盾では出さない */
   canApplyAll: boolean;
 };
@@ -110,10 +131,10 @@ type IncomingMessage =
   | { type: "openSettings"; id: string }
   | { type: "applyAll" };
 
-export class TypoIssuePanel implements vscode.WebviewViewProvider {
+export class ProposalPanel implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private work: WorkEntry | undefined;
-  private items: TypoIssueViewItem[] = [];
+  private items: ProposalViewItem[] = [];
   /**
    * 矛盾の指摘。誤字脱字とは別に持つ。
    *
@@ -121,13 +142,22 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
    * 前提にしており、混ぜると矛盾を「適用」しようとして壊れる。
    */
   private contradictions: ContradictionViewItem[] = [];
+  /**
+   * 設定資料の更新。**本文の置き換えとは処理がまるごと違う**ので、
+   * 同じ配列へ混ぜない（矛盾を別に持つのと同じ理由）
+   */
+  private recordUpdates: RecordUpdateViewItem[] = [];
+  /** 更新を反映する処理。呼び出し側から渡してもらう */
+  private applyRecordUpdate:
+    | ((id: string) => Promise<{ ok: boolean; reason?: string }>)
+    | undefined;
   private category = "誤字脱字";
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
     webviewView.webview.options = { enableScripts: true };
     const nonce = createNonce();
-    webviewView.webview.html = buildTypoIssuePanelHtml(
+    webviewView.webview.html = buildProposalPanelHtml(
       nonce,
       webviewView.webview.cspSource
     );
@@ -165,7 +195,7 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
     }));
     this.postItems();
     // パネルが開いていなければ前面に出す。開いていれば余計なフォーカス移動はしない
-    void vscode.commands.executeCommand(`${AI_ISSUES_VIEW_ID}.focus`);
+    void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
   }
 
   /**
@@ -196,7 +226,7 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
       openTarget: "settings",
     }));
     this.postItems();
-    void vscode.commands.executeCommand(`${AI_ISSUES_VIEW_ID}.focus`);
+    void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
   }
 
   /**
@@ -231,7 +261,7 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
       openTarget: "plot",
     }));
     this.postItems();
-    void vscode.commands.executeCommand(`${AI_ISSUES_VIEW_ID}.focus`);
+    void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
   }
 
   /**
@@ -240,7 +270,7 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
    * **誤字脱字の指摘と形が同じ**なので、適用・無視の道をそのまま使える。
    * 本文を書き換える処理を新しく作らない。
    */
-  showProposals(work: WorkEntry, items: TypoIssueViewItem[]): void {
+  showProposals(work: WorkEntry, items: ProposalViewItem[]): void {
     this.work = work;
     this.category = "編集部からの提案";
     this.contradictions = [];
@@ -252,17 +282,44 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
         : path.join(work.folderPath, item.filePath),
     }));
     this.postItems();
-    void vscode.commands.executeCommand(`${AI_ISSUES_VIEW_ID}.focus`);
+    void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
+  }
+
+  /**
+   * 設定資料の更新を表示する（設計書5.6）。
+   *
+   * **提案の窓口を1つにする。** 本文の直しは提案パネル、設定資料の更新は
+   * 別のダイアログ、では作者が片方を見落とす。
+   */
+  showRecordUpdates(
+    work: WorkEntry,
+    items: RecordUpdateViewItem[],
+    apply: (id: string) => Promise<{ ok: boolean; reason?: string }>
+  ): void {
+    this.work = work;
+    this.category = "設定資料の更新";
+    this.items = [];
+    this.contradictions = [];
+    this.recordUpdates = items;
+    this.applyRecordUpdate = apply;
+    this.postItems();
+    void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
   }
 
   private postItems(): void {
     if (!this.view) return;
     const contradictionMode = this.contradictions.length > 0;
+    const updateMode = this.recordUpdates.length > 0;
     const message: OutgoingMessage = {
       type: "issues",
       workTitle: this.work?.title ?? "",
       category: this.category,
-      items: contradictionMode ? this.contradictions : this.items,
+      items: updateMode
+        ? this.recordUpdates
+        : contradictionMode
+          ? this.contradictions
+          : this.items,
+      // 設定資料の更新は、まとめて反映できる（1件ずつだと19話ぶんで手が止まる）
       canApplyAll: !contradictionMode,
     };
     void this.view.webview.postMessage(message);
@@ -379,6 +436,19 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
   }
 
   private async applyIssue(id: string): Promise<void> {
+    // 設定資料の更新は、本文ではなくレコードを書き換える
+    const update = this.recordUpdates.find((entry) => entry.id === id);
+    if (update && this.applyRecordUpdate) {
+      if (update.status === "applied") return;
+      const outcome = await this.applyRecordUpdate(id);
+      this.markStatus(
+        id,
+        outcome.ok ? "applied" : "failed",
+        outcome.ok ? undefined : outcome.reason
+      );
+      return;
+    }
+
     const item = this.items.find((i) => i.id === id);
     if (!item || !this.work) return;
     if (item.status === "applied") return;
@@ -541,7 +611,7 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
    * 採るかどうかは作者が決める。
    */
   private async proposeIssue(
-    item: TypoIssueViewItem,
+    item: ProposalViewItem,
     work: WorkEntry
   ): Promise<void> {
     // 区切り文字と大文字小文字を揃える（ロックの照合と同じ規則を使う）
@@ -640,10 +710,13 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
 
   private markStatus(
     id: string,
-    status: TypoIssueViewItem["status"],
+    status: ProposalViewItem["status"],
     detail?: string
   ): void {
-    const item = this.items.find((i) => i.id === id);
+    // 本文の指摘・設定資料の更新のどちらでも印を付けられるようにする
+    const item =
+      this.items.find((i) => i.id === id) ??
+      this.recordUpdates.find((entry) => entry.id === id);
     if (!item) return;
     item.status = status;
     item.statusDetail = detail;
@@ -738,7 +811,7 @@ function describeWriteFailure(
 }
 
 /** 表示上の番号。提案の処理では item から引き直す */
-function id2(item: TypoIssueViewItem): string {
+function id2(item: ProposalViewItem): string {
   return item.id;
 }
 

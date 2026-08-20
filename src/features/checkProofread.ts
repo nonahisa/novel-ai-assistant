@@ -43,7 +43,7 @@ import { KeepWordStore } from "../core/keepWordStore";
  * （`core/proofreadValidation.ts`）。
  *
  * 指摘の形は誤字脱字と同じ（`original`/`target`/`suggestion`）なので、
- * **AI指摘パネルの適用の仕組みをそのまま使う。**
+ * **提案パネルの適用の仕組みをそのまま使う。**
  */
 
 export interface ProofreadIssue extends AcceptedProofreadIssue {

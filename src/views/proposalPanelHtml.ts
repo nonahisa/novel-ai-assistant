@@ -1,10 +1,10 @@
 /**
- * AI指摘パネル（下段・誤字脱字）の中身。
+ * 提案パネル（下段・誤字脱字）の中身。
  *
  * 設定資料パネルと同じく、値はすべて postMessage で渡し、
  * HTMLへ文字列として埋め込まない（本文の引用符で画面が壊れるのを防ぐ）。
  */
-export function buildTypoIssuePanelHtml(
+export function buildProposalPanelHtml(
   nonce: string,
   cspSource: string
 ): string {
@@ -15,7 +15,7 @@ export function buildTypoIssuePanelHtml(
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; style-src ${cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI指摘</title>
+<title>提案</title>
 <style nonce="${nonce}">
 * { box-sizing: border-box; }
 body {
@@ -176,6 +176,40 @@ function render(workTitle, items) {
  * 正しいかは作者にしか決められない（設定側が古いことがある）。
  * 「設定ではこう／本文ではこう」を並べ、見に行く先を2つ出すだけにする。
  */
+/**
+ * 設定資料の更新の1件。
+ *
+ * **何がどう変わるかを、全部並べる。** 折り畳むと読まずに押される。
+ * 作者が確定させた記述を書き換える提案なので、そこは省かない。
+ */
+function renderRecordUpdate(item) {
+  const classes = ["issue"];
+  if (item.status === "applied") classes.push("applied");
+  if (item.status === "dismissed") classes.push("dismissed");
+  const canAct = item.status === "pending" || item.status === "failed";
+
+  return (
+    '<div class="' + classes.join(' ') + '">' +
+    '<div class="meta"><span class="reason">' + escapeHtml(item.name) + '</span>' +
+    (item.source ? '<span class="conf">' + escapeHtml(item.source) + '</span>' : '') +
+    (item.status === "applied" ? '<span class="reason">反映しました</span>' : '') +
+    (item.status === "failed" ? '<span class="reason">' + escapeHtml(item.statusDetail || "失敗") + '</span>' : '') +
+    '</div>' +
+    '<div class="quote">' +
+      item.changes.map(function (line) {
+        return escapeHtml(line);
+      }).join('<br>') +
+    '</div>' +
+    (canAct
+      ? '<div class="actions">' +
+        '<button data-action="apply" data-id="' + item.id + '">反映する</button>' +
+        '<button class="secondary" data-action="dismiss" data-id="' + item.id + '">見送る</button>' +
+        '</div>'
+      : '') +
+    '</div>'
+  );
+}
+
 function renderContradiction(item) {
   const classes = ['issue', 'contradiction'];
   if (item.confidence === 'low') classes.push('low');
@@ -215,6 +249,8 @@ function renderContradiction(item) {
 function renderItem(item) {
   // 矛盾は形が違う。並べるものが「置き換え」ではなく「食い違い」である
   if (item.excerpt !== undefined) return renderContradiction(item);
+  // 設定資料の更新も形が違う。行と文字ではなくレコードと項目である
+  if (item.changes !== undefined) return renderRecordUpdate(item);
 
   const classes = ['issue'];
   if (item.confidence === 'low') classes.push('low');

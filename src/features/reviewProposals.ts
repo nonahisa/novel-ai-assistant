@@ -12,7 +12,7 @@ import {
   writeTextFilePreservingFormat,
 } from "../core/textFile";
 import { cancelItem, isCancelItem } from "../views/dialogs";
-import type { TypoIssuePanel, TypoIssueViewItem } from "./typoIssuePanel";
+import type { ProposalPanel, ProposalViewItem } from "./proposalPanel";
 
 /**
  * 編集部からの提案を、作者が見て決める（設計書5.6）。
@@ -20,13 +20,13 @@ import type { TypoIssuePanel, TypoIssueViewItem } from "./typoIssuePanel";
  * **編集部は本文を書き換えない。** 届くのは「こう直したい」という
  * 申し出だけで、採るかどうかは作者が決める。
  *
- * **既存のAI指摘パネルへ流し込む。** 誤字脱字の指摘と形が同じなので、
+ * **既存の提案パネルへ流し込む。** 誤字脱字の指摘と形が同じなので、
  * 適用・無視の道をそのまま使える。**本文を書き換える処理を新しく作らない**
  * （5.4のとおり、書き込み口を増やさない）。
  */
 export async function reviewProposals(
   work: WorkEntry,
-  panel: TypoIssuePanel
+  panel: ProposalPanel
 ): Promise<void> {
   const store = new ProposalStore(work);
   const all = await store.load();
@@ -58,11 +58,11 @@ export async function reviewProposals(
   panel.showProposals(work, pending.map(toViewItem));
   void vscode.window.showInformationMessage(
     `編集部からの提案が ${pending.length} 件あります。` +
-      "「AI指摘」パネルで1件ずつご確認ください。"
+      "「提案」パネルで1件ずつご確認ください。"
   );
 }
 
-function toViewItem(proposal: ProposalView): TypoIssueViewItem & {
+function toViewItem(proposal: ProposalView): ProposalViewItem & {
   proposalId: string;
 } {
   return {
