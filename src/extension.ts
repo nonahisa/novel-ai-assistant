@@ -131,11 +131,18 @@ import {
 } from "./features/allWorksWritingStatsPanel";
 import { askText } from "./views/dialogs";
 import { manageKeepWords } from "./features/manageKeepWords";
+import {
+  extendMarkdownItWithRuby,
+  type MarkdownItLike,
+} from "./core/markdownItRuby";
+import { addRuby, copyForPosting, importRuby } from "./features/ruby";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
+export async function activate(
+  context: vscode.ExtensionContext
+): Promise<{ extendMarkdownIt<T extends MarkdownItLike>(md: T): T }> {
   const registry = new WorkRegistry(context);
   await registry.initialize();
 
@@ -1893,10 +1900,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     )
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.addRuby", addRuby),
+    vscode.commands.registerCommand("novelai.copyForPosting", copyForPosting),
+    vscode.commands.registerCommand("novelai.importRuby", importRuby)
+  );
+
   // 起動時に一度だけ全作品の同期状態を確かめる（設計書5.5.1）。
   // await しないのは、回線が遅い環境で拡張機能の起動を待たせないため。
   // fetchは取得のみなので、途中で終わってもローカルには何も起きない
   void gitSync.refreshAll({ fetch: true });
+
+  // **VS Code 標準のMarkdownプレビューへ差し込む**（設計書6.12）。
+  // 独自のプレビュー画面を作らないのは、作者が既に使っている
+  // プレビュー（Ctrl+Shift+V）でそのまま見えるほうが良いため
+  return {
+    extendMarkdownIt<T extends MarkdownItLike>(md: T): T {
+      return extendMarkdownItWithRuby(md);
+    },
+  };
 }
 
 export function deactivate(): void {

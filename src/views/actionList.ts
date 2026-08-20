@@ -438,6 +438,41 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         items: [
           {
             kind: "action",
+            command: "novelai.addRuby",
+            // 開いているファイルに対して働くので、作品の登録は要らない
+            requiresWork: false,
+            label: "ルビを振る",
+            icon: "text-size",
+            detail:
+              "選んだ文字にルビ（振り仮名）を付けます。漢字の直後なら、" +
+              "選ばなくても拾います。Markdown（.md）のファイルだけで使えます。" +
+              "プレビュー（Ctrl+Shift+V）で振り仮名として表示されます。",
+          },
+          {
+            kind: "action",
+            command: "novelai.copyForPosting",
+            // 開いているファイルに対して働くので、作品の登録は要らない
+            requiresWork: false,
+            label: "投稿サイト用に変換してコピー",
+            icon: "clippy",
+            detail:
+              "ルビを ｜漢字《かんじ》 の形に直して、クリップボードへ入れます。" +
+              "なろう・カクヨム・アルファポリスのいずれでも、そのまま貼り付けられます。" +
+              "**原稿は書き換えません。**",
+          },
+          {
+            kind: "action",
+            command: "novelai.importRuby",
+            // 開いているファイルに対して働くので、作品の登録は要らない
+            requiresWork: false,
+            label: "投稿サイトのルビを取り込む",
+            icon: "arrow-down",
+            detail:
+              "すでに投稿した原稿を持ち込んだときに使います。｜漢字《かんじ》 を " +
+              "｛漢字｜かんじ｝ の形へ直します。何件変わるかを先に見せます。",
+          },
+          {
+            kind: "action",
             command: "novelai.generateSettingsDocs",
             label: "設定資料集を出力",
             description: "AIを使わない",
