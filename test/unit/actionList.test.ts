@@ -422,3 +422,36 @@ describe("開閉を覚える", () => {
     ).toBe(TreeItemCollapsibleState.None);
   });
 });
+
+describe("操作メニューの印の色", () => {
+  const pkg = JSON.parse(readFileSync("package.json", "utf-8")) as {
+    contributes: {
+      colors?: { id: string; defaults: Record<string, string> }[];
+    };
+  };
+
+  /**
+   * コードが使う色IDが `package.json` に無いと、VS Codeは**黙って色を付けない**。
+   * 例外も警告も出ないので、綴りを間違えても気づけない。
+   */
+  test("コードが使う色IDが package.json に定義されている", () => {
+    const source = readFileSync("src/views/actionDecorations.ts", "utf-8");
+    const used = [...source.matchAll(/ThemeColor\("(novelai\.[^"]+)"\)/g)].map(
+      (m) => m[1]
+    );
+    expect(used.length).toBeGreaterThan(0);
+
+    const declared = (pkg.contributes.colors ?? []).map((c) => c.id);
+    for (const id of used) {
+      expect(declared).toContain(id);
+    }
+  });
+
+  test("明るいテーマと暗いテーマの両方に色がある", () => {
+    for (const color of pkg.contributes.colors ?? []) {
+      // 片方だけ決めると、決めていないほうは既定の薄い色に戻る
+      expect(color.defaults.light).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(color.defaults.dark).toMatch(/^#[0-9a-f]{6}$/i);
+    }
+  });
+});

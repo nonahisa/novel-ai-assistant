@@ -96,7 +96,11 @@ export class ActionDecorationProvider
         return {
           badge: String(Math.min(count, MAX_BADGE_COUNT)),
           tooltip: COUNTER_TOOLTIPS[counter](count),
-          color: new vscode.ThemeColor("charts.orange"),
+          // **自前の色を使う。** 既定の `charts.orange`（#d18616）は
+          // 白地のテーマで薄く、件数も操作名も読みにくかった
+          // （作者の指摘、2026-08-21）。テーマごとの濃さは
+          // `package.json` の `contributes.colors` で決める
+          color: new vscode.ThemeColor("novelai.pendingBadge"),
         };
       }
     }
