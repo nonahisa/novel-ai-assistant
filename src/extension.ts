@@ -138,6 +138,10 @@ import {
 } from "./core/markdownItRuby";
 import { addRuby, copyForPosting, importRuby } from "./features/ruby";
 import { showEditHistory } from "./features/editHistoryPanel";
+import {
+  reviewProposals,
+  toggleReviewLock,
+} from "./features/reviewProposals";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -1923,6 +1927,25 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         await showEditHistory(context, work);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.reviewProposals",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await reviewProposals(work, typoIssuePanel);
+      }
+    ),
+    vscode.commands.registerCommand(
+      "novelai.toggleReviewLock",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await toggleReviewLock(work);
       }
     )
   );

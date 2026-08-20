@@ -327,6 +327,29 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         items: [
           {
             kind: "action",
+            command: "novelai.reviewProposals",
+            label: "編集部からの提案を見る",
+            icon: "inbox",
+            requiresWork: true,
+            detail:
+              "編集部が出した直しの提案を、1件ずつ確認して採るか見送るかを決めます。" +
+              "**編集部は本文を書き換えません。** 届くのは提案だけで、" +
+              "本文に入るのはあなたが採ると決めたものだけです。",
+          },
+          {
+            kind: "action",
+            command: "novelai.toggleReviewLock",
+            label: "校閲を始める／終える",
+            icon: "lock",
+            requiresWork: true,
+            detail:
+              "いま開いているファイルを「校閲中」として押さえます。" +
+              "作者側でそのファイルを直そうとすると、誰がいつから見ているかが出ます。" +
+              "**ファイル単位です**ので、他の話は今までどおり書けます。" +
+              "終わったらもう一度押して外してください。",
+          },
+          {
+            kind: "action",
             command: "novelai.checkTypos",
             label: "誤字脱字を検知",
             icon: "search-fuzzy",

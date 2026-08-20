@@ -502,6 +502,18 @@
         "title": "編集履歴を見る",
         "category": "小説執筆",
         "icon": "$(history)"
+      },
+      {
+        "command": "novelai.reviewProposals",
+        "title": "編集部からの提案を見る",
+        "icon": "$(inbox)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.toggleReviewLock",
+        "title": "校閲を始める／終える",
+        "icon": "$(lock)",
+        "category": "小説執筆"
       }
     ],
     "menus": {

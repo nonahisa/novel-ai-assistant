@@ -16,6 +16,13 @@ import { buildTypoIssuePanelHtml } from "../views/typoIssuePanelHtml";
 import { KeepWordStore } from "../core/keepWordStore";
 import { validateKeepWord } from "../models/keepWord";
 import { manualActor, recordEdit } from "../core/actorContext";
+import { isEditorMode } from "../core/actorContext";
+import { ProposalStore } from "../core/proposalStore";
+import { proposalId } from "../models/proposal";
+import { FileLockStore } from "../core/fileLockStore";
+import { describeLock, normalizeFile } from "../models/fileLock";
+import { gitUserName } from "../core/git";
+import { acceptProposal, rejectProposal } from "./reviewProposals";
 
 /**
  * AI指摘パネル（誤字脱字）。
@@ -45,6 +52,13 @@ export interface TypoIssueViewItem {
   confidence: "high" | "medium" | "low";
   status: "pending" | "applied" | "failed" | "dismissed";
   statusDetail?: string;
+  /**
+   * 編集部の提案として来たものなら、その番号。
+   *
+   * **提案は本文への適用だけで終わらない。** 採ったか見送ったかを
+   * 提案の側にも書き戻す必要がある（設計書5.6）。
+   */
+  proposalId?: string;
 }
 
 /**
@@ -220,6 +234,27 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
     void vscode.commands.executeCommand(`${AI_ISSUES_VIEW_ID}.focus`);
   }
 
+  /**
+   * 編集部からの提案を表示する（設計書5.6）。
+   *
+   * **誤字脱字の指摘と形が同じ**なので、適用・無視の道をそのまま使える。
+   * 本文を書き換える処理を新しく作らない。
+   */
+  showProposals(work: WorkEntry, items: TypoIssueViewItem[]): void {
+    this.work = work;
+    this.category = "編集部からの提案";
+    this.contradictions = [];
+    this.items = items.map((item) => ({
+      ...item,
+      // 提案のファイルは作品フォルダーからの相対パス。開くには繋ぐ
+      filePath: path.isAbsolute(item.filePath)
+        ? item.filePath
+        : path.join(work.folderPath, item.filePath),
+    }));
+    this.postItems();
+    void vscode.commands.executeCommand(`${AI_ISSUES_VIEW_ID}.focus`);
+  }
+
   private postItems(): void {
     if (!this.view) return;
     const contradictionMode = this.contradictions.length > 0;
@@ -349,6 +384,37 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
     if (item.status === "applied") return;
     const work = this.work;
 
+    // **編集者モードでは本文を書き換えない。提案として置く**（設計書5.6）。
+    // 作者の意向に反して勝手に書き換えられることが、構造として起きない。
+    // **競合も起きない。** 編集部が触るのは提案のファイルだけである
+    if (isEditorMode()) {
+      await this.proposeIssue(item, work);
+      return;
+    }
+
+    // 編集部が校閲中のファイルは、作者も触らない（設計書5.6）。
+    // 触ると、届いた提案が本文と合わなくなる
+    if (!(await this.confirmNotLocked(item.filePath, work))) return;
+
+    // **提案は、本文への適用と「採った」の記録が対になる**（設計書5.6）
+    if (item.proposalId) {
+      const outcome = await acceptProposal(work, {
+        id: item.proposalId,
+        file: path.relative(work.folderPath, item.filePath),
+        line: item.line,
+        original: item.original,
+        target: item.target,
+        suggestion: item.suggestion,
+      });
+      if (!outcome.ok) {
+        this.markStatus(id, "failed", outcome.reason);
+        return;
+      }
+      this.markStatus(id, "applied", "提案を採り入れました。");
+      await revertIfOpen(item.filePath);
+      return;
+    }
+
     let file;
     try {
       file = await readTextFile(item.filePath);
@@ -468,6 +534,79 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
     await this.dismissIssue(id);
   }
 
+  /**
+   * 本文を書き換えず、提案として置く（編集者モード）。
+   *
+   * **作者に届くのは「こう直したい」という申し出だけ。**
+   * 採るかどうかは作者が決める。
+   */
+  private async proposeIssue(
+    item: TypoIssueViewItem,
+    work: WorkEntry
+  ): Promise<void> {
+    // 区切り文字と大文字小文字を揃える（ロックの照合と同じ規則を使う）
+    const relative = normalizeFile(
+      path.relative(work.folderPath, item.filePath)
+    );
+    const proposer = (await gitUserName(work.folderPath).catch(() => undefined)) ?? "";
+
+    try {
+      await new ProposalStore(work).propose([
+        {
+          id: proposalId(relative, item.line, item.target, item.suggestion),
+          time: new Date().toISOString(),
+          proposer,
+          file: relative,
+          line: item.line,
+          original: item.original,
+          target: item.target,
+          suggestion: item.suggestion,
+          reason: item.reason,
+          category: this.category,
+        },
+      ]);
+    } catch (error) {
+      this.markStatus(
+        id2(item),
+        "failed",
+        `提案を書き出せませんでした: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return;
+    }
+
+    this.markStatus(id2(item), "applied", "提案として作者へ送りました。");
+    await recordEdit(work, {
+      actor: "editor",
+      action: `${this.category}の直しを提案した`,
+      file: path.basename(item.filePath),
+      detail: `${item.line}行 「${item.target}」→「${item.suggestion}」`,
+    });
+  }
+
+  /**
+   * 編集部が校閲中でないかを確かめる。
+   *
+   * **作者は自分の判断で進められる。** 止めるのではなく、
+   * 誰がいつから見ているかを伝えて選ばせる。
+   */
+  private async confirmNotLocked(
+    filePath: string,
+    work: WorkEntry
+  ): Promise<boolean> {
+    const relative = normalizeFile(path.relative(work.folderPath, filePath));
+    const lock = await new FileLockStore(work).lockFor(relative);
+    if (!lock || lock.holderKind !== "editor") return true;
+
+    const answer = await vscode.window.showWarningMessage(
+      `${path.basename(filePath)} は校閲中です。`,
+      { modal: true, detail: describeLock(lock) },
+      "それでも直す"
+    );
+    return answer === "それでも直す";
+  }
+
   private async dismissIssue(id: string): Promise<void> {
     const contradiction = this.contradictions.find((entry) => entry.id === id);
     if (contradiction && this.work) {
@@ -479,6 +618,12 @@ export class TypoIssuePanel implements vscode.WebviewViewProvider {
     if (!item || !this.work) return;
     const work = this.work;
 
+    if (item.proposalId) {
+      // **提案を見送ったことは、編集部にも伝わる必要がある**
+      await rejectProposal(work, item.proposalId, item.fileName);
+      this.markStatus(id, "dismissed");
+      return;
+    }
     await new TypoDismissedHistory(work).add([
       dismissKey(item.chunkHash, item),
     ]);
@@ -590,6 +735,11 @@ function describeWriteFailure(
     default:
       return "適用に失敗しました。";
   }
+}
+
+/** 表示上の番号。提案の処理では item から引き直す */
+function id2(item: TypoIssueViewItem): string {
+  return item.id;
 }
 
 function createNonce(): string {

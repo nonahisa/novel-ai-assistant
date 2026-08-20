@@ -45,6 +45,10 @@ const EDITOR_ALLOWED = new Set<string>([
   "novelai.openSettingsPanel",
   "novelai.showEditHistory",
 
+  // **校閲の要**。ファイルを押さえ、提案の行方を見る
+  "novelai.toggleReviewLock",
+  "novelai.reviewProposals",
+
   // 困ったときのために残す
   "novelai.openExtensionSettings",
   "novelai.showVersion",
