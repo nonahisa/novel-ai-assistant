@@ -149,6 +149,7 @@ import {
   copySubtitle,
   renameWithSubtitle,
 } from "./features/episodeCopy";
+import { countUnextractedEpisodes } from "./features/extractionFreshness";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -505,6 +506,10 @@ export async function activate(
           }
         : undefined;
     },
+    // **まだ設定資料へ取り込んでいない話の数**（設計書6.21.1）。
+    // 更新時刻だけで見る。中身で比べるには全話をチャンクへ割ることになり、
+    // 独り言のために払う費用としては大きすぎる
+    unextractedEpisodes: (work) => countUnextractedEpisodes(work),
     counts: () => ({
       pendingUpdates: actionDecorations.countOf("pendingUpdates"),
       mergeCandidates: actionDecorations.countOf("mergeCandidates"),

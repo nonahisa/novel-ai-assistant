@@ -40,6 +40,14 @@ const TICK_MS = 60 * 1_000;
 export const QUIET_GAP_MS = 10 * 60 * 1_000;
 
 /**
+ * 未抽出の話数を数え直す間隔。
+ *
+ * **数えるには作品の走査が要る。** 1分ごとの様子見のたびに走らせると、
+ * 書いている最中に無駄な読み取りが起きる。申し出が数分遅れても困らない。
+ */
+export const UNEXTRACTED_INTERVAL_MS = 5 * 60 * 1_000;
+
+/**
  * 使う相手を、必要な分だけの形で受け取る。
  *
  * `WorkChatPanel` や `AIRegistry` をそのまま要求すると、
@@ -57,6 +65,12 @@ export interface ChatterDeps {
   summary(
     work: WorkEntry
   ): Promise<{ today: string; written: number; streak: number } | undefined>;
+  /**
+   * まだ設定資料へ取り込んでいない話の数。読めなければ undefined。
+   *
+   * **毎回は数えない**（走査が入る）。呼び出し側で間隔を空ける。
+   */
+  unextractedEpisodes(work: WorkEntry): Promise<number | undefined>;
   /** 承認待ち・重複の件数。操作メニューのバッジと同じ数 */
   counts(): { pendingUpdates: number; mergeCandidates: number };
 }
@@ -159,6 +173,29 @@ export class ChatterService implements vscode.Disposable {
     }
   }
 
+  /**
+   * 未抽出の話数。**間隔を空けて数える。**
+   *
+   * 数えるには作品を走査してファイルの時刻を引く。独り言は1分ごとに
+   * 様子を見に来るので、毎回やると書いている最中に無駄な読み取りが走る。
+   */
+  private async unextractedCached(
+    work: WorkEntry
+  ): Promise<number | undefined> {
+    const cached = this.unextracted.get(work.id);
+    if (cached && Date.now() - cached.at < UNEXTRACTED_INTERVAL_MS) {
+      return cached.count;
+    }
+    const count = await this.deps.unextractedEpisodes(work);
+    this.unextracted.set(work.id, { at: Date.now(), count });
+    return count;
+  }
+
+  private readonly unextracted = new Map<
+    string,
+    { at: number; count: number | undefined }
+  >();
+
   private async snapshot(
     work: WorkEntry
   ): Promise<ChatterState & { saidKey: string }> {
@@ -175,9 +212,9 @@ export class ChatterService implements vscode.Disposable {
       pendingUpdates: counts.pendingUpdates,
       mergeCandidates: counts.mergeCandidates,
       idleMs: Date.now() - this.lastEditAt,
-      // 未抽出の話数はまだ数えていない。**分からないものは undefined にする。**
-      // 0を渡すと「抽出済み」と言い切ることになる
-      unextractedEpisodes: undefined,
+      // **分からないものは undefined のまま渡す。**
+      // 0を渡すと「抽出済み」と言い切ることになる（設計書6.21.1）
+      unextractedEpisodes: await this.unextractedCached(work),
       openManuscriptPath: this.currentPath,
       saidToday: this.said.get(saidKey) ?? new Set<string>(),
     };

@@ -36,6 +36,9 @@ function deps(overrides: Partial<ChatterDeps> = {}): ChatterDeps & {
     // 目標を達成した状態にしておく。**何か言える状態が既定**にすることで、
     // 「黙った」ことが条件のせいだと言い切れる
     summary: async () => ({ today: "2026-08-16", written: 5_000, streak: 0 }),
+    // **既定では未抽出を0にする。** ここで数を出すと、
+    // どの試験でも抽出の申し出が混ざって「何を確かめたか」がぼやける
+    unextractedEpisodes: async () => 0,
     counts: () => ({ pendingUpdates: 0, mergeCandidates: 0 }),
     ...overrides,
   };
@@ -250,5 +253,84 @@ describe("手伝いの申し出", () => {
     await service.tick();
 
     expect(d.posted).toHaveLength(0);
+  });
+});
+
+/**
+ * 未抽出の話数の申し出（設計書6.21.1、2026-08-19）。
+ *
+ * **これまでは数えられず `undefined` を渡して黙らせていた。**
+ * 数えられるようになったので、申し出るところまで通っているかを見る。
+ */
+describe("まだ取り込んでいない話の申し出", () => {
+  test("たまっていれば申し出る", async () => {
+    const posted: Chatter[] = [];
+    const service = new ChatterService(
+      deps({
+        post: (chatter) => posted.push(chatter),
+        // **お祝いは申し出より先に出る**ので、祝う状態にしない。
+        // そうしないと、何を確かめたのかが分からない
+        summary: async () => ({ today: "2026-08-16", written: 100, streak: 0 }),
+        unextractedEpisodes: async () => 3,
+      })
+    );
+    idle(service);
+
+    await service.tick();
+
+    expect(posted.map((c) => c.text).join("\n")).toContain("3話");
+  });
+
+  test("0話なら言わない", async () => {
+    const posted: Chatter[] = [];
+    const service = new ChatterService(
+      deps({
+        post: (chatter) => posted.push(chatter),
+        unextractedEpisodes: async () => 0,
+      })
+    );
+    idle(service);
+
+    await service.tick();
+
+    expect(posted.map((c) => c.text).join("\n")).not.toContain("取り込んでいない");
+  });
+
+  test("分からなければ言わない", async () => {
+    // **0を渡すと「抽出済み」と言い切ることになる。**
+    // 一度も抽出していない作品では undefined が返る
+    const posted: Chatter[] = [];
+    const service = new ChatterService(
+      deps({
+        post: (chatter) => posted.push(chatter),
+        unextractedEpisodes: async () => undefined,
+      })
+    );
+    idle(service);
+
+    await service.tick();
+
+    expect(posted.map((c) => c.text).join("\n")).not.toContain("取り込んでいない");
+  });
+
+  test("数えるのは毎回ではない", async () => {
+    // **数えるには作品の走査が要る。** 1分ごとの様子見のたびに走らせると、
+    // 書いている最中に無駄な読み取りが起きる
+    let calls = 0;
+    const service = new ChatterService(
+      deps({
+        unextractedEpisodes: async () => {
+          calls++;
+          return 0;
+        },
+      })
+    );
+    idle(service);
+
+    await service.tick();
+    await service.tick();
+    await service.tick();
+
+    expect(calls).toBe(1);
   });
 });
