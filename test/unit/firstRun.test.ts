@@ -131,3 +131,56 @@ describe("Ollamaを選んで、つながらなかったとき", () => {
     expect(source).toContain("workbench.action.openSettings");
   });
 });
+
+/**
+ * 作品一覧のボタン（作者の指示、2026-08-19）。
+ *
+ * **「追加」どうしを隣に置く。** フォルダからとGitHubからは同じ目的なので、
+ * 離すと片方を探すことになる。
+ */
+describe("作品一覧に並ぶボタン", () => {
+  const onWorks = (): Array<{ command: string; group?: string }> => {
+    const pkg = JSON.parse(readFileSync("package.json", "utf-8")) as {
+      contributes: {
+        menus: Record<string, Array<{ command: string; when?: string; group?: string }>>;
+      };
+    };
+    return pkg.contributes.menus["view/title"]
+      .filter((entry) => String(entry.when ?? "").includes("novelai.works"))
+      .sort((a, b) => String(a.group).localeCompare(String(b.group)));
+  };
+
+  test("GitHubからの追加が並んでいる", () => {
+    expect(onWorks().map((entry) => entry.command)).toContain(
+      "novelai.addWorkFromGithub"
+    );
+  });
+
+  test("「追加」どうしが隣り合っている", () => {
+    const commands = onWorks().map((entry) => entry.command);
+    const folder = commands.indexOf("novelai.addWork");
+    const github = commands.indexOf("novelai.addWorkFromGithub");
+
+    expect(Math.abs(folder - github)).toBe(1);
+  });
+
+  test("並び順が重ならない", () => {
+    // 同じ番号だと、VS Code側の並びが安定しない
+    const groups = onWorks().map((entry) => entry.group);
+
+    expect(new Set(groups).size).toBe(groups.length);
+  });
+
+  test("アイコンが全部そろっている", () => {
+    // ボタンは名前ではなくアイコンで出る。無いと空白になる
+    const pkg = JSON.parse(readFileSync("package.json", "utf-8")) as {
+      contributes: { commands: Array<{ command: string; icon?: string }> };
+    };
+    for (const entry of onWorks()) {
+      const command = pkg.contributes.commands.find(
+        (c) => c.command === entry.command
+      );
+      expect(command?.icon, entry.command).toBeTruthy();
+    }
+  });
+});
