@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
 import { WorkEntry } from "../models/types";
 import { Character } from "../models/character";
@@ -1226,7 +1227,7 @@ function shouldOfferSettings(kind: AIError["kind"]): boolean {
 
 function dirtyDocumentsInside(folderPath: string): vscode.TextDocument[] {
   return vscode.workspace.textDocuments.filter(
-    (document) => document.isDirty && isPathInside(folderPath, document.uri.fsPath)
+    (document) => document.isDirty && isPathInside(folderPath, fromUri(document.uri))
   );
 }
 

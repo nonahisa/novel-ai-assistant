@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { fromUri } from "./paths";
 import * as path from "./paths";
 import { sha256Bytes, sha256Text } from "./hash";
 import iconv = require("iconv-lite");
@@ -457,7 +458,7 @@ export async function currentFileHash(
  */
 export function getOpenDocumentText(filePath: string): string | undefined {
   const doc = vscode.workspace.textDocuments.find(
-    (d) => sameFilePath(d.uri.fsPath, filePath)
+    (d) => sameFilePath(fromUri(d.uri), filePath)
   );
   if (!doc) return undefined;
   return doc.getText();
@@ -466,7 +467,7 @@ export function getOpenDocumentText(filePath: string): string | undefined {
 /** 未保存の変更があるか */
 export function hasUnsavedChanges(filePath: string): boolean {
   const doc = vscode.workspace.textDocuments.find(
-    (d) => sameFilePath(d.uri.fsPath, filePath)
+    (d) => sameFilePath(fromUri(d.uri), filePath)
   );
   return doc?.isDirty ?? false;
 }

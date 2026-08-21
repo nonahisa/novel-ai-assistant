@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
 import { WorkEntry } from "../models/types";
 import {
@@ -1033,7 +1034,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
  */
 async function revertIfOpen(filePath: string): Promise<void> {
   const openDoc = vscode.workspace.textDocuments.find(
-    (doc) => sameFilePath(doc.uri.fsPath, filePath) && !doc.isDirty
+    (doc) => sameFilePath(fromUri(doc.uri), filePath) && !doc.isDirty
   );
   if (!openDoc) return;
   try {

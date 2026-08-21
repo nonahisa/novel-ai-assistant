@@ -1,4 +1,5 @@
 import { sha256Bytes, sha256Text } from "./hash";
+import { fromUri } from "./paths";
 import { hostTag, randomUuid } from "./runtime";
 import * as path from "./paths";
 import * as vscode from "vscode";
@@ -90,10 +91,10 @@ async function placeNewFile(
   if (await readFileIfExists(destination)) {
     await deleteStagedFileBestEffort(temporary, stagedHash);
     throw new AtomicWriteFileError(
-      `保存先「${destination.fsPath}」は一時書き込み中に作成されました。`,
+      `保存先「${fromUri(destination)}」は一時書き込み中に作成されました。`,
       "path_conflict",
       "not_saved",
-      [destination.fsPath, temporary.fsPath]
+      [fromUri(destination), fromUri(temporary)]
     );
   }
 
@@ -105,10 +106,10 @@ async function placeNewFile(
     await deleteStagedFileBestEffort(temporary, stagedHash);
     if (isFileExists(error) || await readFileIfExists(destination)) {
       throw new AtomicWriteFileError(
-        `保存先「${destination.fsPath}」が同時に作成されました。`,
+        `保存先「${fromUri(destination)}」が同時に作成されました。`,
         "path_conflict",
         "not_saved",
-        [destination.fsPath, temporary.fsPath]
+        [fromUri(destination), fromUri(temporary)]
       );
     }
     throw error;
@@ -117,8 +118,8 @@ async function placeNewFile(
   const placed = await readFileIfExists(destination);
   if (!placed || hashBytes(placed) !== stagedHash) {
     throw manualRecoveryError(
-      `配置直後に保存先「${destination.fsPath}」が変更されました。`,
-      [destination.fsPath],
+      `配置直後に保存先「${fromUri(destination)}」が変更されました。`,
+      [fromUri(destination)],
       "ambiguous"
     );
   }
@@ -132,11 +133,11 @@ async function replaceGuarded(
 ): Promise<void> {
   let proposal: vscode.Uri;
   try {
-    proposal = path.toUri(await createManagedRecoveryPath(destination.fsPath));
+    proposal = path.toUri(await createManagedRecoveryPath(fromUri(destination)));
   } catch (error) {
     throw manualRecoveryError(
       `回復ディレクトリを準備できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, recoveryDirectoryFor(destination.fsPath), temporary.fsPath],
+      [fromUri(destination), recoveryDirectoryFor(fromUri(destination)), fromUri(temporary)],
       "not_saved"
     );
   }
@@ -146,7 +147,7 @@ async function replaceGuarded(
   } catch (error) {
     throw manualRecoveryError(
       `提案内容を回復パスへ移動できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, proposal.fsPath, temporary.fsPath],
+      [fromUri(destination), fromUri(proposal), fromUri(temporary)],
       "not_saved"
     );
   }
@@ -157,14 +158,14 @@ async function replaceGuarded(
   } catch (error) {
     throw manualRecoveryError(
       `提案内容の回復ファイルを確認できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, proposal.fsPath],
+      [fromUri(destination), fromUri(proposal)],
       "not_saved"
     );
   }
   if (!retainedProposal || hashBytes(retainedProposal) !== stagedHash) {
     throw manualRecoveryError(
       `提案内容の回復ファイルが一時書き込み時の内容と一致しません。`,
-      [destination.fsPath, proposal.fsPath],
+      [fromUri(destination), fromUri(proposal)],
       "not_saved"
     );
   }
@@ -175,29 +176,29 @@ async function replaceGuarded(
   } catch (error) {
     throw manualRecoveryError(
       `保存先を確認できませんでした: ${errorMessage(error)}`,
-      [destination.fsPath, proposal.fsPath],
+      [fromUri(destination), fromUri(proposal)],
       "not_saved"
     );
   }
   if (!current || hashBytes(current) !== expectedHash) {
-    await pruneManagedRecoveries(destination.fsPath);
+    await pruneManagedRecoveries(fromUri(destination));
     throw new AtomicWriteFileError(
-      `保存先「${destination.fsPath}」は読み込み後に変更されました。提案内容は手動適用用に「${proposal.fsPath}」へ残しました。`,
+      `保存先「${fromUri(destination)}」は読み込み後に変更されました。提案内容は手動適用用に「${fromUri(proposal)}」へ残しました。`,
       "modified_externally",
       "not_saved",
-      [destination.fsPath, proposal.fsPath]
+      [fromUri(destination), fromUri(proposal)]
     );
   }
 
   // 公開FS APIには「期待した版なら置換」を一命令で行うCASがない。
   // ここから正規パスへ触れないことで、失敗時に拡張機能が正規ファイルを
   // 消失・上書きしていない、という不変条件を外部保存やクラッシュ越しにも守る。
-  await pruneManagedRecoveries(destination.fsPath);
+  await pruneManagedRecoveries(fromUri(destination));
   throw new AtomicWriteFileError(
-    `安全に既存ファイルを自動置換できないため保存しませんでした。提案内容を「${proposal.fsPath}」から手動で反映してください。`,
+    `安全に既存ファイルを自動置換できないため保存しませんでした。提案内容を「${fromUri(proposal)}」から手動で反映してください。`,
     "path_conflict",
     "not_saved",
-    [destination.fsPath, proposal.fsPath]
+    [fromUri(destination), fromUri(proposal)]
   );
 }
 

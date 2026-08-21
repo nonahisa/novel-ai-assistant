@@ -52,9 +52,18 @@ export function toUri(location: string): vscode.Uri {
  *
  * 手元のファイルはこれまでどおり OS のパス。それ以外はURIの文字列。
  * **`toUri` と往復して同じものに戻る**ことをテストが確かめる。
+ *
+ * **仕組み（scheme）が分からないものは、OS のパスに倒す。**
+ * `toString()` に倒すと、`Uri` でないものが渡ったときに
+ * `"[object Object]"` という文字列を静かに作ってしまう。この関数は
+ * **原稿の保存先を決める道に居る**ので、判断できないときは
+ * 「これまでと同じ（`fsPath`）」へ倒すほうが安全である。
+ * 実際、テストの作り物の文書（`uri` に scheme を持たない）で
+ * 未保存の検出が丸ごと効かなくなった（2026-08-21）。
  */
 export function fromUri(uri: vscode.Uri): string {
-  return uri.scheme === "file" ? uri.fsPath : uri.toString();
+  if (uri.scheme && uri.scheme !== "file") return uri.toString();
+  return uri.fsPath;
 }
 
 /**

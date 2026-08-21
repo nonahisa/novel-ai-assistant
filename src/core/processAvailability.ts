@@ -30,12 +30,17 @@ const REQUIRES_PROCESSES = new Set<string>([
   "novelai.setupOllama",
   "novelai.runFullSetup",
   "novelai.setupVectorSearch",
-  "novelai.gitSync",
   "novelai.resolveConflicts",
   "novelai.selectOllamaExecutable",
   "novelai.shareWithEditor",
   "novelai.collectEditorProposals",
 ]);
+
+/**
+ * **`novelai.gitSync`（同期）はここに入れない。** ブラウザでは押せて、
+ * VS Code のソース管理へ案内する（設計書5.8.9）。gitコマンドは打てないが、
+ * **保存する道そのものは在る**ので、行き止まりにしない。
+ */
 
 /** そのコマンドは、いまの実行環境（Node／ブラウザ）で使えるか */
 export function isCommandAvailableInRuntime(
@@ -50,20 +55,41 @@ export const PROCESSES_BLOCKED_HINT =
   "ブラウザ版では使えません（外部プロセスを起動できないため）";
 
 export function describeProcessesBlocked(command: string): string {
+  // **細かく決めたものを先に見る。** 下の `startsWith("novelai.setup")` は
+  // 範囲が広く、`novelai.setupGithub` まで飲み込む（実際に飲み込んでいた）
+  //
+  // **すでに vscode.dev に居る人へ「github.dev を開いてください」と言わない。**
+  // 操作ごとに、その場から取れる手を示す
+  if (command === "novelai.setupGithub") {
+    return (
+      "ブラウザ版では、この設定は要りません。" +
+      "GitHubのリポジトリを開いている時点で、つながっています。" +
+      "保存は「作品管理」→「GitHubと同期」からご覧ください。"
+    );
+  }
   if (command.startsWith("novelai.setup") || command === "novelai.runFullSetup") {
     return (
       "ブラウザ版のVS Codeでは、Ollamaの導入や外部プロセスの起動ができません。" +
       "クラウドのAI（Gemini・OpenAI・さくらのAI Engine・Claude）をお使いください。"
     );
   }
-  if (
-    command.startsWith("novelai.git") ||
-    command === "novelai.addWorkFromGithub" ||
-    command === "novelai.resolveConflicts"
-  ) {
+  if (command === "novelai.addWorkFromGithub") {
     return (
-      "ブラウザ版のVS Codeでは、gitコマンドを起動できません。" +
-      "GitHubのリポジトリを直接開く（github.dev）か、手元のVS Codeをお使いください。"
+      "ブラウザ版では、別のリポジトリを取り寄せることはできません。" +
+      "アドレス欄の「vscode.dev/github/（持ち主）/（リポジトリ名）」を書き換えると、" +
+      "そのリポジトリを開けます。開いたら「フォルダから作品を追加」で登録してください。"
+    );
+  }
+  if (command === "novelai.gitRestore") {
+    return (
+      "ブラウザ版では、過去の版に戻せません（gitコマンドを起動できないためです）。" +
+      "GitHubのサイトでファイルの履歴を開くと、過去の中身を見て写せます。"
+    );
+  }
+  if (command === "novelai.resolveConflicts") {
+    return (
+      "ブラウザ版では、競合の解決ができません（gitコマンドを起動できないためです）。" +
+      "手元のVS Codeで解決してください。"
     );
   }
   if (command === "novelai.shareWithEditor" || command === "novelai.collectEditorProposals") {

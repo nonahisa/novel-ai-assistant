@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { fromUri } from "./paths";
 import * as path from "./paths";
 import { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "./workRegistry";
@@ -171,14 +172,14 @@ export class SettingsStore<T extends StorableRecord> {
     const directory = await this.dir();
     return vscode.workspace.textDocuments
       .filter((document) => {
-        const filePath = document.uri.fsPath;
+        const filePath = fromUri(document.uri);
         return (
           document.isDirty &&
           path.extname(filePath).toLowerCase() === ".json" &&
           isPathInside(directory, filePath)
         );
       })
-      .map((document) => document.uri.fsPath);
+      .map((document) => fromUri(document.uri));
   }
 
   async saveAll(records: T[]): Promise<void> {

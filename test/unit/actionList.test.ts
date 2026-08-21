@@ -176,15 +176,28 @@ describe("操作メニューの構成", () => {
     });
 
     test("理由には、代わりの道が書いてある", () => {
+      // 別のリポジトリを開く道は、ブラウザでもある（アドレス欄を書き換える）
       const action = allActions().find(
-        (entry) => entry.command === "novelai.gitSync"
+        (entry) => entry.command === "novelai.addWorkFromGithub"
       );
       expect(action).toBeDefined();
       if (!action) return;
 
       const hint = disabledHint(action, true, "author", false);
       expect(hint).toBe(PROCESSES_BLOCKED_HINT);
-      expect(explainDisabled(action, hint)).toContain("github.dev");
+      expect(explainDisabled(action, hint)).toContain("vscode.dev");
+    });
+
+    test("同期は塞がない。押せばソース管理へ案内する（設計書5.8.9）", () => {
+      // **行き止まりにしない。** gitコマンドは打てないが、保存する道は在る
+      const action = allActions().find(
+        (entry) => entry.command === "novelai.gitSync"
+      );
+      expect(action).toBeDefined();
+      if (!action) return;
+
+      expect(isActionEnabled(action, true, "author", false)).toBe(true);
+      expect(disabledHint(action, true, "author", false)).toBeUndefined();
     });
 
     test("編集者モードの制限と、実行環境の制限は両方効く", () => {

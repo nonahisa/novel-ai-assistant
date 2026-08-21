@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
 import { AIRegistry } from "../ai/registry";
 import { isVectorSearchEnabled } from "./vectorSearch";
@@ -92,7 +93,7 @@ export async function showVersion(
   if (picked === changelog) {
     // 拡張機能に同梱してある。どのエディターで開くかは作者の設定に任せる
     const file = path.toUri(
-      path.join(context.extensionUri.fsPath, "CHANGELOG.md")
+      path.join(fromUri(context.extensionUri), "CHANGELOG.md")
     );
     try {
       await vscode.workspace.fs.stat(file);

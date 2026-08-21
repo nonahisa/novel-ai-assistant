@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
@@ -83,7 +84,7 @@ export class SettingsWatcher implements vscode.Disposable {
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(settingsDir, "**/*.json")
     );
-    const handle = (uri: vscode.Uri) => this.record(work, uri.fsPath);
+    const handle = (uri: vscode.Uri) => this.record(work, fromUri(uri));
     watcher.onDidChange(handle);
     watcher.onDidCreate(handle);
     // 削除は扱わない。消えたファイルの中身は比べようがなく、

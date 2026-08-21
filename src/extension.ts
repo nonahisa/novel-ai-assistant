@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import { pickFolder } from "./features/pickFolder";
+import { fromUri } from "./core/paths";
 import * as path from "./core/paths";
 import {
   WorkRegistry,
@@ -626,7 +628,7 @@ export async function activate(
       .getConfiguration("novelai")
       .get<boolean>("stats.showInStatusBar", true);
     const work = showProgress
-      ? findWorkForPath(registry, editor.document.uri.fsPath)
+      ? findWorkForPath(registry, fromUri(editor.document.uri))
       : undefined;
     if (!work) return;
 
@@ -687,9 +689,9 @@ export async function activate(
       // 「直前にどの環境で書いていたか」を残す（設計書5.5.2）。
       // 開いただけでは書かない。何も書いていないのに作業ツリーが汚れ、
       // 未コミットの変更を理由に取り込みが止まるようになるため
-      void recordEditedSession(document.uri.fsPath);
+      void recordEditedSession(fromUri(document.uri));
       // 保存した瞬間が、書いた量を数えられる唯一の機会である（設計書6.3）
-      void recordWritingProgress(document.uri.fsPath);
+      void recordWritingProgress(fromUri(document.uri));
     })
   );
   updateStatusBar();
@@ -741,7 +743,7 @@ export async function activate(
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor(async (editor) => {
       if (!editor) return;
-      const work = findWorkForPath(registry, editor.document.uri.fsPath);
+      const work = findWorkForPath(registry, fromUri(editor.document.uri));
       if (!work || sessionNotified.has(work.id)) return;
       sessionNotified.add(work.id);
 
@@ -758,16 +760,12 @@ export async function activate(
 
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.addWork", async () => {
-      const picked = await vscode.window.showOpenDialog({
-        canSelectFolders: true,
-        canSelectFiles: false,
-        canSelectMany: false,
-        openLabel: "この作品フォルダを登録",
-        title: "作品フォルダを選択",
-      });
-      if (!picked || picked.length === 0) return;
-
-      const folderPath = picked[0].fsPath;
+      // ブラウザ版では、開いているフォルダーから選ぶ（設計書5.8.8）
+      const folderPath = await pickFolder(
+        "作品フォルダを選択",
+        "この作品フォルダを登録"
+      );
+      if (!folderPath) return;
 
       // **作品集かもしれない。** 中に作品フォルダーが並んでいたら、
       // まとめて登録する（設計書5.7）。作品そのものならこれまで通り進む
@@ -839,14 +837,12 @@ export async function activate(
    *   （コマンドパレットの「新規作品を作成」から来た場合）
    */
   async function createNewWork(mode?: WorkStartMode): Promise<void> {
-    const parent = await vscode.window.showOpenDialog({
-      canSelectFolders: true,
-      canSelectFiles: false,
-      canSelectMany: false,
-      openLabel: "ここに作品フォルダを作成",
-      title: "作品フォルダを作成する場所を選択",
-    });
-    if (!parent || parent.length === 0) return;
+    // ブラウザ版では、開いているフォルダーから選ぶ（設計書5.8.8）
+    const parentPath = await pickFolder(
+      "作品フォルダを作成する場所を選択",
+      "ここに作品フォルダを作成"
+    );
+    if (!parentPath) return;
 
     const title = await askText({
       prompt: "作品名を入力してください（フォルダ名になります）",
@@ -864,7 +860,7 @@ export async function activate(
     const startMode = mode ?? (await chooseWorkStartMode(title.trim()));
     if (!startMode) return;
 
-    const folderPath = path.join(parent[0].fsPath, title.trim());
+    const folderPath = path.join(parentPath, title.trim());
     try {
       await scaffoldWorkFolder(folderPath, title.trim(), {
         withPlot: startMode === "plot",
@@ -1217,9 +1213,9 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         if (!canRunProcesses()) {
-          vscode.window.showWarningMessage(
-            "GitHub同期はブラウザ版では使えません。"
-          );
+          // 行き止まりにせず、VS Code のソース管理へ案内する（設計書5.8.9）
+          const { showWebSyncGuide } = await import("./features/webSync.js");
+          await showWebSyncGuide(work);
           return;
         }
         const { showGitSyncActions } = await import("./features/gitSync.js");

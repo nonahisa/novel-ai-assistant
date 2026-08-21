@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
 import {
   describeRefusal,
@@ -43,7 +44,7 @@ async function requireMarkdown(): Promise<vscode.TextEditor | undefined> {
     return undefined;
   }
 
-  const filePath = editor.document.uri.fsPath;
+  const filePath = fromUri(editor.document.uri);
   if (filePath.toLowerCase().endsWith(".md")) return editor;
 
   if (!isPlainTextManuscript(filePath)) {

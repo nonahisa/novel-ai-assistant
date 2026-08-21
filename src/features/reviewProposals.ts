@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { ProposalStore } from "../core/proposalStore";
@@ -99,7 +100,7 @@ export async function toggleReviewLock(work: WorkEntry): Promise<void> {
   }
 
   const relative = normalizeFile(
-    path.relative(work.folderPath, editor.document.uri.fsPath)
+    path.relative(work.folderPath, fromUri(editor.document.uri))
   );
   if (relative.startsWith("..")) {
     void vscode.window.showWarningMessage(

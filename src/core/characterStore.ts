@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { fromUri } from "./paths";
 import * as path from "./paths";
 import { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "./workRegistry";
@@ -162,12 +163,12 @@ export class CharacterStore {
     const characterDir = await this.dir();
     return vscode.workspace.textDocuments
       .filter((document) => {
-        const filePath = document.uri.fsPath;
+        const filePath = fromUri(document.uri);
         return document.isDirty &&
           path.extname(filePath).toLowerCase() === ".json" &&
           isPathInside(characterDir, filePath);
       })
-      .map((document) => document.uri.fsPath);
+      .map((document) => fromUri(document.uri));
   }
 
   async save(character: Character): Promise<void> {

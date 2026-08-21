@@ -1,4 +1,5 @@
 import { parsePlotMarkdown, type PlotSections } from "../core/plotDoc";
+import { fromUri } from "../core/paths";
 import { readPlotText } from "../core/plotFile";
 import { describeProgress, nextQuestion } from "../core/plotInterview";
 import * as vscode from "vscode";
@@ -993,7 +994,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     const editor = this.lastEditor;
     const filePath =
       editor && editor.document.uri.scheme === "file"
-        ? editor.document.uri.fsPath
+        ? fromUri(editor.document.uri)
         : undefined;
     const work = filePath ? this.findWork(filePath) : undefined;
 

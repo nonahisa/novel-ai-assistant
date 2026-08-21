@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
 import { WorkRegistry } from "../core/workRegistry";
 import { CharacterStore } from "../core/characterStore";
@@ -119,7 +120,7 @@ export class TermHighlighter implements vscode.Disposable {
       return;
     }
 
-    const work = await this.findWork(editor.document.uri.fsPath);
+    const work = await this.findWork(fromUri(editor.document.uri));
     if (!work) {
       this.clear(editor);
       return;
@@ -180,7 +181,7 @@ export class TermHighlighter implements vscode.Disposable {
     const ext = path.extname(document.fileName).toLowerCase();
     if (!(SUPPORTED_EXTENSIONS as readonly string[]).includes(ext)) return;
 
-    const work = await this.findWork(document.uri.fsPath);
+    const work = await this.findWork(fromUri(document.uri));
     if (!work) return;
 
     const settings = await this.load(work);

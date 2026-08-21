@@ -28,8 +28,13 @@ describe("実行環境で使えるか", () => {
   });
 
   it("一覧にあるコマンドは、外部プロセスを起動できるときだけ使える", () => {
-    expect(isCommandAvailableInRuntime("novelai.gitSync", true)).toBe(true);
-    expect(isCommandAvailableInRuntime("novelai.gitSync", false)).toBe(false);
+    // 競合の解決は、ブラウザに代わりの道が無い（手元でやるしかない）
+    expect(isCommandAvailableInRuntime("novelai.resolveConflicts", true)).toBe(
+      true
+    );
+    expect(isCommandAvailableInRuntime("novelai.resolveConflicts", false)).toBe(
+      false
+    );
   });
 });
 
@@ -55,13 +60,34 @@ describe("押せない理由の説明", () => {
     );
   });
 
-  it("git系は、github.devか手元への案内を出す", () => {
-    expect(describeProcessesBlocked("novelai.gitSync")).toContain(
-      "github.dev"
+  /**
+   * **すでに vscode.dev に居る人へ「github.dev を開いてください」と言わない。**
+   * 操作ごとに、その場から取れる手を示す。
+   */
+  it("別のリポジトリを開く道を、その場のやり方で示す", () => {
+    const text = describeProcessesBlocked("novelai.addWorkFromGithub");
+    expect(text).toContain("vscode.dev");
+    // 開いたあと何をすればよいかまで書く
+    expect(text).toContain("フォルダから作品を追加");
+  });
+
+  it("過去の版は、GitHubのサイトで見られると伝える", () => {
+    expect(describeProcessesBlocked("novelai.gitRestore")).toContain("GitHub");
+  });
+
+  it("同期の設定は、ブラウザでは要らないと伝える", () => {
+    expect(describeProcessesBlocked("novelai.setupGithub")).toContain("要りません");
+  });
+
+  it("競合の解決は、手元でと伝える", () => {
+    expect(describeProcessesBlocked("novelai.resolveConflicts")).toContain(
+      "手元のVS Code"
     );
-    expect(describeProcessesBlocked("novelai.addWorkFromGithub")).toContain(
-      "github.dev"
-    );
+  });
+
+  it("同期そのものは塞がない（ソース管理へ案内するため）", () => {
+    // **行き止まりにしない。** gitコマンドは打てないが、保存する道は在る
+    expect(isCommandAvailableInRuntime("novelai.gitSync", false)).toBe(true);
   });
 
   it("編集部とのやり取りは、手元への案内を出す", () => {

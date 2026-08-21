@@ -197,6 +197,19 @@ describe("Uri との往復", () => {
     expect(paths.fromUri(uri)).toBe(ファイル);
   });
 
+  it("仕組みが分からないものは、OSのパスに倒す", () => {
+    /**
+     * **原稿の保存先を決める道に居る関数である。** `toString()` へ倒すと、
+     * `Uri` でないものが渡ったときに `"[object Object]"` を静かに作る。
+     *
+     * 実際に、`.fsPath` を `fromUri()` へ機械的に置き換えたとき、
+     * テストの作り物の文書（`uri` に scheme を持たない）で
+     * **未保存の検出が丸ごと効かなくなった**（2026-08-21）。
+     */
+    const schemeless = { fsPath: "C:\\novels\\001.txt" } as never;
+    expect(paths.fromUri(schemeless)).toBe("C:\\novels\\001.txt");
+  });
+
   it("日本語のファイル名でも往復する", () => {
     // **URIは記号を伏せ字にする。** 往復で形が変わると別の場所を指す
     const ファイル = paths.join(作品, "本文", "第1話_はじまりの朝.txt");
