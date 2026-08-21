@@ -15,9 +15,25 @@ import { withProgress } from "../views/progress";
 import { probeGeneration } from "./generationProbe";
 import { logFailure, showLog } from "../core/logger";
 import { askText, cancelItem } from "../views/dialogs";
+import { canRunProcesses } from "../core/runtime";
 
 const KEY_PROVIDER = "novelai.ai.provider";
 const KEY_MODEL = "novelai.ai.model";
+
+/**
+ * 実行環境で選べないプロバイダを外す。
+ *
+ * **`AIRegistry.listProviders` から切り出した。** `canRunProcesses()` は
+ * 実際のNode/ブラウザの違いでしか変わらないので、単体テストからは
+ * どちらか一方（常にNode側）しか確かめられない。フィルタの中身だけを
+ * 純粋な関数にして、両方の分岐をテストできるようにする。
+ */
+export function filterProvidersForRuntime(
+  providers: AIProvider[],
+  canRun: boolean
+): AIProvider[] {
+  return canRun ? providers : providers.filter((p) => p.id !== "ollama");
+}
 
 /**
  * 使用するプロバイダとモデルを解決する。
@@ -41,8 +57,20 @@ export class AIRegistry {
     }
   }
 
+  /**
+   * 選択肢に出すプロバイダ。
+   *
+   * **Ollamaはブラウザ版では出さない**（作者の指示、2026-08-21）。
+   * `localhost` はブラウザからは（vscode.devが動いているMicrosoftのサーバ
+   * から見て）作者のPCではないので、選んでも必ず「接続できません」に
+   * なる。選ばせておいて毎回同じ理由で失敗させるより、はじめから
+   * 選べないほうが分かりやすい。
+   */
   listProviders(): AIProvider[] {
-    return [...this.providers.values()];
+    return filterProvidersForRuntime(
+      [...this.providers.values()],
+      canRunProcesses()
+    );
   }
 
   getProvider(id: ProviderId): AIProvider | undefined {

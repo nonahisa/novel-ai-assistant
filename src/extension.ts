@@ -26,7 +26,7 @@ import {
   extractCharacters,
   saveDirtyDocumentsBeforeExtraction,
 } from "./features/extractCharacters";
-import { selectOllamaExecutable } from "./features/selectOllamaExecutable";
+// Node専用（node:child_process / node:path）。選ぶ操作の中で動的importする（設計書5.8.5）
 import {
   chooseWorkStartMode,
   createFirstEpisodeFile,
@@ -54,7 +54,7 @@ import { TermHighlighter } from "./views/termHighlight";
 import { ActionListProvider, nodeKey } from "./views/actionList";
 import { ActionDecorationProvider } from "./views/actionDecorations";
 import { PendingUpdateStore } from "./core/pendingUpdates";
-import { addWorkFromGithub } from "./features/addWorkFromGithub";
+// gitコマンドが要る。動的importする（設計書5.8.5）
 import { tryRegisterAsCollection } from "./features/addCollection";
 import {
   currentCountMode,
@@ -64,14 +64,12 @@ import {
   needsRedraw,
   needsRescan,
 } from "./core/countSettings";
-import {
-  shareWithEditor,
-  collectEditorProposals,
-} from "./features/shareWithEditor";
-import { restoreFromHistory } from "./features/gitRestore";
-import { setupOllama } from "./features/setupOllama";
-import { setupVectorSearch } from "./features/setupVectorSearch";
-import { runFullSetup } from "./features/setupWizard";
+// 以下5つはgit・外部プロセス起動が要る。動的importする（設計書5.8.5）
+// shareWithEditor, collectEditorProposals ← ./features/shareWithEditor
+// restoreFromHistory ← ./features/gitRestore
+// setupOllama ← ./features/setupOllama
+// setupVectorSearch ← ./features/setupVectorSearch
+// runFullSetup ← ./features/setupWizard
 import { showVersion } from "./features/showVersion";
 import { chatLogPath, isChatLogEnabled } from "./core/chatLog";
 import {
@@ -93,23 +91,23 @@ import {
 import { SelfWriteTracker } from "./core/externalChanges";
 import { protectExternalEdits } from "./features/protectExternalEdits";
 import { setWriteObserver } from "./core/atomicWrite";
-import {
-  GitSyncMonitor,
-  describeStatus,
-  describeSyncBadge,
-  showGitSyncActions,
-} from "./features/gitSync";
-import { nextSetupStep, runSetupStep } from "./features/gitOnboarding";
+// GitSyncMonitor・describeStatus・showGitSyncActions は node:child_process を
+// 静的importする core/git.ts を読む。型だけ・バッジ描画用の関数だけを
+// 安全に取り出す（設計書5.8.5）
+import type { GitSyncMonitor } from "./features/gitSync";
+import { describeSyncBadge } from "./core/gitSyncStatusText";
+import { NullGitSyncMonitor, type GitSyncMonitorLike } from "./features/gitSyncStub";
+import { canRunProcesses } from "./core/runtime";
+// nextSetupStep, runSetupStep も core/git.ts 経由。動的importする
+
 import { resolveDeviceId } from "./core/device";
 import {
   SessionStore,
   describeOtherDeviceSession,
 } from "./core/sessionStore";
-import {
-  CONFLICT_SCHEME,
-  ConflictContentProvider,
-  resolveWorkConflicts,
-} from "./features/resolveConflicts";
+// CONFLICT_SCHEME・ConflictContentProvider・resolveWorkConflicts も
+// core/git.ts 経由。競合はgit操作でしか起きないので、動的importする
+import type { ConflictContentProvider as ConflictContentProviderType } from "./features/resolveConflicts";
 import { checkTypos, type TypoCheckRunResult } from "./features/checkTypos";
 import {
   checkNotation,
@@ -180,8 +178,11 @@ export async function activate(
   await registry.initialize();
 
   // GitHub同期の見張り。自動で走るのはfetch（取得のみ）だけで、
-  // 取り込み・送信は作者がボタンを押したときにしか実行しない（設計書5.5.1）
-  const gitSync = new GitSyncMonitor(registry);
+  // 取り込み・送信は作者がボタンを押したときにしか実行しない（設計書5.5.1）。
+  // ブラウザ版（gitコマンドを起動できない）では、何もしない代役を使う（設計書5.8.5）
+  const gitSync: GitSyncMonitorLike = canRunProcesses()
+    ? new (await import("./features/gitSync.js")).GitSyncMonitor(registry)
+    : new NullGitSyncMonitor();
   context.subscriptions.push(gitSync);
 
   const treeProvider = new WorkTreeProvider(registry, (workId) =>
@@ -201,15 +202,20 @@ export async function activate(
     treeProvider.getStats(work)
   );
 
-  // 競合の見比べに使う読み取り専用の本文置き場
-  const conflictProvider = new ConflictContentProvider();
-  context.subscriptions.push(
-    vscode.workspace.registerTextDocumentContentProvider(
-      CONFLICT_SCHEME,
-      conflictProvider
-    ),
-    { dispose: () => conflictProvider.clear() }
-  );
+  // 競合の見比べに使う読み取り専用の本文置き場。
+  // 競合はgit操作でしか起きないので、ブラウザでは作らない（設計書5.8.5）
+  let conflictProvider: ConflictContentProviderType | undefined;
+  if (canRunProcesses()) {
+    const resolveConflicts = await import("./features/resolveConflicts.js");
+    conflictProvider = new resolveConflicts.ConflictContentProvider();
+    context.subscriptions.push(
+      vscode.workspace.registerTextDocumentContentProvider(
+        resolveConflicts.CONFLICT_SCHEME,
+        conflictProvider
+      ),
+      { dispose: () => conflictProvider?.clear() }
+    );
+  }
 
   // 本文中の用語を種類ごとに色分けし、ホバーで設定を出す
   const highlighter = new TermHighlighter(registry);
@@ -956,6 +962,15 @@ export async function activate(
 
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.addWorkFromGithub", async () => {
+      if (!canRunProcesses()) {
+        vscode.window.showWarningMessage(
+          "GitHubからの追加はブラウザ版では使えません。"
+        );
+        return;
+      }
+      const { addWorkFromGithub } = await import(
+        "./features/addWorkFromGithub.js"
+      );
       const entries = await addWorkFromGithub(registry);
       if (entries.length === 0) return;
       treeProvider.refresh();
@@ -970,6 +985,15 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
+        if (!canRunProcesses()) {
+          vscode.window.showWarningMessage(
+            "過去の版への復元はブラウザ版では使えません。"
+          );
+          return;
+        }
+        const { restoreFromHistory } = await import(
+          "./features/gitRestore.js"
+        );
         await restoreFromHistory(work);
         // 原稿が入れ替わったので、文字数もハイライトも作り直す
         treeProvider.refresh(work.id);
@@ -985,6 +1009,16 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
+        if (!canRunProcesses()) {
+          vscode.window.showWarningMessage(
+            "GitHub同期の設定はブラウザ版では使えません。"
+          );
+          return;
+        }
+        const { describeStatus } = await import("./features/gitSync.js");
+        const { nextSetupStep, runSetupStep } = await import(
+          "./features/gitOnboarding.js"
+        );
         // 状態を見てから、足りない一手だけを案内する（設計書5.5.4）
         const status = await gitSync.refresh(work, {
           fetch: false,
@@ -1006,12 +1040,26 @@ export async function activate(
 
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.setupOllama", async () => {
+      if (!canRunProcesses()) {
+        vscode.window.showWarningMessage(
+          "Ollamaの導入案内はブラウザ版では使えません（ローカルで動くAIのため）。"
+        );
+        return;
+      }
+      const { setupOllama } = await import("./features/setupOllama.js");
       await setupOllama(aiRegistry);
     })
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.runFullSetup", async () => {
+      if (!canRunProcesses()) {
+        vscode.window.showWarningMessage(
+          "この案内はブラウザ版では使えません。AI設定から個別に設定してください。"
+        );
+        return;
+      }
+      const { runFullSetup } = await import("./features/setupWizard.js");
       await runFullSetup(aiRegistry);
     })
   );
@@ -1045,6 +1093,15 @@ export async function activate(
 
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.setupVectorSearch", async () => {
+      if (!canRunProcesses()) {
+        vscode.window.showWarningMessage(
+          "意味検索の設定はブラウザ版では使えません（ローカルで動くAIのため）。"
+        );
+        return;
+      }
+      const { setupVectorSearch } = await import(
+        "./features/setupVectorSearch.js"
+      );
       await setupVectorSearch();
     })
   );
@@ -1159,7 +1216,14 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
-        await showGitSyncActions(gitSync, work);
+        if (!canRunProcesses()) {
+          vscode.window.showWarningMessage(
+            "GitHub同期はブラウザ版では使えません。"
+          );
+          return;
+        }
+        const { showGitSyncActions } = await import("./features/gitSync.js");
+        await showGitSyncActions(gitSync as GitSyncMonitor, work);
       }
     )
   );
@@ -1170,6 +1234,15 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
+        if (!canRunProcesses() || !conflictProvider) {
+          vscode.window.showWarningMessage(
+            "競合の解決はブラウザ版では使えません。"
+          );
+          return;
+        }
+        const { resolveWorkConflicts } = await import(
+          "./features/resolveConflicts.js"
+        );
         await resolveWorkConflicts(work, { provider: conflictProvider });
         treeProvider.refresh(work.id);
       }
@@ -1195,6 +1268,13 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
+        if (!canRunProcesses()) {
+          vscode.window.showWarningMessage(
+            "GitHub同期はブラウザ版では使えません。"
+          );
+          return;
+        }
+        const { describeStatus } = await import("./features/gitSync.js");
         // 押した時点の状態で判断させるため、先に取得し直す
         const status = await gitSync.refresh(work, {
           fetch: true,
@@ -1217,6 +1297,13 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
+        if (!canRunProcesses()) {
+          vscode.window.showWarningMessage(
+            "GitHub同期はブラウザ版では使えません。"
+          );
+          return;
+        }
+        const { describeStatus } = await import("./features/gitSync.js");
         const status = await gitSync.refresh(work, {
           fetch: true,
           notify: false,
@@ -1455,6 +1542,15 @@ export async function activate(
     vscode.commands.registerCommand(
       "novelai.selectOllamaExecutable",
       async () => {
+        if (!canRunProcesses()) {
+          vscode.window.showWarningMessage(
+            "Ollamaの選択はブラウザ版では使えません（ローカルで動くAIのため）。"
+          );
+          return;
+        }
+        const { selectOllamaExecutable } = await import(
+          "./features/selectOllamaExecutable.js"
+        );
         await selectOllamaExecutable();
       }
     )
@@ -2043,6 +2139,15 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
+        if (!canRunProcesses()) {
+          vscode.window.showWarningMessage(
+            "編集部へ渡す操作はブラウザ版では使えません。"
+          );
+          return;
+        }
+        const { shareWithEditor } = await import(
+          "./features/shareWithEditor.js"
+        );
         await shareWithEditor(work);
       }
     ),
@@ -2051,6 +2156,15 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
+        if (!canRunProcesses()) {
+          vscode.window.showWarningMessage(
+            "編集部の提案の取り込みはブラウザ版では使えません。"
+          );
+          return;
+        }
+        const { collectEditorProposals } = await import(
+          "./features/shareWithEditor.js"
+        );
         await collectEditorProposals(work);
       }
     )

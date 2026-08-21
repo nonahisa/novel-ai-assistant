@@ -3,11 +3,6 @@ import type {
   AIProvider,
   ConnectionTestResult,
 } from "../ai/types";
-import {
-  describeStartFailure,
-  isLocalEndpoint,
-  startOllama,
-} from "../ai/ollamaLauncher";
 import { withProgress } from "../views/progress";
 
 /**
@@ -15,6 +10,13 @@ import { withProgress } from "../views/progress";
  *
  * 設定資料の抽出・誤字脱字検知など、AIを繰り返し呼ぶ機能で共通に使う。
  * 抽出機能側にあったものをそのまま切り出しただけで、中身は変えていない。
+ *
+ * **`ai/ollamaLauncher.ts` は動的importで持ってくる。** あちらは
+ * `node:child_process` を静的importしているNode専用のファイルで、
+ * このファイル自体はどのAIプロバイダでも通る道（`extractCharacters.ts`
+ * 経由でブラウザ版にも必要）なので、静的importすると巻き込んでしまう
+ * （設計書5.8.5）。呼ぶのはOllamaを選んでいるときだけなので、
+ * ブラウザでは実際には呼ばれない。
  */
 
 /**
@@ -49,7 +51,8 @@ export async function confirmProviderReachable(
     if (result.ok) return true;
 
     // ローカルのOllamaなら、この場から起動できる
-    const canStart = provider.id === "ollama" && isLocalOllamaEndpoint();
+    const canStart =
+      provider.id === "ollama" && (await isLocalOllamaEndpoint());
 
     const action = await vscode.window.showWarningMessage(
       `AIに接続できないため、${actionLabel}を開始できません。\n${result.message}`,
@@ -81,12 +84,16 @@ export function ollamaEndpoint(): string {
     .get<string>("ollama.endpoint", "http://localhost:11434");
 }
 
-export function isLocalOllamaEndpoint(): boolean {
+export async function isLocalOllamaEndpoint(): Promise<boolean> {
+  const { isLocalEndpoint } = await import("../ai/ollamaLauncher.js");
   return isLocalEndpoint(ollamaEndpoint());
 }
 
 /** Ollamaを起動し、応答するまで進捗を出しながら待つ */
 export async function startOllamaWithProgress(): Promise<boolean> {
+  const { describeStartFailure, startOllama } = await import(
+    "../ai/ollamaLauncher.js"
+  );
   const outcome = await withProgress("Ollamaを起動しています…", () =>
     startOllama({
       endpoint: ollamaEndpoint(),

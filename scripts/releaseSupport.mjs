@@ -15,6 +15,8 @@ export const EXPECTED_ARCHIVE_FILES = [
   "extension/package.json",
   "extension/readme.md",
   "extension/dist/extension.js",
+  // ブラウザ版VSCode（vscode.dev / github.dev）向けの束（設計書5.8）
+  "extension/dist/browser-extension.js",
   "extension/media/icon.svg",
 ];
 

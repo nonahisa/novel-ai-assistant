@@ -18,6 +18,11 @@ import {
 import { describeNetworkFailure } from "../core/gitSetup";
 import { logFailure, showLog } from "../core/logger";
 import { withProgress } from "../views/progress";
+
+// ツリーのバッジ用は core/gitSyncStatusText.ts へ切り出した。
+// このファイルは静的importするだけでNode専用（node:child_process）を
+// 巻き込むため、そちらを import しているファイルまで巻き込む（設計書5.8.5）
+export { describeSyncBadge } from "../core/gitSyncStatusText";
 import { cancelItem } from "../views/dialogs";
 import {
   canRecordChanges,
@@ -516,19 +521,6 @@ function describeForTooltip(work: WorkEntry, status: GitSyncStatus): string {
   return `- **${work.title}**（${status.branch}）: ${parts.join(" / ")}`;
 }
 
-/**
- * ツリーの作品行に出す短い説明。
- * 同期が取れているときは何も返さない（行を汚さないため）。
- */
-export function describeSyncBadge(
-  status: GitSyncStatus | undefined
-): string | undefined {
-  if (!status || status.kind !== "tracked") return undefined;
-  const parts: string[] = [];
-  if (status.behind > 0) parts.push(`↓${status.behind}`);
-  if (status.ahead > 0) parts.push(`↑${status.ahead}`);
-  return parts.length > 0 ? parts.join(" ") : undefined;
-}
 
 /**
  * 状態を1文で説明する。

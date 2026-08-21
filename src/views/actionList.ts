@@ -7,6 +7,12 @@ import {
   type WorkMode,
 } from "../core/editorMode";
 import { currentMode } from "../core/actorContext";
+import {
+  describeProcessesBlocked,
+  isCommandAvailableInRuntime,
+  PROCESSES_BLOCKED_HINT,
+} from "../core/processAvailability";
+import { canRunProcesses } from "../core/runtime";
 
 /**
  * 操作メニュー。
@@ -988,9 +994,14 @@ export function visibleGroups(_hasWork: boolean = true): readonly ActionGroup[] 
 export function isActionEnabled(
   item: ActionItem,
   hasWork: boolean,
-  mode: WorkMode = "author"
+  mode: WorkMode = "author",
+  /** 外部プロセス（git・Ollama）を起動できる環境か。既定はできる扱い（手元） */
+  runtimeAllowsProcesses = true
 ): boolean {
   if (!isCommandAllowed(item.command, mode)) return false;
+  if (!isCommandAvailableInRuntime(item.command, runtimeAllowsProcesses)) {
+    return false;
+  }
   return hasWork || !item.requiresWork;
 }
 
@@ -998,9 +1009,13 @@ export function isActionEnabled(
 export function disabledHint(
   item: ActionItem,
   hasWork: boolean,
-  mode: WorkMode = "author"
+  mode: WorkMode = "author",
+  runtimeAllowsProcesses = true
 ): string | undefined {
   if (!isCommandAllowed(item.command, mode)) return EDITOR_BLOCKED_HINT;
+  if (!isCommandAvailableInRuntime(item.command, runtimeAllowsProcesses)) {
+    return PROCESSES_BLOCKED_HINT;
+  }
   if (!hasWork && item.requiresWork) return REQUIRES_WORK_HINT;
   return undefined;
 }
@@ -1009,13 +1024,16 @@ export function disabledHint(
  * 押せない理由に、次に取れる手を添える。
  *
  * **理由だけでは動けない。** 作品が無いなら登録の道を、
- * 編集者モードなら「作者の環境で」を言う。
+ * 編集者モードなら「作者の環境で」を、ブラウザ版なら代わりの道を言う。
  */
 export function explainDisabled(
   item: ActionItem,
   hint: string | undefined
 ): string {
   if (hint === EDITOR_BLOCKED_HINT) return describeBlocked(item.command);
+  if (hint === PROCESSES_BLOCKED_HINT) {
+    return describeProcessesBlocked(item.command);
+  }
   return "「作品一覧」の「フォルダから作品を追加」または「新規作品を作成」から登録してください。";
 }
 
@@ -1133,8 +1151,9 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     const { item: action } = node;
     const hasWork = this.registry.list().length > 0;
     const mode = currentMode();
-    const enabled = isActionEnabled(action, hasWork, mode);
-    const hint = disabledHint(action, hasWork, mode);
+    const runtimeAllowsProcesses = canRunProcesses();
+    const enabled = isActionEnabled(action, hasWork, mode, runtimeAllowsProcesses);
+    const hint = disabledHint(action, hasWork, mode, runtimeAllowsProcesses);
 
     const item = new vscode.TreeItem(
       action.label,

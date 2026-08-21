@@ -6,6 +6,8 @@ import {
   ActionListProvider,
   actionResourceUri,
   allActions,
+  disabledHint,
+  explainDisabled,
   isActionEnabled,
   REQUIRES_WORK_HINT,
   restoreExpandedGroups,
@@ -13,6 +15,10 @@ import {
   type ActionNode,
   type GroupStateStore,
 } from "../../src/views/actionList";
+import {
+  PROCESSES_BLOCKED_HINT,
+  processRequiredCommands,
+} from "../../src/core/processAvailability";
 import { ActionDecorationProvider } from "../../src/views/actionDecorations";
 import type { WorkRegistry } from "../../src/core/workRegistry";
 
@@ -140,6 +146,62 @@ describe("操作メニューの構成", () => {
   test("押せない理由を、どうすれば使えるかまで書く", () => {
     // 「使えない」だけでは、次に何をすればよいか分からない
     expect(REQUIRES_WORK_HINT).toContain("作品を登録すると");
+  });
+
+  /**
+   * ブラウザ版（vscode.dev）では、外部プロセス（git・Ollama）を
+   * 起動できない（設計書5.8.5）。**消すのではなく、押せなくして
+   * 理由を出す**——編集者モードと同じ考え方を、実行環境にも広げた。
+   */
+  describe("外部プロセスを起動できない環境（ブラウザ版）", () => {
+    test("該当する操作だけが押せなくなる", () => {
+      for (const action of allActions()) {
+        const needsProcesses = processRequiredCommands().includes(
+          action.command
+        );
+        expect(
+          isActionEnabled(action, true, "author", false),
+          action.command
+        ).toBe(!needsProcesses);
+      }
+    });
+
+    test("手元（Node）扱いのときは、これまでどおり全部押せる", () => {
+      for (const action of allActions()) {
+        expect(
+          isActionEnabled(action, true, "author", true),
+          action.command
+        ).toBe(true);
+      }
+    });
+
+    test("理由には、代わりの道が書いてある", () => {
+      const action = allActions().find(
+        (entry) => entry.command === "novelai.gitSync"
+      );
+      expect(action).toBeDefined();
+      if (!action) return;
+
+      const hint = disabledHint(action, true, "author", false);
+      expect(hint).toBe(PROCESSES_BLOCKED_HINT);
+      expect(explainDisabled(action, hint)).toContain("github.dev");
+    });
+
+    test("編集者モードの制限と、実行環境の制限は両方効く", () => {
+      // novelai.resolveConflicts は編集者モードでは許されているが、
+      // ブラウザでは使えない。両方の理由を正しく見分けられること
+      const action = allActions().find(
+        (entry) => entry.command === "novelai.resolveConflicts"
+      );
+      expect(action).toBeDefined();
+      if (!action) return;
+
+      expect(isActionEnabled(action, true, "editor", true)).toBe(true);
+      expect(isActionEnabled(action, true, "editor", false)).toBe(false);
+      expect(disabledHint(action, true, "editor", false)).toBe(
+        PROCESSES_BLOCKED_HINT
+      );
+    });
   });
 
   test("作品が未登録でも、始める操作と設定は出す", () => {
