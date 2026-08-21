@@ -33,7 +33,13 @@ export type TypoRejectionReason =
   /** 正しい文語・旧字を「誤変換」として直そうとしている */
   | "archaic_form"
   /** 当てると本文が二重になる（修正案が前後の文まで抱え込んでいる） */
-  | "duplicates_context";
+  | "duplicates_context"
+  /** 修正案が原文のまま。押しても何も変わらない */
+  | "same_as_original"
+  /** 修正案にMarkdownの記号が入っている（直しではなく注釈） */
+  | "markdown_in_suggestion"
+  /** 修正案が対象より大幅に長い（語の直しではなく、文の書き換え） */
+  | "rewrites_span";
 
 export interface RejectedTypoIssue {
   line: number | null;
@@ -56,6 +62,28 @@ export interface TypoValidationResult {
 }
 
 const VALID_CONFIDENCE = new Set(["high", "medium", "low"]);
+
+/**
+ * 修正案が対象より何文字まで長くなってよいか。
+ *
+ * **実データ147件で測って決めた**（2026-08-21）。他の検査を通った80件では、
+ * 伸びは75件が+3以内。そこから +7 / +12 / +18 / +23 / +26 と飛び、
+ * **その5件すべてが本文を壊した**（文の書き換えを修正案に入れていた）。
+ *
+ * 観測した上限（+3）に2文字の余裕を足して5とする。
+ */
+const MAX_SUGGESTION_GROWTH = 5;
+
+/**
+ * 修正案に紛れ込むMarkdownの強調。
+ *
+ * AIが「足した箇所」を強調して返してくる（「先生たち＊＊は＊＊校門に…」）。
+ * **これは注釈であって直しではない。** 当てると本文にアスタリスクが入る。
+ *
+ * 文字列ではなく正規表現で持つのは、画面に出す文字列へ記号を混ぜていないか
+ * 見張るテスト（plainTextUi.test.ts）に、検出用の記号まで拾わせないためでもある。
+ */
+const MARKDOWN_EMPHASIS = /\*\*/;
 
 /**
  * 構造化出力でも前後に説明やコードフェンスが付くモデルがあるため、
@@ -199,6 +227,60 @@ export function validateTypoIssues(
         line: issue.line,
         target: issue.target,
         reason: "no_change",
+      });
+      continue;
+    }
+
+    // **修正案が原文のままなら、見せる意味が無い。**
+    // AIが「直したい語」ではなく「その周りの文」を修正案に入れると、
+    // 画面には原文と修正案が同じ文で並ぶ。押しても何も変わらないうえ、
+    // 当てれば二重になる（作者の指摘、2026-08-21）
+    //
+    //   原文  「相当なお金持ちらしく、恨みも」
+    //   対象  「お金持ちらしく」
+    //   修正案「相当なお金持ちらしく、恨みも」  ← 同じ
+    //
+    // **原文が対象そのものの場合は除く。** 脱字の直しは対象へ文字を足す
+    // ので、そのときは修正案が対象を含むのが正しい
+    if (
+      normalizeForComparison(issue.original) !==
+        normalizeForComparison(issue.target) &&
+      normalizeForComparison(issue.suggestion).includes(
+        normalizeForComparison(issue.original)
+      )
+    ) {
+      rejected.push({
+        line: issue.line,
+        target: issue.target,
+        reason: "same_as_original",
+      });
+      continue;
+    }
+
+    // **Markdownの記号が入った修正案は、直しではなく注釈である。**
+    // 「先生たち**は**校門にいなかった」のように、足した箇所を
+    // 強調して返してくる。当てると本文にアスタリスクが入る
+    if (MARKDOWN_EMPHASIS.test(issue.suggestion)) {
+      rejected.push({
+        line: issue.line,
+        target: issue.target,
+        reason: "markdown_in_suggestion",
+      });
+      continue;
+    }
+
+    // **誤字脱字の直しは、語を1つ直すものである。**
+    // 対象より大幅に長い修正案は、語の直しではなく文の書き換えであり、
+    // 当てると前後が二重に残る。
+    //
+    // **実データ147件で測って決めた**（2026-08-21）。ここまでの検査を
+    // 通った80件のうち、伸びは75件が+3以内。そこから +7 / +12 / +18 /
+    // +23 / +26 と飛び、**その5件すべてが本文を壊した。**
+    if (issue.suggestion.length - issue.target.length > MAX_SUGGESTION_GROWTH) {
+      rejected.push({
+        line: issue.line,
+        target: issue.target,
+        reason: "rewrites_span",
       });
       continue;
     }

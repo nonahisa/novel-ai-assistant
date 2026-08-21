@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "小説執筆のための統合環境。作品を登録して話数・文字数・執筆量を管理し、本文から登場人物や世界観などの設定資料を抽出します。プロットの逆算、あらすじ・紹介文・キャッチコピーの生成、各話の盛り上がりを見る感情曲線、誤字脱字と表記ゆれの検知、開いている画面についてのAI相談まで、執筆の前後を通して支えます。必要なもの（Ollama本体・モデル・Git）は拡張機能の中から入れられます。AIはOllama（無料・ローカル）とClaude・ChatGPT・Geminiから選べ、原稿を勝手に書き換えることはありません。",
-  "version": "0.10.21",
+  "version": "0.10.22",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
