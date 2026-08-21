@@ -159,3 +159,47 @@ describe("表示を切り替えると、前の中身が消える", () => {
     expect(latest().items).toEqual([]);
   });
 });
+
+describe("未処理が残っていることをタブに出す", () => {
+  /**
+   * **開いていないと残りに気づけない**（作者の指摘、2026-08-21）。
+   * 提案パネルは下段にあり、他のタブへ切り替えると見えなくなる。
+   *
+   * **画面の件数とタブの印は、同じ数え方でなければならない。**
+   * 別々に数えると、片方だけ直したときにずれる。
+   */
+  function badgeOf(panel: ProposalPanel): { value: number } | undefined {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (panel as any).view?.badge;
+  }
+
+  test("未処理があれば、その数が出る", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo, { ...typo, line: 9 }]);
+    expect(badgeOf(panel)?.value).toBe(2);
+  });
+
+  test("結果が0件なら、印を消す", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults(work, []);
+    expect(badgeOf(panel)).toBeUndefined();
+  });
+
+  test("設定資料の更新も数える", () => {
+    const panel = panelWithView();
+    panel.showRecordUpdates(work, [recordUpdate], async () => ({ ok: true }));
+    expect(badgeOf(panel)?.value).toBe(1);
+  });
+
+  test("見出しの件数と、印の数が一致する", () => {
+    // 別々に数えると、片方だけ直したときにずれる
+    const panel = panelWithView();
+    panel.showResults(work, [typo, { ...typo, line: 9 }, { ...typo, line: 12 }]);
+    const items = latest().items as Array<{ status: string }>;
+    const shown = items.filter(
+      (i) => i.status === "pending" || i.status === "failed"
+    ).length;
+    expect(badgeOf(panel)?.value).toBe(shown);
+  });
+});

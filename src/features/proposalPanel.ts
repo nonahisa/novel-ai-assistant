@@ -322,6 +322,38 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     });
   }
 
+  /**
+   * 未処理が残っていることを、パネルのタブに出す（設計書6.8.13）。
+   *
+   * **開いていないと残りに気づけない**（作者の指摘、2026-08-21）。
+   * 提案パネルは下段にあり、他のタブ（ターミナル・出力）へ切り替えると
+   * 見えなくなる。**問題タブと同じように、数を出す。**
+   *
+   * ## 数えるのは「まだ手を付けていないもの」だけ
+   *
+   * 適用したものと見送ったものは、作者の判断が済んでいる。
+   * **失敗したものは残りに数える。** 手を付けたが片付いていない。
+   *
+   * ## 0件のときは印を消す
+   *
+   * 残っていないのに数字が出ていると、見に行っても何も無い。
+   */
+  private updateBadge(): void {
+    if (!this.view) return;
+    const remaining =
+      this.items.filter(isRemaining).length +
+      this.contradictions.filter(isRemaining).length +
+      this.recordUpdates.filter(isRemaining).length;
+
+    this.view.badge =
+      remaining > 0
+        ? {
+            value: remaining,
+            tooltip: `${this.category}：未処理が${remaining}件あります`,
+          }
+        : undefined;
+  }
+
   private postItems(): void {
     if (!this.view) return;
     const contradictionMode = this.contradictions.length > 0;
@@ -339,6 +371,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       canApplyAll: !contradictionMode,
     };
     void this.view.webview.postMessage(message);
+    this.updateBadge();
   }
 
   /**
@@ -1014,6 +1047,15 @@ function describeWriteFailure(
 /** 表示上の番号。提案の処理では item から引き直す */
 function id2(item: ProposalViewItem): string {
   return item.id;
+}
+
+/**
+ * まだ作者が手を付けていないか。
+ *
+ * **適用・見送りは判断が済んでいる。** 失敗は片付いていないので残す。
+ */
+function isRemaining(item: { status: string }): boolean {
+  return item.status === "pending" || item.status === "failed";
 }
 
 function createNonce(): string {

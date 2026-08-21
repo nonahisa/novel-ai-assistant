@@ -157,8 +157,12 @@ function escapeHtml(text) {
 }
 
 function render(workTitle, items) {
-  const pending = items.filter((item) => item.status !== 'dismissed');
-  countEl.textContent = pending.length + '件';
+  // **「残り」を出す。** 以前は「見送っていないもの」を数えており、
+  // 全部を適用しても件数が減らなかった。タブの印と同じ数え方にする
+  const remaining = items.filter(
+    (item) => item.status === 'pending' || item.status === 'failed'
+  );
+  countEl.textContent = remaining.length + '件';
   emptyEl.style.display = items.length === 0 ? 'block' : 'none';
   listEl.innerHTML = items.map(renderItem).join('');
 
