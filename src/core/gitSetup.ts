@@ -463,3 +463,65 @@ export function describeNetworkFailure(
 
   return undefined;
 }
+
+/**
+ * VS Codeのアカウントで得た鍵を、git側にも覚えさせる（設計書5.5.12）。
+ *
+ * **「VS Codeのアカウントを使う」と答えたのに、送信でまた聞かれる**という
+ * 報告があった（2026-08-21、作者が実機で発見）。
+ *
+ * 理由は2つ重なっている。
+ *
+ * 1. リポジトリを作るのはGitHubのAPIで、**鍵はこの拡張機能が持っているだけ**。
+ *    `git push` は別のプロセスなので、その鍵を知らない
+ * 2. `runGit` は `GIT_ASKPASS=echo` を渡している（背景のfetchが固まらないため）。
+ *    これはgit自身の入力は止めるが、**Windowsの資格情報マネージャーは別枠**で、
+ *    自前の画面を出す
+ *
+ * そこで `git credential approve` で、git が使う保管場所（Windowsなら
+ * 資格情報マネージャー）へ入れておく。**次のpushは黙って通る。**
+ *
+ * **鍵を平文で置かない。** `.git/config` のURLへ埋め込む手もあるが、
+ * それだと作品フォルダーに鍵が残る。保管場所はOSに任せる。
+ *
+ * 保管の仕組みが設定されていない環境では、gitは黙って何もしない。
+ * その場合はこれまで通り、送信時に聞かれる（失敗はしない）。
+ */
+export async function rememberGithubCredential(
+  token: string,
+  cloneUrl: string,
+  cwd: string
+): Promise<boolean> {
+  const target = parseHttpsRemote(cloneUrl);
+  if (!target) return false;
+
+  const input = [
+    "protocol=https",
+    `host=${target.host}`,
+    `username=${target.owner}`,
+    `password=${token}`,
+    "",
+    "",
+  ].join("\n");
+
+  return new Promise((resolve) => {
+    const child = execFile(
+      "git",
+      ["credential", "approve"],
+      { cwd, timeout: LOCAL_TIMEOUT_MS, windowsHide: true },
+      (error) => resolve(!error)
+    );
+    child.stdin?.end(input);
+  });
+}
+
+/** `https://github.com/owner/repo.git` から、ホストと所有者を取り出す */
+export function parseHttpsRemote(
+  url: string
+): { host: string; owner: string } | undefined {
+  const match = /^https:\/\/([^/]+)\/([^/]+)\/[^/]+?(?:\.git)?\/?$/.exec(
+    url.trim()
+  );
+  if (!match) return undefined;
+  return { host: match[1], owner: match[2] };
+}

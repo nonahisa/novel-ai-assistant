@@ -6,6 +6,7 @@ import {
   commitAll,
   countTrackableFiles,
   createGithubRepositoryViaApi,
+  rememberGithubCredential,
   currentBranch,
   describeNetworkFailure,
   ensureGithubAuthToken,
@@ -452,9 +453,24 @@ async function createRepositoryViaVscodeAccount(
     return false;
   }
 
-  logStep(`GitHubにリポジトリを作成（VS Codeアカウント）: ${name}（private）`);
+  // **鍵をgit側にも覚えさせる**（設計書5.5.12）。これをしないと、
+  // 「VS Codeのアカウントを使う」と答えたのに、送信でまた聞かれる
+  // （リポジトリを作るのはAPI、送るのは別プロセスの git であるため）
+  const remembered = await rememberGithubCredential(
+    token,
+    created.cloneUrl,
+    work.folderPath
+  );
+  logStep(
+    `GitHubにリポジトリを作成（VS Codeアカウント）: ${name}（private）` +
+      `／認証情報の記憶: ${remembered ? "成功" : "できず"}`
+  );
+
   vscode.window.showInformationMessage(
-    `非公開のリポジトリ ${name} を作り、送り先に設定しました。`
+    `非公開のリポジトリ ${name} を作り、送り先に設定しました。` +
+      (remembered
+        ? ""
+        : "（この端末では認証情報を覚えられませんでした。送信のときに一度聞かれます）")
   );
   return true;
 }
