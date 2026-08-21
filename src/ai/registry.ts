@@ -14,7 +14,7 @@ import { GeminiProvider } from "./geminiProvider";
 import { withProgress } from "../views/progress";
 import { probeGeneration } from "./generationProbe";
 import { logFailure, showLog } from "../core/logger";
-import { askText } from "../views/dialogs";
+import { askText, cancelItem } from "../views/dialogs";
 
 const KEY_PROVIDER = "novelai.ai.provider";
 const KEY_MODEL = "novelai.ai.model";
@@ -109,17 +109,22 @@ export async function runSetupWizard(
   };
 
   const providerPick = await vscode.window.showQuickPick(
-    providers.map((p) => ({
-      label: p.displayName,
-      description: providerDescriptions[p.id],
-      providerId: p.id,
-    })),
+    [
+      ...providers.map((p) => ({
+        label: p.displayName,
+        description: providerDescriptions[p.id],
+        providerId: p.id,
+      })),
+      // **取りやめる道を画面に出す。** Escでも閉じられるが、
+      // それを知らない人には出口が無いように見える（作者の指摘、2026-08-21）
+      cancelItem(),
+    ],
     {
       title: "使用するAIを選んでください（1つで構いません）",
       ignoreFocusOut: true,
     }
   );
-  if (!providerPick) return false;
+  if (!providerPick || !("providerId" in providerPick)) return false;
 
   const provider = registry.getProvider(providerPick.providerId)!;
 
@@ -196,24 +201,27 @@ export async function runSetupWizard(
   };
 
   const modelPick = await vscode.window.showQuickPick(
-    models.map((m) => ({
-      label: m.displayName,
-      description: [
-        m.parameterSize ?? "",
-        `文脈 ${formatContext(m.contextWindow)}`,
-        tierLabel[m.tier],
-      ]
-        .filter(Boolean)
-        .join(" / "),
-      detail:
-        m.capabilities.length > 0
-          ? `対応: ${m.capabilities.join(", ")}`
-          : undefined,
-      model: m,
-    })),
+    [
+      ...models.map((m) => ({
+        label: m.displayName,
+        description: [
+          m.parameterSize ?? "",
+          `文脈 ${formatContext(m.contextWindow)}`,
+          tierLabel[m.tier],
+        ]
+          .filter(Boolean)
+          .join(" / "),
+        detail:
+          m.capabilities.length > 0
+            ? `対応: ${m.capabilities.join(", ")}`
+            : undefined,
+        model: m,
+      })),
+      cancelItem(),
+    ],
     { title: "使用するモデルを選んでください", ignoreFocusOut: true }
   );
-  if (!modelPick) return false;
+  if (!modelPick || !("model" in modelPick)) return false;
 
   // 選んだモデルで実際に生成できるか確かめる。
   // モデル一覧は残高ゼロでも返ってくるので、ここまでの確認では
@@ -277,13 +285,14 @@ async function ensureApiKey(provider: ApiKeyProvider): Promise<boolean> {
       [
         { label: "登録済みのキーを使う", action: "keep" as const },
         { label: "キーを入力し直す", action: "replace" as const },
+        cancelItem(),
       ],
       {
         title: `${provider.displayName}のAPIキーは登録済みです`,
         ignoreFocusOut: true,
       }
     );
-    if (!answer) return false;
+    if (!answer || !("action" in answer)) return false;
     if (answer.action === "keep") return true;
   }
 

@@ -3,6 +3,7 @@ import { OllamaEmbeddingProvider, DEFAULT_EMBEDDING_MODEL } from "../ai/ollamaEm
 import { embeddingModelName, isVectorSearchEnabled } from "./vectorSearch";
 import { pullOllamaModel, shortenProgress } from "../core/packageInstall";
 import { withCancellableProgress } from "../views/progress";
+import { cancelItem } from "../views/dialogs";
 
 /**
  * 意味検索（ベクトルDB）のセットアップ案内。
@@ -104,7 +105,14 @@ export async function setupVectorSearch(): Promise<void> {
   });
 
   const picked = await vscode.window.showQuickPick(
-    steps.map((step) => ({ label: step.label, detail: step.detail, step })),
+    [
+      ...steps.map((step) => ({
+        label: step.label,
+        detail: step.detail,
+        step,
+      })),
+      cancelItem(),
+    ],
     {
       title: "相談で使う「意味検索」の準備",
       placeHolder: `${state} ／ ${switchState}`,
@@ -112,7 +120,7 @@ export async function setupVectorSearch(): Promise<void> {
     }
   );
 
-  await picked?.step.run();
+  if (picked && "step" in picked) await picked.step.run();
 }
 
 /**

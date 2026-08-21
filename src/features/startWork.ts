@@ -5,6 +5,7 @@ import { formatChapterNumber } from "../core/episodeParser";
 import { pathExists } from "../core/fileSystem";
 import { buildPlotTemplate } from "../core/plotTemplate";
 import { PLOT_FILE, readWorkConfig, workPaths } from "../core/workRegistry";
+import { cancelItem } from "../views/dialogs";
 
 /**
  * 新規作品の始め方（設計書6.4）。
@@ -44,6 +45,8 @@ export async function chooseWorkStartMode(
           "プロットはあとから「プロットをつくる」で足せます。",
         mode: "manuscript" as const,
       },
+      // Escでも閉じられるが、それを知らない人には出口が無いように見える
+      cancelItem(),
     ],
     {
       title: `「${title}」をどこから始めますか？`,
@@ -52,7 +55,8 @@ export async function chooseWorkStartMode(
       ignoreFocusOut: true,
     }
   );
-  return picked?.mode;
+  if (!picked || !("mode" in picked)) return undefined;
+  return picked.mode;
 }
 
 /**

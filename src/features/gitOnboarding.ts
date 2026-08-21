@@ -21,7 +21,7 @@ import {
 } from "../core/gitSetup";
 import { logFailure, logStep, showLog } from "../core/logger";
 import { withProgress } from "../views/progress";
-import { askText } from "../views/dialogs";
+import { askText , cancelItem } from "../views/dialogs";
 
 /**
  * GitHub同期を始めるまでの案内。
@@ -351,12 +351,12 @@ async function connectRemote(
     action: "local",
   });
 
-  const picked = await vscode.window.showQuickPick(items, {
+  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
     title: `${work.title} の送り先`,
     placeHolder: "GitHubへ送るか、この端末だけで使うかを決めます",
     ignoreFocusOut: true,
   });
-  if (!picked) return false;
+  if (!picked || !("action" in picked)) return false;
 
   if (picked.action === "local") {
     // **GitHubを使わないことは正しい選び方である。**

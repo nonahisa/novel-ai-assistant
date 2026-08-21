@@ -5,6 +5,7 @@ import { CharacterStore, CharacterStoreError } from "../core/characterStore";
 import { findMergeCandidates, type MergeCandidate } from "../core/characterMerge";
 import { unifyCharacters } from "../core/characterUnify";
 import { logFailure } from "../core/logger";
+import { cancelItem } from "../views/dialogs";
 
 /**
  * 同一人物として登録されてしまった組を、作者の確認のうえで1件にまとめる。
@@ -44,17 +45,21 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
 
   const byName = new Map(loaded.characters.map((c) => [c.name, c]));
   const picked = await vscode.window.showQuickPick(
-    candidates.map((candidate) => ({
-      label: `${candidate.names[0]} ＋ ${candidate.names[1]}`,
-      description: REASON_LABELS[candidate.reason],
-      candidate,
-    })),
+    [
+      ...candidates.map((candidate) => ({
+        label: `${candidate.names[0]} ＋ ${candidate.names[1]}`,
+        description: REASON_LABELS[candidate.reason],
+        candidate,
+      })),
+      // Escでも閉じられるが、それを知らない人には出口が無いように見える
+      cancelItem(),
+    ],
     {
       title: "同一人物としてまとめる組を選んでください",
       ignoreFocusOut: true,
     }
   );
-  if (!picked) return;
+  if (!picked || !("candidate" in picked)) return;
 
   const first = byName.get(picked.candidate.names[0]);
   const second = byName.get(picked.candidate.names[1]);
@@ -69,13 +74,14 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
     [
       { label: first.name, description: describe(first), keep: first, absorb: second },
       { label: second.name, description: describe(second), keep: second, absorb: first },
+      cancelItem(),
     ],
     {
       title: "残す名前を選んでください（もう一方は別名として残ります）",
       ignoreFocusOut: true,
     }
   );
-  if (!keepPick) return;
+  if (!keepPick || !("keep" in keepPick)) return;
 
   const { unified, retiredId } = unifyCharacters(keepPick.keep, keepPick.absorb);
 

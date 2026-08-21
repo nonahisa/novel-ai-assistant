@@ -143,7 +143,7 @@ import {
   openAllWorksWritingStatsPanel,
   refreshAllWorksWritingStatsPanel,
 } from "./features/allWorksWritingStatsPanel";
-import { askText } from "./views/dialogs";
+import { askText, cancelItem } from "./views/dialogs";
 import { manageKeepWords } from "./features/manageKeepWords";
 import {
   extendMarkdownItWithRuby,
@@ -1948,14 +1948,17 @@ export async function activate(
           hasBlurb ? "" : "作品紹介文",
           hasEpisodes ? "" : "各話あらすじ",
         ].filter(Boolean);
-        const picked = await vscode.window.showQuickPick(items, {
-          title: `${work.title} の紹介文・あらすじ`,
-          placeHolder:
-            missing.length === 0
-              ? "開くものを選んでください"
-              : `${missing.join("・")}はまだありません`,
-        });
-        if (!picked) return;
+        const picked = await vscode.window.showQuickPick(
+          [...items, cancelItem()],
+          {
+            title: `${work.title} の紹介文・あらすじ`,
+            placeHolder:
+              missing.length === 0
+                ? "開くものを選んでください"
+                : `${missing.join("・")}はまだありません`,
+          }
+        );
+        if (!picked || !("run" in picked)) return;
         await picked.run();
       }
     )
@@ -2219,10 +2222,18 @@ async function resolveWork(
   const title = options.title ?? "作品を選択";
   if (!options.annotate) {
     const picked = await vscode.window.showQuickPick(
-      works.map((w) => ({ label: w.title, description: w.folderPath, work: w })),
+      [
+        ...works.map((w) => ({
+          label: w.title,
+          description: w.folderPath,
+          work: w,
+        })),
+        // Escでも閉じられるが、それを知らない人には出口が無いように見える
+        cancelItem(),
+      ],
       { title }
     );
-    return picked?.work;
+    return picked && "work" in picked ? picked.work : undefined;
   }
 
   const notes = await Promise.all(works.map((work) => options.annotate!(work)));
@@ -2237,6 +2248,9 @@ async function resolveWork(
     // 溜まっている作品を上に出す。作者はたいていそれを選びたい
     .sort((left, right) => right.order - left.order);
 
-  const picked = await vscode.window.showQuickPick(items, { title });
-  return picked?.work;
+  const picked = await vscode.window.showQuickPick(
+    [...items, cancelItem()],
+    { title }
+  );
+  return picked && "work" in picked ? picked.work : undefined;
 }

@@ -18,6 +18,7 @@ import {
 import { describeNetworkFailure } from "../core/gitSetup";
 import { logFailure, showLog } from "../core/logger";
 import { withProgress } from "../views/progress";
+import { cancelItem } from "../views/dialogs";
 import {
   canRecordChanges,
   nextSetupStep,
@@ -625,11 +626,11 @@ export async function showGitSyncActions(
     action: "log",
   });
 
-  const picked = await vscode.window.showQuickPick(items, {
+  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
     title: `${work.title} のGitHub同期`,
     placeHolder: describeStatus(status),
   });
-  if (!picked) return;
+  if (!picked || !("action" in picked)) return;
 
   if (picked.action === "commit") {
     if (await recordChanges(work)) {

@@ -33,6 +33,7 @@ import { withCancellableProgress } from "../views/progress";
 import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 import { renameEpisodeFile } from "../core/episodeRename";
 import { confirmFormatFit } from "./formatFitPrompt";
+import { cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
  * 各話あらすじの生成（P-07）と、サブタイトルの提案・リネーム。
@@ -348,6 +349,8 @@ async function proposeSubtitles(
           description: "ファイル名を変えない",
           suggestion: undefined,
         },
+        // 「このままにする」はこの話だけ。取りやめは残りも見ない
+        cancelItem("やめる（残りも見ない）"),
       ],
       {
         title: `${episodeBodyLabel(episode)} のサブタイトル`,
@@ -355,7 +358,9 @@ async function proposeSubtitles(
         ignoreFocusOut: true,
       }
     );
-    if (!picked || !picked.suggestion) continue;
+    // 取りやめ（Escも同じ）は残りも見ない。「このままにする」はこの話だけ
+    if (!picked || isCancelItem(picked)) return;
+    if (!("suggestion" in picked) || !picked.suggestion) continue;
 
     try {
       const renamed = await renameEpisodeFile(

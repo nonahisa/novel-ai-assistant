@@ -18,6 +18,7 @@ import {
 } from "../core/abilityStore";
 import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
 import { locateBody, type TypoCheckIssue } from "./checkTypos";
+import { cancelItem } from "../views/dialogs";
 
 /**
  * 表記ゆれ検知（P-13）のオーケストレーション。
@@ -216,12 +217,13 @@ async function pickTargetForm(
     keep: null,
   });
 
-  const picked = await vscode.window.showQuickPick(items, {
+  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
     title: `${group.label} — どちらに揃えますか`,
     placeHolder: "選んだ表記に合わせる指摘を作ります（自動では書き換えません）",
     ignoreFocusOut: true,
   });
-  if (!picked) return undefined;
+  // 取りやめ（undefined）は「残りも見ない」。「この組は揃えない」（null）とは別
+  if (!picked || !("keep" in picked)) return undefined;
   return picked.keep;
 }
 

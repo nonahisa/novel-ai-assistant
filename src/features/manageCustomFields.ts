@@ -11,7 +11,7 @@ import {
   type CustomFieldDefinition,
 } from "../models/customField";
 import { logFailure } from "../core/logger";
-import { askText } from "../views/dialogs";
+import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
  * 人物設定に作者が項目を足す・外す。
@@ -97,11 +97,12 @@ async function pickAction(
     });
   }
 
-  const picked = await vscode.window.showQuickPick(items, {
+  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
     title: `人物設定の項目　現在: ${current}`,
     placeHolder: "何をしますか？",
   });
-  return picked?.action;
+  if (!picked || isCancelItem(picked)) return undefined;
+  return "action" in picked ? picked.action : undefined;
 }
 
 async function addField(
@@ -138,13 +139,14 @@ async function addField(
         description: "生い立ち・口癖など",
         multiline: true,
       },
+      cancelItem(),
     ],
     {
       title: `「${trimmedLabel}」の長さ`,
       placeHolder: "入力欄の高さに使います",
     }
   );
-  if (!length) return undefined;
+  if (!length || !("multiline" in length)) return undefined;
 
   return [
     ...fields,
@@ -161,17 +163,20 @@ async function removeField(
   fields: CustomFieldDefinition[]
 ): Promise<CustomFieldDefinition[] | undefined> {
   const picked = await vscode.window.showQuickPick(
-    fields.map((field) => ({
-      label: field.label,
-      description: field.hint,
-      key: field.key,
-    })),
+    [
+      ...fields.map((field) => ({
+        label: field.label,
+        description: field.hint,
+        key: field.key,
+      })),
+      cancelItem(),
+    ],
     {
       title: "外す項目",
       placeHolder: "入力済みの内容は消えません。表示されなくなるだけです",
     }
   );
-  if (!picked) return undefined;
+  if (!picked || !("key" in picked)) return undefined;
 
   return fields.filter((field) => field.key !== picked.key);
 }

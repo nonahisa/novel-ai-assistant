@@ -32,6 +32,7 @@ import {
 } from "../core/packageInstall";
 import { withCancellableProgress, withProgress } from "../views/progress";
 import { logFailure, logStep } from "../core/logger";
+import { cancelItem } from "../views/dialogs";
 
 /**
  * 「これを入れれば使えるようになる」を1か所にまとめた案内（設計書6.16）。
@@ -214,12 +215,12 @@ async function showPlan(
       ? `AIを使うには あと${required.length}件 必要です`
       : "必要なものは揃っています（任意のものが未導入）";
 
-  const picked = await vscode.window.showQuickPick(items, {
+  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
     title: "統合小説執筆環境のセットアップ",
     placeHolder: summary,
     ignoreFocusOut: true,
   });
-  await picked?.action();
+  if (picked && "action" in picked) await picked.action();
 }
 
 /** 何が要るのかを、用途つきで読める形で出す */

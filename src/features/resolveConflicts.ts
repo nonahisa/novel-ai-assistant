@@ -19,6 +19,7 @@ import {
 import { countChars, formatCount } from "../core/charCount";
 import { logFailure, showLog } from "../core/logger";
 import { lastAuthorOf } from "../core/git";
+import { cancelItem } from "../views/dialogs";
 
 /**
  * 競合の解決（設計書5.5.4）。
@@ -122,20 +123,23 @@ export async function resolveWorkConflicts(
   }
 
   const picked = await vscode.window.showQuickPick(
-    files.map((file) => ({
-      label: `$(warning) ${path.basename(file.relativePath)}`,
-      description: describeConflict(file.parsed),
-      detail: file.unmerged
-        ? file.relativePath
-        : `${file.relativePath}（マージの途中ではありません。マーカーが本文に残っています）`,
-      file,
-    })),
+    [
+      ...files.map((file) => ({
+        label: `$(warning) ${path.basename(file.relativePath)}`,
+        description: describeConflict(file.parsed),
+        detail: file.unmerged
+          ? file.relativePath
+          : `${file.relativePath}（マージの途中ではありません。マーカーが本文に残っています）`,
+        file,
+      })),
+      cancelItem(),
+    ],
     {
       title: `${work.title} の未解決の競合（${files.length}件）`,
       placeHolder: "内容を見比べるファイルを選んでください",
     }
   );
-  if (!picked) return;
+  if (!picked || !("file" in picked)) return;
 
   await reviewConflict(work, picked.file, options);
 }
@@ -236,13 +240,14 @@ async function reviewConflict(
         detail: "マーカーを見ながら手で編集します。",
         action: "manual" as const,
       },
+      cancelItem(),
     ],
     {
       title: `${path.basename(file.relativePath)} をどう解決しますか`,
       placeHolder: describeConflict(file.parsed),
     }
   );
-  if (!choice) return;
+  if (!choice || !("action" in choice)) return;
 
   if (choice.action === "manual") {
     await openFile(file.absolutePath);

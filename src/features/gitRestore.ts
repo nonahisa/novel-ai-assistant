@@ -13,6 +13,7 @@ import {
 } from "../core/gitHistory";
 import { logFailure } from "../core/logger";
 import { withProgress } from "../views/progress";
+import { cancelItem } from "../views/dialogs";
 
 /**
  * 過去の版に戻す（設計書5.5.10）。
@@ -158,19 +159,22 @@ async function pickCommit(
   // 先頭は「今の状態」そのものなので、戻し先には出さない
   const candidates = commits.slice(1);
   const picked = await vscode.window.showQuickPick(
-    candidates.map((commit) => ({
-      label: `$(history) ${commit.date}`,
-      description: commit.subject,
-      detail: `版 ${commit.shortId}`,
-      commit,
-    })),
+    [
+      ...candidates.map((commit) => ({
+        label: `$(history) ${commit.date}`,
+        description: commit.subject,
+        detail: `版 ${commit.shortId}`,
+        commit,
+      })),
+      cancelItem(),
+    ],
     {
       title: `「${work.title}」をどの版に戻しますか？（新しい順に最大${HISTORY_LIMIT}件）`,
       placeHolder: "戻したい日時を選んでください",
       ignoreFocusOut: true,
     }
   );
-  return picked?.commit;
+  return picked && "commit" in picked ? picked.commit : undefined;
 }
 
 /**

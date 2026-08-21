@@ -29,7 +29,7 @@ import {
 import { stripCodeFence } from "../core/synopsisValidation";
 import { withCancellableProgress } from "../views/progress";
 import { logFailure, showLog, useLogFile } from "../core/logger";
-import { askText } from "../views/dialogs";
+import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
  * 作品紹介文（P-06）とキャッチコピー3案（P-08）。
@@ -229,12 +229,8 @@ export async function generateCatchphrases(
           action: "again" as const,
           candidate: undefined,
         },
-        {
-          label: "$(close) やめる",
-          description: "何も書き込まない",
-          action: "cancel" as const,
-          candidate: undefined,
-        },
+        // 作法を1つに揃える（他の選択画面と同じ見た目にする）
+        cancelItem(),
       ],
       {
         title: `${material.workTitle} のキャッチコピー`,
@@ -243,7 +239,7 @@ export async function generateCatchphrases(
       }
     );
 
-    if (!picked || picked.action === "cancel") return;
+    if (!picked || isCancelItem(picked) || !("action" in picked)) return;
 
     if (picked.action === "again") {
       await history.add(valid.map((candidate) => candidate.text));

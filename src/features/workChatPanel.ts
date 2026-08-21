@@ -60,6 +60,7 @@ import {
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { renderMarkdownLite } from "../core/markdownLite";
 import { buildWorkChatPanelHtml } from "../views/workChatPanelHtml";
+import { cancelItem } from "../views/dialogs";
 
 /**
  * 相談パネル（P-21）。
@@ -781,10 +782,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       return;
     }
     const picked = await vscode.window.showQuickPick(
-      works.map((work) => ({ label: work.title, work })),
+      [
+        ...works.map((work) => ({ label: work.title, work })),
+        cancelItem(),
+      ],
       { title: "どの作品について相談しますか", ignoreFocusOut: true }
     );
-    if (!picked) return;
+    if (!picked || !("work" in picked)) return;
     this.selectedWorkId = picked.work.id;
     await this.postContext();
   }
