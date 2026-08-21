@@ -75,3 +75,25 @@ describe("提案の窓口は1つ", () => {
     expect(source).toContain("private recordUpdates:");
   });
 });
+
+describe("サイドバーの見出し", () => {
+  const raw = JSON.parse(readFileSync("package.json", "utf-8")) as {
+    displayName: string;
+    contributes: {
+      viewsContainers: { activitybar: Array<{ id: string; title: string }> };
+    };
+  };
+
+  /**
+   * **拡張機能の名前と、サイドバーの見出しを揃える。**
+   *
+   * 通知には `displayName`（「ソース: 統合小説執筆環境」）が出るのに、
+   * サイドバーは「小説執筆」だった。同じものを指しているのに名前が
+   * 2つあると、作者は別の機能だと思う（2026-08-21、作者の指摘）。
+   */
+  test("拡張機能の名前と同じ", () => {
+    const container = raw.contributes.viewsContainers.activitybar[0];
+    expect(container.title).toBe(raw.displayName);
+    expect(container.title).toBe("統合小説執筆環境");
+  });
+});
