@@ -126,6 +126,7 @@ type OutgoingMessage = {
 type IncomingMessage =
   | { type: "jump"; id: string }
   | { type: "apply"; id: string }
+  | { type: "undo"; id: string }
   | { type: "dismiss"; id: string }
   | { type: "keepWord"; id: string }
   | { type: "openSettings"; id: string }
@@ -390,6 +391,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       case "apply":
         await this.applyIssue(message.id);
         return;
+      case "undo":
+        await this.undoIssue(message.id);
+        return;
       case "keepWord":
         await this.keepWord(message.id);
         break;
@@ -653,6 +657,99 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     await appendAiActionLog(work, {
       category: "typo",
       action: "applied",
+      file: item.fileName,
+      line: item.line,
+      target: item.target,
+      suggestion: item.suggestion,
+    });
+  }
+
+  /**
+   * 適用した直しを、元の語へ戻す（設計書6.8.12）。
+   *
+   * **適用したあとに気が変わることがある**（作者の指摘、2026-08-21）。
+   * 直した箇所を1件ずつ元へ戻せるようにする。
+   *
+   * ## 適用の鏡像にする
+   *
+   * 置き換える向きが逆なだけで、**通す安全策は同じ**である。
+   *
+   * - 書き戻す直前に本文を読み直し、**修正案がその行にまだ実在するか**を確かめる
+   * - 読み込み時のハッシュと突き合わせてから書く（外で直されていたら中止）
+   * - 文字コードと改行はそのまま保つ
+   *
+   * **作者が手で直したあとなら、戻さない。** 修正案が見つからなければ
+   * それは既に別の文になっているということで、機械が判断してよい話ではない。
+   *
+   * ## ファイルまるごとは戻さない
+   *
+   * 回復先（`.novelai-recovery/`）には適用前のファイルが残っているが、
+   * **まるごと戻すと、そのあと作者が別の箇所へ書いた分まで消える。**
+   * 行の中のその1か所だけを戻す。
+   */
+  private async undoIssue(id: string): Promise<void> {
+    const item = this.items.find((i) => i.id === id);
+    if (!item || !this.work) return;
+    if (item.status !== "applied") return;
+    const work = this.work;
+
+    // 編集部が校閲中のファイルは、作者も触らない（適用と同じ）
+    if (!(await this.confirmNotLocked(item.filePath, work))) return;
+
+    let file;
+    try {
+      file = await readTextFile(item.filePath);
+    } catch {
+      this.markStatus(id, "applied", "本文を読み込めませんでした。");
+      return;
+    }
+
+    const lines = file.text.split("\n");
+    const lineIndex = item.line - 1;
+    const lineText = lines[lineIndex];
+
+    // **修正案がその行に無ければ、既に別の文になっている。** 触らない
+    if (lineText === undefined || !lineText.includes(item.suggestion)) {
+      this.markStatus(
+        id,
+        "applied",
+        "この行はそのあと書き換えられているため、戻せませんでした。" +
+          "本文を直接お直しください。"
+      );
+      return;
+    }
+
+    const at = lineText.indexOf(item.suggestion);
+    lines[lineIndex] =
+      lineText.slice(0, at) +
+      item.target +
+      lineText.slice(at + item.suggestion.length);
+
+    const result = await writeTextFilePreservingFormat(
+      item.filePath,
+      lines.join("\n"),
+      file,
+      file.hash
+    );
+    if (!result.ok) {
+      this.markStatus(id, "applied", describeWriteFailure(result));
+      return;
+    }
+
+    await revertIfOpen(item.filePath);
+
+    // **もう一度適用できる状態に戻す。** 戻したあとで考え直すこともある
+    this.markStatus(id, "pending");
+
+    await recordEdit(work, {
+      actor: "author",
+      action: `${this.category}の反映を戻した`,
+      file: item.fileName,
+      detail: `${item.line}行 「${item.suggestion}」→「${item.target}」`,
+    });
+    await appendAiActionLog(work, {
+      category: "typo",
+      action: "reverted",
       file: item.fileName,
       line: item.line,
       target: item.target,

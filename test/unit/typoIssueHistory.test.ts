@@ -200,6 +200,50 @@ describe("却下履歴とAI操作ログ", () => {
       expect(keys.has(appliedFixKey("001.txt", "良い", "よい"))).toBe(false);
     });
 
+    test("戻したものは、適用済みから外れる", async () => {
+      // **戻したのに次の検知で二度と挙がってこない**、を防ぐ（設計書6.8.12）
+      await appendAiActionLog(work, {
+        category: "typo",
+        action: "applied",
+        file: "001.txt",
+        line: 5,
+        target: "意外",
+        suggestion: "以外",
+      });
+      expect(await loadAppliedFixKeys(work)).toContain(
+        appliedFixKey("001.txt", "意外", "以外")
+      );
+
+      await appendAiActionLog(work, {
+        category: "typo",
+        action: "reverted",
+        file: "001.txt",
+        line: 5,
+        target: "意外",
+        suggestion: "以外",
+      });
+      expect(await loadAppliedFixKeys(work)).not.toContain(
+        appliedFixKey("001.txt", "意外", "以外")
+      );
+    });
+
+    test("戻したあとにもう一度適用すれば、また適用済みになる", async () => {
+      // 記録は追記だけなので、後の行が勝つ
+      for (const action of ["applied", "reverted", "applied"] as const) {
+        await appendAiActionLog(work, {
+          category: "typo",
+          action,
+          file: "002.txt",
+          line: 1,
+          target: "良い",
+          suggestion: "よい",
+        });
+      }
+      expect(await loadAppliedFixKeys(work)).toContain(
+        appliedFixKey("002.txt", "良い", "よい")
+      );
+    });
+
     test("壊れた行が混ざっていても、読める行は取り込む", async () => {
       await appendAiActionLog(work, {
         category: "typo",

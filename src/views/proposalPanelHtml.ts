@@ -300,6 +300,13 @@ function renderItem(item) {
           : '') +
         '</div>'
       : '') +
+    // **適用したあとに気が変わることがある**（作者の指摘）。
+    // 直した箇所を、元の語へ戻せるようにする
+    (item.status === 'applied'
+      ? '<div class="actions">' +
+        '<button class="secondary" data-action="undo" data-id="' + item.id + '" title="本文をこの指摘の前へ戻します">戻す</button>' +
+        '</div>'
+      : '') +
     '</div>'
   );
 }

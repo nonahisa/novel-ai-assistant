@@ -125,12 +125,15 @@ export async function loadAppliedFixKeys(
         if (
           isRecord(entry) &&
           entry.category === "typo" &&
-          entry.action === "applied" &&
           typeof entry.file === "string" &&
           typeof entry.target === "string" &&
           typeof entry.suggestion === "string"
         ) {
-          keys.add(appliedFixKey(entry.file, entry.target, entry.suggestion));
+          const key = appliedFixKey(entry.file, entry.target, entry.suggestion);
+          // **戻したものは「適用済み」ではない。** 外さないと、
+          // 戻したのに次の検知で二度と挙がってこない（設計書6.8.12）
+          if (entry.action === "applied") keys.add(key);
+          else if (entry.action === "reverted") keys.delete(key);
         }
       } catch {
         // 壊れた行は無視して次の行へ
@@ -149,7 +152,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export interface AiActionLogEntry {
   /** 指摘の種類。推敲・逸脱検知を足すときも、ここへ名前を増やす */
   category: "typo" | "contradiction";
-  action: "applied" | "dismissed";
+  /**
+   * 何をしたか。
+   *
+   * `"reverted"` は、適用したものを元へ戻したこと（設計書6.8.12）。
+   * **記録は追記だけ**なので、消すのではなく「戻した」を足す。
+   */
+  action: "applied" | "dismissed" | "reverted";
   file: string;
   line: number;
   target: string;
