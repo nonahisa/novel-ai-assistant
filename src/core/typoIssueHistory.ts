@@ -13,22 +13,33 @@ import type { AcceptedTypoIssue } from "./typoCheckValidation";
  * 設計書6.11「承認済み・却下済みの履歴は `.aiwriter/logs/ai_actions.log` に
  * 保存し、あとから見返せるようにする」に対応する。
  *
- * 無視した指摘は、チャンクが変わらない限り次回の検知結果からも除く。
- * 除かないと、無視を押しても毎回また出てきて承認作業が終わらない。
+ * 無視した指摘は、次回の検知結果からも除く。除かないと、無視を押しても
+ * 毎回また出てきて承認作業が終わらない。
  */
 
 const DISMISSED_FILE = "typo_dismissed.json";
 /** 覚えておく件数。増やしすぎても意味が薄く、ファイルが際限なく育つのを防ぐ */
 const MAX_DISMISSED = 500;
 
-/** 無視した指摘を識別するキー。チャンクが変われば別キーになり、自然に古い記録は使われなくなる */
+/** 無視した指摘を識別するキー */
 export function dismissKey(
-  chunkHash: string,
+  /**
+   * どのファイルの指摘か。
+   *
+   * **以前はチャンクのハッシュだった。** チャンクは分け方で変わるので、
+   * まとめ方を変えたり本文をどこか1文字直したりするだけで鍵が変わり、
+   * **無視したはずの指摘がまた出てくる**（設計書6.8.10）。
+   * ファイルを基準にすれば、まとめ方に左右されない。
+   */
+  filePath: string,
   issue: Pick<AcceptedTypoIssue, "line" | "target" | "suggestion">
 ): string {
+  // 絶対パスと相対パスが混ざるので、ファイル名だけで揃える。
+  // 同じ作品の中で名前が重なることはない
+  const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
   return crypto
     .createHash("sha1")
-    .update(`${chunkHash}|${issue.line}|${issue.target}|${issue.suggestion}`)
+    .update(`${fileName}|${issue.line}|${issue.target}|${issue.suggestion}`)
     .digest("hex")
     .slice(0, 24);
 }

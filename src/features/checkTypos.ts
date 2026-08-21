@@ -13,6 +13,9 @@ import {
   decideContextSize,
   splitIntoChunks,
   withLineNumbers,
+  mergeAdjacentChunks,
+  splitMergedChunk,
+  locateChunkLine,
   Chunk,
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
@@ -55,9 +58,10 @@ import type { KeepWord } from "../models/keepWord";
 /**
  * 誤字脱字検知（P-09）のオーケストレーション。
  *
- * `extractCharacters.ts` の骨格を踏襲するが、誤字脱字検知に要らない
- * 複雑さ（能力・場所・組織の同時抽出、チャンクのまとめ送信）は持ち込まない。
- * 素直に1話＝相応のチャンク数のまま処理する。
+ * `extractCharacters.ts` の骨格を踏襲する。以前は「チャンクのまとめ送信は
+ * 持ち込まない」としていたが、1話ずつでは指示のほうが本文より大きく、
+ * 19話で19回ぶん同じ指示を送り直していた（作者の指摘）。まとめて送り、
+ * 返ってきた行番号は `locateChunkLine` で元のファイルへ戻す。
  */
 
 export interface TypoCheckIssue extends AcceptedTypoIssue {
@@ -214,7 +218,26 @@ export async function checkTypos(
     if (proceed !== "除外して続行") return undefined;
   }
 
-  const chunks = tasks.flatMap((task) => task.chunks);
+  // **1話ずつ送ると、指示のほうが本文より大きい。** 1話2,000字の作品で
+  // 指示が約5,600字。19話なら19回ぶん同じ指示を送り直していた
+  // （2026-08-21、作者の指摘）。隣どうしをまとめて呼び出し回数を減らす。
+  //
+  // **行番号は `locateChunkLine` で元のファイルへ戻す。** まとめた本文の
+  // 通し番号のまま使うと、2話目以降の指摘が1話目の別の行を書き換える。
+  const configuredMergeChars = vscode.workspace
+    .getConfiguration("novelai")
+    .get<number>("mergeChunkChars", 6000);
+  const mergeChars =
+    Number.isInteger(configuredMergeChars) && configuredMergeChars >= 1
+      ? Math.min(configuredMergeChars, chunkChars)
+      : 0;
+  const chunks =
+    mergeChars > 0
+      ? mergeAdjacentChunks(
+          tasks.flatMap((task) => task.chunks),
+          { maxChars: mergeChars }
+        )
+      : tasks.flatMap((task) => task.chunks);
   if (chunks.length === 0) {
     vscode.window.showWarningMessage("処理できる本文がありません。");
     return undefined;
@@ -245,22 +268,21 @@ export async function checkTypos(
   const dismissed = await dismissedHistory.load();
   const appliedFixKeys = await loadAppliedFixKeys(work);
 
-  const filePathByChunk = new Map<string, string>();
-  for (const task of tasks) {
-    for (const chunk of task.chunks) filePathByChunk.set(chunk.hash, task.filePath);
-  }
-
   const issues: TypoCheckIssue[] = [];
 
   // 文章作法（三点リーダー・ダッシュの偶数使用、鉤括弧内文末の句点、
   // 感嘆符・疑問符後の空白）はAIを使わずコードだけで判定できるため、
   // AIの実行有無・キャッシュに関係なく毎回すべてのチャンクに対して行う
   for (const chunk of chunks) {
-    const filePath = filePathByChunk.get(chunk.hash) ?? chunk.filePath;
     for (const issue of checkWritingStyle(chunk)) {
-      const key = dismissKey(chunk.hash, issue);
+      // **まとめたチャンクでは、行番号が元ファイルのものではない。**
+      // 戻せないものは捨てる（どこを直すのか分からないため）
+      const at = locateChunkLine(chunk, issue.line);
+      if (!at) continue;
+      const located = { ...issue, line: at.line };
+      const key = dismissKey(at.filePath, located);
       if (dismissed.has(key)) continue;
-      issues.push({ ...issue, filePath, chunkHash: chunk.hash });
+      issues.push({ ...located, filePath: at.filePath, chunkHash: chunk.hash });
     }
   }
 
@@ -286,11 +308,18 @@ export async function checkTypos(
     }
     const estimateMinutes = Math.ceil((pending.length * 15) / 60);
     const costNotice = buildTypoCheckCostNotice(resolved.provider.id, pending);
+    // **まとめ方を変えると、キャッシュが総入れ替えになる。** 何も変えて
+    // いないのに全件が対象になると、作者は不具合だと思う。理由を添える
+    const allPending =
+      pending.length === chunks.length && chunks.length > 1
+        ? "\n（前回から本文の分け方が変わっているため、今回はすべて送り直します）"
+        : "";
     const confirm = await vscode.window.showInformationMessage(
       `${chunks.length} チャンク中 ${pending.length} 件を処理します` +
         `（処理済み ${chunks.length - pending.length} 件はスキップ）。\n` +
         `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度\n` +
-        costNotice,
+        costNotice +
+        allPending,
       "実行",
       "中止"
     );
@@ -317,16 +346,21 @@ export async function checkTypos(
     });
 
     let done = 0;
-    for (const chunk of chunks) {
+    // **切り詰められたら、まとめたぶんを話ごとに戻して試し直す。**
+    // まとめると出力も増えるので、上限に当たる見込みが上がる。
+    // 捨てるとその話は丸ごと検査されないまま終わる（抽出で実際に起きた）。
+    // 処理中に足すので、`for...of` ではなく番号で回す
+    const queue = [...chunks];
+    let total = pending.length;
+    for (let cursor = 0; cursor < queue.length; cursor++) {
+      const chunk = queue[cursor];
       if (token.isCancellationRequested) break;
 
-      const filePath = filePathByChunk.get(chunk.hash) ?? chunk.filePath;
       const cached = cache.get(chunk.hash, cacheKeyBase);
       if (cached) {
         collectIssues(
           cached as TypoCheckResult,
           chunk,
-          filePath,
           protectedNames,
           keepWords,
           dismissed,
@@ -337,12 +371,12 @@ export async function checkTypos(
         continue;
       }
 
-      const label = describeChunkFile(filePath, chunk);
+      const label = describeChunkFile(chunk.filePath, chunk);
       progress.report({
-        message: `${done + 1}/${pending.length}  ${label}`,
-        increment: 100 / Math.max(pending.length, 1),
+        message: `${done + 1}/${total}  ${label}`,
+        increment: 100 / Math.max(total, 1),
       });
-      logStep(`AIへ送信: ${done + 1}/${pending.length} ${label}`);
+      logStep(`AIへ送信: ${done + 1}/${total} ${label}`);
       const startedAt = Date.now();
 
       const callAI = () =>
@@ -386,7 +420,7 @@ export async function checkTypos(
             rateLimit.totalWaitedMs += waitMs;
             progress.report({
               message:
-                `${done + 1}/${pending.length}  ` +
+                `${done + 1}/${total}  ` +
                 `レート上限のため ${Math.ceil(waitMs / 1000)} 秒待っています` +
                 `（${rateLimit.waits}回目 / 合計 ${Math.round(
                   rateLimit.totalWaitedMs / 1000
@@ -405,7 +439,18 @@ export async function checkTypos(
         );
 
         if (res.truncated || !res.text.trim()) {
-          failedChunks++;
+          // まとめたせいで入り切らなかったのなら、元の大きさなら通る見込みが
+          // ある。**捨てるより試すほうがよい**（部分的なJSONは解析できない）
+          const parts = splitMergedChunk(chunk);
+          if (parts.length > 1) {
+            queue.splice(cursor + 1, 0, ...parts);
+            total += parts.length;
+            logStep(
+              `切り詰められたため ${parts.length} 話に分けて試し直します: ${label}`
+            );
+          } else {
+            failedChunks++;
+          }
           done++;
           continue;
         }
@@ -417,7 +462,6 @@ export async function checkTypos(
           collectIssues(
             parsed,
             chunk,
-            filePath,
             protectedNames,
             keepWords,
             dismissed,
@@ -505,7 +549,6 @@ export async function checkTypos(
 function collectIssues(
   result: TypoCheckResult,
   chunk: Chunk,
-  filePath: string,
   protectedNames: string[],
   keepWords: KeepWord[],
   dismissed: Set<string>,
@@ -515,18 +558,32 @@ function collectIssues(
 ): void {
   const validated = validateTypoIssues(result, chunk, protectedNames, keepWords);
   let rejectedCount = validated.rejected.length;
-  const fileName = path.basename(filePath);
 
   for (const issue of validated.accepted) {
-    const key = dismissKey(chunk.hash, issue);
-    if (dismissed.has(key)) continue;
+    // **どのファイルの何行目かを、ここで確定させる。** まとめたチャンクでは
+    // AIが返す行番号がまとめた本文の通し番号になっており、そのまま使うと
+    // 別の話のファイルの、まったく違う行を書き換える
+    const at = locateChunkLine(chunk, issue.line);
+    if (!at) {
+      // 戻せない行は捨てる。どこを直すのか決められない
+      rejectedCount++;
+      continue;
+    }
+    const located = { ...issue, line: at.line };
+    const fileName = path.basename(at.filePath);
 
-    if (appliedFixKeys.has(appliedFixKey(fileName, issue.suggestion, issue.target))) {
+    if (dismissed.has(dismissKey(at.filePath, located))) continue;
+
+    if (
+      appliedFixKeys.has(
+        appliedFixKey(fileName, located.suggestion, located.target)
+      )
+    ) {
       rejectedCount++;
       continue;
     }
 
-    out.push({ ...issue, filePath, chunkHash: chunk.hash });
+    out.push({ ...located, filePath: at.filePath, chunkHash: chunk.hash });
   }
 
   onRejected?.(rejectedCount);

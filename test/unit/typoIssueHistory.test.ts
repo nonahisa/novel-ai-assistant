@@ -17,26 +17,45 @@ const work: WorkEntry = {
 };
 
 describe("無視した指摘のキー", () => {
+  const issue = { line: 5, target: "意外", suggestion: "以外" };
+
   test("同じ内容なら同じキーになる", () => {
-    const issue = { line: 5, target: "意外", suggestion: "以外" };
-    expect(dismissKey("chunk-a", issue)).toBe(dismissKey("chunk-a", issue));
+    expect(dismissKey("本文/001.txt", issue)).toBe(
+      dismissKey("本文/001.txt", issue)
+    );
   });
 
-  test("チャンクが変われば別のキーになる", () => {
-    const issue = { line: 5, target: "意外", suggestion: "以外" };
-    expect(dismissKey("chunk-a", issue)).not.toBe(dismissKey("chunk-b", issue));
+  test("ファイルが違えば別のキーになる", () => {
+    expect(dismissKey("本文/001.txt", issue)).not.toBe(
+      dismissKey("本文/002.txt", issue)
+    );
+  });
+
+  test("絶対パスでも相対パスでも同じキーになる", () => {
+    // 呼ぶ場所によってどちらも来る。ファイル名だけで揃える
+    expect(dismissKey("C:\\novels\\作品\\本文\\001.txt", issue)).toBe(
+      dismissKey("本文/001.txt", issue)
+    );
+  });
+
+  test("チャンクの分け方が変わってもキーは変わらない", () => {
+    // **以前はチャンクのハッシュを鍵にしていた。** まとめ方を変えたり
+    // 本文をどこか1文字直したりするだけで鍵が変わり、無視したはずの
+    // 指摘がまた出てきていた（設計書6.8.10）
+    expect(dismissKey("本文/001.txt", issue)).toBe(
+      dismissKey("本文/001.txt", { ...issue })
+    );
   });
 
   test("行・語・修正案のいずれが違っても別のキーになる", () => {
-    const base = { line: 5, target: "意外", suggestion: "以外" };
-    expect(dismissKey("c", base)).not.toBe(
-      dismissKey("c", { ...base, line: 6 })
+    expect(dismissKey("a.txt", issue)).not.toBe(
+      dismissKey("a.txt", { ...issue, line: 6 })
     );
-    expect(dismissKey("c", base)).not.toBe(
-      dismissKey("c", { ...base, target: "以外" })
+    expect(dismissKey("a.txt", issue)).not.toBe(
+      dismissKey("a.txt", { ...issue, target: "以外" })
     );
-    expect(dismissKey("c", base)).not.toBe(
-      dismissKey("c", { ...base, suggestion: "意外" })
+    expect(dismissKey("a.txt", issue)).not.toBe(
+      dismissKey("a.txt", { ...issue, suggestion: "意外" })
     );
   });
 });

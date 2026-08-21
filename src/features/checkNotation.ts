@@ -146,7 +146,7 @@ export async function checkNotation(
       if (form.surface === keep) continue;
       for (const occurrence of form.occurrences) {
         const issue = buildIssue(group, occurrence, form.surface, keep);
-        if (dismissed.has(dismissKey(issue.chunkHash, issue))) {
+        if (dismissed.has(dismissKey(issue.filePath, issue))) {
           dismissedCount++;
           continue;
         }

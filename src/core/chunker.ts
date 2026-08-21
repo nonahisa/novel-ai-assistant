@@ -16,6 +16,15 @@ export interface ChunkSegment {
   /** チャンク本文内での範囲（開始位置と終了位置） */
   start: number;
   end: number;
+  /**
+   * この内訳が、元ファイルの何行目から始まるか（0始まり）。
+   *
+   * **まとめたチャンクでは、行番号が元ファイルのものではなくなる。**
+   * 誤字脱字はAIに「何行目」を言わせ、その値で本文の位置を決めるので、
+   * まとめたあとに元へ戻せないと、別のファイルの別の行を書き換えることになる。
+   * 戻すための足がかりとして持つ（locateChunkLine）。
+   */
+  startLine: number;
 }
 
 export interface Chunk {
@@ -76,6 +85,7 @@ export function segmentsOf(chunk: Chunk): ChunkSegment[] {
       chapterEnd: chunk.chapterEnd,
       start: 0,
       end: chunk.text.length,
+      startLine: chunk.startLine,
     },
   ];
 }
@@ -169,8 +179,8 @@ export function splitIntoChunks(
   }
   const normalized = text.replace(/\r\n?/g, "\n");
 
-  const wholeSegment = (text: string): ChunkSegment[] => [
-    { filePath, chapterStart, chapterEnd, start: 0, end: text.length },
+  const wholeSegment = (text: string, startLine: number): ChunkSegment[] => [
+    { filePath, chapterStart, chapterEnd, start: 0, end: text.length, startLine },
   ];
 
   if (normalized.length <= opts.maxChars) {
@@ -183,7 +193,7 @@ export function splitIntoChunks(
         chapterStart,
         chapterEnd,
         hash: hashText(normalized),
-        segments: wholeSegment(normalized),
+        segments: wholeSegment(normalized, 0),
         wholeFile: true,
       },
     ];
@@ -212,7 +222,7 @@ export function splitIntoChunks(
       chapterStart,
       chapterEnd,
       hash: hashText(body),
-      segments: wholeSegment(body),
+      segments: wholeSegment(body, startLine),
     });
 
     index++;
@@ -298,6 +308,9 @@ function joinChunks(chunks: Chunk[]): Chunk {
       chapterEnd: chunk.chapterEnd,
       start,
       end: text.length,
+      // **元ファイルの何行目からかを控える。** これが無いと、まとめた
+      // チャンクで返ってきた行番号を元のファイルへ戻せない
+      startLine: chunk.startLine,
     });
   }
 
@@ -335,7 +348,10 @@ export function splitMergedChunk(chunk: Chunk): Chunk[] {
       filePath: segment.filePath,
       index: 0,
       text,
-      startLine: 0,
+      // **0に戻さない。** まとめる前の行番号へ戻す。誤字脱字は
+      // ここで返した行番号をそのまま本文の位置に使うので、0にすると
+      // 話の途中を先頭と見なして別の行を書き換える
+      startLine: segment.startLine,
       chapterStart: segment.chapterStart,
       chapterEnd: segment.chapterEnd,
       hash: hashText(text),
@@ -346,6 +362,7 @@ export function splitMergedChunk(chunk: Chunk): Chunk[] {
           chapterEnd: segment.chapterEnd,
           start: 0,
           end: text.length,
+          startLine: segment.startLine,
         },
       ],
       // 元はまるごと1ファイルだったもの
@@ -375,26 +392,35 @@ export function splitChunkInHalf(
   if (cut <= 0 || cut >= chunk.text.length) return undefined;
 
   const halves = [chunk.text.slice(0, cut), chunk.text.slice(cut)];
-  return halves.map((text, offset) => ({
-    filePath: chunk.filePath,
-    index: chunk.index + offset,
-    text,
-    startLine: chunk.startLine,
-    chapterStart: chunk.chapterStart,
-    chapterEnd: chunk.chapterEnd,
-    hash: hashText(text),
-    segments: [
-      {
-        filePath: chunk.filePath,
-        chapterStart: chunk.chapterStart,
-        chapterEnd: chunk.chapterEnd,
-        start: 0,
-        end: text.length,
-      },
-    ],
-    // 半分にしたものは、もう1ファイルまるごとではない
-    wholeFile: false,
-  }));
+  return halves.map((text, offset) => {
+    // **後半は、割った位置の行数だけ後ろから始まる。** 両方に同じ
+    // 開始行を入れると、後半の指摘がすべて前半の行を指す
+    const startLine =
+      offset === 0
+        ? chunk.startLine
+        : chunk.startLine + countLines(chunk.text, cut);
+    return {
+      filePath: chunk.filePath,
+      index: chunk.index + offset,
+      text,
+      startLine,
+      chapterStart: chunk.chapterStart,
+      chapterEnd: chunk.chapterEnd,
+      hash: hashText(text),
+      segments: [
+        {
+          filePath: chunk.filePath,
+          chapterStart: chunk.chapterStart,
+          chapterEnd: chunk.chapterEnd,
+          start: 0,
+          end: text.length,
+          startLine,
+        },
+      ],
+      // 半分にしたものは、もう1ファイルまるごとではない
+      wholeFile: false,
+    };
+  });
 }
 
 /** 区切りに適した位置を後ろから探す */
@@ -428,4 +454,63 @@ function countLines(text: string, upto: number): number {
     if (text[i] === "\n") count++;
   }
   return count;
+}
+
+/** 行番号の戻り先 */
+export interface ChunkLineLocation {
+  filePath: string;
+  /** 元ファイル内での行番号（1始まり） */
+  line: number;
+}
+
+/**
+ * `withLineNumbers` が振った行番号を、元のファイルと行へ戻す。
+ *
+ * **まとめていないチャンクでは、振った番号がそのまま元ファイルの行番号である**
+ * （`chunk.startLine + index + 1`）。何もしなくてよい。
+ *
+ * **まとめたチャンクでは違う。** `startLine` が0になり、番号は
+ * まとめた本文の中での通し番号になる。どの内訳に入るかを位置から割り出し、
+ * その内訳の開始行を足して元へ戻す。
+ *
+ * ここを通さずに `chunk.filePath` と行番号をそのまま使うと、
+ * **2話目以降の指摘が1話目のファイルの、まったく違う行を書き換える。**
+ * 誤字脱字は本文を書き換えるので、取り違えは原稿の破壊になる。
+ *
+ * 範囲の外を指していれば `undefined` を返す。AIは平気で範囲外の行を返す。
+ */
+export function locateChunkLine(
+  chunk: Chunk,
+  line: number
+): ChunkLineLocation | undefined {
+  if (!Number.isInteger(line) || line < 1) return undefined;
+  const segments = segmentsOf(chunk);
+
+  // まとめていないチャンク。番号は既に元ファイルのもの
+  if (segments.length === 1) {
+    const lineCount = chunk.text.split("\n").length;
+    const first = chunk.startLine + 1;
+    if (line < first || line > chunk.startLine + lineCount) return undefined;
+    return { filePath: segments[0].filePath, line };
+  }
+
+  const lineCount = chunk.text.split("\n").length;
+  if (line > lineCount) return undefined;
+
+  // 0始まりに直してから、内訳の行範囲と突き合わせる
+  const target = line - 1;
+  for (const segment of segments) {
+    const firstLine = countLines(chunk.text, segment.start);
+    // 内訳の末尾の1文字ぶん手前を見る。`end` は次の内訳の直前を指すため
+    const lastLine = countLines(
+      chunk.text,
+      Math.max(segment.start, segment.end - 1)
+    );
+    if (target < firstLine || target > lastLine) continue;
+    return {
+      filePath: segment.filePath,
+      line: target - firstLine + segment.startLine + 1,
+    };
+  }
+  return undefined;
 }

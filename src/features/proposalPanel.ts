@@ -799,7 +799,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       return;
     }
     await new TypoDismissedHistory(work).add([
-      dismissKey(item.chunkHash, item),
+      dismissKey(item.filePath, item),
     ]);
     this.markStatus(id, "dismissed");
     await appendAiActionLog(work, {
