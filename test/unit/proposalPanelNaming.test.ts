@@ -97,3 +97,25 @@ describe("サイドバーの見出し", () => {
     expect(container.title).toBe("統合小説執筆環境");
   });
 });
+
+describe("小説を読める既定にする", () => {
+  const raw = JSON.parse(readFileSync("package.json", "utf-8")) as {
+    contributes: {
+      configurationDefaults?: Record<string, Record<string, unknown>>;
+    };
+  };
+
+  /**
+   * **小説は1行が長い。** 折り返さないと横スクロールしながら読むことになる。
+   *
+   * `configurationDefaults` は**既定値を変えるだけ**で、作者が明示的に
+   * 設定していればそちらが勝つ。だから勝手に上書きすることにはならない
+   * （2026-08-21、作者の了承を得て追加）。
+   */
+  test("本文の折り返しを既定で入にする", () => {
+    const defaults = raw.contributes.configurationDefaults ?? {};
+    for (const language of ["[plaintext]", "[markdown]"]) {
+      expect(defaults[language]?.["editor.wordWrap"], language).toBe("on");
+    }
+  });
+});
