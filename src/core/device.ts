@@ -1,4 +1,4 @@
-import * as crypto from "crypto";
+import { randomHex } from "./runtime";
 import * as os from "os";
 
 /**
@@ -35,9 +35,7 @@ export async function resolveDeviceId(
   const existing = storage.get(DEVICE_ID_KEY);
   if (existing && isValidDeviceId(existing)) return existing;
 
-  const created = `${sanitizeHostname(hostname)}-${crypto
-    .randomBytes(2)
-    .toString("hex")}`;
+  const created = `${sanitizeHostname(hostname)}-${randomHex(2)}`;
   await storage.update(DEVICE_ID_KEY, created);
   return created;
 }

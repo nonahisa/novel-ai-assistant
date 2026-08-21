@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "path";
-import * as crypto from "crypto";
+import { sha1Text } from "./hash";
 import { WorkEntry } from "../models/types";
 import { atomicWriteFile } from "./atomicWrite";
 import { workPaths } from "./workRegistry";
@@ -170,10 +170,8 @@ function isLeapYear(year: number): boolean {
 }
 
 function makeKey(chunkHash: string, base: CacheKeyBase): string {
-  const digest = crypto
-    .createHash("sha1")
-    .update(`${base.promptVersion}|${base.model}|${chunkHash}`)
-    .digest("hex")
-    .slice(0, 24);
+  const digest = sha1Text(
+    `${base.promptVersion}|${base.model}|${chunkHash}`
+  ).slice(0, 24);
   return `${base.feature}:${digest}`;
 }

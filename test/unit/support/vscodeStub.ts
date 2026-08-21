@@ -123,21 +123,56 @@ export class FileSystemError extends Error {
   }
 }
 
+/**
+ * `vscode.Uri` の代役。
+ *
+ * **`toString` はプロトタイプに置く。** 各オブジェクトに持たせると、
+ * 同じ場所を指す2つのUriが「別物」と判定される（`toHaveBeenCalledWith`
+ * は関数を参照で比べるため）。本物も同じくプロトタイプに持っている。
+ */
+class StubUri {
+  constructor(
+    readonly scheme: string,
+    readonly authority: string,
+    readonly path: string,
+    readonly fsPath: string,
+    readonly text: string
+  ) {}
+
+  toString(): string {
+    return this.text;
+  }
+}
+
 export const Uri = {
-  file: (fsPath: string) => ({
-    fsPath: fsPath.replace(/^[A-Z]:/, (drive) => drive.toLowerCase()),
-  }),
+  file: (fsPath: string) => {
+    const normalized = fsPath.replace(/^[A-Z]:/, (drive) => drive.toLowerCase());
+    const slashed = normalized.replace(/\\/g, "/");
+    return new StubUri("file", "", slashed, normalized, "file://" + slashed);
+  },
   // 操作メニューの印は、実在しないURIを目印に使う（views/actionList.ts）
-  from: (parts: { scheme: string; path?: string }) => ({
-    scheme: parts.scheme,
-    path: parts.path ?? "",
-    fsPath: parts.path ?? "",
-  }),
-  parse: (value: string) => ({
-    scheme: value.split(":")[0] ?? "",
-    path: value,
-    fsPath: value,
-  }),
+  from: (parts: { scheme: string; path?: string }) =>
+    new StubUri(
+      parts.scheme,
+      "",
+      parts.path ?? "",
+      parts.path ?? "",
+      `${parts.scheme}:${parts.path ?? ""}`
+    ),
+  /**
+   * **本物に近づけてある。** 以前は道の部分に文字列まるごとを入れていたが、
+   * それではブラウザ版のURI（`vscode-vfs://github/...`）を扱う処理を
+   * 確かめられない（`authority` が undefined になって黙って壊れる）。
+   */
+  parse: (value: string) => {
+    const match = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^/?#]*)([^?#]*)/.exec(value);
+    if (!match) {
+      const scheme = value.split(":")[0] ?? "";
+      return new StubUri(scheme, "", value, value, value);
+    }
+    const body = match[3] || "/";
+    return new StubUri(match[1], match[2], body, body, value);
+  },
 };
 
 export enum FileType {

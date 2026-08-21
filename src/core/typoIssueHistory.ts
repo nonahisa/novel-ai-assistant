@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "path";
-import * as crypto from "crypto";
+import { sha1Text } from "./hash";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "./workRegistry";
 import { atomicWriteFile } from "./atomicWrite";
@@ -37,11 +37,9 @@ export function dismissKey(
   // 絶対パスと相対パスが混ざるので、ファイル名だけで揃える。
   // 同じ作品の中で名前が重なることはない
   const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
-  return crypto
-    .createHash("sha1")
-    .update(`${fileName}|${issue.line}|${issue.target}|${issue.suggestion}`)
-    .digest("hex")
-    .slice(0, 24);
+  return sha1Text(
+    `${fileName}|${issue.line}|${issue.target}|${issue.suggestion}`
+  ).slice(0, 24);
 }
 
 export class TypoDismissedHistory {

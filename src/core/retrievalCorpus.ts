@@ -1,4 +1,4 @@
-import * as crypto from "crypto";
+import { sha1Text } from "./hash";
 import { WorkEntry } from "../models/types";
 import type { CustomFieldDefinition } from "../models/customField";
 import { loadExcerptSources } from "./manuscriptSources";
@@ -268,5 +268,5 @@ function makeItem(
 }
 
 export function hashText(text: string): string {
-  return crypto.createHash("sha1").update(text).digest("hex").slice(0, 24);
+  return sha1Text(text).slice(0, 24);
 }

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as crypto from "crypto";
+import { sha256Bytes, sha256Text } from "./hash";
 import iconv = require("iconv-lite");
 import { diffArrays } from "diff";
 import {
@@ -429,11 +429,11 @@ function concatenateBytes(
 }
 
 export function hashBytes(bytes: Uint8Array): string {
-  return crypto.createHash("sha256").update(bytes).digest("hex");
+  return sha256Bytes(bytes);
 }
 
 export function hashText(text: string): string {
-  return crypto.createHash("sha256").update(text, "utf8").digest("hex");
+  return sha256Text(text);
 }
 
 /** 現在ディスク上にあるファイルのハッシュを取得する */

@@ -1,4 +1,5 @@
-import * as crypto from "crypto";
+import { sha256Bytes, sha256Text } from "./hash";
+import { hostTag, randomUuid } from "./runtime";
 import * as path from "path";
 import * as vscode from "vscode";
 
@@ -52,7 +53,7 @@ export async function atomicWriteFile(
 ): Promise<void> {
   writeObserver?.(filePath);
   const destination = vscode.Uri.file(filePath);
-  const nonce = `${process.pid}-${crypto.randomUUID()}`;
+  const nonce = `${hostTag()}-${randomUuid()}`;
   const temporary = vscode.Uri.file(`${filePath}.novelai-${nonce}.tmp`);
   const stagedHash = hashBytes(bytes);
 
@@ -223,7 +224,7 @@ export async function createManagedRecoveryPath(
   const sequence = String(recoverySequence).padStart(8, "0");
   return path.join(
     directory,
-    `${recoveryKey(canonicalPath)}-${timestamp}-${sequence}-${crypto.randomUUID()}.bak`
+    `${recoveryKey(canonicalPath)}-${timestamp}-${sequence}-${randomUuid()}.bak`
   );
 }
 
@@ -292,7 +293,7 @@ function recoveryKey(canonicalPath: string): string {
   const stablePath = process.platform === "win32"
     ? normalized.toLowerCase()
     : normalized;
-  return crypto.createHash("sha256").update(stablePath, "utf8").digest("hex");
+  return sha256Text(stablePath);
 }
 
 function errorMessage(error: unknown): string {
@@ -308,5 +309,5 @@ function isFileExists(error: unknown): boolean {
 }
 
 function hashBytes(bytes: Uint8Array): string {
-  return crypto.createHash("sha256").update(bytes).digest("hex");
+  return sha256Bytes(bytes);
 }
