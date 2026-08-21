@@ -1,22 +1,34 @@
 import * as vscode from "vscode";
-import Anthropic from "@anthropic-ai/sdk";
-import {
-  AIError,
-  ApiKeyHelp,
-  ApiKeyProvider,
-  ConnectionTestResult,
-  GenerateParams,
-  GenerateResult,
-  ModelInfo,
-  inferTier,
-  validateApiKeyFormat,
-} from "./types";
+import { AIError, ApiKeyHelp, ApiKeyProvider, ConnectionTestResult, GenerateParams, GenerateResult, ModelInfo, inferTier, validateApiKeyFormat } from "./types";
+import { fetchJson } from "./httpClient";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
 import { buildAttemptPlan, type OptionAttempt } from "./optionFallback";
 import { forgetSecret, logLine, registerSecret } from "../core/logger";
+import { isWebRuntime } from "../core/runtime";
 
-/** APIキーの保存先。設定ファイルではなくOSの資格情報ストアに置く */
+/**
+ * Claude（Anthropic API）アダプタ。
+ *
+ * **公式SDKを使わない。** 2026-08-21まで `@anthropic-ai/sdk` を使っていたが、
+ * SDKはNode専用のコード（`node:child_process` を読む資格情報の自動探索）を
+ * importするだけで含んでしまい、ブラウザ版のVS Code向けビルドが壊れる
+ * （設計書5.8.5）。OpenAI・Geminiと同じく、素の `fetch` で呼ぶ形に書き換えた。
+ *
+ * **配線（URL・ヘッダー・エラー形式・ページングの仕方）は、SDK自身の
+ * ソース（`node_modules/@anthropic-ai/sdk`、書き換え時点でv0.115.0）を
+ * 読んで確かめた。** 憶測で書いていない。ただし**実際のAnthropic APIに
+ * 対して検証してはいない**（このプロジェクトで実キーを持つのは
+ * Ollama・Geminiだけ）。書き換え後は実機での接続確認を先に行うこと。
+ *
+ * Ollamaと違いクラウド実行なので**呼ぶたびに課金される**。
+ * 設計方針どおり自動フォールバックはせず、
+ * 使うかどうかは常に作者が明示的に選ぶ。
+ */
+
 const SECRET_KEY = "novelai.claude.apiKey";
+const DEFAULT_ENDPOINT = "https://api.anthropic.com";
+const ANTHROPIC_VERSION = "2023-06-01";
+const LABEL = "Claude";
 
 const CLAUDE_STOP_REASONS = new Set<string>([
   "end_turn",
@@ -25,16 +37,43 @@ const CLAUDE_STOP_REASONS = new Set<string>([
   "tool_use",
   "pause_turn",
   "refusal",
-  "model_context_window_exceeded",
 ]);
 
-/**
- * Claude（Anthropic API）アダプタ。
- *
- * Ollamaと違いクラウド実行なので**呼ぶたびに課金される**。
- * 設計方針どおり自動フォールバックはせず、
- * 使うかどうかは常に作者が明示的に選ぶ。
- */
+/** `/v1/models/{id}` の応答（使う項目だけ） */
+interface ClaudeModel {
+  id: string;
+  display_name: string;
+  max_input_tokens?: number;
+  max_tokens?: number;
+  capabilities: ClaudeModelCapabilities | null;
+}
+
+interface ClaudeModelCapabilities {
+  structured_outputs?: { supported?: boolean };
+  thinking?: {
+    supported?: boolean;
+    types?: { adaptive?: { supported?: boolean } };
+  };
+  image_input?: { supported?: boolean };
+  effort?: { supported?: boolean; low?: { supported?: boolean } };
+  batch?: { supported?: boolean };
+}
+
+/** `/v1/models` の応答（カーソル形式のページング） */
+interface ClaudeModelList {
+  data: ClaudeModel[];
+  has_more: boolean;
+  last_id: string | null;
+}
+
+/** `/v1/messages` の応答 */
+interface ClaudeMessage {
+  content: Array<{ type: string; text?: string }>;
+  stop_reason: string | null;
+  stop_details?: { explanation?: string };
+  usage: { input_tokens: number; output_tokens: number };
+}
+
 export class ClaudeProvider implements ApiKeyProvider {
   readonly id = "claude" as const;
   readonly displayName = "Claude（クラウド・有料）";
@@ -73,7 +112,30 @@ export class ClaudeProvider implements ApiKeyProvider {
     this.modelCache.clear();
   }
 
-  private async client(): Promise<Anthropic> {
+  private get endpoint(): string {
+    return DEFAULT_ENDPOINT;
+  }
+
+  private get requestTimeoutMs(): number {
+    return (
+      vscode.workspace
+        .getConfiguration("novelai")
+        .get<number>("claude.timeoutSeconds", 180) * 1000
+    );
+  }
+
+  /**
+   * 送信ヘッダー。
+   *
+   * **ブラウザから直に叩くと、Anthropicは既定で拒否する。** 公式SDKは
+   * `dangerouslyAllowBrowser: true` を渡したときだけ
+   * `anthropic-dangerous-direct-browser-access` を付ける（ブラウザ経由だと
+   * 鍵が盗まれる危険があるとSDK自身が警告している）。この拡張機能は
+   * 鍵を `vscode.ExtensionContext.secrets`（OSの資格情報ストア）へ
+   * 保存しており、ブラウザ版でも同じ仕組みを使うので、
+   * `isWebRuntime()` のときだけ同じ意思表示を付ける。
+   */
+  private async headers(): Promise<Record<string, string>> {
     const apiKey = await this.getApiKey();
     if (!apiKey) {
       throw new AIError(
@@ -81,21 +143,13 @@ export class ClaudeProvider implements ApiKeyProvider {
         "authentication_failed"
       );
     }
-    return new Anthropic({
-      apiKey,
-      // 課金を伴うため、SDKの暗黙リトライは行わない。thinking拒否だけ generate 内で1回再試行する。
-      maxRetries: 0,
-      timeout: this.requestTimeoutMs,
-    });
-  }
-
-  private get requestTimeoutMs(): number {
-    // SDKはミリ秒指定
-    return (
-      vscode.workspace
-        .getConfiguration("novelai")
-        .get<number>("claude.timeoutSeconds", 180) * 1000
-    );
+    return {
+      "x-api-key": apiKey,
+      "anthropic-version": ANTHROPIC_VERSION,
+      ...(isWebRuntime()
+        ? { "anthropic-dangerous-direct-browser-access": "true" }
+        : {}),
+    };
   }
 
   async isConfigured(): Promise<boolean> {
@@ -125,74 +179,59 @@ export class ClaudeProvider implements ApiKeyProvider {
   /**
    * 利用可能なモデルをAPIから取得する。
    * モデル名・コンテキスト長はハードコードしない（新モデルが次々出るため）。
+   *
+   * ページングは `after_id`（前ページの最後のID）を繰り返し渡すカーソル形式。
+   * SDKの `models.list()` と同じ動き。
    */
   async listModels(): Promise<ModelInfo[]> {
-    const client = await this.client();
+    const headers = await this.headers();
     const infos: ModelInfo[] = [];
-    try {
-      for await (const m of client.models.list()) {
-        const info: ModelInfo = {
-          id: m.id,
-          displayName: m.display_name,
-          contextWindow: m.max_input_tokens ?? 200000,
-          // クラウドモデルはパラメータ数を公開していない
-          parameterSize: null,
-          capabilities: describeCapabilities(m.capabilities),
-          tier: inferTier(null, "claude"),
-        };
+    let afterId: string | undefined;
+
+    // ページ送りが壊れて無限に回らないよう上限を設ける
+    for (let page = 0; page < 20; page++) {
+      const query = new URLSearchParams({ limit: "100" });
+      if (afterId) query.set("after_id", afterId);
+
+      let response: ClaudeModelList;
+      try {
+        response = await fetchJson<ClaudeModelList>({
+          url: `${this.endpoint}/v1/models?${query.toString()}`,
+          headers,
+          timeoutMs: 15000,
+          label: LABEL,
+        });
+      } catch (e) {
+        throw toClaudeAIError(e);
+      }
+
+      for (const m of response.data) {
+        const info = toModelInfo(m);
         this.modelCache.set(m.id, info);
         infos.push(info);
       }
-    } catch (e) {
-      throw toClaudeAIError(e);
+
+      if (!response.has_more || !response.last_id) break;
+      afterId = response.last_id;
     }
+
     return infos;
   }
 
   async getModel(id: string): Promise<ModelInfo | undefined> {
     const cached = this.modelCache.get(id);
     if (cached) return cached;
-    try {
-      const client = await this.client();
-      const m = await client.models.retrieve(id);
-      const info: ModelInfo = {
-        id: m.id,
-        displayName: m.display_name,
-        contextWindow: m.max_input_tokens ?? 200000,
-        parameterSize: null,
-        capabilities: describeCapabilities(m.capabilities),
-        tier: inferTier(null, "claude"),
-      };
-      this.modelCache.set(id, info);
-      return info;
-    } catch {
-      return undefined;
-    }
-  }
-
-  /** 入力トークン数を実測する。コスト見積もりに使う（推測値ではなくAPIの値） */
-  async countInputTokens(params: {
-    model: string;
-    systemPrompt: string;
-    userPrompt: string;
-  }): Promise<number> {
-    const client = await this.client();
-    try {
-      const res = await client.messages.countTokens({
-        model: params.model,
-        system: params.systemPrompt,
-        messages: [{ role: "user", content: params.userPrompt }],
-      });
-      return res.input_tokens;
-    } catch (e) {
-      throw toClaudeAIError(e);
-    }
+    const m = await this.rawModel(id);
+    if (!m) return undefined;
+    const info = toModelInfo(m);
+    this.modelCache.set(id, info);
+    return info;
   }
 
   async generate(params: GenerateParams): Promise<GenerateResult> {
     const started = Date.now();
     throwIfAborted(params.signal);
-    const client = await this.client();
+    const headers = await this.headers();
 
     // モデルごとの対応状況を見て、送ってよいパラメータだけを組み立てる。
     // 未対応のパラメータを送るとモデルによっては400で弾かれるため。
@@ -209,13 +248,13 @@ export class ClaudeProvider implements ApiKeyProvider {
     //  - adaptive対応の新しいモデル：既定でONなので、切るには明示的にdisabledを送る
     //  - enabledのみの古いモデル：既定でOFFなので、何も送らなければよい
     const thinkingIsOnByDefault =
-      raw?.thinking.types.adaptive.supported === true;
+      raw?.thinking?.types?.adaptive?.supported === true;
     const sendsSchema =
       params.jsonSchema !== undefined &&
-      raw?.structured_outputs.supported !== false;
+      raw?.structured_outputs?.supported !== false;
     const sendsThinking = params.disableThinking === true && thinkingIsOnByDefault;
     const sendsEffort =
-      raw?.effort.supported === true && raw.effort.low.supported === true;
+      raw?.effort?.supported === true && raw.effort.low?.supported === true;
 
     // この呼び出しで実際に送る指定だけを、外す候補にする。
     // 送ってもいない指定を「非対応」と覚えると、次の呼び出しで失う
@@ -224,18 +263,17 @@ export class ClaudeProvider implements ApiKeyProvider {
     if (sendsThinking) applicable.push("thinking");
     if (sendsSchema) applicable.push("jsonSchema");
 
-    const buildBody = (
-      support: ClaudeSupport
-    ): Anthropic.MessageCreateParamsNonStreaming => {
-      const body: Anthropic.MessageCreateParamsNonStreaming = {
+    const buildBody = (support: ClaudeSupport): Record<string, unknown> => {
+      const body: Record<string, unknown> = {
         model: params.model,
         max_tokens: maxTokens,
         system: params.systemPrompt,
         messages: [{ role: "user", content: params.userPrompt }],
       };
+      let outputConfig: Record<string, unknown> | undefined;
       if (sendsSchema && support.jsonSchema) {
         // Claudeの構造化出力はスキーマに追加の制約がある（後述の変換を参照）
-        body.output_config = {
+        outputConfig = {
           format: {
             type: "json_schema",
             schema: toClaudeJsonSchema(params.jsonSchema) as Record<
@@ -250,20 +288,27 @@ export class ClaudeProvider implements ApiKeyProvider {
       }
       // effort は対応モデルのみ。抽出タスクは深い推論を必要としないため低めにする
       if (sendsEffort && support.effort) {
-        body.output_config = { ...body.output_config, effort: "low" };
+        outputConfig = { ...outputConfig, effort: "low" };
       }
+      if (outputConfig) body.output_config = outputConfig;
       return body;
     };
 
-    let res: Anthropic.Message | undefined;
+    let res: ClaudeMessage | undefined;
     let accepted: ClaudeSupport | undefined;
     let lastError: AIError | undefined;
 
     for (const attempt of claudeAttemptPlan(stored, applicable)) {
       throwIfAborted(params.signal);
       try {
-        res = await client.messages.create(buildBody(attempt.support), {
+        res = await fetchJson<ClaudeMessage>({
+          url: `${this.endpoint}/v1/messages`,
+          method: "POST",
+          headers,
+          body: buildBody(attempt.support),
+          timeoutMs: this.requestTimeoutMs,
           signal: params.signal,
+          label: LABEL,
         });
         // 通った組み合わせだけを覚える。失敗から学ぶと誤った結論が残る
         accepted = attempt.support;
@@ -280,8 +325,8 @@ export class ClaudeProvider implements ApiKeyProvider {
         const billing = billingProblem(e);
         if (billing) throw billing;
 
-        const error = toClaudeMessageCreateError(e);
-        if (error.kind !== "bad_response" || !isInvalidRequest(e)) throw error;
+        const error = toClaudeAIError(e);
+        if (!isInvalidRequest(error)) throw error;
 
         lastError = error;
         // **何を外したときに何と言われたのかを必ず残す。**
@@ -320,7 +365,7 @@ export class ClaudeProvider implements ApiKeyProvider {
     }
 
     const text = res.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .filter((b): b is { type: "text"; text: string } => b.type === "text" && typeof b.text === "string")
       .map((b) => b.text)
       .join("");
 
@@ -350,18 +395,24 @@ export class ClaudeProvider implements ApiKeyProvider {
     return clampToModelLimit(resolveMaxOutputTokens(), raw?.max_tokens ?? 8192);
   }
 
-  private rawModelCache = new Map<string, Anthropic.ModelInfo>();
+  private rawModelCache = new Map<string, ClaudeModel>();
 
   private async rawModel(
     id: string,
     signal?: AbortSignal
-  ): Promise<Anthropic.ModelInfo | undefined> {
+  ): Promise<ClaudeModel | undefined> {
     throwIfAborted(signal);
     const cached = this.rawModelCache.get(id);
     if (cached) return cached;
     try {
-      const client = await this.client();
-      const m = await client.models.retrieve(id, undefined, { signal });
+      const headers = await this.headers();
+      const m = await fetchJson<ClaudeModel>({
+        url: `${this.endpoint}/v1/models/${encodeURIComponent(id)}`,
+        headers,
+        timeoutMs: 15000,
+        signal,
+        label: LABEL,
+      });
       // 中止後に返った値をキャッシュすると、次回の要求へ不完全な状態を持ち越す。
       throwIfAborted(signal);
       this.rawModelCache.set(id, m);
@@ -377,7 +428,7 @@ export class ClaudeProvider implements ApiKeyProvider {
   private async rawCapabilities(
     id: string,
     signal?: AbortSignal
-  ): Promise<Anthropic.ModelCapabilities | undefined> {
+  ): Promise<ClaudeModelCapabilities | undefined> {
     return (await this.rawModel(id, signal))?.capabilities ?? undefined;
   }
 
@@ -418,6 +469,18 @@ export class ClaudeProvider implements ApiKeyProvider {
   }
 }
 
+function toModelInfo(m: ClaudeModel): ModelInfo {
+  return {
+    id: m.id,
+    displayName: m.display_name,
+    contextWindow: m.max_input_tokens ?? 200000,
+    // クラウドモデルはパラメータ数を公開していない
+    parameterSize: null,
+    capabilities: describeCapabilities(m.capabilities),
+    tier: inferTier(null, "claude"),
+  };
+}
+
 /**
  * 記憶の置き場。
  *
@@ -447,9 +510,18 @@ function supportKey(model: string): string {
  * 「要求の形が悪い」と区別が付かない。文面で判断するしかない。
  * 取り違えると、直らない再試行を繰り返したうえに
  * 対応している機能まで外してしまう。
+ *
+ * **`error.detail`（生の応答本文）を見る。** `.message` は
+ * 「Claudeがエラーを返しました (HTTP 400)。」という定型文で、
+ * 実際の理由は本文にしか書かれていない。
  */
 export function billingProblem(error: unknown): AIError | undefined {
-  const message = error instanceof Error ? error.message : String(error);
+  const message =
+    error instanceof AIError
+      ? (error.detail ?? error.message)
+      : error instanceof Error
+        ? error.message
+        : String(error);
   if (!/credit balance|Plans & Billing|billing/i.test(message)) {
     return undefined;
   }
@@ -505,24 +577,28 @@ export function describeDroppedOptions(dropped: ClaudeOptionKey[]): string {
   return dropped.map((key) => CLAUDE_OPTION_LABELS[key]).join("・");
 }
 
-/** 要求の作りが受け付けられなかったか。認証や上限とは区別する */
+/**
+ * 要求の作りが受け付けられなかったか。認証や上限とは区別する。
+ *
+ * Gemini側の `isInvalidArgument` と同じ考え方（`httpClient.ts` の
+ * `toStatusError` は400を明示的な種別に振り分けないので、`bad_response`
+ * かつメッセージに "HTTP 400" を含むかで見分ける）。
+ */
 export function isInvalidRequest(error: unknown): boolean {
-  if (error instanceof Anthropic.BadRequestError) return true;
-  if (error instanceof Anthropic.APIError) return error.status === 400;
-  return false;
+  if (!(error instanceof AIError)) return false;
+  if (error.kind !== "bad_response") return false;
+  return /HTTP 400/.test(error.message);
 }
 
 /** UI表示用に対応機能を短い日本語ラベルへ変換する */
-function describeCapabilities(
-  caps: Anthropic.ModelCapabilities | null
-): string[] {
+function describeCapabilities(caps: ClaudeModelCapabilities | null): string[] {
   if (!caps) return [];
   const out: string[] = [];
-  if (caps.structured_outputs.supported) out.push("JSON強制");
-  if (caps.thinking.supported) out.push("思考");
-  if (caps.image_input.supported) out.push("画像");
-  if (caps.effort.supported) out.push("effort");
-  if (caps.batch.supported) out.push("バッチ");
+  if (caps.structured_outputs?.supported) out.push("JSON強制");
+  if (caps.thinking?.supported) out.push("思考");
+  if (caps.image_input?.supported) out.push("画像");
+  if (caps.effort?.supported) out.push("effort");
+  if (caps.batch?.supported) out.push("バッチ");
   return out;
 }
 
@@ -606,7 +682,7 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   }
 }
 
-function isClaudeMessage(value: unknown): value is Anthropic.Message {
+function isClaudeMessage(value: unknown): value is ClaudeMessage {
   if (!isRecord(value) || !Array.isArray(value.content) || !isRecord(value.usage)) {
     return false;
   }
@@ -629,82 +705,18 @@ function isClaudeStopReason(value: unknown): boolean {
   return value === null || (typeof value === "string" && CLAUDE_STOP_REASONS.has(value));
 }
 
-function toClaudeMessageCreateError(error: unknown): AIError {
-  // SDKの成功HTTP応答JSONのデコード失敗だけを応答不正として扱う。
-  // 汎用のSyntaxErrorまで変換すると、呼び出し側のプログラム不備を隠してしまう。
-  if (error instanceof SyntaxError) {
-    return new AIError("Claudeから形式が不正な応答が返りました。", "bad_response");
-  }
-  return toClaudeAIError(error);
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** SDKの型付き例外を、UIが扱いやすい AIError へ変換する */
+/**
+ * 予期しない失敗を、UIが扱いやすい AIError へ正規化する。
+ *
+ * `fetchJson` が投げるものはすでに `AIError` なので、ほぼ素通しする。
+ * それ以外（想定していない例外）は、生のメッセージをUIへ出さない
+ * （内部情報が漏れる可能性があるため）。
+ */
 export function toClaudeAIError(error: unknown): AIError {
-  const e = error;
-  if (e instanceof AIError) return e;
-
-  if (e instanceof Anthropic.AuthenticationError) {
-    return new AIError(
-      "ClaudeのAPIキーが正しくありません。再登録してください。",
-      "authentication_failed",
-      e.message
-    );
-  }
-  if (e instanceof Anthropic.NotFoundError) {
-    return new AIError(
-      "指定したモデルが見つかりません。",
-      "model_not_found",
-      e.message
-    );
-  }
-  if (e instanceof Anthropic.PermissionDeniedError) {
-    return new AIError(
-      "このAPIキーには権限がありません（モデル未開放、または請求設定が未完了の可能性があります）。",
-      "permission_denied",
-      e.message
-    );
-  }
-  if (e instanceof Anthropic.RateLimitError) {
-    return new AIError(
-      "Claudeのレート上限に達しました。しばらく待ってから再実行してください。",
-      "rate_limited",
-      e.message
-    );
-  }
-  if (e instanceof Anthropic.APIConnectionTimeoutError) {
-    return new AIError(
-      "Claudeの応答がタイムアウトしました。設定でタイムアウトを延ばしてください。",
-      "timeout",
-      e.message
-    );
-  }
-  if (e instanceof Anthropic.APIUserAbortError) {
-    return new AIError("処理が中止されました。", "aborted", e.message);
-  }
-  if (e instanceof Anthropic.APIConnectionError) {
-    return new AIError(
-      "Claudeに接続できません。ネットワーク接続を確認してください。",
-      "not_running",
-      e.message
-    );
-  }
-  if (e instanceof Anthropic.APIError) {
-    return new AIError(
-      "Claudeが予期しない応答を返しました。設定を確認して再実行してください。",
-      "bad_response",
-      // ステータスだけ残しても原因にたどり着けない。
-      // 実際にどの項目を拒否されたのかは本文にしか書かれていない
-      `HTTP ${e.status}: ${e.message}`
-    );
-  }
-
-  const err = e as Error;
-  if (err?.name === "AbortError") {
-    return new AIError("処理が中止されました。", "aborted");
-  }
+  if (error instanceof AIError) return error;
   return new AIError("Claudeとの通信中に予期しないエラーが発生しました。", "unknown");
 }

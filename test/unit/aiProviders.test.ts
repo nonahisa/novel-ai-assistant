@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import Anthropic from "@anthropic-ai/sdk";
 import type { ExtensionContext } from "vscode";
 import { OllamaProvider } from "../../src/ai/ollamaProvider";
 import {
@@ -7,6 +6,7 @@ import {
   toClaudeAIError,
   toClaudeJsonSchema,
 } from "../../src/ai/claudeProvider";
+import { AIError } from "../../src/ai/types";
 import { workspace } from "./support/vscodeStub";
 
 const ollamaParams = {
@@ -316,36 +316,29 @@ describe("AIプロバイダ境界", () => {
     });
   });
 
+  /**
+   * `toClaudeAIError` は、公式SDKを外したので**もうSDKの型付き例外を
+   * 見分けない**（設計書5.8.5）。HTTPの状態からAIErrorへ変換するのは
+   * `httpClient.ts` の `toStatusError` の仕事で、そちらは
+   * `aiProviderSchemas.test.ts` が別に確かめている。ここで見るのは
+   * 「`fetchJson` が投げたAIErrorはそのまま通す」「それ以外（想定していない
+   * 例外）は生の文言を漏らさず unknown へ丸める」の2つだけ。
+   */
+  test("fetchJsonが投げたAIErrorはそのまま通す", () => {
+    const error = new AIError("Claudeのレート上限に達しました。", "rate_limited", "詳細");
+    expect(toClaudeAIError(error)).toBe(error);
+  });
+
   test.each([
-    [
-      new Anthropic.AuthenticationError(401, {}, "invalid API key", new Headers()),
-      "authentication_failed",
-    ],
-    [
-      new Anthropic.PermissionDeniedError(403, {}, "permission denied", new Headers()),
-      "permission_denied",
-    ],
-    [
-      new Anthropic.RateLimitError(429, {}, "rate limited", new Headers()),
-      "rate_limited",
-    ],
-    [new Anthropic.APIConnectionTimeoutError(), "timeout"],
-    [new Anthropic.APIUserAbortError(), "aborted"],
-  ])("Claude SDKエラーを%sとして正規化する", (error, kind) => {
-    expect(toClaudeAIError(error)).toMatchObject({ kind });
-  });
-
-  test("Claudeの未知SDKエラーを安全な公開メッセージへ正規化する", () => {
-    const rawMessage = "gateway returned credential=secret-value";
-
-    expect(toClaudeAIError(new Error(rawMessage))).toMatchObject({ kind: "unknown" });
-    expect(toClaudeAIError(new Error(rawMessage)).message).not.toContain(rawMessage);
-  });
-
-  test("Claudeの汎用SyntaxErrorはresponseデコード失敗としては正規化しない", () => {
-    expect(toClaudeAIError(new SyntaxError("local programmer error"))).toMatchObject({
-      kind: "unknown",
-    });
+    ["Error", new Error("gateway returned credential=secret-value")],
+    ["SyntaxError", new SyntaxError("local programmer error")],
+    ["文字列", "raw string thrown"],
+  ])("想定していない例外（%s）は、生の文言を漏らさずunknownへ丸める", (_label, thrown) => {
+    const result = toClaudeAIError(thrown);
+    expect(result.kind).toBe("unknown");
+    if (thrown instanceof Error) {
+      expect(result.message).not.toContain(thrown.message);
+    }
   });
 
   test("Claude接続確認はSDKの生エラーをUIメッセージに含めない", async () => {
