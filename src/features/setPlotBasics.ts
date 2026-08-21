@@ -1,3 +1,4 @@
+import { openInDefaultEditor } from "../views/openDocument";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
@@ -43,10 +44,7 @@ export async function setPlotBasics(work: WorkEntry): Promise<void> {
 
   await writePlotSections(work, updates);
 
-  const document = await vscode.workspace.openTextDocument(
-    vscode.Uri.file(await plotPath(work))
-  );
-  await vscode.window.showTextDocument(document);
+  await openInDefaultEditor(await plotPath(work));
 
   vscode.window.showInformationMessage(
     genres.length > 0

@@ -20,6 +20,7 @@ import { countChars, formatCount } from "../core/charCount";
 import { logFailure, showLog } from "../core/logger";
 import { lastAuthorOf } from "../core/git";
 import { cancelItem } from "../views/dialogs";
+import { openInDefaultEditor } from "../views/openDocument";
 
 /**
  * 競合の解決（設計書5.5.4）。
@@ -369,8 +370,5 @@ async function writeSideFile(
 }
 
 async function openFile(filePath: string): Promise<void> {
-  const document = await vscode.workspace.openTextDocument(
-    vscode.Uri.file(filePath)
-  );
-  await vscode.window.showTextDocument(document);
+  await openInDefaultEditor(filePath);
 }

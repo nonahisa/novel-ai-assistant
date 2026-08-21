@@ -168,6 +168,7 @@ import {
 import { countUnextractedEpisodes } from "./features/extractionFreshness";
 import { chooseScope, recordCheck } from "./features/typoCheckScope";
 import { switchMode } from "./features/switchMode";
+import { openInDefaultEditor } from "./views/openDocument";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -1348,10 +1349,7 @@ export async function activate(
         );
 
         treeProvider.refresh(work.id);
-        const doc = await vscode.workspace.openTextDocument(
-          vscode.Uri.file(filePath)
-        );
-        await vscode.window.showTextDocument(doc);
+        await openInDefaultEditor(filePath);
       }
     )
   );

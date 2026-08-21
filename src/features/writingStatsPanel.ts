@@ -1,3 +1,4 @@
+import { openInDefaultEditor } from "../views/openDocument";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { toManuscriptPages } from "../core/charCount";
@@ -87,10 +88,7 @@ export async function openWritingStatsPanel(
       return;
     }
     if (parsed.type === "open" && parsed.filePath) {
-      const document = await vscode.workspace.openTextDocument(
-        vscode.Uri.file(parsed.filePath)
-      );
-      await vscode.window.showTextDocument(document, {
+      await openInDefaultEditor(parsed.filePath, {
         viewColumn: vscode.ViewColumn.Beside,
       });
     }

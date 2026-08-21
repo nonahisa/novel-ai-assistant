@@ -6,6 +6,7 @@ import { pathExists } from "../core/fileSystem";
 import { buildPlotTemplate } from "../core/plotTemplate";
 import { PLOT_FILE, readWorkConfig, workPaths } from "../core/workRegistry";
 import { cancelItem } from "../views/dialogs";
+import { openInDefaultEditor } from "../views/openDocument";
 
 /**
  * 新規作品の始め方（設計書6.4）。
@@ -79,10 +80,8 @@ export async function openPlotFile(work: WorkEntry): Promise<void> {
     );
   }
 
-  const document = await vscode.workspace.openTextDocument(
-    vscode.Uri.file(plotPath)
-  );
-  await vscode.window.showTextDocument(document);
+  // 作者が .md に割り当てたエディターで開く（設計書6.17.6）
+  await openInDefaultEditor(plotPath);
   if (!existed) {
     vscode.window.showInformationMessage(
       `「${work.title}」のプロット（${PLOT_FILE}）を作りました。`
@@ -120,9 +119,6 @@ export async function createFirstEpisodeFile(
     );
   }
 
-  const document = await vscode.workspace.openTextDocument(
-    vscode.Uri.file(filePath)
-  );
-  await vscode.window.showTextDocument(document);
+  await openInDefaultEditor(filePath);
   return filePath;
 }

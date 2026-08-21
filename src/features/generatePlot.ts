@@ -30,6 +30,7 @@ import { confirmProviderReachable } from "./aiConnectivity";
 import { confirmFormatFit } from "./formatFitPrompt";
 import { withCancellableProgress } from "../views/progress";
 import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
+import { openInDefaultEditor } from "../views/openDocument";
 
 /**
  * プロット逆算生成（P-02）。既に書いた本文からプロットを組み立て直す。
@@ -346,10 +347,7 @@ async function applyPlot(
     "プロットを開く"
   );
   if (action === "プロットを開く") {
-    const document = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(await plotPath(work))
-    );
-    await vscode.window.showTextDocument(document);
+    await openInDefaultEditor(await plotPath(work));
   }
 }
 
