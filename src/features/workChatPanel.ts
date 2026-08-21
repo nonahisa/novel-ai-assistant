@@ -2,7 +2,7 @@ import { parsePlotMarkdown, type PlotSections } from "../core/plotDoc";
 import { readPlotText } from "../core/plotFile";
 import { describeProgress, nextQuestion } from "../core/plotInterview";
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
@@ -595,7 +595,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
     try {
       const document = await vscode.workspace.openTextDocument(
-        vscode.Uri.file(target)
+        path.toUri(target)
       );
       const editor = await vscode.window.showTextDocument(document, {
         preview: false,
@@ -736,10 +736,11 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
     for (const relative of relativePaths) {
       const target = path.resolve(root, relative);
-      if (target !== root && !target.startsWith(root + path.sep)) continue;
+      if (target !== root && !target.startsWith(root + path.separatorFor(root)))
+        continue;
       try {
         const bytes = await vscode.workspace.fs.readFile(
-          vscode.Uri.file(target)
+          path.toUri(target)
         );
         const text = new TextDecoder().decode(bytes);
         files.push({
@@ -1255,7 +1256,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     try {
       const config = await readWorkConfig(work);
       const target = path.join(workPaths(work, config).settings, fileName);
-      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+      const bytes = await vscode.workspace.fs.readFile(path.toUri(target));
       const text = new TextDecoder().decode(bytes).trim();
       return text || undefined;
     } catch {
@@ -1269,7 +1270,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     let found: WorkEntry | undefined;
     for (const work of this.registry.list()) {
       const root = path.resolve(work.folderPath);
-      if (resolved === root || resolved.startsWith(root + path.sep)) {
+      if (resolved === root || resolved.startsWith(root + path.separatorFor(root))) {
         if (!found || root.length > path.resolve(found.folderPath).length) {
           found = work;
         }

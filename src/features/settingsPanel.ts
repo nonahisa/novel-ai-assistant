@@ -107,7 +107,7 @@ import { renderMarkdownLite } from "../core/markdownLite";
 import { withCancellableProgress } from "../views/progress";
 import { logFailure } from "../core/logger";
 import { appendChatLog, summarizeMaterials } from "../core/chatLog";
-import * as path from "path";
+import * as path from "../core/paths";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "../core/synopsisDoc";
 import { SynopsisStore } from "../core/synopsisStore";
@@ -383,7 +383,7 @@ export class SettingsPanel {
         workPaths(this.work, config).settings,
         SYNOPSIS_FILE
       );
-      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(file));
+      const bytes = await vscode.workspace.fs.readFile(path.toUri(file));
       const doc = parseSynopsisMarkdown(new TextDecoder().decode(bytes));
       info.blurb = doc.blurb.trim();
       info.catchphrase = (doc.catchphrase ?? "").trim();

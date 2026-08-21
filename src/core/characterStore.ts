@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import {
@@ -89,7 +89,7 @@ export class CharacterStore {
 
   async ensureDir(): Promise<string> {
     const d = await this.dir();
-    await vscode.workspace.fs.createDirectory(vscode.Uri.file(d));
+    await vscode.workspace.fs.createDirectory(path.toUri(d));
     return d;
   }
 
@@ -107,7 +107,7 @@ export class CharacterStore {
 
     let entries: [string, vscode.FileType][];
     try {
-      entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(d));
+      entries = await vscode.workspace.fs.readDirectory(path.toUri(d));
     } catch (error) {
       if (error instanceof vscode.FileSystemError && error.code === "FileNotFound") {
         return { characters, errors };
@@ -123,7 +123,7 @@ export class CharacterStore {
       const full = path.join(d, name);
       try {
         const bytes = await vscode.workspace.fs.readFile(
-          vscode.Uri.file(full)
+          path.toUri(full)
         );
         const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
         const character = parseCharacter(parsed);
@@ -287,8 +287,8 @@ export class CharacterStore {
     try {
       recoveryPath = await createManagedRecoveryPath(snapshot.filePath);
       await vscode.workspace.fs.rename(
-        vscode.Uri.file(snapshot.filePath),
-        vscode.Uri.file(recoveryPath),
+        path.toUri(snapshot.filePath),
+        path.toUri(recoveryPath),
         { overwrite: false }
       );
     } catch (error) {
@@ -425,8 +425,8 @@ export class CharacterStore {
       }
       try {
         await vscode.workspace.fs.rename(
-          vscode.Uri.file(sourcePath),
-          vscode.Uri.file(recoveryPath),
+          path.toUri(sourcePath),
+          path.toUri(recoveryPath),
           { overwrite: false }
         );
       } catch (error) {
@@ -536,7 +536,7 @@ export class CharacterStore {
     const found: string[] = [];
     try {
       const entries = await vscode.workspace.fs.readDirectory(
-        vscode.Uri.file(d)
+        path.toUri(d)
       );
       for (const [name, type] of entries) {
         if (type !== vscode.FileType.File || !name.endsWith(".json")) continue;
@@ -561,7 +561,7 @@ export class CharacterStore {
     filePath: string
   ): Promise<Uint8Array | undefined> {
     try {
-      return await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
+      return await vscode.workspace.fs.readFile(path.toUri(filePath));
     } catch (error) {
       if (error instanceof vscode.FileSystemError && error.code === "FileNotFound") {
         return undefined;
@@ -574,7 +574,7 @@ export class CharacterStore {
     message: string,
     paths: string[]
   ): CharacterStoreError {
-    const recoveryPaths = paths.map((filePath) => vscode.Uri.file(filePath).fsPath);
+    const recoveryPaths = paths.map((filePath) => path.toUri(filePath).fsPath);
     return new CharacterStoreError(
       `${message} データを失わないため回復可能なファイルを残しました。手動で確認してください: ${recoveryPaths.join(
         ", "
@@ -602,10 +602,7 @@ function isPathInside(parentPath: string, candidatePath: string): boolean {
   const normalizedParent = normalizePathForComparison(parentPath);
   const normalizedCandidate = normalizePathForComparison(candidatePath);
   const relative = path.relative(normalizedParent, normalizedCandidate);
-  return relative.length > 0 &&
-    relative !== ".." &&
-    !relative.startsWith(`..${path.sep}`) &&
-    !path.isAbsolute(relative);
+  return relative.length > 0 && !path.goesOutside(normalizedParent, relative);
 }
 
 function normalizePathForComparison(filePath: string): string {

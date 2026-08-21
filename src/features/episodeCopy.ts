@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import {
   bodyForPosting,
@@ -118,8 +118,8 @@ export async function renameWithSubtitle(
   try {
     // **上書きしない。** 同じ名前があれば失敗させる
     await vscode.workspace.fs.rename(
-      vscode.Uri.file(episode.filePath),
-      vscode.Uri.file(target),
+      path.toUri(episode.filePath),
+      path.toUri(target),
       { overwrite: false }
     );
   } catch (error) {

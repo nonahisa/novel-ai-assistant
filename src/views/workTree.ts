@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { toUri } from "../core/paths";
 import { EpisodeFile, WorkEntry, WorkStats } from "../models/types";
 import { formatCount, toManuscriptPages } from "../core/charCount";
 import {
@@ -164,11 +165,11 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       vscode.TreeItemCollapsibleState.None
     );
     item.contextValue = "episode";
-    item.resourceUri = vscode.Uri.file(ep.filePath);
+    item.resourceUri = toUri(ep.filePath);
     item.command = {
       command: "vscode.open",
       title: "開く",
-      arguments: [vscode.Uri.file(ep.filePath)],
+      arguments: [toUri(ep.filePath)],
     };
 
     const chapterLabel = formatChapterLabel(ep, node.format);

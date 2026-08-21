@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import {
   planSplit,
@@ -54,7 +54,7 @@ export async function splitCollectedFile(
   let existing: string[] = [];
   try {
     const entries = await vscode.workspace.fs.readDirectory(
-      vscode.Uri.file(directory)
+      path.toUri(directory)
     );
     existing = entries
       .filter(([, kind]) => kind === vscode.FileType.File)
@@ -126,8 +126,8 @@ export async function splitCollectedFile(
   try {
     recovery = await createManagedRecoveryPath(filePath);
     await vscode.workspace.fs.rename(
-      vscode.Uri.file(filePath),
-      vscode.Uri.file(recovery),
+      path.toUri(filePath),
+      path.toUri(recovery),
       { overwrite: false }
     );
   } catch (error) {
@@ -173,7 +173,7 @@ export async function splitCollectedFile(
   if (answer === "退避先を開く") {
     await vscode.commands.executeCommand(
       "revealFileInOS",
-      vscode.Uri.file(recovery)
+      path.toUri(recovery)
     );
   }
 }

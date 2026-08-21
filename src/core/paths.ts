@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as nodePath from "path";
 
 /**
- * 手元のファイルと、ブラウザ上の作品を、同じ書き方で扱う（設計書5.7）。
+ * 手元のファイルと、ブラウザ上の作品を、同じ書き方で扱う（設計書5.8）。
  *
  * **ブラウザのVS Code（vscode.dev / github.dev）では、作品は
  * `file:` のところに無い。** GitHubのリポジトリを開くと、作品の場所は
@@ -158,3 +158,41 @@ export function separatorFor(location: string): string {
 }
 
 export const sep = nodePath.sep;
+
+/**
+ * 「同じ場所を指しているか」を比べるための正規化。
+ *
+ * 以前は `vscode.Uri.file(x).fsPath` を経由していた箇所が3つあった。
+ * **ブラウザ上の作品に対して呼ぶと、存在しない `file:` の場所を
+ * 指すUriができる。** 手元のファイルでは、Windowsのドライブ文字を
+ * 大文字小文字問わず比べるのと同じ結果になる（このあと呼び出し側で
+ * 全体を小文字化するため、`Uri.file` が行うドライブ文字だけの
+ * 小文字化と最終的な文字列は変わらない）。
+ */
+export function normalizeForComparison(location: string): string {
+  const normalized = normalize(location);
+  // **ブラウザ版には `process` が無い。** 有ってもWindowsか判定できる
+  // 保証は無いので、無ければ大文字小文字を区別する側へ倒す
+  const isWindows =
+    typeof process !== "undefined" && process.platform === "win32";
+  return isWindows ? normalized.toLowerCase() : normalized;
+}
+
+/**
+ * `relative` が、`base` の外を指しているか。
+ *
+ * `relative(base, candidate)` の結果に対して使う。**`..${path.sep}` を
+ * 直に書いている箇所が5つあった。** `path.sep` は常にOSの区切り
+ * （Windowsなら `\`）だが、`relative()` はブラウザ上の作品に対しては
+ * 常に `/` 区切りを返す。**区切りを取り違えると、作品の外のファイルを
+ * 「中にある」と誤判定する。** 判定をここへ集め、`base` から
+ * 正しい区切りを選ばせる。
+ */
+export function goesOutside(base: string, relative: string): boolean {
+  const separator = separatorFor(base);
+  return (
+    relative === ".." ||
+    relative.startsWith(`..${separator}`) ||
+    isAbsolute(relative)
+  );
+}

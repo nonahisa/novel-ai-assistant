@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import type { WorkEntry } from "../models/types";
 import {
   emptyWorkGoals,
@@ -41,7 +41,7 @@ export async function readWorkGoals(work: WorkEntry): Promise<WorkGoals> {
   let goals: WorkGoals;
   try {
     const bytes = await vscode.workspace.fs.readFile(
-      vscode.Uri.file(goalsPath(work))
+      path.toUri(goalsPath(work))
     );
     goals = parseWorkGoals(JSON.parse(new TextDecoder().decode(bytes)));
   } catch (error) {
@@ -83,16 +83,16 @@ export async function writeWorkGoals(
     ) + "\n";
 
   await vscode.workspace.fs.createDirectory(
-    vscode.Uri.file(path.dirname(target))
+    path.toUri(path.dirname(target))
   );
 
   // 既存ファイルは上書きできない（`atomicWrite.ts`）。
   // 退避してから作り直す
   if (await exists(target)) {
     const recoveryPath = await createManagedRecoveryPath(target);
-    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+    const bytes = await vscode.workspace.fs.readFile(path.toUri(target));
     await atomicWriteFile(recoveryPath, bytes, { mode: "create" });
-    await vscode.workspace.fs.delete(vscode.Uri.file(target), {
+    await vscode.workspace.fs.delete(path.toUri(target), {
       useTrash: false,
     });
   }
@@ -113,7 +113,7 @@ export function invalidateWorkGoals(workId?: string): void {
 
 async function exists(filePath: string): Promise<boolean> {
   try {
-    await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+    await vscode.workspace.fs.stat(path.toUri(filePath));
     return true;
   } catch {
     return false;

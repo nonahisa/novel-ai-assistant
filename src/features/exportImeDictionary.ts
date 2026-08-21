@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "../core/paths";
 import { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { CharacterStore } from "../core/characterStore";
@@ -85,7 +85,7 @@ export async function exportImeDictionary(work: WorkEntry): Promise<void> {
 
   const config = await readWorkConfig(work);
   const settingsDir = workPaths(work, config).settings;
-  await vscode.workspace.fs.createDirectory(vscode.Uri.file(settingsDir));
+  await vscode.workspace.fs.createDirectory(path.toUri(settingsDir));
 
   const written: string[] = [];
   /** 文字コードの都合で入れられなかった語。形式ごとに違うのでまとめて集める */
@@ -159,7 +159,7 @@ export async function exportImeDictionary(work: WorkEntry): Promise<void> {
   if (action === "フォルダーを開く") {
     await vscode.commands.executeCommand(
       "revealFileInOS",
-      vscode.Uri.file(path.join(settingsDir, written[0]))
+      path.toUri(path.join(settingsDir, written[0]))
     );
   } else if (action === "取り込み手順を見る") {
     const document = await vscode.workspace.openTextDocument({

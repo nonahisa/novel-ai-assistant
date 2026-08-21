@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 
 /**
  * 診断用のログ。
@@ -43,9 +43,9 @@ function appendToFile(text: string): void {
   // 抽出が中断するほうが作者にとって困る
   writeQueue = writeQueue
     .then(async () => {
-      const uri = vscode.Uri.file(target);
+      const uri = path.toUri(target);
       await vscode.workspace.fs.createDirectory(
-        vscode.Uri.file(path.dirname(target))
+        path.toUri(path.dirname(target))
       );
       let existing: Uint8Array;
       try {

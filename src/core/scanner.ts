@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import {
   EpisodeFile,
   SUPPORTED_EXTENSIONS,
@@ -53,7 +53,7 @@ export async function scanWork(work: WorkEntry): Promise<{
     };
     try {
       const bytes = await vscode.workspace.fs.readFile(
-        vscode.Uri.file(filePath)
+        path.toUri(filePath)
       );
       const text = decodeText(bytes);
 
@@ -200,7 +200,7 @@ async function collectTextFiles(dir: string): Promise<string[]> {
     let entries: [string, vscode.FileType][];
     try {
       entries = await vscode.workspace.fs.readDirectory(
-        vscode.Uri.file(current)
+        path.toUri(current)
       );
     } catch {
       return;

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { atomicWriteFile, AtomicWriteFileError } from "./atomicWrite";
@@ -87,7 +87,7 @@ export class AbilitySystemStore {
     const file = await this.filePath();
     let bytes: Uint8Array;
     try {
-      bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(file));
+      bytes = await vscode.workspace.fs.readFile(path.toUri(file));
     } catch (error) {
       if (
         error instanceof vscode.FileSystemError &&
@@ -103,7 +103,7 @@ export class AbilitySystemStore {
   async save(system: AbilitySystem): Promise<void> {
     const file = await this.filePath();
     await vscode.workspace.fs.createDirectory(
-      vscode.Uri.file(path.dirname(file))
+      path.toUri(path.dirname(file))
     );
     const body =
       JSON.stringify(

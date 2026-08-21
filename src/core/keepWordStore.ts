@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import type { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import {
@@ -42,7 +42,7 @@ export class KeepWordStore {
     const target = await this.filePath();
     let bytes: Uint8Array;
     try {
-      bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+      bytes = await vscode.workspace.fs.readFile(path.toUri(target));
     } catch (error) {
       if (
         error instanceof vscode.FileSystemError &&
@@ -127,7 +127,7 @@ export class KeepWordStore {
     const bytes = new TextEncoder().encode(`${body}\n`);
 
     await vscode.workspace.fs.createDirectory(
-      vscode.Uri.file(path.dirname(target))
+      path.toUri(path.dirname(target))
     );
 
     let recoveryPath: string | undefined;
@@ -135,8 +135,8 @@ export class KeepWordStore {
       try {
         recoveryPath = await createManagedRecoveryPath(target);
         await vscode.workspace.fs.rename(
-          vscode.Uri.file(target),
-          vscode.Uri.file(recoveryPath),
+          path.toUri(target),
+          path.toUri(recoveryPath),
           { overwrite: false }
         );
       } catch (error) {
@@ -164,7 +164,7 @@ export class KeepWordStore {
 
   private async exists(target: string): Promise<boolean> {
     try {
-      await vscode.workspace.fs.stat(vscode.Uri.file(target));
+      await vscode.workspace.fs.stat(path.toUri(target));
       return true;
     } catch {
       return false;

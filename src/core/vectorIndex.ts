@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import { WorkEntry } from "../models/types";
 import { workPaths } from "./workRegistry";
 import { atomicWriteFile } from "./atomicWrite";
@@ -135,7 +135,7 @@ export class VectorIndex {
     const paths = indexPaths(work);
     try {
       const metaBytes = await vscode.workspace.fs.readFile(
-        vscode.Uri.file(paths.meta)
+        path.toUri(paths.meta)
       );
       const meta: unknown = JSON.parse(new TextDecoder().decode(metaBytes));
       if (!isStoredMeta(meta)) return index;
@@ -146,7 +146,7 @@ export class VectorIndex {
       }
 
       const binBytes = await vscode.workspace.fs.readFile(
-        vscode.Uri.file(paths.vectors)
+        path.toUri(paths.vectors)
       );
       const expected = meta.hashes.length * meta.dimensions * 4;
       if (binBytes.byteLength !== expected) {
@@ -177,7 +177,7 @@ export class VectorIndex {
   async save(work: WorkEntry): Promise<void> {
     const paths = indexPaths(work);
     await vscode.workspace.fs.createDirectory(
-      vscode.Uri.file(path.dirname(paths.meta))
+      path.toUri(path.dirname(paths.meta))
     );
 
     const hashes = [...this.byHash.keys()];
@@ -211,7 +211,7 @@ export class VectorIndex {
     const paths = indexPaths(work);
     for (const target of [paths.vectors, paths.meta]) {
       try {
-        await vscode.workspace.fs.delete(vscode.Uri.file(target));
+        await vscode.workspace.fs.delete(path.toUri(target));
       } catch {
         // 無ければそれでよい
       }
@@ -224,7 +224,7 @@ export class VectorIndex {
     let total = 0;
     for (const target of [paths.vectors, paths.meta]) {
       try {
-        const stat = await vscode.workspace.fs.stat(vscode.Uri.file(target));
+        const stat = await vscode.workspace.fs.stat(path.toUri(target));
         total += stat.size;
       } catch {
         // 無ければ0

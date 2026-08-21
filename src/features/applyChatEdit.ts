@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { atomicWriteFile, createManagedRecoveryPath } from "../core/atomicWrite";
@@ -171,7 +171,7 @@ async function settingsFile(
 
 async function readText(target: string): Promise<string | undefined> {
   try {
-    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+    const bytes = await vscode.workspace.fs.readFile(path.toUri(target));
     return new TextDecoder().decode(bytes);
   } catch {
     return undefined;
@@ -181,14 +181,14 @@ async function readText(target: string): Promise<string | undefined> {
 /** 既存ファイルは上書きできないので、退避してから作り直す */
 async function replaceFile(target: string, body: string): Promise<void> {
   await vscode.workspace.fs.createDirectory(
-    vscode.Uri.file(path.dirname(target))
+    path.toUri(path.dirname(target))
   );
 
   if (await exists(target)) {
     const recoveryPath = await createManagedRecoveryPath(target);
-    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+    const bytes = await vscode.workspace.fs.readFile(path.toUri(target));
     await atomicWriteFile(recoveryPath, bytes, { mode: "create" });
-    await vscode.workspace.fs.delete(vscode.Uri.file(target), {
+    await vscode.workspace.fs.delete(path.toUri(target), {
       useTrash: false,
     });
   }
@@ -200,7 +200,7 @@ async function replaceFile(target: string, body: string): Promise<void> {
 
 async function exists(filePath: string): Promise<boolean> {
   try {
-    await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+    await vscode.workspace.fs.stat(path.toUri(filePath));
     return true;
   } catch {
     return false;

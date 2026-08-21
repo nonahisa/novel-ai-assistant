@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { hashBytes } from "./textFile";
@@ -90,7 +90,7 @@ export class SettingsStore<T extends StorableRecord> {
 
   async ensureDir(): Promise<string> {
     const directory = await this.dir();
-    await vscode.workspace.fs.createDirectory(vscode.Uri.file(directory));
+    await vscode.workspace.fs.createDirectory(path.toUri(directory));
     return directory;
   }
 
@@ -109,7 +109,7 @@ export class SettingsStore<T extends StorableRecord> {
     let entries: [string, vscode.FileType][];
     try {
       entries = await vscode.workspace.fs.readDirectory(
-        vscode.Uri.file(directory)
+        path.toUri(directory)
       );
     } catch (error) {
       if (
@@ -129,7 +129,7 @@ export class SettingsStore<T extends StorableRecord> {
       const full = path.join(directory, name);
       try {
         const bytes = await vscode.workspace.fs.readFile(
-          vscode.Uri.file(full)
+          path.toUri(full)
         );
         const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
         const record = this.options.parse(parsed);
@@ -238,7 +238,7 @@ export class SettingsStore<T extends StorableRecord> {
       const previous = this.snapshots.get(record.id);
       if (previous && !isSamePath(previous.filePath, target)) {
         try {
-          await vscode.workspace.fs.delete(vscode.Uri.file(previous.filePath));
+          await vscode.workspace.fs.delete(path.toUri(previous.filePath));
         } catch {
           // 消せなくても新規保存は済んでいる。次回の読み込みで重複IDとして検出される
         }
@@ -285,7 +285,7 @@ export class SettingsStore<T extends StorableRecord> {
     let current: Uint8Array | undefined;
     try {
       current = await vscode.workspace.fs.readFile(
-        vscode.Uri.file(snapshot.filePath)
+        path.toUri(snapshot.filePath)
       );
     } catch (error) {
       if (
@@ -311,8 +311,8 @@ export class SettingsStore<T extends StorableRecord> {
     try {
       recoveryPath = await createManagedRecoveryPath(snapshot.filePath);
       await vscode.workspace.fs.rename(
-        vscode.Uri.file(snapshot.filePath),
-        vscode.Uri.file(recoveryPath),
+        path.toUri(snapshot.filePath),
+        path.toUri(recoveryPath),
         { overwrite: false }
       );
     } catch (error) {
@@ -341,7 +341,7 @@ export class SettingsStore<T extends StorableRecord> {
     let current: Uint8Array;
     try {
       current = await vscode.workspace.fs.readFile(
-        vscode.Uri.file(snapshot.filePath)
+        path.toUri(snapshot.filePath)
       );
     } catch (error) {
       if (

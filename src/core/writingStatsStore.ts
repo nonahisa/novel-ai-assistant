@@ -1,4 +1,4 @@
-import * as path from "path";
+import * as path from "./paths";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import type {
@@ -61,7 +61,7 @@ export class WritingStatsStore {
     let entries: [string, vscode.FileType][];
     try {
       entries = await vscode.workspace.fs.readDirectory(
-        vscode.Uri.file(this.directory())
+        path.toUri(this.directory())
       );
     } catch {
       return [];
@@ -110,7 +110,7 @@ export class WritingStatsStore {
 
   private async save(stats: DeviceWritingStats): Promise<void> {
     await vscode.workspace.fs.createDirectory(
-      vscode.Uri.file(this.directory())
+      path.toUri(this.directory())
     );
     await atomicWriteFile(
       this.fileFor(this.deviceId),
@@ -123,7 +123,7 @@ export class WritingStatsStore {
   ): Promise<DeviceWritingStats | undefined> {
     try {
       const bytes = await vscode.workspace.fs.readFile(
-        vscode.Uri.file(filePath)
+        path.toUri(filePath)
       );
       const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
       return parseDeviceWritingStats(parsed);

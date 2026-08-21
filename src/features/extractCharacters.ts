@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "../core/paths";
 import { WorkEntry } from "../models/types";
 import { Character } from "../models/character";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
@@ -864,7 +864,7 @@ export async function extractCharacters(
     const dir = await store2.ensureDir();
     await vscode.commands.executeCommand(
       "revealInExplorer",
-      vscode.Uri.file(dir)
+      path.toUri(dir)
     );
   }
 
@@ -1234,10 +1234,7 @@ function isPathInside(parentPath: string, candidatePath: string): boolean {
   const parent = normalizePathForComparison(parentPath);
   const candidate = normalizePathForComparison(candidatePath);
   const relative = path.relative(parent, candidate);
-  return relative.length > 0 &&
-    relative !== ".." &&
-    !relative.startsWith(`..${path.sep}`) &&
-    !path.isAbsolute(relative);
+  return relative.length > 0 && !path.goesOutside(parent, relative);
 }
 
 function normalizePathForComparison(filePath: string): string {

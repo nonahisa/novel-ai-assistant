@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "../core/paths";
 import { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { atomicWriteFile, AtomicWriteFileError } from "../core/atomicWrite";
@@ -82,7 +82,7 @@ export function isGeneratedDoc(existing: string): boolean {
 /** 既存ファイルが作者の手書きなら true（＝書き込んではいけない） */
 async function isAuthorWritten(target: string): Promise<boolean> {
   try {
-    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+    const bytes = await vscode.workspace.fs.readFile(path.toUri(target));
     return !isGeneratedDoc(new TextDecoder().decode(bytes));
   } catch (error) {
     // 読めない理由が「まだ無い」なら書いてよい。
@@ -99,7 +99,7 @@ async function isAuthorWritten(target: string): Promise<boolean> {
 
 async function fileExists(target: string): Promise<boolean> {
   try {
-    await vscode.workspace.fs.stat(vscode.Uri.file(target));
+    await vscode.workspace.fs.stat(path.toUri(target));
     return true;
   } catch {
     return false;
@@ -238,7 +238,7 @@ export async function generateSettingsDocs(
 
   const config = await readWorkConfig(work);
   const settingsDir = workPaths(work, config).settings;
-  await vscode.workspace.fs.createDirectory(vscode.Uri.file(settingsDir));
+  await vscode.workspace.fs.createDirectory(path.toUri(settingsDir));
 
   // 他のツール・AIが設定資料を読み書きするための定義を置く。
   // 資料を作るたびに書き直すので、字数上限などを変えても古びない
@@ -391,7 +391,7 @@ async function openGeneratedDoc(
     return;
   }
 
-  const uri = vscode.Uri.file(path.join(settingsDir, target));
+  const uri = path.toUri(path.join(settingsDir, target));
   try {
     // 存在を確かめてから開く。無いファイルにプレビューを出すと
     // 空の画面が出るだけで、失敗したことが作者に伝わらない
@@ -421,10 +421,10 @@ async function writeSchemaFiles(
 ): Promise<void> {
   const directory = path.join(settingsDir, SCHEMA_DIR);
   try {
-    await vscode.workspace.fs.createDirectory(vscode.Uri.file(directory));
+    await vscode.workspace.fs.createDirectory(path.toUri(directory));
     for (const file of buildSchemaFiles(workTitle)) {
       await vscode.workspace.fs.writeFile(
-        vscode.Uri.file(path.join(directory, file.fileName)),
+        path.toUri(path.join(directory, file.fileName)),
         new TextEncoder().encode(file.content)
       );
     }

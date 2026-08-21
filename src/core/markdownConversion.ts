@@ -1,4 +1,4 @@
-import * as path from "path";
+import * as path from "./paths";
 
 /**
  * 本文の .txt を .md へ変える判断（設計書6.12）。

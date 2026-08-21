@@ -1,4 +1,4 @@
-import * as path from "path";
+import * as path from "./paths";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { atomicWriteFile } from "./atomicWrite";
@@ -65,7 +65,7 @@ export class SessionStore {
     };
 
     await vscode.workspace.fs.createDirectory(
-      vscode.Uri.file(this.directory())
+      path.toUri(this.directory())
     );
     // 拡張機能だけが書くファイルなので、そのまま置き換えてよい
     // （作者が手で編集する設定JSONとは扱いが違う）
@@ -110,7 +110,7 @@ export class SessionStore {
     let entries: [string, vscode.FileType][];
     try {
       entries = await vscode.workspace.fs.readDirectory(
-        vscode.Uri.file(this.directory())
+        path.toUri(this.directory())
       );
     } catch {
       return [];
@@ -121,7 +121,7 @@ export class SessionStore {
       if (type !== vscode.FileType.File || !name.endsWith(".json")) continue;
       try {
         const bytes = await vscode.workspace.fs.readFile(
-          vscode.Uri.file(path.join(this.directory(), name))
+          path.toUri(path.join(this.directory(), name))
         );
         const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
         const record = parseSessionRecord(parsed);

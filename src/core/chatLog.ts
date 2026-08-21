@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "./workRegistry";
 import { formatLogTime, redactSecrets } from "./logger";
@@ -110,9 +110,9 @@ export function appendChatLog(work: WorkEntry, entry: ChatLogEntry): void {
 
   writeQueue = writeQueue
     .then(async () => {
-      const uri = vscode.Uri.file(target);
+      const uri = path.toUri(target);
       await vscode.workspace.fs.createDirectory(
-        vscode.Uri.file(path.dirname(target))
+        path.toUri(path.dirname(target))
       );
       let existing: Uint8Array;
       try {

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import { sha1Text } from "./hash";
 import { WorkEntry } from "../models/types";
 import { atomicWriteFile } from "./atomicWrite";
@@ -41,7 +41,7 @@ export class ChunkCache {
     const file = await this.filePath();
     try {
       const bytes = await vscode.workspace.fs.readFile(
-        vscode.Uri.file(file)
+        path.toUri(file)
       );
       const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
       if (!Array.isArray(parsed)) return;
@@ -59,7 +59,7 @@ export class ChunkCache {
     if (!this.dirty) return;
     const file = await this.filePath();
     await vscode.workspace.fs.createDirectory(
-      vscode.Uri.file(path.dirname(file))
+      path.toUri(path.dirname(file))
     );
     const body = JSON.stringify([...this.entries.values()], null, 0);
     await atomicWriteFile(file, new TextEncoder().encode(body));

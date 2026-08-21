@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import { AIWRITER_DIR, WorkEntry } from "../models/types";
 import { parseCharacter, type Character } from "../models/character";
 import { atomicWriteFile } from "./atomicWrite";
@@ -37,7 +37,7 @@ export class PendingUpdateStore {
   async stage(characters: Character[]): Promise<void> {
     if (characters.length === 0) return;
     await vscode.workspace.fs.createDirectory(
-      vscode.Uri.file(this.directory)
+      path.toUri(this.directory)
     );
 
     for (const character of characters) {
@@ -60,7 +60,7 @@ export class PendingUpdateStore {
     let entries: [string, vscode.FileType][];
     try {
       entries = await vscode.workspace.fs.readDirectory(
-        vscode.Uri.file(this.directory)
+        path.toUri(this.directory)
       );
     } catch (error) {
       if (
@@ -77,7 +77,7 @@ export class PendingUpdateStore {
       const filePath = path.join(this.directory, name);
       try {
         const bytes = await vscode.workspace.fs.readFile(
-          vscode.Uri.file(filePath)
+          path.toUri(filePath)
         );
         const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
         updates.push({ character: parseCharacter(parsed), filePath });
@@ -96,7 +96,7 @@ export class PendingUpdateStore {
   /** 反映済み・破棄した更新案を片付ける */
   async discard(filePath: string): Promise<void> {
     try {
-      await vscode.workspace.fs.delete(vscode.Uri.file(filePath));
+      await vscode.workspace.fs.delete(path.toUri(filePath));
     } catch {
       // 消せなくても実害はない。次回の一覧に残るだけ
     }

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "./workRegistry";
 import {
@@ -58,7 +58,7 @@ export class ProposalStore {
   async load(): Promise<ProposalView[]> {
     try {
       const bytes = await vscode.workspace.fs.readFile(
-        vscode.Uri.file(this.filePath)
+        path.toUri(this.filePath)
       );
       return resolveProposals(parseProposalLines(new TextDecoder().decode(bytes)));
     } catch {
@@ -77,9 +77,9 @@ export class ProposalStore {
     const target = this.filePath;
     const text = lines.map((line) => JSON.stringify(line)).join("\n") + "\n";
     await vscode.workspace.fs.createDirectory(
-      vscode.Uri.file(path.dirname(target))
+      path.toUri(path.dirname(target))
     );
-    const uri = vscode.Uri.file(target);
+    const uri = path.toUri(target);
     let existing: Uint8Array;
     try {
       existing = await vscode.workspace.fs.readFile(uri);

@@ -1,4 +1,4 @@
-import * as path from "path";
+import * as path from "./paths";
 
 /**
  * 設定資料が外部で書き換えられたことを見分ける。

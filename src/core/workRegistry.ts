@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import { open } from "node:fs/promises";
 import {
   AIWRITER_DIR,
@@ -214,7 +214,7 @@ async function ensureRecoveryIgnoreRule(
   options: { syncCache?: boolean } = {}
 ): Promise<void> {
   const gitignorePath = path.join(folderPath, ".gitignore");
-  const uri = vscode.Uri.file(gitignorePath);
+  const uri = path.toUri(gitignorePath);
   let existing: Uint8Array;
   try {
     existing = await vscode.workspace.fs.readFile(uri);
@@ -364,11 +364,7 @@ function resolveInsideWork(root: string, subdir: string, key: string): string {
   const resolvedRoot = path.resolve(root);
   const resolved = path.resolve(resolvedRoot, subdir);
   const relative = path.relative(resolvedRoot, resolved);
-  if (
-    relative === ".." ||
-    relative.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(relative)
-  ) {
+  if (path.goesOutside(resolvedRoot, relative)) {
     throw new Error(`${key} は作品フォルダ内の相対パスにしてください。`);
   }
   return resolved;
@@ -378,7 +374,7 @@ function resolveInsideWork(root: string, subdir: string, key: string): string {
 export async function readWorkConfig(
   work: WorkEntry
 ): Promise<WorkConfig | undefined> {
-  const uri = vscode.Uri.file(workPaths(work).configFile);
+  const uri = path.toUri(workPaths(work).configFile);
   try {
     const bytes = await vscode.workspace.fs.readFile(uri);
     const raw: unknown = JSON.parse(new TextDecoder().decode(bytes));
@@ -402,10 +398,10 @@ export async function writeWorkConfig(
   const validated = parseWorkConfig(config);
   workPaths(work, validated);
   const p = workPaths(work);
-  await vscode.workspace.fs.createDirectory(vscode.Uri.file(p.aiwriter));
+  await vscode.workspace.fs.createDirectory(path.toUri(p.aiwriter));
   const body = JSON.stringify(validated, null, 2);
   await vscode.workspace.fs.writeFile(
-    vscode.Uri.file(p.configFile),
+    path.toUri(p.configFile),
     new TextEncoder().encode(body)
   );
 }
@@ -425,7 +421,7 @@ export async function scaffoldWorkFolder(
 ): Promise<void> {
   const fs = vscode.workspace.fs;
   try {
-    await fs.stat(vscode.Uri.file(folderPath));
+    await fs.stat(path.toUri(folderPath));
     throw new Error(
       `「${folderPath}」はすでに存在します。既存のファイルを保護するため作成を中止しました。`
     );
@@ -443,7 +439,7 @@ export async function scaffoldWorkFolder(
     path.join(folderPath, AIWRITER_DIR),
   ];
   for (const d of dirs) {
-    await fs.createDirectory(vscode.Uri.file(d));
+    await fs.createDirectory(path.toUri(d));
   }
 
   const config: WorkConfig = {
@@ -454,7 +450,7 @@ export async function scaffoldWorkFolder(
     createdAt: new Date().toISOString(),
   };
   await fs.writeFile(
-    vscode.Uri.file(path.join(folderPath, AIWRITER_DIR, CONFIG_FILE)),
+    path.toUri(path.join(folderPath, AIWRITER_DIR, CONFIG_FILE)),
     new TextEncoder().encode(JSON.stringify(config, null, 2))
   );
 
@@ -481,7 +477,7 @@ export async function scaffoldWorkFolder(
 export const PLOT_FILE = "plot.md";
 
 async function writeIfAbsent(filePath: string, content: string): Promise<void> {
-  const uri = vscode.Uri.file(filePath);
+  const uri = path.toUri(filePath);
   try {
     await vscode.workspace.fs.stat(uri);
     return; // すでに存在するので触らない

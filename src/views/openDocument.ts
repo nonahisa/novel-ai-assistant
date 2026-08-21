@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { toUri } from "../core/paths";
 
 /**
  * 作者の既定のエディターでファイルを開く（設計書6.17.6）。
@@ -25,7 +26,7 @@ export async function openInDefaultEditor(
 ): Promise<void> {
   await vscode.commands.executeCommand(
     "vscode.open",
-    vscode.Uri.file(filePath),
+    toUri(filePath),
     options
   );
 }

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "./workRegistry";
 import { atomicWriteFile } from "./atomicWrite";
@@ -29,7 +29,7 @@ export class CatchphraseHistory {
   async load(): Promise<string[]> {
     try {
       const bytes = await vscode.workspace.fs.readFile(
-        vscode.Uri.file(this.filePath())
+        path.toUri(this.filePath())
       );
       const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
       if (!Array.isArray(parsed)) return [];
@@ -49,7 +49,7 @@ export class CatchphraseHistory {
     const target = this.filePath();
     try {
       await vscode.workspace.fs.createDirectory(
-        vscode.Uri.file(path.dirname(target))
+        path.toUri(path.dirname(target))
       );
       await atomicWriteFile(
         target,

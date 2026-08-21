@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "../core/paths";
 import { AIRegistry } from "../ai/registry";
 import { isVectorSearchEnabled } from "./vectorSearch";
 
@@ -91,7 +91,7 @@ export async function showVersion(
   }
   if (picked === changelog) {
     // 拡張機能に同梱してある。どのエディターで開くかは作者の設定に任せる
-    const file = vscode.Uri.file(
+    const file = path.toUri(
       path.join(context.extensionUri.fsPath, "CHANGELOG.md")
     );
     try {

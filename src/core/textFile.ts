@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as path from "./paths";
 import { sha256Bytes, sha256Text } from "./hash";
 import iconv = require("iconv-lite");
 import { diffArrays } from "diff";
@@ -54,7 +55,7 @@ const CONFLICT_PATTERN = /^(<{7}|={7}|>{7})(\s|$)/m;
 export async function readTextFile(
   filePath: string
 ): Promise<TextFileContent> {
-  const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
+  const bytes = await vscode.workspace.fs.readFile(path.toUri(filePath));
   return decodeBytes(bytes);
 }
 
@@ -133,7 +134,7 @@ export async function writeTextFilePreservingFormat(
   original: Pick<TextFileContent, "encoding" | "eol" | "hasTrailingNewline">,
   expectedHash: string
 ): Promise<WriteTextFileResult> {
-  const uri = vscode.Uri.file(filePath);
+  const uri = path.toUri(filePath);
 
   if (hasUnsavedChanges(filePath)) {
     return { ok: false, reason: "unsaved_changes" };
@@ -442,7 +443,7 @@ export async function currentFileHash(
 ): Promise<string | undefined> {
   try {
     const bytes = await vscode.workspace.fs.readFile(
-      vscode.Uri.file(filePath)
+      path.toUri(filePath)
     );
     return hashBytes(bytes);
   } catch {
@@ -471,10 +472,5 @@ export function hasUnsavedChanges(filePath: string): boolean {
 }
 
 export function sameFilePath(left: string, right: string): boolean {
-  const normalizedLeft = vscode.Uri.file(left).fsPath;
-  const normalizedRight = vscode.Uri.file(right).fsPath;
-
-  return process.platform === "win32"
-    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
-    : normalizedLeft === normalizedRight;
+  return path.normalizeForComparison(left) === path.normalizeForComparison(right);
 }

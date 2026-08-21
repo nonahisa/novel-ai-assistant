@@ -1,4 +1,4 @@
-import * as path from "path";
+import * as path from "../core/paths";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "../core/workRegistry";
 import { pruneLogText } from "../core/logRetention";
@@ -52,7 +52,7 @@ async function pruneWorkLogs(
   let removed = 0;
 
   for (const fileName of LOG_FILES) {
-    const uri = vscode.Uri.file(path.join(dir, fileName));
+    const uri = path.toUri(path.join(dir, fileName));
     try {
       const bytes = await vscode.workspace.fs.readFile(uri);
       const result = pruneLogText(

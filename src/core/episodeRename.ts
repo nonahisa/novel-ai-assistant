@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import type { EpisodeFile } from "../models/types";
 import { sanitizeFileName } from "./episodeParser";
 
@@ -36,8 +36,8 @@ export async function renameEpisodeFile(
   }
 
   await vscode.workspace.fs.rename(
-    vscode.Uri.file(file.filePath),
-    vscode.Uri.file(target),
+    path.toUri(file.filePath),
+    path.toUri(target),
     // 上書きを許すと、同名の別の話が消える
     { overwrite: false }
   );
@@ -52,7 +52,7 @@ export function renamedFileName(file: EpisodeFile, subtitle: string): string {
 
 async function exists(filePath: string): Promise<boolean> {
   try {
-    await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+    await vscode.workspace.fs.stat(path.toUri(filePath));
     return true;
   } catch {
     return false;

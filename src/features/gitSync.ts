@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import {
@@ -662,12 +662,7 @@ function isPathInside(parentPath: string, candidatePath: string): boolean {
   const parent = normalizeForComparison(parentPath);
   const candidate = normalizeForComparison(candidatePath);
   const relative = path.relative(parent, candidate);
-  return (
-    relative.length > 0 &&
-    relative !== ".." &&
-    !relative.startsWith(`..${path.sep}`) &&
-    !path.isAbsolute(relative)
-  );
+  return relative.length > 0 && !path.goesOutside(parent, relative);
 }
 
 function normalizeForComparison(filePath: string): string {

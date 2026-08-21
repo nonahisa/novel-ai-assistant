@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import { DICTIONARY_FORMATS } from "./imeDictionary";
 import { SETTINGS_DIRECTORY_NAMES } from "./externalChanges";
 
@@ -38,7 +38,7 @@ async function newestMtime(directory: string): Promise<number | undefined> {
   let entries: [string, vscode.FileType][];
   try {
     entries = await vscode.workspace.fs.readDirectory(
-      vscode.Uri.file(directory)
+      path.toUri(directory)
     );
   } catch {
     // フォルダがまだ無い作品もある。その場合は比べる材料が無いだけ
@@ -50,7 +50,7 @@ async function newestMtime(directory: string): Promise<number | undefined> {
     if (!name.endsWith(".json")) continue;
     try {
       const stat = await vscode.workspace.fs.stat(
-        vscode.Uri.file(path.join(directory, name))
+        path.toUri(path.join(directory, name))
       );
       if (newest === undefined || stat.mtime > newest) newest = stat.mtime;
     } catch {
@@ -73,7 +73,7 @@ export async function checkDictionaryFreshness(
   for (const format of Object.values(DICTIONARY_FORMATS)) {
     try {
       const stat = await vscode.workspace.fs.stat(
-        vscode.Uri.file(path.join(settingsDir, format.fileName))
+        path.toUri(path.join(settingsDir, format.fileName))
       );
       if (newestDictionary === undefined || stat.mtime > newestDictionary) {
         newestDictionary = stat.mtime;

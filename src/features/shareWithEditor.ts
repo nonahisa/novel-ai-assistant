@@ -1,4 +1,4 @@
-import * as path from "path";
+import * as path from "../core/paths";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { runGit, pullFastForward, type GitCommandRunner } from "../core/git";
@@ -55,7 +55,7 @@ async function readPointer(
 ): Promise<EditingPointer | undefined> {
   try {
     const bytes = await vscode.workspace.fs.readFile(
-      vscode.Uri.file(pointerPath(work))
+      path.toUri(pointerPath(work))
     );
     const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
     if (typeof parsed !== "object" || parsed === null) return undefined;
@@ -76,19 +76,19 @@ async function writePointer(
 ): Promise<void> {
   const target = pointerPath(work);
   await vscode.workspace.fs.createDirectory(
-    vscode.Uri.file(path.dirname(target))
+    path.toUri(path.dirname(target))
   );
   // **場所を覚えるだけのファイルである。** 失っても聞き直せるので、
   // 原子的な書き込みの仕組みまでは要らない
   await vscode.workspace.fs.writeFile(
-    vscode.Uri.file(target),
+    path.toUri(target),
     new TextEncoder().encode(`${JSON.stringify(pointer, null, 2)}\n`)
   );
 }
 
 async function exists(target: string): Promise<boolean> {
   try {
-    await vscode.workspace.fs.stat(vscode.Uri.file(target));
+    await vscode.workspace.fs.stat(path.toUri(target));
     return true;
   } catch {
     return false;
@@ -97,7 +97,7 @@ async function exists(target: string): Promise<boolean> {
 
 async function readTextIfAny(target: string): Promise<string> {
   try {
-    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+    const bytes = await vscode.workspace.fs.readFile(path.toUri(target));
     return new TextDecoder().decode(bytes);
   } catch {
     return "";
@@ -219,9 +219,10 @@ async function chooseDestination(work: WorkEntry): Promise<string | undefined> {
   const destination = path.join(parent[0].fsPath, name.trim());
 
   // 作品フォルダーの中へ置くと、作品集のリポジトリに入れ子で入ってしまう
+  const normalizedWork = path.normalize(work.folderPath);
   const inside = path
     .normalize(destination)
-    .startsWith(path.normalize(work.folderPath) + path.sep);
+    .startsWith(normalizedWork + path.separatorFor(normalizedWork));
   if (inside) {
     void vscode.window.showErrorMessage(
       "作品フォルダーの中には置けません。リポジトリが入れ子になり、" +
@@ -244,7 +245,7 @@ async function copyForEditor(
   manuscriptDir: string | undefined,
   settingsDir: string | undefined
 ): Promise<void> {
-  await vscode.workspace.fs.createDirectory(vscode.Uri.file(destination));
+  await vscode.workspace.fs.createDirectory(path.toUri(destination));
 
   const replaced = replacedDirectories(
     manuscriptDir ?? path.basename(paths.manuscript),
@@ -260,14 +261,14 @@ async function copyForEditor(
     if (!(await exists(source))) continue;
     const target = path.join(destination, name);
     if (await exists(target)) {
-      await vscode.workspace.fs.delete(vscode.Uri.file(target), {
+      await vscode.workspace.fs.delete(path.toUri(target), {
         recursive: true,
         useTrash: false,
       });
     }
     await vscode.workspace.fs.copy(
-      vscode.Uri.file(source),
-      vscode.Uri.file(target),
+      path.toUri(source),
+      path.toUri(target),
       { overwrite: true }
     );
   }
@@ -277,11 +278,11 @@ async function copyForEditor(
     if (!(await exists(source))) continue;
     const target = path.join(destination, relative);
     await vscode.workspace.fs.createDirectory(
-      vscode.Uri.file(path.dirname(target))
+      path.toUri(path.dirname(target))
     );
     await vscode.workspace.fs.copy(
-      vscode.Uri.file(source),
-      vscode.Uri.file(target),
+      path.toUri(source),
+      path.toUri(target),
       { overwrite: true }
     );
   }
@@ -304,10 +305,10 @@ async function mergeProposalsInto(
   if (merged.text.length === 0) return 0;
   if (merged.added === 0 && merged.text === existing) return 0;
   await vscode.workspace.fs.createDirectory(
-    vscode.Uri.file(path.dirname(targetPath))
+    path.toUri(path.dirname(targetPath))
   );
   await vscode.workspace.fs.writeFile(
-    vscode.Uri.file(targetPath),
+    path.toUri(targetPath),
     new TextEncoder().encode(merged.text)
   );
   return merged.added;

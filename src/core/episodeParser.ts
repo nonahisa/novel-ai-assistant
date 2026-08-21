@@ -1,4 +1,4 @@
-import * as path from "path";
+import * as path from "./paths";
 import type { EpisodeKind } from "../models/types";
 
 export interface ParsedFileName {

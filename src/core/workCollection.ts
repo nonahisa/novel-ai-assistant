@@ -1,4 +1,4 @@
-import * as path from "path";
+import * as path from "./paths";
 import { readdir, stat } from "node:fs/promises";
 import {
   AIWRITER_DIR,

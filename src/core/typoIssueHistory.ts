@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import { sha1Text } from "./hash";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "./workRegistry";
@@ -53,7 +53,7 @@ export class TypoDismissedHistory {
   async load(): Promise<Set<string>> {
     try {
       const bytes = await vscode.workspace.fs.readFile(
-        vscode.Uri.file(this.filePath())
+        path.toUri(this.filePath())
       );
       const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
       if (!Array.isArray(parsed)) return new Set();
@@ -74,7 +74,7 @@ export class TypoDismissedHistory {
     const target = this.filePath();
     try {
       await vscode.workspace.fs.createDirectory(
-        vscode.Uri.file(path.dirname(target))
+        path.toUri(path.dirname(target))
       );
       await atomicWriteFile(
         target,
@@ -114,7 +114,7 @@ export async function loadAppliedFixKeys(
   const target = path.join(workPaths(work).aiwriter, "logs", "ai_actions.log");
   const keys = new Set<string>();
   try {
-    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+    const bytes = await vscode.workspace.fs.readFile(path.toUri(target));
     const text = new TextDecoder().decode(bytes);
     for (const line of text.split("\n")) {
       if (!line.trim()) continue;
@@ -182,9 +182,9 @@ export async function appendAiActionLog(
   const line = JSON.stringify({ timestamp: formatLogTime(), ...entry });
 
   try {
-    const uri = vscode.Uri.file(target);
+    const uri = path.toUri(target);
     await vscode.workspace.fs.createDirectory(
-      vscode.Uri.file(path.dirname(target))
+      path.toUri(path.dirname(target))
     );
     let existing: Uint8Array;
     try {

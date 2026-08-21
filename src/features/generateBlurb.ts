@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
@@ -335,7 +335,7 @@ async function readPlot(work: WorkEntry): Promise<string> {
   const config = await readWorkConfig(work);
   const target = path.join(workPaths(work, config).settings, "plot.md");
   try {
-    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+    const bytes = await vscode.workspace.fs.readFile(path.toUri(target));
     return new TextDecoder().decode(bytes);
   } catch {
     return "";
@@ -392,7 +392,7 @@ export async function refreshSynopsisDoc(
 async function readSynopsisDoc(work: WorkEntry): Promise<SynopsisDoc> {
   try {
     const bytes = await vscode.workspace.fs.readFile(
-      vscode.Uri.file(await synopsisPath(work))
+      path.toUri(await synopsisPath(work))
     );
     return parseSynopsisMarkdown(new TextDecoder().decode(bytes));
   } catch {
@@ -426,7 +426,7 @@ async function writeSynopsisDoc(
   );
 
   await vscode.workspace.fs.createDirectory(
-    vscode.Uri.file(path.dirname(target))
+    path.toUri(path.dirname(target))
   );
 
   let recoveryPath: string | undefined;
@@ -434,8 +434,8 @@ async function writeSynopsisDoc(
     try {
       recoveryPath = await createManagedRecoveryPath(target);
       await vscode.workspace.fs.rename(
-        vscode.Uri.file(target),
-        vscode.Uri.file(recoveryPath),
+        path.toUri(target),
+        path.toUri(recoveryPath),
         { overwrite: false }
       );
     } catch (error) {
@@ -456,7 +456,7 @@ async function writeSynopsisDoc(
     // 言われていた（作者の指摘、2026-08-16）。
     // どのエディターで開くかは決め打ちしない。`vscode.open` なら
     // 作者が既定にしたもの（Markdown Editor など）で開く
-    await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(target));
+    await vscode.commands.executeCommand("vscode.open", path.toUri(target));
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     vscode.window.showErrorMessage(
@@ -525,7 +525,7 @@ function reportAIError(context: string, error: unknown): void {
 
 async function exists(filePath: string): Promise<boolean> {
   try {
-    await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+    await vscode.workspace.fs.stat(path.toUri(filePath));
     return true;
   } catch {
     return false;

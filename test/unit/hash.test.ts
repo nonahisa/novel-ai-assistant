@@ -3,7 +3,7 @@ import * as crypto from "crypto";
 import { sha1Bytes, sha1Text, sha256Bytes, sha256Text } from "../../src/core/hash";
 
 /**
- * 自前のハッシュが、Node の `crypto` と1文字も違わないことを確かめる（設計書5.7）。
+ * 自前のハッシュが、Node の `crypto` と1文字も違わないことを確かめる（設計書5.8）。
  *
  * **ブラウザ版には `node:crypto` が無く、Web Crypto は非同期しか無い。**
  * 同期のまま動く実装を自分で書いたので、**正しさは他人の実装と

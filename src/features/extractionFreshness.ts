@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { SETTINGS_DIRECTORY_NAMES } from "../core/externalChanges";
@@ -62,7 +62,7 @@ async function newestSettingsTime(
     let entries: [string, vscode.FileType][];
     try {
       entries = await vscode.workspace.fs.readDirectory(
-        vscode.Uri.file(directory)
+        path.toUri(directory)
       );
     } catch {
       // そのフォルダがまだ無い作品もある
@@ -82,7 +82,7 @@ async function newestSettingsTime(
 
 async function modifiedAt(filePath: string): Promise<number | undefined> {
   try {
-    return (await vscode.workspace.fs.stat(vscode.Uri.file(filePath))).mtime;
+    return (await vscode.workspace.fs.stat(path.toUri(filePath))).mtime;
   } catch {
     return undefined;
   }

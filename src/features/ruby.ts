@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "../core/paths";
 import {
   describeRefusal,
   isPlainTextManuscript,
@@ -77,7 +77,7 @@ async function requireMarkdown(): Promise<vscode.TextEditor | undefined> {
 
   // 変換した .md を開き直す。作者は続きを書こうとしている
   const document = await vscode.workspace.openTextDocument(
-    vscode.Uri.file(converted)
+    path.toUri(converted)
   );
   return vscode.window.showTextDocument(document, {
     selection: editor.selection,
@@ -86,7 +86,7 @@ async function requireMarkdown(): Promise<vscode.TextEditor | undefined> {
 
 /** 同じフォルダーにある名前の一覧（拡張子込み） */
 async function siblingNames(filePath: string): Promise<string[]> {
-  const dir = vscode.Uri.file(path.dirname(filePath));
+  const dir = path.toUri(path.dirname(filePath));
   try {
     const entries = await vscode.workspace.fs.readDirectory(dir);
     return entries
@@ -184,8 +184,8 @@ async function convertFolder(filePath: string): Promise<string | undefined> {
  */
 async function renamePreservingContent(plan: ConversionPlan): Promise<void> {
   await vscode.workspace.fs.rename(
-    vscode.Uri.file(plan.from),
-    vscode.Uri.file(plan.to),
+    path.toUri(plan.from),
+    path.toUri(plan.to),
     // **上書きしない。** 既にあるなら planConversion が止めているが、
     // その後に作られている場合もある
     { overwrite: false }

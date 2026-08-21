@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import type { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import {
@@ -53,7 +53,7 @@ export class TimelineStore {
     const target = await this.filePath();
     let bytes: Uint8Array;
     try {
-      bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+      bytes = await vscode.workspace.fs.readFile(path.toUri(target));
     } catch (error) {
       if (
         error instanceof vscode.FileSystemError &&
@@ -113,7 +113,7 @@ export class TimelineStore {
     const bytes = new TextEncoder().encode(`${body}\n`);
 
     await vscode.workspace.fs.createDirectory(
-      vscode.Uri.file(path.dirname(target))
+      path.toUri(path.dirname(target))
     );
 
     const existed = await this.exists(target);
@@ -122,8 +122,8 @@ export class TimelineStore {
       try {
         recoveryPath = await createManagedRecoveryPath(target);
         await vscode.workspace.fs.rename(
-          vscode.Uri.file(target),
-          vscode.Uri.file(recoveryPath),
+          path.toUri(target),
+          path.toUri(recoveryPath),
           { overwrite: false }
         );
       } catch (error) {
@@ -153,7 +153,7 @@ export class TimelineStore {
 
   private async exists(filePath: string): Promise<boolean> {
     try {
-      await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+      await vscode.workspace.fs.stat(path.toUri(filePath));
       return true;
     } catch (error) {
       if (

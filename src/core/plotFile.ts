@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./paths";
 import type { WorkEntry } from "../models/types";
 import { PLOT_FILE, readWorkConfig, workPaths } from "./workRegistry";
 import { atomicWriteFile, createManagedRecoveryPath } from "./atomicWrite";
@@ -22,7 +22,7 @@ export async function plotPath(work: WorkEntry): Promise<string> {
 export async function readPlotText(work: WorkEntry): Promise<string> {
   try {
     const bytes = await vscode.workspace.fs.readFile(
-      vscode.Uri.file(await plotPath(work))
+      path.toUri(await plotPath(work))
     );
     return new TextDecoder().decode(bytes);
   } catch {
@@ -54,14 +54,14 @@ export async function writePlotText(
   body: string
 ): Promise<void> {
   await vscode.workspace.fs.createDirectory(
-    vscode.Uri.file(path.dirname(target))
+    path.toUri(path.dirname(target))
   );
 
   if (await exists(target)) {
     const recoveryPath = await createManagedRecoveryPath(target);
-    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+    const bytes = await vscode.workspace.fs.readFile(path.toUri(target));
     await atomicWriteFile(recoveryPath, bytes, { mode: "create" });
-    await vscode.workspace.fs.delete(vscode.Uri.file(target), {
+    await vscode.workspace.fs.delete(path.toUri(target), {
       useTrash: false,
     });
   }
@@ -73,7 +73,7 @@ export async function writePlotText(
 
 async function exists(filePath: string): Promise<boolean> {
   try {
-    await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+    await vscode.workspace.fs.stat(path.toUri(filePath));
     return true;
   } catch {
     return false;

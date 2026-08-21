@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "../core/paths";
 import { isAiBusy } from "../core/aiActivity";
 import { decideChatter, type Chatter, type ChatterState } from "../core/chatter";
 import { logFailure } from "../core/logger";

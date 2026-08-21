@@ -1,6 +1,6 @@
 import { sha256Bytes, sha256Text } from "./hash";
 import { hostTag, randomUuid } from "./runtime";
-import * as path from "path";
+import * as path from "./paths";
 import * as vscode from "vscode";
 
 export const RECOVERY_GENERATIONS_PER_FILE = 5;
@@ -52,9 +52,9 @@ export async function atomicWriteFile(
   options?: AtomicWriteFileOptions
 ): Promise<void> {
   writeObserver?.(filePath);
-  const destination = vscode.Uri.file(filePath);
+  const destination = path.toUri(filePath);
   const nonce = `${hostTag()}-${randomUuid()}`;
-  const temporary = vscode.Uri.file(`${filePath}.novelai-${nonce}.tmp`);
+  const temporary = path.toUri(`${filePath}.novelai-${nonce}.tmp`);
   const stagedHash = hashBytes(bytes);
 
   await vscode.workspace.fs.writeFile(temporary, bytes);
@@ -132,7 +132,7 @@ async function replaceGuarded(
 ): Promise<void> {
   let proposal: vscode.Uri;
   try {
-    proposal = vscode.Uri.file(await createManagedRecoveryPath(destination.fsPath));
+    proposal = path.toUri(await createManagedRecoveryPath(destination.fsPath));
   } catch (error) {
     throw manualRecoveryError(
       `回復ディレクトリを準備できませんでした: ${errorMessage(error)}`,
@@ -218,7 +218,7 @@ export async function createManagedRecoveryPath(
   canonicalPath: string
 ): Promise<string> {
   const directory = recoveryDirectoryFor(canonicalPath);
-  await vscode.workspace.fs.createDirectory(vscode.Uri.file(directory));
+  await vscode.workspace.fs.createDirectory(path.toUri(directory));
   recoverySequence += 1;
   const timestamp = String(Date.now()).padStart(13, "0");
   const sequence = String(recoverySequence).padStart(8, "0");
@@ -240,7 +240,7 @@ export async function pruneManagedRecoveries(
 
   let entries: [string, vscode.FileType][];
   try {
-    entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(directory));
+    entries = await vscode.workspace.fs.readDirectory(path.toUri(directory));
   } catch {
     return;
   }
@@ -253,7 +253,7 @@ export async function pruneManagedRecoveries(
     .slice(RECOVERY_GENERATIONS_PER_FILE);
   for (const name of obsolete) {
     try {
-      await vscode.workspace.fs.delete(vscode.Uri.file(path.join(directory, name)));
+      await vscode.workspace.fs.delete(path.toUri(path.join(directory, name)));
     } catch {
       // 回復物の整理失敗で、完了済みの保存を失敗扱いにしない。
     }
@@ -289,11 +289,7 @@ function recoveryDirectoryFor(canonicalPath: string): string {
 }
 
 function recoveryKey(canonicalPath: string): string {
-  const normalized = path.normalize(vscode.Uri.file(canonicalPath).fsPath);
-  const stablePath = process.platform === "win32"
-    ? normalized.toLowerCase()
-    : normalized;
-  return sha256Text(stablePath);
+  return sha256Text(path.normalizeForComparison(canonicalPath));
 }
 
 function errorMessage(error: unknown): string {

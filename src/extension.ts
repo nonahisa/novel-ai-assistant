@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "./core/paths";
 import {
   WorkRegistry,
   readWorkConfig,
@@ -1025,7 +1025,7 @@ export async function activate(
 
         const file = chatLogPath(work);
         try {
-          await vscode.workspace.fs.stat(vscode.Uri.file(file));
+          await vscode.workspace.fs.stat(path.toUri(file));
         } catch {
           // 無いことと、切ってあることを区別して伝える。
           // 「まだ相談していない」のか「記録していない」のかで対処が違う
@@ -1037,7 +1037,7 @@ export async function activate(
         }
         await vscode.commands.executeCommand(
           "vscode.open",
-          vscode.Uri.file(file)
+          path.toUri(file)
         );
       }
     )
@@ -1240,7 +1240,7 @@ export async function activate(
         if (!work) return;
         await vscode.commands.executeCommand(
           "revealFileInOS",
-          vscode.Uri.file(work.folderPath)
+          path.toUri(work.folderPath)
         );
       }
     )
@@ -1354,7 +1354,7 @@ export async function activate(
         }
 
         await vscode.workspace.fs.writeFile(
-          vscode.Uri.file(filePath),
+          path.toUri(filePath),
           new TextEncoder().encode("")
         );
 
@@ -1839,7 +1839,7 @@ export async function activate(
 
         try {
           await vscode.workspace.fs.delete(
-            vscode.Uri.file(node.episode.filePath),
+            path.toUri(node.episode.filePath),
             { useTrash: true }
           );
         } catch (error) {
@@ -1898,7 +1898,7 @@ export async function activate(
         let hasBlurb = false;
         try {
           const bytes = await vscode.workspace.fs.readFile(
-            vscode.Uri.file(file)
+            path.toUri(file)
           );
           hasBlurb = Boolean(
             parseSynopsisMarkdown(new TextDecoder().decode(bytes)).blurb.trim()
@@ -1935,7 +1935,7 @@ export async function activate(
             run: () =>
               vscode.commands.executeCommand(
                 "vscode.open",
-                vscode.Uri.file(file)
+                path.toUri(file)
               ),
           });
         }
@@ -2151,16 +2151,9 @@ function findWorkForPath(
   return [...registry.list()]
     .sort((a, b) => b.folderPath.length - a.folderPath.length)
     .find((work) => {
-      const relative = path.relative(
-        normalize(work.folderPath),
-        normalize(filePath)
-      );
-      return (
-        relative.length > 0 &&
-        relative !== ".." &&
-        !relative.startsWith(`..${path.sep}`) &&
-        !path.isAbsolute(relative)
-      );
+      const normalizedWork = normalize(work.folderPath);
+      const relative = path.relative(normalizedWork, normalize(filePath));
+      return relative.length > 0 && !path.goesOutside(normalizedWork, relative);
     });
 }
 

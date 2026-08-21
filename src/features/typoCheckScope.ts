@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "path";
+import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "../core/workRegistry";
 import { scanWork } from "../core/scanner";
@@ -34,7 +34,7 @@ export async function readLastCheck(
 ): Promise<number | undefined> {
   try {
     const bytes = await vscode.workspace.fs.readFile(
-      vscode.Uri.file(filePath(work))
+      path.toUri(filePath(work))
     );
     const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
     const at =
@@ -57,7 +57,7 @@ export async function recordCheck(work: WorkEntry): Promise<void> {
   const target = filePath(work);
   try {
     await vscode.workspace.fs.createDirectory(
-      vscode.Uri.file(path.dirname(target))
+      path.toUri(path.dirname(target))
     );
     await atomicWriteFile(
       target,
@@ -144,7 +144,7 @@ export async function chooseScope(
 
 async function modifiedAt(file: string): Promise<number | undefined> {
   try {
-    return (await vscode.workspace.fs.stat(vscode.Uri.file(file))).mtime;
+    return (await vscode.workspace.fs.stat(path.toUri(file))).mtime;
   } catch {
     return undefined;
   }

@@ -1,4 +1,4 @@
-import * as path from "path";
+import * as path from "../core/paths";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { formatChapterNumber } from "../core/episodeParser";
@@ -73,9 +73,9 @@ export async function openPlotFile(work: WorkEntry): Promise<void> {
 
   const existed = await pathExists(plotPath);
   if (!existed) {
-    await vscode.workspace.fs.createDirectory(vscode.Uri.file(settingsDir));
+    await vscode.workspace.fs.createDirectory(path.toUri(settingsDir));
     await vscode.workspace.fs.writeFile(
-      vscode.Uri.file(plotPath),
+      path.toUri(plotPath),
       new TextEncoder().encode(buildPlotTemplate(work.title))
     );
   }
@@ -114,7 +114,7 @@ export async function createFirstEpisodeFile(
   // 既にあるなら作らずに開く。中身を消してはいけない
   if (!(await pathExists(filePath))) {
     await vscode.workspace.fs.writeFile(
-      vscode.Uri.file(filePath),
+      path.toUri(filePath),
       new TextEncoder().encode("")
     );
   }

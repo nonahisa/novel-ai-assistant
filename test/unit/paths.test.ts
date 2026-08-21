@@ -3,7 +3,7 @@ import * as nodePath from "path";
 import * as paths from "../../src/core/paths";
 
 /**
- * 手元のファイルと、ブラウザ上の作品を、同じ書き方で扱う（設計書5.7）。
+ * 手元のファイルと、ブラウザ上の作品を、同じ書き方で扱う（設計書5.8）。
  *
  * **2つのことを確かめる。**
  *
@@ -148,6 +148,36 @@ describe("ブラウザ上の作品", () => {
 
   it("resolve は、いちばん後ろの確定した場所から組み立てる", () => {
     expect(paths.resolve("C:\\ignored", 作品, "本文")).toBe(作品 + "/本文");
+  });
+});
+
+describe("外を指しているか（goesOutside）", () => {
+  /**
+   * **`..${path.sep}` を直に書いている箇所が5つあった。** `path.sep` は
+   * 常にOSの区切りだが、`relative()` はブラウザ上の作品に対して
+   * 常に `/` を返す。取り違えると、作品の外のファイルを
+   * 「中にある」と誤判定する。
+   */
+  it("手元のファイルで、外を正しく判定する", () => {
+    const base = nodePath.resolve("a", "b");
+    const inside = nodePath.relative(base, nodePath.resolve("a", "b", "c.txt"));
+    const outside = nodePath.relative(base, nodePath.resolve("a", "d.txt"));
+    expect(paths.goesOutside(base, inside)).toBe(false);
+    expect(paths.goesOutside(base, outside)).toBe(true);
+    expect(paths.goesOutside(base, "..")).toBe(true);
+  });
+
+  it("ブラウザ上の作品で、区切りを取り違えない", () => {
+    // relative() はURIに対して常に "/" を返す。path.sep（Windowsなら \）
+    // で比べると、外を指していても検出できない
+    const base = 作品;
+    const inside = paths.relative(base, paths.join(base, "本文", "001.txt"));
+    const outside = paths.relative(
+      base,
+      "vscode-vfs://github/nonahisa/another"
+    );
+    expect(paths.goesOutside(base, inside)).toBe(false);
+    expect(paths.goesOutside(base, outside)).toBe(true);
   });
 });
 
