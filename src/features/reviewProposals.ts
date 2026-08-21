@@ -6,7 +6,7 @@ import type { ProposalView } from "../models/proposal";
 import { FileLockStore } from "../core/fileLockStore";
 import { describeLock, normalizeFile } from "../models/fileLock";
 import { isEditorMode, recordEdit } from "../core/actorContext";
-import { gitUserName } from "../core/git";
+import { tryGitUserName } from "../core/gitAttribution";
 import {
   readTextFile,
   writeTextFilePreservingFormat,
@@ -110,7 +110,7 @@ export async function toggleReviewLock(work: WorkEntry): Promise<void> {
 
   const store = new FileLockStore(work);
   const current = await store.lockFor(relative);
-  const who = (await gitUserName(work.folderPath).catch(() => undefined)) ?? "";
+  const who = (await tryGitUserName(work.folderPath)) ?? "";
   const holderKind = isEditorMode() ? "editor" : "author";
 
   if (current) {
@@ -218,7 +218,7 @@ export async function acceptProposal(
     return { ok: false, reason: "本文を書き戻せませんでした。" };
   }
 
-  const who = (await gitUserName(work.folderPath).catch(() => undefined)) ?? "";
+  const who = (await tryGitUserName(work.folderPath)) ?? "";
   await new ProposalStore(work).decide([
     {
       proposalId: proposal.id,
@@ -243,7 +243,7 @@ export async function rejectProposal(
   proposalIdValue: string,
   fileName: string
 ): Promise<void> {
-  const who = (await gitUserName(work.folderPath).catch(() => undefined)) ?? "";
+  const who = (await tryGitUserName(work.folderPath)) ?? "";
   await new ProposalStore(work).decide([
     {
       proposalId: proposalIdValue,

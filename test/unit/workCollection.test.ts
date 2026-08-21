@@ -1,7 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  rm,
+  writeFile,
+  stat as nodeStat,
+  readdir as nodeReaddir,
+} from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { FileSystemError, FileType, workspace } from "./support/vscodeStub";
 import {
   scanCollection,
   looksLikeWork,
@@ -13,7 +21,38 @@ import {
  *
  * **実際のフォルダーを作って試す。** 判定はファイルの有無だけで決まるので、
  * 作り物のデータで確かめると、`stat` の使い方を間違えていても通ってしまう。
+ *
+ * `workCollection.ts` は `vscode.workspace.fs` 経由になった（ブラウザ版の
+ * VS Codeには `node:fs` が無いため。設計書5.8）。ここでは、その
+ * `workspace.fs` を実ディスクの `node:fs` へ橋渡しする。**中身をMapで
+ * 作った偽物にはしない。** 偽物にすると、上の「作り物のデータでは
+ * `stat` の間違いを見逃す」という当初の目的が失われる。
  */
+
+workspace.fs = {
+  stat: async (uri: { fsPath: string }) => {
+    try {
+      const s = await nodeStat(uri.fsPath);
+      return { type: s.isDirectory() ? FileType.Directory : FileType.File };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new FileSystemError("見つかりません", "FileNotFound");
+      }
+      throw error;
+    }
+  },
+  readDirectory: async (uri: { fsPath: string }) => {
+    try {
+      const names = await nodeReaddir(uri.fsPath);
+      return names.map((name) => [name, 1]);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new FileSystemError("見つかりません", "FileNotFound");
+      }
+      throw error;
+    }
+  },
+} as never;
 
 let root: string;
 

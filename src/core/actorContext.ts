@@ -3,7 +3,7 @@ import type { WorkEntry } from "../models/types";
 import { DEFAULT_MODE, type WorkMode } from "./editorMode";
 import { EditHistory, type EditHistoryEntry } from "./editHistory";
 import type { ActorKind } from "../models/actor";
-import { gitUserName } from "./git";
+import { tryGitUserName } from "./gitAttribution";
 
 /**
  * いまの環境が誰として動いているか（設計書5.6）。
@@ -63,7 +63,7 @@ export async function recordEdit(
 
 async function safeUserName(work: WorkEntry): Promise<string | undefined> {
   try {
-    return await gitUserName(work.folderPath);
+    return await tryGitUserName(work.folderPath);
   } catch {
     // **名前が取れなくても履歴は残す。** 誰かが分からないより、
     // 記録が無いほうが困る

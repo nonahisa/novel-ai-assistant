@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "./paths";
-import { open } from "node:fs/promises";
+import { isWebRuntime } from "./runtime";
 import {
   AIWRITER_DIR,
   CONFIG_FILE,
@@ -242,8 +242,47 @@ async function ensureRecoveryIgnoreRule(
   const addition = new TextEncoder().encode(
     `${separator}${missing.join(eol)}${eol}`
   );
-  // O_APPEND の一回の追記だけを使い、既存の作者バイトを置換・切り詰めしない。
-  const handle = await open(gitignorePath, "a");
+  await appendBytes(gitignorePath, uri, addition);
+
+  const migrated = await vscode.workspace.fs.readFile(uri);
+  if (
+    migrated.length < existing.length ||
+    !sameBytes(migrated.subarray(0, existing.length), existing) ||
+    missingIgnoreRules(migrated, options).length > 0
+  ) {
+    throw new Error(".gitignore の作者記述を保持したmigrationを確認できませんでした。");
+  }
+}
+
+/**
+ * `.gitignore` の末尾へ、渡されたバイト列だけを足す。
+ *
+ * **手元では `O_APPEND` の一回の追記だけを使う。** OSが保証する
+ * 「既存バイトを絶対に置換・切り詰めしない」という性質を頼りにしている。
+ *
+ * **ブラウザ版のVS Code（vscode.dev）には `node:fs` が無い。** 読み直して
+ * から書き直す形で代える。`vscode.workspace.fs` に追記の仕組みは無く、
+ * ブラウザの仮想ファイルシステム（GitHubへの都度の書き込みなど）は
+ * そもそも「OSレベルの追記」に相当する強い保証を持たない。**呼び出し元は
+ * 書き込み後に中身を読み直して壊れていないか確かめている**ので、
+ * どちらの経路でも安全側には倒れる。
+ */
+async function appendBytes(
+  filePath: string,
+  uri: vscode.Uri,
+  addition: Uint8Array
+): Promise<void> {
+  if (isWebRuntime()) {
+    const before = await vscode.workspace.fs.readFile(uri);
+    const combined = new Uint8Array(before.length + addition.length);
+    combined.set(before);
+    combined.set(addition, before.length);
+    await vscode.workspace.fs.writeFile(uri, combined);
+    return;
+  }
+
+  const { open } = await import("node:fs/promises");
+  const handle = await open(filePath, "a");
   try {
     let offset = 0;
     while (offset < addition.length) {
@@ -261,15 +300,6 @@ async function ensureRecoveryIgnoreRule(
     await handle.sync();
   } finally {
     await handle.close();
-  }
-
-  const migrated = await vscode.workspace.fs.readFile(uri);
-  if (
-    migrated.length < existing.length ||
-    !sameBytes(migrated.subarray(0, existing.length), existing) ||
-    missingIgnoreRules(migrated, options).length > 0
-  ) {
-    throw new Error(".gitignore の作者記述を保持したmigrationを確認できませんでした。");
   }
 }
 

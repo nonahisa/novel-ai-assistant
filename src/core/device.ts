@@ -1,5 +1,4 @@
-import { randomHex } from "./runtime";
-import * as os from "os";
+import { isWebRuntime, randomHex } from "./runtime";
 
 /**
  * 端末（執筆環境）の識別子。
@@ -30,14 +29,28 @@ export interface DeviceIdStorage {
  */
 export async function resolveDeviceId(
   storage: DeviceIdStorage,
-  hostname: string = os.hostname()
+  hostname?: string
 ): Promise<string> {
   const existing = storage.get(DEVICE_ID_KEY);
   if (existing && isValidDeviceId(existing)) return existing;
 
-  const created = `${sanitizeHostname(hostname)}-${randomHex(2)}`;
+  const created = `${sanitizeHostname(hostname ?? (await currentHostname()))}-${randomHex(2)}`;
   await storage.update(DEVICE_ID_KEY, created);
   return created;
+}
+
+/**
+ * 機械名。
+ *
+ * **ブラウザ版のVS Code（vscode.dev）には `node:os` が無い。** 「どの機械か」
+ * という概念自体が無い（タブを閉じれば終わる）ので、決め打ちの言葉で代える。
+ * `os` を動的importにするのは、静的importだと未対応環境でも
+ * 読み込んだ瞬間に解決を試みて壊れるため（設計書5.8）。
+ */
+async function currentHostname(): Promise<string> {
+  if (isWebRuntime()) return "browser";
+  const os = await import("os");
+  return os.hostname();
 }
 
 /**

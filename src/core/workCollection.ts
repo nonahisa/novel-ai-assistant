@@ -1,5 +1,5 @@
 import * as path from "./paths";
-import { readdir, stat } from "node:fs/promises";
+import { isDirectory, listDirectory, pathExists } from "./fileSystem";
 import {
   AIWRITER_DIR,
   CONFIG_FILE,
@@ -72,23 +72,6 @@ const SKIPPED_DIRS = new Set([
   "exports",
 ]);
 
-async function isDirectory(target: string): Promise<boolean> {
-  try {
-    return (await stat(target)).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-async function exists(target: string): Promise<boolean> {
-  try {
-    await stat(target);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * そのフォルダーが作品かどうか。
  *
@@ -101,7 +84,7 @@ async function exists(target: string): Promise<boolean> {
 export async function looksLikeWork(
   folderPath: string
 ): Promise<{ isWork: boolean; hasConfig: boolean }> {
-  const hasConfig = await exists(
+  const hasConfig = await pathExists(
     path.join(folderPath, AIWRITER_DIR, CONFIG_FILE)
   );
   if (hasConfig) return { isWork: true, hasConfig: true };
@@ -135,7 +118,7 @@ export async function scanCollection(
 
   let entries: string[];
   try {
-    entries = await readdir(root);
+    entries = await listDirectory(root);
   } catch (error) {
     return {
       kind: "unreadable",

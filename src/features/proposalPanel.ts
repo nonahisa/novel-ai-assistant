@@ -22,7 +22,7 @@ import { ProposalStore } from "../core/proposalStore";
 import { proposalId } from "../models/proposal";
 import { FileLockStore } from "../core/fileLockStore";
 import { describeLock, normalizeFile } from "../models/fileLock";
-import { gitUserName } from "../core/git";
+import { tryGitUserName } from "../core/gitAttribution";
 import { acceptProposal, rejectProposal } from "./reviewProposals";
 
 /**
@@ -891,7 +891,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     const relative = normalizeFile(
       path.relative(work.folderPath, item.filePath)
     );
-    const proposer = (await gitUserName(work.folderPath).catch(() => undefined)) ?? "";
+    const proposer = (await tryGitUserName(work.folderPath)) ?? "";
 
     try {
       await new ProposalStore(work).propose([
