@@ -69,7 +69,15 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 .issue.low { display: none; }
 body.show-low .issue.low { display: flex; }
-.issue.applied { opacity: 0.55; }
+/* 済んだ指摘は薄く出す。ただし薄くするのは中身だけで、押せる操作は
+   そのままにする。以前は .issue.applied 全体を薄くしており、
+   「戻す」が押せないように見えていた（2026-08-21、作者の指摘）。
+   opacity は親に付けると子で戻せないので、対象を絞る */
+.issue.applied .meta,
+.issue.applied .diff,
+.issue.applied .quote,
+.issue.applied .reason,
+.issue.applied .location { opacity: 0.55; }
 .issue.dismissed { display: none; }
 .issue-head {
   display: flex;

@@ -207,8 +207,15 @@ export function validateTypoIssues(
     // AIが `target`（直す語）と `original`（その周り）を取り違え、
     // 文まるごとの書き換えを修正案に入れてくることがある。
     // **実データで4か所の原稿が壊れた**（2026-08-21、作者が実機で発見）
+    // **本文のその行で確かめる。** AIの抜粋は対象のすぐ後ろで切れて
+    // いることがあり、それだけを見ると重なりを見つけられない
     if (
-      wouldDuplicateContext(issue.original, issue.target, issue.suggestion)
+      wouldDuplicateContext(
+        lineTextOf(chunk, issue.line) ?? issue.original,
+        issue.original,
+        issue.target,
+        issue.suggestion
+      )
     ) {
       rejected.push({
         line: issue.line,
@@ -591,14 +598,37 @@ function extractBraces(text: string): string | null {
  * 2文字以上の重なりを持っていた（最短で「夢で」の2文字）。
  */
 export function wouldDuplicateContext(
+  /**
+   * **本文のその行そのもの。** AIが渡す `original`（抜粋）ではない。
+   *
+   * 抜粋は対象のすぐ後ろで切れていることがある。実際に起きた
+   * （2026-08-21、作者が実機で2度目の報告）。
+   *
+   * ```
+   * 本文:   …それって取り憑くってこと？
+   * 抜粋:   「それって取り」   ← ここで終わっている
+   * 対象:   「取り」
+   * 修正案: 「取り憑く」
+   * ```
+   *
+   * 抜粋だけを見ると「後ろ」が空になり、重なりを見つけられない。
+   * **当てるのは行に対してなので、確かめるのも行に対して行う。**
+   */
+  lineText: string,
+  /** AIが渡した抜粋。当てる位置を決めるのに使う（適用処理と同じ手順） */
   original: string,
   target: string,
   suggestion: string
 ): boolean {
-  const at = original.indexOf(target);
-  if (at < 0) return false;
-  const before = original.slice(0, at);
-  const after = original.slice(at + target.length);
+  // **適用処理と同じ順で位置を決める。** 違う決め方をすると、
+  // 検査した場所と書き換える場所がずれる
+  const originalAt = lineText.indexOf(original);
+  const targetInOriginal = original.indexOf(target);
+  if (originalAt < 0 || targetInOriginal < 0) return false;
+
+  const at = originalAt + targetInOriginal;
+  const before = lineText.slice(0, at);
+  const after = lineText.slice(at + target.length);
   return (
     overlapLength(before, suggestion, "tail") >= MIN_DUPLICATE_OVERLAP ||
     overlapLength(suggestion, after, "head") >= MIN_DUPLICATE_OVERLAP
@@ -669,4 +699,19 @@ export function looksArchaicText(text: string): boolean {
   // 2,000字あたり1回以上。実データの自分史（戦前の文語体）で
   // 1,000字あたり2〜3回、現代文の作品で0〜0.2回だった
   return hits / (text.length / 2000) >= 1;
+}
+
+/**
+ * チャンクから、その行の本文を取り出す。
+ *
+ * **`withLineNumbers` が振った番号と対で使う。** あちらは
+ * `chunk.startLine + index + 1` を振るので、こちらは逆をたどる。
+ *
+ * 範囲の外なら undefined。呼び出し側が抜粋で代用できるようにする
+ * （行が取れないことを理由に、検査そのものを飛ばさないため）。
+ */
+export function lineTextOf(chunk: Chunk, line: number): string | undefined {
+  const index = line - chunk.startLine - 1;
+  if (index < 0) return undefined;
+  return chunk.text.split("\n")[index];
 }
