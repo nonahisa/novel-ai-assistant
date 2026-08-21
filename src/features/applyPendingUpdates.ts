@@ -10,6 +10,7 @@ import {
   summarizeDiff,
   type CharacterDiff,
 } from "../core/characterDiff";
+import { diffChars } from "../core/inlineDiff";
 import { CustomFieldStore } from "../core/customFieldStore";
 import { logFailure } from "../core/logger";
 import type { ProposalPanel } from "./proposalPanel";
@@ -108,6 +109,17 @@ export async function applyPendingCharacterUpdates(
         name: item.diff.name,
         // **何がどう変わるかを全部並べる。** 折り畳むと読まずに押される
         changes: diffLinesForPanel(item.diff),
+        // 違うところだけを塗れるよう、項目ごとに分けても渡す
+        changeParts: item.diff.changes.map((change) => {
+          const before = change.before || "（未設定）";
+          const after = change.after || "（未設定）";
+          return {
+            label: change.label,
+            before,
+            after,
+            diff: diffChars(before, after),
+          };
+        }),
         source: summarizeDiff(item.diff),
         status: "pending" as const,
       })),

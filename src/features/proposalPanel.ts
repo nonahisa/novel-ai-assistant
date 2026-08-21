@@ -13,6 +13,7 @@ import type { TypoCheckIssue } from "./checkTypos";
 import type { AcceptedContradiction as ContradictionIssue } from "../core/contradictionValidation";
 import type { DeviationIssue } from "./checkDeviations";
 import { buildProposalPanelHtml } from "../views/proposalPanelHtml";
+import { diffChars, type DiffSegment } from "../core/inlineDiff";
 import { KeepWordStore } from "../core/keepWordStore";
 import { validateKeepWord } from "../models/keepWord";
 import { manualActor, recordEdit } from "../core/actorContext";
@@ -39,6 +40,17 @@ import { acceptProposal, rejectProposal } from "./reviewProposals";
 
 export const PROPOSALS_VIEW_ID = "novelai.proposalsView";
 
+/**
+ * 画面へ送る直前に、違うところを計算して添える。
+ *
+ * **修正案の無い指摘がある**（推敲の「長すぎる文」など）。そのときは
+ * 比べる相手がいないので、何も添えない。
+ */
+function withDiff(item: ProposalViewItem): ProposalViewItem {
+  if (!item.suggestion) return item;
+  return { ...item, diff: diffChars(item.target, item.suggestion) };
+}
+
 export interface ProposalViewItem {
   id: string;
   filePath: string;
@@ -52,6 +64,14 @@ export interface ProposalViewItem {
   confidence: "high" | "medium" | "low";
   status: "pending" | "applied" | "failed" | "dismissed";
   statusDetail?: string;
+  /**
+   * `target` のどこが `suggestion` で変わるか、区間に分けたもの。
+   *
+   * **画面で「違うところだけ」を塗るために使う。** 計算は拡張機能側で
+   * 行う。WebView の中に書くと単体テストが書けないためで、`postItems`
+   * で送るたびに作り直す（保存はしない）。
+   */
+  diff?: DiffSegment[];
   /**
    * 編集部の提案として来たものなら、その番号。
    *
@@ -99,12 +119,31 @@ export interface ContradictionViewItem {
  * それでも**作者への提案であることは同じ**なので、同じパネルに出す。
  * 提案の窓口が2つあると、片方を見落とす。
  */
+/** 設定資料の1項目が、どう変わるか */
+export interface RecordChangePart {
+  /** 項目名（「紹介」「性別」など） */
+  label: string;
+  before: string;
+  after: string;
+  /** 違うところ。`before` を `after` にするための区間の並び */
+  diff: DiffSegment[];
+}
+
 export interface RecordUpdateViewItem {
   id: string;
   /** 何のレコードか（人物名など） */
   name: string;
   /** 何が変わるか。1行ずつの説明 */
   changes: string[];
+  /**
+   * 同じ内容を「項目・前・後」に分けたもの。
+   *
+   * **紹介文のように長い項目は、変わるのがひと言だけのことが多い。**
+   * 前後をまるごと並べると、どこが変わるのか目で追えない（作者の指摘）。
+   * ここがあれば、画面は違うところだけを塗る。
+   * 無ければ `changes` をそのまま並べる（古い作りへ落ちる）。
+   */
+  changeParts?: RecordChangePart[];
   /** どこから来た提案か */
   source: string;
   status: "pending" | "applied" | "failed" | "dismissed";
@@ -366,7 +405,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         ? this.recordUpdates
         : contradictionMode
           ? this.contradictions
-          : this.items,
+          : this.items.map(withDiff),
       // 設定資料の更新は、まとめて反映できる（1件ずつだと19話ぶんで手が止まる）
       canApplyAll: !contradictionMode,
     };

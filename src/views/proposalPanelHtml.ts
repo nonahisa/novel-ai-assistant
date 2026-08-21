@@ -101,8 +101,30 @@ body.show-low .issue.low { display: flex; }
 .badge.medium { border-color: var(--vscode-editorWarning-foreground, #cca700); }
 .badge.low { border-color: var(--vscode-descriptionForeground); }
 .diff { font-family: var(--vscode-editor-font-family, monospace); }
-.diff .from { color: var(--vscode-errorForeground); text-decoration: line-through; }
-.diff .to { color: var(--vscode-terminal-ansiGreen, #4caf50); }
+/*
+  かつては行まるごとを赤で消し、まるごと緑で出していた。誤字は直す語が
+  短いので気にならなかったが、推敲の指摘は文まるごとが対象になるため
+  どこが変わるのか目で追えなかった（作者の指摘）。塗るのは違うところだけ。
+  地の文は普段どおりの色で置く
+*/
+.diff .from, .diff .to { color: var(--vscode-foreground); }
+/* mark は既定で黄色地に黒字になるので、必ず上書きする */
+.diff mark { color: inherit; background: none; border-radius: 2px; padding: 0 1px; }
+.diff mark.del {
+  background-color: var(--vscode-diffEditor-removedTextBackground, rgba(255, 90, 90, 0.28));
+  text-decoration: line-through;
+}
+.diff mark.ins {
+  background-color: var(--vscode-diffEditor-insertedTextBackground, rgba(76, 175, 80, 0.28));
+}
+/* 設定資料の更新。項目ごとに「現在 / 更新案」を上下に並べる */
+.change { margin: 6px 0; }
+.change .side {
+  display: inline-block;
+  min-width: 4.5em;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
 .reason { color: var(--vscode-descriptionForeground); font-size: 12px; }
 .actions { display: flex; gap: 6px; }
 .status-detail { font-size: 12px; color: var(--vscode-errorForeground); }
@@ -194,6 +216,35 @@ function render(workTitle, items) {
  * **何がどう変わるかを、全部並べる。** 折り畳むと読まずに押される。
  * 作者が確定させた記述を書き換える提案なので、そこは省かない。
  */
+/**
+ * 設定資料の更新を「項目 / 現在 / 更新案」で並べ、違うところだけを塗る。
+ *
+ * **紹介文は長い。** 前後をまるごと並べると、変わるのがひと言でも
+ * 全部を読み比べることになる。
+ * 項目ごとに分けたものが無ければ、説明の行をそのまま並べる。
+ */
+function renderRecordChanges(item) {
+  if (!item.changeParts || item.changeParts.length === 0) {
+    return item.changes.map(function (line) {
+      return escapeHtml(line);
+    }).join('<br>');
+  }
+
+  // **設定資料は矢印で1行に並べない。** 紹介文は本文の直しより長く、
+  // 横に繋ぐと折り返して読めなくなる。上下に並べて、頭に何かを書く
+  return item.changeParts.map(function (part) {
+    return '<div class="change">' +
+      '<div class="reason">' + escapeHtml(part.label) + '</div>' +
+      '<div class="diff">' +
+      '<div><span class="side">現在</span>' +
+      '<span class="from">' + diffSide(part.diff, 'from', part.before) + '</span></div>' +
+      '<div><span class="side">更新案</span>' +
+      '<span class="to">' + diffSide(part.diff, 'to', part.after) + '</span></div>' +
+      '</div>' +
+      '</div>';
+  }).join('');
+}
+
 function renderRecordUpdate(item) {
   const classes = ["issue"];
   if (item.status === "applied") classes.push("applied");
@@ -207,11 +258,7 @@ function renderRecordUpdate(item) {
     (item.status === "applied" ? '<span class="reason">反映しました</span>' : '') +
     (item.status === "failed" ? '<span class="reason">' + escapeHtml(item.statusDetail || "失敗") + '</span>' : '') +
     '</div>' +
-    '<div class="quote">' +
-      item.changes.map(function (line) {
-        return escapeHtml(line);
-      }).join('<br>') +
-    '</div>' +
+    '<div class="quote">' + renderRecordChanges(item) + '</div>' +
     (canAct
       ? '<div class="actions">' +
         '<button data-action="apply" data-id="' + item.id + '">反映する</button>' +
@@ -258,6 +305,38 @@ function renderContradiction(item) {
   );
 }
 
+/**
+ * 片側（消える側か、足す側か）を組み立て、違うところだけを塗る。
+ *
+ * 区間分けは拡張機能側（core/inlineDiff.ts）で済ませてある。ここは
+ * 受け取ったものを組み立てるだけにして、判断を持たせない。
+ * **添えられていなければ、まるごと出す**（古い作りへ素直に落ちる）。
+ *
+ * @param side 'from' なら消える側、'to' なら足す側
+ */
+function diffSide(segments, side, fallback) {
+  if (!segments || segments.length === 0) return escapeHtml(fallback);
+
+  let out = '';
+  for (const segment of segments) {
+    const text = escapeHtml(segment.text);
+    if (segment.kind === 'equal') {
+      out += text;
+    } else if (segment.kind === 'removed' && side === 'from') {
+      out += '<mark class="del">' + text + '</mark>';
+    } else if (segment.kind === 'added' && side === 'to') {
+      out += '<mark class="ins">' + text + '</mark>';
+    }
+  }
+  return out;
+}
+
+/** 本文の置き換え。短いので、矢印で1行に並べる */
+function renderDiff(item) {
+  return '<span class="from">' + diffSide(item.diff, 'from', item.target) + '</span> → ' +
+    '<span class="to">' + diffSide(item.diff, 'to', item.suggestion) + '</span>';
+}
+
 function renderItem(item) {
   // 矛盾は形が違う。並べるものが「置き換え」ではなく「食い違い」である
   if (item.excerpt !== undefined) return renderContradiction(item);
@@ -282,10 +361,7 @@ function renderItem(item) {
     : '';
 
   const body = hasFix
-    ? '<div class="diff">' +
-      '<span class="from">' + escapeHtml(item.target) + '</span> → ' +
-      '<span class="to">' + escapeHtml(item.suggestion) + '</span>' +
-      '</div>' +
+    ? '<div class="diff">' + renderDiff(item) + '</div>' +
       '<div class="reason">' + escapeHtml(item.original) + '（' + escapeHtml(item.reason) + '）</div>'
     : '<div class="quote">' + escapeHtml(item.original) + '</div>' +
       '<div class="reason">' + escapeHtml(item.reason) +
