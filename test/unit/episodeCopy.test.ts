@@ -4,6 +4,10 @@ import {
   extractEpisodeParts,
   nameWithSubtitle,
 } from "../../src/core/episodeCopy";
+import {
+  formatChapterLabel,
+  stripChapterLabel,
+} from "../../src/core/episodeLabel";
 
 /**
  * サブタイトル・本文のコピーと、ファイル名への付与（設計書6.2.3）。
@@ -110,6 +114,57 @@ describe("ファイル名にサブタイトルを付ける", () => {
   test("拡張子は変えない", () => {
     expect(nameWithSubtitle("episode_0001.md", null, "転生")).toBe(
       "episode_0001_転生.md"
+    );
+  });
+});
+
+describe("投稿サイトの題から話数を落としてから足す", () => {
+  /**
+   * **投稿サイトのヘッダーには話数込みで入っている。**
+   *
+   * ```
+   * 【タイトル】
+   * 第15話　イジメっ子襲撃
+   * ```
+   *
+   * そのまま足すと `episode_0015_第15話　イジメっ子襲撃.txt` になり、
+   * 話数が二重になる（2026-08-21、作者の指摘）。一覧の見出しは
+   * `stripChapterLabel` を通しているのに、改名だけ通っていなかった。
+   */
+  const episode = {
+    kind: "本編" as const,
+    chapterStart: 15,
+    chapterEnd: 15,
+    date: null,
+    dateSeq: null,
+  };
+
+  test("話数を落としてからファイル名に足す", () => {
+    const stripped = stripChapterLabel(
+      "第15話　イジメっ子襲撃",
+      formatChapterLabel(episode)
+    );
+    expect(stripped).toBe("イジメっ子襲撃");
+    expect(nameWithSubtitle("episode_0015.txt", null, stripped)).toBe(
+      "episode_0015_イジメっ子襲撃.txt"
+    );
+  });
+
+  test("題が話数だけなら、足すものが無い", () => {
+    // 「第16話」だけの題。足しても情報が増えない
+    const stripped = stripChapterLabel("第16話", formatChapterLabel({
+      ...episode,
+      chapterStart: 16,
+      chapterEnd: 16,
+    }));
+    expect(stripped).toBeNull();
+    expect(nameWithSubtitle("episode_0016.txt", null, stripped)).toBeUndefined();
+  });
+
+  test("話数が付いていない題は、そのまま足す", () => {
+    const stripped = stripChapterLabel("転生", formatChapterLabel(episode));
+    expect(nameWithSubtitle("episode_0015.txt", null, stripped)).toBe(
+      "episode_0015_転生.txt"
     );
   });
 });

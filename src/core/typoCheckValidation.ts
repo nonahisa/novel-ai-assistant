@@ -31,7 +31,9 @@ export type TypoRejectionReason =
   /** 読みが同じで書き方だけ違う。表記ゆれであって誤字ではない */
   | "script_only"
   /** 正しい文語・旧字を「誤変換」として直そうとしている */
-  | "archaic_form";
+  | "archaic_form"
+  /** 当てると本文が二重になる（修正案が前後の文まで抱え込んでいる） */
+  | "duplicates_context";
 
 export interface RejectedTypoIssue {
   line: number | null;
@@ -197,6 +199,21 @@ export function validateTypoIssues(
         line: issue.line,
         target: issue.target,
         reason: "no_change",
+      });
+      continue;
+    }
+
+    // **当てると本文が二重になる指摘を、絶対に通さない。**
+    // AIが `target`（直す語）と `original`（その周り）を取り違え、
+    // 文まるごとの書き換えを修正案に入れてくることがある。
+    // **実データで4か所の原稿が壊れた**（2026-08-21、作者が実機で発見）
+    if (
+      wouldDuplicateContext(issue.original, issue.target, issue.suggestion)
+    ) {
+      rejected.push({
+        line: issue.line,
+        target: issue.target,
+        reason: "duplicates_context",
       });
       continue;
     }
@@ -545,4 +562,68 @@ function extractBraces(text: string): string | null {
   const end = text.lastIndexOf("}");
   if (start === -1 || end === -1 || end <= start) return null;
   return text.slice(start, end + 1);
+}
+
+/**
+ * その修正案を当てると、本文が二重になるか（設計書6.8.11）。
+ *
+ * **実際に原稿が壊れた**（2026-08-21、作者が実機で発見）。
+ *
+ * ```
+ * 元:   「あんたが望むなら、夢で会わすぐらいのことはできるんだがね」
+ * target:     会わすぐらい
+ * suggestion: 夢で会わせるくらいのことはできるんだがね
+ * ↓
+ * 「あんたが望むなら、夢で夢で会わせるくらいのことはできるんだがねのことはできるんだがね」
+ * ```
+ *
+ * **AIが `target` と `original` を取り違えている。** 直したい語だけを
+ * `target` に入れるべきところへ、文まるごとの書き換えを `suggestion` に
+ * 入れてくる。コードは `target` の位置だけを置き換えるので、
+ * **修正案が抱え込んだ前後の文が、そのまま二重に残る。**
+ *
+ * 見分け方は単純である。`target` の**直前の文字列が修正案の先頭にも
+ * ある**、または**直後の文字列が修正案の末尾にもある**なら、
+ * 当てた時点で必ず重なる。
+ *
+ * **2文字から見る。** 1文字だと「の」「を」のような助詞でたまたま一致し、
+ * 正しい修正案まで弾いてしまう。実データで壊れた4件は、いずれも
+ * 2文字以上の重なりを持っていた（最短で「夢で」の2文字）。
+ */
+export function wouldDuplicateContext(
+  original: string,
+  target: string,
+  suggestion: string
+): boolean {
+  const at = original.indexOf(target);
+  if (at < 0) return false;
+  const before = original.slice(0, at);
+  const after = original.slice(at + target.length);
+  return (
+    overlapLength(before, suggestion, "tail") >= MIN_DUPLICATE_OVERLAP ||
+    overlapLength(suggestion, after, "head") >= MIN_DUPLICATE_OVERLAP
+  );
+}
+
+/** これ以上重なっていたら、偶然ではなく抱え込みと見る */
+const MIN_DUPLICATE_OVERLAP = 2;
+
+/**
+ * 重なりの長さ。
+ *
+ * `"tail"` は「`left` の末尾と `right` の先頭」、
+ * `"head"` は「`left` の末尾と `right` の先頭」を見る（引数の順が違うだけ）。
+ */
+function overlapLength(
+  left: string,
+  right: string,
+  _kind: "tail" | "head"
+): number {
+  const max = Math.min(left.length, right.length);
+  for (let length = max; length >= MIN_DUPLICATE_OVERLAP; length--) {
+    if (left.slice(left.length - length) === right.slice(0, length)) {
+      return length;
+    }
+  }
+  return 0;
 }

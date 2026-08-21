@@ -11,6 +11,7 @@ import { RUBY_STYLES, type RubyStyle } from "../core/ruby";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import { recordEdit } from "../core/actorContext";
 import { logFailure } from "../core/logger";
+import { formatChapterLabel, stripChapterLabel } from "../core/episodeLabel";
 
 /**
  * 話のサブタイトル・本文をコピーする／ファイル名にサブタイトルを付ける
@@ -80,16 +81,22 @@ export async function renameWithSubtitle(
   const parts = await read(episode);
   if (!parts) return;
 
-  const next = nameWithSubtitle(
-    episode.fileName,
-    episode.subtitle,
-    parts.subtitle
+  // **題から話数を落としてから足す。** 投稿サイトのヘッダーには
+  // 「第15話　イジメっ子襲撃」と話数込みで入っている。そのまま足すと
+  // `episode_0015_第15話　イジメっ子襲撃.txt` になり、**話数が二重になる**
+  // （2026-08-21、作者の指摘）。一覧の見出しは既に `stripChapterLabel` を
+  // 通しているのに、ここだけ通っていなかった
+  const subtitle = stripChapterLabel(
+    parts.subtitle,
+    formatChapterLabel(episode)
   );
+
+  const next = nameWithSubtitle(episode.fileName, episode.subtitle, subtitle);
   if (!next) {
     void vscode.window.showInformationMessage(
-      parts.subtitle
+      subtitle
         ? `${episode.fileName} には既にサブタイトルが付いています。`
-        : `${episode.fileName} からサブタイトルを読み取れませんでした。`
+        : `${episode.fileName} からサブタイトルを読み取れませんでした（題が話数だけのようです）。`
     );
     return;
   }
