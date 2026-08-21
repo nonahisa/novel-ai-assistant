@@ -111,7 +111,10 @@ import {
   resolveWorkConflicts,
 } from "./features/resolveConflicts";
 import { checkTypos, type TypoCheckRunResult } from "./features/checkTypos";
-import { checkNotation } from "./features/checkNotation";
+import {
+  checkNotation,
+  describeNotationResult,
+} from "./features/checkNotation";
 import { generatePlot } from "./features/generatePlot";
 import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
 import { ChatterService } from "./features/chatterService";
@@ -439,6 +442,11 @@ export async function activate(
         const result = await checkNotation(work);
         if (!result || result.cancelled) return;
         proposalPanel.showResults(work, result.issues, "表記ゆれ");
+        // **黙って終わらない。** 0件のときに理由を言わないと、作者は
+        // 壊れていると受け取る（2026-08-21、作者の報告）
+        void vscode.window.showInformationMessage(
+          describeNotationResult(result)
+        );
         return;
       }
 
