@@ -57,7 +57,7 @@ export async function generateWorkBlurb(
   if (!material) return;
 
   const costNotice = resolved.provider.isPaid
-    ? `\n**${resolved.provider.displayName} は呼び出すたびに課金されます。**`
+    ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
   const confirm = await vscode.window.showInformationMessage(
     `作品紹介文を作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,
@@ -149,7 +149,7 @@ export async function generateCatchphrases(
 
   const history = new CatchphraseHistory(work);
   const costNotice = resolved.provider.isPaid
-    ? `\n**${resolved.provider.displayName} は呼び出すたびに課金されます。**`
+    ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
   const confirm = await vscode.window.showInformationMessage(
     `キャッチコピーを3案作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,

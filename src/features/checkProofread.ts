@@ -9,6 +9,9 @@ import {
   decideChunkSize,
   splitIntoChunks,
   withLineNumbers,
+  mergeAdjacentChunks,
+  splitMergedChunk,
+  locateChunkLine,
   type Chunk,
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
@@ -76,9 +79,8 @@ export async function checkProofread(
   const resolved = await ensureConfigured(registry);
   if (!resolved) return undefined;
 
-  const collected = await collectChunks(work, registry, options);
-  if (!collected) return undefined;
-  const { chunks, filePathByChunk } = collected;
+  const chunks = await collectChunks(work, registry, options);
+  if (!chunks) return undefined;
   if (chunks.length === 0) {
     vscode.window.showWarningMessage("推敲できる本文がありませんでした。");
     return undefined;
@@ -113,6 +115,11 @@ export async function checkProofread(
         detail: [
           `${chunks.length}チャンク中 ${pending.length}件を処理します` +
             `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
+          // **まとめ方を変えると、キャッシュが総入れ替えになる。** 何も
+          // 変えていないのに全件が対象になると、作者は不具合だと思う
+          pending.length === chunks.length && chunks.length > 1
+            ? "（前回から本文の分け方が変わっているため、今回はすべて送り直します）"
+            : "",
           "",
           "見るのは4つだけです（冗長・同語反復・係り受け・長すぎる文）。",
           "語彙や文体、描写の増減には触れません。",
@@ -120,7 +127,7 @@ export async function checkProofread(
           "",
           "本文は書き換えません。 指摘を1件ずつ確認して適用します。",
           resolved.provider.isPaid
-            ? `\n**${resolved.provider.displayName} はチャンクごとに課金されます。**`
+            ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
             : "",
         ]
           .filter(Boolean)
@@ -153,16 +160,35 @@ export async function checkProofread(
     });
 
     let done = 0;
-    for (const chunk of chunks) {
+    // **切り詰められたら、まとめたぶんを話ごとに戻して試し直す。**
+    // まとめると出力も増えるので、上限に当たる見込みが上がる。
+    // 処理中に足すので、`for...of` ではなく番号で回す
+    const queue = [...chunks];
+    let total = chunks.length;
+    for (let cursor = 0; cursor < queue.length; cursor++) {
+      const chunk = queue[cursor];
       if (token.isCancellationRequested) break;
 
-      const filePath = filePathByChunk.get(chunk.hash) ?? chunk.filePath;
       const cached = cache.get(chunk.hash, cacheKeyBase);
-      const raw = cached ?? (await ask(chunk));
+      let raw: unknown | undefined;
+      if (cached !== undefined) {
+        raw = cached;
+      } else {
+        const asked = await ask(chunk);
+        if (asked.ok) {
+          raw = asked.value;
+        } else if (asked.truncated) {
+          const parts = splitMergedChunk(chunk);
+          if (parts.length > 1) {
+            queue.splice(cursor + 1, 0, ...parts);
+            total += parts.length;
+          }
+        }
+      }
       done++;
       progress.report({
-        message: `${done}/${chunks.length}`,
-        increment: 100 / chunks.length,
+        message: `${done}/${total}`,
+        increment: 100 / total,
       });
       if (raw === undefined) continue;
 
@@ -172,11 +198,29 @@ export async function checkProofread(
         (entry) => entry.reason === "over_budget"
       ).length;
       for (const issue of validated.accepted) {
-        issues.push({ ...issue, filePath, chunkHash: chunk.hash });
+        // **どのファイルの何行目かを、ここで確定させる。** まとめたチャンクでは
+        // AIが返す行番号がまとめた本文の通し番号になっており、そのまま使うと
+        // 別の話のファイルの、まったく違う行を書き換える
+        const at = locateChunkLine(chunk, issue.line);
+        if (!at) {
+          rejectedCount++;
+          continue;
+        }
+        issues.push({
+          ...issue,
+          line: at.line,
+          filePath: at.filePath,
+          chunkHash: chunk.hash,
+        });
       }
     }
 
-    async function ask(chunk: Chunk): Promise<unknown | undefined> {
+    /** 応答。切り詰められたときだけ、話ごとに戻して試し直す */
+    type AskResult =
+      | { ok: true; value: unknown }
+      | { ok: false; truncated: boolean };
+
+    async function ask(chunk: Chunk): Promise<AskResult> {
       try {
         const response = await provider.generate({
           systemPrompt: PROOFREAD_SYSTEM_PROMPT,
@@ -195,18 +239,24 @@ export async function checkProofread(
 
         const parsed = parseProofreadResult(response.text);
         if (!parsed) {
-          failedChunks++;
+          // **切り詰められたのなら、まとめたせいかもしれない。**
+          // 話ごとに戻せば通る見込みがある（捨てるより試すほうがよい）
+          if (!response.truncated) failedChunks++;
           logFailure("推敲", {
             チャンク: chunk.hash,
-            理由: "応答を読み取れません",
+            理由: response.truncated
+              ? "応答が上限で切り詰められました"
+              : "応答を読み取れません",
             応答: response.text.slice(0, 300),
           });
-          return undefined;
+          return { ok: false, truncated: response.truncated === true };
         }
         await cache.set(chunk.hash, cacheKeyBase, parsed);
-        return parsed;
+        return { ok: true, value: parsed };
       } catch (error) {
-        if (error instanceof AIError && error.kind === "aborted") return undefined;
+        if (error instanceof AIError && error.kind === "aborted") {
+          return { ok: false, truncated: false };
+        }
         failedChunks++;
         logFailure("推敲", {
           チャンク: chunk.hash,
@@ -217,7 +267,7 @@ export async function checkProofread(
                 ? error.message
                 : String(error),
         });
-        return undefined;
+        return { ok: false, truncated: false };
       }
     }
   });
@@ -252,9 +302,7 @@ async function collectChunks(
   work: WorkEntry,
   registry: AIRegistry,
   options: CheckProofreadOptions
-): Promise<
-  { chunks: Chunk[]; filePathByChunk: Map<string, string> } | undefined
-> {
+): Promise<Chunk[] | undefined> {
   const scan = await scanWork(work);
   const targets = options.filePaths
     ? scan.episodes.filter((episode) =>
@@ -270,7 +318,6 @@ async function collectChunks(
   const maxChars = decideChunkSize(info?.contextWindow ?? 8192);
 
   const chunks: Chunk[] = [];
-  const filePathByChunk = new Map<string, string>();
 
   for (const episode of targets) {
     // 競合マーカーのあるファイルはAI処理をブロックする
@@ -289,9 +336,20 @@ async function collectChunks(
       { maxChars }
     )) {
       chunks.push(chunk);
-      filePathByChunk.set(chunk.hash, episode.filePath);
     }
   }
 
-  return { chunks, filePathByChunk };
+  // **1話ずつ送ると、指示のほうが本文より大きい。** 誤字脱字と同じ理由で
+  // 隣どうしをまとめる（設計書6.8.10）。返ってきた行番号は
+  // `locateChunkLine` で元のファイルへ戻す
+  const configuredMergeChars = vscode.workspace
+    .getConfiguration("novelai")
+    .get<number>("mergeChunkChars", 6000);
+  const mergeChars =
+    Number.isInteger(configuredMergeChars) && configuredMergeChars >= 1
+      ? Math.min(configuredMergeChars, maxChars)
+      : 0;
+  return mergeChars > 0
+    ? mergeAdjacentChunks(chunks, { maxChars: mergeChars })
+    : chunks;
 }

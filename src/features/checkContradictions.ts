@@ -134,7 +134,7 @@ export async function checkContradictions(
           "この機能は本文を書き換えません。 設定と食い違う箇所を並べるだけで、",
           "どちらを直すかは作者が決めます（設定側が古いこともあります）。",
           resolved.provider.isPaid
-            ? `\n**${resolved.provider.displayName} はチャンクごとに課金されます。**`
+            ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
             : "",
         ]
           .filter(Boolean)

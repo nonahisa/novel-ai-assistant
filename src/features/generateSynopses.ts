@@ -109,7 +109,7 @@ export async function generateSynopses(
 
   const estimateMinutes = Math.ceil((pending.length * 15) / 60);
   const costNotice = resolved.provider.isPaid
-    ? `\n**${resolved.provider.displayName} は呼び出すたびに課金されます。**`
+    ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
   const confirm = await vscode.window.showInformationMessage(
     `${loaded.bodies.length} 話中 ${pending.length} 話のあらすじを作ります` +

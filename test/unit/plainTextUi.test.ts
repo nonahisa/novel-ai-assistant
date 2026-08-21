@@ -30,6 +30,8 @@ const MARKDOWN_ALLOWED = new Set([
   "src/core/characterDiff.ts",
   "src/features/exportImeDictionary.ts",
   "src/features/setupWizard.ts",
+  "src/core/synopsisMarkdown.ts",
+  "src/core/plotReverseValidation.ts",
   "src/core/synopsisDoc.ts",
   "src/features/applyPendingUpdates.ts",
   // .gitignore に書き込む注釈。Markdownではないが「#」で始まる
@@ -58,22 +60,54 @@ function collectSources(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-/** コメント行を除いた、二重引用符の中身だけを取り出す */
+/**
+ * Markdownとして読まれる先へ渡していることが、その場で分かる書き方。
+ *
+ * **ファイル単位の一覧だけでは粗すぎる。** `extension.ts` のように、
+ * ダイアログの文言とツールチップが同じファイルに混ざっていることがある。
+ * ファイルごと許すと、その先で足した文言を見張れなくなる。
+ */
+const MARKDOWN_CONTEXT = /MarkdownString|appendMarkdown|[Tt]ooltip|Hover/;
+
+/**
+ * その行が、Markdownを組み立てている最中か（少し上まで見る）。
+ *
+ * ツールチップは配列に何行も並べてから `MarkdownString` へ渡すので、
+ * 見る範囲が狭いと後ろのほうを取りこぼす。広げすぎれば逆に見逃すが、
+ * **この検査は網であって証明ではない。**
+ */
+function inMarkdownContext(lines: string[], index: number): boolean {
+  for (let i = Math.max(0, index - 12); i <= index; i++) {
+    if (MARKDOWN_CONTEXT.test(lines[i])) return true;
+  }
+  return false;
+}
+
+/** コメント行を除いた、文字列の中身だけを取り出す */
 function stringLiterals(source: string): string[] {
   const found: string[] = [];
-  for (const line of source.split("\n")) {
+  const lines = source.split("\n");
+  lines.forEach((line, index) => {
     const trimmed = line.trim();
     if (
       trimmed.startsWith("*") ||
       trimmed.startsWith("//") ||
       trimmed.startsWith("/*")
     ) {
-      continue;
+      return;
     }
+    // Markdownを組み立てている最中なら、記号は正しい
+    if (inMarkdownContext(lines, index)) return;
     for (const match of line.matchAll(/"[^"]*"/g)) {
       found.push(match[0]);
     }
-  }
+    // **テンプレート文字列も見る。** 二重引用符だけを見ていたため、
+    // `` `**${名前}** は課金されます` `` のような行が素通りしていた
+    // （2026-08-21、推敲の作業中に気づいた）
+    for (const match of line.matchAll(/`[^`]*`/g)) {
+      found.push(match[0]);
+    }
+  });
   return found;
 }
 

@@ -120,7 +120,7 @@ export async function checkDeviations(
               "（このモデルでは「間延び」も見ません。判定が難しく的外れが増えるため）"
             : "",
           resolved.provider.isPaid
-            ? `\n**${resolved.provider.displayName} は話ごとに課金されます。**`
+            ? `\n${resolved.provider.displayName} は話ごとに課金されます。`
             : "",
         ]
           .filter(Boolean)

@@ -76,7 +76,7 @@ export async function generatePlot(
         "AIの呼び出しは1回です（本文全体は読み直しません）。",
         "作者が既に書いた項目は、確認せずに書き換えることはありません。",
         resolved.provider.isPaid
-          ? `\n**${resolved.provider.displayName} はトークンを消費し、利用量が加算されます。**`
+          ? `\n${resolved.provider.displayName} はトークンを消費し、利用量が加算されます。`
           : "",
       ]
         .filter(Boolean)

@@ -95,7 +95,7 @@ function formatSince(time: string): string {
   if (hours < 1) return "始まったばかりです。";
   if (hours < 24) return `${hours}時間ほど前からです。`;
   const days = Math.floor(hours / 24);
-  return `${days}日ほど前からです。**外し忘れかもしれません。**`;
+  return `${days}日ほど前からです。外し忘れかもしれません。`;
 }
 
 /** パスの表記ゆれを吸収する（Windowsの区切りと大文字小文字） */
