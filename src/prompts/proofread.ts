@@ -17,7 +17,8 @@
  * プロンプトを変更したら version を上げること。
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
-export const PROOFREAD_VERSION = "1.2";
+// 1.3: 作品の作法（一人称・文語体・直さない語）を渡すようにした（6.8.14）
+export const PROOFREAD_VERSION = "1.3";
 
 export const PROOFREAD_SYSTEM_PROMPT = `あなたは日本語の小説を読み、明らかに読みにくい箇所だけを指摘する校正アシスタントです。
 
@@ -50,6 +51,13 @@ export interface ProofreadInput {
   chunkTextWithLineNumbers: string;
   /** 作品の人称・文体。分かる範囲で。無ければ空文字 */
   narrativeStyle: string;
+  /**
+   * この作品の書き方（`core/workStyle.ts` の `buildStyleNote`）。
+   *
+   * **誤字脱字と同じものを渡す**（設計書6.8.14）。片方だけに渡すと、
+   * 同じ本文について機能ごとに違う前提で判断することになる。
+   */
+  styleNote?: string;
   /** このチャンクで出してよい件数の上限 */
   maxIssues: number;
 }
@@ -63,7 +71,7 @@ export function buildProofreadPrompt(input: ProofreadInput): string {
 ${input.chunkTextWithLineNumbers}
 
 【作品の人称・文体】${style}
-
+${input.styleNote ? `\n${input.styleNote}\n` : ""}
 【提案してよい対象（これ以外は提案しないこと）】
 1. 冗長：同じ意味の言葉が重なっている（「まず最初に」「約10分ほど」）
 2. 同語反復：近い範囲で同じ語・言い回しが繰り返され、単調になっている

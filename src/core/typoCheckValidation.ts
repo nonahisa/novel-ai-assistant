@@ -627,3 +627,46 @@ function overlapLength(
   }
   return 0;
 }
+
+/**
+ * その本文が文語体で書かれているか（設計書6.8.14）。
+ *
+ * **`isArchaicForm` は語ひとつを見る。** こちらは作品全体を見て
+ * 「この作品はそもそも文語体である」と言えるかを判定する。
+ *
+ * 言えるなら、**AIへ先に伝えられる。** 「然し」を「しかし」に直す提案が
+ * そもそも生まれなくなり、こちらで弾く手間が減る。
+ *
+ * **数ではなく密度で見る。** 現代文の小説にも旧字が1つ2つ紛れることは
+ * あるので、長さに対してどれだけ出るかで決める。
+ */
+/** これ以下なら、たまたま混ざっただけとみる */
+const MIN_ARCHAIC_HITS = 5;
+
+export function looksArchaicText(text: string): boolean {
+  if (text.length < 500) return false;
+
+  let hits = 0;
+  for (const form of ARCHAIC_FORMS) {
+    if (form.length < 2) continue;
+    let from = 0;
+    for (;;) {
+      const at = text.indexOf(form, from);
+      if (at < 0) break;
+      hits++;
+      from = at + form.length;
+    }
+  }
+  for (const ch of text) {
+    if (ARCHAIC_MARKS.test(ch)) hits++;
+  }
+
+  // **回数と密度の両方を見る。** 密度だけだと、短い本文に旧字が1つ
+  // 混ざっただけで「文語体」と言ってしまう。現代文の小説にも
+  // 「然し」が1度だけ現れることはある
+  if (hits < MIN_ARCHAIC_HITS) return false;
+
+  // 2,000字あたり1回以上。実データの自分史（戦前の文語体）で
+  // 1,000字あたり2〜3回、現代文の作品で0〜0.2回だった
+  return hits / (text.length / 2000) >= 1;
+}

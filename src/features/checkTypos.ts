@@ -53,6 +53,11 @@ import {
   type RateLimitWaitState,
 } from "./extractCharacters";
 import { KeepWordStore } from "../core/keepWordStore";
+import {
+  buildStyleNote,
+  collectWorkStyle,
+  readNarrativePerson,
+} from "../core/workStyle";
 import type { KeepWord } from "../models/keepWord";
 
 /**
@@ -264,6 +269,19 @@ export async function checkTypos(
   // **方言・口癖は固有名詞の辞書に入らない。** 作者が名指しで守った語を別に読む
   const keepWords = await new KeepWordStore(work).loadWords();
 
+  // **この作品の書き方をAIへ先に伝える**（設計書6.8.14）。
+  // 語り手の一人称・文語体かどうか・直さない語。これまでは渡しておらず、
+  // モデルが知りようのないことをコード側で後から弾いていた。
+  // **コードの検証は外さない。** ここは「生まれる数を減らす」ためである
+  const styleNote = buildStyleNote(
+    collectWorkStyle({
+      // 全チャンクを繋いで見る。1話だけでは一人称も文語かも決められない
+      bodyText: chunks.map((chunk) => chunk.text).join("\n"),
+      narrativePerson: await readNarrativePerson(work),
+      keepWords: keepWords.map((entry) => entry.word),
+    })
+  );
+
   const dismissedHistory = new TypoDismissedHistory(work);
   const dismissed = await dismissedHistory.load();
   const appliedFixKeys = await loadAppliedFixKeys(work);
@@ -384,11 +402,12 @@ export async function checkTypos(
           systemPrompt: TYPO_CHECK_SYSTEM_PROMPT,
           userPrompt: buildTypoCheckPrompt({
             chunkTextWithLineNumbers: withLineNumbers(chunk),
-            // 守る語もAIへ渡す。検査でも弾くが、先に伝えれば挙がる数が減る
-            properNounDictionary: [
-              ...protectedNames,
-              ...keepWords.map((entry) => entry.word),
-            ].slice(0, 200),
+            // **「直さない語」は辞書へ混ぜない。** 固有名詞を先に並べて
+            // 200語で切っていたため、固有名詞が多い作品では
+            // **作者が名指しで守った語が1つも届かなかった**（2026-08-21）。
+            // 作法の枠（styleNote）へ独立して出す
+            properNounDictionary: protectedNames.slice(0, 200),
+            styleNote,
           }),
           model: resolved.model,
           temperature: 0.0,

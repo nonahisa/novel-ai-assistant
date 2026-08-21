@@ -15,8 +15,6 @@ import {
   type Chunk,
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
-import { parsePlotMarkdown } from "../core/plotDoc";
-import { readPlotText } from "../core/plotFile";
 import {
   buildProofreadPrompt,
   issueBudget,
@@ -34,6 +32,11 @@ import { withCancellableProgress } from "../views/progress";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { KeepWordStore } from "../core/keepWordStore";
+import {
+  buildStyleNote,
+  collectWorkStyle,
+  readNarrativePerson,
+} from "../core/workStyle";
 
 /**
  * 推敲支援（P-10、設計書6.9.1）。
@@ -86,10 +89,21 @@ export async function checkProofread(
     return undefined;
   }
 
-  const narrativeStyle = await readNarrativeStyle(work);
+  const narrativeStyle = await readNarrativePerson(work);
   // 作者が「直さない」と決めた語。推敲は原文まるごとを置き換えるので、
   // 含まれていたら指摘ごと出さない
   const keepWords = await new KeepWordStore(work).loadWords();
+
+  // **誤字脱字と同じ作法を渡す**（設計書6.8.14）。片方だけに渡すと、
+  // 同じ本文について機能ごとに違う前提で判断することになる
+  const styleNote = buildStyleNote(
+    collectWorkStyle({
+      // 全チャンクを繋いで見る。1話だけでは一人称も文語かも決められない
+      bodyText: chunks.map((chunk) => chunk.text).join("\n"),
+      narrativePerson: narrativeStyle,
+      keepWords: keepWords.map((entry) => entry.word),
+    })
+  );
 
   const cache = new ChunkCache(work);
   await cache.load();
@@ -227,6 +241,7 @@ export async function checkProofread(
           userPrompt: buildProofreadPrompt({
             chunkTextWithLineNumbers: withLineNumbers(chunk),
             narrativeStyle,
+            styleNote,
             maxIssues: issueBudget(chunk.text.length),
           }),
           model,
@@ -289,15 +304,6 @@ export async function checkProofread(
  * **無くても推敲はできる。** 渡すのは「三人称なのに一人称の癖を直せと
  * 言わない」ための手がかりで、必須ではない。
  */
-async function readNarrativeStyle(work: WorkEntry): Promise<string> {
-  try {
-    const sections = parsePlotMarkdown(await readPlotText(work)).sections;
-    return sections.narrativePerson.trim();
-  } catch {
-    return "";
-  }
-}
-
 async function collectChunks(
   work: WorkEntry,
   registry: AIRegistry,

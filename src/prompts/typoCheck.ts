@@ -9,7 +9,8 @@
  * プロンプトを変更したら version を上げること。
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
-export const TYPO_CHECK_VERSION = "1.0";
+// 1.1: 作品の作法（一人称・文語体・直さない語）を渡すようにした（6.8.14）
+export const TYPO_CHECK_VERSION = "1.1";
 
 export const TYPO_CHECK_SYSTEM_PROMPT = `あなたは日本語の小説の誤字脱字だけを検出する校正アシスタントです。
 
@@ -24,6 +25,16 @@ export interface TypoCheckInput {
   chunkTextWithLineNumbers: string;
   /** この作品の固有名詞・造語。誤りとして指摘させないため */
   properNounDictionary: string[];
+  /**
+   * この作品の書き方（`core/workStyle.ts` の `buildStyleNote`）。
+   *
+   * **語り手の一人称・文語体・作者が直さないと決めた語**を伝える。
+   * これまでは渡しておらず、モデルが知りようのないことを
+   * コード側で後から弾いていた（設計書6.8.14）。
+   *
+   * 分かっていることが何も無ければ空文字。**そのときは何も書かない。**
+   */
+  styleNote?: string;
 }
 
 export function buildTypoCheckPrompt(input: TypoCheckInput): string {
@@ -39,7 +50,7 @@ ${input.chunkTextWithLineNumbers}
 
 【この作品の固有名詞・造語】（これらは誤りではありません。指摘しないこと）
 ${dictionary}
-
+${input.styleNote ? `\n${input.styleNote}\n` : ""}
 【検出対象】
 - 誤変換（例：「以外」と「意外」、「行動」と「講堂」）
 - 脱字（助詞抜け、文字抜け）
