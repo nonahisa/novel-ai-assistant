@@ -200,6 +200,7 @@ describe("AIの印", () => {
 
     expect(aiCommands).toEqual(
       [
+        "novelai.plotInterview",
         "novelai.checkTypos",
         "novelai.checkProofread",
         "novelai.checkContradictions",

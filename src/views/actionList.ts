@@ -322,6 +322,19 @@ export const ACTION_TREE: readonly ActionGroup[] = [
       },
       {
         kind: "action",
+        command: "novelai.plotInterview",
+        label: "対話でプロットを作る",
+        icon: "comment-discussion",
+        requiresWork: true,
+        usesAI: true,
+        detail:
+          "まだ書けていない項目を、AIが1つずつ尋ねます。答えを整えて" +
+          "プロットへ書く案を出すので、押せば入ります。" +
+          "**AIが筋書きを作るのではありません。** 作者の中にあるものを引き出します。" +
+          "決まっていない項目は飛ばせます。",
+      },
+      {
+        kind: "action",
         command: "novelai.setPlotBasics",
         label: "形式とジャンルを決める",
         icon: "tag",

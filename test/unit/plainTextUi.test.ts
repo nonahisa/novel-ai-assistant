@@ -43,6 +43,7 @@ const MARKDOWN_ALLOWED = new Set([
   "src/core/settingsSchema.ts",
   "src/prompts/characterExtract.ts",
   "src/prompts/proofread.ts",
+  "src/prompts/workChat.ts",
   "src/prompts/settingsEnrich.ts",
   // 記録ファイル（人が読む前提のログ）
   "src/core/logger.ts",

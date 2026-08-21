@@ -147,6 +147,14 @@ export interface WorkChatInput {
    * もう一度 needFiles を返させない（同じ問答を繰り返してしまう）。
    */
   requestedFiles?: Array<{ path: string; content: string }>;
+  /**
+   * いま対話で埋めようとしているプロットの項目（設計書6.4.7）。
+   *
+   * **これが無いと、書き込み先をAIが当てずっぽうで決める。** 対話で
+   * プロットを作るときは、作者の答えがどの項目のものかが決まっている。
+   * 決まっていることを推測させない。
+   */
+  plotFocus?: { heading: string; target: string; purpose: string };
   /** これまでのやり取り。古いものから順に */
   history: WorkChatTurn[];
   question: string;
@@ -165,6 +173,23 @@ export function buildWorkChatPrompt(input: WorkChatInput): string {
   const blocks: string[] = [`【作品】\n${input.workTitle}`];
 
   blocks.push(`【いま開いている画面】\n${input.contextLabel}`);
+
+  // **対話でプロットを埋めているときは、書き込み先が決まっている**（6.4.7）。
+  // 決まっていることをAIに推測させない
+  if (input.plotFocus) {
+    blocks.push(
+      [
+        "【いま埋めている項目】",
+        `${input.plotFocus.heading}（${input.plotFocus.purpose}）`,
+        "",
+        "作者の返事は、この項目についての答えです。",
+        `書き込みを提案するときは target を "${input.plotFocus.target}" にしてください。`,
+        "**作者が言っていないことを足さないこと。** 言葉を整えるのはよいが、",
+        "設定や筋書きをこちらで作らないこと。足りないと感じたら、reply で聞き返してください。",
+        "答えがまだ出せない様子なら、無理に書き込みを提案せず、聞き方を変えてください。",
+      ].join("\n")
+    );
+  }
 
   if (input.excerpt.trim()) {
     const note = input.fromSelection

@@ -1,3 +1,6 @@
+import { parsePlotMarkdown, type PlotSections } from "../core/plotDoc";
+import { readPlotText } from "../core/plotFile";
+import { describeProgress, nextQuestion } from "../core/plotInterview";
 import * as vscode from "vscode";
 import * as path from "path";
 import type { WorkEntry } from "../models/types";
@@ -139,6 +142,17 @@ export interface ChatRunner {
 export class WorkChatPanel implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private history: WorkChatTurn[] = [];
+  /**
+   * 対話で埋めようとしているプロットの項目（設計書6.4.7）。
+   *
+   * **これが無いと、書き込み先をAIが当てずっぽうで決める。**
+   * 対話を終えたら空にする（普通の相談で prompt に混ざらないように）。
+   */
+  private plotFocus:
+    | { heading: string; target: string; purpose: string }
+    | undefined;
+  /** 対話の相手になっている作品。次の項目へ進むときに要る */
+  private plotInterviewWork: WorkEntry | undefined;
 
   /**
    * 押されるのを待っている書き込みの提案。
@@ -348,6 +362,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
             fromSelection: context?.fromSelection ?? false,
             reference: [...(context?.reference ?? []), ...found.reference],
             requestedFiles,
+            plotFocus: this.plotFocus,
             history: this.history.slice(-HISTORY_TURNS),
             question,
             // 使い方を聞かれたときに答えられるよう、機能の一覧を渡す。
@@ -692,6 +707,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         id,
         message: `${staged.edit.label.replace(/に書き込む$/, "")}に書き込みました（${where}）`,
       });
+      // 対話でプロットを埋めている最中なら、次の項目を尋ねる
+      await this.advancePlotInterview(String(staged.edit.target));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logFailure("相談からの書き込み", { 内容: message });
@@ -870,6 +887,105 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         "下の例を押しても始められます。",
       options: PLOT_ADVICE_OPTIONS,
     });
+  }
+
+  /**
+   * 対話でプロットを作る（設計書6.4.7）。
+   *
+   * **AIに筋書きを作らせない。** まだ何も書いていない作品でAIに
+   * 「プロットを作って」と頼むと、材料なしに話を丸ごと組み立てることになり、
+   * **作者のものではない話**が出てくる（6.21.2で確かめた）。
+   *
+   * ここでやるのは**引き出すこと**である。まだ書かれていない項目を
+   * 1つずつ尋ね、答えを整えて `plot.md` へ置く。書くのは作者が
+   * ボタンを押したときだけ。
+   */
+  async startPlotInterview(work: WorkEntry): Promise<void> {
+    await this.focusWork(work);
+    if (!this.view) return;
+
+    const sections = await this.readPlotSections(work);
+    if (!sections) {
+      void this.view.webview.postMessage({
+        type: "chatter",
+        who: "AI",
+        text:
+          `「${work.title}」にはまだプロットがありません。\n` +
+          "「プロットをつくる」を先に実行すると、書く場所ができます。",
+        run: "createPlot",
+      });
+      return;
+    }
+
+    this.plotInterviewWork = work;
+    await this.askNextPlotQuestion(sections, true);
+  }
+
+  /** まだ書かれていない項目を1つ尋ねる。全部埋まっていれば終わりを告げる */
+  private async askNextPlotQuestion(
+    sections: PlotSections,
+    first: boolean
+  ): Promise<void> {
+    if (!this.view) return;
+    const question = nextQuestion(sections);
+
+    if (!question) {
+      this.plotFocus = undefined;
+      this.plotInterviewWork = undefined;
+      void this.view.webview.postMessage({
+        type: "chatter",
+        who: "AI",
+        text:
+          "プロットの項目はひととおり埋まりました。\n" +
+          "書き足したいところがあれば、いつでも聞いてください。",
+      });
+      return;
+    }
+
+    this.plotFocus = {
+      heading: question.heading,
+      target: `plot.${question.key}`,
+      purpose: question.purpose,
+    };
+
+    const progress = describeProgress(sections);
+    void this.view.webview.postMessage({
+      type: "chatter",
+      who: "AI",
+      text:
+        (first ? `プロットを一緒に埋めていきましょう。${progress}。\n\n` : "") +
+        `【${question.heading}】\n${question.question}`,
+      // **飛ばせるようにする。** 決まっていない項目で止まると、
+      // 作者はそこで対話ごとやめてしまう
+      options: [...question.options, "この項目は飛ばす"],
+    });
+  }
+
+  /** `plot.md` を読んで節に分ける。無ければ undefined */
+  private async readPlotSections(
+    work: WorkEntry
+  ): Promise<PlotSections | undefined> {
+    try {
+      return parsePlotMarkdown(await readPlotText(work)).sections;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * 対話の途中で書き込みが済んだら、次の項目へ進む。
+   *
+   * **読み直してから次を決める。** 作者が同じ間に別の項目を手で
+   * 書いていることがあり、覚えている状態で進めると同じことを二度聞く。
+   */
+  private async advancePlotInterview(target: string): Promise<void> {
+    const work = this.plotInterviewWork;
+    if (!work || !this.plotFocus) return;
+    if (this.plotFocus.target !== target) return;
+
+    const sections = await this.readPlotSections(work);
+    if (!sections) return;
+    await this.askNextPlotQuestion(sections, false);
   }
 
   private async resolveContext(): Promise<ResolvedContext | undefined> {

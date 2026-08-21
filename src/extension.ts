@@ -910,6 +910,16 @@ export async function activate(
         await openPlotFile(work);
       }
     ),
+    // 対話でプロットを埋める（設計書6.4.7）。**AIに筋書きを作らせず、
+    // まだ書かれていない項目を1つずつ尋ねて引き出す**
+    vscode.commands.registerCommand(
+      "novelai.plotInterview",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await workChatPanel.startPlotInterview(work);
+      }
+    ),
     vscode.commands.registerCommand(
       "novelai.setPlotBasics",
       async (node?: WorkNode) => {
