@@ -360,3 +360,32 @@ function extractBraces(text: string): string | null {
   const end = text.lastIndexOf("}");
   return start >= 0 && end > start ? text.slice(start, end + 1) : null;
 }
+
+/**
+ * 指摘の種類だけでは何が読みにくいのか分からないので、言葉を足す。
+ *
+ * **画面には「冗長」の一語しか出ていなかった。** どこが冗長なのかは
+ * 差分を見れば分かることもあるが、「係り受け」「同語反復」は**何と何の
+ * 関係の話なのかが言われないと分からない**（2026-08-22、作者の指摘）。
+ *
+ * AIの説明（`explanation`）が使えるならそちらを出し、空だったり
+ * 種類の言葉をなぞっただけだったりしたときに、これを代わりに出す。
+ * **「AIが説明を返さなかったから何も出ない」を作らない。**
+ *
+ * 4つの種類のどれでもなければ `undefined`（誤字脱字や表記ゆれの
+ * `reason` はここへ来る。あちらは説明そのものが `reason` に入っている）。
+ */
+export function explainProofreadReason(reason: string): string | undefined {
+  switch (reason) {
+    case "冗長":
+      return "同じ意味の言葉が重なっています";
+    case "同語反復":
+      return "近いところで同じ語が繰り返され、単調になっています";
+    case "係り受け":
+      return "どこに掛かるかが2通りに読めます";
+    case "長文":
+      return "一文が長く、意味を取りにくくなっています";
+    default:
+      return undefined;
+  }
+}

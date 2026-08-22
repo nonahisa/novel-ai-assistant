@@ -37,6 +37,38 @@ body {
   background: var(--vscode-editor-background);
 }
 #toolbar .title { font-weight: bold; }
+/*
+  分類の切り替え（設計書6.11.3）。**検知を走らせても前の結果は消えない**ので、
+  どこに何件残っているかを出して、戻れるようにする。
+  1つしか無いときは出さない（下段は狭い）
+*/
+#tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px 10px 0;
+  flex-wrap: wrap;
+}
+#tabs:empty { display: none; }
+#tabs .tab {
+  background: none;
+  color: var(--vscode-foreground);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 2px 8px;
+  opacity: 0.75;
+}
+#tabs .tab:hover { background: var(--vscode-toolbar-hoverBackground); }
+#tabs .tab.active {
+  opacity: 1;
+  font-weight: bold;
+  border-color: var(--vscode-focusBorder);
+  background: var(--vscode-toolbar-activeBackground, transparent);
+}
+#tabs .tab .n {
+  margin-left: 4px;
+  color: var(--vscode-descriptionForeground);
+  font-weight: normal;
+}
 #toolbar .count { color: var(--vscode-descriptionForeground); }
 #toolbar label { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 button {
@@ -152,10 +184,12 @@ body.show-low .issue.low { display: flex; }
 </style>
 </head>
 <body>
+<div id="tabs"></div>
 <div id="toolbar">
   <span class="title" id="category">誤字脱字</span>
   <span class="count" id="count">0件</span>
   <label><input type="checkbox" id="showLow"> 確信度が低いものも表示</label>
+  <button class="secondary" id="clear" title="この分類の一覧を空にします（本文は書き換わりません）">一覧を空にする</button>
   <button class="secondary" id="applyAll" title="確信度が「高」「中」で、修正案のあるものだけが対象です">まとめて適用</button>
 </div>
 <div id="empty">まだ検知結果がありません。「誤字脱字を検知」または「表記ゆれを検知」を実行してください。</div>
@@ -167,6 +201,8 @@ const emptyEl = document.getElementById('empty');
 const countEl = document.getElementById('count');
 const showLowEl = document.getElementById('showLow');
 const applyAllEl = document.getElementById('applyAll');
+const tabsEl = document.getElementById('tabs');
+const clearEl = document.getElementById('clear');
 
 showLowEl.addEventListener('change', () => {
   document.body.classList.toggle('show-low', showLowEl.checked);
@@ -174,6 +210,36 @@ showLowEl.addEventListener('change', () => {
 applyAllEl.addEventListener('click', () => {
   vscode.postMessage({ type: 'applyAll' });
 });
+clearEl.addEventListener('click', () => {
+  vscode.postMessage({ type: 'clearCategory' });
+});
+
+/**
+ * 分類のタブを並べる。
+ *
+ * **残りの件数を添える。** どれを見に行けばよいかは、名前だけでは決まらない。
+ * 空になった分類も残す——「さっき走らせたのに消えた」と思わせないため。
+ */
+function renderTabs(categories) {
+  if (!categories || categories.length === 0) {
+    tabsEl.innerHTML = '';
+    return;
+  }
+  tabsEl.innerHTML = categories.map(function (entry) {
+    const count = entry.remaining > 0
+      ? '<span class="n">' + entry.remaining + '</span>'
+      : (entry.total > 0 ? '<span class="n">済</span>' : '');
+    return '<button class="tab' + (entry.active ? ' active' : '') +
+      '" data-category="' + escapeHtml(entry.name) + '">' +
+      escapeHtml(entry.name) + count + '</button>';
+  }).join('');
+
+  tabsEl.querySelectorAll('.tab').forEach(function (el) {
+    el.addEventListener('click', function () {
+      vscode.postMessage({ type: 'selectCategory', category: el.dataset.category });
+    });
+  });
+}
 
 const CONFIDENCE_LABEL = { high: '確信度: 高', medium: '確信度: 中', low: '確信度: 低' };
 const STATUS_LABEL = { applied: '適用済み', dismissed: '無視しました', failed: '失敗' };
@@ -360,11 +426,25 @@ function renderItem(item) {
     ? '<div class="status-detail">' + escapeHtml(item.statusDetail) + '</div>'
     : '';
 
+  // 「冗長」の一語だけでは、何と何の話なのか分からない。説明を添える
+  const explain = [item.reason, item.detail].filter(Boolean).join('：');
+
+  // **原文をもう一度出さない。**
+  //
+  // 誤字脱字は、直す語（target）が行の一部なので、行まるごと（original）を
+  // 添えると前後が分かって役に立つ。**推敲は一文まるごとが target** なので、
+  // 同じ文が差分のすぐ下にもう一度並んでいた（2026-08-22、作者の指摘）。
+  // 前後を足せるときだけ足す
+  const addsContext = item.original && item.original !== item.target;
+
   const body = hasFix
     ? '<div class="diff">' + renderDiff(item) + '</div>' +
-      '<div class="reason">' + escapeHtml(item.original) + '（' + escapeHtml(item.reason) + '）</div>'
+      '<div class="reason">' +
+      (addsContext ? escapeHtml(item.original) + '（' + escapeHtml(explain) + '）'
+                   : escapeHtml(explain)) +
+      '</div>'
     : '<div class="quote">' + escapeHtml(item.original) + '</div>' +
-      '<div class="reason">' + escapeHtml(item.reason) +
+      '<div class="reason">' + escapeHtml(explain) +
       '（直し方は作者が決めてください）</div>';
 
   return (
@@ -413,6 +493,9 @@ window.addEventListener('message', (event) => {
     document.getElementById('category').textContent = message.category || '誤字脱字';
     // 矛盾には「まとめて適用」が無い。どちらが正しいか決められないため
     applyAllEl.style.display = message.canApplyAll === false ? 'none' : '';
+    // 空の分類に「空にする」を出しても押すものが無い
+    clearEl.style.display = message.items.length > 0 ? '' : 'none';
+    renderTabs(message.categories);
     render(message.workTitle, message.items);
   }
 });

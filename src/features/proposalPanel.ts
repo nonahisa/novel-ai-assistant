@@ -17,6 +17,7 @@ import { buildProposalPanelHtml } from "../views/proposalPanelHtml";
 import { diffChars, type DiffSegment } from "../core/inlineDiff";
 import { KeepWordStore } from "../core/keepWordStore";
 import { validateKeepWord } from "../models/keepWord";
+import { explainProofreadReason } from "../core/proofreadValidation";
 import { manualActor, recordEdit } from "../core/actorContext";
 import { isEditorMode } from "../core/actorContext";
 import { ProposalStore } from "../core/proposalStore";
@@ -25,6 +26,13 @@ import { FileLockStore } from "../core/fileLockStore";
 import { describeLock, normalizeFile } from "../models/fileLock";
 import { tryGitUserName } from "../core/gitAttribution";
 import { acceptProposal, rejectProposal } from "./reviewProposals";
+import {
+  describeBadgeTooltip,
+  isRemaining,
+  mergeProposals,
+  summarizeCategories,
+  type CategorySummary,
+} from "../core/proposalBuckets";
 
 /**
  * 提案パネル（誤字脱字）。
@@ -34,9 +42,9 @@ import { acceptProposal, rejectProposal } from "./reviewProposals";
  * エディター領域に開く別方式だが、こちらは本文を編集しながら
  * 常に見えている場所に置きたいという要望のため下段にした。
  *
- * 設計書6.10は誤字脱字／推敲／逸脱・間延び／矛盾を同じパネルに
+ * 設計書6.11は誤字脱字／推敲／逸脱・間延び／矛盾を同じパネルに
  * タブ分けで統合する設計。ビューIDとコンテナ名は既にその前提で
- * 汎用の名前にしてあり、今回は誤字脱字だけを実装する。
+ * 分類ごとに分けて出す（6.11.3で、分類を切り替えられるようにした）。
  */
 
 export const PROPOSALS_VIEW_ID = "novelai.proposalsView";
@@ -62,6 +70,14 @@ export interface ProposalViewItem {
   target: string;
   suggestion: string;
   reason: string;
+  /**
+   * なぜ読みにくいのか（推敲）。
+   *
+   * **`reason` は種類の一語しか入っていない**（冗長・同語反復・係り受け・
+   * 長文）。それだけでは、何と何の話なのかが分からない
+   * （2026-08-22、作者の指摘）。AIの説明か、種類ごとの決まり文句が入る。
+   */
+  detail?: string;
   confidence: "high" | "medium" | "low";
   status: "pending" | "applied" | "failed" | "dismissed";
   statusDetail?: string;
@@ -161,6 +177,13 @@ type OutgoingMessage = {
   >;
   /** 「まとめて適用」を出すか。矛盾では出さない */
   canApplyAll: boolean;
+  /**
+   * 持っている分類の一覧（設計書6.11.3）。
+   *
+   * **切り替えて見るために要る。** 検知を走らせても前の結果は消えないので、
+   * どこに何件残っているかを出して、戻れるようにする。
+   */
+  categories: CategorySummary[];
 };
 
 type IncomingMessage =
@@ -170,7 +193,28 @@ type IncomingMessage =
   | { type: "dismiss"; id: string }
   | { type: "keepWord"; id: string }
   | { type: "openSettings"; id: string }
-  | { type: "applyAll" };
+  | { type: "applyAll" }
+  /** 別の分類へ切り替える */
+  | { type: "selectCategory"; category: string }
+  /** いま見ている分類を空にする */
+  | { type: "clearCategory" };
+
+/**
+ * 1つの分類が持つもの。
+ *
+ * **3つを混ぜない。** 適用の処理が誤字脱字の形を前提にしており、
+ * 混ぜると矛盾を「適用」しようとして壊れる。
+ */
+interface CategoryBucket {
+  items: ProposalViewItem[];
+  contradictions: ContradictionViewItem[];
+  recordUpdates: RecordUpdateViewItem[];
+  applyRecordUpdate?: (id: string) => Promise<{ ok: boolean; reason?: string }>;
+}
+
+function emptyBucket(): CategoryBucket {
+  return { items: [], contradictions: [], recordUpdates: [] };
+}
 
 export class ProposalPanel implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
@@ -193,6 +237,17 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     | ((id: string) => Promise<{ ok: boolean; reason?: string }>)
     | undefined;
   private category = "誤字脱字";
+  /**
+   * 分類ごとの置き場（設計書6.11.3）。
+   *
+   * **上の4つは「いま出している分」で、こちらが控えである。**
+   * 既存の処理はすべて `this.items` などを直に触るので、切り替えのたびに
+   * 入れ替える形にした。配列そのものを共有しているため、1件を適用した
+   * ときの状態の変化は、控えの側にもそのまま残る。
+   *
+   * `Map` は入れた順を保つので、タブの並びは**走らせた順**になる。
+   */
+  private buckets = new Map<string, CategoryBucket>();
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
@@ -213,17 +268,21 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   }
 
   /**
-   * 表示するものを丸ごと入れ替える。
+   * 検知の結果を、その分類へ足す（設計書6.11.3）。
    *
-   * **渡さなかった入れ物は空になる。** 以前は表示口ごとに「他の入れ物を
+   * **消さずに足す。** 以前はパネルの中身を丸ごと入れ替えており、
+   * 誤字脱字を1件ずつ見ている途中で推敲を実行すると、**適用済み・
+   * 見送り済みの判断も、まだ見ていない指摘も、すべて失われていた**
+   * （2026-08-22、作者の指摘）。
+   *
+   * 分類ごとに置き場を持ち、切り替えて見る。同じ分類をもう一度
+   * 走らせたときは、作者の判断が入っているものを残して足す
+   * （`core/proposalBuckets.ts`）。
+   *
+   * **入れ替えは、ここ1か所に集める。** 以前は表示口ごとに「他の入れ物を
    * 空にする」処理を書いており、5つのうち4つが `recordUpdates` を
-   * 空にし忘れていた。描画は `recordUpdates` を最優先で出すので、
-   * **一度でも設定資料の更新を出すと、以後の誤字脱字がすべて隠れていた**
-   * （2026-08-21、作者が実機で発見。見出しだけ「誤字脱字」に変わり、
-   * 中身は前の更新のままだった）。
-   *
-   * 入れ物を増やしたときに書き忘れる形の失敗なので、**入れ替えを
-   * ここ1か所に集める。**
+   * 空にし忘れていた（2026-08-21）。入れ物を増やしたときに書き忘れる形の
+   * 失敗なので、口を1つにしてある。
    */
   private replaceContents(
     work: WorkEntry,
@@ -237,21 +296,78 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       ) => Promise<{ ok: boolean; reason?: string }>;
     }
   ): void {
+    // **作品が変われば、前の作品の指摘は意味を持たない。**
+    // ファイルの場所ごと違うので、残しても開けない。
+    // **控えだけでなく、いま出している分も落とす**——落とさないと、
+    // すぐ下の `stashCurrent()` が前の作品の指摘を控えへ戻してしまう
+    if (this.work && this.work.id !== work.id) {
+      this.buckets.clear();
+      this.items = [];
+      this.contradictions = [];
+      this.recordUpdates = [];
+      this.applyRecordUpdate = undefined;
+    }
     this.work = work;
-    this.category = category;
-    this.items = contents.items ?? [];
-    this.contradictions = contents.contradictions ?? [];
-    this.recordUpdates = contents.recordUpdates ?? [];
-    this.applyRecordUpdate = contents.applyRecordUpdate;
-    this.postItems();
+
+    this.stashCurrent();
+    const bucket = this.buckets.get(category) ?? emptyBucket();
+    bucket.items = mergeProposals(bucket.items, contents.items ?? []);
+    bucket.contradictions = mergeProposals(
+      bucket.contradictions,
+      contents.contradictions ?? []
+    );
+    bucket.recordUpdates = mergeProposals(
+      bucket.recordUpdates,
+      contents.recordUpdates ?? []
+    );
+    // 反映の手順は、いちばん新しく渡されたものを使う（古い閉包を握らない）
+    if (contents.applyRecordUpdate) {
+      bucket.applyRecordUpdate = contents.applyRecordUpdate;
+    }
+    this.buckets.set(category, bucket);
+
+    this.activate(category);
     // パネルが開いていなければ前面に出す。開いていれば余計なフォーカス移動はしない
     void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
   }
 
-  /** `checkTypos` の結果を差し替えて表示する */
+  /**
+   * いま画面に出している分の状態を、置き場へ書き戻す。
+   *
+   * **配列は同じものを共有しているが、`applyRecordUpdate` は別**なので、
+   * ここで揃える。切り替えのたびに必ず通す。
+   */
+  private stashCurrent(): void {
+    if (this.items.length === 0 &&
+        this.contradictions.length === 0 &&
+        this.recordUpdates.length === 0 &&
+        !this.buckets.has(this.category)) {
+      return;
+    }
+    this.buckets.set(this.category, {
+      items: this.items,
+      contradictions: this.contradictions,
+      recordUpdates: this.recordUpdates,
+      applyRecordUpdate: this.applyRecordUpdate,
+    });
+  }
+
+  /** その分類を画面に出す */
+  private activate(category: string): void {
+    const bucket = this.buckets.get(category) ?? emptyBucket();
+    this.category = category;
+    this.items = bucket.items;
+    this.contradictions = bucket.contradictions;
+    this.recordUpdates = bucket.recordUpdates;
+    this.applyRecordUpdate = bucket.applyRecordUpdate;
+    this.postItems();
+  }
+
+  /** `checkTypos` / `checkProofread` / `checkNotation` の結果を出す */
   showResults(
     work: WorkEntry,
-    issues: TypoCheckIssue[],
+    /** 推敲は `explanation`（なぜ読みにくいか）を持つ。誤字脱字は持たない */
+    issues: Array<TypoCheckIssue & { explanation?: string }>,
     category = "誤字脱字"
   ): void {
     const items: ProposalViewItem[] = issues.map((issue, index) => ({
@@ -264,6 +380,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       target: issue.target,
       suggestion: issue.suggestion,
       reason: issue.reason,
+      detail: proposalDetail(issue),
       confidence: issue.confidence,
       status: "pending",
     }));
@@ -378,23 +495,57 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    *
    * 残っていないのに数字が出ていると、見に行っても何も無い。
    */
-  private updateBadge(): void {
+  /**
+   * 分類ごとの件数を数える。
+   *
+   * **いま出している分は、控えではなく手元の配列から数える。** 切り替えの
+   * たびに書き戻してはいるが、1件を適用した直後のように書き戻す前の
+   * 瞬間があるため、そこだけは手元を見る。
+   */
+  private countByCategory(): Map<string, { remaining: number; total: number }> {
+    const counts = new Map<string, { remaining: number; total: number }>();
+    const seen = new Set([...this.buckets.keys(), this.category]);
+    for (const name of seen) {
+      const bucket =
+        name === this.category
+          ? {
+              items: this.items,
+              contradictions: this.contradictions,
+              recordUpdates: this.recordUpdates,
+            }
+          : (this.buckets.get(name) ?? emptyBucket());
+      const all = [
+        ...bucket.items,
+        ...bucket.contradictions,
+        ...bucket.recordUpdates,
+      ];
+      counts.set(name, {
+        remaining: all.filter(isRemaining).length,
+        total: all.length,
+      });
+    }
+    return counts;
+  }
+
+  private updateBadge(summaries: readonly CategorySummary[]): void {
     if (!this.view) return;
-    const remaining =
-      this.items.filter(isRemaining).length +
-      this.contradictions.filter(isRemaining).length +
-      this.recordUpdates.filter(isRemaining).length;
+    const remaining = summaries.reduce(
+      (total, summary) => total + summary.remaining,
+      0
+    );
 
     this.view.badge =
       remaining > 0
-        ? {
-            value: remaining,
-            tooltip: `${this.category}：未処理が${remaining}件あります`,
-          }
+        ? { value: remaining, tooltip: describeBadgeTooltip(summaries) }
         : undefined;
   }
 
   private postItems(): void {
+    const summaries = summarizeCategories(
+      this.countByCategory(),
+      this.category
+    );
+    this.updateBadge(summaries);
     if (!this.view) return;
     const contradictionMode = this.contradictions.length > 0;
     const updateMode = this.recordUpdates.length > 0;
@@ -409,9 +560,11 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
           : this.items.map(withDiff),
       // 設定資料の更新は、まとめて反映できる（1件ずつだと19話ぶんで手が止まる）
       canApplyAll: !contradictionMode,
+      // **1つしか無いときはタブを出さない。** 選ぶものが無いのに
+      // 場所だけ取ると、下段の狭い画面がさらに狭くなる
+      categories: summaries.length > 1 ? summaries : [],
     };
     void this.view.webview.postMessage(message);
-    this.updateBadge();
   }
 
   /**
@@ -479,7 +632,61 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       case "applyAll":
         await this.applyVisible();
         return;
+      case "selectCategory":
+        this.switchTo(message.category);
+        return;
+      case "clearCategory":
+        await this.clearCurrentCategory();
+        return;
     }
+  }
+
+  /** タブを押されたとき。控えへ書き戻してから入れ替える */
+  private switchTo(category: string): void {
+    if (category === this.category) return;
+    if (!this.buckets.has(category)) return;
+    this.stashCurrent();
+    this.activate(category);
+  }
+
+  /**
+   * いま見ている分類を空にする。
+   *
+   * **足していく作りなので、片付ける口が要る。** 全部に手を付け終えても、
+   * 済んだものは薄くなって残り続ける。**確認してから消す**——見送ったものは
+   * ともかく、まだ見ていないものが混じっていることがある。
+   */
+  private async clearCurrentCategory(): Promise<void> {
+    const remaining =
+      this.items.filter(isRemaining).length +
+      this.contradictions.filter(isRemaining).length +
+      this.recordUpdates.filter(isRemaining).length;
+
+    const answer = await vscode.window.showWarningMessage(
+      `「${this.category}」の一覧を空にしますか？`,
+      {
+        modal: true,
+        detail:
+          remaining > 0
+            ? `まだ手を付けていないものが${remaining}件あります。\n本文は書き換わりません（一覧から消えるだけです）。`
+            : "本文は書き換わりません（一覧から消えるだけです）。",
+      },
+      "空にする"
+    );
+    if (answer !== "空にする") return;
+
+    this.buckets.delete(this.category);
+    // 残っている分類があれば、そちらへ移る。無ければ空のまま出す
+    const next = [...this.buckets.keys()][0];
+    this.items = [];
+    this.contradictions = [];
+    this.recordUpdates = [];
+    this.applyRecordUpdate = undefined;
+    if (next) {
+      this.activate(next);
+      return;
+    }
+    this.postItems();
   }
 
   private async jumpTo(id: string): Promise<void> {
@@ -1090,13 +1297,29 @@ function id2(item: ProposalViewItem): string {
 }
 
 /**
- * まだ作者が手を付けていないか。
+ * 「なぜ読みにくいか」の一文を決める。
  *
- * **適用・見送りは判断が済んでいる。** 失敗は片付いていないので残す。
+ * **AIの説明を優先し、使えなければ種類ごとの決まり文句へ落ちる。**
+ * 「空文字」「なし」のような、指示の言葉がそのまま返ってくる形は
+ * この作品で繰り返し起きている（`CLAUDE.md`）ので、種類の一語を
+ * なぞっただけのものも使えないものとして扱う。
  */
-function isRemaining(item: { status: string }): boolean {
-  return item.status === "pending" || item.status === "failed";
+function proposalDetail(issue: {
+  reason: string;
+  explanation?: string;
+}): string | undefined {
+  const written = issue.explanation?.trim();
+  if (written && written !== issue.reason && !PLACEHOLDER.test(written)) {
+    return written;
+  }
+  return explainProofreadReason(issue.reason);
 }
+
+/** 中身の無い言い方。これが来たら説明として扱わない */
+const PLACEHOLDER = /^(なし|無し|空文字|特になし|説明)$/;
+
+// 「まだ手を付けていないか」の判定は `core/proposalBuckets.ts` にある
+// （分類ごとの件数を数えるのにも使うため、VS Codeに依らない側へ置いた）
 
 function createNonce(): string {
   const chars =

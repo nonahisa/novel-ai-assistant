@@ -1,15 +1,24 @@
 import { describe, expect, test, vi, beforeEach } from "vitest";
 
 /**
- * 提案パネルの表示を切り替えたとき、前の中身が残らないこと。
+ * 提案パネルの中身の入れ替え。**逆向きの2つの決まりを、同時に守る。**
  *
- * **実際に残っていた**（2026-08-21、作者が実機で発見）。設定資料の更新を
+ * ## 画面には、いま選んでいる分類のものだけを出す
+ *
+ * **混ざっていた**（2026-08-21、作者が実機で発見）。設定資料の更新を
  * 表示したあとで誤字脱字を検知すると、見出しだけ「誤字脱字」に変わり、
  * 中身は前の更新のまま、件数も前のままだった。104件の指摘が1件も見えない。
- *
  * 描画は `recordUpdates` を最優先で出すのに、表示口5つのうち4つが
- * それを空にし忘れていた。**入れ物を増やしたときに書き忘れる形**なので、
- * 表示口ごとではなく「切り替えたら前のものが消える」ことを試す。
+ * それを空にし忘れていた。
+ *
+ * ## それでも、他の分類の作業は消さない
+ *
+ * **消えていた**（2026-08-22、作者の指摘）。誤字脱字を1件ずつ見ている
+ * 途中で推敲を実行すると、適用済み・見送り済みの判断も、まだ見ていない
+ * 指摘も、すべて失われた。
+ *
+ * **「表示を差し替える」と「持っているものを捨てる」は別である。**
+ * 分類ごとに置き場を持ち、出すのは1つだけにする（設計書6.11.3）。
  */
 
 const posted: Array<{ category: string; items: unknown[] }> = [];
@@ -168,7 +177,9 @@ describe("未処理が残っていることをタブに出す", () => {
    * **画面の件数とタブの印は、同じ数え方でなければならない。**
    * 別々に数えると、片方だけ直したときにずれる。
    */
-  function badgeOf(panel: ProposalPanel): { value: number } | undefined {
+  function badgeOf(
+    panel: ProposalPanel
+  ): { value: number; tooltip?: string } | undefined {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (panel as any).view?.badge;
   }
@@ -179,11 +190,35 @@ describe("未処理が残っていることをタブに出す", () => {
     expect(badgeOf(panel)?.value).toBe(2);
   });
 
-  test("結果が0件なら、印を消す", () => {
+  test("何も無ければ、印は出さない", () => {
+    const panel = panelWithView();
+    panel.showResults(work, []);
+    expect(badgeOf(panel)).toBeUndefined();
+  });
+
+  /**
+   * **0件だったからといって、前の結果を消さない**（設計書6.11.3）。
+   *
+   * 話を絞って2回に分けて実行することがある。2回目が0件でも、
+   * 1回目の指摘はまだ作者の手元にある。
+   */
+  test("同じ分類で0件が返っても、前の指摘は残る", () => {
     const panel = panelWithView();
     panel.showResults(work, [typo]);
     panel.showResults(work, []);
-    expect(badgeOf(panel)).toBeUndefined();
+    expect(badgeOf(panel)?.value).toBe(1);
+    expect(latest().items).toHaveLength(1);
+  });
+
+  /** 印には、どの分類に何件残っているかを書く（開くまで中身が見えないため） */
+  test("印の説明に、分類ごとの内訳を出す", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults(work, [{ ...typo, line: 9 }], "推敲");
+
+    expect(badgeOf(panel)?.value).toBe(2);
+    expect(badgeOf(panel)?.tooltip).toContain("誤字脱字 1件");
+    expect(badgeOf(panel)?.tooltip).toContain("推敲 1件");
   });
 
   test("設定資料の更新も数える", () => {
@@ -201,5 +236,163 @@ describe("未処理が残っていることをタブに出す", () => {
       (i) => i.status === "pending" || i.status === "failed"
     ).length;
     expect(badgeOf(panel)?.value).toBe(shown);
+  });
+});
+
+/**
+ * **他の検知を走らせても、それまでの作業が消えないこと**（設計書6.11.3）。
+ *
+ * 誤字脱字を1件ずつ見ている途中で推敲を実行すると、パネルの中身が丸ごと
+ * 入れ替わり、**適用済み・見送り済みの判断も、まだ見ていない指摘も、
+ * すべて失われていた**（2026-08-22、作者の指摘）。
+ */
+describe("分類ごとに分けて持つ", () => {
+  /** 画面の中身を触らずに、分類を切り替える（作者がタブを押したのと同じ） */
+  function selectCategory(panel: ProposalPanel, category: string): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (panel as any).handleMessage({ type: "selectCategory", category });
+  }
+
+  test("推敲を出しても、誤字脱字は残っている", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults(work, [{ ...typo, line: 20, reason: "冗長" }], "推敲");
+
+    expect(latest().category).toBe("推敲");
+    expect(latest().items).toHaveLength(1);
+
+    selectCategory(panel, "誤字脱字");
+    expect(latest().category).toBe("誤字脱字");
+    expect(latest().items).toHaveLength(1);
+    expect(latest().items[0]).toMatchObject({ suggestion: "走った" });
+  });
+
+  test("分類のタブに、残りの件数を添えて並べる", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults(work, [{ ...typo, line: 20 }, { ...typo, line: 21 }], "推敲");
+
+    const tabs = (latest() as unknown as { categories: Array<{ name: string; remaining: number; active: boolean }> })
+      .categories;
+    expect(tabs.map((t) => t.name)).toEqual(["誤字脱字", "推敲"]);
+    expect(tabs.find((t) => t.name === "誤字脱字")?.remaining).toBe(1);
+    expect(tabs.find((t) => t.name === "推敲")?.active).toBe(true);
+  });
+
+  test("分類が1つだけなら、タブは出さない", () => {
+    // 選ぶものが無いのに場所だけ取ると、下段の狭い画面がさらに狭くなる
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    expect(
+      (latest() as unknown as { categories: unknown[] }).categories
+    ).toEqual([]);
+  });
+
+  /**
+   * **作者が決めたものを、`pending` へ戻さない。**
+   * 戻すと、同じ直しをもう一度当てにいくことになる。
+   */
+  test("同じ分類をもう一度走らせても、済んだ判断は残る", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    // 1件目を見送った状態にする
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (panel as any).items[0].status = "dismissed";
+
+    panel.showResults(work, [typo, { ...typo, line: 9 }]);
+
+    const items = latest().items as Array<{ status: string; line: number }>;
+    expect(items).toHaveLength(2);
+    expect(items.find((i) => i.line === 3)?.status).toBe("dismissed");
+    expect(items.find((i) => i.line === 9)?.status).toBe("pending");
+  });
+
+  test("作品が変われば、前の作品の指摘は持ち越さない", () => {
+    // ファイルの場所ごと違うので、残しても開けない
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults({ ...work, id: "w2", title: "別の作品" }, [], "推敲");
+
+    expect(
+      (latest() as unknown as { categories: unknown[] }).categories
+    ).toEqual([]);
+    expect(latest().items).toEqual([]);
+  });
+});
+
+/**
+ * 推敲の指摘に添える説明（設計書6.11.4）。
+ *
+ * **適用ボタンの上の文が、その上の差分と同じ文だった**（2026-08-22、
+ * 作者の指摘）。誤字脱字は直す語が行の一部なので、行まるごとを添えると
+ * 前後が分かって役に立つ。**推敲は一文まるごとが対象**なので、同じ文が
+ * 2度並ぶだけだった。
+ *
+ * 出す言葉も「冗長」の一語しか無く、何と何の話なのか分からなかった。
+ */
+describe("推敲の説明", () => {
+  const proofread = {
+    filePath: "C:/小説/いじめられっ子/本文/001.txt",
+    chunkHash: "h1",
+    line: 12,
+    // 推敲は一文まるごとが対象。original と target が同じになる
+    original: "彼はまず最初に扉を開けた。",
+    target: "彼はまず最初に扉を開けた。",
+    suggestion: "彼はまず扉を開けた。",
+    reason: "冗長",
+    confidence: "medium" as const,
+  };
+
+  function detailOf(): string | undefined {
+    return (latest().items[0] as { detail?: string }).detail;
+  }
+
+  test("AIの説明があれば、それを出す", () => {
+    const panel = panelWithView();
+    panel.showResults(
+      work,
+      [{ ...proofread, explanation: "「まず」と「最初に」が同じ意味です" }],
+      "推敲"
+    );
+    expect(detailOf()).toBe("「まず」と「最初に」が同じ意味です");
+  });
+
+  /** **AIが説明を返さなかったから何も出ない、を作らない** */
+  test("説明が無ければ、種類ごとの決まり文句を出す", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [proofread], "推敲");
+    expect(detailOf()).toBe("同じ意味の言葉が重なっています");
+  });
+
+  test("種類の名前をなぞっただけの説明は使わない", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [{ ...proofread, explanation: "冗長" }], "推敲");
+    expect(detailOf()).toBe("同じ意味の言葉が重なっています");
+  });
+
+  test("中身の無い言い方も使わない", () => {
+    // 指示の言葉がそのまま返ってくる形は、この作品で繰り返し起きている
+    const panel = panelWithView();
+    panel.showResults(work, [{ ...proofread, explanation: "なし" }], "推敲");
+    expect(detailOf()).toBe("同じ意味の言葉が重なっています");
+  });
+
+  test("係り受け・同語反復・長文にも言葉がある", () => {
+    const panel = panelWithView();
+    for (const [reason, expected] of [
+      ["係り受け", "どこに掛かるかが2通りに読めます"],
+      ["同語反復", "近いところで同じ語が繰り返され、単調になっています"],
+      ["長文", "一文が長く、意味を取りにくくなっています"],
+    ]) {
+      panel.showResults(work, [{ ...proofread, reason }], "推敲");
+      expect(detailOf(), reason).toBe(expected);
+    }
+  });
+
+  /** 誤字脱字の `reason` は説明そのものなので、足すものは無い */
+  test("誤字脱字には、余計な説明を足さない", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    expect(detailOf()).toBeUndefined();
   });
 });
