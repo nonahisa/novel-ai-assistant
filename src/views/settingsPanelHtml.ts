@@ -119,6 +119,21 @@ input:focus, textarea:focus, select:focus {
 /* 高さを中身に合わせて広げる欄があるので、下限は小さくしておく */
 textarea { resize: vertical; min-height: 32px; }
 #list { flex: 1; overflow-y: auto; }
+/*
+ * 一覧の下に置く操作。**いま選んでいる1件ではなく、資料ぜんぶに効く**ので、
+ * 一覧の中へ混ぜず、区切って下に据える
+ */
+#apply-ruby {
+  margin: 6px 8px 8px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  font-size: inherit;
+}
+#apply-ruby:hover { background: var(--vscode-button-secondaryHoverBackground); }
 #list .item {
   padding: 6px 10px;
   cursor: pointer;
@@ -321,6 +336,13 @@ button.danger:hover {
     <div id="tabs"></div>
     <input id="search" type="text" placeholder="名前で絞り込む">
     <div id="list"></div>
+    <!--
+      **資料の読み仮名を、本文のルビにする**（設計書6.12.5）。
+      一覧の下に置くのは、これが「いま選んでいる1件」ではなく
+      **資料ぜんぶ**に効く操作だからである
+    -->
+    <button id="apply-ruby" type="button"
+      title="資料の読み仮名を、本文にルビとして振ります（対象の話は次の画面で選べます）">ルビを追加</button>
   </div>
   <div id="detail">
     <button id="reopen" type="button" title="一覧を出す">▶ 一覧を出す</button>

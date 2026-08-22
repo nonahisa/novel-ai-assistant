@@ -662,11 +662,36 @@ export class SettingsPanel {
         case "retire":
           await this.handleRetire(message.kind, message.id);
           return;
+        case "applyRuby":
+          await this.handleApplyRuby();
+          return;
       }
     } catch (error) {
       this.setBusy(false);
       this.post({ type: "error", message: describeError(error) });
     }
+  }
+
+  /**
+   * 資料の読み仮名を、本文のルビとして振る（設計書6.12.5）。
+   *
+   * **変わるのは原稿のほうである。** 設定資料の画面から押すが、
+   * 書き換わるのは本文なので、対象の話も入れ方も、押したあとに選ばせる。
+   *
+   * 種類をまたいで集める——人物だけでなく、能力や場所の名前にも
+   * 読み仮名は入っている。
+   */
+  private async handleApplyRuby(): Promise<void> {
+    const { applySettingsRuby, collectRubyTerms } = await import(
+      "./applySettingsRuby.js"
+    );
+    const terms = collectRubyTerms([
+      ...this.characters,
+      ...this.abilities,
+      ...this.locations,
+      ...this.organizations,
+    ]);
+    await applySettingsRuby(this.work, terms);
   }
 
   private postDetail(kind: SettingsKind, id: string): void {
@@ -1540,6 +1565,8 @@ type PanelMessage =
   | { type: "deleteNote"; kind: SettingsKind; id: string; noteId: string }
   | { type: "chat"; kind: SettingsKind; id: string; question: string }
   | { type: "retire"; kind: SettingsKind; id: string }
+  /** 資料の読み仮名を、本文のルビとして振る（設計書6.12.5） */
+  | { type: "applyRuby" }
   | {
       type: "promoteConflict";
       kind: SettingsKind;
