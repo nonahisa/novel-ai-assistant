@@ -118,6 +118,40 @@ describe("looksLikeWork", () => {
     const folder = await makeWork(root, "ただのフォルダー");
     expect((await looksLikeWork(folder)).isWork).toBe(false);
   });
+
+  /**
+   * **作者の運用がこの形だった**（2026-08-22、実機で判明）。
+   *
+   * 「本文」フォルダを作らず、作品フォルダーへ直に `001.txt` を置く。
+   * ここを見ていなかったため、**作品集の中の作品が1つも作品と認識されず**、
+   * 作品集まるごとが1作品として登録された（328ファイル・996,040字という、
+   * 複数作品の話が混ざった一覧になった）。
+   */
+  it("話数ファイルが直下に並んでいれば作品と見なす", async () => {
+    const folder = path.join(root, "直に話数を置く作品");
+    await mkdir(folder, { recursive: true });
+    await writeFile(path.join(folder, "001.txt"), "本文", "utf-8");
+    await writeFile(path.join(folder, "002.txt"), "本文", "utf-8");
+    expect((await looksLikeWork(folder)).isWork).toBe(true);
+  });
+
+  it("プロローグだけでも作品と見なす", async () => {
+    const folder = path.join(root, "プロローグだけの作品");
+    await mkdir(folder, { recursive: true });
+    await writeFile(path.join(folder, "プロローグ.txt"), "本文", "utf-8");
+    expect((await looksLikeWork(folder)).isWork).toBe(true);
+  });
+
+  it("話数として読めないファイルだけなら作品ではない", async () => {
+    // **作品集そのものを作品と誤認しない。**
+    // 作品集の直下にも README.md や characters.json は置かれる
+    const folder = path.join(root, "作品集らしい置き場");
+    await mkdir(folder, { recursive: true });
+    await writeFile(path.join(folder, "README.md"), "説明", "utf-8");
+    await writeFile(path.join(folder, "characters.json"), "{}", "utf-8");
+    await writeFile(path.join(folder, "プロンプト雛形.txt"), "雛形", "utf-8");
+    expect((await looksLikeWork(folder)).isWork).toBe(false);
+  });
 });
 
 describe("scanCollection", () => {

@@ -1,10 +1,13 @@
 import * as path from "./paths";
+import * as vscode from "vscode";
 import { isDirectory, listDirectory, pathExists } from "./fileSystem";
+import { parseEpisodeFileName } from "./episodeParser";
 import {
   AIWRITER_DIR,
   CONFIG_FILE,
   DEFAULT_MANUSCRIPT_DIR,
   DEFAULT_SETTINGS_DIR,
+  type EpisodeKind,
 } from "../models/types";
 
 /**
@@ -106,8 +109,51 @@ export async function looksLikeWork(
   const hasSettings = await isDirectory(
     path.join(folderPath, DEFAULT_SETTINGS_DIR)
   );
-  return { isWork: hasManuscript || hasSettings, hasConfig: false };
+  if (hasManuscript || hasSettings) return { isWork: true, hasConfig: false };
+
+  // **話数ファイルが直下に並んでいる形もある**（2026-08-22、作者の環境で判明）。
+  //
+  // 「本文」フォルダを作らず、作品フォルダーへ直に `001.txt` を置く運用である。
+  // ここを見ていなかったため、**作品集の中の作品が1つも作品と認識されず**、
+  // 作品集まるごとが1作品として登録された（328ファイル・996,040字という、
+  // 複数作品の話が混ざった一覧になった）。
+  return { isWork: await hasEpisodeFiles(folderPath), hasConfig: false };
 }
+
+/**
+ * 直下に話数として読めるファイルがあるか。
+ *
+ * **作品集そのものを作品と誤認しない。** 作品集の直下にも `README.md` や
+ * `characters.json` は置かれるが、それらは話数として読めない。
+ */
+async function hasEpisodeFiles(folderPath: string): Promise<boolean> {
+  let entries: [string, vscode.FileType][];
+  try {
+    entries = await vscode.workspace.fs.readDirectory(path.toUri(folderPath));
+  } catch {
+    return false;
+  }
+
+  for (const [name, kind] of entries) {
+    if (kind !== vscode.FileType.File) continue;
+    const extension = path.extname(name).toLowerCase();
+    if (extension !== ".txt" && extension !== ".md") continue;
+    const parsed = parseEpisodeFileName(name);
+
+    // 話数が読めれば本文
+    if (parsed.chapterStart !== null) return true;
+    // 話数は無くても、種別が読めれば本文（`プロローグ.txt` など）
+    //
+    // **「本編以外」で通してはいけない。** 読み取れなかったものは `不明` に
+    // なるので、`README.md` や `プロンプト雛形.txt` まで本文として数えて
+    // しまい、**作品集そのものを作品と誤認する**（テストが捕まえた）
+    if (NAMED_KINDS.has(parsed.kind)) return true;
+  }
+  return false;
+}
+
+/** 話数が無くても本文と分かる種別。`不明` と `本編` は含めない */
+const NAMED_KINDS = new Set<EpisodeKind>(["プロローグ", "エピローグ", "幕間"]);
 
 /**
  * 作品集の中の作品を探す。
