@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { pickFolder } from "./features/pickFolder";
 import { fromUri } from "./core/paths";
 import * as path from "./core/paths";
+import { describeSyncTarget } from "./core/syncTarget";
 import {
   WorkRegistry,
   readWorkConfig,
@@ -1047,19 +1048,26 @@ export async function activate(
         const { nextSetupStep, runSetupStep } = await import(
           "./features/gitOnboarding.js"
         );
+        // **どこを1つの置き場にするかを先に決める**（設計書5.7.9）。
+        // 既定は「1つのリポジトリに複数の作品」なので、隣に作品が並んで
+        // いれば、まとめる側を先に出して選んでもらう
+        const { resolveSyncTarget } = await import(
+          "./features/resolveSyncTarget.js"
+        );
+        const target = await resolveSyncTarget(work, registry.list());
+        if (!target) return;
+
         // 状態を見てから、足りない一手だけを案内する（設計書5.5.4）
-        const status = await gitSync.refresh(work, {
-          fetch: false,
-          notify: false,
-        });
+        const { readSyncStatus } = await import("./core/git.js");
+        const status = await readSyncStatus(target.folderPath);
         const step = nextSetupStep(status);
         if (!step) {
           vscode.window.showInformationMessage(
-            `「${work.title}」の同期の準備はすでに整っています。${describeStatus(status)}`
+            `${describeSyncTarget(target)} の同期の準備はすでに整っています。${describeStatus(status)}`
           );
           return;
         }
-        if (await runSetupStep(work, status)) {
+        if (await runSetupStep(target, status)) {
           await gitSync.refresh(work, { fetch: true, notify: false });
         }
       }

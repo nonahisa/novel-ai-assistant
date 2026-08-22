@@ -17,6 +17,7 @@ import {
 } from "../core/git";
 import { describeNetworkFailure } from "../core/gitSetup";
 import { logFailure, showLog } from "../core/logger";
+import { buildSyncTarget, describeCompanions } from "../core/syncTarget";
 import { withProgress } from "../views/progress";
 
 // ツリーのバッジ用は core/gitSyncStatusText.ts へ切り出した。
@@ -137,6 +138,16 @@ export class GitSyncMonitor implements vscode.Disposable {
 
   statusFor(workId: string): GitSyncStatus | undefined {
     return this.statuses.get(workId);
+  }
+
+  /**
+   * 登録済みの作品を、外から見えるようにする。
+   *
+   * **同じ置き場に何作品入っているかを数えるのに要る**（設計書5.7.9）。
+   * 登録簿そのものを渡すと、この層の外から書き換えられてしまう。
+   */
+  knownWorks(): WorkEntry[] {
+    return this.registry.list();
   }
 
   /** 起動時に全作品を一度確かめる */
@@ -403,9 +414,16 @@ ${reason}` : ""}`,
       (await this.refresh(work, { fetch: false, notify: false }));
     if (status.kind !== "tracked") return false;
 
-    // 送信は外部（GitHub）へ出る操作なので、件数を見せてから確認する
+    // 送信は外部（GitHub）へ出る操作なので、件数を見せてから確認する。
+    // **同じ置き場の他の作品も一緒に出ていく**（設計書5.7.9）。作品名が
+    // 1つしか出ていないと「これだけが送られる」と読めるので、名前を挙げる
+    const companions = describeCompanions(
+      buildSyncTarget(status.root, this.registry.list()),
+      work
+    );
     const confirm = await vscode.window.showInformationMessage(
-      `「${work.title}」のコミット ${status.ahead} 件を ${status.upstream} へ送信します。`,
+      `「${work.title}」のコミット ${status.ahead} 件を ${status.upstream} へ送信します。` +
+        (companions ? `\n${companions}` : ""),
       "送信する",
       "中止"
     );
@@ -625,14 +643,30 @@ export async function showGitSyncActions(
   if (!picked || !("action" in picked)) return;
 
   if (picked.action === "commit") {
-    if (await recordChanges(work)) {
+    // **記録は置き場まるごとに効く**（`git add -A` はリポジトリ全体を見る）。
+    // 作品名だけを出すと、その作品だけが記録されると読めてしまう
+    const target = buildSyncTarget(
+      "root" in status && status.root ? status.root : work.folderPath,
+      monitor.knownWorks()
+    );
+    if (await recordChanges(target)) {
       await monitor.refresh(work, { fetch: false, notify: false });
     }
     return;
   }
   if (picked.action === "setup") {
+    // **どこを1つの置き場にするかを先に決める**（設計書5.7.9）。
+    // 隣に作品が並んでいれば、まとめる側を先に出して選んでもらう
+    const { resolveSyncTarget } = await import("./resolveSyncTarget.js");
+    const target = await resolveSyncTarget(work, monitor.knownWorks());
+    if (!target) return;
+    // 置き場が作品フォルダーと違うなら、状態もそちらで見直す
+    const scoped =
+      target.folderPath === work.folderPath
+        ? status
+        : await readSyncStatus(target.folderPath);
     // 1手進むごとに状態が変わるので、続けて次の一手を出す
-    if (await runSetupStep(work, status)) {
+    if (await runSetupStep(target, scoped)) {
       await monitor.refresh(work, { fetch: false, notify: false });
       await showGitSyncActions(monitor, work);
     }

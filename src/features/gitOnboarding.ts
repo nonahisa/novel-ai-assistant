@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
-import type { WorkEntry } from "../models/types";
+import type { SyncTarget } from "../core/syncTarget";
+import { describeSyncTarget } from "../core/syncTarget";
 import { runGit, type GitCommandRunner, type GitSyncStatus } from "../core/git";
 import {
   addRemote,
@@ -102,19 +103,19 @@ export function canRecordChanges(status: GitSyncStatus): boolean {
  * 記録のたびにAIを呼ぶと、料金が執筆の回数に比例してかかる。
  */
 export async function recordChanges(
-  work: WorkEntry,
+  target: SyncTarget,
   run: GitCommandRunner = runGit
 ): Promise<boolean> {
-  const count = await countTrackableFiles(work.folderPath, run);
+  const count = await countTrackableFiles(target.folderPath, run);
   if (count === 0) {
     vscode.window.showInformationMessage(
-      `${work.title} に記録していない変更はありません。`
+      `${target.label} に記録していない変更はありません。`
     );
     return false;
   }
 
-  if (!(await hasCommitIdentity(work.folderPath, run))) {
-    if (!(await askCommitIdentity(work, run))) return false;
+  if (!(await hasCommitIdentity(target.folderPath, run))) {
+    if (!(await askCommitIdentity(target, run))) return false;
   }
 
   const defaultMessage = `${formatStamp(new Date())} の執筆（${count}件）`;
@@ -128,13 +129,13 @@ export async function recordChanges(
   });
   if (!message) return false;
 
-  const committed = await commitAll(work.folderPath, message.trim(), run);
+  const committed = await commitAll(target.folderPath, message.trim(), run);
   if (!committed.ok) {
     reportFailure("変更の記録", committed.detail);
     return false;
   }
 
-  logStep(`変更を記録: ${work.title}（${count}件）`);
+  logStep(`変更を記録: ${target.label}（${count}件）`);
   vscode.window.showInformationMessage(
     `${count} 件の変更を記録しました。`
   );
@@ -152,7 +153,7 @@ function formatStamp(now: Date): string {
 
 /** 「次の一手」を実行する。進んだら true */
 export async function runSetupStep(
-  work: WorkEntry,
+  target: SyncTarget,
   status: GitSyncStatus,
   run: GitCommandRunner = runGit
 ): Promise<boolean> {
@@ -161,11 +162,11 @@ export async function runSetupStep(
       await guideGitInstall();
       return false;
     case "not_a_repo":
-      return startTracking(work, run);
+      return startTracking(target, run);
     case "no_remote":
-      return connectRemote(work, run);
+      return connectRemote(target, run);
     case "no_upstream":
-      return firstPush(work, status.branch, run);
+      return firstPush(target, status.branch, run);
     default:
       return false;
   }
@@ -208,30 +209,38 @@ async function guideGitInstall(): Promise<void> {
 
 /** git init と初回コミット。ここでは外部へ何も送らない */
 async function startTracking(
-  work: WorkEntry,
+  target: SyncTarget,
   run: GitCommandRunner
 ): Promise<boolean> {
+  // **何が1つの置き場になるのかを、名前で言う**（設計書5.7.9）。
+  // 複数の作品が入る形が既定なので、「作品フォルダーに」とだけ書くと
+  // 作品ごとに分かれると読めてしまう
+  const scope =
+    target.works.length > 1
+      ? `「${target.label}」に履歴を作り、中の${target.works.length}作品をまとめて残します。\n`
+      : "作品フォルダーに履歴を作り、今ある原稿を1つ目の記録として残します。\n";
+
   const answer = await vscode.window.showInformationMessage(
-    `${work.title} をGitで管理しますか？\n` +
-      "作品フォルダーに履歴を作り、今ある原稿を1つ目の記録として残します。\n" +
+    `${describeSyncTarget(target)} をGitで管理しますか？\n` +
+      scope +
       "この時点ではまだ外部へ何も送りません。",
     "始める",
     "やめる"
   );
   if (answer !== "始める") return false;
 
-  const initialized = await initRepository(work.folderPath, run);
+  const initialized = await initRepository(target.folderPath, run);
   if (!initialized.ok) {
     reportFailure("Gitの初期化", initialized.detail);
     return false;
   }
 
   // 名前とメールが無いとコミットが失敗する。初めての人はここで必ず詰まる
-  if (!(await hasCommitIdentity(work.folderPath, run))) {
-    if (!(await askCommitIdentity(work, run))) return false;
+  if (!(await hasCommitIdentity(target.folderPath, run))) {
+    if (!(await askCommitIdentity(target, run))) return false;
   }
 
-  const count = await countTrackableFiles(work.folderPath, run);
+  const count = await countTrackableFiles(target.folderPath, run);
   const confirm = await vscode.window.showInformationMessage(
     `${count} 件のファイルを1つ目の記録として残します。\n` +
       "（キャッシュなど、同期しない設定のものは除いています）",
@@ -241,8 +250,8 @@ async function startTracking(
   if (confirm !== "記録する") return false;
 
   const committed = await commitAll(
-    work.folderPath,
-    `初回コミット: ${work.title}`,
+    target.folderPath,
+    `初回コミット: ${target.label}`,
     run
   );
   if (!committed.ok) {
@@ -250,16 +259,16 @@ async function startTracking(
     return false;
   }
 
-  logStep(`Gitで管理を開始: ${work.title}（${count}件）`);
+  logStep(`Gitで管理を開始: ${target.label}（${count}件）`);
   vscode.window.showInformationMessage(
-    `${work.title} をGitで管理し始めました。次はGitHubのリポジトリとつなげます。`
+    `${target.label} をGitで管理し始めました。次はGitHubのリポジトリとつなげます。`
   );
   return true;
 }
 
 /** 名前とメールを聞いて、この作品フォルダにだけ設定する */
 async function askCommitIdentity(
-  work: WorkEntry,
+  target: SyncTarget,
   run: GitCommandRunner
 ): Promise<boolean> {
   await vscode.window.showInformationMessage(
@@ -290,7 +299,7 @@ async function askCommitIdentity(
   if (!email) return false;
 
   const result = await setCommitIdentity(
-    work.folderPath,
+    target.folderPath,
     name.trim(),
     email.trim(),
     run
@@ -309,7 +318,7 @@ async function askCommitIdentity(
  * 要らないので最優先で出す。GitHub CLI（gh）は入っていれば選べる代替経路として残す。
  */
 async function connectRemote(
-  work: WorkEntry,
+  target: SyncTarget,
   run: GitCommandRunner
 ): Promise<boolean> {
   const canUseGh = await ghAvailable();
@@ -353,7 +362,7 @@ async function connectRemote(
   });
 
   const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
-    title: `${work.title} の送り先`,
+    title: `${target.label} の送り先`,
     placeHolder: "GitHubへ送るか、この端末だけで使うかを決めます",
     ignoreFocusOut: true,
   });
@@ -364,22 +373,22 @@ async function connectRemote(
     // アカウントを持たない作者や、原稿を外部へ置きたくない作者がいる。
     // 履歴だけでも「消してしまった原稿を戻す」という価値がある
     vscode.window.showInformationMessage(
-      `${work.title} は、この端末だけで履歴を残します。\n` +
+      `${target.label} は、この端末だけで履歴を残します。\n` +
         "変更を残したいときは「変更を記録する」を実行してください。"
     );
     return false;
   }
 
   if (picked.action === "vscodeAuth") {
-    const name = await askRepositoryName(work);
+    const name = await askRepositoryName(target);
     if (!name) return false;
-    return createRepositoryViaVscodeAccount(work, name, run);
+    return createRepositoryViaVscodeAccount(target, name, run);
   }
 
   if (picked.action === "gh") {
-    const name = await askRepositoryName(work);
+    const name = await askRepositoryName(target);
     if (!name) return false;
-    return createRepositoryViaGh(work, name);
+    return createRepositoryViaGh(target, name);
   }
 
   const url = await askText({
@@ -390,7 +399,7 @@ async function connectRemote(
   });
   if (!url) return false;
 
-  const added = await addRemote(work.folderPath, url.trim(), run);
+  const added = await addRemote(target.folderPath, url.trim(), run);
   if (!added.ok) {
     reportFailure("送り先の登録", added.detail);
     return false;
@@ -401,8 +410,8 @@ async function connectRemote(
 }
 
 /** 新しいリポジトリの名前を聞く。日本語の作品名からは作れないので空欄から入力してもらう */
-async function askRepositoryName(work: WorkEntry): Promise<string | undefined> {
-  const suggested = suggestRepositoryName(work.title);
+async function askRepositoryName(target: SyncTarget): Promise<string | undefined> {
+  const suggested = suggestRepositoryName(target.label);
   const name = await askText({
     title: "新しいリポジトリの名前",
     value: suggested,
@@ -425,7 +434,7 @@ async function askRepositoryName(work: WorkEntry): Promise<string | undefined> {
  * （ghと違い、API呼び出し自体はリモート登録まで面倒を見てくれないため）。
  */
 async function createRepositoryViaVscodeAccount(
-  work: WorkEntry,
+  target: SyncTarget,
   name: string,
   run: GitCommandRunner
 ): Promise<boolean> {
@@ -447,7 +456,7 @@ async function createRepositoryViaVscodeAccount(
     return false;
   }
 
-  const added = await addRemote(work.folderPath, created.cloneUrl, run);
+  const added = await addRemote(target.folderPath, created.cloneUrl, run);
   if (!added.ok) {
     reportFailure("送り先の登録", added.detail);
     return false;
@@ -459,7 +468,7 @@ async function createRepositoryViaVscodeAccount(
   const remembered = await rememberGithubCredential(
     token,
     created.cloneUrl,
-    work.folderPath
+    target.folderPath
   );
   logStep(
     `GitHubにリポジトリを作成（VS Codeアカウント）: ${name}（private）` +
@@ -477,11 +486,11 @@ async function createRepositoryViaVscodeAccount(
 
 /** GitHub CLI（gh）でリポジトリを作る。remoteの登録もgh側で完結する */
 async function createRepositoryViaGh(
-  work: WorkEntry,
+  target: SyncTarget,
   name: string
 ): Promise<boolean> {
   const created = await withProgress("リポジトリを作っています", () =>
-    ghCreateRepository(work.folderPath, name)
+    ghCreateRepository(target.folderPath, name)
   );
   if (!created.ok) {
     reportFailure("リポジトリの作成", created.detail);
@@ -496,11 +505,11 @@ async function createRepositoryViaGh(
 
 /** はじめての送信。原稿が外部へ渡ることを明示して確認する */
 async function firstPush(
-  work: WorkEntry,
+  target: SyncTarget,
   branch: string,
   run: GitCommandRunner
 ): Promise<boolean> {
-  if (!(await hasCommits(work.folderPath, run))) {
+  if (!(await hasCommits(target.folderPath, run))) {
     vscode.window.showWarningMessage(
       "まだ記録が1つもありません。先に「Gitで管理を始める」を実行してください。"
     );
@@ -509,14 +518,22 @@ async function firstPush(
 
   const remote = await run(
     ["remote", "get-url", "origin"],
-    work.folderPath,
+    target.folderPath,
     15_000
   );
-  const target = remote.stdout.trim() || "（送り先が取得できませんでした）";
+  const remoteUrl = remote.stdout.trim() || "（送り先が取得できませんでした）";
+
+  // **何作品ぶんが出ていくのかを、送る前に言う。**
+  // 1つの置き場に複数の作品が入っているのが既定の形なので（設計書5.7.9）、
+  // 作品名を1つだけ出すと「これだけが送られる」と読めてしまう
+  const scope =
+    target.works.length > 1
+      ? `\n入っている作品: ${target.works.map((entry) => entry.title).join("・")}`
+      : "";
 
   const confirm = await vscode.window.showWarningMessage(
-    `${work.title} をGitHubへ送ります。\n\n` +
-      `送り先: ${target}\n\n` +
+    `${describeSyncTarget(target)} をGitHubへ送ります。\n\n` +
+      `送り先: ${remoteUrl}${scope}\n\n` +
       "原稿と設定資料が外部のサービスへ渡ります。 " +
       "送り先が非公開かどうかを、GitHubの画面で確かめてから実行してください。",
     { modal: true },
@@ -525,16 +542,16 @@ async function firstPush(
   if (confirm !== "送信する") return false;
 
   const result = await withProgress("GitHubへ送信しています", () =>
-    pushSetUpstream(work.folderPath, branch, run)
+    pushSetUpstream(target.folderPath, branch, run)
   );
   if (!result.ok) {
     reportFailure("送信", result.detail);
     return false;
   }
 
-  logStep(`はじめての送信: ${work.title} → ${target}（${branch}）`);
+  logStep(`はじめての送信: ${target.label} → ${remoteUrl}（${branch}）`);
   vscode.window.showInformationMessage(
-    `${work.title} を送信しました。以後は「取り込む」「送信する」が使えます。`
+    `${target.label} を送信しました。以後は「取り込む」「送信する」が使えます。`
   );
   return true;
 }

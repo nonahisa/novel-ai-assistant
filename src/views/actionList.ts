@@ -164,6 +164,21 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         label: "GitHubで作品管理",
         icon: "github",
         items: [
+          // **GitHubへ載せる入口を、ここに置く**（設計書5.7.9）。
+          // 以前は「拡張機能の設定 → セットアップを開始」の中にあり、
+          // 作者が作品管理の下を探して見つけられなかった（2026-08-22）
+          {
+            kind: "action",
+            command: "novelai.setupGithub",
+            label: "GitHubに置く（はじめて）",
+            icon: "repo-push",
+            requiresWork: true,
+            detail:
+              "リポジトリの作成から最初の送信までを順に案内します。" +
+              "**同じフォルダーに並んでいる作品は、まとめて1つの置き場に入ります**" +
+              "（この作品だけを分けることもできます）。" +
+              "**新しく作るリポジトリは非公開に固定します。**",
+          },
           {
             kind: "action",
             command: "novelai.gitSync",
@@ -172,7 +187,8 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             requiresWork: true,
             detail:
               "別の環境の変更が未取得か、この環境の変更が未送信かを確認します。" +
-              "取り込みと送信もここから行えます。",
+              "取り込みと送信もここから行えます。" +
+              "**同じ置き場に入っている作品は、まとめて取り込み・送信します。**",
           },
           {
             kind: "action",
@@ -834,17 +850,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "無料でオフラインでも使えるOllamaを、導入から使える状態まで案内します。" +
               "入っているか・起動しているか・モデルがあるかを順に確かめ、" +
               "足りないものだけを案内します。",
-          },
-          {
-            kind: "action",
-            command: "novelai.setupGithub",
-            label: "GitHubのセットアップ",
-            icon: "github",
-            requiresWork: true,
-            detail:
-              "作品をGitHubで同期できるようにします。" +
-              "リポジトリの作成から最初の送信までを順に案内します。" +
-              "**新しく作るリポジトリは非公開に固定します。**",
           },
         ],
       },
