@@ -8,7 +8,9 @@ vi.mock("vscode", () => ({
 }));
 
 import {
+  describeHistoryNotCarried,
   describeMergePlans,
+  describeOriginalsNote,
   planMerge,
   shouldSkip,
 } from "../../src/core/libraryMerge";
@@ -166,5 +168,66 @@ describe("作者に見せる要約", () => {
       none
     );
     expect(describeMergePlans(plans)).not.toContain("まとめられない");
+  });
+});
+
+/**
+ * **履歴を引き継がないことを、操作のときに伝える**（設計書5.7.10）。
+ *
+ * 作者の確認（2026-08-22）：「引き継がないことを操作時にユーザーに知らせて
+ * ますか？」——実行前の確認には書いてあったが、**終わったあとの報告では
+ * 「元のフォルダーはご自身で消してください」とだけ言っていた。**
+ *
+ * 履歴は写していないので、**元を消すと書き換えの記録がまるごと失われる。**
+ * 「消してよい」と言う前に、消すと何を失うかを言わなければならない。
+ * 画面の中に埋めておくと書き換えたときに落ちても気づかないので、ここで見張る。
+ */
+describe("履歴を引き継がないことを伝える", () => {
+  describe("実行前の確認", () => {
+    it("履歴を持つ作品を名指しで挙げ、写らないと言う", () => {
+      const lines = describeHistoryNotCarried(["いじめられっ子", "教科書チート"]).join(
+        "\n"
+      );
+      expect(lines).toContain("写りません");
+      expect(lines).toContain("いじめられっ子");
+      expect(lines).toContain("教科書チート");
+      // どこを見れば過去の版があるかまで言う
+      expect(lines).toContain("元のフォルダー");
+    });
+
+    /** Gitを使わずに書いている作品に言っても、読ませるだけ無駄である */
+    it("履歴を持つ作品が無ければ、何も言わない", () => {
+      expect(describeHistoryNotCarried([])).toEqual([]);
+    });
+  });
+
+  describe("実行後の報告", () => {
+    /**
+     * **ここが抜けていた。** 「ご自身で消してください」だけを言うと、
+     * 取り返しのつかない操作へ背中を押すことになる。
+     */
+    it("消すと履歴を失う作品があるなら、消す前に警告する", () => {
+      const lines = describeOriginalsNote(["いじめられっ子"]).join("\n");
+      expect(lines).toContain("消す前に");
+      expect(lines).toContain("いじめられっ子");
+      expect(lines).toContain("過去の版に戻せなくなります");
+      // 迂闊に消すよう勧めない
+      expect(lines).not.toContain("ご自身で消してください");
+    });
+
+    it("履歴が無ければ、これまでどおり消してよいと伝える", () => {
+      const lines = describeOriginalsNote([]).join("\n");
+      expect(lines).toContain("そのまま残っています");
+      expect(lines).toContain("ご自身で消してください");
+    });
+
+    it("どちらの場合も、元が残っていることは必ず言う", () => {
+      // 「まとめました」だけだと、元が消えたのか残っているのか分からない
+      for (const titles of [[], ["いじめられっ子"]]) {
+        expect(describeOriginalsNote(titles).join("\n")).toContain(
+          "元のフォルダーはそのまま残っています"
+        );
+      }
+    });
   });
 });

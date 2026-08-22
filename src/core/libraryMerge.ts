@@ -117,6 +117,54 @@ export function shouldSkip(relativePath: string): boolean {
   return false;
 }
 
+/**
+ * 実行前に、履歴を引き継がないことを伝える文（設計書5.7.10）。
+ *
+ * **履歴を持つ作品があるときだけ言う。** Gitを使わずに書いている作品に
+ * 「履歴は残ります」と言っても、読ませるだけ無駄である。
+ *
+ * 画面の文言をここへ置いたのは、**見張れるようにするため。** これは
+ * 「言ったか言わなかったか」が後で効いてくる類の説明で、画面の中に
+ * 埋めておくと、書き換えたときに落ちても誰も気づかない。
+ */
+export function describeHistoryNotCarried(
+  titlesWithHistory: readonly string[]
+): string[] {
+  if (titlesWithHistory.length === 0) return [];
+  return [
+    "",
+    `書き換えの記録（履歴）は写りません。${titlesWithHistory.join("・")} の記録は`,
+    "元のフォルダーに残り、新しい書庫ではまとめた時点からの記録が始まります。",
+    "過去の版が要るときは、元のフォルダーを開いてください。",
+  ];
+}
+
+/**
+ * 実行後、元のフォルダーの扱いを伝える文（設計書5.7.10）。
+ *
+ * **「消してよい」と言う前に、消すと何を失うかを言う。** 履歴は写して
+ * いないので、元を消すと**書き換えの記録がまるごと失われる。** そこを
+ * 黙って「ご自身で消してください」とだけ書くのは、取り返しのつかない
+ * 操作へ背中を押すことになる。
+ */
+export function describeOriginalsNote(
+  titlesWithHistory: readonly string[]
+): string[] {
+  if (titlesWithHistory.length === 0) {
+    return [
+      "元のフォルダーはそのまま残っています。中身を見比べて納得できたら、",
+      "ご自身で消してください（作品一覧からは外れています）。",
+    ];
+  }
+  return [
+    "元のフォルダーはそのまま残っています（作品一覧からは外れています）。",
+    "",
+    `消す前にご注意ください。${titlesWithHistory.join("・")} は書き換えの記録（履歴）を`,
+    "持っていますが、それは写していません。元のフォルダーを消すと、",
+    "過去の版に戻せなくなります。",
+  ];
+}
+
 /** 作者に見せる要約 */
 export function describeMergePlans(plans: readonly MergePlan[]): string {
   const movable = plans.filter((plan) => !plan.blocked);

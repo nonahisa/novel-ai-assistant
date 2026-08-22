@@ -3,7 +3,9 @@ import * as path from "../core/paths";
 import { sha256Bytes } from "../core/hash";
 import type { WorkRegistry } from "../core/workRegistry";
 import {
+  describeHistoryNotCarried,
   describeMergePlans,
+  describeOriginalsNote,
   planMerge,
   shouldSkip,
   type MergePlan,
@@ -36,6 +38,8 @@ import { withCancellableProgress } from "../views/progress";
 
 /** 1件の結果 */
 interface MergeOutcome {
+  /** どの作品か。**題名では引かない**（同じ題名の作品がありうる） */
+  workId: string;
   title: string;
   ok: boolean;
   detail?: string;
@@ -80,12 +84,38 @@ export async function mergeIntoLibrary(
   const chosen = await chooseWorks(movable, plans, library);
   if (!chosen || chosen.length === 0) return false;
 
-  if (!(await confirm(chosen, library))) return false;
+  // **履歴を持っている作品を、先に数えておく。** 引き継がないことを
+  // 伝えるためだけでなく、**終わったあと「元を消してよい」と言う前に
+  // 釘を刺す**のに要る（設計書5.7.10）
+  const withHistory = await worksWithHistory(chosen);
+
+  if (!(await confirm(chosen, library, withHistory))) return false;
 
   const outcomes = await runMerge(chosen);
   await reregister(registry, outcomes, chosen);
-  await report(outcomes, library);
+  await report(outcomes, library, withHistory);
   return outcomes.some((outcome) => outcome.ok);
+}
+
+/**
+ * 書き換えの記録（履歴）を持っている作品。
+ *
+ * **持っていない作品に「履歴は残ります」と言わない。** Gitを使わずに
+ * 書いている作品には関係のない話で、読ませるだけ無駄である。
+ *
+ * `.git` はフォルダーのことも、ファイルのこともある（別の場所を指す形）。
+ * どちらでも「ある」と見なせばよいので `stat` で確かめる。
+ */
+async function worksWithHistory(
+  plans: readonly MergePlan[]
+): Promise<Set<string>> {
+  const found = new Set<string>();
+  for (const plan of plans) {
+    if (await exists(path.join(plan.work.folderPath, ".git"))) {
+      found.add(plan.work.id);
+    }
+  }
+  return found;
 }
 
 /** 書庫の直下にすでにある名前（比較用に正規化して返す） */
@@ -144,8 +174,17 @@ async function chooseWorks(
  */
 async function confirm(
   plans: readonly MergePlan[],
-  library: string
+  library: string,
+  withHistory: ReadonlySet<string>
 ): Promise<boolean> {
+  // **履歴を持つ作品があるときだけ、履歴の話をする。**
+  // Gitを使わずに書いている作品に「履歴は残ります」と言っても、
+  // 読ませるだけ無駄である
+  const historyTitles = plans
+    .filter((plan) => withHistory.has(plan.work.id))
+    .map((plan) => plan.work.title);
+
+
   const answer = await vscode.window.showWarningMessage(
     `${plans.length}件の作品を「${path.basename(library)}」へまとめますか？`,
     {
@@ -154,10 +193,8 @@ async function confirm(
         describeMergePlans(plans),
         "",
         "元のフォルダーは消しません。中身を写したうえで、作品一覧の指す先だけを",
-        "新しい場所へ移します。見比べて納得できたら、元のフォルダーはご自身で消してください。",
-        "",
-        "書き換えの記録（履歴）は元のフォルダーに残ります。新しい書庫では、",
-        "まとめた時点からの記録が始まります。",
+        "新しい場所へ移します。",
+        ...describeHistoryNotCarried(historyTitles),
       ].join("\n"),
     },
     "まとめる"
@@ -190,12 +227,14 @@ async function mergeOne(
   plan: MergePlan,
   token: vscode.CancellationToken
 ): Promise<MergeOutcome> {
+  const workId = plan.work.id;
   const title = plan.work.title;
   try {
     // **すでにあるものへは絶対に書かない。** 選んだ時点から実行までの間に
     // 作られていることもあるので、直前にもう一度確かめる
     if (await exists(plan.destination)) {
       return {
+        workId,
         title,
         ok: false,
         detail: `「${plan.folderName}」がすでにあります（上書きしません）`,
@@ -204,12 +243,12 @@ async function mergeOne(
 
     const files = await collectFiles(plan.work.folderPath);
     if (files.length === 0) {
-      return { title, ok: false, detail: "写すファイルがありませんでした" };
+      return { workId, title, ok: false, detail: "写すファイルがありませんでした" };
     }
 
     for (const relative of files) {
       if (token.isCancellationRequested) {
-        return { title, ok: false, detail: "取りやめました" };
+        return { workId, title, ok: false, detail: "取りやめました" };
       }
       const from = path.join(plan.work.folderPath, relative);
       const to = path.join(plan.destination, relative);
@@ -222,6 +261,7 @@ async function mergeOne(
       const written = await vscode.workspace.fs.readFile(path.toUri(to));
       if (sha256Bytes(written) !== sha256Bytes(bytes)) {
         return {
+          workId,
           title,
           ok: false,
           detail: `写した中身が一致しませんでした（${relative}）`,
@@ -230,11 +270,11 @@ async function mergeOne(
     }
 
     logStep(`書庫へまとめた: ${title} → ${plan.destination}（${files.length}件）`);
-    return { title, ok: true, destination: plan.destination };
+    return { workId, title, ok: true, destination: plan.destination };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     logFailure("書庫へまとめる", { 作品: title, 詳細: detail });
-    return { title, ok: false, detail };
+    return { workId, title, ok: false, detail };
   }
 }
 
@@ -289,11 +329,12 @@ async function reregister(
   outcomes: readonly MergeOutcome[],
   plans: readonly MergePlan[]
 ): Promise<void> {
-  const byTitle = new Map(plans.map((plan) => [plan.work.title, plan.work]));
+  // **題名では引かない。** 同じ題名の作品が2つ登録されていることがある
+  const byId = new Map(plans.map((plan) => [plan.work.id, plan.work]));
 
   for (const outcome of outcomes) {
     if (!outcome.ok || !outcome.destination) continue;
-    const work = byTitle.get(outcome.title);
+    const work = byId.get(outcome.workId);
     if (!work) continue;
     try {
       await registry.addExisting(outcome.destination, work.title);
@@ -314,10 +355,16 @@ async function reregister(
  *
  * **元のフォルダーがどこに残っているかを必ず言う。** 「まとめました」だけ
  * だと、作者は元が消えたのか残っているのか分からない。
+ *
+ * **「消してよい」と言う前に、消すと何を失うかを言う。** 履歴は写して
+ * いないので、元のフォルダーを消すと**書き換えの記録がまるごと失われる。**
+ * ここを黙って「ご自身で消してください」とだけ書くのは、取り返しの
+ * つかない操作へ背中を押すことになる（設計書5.7.10）。
  */
 async function report(
   outcomes: readonly MergeOutcome[],
-  library: string
+  library: string,
+  withHistory: ReadonlySet<string>
 ): Promise<void> {
   const done = outcomes.filter((outcome) => outcome.ok);
   const failed = outcomes.filter((outcome) => !outcome.ok);
@@ -334,6 +381,12 @@ async function report(
     return;
   }
 
+  // 消すと履歴まで失う作品を、名指しで挙げる
+  const losing = done
+    .filter((outcome) => withHistory.has(outcome.workId))
+    .map((outcome) => outcome.title);
+
+
   const detail = [
     `書庫: ${library}`,
     "",
@@ -342,8 +395,7 @@ async function report(
       ? ["", `まとめられなかったもの（${failed.length}件）`, ...failed.map(describeOutcome)]
       : []),
     "",
-    "元のフォルダーはそのまま残っています。中身を見比べて納得できたら、",
-    "ご自身で消してください（作品一覧からは外れています）。",
+    ...describeOriginalsNote(losing),
     "",
     "この書庫をGitHubへ載せるには、「GitHubに置く（はじめて）」をお使いください。",
   ].join("\n");
