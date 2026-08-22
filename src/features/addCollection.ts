@@ -161,6 +161,9 @@ async function registerAll(
 ): Promise<WorkEntry[]> {
   const added: WorkEntry[] = [];
   const failed: string[] = [];
+  // **最初の失敗の理由を画面に出す。** 名前だけ並べても次の手が決まらず、
+  // 作者はログを開くところから始めることになる（2026-08-22）
+  let firstReason: string | undefined;
 
   await withProgress("作品を登録しています…", async () => {
     for (const work of works) {
@@ -172,14 +175,15 @@ async function registerAll(
           failed.push(work.title);
         }
       } catch (error) {
-        logFailure("作品集からの登録", {
-          作品: work.title,
-          詳細: error instanceof Error ? error.message : String(error),
-        });
+        const detail = error instanceof Error ? error.message : String(error);
+        logFailure("作品集からの登録", { 作品: work.title, 詳細: detail });
         failed.push(work.title);
+        firstReason ??= detail;
       }
     }
   });
+
+  const reasonNote = firstReason ? `\n理由: ${firstReason}` : "";
 
   if (added.length > 0 && failed.length === 0) {
     void vscode.window.showInformationMessage(
@@ -187,7 +191,7 @@ async function registerAll(
     );
   } else if (added.length > 0) {
     const action = await vscode.window.showWarningMessage(
-      `${added.length}件を登録しました。${failed.length}件は登録できませんでした（${failed.join("、")}）。`,
+      `${added.length}件を登録しました。${failed.length}件は登録できませんでした（${failed.join("、")}）。${reasonNote}`,
       "ログを表示",
       "閉じる"
     );
@@ -195,9 +199,14 @@ async function registerAll(
       await vscode.commands.executeCommand("novelai.showLog");
     }
   } else {
-    void vscode.window.showErrorMessage(
-      `登録できませんでした（${failed.join("、")}）。`
+    const action = await vscode.window.showErrorMessage(
+      `登録できませんでした（${failed.join("、")}）。${reasonNote}`,
+      "ログを表示",
+      "閉じる"
     );
+    if (action === "ログを表示") {
+      await vscode.commands.executeCommand("novelai.showLog");
+    }
   }
 
   return added;

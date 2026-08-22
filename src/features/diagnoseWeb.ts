@@ -2,6 +2,9 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { fromUri } from "../core/paths";
 import { isWebRuntime } from "../core/runtime";
+import type { WorkEntry } from "../models/types";
+import { readWorkConfig } from "../core/workRegistry";
+import { scanWork } from "../core/scanner";
 
 /**
  * いまの環境で、ファイルに何ができるかを実際に試して並べる（設計書5.8.11）。
@@ -31,7 +34,14 @@ export interface ProbeResult {
 const PROBE_DIR = ".novelai-probe";
 
 export async function diagnoseWeb(
-  workFolderPath: string | undefined
+  /**
+   * 登録済みの作品。
+   *
+   * **「登録できたのに一覧に出ない」を見分けるために要る。** 登録簿に
+   * 入っていれば描画側の問題、入っていなければ登録側の問題である。
+   * 見た目だけでは、この2つは区別が付かない（2026-08-22、作者の環境）。
+   */
+  works: readonly WorkEntry[]
 ): Promise<void> {
   const lines: string[] = ["# ブラウザ版の動作診断", ""];
 
@@ -52,8 +62,11 @@ export async function diagnoseWeb(
     );
   }
 
+  await appendRegisteredWorks(lines, works);
+
   // 試す場所を決める。作品が登録されていればその中、無ければ開いているフォルダー
-  const base = workFolderPath ?? (folders[0] ? fromUri(folders[0].uri) : undefined);
+  const base =
+    works[0]?.folderPath ?? (folders[0] ? fromUri(folders[0].uri) : undefined);
   if (!base) {
     lines.push("", "試せる場所がないため、ここまでです。");
     await show(lines.join("\n"));
@@ -96,6 +109,60 @@ export async function diagnoseWeb(
   );
 
   await show(lines.join("\n"));
+}
+
+/**
+ * 登録簿の中身と、その1件ずつが読めるかを並べる。
+ *
+ * **「登録できていない」と「登録できたが出せない」は、見た目が同じ。**
+ * どちらも作品一覧が空になる（VS Codeは空のツリーに「まだ作品が
+ * 登録されていません」を出す）。作者の環境では、作品の設定ファイルは
+ * 5件とも作られているのに一覧が空、という形で現れた（2026-08-22）。
+ *
+ * ここで登録簿を直接見せれば、その先どちらを直せばよいかが決まる。
+ */
+async function appendRegisteredWorks(
+  lines: string[],
+  works: readonly WorkEntry[]
+): Promise<void> {
+  lines.push("", "## 登録済みの作品", "");
+  if (works.length === 0) {
+    lines.push(
+      "**登録簿は空です。** 作品一覧が空なのは、描画ではなく登録の問題です。",
+      "",
+      "（作品フォルダーに `.aiwriter/config.json` ができているのに",
+      "ここが空なら、設定ファイルを書いたあとの登録で失敗しています）"
+    );
+    return;
+  }
+
+  lines.push(`- 登録簿にある数: **${works.length}件**`, "");
+  lines.push("| 作品 | 設定 | 走査 | 場所 |", "|---|---|---|---|");
+  for (const work of works) {
+    let config = "—";
+    try {
+      const loaded = await readWorkConfig(work);
+      config = loaded ? `○ 本文=${loaded.manuscriptDir}` : "無し（既定を使う）";
+    } catch (error) {
+      config = `**×** ${escapeCell(describeError(error))}`;
+    }
+
+    // **一覧と同じ道をたどる。** ここが失敗すると、以前は一覧全体が
+    // 空になっていた（0.15.2で1件ずつ切り離した）
+    let scan = "—";
+    try {
+      const result = await scanWork(work);
+      scan = `○ ${result.episodes.length}話`;
+    } catch (error) {
+      scan = `**×** ${escapeCell(describeError(error))}`;
+    }
+
+    lines.push(
+      `| ${escapeCell(work.title)} | ${config} | ${scan} | \`${escapeCell(
+        work.folderPath
+      )}\` |`
+    );
+  }
 }
 
 /**

@@ -1479,7 +1479,7 @@ export async function activate(
     vscode.commands.registerCommand("novelai.diagnoseWeb", async () => {
       // 作品が登録されていればその中で試す。無ければ開いているフォルダーで
       const { diagnoseWeb } = await import("./features/diagnoseWeb.js");
-      await diagnoseWeb(registry.list()[0]?.folderPath);
+      await diagnoseWeb(registry.list());
     })
   );
 

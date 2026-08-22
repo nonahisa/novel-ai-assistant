@@ -134,9 +134,28 @@ export class WorkRegistry {
       });
     }
 
-    await ensureRecoveryIgnoreRule(normalized, {
-      syncCache: isCacheSyncEnabled(),
-    });
+    // **`.gitignore` の整備で登録を失敗させない。**
+    //
+    // ここは「作業ファイルをGitに入れない」ための後始末であって、
+    // 作品を登録するのに要るものではない。以前は失敗をそのまま投げており、
+    // **設定ファイル（`.aiwriter/config.json`）だけが作られて登録簿には
+    // 入らない**という中途半端な状態になっていた（作者のブラウザ版で、
+    // 5作品すべてがこの形になった。2026-08-22）。
+    //
+    // 起動時の `initialize()` は最初からこれを失敗しても続ける作りに
+    // してあり、次の起動でもう一度試される。ここも同じ扱いに揃える。
+    try {
+      await ensureRecoveryIgnoreRule(normalized, {
+        syncCache: isCacheSyncEnabled(),
+      });
+    } catch (error) {
+      void vscode.window.showWarningMessage(
+        `「${entry.title}」を登録しました。ただし .gitignore を整えられませんでした` +
+          `（作業ファイルがGitに入るかもしれません）: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+      );
+    }
 
     await this.save([...works, entry]);
     return entry;

@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { toUri } from "../core/paths";
 import { EpisodeFile, WorkEntry, WorkStats } from "../models/types";
-import { formatCount, toManuscriptPages } from "../core/charCount";
+import { emptyCounts, formatCount, toManuscriptPages } from "../core/charCount";
 import {
   episodeTitle,
   formatChapterLabel,
@@ -25,7 +25,14 @@ export class WorkNode {
   readonly type = "work" as const;
   constructor(
     public readonly work: WorkEntry,
-    public readonly stats: WorkStats
+    public readonly stats: WorkStats,
+    /**
+     * 走査に失敗した理由。成功なら `undefined`。
+     *
+     * **登録されている以上、読めなくても一覧には出す。** 隠すと
+     * 「登録したのに出てこない」という、原因の分からない終わり方になる。
+     */
+    public readonly loadError?: string
   ) {}
 }
 
@@ -123,6 +130,25 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       );
       item.contextValue = "work";
       item.iconPath = new vscode.ThemeIcon("book");
+
+      // 走査に失敗した作品は、字数の代わりに理由を出す。
+      // 0字と表示すると「書いていない」と読めてしまう
+      if (node.loadError) {
+        item.iconPath = new vscode.ThemeIcon("warning");
+        item.description = "⚠ 読み込めません";
+        item.tooltip = new vscode.MarkdownString(
+          [
+            `**${work.title}**`,
+            "",
+            "フォルダーの中を読めませんでした。",
+            "",
+            `- 理由: ${node.loadError}`,
+            "",
+            `\`${work.folderPath}\``,
+          ].join("\n")
+        );
+        return item;
+      }
       // 未解決の競合は最優先で気づかせる。放置するとAI処理で原稿が壊れる
       const conflictNote =
         stats.conflictedCount > 0
@@ -272,14 +298,47 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       const works = this.registry.list();
       const nodes: TreeNode[] = [];
       for (const w of works) {
-        const result = await this.load(w);
-        nodes.push(new WorkNode(w, result.stats));
+        // **1件の失敗で一覧全体を消さない。**
+        //
+        // 以前はここで `await` した走査が1つでも失敗すると、`getChildren`
+        // ごと失敗し、**登録済みの作品が1件も出ない**（VS Codeは空の
+        // ツリーと見なして「まだ作品が登録されていません」を出す）。
+        // 登録は済んでいるのに何も出ない、という原因の分からない
+        // 見え方になっていた（2026-08-22、作者のブラウザ版で発生）
+        try {
+          const result = await this.load(w);
+          nodes.push(new WorkNode(w, result.stats));
+        } catch (error) {
+          nodes.push(
+            new WorkNode(
+              w,
+              { fileCount: 0, totals: emptyCounts(), conflictedCount: 0 },
+              error instanceof Error ? error.message : String(error)
+            )
+          );
+        }
       }
       return nodes;
     }
 
     if (node.type === "work") {
-      const result = await this.load(node.work);
+      // 走査に失敗していれば、開いたときに理由を出す。
+      // 「本文ファイルがありません」と出すと、原因を取り違える
+      if (node.loadError) {
+        return [new MessageNode(`⚠ 読み込めません: ${node.loadError}`)];
+      }
+      let result;
+      try {
+        result = await this.load(node.work);
+      } catch (error) {
+        return [
+          new MessageNode(
+            `⚠ 読み込めません: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          ),
+        ];
+      }
       if (result.episodes.length === 0) {
         return [
           new MessageNode("本文ファイルがありません（txt / md）"),
