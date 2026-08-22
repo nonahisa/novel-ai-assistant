@@ -758,6 +758,71 @@ export async function activate(
 
   // ─── コマンド ───
 
+  /**
+   * 場所を1つ受け取って、作品として登録する。
+   *
+   * **入口が違っても、ここから先は同じ道を通す。** 「フォルダから追加」と
+   * 「GitHubから追加」（ブラウザ版）は場所の決め方が違うだけで、作品集の
+   * 見分け方も、登録後の集計も同じでよい。分けて書くと、片方だけ直る
+   * （実際、登録後の集計を囲む修正は片方にしか入っていなかった）。
+   */
+  async function registerFolderAsWork(folderPath: string): Promise<void> {
+    // **作品集かもしれない。** 中に作品フォルダーが並んでいたら、
+    // まとめて登録する（設計書5.7）。作品そのものならこれまで通り進む
+    const collection = await tryRegisterAsCollection(registry, folderPath);
+    if (collection.handled) {
+      if (collection.added.length > 0) {
+        treeProvider.refresh();
+        highlighter.invalidate();
+      }
+      return;
+    }
+
+    const defaultTitle = path.basename(folderPath);
+    const title = await askText({
+      prompt: "作品名を入力してください",
+      value: defaultTitle,
+      validateInput: (v) =>
+        v.trim().length === 0 ? "作品名を入力してください" : null,
+    });
+    if (title === undefined) return;
+
+    let entry: WorkEntry | undefined;
+    try {
+      entry = await registry.addExisting(folderPath, title.trim());
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      await vscode.window.showErrorMessage(
+        `作品フォルダを登録できませんでした。登録状態は変更されていません。\n${detail}`
+      );
+      return;
+    }
+    if (!entry) return;
+
+    // **登録はもう済んでいる。** ここから先（文字数の集計）で失敗しても、
+    // 一覧の更新まで巻き添えにしない。以前は `scanWork` を囲っておらず、
+    // 集計で落ちると**登録できているのに画面が何も変わらなかった**
+    // （2026-08-22、作者の環境で判明）
+    try {
+      const result = await scanWork(entry);
+      vscode.window.showInformationMessage(
+        `「${entry.title}」を登録しました（${result.stats.fileCount}ファイル / ${formatCount(
+          result.stats.totals.net
+        )}字）`
+      );
+    } catch (error) {
+      logFailure("登録後の集計", {
+        作品: entry.title,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+      vscode.window.showInformationMessage(
+        `「${entry.title}」を登録しました（文字数の集計は後で行います）。`
+      );
+    }
+    treeProvider.refresh();
+    highlighter.invalidate();
+  }
+
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.addWork", async () => {
       // ブラウザ版では、開いているフォルダーから選ぶ（設計書5.8.8）
@@ -766,61 +831,7 @@ export async function activate(
         "この作品フォルダを登録"
       );
       if (!folderPath) return;
-
-      // **作品集かもしれない。** 中に作品フォルダーが並んでいたら、
-      // まとめて登録する（設計書5.7）。作品そのものならこれまで通り進む
-      const collection = await tryRegisterAsCollection(registry, folderPath);
-      if (collection.handled) {
-        if (collection.added.length > 0) {
-          treeProvider.refresh();
-          highlighter.invalidate();
-        }
-        return;
-      }
-
-      const defaultTitle = path.basename(folderPath);
-      const title = await askText({
-        prompt: "作品名を入力してください",
-        value: defaultTitle,
-        validateInput: (v) =>
-          v.trim().length === 0 ? "作品名を入力してください" : null,
-      });
-      if (title === undefined) return;
-
-      let entry: WorkEntry | undefined;
-      try {
-        entry = await registry.addExisting(folderPath, title.trim());
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        await vscode.window.showErrorMessage(
-          `作品フォルダを登録できませんでした。登録状態は変更されていません。\n${detail}`
-        );
-        return;
-      }
-      if (!entry) return;
-
-      // **登録はもう済んでいる。** ここから先（文字数の集計）で失敗しても、
-      // 一覧の更新まで巻き添えにしない。以前は `scanWork` を囲っておらず、
-      // 集計で落ちると**登録できているのに画面が何も変わらなかった**
-      // （2026-08-22、作者の環境で判明）
-      try {
-        const result = await scanWork(entry);
-        vscode.window.showInformationMessage(
-          `「${entry.title}」を登録しました（${result.stats.fileCount}ファイル / ${formatCount(
-            result.stats.totals.net
-          )}字）`
-        );
-      } catch (error) {
-        logFailure("登録後の集計", {
-          作品: entry.title,
-          詳細: error instanceof Error ? error.message : String(error),
-        });
-        vscode.window.showInformationMessage(
-          `「${entry.title}」を登録しました（文字数の集計は後で行います）。`
-        );
-      }
-      treeProvider.refresh();
-      highlighter.invalidate();
+      await registerFolderAsWork(folderPath);
     })
   );
 
@@ -973,10 +984,16 @@ export async function activate(
 
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.addWorkFromGithub", async () => {
+      // **ブラウザ版でも、別のリポジトリの作品を登録できる**（設計書5.8.12）。
+      // 取り寄せる（`git clone`）代わりに、GitHubの中身を直に読む仕組みを指す。
+      // 場所が決まったあとは「フォルダから追加」とまったく同じ道を通る
       if (!canRunProcesses()) {
-        vscode.window.showWarningMessage(
-          "GitHubからの追加はブラウザ版では使えません。"
+        const { resolveGithubRepoFolder } = await import(
+          "./features/addWorkFromGithubWeb.js"
         );
+        const folderPath = await resolveGithubRepoFolder();
+        if (!folderPath) return;
+        await registerFolderAsWork(folderPath);
         return;
       }
       const { addWorkFromGithub } = await import(

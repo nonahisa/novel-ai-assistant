@@ -176,16 +176,32 @@ describe("操作メニューの構成", () => {
     });
 
     test("理由には、代わりの道が書いてある", () => {
-      // 別のリポジトリを開く道は、ブラウザでもある（アドレス欄を書き換える）
+      // 過去の版は、GitHubのサイトで履歴を開けば見て写せる
       const action = allActions().find(
-        (entry) => entry.command === "novelai.addWorkFromGithub"
+        (entry) => entry.command === "novelai.gitRestore"
       );
       expect(action).toBeDefined();
       if (!action) return;
 
       const hint = disabledHint(action, true, "author", false);
       expect(hint).toBe(PROCESSES_BLOCKED_HINT);
-      expect(explainDisabled(action, hint)).toContain("vscode.dev");
+      expect(explainDisabled(action, hint)).toContain("GitHub");
+    });
+
+    /**
+     * **GitHubからの追加は、ブラウザでも押せる**（設計書5.8.12）。
+     *
+     * 取り寄せる（`git clone`）代わりに、GitHubの中身を直に読む仕組みを
+     * 指す。**やることが同じなら、道具が違っても塞がない。**
+     */
+    test("GitHubから作品を追加は、ブラウザでも押せる", () => {
+      const action = allActions().find(
+        (entry) => entry.command === "novelai.addWorkFromGithub"
+      );
+      expect(action).toBeDefined();
+      if (!action) return;
+      expect(isActionEnabled(action, true, "author", false)).toBe(true);
+      expect(disabledHint(action, true, "author", false)).toBeUndefined();
     });
 
     test("同期は塞がない。押せばソース管理へ案内する（設計書5.8.9）", () => {

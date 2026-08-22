@@ -61,14 +61,20 @@ describe("押せない理由の説明", () => {
   });
 
   /**
-   * **すでに vscode.dev に居る人へ「github.dev を開いてください」と言わない。**
-   * 操作ごとに、その場から取れる手を示す。
+   * **GitHubからの追加は塞がない**（設計書5.8.12）。
+   *
+   * 0.15.2までは塞いで「アドレス欄を書き換えてください」と案内していたが、
+   * それは**いま開いているものを閉じる**遠回りだった。`git clone` の代わりに
+   * GitHubの中身を直に読む仕組み（`vscode-vfs://github/…`）を指せば、
+   * 開き直さずに登録できる。
    */
-  it("別のリポジトリを開く道を、その場のやり方で示す", () => {
-    const text = describeProcessesBlocked("novelai.addWorkFromGithub");
-    expect(text).toContain("vscode.dev");
-    // 開いたあと何をすればよいかまで書く
-    expect(text).toContain("フォルダから作品を追加");
+  it("GitHubからの追加は、ブラウザでも押せる", () => {
+    expect(
+      isCommandAvailableInRuntime("novelai.addWorkFromGithub", false)
+    ).toBe(true);
+    expect(processRequiredCommands()).not.toContain(
+      "novelai.addWorkFromGithub"
+    );
   });
 
   it("過去の版は、GitHubのサイトで見られると伝える", () => {

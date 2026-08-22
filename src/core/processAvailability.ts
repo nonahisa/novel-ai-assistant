@@ -24,7 +24,6 @@
  * 「実在しないIDを禁じている」と気づけずに黙って素通りしてしまう。
  */
 const REQUIRES_PROCESSES = new Set<string>([
-  "novelai.addWorkFromGithub",
   "novelai.gitRestore",
   "novelai.setupGithub",
   "novelai.setupOllama",
@@ -40,6 +39,12 @@ const REQUIRES_PROCESSES = new Set<string>([
  * **`novelai.gitSync`（同期）はここに入れない。** ブラウザでは押せて、
  * VS Code のソース管理へ案内する（設計書5.8.9）。gitコマンドは打てないが、
  * **保存する道そのものは在る**ので、行き止まりにしない。
+ *
+ * **`novelai.addWorkFromGithub`（GitHubから作品を追加）も入れない**
+ * （設計書5.8.12）。0.15.2までは塞いで「アドレス欄を書き換えてください」と
+ * 案内していたが、それは**いま開いているものを閉じる**遠回りだった。
+ * `git clone` の代わりにGitHubの中身を直に読む仕組みを指せば、開き直さずに
+ * 登録できる。**やることが同じなら、道具が違っても塞がない。**
  */
 
 /** そのコマンドは、いまの実行環境（Node／ブラウザ）で使えるか */
@@ -71,13 +76,6 @@ export function describeProcessesBlocked(command: string): string {
     return (
       "ブラウザ版のVS Codeでは、Ollamaの導入や外部プロセスの起動ができません。" +
       "クラウドのAI（Gemini・OpenAI・さくらのAI Engine・Claude）をお使いください。"
-    );
-  }
-  if (command === "novelai.addWorkFromGithub") {
-    return (
-      "ブラウザ版では、別のリポジトリを取り寄せることはできません。" +
-      "アドレス欄の「vscode.dev/github/（持ち主）/（リポジトリ名）」を書き換えると、" +
-      "そのリポジトリを開けます。開いたら「フォルダから作品を追加」で登録してください。"
     );
   }
   if (command === "novelai.gitRestore") {
