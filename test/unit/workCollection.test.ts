@@ -186,6 +186,43 @@ describe("scanCollection", () => {
     expect((await scanCollection(work, none)).kind).toBe("single_work");
   });
 
+  /**
+   * **作者の `HisasNovels` がこの形だった**（2026-08-22、実機で判明）。
+   *
+   * 作品集の直下に `.aiwriter/config.json` が残っていた（作品集の仕組みが
+   * できる前に、その全体を1作品として登録した名残）。
+   *
+   * 以前は「自分が作品なら中を見ない」としていたため、**作品集なのに
+   * 1作品と判定され、中の作品を登録する道に入れなかった。**
+   * 機械には決められないので、両方の性質があることを伝えて作者に選ばせる。
+   */
+  it("自分も作品に見えて、中にも作品があれば、どちらとも言わない", async () => {
+    const both = path.join(root, "設定ファイルが残った作品集");
+    await mkdir(both, { recursive: true });
+    // 過去の登録の名残
+    await mkdir(path.join(both, ".aiwriter"), { recursive: true });
+    await writeFile(
+      path.join(both, ".aiwriter", "config.json"),
+      JSON.stringify({ workTitle: "むかしの登録" }),
+      "utf-8"
+    );
+    // 中には作品が並んでいる
+    await makeWork(both, "作品A", { manuscript: true });
+    await makeWork(both, "作品B", { settings: true });
+
+    const scan = await scanCollection(both, none);
+    expect(scan.kind).toBe("work_with_children");
+    if (scan.kind !== "work_with_children") return;
+    expect(scan.works.map((w) => w.title)).toEqual(["作品A", "作品B"]);
+  });
+
+  it("自分が作品で、中に作品が無ければ、これまでどおり1作品", async () => {
+    // 上を足したことで、ふつうの作品の判定が変わっていないこと
+    const plain = path.join(root, "ふつうの作品");
+    await makeWork(root, "ふつうの作品", { config: true, manuscript: true });
+    expect((await scanCollection(plain, none)).kind).toBe("single_work");
+  });
+
   it("作品が無ければその旨を返す", async () => {
     const empty = path.join(root, "空の作品集");
     await mkdir(empty, { recursive: true });

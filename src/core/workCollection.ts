@@ -53,6 +53,17 @@ export type CollectionScan =
   | { kind: "collection"; works: WorkCandidate[] }
   /** 指定されたフォルダー自体が作品だった（作品集ではない） */
   | { kind: "single_work" }
+  /**
+   * 自分も作品に見えるが、**中にも作品が並んでいる。**
+   *
+   * **機械には決められない。** 作品集の直下に `.aiwriter/config.json` が
+   * 残っていることがある（作品集の仕組みができる前に、その全体を1作品として
+   * 登録した名残）。実際、作者の `HisasNovels` がこの形だった（2026-08-22）。
+   *
+   * 以前は「自分が作品なら中を見ない」としていたため、**作品集なのに
+   * 1作品と判定され、中の作品を登録する道に入れなかった。**
+   */
+  | { kind: "work_with_children"; works: WorkCandidate[] }
   /** 中に作品らしいフォルダーが1つも無かった */
   | { kind: "no_works" }
   | { kind: "unreadable"; detail: string };
@@ -111,15 +122,18 @@ export async function scanCollection(
   root: string,
   isRegistered: (folderPath: string) => boolean
 ): Promise<CollectionScan> {
-  // 指定されたフォルダー自体が作品なら、作品集ではない。
-  // ここで分けないと、作品の中の「本文」「設定」を作品として並べてしまう
+  // **自分が作品に見えても、中を見る。**
+  // 以前はここで打ち切っていたが、作品集の直下に設定ファイルが残っている
+  // ことがあり（過去に全体を1作品として登録した名残）、そのせいで
+  // 中の作品を登録する道に入れなかった（2026-08-22、作者の環境で判明）
   const self = await looksLikeWork(root);
-  if (self.isWork) return { kind: "single_work" };
 
   let entries: string[];
   try {
     entries = await listDirectory(root);
   } catch (error) {
+    // 自分が作品なら、中を読めなくても1作品として扱える
+    if (self.isWork) return { kind: "single_work" };
     return {
       kind: "unreadable",
       detail: error instanceof Error ? error.message : String(error),
@@ -143,10 +157,20 @@ export async function scanCollection(
     });
   }
 
-  if (works.length === 0) return { kind: "no_works" };
+  if (works.length === 0) {
+    // 中に作品が無いなら、これまでどおり
+    return self.isWork ? { kind: "single_work" } : { kind: "no_works" };
+  }
+
   // 作品名の順に並べる。登録簿の並びと揃えて、見つけやすくする
   works.sort((a, b) => a.title.localeCompare(b.title, "ja"));
-  return { kind: "collection", works };
+
+  // **どちらとも取れるときは、作者に決めてもらう。**
+  // 「機械が判断できることを人に聞かない」が方針だが、ここは
+  // 機械には判断できない（両方の性質を持っている）
+  return self.isWork
+    ? { kind: "work_with_children", works }
+    : { kind: "collection", works };
 }
 
 /**
@@ -173,5 +197,10 @@ export function describeScan(scan: CollectionScan, root: string): string {
       return `「${name}」を読めませんでした: ${scan.detail}`;
     case "collection":
       return `${scan.works.length}件の作品が見つかりました。`;
+    case "work_with_children":
+      return (
+        `「${name}」は作品にも作品集にも見えます` +
+        `（設定ファイルがあり、中にも${scan.works.length}件の作品が並んでいます）。`
+      );
   }
 }

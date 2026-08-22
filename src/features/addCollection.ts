@@ -10,6 +10,7 @@ import {
 } from "../core/workCollection";
 import { isEditorMode } from "../core/actorContext";
 import { withProgress } from "../views/progress";
+import { cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
  * 作品集をまとめて登録する（設計書5.7）。
@@ -59,10 +60,21 @@ export async function tryRegisterAsCollection(
     scanCollection(root, (folder) => registered.has(folder))
   );
 
+  // **どちらとも取れるときは、作者に決めてもらう**（設計書5.7.6）。
+  // 作品集の直下に設定ファイルが残っていることがあり、機械には決められない
+  if (scan.kind === "work_with_children") {
+    const choice = await askWhichToRegister(root, scan.works.length);
+    if (choice === "cancel") return { handled: true, added: [] };
+    // 1作品として登録するなら、これまでの道（呼び出し側）へ返す
+    if (choice === "self") return { handled: false };
+  }
+
   // 作品そのもの・作品が無い・読めない、はすべて呼び出し側へ返す。
   // 「読めない」を作品集として扱うと、取り寄せは済んでいるのに
   // 何も登録されないまま終わってしまう
-  if (scan.kind !== "collection") return { handled: false };
+  if (scan.kind !== "collection" && scan.kind !== "work_with_children") {
+    return { handled: false };
+  }
 
   const fresh = scan.works.filter((w) => !w.alreadyRegistered);
   if (fresh.length === 0) {
@@ -99,6 +111,42 @@ export async function tryRegisterAsCollection(
     chosen.map((item) => item.work)
   );
   return { handled: true, added };
+}
+
+/**
+ * 作品にも作品集にも見えるとき、どちらとして登録するかを聞く。
+ *
+ * **中の作品をまとめて登録するほうを先に置く。** 作品集の直下に設定ファイルが
+ * 残っているのは過去の名残であることが多く、作者が本当にやりたいのは
+ * 中の作品を扱うことだからである（2026-08-22、作者の環境で判明）。
+ */
+async function askWhichToRegister(
+  root: string,
+  childCount: number
+): Promise<"children" | "self" | "cancel"> {
+  const name = path.basename(root);
+  const picked = await vscode.window.showQuickPick(
+    [
+      {
+        label: `$(library) 中の${childCount}件の作品を登録する`,
+        detail: "作品集として扱います（こちらが多い形です）",
+        choice: "children" as const,
+      },
+      {
+        label: `$(book) 「${name}」そのものを1作品として登録する`,
+        detail: "このフォルダー全体で1つの作品として扱います",
+        choice: "self" as const,
+      },
+      cancelItem(),
+    ],
+    {
+      title: `「${name}」は作品にも作品集にも見えます`,
+      placeHolder: "どちらとして登録しますか",
+      ignoreFocusOut: true,
+    }
+  );
+  if (!picked || isCancelItem(picked) || !("choice" in picked)) return "cancel";
+  return picked.choice;
 }
 
 /**

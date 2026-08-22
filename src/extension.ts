@@ -799,13 +799,28 @@ export async function activate(
       }
       if (!entry) return;
 
-      const result = await scanWork(entry);
-      vscode.window.showInformationMessage(
-        `「${entry.title}」を登録しました（${result.stats.fileCount}ファイル / ${formatCount(
-          result.stats.totals.net
-        )}字）`
-      );
+      // **登録はもう済んでいる。** ここから先（文字数の集計）で失敗しても、
+      // 一覧の更新まで巻き添えにしない。以前は `scanWork` を囲っておらず、
+      // 集計で落ちると**登録できているのに画面が何も変わらなかった**
+      // （2026-08-22、作者の環境で判明）
+      try {
+        const result = await scanWork(entry);
+        vscode.window.showInformationMessage(
+          `「${entry.title}」を登録しました（${result.stats.fileCount}ファイル / ${formatCount(
+            result.stats.totals.net
+          )}字）`
+        );
+      } catch (error) {
+        logFailure("登録後の集計", {
+          作品: entry.title,
+          詳細: error instanceof Error ? error.message : String(error),
+        });
+        vscode.window.showInformationMessage(
+          `「${entry.title}」を登録しました（文字数の集計は後で行います）。`
+        );
+      }
       treeProvider.refresh();
+      highlighter.invalidate();
     })
   );
 
