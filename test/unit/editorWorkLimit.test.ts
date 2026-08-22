@@ -16,7 +16,7 @@ describe("canRegisterWork", () => {
   it("作者は何作品でも登録できる", () => {
     expect(canRegisterWork("author", 0)).toBe(true);
     expect(canRegisterWork("author", 1)).toBe(true);
-    // 作者は作品集を丸ごと登録する。ここで止めては本題が成り立たない
+    // 作者は書庫を丸ごと登録する。ここで止めては本題が成り立たない
     expect(canRegisterWork("author", 50)).toBe(true);
   });
 

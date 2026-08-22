@@ -25,7 +25,7 @@ import { withProgress } from "../views/progress";
  *
  * **登録するところまでは、このファイルの仕事ではない。** 場所を1つ決めて
  * 返すだけにして、そのあとは「フォルダから作品を追加」とまったく同じ道を
- * 通す（作品集なら中の作品を選ぶ、など）。入口ごとに違う振る舞いをさせない。
+ * 通す（書庫なら中の作品を選ぶ、など）。入口ごとに違う振る舞いをさせない。
  */
 export async function resolveGithubRepoFolder(): Promise<string | undefined> {
   const input = await askText({

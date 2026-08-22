@@ -206,7 +206,7 @@ async function appendCommandCheck(lines: string[]): Promise<void> {
  * 作品を探す道を、実際にたどってみせる。
  *
  * 「フォルダから作品を追加」で何が起きるはずだったかを、そのまま再現する
- * （登録はしない）。作品集として何件見つかるか、見つからないならなぜかが分かる。
+ * （登録はしない）。書庫として何件見つかるか、見つからないならなぜかが分かる。
  */
 async function appendWorkScan(lines: string[], base: string): Promise<void> {
   lines.push("", `## 作品を探す（\`${base}\`）`, "");

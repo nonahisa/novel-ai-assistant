@@ -17,7 +17,7 @@ import {
 } from "../../src/core/workCollection";
 
 /**
- * 作品集の走査。
+ * 書庫の走査。
  *
  * **実際のフォルダーを作って試す。** 判定はファイルの有無だけで決まるので、
  * 作り物のデータで確かめると、`stat` の使い方を間違えていても通ってしまう。
@@ -123,8 +123,8 @@ describe("looksLikeWork", () => {
    * **作者の運用がこの形だった**（2026-08-22、実機で判明）。
    *
    * 「本文」フォルダを作らず、作品フォルダーへ直に `001.txt` を置く。
-   * ここを見ていなかったため、**作品集の中の作品が1つも作品と認識されず**、
-   * 作品集まるごとが1作品として登録された（328ファイル・996,040字という、
+   * ここを見ていなかったため、**書庫の中の作品が1つも作品と認識されず**、
+   * 書庫まるごとが1作品として登録された（328ファイル・996,040字という、
    * 複数作品の話が混ざった一覧になった）。
    */
   it("話数ファイルが直下に並んでいれば作品と見なす", async () => {
@@ -143,9 +143,9 @@ describe("looksLikeWork", () => {
   });
 
   it("話数として読めないファイルだけなら作品ではない", async () => {
-    // **作品集そのものを作品と誤認しない。**
-    // 作品集の直下にも README.md や characters.json は置かれる
-    const folder = path.join(root, "作品集らしい置き場");
+    // **書庫そのものを作品と誤認しない。**
+    // 書庫の直下にも README.md や characters.json は置かれる
+    const folder = path.join(root, "書庫らしい置き場");
     await mkdir(folder, { recursive: true });
     await writeFile(path.join(folder, "README.md"), "説明", "utf-8");
     await writeFile(path.join(folder, "characters.json"), "{}", "utf-8");
@@ -158,7 +158,7 @@ describe("scanCollection", () => {
   let collection: string;
 
   beforeAll(async () => {
-    collection = path.join(root, "作品集");
+    collection = path.join(root, "書庫");
     await mkdir(collection, { recursive: true });
     await makeWork(collection, "いじめられっ子", {
       config: true,
@@ -187,7 +187,7 @@ describe("scanCollection", () => {
 
   it("作品ではないフォルダーと隠しフォルダーを拾わない", async () => {
     const scan = await scanCollection(collection, none);
-    if (scan.kind !== "collection") throw new Error("作品集のはず");
+    if (scan.kind !== "collection") throw new Error("書庫のはず");
     const titles = scan.works.map((w) => w.title);
     expect(titles).not.toContain("メモ");
     expect(titles).not.toContain(".git");
@@ -196,7 +196,7 @@ describe("scanCollection", () => {
 
   it("設定ファイルの有無を伝える", async () => {
     const scan = await scanCollection(collection, none);
-    if (scan.kind !== "collection") throw new Error("作品集のはず");
+    if (scan.kind !== "collection") throw new Error("書庫のはず");
     const byTitle = new Map(scan.works.map((w) => [w.title, w]));
     expect(byTitle.get("いじめられっ子")?.hasConfig).toBe(true);
     expect(byTitle.get("教科書チート")?.hasConfig).toBe(false);
@@ -208,13 +208,13 @@ describe("scanCollection", () => {
       collection,
       (folder) => folder === registered
     );
-    if (scan.kind !== "collection") throw new Error("作品集のはず");
+    if (scan.kind !== "collection") throw new Error("書庫のはず");
     const byTitle = new Map(scan.works.map((w) => [w.title, w]));
     expect(byTitle.get("教科書チート")?.alreadyRegistered).toBe(true);
     expect(byTitle.get("いじめられっ子")?.alreadyRegistered).toBe(false);
   });
 
-  it("作品そのものを指されたら作品集とは言わない", async () => {
+  it("作品そのものを指されたら書庫とは言わない", async () => {
     // ここで分けないと、作品の中の「本文」「設定」を作品として並べてしまう
     const work = path.join(collection, "いじめられっ子");
     expect((await scanCollection(work, none)).kind).toBe("single_work");
@@ -223,15 +223,15 @@ describe("scanCollection", () => {
   /**
    * **作者の `HisasNovels` がこの形だった**（2026-08-22、実機で判明）。
    *
-   * 作品集の直下に `.aiwriter/config.json` が残っていた（作品集の仕組みが
+   * 書庫の直下に `.aiwriter/config.json` が残っていた（書庫の仕組みが
    * できる前に、その全体を1作品として登録した名残）。
    *
-   * 以前は「自分が作品なら中を見ない」としていたため、**作品集なのに
+   * 以前は「自分が作品なら中を見ない」としていたため、**書庫なのに
    * 1作品と判定され、中の作品を登録する道に入れなかった。**
    * 機械には決められないので、両方の性質があることを伝えて作者に選ばせる。
    */
   it("自分も作品に見えて、中にも作品があれば、どちらとも言わない", async () => {
-    const both = path.join(root, "設定ファイルが残った作品集");
+    const both = path.join(root, "設定ファイルが残った書庫");
     await mkdir(both, { recursive: true });
     // 過去の登録の名残
     await mkdir(path.join(both, ".aiwriter"), { recursive: true });
@@ -258,7 +258,7 @@ describe("scanCollection", () => {
   });
 
   it("作品が無ければその旨を返す", async () => {
-    const empty = path.join(root, "空の作品集");
+    const empty = path.join(root, "空の書庫");
     await mkdir(empty, { recursive: true });
     expect((await scanCollection(empty, none)).kind).toBe("no_works");
   });
@@ -296,7 +296,7 @@ describe("describeScan", () => {
           },
         ],
       },
-      "C:/小説/作品集"
+      "C:/小説/書庫"
     );
     expect(text).toContain("1件");
   });

@@ -117,7 +117,7 @@ export async function addWorkFromGithub(
     return [];
   }
 
-  // **取り寄せたものが作品集かもしれない。** 中に作品フォルダーが並んでいたら、
+  // **取り寄せたものが書庫かもしれない。** 中に作品フォルダーが並んでいたら、
   // まとめて登録する（設計書5.7）。作者は1リポジトリに複数作品を置いており、
   // 以前はリポジトリ全体が1作品として登録されていた
   const collection = await tryRegisterAsCollection(registry, destination);

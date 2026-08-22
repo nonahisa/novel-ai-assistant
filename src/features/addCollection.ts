@@ -13,7 +13,7 @@ import { withProgress } from "../views/progress";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
- * 作品集をまとめて登録する（設計書5.7）。
+ * 書庫をまとめて登録する（設計書5.7）。
  *
  * **これまでは作品を1つずつ登録するしかなかった。** 作者は1つのリポジトリに
  * 複数の作品を並べて運用しており、別の環境で開くたびに、フォルダーを選ぶ操作を
@@ -21,10 +21,10 @@ import { cancelItem, isCancelItem } from "../views/dialogs";
  *
  * ## ボタンを増やさない
  *
- * 「作品集を追加」という入口を別に作ると、作者は**押す前にどちらか決めねば
+ * 「書庫を追加」という入口を別に作ると、作者は**押す前にどちらか決めねば
  * ならない。** フォルダーの中身を見れば機械が判断できることを、人に聞くのは
  * 筋が悪い。そこで既存の入口（フォルダーから追加・GitHubから追加）が、
- * 渡されたフォルダーを見て**作品か作品集かを自分で見分ける**ようにした。
+ * 渡されたフォルダーを見て**作品か書庫かを自分で見分ける**ようにした。
  *
  * ## 編集者モードでは働かせない
  *
@@ -34,15 +34,15 @@ import { cancelItem, isCancelItem } from "../views/dialogs";
  */
 
 export type CollectionResult =
-  /** 作品集として扱い、登録まで済ませた（呼び出し側は何もしない） */
+  /** 書庫として扱い、登録まで済ませた（呼び出し側は何もしない） */
   | { handled: true; added: WorkEntry[] }
-  /** 作品集ではなかった。呼び出し側がこれまで通り1作品として扱う */
+  /** 書庫ではなかった。呼び出し側がこれまで通り1作品として扱う */
   | { handled: false };
 
 /**
- * フォルダーが作品集なら、中の作品をまとめて登録する。
+ * フォルダーが書庫なら、中の作品をまとめて登録する。
  *
- * **作品集でなければ何もせず、判断を呼び出し側へ返す。** 作品そのものだった
+ * **書庫でなければ何もせず、判断を呼び出し側へ返す。** 作品そのものだった
  * 場合や、中に作品が見当たらない場合は、これまでの振る舞い（そのフォルダーを
  * 1作品として登録する）を変えない。**入口の意味を変えないための約束である。**
  */
@@ -61,7 +61,7 @@ export async function tryRegisterAsCollection(
   );
 
   // **どちらとも取れるときは、作者に決めてもらう**（設計書5.7.6）。
-  // 作品集の直下に設定ファイルが残っていることがあり、機械には決められない
+  // 書庫の直下に設定ファイルが残っていることがあり、機械には決められない
   if (scan.kind === "work_with_children") {
     const choice = await askWhichToRegister(root, scan.works.length);
     if (choice === "cancel") return { handled: true, added: [] };
@@ -70,7 +70,7 @@ export async function tryRegisterAsCollection(
   }
 
   // 作品そのもの・作品が無い・読めない、はすべて呼び出し側へ返す。
-  // 「読めない」を作品集として扱うと、取り寄せは済んでいるのに
+  // 「読めない」を書庫として扱うと、取り寄せは済んでいるのに
   // 何も登録されないまま終わってしまう
   if (scan.kind !== "collection" && scan.kind !== "work_with_children") {
     return { handled: false };
@@ -84,7 +84,7 @@ export async function tryRegisterAsCollection(
     return { handled: true, added: [] };
   }
 
-  // **黙って全部登録しない。** 作品集には、作者が作品として扱っていない
+  // **黙って全部登録しない。** 書庫には、作者が作品として扱っていない
   // フォルダー（下書き置き場など）が混じることがある
   const chosen = await vscode.window.showQuickPick(
     fresh.map((work) => ({
@@ -102,7 +102,7 @@ export async function tryRegisterAsCollection(
     }
   );
   // 取り消したときは、1作品としての登録へ落とさない。
-  // 作品集だと分かっている以上、その全体を1作品にするのは作者の意図ではない
+  // 書庫だと分かっている以上、その全体を1作品にするのは作者の意図ではない
   if (!chosen) return { handled: true, added: [] };
   if (chosen.length === 0) return { handled: true, added: [] };
 
@@ -114,9 +114,9 @@ export async function tryRegisterAsCollection(
 }
 
 /**
- * 作品にも作品集にも見えるとき、どちらとして登録するかを聞く。
+ * 作品にも書庫にも見えるとき、どちらとして登録するかを聞く。
  *
- * **中の作品をまとめて登録するほうを先に置く。** 作品集の直下に設定ファイルが
+ * **中の作品をまとめて登録するほうを先に置く。** 書庫の直下に設定ファイルが
  * 残っているのは過去の名残であることが多く、作者が本当にやりたいのは
  * 中の作品を扱うことだからである（2026-08-22、作者の環境で判明）。
  */
@@ -129,7 +129,7 @@ async function askWhichToRegister(
     [
       {
         label: `$(library) 中の${childCount}件の作品を登録する`,
-        detail: "作品集として扱います（こちらが多い形です）",
+        detail: "書庫として扱います（こちらが多い形です）",
         choice: "children" as const,
       },
       {
@@ -140,7 +140,7 @@ async function askWhichToRegister(
       cancelItem(),
     ],
     {
-      title: `「${name}」は作品にも作品集にも見えます`,
+      title: `「${name}」は作品にも書庫にも見えます`,
       placeHolder: "どちらとして登録しますか",
       ignoreFocusOut: true,
     }
@@ -176,7 +176,7 @@ async function registerAll(
         }
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        logFailure("作品集からの登録", { 作品: work.title, 詳細: detail });
+        logFailure("書庫からの登録", { 作品: work.title, 詳細: detail });
         failed.push(work.title);
         firstReason ??= detail;
       }

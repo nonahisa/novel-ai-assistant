@@ -27,7 +27,7 @@ import { isEditorMode } from "../core/actorContext";
 /**
  * 編集部へ作品を渡し、提案を受け取る（設計書5.7.5）。
  *
- * **作品集へ編集部を招くことはできない。** GitHubの権限はリポジトリ単位で
+ * **書庫へ編集部を招くことはできない。** GitHubの権限はリポジトリ単位で
  * しかかけられないので、招いた時点で全作品が読めてしまう。渡す作品だけを
  * 入れたリポジトリを別に切り出す。
  *
@@ -196,7 +196,7 @@ async function chooseDestination(work: WorkEntry): Promise<string | undefined> {
     canSelectFiles: false,
     canSelectMany: false,
     openLabel: "ここに置く",
-    title: "編集用フォルダーを置く場所を選択（作品集の外を勧めます）",
+    title: "編集用フォルダーを置く場所を選択（書庫の外を勧めます）",
   });
   if (!parent || parent.length === 0) return undefined;
 
@@ -218,7 +218,7 @@ async function chooseDestination(work: WorkEntry): Promise<string | undefined> {
 
   const destination = path.join(parent[0].fsPath, name.trim());
 
-  // 作品フォルダーの中へ置くと、作品集のリポジトリに入れ子で入ってしまう
+  // 作品フォルダーの中へ置くと、書庫のリポジトリに入れ子で入ってしまう
   const normalizedWork = path.normalize(work.folderPath);
   const inside = path
     .normalize(destination)
@@ -226,7 +226,7 @@ async function chooseDestination(work: WorkEntry): Promise<string | undefined> {
   if (inside) {
     void vscode.window.showErrorMessage(
       "作品フォルダーの中には置けません。リポジトリが入れ子になり、" +
-        "作品集の側へ巻き込まれます。別の場所を選んでください。"
+        "書庫の側へ巻き込まれます。別の場所を選んでください。"
     );
     return undefined;
   }

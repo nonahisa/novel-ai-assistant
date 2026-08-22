@@ -763,12 +763,12 @@ export async function activate(
    * 場所を1つ受け取って、作品として登録する。
    *
    * **入口が違っても、ここから先は同じ道を通す。** 「フォルダから追加」と
-   * 「GitHubから追加」（ブラウザ版）は場所の決め方が違うだけで、作品集の
+   * 「GitHubから追加」（ブラウザ版）は場所の決め方が違うだけで、書庫の
    * 見分け方も、登録後の集計も同じでよい。分けて書くと、片方だけ直る
    * （実際、登録後の集計を囲む修正は片方にしか入っていなかった）。
    */
   async function registerFolderAsWork(folderPath: string): Promise<void> {
-    // **作品集かもしれない。** 中に作品フォルダーが並んでいたら、
+    // **書庫かもしれない。** 中に作品フォルダーが並んでいたら、
     // まとめて登録する（設計書5.7）。作品そのものならこれまで通り進む
     const collection = await tryRegisterAsCollection(registry, folderPath);
     if (collection.handled) {
@@ -1501,6 +1501,18 @@ export async function activate(
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.mergeIntoLibrary", async () => {
+      const { mergeIntoLibrary } = await import(
+        "./features/mergeIntoLibrary.js"
+      );
+      if (await mergeIntoLibrary(registry)) {
+        treeProvider.refresh();
+        highlighter.invalidate();
+      }
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("novelai.diagnoseWeb", async () => {
       // 作品が登録されていればその中で試す。無ければ開いているフォルダーで
       const { diagnoseWeb } = await import("./features/diagnoseWeb.js");
@@ -2176,7 +2188,7 @@ export async function activate(
       }
     ),
     // 編集部へ渡す／提案を取り込む（設計書5.7.5）。
-    // **作品集へ編集部を招けない**ので、その作品だけを切り出して渡す
+    // **書庫へ編集部を招けない**ので、その作品だけを切り出して渡す
     vscode.commands.registerCommand(
       "novelai.shareWithEditor",
       async (node?: WorkNode) => {

@@ -179,6 +179,20 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "（この作品だけを分けることもできます）。" +
               "**新しく作るリポジトリは非公開に固定します。**",
           },
+          // **散らばった作品を1つの書庫へ寄せる道**（設計書5.7.10）。
+          // すでに作品ごとに分けて置いている作者のための入口で、
+          // GitHubへ載せる前に通ることが多いので、その隣に置く
+          {
+            kind: "action",
+            command: "novelai.mergeIntoLibrary",
+            label: "作品を書庫にまとめる",
+            icon: "library",
+            requiresWork: false,
+            detail:
+              "別々の場所に置いてある作品を、1つの書庫（フォルダー）へ写してまとめます。" +
+              "**元のフォルダーは消しません。**" +
+              "まとめたあと「GitHubに置く（はじめて）」で、書庫まるごとを1つのリポジトリにできます。",
+          },
           {
             kind: "action",
             command: "novelai.gitSync",
