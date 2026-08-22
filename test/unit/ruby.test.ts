@@ -1,11 +1,15 @@
 import { describe, expect, test } from "vitest";
 import {
+  countSiteNotation,
+  describeSiteNotation,
   findRuby,
   fromSiteNotation,
+  hasEmphasis,
   rubyToHtml,
   RUBY_STYLES,
   stripRuby,
   toSiteNotation,
+  validateEmphasis,
   validateRuby,
 } from "../../src/core/ruby";
 
@@ -168,5 +172,147 @@ describe("出せる記法の一覧", () => {
     expect(RUBY_STYLES[0].detail).toContain("なろう");
     expect(RUBY_STYLES[0].detail).toContain("カクヨム");
     expect(RUBY_STYLES[0].detail).toContain("アルファポリス");
+  });
+});
+
+/**
+ * 傍点（設計書6.12.4）。
+ *
+ * 作者の指示（2026-08-23）：範囲選択で傍点を入れ、各投稿サイト向けに変換したい。
+ * ネオページはカクヨムと同じ記法である（作者の確認）。
+ *
+ * **ここを間違えると、貼り付けた先が読者の目の前で崩れる。**
+ * ルビと違い、傍点はサイトによって書き方が違うので、出し分けを機械で見張る。
+ */
+describe("傍点", () => {
+  describe("投稿サイトへ出す", () => {
+    /** カクヨムとネオページには専用の記法がある */
+    test("カクヨム・ネオページは 《《強調》》", () => {
+      expect(toSiteNotation("これは{{大事}}だ", "site", "kakuyomu")).toBe(
+        "これは《《大事》》だ"
+      );
+    });
+
+    /**
+     * **なろうとアルファポリスには傍点の記法が無い。**
+     * ルビで代用し、読み仮名を文字数ぶんの中黒にする。
+     */
+    test("なろう・アルファポリスはルビで代用する", () => {
+      expect(toSiteNotation("これは{{大事}}だ", "site", "narou")).toBe(
+        "これは｜大事《・・》だ"
+      );
+    });
+
+    test("中黒の数は、傍点を付ける文字数と合わせる", () => {
+      expect(toSiteNotation("{{とても大事}}", "site", "narou")).toBe(
+        "｜とても大事《・・・・・》"
+      );
+    });
+
+    /** サロゲートペアを2文字と数えると、点の数がずれる */
+    test("サロゲートペアも1文字と数える", () => {
+      expect(toSiteNotation("{{𠮟責}}", "site", "narou")).toBe(
+        "｜𠮟責《・・》"
+      );
+    });
+
+    test("ルビはサイトを問わず同じ", () => {
+      for (const site of ["kakuyomu", "narou"] as const) {
+        expect(toSiteNotation("{漢字|かんじ}", "site", site)).toBe(
+          "｜漢字《かんじ》"
+        );
+      }
+    });
+
+    test("ルビと傍点が混ざっていても、どちらも出る", () => {
+      expect(
+        toSiteNotation("{漢字|かんじ}と{{強調}}", "site", "kakuyomu")
+      ).toBe("｜漢字《かんじ》と《《強調》》");
+    });
+  });
+
+  describe("取り込む", () => {
+    test("カクヨムの傍点を読める", () => {
+      expect(fromSiteNotation("これは《《大事》》だ")).toBe("これは{{大事}}だ");
+    });
+
+    /**
+     * **中黒だけの読み仮名は、ルビではなく傍点である。**
+     * ここを取り違えると、傍点が「・・」というルビになって残る。
+     */
+    test("ルビで代用された傍点も、傍点として読める", () => {
+      expect(fromSiteNotation("これは｜大事《・・》だ")).toBe(
+        "これは{{大事}}だ"
+      );
+    });
+
+    test("ふつうのルビは、これまでどおりルビとして読める", () => {
+      expect(fromSiteNotation("｜漢字《かんじ》")).toBe("{漢字|かんじ}");
+    });
+
+    test("出して戻すと、元に戻る", () => {
+      for (const site of ["kakuyomu", "narou"] as const) {
+        const source = "{漢字|かんじ}と{{強調}}";
+        expect(fromSiteNotation(toSiteNotation(source, "site", site))).toBe(
+          source
+        );
+      }
+    });
+  });
+
+  describe("数える・見分ける", () => {
+    test("傍点が入っているかが分かる", () => {
+      expect(hasEmphasis("{{強調}}")).toBe(true);
+      expect(hasEmphasis("{漢字|かんじ}")).toBe(false);
+      expect(hasEmphasis("ただの本文")).toBe(false);
+    });
+
+    test("ルビと傍点を、別々に数える", () => {
+      const text = "｜漢字《かんじ》と《《強調》》と｜大事《・・》";
+      expect(countSiteNotation(text)).toEqual({ ruby: 1, emphasis: 2 });
+    });
+
+    test("何も無ければ0件", () => {
+      expect(countSiteNotation("ただの本文です")).toEqual({
+        ruby: 0,
+        emphasis: 0,
+      });
+    });
+
+    test("件数を作者に読める言葉にする", () => {
+      expect(describeSiteNotation("｜漢字《かんじ》と《《強調》》")).toBe(
+        "ルビ1件と傍点1件"
+      );
+      expect(describeSiteNotation("《《強調》》")).toBe("傍点1件");
+    });
+  });
+
+  describe("字数と表示", () => {
+    /** 印は本文ではないので、字数に数えない */
+    test("字数を数えるとき、傍点の印は落とす", () => {
+      expect(stripRuby("これは{{大事}}だ")).toBe("これは大事だ");
+    });
+
+    test("プレビューでは点が付く", () => {
+      const html = rubyToHtml("{{大事}}");
+      expect(html).toContain("text-emphasis");
+      expect(html).toContain("大事");
+    });
+  });
+
+  describe("入れてよい形か", () => {
+    test("空は受けない", () => {
+      expect(validateEmphasis("  ")).toBeTruthy();
+    });
+
+    /** `}` が混ざると、そこで印が閉じてしまう */
+    test("記号は受けない", () => {
+      expect(validateEmphasis("大}事")).toBeTruthy();
+      expect(validateEmphasis("大《事")).toBeTruthy();
+    });
+
+    test("ふつうの語は受ける", () => {
+      expect(validateEmphasis("大事")).toBeNull();
+    });
   });
 });

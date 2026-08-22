@@ -4,10 +4,15 @@ import * as path from "../core/paths";
 import { isPlainTextManuscript } from "../core/markdownConversion";
 import { convertFolder, convertOne } from "./markdownConvert";
 import {
+  describeSiteNotation,
+  EMPHASIS_SITES,
   fromSiteNotation,
+  hasEmphasis,
   RUBY_STYLES,
   toSiteNotation,
+  validateEmphasis,
   validateRuby,
+  type EmphasisSite,
   type RubyStyle,
 } from "../core/ruby";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
@@ -144,7 +149,18 @@ export async function copyForPosting(): Promise<void> {
   const source = selection.isEmpty
     ? editor.document.getText()
     : editor.document.getText(selection);
-  const converted = toSiteNotation(source, style.id);
+
+  // **傍点が入っているときだけ、貼り付け先を訊く**（設計書6.12.4）。
+  // ルビはどのサイトでも同じ書き方で通るので、傍点が無いなら
+  // 訊いても答えが変わらない
+  let site: EmphasisSite = "kakuyomu";
+  if (style.id === "site" && hasEmphasis(source)) {
+    const picked = await pickEmphasisSite();
+    if (!picked) return;
+    site = picked;
+  }
+
+  const converted = toSiteNotation(source, style.id, site);
 
   await vscode.env.clipboard.writeText(converted);
   const scope = selection.isEmpty ? "本文全体" : "選んだ範囲";
@@ -178,17 +194,14 @@ export async function importRuby(): Promise<void> {
 
   if (converted === source) {
     void vscode.window.showInformationMessage(
-      "投稿サイトのルビ記法は見つかりませんでした。"
+      "投稿サイトのルビ・傍点の記法は見つかりませんでした。"
     );
     return;
   }
 
   // 何件変わるかを数えて示す。黙って本文を書き換えない
-  const count =
-    (converted.match(/\{[^{}|\r\n]+\|[^{}|\r\n]*\}/g) ?? []).length -
-    (source.match(/\{[^{}|\r\n]+\|[^{}|\r\n]*\}/g) ?? []).length;
   const answer = await vscode.window.showWarningMessage(
-    `${count}件のルビを ｛漢字｜かんじ｝ の形へ直します。よろしいですか。`,
+    `${describeSiteNotation(source)}を、この拡張機能の書き方へ直します。よろしいですか。`,
     { modal: true, detail: "取り消し（Ctrl+Z）で元へ戻せます。" },
     "直す"
   );
@@ -196,6 +209,62 @@ export async function importRuby(): Promise<void> {
 
   await editor.edit((builder) => {
     builder.replace(range, converted);
+  });
+}
+
+/**
+ * 傍点の貼り付け先を訊く。
+ *
+ * **サイト名で選ばせる。** 記法で並べると、作者は自分の貼り付け先が
+ * どちらなのかを記号から逆算することになる。
+ */
+async function pickEmphasisSite(): Promise<EmphasisSite | undefined> {
+  const picked = await vscode.window.showQuickPick(
+    [
+      ...EMPHASIS_SITES.map((entry) => ({
+        label: entry.label,
+        detail: entry.detail,
+        site: entry.id,
+      })),
+      cancelItem(),
+    ],
+    {
+      title: "傍点はどのサイトへ貼りますか",
+      placeHolder: "傍点の書き方だけがサイトで違います（ルビは同じです）",
+      ignoreFocusOut: true,
+    }
+  );
+  if (!picked || isCancelItem(picked)) return undefined;
+  return "site" in picked ? picked.site : undefined;
+}
+
+/**
+ * 選んだ文字に傍点を付ける。
+ *
+ * **ルビと違い、選択が要る。** ルビは漢字の直後という手がかりがあるが、
+ * 傍点は「どこを強調したいか」が作者にしか分からない。
+ */
+export async function addEmphasis(): Promise<void> {
+  const editor = await requireMarkdown();
+  if (!editor) return;
+
+  const range = editor.selection;
+  if (range.isEmpty) {
+    void vscode.window.showInformationMessage(
+      "傍点を付ける文字を選んでから実行してください。"
+    );
+    return;
+  }
+
+  const base = editor.document.getText(range);
+  const problem = validateEmphasis(base);
+  if (problem) {
+    void vscode.window.showWarningMessage(problem);
+    return;
+  }
+
+  await editor.edit((builder) => {
+    builder.replace(range, `{{${base}}}`);
   });
 }
 

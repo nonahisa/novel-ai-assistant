@@ -586,6 +586,18 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.addEmphasis",
+            // 開いているファイルに対して働くので、作品の登録は要らない
+            requiresWork: false,
+            label: "傍点を付ける",
+            icon: "three-bars",
+            detail:
+              "選んだ文字に傍点（強調の点）を付けます。**範囲を選んでから押してください**" +
+              "（どこを強調するかは、機械には決められません）。" +
+              "Markdown（.md）のファイルだけで使えます。",
+          },
+          {
+            kind: "action",
             command: "novelai.copyForPosting",
             // 開いているファイルに対して働くので、作品の登録は要らない
             requiresWork: false,
@@ -593,7 +605,9 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             icon: "clippy",
             detail:
               "ルビを ｜漢字《かんじ》 の形に直して、クリップボードへ入れます。" +
-              "なろう・カクヨム・アルファポリスのいずれでも、そのまま貼り付けられます。" +
+              "なろう・カクヨム・アルファポリス・ネオページのいずれでも、そのまま貼り付けられます。" +
+              "**傍点が入っているときだけ、貼り付け先を訊きます**" +
+              "（傍点はサイトによって書き方が違うためです）。" +
               "**原稿は書き換えません。**",
           },
           {

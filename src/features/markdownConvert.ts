@@ -11,6 +11,12 @@ import {
 import type { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { pathExists } from "../core/fileSystem";
+import {
+  readTextFile,
+  writeTextFilePreservingFormat,
+  type WriteTextFileResult,
+} from "../core/textFile";
+import { countSiteNotation, fromSiteNotation } from "../core/ruby";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
@@ -66,8 +72,11 @@ export async function convertOne(
     );
     return undefined;
   }
+  // **名前を変えたら、中のルビ・傍点も直す**（設計書6.12.4）
+  const imported = await importNotation(decision.plan.to);
   void vscode.window.showInformationMessage(
-    `${path.basename(filePath)} を ${path.basename(decision.plan.to)} にしました。`
+    `${path.basename(filePath)} を ${path.basename(decision.plan.to)} にしました。` +
+      describeImported([imported])
   );
   return decision.plan.to;
 }
@@ -106,7 +115,11 @@ export async function convertFolder(
     }
   }
 
-  const notes = [`${done.length}件を .md にしました。`];
+  // **名前を変えたら、中のルビ・傍点も直す**（設計書6.12.4）
+  const imported = [];
+  for (const target of done) imported.push(await importNotation(target));
+
+  const notes = [`${done.length}件を .md にしました。` + describeImported(imported)];
   if (skipped.length > 0) {
     notes.push(
       `${skipped.length}件は見送りました：` +
@@ -142,6 +155,112 @@ export async function renamePreservingContent(
     // その後に作られている場合もある
     overwrite: false,
   });
+}
+
+/**
+ * すでに入っているルビ・傍点を、この拡張機能の書き方へ直す（設計書6.12.4）。
+ *
+ * 作者の指示（2026-08-23）：「テキスト形式の中にルビや傍点がすでにある
+ * ときは、MD形式に変換してください」。
+ *
+ * **投稿サイトから持ってきた本文には、すでに `｜漢字《かんじ》` が入って
+ * いる。** 名前を `.md` に変えただけでは、プレビューでルビとして表示されず、
+ * 「ルビを振る」の対象にもならない。**MD化の意味が半分しかない。**
+ *
+ * ## ここだけは中身を書き換える
+ *
+ * 名前を変えるだけの処理（`renamePreservingContent`）と違い、本文の
+ * バイトが変わる。だから**原稿を守る手順をそのまま通す**——
+ * 読み込み時のハッシュを照合し、文字コードと改行を保って書き戻す
+ * （`writeTextFilePreservingFormat`。設計書5.4.1）。
+ *
+ * @returns 直した件数。0なら書き込んでいない
+ */
+export async function importNotation(
+  filePath: string
+): Promise<{ ok: boolean; ruby: number; emphasis: number; reason?: string }> {
+  let content;
+  try {
+    content = await readTextFile(filePath);
+  } catch (error) {
+    return {
+      ok: false,
+      ruby: 0,
+      emphasis: 0,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  const counts = countSiteNotation(content.text);
+  if (counts.ruby === 0 && counts.emphasis === 0) {
+    return { ok: true, ruby: 0, emphasis: 0 };
+  }
+
+  const converted = fromSiteNotation(content.text);
+  if (converted === content.text) return { ok: true, ruby: 0, emphasis: 0 };
+
+  const result = await writeTextFilePreservingFormat(
+    filePath,
+    converted,
+    content,
+    content.hash
+  );
+  if (!result.ok) {
+    return { ok: false, ruby: 0, emphasis: 0, reason: describeWriteFailure(result) };
+  }
+  return { ok: true, ruby: counts.ruby, emphasis: counts.emphasis };
+}
+
+/**
+ * 直したルビ・傍点の件数を、報告へ添える。
+ *
+ * **0件なら何も足さない。** ルビの入っていない本文で「ルビ0件」と
+ * 出しても、読ませるだけ無駄である。
+ */
+function describeImported(
+  results: ReadonlyArray<{
+    ok: boolean;
+    ruby: number;
+    emphasis: number;
+    reason?: string;
+  }>
+): string {
+  const ruby = results.reduce((total, entry) => total + entry.ruby, 0);
+  const emphasis = results.reduce((total, entry) => total + entry.emphasis, 0);
+  const failed = results.filter((entry) => !entry.ok);
+
+  const parts: string[] = [];
+  if (ruby > 0) parts.push(`ルビ${ruby}件`);
+  if (emphasis > 0) parts.push(`傍点${emphasis}件`);
+
+  const notes: string[] = [];
+  if (parts.length > 0) {
+    notes.push(`${parts.join("と")}を、この拡張機能の書き方へ直しました。`);
+  }
+  if (failed.length > 0) {
+    // **黙って諦めない。** 名前は変わったのに中身が直っていない状態なので、
+    // 作者は「ルビを取り込む」を自分で押す必要がある
+    notes.push(
+      `${failed.length}件は中の記法を直せませんでした（${
+        failed[0].reason ?? "理由なし"
+      }）。「投稿サイトのルビを取り込む」からやり直せます。`
+    );
+  }
+  return notes.length > 0 ? ` ${notes.join(" ")}` : "";
+}
+
+function describeWriteFailure(result: WriteTextFileResult): string {
+  if (result.ok) return "";
+  switch (result.reason) {
+    case "unsaved_changes":
+      return "開いたまま直していない変更があります（保存してからお試しください）";
+    case "conflict_markers":
+      return "競合の印（<<<<<<<）が残っています";
+    case "modified_externally":
+      return "読み込んだあとに、他の場所から変更されました";
+    default:
+      return result.detail ?? "書き込めませんでした";
+  }
 }
 
 /**

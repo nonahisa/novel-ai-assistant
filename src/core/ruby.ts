@@ -1,18 +1,30 @@
 /**
- * ルビ（振り仮名）の記法変換（設計書6.12）。
+ * ルビ（振り仮名）と傍点の記法変換（設計書6.12）。
  *
- * **拡張機能の中では `{漢字|かんじ}` で書く。** Markdownの拡張として
- * 広く使われている形で、投稿サイトごとの記法に引きずられずに済む。
+ * **拡張機能の中では `{漢字|かんじ}` と `{{強調}}` で書く。** Markdownの
+ * 拡張として広く使われている形で、投稿サイトごとの記法に引きずられずに済む。
+ *
+ * ## ルビは1つの記法で足りる
  *
  * **投稿サイトへは `｜漢字《かんじ》` で出す。** 2026-08-19に調べたところ、
- * **なろう・カクヨム・アルファポリスのいずれでも通る**。1つの記法で
- * 3サイトを賄えるので、サイトごとに出し分ける必要がない。
+ * **なろう・カクヨム・アルファポリスのいずれでも通る**。ネオページも
+ * カクヨムと同じ記法である（2026-08-23、作者の確認）。1つの記法で
+ * 賄えるので、サイトごとに出し分ける必要がない。
  *
  * アルファポリスにはもう1つ `#漢字__かんじ__#` があるので、そちらも
  * 読み書きできるようにしてある（他所から持ち込んだ原稿を取り込めるように）。
  *
- * **ネオページの記法は確かめていない。** 分からないものを推測で入れると、
- * 作者が貼り付けた先で崩れる。分かってから足す。
+ * ## 傍点は、サイトによって書き方が違う
+ *
+ * **ここだけは1つの記法で賄えない。**
+ *
+ * | サイト | 傍点 |
+ * |---|---|
+ * | カクヨム・ネオページ | `《《強調》》`（専用の記法がある） |
+ * | なろう・アルファポリス | 専用記法が無く、**ルビで代用する**（`｜強調《・・》`） |
+ *
+ * そのため、**傍点が入っているときだけ**「どのサイトへ貼るか」を訊く。
+ * 入っていなければ訊かない——訊いても答えが変わらない（5.7.3）。
  *
  * VS Code APIに依存しない。
  */
@@ -38,6 +50,57 @@ const SITE_BARE = /([\u4E00-\u9FFF\u3005々]+)《([^《》\r\n]*)》/g;
 
 /** アルファポリスのもう1つの記法 `#漢字__かんじ__#` */
 const SITE_HASH = /#([^#\r\n]+?)__([^#\r\n]*?)__#/g;
+
+/** 拡張機能の中で使う傍点 `{{強調}}` */
+const EMPHASIS_INTERNAL = /\{\{([^{}\r\n]+)\}\}/g;
+
+/** カクヨム・ネオページの傍点 `《《強調》》` */
+const EMPHASIS_KAKUYOMU = /《《([^《》\r\n]+)》》/g;
+
+/**
+ * 傍点の代わりに使われるルビ。読み仮名が中黒だけのもの。
+ *
+ * **なろうとアルファポリスには傍点の記法が無い**ので、ルビで代用する
+ * （`｜強調《・・》`）。取り込むときは、これを傍点として読む。
+ *
+ * **数は合っていなくてもよい。** 中黒だけの読み仮名を振ることは
+ * ふつう無いので、それが出てきた時点で傍点だと判断してよい。
+ */
+const EMPHASIS_AS_RUBY = /[|｜]([^|｜《》\r\n]+)《([・･]+)》/g;
+
+/** 傍点の代わりに使うルビの読み（文字数ぶんの中黒） */
+function dotsFor(base: string): string {
+  return "・".repeat(Array.from(base).length);
+}
+
+/** 貼り付け先のサイト。傍点の書き方だけが変わる */
+export type EmphasisSite = "kakuyomu" | "narou";
+
+export interface EmphasisSiteChoice {
+  id: EmphasisSite;
+  label: string;
+  detail: string;
+}
+
+/**
+ * 傍点があるときに選んでもらう先。
+ *
+ * **サイト名で並べる。** 記法で並べると、作者は自分の貼り付け先が
+ * どちらなのかを記号から逆算することになる。
+ */
+export const EMPHASIS_SITES: EmphasisSiteChoice[] = [
+  {
+    id: "kakuyomu",
+    label: "カクヨム・ネオページ",
+    detail: "傍点を 《《強調》》 で出します（この2つは同じ記法です）",
+  },
+  {
+    id: "narou",
+    label: "小説家になろう・アルファポリス",
+    detail:
+      "傍点の記法が無いため、ルビで代用します（｜強調《・・》）。ルビはそのままです",
+  },
+];
 
 export interface RubyStyle {
   id: "site" | "alphapolis-hash" | "html";
@@ -79,26 +142,60 @@ export function findRuby(text: string): Array<{ base: string; reading: string }>
   return found;
 }
 
-/** `{漢字|かんじ}` を投稿サイトの記法へ */
+/** 傍点が入っているか。入っていなければ、貼り付け先を訊く必要が無い */
+export function hasEmphasis(text: string): boolean {
+  EMPHASIS_INTERNAL.lastIndex = 0;
+  return EMPHASIS_INTERNAL.test(text);
+}
+
+/** 傍点の中身を1件ずつ取り出す */
+export function findEmphasis(text: string): string[] {
+  return [...text.matchAll(EMPHASIS_INTERNAL)].map((match) => match[1]);
+}
+
+/**
+ * `{漢字|かんじ}` と `{{強調}}` を投稿サイトの記法へ。
+ *
+ * @param site 傍点の書き方だけがこれで変わる。ルビは変わらない
+ */
 export function toSiteNotation(
   text: string,
-  style: RubyStyle["id"] = "site"
+  style: RubyStyle["id"] = "site",
+  site: EmphasisSite = "kakuyomu"
 ): string {
   switch (style) {
     case "site":
-      return text.replace(INTERNAL, (_, base, reading) =>
-        reading ? `｜${base}《${reading}》` : base
-      );
+      return text
+        .replace(EMPHASIS_INTERNAL, (_, base: string) =>
+          site === "kakuyomu" ? `《《${base}》》` : `｜${base}《${dotsFor(base)}》`
+        )
+        .replace(INTERNAL, (_, base, reading) =>
+          reading ? `｜${base}《${reading}》` : base
+        );
     case "alphapolis-hash":
-      return text.replace(INTERNAL, (_, base, reading) =>
-        reading ? `#${base}__${reading}__#` : base
-      );
+      // アルファポリスには傍点の記法が無いので、ルビでの代用に揃える
+      return text
+        .replace(
+          EMPHASIS_INTERNAL,
+          (_, base: string) => `#${base}__${dotsFor(base)}__#`
+        )
+        .replace(INTERNAL, (_, base, reading) =>
+          reading ? `#${base}__${reading}__#` : base
+        );
     case "html":
-      return text.replace(INTERNAL, (_, base, reading) =>
-        reading
-          ? `<ruby>${escapeHtml(base)}<rt>${escapeHtml(reading)}</rt></ruby>`
-          : escapeHtml(base)
-      );
+      return text
+        .replace(
+          EMPHASIS_INTERNAL,
+          (_, base: string) =>
+            `<span style="text-emphasis: filled dot; -webkit-text-emphasis: filled dot;">${escapeHtml(
+              base
+            )}</span>`
+        )
+        .replace(INTERNAL, (_, base, reading) =>
+          reading
+            ? `<ruby>${escapeHtml(base)}<rt>${escapeHtml(reading)}</rt></ruby>`
+            : escapeHtml(base)
+        );
   }
 }
 
@@ -109,10 +206,41 @@ export function toSiteNotation(
  * 先に縦線なしを当てると、`｜漢字《かんじ》` の縦線が置いてけぼりになる。
  */
 export function fromSiteNotation(text: string): string {
-  return text
-    .replace(SITE_BAR, (_, base, reading) => `{${base}|${reading}}`)
-    .replace(SITE_HASH, (_, base, reading) => `{${base}|${reading}}`)
-    .replace(SITE_BARE, (_, base, reading) => `{${base}|${reading}}`);
+  return (
+    text
+      // **傍点を先に読む。** 中黒だけの読み仮名をルビとして取り込むと、
+      // 傍点だったものが「・・」というルビになって残る
+      .replace(EMPHASIS_KAKUYOMU, (_, base: string) => `{{${base}}}`)
+      .replace(EMPHASIS_AS_RUBY, (_, base: string) => `{{${base}}}`)
+      .replace(SITE_BAR, (_, base, reading) => `{${base}|${reading}}`)
+      .replace(SITE_HASH, (_, base, reading) => `{${base}|${reading}}`)
+      .replace(SITE_BARE, (_, base, reading) => `{${base}|${reading}}`)
+  );
+}
+
+/**
+ * 投稿サイトの記法が入っているか（取り込む価値があるか）。
+ *
+ * **`.txt` を `.md` にするとき、中に既にルビや傍点があれば直す**
+ * （設計書6.12.4）。名前を変えただけでは、プレビューでもルビとして
+ * 表示されず、「ルビを振る」の対象にもならない。
+ */
+export function countSiteNotation(text: string): {
+  ruby: number;
+  emphasis: number;
+} {
+  const emphasis =
+    [...text.matchAll(EMPHASIS_KAKUYOMU)].length +
+    [...text.matchAll(EMPHASIS_AS_RUBY)].length;
+  // 傍点として読むぶんを、ルビから差し引く（同じ並びを二重に数えない）
+  const withoutEmphasis = text
+    .replace(EMPHASIS_KAKUYOMU, "")
+    .replace(EMPHASIS_AS_RUBY, "");
+  const ruby =
+    [...withoutEmphasis.matchAll(SITE_BAR)].length +
+    [...withoutEmphasis.matchAll(SITE_HASH)].length +
+    [...withoutEmphasis.replace(SITE_BAR, "").matchAll(SITE_BARE)].length;
+  return { ruby, emphasis };
 }
 
 /** プレビュー用のHTML。ルビ以外はそのまま返す（呼ぶ側で escape 済みを想定しない） */
@@ -126,7 +254,39 @@ export function rubyToHtml(text: string): string {
  * **投稿サイトは読み仮名を字数に数えない**ので、文字数の計測でも使う。
  */
 export function stripRuby(text: string): string {
-  return text.replace(INTERNAL, "$1");
+  // 傍点の印も落とす。**印は本文ではない**ので、字数に数えない
+  return text.replace(EMPHASIS_INTERNAL, "$1").replace(INTERNAL, "$1");
+}
+
+/**
+ * 傍点として正しい形か。理由が分かる文字列を返す（問題なければ null）。
+ *
+ * **読み仮名が無いぶん、ルビより条件はゆるい。** それでも記号は弾く
+ * ——`}` が混ざると、そこで印が閉じてしまう。
+ */
+export function validateEmphasis(base: string): string | null {
+  if (!base.trim()) return "傍点を付ける文字がありません。";
+  if (/[{}|｜《》#\r\n]/u.test(base)) {
+    return "傍点に使えない記号（{ } | ｜ 《 》 #）が入っています。";
+  }
+  if (Array.from(base).length > 30) {
+    return "傍点を付ける文字が長すぎます（30文字まで）。";
+  }
+  return null;
+}
+
+/**
+ * 見つかった件数を、作者に読める言葉にする。
+ *
+ * **ルビと傍点で言い分ける。** 「12件のルビ」とだけ出ていると、
+ * 傍点まで直されることに気づけない。
+ */
+export function describeSiteNotation(text: string): string {
+  const { ruby, emphasis } = countSiteNotation(text);
+  const parts: string[] = [];
+  if (ruby > 0) parts.push(`ルビ${ruby}件`);
+  if (emphasis > 0) parts.push(`傍点${emphasis}件`);
+  return parts.length > 0 ? parts.join("と") : "投稿サイトの記法";
 }
 
 /**

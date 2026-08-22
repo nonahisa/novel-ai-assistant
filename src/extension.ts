@@ -153,7 +153,12 @@ import {
   extendMarkdownItWithRuby,
   type MarkdownItLike,
 } from "./core/markdownItRuby";
-import { addRuby, copyForPosting, importRuby } from "./features/ruby";
+import {
+  addEmphasis,
+  addRuby,
+  copyForPosting,
+  importRuby,
+} from "./features/ruby";
 import { showEditHistory } from "./features/editHistoryPanel";
 import {
   reviewProposals,
@@ -2155,6 +2160,7 @@ export async function activate(
 
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.addRuby", addRuby),
+    vscode.commands.registerCommand("novelai.addEmphasis", addEmphasis),
     vscode.commands.registerCommand("novelai.copyForPosting", copyForPosting),
     vscode.commands.registerCommand("novelai.importRuby", importRuby)
   );
