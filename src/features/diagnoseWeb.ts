@@ -77,6 +77,9 @@ export async function diagnoseWeb(
     lines.push(`| ${r.name} | ${mark}${detail} | ${r.impact} |`);
   }
 
+  await appendCommandCheck(lines);
+  await appendWorkScan(lines, base);
+
   const failed = results.filter((r) => !r.ok);
   lines.push("", "## まとめ", "");
   if (failed.length === 0) {
@@ -93,6 +96,110 @@ export async function diagnoseWeb(
   );
 
   await show(lines.join("\n"));
+}
+
+/**
+ * コマンドが登録されているか。
+ *
+ * **`activate()` が途中で失敗すると、画面（作品一覧・操作メニュー）は
+ * 出るのにコマンドが登録されない。** ツリーの項目は決まった一覧から
+ * 描いているので、押しても何も起きないボタンが並ぶ。
+ * 「押したのに何も起きない」の原因を、ここで見分ける。
+ */
+async function appendCommandCheck(lines: string[]): Promise<void> {
+  lines.push("", "## コマンドの登録", "");
+  try {
+    const all = await vscode.commands.getCommands(true);
+    const mine = all.filter((c) => c.startsWith("novelai.")).sort();
+    lines.push(`- 登録されている数: **${mine.length}件**`);
+
+    // 作品を足す道が通っているかは、ここが要
+    const key = [
+      "novelai.addWork",
+      "novelai.createWork",
+      "novelai.addWorkFromGithub",
+      "novelai.diagnoseWeb",
+    ];
+    lines.push("", "| コマンド | 登録 |", "|---|---|");
+    for (const c of key) {
+      lines.push(`| \`${c}\` | ${mine.includes(c) ? "○" : "**×**"} |`);
+    }
+    if (mine.length < 50) {
+      lines.push(
+        "",
+        "**数が少なすぎます。** 拡張機能の起動が途中で止まった可能性があります。"
+      );
+    }
+  } catch (error) {
+    lines.push(`- 取得できませんでした: ${describeError(error)}`);
+  }
+}
+
+/**
+ * 作品を探す道を、実際にたどってみせる。
+ *
+ * 「フォルダから作品を追加」で何が起きるはずだったかを、そのまま再現する
+ * （登録はしない）。作品集として何件見つかるか、見つからないならなぜかが分かる。
+ */
+async function appendWorkScan(lines: string[], base: string): Promise<void> {
+  lines.push("", `## 作品を探す（\`${base}\`）`, "");
+  try {
+    const { scanCollection, describeScan, looksLikeWork } = await import(
+      "../core/workCollection.js"
+    );
+
+    const self = await looksLikeWork(base);
+    lines.push(
+      `- このフォルダー自体が作品か: ${self.isWork ? "はい" : "いいえ"}` +
+        `（設定ファイル: ${self.hasConfig ? "あり" : "なし"}）`
+    );
+
+    const scan = await scanCollection(base, () => false);
+    lines.push(`- 判定: \`${scan.kind}\``);
+    lines.push(`- 説明: ${describeScan(scan, base)}`);
+
+    if (scan.kind === "collection") {
+      lines.push("", "| 作品 | 設定ファイル |", "|---|---|");
+      for (const w of scan.works) {
+        lines.push(`| ${w.title} | ${w.hasConfig ? "あり" : "なし"} |`);
+      }
+    } else if (scan.kind === "no_works") {
+      // なぜ見つからないのかを、子フォルダーごとに出す
+      lines.push("", "**中のフォルダーを1つずつ見た結果：**", "");
+      lines.push("| フォルダー | 本文 | 設定 | .aiwriter |", "|---|---|---|---|");
+      try {
+        const entries = await vscode.workspace.fs.readDirectory(path.toUri(base));
+        for (const [name, kind] of entries) {
+          if (kind !== vscode.FileType.Directory) continue;
+          if (name.startsWith(".")) continue;
+          const child = path.join(base, name);
+          lines.push(
+            `| ${name} | ${await mark(child, "本文")} | ${await mark(child, "設定")}` +
+              ` | ${await mark(child, ".aiwriter")} |`
+          );
+        }
+      } catch (error) {
+        lines.push(`（中を見られませんでした: ${describeError(error)}）`);
+      }
+      lines.push(
+        "",
+        "作品と見なすのは、**「本文」か「設定」のフォルダーがある**か、",
+        "**`.aiwriter/config.json` がある**ものです。"
+      );
+    }
+  } catch (error) {
+    lines.push(`- 走査できませんでした: ${describeError(error)}`);
+  }
+}
+
+/** 子フォルダーの有無を○×で */
+async function mark(parent: string, child: string): Promise<string> {
+  try {
+    const stat = await vscode.workspace.fs.stat(path.toUri(path.join(parent, child)));
+    return (stat.type & vscode.FileType.Directory) !== 0 ? "○" : "ファイル";
+  } catch {
+    return "×";
+  }
 }
 
 /**
