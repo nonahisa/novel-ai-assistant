@@ -132,7 +132,7 @@ export async function runSetupWizard(
     ollama: "無料・オフライン可。ローカル実行",
     gemini: "無料枠あり。超えると課金される",
     openai: "実行するたびに課金される",
-    sakura: "国内のサービス。実行するたびに課金される",
+    sakura: "国内のサービス。無料枠あり。超えると課金される",
     claude: "高精度だが実行するたびに課金される",
   };
 
