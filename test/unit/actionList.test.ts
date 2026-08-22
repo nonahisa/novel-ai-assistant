@@ -548,3 +548,52 @@ describe("操作メニューの印の色", () => {
     }
   });
 });
+
+/**
+ * 校正・校閲の並び（作者の指示、2026-08-22）。
+ *
+ * 「『編集部からの提案を見る』を一番下、『校閲を始める／終える』をその上に
+ * 配置してください」。
+ *
+ * **並びは作者が決めたものなので、機械で留める。** 項目を足すときに、
+ * うっかり末尾へ差し込むと崩れる——崩れても動きは変わらないので、
+ * 実機で気づくまで分からない。
+ */
+describe("校正・校閲の並び", () => {
+  function proofreadingSection() {
+    for (const group of ACTION_TREE) {
+      for (const entry of group.entries) {
+        if (entry.kind === "section" && entry.label === "校正・校閲") {
+          return entry;
+        }
+      }
+    }
+    throw new Error("「校正・校閲」が見つかりません");
+  }
+
+  test("編集部とのやり取りは、いちばん下の2つに置く", () => {
+    const commands = proofreadingSection().items.map((item) => item.command);
+
+    expect(commands[commands.length - 1]).toBe("novelai.reviewProposals");
+    expect(commands[commands.length - 2]).toBe("novelai.toggleReviewLock");
+  });
+
+  test("作者が1人で回す作業が、その上に並ぶ", () => {
+    // 毎日通るのは上のほう。相手のいる作業を上に置くと、そこを通り抜ける
+    const commands = proofreadingSection().items.map((item) => item.command);
+
+    expect(commands[0]).toBe("novelai.checkTypos");
+    expect(commands).toContain("novelai.checkProofread");
+    // 校閲ロックより前に、検知の類がすべて並んでいる
+    const lockAt = commands.indexOf("novelai.toggleReviewLock");
+    for (const command of [
+      "novelai.checkTypos",
+      "novelai.checkNotation",
+      "novelai.checkProofread",
+      "novelai.checkDeviations",
+      "novelai.checkContradictions",
+    ]) {
+      expect(commands.indexOf(command), command).toBeLessThan(lockAt);
+    }
+  });
+});
