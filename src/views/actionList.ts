@@ -556,6 +556,22 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         // 分類と操作の両方に出しても、その間の小分類に無いと辿れない（6.17.1）
         counter: "staleImeDictionary",
         items: [
+          // **MD化したい理由はルビだけではない**（プレビューで読みたい、
+          // 見出しを使いたい）。以前は「ルビを振る」を押したときにだけ
+          // 現れる救済の道で、作者から「どこから操作すればいいのでしょうか？」
+          // と訊かれた（2026-08-22）。ルビの手前に置く
+          {
+            kind: "action",
+            command: "novelai.convertToMarkdown",
+            label: "本文を .md にする",
+            icon: "markdown",
+            requiresWork: true,
+            detail:
+              "本文の .txt を .md に変えます。ルビやプレビューが使えるようになります。" +
+              "**中身は1文字も変えません。名前だけを変えます**" +
+              "（文字コードも改行もそのまま。戻すときは名前を .txt に戻すだけです）。" +
+              "この作品の本文をまとめて変えるか、開いている1件だけかを選べます。",
+          },
           {
             kind: "action",
             command: "novelai.addRuby",

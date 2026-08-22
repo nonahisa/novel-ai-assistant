@@ -2159,6 +2159,37 @@ export async function activate(
     vscode.commands.registerCommand("novelai.importRuby", importRuby)
   );
 
+  // **入口を2つ持たせる**（設計書6.12.1）。ファイルを右クリックしたときは
+  // 対象が決まっているので訊かない。操作メニューからは、まとめてか1件かを選ぶ
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "novelai.convertToMarkdown",
+      async (node?: EpisodeNode | WorkNode) => {
+        const { convertOne, convertToMarkdown } = await import(
+          "./features/markdownConvert.js"
+        );
+
+        if (node && "episode" in node) {
+          // 未保存のまま名前を変えると、書きかけが行き場を失う
+          if (
+            !(await saveDirtyDocumentsBeforeExtraction(node.work, "MD化"))
+          ) {
+            return;
+          }
+          if (!(await convertOne(node.episode.filePath))) return;
+          treeProvider.refresh(node.work.id);
+          return;
+        }
+
+        const work = await resolveWork(node as WorkNode | undefined, registry);
+        if (!work) return;
+        if (!(await saveDirtyDocumentsBeforeExtraction(work, "MD化"))) return;
+        if (!(await convertToMarkdown(work))) return;
+        treeProvider.refresh(work.id);
+      }
+    )
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "novelai.showEditHistory",

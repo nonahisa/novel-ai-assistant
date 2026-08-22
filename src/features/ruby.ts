@@ -1,13 +1,8 @@
 import * as vscode from "vscode";
 import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
-import {
-  describeRefusal,
-  isPlainTextManuscript,
-  planConversion,
-  planFolderConversion,
-  type ConversionPlan,
-} from "../core/markdownConversion";
+import { isPlainTextManuscript } from "../core/markdownConversion";
+import { convertFolder, convertOne } from "./markdownConvert";
 import {
   fromSiteNotation,
   RUBY_STYLES,
@@ -85,113 +80,6 @@ async function requireMarkdown(): Promise<vscode.TextEditor | undefined> {
   });
 }
 
-/** 同じフォルダーにある名前の一覧（拡張子込み） */
-async function siblingNames(filePath: string): Promise<string[]> {
-  const dir = path.toUri(path.dirname(filePath));
-  try {
-    const entries = await vscode.workspace.fs.readDirectory(dir);
-    return entries
-      .filter(([, kind]) => kind === vscode.FileType.File)
-      .map(([name]) => name);
-  } catch {
-    return [];
-  }
-}
-
-/** 1件だけ変換する。変換後のパスを返す */
-async function convertOne(filePath: string): Promise<string | undefined> {
-  const decision = planConversion(filePath, await siblingNames(filePath));
-  if (!decision.plan) {
-    void vscode.window.showErrorMessage(
-      `変換できませんでした。${describeRefusal(decision.refusal!)}`
-    );
-    return undefined;
-  }
-  try {
-    await renamePreservingContent(decision.plan);
-  } catch (error) {
-    void vscode.window.showErrorMessage(
-      `変換できませんでした: ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
-    return undefined;
-  }
-  void vscode.window.showInformationMessage(
-    `${path.basename(filePath)} を ${path.basename(decision.plan.to)} にしました。`
-  );
-  return decision.plan.to;
-}
-
-/** フォルダーの .txt をまとめて変換する。もとのファイルに当たる変換後のパスを返す */
-async function convertFolder(filePath: string): Promise<string | undefined> {
-  const dir = path.dirname(filePath);
-  const names = await siblingNames(filePath);
-  const targets = names
-    .filter((name) => isPlainTextManuscript(name))
-    .map((name) => path.join(dir, name))
-    .sort();
-
-  const { plans, skipped } = planFolderConversion(targets, names);
-  if (plans.length === 0) {
-    void vscode.window.showWarningMessage(
-      "変換できる .txt がありませんでした。"
-    );
-    return undefined;
-  }
-
-  const done: string[] = [];
-  const failed: string[] = [];
-  for (const plan of plans) {
-    try {
-      await renamePreservingContent(plan);
-      done.push(plan.to);
-    } catch (error) {
-      // **1件失敗しても残りは進める。** 途中で止めると、
-      // どこまで終わったのかが作者に分からない
-      failed.push(
-        `${path.basename(plan.from)}（${
-          error instanceof Error ? error.message : String(error)
-        }）`
-      );
-    }
-  }
-
-  const notes = [`${done.length}件を .md にしました。`];
-  if (skipped.length > 0) {
-    notes.push(
-      `${skipped.length}件は見送りました：` +
-        skipped
-          .map(
-            (entry) =>
-              `${path.basename(entry.file)}（${describeRefusal(entry.refusal)}）`
-          )
-          .join("、")
-    );
-  }
-  if (failed.length > 0) notes.push(`${failed.length}件は失敗：${failed.join("、")}`);
-  void vscode.window.showInformationMessage(notes.join(" "));
-
-  const mine = plans.find((plan) => plan.from === filePath);
-  return mine?.to ?? done[0];
-}
-
-/**
- * 名前だけを変える。
- *
- * **中身を読み書きしない。** 読んで書き直すと、文字コードや改行の
- * 扱いを1つ間違えただけで原稿が壊れる。名前を変えるだけなら、
- * 中身に触れる余地がそもそも無い。
- */
-async function renamePreservingContent(plan: ConversionPlan): Promise<void> {
-  await vscode.workspace.fs.rename(
-    path.toUri(plan.from),
-    path.toUri(plan.to),
-    // **上書きしない。** 既にあるなら planConversion が止めているが、
-    // その後に作られている場合もある
-    { overwrite: false }
-  );
-}
 
 /**
  * 選択した文字にルビを振る。
