@@ -168,7 +168,7 @@ import {
 import { countUnextractedEpisodes } from "./features/extractionFreshness";
 import { chooseScope, recordCheck } from "./features/typoCheckScope";
 import { switchMode } from "./features/switchMode";
-import { openInDefaultEditor } from "./views/openDocument";
+import { openInDefaultEditor, revealFolder } from "./views/openDocument";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -1321,10 +1321,9 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
-        await vscode.commands.executeCommand(
-          "revealFileInOS",
-          path.toUri(work.folderPath)
-        );
+        // ブラウザではOSのフォルダーを開けないので、
+        // VS Code の中のエクスプローラーで見せる（設計書5.8.10）
+        await revealFolder(work.folderPath);
       }
     )
   );
@@ -1458,6 +1457,14 @@ export async function activate(
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.showLog", () => {
       showLog();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.diagnoseWeb", async () => {
+      // 作品が登録されていればその中で試す。無ければ開いているフォルダーで
+      const { diagnoseWeb } = await import("./features/diagnoseWeb.js");
+      await diagnoseWeb(registry.list()[0]?.folderPath);
     })
   );
 

@@ -930,6 +930,18 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           "**原稿の一部を含みます。** GitHubへは送られません。" +
           "残したくない場合は設定 `novelai.chatLog.enabled` を切ってください。",
       },
+      {
+        kind: "action",
+        command: "novelai.diagnoseWeb",
+        label: "動作を診断",
+        icon: "pulse",
+        requiresWork: false,
+        detail:
+          "いまの環境で、ファイルに何ができるかを実際に試して並べます" +
+          "（フォルダーを作る・書く・読む・移す・消す）。" +
+          "**原稿には触れません。** 使い捨ての場所で試して、終わったら消します。" +
+          "ブラウザ版で保存できないときに、原因を突き止めるために使います。",
+      },
       // **一番下に置く**（作者の指定、2026-08-16）。
       // 版を見るのは不具合を伝えるときだけで、日々の作業では使わない
       {

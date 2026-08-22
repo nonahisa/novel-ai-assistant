@@ -1,5 +1,5 @@
+import { revealFolder } from "../views/openDocument";
 import * as vscode from "vscode";
-import { toUri } from "../core/paths";
 import { WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
 import { CharacterStore, CharacterStoreError } from "../core/characterStore";
@@ -144,10 +144,7 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
     "退避先を開く"
   );
   if (action === "退避先を開く") {
-    await vscode.commands.executeCommand(
-      "revealFileInOS",
-      toUri(absorbRecoveryPath)
-    );
+    await revealFolder(absorbRecoveryPath);
   }
 }
 

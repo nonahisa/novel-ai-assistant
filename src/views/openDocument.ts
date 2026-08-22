@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { toUri } from "../core/paths";
+import { canRunProcesses } from "../core/runtime";
 
 /**
  * 作者の既定のエディターでファイルを開く（設計書6.17.6）。
@@ -29,4 +30,43 @@ export async function openInDefaultEditor(
     toUri(filePath),
     options
   );
+}
+
+/**
+ * その場所を、作者に見せる（設計書5.8.10）。
+ *
+ * 書き出しやまとめが済んだあとの「フォルダーを開く」に使う。
+ *
+ * **ブラウザ版では、OSのフォルダーを開けない。** `revealFileInOS` は
+ * 手元のVS Codeにしか無いコマンドで、呼ぶと失敗する。かといって
+ * ボタンごと消すと、**書き出したものがどこへ行ったのか分からなくなる**
+ * ——機能そのものはブラウザでも動いているので、そこだけ行き止まりにしない。
+ *
+ * 代わりに、VS Code の中のエクスプローラーで在り処を見せる。
+ * 開けなかったときは黙って諦める——**もとの用は済んでいる**（書き出しは
+ * 成功していて、その旨は先に伝えてある）ので、ここで失敗を重ねて
+ * 作者を驚かせない。
+ */
+export async function revealFolder(location: string): Promise<void> {
+  try {
+    await vscode.commands.executeCommand(
+      revealCommandFor(canRunProcesses()),
+      toUri(location)
+    );
+  } catch {
+    // 在り処は、呼び出し元がすでに文言で伝えている
+  }
+}
+
+/**
+ * 場所を見せるのに使うコマンド名。
+ *
+ * **`canRunProcesses()` は実行環境そのものを見るので、単体テストからは
+ * 片側（常にNode）しか確かめられない。** どちらを選ぶかだけを切り出して、
+ * 両方の分岐をテストできるようにする（`providerRuntimeFilter.ts` と同じ手）。
+ */
+export function revealCommandFor(canRun: boolean): string {
+  // `revealFileInOS` は手元のVS Codeにしか無い。
+  // ブラウザでは VS Code の中のエクスプローラーで見せる
+  return canRun ? "revealFileInOS" : "revealInExplorer";
 }

@@ -1,3 +1,4 @@
+import { revealFolder } from "../views/openDocument";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { WorkEntry } from "../models/types";
@@ -157,10 +158,7 @@ export async function exportImeDictionary(work: WorkEntry): Promise<void> {
   );
 
   if (action === "フォルダーを開く") {
-    await vscode.commands.executeCommand(
-      "revealFileInOS",
-      path.toUri(path.join(settingsDir, written[0]))
-    );
+    await revealFolder(path.join(settingsDir, written[0]));
   } else if (action === "取り込み手順を見る") {
     const document = await vscode.workspace.openTextDocument({
       content: buildHowToDocument(picked.map((entry) => entry.dialect as ImeDialect)),

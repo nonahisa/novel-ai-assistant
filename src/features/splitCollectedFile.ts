@@ -1,3 +1,4 @@
+import { revealFolder } from "../views/openDocument";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
@@ -171,10 +172,7 @@ export async function splitCollectedFile(
     "退避先を開く"
   );
   if (answer === "退避先を開く") {
-    await vscode.commands.executeCommand(
-      "revealFileInOS",
-      path.toUri(recovery)
-    );
+    await revealFolder(recovery);
   }
 }
 
