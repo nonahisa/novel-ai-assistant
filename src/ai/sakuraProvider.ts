@@ -48,7 +48,7 @@ interface ChatResponse {
 
 export class SakuraProvider implements ApiKeyProvider {
   readonly id = "sakura" as const;
-  readonly displayName = "さくらのAI Engine（クラウド）";
+  readonly displayName = "さくらのAI（クラウド・無料枠あり）";
 
   /**
    * **無料枠はあるが、有料として扱う**（2026-08-23、作者の確認）。
