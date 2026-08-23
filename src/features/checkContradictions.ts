@@ -17,6 +17,7 @@ import {
 import { ChunkCache } from "../core/chunkCache";
 import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
 import {
+  factsRevealedAfter,
   hasAppearedBy,
   isEmptyAfterRollback,
   recordAsOf,
@@ -50,6 +51,19 @@ import {
   LIGHT_CATEGORIES,
   type ContradictionCategory,
 } from "../prompts/contradictionCheck";
+import {
+  buildContradictionVerifyPrompt,
+  CONTRADICTION_VERIFY_SCHEMA,
+  CONTRADICTION_VERIFY_SYSTEM_PROMPT,
+  CONTRADICTION_VERIFY_VERSION,
+  type VerifyRejectReason,
+} from "../prompts/contradictionVerify";
+import {
+  describeVerifyResults,
+  parseVerifyOutcome,
+  undecidedOutcome,
+  type VerifyOutcome,
+} from "../core/contradictionVerifyValidation";
 import {
   contradictionKey,
   parseContradictionResult,
@@ -102,6 +116,18 @@ const CHARACTER_AS_OF_FIELDS = [
 
 const LOCATION_AS_OF_FIELDS = ["summary", "region", "description"];
 
+/** 項目の名前を、作者に読める言葉にする */
+const FIELD_LABELS: Record<string, string> = {
+  summary: "紹介",
+  role: "役割",
+  personality: "性格",
+  appearance: "外見",
+  gender: "性別",
+  affiliation: "所属",
+  region: "地域",
+  description: "説明",
+};
+
 export interface ContradictionRunResult {
   issues: AcceptedContradiction[];
   /** 本文に無い引用など、弾いた件数 */
@@ -111,6 +137,13 @@ export interface ContradictionRunResult {
   cancelled: boolean;
   /** 処理したチャンク数 */
   processedChunks: number;
+  /**
+   * 検証で何件を取り下げたか（設計書6.10.5）。
+   *
+   * **黙って消さない。** 内訳が見えないと、指摘が少ないのが
+   * 「本当に無い」のか「消しすぎている」のか作者に分からない。
+   */
+  verifyNote: string;
 }
 
 export interface CheckContradictionsOptions {
@@ -147,6 +180,18 @@ export async function checkContradictions(
   const cacheKeyBase = {
     feature: "contradiction_check",
     promptVersion: `${CONTRADICTION_CHECK_VERSION}:${material.fingerprint}`,
+    model: resolved.model,
+  };
+
+  // **向きが違えば答えも違う。** 同じ鍵に入れると、片方が他方を上書きする
+  const futureKeyBase = {
+    ...cacheKeyBase,
+    feature: "contradiction_future",
+  };
+  // 検証は別のプロンプトなので、版も別に持つ
+  const verifyKeyBase = {
+    feature: "contradiction_verify",
+    promptVersion: `${CONTRADICTION_VERIFY_VERSION}:${material.fingerprint}`,
     model: resolved.model,
   };
 
@@ -195,8 +240,14 @@ export async function checkContradictions(
   const model = resolved.model;
   const settings = material;
 
-  const issues: AcceptedContradiction[] = [];
+  /**
+   * 検出した1件。**検証まで、どのチャンクの何行目かを持ち回る**
+   * （設計書6.10.5）。前後の本文を渡すのに要る
+   */
+  const found: Array<{ issue: AcceptedContradiction; chunk: Chunk }> = [];
   let rejectedCount = 0;
+  const verifyRejected: Array<{ reason?: VerifyRejectReason }> = [];
+  let verifyUndecided = 0;
   let failedChunks = 0;
   let cancelled = false;
   let processedChunks = 0;
@@ -220,7 +271,7 @@ export async function checkContradictions(
       const chunk = queue[cursor];
 
       const cached = cache.get(chunk.hash, cacheKeyBase);
-      const raw = cached ?? (await ask(chunk));
+      const raw = cached ?? (await ask(chunk, "settled"));
       done++;
       progress.report({
         message: `${done}/${total}`,
@@ -242,25 +293,36 @@ export async function checkContradictions(
       }
       if (raw === undefined) continue;
 
-      const validated = validateContradictions(raw, chunk);
-      rejectedCount += validated.rejected.length;
+      collect(raw, chunk);
 
-      // **どのファイルの何行目かを、ここで確定させる。** まとめたチャンクでは
-      // AIが返す行番号がまとめた本文の通し番号になっており、そのまま使うと
-      // 別の話のファイルの、まったく違う行を指すことになる
-      for (const issue of validated.accepted) {
-        const at = locateChunkLine(chunk, issue.line);
-        if (!at) {
-          // 戻せない行は捨てる。どこの話か決められない
-          rejectedCount++;
-          continue;
+      // **あとで判明する事実とも突き合わせる**（設計書6.10.4）。
+      // 「まだ知らない」ではなく「両立しない」を探す、逆向きの見方である
+      const futureFacts = settings.futureFactsFor(chunk.text, chunk.chapterStart);
+      if (futureFacts) {
+        const futureCached = cache.get(chunk.hash, futureKeyBase);
+        const futureRaw =
+          futureCached ?? (await ask(chunk, "future", futureFacts));
+        if (futureRaw !== undefined && futureRaw !== RETRY_SMALLER) {
+          collect(futureRaw, chunk);
         }
-        issues.push({ ...issue, filePath: at.filePath, line: at.line });
       }
       processedChunks++;
     }
 
-    async function ask(chunk: Chunk): Promise<unknown | undefined> {
+    /** 応答を検証して、どのチャンクの指摘かを覚えておく */
+    function collect(raw: unknown, chunk: Chunk): void {
+      const validated = validateContradictions(raw, chunk);
+      rejectedCount += validated.rejected.length;
+      for (const issue of validated.accepted) {
+        found.push({ issue, chunk });
+      }
+    }
+
+    async function ask(
+      chunk: Chunk,
+      mode: "settled" | "future",
+      futureFacts = ""
+    ): Promise<unknown | undefined> {
       // **まとめたチャンクでは、いちばん前の話に合わせる。**
       // うしろに合わせると、前半の話にとって「まだ分かっていないこと」を
       // 材料に渡すことになる（設計書6.10.3）
@@ -285,6 +347,7 @@ export async function checkContradictions(
             worldviewSummary: settings.worldview,
             previousSynopses: settings.synopsesBefore(chunk.chapterStart),
             categories,
+            futureFacts,
           }),
           model,
           // 事実の突き合わせなので揺らさない
@@ -314,7 +377,11 @@ export async function checkContradictions(
           });
           return undefined;
         }
-        await cache.set(chunk.hash, cacheKeyBase, parsed);
+        await cache.set(
+          chunk.hash,
+          mode === "future" ? futureKeyBase : cacheKeyBase,
+          parsed
+        );
         return parsed;
       } catch (error) {
         if (error instanceof AIError && error.kind === "aborted") return undefined;
@@ -333,7 +400,66 @@ export async function checkContradictions(
     }
   });
 
+  // ── 検証（設計書6.10.5）─────────────────────────
+  //
+  // **検出は本文を読みながら行う。** 1回で何十行も見て、設定も世界観も
+  // 突き合わせるので、1件ずつを吟味する余裕が無い。ここでは**1件だけ**を
+  // 見て、「これは本当に矛盾か」を問い直す。
+  const issues: AcceptedContradiction[] = [];
+  if (found.length > 0 && !cancelled) {
+    await withCancellableProgress(
+      "検出した矛盾を検証しています",
+      async (progress, token) => {
+        const controller = new AbortController();
+        token.onCancellationRequested(() => {
+          cancelled = true;
+          controller.abort();
+        });
+
+        let done = 0;
+        for (const entry of found) {
+          if (token.isCancellationRequested) break;
+          progress.report({
+            message: `${++done}/${found.length}`,
+            increment: 100 / found.length,
+          });
+
+          const outcome = await verify(entry.issue, entry.chunk, controller);
+          if (outcome.undecided) verifyUndecided++;
+          if (!outcome.keep) {
+            verifyRejected.push({ reason: outcome.reason });
+            logStep(
+              `検証で取り下げ: ${entry.issue.excerpt.slice(0, 20)} ` +
+                `（${outcome.reason}／${outcome.explanation}）`
+            );
+            continue;
+          }
+
+          // **どのファイルの何行目かを、ここで確定させる。** まとめた
+          // チャンクではAIが返す行番号がまとめた本文の通し番号になっており、
+          // そのまま使うと別の話のファイルの、まったく違う行を指す
+          const at = locateChunkLine(entry.chunk, entry.issue.line);
+          if (!at) {
+            // 戻せない行は捨てる。どこの話か決められない
+            rejectedCount++;
+            continue;
+          }
+          issues.push({
+            ...entry.issue,
+            filePath: at.filePath,
+            line: at.line,
+            // 検証で分かったことは、作者の判断材料になる
+            note: appendNote(entry.issue.note, outcome.explanation),
+          });
+        }
+      }
+    );
+  }
+
   await cache.save();
+
+  const verifyNote = describeVerifyResults(verifyRejected, verifyUndecided);
+  if (verifyNote) logStep(`矛盾検知の検証: ${verifyNote}`);
 
   return {
     issues: sortContradictions(dedupe(issues)),
@@ -341,7 +467,82 @@ export async function checkContradictions(
     failedChunks,
     cancelled,
     processedChunks,
+    verifyNote,
   };
+
+  /** 1件だけを見て、本当に矛盾かを問い直す */
+  async function verify(
+    issue: AcceptedContradiction,
+    chunk: Chunk,
+    controller: AbortController
+  ): Promise<VerifyOutcome> {
+    const key = hashText(
+      `${chunk.hash}:${issue.line}:${issue.excerpt}:${issue.settingSays}`
+    );
+    const cached = cache.get(key, verifyKeyBase);
+    if (cached !== undefined) {
+      return parseVerifyOutcome(
+        typeof cached === "string" ? cached : JSON.stringify(cached)
+      );
+    }
+
+    try {
+      const response = await provider.generate({
+        systemPrompt: CONTRADICTION_VERIFY_SYSTEM_PROMPT,
+        userPrompt: buildContradictionVerifyPrompt({
+          chapterLabel: describeChunkScope(chunk, (filePath) =>
+            chapterLabelByFile.get(filePath)
+          ),
+          contextWithLineNumbers: excerptAround(chunk, issue.line),
+          excerpt: issue.excerpt,
+          settingSays: issue.settingSays,
+          textSays: issue.textSays,
+          category: issue.category,
+          settingKnownAt: settings.knownAtFor("role", issue.settingSays),
+        }),
+        model,
+        temperature: 0.0,
+        jsonSchema: CONTRADICTION_VERIFY_SCHEMA as unknown as object,
+        disableThinking: true,
+        signal: controller.signal,
+      });
+
+      if (response.truncated || !response.text.trim()) {
+        return undecidedOutcome("応答が切り詰められました");
+      }
+      await cache.set(key, verifyKeyBase, response.text);
+      return parseVerifyOutcome(response.text);
+    } catch (error) {
+      if (error instanceof AIError && error.kind === "aborted") {
+        return undecidedOutcome("取りやめました");
+      }
+      // **検証できなかったら通す。** 通信の失敗で本物の指摘を消さない
+      logFailure("矛盾の検証", {
+        引用: issue.excerpt.slice(0, 40),
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+      return undecidedOutcome("検証できませんでした");
+    }
+  }
+}
+
+/** 該当行の前後を、行番号付きで切り出す */
+function excerptAround(chunk: Chunk, line: number, around = 6): string {
+  const lines = chunk.text.split("\n");
+  const target = line - chunk.startLine - 1;
+  const from = Math.max(0, target - around);
+  const to = Math.min(lines.length, target + around + 1);
+  return lines
+    .slice(from, to)
+    .map((text, index) => `${chunk.startLine + from + index + 1}: ${text}`)
+    .join("\n");
+}
+
+/** 検証で分かったことを、もとの補足へ足す */
+function appendNote(note: string, explanation: string): string {
+  const extra = explanation.trim();
+  if (!extra) return note;
+  return note.trim() ? `${note.trim()}（検証: ${extra}）` : `検証: ${extra}`;
 }
 
 /** 同じ箇所の同じ指摘が、重なったチャンクから二重に出ることがある */
@@ -375,6 +576,13 @@ interface SettingsMaterial {
     locations: string;
     hasAnything: boolean;
   };
+  /**
+   * その本文より**あと**で判明する事実（設計書6.10.4）。
+   * 無ければ空文字。
+   */
+  futureFactsFor(text: string, chapter: number | null): string;
+  /** その設定が何話で分かるか。検証で使う（設計書6.10.5） */
+  knownAtFor(field: string, value: string): string;
   synopsesBefore(chapter: number | null): string;
 }
 
@@ -474,6 +682,16 @@ async function collectSettings(
     // あらすじが無くても矛盾検知はできる。時系列の確認が弱くなるだけ
   }
 
+  // **どの値が何話で分かるか**の索引（設計書6.10.5）。検証で使う
+  const knownAt = new Map<string, number[]>();
+  for (const character of people) {
+    for (const change of character.changes) {
+      const chapters = change.chapters.filter(Number.isFinite);
+      if (chapters.length === 0) continue;
+      knownAt.set(`${change.field} ${change.value.trim()}`, chapters);
+    }
+  }
+
   return {
     characterCount: people.length,
     locationCount: places.length,
@@ -514,6 +732,32 @@ async function collectSettings(
         // 世界観は誰が出ていても効くので、それだけでも材料になる
         hasAnything: Boolean(characterText || locationText || worldview),
       };
+    },
+    futureFactsFor(text, chapter) {
+      if (chapter === null) return "";
+      const lines: string[] = [];
+      for (const match of index.find(text)) {
+        if (match.entry.kind !== "character") continue;
+        const character = characterById.get(match.entry.id);
+        if (!character) continue;
+        const facts = factsRevealedAfter(
+          character,
+          CHARACTER_AS_OF_FIELDS,
+          chapter
+        );
+        for (const fact of facts) {
+          const label = FIELD_LABELS[fact.field] ?? fact.field;
+          const line = `${character.name}の${label}（第${fact.chapter}話で判明）: ${fact.value}`;
+          if (!lines.includes(line)) lines.push(line);
+        }
+      }
+      // **多すぎると、1件ずつの吟味が薄まる。** 近い先の話から順に絞る
+      return lines.slice(0, 20).join("\n");
+    },
+    knownAtFor(field, value) {
+      const chapters = knownAt.get(`${field} ${value.trim()}`);
+      if (!chapters || chapters.length === 0) return "";
+      return chapters.map((at) => `第${at}話`).join("、");
     },
     synopsesBefore(chapter) {
       if (chapter === null) return "";

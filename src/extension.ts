@@ -450,6 +450,12 @@ export async function activate(
         const result = await checkContradictions(work, aiRegistry);
         if (!result || result.cancelled) return;
         proposalPanel.showContradictions(work, result.issues);
+        // 検証で消したことは、こちらの入口からでも伝える（設計書6.10.5）
+        if (result.verifyNote) {
+          void vscode.window.showInformationMessage(
+            `矛盾検知が完了しました。指摘 ${result.issues.length}件 / ${result.verifyNote}。`
+          );
+        }
         return;
       }
 
@@ -1937,6 +1943,9 @@ export async function activate(
           // 本文に無い箇所を「引用」してくることがある。黙って捨てない
           parts.push(`本文と合わない指摘 ${result.rejectedCount}件を除外`);
         }
+        // **検証で消したことを黙らない**（設計書6.10.5）。内訳が見えないと、
+        // 指摘が少ないのが「本当に無い」のか「消しすぎ」なのか分からない
+        if (result.verifyNote) parts.push(result.verifyNote);
         if (result.failedChunks > 0) {
           parts.push(`読み取れなかった ${result.failedChunks}件`);
         }

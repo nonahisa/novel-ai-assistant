@@ -114,6 +114,56 @@ export function recordAsOf<T extends object>(
   return rolled as T;
 }
 
+/** あとの話で分かった事実の1件 */
+export interface FutureFact {
+  field: string;
+  value: string;
+  /** 何話で分かったか */
+  chapter: number;
+}
+
+/**
+ * その話より**あと**で分かった事実を集める（設計書6.10.4）。
+ *
+ * 作者の要望（2026-08-23）：「将来判明する事実と、それ以前の記述が
+ * 矛盾している場合も検出したいです」。
+ *
+ * **「まだ知らない」と「両立しない」は別である。**
+ * 第4話で「3ヶ月前に退学した」と分かったとき、
+ *
+ * - 第3話で母がその件に触れていない → **まだ知らないだけ。矛盾ではない**
+ * - 第3話で「先週、学校で表彰された」と書いてある → **両立しない。矛盾である**
+ *
+ * 前者を消すのが `valueAsOf`、後者を拾うのがこちらである。
+ * **同じ材料を、逆向きに使う。**
+ */
+export function factsRevealedAfter<T extends object>(
+  record: T,
+  fields: readonly AsOfField[],
+  chapter: number | null
+): FutureFact[] {
+  if (chapter === null) return [];
+  const source = record as { changes?: RecordChange[] };
+  const changes = source.changes;
+  if (!changes) return [];
+
+  const found: FutureFact[] = [];
+  for (const field of fields) {
+    for (const change of changes) {
+      if (change.field !== field) continue;
+      const known = change.chapters.filter((at) => Number.isFinite(at));
+      if (known.length === 0) continue;
+      const at = Math.min(...known);
+      if (at <= chapter) continue;
+      const value = change.value.trim();
+      if (!value) continue;
+      found.push({ field, value, chapter: at });
+    }
+  }
+  // 近い先の話から順に。遠い先の話ほど、突き合わせる意味が薄れる
+  return found.sort((left, right) => left.chapter - right.chapter);
+}
+
 /**
  * 巻き戻した結果、何も残らなかったか。
  *

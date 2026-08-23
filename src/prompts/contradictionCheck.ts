@@ -13,7 +13,8 @@
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
 // 1.2: あとの話で明かされることを、前の話の矛盾にしない（6.10.3）
-export const CONTRADICTION_CHECK_VERSION = "1.2";
+// 1.3: あとで判明する事実と両立しない記述を、逆向きに探す（6.10.4）
+export const CONTRADICTION_CHECK_VERSION = "1.3";
 
 export const CONTRADICTION_CHECK_SYSTEM_PROMPT = `あなたは日本語の小説の設定矛盾だけを検出する編集アシスタントです。
 
@@ -76,6 +77,46 @@ export interface ContradictionCheckInput {
   previousSynopses: string;
   /** 見る観点。小さいモデルでは絞る */
   categories: readonly ContradictionCategory[];
+  /**
+   * **あとで判明する事実**（設計書6.10.4）。空なら従来どおりの突き合わせ。
+   *
+   * 入っているときは向きが変わる——「この本文は、あとで分かることと
+   * **両立するか**」を見る。
+   */
+  futureFacts?: string;
+}
+
+/**
+ * あとで判明する事実との突き合わせ（設計書6.10.4）。
+ *
+ * **向きが逆である。** ふだんは「確立された設定と食い違うか」を見るが、
+ * ここでは「**あとで分かることと両立しない記述があるか**」を見る。
+ *
+ * **いちばん間違えやすいのがここ**なので、してはいけないことを先に書く。
+ * 「まだ知らない」を矛盾と言い出すと、この機能を入れた意味が無くなる。
+ */
+function futureSection(input: ContradictionCheckInput): string {
+  const facts = input.futureFacts?.trim();
+  if (!facts) return "";
+
+  return `
+【あとの話で判明する事実】（${input.chapterLabel} より後で明かされます）
+${facts}
+
+【この項目についての判断】
+上の事実と、対象本文が**両立するか**だけを見てください。
+
+- **触れていないのは矛盾ではありません。** この時点の登場人物や語り手が
+  まだ知らないことは、書かれていなくて当然です。
+- **矛盾になるのは、両方が同時に成り立たないときだけです。**
+  例：あとの話で「3ヶ月前に退学した」と分かるのに、対象本文（その後の時期）に
+  「今日も学校で授業を受けた」と地の文で書かれている——これは両立しません。
+- **人物の発言は、嘘・思い違い・知らないことがありえます。**
+  地の文（語り手の記述）と食い違う場合だけを矛盾として挙げ、
+  発言の食い違いは confidence を low にして note に「発言者が知らない／
+  偽っている可能性」と書いてください。
+- 迷ったら挙げないこと。**ここでの誤検出は、作者の手を最も煩わせます。**
+`;
 }
 
 export function buildContradictionCheckPrompt(
@@ -101,6 +142,7 @@ ${orNone(input.worldviewSummary)}
 
 【これまでの経緯】（時系列の整合性確認用）
 ${orNone(input.previousSynopses)}
+${futureSection(input)}
 
 【検証項目】
 ${items}
