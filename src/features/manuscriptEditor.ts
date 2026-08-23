@@ -114,12 +114,6 @@ export class ManuscriptEditorProvider
       panel.webview.cspSource
     );
 
-    /**
-     * 画面から来た本文。**これと同じものが返ってきたら描き直さない**
-     * ——打っている最中に入れ直すとカーソルが飛ぶ。
-     */
-    let fromPanel: string | undefined;
-
     const send = async (): Promise<void> => {
       const text = document.getText();
       const found = await this.deps.highlighter.indexFor(
@@ -147,17 +141,31 @@ export class ManuscriptEditorProvider
 
     const subscriptions: vscode.Disposable[] = [];
 
+    /**
+     * 文書が変わるたびに送り直すが、**まとめてから送る**。
+     *
+     * 打った本文はこちらへ即座に届き、文書が変わり、その文書をまた
+     * 画面へ送り返す。4万字の本文を1語ごとに組み立て直すと、
+     * 打っている手が止まる（作者が実機で当たった「変換が途中で止まる」）。
+     *
+     * **打っている面は画面側が持っている**ので、少し遅れて届いても困らない。
+     */
+    let sendTimer: ReturnType<typeof setTimeout> | undefined;
+    const scheduleSend = (): void => {
+      if (sendTimer) clearTimeout(sendTimer);
+      sendTimer = setTimeout(() => {
+        sendTimer = undefined;
+        void send();
+      }, 120);
+    };
+
     subscriptions.push(
       vscode.workspace.onDidChangeTextDocument((event) => {
         if (event.document.uri.toString() !== document.uri.toString()) return;
-        // 自分が送った書き換えが返ってきただけなら、描き直すのは
-        // 「読む」面だけでよい（`send` の中で見分ける）
-        if (document.getText() === fromPanel) {
-          void send();
-          return;
-        }
-        fromPanel = undefined;
-        void send();
+        scheduleSend();
+      }),
+      new vscode.Disposable(() => {
+        if (sendTimer) clearTimeout(sendTimer);
       })
     );
 
@@ -180,7 +188,6 @@ export class ManuscriptEditorProvider
           break;
 
         case "edit":
-          fromPanel = message.text;
           await this.applyEdit(document, message.text);
           break;
 

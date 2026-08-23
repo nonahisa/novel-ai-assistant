@@ -134,8 +134,23 @@ body.vertical #read p.line { min-width: 1.9em; min-height: 0; }
 /* 縦書きのときだけ、行の長さを紙のように区切る */
 body.vertical.paged #surface { padding: 0; }
 
-body.reading #write { visibility: hidden; pointer-events: none; }
-body:not(.reading) #read { visibility: hidden; pointer-events: none; }
+body.reading:not(.split) #write { visibility: hidden; pointer-events: none; }
+body:not(.reading):not(.split) #read { visibility: hidden; pointer-events: none; }
+
+/*
+  並べる。**打つ面はそのまま、見る面を隣に置く。**
+  ルビを出したまま打てる画面は日本語入力（IME）を壊すので作らない
+  （設計書6.25）。代わりに、打ちながら組み上がりを見られるようにする。
+*/
+body.split #surface { display: flex; gap: 0; }
+body.split #write, body.split #read {
+  position: relative;
+  inset: auto;
+  flex: 1 1 50%;
+  min-width: 0;
+  min-height: 0;
+}
+body.split #read { border-left: 1px solid var(--vscode-panel-border); }
 
 /* ── ルビ・傍点・用語 ─────────────────── */
 ruby > rt {
@@ -220,6 +235,7 @@ body.plain .term { color: inherit; }
 <div id="bar">
   <button id="mode" title="組み立てた表示と、打てる表示を切り替えます">読む</button>
   <button id="dir" title="縦書きと横書きを切り替えます">横書きにする</button>
+  <button id="split" title="打つ面と、組み上がりを並べます">並べる</button>
   <div class="sep"></div>
   <button id="ruby" title="選んだ文字にルビを振ります">ルビ</button>
   <button id="emph" title="選んだ文字に傍点を付けます">傍点</button>
@@ -254,36 +270,58 @@ body.plain .term { color: inherit; }
   const note = document.getElementById("note");
   const modeButton = document.getElementById("mode");
   const dirButton = document.getElementById("dir");
+  const splitButton = document.getElementById("split");
 
   /** いま画面が持っている本文。拡張機能から来たものと比べるために持つ */
   let current = "";
-  /** 自分が送った書き換えが返ってきただけかを見分ける */
-  let sending = false;
-  let sendTimer = null;
+  /**
+   * 最後に自分が送った本文。
+   *
+   * **これと同じものが返ってきたら、打っている面には触らない。**
+   * 自分の書き換えが文書へ入ると、拡張機能はその文書を送り返してくる。
+   * それを入れ直すと、カーソルが飛び、変換中なら変換そのものが壊れる。
+   */
+  let lastSent = null;
+  /** 変換中に外から届いた本文。確定してから片づける */
+  let pending = null;
+  /** 書いている間に届いた「読む面」。切り替えるときに当てる */
+  let freshHtml = null;
 
   const saved = vscode.getState() || {};
   /** はじめの向きは設定から。**一度切り替えたら、その原稿ではそれを覚える** */
   let vertical = saved.vertical;
   let reading = saved.reading === true;
+  /** 打つ面と組み上がりを並べる */
+  let split = saved.split === true;
   let size = saved.size || 16;
 
   function remember() {
-    vscode.setState({ vertical, reading, size });
+    vscode.setState({ vertical, reading, split, size });
+  }
+
+  /** 組み上がりが見えている場面か（並べているときも見えている） */
+  function showingRead() {
+    return reading || split;
   }
 
   function paint() {
     // 設定がまだ届いていない間は縦書きとして見せる（body の初期値と揃える）
     document.body.classList.toggle("vertical", vertical !== false);
     document.body.classList.toggle("reading", reading);
+    document.body.classList.toggle("split", split);
+    splitButton.textContent = split ? "並べるのをやめる" : "並べる";
+    splitButton.classList.toggle("on", split);
+    // 並べているときは、切り替えるものが無い
+    modeButton.disabled = split;
     document.documentElement.style.setProperty("--novelai-size", size + "px");
     modeButton.textContent = reading ? "書く" : "読む";
     modeButton.classList.toggle("on", reading);
     dirButton.textContent = vertical !== false ? "横書きにする" : "縦書きにする";
     dirButton.classList.toggle("on", vertical !== false);
     // **書く面では、ルビは記法のまま見える。** そのことを一言添える
-    note.textContent = reading
+    note.textContent = showingRead()
       ? ""
-      : "ルビ・傍点・用語の色分けは「読む」で出ます（この面では記法のまま見えます）";
+      : "ルビ・傍点・用語の色分けは「読む」か「並べる」で出ます（この面では記法のまま見えます）";
   }
 
   /** 縦書きでは「上下」ではなく「左右」に流れる。位置合わせもそれに従う */
@@ -307,12 +345,31 @@ body.plain .term { color: inherit; }
   modeButton.addEventListener("click", function () {
     const from = reading ? read : write;
     reading = !reading;
+    // 書いている間に溜めておいた分を、ここで当てる
+    if (reading) applyFreshHtml();
     paint();
     remember();
     const to = reading ? read : write;
     // 切り替えても同じあたりを見ていられるようにする
     requestAnimationFrame(function () { keepPlace(from, to); });
     if (!reading) write.focus();
+  });
+
+  splitButton.addEventListener("click", function () {
+    split = !split;
+    if (split) {
+      applyFreshHtml();
+      // 並べたら、打つのはこちら側である
+      reading = false;
+    }
+    paint();
+    remember();
+    if (split) {
+      requestAnimationFrame(function () {
+        keepPlace(write, read);
+        write.focus();
+      });
+    }
   });
 
   dirButton.addEventListener("click", function () {
@@ -373,35 +430,135 @@ body.plain .term { color: inherit; }
     // **変換中は送らない。** 確定前の文字を本文へ入れると、
     // 確定のたびに二重に入る
     if (composing) return;
-    schedule();
+    send();
   });
 
   let composing = false;
   write.addEventListener("compositionstart", function () { composing = true; });
   write.addEventListener("compositionend", function () {
     composing = false;
-    schedule();
+    send();
+    // 変換中に外から届いていた書き換えは、ここで片づける
+    flushPending();
   });
 
-  function schedule() {
-    if (sendTimer) clearTimeout(sendTimer);
-    // 打つたびに送ると、長い本文で引っかかる。少し待ってまとめる
-    sendTimer = setTimeout(send, 200);
-  }
-
+  /**
+   * 打たれた本文を、そのまま文書へ返す。
+   *
+   * **待たせない。** 以前は200ミリ秒まとめていたが、
+   *
+   * - 打った直後に Ctrl+S を押すと、**最後の数文字が保存されない**
+   * - 待っている間に届いた書き換えと、打った内容がぶつかる
+   *
+   * 日本語入力では input は変換中にも起きるが、そこは送らない。
+   * **実際に送るのは「変換を確定したとき」＝語ごと**なので、
+   * 打鍵のたびに送ることにはならない。
+   */
   function send() {
-    sendTimer = null;
     if (write.value === current) return;
     current = write.value;
-    sending = true;
+    lastSent = current;
     vscode.postMessage({ type: "edit", text: current });
     updateCount();
   }
 
-  /** 画面を閉じる・切り替える前に、待っているぶんを出し切る */
-  window.addEventListener("blur", function () {
-    if (sendTimer) { clearTimeout(sendTimer); send(); }
+  /**
+   * 拡張機能から届いた本文を、打っている面へ入れるかどうか決める。
+   *
+   * **触ってよい場面のほうが少ない。** 次の3つは触らない。
+   *
+   * 1. **変換中**（IME）。値を入れ直すと変換そのものが壊れる——
+   *    確定前の文字が消える、二重に入る、変換が途中で止まる。
+   *    作者が実機で当たったのはこれである（2026-08-24）
+   * 2. **自分が送った本文が返ってきただけのとき。** 打つたびに
+   *    文書が変わり、その文書がそのまま送り返される。入れ直すと
+   *    カーソルが飛ぶ
+   * 3. すでに同じ中身のとき
+   */
+  function takeIncoming(text) {
+    if (composing) {
+      // 確定するまで覚えておく。**いま入れると変換が壊れる**
+      if (text !== lastSent && text !== write.value) pending = text;
+      return;
+    }
+    if (text === lastSent) return;
+    if (write.value === text) return;
+    replaceKeepingCaret(text);
+  }
+
+  /** 溜めておいた組み上がりを当てる。見えていないときは溜めたままにする */
+  function applyFreshHtml() {
+    if (freshHtml === null) return;
+    read.innerHTML = freshHtml;
+    freshHtml = null;
+    if (split) followCaret();
+  }
+
+  /**
+   * 並べているとき、組み上がりの側を**カーソルのある行に合わせる**。
+   *
+   * 割合でスクロールを合わせる手もあるが、ルビや傍点で行の高さが変わるため
+   * 少しずつずれる。**行そのものを指して寄せる**ほうが確かである。
+   */
+  let followTimer = null;
+  function followCaret() {
+    if (!split) return;
+    if (followTimer) cancelAnimationFrame(followTimer);
+    followTimer = requestAnimationFrame(function () {
+      followTimer = null;
+      const before = write.value.slice(0, write.selectionStart);
+      let line = 0;
+      for (let i = 0; i < before.length; i++) {
+        if (before.charCodeAt(i) === 10) line++;
+      }
+      const target = read.querySelector('[data-line="' + line + '"]');
+      if (target && target.scrollIntoView) {
+        target.scrollIntoView({ block: "center", inline: "center" });
+      }
+    });
+  }
+
+  // カーソルが動いたら、組み上がりの側も追いかける
+  document.addEventListener("selectionchange", function () {
+    if (document.activeElement === write) followCaret();
   });
+
+  /** 変換が確定したあとに、待たせていた書き換えを片づける */
+  function flushPending() {
+    const text = pending;
+    pending = null;
+    if (text === null) return;
+    // **打った内容のほうを優先する。** 変換している間に外から
+    // 書き換えが来たなら、確定した文字を捨てるより送り直すほうがよい
+    if (write.value !== current) { send(); return; }
+    takeIncoming(text);
+  }
+
+  /**
+   * 外からの書き換えを当てる。**カーソルの位置をできるだけ保つ。**
+   *
+   * 前から一致する長さを見て、カーソルがそれより前なら動かさない。
+   * 後ろなら、増えた（減った）ぶんだけずらす。
+   */
+  function replaceKeepingCaret(text) {
+    const before = write.value;
+    const start = write.selectionStart;
+    const end = write.selectionEnd;
+    let common = 0;
+    const max = Math.min(before.length, text.length);
+    while (common < max && before[common] === text[common]) common++;
+    const delta = text.length - before.length;
+    const move = function (at) {
+      if (at <= common) return at;
+      return Math.max(common, Math.min(text.length, at + delta));
+    };
+    write.value = text;
+    try {
+      write.setSelectionRange(move(start), move(end));
+    } catch (e) {
+      /* 範囲外なら諦める */
+    }
+  }
 
   function updateCount() {
     // 数え方は拡張機能側に合わせる（ルビの読み仮名は数えない）
@@ -514,15 +671,15 @@ body.plain .term { color: inherit; }
     const message = event.data;
     if (message.type === "update") {
       current = message.text;
-      // **自分が打っている最中は、書く面へ入れ直さない。**
-      // カーソルが先頭へ飛ぶ
-      if (!sending && write.value !== message.text) {
-        const at = write.selectionStart;
-        write.value = message.text;
-        try { write.setSelectionRange(at, at); } catch (e) { /* 範囲外なら諦める */ }
-      }
-      sending = false;
-      read.innerHTML = message.html;
+      takeIncoming(message.text);
+      /*
+        **打っている間は、読む面を組み立て直さない。**
+        4万字の本文では段落が千を超える。打つたびにそれを作り直すと、
+        画面がつかえて「変換が途中で止まった」ように感じる。
+        見えていないのだから、切り替えるときに作ればよい。
+      */
+      freshHtml = message.html;
+      if (showingRead()) applyFreshHtml();
       if (typeof vertical !== "boolean") {
         // まだ切り替えたことがない原稿。設定の向きで開く
         vertical = message.verticalDefault !== false;
