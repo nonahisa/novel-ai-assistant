@@ -63,7 +63,7 @@ interface ChatResponse {
 
 export class LmStudioProvider implements AIProvider {
   readonly id = "lmstudio" as const;
-  readonly displayName = "LM Studio（手元のPC）";
+  readonly displayName = "LM Studio（ローカル）";
 
   /** 手元で動くので課金されない。Ollamaと同じ扱い */
   readonly isPaid = false;
