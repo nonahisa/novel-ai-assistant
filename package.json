@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "小説執筆のための統合環境。作品を登録して話数・文字数・執筆量を管理し、本文から登場人物や世界観などの設定資料を抽出します。プロットの逆算、あらすじ・紹介文・キャッチコピーの生成、各話の盛り上がりを見る感情曲線、誤字脱字と表記ゆれの検知、開いている画面についてのAI相談まで、執筆の前後を通して支えます。必要なもの（Ollama本体・モデル・Git）は拡張機能の中から入れられます。AIはOllama（無料・ローカル）とClaude・ChatGPT・Gemini・さくらのAI Engineから選べ、原稿を勝手に書き換えることはありません。",
-  "version": "0.18.3",
+  "version": "0.19.0",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -37,6 +37,21 @@
   "main": "./dist/extension.js",
   "browser": "./dist/browser-extension.js",
   "contributes": {
+    "customEditors": [
+      {
+        "viewType": "novelai.manuscriptEditor",
+        "displayName": "原稿（縦書き）",
+        "selector": [
+          {
+            "filenamePattern": "*.md"
+          },
+          {
+            "filenamePattern": "*.txt"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         {
@@ -499,6 +514,12 @@
         "icon": "$(markdown)"
       },
       {
+        "command": "novelai.openVertical",
+        "title": "縦書きで開く",
+        "category": "小説執筆",
+        "icon": "$(book)"
+      },
+      {
         "command": "novelai.addEmphasis",
         "title": "傍点を付ける",
         "category": "小説執筆",
@@ -709,6 +730,26 @@
           "command": "novelai.openChat",
           "when": "resourceExtname == .txt || resourceExtname == .md",
           "group": "navigation"
+        },
+        {
+          "command": "novelai.openVertical",
+          "when": "resourceExtname == .txt || resourceExtname == .md",
+          "group": "navigation"
+        },
+        {
+          "command": "novelai.addRuby",
+          "when": "resourceExtname == .md",
+          "group": "1_novelai_ruby"
+        },
+        {
+          "command": "novelai.addEmphasis",
+          "when": "resourceExtname == .md",
+          "group": "1_novelai_ruby"
+        },
+        {
+          "command": "novelai.copyForPosting",
+          "when": "resourceExtname == .md",
+          "group": "1_novelai_ruby"
         }
       ],
       "commandPalette": [
@@ -842,6 +883,16 @@
           "type": "boolean",
           "default": true,
           "description": "Markdownのルビ記法 {漢字|かんじ} のルビ部分を文字数から除外する（.txt には効きません）。"
+        },
+        "novelai.manuscriptEditor.vertical": {
+          "type": "boolean",
+          "default": true,
+          "description": "「縦書きで開く」で開いた原稿を、はじめから縦書きにする。画面の上のボタンでいつでも切り替えられます（切り替えた状態はその原稿ごとに覚えます）。"
+        },
+        "novelai.manuscriptEditor.fontFamily": {
+          "type": "string",
+          "default": "",
+          "description": "原稿の画面で使う書体。空にすると明朝体（游明朝→ヒラギノ明朝→MS明朝の順で、入っているものを使います）。例：\"Noto Serif JP\", serif"
         },
         "novelai.logs.retentionDays": {
           "type": "number",

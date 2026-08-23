@@ -218,7 +218,7 @@ export async function importRuby(): Promise<void> {
  * **サイト名で選ばせる。** 記法で並べると、作者は自分の貼り付け先が
  * どちらなのかを記号から逆算することになる。
  */
-async function pickEmphasisSite(): Promise<EmphasisSite | undefined> {
+export async function pickEmphasisSite(): Promise<EmphasisSite | undefined> {
   const picked = await vscode.window.showQuickPick(
     [
       ...EMPHASIS_SITES.map((entry) => ({
@@ -268,7 +268,7 @@ export async function addEmphasis(): Promise<void> {
   });
 }
 
-async function pickStyle(): Promise<RubyStyle | undefined> {
+export async function pickStyle(): Promise<RubyStyle | undefined> {
   const picked = await vscode.window.showQuickPick(
     [
       ...RUBY_STYLES.map((style) => ({

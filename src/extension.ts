@@ -159,6 +159,10 @@ import {
   copyForPosting,
   importRuby,
 } from "./features/ruby";
+import {
+  MANUSCRIPT_EDITOR_VIEW_TYPE,
+  ManuscriptEditorProvider,
+} from "./features/manuscriptEditor";
 import { showEditHistory } from "./features/editHistoryPanel";
 import {
   reviewProposals,
@@ -284,6 +288,60 @@ export async function activate(
       findOpenSettingsPanel(found.work.id)?.showRecord(
         found.entry.kind,
         found.entry.id
+      );
+    })
+  );
+
+  /**
+   * 原稿エディタ（設計書6.25）。
+   *
+   * **既定のエディタにはしない**（`package.json` の `priority` は `option`）。
+   * 「縦書きで開く」か、VS Code の「エディターを再度開く」から選ぶ。
+   */
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(
+      MANUSCRIPT_EDITOR_VIEW_TYPE,
+      new ManuscriptEditorProvider({
+        highlighter,
+        openSettings: async (work, kind, id) => {
+          const panel = await openSettingsPanel(context, work, aiRegistry, {
+            beside: true,
+          });
+          panel.showRecord(kind, id);
+        },
+        openChat: async (document, range) => {
+          // 相談パネルは普通のエディタから本文を受け取る。
+          // 同じ文書を横に開いてから渡す（開かないと、前に見ていた
+          // 別の作品について答えることになる）
+          const editor = await vscode.window.showTextDocument(document, {
+            viewColumn: vscode.ViewColumn.Beside,
+            preserveFocus: false,
+            selection: range,
+          });
+          workChatPanel.trackEditor(editor);
+          await vscode.commands.executeCommand(`${WORK_CHAT_VIEW_ID}.focus`);
+        },
+      }),
+      {
+        webviewOptions: { retainContextWhenHidden: true },
+        supportsMultipleEditorsPerDocument: false,
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.openVertical", async () => {
+      const uri = vscode.window.activeTextEditor?.document.uri;
+      if (!uri) {
+        void vscode.window.showWarningMessage(
+          "本文のファイルを開いてから実行してください。"
+        );
+        return;
+      }
+      await vscode.commands.executeCommand(
+        "vscode.openWith",
+        uri,
+        MANUSCRIPT_EDITOR_VIEW_TYPE
       );
     })
   );

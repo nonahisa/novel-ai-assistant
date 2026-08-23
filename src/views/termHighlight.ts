@@ -215,6 +215,24 @@ export class TermHighlighter implements vscode.Disposable {
     return sorted.find((work) => isPathInside(work.folderPath, filePath));
   }
 
+  /**
+   * ファイルが属する作品と、その用語索引を返す。
+   *
+   * **原稿エディタ（設計書6.25）のために開けた口。** あちらは
+   * `TextEditor` の装飾が使えない（画面を自前で組み立てているため）ので、
+   * 索引そのものを借りて、HTMLの側で色を当てる。**索引の作り方を
+   * 2つに分けない**——分けると、色が付く語と付かない語がここと食い違う。
+   */
+  async indexFor(
+    filePath: string
+  ): Promise<{ work: WorkEntry; index: TermIndex } | undefined> {
+    const work = await this.findWork(filePath);
+    if (!work) return undefined;
+    const settings = await this.load(work);
+    if (!settings) return undefined;
+    return { work, index: settings.index };
+  }
+
   private async load(work: WorkEntry): Promise<WorkSettings | undefined> {
     const cached = this.cache.get(work.id);
     if (cached) return cached;

@@ -160,6 +160,17 @@ export class TermIndex {
   entriesFor(id: string): TermEntry[] {
     return this.byId.get(id) ?? [];
   }
+
+  /**
+   * 登録されている用語をすべて返す。
+   *
+   * 原稿エディタ（設計書6.25）が**凡例に出す種別**を決めるために使う。
+   * 人物しか登録していない作品で「場所・能力・組織」の色まで並べても、
+   * 何の色なのか確かめようがない。
+   */
+  allEntries(): TermEntry[] {
+    return [...this.byId.values()].flat();
+  }
 }
 
 /**
