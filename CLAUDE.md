@@ -6,7 +6,7 @@
 
 ## プロジェクト概要
 
-小説執筆を支援するVSCode拡張機能。テキスト/Markdownで書かれた小説作品を管理し、AI（Ollama / Gemini / ChatGPT / Claude）で登場人物・世界観・あらすじの生成、誤字脱字検知、矛盾検知などを行う。
+小説執筆を支援するVSCode拡張機能。テキスト/Markdownで書かれた小説作品を管理し、AI（Ollama / LM Studio / Gemini / さくらのAI / ChatGPT / Claude）で登場人物・世界観・あらすじの生成、誤字脱字検知、矛盾検知などを行う。
 
 **開発者は小説の作者本人**であり、プログラマではない。技術的な説明は必要だが、専門用語だけで押し切らず、なぜその判断をしたのかを日本語で説明すること。
 
@@ -21,7 +21,7 @@
 | ファイル | 内容 |
 |---|---|
 | `docs/設計書.md` | 全体設計。データモデル、機能仕様、外部ツール共存、GitHub同期対策 |
-| `docs/プロンプト設計書.md` | AI機能ごとのプロンプト本文（P-01〜P-17） |
+| `docs/プロンプト設計書.md` | AI機能ごとのプロンプト本文（P-01〜P-22） |
 | `docs/進捗と引継ぎ.md` | 現在の実装状況、次にやること、既知の課題 |
 
 特に設計書の **5.4節（外部ツールとの共存）** と **5.5節（GitHub同期）** は、実装時に必ず守るべき制約が書かれている。
@@ -122,7 +122,7 @@ src/
 │  ├─ writingStats.ts    執筆量の集計（日次・週次・月次・年次、目標）
 │  ├─ writingStatsStore.ts 執筆量の記録（端末ごとに1ファイル）
 │  ├─ episodeCharTable.ts 話ごとの文字数一覧（長さの偏り）
-│  ├─ chunker.ts         本文のチャンク分割
+│  ├─ chunker.ts         本文のチャンク分割（大きさはモデルの上限から決める）
 │  ├─ chunkCache.ts      処理済みチャンクのキャッシュ
 │  ├─ manuscriptSources.ts / mentionExcerpts.ts  本文からの場面抜粋
 │  【設定資料を持つ】
@@ -135,7 +135,8 @@ src/
 │  ├─ characterMerge.ts / settingsMerge.ts  抽出結果のマージ
 │  ├─ characterUnify.ts  同一人物のまとめ
 │  ├─ characterDiff.ts   更新内容の差分
-│  ├─ settingsEdit.ts    作者による書き換え
+│  ├─ settingsEdit.ts    作者による書き換え（名前と別名の入れ替えを含む）
+│  ├─ settingsAsOf.ts    その話の時点での設定（先の話で判明した値を巻き戻す）
 │  ├─ gender.ts          性別の表記を揃える
 │  ├─ reading.ts         読み仮名の生成
 │  ├─ summaryLimit.ts    紹介文の字数制限
@@ -148,7 +149,7 @@ src/
 │  ├─ imeDictionary.ts    IME辞書
 │  ├─ termIndex.ts        用語の索引（ハイライト用）
 │  ├─ logger.ts           失敗の記録（APIキーは伏せる）
-│  ├─ ruby.ts            ルビ記法の変換（投稿サイト↔｛漢字｜かんじ｝）
+│  ├─ ruby.ts            ルビと傍点の変換（投稿サイト↔{漢字|かんじ}・{{強調}}）
 │  ├─ markdownItRuby.ts  標準のMarkdownプレビューへルビを差し込む
 │  └─ markdownConversion.ts .txt を .md へ（名前だけ変える）
 │  【AIの出力から原稿を守る】
@@ -167,7 +168,8 @@ src/
 │  ├─ registry.ts        プロバイダ選択・セットアップウィザード
 │  ├─ ollamaProvider.ts / ollamaLauncher.ts
 │  ├─ claudeProvider.ts / openaiProvider.ts / geminiProvider.ts
-│  ├─ sakuraProvider.ts  さくらのAI Engine（OpenAI互換）
+│  ├─ sakuraProvider.ts  さくらのAI（クラウド・OpenAI互換。無料枠あり）
+│  ├─ lmstudioProvider.ts LM Studio（手元・OpenAI互換。鍵が要らない）
 │  ├─ httpClient.ts      共通のHTTP・再試行
 │  ├─ jsonSchema.ts      プロバイダ方言へのスキーマ変換
 │  └─ outputLimit.ts     出力トークン上限
@@ -178,6 +180,7 @@ src/
 │  └─ settingsEnrich.ts    P-20 設定項目の充実
 │
 ├─ features/             機能単位のオーケストレーション
+│  ├─ chunkSettings.ts     チャンクの大きさの設定を読む（**AI機能はここを通す**）
 │  ├─ extractSettings.ts / extractCharacters.ts
 │  ├─ applyPendingUpdates.ts / unifyCharacters.ts
 │  ├─ settingsPanel.ts      設定資料パネル
@@ -195,7 +198,8 @@ src/
 │  ├─ editHistoryPanel.ts  編集履歴（作者・編集者・AIで色分け）
 │  ├─ manageKeepWords.ts   直さない語の管理
 │  ├─ protectExternalEdits.ts 外で直された資料を守る
-│  └─ ruby.ts              ルビを振る・投稿サイト用に変換・取り込む
+│  ├─ ruby.ts              ルビ・傍点を振る／投稿サイト用に変換／取り込む
+│  └─ mergeIntoLibrary.ts  別々の作品を1つの書庫へまとめ直す（写すだけ。元は消さない）
 │
 └─ views/                VSCode UI
    ├─ workTree.ts          作品一覧
@@ -323,9 +327,9 @@ npm run check            # 型検査＋単体テスト＋本番ビルド
 `docs/進捗と引継ぎ.md` の「いまの状態」を参照。**この節は要約なので、細かい進捗はそちらが正しい。**
 
 - **Marketplace で公開済み**（発行者 `nonahisa`）。手元の版のほうが先へ進んでいることがあるので、**出す前に必ず引継ぎ書で確認する**
-- フェーズ0〜3はすべて実装済み：作品管理・文字数・執筆統計／設定資料の抽出と閲覧／プロット逆算・あらすじ・紹介文・キャッチコピー・感情曲線／**誤字脱字・表記ゆれ・推敲・矛盾・プロット逸脱**／GitHub同期／IME辞書／ルビ
+- フェーズ0〜3はすべて実装済み：作品管理・**書庫**（1つのリポジトリに複数作品）・文字数・執筆統計／設定資料の抽出と閲覧・編集／プロット逆算・あらすじ・紹介文・キャッチコピー・感情曲線／**誤字脱字・表記ゆれ・推敲・矛盾・プロット逸脱**／GitHub同期／IME辞書／**ルビと傍点**（投稿サイト4種への変換つき）
 - **未着手**：世界観まとめ（P-03）、プロットモード専用画面、伏線追跡、設定資料エクスポート
-- 使えるAI：Ollama・Gemini・**さくらのAI Engine**は実機で確認済み。**Claude は 0.11.2 で公式SDKから素のfetchへ書き換えたあと、一度も実APIへ繋いでいない**（設計書5.8.6）。ChatGPT はキー未入手
+- 使えるAIは6つ。**実データで確かめたのは Ollama・Gemini・さくらのAI** の3つ。**LM Studio（0.18.0で追加）・Claude・ChatGPT は一度も繋いでいない**。Claude は 0.11.2 で公式SDKから素のfetchへ書き換えたあと未確認（設計書5.8.6）、ChatGPT はキー未入手。**LM Studio がいちばん確かめやすい**（鍵も課金も要らない）
 - **編集部と一緒に書ける**（設計書5.6）。編集者モード・提案・校閲ロック・編集履歴。**編集部は本文を書き換えず、提案として置く**
 - **ブラウザ版（vscode.dev）は下ごしらえの途中**（設計書5.8）。0.13.0 のVSIXに `dist/browser-extension.js` を同梱したが、**まだブラウザで動かして確かめていない**。GitHub同期の代わりの手段も未実装
 
