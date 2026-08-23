@@ -10,6 +10,7 @@ import { OllamaProvider } from "./ollamaProvider";
 import { ClaudeProvider } from "./claudeProvider";
 import { OpenAIProvider } from "./openaiProvider";
 import { SakuraProvider } from "./sakuraProvider";
+import { LmStudioProvider } from "./lmstudioProvider";
 import { GeminiProvider } from "./geminiProvider";
 import { withProgress } from "../views/progress";
 import { probeGeneration } from "./generationProbe";
@@ -28,11 +29,19 @@ const KEY_MODEL = "novelai.ai.model";
  * どちらか一方（常にNode側）しか確かめられない。フィルタの中身だけを
  * 純粋な関数にして、両方の分岐をテストできるようにする。
  */
+/**
+ * 手元のPCで動くもの。**ブラウザ版では選ばせない。**
+ *
+ * `localhost` はブラウザからは（vscode.dev が動いているMicrosoftのサーバ
+ * から見て）作者のPCではないので、選んでも必ず「接続できません」になる。
+ */
+const LOCAL_PROVIDERS = new Set<ProviderId>(["ollama", "lmstudio"]);
+
 export function filterProvidersForRuntime(
   providers: AIProvider[],
   canRun: boolean
 ): AIProvider[] {
-  return canRun ? providers : providers.filter((p) => p.id !== "ollama");
+  return canRun ? providers : providers.filter((p) => !LOCAL_PROVIDERS.has(p.id));
 }
 
 /**
@@ -48,6 +57,7 @@ export class AIRegistry {
     // 並び順はそのまま選択画面に出る。無料で始められるものを先頭に置く
     for (const provider of [
       new OllamaProvider(),
+      new LmStudioProvider(),
       new GeminiProvider(context),
       new OpenAIProvider(context),
       new SakuraProvider(context),
@@ -130,6 +140,7 @@ export async function runSetupWizard(
 
   const providerDescriptions: Partial<Record<ProviderId, string>> = {
     ollama: "無料・オフライン可。ローカル実行",
+    lmstudio: "無料・オフライン可。LM Studioで読み込んだモデルを使う",
     gemini: "無料枠あり。超えると課金される",
     openai: "実行するたびに課金される",
     sakura: "国内のサービス。無料枠あり。超えると課金される",

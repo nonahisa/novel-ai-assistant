@@ -1,6 +1,8 @@
 /** 対応プロバイダ */
 export type ProviderId =
   | "ollama"
+  /** LM Studio（手元のPC。OpenAI互換の口） */
+  | "lmstudio"
   | "gemini"
   | "claude"
   | "openai"

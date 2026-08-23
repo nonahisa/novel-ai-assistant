@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "小説執筆のための統合環境。作品を登録して話数・文字数・執筆量を管理し、本文から登場人物や世界観などの設定資料を抽出します。プロットの逆算、あらすじ・紹介文・キャッチコピーの生成、各話の盛り上がりを見る感情曲線、誤字脱字と表記ゆれの検知、開いている画面についてのAI相談まで、執筆の前後を通して支えます。必要なもの（Ollama本体・モデル・Git）は拡張機能の中から入れられます。AIはOllama（無料・ローカル）とClaude・ChatGPT・Gemini・さくらのAI Engineから選べ、原稿を勝手に書き換えることはありません。",
-  "version": "0.17.1",
+  "version": "0.18.0",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -985,6 +985,23 @@
           "default": 180,
           "minimum": 10,
           "description": "Geminiの1回のAI呼び出しのタイムアウト（秒）。"
+        },
+        "novelai.lmstudio.endpoint": {
+          "type": "string",
+          "default": "http://localhost:1234/v1",
+          "markdownDescription": "LM StudioのローカルサーバーのURL。LM Studioの「Developer」画面でサーバーを開始したときに表示される値に合わせます。通常は変更不要です。"
+        },
+        "novelai.lmstudio.contextWindow": {
+          "type": "number",
+          "default": 8192,
+          "minimum": 512,
+          "markdownDescription": "LM Studioのコンテキスト長。**APIから取得できないため、LM Studioでモデルを読み込んだときに指定した長さに合わせてください。** 実際より大きいと、入力が黙って切り捨てられます。"
+        },
+        "novelai.lmstudio.timeoutSeconds": {
+          "type": "number",
+          "default": 180,
+          "minimum": 10,
+          "description": "LM Studioの1回の呼び出しのタイムアウト（秒）。手元のPCで動かすため、大きなモデルでは長めに必要です。"
         },
         "novelai.chunkSizeMode": {
           "type": "string",
