@@ -168,6 +168,14 @@ interface DetailField {
   check?: boolean;
   /** 決まった値から選ぶ項目。画面では選択肢として出す */
   choices?: Array<{ value: string; label: string }>;
+  /**
+   * 入力の候補（設計書6.5.6）。**選択肢ではない。**
+   *
+   * 名前欄に別名を並べて、選んで入れ替えられるようにする。
+   * `choices` と違い**手で書く道は残す**——まだ別名に無い名前へ
+   * 変えられなくなると、打ち間違いの修正すらできない。
+   */
+  suggestions?: string[];
 }
 
 /** 世界観の分類。画面には日本語の見出しを出し、保存するのは英字のキー */
@@ -458,7 +466,7 @@ export class SettingsPanel {
           character.changes
         ),
         fields: [
-          field("name", "名前", character.name),
+          nameField(character.name, character.aliases),
           // 紹介は文章なので、1行の入力欄では書いた内容が隠れる
           field(
             "summary",
@@ -502,7 +510,7 @@ export class SettingsPanel {
         ].filter((entry) => entry.value),
         reference: referenceLines(ability.conflicts, ability.evidence),
         fields: [
-          field("name", "名前", ability.name),
+          nameField(ability.name, ability.aliases),
           field(
             "summary",
             `紹介（${SUMMARY_MAX_CHARS}字以内）`,
@@ -540,7 +548,7 @@ export class SettingsPanel {
         ].filter((entry) => entry.value),
         reference: referenceLines(organization.conflicts, organization.evidence),
         fields: [
-          field("name", "名前", organization.name),
+          nameField(organization.name, organization.aliases),
           field(
             "summary",
             `紹介（${SUMMARY_MAX_CHARS}字以内）`,
@@ -575,7 +583,7 @@ export class SettingsPanel {
         ].filter((entry) => entry.value),
         reference: referenceLines(item.conflicts, item.evidence),
         fields: [
-          field("name", "見出し（15字以内）", item.name),
+          nameField(item.name, item.aliases, "見出し（15字以内）"),
           // 分類は決まった7種。自由入力にすると綴りの揺れで
           // 資料の節が増え、読み込み時の検証でも落ちる
           choiceField("category", "分類", item.category, WORLD_CATEGORY_CHOICES),
@@ -606,7 +614,7 @@ export class SettingsPanel {
       ].filter((entry) => entry.value),
       reference: referenceLines(location.conflicts, location.evidence),
       fields: [
-        field("name", "名前", location.name),
+        nameField(location.name, location.aliases),
         field(
             "summary",
             `紹介（${SUMMARY_MAX_CHARS}字以内）`,
@@ -1368,6 +1376,30 @@ function field(
   multiline = false
 ): DetailField {
   return { key, label, value: value ?? "", multiline };
+}
+
+/**
+ * 名前の欄。**別名を候補に出す**（設計書6.5.6）。
+ *
+ * 選んで保存すると、元の名前は別名へ移る（`swapNameWithAlias`）。
+ * **元の名前は消えない**——消すと本文の照合から外れ、用語ハイライトも
+ * IME辞書も、その呼び方を拾わなくなる。
+ */
+function nameField(
+  value: string,
+  aliases: readonly string[],
+  label = "名前"
+): DetailField {
+  const suggestions = aliases
+    .map((alias) => alias.trim())
+    .filter((alias) => alias && alias !== value.trim());
+  return {
+    key: "name",
+    label: suggestions.length > 0 ? `${label}（別名から選べます）` : label,
+    value,
+    multiline: false,
+    suggestions,
+  };
 }
 
 /**

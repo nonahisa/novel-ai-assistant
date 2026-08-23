@@ -797,6 +797,21 @@ button.danger:hover {
       }
       const control = document.createElement(field.multiline ? "textarea" : "input");
       control.value = field.value;
+      // **選べるようにするが、手で書く道も残す**（設計書6.5.6）。
+      // 名前欄では別名を候補に出す。選択肢だけにすると、
+      // まだ別名に無い名前へ変えられなくなる
+      if (field.suggestions && field.suggestions.length > 0) {
+        const listId = "suggest-" + field.key.replace(/[^A-Za-z0-9_-]/g, "_");
+        const list = document.createElement("datalist");
+        list.id = listId;
+        for (const suggestion of field.suggestions) {
+          const option = document.createElement("option");
+          option.value = suggestion;
+          list.appendChild(option);
+        }
+        el.detail.appendChild(list);
+        control.setAttribute("list", listId);
+      }
       // 中身の量に合わせて高さを変える。固定の行数だと、
       // 紹介文のように少し長い文章が途中で隠れてしまう
       if (field.multiline) growWithContent(control);
