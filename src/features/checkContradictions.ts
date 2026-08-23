@@ -16,6 +16,11 @@ import {
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
 import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
+import {
+  hasAppearedBy,
+  isEmptyAfterRollback,
+  recordAsOf,
+} from "../core/settingsAsOf";
 import { CharacterStore } from "../core/characterStore";
 import {
   createAbilityStore,
@@ -79,6 +84,23 @@ import { hashText } from "../core/textFile";
  * 切り詰められたチャンクが黙って捨てられる。
  */
 const RETRY_SMALLER = Symbol("retry-smaller");
+
+/**
+ * 話数で巻き戻す項目（設計書6.10.3）。
+ *
+ * **名前と読みは巻き戻さない。** 作中で変わるものではないし、
+ * 消すと誰の話か分からなくなる。
+ */
+const CHARACTER_AS_OF_FIELDS = [
+  "summary",
+  "role",
+  "personality",
+  "appearance",
+  "gender",
+  "affiliation",
+];
+
+const LOCATION_AS_OF_FIELDS = ["summary", "region", "description"];
 
 export interface ContradictionRunResult {
   issues: AcceptedContradiction[];
@@ -239,7 +261,10 @@ export async function checkContradictions(
     }
 
     async function ask(chunk: Chunk): Promise<unknown | undefined> {
-      const relevant = settings.relevantFor(chunk.text);
+      // **まとめたチャンクでは、いちばん前の話に合わせる。**
+      // うしろに合わせると、前半の話にとって「まだ分かっていないこと」を
+      // 材料に渡すことになる（設計書6.10.3）
+      const relevant = settings.relevantFor(chunk.text, chunk.chapterStart);
       // **照らし合わせる相手が無いチャンクは飛ばす。**
       // 材料なしで問うと、本文だけを見て矛盾を作り出す
       if (!relevant.hasAnything) return undefined;
@@ -339,7 +364,13 @@ interface SettingsMaterial {
   worldview: string;
   /** 設定の中身のハッシュ。変われば検知をやり直す */
   fingerprint: string;
-  relevantFor(text: string): {
+  /**
+   * @param chapter その本文が何話か。**その時点で分かっていることだけ**を返す
+   */
+  relevantFor(
+    text: string,
+    chapter: number | null
+  ): {
     characters: string;
     locations: string;
     hasAnything: boolean;
@@ -449,7 +480,7 @@ async function collectSettings(
     worldCount: worldItems.length,
     worldview,
     fingerprint,
-    relevantFor(text) {
+    relevantFor(text, chapter) {
       const seenCharacters = new Set<string>();
       const seenLocations = new Set<string>();
       for (const match of index.find(text)) {
@@ -457,14 +488,23 @@ async function collectSettings(
         if (match.entry.kind === "location") seenLocations.add(match.entry.id);
       }
 
+      // **その話の時点で分かっていることだけを渡す**（設計書6.10.3）。
+      // 資料は作品全体から作られているので、そのまま渡すと
+      // **あとの話で明かされる事実**と食い違って見える
       const characterText = [...seenCharacters]
         .map((id) => characterById.get(id))
         .filter((item) => item !== undefined)
+        .filter((item) => hasAppearedBy(item.appearedChapters, chapter))
+        .map((item) => recordAsOf(item, CHARACTER_AS_OF_FIELDS, chapter))
+        .filter((item) => !isEmptyAfterRollback(item, CHARACTER_AS_OF_FIELDS))
         .map((item) => describeCharacter(item, []))
         .join("\n\n");
       const locationText = [...seenLocations]
         .map((id) => locationById.get(id))
         .filter((item) => item !== undefined)
+        .filter((item) => hasAppearedBy(item.appearedChapters, chapter))
+        .map((item) => recordAsOf(item, LOCATION_AS_OF_FIELDS, chapter))
+        .filter((item) => !isEmptyAfterRollback(item, LOCATION_AS_OF_FIELDS))
         .map((item) => describeLocation(item))
         .join("\n\n");
 
