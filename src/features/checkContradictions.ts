@@ -6,12 +6,16 @@ import { AIError, recoveryForAIError } from "../ai/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import {
-  decideChunkSize,
+  describeChunkScope,
+  locateChunkLine,
+  mergeAdjacentChunks,
   splitIntoChunks,
+  splitMergedChunk,
   withLineNumbers,
   type Chunk,
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
+import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
 import { CharacterStore } from "../core/characterStore";
 import {
   createAbilityStore,
@@ -68,6 +72,14 @@ import { hashText } from "../core/textFile";
  * AIへ投げると、本文だけを見て「矛盾していそうなこと」を作り出す。
  */
 
+/**
+ * 「まとめたせいで入り切らなかった。分けて試し直す」の印。
+ *
+ * **`undefined`（この本文は飛ばす）と区別する。** 同じ値にすると、
+ * 切り詰められたチャンクが黙って捨てられる。
+ */
+const RETRY_SMALLER = Symbol("retry-smaller");
+
 export interface ContradictionRunResult {
   issues: AcceptedContradiction[];
   /** 本文に無い引用など、弾いた件数 */
@@ -99,7 +111,7 @@ export async function checkContradictions(
 
   const tasks = await collectChunks(work, registry, options);
   if (!tasks) return undefined;
-  const { chunks, filePathByChunk, chapterLabelByChunk } = tasks;
+  const { chunks, chapterLabelByFile, chunkNote } = tasks;
   if (chunks.length === 0) {
     vscode.window.showWarningMessage("検知できる本文がありませんでした。");
     return undefined;
@@ -147,7 +159,8 @@ export async function checkContradictions(
 
   logStep(
     `矛盾検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
-      `${resolved.model} / ${chunks.length}チャンク / v${CONTRADICTION_CHECK_VERSION}`
+      `${resolved.model} / ${chunks.length}チャンク / ${chunkNote} / ` +
+      `v${CONTRADICTION_CHECK_VERSION}`
   );
 
   // 小さいモデルでは観点を絞る。1回の負荷を下げないと検出漏れが増える
@@ -173,26 +186,55 @@ export async function checkContradictions(
       controller.abort();
     });
 
+    // **まとめたチャンクは、切り詰められたら分けて試し直す**（設計書6.23）。
+    // 部分的なJSONは読めないので、まとめたせいで入り切らなかったのなら
+    // 元の大きさで出し直すほうがよい。処理中に増えるので配列で持つ
+    const queue = [...chunks];
+    let total = queue.length;
     let done = 0;
-    for (const chunk of chunks) {
-      if (token.isCancellationRequested) break;
 
-      const filePath = filePathByChunk.get(chunk.hash) ?? chunk.filePath;
+    for (let cursor = 0; cursor < queue.length; cursor++) {
+      if (token.isCancellationRequested) break;
+      const chunk = queue[cursor];
+
       const cached = cache.get(chunk.hash, cacheKeyBase);
       const raw = cached ?? (await ask(chunk));
       done++;
       progress.report({
-        message: `${done}/${chunks.length}`,
-        increment: 100 / chunks.length,
+        message: `${done}/${total}`,
+        increment: 100 / total,
       });
+
+      if (raw === RETRY_SMALLER) {
+        const parts = splitMergedChunk(chunk);
+        if (parts.length > 1) {
+          queue.splice(cursor + 1, 0, ...parts);
+          total += parts.length;
+          logStep(
+            `切り詰められたため ${parts.length} 話に分けて試し直します: ${chunk.hash}`
+          );
+        } else {
+          failedChunks++;
+        }
+        continue;
+      }
       if (raw === undefined) continue;
 
-      const validated = validateContradictions(raw, {
-        ...chunk,
-        filePath,
-      });
+      const validated = validateContradictions(raw, chunk);
       rejectedCount += validated.rejected.length;
-      issues.push(...validated.accepted);
+
+      // **どのファイルの何行目かを、ここで確定させる。** まとめたチャンクでは
+      // AIが返す行番号がまとめた本文の通し番号になっており、そのまま使うと
+      // 別の話のファイルの、まったく違う行を指すことになる
+      for (const issue of validated.accepted) {
+        const at = locateChunkLine(chunk, issue.line);
+        if (!at) {
+          // 戻せない行は捨てる。どこの話か決められない
+          rejectedCount++;
+          continue;
+        }
+        issues.push({ ...issue, filePath: at.filePath, line: at.line });
+      }
       processedChunks++;
     }
 
@@ -206,7 +248,12 @@ export async function checkContradictions(
         const response = await provider.generate({
           systemPrompt: CONTRADICTION_CHECK_SYSTEM_PROMPT,
           userPrompt: buildContradictionCheckPrompt({
-            chapterLabel: chapterLabelByChunk.get(chunk.hash) ?? "",
+            // **まとめたチャンクは、話が1つとは限らない。**
+            // 1つ目の話の名前だけを渡すと、2話目以降の本文を
+            // 1話目だと言って読ませることになる
+            chapterLabel: describeChunkScope(chunk, (filePath) =>
+              chapterLabelByFile.get(filePath)
+            ),
             chunkTextWithLineNumbers: withLineNumbers(chunk),
             characterDetails: relevant.characters,
             locationDetails: relevant.locations,
@@ -221,6 +268,16 @@ export async function checkContradictions(
           disableThinking: true,
           signal: controller.signal,
         });
+
+        if (response.truncated || !response.text.trim()) {
+          // まとめたせいで入り切らなかったのなら、元の大きさなら通る見込みが
+          // ある。**捨てるより試すほうがよい**（部分的なJSONは解析できない）
+          logFailure("矛盾検知", {
+            チャンク: chunk.hash,
+            理由: "応答が上限で切り詰められました",
+          });
+          return RETRY_SMALLER;
+        }
 
         const parsed = parseContradictionResult(response.text);
         if (!parsed) {
@@ -442,8 +499,9 @@ async function collectChunks(
 ): Promise<
   | {
       chunks: Chunk[];
-      filePathByChunk: Map<string, string>;
-      chapterLabelByChunk: Map<string, string>;
+      chapterLabelByFile: Map<string, string>;
+      /** 何を根拠に大きさを決めたか。ログに残す（設計書6.23） */
+      chunkNote: string;
     }
   | undefined
 > {
@@ -461,11 +519,11 @@ async function collectChunks(
 
   const info = await registry.resolveModelInfo();
   // コンテキスト長が取れないモデルでは、誤字脱字検知と同じ既定へ落とす
-  const maxChars = decideChunkSize(info?.contextWindow ?? 8192);
+  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192);
+  const maxChars = chunkSettings.chunk.chars;
 
   const chunks: Chunk[] = [];
-  const filePathByChunk = new Map<string, string>();
-  const chapterLabelByChunk = new Map<string, string>();
+  const chapterLabelByFile = new Map<string, string>();
 
   for (const episode of targets) {
     if (episode.hasConflictMarkers) continue;
@@ -485,10 +543,22 @@ async function collectChunks(
       { maxChars }
     )) {
       chunks.push(chunk);
-      filePathByChunk.set(chunk.hash, episode.filePath);
-      chapterLabelByChunk.set(chunk.hash, label);
     }
+    chapterLabelByFile.set(episode.filePath, label);
   }
 
-  return { chunks, filePathByChunk, chapterLabelByChunk };
+  // **1話ずつ送ると、指示のほうが本文より大きい**（設計書6.23）。
+  // 矛盾検知は設定資料も一緒に送るので、1回あたりの指示はさらに重い。
+  // 隣どうしをまとめて呼び出し回数を減らす。返ってきた行番号は
+  // `locateChunkLine` で元のファイルへ戻す
+  const merged =
+    chunkSettings.mergeChars > 0
+      ? mergeAdjacentChunks(chunks, { maxChars: chunkSettings.mergeChars })
+      : chunks;
+
+  return {
+    chunks: merged,
+    chapterLabelByFile,
+    chunkNote: describeChunkSettings(chunkSettings),
+  };
 }

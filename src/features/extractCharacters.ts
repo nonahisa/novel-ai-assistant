@@ -11,7 +11,6 @@ import { readTextFile } from "../core/textFile";
 import { parseEpisodeMetadata } from "../core/metadataParser";
 import { parseCollectedFile } from "../core/collectedFile";
 import {
-  decideChunkSize,
   decideContextSize,
   mergeAdjacentChunks,
   segmentsOf,
@@ -48,6 +47,7 @@ import { resolveMaxOutputTokens } from "../ai/outputLimit";
 import { PendingUpdateStore } from "../core/pendingUpdates";
 import { applyPendingCharacterUpdates } from "./applyPendingUpdates";
 import { ChunkCache } from "../core/chunkCache";
+import { readChunkSettings } from "./chunkSettings";
 import {
   AbilitySystemStore,
   createAbilityStore,
@@ -195,13 +195,9 @@ export async function extractCharacters(
   }
 
   const contextWindow = modelInfo.contextWindow;
-  const configuredChunkChars = vscode.workspace
-    .getConfiguration("novelai")
-    .get<number>("chunkChars", 0);
-  const chunkChars =
-    Number.isInteger(configuredChunkChars) && configuredChunkChars >= 1
-      ? configuredChunkChars
-      : decideChunkSize(contextWindow);
+  // 大きさの決め方は1か所へ集めてある（設計書6.23）
+  const chunkSettings = readChunkSettings(contextWindow);
+  const chunkChars = chunkSettings.chunk.chars;
 
   // 実際に使うコンテキスト長。モデルの上限をそのまま使うと
   // メモリを大量に消費するため、**送るものから必要量を計算して**確保する。

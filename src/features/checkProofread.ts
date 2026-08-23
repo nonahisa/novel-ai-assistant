@@ -6,7 +6,6 @@ import { AIError, recoveryForAIError } from "../ai/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import {
-  decideChunkSize,
   splitIntoChunks,
   withLineNumbers,
   mergeAdjacentChunks,
@@ -15,6 +14,7 @@ import {
   type Chunk,
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
+import { readChunkSettings } from "./chunkSettings";
 import {
   buildProofreadPrompt,
   issueBudget,
@@ -321,7 +321,10 @@ async function collectChunks(
     : scan.episodes;
 
   const info = await registry.resolveModelInfo();
-  const maxChars = decideChunkSize(info?.contextWindow ?? 8192);
+  // **設定を見るようにした**（設計書6.23）。以前はここだけ設定を無視して
+  // いつも自動で決めており、作者が字数を指定しても効かなかった
+  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192);
+  const maxChars = chunkSettings.chunk.chars;
 
   const chunks: Chunk[] = [];
 
@@ -348,13 +351,7 @@ async function collectChunks(
   // **1話ずつ送ると、指示のほうが本文より大きい。** 誤字脱字と同じ理由で
   // 隣どうしをまとめる（設計書6.8.10）。返ってきた行番号は
   // `locateChunkLine` で元のファイルへ戻す
-  const configuredMergeChars = vscode.workspace
-    .getConfiguration("novelai")
-    .get<number>("mergeChunkChars", 6000);
-  const mergeChars =
-    Number.isInteger(configuredMergeChars) && configuredMergeChars >= 1
-      ? Math.min(configuredMergeChars, maxChars)
-      : 0;
+  const mergeChars = chunkSettings.mergeChars;
   return mergeChars > 0
     ? mergeAdjacentChunks(chunks, { maxChars: mergeChars })
     : chunks;

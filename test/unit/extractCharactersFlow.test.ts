@@ -138,6 +138,23 @@ vi.mock("../../src/core/chunker", async (importOriginal) => {
   return {
     ...actual,
     decideChunkSize: vi.fn(() => 1000),
+    /**
+     * **自動で決まる分だけを、テスト用の小さな値に置き換える。**
+     *
+     * `decideChunkSize` を差し替えるだけでは効かない。`resolveChunkChars`
+     * は同じファイルの中から呼んでおり、モジュールの外から差し替えた
+     * 輸出は通らないためである（2026-08-23、6.23の作業で判明）。
+     * 設定で指定した値（`from: "setting"`）はそのまま通す——
+     * そこを潰すと、設定が効くことを確かめるテストが意味を失う。
+     */
+    resolveChunkChars: vi.fn(
+      (options: Parameters<typeof actual.resolveChunkChars>[0]) => {
+        const resolved = actual.resolveChunkChars(options);
+        return resolved.from === "setting"
+          ? resolved
+          : { ...resolved, chars: 1000 };
+      }
+    ),
     splitIntoChunks: vi.fn(() => state.chunks ?? chunks),
   };
 });
@@ -1549,10 +1566,18 @@ describe("人物抽出フロー", () => {
     );
   });
 
-  test("chunkChars が正なら自動計算より優先して分割へ渡す", async () => {
+  /**
+   * **「文字数を指定する」を選んだときだけ効く**（設計書6.23）。
+   * 既定は「モデルによって可変」で、そのときは字数の指定を見ない。
+   */
+  test("字数を指定する設定なら、その値を分割へ渡す", async () => {
     workspace.getConfiguration = () => ({
       get: <T>(key: string, defaultValue: T): T =>
-        (key === "chunkChars" ? 321 : defaultValue) as T,
+        (key === "chunkChars"
+          ? 321
+          : key === "chunkSizeMode"
+            ? "文字数を指定する"
+            : defaultValue) as T,
     });
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
@@ -1588,10 +1613,14 @@ describe("人物抽出フロー", () => {
     );
   });
 
-  test("1未満の chunkChars は自動計算へ戻す", async () => {
+  test("字数を指定するのに1未満なら、モデルから決め直す", async () => {
     workspace.getConfiguration = () => ({
       get: <T>(key: string, defaultValue: T): T =>
-        (key === "chunkChars" ? 0.5 : defaultValue) as T,
+        (key === "chunkChars"
+          ? 0.5
+          : key === "chunkSizeMode"
+            ? "文字数を指定する"
+            : defaultValue) as T,
     });
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),

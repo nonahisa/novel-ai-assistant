@@ -75,6 +75,30 @@ export function withLineNumbers(chunk: Chunk): string {
     .join("\n");
 }
 
+/**
+ * このチャンクが、どの話を含んでいるかを1行で言う（設計書6.23）。
+ *
+ * **まとめたチャンクでは、話が1つとは限らない。** 矛盾検知はAIへ
+ * 「いま見ているのは第何話か」を渡しており、まとめたあとに1つ目の話の
+ * 名前だけを渡すと、**2話目以降の本文を1話目だと言って読ませることになる。**
+ *
+ * @param labelOf ファイルの場所から見出し（「第3話」など）を引く
+ */
+export function describeChunkScope(
+  chunk: Chunk,
+  labelOf: (filePath: string) => string | undefined
+): string {
+  const labels: string[] = [];
+  for (const segment of segmentsOf(chunk)) {
+    const label = labelOf(segment.filePath);
+    if (label && !labels.includes(label)) labels.push(label);
+  }
+  if (labels.length === 0) return "";
+  if (labels.length === 1) return labels[0];
+  // **端どうしを繋ぐ。** 全部並べると、20話まとめたときに読めなくなる
+  return `${labels[0]}〜${labels[labels.length - 1]}`;
+}
+
 /** 内訳を取り出す。持っていなければ、チャンク全体を1件とみなす */
 export function segmentsOf(chunk: Chunk): ChunkSegment[] {
   if (chunk.segments && chunk.segments.length > 0) return chunk.segments;
@@ -111,6 +135,81 @@ export function decideChunkSize(contextWindow: number): number {
   const chars = Math.floor(usableTokens * 0.7);
   // 極端な値を避けるため上下限を設ける
   return Math.max(1500, Math.min(chars, 20000));
+}
+
+/** チャンクの大きさの決め方（設計書6.23） */
+export type ChunkSizeMode =
+  /** モデルのコンテキスト長から決める（既定） */
+  | "auto"
+  /** 作者が字数を指定する */
+  | "manual";
+
+/** 設定に書く言葉。**画面にそのまま出る**ので、機械語にしない */
+export const CHUNK_SIZE_MODE_AUTO = "モデルによって可変";
+export const CHUNK_SIZE_MODE_MANUAL = "文字数を指定する";
+
+export function parseChunkSizeMode(value: string | undefined): ChunkSizeMode {
+  return value === CHUNK_SIZE_MODE_MANUAL ? "manual" : "auto";
+}
+
+export interface ResolvedChunkSize {
+  chars: number;
+  /** 何を根拠に決めたか。ログと画面の説明に使う */
+  from: "model" | "setting" | "fallback";
+}
+
+/**
+ * 1チャンクの字数を決める（設計書6.23）。
+ *
+ * **既定は「モデルによって可変」。** モデルのコンテキスト長が取れるなら、
+ * そこから決めるのがいちばん無駄がない。131,072のモデルへ2,000字ずつ
+ * 送るのは、指示の使い回しという意味でも呼び出し回数という意味でも損である。
+ *
+ * **決め方を1か所に集める。** 以前は誤字脱字と設定資料の抽出だけが
+ * `novelai.chunkChars` を見ており、**推敲と矛盾検知は設定を無視して
+ * いつも自動だった**（2026-08-23に判明）。同じ設定が機能によって効いたり
+ * 効かなかったりするのは、作者から見て理由が無い。
+ *
+ * @param configured `novelai.chunkChars` の値（0や未設定は「指定なし」）
+ */
+export function resolveChunkChars(options: {
+  mode: ChunkSizeMode;
+  configured: number | undefined;
+  contextWindow: number;
+}): ResolvedChunkSize {
+  const fromModel = decideChunkSize(options.contextWindow);
+  if (options.mode === "auto") return { chars: fromModel, from: "model" };
+
+  const configured = options.configured;
+  if (Number.isInteger(configured) && (configured as number) >= 1) {
+    return { chars: configured as number, from: "setting" };
+  }
+  // **「指定する」を選んだのに字数が空、は起こりうる。** そこで止めるより、
+  // モデルから決めて進めるほうがよい（作者は検知をしたくて押している）
+  return { chars: fromModel, from: "fallback" };
+}
+
+/**
+ * まとめて送るときの1回ぶんの字数を決める（設計書6.23）。
+ *
+ * **1話ずつ送ると、指示のほうが本文より大きい。** 1話2,000字の作品で
+ * 指示が約5,600字。19話なら19回ぶん同じ指示を送り直すことになる。
+ *
+ * **自動のときは、チャンクの大きさまで詰める。** モデルが受けられる量を
+ * 使い切るのが、呼び出し回数をいちばん減らす。手で指定しているときは、
+ * その値を尊重する（ただしチャンクより大きくはしない）。
+ */
+export function resolveMergeChars(options: {
+  mode: ChunkSizeMode;
+  configured: number | undefined;
+  chunkChars: number;
+}): number {
+  if (options.mode === "auto") return options.chunkChars;
+  const configured = options.configured;
+  if (Number.isInteger(configured) && (configured as number) >= 1) {
+    return Math.min(configured as number, options.chunkChars);
+  }
+  return 0;
 }
 
 /**

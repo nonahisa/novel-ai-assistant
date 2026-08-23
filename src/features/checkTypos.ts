@@ -9,7 +9,6 @@ import { readTextFile } from "../core/textFile";
 import { parseEpisodeMetadata } from "../core/metadataParser";
 import { parseCollectedFile } from "../core/collectedFile";
 import {
-  decideChunkSize,
   decideContextSize,
   splitIntoChunks,
   withLineNumbers,
@@ -19,6 +18,7 @@ import {
   Chunk,
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
+import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
 import {
   TYPO_CHECK_SCHEMA,
   TYPO_CHECK_SYSTEM_PROMPT,
@@ -126,13 +126,9 @@ export async function checkTypos(
   }
 
   const contextWindow = modelInfo.contextWindow;
-  const configuredChunkChars = vscode.workspace
-    .getConfiguration("novelai")
-    .get<number>("chunkChars", 0);
-  const chunkChars =
-    Number.isInteger(configuredChunkChars) && configuredChunkChars >= 1
-      ? configuredChunkChars
-      : decideChunkSize(contextWindow);
+  // 大きさの決め方は1か所へ集めてある（設計書6.23）
+  const chunkSettings = readChunkSettings(contextWindow);
+  const chunkChars = chunkSettings.chunk.chars;
 
   const configuredNumCtx = vscode.workspace
     .getConfiguration("novelai")
@@ -229,13 +225,7 @@ export async function checkTypos(
   //
   // **行番号は `locateChunkLine` で元のファイルへ戻す。** まとめた本文の
   // 通し番号のまま使うと、2話目以降の指摘が1話目の別の行を書き換える。
-  const configuredMergeChars = vscode.workspace
-    .getConfiguration("novelai")
-    .get<number>("mergeChunkChars", 6000);
-  const mergeChars =
-    Number.isInteger(configuredMergeChars) && configuredMergeChars >= 1
-      ? Math.min(configuredMergeChars, chunkChars)
-      : 0;
+  const mergeChars = chunkSettings.mergeChars;
   const chunks =
     mergeChars > 0
       ? mergeAdjacentChunks(
@@ -307,7 +297,8 @@ export async function checkTypos(
   useLogFile(work.folderPath);
   logStep(
     `誤字脱字検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
-      `${resolved.model} / ${chunks.length}チャンク / v${TYPO_CHECK_VERSION}`
+      `${resolved.model} / ${chunks.length}チャンク / ` +
+      `${describeChunkSettings(chunkSettings)} / v${TYPO_CHECK_VERSION}`
   );
 
   const cache = new ChunkCache(work);
