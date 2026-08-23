@@ -43,6 +43,11 @@ describe("原稿エディタのHTML", () => {
   });
 
   /** 英数字が1文字ずつ縦に積まれないようにする */
+  /** 縦書きの日本語では、傍線（下線）は行の右に引く。変換中の線も同じ */
+  it("縦書きの傍線は右に引く", () => {
+    expect(html).toContain("text-underline-position: right");
+  });
+
   it("文字の向きは mixed にしてある", () => {
     expect(html).toContain("text-orientation: mixed");
     expect(html).not.toContain("text-orientation: upright");
