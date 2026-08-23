@@ -182,6 +182,52 @@ h3 {
 .work-body h3:first-of-type { margin-top: 12px; }
 .field { margin-bottom: 10px; }
 .field label { display: block; font-size: 12px; opacity: 0.8; margin-bottom: 3px; }
+/* 書き換えた項目に印を付ける。**何が保存されるのか**を見えるようにする */
+.field.changed > input, .field.changed > textarea, .field.changed > select {
+  border-color: var(--vscode-focusBorder);
+}
+.field.changed > label::after {
+  content: "（変更あり）";
+  color: var(--vscode-focusBorder);
+  margin-left: 4px;
+}
+/* 項目の下に添える短い説明 */
+.hint { font-size: 11px; opacity: 0.7; margin: 3px 0 0; }
+/*
+  別名を選ぶ札（設計書6.5.6）。
+  **datalist はChromiumでは何の印も出ない**ので、作者からは
+  「ドロップダウンが出ない」としか見えなかった（2026-08-24の指摘）。
+  押せるものを、押せる形で並べる。
+*/
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.chips .chiplabel { font-size: 11px; opacity: 0.7; align-self: center; }
+button.chip {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  cursor: pointer;
+}
+button.chip:hover { background: var(--vscode-button-secondaryHoverBackground); }
+button.chip.on {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+/*
+  保存の帯。**変更があるときだけ下へ貼り付く。**
+  人物の項目は10以上あり、名前を直しても保存ボタンが画面の外にあった
+*/
+.row.saverow.dirty {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  background: var(--vscode-editor-background);
+  border-top: 1px solid var(--vscode-focusBorder);
+  padding: 8px 0;
+  margin-top: 8px;
+}
 .readonly { font-size: 12px; opacity: 0.85; margin-bottom: 6px; }
 .readonly .k { opacity: 0.7; margin-right: 6px; }
 button.action {
@@ -771,6 +817,36 @@ button.danger:hover {
     // ── 作者による書き換え
     el.detail.appendChild(heading("設定を書き換える"));
     const inputs = {};
+    /*
+      **書き換えたことを、その場で見えるようにする**（設計書6.5.7）。
+
+      人物の項目は10以上あり、保存ボタンはその下にある。名前を直しても
+      ボタンが画面の外にあり、作者から「どうやったら保存できるか
+      わからない」と言われた（2026-08-24）。変えたら帯が下に貼り付く。
+    */
+    let saveRow = null;
+    let saveHint = null;
+    function markChanged() {
+      for (const key of Object.keys(inputs)) {
+        const control = inputs[key];
+        const now =
+          control.type === "checkbox" ? (control.checked ? "1" : "") : control.value;
+        const wrap = control.closest ? control.closest(".field") : null;
+        if (wrap) wrap.classList.toggle("changed", now !== control.dataset.initial);
+      }
+      const dirty = Object.keys(inputs).some(function (key) {
+        const control = inputs[key];
+        const now =
+          control.type === "checkbox" ? (control.checked ? "1" : "") : control.value;
+        return now !== control.dataset.initial;
+      });
+      if (saveRow) saveRow.classList.toggle("dirty", dirty);
+      if (saveHint) {
+        saveHint.textContent = dirty
+          ? "変更があります。「保存」を押すまで反映されません。"
+          : "保存すると、以後この項目は抽出で上書きされなくなります。";
+      }
+    }
     for (const field of detail.fields) {
       if (field.check) {
         const box = document.createElement("input");
@@ -797,30 +873,55 @@ button.danger:hover {
       }
       const control = document.createElement(field.multiline ? "textarea" : "input");
       control.value = field.value;
-      // **選べるようにするが、手で書く道も残す**（設計書6.5.6）。
-      // 名前欄では別名を候補に出す。選択肢だけにすると、
-      // まだ別名に無い名前へ変えられなくなる
-      if (field.suggestions && field.suggestions.length > 0) {
-        const listId = "suggest-" + field.key.replace(/[^A-Za-z0-9_-]/g, "_");
-        const list = document.createElement("datalist");
-        list.id = listId;
-        for (const suggestion of field.suggestions) {
-          const option = document.createElement("option");
-          option.value = suggestion;
-          list.appendChild(option);
-        }
-        el.detail.appendChild(list);
-        control.setAttribute("list", listId);
-      }
       // 中身の量に合わせて高さを変える。固定の行数だと、
       // 紹介文のように少し長い文章が途中で隠れてしまう
       if (field.multiline) growWithContent(control);
       inputs[field.key] = control;
-      el.detail.appendChild(labelled(field.label, control));
+      const wrap = labelled(field.label, control);
+
+      /*
+        **押せるものを、押せる形で出す**（設計書6.5.6）。
+
+        以前は datalist で候補を出していたが、Chromiumでは入力欄に
+        何の印も出ない——作者からは「ドロップダウンが出ない」としか
+        見えなかった（2026-08-24の指摘）。別名を札にして並べる。
+
+        **手で書く道は残す。** 札だけにすると、まだ別名に無い名前へ
+        変えられなくなる。
+      */
+      if (field.suggestions && field.suggestions.length > 0) {
+        const chips = document.createElement("div");
+        chips.className = "chips";
+        const chipLabel = document.createElement("span");
+        chipLabel.className = "chiplabel";
+        chipLabel.textContent = "別名から選ぶ：";
+        chips.appendChild(chipLabel);
+        for (const suggestion of field.suggestions) {
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "chip";
+          chip.textContent = suggestion;
+          chip.title = suggestion + " を名前にします（いまの名前は別名へ移ります）";
+          chip.addEventListener("click", function () {
+            control.value = suggestion;
+            markChanged();
+            control.focus();
+          });
+          chips.appendChild(chip);
+        }
+        wrap.appendChild(chips);
+      }
+      if (field.hint) {
+        const hint = document.createElement("p");
+        hint.className = "hint";
+        hint.textContent = field.hint;
+        wrap.appendChild(hint);
+      }
+      el.detail.appendChild(wrap);
     }
 
-    const saveRow = document.createElement("div");
-    saveRow.className = "row";
+    saveRow = document.createElement("div");
+    saveRow.className = "row saverow";
     const saveButton = document.createElement("button");
     saveButton.className = "action";
     saveButton.textContent = "保存";
@@ -836,13 +937,23 @@ button.danger:hover {
       post("save", { kind: detail.kind, id: detail.id, edits: edits });
     });
     saveRow.appendChild(saveButton);
-    const saveHint = document.createElement("span");
+    saveHint = document.createElement("span");
     saveHint.className = "sub";
     saveHint.style.fontSize = "11px";
     saveHint.style.opacity = "0.7";
     saveHint.textContent = "保存すると、以後この項目は抽出で上書きされなくなります。";
     saveRow.appendChild(saveHint);
     el.detail.appendChild(saveRow);
+
+    // 初めの値を控えておく。**「変えた」かどうかは、これと比べて決める**
+    for (const key of Object.keys(inputs)) {
+      const control = inputs[key];
+      control.dataset.initial =
+        control.type === "checkbox" ? (control.checked ? "1" : "") : control.value;
+      control.addEventListener("input", markChanged);
+      control.addEventListener("change", markChanged);
+    }
+    markChanged();
 
     // ── AIに各項目を埋めさせる（承認制）
     el.detail.appendChild(heading("AIで項目を充実させる"));

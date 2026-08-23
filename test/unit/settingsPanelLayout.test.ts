@@ -129,3 +129,54 @@ describe("記録を取り下げられる", () => {
     expect(script()).not.toContain("confirm(");
   });
 });
+
+/**
+ * 名前を変えられるようにした（作者の指摘、2026-08-24。設計書6.5.7）。
+ *
+ * 「設定資料パネルの登場人物の名前が変更できません。（略）ドロップダウンが
+ * でず、ドロップダウンがでる場合も、どうやったら保存できるかわかりません」
+ *
+ * 原因は2つ。**候補を `datalist` で出していたが、Chromiumでは入力欄に
+ * 何の印も出ない**。そして**保存ボタンが10以上の項目の下にあり、
+ * 名前を直しても画面の外だった**。
+ */
+describe("名前の書き換え", () => {
+  test("別名は、押せる札として並べる", () => {
+    expect(script()).toContain("別名から選ぶ：");
+    expect(HTML).toContain("button.chip");
+  });
+
+  test("印の出ない datalist は使わない", () => {
+    // 入力欄に何の変化も無いため、作者からは「出ない」としか見えない
+    expect(script()).not.toContain('createElement("datalist")');
+    expect(script()).not.toContain('setAttribute("list"');
+  });
+
+  test("札を押すと、入力欄へ入る", () => {
+    expect(script()).toContain("control.value = suggestion");
+  });
+
+  test("欄の下に、次にやることを書ける", () => {
+    expect(script()).toContain('hint.className = "hint"');
+  });
+
+  test("変えたことが分かるよう、項目に印を付ける", () => {
+    expect(script()).toContain('classList.toggle("changed"');
+    expect(HTML).toContain(".field.changed");
+  });
+
+  test("変更があるときは、保存の帯を下へ貼り付ける", () => {
+    expect(script()).toContain('classList.toggle("dirty"');
+    expect(HTML).toContain(".row.saverow.dirty");
+    expect(HTML).toContain("position: sticky");
+  });
+
+  test("保存していないことを、言葉でも伝える", () => {
+    expect(script()).toContain("「保存」を押すまで反映されません。");
+  });
+
+  test("初めの値と比べて「変えた」を決める", () => {
+    // 初期値を控えずに「触ったか」で決めると、書き戻しても変更扱いになる
+    expect(script()).toContain("control.dataset.initial");
+  });
+});
