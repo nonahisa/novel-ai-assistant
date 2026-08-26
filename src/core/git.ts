@@ -92,23 +92,51 @@ export type GitSyncStatus =
   /** Gitリポジトリではない（Gitを使わずに執筆している作品） */
   | { kind: "not_a_repo" }
   /** リポジトリだがリモートが未設定（ローカルだけで履歴を取っている） */
-  | { kind: "no_remote"; root: string }
+  | { kind: "no_remote"; root: string; dirty: number; dirtyHere: number }
   /** ブランチではなく特定のコミットを直接見ている */
   | { kind: "detached"; root: string }
   /** 現在のブランチに上流が無い（push -u がまだ） */
-  | { kind: "no_upstream"; root: string; branch: string }
+  | {
+      kind: "no_upstream";
+      root: string;
+      branch: string;
+      dirty: number;
+      dirtyHere: number;
+    }
   /** 判定できた */
   | {
       kind: "tracked";
       root: string;
       branch: string;
       upstream: string;
-      /** 別環境で進んでいて、まだ取り込んでいないコミット数 */
+      /** 別環境で進んでいて、まだ取り込んでいないコミット数。**置き場ぜんぶ** */
       behind: number;
-      /** この環境で進んでいて、まだ送信していないコミット数 */
+      /** この環境で進んでいて、まだ送信していないコミット数。**置き場ぜんぶ** */
       ahead: number;
-      /** 変更のあるファイル数（未追跡を含む） */
+      /**
+       * **その作品に触れた**ぶんだけの、取り込み待ち・送信待ちの数。
+       *
+       * 書庫では `ahead` が全作品の合計になる。作品一覧の各行にそれを出すと
+       * **全部の行に同じ数字が並び、どの作品を送ればよいのか分からない**
+       * （実データで11作品すべてに「送信待ち13」と出た）。
+       *
+       * 送るのも取り込むのも置き場ぜんぶが単位なので、`ahead`／`behind` は残す。
+       */
+      behindHere: number;
+      aheadHere: number;
+      /** 変更のあるファイル数（未追跡を含む）。**置き場ぜんぶ** */
       dirty: number;
+      /**
+       * **訊ねたフォルダーの中だけ**の変更のあるファイル数。
+       *
+       * 書庫（1つの置き場に複数の作品）では、`dirty` は置き場ぜんぶの数に
+       * なる。作品一覧の各行に置き場の数を出すと、**どの作品に書きかけが
+       * あるのか分からない**（作者の指摘、2026-08-26：
+       * 「未同期の作品がわかりません」）。
+       *
+       * 取り込みの可否は置き場ぜんぶで決まるので、`dirty` は残す。
+       */
+      dirtyHere: number;
       /** Gitがマージ未解決としているファイル数 */
       unmerged: number;
     }
@@ -157,11 +185,20 @@ export async function readSyncStatus(
   }
   const root = topLevel.stdout.trim();
 
+  // **作業ツリーの状態は、どの分かれ道でも要る。** リモートが無くても
+  // 「記録していない変更が何件あるか」は作者に見せたい
+  const working = await readWorkingTree(cwd, root, run);
+  if (!working) {
+    return { kind: "failed", detail: "作業ツリーの状態を読めませんでした" };
+  }
+
   const remotes = await run(["remote"], cwd, LOCAL_TIMEOUT_MS);
   if (remotes.code !== 0) {
     return { kind: "failed", detail: describeFailure(remotes) };
   }
-  if (remotes.stdout.trim() === "") return { kind: "no_remote", root };
+  if (remotes.stdout.trim() === "") {
+    return { kind: "no_remote", root, dirty: working.dirty, dirtyHere: working.dirtyHere };
+  }
 
   // --quiet を付けるのは、切り離されたHEADでエラー文を出さないため
   const branchResult = await run(
@@ -179,7 +216,13 @@ export async function readSyncStatus(
     LOCAL_TIMEOUT_MS
   );
   if (upstreamResult.code !== 0) {
-    return { kind: "no_upstream", root, branch };
+    return {
+      kind: "no_upstream",
+      root,
+      branch,
+      dirty: working.dirty,
+      dirtyHere: working.dirtyHere,
+    };
   }
   const upstream = upstreamResult.stdout.trim();
 
@@ -199,15 +242,26 @@ export async function readSyncStatus(
     };
   }
 
-  const status = await run(
-    ["status", "--porcelain"],
-    cwd,
-    LOCAL_TIMEOUT_MS
-  );
-  if (status.code !== 0) {
-    return { kind: "failed", detail: describeFailure(status) };
-  }
-  const working = parseStatusPorcelain(status.stdout);
+  // その作品に触れたコミットだけを数え直す。
+  // **置き場の根そのものなら同じ**なので、gitを二度呼ばない
+  const here = isSameLocation(cwd, root)
+    ? parsed
+    : parseAheadBehind(
+        (
+          await run(
+            [
+              "rev-list",
+              "--left-right",
+              "--count",
+              `${upstream}...HEAD`,
+              "--",
+              ".",
+            ],
+            cwd,
+            LOCAL_TIMEOUT_MS
+          )
+        ).stdout
+      ) ?? parsed;
 
   return {
     kind: "tracked",
@@ -216,9 +270,61 @@ export async function readSyncStatus(
     upstream,
     behind: parsed.behind,
     ahead: parsed.ahead,
+    behindHere: here.behind,
+    aheadHere: here.ahead,
     dirty: working.dirty,
+    dirtyHere: working.dirtyHere,
     unmerged: working.unmerged,
   };
+}
+
+/**
+ * 作業ツリーの状態を読む。
+ *
+ * **置き場ぜんぶと、訊ねたフォルダーの中との2つを返す。**
+ * 書庫では前者が全作品の合計になるため、作品一覧に出すと
+ * どの作品に書きかけがあるのか分からない。
+ *
+ * 訊ねた先が置き場の根そのものなら**2つは同じ**なので、gitを二度呼ばない
+ * （作品の数だけプロセスを起こすと、一覧の描き直しが目に見えて遅くなる）。
+ */
+async function readWorkingTree(
+  cwd: string,
+  root: string,
+  run: GitCommandRunner
+): Promise<{ dirty: number; dirtyHere: number; unmerged: number } | undefined> {
+  const whole = await run(["status", "--porcelain"], cwd, LOCAL_TIMEOUT_MS);
+  if (whole.code !== 0) return undefined;
+  const counted = parseStatusPorcelain(whole.stdout);
+
+  if (isSameLocation(cwd, root)) {
+    return { ...counted, dirtyHere: counted.dirty };
+  }
+
+  // `-- .` で、いま居るフォルダーの下だけに絞る。
+  // **パスを自分で切り分けない**——日本語のパスは引用符で囲まれるうえ、
+  // 改名は2つのパスを持つ。gitに絞らせるほうが確かである
+  const here = await run(
+    ["status", "--porcelain", "--", "."],
+    cwd,
+    LOCAL_TIMEOUT_MS
+  );
+  return {
+    ...counted,
+    dirtyHere: here.code === 0 ? parseStatusPorcelain(here.stdout).dirty : counted.dirty,
+  };
+}
+
+/** 同じ場所を指しているか。Windowsでは大文字小文字を同じものとして見る */
+function isSameLocation(left: string, right: string): boolean {
+  // 区切りの円記号を / に揃え、末尾の / を落とす。
+  // 正規表現の中の円記号は読みにくいので符号（u005C）で書く
+  const normalize = (value: string) =>
+    value
+      .replace(/[\u005C]/g, "/")
+      .replace(/[/]+$/, "")
+      .toLowerCase();
+  return normalize(left) === normalize(right);
 }
 
 /**

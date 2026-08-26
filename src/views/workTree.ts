@@ -78,12 +78,16 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private synopses = new Map<string, Map<string, string>>();
 
   /**
-   * @param syncBadge GitHub同期の遅れを短く表す文字列を返す。
+   * @param syncBadge GitHub同期に残っているものを短く表す文字列を返す。
    *   ツリーがGit連携そのものに依存しないよう、関数で受け取る。
+   * @param syncTooltip その内訳（ホバーで読む）。
+   *   **印は短くしか書けない。** 「記録待ち」と「送信待ち」が何を指すのかは
+   *   言葉だけでは伝わりきらないので、ここで補う
    */
   constructor(
     private readonly registry: WorkRegistry,
-    private readonly syncBadge?: (workId: string) => string | undefined
+    private readonly syncBadge?: (workId: string) => string | undefined,
+    private readonly syncTooltip?: (workId: string) => string[]
   ) {
     registry.onDidChange(() => this.refresh());
   }
@@ -171,6 +175,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
             toManuscriptPages(stats.totals.manuscriptLines)
           )} 枚`,
           `- ファイル数: ${stats.fileCount}`,
+          ...(this.syncTooltip?.(work.id) ?? []),
           stats.conflictedCount > 0
             ? `\n**未解決の競合が ${stats.conflictedCount} 件あります。**\n` +
               "これらは文字数に含めていません。解決してから執筆・AI処理を行ってください。"

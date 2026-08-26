@@ -22,6 +22,7 @@ import { parseConflicts } from "../../src/core/conflictFile";
 import {
   describeStatus,
   describeSyncBadge,
+  describeSyncTooltip,
   isWarning,
 } from "../../src/features/gitSync";
 
@@ -192,13 +193,181 @@ describe("同期状態の判定", () => {
     expect(describeSyncBadge(status)).toBeUndefined();
   });
 
-  test("遅れと未送信をツリー用の短い印にする", async () => {
+  /**
+   * 印は矢印から言葉へ変えた（2026-08-26）。
+   *
+   * 作者の指摘：「未同期の作品がわかりません。横に数字をだせませんか？」
+   * **印は出ていたのに伝わっていなかった**（矢印だけだった）。加えて、記録して
+   * いない変更は数に入っておらず、**書いたままの作品が同期済みに見えていた。**
+   */
+  test("何がどれだけ残っているかを、言葉と数で出す", async () => {
     const run = fakeGit({
       ...TRACKED_BASE,
       "rev-list --left-right --count": { stdout: "3\t2\n" },
     });
 
-    expect(describeSyncBadge(await readSyncStatus("/work", run))).toBe("↓3 ↑2");
+    expect(describeSyncBadge(await readSyncStatus("/work", run))).toBe(
+      "送信待ち2・受け取り3"
+    );
+  });
+
+  test("記録していない変更も数に入れる", async () => {
+    // ここが入っていなかったため、**書いたままの作品に何も出ていなかった**
+    const run = fakeGit({
+      ...TRACKED_BASE,
+      "status --porcelain": {
+        stdout: " M 短編/本文/第1話.txt\n?? 短編/本文/第2話.txt\n",
+      },
+    });
+
+    expect(describeSyncBadge(await readSyncStatus("/work", run))).toBe("記録待ち2");
+  });
+
+  test("書庫では、その作品ぶんだけを数える", async () => {
+    // 置き場ぜんぶの数を各行に出すと、**全部の行に同じ数字が並ぶ**。
+    // 実データでは11作品すべてに「送信待ち13」と出た（作者の指摘）
+    const run = fakeGit({
+      ...TRACKED_BASE,
+      "rev-parse --show-toplevel": { stdout: "/library\n" },
+      "rev-list --left-right --count origin/main...HEAD -- .": {
+        stdout: "0\t2\n",
+      },
+      "rev-list --left-right --count": { stdout: "0\t13\n" },
+      // 引数そのままの鍵にする。前方一致だと置き場ぜんぶの応答に当たる
+      "status --porcelain -- .": { stdout: " M 短編/本文/第1話.txt\n" },
+      "status --porcelain": {
+        stdout: " M 短編/本文/第1話.txt\n M 長編/本文/第9話.txt\n",
+      },
+    });
+
+    const status = await readSyncStatus("/library/短編", run);
+
+    expect(status).toMatchObject({
+      dirty: 2,
+      dirtyHere: 1,
+      ahead: 13,
+      aheadHere: 2,
+    });
+    // 行に出るのは、その作品ぶんだけ
+    expect(describeSyncBadge(status)).toBe("記録待ち1・送信待ち2");
+  });
+
+  test("置き場ぜんぶの数は、ホバーで断る", async () => {
+    // 送信は置き場が単位で、1つ送れば同じ置き場の作品はまとめて出ていく
+    const run = fakeGit({
+      ...TRACKED_BASE,
+      "rev-parse --show-toplevel": { stdout: "/library\n" },
+      "rev-list --left-right --count origin/main...HEAD -- .": {
+        stdout: "0\t2\n",
+      },
+      "rev-list --left-right --count": { stdout: "0\t13\n" },
+    });
+
+    const lines = describeSyncTooltip(await readSyncStatus("/library/短編", run));
+
+    expect(lines.join("|")).toContain("送信待ち: 2件");
+    expect(lines.join("|")).toContain("同じ置き場ぜんぶでは: 送信待ち 13件");
+  });
+
+  test("作品が置き場の根なら、数え直さない", async () => {
+    // 一覧を描くたびに作品の数だけプロセスを起こすと、目に見えて遅くなる
+    const calls: string[] = [];
+    const inner = fakeGit({
+      ...TRACKED_BASE,
+      "rev-list --left-right --count": { stdout: "0\t3\n" },
+    });
+    const run: GitCommandRunner = async (args, cwd, timeout) => {
+      calls.push(args.join(" "));
+      return inner(args, cwd, timeout);
+    };
+
+    const status = await readSyncStatus("/work", run);
+
+    expect(status).toMatchObject({ ahead: 3, aheadHere: 3 });
+    expect(calls.filter((call) => call.startsWith("rev-list"))).toHaveLength(1);
+  });
+
+  test("作品が置き場の根なら、gitを二度呼ばない", async () => {
+    // 一覧を描くたびに作品の数だけプロセスを起こすと、目に見えて遅くなる
+    const calls: string[] = [];
+    const inner = fakeGit({
+      ...TRACKED_BASE,
+      "status --porcelain": { stdout: " M 本文/第1話.txt\n" },
+    });
+    const run: GitCommandRunner = async (args, cwd, timeout) => {
+      calls.push(args.join(" "));
+      return inner(args, cwd, timeout);
+    };
+
+    const status = await readSyncStatus("/work", run);
+
+    expect(status).toMatchObject({ dirty: 1, dirtyHere: 1 });
+    expect(calls.filter((call) => call.startsWith("status"))).toHaveLength(1);
+  });
+
+  test("競合は印に出さない（作品の行に既に出ている）", () => {
+    // 同じことを2度言うと、どちらが本当か分からなくなる。
+    // 作品の行には、本文を読んで数えた「⚠競合 N件」が出ている
+    const badge = describeSyncBadge({
+      kind: "tracked",
+      root: "/work",
+      branch: "main",
+      upstream: "origin/main",
+      behind: 0,
+      ahead: 0,
+      dirty: 1,
+      dirtyHere: 1,
+      unmerged: 1,
+    });
+
+    expect(badge).toBe("記録待ち1");
+  });
+
+  test("gitから見た未解決は、ホバーで伝える", () => {
+    const lines = describeSyncTooltip({
+      kind: "tracked",
+      root: "/work",
+      branch: "main",
+      upstream: "origin/main",
+      behind: 0,
+      ahead: 0,
+      dirty: 1,
+      dirtyHere: 1,
+      unmerged: 2,
+    });
+
+    expect(lines.join("|")).toContain("未解決の競合が 2 件");
+  });
+
+  test("まだ一度も送っていない作品は、そう書く", async () => {
+    const run = fakeGit({
+      ...TRACKED_BASE,
+      "rev-parse --abbrev-ref --symbolic-full-name @{upstream}": { code: 1 },
+      "status --porcelain": { stdout: " M 本文/第1話.txt\n" },
+    });
+
+    expect(describeSyncBadge(await readSyncStatus("/work", run))).toBe(
+      "記録待ち1・未送信"
+    );
+  });
+
+  test("ホバーでは、それぞれが何かを説明する", async () => {
+    // 言葉だけでは「記録待ち」と「送信待ち」の違いが伝わりきらない
+    const run = fakeGit({
+      ...TRACKED_BASE,
+      "rev-list --left-right --count": { stdout: "3\t2\n" },
+    });
+
+    const lines = describeSyncTooltip(await readSyncStatus("/work", run));
+
+    expect(lines.join("|")).toContain("送信待ち: 2件");
+    expect(lines.join("|")).toContain("受け取り: 3件");
+  });
+
+  test("揃っているときは、揃っていると書く", async () => {
+    const status = await readSyncStatus("/work", fakeGit(TRACKED_BASE));
+
+    expect(describeSyncTooltip(status).join("|")).toContain("GitHubと揃っています");
   });
 });
 

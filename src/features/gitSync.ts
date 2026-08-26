@@ -23,7 +23,10 @@ import { withProgress } from "../views/progress";
 // ツリーのバッジ用は core/gitSyncStatusText.ts へ切り出した。
 // このファイルは静的importするだけでNode専用（node:child_process）を
 // 巻き込むため、そちらを import しているファイルまで巻き込む（設計書5.8.5）
-export { describeSyncBadge } from "../core/gitSyncStatusText";
+export {
+  describeSyncBadge,
+  describeSyncTooltip,
+} from "../core/gitSyncStatusText";
 import { cancelItem } from "../views/dialogs";
 import {
   canRecordChanges,

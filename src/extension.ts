@@ -98,7 +98,10 @@ import { setWriteObserver } from "./core/atomicWrite";
 // 静的importする core/git.ts を読む。型だけ・バッジ描画用の関数だけを
 // 安全に取り出す（設計書5.8.5）
 import type { GitSyncMonitor } from "./features/gitSync";
-import { describeSyncBadge } from "./core/gitSyncStatusText";
+import {
+  describeSyncBadge,
+  describeSyncTooltip,
+} from "./core/gitSyncStatusText";
 import { NullGitSyncMonitor, type GitSyncMonitorLike } from "./features/gitSyncStub";
 import { canRunProcesses } from "./core/runtime";
 // nextSetupStep, runSetupStep も core/git.ts 経由。動的importする
@@ -197,8 +200,10 @@ export async function activate(
     : new NullGitSyncMonitor();
   context.subscriptions.push(gitSync);
 
-  const treeProvider = new WorkTreeProvider(registry, (workId) =>
-    describeSyncBadge(gitSync.statusFor(workId))
+  const treeProvider = new WorkTreeProvider(
+    registry,
+    (workId) => describeSyncBadge(gitSync.statusFor(workId)),
+    (workId) => describeSyncTooltip(gitSync.statusFor(workId))
   );
   // 同期状態が変わっても本文は変わらないので、再走査はせず描き直すだけにする
   gitSync.onDidChange(() => treeProvider.redraw());
