@@ -246,6 +246,7 @@ async function runPlan(
     const result = await pullFastForward(cwd, deps.run);
     if (!result.ok) {
       outcome.error = describePullFailure(result.failure.kind);
+      outcome.diverged = result.failure.kind === "diverged";
       logFailure("すべて同期：取り込みに失敗", {
         置き場: name,
         詳細: outcome.error,
@@ -277,7 +278,7 @@ function describePullFailure(kind: "dirty" | "diverged" | "failed"): string {
   if (kind === "diverged") {
     return (
       "この環境と別の環境の両方で変更が進んでいます。" +
-      "どちらを残すかは自動で決められないため、取り込みませんでした。"
+      "取り込みませんでした。「分かれた分を合わせる」でお試しください。"
     );
   }
   return "取り込めませんでした。";
@@ -301,12 +302,23 @@ async function report(
   const detail = failed
     .map((one) => `・${describeTargetWorks(one.plan.target)}：${one.error}`)
     .join("\n");
+  // 分岐で止まったものがあるなら、**その場から次の手へ行けるようにする**
+  const diverged = failed.filter((one) => one.diverged);
+  const buttons =
+    diverged.length > 0 ? ["分かれた分を合わせる", "ログを表示"] : ["ログを表示"];
   const action = await vscode.window.showWarningMessage(
     summary,
     { modal: true, detail },
-    "ログを表示"
+    ...buttons
   );
   if (action === "ログを表示") showLog();
+  if (action === "分かれた分を合わせる") {
+    const work = diverged[0]?.plan.target.works[0];
+    await vscode.commands.executeCommand(
+      "novelai.resolveDivergence",
+      work ? { type: "work", work } : undefined
+    );
+  }
 }
 
 function stamp(): string {

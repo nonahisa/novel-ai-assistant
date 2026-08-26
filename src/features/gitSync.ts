@@ -383,11 +383,19 @@ export class GitSyncMonitor implements vscode.Disposable {
     }
 
     if (result.failure.kind === "diverged") {
-      vscode.window.showWarningMessage(
+      // **行き止まりにしない**（設計書5.5.16）。同じファイルが両方で
+      // 書き換えられていなければ、そのまま合わせられる
+      const answer = await vscode.window.showWarningMessage(
         `「${work.title}」は、この環境と別の環境の両方で変更が進んでいます。` +
-          "どちらを残すかは自動では決められないため、取り込みを中止しました。" +
-          "Gitのクライアントで内容を見比べてから解決してください。"
+          "取り込みは中止しました。",
+        "分かれた分を合わせる"
       );
+      if (answer === "分かれた分を合わせる") {
+        await vscode.commands.executeCommand("novelai.resolveDivergence", {
+          type: "work",
+          work,
+        });
+      }
       return false;
     }
 

@@ -334,6 +334,23 @@ export async function activate(
       const { syncAllWorks } = await import("./features/syncAllWorks.js");
       await syncAllWorks({ registry, monitor: gitSync });
     }),
+    // 別のPCとこちらの両方で書くと分岐する（設計書5.5.16）。
+    // これまでは「Gitのクライアントで解決してください」で行き止まりだった
+    vscode.commands.registerCommand(
+      "novelai.resolveDivergence",
+      async (node?: WorkNode) => {
+        // 合わせる相手は置き場（リポジトリ）だが、選んでもらうのは作品にする。
+        // 作者が見ているのは作品であり、どの作品がどの置き場かは意識しなくてよい
+        const work = await resolveWork(node, registry, {
+          title: "分かれた分を合わせる作品",
+        });
+        if (!work) return;
+        const { resolveDivergence } = await import(
+          "./features/resolveDivergence.js"
+        );
+        await resolveDivergence({ registry, monitor: gitSync }, work);
+      }
+    ),
     vscode.commands.registerCommand("novelai.openVertical", async () => {
       const uri = vscode.window.activeTextEditor?.document.uri;
       if (!uri) {

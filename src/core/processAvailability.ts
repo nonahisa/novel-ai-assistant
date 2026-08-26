@@ -37,6 +37,9 @@ const REQUIRES_PROCESSES = new Set<string>([
   // 1作品ずつの `novelai.gitSync` と違い、ソース管理へ案内して代わりに
   // させる形にできない（置き場ごとに記録・取り込み・送信を順に行うため）
   "novelai.syncAllWorks",
+  // **分岐を合わせるのもgitコマンドを直に打つ**（設計書5.5.16）。
+  // ソース管理へ案内して代わりにさせる形にはできない
+  "novelai.resolveDivergence",
 ]);
 
 /**
