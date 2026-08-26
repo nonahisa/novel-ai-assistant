@@ -163,8 +163,10 @@ import {
   importRuby,
 } from "./features/ruby";
 import {
+  MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   MANUSCRIPT_EDITOR_VIEW_TYPE,
   ManuscriptEditorProvider,
+  type ManuscriptEditorDeps,
 } from "./features/manuscriptEditor";
 import { showEditHistory } from "./features/editHistoryPanel";
 import {
@@ -302,35 +304,57 @@ export async function activate(
    *
    * **既定のエディタにはしない**（`package.json` の `priority` は `option`）。
    * 「縦書きで開く」か、VS Code の「エディターを再度開く」から選ぶ。
+   *
+   * **中身は縦書きと横書きで同じものを使う**（6.25.4）。違うのは、
+   * 開いたときの向きだけである。
    */
+  const manuscriptDeps = {
+    highlighter,
+    openSettings: async (work, kind, id) => {
+      const panel = await openSettingsPanel(context, work, aiRegistry, {
+        beside: true,
+      });
+      panel.showRecord(kind, id);
+    },
+    openChat: async (document, range) => {
+      // 相談パネルは普通のエディタから本文を受け取る。
+      // 同じ文書を横に開いてから渡す（開かないと、前に見ていた
+      // 別の作品について答えることになる）
+      const editor = await vscode.window.showTextDocument(document, {
+        viewColumn: vscode.ViewColumn.Beside,
+        preserveFocus: false,
+        selection: range,
+      });
+      workChatPanel.trackEditor(editor);
+      await vscode.commands.executeCommand(`${WORK_CHAT_VIEW_ID}.focus`);
+    },
+  } satisfies ManuscriptEditorDeps;
+
+  const manuscriptOptions = {
+    webviewOptions: { retainContextWhenHidden: true },
+    supportsMultipleEditorsPerDocument: false,
+  };
+
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(
       MANUSCRIPT_EDITOR_VIEW_TYPE,
-      new ManuscriptEditorProvider({
-        highlighter,
-        openSettings: async (work, kind, id) => {
-          const panel = await openSettingsPanel(context, work, aiRegistry, {
-            beside: true,
-          });
-          panel.showRecord(kind, id);
-        },
-        openChat: async (document, range) => {
-          // 相談パネルは普通のエディタから本文を受け取る。
-          // 同じ文書を横に開いてから渡す（開かないと、前に見ていた
-          // 別の作品について答えることになる）
-          const editor = await vscode.window.showTextDocument(document, {
-            viewColumn: vscode.ViewColumn.Beside,
-            preserveFocus: false,
-            selection: range,
-          });
-          workChatPanel.trackEditor(editor);
-          await vscode.commands.executeCommand(`${WORK_CHAT_VIEW_ID}.focus`);
-        },
-      }),
-      {
-        webviewOptions: { retainContextWhenHidden: true },
-        supportsMultipleEditorsPerDocument: false,
-      }
+      new ManuscriptEditorProvider(
+        manuscriptDeps,
+        "setting",
+        MANUSCRIPT_EDITOR_VIEW_TYPE
+      ),
+      manuscriptOptions
+    ),
+    // **同じ画面を、横書きで開く入口**（作者の依頼、2026-08-27。設計書6.25.4）。
+    // VS Code の「エディターを再度開く」に2つ並ぶので、開くときに選べる
+    vscode.window.registerCustomEditorProvider(
+      MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
+      new ManuscriptEditorProvider(
+        manuscriptDeps,
+        "horizontal",
+        MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+      ),
+      manuscriptOptions
     )
   );
 

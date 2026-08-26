@@ -4,7 +4,16 @@ import {
   listChoices,
 } from "../core/manuscriptFonts";
 import { cancelItem, isCancelItem } from "../views/dialogs";
+import * as paths from "../core/paths";
 import { fromUri } from "../core/paths";
+import { scanWork } from "../core/scanner";
+import { pathExists } from "../core/fileSystem";
+import { formatChapterNumber } from "../core/episodeParser";
+import {
+  isBlankEpisode,
+  isBlankText,
+  planLatestEpisode,
+} from "../core/latestEpisode";
 import { buildManuscriptEditorHtml } from "../views/manuscriptEditorHtml";
 import {
   renderManuscript,
@@ -76,6 +85,23 @@ const TERM_COLORS: Record<TermKind, { light: string; dark: string }> = {
 
 export const MANUSCRIPT_EDITOR_VIEW_TYPE = "novelai.manuscriptEditor";
 
+/**
+ * 横書きで開く入口（作者の依頼、2026-08-27。設計書6.25.4）。
+ *
+ * **同じ画面を、向きだけ変えて開く。** VS Code の「エディターを再度開く」に
+ * 「原稿（縦書）」と「原稿（横書）」が並ぶので、**開くときに選べる。**
+ * 開いたあとに画面のボタンで切り替えられるのは、これまでどおり。
+ */
+export const MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE =
+  "novelai.manuscriptEditorHorizontal";
+
+/** その入口が、はじめにどちらの向きで開くか */
+export type ManuscriptOrientation =
+  /** 設定（`manuscriptEditor.vertical`）に従う */
+  | "setting"
+  /** 必ず横書き */
+  | "horizontal";
+
 /** 画面から届く用件 */
 type Incoming =
   | { type: "ready" }
@@ -93,7 +119,9 @@ type Incoming =
    * 測れなかったときは省く（全部並べる。測れないことを「入っていない」と
    * 読み替えると、選べるものが消える）
    */
-  | { type: "pickFont"; installed?: string[] };
+  | { type: "pickFont"; installed?: string[] }
+  /** 最新話を書く（設計書6.25.5） */
+  | { type: "openLatest" };
 
 export interface ManuscriptEditorDeps {
   highlighter: TermHighlighter;
@@ -116,7 +144,19 @@ export interface ManuscriptEditorDeps {
 export class ManuscriptEditorProvider
   implements vscode.CustomTextEditorProvider
 {
-  constructor(private readonly deps: ManuscriptEditorDeps) {}
+  constructor(
+    private readonly deps: ManuscriptEditorDeps,
+    /**
+     * この入口の向き。
+     *
+     * **縦書きの入口は設定に従う。** `manuscriptEditor.vertical` は
+     * 0.19.0からある設定で、既定は縦。**必ず縦に決め打つと、その設定が
+     * 黙って無視される**（横で書く人が設定していたら、その指定が消える）。
+     */
+    private readonly orientation: ManuscriptOrientation = "setting",
+    /** 開き直すときに使う入口のID（「最新話を書く」で同じ向きを保つ） */
+    private readonly viewType: string = MANUSCRIPT_EDITOR_VIEW_TYPE
+  ) {}
 
   async resolveCustomTextEditor(
     document: vscode.TextDocument,
@@ -149,7 +189,7 @@ export class ManuscriptEditorProvider
           kind,
           label: TERM_LABELS[kind],
         })),
-        ...readAppearance(),
+        ...readAppearance(this.orientation),
       });
       await this.sendCount(panel, text);
     };
@@ -249,6 +289,10 @@ export class ManuscriptEditorProvider
           await this.deps.openSettings(found.work, message.kind, message.id);
           break;
         }
+
+        case "openLatest":
+          await this.openLatestEpisode(document);
+          break;
 
         case "pickFont":
           await pickFont(message.installed);
@@ -435,6 +479,83 @@ export class ManuscriptEditorProvider
    * 選択は使わず本文全体を出す——画面の選択範囲は「読む」面と
    * 「書く」面で意味が違い、どちらの意味で出したのかが作者に伝わらない。
    */
+  /**
+   * 最新話を開く。白紙でなければ、次の話を作って開く（設計書6.25.5）。
+   *
+   * **同じ向きの入口で開き直す。** 縦書きで書いていた人が、次の話だけ
+   * 横書きで開かれると困る。
+   */
+  private async openLatestEpisode(
+    document: vscode.TextDocument
+  ): Promise<void> {
+    const found = await this.deps.highlighter.indexFor(fromUri(document.uri));
+    if (!found) {
+      void vscode.window.showWarningMessage(
+        "この原稿の作品が分かりませんでした。作品として登録されているかご確認ください。"
+      );
+      return;
+    }
+
+    const { episodes, manuscriptDir } = await scanWork(found.work);
+    const config = vscode.workspace.getConfiguration("novelai");
+    const naming = {
+      digits: config.get<number>("episodeNumberDigits", 3),
+      extension: config.get<string>("episodeFileExtension", ".txt"),
+    };
+
+    // **白紙かどうかは、いま開いている本文で判断できることがある。**
+    // 同じファイルなら読み直さない（保存前の状態が正しい）
+    const current = fromUri(document.uri);
+    const plan = planLatestEpisode(
+      episodes,
+      (episode) =>
+        // いま開いている話は、**保存前の中身**で見る（打ちかけを白紙にしない）。
+        // ほかは走査が数えた文字数で見る（読み直さない）
+        episode.filePath === current
+          ? isBlankText(document.getText())
+          : isBlankEpisode(episode),
+      naming,
+      (chapter, rule) =>
+        `${formatChapterNumber(chapter, rule.digits)}${rule.extension}`
+    );
+
+    if (plan.kind === "open") {
+      if (plan.episode.filePath === current) {
+        void vscode.window.showInformationMessage(
+          "いま開いているのが最新話です。このまま書けます。"
+        );
+        return;
+      }
+      await this.openAsManuscript(plan.episode.filePath);
+      return;
+    }
+
+    const filePath = paths.join(manuscriptDir, plan.fileName);
+    if (await pathExists(filePath)) {
+      // 走査の取りこぼしなど。**上書きしない**
+      await this.openAsManuscript(filePath);
+      return;
+    }
+    await vscode.workspace.fs.writeFile(
+      paths.toUri(filePath),
+      new TextEncoder().encode("")
+    );
+    logLine(`最新話を書く: ${plan.fileName} を作成`);
+    void vscode.window.showInformationMessage(
+      `${plan.fileName} を作りました。`
+    );
+    await this.openAsManuscript(filePath);
+  }
+
+  /** 同じ向きの原稿エディタで開く */
+  private async openAsManuscript(filePath: string): Promise<void> {
+    await vscode.commands.executeCommand(
+      "vscode.openWith",
+      paths.toUri(filePath),
+      this.viewType
+    );
+  }
+
   private async copyForPosting(document: vscode.TextDocument): Promise<void> {
     // **訊き方は普通のエディタと同じものを使う**（`features/ruby.ts`）。
     // 画面ごとに選択肢の言葉が違うと、同じ操作に見えなくなる
@@ -515,10 +636,25 @@ async function pickFont(installed?: string[]): Promise<void> {
   );
 }
 
-function readAppearance(): { verticalDefault: boolean; fontFamily: string } {
+function readAppearance(orientation: ManuscriptOrientation): {
+  verticalDefault: boolean;
+  /**
+   * 向きを決め打つか。
+   *
+   * **「原稿（横書）」で開いたなら、その原稿が縦を覚えていても横で開く。**
+   * 選んで開いたのに前の向きが勝つと、選んだ意味が無い。
+   * 開いたあとに切り替えれば、そちらを覚える（これまでどおり）。
+   */
+  forceVertical?: boolean;
+  fontFamily: string;
+} {
   const config = vscode.workspace.getConfiguration("novelai");
   return {
-    verticalDefault: config.get<boolean>("manuscriptEditor.vertical", true),
+    verticalDefault:
+      orientation === "horizontal"
+        ? false
+        : config.get<boolean>("manuscriptEditor.vertical", true),
+    ...(orientation === "horizontal" ? { forceVertical: false } : {}),
     fontFamily: config.get<string>("manuscriptEditor.fontFamily", "").trim(),
   };
 }

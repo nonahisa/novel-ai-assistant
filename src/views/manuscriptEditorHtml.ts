@@ -100,6 +100,17 @@ button.on {
 }
 
 /* ── 本文の面 ─────────────────────────── */
+/* **下段。** 道具箱（上）とは役目が違う——上は「いま見ている原稿をどう見るか」、
+   下は「次に何を書くか」。書いている最中に押すものなので、手の近くへ置く */
+#bottom {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--vscode-panel-border, transparent);
+  background: var(--vscode-editor-background);
+}
 #surface {
   flex: 1 1 auto;
   position: relative;
@@ -283,6 +294,10 @@ body.plain .term { color: inherit; }
   <div id="read"></div>
 </div>
 
+<div id="bottom">
+  <button id="latest" title="いちばん新しい話を開きます。白紙でなければ、次の話を作って開きます">最新話を書く</button>
+</div>
+
 <div id="foot">
   <span id="legend"></span>
   <span id="note"></span>
@@ -358,6 +373,9 @@ body.plain .term { color: inherit; }
 
   /** 測る書体。**一覧は core/manuscriptFonts.ts が持つ**（写さない） */
   const PROBE_FONTS = ${JSON.stringify(PROBE_FONT_NAMES)};
+
+  /** 入口で決められた向きを、もう当てたか（当てるのは開いた1回だけ） */
+  let forcedOnce = false;
 
   const saved = vscode.getState() || {};
   /** はじめの向きは設定から。**一度切り替えたら、その原稿ではそれを覚える** */
@@ -448,6 +466,10 @@ body.plain .term { color: inherit; }
     vertical = vertical === false;
     paint();
     remember();
+  });
+
+  document.getElementById("latest").addEventListener("click", function () {
+    vscode.postMessage({ type: "openLatest" });
   });
 
   document.getElementById("font").addEventListener("click", function () {
@@ -777,7 +799,15 @@ body.plain .term { color: inherit; }
       */
       freshHtml = message.html;
       if (showingRead()) applyFreshHtml();
-      if (typeof vertical !== "boolean") {
+      if (typeof message.forceVertical === "boolean" && !forcedOnce) {
+        // **「原稿（横書）」で開いたなら、その原稿が縦を覚えていても横で開く。**
+        // 選んで開いたのに前の向きが勝つと、選んだ意味が無い。
+        // 効かせるのは開いた1回だけで、そのあと切り替えればそちらを覚える
+        forcedOnce = true;
+        vertical = message.forceVertical;
+        remember();
+        paint();
+      } else if (typeof vertical !== "boolean") {
         // まだ切り替えたことがない原稿。設定の向きで開く
         vertical = message.verticalDefault !== false;
         paint();
