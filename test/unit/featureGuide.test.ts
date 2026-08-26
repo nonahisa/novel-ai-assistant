@@ -80,11 +80,35 @@ describe("使い方の説明", () => {
     expect(guide).not.toContain("**");
   });
 
-  test("説明文がそのまま入る（要約して意味を変えない）", () => {
+  test("何ができるかの1文目は、そのまま入る", () => {
+    // 言い換えると意味が変わる。**機械的に切るだけ**にする（2026-08-27）
     const action = allActions().find(
       (entry) => entry.command === "novelai.checkNotation"
     );
-    expect(action).toBeDefined();
-    expect(guide).toContain(action!.detail.replace(/\*\*/g, ""));
+    const first = action!.detail.split("。")[0].split("*".repeat(2)).join("") + "。";
+
+    expect(guide).toContain(first);
+  });
+
+  test("「〜ません」の断りは落とさない", () => {
+    /*
+      **毎回送る量を減らすために、説明を短くした**（8,111字→5,097字）。
+      だが「AIは使いません」「原稿は書き換えません」を落とすと、
+      **AIが逆を答えかねない。** しないことの断りは、作者がいちばん
+      知りたいことである。
+    */
+    expect(guide).toContain("AIは使いません。");
+  });
+
+  test("但し書きまでは入れない（毎回送るので短くする）", () => {
+    // 2文目以降の言い換え・使いどころは落とす。名前と1文目があれば、
+    // 「どこにあるか」「何ができるか」には答えられる
+    const action = allActions().find(
+      (entry) => entry.command === "novelai.checkNotation"
+    );
+    const fullDetail = action!.detail.split("*".repeat(2)).join("");
+
+    expect(guide).not.toContain(fullDetail);
+    expect(guide.length).toBeLessThan(6000);
   });
 });

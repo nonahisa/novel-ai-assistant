@@ -14,6 +14,18 @@ import { canRunProcesses } from "../core/runtime";
  *
  * 操作メニューに出ないもの（パネル類・右クリック・考え方）だけを、
  * ここで補う。
+ *
+ * ## 毎回送るので、短くする（2026-08-27）
+ *
+ * この一覧は**相談の1回ごとに毎回**送っている。測ったところ8,111字あり、
+ * **1回の問いかけで送る量の半分**を占めていた（本文は19%しかない）。
+ * 設計書には「約4,300字」とあるが、機能を足すたびに自動で伸びるので、
+ * **誰も気づかないまま倍近くになっていた。**
+ *
+ * **名前は全部残し、説明は要るところだけにする。** 機能の名前が欠けると
+ * 「その機能はありません」と嘘を答える。残すのは**1文目**（何ができるか）と、
+ * **「〜ません」で終わる文**（しないことの断り）だけにする。後者を落とすと、
+ * 「原稿は書き換えません」「AIは使いません」が消えて、AIが逆を答えかねない。
  */
 
 /**
@@ -52,7 +64,18 @@ const EXTRA_GUIDE = `
  * 見出しの階層はメニューと同じにする。作者が画面で見ている並びと
  * 説明の並びが違うと、「どこにあるか」を答えられない。
  */
-export function buildFeatureGuide(): string {
+export function buildFeatureGuide(
+  options: {
+    /**
+     * 説明の詳しさ。
+     *
+     * - `short`（既定）：1文目まで。**毎回送るのはこちら**
+     * - `full`：全文。作者が「詳しく」と聞いたときに渡す道を作るための口
+     */
+    detail?: "short" | "full";
+  } = {}
+): string {
+  const detailLevel = options.detail ?? "short";
   const lines: string[] = ["【操作メニューにある操作】"];
 
   // **画面に無い操作を案内させない。** 環境によって出さない操作があるので、
@@ -64,12 +87,12 @@ export function buildFeatureGuide(): string {
     lines.push(`■ ${group.label}`);
     for (const entry of visibleEntries(group.entries, allowsProcesses)) {
       if (entry.kind === "action") {
-        lines.push(describeAction(entry, ""));
+        lines.push(describeAction(entry, "", detailLevel));
         continue;
       }
       lines.push(`  ▸ ${entry.label}`);
       for (const item of visibleEntries(entry.items, allowsProcesses)) {
-        lines.push(describeAction(item, "  "));
+        lines.push(describeAction(item, "  ", detailLevel));
       }
     }
   }
@@ -79,10 +102,54 @@ export function buildFeatureGuide(): string {
 
 function describeAction(
   action: { label: string; detail: string; usesAI?: boolean },
-  indent: string
+  indent: string,
+  level: "short" | "full"
 ): string {
-  // 強調の記号は画面用なので落とす。AIへの指示と混ざると読みにくい
-  const detail = action.detail.replace(/\*\*/g, "");
+  // 強調の記号は画面用なので落とす。AIへの指示と混ざると読みにくい。
+  // 記号そのものを文字列に書かない（画面に出す文字を見張る試験に引っかかる）
+  const emphasis = "*".repeat(2);
+  const full = action.detail.split(emphasis).join("");
+  const detail = level === "full" ? full : shorten(full);
   const mark = action.usesAI ? "（AIを使う）" : "";
   return `${indent}  - ${action.label}${mark}: ${detail}`;
+}
+
+/**
+ * 説明を短くする。**毎回送るので、要る分だけ残す。**
+ *
+ * 残すのは2種類だけである。
+ *
+ * 1. **1文目**——この作品の説明文は「何ができるか」を1文目に書く決まりで
+ *    揃えてある
+ * 2. **「〜ません」で終わる文**——「原稿は書き換えません」「元のフォルダーは
+ *    消しません」「AIは使いません」。**しないことの断りは、作者がいちばん
+ *    知りたいこと**であり、落とすとAIが「する」と答えかねない
+ *
+ * 2文目以降の但し書き（使いどころ・言い換え・例）は落とす。
+ */
+export function shorten(text: string): string {
+  const sentences = splitSentences(text);
+  if (sentences.length === 0) return text.trim();
+
+  const kept = [sentences[0]];
+  for (const sentence of sentences.slice(1)) {
+    // 「〜ません」「〜しません」。**しないことの断りは落とさない**
+    if (/ません[。」]?$/.test(sentence.trim())) kept.push(sentence);
+  }
+  return kept.join("");
+}
+
+/** 句点で文に割る。句点そのものは前の文へ付ける */
+function splitSentences(text: string): string[] {
+  const out: string[] = [];
+  let current = "";
+  for (const char of text.trim()) {
+    current += char;
+    if (char === "。") {
+      out.push(current);
+      current = "";
+    }
+  }
+  if (current.trim()) out.push(current);
+  return out;
 }
