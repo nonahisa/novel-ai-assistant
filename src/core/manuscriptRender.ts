@@ -152,3 +152,82 @@ export const TERM_LABELS: Record<TermKind, string> = {
   ability: "能力",
   organization: "組織",
 };
+
+/**
+ * 「書く」面の裏に敷く、用語の目印（設計書6.25.6）。
+ *
+ * 作者の依頼（2026-08-27）：「『書く』モードの時に設定資料の用語の
+ * ハイライトは出せますか？」
+ *
+ * ## textarea の中の文字は飾れない
+ *
+ * 打つ面は `textarea` である。**中の一部分だけに色を付ける方法は無い。**
+ * ルビを出したまま打てる面（`contenteditable`）は日本語入力と相性が悪く、
+ * この作品では既に2度壊している（6.25.1・6.25.2）。**入力の受け口は変えない。**
+ *
+ * ## 裏に同じ文を敷いて、背景だけを塗る
+ *
+ * 打つ面と**同じ字送りで同じ本文**を裏に置き、用語のところだけ背景を塗る。
+ * 表の `textarea` は文字だけを見せ、背景は透ける。
+ *
+ * **文字は裏でも表でも出さない**（裏は透明、表が本物）。二重に見えないし、
+ * **変換中の文字も表にそのまま出る**——ここが肝で、裏に文字を出す作りだと
+ * 変換中の文字が見えなくなる。
+ *
+ * ## 塗るのは背景だけ
+ *
+ * 文字の色は変えない。**打っている本文の色を変えると、変換中の文字と
+ * 確定した文字の見分けが付かなくなる。**
+ */
+export function renderTermMarks(text: string, index?: TermIndex): string {
+  if (!index) return escapeHtml(text);
+  const matches = index.find(text);
+  if (matches.length === 0) return escapeHtml(text);
+
+  let html = "";
+  let last = 0;
+  for (const match of matches) {
+    if (match.start > last) html += escapeHtml(text.slice(last, match.start));
+    html +=
+      `<span class="mark mark-${match.entry.kind}">` +
+      `${escapeHtml(text.slice(match.start, match.end))}</span>`;
+    last = match.end;
+  }
+  if (last < text.length) html += escapeHtml(text.slice(last));
+  return html;
+}
+
+/**
+ * 用語の位置（右クリックで、どの用語の上かを知るために使う）。
+ *
+ * **打つ面では、当たり判定を要素で取れない**（textareaの中に要素は無い）。
+ * カーソルの文字位置から引くので、位置の一覧をそのまま渡す。
+ */
+export interface TermSpan {
+  start: number;
+  end: number;
+  id: string;
+  kind: TermKind;
+  name: string;
+}
+
+export function collectTermSpans(text: string, index?: TermIndex): TermSpan[] {
+  if (!index) return [];
+  return index.find(text).map((match) => ({
+    start: match.start,
+    end: match.end,
+    id: match.entry.id,
+    kind: match.entry.kind,
+    name: match.entry.canonicalName,
+  }));
+}
+
+/** その文字位置にある用語。無ければ undefined */
+export function termSpanAt(
+  spans: readonly TermSpan[],
+  offset: number
+): TermSpan | undefined {
+  // **端は含めない。** 用語の直後にカーソルを置いて右クリックしたときに、
+  // 隣の言葉の資料が開くと分かりにくい
+  return spans.find((span) => offset >= span.start && offset < span.end);
+}

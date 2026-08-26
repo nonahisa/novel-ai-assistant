@@ -16,7 +16,9 @@ import {
 } from "../core/latestEpisode";
 import { buildManuscriptEditorHtml } from "../views/manuscriptEditorHtml";
 import {
+  collectTermSpans,
   renderManuscript,
+  renderTermMarks,
   TERM_LABELS,
 } from "../core/manuscriptRender";
 import { computeMinimalEdit } from "../core/textEdit";
@@ -183,6 +185,13 @@ export class ManuscriptEditorProvider
         type: "update",
         text,
         html: renderManuscript(text, index),
+        // **打つ面の裏に敷く目印**（設計書6.25.6）。
+        // 打つ面は textarea なので、中の一部だけを飾れない。
+        // 同じ本文を裏に敷いて、用語のところだけ背景を塗る
+        marks: renderTermMarks(text, index),
+        // 右クリックで「どの用語の上か」を知るために使う。
+        // textarea の中に要素は無いので、当たり判定を要素で取れない
+        terms: collectTermSpans(text, index),
         hasTerms: (index?.size ?? 0) > 0,
         colors: colorsFor(),
         legend: [...kinds].map((kind) => ({

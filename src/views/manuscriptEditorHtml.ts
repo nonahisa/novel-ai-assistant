@@ -116,7 +116,7 @@ button.on {
   position: relative;
   overflow: hidden;
 }
-#write, #read {
+#write, #read, #marks {
   position: absolute;
   inset: 0;
   padding: 24px 28px;
@@ -129,6 +129,31 @@ button.on {
   font-family: var(--novelai-font, "Yu Mincho", "YuMincho",
     "Hiragino Mincho ProN", "MS Mincho", serif);
 }
+/* **打つ面の裏に敷く目印**（設計書6.25.6）。
+   打つ面と同じ字送りで同じ本文を置き、用語のところだけ背景を塗る。
+   **文字は出さない**（透明）。表の textarea の文字が本物で、
+   変換中の文字もそちらに出る */
+#marks {
+  color: transparent;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  tab-size: 4;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+/* 打っている間は隠す。**位置のずれた目印を出さない**——
+   本文が変わってから新しい目印が届くまでの間、古い位置のまま残るため */
+#marks.stale { visibility: hidden; }
+/* 読む面・並べる面では、そちらに色が付くので要らない */
+body.reading #marks, body.split #marks { display: none; }
+.mark { border-radius: 2px; }
+.mark-character { background: color-mix(in srgb, var(--novelai-character) 22%, transparent); }
+.mark-location { background: color-mix(in srgb, var(--novelai-location) 22%, transparent); }
+.mark-ability { background: color-mix(in srgb, var(--novelai-ability) 22%, transparent); }
+.mark-organization { background: color-mix(in srgb, var(--novelai-organization) 22%, transparent); }
+.mark-world { background: color-mix(in srgb, var(--novelai-world, var(--novelai-character)) 22%, transparent); }
+body.plain .mark { background: transparent; }
 #write {
   border: none;
   resize: none;
@@ -290,6 +315,7 @@ body.plain .term { color: inherit; }
 </div>
 
 <div id="surface">
+  <div id="marks" aria-hidden="true"></div>
   <textarea id="write" spellcheck="false" wrap="soft"></textarea>
   <div id="read"></div>
 </div>
@@ -310,6 +336,10 @@ body.plain .term { color: inherit; }
   const vscode = acquireVsCodeApi();
   const write = document.getElementById("write");
   const read = document.getElementById("read");
+  /** 打つ面の裏に敷く目印（設計書6.25.6） */
+  const marks = document.getElementById("marks");
+  /** 用語の位置。右クリックで「どの用語の上か」を引くのに使う */
+  let termSpans = [];
   const menu = document.getElementById("menu");
   const countLabel = document.getElementById("count");
   const legend = document.getElementById("legend");
@@ -529,10 +559,19 @@ body.plain .term { color: inherit; }
 
   /* ── 打たれたら、変わったことだけを伝える ── */
   write.addEventListener("input", function () {
+    // **目印は本文が変わった時点でずれる。** 新しいものが届くまで隠す。
+    // 出したままにすると、1文字打つたびに色が横へずれて見える
+    marks.classList.add("stale");
     // **変換中は送らない。** 確定前の文字を本文へ入れると、
     // 確定のたびに二重に入る
     if (composing) return;
     send();
+  });
+
+  // 打つ面と裏地の見えている場所を合わせる。**ずれると色が別の字に付く**
+  write.addEventListener("scroll", function () {
+    marks.scrollTop = write.scrollTop;
+    marks.scrollLeft = write.scrollLeft;
   });
 
   let composing = false;
@@ -749,7 +788,27 @@ body.plain .term { color: inherit; }
     menu.style.top = Math.max(0, top) + "px";
   }
 
+  /**
+   * 打つ面で、カーソルの位置にある用語。
+   *
+   * **当たり判定を要素で取れない**（textarea の中に要素は無い）。
+   * 右クリックするとカーソルがそこへ移るので、その文字位置から引く。
+   */
+  function termAtCaret() {
+    const at = write.selectionStart;
+    if (typeof at !== "number") return null;
+    for (const span of termSpans) {
+      // 端は含めない。用語の直後で右クリックして隣の資料が開くと分かりにくい
+      if (at >= span.start && at < span.end) {
+        return { id: span.id, kind: span.kind, name: span.name };
+      }
+    }
+    return null;
+  }
+
   function termFrom(target) {
+    // 打つ面には要素が無いので、カーソルの位置から引く
+    if (target === write) return termAtCaret();
     const el = target && target.closest ? target.closest(".term") : null;
     if (!el) return null;
     return {
@@ -799,6 +858,13 @@ body.plain .term { color: inherit; }
       */
       freshHtml = message.html;
       if (showingRead()) applyFreshHtml();
+      if (typeof message.marks === "string") {
+        marks.innerHTML = message.marks;
+        marks.scrollTop = write.scrollTop;
+        marks.scrollLeft = write.scrollLeft;
+        marks.classList.remove("stale");
+      }
+      if (Array.isArray(message.terms)) termSpans = message.terms;
       if (typeof message.forceVertical === "boolean" && !forcedOnce) {
         // **「原稿（横書）」で開いたなら、その原稿が縦を覚えていても横で開く。**
         // 選んで開いたのに前の向きが勝つと、選んだ意味が無い。

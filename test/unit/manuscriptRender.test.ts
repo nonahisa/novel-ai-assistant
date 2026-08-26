@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  collectTermSpans,
   renderLine,
   renderManuscript,
+  renderTermMarks,
+  termSpanAt,
   tokenizeLine,
 } from "../../src/core/manuscriptRender";
 import { TermIndex, type TermEntry } from "../../src/core/termIndex";
@@ -142,5 +145,79 @@ describe("本文まるごと", () => {
     const text = "あ\nい\nう\nえ\nお";
     const count = [...renderManuscript(text).matchAll(/data-line=/g)].length;
     expect(count).toBe(5);
+  });
+});
+
+/**
+ * 「書く」面の裏に敷く目印（作者の依頼、2026-08-27。設計書6.25.6）。
+ *
+ * **打つ面は textarea なので、中の一部だけを飾れない。** 同じ本文を裏に敷き、
+ * 用語のところだけ背景を塗る。**裏と表で字送りが1文字でもずれると、
+ * 色が別の字に付く。**
+ */
+describe("打つ面の目印", () => {
+  it("用語のところだけを包む", () => {
+    const html = renderTermMarks("灯は歩いた", index([{ text: "灯" }]));
+
+    expect(html).toBe('<span class="mark mark-character">灯</span>は歩いた');
+  });
+
+  it("文字は1つも足さない・落とさない", () => {
+    // **裏と表で字数が変われば、そこから先の色が全部ずれる**
+    const text = "灯と澪が話した";
+    const html = renderTermMarks(
+      text,
+      index([{ text: "灯" }, { text: "澪", id: "char_002" }])
+    );
+
+    expect(html.replace(/<[^>]+>/g, "")).toBe(text);
+  });
+
+  it("記号を逃がす", () => {
+    // 逃がさないと、本文の < で画面が壊れる
+    expect(renderTermMarks("<b>灯", index([{ text: "灯" }]))).toBe(
+      '&lt;b&gt;<span class="mark mark-character">灯</span>'
+    );
+  });
+
+  it("索引が無ければ、そのまま逃がすだけ", () => {
+    expect(renderTermMarks("灯は歩いた", undefined)).toBe("灯は歩いた");
+  });
+
+  it("改行はそのまま残す", () => {
+    // 裏地は pre-wrap で置くので、改行を落とすと行がずれる
+    const newline = String.fromCharCode(10);
+    const html = renderTermMarks("灯" + newline + "澪", index([{ text: "灯" }]));
+
+    expect(html).toContain(newline);
+  });
+});
+
+describe("用語の位置", () => {
+  it("位置と名前を返す", () => {
+    const spans = collectTermSpans("灯は歩いた", index([{ text: "灯" }]));
+
+    expect(spans).toEqual([
+      { start: 0, end: 1, id: "char_001", kind: "character", name: "灯" },
+    ]);
+  });
+
+  it("その文字位置にある用語を引ける", () => {
+    // 打つ面には要素が無いので、カーソルの文字位置から引く
+    const spans = collectTermSpans("あ灯い", index([{ text: "灯" }]));
+
+    expect(termSpanAt(spans, 1)?.name).toBe("灯");
+    expect(termSpanAt(spans, 0)).toBeUndefined();
+  });
+
+  it("用語の直後は含めない", () => {
+    // 直後で右クリックして隣の資料が開くと分かりにくい
+    const spans = collectTermSpans("灯は", index([{ text: "灯" }]));
+
+    expect(termSpanAt(spans, 1)).toBeUndefined();
+  });
+
+  it("索引が無ければ空", () => {
+    expect(collectTermSpans("灯", undefined)).toEqual([]);
   });
 });
