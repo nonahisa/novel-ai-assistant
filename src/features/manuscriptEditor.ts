@@ -6,6 +6,7 @@ import {
   TERM_LABELS,
 } from "../core/manuscriptRender";
 import { computeMinimalEdit } from "../core/textEdit";
+import { createEditQueue } from "../core/editQueue";
 import { countChars, formatCount } from "../core/charCount";
 import {
   countModeLabel,
@@ -22,6 +23,7 @@ import {
 } from "../core/ruby";
 import { pickEmphasisSite, pickStyle } from "./ruby";
 import { askText } from "../views/dialogs";
+import { logLine } from "../core/logger";
 import type { TermHighlighter } from "../views/termHighlight";
 import type { TermKind } from "../core/termIndex";
 import type { WorkEntry } from "../models/types";
@@ -181,6 +183,15 @@ export class ManuscriptEditorProvider
       for (const item of subscriptions) item.dispose();
     });
 
+    /**
+     * 画面から届いた本文を、**1つずつ順に**文書へ当てる。
+     *
+     * ここを通していなかったために、作者が実機で当たった
+     * 「改行すると空行が入る」が起きていた（2026-08-24、設計書6.25.2）。
+     * 理由は `core/editQueue.ts` に書いてある。
+     */
+    const queueEdit = createEditQueue((text) => this.applyEdit(document, text));
+
     panel.webview.onDidReceiveMessage(async (message: Incoming) => {
       switch (message.type) {
         case "ready":
@@ -188,7 +199,7 @@ export class ManuscriptEditorProvider
           break;
 
         case "edit":
-          await this.applyEdit(document, message.text);
+          await queueEdit(message.text);
           break;
 
         case "count":
@@ -250,7 +261,15 @@ export class ManuscriptEditorProvider
       ),
       edit.insert
     );
-    await vscode.workspace.applyEdit(change);
+    const applied = await vscode.workspace.applyEdit(change);
+    if (!applied) {
+      // **黙って捨てない。** 当たらなかった場合、このあと文書の側の本文が
+      // 画面へ送り返され、打った内容が消えたように見える。理由が残っていないと
+      // 「勝手に消えた」としか分からない
+      logLine(
+        `原稿エディタ：打った内容を文書へ当てられませんでした（${edit.start}〜${edit.end}）。`
+      );
+    }
   }
 
   private async sendCount(

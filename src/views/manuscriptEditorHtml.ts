@@ -130,6 +130,10 @@ body.vertical #write, body.vertical #read {
   /*
     **傍線は行の右へ。**（作者の指示、2026-08-24）
 
+    ただし**変換中の線には効かなかった**（実機で確認、設計書6.25.2）。
+    あの線を引いているのは日本語入力の層で、本文の下線とは別の道を通る。
+    ここに残してあるのは、本文へ下線を引く日が来たときのためである。
+
     縦書きの日本語では、傍線（下線）は行の右側に引く。変換中に日本語入力が
     引く線もこれに従う。既定（auto）では左に出ることがあり、**打っている
     文字の左に線が付くと、隣の行に付いているように見える。**
@@ -448,9 +452,17 @@ body.plain .term { color: inherit; }
   write.addEventListener("compositionstart", function () { composing = true; });
   write.addEventListener("compositionend", function () {
     composing = false;
-    send();
-    // 変換中に外から届いていた書き換えは、ここで片づける
-    flushPending();
+    /*
+      **確定した文字が入るのは、この直後のことがある。**
+      compositionend が先に起き、確定ぶんの input があとから来る組み合わせ
+      （Windowsの日本語入力）では、ここで読むとまだ確定前の中身である。
+      1周まわしてから読む。
+    */
+    setTimeout(function () {
+      send();
+      // 変換中に外から届いていた書き換えは、ここで片づける
+      flushPending();
+    }, 0);
   });
 
   /**
@@ -563,12 +575,21 @@ body.plain .term { color: inherit; }
       if (at <= common) return at;
       return Math.max(common, Math.min(text.length, at + delta));
     };
+    /*
+      **見ている場所も保つ。** 縦書きでは行が右から左へ並ぶので、
+      本文が短くなると左端（＝いちばん新しい行）の位置がずれ、
+      値を入れ直しただけで画面が飛ぶ（作者の指摘、2026-08-24）。
+    */
+    const left = write.scrollLeft;
+    const top = write.scrollTop;
     write.value = text;
     try {
       write.setSelectionRange(move(start), move(end));
     } catch (e) {
       /* 範囲外なら諦める */
     }
+    write.scrollLeft = left;
+    write.scrollTop = top;
   }
 
   function updateCount() {
