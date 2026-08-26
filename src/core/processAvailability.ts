@@ -33,6 +33,10 @@ const REQUIRES_PROCESSES = new Set<string>([
   "novelai.selectOllamaExecutable",
   "novelai.shareWithEditor",
   "novelai.collectEditorProposals",
+  // **すべて同期はgitコマンドを直に打つ**ので、ブラウザでは動かせない。
+  // 1作品ずつの `novelai.gitSync` と違い、ソース管理へ案内して代わりに
+  // させる形にできない（置き場ごとに記録・取り込み・送信を順に行うため）
+  "novelai.syncAllWorks",
 ]);
 
 /**

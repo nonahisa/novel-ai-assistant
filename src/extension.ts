@@ -330,6 +330,10 @@ export async function activate(
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("novelai.syncAllWorks", async () => {
+      const { syncAllWorks } = await import("./features/syncAllWorks.js");
+      await syncAllWorks({ registry, monitor: gitSync });
+    }),
     vscode.commands.registerCommand("novelai.openVertical", async () => {
       const uri = vscode.window.activeTextEditor?.document.uri;
       if (!uri) {

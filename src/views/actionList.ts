@@ -193,6 +193,20 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "**元のフォルダーは消しません。**" +
               "まとめたあと「GitHubに置く（はじめて）」で、書庫まるごとを1つのリポジトリにできます。",
           },
+          // **作品が増えるほど、1つずつ押すのがつらくなる**（設計書5.5.14）。
+          // 置き場ごとにまとめて、記録 → 取り込み → 送信をひと息で行う
+          {
+            kind: "action",
+            command: "novelai.syncAllWorks",
+            label: "作品をすべて同期",
+            icon: "sync",
+            requiresWork: false,
+            detail:
+              "登録しているすべての作品を、まとめて同期します。" +
+              "**置き場（リポジトリ）ごとに、記録 → 取り込み → 送信**の順で行います。" +
+              "**何が起きるかを一覧で見せてから、1回だけ確認します。**" +
+              "1か所が通らなくても、残りは続けます。",
+          },
           {
             kind: "action",
             command: "novelai.gitSync",
