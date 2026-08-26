@@ -2,6 +2,15 @@
   "version": "2.0.0",
   "tasks": [
     {
+      // **F5はこちらを使う。** 本番ビルド（npm: build）では、開発用の道具
+      // （実機確認を回すヘルパー）を枝ごと落としているため、F5で出なくなる。
+      // 設計書6.26
+      "type": "npm",
+      "script": "build:dev",
+      "problemMatcher": "$esbuild",
+      "label": "npm: build:dev"
+    },
+    {
       "type": "npm",
       "script": "build",
       "problemMatcher": "$esbuild",

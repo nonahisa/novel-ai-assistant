@@ -209,3 +209,57 @@ describe("「テスト中」の組み立て", () => {
     for (const section of orphans) expect(section.commands).toEqual([]);
   });
 });
+
+describe("F5で、開発用の道具が出ること", () => {
+  /**
+   * **F5は開発ビルドを使わなければならない**（2026-08-27、作者の問いで発覚）。
+   *
+   * 本番ビルドでは `__DEV_HELPERS__` が false に畳まれ、道具もメニューの項目も
+   * 枝ごと落ちる。F5が本番ビルドを走らせていたため、**作った道具が
+   * 拡張機能開発ホストに出ていなかった。**
+   *
+   * 見た目には何も壊れないので、**ここで見張らないと次も同じことが起きる。**
+   */
+  /** コメント付きJSONを読む。行コメントだけを落とす */
+  function readJsonc(path: string): unknown {
+    const newline = String.fromCharCode(10);
+    const text = readFileSync(path, "utf8")
+      .split(newline)
+      .filter((line) => !line.trim().startsWith("//"))
+      .join(" ");
+    return JSON.parse(text);
+  }
+
+  test("F5は、本番ビルドを走らせない", () => {
+    const launch = readJsonc(".vscode/launch.json") as {
+      configurations: Array<{ preLaunchTask?: string }>;
+    };
+
+    for (const config of launch.configurations) {
+      // 本番ビルド（npm: build）だと、開発用の道具が落ちたまま起動する
+      expect(config.preLaunchTask).not.toBe("npm: build");
+    }
+  });
+
+  test("F5が指す仕事が、実在する", () => {
+    const launch = readJsonc(".vscode/launch.json") as {
+      configurations: Array<{ preLaunchTask?: string }>;
+    };
+    const tasks = readJsonc(".vscode/tasks.json") as {
+      tasks: Array<{ label: string; script: string }>;
+    };
+
+    for (const config of launch.configurations) {
+      if (!config.preLaunchTask) continue;
+      const task = tasks.tasks.find((entry) => entry.label === config.preLaunchTask);
+      expect(task, config.preLaunchTask).toBeDefined();
+      // その仕事が呼ぶ npm script も実在すること
+      const pkg = JSON.parse(readFileSync("package.json", "utf8")) as {
+        scripts: Record<string, string>;
+      };
+      expect(pkg.scripts[task!.script], task!.script).toBeDefined();
+      // **--production を渡していないこと**（渡すと道具が落ちる）
+      expect(pkg.scripts[task!.script]).not.toContain("--production");
+    }
+  });
+});
