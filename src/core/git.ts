@@ -363,7 +363,7 @@ export async function headCommit(
  * 2つのコミットの間で変わったファイル（作品フォルダーからの相対パス）。
  *
  * pullで一度に大量のファイルが変わるため、**何が変わったかはgitに聞く**
- * （設計書5.5.8）。こちらで全ファイルのハッシュを取り直すより速く、
+ * （設計書5.5.13）。こちらで全ファイルのハッシュを取り直すより速く、
  * 削除・改名も正確に分かる。
  */
 export async function changedFilesBetween(
@@ -419,10 +419,40 @@ export function parseStatusPorcelain(stdout: string): {
 } {
   const lines = stdout.split(/\r?\n/).filter((line) => line.trim() !== "");
   let unmerged = 0;
+  let dirty = 0;
   for (const line of lines) {
-    if (isUnmergedCode(line.slice(0, 2))) unmerged++;
+    const conflicted = isUnmergedCode(line.slice(0, 2));
+    if (conflicted) unmerged++;
+    // **競合しているなら数える。** 自動で書かれるものでも、
+    // 競合を見逃すわけにはいかない
+    if (conflicted || !isAutoWrittenLine(line)) dirty++;
   }
-  return { dirty: lines.length, unmerged };
+  return { dirty, unmerged };
+}
+
+/**
+ * 拡張機能が勝手に書き換えるので、変更として数えないもの（設計書5.5.13）。
+ *
+ * **執筆量の記録は、保存のたびに書き換わる。** 端末ごとに1ファイル持ち、
+ * 同期もする（複数のPCで書いた量を合算するため）。だが**作者が何も
+ * していなくても必ず変わる**ので、これを数えると、
+ *
+ * - 記録して送信した直後から、また「1件の変更」と出る
+ * - **常に1件出ているので、本当に原稿を書いた1件と見分けが付かない**
+ *
+ * 作者の指摘（2026-08-24）：「GitHubと同期しても常に1件同期が残る」。
+ *
+ * **数えないだけで、記録からは外さない。** コミットには入るので、
+ * 執筆量は今までどおり別の環境へ同期される。
+ */
+const AUTO_WRITTEN_PATHS = [".aiwriter/stats/"] as const;
+
+/** その行が、拡張機能の自動書き換えぶんか */
+export function isAutoWrittenLine(line: string): boolean {
+  // porcelain の行は「XY パス」の形。日本語のパスは引用符で囲まれるので、
+  // パスを取り出そうとせず、行に含まれるかだけを見る
+  const normalized = line.replace(/\\/g, "/");
+  return AUTO_WRITTEN_PATHS.some((target) => normalized.includes(target));
 }
 
 /**

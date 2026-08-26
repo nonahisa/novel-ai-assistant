@@ -10,6 +10,7 @@ import {
   isGitAvailable,
   parseAheadBehind,
   parseStatusPorcelain,
+  isAutoWrittenLine,
   pullFastForward,
   readSyncStatus,
   runGit,
@@ -509,4 +510,52 @@ describe("実際の競合の解決", () => {
     },
     120_000
   );
+});
+
+/**
+ * 同期しても常に1件残っていた（作者の指摘、2026-08-24。設計書5.5.13）。
+ *
+ * 「GitHubと同期しても常に1件同期が残る」——正体は**執筆量の記録**
+ * （`.aiwriter/stats/<端末>.json`）。保存のたびに拡張機能が書き換えるので、
+ * 記録して送信した直後からまた「1件の変更」に戻っていた。
+ */
+describe("自動で書き換わるものは数えない", () => {
+  test("執筆量の記録だけなら、変更は0件", () => {
+    const status = parseStatusPorcelain(
+      ' M "いじめられっ子/.aiwriter/stats/gamingpc-16cd.json"'
+    );
+    expect(status.dirty).toBe(0);
+  });
+
+  test("原稿の変更は、これまでどおり数える", () => {
+    const status = parseStatusPorcelain(
+      [
+        ' M "作品/本文/001.txt"',
+        ' M "作品/.aiwriter/stats/pc-1.json"',
+        "?? 作品/本文/002.txt",
+      ].join("\n")
+    );
+    expect(status.dirty).toBe(2);
+  });
+
+  /** 競合は見逃せない。自動で書かれるものでも数える */
+  test("執筆量の記録が競合していたら数える", () => {
+    const status = parseStatusPorcelain(
+      "UU 作品/.aiwriter/stats/pc-1.json"
+    );
+    expect(status.dirty).toBe(1);
+    expect(status.unmerged).toBe(1);
+  });
+
+  /** Windowsのgitが円記号で返した場合 */
+  test("区切りが逆向きでも見分ける", () => {
+    expect(
+      isAutoWrittenLine(String.raw` M 作品\.aiwriter\stats\pc-1.json`)
+    ).toBe(true);
+  });
+
+  test("似た名前のフォルダーは巻き込まない", () => {
+    expect(isAutoWrittenLine(" M 作品/.aiwriter/statsmemo.txt")).toBe(false);
+    expect(isAutoWrittenLine(" M 作品/本文/stats.txt")).toBe(false);
+  });
 });

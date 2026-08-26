@@ -42,7 +42,15 @@ import {
   buildCharacterExtractPrompt,
 } from "../prompts/characterExtract";
 import { withCancellableProgress } from "../views/progress";
-import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logLine,
+  logStep,
+  showLog,
+  useLogFile,
+} from "../core/logger";
+import { writeExtractedIndex } from "../core/extractedIndexStore";
+import { readEpisodeContents } from "./extractionFreshness";
 import { resolveMaxOutputTokens } from "../ai/outputLimit";
 import { PendingUpdateStore } from "../core/pendingUpdates";
 import { applyPendingCharacterUpdates } from "./applyPendingUpdates";
@@ -863,6 +871,26 @@ export async function extractCharacters(
       "revealInExplorer",
       path.toUri(dir)
     );
+  }
+
+  // **取り込んだ話を書き留める**（設計書6.21.3）。
+  // 独り言が「あと何話ぶん残っているか」を数えるための記録である。
+  //
+  // **失敗した話があるときは書かない。** 取り込めていない話を
+  // 「取り込んだ」と記録すると、そのまま黙ってしまう。
+  //
+  // **ここで転んでも、抽出の結果は捨てない。** 資料そのものは保存済みで、
+  // これは数えるためだけの記録である
+  if (failures.length === 0) {
+    try {
+      await writeExtractedIndex(work, await readEpisodeContents(work));
+    } catch (error) {
+      logLine(
+        `取り込んだ話の記録を書けませんでした: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
   }
 
   // ここまで来ていれば人物・能力・場所の保存を試みている。
