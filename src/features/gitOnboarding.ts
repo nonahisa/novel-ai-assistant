@@ -134,6 +134,14 @@ export async function recordChanges(
     reportFailure("変更の記録", committed.detail);
     return false;
   }
+  // 数えてから記録するまでの間に、別の窓が先に記録したときはここへ来る。
+  // **失敗として出さない。** 起きたことをそのまま伝える
+  if (committed.nothingToCommit) {
+    vscode.window.showInformationMessage(
+      `${target.label} に記録していない変更はありませんでした。`
+    );
+    return false;
+  }
 
   logStep(`変更を記録: ${target.label}（${count}件）`);
   vscode.window.showInformationMessage(
@@ -256,6 +264,15 @@ async function startTracking(
   );
   if (!committed.ok) {
     reportFailure("初回コミット", committed.detail);
+    return false;
+  }
+  // 1つ目の記録が作れないと、このあとの送信も履歴も成り立たない。
+  // **空のフォルダーだったということなので、失敗ではなく理由を出す**
+  if (committed.nothingToCommit) {
+    vscode.window.showWarningMessage(
+      `${target.label} に記録できるものがありませんでした。` +
+        "本文を1話でも置いてから、もう一度お試しください。"
+    );
     return false;
   }
 

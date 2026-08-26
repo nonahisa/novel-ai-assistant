@@ -82,8 +82,8 @@ export async function restoreFromHistory(work: WorkEntry): Promise<void> {
   if (!confirmed) return;
 
   // 1. 今の状態を退避する。戻したあとで「やっぱり元に」ができるようにする。
-  //    変更が無ければコミットは作られない（commitAllが失敗するだけ）ので、
-  //    その場合は先へ進む
+  //    **残すものが無いときは、コミットは作られないが失敗でもない**
+  //    （`commitAll` が `nothingToCommit` を返す）。そのまま先へ進む
   const dirty = status.kind === "tracked" ? status.dirty : 1;
   if (dirty > 0) {
     const saved = await withProgress("いまの原稿を履歴へ残しています…", () =>

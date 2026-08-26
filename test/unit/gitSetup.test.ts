@@ -82,12 +82,89 @@ describe("リポジトリを作る", () => {
   });
 
   test("初回コミットは全部を対象にする", async () => {
-    const run = runner();
+    // 2番目は「記録するものがあるか」の確認（終了コード1＝ある）
+    const run = runner([{}, { code: 1 }]);
 
     await commitAll("C:/work", "初回コミット: 作品", run);
 
     expect(run.calls[0]).toEqual(["add", "-A"]);
-    expect(run.calls[1]).toEqual(["commit", "-m", "初回コミット: 作品"]);
+    expect(run.calls[1]).toEqual(["diff", "--cached", "--quiet"]);
+    expect(run.calls[2]).toEqual(["commit", "-m", "初回コミット: 作品"]);
+  });
+
+  /**
+   * 記録するものが無いのは、失敗ではない（2026-08-26、作者の実機）。
+   *
+   * 「作品をすべて同期」が
+   * 「記録できませんでした: On branch main / nothing to commit, working tree clean」
+   * で止まっていた。**しかもそこで打ち切るので、取り込みと送信まで飛んでいた。**
+   */
+  describe("記録するものが無いとき", () => {
+    test("commit を実行せず、失敗にもしない", async () => {
+      // 終了コード0＝ステージに差が無い
+      const run = runner([{}, { code: 0 }]);
+
+      const result = await commitAll("C:/work", "記録", run);
+
+      expect(result.ok).toBe(true);
+      expect(result.nothingToCommit).toBe(true);
+      // 空のコミットを作らない。作ると履歴が意味の無い記録で埋まる
+      expect(run.calls).toHaveLength(2);
+    });
+
+    test("直前に別の窓が記録したときも、失敗にしない", async () => {
+      // 確認の時点では差があったが、commit までの間に先を越された
+      const run = runner([
+        {},
+        { code: 1 },
+        { code: 1, stdout: "On branch main / nothing to commit, working tree clean" },
+        { code: 0 },
+      ]);
+
+      const result = await commitAll("C:/work", "記録", run);
+
+      expect(result.ok).toBe(true);
+      expect(result.nothingToCommit).toBe(true);
+    });
+
+    test("gitの文言では判定しない", async () => {
+      // 日本語のgitは「コミットするべき変更がありません」と書く。
+      // 文言で見ていると、環境の言語で結果が変わる
+      const run = runner([
+        {},
+        { code: 1 },
+        { code: 1, stdout: "現在のブランチは main です / コミットするべき変更がありません" },
+        { code: 0 },
+      ]);
+
+      expect((await commitAll("C:/w", "記録", run)).nothingToCommit).toBe(true);
+    });
+
+    test("本当の失敗は失敗のまま", async () => {
+      const run = runner([
+        {},
+        { code: 1 },
+        { code: 128, stderr: "fatal: unable to write new index file" },
+        // まだ記録するものは残っている
+        { code: 1 },
+      ]);
+
+      const result = await commitAll("C:/w", "記録", run);
+
+      expect(result.ok).toBe(false);
+      expect(result.detail).toContain("unable to write new index file");
+    });
+
+    test("確認できなかったときは、記録を試みる", async () => {
+      // 0でも1でもない＝判定できない。**「無い」と決めつけて捨てない**
+      const run = runner([{}, { code: 128 }]);
+
+      const result = await commitAll("C:/w", "記録", run);
+
+      expect(result.ok).toBe(true);
+      expect(result.nothingToCommit).toBeUndefined();
+      expect(run.calls[2]).toEqual(["commit", "-m", "記録"]);
+    });
   });
 
   test("初回の送信は上流を設定する", async () => {

@@ -173,6 +173,35 @@ export function describePlan(plan: SyncTargetPlan): string {
   return parts.join(" / ");
 }
 
+/**
+ * 記録（コミット）の結果を、次にどうするかへ翻訳する。
+ *
+ * **「記録するものが無い」で打ち切らない**（2026-08-26、作者の実機）。
+ * gitは記録するものが無いとき終了コード1を返す。これを失敗として扱って
+ * いたため、
+ *
+ *   ・novel（…）：記録できませんでした: On branch main / nothing to commit
+ *
+ * と出て**そこで打ち切っていた**。この置き場は取り込み1件・送信11件を
+ * 抱えており、**本当に必要な手順がまるごと飛んでいた。**
+ *
+ * 件数を数えてから記録するまでの間に、別の窓・前回の実行・作者自身の操作が
+ * 先に記録すれば、記録するものは無くなる。**それは失敗ではない。**
+ */
+export function afterCommit(result: {
+  ok: boolean;
+  detail?: string;
+  nothingToCommit?: boolean;
+}): { stop: true; error: string } | { stop: false; committed: boolean } {
+  if (!result.ok) {
+    return {
+      stop: true,
+      error: `記録できませんでした: ${result.detail ?? "（詳細なし）"}`,
+    };
+  }
+  return { stop: false, committed: !result.nothingToCommit };
+}
+
 /** 置き場の名前と、中の作品名 */
 export function describeTargetWorks(target: SyncTargetState): string {
   if (target.works.length === 0) return target.label;

@@ -25,6 +25,14 @@ export interface GitSetupResult {
   ok: boolean;
   /** 失敗した理由。作者に見せる */
   detail?: string;
+  /**
+   * 記録するものが無かった（`commitAll` のみ）。
+   *
+   * **失敗ではない。** 数えた時点から実行までの間に、別の窓や前回の実行が
+   * 先に記録しただけである。呼び出し側は「記録は作られなかった」とだけ
+   * 扱い、**後の手順（取り込み・送信）は続ける**こと。
+   */
+  nothingToCommit?: boolean;
 }
 
 /**
@@ -119,7 +127,24 @@ export async function countTrackableFiles(
     .length;
 }
 
-/** いま作品フォルダにあるものを、1つの履歴として記録する */
+/**
+ * いま作品フォルダにあるものを、1つの履歴として記録する。
+ *
+ * **記録するものが無いのは、失敗ではない。**
+ * gitは「nothing to commit」を**終了コード1**で返す。これをそのまま失敗として
+ * 扱うと、次のようになる（2026-08-26、作者の実機で起きた）。
+ *
+ *   ・novel（…）：記録できませんでした: On branch main / nothing to commit
+ *
+ * 件数を数えてから記録するまでの間はごく短いが、**別の窓・前回の実行・
+ * 作者自身の操作**が先に記録すれば空になる。しかも「すべて同期」では
+ * ここで打ち切るため、**本当に必要な取り込みと送信まで止まっていた。**
+ *
+ * **判定はgitの文言に頼らない。** 「nothing to commit」は環境の言語で変わる
+ * （日本語のgitは「コミットするべき変更がありません」と書く）。
+ * `git diff --cached --quiet` の終了コードで見る——0なら記録するものが無い。
+ * HEADがまだ無い（初回コミット前）状態でも正しく答える。
+ */
 export async function commitAll(
   cwd: string,
   message: string,
@@ -128,13 +153,38 @@ export async function commitAll(
   const added = await run(["add", "-A"], cwd, LOCAL_TIMEOUT_MS);
   if (added.code !== 0) return failure(added);
 
+  if (await nothingStaged(cwd, run)) return { ok: true, nothingToCommit: true };
+
   const committed = await run(
     ["commit", "-m", message],
     cwd,
     LOCAL_TIMEOUT_MS
   );
-  if (committed.code !== 0) return failure(committed);
+  if (committed.code !== 0) {
+    // 上で見てから commit までの間に、別の窓が記録したかもしれない。
+    // **失敗の文言ではなく、いまの状態をもう一度見て決める**
+    if (await nothingStaged(cwd, run)) return { ok: true, nothingToCommit: true };
+    return failure(committed);
+  }
   return { ok: true };
+}
+
+/**
+ * 記録するものが無いか。
+ *
+ * 終了コードは 0＝差が無い／1＝差がある。それ以外（判定できなかった）は
+ * **「無い」と決めつけない**——記録できるものを黙って捨てないためである。
+ */
+async function nothingStaged(
+  cwd: string,
+  run: GitCommandRunner
+): Promise<boolean> {
+  const staged = await run(
+    ["diff", "--cached", "--quiet"],
+    cwd,
+    LOCAL_TIMEOUT_MS
+  );
+  return staged.code === 0;
 }
 
 /** リモートを登録する */

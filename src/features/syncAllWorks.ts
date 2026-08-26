@@ -12,6 +12,7 @@ import { commitAll, countTrackableFiles, hasCommitIdentity } from "../core/gitSe
 import { buildSyncTarget } from "../core/syncTarget";
 import {
   actionablePlans,
+  afterCommit,
   describeOutcomes,
   describePlan,
   describeTargetWorks,
@@ -225,14 +226,20 @@ async function runPlan(
       return outcome;
     }
     const message = `${stamp()} の執筆（${plan.target.trackable}件）`;
-    const result = await commitAll(cwd, message, run);
-    if (!result.ok) {
-      outcome.error = `記録できませんでした: ${result.detail ?? "（詳細なし）"}`;
+    const next = afterCommit(await commitAll(cwd, message, run));
+    if (next.stop) {
+      outcome.error = next.error;
       logFailure("すべて同期：記録に失敗", { 置き場: name, 詳細: outcome.error });
       return outcome;
     }
-    outcome.committed = true;
-    logStep(`すべて同期：記録（${name}／${plan.target.trackable}件）`);
+    // **記録するものが無いのは失敗ではない。** 止めると、本当に必要な
+    // 取り込みと送信まで飛ぶ（それがこの不具合で起きていたことである）
+    outcome.committed = next.committed;
+    logStep(
+      next.committed
+        ? `すべて同期：記録（${name}／${plan.target.trackable}件）`
+        : `すべて同期：記録するものは無かった（${name}）`
+    );
   }
 
   if (plan.pull) {

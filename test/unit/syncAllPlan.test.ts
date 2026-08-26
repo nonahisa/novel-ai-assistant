@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   actionablePlans,
+  afterCommit,
   describeOutcomes,
   describePlan,
   describeTargetWorks,
@@ -201,5 +202,40 @@ describe("済んだあとの報告", () => {
 
   test("何も無ければ、そう書く", () => {
     expect(describeOutcomes([])).toBe("同期するものはありませんでした。");
+  });
+});
+
+describe("記録の結果を、次の手順へ翻訳する", () => {
+  /**
+   * 2026-08-26、作者の実機で
+   * 「記録できませんでした: On branch main / nothing to commit, working tree clean」
+   * が出た。**そこで打ち切っていたので、取り込み1件・送信11件が飛んでいた。**
+   */
+  test("記録するものが無くても、止めない", () => {
+    const next = afterCommit({ ok: true, nothingToCommit: true });
+
+    expect(next.stop).toBe(false);
+    // 記録はしていないので、報告で「記録した」と数えない
+    expect(next).toMatchObject({ committed: false });
+  });
+
+  test("記録できたら、記録したと数える", () => {
+    expect(afterCommit({ ok: true })).toEqual({ stop: false, committed: true });
+  });
+
+  test("本当に失敗したときは止めて、理由を返す", () => {
+    // 続けても同じ理由で止まる。取り込みは未記録の変更があると動かない
+    const next = afterCommit({ ok: false, detail: "fatal: index.lock" });
+
+    expect(next).toEqual({
+      stop: true,
+      error: "記録できませんでした: fatal: index.lock",
+    });
+  });
+
+  test("理由が分からなくても、黙って止まらない", () => {
+    expect(afterCommit({ ok: false })).toMatchObject({
+      error: "記録できませんでした: （詳細なし）",
+    });
   });
 });

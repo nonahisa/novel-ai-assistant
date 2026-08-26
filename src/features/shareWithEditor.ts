@@ -339,11 +339,10 @@ async function setUpAndPush(
   }
 
   const message = `${work.title} を編集部へ渡す`;
+  // 変えるものが無いのは失敗ではない。**判定は `commitAll` が持っている**
+  // （gitの文言は環境の言語で変わるので、ここで正規表現を書かない）
   const committed = await commitAll(destination, message, run);
-  // 変えるものが無いときも `commit` は失敗する。それは失敗ではない
-  const nothingToCommit =
-    !committed.ok && /nothing to commit|変更されていません/i.test(committed.detail ?? "");
-  if (!committed.ok && !nothingToCommit) {
+  if (!committed.ok) {
     return { ok: false, detail: committed.detail ?? "記録できませんでした" };
   }
 
