@@ -9,6 +9,8 @@ import {
   disabledHint,
   explainDisabled,
   isActionEnabled,
+  isItemVisibleInRuntime,
+  visibleEntries,
   REQUIRES_WORK_HINT,
   restoreExpandedGroups,
   visibleGroups,
@@ -595,5 +597,66 @@ describe("校正・校閲の並び", () => {
     ]) {
       expect(commands.indexOf(command), command).toBeLessThan(lockAt);
     }
+  });
+});
+
+describe("ブラウザ版でだけ出す操作", () => {
+  /**
+   * 作者の指摘（2026-08-26）：「操作メニューのヘルプの動作を診断ってまだ使うでしょうか？」
+   *
+   * ブラウザ版で保存できないときの切り分けに作ったもので、**手元では出番が無い**。
+   * この作品の原則は「消さずに押せなくして理由を出す」だが、ここは例外である
+   * ——**手元でも動くので、押せない理由を書けない。**
+   */
+  test("手元のVS Codeでは出さない", () => {
+    const item = allActions().find(
+      (action) => action.command === "novelai.diagnoseWeb"
+    );
+
+    expect(item?.browserOnly).toBe(true);
+    expect(isItemVisibleInRuntime(item!, true)).toBe(false);
+  });
+
+  test("ブラウザ版では出す", () => {
+    const item = allActions().find(
+      (action) => action.command === "novelai.diagnoseWeb"
+    );
+
+    expect(isItemVisibleInRuntime(item!, false)).toBe(true);
+  });
+
+  test("印の無い操作は、どちらでも出す", () => {
+    const item = allActions().find(
+      (action) => action.command === "novelai.showVersion"
+    );
+
+    expect(isItemVisibleInRuntime(item!, true)).toBe(true);
+    expect(isItemVisibleInRuntime(item!, false)).toBe(true);
+  });
+
+  test("小分類は絞り込みで消えない", () => {
+    // 中身が空になっても見出しは残す（`visibleEntries` は action だけを見る）
+    const entries = [
+      { kind: "section" as const, label: "小分類", items: [] },
+      {
+        kind: "action" as const,
+        command: "novelai.diagnoseWeb",
+        label: "診断",
+        icon: "pulse",
+        requiresWork: false,
+        detail: "",
+        browserOnly: true,
+      },
+    ];
+
+    expect(visibleEntries(entries, true)).toHaveLength(1);
+    expect(visibleEntries(entries, false)).toHaveLength(2);
+  });
+
+  test("コマンドそのものは残す", () => {
+    // 手元で切り分けが要るときは、コマンドパレットから呼べる
+    const commands = allActions().map((action) => action.command);
+
+    expect(commands).toContain("novelai.diagnoseWeb");
   });
 });

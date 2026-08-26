@@ -1,4 +1,5 @@
-import { ACTION_TREE } from "../views/actionList";
+import { ACTION_TREE, visibleEntries } from "../views/actionList";
+import { canRunProcesses } from "../core/runtime";
 
 /**
  * 「この拡張機能の使い方」をAIへ渡すための説明を組み立てる。
@@ -54,15 +55,19 @@ const EXTRA_GUIDE = `
 export function buildFeatureGuide(): string {
   const lines: string[] = ["【操作メニューにある操作】"];
 
+  // **画面に無い操作を案内させない。** 環境によって出さない操作があるので、
+  // 一覧も同じ規則で絞る（`isItemVisibleInRuntime`）
+  const allowsProcesses = canRunProcesses();
+
   for (const group of ACTION_TREE) {
     lines.push(`■ ${group.label}`);
-    for (const entry of group.entries) {
+    for (const entry of visibleEntries(group.entries, allowsProcesses)) {
       if (entry.kind === "action") {
         lines.push(describeAction(entry, ""));
         continue;
       }
       lines.push(`  ▸ ${entry.label}`);
-      for (const item of entry.items) {
+      for (const item of visibleEntries(entry.items, allowsProcesses)) {
         lines.push(describeAction(item, "  "));
       }
     }

@@ -17,7 +17,20 @@ describe("使い方の説明", () => {
     // 漏れると、AIは「その機能はありません」と嘘を答える。
     // 説明書を手で書かずメニューの定義から作るのは、これを防ぐため
     for (const action of allActions()) {
+      // **画面に出ない操作は、案内にも入れない**（`browserOnly`）。
+      // 試験は手元（Nodeあり）で走るので、ブラウザ版だけの操作は外れる
+      if (action.browserOnly) continue;
       expect(guide, action.label).toContain(action.label);
+    }
+  });
+
+  test("ブラウザ版だけの操作は、手元の案内に入れない", () => {
+    // 画面に無い操作をAIが案内すると、探しても見つからない
+    const browserOnly = allActions().filter((action) => action.browserOnly);
+
+    expect(browserOnly.length).toBeGreaterThan(0);
+    for (const action of browserOnly) {
+      expect(guide, action.label).not.toContain(action.label);
     }
   });
 

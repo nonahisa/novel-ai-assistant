@@ -55,6 +55,20 @@ export interface ActionItem {
   usesAI?: boolean;
   /** 末尾に件数を出す。0件のときは出さない */
   counter?: ActionCounter;
+  /**
+   * ブラウザ版のVS Codeでだけ出す操作か。
+   *
+   * **この作品の原則は「消さずに押せなくして理由を出す」である**
+   * （`processAvailability.ts`、編集者モード）。ここはその例外にあたる。
+   *
+   * 押せなくする理由は「この環境では動かない」だが、こちらは逆で、
+   * **手元のVS Codeでも動く。ただし出番が無い**。動くものを灰色で並べても
+   * 「なぜ押せないのか」を説明できず、メニューが1行ぶん長くなるだけである。
+   *
+   * **コマンドは登録したままにする。** 手元で必要になったとき
+   * （「登録したのに一覧が空」の切り分けなど）は、コマンドパレットから呼べる。
+   */
+  browserOnly?: boolean;
 }
 
 export interface ActionSection {
@@ -1035,6 +1049,10 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         label: "動作を診断",
         icon: "pulse",
         requiresWork: false,
+        // **手元のVS Codeでは出さない**（作者の指定、2026-08-26）。
+        // ブラウザ版で保存できないときの切り分けに作ったもので、手元では
+        // 出番が無い。手元で要るときはコマンドパレットから呼べる
+        browserOnly: true,
         detail:
           "いまの環境で、ファイルに何ができるかを実際に試して並べます" +
           "（フォルダーを作る・書く・読む・移す・消す）。" +
@@ -1085,6 +1103,33 @@ export const ACTION_TREE: readonly ActionGroup[] = [
  * 使えるのかが分からない。**
  */
 export const REQUIRES_WORK_HINT = "作品を登録すると使えます";
+
+/**
+ * その操作を、いまの環境の操作メニューに出すか。
+ *
+ * **出す・出さないをここだけで決める。** 画面（`getChildren`）とAIへ渡す
+ * 機能の一覧（`featureGuide`）の両方が通るので、片方だけ直して
+ * 「メニューに無い操作をAIが案内する」形にしない。
+ */
+export function isItemVisibleInRuntime(
+  item: ActionItem,
+  runtimeAllowsProcesses: boolean
+): boolean {
+  // 外部プロセスを起動できる＝手元のVS Code
+  return !item.browserOnly || !runtimeAllowsProcesses;
+}
+
+/** 分類・小分類の中身を、いまの環境に合わせて絞る */
+export function visibleEntries<T extends ActionItem | ActionSection>(
+  entries: readonly T[],
+  runtimeAllowsProcesses: boolean
+): T[] {
+  return entries.filter(
+    (entry) =>
+      entry.kind !== "action" ||
+      isItemVisibleInRuntime(entry, runtimeAllowsProcesses)
+  );
+}
 
 /**
  * いま出す分類。**作品の有無で中身は変わらない。**
@@ -1317,7 +1362,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       return groups.map((group) => ({ type: "group" as const, group }));
     }
     if (node.type === "group") {
-      return node.group.entries.map((entry) =>
+      return visibleEntries(node.group.entries, canRunProcesses()).map((entry) =>
         entry.kind === "section"
           ? {
               type: "section" as const,
@@ -1328,7 +1373,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       );
     }
     if (node.type === "section") {
-      return node.section.items.map((item) => ({
+      return visibleEntries(node.section.items, canRunProcesses()).map((item) => ({
         type: "action" as const,
         item,
       }));
