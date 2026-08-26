@@ -5,7 +5,11 @@ import type { Organization } from "../models/organization";
 import type { CustomFieldDefinition } from "../models/customField";
 import { WORLD_CATEGORY_LABELS, type WorldItem } from "../models/world";
 import { describeChangeValues, formatChapters } from "./settingsMarkdown";
-import { changedFields, changesOfField } from "./recordChanges";
+import { changesOfField } from "./recordChanges";
+import {
+  describeInvolvement,
+  scoreCharacterChanges,
+} from "./changeSignificance";
 
 /**
  * 1件分の設定を、人が読める短い文章にする。
@@ -96,12 +100,20 @@ export function describeCharacter(
     );
   }
   // 作中での変化は、AIにも渡す。項目の値だけを見せると
-  // 「今の姿」しか分からず、過去の話について相談したときに食い違う
-  for (const field of changedFields(character.changes)) {
+  // 「今の姿」しか分からず、過去の話について相談したときに食い違う。
+  //
+  // **関与度を添えて、高い順に並べる**（`changeSignificance.ts`）。
+  // 紹介は80字しかないので、どの変化に紙幅を使うかをここで示す。
+  // **変化そのものは低いものも全部渡す。** 相談（P-18）ではどれも事実であり、
+  // ふるいにかけると「髪を切った話」を聞かれたときに答えられなくなる
+  for (const significance of scoreCharacterChanges(character)) {
+    const values = describeChangeValues(
+      changesOfField(character.changes, significance.field)
+    );
     push(
       lines,
-      `変化（${field}）`,
-      describeChangeValues(changesOfField(character.changes, field))
+      `変化（${significance.field}）`,
+      `${values}［${describeInvolvement(significance)}］`
     );
   }
   // 作者が足した項目は、定義された順に並べる。

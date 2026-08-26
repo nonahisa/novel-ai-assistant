@@ -13,7 +13,7 @@ import { SUMMARY_MAX_CHARS } from "../core/summaryLimit";
  * プロンプトを変更したら version を上げること。
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
-export const CHARACTER_EXTRACT_VERSION = "5.0";
+export const CHARACTER_EXTRACT_VERSION = "5.1";
 
 export const BASE_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 
@@ -119,6 +119,7 @@ ${knownWorld}
 - summary には、その人物が何者かが一目で分かる紹介を**${SUMMARY_MAX_CHARS}字以内**で書くこと。
   一覧で名前の下に並べる短い説明なので、役割と立場が分かれば十分である。
   例：「冒険者ギルドの生活保護課ケースワーカー。転移者で制度の考案者。」
+  **余った字数を埋めるために、本文に無いことを足してはならない。** 上限であって目安ではない。
   ${SUMMARY_MAX_CHARS}字を超える場合は削ること。詳しい内容は role / personality / appearance に分けて書く。
 - gender（性別）は、**本文から確認できる場合だけ**書くこと。根拠になるのは
   地の文の「彼」「彼女」、性別を示す語（少年・少女・男・女・父・母など）、

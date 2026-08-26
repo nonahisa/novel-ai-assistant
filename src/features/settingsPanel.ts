@@ -49,7 +49,6 @@ import {
 } from "../core/settingsMarkdown";
 import {
   applyPromotion,
-  changedFields,
   changesOfField,
   promoteConflictToChanges,
 } from "../core/recordChanges";
@@ -102,6 +101,11 @@ import { isMeaningfulValue } from "../core/characterExtractionValidation";
 import { CustomFieldStore } from "../core/customFieldStore";
 import type { CustomFieldDefinition } from "../models/customField";
 import { clampSummary, SUMMARY_MAX_CHARS } from "../core/summaryLimit";
+import {
+  describeInvolvement,
+  scoreChanges,
+  stripInvolvementNote,
+} from "../core/changeSignificance";
 import { buildSettingsPanelHtml } from "../views/settingsPanelHtml";
 import { renderMarkdownLite } from "../core/markdownLite";
 import { withCancellableProgress } from "../views/progress";
@@ -465,7 +469,8 @@ export class SettingsPanel {
         reference: referenceLines(
           character.conflicts,
           character.evidence,
-          character.changes
+          character.changes,
+          character.appearedChapters
         ),
         fields: [
           nameField(character.name, character.aliases),
@@ -1491,14 +1496,25 @@ function referenceLines(
    * 渡されたときだけ「作中の変化」ボタンを出す（他の種別では押せても
    * 保存先が無い）。空配列と「持っていない」を区別するため省略可能にしてある。
    */
-  changes?: RecordChange[]
+  changes?: RecordChange[],
+  /**
+   * 登場話。関与度の計算に使う（変化した後の姿が続いているか）。
+   * 人物だけが変化を持つので、変化と一緒にしか渡らない
+   */
+  appearedChapters: readonly number[] = []
 ): DetailView["reference"] {
   return [
     // 確定した変化を、判断待ちより先に置く。事実として読んでよいものと
-    // 疑いの残るものを混ぜない
-    ...changedFields(changes ?? []).map((field) => ({
-      label: `変化（${field}）`,
-      value: describeChangeValues(changesOfField(changes ?? [], field)),
+    // 疑いの残るものを混ぜない。
+    //
+    // **関与度を添える**（`changeSignificance.ts`）。AIへ渡す材料と同じ数字を
+    // 同じ書き方で出す。紹介に何が書かれ、何が書かれなかったのかを
+    // 作者がここで確かめられるようにするためである
+    ...scoreChanges(changes ?? [], appearedChapters).map((significance) => ({
+      label: `変化（${significance.field}）`,
+      value: `${describeChangeValues(
+        changesOfField(changes ?? [], significance.field)
+      )}［${describeInvolvement(significance)}］`,
     })),
     ...conflicts.map((conflict) => ({
       label: `変化かもしれない（${conflict.field}）`,
@@ -1537,7 +1553,12 @@ function clampField(field: EnrichableField, value: unknown): string {
   // AIは「不明」「なし」「（本文から読み取れる記述なし）」を値として返してくる。
   // 判定は抽出側と共有する（片方だけ直しても、もう片方から入り込む）
   if (!isMeaningfulValue(text)) return "";
-  return field.maxChars ? (clampSummary(text, field.maxChars) ?? "") : text;
+  // 材料に付けた［関与度 …］を、そのまま値へ書き写してくることがある。
+  // 指示語が答えの中身として返るのは、この作品で繰り返し起きている
+  // （`placeholderText.ts`）。資料へ載る手前で落とす
+  const body = stripInvolvementNote(text);
+  if (!body) return "";
+  return field.maxChars ? (clampSummary(body, field.maxChars) ?? "") : body;
 }
 
 function asText(value: unknown): string {

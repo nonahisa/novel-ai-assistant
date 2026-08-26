@@ -74,6 +74,27 @@ describe("項目を充実させる提案", () => {
     expect(prompt).toContain("読み取れない項目は null");
   });
 
+  test("関与度の高い変化だけを紹介へ書かせる", () => {
+    // 紹介は80字しかない。「課長になった」と「髪を切った」が同じ形で並ぶと、
+    // AIは書きやすいほう（外見）から埋める（2026-08-26）
+    const prompt = buildEnrichPrompt({
+      workTitle: "テスト作品",
+      kind: "character",
+      target: {
+        kindLabel: "登場人物",
+        name: "文佳",
+        currentSettings: `名前: 文佳
+変化（role）: 新人（第1〜3話）→ 課長（第7、8話）［関与度 65（高）］`,
+      },
+      excerpts: [{ label: "第7話", text: "文佳は辞令を受け取った。" }],
+    });
+
+    expect(prompt).toContain("関与度");
+    expect(prompt).toContain("（高）だけ");
+    // 印をそのまま値に書き写してくるのが、この作品で繰り返し起きている失敗
+    expect(prompt).toContain("値に書かないでください");
+  });
+
   test("抜粋が無いことを隠さない", () => {
     const prompt = buildEnrichPrompt({
       workTitle: "テスト作品",

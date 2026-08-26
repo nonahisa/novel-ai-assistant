@@ -126,11 +126,13 @@ describe("登場人物抽出の品質ゲート", () => {
     assertChapterAndAddressPeriods(fixture, merged.characters);
   });
 
-  test("v5.0の構造化出力契約を公開する", () => {
+  test("v5.1の構造化出力契約を公開する", () => {
     // 4.0で「要約は推測ではない」を明示した（2026-08-15）。
     // 5.0で関係の抽出ルールを足し、relations を必須にした（2026-08-15）。
+    // 5.1で紹介の上限が60字から80字になった（2026-08-26）。字数はプロンプトへ
+    // 埋め込んでいるので、上げないと古い60字の応答がキャッシュから返る。
     // 版が変わるとキャッシュが無効になり、次回の抽出でAIを呼び直す
-    expect(CHARACTER_EXTRACT_VERSION).toBe("5.0");
+    expect(CHARACTER_EXTRACT_VERSION).toBe("5.1");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.properties)
       .toHaveProperty("entityType");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.required)
