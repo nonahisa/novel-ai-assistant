@@ -59,7 +59,8 @@ export function buildFeatureGuide(): string {
   // 一覧も同じ規則で絞る（`isItemVisibleInRuntime`）
   const allowsProcesses = canRunProcesses();
 
-  for (const group of ACTION_TREE) {
+  // 写しの分類（「テスト中」）は案内に入れない。同じ機能を2回案内することになる
+  for (const group of ACTION_TREE.filter((entry) => !entry.generated)) {
     lines.push(`■ ${group.label}`);
     for (const entry of visibleEntries(group.entries, allowsProcesses)) {
       if (entry.kind === "action") {

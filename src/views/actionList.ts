@@ -13,6 +13,8 @@ import {
   PROCESSES_BLOCKED_HINT,
 } from "../core/processAvailability";
 import { canRunProcesses } from "../core/runtime";
+import { buildPendingCheckGroup } from "./pendingCheckMenu";
+import { PENDING_CHECKS } from "./pendingChecks";
 
 /**
  * 操作メニュー。
@@ -69,6 +71,13 @@ export interface ActionItem {
    * （「登録したのに一覧が空」の切り分けなど）は、コマンドパレットから呼べる。
    */
   browserOnly?: boolean;
+  /**
+   * 開発ビルドでだけ出す操作か（実機確認を回す道具）。
+   *
+   * **配布物には定義ごと入らない。** 本番ビルドでは `__DEV_HELPERS__` が
+   * false に畳まれ、この項目を並べている枝ごと落ちる。
+   */
+  devOnly?: boolean;
 }
 
 export interface ActionSection {
@@ -94,6 +103,16 @@ export interface ActionGroup {
   entries: Array<ActionItem | ActionSection>;
   /** 分類を閉じたままでも気づけるよう、中身の件数をここにも出す */
   counter?: ActionCounter;
+  /** ホバーで出す説明。組み立てた分類で「ここに出せないもの」を伝えるのに使う */
+  tooltip?: string;
+  /**
+   * 他の分類から機械的に組み立てた分類か（「テスト中」）。
+   *
+   * **中身は写しである。** 同じコマンドが2か所に並ぶので、
+   * 「全操作」を数えるところ（`allActions`）とAIへ渡す機能の一覧では飛ばす。
+   * 飛ばさないと、コマンドIDが重複し、AIは同じ機能を2回案内する。
+   */
+  generated?: boolean;
 }
 
 /**
@@ -102,7 +121,7 @@ export interface ActionGroup {
  * 「AIを使う」ものには usesAI を立てる。文言ではなく印で示すのは、
  * 一覧を眺めたときに料金の発生する操作だけが浮き上がるようにするため。
  */
-export const ACTION_TREE: readonly ActionGroup[] = [
+const BASE_ACTION_TREE: readonly ActionGroup[] = [
   {
     kind: "group",
     label: "執筆データ",
@@ -1076,6 +1095,23 @@ export const ACTION_TREE: readonly ActionGroup[] = [
   },
 ];
 
+/**
+ * 画面に出す操作メニュー。**土台に「テスト中」を足したもの**。
+ *
+ * 作者の依頼（2026-08-26）：「操作メニューの最下段に『テスト中』を新設し、
+ * その下に操作メニューと同じメニュー構造でテストが終わっていない機能を
+ * 並べてください」。
+ *
+ * **中身は `docs/実機確認リスト.md` から自動生成する**（`pendingChecks.ts`）。
+ * 文書を手で写すと必ず片方が古くなる。
+ *
+ * 残りが1件も無くなれば、この分類は自然に消える。
+ */
+export const ACTION_TREE: readonly ActionGroup[] = (() => {
+  const testing = buildPendingCheckGroup(BASE_ACTION_TREE, PENDING_CHECKS);
+  return testing ? [...BASE_ACTION_TREE, testing] : BASE_ACTION_TREE;
+})();
+
 // 「設定情報を表示」（novelai.showSettingsForTerm）はここに置かない。
 // 本文にカーソルを置いた状態で実行する操作なので、操作メニューから押しても
 // 対象が定まらず動かない。本文の右クリックメニューにだけ出す。
@@ -1195,7 +1231,8 @@ export function explainDisabled(
 
 /** 木の中の操作をすべて取り出す（テストと整合性の確認用） */
 export function allActions(): ActionItem[] {
-  return ACTION_TREE.flatMap((group) =>
+  // **写しの分類（「テスト中」）は数えない。** 同じコマンドが2度出てくる
+  return ACTION_TREE.filter((group) => !group.generated).flatMap((group) =>
     group.entries.flatMap((entry) =>
       entry.kind === "section" ? entry.items : [entry]
     )
@@ -1298,6 +1335,9 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
           : vscode.TreeItemCollapsibleState.Collapsed
       );
       item.contextValue = node.type === "group" ? "actionGroup" : "actionSection";
+      // **ここに出せないものを黙って落とさない**（「テスト中」で使う）
+      const groupTooltip = node.type === "group" ? node.group.tooltip : undefined;
+      if (groupTooltip) item.tooltip = new vscode.MarkdownString(groupTooltip);
       item.iconPath = new vscode.ThemeIcon(icon);
       // 件数の印（FileDecorationProvider）を出すための目印
       item.resourceUri = actionResourceUri(node);

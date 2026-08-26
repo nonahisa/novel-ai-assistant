@@ -5,7 +5,8 @@ import { ACTION_TREE } from "../../src/views/actionList";
 const guide = buildFeatureGuide();
 
 function allActions() {
-  return ACTION_TREE.flatMap((group) =>
+  // 写しの分類（「テスト中」）は案内に入れない。中身は元の操作の写しである
+  return ACTION_TREE.filter((group) => !group.generated).flatMap((group) =>
     group.entries.flatMap((entry) =>
       entry.kind === "section" ? entry.items : [entry]
     )
@@ -36,8 +37,9 @@ describe("使い方の説明", () => {
 
   test("分類と小分類の見出しが、画面と同じ並びで入る", () => {
     // 並びが画面と違うと「どこにあるか」を答えられない
-    const groupPositions = ACTION_TREE.map((group) =>
-      guide.indexOf(`■ ${group.label}`)
+    // 写しの分類（「テスト中」）は案内に入れない
+    const groupPositions = ACTION_TREE.filter((group) => !group.generated).map(
+      (group) => guide.indexOf(`■ ${group.label}`)
     );
 
     expect(groupPositions.every((at) => at >= 0)).toBe(true);

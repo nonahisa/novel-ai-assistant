@@ -39,6 +39,7 @@ const MARKDOWN_ALLOWED = new Set([
   // MarkdownString（ツールチップ）として渡す
   "src/features/gitSync.ts",
   "src/core/gitSyncStatusText.ts",
+  "src/views/pendingCheckMenu.ts",
   "src/views/actionList.ts",
   // AIへ渡すプロンプト本文
   "src/core/settingsSchema.ts",

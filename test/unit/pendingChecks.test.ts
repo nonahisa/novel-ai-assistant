@@ -1,0 +1,193 @@
+import { describe, expect, test } from "vitest";
+import { readFileSync } from "node:fs";
+// @ts-expect-error 生成器は .mjs（型は付いていない）
+import { collectPendingChecks, render, SOURCE, TARGET } from "../../scripts/pendingChecksLib.mjs";
+import { ACTION_TREE, allActions, type ActionGroup } from "../../src/views/actionList";
+import {
+  buildPendingCheckGroup,
+  unreachableSections,
+} from "../../src/views/pendingCheckMenu";
+import { PENDING_CHECKS, PENDING_CHECK_TOTAL } from "../../src/views/pendingChecks";
+import type { PendingCheckSection } from "../../src/views/pendingChecks";
+
+/**
+ * 操作メニューの「テスト中」（作者の依頼、2026-08-26）。
+ *
+ * **文書を手で写さない。** メニューの中身は `docs/実機確認リスト.md` から
+ * 機械的に作る。写すと必ず片方が古くなる。
+ */
+
+describe("確認リストから作った一覧", () => {
+  test("文書とずれていない", () => {
+    // ここが落ちたら `node scripts/pendingChecks.mjs` で作り直す。
+    // **古い数字がメニューに残るのを防ぐための見張りである**
+    const expected = render(collectPendingChecks(readFileSync(SOURCE, "utf8")));
+
+    expect(readFileSync(TARGET, "utf8")).toBe(expected);
+  });
+
+  test("指している操作は、すべて実在する", () => {
+    // 文書に書いたコマンドIDを打ち間違えると、**何も出ない**まま気づけない
+    const known = new Set(allActions().map((action) => action.command));
+
+    for (const section of PENDING_CHECKS) {
+      for (const command of section.commands) {
+        expect(known, `${section.id}: ${command}`).toContain(command);
+      }
+    }
+  });
+
+  test("済んだ印の付いた項目は数えない", () => {
+    const markdown = [
+      "### A-99. 試し",
+      "",
+      "<!-- 対象: novelai.showVersion -->",
+      "",
+      "- [x] 済んだもの",
+      "- [ ] まだのもの",
+    ].join("\n");
+
+    const sections = collectPendingChecks(markdown) as PendingCheckSection[];
+
+    expect(sections).toHaveLength(1);
+    expect(sections[0].items).toEqual(["まだのもの"]);
+  });
+
+  test("項目が残っていない節は落とす", () => {
+    const markdown = ["### A-98. 全部済み", "", "- [x] 済んだもの"].join("\n");
+
+    expect(collectPendingChecks(markdown)).toEqual([]);
+  });
+
+  test("見出しの注記は落として、短い名前にする", () => {
+    const markdown = [
+      "### A-15. 作品をすべて同期（0.19.6で追加。**原稿がGitHubへ出る**）",
+      "",
+      "- [ ] 何か",
+    ].join("\n");
+
+    const sections = collectPendingChecks(markdown) as PendingCheckSection[];
+
+    expect(sections[0].id).toBe("A-15");
+    expect(sections[0].title).toBe("作品をすべて同期");
+  });
+});
+
+/** 組み立てた分類から、指定した小分類の1件目を取り出す */
+function firstItemOf(group: ActionGroup | undefined, label: string) {
+  const section = group?.entries.find(
+    (entry) => entry.kind === "section" && entry.label === label
+  );
+  return section?.kind === "section" ? section.items[0] : undefined;
+}
+
+describe("「テスト中」の組み立て", () => {
+  test("最下段に置く", () => {
+    // 作者の指定。日々使う操作の邪魔をしない
+    expect(ACTION_TREE.at(-1)?.label).toBe("テスト中");
+  });
+
+  test("元のメニューと同じ並びで、分類ごとに分ける", () => {
+    const testing = ACTION_TREE.at(-1);
+    const labels = (testing?.entries ?? [])
+      .filter((entry) => entry.kind === "section")
+      .map((entry) => entry.label);
+
+    // 元の分類の並びを崩さない（作者が見慣れた順に出す）
+    const original = ACTION_TREE.filter((group) => !group.generated).map(
+      (group) => group.label
+    );
+    const mirrored = labels.filter((label) => original.includes(label));
+
+    expect(mirrored).toEqual(original.filter((label) => mirrored.includes(label)));
+  });
+
+  test("残り件数を右に出す", () => {
+    const group = buildPendingCheckGroup(
+      [
+        {
+          kind: "group",
+          label: "作品管理",
+          icon: "book",
+          entries: [
+            {
+              kind: "action",
+              command: "novelai.syncAllWorks",
+              label: "作品をすべて同期",
+              icon: "sync",
+              requiresWork: false,
+              detail: "",
+            },
+          ],
+        },
+      ],
+      [
+        {
+          id: "A-15",
+          title: "作品をすべて同期",
+          commands: ["novelai.syncAllWorks"],
+          items: ["ひとつ", "ふたつ"],
+        },
+      ]
+    );
+
+    // 開発ビルドでは「確認を回す（開発用）」が先頭に入る。名前で探す
+    const item = firstItemOf(group, "作品管理");
+    expect(item?.description).toBe("残り2");
+    // **押したときの動きは元と同じ。** 別のコマンドを挟まない
+    expect(item?.command).toBe("novelai.syncAllWorks");
+  });
+
+  test("複数の節が同じ操作を指していたら、足して数える", () => {
+    const group = buildPendingCheckGroup(
+      [
+        {
+          kind: "group",
+          label: "資料管理",
+          icon: "book",
+          entries: [
+            {
+              kind: "action",
+              command: "novelai.openSettingsPanel",
+              label: "設定資料集を閲覧",
+              icon: "book",
+              requiresWork: true,
+              detail: "",
+            },
+          ],
+        },
+      ],
+      [
+        { id: "A-10", title: "ルビ", commands: ["novelai.openSettingsPanel"], items: ["あ"] },
+        { id: "A-14", title: "改名", commands: ["novelai.openSettingsPanel"], items: ["い", "う"] },
+      ]
+    );
+
+    const item = firstItemOf(group, "資料管理");
+    expect(item?.description).toBe("残り3");
+    // どの節のことかを、ホバーで辿れるようにする
+    expect(item?.detail).toContain("A-10");
+    expect(item?.detail).toContain("A-14");
+  });
+
+  test("残りが無ければ、分類ごと作らない", () => {
+    // 全部済めば、この分類は自然に消える
+    expect(buildPendingCheckGroup(ACTION_TREE, [])).toBeUndefined();
+  });
+
+  test("写しなので、全操作の数には入れない", () => {
+    // 入れると同じコマンドIDが2度出てきて、AIも同じ機能を2回案内する
+    const commands = allActions().map((action) => action.command);
+
+    expect(new Set(commands).size).toBe(commands.length);
+  });
+
+  test("操作から辿れない節を、数えられる", () => {
+    // 環境が要るもの・見るだけのものは押す操作が無い。**黙って落とさない**
+    const orphans = unreachableSections(PENDING_CHECKS);
+    const counted = orphans.reduce((sum, section) => sum + section.items.length, 0);
+
+    expect(counted).toBeLessThan(PENDING_CHECK_TOTAL);
+    for (const section of orphans) expect(section.commands).toEqual([]);
+  });
+});

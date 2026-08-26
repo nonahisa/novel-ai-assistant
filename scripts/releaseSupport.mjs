@@ -25,6 +25,12 @@ const FORBIDDEN_CONTENT_PATTERNS = [
   /C:\\Users\\/i,
   /Documents\\/i,
   /_test_extract/i,
+  // **開発用の道具は配布物に入れない**（作者の指定、2026-08-26）。
+  // 本番ビルドでは `__DEV_HELPERS__` が false に畳まれて枝ごと落ちるが、
+  // **畳み忘れれば黙って入る**ので、出口でも見張る。
+  // ASCIIの名前で見る——日本語は逃がされた形になるため（0.13.0で踏んだ）
+  /novelai[.]runChecks/,
+  /checkRunner/,
 ];
 
 export async function deriveReleaseMetadata(repositoryRoot) {

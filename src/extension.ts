@@ -334,6 +334,14 @@ export async function activate(
     )
   );
 
+  // **開発用の道具は、配布物に入れない**（作者の指定、2026-08-26）。
+  // 本番ビルドでは `__DEV_HELPERS__` が false に畳まれ、この枝ごと落ちる
+  // （中の動的importも消えるので、`src/dev/` は束に入らない）
+  if (__DEV_HELPERS__) {
+    const { registerCheckRunner } = await import("./dev/checkRunner.js");
+    context.subscriptions.push(registerCheckRunner(context));
+  }
+
   context.subscriptions.push(
     vscode.commands.registerCommand("novelai.syncAllWorks", async () => {
       const { syncAllWorks } = await import("./features/syncAllWorks.js");

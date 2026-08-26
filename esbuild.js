@@ -26,6 +26,17 @@ const BROWSER_EXTERNAL_BUILTINS = [
   "child_process",
 ];
 
+/**
+ * 開発用の道具（実機確認を回すヘルパー）を束に入れるか。
+ *
+ * **配布物には入れない**（作者の指定、2026-08-26）。`false` に畳むと、
+ * `if (__DEV_HELPERS__)` の中は死んだ枝になり、esbuild がまるごと落とす。
+ * 中にある動的importも消えるので、**そのファイル自体が束に入らない。**
+ *
+ * 入っていないことは `npm run verify:vsix` が見張る。
+ */
+const DEFINE = { __DEV_HELPERS__: production ? "false" : "true" };
+
 async function main() {
   const desktop = await esbuild.context({
     entryPoints: ["src/extension.ts"],
@@ -37,6 +48,7 @@ async function main() {
     platform: "node",
     outfile: "dist/extension.js",
     external: ["vscode"],
+    define: DEFINE,
     logLevel: "info",
   });
 
@@ -50,6 +62,7 @@ async function main() {
     platform: "browser",
     outfile: "dist/browser-extension.js",
     external: ["vscode", ...BROWSER_EXTERNAL_BUILTINS],
+    define: DEFINE,
     alias: { path: "path-browserify" },
     logLevel: "info",
   });
