@@ -537,7 +537,9 @@ export async function run(): Promise<void> {
             1,
             "別環境の変更を未取得として数えられません"
           );
-          assert.equal(describeSyncBadge(status), "↓1");
+          // 印は矢印から言葉へ変えた（0.20.3）。
+          // **作品ごとの数**を出すので、1作品＝1置き場のここでは受け取り1件
+          assert.equal(describeSyncBadge(status), "受け取り1");
 
           // 自動では取り込まない。作業ツリーが変わっていないことで確かめる
           const files = await fs.readdir(workPath);

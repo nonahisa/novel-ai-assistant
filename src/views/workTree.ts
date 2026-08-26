@@ -158,8 +158,9 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         stats.conflictedCount > 0
           ? ` / ⚠競合 ${stats.conflictedCount}件`
           : "";
-      // GitHubとの差は「↓3 ↑2」の形で短く添える。
-      // 別の環境へ移る前に気づけるかどうかが分かれ目になる（設計書5.5.1）
+      // GitHubとの差は「記録待ち2・送信待ち6」の形で短く添える（設計書5.5.17）。
+      // 別の環境へ移る前に気づけるかどうかが分かれ目になる（設計書5.5.1）。
+      // **数はその作品のぶんだけ**——書庫では置き場ぜんぶの数が全部の行に並ぶ
       const badge = this.syncBadge?.(work.id);
       const syncNote = badge ? ` / ${badge}` : "";
       item.description = `${stats.fileCount}ファイル / ${modeLabel}${formatCount(
