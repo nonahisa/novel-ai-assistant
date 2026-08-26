@@ -1,4 +1,9 @@
 import * as vscode from "vscode";
+import {
+  describeCurrentFont,
+  listChoices,
+} from "../core/manuscriptFonts";
+import { cancelItem, isCancelItem } from "../views/dialogs";
 import { fromUri } from "../core/paths";
 import { buildManuscriptEditorHtml } from "../views/manuscriptEditorHtml";
 import {
@@ -80,7 +85,15 @@ type Incoming =
   | { type: "emphasis"; text: string; start: number; end: number }
   | { type: "copyForPosting" }
   | { type: "openTerm"; id: string; kind: TermKind }
-  | { type: "chat"; start: number; end: number };
+  | { type: "chat"; start: number; end: number }
+  /**
+   * 書体を選ぶ。
+   *
+   * `installed` は**画面が測った**「この端末に入っている書体」。
+   * 測れなかったときは省く（全部並べる。測れないことを「入っていない」と
+   * 読み替えると、選べるものが消える）
+   */
+  | { type: "pickFont"; installed?: string[] };
 
 export interface ManuscriptEditorDeps {
   highlighter: TermHighlighter;
@@ -179,6 +192,16 @@ export class ManuscriptEditorProvider
       })
     );
 
+    // **見た目の設定を変えたら、その場で効かせる**（設計書6.25.3）。
+    // 0.19.0の書体の設定は、変えても**開き直すまで効かなかった**。
+    // 設定を直したのに何も起きなければ、作者は壊れていると受け取る
+    subscriptions.push(
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (!event.affectsConfiguration("novelai.manuscriptEditor")) return;
+        void send();
+      })
+    );
+
     panel.onDidDispose(() => {
       for (const item of subscriptions) item.dispose();
     });
@@ -226,6 +249,10 @@ export class ManuscriptEditorProvider
           await this.deps.openSettings(found.work, message.kind, message.id);
           break;
         }
+
+        case "pickFont":
+          await pickFont(message.installed);
+          break;
 
         case "chat":
           await this.deps.openChat(
@@ -442,6 +469,52 @@ export class ManuscriptEditorProvider
  * 状態はその原稿ごとに覚える（`vscode.setState`）ので、設定を書き換えても
  * すでに開いている原稿の向きは変わらない。
  */
+/**
+ * 書体を選んでもらい、設定へ書き戻す（設計書6.25.3）。
+ *
+ * **設定を1つの出どころにする。** 原稿ごとに覚える形にすると、
+ * 新しい話を開くたびに書体が戻る。作者が選ぶのは「この作品の書体」ではなく
+ * 「自分の読み書きする書体」である。
+ *
+ * **入っていない書体も並べて、入っていないと書く。** 消すと
+ * 「あるはずのものが無い」に見え、なぜ選べないのかが分からない
+ * （`processAvailability.ts` と同じ考え方）。
+ */
+async function pickFont(installed?: string[]): Promise<void> {
+  const config = vscode.workspace.getConfiguration("novelai");
+  const current = config.get<string>("manuscriptEditor.fontFamily", "").trim();
+  const available = installed ? new Set(installed) : undefined;
+
+  const choices = listChoices(current, available).map((font) => ({
+    label: (font.selected ? "$(check) " : "") + font.label,
+    description: font.kind,
+    detail: font.installed
+      ? undefined
+      : "この端末には入っていません（選ぶと、近い書体で表示されます）",
+    value: font.value,
+  }));
+
+  const picked = await vscode.window.showQuickPick(
+    [...choices, cancelItem()],
+    {
+      title: `原稿の書体（いま: ${describeCurrentFont(current)}）`,
+      placeHolder: "本文に使う書体を選んでください",
+      matchOnDescription: true,
+    }
+  );
+  if (!picked || isCancelItem(picked)) return;
+
+  const value = "value" in picked ? picked.value : undefined;
+  if (value === undefined || value === current) return;
+
+  // **全体の設定へ書く。** 作品ごとではなく、作者ごとの好みである
+  await config.update(
+    "manuscriptEditor.fontFamily",
+    value,
+    vscode.ConfigurationTarget.Global
+  );
+}
+
 function readAppearance(): { verticalDefault: boolean; fontFamily: string } {
   const config = vscode.workspace.getConfiguration("novelai");
   return {

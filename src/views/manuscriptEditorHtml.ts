@@ -21,6 +21,21 @@
  * 切り替えは1つのボタンで、**同じ場所を見続けられるようにする**。
  */
 
+import { MANUSCRIPT_FONTS } from "../core/manuscriptFonts";
+
+/**
+ * 測る書体の名前。
+ *
+ * **一覧は `core/manuscriptFonts.ts` が持つ。** ここへ写すと、
+ * 書体を1つ足すたびに2か所を直すことになる（片方が必ず古くなる）。
+ *
+ * 値をHTMLへ埋め込まない決まりの例外にあたるが、これは**作者の書いたもので
+ * はなく、こちらが決めた定数**である（引用符や `<` は入らない）。
+ */
+const PROBE_FONT_NAMES = MANUSCRIPT_FONTS.map((font) => font.probe).filter(
+  (name): name is string => name !== undefined
+);
+
 export function buildManuscriptEditorHtml(
   nonce: string,
   cspSource: string
@@ -256,6 +271,7 @@ body.plain .term { color: inherit; }
   <button id="emph" title="選んだ文字に傍点を付けます">傍点</button>
   <div class="sep"></div>
   <button id="copy" title="投稿サイトの記法に直してコピーします">投稿用にコピー</button>
+  <button id="font" title="本文の書体を選びます">書体</button>
   <button id="smaller" title="文字を小さく">ー</button>
   <button id="bigger" title="文字を大きく">＋</button>
   <div class="gap"></div>
@@ -301,6 +317,47 @@ body.plain .term { color: inherit; }
   let pending = null;
   /** 書いている間に届いた「読む面」。切り替えるときに当てる */
   let freshHtml = null;
+
+  /**
+   * その書体が、この端末に入っているか。
+   *
+   * **document.fonts.check は当てにならない。** 入っていない書体名でも
+   * 逃げ先で描けてしまうため true を返す。**幅を測って見分ける**——
+   * 入っていなければ逃げ先と同じ形で描かれ、幅が一致する。
+   *
+   * 逃げ先を2つ（serif と monospace）試すのは、**まれに逃げ先そのものと
+   * 同じ幅になる**ためである。片方でも違えば、その書体で描かれている。
+   */
+  function fontInstalled(name) {
+    const canvas = fontInstalled.canvas || (fontInstalled.canvas =
+      document.createElement("canvas"));
+    const context = canvas.getContext("2d");
+    if (!context) return true;
+    // 仮名と漢字と欧文を混ぜる。欧文だけだと、和文書体の違いが出ない
+    const sample = "あ亜Aｱ漢";
+    const width = (family) => {
+      context.font = '16px ' + family;
+      return context.measureText(sample).width;
+    };
+    return ["serif", "monospace"].some(
+      (fallback) =>
+        width('"' + name + '", ' + fallback) !== width(fallback)
+    );
+  }
+
+  /** この端末に入っている書体（測るのは押されたときだけ） */
+  function installedFonts(names) {
+    try {
+      return names.filter(fontInstalled);
+    } catch (error) {
+      // 測れなかったときは**何も渡さない**。
+      // 「測れない」を「入っていない」と読み替えると、選べるものが消える
+      return undefined;
+    }
+  }
+
+  /** 測る書体。**一覧は core/manuscriptFonts.ts が持つ**（写さない） */
+  const PROBE_FONTS = ${JSON.stringify(PROBE_FONT_NAMES)};
 
   const saved = vscode.getState() || {};
   /** はじめの向きは設定から。**一度切り替えたら、その原稿ではそれを覚える** */
@@ -391,6 +448,14 @@ body.plain .term { color: inherit; }
     vertical = vertical === false;
     paint();
     remember();
+  });
+
+  document.getElementById("font").addEventListener("click", function () {
+    // **押されたときだけ測る。** 開くたびに測ると、その分だけ表示が遅れる
+    vscode.postMessage({
+      type: "pickFont",
+      installed: installedFonts(PROBE_FONTS),
+    });
   });
 
   document.getElementById("bigger").addEventListener("click", function () {
