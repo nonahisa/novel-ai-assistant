@@ -1,7 +1,14 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 // @ts-expect-error 生成器は .mjs（型は付いていない）
-import { collectPendingChecks, render, SOURCE, TARGET } from "../../scripts/pendingChecksLib.mjs";
+import {
+  collectPendingChecks,
+  render,
+  renderItems,
+  ITEMS_TARGET,
+  SOURCE,
+  TARGET,
+} from "../../scripts/pendingChecksLib.mjs";
 import { ACTION_TREE, allActions, type ActionGroup } from "../../src/views/actionList";
 import {
   buildPendingCheckGroup,
@@ -19,11 +26,22 @@ import type { PendingCheckSection } from "../../src/views/pendingChecks";
 
 describe("確認リストから作った一覧", () => {
   test("文書とずれていない", () => {
-    // ここが落ちたら `node scripts/pendingChecks.mjs` で作り直す。
+    // ここが落ちたら `npm run checks:menu` で作り直す。
     // **古い数字がメニューに残るのを防ぐための見張りである**
-    const expected = render(collectPendingChecks(readFileSync(SOURCE, "utf8")));
+    const sections = collectPendingChecks(readFileSync(SOURCE, "utf8"));
 
-    expect(readFileSync(TARGET, "utf8")).toBe(expected);
+    expect(readFileSync(TARGET, "utf8")).toBe(render(sections));
+    expect(readFileSync(ITEMS_TARGET, "utf8")).toBe(renderItems(sections));
+  });
+
+  test("配布物へ入るほうに、項目の文章を入れない", () => {
+    // 確認リストには作者の作品名のような、外へ出すつもりのない言葉が入る
+    // （作者の指定、2026-08-26）
+    const shipped = readFileSync(TARGET, "utf8");
+
+    expect(shipped).not.toContain("じいちゃんの自分史");
+    // 件数は入る（メニューの「残り8」に要る）
+    expect(shipped).toContain("count:");
   });
 
   test("指している操作は、すべて実在する", () => {
@@ -126,7 +144,7 @@ describe("「テスト中」の組み立て", () => {
           id: "A-15",
           title: "作品をすべて同期",
           commands: ["novelai.syncAllWorks"],
-          items: ["ひとつ", "ふたつ"],
+          count: 2,
         },
       ]
     );
@@ -158,8 +176,8 @@ describe("「テスト中」の組み立て", () => {
         },
       ],
       [
-        { id: "A-10", title: "ルビ", commands: ["novelai.openSettingsPanel"], items: ["あ"] },
-        { id: "A-14", title: "改名", commands: ["novelai.openSettingsPanel"], items: ["い", "う"] },
+        { id: "A-10", title: "ルビ", commands: ["novelai.openSettingsPanel"], count: 1 },
+        { id: "A-14", title: "改名", commands: ["novelai.openSettingsPanel"], count: 2 },
       ]
     );
 
@@ -185,7 +203,7 @@ describe("「テスト中」の組み立て", () => {
   test("操作から辿れない節を、数えられる", () => {
     // 環境が要るもの・見るだけのものは押す操作が無い。**黙って落とさない**
     const orphans = unreachableSections(PENDING_CHECKS);
-    const counted = orphans.reduce((sum, section) => sum + section.items.length, 0);
+    const counted = orphans.reduce((sum, section) => sum + section.count, 0);
 
     expect(counted).toBeLessThan(PENDING_CHECK_TOTAL);
     for (const section of orphans) expect(section.commands).toEqual([]);

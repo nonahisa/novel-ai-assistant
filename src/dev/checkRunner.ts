@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as paths from "../core/paths";
 import { PENDING_CHECKS, type PendingCheckSection } from "../views/pendingChecks";
+import { PENDING_CHECK_ITEMS } from "./pendingCheckItems";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
@@ -22,6 +23,12 @@ import { cancelItem, isCancelItem } from "../views/dialogs";
  *
  * - 節を選ぶ → **その機能をその場で実行できる**（探さない）
  * - 通った項目に印を付ける → **文書へ書き戻す**（開き直さない）
+ *
+ * ## 項目の文章は、この道具だけが持つ
+ *
+ * 確認リストの項目には、作者の作品名のような**外へ出すつもりのない言葉**が入る。
+ * 配布物に入るほう（`views/pendingChecks.ts`）は件数だけにして、
+ * **文章は `pendingCheckItems.ts`（この道具と一緒に落ちる）**に置いた。
  *
  * ## 判断は作者がする
  *
@@ -52,7 +59,7 @@ async function pickSection(): Promise<PendingCheckSection | undefined> {
   const items: Array<vscode.QuickPickItem & { section?: PendingCheckSection }> =
     PENDING_CHECKS.map((section) => ({
       label: `${section.id ? `${section.id}. ` : ""}${section.title}`,
-      description: `残り${section.items.length}`,
+      description: `残り${section.count}`,
       detail:
         section.commands.length > 0
           ? `実行できます: ${section.commands.join(" / ")}`
@@ -93,7 +100,7 @@ async function walkSection(
   quick.title = `${section.id ? `${section.id}. ` : ""}${section.title}`;
   quick.placeholder = "通った項目を選んで Enter。選ばなければ何も変わりません";
   quick.canSelectMany = true;
-  quick.items = section.items.map((item) => ({ label: item }));
+  quick.items = itemsOf(section).map((item) => ({ label: item }));
   quick.buttons = section.commands.length > 0 ? [run, openDoc] : [openDoc];
   quick.ignoreFocusOut = true;
 
@@ -238,8 +245,14 @@ function checklistUri(context: vscode.ExtensionContext): vscode.Uri {
 }
 
 function total(): number {
-  return PENDING_CHECKS.reduce(
-    (sum, section) => sum + section.items.length,
-    0
-  );
+  return PENDING_CHECKS.reduce((sum, section) => sum + section.count, 0);
+}
+
+/**
+ * その節の項目の文章。
+ *
+ * 鍵は確認リストの番号。**番号の無い節は名前を鍵にする**（生成器と揃える）。
+ */
+function itemsOf(section: PendingCheckSection): readonly string[] {
+  return PENDING_CHECK_ITEMS[section.id || section.title] ?? [];
 }

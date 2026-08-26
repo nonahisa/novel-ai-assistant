@@ -21,8 +21,14 @@ import type { PendingCheckSection } from "./pendingChecks";
  *
  * ## 数はここで作らない
  *
- * 未確認の項目は `pendingChecks.ts`（`docs/実機確認リスト.md` から自動生成）が持つ。
+ * 未確認の件数は `pendingChecks.ts`（`docs/実機確認リスト.md` から自動生成）が持つ。
  * **文書を手で写さない。** 写すと必ず片方が古くなる。
+ *
+ * ## 配布物には件数だけを入れる（作者の指定、2026-08-26）
+ *
+ * 確認リストの**項目の文章**には、作者の作品名のような外へ出すつもりのない言葉が
+ * 入る。ここで組み立てる説明にも**文章を入れない**——出すのは件数と節の番号だけで、
+ * 何を確かめるのかは開発ビルドの道具（`src/dev/checkRunner.ts`）が見せる。
  */
 
 /** 組み立てた結果。作れなかった（残りが無い）ときは undefined */
@@ -130,10 +136,7 @@ function toPendingItem(
   const sections = byCommand.get(item.command);
   if (!sections || sections.length === 0) return undefined;
 
-  const remaining = sections.reduce(
-    (sum, section) => sum + section.items.length,
-    0
-  );
+  const remaining = sections.reduce((sum, section) => sum + section.count, 0);
   const ids = sections.map((section) => section.id).filter((id) => id !== "");
 
   return {
@@ -152,31 +155,19 @@ function describePending(
   ids: readonly string[]
 ): string {
   const where = sectionLabel ? `${sectionLabel} → ${item.label}` : item.label;
-  const lines = [
-    `**${where}**（確認リスト ${ids.length > 0 ? ids.join("・") : "番号なし"}）`,
+  const total = sections.reduce((sum, section) => sum + section.count, 0);
+
+  return [
+    `**${where}**`,
     "",
-  ];
-
-  for (const section of sections) {
-    for (const check of section.items.slice(0, MAX_SHOWN)) {
-      lines.push(`- ${check}`);
-    }
-  }
-
-  const total = sections.reduce((sum, section) => sum + section.items.length, 0);
-  const shown = sections.reduce(
-    (sum, section) => sum + Math.min(section.items.length, MAX_SHOWN),
-    0
-  );
-  // **省いた件数は必ず書く。** 黙って切ると、これで全部だと読めてしまう
-  if (total > shown) lines.push(`- ほか${total - shown}件`);
-
-  lines.push("", "押すと、その機能をそのまま実行します。");
-  return lines.join("\n");
+    `- まだ確かめていない項目: ${total}件`,
+    `- 確認リスト: ${ids.length > 0 ? ids.join("・") : "番号なし"}`,
+    "",
+    // **項目の文章はここに出さない**（配布物へ入るため）。何を確かめるのかは、
+    // 確認リストと、開発ビルドの「実機確認を回す」で見る
+    "押すと、その機能をそのまま実行します。",
+  ].join("\n");
 }
-
-/** ホバーに並べる項目の数。**多すぎると画面から溢れて読めない** */
-const MAX_SHOWN = 6;
 
 /**
  * どの操作からも辿れない節。
@@ -198,12 +189,9 @@ export function unreachableSections(
  * **並んでいるものが全部だと読めてしまう。**
  */
 function describeGroup(pending: readonly PendingCheckSection[]): string {
-  const total = pending.reduce((sum, section) => sum + section.items.length, 0);
+  const total = pending.reduce((sum, section) => sum + section.count, 0);
   const orphans = unreachableSections(pending);
-  const orphanCount = orphans.reduce(
-    (sum, section) => sum + section.items.length,
-    0
-  );
+  const orphanCount = orphans.reduce((sum, section) => sum + section.count, 0);
 
   const lines = [
     `**実機でまだ確かめていないもの（残り${total}件）**`,

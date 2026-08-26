@@ -1,4 +1,3 @@
-
 /**
  * 実機確認リストの読み取りと、書き出す中身の組み立て（副作用なし）。
  *
@@ -11,15 +10,20 @@
  * 同じ1つの文書（`docs/実機確認リスト.md`）から作る。写すと必ず片方が古くなる
  * （引継ぎ書の目次と同じ考え方。`scripts/handoverToc.mjs`）。
  *
- * 機械が触ってよいのは、機械にしか作れないものだけである（CLAUDE.md）。
- * ここで作るのは**見出しと未確認の項目を機械的に写したもの**で、文章は書かない。
+ * ## 2つに分けて書き出す（作者の指定、2026-08-26）
  *
- *     node scripts/pendingChecks.mjs          作り直す
- *     node scripts/pendingChecks.mjs --check  ずれていないか見るだけ（テスト用）
+ * | 書き出す先 | 中身 | 配布物 |
+ * |---|---|---|
+ * | `src/views/pendingChecks.ts` | 節の名前と**件数**だけ | 入る |
+ * | `src/dev/pendingCheckItems.ts` | **項目の文章** | 入らない |
+ *
+ * 確認リストの項目には、作者の作品名のような**外へ出すつもりのない言葉**が入る
+ * （「じいちゃんの自分史で、文語体を…」）。Marketplaceへ出す束に混ぜない。
  */
 
 export const SOURCE = "docs/実機確認リスト.md";
 export const TARGET = "src/views/pendingChecks.ts";
+export const ITEMS_TARGET = "src/dev/pendingCheckItems.ts";
 
 /** 見出しから、番号と表題を取り出す */
 function parseHeading(line) {
@@ -77,6 +81,7 @@ function cleanItem(text) {
   return text.replace(/\*\*/g, "").trim();
 }
 
+/** 件数だけの一覧。**配布物にも入る** */
 export function render(sections) {
   const total = sections.reduce((sum, section) => sum + section.items.length, 0);
   const body = sections
@@ -88,17 +93,12 @@ export function render(sections) {
         `    commands: [${section.commands
           .map((name) => JSON.stringify(name))
           .join(", ")}],\n` +
-        `    items: [\n${section.items
-          .map((item) => `      ${JSON.stringify(item)},`)
-          .join("\n")}\n    ],\n` +
+        `    count: ${section.items.length},\n` +
         `  },`
     )
     .join("\n");
 
-  return `// このファイルは自動生成です。手で書き換えないでください。
-// 作り直す: node scripts/pendingChecks.mjs
-// 元の文書: ${SOURCE}
-
+  return `${header()}
 /** 実機でまだ確かめていない機能の、1かたまり */
 export interface PendingCheckSection {
   /** 確認リストの番号（"A-15"）。無い節は空文字 */
@@ -107,16 +107,56 @@ export interface PendingCheckSection {
   title: string;
   /** その節で確かめる操作。無い節（環境が要るものなど）は空 */
   commands: string[];
-  /** まだ確かめていない項目 */
-  items: string[];
+  /** まだ確かめていない項目の数 */
+  count: number;
 }
 
-/** まだ確かめていないもの。**${SOURCE} から機械的に作る** */
+/**
+ * まだ確かめていないもの。**${SOURCE} から機械的に作る**
+ *
+ * **項目の文章はここに入れない**（作者の指定、2026-08-26）。
+ * 確認リストには作者の作品名のような外へ出すつもりのない言葉が入るので、
+ * 配布物に混ぜない。文章は \`${ITEMS_TARGET}\`（配布物に入らない）にある。
+ */
 export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ${body}
 ];
 
 /** 残っている項目の総数 */
 export const PENDING_CHECK_TOTAL = ${total};
+`;
+}
+
+/** 項目の文章。**配布物には入らない**（開発ビルドだけが読む） */
+export function renderItems(sections) {
+  const body = sections
+    .map(
+      (section) =>
+        `  ${JSON.stringify(section.id || section.title)}: [\n${section.items
+          .map((item) => `    ${JSON.stringify(item)},`)
+          .join("\n")}\n  ],`
+    )
+    .join("\n");
+
+  return `${header()}
+/**
+ * 確認リストの項目の文章。
+ *
+ * **配布物には入らない**（作者の指定、2026-08-26）。読むのは開発ビルドだけで、
+ * 本番ビルドでは \`__DEV_HELPERS__\` が false に畳まれ、これを読む枝ごと落ちる。
+ *
+ * 鍵は確認リストの番号（"A-15"）。番号の無い節は名前を鍵にする。
+ */
+export const PENDING_CHECK_ITEMS: Readonly<Record<string, readonly string[]>> = {
+${body}
+};
+`;
+}
+
+function header() {
+  return `// このファイルは自動生成です。手で書き換えないでください。
+// 作り直す: npm run checks:menu
+// 元の文書: ${SOURCE}
+
 `;
 }

@@ -31,6 +31,8 @@ const FORBIDDEN_CONTENT_PATTERNS = [
   // ASCIIの名前で見る——日本語は逃がされた形になるため（0.13.0で踏んだ）
   /novelai[.]runChecks/,
   /checkRunner/,
+  // 確認リストの項目の文章。**作者の作品名が入る**ので配布物へ出さない
+  /PENDING_CHECK_ITEMS/,
 ];
 
 export async function deriveReleaseMetadata(repositoryRoot) {
