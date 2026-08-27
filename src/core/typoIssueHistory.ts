@@ -155,8 +155,12 @@ export interface AiActionLogEntry {
    *
    * `"reverted"` は、適用したものを元へ戻したこと（設計書6.8.12）。
    * **記録は追記だけ**なので、消すのではなく「戻した」を足す。
+   *
+   * `"resolved"` は、**作者が本文を手で書き直して片付いた**ことを
+   * 再チェックで確かめた場合（P-23）。拡張機能は本文に一切
+   * 書いていないので、`"applied"` とは分けて記録する。
    */
-  action: "applied" | "dismissed" | "reverted";
+  action: "applied" | "dismissed" | "reverted" | "resolved";
   file: string;
   line: number;
   target: string;

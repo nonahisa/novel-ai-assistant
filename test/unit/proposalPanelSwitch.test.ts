@@ -27,13 +27,18 @@ const posted: Array<{ category: string; items: unknown[] }> = [];
 const notified: string[] = [];
 /** その通知に作者が何と答えるか。既定は「答えない」（×で閉じたのと同じ） */
 let notificationAnswer: string | undefined;
+/** 警告に出た文言。再チェックがAI未設定を伝えているかを見る */
+const warned: string[] = [];
 
 vi.mock("vscode", () => {
   const noop = () => undefined;
   return {
     commands: { executeCommand: vi.fn() },
     window: {
-      showWarningMessage: vi.fn(),
+      showWarningMessage: vi.fn((message: string) => {
+        warned.push(message);
+        return Promise.resolve(undefined);
+      }),
       showInformationMessage: vi.fn((message: string) => {
         notified.push(message);
         return Promise.resolve(notificationAnswer);
@@ -142,6 +147,7 @@ function switchWork(panel: ProposalPanel, workId: string): void {
 beforeEach(() => {
   posted.length = 0;
   notified.length = 0;
+  warned.length = 0;
   notificationAnswer = undefined;
 });
 
@@ -518,6 +524,75 @@ describe("作品の切り替え口", () => {
 
   test("1作品のときは出さない", () => {
     expect(html()).toContain("works.length < 2");
+  });
+});
+
+/**
+ * 指摘の再チェック（P-23）。
+ *
+ * 作者の依頼（2026-08-27）：「なおし方を作者が決める系のものは『再チェック』
+ * ボタンを追加してください」「誤字脱字の提案パネルでも、違うそうじゃないと
+ * いう提案がきます。手書きで書き直して解消したか確認したいです」。
+ *
+ * **どこに出して、どこに出さないか**だけをここで押さえる。中身の判定は
+ * `recheckProposal.test.ts` にある。
+ */
+describe("再チェックの出し分け", () => {
+  test("誤字脱字の指摘には出す", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    expect(latest().items[0]).toMatchObject({ canRecheck: true });
+  });
+
+  /** **修正案が無い指摘こそ、この機能の出発点。** 直し方は作者が決める */
+  test("推敲の指摘には、修正案が無くても出す", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [{ ...typo, suggestion: "", reason: "長文" }], "推敲");
+    expect(latest().items[0]).toMatchObject({ canRecheck: true });
+  });
+
+  /**
+   * **編集部からの提案には出さない**（設計書5.6）。
+   * あちらは承認・却下という別の片付け方を持っており、結果を提案の側へ
+   * 書き戻す必要もある。
+   */
+  test("編集部からの提案には出さない", () => {
+    const panel = panelWithView();
+    panel.showProposals(work, [
+      {
+        id: "e1",
+        filePath: "本文/001.txt",
+        fileName: "001.txt",
+        chunkHash: "",
+        line: 3,
+        original: "彼は走つた",
+        target: "走つた",
+        suggestion: "走った",
+        reason: "促音の誤り",
+        confidence: "high",
+        status: "pending",
+        proposalId: "p1",
+      },
+    ]);
+    expect(latest().items[0]).toMatchObject({ canRecheck: false });
+  });
+
+  /**
+   * **AIが無ければ、黙って何もしないをやめる。**
+   * 押したのに無反応だと「壊れている」としか見えない。
+   */
+  test("AIが設定されていなければ、その旨を伝える", async () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const id = (panel as any).items[0].id as string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (panel as any).handleMessage({ type: "recheck", id });
+
+    expect(warned[0]).toContain("AIが設定されていません");
+    // 指摘には手を付けない
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((panel as any).items[0].status).toBe("pending");
   });
 });
 

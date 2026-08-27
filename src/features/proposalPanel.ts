@@ -34,6 +34,12 @@ import {
   type CategorySummary,
   type WorkSummary,
 } from "../core/proposalBuckets";
+// **型だけを取る。** `AIRegistry` の実体は呼び出し側（extension.ts）が
+// 作ったものを受け取るので、ここで束に取り込む必要がない
+import type { AIRegistry } from "../ai/registry";
+import { confirmPaidUsage } from "./aiConnectivity";
+import { recheckProposal, type RecheckOutcome } from "./recheckProposal";
+import { logFailure } from "../core/logger";
 
 /**
  * 提案パネル（誤字脱字）。
@@ -51,14 +57,23 @@ import {
 export const PROPOSALS_VIEW_ID = "novelai.proposalsView";
 
 /**
- * 画面へ送る直前に、違うところを計算して添える。
+ * 画面へ送る直前に、違うところと「再チェックできるか」を添える。
  *
  * **修正案の無い指摘がある**（推敲の「長すぎる文」など）。そのときは
- * 比べる相手がいないので、何も添えない。
+ * 比べる相手がいないので、違うところは添えない。
+ *
+ * **再チェックは、修正案の有無に関わらず出す。** 作者は誤字脱字の指摘も
+ * 手で書き直すし、修正案どおりに直すとも限らない（作者の依頼、2026-08-27）。
+ * 出さないのは編集部からの提案だけで、あちらは承認・却下という別の
+ * 片付け方を持っている。
  */
-function withDiff(item: ProposalViewItem): ProposalViewItem {
-  if (!item.suggestion) return item;
-  return { ...item, diff: diffChars(item.target, item.suggestion) };
+function forView(item: ProposalViewItem): ProposalViewItem {
+  const shown: ProposalViewItem = {
+    ...item,
+    canRecheck: !item.proposalId,
+  };
+  if (!item.suggestion) return shown;
+  return { ...shown, diff: diffChars(item.target, item.suggestion) };
 }
 
 export interface ProposalViewItem {
@@ -80,8 +95,32 @@ export interface ProposalViewItem {
    */
   detail?: string;
   confidence: "high" | "medium" | "low";
-  status: "pending" | "applied" | "failed" | "dismissed";
+  /**
+   * いまの扱い。
+   *
+   * `"resolved"` は**作者が本文を書き直して片付いた**もの（P-23）。
+   * 「適用した」でも「見送った」でもないので分ける——適用は拡張機能が
+   * 本文を書き換えたことを、見送りは直さないと決めたことを意味する。
+   */
+  status: "pending" | "applied" | "failed" | "dismissed" | "resolved";
   statusDetail?: string;
+  /**
+   * 再チェックした結果（P-23）。
+   *
+   * **`statusDetail` とは分ける。** あちらは適用に失敗した理由で、画面では
+   * 赤く出る。こちらは「確かめた結果」であって不具合ではない。
+   */
+  recheckNote?: string;
+  /**
+   * 再チェックの最中か。**押した手応えを返すために要る。**
+   * AIの応答は数秒〜数十秒かかるので、無反応だと壊れたようにしか見えない。
+   */
+  busy?: boolean;
+  /**
+   * 「再チェック」を出すか。**画面へ送る直前に決める**（`forView`）ので、
+   * 保存はしない
+   */
+  canRecheck?: boolean;
   /**
    * `target` のどこが `suggestion` で変わるか、区間に分けたもの。
    *
@@ -201,6 +240,8 @@ type IncomingMessage =
   | { type: "dismiss"; id: string }
   | { type: "keepWord"; id: string }
   | { type: "openSettings"; id: string }
+  /** 作者が本文を手で書き直したあと、その指摘が解消したかを確かめる */
+  | { type: "recheck"; id: string }
   | { type: "applyAll" }
   /** 別の分類へ切り替える */
   | { type: "selectCategory"; category: string }
@@ -303,6 +344,22 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * 指摘は控えに残り続ける（2026-08-27）。
    */
   private buckets = new Map<string, WorkBuckets>();
+  /**
+   * 有料AIの確認を取ったモデル（P-23）。
+   *
+   * **このパネルを開いている間に一度だけ確認する。** 再チェックは1件ずつ
+   * 押す操作なので、毎回モーダルが出ると確かめる気が失せる。かといって
+   * 一度も出さないと、知らないうちに料金が積み上がる。
+   * モデルを覚えるのは、**切り替えたら確認を取り直す**ため。
+   */
+  private paidConfirmedFor: string | undefined;
+
+  /**
+   * @param ai 再チェック（P-23）で使う。**渡されなければ
+   *   「再チェック」を押したときにAI未設定として断る。** 検知の結果を
+   *   出すだけなら要らないので、必須にはしていない
+   */
+  constructor(private readonly ai?: AIRegistry) {}
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
@@ -735,7 +792,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         ? this.recordUpdates
         : contradictionMode
           ? this.contradictions
-          : this.items.map(withDiff),
+          : this.items.map(forView),
       // 設定資料の更新は、まとめて反映できる（1件ずつだと19話ぶんで手が止まる）
       canApplyAll: !contradictionMode,
       // **1つしか無いときはタブを出さない。** 選ぶものが無いのに
@@ -808,6 +865,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         return;
       case "openSettings":
         await this.openSettingsFor(message.id);
+        return;
+      case "recheck":
+        await this.recheckIssue(message.id);
         return;
       case "applyAll":
         await this.applyVisible();
@@ -1233,6 +1293,169 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   }
 
   /**
+   * 作者が本文を手で書き直したあと、その指摘が解消したかを確かめる
+   * （P-23）。
+   *
+   * 作者の依頼（2026-08-27）：「なおし方を作者が決める系のものは『再チェック』
+   * ボタンを追加してください。なおして解消されたか確認したいです」
+   * 「誤字脱字の提案パネルでも、違うそうじゃないという提案がきます。
+   * 手書きで書き直して解消したか確認したいです」。
+   *
+   * ## 安い順に確かめる
+   *
+   * 1. **引用がまだそのまま在るか**を照合する（無料）。在れば直し忘れである
+   * 2. 変わっていたら、該当箇所の前後だけを添えてAIに1問だけ聞く
+   *
+   * 検知をやり直しても分かるが、あちらは作品まるごとを何十チャンクにも
+   * 割って走らせる。**1件のために全部を走らせ直すのは高い。**
+   *
+   * ## 判定は、この1件にしか及ぼさない
+   *
+   * 解消と分かっても、片付けるのはこの指摘だけである。**似た指摘まで
+   * まとめて消さない**——同じ語でも話ごとに事情が違う。
+   */
+  private async recheckIssue(id: string): Promise<void> {
+    const item = this.items.find((entry) => entry.id === id);
+    if (!item || !this.work) return;
+    // **編集部からの提案には出さない。** あちらは承認・却下という別の
+    // 片付け方を持っており、結果を提案の側へ書き戻す必要もある
+    if (item.proposalId) return;
+    // 二重に押されても、1回だけ走らせる
+    if (item.busy) return;
+    const work = this.work;
+    // **作品と分類は、押された時点のものを覚えておく。** AIの答えを待つ間に
+    // 作者がタブや作品を切り替えることがあり、`this` を見に行くと
+    // 別の分類の名前でAIに問い合わせることになる
+    const category = this.category;
+
+    const resolved = this.ai?.resolve();
+    if (!resolved) {
+      void vscode.window.showWarningMessage(
+        "AIが設定されていません。操作メニューの「AIの設定」から設定してください。"
+      );
+      return;
+    }
+
+    if (resolved.provider.isPaid && this.paidConfirmedFor !== resolved.model) {
+      const ok = await confirmPaidUsage(resolved.provider, {
+        actionLabel: "指摘の再チェック",
+        model: resolved.model,
+        calls: 1,
+        detail:
+          "本文が書き直されていれば、その1件についてAIへ1回だけ問い合わせます。\n" +
+          "書き直されていなければ、AIは呼びません。\n" +
+          "（この確認は、このパネルで一度だけです）",
+      });
+      if (!ok) return;
+      this.paidConfirmedFor = resolved.model;
+    }
+
+    this.setBusy(item, true);
+    try {
+      let file;
+      try {
+        file = await readTextFile(item.filePath);
+      } catch {
+        this.noteRecheck(item, "本文を読み込めませんでした。");
+        return;
+      }
+
+      const outcome = await recheckProposal({
+        provider: resolved.provider,
+        model: resolved.model,
+        workFolder: work.folderPath,
+        category,
+        fileName: item.fileName,
+        content: file.text,
+        item: {
+          line: item.line,
+          original: item.original,
+          target: item.target,
+          suggestion: item.suggestion,
+          reason: [item.reason, item.detail].filter(Boolean).join("："),
+        },
+      });
+      await this.applyRecheckOutcome(item, outcome, work);
+    } finally {
+      // **必ず戻す。** 途中で失敗しても、押せないままの行を残さない
+      this.setBusy(item, false);
+    }
+  }
+
+  /** 再チェックの結果を、画面と記録へ反映する */
+  private async applyRecheckOutcome(
+    item: ProposalViewItem,
+    outcome: RecheckOutcome,
+    work: WorkEntry
+  ): Promise<void> {
+    const at = clockLabel();
+
+    if (outcome.kind === "unchanged") {
+      // ここに来るのは、AIを呼ばずに済んだ場合である（引用がそのまま残って
+      // いた）。**直し忘れは、その場で分かるのがいちばん役に立つ**
+      this.noteRecheck(
+        item,
+        `再チェック（${at}）：本文がまだ変わっていません（同じ文のままです）。`
+      );
+      void vscode.window.showInformationMessage(
+        `${item.fileName} ${item.line}行目は、まだ書き直されていません。`
+      );
+      return;
+    }
+
+    if (outcome.kind === "failed") {
+      // **指摘は残す。** 通信の失敗や応答の崩れで、本物の指摘を消さない
+      this.noteRecheck(item, `再チェック（${at}）：${outcome.reason}`);
+      logFailure("指摘の再チェック", {
+        ファイル: item.fileName,
+        行: String(item.line),
+        詳細: outcome.detail ?? outcome.reason,
+      });
+      void vscode.window.showWarningMessage(
+        `再チェックできませんでした：${outcome.reason}`
+      );
+      return;
+    }
+
+    if (outcome.kind === "unresolved") {
+      this.noteRecheck(
+        item,
+        `再チェック（${at}）：まだ当てはまります。${outcome.reason}`.trim()
+      );
+      return;
+    }
+
+    // 解消。**一覧から外すのはこの1件だけ**で、本文には何も書かない
+    item.status = "resolved";
+    item.recheckNote = `再チェック（${at}）：解消を確認しました。${outcome.reason}`.trim();
+    this.postItems();
+    void vscode.window.showInformationMessage(
+      `解消を確認しました（${item.fileName} ${item.line}行目）。` +
+        "一覧から外します。"
+    );
+    await appendAiActionLog(work, {
+      category: "typo",
+      action: "resolved",
+      file: item.fileName,
+      line: item.line,
+      target: item.target,
+      suggestion: item.suggestion,
+    });
+  }
+
+  /** 再チェックの結果を書き添える（状態は変えない） */
+  private noteRecheck(item: ProposalViewItem, note: string): void {
+    item.recheckNote = note;
+    this.postItems();
+  }
+
+  /** 再チェック中かどうかを画面へ伝える */
+  private setBusy(item: ProposalViewItem, busy: boolean): void {
+    item.busy = busy;
+    this.postItems();
+  }
+
+  /**
    * この語を「今後直さない」として登録する。
    *
    * **方言・口癖は固有名詞の辞書では守れない。** 作者の10作品で測ったところ、
@@ -1386,7 +1609,12 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
 
   private markStatus(
     id: string,
-    status: ProposalViewItem["status"],
+    /**
+     * **再チェックの `"resolved"` はここを通さない。** 設定資料の更新には
+     * 無い印なので、両方へ書ける印だけを受け取る（`resolved` は
+     * `applyRecheckOutcome` が直に立てる）。
+     */
+    status: RecordUpdateViewItem["status"],
     detail?: string
   ): void {
     // 本文の指摘・設定資料の更新のどちらでも印を付けられるようにする
@@ -1489,6 +1717,19 @@ function describeWriteFailure(
 /** 表示上の番号。提案の処理では item から引き直す */
 function id2(item: ProposalViewItem): string {
   return item.id;
+}
+
+/**
+ * 再チェックした時刻（HH:mm）。
+ *
+ * **いつ確かめたのかが要る。** 作者は本文を何度も直すので、時刻が無いと
+ * 補足に出ている結果が「さっき直す前のもの」なのか分からない。
+ * 日付までは出さない——同じ日に何度も押す使い方が前提である。
+ */
+function clockLabel(now = new Date()): string {
+  const hours = String(now.getHours()).padStart(2, "0");
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
 }
 
 /**

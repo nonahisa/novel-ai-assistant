@@ -27,7 +27,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-1",
     title: "誤字脱字・推敲の適用",
     commands: ["novelai.checkTypos", "novelai.checkProofread"],
-    count: 6,
+    count: 13,
   },
   {
     id: "A-3",
@@ -57,7 +57,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-8",
     title: "書庫へまとめ直す",
     commands: ["novelai.mergeIntoLibrary"],
-    count: 12,
+    count: 6,
   },
   {
     id: "A-9",
@@ -75,7 +75,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-11",
     title: "矛盾検知のまとめ送信",
     commands: ["novelai.checkContradictions"],
-    count: 18,
+    count: 16,
   },
   {
     id: "A-12",
@@ -278,4 +278,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 357;
+export const PENDING_CHECK_TOTAL = 356;

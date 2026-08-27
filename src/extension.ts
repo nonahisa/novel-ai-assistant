@@ -612,9 +612,9 @@ export async function activate(
   });
 
   // 提案パネル（下段・出力やデバッグコンソールと同じ場所）。
-  // 誤字脱字検知の結果をここへ表示する。設定資料パネルと違い
-  // 作品ごとには分けず、直近に検知した作品の結果を1枚で見せる
-  const proposalPanel = new ProposalPanel();
+  // 誤字脱字検知の結果をここへ表示する。0.22.24から作品ごとに
+  // 置き場を分けて持つ。AIは「再チェック」（P-23）が使う
+  const proposalPanel = new ProposalPanel(aiRegistry);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(PROPOSALS_VIEW_ID, proposalPanel, {
       webviewOptions: { retainContextWhenHidden: true },

@@ -136,6 +136,17 @@ body.show-low .issue.low { display: flex; }
 .issue.applied .reason,
 .issue.applied .location { opacity: 0.55; }
 .issue.dismissed { display: none; }
+/* 再チェックで解消が確かめられたものは、見送ったものと同じく一覧から外す。
+   本文は既に作者が直しており、この行にもう作業は残っていない */
+.issue.resolved { display: none; }
+/* 再チェックの結果。**status-detail（赤）とは分ける。**
+   あちらは適用に失敗した理由で、こちらは確かめた結果である */
+.recheck-note {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  border-left: 2px solid var(--vscode-focusBorder);
+  padding-left: 8px;
+}
 .issue-head {
   display: flex;
   align-items: center;
@@ -298,7 +309,12 @@ function renderWorks(works) {
 }
 
 const CONFIDENCE_LABEL = { high: '確信度: 高', medium: '確信度: 中', low: '確信度: 低' };
-const STATUS_LABEL = { applied: '適用済み', dismissed: '無視しました', failed: '失敗' };
+const STATUS_LABEL = {
+  applied: '適用済み',
+  dismissed: '無視しました',
+  failed: '失敗',
+  resolved: '解消を確認しました',
+};
 
 function escapeHtml(text) {
   return String(text)
@@ -469,6 +485,7 @@ function renderItem(item) {
   if (item.confidence === 'low') classes.push('low');
   if (item.status === 'applied') classes.push('applied');
   if (item.status === 'dismissed') classes.push('dismissed');
+  if (item.status === 'resolved') classes.push('resolved');
 
   // **修正案の無い指摘がある**（推敲）。長すぎる文をどう割るかは
   // 文体の書き換えになるので、直し方は作者が決める。
@@ -481,6 +498,13 @@ function renderItem(item) {
   const statusDetail = item.statusDetail
     ? '<div class="status-detail">' + escapeHtml(item.statusDetail) + '</div>'
     : '';
+  // 再チェックの結果。確かめた結果であって不具合ではないので、赤で出さない
+  const recheckNote = item.recheckNote
+    ? '<div class="recheck-note">' + escapeHtml(item.recheckNote) + '</div>'
+    : '';
+  // **再チェック中はこの行の操作を全部止める。** AIの答えは数秒〜数十秒
+  // かかる。その間に「適用」を押されると、確かめている最中の本文が変わる
+  const disabled = item.busy ? ' disabled' : '';
 
   // 「冗長」の一語だけでは、何と何の話なのか分からない。説明を添える
   const explain = [item.reason, item.detail].filter(Boolean).join('：');
@@ -513,14 +537,22 @@ function renderItem(item) {
     '</div>' +
     body +
     statusDetail +
+    recheckNote +
     (canAct
       ? '<div class="actions">' +
         (hasFix
-          ? '<button data-action="apply" data-id="' + item.id + '">適用</button>'
-          : '<button data-action="jump" data-id="' + item.id + '">本文を見る</button>') +
-        '<button class="secondary" data-action="dismiss" data-id="' + item.id + '">無視</button>' +
+          ? '<button data-action="apply" data-id="' + item.id + '"' + disabled + '>適用</button>'
+          : '<button data-action="jump" data-id="' + item.id + '"' + disabled + '>本文を見る</button>') +
+        '<button class="secondary" data-action="dismiss" data-id="' + item.id + '"' + disabled + '>無視</button>' +
         (canKeep(item)
-          ? '<button class="secondary" data-action="keepWord" data-id="' + item.id + '" title="この語を今後どの話でも指摘しません">今後直さない</button>'
+          ? '<button class="secondary" data-action="keepWord" data-id="' + item.id + '" title="この語を今後どの話でも指摘しません"' + disabled + '>今後直さない</button>'
+          : '') +
+        // **本文を手で書き直したあと、解消したかを確かめる**（作者の依頼）。
+        // 修正案の有無を問わず出す——誤字脱字でも「そうじゃない」直し方を
+        // することがあり、そのときも解消したかどうかは知りたい
+        (item.canRecheck
+          ? '<button class="secondary" data-action="recheck" data-id="' + item.id + '" title="本文を書き直したあと、この指摘が解消したかを確かめます"' + disabled + '>' +
+            (item.busy ? '再チェック中…' : '再チェック') + '</button>'
           : '') +
         '</div>'
       : '') +
