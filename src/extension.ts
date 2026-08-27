@@ -801,6 +801,14 @@ export async function activate(
       workChatPanel.trackEditor(vscode.window.activeTextEditor);
       await vscode.commands.executeCommand(`${WORK_CHAT_VIEW_ID}.focus`);
     }),
+    // 本文の領域に大きく開く（作者の要望、2026-08-28）。
+    // **横の小さいパネル（novelai.openChat）は残す。** 範囲を選んで聞くときは
+    // 本文が見えている必要があり、大きい画面では隠れてしまう
+    registerCommand("novelai.openChatPanel", () => {
+      // 開く前に、今の本文を覚えさせる（`openChat` と同じ理由）
+      workChatPanel.trackEditor(vscode.window.activeTextEditor);
+      workChatPanel.openLargePanel();
+    }),
     registerCommand("novelai.exitChatFocus", async () => {
       await setChatFocus(false);
     })
@@ -1462,6 +1470,15 @@ export async function activate(
   context.subscriptions.push(
     registerCommand("novelai.showVersion", async () => {
       await showVersion(context, aiRegistry);
+    })
+  );
+
+  // 使い方のマニュアル。**中身はメニューの定義から作る**ので、
+  // 機能を足しても書き足す手間が要らない（features/openManual.ts）
+  context.subscriptions.push(
+    registerCommand("novelai.openManual", async () => {
+      const { openManual } = await import("./features/openManual.js");
+      await openManual();
     })
   );
 

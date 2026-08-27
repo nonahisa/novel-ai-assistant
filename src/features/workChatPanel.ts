@@ -32,11 +32,19 @@ import {
   parseChatEdit,
   parseChatLocate,
   parseChatRun,
+  runnableFeatures,
   sanitizeRequestedPaths,
   type ChatEdit,
   type ChatLocate,
   type ChatRunKind,
 } from "../core/chatEdit";
+import {
+  buildChatNoteMarkdown,
+  chatNoteFileNameCandidates,
+  CHAT_NOTE_DIR,
+} from "../core/chatNote";
+import { atomicWriteFile } from "../core/atomicWrite";
+import { openManual } from "./openManual";
 import {
   describeChatReload,
   matchReloadTarget,
@@ -139,7 +147,20 @@ type Incoming =
   | { type: "applyEdit"; id: string }
   | { type: "run"; id: string }
   | { type: "locate"; id: string }
-  | { type: "reload"; id: string };
+  | { type: "reload"; id: string }
+  /** 大きい画面のツールバー。相談する作品を選び直す */
+  | { type: "chooseWork" }
+  /**
+   * 「できること」の札を押した。
+   *
+   * **AIの提案と同じ関門を通す。** 画面から届いた文字列でも、
+   * 許可した一覧に無いものは起動しない（`parseChatRun`）。
+   */
+  | { type: "quickRun"; kind: string }
+  /** 会話をMarkdownのメモとして残す */
+  | { type: "saveNote" }
+  /** 使い方のマニュアルを開く */
+  | { type: "openManual" };
 
 /**
  * 標準機能を起動する口。
@@ -169,6 +190,16 @@ export interface ChatRunner {
 
 export class WorkChatPanel implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
+  /**
+   * 本文の領域に開いた、大きいほうの画面（作者の要望、2026-08-28）。
+   *
+   * 「メニューのAI相談を大きいパネルにして」「本文領域に大きく表示できる
+   * ようにすること。**現在の領域は残してください**」。そのため横の
+   * パネル（`view`）と入れ替えるのではなく、**両方を同時に持てる**形にした。
+   * 会話（`history`）と押されるのを待つ提案は1つだけで、2つの画面が
+   * それを覗いている——別々に持つと、どちらが本当の会話なのか分からなくなる。
+   */
+  private panel: vscode.WebviewPanel | undefined;
   private history: WorkChatTurn[] = [];
   /**
    * 対話で埋めようとしているプロットの項目（設計書6.4.7）。
@@ -264,6 +295,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     if (this.highlightTimer) clearTimeout(this.highlightTimer);
     this.highlight.dispose();
     this.selectionListener?.dispose();
+    // 大きい画面は自分で作ったものなので、自分で片づける
+    this.panel?.dispose();
   }
 
   /**
@@ -291,9 +324,81 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    *
    * 独り言は、見ていないところへ書き溜めても意味がない。
    * 畳まれている（`visible === false`）ときは黙る。
+   *
+   * **どちらか一方でも見えていればよい。** 大きい画面だけを開いて
+   * 横のパネルを畳んでいる、という使い方が普通にありうる。
    */
   isVisible(): boolean {
-    return this.view?.visible ?? false;
+    return (this.view?.visible ?? false) || (this.panel?.visible ?? false);
+  }
+
+  /**
+   * いま画面を持っている送り先。
+   *
+   * **送り先を1か所にまとめる。** 以前は `this.view` へ直接送っていたが、
+   * 画面が2つになると送り忘れが必ず出る（片方の画面にだけ返事が出ない、
+   * という直しにくい不具合になる）。
+   */
+  private hosts(): vscode.Webview[] {
+    const found: vscode.Webview[] = [];
+    if (this.view) found.push(this.view.webview);
+    if (this.panel) found.push(this.panel.webview);
+    return found;
+  }
+
+  /** 開いているすべての画面へ送る */
+  private postAll(message: unknown): void {
+    for (const webview of this.hosts()) void webview.postMessage(message);
+  }
+
+  /**
+   * 送り元**以外**の画面へ送る。
+   *
+   * 押した側の画面は自分で表示を済ませている。同じものをもう一度送ると、
+   * 作者の発言が二重に並ぶ。
+   */
+  private postOthers(source: vscode.Webview, message: unknown): void {
+    for (const webview of this.hosts()) {
+      if (webview === source) continue;
+      void webview.postMessage(message);
+    }
+  }
+
+  /**
+   * 本文の領域に、大きい相談の画面を開く（作者の要望、2026-08-28）。
+   *
+   * すでに開いていれば、作り直さずに前へ出すだけにする。作り直すと
+   * その画面に出ていた提案のボタンが消える。
+   */
+  openLargePanel(): void {
+    if (this.panel) {
+      this.panel.reveal();
+      return;
+    }
+
+    const panel = vscode.window.createWebviewPanel(
+      "novelai.chatPanel",
+      "AIに相談",
+      vscode.ViewColumn.Active,
+      {
+        enableScripts: true,
+        // 別のタブへ移って戻ったときに、会話が消えていては使い物にならない
+        retainContextWhenHidden: true,
+      }
+    );
+    this.panel = panel;
+    panel.webview.html = buildWorkChatPanelHtml(
+      createNonce(),
+      panel.webview.cspSource,
+      { large: true }
+    );
+    panel.webview.onDidReceiveMessage((message: unknown) => {
+      void this.handle(message as Incoming, panel.webview);
+    });
+    panel.onDidDispose(() => {
+      // 閉じたものへ送り続けない
+      if (this.panel === panel) this.panel = undefined;
+    });
   }
 
   /** エディターが変わったら覚え直す。拡張機能側から呼ぶ */
@@ -312,23 +417,71 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       webviewView.webview.cspSource
     );
     webviewView.webview.onDidReceiveMessage((message: unknown) => {
-      void this.handle(message as Incoming);
+      void this.handle(message as Incoming, webviewView.webview);
     });
   }
 
-  private async handle(message: Incoming): Promise<void> {
+  /**
+   * 画面から届いた指示を捌く。
+   *
+   * `source` は**どちらの画面から届いたか**である。片方だけへ返すもの
+   * （読み込み直後の履歴）と、もう片方だけへ知らせるもの（作者の発言・
+   * 会話の消去）があるので、送り元が分からないと組み立てられない。
+   */
+  private async handle(
+    message: Incoming,
+    source: vscode.Webview
+  ): Promise<void> {
     if (message.type === "ready") {
       await this.postContext();
+      // **後から開いた画面でも、会話が続きから見えるようにする。**
+      // 送るのは読み込んだ画面だけ（既に出ている側へ送ると二重になる）。
+      // 押されるのを待っている提案のボタンは作り直さない——提案は出た側の
+      // 画面に残っており、同じものが2つ並ぶと、どちらを押したのか分からない
+      if (this.history.length > 0) {
+        void source.postMessage({
+          type: "history",
+          turns: this.history.map((turn) => ({
+            role: turn.role,
+            text: turn.text,
+            // AIの返事はMarkdown。記号のまま見せない（`answer` と同じ扱い）
+            html:
+              turn.role === "assistant"
+                ? renderMarkdownLite(turn.text)
+                : undefined,
+          })),
+        });
+      }
       return;
     }
     if (message.type === "clear") {
       this.history = [];
       // 会話をやり直すなら、料金の確認も取り直す
       this.paidConfirmedFor = undefined;
+      // もう片方の画面にも、消えたことを伝える
+      this.postOthers(source, { type: "cleared" });
       return;
     }
     if (message.type === "ask") {
+      // 押した側は自分で表示済み。**もう片方にも積んで待ち状態にする**
+      this.postOthers(source, { type: "asked", question: message.question });
       await this.ask(message.question);
+      return;
+    }
+    if (message.type === "chooseWork") {
+      await this.chooseWork();
+      return;
+    }
+    if (message.type === "quickRun") {
+      await this.quickRun(message.kind);
+      return;
+    }
+    if (message.type === "saveNote") {
+      await this.saveNote();
+      return;
+    }
+    if (message.type === "openManual") {
+      await openManual();
       return;
     }
     if (message.type === "applyEdit") {
@@ -350,10 +503,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
   /** いま何について相談できるかを画面に出す */
   private async postContext(): Promise<void> {
-    if (!this.view) return;
+    if (this.hosts().length === 0) return;
     const context = await this.resolveContext();
     const resolved = this.ai.resolve();
-    void this.view.webview.postMessage({
+    this.postAll({
       type: "context",
       label: context ? context.label : "作品のファイルを開いてください",
       provider: resolved
@@ -362,11 +515,14 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 有料かどうかは、押す前に常に見えている必要がある。
       // 確認は会話ごとに一度しか出さないため、印は出し続ける
       paid: resolved?.provider.isPaid ?? false,
+      // 大きい画面の「できること」に並べる。**実装の一覧をそのまま渡す**ので、
+      // 機能を足しても画面側を直さなくてよい
+      quickRuns: runnableFeatures(),
     });
   }
 
   private async ask(question: string): Promise<void> {
-    if (!this.view) return;
+    if (this.hosts().length === 0) return;
 
     const resolved = this.ai.resolve();
     if (!resolved) {
@@ -389,7 +545,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           "（この確認はこの会話で一度だけです。「最初から」を押すと再び確認します）",
       });
       if (!ok) {
-        void this.view.webview.postMessage({ type: "cancelled" });
+        this.postAll({ type: "cancelled" });
         return;
       }
       this.paidConfirmedFor = resolved.model;
@@ -453,10 +609,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         const files = await this.readWorkFiles(context!.work, wanted);
         if (files.length > 0) {
           readFiles = files.map((file) => file.path);
-          void this.view.webview.postMessage({
-            type: "reading",
-            files: readFiles,
-          });
+          this.postAll({ type: "reading", files: readFiles });
           result = await call(files);
           answer = parseWorkChatAnswer(result.text);
         }
@@ -511,7 +664,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         });
       }
 
-      void this.view.webview.postMessage({
+      this.postAll({
         type: "answer",
         reply: answer.reply,
         // AIはMarkdownで返してくる。記号のまま見せない
@@ -552,7 +705,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
 
   private postError(message: string): void {
-    void this.view?.webview.postMessage({ type: "error", message });
+    this.postAll({ type: "error", message });
   }
 
   /**
@@ -571,7 +724,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     if (!parsed.ok) {
       // 本文を書き換えようとした場合など、黙って捨てると理由が伝わらない
       if (parsed.reason === "manuscript_not_allowed") {
-        void this.view?.webview.postMessage({
+        this.postAll({
           type: "note",
           message: describeChatEditRejection(parsed.reason),
         });
@@ -733,7 +886,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         staged.recordId,
         staged.notes
       );
-      void this.view?.webview.postMessage({
+      this.postAll({
         type: "reloadDone",
         id,
         // **「直しました」とは言わない。** 反映されるのは、資料の画面で
@@ -745,7 +898,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logFailure("相談からの再読込", { 内容: message });
-      void this.view?.webview.postMessage({
+      this.postAll({
         type: "reloadFailed",
         id,
         message: `読み直せませんでした: ${message}`,
@@ -802,7 +955,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
 
       if (!staged.locate.text) {
-        void this.view?.webview.postMessage({
+        this.postAll({
           type: "locateDone",
           id,
           message: `${path.basename(target)} を開きました。`,
@@ -812,7 +965,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
       const found = findTextRange(document.getText(), staged.locate.text);
       if (!found) {
-        void this.view?.webview.postMessage({
+        this.postAll({
           type: "locateFailed",
           id,
           message:
@@ -832,14 +985,14 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
       this.applyHighlight(editor, range);
 
-      void this.view?.webview.postMessage({
+      this.postAll({
         type: "locateDone",
         id,
         message: `${path.basename(target)} の ${found.line + 1}行目を開きました。`,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      void this.view?.webview.postMessage({
+      this.postAll({
         type: "locateFailed",
         id,
         message: `開けませんでした: ${message}`,
@@ -873,7 +1026,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
     try {
       await this.runner.run(staged.work, staged.kind, staged.filePath);
-      void this.view?.webview.postMessage({
+      this.postAll({
         type: "runDone",
         id,
         message: "実行しました。結果は下段の「提案」パネルに出ます。",
@@ -881,7 +1034,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logFailure("相談からの機能起動", { 内容: message });
-      void this.view?.webview.postMessage({
+      this.postAll({
         type: "runFailed",
         id,
         message: `実行できませんでした: ${message}`,
@@ -900,7 +1053,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     try {
       const where = await applyChatEdit(staged.work, staged.edit);
       this.pendingEdits.delete(id);
-      void this.view?.webview.postMessage({
+      this.postAll({
         type: "editApplied",
         id,
         message: `${staged.edit.label.replace(/に書き込む$/, "")}に書き込みました（${where}）`,
@@ -910,7 +1063,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logFailure("相談からの書き込み", { 内容: message });
-      void this.view?.webview.postMessage({
+      this.postAll({
         type: "editFailed",
         id,
         message: `書き込めませんでした: ${message}`,
@@ -1010,6 +1163,147 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   }
 
   /**
+   * 「できること」の札から、標準機能を起動する（大きい画面のツールバー）。
+   *
+   * **AIの提案と同じ関門を通す。** 画面から届いた文字列であっても、
+   * 許可した一覧（`RUNNABLE`）に無いものは黙って捨てる。webviewは
+   * 信用できる出どころではない（原理として、任意のコマンドを実行できる
+   * 余地をどこにも残さない）。
+   *
+   * **作者が押したときだけ動く**という原則は、押した時点で満たされている。
+   * AIの提案と違い、確認をもう一度挟むことはしない——札そのものに
+   * 「AIを使います」と書いてあり、押す前に判断できる。
+   */
+  private async quickRun(raw: string): Promise<void> {
+    const parsed = parseChatRun(raw);
+    if (!parsed) return;
+
+    const context = await this.resolveContext();
+    if (!context) {
+      this.postError(
+        "作品のファイルを開くか、「相談する作品を選ぶ」で作品を決めてください。"
+      );
+      return;
+    }
+
+    // 「この話だけ」は本文を開いているときにしか意味がない。
+    // 開いていなければ作品全体の検知に読み替える（`stageRun` と同じ規則）
+    let kind = parsed.kind;
+    let label = parsed.label;
+    if (kind === "checkTyposForFile" && context.kind !== "manuscript") {
+      kind = "checkTypos";
+      label = "誤字脱字を検知する";
+    }
+
+    try {
+      await this.runner.run(
+        context.work,
+        kind,
+        kind === "checkTyposForFile" ? context.filePath : undefined
+      );
+      this.postAll({
+        type: "note",
+        message: `「${label}」を実行しました。結果は下段の「提案」パネルに出ます。`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logFailure("相談の「できること」からの機能起動", { 内容: message });
+      this.postError(`実行できませんでした: ${message}`);
+    }
+  }
+
+  /**
+   * 会話をMarkdownのメモとして残す（作者の要望、2026-08-28）。
+   *
+   * **相談の会話は、閉じると消える。** 「最初から」でも消える。
+   * いい案が出た回ほど残しておきたいのに、手で写すしかなかった。
+   *
+   * 置き場所は設定フォルダーの中（`設定/相談メモ/`）。作品と一緒に
+   * GitHubへ同期される場所である——**作者が読み返すためのもの**なので、
+   * 開発用の記録（`.aiwriter/logs/chat.md`）とは扱いを分ける。
+   *
+   * **既存ファイルは上書きしない。** `atomicWriteFile` の新規作成だけを使い、
+   * 名前がぶつかったら別名にする（`atomicWrite.ts` の置換は必ず失敗する設計で、
+   * それ以前に作者のメモを消してよい理由がない）。
+   */
+  private async saveNote(): Promise<void> {
+    if (this.history.length === 0) {
+      this.postAll({ type: "note", message: "まだ会話がありません。" });
+      return;
+    }
+
+    const context = await this.resolveContext();
+    if (!context) {
+      this.postError(
+        "作品のファイルを開くか、「相談する作品を選ぶ」で作品を決めてください。"
+      );
+      return;
+    }
+
+    try {
+      const work = context.work;
+      const config = await readWorkConfig(work);
+      const directory = path.join(
+        workPaths(work, config).settings,
+        CHAT_NOTE_DIR
+      );
+      await vscode.workspace.fs.createDirectory(path.toUri(directory));
+
+      const savedAt = new Date();
+      const target = await this.freshNotePath(directory, savedAt);
+      const markdown = buildChatNoteMarkdown(this.history, {
+        workTitle: work.title,
+        savedAt,
+      });
+      await atomicWriteFile(
+        target,
+        new TextEncoder().encode(markdown),
+        { mode: "create" }
+      );
+
+      this.postAll({
+        type: "note",
+        message: `相談メモを「${path.relative(work.folderPath, target)}」に保存しました。`,
+      });
+      // 保存しただけでは、何が残ったのか分からない。開いて見せる。
+      // **相談を続けられるよう、フォーカスは奪わない**
+      const document = await vscode.workspace.openTextDocument(
+        path.toUri(target)
+      );
+      await vscode.window.showTextDocument(document, {
+        preview: false,
+        preserveFocus: true,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logFailure("相談メモの保存", { 内容: message });
+      this.postError(`保存できませんでした: ${message}`);
+    }
+  }
+
+  /**
+   * まだ使われていない保存先を決める。
+   *
+   * 同じ分に2回保存すると名前がぶつかる。**上書きはしない**ので、
+   * 秒・連番を足した別名を順に試す（名前の作り方は `chatNote.ts`）。
+   */
+  private async freshNotePath(
+    directory: string,
+    savedAt: Date
+  ): Promise<string> {
+    for (const name of chatNoteFileNameCandidates(savedAt)) {
+      const target = path.join(directory, name);
+      try {
+        await vscode.workspace.fs.stat(path.toUri(target));
+      } catch {
+        // 読めない＝まだ無い。ここへ書く
+        return target;
+      }
+    }
+    throw new Error("相談メモの保存先の名前を決められませんでした。");
+  }
+
+  /**
    * 相談する作品を、画面を介さずに決める。
    *
    * 新規作品を作った直後に、その作品についてのプロット相談を始めるために使う。
@@ -1039,7 +1333,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     work: WorkEntry,
     filePath?: string
   ): void {
-    if (!this.view) return;
+    if (this.hosts().length === 0) return;
 
     let run: { id: string; label: string; usesAI: boolean } | undefined;
     // 許可した一覧と突き合わせてから持つ。**独り言でも例外にしない。**
@@ -1055,7 +1349,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       run = { id, label: parsed.label, usesAI: parsed.usesAI };
     }
 
-    void this.view.webview.postMessage({
+    this.postAll({
       type: "chatter",
       who: "AI（独り言）",
       text: chatter.text,
@@ -1075,9 +1369,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    */
   async startPlotAdvice(work: WorkEntry): Promise<void> {
     await this.focusWork(work);
-    if (!this.view) return;
+    if (this.hosts().length === 0) return;
 
-    void this.view.webview.postMessage({
+    this.postAll({
       type: "chatter",
       who: "AI",
       text:
@@ -1101,11 +1395,11 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    */
   async startPlotInterview(work: WorkEntry): Promise<void> {
     await this.focusWork(work);
-    if (!this.view) return;
+    if (this.hosts().length === 0) return;
 
     const sections = await this.readPlotSections(work);
     if (!sections) {
-      void this.view.webview.postMessage({
+      this.postAll({
         type: "chatter",
         who: "AI",
         text:
@@ -1125,13 +1419,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     sections: PlotSections,
     first: boolean
   ): Promise<void> {
-    if (!this.view) return;
+    if (this.hosts().length === 0) return;
     const question = nextQuestion(sections);
 
     if (!question) {
       this.plotFocus = undefined;
       this.plotInterviewWork = undefined;
-      void this.view.webview.postMessage({
+      this.postAll({
         type: "chatter",
         who: "AI",
         text:
@@ -1148,7 +1442,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     };
 
     const progress = describeProgress(sections);
-    void this.view.webview.postMessage({
+    this.postAll({
       type: "chatter",
       who: "AI",
       text:
@@ -1297,7 +1591,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 何を参照したかを作者にも見せる。材料が見えないまま答えが出ると、
       // どこ由来の話なのか確かめようがない
       const retrieval = describeRetrieval(found);
-      void this.view?.webview.postMessage({ type: "searched", summary: retrieval });
+      this.postAll({ type: "searched", summary: retrieval });
 
       return {
         reference: [

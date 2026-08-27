@@ -10,11 +10,42 @@
  *
  * 値はすべて postMessage で渡し、HTMLへ文字列として埋め込まない
  * （作品名や本文の引用符で画面が壊れるのを防ぐ）。
+ *
+ * ## 同じ画面を2か所へ出す（作者の要望、2026-08-28）
+ *
+ * 「メニューのAI相談を大きいパネルにして」「本文領域に大きく表示できる
+ * ようにすること。現在の領域は残してください」。そこで**画面の組み立ては
+ * 1つのまま**にして、`large` で見た目だけを変える。2つ書くと、
+ * 片方だけ直したときに「横では出るのに大きい画面では出ない」が起きる。
+ *
+ * `large` のときだけツールバー（作品を選ぶ・会話をメモに保存・できること）を
+ * 出す。横の狭いパネルに同じものを置くと、肝心の会話が押し出される。
  */
+/**
+ * 大きく開いたときだけ出すツールバー。
+ *
+ * **「できること」は畳んでおく。** 21個の札を最初から広げると、
+ * 会話の場が下へ押し出される。中身は拡張機能側から届いたものを
+ * その都度作り直すので、ここには入れ物だけを置く。
+ */
+const TOOLBAR_HTML = `<div id="toolbar">
+  <div class="row">
+    <button class="action secondary" id="choose-work">作品を選ぶ</button>
+    <button class="action secondary" id="save-note">会話をメモに保存</button>
+    <button class="action secondary" id="open-manual">使い方を開く</button>
+  </div>
+  <details>
+    <summary>できること</summary>
+    <div id="quickrun-list"></div>
+  </details>
+</div>`;
+
 export function buildWorkChatPanelHtml(
   nonce: string,
-  cspSource: string
+  cspSource: string,
+  options: { large?: boolean } = {}
 ): string {
+  const large = options.large === true;
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -167,10 +198,44 @@ button.secondary {
 }
 .edit .done { color: var(--vscode-testing-iconPassed, #4caf50); font-size: 12px; }
 .edit .failed { color: var(--vscode-errorForeground); font-size: 12px; }
+/*
+ * 本文の領域に大きく開いたとき。
+ *
+ * **画面いっぱいの幅で文章を流さない。** 横に長い行は目が戻る場所を
+ * 見失う。読みやすい幅で中央に寄せ、入力欄も少し高くする
+ * （大きく開いたということは、長めに書きたいということである）。
+ */
+body.large #log > *,
+body.large #composer > * {
+  max-width: 62em;
+  margin-left: auto;
+  margin-right: auto;
+}
+body.large #log { padding: 16px 10px; }
+body.large textarea { min-height: 72px; }
+#toolbar {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+#toolbar .row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+#toolbar details { margin-top: 6px; font-size: 12px; }
+#toolbar summary {
+  cursor: pointer;
+  color: var(--vscode-descriptionForeground);
+}
+#quickrun-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+/* 一覧の札は横に並べる（.option は縦積みで幅いっぱいになる） */
+.quickrun { width: auto; }
 </style>
 </head>
-<body>
+<body${large ? ` class="large"` : ""}>
 <div id="context"><span class="label">相談の対象:</span><span class="what" id="context-what">—</span><span id="context-provider"></span></div>
+${large ? TOOLBAR_HTML : ""}
 <div id="log">
   <div id="empty">
     作品について、思いついたまま日本語で聞いてください。<br>
@@ -200,9 +265,16 @@ const sendEl = document.getElementById('send');
 const clearEl = document.getElementById('clear');
 const thinkingEl = document.getElementById('thinking');
 const hintEl = document.getElementById('hint');
+// ツールバーは大きく開いたときにしか無い。**必ず有無を確かめてから使う**
+const chooseWorkEl = document.getElementById('choose-work');
+const saveNoteEl = document.getElementById('save-note');
+const openManualEl = document.getElementById('open-manual');
+const quickRunListEl = document.getElementById('quickrun-list');
 
 /** 直前の返事に付いていた選択肢。番号入力で選べるようにする */
 let currentOptions = [];
+/** 「できること」に並べる機能。拡張機能側から届く */
+let quickRuns = [];
 let busy = false;
 
 function escapeHtml(text) {
@@ -219,6 +291,45 @@ function setBusy(value) {
   sendEl.disabled = value;
   document.querySelectorAll('.option').forEach((el) => {
     el.disabled = value;
+  });
+}
+
+/**
+ * ログを空に戻す。
+ *
+ * 「最初から」を押したときと、もう片方の画面で押されたとき（cleared）の
+ * 両方から呼ぶ。**ここでは拡張機能へ送らない。** 受け取った側が送り返すと、
+ * 2つの画面のあいだで行ったり来たりする。
+ */
+function resetLog() {
+  logEl.innerHTML = '';
+  logEl.appendChild(emptyEl);
+  emptyEl.hidden = false;
+  currentOptions = [];
+  updateHint();
+}
+
+/**
+ * 「できること」の一覧を作り直す。
+ *
+ * **一覧は拡張機能側から届いたものだけを出す。** 画面に
+ * 書き写すと、機能を足したときに「押しても何も起きない札」が並ぶ。
+ * 押した先でも許可した一覧と突き合わせている（AIの提案と同じ関門）。
+ */
+function renderQuickRuns() {
+  if (!quickRunListEl) return;
+  quickRunListEl.replaceChildren();
+  quickRuns.forEach((run) => {
+    const button = document.createElement('button');
+    button.className = 'option quickrun';
+    // 料金がかかるかどうかは、押す前に見えている必要がある
+    button.textContent = run.label + (run.usesAI ? '（AIを使います）' : '');
+    button.disabled = busy;
+    button.addEventListener('click', () => {
+      if (busy) return;
+      vscode.postMessage({ type: 'quickRun', kind: run.kind });
+    });
+    quickRunListEl.appendChild(button);
   });
 }
 
@@ -438,13 +549,26 @@ sendEl.addEventListener('click', () => send(inputEl.value));
 
 clearEl.addEventListener('click', () => {
   if (busy) return;
-  logEl.innerHTML = '';
-  logEl.appendChild(emptyEl);
-  emptyEl.hidden = false;
-  currentOptions = [];
-  updateHint();
+  resetLog();
   vscode.postMessage({ type: 'clear' });
 });
+
+// ツールバーは大きく開いたときにしか無い
+if (chooseWorkEl) {
+  chooseWorkEl.addEventListener('click', () => {
+    vscode.postMessage({ type: 'chooseWork' });
+  });
+}
+if (saveNoteEl) {
+  saveNoteEl.addEventListener('click', () => {
+    vscode.postMessage({ type: 'saveNote' });
+  });
+}
+if (openManualEl) {
+  openManualEl.addEventListener('click', () => {
+    vscode.postMessage({ type: 'openManual' });
+  });
+}
 
 inputEl.addEventListener('keydown', (event) => {
   // Ctrl+Enter で送る。Enterだけだと改行が打てない
@@ -478,6 +602,38 @@ window.addEventListener('message', (event) => {
       ? '／ ' + message.provider + (message.paid ? '（有料・送るたびに課金）' : '')
       : '';
     providerEl.className = message.paid ? 'paid' : '';
+    // 起動できる機能は、届くたびに作り直す（機能が増減しても写しが残らない）
+    quickRuns = message.quickRuns || [];
+    renderQuickRuns();
+    return;
+  }
+  if (message.type === 'history') {
+    // 後から開いた画面にも、これまでの会話を積む。
+    // **押されるのを待っているボタンは作り直さない。** 提案は出た側の画面に
+    // 残っており、同じものが2つ並ぶと、どちらを押したのか分からなくなる
+    (message.turns || []).forEach((turn) => {
+      if (turn.role === 'author') {
+        appendTurn('あなた', turn.text, 'author');
+      } else {
+        appendTurn('AI', turn.text, undefined, turn.html);
+      }
+    });
+    scrollToBottom();
+    return;
+  }
+  if (message.type === 'asked') {
+    // もう片方の画面から質問が送られた。こちらにも積んで、待ち状態にする
+    appendTurn('あなた', message.question, 'author');
+    document.querySelectorAll('.options').forEach((el) => el.remove());
+    currentOptions = [];
+    updateHint();
+    setBusy(true);
+    scrollToBottom();
+    return;
+  }
+  if (message.type === 'cleared') {
+    // もう片方の画面で「最初から」が押された
+    resetLog();
     return;
   }
   if (message.type === 'cancelled') {

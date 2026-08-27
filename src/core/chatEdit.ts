@@ -243,6 +243,18 @@ const RUNNABLE: ReadonlyMap<string, { kind: ChatRunKind } & Omit<ChatRun, "kind"
     ])
   );
 
+/**
+ * 起動できる機能を、そのまま並べて返す。
+ *
+ * 大きい相談パネルの「できること」に出すために使う。**画面側に一覧を
+ * 書き写さない。** 写すと、機能を足したときに片方だけ古くなり、
+ * しかも押しても何も起きないボタンとしてしか現れない
+ * （`runnableFeatureList` がAIに対して同じ理由で存在する）。
+ */
+export function runnableFeatures(): ChatRun[] {
+  return [...RUNNABLE.values()].map((item) => ({ ...item }));
+}
+
 /** AIに見せる、起動できる機能の一覧。プロンプトと実装を食い違わせないため */
 export function runnableFeatureList(): string {
   return [...RUNNABLE.values()]

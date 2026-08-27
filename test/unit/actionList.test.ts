@@ -312,7 +312,10 @@ describe("AIの印", () => {
         "novelai.generatePlot",
         "novelai.generateSynopses",
         "novelai.generateWorkBlurb",
+        // 相談は2つの入口を持つ（本文の領域に大きく開く／横の細いパネル）。
+        // **どちらもAIを呼ぶ**ので、両方に印が要る
         "novelai.openChat",
+        "novelai.openChatPanel",
       ].sort()
     );
   });

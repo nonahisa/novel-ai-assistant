@@ -116,7 +116,8 @@ const STEP_DEFS: readonly StepDef[] = [
         commands: [
           "novelai.createWorkFromManuscript",
           "novelai.openVertical",
-          "novelai.openChat",
+          // 大きく開くほう。**横のパネルは詳細メニューと本文の右クリックにある**
+          "novelai.openChatPanel",
           "novelai.showWritingStats",
         ],
       },

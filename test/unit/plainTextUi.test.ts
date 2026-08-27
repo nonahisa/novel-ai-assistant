@@ -54,6 +54,10 @@ const MARKDOWN_ALLOWED = new Set([
   "src/features/diagnoseWeb.ts",
   // 冒頭診断のレポートをMarkdownの文書として開く（P-24）
   "src/features/checkOpening.ts",
+  // 相談の会話を、読み返せるMarkdownのメモとして残す
+  "src/core/chatNote.ts",
+  // 使い方のマニュアルをMarkdownの文書として開く
+  "src/features/openManual.ts",
 ]);
 
 function collectSources(dir: string, out: string[] = []): string[] {

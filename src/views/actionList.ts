@@ -384,7 +384,7 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
     entries: [
       {
         kind: "action",
-        command: "novelai.openChat",
+        command: "novelai.openChatPanel",
         label: "AIに相談する",
         icon: "comment-discussion",
         // 作品のファイルを開いていないと材料が無く、
@@ -393,11 +393,31 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
         usesAI: true,
         detail:
           "いま開いているファイルについて、日本語で相談できます。" +
+          "**本文の領域に大きく開きます。**" +
           "本文でもプロットでも設定資料でも構いません。" +
-          "**範囲を選んでから聞くと、そこについての相談として扱います。**" +
           "返事には次の一手の選択肢が付き、押すだけで話を進められます。" +
+          "「できること」から、誤字脱字の検知や資料の抽出をその場で始められます。" +
+          "会話はMarkdownのメモとして残せます。" +
           "プロット・紹介文・各話あらすじは、内容を確かめてボタンを押すと書き込めます" +
-          "（**押すまで何も書き換わりません。小説の本文は対象外です**）。",
+          "（**押すまで何も書き換わりません。小説の本文は対象外です**）。" +
+          "**本文の右クリックからは、横の小さいパネルでも聞けます**" +
+          "（範囲を選んで聞くときは、そちらのほうが本文が隠れません）。",
+      },
+      {
+        kind: "action",
+        command: "novelai.openChat",
+        label: "AIに相談する（横のパネル）",
+        icon: "comment-discussion",
+        requiresWork: true,
+        usesAI: true,
+        // **大きい画面と両方を残す**（作者の指定、2026-08-28）。
+        // 範囲を選んで聞くときは本文が見えている必要があり、
+        // 大きい画面では隠れてしまう
+        detail:
+          "同じ相談を、左の細いパネルで行います。" +
+          "**範囲を選んでから聞くと、そこについての相談として扱います。**" +
+          "本文を見ながら聞きたいときは、こちらを使ってください。" +
+          "会話は大きい画面と共通なので、どちらで聞いても続きから話せます。",
       },
       {
         kind: "action",
@@ -1071,6 +1091,20 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
     label: "ヘルプ",
     icon: "question",
     entries: [
+      // **一番上に置く。** 何ができるのかが分からない状態でヘルプを開く人が
+      // 最初に見るものである（ログを読みたい人は目的があって来る）
+      {
+        kind: "action",
+        command: "novelai.openManual",
+        label: "使い方（マニュアル）",
+        icon: "book",
+        requiresWork: false,
+        detail:
+          "この拡張機能でできることを、1つの文書にまとめて開きます。" +
+          "作品づくりの流れ・全部の操作・画面の説明が入ります。" +
+          "**いま入っている版から作るので、説明が古びません。**" +
+          "**保存はしません**（閉じて構いません）。",
+      },
       {
         kind: "action",
         command: "novelai.showLog",
