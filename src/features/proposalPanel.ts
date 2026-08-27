@@ -899,7 +899,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       file: item.fileName,
       line: item.line,
       target: item.excerpt,
-      suggestion: `設定「${item.settingSays}」／本文「${item.textSays}」`,
+      // 「設定／本文」と決め打ちしない。プロット逸脱を無視したとき
+      // 「設定」と記録されてしまう（見出しは leftLabel/rightLabel が正しい）
+      suggestion: describeContradiction(item),
     });
   }
 
