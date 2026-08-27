@@ -749,6 +749,19 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.exportPdf",
+            label: "PDF出力（印刷用）",
+            description: "AIを使わない",
+            icon: "file-pdf",
+            requiresWork: true,
+            detail:
+              "本文を印刷用に組版してブラウザで開きます。" +
+              "ブラウザの印刷で「PDFに保存」を選ぶとPDFになります。" +
+              "縦書き（文庫・A5）と横書き（A4）が選べ、ルビ・傍点も組みます。" +
+              "**原稿は書き換えません。** AIは呼びません。",
+          },
+          {
+            kind: "action",
             command: "novelai.exportImeDictionary",
             label: "IME辞書を出力",
             description: "AIを使わない",

@@ -53,6 +53,7 @@ import { CharacterStore } from "./core/characterStore";
 import type { ChatRunKind } from "./core/chatEdit";
 import { applyPendingCharacterUpdates } from "./features/applyPendingUpdates";
 import { exportImeDictionary } from "./features/exportImeDictionary";
+import { exportPdf } from "./features/exportPdf";
 import { manageCustomFields } from "./features/manageCustomFields";
 import { TermHighlighter } from "./views/termHighlight";
 import { ActionListProvider, nodeKey } from "./views/actionList";
@@ -115,6 +116,7 @@ import {
 } from "./core/gitSyncStatusText";
 import { NullGitSyncMonitor, type GitSyncMonitorLike } from "./features/gitSyncStub";
 import { canRunProcesses } from "./core/runtime";
+import { describeProcessesBlocked } from "./core/processAvailability";
 // nextSetupStep, runSetupStep も core/git.ts 経由。動的importする
 
 import { resolveDeviceId } from "./core/device";
@@ -2006,6 +2008,24 @@ export async function activate(
         refreshActionBadges();
       }
     )
+  );
+
+  context.subscriptions.push(
+    registerCommand("novelai.exportPdf", async (node?: WorkRef) => {
+      // メニューでは灰色にしてあるが、コマンドパレットからは押せてしまう。
+      // 理由を出して止める（`gitRestore` と同じ形）
+      if (!canRunProcesses()) {
+        void vscode.window.showWarningMessage(
+          describeProcessesBlocked("novelai.exportPdf")
+        );
+        return;
+      }
+      const work = await resolveWork(node, registry, {
+        title: "PDFにする作品を選択",
+      });
+      if (!work) return;
+      await exportPdf(work);
+    })
   );
 
   context.subscriptions.push(

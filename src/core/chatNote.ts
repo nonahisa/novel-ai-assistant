@@ -14,6 +14,12 @@
  * 作者が選んだときだけ作る。
  */
 
+import {
+  formatDayTime,
+  timestampedFileNameCandidates,
+  TIMESTAMPED_NAME_TRIES,
+} from "./timestampedFileName";
+
 /**
  * 1往復の発言。
  *
@@ -32,7 +38,7 @@ export interface ChatNoteMeta {
 }
 
 /** 同名を避けるために試す名前の数。これを超えることは実際には起きない */
-export const CHAT_NOTE_NAME_TRIES = 20;
+export const CHAT_NOTE_NAME_TRIES = TIMESTAMPED_NAME_TRIES;
 
 /** 相談メモの置き場所（設定フォルダーからの相対） */
 export const CHAT_NOTE_DIR = "相談メモ";
@@ -56,7 +62,7 @@ export function buildChatNoteMarkdown(
     "# 相談メモ",
     "",
     `- 作品: ${meta.workTitle}`,
-    `- 保存: ${formatNoteTime(meta.savedAt)}`,
+    `- 保存: ${formatDayTime(meta.savedAt)}`,
     "",
     "---",
     "",
@@ -73,34 +79,12 @@ export function buildChatNoteMarkdown(
 /**
  * 保存先の名前の候補を、試す順に並べる。
  *
- * **既存ファイルは上書きできない**（`atomicWrite.ts` の設計）。同じ分に
- * 2回保存すると名前がぶつかるので、秒 → 連番の順に別名を用意する。
- * 名前を作るところと、実在を確かめるところを分けてあるのは、
- * ここだけを単体テストできるようにするため。
+ * 規則そのものは `timestampedFileName.ts` にある。**印刷用HTMLの
+ * 書き出しも同じ規則を要る**ので、名前の作り方は1か所に置いた。
  */
 export function chatNoteFileNameCandidates(
   savedAt: Date,
   tries: number = CHAT_NOTE_NAME_TRIES
 ): string[] {
-  const day = formatDay(savedAt);
-  const minute = `${pad(savedAt.getHours())}${pad(savedAt.getMinutes())}`;
-  const second = `${minute}${pad(savedAt.getSeconds())}`;
-
-  const names = [`相談 ${day} ${minute}.md`, `相談 ${day} ${second}.md`];
-  for (let n = 2; names.length < Math.max(tries, 1); n += 1) {
-    names.push(`相談 ${day} ${second}-${n}.md`);
-  }
-  return names.slice(0, Math.max(tries, 1));
-}
-
-function formatNoteTime(at: Date): string {
-  return `${formatDay(at)} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
-}
-
-function formatDay(at: Date): string {
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
-}
-
-function pad(value: number): string {
-  return String(value).padStart(2, "0");
+  return timestampedFileNameCandidates("相談", savedAt, ".md", tries);
 }

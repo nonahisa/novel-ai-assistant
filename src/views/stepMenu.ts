@@ -206,9 +206,10 @@ const STEP_DEFS: readonly StepDef[] = [
     label: "7. 電子出版等",
     icon: "package",
     detail:
-      "書き上げた作品を電子書籍として出す段階です。" +
-      "まだ実装していません。",
+      "書き上げた作品を、紙や電子書籍の形にして出す段階です。" +
+      "いまはPDF（印刷用）まで作れます。",
     entries: [
+      "novelai.exportPdf",
       {
         kind: "placeholder",
         label: "EPUB出力（予定）",

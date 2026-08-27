@@ -42,6 +42,12 @@ const REQUIRES_PROCESSES = new Set<string>([
   // **分岐を合わせるのもgitコマンドを直に打つ**（設計書5.5.16）。
   // ソース管理へ案内して代わりにさせる形にはできない
   "novelai.resolveDivergence",
+  // **PDF出力は、組んだHTMLを手元のブラウザへ渡して印刷させる。**
+  // 外部プロセスこそ起動しないが、`openExternal` に渡せるのは手元の
+  // ファイル（`file:`）だけで、ブラウザ版の作品は `vscode-vfs://github/…`
+  // にある。ブラウザからブラウザへファイルを渡す道が無い以上、
+  // 判定は `canRunProcesses()` と同じところで分かれる
+  "novelai.exportPdf",
 ]);
 
 /**
@@ -107,6 +113,13 @@ export function describeProcessesBlocked(command: string): string {
     return (
       "ブラウザ版では、競合の解決ができません（gitコマンドを起動できないためです）。" +
       "手元のVS Codeで解決してください。"
+    );
+  }
+  if (command === "novelai.exportPdf") {
+    return (
+      "ブラウザ版では、印刷用のファイルをブラウザへ渡せません" +
+      "（作品がパソコンの中に無いためです）。" +
+      "手元のVS Codeで開いてからお使いください。"
     );
   }
   if (command === "novelai.shareWithEditor" || command === "novelai.collectEditorProposals") {
