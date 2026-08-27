@@ -181,13 +181,23 @@ body.plain .mark { background: transparent; }
    （縦3点）を持つかに依存せず、同じ見た目になる。
    書く面（textarea）は文字単位の調整ができないため、フォントの形のまま */
 #read .ellipsis {
-  display: inline-block;
   vertical-align: middle;
 }
+/* **箱を1em角の正方形に固定する**（実機の報告、2026-08-28）。
+   寸法を決めないと箱の高さが行の高さ（約1.5文字分）になり、
+   連続した「……」の間に隙間があく。また縦横比が崩れるため、
+   フォントサイズを変えると回転の中心が柱からずれる。
+   1em角なら送りは1文字分で、中心はフォントサイズに追従する */
 body.vertical #read .ellipsis {
   writing-mode: horizontal-tb;
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  line-height: 1em;
+  text-align: center;
   transform: rotate(90deg);
   transform-origin: center;
+  vertical-align: baseline;
 }
 body.vertical #write, body.vertical #read, body.vertical #marks {
   writing-mode: vertical-rl;
