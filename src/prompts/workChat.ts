@@ -18,7 +18,9 @@ import { runnableFeatureList } from "../core/chatEdit";
 // 3.2: 作者の創作観（読まれ方の5段階・スキル集合体・手を止めない）を土台に足した。
 //      あわせて、プロットの相談で「読者の欲求」「対象年齢」が決まっていなさそうな
 //      ときだけ質問させる（作者の指定、2026-08-27「AIからの質問で聞いてください」）
-export const WORK_CHAT_VERSION = "3.2";
+// 3.3: 設定資料の誤り・混入の相談に、reloadRecord（対象の名前・種別・留意点）を
+//      返させる（設計書6.31.3）。作者が押すと設定資料パネルで再読込が走る
+export const WORK_CHAT_VERSION = "3.3";
 
 /**
  * 起動できる機能の一覧。**実装（chatEdit.ts）から作る。**
@@ -137,8 +139,24 @@ ${RUNNABLE_LIST}
 - ファイルを開くだけでよいときは text を省いてください。
 - 場所を指していないときは locate を付けないこと。
 
+【設定資料の誤り・混入を訴えられたとき】
+「〇〇に△△の情報が混ざっている」「〇〇の紹介がおかしい」のように、
+**設定資料の記録そのものの誤り**を相談されたときは、reloadRecord を付けてください。
+作者がボタンを押すと設定資料の画面が開き、その記録を本文から読み直します。
+- kind は "character"（登場人物）/ "location"（場所）/ "ability"（能力）/
+  "organization"（組織）のいずれか
+- name は**資料に実在する名前をそのまま**書くこと。言い換えたり敬称を足したり
+  しないこと。**実在しない名前を書くと、ボタンは出ません**
+- notes には作者の訴えを短くまとめて書くこと
+  （例:「他の登場人物『殿下』の情報が混入しています。」）。
+  読み直すAIへの申し送りになるので、**何が混ざっているか**を具体的に書くこと
+- 設定資料の誤りの話でないときは reloadRecord を付けないこと。
+  本文やプロットの相談、資料の内容についての質問には要りません
+- **あなたが資料を書き換えるのではありません。** 読み直した結果は項目ごとの
+  提案として並び、作者が選んだものだけが反映されます
+
 【出力形式】JSONのみ。前置き・後書き・コードフェンスを含めないこと。
-{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "locate": {"path": "...", "text": "...", "label": "..."}}`;
+{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "locate": {"path": "...", "text": "...", "label": "..."}, "reloadRecord": {"kind": "character", "name": "アジャーノ", "notes": "他の登場人物『殿下』の情報が混入しています。"}}`;
 
 export interface WorkChatTurn {
   role: "author" | "assistant";
@@ -290,8 +308,25 @@ export const WORK_CHAT_SCHEMA = {
         label: { type: ["string", "null"] },
       },
     },
+    reloadRecord: {
+      type: ["object", "null"],
+      properties: {
+        kind: { type: "string" },
+        name: { type: "string" },
+        notes: { type: ["string", "null"] },
+      },
+      required: ["kind", "name"],
+    },
   },
-  required: ["reply", "options", "needFiles", "edit", "run", "locate"],
+  required: [
+    "reply",
+    "options",
+    "needFiles",
+    "edit",
+    "run",
+    "locate",
+    "reloadRecord",
+  ],
 } as const;
 
 export interface WorkChatAnswer {
@@ -305,6 +340,11 @@ export interface WorkChatAnswer {
   run: unknown;
   /** 本文の該当箇所を指す提案。呼び出し側で実在を照合する */
   locate: unknown;
+  /**
+   * 設定資料を留意点つきで読み直す提案（設計書6.31.3）。
+   * 名前が実在するかは呼び出し側が照合する
+   */
+  reloadRecord: unknown;
 }
 
 /**
@@ -336,6 +376,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
           edit?: unknown;
           run?: unknown;
           locate?: unknown;
+          reloadRecord?: unknown;
         };
         return {
           reply: record.reply.trim(),
@@ -350,6 +391,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
           edit: record.edit,
           run: record.run,
           locate: record.locate,
+          reloadRecord: record.reloadRecord,
         };
       }
     } catch {
@@ -364,6 +406,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
     edit: undefined,
     run: undefined,
     locate: undefined,
+    reloadRecord: undefined,
   };
 }
 

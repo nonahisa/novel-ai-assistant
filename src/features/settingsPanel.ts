@@ -344,6 +344,9 @@ export class SettingsPanel {
    * 場所の「地域」や能力の「代償」は人物レコードに置き場所が無い）。
    */
   private misattributedKind: SettingsKind | undefined;
+  /** 画面が「ready」を返したか。開いた直後に送っても届かないため見張る */
+  private ready = false;
+  private readyWaiters: Array<() => void> = [];
 
   constructor(
     context: vscode.ExtensionContext,
@@ -397,6 +400,77 @@ export class SettingsPanel {
     const detail = this.detailOf(kind, id);
     if (!detail) return;
     this.post({ type: "focus", kind, id, detail });
+  }
+
+  /**
+   * 相談パネルから、留意点つきで再読込を始める（設計書6.31.3）。
+   *
+   * **再読込そのものは `handleEnrich` を通す。** ここで組み立て直すと、
+   * 片方だけ直したときに「画面のボタンからと相談からで結果が違う」
+   * 食い違いが出る。この口がするのは、対象を開いて留意点を渡すことだけ。
+   *
+   * 名前の照合は呼び出し側（相談パネル）が済ませているが、開くまでの間に
+   * 消えていることもあるので、ここでも実在を確かめる。
+   */
+  async reloadRecordFromChat(
+    kind: SettingsKind,
+    id: string,
+    notes?: string
+  ): Promise<void> {
+    this.reveal();
+
+    const detail = this.detailOf(kind, id);
+    if (!detail) {
+      this.post({
+        type: "error",
+        message:
+          "読み直す設定が見つかりませんでした。資料が変わったようです。",
+      });
+      return;
+    }
+
+    // **画面が受け取れるようになるまで待つ。** 開いた直後は、送っても
+    // 捨てられる（スクリプトがまだ走っていない）。待たないと、
+    // 提案ができたころに画面が空のままになる
+    await this.whenReady();
+    // 留意点も一緒に送って、画面の入力欄へ映す。何を添えて読み直したのかが
+    // 見えないと、出てきた提案の理由を作者が確かめられない
+    this.post({ type: "focus", kind, id, detail, notes });
+
+    try {
+      await this.handleEnrich(kind, id, notes);
+    } catch (error) {
+      // handleMessage の外から呼ばれるので、後片付けはここで行う
+      this.setBusy(false);
+      this.post({ type: "error", message: describeError(error) });
+    }
+  }
+
+  /**
+   * 画面（WebView）が受け取れる状態になるまで待つ。
+   *
+   * 作ったばかりのパネルへ送ったメッセージは**届かずに捨てられる**。
+   * 作者が押してから開く経路（相談パネルからの再読込）でだけ要る。
+   *
+   * 待ち切れなくても先へ進む。画面が既に動いていれば映るし、
+   * ここで止まると作者は何も起きないまま待たされる。
+   */
+  private whenReady(timeoutMs = 5_000): Promise<void> {
+    if (this.ready) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, timeoutMs);
+      this.readyWaiters.push(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  private markReady(): void {
+    if (this.ready) return;
+    this.ready = true;
+    for (const resolve of this.readyWaiters) resolve();
+    this.readyWaiters = [];
   }
 
   /**
@@ -734,6 +808,7 @@ export class SettingsPanel {
     try {
       switch (message.type) {
         case "ready":
+          this.markReady();
           this.post({
             type: "init",
             groups: this.groups(),
@@ -2131,6 +2206,11 @@ type OutgoingMessage =
       kind: SettingsKind;
       id: string;
       detail: DetailView;
+      /**
+       * 留意点の入力欄へ映す文章（設計書6.31.3）。
+       * 相談から開いたときだけ入る。無ければ空にする
+       */
+      notes?: string;
     }
   | {
       type: "saved";

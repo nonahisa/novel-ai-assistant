@@ -279,7 +279,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-22",
     title: "AIで再読込",
     commands: ["novelai.openSettingsPanel"],
-    count: 6,
+    count: 9,
   },
   {
     id: "F-19",
@@ -320,4 +320,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 401;
+export const PENDING_CHECK_TOTAL = 404;

@@ -37,6 +37,19 @@ import {
   type ChatLocate,
   type ChatRunKind,
 } from "../core/chatEdit";
+import {
+  describeChatReload,
+  matchReloadTarget,
+  parseChatReload,
+  RELOAD_KIND_LABELS,
+  type ChatReloadKind,
+  type ReloadCandidate,
+} from "../core/chatReload";
+import {
+  createAbilityStore,
+  createLocationStore,
+  createOrganizationStore,
+} from "../core/abilityStore";
 import type { Chatter } from "../core/chatter";
 import { detectRunIntent } from "../core/chatIntent";
 import { findTextRange } from "../core/textLocate";
@@ -125,7 +138,8 @@ type Incoming =
   | { type: "clear" }
   | { type: "applyEdit"; id: string }
   | { type: "run"; id: string }
-  | { type: "locate"; id: string };
+  | { type: "locate"; id: string }
+  | { type: "reload"; id: string };
 
 /**
  * 標準機能を起動する口。
@@ -138,6 +152,19 @@ type Incoming =
  */
 export interface ChatRunner {
   run(work: WorkEntry, kind: ChatRunKind, filePath?: string): Promise<void>;
+  /**
+   * 設定資料の1件を、留意点つきでAIに読み直させる（設計書6.31.3）。
+   *
+   * **処理は設定資料パネルが持っているものをそのまま使う。** 相談側で
+   * 組み立て直すと、片方だけ直したときに「メニューからと相談からで
+   * 結果が違う」食い違いが出る（`run` と同じ考え方）。
+   */
+  reload(
+    work: WorkEntry,
+    kind: ChatReloadKind,
+    recordId: string,
+    notes?: string
+  ): Promise<void>;
 }
 
 export class WorkChatPanel implements vscode.WebviewViewProvider {
@@ -174,6 +201,22 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   private readonly pendingLocates = new Map<
     string,
     { locate: ChatLocate; work: WorkEntry; fallbackPath: string }
+  >();
+  /**
+   * 押されるのを待っている「AIで再読込」の提案（設計書6.31.3）。
+   *
+   * **持つのは照合済みのレコードのidと名前**である。AIが書いた名前を
+   * 押した瞬間に引き直すと、その間に資料が変わっていたときに別の相手を開く。
+   */
+  private readonly pendingReloads = new Map<
+    string,
+    {
+      work: WorkEntry;
+      kind: ChatReloadKind;
+      recordId: string;
+      name: string;
+      notes?: string;
+    }
   >();
   private editSeq = 0;
 
@@ -298,6 +341,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
     if (message.type === "locate") {
       await this.showLocation(message.id);
+      return;
+    }
+    if (message.type === "reload") {
+      await this.reloadRecord(message.id);
     }
   }
 
@@ -438,6 +485,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           this.stageRun(answer.run, context) ??
           (intended ? this.stageRun(intended, context) : undefined),
         locate: this.stageLocate(answer.locate, context),
+        // 実在の照合に資料の読み込みが要るので、ここだけ待つ
+        reload: await this.stageReload(answer.reloadRecord, context),
       };
 
       if (context) {
@@ -570,6 +619,138 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       filePath: kind === "checkTyposForFile" ? context.filePath : undefined,
     });
     return { id, label, usesAI: parsed.usesAI };
+  }
+
+  /**
+   * 「AIで再読込」の提案を受け取り、押されるまで持っておく（設計書6.31.3）。
+   *
+   * **実在するレコードだけをボタンにする。** AIが返した名前をそのまま
+   * 操作の対象にしない（`run` と同じ原則）。照合はここ——**応答を受けた
+   * 時点**——で済ませる。押されてから探すと、出したボタンが押した瞬間に
+   * 「見つかりません」になり、作者には資料が消えたように見える。
+   */
+  private async stageReload(
+    raw: unknown,
+    context: ResolvedContext | undefined
+  ): Promise<
+    | {
+        id: string;
+        label: string;
+        name: string;
+        kindLabel: string;
+        notes: string;
+      }
+    | undefined
+  > {
+    if (raw === undefined || raw === null || !context) return undefined;
+
+    const request = parseChatReload(raw);
+    if (!request) return undefined;
+
+    const candidates = await this.loadReloadCandidates(
+      context.work,
+      request.kind
+    );
+    const target = matchReloadTarget(candidates, request.name);
+    if (!target) {
+      // **黙って捨てる。** 「その名前の資料はありません」と画面に出すと、
+      // 作者の相談とは関係のない技術的な断りが会話に混ざる
+      logStep(
+        `相談: 再読込の提案を捨てた（資料に無い名前: ${request.name}）`
+      );
+      return undefined;
+    }
+
+    const id = `reload-${++this.editSeq}`;
+    this.pendingReloads.set(id, {
+      work: context.work,
+      kind: request.kind,
+      recordId: target.id,
+      name: target.name,
+      notes: request.notes,
+    });
+    return {
+      id,
+      // 出すのは**照合が通ったレコードの名前**。AIの書き方のまま出すと、
+      // 実際に開く記録とボタンの文言が食い違う
+      label: describeChatReload(target.name),
+      name: target.name,
+      kindLabel: RELOAD_KIND_LABELS[request.kind],
+      notes: request.notes ?? "",
+    };
+  }
+
+  /**
+   * 照合の相手になる資料を読む。
+   *
+   * **読めなくても相談は続ける。** 資料が無い作品もあり、
+   * そこで例外を投げると質問の答えごと消える。
+   */
+  private async loadReloadCandidates(
+    work: WorkEntry,
+    kind: ChatReloadKind
+  ): Promise<ReloadCandidate[]> {
+    try {
+      if (kind === "character") {
+        const loaded = await new CharacterStore(work).loadAll();
+        return loaded.characters;
+      }
+      const store =
+        kind === "ability"
+          ? createAbilityStore(work)
+          : kind === "organization"
+            ? createOrganizationStore(work)
+            : createLocationStore(work);
+      const loaded = await store.loadAll();
+      return loaded.records;
+    } catch (error) {
+      logFailure("再読込の照合に使う資料を読めなかった", {
+        種別: kind,
+        理由: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  /**
+   * 作者がボタンを押したときだけ、設定資料パネルで読み直す。
+   *
+   * ここでは**開いて始めるところまで**で、書き込みは行わない。
+   * 提案は設定資料パネルに項目ごとに並び、作者が選んだものだけが入る。
+   */
+  private async reloadRecord(id: string): Promise<void> {
+    const staged = this.pendingReloads.get(id);
+    if (!staged) {
+      this.postError("この提案はもう使えません。もう一度聞いてください。");
+      return;
+    }
+    this.pendingReloads.delete(id);
+
+    try {
+      await this.runner.reload(
+        staged.work,
+        staged.kind,
+        staged.recordId,
+        staged.notes
+      );
+      void this.view?.webview.postMessage({
+        type: "reloadDone",
+        id,
+        // **「直しました」とは言わない。** 反映されるのは、資料の画面で
+        // 作者が選んだ項目だけである
+        message:
+          `「${staged.name}」を設定資料の画面で開きました。` +
+          "読み直した提案はそちらに出ます（選んだ項目だけが反映されます）。",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logFailure("相談からの再読込", { 内容: message });
+      void this.view?.webview.postMessage({
+        type: "reloadFailed",
+        id,
+        message: `読み直せませんでした: ${message}`,
+      });
+    }
   }
 
   /** 「そこを見せて」の提案を受け取り、押されるまで持っておく */
@@ -1320,6 +1501,7 @@ function describeStagedProposals(staged: {
   edit?: { label: string } | undefined;
   run?: { label: string; usesAI: boolean } | undefined;
   locate?: { label: string } | undefined;
+  reload?: { label: string; kindLabel: string; notes: string } | undefined;
 }): string[] {
   const out: string[] = [];
   if (staged.edit) out.push(`書き込み: ${staged.edit.label}`);
@@ -1327,6 +1509,14 @@ function describeStagedProposals(staged: {
     out.push(`機能の起動: ${staged.run.label}${staged.run.usesAI ? "（AIを使う）" : ""}`);
   }
   if (staged.locate) out.push(`該当箇所: ${staged.locate.label}`);
+  if (staged.reload) {
+    // 留意点まで残す。**何を添えて読み直したか**が分からないと、
+    // 出てきた提案が妥当だったのかを後から確かめられない
+    out.push(
+      `再読込: ${staged.reload.kindLabel}${staged.reload.label}` +
+        (staged.reload.notes ? `（留意点: ${staged.reload.notes}）` : "")
+    );
+  }
   return out;
 }
 

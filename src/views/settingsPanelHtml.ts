@@ -111,7 +111,9 @@ input, textarea, select {
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
-  border-radius: 2px;
+  /* 角を丸くする（作者の依頼、2026-08-28。入力欄すべて）。
+     前はここに 2px があり、後から足した 4px が後勝ちで負けていた */
+  border-radius: 4px;
   padding: 4px 6px;
   font-family: inherit;
   font-size: inherit;
@@ -1603,7 +1605,9 @@ button.danger:hover {
         proposal = null;
         chatLog = [];
         questionText = "";
-        notesText = "";
+        // 相談から開いたときは、向こうで書いた留意点をそのまま映す
+        // （何を添えて読み直したのかが見えないと、提案の理由が分からない）
+        notesText = message.notes || "";
         renderTabs();
         renderList();
         renderDetail();

@@ -104,6 +104,7 @@ body {
 }
 #thinking { padding: 0 10px 10px; color: var(--vscode-descriptionForeground); font-size: 12px; }
 #composer { border-top: 1px solid var(--vscode-panel-border); padding: 8px 10px; }
+/* この画面の入力欄は相談の入力だけ。増えたらここへ足す */
 textarea {
   width: 100%;
   resize: vertical;
@@ -114,7 +115,8 @@ textarea {
   color: var(--vscode-input-foreground);
   background: var(--vscode-input-background);
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
-  border-radius: 2px;
+  /* 角を丸くする（作者の依頼、2026-08-28。入力欄すべて） */
+  border-radius: 4px;
 }
 textarea:focus { outline: 1px solid var(--vscode-focusBorder); }
 #composer .row {
@@ -329,6 +331,50 @@ function appendRun(turn, run) {
   turn.appendChild(box);
 }
 
+/**
+ * 「AIで再読込」を勧める（設計書6.31.3）。
+ *
+ * **押すまで何も起きない。** 書き込みの提案と同じ作法で、どの記録を
+ * どんな留意点で読み直すのかを先に見せる。読み直した結果もそのまま
+ * 保存されるわけではなく、設定資料の画面に項目ごとの提案として並ぶ。
+ */
+function appendReload(turn, reload) {
+  const box = document.createElement('div');
+  box.className = 'edit';
+  box.dataset.editId = reload.id;
+
+  const what = document.createElement('div');
+  what.className = 'what';
+  what.textContent = reload.kindLabel + '「' + reload.name + '」を本文から読み直します';
+  box.appendChild(what);
+
+  // 留意点は、押す前に読めるようにする。何を申し送るのか見えないまま
+  // 押すと、出てきた提案の理由が分からない
+  if (reload.notes) {
+    const preview = document.createElement('div');
+    preview.className = 'preview';
+    preview.textContent = '留意点: ' + reload.notes;
+    box.appendChild(preview);
+  }
+
+  const row = document.createElement('div');
+  row.className = 'options';
+  const button = document.createElement('button');
+  button.className = 'option';
+  button.innerHTML =
+    '<span class="num">↻</span><span>' +
+    escapeHtml(reload.label) +
+    '（AIを使います）</span>';
+  button.addEventListener('click', () => {
+    if (busy) return;
+    button.disabled = true;
+    vscode.postMessage({ type: 'reload', id: reload.id });
+  });
+  row.appendChild(button);
+  box.appendChild(row);
+  turn.appendChild(box);
+}
+
 /** 「そこを見せて」。押すとファイルを開き、該当箇所を光らせる */
 function appendLocate(turn, locate) {
   const box = document.createElement('div');
@@ -459,6 +505,7 @@ window.addEventListener('message', (event) => {
     if (message.locate) appendLocate(turn, message.locate);
     if (message.edit) appendEdit(turn, message.edit);
     if (message.run) appendRun(turn, message.run);
+    if (message.reload) appendReload(turn, message.reload);
     appendOptions(turn, message.options || []);
     scrollToBottom();
     return;
@@ -498,6 +545,16 @@ window.addEventListener('message', (event) => {
     return;
   }
   if (message.type === 'runFailed') {
+    markEdit(message.id, message.message, false);
+    scrollToBottom();
+    return;
+  }
+  if (message.type === 'reloadDone') {
+    markEdit(message.id, message.message, true);
+    scrollToBottom();
+    return;
+  }
+  if (message.type === 'reloadFailed') {
     markEdit(message.id, message.message, false);
     scrollToBottom();
     return;

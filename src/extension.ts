@@ -773,6 +773,13 @@ export async function activate(
         result
       );
     },
+    // 相談からの「AIで再読込」（設計書6.31.3）。
+    // **設定資料パネルの再読込をそのまま呼ぶ。** ここで処理を書き直すと、
+    // 画面のボタンから押したときと結果が食い違う
+    reload: async (work, kind, recordId, notes) => {
+      const panel = await openSettingsPanel(context, work, aiRegistry);
+      await panel.reloadRecordFromChat(kind, recordId, notes);
+    },
   });
   context.subscriptions.push(
     workChatPanel,
