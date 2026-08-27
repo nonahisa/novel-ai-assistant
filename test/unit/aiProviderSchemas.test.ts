@@ -238,10 +238,20 @@ describe("実行前の料金表示", () => {
     total: 1,
   };
 
-  test("ローカル実行は無料と示す", () => {
-    expect(buildExtractionCostNotice("ollama", [chunk], [], 4096)).toContain(
-      "無料・ローカル実行"
+  test("手元で動かすものは無料と示す", () => {
+    expect(buildExtractionCostNotice("ollama", false, [chunk], [], 4096)).toContain(
+      "無料・手元で実行"
     );
+  });
+
+  test("LM Studio も無料と示す", () => {
+    // **課金されないのに課金の目安が出ていた。** 判定が
+    // `providerId === "ollama"` の文字列一致だったため、同じく
+    // 手元で動く LM Studio が漏れていた（設計書6.28）
+    const notice = buildExtractionCostNotice("lmstudio", false, [chunk], [], 4096);
+
+    expect(notice).toContain("無料・手元で実行");
+    expect(notice).not.toContain("課金対象");
   });
 
   test.each([
@@ -251,7 +261,7 @@ describe("実行前の料金表示", () => {
   ] as const)("%s はサービス名を出して利用量を予告する", (id, serviceName) => {
     // 新しく足したプロバイダーで警告が消えると、
     // 作者が課金に気づかないまま73万字を流してしまう
-    const notice = buildExtractionCostNotice(id, [chunk], [], 4096);
+    const notice = buildExtractionCostNotice(id, true, [chunk], [], 4096);
 
     expect(notice).toContain("【課金対象トークン量の目安（上限寄り）】");
     expect(notice).toContain(`${serviceName}は実行すると利用量が加算されます`);

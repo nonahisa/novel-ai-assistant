@@ -6,6 +6,11 @@ import { scanWork } from "../core/scanner";
 import { readTextFile, hashText } from "../core/textFile";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
+import {
+  capabilityCacheTag,
+  capabilityProfile,
+  describeCapability,
+} from "../ai/capability";
 import { SynopsisStore } from "../core/synopsisStore";
 import { readPlotText } from "../core/plotFile";
 import { isBlankPlotSection, parsePlotMarkdown } from "../core/plotDoc";
@@ -85,13 +90,26 @@ export async function checkDeviations(
 
   const synopses = await loadSynopses(work);
 
+  // 地力の足りないモデルでは種別を絞り、実行前に断る（設計書6.28）。
+  // **この機能は話単位で送るので、コンテキスト長は要らない。**
+  // モデル情報が取れなくても止めず、これまでと同じ判定へ落とす
+  const modelInfo = await registry.resolveModelInfo();
+  const capability = capabilityProfile({
+    tier: modelInfo?.tier,
+    providerId: resolved.provider.id,
+  });
+
   const cache = new ChunkCache(work);
   await cache.load();
   // **プロットが変われば、同じ本文でも答えが変わる。**
   // 含めないと、プロットを直したのに古い指摘が出続ける（矛盾検知と同じ）
   const cacheKeyBase = {
     feature: "deviation_check",
-    promptVersion: `${DEVIATION_CHECK_VERSION}:${hashText(plot).slice(0, 16)}`,
+    // 見る種別が変われば答えも変わるので、鍵にも入れる。絞らないときは
+    // 印が空になるので、`high` のモデルの鍵はこれまでと同じままになる
+    promptVersion:
+      `${DEVIATION_CHECK_VERSION}:` +
+      `${capabilityCacheTag(capability)}${hashText(plot).slice(0, 16)}`,
     model: resolved.model,
   };
 
@@ -113,12 +131,19 @@ export async function checkDeviations(
           "本文は書き換えません。 プロットと違う箇所を並べるだけで、",
           "プロットのほうが古いこともあります。",
           // **実測に基づく断り。** 黙って動かして0件を返すより、
-          // 先に「効かない」と言うほうがよい（設計書6.10.2）
-          resolved.provider.id === "ollama"
-            ? "\nこの機能は、手元のAI（Ollama）ではほとんど働きません。\n" +
-              "実データで5回測ったところ、プロットに載せた話と外した話を\n" +
-              "見分けられませんでした。Claude・ChatGPT・Gemini をお使いください。\n" +
+          // 先に「効かない」と言うほうがよい（設計書6.10.2）。
+          // **「手元の」でも「Ollama」でもなく、地力で言う**——同じことは
+          // LM Studio の小さいモデルでも、クラウドの小さいモデルでも起きる
+          capability.warnDeviationIneffective
+            ? "\n小さめのモデルでは、この機能はほとんど働きません。\n" +
+              "実データで5回測ったところ、gemma4:e4b と gemma4:12b は\n" +
+              "プロットに載せた話と外した話を見分けられませんでした。\n" +
+              "大きなモデル（Claude・ChatGPT・Gemini など）をお使いください。\n" +
               "（このモデルでは「間延び」も見ません。判定が難しく的外れが増えるため）"
+            : "",
+          // 種別を絞ると鍵が変わり、キャッシュが総入れ替えになる
+          pending.length === episodes.length && episodes.length > 1
+            ? "\n（見る種別が前回から変わっているため、今回はすべて送り直します）"
             : "",
           resolved.provider.isPaid
             ? `\n${resolved.provider.displayName} は話ごとに課金されます。`
@@ -134,12 +159,14 @@ export async function checkDeviations(
 
   logStep(
     `プロット逸脱検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
-      `${resolved.model} / ${episodes.length}話 / v${DEVIATION_CHECK_VERSION}`
+      `${resolved.model}（${describeCapability({ tier: modelInfo?.tier, providerId: resolved.provider.id }, capability)}） / ` +
+      `${episodes.length}話 / v${DEVIATION_CHECK_VERSION}`
   );
 
   const plotText = plot;
-  const types: readonly DeviationType[] =
-    resolved.provider.id === "ollama" ? LIGHT_DEVIATION_TYPES : DEVIATION_TYPES;
+  const types: readonly DeviationType[] = capability.narrowDeviationTypes
+    ? LIGHT_DEVIATION_TYPES
+    : DEVIATION_TYPES;
   const provider = resolved.provider;
   const model = resolved.model;
 

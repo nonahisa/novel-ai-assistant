@@ -393,6 +393,7 @@ export async function extractCharacters(
     const configuredMaxOutputTokens = resolveMaxOutputTokens();
     const costNotice = buildExtractionCostNotice(
       resolved.provider.id,
+      resolved.provider.isPaid,
       pending,
       buildKnownCharacterNames(loaded.characters, []),
       configuredMaxOutputTokens
@@ -1292,12 +1293,18 @@ const CLOUD_SERVICE_NAMES: Partial<Record<ProviderId, string>> = {
 /** 実行前に、プロバイダごとの料金上の影響を明示する。 */
 export function buildExtractionCostNotice(
   providerId: ProviderId,
+  /**
+   * 課金されるか。**プロバイダIDでは判断しない。** 以前は
+   * `providerId === "ollama"` で見ていたため、同じく課金されない
+   * LM Studio に課金の目安が出ていた（設計書6.28）。
+   */
+  paid: boolean,
   pendingChunks: Chunk[],
   knownCharacterNames: string[],
   configuredMaxOutputTokens: number
 ): string {
-  if (providerId === "ollama") {
-    return "料金: 無料・ローカル実行（API課金なし）";
+  if (!paid) {
+    return "料金: 無料・手元で実行（API課金なし）";
   }
 
   // UTF-8の各バイトを1トークンとして数え、実際より少なく見せにくい

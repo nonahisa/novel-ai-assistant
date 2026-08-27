@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError, recoveryForAIError } from "../ai/types";
+import { AIError, recoveryForAIError, type CapabilityTier } from "../ai/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import {
@@ -16,6 +16,11 @@ import {
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
+import {
+  capabilityCacheTag,
+  capabilityProfile,
+  describeCapability,
+} from "../ai/capability";
 import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
 import {
   factsRevealedAfter,
@@ -167,11 +172,19 @@ export async function checkContradictions(
 
   const tasks = await collectChunks(work, registry, options);
   if (!tasks) return undefined;
-  const { chunks, chapterLabelByFile, chunkNote } = tasks;
+  const { chunks, chapterLabelByFile, chunkNote, tier } = tasks;
   if (chunks.length === 0) {
     vscode.window.showWarningMessage("検知できる本文がありませんでした。");
     return undefined;
   }
+
+  // 地力の足りないモデルには観点を絞って渡す（設計書6.28）。
+  // **鍵より先に決める。** 観点が変われば答えも変わるので、
+  // 鍵にも反映しなければ古い結果が再利用される
+  const capability = capabilityProfile({
+    tier,
+    providerId: resolved.provider.id,
+  });
 
   // **設定が変われば、同じ本文でも答えが変わる。**
   // 材料のハッシュをキャッシュの鍵へ入れないと、設定を直したのに
@@ -180,7 +193,11 @@ export async function checkContradictions(
   await cache.load();
   const cacheKeyBase = {
     feature: "contradiction_check",
-    promptVersion: `${CONTRADICTION_CHECK_VERSION}:${material.fingerprint}`,
+    // 絞らないときは印が空になるので、`high` のモデルの鍵はこれまでと
+    // 同じままになる（有料AIで処理済みのキャッシュを飛ばさない）
+    promptVersion:
+      `${CONTRADICTION_CHECK_VERSION}:` +
+      `${capabilityCacheTag(capability)}${material.fingerprint}`,
     model: resolved.model,
   };
 
@@ -192,6 +209,7 @@ export async function checkContradictions(
   // 検証は別のプロンプトなので、版も別に持つ
   const verifyKeyBase = {
     feature: "contradiction_verify",
+    // 検証のプロンプトは観点で変わらないので、印を混ぜない
     promptVersion: `${CONTRADICTION_VERIFY_VERSION}:${material.fingerprint}`,
     model: resolved.model,
   };
@@ -213,6 +231,17 @@ export async function checkContradictions(
           "",
           "この機能は本文を書き換えません。 設定と食い違う箇所を並べるだけで、",
           "どちらを直すかは作者が決めます（設定側が古いこともあります）。",
+          // **絞ったことを黙って行わない。** 指摘の件数が減るので、
+          // 理由が画面に出ていないと作者には分からない（設計書6.28）
+          capability.narrowContradictionCategories
+            ? `\nこのモデルでは、見る観点を7つから3つ（人物・状態・時系列）へ絞ります。\n` +
+              "一度にたくさん見せると、かえって見落としが増えるためです。"
+            : "",
+          // **観点を絞ると鍵が変わり、キャッシュが総入れ替えになる。**
+          // 何も変えていないのに全件が対象になると、作者は不具合だと思う
+          pending.length === chunks.length && chunks.length > 1
+            ? "\n（見る観点が前回から変わっているため、今回はすべて送り直します）"
+            : "",
           resolved.provider.isPaid
             ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
             : "",
@@ -227,13 +256,16 @@ export async function checkContradictions(
 
   logStep(
     `矛盾検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
-      `${resolved.model} / ${chunks.length}チャンク / ${chunkNote} / ` +
+      `${resolved.model}（${describeCapability({ tier, providerId: resolved.provider.id }, capability)}） / ` +
+      `${chunks.length}チャンク / ${chunkNote} / ` +
       `v${CONTRADICTION_CHECK_VERSION}`
   );
 
-  // 小さいモデルでは観点を絞る。1回の負荷を下げないと検出漏れが増える
+  // 地力の足りないモデルでは観点を絞る。1回の負荷を下げないと検出漏れが増える
   const categories: readonly ContradictionCategory[] =
-    resolved.provider.id === "ollama" ? LIGHT_CATEGORIES : CONTRADICTION_CATEGORIES;
+    capability.narrowContradictionCategories
+      ? LIGHT_CATEGORIES
+      : CONTRADICTION_CATEGORIES;
 
   // 下の入れ子の関数では、上の `if (!resolved) return` による絞り込みが
   // 効かない（あとから書き換わりうるとみなされる）。ここで束ねておく
@@ -811,6 +843,14 @@ async function collectChunks(
       chapterLabelByFile: Map<string, string>;
       /** 何を根拠に大きさを決めたか。ログに残す（設計書6.23） */
       chunkNote: string;
+      /**
+       * モデルの能力。観点を絞るかの判断に使う（設計書6.28）。
+       *
+       * **ここで取ったものを返す。** 呼び出し側でもう一度
+       * `resolveModelInfo()` を呼ぶと、通信が1回増えるうえ、
+       * 2回の結果が食い違ったときにどちらで動いたのか分からなくなる。
+       */
+      tier: CapabilityTier | undefined;
     }
   | undefined
 > {
@@ -869,5 +909,6 @@ async function collectChunks(
     chunks: merged,
     chapterLabelByFile,
     chunkNote: describeChunkSettings(chunkSettings),
+    tier: info?.tier,
   };
 }

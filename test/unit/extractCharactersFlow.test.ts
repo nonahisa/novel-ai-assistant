@@ -68,6 +68,7 @@ vi.mock("../../src/ai/registry", () => ({
       ? {
           provider: {
             id: state.providerId,
+            isPaid: state.providerId !== "ollama",
             generate: state.generate,
             testConnection: state.testConnection,
           },
@@ -1877,7 +1878,7 @@ describe("人物抽出フロー", () => {
     const confirmation = showInformationMessage.mock.calls.find((call) =>
       call.slice(1).includes("実行")
     )?.[0];
-    expect(confirmation).toContain("無料・ローカル実行（API課金なし）");
+    expect(confirmation).toContain("無料・手元で実行（API課金なし）");
     expect(confirmation).not.toContain("課金が発生します");
     expect(confirmation).not.toContain("Anthropic");
   });

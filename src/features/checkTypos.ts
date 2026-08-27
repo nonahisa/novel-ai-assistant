@@ -317,7 +317,11 @@ export async function checkTypos(
       return undefined;
     }
     const estimateMinutes = Math.ceil((pending.length * 15) / 60);
-    const costNotice = buildTypoCheckCostNotice(resolved.provider.id, pending);
+    const costNotice = buildTypoCheckCostNotice(
+      resolved.provider.id,
+      resolved.provider.isPaid,
+      pending
+    );
     // **まとめ方を変えると、キャッシュが総入れ替えになる。** 何も変えて
     // いないのに全件が対象になると、作者は不具合だと思う。理由を添える
     const allPending =
@@ -699,13 +703,20 @@ const CLOUD_SERVICE_NAMES: Partial<Record<ProviderId, string>> = {
   gemini: "Gemini API",
 };
 
-/** 実行前に、プロバイダごとの料金上の影響を明示する（簡易版） */
+/**
+ * 実行前に、プロバイダごとの料金上の影響を明示する（簡易版）。
+ *
+ * **「無料か」はプロバイダIDではなく `isPaid` で決める。** 以前は
+ * `providerId === "ollama"` と書いていたため、**同じく課金されない
+ * LM Studio に「課金対象トークン量の目安」が出ていた**（設計書6.28）。
+ */
 export function buildTypoCheckCostNotice(
   providerId: ProviderId,
+  paid: boolean,
   pendingChunks: Chunk[]
 ): string {
-  if (providerId === "ollama") {
-    return "料金: 無料・ローカル実行（API課金なし）";
+  if (!paid) {
+    return "料金: 無料・手元で実行（API課金なし）";
   }
 
   const estimatedInputTokens = pendingChunks.reduce((total, chunk) => {
