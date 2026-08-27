@@ -15,6 +15,7 @@ import {
   type Chunk,
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
+import { measureParts } from "../core/usageLog";
 import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
 import {
   factsRevealedAfter,
@@ -332,29 +333,50 @@ export async function checkContradictions(
       if (!relevant.hasAnything) return undefined;
 
       try {
+        const bodyWithLines = withLineNumbers(chunk);
+        const previousSynopses = settings.synopsesBefore(chunk.chapterStart);
+        const userPrompt = buildContradictionCheckPrompt({
+          // **まとめたチャンクは、話が1つとは限らない。**
+          // 1つ目の話の名前だけを渡すと、2話目以降の本文を
+          // 1話目だと言って読ませることになる
+          chapterLabel: describeChunkScope(chunk, (filePath) =>
+            chapterLabelByFile.get(filePath)
+          ),
+          chunkTextWithLineNumbers: bodyWithLines,
+          characterDetails: relevant.characters,
+          locationDetails: relevant.locations,
+          worldviewSummary: settings.worldview,
+          previousSynopses,
+          categories,
+          futureFacts,
+        });
+
         const response = await provider.generate({
           systemPrompt: CONTRADICTION_CHECK_SYSTEM_PROMPT,
-          userPrompt: buildContradictionCheckPrompt({
-            // **まとめたチャンクは、話が1つとは限らない。**
-            // 1つ目の話の名前だけを渡すと、2話目以降の本文を
-            // 1話目だと言って読ませることになる
-            chapterLabel: describeChunkScope(chunk, (filePath) =>
-              chapterLabelByFile.get(filePath)
-            ),
-            chunkTextWithLineNumbers: withLineNumbers(chunk),
-            characterDetails: relevant.characters,
-            locationDetails: relevant.locations,
-            worldviewSummary: settings.worldview,
-            previousSynopses: settings.synopsesBefore(chunk.chapterStart),
-            categories,
-            futureFacts,
-          }),
+          userPrompt,
           model,
           // 事実の突き合わせなので揺らさない
           temperature: 0.0,
           jsonSchema: CONTRADICTION_CHECK_SCHEMA as unknown as object,
           disableThinking: true,
           signal: controller.signal,
+          meta: {
+            feature:
+              mode === "future" ? "contradiction_future" : "contradiction_check",
+            workFolder: work.folderPath,
+            parts: measureParts(userPrompt, {
+              本文: bodyWithLines.length,
+              人物: relevant.characters.length,
+              場所: relevant.locations.length,
+              // **ここだけ上限が無い。** 人物・場所は本文に名前が出たものに
+              // 絞り、あらすじは直近12話、未来の事実は20行で切っているのに、
+              // 世界観は全項目を毎チャンク送っている。作者の作品で実際に
+              // 何字になるのかを測るために、独立した項目として出す
+              世界観: settings.worldview.length,
+              あらすじ: previousSynopses.length,
+              未来の事実: futureFacts.length,
+            }),
+          },
         });
 
         if (response.truncated || !response.text.trim()) {
@@ -505,6 +527,9 @@ export async function checkContradictions(
         jsonSchema: CONTRADICTION_VERIFY_SCHEMA as unknown as object,
         disableThinking: true,
         signal: controller.signal,
+        // 指摘1件ごとに1回呼ぶ。**件数が多いと、本体より重くなりうる**ので
+        // 別の機能名で数える
+        meta: { feature: "contradiction_verify", workFolder: work.folderPath },
       });
 
       if (response.truncated || !response.text.trim()) {

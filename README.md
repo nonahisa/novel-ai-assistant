@@ -2,7 +2,7 @@
 
 小説を書くための作品管理・文字数計測・AI支援を1つにまとめたVSCode拡張機能です。
 
-このリポジトリの版：**0.22.5**（AIへ毎回送る説明を37%短くしました）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.22.7**（1つにまとめられた人物を、別人に分けられるようにしました）。Marketplace に出ている版はこれより遅れることがあります。
 
 ## できること
 
@@ -881,6 +881,7 @@ AI処理の記録は「**ログを開く**」（ヘルプ）で開けます。�
 | `novelai.vectorSearch.model` | `bge-m3` | 意味検索に使う埋め込みモデル（Ollama）。変更すると索引は作り直しになります |
 | `novelai.vectorSearch.autoUpdate` | `true` | 相談を始めるときに、変更ぶんだけ索引を自動で追加します。切ると「検索用の索引を作る」を実行するまで更新されません |
 | `novelai.chatLog.enabled` | `true` | AIとの相談のやり取りを `.aiwriter/logs/chat.md` に残します。**何を材料にAIが何を答えたか**を後から確かめられます。**原稿の一部を含みます**（この場所はGitHubへ送られません）。残したくない場合は切ってください |
+| `novelai.usageLog.enabled` | `true` | AIへ1回送るごとに、送った量を `.aiwriter/logs/usage.md` に1行ずつ残します。**どの機能が重いか・本文が何割を占めるか**を後から確かめられます。**本文そのものは記録しません**（字数だけです。この場所はGitHubへ送られません） |
 
 `novelai.claude.maxOutputTokens` はClaude専用だった旧設定です。`novelai.maxOutputTokens` に置き換わりました。
 

@@ -45,6 +45,7 @@ import {
 import {
   findOpenSettingsPanel,
   openSettingsPanel,
+  setSettingsChangeObserver,
 } from "./features/settingsPanel";
 import { unifyCharacterRecords } from "./features/unifyCharacters";
 import { findMergeCandidates } from "./core/characterMerge";
@@ -507,6 +508,18 @@ export async function activate(
   // 起動直後にも数える。前回の抽出で溜まったままのことがある
   refreshActionBadges();
   registry.onDidChange(() => refreshActionBadges());
+
+  // 設定資料パネルからの保存を、本文の色分けと一覧へ届ける。
+  // **パネルは長らくここを呼んでいなかった**ので、名前を変えても
+  // 分けても、本文の用語ハイライトは古い人物を指したままだった
+  setSettingsChangeObserver((work) => {
+    highlighter.invalidate();
+    treeProvider.refresh(work.id);
+    refreshActionBadges();
+  });
+  context.subscriptions.push({
+    dispose: () => setSettingsChangeObserver(undefined),
+  });
 
   // 提案パネル（下段・出力やデバッグコンソールと同じ場所）。
   // 誤字脱字検知の結果をここへ表示する。設定資料パネルと違い

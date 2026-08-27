@@ -1059,6 +1059,43 @@ button.danger:hover {
       }
     }
 
+    // ── 別人に分ける（設計書6.5.8）
+    // **取り下げの真上に置く。** どちらも「この記録そのものを直す」操作なので
+    // 並べる。ただし分けるのは消す操作ではないので、danger にはしない。
+    //
+    // **押せるものを、押せる形で出す**（6.5.6と同じ。datalistは使わない）
+    if (detail.separable && detail.separable.length > 0) {
+      el.detail.appendChild(heading("別の人物に分ける"));
+      const sepHint = document.createElement("div");
+      sepHint.className = "readonly";
+      sepHint.textContent =
+        "同じ人の別の呼び方ではなく、別人だった呼び名を選んでください。" +
+        "名前だけの人物ができます。紹介や登場話はこちらに残るので、" +
+        "「設定資料を抽出」をもう一度実行すると本文から入ります。";
+      el.detail.appendChild(sepHint);
+
+      const sepChips = document.createElement("div");
+      sepChips.className = "chips";
+      const sepLabel = document.createElement("span");
+      sepLabel.className = "chiplabel";
+      sepLabel.textContent = "別人にする呼び名：";
+      sepChips.appendChild(sepLabel);
+      for (const alias of detail.separable) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip";
+        chip.textContent = alias;
+        chip.disabled = busy;
+        chip.title = alias + " を別の人物として切り出します";
+        chip.addEventListener("click", function () {
+          // 確認は拡張機能側で出す。WebViewのconfirmは使えない
+          post("separate", { kind: detail.kind, id: detail.id, alias: alias });
+        });
+        sepChips.appendChild(chip);
+      }
+      el.detail.appendChild(sepChips);
+    }
+
     // ── 取り下げ
     // **いちばん下に置く。** AIの抽出は誤った記録を作る（名前が「null」の
     // 組織が実データにできていた）ので消せる手段は要るが、

@@ -119,6 +119,7 @@ export async function generatePlot(
           temperature: 0.3,
           jsonSchema: PLOT_REVERSE_SCHEMA as unknown as object,
           disableThinking: true,
+          meta: { feature: "plot_reverse", workFolder: work.folderPath },
           signal: controller.signal,
         });
         responseText = response.truncated ? undefined : response.text;

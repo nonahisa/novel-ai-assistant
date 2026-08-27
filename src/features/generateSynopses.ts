@@ -162,6 +162,7 @@ export async function generateSynopses(
             temperature: 0.3,
             jsonSchema: SYNOPSIS_SCHEMA as unknown as object,
             disableThinking: true,
+            meta: { feature: "synopsis", workFolder: work.folderPath },
           });
 
           const parsed = parseSynopsisResult(response.text);

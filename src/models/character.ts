@@ -55,6 +55,19 @@ export interface AddressForm {
   evidence: string | null;
 }
 
+/**
+ * 作者が「この2人は別人だ」と決めた相手（設計書6.5.8）。
+ *
+ * 名前で持つのは、**抽出が返してくるのは名前だけ**だからである
+ * （まだレコードになっていない呼び方とも突き合わせる必要がある）。
+ * idも添えるのは、あとで名前が変わっても組を見失わないため
+ * （`AddressTerm` の `targetName`/`targetId` と同じ形）。
+ */
+export interface DistinctPerson {
+  name: string;
+  id: string | null;
+}
+
 /** ある人物が特定の相手を呼ぶ呼称 */
 export interface AddressTerm {
   targetName: string;
@@ -86,6 +99,14 @@ export interface Character {
   id: string;
   name: string;
   aliases: string[];
+  /**
+   * 作者が「別人だ」と決めた相手（設計書6.5.8）。
+   *
+   * **次の抽出でまとめ直させないための記録である。** マージは名前だけでなく
+   * 別名でも既存レコードを引き当てるので、ここに残さないと、分けた翌日には
+   * また1人に戻る。作者の判断は、AIの読みより強い。
+   */
+  distinctFrom: DistinctPerson[];
   /** 読み仮名。設定資料エクスポートで必要になる */
   reading: string | null;
   romaji: string | null;
@@ -173,6 +194,7 @@ export function emptyCharacter(id: string, name: string): Character {
     id,
     name,
     aliases: [],
+    distinctFrom: [],
     reading: null,
     romaji: null,
     icon: null,
@@ -221,6 +243,7 @@ export function normalizeCharacter(raw: Partial<Character>): Character {
     ...base,
     ...raw,
     aliases: raw.aliases ?? [],
+    distinctFrom: raw.distinctFrom ?? [],
     firstPerson: raw.firstPerson ?? base.firstPerson,
     addressTerms: raw.addressTerms ?? [],
     relations: raw.relations ?? [],
@@ -332,6 +355,16 @@ export function parseCharacter(raw: unknown): Character {
     requireNonEmptyString(entry.relation, `${path}.relation`);
     return { name: entry.name as string, relation: entry.relation as string };
   });
+  // 別人だと決めた相手（6.5.8）。**壊れた形は読み込みエラーにする。**
+  // 黙って空にすると、作者の判断が消えたまま次の抽出でまとめ直される
+  const distinctFrom = optionalObjectArray(value.distinctFrom, "distinctFrom", (entry, path) => {
+    requireNonEmptyString(entry.name, `${path}.name`);
+    optionalNullableString(entry.id, `${path}.id`);
+    return {
+      name: entry.name as string,
+      id: (entry.id as string | null | undefined) ?? null,
+    };
+  });
   const abilities = optionalObjectArray(value.abilities, "abilities", (entry, path) => {
     requireNonEmptyString(entry.name, `${path}.name`);
     optionalNullableString(entry.abilityId, `${path}.abilityId`);
@@ -371,6 +404,7 @@ export function parseCharacter(raw: unknown): Character {
     firstPerson,
     addressTerms,
     relations,
+    distinctFrom,
     abilities,
     conflicts,
     changes,

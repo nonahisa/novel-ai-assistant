@@ -1,6 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
-import { mergeExtractedCharacters } from "../../src/core/characterMerge";
-import { emptyCharacter } from "../../src/models/character";
+import {
+  findMergeCandidates,
+  mergeExtractedCharacters,
+} from "../../src/core/characterMerge";
+import { emptyCharacter, type Character } from "../../src/models/character";
 
 describe("登場人物マージ", () => {
   test("空白だけの人物名は新規人物として保存しない", () => {
@@ -788,5 +791,116 @@ describe("敬称の吸収", () => {
     const result = merge(["リナ", "レナ", "リン"]);
 
     expect(result.characters).toHaveLength(3);
+  });
+});
+
+/**
+ * 作者が「別人だ」と決めた組を、次の抽出でまとめ直さない（設計書6.5.8）。
+ *
+ * **これが本丸である。** 分ける操作を作っても、ここが塞がっていなければ
+ * 次に「設定資料を抽出」した瞬間にまた1人へ戻る。
+ * 分ける操作そのものを通さず、`distinctFrom` を手で入れたレコードで確かめる
+ * ——マージ側だけを試せる形にしておくと、画面を直しても壊れない。
+ */
+describe("別人だと決めた組", () => {
+  /** 実データの形（char_003 アジャン / char_010 アジャーノ）を写す */
+  function split(): [Character, Character] {
+    const ajan = emptyCharacter("char_003", "アジャン");
+    ajan.aliases = ["アジャン様"];
+    ajan.summary = "村の長";
+    ajan.appearedChapters = [1, 3, 5, 11, 12];
+    ajan.distinctFrom = [{ name: "アジャーノ", id: "char_010" }];
+
+    const ajano = emptyCharacter("char_010", "アジャーノ");
+    ajano.distinctFrom = [{ name: "アジャン", id: "char_003" }];
+    return [ajan, ajano];
+  }
+
+  test("同一人物として抽出されても、別名が戻らない", () => {
+    const result = mergeExtractedCharacters(split(), [
+      { data: { name: "アジャン", aliases: ["アジャーノ"] }, chapters: [5] },
+    ]);
+
+    const ajan = result.characters.find((c) => c.id === "char_003")!;
+    expect(ajan.aliases).toEqual(["アジャン様"]);
+    expect(result.characters).toHaveLength(2);
+  });
+
+  test("敬称が付いた呼び方でも戻らない", () => {
+    // 「アジャーノさん」は敬称を落とすと「アジャーノ」。
+    // 書かれたままで比べると、ここをすり抜ける
+    const result = mergeExtractedCharacters(split(), [
+      { data: { name: "アジャン", aliases: ["アジャーノさん"] }, chapters: [5] },
+    ]);
+
+    expect(result.characters.find((c) => c.id === "char_003")!.aliases).toEqual([
+      "アジャン様",
+    ]);
+  });
+
+  test("分けた側の名前で抽出されたら、分けた側だけが育つ", () => {
+    const result = mergeExtractedCharacters(split(), [
+      { data: { name: "アジャーノ", summary: "旅の商人" }, chapters: [6] },
+    ]);
+
+    const ajano = result.characters.find((c) => c.id === "char_010")!;
+    expect(ajano.summary).toBe("旅の商人");
+    expect(ajano.appearedChapters).toEqual([6]);
+
+    // 元の記録は、紹介も登場話も動かない
+    const ajan = result.characters.find((c) => c.id === "char_003")!;
+    expect(ajan.summary).toBe("村の長");
+    expect(ajan.appearedChapters).toEqual([1, 3, 5, 11, 12]);
+  });
+
+  test("重複の候補に出さない", () => {
+    // 出すと操作メニューの印が永久に「1件」を出し続ける
+    const result = mergeExtractedCharacters(split(), [
+      { data: { name: "アジャン", aliases: ["アジャーノ"] }, chapters: [5] },
+    ]);
+
+    expect(result.mergeCandidates).toEqual([]);
+    expect(findMergeCandidates(result.characters)).toEqual([]);
+  });
+
+  test("何度流しても同じ（べき等）", () => {
+    const once = mergeExtractedCharacters(split(), [
+      { data: { name: "アジャン", aliases: ["アジャーノ"] }, chapters: [5] },
+    ]);
+    const twice = mergeExtractedCharacters(once.characters, [
+      { data: { name: "アジャン", aliases: ["アジャーノ"] }, chapters: [5] },
+    ]);
+
+    expect(twice.characters).toHaveLength(2);
+    expect(twice.characters.find((c) => c.id === "char_003")!.aliases).toEqual([
+      "アジャン様",
+    ]);
+  });
+
+  test("片側だけに記録が残っていても効く", () => {
+    // 作者が片方のJSONを手で直すと、記録が片側だけになりうる
+    const [ajan, ajano] = split();
+    ajan.distinctFrom = [];
+
+    const result = mergeExtractedCharacters([ajan, ajano], [
+      { data: { name: "アジャン", aliases: ["アジャーノ"] }, chapters: [5] },
+    ]);
+
+    expect(result.mergeCandidates).toEqual([]);
+    expect(result.characters).toHaveLength(2);
+  });
+
+  test("関係のない人物の統合は、これまでどおり寄る", () => {
+    const [ajan, ajano] = split();
+    const rina = emptyCharacter("char_004", "リナ");
+
+    const result = mergeExtractedCharacters([ajan, ajano, rina], [
+      { data: { name: "リナ", aliases: ["リナさん"], summary: "宿の娘" }, chapters: [2] },
+    ]);
+
+    expect(result.characters).toHaveLength(3);
+    expect(result.characters.find((c) => c.id === "char_004")!.summary).toBe(
+      "宿の娘"
+    );
   });
 });

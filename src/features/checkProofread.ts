@@ -14,6 +14,7 @@ import {
   type Chunk,
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
+import { measureParts } from "../core/usageLog";
 import { readChunkSettings } from "./chunkSettings";
 import {
   buildProofreadPrompt,
@@ -236,20 +237,31 @@ export async function checkProofread(
 
     async function ask(chunk: Chunk): Promise<AskResult> {
       try {
+        const bodyWithLines = withLineNumbers(chunk);
+        const userPrompt = buildProofreadPrompt({
+          chunkTextWithLineNumbers: bodyWithLines,
+          narrativeStyle,
+          styleNote,
+          maxIssues: issueBudget(chunk.text.length),
+        });
+
         const response = await provider.generate({
           systemPrompt: PROOFREAD_SYSTEM_PROMPT,
-          userPrompt: buildProofreadPrompt({
-            chunkTextWithLineNumbers: withLineNumbers(chunk),
-            narrativeStyle,
-            styleNote,
-            maxIssues: issueBudget(chunk.text.length),
-          }),
+          userPrompt,
           model,
           // 言い回しの提案なので、事実の突き合わせより少しだけ揺らす
           temperature: 0.2,
           jsonSchema: PROOFREAD_SCHEMA as unknown as object,
           disableThinking: true,
           signal: controller.signal,
+          meta: {
+            feature: "proofread",
+            workFolder: work.folderPath,
+            parts: measureParts(userPrompt, {
+              本文: bodyWithLines.length,
+              作法: styleNote.length,
+            }),
+          },
         });
 
         const parsed = parseProofreadResult(response.text);

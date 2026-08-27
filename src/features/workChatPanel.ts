@@ -354,6 +354,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       ) =>
         resolved.provider.generate({
           systemPrompt: WORK_CHAT_SYSTEM_PROMPT,
+          // 作品の外のファイルについての相談は、どの作品にも属さないので
+          // 記録しない（`workFolder` が無ければ記録されない）
+          meta: { feature: "work_chat", workFolder: context?.work.folderPath },
           userPrompt: buildWorkChatPrompt({
             workTitle: context?.work.title ?? "（作品を特定できません）",
             contextKind: context?.kind ?? "outside",
@@ -1142,6 +1145,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         temperature: 0.2,
         jsonSchema: SEARCH_TERMS_SCHEMA,
         disableThinking: true,
+        meta: { feature: "search_terms", workFolder: work.folderPath },
       });
       return parseSearchTerms(result.text);
     } catch (error) {

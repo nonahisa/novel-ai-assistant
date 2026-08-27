@@ -180,3 +180,36 @@ describe("名前の書き換え", () => {
     expect(script()).toContain("control.dataset.initial");
   });
 });
+
+/**
+ * 別人に分ける（設計書6.5.8）。
+ *
+ * WebViewは実機でしか動かないので、**組み立てに入っていること**だけを見る。
+ */
+describe("別人に分ける", () => {
+  test("分ける節が、取り下げの前にある", () => {
+    const body = script();
+    const separate = body.indexOf("別の人物に分ける");
+    const retire = body.indexOf("この記録を取り下げる");
+
+    expect(separate).toBeGreaterThan(0);
+    expect(retire).toBeGreaterThan(0);
+    // どちらも「この記録そのものを直す」操作なので並べる。
+    // ただし消す操作はいちばん下（押し間違えを避ける）
+    expect(separate).toBeLessThan(retire);
+  });
+
+  test("押すと拡張機能側へ渡る", () => {
+    // WebViewの confirm は使えないので、確認は拡張機能側で出す
+    expect(script()).toContain('post("separate"');
+  });
+
+  test("札として並べる（datalistを使わない）", () => {
+    // 6.5.7：Chromiumのdatalistは入力欄に何の印も出ず、
+    // 作者からは「ドロップダウンが出ない」としか見えなかった
+    const body = script();
+    const at = body.indexOf("別人にする呼び名");
+    expect(at).toBeGreaterThan(0);
+    expect(body.slice(at, at + 600)).toContain('className = "chip"');
+  });
+});

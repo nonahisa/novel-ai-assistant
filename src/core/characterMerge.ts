@@ -108,6 +108,7 @@ export function mergeExtractedCharacters(
       // 「どれかと同じかもしれない」ことを作者へ伝える。
       // 黙って新規にすると重複が増えるだけで気づけない。
       for (const other of lookup.ambiguous) {
+        if (isDeclaredDistinct(c, other)) continue;
         ambiguousPairs.push([c.name, other.name]);
       }
       continue;
@@ -116,7 +117,10 @@ export function mergeExtractedCharacters(
     // 同名の相手が他にもいた場合、寄せ先へ統合したうえで
     // 「これらも同じかもしれない」と作者へ伝える。
     // 統合そのものは作者が決める（誤統合は取り返しがつかない）
+    // 作者が「別人だ」と決めた組は、ここでも作者へ回さない（設計書6.5.8）。
+    // 回すと「同じかもしれません」と毎回聞かれ、分けた判断が尊重されない
     for (const other of lookup.ambiguous) {
+      if (isDeclaredDistinct(match, other)) continue;
       ambiguousPairs.push([match.name, other.name]);
     }
 
@@ -208,14 +212,19 @@ function applyExtracted(
   // 別名は和集合。
   // 抽出時の名前が既存レコードと異なる場合（「玲司」で照合されたが
   // 登録名が「黒木 玲司」など）、その呼び名も別名として残す。
+  //
+  // **作者が「別人だ」と決めた呼び名は足さない**（設計書6.5.8）。
+  // 抽出は毎回まっさらな目で本文を読むので、分けた翌日にはまた
+  // 「アジャン＝アジャーノ」と返してくる。ここで受け取ると別名が戻り、
+  // 用語ハイライトもIME辞書も1人に戻る。
   const aliases = new Set(target.aliases);
   const incomingName = ex.name?.trim();
-  if (incomingName && incomingName !== target.name && !aliases.has(incomingName)) {
-    aliases.add(incomingName);
-    changed = true;
-  }
-  for (const a of ex.aliases ?? []) {
-    if (a && a !== target.name && !aliases.has(a)) {
+  const incoming = withoutDistinctNames(target, [
+    ...(incomingName ? [incomingName] : []),
+    ...(ex.aliases ?? []).filter((a): a is string => Boolean(a)),
+  ]);
+  for (const a of incoming) {
+    if (a !== target.name && !aliases.has(a)) {
       aliases.add(a);
       changed = true;
     }
@@ -505,6 +514,62 @@ function adoptLatest(target: Character, field: CharacterTextField): boolean {
 }
 
 /**
+ * 作者が「別人だ」と決めた相手の呼び名（設計書6.5.8）。
+ *
+ * **敬称を落とした形で持つ。** 抽出は「アジャーノ」とも「アジャーノさん」とも
+ * 返してくるので、書かれたままで比べると片方がすり抜ける。
+ */
+function distinctKeys(character: Character): Set<string> {
+  return new Set(
+    (character.distinctFrom ?? []).map((entry) => normalizeName(entry.name))
+  );
+}
+
+/**
+ * この2人は、作者が「別人だ」と決めた組か。
+ *
+ * **片側だけ見ればよい形にしない。** 分ける操作は両方へ記録を入れるが、
+ * 作者が片方のJSONを手で直したときに、記録が片側だけになりうる。
+ * どちらかが「別人だ」と言っていれば別人として扱う——
+ * **作者の判断は、AIの読みより強い**（実装ルール2）。
+ */
+function isDeclaredDistinct(a: Character, b: Character): boolean {
+  if (a.id === b.id) return false;
+  const fromA = a.distinctFrom ?? [];
+  const fromB = b.distinctFrom ?? [];
+  return (
+    fromA.some(
+      (entry) =>
+        entry.id === b.id ||
+        [b.name, ...b.aliases].some(
+          (name) => normalizeName(name) === normalizeName(entry.name)
+        )
+    ) ||
+    fromB.some(
+      (entry) =>
+        entry.id === a.id ||
+        [a.name, ...a.aliases].some(
+          (name) => normalizeName(name) === normalizeName(entry.name)
+        )
+    )
+  );
+}
+
+/**
+ * 抽出結果の呼び名のうち、このレコードが「別人のもの」と決めたものを外す。
+ *
+ * 抽出はレコードを知らないので、**まだレコードになっていない呼び方**
+ * （分けたばかりで本文からしか出てこない名前）も来る。名前で突き合わせる。
+ */
+function withoutDistinctNames(
+  target: Character,
+  names: readonly string[]
+): string[] {
+  const blocked = distinctKeys(target);
+  return names.filter((name) => !blocked.has(normalizeName(name)));
+}
+
+/**
  * 統合先の探索結果。
  *
  * 「どれに統合すべきか決まらない」ことと「一致するものが無い」ことを
@@ -524,8 +589,22 @@ function findCharacter(
 ): CharacterLookup {
   const incomingNames = [name, ...aliases];
   const keys = new Set(incomingNames.map(normalizeName));
-  const exactMatches = list.filter((c) => {
-    const candidates = [c.name, ...c.aliases].map(normalizeName);
+
+  // 作者が「別人だ」と決めた呼び名では引き当てない（設計書6.5.8）。
+  //
+  // **ここを塞がないと、分ける操作は無意味になる。** 抽出は毎回まっさらな
+  // 目で本文を読むので、「アジャン」と「アジャーノ」をまた1人として返す。
+  // 名前で引き当てた先が「その名前は別人のものだ」と言っているなら、
+  // そのレコードは候補から外す。
+  const usable = list.filter((c) => !distinctKeys(c).has(normalizeName(name)));
+
+  const exactMatches = usable.filter((c) => {
+    // レコード側が別人だと決めた呼び名は、そのレコードの呼び名として使わない。
+    // 作者が手でJSONを直したときなど、別名に残ったままのことがある
+    const blocked = distinctKeys(c);
+    const candidates = [c.name, ...c.aliases]
+      .map(normalizeName)
+      .filter((candidate) => !blocked.has(candidate));
     return candidates.some((candidate) => keys.has(candidate));
   });
   if (exactMatches.length === 1) return { match: exactMatches[0], ambiguous: [] };
@@ -573,7 +652,7 @@ function findCharacter(
   );
   const usableKeys = new Set([...keys].filter((key) => !shared.has(key)));
 
-  const partMatches = list.filter((character) =>
+  const partMatches = usable.filter((character) =>
     [character.name, ...character.aliases].some((candidate) =>
       incomingParts.has(normalizeName(candidate)) ||
       splitNameParts(candidate).some((part) => usableKeys.has(part))
@@ -651,6 +730,11 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
     for (let j = i + 1; j < characters.length; j++) {
       const a = characters[i];
       const b = characters[j];
+
+      // 作者が「別人だ」と決めた組は、候補に出さない（設計書6.5.8）。
+      // **出すと、操作メニューの「重複をまとめる」に永久に1件が残る。**
+      // 分けたのに「重複しています」と言われ続けるのは、直っていないのと同じ
+      if (isDeclaredDistinct(a, b)) continue;
 
       // 別レコードなのに呼称が重なっている＝ほぼ確実に同一人物。
       // 統合先が決まらず新規になった場合などに起きるので、最優先で伝える。
@@ -940,7 +1024,7 @@ const HONORIFIC_SUFFIXES = [...HONORIFIC_SUFFIX_SOURCE].sort(
  * 表記ゆれを吸収する。全角空白・記号の違いで別人扱いしないため。
  * 敬称の有無も同様の理由で吸収する（「シル」と「シルさん」を別人扱いしない）。
  */
-function normalizeName(s: string): string {
+export function normalizeName(s: string): string {
   const base = s
     .replace(/[\s　・･]/g, "")
     .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))

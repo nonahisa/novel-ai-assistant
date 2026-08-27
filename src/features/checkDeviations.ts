@@ -5,6 +5,7 @@ import { AIError, recoveryForAIError } from "../ai/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile, hashText } from "../core/textFile";
 import { ChunkCache } from "../core/chunkCache";
+import { measureParts } from "../core/usageLog";
 import { SynopsisStore } from "../core/synopsisStore";
 import { readPlotText } from "../core/plotFile";
 import { isBlankPlotSection, parsePlotMarkdown } from "../core/plotDoc";
@@ -189,22 +190,37 @@ export async function checkDeviations(
 
       async function ask(episode: Episode): Promise<unknown | undefined> {
         try {
+          const bodyWithLines = withLineNumbers(episode.text);
+          const surroundingSynopses = nearbySynopses(synopses, episode.chapter);
+          const userPrompt = buildDeviationCheckPrompt({
+            chapterLabel: episode.label,
+            plot: plotText,
+            chapterTextWithLineNumbers: bodyWithLines,
+            surroundingSynopses,
+            types,
+            maxIssues: deviationBudget(episode.text.length),
+          });
+
           const response = await provider.generate({
             systemPrompt: DEVIATION_CHECK_SYSTEM_PROMPT,
-            userPrompt: buildDeviationCheckPrompt({
-              chapterLabel: episode.label,
-              plot: plotText,
-              chapterTextWithLineNumbers: withLineNumbers(episode.text),
-              surroundingSynopses: nearbySynopses(synopses, episode.chapter),
-              types,
-              maxIssues: deviationBudget(episode.text.length),
-            }),
+            userPrompt,
             model,
             // 判断を伴うので、事実の突き合わせより少しだけ揺らす
             temperature: 0.2,
             jsonSchema: DEVIATION_CHECK_SCHEMA as unknown as object,
             disableThinking: true,
             signal: controller.signal,
+            meta: {
+              feature: "deviation_check",
+              workFolder: work.folderPath,
+              parts: measureParts(userPrompt, {
+                本文: bodyWithLines.length,
+                // **プロットは毎回全文を送っている。** 話の数だけ繰り返すので、
+                // 長いプロットの作品ほど効いてくる。実際の量を測る
+                プロット: plotText.length,
+                あらすじ: surroundingSynopses.length,
+              }),
+            },
           });
 
           const parsed = parseDeviationResult(response.text);

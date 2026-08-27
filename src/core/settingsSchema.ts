@@ -180,6 +180,24 @@ export function characterSchema(): Record<string, unknown> {
         "authorLocked: true の項目は変更しないこと",
     },
     relations: { type: "array" },
+    // 作者が「別人だ」と決めた組（設計書6.5.8）。
+    // 外部のAIが手を入れる資料にも載せる——載せないと、AIが別名を
+    // 足し戻したときに「なぜ足してはいけなかったか」が読み取れない
+    distinctFrom: {
+      type: "array",
+      description:
+        "**作者が『別人だ』と決めた相手。** " +
+        "ここに挙がっている呼び名を、この人物の別名に足さないこと。" +
+        "**この記録そのものを消さないこと**（消すと2人がまた1人にまとめられる）",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string", minLength: 1 },
+          id: { type: ["string", "null"] },
+        },
+        required: ["name"],
+      },
+    },
     abilities: { type: "array", description: "この人物が持つ能力" },
     // 変化を持つのは今のところ人物だけなので、共通の項目には置かない。
     // 共通側へ入れると、持っていない種別のスキーマにまで現れる
@@ -352,7 +370,10 @@ export function schemaReadme(workTitle: string): string {
 3. **\`addressTerms\` の \`authorLocked: true\` の項目は変更しない。**
 4. **\`conflicts\` を勝手に消さない。** 作者の判断待ちとして残しているものです。
 5. **既存の記述と食い違う情報を見つけても、上書きしない。** \`conflicts\` に足して作者に判断させてください。
-6. **スキーマに無い項目を足さない。** 読み込み時に落ちます。
+6. **\`distinctFrom\` に挙がっている呼び名を、その人物の \`aliases\` に足さない。** 
+   作者が「別人だ」と決めた組です。**この記録そのものも消さないでください**
+   （消すと、2人がまた1人にまとめられます）。
+7. **スキーマに無い項目を足さない。** 読み込み時に落ちます。
 
 ## 書き方
 

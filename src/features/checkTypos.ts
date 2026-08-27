@@ -18,6 +18,7 @@ import {
   Chunk,
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
+import { measureParts } from "../core/usageLog";
 import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
 import {
   TYPO_CHECK_SCHEMA,
@@ -388,24 +389,37 @@ export async function checkTypos(
       logStep(`AIへ送信: ${done + 1}/${total} ${label}`);
       const startedAt = Date.now();
 
+      const bodyWithLines = withLineNumbers(chunk);
+      // **「直さない語」は辞書へ混ぜない。** 固有名詞を先に並べて
+      // 200語で切っていたため、固有名詞が多い作品では
+      // **作者が名指しで守った語が1つも届かなかった**（2026-08-21）。
+      // 作法の枠（styleNote）へ独立して出す
+      const dictionary = protectedNames.slice(0, 200);
+      const userPrompt = buildTypoCheckPrompt({
+        chunkTextWithLineNumbers: bodyWithLines,
+        properNounDictionary: dictionary,
+        styleNote,
+      });
+
       const callAI = () =>
         resolved.provider.generate({
           systemPrompt: TYPO_CHECK_SYSTEM_PROMPT,
-          userPrompt: buildTypoCheckPrompt({
-            chunkTextWithLineNumbers: withLineNumbers(chunk),
-            // **「直さない語」は辞書へ混ぜない。** 固有名詞を先に並べて
-            // 200語で切っていたため、固有名詞が多い作品では
-            // **作者が名指しで守った語が1つも届かなかった**（2026-08-21）。
-            // 作法の枠（styleNote）へ独立して出す
-            properNounDictionary: protectedNames.slice(0, 200),
-            styleNote,
-          }),
+          userPrompt,
           model: resolved.model,
           temperature: 0.0,
           numCtx,
           jsonSchema: TYPO_CHECK_SCHEMA as unknown as object,
           disableThinking: true,
           signal: controller.signal,
+          meta: {
+            feature: "typo_check",
+            workFolder: work.folderPath,
+            parts: measureParts(userPrompt, {
+              本文: bodyWithLines.length,
+              辞書: dictionary.join("").length,
+              作法: styleNote?.length ?? 0,
+            }),
+          },
         });
 
       try {

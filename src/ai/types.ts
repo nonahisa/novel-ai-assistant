@@ -41,6 +41,42 @@ export interface GenerateParams {
   /** 思考モード対応モデルで思考を無効化するか */
   disableThinking?: boolean;
   signal?: AbortSignal;
+  /**
+   * この呼び出しが何であるか。**AIへは送らない。**
+   *
+   * 送信量の記録（`core/usageLog.ts`）に使う。プロバイダの実装は
+   * これを無視してよい（見ているのは `ai/meteredProvider.ts` だけ）。
+   *
+   * **送るものと、送らないものを同じ型に入れている。** 分けると、
+   * 呼び出し側が2つの引数を持ち回ることになり、10か所ある呼び出しの
+   * どれかで付け忘れる。付け忘れても動くもの（記録）は、
+   * 付け忘れに気づけない。
+   */
+  meta?: GenerateMeta;
+}
+
+/** 送信量の記録に添える情報。AIへは送らない */
+export interface GenerateMeta {
+  /**
+   * どの機能の呼び出しか。
+   * **`core/chunkCache.ts` の feature 名と揃える**（同じものを2通りに
+   * 呼ぶと、記録とキャッシュを突き合わせられなくなる）。
+   */
+  feature: string;
+  /**
+   * 記録先を決める作品フォルダ（`WorkEntry.folderPath`）。
+   *
+   * **無ければ記録しない。** 作品に属さない呼び出し（接続確認など）を
+   * どこかの作品のログへ書くと、その作品の数字が狂う。
+   */
+  workFolder?: string;
+  /**
+   * 送ったものの内訳（字数）。「本文」「設定資料」「指示」など。
+   *
+   * 組み立て済みの文字列からは内訳が取れないので、材料を積む側から渡す。
+   * **省いてよい。** そのときは合計だけが記録される。
+   */
+  parts?: Record<string, number>;
 }
 
 export interface GenerateResult {

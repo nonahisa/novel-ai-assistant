@@ -55,6 +55,7 @@ import { resolveMaxOutputTokens } from "../ai/outputLimit";
 import { PendingUpdateStore } from "../core/pendingUpdates";
 import { applyPendingCharacterUpdates } from "./applyPendingUpdates";
 import { ChunkCache } from "../core/chunkCache";
+import { measureParts } from "../core/usageLog";
 import { readChunkSettings } from "./chunkSettings";
 import {
   AbilitySystemStore,
@@ -490,36 +491,50 @@ export async function extractCharacters(
           extractedAll
         );
 
+        const known = {
+          characters: knownNames.slice(0, 100),
+          abilities: settings.knownAbilityNames(existingAbilities).slice(0, 50),
+          locations: settings.knownLocationNames(existingLocations).slice(0, 50),
+          organizations: settings
+            .knownOrganizationNames(existingOrganizations)
+            .slice(0, 50),
+          // 世界観の見出しは15字以内と短く、これを渡す目的は
+          // **同じ事柄が別の見出しで増えるのを防ぐこと**そのものである。
+          // 219話の作品では50件では足りず、途中から効かなくなる
+          worlds: settings.knownWorldNames(existingWorld).slice(0, 150),
+        };
+        const userPrompt = buildCharacterExtractPrompt({
+          chunkText: chunk.text,
+          chapterLabel: label,
+          knownCharacterNames: known.characters,
+          knownAbilityNames: known.abilities,
+          knownLocationNames: known.locations,
+          knownOrganizationNames: known.organizations,
+          knownWorldNames: known.worlds,
+          abilityTerm: settings.currentAbilityTerm() ?? undefined,
+        });
+
         const callAI = () =>
           resolved.provider.generate({
             systemPrompt: BASE_SYSTEM_PROMPT,
-            userPrompt: buildCharacterExtractPrompt({
-              chunkText: chunk.text,
-              chapterLabel: label,
-              knownCharacterNames: knownNames.slice(0, 100),
-              knownAbilityNames: settings
-                .knownAbilityNames(existingAbilities)
-                .slice(0, 50),
-              knownLocationNames: settings
-                .knownLocationNames(existingLocations)
-                .slice(0, 50),
-              knownOrganizationNames: settings
-                .knownOrganizationNames(existingOrganizations)
-                .slice(0, 50),
-              // 世界観の見出しは15字以内と短く、これを渡す目的は
-              // **同じ事柄が別の見出しで増えるのを防ぐこと**そのものである。
-              // 219話の作品では50件では足りず、途中から効かなくなる
-              knownWorldNames: settings
-                .knownWorldNames(existingWorld)
-                .slice(0, 150),
-              abilityTerm: settings.currentAbilityTerm() ?? undefined,
-            }),
+            userPrompt,
             model: resolved.model,
             temperature: 0.2,
             numCtx,
             jsonSchema: CHARACTER_EXTRACT_SCHEMA as unknown as object,
             disableThinking: true,
             signal: controller.signal,
+            meta: {
+              feature: "character_extract",
+              workFolder: work.folderPath,
+              parts: measureParts(userPrompt, {
+                本文: chunk.text.length,
+                既知名: Object.values(known).reduce(
+                  (sum, list) => sum + list.join("").length,
+                  0
+                ),
+              }),
+            },
           });
 
         try {

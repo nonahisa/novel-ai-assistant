@@ -25,6 +25,7 @@ const MARKDOWN_ALLOWED = new Set([
   // .md を書き出す
   "src/core/settingsMarkdown.ts",
   "src/core/chatLog.ts",
+  "src/core/usageLog.ts",
   "src/core/plotTemplate.ts",
   "src/core/emotionCurve.ts",
   "src/core/characterDiff.ts",

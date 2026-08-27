@@ -12,6 +12,12 @@ import {
 import type { AiNote, AiNoteSource } from "../models/aiNote";
 import { CharacterStore } from "../core/characterStore";
 import {
+  planCharacterSeparation,
+  type SeparationPlan,
+} from "../core/characterSeparate";
+import { normalizeName } from "../core/characterMerge";
+import { PendingUpdateStore } from "../core/pendingUpdates";
+import {
   AbilitySystemStore,
   createAbilityStore,
   createLocationStore,
@@ -214,13 +220,73 @@ interface DetailView {
      */
     action?: { label: string; field: string };
   }>;
+  /**
+   * 別人として切り出せる呼び名（設計書6.5.8）。**人物のときだけ入る。**
+   *
+   * 敬称を付けただけの呼び方（「アジャン様」）は出さない。
+   * 分けても同じ人が2件になるだけで、作者の役に立たない。
+   */
+  separable?: string[];
   /** html は整形済み。画面側でそのまま挿入する */
   aiNotes: Array<AiNote & { html: string }>;
 }
 
+
+/**
+ * 別人として切り出せる呼び名を選ぶ（設計書6.5.8）。
+ *
+ * **敬称を付けただけの呼び方は出さない。** 「アジャン様」は「アジャン」
+ * 自身の呼び方であって、別人ではない。出すと、押した先で必ず断られる
+ * ——**押せない札を並べない**（6.5.7の裏返し）。
+ *
+ * 既に別人だと決めた相手も出さない（分ける操作は済んでいる）。
+ */
+function separableAliases(character: Character): string[] {
+  const own = normalizeName(character.name);
+  const decided = new Set(
+    (character.distinctFrom ?? []).map((entry) => normalizeName(entry.name))
+  );
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const raw of character.aliases) {
+    const alias = raw.trim();
+    if (!alias) continue;
+    const key = normalizeName(alias);
+    if (key === own || decided.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    // 敬称違いは同じ人なので、代表を1つだけ出す（押すと一緒に移る）
+    out.push(alias);
+  }
+  return out;
+}
 /** メモをそのまま渡さず、整形したHTMLを添える */
 function withRenderedNotes(notes: AiNote[]): Array<AiNote & { html: string }> {
   return notes.map((note) => ({ ...note, html: renderMarkdownLite(note.text) }));
+}
+
+
+/**
+ * 資料が書き換わったことを、外（拡張機能の本体）へ知らせる口。
+ *
+ * ## なぜ要るか
+ *
+ * **このパネルからの保存は、本文の用語ハイライトを引き直していなかった。**
+ * `TermHighlighter.invalidate()` を呼ぶのはエディタで `.json` を保存した
+ * ときだけで、パネルからの保存は通らない。名前を入れ替えても（6.5.6）、
+ * 別人に分けても（6.5.8）、本文の色分けは古い人物を指したままになり、
+ * 作者からは「効いていない」ように見える。
+ *
+ * `atomicWrite.ts` の `setWriteObserver` と同じ形にしてある。
+ * パネルは vscode の画面部品を知っていればよく、
+ * ハイライトや一覧の都合まで抱え込ませない。
+ */
+let changeObserver: ((work: WorkEntry) => void) | undefined;
+
+export function setSettingsChangeObserver(
+  observer: ((work: WorkEntry) => void) | undefined
+): void {
+  changeObserver = observer;
 }
 
 export class SettingsPanel {
@@ -500,6 +566,7 @@ export class SettingsPanel {
           field("authorNotes", "作者メモ", character.authorNotes, true),
           field("exportNote", "資料用の補足", character.exportNote, true),
         ],
+        separable: separableAliases(character),
         aiNotes: withRenderedNotes(character.aiNotes),
       };
     }
@@ -677,6 +744,9 @@ export class SettingsPanel {
         case "retire":
           await this.handleRetire(message.kind, message.id);
           return;
+        case "separate":
+          await this.handleSeparate(message.kind, message.id, message.alias);
+          return;
         case "applyRuby":
           await this.handleApplyRuby();
           return;
@@ -831,6 +901,9 @@ export class SettingsPanel {
     notice: string
   ): Promise<void> {
     await this.loadAll();
+    // 本文の色分け・一覧・操作メニューの印を引き直す。
+    // ここを呼ばないと、名前を変えても分けても画面が古いまま残る
+    changeObserver?.(this.work);
     const detail = this.detailOf(kind, id);
     this.post({
       type: "saved",
@@ -1082,6 +1155,7 @@ export class SettingsPanel {
     const recoveryPath = await this.retireFromStore(kind, id);
 
     await this.loadAll();
+    changeObserver?.(this.work);
     this.post({
       type: "saved",
       // 消したものは開けない。詳細は空にして一覧へ戻す
@@ -1092,6 +1166,112 @@ export class SettingsPanel {
         recoveryPath
       )} として回復用の場所に残っています。`,
     });
+  }
+
+  /**
+   * 1つにまとめられた人物を、別人に分ける（設計書6.5.8）。
+   *
+   * 作者の指摘（2026-08-27）：「アジャンとアジャーノが同一人物として
+   * 認識されている作品があります」。まとめる操作（`unifyCharacters`）は
+   * あったが、逆向きが無かった。
+   *
+   * ## 書く順番を守る。**新しいほうが先**
+   *
+   * 逆にすると、途中で失敗したときに別名がどちらからも消える
+   * ——用語ハイライトもIME辞書も、その呼び方を拾わなくなる。
+   * この順なら失敗しても「別名が両方にある」だけで、**何も失われない。**
+   */
+  private async handleSeparate(
+    kind: SettingsKind,
+    id: string,
+    alias: string
+  ): Promise<void> {
+    if (kind !== "character") return;
+    const record = this.find(kind, id) as Character | undefined;
+    if (!record) {
+      this.post({ type: "error", message: "選択した人物が見つかりません。" });
+      return;
+    }
+
+    let plan: SeparationPlan;
+    try {
+      plan = planCharacterSeparation(record, alias, this.characters);
+    } catch (error) {
+      this.post({
+        type: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
+    const moved = plan.movedAliases.map((entry) => `「${entry}」`).join("");
+    // 確認は拡張機能側で出す。WebViewの confirm は使えない（6.5.5と同じ）
+    const KEEP = "分ける（この記録はAIに書き換えさせない）";
+    const PLAIN = "分ける";
+    const answer = await vscode.window.showWarningMessage(
+      `「${alias}」を、別の人物として分けますか？`,
+      {
+        modal: true,
+        detail:
+          `・「${alias}」という名前だけの人物ができます\n` +
+          `・「${record.name}」の別名から ${moved} が外れます\n` +
+          `・紹介・役割・性格・登場話・変化の記録は「${record.name}」に残ります（移しません）\n` +
+          "・この2人は別人だと覚えるので、次の抽出でまとめ直されません\n" +
+          `・書き換える前に「${record.name}」の控えを取ります（あとから戻せます）\n\n` +
+          "新しい人物の中身は空です。「設定資料を抽出」をもう一度実行すると本文から入ります。" +
+          "前と同じAI・同じモデルなら、AIは呼ばれません。",
+      },
+      KEEP,
+      PLAIN
+    );
+    if (answer !== KEEP && answer !== PLAIN) return;
+
+    // 作者がその場で選ぶ。立てると、以後の抽出は登場話数しか足さなくなる
+    const original =
+      answer === KEEP ? { ...plan.original, autoGenerated: false } : plan.original;
+
+    try {
+      // **新しいほうが先**（上の説明を参照）
+      await this.characterStore.saveOrUpdate(plan.created);
+      await this.characterStore.saveOrUpdate(original);
+    } catch (error) {
+      this.post({
+        type: "error",
+        message: `分けられませんでした: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      });
+      return;
+    }
+
+    // 承認待ちの更新案は、レコード丸ごとの写しである。
+    // 残すと、あとで反映したときに別名も別人の記録も巻き戻る。しかも
+    // `characterDiff.ts` は distinctFrom を見ないので**差分に出ない**
+    // ＝作者に見えないまま戻る。提案は再抽出で作り直せる
+    await this.discardPendingFor(record.id);
+
+    await this.reloadAfterSave(
+      kind,
+      id,
+      `「${alias}」を別の人物として分けました。中身は空なので、` +
+        "「設定資料を抽出」をもう一度実行すると本文から入ります。"
+    );
+  }
+
+  /** 分けた人物の更新案を片づける。読めない・無いときは何もしない */
+  private async discardPendingFor(characterId: string): Promise<void> {
+    try {
+      const store = new PendingUpdateStore(this.work);
+      const { updates } = await store.loadAll();
+      for (const update of updates) {
+        if (update.character.id === characterId) {
+          await store.discard(update.filePath);
+        }
+      }
+    } catch {
+      // 片づけに失敗しても、分けたこと自体は成立している。
+      // ここで止めると作者は「失敗した」と読んで、もう一度押してしまう
+    }
   }
 
   private async retireFromStore(
@@ -1228,6 +1408,9 @@ export class SettingsPanel {
         temperature: 0.2,
         jsonSchema: SEARCH_TERMS_SCHEMA,
         disableThinking: true,
+        // 相談1回につき、これがもう1回ぶんの呼び出しになる（P-22）。
+        // 本体と分けて数えないと、相談の重さを見誤る
+        meta: { feature: "search_terms", workFolder: this.work.folderPath },
       });
       this.lastSearchTerms = parseSearchTerms(result.text);
       return this.lastSearchTerms;
@@ -1332,6 +1515,12 @@ export class SettingsPanel {
             jsonSchema,
             disableThinking: true,
             signal: controller.signal,
+            meta: {
+              // スキーマの有無が、そのまま用途の違いになっている
+              // （相談は自由文、項目の充実はJSON）
+              feature: jsonSchema ? "settings_enrich" : "settings_chat",
+              workFolder: this.work.folderPath,
+            },
           });
         }
       );
@@ -1631,6 +1820,8 @@ type PanelMessage =
   | { type: "deleteNote"; kind: SettingsKind; id: string; noteId: string }
   | { type: "chat"; kind: SettingsKind; id: string; question: string }
   | { type: "retire"; kind: SettingsKind; id: string }
+  /** 1つにまとめられた人物を、別人に分ける（設計書6.5.8） */
+  | { type: "separate"; kind: SettingsKind; id: string; alias: string }
   /** 資料の読み仮名を、本文のルビとして振る（設計書6.12.5） */
   | { type: "applyRuby" }
   | {

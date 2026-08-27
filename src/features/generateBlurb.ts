@@ -83,6 +83,7 @@ export async function generateWorkBlurb(
           temperature: 0.5,
           jsonSchema: BLURB_SCHEMA as unknown as object,
           disableThinking: true,
+          meta: { feature: "blurb", workFolder: work.folderPath },
         });
       } catch (error) {
         reportAIError("作品紹介文の生成", error);
@@ -177,6 +178,7 @@ export async function generateCatchphrases(
             model: resolved.model,
             // 案を出させるので、いちばん揺らす
             temperature: 0.9,
+            meta: { feature: "catchphrase", workFolder: work.folderPath },
             jsonSchema: CATCHPHRASE_SCHEMA as unknown as object,
             disableThinking: true,
           });

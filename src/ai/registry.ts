@@ -6,6 +6,7 @@ import {
   ProviderId,
   isApiKeyProvider,
 } from "./types";
+import { MeteredProvider } from "./meteredProvider";
 import { OllamaProvider } from "./ollamaProvider";
 import { ClaudeProvider } from "./claudeProvider";
 import { OpenAIProvider } from "./openaiProvider";
@@ -52,6 +53,8 @@ export function filterProvidersForRuntime(
  */
 export class AIRegistry {
   private readonly providers = new Map<ProviderId, AIProvider>();
+  /** 送信量を記録する包み。プロバイダごとに1つだけ作る */
+  private readonly metered = new Map<ProviderId, AIProvider>();
 
   constructor(private readonly context: vscode.ExtensionContext) {
     // 並び順はそのまま選択画面に出る。無料で始められるものを先頭に置く
@@ -107,14 +110,34 @@ export class AIRegistry {
     await this.context.globalState.update(KEY_MODEL, undefined);
   }
 
-  /** 設定済みなら {provider, model} を返す。未設定なら undefined */
+  /**
+   * 設定済みなら {provider, model} を返す。未設定なら undefined。
+   *
+   * **返すのは送信量を記録する包み**（`MeteredProvider`）である。
+   * AI機能はすべてここからプロバイダを受け取るので、包みを1つ挟むだけで
+   * 10か所ある呼び出しを1行も変えずに記録できる。
+   */
   resolve(): { provider: AIProvider; model: string } | undefined {
     const id = this.selectedProviderId;
     const model = this.selectedModel;
     if (!id || !model) return undefined;
     const provider = this.providers.get(id);
     if (!provider) return undefined;
-    return { provider, model };
+    return { provider: this.meter(provider), model };
+  }
+
+  /**
+   * 送信量を記録できる形にして返す。
+   *
+   * **同じプロバイダには同じ包みを返す。** `resolve()` は画面の更新の
+   * たびに呼ばれるので、毎回作ると同じプロバイダが別物として増えていく。
+   */
+  private meter(provider: AIProvider): AIProvider {
+    const existing = this.metered.get(provider.id);
+    if (existing) return existing;
+    const wrapped = new MeteredProvider(provider);
+    this.metered.set(provider.id, wrapped);
+    return wrapped;
   }
 
   /** 選択中モデルの詳細（コンテキスト長など）を取得する */
