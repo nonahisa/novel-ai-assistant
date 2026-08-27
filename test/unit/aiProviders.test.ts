@@ -167,6 +167,83 @@ describe("AIプロバイダ境界", () => {
     expect(result.truncated).toBe(false);
   });
 
+  test("numCtxを渡さない呼び出しでも、プロンプトが収まる大きさを確保する", async () => {
+    // generate の呼び出し15か所のうち11か所が numCtx を渡しておらず、
+    // 既定の 8192 のまま送っていた（0.22.14で判明）。チャンクはモデル可変で
+    // 20,000字になりうるので、入力が黙って切り捨てられる
+    const longPrompt = "あ".repeat(30000);
+    let sentNumCtx = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/api/show")) {
+          return jsonResponse({ model_info: { "gemma4.context_length": 131072 } });
+        }
+        sentNumCtx = JSON.parse(String(init?.body)).options.num_ctx;
+        return ollamaResponse("ok");
+      })
+    );
+
+    await new OllamaProvider().generate({
+      systemPrompt: "system",
+      userPrompt: longPrompt,
+      model: "test-model",
+      temperature: 0.2,
+    });
+
+    // 日本語1文字あたり 1/0.7 トークンと見積もる。30,000字は約42,858トークン
+    expect(sentNumCtx).toBeGreaterThanOrEqual(Math.ceil(30000 / 0.7));
+    // モデルの上限は超えない（超えた分はモデル側で黙って切り捨てられる）
+    expect(sentNumCtx).toBeLessThanOrEqual(131072);
+  });
+
+  test("numCtxを明示した呼び出しは、その値のまま送る（見積りへ回さない）", async () => {
+    // 明示している4か所は送るものを分かったうえで決めている。
+    // 見積りで上書きすると、そちらの積み上げが無意味になる
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/api/show")) {
+        return jsonResponse({ model_info: { "gemma4.context_length": 131072 } });
+      }
+      expect(JSON.parse(String(init?.body)).options.num_ctx).toBe(16384);
+      return ollamaResponse("ok");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new OllamaProvider().generate({
+      ...ollamaParams,
+      userPrompt: "あ".repeat(30000),
+    });
+
+    // /api/show を引きにいかない。明示経路の挙動は一切変わらない
+    expect(fetchMock.mock.calls.every(([url]) => !url.endsWith("/api/show"))).toBe(
+      true
+    );
+  });
+
+  test("モデル情報が取れないときは8192で頭打ちになる（従来と同じ）", async () => {
+    // /api/show が失敗しても悪化はさせない。従来の固定値と同じ値に落ちる
+    let sentNumCtx = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/api/show")) {
+          return new Response("", { status: 500 });
+        }
+        sentNumCtx = JSON.parse(String(init?.body)).options.num_ctx;
+        return ollamaResponse("ok");
+      })
+    );
+
+    await new OllamaProvider().generate({
+      systemPrompt: "system",
+      userPrompt: "あ".repeat(30000),
+      model: "test-model",
+      temperature: 0.2,
+    });
+
+    expect(sentNumCtx).toBe(8192);
+  });
+
   test("Claude用スキーマへnull許容とadditionalProperties禁止を再帰変換する", () => {
     expect(
       toClaudeJsonSchema({

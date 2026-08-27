@@ -9,10 +9,30 @@ import {
   inferTier,
 } from "./types";
 import { countByteFallback, decodeByteFallback } from "../core/byteFallback";
+import { contextSizeForPrompt } from "../core/chunker";
 import { logLine } from "../core/logger";
 import { withAiWork } from "../core/aiActivity";
 
 const DEFAULT_ENDPOINT = "http://localhost:11434";
+
+/**
+ * `numCtx` を渡してこない呼び出しのために、応答用に確保するトークン数。
+ *
+ * 渡し忘れ経路では**出力の見込みが呼び出し側にしか無い**（あらすじは短く、
+ * 抽出は長い）。分からないものを小さく見積もると応答が途中で切れるので、
+ * 固定で多めに確保する。**明示経路（`numCtx` あり）はこれを使わない**——
+ * そちらは送るものを分かったうえで積み上げた値が来ている。
+ */
+const OUTPUT_RESERVE_TOKENS = 8192;
+
+/**
+ * モデル情報が取れなかったときのコンテキスト長。
+ *
+ * `/api/show` が失敗すると必要量を計算しても頭打ちの根拠が無い。
+ * ここを従来の既定値と同じにしておけば、**取れないときは従来と同じ
+ * 8192 に落ちるだけで、いまより悪くはならない。**
+ */
+const UNKNOWN_CONTEXT_WINDOW = 8192;
 
 interface TagsResponse {
   models?: Array<{
@@ -206,6 +226,20 @@ export class OllamaProvider implements AIProvider {
   ): Promise<GenerateResult> {
     const started = Date.now();
 
+    // 呼び出し側が決めた値があればそれを使う。無ければ**送る文字列そのもの**から
+    // 見積もる。以前はここを 8192 に固定しており、渡してこない11か所では
+    // 入力が黙って切り捨てられていた（0.22.14で判明）。
+    // `getModel` はキャッシュ済みなので、毎回 /api/show を叩くわけではない。
+    const numCtx =
+      params.numCtx ??
+      contextSizeForPrompt({
+        promptChars: params.systemPrompt.length + params.userPrompt.length,
+        outputTokens: OUTPUT_RESERVE_TOKENS,
+        contextWindow:
+          (await this.getModel(params.model))?.contextWindow ??
+          UNKNOWN_CONTEXT_WINDOW,
+      });
+
     const body: Record<string, unknown> = {
       model: params.model,
       stream: false,
@@ -217,7 +251,7 @@ export class OllamaProvider implements AIProvider {
         temperature: params.temperature,
         // これを指定しないとOllamaは既定の短いコンテキストで動き、
         // 入力が黙って切り捨てられる。長文処理では必須。
-        num_ctx: params.numCtx ?? 8192,
+        num_ctx: numCtx,
       },
     };
 

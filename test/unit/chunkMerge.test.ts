@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  contextSizeForPrompt,
   decideContextSize,
   mergeAdjacentChunks,
   segmentsOf,
@@ -185,6 +186,59 @@ describe("確保するコンテキスト長", () => {
         contextWindow: 10_000_000,
       })
     ).toBeGreaterThanOrEqual(Math.ceil(measuredOverheadChars / 0.7));
+  });
+
+  test("実物のプロンプトからは、その字数と応答が入る大きさにする", () => {
+    // numCtx を渡してこない呼び出しのための見積り。
+    // 30,000字は約42,858トークン。これに応答分が乗る
+    const size = contextSizeForPrompt({
+      promptChars: 30000,
+      outputTokens: 8192,
+      contextWindow: 131072,
+    });
+
+    expect(size).toBeGreaterThan(Math.ceil(30000 / 0.7) + 8192);
+    expect(size).toBeLessThanOrEqual(131072);
+  });
+
+  test("実物のプロンプトには、指示ぶんの固定費を足さない", () => {
+    // `decideContextSize` は本文チャンクの字数しか分からない側のもので、
+    // 指示のぶん（PROMPT_OVERHEAD_CHARS）を足して見込む。
+    // こちらは送る文字列そのものが手元にあるので、二重に見込まない
+    const fromPrompt = contextSizeForPrompt({
+      promptChars: 20000,
+      outputTokens: 8192,
+      contextWindow: 131072,
+    });
+    const fromChunk = decideContextSize({
+      chunkChars: 20000,
+      outputTokens: 8192,
+      contextWindow: 131072,
+    });
+
+    expect(fromPrompt).toBeLessThan(fromChunk);
+  });
+
+  test("モデルの上限は超えない", () => {
+    // /api/show が取れないときは 8192 で頭打ちになる（従来の固定値と同じ）
+    expect(
+      contextSizeForPrompt({
+        promptChars: 30000,
+        outputTokens: 8192,
+        contextWindow: 8192,
+      })
+    ).toBe(8192);
+  });
+
+  test("短いプロンプトでも4096は確保する", () => {
+    // 極端に小さい num_ctx は、応答が数十トークンで切れる
+    expect(
+      contextSizeForPrompt({
+        promptChars: 10,
+        outputTokens: 0,
+        contextWindow: 131072,
+      })
+    ).toBe(4096);
   });
 });
 

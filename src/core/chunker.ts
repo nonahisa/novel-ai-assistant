@@ -257,6 +257,36 @@ export function decideContextSize(options: {
   return Math.max(4096, Math.min(options.contextWindow, needed));
 }
 
+/**
+ * 実際に送るプロンプトから、確保するコンテキスト長を決める。
+ *
+ * **本来は呼び出し側が `numCtx` を渡すべきで、これはその受け皿である。**
+ * `generate` の呼び出し15か所のうち、渡していたのは4か所だけで、
+ * 残る11か所（矛盾検知・推敲・逸脱検知・あらすじ・紹介文・プロット・
+ * 設定パネル・AI相談）は既定の 8192 のまま送っていた（0.22.14で判明）。
+ * チャンクがモデル可変になって20,000字（≒28,600トークン）を送るように
+ * なったため、**固定の既定では入力が黙って切り捨てられる。**
+ *
+ * 実物の文字数から見積もれば、渡し忘れても切り捨ては起きない。
+ *
+ * `decideContextSize` と違って `PROMPT_OVERHEAD_CHARS` を足さないのは、
+ * あれが「本文チャンクの字数しか分からない側」が指示のぶんを見込むための
+ * 固定費だからである。**ここでは送る文字列そのものが手元にある。**
+ */
+export function contextSizeForPrompt(options: {
+  /** 実際に送るプロンプトの文字数（system＋user） */
+  promptChars: number;
+  /** 応答に見込むトークン数 */
+  outputTokens: number;
+  /** モデルが扱える上限 */
+  contextWindow: number;
+}): number {
+  const inputTokens = Math.ceil(options.promptChars * TOKENS_PER_CHAR);
+  // 見積りは外れることがあるので1割の余裕を持たせる（decideContextSize と同じ）
+  const needed = Math.ceil((inputTokens + options.outputTokens) * 1.1);
+  return Math.max(4096, Math.min(options.contextWindow, needed));
+}
+
 const DEFAULT_OPTIONS: ChunkOptions = {
   maxChars: 8000,
   overlapChars: 0,
