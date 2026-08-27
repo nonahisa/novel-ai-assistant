@@ -266,7 +266,7 @@ export function contradictionKey(item: AcceptedContradiction): string {
     item.line,
     item.category,
     normalizeForComparison(item.excerpt),
-  ].join(" ");
+  ].join("\u0000");
 }
 
 function level(raw: unknown): "high" | "medium" | "low" {
@@ -286,4 +286,74 @@ function extractBraces(text: string): string | null {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   return start >= 0 && end > start ? text.slice(start, end + 1) : null;
+}
+
+/**
+ * 「どの値が何話で分かるか」の索引（設計書6.10.5）。
+ *
+ * ## なぜ鍵を1か所に集めるか
+ *
+ * 以前は、書く側（`checkContradictions.ts` の索引作り）と読む側
+ * （`knownAtFor`）が**それぞれ**テンプレートリテラルで鍵を組み立てていた。
+ * 書く側は空白区切り、読む側はNUL区切りになっており、**読みは一度も
+ * 当たっていなかった**——裏取りプロンプトの「この設定が分かる話」は
+ * 常に「（不明）」だった（0.22.10で修正）。
+ *
+ * しかも読む側の区切りが**生のNUL文字**でソースに書かれていたため、
+ * grepがこのファイルをバイナリ扱いし、検索でも見つからなかった。
+ * 鍵の組み立てを1つの関数にすれば、ずれること自体が起きない。
+ *
+ * 区切りは項目名にも値にも現れないNULにする（`characterUnify.ts` と
+ * 同じ理由。エスケープで書く——生のまま置くとgit/grepが差分を見せない）。
+ */
+export function buildKnownAtIndex(
+  people: ReadonlyArray<{ changes: readonly RecordChangeLike[] }>
+): Map<string, number[]> {
+  const index = new Map<string, number[]>();
+  for (const person of people) {
+    for (const change of person.changes) {
+      const chapters = change.chapters.filter(Number.isFinite);
+      if (chapters.length === 0) continue;
+      index.set(knownAtKey(change.field, change.value), chapters);
+    }
+  }
+  return index;
+}
+
+/** 索引を引く。見つからなければ空配列 */
+export function lookupKnownAt(
+  index: ReadonlyMap<string, number[]>,
+  field: string,
+  value: string
+): number[] {
+  return index.get(knownAtKey(field, value)) ?? [];
+}
+
+interface RecordChangeLike {
+  field: string;
+  value: string;
+  chapters: number[];
+}
+
+function knownAtKey(field: string, value: string): string {
+  return `${field}\u0000${value.trim()}`;
+}
+
+/**
+ * 項目名が分からないとき、値だけで索引を引く。
+ *
+ * 裏取りの指摘（`settingSays`）には「どの項目の話か」が付いてこない。
+ * 以前は "role" と決め打ちで引いており、外見や状態の指摘では
+ * **当たりようがなかった**。どの項目であれ、その値が記録された話数は
+ * 「いつ分かったか」の答えとして正しい。
+ */
+export function lookupKnownAtValue(
+  index: ReadonlyMap<string, number[]>,
+  value: string
+): number[] {
+  const suffix = `\u0000${value.trim()}`;
+  for (const [key, chapters] of index) {
+    if (key.endsWith(suffix)) return chapters;
+  }
+  return [];
 }

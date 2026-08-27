@@ -70,7 +70,7 @@ import {
   undecidedOutcome,
   type VerifyOutcome,
 } from "../core/contradictionVerifyValidation";
-import {
+import { buildKnownAtIndex, lookupKnownAtValue,
   contradictionKey,
   parseContradictionResult,
   sortContradictions,
@@ -552,7 +552,9 @@ export async function checkContradictions(
           settingSays: issue.settingSays,
           textSays: issue.textSays,
           category: issue.category,
-          settingKnownAt: settings.knownAtFor("role", issue.settingSays),
+          // 指摘には「どの項目の話か」が付いてこないので、値だけで引く。
+          // 以前は "role" 決め打ちで、外見や状態の指摘では当たらなかった
+          settingKnownAt: settings.knownAtFor(issue.settingSays),
         }),
         model,
         temperature: 0.0,
@@ -639,7 +641,7 @@ interface SettingsMaterial {
    */
   futureFactsFor(text: string, chapter: number | null): string;
   /** その設定が何話で分かるか。検証で使う（設計書6.10.5） */
-  knownAtFor(field: string, value: string): string;
+  knownAtFor(value: string): string;
   synopsesBefore(chapter: number | null): string;
 }
 
@@ -740,14 +742,9 @@ async function collectSettings(
   }
 
   // **どの値が何話で分かるか**の索引（設計書6.10.5）。検証で使う
-  const knownAt = new Map<string, number[]>();
-  for (const character of people) {
-    for (const change of character.changes) {
-      const chapters = change.chapters.filter(Number.isFinite);
-      if (chapters.length === 0) continue;
-      knownAt.set(`${change.field} ${change.value.trim()}`, chapters);
-    }
-  }
+  // 鍵の組み立ては buildKnownAtIndex に集めてある。書く側と読む側が
+  // 別々に鍵を作っていた頃、区切りがずれて**読みが一度も当たらなかった**
+  const knownAt = buildKnownAtIndex(people);
 
   return {
     characterCount: people.length,
@@ -811,9 +808,9 @@ async function collectSettings(
       // **多すぎると、1件ずつの吟味が薄まる。** 近い先の話から順に絞る
       return lines.slice(0, 20).join("\n");
     },
-    knownAtFor(field, value) {
-      const chapters = knownAt.get(`${field} ${value.trim()}`);
-      if (!chapters || chapters.length === 0) return "";
+    knownAtFor(value) {
+      const chapters = lookupKnownAtValue(knownAt, value);
+      if (chapters.length === 0) return "";
       return chapters.map((at) => `第${at}話`).join("、");
     },
     synopsesBefore(chapter) {

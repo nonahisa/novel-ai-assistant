@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import {
+import { buildKnownAtIndex, lookupKnownAt, lookupKnownAtValue,
   contradictionKey,
   deniesContradiction,
   lacksSetting,
@@ -314,5 +314,74 @@ describe("無視の記憶", () => {
     expect(contradictionKey(base)).toBe(
       contradictionKey({ ...base, excerpt: "「わたくしが参りますわ」" })
     );
+  });
+});
+
+/**
+ * 「どの値が何話で分かるか」の索引（0.22.10で修正）。
+ *
+ * **再現**：以前は書く側が空白区切り、読む側がNUL区切りで鍵を別々に
+ * 組み立てており、**読みは一度も当たらなかった**。裏取りプロンプトの
+ * 「この設定が分かる話」は常に「（不明）」だった。読む側の区切りが
+ * 生のNUL文字だったため、grepがファイルをバイナリ扱いして検索でも
+ * 見つからなかった。鍵を1つの関数に集めて、ずれること自体を無くした。
+ */
+describe("どの値が何話で分かるか", () => {
+  test("書いた値が、同じ項目と値で引ける", () => {
+    const index = buildKnownAtIndex([
+      {
+        changes: [
+          { field: "role", value: "課長", chapters: [7, 9] },
+          { field: "appearance", value: "短髪", chapters: [3] },
+        ],
+      },
+    ]);
+
+    expect(lookupKnownAt(index, "role", "課長")).toEqual([7, 9]);
+    expect(lookupKnownAt(index, "appearance", "短髪")).toEqual([3]);
+  });
+
+  test("値の前後の空白は無視する", () => {
+    const index = buildKnownAtIndex([
+      { changes: [{ field: "role", value: "課長", chapters: [7] }] },
+    ]);
+
+    expect(lookupKnownAt(index, "role", " 課長 ")).toEqual([7]);
+  });
+
+  test("空白を含む値でも、項目と値が混ざらない", () => {
+    // 区切りが空白だと「role」＋「a b」と「role a」＋「b」が同じ鍵になる
+    const index = buildKnownAtIndex([
+      { changes: [{ field: "role", value: "b", chapters: [2] }] },
+    ]);
+
+    expect(lookupKnownAt(index, "role b", "")).toEqual([]);
+  });
+
+  test("話数の無い変化は索引に入れない", () => {
+    const index = buildKnownAtIndex([
+      { changes: [{ field: "role", value: "課長", chapters: [] }] },
+    ]);
+
+    expect(lookupKnownAt(index, "role", "課長")).toEqual([]);
+  });
+});
+
+describe("値だけで索引を引く", () => {
+  test("項目名が分からなくても、記録された話数が出る", () => {
+    const index = buildKnownAtIndex([
+      { changes: [{ field: "appearance", value: "短髪", chapters: [3] }] },
+    ]);
+
+    expect(lookupKnownAtValue(index, "短髪")).toEqual([3]);
+    expect(lookupKnownAtValue(index, " 短髪 ")).toEqual([3]);
+  });
+
+  test("どの項目にも無い値は空", () => {
+    const index = buildKnownAtIndex([
+      { changes: [{ field: "role", value: "課長", chapters: [7] }] },
+    ]);
+
+    expect(lookupKnownAtValue(index, "部長")).toEqual([]);
   });
 });
