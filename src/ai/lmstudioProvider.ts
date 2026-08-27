@@ -31,13 +31,22 @@ import { isUnsupportedParameter } from "./openaiProvider";
  * LM Studioのサーバは手元で動いており、認証を持たない。**入力欄を出さない。**
  * 「キーが要るのでは」と作者を迷わせるだけである。
  *
- * ## コンテキスト長は、こちらからは分からない
+ * ## コンテキスト長は、まずLM Studioに聞く
  *
- * LM Studioで**どの長さでモデルを読み込んだか**は、APIから確実には取れない。
- * さくらと同じく設定値（`novelai.lmstudio.contextWindow`）を使う。
+ * LM Studioは**OpenAI互換ではない自前の口**（`/api/v0/models`）を持っており、
+ * そこには**実際に読み込んだ長さ**（`loaded_context_length`）が入っている
+ * （この機械の0.4.21で実測、2026-08-27）。読めたらそれを使う。
  *
- * **実際より大きいと、入力が黙って切り捨てられる。** LM Studioの画面で
- * 読み込み時に指定した長さに合わせてもらう。
+ * 設定値（`novelai.lmstudio.contextWindow`）は作者が手で合わせるものなので、
+ * 既定の8192のまま忘れられていると、131072で読み込んでいるのにモデル選択が
+ * 「文脈 8k」と出る——**設定値を表示していただけ**だった（作者の報告、
+ * 2026-08-27）。読めないとき（口が無い古い版、未読込のモデル）は、
+ * これまでどおり設定値を使う。**取れなくても悪くはならない。**
+ *
+ * **`max_context_length` は使わない。** そちらはモデルが対応できる最大で、
+ * 実際に何で読み込まれたかとは別物である。実際より大きい想定は
+ * 「入力が黙って切り捨てられる」そのもので、エラーにならないぶん
+ * 「AIが後半を読んでいない」という形でしか現れない。
  *
  * ## 大きさはモデル名から読む
  *
@@ -51,6 +60,47 @@ const LABEL = "LM Studio";
 
 interface ModelListResponse {
   data?: Array<{ id?: string; object?: string }>;
+}
+
+/**
+ * native API（`/api/v0/models`）が返すモデル1件。
+ *
+ * 項目名はこの機械のLM Studio 0.4.21の実測に合わせてある。
+ * **すべて任意にしてある**——版によって欠ける項目があっても、
+ * 欠けたぶんだけ設定値へ落ちればよく、例外にはしない。
+ */
+interface NativeModelEntry {
+  id?: string;
+  /** `llm` / `vlm` / `embeddings` など */
+  type?: string;
+  /** `loaded` / `not-loaded` */
+  state?: string;
+  /** モデルが対応できる最大。**contextWindowには使わない**（冒頭の説明を参照） */
+  max_context_length?: number;
+  /** **いま読み込まれている長さ。** 読込済みのモデルにしか入らない */
+  loaded_context_length?: number;
+}
+
+interface NativeModelListResponse {
+  data?: NativeModelEntry[];
+}
+
+/**
+ * そのモデルが「いま実際に読み込まれている長さ」。分からなければ undefined。
+ *
+ * **`max_context_length` へ落とさない。** 未読込のモデルに 262144 と書いて
+ * あっても、読み込むときに何を指定されるかはこちらからは分からない。
+ * 大きく見積もると入力が黙って切り捨てられるので、分からないときは
+ * 呼び出し側で設定値（作者が申告した値）へ落とす。
+ */
+function loadedContextLength(
+  entry: NativeModelEntry | undefined
+): number | undefined {
+  if (!entry || entry.state !== "loaded") return undefined;
+  const length = entry.loaded_context_length;
+  return typeof length === "number" && Number.isFinite(length) && length > 0
+    ? length
+    : undefined;
 }
 
 interface ChatResponse {
@@ -80,6 +130,14 @@ export class LmStudioProvider implements AIProvider {
 
   private readonly modelCache = new Map<string, ModelInfo>();
 
+  /**
+   * native APIが読めなかったことを、もうログへ書いたか。
+   *
+   * **毎回は書かない。** 一覧を引くたびに同じ行が積み上がると、
+   * ほかの失敗が埋もれる（この口が無い版では必ず失敗し続ける）。
+   */
+  private nativeFailureLogged = false;
+
   private get endpoint(): string {
     const configured = vscode.workspace
       .getConfiguration("novelai")
@@ -93,6 +151,16 @@ export class LmStudioProvider implements AIProvider {
       .getConfiguration("novelai")
       .get<number>("lmstudio.contextWindow", 8192);
     return Number.isFinite(configured) && configured > 0 ? configured : 8192;
+  }
+
+  /**
+   * native APIの場所。
+   *
+   * 設定に入っているのはOpenAI互換の口（`…/v1`）なので、**末尾の `/v1` を
+   * 落として**同じサーバの別の口を組み立てる。作者に2つ目のURLを設定させない。
+   */
+  private get nativeModelsUrl(): string {
+    return `${this.endpoint.replace(/\/v1$/, "")}/api/v0/models`;
   }
 
   private get requestTimeoutMs(): number {
@@ -152,32 +220,102 @@ export class LmStudioProvider implements AIProvider {
       timeoutMs: 15000,
       label: LABEL,
     });
+    // 読み込んだ長さと種別は、OpenAI互換の口では返らない。別の口で補う
+    const native = await this.readNativeModels();
 
     const infos: ModelInfo[] = [];
     for (const entry of response.data ?? []) {
       const id = entry.id;
       if (!id) continue;
-      // **埋め込み用のモデルは選ばせない。** 文章を書かせても返らない
-      if (/embed/i.test(id)) continue;
-      infos.push(this.describe(id));
+      // **埋め込み用のモデルは選ばせない。** 文章を書かせても返らない。
+      // 名前と種別の二重の網にしてある——名前に embed が入らない
+      // 埋め込みモデルもあり、逆に種別は古い版では取れない
+      const nativeEntry = native?.get(id);
+      if (/embed/i.test(id) || nativeEntry?.type === "embeddings") continue;
+      infos.push(this.describe(id, nativeEntry));
     }
     infos.sort((a, b) => a.id.localeCompare(b.id));
     return infos;
   }
 
   async getModel(id: string): Promise<ModelInfo | undefined> {
+    const nativeEntry = (await this.readNativeModels())?.get(id);
+    const loaded = loadedContextLength(nativeEntry);
+
     const cached = this.modelCache.get(id);
-    // 設定を直したら次から効くよう、長さは毎回読み直す
-    if (cached) return { ...cached, contextWindow: this.contextWindow };
-    return this.describe(id);
+    if (cached) {
+      // 読み込んだ長さが取れたモデルは、そちらが実際の値なので優先する。
+      // 取れないモデルにだけ「設定を直したら次から効く」を残す
+      return { ...cached, contextWindow: loaded ?? this.contextWindow };
+    }
+    return this.describe(id, nativeEntry);
   }
 
-  private describe(id: string): ModelInfo {
+  /**
+   * いま読み込まれているモデルの長さ。導入案内（`setupLmStudio.ts`）が
+   * 入力欄の初期値に使う。読めなければ undefined。
+   *
+   * **複数読み込まれているときは、いちばん短いものを返す。** この設定値は
+   * 全モデル共通の予備なので、長いほうに合わせると短いモデルを選んだときに
+   * 入力が黙って切り捨てられる。
+   */
+  async readLoadedContextWindow(): Promise<number | undefined> {
+    const native = await this.readNativeModels();
+    if (!native) return undefined;
+
+    let shortest: number | undefined;
+    for (const entry of native.values()) {
+      // 埋め込みモデルは選ばせないので、長さの基準にもしない
+      if (entry.type === "embeddings") continue;
+      const length = loadedContextLength(entry);
+      if (length === undefined) continue;
+      if (shortest === undefined || length < shortest) shortest = length;
+    }
+    return shortest;
+  }
+
+  /**
+   * モデルごとの実情をLM Studio自身に聞く。取れなければ undefined。
+   *
+   * **失敗を例外にしない。** この口を持たない古い版でも、これまでどおり
+   * 設定値で動き続ける（読めれば良くなるだけで、読めなくても悪くならない）。
+   */
+  private async readNativeModels(): Promise<
+    Map<string, NativeModelEntry> | undefined
+  > {
+    try {
+      const response = await fetchJson<NativeModelListResponse>({
+        url: this.nativeModelsUrl,
+        // `/v1/models` と同じ。手元のサーバなので、待つとしても一瞬
+        timeoutMs: 15000,
+        label: LABEL,
+      });
+      const byId = new Map<string, NativeModelEntry>();
+      for (const entry of response.data ?? []) {
+        if (entry.id) byId.set(entry.id, entry);
+      }
+      return byId;
+    } catch (error) {
+      if (!this.nativeFailureLogged) {
+        this.nativeFailureLogged = true;
+        logLine(
+          `LM Studio：${this.nativeModelsUrl} から読み込み状況を取得できませんでした。` +
+            `設定のコンテキスト長を使います（${
+              error instanceof Error ? error.message : String(error)
+            }）。`
+        );
+      }
+      return undefined;
+    }
+  }
+
+  private describe(id: string, native?: NativeModelEntry): ModelInfo {
     const parameterSize = parseParameterSize(id);
     const info: ModelInfo = {
       id,
       displayName: id,
-      contextWindow: this.contextWindow,
+      // 読み込んだ長さが分かればそれが実際の値。分からなければ作者の申告
+      contextWindow: loadedContextLength(native) ?? this.contextWindow,
       parameterSize,
       capabilities: ["JSON強制"],
       // 公開重みのモデルなので、Ollamaと同じ物差しで測る

@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "「設定が前の話と食い違っていないか不安」「誤字脱字の見直しがつらい」「AIに原稿を触られたくない」——小説を書く人の困りごとを引き受けるVSCode拡張機能です。本文から設定資料を自動で作り、矛盾や誤字脱字を調べ、執筆量を記録します。AIは提案するだけで、原稿は書き換えません。無料の手元AI（Ollama / LM Studio）だけでも使え、その場合、原稿はパソコンの外へ出ません。",
-  "version": "0.23.0",
+  "version": "0.23.1",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -1077,7 +1077,7 @@
           "type": "number",
           "default": 8192,
           "minimum": 512,
-          "markdownDescription": "LM Studioのコンテキスト長。**APIから取得できないため、LM Studioでモデルを読み込んだときに指定した長さに合わせてください。** 実際より大きいと、入力が黙って切り捨てられます。"
+          "markdownDescription": "LM Studioのコンテキスト長。**LM Studioが実際に読み込んだ長さを自動で読み取れる場合は、そちらを優先します。** この設定は、読み取れない古い版のための予備です。使われる場合、実際より大きいと入力が黙って切り捨てられるため、LM Studioでモデルを読み込んだときに指定した長さに合わせてください。"
         },
         "novelai.lmstudio.timeoutSeconds": {
           "type": "number",

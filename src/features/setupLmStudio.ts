@@ -77,7 +77,7 @@ export async function setupLmStudio(registry: AIRegistry): Promise<void> {
     }
 
     // ⑤ コンテキスト長を合わせる
-    await askContextWindow();
+    await askContextWindow(provider);
 
     // ⑥ 使うAIとして選ぶ
     const action = await vscode.window.showInformationMessage(
@@ -192,22 +192,30 @@ async function guideLoadModel(): Promise<boolean> {
 /**
  * コンテキスト長を、LM Studio側の設定に合わせてもらう。
  *
- * **APIからは取れない**（`lmstudioProvider.ts` の冒頭を参照）。設定値が
- * 実際より大きいと、**入力が黙って切り捨てられる**——エラーにならないので、
- * 「AIが本文の後半を読んでいない」という形でしか現れない。
+ * **読み込んだ長さが取れたら、それを初期値にする**（`lmstudioProvider.ts` の
+ * 冒頭を参照）。作者に手で写させると、写し間違いと写し忘れが起きる。
+ * 実際より大きい値が入っていると、**入力が黙って切り捨てられる**——
+ * エラーにならないので、「AIが本文の後半を読んでいない」という形でしか
+ * 現れない。
+ *
+ * 取れないとき（口の無い古い版）は、これまでどおり現在の設定値を初期値にし、
+ * LM Studioの画面と同じ値にしてもらう。
  *
  * **強制しない。** Escで飛ばせる。あとから設定画面でも直せる値である。
  */
-async function askContextWindow(): Promise<void> {
+async function askContextWindow(provider: LmStudioProvider): Promise<void> {
   const configuration = vscode.workspace.getConfiguration("novelai");
   const current = configuration.get<number>("lmstudio.contextWindow", 8192);
+  const detected = await provider.readLoadedContextWindow();
 
   const input = await askText({
     title: "LM Studioのコンテキスト長",
     prompt:
-      "LM Studioでモデルを読み込んだときの Context Length と同じ値にしてください。" +
-      "実際より大きいと、入力が黙って切り捨てられます。",
-    value: String(current),
+      detected === undefined
+        ? "LM Studioでモデルを読み込んだときの Context Length と同じ値にしてください。" +
+          "実際より大きいと、入力が黙って切り捨てられます。"
+        : "LM Studioから読み取った値です。通常はこのままでかまいません。",
+    value: String(detected ?? current),
     validateInput: (value) => {
       const text = value.trim();
       if (text.length === 0) return "数字を入力してください";

@@ -8,6 +8,7 @@ import {
 } from "../../src/ai/claudeProvider";
 import { OpenAIProvider } from "../../src/ai/openaiProvider";
 import { GeminiProvider } from "../../src/ai/geminiProvider";
+import { LmStudioProvider } from "../../src/ai/lmstudioProvider";
 import { AIError } from "../../src/ai/types";
 import { workspace } from "./support/vscodeStub";
 
@@ -895,6 +896,153 @@ describe("AIプロバイダ境界", () => {
       );
 
       expect(result.usage?.cachedInputTokens).toBeUndefined();
+    });
+  });
+
+  /**
+   * LM Studioのコンテキスト長を、設定値ではなくLM Studio自身から読む
+   * （作者の報告、2026-08-27：「8kと表示されていますが、LM Studioから見ると
+   * もう少し多そうです」）。
+   *
+   * 応答の形は、この機械のLM Studio 0.4.21を実際に叩いて写したもの。
+   */
+  describe("LM Studioのコンテキスト長", () => {
+    const loadedModel = {
+      id: "google/gemma-4-e4b",
+      object: "model",
+      type: "vlm",
+      state: "loaded",
+      max_context_length: 131072,
+      loaded_context_length: 131072,
+    };
+
+    const notLoadedModel = {
+      id: "google/gemma-4-12b-qat",
+      object: "model",
+      type: "vlm",
+      state: "not-loaded",
+      // 未読込には loaded_context_length が無い。**この値は使ってはいけない**
+      max_context_length: 262144,
+    };
+
+    // **名前に embed を含めていない。** 名前で弾く既存の網を通り抜けさせて、
+    // 種別（type）で外せているかを確かめるため
+    const embeddingModel = {
+      id: "nomic-ai/nomic-text-v1.5",
+      object: "model",
+      type: "embeddings",
+      state: "not-loaded",
+      max_context_length: 2048,
+    };
+
+    /**
+     * LM Studioの2つの口を立てる。
+     *
+     * `native` に undefined を渡すと、`/api/v0/models` を持たない古い版に
+     * なる（404）。`/v1/models` は種別も読み込み状況も返さない
+     */
+    function stubLmStudio(
+      native: unknown[] | undefined,
+      ids: string[]
+    ): ReturnType<typeof vi.fn> {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.endsWith("/api/v0/models")) {
+          return native === undefined
+            ? jsonResponse({ error: "Unexpected endpoint" }, 404)
+            : jsonResponse({ data: native });
+        }
+        return jsonResponse({
+          data: ids.map((id) => ({ id, object: "model" })),
+        });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+
+    /** コンテキスト長の設定だけを差し替える（ほかは既定のまま） */
+    function stubContextWindowSetting(value: number): void {
+      workspace.getConfiguration = () => ({
+        get: <T>(key: string, defaultValue: T): T =>
+          key === "lmstudio.contextWindow" ? (value as T) : defaultValue,
+      });
+    }
+
+    test("読み込み済みのモデルは、LM Studioが読み込んだ長さを使う", async () => {
+      stubContextWindowSetting(8192);
+      stubLmStudio([loadedModel], [loadedModel.id]);
+
+      const provider = new LmStudioProvider();
+      const models = await provider.listModels();
+
+      expect(models).toHaveLength(1);
+      // 設定値（8192）ではなく、実際に読み込んだ 131072 が出る
+      expect(models[0].contextWindow).toBe(131072);
+
+      // 一覧を引いたあと（キャッシュ経由）でも設定値へ戻らない。
+      // ここが戻ると、モデル選択だけ正しく見えて実際の送信量は8kになる
+      expect((await provider.getModel(loadedModel.id))?.contextWindow).toBe(
+        131072
+      );
+    });
+
+    test("未読込のモデルは設定値のまま（max_context_lengthを使わない）", async () => {
+      // **実際より大きい想定は、入力が黙って切り捨てられるということ。**
+      // 262144 は「対応できる最大」であって、読み込むときに何を指定されるかは
+      // こちらからは分からない
+      stubContextWindowSetting(32768);
+      stubLmStudio([notLoadedModel], [notLoadedModel.id]);
+
+      const provider = new LmStudioProvider();
+      const models = await provider.listModels();
+
+      expect(models[0].contextWindow).toBe(32768);
+      expect(models[0].contextWindow).not.toBe(262144);
+      expect((await provider.getModel(notLoadedModel.id))?.contextWindow).toBe(
+        32768
+      );
+    });
+
+    test("/api/v0/models が無い版でも、従来どおり設定値で動く", async () => {
+      // 古いLM Studioにはこの口が無い。**読めなくても悪くならない**ことを、
+      // 一覧が空にならない・例外にならないところまで確かめる
+      stubContextWindowSetting(16384);
+      stubLmStudio(undefined, ["some-model-7b"]);
+
+      const provider = new LmStudioProvider();
+      const models = await provider.listModels();
+
+      expect(models.map((m) => m.id)).toEqual(["some-model-7b"]);
+      expect(models[0].contextWindow).toBe(16384);
+      expect((await provider.getModel("some-model-7b"))?.contextWindow).toBe(
+        16384
+      );
+      // 導入案内の初期値も、取れないときは黙って undefined を返す
+      expect(await provider.readLoadedContextWindow()).toBeUndefined();
+    });
+
+    test("種別が embeddings のモデルは一覧から外す", async () => {
+      stubLmStudio(
+        [loadedModel, embeddingModel],
+        [loadedModel.id, embeddingModel.id]
+      );
+
+      const models = await new LmStudioProvider().listModels();
+
+      expect(models.map((m) => m.id)).toEqual([loadedModel.id]);
+    });
+
+    test("導入案内の初期値には、読み込み済みのうち短いほうを返す", async () => {
+      // 設定値は全モデル共通の予備なので、長いほうに合わせると
+      // 短いモデルを選んだときに入力が切り捨てられる
+      const shorter = {
+        ...notLoadedModel,
+        state: "loaded",
+        loaded_context_length: 8192,
+      };
+      stubLmStudio([loadedModel, shorter], [loadedModel.id, shorter.id]);
+
+      expect(await new LmStudioProvider().readLoadedContextWindow()).toBe(8192);
     });
   });
 });
