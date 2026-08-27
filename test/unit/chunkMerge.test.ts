@@ -145,8 +145,8 @@ describe("確保するコンテキスト長", () => {
       contextWindow: 131072,
     });
 
-    // 本文20,000字＋指示7,000字 ≒ 38,572トークン。これに応答分が乗る
-    expect(size).toBeGreaterThan(38572 + 16384);
+    // 本文20,000字＋指示ほか12,000字 ≒ 45,715トークン。これに応答分が乗る
+    expect(size).toBeGreaterThan(45715 + 16384);
     expect(size).toBeLessThanOrEqual(131072);
   });
 
@@ -162,7 +162,7 @@ describe("確保するコンテキスト長", () => {
   });
 
   test("本文が短くても、指示の分は必ず見込む", () => {
-    // 本文が10字でも、抽出の指示だけで約7,000字（1万トークン近く）ある。
+    // 本文が10字でも、抽出は指示だけで実測約10,000字ある。
     // 本文の長さだけで決めると、指示が入り切らない
     expect(
       decideContextSize({
@@ -170,7 +170,21 @@ describe("確保するコンテキスト長", () => {
         outputTokens: 10,
         contextWindow: 131072,
       })
-    ).toBeGreaterThan(10000);
+    ).toBeGreaterThan(17143);
+  });
+
+  test("指示の見込みは実測（約10,000字）を下回らない", () => {
+    // かつて7,000字のまま放置され、実測（system 829＋指示6,823＋
+    // 既知の名前約2,250）の半分になっていた（設計書6.27.6）。
+    // num_ctx が足りないと入力は黙って切り捨てられ、誰も気づけない
+    const measuredOverheadChars = 10000;
+    expect(
+      decideContextSize({
+        chunkChars: 0,
+        outputTokens: 0,
+        contextWindow: 10_000_000,
+      })
+    ).toBeGreaterThanOrEqual(Math.ceil(measuredOverheadChars / 0.7));
   });
 });
 

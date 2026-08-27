@@ -45,6 +45,7 @@ import {
   describeCharacter,
   describeLocation,
   describeWorldItem,
+  settingsFingerprint,
 } from "../core/settingsSummary";
 import { formatChapterLabel } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
@@ -722,14 +723,9 @@ async function collectSettings(
     .join("\n\n");
 
   // 設定が変われば同じ本文でも答えが変わる。**更新時刻ではなく中身**で見る
-  // （抽出は中身が同じでも updatedAt を書き換えるため）
-  const fingerprint = hashText(
-    JSON.stringify([
-      people.map((c) => [c.id, c.updatedAt, describeCharacter(c, [])]),
-      places.map((l) => [l.id, describeLocation(l)]),
-      worldItems.map((w) => [w.id, describeWorldItem(w)]),
-    ])
-  ).slice(0, 16);
+  // （抽出は中身が同じでも updatedAt を書き換えるため。以前ここに
+  // updatedAt が混ざっており、抽出のたびに全チャンクのキャッシュが飛んでいた）
+  const fingerprint = settingsFingerprint({ people, places, worldItems });
 
   let synopses: Array<{ chapter: number | null; synopsis: string }> = [];
   try {

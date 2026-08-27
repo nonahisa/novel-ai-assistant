@@ -5,6 +5,7 @@ import type { Organization } from "../models/organization";
 import type { CustomFieldDefinition } from "../models/customField";
 import { WORLD_CATEGORY_LABELS, type WorldItem } from "../models/world";
 import { describeChangeValues, formatChapters } from "./settingsMarkdown";
+import { hashText } from "./textFile";
 import { changesOfField } from "./recordChanges";
 import {
   describeInvolvement,
@@ -199,4 +200,27 @@ function push(lines: string[], label: string, value: string | null): void {
   // 空の項目を「なし」と書くと、AIがそれを事実として扱いかねない
   if (!value || !value.trim()) return;
   lines.push(`${label}: ${value.trim()}`);
+}
+
+/**
+ * 設定の「中身」から作る短い指紋。矛盾検知のキャッシュ鍵に使う。
+ *
+ * **更新時刻ではなく中身で見る。** 抽出は中身が同じでも `updatedAt` を
+ * 書き換えるため、時刻を混ぜると抽出を回すたびに全チャンクのキャッシュが
+ * 飛ぶ（人物の行だけ `updatedAt` が混ざっていた。設計書6.27.6）。
+ * ここで描き出す文章はプロンプトへ渡る形そのものなので、
+ * これが同じなら答えも変わらない。
+ */
+export function settingsFingerprint(options: {
+  people: readonly Character[];
+  places: readonly Location[];
+  worldItems: readonly WorldItem[];
+}): string {
+  return hashText(
+    JSON.stringify([
+      options.people.map((c) => [c.id, describeCharacter(c, [])]),
+      options.places.map((l) => [l.id, describeLocation(l)]),
+      options.worldItems.map((w) => [w.id, describeWorldItem(w)]),
+    ])
+  ).slice(0, 16);
 }
