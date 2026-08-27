@@ -21,7 +21,7 @@ import { cancelItem, isCancelItem } from "../views/dialogs";
  *
  * ## この道具でやること
  *
- * - 節を選ぶ → **その機能をその場で実行できる**（探さない）
+ * - 節を選ぶ → **その機能をその場で実行できる**（探さない。節一覧の▶からも飛べる）
  * - 通った項目に印を付ける → **文書へ書き戻す**（開き直さない）
  *
  * ## 項目の文章は、この道具だけが持つ
@@ -48,33 +48,87 @@ export function registerCheckRunner(
 }
 
 async function runChecks(context: vscode.ExtensionContext): Promise<void> {
-  const section = await pickSection();
-  if (!section) return;
+  const chosen = await pickSection();
+  if (!chosen) return;
 
-  await walkSection(context, section);
+  // ▶で選ばれたら、**節へ入らずにその機能だけ実行して終わる**。
+  // 「該当機能へとべる」のが依頼（作者、2026-08-27）で、印を付けるのは別の操作
+  if (chosen.kind === "run") {
+    await runFeature(chosen.section);
+    return;
+  }
+
+  await walkSection(context, chosen.section);
 }
 
+/** 節一覧で選ばれたもの。**中を回すのか、その機能へ飛ぶのか**で分かれる */
+type SectionChoice =
+  | { kind: "walk"; section: PendingCheckSection }
+  | { kind: "run"; section: PendingCheckSection };
+
+/** 節の行。取りやめの項目は `section` を持たない */
+type SectionItem = vscode.QuickPickItem & { section?: PendingCheckSection };
+
 /** どの節を回すか。**残りの多い順ではなく、リストの並び順**（危ないものから並んでいる） */
-async function pickSection(): Promise<PendingCheckSection | undefined> {
-  const items: Array<vscode.QuickPickItem & { section?: PendingCheckSection }> =
-    PENDING_CHECKS.map((section) => ({
-      label: `${section.id ? `${section.id}. ` : ""}${section.title}`,
-      description: `残り${section.count}`,
-      detail:
-        section.commands.length > 0
-          ? `実行できます: ${section.commands.join(" / ")}`
-          : "実行する操作はありません（見るだけ・環境が要るもの）",
-      section,
-    }));
+async function pickSection(): Promise<SectionChoice | undefined> {
+  /**
+   * その節の機能へ飛ぶボタン。**タイトルバーではなく、行に付ける**（作者の依頼、2026-08-27）。
+   *
+   * タイトルバーのボタンは「いま押したら**どの節**を実行するのか」が画面から読めない
+   * （選んでいる行と結びついて見えない）。行に付ければ**節と実行が1対1**になり、
+   * 押し間違いようがない。ついでに、節へ入らないと▶が無い状態も解消される。
+   */
+  const runButton: vscode.QuickInputButton = {
+    iconPath: new vscode.ThemeIcon("play"),
+    tooltip: "この機能を実行する",
+  };
+
+  const items: SectionItem[] = PENDING_CHECKS.map((section) => ({
+    label: `${section.id ? `${section.id}. ` : ""}${section.title}`,
+    description: `残り${section.count}`,
+    detail:
+      section.commands.length > 0
+        ? `実行できます: ${section.commands.join(" / ")}`
+        : "実行する操作はありません（見るだけ・環境が要るもの）",
+    // 実行する操作が無い節に▶を出すと、押しても何も起きない
+    buttons: section.commands.length > 0 ? [runButton] : undefined,
+    section,
+  }));
+
+  const quick = vscode.window.createQuickPick<SectionItem>();
+  quick.title = `実機確認（残り ${total()}件）`;
+  quick.placeholder =
+    "確かめる節を選んでください。危ないものから並んでいます（▶でその機能をすぐ実行できます）";
+  quick.matchOnDetail = true;
   // **閉じる道を画面に出す**（設計書6.17.3）。Escを知らない人には出口が無く見える
-  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
-    title: `実機確認（残り ${total()}件）`,
-    placeHolder: "確かめる節を選んでください。危ないものから並んでいます",
-    matchOnDetail: true,
+  quick.items = [...items, cancelItem()];
+  // `ignoreFocusOut` は既定（false）のまま。ここは打ち込んだ入力を失う画面ではないので、
+  // 外側をクリックしても抜けられるほうがよい（書き換える前の選択画面と同じ挙動）。
+  // なお、この画面の名前をコメントに書かないこと——`quickPickCancel.test.ts` が
+  // 文字列で呼び出し箇所を拾うので、コメントでも呼び出しと見なされて落ちる
+
+  const chosen = await new Promise<SectionChoice | undefined>((resolve) => {
+    quick.onDidTriggerItemButton((event) => {
+      const section = event.item.section;
+      if (!section) return;
+      // **先に答えを決めてから閉じる。** 逆にすると onDidHide が先に走って
+      // 「取りやめ」で片付いてしまう。実際の実行は画面を閉じたあと（runChecks）で行う
+      resolve({ kind: "run", section });
+      quick.hide();
+    });
+    quick.onDidAccept(() => {
+      const picked = quick.selectedItems[0];
+      resolve(
+        picked && !isCancelItem(picked) && picked.section
+          ? { kind: "walk", section: picked.section }
+          : undefined
+      );
+      quick.hide();
+    });
+    quick.onDidHide(() => resolve(undefined));
   });
-  if (!picked || isCancelItem(picked)) return undefined;
-  // 取りやめの項目は section を持たない。上で外してある
-  return "section" in picked ? picked.section : undefined;
+  quick.dispose();
+  return chosen;
 }
 
 /**
@@ -98,7 +152,11 @@ async function walkSection(
 
   const quick = vscode.window.createQuickPick<vscode.QuickPickItem>();
   quick.title = `${section.id ? `${section.id}. ` : ""}${section.title}`;
-  quick.placeholder = "通った項目を選んで Enter。選ばなければ何も変わりません";
+  // **▶がどこにあるかを書く。** タイトルバーの小さなアイコンは気づかれない（作者の指摘、2026-08-27）。
+  // 実行する操作が無い節では▶自体を出していないので、そのときは書かない
+  const runHint =
+    section.commands.length > 0 ? "右上の▶でこの機能を実行できます。" : "";
+  quick.placeholder = `通った項目を選んで Enter。${runHint}選ばなければ何も変わりません`;
   quick.canSelectMany = true;
   quick.items = itemsOf(section).map((item) => ({ label: item }));
   quick.buttons = section.commands.length > 0 ? [run, openDoc] : [openDoc];
