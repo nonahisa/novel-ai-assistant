@@ -92,6 +92,7 @@ describe("姓名と、名だけの呼び方", () => {
 
     expect(findMergeCandidates(characters)).toContainEqual({
       names: ["三門太志", "太志"],
+      ids: ["char_三門太志", "char_太志"],
       reason: "name_part",
     });
     expect(characters).toHaveLength(2);
@@ -116,6 +117,7 @@ describe("統合候補への反映", () => {
 
     expect(candidates).toContainEqual({
       names: ["近所のおばあさん", "ばあさん"],
+      ids: ["char_近所のおばあさん", "char_ばあさん"],
       reason: "suffix",
     });
     // 候補を出すだけで、レコードは触らない

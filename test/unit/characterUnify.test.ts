@@ -225,3 +225,80 @@ describe("同一人物をまとめる", () => {
     ).toThrow();
   });
 });
+
+/**
+ * まとめる操作と、別人の記録（distinctFrom、設計書6.5.8）の関係。
+ *
+ * まとめる側は distinctFrom を意識せずに書かれていた（0.22.7より前からある
+ * 関数なので当然だが）、そのままだと2通りに壊れる。
+ *
+ * 1. **吸収される側の記録が黙って消える。** アジャンを別レコードへ吸収させると
+ *    「アジャーノは別人」という判断が失われ、次の抽出で別名が戻る
+ * 2. **相手を指す記録が残る。** 別人と決めた2人を（手で戻すなどして）まとめたとき、
+ *    「自分の別名は別人だ」という自己矛盾したレコードができ、その別名では
+ *    永久に照合されなくなる
+ */
+describe("まとめたとき、別人の記録を失わない", () => {
+  test("吸収される側の別人の記録が、まとめた後も残る", () => {
+    const keep = character("char_009", "アジャン様");
+    const absorb = character("char_003", "アジャン", {
+      distinctFrom: [{ name: "アジャーノ", id: "char_010" }],
+    });
+
+    const { unified } = unifyCharacters(keep, absorb);
+
+    expect(unified.distinctFrom).toEqual([
+      { name: "アジャーノ", id: "char_010" },
+    ]);
+  });
+
+  test("両方の記録は重複なく合わさる", () => {
+    const keep = character("char_001", "リン", {
+      distinctFrom: [{ name: "アジャーノ", id: "char_010" }],
+    });
+    const absorb = character("char_002", "リンセップ", {
+      distinctFrom: [
+        { name: "アジャーノ", id: "char_010" },
+        { name: "ソフィ", id: null },
+      ],
+    });
+
+    const { unified } = unifyCharacters(keep, absorb);
+
+    expect(unified.distinctFrom).toEqual([
+      { name: "アジャーノ", id: "char_010" },
+      { name: "ソフィ", id: null },
+    ]);
+  });
+
+  test("互いを指す記録は、まとめたときに消す", () => {
+    // 別人と決めた2人を、作者があらためて「同じだった」とまとめ直す場面。
+    // 相手を指す記録を残すと「自分の別名は別人だ」という矛盾になり、
+    // その別名では二度と照合されない
+    const keep = character("char_003", "アジャン", {
+      distinctFrom: [{ name: "アジャーノ", id: "char_010" }],
+    });
+    const absorb = character("char_010", "アジャーノ", {
+      aliases: ["アジャーノさん"],
+      distinctFrom: [{ name: "アジャン", id: "char_003" }],
+    });
+
+    const { unified } = unifyCharacters(keep, absorb);
+
+    expect(unified.distinctFrom).toEqual([]);
+    expect(unified.aliases).toContain("アジャーノ");
+  });
+
+  test("敬称違いで相手を指す記録も消す", () => {
+    // 記録は敬称を落とした形で照合される（characterMerge と同じ規則）。
+    // 名前の完全一致だけで消すと「アジャーノさん」を指す記録が残る
+    const keep = character("char_003", "アジャン", {
+      distinctFrom: [{ name: "アジャーノさん", id: null }],
+    });
+    const absorb = character("char_010", "アジャーノ");
+
+    const { unified } = unifyCharacters(keep, absorb);
+
+    expect(unified.distinctFrom).toEqual([]);
+  });
+});

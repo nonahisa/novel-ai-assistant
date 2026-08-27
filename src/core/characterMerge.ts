@@ -64,6 +64,12 @@ export interface MergeResult {
 export interface MergeCandidate {
   names: [string, string];
   /**
+   * 組のレコードid。**名前だけでは組を特定できない。**
+   * same_name の候補はまさに同名レコードの組であり（「お母さん」が4件）、
+   * 名前で引き当てると同じ1件へ潰れて、まとめる操作が必ず失敗する
+   */
+  ids: [string, string];
+  /**
    * abbreviation: 省略形とみられる（「ギルマス」と「ギルドマスター」）
    * suffix: 一方が他方の言い方を含む（「近所のおばあさん」と「ばあさん」）
    * name_part: 姓名を繋げた名前と、名だけの名前（「密倉文佳」と「文佳」）
@@ -89,7 +95,10 @@ export function mergeExtractedCharacters(
   const changedIds = new Set<string>();
   const conflicts: MergeResult["conflicts"] = [];
   /** 統合先を決められず新規にした組。作者の判断へ回す */
-  const ambiguousPairs: Array<[string, string]> = [];
+  const ambiguousPairs: Array<{
+    names: [string, string];
+    ids: [string, string];
+  }> = [];
 
   for (const item of extracted) {
     const ex = item.data;
@@ -109,7 +118,7 @@ export function mergeExtractedCharacters(
       // 黙って新規にすると重複が増えるだけで気づけない。
       for (const other of lookup.ambiguous) {
         if (isDeclaredDistinct(c, other)) continue;
-        ambiguousPairs.push([c.name, other.name]);
+        ambiguousPairs.push({ names: [c.name, other.name], ids: [c.id, other.id] });
       }
       continue;
     }
@@ -121,7 +130,7 @@ export function mergeExtractedCharacters(
     // 回すと「同じかもしれません」と毎回聞かれ、分けた判断が尊重されない
     for (const other of lookup.ambiguous) {
       if (isDeclaredDistinct(match, other)) continue;
-      ambiguousPairs.push([match.name, other.name]);
+      ambiguousPairs.push({ names: [match.name, other.name], ids: [match.id, other.id] });
     }
 
     // 作者が確定させた人物はAIで書き換えない。
@@ -187,8 +196,8 @@ export function mergeExtractedCharacters(
     ),
     folded,
     mergeCandidates: [
-      ...ambiguousPairs.map((names) => ({
-        names,
+      ...ambiguousPairs.map((pair) => ({
+        ...pair,
         reason: "ambiguous" as const,
       })),
       ...findMergeCandidates(result),
@@ -746,24 +755,24 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
           keys.has(normalizeName(name))
         )
       ) {
-        candidates.push({ names: [a.name, b.name], reason: "same_name" });
+        candidates.push({ names: [a.name, b.name], ids: [a.id, b.id], reason: "same_name" });
         continue;
       }
 
       const pairs = appellationPairs(a, b);
 
       if (pairs.some(([left, right]) => isAbbreviationOf(left, right))) {
-        candidates.push({ names: [a.name, b.name], reason: "abbreviation" });
+        candidates.push({ names: [a.name, b.name], ids: [a.id, b.id], reason: "abbreviation" });
         continue;
       }
 
       if (pairs.some(([left, right]) => isSuffixCallOf(left, right))) {
-        candidates.push({ names: [a.name, b.name], reason: "suffix" });
+        candidates.push({ names: [a.name, b.name], ids: [a.id, b.id], reason: "suffix" });
         continue;
       }
 
       if (pairs.some(([left, right]) => isFamilyNameForm(left, right))) {
-        candidates.push({ names: [a.name, b.name], reason: "name_part" });
+        candidates.push({ names: [a.name, b.name], ids: [a.id, b.id], reason: "name_part" });
       }
     }
   }

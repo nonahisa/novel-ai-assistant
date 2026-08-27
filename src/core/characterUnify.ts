@@ -1,5 +1,6 @@
 import type { Character } from "../models/character";
 import { mergeChangeLists, mergeConflicts } from "../models/jsonValidation";
+import { normalizeName } from "./characterMerge";
 
 /**
  * 同一人物として登録されてしまった2件を1件にまとめる。
@@ -32,6 +33,12 @@ export function unifyCharacters(keep: Character, absorb: Character): UnifyResult
     unified: {
       ...keep,
       aliases: [...aliases].filter((alias) => alias.trim()),
+      // 別人の記録（設計書6.5.8）は両方から引き継ぐ。吸収される側の分を
+      // 落とすと、「アジャーノは別人」という作者の判断がまとめる操作1回で
+      // 消え、次の抽出で別名が戻る。ただし**互いを指す記録は消す**——
+      // まとめた後も残すと「自分の別名は別人だ」という矛盾になり、
+      // その別名では二度と照合されなくなる
+      distinctFrom: unifyDistinctFrom(keep, absorb),
       summary: keep.summary ?? absorb.summary,
       affiliation: keep.affiliation ?? absorb.affiliation,
       reading: keep.reading ?? absorb.reading,
@@ -133,4 +140,37 @@ function dedupeBy<T>(items: T[], key: (item: T) => string): T[] {
     result.push(item);
   }
   return result;
+}
+
+/**
+ * 別人の記録（distinctFrom）を、2人ぶん合わせる。
+ *
+ * - 互いを指す記録は消す（idか、敬称を落とした名前が相手の呼び名と一致するもの）
+ * - 残りは重複なく合わせる（照合は characterMerge と同じ、敬称を落とした形）
+ */
+function unifyDistinctFrom(
+  keep: Character,
+  absorb: Character
+): Character["distinctFrom"] {
+  const counterpartIds = new Set([keep.id, absorb.id]);
+  const counterpartNames = new Set(
+    [keep.name, ...keep.aliases, absorb.name, ...absorb.aliases].map(
+      normalizeName
+    )
+  );
+
+  const seen = new Set<string>();
+  const merged: Character["distinctFrom"] = [];
+  for (const entry of [
+    ...(keep.distinctFrom ?? []),
+    ...(absorb.distinctFrom ?? []),
+  ]) {
+    if (entry.id !== null && counterpartIds.has(entry.id)) continue;
+    const key = normalizeName(entry.name);
+    if (counterpartNames.has(key)) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(entry);
+  }
+  return merged;
 }

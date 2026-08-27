@@ -44,11 +44,21 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
     return;
   }
 
-  const byName = new Map(loaded.characters.map((c) => [c.name, c]));
+  // **idで引き当てる。名前では組を特定できない。**
+  // 「同じ呼び名が両方に登録されています」の候補は、まさに同名レコードの組
+  // である（実データで「お母さん」が4件に分裂した）。名前のMapは同名を
+  // 1件へ潰すので、first と second が同じレコードになり、
+  // 「同じ人物どうしはまとめられません」で必ず失敗していた（0.22.9で修正）
+  const byId = new Map(loaded.characters.map((c) => [c.id, c]));
   const picked = await vscode.window.showQuickPick(
     [
+      // 同名の組（「お母さん ＋ お母さん」）は名前だけでは見分けが付かない。
+      // idを添えて、どのレコードの組かが分かるようにする
       ...candidates.map((candidate) => ({
-        label: `${candidate.names[0]} ＋ ${candidate.names[1]}`,
+        label:
+          candidate.names[0] === candidate.names[1]
+            ? `${candidate.names[0]}（${candidate.ids[0]}） ＋ ${candidate.names[1]}（${candidate.ids[1]}）`
+            : `${candidate.names[0]} ＋ ${candidate.names[1]}`,
         description: REASON_LABELS[candidate.reason],
         candidate,
       })),
@@ -62,8 +72,8 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
   );
   if (!picked || !("candidate" in picked)) return;
 
-  const first = byName.get(picked.candidate.names[0]);
-  const second = byName.get(picked.candidate.names[1]);
+  const first = byId.get(picked.candidate.ids[0]);
+  const second = byId.get(picked.candidate.ids[1]);
   if (!first || !second) {
     await vscode.window.showErrorMessage(
       "対象の人物が見つかりませんでした。読み込み直してください。"

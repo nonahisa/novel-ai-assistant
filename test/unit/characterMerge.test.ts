@@ -128,6 +128,7 @@ describe("登場人物マージ", () => {
     // 寄せなかった相手は統合候補として作者へ見せる。統合は作者が決める
     expect(result.mergeCandidates).toContainEqual({
       names: ["玲司", "玲司"],
+      ids: ["char_001", "char_002"],
       reason: "ambiguous",
     });
   });
@@ -591,7 +592,11 @@ describe("省略形の統合候補", () => {
     // 自動では統合しない。作者が判断できるよう候補として出すだけ
     expect(result.characters).toHaveLength(2);
     expect(result.mergeCandidates).toEqual([
-      { names: ["ギルドマスター", "ギルマス"], reason: "abbreviation" },
+      {
+        names: ["ギルドマスター", "ギルマス"],
+        ids: ["char_001", "char_002"],
+        reason: "abbreviation",
+      },
     ]);
   });
 
@@ -616,7 +621,11 @@ describe("省略形の統合候補", () => {
 
     expect(result.characters).toHaveLength(2);
     expect(result.mergeCandidates).toEqual([
-      { names: ["ギルドマスター", "マスター"], reason: "suffix" },
+      {
+        names: ["ギルドマスター", "マスター"],
+        ids: ["char_001", "char_002"],
+        reason: "suffix",
+      },
     ]);
   });
 
@@ -902,5 +911,44 @@ describe("別人だと決めた組", () => {
     expect(result.characters.find((c) => c.id === "char_004")!.summary).toBe(
       "宿の娘"
     );
+  });
+});
+
+/**
+ * 統合候補は、名前だけでなく**idでも**組を特定できること。
+ *
+ * 「同じ呼び名が両方に登録されています」という候補は、まさに同名レコードの組
+ * である（実データで「お母さん」が4件に分裂した）。名前しか持たないと、
+ * まとめる画面が名前でレコードを引き当てたときに同じ1件へ潰れ、
+ * 「同じ人物どうしはまとめられません」で必ず失敗する——**この候補を出す
+ * 目的そのものが実行できない**（0.22.9で修正）。
+ */
+describe("統合候補のid", () => {
+  test("同名レコードの組でも、idで区別できる", () => {
+    const a = emptyCharacter("char_001", "お母さん");
+    const b = emptyCharacter("char_002", "お母さん");
+
+    const candidates = findMergeCandidates([a, b]);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].names).toEqual(["お母さん", "お母さん"]);
+    expect(candidates[0].ids).toEqual(["char_001", "char_002"]);
+  });
+
+  test("曖昧で新規になった組にもidが付く", () => {
+    // 「黒木」と「白木」が同じ別名「玲司」を持つ場面
+    const kuroki = emptyCharacter("char_001", "黒木");
+    kuroki.aliases = ["玲司"];
+    const shiraki = emptyCharacter("char_002", "白木");
+    shiraki.aliases = ["玲司"];
+
+    const result = mergeExtractedCharacters([kuroki, shiraki], [
+      { data: { name: "玲司" }, chapters: [3] },
+    ]);
+
+    for (const candidate of result.mergeCandidates) {
+      expect(candidate.ids).toBeDefined();
+      expect(candidate.ids[0]).not.toBe(candidate.ids[1]);
+    }
   });
 });
