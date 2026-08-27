@@ -220,16 +220,25 @@ async function runFeature(section: PendingCheckSection): Promise<void> {
   await vscode.commands.executeCommand(picked.label);
 }
 
-/** 確認リストの該当箇所を開く。**節の見出しへカーソルを置く** */
+/**
+ * 確認リストの該当箇所を開く。
+ *
+ * **作者の既定のMarkdown画面で開く。** 以前はテキストエディタを決め打ちで
+ * 開いており、ふだんは読みやすい画面（1.131のMarkdown編集画面など）で
+ * 見ている作者に、素のテキストを押し付けていた（実機の報告、2026-08-27）。
+ * 既定がテキストエディタだったときだけ、節の見出しへカーソルを置く
+ * （読みやすい画面には外から場所を指定する口が無い）。
+ */
 async function openChecklist(
   context: vscode.ExtensionContext,
   section: PendingCheckSection
 ): Promise<void> {
   const uri = checklistUri(context);
-  const document = await vscode.workspace.openTextDocument(uri);
-  const editor = await vscode.window.showTextDocument(document);
+  await vscode.commands.executeCommand("vscode.open", uri);
 
-  const at = findHeading(document.getText(), section);
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.uri.toString() !== uri.toString()) return;
+  const at = findHeading(editor.document.getText(), section);
   if (at === undefined) return;
   const position = new vscode.Position(at, 0);
   editor.selection = new vscode.Selection(position, position);
