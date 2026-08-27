@@ -98,7 +98,9 @@ export class MeteredProvider implements AIProvider {
   private record(
     params: GenerateParams,
     outcome: {
-      usage?: { inputTokens: number; outputTokens: number };
+      // 形は `GenerateResult["usage"]` と同じ。**そのまま渡す**ので、
+      // プロバイダが新しい項目を返し始めても、ここを直す必要はない
+      usage?: GenerateResult["usage"];
       elapsedMs?: number;
       truncated?: boolean;
       error?: string;

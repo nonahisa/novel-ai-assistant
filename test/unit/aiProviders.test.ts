@@ -6,6 +6,8 @@ import {
   toClaudeAIError,
   toClaudeJsonSchema,
 } from "../../src/ai/claudeProvider";
+import { OpenAIProvider } from "../../src/ai/openaiProvider";
+import { GeminiProvider } from "../../src/ai/geminiProvider";
 import { AIError } from "../../src/ai/types";
 import { workspace } from "./support/vscodeStub";
 
@@ -730,6 +732,169 @@ describe("AIプロバイダ境界", () => {
     ).rejects.toMatchObject({
       kind: "bad_response",
       detail: expect.stringContaining("maxLength"),
+    });
+  });
+
+  /**
+   * プロンプトキャッシュが効いているかを測れるようにする第1段。
+   *
+   * **効かせる工夫より先に、読むほうを入れる。** 数字が残っていなければ、
+   * あとで工夫をしても前後を比べられない（設計書6.27.7「まず測る」）。
+   *
+   * ここで確かめるのは**応答から拾えているか**だけで、キャッシュを
+   * 効かせる指定（Claudeの `cache_control`）はまだ送っていない。
+   */
+  describe("プロンプトキャッシュの効きを読む", () => {
+    function openAiChat(usage: Record<string, unknown>) {
+      return {
+        choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+        usage,
+      };
+    }
+
+    function geminiChat(usageMetadata: Record<string, unknown>) {
+      return {
+        candidates: [
+          { content: { parts: [{ text: "ok" }] }, finishReason: "STOP" },
+        ],
+        usageMetadata,
+      };
+    }
+
+    test("OpenAI互換の cached_tokens を拾う", async () => {
+      // さくらのAI・LM Studio も同じ形を読む（口がOpenAI互換のため）
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          jsonResponse(
+            openAiChat({
+              prompt_tokens: 12_000,
+              completion_tokens: 300,
+              prompt_tokens_details: { cached_tokens: 9_600 },
+            })
+          )
+        )
+      );
+
+      const result = await new OpenAIProvider(claudeContext()).generate(
+        ollamaParams
+      );
+
+      expect(result.usage).toEqual({
+        inputTokens: 12_000,
+        outputTokens: 300,
+        cachedInputTokens: 9_600,
+      });
+    });
+
+    test("OpenAI互換で内訳が返らなければ undefined のままにする", async () => {
+      // **0で埋めない。** 0は「対応しているが効かなかった」に取っておく
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          jsonResponse(
+            openAiChat({ prompt_tokens: 12_000, completion_tokens: 300 })
+          )
+        )
+      );
+
+      const result = await new OpenAIProvider(claudeContext()).generate(
+        ollamaParams
+      );
+
+      expect(result.usage?.cachedInputTokens).toBeUndefined();
+    });
+
+    test("Geminiの cachedContentTokenCount を拾う", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          jsonResponse(
+            geminiChat({
+              promptTokenCount: 12_000,
+              candidatesTokenCount: 300,
+              cachedContentTokenCount: 9_600,
+            })
+          )
+        )
+      );
+
+      const result = await new GeminiProvider(claudeContext()).generate(
+        ollamaParams
+      );
+
+      expect(result.usage).toEqual({
+        inputTokens: 12_000,
+        outputTokens: 300,
+        cachedInputTokens: 9_600,
+      });
+    });
+
+    test("Geminiが数を返さなければ undefined のままにする", async () => {
+      // 効かなかった回は項目ごと返らない。0と書くと記録の意味が変わる
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          jsonResponse(
+            geminiChat({ promptTokenCount: 12_000, candidatesTokenCount: 300 })
+          )
+        )
+      );
+
+      const result = await new GeminiProvider(claudeContext()).generate(
+        ollamaParams
+      );
+
+      expect(result.usage?.cachedInputTokens).toBeUndefined();
+    });
+
+    test("Claudeの cache_read_input_tokens を拾い、nullは undefined として扱う", async () => {
+      // Anthropicはキャッシュを使っていない回に null を返すことがある。
+      // そのまま渡すと、記録の欄に「対応しているのに効かなかった（0）」でも
+      // 「数えられない（空欄）」でもないものが入る
+      const withCache = {
+        ...claudeMessage("ok"),
+        usage: {
+          input_tokens: 10,
+          output_tokens: 5,
+          cache_read_input_tokens: 8,
+          cache_creation_input_tokens: null,
+        },
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = input instanceof Request ? input.url : String(input);
+          return url.includes("/v1/models/")
+            ? jsonResponse(claudeModel)
+            : jsonResponse(withCache);
+        })
+      );
+
+      const result = await new ClaudeProvider(claudeContext()).generate(
+        ollamaParams
+      );
+
+      expect(result.usage?.cachedInputTokens).toBe(8);
+    });
+
+    test("Claudeがキャッシュの数を返さない回は undefined のままにする", async () => {
+      // いまは `cache_control` を送っていないので、これが通常の応答である
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = input instanceof Request ? input.url : String(input);
+          return url.includes("/v1/models/")
+            ? jsonResponse(claudeModel)
+            : jsonResponse(claudeMessage("ok"));
+        })
+      );
+
+      const result = await new ClaudeProvider(claudeContext()).generate(
+        ollamaParams
+      );
+
+      expect(result.usage?.cachedInputTokens).toBeUndefined();
     });
   });
 });

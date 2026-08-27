@@ -51,7 +51,16 @@ interface ChatResponse {
     message?: { content?: string | null; refusal?: string | null };
     finish_reason?: string;
   }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    /**
+     * プロンプトキャッシュの内訳。**OpenAIは自動でキャッシュする**ので、
+     * こちらから何かを送る必要はなく、返ってきた数を読むだけでよい。
+     * 古いモデル・古い口では返らないことがあるので省略可能にしてある。
+     */
+    prompt_tokens_details?: { cached_tokens?: number };
+  };
 }
 
 /**
@@ -306,6 +315,9 @@ export class OpenAIProvider implements ApiKeyProvider {
       usage: {
         inputTokens: response.usage?.prompt_tokens ?? 0,
         outputTokens: response.usage?.completion_tokens ?? 0,
+        // **`?? 0` にしない。** 返ってこなかった回は undefined のままにして、
+        // 「数えられない」と「数えて0だった」を分ける（types.ts の説明のとおり）
+        cachedInputTokens: response.usage?.prompt_tokens_details?.cached_tokens,
       },
       truncated: choice.finish_reason === "length",
       elapsedMs: Date.now() - started,

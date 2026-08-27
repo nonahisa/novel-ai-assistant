@@ -62,7 +62,20 @@ export interface UsageLogEntry {
   parts?: Record<string, number>;
   /** 実際に確保したコンテキスト長。`inputTokens` と並べると過不足が見える */
   numCtx?: number;
-  usage?: { inputTokens: number; outputTokens: number };
+  /**
+   * 応答が返した消費量。
+   *
+   * `cachedInputTokens` は**入力のうちキャッシュから読めた分**で、
+   * **数えられないAI（Ollama等）では undefined になる。** 0と分けて
+   * 扱う（0は「数えたうえで効かなかった」）。
+   * 型は `ai/types.ts` の `GenerateResult["usage"]` と揃えているが、
+   * **こちらから ai/ をimportしない**（core → ai の逆流を作らないため）。
+   */
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens?: number;
+  };
   elapsedMs?: number;
   /** 応答が長さ上限で打ち切られたか */
   truncated?: boolean;
@@ -160,9 +173,12 @@ export function usageLogHeader(workFolder: string): string {
     "- **スキーマ** … 出力の形の指定。プロンプトとは別枠で送るため、足さずに分けています",
     "- **本文%** … 指示＋本文のうち、原稿そのものが占める割合。小さいほど見落としが増えます",
     "- **確保** … `num_ctx`（確保したコンテキスト長）。**入力トークンがこれに近いと、入力が切り捨てられます**",
+    "- **キャッシュ** … 入力トークンのうち、プロンプトキャッシュから読めた分。空欄は、数を返さないAI（Ollamaなど）です",
     "",
-    "| 時刻 | 機能 | モデル | 指示＋本文 | スキーマ | 本文% | 内訳 | 確保 | 入力tok | 出力tok | 秒 | 備考 |",
-    "|---|---|---|---|---|---|---|---|---|---|---|---|",
+    // **キャッシュは末尾に足す。** 途中へ入れると、すでに書かれた行が
+    // 1つずつずれて、備考が「秒」の欄に出るようになる（過去の記録が読めなくなる）
+    "| 時刻 | 機能 | モデル | 指示＋本文 | スキーマ | 本文% | 内訳 | 確保 | 入力tok | 出力tok | 秒 | 備考 | キャッシュ |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
   ].join("\n");
 }
 
@@ -189,6 +205,7 @@ export function renderUsageRow(
     entry.usage ? num(entry.usage.outputTokens) : "",
     entry.elapsedMs === undefined ? "" : (entry.elapsedMs / 1000).toFixed(1),
     note(entry),
+    cachedTokens(entry),
   ];
   return `\n| ${cells.join(" | ")} |`;
 }
@@ -228,6 +245,18 @@ function note(entry: UsageLogEntry): string {
   if (entry.truncated) notes.push("**切り詰め**");
   if (entry.error) notes.push(`**失敗**: ${clean(entry.error)}`);
   return notes.join("／");
+}
+
+/**
+ * 入力のうち、プロンプトキャッシュから読めた分。
+ *
+ * **0も書く。** 「対応しているのに効いていない」は、効かせる工夫をする
+ * ときにいちばん知りたい数字で、空欄にすると気づけない。
+ * 数を返さないAI（Ollamaなど）だけを空欄にする。
+ */
+function cachedTokens(entry: UsageLogEntry): string {
+  const cached = entry.usage?.cachedInputTokens;
+  return typeof cached === "number" ? num(cached) : "";
 }
 
 function num(value: number): string {

@@ -43,7 +43,18 @@ interface ChatResponse {
     message?: { content?: string | null };
     finish_reason?: string;
   }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    /**
+     * プロンプトキャッシュの内訳（OpenAI互換の形）。
+     *
+     * **さくらが実際にこれを返すかは未確認である**（2026-08-27）。
+     * 返さなければ undefined のままになるだけで、記録の欄が空くほかに
+     * 害はない。返し始めたときに、こちらを直さなくても数字が出る。
+     */
+    prompt_tokens_details?: { cached_tokens?: number };
+  };
 }
 
 export class SakuraProvider implements ApiKeyProvider {
@@ -301,6 +312,9 @@ export class SakuraProvider implements ApiKeyProvider {
       usage: {
         inputTokens: response.usage?.prompt_tokens ?? 0,
         outputTokens: response.usage?.completion_tokens ?? 0,
+        // 返ってこなければ undefined のまま（`?? 0` にしない）。
+        // 0にすると「対応しているが効かなかった」と読めてしまう
+        cachedInputTokens: response.usage?.prompt_tokens_details?.cached_tokens,
       },
       truncated: choice.finish_reason === "length",
       elapsedMs: Date.now() - started,

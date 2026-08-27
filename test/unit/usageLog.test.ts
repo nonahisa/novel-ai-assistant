@@ -96,6 +96,48 @@ describe("送信量の記録", () => {
     expect(row).toContain("| 60,452 | 58,900 | 1,024 |");
   });
 
+  test("キャッシュから読めた分を残す", () => {
+    // 効いているかどうかは、この数字を見ないと分からない。
+    // 欄は末尾にあるので、行の最後に出る
+    const row = renderUsageRow(
+      entry({
+        usage: {
+          inputTokens: 12_000,
+          outputTokens: 300,
+          cachedInputTokens: 9_600,
+        },
+      }),
+      AT
+    );
+
+    expect(row.trimEnd().endsWith("| 9,600 |")).toBe(true);
+  });
+
+  test("効かなかった回は0と書く", () => {
+    // 空欄にすると「対応していないAI」と見分けが付かない。
+    // 効いていないことこそ、効かせる工夫をするときの手がかりになる
+    const row = renderUsageRow(
+      entry({
+        usage: { inputTokens: 12_000, outputTokens: 300, cachedInputTokens: 0 },
+      }),
+      AT
+    );
+
+    expect(row.trimEnd().endsWith("| 0 |")).toBe(true);
+  });
+
+  test("数を返さないAIでは、キャッシュの欄を空にする", () => {
+    // Ollamaはキャッシュの会計を持たない。0と書くと
+    // 「対応しているのに効いていない」と読み違える
+    const row = renderUsageRow(
+      entry({ usage: { inputTokens: 12_000, outputTokens: 300 } }),
+      AT
+    );
+
+    expect(row.trimEnd().endsWith("|  |")).toBe(true);
+    expect(row).not.toContain("| 0 |");
+  });
+
   test("切り詰めを備考に出す", () => {
     const row = renderUsageRow(entry({ truncated: true }), AT);
 
@@ -160,6 +202,14 @@ describe("ファイルの先頭", () => {
     expect(header).toContain("# わたしの小説 の送信量");
     expect(header).toContain("| 時刻 | 機能 | モデル |");
     expect(header).toContain("|---|---|---|");
+  });
+
+  test("キャッシュの欄は末尾に置き、意味を説明する", () => {
+    // 途中へ入れると、すでに書かれた行が1つずつずれて読めなくなる
+    const header = usageLogHeader("C:/works/わたしの小説");
+
+    expect(header).toContain("| 秒 | 備考 | キャッシュ |");
+    expect(header).toContain("空欄は、数を返さないAI");
   });
 
   test("切り方を説明する", () => {

@@ -48,6 +48,14 @@ interface GenerateContentResponse {
   usageMetadata?: {
     promptTokenCount?: number;
     candidatesTokenCount?: number;
+    /**
+     * 入力のうち、キャッシュから読めた分。
+     *
+     * **Geminiは条件を満たすと自動でキャッシュする**（明示の指定は要らない）。
+     * 効かなかった回や対応していないモデルでは項目ごと返らないので、
+     * 省略可能にしてある。
+     */
+    cachedContentTokenCount?: number;
   };
   promptFeedback?: { blockReason?: string };
 }
@@ -261,6 +269,9 @@ export class GeminiProvider implements ApiKeyProvider {
       usage: {
         inputTokens: response.usageMetadata?.promptTokenCount ?? 0,
         outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
+        // 返ってこなければ undefined のまま（`?? 0` にしない）。
+        // 0にすると「対応しているが効かなかった」と読めてしまう
+        cachedInputTokens: response.usageMetadata?.cachedContentTokenCount,
       },
       truncated: candidate.finishReason === "MAX_TOKENS",
       elapsedMs: Date.now() - started,

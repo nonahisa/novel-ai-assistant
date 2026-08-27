@@ -83,7 +83,20 @@ export interface GenerateResult {
   text: string;
   /** 思考モードの出力（あれば） */
   thinking?: string;
-  usage?: { inputTokens: number; outputTokens: number };
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    /**
+     * 入力のうち、プロンプトキャッシュから読めた分。
+     *
+     * **対応していないAI（Ollama等）では undefined。** 0と区別する
+     * ——0は「対応しているが、今回は効かなかった」の意味に取っておく。
+     * 両方を0にまとめると、「そもそも数えられないAI」なのか
+     * 「数えたうえで効いていない」のかが記録から読めなくなり、
+     * 効かせる工夫の前後を比べられない。
+     */
+    cachedInputTokens?: number;
+  };
   /** 応答が長さ上限で打ち切られた場合 true */
   truncated: boolean;
   /** 所要時間（ミリ秒） */

@@ -58,7 +58,17 @@ interface ChatResponse {
     message?: { content?: string | null };
     finish_reason?: string;
   }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    /**
+     * プロンプトキャッシュの内訳（OpenAI互換の形）。
+     *
+     * **手元で動くので料金の意味は無い**が、返ってくるなら記録しておく
+     * （効いていれば速さに出る）。返さなければ undefined のままになる。
+     */
+    prompt_tokens_details?: { cached_tokens?: number };
+  };
 }
 
 export class LmStudioProvider implements AIProvider {
@@ -261,6 +271,8 @@ export class LmStudioProvider implements AIProvider {
       usage: {
         inputTokens: response.usage?.prompt_tokens ?? 0,
         outputTokens: response.usage?.completion_tokens ?? 0,
+        // 返ってこなければ undefined のまま（`?? 0` にしない）
+        cachedInputTokens: response.usage?.prompt_tokens_details?.cached_tokens,
       },
       truncated: choice.finish_reason === "length",
       elapsedMs: Date.now() - started,

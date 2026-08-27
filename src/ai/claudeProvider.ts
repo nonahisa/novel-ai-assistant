@@ -71,7 +71,24 @@ interface ClaudeMessage {
   content: Array<{ type: string; text?: string }>;
   stop_reason: string | null;
   stop_details?: { explanation?: string };
-  usage: { input_tokens: number; output_tokens: number };
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    /**
+     * キャッシュから読めた分。
+     *
+     * **Claudeは印（`cache_control`）を付けないと効かない。** いまは
+     * 付けていないので、この項目は返らないか0で返る。付ける実装より先に
+     * 読むほうを入れておくと、**付けた前後を同じ物差しで比べられる**。
+     */
+    cache_read_input_tokens?: number | null;
+    /**
+     * キャッシュへ書き込んだ分。読めた分より割高なので、印を付けたあと
+     * 「書いてばかりで読めていない」ことに気づくために型へ残す
+     * （いまは記録していない）。
+     */
+    cache_creation_input_tokens?: number | null;
+  };
 }
 
 export class ClaudeProvider implements ApiKeyProvider {
@@ -382,6 +399,9 @@ export class ClaudeProvider implements ApiKeyProvider {
       usage: {
         inputTokens: res.usage.input_tokens,
         outputTokens: res.usage.output_tokens,
+        // **null で返ることがある**（キャッシュを使っていない回）ので undefined へ寄せる。
+        // `?? 0` にはしない——0は「印を付けたのに読めなかった」に取っておく
+        cachedInputTokens: res.usage.cache_read_input_tokens ?? undefined,
       },
       truncated: res.stop_reason === "max_tokens",
       elapsedMs: Date.now() - started,
