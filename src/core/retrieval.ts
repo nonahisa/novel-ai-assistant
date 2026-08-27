@@ -81,10 +81,12 @@ export function retrieve(
   const byId = new Map(pool.map((item) => [item.id, item]));
   const allowed = new Set(byId.keys());
 
+  // 母集団を索引へ渡してから引く。以前は索引全体から多め（perMethod*3）に
+  // 引いてからふるいにかけており、mustInclude で数十件まで狭めた相談では
+  // 全体の上位に母集団の文書が残らず、語句一致が丸ごと空になっていた
+  // （設計書6.27.6）。意味検索側が pool を渡しているのと同じ形へ揃える
   const lexical = input.bm25
-    .search(input.query, perMethod * 3)
-    .filter((hit) => allowed.has(hit.id))
-    .slice(0, perMethod)
+    .search(input.query, perMethod, allowed)
     .map((hit) => hit.id);
 
   const semantic = input.semantic

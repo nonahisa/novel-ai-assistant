@@ -58,6 +58,35 @@ describe("語句一致（BM25）", () => {
   test("件数の上限を守る", () => {
     expect(index.search("を", 2).length).toBeLessThanOrEqual(2);
   });
+
+  test("母集団を渡すと、その外の文書は返らない", () => {
+    // 相談は mustInclude で母集団を狭める。索引全体から引いてから
+    // ふるいにかけると、母集団の文書が上位に残らず取りこぼす（設計書6.27.6）
+    const got = index.search("嫉妬 稽古 薬", 3, new Set(["b"]));
+
+    expect(got.map((hit) => hit.id)).toEqual(["b"]);
+  });
+
+  test("件数の上限は、母集団で絞ったあとに効く", () => {
+    // 「全体の上位n件のうち母集団に入るもの」ではなく
+    // 「母集団の中の上位n件」を返す。ここが取りこぼしの分かれ目
+    const many = new Bm25Index(
+      Array.from({ length: 10 }, (_, i) => ({
+        id: `d-${i}`,
+        text: `${"あ".repeat(i)}嫉妬の場面`,
+      }))
+    );
+    const allowed = new Set(["d-5", "d-6", "d-7", "d-8", "d-9"]);
+    const got = many.search("嫉妬", 3, allowed);
+
+    expect(got).toHaveLength(3);
+    for (const hit of got) expect(allowed.has(hit.id)).toBe(true);
+  });
+
+  test("母集団を渡さなければ、これまでどおり", () => {
+    expect(index.search("嫉妬", 3).map((hit) => hit.id)).toEqual(["a"]);
+    expect(index.search("宇宙船", 3, undefined)).toEqual([]);
+  });
 });
 
 describe("検索の組み立て", () => {
@@ -129,6 +158,38 @@ describe("検索の組み立て", () => {
     );
 
     expect(got.map((c) => c.item.id)).toEqual(["m1"]);
+  });
+
+  test("母集団を狭めた相談でも、語句一致が取りこぼさない", () => {
+    // 設計書6.27.6の穴4の再現。
+    //
+    // 以前は索引**全体**から perMethod*3（既定60）件引いてから allowed で
+    // ふるいにかけていた。質問語を強く含む場面が他に70件あると、目当ての
+    // 1件は全体では71位で、上位60件に入らない。ふるいの結果は0件になり、
+    // 語句一致が丸ごと空になる（意味検索を切っていれば結果も空）。
+    //
+    // 「母集団の中の上位n件」を引けば、この1件は1位で返る。
+    const noise = Array.from({ length: 70 }, (_, i) =>
+      item(`n-${i}`, "嫉妬。嫉妬。嫉妬。")
+    );
+    // 目当ての1件は、質問語を1回しか含まず、長いので点が最も低くなる
+    const target = item(
+      "target",
+      `マイナ${"あ".repeat(300)}嫉妬${"い".repeat(300)}`
+    );
+    const all = [...noise, target];
+    const index = new Bm25Index(all.map((i) => ({ id: i.id, text: i.text })));
+
+    // 前提の確認：全体で引くと、目当ての1件は上位60件に入らない
+    expect(index.search("嫉妬", 60).map((h) => h.id)).not.toContain("target");
+
+    const got = retrieve(
+      { items: all, bm25: index, query: "嫉妬" },
+      { maxChars: 5000, mustInclude: ["マイナ"] }
+    );
+
+    expect(got.map((c) => c.item.id)).toEqual(["target"]);
+    expect(got[0].foundBy).toBe("語句一致");
   });
 });
 

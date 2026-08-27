@@ -126,8 +126,21 @@ export class Bm25Index {
    *
    * 一致が1つも無い文書は返さない。0点のものを混ぜると、
    * 呼び出し側が「上位n件」を取ったときに無関係な場面が紛れ込む。
+   *
+   * `allowedIds` を渡すと、その中の文書だけを対象にして上位 `limit` 件を返す。
+   * **呼び出し側が引いたあとでふるいにかけるのでは足りない。** 母集団を
+   * 数十件まで狭めた相談では、全体の上位 `limit` 件に母集団の文書がほとんど
+   * 残らず、ふるった結果が空になる（設計書6.27.6）。
+   *
+   * ただし **IDF（語の珍しさ）は索引全体のまま**にしてある。絞りは足切りで
+   * あって、点の付け方まで変えるものではない。母集団ごとに珍しさを数え直すと
+   * 同じ質問でも絞り方しだいで順位が動き、作者から見て説明がつかなくなる。
    */
-  search(query: string, limit: number): Bm25Hit[] {
+  search(
+    query: string,
+    limit: number,
+    allowedIds?: ReadonlySet<string>
+  ): Bm25Hit[] {
     if (this.ids.length === 0 || limit <= 0) return [];
 
     // 同じ2つ組みを何度も数えない。質問側の重複は重みにしない
@@ -167,6 +180,9 @@ export class Bm25Index {
     for (let doc = 0; doc < this.ids.length; doc++) {
       if (!touched.has(doc)) continue;
       if (scores[doc] <= 0) continue;
+      // 並べ替えと件数の頭打ちより**前**に落とす。
+      // あとから落とすと「全体の上位limit件のうち母集団に入るもの」になる
+      if (allowedIds && !allowedIds.has(this.ids[doc])) continue;
       hits.push({ id: this.ids[doc], score: scores[doc] });
     }
 
