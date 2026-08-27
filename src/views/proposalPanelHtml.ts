@@ -411,11 +411,21 @@ function renderContradiction(item) {
   const classes = ['issue', 'contradiction'];
   if (item.confidence === 'low') classes.push('low');
   if (item.status === 'dismissed') classes.push('dismissed');
+  // 再チェックで解消が確かめられたものは、見送ったものと同じく一覧から外す。
+  // 本文は既に作者が直しており、この行にもう作業は残っていない
+  if (item.status === 'resolved') classes.push('resolved');
 
   const canAct = item.status === 'pending';
   const note = item.note
     ? '<div class="note">' + escapeHtml(item.note) + '</div>'
     : '';
+  // 再チェックの結果。確かめた結果であって不具合ではないので、赤で出さない
+  const recheckNote = item.recheckNote
+    ? '<div class="recheck-note">' + escapeHtml(item.recheckNote) + '</div>'
+    : '';
+  // **再チェック中はこの行の操作を全部止める。** AIの答えは数秒〜数十秒
+  // かかる。その間に本文や設定資料を直されると、確かめている最中の本文が変わる
+  const disabled = item.busy ? ' disabled' : '';
 
   return (
     '<div class="' + classes.join(' ') + '">' +
@@ -432,11 +442,24 @@ function renderContradiction(item) {
     '<div><span class="side">' + escapeHtml(item.rightLabel || '本文では') + '</span>' + escapeHtml(item.textSays) + '</div>' +
     '</div>' +
     note +
+    recheckNote +
     (canAct
       ? '<div class="actions">' +
-        '<button data-action="jump" data-id="' + item.id + '">本文を見る</button>' +
-        '<button class="secondary" data-action="openSettings" data-id="' + item.id + '">' + (item.openTarget === 'plot' ? 'プロットを見る' : '設定資料を見る') + '</button>' +
-        '<button class="secondary" data-action="dismiss" data-id="' + item.id + '">無視</button>' +
+        '<button data-action="jump" data-id="' + item.id + '"' + disabled + '>本文を見る</button>' +
+        '<button class="secondary" data-action="openSettings" data-id="' + item.id + '"' + disabled + '>' + (item.openTarget === 'plot' ? 'プロットを見る' : '設定資料を見る') + '</button>' +
+        '<button class="secondary" data-action="dismiss" data-id="' + item.id + '"' + disabled + '>無視</button>' +
+        // **本文を直したあと、食い違いが残っているかを確かめる**（作者の依頼、
+        // 2026-08-27）。矛盾には修正案が無いので、直したかどうかは
+        // 作者の手元でしか分からない
+        (item.canRecheck
+          // **「本文を」に限る。** 設定資料のほうを直した場合、本文は
+          // 変わっていないので「本文が変わっていません」と返る（引用照合が
+          // 本文だけを見るため）。できないことを謳うと、直したのに
+          // 直っていないと言われた形になる。設定側の解決を見るには
+          // 再チェックへ現在の設定を添える改修（P-23の変更）が要る
+          ? '<button class="secondary" data-action="recheck" data-id="' + item.id + '" title="本文を書き直したあと、この食い違いが解消したかを確かめます"' + disabled + '>' +
+            (item.busy ? '再チェック中…' : '再チェック') + '</button>'
+          : '') +
         '</div>'
       : '') +
     '</div>'

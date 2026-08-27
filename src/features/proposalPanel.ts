@@ -38,7 +38,11 @@ import {
 // 作ったものを受け取るので、ここで束に取り込む必要がない
 import type { AIRegistry } from "../ai/registry";
 import { confirmPaidUsage } from "./aiConnectivity";
-import { recheckProposal, type RecheckOutcome } from "./recheckProposal";
+import {
+  recheckProposal,
+  type RecheckItem,
+  type RecheckOutcome,
+} from "./recheckProposal";
 import { logFailure } from "../core/logger";
 
 /**
@@ -74,6 +78,24 @@ function forView(item: ProposalViewItem): ProposalViewItem {
   };
   if (!item.suggestion) return shown;
   return { ...shown, diff: diffChars(item.target, item.suggestion) };
+}
+
+/**
+ * 矛盾・プロット逸脱を、画面へ送る直前に整える。
+ *
+ * **こちらは常に再チェックを出す。** 矛盾も逸脱も作者へ直に出す指摘で、
+ * 編集部の提案のような別の片付け方（承認・却下）を持たない。
+ * それでも `forView` と同じく**送る直前に決める**——保存すると、
+ * 出し分けの規則が変わったときに古い値を抱えた指摘が残る。
+ *
+ * 作者の依頼（2026-08-27）：「誤字をなおした後、再確認したい」。
+ * 矛盾は「設定の『プラム』と本文の『プリム様』が食い違う」のように、
+ * **直し方を作者が決める**指摘なので、直したかどうかは確かめるしかない。
+ */
+function contradictionForView(
+  item: ContradictionViewItem
+): ContradictionViewItem {
+  return { ...item, canRecheck: true };
 }
 
 export interface ProposalViewItem {
@@ -156,7 +178,29 @@ export interface ContradictionViewItem {
   textSays: string;
   note: string;
   confidence: "high" | "medium" | "low";
-  status: "pending" | "dismissed";
+  /**
+   * いまの扱い。
+   *
+   * `"resolved"` は**作者が本文を書き直して片付いた**もの（P-23）。
+   * 「無視した」とは分ける——あちらは「この食い違いは矛盾ではない」という
+   * 判断で、こちらは「食い違いは本物だったが、もう直した」である。
+   */
+  status: "pending" | "dismissed" | "resolved";
+  /**
+   * 再チェックした結果（P-23）。誤字脱字側の `recheckNote` と同じもので、
+   * 画面でも同じ `.recheck-note` に出す
+   */
+  recheckNote?: string;
+  /**
+   * 再チェックの最中か。**押した手応えを返すために要る。**
+   * AIの応答は数秒〜数十秒かかるので、無反応だと壊れたようにしか見えない。
+   */
+  busy?: boolean;
+  /**
+   * 「再チェック」を出すか。**画面へ送る直前に決める**
+   * （`contradictionForView`）ので、保存はしない
+   */
+  canRecheck?: boolean;
   /**
    * 並べる2つの見出し。
    *
@@ -167,6 +211,28 @@ export interface ContradictionViewItem {
   rightLabel: string;
   /** 「設定資料を見る」の代わりに何を開くか */
   openTarget: "settings" | "plot";
+}
+
+/**
+ * 再チェックが触るところだけを取り出した形（P-23）。
+ *
+ * **誤字脱字の指摘と矛盾では、持っている項目が違う**（あちらは置き換え、
+ * こちらは食い違い）。共通なのは「どのファイルの何行目か」と「いま何を
+ * しているか」だけなので、そこだけを受け取って処理を1本にまとめる。
+ * 2本に分けると、片方だけ直る。
+ */
+interface RecheckTarget {
+  filePath: string;
+  fileName: string;
+  line: number;
+  /**
+   * **ここへ書き込むのは `"resolved"` だけ。** 誤字脱字側の広い型で
+   * 受けているので「適用済み」なども入れられてしまうが、立てない
+   * （矛盾には適用という道が無い）。
+   */
+  status: ProposalViewItem["status"];
+  recheckNote?: string;
+  busy?: boolean;
 }
 
 /**
@@ -799,7 +865,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       items: updateMode
         ? this.recordUpdates
         : contradictionMode
-          ? this.contradictions
+          ? this.contradictions.map(contradictionForView)
           : this.items.map(forView),
       // 設定資料の更新は、まとめて反映できる（1件ずつだと19話ぶんで手が止まる）
       canApplyAll: !contradictionMode,
@@ -1323,15 +1389,79 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    *
    * 解消と分かっても、片付けるのはこの指摘だけである。**似た指摘まで
    * まとめて消さない**——同じ語でも話ごとに事情が違う。
+   *
+   * ## 矛盾・プロット逸脱も同じ道を通す
+   *
+   * 作者の依頼（2026-08-27）：「誤字をなおした後、再確認したい」。
+   * 矛盾は描画が別（`ContradictionViewItem`）だが、**確かめることは同じ**
+   * なので、渡す形（`RecheckItem`）へ寄せてから1本の処理へ入れる。
    */
   private async recheckIssue(id: string): Promise<void> {
     const item = this.items.find((entry) => entry.id === id);
-    if (!item || !this.work) return;
-    // **編集部からの提案には出さない。** あちらは承認・却下という別の
-    // 片付け方を持っており、結果を提案の側へ書き戻す必要もある
-    if (item.proposalId) return;
+    if (item) {
+      // **編集部からの提案には出さない。** あちらは承認・却下という別の
+      // 片付け方を持っており、結果を提案の側へ書き戻す必要もある
+      if (item.proposalId) return;
+      await this.runRecheck(
+        item,
+        {
+          line: item.line,
+          original: item.original,
+          target: item.target,
+          suggestion: item.suggestion,
+          reason: [item.reason, item.detail].filter(Boolean).join("："),
+        },
+        {
+          category: "typo",
+          target: item.target,
+          suggestion: item.suggestion,
+        }
+      );
+      return;
+    }
+
+    const contradiction = this.contradictions.find((entry) => entry.id === id);
+    if (!contradiction) return;
+    await this.runRecheck(
+      contradiction,
+      {
+        line: contradiction.line,
+        // **引用は1つしか無い。** 矛盾は「行の中のこの語」ではなく
+        // 「この場面がこう書かれている」という指摘なので、抜粋がそのまま
+        // 問題とされた範囲でもある
+        original: contradiction.excerpt,
+        target: contradiction.excerpt,
+        // **置き換える案が無い。** どちらが正しいかは作者にしか決められない
+        suggestion: "",
+        reason: describeContradiction(contradiction),
+      },
+      {
+        category: "contradiction",
+        target: contradiction.excerpt,
+        suggestion: describeContradiction(contradiction),
+      }
+    );
+  }
+
+  /**
+   * 1件を確かめる本体（誤字脱字・推敲・表記ゆれ・矛盾・プロット逸脱で共通）。
+   *
+   * @param target 画面の状態を書き換える先（指摘そのもの）
+   * @param item AIへ渡す形。指摘の種類ごとの組み立ては呼び出し側で済ませる
+   * @param log 作業記録へ残す中身
+   */
+  private async runRecheck(
+    target: RecheckTarget,
+    item: RecheckItem,
+    log: {
+      category: "typo" | "contradiction";
+      target: string;
+      suggestion: string;
+    }
+  ): Promise<void> {
+    if (!this.work) return;
     // 二重に押されても、1回だけ走らせる
-    if (item.busy) return;
+    if (target.busy) return;
     const work = this.work;
     // **作品と分類は、押された時点のものを覚えておく。** AIの答えを待つ間に
     // 作者がタブや作品を切り替えることがあり、`this` を見に行くと
@@ -1360,13 +1490,13 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       this.paidConfirmedFor = resolved.model;
     }
 
-    this.setBusy(item, true);
+    this.setBusy(target, true);
     try {
       let file;
       try {
-        file = await readTextFile(item.filePath);
+        file = await readTextFile(target.filePath);
       } catch {
-        this.noteRecheck(item, "本文を読み込めませんでした。");
+        this.noteRecheck(target, "本文を読み込めませんでした。");
         return;
       }
 
@@ -1375,50 +1505,46 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         model: resolved.model,
         workFolder: work.folderPath,
         category,
-        fileName: item.fileName,
+        fileName: target.fileName,
         content: file.text,
-        item: {
-          line: item.line,
-          original: item.original,
-          target: item.target,
-          suggestion: item.suggestion,
-          reason: [item.reason, item.detail].filter(Boolean).join("："),
-        },
+        item,
       });
-      await this.applyRecheckOutcome(item, outcome, work);
+      await this.applyRecheckOutcome(target, outcome, work, log);
     } finally {
       // **必ず戻す。** 途中で失敗しても、押せないままの行を残さない
-      this.setBusy(item, false);
+      this.setBusy(target, false);
     }
   }
 
   /** 再チェックの結果を、画面と記録へ反映する */
   private async applyRecheckOutcome(
-    item: ProposalViewItem,
+    target: RecheckTarget,
     outcome: RecheckOutcome,
-    work: WorkEntry
+    work: WorkEntry,
+    log: {
+      category: "typo" | "contradiction";
+      target: string;
+      suggestion: string;
+    }
   ): Promise<void> {
-    const at = clockLabel();
+    const note = describeRecheckNote(outcome);
 
     if (outcome.kind === "unchanged") {
       // ここに来るのは、AIを呼ばずに済んだ場合である（引用がそのまま残って
       // いた）。**直し忘れは、その場で分かるのがいちばん役に立つ**
-      this.noteRecheck(
-        item,
-        `再チェック（${at}）：本文がまだ変わっていません（同じ文のままです）。`
-      );
+      this.noteRecheck(target, note);
       void vscode.window.showInformationMessage(
-        `${item.fileName} ${item.line}行目は、まだ書き直されていません。`
+        `${target.fileName} ${target.line}行目は、まだ書き直されていません。`
       );
       return;
     }
 
     if (outcome.kind === "failed") {
       // **指摘は残す。** 通信の失敗や応答の崩れで、本物の指摘を消さない
-      this.noteRecheck(item, `再チェック（${at}）：${outcome.reason}`);
+      this.noteRecheck(target, note);
       logFailure("指摘の再チェック", {
-        ファイル: item.fileName,
-        行: String(item.line),
+        ファイル: target.fileName,
+        行: String(target.line),
         詳細: outcome.detail ?? outcome.reason,
       });
       void vscode.window.showWarningMessage(
@@ -1428,40 +1554,37 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     }
 
     if (outcome.kind === "unresolved") {
-      this.noteRecheck(
-        item,
-        `再チェック（${at}）：まだ当てはまります。${outcome.reason}`.trim()
-      );
+      this.noteRecheck(target, note);
       return;
     }
 
     // 解消。**一覧から外すのはこの1件だけ**で、本文には何も書かない
-    item.status = "resolved";
-    item.recheckNote = `再チェック（${at}）：解消を確認しました。${outcome.reason}`.trim();
+    target.status = "resolved";
+    target.recheckNote = note;
     this.postItems();
     void vscode.window.showInformationMessage(
-      `解消を確認しました（${item.fileName} ${item.line}行目）。` +
+      `解消を確認しました（${target.fileName} ${target.line}行目）。` +
         "一覧から外します。"
     );
     await appendAiActionLog(work, {
-      category: "typo",
+      category: log.category,
       action: "resolved",
-      file: item.fileName,
-      line: item.line,
-      target: item.target,
-      suggestion: item.suggestion,
+      file: target.fileName,
+      line: target.line,
+      target: log.target,
+      suggestion: log.suggestion,
     });
   }
 
   /** 再チェックの結果を書き添える（状態は変えない） */
-  private noteRecheck(item: ProposalViewItem, note: string): void {
-    item.recheckNote = note;
+  private noteRecheck(target: RecheckTarget, note: string): void {
+    target.recheckNote = note;
     this.postItems();
   }
 
   /** 再チェック中かどうかを画面へ伝える */
-  private setBusy(item: ProposalViewItem, busy: boolean): void {
-    item.busy = busy;
+  private setBusy(target: RecheckTarget, busy: boolean): void {
+    target.busy = busy;
     this.postItems();
   }
 
@@ -1740,6 +1863,42 @@ function clockLabel(now = new Date()): string {
   const hours = String(now.getHours()).padStart(2, "0");
   const minutes = String(now.getMinutes()).padStart(2, "0");
   return `${hours}:${minutes}`;
+}
+
+/**
+ * 再チェックの結果を、補足に添える一文へ変える（P-23）。
+ *
+ * **誤字脱字も矛盾も、同じ言い方にする。** 指摘の種類ごとに文を書き分けると、
+ * 言い回しを直したときに片方だけが直る。
+ */
+function describeRecheckNote(
+  outcome: RecheckOutcome,
+  at = clockLabel()
+): string {
+  switch (outcome.kind) {
+    case "unchanged":
+      return `再チェック（${at}）：本文がまだ変わっていません（同じ文のままです）。`;
+    case "failed":
+      return `再チェック（${at}）：${outcome.reason}`;
+    case "unresolved":
+      return `再チェック（${at}）：まだ当てはまります。${outcome.reason}`.trim();
+    case "resolved":
+      return `再チェック（${at}）：解消を確認しました。${outcome.reason}`.trim();
+  }
+}
+
+/**
+ * 矛盾・プロット逸脱の中身を、1つの文にまとめる（再チェックでAIへ渡す）。
+ *
+ * **見出しは持ち回りのものを使う。** 矛盾は「設定では／本文では」、
+ * プロット逸脱は「プロットでは／この話では」で言葉が違う。ここを決め打ちに
+ * すると、逸脱の指摘が「設定では」と読める文でAIへ届く。
+ *
+ * 補足（逸脱の行範囲など）は、あれば後ろへ添える。
+ */
+function describeContradiction(item: ContradictionViewItem): string {
+  const compared = `${item.leftLabel}：${item.settingSays}／${item.rightLabel}：${item.textSays}`;
+  return item.note ? `${compared}（補足：${item.note}）` : compared;
 }
 
 /**
