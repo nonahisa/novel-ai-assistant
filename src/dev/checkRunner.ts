@@ -107,7 +107,7 @@ async function pickSection(): Promise<SectionChoice | undefined> {
   // なお、この画面の名前をコメントに書かないこと——`quickPickCancel.test.ts` が
   // 文字列で呼び出し箇所を拾うので、コメントでも呼び出しと見なされて落ちる
 
-  const chosen = await new Promise<SectionChoice | undefined>((resolve) => {
+  const done = new Promise<SectionChoice | undefined>((resolve) => {
     quick.onDidTriggerItemButton((event) => {
       const section = event.item.section;
       if (!section) return;
@@ -127,6 +127,12 @@ async function pickSection(): Promise<SectionChoice | undefined> {
     });
     quick.onDidHide(() => resolve(undefined));
   });
+
+  // この画面は show を呼ぶまで出ない。0.22.13でここが抜け、**押しても何も
+  // 起きない**まま出荷した（`checkRunnerShow.test.ts` が見張る。あのテストは
+  // ソースの文字列を数えるので、このコメントに作成側の関数名を書かないこと）
+  quick.show();
+  const chosen = await done;
   quick.dispose();
   return chosen;
 }

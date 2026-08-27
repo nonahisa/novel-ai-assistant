@@ -56,6 +56,18 @@ export class AIRegistry {
   /** 送信量を記録する包み。プロバイダごとに1つだけ作る */
   private readonly metered = new Map<ProviderId, AIProvider>();
 
+  /**
+   * 選択（プロバイダ・モデル）が変わったことを知らせる。
+   *
+   * 選択は `globalState` にあり、**変えても VS Code からは何の合図も出ない。**
+   * そのため、開きっぱなしの相談パネルはエンジン表示を更新するきっかけが
+   * 無く、切り替え前の名前を出し続けていた（0.22.15で判明。実際に送る側は
+   * 毎回 `resolve()` し直すので、古かったのは表示だけ）。
+   */
+  private readonly selectionEmitter = new vscode.EventEmitter<void>();
+  readonly onDidChangeSelection: vscode.Event<void> =
+    this.selectionEmitter.event;
+
   constructor(private readonly context: vscode.ExtensionContext) {
     // 並び順はそのまま選択画面に出る。無料で始められるものを先頭に置く
     for (const provider of [
@@ -103,11 +115,13 @@ export class AIRegistry {
   async select(providerId: ProviderId, model: string): Promise<void> {
     await this.context.globalState.update(KEY_PROVIDER, providerId);
     await this.context.globalState.update(KEY_MODEL, model);
+    this.selectionEmitter.fire();
   }
 
   async clear(): Promise<void> {
     await this.context.globalState.update(KEY_PROVIDER, undefined);
     await this.context.globalState.update(KEY_MODEL, undefined);
+    this.selectionEmitter.fire();
   }
 
   /**

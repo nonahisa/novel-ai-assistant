@@ -208,9 +208,19 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   });
   private highlightTimer: ReturnType<typeof setTimeout> | undefined;
 
+  /**
+   * AIの切り替えを聞いて、上部のエンジン表示を更新する。
+   *
+   * 表示は `postContext()` が毎回 `resolve()` し直して正しく作るのに、
+   * 呼ぶきっかけが「webviewの初回ready」と「エディターの切り替え」しか
+   * 無かったため、AIを切り替えても古いエンジン名が出続けていた（0.22.15）。
+   */
+  private selectionListener: vscode.Disposable | undefined;
+
   dispose(): void {
     if (this.highlightTimer) clearTimeout(this.highlightTimer);
     this.highlight.dispose();
+    this.selectionListener?.dispose();
   }
 
   /**
@@ -228,6 +238,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     private readonly runner: ChatRunner
   ) {
     this.lastEditor = vscode.window.activeTextEditor;
+    this.selectionListener = this.ai.onDidChangeSelection(
+      () => void this.postContext()
+    );
   }
 
   /**

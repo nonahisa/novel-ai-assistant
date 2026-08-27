@@ -78,8 +78,17 @@ export class CancellationTokenSource {
 }
 
 export class EventEmitter<T> {
-  readonly event = (): void => undefined;
-  fire(_value?: T): void {}
+  // 以前は何もしない空実装だったが、それでは「選択が変わったら画面を
+  // 更新する」のような配線そのものを確かめるテストが書けない。
+  // 本物と同じく、登録関数を返し、fire で登録された順に呼ぶ
+  private readonly listeners = new Set<(value: T) => void>();
+  readonly event = (listener: (value: T) => void): { dispose(): void } => {
+    this.listeners.add(listener);
+    return { dispose: () => this.listeners.delete(listener) };
+  };
+  fire(value?: T): void {
+    for (const listener of [...this.listeners]) listener(value as T);
+  }
 }
 
 export enum TreeItemCollapsibleState {
