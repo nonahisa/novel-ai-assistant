@@ -32,6 +32,7 @@ import {
   mergeProposals,
   summarizeCategories,
   type CategorySummary,
+  type WorkSummary,
 } from "../core/proposalBuckets";
 
 /**
@@ -184,6 +185,13 @@ type OutgoingMessage = {
    * どこに何件残っているかを出して、戻れるようにする。
    */
   categories: CategorySummary[];
+  /**
+   * 結果を持っている作品の一覧（設計書6.11.3）。
+   *
+   * **2つ以上あるときだけ中身が入る。** 1作品しか無ければ選ぶものが無く、
+   * 下段の狭い画面を取るだけになる。
+   */
+  works: WorkSummary[];
 };
 
 type IncomingMessage =
@@ -196,6 +204,8 @@ type IncomingMessage =
   | { type: "applyAll" }
   /** 別の分類へ切り替える */
   | { type: "selectCategory"; category: string }
+  /** 別の作品へ切り替える（適用・見送りは表示中の作品にしか効かないため） */
+  | { type: "switchWork"; workId: string }
   /** いま見ている分類を空にする */
   | { type: "clearCategory" };
 
@@ -214,6 +224,50 @@ interface CategoryBucket {
 
 function emptyBucket(): CategoryBucket {
   return { items: [], contradictions: [], recordUpdates: [] };
+}
+
+/**
+ * 1つの作品が持つもの（設計書6.11.3）。
+ *
+ * **作品ごとに分ける。** 誤字脱字を2つの作品で同時に走らせると、あとから
+ * 届いたほうが画面を奪い、**見ている途中の作品の指摘を全部捨てていた**
+ * （2026-08-27、作者の指摘）。届いた結果はその作品の段へ入れるだけにして、
+ * 画面は作者が選んだときにだけ移す。
+ *
+ * 作品の情報を一緒に持つのは、**題名と直近の分類を別の入れ物にすると
+ * 同期が漏れるため**（一覧を空にしたときに片方だけ残る）。
+ */
+interface WorkBuckets {
+  /** いちばん新しい作品の情報（題名は作者が変えることがある） */
+  work: WorkEntry;
+  /**
+   * 分類ごとの置き場。
+   *
+   * `Map` は入れた順を保つので、タブの並びは**走らせた順**になる。
+   */
+  categories: Map<string, CategoryBucket>;
+  /**
+   * 直近に見ていた分類。
+   *
+   * **作品を切り替えて戻ったとき、続きから見せる。** 毎回先頭の分類へ
+   * 戻ると、どこまで見たかを作者が数え直すことになる。
+   */
+  lastCategory?: string;
+}
+
+/** その作品の全分類で、まだ手を付けていない件数 */
+function countRemaining(
+  categories: ReadonlyMap<string, CategoryBucket>
+): number {
+  let total = 0;
+  for (const bucket of categories.values()) {
+    total += [
+      ...bucket.items,
+      ...bucket.contradictions,
+      ...bucket.recordUpdates,
+    ].filter(isRemaining).length;
+  }
+  return total;
 }
 
 export class ProposalPanel implements vscode.WebviewViewProvider {
@@ -238,16 +292,17 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     | undefined;
   private category = "誤字脱字";
   /**
-   * 分類ごとの置き場（設計書6.11.3）。
+   * 作品ごと・分類ごとの置き場（設計書6.11.3）。
    *
    * **上の4つは「いま出している分」で、こちらが控えである。**
    * 既存の処理はすべて `this.items` などを直に触るので、切り替えのたびに
    * 入れ替える形にした。配列そのものを共有しているため、1件を適用した
    * ときの状態の変化は、控えの側にもそのまま残る。
    *
-   * `Map` は入れた順を保つので、タブの並びは**走らせた順**になる。
+   * **作品でも段を分ける。** 別の作品の結果が届いても、いま見ている作品の
+   * 指摘は控えに残り続ける（2026-08-27）。
    */
-  private buckets = new Map<string, CategoryBucket>();
+  private buckets = new Map<string, WorkBuckets>();
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
@@ -283,6 +338,18 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * 空にする」処理を書いており、5つのうち4つが `recordUpdates` を
    * 空にし忘れていた（2026-08-21）。入れ物を増やしたときに書き忘れる形の
    * 失敗なので、口を1つにしてある。
+   *
+   * ## 別の作品の結果が届いても、画面は奪わない
+   *
+   * 以前は、届いた作品が表示中と違うと**表示中の作品の指摘を全部捨てて**
+   * 届いた作品へ切り替えていた。そのため、2つの作品で同時に誤字脱字を
+   * 走らせると、提案を1件ずつ確認している最中に画面が入れ替わり、
+   * それまでの判断ごと消えた（2026-08-27、作者の指摘）。
+   *
+   * 捨てていた理由は「作品が変われば前の指摘は開けない」だったが、これは
+   * 誤りだった。指摘はファイルの絶対パスを持っており、前の作品のファイルも
+   * そのまま開ける。**届いた結果はその作品の段へ入れるだけにして、
+   * 画面を移すかどうかは作者に選ばせる。**
    */
   private replaceContents(
     work: WorkEntry,
@@ -296,21 +363,11 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       ) => Promise<{ ok: boolean; reason?: string }>;
     }
   ): void {
-    // **作品が変われば、前の作品の指摘は意味を持たない。**
-    // ファイルの場所ごと違うので、残しても開けない。
-    // **控えだけでなく、いま出している分も落とす**——落とさないと、
-    // すぐ下の `stashCurrent()` が前の作品の指摘を控えへ戻してしまう
-    if (this.work && this.work.id !== work.id) {
-      this.buckets.clear();
-      this.items = [];
-      this.contradictions = [];
-      this.recordUpdates = [];
-      this.applyRecordUpdate = undefined;
-    }
-    this.work = work;
-
+    // **表示中の作品の作業を、先に控えへ戻す。** 届いたのがどちらの作品でも通す
     this.stashCurrent();
-    const bucket = this.buckets.get(category) ?? emptyBucket();
+
+    const entry = this.workBucketsOf(work);
+    const bucket = entry.categories.get(category) ?? emptyBucket();
     bucket.items = mergeProposals(bucket.items, contents.items ?? []);
     bucket.contradictions = mergeProposals(
       bucket.contradictions,
@@ -324,11 +381,75 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     if (contents.applyRecordUpdate) {
       bucket.applyRecordUpdate = contents.applyRecordUpdate;
     }
-    this.buckets.set(category, bucket);
+    entry.categories.set(category, bucket);
 
+    // まだ何も出していないとき、または同じ作品なら、これまでどおり前面へ
+    if (!this.work || this.work.id === work.id) {
+      this.work = work;
+      this.activate(category);
+      // パネルが開いていなければ前面に出す。開いていれば余計なフォーカス移動はしない
+      void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
+      return;
+    }
+
+    // **画面には触らない。** 切り替え口の一覧だけ作り直し、届いたことは通知で伝える
+    this.postItems();
+    // **答えを待たない。** 待つと、検知を終えた側の処理が作者の返事まで止まる
+    void this.offerToShow(
+      work,
+      category,
+      (contents.items?.length ?? 0) +
+        (contents.contradictions?.length ?? 0) +
+        (contents.recordUpdates?.length ?? 0)
+    );
+  }
+
+  /**
+   * 別の作品の結果が届いたことを伝え、移るかどうかを選ばせる。
+   *
+   * **呼ぶ側は待たない。** 待つと、検知を終えた側の処理が作者の返事まで
+   * 止まる（19話ぶんの実行がここで止まっては困る）。
+   */
+  private async offerToShow(
+    work: WorkEntry,
+    category: string,
+    arrived: number
+  ): Promise<void> {
+    const answer = await vscode.window.showInformationMessage(
+      arrived > 0
+        ? `「${work.title}」の${category}の結果が届きました（${arrived}件）`
+        : `「${work.title}」の${category}は、指摘がありませんでした。`,
+      "表示する",
+      "あとで"
+    );
+    if (answer !== "表示する") return;
+
+    // 答えるまでの間に、作者がその一覧を空にしていることがある
+    const entry = this.buckets.get(work.id);
+    if (!entry?.categories.has(category)) return;
+
+    this.stashCurrent();
+    this.work = entry.work;
     this.activate(category);
-    // パネルが開いていなければ前面に出す。開いていれば余計なフォーカス移動はしない
     void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
+  }
+
+  /** その作品の置き場（無ければ作る）。題名はいちばん新しいものへ揃える */
+  private workBucketsOf(work: WorkEntry): WorkBuckets {
+    const found = this.buckets.get(work.id);
+    if (found) {
+      found.work = work;
+      return found;
+    }
+    const created: WorkBuckets = { work, categories: new Map() };
+    this.buckets.set(work.id, created);
+    return created;
+  }
+
+  /** いま表示している作品の、分類ごとの置き場（まだ何も無ければ空） */
+  private currentCategories(): Map<string, CategoryBucket> {
+    const entry = this.work ? this.buckets.get(this.work.id) : undefined;
+    return entry?.categories ?? new Map();
   }
 
   /**
@@ -338,13 +459,16 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * ここで揃える。切り替えのたびに必ず通す。
    */
   private stashCurrent(): void {
+    const work = this.work;
+    if (!work) return;
+    const entry = this.buckets.get(work.id);
     if (this.items.length === 0 &&
         this.contradictions.length === 0 &&
         this.recordUpdates.length === 0 &&
-        !this.buckets.has(this.category)) {
+        !entry?.categories.has(this.category)) {
       return;
     }
-    this.buckets.set(this.category, {
+    this.workBucketsOf(work).categories.set(this.category, {
       items: this.items,
       contradictions: this.contradictions,
       recordUpdates: this.recordUpdates,
@@ -352,15 +476,46 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     });
   }
 
-  /** その分類を画面に出す */
+  /** その分類を画面に出す（表示中の作品の中で） */
   private activate(category: string): void {
-    const bucket = this.buckets.get(category) ?? emptyBucket();
+    const entry = this.work ? this.buckets.get(this.work.id) : undefined;
+    const bucket = entry?.categories.get(category) ?? emptyBucket();
     this.category = category;
+    // 作品を切り替えて戻ったとき、続きから見せるために覚えておく
+    if (entry) entry.lastCategory = category;
     this.items = bucket.items;
     this.contradictions = bucket.contradictions;
     this.recordUpdates = bucket.recordUpdates;
     this.applyRecordUpdate = bucket.applyRecordUpdate;
     this.postItems();
+  }
+
+  /**
+   * 別の作品へ移る（画面の切り替え口から）。
+   *
+   * **適用・見送りは表示中の作品にしか効かない。** 別の作品の指摘に手を
+   * 付けるには、まずここで移ってもらう。
+   */
+  private switchWork(workId: string): void {
+    if (workId === this.work?.id) return;
+    const entry = this.buckets.get(workId);
+    if (!entry) return;
+    this.stashCurrent();
+    this.work = entry.work;
+    this.activate(this.categoryToShow(entry));
+  }
+
+  /**
+   * その作品で最初に出す分類。
+   *
+   * **直近に見ていたものへ戻す。** 無ければ、その作品が持っている先頭
+   * （＝いちばん先に走らせた分類）。
+   */
+  private categoryToShow(entry: WorkBuckets): string {
+    if (entry.lastCategory && entry.categories.has(entry.lastCategory)) {
+      return entry.lastCategory;
+    }
+    return [...entry.categories.keys()][0] ?? this.category;
   }
 
   /** `checkTypos` / `checkProofread` / `checkNotation` の結果を出す */
@@ -504,7 +659,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    */
   private countByCategory(): Map<string, { remaining: number; total: number }> {
     const counts = new Map<string, { remaining: number; total: number }>();
-    const seen = new Set([...this.buckets.keys(), this.category]);
+    // **数えるのは表示中の作品の分だけ。** 別の作品の残りは切り替え口に出す
+    const categories = this.currentCategories();
+    const seen = new Set([...categories.keys(), this.category]);
     for (const name of seen) {
       const bucket =
         name === this.category
@@ -513,7 +670,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
               contradictions: this.contradictions,
               recordUpdates: this.recordUpdates,
             }
-          : (this.buckets.get(name) ?? emptyBucket());
+          : (categories.get(name) ?? emptyBucket());
       const all = [
         ...bucket.items,
         ...bucket.contradictions,
@@ -527,17 +684,33 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     return counts;
   }
 
-  private updateBadge(summaries: readonly CategorySummary[]): void {
+  private updateBadge(
+    summaries: readonly CategorySummary[],
+    remaining: number
+  ): void {
     if (!this.view) return;
-    const remaining = summaries.reduce(
-      (total, summary) => total + summary.remaining,
-      0
-    );
-
     this.view.badge =
       remaining > 0
         ? { value: remaining, tooltip: describeBadgeTooltip(summaries) }
         : undefined;
+  }
+
+  /**
+   * 切り替え口に並べる作品。
+   *
+   * **表示中の作品だけは手元の配列から数える**（`countByCategory` と同じ理由。
+   * 1件を適用した直後は、まだ控えへ書き戻していない瞬間がある）。
+   */
+  private summarizeWorks(currentRemaining: number): WorkSummary[] {
+    return [...this.buckets].map(([id, entry]) => ({
+      id,
+      title: entry.work.title,
+      remaining:
+        id === this.work?.id
+          ? currentRemaining
+          : countRemaining(entry.categories),
+      active: id === this.work?.id,
+    }));
   }
 
   private postItems(): void {
@@ -545,8 +718,13 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       this.countByCategory(),
       this.category
     );
-    this.updateBadge(summaries);
+    const remaining = summaries.reduce(
+      (total, summary) => total + summary.remaining,
+      0
+    );
+    this.updateBadge(summaries, remaining);
     if (!this.view) return;
+    const works = this.summarizeWorks(remaining);
     const contradictionMode = this.contradictions.length > 0;
     const updateMode = this.recordUpdates.length > 0;
     const message: OutgoingMessage = {
@@ -563,6 +741,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       // **1つしか無いときはタブを出さない。** 選ぶものが無いのに
       // 場所だけ取ると、下段の狭い画面がさらに狭くなる
       categories: summaries.length > 1 ? summaries : [],
+      // 作品の切り替え口も同じ（1作品なら、これまでと同じ見た目のまま）
+      works: works.length > 1 ? works : [],
     };
     void this.view.webview.postMessage(message);
   }
@@ -635,6 +815,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       case "selectCategory":
         this.switchTo(message.category);
         return;
+      case "switchWork":
+        this.switchWork(message.workId);
+        return;
       case "clearCategory":
         await this.clearCurrentCategory();
         return;
@@ -644,7 +827,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   /** タブを押されたとき。控えへ書き戻してから入れ替える */
   private switchTo(category: string): void {
     if (category === this.category) return;
-    if (!this.buckets.has(category)) return;
+    if (!this.currentCategories().has(category)) return;
     this.stashCurrent();
     this.activate(category);
   }
@@ -675,15 +858,27 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     );
     if (answer !== "空にする") return;
 
-    this.buckets.delete(this.category);
-    // 残っている分類があれば、そちらへ移る。無ければ空のまま出す
-    const next = [...this.buckets.keys()][0];
+    const entry = this.work ? this.buckets.get(this.work.id) : undefined;
+    entry?.categories.delete(this.category);
     this.items = [];
     this.contradictions = [];
     this.recordUpdates = [];
     this.applyRecordUpdate = undefined;
+
+    // 同じ作品に残っている分類があれば、そちらへ移る
+    const next = entry ? [...entry.categories.keys()][0] : undefined;
     if (next) {
       this.activate(next);
+      return;
+    }
+
+    // **空になった作品は、切り替え口から外す。** 選べるのに何も無い作品が
+    // 並んでいると、押してみるまで空だと分からない
+    if (entry && this.work) this.buckets.delete(this.work.id);
+    const other = [...this.buckets.values()][0];
+    if (other) {
+      this.work = other.work;
+      this.activate(this.categoryToShow(other));
       return;
     }
     this.postItems();

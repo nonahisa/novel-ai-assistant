@@ -80,6 +80,20 @@ export interface CategorySummary {
 }
 
 /**
+ * 作品の切り替え口に並べるもの（設計書6.11.3）。
+ *
+ * **検知は2つの作品で同時に走らせられる。** 後から届いた結果で画面を
+ * 奪わない代わりに、どの作品に何件あるかを出して、選んで移れるようにする。
+ */
+export interface WorkSummary {
+  id: string;
+  title: string;
+  /** その作品全体で、まだ手を付けていない件数（分類をまたいで合計する） */
+  remaining: number;
+  active: boolean;
+}
+
+/**
  * タブに並べる順を決める。
  *
  * **走らせた順に並べる。** 分類の名前で並べ替えると、いま実行したものが

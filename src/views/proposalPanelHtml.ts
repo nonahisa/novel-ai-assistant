@@ -42,6 +42,31 @@ body {
   どこに何件残っているかを出して、戻れるようにする。
   1つしか無いときは出さない（下段は狭い）
 */
+/*
+  作品の切り替え（設計書6.11.3）。**2つの作品で同時に検知を走らせられる**ので、
+  後から届いた結果で画面を奪わない代わりに、ここで移れるようにする。
+  1作品しか無いときは出さない（下段は狭い）
+*/
+#works {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 0;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+}
+#works:empty { display: none; }
+#works label { display: flex; align-items: center; gap: 6px; }
+#works select {
+  background: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+  border: 1px solid var(--vscode-dropdown-border, transparent);
+  border-radius: 2px;
+  padding: 1px 4px;
+  font-family: inherit;
+  font-size: inherit;
+  max-width: 60%;
+}
 #tabs {
   display: flex;
   gap: 4px;
@@ -184,6 +209,7 @@ body.show-low .issue.low { display: flex; }
 </style>
 </head>
 <body>
+<div id="works"></div>
 <div id="tabs"></div>
 <div id="toolbar">
   <span class="title" id="category">誤字脱字</span>
@@ -202,6 +228,7 @@ const countEl = document.getElementById('count');
 const showLowEl = document.getElementById('showLow');
 const applyAllEl = document.getElementById('applyAll');
 const tabsEl = document.getElementById('tabs');
+const worksEl = document.getElementById('works');
 const clearEl = document.getElementById('clear');
 
 showLowEl.addEventListener('change', () => {
@@ -238,6 +265,35 @@ function renderTabs(categories) {
     el.addEventListener('click', function () {
       vscode.postMessage({ type: 'selectCategory', category: el.dataset.category });
     });
+  });
+}
+
+/**
+ * 作品の切り替え口。
+ *
+ * **2作品以上のときだけ出す。** 1作品なら選ぶものが無く、これまでと同じ
+ * 見た目のままにする。
+ *
+ * 誤字脱字を2つの作品で同時に走らせると、両方の結果が溜まる。**届いた
+ * 結果は画面を奪わない**ので、移りたいときはここで選んでもらう
+ * （適用・見送りは、表示中の作品の指摘にしか効かない）。
+ */
+function renderWorks(works) {
+  if (!works || works.length < 2) {
+    worksEl.innerHTML = '';
+    return;
+  }
+  // 名前は label で結び付ける（読み上げのとき、何の選択かが分かるように）
+  worksEl.innerHTML = '<label>作品<select>' +
+    works.map(function (entry) {
+      const count = entry.remaining > 0 ? '（' + entry.remaining + '件）' : '';
+      return '<option value="' + escapeHtml(entry.id) + '"' +
+        (entry.active ? ' selected' : '') + '>' +
+        escapeHtml(entry.title) + count + '</option>';
+    }).join('') + '</select></label>';
+
+  worksEl.querySelector('select').addEventListener('change', function (event) {
+    vscode.postMessage({ type: 'switchWork', workId: event.target.value });
   });
 }
 
@@ -495,6 +551,7 @@ window.addEventListener('message', (event) => {
     applyAllEl.style.display = message.canApplyAll === false ? 'none' : '';
     // 空の分類に「空にする」を出しても押すものが無い
     clearEl.style.display = message.items.length > 0 ? '' : 'none';
+    renderWorks(message.works);
     renderTabs(message.categories);
     render(message.workTitle, message.items);
   }

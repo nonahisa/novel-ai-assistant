@@ -1,4 +1,5 @@
 import { describe, expect, test, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
 
 /**
  * 提案パネルの中身の入れ替え。**逆向きの2つの決まりを、同時に守る。**
@@ -22,6 +23,10 @@ import { describe, expect, test, vi, beforeEach } from "vitest";
  */
 
 const posted: Array<{ category: string; items: unknown[] }> = [];
+/** 通知に出た文言。**画面を奪わない代わりに、ここで届いたことを伝える** */
+const notified: string[] = [];
+/** その通知に作者が何と答えるか。既定は「答えない」（×で閉じたのと同じ） */
+let notificationAnswer: string | undefined;
 
 vi.mock("vscode", () => {
   const noop = () => undefined;
@@ -29,7 +34,10 @@ vi.mock("vscode", () => {
     commands: { executeCommand: vi.fn() },
     window: {
       showWarningMessage: vi.fn(),
-      showInformationMessage: vi.fn(),
+      showInformationMessage: vi.fn((message: string) => {
+        notified.push(message);
+        return Promise.resolve(notificationAnswer);
+      }),
       showErrorMessage: vi.fn(),
     },
     workspace: {
@@ -107,8 +115,34 @@ const recordUpdate = {
   status: "pending" as const,
 };
 
+/** もう1つの作品。**2作品で同時に検知を走らせられる**（2026-08-27） */
+const other: WorkEntry = {
+  ...work,
+  id: "w2",
+  title: "別の作品",
+  folderPath: "C:/小説/別の作品",
+};
+
+const otherTypo = {
+  ...typo,
+  filePath: "C:/小説/別の作品/本文/001.txt",
+  chunkHash: "h2",
+  line: 4,
+  original: "彼は歩つた",
+  target: "歩つた",
+  suggestion: "歩いた",
+};
+
+/** 作品の切り替え口を押したのと同じ（webviewからのメッセージ） */
+function switchWork(panel: ProposalPanel, workId: string): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (panel as any).handleMessage({ type: "switchWork", workId });
+}
+
 beforeEach(() => {
   posted.length = 0;
+  notified.length = 0;
+  notificationAnswer = undefined;
 });
 
 describe("表示を切り替えると、前の中身が消える", () => {
@@ -307,16 +341,183 @@ describe("分類ごとに分けて持つ", () => {
     expect(items.find((i) => i.line === 9)?.status).toBe("pending");
   });
 
-  test("作品が変われば、前の作品の指摘は持ち越さない", () => {
-    // ファイルの場所ごと違うので、残しても開けない
+  test("別の作品の結果が来ても、タブは表示中の作品のものだけ", () => {
+    // **分類の段は作品ごとに分かれている。** 別の作品で推敲を走らせても、
+    // いま見ている作品のタブに「推敲」が現れてはいけない（中身は別の作品）
     const panel = panelWithView();
     panel.showResults(work, [typo]);
-    panel.showResults({ ...work, id: "w2", title: "別の作品" }, [], "推敲");
+    panel.showResults(other, [otherTypo], "推敲");
 
+    expect(latest().category).toBe("誤字脱字");
     expect(
       (latest() as unknown as { categories: unknown[] }).categories
     ).toEqual([]);
-    expect(latest().items).toEqual([]);
+
+    switchWork(panel, "w2");
+    expect(latest().category).toBe("推敲");
+    expect(latest().items).toHaveLength(1);
+  });
+});
+
+/**
+ * **2つの作品で同時に検知を走らせられる**（設計書6.11.3）。
+ *
+ * 誤字脱字を2作品で走らせると、**提案を1件ずつ確認している最中に、
+ * あとから届いたほうへ画面が切り替わった**（2026-08-27、作者の指摘）。
+ * そのとき、見ていた作品の指摘は判断ごと捨てられていた。
+ *
+ * 捨てていた理由は「作品が変われば前の指摘は開けない」だったが、誤りだった。
+ * 指摘はファイルの絶対パスを持っているので、前の作品のファイルも開ける。
+ *
+ * **届いた結果は、その作品の段へ入れるだけにする。** 画面を移すかどうかは
+ * 作者が決める（通知の「表示する」か、画面の切り替え口）。
+ */
+describe("作品ごとに分けて持つ", () => {
+  /** 通知の返事を待つ（`offerToShow` は答えを待たずに戻るため） */
+  async function settle(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  test("別の作品の結果が届いても、見ている作品の指摘は消えない", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo, { ...typo, line: 9 }]);
+    // 1件目を見送った状態にする（**判断済みのものも失われないこと**）
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (panel as any).items[0].status = "dismissed";
+
+    panel.showResults(other, [otherTypo]);
+
+    // 画面は奪われない
+    expect(latest().workTitle).toBe("いじめられっ子");
+    expect(latest().category).toBe("誤字脱字");
+
+    const items = latest().items as Array<{ status: string; line: number }>;
+    expect(items).toHaveLength(2);
+    expect(items.find((i) => i.line === 3)?.status).toBe("dismissed");
+    expect(items.find((i) => i.line === 9)?.status).toBe("pending");
+  });
+
+  test("届いたことは、通知で伝える", () => {
+    // 黙って溜めると、走らせたことを作者が忘れる
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults(other, [otherTypo]);
+
+    expect(notified).toHaveLength(1);
+    expect(notified[0]).toContain("別の作品");
+    expect(notified[0]).toContain("誤字脱字");
+    expect(notified[0]).toContain("1件");
+  });
+
+  test("表示を切り替えると、届いていた別の作品の指摘が出る", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults(other, [otherTypo]);
+
+    switchWork(panel, "w2");
+
+    expect(latest().workTitle).toBe("別の作品");
+    expect(latest().items).toHaveLength(1);
+    expect(latest().items[0]).toMatchObject({ suggestion: "歩いた" });
+  });
+
+  test("切り替えて戻ると、判断の途中経過が残っている", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo, { ...typo, line: 9 }]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (panel as any).items[0].status = "applied";
+    panel.showResults(other, [otherTypo]);
+
+    switchWork(panel, "w2");
+    switchWork(panel, "w1");
+
+    expect(latest().workTitle).toBe("いじめられっ子");
+    const items = latest().items as Array<{ status: string; line: number }>;
+    expect(items.find((i) => i.line === 3)?.status).toBe("applied");
+    expect(items.find((i) => i.line === 9)?.status).toBe("pending");
+  });
+
+  test("戻ったとき、直近に見ていた分類から見せる", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults(work, [{ ...typo, line: 20 }], "推敲");
+    // 誤字脱字へ戻してから、別の作品を見に行く
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (panel as any).handleMessage({
+      type: "selectCategory",
+      category: "誤字脱字",
+    });
+    panel.showResults(other, [otherTypo]);
+
+    switchWork(panel, "w2");
+    switchWork(panel, "w1");
+
+    expect(latest().category).toBe("誤字脱字");
+  });
+
+  test("通知で「表示する」を選ぶと、その作品へ移る", async () => {
+    notificationAnswer = "表示する";
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults(other, [otherTypo]);
+
+    // 押されるまでは、画面は元の作品のまま
+    expect(latest().workTitle).toBe("いじめられっ子");
+    await settle();
+
+    expect(latest().workTitle).toBe("別の作品");
+    expect(latest().items).toHaveLength(1);
+  });
+
+  test("切り替え口は、作品が2つ以上のときだけ出す", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    expect((latest() as unknown as { works: unknown[] }).works).toEqual([]);
+
+    panel.showResults(other, [otherTypo, { ...otherTypo, line: 9 }]);
+
+    const works = (
+      latest() as unknown as {
+        works: Array<{
+          id: string;
+          title: string;
+          remaining: number;
+          active: boolean;
+        }>;
+      }
+    ).works;
+    expect(works.map((entry) => entry.id)).toEqual(["w1", "w2"]);
+    expect(works.find((entry) => entry.id === "w1")?.active).toBe(true);
+    expect(works.find((entry) => entry.id === "w2")?.remaining).toBe(2);
+  });
+
+  /** 同じ作品での「消さずに足す」は、これまでどおり */
+  test("同じ作品の別分類は、これまでどおり足していく", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults(other, [otherTypo]);
+    panel.showResults(work, [{ ...typo, line: 20 }], "推敲");
+
+    const tabs = (
+      latest() as unknown as { categories: Array<{ name: string }> }
+    ).categories;
+    expect(tabs.map((tab) => tab.name)).toEqual(["誤字脱字", "推敲"]);
+    expect(latest().workTitle).toBe("いじめられっ子");
+  });
+});
+
+/**
+ * 画面側の切り替え口（WebViewを要するので、その道が残っているかを見る）。
+ */
+describe("作品の切り替え口", () => {
+  const html = () => readFileSync("src/views/proposalPanelHtml.ts", "utf-8");
+
+  test("選ぶと、切り替えを送る道がある", () => {
+    expect(html()).toContain("switchWork");
+  });
+
+  test("1作品のときは出さない", () => {
+    expect(html()).toContain("works.length < 2");
   });
 });
 
