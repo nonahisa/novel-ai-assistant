@@ -140,7 +140,7 @@ export class ChatterService implements vscode.Disposable {
     if (Date.now() - this.lastSpokeAt < QUIET_GAP_MS) return false;
 
     // 有料のAIでは動かさない。**頼まれていない発言で課金しない。**
-    // Ollamaが繋がっていない環境では、そもそも独り言は出ない
+    // 無料の手元AI（Ollama・LM Studioなど）なら動く。AIが未設定なら出ない
     const resolved = this.deps.resolveAi();
     if (!resolved || resolved.paid) return false;
 
