@@ -221,3 +221,25 @@ describe("用語の位置", () => {
     expect(collectTermSpans("灯", undefined)).toEqual([]);
   });
 });
+
+/**
+ * 三点リーダの中央寄せ（作者の依頼、2026-08-28）。
+ *
+ * 位置はフォント任せで、欧文フォントに落ちると横書きで下に沈み、
+ * 縦書きで横倒しのまま出る。読む面はHTMLなので印を付けてCSSで寄せる。
+ * 書く面（textarea）は文字単位の調整ができないため対象外。
+ */
+describe("三点リーダの印", () => {
+  it("「…」が1文字ずつ ellipsis の印で包まれる", () => {
+    const html = renderLine("だが……そうか", undefined);
+    expect(html).toBe(
+      'だが<span class="ellipsis">…</span><span class="ellipsis">…</span>そうか'
+    );
+  });
+
+  it("用語の色分けの中の「…」も包まれ、属性値は包まれない", () => {
+    const html = renderLine("白…瀬は言った", index([{ text: "白…瀬" }]));
+    expect(html).toContain('>白<span class="ellipsis">…</span>瀬</span>');
+    expect(html).toContain('data-term-name="白…瀬"');
+  });
+});

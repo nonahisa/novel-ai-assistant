@@ -175,6 +175,20 @@ body.plain .mark { background: transparent; }
    **#marks（打つ面の裏の目印）も必ず同じ向きにする。** 0.22.24まで
    ここから漏れており、縦書きのとき裏だけ横書きで塗られて、目印が
    本文と無関係な場所（空白）に浮いていた（実機の報告、2026-08-27） */
+/* **三点リーダを行の中央に寄せる**（作者の依頼、2026-08-28。読む面だけ）。
+   横書き：欧文フォントに落ちると「…」が下に沈むので、中央を明示する。
+   縦書き：横書きの向きに固定してから90度回す。フォントが縦用の字形
+   （縦3点）を持つかに依存せず、同じ見た目になる。
+   書く面（textarea）は文字単位の調整ができないため、フォントの形のまま */
+#read .ellipsis {
+  display: inline-block;
+  vertical-align: middle;
+}
+body.vertical #read .ellipsis {
+  writing-mode: horizontal-tb;
+  transform: rotate(90deg);
+  transform-origin: center;
+}
 body.vertical #write, body.vertical #read, body.vertical #marks {
   writing-mode: vertical-rl;
   /* **upright にしない。** 全部を立てると、英数字が1文字ずつ縦に

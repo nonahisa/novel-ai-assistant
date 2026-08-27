@@ -72,34 +72,56 @@ export function escapeHtml(text: string): string {
 }
 
 /**
+ * 本文の三点リーダ「…」を、行の中央に寄せるための印で包む
+ * （作者の依頼、2026-08-28）。
+ *
+ * 位置はフォント任せで、欧文フォントに落ちると横書きでは下に沈み、
+ * 縦書きでは縦用の字形（縦3点）を持たないフォントで横倒しのまま出る。
+ * 読む面はHTMLなので、印を付けてCSSで寄せられる。
+ * **書く面（textarea）は文字単位の調整ができない**ので、フォントの形のまま。
+ *
+ * **1文字ずつ包む。** 「……」をまとめて回すと、回転の中心が2文字の
+ * 真ん中になり、縦書きで点列が柱からはみ出す。
+ *
+ * **本文の経路だけに使う。** 属性値（data-term-name など）へ使うと、
+ * 名前に「…」を含む用語でHTMLが壊れる。
+ */
+function escapeBody(text: string): string {
+  return escapeHtml(text).replace(
+    /…/g,
+    '<span class="ellipsis">…</span>'
+  );
+}
+
+/**
  * 平文に用語索引を当て、色分けの印を付ける。
  *
  * **索引が無いときは、ただ escape して返す。** 設定資料をまだ作って
  * いない作品でも、本文は読めなければならない。
  */
 function markTerms(text: string, index: TermIndex | undefined): string {
-  if (!index || index.size === 0) return escapeHtml(text);
+  if (!index || index.size === 0) return escapeBody(text);
 
   // 重なりは `find` の中で解消済み（最左最長）。「白瀬」と「白瀬澪」が
   // 両方登録されている作品で短いほうが勝つと、名字だけが色付いて、
   // 続く名前が地の文に見える
   const matches = index.find(text);
-  if (matches.length === 0) return escapeHtml(text);
+  if (matches.length === 0) return escapeBody(text);
 
   let html = "";
   let last = 0;
   for (const match of matches) {
-    if (match.start > last) html += escapeHtml(text.slice(last, match.start));
+    if (match.start > last) html += escapeBody(text.slice(last, match.start));
     const entry = match.entry;
     html +=
       `<span class="term term-${entry.kind}"` +
       ` data-term-id="${escapeHtml(entry.id)}"` +
       ` data-term-kind="${escapeHtml(entry.kind)}"` +
       ` data-term-name="${escapeHtml(entry.canonicalName)}"` +
-      `>${escapeHtml(text.slice(match.start, match.end))}</span>`;
+      `>${escapeBody(text.slice(match.start, match.end))}</span>`;
     last = match.end;
   }
-  if (last < text.length) html += escapeHtml(text.slice(last));
+  if (last < text.length) html += escapeBody(text.slice(last));
   return html;
 }
 
