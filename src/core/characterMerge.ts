@@ -49,6 +49,21 @@ export interface MergeResult {
    * **黙って書き換えたことにしないため**、件数を作者へ伝えるのに使う。
    */
   folded: Array<{ characterName: string; field: string }>;
+  /**
+   * 作者が「別人だ」と決めた相手の呼び名が付いていたため、
+   * 既存レコードへ取り込まなかった候補（設計書6.5.8）。
+   *
+   * **黙って捨てない。** 件数を作者へ伝えないと、
+   * 資料が増えなかった理由が抽出の失敗と区別できない。
+   */
+  rejectedDistinct: Array<{
+    /** 取り込み先になるはずだった既存レコードの名前 */
+    characterName: string;
+    /** 「別人だ」と決めた側に当たった呼び名（抽出が書いてきたまま） */
+    blockedName: string;
+    /** その候補が出てきた話数 */
+    chapters: number[];
+  }>;
   /** 同一人物かもしれない組。自動では統合せず、作者の判断に委ねる */
   mergeCandidates: MergeCandidate[];
 }
@@ -94,6 +109,7 @@ export function mergeExtractedCharacters(
   const updated: string[] = [];
   const changedIds = new Set<string>();
   const conflicts: MergeResult["conflicts"] = [];
+  const rejectedDistinct: MergeResult["rejectedDistinct"] = [];
   /** 統合先を決められず新規にした組。作者の判断へ回す */
   const ambiguousPairs: Array<{
     names: [string, string];
@@ -131,6 +147,33 @@ export function mergeExtractedCharacters(
     for (const other of lookup.ambiguous) {
       if (isDeclaredDistinct(match, other)) continue;
       ambiguousPairs.push({ names: [match.name, other.name], ids: [match.id, other.id] });
+    }
+
+    // 作者が「別人だ」と決めた相手の呼び名が付いた候補は、まるごと取り込まない。
+    //
+    // **呼び名だけ外すのでは足りなかった**（`withoutDistinctNames`）。
+    // 実データでは、冒険者アジャーノのレコードへ皇子の場面から作った候補
+    // （name=アジャーノ / aliases=[殿下] / summary=「帝国の皇子…」）が届き、
+    // 別名の「殿下」は弾いたのに、紹介文・役割・一人称・呼称・登場話数は
+    // そのまま積まれて、冒険者の紹介文が皇子のものへ書き換わった
+    // （2026-08-27に作者が発見。「違う話の値どうしは最後の話の値を本体へ」の
+    // 規則が、別人の値に対してそのまま働いた）。
+    //
+    // 分けた相手の呼び名が付いていること自体が、AIが2人を混ぜた強いシグナルである。
+    // **作者の判断はAIの読みより強い**（実装ルール2）ので、候補ごと捨てる。
+    // 登場話数の追記もしない——それも別人の場面から来た値であるため。
+    const blockedNames = distinctKeys(match);
+    const blockedName = [ex.name, ...(ex.aliases ?? [])]
+      .filter((name): name is string => Boolean(name && name.trim()))
+      .find((name) => blockedNames.has(normalizeName(name)));
+    if (blockedName !== undefined) {
+      // 何を取り込まなかったかは完了報告に出す（黙って捨てたことにしない）
+      rejectedDistinct.push({
+        characterName: match.name,
+        blockedName,
+        chapters: [...item.chapters],
+      });
+      continue;
     }
 
     // 作者が確定させた人物はAIで書き換えない。
@@ -195,6 +238,7 @@ export function mergeExtractedCharacters(
         )
     ),
     folded,
+    rejectedDistinct,
     mergeCandidates: [
       ...ambiguousPairs.map((pair) => ({
         ...pair,

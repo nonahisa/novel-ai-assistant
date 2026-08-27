@@ -26,6 +26,7 @@ import {
 import {
   mergeExtractedCharacters,
   type MergeCandidate,
+  type MergeResult,
 } from "../core/characterMerge";
 import {
   parseResult,
@@ -85,6 +86,12 @@ interface ExtractionSummaryCounts {
    * 黙って書き換えたことにしないため、報告に出す（設計書6.18）。
    */
   folded: number;
+  /**
+   * 作者が「別人だ」と決めた呼び名が付いていたため取り込まなかった候補（設計書6.5.8）。
+   * 件数だけでなく中身も持つ——どのレコードに何が付いていたかを出さないと、
+   * 作者は「更新0名」を抽出の失敗と読んでしまう。
+   */
+  rejectedDistinct: MergeResult["rejectedDistinct"];
   failedChunks: number;
   saved: number;
   ambiguous: number;
@@ -731,6 +738,7 @@ export async function extractCharacters(
     rejected: rejectedCandidates,
     conflicts: merged?.conflicts.length ?? 0,
     folded: merged?.folded.length ?? 0,
+    rejectedDistinct: merged?.rejectedDistinct ?? [],
     failedChunks: failures.length,
     saved: 0,
     ambiguous: 0,
@@ -997,6 +1005,16 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
           counts.mergeCandidates
         )}（自動では統合していません）`
       : "";
+  // 取り込まなかったことを黙らない。捨てた場面は資料に残らないので、
+  // ここで言わないと作者には「なぜか増えなかった」としか見えない
+  const distinctDetail =
+    counts.rejectedDistinct.length > 0
+      ? `\n作者が別人と決めた呼び名が付いた場面を ${
+          counts.rejectedDistinct.length
+        }件、取り込みませんでした（${describeDistinctRejections(
+          counts.rejectedDistinct
+        )}）`
+      : "";
   return (
     [
       `新規 ${counts.added}名（うちモブ ${counts.mobs}名）`,
@@ -1012,6 +1030,7 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
     ].join(" / ") +
     rejectedDetail +
     candidateDetail +
+    distinctDetail +
     // 既存人物への変更は承認待ちに回る。件数を出さないと、
     // 作者は「更新0名」を見て何も増えなかったと思ってしまう
     (counts.pendingUpdates > 0
@@ -1083,6 +1102,24 @@ function describeMergeCandidates(candidates: MergeCandidate[]): string {
     .join("、");
   const rest =
     candidates.length > 5 ? ` ほか${candidates.length - 5}組` : "";
+  return shown + rest;
+}
+
+/**
+ * 別人と決めた呼び名で弾いた候補を、作者が確かめられる形で並べる。
+ *
+ * 件数だけだと、どのレコードのどの呼び名で弾いたのかが分からず、
+ * 分ける判断が正しかったのかを見直せない。
+ */
+function describeDistinctRejections(
+  rejections: MergeResult["rejectedDistinct"]
+): string {
+  const shown = rejections
+    .slice(0, 3)
+    .map((entry) => `${entry.characterName} に付いた「${entry.blockedName}」`)
+    .join("、");
+  const rest =
+    rejections.length > 3 ? ` ほか${rejections.length - 3}件` : "";
   return shown + rest;
 }
 

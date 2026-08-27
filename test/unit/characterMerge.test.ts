@@ -952,3 +952,128 @@ describe("統合候補のid", () => {
     }
   });
 });
+
+/**
+ * 分けた相手の呼び名が付いた候補は、中身ごと取り込まない（設計書6.5.8）。
+ *
+ * **呼び名だけ剥がすのでは足りなかった。** 作者が char_007 アジャーノ（冒険者）と
+ * char_016 殿下（皇子）を分けた直後の抽出で、AIが
+ * `name=アジャーノ / aliases=[殿下] / summary=帝国の皇子…` を返した。
+ * 別名の「殿下」は `withoutDistinctNames` が弾いたのに、紹介文・役割・一人称・
+ * 呼称・登場話数はそのまま冒険者のレコードへ積まれ、
+ * 本体が皇子の値へ書き換わった（2026-08-27に作者が発見）。
+ */
+describe("別人と決めた呼び名が付いた候補", () => {
+  /** 実データの形（char_007 アジャーノ＝冒険者 / char_016 殿下＝皇子）を写す */
+  function split(): [Character, Character] {
+    const ajano = emptyCharacter("char_007", "アジャーノ");
+    ajano.summary = "腕利きの冒険者";
+    ajano.role = "冒険者";
+    ajano.firstPerson.default = "俺";
+    ajano.appearedChapters = [3, 4];
+    ajano.distinctFrom = [{ name: "殿下", id: "char_016" }];
+
+    const prince = emptyCharacter("char_016", "殿下");
+    prince.distinctFrom = [{ name: "アジャーノ", id: "char_007" }];
+    return [ajano, prince];
+  }
+
+  /** 12話（皇子の場面）から作られた、2人が混ざった候補 */
+  function mixedCandidate(aliases: string[]) {
+    return {
+      data: {
+        name: "アジャーノ",
+        aliases,
+        summary: "帝国の皇子。どの教科も優秀",
+        role: "皇子",
+        firstPerson: "余",
+        addressTerms: [{ targetName: "教師", term: "余" }],
+        evidence: "皇子殿下は、どの教科も優秀でございます",
+      },
+      chapters: [12],
+    };
+  }
+
+  test("冒険者のレコードが皇子の値で上書きされない", () => {
+    const [ajano, prince] = split();
+    const before = structuredClone(ajano);
+
+    const result = mergeExtractedCharacters([ajano, prince], [
+      mixedCandidate(["殿下"]),
+    ]);
+
+    // 1項目ずつではなくレコードごと突き合わせる。
+    // 「どれか1つでも流れ込んだら落ちる」形にしておかないと、
+    // 次に項目が増えたときに素通りする
+    expect(result.characters.find((c) => c.id === "char_007")).toEqual(before);
+    expect(result.updated).not.toContain("アジャーノ");
+    expect(result.changedIds).not.toContain("char_007");
+    expect(result.rejectedDistinct).toEqual([
+      { characterName: "アジャーノ", blockedName: "殿下", chapters: [12] },
+    ]);
+  });
+
+  test("敬称が付いた呼び方でもすり抜けない", () => {
+    // 「殿下さま」は敬称を落とすと「殿下」。書かれたままで比べると通ってしまう
+    const [ajano, prince] = split();
+
+    const result = mergeExtractedCharacters([ajano, prince], [
+      mixedCandidate(["殿下さま"]),
+    ]);
+
+    expect(result.characters.find((c) => c.id === "char_007")!.summary).toBe(
+      "腕利きの冒険者"
+    );
+    expect(result.rejectedDistinct).toEqual([
+      { characterName: "アジャーノ", blockedName: "殿下さま", chapters: [12] },
+    ]);
+  });
+
+  test("分けた相手の呼び名が無い候補は、これまでどおり取り込む", () => {
+    const [ajano, prince] = split();
+
+    const result = mergeExtractedCharacters([ajano, prince], [
+      {
+        data: { name: "アジャーノ", aliases: [], appearance: "赤い外套" },
+        chapters: [5],
+      },
+    ]);
+
+    const merged = result.characters.find((c) => c.id === "char_007")!;
+    expect(merged.appearance).toBe("赤い外套");
+    expect(merged.appearedChapters).toEqual([3, 4, 5]);
+    expect(merged.changes.some((change) => change.field === "appearance")).toBe(
+      true
+    );
+    expect(result.updated).toContain("アジャーノ");
+    expect(result.rejectedDistinct).toEqual([]);
+  });
+
+  test("皇子の場面は、皇子のレコードへは入る", () => {
+    // 弾くのは「分けた相手の呼び名が付いていること」だけ。
+    // 分けた側そのものの成長まで止めると、分ける操作が損になる
+    const [ajano, prince] = split();
+
+    const result = mergeExtractedCharacters([ajano, prince], [
+      { data: { name: "殿下", summary: "帝国の皇子" }, chapters: [12] },
+    ]);
+
+    const merged = result.characters.find((c) => c.id === "char_016")!;
+    expect(merged.summary).toBe("帝国の皇子");
+    expect(merged.appearedChapters).toEqual([12]);
+    expect(result.rejectedDistinct).toEqual([]);
+  });
+
+  test("新規人物の作成は、これまでどおり通る", () => {
+    const [ajano, prince] = split();
+
+    const result = mergeExtractedCharacters([ajano, prince], [
+      { data: { name: "リナ", summary: "宿の娘" }, chapters: [2] },
+    ]);
+
+    expect(result.characters).toHaveLength(3);
+    expect(result.added).toEqual(["リナ"]);
+    expect(result.characters.at(-1)!.summary).toBe("宿の娘");
+    expect(result.rejectedDistinct).toEqual([]);
+  });
+});

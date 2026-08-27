@@ -282,6 +282,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 3,
   },
   {
+    id: "F-20",
+    title: "別人に分けた記録が、再抽出で混ざらないか",
+    commands: ["novelai.extractCharactersOnly", "novelai.extractSettings"],
+    count: 3,
+  },
+  {
     id: "",
     title: "LM Studio",
     commands: ["novelai.setupLmStudio", "novelai.setupAI", "novelai.testAI"],
@@ -302,4 +308,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 377;
+export const PENDING_CHECK_TOTAL = 380;
