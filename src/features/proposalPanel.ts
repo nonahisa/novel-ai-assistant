@@ -1501,7 +1501,11 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     // 別の分類の名前でAIに問い合わせることになる
     const category = this.category;
 
-    const resolved = this.ai?.resolve();
+    // プロンプトは分類共通の1本だが、**割当はいま見ている指摘の分類に従う**。
+    // 誤字脱字を無料AIに割り当てた作者が、誤字の再チェックだけ矛盾検知の
+    // （有料の）AIで動いては驚く。`log.category` は "typo" | "contradiction" で、
+    // そのまま割当のキーになる
+    const resolved = this.ai?.resolve(log.category);
     if (!resolved) {
       void vscode.window.showWarningMessage(
         "AIが設定されていません。詳細メニューの「AIの設定」から設定してください。"
@@ -1509,7 +1513,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       return;
     }
 
-    if (resolved.provider.isPaid && this.paidConfirmedFor !== resolved.model) {
+    // **プロバイダとモデルの組で覚える。** 同じモデル名を持つ別のAIへ
+    // 割当が変わったとき、モデル名だけでは切り替わりを見落とす
+    const paidKey = `${resolved.provider.id}:${resolved.model}`;
+    if (resolved.provider.isPaid && this.paidConfirmedFor !== paidKey) {
       const ok = await confirmPaidUsage(resolved.provider, {
         actionLabel: "指摘の再チェック",
         model: resolved.model,
@@ -1520,7 +1527,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
           "（この確認は、このパネルで一度だけです）",
       });
       if (!ok) return;
-      this.paidConfirmedFor = resolved.model;
+      this.paidConfirmedFor = paidKey;
     }
 
     this.setBusy(target, true);

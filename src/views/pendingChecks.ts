@@ -276,6 +276,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 1,
   },
   {
+    id: "F-24",
+    title: "機能ごとにAIを割り当てる",
+    commands: ["novelai.assignFeatureAI"],
+    count: 8,
+  },
+  {
     id: "F-23",
     title: "AI相談の大きい画面と使い方マニュアル",
     commands: ["novelai.openChatPanel", "novelai.openManual"],
@@ -326,4 +332,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 414;
+export const PENDING_CHECK_TOTAL = 422;

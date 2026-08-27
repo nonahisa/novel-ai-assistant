@@ -81,7 +81,11 @@ import { resolveMaxOutputTokens } from "../ai/outputLimit";
 import { loadExcerptSources } from "../core/manuscriptSources";
 import { expandNameVariants } from "../core/termIndex";
 import { evidencePhrases } from "../core/groundedEvidence";
-import { AIRegistry, ensureConfigured } from "../ai/registry";
+import {
+  AIRegistry,
+  ensureConfigured,
+  type AssignableFeature,
+} from "../ai/registry";
 import { confirmPaidUsage } from "./aiConnectivity";
 import { prepareRetrieval, search, type RetrievalContext } from "./vectorSearch";
 import {
@@ -1039,7 +1043,8 @@ export class SettingsPanel {
       return;
     }
 
-    const resolved = await ensureConfigured(this.registry);
+    // AIで再読込は設定資料の抽出と同じ仕事なので、割当も抽出に揃える
+    const resolved = await ensureConfigured(this.registry, "extract");
     if (!resolved) return;
 
     const excerpts = await this.excerptsFor(kind, record);
@@ -1057,6 +1062,7 @@ export class SettingsPanel {
     });
 
     const text = await this.generate(
+      "extract",
       prompt,
       `「${record.name}」を読み直しています`,
       buildEnrichSchema(kind, this.customFields)
@@ -1355,7 +1361,7 @@ export class SettingsPanel {
       return;
     }
 
-    const resolved = await ensureConfigured(this.registry);
+    const resolved = await ensureConfigured(this.registry, "chat");
     if (!resolved) return;
 
     const key = `${kind}:${id}`;
@@ -1376,7 +1382,11 @@ export class SettingsPanel {
       history,
     });
 
-    const text = await this.generate(prompt, `「${record.name}」について調べています`);
+    const text = await this.generate(
+      "chat",
+      prompt,
+      `「${record.name}」について調べています`
+    );
     if (text === undefined) return;
 
     appendChatLog(this.work, {
@@ -1416,7 +1426,8 @@ export class SettingsPanel {
       return;
     }
 
-    const resolved = this.registry.resolve();
+    // 掘り下げメモは相談から出てきたものなので、どのAIが書いたかも相談の割当で見る
+    const resolved = this.registry.resolve("chat");
     const updated = appendAiNote(record, {
       topic: message.topic,
       text: message.text,
@@ -1717,7 +1728,8 @@ export class SettingsPanel {
     focus: string
   ): Promise<string[]> {
     try {
-      const resolved = await this.registry.resolve();
+      // 検索語づくりは相談1回に付随する下ごしらえなので、相談の割当に従う
+      const resolved = this.registry.resolve("chat");
       if (!resolved) return [];
       const result = await resolved.provider.generate({
         systemPrompt: SEARCH_TERMS_SYSTEM_PROMPT,
@@ -1779,20 +1791,30 @@ export class SettingsPanel {
     );
   }
 
-  /** AIを1回呼ぶ。失敗したら理由と次の操作を画面に出す */
+  /**
+   * AIを1回呼ぶ。失敗したら理由と次の操作を画面に出す。
+   *
+   * **機能キーは呼び出し側が渡す。** この画面からは性質の違う2つが走る
+   * （相談＝`chat`、AIで再読込＝`extract`）ので、どちらで呼ばれたかを
+   * ここで推し量らない。
+   */
   private async generate(
+    feature: AssignableFeature,
     prompt: string,
     progressLabel: string,
     jsonSchema?: object
   ): Promise<string | undefined> {
-    const resolved = await ensureConfigured(this.registry);
+    const resolved = await ensureConfigured(this.registry, feature);
     if (!resolved) return undefined;
 
     // 有料のAIは呼ぶたびに課金される。**このパネルを開いている間に一度だけ
     // 確認を取る。** 相談も項目の充実も何度も押すものなので、毎回モーダルを
-    // 挟むと使い物にならない。モデルまで覚えるのは、AIを切り替えたときに
-    // 確認をやり直すため（無料から有料へ黙って移らない）
-    if (resolved.provider.isPaid && this.paidConfirmedFor !== resolved.model) {
+    // 挟むと使い物にならない。**プロバイダとモデルの両方**を覚えるのは、
+    // AIを切り替えたときに確認をやり直すため（無料から有料へ黙って移らない）。
+    // 機能ごとの割当を入れてからは、Ollama と LM Studio が同じモデル名を
+    // 持てるので、モデル名だけでは切り替わりを見落とす
+    const paidKey = `${resolved.provider.id}:${resolved.model}`;
+    if (resolved.provider.isPaid && this.paidConfirmedFor !== paidKey) {
       const ok = await confirmPaidUsage(resolved.provider, {
         actionLabel: progressLabel,
         model: resolved.model,
@@ -1801,10 +1823,10 @@ export class SettingsPanel {
           "（この確認はこの画面で一度だけです）",
       });
       if (!ok) return undefined;
-      this.paidConfirmedFor = resolved.model;
+      this.paidConfirmedFor = paidKey;
     }
 
-    const modelInfo = await this.registry.resolveModelInfo();
+    const modelInfo = await this.registry.resolveModelInfo(feature);
     const configuredNumCtx = vscode.workspace
       .getConfiguration("novelai")
       .get<number>("ollama.numCtx", 0);

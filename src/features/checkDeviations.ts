@@ -79,7 +79,7 @@ export async function checkDeviations(
   const plot = await loadPlot(work);
   if (!plot) return undefined;
 
-  const resolved = await ensureConfigured(registry);
+  const resolved = await ensureConfigured(registry, "deviation");
   if (!resolved) return undefined;
 
   const episodes = await collectEpisodes(work);
@@ -93,7 +93,7 @@ export async function checkDeviations(
   // 地力の足りないモデルでは種別を絞り、実行前に断る（設計書6.28）。
   // **この機能は話単位で送るので、コンテキスト長は要らない。**
   // モデル情報が取れなくても止めず、これまでと同じ判定へ落とす
-  const modelInfo = await registry.resolveModelInfo();
+  const modelInfo = await registry.resolveModelInfo("deviation");
   const capability = capabilityProfile({
     tier: modelInfo?.tier,
     providerId: resolved.provider.id,
@@ -110,6 +110,7 @@ export async function checkDeviations(
     promptVersion:
       `${DEVIATION_CHECK_VERSION}:` +
       `${capabilityCacheTag(capability)}${hashText(plot).slice(0, 16)}`,
+    providerId: resolved.provider.id,
     model: resolved.model,
   };
 

@@ -8,6 +8,14 @@ import { workPaths } from "./workRegistry";
 export interface CacheKeyBase {
   feature: string;
   promptVersion: string;
+  /**
+   * どのAIサービスで処理したか（`ollama` / `lmstudio` / `claude` …）。
+   *
+   * **モデル名だけでは足りない**（設計書6.28.7）。Ollama と LM Studio は
+   * 同じ重みを同じ名前（`gemma4:e4b` など）で持てるので、モデル名だけを
+   * 鍵にすると**別のプロバイダで作った結果を再利用してしまう**。
+   */
+  providerId: string;
   model: string;
 }
 
@@ -169,9 +177,17 @@ function isLeapYear(year: number): boolean {
   return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
 
+/**
+ * 鍵を組み立てる。
+ *
+ * **プロバイダIDを足したので、既存のキャッシュは一度すべて作り直しになる**
+ * （鍵の文字列が変わるため。設計書6.28.7が「機能別割当と同じ版で行う」と
+ * 決めたのは、飛ぶ回数を1回にまとめるためである）。無料AIなら時間だけ、
+ * 有料AIなら処理し直したぶんの費用がかかる。
+ */
 function makeKey(chunkHash: string, base: CacheKeyBase): string {
   const digest = sha1Text(
-    `${base.promptVersion}|${base.model}|${chunkHash}`
+    `${base.promptVersion}|${base.providerId}|${base.model}|${chunkHash}`
   ).slice(0, 24);
   return `${base.feature}:${digest}`;
 }

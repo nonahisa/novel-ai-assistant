@@ -58,7 +58,7 @@ export async function generateSynopses(
   // 短編では1件しか作れず、感情曲線も線にならない（設計書6.4.5）
   if (!(await confirmFormatFit(work, "episodeSynopses"))) return false;
 
-  const resolved = await ensureConfigured(registry);
+  const resolved = await ensureConfigured(registry, "generate");
   if (!resolved) return false;
 
   const scan = await scanWork(work);

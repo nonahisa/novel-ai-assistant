@@ -165,7 +165,7 @@ export async function checkContradictions(
 ): Promise<ContradictionRunResult | undefined> {
   useLogFile(work.folderPath);
 
-  const resolved = await ensureConfigured(registry);
+  const resolved = await ensureConfigured(registry, "contradiction");
   if (!resolved) return undefined;
 
   const material = await collectSettings(work);
@@ -199,6 +199,7 @@ export async function checkContradictions(
     promptVersion:
       `${CONTRADICTION_CHECK_VERSION}:` +
       `${capabilityCacheTag(capability)}${material.fingerprint}`,
+    providerId: resolved.provider.id,
     model: resolved.model,
   };
 
@@ -212,6 +213,7 @@ export async function checkContradictions(
     feature: "contradiction_verify",
     // 検証のプロンプトは観点で変わらないので、印を混ぜない
     promptVersion: `${CONTRADICTION_VERIFY_VERSION}:${material.fingerprint}`,
+    providerId: resolved.provider.id,
     model: resolved.model,
   };
 
@@ -864,7 +866,7 @@ async function collectChunks(
       )
     : scan.episodes;
 
-  const info = await registry.resolveModelInfo();
+  const info = await registry.resolveModelInfo("contradiction");
   // コンテキスト長が取れないモデルでは、誤字脱字検知と同じ既定へ落とす
   const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192);
   const maxChars = chunkSettings.chunk.chars;

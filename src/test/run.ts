@@ -426,6 +426,7 @@ export async function run(): Promise<void> {
       const cacheKeyBase = {
         feature: "character_extract",
         promptVersion: CHARACTER_EXTRACT_VERSION,
+        providerId: "ollama",
         model,
       };
       const cache = new ChunkCache(work);

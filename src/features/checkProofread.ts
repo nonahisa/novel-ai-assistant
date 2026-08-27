@@ -81,7 +81,7 @@ export async function checkProofread(
 ): Promise<ProofreadRunResult | undefined> {
   useLogFile(work.folderPath);
 
-  const resolved = await ensureConfigured(registry);
+  const resolved = await ensureConfigured(registry, "proofread");
   if (!resolved) return undefined;
 
   const chunks = await collectChunks(work, registry, options);
@@ -112,6 +112,7 @@ export async function checkProofread(
   const cacheKeyBase = {
     feature: "proofread",
     promptVersion: PROOFREAD_VERSION,
+    providerId: resolved.provider.id,
     model: resolved.model,
   };
 
@@ -334,7 +335,7 @@ async function collectChunks(
       )
     : scan.episodes;
 
-  const info = await registry.resolveModelInfo();
+  const info = await registry.resolveModelInfo("proofread");
   // **設定を見るようにした**（設計書6.23）。以前はここだけ設定を無視して
   // いつも自動で決めており、作者が字数を指定しても効かなかった
   const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192);

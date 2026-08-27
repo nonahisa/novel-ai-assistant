@@ -183,17 +183,17 @@ export async function extractCharacters(
   options: ExtractCharactersOptions = {}
 ): Promise<boolean> {
   const saveKinds = new Set<ExtractKind>(options.kinds ?? ALL_EXTRACT_KINDS);
-  const resolved = await ensureConfigured(registry);
+  const resolved = await ensureConfigured(registry, "extract");
   if (!resolved) return false;
 
   // モデル情報はチャンクサイズを決めるのに使う。
   // 取得できないまま既定値で進むと、本来より細かく分割され、
   // ハッシュが変わって既存のキャッシュが全て無駄になる。
   // そのため取れない場合は、先に疎通を回復させてから取り直す。
-  let modelInfo = await registry.resolveModelInfo();
+  let modelInfo = await registry.resolveModelInfo("extract");
   if (!modelInfo) {
     if (!(await confirmProviderReachable(resolved.provider, "設定資料の抽出"))) return false;
-    modelInfo = await registry.resolveModelInfo();
+    modelInfo = await registry.resolveModelInfo("extract");
   }
   if (!modelInfo) {
     const action = await vscode.window.showWarningMessage(
@@ -369,6 +369,7 @@ export async function extractCharacters(
   const cacheKeyBase = {
     feature: "character_extract",
     promptVersion: CHARACTER_EXTRACT_VERSION,
+    providerId: resolved.provider.id,
     model: resolved.model,
   };
 

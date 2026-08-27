@@ -50,7 +50,7 @@ export async function generateWorkBlurb(
   registry: AIRegistry
 ): Promise<void> {
   useLogFile(work.folderPath);
-  const resolved = await ensureConfigured(registry);
+  const resolved = await ensureConfigured(registry, "generate");
   if (!resolved) return;
 
   const material = await collectMaterial(work);
@@ -142,7 +142,7 @@ export async function generateCatchphrases(
   registry: AIRegistry
 ): Promise<void> {
   useLogFile(work.folderPath);
-  const resolved = await ensureConfigured(registry);
+  const resolved = await ensureConfigured(registry, "generate");
   if (!resolved) return;
 
   const material = await collectMaterial(work);

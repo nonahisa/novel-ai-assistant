@@ -14,6 +14,7 @@ const work: WorkEntry = {
 const base: CacheKeyBase = {
   feature: "characters",
   promptVersion: "1.0",
+  providerId: "ollama",
   model: "gemma4:e4b",
 };
 
@@ -196,6 +197,23 @@ describe("チャンク処理キャッシュ", () => {
     expect(cache.get("same-content", { ...base, model: "other-model" })).toBeUndefined();
     expect(cache.get("same-content", { ...base, promptVersion: "1.1" })).toBeUndefined();
     expect(cache.get("same-content", base)).toEqual({ model: base.model });
+  });
+
+  /**
+   * **同じ名前のモデルが、別のサービスに在る**（設計書6.28.7）。
+   *
+   * Ollama と LM Studio は同じ重みを同じ名前（`gemma4:e4b` など）で
+   * 持てるので、鍵がモデル名だけだと**別のプロバイダで作った結果を
+   * 再利用してしまう**。地力も設定も違うので、答えは揃わない。
+   */
+  test("同じモデル名でも、プロバイダが違えば結果を再利用しない", async () => {
+    const cache = new ChunkCache(work);
+    await cache.set("same-content", base, { from: "ollama" });
+
+    expect(
+      cache.get("same-content", { ...base, providerId: "lmstudio" })
+    ).toBeUndefined();
+    expect(cache.get("same-content", base)).toEqual({ from: "ollama" });
   });
 
   test("指定機能の項目だけを破棄する", async () => {

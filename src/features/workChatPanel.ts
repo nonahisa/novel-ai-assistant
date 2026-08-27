@@ -505,7 +505,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   private async postContext(): Promise<void> {
     if (this.hosts().length === 0) return;
     const context = await this.resolveContext();
-    const resolved = this.ai.resolve();
+    // 画面に出すエンジン名は、この画面から実際に送るAI（相談の割当）にする
+    const resolved = this.ai.resolve("chat");
     this.postAll({
       type: "context",
       label: context ? context.label : "作品のファイルを開いてください",
@@ -524,7 +525,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   private async ask(question: string): Promise<void> {
     if (this.hosts().length === 0) return;
 
-    const resolved = this.ai.resolve();
+    const resolved = this.ai.resolve("chat");
     if (!resolved) {
       this.postError(
         "AIが設定されていません。詳細メニューの「AIの設定」から設定してください。"
@@ -534,8 +535,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
     // 有料のAIは送るたびに課金される。**会話ごとに一度だけ確認を取る。**
     // 毎回モーダルを出すと相談にならず、一度も出さないと知らないうちに
-    // 積み上がる。あわせて画面上部に「有料」と出し続ける（postContext）
-    if (resolved.provider.isPaid && this.paidConfirmedFor !== resolved.model) {
+    // 積み上がる。あわせて画面上部に「有料」と出し続ける（postContext）。
+    //
+    // **覚えるのはプロバイダとモデルの組。** モデル名だけだと、
+    // Ollama と LM Studio のように同じ名前のモデルを持つ相手へ
+    // 割当が変わったとき、確認を取り直さずに送ってしまう
+    const paidKey = `${resolved.provider.id}:${resolved.model}`;
+    if (resolved.provider.isPaid && this.paidConfirmedFor !== paidKey) {
       const ok = await confirmPaidUsage(resolved.provider, {
         actionLabel: "AIへの相談",
         model: resolved.model,
@@ -548,7 +554,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         this.postAll({ type: "cancelled" });
         return;
       }
-      this.paidConfirmedFor = resolved.model;
+      this.paidConfirmedFor = paidKey;
     }
 
     const context = await this.resolveContext();
@@ -1623,7 +1629,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     question: string
   ): Promise<string[]> {
     try {
-      const resolved = await this.ai.resolve();
+      // 検索語づくりは相談1回に付随する下ごしらえなので、相談の割当に従う
+      const resolved = this.ai.resolve("chat");
       if (!resolved) return [];
       const names = await this.characterNames(work);
       const result = await resolved.provider.generate({

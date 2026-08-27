@@ -101,15 +101,15 @@ export async function checkTypos(
   registry: AIRegistry,
   options: CheckTyposOptions = {}
 ): Promise<TypoCheckRunResult | undefined> {
-  const resolved = await ensureConfigured(registry);
+  const resolved = await ensureConfigured(registry, "typo");
   if (!resolved) return undefined;
 
-  let modelInfo = await registry.resolveModelInfo();
+  let modelInfo = await registry.resolveModelInfo("typo");
   if (!modelInfo) {
     if (!(await confirmProviderReachable(resolved.provider, "誤字脱字の検知"))) {
       return undefined;
     }
-    modelInfo = await registry.resolveModelInfo();
+    modelInfo = await registry.resolveModelInfo("typo");
   }
   if (!modelInfo) {
     const action = await vscode.window.showWarningMessage(
@@ -307,6 +307,7 @@ export async function checkTypos(
   const cacheKeyBase = {
     feature: "typo_check",
     promptVersion: TYPO_CHECK_VERSION,
+    providerId: resolved.provider.id,
     model: resolved.model,
   };
 

@@ -53,7 +53,8 @@ export async function showVersion(
   context: vscode.ExtensionContext,
   registry: AIRegistry
 ): Promise<void> {
-  const resolved = registry.resolve();
+  // 版の表示は「いま何を既定にしているか」を見せるだけなので、割当を見ない
+  const resolved = registry.resolve("default");
   const packageJson = context.extension.packageJSON as {
     displayName?: string;
     version?: string;

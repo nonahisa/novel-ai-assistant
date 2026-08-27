@@ -971,6 +971,17 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.assignFeatureAI",
+            label: "機能ごとにAIを割り当てる",
+            icon: "list-selection",
+            requiresWork: false,
+            detail:
+              "機能ごとに使うAIを分けられます。" +
+              "いちばん重い設定資料の抽出は、手元の無料AI（Ollama）で実用になっています（実測）。" +
+              "割り当てない機能は、AI設定で選んだ既定のAIを使います。",
+          },
+          {
+            kind: "action",
             command: "novelai.testAI",
             label: "AI接続の確認",
             icon: "plug",

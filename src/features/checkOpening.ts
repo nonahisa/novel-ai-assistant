@@ -55,7 +55,8 @@ export async function checkOpening(
 ): Promise<void> {
   useLogFile(work.folderPath);
 
-  const resolved = await ensureConfigured(registry);
+  // 冒頭診断は「生成系」の割当に従う（あらすじ・紹介文と同じ扱い）
+  const resolved = await ensureConfigured(registry, "generate");
   if (!resolved) return;
 
   const material = await collectOpening(work);

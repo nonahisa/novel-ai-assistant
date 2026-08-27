@@ -835,7 +835,8 @@ export async function activate(
   // ─── AIの独り言（設計書6.21） ───
   const chatter = new ChatterService({
     resolveAi: () => {
-      const resolved = aiRegistry.resolve();
+      // 独り言は相談パネルへ出るものなので、相談の割当で有料かを見る
+      const resolved = aiRegistry.resolve("chat");
       return resolved ? { paid: resolved.provider.isPaid } : undefined;
     },
     panelVisible: () => workChatPanel.isVisible(),
@@ -1932,6 +1933,13 @@ export async function activate(
   );
 
   context.subscriptions.push(
+    registerCommand("novelai.assignFeatureAI", async () => {
+      const { assignFeatureAI } = await import("./features/assignFeatureAI.js");
+      await assignFeatureAI(aiRegistry);
+    })
+  );
+
+  context.subscriptions.push(
     registerCommand("novelai.showLog", () => {
       showLog();
     })
@@ -2181,7 +2189,9 @@ export async function activate(
 
   context.subscriptions.push(
     registerCommand("novelai.testAI", async () => {
-      const resolved = aiRegistry.resolve();
+      // 接続の確認は「AI設定で選んだAI」に対して行う。
+      // 機能ごとの割当は、それぞれ割り当てるときに生成まで試している
+      const resolved = aiRegistry.resolve("default");
       if (!resolved) {
         vscode.window.showInformationMessage(
           "AIが設定されていません。「AI設定」から設定してください。"
@@ -2219,7 +2229,7 @@ export async function activate(
         return;
       }
 
-      const info = await aiRegistry.resolveModelInfo();
+      const info = await aiRegistry.resolveModelInfo("default");
       const detail = info
         ? `${info.displayName}（${info.parameterSize ?? "?"} / 文脈 ${
             info.contextWindow

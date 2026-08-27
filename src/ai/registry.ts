@@ -15,12 +15,77 @@ import { LmStudioProvider } from "./lmstudioProvider";
 import { GeminiProvider } from "./geminiProvider";
 import { withProgress } from "../views/progress";
 import { probeGeneration } from "./generationProbe";
-import { logFailure, showLog } from "../core/logger";
+import { logFailure, logStep, showLog } from "../core/logger";
 import { askText, cancelItem } from "../views/dialogs";
 import { canRunProcesses } from "../core/runtime";
 
 const KEY_PROVIDER = "novelai.ai.provider";
 const KEY_MODEL = "novelai.ai.model";
+/**
+ * 機能ごとのAI割当（設計書6.28.7の1）。
+ *
+ * **`globalState` に置く**（いまのAI選択と同じ場所）。設定同期に乗せると、
+ * Ollamaの入っていない端末へ「抽出はOllamaで」という割当が流れ込み、
+ * その端末では必ず失敗する。
+ */
+const KEY_FEATURE_ASSIGNMENTS = "novelai.ai.featureAssignments";
+
+/**
+ * 作者が割り当てを選べる機能のまとまり。増やすときはメニューの文言も揃える。
+ *
+ * **粒度は「作者が使い分けたい単位」で切っている。** 内部の
+ * `meta.feature`（`contradiction_verify` など）より粗いのは、
+ * 矛盾検知の本体と検証だけ別のAIにしたい作者はいないため。
+ */
+export type AssignableFeature =
+  | "extract" // 設定資料の抽出（人物・場所・能力・組織・世界観、AIで再読込・項目の充実）
+  | "typo" // 誤字脱字
+  | "proofread" // 推敲
+  | "contradiction" // 矛盾検知（指摘の検証・再チェックも含む）
+  | "deviation" // プロットからの逸脱
+  | "generate" // あらすじ・紹介文・キャッチコピー・プロット逆算・冒頭診断・感情曲線
+  | "chat"; // 相談（相談パネル・設定の相談・検索語の生成・独り言）
+
+/**
+ * 機能の表示名。**画面に出す名前はここだけが持つ。**
+ * 割当の選択画面・通知・ログのすべてがこれを読む。
+ */
+export const ASSIGNABLE_FEATURE_LABELS: Record<AssignableFeature, string> = {
+  extract: "設定資料の抽出",
+  typo: "誤字脱字",
+  proofread: "推敲",
+  contradiction: "矛盾検知",
+  deviation: "プロットからの逸脱",
+  generate: "あらすじ・紹介文・キャッチコピーなど",
+  chat: "AIに相談",
+};
+
+/** 選択画面に並べる順。重い（＝手元AIの効きが大きい）ものから */
+export const ASSIGNABLE_FEATURES: AssignableFeature[] = [
+  "extract",
+  "typo",
+  "proofread",
+  "contradiction",
+  "deviation",
+  "generate",
+  "chat",
+];
+
+export interface FeatureAssignment {
+  provider: ProviderId;
+  model: string;
+}
+
+/**
+ * 保存されている割当。**キーが無い＝既定を使う。**
+ *
+ * 「機能別割当が有効か」のフラグは作らない（設計書6.28.7）。
+ * フラグと中身の2か所が食い違うと、割り当てたのに効かない・
+ * 外したのに効き続ける、という追いにくい状態ができる。
+ */
+export type FeatureAssignments = Partial<
+  Record<AssignableFeature, FeatureAssignment>
+>;
 
 /**
  * 実行環境で選べないプロバイダを外す。
@@ -124,20 +189,108 @@ export class AIRegistry {
     this.selectionEmitter.fire();
   }
 
+  /** 機能ごとの割当。**キーが無い機能は既定のAIを使う** */
+  assignments(): FeatureAssignments {
+    return (
+      this.context.globalState.get<FeatureAssignments>(
+        KEY_FEATURE_ASSIGNMENTS
+      ) ?? {}
+    );
+  }
+
+  async assign(
+    feature: AssignableFeature,
+    providerId: ProviderId,
+    model: string
+  ): Promise<void> {
+    const next: FeatureAssignments = {
+      ...this.assignments(),
+      [feature]: { provider: providerId, model },
+    };
+    await this.context.globalState.update(KEY_FEATURE_ASSIGNMENTS, next);
+    // 開きっぱなしのパネルのエンジン表示を追従させる（選択の変更と同じ扱い）
+    this.selectionEmitter.fire();
+  }
+
+  async unassign(feature: AssignableFeature): Promise<void> {
+    const next = { ...this.assignments() };
+    delete next[feature];
+    await this.context.globalState.update(KEY_FEATURE_ASSIGNMENTS, next);
+    this.selectionEmitter.fire();
+  }
+
   /**
-   * 設定済みなら {provider, model} を返す。未設定なら undefined。
+   * その機能で使うプロバイダとモデルを解決する。未設定なら undefined。
+   *
+   * **引数は必須にしてある。** 既定値を持たせると、渡し忘れた場所が
+   * 黙って既定のAIで動く。とくに `resolveModelInfo` の渡し忘れは、
+   * 既定モデルのコンテキスト長で本文を切って割当先へ送ることになり、
+   * 入力が黙って切り捨てられる（この作品でいちばん怖い形）。
+   *
+   * `"default"` は「どの機能でもない場所」用——版の表示・接続の確認など、
+   * いま何を選んでいるかを見せるだけの所で使う。
    *
    * **返すのは送信量を記録する包み**（`MeteredProvider`）である。
    * AI機能はすべてここからプロバイダを受け取るので、包みを1つ挟むだけで
    * 10か所ある呼び出しを1行も変えずに記録できる。
+   *
+   * **有料の確認はここでは出さない。** 実行前の確認（設計書7.1.1）が
+   * プロバイダ名・モデル名つきで必ず出るので、割当で有料AIへ回った場合も
+   * そこで作者の目に入る。`resolve()` は画面の更新のたびに呼ばれるため、
+   * ここでモーダルを出すと相談パネルを開いただけで確認が飛ぶ。
    */
-  resolve(): { provider: AIProvider; model: string } | undefined {
+  resolve(
+    feature: AssignableFeature | "default"
+  ): { provider: AIProvider; model: string } | undefined {
+    const assigned =
+      feature === "default" ? undefined : this.assignments()[feature];
+    if (assigned) {
+      const provider = this.providers.get(assigned.provider);
+      if (provider && this.isUsableHere(provider)) {
+        return { provider: this.meter(provider), model: assigned.model };
+      }
+      // 割当先が使えないときは既定へ落とす。**止めない。**
+      // ブラウザ版で開いただけで全機能が死ぬのは、作者から見て
+      // 「壊れた」としか見えない（設計書5.8の「消さずに理由を出す」）
+      this.noteFallback(feature as AssignableFeature, assigned.provider);
+    }
+
     const id = this.selectedProviderId;
     const model = this.selectedModel;
     if (!id || !model) return undefined;
     const provider = this.providers.get(id);
     if (!provider) return undefined;
     return { provider: this.meter(provider), model };
+  }
+
+  /** この実行環境で選べるプロバイダか（ブラウザ版では手元のAIが使えない） */
+  private isUsableHere(provider: AIProvider): boolean {
+    return (
+      filterProvidersForRuntime([provider], canRunProcesses()).length > 0
+    );
+  }
+
+  /**
+   * 既定へ落としたことをログに残す。
+   *
+   * **同じ組み合わせは一度だけ書く。** `resolve()` は画面の更新のたびに
+   * 呼ばれるので、毎回書くとログが同じ行で埋まって他が読めなくなる。
+   * 割り当て直せばキーが変わるので、そのときは改めて記録される。
+   */
+  private readonly loggedFallbacks = new Set<string>();
+
+  private noteFallback(
+    feature: AssignableFeature,
+    providerId: ProviderId
+  ): void {
+    const key = `${feature}:${providerId}`;
+    if (this.loggedFallbacks.has(key)) return;
+    this.loggedFallbacks.add(key);
+    const name = this.providers.get(providerId)?.displayName ?? providerId;
+    logStep(
+      `${ASSIGNABLE_FEATURE_LABELS[feature]}: ` +
+        `割当のAI（${name}）が使えないため、既定のAIで実行します`
+    );
   }
 
   /**
@@ -154,9 +307,17 @@ export class AIRegistry {
     return wrapped;
   }
 
-  /** 選択中モデルの詳細（コンテキスト長など）を取得する */
-  async resolveModelInfo(): Promise<ModelInfo | undefined> {
-    const resolved = this.resolve();
+  /**
+   * その機能で使うモデルの詳細（コンテキスト長など）を取得する。
+   *
+   * **機能キーを必ず渡すこと。** ここだけ渡し忘れると、既定モデルの
+   * コンテキスト長でチャンクを切って割当先のモデルへ送ることになり、
+   * 入力が黙って切り捨てられる（設計書6.28.7）。
+   */
+  async resolveModelInfo(
+    feature: AssignableFeature | "default"
+  ): Promise<ModelInfo | undefined> {
+    const resolved = this.resolve(feature);
     if (!resolved) return undefined;
     const p = resolved.provider;
     // 個別取得できるプロバイダは一覧を引かずに済ませる（呼び出し回数の節約）
@@ -166,13 +327,32 @@ export class AIRegistry {
   }
 }
 
+/** プロバイダとモデルが決まったときの結果 */
+export interface ProviderAndModelPick {
+  providerId: ProviderId;
+  /**
+   * 素のプロバイダ（送信量を記録する包みではない）。
+   * 通知の名前と有料判定に使う
+   */
+  provider: AIProvider;
+  /** 選ばれたモデルの詳細。`id` が実際に保存する値 */
+  model: ModelInfo;
+}
+
 /**
- * AI設定のセットアップウィザード。
- * 未設定でAI機能を呼んだ場合にもここへ誘導する。
+ * プロバイダを選び、鍵を入れ、接続を確かめ、モデルを選び、
+ * 実際に1回生成できるところまでを確かめる。
+ *
+ * **AI設定のウィザードから切り出した**（設計書7.1）。機能ごとの割当でも
+ * 同じ手順が要るので、2つ目の実装を書かない。書くと、片方だけ直された
+ * ときに「AI設定では通るのに割当では通らない」が起きる。
+ *
+ * ここでは**保存しない。** 何に使うか（既定にするのか、ある機能へ
+ * 割り当てるのか）は呼び出し側が決める。
  */
-export async function runSetupWizard(
+export async function pickProviderAndModel(
   registry: AIRegistry
-): Promise<boolean> {
+): Promise<ProviderAndModelPick | undefined> {
   const providers = registry.listProviders();
 
   const providerDescriptions: Partial<Record<ProviderId, string>> = {
@@ -200,14 +380,14 @@ export async function runSetupWizard(
       ignoreFocusOut: true,
     }
   );
-  if (!providerPick || !("providerId" in providerPick)) return false;
+  if (!providerPick || !("providerId" in providerPick)) return undefined;
 
   const provider = registry.getProvider(providerPick.providerId)!;
 
   // APIキーが要るプロバイダは、接続テストの前に入力してもらう
   if (isApiKeyProvider(provider)) {
     const ok = await ensureApiKey(provider);
-    if (!ok) return false;
+    if (!ok) return undefined;
   }
 
   // 接続テスト
@@ -238,7 +418,7 @@ export async function runSetupWizard(
         // コマンド経由で呼ぶ。直接 import すると読み込みが循環する
         await vscode.commands.executeCommand("novelai.setupOllama");
       }
-      return false;
+      return undefined;
     }
 
     const action = await vscode.window.showErrorMessage(
@@ -252,12 +432,12 @@ export async function runSetupWizard(
         `novelai.${providerPick.providerId}`
       );
     }
-    return false;
+    return undefined;
   }
 
   if (test.modelCount === 0) {
     vscode.window.showWarningMessage(test.message);
-    return false;
+    return undefined;
   }
 
   // モデル一覧を取得
@@ -267,7 +447,7 @@ export async function runSetupWizard(
 
   if (models.length === 0) {
     vscode.window.showWarningMessage("利用可能なモデルが見つかりませんでした。");
-    return false;
+    return undefined;
   }
 
   const tierLabel: Record<string, string> = {
@@ -297,7 +477,7 @@ export async function runSetupWizard(
     ],
     { title: "使用するモデルを選んでください", ignoreFocusOut: true }
   );
-  if (!modelPick || !("model" in modelPick)) return false;
+  if (!modelPick || !("model" in modelPick)) return undefined;
 
   // 選んだモデルで実際に生成できるか確かめる。
   // モデル一覧は残高ゼロでも返ってくるので、ここまでの確認では
@@ -320,12 +500,33 @@ export async function runSetupWizard(
       "閉じる"
     );
     if (action === "ログを表示") showLog();
-    return false;
+    return undefined;
   }
 
-  await registry.select(providerPick.providerId, modelPick.model.id);
+  return {
+    providerId: providerPick.providerId,
+    provider,
+    model: modelPick.model,
+  };
+}
 
-  const m = modelPick.model;
+/**
+ * AI設定のセットアップウィザード。
+ * 未設定でAI機能を呼んだ場合にもここへ誘導する。
+ *
+ * 選ぶところは `pickProviderAndModel` が持つ。ここは**選んだものを
+ * 既定として保存する**役目だけを持つ。
+ */
+export async function runSetupWizard(
+  registry: AIRegistry
+): Promise<boolean> {
+  const picked = await pickProviderAndModel(registry);
+  if (!picked) return false;
+
+  await registry.select(picked.providerId, picked.model.id);
+
+  const provider = picked.provider;
+  const m = picked.model;
   const notes: string[] = [];
   if (m.tier === "light") {
     notes.push(
@@ -391,11 +592,16 @@ function formatContext(tokens: number): string {
   return String(tokens);
 }
 
-/** AI機能の実行前に呼ぶ。未設定ならウィザードを出す */
+/**
+ * AI機能の実行前に呼ぶ。未設定ならウィザードを出す。
+ *
+ * **機能キーは必須。** その機能に割当があればそれを使う（設計書6.28.7）。
+ */
 export async function ensureConfigured(
-  registry: AIRegistry
+  registry: AIRegistry,
+  feature: AssignableFeature | "default"
 ): Promise<{ provider: AIProvider; model: string } | undefined> {
-  const resolved = registry.resolve();
+  const resolved = registry.resolve(feature);
   if (resolved) return resolved;
 
   const answer = await vscode.window.showInformationMessage(
@@ -406,5 +612,5 @@ export async function ensureConfigured(
   if (answer !== "設定する") return undefined;
 
   const ok = await runSetupWizard(registry);
-  return ok ? registry.resolve() : undefined;
+  return ok ? registry.resolve(feature) : undefined;
 }

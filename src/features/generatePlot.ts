@@ -58,7 +58,7 @@ export async function generatePlot(
   // 未設定なら設定させてから断るのでは順序が逆である
   if (!(await confirmFormatFit(work, "plotReverse"))) return;
 
-  const resolved = await ensureConfigured(registry);
+  const resolved = await ensureConfigured(registry, "generate");
   if (!resolved) return;
 
   const material = await collectMaterial(work);
