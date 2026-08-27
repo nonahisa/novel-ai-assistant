@@ -145,6 +145,25 @@ export async function applyPendingCharacterUpdates(
           });
           return { ok: false, reason: message };
         }
+      },
+      // 見送る＝承認待ちから片付ける（レコードには触らない）。
+      // これを渡していなかったころ、「見送る」は押しても黙って何も
+      // 起きなかった（作者の報告、2026-08-28）
+      async (id) => {
+        const target = items.find((item) => item.update.filePath === id);
+        if (!target) return { ok: false, reason: "対象が見つかりません。" };
+        try {
+          await pendingStore.discard(target.update.filePath);
+          return { ok: true };
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          logFailure("更新の見送りに失敗", {
+            人物: target.diff.name,
+            詳細: message,
+          });
+          return { ok: false, reason: message };
+        }
       }
     );
     return;

@@ -21,7 +21,7 @@ import {
  * - **件数を機械的に切る**（1000字あたり3件）。プロンプトでも言うが守らない
  * - **確信度の高いものから残す。** 切るときに迷っている提案が残ると、
  *   質の低いものだけが手元に来る
- * - 決めた4種類以外の理由を弾く（文体への干渉が紛れ込む口を塞ぐ）
+ * - 決めた6種類以外の理由を弾く（文体への干渉が紛れ込む口を塞ぐ）
  * - **変わっていない提案を弾く。** 原文と同じものを「修正案」として返す
  *
  * VS Code APIに依存しない。
@@ -150,8 +150,26 @@ export function isDialogueOnly(text: string): boolean {
 const FORBIDDEN_EXPLANATION =
   /(口語|文語|語彙|言い回しが|表現が|語感|リズム|テンポ|文体|描写|余韻|唐突|不自然|物足りな|くどい印象|やや古|硬い|柔らか)/;
 
-export function mentionsForbiddenAspect(explanation: string): boolean {
-  return FORBIDDEN_EXPLANATION.test(explanation);
+/**
+ * その札に限って許す語。
+ *
+ * 語尾単調はリズムの指摘**そのもの**なので、「リズムが単調」と説明されるのが
+ * 自然である。漢字ひらきも「硬い・古い表記」と説明されうる。全部の札に
+ * 開けると6.8.9以前（文体干渉が素通り）へ戻るので、**観点がその語を
+ * 意味している札にだけ**穴を開ける（1.5。実モデルでの測定はこれから）。
+ */
+const ALLOWED_BY_REASON: Partial<Record<string, RegExp>> = {
+  語尾単調: /(リズム|テンポ)/gu,
+  漢字ひらき: /(やや古|硬い)/gu,
+};
+
+export function mentionsForbiddenAspect(
+  explanation: string,
+  reason?: string
+): boolean {
+  const allowed = reason ? ALLOWED_BY_REASON[reason] : undefined;
+  const target = allowed ? explanation.replace(allowed, "") : explanation;
+  return FORBIDDEN_EXPLANATION.test(target);
 }
 
 export function parseProofreadResult(
@@ -221,7 +239,7 @@ export function validateProofreadIssues(
       continue;
     }
     if (!reason) {
-      // 決めた4種類以外は、文体への干渉が紛れ込む口になる
+      // 決めた6種類以外は、文体への干渉が紛れ込む口になる
       rejected.push({ raw: item, reason: "unknown_reason" });
       continue;
     }
@@ -250,8 +268,9 @@ export function validateProofreadIssues(
       rejected.push({ raw: item, reason: "dialogue_voice" });
       continue;
     }
-    // **札ではなく中身を見る。** 語彙や文体の話が、許した札を着て入ってくる
-    if (mentionsForbiddenAspect(asString(item.explanation))) {
+    // **札ではなく中身を見る。** 語彙や文体の話が、許した札を着て入ってくる。
+    // ただし札そのものがリズム・表記の観点である場合は、その語だけ許す
+    if (mentionsForbiddenAspect(asString(item.explanation), reason)) {
       rejected.push({ raw: item, reason: "forbidden_aspect" });
       continue;
     }
@@ -269,9 +288,14 @@ export function validateProofreadIssues(
     // プロンプトの「空文字にしてください」をそのまま書いたもので、
     // 押すと本文の一文がその3文字に置き換わる（2026-08-17、実データ）。
     // 中身が無いという意味なので、指摘としては残し、修正案だけ空にする
-    const usableSuggestion = isPlaceholderText(suggestion, true)
-      ? ""
-      : suggestion;
+    // **語尾単調の修正案は、コードで必ず空にする。** どの文をどう散らすかは
+    // 作者が決めること（プロンプトにも書いたが、守られない前提で切る）。
+    // 原文は複数文で50字制限に収まらず途中で切れていることがあり、
+    // そこへ修正案が付くと**切れた範囲がまるごと置き換わる**
+    const usableSuggestion =
+      reason === "語尾単調" || isPlaceholderText(suggestion, true)
+        ? ""
+        : suggestion;
     // 原文と同じものを「修正案」として返してくる。押しても何も起きない。
     // **空は別物**（直し方を作者に委ねる指摘であって、間違いではない）
     if (
@@ -372,7 +396,7 @@ function extractBraces(text: string): string | null {
  * 種類の言葉をなぞっただけだったりしたときに、これを代わりに出す。
  * **「AIが説明を返さなかったから何も出ない」を作らない。**
  *
- * 4つの種類のどれでもなければ `undefined`（誤字脱字や表記ゆれの
+ * 6つの種類のどれでもなければ `undefined`（誤字脱字や表記ゆれの
  * `reason` はここへ来る。あちらは説明そのものが `reason` に入っている）。
  */
 export function explainProofreadReason(reason: string): string | undefined {
@@ -385,6 +409,12 @@ export function explainProofreadReason(reason: string): string | undefined {
       return "どこに掛かるかが2通りに読めます";
     case "長文":
       return "一文が長く、意味を取りにくくなっています";
+    case "漢字ひらき":
+      return "読みに詰まる漢字表記です。ひらがなにすると読みやすくなります";
+    case "語尾単調":
+      // **直し方は書かない。** どう散らすかは文体そのものなので、
+      // 決めるのは作者である（修正案も空で返させている）
+      return "同じ語尾が続いてリズムが単調です。どう散らすかは作者の判断です";
     default:
       return undefined;
   }

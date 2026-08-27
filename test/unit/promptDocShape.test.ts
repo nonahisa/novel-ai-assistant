@@ -88,6 +88,7 @@ describe("プロンプト設計書の形", () => {
     ["P-21", "src/prompts/workChat.ts", "WORK_CHAT_VERSION"],
     ["P-22", "src/prompts/searchTerms.ts", "SEARCH_TERMS_VERSION"],
     ["P-23", "src/prompts/recheck.ts", "RECHECK_VERSION"],
+    ["P-24", "src/prompts/openingCheck.ts", "OPENING_CHECK_VERSION"],
   ];
 
   test.each(IMPLEMENTED)(

@@ -327,6 +327,12 @@ interface CategoryBucket {
   contradictions: ContradictionViewItem[];
   recordUpdates: RecordUpdateViewItem[];
   applyRecordUpdate?: (id: string) => Promise<{ ok: boolean; reason?: string }>;
+  /**
+   * 更新を見送る処理（承認待ちから片付ける）。**apply と必ず対にする。**
+   * これが無かったころ、「見送る」は押しても黙って何も起きなかった
+   * （dismissIssue が本文の指摘しか探さず、素通りしていた。作者の報告、2026-08-28）
+   */
+  dismissRecordUpdate?: (id: string) => Promise<{ ok: boolean; reason?: string }>;
 }
 
 function emptyBucket(): CategoryBucket {
@@ -395,6 +401,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   private recordUpdates: RecordUpdateViewItem[] = [];
   /** 更新を反映する処理。呼び出し側から渡してもらう */
   private applyRecordUpdate:
+    | ((id: string) => Promise<{ ok: boolean; reason?: string }>)
+    | undefined;
+  /** 更新を見送る処理（承認待ちから片付ける）。apply と対 */
+  private dismissRecordUpdate:
     | ((id: string) => Promise<{ ok: boolean; reason?: string }>)
     | undefined;
   private category = "誤字脱字";
@@ -492,6 +502,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       applyRecordUpdate?: (
         id: string
       ) => Promise<{ ok: boolean; reason?: string }>;
+      dismissRecordUpdate?: (
+        id: string
+      ) => Promise<{ ok: boolean; reason?: string }>;
     }
   ): void {
     // **表示中の作品の作業を、先に控えへ戻す。** 届いたのがどちらの作品でも通す
@@ -511,6 +524,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     // 反映の手順は、いちばん新しく渡されたものを使う（古い閉包を握らない）
     if (contents.applyRecordUpdate) {
       bucket.applyRecordUpdate = contents.applyRecordUpdate;
+    }
+    if (contents.dismissRecordUpdate) {
+      bucket.dismissRecordUpdate = contents.dismissRecordUpdate;
     }
     entry.categories.set(category, bucket);
 
@@ -604,6 +620,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       contradictions: this.contradictions,
       recordUpdates: this.recordUpdates,
       applyRecordUpdate: this.applyRecordUpdate,
+      dismissRecordUpdate: this.dismissRecordUpdate,
     });
   }
 
@@ -618,6 +635,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     this.contradictions = bucket.contradictions;
     this.recordUpdates = bucket.recordUpdates;
     this.applyRecordUpdate = bucket.applyRecordUpdate;
+    this.dismissRecordUpdate = bucket.dismissRecordUpdate;
     this.postItems();
   }
 
@@ -757,11 +775,14 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   showRecordUpdates(
     work: WorkEntry,
     items: RecordUpdateViewItem[],
-    apply: (id: string) => Promise<{ ok: boolean; reason?: string }>
+    apply: (id: string) => Promise<{ ok: boolean; reason?: string }>,
+    /** 見送る（承認待ちから片付ける）。渡さないと「見送る」は押せても効かない */
+    dismiss: (id: string) => Promise<{ ok: boolean; reason?: string }>
   ): void {
     this.replaceContents(work, "設定資料の更新", {
       recordUpdates: items,
       applyRecordUpdate: apply,
+      dismissRecordUpdate: dismiss,
     });
   }
 
@@ -1000,6 +1021,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     this.contradictions = [];
     this.recordUpdates = [];
     this.applyRecordUpdate = undefined;
+    this.dismissRecordUpdate = undefined;
 
     // 同じ作品に残っている分類があれば、そちらへ移る
     const next = entry ? [...entry.categories.keys()][0] : undefined;
@@ -1715,6 +1737,27 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     const contradiction = this.contradictions.find((entry) => entry.id === id);
     if (contradiction && this.work) {
       await this.dismissContradiction(contradiction, this.work);
+      return;
+    }
+
+    // 設定資料の更新。**ここを探さず素通りしていた**ため、「見送る」が
+    // 押しても黙って何も起きなかった（作者の報告、2026-08-28）。
+    // 見送り＝承認待ちから片付けるので、反映と同じく呼び出し側の処理を通す
+    const update = this.recordUpdates.find((entry) => entry.id === id);
+    if (update) {
+      if (update.status !== "pending" && update.status !== "failed") return;
+      if (!this.dismissRecordUpdate) {
+        this.markStatus(id, "failed", "見送りの処理が繋がっていません。");
+        return;
+      }
+      const outcome = await this.dismissRecordUpdate(id);
+      this.markStatus(
+        id,
+        outcome.ok ? "dismissed" : "failed",
+        outcome.ok ? undefined : outcome.reason
+      );
+      // 承認待ちが1件減ったので、メニューの印を数え直してもらう
+      if (outcome.ok) this.onCountsChanged?.();
       return;
     }
 

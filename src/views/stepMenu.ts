@@ -159,6 +159,7 @@ const STEP_DEFS: readonly StepDef[] = [
       "novelai.manageKeepWords",
       "novelai.checkNotation",
       "novelai.checkProofread",
+      "novelai.checkOpening",
       "novelai.checkDeviations",
       "novelai.checkContradictions",
     ],

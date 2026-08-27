@@ -52,6 +52,8 @@ const MARKDOWN_ALLOWED = new Set([
   "src/core/logger.ts",
   // 診断の結果をMarkdownの文書として開く（作者がそのまま貼れるように）
   "src/features/diagnoseWeb.ts",
+  // 冒頭診断のレポートをMarkdownの文書として開く（P-24）
+  "src/features/checkOpening.ts",
 ]);
 
 function collectSources(dir: string, out: string[] = []): string[] {

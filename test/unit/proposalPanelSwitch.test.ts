@@ -154,7 +154,7 @@ beforeEach(() => {
 describe("表示を切り替えると、前の中身が消える", () => {
   test("設定資料の更新のあとに誤字脱字を出すと、誤字脱字が見える", () => {
     const panel = panelWithView();
-    panel.showRecordUpdates(work, [recordUpdate], async () => ({ ok: true }));
+    panel.showRecordUpdates(work, [recordUpdate], async () => ({ ok: true }), async () => ({ ok: true }));
     expect(latest().items).toHaveLength(1);
 
     panel.showResults(work, [typo]);
@@ -168,7 +168,7 @@ describe("表示を切り替えると、前の中身が消える", () => {
   test("誤字脱字のあとに設定資料の更新を出すと、更新が見える", () => {
     const panel = panelWithView();
     panel.showResults(work, [typo]);
-    panel.showRecordUpdates(work, [recordUpdate], async () => ({ ok: true }));
+    panel.showRecordUpdates(work, [recordUpdate], async () => ({ ok: true }), async () => ({ ok: true }));
 
     expect(latest().category).toBe("設定資料の更新");
     expect(latest().items).toHaveLength(1);
@@ -177,7 +177,7 @@ describe("表示を切り替えると、前の中身が消える", () => {
 
   test("設定資料の更新のあとに矛盾を出すと、矛盾が見える", () => {
     const panel = panelWithView();
-    panel.showRecordUpdates(work, [recordUpdate], async () => ({ ok: true }));
+    panel.showRecordUpdates(work, [recordUpdate], async () => ({ ok: true }), async () => ({ ok: true }));
     panel.showContradictions(work, [
       {
         filePath: "C:/小説/いじめられっ子/本文/001.txt",
@@ -201,7 +201,7 @@ describe("表示を切り替えると、前の中身が消える", () => {
   test("結果が0件なら、前の中身を残さず0件と出す", () => {
     // 「前回の結果が残っている」と「今回0件だった」を取り違えさせない
     const panel = panelWithView();
-    panel.showRecordUpdates(work, [recordUpdate], async () => ({ ok: true }));
+    panel.showRecordUpdates(work, [recordUpdate], async () => ({ ok: true }), async () => ({ ok: true }));
     panel.showResults(work, []);
 
     expect(latest().category).toBe("誤字脱字");
@@ -263,7 +263,7 @@ describe("未処理が残っていることをタブに出す", () => {
 
   test("設定資料の更新も数える", () => {
     const panel = panelWithView();
-    panel.showRecordUpdates(work, [recordUpdate], async () => ({ ok: true }));
+    panel.showRecordUpdates(work, [recordUpdate], async () => ({ ok: true }), async () => ({ ok: true }));
     expect(badgeOf(panel)?.value).toBe(1);
   });
 
@@ -653,12 +653,22 @@ describe("推敲の説明", () => {
     expect(detailOf()).toBe("同じ意味の言葉が重なっています");
   });
 
-  test("係り受け・同語反復・長文にも言葉がある", () => {
+  test("残りの種類にも言葉がある", () => {
+    // 1.5で漢字ひらき・語尾単調を足して6種類になった（設計書6.30）。
+    // **札が増えたのに決まり文句を足し忘れると、その種類だけ説明が消える**
     const panel = panelWithView();
     for (const [reason, expected] of [
       ["係り受け", "どこに掛かるかが2通りに読めます"],
       ["同語反復", "近いところで同じ語が繰り返され、単調になっています"],
       ["長文", "一文が長く、意味を取りにくくなっています"],
+      [
+        "漢字ひらき",
+        "読みに詰まる漢字表記です。ひらがなにすると読みやすくなります",
+      ],
+      [
+        "語尾単調",
+        "同じ語尾が続いてリズムが単調です。どう散らすかは作者の判断です",
+      ],
     ]) {
       panel.showResults(work, [{ ...proofread, reason }], "推敲");
       expect(detailOf(), reason).toBe(expected);
@@ -670,5 +680,79 @@ describe("推敲の説明", () => {
     const panel = panelWithView();
     panel.showResults(work, [typo]);
     expect(detailOf()).toBeUndefined();
+  });
+});
+
+/**
+ * 設定資料の更新の「見送る」（作者の報告、2026-08-28「押せません」）。
+ *
+ * dismissIssue が矛盾→誤字脱字の順にしか探さず、設定資料の更新は
+ * **素通りして黙って何もしなかった**。見送り＝承認待ちから片付ける、を
+ * 反映と同じ形（呼び出し側の処理）で通す。
+ */
+describe("設定資料の更新の「見送る」", () => {
+  test("見送ると、片付け処理が呼ばれて「見送り」の印が付く", async () => {
+    const panel = panelWithView();
+    const discarded: string[] = [];
+    // 定数を共有すると、印の書き換えが次のテストへ漏れる。コピーを渡す
+    panel.showRecordUpdates(
+      work,
+      [{ ...recordUpdate }],
+      async () => ({ ok: true }),
+      async (id) => {
+        discarded.push(id);
+        return { ok: true };
+      }
+    );
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (panel as any).handleMessage({ type: "dismiss", id: "u1" });
+
+    expect(discarded).toEqual(["u1"]);
+    const items = latest().items as Array<{ id: string; status: string }>;
+    expect(items.find((item) => item.id === "u1")?.status).toBe("dismissed");
+  });
+
+  test("片付けに失敗したら、指摘は消えずに理由が出る", async () => {
+    const panel = panelWithView();
+    panel.showRecordUpdates(
+      work,
+      [{ ...recordUpdate }],
+      async () => ({ ok: true }),
+      async () => ({ ok: false, reason: "書き込めませんでした。" })
+    );
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (panel as any).handleMessage({ type: "dismiss", id: "u1" });
+
+    const items = latest().items as Array<{
+      id: string;
+      status: string;
+      statusDetail?: string;
+    }>;
+    const item = items.find((entry) => entry.id === "u1");
+    expect(item?.status).toBe("failed");
+    expect(item?.statusDetail).toBe("書き込めませんでした。");
+  });
+
+  test("反映は従来どおり動く（見送りを足しても壊れていない）", async () => {
+    const panel = panelWithView();
+    const applied: string[] = [];
+    panel.showRecordUpdates(
+      work,
+      [{ ...recordUpdate }],
+      async (id) => {
+        applied.push(id);
+        return { ok: true };
+      },
+      async () => ({ ok: true })
+    );
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (panel as any).handleMessage({ type: "apply", id: "u1" });
+
+    expect(applied).toEqual(["u1"]);
+    const items = latest().items as Array<{ id: string; status: string }>;
+    expect(items.find((item) => item.id === "u1")?.status).toBe("applied");
   });
 });

@@ -67,7 +67,7 @@ describe("抽出は厳しいままにする", () => {
 describe("版", () => {
   test("プロンプトを変えたら版も上がっている", () => {
     // 版を止めたままだと、古い応答がキャッシュから返る
-    expect(WORK_CHAT_VERSION).toBe("3.1");
+    expect(WORK_CHAT_VERSION).toBe("3.2");
     expect(SETTINGS_CHAT_VERSION).toBe("3.0");
   });
 });

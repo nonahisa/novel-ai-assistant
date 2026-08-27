@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  explainProofreadReason,
   hasLongSentence,
   hasRepetition,
   isDialogueOnly,
@@ -10,7 +11,7 @@ import {
   validateProofreadIssues,
   type AcceptedProofreadIssue,
 } from "../../src/core/proofreadValidation";
-import { issueBudget } from "../../src/prompts/proofread";
+import { issueBudget, PROOFREAD_REASONS } from "../../src/prompts/proofread";
 import type { Chunk } from "../../src/core/chunker";
 
 /**
@@ -71,6 +72,100 @@ describe("受け入れる提案", () => {
   });
 });
 
+/**
+ * 1.5で足した2観点（設計書6.30）。
+ *
+ * 作者の創作論（読みやすさの技術）から起こしたもので、**先の4つのように
+ * 実データの失敗から削り出した観点ではない。実モデルでの見逃し・誤検出は
+ * まだ測っていない。** ここで確かめているのは「検証を素通りしないか」だけで、
+ * AIがこの2つをどれだけ拾えるかは分かっていない。
+ */
+describe("漢字ひらき・語尾単調（1.5で追加）", () => {
+  const kanji = chunkOf("所謂、彼は殆ど何も言わなかった。");
+
+  test("漢字ひらきは、ひらがなの修正案ごと通る", () => {
+    // 機械的に直せるので、修正案を書かせている
+    const result = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 11,
+            original: "所謂",
+            suggestion: "いわゆる",
+            reason: "漢字ひらき",
+            explanation: "「所謂（いわゆる）」で読みが詰まります",
+            confidence: "high",
+          },
+        ],
+      },
+      kanji
+    );
+
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].suggestion).toBe("いわゆる");
+  });
+
+  test("語尾単調は、修正案が空のまま通る", () => {
+    // **どの文をどう変えるかは文体そのもの**なので、作者が決める
+    const result = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 12,
+            original: "彼は歩いた。彼は走った。彼は止まった。",
+            suggestion: "",
+            reason: "語尾単調",
+            explanation: "「〜た。」で終わる文が3連続です",
+            confidence: "medium",
+          },
+        ],
+      },
+      chunk
+    );
+
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].suggestion).toBe("");
+  });
+
+  /**
+   * **作者が名指しで守った語は、新しい観点でも守られる。**
+   * 推敲は原文まるごとを置き換えるので、守る語が原文に入っていれば
+   * 必ず巻き込む。固有名詞・作品の造語をひらかれると作品が壊れる。
+   */
+  test.each([
+    ["漢字ひらき", "所謂", "いわゆる"],
+    ["語尾単調", "所謂", ""],
+  ])("直さない語を含む %s の指摘は出さない", (reason, original, suggestion) => {
+    const result = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 11,
+            original,
+            suggestion,
+            reason,
+            explanation: "読みが詰まります",
+            confidence: "high",
+          },
+        ],
+      },
+      kanji,
+      [{ word: "所謂", note: "この作品の言い回し", addedAt: "2026-08-27" }]
+    );
+
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected[0].reason).toBe("kept_word");
+  });
+
+  test("札は増えたが、選択肢を写した返し方も拾える", () => {
+    // 実データで起きた形（設計書6.10.1）。6つに増えても同じ
+    expect(normalizeReason("漢字ひらき：読みが詰まります")).toBe("漢字ひらき");
+    expect(normalizeReason("語尾単調")).toBe("語尾単調");
+  });
+});
+
 describe("弾く提案", () => {
   test("本文に無い原文を弾く", () => {
     // 言い換えた「原文」を返すことがあり、適用するとどこにも当たらない
@@ -82,7 +177,7 @@ describe("弾く提案", () => {
     expect(result.rejected[0].reason).toBe("original_not_found");
   });
 
-  test("決めた4種類以外の理由を弾く", () => {
+  test("決めた6種類以外の理由を弾く", () => {
     // **文体への干渉が紛れ込む口を塞ぐ**
     for (const reason of ["語彙", "リズム", "描写不足", "もっと小説らしく"]) {
       const result = validateProofreadIssues(
@@ -365,13 +460,31 @@ describe("出しすぎを切る", () => {
 describe("理由の読み取り", () => {
   test("選択肢を写して返されても拾う", () => {
     // 矛盾検知で実際に起きた形（設計書6.10.1）
-    expect(normalizeReason("冗長|同語反復|係り受け|長文")).toBe("冗長");
+    expect(normalizeReason("冗長|同語反復|係り受け|長文|漢字ひらき|語尾単調")).toBe(
+      "冗長"
+    );
     expect(normalizeReason("同語反復：近い範囲で…")).toBe("同語反復");
   });
 
   test("知らない語は決めない", () => {
     expect(normalizeReason("語彙")).toBeUndefined();
     expect(normalizeReason("")).toBeUndefined();
+  });
+});
+
+/**
+ * **札を足したのに決まり文句を足し忘れる**と、その種類だけ画面から
+ * 説明が消える（AIが explanation を返さなかったときに何も出なくなる）。
+ * 種類は増えていくので、1つずつ書き並べるのではなく、一覧から確かめる。
+ */
+describe("種類ごとの決まり文句", () => {
+  test.each(PROOFREAD_REASONS)("%s には言葉がある", (reason) => {
+    expect(explainProofreadReason(reason)).toBeTruthy();
+  });
+
+  test("推敲以外の種類には足さない", () => {
+    // 誤字脱字の `reason` は説明そのものなので、重ねる言葉は無い
+    expect(explainProofreadReason("誤字")).toBeUndefined();
   });
 });
 
@@ -394,5 +507,103 @@ describe("並べ方", () => {
       sortProofreadIssues([make("low", 1), make("high", 2), make("medium", 3)])
         .map((entry) => entry.confidence)
     ).toEqual(["high", "medium", "low"]);
+  });
+});
+
+/**
+ * 新観点（1.5）の検収で入れた2つの防御（本体、2026-08-28）。
+ *
+ * 1. 語尾単調の説明としてモデルが自然に書くのは「リズムが単調」で、
+ *    これが禁止語の網に掛かると**新観点の指摘が全部落ちる**。
+ *    札そのものがその観点の話である場合だけ、その語を許す。
+ * 2. 語尾単調の原文は複数文で、50字制限で途中まで切れていることがある。
+ *    そこへ修正案が付くと切れた範囲がまるごと置き換わるので、コードで空にする。
+ */
+describe("新観点の説明と修正案の防御", () => {
+  const chunk = {
+    text: "彼は走った。彼は跳んだ。彼は飛んだ。彼は泳いだ。",
+    startLine: 0,
+    chapterStart: 1,
+    chapterEnd: 1,
+  } as never;
+
+  test("語尾単調の説明の「リズム」は弾かない", () => {
+    const { accepted, rejected } = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 1,
+            original: "彼は走った。彼は跳んだ。彼は飛んだ。",
+            suggestion: "",
+            reason: "語尾単調",
+            explanation: "「〜た。」で終わる文が続き、リズムが単調です",
+            confidence: "high",
+          },
+        ],
+      },
+      chunk
+    );
+    expect(rejected).toEqual([]);
+    expect(accepted).toHaveLength(1);
+  });
+
+  test("語尾単調でも、文体そのものの話は弾いたまま", () => {
+    const { accepted, rejected } = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 1,
+            original: "彼は走った。彼は跳んだ。彼は飛んだ。",
+            suggestion: "",
+            reason: "語尾単調",
+            explanation: "文体が単調で、描写に工夫がありません",
+            confidence: "high",
+          },
+        ],
+      },
+      chunk
+    );
+    expect(accepted).toEqual([]);
+    expect(rejected[0]?.reason).toBe("forbidden_aspect");
+  });
+
+  test("冗長の説明の「リズム」は、これまでどおり弾く", () => {
+    const { accepted, rejected } = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 1,
+            original: "彼は走った。彼は跳んだ。",
+            suggestion: "",
+            reason: "冗長",
+            explanation: "リズムが悪く冗長です",
+            confidence: "high",
+          },
+        ],
+      },
+      chunk
+    );
+    expect(accepted).toEqual([]);
+    expect(rejected[0]?.reason).toBe("forbidden_aspect");
+  });
+
+  test("語尾単調に修正案が付いてきても、コードで空にする", () => {
+    const { accepted } = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 1,
+            original: "彼は走った。彼は跳んだ。彼は飛んだ。",
+            suggestion: "彼は走った。跳んだかと思えば、宙を飛ぶ。",
+            reason: "語尾単調",
+            explanation: "「〜た。」で終わる文が3連続です",
+            confidence: "high",
+          },
+        ],
+      },
+      chunk
+    );
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0].suggestion).toBe("");
   });
 });

@@ -143,6 +143,7 @@ import { setWorkGoals } from "./features/setWorkGoals";
 import { checkContradictions } from "./features/checkContradictions";
 import { checkProofread } from "./features/checkProofread";
 import { checkDeviations } from "./features/checkDeviations";
+import { checkOpening } from "./features/checkOpening";
 import { pruneAllLogs } from "./features/pruneLogs";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
@@ -2376,6 +2377,23 @@ export async function activate(
         vscode.window.showInformationMessage(
           `推敲が完了しました。${parts.join(" / ")}。`
         );
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.checkOpening",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+
+        // 未保存のまま読むと、画面と違う冒頭を診断してしまう
+        if (!(await saveDirtyDocumentsBeforeExtraction(work, "冒頭診断"))) return;
+
+        // **完了の通知を出さない。** 結果そのものが文書として開くので、
+        // 「できました」を重ねると画面の手前に確認が1枚増えるだけになる
+        await checkOpening(work, aiRegistry);
       }
     )
   );
