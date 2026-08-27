@@ -424,6 +424,18 @@ button.danger:hover {
   let chatLog = [];
   let busy = false;
   /**
+   * 作品情報タブ。**宣言を忘れないこと。**
+   *
+   * この2つはかつて宣言が無かった。workInfo は受信時の代入で
+   * 暗黙のグローバルになり動いて見えたが、workSelected は
+   * 選ぶまで代入されず、一覧描画の最初の読み取りで ReferenceError
+   * になって「作品情報が何も表示されない」（実機の報告、2026-08-27）。
+   * タブの件数は workInfo しか読まないため (2) と出続け、
+   * 壊れているのは一覧だけという見え方になる。
+   */
+  let workSelected = null;
+  let workInfo = {};
+  /**
    * 相談欄に書きかけの文章。
    *
    * renderDetail() は詳細欄をまるごと作り直すので、

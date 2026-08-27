@@ -103,6 +103,42 @@ describe("作品情報を設定資料集で見られる", () => {
 });
 
 /**
+ * 「作品情報が何も表示されません」（実機の報告、2026-08-27）の再現。
+ *
+ * workSelected と workInfo の宣言が無かった。workInfo は受信時の代入で
+ * 暗黙のグローバルになり動いて見えたが、workSelected は選ぶまで代入されず、
+ * 一覧描画の最初の読み取りで ReferenceError になって一覧が空のままだった。
+ * タブの件数は workInfo しか読まないため (2) と出続け、見つけにくかった。
+ */
+describe("暗黙のグローバルを作らない", () => {
+  test("代入している変数は、すべて宣言されている", () => {
+    const code = script();
+
+    // 宣言されている名前（let / const / var / function と、関数の引数）
+    const declared = new Set<string>();
+    for (const m of code.matchAll(/\b(?:let|const|var|function)\s+(\w+)/g)) {
+      declared.add(m[1]);
+    }
+    for (const m of code.matchAll(/function\s*\w*\s*\(([^)]*)\)/g)) {
+      for (const raw of m[1].split(",")) {
+        const name = raw.trim();
+        if (/^\w+$/.test(name)) declared.add(name);
+      }
+    }
+
+    // 単純な代入の左辺（`x = ...`）。プロパティ（`a.b = ...`）と
+    // 比較（`==`）・アロー（`=>`）・複合演算子は除く
+    const assigned = new Set<string>();
+    for (const m of code.matchAll(/(?<![.\w"'`])(\w+)\s*=(?![=>])/g)) {
+      assigned.add(m[1]);
+    }
+
+    const undeclared = [...assigned].filter((name) => !declared.has(name));
+    expect(undeclared, "宣言なしで代入している（暗黙のグローバル）").toEqual([]);
+  });
+});
+
+/**
  * 記録の取り下げ（2026-08-16）。
  *
  * 名前が文字列の「null」になった組織が実データにできており、
