@@ -18,6 +18,11 @@ export interface TermEntry {
   id: string;
   /** 正式名称。別名で一致したときに本来の名前を示す */
   canonicalName: string;
+  /**
+   * 紹介の一文。原稿エディタのホバーのチップに出す（作者の依頼、2026-08-28）。
+   * 供給元が渡さなくてもよい（チップに紹介が出ないだけ）
+   */
+  summary?: string;
 }
 
 export interface TermMatch {

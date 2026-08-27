@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { WorkEntry } from "../models/types";
-import type { Character } from "../models/character";
+import { isCharacterTextField, type Character } from "../models/character";
 import type { Ability, AbilitySystem } from "../models/ability";
 import type { Location } from "../models/location";
 import { membersOf, type Organization } from "../models/organization";
@@ -101,8 +101,18 @@ import {
   buildEnrichPrompt,
   buildEnrichSchema,
   enrichableFields,
+  MISATTRIBUTED_KEY,
   type EnrichableField,
 } from "../prompts/settingsEnrich";
+import {
+  droppedTotal,
+  insertMisattributedValue,
+  parseMisattributedValues,
+  planMisattributedRecord,
+  resolveMisattributedDestination,
+  type MisattributedDestination,
+  type MisattributedValue,
+} from "../core/misattributedValues";
 import { isMeaningfulValue } from "../core/characterExtractionValidation";
 import { CustomFieldStore } from "../core/customFieldStore";
 import type { CustomFieldDefinition } from "../models/customField";
@@ -320,6 +330,20 @@ export class SettingsPanel {
   private readonly chatHistory = new Map<string, ChatTurn[]>();
   /** 有料のAIについて確認を取り終えたモデル名。切り替えたら取り直す */
   private paidConfirmedFor: string | undefined;
+  /**
+   * 直近の再読込ではじいた記述（設計書6.31.2）。
+   *
+   * 画面には見出しと行き先だけを送り、書き込む中身はこちらで持つ。
+   * 画面から返ってきた文字列をそのまま保存すると、
+   * 照合を通したはずの値が別のものへ差し替わりうる。
+   */
+  private misattributed: MisattributedValue[] = [];
+  /**
+   * その再読込の対象種別。
+   * 行き先を選べるのは人物だけ（belongsTo は人物の呼び名を前提にしており、
+   * 場所の「地域」や能力の「代償」は人物レコードに置き場所が無い）。
+   */
+  private misattributedKind: SettingsKind | undefined;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -724,7 +748,10 @@ export class SettingsPanel {
           await this.handleSave(message.kind, message.id, message.edits);
           return;
         case "enrich":
-          await this.handleEnrich(message.kind, message.id);
+          await this.handleEnrich(message.kind, message.id, message.notes);
+          return;
+        case "placeMisattributed":
+          await this.handlePlaceMisattributed(message);
           return;
         case "applyProposal":
           await this.handleApplyProposal(message);
@@ -915,13 +942,22 @@ export class SettingsPanel {
   }
 
   /**
-   * 各項目に入れる値をAIに提案させる。
+   * 本文を読み直して、各項目に入れる値をAIに提案させる（設計書6.31.1）。
    *
    * 掘り下げ（文章のメモ）と違い、設定資料の項目そのものを埋めるためのもの。
    * **提案は保存しない。** 項目ごとに現在の値と並べて見せ、
    * 作者が選んだものだけを書き込む。
+   *
+   * 作者は「留意点」を添えられる（「他の登場人物〇〇の情報が混入しています」）。
+   * 添えられたときは、この記録のものと確信できる記述だけで書き直させ、
+   * 混入と判断された記述は `misattributed` として受け取って行き先を選ばせる。
+   * **留意点が空なら、従来の「項目を充実させる」と同じ動きになる。**
    */
-  private async handleEnrich(kind: SettingsKind, id: string): Promise<void> {
+  private async handleEnrich(
+    kind: SettingsKind,
+    id: string,
+    notes?: string
+  ): Promise<void> {
     const record = this.find(kind, id);
     if (!record) {
       this.post({ type: "error", message: "選択した設定が見つかりません。" });
@@ -942,11 +978,12 @@ export class SettingsPanel {
       },
       excerpts,
       customFields: this.customFields,
+      notes,
     });
 
     const text = await this.generate(
       prompt,
-      `「${record.name}」の項目を充実させています`,
+      `「${record.name}」を読み直しています`,
       buildEnrichSchema(kind, this.customFields)
     );
     if (text === undefined) return;
@@ -984,16 +1021,226 @@ export class SettingsPanel {
       });
     }
 
-    if (proposals.length === 0) {
+    const misattributed = this.buildMisattributed(
+      kind,
+      parsed[MISATTRIBUTED_KEY],
+      excerpts
+    );
+
+    if (proposals.length === 0 && misattributed.items.length === 0) {
       this.post({
         type: "error",
         message:
-          "本文から新しく書ける内容は見つかりませんでした。抜粋の範囲に手掛かりが無いようです。",
+          "本文から新しく書ける内容は見つかりませんでした。抜粋の範囲に手掛かりが無いようです。" +
+          misattributed.droppedNotice,
       });
       return;
     }
 
-    this.post({ type: "proposal", kind, id, proposals, model: resolved.model });
+    // 行き先を選ぶときに、画面から送られてきた値ではなく
+    // こちら側の控えを使う。AIの返した文字列が往復するほど、
+    // どこで変わったのか分からなくなる
+    this.misattributed = misattributed.items;
+    this.misattributedKind = kind;
+
+    this.post({
+      type: "proposal",
+      kind,
+      id,
+      proposals,
+      model: resolved.model,
+      misattributed: this.misattributedViews(kind, misattributed.items),
+      // 行き先を選べるのは人物だけ。belongsTo は人物の呼び名を前提にしており、
+      // 場所や能力の項目（region・cost など）は人物レコードに置き場所が無い
+      placeable: kind === "character",
+      notice: misattributed.droppedNotice,
+    });
+  }
+
+  /**
+   * はじいた記述を読む（設計書6.31.2）。
+   *
+   * **照合はここで済ませる。** 本文に無い引用や、設定資料に無い項目名を
+   * 抱えたまま画面へ出すと、作者が押した先で初めて失敗することになる。
+   * 落としたものは黙って消さず、件数を通知に添える。
+   */
+  private buildMisattributed(
+    kind: SettingsKind,
+    raw: unknown,
+    excerpts: MentionExcerpt[]
+  ): { items: MisattributedValue[]; droppedNotice: string } {
+    const allowed = enrichableFields(kind, this.customFields)
+      .map((field) => field.key)
+      // 行き先は人物レコードなので、人物が持たない項目は置けない。
+      // 場所の「地域」を人物へ入れる道を作らない
+      .filter((key) => kind !== "character" || isCharacterTextField(key));
+
+    const parsed = parseMisattributedValues(
+      raw,
+      excerpts.map((excerpt) => excerpt.text).join("\n"),
+      allowed
+    );
+
+    const dropped = droppedTotal(parsed.dropped);
+    if (dropped > 0) {
+      // 画面には件数しか出さないので、内訳はログへ残す。
+      // 残さないと、照合が厳しすぎるのかAIが外しているのか分からない
+      logFailure("再読込ではじいた記述のうち、採らなかったもの", {
+        本文と照合できず: parsed.dropped.ungrounded,
+        設定資料に無い項目: parsed.dropped.unknownField,
+        中身の無い値: parsed.dropped.emptyValue,
+        形が違う: parsed.dropped.malformed,
+      });
+    }
+
+    return {
+      items: parsed.entries,
+      droppedNotice:
+        dropped === 0
+          ? ""
+          : `（本文と照合できなかった${dropped}件は除きました。内訳はログを参照）`,
+    };
+  }
+
+  /**
+   * 画面へ出す形にする。**行き先の照合はここで行う**（AIには決めさせない）。
+   *
+   * 項目名は作者が見て分かる見出しに直す。`personality` とだけ出しても、
+   * それが「性格」の欄だとは分からない。
+   */
+  private misattributedViews(
+    kind: SettingsKind,
+    entries: MisattributedValue[]
+  ): MisattributedView[] {
+    const labels = new Map(
+      enrichableFields(kind, this.customFields).map((field) => [
+        field.key,
+        field.label,
+      ])
+    );
+    return entries.map((entry, index) => ({
+      index,
+      belongsTo: entry.belongsTo,
+      fieldLabel: labels.get(entry.field) ?? entry.field,
+      value: entry.value,
+      evidence: entry.evidence,
+      destination: resolveMisattributedDestination(
+        entry.belongsTo,
+        this.characters
+      ),
+    }));
+  }
+
+  /**
+   * はじいた記述の行き先を作者が選んだ（設計書6.31.2）。
+   *
+   * **押されるまで何も書かない。** ここが、はじいた情報が
+   * 実際にファイルへ入る唯一の場所である。
+   */
+  private async handlePlaceMisattributed(
+    message: PlaceMisattributedMessage
+  ): Promise<void> {
+    const entry = this.misattributed[message.index];
+    if (!entry) {
+      this.post({
+        type: "error",
+        message: "はじいた記述が見つかりません。もう一度読み直してください。",
+      });
+      return;
+    }
+    // 画面側でもボタンを出していないが、古い画面から届くことがある。
+    // 書き込む側で必ず確かめる（人物以外は行き先を決められない）
+    if (this.misattributedKind !== "character") {
+      this.post({
+        type: "error",
+        message:
+          "はじいた情報の行き先を選べるのは、登場人物の再読込だけです。",
+      });
+      return;
+    }
+
+    const destination = resolveMisattributedDestination(
+      entry.belongsTo,
+      this.characters
+    );
+
+    try {
+      const notice =
+        destination.kind === "existing"
+          ? await this.insertIntoExisting(destination, entry)
+          : await this.createFromMisattributed(destination.name, entry);
+
+      await this.loadAll();
+      // 一覧・本文の色分け・操作メニューの印を引き直す。
+      // 新しい人物が増えたことが、他の画面にも伝わらないと分からない
+      changeObserver?.(this.work);
+      this.post({
+        type: "misattributedPlaced",
+        index: message.index,
+        ok: true,
+        message: notice,
+        groups: this.groups(),
+        // 行き先を引き直して送る。**新しく起こした人物へ、
+        // 同じ相手の2件目が「新しいレコードを起こす」で入ると、
+        // 同じ名前の記録が2つできる**
+        misattributed: this.misattributedViews(
+          "character",
+          this.misattributed
+        ),
+      });
+    } catch (error) {
+      this.post({
+        type: "misattributedPlaced",
+        index: message.index,
+        ok: false,
+        message: describeError(error),
+        groups: this.groups(),
+      });
+    }
+  }
+
+  /** 既存の人物へ入れる。上書きはせず、食い違えば作者の判断待ちにする */
+  private async insertIntoExisting(
+    destination: MisattributedDestination & { kind: "existing" },
+    entry: MisattributedValue
+  ): Promise<string> {
+    const target = this.characters.find(
+      (character) => character.id === destination.id
+    );
+    if (!target) {
+      throw new Error(
+        `「${destination.name}」が見つかりません。別の窓で取り下げられたのかもしれません。`
+      );
+    }
+
+    const result = insertMisattributedValue(target, entry);
+    if (!result.changed) {
+      return `「${destination.name}」には、同じ内容が既に入っていました。`;
+    }
+
+    await this.characterStore.saveOrUpdate(result.character);
+    if (result.conflicted) {
+      // 上書きしなかったことを、はっきり伝える。
+      // 「入れた」とだけ出すと、作者は元の値が消えたと読む
+      return (
+        `「${destination.name}」には既に別の値があったので、上書きせず` +
+        "「変化かもしれない」として残しました。参考の欄で選べます。"
+      );
+    }
+    return `「${destination.name}」の空いていた項目へ入れました。`;
+  }
+
+  /** 行き先が見つからないときに、その値だけを持つ人物を起こす */
+  private async createFromMisattributed(
+    name: string,
+    entry: MisattributedValue
+  ): Promise<string> {
+    const created = planMisattributedRecord(entry, this.characters);
+    await this.characterStore.saveOrUpdate(created);
+    return (
+      `「${created.name}」を新しく起こしました。中身はこの1項目だけなので、` +
+      "「設定資料を抽出」をもう一度実行すると本文から入ります。"
+    );
   }
 
   /** 作者が選んだ項目だけを書き込む */
@@ -1796,6 +2043,19 @@ export interface FieldProposal {
   selected: boolean;
 }
 
+/** 画面に出す、はじいた記述1件（設計書6.31.2） */
+export interface MisattributedView {
+  /** 拡張機能側が持つ控えの位置。書き込む中身はこちらで引く */
+  index: number;
+  belongsTo: string;
+  /** 作者が見て分かる項目名（`personality` ではなく「性格」） */
+  fieldLabel: string;
+  value: string;
+  evidence: string;
+  /** 行き先。既存レコードに当たったか、新しく起こすか */
+  destination: MisattributedDestination;
+}
+
 interface ApplyProposalMessage {
   type: "applyProposal";
   kind: SettingsKind;
@@ -1804,10 +2064,18 @@ interface ApplyProposalMessage {
   values: Record<string, string>;
 }
 
+interface PlaceMisattributedMessage {
+  type: "placeMisattributed";
+  /** はじいた記述の位置。中身は拡張機能側の控えから引く */
+  index: number;
+}
+
 type PanelMessage =
   | { type: "ready" }
-  | { type: "enrich"; kind: SettingsKind; id: string }
+  /** 留意点は自由記載。空のときは従来の「項目の充実」として動く */
+  | { type: "enrich"; kind: SettingsKind; id: string; notes?: string }
   | ApplyProposalMessage
+  | PlaceMisattributedMessage
   | { type: "select"; kind: SettingsKind; id: string }
   | {
       type: "save";
@@ -1877,6 +2145,22 @@ type OutgoingMessage =
       id: string;
       proposals: FieldProposal[];
       model: string;
+      /** はじいた記述。無ければ空配列 */
+      misattributed: MisattributedView[];
+      /** 行き先を選べるか（人物だけ）。false なら読むだけで出す */
+      placeable: boolean;
+      /** 照合で除いた件数の断り。無ければ空文字 */
+      notice: string;
+    }
+  | {
+      type: "misattributedPlaced";
+      index: number;
+      ok: boolean;
+      message: string;
+      /** 人物が増えることがあるので、一覧も一緒に送る */
+      groups: Record<SettingsKind, SettingsListItem[]>;
+      /** 行き先を引き直したもの。失敗したときは送らない */
+      misattributed?: MisattributedView[];
     }
   | {
       type: "chatAnswer";

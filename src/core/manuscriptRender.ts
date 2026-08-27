@@ -231,6 +231,8 @@ export interface TermSpan {
   id: string;
   kind: TermKind;
   name: string;
+  /** 紹介の一文（チップに出す）。無ければ空文字 */
+  summary: string;
 }
 
 export function collectTermSpans(text: string, index?: TermIndex): TermSpan[] {
@@ -241,6 +243,8 @@ export function collectTermSpans(text: string, index?: TermIndex): TermSpan[] {
     id: match.entry.id,
     kind: match.entry.kind,
     name: match.entry.canonicalName,
+    // ホバーのチップに出す紹介。無ければ名前と種別だけのチップになる
+    summary: match.entry.summary ?? "",
   }));
 }
 

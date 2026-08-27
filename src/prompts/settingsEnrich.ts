@@ -19,8 +19,23 @@ import { SUMMARY_MAX_CHARS } from "../core/summaryLimit";
  * 以後の抽出で更新されてよい。
  *
  * プロンプトを変更したら version を上げること。
+ *
+ * ## 変更履歴
+ *
+ * - 2.0 「AIで再読込」へ（設計書6.31）。作者の**留意点**を受け取り、
+ *   混入と判断した記述を `misattributed` として分けて返させる。
+ *   留意点が空なら、従来（1.1）と同じ「項目の充実」として動く
+ * - 1.1 変化の関与度を紹介へどこまで書くかを指示
  */
-export const SETTINGS_ENRICH_VERSION = "1.1";
+export const SETTINGS_ENRICH_VERSION = "2.0";
+
+/**
+ * はじいた記述の置き場所。
+ *
+ * スキーマの項目名と、応答を読むときの鍵を1か所に持つ。
+ * 文字列を2か所に書くと、片方を直したときにもう片方が黙って外れる。
+ */
+export const MISATTRIBUTED_KEY = "misattributed";
 
 export interface EnrichableField {
   key: string;
@@ -187,10 +202,28 @@ export function buildEnrichSchema(
       ? { type: ["string", "null"], maxLength: field.maxChars }
       : { type: ["string", "null"] };
   }
+  // **留意点が無いときも置く。** 空配列が返るだけで害は無い。
+  // 逆に、指示のあるときだけ項目を出し入れすると、
+  // モデルによっては「知らない項目」として黙って落とす
+  properties[MISATTRIBUTED_KEY] = {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        belongsTo: { type: "string" },
+        field: { type: "string" },
+        value: { type: "string" },
+        evidence: { type: "string" },
+      },
+      // 4つとも欠かせない。誰のものか・どの項目か・何を・どこに書いてあるか、
+      // どれか1つでも欠けると作者は行き先を決められない
+      required: ["belongsTo", "field", "value", "evidence"],
+    },
+  };
   return {
     type: "object",
     properties,
-    required: fields.map((field) => field.key),
+    required: [...fields.map((field) => field.key), MISATTRIBUTED_KEY],
   };
 }
 
@@ -201,14 +234,23 @@ export interface EnrichInput {
   excerpts: MentionExcerpt[];
   /** 作者が足した項目。人物のときだけ効く */
   customFields?: CustomFieldDefinition[];
+  /**
+   * 作者の留意点（設計書6.31.1）。自由記載で、原文のまま渡す。
+   *
+   * 空なら従来の「項目の充実」と同じ動きになる。
+   * 言い換えると内容が変わるので、**要約も整形もしない。**
+   */
+  notes?: string;
 }
 
 export function buildEnrichPrompt(input: EnrichInput): string {
   const fields = enrichableFields(input.kind, input.customFields);
+  const notes = input.notes?.trim();
 
   return `小説「${input.workTitle}」の${input.target.kindLabel}「${
     input.target.name
   }」について、設定資料の各項目に入れる内容を提案してください。
+${notes ? formatNotes(notes, input.target.kindLabel) : ""}
 
 【現在の設定】
 ${input.target.currentSettings}
@@ -244,7 +286,34 @@ ${fields
   それは事実ではなく解釈です。
 - 各項目は設定資料に載る文章です。「〜が読み取れる」のような
   分析口調ではなく、「冷静沈着で現実主義」のように設定として書いてください。
+- ${MISATTRIBUTED_KEY} には、**この${
+    input.target.kindLabel
+  }のものではないと判断した記述**を並べてください。
+  1件ごとに、belongsTo（本文で使われている呼び名）・field（上の項目名のどれか）・
+  value（その項目に入る値）・evidence（本文の抜粋からの逐語引用）を入れてください。
+  evidence は抜粋から**一字一句そのまま**写してください（言い換えると照合できません）。
+  はじいた記述が無ければ、空の配列 [] にしてください。
 - 前置き・後書きは不要です。指定されたJSON形式のみを出力してください。`;
+}
+
+/**
+ * 作者の留意点を指示へ差し込む（設計書6.31.1）。
+ *
+ * 発端は実データでの混同——アジャーノの紹介に皇子の場面が入っていた。
+ * **原文のまま渡す。** 「他の登場人物〇〇の情報が混入しています」という
+ * 一文の〇〇こそが手掛かりで、こちらで言い換えると失われる。
+ */
+function formatNotes(notes: string, kindLabel: string): string {
+  return `
+【作者からの留意点】
+${notes}
+
+この記録には**別の登場人物の情報が混入している可能性**があります。
+上の留意点に従い、**この${kindLabel}のものと確信できる記述だけ**で各項目を書いてください。
+**混入と判断した内容は、項目には入れず ${MISATTRIBUTED_KEY} に分けて**返してください。
+捨てずに分けることが目的です。誰のものか（本文で使われている呼び名）・
+どの項目の値か・根拠（本文からの逐語引用）を必ず添えてください。
+`;
 }
 
 function formatExcerpts(excerpts: MentionExcerpt[]): string {

@@ -198,8 +198,23 @@ describe("用語の位置", () => {
     const spans = collectTermSpans("灯は歩いた", index([{ text: "灯" }]));
 
     expect(spans).toEqual([
-      { start: 0, end: 1, id: "char_001", kind: "character", name: "灯" },
+      {
+        start: 0,
+        end: 1,
+        id: "char_001",
+        kind: "character",
+        name: "灯",
+        summary: "",
+      },
     ]);
+  });
+
+  it("紹介があれば、チップ用に一緒に返す", () => {
+    const spans = collectTermSpans(
+      "灯は歩いた",
+      index([{ text: "灯", summary: "夜市を歩く少女。" }])
+    );
+    expect(spans[0].summary).toBe("夜市を歩く少女。");
   });
 
   it("その文字位置にある用語を引ける", () => {

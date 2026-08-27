@@ -553,6 +553,66 @@ function fillOrConflict(
   return true;
 }
 
+/** 1つの値を人物へ入れた結果（`insertFieldValue`） */
+export interface FieldInsertResult {
+  /** 入れたあとの人物。**元のレコードは書き換えない** */
+  character: Character;
+  /** 何かが変わったか。false なら保存する必要も無い */
+  changed: boolean;
+  /** 空欄を埋めたか */
+  filled: boolean;
+  /** 既存の値と食い違い、作者の判断待ちになったか */
+  conflicted: boolean;
+}
+
+/**
+ * 1つの値を、抽出と同じマージ規則にのせて人物へ入れる（設計書6.31.2）。
+ *
+ * はじいた記述を本来の人物へ挿入する操作（「AIで再読込」）のために、
+ * `fillOrConflict` を1件だけ呼べるようにしたもの。
+ * **規則を書き写さない。** 空欄なら埋め、値が違えば上書きせず
+ * 食い違い（作者の判断待ち）へ回す、という判断は1か所にしかない。
+ *
+ * 話数は分かるときだけ渡す。分からないまま適当な話数を付けると、
+ * 起きていない「作中の変化」が資料に載る（設計書6.18）。
+ */
+export function insertFieldValue(
+  character: Character,
+  field: CharacterTextField,
+  value: string,
+  chapters: number[] = []
+): FieldInsertResult {
+  // 呼び出し側のレコードを書き換えない。fillOrConflict は
+  // 変化・食い違いの中身まで直に触るので、配列の要素まで写す
+  const target: Character = {
+    ...character,
+    changes: character.changes.map((change) => ({
+      ...change,
+      chapters: [...change.chapters],
+    })),
+    conflicts: character.conflicts.map((conflict) => ({
+      ...conflict,
+      values: [...conflict.values],
+      chapters: [...conflict.chapters],
+      observations: conflict.observations?.map((observation) => ({
+        ...observation,
+        chapters: [...observation.chapters],
+      })),
+    })),
+  };
+
+  const before = target[field];
+  const reported: MergeResult["conflicts"] = [];
+  const changed = fillOrConflict(target, field, value, chapters, reported);
+
+  return {
+    character: target,
+    changed,
+    filled: !before && Boolean(target[field]),
+    conflicted: reported.length > 0,
+  };
+}
+
 /**
  * 履歴のうち、いちばん後ろの話に出てきた値をレコード本体へ入れる。
  *

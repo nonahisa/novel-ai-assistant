@@ -87,7 +87,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-13",
     title: "縦書きの原稿エディタ",
     commands: ["novelai.openVertical"],
-    count: 55,
+    count: 57,
   },
   {
     id: "A-14",
@@ -276,6 +276,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 1,
   },
   {
+    id: "F-22",
+    title: "AIで再読込",
+    commands: ["novelai.openSettingsPanel"],
+    count: 6,
+  },
+  {
     id: "F-19",
     title: "設定資料パネルの作品情報タブ",
     commands: ["novelai.openSettingsPanel"],
@@ -314,4 +320,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 393;
+export const PENDING_CHECK_TOTAL = 401;

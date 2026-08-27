@@ -259,6 +259,7 @@ export class TermHighlighter implements vscode.Disposable {
             kind: "character",
             id: character.id,
             canonicalName: character.name,
+            summary: character.summary ?? undefined,
           });
         }
       }
@@ -272,6 +273,7 @@ export class TermHighlighter implements vscode.Disposable {
             kind: "location",
             id: location.id,
             canonicalName: location.name,
+            summary: location.summary ?? undefined,
           });
         }
       }
@@ -282,6 +284,7 @@ export class TermHighlighter implements vscode.Disposable {
             kind: "ability",
             id: ability.id,
             canonicalName: ability.name,
+            summary: ability.summary ?? undefined,
           });
         }
       }
@@ -294,6 +297,7 @@ export class TermHighlighter implements vscode.Disposable {
             kind: "organization",
             id: organization.id,
             canonicalName: organization.name,
+            summary: organization.summary ?? undefined,
           });
         }
       }

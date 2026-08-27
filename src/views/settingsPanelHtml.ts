@@ -444,6 +444,11 @@ button.danger:hover {
    * 作者からは「入力できない」ようにしか見えない。
    */
   let questionText = "";
+  /**
+   * 再読込の留意点に書きかけの文章（設計書6.31.1）。
+   * 質問欄と同じ理由で控える。書きかけが消えると入力できないのと同じ。
+   */
+  let notesText = "";
 
   /** 相談欄に出す例。質問の形と、観点だけを書く形の両方を見せる */
   const CHAT_EXAMPLES = {
@@ -618,8 +623,10 @@ button.danger:hover {
       proposal = null;
       chatLog = [];
       // 別の記録へ移ったら書きかけは持ち越さない。
-      // 前の相手への質問が残っていると、誰に聞いているのか分からなくなる
+      // 前の相手への質問が残っていると、誰に聞いているのか分からなくなる。
+      // 留意点も同じ（「〇〇の情報が混入」は、その記録に対する指摘である）
       questionText = "";
+      notesText = "";
       renderList();
       post("select", { kind: activeKind, id: item.id });
     });
@@ -669,6 +676,9 @@ button.danger:hover {
     // 高さを中身に合わせるので、内側でスクロールさせない。
     // 行数を固定した他の欄（相談・下書き）はこれまでどおりスクロールする
     area.style.overflowY = "hidden";
+    // 幅が変わったときに測り直せるよう、印を付けておく。
+    // 参照を配列で抱えると、描き直しで捨てた古い欄まで残る
+    area.dataset.grow = "1";
     area.addEventListener("input", function () {
       fitHeight(area);
     });
@@ -684,6 +694,18 @@ button.danger:hover {
     for (const area of pendingGrow) fitHeight(area);
     pendingGrow = [];
   }
+  /*
+    幅が変わったら測り直す。
+
+    パネルを狭めると同じ文章がより多くの行に折り返されるが、
+    高さは広かったときのpx値で固定されている。内側のスクロールは
+    切ってあるので、**はみ出した行はどこからも読めなくなる。**
+  */
+  window.addEventListener("resize", function () {
+    // 印の有無だけで引く（値まで見ると、検査が代入と読み違える）
+    const areas = el.detail.querySelectorAll("textarea[data-grow]");
+    for (const area of areas) fitHeight(area);
+  });
 
   /** 作品情報の一覧。3つ固定なので絞り込みは要らない */
   function renderWorkList() {
@@ -972,22 +994,45 @@ button.danger:hover {
     }
     markChanged();
 
-    // ── AIに各項目を埋めさせる（承認制）
-    el.detail.appendChild(heading("AIで項目を充実させる"));
+    /*
+      ── AIで再読込（設計書6.31.1。承認制）
+
+      もとは「AIで項目を充実させる」。実データで、別人の場面の記述が
+      混ざった記録ができていたため、**書き足すだけでなく読み直せる**
+      操作にした。作者は留意点を添えられる（空でも押せる）。
+    */
+    el.detail.appendChild(heading("AIで再読込"));
     const enrichHint = document.createElement("div");
     enrichHint.className = "readonly";
     enrichHint.textContent =
-      "本文を読み直して、上の各項目に入れる内容を提案させます。反映するかは項目ごとに選べます。";
+      "本文を読み直して、上の各項目に入れる内容を提案させます。反映するかは項目ごとに選べます。" +
+      "気になることがあれば、下の留意点に書いてください。";
     el.detail.appendChild(enrichHint);
+
+    const notes = document.createElement("textarea");
+    notes.placeholder =
+      "例：他の登場人物〇〇の情報が混入しています。（空のままでも実行できます）";
+    // 中身の量に合わせて高さを変える。何行書いたか見えないと直せない
+    growWithContent(notes);
+    // 書きかけを復元する。再描画で消えると入力できないのと同じ
+    notes.value = notesText;
+    notes.addEventListener("input", function () {
+      notesText = notes.value;
+    });
+    el.detail.appendChild(labelled("留意点（空欄でも押せます）", notes));
 
     const enrichRow = document.createElement("div");
     enrichRow.className = "row";
     const enrichButton = document.createElement("button");
     enrichButton.className = "action";
-    enrichButton.textContent = "項目を充実させる";
+    enrichButton.textContent = "AIで再読込";
     enrichButton.disabled = busy;
     enrichButton.addEventListener("click", function () {
-      post("enrich", { kind: detail.kind, id: detail.id });
+      post("enrich", {
+        kind: detail.kind,
+        id: detail.id,
+        notes: notes.value.trim(),
+      });
     });
     enrichRow.appendChild(enrichButton);
     el.detail.appendChild(enrichRow);
@@ -1157,7 +1202,25 @@ button.danger:hover {
     meta.textContent = proposal.model;
     box.appendChild(meta);
 
+    // 照合で除いたものがあれば、そのことを先に出す。
+    // 黙って減らすと、出なかったのが「無かった」のか分からない
+    if (proposal.notice) {
+      const notice = document.createElement("div");
+      notice.className = "readonly";
+      notice.textContent = proposal.notice;
+      box.appendChild(notice);
+    }
+
     const controls = [];
+
+    // 提案が1件も無いことがある（混入の指摘だけが返った場合）。
+    // 押しても何も起きないボタンを出さない
+    if (proposal.proposals.length === 0) {
+      if ((proposal.misattributed || []).length > 0) {
+        box.appendChild(renderMisattributed());
+      }
+      return box;
+    }
 
     // 項目が多いと、反映のたびに下まで送ることになる。上にも同じ操作を置く
     box.appendChild(bulkRow(controls));
@@ -1214,6 +1277,107 @@ button.danger:hover {
     }
 
     box.appendChild(bulkRow(controls));
+    if ((proposal.misattributed || []).length > 0) {
+      box.appendChild(renderMisattributed());
+    }
+    return box;
+  }
+
+  /**
+   * はじいた記述の行き先（設計書6.31.2）。
+   *
+   * **捨てない。** AIが「これは別人のものだ」と分けた記述を、
+   * 本来のレコードへ入れるか、新しいレコードを起こすかで残す。
+   * どちらも**押すまで何も書かない。**
+   */
+  function renderMisattributed() {
+    const box = document.createElement("div");
+    box.className = "note";
+
+    const banner = document.createElement("div");
+    banner.className = "banner";
+    banner.textContent =
+      "はじいた情報の行き先です。押すまで何も書き込みません。";
+    box.appendChild(banner);
+
+    const hint = document.createElement("div");
+    hint.className = "readonly";
+    hint.textContent = proposal.placeable
+      ? "この記録のものではないと判断された記述です。行き先を選ぶと、そちらへ入ります。" +
+        "「破棄」を押すとこの一覧も消えます（もう一度「AIで再読込」を押せば作り直せます）。"
+      : "この記録のものではないと判断された記述です。行き先を選べるのは登場人物だけなので、" +
+        "ここでは内容の確認だけできます。";
+    box.appendChild(hint);
+
+    for (const item of proposal.misattributed) {
+      const row = document.createElement("div");
+      row.className = "field-row";
+
+      const head = document.createElement("div");
+      head.className = "head";
+      const label = document.createElement("label");
+      label.textContent = item.belongsTo + " の「" + item.fieldLabel + "」";
+      // 項目名だけの見出しと違って長くなる。折り返さないと、
+      // 幅の狭いパネルで名前が枠からはみ出す
+      label.style.whiteSpace = "normal";
+      head.appendChild(label);
+      row.appendChild(head);
+
+      const value = document.createElement("div");
+      value.className = "before";
+      const valueKey = document.createElement("span");
+      valueKey.className = "k";
+      valueKey.textContent = "内容:";
+      value.appendChild(valueKey);
+      value.appendChild(document.createTextNode(item.value));
+      row.appendChild(value);
+
+      const evidence = document.createElement("div");
+      evidence.className = "before";
+      const evidenceKey = document.createElement("span");
+      evidenceKey.className = "k";
+      evidenceKey.textContent = "根拠:";
+      evidence.appendChild(evidenceKey);
+      evidence.appendChild(document.createTextNode(item.evidence));
+      row.appendChild(evidence);
+
+      if (proposal.placeable) {
+        const actions = document.createElement("div");
+        actions.className = "row";
+        const place = document.createElement("button");
+        place.className = "action secondary";
+        place.textContent =
+          item.destination.kind === "existing"
+            ? "「" + item.destination.name + "」へ挿入する"
+            : "新しいレコードを起こす";
+        // 一度書き込んだものは押し直させない。二重に入る
+        place.disabled = busy || Boolean(item.placed && item.placed.ok);
+        place.addEventListener("click", function () {
+          post("placeMisattributed", { index: item.index });
+        });
+        actions.appendChild(place);
+        row.appendChild(actions);
+
+        if (item.destination.kind === "new") {
+          const newHint = document.createElement("div");
+          newHint.className = "readonly";
+          newHint.textContent =
+            "「" + item.belongsTo + "」に当たる記録が見つかりませんでした。" +
+            "押すと、この1項目だけを持つ記録ができます。";
+          row.appendChild(newHint);
+        }
+      }
+
+      // 押した結果は、その行に出す。どれが済んだのか分からなくなるため
+      if (item.placed) {
+        const result = document.createElement("div");
+        result.className = item.placed.ok ? "readonly" : "overwrite";
+        result.textContent = item.placed.message;
+        row.appendChild(result);
+      }
+
+      box.appendChild(row);
+    }
     return box;
   }
 
@@ -1439,6 +1603,7 @@ button.danger:hover {
         proposal = null;
         chatLog = [];
         questionText = "";
+        notesText = "";
         renderTabs();
         renderList();
         renderDetail();
@@ -1452,8 +1617,32 @@ button.danger:hover {
       case "proposal":
         proposal = message;
         setStatus(
-          message.proposals.length + " 項目の提案ができました。まだ保存していません。"
+          message.proposals.length + " 項目の提案ができました。まだ保存していません。" +
+            ((message.misattributed || []).length > 0
+              ? " はじいた情報が " + message.misattributed.length + " 件あります。"
+              : "")
         );
+        renderDetail();
+        break;
+      case "misattributedPlaced":
+        // 提案そのものは閉じない。はじいた記述は何件も並ぶので、
+        // 1件入れるたびに一覧が消えると残りを入れられなくなる
+        if (proposal && proposal.misattributed) {
+          for (const item of proposal.misattributed) {
+            if (item.index === message.index) {
+              item.placed = { ok: message.ok, message: message.message };
+            }
+            // 行き先は引き直したものへ入れ替える。人物が増えたことを
+            // 反映しないと、同じ相手の2件目がもう1つ記録を起こしてしまう
+            for (const fresh of message.misattributed || []) {
+              if (fresh.index === item.index) item.destination = fresh.destination;
+            }
+          }
+        }
+        if (message.groups) groups = message.groups;
+        setStatus(message.message, !message.ok);
+        renderTabs();
+        renderList();
         renderDetail();
         break;
       case "chatAnswer":
@@ -1468,7 +1657,17 @@ button.danger:hover {
         break;
       case "saved":
         draft = null;
-        proposal = null;
+        /*
+          反映した提案は片づけるが、**はじいた記述の行き先は残す**。
+
+          ここで丸ごと消すと、項目を反映した拍子に行き先の一覧が消え、
+          もう一度AIを呼ばないと選べなくなる（はじいた情報を捨てないための
+          区画なのに、捨てることになる。設計書6.31.2）。
+        */
+        proposal =
+          proposal && (proposal.misattributed || []).length > 0
+            ? Object.assign({}, proposal, { proposals: [] })
+            : null;
         detail = message.detail;
         groups = message.groups;
         if (message.workInfo) workInfo = message.workInfo;

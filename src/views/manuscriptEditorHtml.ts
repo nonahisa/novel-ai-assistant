@@ -256,6 +256,28 @@ em.emph {
 .term-organization { color: var(--novelai-organization); }
 body.plain .term { color: inherit; }
 
+/* ── ホバーのチップ（読む面。作者の依頼、2026-08-28） ───── */
+#tip {
+  position: fixed;
+  z-index: 15;
+  max-width: 280px;
+  padding: 6px 10px;
+  border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  line-height: 1.5;
+  /* 縦書きの面の上でも、チップは横書きで読む */
+  writing-mode: horizontal-tb;
+  display: none;
+  /* チップ自身がマウスの当たりを奪うと、外れた瞬間に点滅する */
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+#tip.open { display: block; }
+#tip .tip-name { font-weight: bold; }
+#tip .tip-kind { opacity: 0.7; margin-left: 6px; font-size: 11px; }
+
 /* ── 右クリックの品書き ───────────────── */
 #menu {
   position: fixed;
@@ -347,6 +369,7 @@ body.plain .term { color: inherit; }
 </div>
 
 <div id="menu"></div>
+<div id="tip"></div>
 
 <script nonce="${nonce}">
 (function () {
@@ -870,9 +893,31 @@ body.plain .term { color: inherit; }
     return null;
   }
 
+  /**
+   * 打つ面で、選択範囲に重なる用語（作者の依頼、2026-08-28）。
+   *
+   * 点（カーソル位置）だけだと、範囲を選んでから右クリックしたときに
+   * 選んだ語の資料が引けない。選択があるときは、範囲に重なる最初の
+   * 用語を対象にする（選択内の右クリックは選択を保つので、この順で効く）。
+   */
+  function termInSelection() {
+    const start = write.selectionStart;
+    const end = write.selectionEnd;
+    if (typeof start !== "number" || typeof end !== "number" || end <= start) {
+      return null;
+    }
+    for (const span of termSpans) {
+      if (span.start < end && span.end > start) {
+        return { id: span.id, kind: span.kind, name: span.name };
+      }
+    }
+    return null;
+  }
+
   function termFrom(target) {
-    // 打つ面には要素が無いので、カーソルの位置から引く
-    if (target === write) return termAtCaret();
+    // 打つ面には要素が無いので、カーソルの位置から引く。
+    // 範囲を選んでいれば、範囲に重なる用語を優先する
+    if (target === write) return termInSelection() || termAtCaret();
     const el = target && target.closest ? target.closest(".term") : null;
     if (!el) return null;
     return {
@@ -906,6 +951,73 @@ body.plain .term { color: inherit; }
     if (term) {
       vscode.postMessage({ type: "openTerm", id: term.id, kind: term.kind });
     }
+  });
+
+  /* ── 読む面のホバーのチップ（作者の依頼、2026-08-28） ── */
+  const tip = document.getElementById("tip");
+  const TIP_KIND_LABELS = {
+    character: "人物",
+    location: "場所",
+    ability: "能力",
+    organization: "組織",
+  };
+
+  /** 紹介の一文。届いた用語の一覧（termSpans）から同じidを引く */
+  function tipSummaryOf(id) {
+    for (const span of termSpans) {
+      if (span.id === id && span.summary) return span.summary;
+    }
+    return "";
+  }
+
+  read.addEventListener("mouseover", function (event) {
+    const el =
+      event.target && event.target.closest
+        ? event.target.closest(".term")
+        : null;
+    if (!el) {
+      tip.classList.remove("open");
+      return;
+    }
+    tip.innerHTML = "";
+    const head = document.createElement("div");
+    const nameEl = document.createElement("span");
+    nameEl.className = "tip-name";
+    nameEl.textContent = el.getAttribute("data-term-name") || "";
+    const kindEl = document.createElement("span");
+    kindEl.className = "tip-kind";
+    kindEl.textContent =
+      TIP_KIND_LABELS[el.getAttribute("data-term-kind")] || "";
+    head.appendChild(nameEl);
+    head.appendChild(kindEl);
+    tip.appendChild(head);
+    const body = document.createElement("div");
+    const summary = tipSummaryOf(el.getAttribute("data-term-id"));
+    // 紹介が無くても名前と種別だけのチップを出す（クリックで資料を開ける）
+    body.textContent = summary || "（紹介はまだありません）";
+    tip.appendChild(body);
+    tip.classList.add("open");
+    // 用語の近くに出し、画面の外へはみ出さないよう収める
+    const rect = el.getBoundingClientRect();
+    const box = tip.getBoundingClientRect();
+    const left = Math.min(rect.left, window.innerWidth - box.width - 8);
+    const below = rect.bottom + 6;
+    const top =
+      below + box.height > window.innerHeight
+        ? rect.top - box.height - 6
+        : below;
+    tip.style.left = Math.max(4, left) + "px";
+    tip.style.top = Math.max(4, top) + "px";
+  });
+  read.addEventListener("mouseout", function (event) {
+    const el =
+      event.target && event.target.closest
+        ? event.target.closest(".term")
+        : null;
+    if (el) tip.classList.remove("open");
+  });
+  read.addEventListener("scroll", function () {
+    tip.classList.remove("open");
   });
 
   /* ── 拡張機能からの知らせ ──────────── */

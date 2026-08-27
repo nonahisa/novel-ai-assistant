@@ -218,6 +218,86 @@ describe("名前の書き換え", () => {
 });
 
 /**
+ * AIで再読込（設計書6.31）。
+ *
+ * 「AIで項目を充実させる」を改め、作者が留意点を添えて読み直させる操作にした。
+ * 混入と判断された記述は捨てず、行き先を選ばせる。
+ */
+describe("AIで再読込", () => {
+  test("ボタンと見出しが「AIで再読込」になっている", () => {
+    const body = script();
+    expect(body).toContain('textContent = "AIで再読込"');
+    // 旧「項目を充実させる」。改名の経緯はコメントに残してよいが、
+    // 画面に出る文言としては残さない
+    expect(body).not.toContain('textContent = "項目を充実させる"');
+  });
+
+  test("留意点の欄があり、記載例を出す", () => {
+    const body = script();
+    expect(body).toContain("留意点（空欄でも押せます）");
+    // 何を書けばよいか分からない自由記載欄は、書かれないのと同じ
+    expect(body).toContain("例：他の登場人物〇〇の情報が混入しています。");
+    expect(body).toContain("空のままでも実行できます");
+  });
+
+  test("留意点を拡張機能側へ渡す", () => {
+    expect(script()).toContain("notes: notes.value.trim()");
+  });
+
+  test("はじいた情報の行き先を、承認画面に並べる", () => {
+    const body = script();
+    expect(body).toContain("はじいた情報の行き先");
+    // どちらのボタンも用意する（当たったとき／当たらなかったとき）
+    expect(body).toContain("」へ挿入する");
+    expect(body).toContain("新しいレコードを起こす");
+  });
+
+  test("押すまで何も書かないと、画面にも書く", () => {
+    expect(script()).toContain("押すまで何も書き込みません");
+  });
+
+  test("画面は位置だけを送る（値を往復させない）", () => {
+    // AIの返した文字列が画面を往復するほど、どこで変わったのか分からなくなる
+    expect(script()).toContain('post("placeMisattributed", { index: item.index })');
+  });
+
+  test("項目を反映しても、行き先の一覧は消えない", () => {
+    // ここで消すと、作者は行き先を選ぶ前に一覧を失う
+    const body = script();
+    const at = body.indexOf('case "saved"');
+    expect(at).toBeGreaterThan(0);
+    expect(body.slice(at, at + 900)).toContain("misattributed");
+  });
+});
+
+/**
+ * 入力欄の高さ（作者の要望、2026-08-28）。
+ * 「文字量にあわせてフォームの大きさを可変にしてください」
+ */
+describe("入力欄の高さ", () => {
+  test("中身に合わせて伸びる欄は、編集欄・提案・留意点の3つ", () => {
+    // 相談の入力と下書きは、別の理由で行数を固定してある（増減させない）
+    const uses = script().split("growWithContent(").length - 1;
+    // 定義が1つ、呼び出しが3つ
+    expect(uses).toBe(4);
+  });
+
+  test("行数を固定した欄は、内側でスクロールする", () => {
+    const body = script();
+    expect(body).toContain("question.rows = 2");
+    expect(body).toContain("body.rows = 8");
+  });
+
+  test("幅が変わったら測り直す", () => {
+    // 狭めると折り返しが増えるのに高さは固定のままで、
+    // 内側のスクロールも切ってあるため、はみ出した行が読めなくなる
+    const body = script();
+    expect(body).toContain('window.addEventListener("resize"');
+    expect(body).toContain("textarea[data-grow]");
+  });
+});
+
+/**
  * 別人に分ける（設計書6.5.8）。
  *
  * WebViewは実機でしか動かないので、**組み立てに入っていること**だけを見る。
