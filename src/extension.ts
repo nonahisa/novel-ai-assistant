@@ -192,6 +192,43 @@ const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
 export async function activate(
   context: vscode.ExtensionContext
 ): Promise<{ extendMarkdownIt<T extends MarkdownItLike>(md: T): T }> {
+  /**
+   * F5の開発ホストで、押した操作を記録する（作者の依頼、2026-08-27）。
+   *
+   * **本番の束には1バイトも入らない。** 本番ビルドでは `__DEV_HELPERS__` が
+   * `false` に畳まれ、この枝ごと（中の動的importも）落ちる。残るのは
+   * `logOperation` が `undefined` のままの変数だけで、下の包みは素通りになる。
+   *
+   * 記録は node:fs で書く。ブラウザの開発ビルド（vscode.dev）には fs が無いので
+   * 記録しない——F5の「拡張機能開発ホスト」は常にデスクトップなので実害はない。
+   */
+  let logOperation: ((command: string) => void) | undefined;
+  if (__DEV_HELPERS__ && canRunProcesses()) {
+    const dev = await import("./dev/operationLog.js");
+    dev.initOperationLog(context.extensionPath);
+    logOperation = dev.logOperation;
+  }
+
+  /**
+   * コマンド登録の包み。**登録の入口を1か所にまとめて、押された事実を残す。**
+   *
+   * 個々のハンドラへ記録を書き足す形にすると、80か所のうち書き忘れたものだけが
+   * 静かに記録されなくなる（しかも気づけない）。入口で包めば、
+   * **新しく足したコマンドも自動で記録の対象になる。**
+   *
+   * 残すのは「実行した事実」だけで、通ったかどうかは残さない
+   * （判断は作者がする。`src/dev/checkRunner.ts`）。
+   */
+  const registerCommand: typeof vscode.commands.registerCommand = (
+    command,
+    callback,
+    thisArg
+  ) =>
+    vscode.commands.registerCommand(command, (...args: unknown[]) => {
+      logOperation?.(command);
+      return callback.apply(thisArg, args);
+    });
+
   const registry = new WorkRegistry(context);
   await registry.initialize();
 
@@ -365,16 +402,21 @@ export async function activate(
   if (__DEV_HELPERS__) {
     const { registerCheckRunner } = await import("./dev/checkRunner.js");
     context.subscriptions.push(registerCheckRunner(context));
+    // 操作ログを確認リストへ書き戻す道具。**合否の印には触らない**
+    const { registerReflectOperationLog } = await import(
+      "./dev/reflectOperationLog.js"
+    );
+    context.subscriptions.push(registerReflectOperationLog(context));
   }
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.syncAllWorks", async () => {
+    registerCommand("novelai.syncAllWorks", async () => {
       const { syncAllWorks } = await import("./features/syncAllWorks.js");
       await syncAllWorks({ registry, monitor: gitSync });
     }),
     // 別のPCとこちらの両方で書くと分岐する（設計書5.5.16）。
     // これまでは「Gitのクライアントで解決してください」で行き止まりだった
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.resolveDivergence",
       async (node?: WorkNode) => {
         // 合わせる相手は置き場（リポジトリ）だが、選んでもらうのは作品にする。
@@ -389,7 +431,7 @@ export async function activate(
         await resolveDivergence({ registry, monitor: gitSync }, work);
       }
     ),
-    vscode.commands.registerCommand("novelai.openVertical", async () => {
+    registerCommand("novelai.openVertical", async () => {
       const uri = vscode.window.activeTextEditor?.document.uri;
       if (!uri) {
         void vscode.window.showWarningMessage(
@@ -406,7 +448,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.showSettingsForTerm",
       async () => {
         const editor = vscode.window.activeTextEditor;
@@ -630,14 +672,14 @@ export async function activate(
     // アイコンを増やすと、同じ絵柄が並んで何のアイコンか分からなくなる
     // （実機で指摘、2026-08-15）。左サイドバーの中に置き、
     // メニューと本文の右クリックから開く形にした
-    vscode.commands.registerCommand("novelai.openChat", async () => {
+    registerCommand("novelai.openChat", async () => {
       // 呼ぶ前に、今開いている本文を確実に覚えさせる。
       // このコマンド自体はエディターのフォーカスを奪わないが、
       // パネルを開いた時点で activeTextEditor は取れなくなる
       workChatPanel.trackEditor(vscode.window.activeTextEditor);
       await vscode.commands.executeCommand(`${WORK_CHAT_VIEW_ID}.focus`);
     }),
-    vscode.commands.registerCommand("novelai.exitChatFocus", async () => {
+    registerCommand("novelai.exitChatFocus", async () => {
       await setChatFocus(false);
     })
   );
@@ -965,7 +1007,7 @@ export async function activate(
   }
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.addWork", async () => {
+    registerCommand("novelai.addWork", async () => {
       // ブラウザ版では、開いているフォルダーから選ぶ（設計書5.8.8）
       const folderPath = await pickFolder(
         "作品フォルダを選択",
@@ -977,7 +1019,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.createWork", async () => {
+    registerCommand("novelai.createWork", async () => {
       await createNewWork();
     })
   );
@@ -986,10 +1028,10 @@ export async function activate(
   // 「プロットから開始」を押した作者に、もう一度「どちらから始めますか」と
   // 訊き返すのは失礼である
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.createWorkWithPlot", async () => {
+    registerCommand("novelai.createWorkWithPlot", async () => {
       await createNewWork("plot");
     }),
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.createWorkFromManuscript",
       async () => {
         await createNewWork("manuscript");
@@ -1071,7 +1113,7 @@ export async function activate(
   }
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.createPlot",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1081,7 +1123,7 @@ export async function activate(
     ),
     // 対話でプロットを埋める（設計書6.4.7）。**AIに筋書きを作らせず、
     // まだ書かれていない項目を1つずつ尋ねて引き出す**
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.plotInterview",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1089,7 +1131,7 @@ export async function activate(
         await workChatPanel.startPlotInterview(work);
       }
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.setPlotBasics",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1097,7 +1139,7 @@ export async function activate(
         await setPlotBasics(work);
       }
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.setWorkGoals",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1110,7 +1152,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.generatePlot",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1124,7 +1166,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.addWorkFromGithub", async () => {
+    registerCommand("novelai.addWorkFromGithub", async () => {
       // **ブラウザ版でも、別のリポジトリの作品を登録できる**（設計書5.8.12）。
       // 取り寄せる（`git clone`）代わりに、GitHubの中身を直に読む仕組みを指す。
       // 場所が決まったあとは「フォルダから追加」とまったく同じ道を通る
@@ -1149,7 +1191,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.gitRestore",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1173,7 +1215,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.setupGithub",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1215,7 +1257,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.setupOllama", async () => {
+    registerCommand("novelai.setupOllama", async () => {
       if (!canRunProcesses()) {
         vscode.window.showWarningMessage(
           "Ollamaの導入案内はブラウザ版では使えません（ローカルで動くAIのため）。"
@@ -1228,7 +1270,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.runFullSetup", async () => {
+    registerCommand("novelai.runFullSetup", async () => {
       if (!canRunProcesses()) {
         vscode.window.showWarningMessage(
           "この案内はブラウザ版では使えません。AI設定から個別に設定してください。"
@@ -1241,7 +1283,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.openChatLog",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1268,7 +1310,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.setupVectorSearch", async () => {
+    registerCommand("novelai.setupVectorSearch", async () => {
       if (!canRunProcesses()) {
         vscode.window.showWarningMessage(
           "意味検索の設定はブラウザ版では使えません（ローカルで動くAIのため）。"
@@ -1283,19 +1325,19 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.showVersion", async () => {
+    registerCommand("novelai.showVersion", async () => {
       await showVersion(context, aiRegistry);
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.chooseChatWork", async () => {
+    registerCommand("novelai.chooseChatWork", async () => {
       await workChatPanel.chooseWork();
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.buildVectorIndex",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1325,7 +1367,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.clearVectorIndex",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1344,7 +1386,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.openExtensionSettings", async () => {
+    registerCommand("novelai.openExtensionSettings", async () => {
       // この拡張機能の設定だけに絞る。VS Code全体の設定を開くと、
       // 作者は目的の項目にたどり着けない。
       //
@@ -1361,7 +1403,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.removeWork",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1381,13 +1423,13 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.refresh", () => {
+    registerCommand("novelai.refresh", () => {
       treeProvider.refresh();
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.gitSync",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1405,7 +1447,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.resolveConflicts",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1439,7 +1481,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.gitPull",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1468,7 +1510,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.gitPush",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1496,7 +1538,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.openWorkFolder",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1509,7 +1551,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.showWorkStats",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1538,7 +1580,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.showWritingStats",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1549,13 +1591,13 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.showAllWorksWritingStats", async () => {
+    registerCommand("novelai.showAllWorksWritingStats", async () => {
       await openAllWorksWritingStatsPanel(context, registry, deviceId);
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.addEpisode",
       async (node?: WorkNode | EpisodeNode) => {
         const work =
@@ -1629,19 +1671,19 @@ export async function activate(
   // ─── AI関連コマンド ───
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.setupAI", async () => {
+    registerCommand("novelai.setupAI", async () => {
       await runSetupWizard(aiRegistry);
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.showLog", () => {
+    registerCommand("novelai.showLog", () => {
       showLog();
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.mergeIntoLibrary", async () => {
+    registerCommand("novelai.mergeIntoLibrary", async () => {
       const { mergeIntoLibrary } = await import(
         "./features/mergeIntoLibrary.js"
       );
@@ -1653,7 +1695,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.diagnoseWeb", async () => {
+    registerCommand("novelai.diagnoseWeb", async () => {
       // 作品が登録されていればその中で試す。無ければ開いているフォルダーで
       const { diagnoseWeb } = await import("./features/diagnoseWeb.js");
       await diagnoseWeb(registry.list());
@@ -1661,7 +1703,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.exportImeDictionary",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1675,7 +1717,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.manageCustomFields",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1686,7 +1728,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.applyPendingUpdates",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry, {
@@ -1716,7 +1758,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.unifyCharacters",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1734,7 +1776,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.selectOllamaExecutable",
       async () => {
         if (!canRunProcesses()) {
@@ -1752,7 +1794,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.openSettingsPanel",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1763,7 +1805,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.generateSettingsDocs",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1782,7 +1824,7 @@ export async function activate(
     ["novelai.generateWorldDocs", "world"],
   ] as const) {
     context.subscriptions.push(
-      vscode.commands.registerCommand(command, async (node?: WorkNode) => {
+      registerCommand(command, async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
         await generateSettingsDocs(work, { kinds: [kind] });
@@ -1806,7 +1848,7 @@ export async function activate(
     ["novelai.extractWorldOnly", "world", "世界観"],
   ] as const) {
     context.subscriptions.push(
-      vscode.commands.registerCommand(command, async (node?: WorkNode) => {
+      registerCommand(command, async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
         if (!(await saveDirtyDocumentsBeforeExtraction(work, `${label}の抽出`)))
@@ -1827,7 +1869,7 @@ export async function activate(
   }
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.testAI", async () => {
+    registerCommand("novelai.testAI", async () => {
       const resolved = aiRegistry.resolve();
       if (!resolved) {
         vscode.window.showInformationMessage(
@@ -1879,7 +1921,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.extractSettings",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1906,7 +1948,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.manageKeepWords",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1917,7 +1959,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.checkTypos",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1952,7 +1994,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.checkNotation",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -1984,7 +2026,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.checkDeviations",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -2023,7 +2065,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.checkProofread",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -2053,7 +2095,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.checkContradictions",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -2089,7 +2131,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.checkTyposForFile",
       async (node?: EpisodeNode) => {
         if (!node) return;
@@ -2111,7 +2153,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.deleteEpisodeFile",
       async (node?: EpisodeNode) => {
         if (!node) return;
@@ -2153,7 +2195,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.generateSynopses",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -2175,7 +2217,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.openSynopsisDocs",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -2275,7 +2317,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.generateWorkBlurb",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -2286,7 +2328,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.generateCatchphrases",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -2297,16 +2339,16 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.addRuby", addRuby),
-    vscode.commands.registerCommand("novelai.addEmphasis", addEmphasis),
-    vscode.commands.registerCommand("novelai.copyForPosting", copyForPosting),
-    vscode.commands.registerCommand("novelai.importRuby", importRuby)
+    registerCommand("novelai.addRuby", addRuby),
+    registerCommand("novelai.addEmphasis", addEmphasis),
+    registerCommand("novelai.copyForPosting", copyForPosting),
+    registerCommand("novelai.importRuby", importRuby)
   );
 
   // **入口を2つ持たせる**（設計書6.12.1）。ファイルを右クリックしたときは
   // 対象が決まっているので訊かない。操作メニューからは、まとめてか1件かを選ぶ
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.convertToMarkdown",
       async (node?: EpisodeNode | WorkNode) => {
         const { convertOne, convertToMarkdown } = await import(
@@ -2335,7 +2377,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.showEditHistory",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -2346,7 +2388,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.reviewProposals",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -2354,7 +2396,7 @@ export async function activate(
         await reviewProposals(work, proposalPanel);
       }
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.toggleReviewLock",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -2364,7 +2406,7 @@ export async function activate(
     ),
     // 編集部へ渡す／提案を取り込む（設計書5.7.5）。
     // **書庫へ編集部を招けない**ので、その作品だけを切り出して渡す
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.shareWithEditor",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -2381,7 +2423,7 @@ export async function activate(
         await shareWithEditor(work);
       }
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.collectEditorProposals",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
@@ -2401,7 +2443,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.splitCollectedFile",
       async (node?: EpisodeNode) => {
         if (!node) return;
@@ -2418,13 +2460,13 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.copySubtitle",
       async (node?: EpisodeNode) => {
         if (node) await copySubtitle(node.episode);
       }
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.copyBodyForPosting",
       async (node?: EpisodeNode) => {
         if (!node) return;
@@ -2437,7 +2479,7 @@ export async function activate(
         await copyBodyForPosting(node.episode);
       }
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       "novelai.renameWithSubtitle",
       async (node?: EpisodeNode) => {
         if (!node) return;
@@ -2448,7 +2490,7 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("novelai.switchMode", async () => {
+    registerCommand("novelai.switchMode", async () => {
       await switchMode();
       // 押せる操作が変わるので、メニューを作り直す
       actionProvider.refresh();

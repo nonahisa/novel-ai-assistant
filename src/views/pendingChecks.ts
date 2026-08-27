@@ -267,9 +267,9 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "H",
     title: "ブラウザ版（vscode.dev / github.dev）",
     commands: ["novelai.diagnoseWeb"],
-    count: 15,
+    count: 12,
   },
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 350;
+export const PENDING_CHECK_TOTAL = 347;

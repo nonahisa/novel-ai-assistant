@@ -1,8 +1,10 @@
 import * as vscode from "vscode";
-import * as paths from "../core/paths";
 import { PENDING_CHECKS, type PendingCheckSection } from "../views/pendingChecks";
 import { PENDING_CHECK_ITEMS } from "./pendingCheckItems";
 import { cancelItem, isCancelItem } from "../views/dialogs";
+// 確認リストの置き場と見出しの探し方は、操作ログの反映と共用する
+import { checklistUri, findHeading } from "./reflectOperationLog";
+import type { OperationCount } from "./operationLog";
 
 /**
  * 実機確認リストを、速く回すための道具（作者の依頼、2026-08-26）。
@@ -34,10 +36,11 @@ import { cancelItem, isCancelItem } from "../views/dialogs";
  *
  * 「通ったか」を機械が決めることはできない。**印を付けるのは作者**である。
  * ここが自動で進むと、確かめていないものが済んだことになる。
+ *
+ * **操作ログ（`operationLog.ts`）が自動で持つのは「何回動かしたか」まで。**
+ * 節一覧の右へ実行回数を出すのは、どこを触っていないかを見せるためであって、
+ * 済んだことにするためではない。
  */
-
-/** 確認リストの場所。**拡張機能のフォルダーから引く**（開いている作品とは無関係） */
-const CHECKLIST = "docs/実機確認リスト.md";
 
 export function registerCheckRunner(
   context: vscode.ExtensionContext
@@ -83,9 +86,14 @@ async function pickSection(): Promise<SectionChoice | undefined> {
     tooltip: "この機能を実行する",
   };
 
+  // **押した端から回数が見えるようにする**（作者の依頼、2026-08-27）。
+  // 「残り」は作者が印を付けるまで減らないので、それだけでは
+  // **どこにまだ触っていないか**が分からない
+  const summary = await readSummarySafely();
+
   const items: SectionItem[] = PENDING_CHECKS.map((section) => ({
     label: `${section.id ? `${section.id}. ` : ""}${section.title}`,
-    description: `残り${section.count}`,
+    description: describeProgress(section, summary),
     detail:
       section.commands.length > 0
         ? `実行できます: ${section.commands.join(" / ")}`
@@ -288,24 +296,32 @@ async function markDone(
   );
 }
 
-/** その節の見出しの行。無ければ undefined */
-function findHeading(
-  markdown: string,
-  section: PendingCheckSection
-): number | undefined {
-  const lines = markdown.split("\n");
-  const at = lines.findIndex((line) => {
-    if (!/^#{2,3}\s/.test(line)) return false;
-    const text = line.replace(/^#{2,3}\s+/, "");
-    return section.id
-      ? text.startsWith(`${section.id}.`)
-      : text.startsWith(section.title);
-  });
-  return at === -1 ? undefined : at;
+/**
+ * 操作の記録。**読めなくても節一覧は出す。**
+ *
+ * 記録は node:fs で書いており、ブラウザの開発ビルドには fs が無い。
+ * そこで読み込み自体が落ちても、失うのは回数の表示だけにする——
+ * 確認を回すこと自体を止めてよい理由にはならない。
+ */
+async function readSummarySafely(): Promise<ReadonlyMap<string, OperationCount>> {
+  try {
+    const { readOperationSummary } = await import("./operationLog.js");
+    return readOperationSummary();
+  } catch {
+    return new Map();
+  }
 }
 
-function checklistUri(context: vscode.ExtensionContext): vscode.Uri {
-  return paths.toUri(paths.join(context.extensionPath, CHECKLIST));
+/** 節一覧の右に出す文。実行したことがある節だけ、回数を添える */
+function describeProgress(
+  section: PendingCheckSection,
+  summary: ReadonlyMap<string, OperationCount>
+): string {
+  const runs = section.commands.reduce(
+    (sum, command) => sum + (summary.get(command)?.count ?? 0),
+    0
+  );
+  return runs > 0 ? `残り${section.count}／実行${runs}回` : `残り${section.count}`;
 }
 
 function total(): number {

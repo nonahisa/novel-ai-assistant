@@ -61,6 +61,19 @@ export function buildPendingCheckGroup(
             "通った項目に印を付けると、**確認リストへ書き戻します**。" +
             "配布物には入りません（開発ビルドだけの道具です）。",
         },
+        {
+          kind: "action",
+          command: "novelai.reflectOperationLog",
+          label: "操作ログを確認リストへ反映",
+          icon: "sync",
+          requiresWork: false,
+          devOnly: true,
+          detail:
+            "F5で押した操作の記録を、確認リストの節ごとに" +
+            "**最終実行と回数**として書き足します。" +
+            "**通ったかの印（[x]）には触りません**——" +
+            "押したことと通ったことは別で、判断は作者がします。",
+        },
       ],
     });
   }

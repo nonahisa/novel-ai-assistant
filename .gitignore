@@ -19,6 +19,10 @@ _peek*
 *.vsix
 .worktrees/
 
+# F5の操作ログ（src/dev/operationLog.ts）。
+# どの環境で何を触ったかという個人の作業記録なので、同期しない
+/logs/
+
 # Claude Code の個人設定（エージェント定義 .claude/agents/ は共有する）
 .claude/*
 !.claude/agents/

@@ -31,6 +31,10 @@ const FORBIDDEN_CONTENT_PATTERNS = [
   // ASCIIの名前で見る——日本語は逃がされた形になるため（0.13.0で踏んだ）
   /novelai[.]runChecks/,
   /checkRunner/,
+  // F5の操作ログ（作者の依頼、2026-08-27）。作者がどの機能をいつ触ったかという
+  // 個人の作業記録に繋がるので、道具ごと配布物へ出さない
+  /novelai[.]reflectOperationLog/,
+  /operationLog/,
   // 確認リストの項目の文章。**作者の作品名が入る**ので配布物へ出さない
   /PENDING_CHECK_ITEMS/,
 ];
