@@ -276,6 +276,14 @@ export interface RecordUpdateViewItem {
 type OutgoingMessage = {
   type: "issues";
   workTitle: string;
+  /**
+   * いま表示している作品のid。
+   *
+   * **スクロール位置を保つ判定に使う**（0.22.24の積み残し）。別作品の
+   * 結果が届いて描き直されるたびに先頭へ戻っていた。題名は同名の作品が
+   * ありうるので、判定はidで行う。
+   */
+  workId: string;
   /** パネルの見出し。誤字脱字か表記ゆれか矛盾かで変わる */
   category: string;
   items: Array<
@@ -882,6 +890,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     const message: OutgoingMessage = {
       type: "issues",
       workTitle: this.work?.title ?? "",
+      workId: this.work?.id ?? "",
       category: this.category,
       items: updateMode
         ? this.recordUpdates

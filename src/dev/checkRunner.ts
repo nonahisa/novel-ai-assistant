@@ -117,9 +117,7 @@ async function pickSection(): Promise<SectionChoice | undefined> {
   // **閉じる道を画面に出す**（設計書6.17.3）。Escを知らない人には出口が無く見える
   quick.items = [...items, cancelItem()];
   // `ignoreFocusOut` は既定（false）のまま。ここは打ち込んだ入力を失う画面ではないので、
-  // 外側をクリックしても抜けられるほうがよい（書き換える前の選択画面と同じ挙動）。
-  // なお、この画面の名前をコメントに書かないこと——`quickPickCancel.test.ts` が
-  // 文字列で呼び出し箇所を拾うので、コメントでも呼び出しと見なされて落ちる
+  // 外側をクリックしても抜けられるほうがよい（書き換える前の選択画面と同じ挙動）
 
   const done = new Promise<SectionChoice | undefined>((resolve) => {
     quick.onDidTriggerItemButton((event) => {

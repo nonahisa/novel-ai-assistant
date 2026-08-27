@@ -597,9 +597,24 @@ function canKeep(item) {
   return word.length >= 2 && word.length <= 20;
 }
 
+/**
+ * 直前に表示していた一覧の主（作品id＋分類）。
+ *
+ * **同じ一覧の描き直しでは、読んでいた位置を保つ**（0.22.24の積み残し）。
+ * 別作品の結果が届く・1件適用する、のたびに全体を描き直すため、
+ * そのままだと読んでいた位置が先頭へ戻ってしまう。
+ * 別の作品・分類へ切り替わったときは先頭へ戻す（別の一覧を
+ * 途中から見せられても、どこを見ているのか分からない）。
+ */
+let lastListKey = '';
+
 window.addEventListener('message', (event) => {
   const message = event.data;
   if (message.type === 'issues') {
+    const listKey = (message.workId || '') + '/' + (message.category || '');
+    const keepScroll = listKey === lastListKey;
+    const scrollY = window.scrollY;
+    lastListKey = listKey;
     // 見出しは検知の種類で変わる（誤字脱字／表記ゆれ）
     document.getElementById('category').textContent = message.category || '誤字脱字';
     // 矛盾には「まとめて適用」が無い。どちらが正しいか決められないため
@@ -609,6 +624,8 @@ window.addEventListener('message', (event) => {
     renderWorks(message.works);
     renderTabs(message.categories);
     render(message.workTitle, message.items);
+    // 描き直しが終わってから戻す（先に戻すと、描き直しで打ち消される）
+    window.scrollTo(0, keepScroll ? scrollY : 0);
   }
 });
 </script>

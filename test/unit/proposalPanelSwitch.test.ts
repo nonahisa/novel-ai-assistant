@@ -757,3 +757,36 @@ describe("設定資料の更新の「見送る」", () => {
     expect(items.find((item) => item.id === "u1")?.status).toBe("applied");
   });
 });
+
+/**
+ * スクロール位置を保つための材料（0.22.24の積み残し、0.24.3）。
+ *
+ * 別作品の結果が届くたびに一覧が描き直され、読んでいた位置が先頭へ
+ * 戻っていた。webview側は「作品idと分類が変わらないときだけ」位置を
+ * 戻す。その判定に使う workId を、拡張機能側が必ず送ること。
+ */
+describe("スクロール位置を保つための材料", () => {
+  test("issuesメッセージに作品idが入る", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    expect(latest()).toMatchObject({ workId: "w1" });
+  });
+
+  test("作品を切り替えると、切り替え先のidが入る", () => {
+    const panel = panelWithView();
+    panel.showResults(other, [otherTypo]);
+    panel.showResults(work, [typo]);
+    switchWork(panel, "w2");
+    expect(latest()).toMatchObject({ workId: "w2" });
+  });
+
+  test("webviewは、作品と分類が同じときだけ位置を戻す", () => {
+    const html = readFileSync(
+      new URL("../../src/views/proposalPanelHtml.ts", import.meta.url),
+      "utf8"
+    );
+    expect(html).toContain("lastListKey");
+    expect(html).toContain("message.workId");
+    expect(html).toContain("keepScroll ? scrollY : 0");
+  });
+});
