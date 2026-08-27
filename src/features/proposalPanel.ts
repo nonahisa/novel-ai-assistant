@@ -359,7 +359,15 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    *   「再チェック」を押したときにAI未設定として断る。** 検知の結果を
    *   出すだけなら要らないので、必須にはしていない
    */
-  constructor(private readonly ai?: AIRegistry) {}
+  /**
+   * @param onCountsChanged 反映で承認待ちの件数が変わったときに呼ぶ。
+   * メニューの印（更新分を反映 残りN）はコマンド実行時にしか数え直されず、
+   * **パネルから全部反映しても印が残る**不具合があった（作者の報告、2026-08-27）
+   */
+  constructor(
+    private readonly ai?: AIRegistry,
+    private readonly onCountsChanged?: () => void
+  ) {}
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
@@ -1089,6 +1097,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         outcome.ok ? "applied" : "failed",
         outcome.ok ? undefined : outcome.reason
       );
+      // 承認待ちが1件減ったので、メニューの印を数え直してもらう
+      if (outcome.ok) this.onCountsChanged?.();
       return;
     }
 

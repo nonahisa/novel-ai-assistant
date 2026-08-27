@@ -186,6 +186,9 @@ export class SakuraProvider implements ApiKeyProvider {
     }
   }
 
+  /** `/v1/models` の生応答を、この起動で一度だけ記録したか */
+  private loggedRawModels = false;
+
   async listModels(): Promise<ModelInfo[]> {
     const response = await fetchJson<ModelListResponse>({
       url: `${this.endpoint}/models`,
@@ -193,6 +196,19 @@ export class SakuraProvider implements ApiKeyProvider {
       timeoutMs: 15000,
       label: LABEL,
     });
+
+    // **生の応答を一度だけ記録する**（コンテキスト長の実測、2026-08-27）。
+    // OpenAI互換の /models に「モデルの受け取れる長さ」の拡張欄があるかは
+    // 公表情報だけでは分からない。あれば LM Studio（0.23.1）と同じ形の
+    // 自動読取に切り替え、無ければ設定値のままでよい——その判断材料。
+    // 応答はモデルの一覧情報だけで、鍵や原稿は含まれない
+    if (!this.loggedRawModels) {
+      this.loggedRawModels = true;
+      logLine(
+        `さくらのAI: /v1/models の生応答（実測用）: ` +
+          JSON.stringify(response).slice(0, 4000)
+      );
+    }
 
     const infos: ModelInfo[] = [];
     for (const entry of response.data ?? []) {
