@@ -58,6 +58,9 @@ import { TermHighlighter } from "./views/termHighlight";
 import { ActionListProvider, nodeKey } from "./views/actionList";
 import { ActionDecorationProvider } from "./views/actionDecorations";
 import { PendingUpdateStore } from "./core/pendingUpdates";
+// 作品を選ぶ場面で「未処理の提案が何件あるか」を出すために使う。
+// 提案パネル（features/proposalPanel）が既に読んでいるので、束は増えない
+import { ProposalStore } from "./core/proposalStore";
 // gitコマンドが要る。動的importする（設計書5.8.5）
 import { tryRegisterAsCollection } from "./features/addCollection";
 import {
@@ -102,6 +105,7 @@ import type { GitSyncMonitor } from "./features/gitSync";
 import {
   describeSyncBadge,
   describeSyncTooltip,
+  hasPendingSync,
 } from "./core/gitSyncStatusText";
 import { NullGitSyncMonitor, type GitSyncMonitorLike } from "./features/gitSyncStub";
 import { canRunProcesses } from "./core/runtime";
@@ -239,6 +243,27 @@ export async function activate(
     ? new (await import("./features/gitSync.js")).GitSyncMonitor(registry)
     : new NullGitSyncMonitor();
   context.subscriptions.push(gitSync);
+
+  /**
+   * 作品を選ぶ場面へ出す、同期の状態（設計書5.5.1）。
+   *
+   * **どの作品を送ればよいのかが、選んだ後にしか分からなかった。**
+   * 「GitHubへ送る」は作品を選ばせてから状態を見に行き、送るものが
+   * 無ければ「送信するものはありません」と告げて終わる。作者から見ると
+   * 選び直すしかなく、正解は総当たりでしか見つからない。
+   * 作品一覧の印と同じ情報を、選ぶ場面にも出す。
+   *
+   * **数え直さない。** `statusFor` は見張りが持っている控えを読むだけなので、
+   * 選択肢を出すたびに呼んでもgitは動かない。値は前回の取得時点のものだが、
+   * 押した後の取得し直しはこれまでどおり行う（最終的な判断はそちら）。
+   *
+   * `tracked` 以外（gitを使っていない・リモートが無い等）は数が無いので、
+   * 呼び出し側で補足を諦める。**印が出ないだけで実害はない**
+   */
+  const trackedSyncStatus = (workId: string) => {
+    const status = gitSync.statusFor(workId);
+    return status?.kind === "tracked" ? status : undefined;
+  };
 
   const treeProvider = new WorkTreeProvider(
     registry,
@@ -423,6 +448,28 @@ export async function activate(
         // 作者が見ているのは作品であり、どの作品がどの置き場かは意識しなくてよい
         const work = await resolveWork(node, registry, {
           title: "分かれた分を合わせる作品",
+          // **この操作は分かれた作品しか対象にならない**のに、選択肢では
+          // それを見分けられなかった。ブラウザ版では代役が全作品に同じ状態を
+          // 返すので、補足を出さない（同じ文字が並ぶだけで手掛かりにならない）
+          annotate: canRunProcesses()
+            ? async (candidate) => {
+                const status = trackedSyncStatus(candidate.id);
+                if (!status) return {};
+                // **分かれているかは置き場（リポジトリ）の性質**であって、
+                // 作品ごとには決まらない。合わせる相手も置き場なので、
+                // ここは `ahead`／`behind`（置き場ぜんぶ）で見るのが正しい。
+                // 同じ置き場の作品に同じ補足が並ぶのは、それが事実だから
+                if (status.ahead > 0 && status.behind > 0) {
+                  return {
+                    note:
+                      `分かれています（送信待ち ${status.ahead}件・` +
+                      `受け取り ${status.behind}件）`,
+                    order: 1,
+                  };
+                }
+                return { note: "分かれていません", order: 0 };
+              }
+            : undefined,
         });
         if (!work) return;
         const { resolveDivergence } = await import(
@@ -1432,7 +1479,22 @@ export async function activate(
     registerCommand(
       "novelai.gitSync",
       async (node?: WorkNode) => {
-        const work = await resolveWork(node, registry);
+        const work = await resolveWork(node, registry, {
+          title: "同期する作品を選択",
+          // **一覧の印をそのまま使う。** この先の同期メニューは記録・送信・
+          // 受け取りのどれにも進めるので、状態を丸ごと見せるのが合っている。
+          // 言い回しを作り直さないので、作品一覧の印と読み合わせられる
+          annotate: canRunProcesses()
+            ? async (candidate) => {
+                const status = gitSync.statusFor(candidate.id);
+                return {
+                  // gitを使っていない作品には何も出さない（印と同じ扱い）
+                  note: describeSyncBadge(status),
+                  order: hasPendingSync(status) ? 1 : 0,
+                };
+              }
+            : undefined,
+        });
         if (!work) return;
         if (!canRunProcesses()) {
           // 行き止まりにせず、VS Code のソース管理へ案内する（設計書5.8.9）
@@ -1484,7 +1546,40 @@ export async function activate(
     registerCommand(
       "novelai.gitPull",
       async (node?: WorkNode) => {
-        const work = await resolveWork(node, registry);
+        const work = await resolveWork(node, registry, {
+          title: "GitHubから受け取る作品を選択",
+          annotate: canRunProcesses()
+            ? async (candidate) => {
+                const status = trackedSyncStatus(candidate.id);
+                if (!status) return {};
+                // **その作品ぶんの数を主に出す。** 書庫（1つの置き場に複数の
+                // 作品）では `behind` が置き場ぜんぶの合計になり、全作品に
+                // 同じ数字が並ぶ。作品一覧の印で実際に起きた失敗で
+                // （11作品すべてに「送信待ち13」と出た）、いま直している
+                // 「どれを選べばよいか分からない」と同じことになる
+                if (status.behindHere > 0) {
+                  return {
+                    note:
+                      `受け取り ${status.behindHere}件` +
+                      (status.behind !== status.behindHere
+                        ? `（置き場ぜんぶでは ${status.behind}件）`
+                        : ""),
+                    order: status.behindHere,
+                  };
+                }
+                // 取り込みは置き場が単位なので、**この作品を選んでも
+                // 他作品の分が入ってくる。** 「ありません」とだけ言うと、
+                // 実際には取り込めることを隠すことになる
+                if (status.behind > 0) {
+                  return {
+                    note: `この作品ぶんはありません（置き場ぜんぶでは受け取り ${status.behind}件）`,
+                    order: 0,
+                  };
+                }
+                return { note: "受け取るものはありません", order: 0 };
+              }
+            : undefined,
+        });
         if (!work) return;
         if (!canRunProcesses()) {
           vscode.window.showWarningMessage(
@@ -1513,7 +1608,36 @@ export async function activate(
     registerCommand(
       "novelai.gitPush",
       async (node?: WorkNode) => {
-        const work = await resolveWork(node, registry);
+        const work = await resolveWork(node, registry, {
+          title: "GitHubへ送る作品を選択",
+          annotate: canRunProcesses()
+            ? async (candidate) => {
+                const status = trackedSyncStatus(candidate.id);
+                if (!status) return {};
+                // 受け取り側と同じ理由で、その作品ぶんの数を主に出す
+                if (status.aheadHere > 0) {
+                  return {
+                    note:
+                      `送信待ち ${status.aheadHere}件` +
+                      (status.ahead !== status.aheadHere
+                        ? `（置き場ぜんぶでは ${status.ahead}件）`
+                        : ""),
+                    order: status.aheadHere,
+                  };
+                }
+                // **送信は置き場が単位で、1つ送ると同じ置き場の作品は
+                // まとめて出ていく**（設計書5.7.9）。この作品ぶんが0でも
+                // 送信そのものは動くので、「ありません」で終わらせない
+                if (status.ahead > 0) {
+                  return {
+                    note: `この作品ぶんはありません（置き場ぜんぶでは送信待ち ${status.ahead}件）`,
+                    order: 0,
+                  };
+                }
+                return { note: "送信するものはありません", order: 0 };
+              }
+            : undefined,
+        });
         if (!work) return;
         if (!canRunProcesses()) {
           vscode.window.showWarningMessage(
@@ -1706,7 +1830,36 @@ export async function activate(
     registerCommand(
       "novelai.exportImeDictionary",
       async (node?: WorkNode) => {
-        const work = await resolveWork(node, registry);
+        const work = await resolveWork(node, registry, {
+          title: "IME辞書を書き出す作品を選択",
+          // **印は「何作品が古いか」しか言わない。** どの作品を書き出し直せば
+          // よいのかは、選ぶ場面でしか分からなかった（作者の指摘、2026-08-27）。
+          // 数え方は `ActionDecorationProvider` の staleImeDictionary と
+          // 同じ式にする。別の式で見ると、印と内訳が食い違う
+          annotate: async (candidate) => {
+            try {
+              const config = await readWorkConfig(candidate);
+              const freshness = await checkDictionaryFreshness(
+                workPaths(candidate, config).settings
+              );
+              if (freshness.stale) {
+                return { note: "設定資料が辞書より新しい", order: 1 };
+              }
+              // 一度も書き出していない作品は「古い」と言わない（催促にならない
+              // ため、印でも数えていない）。ただし**この場面では判断材料になる**
+              // ので、書き出し済みかどうかは伝える。並び順は上げない
+              return {
+                note: freshness.exported
+                  ? "書き出し済み"
+                  : "まだ書き出していない",
+                order: 0,
+              };
+            } catch {
+              // 読めない作品は無印で返す。補足が出ないだけで実害はない
+              return {};
+            }
+          },
+        });
         if (!work) return;
         await exportImeDictionary(work);
         // 書き出したので「辞書が古い」の印を消す。
@@ -1761,7 +1914,34 @@ export async function activate(
     registerCommand(
       "novelai.unifyCharacters",
       async (node?: WorkNode) => {
-        const work = await resolveWork(node, registry);
+        const work = await resolveWork(node, registry, {
+          title: "重複をまとめる作品を選択",
+          // **印（例：13）は全作品の合計**なので、どの作品に何組あるかは
+          // ここで出さないと分からない（作者の指摘、2026-08-27）。
+          // 数え方は `ActionDecorationProvider` の mergeCandidates と
+          // 同じ式にする。別の式で数えると、印の合計と内訳が食い違い、
+          // どちらが正しいのか作者に判断できなくなる
+          annotate: async (candidate) => {
+            let count: number;
+            try {
+              const loaded = await new CharacterStore(candidate).loadAll();
+              count = findMergeCandidates(loaded.characters).length;
+            } catch {
+              // **読めない作品は無印で返す。** ここで0組と同じ言葉を出すと、
+              // 「候補が無い」のか「読み取りに失敗した」のかを作者が
+              // 区別できなくなる。補足が出ないだけで実害はない
+              return {};
+            }
+            // 0組の作品も選択肢に残す（消さずに案内する）。
+            // **0組でも言葉にする。** 見本（承認待ちの「未反映なし」）と
+            // 同じ流儀で、空白は「読めなかった」の意味に取っておく
+            return {
+              note:
+                count > 0 ? `同じ人物とみられる組が ${count}組` : "重複の候補なし",
+              order: count,
+            };
+          },
+        });
         if (!work) return;
         await unifyCharacterRecords(work);
         treeProvider.refresh(work.id);
@@ -2391,7 +2571,25 @@ export async function activate(
     registerCommand(
       "novelai.reviewProposals",
       async (node?: WorkNode) => {
-        const work = await resolveWork(node, registry);
+        const work = await resolveWork(node, registry, {
+          title: "提案を確認する作品を選択",
+          // 提案は作品ごとに溜まる。**この操作には印が無い**ので、
+          // 選ぶ場面が「どこに未処理が残っているか」を知る唯一の手がかりになる。
+          // `pendingCount()` は提案の1ファイル（JSONL）を読むだけで済むので、
+          // 選択肢を出すたびに呼んでも重くならない
+          annotate: async (candidate) => {
+            let count = 0;
+            try {
+              count = await new ProposalStore(candidate).pendingCount();
+            } catch {
+              // 読めない作品は0件として扱う。補足が出ないだけで実害はない
+            }
+            return {
+              note: count > 0 ? `未処理の提案 ${count}件` : "未処理なし",
+              order: count,
+            };
+          },
+        });
         if (!work) return;
         await reviewProposals(work, proposalPanel);
       }
