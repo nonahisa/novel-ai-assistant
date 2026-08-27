@@ -18,3 +18,7 @@ _mksample*
 _peek*
 *.vsix
 .worktrees/
+
+# Claude Code の個人設定（エージェント定義 .claude/agents/ は共有する）
+.claude/*
+!.claude/agents/
