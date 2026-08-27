@@ -56,6 +56,7 @@ import { exportImeDictionary } from "./features/exportImeDictionary";
 import { manageCustomFields } from "./features/manageCustomFields";
 import { TermHighlighter } from "./views/termHighlight";
 import { ActionListProvider, nodeKey } from "./views/actionList";
+import { StepMenuProvider, stepNodeKey } from "./views/stepMenu";
 import { ActionDecorationProvider } from "./views/actionDecorations";
 import { PendingUpdateStore } from "./core/pendingUpdates";
 // 作品を選ぶ場面で「未処理の提案が何件あるか」を出すために使う。
@@ -193,6 +194,18 @@ import { openInDefaultEditor, revealFolder } from "./views/openDocument";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
+
+/** ステップメニューで開いている段階の記憶先 */
+const STEP_GROUPS_KEY = "novelai.steps.expandedGroups";
+
+/**
+ * ステップメニューで選んでいる作品の記憶先。
+ *
+ * **IDだけを覚える。** 作品そのものを写すと、名前を変えたり登録から
+ * 外したりしたときに、消えた作品を指したままになる（実在の確認は
+ * 表示のたびに `StepMenuProvider` が行う）。
+ */
+const STEP_WORK_KEY = "novelai.stepMenu.selectedWorkId";
 
 export async function activate(
   context: vscode.ExtensionContext
@@ -591,9 +604,44 @@ export async function activate(
   });
   context.subscriptions.push(actionView);
 
+  // 作品づくりの流れ（1.作品登録 → … → 7.電子出版等）に沿った入口。
+  // **操作の実体は詳細メニューの定義を参照するだけ**で、ここには持たない。
+  // 最上段で選んだ作品を引数に載せて渡すので、押すたびに作品を訊かれない
+  const stepProvider = new StepMenuProvider(
+    registry,
+    {
+      get: () => context.globalState.get<string>(STEP_WORK_KEY),
+      set: (id) => void context.globalState.update(STEP_WORK_KEY, id),
+    },
+    {
+      get: () => context.globalState.get<string[]>(STEP_GROUPS_KEY, []),
+      set: (groups) => void context.globalState.update(STEP_GROUPS_KEY, groups),
+    },
+    (counter) => actionDecorations.countOf(counter)
+  );
+  const stepView = vscode.window.createTreeView("novelai.steps", {
+    treeDataProvider: stepProvider,
+  });
+  // 開閉を控えて次回に引き継ぐ（詳細メニューと同じ理由）
+  stepView.onDidExpandElement((event) => {
+    if (event.element.type === "step" || event.element.type === "section") {
+      stepProvider.setExpanded(stepNodeKey(event.element), true);
+    }
+  });
+  stepView.onDidCollapseElement((event) => {
+    if (event.element.type === "step" || event.element.type === "section") {
+      stepProvider.setExpanded(stepNodeKey(event.element), false);
+    }
+  });
+  context.subscriptions.push(stepView);
+
   /** 未反映の件数を数え直す。抽出・反映のあとに呼ぶ */
   const refreshActionBadges = (): void => {
-    void actionDecorations.refresh().then(() => actionProvider.refresh());
+    void actionDecorations.refresh().then(() => {
+      actionProvider.refresh();
+      // 同じ操作が2つのメニューに出るので、両方を引き直す
+      stepProvider.refresh();
+    });
   };
   // 起動直後にも数える。前回の抽出で溜まったままのことがある
   refreshActionBadges();
@@ -1395,6 +1443,32 @@ export async function activate(
   context.subscriptions.push(
     registerCommand("novelai.chooseChatWork", async () => {
       await workChatPanel.chooseWork();
+    })
+  );
+
+  // ステップメニューの最上段（作品選択窓）から呼ばれる。
+  // **選ぶのはIDだけ**で、実在の確認は表示のたびにメニュー側が行う
+  context.subscriptions.push(
+    registerCommand("novelai.chooseStepWork", async () => {
+      const works = registry.list();
+      if (works.length === 0) {
+        vscode.window.showInformationMessage("作品が登録されていません。");
+        return;
+      }
+      const picked = await vscode.window.showQuickPick(
+        [
+          ...works.map((work) => ({
+            label: work.title,
+            description: work.folderPath,
+            work,
+          })),
+          // Escでも閉じられるが、それを知らない人には出口が無いように見える
+          cancelItem(),
+        ],
+        { title: "ステップメニューで使う作品" }
+      );
+      if (!picked || !("work" in picked)) return;
+      stepProvider.selectWork(picked.work.id);
     })
   );
 

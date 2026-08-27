@@ -324,7 +324,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     const resolved = this.ai.resolve();
     if (!resolved) {
       this.postError(
-        "AIが設定されていません。操作メニューの「AIの設定」から設定してください。"
+        "AIが設定されていません。詳細メニューの「AIの設定」から設定してください。"
       );
       return;
     }

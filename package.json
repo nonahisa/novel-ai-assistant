@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "「設定が前の話と食い違っていないか不安」「誤字脱字の見直しがつらい」「AIに原稿を触られたくない」——小説を書く人の困りごとを引き受けるVSCode拡張機能です。本文から設定資料を自動で作り、矛盾や誤字脱字を調べ、執筆量を記録します。AIは提案するだけで、原稿は書き換えません。無料の手元AI（Ollama / LM Studio）だけでも使え、その場合、原稿はパソコンの外へ出ません。",
-  "version": "0.23.4",
+  "version": "0.23.5",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -89,8 +89,13 @@
           "when": "!novelai.focusChat"
         },
         {
+          "id": "novelai.steps",
+          "name": "ステップメニュー",
+          "when": "!novelai.focusChat"
+        },
+        {
           "id": "novelai.actions",
-          "name": "操作メニュー",
+          "name": "詳細メニュー",
           "when": "!novelai.focusChat"
         },
         {
@@ -205,7 +210,7 @@
       },
       {
         "command": "novelai.exitChatFocus",
-        "title": "作品一覧と操作メニューを出す",
+        "title": "作品一覧とメニューを出す",
         "category": "小説執筆",
         "icon": "$(layout-sidebar-left)"
       },
@@ -535,6 +540,12 @@
       {
         "command": "novelai.chooseChatWork",
         "title": "相談する作品を選ぶ",
+        "category": "小説執筆",
+        "icon": "$(book)"
+      },
+      {
+        "command": "novelai.chooseStepWork",
+        "title": "ステップメニューの作品を選ぶ",
         "category": "小説執筆",
         "icon": "$(book)"
       },

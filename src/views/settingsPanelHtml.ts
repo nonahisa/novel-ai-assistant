@@ -771,7 +771,7 @@ button.danger:hover {
     const note = document.createElement("div");
     note.className = "empty";
     note.textContent =
-      "まだありません。操作メニューの「執筆AI支援 → " + action + "」で作れます。";
+      "まだありません。詳細メニューの「執筆AI支援 → " + action + "」で作れます。";
     return note;
   }
 
