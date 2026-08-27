@@ -171,8 +171,11 @@ body.plain .mark { background: transparent; }
   margin: 0;
   min-height: 1.9em;
 }
-/* 縦書き。**行の高さを「幅」として持つ**ので、指定はそのまま効く */
-body.vertical #write, body.vertical #read {
+/* 縦書き。**行の高さを「幅」として持つ**ので、指定はそのまま効く。
+   **#marks（打つ面の裏の目印）も必ず同じ向きにする。** 0.22.24まで
+   ここから漏れており、縦書きのとき裏だけ横書きで塗られて、目印が
+   本文と無関係な場所（空白）に浮いていた（実機の報告、2026-08-27） */
+body.vertical #write, body.vertical #read, body.vertical #marks {
   writing-mode: vertical-rl;
   /* **upright にしない。** 全部を立てると、英数字が1文字ずつ縦に
      積まれる（2026 が4行になる）。既定の mixed は日本語の組版と
@@ -340,6 +343,12 @@ body.plain .term { color: inherit; }
   const marks = document.getElementById("marks");
   /** 用語の位置。右クリックで「どの用語の上か」を引くのに使う */
   let termSpans = [];
+  /**
+   * 届いた目印と、その元になった本文。**照合してから出す。**
+   * 変換中は本文の適用が待たされるのに、目印だけ即座に出すと、
+   * 古い本文向けの塗りが新しい本文の上に浮く（0.22.25で塞いだ競合）
+   */
+  let latestMarks = null;
   const menu = document.getElementById("menu");
   const countLabel = document.getElementById("count");
   const legend = document.getElementById("legend");
@@ -438,10 +447,11 @@ body.plain .term { color: inherit; }
     modeButton.classList.toggle("on", reading);
     dirButton.textContent = vertical !== false ? "横書きにする" : "縦書きにする";
     dirButton.classList.toggle("on", vertical !== false);
-    // **書く面では、ルビは記法のまま見える。** そのことを一言添える
+    // **書く面では、ルビは記法のまま見える。** そのことを一言添える。
+    // 用語の色は6.25.6でこの面にも付くようになったので、無いとは言わない
     note.textContent = showingRead()
       ? ""
-      : "ルビ・傍点・用語の色分けは「読む」か「並べる」で出ます（この面では記法のまま見えます）";
+      : "ルビ・傍点は「読む」か「並べる」で出ます（この面では記法のまま見えます。用語には色が付き、右クリックで資料を開けます）";
   }
 
   /** 縦書きでは「上下」ではなく「左右」に流れる。位置合わせもそれに従う */
@@ -635,6 +645,44 @@ body.plain .term { color: inherit; }
     replaceKeepingCaret(text);
   }
 
+  /**
+   * 目印を、いまの本文と一致するときだけ出す。
+   *
+   * 一致しないまま出すと、古い位置に塗られて宙に浮く。一致しない場合は
+   * 隠したままでよい——本文が変わった直後なら新しい update が向かっているし、
+   * 変換待ちなら flushPending のあとにもう一度ここを通る。
+   */
+  /**
+   * 鏡の描ける幅を、打つ面の実測に合わせる。
+   *
+   * 打つ面には**スクロールバーがあり、その分だけ本文の幅が狭い**。
+   * 鏡は overflow:hidden でバーが無く、そのままだと全幅で折り返して
+   * 1行の字数が変わり、**目印が1行ずつずれて空行の上に浮く**
+   * （実機の報告、2026-08-27。横書きで確認された）。
+   * 縦書きでは横のバーの高さぶんが同じ理由でずれる。両方を合わせる。
+   */
+  function alignMarksBox() {
+    marks.style.right = (write.offsetWidth - write.clientWidth) + "px";
+    marks.style.bottom = (write.offsetHeight - write.clientHeight) + "px";
+  }
+
+  function applyMarksIfMatch() {
+    if (!latestMarks) return;
+    if (latestMarks.forText !== write.value) return;
+    alignMarksBox();
+    marks.innerHTML = latestMarks.html;
+    marks.scrollTop = write.scrollTop;
+    marks.scrollLeft = write.scrollLeft;
+    marks.classList.remove("stale");
+  }
+
+  // 窓の大きさが変わるとスクロールバーの有無も変わりうる。合わせ直す
+  window.addEventListener("resize", function () {
+    alignMarksBox();
+    marks.scrollTop = write.scrollTop;
+    marks.scrollLeft = write.scrollLeft;
+  });
+
   /** 溜めておいた組み上がりを当てる。見えていないときは溜めたままにする */
   function applyFreshHtml() {
     if (freshHtml === null) return;
@@ -681,6 +729,8 @@ body.plain .term { color: inherit; }
     // 書き換えが来たなら、確定した文字を捨てるより送り直すほうがよい
     if (write.value !== current) { send(); return; }
     takeIncoming(text);
+    // 待たせていた本文が入ったので、目印も出せるようになったかもしれない
+    applyMarksIfMatch();
   }
 
   /**
@@ -859,10 +909,8 @@ body.plain .term { color: inherit; }
       freshHtml = message.html;
       if (showingRead()) applyFreshHtml();
       if (typeof message.marks === "string") {
-        marks.innerHTML = message.marks;
-        marks.scrollTop = write.scrollTop;
-        marks.scrollLeft = write.scrollLeft;
-        marks.classList.remove("stale");
+        latestMarks = { forText: message.text, html: message.marks };
+        applyMarksIfMatch();
       }
       if (Array.isArray(message.terms)) termSpans = message.terms;
       if (typeof message.forceVertical === "boolean" && !forcedOnce) {
