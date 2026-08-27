@@ -978,6 +978,17 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "入っているか・起動しているか・モデルがあるかを順に確かめ、" +
               "足りないものだけを案内します。",
           },
+          {
+            kind: "action",
+            command: "novelai.setupLmStudio",
+            label: "LM Studioのセットアップ",
+            icon: "cloud-download",
+            requiresWork: false,
+            detail:
+              "**鍵も課金も要らない、もう1つの手元のAI**です。導入から使える状態まで案内します。" +
+              "**起動とサーバーの開始、モデルの読み込みはLM Studioの画面での操作**になるので、" +
+              "手順を案内して、できたところで確かめ直します。",
+          },
         ],
       },
       {

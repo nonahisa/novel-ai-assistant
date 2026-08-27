@@ -71,10 +71,11 @@ import {
   needsRedraw,
   needsRescan,
 } from "./core/countSettings";
-// 以下5つはgit・外部プロセス起動が要る。動的importする（設計書5.8.5）
+// 以下6つはgit・外部プロセス起動が要る。動的importする（設計書5.8.5）
 // shareWithEditor, collectEditorProposals ← ./features/shareWithEditor
 // restoreFromHistory ← ./features/gitRestore
 // setupOllama ← ./features/setupOllama
+// setupLmStudio ← ./features/setupLmStudio
 // setupVectorSearch ← ./features/setupVectorSearch
 // runFullSetup ← ./features/setupWizard
 import { showVersion } from "./features/showVersion";
@@ -1313,6 +1314,19 @@ export async function activate(
       }
       const { setupOllama } = await import("./features/setupOllama.js");
       await setupOllama(aiRegistry);
+    })
+  );
+
+  context.subscriptions.push(
+    registerCommand("novelai.setupLmStudio", async () => {
+      if (!canRunProcesses()) {
+        vscode.window.showWarningMessage(
+          "LM Studioの導入案内はブラウザ版では使えません（ローカルで動くAIのため）。"
+        );
+        return;
+      }
+      const { setupLmStudio } = await import("./features/setupLmStudio.js");
+      await setupLmStudio(aiRegistry);
     })
   );
 

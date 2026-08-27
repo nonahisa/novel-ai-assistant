@@ -260,7 +260,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
   {
     id: "",
     title: "LM Studio",
-    commands: ["novelai.setupAI", "novelai.testAI"],
+    commands: ["novelai.setupLmStudio", "novelai.setupAI", "novelai.testAI"],
     count: 12,
   },
   {

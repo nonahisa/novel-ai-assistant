@@ -27,6 +27,8 @@ const REQUIRES_PROCESSES = new Set<string>([
   "novelai.gitRestore",
   "novelai.setupGithub",
   "novelai.setupOllama",
+  // LM Studioも手元で動くAIで、導入（winget）も起動の確認も外部プロセスが要る
+  "novelai.setupLmStudio",
   "novelai.runFullSetup",
   "novelai.setupVectorSearch",
   "novelai.resolveConflicts",
@@ -77,6 +79,16 @@ export function describeProcessesBlocked(command: string): string {
       "ブラウザ版では、この設定は要りません。" +
       "GitHubのリポジトリを開いている時点で、つながっています。" +
       "保存は「作品管理」→「GitHubと同期」からご覧ください。"
+    );
+  }
+  // **案内文にサービス名を決め打ちしない。** 下の `startsWith("novelai.setup")`
+  // は「Ollamaの導入」と言い切るので、LM Studioの案内に混ざると別のものを指す
+  // （Geminiを使っているのに「Claudeの…」と出た不具合と同じ形）
+  if (command === "novelai.setupLmStudio") {
+    return (
+      "ブラウザ版のVS Codeでは、LM Studioのような手元で動くAIは使えません" +
+      "（外部プロセスを起動できないためです）。" +
+      "クラウドのAI（Gemini・OpenAI・さくらのAI Engine・Claude）をお使いください。"
     );
   }
   if (command.startsWith("novelai.setup") || command === "novelai.runFullSetup") {
