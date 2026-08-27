@@ -607,3 +607,61 @@ describe("新観点の説明と修正案の防御", () => {
     expect(accepted[0].suggestion).toBe("");
   });
 });
+
+/**
+ * 常用漢字表との照合の注記（作者の指定、2026-08-28）。
+ *
+ * 判定はAIにさせない（表を正確に覚えていない）。コードで照合し、
+ * **参考として**添える——ひらくかどうかは作者の判断が優先。
+ */
+describe("漢字ひらきへの常用漢字表の注記", () => {
+  const chunk = {
+    text: "悍ましい夜だった。然し彼は歩き続けた。",
+    startLine: 0,
+    chapterStart: 1,
+    chapterEnd: 1,
+  } as never;
+
+  function acceptedOf(original: string, explanation: string) {
+    return validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 1,
+            original,
+            suggestion: "",
+            reason: "漢字ひらき",
+            explanation,
+            confidence: "high",
+          },
+        ],
+      },
+      chunk
+    ).accepted;
+  }
+
+  test("表に無い字は、参考として説明に添えられる", () => {
+    const accepted = acceptedOf(
+      "悍ましい夜だった。",
+      "「悍ましい（おぞましい）」で読みが詰まります"
+    );
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0].explanation).toContain("「悍」は常用漢字表");
+    expect(accepted[0].explanation).toContain("平成22年内閣告示第2号");
+  });
+
+  test("表の字だけなら、注記は付かない", () => {
+    const accepted = acceptedOf(
+      "然し彼は歩き続けた。",
+      "「然し（しかし）」で読みが詰まります"
+    );
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0].explanation).not.toContain("常用漢字表");
+  });
+
+  test("決まり文句に「作者の判断が優先」が入っている", () => {
+    expect(explainProofreadReason("漢字ひらき")).toContain(
+      "作者の判断が優先"
+    );
+  });
+});

@@ -1,6 +1,7 @@
 import type { Chunk } from "./chunker";
 import { normalizeForComparison } from "./groundedEvidence";
 import { isPlaceholderText } from "./placeholderText";
+import { nonJouyouKanjiIn } from "./jouyouKanji";
 import { isKeptWord, type KeepWord } from "../models/keepWord";
 import {
   issueBudget,
@@ -172,6 +173,28 @@ export function mentionsForbiddenAspect(
   return FORBIDDEN_EXPLANATION.test(target);
 }
 
+/**
+ * 漢字ひらきの説明へ、常用漢字表との照合結果を参考として添える
+ * （作者の指定、2026-08-28）。
+ *
+ * **判定はAIにさせない。** 表を正確に覚えていないので、注記が当てに
+ * ならなくなる。コードで照合し、表に無い字だけを挙げる。
+ * **注記は参考であって指示ではない**——ひらくかどうかは作者の判断が優先
+ * （その一文は種類の決まり文句 `explainProofreadReason` 側に置く）。
+ */
+export function withNonJouyouNote(
+  explanation: string,
+  original: string
+): string {
+  const outside = nonJouyouKanjiIn(original);
+  if (outside.length === 0) return explanation;
+  const listed = outside.map((char) => `「${char}」`).join("");
+  return (
+    `${explanation}（参考：${listed}は常用漢字表` +
+    "（平成22年内閣告示第2号）に無い字です）"
+  );
+}
+
 export function parseProofreadResult(
   text: string
 ): { issues: unknown[] } | null {
@@ -314,7 +337,11 @@ export function validateProofreadIssues(
       target: original,
       suggestion: usableSuggestion,
       reason,
-      explanation: asString(item.explanation),
+      // 漢字ひらきには、常用漢字表との照合結果を参考として添える
+      explanation:
+        reason === "漢字ひらき"
+          ? withNonJouyouNote(asString(item.explanation), original)
+          : asString(item.explanation),
       confidence: level(item.confidence),
     });
   }
@@ -410,7 +437,12 @@ export function explainProofreadReason(reason: string): string | undefined {
     case "長文":
       return "一文が長く、意味を取りにくくなっています";
     case "漢字ひらき":
-      return "読みに詰まる漢字表記です。ひらがなにすると読みやすくなります";
+      // **判断は絶対ではない**（作者の指定、2026-08-28）。演出で漢字の
+      // ままにする選択は正しい選択であり、注記も参考にすぎない
+      return (
+        "読みに詰まる漢字表記です。ひらがなにすると読みやすくなります" +
+        "（ひらくかどうかは作者の判断が優先です）"
+      );
     case "語尾単調":
       // **直し方は書かない。** どう散らすかは文体そのものなので、
       // 決めるのは作者である（修正案も空で返させている）
