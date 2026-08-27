@@ -44,9 +44,9 @@ import {
 import {
   describeCharacter,
   describeLocation,
-  describeWorldItem,
   settingsFingerprint,
 } from "../core/settingsSummary";
+import { selectWorldview } from "../core/worldviewSelect";
 import { formatChapterLabel } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import {
@@ -378,7 +378,7 @@ export async function checkContradictions(
           chunkTextWithLineNumbers: bodyWithLines,
           characterDetails: relevant.characters,
           locationDetails: relevant.locations,
-          worldviewSummary: settings.worldview,
+          worldviewSummary: relevant.worldview,
           previousSynopses,
           categories,
           futureFacts,
@@ -401,11 +401,10 @@ export async function checkContradictions(
               本文: bodyWithLines.length,
               人物: relevant.characters.length,
               場所: relevant.locations.length,
-              // **ここだけ上限が無い。** 人物・場所は本文に名前が出たものに
-              // 絞り、あらすじは直近12話、未来の事実は20行で切っているのに、
-              // 世界観は全項目を毎チャンク送っている。作者の作品で実際に
-              // 何字になるのかを測るために、独立した項目として出す
-              世界観: settings.worldview.length,
+              // ここだけ上限が無かった（設計書6.27.6の穴2）。いまは
+              // `WORLDVIEW_MAX_CHARS` で頭を打つが、**実測はまだ無い**ので、
+              // 何字になるのかを測れるよう独立した項目として出し続ける
+              世界観: relevant.worldview.length,
               あらすじ: previousSynopses.length,
               未来の事実: futureFacts.length,
             }),
@@ -622,7 +621,6 @@ interface SettingsMaterial {
   characterCount: number;
   locationCount: number;
   worldCount: number;
-  worldview: string;
   /** 設定の中身のハッシュ。変われば検知をやり直す */
   fingerprint: string;
   /**
@@ -634,6 +632,8 @@ interface SettingsMaterial {
   ): {
     characters: string;
     locations: string;
+    /** そのチャンクへ載せる世界観。上限内なら全項目（設計書6.27.6） */
+    worldview: string;
     hasAnything: boolean;
   };
   /**
@@ -718,10 +718,6 @@ async function collectSettings(
   const locationById = new Map(places.map((item) => [item.id, item]));
   const abilitySystem = abilities.records;
 
-  const worldview = worldItems
-    .map((item) => describeWorldItem(item))
-    .join("\n\n");
-
   // 設定が変われば同じ本文でも答えが変わる。**更新時刻ではなく中身**で見る
   // （抽出は中身が同じでも updatedAt を書き換えるため。以前ここに
   // updatedAt が混ざっており、抽出のたびに全チャンクのキャッシュが飛んでいた）
@@ -746,7 +742,6 @@ async function collectSettings(
     characterCount: people.length,
     locationCount: places.length,
     worldCount: worldItems.length,
-    worldview,
     fingerprint,
     relevantFor(text, chapter) {
       const seenCharacters = new Set<string>();
@@ -779,8 +774,18 @@ async function collectSettings(
       return {
         characters: characterText,
         locations: locationText,
-        // 世界観は誰が出ていても効くので、それだけでも材料になる
-        hasAnything: Boolean(characterText || locationText || worldview),
+        // **世界観にも上限を置く**（設計書6.27.6の穴2）。上限内なら
+        // 全項目が元の並び順で入るので、いまの作品では従来と同じ文字列になる
+        worldview: selectWorldview({
+          items: worldItems,
+          chunkText: text,
+          chapter,
+        }),
+        // 世界観は誰が出ていても効くので、それだけでも材料になる。
+        // 上限で絞っても1件は必ず残るので、項目があるかどうかで見てよい
+        hasAnything: Boolean(
+          characterText || locationText || worldItems.length > 0
+        ),
       };
     },
     futureFactsFor(text, chapter) {

@@ -14,7 +14,9 @@
  */
 // 1.2: あとの話で明かされることを、前の話の矛盾にしない（6.10.3）
 // 1.3: あとで判明する事実と両立しない記述を、逆向きに探す（6.10.4）
-export const CONTRADICTION_CHECK_VERSION = "1.3";
+// 1.4: 世界観に字数の上限を置いた（6.27.6の穴2）。上限内なら送る内容は
+//      これまでと同一だが、超える作品では中身が変わるので版を分ける
+export const CONTRADICTION_CHECK_VERSION = "1.4";
 
 export const CONTRADICTION_CHECK_SYSTEM_PROMPT = `あなたは日本語の小説の設定矛盾だけを検出する編集アシスタントです。
 
