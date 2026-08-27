@@ -11,6 +11,7 @@ import {
   STEP_WORK_COMMAND,
   StepMenuProvider,
   restoreExpandedSteps,
+  stepViewDescription,
   type StepNode,
   type StepPlaceholder,
   type StepWorkStore,
@@ -423,5 +424,21 @@ describe("開閉を覚える", () => {
         "むかしの段階",
       ]),
     ]).toEqual(["4. 自己校正", "3. 作品執筆/資料生成"]);
+  });
+});
+
+describe("ビューの見出しに出す作品名", () => {
+  // 最上段の選択窓はスクロールで画面の外へ流れる。
+  // 見出しの薄字は常に見えるので、そこにも対象を出す（作者の依頼、2026-08-27）
+  test("選んだ作品のタイトルが出る", () => {
+    expect(stepViewDescription(work("w1", "銀の航路"), true)).toBe("銀の航路");
+  });
+
+  test("作品が無ければ「未登録」", () => {
+    expect(stepViewDescription(undefined, false)).toBe(STEP_NO_WORK_LABEL);
+  });
+
+  test("登録済みだが未選択なら、最上段と同じ文言で促す", () => {
+    expect(stepViewDescription(undefined, true)).toBe(STEP_CHOOSE_WORK_LABEL);
   });
 });

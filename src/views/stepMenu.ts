@@ -373,6 +373,22 @@ export function describeSelector(
 }
 
 /**
+ * ビューの見出し（「ステップメニュー」の右の薄字）に出す文字。
+ *
+ * 最上段の選択窓は、段階を開いてスクロールすると画面の外へ流れる。
+ * 見出しに作品名があれば、どの状態でも「いま何に効くメニューか」が
+ * 見える（作者の依頼、2026-08-27）。文言は最上段と同じものを使う。
+ */
+export function stepViewDescription(
+  selected: WorkEntry | undefined,
+  hasAnyWork: boolean
+): string {
+  if (!hasAnyWork) return STEP_NO_WORK_LABEL;
+  if (selected) return selected.title;
+  return STEP_CHOOSE_WORK_LABEL;
+}
+
+/**
  * 押せない理由。**作品が「無い」のか「選ばれていない」のかを分ける。**
  *
  * 判定そのものは詳細メニューの `disabledHint` を使い回し、

@@ -92,7 +92,12 @@ body.collapsed #reopen { display: block; }
   border-bottom: 2px solid var(--vscode-focusBorder);
   font-weight: bold;
 }
-#search { margin: 8px; padding: 4px 6px; }
+/*
+ * 幅は margin のぶんを引く。下の input 全般の width: 100% をそのまま受けると、
+ * box-sizing: border-box は margin を含まないため、右へ 16px はみ出す
+ * （作者の報告、2026-08-27）。
+ */
+#search { margin: 8px; padding: 4px 6px; width: calc(100% - 16px); }
 /*
  * 入力欄は必ず枠線を見せる。
  *

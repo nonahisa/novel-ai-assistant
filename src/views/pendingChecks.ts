@@ -267,7 +267,13 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-17",
     title: "ステップメニュー",
     commands: [],
-    count: 8,
+    count: 9,
+  },
+  {
+    id: "F-18",
+    title: "設定資料パネルの絞り込み欄",
+    commands: ["novelai.openSettingsPanel"],
+    count: 1,
   },
   {
     id: "",
@@ -290,4 +296,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 374;
+export const PENDING_CHECK_TOTAL = 376;

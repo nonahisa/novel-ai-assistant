@@ -56,7 +56,11 @@ import { exportImeDictionary } from "./features/exportImeDictionary";
 import { manageCustomFields } from "./features/manageCustomFields";
 import { TermHighlighter } from "./views/termHighlight";
 import { ActionListProvider, nodeKey } from "./views/actionList";
-import { StepMenuProvider, stepNodeKey } from "./views/stepMenu";
+import {
+  StepMenuProvider,
+  stepNodeKey,
+  stepViewDescription,
+} from "./views/stepMenu";
 import { ActionDecorationProvider } from "./views/actionDecorations";
 import { PendingUpdateStore } from "./core/pendingUpdates";
 // 作品を選ぶ場面で「未処理の提案が何件あるか」を出すために使う。
@@ -633,6 +637,19 @@ export async function activate(
       stepProvider.setExpanded(stepNodeKey(event.element), false);
     }
   });
+  // 見出しにも対象の作品名を出す（作者の依頼、2026-08-27）。
+  // 最上段の選択窓はスクロールで画面の外へ流れるが、見出しは常に見える
+  const updateStepViewDescription = (): void => {
+    stepView.description = stepViewDescription(
+      stepProvider.selectedWork(),
+      registry.list().length > 0
+    );
+  };
+  updateStepViewDescription();
+  // 選び直し・作品の増減・件数の数え直しは、すべてこのイベントを通る
+  context.subscriptions.push(
+    stepProvider.onDidChangeTreeData(() => updateStepViewDescription())
+  );
   context.subscriptions.push(stepView);
 
   /** 未反映の件数を数え直す。抽出・反映のあとに呼ぶ */

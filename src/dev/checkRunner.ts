@@ -51,17 +51,23 @@ export function registerCheckRunner(
 }
 
 async function runChecks(context: vscode.ExtensionContext): Promise<void> {
-  const chosen = await pickSection();
-  if (!chosen) return;
+  // **節一覧 ⇄ 項目一覧を1つのループで行き来する**（作者の報告、2026-08-27
+  // 「戻る機能がありません」）。前は項目一覧で行き止まりで、隣の節を見るには
+  // Escで全部閉じてコマンドを呼び直すしかなかった
+  for (;;) {
+    const chosen = await pickSection();
+    if (!chosen) return;
 
-  // ▶で選ばれたら、**節へ入らずにその機能だけ実行して終わる**。
-  // 「該当機能へとべる」のが依頼（作者、2026-08-27）で、印を付けるのは別の操作
-  if (chosen.kind === "run") {
-    await runFeature(chosen.section);
-    return;
+    // ▶で選ばれたら、**節へ入らずにその機能だけ実行して終わる**。
+    // 「該当機能へとべる」のが依頼（作者、2026-08-27）で、印を付けるのは別の操作
+    if (chosen.kind === "run") {
+      await runFeature(chosen.section);
+      return;
+    }
+
+    const outcome = await walkSection(context, chosen.section);
+    if (outcome !== "back") return;
   }
-
-  await walkSection(context, chosen.section);
 }
 
 /** 節一覧で選ばれたもの。**中を回すのか、その機能へ飛ぶのか**で分かれる */
@@ -145,16 +151,22 @@ async function pickSection(): Promise<SectionChoice | undefined> {
   return chosen;
 }
 
+/** 項目一覧の結末。**「戻る」だけを呼び出し側のループへ伝える** */
+type WalkOutcome = "back" | "closed";
+
 /**
  * 1つの節を回す。
  *
  * **実行と、印を付けるのを分ける。** 押した瞬間に済みにすると、
  * 見ていないものが済んだことになる。
+ *
+ * 戻り値が "back" なら節一覧へ戻る。**印を付けたあとも "back"**——
+ * 300件を回すとき、1節ごとにコマンドを呼び直させない。
  */
 async function walkSection(
   context: vscode.ExtensionContext,
   section: PendingCheckSection
-): Promise<void> {
+): Promise<WalkOutcome> {
   const run: vscode.QuickInputButton = {
     iconPath: new vscode.ThemeIcon("play"),
     tooltip: "この機能を実行する",
@@ -170,36 +182,54 @@ async function walkSection(
   // 実行する操作が無い節では▶自体を出していないので、そのときは書かない
   const runHint =
     section.commands.length > 0 ? "右上の▶でこの機能を実行できます。" : "";
-  quick.placeholder = `通った項目を選んで Enter。${runHint}選ばなければ何も変わりません`;
+  quick.placeholder =
+    `通った項目を選んで Enter。${runHint}` +
+    "←で節一覧へ戻れます。選ばなければ何も変わりません";
   quick.canSelectMany = true;
   quick.items = itemsOf(section).map((item) => ({ label: item }));
-  quick.buttons = section.commands.length > 0 ? [run, openDoc] : [openDoc];
+  // **戻る道を先頭に置く**（作者の報告、2026-08-27「戻る機能がありません」）。
+  // 標準の戻るボタン（タイトル左の←）を使い、独自の行は増やさない
+  quick.buttons = [
+    vscode.QuickInputButtons.Back,
+    ...(section.commands.length > 0 ? [run, openDoc] : [openDoc]),
+  ];
   quick.ignoreFocusOut = true;
 
-  const done = new Promise<readonly vscode.QuickPickItem[] | undefined>(
-    (resolve) => {
-      quick.onDidTriggerButton(async (button) => {
-        if (button === run) await runFeature(section);
-        if (button === openDoc) await openChecklist(context, section);
-      });
-      quick.onDidAccept(() => {
-        resolve(quick.selectedItems);
+  type WalkAnswer =
+    | { kind: "accepted"; items: readonly vscode.QuickPickItem[] }
+    | { kind: "back" }
+    | { kind: "closed" };
+  const done = new Promise<WalkAnswer>((resolve) => {
+    quick.onDidTriggerButton(async (button) => {
+      if (button === vscode.QuickInputButtons.Back) {
+        // 先に答えを決めてから閉じる。逆だと onDidHide が「閉じた」で先に片付ける
+        resolve({ kind: "back" });
         quick.hide();
-      });
-      quick.onDidHide(() => resolve(undefined));
-    }
-  );
+        return;
+      }
+      if (button === run) await runFeature(section);
+      if (button === openDoc) await openChecklist(context, section);
+    });
+    quick.onDidAccept(() => {
+      resolve({ kind: "accepted", items: quick.selectedItems });
+      quick.hide();
+    });
+    quick.onDidHide(() => resolve({ kind: "closed" }));
+  });
 
   quick.show();
-  const selected = await done;
+  const answer = await done;
   quick.dispose();
-  if (!selected || selected.length === 0) return;
+  if (answer.kind === "back") return "back";
+  if (answer.kind === "closed" || answer.items.length === 0) return "closed";
 
   await markDone(
     context,
     section,
-    selected.map((item) => item.label)
+    answer.items.map((item) => item.label)
   );
+  // 印を付け終えたら節一覧へ。続きの節をそのまま回せるようにする
+  return "back";
 }
 
 /** その節の機能を実行する。**探さずに、ここから飛べる**のが要点 */
