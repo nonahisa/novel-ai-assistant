@@ -1,4 +1,4 @@
-import { revealFolder } from "../views/openDocument";
+import { openGeneratedMarkdown, revealFolder } from "../views/openDocument";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { WorkEntry } from "../models/types";
@@ -160,11 +160,11 @@ export async function exportImeDictionary(work: WorkEntry): Promise<void> {
   if (action === "フォルダーを開く") {
     await revealFolder(path.join(settingsDir, written[0]));
   } else if (action === "取り込み手順を見る") {
-    const document = await vscode.workspace.openTextDocument({
-      content: buildHowToDocument(picked.map((entry) => entry.dialect as ImeDialect)),
-      language: "markdown",
-    });
-    await vscode.window.showTextDocument(document);
+    // 手順を見ながらIMEの辞書ツールを操作するので、読める形で開く
+    await openGeneratedMarkdown(
+      "IME辞書の取り込み手順",
+      buildHowToDocument(picked.map((entry) => entry.dialect as ImeDialect))
+    );
   }
 }
 

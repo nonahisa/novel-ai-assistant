@@ -5,6 +5,7 @@ import { isWebRuntime } from "../core/runtime";
 import type { WorkEntry } from "../models/types";
 import { readWorkConfig } from "../core/workRegistry";
 import { scanWork } from "../core/scanner";
+import { openGeneratedMarkdown } from "../views/openDocument";
 
 /**
  * いまの環境で、ファイルに何ができるかを実際に試して並べる（設計書5.8.11）。
@@ -406,9 +407,6 @@ function escapeCell(text: string): string {
 }
 
 async function show(markdown: string): Promise<void> {
-  const document = await vscode.workspace.openTextDocument({
-    content: markdown,
-    language: "markdown",
-  });
-  await vscode.window.showTextDocument(document);
+  // 表が並ぶ長い読み物なので、作者が既定にした画面で読めるようにする
+  await openGeneratedMarkdown("動作の診断", markdown);
 }

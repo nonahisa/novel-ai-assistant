@@ -258,6 +258,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 7,
   },
   {
+    id: "F-16",
+    title: "Markdownが既定の画面で開くか",
+    commands: ["novelai.applyPendingUpdates", "novelai.exportImeDictionary", "novelai.runFullSetup", "novelai.diagnoseWeb"],
+    count: 9,
+  },
+  {
     id: "",
     title: "LM Studio",
     commands: ["novelai.setupLmStudio", "novelai.setupAI", "novelai.testAI"],
@@ -278,4 +284,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 357;
+export const PENDING_CHECK_TOTAL = 366;

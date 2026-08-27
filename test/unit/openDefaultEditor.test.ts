@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { untitledMarkdownUri } from "../../src/views/openDocument";
 
 /**
  * ファイルは、作者の既定のエディターで開く（設計書6.17.6）。
@@ -13,8 +14,15 @@ import { join } from "node:path";
  * 「テキスト エディター」で開き、記法がそのまま並んでいた。作品一覧から
  * 開いた `.md` は Markdown のエディターで出るのに、こちらだけ違っていた。
  *
- * **画面上で作る文書は対象外。** `openTextDocument({content, language})` は
- * URIを持たないので、既定の割り当てという考え方がそもそも無い。
+ * **画面上で作る文書も対象である**（2026-08-27に直した）。以前ここには
+ * 「`openTextDocument({content, language})` はURIを持たないので対象外」と
+ * 書いてあったが、**間違いだった**——`untitled:` のURIを持っている。
+ * 作者から「反映待ちの更新がデフォルトで開かない」と報告があり、それが
+ * まさにこの形だった。
+ *
+ * ただし `vscode.open` へ渡すだけでは足りない。**名前が `Untitled-1` だと、
+ * `*.md` の割り当てに当たらない。** 名前を付けて作る必要がある
+ * （`views/openDocument.ts` の `openGeneratedMarkdown`）。
  */
 
 /**
@@ -66,6 +74,39 @@ describe("ファイルは既定のエディターで開く", () => {
     }
   });
 
+  /**
+   * その場で作るMarkdownは、`openGeneratedMarkdown` を通す。
+   *
+   * `openTextDocument({content, language: "markdown"})` は名前を付けられず、
+   * `Untitled-1` になる。**それでは `*.md` の割り当てに当たらない**ので、
+   * `vscode.open` へ渡しても直らない。名前付きで作る道は助けの中だけにある。
+   *
+   * **1か所に寄せておかないと、次にMarkdownを見せる場面を足した人が同じ
+   * 書き方をする**（`plot.md` の件のあと、4か所に増えていた）。
+   */
+  it("画面上で作るMarkdownが、開き方の助けを通っている", () => {
+    const offenders = files.filter((file) =>
+      /language:\s*"markdown"/.test(readFileSync(file, "utf-8"))
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  /**
+   * どの画面で読むかは作者が決める。
+   *
+   * `markdown.showPreview` を後から呼ぶと、作者が既定にした画面を
+   * 開いた直後に押しのけることになる（`generateSettingsDocs.ts` に
+   * 同じ趣旨が書いてある）。
+   */
+  it("開いたあとにプレビューを横取りしていない", () => {
+    const offenders = files.filter((file) =>
+      /executeCommand\(\s*"markdown\.showPreview"/.test(
+        readFileSync(file, "utf-8")
+      )
+    );
+    expect(offenders).toEqual([]);
+  });
+
   it("例外のファイルは、本当にエディターの実体を使っている", () => {
     for (const [file, why] of NEEDS_EDITOR) {
       const text = readFileSync(file, "utf-8");
@@ -77,5 +118,38 @@ describe("ファイルは既定のエディターで開く", () => {
         ) || /return\s+vscode\.window\.showTextDocument/.test(text);
       expect(usesEditor, `${file}（${why}）`).toBe(true);
     }
+  });
+});
+
+/**
+ * 保存されていない文書にも、`.md` の名前を付ける。
+ *
+ * **ここが `Untitled-1` だと、直したことにならない。** 作者が `*.md` へ
+ * 割り当てたエディターは名前のかたちで選ばれるので、拡張子が無ければ
+ * 当たらず、`vscode.open` に渡しても素のテキストのままになる。
+ */
+describe("その場で作るMarkdownの名前", () => {
+  it("`.md` で終わる untitled のURIになる", () => {
+    const uri = untitledMarkdownUri("反映待ちの更新", []);
+    expect(uri.scheme).toBe("untitled");
+    expect(uri.path).toBe("反映待ちの更新.md");
+  });
+
+  it("同じ名前が開いていたら、番号を振って避ける", () => {
+    // 避けないと `openTextDocument` が前の文書を返し、
+    // そこへ中身を差し込むことになる（前回の内容と混ざる）
+    const taken = ["反映待ちの更新.md", "反映待ちの更新-2.md"];
+    expect(untitledMarkdownUri("反映待ちの更新", taken).path).toBe(
+      "反映待ちの更新-3.md"
+    );
+  });
+
+  it("URIの区切りと混ざる文字を落とす", () => {
+    expect(untitledMarkdownUri("A/B:C?D#E", []).path).toBe("ABCDE.md");
+  });
+
+  it("名前が空になっても、拡張子は残る", () => {
+    // 表示名は呼び出し側が決めるが、万一空でも `.md` を失わない
+    expect(untitledMarkdownUri("///", []).path).toBe("無題.md");
   });
 });

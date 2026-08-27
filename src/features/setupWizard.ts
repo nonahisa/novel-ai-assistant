@@ -7,6 +7,7 @@ import {
   startOllama,
 } from "../ai/ollamaLauncher";
 import { AIRegistry, runSetupWizard } from "../ai/registry";
+import { openGeneratedMarkdown } from "../views/openDocument";
 import { isGitAvailable } from "../core/git";
 import { ghAvailable } from "../core/gitSetup";
 import {
@@ -225,11 +226,10 @@ async function showPlan(
 
 /** 何が要るのかを、用途つきで読める形で出す */
 async function showDetail(plan: SetupPlan): Promise<void> {
-  const document = await vscode.workspace.openTextDocument({
-    language: "markdown",
-    content: buildSetupDocument(plan),
+  // 一度読んで閉じる案内なので、プレビュー表示（タブを増やさない）のまま
+  await openGeneratedMarkdown("セットアップで入れるもの", buildSetupDocument(plan), {
+    preview: true,
   });
-  await vscode.window.showTextDocument(document, { preview: true });
 }
 
 export function buildSetupDocument(plan: SetupPlan): string {

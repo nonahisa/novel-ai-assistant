@@ -13,6 +13,7 @@ import {
 import { diffChars } from "../core/inlineDiff";
 import { CustomFieldStore } from "../core/customFieldStore";
 import { logFailure } from "../core/logger";
+import { openGeneratedMarkdown } from "../views/openDocument";
 import type { ProposalPanel } from "./proposalPanel";
 
 /**
@@ -265,11 +266,9 @@ async function showDiffDocument(items: ReviewItem[]): Promise<void> {
     ...items.map((item) => formatDiff(item.diff)),
   ].join("\n");
 
-  const document = await vscode.workspace.openTextDocument({
-    content,
-    language: "markdown",
-  });
-  await vscode.window.showTextDocument(document, { preview: false });
-  // 読むための文書なので、記法のままではなくプレビューで見せる
-  await vscode.commands.executeCommand("markdown.showPreview");
+  // **どの画面で読むかは作者が決める。** 前は開いた直後に
+  // `markdown.showPreview` を呼んでプレビューへ切り替えていたが、
+  // それは作者が既定にした画面（Markdown編集画面など）を押しのける。
+  // 作者の報告「反映待ちの更新がデフォルトで開きません」（2026-08-27）
+  await openGeneratedMarkdown("反映待ちの更新", content, { preview: false });
 }
