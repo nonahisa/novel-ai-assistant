@@ -18,7 +18,7 @@ import {
 } from "./actionList";
 
 /**
- * ステップメニュー（作者の依頼、2026-08-27）。
+ * 簡単ステップメニュー（作者の依頼、2026-08-27。名前は2026-08-29に改名）。
  *
  * 詳細メニュー（`actionList.ts`）は**何ができるか**で並べてある。
  * 一方、初めて使う人が知りたいのは**どの順でやるか**である。
@@ -30,7 +30,7 @@ import {
  *
  * ラベル・説明・AIの印・作品が要るかは、**すべて `ACTION_TREE` にあるもの**を
  * `allActions()` から引いて使う。ここで同じものを書くと、片方だけ直したときに
- * 「詳細メニューでは直っているのにステップメニューは古い」が起きる。
+ * 「詳細メニューでは直っているのに簡単ステップメニューは古い」が起きる。
  * しかも、どちらが正しいのかは画面を見比べるまで分からない。
  *
  * 参照が切れた（コマンドを改名した）ときは `STEP_MENU_MISSING_COMMANDS` に残り、
@@ -39,11 +39,15 @@ import {
  * ## 最上段で選んだ作品にだけ効く
  *
  * 詳細メニューは引数を渡さないので、作品が複数あると押すたびに選択を訊かれる。
- * ステップメニューは**最上段で一度選んでおく**形にして、そのあとは訊かない。
+ * 簡単ステップメニューは**最上段で一度選んでおく**形にして、そのあとは訊かない。
  * 選んだ作品は `command.arguments` に載せて渡す（`resolveWork` が受ける形）。
  *
  * 作品を選んでいないときは、**消さずに押せなくして理由を出す**——
  * 詳細メニューや編集者モードと同じ考え方である。
+ *
+ * ただし**作品を要さない操作は、未選択でも押せる**。最下段の「ヘルプ」が
+ * それで、作品を選ぶ前でも読める（判定は `requiresWork` 任せなので、
+ * ここに例外は書かない）。
  */
 
 /** 準備中の項目。まだコマンドが無い段階を、消さずに置いて予定だと伝える */
@@ -75,9 +79,13 @@ export interface StepDef {
 }
 
 /**
- * ステップメニューの中身。**この配列が画面の順序そのもの**である。
+ * 簡単ステップメニューの中身。**この配列が画面の順序そのもの**である。
  *
  * 並べるのは「その段階でよく通る操作」だけにする。全操作は詳細メニューにある。
+ *
+ * 末尾の「ヘルプ」だけは番号を持たない。作品づくりの流れの中の一段階では
+ * なく、**どの段階からでも寄る場所**だからである（番号を振ると
+ * 「8番目にやること」に見える）。
  */
 const STEP_DEFS: readonly StepDef[] = [
   {
@@ -229,6 +237,24 @@ const STEP_DEFS: readonly StepDef[] = [
       },
     ],
   },
+  {
+    // **番号を付けない**（作者の指定、2026-08-29）。流れの中の一段階ではなく、
+    // どの段階からでも寄る場所である。アイコンは詳細メニューの「ヘルプ」と
+    // 同じ question にして、同じものだと分かるようにする
+    label: "ヘルプ",
+    icon: "question",
+    detail:
+      "使い方が分からなくなったときや、うまく動かないときに開く場所です。" +
+      "作品を選んでいなくても使えます。",
+    // 並びは詳細メニューの「ヘルプ」分類に合わせる（使い方 → ログ → 版）。
+    // 「動作を診断」はブラウザ版だけの操作なので、ここには置かない
+    entries: [
+      "novelai.openManual",
+      "novelai.showLog",
+      "novelai.openChatLog",
+      "novelai.showVersion",
+    ],
+  },
 ];
 
 /** 参照を解いたあとの小分類 */
@@ -321,7 +347,7 @@ function referencedCommands(defs: readonly StepDef[]): string[] {
 
 const resolved = resolveSteps(STEP_DEFS, actionIndex());
 
-/** 画面に出すステップメニュー */
+/** 画面に出す簡単ステップメニュー */
 export const STEP_MENU: readonly Step[] = resolved.steps;
 
 /**
@@ -332,7 +358,7 @@ export const STEP_MENU: readonly Step[] = resolved.steps;
  */
 export const STEP_MENU_MISSING_COMMANDS: readonly string[] = resolved.missing;
 
-/** ステップメニューが参照しているコマンドID */
+/** 簡単ステップメニューが参照しているコマンドID */
 export const STEP_REFERENCED_COMMANDS: readonly string[] =
   referencedCommands(STEP_DEFS);
 
@@ -389,7 +415,7 @@ export function describeSelector(
 }
 
 /**
- * ビューの見出し（「ステップメニュー」の右の薄字）に出す文字。
+ * ビューの見出し（「簡単ステップメニュー」の右の薄字）に出す文字。
  *
  * **選んだ作品名はここに出さない**（作者の撤回、2026-08-28。
  * 「右側に作品名はやっぱり入れなくて良いです」——最上段の
@@ -603,7 +629,7 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
     if (works.length > 0) {
       item.command = {
         command: STEP_WORK_COMMAND,
-        title: "ステップメニューの作品を選ぶ",
+        title: "簡単ステップメニューの作品を選ぶ",
       };
     }
     return item;

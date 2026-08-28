@@ -85,6 +85,64 @@ export function planFolderConversion(
   return { plans, skipped };
 }
 
+/** 投稿サイトの記法の件数（`core/ruby.ts` の `countSiteNotation` の結果） */
+export interface SiteNotationCounts {
+  ruby: number;
+  emphasis: number;
+}
+
+/**
+ * 読み仮名の入った `.txt` を開いたときに、MD化を勧めるか
+ * （作者の指示、2026-08-29「読み仮名を含んだファイルを開くときは、
+ * 理由を添えて、投稿には問題がない旨添えてファイルのMD変換を促しましょう」）。
+ *
+ * **勧めるのは、勧める理由があるときだけ。**
+ *
+ * - `.md` は対象外（もう変換されている）
+ * - 読み仮名も傍点も無い `.txt` も対象外——**変換して得になることが無い**
+ *   のに声をかけると、案内そのものが読まれなくなる
+ * - 「今はしない」と断られたファイルには二度と出さない
+ *
+ * @param declined 断られたファイルの一覧（端末に残してある）
+ */
+export function shouldSuggestMarkdown(
+  filePath: string,
+  counts: SiteNotationCounts,
+  declined: readonly string[]
+): boolean {
+  if (!isPlainTextManuscript(filePath)) return false;
+  if (counts.ruby + counts.emphasis <= 0) return false;
+  const wanted = path.normalizeForComparison(filePath);
+  return !declined.some(
+    (entry) => path.normalizeForComparison(entry) === wanted
+  );
+}
+
+/**
+ * MD化を勧める文言。
+ *
+ * **「投稿にも問題ありません」まで言い切る。** 作者がためらうのは
+ * 「投稿サイトへ出せなくなるのでは」という一点なので、そこへ先に答える。
+ *
+ * **「中身は1文字も変わらない」とは書かない。** 名前を変えるだけでは
+ * 済まず、中のルビ・傍点は拡張機能の書き方へ揃えられる（設計書6.12.4、
+ * `features/markdownConvert.ts` の `importNotation`）。変わらないのは
+ * **本文の言葉**のほうで、そこを言い換えずに書くと嘘になる。
+ */
+export function describeMarkdownSuggestion(counts: SiteNotationCounts): string {
+  const found: string[] = [];
+  if (counts.ruby > 0) found.push(`読み仮名（ルビ）が${counts.ruby}件`);
+  if (counts.emphasis > 0) found.push(`傍点が${counts.emphasis}件`);
+
+  return (
+    `この原稿には${found.join("と")}入っています。` +
+    "Markdown（.md）にすると、この画面からルビや傍点を振り直せます。" +
+    "変換で変わるのは読み仮名の書き方だけで、本文の言葉は1文字も変わりません。" +
+    "投稿用のコピーはこれまでどおり投稿サイトの形（｜漢字《かんじ》）で出るので、" +
+    "投稿にも問題ありません。"
+  );
+}
+
 /** 断った理由を、作者に伝わる言葉にする */
 export function describeRefusal(refusal: ConversionRefusal): string {
   switch (refusal) {

@@ -1,6 +1,8 @@
 import {
   DailyStat,
   DeviceWritingStats,
+  FileCountMap,
+  FileCounts,
   WRITING_STATS_SCHEMA_VERSION,
   WritingBaseline,
   WritingMeasurement,
@@ -96,7 +98,59 @@ function parseDailyStat(value: unknown): DailyStat | undefined {
   }
   const saves =
     typeof raw.saves === "number" && Number.isFinite(raw.saves) ? raw.saves : 0;
-  return { date: raw.date, net: raw.net, gross: raw.gross, saves };
+
+  /*
+    **知らない項目は捨てずに残す。** この記録は端末をまたいで同期され、
+    同じ端末に前の版・先の版の拡張機能が入れ替わり立ち替わり入りうる。
+    読んだときに落とすと、**書き戻した瞬間に先の版が足した情報が消える**
+    （このファイルは読んで・足して・丸ごと書き直す作りである）。
+  */
+  const day = {
+    ...raw,
+    date: raw.date,
+    net: raw.net,
+    gross: raw.gross,
+    saves,
+  } as DailyStat;
+
+  // **内訳だけは、壊れていたら黙って落とす。** 合計が正なので、
+  // 内訳が無くても記録としては成り立つ（想像で埋めない）
+  const files = parseFileCountMap(raw.files);
+  if (files) day.files = files;
+  else delete day.files;
+  return day;
+}
+
+/**
+ * ファイル別の内訳を読む。
+ *
+ * **1件ずつ確かめて、読めたものだけを通す。** ここが壊れているのは
+ * 同期の競合か手編集なので、丸ごと捨てるより読める分を残すほうがよい。
+ * 1件も読めなければ `undefined`（項目そのものを置かない）。
+ */
+function parseFileCountMap(value: unknown): FileCountMap | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  const result: FileCountMap = {};
+  let found = false;
+  for (const key of Object.keys(raw)) {
+    // 鍵はJSONから来る。原型（prototype）を書き換える鍵は受け取らない
+    if (key === "" || key === "__proto__") continue;
+    const entry = raw[key];
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      continue;
+    }
+    const counts = entry as Record<string, unknown>;
+    if (typeof counts.net !== "number" || !Number.isFinite(counts.net)) continue;
+    if (typeof counts.gross !== "number" || !Number.isFinite(counts.gross)) {
+      continue;
+    }
+    result[key] = { net: counts.net, gross: counts.gross };
+    found = true;
+  }
+  return found ? result : undefined;
 }
 
 function parseBaseline(value: unknown): WritingBaseline | undefined {
@@ -111,13 +165,38 @@ function parseBaseline(value: unknown): WritingBaseline | undefined {
   if (typeof raw.at !== "string" || !Number.isFinite(Date.parse(raw.at))) {
     return undefined;
   }
-  return {
+  const baseline: WritingBaseline = {
     net: raw.net as number,
     gross: raw.gross as number,
     fileCount: raw.fileCount as number,
     conflictedCount: raw.conflictedCount as number,
     at: raw.at,
   };
+  const files = parseFileCountMap(raw.files);
+  if (files) baseline.files = files;
+  return baseline;
+}
+
+/**
+ * 記録に載せるファイルの鍵。**区切りは必ず `/` にする。**
+ *
+ * 同じ作品をWindowsとmacOSの両方で書くと、`本文\001.txt` と `本文/001.txt`
+ * が別の鍵になり、**同じファイルの記録が2つに割れる**。records は端末ごとに
+ * 分かれているが、読むときは全端末ぶんを合算する（設計書5.5.6）ので、
+ * 鍵が揃っていないと合算した瞬間に取りこぼす。
+ */
+export function fileCountKey(relativePath: string): string {
+  return relativePath.split("\\").join("/");
+}
+
+/** 内訳から1件を引く。原型（prototype）の持ち物を拾わない */
+function fileCountsOf(
+  files: FileCountMap | undefined,
+  key: string
+): FileCounts | undefined {
+  if (!files) return undefined;
+  if (!Object.prototype.hasOwnProperty.call(files, key)) return undefined;
+  return files[key];
 }
 
 /** 記録が付かなかったときの理由 */
@@ -191,18 +270,27 @@ export function recordMeasurement(
   }
 
   const date = statsDayKey(at, options.boundaryHour);
+  // **ファイル別の差も、ここでしか取れない。** 数えない回（初回・ファイルの
+  // 増減）では基準を置き直すだけなので、内訳も同じように数えない
+  const fileDeltas = fileDeltasBetween(stats.baseline.files, measurement.files);
   const days = [...stats.days];
   const index = days.findIndex((day) => day.date === date);
   if (index >= 0) {
     const current = days[index];
+    // **知らない項目を落とさない**（先の版が足したものを消さない）
     days[index] = {
+      ...current,
       date,
       net: current.net + delta,
       gross: current.gross + grossDelta,
       saves: current.saves + 1,
     };
+    const files = addFileCounts(current.files, fileDeltas);
+    if (files) days[index].files = files;
   } else {
-    days.push({ date, net: delta, gross: grossDelta, saves: 1 });
+    const day: DailyStat = { date, net: delta, gross: grossDelta, saves: 1 };
+    if (fileDeltas) day.files = fileDeltas;
+    days.push(day);
     days.sort((left, right) => left.date.localeCompare(right.date));
   }
 
@@ -244,13 +332,67 @@ function toBaseline(
   measurement: WritingMeasurement,
   at: Date
 ): WritingBaseline {
-  return {
+  const baseline: WritingBaseline = {
     net: measurement.net,
     gross: measurement.gross,
     fileCount: measurement.fileCount,
     conflictedCount: measurement.conflictedCount,
     at: at.toISOString(),
   };
+  // 渡されなかったときは項目ごと置かない（空の内訳と「内訳を持たない」を
+  // 取り違えないため。次の回に「基準に無いパス」として素通りする）
+  if (measurement.files) baseline.files = { ...measurement.files };
+  return baseline;
+}
+
+/**
+ * ファイルごとの増減。
+ *
+ * **基準にも現在にもあるパスだけを数える。** 片方にしか無いのは、
+ * ファイルが増えた・消えた・名前が変わったということで、書いた量ではない
+ * （作品合計で「ファイル数が変わった回は数えない」としているのと同じ理屈を、
+ * 1件ずつに当てはめている）。名前を変えただけの原稿を「全部書いた／全部
+ * 消した」と数えてしまうのを避ける。
+ *
+ * 増減のあったものが1件も無ければ `undefined`（空の内訳を積まない）。
+ */
+function fileDeltasBetween(
+  before: FileCountMap | undefined,
+  after: FileCountMap | undefined
+): FileCountMap | undefined {
+  if (!before || !after) return undefined;
+  const deltas: FileCountMap = {};
+  let found = false;
+  for (const key of Object.keys(after)) {
+    const previous = fileCountsOf(before, key);
+    if (!previous) continue;
+    const current = fileCountsOf(after, key);
+    if (!current) continue;
+    const net = current.net - previous.net;
+    const gross = current.gross - previous.gross;
+    if (net === 0 && gross === 0) continue;
+    deltas[key] = { net, gross };
+    found = true;
+  }
+  return found ? deltas : undefined;
+}
+
+/** その日の内訳へ、今回の増減を足し込む（元の内訳は書き換えない） */
+function addFileCounts(
+  current: FileCountMap | undefined,
+  deltas: FileCountMap | undefined
+): FileCountMap | undefined {
+  if (!deltas) return current;
+  const merged: FileCountMap = current ? { ...current } : {};
+  for (const key of Object.keys(deltas)) {
+    const delta = fileCountsOf(deltas, key);
+    if (!delta) continue;
+    const previous = fileCountsOf(merged, key);
+    merged[key] = previous
+      ? { net: previous.net + delta.net, gross: previous.gross + delta.gross }
+      : { net: delta.net, gross: delta.gross };
+  }
+  return merged;
 }
 
 // ─── 日付の扱い ───
@@ -473,14 +615,42 @@ export function mergeDailyStats(sets: DeviceWritingStats[]): DailyStat[] {
         current.net += day.net;
         current.gross += day.gross;
         current.saves += day.saves;
+        // 内訳も同じ日で足し合わせる。**片方にしか無くても落とさない**
+        // （新しい端末だけが内訳を持っている、という状態が普通にありうる）
+        const files = addFileCounts(current.files, day.files);
+        if (files) current.files = files;
       } else {
-        merged.set(day.date, { ...day });
+        // **浅い写しでは足りない。** 内訳をそのまま持つと、足し込みが
+        // 元の記録（読み込んだ配列）まで書き換える
+        const copy: DailyStat = { ...day };
+        if (day.files) copy.files = { ...day.files };
+        merged.set(day.date, copy);
       }
     }
   }
   return [...merged.values()].sort((left, right) =>
     left.date.localeCompare(right.date)
   );
+}
+
+/**
+ * その日、そのファイルで書いた純文字数（設計書6.3）。
+ *
+ * 原稿エディタの下段に「今日 +560字」を出すために使う（作者の指示、
+ * 2026-08-29）。**内訳を持たない日は 0 を返す。** この機能より前に
+ * 書いた日には内訳が無く、そこへ作品合計を代わりに出すと
+ * 「このファイルで書いた量」ではなくなる。
+ */
+export function fileNetOn(
+  days: readonly DailyStat[],
+  date: string,
+  key: string
+): number {
+  for (const day of days) {
+    if (day.date !== date) continue;
+    return fileCountsOf(day.files, key)?.net ?? 0;
+  }
+  return 0;
 }
 
 /** 端末ごとの内訳。「自宅では書けているが外では進まない」が見える */

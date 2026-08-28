@@ -196,6 +196,7 @@ import {
   MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   MANUSCRIPT_EDITOR_VIEW_TYPE,
   ManuscriptEditorProvider,
+  refreshManuscriptCounts,
   type ManuscriptEditorDeps,
 } from "./features/manuscriptEditor";
 import { showEditHistory } from "./features/editHistoryPanel";
@@ -218,17 +219,27 @@ import { openInDefaultEditor, revealFolder } from "./views/openDocument";
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
 
-/** ステップメニューで開いている段階の記憶先 */
+/** 簡単ステップメニューで開いている段階の記憶先 */
 const STEP_GROUPS_KEY = "novelai.steps.expandedGroups";
 
 /**
- * ステップメニューで選んでいる作品の記憶先。
+ * 簡単ステップメニューで選んでいる作品の記憶先。
  *
  * **IDだけを覚える。** 作品そのものを写すと、名前を変えたり登録から
  * 外したりしたときに、消えた作品を指したままになる（実在の確認は
  * 表示のたびに `StepMenuProvider` が行う）。
  */
 const STEP_WORK_KEY = "novelai.stepMenu.selectedWorkId";
+
+/**
+ * MD化の案内を「今はしない」と断られたファイルの記憶先
+ * （作者の指示、2026-08-29）。
+ *
+ * **端末に残す**（作品フォルダーへは書かない）。断りは作者ひとりの都合で
+ * あって作品の設定ではないし、同期対象へ入れると、書いていないのに
+ * 差分が出る（`writingStatsStore.ts` と同じ理由）。
+ */
+const MARKDOWN_DECLINED_KEY = "novelai.manuscript.markdownDeclined";
 
 export async function activate(
   context: vscode.ExtensionContext
@@ -317,9 +328,12 @@ export async function activate(
 
   // 執筆量の記録（設計書6.3）。走査は作品一覧の結果を借りるので、
   // 保存のたびにファイルを2度読むことはない
-  const progress = new WritingProgressTracker(deviceId, (work) =>
-    treeProvider.getStats(work)
-  );
+  // **話ごとの文字数も渡す**（作者の指示、2026-08-29「記録の持ち方を細かくして」）。
+  // どちらも同じ走査結果のキャッシュを引くので、2度読むことにはならない
+  const progress = new WritingProgressTracker(deviceId, async (work) => ({
+    stats: await treeProvider.getStats(work),
+    episodes: await treeProvider.getEpisodes(work),
+  }));
 
   // 競合の見比べに使う読み取り専用の本文置き場。
   // 競合はgit操作でしか起きないので、ブラウザでは作らない（設計書5.8.5）
@@ -436,6 +450,27 @@ export async function activate(
       });
       workChatPanel.trackEditor(editor);
       await vscode.commands.executeCommand(`${WORK_CHAT_VIEW_ID}.focus`);
+    },
+    // 下段の字数（作者の指示、2026-08-29）。**走査は一覧のキャッシュを借りる**
+    workStats: (work) => treeProvider.getStats(work),
+    todayFileCount: (work, filePath) => progress.todayFileCount(work, filePath),
+    // MD化は**既存の変換と同じ経路**を通す（中のルビも直る。設計書6.12.4）
+    convertToMarkdown: async (filePath) => {
+      const { convertOne } = await import("./features/markdownConvert.js");
+      return convertOne(filePath);
+    },
+    markdownDeclined: () =>
+      context.globalState.get<string[]>(MARKDOWN_DECLINED_KEY, []),
+    declineMarkdown: async (filePath) => {
+      const declined = context.globalState.get<string[]>(
+        MARKDOWN_DECLINED_KEY,
+        []
+      );
+      if (declined.includes(filePath)) return;
+      await context.globalState.update(MARKDOWN_DECLINED_KEY, [
+        ...declined,
+        filePath,
+      ]);
     },
   } satisfies ManuscriptEditorDeps;
 
@@ -859,7 +894,15 @@ export async function activate(
     }),
     registerCommand("novelai.exitChatFocus", async () => {
       await setChatFocus(false);
-    })
+    }),
+    // 1つのメニューだけを残す（作者の依頼、2026-08-29）。
+    // **入口はビューごとに分ける。** 「どのビューを残すか」を後から訊く形にすると、
+    // 押したビューを残したいだけなのに選択画面が1枚挟まる
+    registerCommand("novelai.soloWorks", () => setSoloView("works")),
+    registerCommand("novelai.soloSteps", () => setSoloView("steps")),
+    registerCommand("novelai.soloActions", () => setSoloView("actions")),
+    registerCommand("novelai.soloChat", () => setSoloView("chat")),
+    registerCommand("novelai.showAllViews", () => setSoloView(undefined))
   );
 
   /**
@@ -877,6 +920,34 @@ export async function activate(
       "setContext",
       "novelai.focusChat",
       on
+    );
+  }
+
+  /**
+   * 1つのメニューだけを残して、ほかを引っ込める（作者の依頼、2026-08-29）。
+   *
+   * 左側には4つのビュー（作品一覧・簡単ステップメニュー・詳細メニュー・
+   * AIに相談）が縦に並ぶ。畳んでも見出しの行は残るので、1つを大きく使いたい
+   * ときに邪魔になる。
+   *
+   * 渡すのは残すビューの短い名前（"works" | "steps" | "actions" | "chat"）で、
+   * `package.json` のビューの `when` がこの印を見て出し入れする。
+   * `undefined` を渡すと印が消えて、全部が戻る。
+   *
+   * **相談に集中する表示（`novelai.focusChat`）とは別に持つ。** どちらも
+   * 「ほかを引っ込める」だが、focusChat は相談パネルを開く流れの中で自動的に
+   * 掛かるもので、こちらは作者が明示的に選ぶもの。1つの印にまとめると、
+   * プロット相談を終えたときに、作者が選んだ表示まで巻き戻ってしまう。
+   *
+   * **覚えない（globalState へ書かない）。** 閉じた状態のまま再起動すると、
+   * 出し方を知らない作者には拡張機能が壊れたようにしか見えない。
+   * 起動のたびに全部出るほうが、閉じ込め事故より安い。
+   */
+  async function setSoloView(view: string | undefined): Promise<void> {
+    await vscode.commands.executeCommand(
+      "setContext",
+      "novelai.soloView",
+      view
     );
   }
 
@@ -1074,6 +1145,9 @@ export async function activate(
     chatter.noteEdit(work, filePath);
     await progress.record(work);
     updateStatusBar();
+    // **記録し終えてから、原稿エディタの下段を測り直す**（作者の指示、
+    // 2026-08-29）。先に読むと「今日 +◯字」が保存1回ぶん古いままになる
+    refreshManuscriptCounts(filePath);
     await refreshWritingStatsPanel(work, deviceId);
     await refreshAllWorksWritingStatsPanel(registry, deviceId);
   }
@@ -1537,7 +1611,7 @@ export async function activate(
     })
   );
 
-  // ステップメニューの最上段（作品選択窓）から呼ばれる。
+  // 簡単ステップメニューの最上段（作品選択窓）から呼ばれる。
   // **選ぶのはIDだけ**で、実在の確認は表示のたびにメニュー側が行う
   context.subscriptions.push(
     registerCommand("novelai.chooseStepWork", async () => {
@@ -1556,7 +1630,7 @@ export async function activate(
           // Escでも閉じられるが、それを知らない人には出口が無いように見える
           cancelItem(),
         ],
-        { title: "ステップメニューで使う作品" }
+        { title: "簡単ステップメニューで使う作品" }
       );
       if (!picked || !("work" in picked)) return;
       stepProvider.selectWork(picked.work.id);

@@ -12,6 +12,8 @@ import {
   dailyPaceNeeded,
   deviceTotals,
   emptyDeviceStats,
+  fileCountKey,
+  fileNetOn,
   mergeDailyStats,
   parseDeviceWritingStats,
   progressAgainstGoal,
@@ -285,6 +287,367 @@ describe("記録の読み込み", () => {
 
     expect(parsed?.baseline).toBeUndefined();
     expect(parsed?.days).toHaveLength(1);
+  });
+});
+
+/**
+ * ファイル別の内訳（作者の指示、2026-08-29「記録の持ち方を細かくして。
+ * 集計画面等でおかしくならないように」）。
+ *
+ * **合計が正で、内訳は補助である。** 内訳を足しても、これまでの集計・
+ * グラフ・目標・ステータスバーの数字は1字も変わってはいけない。
+ */
+describe("ファイル別の内訳", () => {
+  const at = new Date(2026, 7, 13, 20, 0);
+
+  /** 内訳つきの走査結果 */
+  function withFiles(
+    net: number,
+    files: Record<string, { net: number; gross: number }>,
+    options: Partial<WritingMeasurement> = {}
+  ): WritingMeasurement {
+    return { ...measurement(net, options), files };
+  }
+
+  test("ファイルごとの増減を積む", () => {
+    const first = recordMeasurement(
+      emptyDeviceStats("d-0001"),
+      withFiles(300, {
+        "本文/001.txt": { net: 200, gross: 210 },
+        "本文/002.txt": { net: 100, gross: 110 },
+      }),
+      { at }
+    );
+
+    const second = recordMeasurement(
+      first.stats,
+      withFiles(450, {
+        "本文/001.txt": { net: 200, gross: 210 },
+        "本文/002.txt": { net: 250, gross: 265 },
+      }),
+      { at }
+    );
+
+    expect(second.counted).toBe(true);
+    // 増えていないファイルは載せない（積むのは増減のあったものだけ）
+    expect(second.stats.days[0].files).toEqual({
+      "本文/002.txt": { net: 150, gross: 155 },
+    });
+    // **合計はこれまでどおり別に積む**
+    expect(second.stats.days[0].net).toBe(150);
+  });
+
+  test("同じ日に何度保存しても、ファイルごとに足し込む", () => {
+    let stats = recordMeasurement(
+      emptyDeviceStats("d-0001"),
+      withFiles(100, { "本文/001.txt": { net: 100, gross: 100 } }),
+      { at }
+    ).stats;
+    stats = recordMeasurement(
+      stats,
+      withFiles(150, { "本文/001.txt": { net: 150, gross: 150 } }),
+      { at }
+    ).stats;
+    stats = recordMeasurement(
+      stats,
+      withFiles(230, { "本文/001.txt": { net: 230, gross: 230 } }),
+      { at }
+    ).stats;
+
+    expect(stats.days[0].files).toEqual({
+      "本文/001.txt": { net: 130, gross: 130 },
+    });
+    expect(stats.days[0].net).toBe(130);
+  });
+
+  test("ファイルが増えた回は、内訳も数えない", () => {
+    // ダウンロードした本文を入れただけで「書いた」ことにしない。
+    // 合計と同じ扱いを内訳にも当てる
+    const first = recordMeasurement(
+      emptyDeviceStats("d-0001"),
+      withFiles(100, { "本文/001.txt": { net: 100, gross: 100 } }),
+      { at }
+    );
+
+    const second = recordMeasurement(
+      first.stats,
+      withFiles(
+        900,
+        {
+          "本文/001.txt": { net: 400, gross: 400 },
+          "本文/002.txt": { net: 500, gross: 500 },
+        },
+        { fileCount: 20 }
+      ),
+      { at }
+    );
+
+    expect(second.counted).toBe(false);
+    expect(second.reason).toBe("structure_changed");
+    expect(second.stats.days).toEqual([]);
+    // 次回の差はこの新しい姿から取る
+    expect(second.stats.baseline?.files).toEqual({
+      "本文/001.txt": { net: 400, gross: 400 },
+      "本文/002.txt": { net: 500, gross: 500 },
+    });
+  });
+
+  test("初回は内訳も数えず、基準だけ置く", () => {
+    const first = recordMeasurement(
+      emptyDeviceStats("d-0001"),
+      withFiles(43_755, { "本文/001.txt": { net: 43_755, gross: 44_000 } }),
+      { at }
+    );
+
+    expect(first.stats.days).toEqual([]);
+    expect(first.stats.baseline?.files).toEqual({
+      "本文/001.txt": { net: 43_755, gross: 44_000 },
+    });
+  });
+
+  test("基準に無いパス・現在に無いパスの差は取らない", () => {
+    /*
+      ファイル数が同じままパスが入れ替わるのは「名前を変えた」ときである。
+      差を取ると、同じ原稿を「全部消して全部書いた」と数えてしまう。
+    */
+    const first = recordMeasurement(
+      emptyDeviceStats("d-0001"),
+      withFiles(500, {
+        "本文/001.txt": { net: 200, gross: 200 },
+        "本文/002.txt": { net: 300, gross: 300 },
+      }),
+      { at }
+    );
+
+    const renamed = recordMeasurement(
+      first.stats,
+      withFiles(560, {
+        "本文/001.txt": { net: 200, gross: 200 },
+        "本文/002_旅立ち.txt": { net: 360, gross: 360 },
+      }),
+      { at }
+    );
+
+    // 合計は動く（ファイル数は変わっていない）が、内訳には載せない
+    expect(renamed.counted).toBe(true);
+    expect(renamed.stats.days[0].net).toBe(60);
+    expect(renamed.stats.days[0].files).toBeUndefined();
+  });
+
+  test("内訳を渡さなければ、これまでどおり合計だけを積む", () => {
+    const first = recordMeasurement(emptyDeviceStats("d-0001"), measurement(1_000), { at });
+    const second = recordMeasurement(first.stats, measurement(1_600), { at });
+
+    expect(second.stats.days[0]).toEqual({
+      date: "2026-08-13",
+      net: 600,
+      gross: 600,
+      saves: 1,
+    });
+    expect(second.stats.baseline?.files).toBeUndefined();
+  });
+
+  test("鍵の区切りは / に揃える", () => {
+    // WindowsとmacOSで同じ作品を書くと、揃えないと記録が2つに割れる
+    expect(fileCountKey("本文\\001.txt")).toBe("本文/001.txt");
+    expect(fileCountKey("本文/001.txt")).toBe("本文/001.txt");
+  });
+
+  test("今日その話で書いた量を引ける", () => {
+    const days = [
+      { date: "2026-08-12", net: 500, gross: 500, saves: 1 },
+      {
+        date: "2026-08-13",
+        net: 900,
+        gross: 900,
+        saves: 2,
+        files: {
+          "本文/001.txt": { net: 600, gross: 600 },
+          "本文/002.txt": { net: 300, gross: 300 },
+        },
+      },
+    ];
+
+    expect(fileNetOn(days, "2026-08-13", "本文/001.txt")).toBe(600);
+    // 内訳に無いファイル・内訳を持たない日は0（作品合計で埋めない）
+    expect(fileNetOn(days, "2026-08-13", "本文/003.txt")).toBe(0);
+    expect(fileNetOn(days, "2026-08-12", "本文/001.txt")).toBe(0);
+    expect(fileNetOn(days, "2026-08-11", "本文/001.txt")).toBe(0);
+  });
+
+  test("環境をまたいでも、同じ話の量は足し合わせる", () => {
+    const desktop: DeviceWritingStats = {
+      schemaVersion: WRITING_STATS_SCHEMA_VERSION,
+      deviceId: "desktop-a1b2",
+      days: [
+        {
+          date: "2026-08-13",
+          net: 600,
+          gross: 600,
+          saves: 1,
+          files: { "本文/001.txt": { net: 600, gross: 600 } },
+        },
+      ],
+    };
+    // **内訳を持たない端末（前の版で書いた記録）と混ざる**
+    const laptop: DeviceWritingStats = {
+      schemaVersion: WRITING_STATS_SCHEMA_VERSION,
+      deviceId: "laptop-c3d4",
+      days: [
+        {
+          date: "2026-08-13",
+          net: 400,
+          gross: 400,
+          saves: 1,
+          files: { "本文/001.txt": { net: 400, gross: 400 } },
+        },
+      ],
+    };
+    const old: DeviceWritingStats = {
+      schemaVersion: WRITING_STATS_SCHEMA_VERSION,
+      deviceId: "tablet-e5f6",
+      days: [day("2026-08-13", 100)],
+    };
+
+    const merged = mergeDailyStats([desktop, laptop, old]);
+
+    expect(fileNetOn(merged, "2026-08-13", "本文/001.txt")).toBe(1_000);
+    // 合計には、内訳を持たない端末のぶんも入る
+    expect(merged[0].net).toBe(1_100);
+    // **元の記録を書き換えていない**（浅い写しのままだと壊れる）
+    expect(desktop.days[0].files).toEqual({
+      "本文/001.txt": { net: 600, gross: 600 },
+    });
+  });
+
+  test("内訳の有無が混ざっても、これまでの集計は変わらない", () => {
+    /*
+      **内訳をわざと合計と食い違わせる。** 集計・グラフ・目標・ステータスバーが
+      合計しか見ていないことを、こうすれば確かめられる（内訳を足し込んでいたら
+      ここで数字が跳ねる）。実際の記録でこうなることは無い。
+    */
+    const withBreakdown: DailyStat = {
+      date: "2026-08-13",
+      net: 600,
+      gross: 620,
+      saves: 1,
+      files: { "本文/001.txt": { net: 999_999, gross: 999_999 } },
+    };
+    const without = day("2026-08-12", 400);
+
+    const buckets = aggregate([without, withBreakdown], "daily", {
+      today: "2026-08-13",
+      span: 2,
+    });
+
+    expect(buckets.map((bucket) => bucket.net)).toEqual([400, 600]);
+    expect(sumRange([without, withBreakdown], "2026-08-01", "2026-08-31")).toEqual(
+      { net: 1_000, gross: 1_020, activeDays: 2 }
+    );
+    expect(currentStreak([without, withBreakdown], "2026-08-13")).toBe(2);
+    expect(
+      summarize([without, withBreakdown], "2026-08-13").todayProgress.written
+    ).toBe(600);
+    expect(
+      deviceTotals([
+        {
+          schemaVersion: WRITING_STATS_SCHEMA_VERSION,
+          deviceId: "desktop-a1b2",
+          days: [without, withBreakdown],
+        },
+      ])
+    ).toEqual([{ deviceId: "desktop-a1b2", net: 1_000, activeDays: 2 }]);
+  });
+});
+
+describe("内訳つきの記録を読む", () => {
+  test("様式版は上げない（古い版がこの記録を読めなくなる）", () => {
+    // 上げると、古い版は「読めない版」としてファイルごと捨てる。
+    // 同期で他の環境の記録も読むので、被害は端末1台では済まない
+    expect(WRITING_STATS_SCHEMA_VERSION).toBe("1");
+  });
+
+  test("内訳を読み取る", () => {
+    const parsed = parseDeviceWritingStats({
+      schemaVersion: WRITING_STATS_SCHEMA_VERSION,
+      deviceId: "desktop-a1b2",
+      baseline: {
+        net: 100,
+        gross: 120,
+        fileCount: 3,
+        conflictedCount: 0,
+        at: "2026-08-13T11:00:00.000Z",
+        files: { "本文/001.txt": { net: 100, gross: 120 } },
+      },
+      days: [
+        {
+          date: "2026-08-13",
+          net: 600,
+          gross: 600,
+          saves: 1,
+          files: { "本文/001.txt": { net: 600, gross: 600 } },
+        },
+      ],
+    });
+
+    expect(parsed?.days[0].files).toEqual({
+      "本文/001.txt": { net: 600, gross: 600 },
+    });
+    expect(parsed?.baseline?.files).toEqual({
+      "本文/001.txt": { net: 100, gross: 120 },
+    });
+  });
+
+  test("壊れた内訳だけを黙って落とす", () => {
+    // 合計が正なので、内訳が読めなくても記録としては成り立つ。
+    // 読める分は残す（丸ごと捨てない）
+    const parsed = parseDeviceWritingStats({
+      schemaVersion: WRITING_STATS_SCHEMA_VERSION,
+      deviceId: "desktop-a1b2",
+      days: [
+        {
+          date: "2026-08-13",
+          net: 600,
+          gross: 600,
+          saves: 1,
+          files: {
+            "本文/001.txt": { net: 600, gross: 600 },
+            "本文/002.txt": { net: "たくさん" },
+            "本文/003.txt": null,
+            "本文/004.txt": [1, 2],
+          },
+        },
+        { date: "2026-08-12", net: 100, gross: 100, saves: 1, files: "こわれた" },
+        { date: "2026-08-11", net: 50, gross: 50, saves: 1, files: {} },
+      ],
+    });
+
+    expect(parsed?.days).toHaveLength(3);
+    expect(parsed?.days[2].files).toEqual({
+      "本文/001.txt": { net: 600, gross: 600 },
+    });
+    // 1件も読めなければ、項目そのものを置かない
+    expect(parsed?.days[1].files).toBeUndefined();
+    expect(parsed?.days[0].files).toBeUndefined();
+    // 合計は落とさない
+    expect(parsed?.days.map((entry) => entry.net)).toEqual([50, 100, 600]);
+  });
+
+  test("知らない項目は捨てずに通す", () => {
+    /*
+      **先の版が足した項目を、読んで書き戻すだけで消さない。**
+      この記録は読んで・足して・丸ごと書き直す作りなので、
+      落とすと版を戻した瞬間に情報が消える。
+    */
+    const parsed = parseDeviceWritingStats({
+      schemaVersion: WRITING_STATS_SCHEMA_VERSION,
+      deviceId: "desktop-a1b2",
+      days: [
+        { date: "2026-08-13", net: 600, gross: 600, saves: 1, mood: "上機嫌" },
+      ],
+    });
+
+    expect(parsed?.days[0]).toMatchObject({ net: 600, mood: "上機嫌" });
   });
 });
 

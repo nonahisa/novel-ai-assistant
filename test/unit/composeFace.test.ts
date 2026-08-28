@@ -838,10 +838,15 @@ describe("画面の約束", () => {
     expect(() => new Function(body)).not.toThrow();
   });
 
-  it("組んで書く（実験）のボタンと面がある", () => {
-    expect(html).toContain('id="composeMode"');
-    expect(html).toContain("組んで書く（実験）");
+  /**
+   * **切り替えのボタンは外した**（作者の指示、2026-08-29。組んで書くが標準）。
+   * 面そのものと、覚えた状態から開く道（composeWanted）は残っている。
+   */
+  it("組んで書く面があり、開いた時点で入る", () => {
     expect(html).toContain('<div id="compose"');
+    expect(html).not.toContain('id="composeMode"');
+    expect(code).toContain("composeWanted");
+    expect(code).toContain("composeEnter()");
   });
 
   /**
@@ -1020,9 +1025,16 @@ describe("画面の約束", () => {
     expect(code).toContain("compose: composeOn || composeWanted");
   });
 
-  /** 実験が転んでも、いままでの書き方が無傷で残ること */
-  it("いつでも打つ面へ戻せる", () => {
+  /**
+   * 実験が転んでも、いままでの書き方が無傷で残ること。
+   *
+   * **ボタンは無くなったが、落ちる道は残す**（作者の指示、2026-08-29）。
+   * 届いた本文を組み直せないと分かったら、この面から「書く」面へ落とす。
+   * 落ちた先の textarea では、これまでどおり普通に打てる。
+   */
+  it("組み直せない本文が届いたら、打つ面へ落ちる", () => {
     expect(code).toContain("function composeLeave(");
-    expect(html).toContain("組んで書くのをやめる");
+    const apply = code.slice(code.indexOf("function composeApplyText("));
+    expect(apply.slice(0, 700)).toContain("composeLeave();");
   });
 });

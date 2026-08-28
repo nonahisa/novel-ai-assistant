@@ -27,7 +27,7 @@ import type { WorkEntry } from "../../src/models/types";
 import type { WorkRegistry } from "../../src/core/workRegistry";
 
 /**
- * ステップメニュー（作者の依頼、2026-08-27）。
+ * 簡単ステップメニュー（作者の依頼、2026-08-27。名前は2026-08-29に改名）。
  *
  * 確かめるのは2つに絞る。
  *
@@ -35,7 +35,7 @@ import type { WorkRegistry } from "../../src/core/workRegistry";
  *    （`ACTION_TREE`）にしか無い。コマンドを改名すると、画面からは
  *    項目が1つ消えるだけで気づけない
  * 2. **最上段で選んだ作品が、押した操作へ渡ること**——渡らないと、
- *    押すたびに作品を訊かれる（ステップメニューを作った意味が無い）
+ *    押すたびに作品を訊かれる（簡単ステップメニューを作った意味が無い）
  */
 
 function work(id: string, title: string): WorkEntry {
@@ -84,7 +84,7 @@ function memoryGroupStore(initial: string[] = []): GroupStateStore & {
   };
 }
 
-/** ステップメニューに並ぶ操作をすべて取り出す */
+/** 簡単ステップメニューに並ぶ操作をすべて取り出す */
 function stepActions(): ActionItem[] {
   return STEP_MENU.flatMap((step) =>
     step.entries.flatMap((entry) =>
@@ -108,7 +108,9 @@ function stepPlaceholders(): StepPlaceholder[] {
 /** 操作の節点を作る。名前で引けないと、テストが並び順に縛られる */
 function actionNode(command: string): StepNode {
   const item = stepActions().find((entry) => entry.command === command);
-  if (!item) throw new Error(`操作「${command}」がステップメニューにありません`);
+  if (!item) {
+    throw new Error(`操作「${command}」が簡単ステップメニューにありません`);
+  }
   return { type: "action", item };
 }
 
@@ -130,7 +132,7 @@ function descriptionOf(provider: StepMenuProvider, node: StepNode): string {
   return String(provider.getTreeItem(node).description ?? "");
 }
 
-describe("ステップメニューの構成", () => {
+describe("簡単ステップメニューの構成", () => {
   test("参照しているコマンドは、すべて詳細メニューに実在する", () => {
     // **操作の実体は二重に持たない。** ここが切れると、画面から項目が
     // 1つ消えるだけで、誰も気づけないまま出続ける
@@ -143,9 +145,11 @@ describe("ステップメニューの構成", () => {
     expect(STEP_MENU_MISSING_COMMANDS).toEqual([]);
   });
 
-  test("段階は7つで、番号の付いた名前が並ぶ", () => {
-    // 番号は「どの順でやるか」そのもの。並べ替えたら番号も直す
-    expect(STEP_MENU).toHaveLength(7);
+  test("番号の付いた7段階のあとに、番号なしの「ヘルプ」が来る", () => {
+    // 番号は「どの順でやるか」そのもの。並べ替えたら番号も直す。
+    // **ヘルプに番号は振らない**——流れの中の一段階ではなく、
+    // どの段階からでも寄る場所だから（作者の指定、2026-08-29）
+    expect(STEP_MENU).toHaveLength(8);
     expect(STEP_MENU.map((step) => step.label)).toEqual([
       "1. 作品登録",
       "2. 新作構想",
@@ -154,6 +158,7 @@ describe("ステップメニューの構成", () => {
       "5. 投稿脱稿",
       "6. 編集部校正・校閲",
       "7. 電子出版等",
+      "ヘルプ",
     ]);
   });
 
@@ -193,6 +198,89 @@ describe("ステップメニューの構成", () => {
 
     expect(roots[0]).toEqual({ type: "selector" });
     expect(roots).toHaveLength(1 + STEP_MENU.length);
+  });
+});
+
+/**
+ * 最下段のヘルプ（作者の依頼、2026-08-29）。
+ *
+ * **ここは「作品を選んでから」の規則の外に置く。** 何をすればよいか
+ * 分からない人が最初に開くのがヘルプであり、そこで「作品を選んでください」と
+ * 言われると先へ進めない。
+ */
+describe("最下段のヘルプ", () => {
+  const helpStep = (): (typeof STEP_MENU)[number] =>
+    STEP_MENU[STEP_MENU.length - 1];
+
+  test("ヘルプは最後の段で、詳細メニューと同じ並び・同じ印を持つ", () => {
+    expect(helpStep().label).toBe("ヘルプ");
+    // 詳細メニューの「ヘルプ」分類と同じアイコン。別の絵にすると、
+    // 同じものが2か所にあると気づけない
+    expect(helpStep().icon).toBe("question");
+    expect(
+      helpStep().entries.map((entry) =>
+        entry.kind === "action" ? entry.command : entry.label
+      )
+    ).toEqual([
+      "novelai.openManual",
+      "novelai.showLog",
+      "novelai.openChatLog",
+      "novelai.showVersion",
+    ]);
+  });
+
+  test("作品を選んでいなくても押せる", () => {
+    // 作品は2つ登録済みで、どれも選んでいない状態
+    const provider = new StepMenuProvider(
+      fakeRegistry([work("w1", "作品A"), work("w2", "作品B")]),
+      memoryWorkStore()
+    );
+
+    for (const entry of helpStep().entries) {
+      if (entry.kind !== "action" || entry.requiresWork) continue;
+      const command = commandOf(provider, { type: "action", item: entry });
+
+      expect(command?.command, entry.command).toBe(entry.command);
+      // 作品を要さないので、対象は渡さない（渡すと相手がすり替わる）
+      expect(command?.arguments, entry.command).toEqual([]);
+    }
+  });
+
+  test("作品が1つも登録されていなくても押せる", () => {
+    // 入れた直後に開くのがここ。**登録より先に読めなければ意味が無い**
+    const provider = new StepMenuProvider(fakeRegistry([]), memoryWorkStore());
+
+    for (const entry of helpStep().entries) {
+      if (entry.kind !== "action" || entry.requiresWork) continue;
+      expect(
+        commandOf(provider, { type: "action", item: entry })?.command,
+        entry.command
+      ).toBe(entry.command);
+    }
+  });
+
+  test("押せるものが3つある（要件を絞り込んで空振りしない）", () => {
+    // 上の2つは「押せないものを飛ばす」書き方なので、全部が
+    // `requiresWork` になると**何も確かめずに通ってしまう**
+    const openable = helpStep().entries.filter(
+      (entry) => entry.kind === "action" && !entry.requiresWork
+    );
+
+    expect(openable).toHaveLength(3);
+  });
+
+  test("「相談のログを開く」だけは作品が要る", () => {
+    // 作品ごとに残しているログなので、対象が決まらないと開けない。
+    // **ここが落ちたら、詳細メニュー側の `requiresWork` を変えたということ。**
+    // そのときはヘルプ段の扱い（未選択でも押せる）も見直すこと
+    const provider = new StepMenuProvider(
+      fakeRegistry([work("w1", "作品A"), work("w2", "作品B")]),
+      memoryWorkStore()
+    );
+    const node = actionNode("novelai.openChatLog");
+
+    expect(commandOf(provider, node)).toBeUndefined();
+    expect(descriptionOf(provider, node)).toBe(STEP_SELECT_HINT);
   });
 });
 

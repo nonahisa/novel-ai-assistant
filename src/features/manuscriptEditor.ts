@@ -44,7 +44,12 @@ import { askText } from "../views/dialogs";
 import { logLine } from "../core/logger";
 import type { TermHighlighter } from "../views/termHighlight";
 import type { TermKind } from "../core/termIndex";
-import type { WorkEntry } from "../models/types";
+import type { WorkEntry, WorkStats } from "../models/types";
+import {
+  describeMarkdownSuggestion,
+  shouldSuggestMarkdown,
+} from "../core/markdownConversion";
+import { countSiteNotation } from "../core/ruby";
 
 /**
  * 原稿エディタ（設計書6.25）。
@@ -110,8 +115,70 @@ const openManuscripts = new Map<
      * 送っても捨てられるだけなので、待つほかにやりようがない。
      */
     revealLine(line: number): void;
+    /**
+     * 下段の字数を測り直す（作者の指示、2026-08-29）。
+     *
+     * **保存のあと、執筆量を記録し終えてから呼ぶ**（`extension.ts`）。
+     * 保存の知らせを自分で拾うと、記録より先に読むことがあり、
+     * 「今日 +◯字」が1回分ずつ古くなる。
+     */
+    refreshCounts(): void;
   }
 >();
+
+/**
+ * その原稿を開いている画面の、下段の字数を測り直す。
+ *
+ * 開いていなければ何もしない。呼ぶのは保存を記録し終えたところ1か所だけ。
+ */
+export function refreshManuscriptCounts(filePath: string): void {
+  openManuscripts.get(paths.toUri(filePath).toString())?.refreshCounts();
+}
+
+/**
+ * MD化の案内をもう出したファイル（この起動中だけ覚える）。
+ *
+ * 断られたぶんは端末に残す（`deps.markdownDeclined`）。こちらは
+ * 「開くたびに同じ案内が出る」のを止めるためだけのもので、
+ * VS Code を開き直せば1度は出る——**断りではなく、後回しだから**である。
+ */
+const markdownAsked = new Set<string>();
+
+/**
+ * 画面へ出す字数。**数え方は他の画面と揃える**（純／総の設定、ルビを数えるか）。
+ * ここだけ違う数字が出ると、どちらが本当か分からなくなる。
+ */
+function countFor(text: string): number {
+  return pickCount(
+    countChars(text, excludeRubyFromCount()),
+    currentCountMode()
+  );
+}
+
+/**
+ * 同じファイルを指しているか。
+ *
+ * **文字列の一致では足りない。** Windowsではドライブ文字の大小や
+ * 区切りの表れ方が経路によって違う（`paths.normalizeForComparison`）。
+ * 取り違えると「いま開いている話」が見つからず、前後の話へ移れない。
+ */
+function samePath(left: string, right: string): boolean {
+  return (
+    paths.normalizeForComparison(left) === paths.normalizeForComparison(right)
+  );
+}
+
+/**
+ * 話を新しく作るときの名前の決まり。**`novelai.addEpisode` と揃える**
+ * （揃えないと、同じ作品の中でファイル名の形が2種類できる）。
+ */
+function episodeNaming(): { digits: number; extension: string } {
+  const config = vscode.workspace.getConfiguration("novelai");
+  return {
+    digits: config.get<number>("episodeNumberDigits", 3),
+    extension: config.get<string>("episodeFileExtension", ".txt"),
+  };
+}
 
 /**
  * いまアクティブなタブが原稿エディタなら、その入口のID。
@@ -172,6 +239,13 @@ type Incoming =
   /** 最新話を書く（設計書6.25.5） */
   | { type: "openLatest" }
   /**
+   * 前の話・次の話（作者の指示、2026-08-29）。
+   *
+   * **どの話かを決めるのはこちら。** 画面はファイルの並びを知らない
+   * （走査の結果を持っているのは拡張機能側である）。
+   */
+  | { type: "openNeighbor"; direction: "prev" | "next" }
+  /**
    * 画面側で起きたことを記録する（設計書6.34）。
    *
    * 組んで書く面の安全弁（記法→DOM→記法 の往復が一致しないとき）は、
@@ -201,6 +275,31 @@ export interface ManuscriptEditorDeps {
     document: vscode.TextDocument,
     range: vscode.Range | undefined
   ): Promise<void>;
+  /**
+   * 作品ぜんたいの字数（下段に出す。作者の指示、2026-08-29）。
+   *
+   * **走査は作品一覧の結果を借りる。** 開いたときと保存したときにしか
+   * 呼ばないが、それでも4万字の作品を独立に読み直す理由は無い。
+   */
+  workStats(work: WorkEntry): Promise<WorkStats>;
+  /**
+   * この原稿で今日書いた純文字数（設計書6.3）。
+   * 記録を止めている作者には `undefined` が返る（0と書かない）。
+   */
+  todayFileCount(work: WorkEntry, filePath: string): Promise<number | undefined>;
+  /**
+   * 読み仮名の入った `.txt` を `.md` にする（作者の指示、2026-08-29）。
+   *
+   * **既存の変換と同じ経路を通す**（`features/markdownConvert.ts` の
+   * `convertOne`）。ここで名前を変える手順を書き起こすと、
+   * 「中のルビも直す」（設計書6.12.4）が抜けた別物ができる。
+   * 変換後のパスを返す。断られた・失敗したときは undefined。
+   */
+  convertToMarkdown(filePath: string): Promise<string | undefined>;
+  /** MD化の案内を「今はしない」と断られたファイル（端末に残す） */
+  markdownDeclined(): readonly string[];
+  /** 断られたことを覚える */
+  declineMarkdown(filePath: string): Promise<void>;
 }
 
 export class ManuscriptEditorProvider
@@ -297,6 +396,9 @@ export class ManuscriptEditorProvider
         }
         revealLineNow(line);
       },
+      refreshCounts: (): void => {
+        void this.sendFootCounts(panel, document);
+      },
     };
     openManuscripts.set(key, entry);
     panel.onDidDispose(() => {
@@ -376,6 +478,11 @@ export class ManuscriptEditorProvider
             pendingReveal = undefined;
             revealLineNow(line);
           }
+          // 下段の字数は**本文より後**でよい（作品ぜんたいの走査が要る）。
+          // 待たせると、開いた直後の本文の表示まで遅れる
+          void this.sendFootCounts(panel, document);
+          // 読み仮名の入った .txt なら、MD化を勧める（作者の指示、2026-08-29）
+          void this.suggestMarkdown(document);
           break;
 
         case "edit":
@@ -429,6 +536,10 @@ export class ManuscriptEditorProvider
 
         case "openLatest":
           await this.openLatestEpisode(document);
+          break;
+
+        case "openNeighbor":
+          await this.openNeighborEpisode(document, message.direction);
           break;
 
         case "pickFont":
@@ -544,14 +655,106 @@ export class ManuscriptEditorProvider
     panel: vscode.WebviewPanel,
     text: string
   ): Promise<void> {
-    // **数え方は他の画面と揃える**（純／総の設定、ルビを数えるか）。
-    // ここだけ違う数字が出ると、どちらが本当か分からなくなる
-    const mode = currentCountMode();
-    const counts = countChars(text, excludeRubyFromCount());
+    const value = countFor(text);
     await panel.webview.postMessage({
       type: "count",
-      label: `${countModeLabel(mode)}${formatCount(pickCount(counts, mode))}字`,
+      label: `${countModeLabel(currentCountMode())}${formatCount(value)}字`,
+      // **下段の「このファイル」も同じ数字を使う**（作者の指示、2026-08-29）。
+      // 画面側で数え直すと、純／総の設定やルビの扱いが食い違って、
+      // 同じ画面に2つの字数が出る
+      value,
     });
+  }
+
+  /**
+   * 下段の「作品 ◯◯字 ／ 今日 +◯◯字」を送る（作者の指示、2026-08-29）。
+   *
+   * **打鍵ごとには送らない。** 開いたときと、保存を記録し終えたとき
+   * （`refreshManuscriptCounts`）の2回だけ。作品の合計は全話の走査が要り、
+   * 1打鍵ごとに数え直すと打つ手が止まる。その間の増減は、画面側が
+   * 「このファイルの字数の差」を足して見せる。
+   *
+   * `fileAtBase` を一緒に送るのは、その差を取るための基準である
+   * （測った瞬間のこのファイルの字数）。
+   */
+  private async sendFootCounts(
+    panel: vscode.WebviewPanel,
+    document: vscode.TextDocument
+  ): Promise<void> {
+    const filePath = fromUri(document.uri);
+    const found = await this.deps.highlighter.indexFor(filePath);
+    // 作品に属さない原稿では、このファイルの字数だけを出す（作品も今日も無い）
+    if (!found) return;
+
+    try {
+      const stats = await this.deps.workStats(found.work);
+      const today = await this.deps.todayFileCount(found.work, filePath);
+      await panel.webview.postMessage({
+        type: "counts",
+        workTotal: pickCount(stats.totals, currentCountMode()),
+        fileAtBase: countFor(toLf(document.getText())),
+        today,
+      });
+    } catch (error) {
+      // **字数が出ないだけで、書くほうは止めない。** 黙って諦めずに残す
+      logLine(
+        `原稿エディタ：下段の字数を出せませんでした（${
+          error instanceof Error ? error.message : String(error)
+        }）。`
+      );
+    }
+  }
+
+  /**
+   * 読み仮名の入った `.txt` を開いたら、MD化を勧める（作者の指示、2026-08-29）。
+   *
+   * **控えめに1度だけ。** 断られたらそのファイルでは二度と出さないし、
+   * 断られていなくても、同じ画面で開き直すたびには出さない
+   * （`markdownAsked`）。毎回促すと、案内そのものが邪魔になる。
+   */
+  private async suggestMarkdown(document: vscode.TextDocument): Promise<void> {
+    const filePath = fromUri(document.uri);
+    if (markdownAsked.has(paths.normalizeForComparison(filePath))) return;
+
+    const counts = countSiteNotation(document.getText());
+    if (
+      !shouldSuggestMarkdown(filePath, counts, this.deps.markdownDeclined())
+    ) {
+      return;
+    }
+    markdownAsked.add(paths.normalizeForComparison(filePath));
+
+    const convert = ".mdにする";
+    const later = "今はしない";
+    const picked = await vscode.window.showInformationMessage(
+      describeMarkdownSuggestion(counts),
+      convert,
+      later
+    );
+    if (picked === later) {
+      await this.deps.declineMarkdown(filePath);
+      return;
+    }
+    if (picked !== convert) return;
+
+    /*
+      **先に保存する。** 変換はディスク上のファイルの名前を変えるので、
+      打ちかけを抱えたまま変えると、その中身は行き場を失う（開いていた面が
+      無くなったファイルを指したままになる）。操作メニューからのMD化も
+      同じ手順を踏んでいる（`saveDirtyDocumentsBeforeExtraction`）。
+    */
+    if (document.isDirty && !(await document.save())) {
+      void vscode.window.showWarningMessage(
+        "保存できなかったため、.md にしませんでした。" +
+          "保存してから、詳細メニューの「本文を .md にする」でお試しください。"
+      );
+      return;
+    }
+
+    const converted = await this.deps.convertToMarkdown(filePath);
+    if (!converted) return;
+    // 変換すると元のファイルは消える（名前が変わる）。同じ入口で開き直す
+    await this.openAsManuscript(converted);
   }
 
   /**
@@ -701,11 +904,6 @@ export class ManuscriptEditorProvider
     }
 
     const { episodes, manuscriptDir } = await scanWork(found.work);
-    const config = vscode.workspace.getConfiguration("novelai");
-    const naming = {
-      digits: config.get<number>("episodeNumberDigits", 3),
-      extension: config.get<string>("episodeFileExtension", ".txt"),
-    };
 
     // **白紙かどうかは、いま開いている本文で判断できることがある。**
     // 同じファイルなら読み直さない（保存前の状態が正しい）
@@ -715,16 +913,16 @@ export class ManuscriptEditorProvider
       (episode) =>
         // いま開いている話は、**保存前の中身**で見る（打ちかけを白紙にしない）。
         // ほかは走査が数えた文字数で見る（読み直さない）
-        episode.filePath === current
+        samePath(episode.filePath, current)
           ? isBlankText(document.getText())
           : isBlankEpisode(episode),
-      naming,
+      episodeNaming(),
       (chapter, rule) =>
         `${formatChapterNumber(chapter, rule.digits)}${rule.extension}`
     );
 
     if (plan.kind === "open") {
-      if (plan.episode.filePath === current) {
+      if (samePath(plan.episode.filePath, current)) {
         void vscode.window.showInformationMessage(
           "いま開いているのが最新話です。このまま書けます。"
         );
@@ -734,7 +932,98 @@ export class ManuscriptEditorProvider
       return;
     }
 
-    const filePath = paths.join(manuscriptDir, plan.fileName);
+    await this.createAndOpen(manuscriptDir, plan.fileName);
+  }
+
+  /**
+   * 前の話・次の話を開く（作者の指示、2026-08-29）。
+   *
+   * **並びは走査の結果そのまま**（`scanWork` の episodes）。話数で並べ直す
+   * のは走査の仕事で、ここでやると2か所に並べ方が生まれる。
+   *
+   * 次の話の決め方は3通りある。
+   *
+   * | いまの話 | どうするか |
+   * |---|---|
+   * | 後ろに話がある | それを開く |
+   * | 最終話で、**白紙** | 「最新話です。」と伝えるだけ（作らない） |
+   * | 最終話で、本文がある | 次の話数を作って開く |
+   *
+   * 白紙のときに作らないのは「最新話を書く」と同じ考え方である
+   * （押すたびに空のファイルが増えるのを避ける。設計書6.25.5）。
+   */
+  private async openNeighborEpisode(
+    document: vscode.TextDocument,
+    direction: "prev" | "next"
+  ): Promise<void> {
+    const current = fromUri(document.uri);
+    const found = await this.deps.highlighter.indexFor(current);
+    if (!found) {
+      void vscode.window.showInformationMessage(
+        "この原稿は作品の話として認識できません。"
+      );
+      return;
+    }
+
+    const { episodes, manuscriptDir } = await scanWork(found.work);
+    const at = episodes.findIndex((episode) =>
+      samePath(episode.filePath, current)
+    );
+    if (at < 0) {
+      // 作品には属しているが、本文フォルダーの外にある（プロットなど）
+      void vscode.window.showInformationMessage(
+        "この原稿は作品の話として認識できません。"
+      );
+      return;
+    }
+
+    if (direction === "prev") {
+      if (at === 0) {
+        void vscode.window.showInformationMessage("最初の話です。");
+        return;
+      }
+      await this.openAsManuscript(episodes[at - 1].filePath);
+      return;
+    }
+
+    if (at < episodes.length - 1) {
+      await this.openAsManuscript(episodes[at + 1].filePath);
+      return;
+    }
+
+    // ここから先は最終話。**保存前の中身で白紙かを見る**（打ちかけを白紙にしない）
+    if (isBlankText(document.getText())) {
+      void vscode.window.showInformationMessage("最新話です。");
+      return;
+    }
+
+    /*
+      次の話数の決め方は「最新話を書く」と同じものを使う（`planLatestEpisode`）。
+      **ここは「最終話に本文がある」と分かっている場面**なので、白紙の判定は
+      常に false を返す＝必ず「次を作る」枝へ入る。
+    */
+    const plan = planLatestEpisode(
+      episodes,
+      () => false,
+      episodeNaming(),
+      (chapter, rule) =>
+        `${formatChapterNumber(chapter, rule.digits)}${rule.extension}`
+    );
+    if (plan.kind !== "create") return;
+    await this.createAndOpen(manuscriptDir, plan.fileName);
+  }
+
+  /**
+   * 白紙の話を作って開く。**既にあるなら作らない**（上書き禁止）。
+   *
+   * 「最新話を書く」と「次の話」で分け合う。作り方が2つあると、
+   * 片方だけがファイル名の決まりから外れる日が来る。
+   */
+  private async createAndOpen(
+    manuscriptDir: string,
+    fileName: string
+  ): Promise<void> {
+    const filePath = paths.join(manuscriptDir, fileName);
     if (await pathExists(filePath)) {
       // 走査の取りこぼしなど。**上書きしない**
       await this.openAsManuscript(filePath);
@@ -744,10 +1033,8 @@ export class ManuscriptEditorProvider
       paths.toUri(filePath),
       new TextEncoder().encode("")
     );
-    logLine(`最新話を書く: ${plan.fileName} を作成`);
-    void vscode.window.showInformationMessage(
-      `${plan.fileName} を作りました。`
-    );
+    logLine(`原稿エディタ：${fileName} を作成`);
+    void vscode.window.showInformationMessage(`${fileName} を作りました。`);
     await this.openAsManuscript(filePath);
   }
 

@@ -36,8 +36,16 @@ describe("マニュアルの骨組み", () => {
 });
 
 describe("メニューから作る（手で書き写さない）", () => {
-  test("7つの段階が、メニューと同じ並びで出る", () => {
-    const headings = [...MANUAL.matchAll(/^### (\d\. .+)$/gm)].map((m) => m[1]);
+  test("段階が、メニューと同じ並びで出る", () => {
+    // **番号で拾わない。** 最下段の「ヘルプ」には番号が無く、
+    // 番号だけを見ていると、増やした段が抜けても気づけない
+    // （番号なしの段を足した2026-08-29に、実際にこの検査が空振りしかけた）。
+    // 章を切り出してから見出しを数える
+    const chapter = MANUAL.slice(
+      MANUAL.indexOf("## 作品づくりの流れ"),
+      MANUAL.indexOf("## 操作の一覧")
+    );
+    const headings = [...chapter.matchAll(/^### (.+)$/gm)].map((m) => m[1]);
 
     expect(headings).toEqual(STEP_MENU.map((step) => step.label));
   });

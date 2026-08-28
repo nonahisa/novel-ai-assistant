@@ -470,10 +470,17 @@ body.plain .term { color: inherit; }
   margin: 4px 0;
   background: var(--vscode-menu-separatorBackground, var(--vscode-panel-border));
 }
-/* ── 下の帯（知らせ） ─────────────────── */
+/* ── 下の帯（字数と知らせ） ─────────────────── */
 /* 色分けの凡例はここに並べていたが、**作者の指示で外した**（2026-08-28
    「文字の色分け説明は不要です」）。色の意味は設定資料パネルのタブが
-   同じ色で示す（views/settingsPanelHtml.ts） */
+   同じ色で示す（views/settingsPanelHtml.ts）。
+
+   **面の説明（「組んで書く（実験）：…」）も外した**（作者の指示、
+   2026-08-29）。組んで書くが標準になり、切り替えのボタンも無くなったので、
+   常に出ている説明は場所を取るだけになった。空いたところへ字数を出す
+   （作品／このファイル／今日）。#note は残す——安全弁で面へ入れなかった
+   ときなど、**その場で起きたことを伝える口**が無くなると、黙って形が
+   変わったようにしか見えない */
 #foot {
   flex: 0 0 auto;
   display: flex;
@@ -485,6 +492,12 @@ body.plain .term { color: inherit; }
   opacity: 0.85;
   flex-wrap: wrap;
 }
+/* **字数は控えめに出す。** 書いている最中にいつも視界へ入るものなので、
+   読みにいったときだけ読める濃さにしておく（数えるのが目的ではない） */
+#counts {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 #note {
   color: var(--vscode-notificationsInfoIcon-foreground, inherit);
 }
@@ -492,10 +505,7 @@ body.plain .term { color: inherit; }
 </head>
 <body class="vertical">
 <div id="bar">
-  <button id="mode" title="組み立てた表示と、打てる表示を切り替えます">読む</button>
   <button id="dir" title="縦書きと横書きを切り替えます">横書きにする</button>
-  <button id="split" title="打つ面と、組み上がりを並べます">並べる</button>
-  <button id="composeMode" title="ルビ・傍点を組んだまま打ちます（実験。うまく打てないときは戻してください）">組んで書く（実験）</button>
   <div class="sep"></div>
   <button id="ruby" title="選んだ文字にルビを振ります">ルビ</button>
   <button id="emph" title="選んだ文字に傍点を付けます">傍点</button>
@@ -516,10 +526,13 @@ body.plain .term { color: inherit; }
 </div>
 
 <div id="bottom">
+  <button id="prev" title="ひとつ前の話を開きます">← 前の話</button>
+  <button id="next" title="次の話を開きます。最終話に本文があれば、次の話を作って開きます">次の話 →</button>
   <button id="latest" title="いちばん新しい話を開きます。白紙でなければ、次の話を作って開きます">最新話を書く</button>
 </div>
 
 <div id="foot">
+  <span id="counts"></span>
   <span id="note"></span>
 </div>
 
@@ -544,12 +557,11 @@ body.plain .term { color: inherit; }
   const menu = document.getElementById("menu");
   const countLabel = document.getElementById("count");
   const note = document.getElementById("note");
-  const modeButton = document.getElementById("mode");
+  /** 下段の字数（作品／このファイル／今日。作者の指示、2026-08-29） */
+  const countsLabel = document.getElementById("counts");
   const dirButton = document.getElementById("dir");
-  const splitButton = document.getElementById("split");
   /** 組んで書く（実験。設計書6.34） */
   const compose = document.getElementById("compose");
-  const composeButton = document.getElementById("composeMode");
 
   /** いま画面が持っている本文。拡張機能から来たものと比べるために持つ */
   let current = "";
@@ -613,9 +625,17 @@ body.plain .term { color: inherit; }
   const saved = vscode.getState() || {};
   /** はじめの向きは設定から。**一度切り替えたら、その原稿ではそれを覚える** */
   let vertical = saved.vertical;
-  let reading = saved.reading === true;
+  /**
+   * 読む面・並べる面（設計書6.25）。
+   *
+   * **ボタンは外した**（作者の指示、2026-08-29。組んで書くが標準）。
+   * 面と切り替えの仕掛けそのものは残してあるが、**入る道が無いので
+   * 必ず false から始める**——覚えていた状態のまま開くと、戻すボタンの
+   * 無い面に閉じ込められる（読む面には打ち込めない）。
+   */
+  let reading = false;
   /** 打つ面と組み上がりを並べる */
-  let split = saved.split === true;
+  let split = false;
   /**
    * 組んで書く（実験）の面にいるか（設計書6.34）。
    *
@@ -648,37 +668,18 @@ body.plain .term { color: inherit; }
     document.body.classList.toggle("reading", reading);
     document.body.classList.toggle("split", split);
     document.body.classList.toggle("compose", composeOn);
-    splitButton.textContent = split ? "並べるのをやめる" : "並べる";
-    splitButton.classList.toggle("on", split);
-    // 並べているときは、切り替えるものが無い
-    modeButton.disabled = split || composeOn;
-    // **組んで書く面は、いままでの3面とは別物である。** 混ぜて見せると、
-    // どちらの面で打っているのか分からなくなる
-    splitButton.disabled = composeOn;
-    composeButton.textContent = composeOn
-      ? "組んで書くのをやめる"
-      : "組んで書く（実験）";
-    composeButton.classList.toggle("on", composeOn);
     document.documentElement.style.setProperty("--novelai-size", size + "px");
     // **大きさも向きもここで変わる。** どちらも折り返し幅を変えるので、
     // 重ねた色の枠を測り直す（実機の報告、2026-08-28）
     scheduleAlignMarks();
-    modeButton.textContent = reading ? "書く" : "読む";
-    modeButton.classList.toggle("on", reading);
     dirButton.textContent = vertical !== false ? "横書きにする" : "縦書きにする";
     dirButton.classList.toggle("on", vertical !== false);
-    // **書く面では、ルビは記法のまま見える。** そのことを一言添える。
-    // 用語の色は6.25.6でこの面にも付くようになったので、無いとは言わない
-    if (composeOn) {
-      note.textContent =
-        "組んで書く（実験）：ルビ・傍点は1つのかたまりとして扱います" +
-        "（中の文字は直接直せません。消すときは1単位で消えます）。" +
-        "うまく打てないときは、もう一度押して「書く」へ戻してください";
-    } else {
-      note.textContent = showingRead()
-        ? ""
-        : "ルビ・傍点は「読む」か「並べる」で出ます（この面では記法のまま見えます。用語には色が付き、右クリックで資料を開けます）";
-    }
+    /*
+      **面の説明はここで出さない**（作者の指示、2026-08-29）。
+      切り替えのボタンを外したので、「もう一度押して戻してください」は
+      押す先が無い案内になる。#note は、その場で起きたこと（安全弁で面へ
+      入れなかった、ルビを振る場所が無い）を伝えるためだけに使う。
+    */
   }
 
   /** 縦書きでは「上下」ではなく「左右」に流れる。位置合わせもそれに従う */
@@ -699,42 +700,13 @@ body.plain .term { color: inherit; }
     }
   }
 
-  modeButton.addEventListener("click", function () {
-    const from = reading ? read : write;
-    reading = !reading;
-    // 書いている間に溜めておいた分を、ここで当てる
-    if (reading) applyFreshHtml();
-    paint();
-    remember();
-    const to = reading ? read : write;
-    // 切り替えても同じあたりを見ていられるようにする
-    requestAnimationFrame(function () { keepPlace(from, to); });
-    if (!reading) write.focus();
-  });
-
-  splitButton.addEventListener("click", function () {
-    split = !split;
-    if (split) {
-      // 追いかけの眠りは、並べ直すたびに解く（前回の眠りを持ち越さない）
-      wakeFollow();
-      applyFreshHtml();
-      // 並べたら、打つのはこちら側である
-      reading = false;
-    } else {
-      // 並べるのをやめたら、打っている行の印も消す
-      clearCaretMark();
-    }
-    paint();
-    remember();
-    if (split) {
-      requestAnimationFrame(function () {
-        keepPlace(write, read);
-        write.focus();
-        // 並べた直後は、打っている行が見えているところから始める
-        scheduleSync(true);
-      });
-    }
-  });
+  /*
+    **「読む」「並べる」のボタンは外した**（作者の指示、2026-08-29）。
+    面そのものと、切り替えに要る道具（keepPlace・applyFreshHtml・
+    wakeFollow・追いかけ）は残してある——組んで書く面が安全弁で開けない
+    原稿では「書く」面へ落ちるし、並べる面の追いかけは
+    manuscriptSplitFollow.test.ts が今も動かしている。
+  */
 
   dirButton.addEventListener("click", function () {
     vertical = vertical === false;
@@ -748,6 +720,18 @@ body.plain .term { color: inherit; }
 
   document.getElementById("latest").addEventListener("click", function () {
     vscode.postMessage({ type: "openLatest" });
+  });
+
+  /*
+    前後の話へ移る（作者の指示、2026-08-29）。
+    **どの話なのかを決めるのは拡張機能側**——画面はファイルの並びを
+    知らない（走査の結果を持っているのは向こうである）。
+  */
+  document.getElementById("prev").addEventListener("click", function () {
+    vscode.postMessage({ type: "openNeighbor", direction: "prev" });
+  });
+  document.getElementById("next").addEventListener("click", function () {
+    vscode.postMessage({ type: "openNeighbor", direction: "next" });
   });
 
   document.getElementById("font").addEventListener("click", function () {
@@ -1337,6 +1321,50 @@ body.plain .term { color: inherit; }
     vscode.postMessage({ type: "count", text: write.value });
   }
 
+  /* ── 下段の字数（作者の指示、2026-08-29） ─────────────
+     「作品 ◯◯,◯◯◯字 ／ このファイル ◯,◯◯◯字 ／ 今日 +◯◯◯字」。
+
+     **数えるのは拡張機能側**（画面は受けて出すだけ）。純／総の設定も
+     ルビの扱いも向こうが持っているので、ここで数え直すと**上の帯の数字と
+     食い違う**——同じ画面に違う字数が2つ出るのがいちばん困る。 */
+
+  /** このファイルの字数（拡張機能が数えた値） */
+  let footFile = null;
+  /**
+   * 作品の合計。**開いたときと保存したときにしか測らない。**
+   * 1打鍵ごとに全話を走査すると、打つ手が止まる。
+   */
+  let footWorkTotal = null;
+  /** その合計を測ったときの、このファイルの字数（差を足すための基準） */
+  let footWorkBase = null;
+  /** このファイルで今日書いた量（純文字数。マイナスもある） */
+  let footToday = null;
+
+  function groupDigits(value) {
+    return value.toLocaleString("ja-JP");
+  }
+
+  function paintCounts() {
+    const parts = [];
+    if (footWorkTotal !== null) {
+      // 測ったときからの増減を足して見せる。**このファイルの増減しか
+      // 分からない**が、いま打っているのはこのファイルなので足りる
+      const grown =
+        footFile !== null && footWorkBase !== null ? footFile - footWorkBase : 0;
+      parts.push("作品 " + groupDigits(footWorkTotal + grown) + "字");
+    }
+    if (footFile !== null) {
+      parts.push("このファイル " + groupDigits(footFile) + "字");
+    }
+    if (footToday !== null) {
+      // 増えた日は符号を付ける（減った日は数字そのものに − が付く）
+      parts.push(
+        "今日 " + (footToday > 0 ? "+" : "") + groupDigits(footToday) + "字"
+      );
+    }
+    countsLabel.textContent = parts.join(" ／ ");
+  }
+
   /**
    * その行を打つ面で示す（提案パネルの「飛ぶ」。作者の依頼、2026-08-28）。
    *
@@ -1732,6 +1760,20 @@ body.plain .term { color: inherit; }
       document.body.classList.toggle("plain", message.hasTerms === false);
     } else if (message.type === "count") {
       countLabel.textContent = message.label;
+      if (typeof message.value === "number") {
+        footFile = message.value;
+        paintCounts();
+      }
+    } else if (message.type === "counts") {
+      // 作品の合計と「今日この話で書いた量」。開いたときと保存したときに届く
+      if (typeof message.workTotal === "number") {
+        footWorkTotal = message.workTotal;
+        footWorkBase =
+          typeof message.fileAtBase === "number" ? message.fileAtBase : footFile;
+      }
+      // 記録を止めている作者には届かない。そのときは出さない（0と書かない）
+      footToday = typeof message.today === "number" ? message.today : null;
+      paintCounts();
     } else if (message.type === "revealLine") {
       revealLine(message.line);
     } else if (message.type === "select" && composeOn) {
@@ -2322,10 +2364,13 @@ body.plain .term { color: inherit; }
     }
   }
 
-  composeButton.addEventListener("click", function () {
-    if (composeOn) composeLeave();
-    else composeEnter();
-  });
+  /*
+    **組んで書くをやめるボタンも外した**（作者の指示、2026-08-29。
+    組んで書くが標準）。composeLeave は残す——安全弁が届いた本文を
+    組み直せないと判断したとき（composeApplyText）に、この面から
+    「書く」面へ落とすのに要る。落ちた先の textarea では、これまでどおり
+    普通に打てる。
+  */
 
   /* ── 本文の往復 ────────────────────────────── */
 

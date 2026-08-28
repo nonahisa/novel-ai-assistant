@@ -1,10 +1,13 @@
 import { describe, expect, test } from "vitest";
 import {
+  describeMarkdownSuggestion,
   describeRefusal,
   isPlainTextManuscript,
   planConversion,
   planFolderConversion,
+  shouldSuggestMarkdown,
 } from "../../src/core/markdownConversion";
+import { countSiteNotation } from "../../src/core/ruby";
 
 /**
  * .txt を .md へ変える判断（設計書6.12）。
@@ -118,5 +121,87 @@ describe("断った理由の伝え方", () => {
 
   test("どの理由も日本語で返る", () => {
     expect(describeRefusal("not_text")).toContain("テキストファイル");
+  });
+});
+
+/**
+ * 読み仮名の入った .txt を開いたときの案内（作者の指示、2026-08-29
+ * 「読み仮名を含んだファイルを開くときは、理由を添えて、投稿には問題が
+ * ない旨添えてファイルのMD変換を促しましょう」）。
+ */
+describe("MD化を勧めるか", () => {
+  const none: string[] = [];
+
+  test("読み仮名の入った .txt では勧める", () => {
+    const counts = countSiteNotation("｜魔導書庫《まどうしょこ》へ向かう");
+
+    expect(counts.ruby).toBeGreaterThan(0);
+    expect(shouldSuggestMarkdown("C:/works/x/001.txt", counts, none)).toBe(true);
+  });
+
+  test("傍点だけでも勧める", () => {
+    expect(
+      shouldSuggestMarkdown("C:/works/x/001.txt", { ruby: 0, emphasis: 2 }, none)
+    ).toBe(true);
+  });
+
+  test("読み仮名の無い .txt では出さない", () => {
+    // 変換して得になることが無いのに声をかけると、案内が読まれなくなる
+    expect(
+      shouldSuggestMarkdown("C:/works/x/001.txt", { ruby: 0, emphasis: 0 }, none)
+    ).toBe(false);
+  });
+
+  test(".md には出さない（もう変換されている）", () => {
+    expect(
+      shouldSuggestMarkdown("C:/works/x/001.md", { ruby: 5, emphasis: 0 }, none)
+    ).toBe(false);
+  });
+
+  test("「今はしない」と断られたファイルには二度と出さない", () => {
+    const counts = { ruby: 5, emphasis: 0 };
+
+    expect(
+      shouldSuggestMarkdown("C:/works/x/001.txt", counts, [
+        "C:/works/x/001.txt",
+      ])
+    ).toBe(false);
+    // 断ったのはそのファイルだけ。ほかの話では出す
+    expect(
+      shouldSuggestMarkdown("C:/works/x/002.txt", counts, [
+        "C:/works/x/001.txt",
+      ])
+    ).toBe(true);
+  });
+});
+
+describe("MD化を勧める文言", () => {
+  test("件数と、投稿に問題が無いことを言う", () => {
+    const text = describeMarkdownSuggestion({ ruby: 12, emphasis: 0 });
+
+    expect(text).toContain("読み仮名（ルビ）が12件");
+    // 0件のものは数え上げない（「傍点0件」と書いても読ませるだけ無駄）
+    expect(text).not.toContain("傍点が");
+    expect(text).toContain("投稿にも問題ありません");
+    // なぜ勧めるのか（理由）を必ず添える
+    expect(text).toContain("ルビや傍点を振り直せます");
+  });
+
+  test("傍点があれば、そちらも件数で言う", () => {
+    const text = describeMarkdownSuggestion({ ruby: 3, emphasis: 2 });
+
+    expect(text).toContain("読み仮名（ルビ）が3件と傍点が2件");
+  });
+
+  /**
+   * **「中身は1文字も変わりません」とは書かない。** 名前を変えるだけでは
+   * 済まず、中のルビ・傍点は拡張機能の書き方へ揃えられる（設計書6.12.4）。
+   * 変わらないのは本文の言葉のほうである。
+   */
+  test("変わるものと変わらないものを、正確に言い分ける", () => {
+    const text = describeMarkdownSuggestion({ ruby: 1, emphasis: 0 });
+
+    expect(text).toContain("本文の言葉は1文字も変わりません");
+    expect(text).not.toContain("中身は1文字も変わりません");
   });
 });

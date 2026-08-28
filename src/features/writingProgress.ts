@@ -1,9 +1,16 @@
 import * as vscode from "vscode";
-import type { WorkEntry, WorkStats } from "../models/types";
-import type { DailyStat } from "../models/writingStats";
+import * as path from "../core/paths";
+import type { EpisodeFile, WorkEntry, WorkStats } from "../models/types";
+import type {
+  DailyStat,
+  FileCountMap,
+  WritingMeasurement,
+} from "../models/writingStats";
 import { logFailure } from "../core/logger";
 import {
   currentStreak,
+  fileCountKey,
+  fileNetOn,
   mergeDailyStats,
   monthKey,
   progressAgainstGoal,
@@ -23,13 +30,25 @@ import { WritingStatsStore } from "../core/writingStatsStore";
  * **記録に失敗しても執筆は止めない。** 統計は失われても原稿は無事なので、
  * 画面には出さずログにだけ残す。
  */
+/**
+ * 走査の結果。**話ごとの文字数まで受け取る**（作者の指示、2026-08-29
+ * 「記録の持ち方を細かくして」）。
+ *
+ * 集計だけでは「どのファイルで書いたか」が分からない。走査は既に話ごとの
+ * 文字数を数えている（`scanner.ts`）ので、**測り直さずにそれを借りる。**
+ */
+export interface WorkScan {
+  stats: WorkStats;
+  episodes: readonly EpisodeFile[];
+}
+
 export class WritingProgressTracker {
   /** 作品ごとの直近の集計。ステータスバーが毎回ファイルを読まないために持つ */
   private readonly cache = new Map<string, WritingSummary>();
 
   constructor(
     private readonly deviceId: string,
-    private readonly statsFor: (work: WorkEntry) => Promise<WorkStats>
+    private readonly statsFor: (work: WorkEntry) => Promise<WorkScan>
   ) {}
 
   /** 設定で記録そのものを止められる。書いた量を残したくない作者もいる */
@@ -43,8 +62,8 @@ export class WritingProgressTracker {
   async record(work: WorkEntry): Promise<void> {
     if (!this.enabled()) return;
     try {
-      const stats = await this.statsFor(work);
-      await this.store(work).record(toMeasurement(stats), {
+      const scan = await this.statsFor(work);
+      await this.store(work).record(toMeasurement(work, scan), {
         boundaryHour: boundaryHour(),
       });
       // 記録が変わったので、次にステータスバーが必要としたときに読み直す
@@ -66,8 +85,8 @@ export class WritingProgressTracker {
   async rebaseline(work: WorkEntry): Promise<void> {
     if (!this.enabled()) return;
     try {
-      const stats = await this.statsFor(work);
-      await this.store(work).rebaseline(toMeasurement(stats));
+      const scan = await this.statsFor(work);
+      await this.store(work).rebaseline(toMeasurement(work, scan));
       this.cache.delete(work.id);
     } catch (error) {
       logFailure("執筆量の基準の置き直しに失敗", {
@@ -91,6 +110,32 @@ export class WritingProgressTracker {
       return summary;
     } catch {
       // 統計が読めなくても文字数表示は続ける
+      return undefined;
+    }
+  }
+
+  /**
+   * そのファイルで今日書いた純文字数（作者の指示、2026-08-29）。
+   *
+   * 原稿エディタの下段に出す。**全端末ぶんを合算する**——同じ話を
+   * ノートPCと自宅の両方で書いた日に、片方しか出ないのはおかしい
+   * （合算するのは日ごとの記録と同じ流儀。設計書5.5.6）。
+   *
+   * 記録そのものを止めている作者には `undefined` を返す。0を返すと
+   * 「今日は1字も書いていない」と読めてしまう。
+   */
+  async todayFileCount(
+    work: WorkEntry,
+    filePath: string
+  ): Promise<number | undefined> {
+    if (!this.enabled()) return undefined;
+    try {
+      const sets = await this.store(work).loadAll();
+      const today = statsDayKey(new Date(), boundaryHour());
+      const key = fileCountKey(path.relative(work.folderPath, filePath));
+      return fileNetOn(mergeDailyStats(sets), today, key);
+    } catch {
+      // 統計が読めなくても本文の字数表示は続ける
       return undefined;
     }
   }
@@ -132,12 +177,28 @@ export function summarize(days: DailyStat[], today: string): WritingSummary {
   };
 }
 
-function toMeasurement(stats: WorkStats) {
+/**
+ * 走査の結果を、記録の入力へ。
+ *
+ * **内訳の鍵は作品フォルダーからの相対パス**にする。絶対パスだと、
+ * 同じ作品を別の場所へ置いた環境（`C:\小説` と `~/novels`）で
+ * 別のファイルとして数えられ、合算したときに二重になる。
+ */
+function toMeasurement(work: WorkEntry, scan: WorkScan): WritingMeasurement {
+  const files: FileCountMap = {};
+  for (const episode of scan.episodes) {
+    // 競合を含む話は走査が0字として扱う（集計からも外れている）。
+    // 内訳にも載せない——直った瞬間に「数万字書いた」ことになる
+    if (episode.hasConflictMarkers) continue;
+    const key = fileCountKey(path.relative(work.folderPath, episode.filePath));
+    files[key] = { net: episode.counts.net, gross: episode.counts.gross };
+  }
   return {
-    net: stats.totals.net,
-    gross: stats.totals.gross,
-    fileCount: stats.fileCount,
-    conflictedCount: stats.conflictedCount,
+    net: scan.stats.totals.net,
+    gross: scan.stats.totals.gross,
+    fileCount: scan.stats.fileCount,
+    conflictedCount: scan.stats.conflictedCount,
+    files,
   };
 }
 

@@ -273,8 +273,27 @@ describe("その行を示す", () => {
 describe("並べて書く", () => {
   const code = html.slice(html.indexOf("<script"));
 
-  it("並べるボタンがある", () => {
-    expect(html).toContain('id="split"');
+  /**
+   * **ボタンは外した**（作者の指示、2026-08-29。組んで書くが標準）。
+   * 面と切り替えの仕掛けそのものは残っている——組んで書く面が安全弁で
+   * 開けない原稿では「書く」面へ落ちるので、そちらの道具は要る。
+   */
+  it("「読む」「並べる」「組んで書くのをやめる」のボタンは出さない", () => {
+    expect(html).not.toContain('id="split"');
+    expect(html).not.toContain('id="mode"');
+    expect(html).not.toContain('id="composeMode"');
+    expect(html).not.toContain("並べるのをやめる");
+    expect(html).not.toContain("組んで書くのをやめる");
+  });
+
+  /**
+   * ボタンが無い以上、覚えていた状態で開くと**戻れない面に閉じ込められる**
+   * （読む面には打ち込めない）。必ず「書く」から始める。
+   */
+  it("覚えていた読む面・並べる面では開かない", () => {
+    expect(code).not.toContain("saved.reading === true");
+    expect(code).not.toContain("saved.split === true");
+    expect(code).toMatch(/let reading = false;[\s\S]{0,200}let split = false;/);
   });
 
   it("並べると、両方の面が見える", () => {
@@ -355,5 +374,91 @@ describe("下段と品書きの整理", () => {
     expect(html).not.toContain('className = "swatch"');
     // 知らせの行は残す（凡例と同じ帯に同居していた）
     expect(html).toContain('id="note"');
+  });
+});
+
+/**
+ * 下段の字数（作者の指示、2026-08-29）。
+ *
+ * 常に出ていた面の説明を外し、空いたところへ
+ * 「作品 ◯◯,◯◯◯字 ／ このファイル ◯,◯◯◯字 ／ 今日 +◯◯◯字」を出す。
+ */
+describe("下段の字数", () => {
+  const code = html.slice(html.indexOf("<script"));
+
+  it("字数を出す場所がある", () => {
+    expect(html).toContain('<span id="counts"></span>');
+    expect(code).toContain("function paintCounts()");
+  });
+
+  it("3つとも出す", () => {
+    expect(code).toContain('"作品 "');
+    expect(code).toContain('"このファイル "');
+    expect(code).toContain('"今日 "');
+  });
+
+  /**
+   * **面の説明は出さない。** 切り替えのボタンを外したので、
+   * 「もう一度押して戻してください」は押す先の無い案内になる。
+   */
+  it("常に出ている面の説明は残さない", () => {
+    expect(html).not.toContain("ルビ・傍点は「読む」か「並べる」で出ます");
+    expect(html).not.toContain("1つのかたまりとして扱います");
+    // その場で起きたことを伝える口は残す（安全弁・ルビの断り）
+    expect(code).toContain("note.textContent");
+  });
+
+  /**
+   * **数えるのは拡張機能側**（純／総の設定もルビの扱いも向こうが持つ）。
+   * 画面で数え直すと、上の帯と下の帯で違う字数が出る。
+   */
+  it("このファイルの字数は、上の帯と同じ値を使う", () => {
+    const handler = code.slice(code.indexOf('message.type === "count"'));
+    expect(handler.slice(0, 300)).toContain("footFile = message.value");
+  });
+
+  /**
+   * 4万字の作品を1打鍵ごとに走査すると打つ手が止まる。作品の合計は
+   * 開いたときと保存したときにだけ測り、その間はこのファイルの増減を足す。
+   */
+  it("作品の合計は、測ったときからの増減を足して見せる", () => {
+    const paint = code.slice(code.indexOf("function paintCounts()"));
+    expect(paint.slice(0, 700)).toContain("footFile - footWorkBase");
+    expect(code).toContain('message.type === "counts"');
+  });
+
+  /** 記録を止めている作者に「今日 0字」と書かない */
+  it("今日の量が届かなければ、出さない", () => {
+    const handler = code.slice(code.indexOf('message.type === "counts"'));
+    expect(handler.slice(0, 500)).toContain(
+      'typeof message.today === "number" ? message.today : null'
+    );
+  });
+});
+
+/**
+ * 前の話・次の話（作者の指示、2026-08-29）。
+ *
+ * 並びを知っているのは拡張機能側なので、画面は用件を送るだけにする。
+ */
+describe("前の話・次の話", () => {
+  const code = html.slice(html.indexOf("<script"));
+
+  it("下段に2つのボタンを置く", () => {
+    expect(html).toContain('id="prev"');
+    expect(html).toContain('id="next"');
+    // 縦書き・横書きのどちらでも意味が通る言葉にする
+    expect(html).toContain("← 前の話");
+    expect(html).toContain("次の話 →");
+  });
+
+  it("どちらへ移るかを添えて送る", () => {
+    expect(code).toContain('type: "openNeighbor", direction: "prev"');
+    expect(code).toContain('type: "openNeighbor", direction: "next"');
+  });
+
+  /** 「最新話を書く」は右端のまま（作者の依頼、2026-08-28） */
+  it("最新話を書くは、下段の右端に残る", () => {
+    expect(html).toContain("#latest { margin-left: auto; }");
   });
 });

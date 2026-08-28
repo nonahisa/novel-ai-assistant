@@ -86,23 +86,24 @@
         {
           "id": "novelai.works",
           "name": "作品一覧",
-          "when": "!novelai.focusChat"
+          "when": "!novelai.focusChat && (!novelai.soloView || novelai.soloView == 'works')"
         },
         {
           "id": "novelai.steps",
-          "name": "ステップメニュー",
-          "when": "!novelai.focusChat"
+          "name": "簡単ステップメニュー",
+          "when": "!novelai.focusChat && (!novelai.soloView || novelai.soloView == 'steps')"
         },
         {
           "id": "novelai.actions",
           "name": "詳細メニュー",
-          "when": "!novelai.focusChat"
+          "when": "!novelai.focusChat && (!novelai.soloView || novelai.soloView == 'actions')"
         },
         {
           "id": "novelai.chatView",
           "name": "AIに相談",
           "type": "webview",
-          "visibility": "collapsed"
+          "visibility": "collapsed",
+          "when": "novelai.focusChat || !novelai.soloView || novelai.soloView == 'chat'"
         }
       ],
       "novelaiIssues": [
@@ -229,6 +230,36 @@
       {
         "command": "novelai.exitChatFocus",
         "title": "作品一覧とメニューを出す",
+        "category": "小説執筆",
+        "icon": "$(layout-sidebar-left)"
+      },
+      {
+        "command": "novelai.soloWorks",
+        "title": "他のメニューを閉じる",
+        "category": "小説執筆",
+        "icon": "$(screen-full)"
+      },
+      {
+        "command": "novelai.soloSteps",
+        "title": "他のメニューを閉じる",
+        "category": "小説執筆",
+        "icon": "$(screen-full)"
+      },
+      {
+        "command": "novelai.soloActions",
+        "title": "他のメニューを閉じる",
+        "category": "小説執筆",
+        "icon": "$(screen-full)"
+      },
+      {
+        "command": "novelai.soloChat",
+        "title": "他のメニューを閉じる",
+        "category": "小説執筆",
+        "icon": "$(screen-full)"
+      },
+      {
+        "command": "novelai.showAllViews",
+        "title": "すべてのメニューを出す",
         "category": "小説執筆",
         "icon": "$(layout-sidebar-left)"
       },
@@ -755,6 +786,46 @@
           "command": "novelai.exitChatFocus",
           "when": "view == novelai.chatView && novelai.focusChat",
           "group": "navigation@1"
+        },
+        {
+          "command": "novelai.showAllViews",
+          "when": "view == novelai.works && novelai.soloView",
+          "group": "navigation@0"
+        },
+        {
+          "command": "novelai.showAllViews",
+          "when": "view == novelai.steps && novelai.soloView",
+          "group": "navigation@0"
+        },
+        {
+          "command": "novelai.showAllViews",
+          "when": "view == novelai.actions && novelai.soloView",
+          "group": "navigation@0"
+        },
+        {
+          "command": "novelai.showAllViews",
+          "when": "view == novelai.chatView && novelai.soloView",
+          "group": "navigation@0"
+        },
+        {
+          "command": "novelai.soloWorks",
+          "when": "view == novelai.works && !novelai.soloView",
+          "group": "1_solo@1"
+        },
+        {
+          "command": "novelai.soloSteps",
+          "when": "view == novelai.steps && !novelai.soloView",
+          "group": "1_solo@1"
+        },
+        {
+          "command": "novelai.soloActions",
+          "when": "view == novelai.actions && !novelai.soloView",
+          "group": "1_solo@1"
+        },
+        {
+          "command": "novelai.soloChat",
+          "when": "view == novelai.chatView && !novelai.soloView",
+          "group": "1_solo@1"
         }
       ],
       "view/item/context": [
@@ -872,6 +943,22 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "novelai.soloWorks",
+          "when": "false"
+        },
+        {
+          "command": "novelai.soloSteps",
+          "when": "false"
+        },
+        {
+          "command": "novelai.soloActions",
+          "when": "false"
+        },
+        {
+          "command": "novelai.soloChat",
+          "when": "false"
+        },
         {
           "command": "novelai.removeWork",
           "when": "false"
