@@ -19,9 +19,26 @@
  * - **読む面**は組み立てたHTML。ルビ・傍点・用語の色分けが出る
  *
  * 切り替えは1つのボタンで、**同じ場所を見続けられるようにする**。
+ *
+ * ## 第4の面「組んで書く（実験）」（設計書6.34）
+ *
+ * 打つ面そのものにルビ・傍点が組まれて出る `contenteditable` の面を、
+ * **実験として別に足した**。上の3面（書く・読む・並べる）には手を入れて
+ * いない——実験が壊れても、いままでの書き方は無傷で残る。
+ *
+ * この面でいちばん危ないのは、DOMから記法テキストへ戻すところである。
+ * ずれた瞬間に本文が壊れるので、
+ *
+ * - 面に入るとき **`記法→DOM→記法` が元の本文と一致するかを確かめる**
+ *   （一致しなければ入らない）
+ * - 貼り付けは**平文だけ**を入れる（外のHTMLが混ざると直列化が壊れる）
+ * - 用語の色付けは **CSS Custom Highlight API**（DOMを書き換えない）
+ *
+ * を守る。
  */
 
 import { MANUSCRIPT_FONTS } from "../core/manuscriptFonts";
+import { NOTATION_PATTERN } from "../core/manuscriptRender";
 
 /**
  * 測る書体の名前。
@@ -116,7 +133,7 @@ button.on {
   position: relative;
   overflow: hidden;
 }
-#write, #read, #marks {
+#write, #read, #marks, #compose {
   position: absolute;
   inset: 0;
   padding: 24px 28px;
@@ -199,7 +216,8 @@ body.vertical #read .ellipsis {
   transform-origin: center;
   vertical-align: baseline;
 }
-body.vertical #write, body.vertical #read, body.vertical #marks {
+body.vertical #write, body.vertical #read, body.vertical #marks,
+body.vertical #compose {
   writing-mode: vertical-rl;
   /* **upright にしない。** 全部を立てると、英数字が1文字ずつ縦に
      積まれる（2026 が4行になる）。既定の mixed は日本語の組版と
@@ -229,6 +247,58 @@ body.vertical.paged #surface { padding: 0; }
 
 body.reading:not(.split) #write { visibility: hidden; pointer-events: none; }
 body:not(.reading):not(.split) #read { visibility: hidden; pointer-events: none; }
+
+/* ── 組んで書く（実験）（設計書6.34） ─────────────
+   **この面だけを出す。** 打ちながらルビ・傍点が組まれて見える代わりに、
+   contenteditable の地雷（変換中のDOM書き換え・カーソルの崩壊）を踏む
+   可能性がある実験の面なので、**いつでも上の3面へ戻れる**ことを優先する */
+#compose {
+  display: none;
+  outline: none;
+  /* **空白を潰さない。** 原稿の字下げ（全角空白）や連続した空白がそのまま
+     見えることに加え、pre-wrap では**打った空白がそのまま空白で入る**——
+     潰れる指定だと、ブラウザが代わりに &nbsp;（U+00A0）を差し込む */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  tab-size: 4;
+  color: var(--vscode-editor-foreground);
+}
+body.compose #compose { display: block; }
+/* 上の3面は、この面が出ている間は隠す（描かせない） */
+body.compose #write, body.compose #read, body.compose #marks { display: none; }
+/* 行の段落。**打っている間に増える入れ物にも効かせる**——改行で作られる
+   入れ物は環境によって p と div のどちらにもなりうる（直列化の側は
+   どちらも行の切れ目として読む） */
+#compose p, #compose div {
+  margin: 0;
+  min-height: 1.9em;
+}
+body.vertical #compose p, body.vertical #compose div {
+  min-width: 1.9em;
+  min-height: 0;
+}
+/* **かたまり（ルビ・傍点）は編集不可**（設計書6.34.2）。中の文字を直接
+   直せないので、消すときは1単位で消える。選んだときに1文字のように
+   振る舞わせるため、余計な余白は付けない */
+#compose ruby[data-src], #compose .emphasis[data-src] {
+  /* 選択の見た目を、ふつうの文字と揃える */
+  border-radius: 2px;
+}
+/* 圏点は読む面と同じ出し方（em.emph と同じ指定を分け合う） */
+#compose .emphasis {
+  font-style: normal;
+  text-emphasis: filled dot;
+  -webkit-text-emphasis: filled dot;
+  text-emphasis-position: over right;
+  -webkit-text-emphasis-position: over right;
+}
+/* **用語の色付けは CSS Custom Highlight API で行う**（設計書6.34.3）。
+   下敷き（#marks）も印の要素も使わないので、色を付けてもDOMは変わらず、
+   カーソルも取り消し履歴も動かない。使えない環境では色が出ないだけ */
+::highlight(novelai-term-character) { color: var(--novelai-character); }
+::highlight(novelai-term-location) { color: var(--novelai-location); }
+::highlight(novelai-term-ability) { color: var(--novelai-ability); }
+::highlight(novelai-term-organization) { color: var(--novelai-organization); }
 
 /*
   並べる。**打つ面はそのまま、見る面を隣に置く。**
@@ -372,6 +442,7 @@ body.plain .term { color: inherit; }
   <button id="mode" title="組み立てた表示と、打てる表示を切り替えます">読む</button>
   <button id="dir" title="縦書きと横書きを切り替えます">横書きにする</button>
   <button id="split" title="打つ面と、組み上がりを並べます">並べる</button>
+  <button id="composeMode" title="ルビ・傍点を組んだまま打ちます（実験。うまく打てないときは戻してください）">組んで書く（実験）</button>
   <div class="sep"></div>
   <button id="ruby" title="選んだ文字にルビを振ります">ルビ</button>
   <button id="emph" title="選んだ文字に傍点を付けます">傍点</button>
@@ -388,6 +459,7 @@ body.plain .term { color: inherit; }
   <div id="marks" aria-hidden="true"></div>
   <textarea id="write" spellcheck="false" wrap="soft"></textarea>
   <div id="read"></div>
+  <div id="compose" spellcheck="false"></div>
 </div>
 
 <div id="bottom">
@@ -424,6 +496,9 @@ body.plain .term { color: inherit; }
   const modeButton = document.getElementById("mode");
   const dirButton = document.getElementById("dir");
   const splitButton = document.getElementById("split");
+  /** 組んで書く（実験。設計書6.34） */
+  const compose = document.getElementById("compose");
+  const composeButton = document.getElementById("composeMode");
 
   /** いま画面が持っている本文。拡張機能から来たものと比べるために持つ */
   let current = "";
@@ -490,10 +565,19 @@ body.plain .term { color: inherit; }
   let reading = saved.reading === true;
   /** 打つ面と組み上がりを並べる */
   let split = saved.split === true;
+  /**
+   * 組んで書く（実験）の面にいるか（設計書6.34）。
+   *
+   * **覚えていても、すぐには開かない。** この面は本文から組み立てるので、
+   * 最初の update が届くまで中身が無い。届いてから開く（composeWanted）。
+   */
+  let composeOn = false;
+  let composeWanted = saved.compose === true;
   let size = saved.size || 16;
 
   function remember() {
-    vscode.setState({ vertical, reading, split, size });
+    // **まだ開いていないだけの状態を、閉じたことにしない**（composeWanted）
+    vscode.setState({ vertical, reading, split, size, compose: composeOn || composeWanted });
   }
 
   /** 組み上がりが見えている場面か（並べているときも見えている） */
@@ -506,10 +590,18 @@ body.plain .term { color: inherit; }
     document.body.classList.toggle("vertical", vertical !== false);
     document.body.classList.toggle("reading", reading);
     document.body.classList.toggle("split", split);
+    document.body.classList.toggle("compose", composeOn);
     splitButton.textContent = split ? "並べるのをやめる" : "並べる";
     splitButton.classList.toggle("on", split);
     // 並べているときは、切り替えるものが無い
-    modeButton.disabled = split;
+    modeButton.disabled = split || composeOn;
+    // **組んで書く面は、いままでの3面とは別物である。** 混ぜて見せると、
+    // どちらの面で打っているのか分からなくなる
+    splitButton.disabled = composeOn;
+    composeButton.textContent = composeOn
+      ? "組んで書くのをやめる"
+      : "組んで書く（実験）";
+    composeButton.classList.toggle("on", composeOn);
     document.documentElement.style.setProperty("--novelai-size", size + "px");
     modeButton.textContent = reading ? "書く" : "読む";
     modeButton.classList.toggle("on", reading);
@@ -517,9 +609,16 @@ body.plain .term { color: inherit; }
     dirButton.classList.toggle("on", vertical !== false);
     // **書く面では、ルビは記法のまま見える。** そのことを一言添える。
     // 用語の色は6.25.6でこの面にも付くようになったので、無いとは言わない
-    note.textContent = showingRead()
-      ? ""
-      : "ルビ・傍点は「読む」か「並べる」で出ます（この面では記法のまま見えます。用語には色が付き、右クリックで資料を開けます）";
+    if (composeOn) {
+      note.textContent =
+        "組んで書く（実験）：ルビ・傍点は1つのかたまりとして扱います" +
+        "（中の文字は直接直せません。消すときは1単位で消えます）。" +
+        "うまく打てないときは、もう一度押して「書く」へ戻してください";
+    } else {
+      note.textContent = showingRead()
+        ? ""
+        : "ルビ・傍点は「読む」か「並べる」で出ます（この面では記法のまま見えます。用語には色が付き、右クリックで資料を開けます）";
+    }
   }
 
   /** 縦書きでは「上下」ではなく「左右」に流れる。位置合わせもそれに従う */
@@ -618,11 +717,15 @@ body.plain .term { color: inherit; }
 
   /** 選んでいる文字。読む面では選択範囲、書く面では textarea の選択 */
   function selectionText() {
-    if (reading) return String(window.getSelection() || "");
+    if (composeOn || reading) return String(window.getSelection() || "");
     return write.value.slice(write.selectionStart, write.selectionEnd);
   }
 
   function askRuby() {
+    if (composeOn) {
+      composeAskNotation("ruby");
+      return;
+    }
     const text = selectionText();
     vscode.postMessage({
       type: "ruby",
@@ -633,6 +736,10 @@ body.plain .term { color: inherit; }
   }
 
   function askEmphasis() {
+    if (composeOn) {
+      composeAskNotation("emphasis");
+      return;
+    }
     const text = selectionText();
     vscode.postMessage({
       type: "emphasis",
@@ -1165,10 +1272,20 @@ body.plain .term { color: inherit; }
       vscode.postMessage({ type: "copyForPosting" });
     });
     add("選んだところをAIに相談", function () {
+      // 組んで書く面では、品書きを開いた時点の選択を使う。
+      // **押した瞬間には選択が消えている**（画面の他所を押すと外れる）ので、
+      // textarea のように押されてから読むことができない
+      const at = composeOn ? composeMenuAt : null;
       vscode.postMessage({
         type: "chat",
-        start: reading ? -1 : write.selectionStart,
-        end: reading ? -1 : write.selectionEnd,
+        start: composeOn
+          ? at
+            ? at.start
+            : -1
+          : reading
+            ? -1
+            : write.selectionStart,
+        end: composeOn ? (at ? at.end : -1) : reading ? -1 : write.selectionEnd,
       });
     }, hasSelection);
 
@@ -1236,10 +1353,14 @@ body.plain .term { color: inherit; }
   document.addEventListener("contextmenu", function (event) {
     if (event.target === menu || menu.contains(event.target)) return;
     event.preventDefault();
+    // **選択は、押された時点で読んでおく**（組んで書く面。上の相談・ルビで使う）
+    if (composeOn) composeMenuAt = composeSelectionNow();
     openMenu(
       event.clientX,
       event.clientY,
-      termFrom(event.target),
+      composeOn
+        ? composeTermAt(event.clientX, event.clientY)
+        : termFrom(event.target),
       selectionText().length > 0
     );
   });
@@ -1276,35 +1397,34 @@ body.plain .term { color: inherit; }
     return "";
   }
 
-  read.addEventListener("mouseover", function (event) {
-    const el =
-      event.target && event.target.closest
-        ? event.target.closest(".term")
-        : null;
-    if (!el) {
-      tip.classList.remove("open");
-      return;
-    }
+  /**
+   * チップの中身を作って出す。
+   *
+   * **組んで書く面（設計書6.34）とここで分け合う。** あちらは要素ではなく
+   * 位置から用語を引くが、**出すものは同じ**である（同じ見た目のチップが
+   * 2つの作りで別々に育つのを避ける）。
+   */
+  function fillTip(name, kind, summary) {
     tip.innerHTML = "";
     const head = document.createElement("div");
     const nameEl = document.createElement("span");
     nameEl.className = "tip-name";
-    nameEl.textContent = el.getAttribute("data-term-name") || "";
+    nameEl.textContent = name || "";
     const kindEl = document.createElement("span");
     kindEl.className = "tip-kind";
-    kindEl.textContent =
-      TIP_KIND_LABELS[el.getAttribute("data-term-kind")] || "";
+    kindEl.textContent = TIP_KIND_LABELS[kind] || "";
     head.appendChild(nameEl);
     head.appendChild(kindEl);
     tip.appendChild(head);
     const body = document.createElement("div");
-    const summary = tipSummaryOf(el.getAttribute("data-term-id"));
     // 紹介が無くても名前と種別だけのチップを出す（クリックで資料を開ける）
     body.textContent = summary || "（紹介はまだありません）";
     tip.appendChild(body);
     tip.classList.add("open");
-    // 用語の近くに出し、画面の外へはみ出さないよう収める
-    const rect = el.getBoundingClientRect();
+  }
+
+  /** 用語の近くに出し、画面の外へはみ出さないよう収める */
+  function placeTip(rect) {
     const box = tip.getBoundingClientRect();
     const left = Math.min(rect.left, window.innerWidth - box.width - 8);
     const below = rect.bottom + 6;
@@ -1314,6 +1434,23 @@ body.plain .term { color: inherit; }
         : below;
     tip.style.left = Math.max(4, left) + "px";
     tip.style.top = Math.max(4, top) + "px";
+  }
+
+  read.addEventListener("mouseover", function (event) {
+    const el =
+      event.target && event.target.closest
+        ? event.target.closest(".term")
+        : null;
+    if (!el) {
+      tip.classList.remove("open");
+      return;
+    }
+    fillTip(
+      el.getAttribute("data-term-name"),
+      el.getAttribute("data-term-kind"),
+      tipSummaryOf(el.getAttribute("data-term-id"))
+    );
+    placeTip(el.getBoundingClientRect());
   });
   read.addEventListener("mouseout", function (event) {
     const el =
@@ -1343,7 +1480,14 @@ body.plain .term { color: inherit; }
     const message = event.data;
     if (message.type === "update") {
       current = message.text;
-      takeIncoming(message.text);
+      if (composeOn) composeTakeIncoming(message.text);
+      else takeIncoming(message.text);
+      // 覚えていた「組んで書く」は、本文が届いてから開く。
+      // **一度きりにする**——安全弁で断られたときに、届くたび試し直さない
+      if (composeWanted && !composeOn) {
+        composeWanted = false;
+        composeEnter();
+      }
       /*
         **打っている間は、読む面を組み立て直さない。**
         4万字の本文では段落が千を超える。打つたびにそれを作り直すと、
@@ -1356,7 +1500,17 @@ body.plain .term { color: inherit; }
         latestMarks = { forText: message.text, html: message.marks };
         applyMarksIfMatch();
       }
-      if (Array.isArray(message.terms)) termSpans = message.terms;
+      if (Array.isArray(message.terms)) {
+        termSpans = message.terms;
+        /*
+          **どの本文に対する位置なのかを覚えておく**（組んで書く面の色付け）。
+          打った直後は本文のほうが先に進んでいるので、そのまま色を置くと
+          1文字ずれた場所が塗られる。打つ面の目印（applyMarksIfMatch）と
+          同じ考え方で、一致するときだけ出す
+        */
+        termsForText = message.text;
+        composeScheduleHighlight();
+      }
       if (typeof message.forceVertical === "boolean" && !forcedOnce) {
         // **「原稿（横書）」で開いたなら、その原稿が縦を覚えていても横で開く。**
         // 選んで開いたのに前の向きが勝つと、選んだ意味が無い。
@@ -1398,12 +1552,920 @@ body.plain .term { color: inherit; }
       }
     } else if (message.type === "count") {
       countLabel.textContent = message.label;
+    } else if (message.type === "select" && composeOn) {
+      /*
+        ルビを入れたあと、入れた場所を選び直す（組んで書く面）。
+        **組み直しはこのあとに届く**（文書の書き換えが返ってくるのは少し先）
+        ので、覚えておいて組み直したあとにも当て直す
+      */
+      composeWantSelect = { start: message.start, end: message.end };
+      composeRestoreCaret(composeWantSelect);
     } else if (message.type === "select" && !reading) {
       // ルビを入れたあと、入れた場所を選び直す
       write.focus();
       try { write.setSelectionRange(message.start, message.end); } catch (e) { /* 範囲外 */ }
     }
   });
+
+  /* ══ 組んで書く（実験。設計書6.34） ══════════════════════ */
+
+  /**
+   * 打つ面そのものに、ルビ・傍点が組まれて出る面。
+   *
+   * **いちばん危ないのは DOM→記法の直列化である。** ここが1文字でも
+   * ずれると本文が壊れるので、
+   *
+   * 1. 面に入るとき、**記法→DOM→記法 が元の本文と一致するか**を確かめる
+   *    （一致しなければ入らない）
+   * 2. 貼り付けは**平文だけ**（外のHTMLが入ると直列化が壊れる）
+   * 3. 用語の色付けは **CSS Custom Highlight API**（DOMを書き換えない）
+   *
+   * を守る。**取り消し（Ctrl+Z）はブラウザ任せ**——自分の入力では組み直さ
+   * ないので素の履歴が効くはずで、**これが実験の検証項目**である。
+   */
+
+  /** 品書きを開いた時点の選択（押した瞬間には外れているので、先に読む） */
+  let composeMenuAt = null;
+  /** 組み直したあとに選び直したい範囲（ルビを入れた直後） */
+  let composeWantSelect = null;
+  /** 届いている用語の位置（termSpans）が、どの本文に対するものか */
+  let termsForText = null;
+  /** 変換中に外から届いた本文。確定してから片づける */
+  let composePending = null;
+
+  /* compose:start */
+  /**
+   * ルビ・傍点の記法。**定義は core/manuscriptRender.ts の1つだけ**で、
+   * ここへはその文字列がそのまま埋め込まれる（写しを置かない）。
+   */
+  const COMPOSE_NOTATION = ${JSON.stringify(NOTATION_PATTERN)};
+
+  /** 平文はつなげて1つにする（テキストノードを無駄に増やさない） */
+  function composePushText(parts, text) {
+    if (text === "") return;
+    const last = parts.length > 0 ? parts[parts.length - 1] : null;
+    if (last && last.kind === "text") {
+      last.src += text;
+      return;
+    }
+    parts.push({ kind: "text", src: text, base: text, reading: "" });
+  }
+
+  /**
+   * 記法つきの1行を、部品へ割る。
+   *
+   * **どの部品も src（元の記法そのもの）を持つ。** 読む面の tokenizeLine は
+   * 読み仮名が空のルビを平文（親文字だけ）へ落とすが、それをこの面でやると
+   * **記法が消えて本文が書き換わる**。ここでは元の文字列のまま平文として
+   * 残す（書きかけのルビは記法のまま見えて、そのまま直せる）。
+   */
+  function composeParts(line) {
+    const parts = [];
+    const pattern = new RegExp(COMPOSE_NOTATION, "g");
+    let last = 0;
+    let match = pattern.exec(line);
+    while (match !== null) {
+      // 長さ0の一致は位置が進まない（無限に回る）。念のため
+      if (match[0].length === 0) break;
+      if (match.index > last) {
+        composePushText(parts, line.slice(last, match.index));
+      }
+      if (match[1] !== undefined) {
+        parts.push({
+          kind: "emphasis",
+          src: match[0],
+          base: match[1],
+          reading: "",
+        });
+      } else if (match[3] !== undefined && match[3].trim() !== "") {
+        parts.push({
+          kind: "ruby",
+          src: match[0],
+          base: match[2],
+          reading: match[3],
+        });
+      } else {
+        composePushText(parts, match[0]);
+      }
+      last = match.index + match[0].length;
+      match = pattern.exec(line);
+    }
+    if (last < line.length) composePushText(parts, line.slice(last));
+    return parts;
+  }
+
+  /** 部品を記法へ戻す。並べ直すだけ（ここが崩れると本文が壊れる） */
+  function composePartsToNotation(parts) {
+    let text = "";
+    for (const part of parts) text += part.src;
+    return text;
+  }
+
+  /**
+   * 改行の種類を揃える。
+   *
+   * **textarea が値へ行うのと同じこと**をする（打つ面は CRLF の原稿でも
+   * LF として持つ）。ここで揃えておかないと、面ごとに送る本文が変わる。
+   */
+  function composeNormalizeNewlines(text) {
+    return text.replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n");
+  }
+
+  /**
+   * contenteditable が入れる揺れを、原稿の文字へ戻す。
+   *
+   * **&nbsp;（U+00A0）を普通の空白に戻す。** 見た目が同じなので気づかず、
+   * 原稿へ混ざると検索・文字数・投稿サイトで事故る。
+   */
+  function composeNormalizeText(text) {
+    return composeNormalizeNewlines(text).replace(/\\u00A0/g, " ");
+  }
+
+  /**
+   * 1行ぶんの段落を作る。**かたまり（ルビ・傍点）は編集不可**（設計書6.34.2）。
+   *
+   * doc を引数で受けるのは、**画面の外から試せるようにする**ためである
+   * （test/unit/composeFace.test.ts が偽の document を渡して往復を確かめる）。
+   */
+  function composeBuildLine(line, doc) {
+    const p = doc.createElement("p");
+    p.setAttribute("class", "line");
+    const parts = composeParts(line);
+    if (parts.length === 0) {
+      // 空行。高さを保つための詰め物（読む面の br と同じ役目）
+      p.appendChild(doc.createElement("br"));
+      return p;
+    }
+    for (const part of parts) {
+      if (part.kind === "text") {
+        p.appendChild(doc.createTextNode(part.src));
+      } else if (part.kind === "ruby") {
+        const ruby = doc.createElement("ruby");
+        ruby.setAttribute("contenteditable", "false");
+        ruby.setAttribute("data-src", part.src);
+        ruby.appendChild(doc.createTextNode(part.base));
+        const rt = doc.createElement("rt");
+        rt.appendChild(doc.createTextNode(part.reading));
+        ruby.appendChild(rt);
+        p.appendChild(ruby);
+      } else {
+        const em = doc.createElement("span");
+        em.setAttribute("class", "emphasis");
+        em.setAttribute("contenteditable", "false");
+        em.setAttribute("data-src", part.src);
+        em.appendChild(doc.createTextNode(part.base));
+        p.appendChild(em);
+      }
+    }
+    return p;
+  }
+
+  /** 本文まるごとを、行の段落へ組む（渡す本文は改行を揃えてあること） */
+  function composeBuildFragment(text, doc) {
+    const fragment = doc.createDocumentFragment();
+    const lines = text.split("\\n");
+    for (const line of lines) fragment.appendChild(composeBuildLine(line, doc));
+    return fragment;
+  }
+
+  /** 行の切れ目になる入れ物か */
+  function composeIsBlock(name) {
+    return name === "P" || name === "DIV" || name === "LI" || name === "SECTION";
+  }
+
+  function composePutBreak(atoms, state, node, parent, index) {
+    atoms.push({
+      kind: "break",
+      node: node,
+      parent: parent,
+      index: index,
+      text: "\\n",
+      start: state.at,
+      end: state.at + 1,
+    });
+    state.at += 1;
+    state.open = true;
+  }
+
+  function composePutText(atoms, state, node, parent, index) {
+    const raw = node.nodeValue === undefined || node.nodeValue === null
+      ? ""
+      : node.nodeValue;
+    const text = composeNormalizeText(raw);
+    if (text === "") return;
+    atoms.push({
+      kind: "text",
+      node: node,
+      parent: parent,
+      index: index,
+      text: text,
+      start: state.at,
+      end: state.at + text.length,
+    });
+    state.at += text.length;
+    state.open = true;
+  }
+
+  function composeCollect(node, atoms, state) {
+    const kids = node.childNodes;
+    if (!kids) return;
+    for (let i = 0; i < kids.length; i++) {
+      const kid = kids[i];
+      if (kid.nodeType === 3) {
+        composePutText(atoms, state, kid, node, i);
+        continue;
+      }
+      if (kid.nodeType !== 1) continue;
+      const src = kid.getAttribute ? kid.getAttribute("data-src") : null;
+      if (src !== null && src !== undefined && src !== "") {
+        // かたまり（ルビ・傍点）。**中は見ない**——記法そのものを持っている
+        atoms.push({
+          kind: "chunk",
+          node: kid,
+          parent: node,
+          index: i,
+          text: src,
+          start: state.at,
+          end: state.at + src.length,
+        });
+        state.at += src.length;
+        state.open = true;
+        continue;
+      }
+      if (kid.nodeName === "BR") {
+        /*
+          **入れ物の最後の br は詰め物**である。ブラウザが空の行の高さを
+          保つために置くもので、本文の改行ではない。数えると、行を打つたびに
+          空行が増えていく
+        */
+        if (i === kids.length - 1) continue;
+        composePutBreak(atoms, state, kid, node, i);
+        continue;
+      }
+      if (composeIsBlock(kid.nodeName)) {
+        // 2つめ以降の入れ物の手前が、行の切れ目にあたる
+        if (state.open) composePutBreak(atoms, state, kid, node, i);
+        state.open = true;
+        composeCollect(kid, atoms, state);
+        continue;
+      }
+      composeCollect(kid, atoms, state);
+    }
+  }
+
+  /**
+   * DOMの中身を「かたまり（atom）」の並びへ割る。
+   *
+   * **直列化と位置の対応を、同じ1つの走査から作る。** 別々に書くと、
+   * 片方だけが正しい状態（本文は合っているのに色が1文字ずれる、
+   * カーソルが別の行へ飛ぶ）が生まれる。
+   *
+   * - text  … テキストノード（中身は正規化済み）
+   * - chunk … ルビ・傍点。**data-src の文字数ぶんを占める**
+   * - break … 行の切れ目。改行1文字ぶん
+   */
+  function composeAtoms(root) {
+    const atoms = [];
+    composeCollect(root, atoms, { at: 0, open: false });
+    return atoms;
+  }
+
+  /** DOM → 記法テキスト。**本文の正しさは、この関数がすべて背負う** */
+  function composeDomToNotation(root) {
+    let text = "";
+    for (const atom of composeAtoms(root)) text += atom.text;
+    return text;
+  }
+
+  /** その atom の終わりを指す DOM の位置 */
+  function composeEndPoint(atom) {
+    if (atom.kind === "text") {
+      return { node: atom.node, offset: atom.text.length };
+    }
+    if (atom.kind === "chunk") {
+      return { node: atom.parent, offset: atom.index + 1 };
+    }
+    return composeAfterBreak(atom);
+  }
+
+  /** 行の切れ目の直後（＝次の行の頭） */
+  function composeAfterBreak(atom) {
+    if (atom.node.nodeName === "BR") {
+      return { node: atom.parent, offset: atom.index + 1 };
+    }
+    return { node: atom.node, offset: 0 };
+  }
+
+  /**
+   * 記法の位置 → DOM の位置。
+   *
+   * **かたまりの中へは入らない**（編集できないので、手前か後ろの境目へ寄せる）。
+   */
+  function composeOffsetToPoint(atoms, offset) {
+    let lastAtom = null;
+    for (const atom of atoms) {
+      const previous = lastAtom;
+      lastAtom = atom;
+      if (offset >= atom.end) continue;
+      const at = offset < atom.start ? atom.start : offset;
+      if (atom.kind === "text") {
+        return { node: atom.node, offset: at - atom.start };
+      }
+      if (atom.kind === "chunk") {
+        return at <= atom.start
+          ? { node: atom.parent, offset: atom.index }
+          : { node: atom.parent, offset: atom.index + 1 };
+      }
+      /*
+        行の切れ目そのもの。**改行の手前は「前の行の終わり」である。**
+        次の行の頭へ置くと、行末で組み直すたびにカーソルが1行下がる
+      */
+      if (at === atom.start && previous !== null) return composeEndPoint(previous);
+      return composeAfterBreak(atom);
+    }
+    if (lastAtom === null) return null;
+    return composeEndPoint(lastAtom);
+  }
+
+  /** その節点を含んでいるか（親をたどれない偽のDOMでも動くように、子から探す） */
+  function composeContains(ancestor, node) {
+    if (ancestor === node) return true;
+    const kids = ancestor.childNodes;
+    if (!kids) return false;
+    for (let i = 0; i < kids.length; i++) {
+      if (composeContains(kids[i], node)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * DOM の位置 → 記法の位置。
+   *
+   * 当たらない位置（かたまりの中、空の行）は**手前の境目へ寄せる**。
+   * カーソルの置き直しに使うので、**外すより寄せるほうがよい**。
+   */
+  function composePointToOffset(atoms, node, offset) {
+    if (!node || atoms.length === 0) return 0;
+    if (node.nodeType === 3) {
+      for (const atom of atoms) {
+        if (atom.kind === "text" && atom.node === node) {
+          const within = offset > atom.text.length ? atom.text.length : offset;
+          return atom.start + within;
+        }
+      }
+    }
+    // 要素の「何番目の子の手前か」で指されている
+    const kids = node.childNodes;
+    if (kids && offset < kids.length) {
+      const target = kids[offset];
+      for (const atom of atoms) {
+        if (composeContains(target, atom.node)) return atom.start;
+      }
+    }
+    // その先に atom が無い。入れ物の中の最後尾へ
+    let end = null;
+    for (const atom of atoms) {
+      if (composeContains(node, atom.node)) end = atom.end;
+    }
+    if (end !== null) return end;
+    return offset > 0 ? atoms[atoms.length - 1].end : 0;
+  }
+
+  /** その範囲に、かたまり（ルビ・傍点）が重なっているか */
+  function composeSelectionHasChunk(atoms, start, end) {
+    for (const atom of atoms) {
+      if (atom.kind !== "chunk") continue;
+      if (atom.start < end && atom.end > start) return true;
+    }
+    return false;
+  }
+  /* compose:end */
+
+  /**
+   * 位置の一覧は、変わるまで使い回す。
+   *
+   * 4万字の原稿ではかたまりが数千になる。マウスを動かすたび・色を置くたびに
+   * 数え直すと、**打つ手より先に画面が重くなる**。DOMを変えるのは入力と
+   * 組み直しだけなので、そこで捨てれば古いものは残らない。
+   */
+  let composeAtomsCache = null;
+  function composeCurrentAtoms() {
+    if (composeAtomsCache === null) composeAtomsCache = composeAtoms(compose);
+    return composeAtomsCache;
+  }
+  function composeInvalidate() {
+    composeAtomsCache = null;
+  }
+
+  /* ── 面の出し入れ ──────────────────────────── */
+
+  /** 中身を空にする（innerHTML を使わない。組み立ては節点で行う） */
+  function composeClear() {
+    while (compose.firstChild) compose.removeChild(compose.firstChild);
+  }
+
+  /**
+   * **安全弁。** 記法→DOM→記法 が元の本文と一致するときだけ、組んだものを返す。
+   *
+   * 一致しないまま面へ入れると、次に打った瞬間に**壊れた本文が文書へ入る**。
+   * 一致しないのは、この面が扱えない文字（U+00A0 など）が原稿にあるとき。
+   * **黙って直さずに、入らない。**
+   */
+  function composeBuildChecked(text) {
+    const wanted = composeNormalizeNewlines(text);
+    const built = composeBuildFragment(wanted, document);
+    if (composeDomToNotation(built) !== wanted) return null;
+    return { fragment: built, text: wanted };
+  }
+
+  function composeEnter() {
+    const built = composeBuildChecked(write.value);
+    if (!built) {
+      note.textContent =
+        "組んで書く（実験）は、この原稿では開けませんでした。" +
+        "組み直したものが元の本文と一致しないため、書き換わる恐れがあります" +
+        "（「書く」面はこれまでどおり使えます）";
+      vscode.postMessage({
+        type: "log",
+        text: "組んで書く（実験）：記法→DOM→記法 の往復が一致しないため開きませんでした",
+      });
+      return;
+    }
+    // カーソルは、打つ面で見ていたところから続ける
+    const at = write.selectionStart;
+    composeOn = true;
+    // **この面だけを出す。** 3つの面と混ぜない（どこで打っているか分からなくなる）
+    reading = false;
+    split = false;
+    clearCaretMark();
+    compose.setAttribute("contenteditable", "true");
+    try {
+      // 改行で作られる入れ物を p に揃える（既定は環境によって違う）
+      document.execCommand("defaultParagraphSeparator", false, "p");
+    } catch (error) {
+      /* 効かない環境でも、直列化の側で入れ物の違いを吸収する */
+    }
+    composeClear();
+    compose.appendChild(built.fragment);
+    composeInvalidate();
+    paint();
+    remember();
+    compose.focus();
+    composeRestoreCaret({ start: at, end: at });
+    composeScheduleHighlight();
+  }
+
+  /** 打つ面へ戻す。**実験が転んでも、いままでの書き方は無傷で残る** */
+  function composeLeave() {
+    if (!composeOn) return;
+    const at = composeSelectionNow();
+    composeOn = false;
+    composeMenuAt = null;
+    composeWantSelect = null;
+    composePending = null;
+    composeClearHighlights();
+    compose.setAttribute("contenteditable", "false");
+    composeClear();
+    paint();
+    remember();
+    write.focus();
+    if (at) {
+      try {
+        write.setSelectionRange(at.start, at.end);
+      } catch (error) {
+        /* 範囲外なら諦める */
+      }
+    }
+  }
+
+  composeButton.addEventListener("click", function () {
+    if (composeOn) composeLeave();
+    else composeEnter();
+  });
+
+  /* ── 本文の往復 ────────────────────────────── */
+
+  /**
+   * 打たれた本文を、そのまま文書へ返す（打つ面の send と同じ流儀）。
+   *
+   * **打つ面の値も揃えておく。** 面を出たあと、そのまま続けて打てるように
+   * するためで、字数の数え直し（updateCount）もこの値を見ている。
+   */
+  function composeSend() {
+    // DOMは打たれるたびに変わる。**位置の一覧は必ず数え直す**
+    composeInvalidate();
+    const text = composeDomToNotation(compose);
+    if (text === current) return;
+    current = text;
+    lastSent = text;
+    write.value = text;
+    vscode.postMessage({ type: "edit", text: text });
+    updateCount();
+  }
+
+  /**
+   * 外から届いた本文を当てる。
+   *
+   * **自分の書き換えが返ってきたら触らない。** 組み直すとカーソルが飛び、
+   * ブラウザの取り消し履歴（Ctrl+Z）まで壊れる。
+   */
+  function composeTakeIncoming(text) {
+    if (composing) {
+      // 確定するまで覚えておく。**いま組み直すと変換が壊れる**
+      composePending = text;
+      return;
+    }
+    if (text === lastSent) return;
+    if (composeNormalizeNewlines(text) === composeDomToNotation(compose)) return;
+    write.value = text;
+    composeApplyText(text);
+  }
+
+  /**
+   * 組み直す。**カーソルは記法の位置で覚えて、位置で戻す**（最善努力）。
+   *
+   * ルビの前後や行の頭など、同じ位置に戻せないことはある。完全でなくてよい
+   * ——**外からの書き換えは頻繁には来ない**（AIの適用・別の窓での編集）。
+   */
+  function composeApplyText(text) {
+    const at = composeWantSelect || composeSelectionNow();
+    composeWantSelect = null;
+    const built = composeBuildChecked(text);
+    if (!built) {
+      // 組み直せない本文が届いた。**この面に留まらない**
+      composeLeave();
+      note.textContent =
+        "組んで書く（実験）を閉じました。届いた本文をそのまま組み直せないため、" +
+        "「書く」面へ戻しています";
+      vscode.postMessage({
+        type: "log",
+        text: "組んで書く（実験）：届いた本文の往復が一致しないため面を閉じました",
+      });
+      return;
+    }
+    composeClear();
+    compose.appendChild(built.fragment);
+    composeInvalidate();
+    composeRestoreCaret(at);
+    composeScheduleHighlight();
+  }
+
+  compose.addEventListener("input", function () {
+    composeInvalidate();
+    // **変換中は送らない**（確定前の文字を本文へ入れると二重に入る）
+    if (composing) return;
+    composeSend();
+    composeScheduleHighlight();
+  });
+
+  compose.addEventListener("compositionstart", function () {
+    composing = true;
+  });
+  compose.addEventListener("compositionend", function () {
+    composing = false;
+    // 確定ぶんが入るのは、この直後のことがある（打つ面と同じ理由）
+    setTimeout(function () {
+      composeSend();
+      const waiting = composePending;
+      composePending = null;
+      if (waiting !== null) composeTakeIncoming(waiting);
+      composeScheduleHighlight();
+    }, 0);
+  });
+
+  /**
+   * **装飾のコマンドは通さない。** Ctrl+B などは記法に無いものを
+   * DOMへ入れる（太字の要素）ので、直列化がそこで崩れる。
+   */
+  compose.addEventListener("beforeinput", function (event) {
+    const kind = event.inputType || "";
+    if (kind.indexOf("format") === 0) event.preventDefault();
+  });
+
+  /**
+   * **貼り付けは平文だけ。** 外のHTMLがDOMへ入ると直列化が壊れる
+   * （色・書体・表・画像は、この面が扱えるものではない）。
+   */
+  function composeInsertPlain(text) {
+    if (!text) return;
+    const plain = composeNormalizeText(text);
+    try {
+      // **execCommand を使う。** 自前で節点を差し込むと、
+      // ブラウザの取り消し履歴（Ctrl+Z）から外れる
+      if (document.execCommand("insertText", false, plain)) return;
+    } catch (error) {
+      /* 使えない環境では、下の手で入れる */
+    }
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    range.insertNode(document.createTextNode(plain));
+    selection.collapseToEnd();
+    composeSend();
+  }
+
+  compose.addEventListener("paste", function (event) {
+    event.preventDefault();
+    const data = event.clipboardData;
+    composeInsertPlain(data ? data.getData("text/plain") : "");
+  });
+  compose.addEventListener("drop", function (event) {
+    // 落とされたものも同じ（HTMLのまま入れない）
+    event.preventDefault();
+    const data = event.dataTransfer;
+    composeInsertPlain(data ? data.getData("text/plain") : "");
+  });
+
+  /**
+   * **写すときは、記法で写す。**
+   *
+   * 見えている字をそのまま写すと、ルビは「親文字＋読み仮名」の並びになる
+   * （組んで見せているだけで、間に区切りが無い）。それを貼り戻すと
+   * **読み仮名が本文へ混ざる**。かたまりは記法（data-src）で写す。
+   */
+  function composeCopyNotation(event, andDelete) {
+    const at = composeSelectionNow();
+    if (!at || at.end <= at.start) return;
+    const data = event.clipboardData;
+    if (!data) return;
+    event.preventDefault();
+    let text = "";
+    for (const atom of composeCurrentAtoms()) text += atom.text;
+    data.setData("text/plain", text.slice(at.start, at.end));
+    if (!andDelete) return;
+    try {
+      // 消すのはブラウザに任せる（自前で消すと取り消し履歴から外れる）
+      document.execCommand("delete");
+    } catch (error) {
+      /* 消せない環境では、選んだまま残る（本文は壊れない） */
+    }
+  }
+
+  compose.addEventListener("copy", function (event) {
+    composeCopyNotation(event, false);
+  });
+  compose.addEventListener("cut", function (event) {
+    composeCopyNotation(event, true);
+  });
+
+  /* ── カーソルと選択 ───────────────────────── */
+
+  /** いまの選択を、記法の位置で返す */
+  function composeSelectionNow() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+    const range = selection.getRangeAt(0);
+    if (!compose.contains(range.startContainer)) return null;
+    const atoms = composeCurrentAtoms();
+    const start = composePointToOffset(
+      atoms,
+      range.startContainer,
+      range.startOffset
+    );
+    const end = composePointToOffset(atoms, range.endContainer, range.endOffset);
+    return start <= end ? { start: start, end: end } : { start: end, end: start };
+  }
+
+  /** 記法の位置で、選択を置き直す */
+  function composeRestoreCaret(at) {
+    if (!at) return;
+    const atoms = composeCurrentAtoms();
+    const head = composeOffsetToPoint(atoms, at.start);
+    const tail = composeOffsetToPoint(atoms, at.end);
+    if (!head || !tail) return;
+    try {
+      const range = document.createRange();
+      range.setStart(head.node, head.offset);
+      range.setEnd(tail.node, tail.offset);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } catch (error) {
+      /* 置けなければ諦める（最善努力。本文は壊れない） */
+    }
+  }
+
+  /* ── 用語の色付け（CSS Custom Highlight API。設計書6.34.3） ── */
+
+  const COMPOSE_HIGHLIGHTS = [
+    "character",
+    "location",
+    "ability",
+    "organization",
+  ];
+
+  function composeHighlightsUsable() {
+    return (
+      typeof CSS !== "undefined" &&
+      CSS.highlights &&
+      typeof Highlight !== "undefined"
+    );
+  }
+
+  function composeClearHighlights() {
+    if (!composeHighlightsUsable()) return;
+    try {
+      for (const kind of COMPOSE_HIGHLIGHTS) {
+        CSS.highlights.delete("novelai-term-" + kind);
+      }
+    } catch (error) {
+      /* 消せなくても入力は動く */
+    }
+  }
+
+  /**
+   * 用語のところへ色を置く。**DOMは書き換えない**（設計書6.34.3）。
+   *
+   * 下敷き方式（打つ面の #marks）は textarea の制約から生まれた迂回であり、
+   * この面では要らない。印の要素を入れる方式だと、色を付け直すたびに
+   * カーソルが飛び、取り消し履歴も汚れる。
+   *
+   * **位置が今の本文のものだと確かめてから置く**（打つ面の
+   * applyMarksIfMatch と同じ）。ずれた色は、無い色より分かりにくい。
+   */
+  function composeApplyHighlights() {
+    if (!composeOn) return;
+    if (!composeHighlightsUsable()) return;
+    try {
+      /*
+        **同じ本文に対する位置でなければ、色を出さない。** 改行の種類まで
+        含めて見るのは、位置が文書の本文（CRLFならCRLF）で数えられている
+        ためで、揃えて比べると1行ごとに1文字ずつずれた色が出る
+      */
+      if (termsForText === null || termsForText !== composeDomToNotation(compose)) {
+        composeClearHighlights();
+        return;
+      }
+      const atoms = composeCurrentAtoms();
+      const buckets = {};
+      for (const kind of COMPOSE_HIGHLIGHTS) buckets[kind] = [];
+      for (const span of termSpans) {
+        const bucket = buckets[span.kind];
+        if (!bucket) continue;
+        const head = composeOffsetToPoint(atoms, span.start);
+        const tail = composeOffsetToPoint(atoms, span.end);
+        if (!head || !tail) continue;
+        const range = document.createRange();
+        range.setStart(head.node, head.offset);
+        range.setEnd(tail.node, tail.offset);
+        bucket.push(range);
+      }
+      for (const kind of COMPOSE_HIGHLIGHTS) {
+        const ranges = buckets[kind];
+        if (ranges.length === 0) {
+          CSS.highlights.delete("novelai-term-" + kind);
+          continue;
+        }
+        CSS.highlights.set("novelai-term-" + kind, new Highlight(...ranges));
+      }
+    } catch (error) {
+      // **色が出ないだけで、入力は動く。** ここで止めない
+      composeClearHighlights();
+    }
+  }
+
+  /** 色付けは1フレームに1回へまとめる（打鍵のたびに数千の範囲を作らない） */
+  let composeHighlightTimer = null;
+  function composeScheduleHighlight() {
+    if (!composeOn) return;
+    if (composeHighlightTimer !== null) return;
+    composeHighlightTimer = requestAnimationFrame(function () {
+      composeHighlightTimer = null;
+      composeApplyHighlights();
+    });
+  }
+
+  /* ── 設定資料の操作（作者の指定。設計書6.34.3） ────── */
+
+  /** 画面の座標 → 記法の位置。用語の当たり判定に使う */
+  function composeOffsetAtPoint(x, y) {
+    let node = null;
+    let offset = 0;
+    if (document.caretRangeFromPoint) {
+      const range = document.caretRangeFromPoint(x, y);
+      if (!range) return null;
+      node = range.startContainer;
+      offset = range.startOffset;
+    } else if (document.caretPositionFromPoint) {
+      const position = document.caretPositionFromPoint(x, y);
+      if (!position) return null;
+      node = position.offsetNode;
+      offset = position.offset;
+    } else {
+      return null;
+    }
+    if (!node || !compose.contains(node)) return null;
+    return composePointToOffset(composeCurrentAtoms(), node, offset);
+  }
+
+  /** その位置にある用語（端は含めない。打つ面の termAtCaret と同じ扱い） */
+  function composeTermSpanAt(offset) {
+    if (offset === null) return null;
+    for (const span of termSpans) {
+      if (offset >= span.start && offset < span.end) return span;
+    }
+    return null;
+  }
+
+  /**
+   * 押されたところの用語。
+   *
+   * **範囲を選んでいれば、そちらに重なる用語を優先する**（打つ面と同じ）。
+   * 点だけだと、選んでから右クリックしたときに選んだ語を引けない。
+   */
+  function composeTermAt(x, y) {
+    const at = composeMenuAt;
+    if (at && at.end > at.start) {
+      for (const span of termSpans) {
+        if (span.start < at.end && span.end > at.start) return span;
+      }
+    }
+    return composeTermSpanAt(composeOffsetAtPoint(x, y));
+  }
+
+  /**
+   * 読む面と同じチップを出す。**引き方だけが違う**——この面には用語の要素が
+   * 無いので（色は Highlight API で置いている）、位置から引く。
+   *
+   * **1フレームに1回にまとめる。** マウスを動かすたびに本文じゅうの位置を
+   * 数え直すと、指の動きに画面が付いてこない。
+   */
+  let composeTipTimer = null;
+  let composeTipAt = null;
+  compose.addEventListener("mousemove", function (event) {
+    if (!composeOn) return;
+    composeTipAt = { x: event.clientX, y: event.clientY };
+    if (composeTipTimer !== null) return;
+    composeTipTimer = requestAnimationFrame(function () {
+      composeTipTimer = null;
+      const at = composeTipAt;
+      if (!at) return;
+      const span = composeTermSpanAt(composeOffsetAtPoint(at.x, at.y));
+      if (!span) {
+        tip.classList.remove("open");
+        return;
+      }
+      fillTip(span.name, span.kind, span.summary);
+      // 要素が無いので、指の先を用語の箱の代わりにする
+      placeTip({ left: at.x, right: at.x, top: at.y, bottom: at.y });
+    });
+  });
+  compose.addEventListener("mouseleave", function () {
+    composeTipAt = null;
+    tip.classList.remove("open");
+  });
+  compose.addEventListener("scroll", function () {
+    tip.classList.remove("open");
+  });
+
+  /**
+   * ルビ・傍点を振る先。
+   *
+   * **品書きから押されたときは、開いた時点の選択を使う。** 品書きを押した
+   * 瞬間に選択は外れているので、いまの選択だけを見ると「選んでいない」に
+   * なってしまう（textarea は焦点が移っても選択を覚えているが、
+   * contenteditable の選択は画面じゅうで1つしかない）。
+   */
+  function composeTargetRange() {
+    const live = composeSelectionNow();
+    if (live && live.end > live.start) return live;
+    if (composeMenuAt && composeMenuAt.end > composeMenuAt.start) {
+      return composeMenuAt;
+    }
+    return live || composeMenuAt;
+  }
+
+  /**
+   * ルビ・傍点を、この面から振る。**振るのは打つ面と同じ道**である
+   * （記法の位置で頼み、入れるのは拡張機能側）。
+   *
+   * **かたまりの上には重ねない。** ルビの中へルビを入れると記法が入れ子に
+   * なり、読む面でも投稿サイトでも壊れる。
+   */
+  function composeAskNotation(kind) {
+    const label = kind === "ruby" ? "ルビ" : "傍点";
+    const at = composeTargetRange();
+    if (!at) {
+      note.textContent = label + "を振る場所を、この面で選んでください";
+      return;
+    }
+    const atoms = composeCurrentAtoms();
+    if (composeSelectionHasChunk(atoms, at.start, at.end)) {
+      note.textContent =
+        "ルビや傍点の上には重ねられません。いったん外してから振り直してください";
+      return;
+    }
+    // **位置を数えたのと同じものから本文を作る**（切り出す先がずれない）
+    let text = "";
+    for (const atom of atoms) text += atom.text;
+    vscode.postMessage({
+      type: kind,
+      text: text.slice(at.start, at.end),
+      start: at.start,
+      end: at.end,
+    });
+  }
 
   paint();
   vscode.postMessage({ type: "ready" });

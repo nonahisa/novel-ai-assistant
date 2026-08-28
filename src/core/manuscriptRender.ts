@@ -29,12 +29,19 @@ type Token =
   | { kind: "emphasis"; text: string };
 
 /**
- * ルビ・傍点・平文へ割る。
+ * ルビ・傍点の記法。**この1つを唯一の定義にする。**
  *
  * **傍点を先に見る。** `{{強調}}` はルビの規則にも当たってしまうため、
  * 後回しにすると `{強調}` というルビ（読み仮名なし）に化ける。
+ *
+ * 正規表現ではなく**文字列**で置いてあるのは、組んで書く面（設計書6.34）の
+ * 画面側JSへそのまま渡すためである。あちらは webview のテンプレート文字列の
+ * 中にあり `import` が効かないので、写しを置くと**片方だけが直る日が来る**。
  */
-const TOKEN = /\{\{([^{}\r\n]+)\}\}|\{([^{}|\r\n]+)\|([^{}|\r\n]*)\}/g;
+export const NOTATION_PATTERN =
+  "\\{\\{([^{}\\r\\n]+)\\}\\}|\\{([^{}|\\r\\n]+)\\|([^{}|\\r\\n]*)\\}";
+
+const TOKEN = new RegExp(NOTATION_PATTERN, "g");
 
 export function tokenizeLine(line: string): Token[] {
   const tokens: Token[] = [];

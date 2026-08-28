@@ -123,7 +123,15 @@ type Incoming =
    */
   | { type: "pickFont"; installed?: string[] }
   /** 最新話を書く（設計書6.25.5） */
-  | { type: "openLatest" };
+  | { type: "openLatest" }
+  /**
+   * 画面側で起きたことを記録する（設計書6.34）。
+   *
+   * 組んで書く面の安全弁（記法→DOM→記法 の往復が一致しないとき）は、
+   * **黙って開かないだけ**では何が起きたか誰にも分からない。通知は出さず、
+   * ログには必ず残す。
+   */
+  | { type: "log"; text: string };
 
 export interface ManuscriptEditorDeps {
   highlighter: TermHighlighter;
@@ -305,6 +313,10 @@ export class ManuscriptEditorProvider
 
         case "pickFont":
           await pickFont(message.installed);
+          break;
+
+        case "log":
+          logLine(`原稿エディタ：${message.text}`);
           break;
 
         case "chat":
