@@ -31,6 +31,7 @@ export function createAbilityStore(work: WorkEntry): SettingsStore<Ability> {
     idPrefix: "abil",
     parse: parseAbility,
     fileName: abilityFileName,
+    displayName: (ability) => ability.name,
   });
 }
 
@@ -41,6 +42,7 @@ export function createLocationStore(work: WorkEntry): SettingsStore<Location> {
     idPrefix: "loc",
     parse: parseLocation,
     fileName: locationFileName,
+    displayName: (location) => location.name,
   });
 }
 
@@ -51,6 +53,7 @@ export function createWorldStore(work: WorkEntry): SettingsStore<WorldItem> {
     idPrefix: "world",
     parse: parseWorldItem,
     fileName: worldItemFileName,
+    displayName: (item) => item.name,
   });
 }
 
@@ -63,6 +66,7 @@ export function createOrganizationStore(
     idPrefix: "org",
     parse: parseOrganization,
     fileName: organizationFileName,
+    displayName: (organization) => organization.name,
   });
 }
 

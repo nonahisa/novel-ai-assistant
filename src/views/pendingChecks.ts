@@ -276,6 +276,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 1,
   },
   {
+    id: "F-29",
+    title: "伏線の台帳",
+    commands: ["novelai.openForeshadows", "novelai.addForeshadow", "novelai.checkContradictions"],
+    count: 6,
+  },
+  {
     id: "F-28",
     title: "CRLF原稿の位置ずれと改行の書き換わり",
     commands: ["novelai.openVertical"],
@@ -356,4 +362,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 456;
+export const PENDING_CHECK_TOTAL = 462;

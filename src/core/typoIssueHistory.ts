@@ -159,8 +159,13 @@ export interface AiActionLogEntry {
    * `"resolved"` は、**作者が本文を手で書き直して片付いた**ことを
    * 再チェックで確かめた場合（P-23）。拡張機能は本文に一切
    * 書いていないので、`"applied"` とは分けて記録する。
+   *
+   * `"foreshadowed"` は、矛盾が実は伏線だったので台帳へ移した場合
+   * （設計書6.35.4）。画面上は `"dismissed"` と同じく「片付いた」だが、
+   * **理由がまるごと違う**——「矛盾ではない」ではなく「意図した違和感で
+   * あり、別の場所で追いかけている」である。
    */
-  action: "applied" | "dismissed" | "reverted" | "resolved";
+  action: "applied" | "dismissed" | "reverted" | "resolved" | "foreshadowed";
   file: string;
   line: number;
   target: string;

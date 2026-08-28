@@ -45,10 +45,17 @@ interface Snapshot {
   hash: string;
 }
 
-/** 保存対象の型が満たすべき最小限の形 */
+/**
+ * 保存対象の型が満たすべき最小限の形。
+ *
+ * **見出しの項目名は縛らない。** 設定資料は `name` を持つが、伏線は
+ * `label` である（設計書6.35.1）。ここで `name` を必須にすると、
+ * 名前を持たない台帳がこの保護（ハッシュ照合・未保存の検出・退避）を
+ * 使えず、同じ処理をもう1つ書くことになる。
+ * 作者へ見せる呼び名は `displayName` で受け取る。
+ */
 export interface StorableRecord {
   id: string;
-  name: string;
   updatedAt: string;
 }
 
@@ -61,6 +68,8 @@ export interface SettingsStoreOptions<T extends StorableRecord> {
   parse: (raw: unknown) => T;
   /** ファイル名を決める */
   fileName: (record: T) => string;
+  /** 失敗を伝えるときに使う呼び名。IDだけでは作者にどれか分からない */
+  displayName: (record: T) => string;
 }
 
 export class SettingsStore<T extends StorableRecord> {
@@ -223,7 +232,9 @@ export class SettingsStore<T extends StorableRecord> {
       } catch (error) {
         if (error instanceof AtomicWriteFileError) {
           throw new SettingsStoreError(
-            `「${record.name}」の保存に失敗しました。${error.message}`,
+            `「${this.options.displayName(record)}」の保存に失敗しました。${
+              error.message
+            }`,
             "io_error",
             error.recoveryPaths ?? []
           );
@@ -351,7 +362,7 @@ export class SettingsStore<T extends StorableRecord> {
       ) {
         // 読み込み後に削除された。作者の意図かもしれないので上書きしない
         throw new SettingsStoreError(
-          `「${record.name}」は読み込み後に削除されました。`,
+          `「${this.options.displayName(record)}」は読み込み後に削除されました。`,
           "modified_externally",
           [snapshot.filePath]
         );
@@ -361,7 +372,9 @@ export class SettingsStore<T extends StorableRecord> {
 
     if (hashBytes(current) !== snapshot.hash) {
       throw new SettingsStoreError(
-        `「${record.name}」は読み込み後に変更されました。作者の変更を保護するため保存しませんでした。`,
+        `「${this.options.displayName(
+          record
+        )}」は読み込み後に変更されました。作者の変更を保護するため保存しませんでした。`,
         "modified_externally",
         [snapshot.filePath]
       );

@@ -10,6 +10,7 @@ import {
 } from "../core/textFile";
 import { appendAiActionLog } from "../core/typoIssueHistory";
 import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
+import { parseEpisodeFileName } from "../core/episodeParser";
 import type { TypoCheckIssue } from "./checkTypos";
 import type { AcceptedContradiction as ContradictionIssue } from "../core/contradictionValidation";
 import type { DeviationIssue } from "./checkDeviations";
@@ -202,6 +203,23 @@ export interface ContradictionViewItem {
    */
   canRecheck?: boolean;
   /**
+   * 「無視しました」の代わりに出す言葉。
+   *
+   * **片付いた理由が1つではない**（設計書6.35.4）。「この食い違いは
+   * 矛盾ではない」で見送ったのか、「これは伏線だった」ので台帳へ移したのかは
+   * 別のことである。状態そのものは `dismissed` のまま（＝片付いた）にして、
+   * 理由だけを添える。印を増やすと、片付いたかどうかを見る側が全部の
+   * 印を知っていなければならなくなる。
+   */
+  dismissReason?: string;
+  /**
+   * 「伏線として登録」を出すか（設計書6.35.4）。
+   *
+   * **矛盾にだけ出す。** プロット逸脱は「プロットと本文の食い違い」であって
+   * 「後の展開への示唆」ではないので、伏線の台帳へ入れる意味がない。
+   */
+  canRegisterForeshadow?: boolean;
+  /**
    * 並べる2つの見出し。
    *
    * **矛盾とプロット逸脱で言葉が違う**（設定では／本文では、
@@ -212,6 +230,29 @@ export interface ContradictionViewItem {
   /** 「設定資料を見る」の代わりに何を開くか */
   openTarget: "settings" | "plot";
 }
+
+/**
+ * 矛盾から伏線を作るときに渡すもの（設計書6.35.4）。
+ *
+ * **パネルは伏線の保存を知らない。** 保存の手順は呼び出し側
+ * （`extension.ts` が `features/foreshadows.ts` を繋ぐ）が持ち、
+ * ここは「何を写すか」だけを決める。設定資料の更新で
+ * `applyRecordUpdate` を外から渡しているのと同じ形である。
+ */
+export interface ForeshadowFromContradiction {
+  /** 伏線の短い名 */
+  label: string;
+  /** 何を示唆しているか。矛盾の内容を写す */
+  note: string;
+  /** 張った話数。ファイル名から読めなければ null（推測で埋めない） */
+  chapter: number | null;
+  /** 本文の逐語引用 */
+  quote: string;
+}
+
+export type RegisterForeshadow = (
+  source: ForeshadowFromContradiction
+) => Promise<{ ok: boolean; reason?: string }>;
 
 /**
  * 再チェックが触るところだけを取り出した形（P-23）。
@@ -314,6 +355,8 @@ type IncomingMessage =
   | { type: "dismiss"; id: string }
   | { type: "keepWord"; id: string }
   | { type: "openSettings"; id: string }
+  /** その食い違いは矛盾ではなく伏線だった（設計書6.35.4） */
+  | { type: "registerForeshadow"; id: string }
   /** 作者が本文を手で書き直したあと、その指摘が解消したかを確かめる */
   | { type: "recheck"; id: string }
   | { type: "applyAll" }
@@ -341,6 +384,8 @@ interface CategoryBucket {
    * （dismissIssue が本文の指摘しか探さず、素通りしていた。作者の報告、2026-08-28）
    */
   dismissRecordUpdate?: (id: string) => Promise<{ ok: boolean; reason?: string }>;
+  /** 矛盾を伏線として台帳へ入れる処理（設計書6.35.4）。矛盾の段だけが持つ */
+  registerForeshadow?: RegisterForeshadow;
 }
 
 function emptyBucket(): CategoryBucket {
@@ -415,6 +460,11 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   private dismissRecordUpdate:
     | ((id: string) => Promise<{ ok: boolean; reason?: string }>)
     | undefined;
+  /**
+   * 矛盾を伏線として台帳へ入れる処理（設計書6.35.4）。
+   * **パネルは保存の手順を知らない**ので、呼び出し側から渡してもらう
+   */
+  private registerForeshadow: RegisterForeshadow | undefined;
   private category = "誤字脱字";
   /**
    * 作品ごと・分類ごとの置き場（設計書6.11.3）。
@@ -513,6 +563,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       dismissRecordUpdate?: (
         id: string
       ) => Promise<{ ok: boolean; reason?: string }>;
+      registerForeshadow?: RegisterForeshadow;
     }
   ): void {
     // **表示中の作品の作業を、先に控えへ戻す。** 届いたのがどちらの作品でも通す
@@ -535,6 +586,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     }
     if (contents.dismissRecordUpdate) {
       bucket.dismissRecordUpdate = contents.dismissRecordUpdate;
+    }
+    if (contents.registerForeshadow) {
+      bucket.registerForeshadow = contents.registerForeshadow;
     }
     entry.categories.set(category, bucket);
 
@@ -629,6 +683,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       recordUpdates: this.recordUpdates,
       applyRecordUpdate: this.applyRecordUpdate,
       dismissRecordUpdate: this.dismissRecordUpdate,
+      registerForeshadow: this.registerForeshadow,
     });
   }
 
@@ -644,6 +699,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     this.recordUpdates = bucket.recordUpdates;
     this.applyRecordUpdate = bucket.applyRecordUpdate;
     this.dismissRecordUpdate = bucket.dismissRecordUpdate;
+    this.registerForeshadow = bucket.registerForeshadow;
     this.postItems();
   }
 
@@ -705,7 +761,17 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * **適用の口を持たせない。** 設定と本文のどちらが正しいかは
    * 作者にしか決められないので、見に行く先を出すだけにする。
    */
-  showContradictions(work: WorkEntry, issues: ContradictionIssue[]): void {
+  showContradictions(
+    work: WorkEntry,
+    issues: ContradictionIssue[],
+    /**
+     * 「伏線として登録」を押されたときの保存（設計書6.35.4）。
+     *
+     * **渡されなければボタンを出さない。** 押しても何も起きない口を
+     * 作らないため（「見送る」が黙って素通りしていた失敗と同じ形）。
+     */
+    registerForeshadow?: RegisterForeshadow
+  ): void {
     const contradictions: ContradictionViewItem[] = issues.map((issue, index) => ({
       id: `c:${issue.chunkHash}:${issue.line}:${index}`,
       filePath: issue.filePath,
@@ -719,11 +785,14 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       note: issue.note,
       confidence: issue.confidence,
       status: "pending",
+      // **矛盾が実は伏線だった、という道を残す**（設計書6.35.4）。
+      // プロット逸脱には付けない（`showDeviations` を参照）
+      canRegisterForeshadow: Boolean(registerForeshadow),
       leftLabel: "設定では",
       rightLabel: "本文では",
       openTarget: "settings",
     }));
-    this.replaceContents(work, "矛盾", { contradictions });
+    this.replaceContents(work, "矛盾", { contradictions, registerForeshadow });
   }
 
   /**
@@ -936,6 +1005,65 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   }
 
   /**
+   * その食い違いは矛盾ではなく伏線だった、として台帳へ移す（設計書6.35.4）。
+   *
+   * **作者が押した時点で承認済みなので、その場で保存してよい。**
+   * 検知結果の自動保存は禁じているが、ここは作者の操作そのものである。
+   *
+   * 保存できてから片付ける。**順序を逆にしない**——先に片付けると、
+   * 保存に失敗したときに矛盾も伏線も残らない。
+   */
+  private async registerForeshadowFor(id: string): Promise<void> {
+    const item = this.contradictions.find((entry) => entry.id === id);
+    if (!item || !this.work) return;
+    if (item.status !== "pending") return;
+
+    if (!this.registerForeshadow) {
+      // 押したのに無反応だと「壊れている」としか見えない
+      void vscode.window.showWarningMessage(
+        "伏線の登録が繋がっていません。矛盾検知をやり直してください。"
+      );
+      return;
+    }
+
+    const work = this.work;
+    const outcome = await this.registerForeshadow({
+      label: foreshadowLabelOf(item),
+      note: describeContradiction(item),
+      // ファイル名から話数を読む。読めなければ null のまま（推測で埋めない）
+      chapter: parseEpisodeFileName(item.fileName).chapterStart,
+      quote: item.excerpt,
+    });
+
+    if (!outcome.ok) {
+      void vscode.window.showWarningMessage(
+        `伏線として登録できませんでした。${outcome.reason ?? ""}`.trim()
+      );
+      return;
+    }
+
+    // 片付いたことは「無視」と同じ状態で表す。**理由だけを分ける**
+    item.status = "dismissed";
+    item.dismissReason = "伏線として登録しました";
+    this.postItems();
+
+    await appendAiActionLog(work, {
+      category: "contradiction",
+      // **「無視した」とは別に記録する。** あとで一覧を見た作者が、
+      // 消えた指摘の行方をたどれるようにする
+      action: "foreshadowed",
+      file: item.fileName,
+      line: item.line,
+      target: item.excerpt,
+      suggestion: describeContradiction(item),
+    });
+
+    void vscode.window.showInformationMessage(
+      "伏線として登録しました（伏線の一覧で見られます）。"
+    );
+  }
+
+  /**
    * 照らした相手側を開く。**本文だけを直す道を示さないため。**
    *
    * 矛盾なら設定資料、プロット逸脱ならプロット。
@@ -971,6 +1099,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         return;
       case "openSettings":
         await this.openSettingsFor(message.id);
+        return;
+      case "registerForeshadow":
+        await this.registerForeshadowFor(message.id);
         return;
       case "recheck":
         await this.recheckIssue(message.id);
@@ -1960,6 +2091,24 @@ function describeRecheckNote(
 function describeContradiction(item: ContradictionViewItem): string {
   const compared = `${item.leftLabel}：${item.settingSays}／${item.rightLabel}：${item.textSays}`;
   return item.note ? `${compared}（補足：${item.note}）` : compared;
+}
+
+/** 伏線の短い名に使う長さ。一覧の見出しになるので、長いと折り返す */
+const FORESHADOW_LABEL_MAX = 20;
+
+/**
+ * 矛盾の1件から、伏線の短い名を決める（設計書6.35.4）。
+ *
+ * **本文の側を採る。** 伏線になりうるのは「設定と違うことが書かれている」
+ * その記述のほうであって、設定に書いてある値ではない。
+ * 本文の側が空なら引用へ落ちる（引用は検証済みで必ず入っている）。
+ */
+function foreshadowLabelOf(item: ContradictionViewItem): string {
+  const source = item.textSays.trim() || item.excerpt.trim();
+  if (!source) return "矛盾から登録した伏線";
+  return source.length > FORESHADOW_LABEL_MAX
+    ? `${source.slice(0, FORESHADOW_LABEL_MAX)}…`
+    : source;
 }
 
 /**

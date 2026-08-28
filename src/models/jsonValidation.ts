@@ -37,6 +37,17 @@ export function optionalBoolean(value: unknown, path: string): void {
   if (value !== undefined && typeof value !== "boolean") invalid(path);
 }
 
+/**
+ * 「話数」のように、数字か「不明（null）」しか取らない項目。
+ *
+ * 負の数と小数を弾く。話数に -1 や 3.5 が入ると、並べ替えも
+ * 「第◯話」の表示も静かに崩れる（例外にならないぶん見つけにくい）。
+ */
+export function optionalNullableNumber(value: unknown, path: string): void {
+  if (value === undefined || value === null) return;
+  if (!Number.isSafeInteger(value) || (value as number) < 0) invalid(path);
+}
+
 export function optionalStringArray(value: unknown, path: string): void {
   if (value === undefined) return;
   if (!Array.isArray(value)) invalid(path);

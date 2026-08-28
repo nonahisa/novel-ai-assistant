@@ -35,6 +35,8 @@ const MARKDOWN_ALLOWED = new Set([
   "src/core/plotReverseValidation.ts",
   "src/core/synopsisDoc.ts",
   "src/features/applyPendingUpdates.ts",
+  // 伏線の一覧をMarkdownの文書として開く（設計書6.35.5）
+  "src/core/foreshadowMarkdown.ts",
   // .gitignore に書き込む注釈。Markdownではないが「#」で始まる
   "src/core/workRegistry.ts",
   // MarkdownString（ツールチップ）として渡す

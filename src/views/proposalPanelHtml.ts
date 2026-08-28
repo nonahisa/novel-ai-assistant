@@ -434,7 +434,11 @@ function renderContradiction(item) {
     escapeHtml(item.fileName) + ' ' + item.line + '行目</span>' +
     '<span class="badge cat">' + escapeHtml(item.category) + '</span>' +
     '<span class="badge ' + item.confidence + '">' + CONFIDENCE_LABEL[item.confidence] + '</span>' +
-    (item.status === 'dismissed' ? '<span class="reason">無視しました</span>' : '') +
+    // **片付いた理由は1つではない**（設計書6.35.4）。伏線として登録した
+    // ものは「無視しました」ではない。理由が添えてあればそちらを出す
+    (item.status === 'dismissed'
+      ? '<span class="reason">' + escapeHtml(item.dismissReason || '無視しました') + '</span>'
+      : '') +
     '</div>' +
     '<div class="quote">' + escapeHtml(item.excerpt) + '</div>' +
     '<div class="compare">' +
@@ -448,6 +452,12 @@ function renderContradiction(item) {
         '<button data-action="jump" data-id="' + item.id + '"' + disabled + '>本文を見る</button>' +
         '<button class="secondary" data-action="openSettings" data-id="' + item.id + '"' + disabled + '>' + (item.openTarget === 'plot' ? 'プロットを見る' : '設定資料を見る') + '</button>' +
         '<button class="secondary" data-action="dismiss" data-id="' + item.id + '"' + disabled + '>無視</button>' +
+        // **矛盾ではなく伏線だった、という道**（設計書6.35.4）。
+        // 矛盾検知は「意図した違和感」も食い違いとして拾うので、
+        // そこから伏線の台帳へ移せるようにする。プロット逸脱には出ない
+        (item.canRegisterForeshadow
+          ? '<button class="secondary" data-action="registerForeshadow" data-id="' + item.id + '" title="この食い違いは矛盾ではなく、意図して置いた伏線だった場合に登録します"' + disabled + '>伏線として登録</button>'
+          : '') +
         // **本文を直したあと、食い違いが残っているかを確かめる**（作者の依頼、
         // 2026-08-27）。矛盾には修正案が無いので、直したかどうかは
         // 作者の手元でしか分からない

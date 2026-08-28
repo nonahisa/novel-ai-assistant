@@ -167,6 +167,11 @@ import {
 import { askText, cancelItem } from "./views/dialogs";
 import { manageKeepWords } from "./features/manageKeepWords";
 import {
+  addForeshadowByHand,
+  openForeshadows,
+  registerForeshadowFromContradiction,
+} from "./features/foreshadows";
+import {
   extendMarkdownItWithRuby,
   type MarkdownItLike,
 } from "./core/markdownItRuby";
@@ -737,7 +742,10 @@ export async function activate(
       if (kind === "checkContradictions") {
         const result = await checkContradictions(work, aiRegistry);
         if (!result || result.cancelled) return;
-        proposalPanel.showContradictions(work, result.issues);
+        // 矛盾が実は伏線だったときの逃げ道を添える（設計書6.35.4）
+        proposalPanel.showContradictions(work, result.issues, (source) =>
+          registerForeshadowFromContradiction(work, source)
+        );
         // 検証で消したことは、こちらの入口からでも伝える（設計書6.10.5）
         if (result.verifyNote) {
           void vscode.window.showInformationMessage(
@@ -2299,6 +2307,30 @@ export async function activate(
     )
   );
 
+  // 伏線追跡（設計書6.35）。**この版はAIを使わない**——台帳と一覧、
+  // 手で足す口、矛盾からの転送だけで、自動検知は次の弾で入る
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.openForeshadows",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await openForeshadows(work);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.addForeshadow",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await addForeshadowByHand(work);
+      }
+    )
+  );
+
   context.subscriptions.push(
     registerCommand(
       "novelai.checkTypos",
@@ -2465,7 +2497,10 @@ export async function activate(
         const result = await checkContradictions(work, aiRegistry);
         if (!result || result.cancelled) return;
 
-        proposalPanel.showContradictions(work, result.issues);
+        // 矛盾が実は伏線だったときの逃げ道を添える（設計書6.35.4）
+        proposalPanel.showContradictions(work, result.issues, (source) =>
+          registerForeshadowFromContradiction(work, source)
+        );
 
         const parts = [`指摘 ${result.issues.length}件`];
         if (result.rejectedCount > 0) {
