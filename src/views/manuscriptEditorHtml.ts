@@ -2185,6 +2185,7 @@ body.plain .term { color: inherit; }
     compose.focus();
     composeRestoreCaret({ start: at, end: at });
     composeScheduleHighlight();
+    composeReportEllipsis();
   }
 
   /** 打つ面へ戻す。**実験が転んでも、いままでの書き方は無傷で残る** */
@@ -2280,6 +2281,38 @@ body.plain .term { color: inherit; }
     composeInvalidate();
     composeRestoreCaret(at);
     composeScheduleHighlight();
+    composeReportEllipsis();
+  }
+
+  /**
+   * 三点リーダの組みが**実機で**効いているかを記録する（切り分けの計器）。
+   *
+   * 0.24.13時点で「中央に来ない」の実機報告が続いたが、CSS・組み立てとも
+   * 静的には正しい。作者にDevToolsを開かせずに、span の個数と計算済み
+   * スタイルをログへ出す。原因が特定できたら消してよい。
+   */
+  function composeReportEllipsis() {
+    try {
+      const spans = compose.querySelectorAll(".ellipsis");
+      let style = "（0個）";
+      if (spans.length > 0) {
+        const cs = getComputedStyle(spans[0]);
+        style =
+          "vertical-align=" + cs.verticalAlign +
+          " display=" + cs.display +
+          " writing-mode=" + cs.writingMode +
+          " transform=" + cs.transform;
+      }
+      const under = getComputedStyle(compose).textUnderlinePosition;
+      vscode.postMessage({
+        type: "log",
+        text:
+          "組んで書く：三点リーダ" + spans.length + "個 " + style +
+          " ／ 下線位置=" + under,
+      });
+    } catch (error) {
+      // 計器が本体を壊しては本末転倒。黙って続ける
+    }
   }
 
   compose.addEventListener("input", function () {
