@@ -276,6 +276,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 1,
   },
   {
+    id: "F-28",
+    title: "CRLF原稿の位置ずれと改行の書き換わり",
+    commands: ["novelai.openVertical"],
+    count: 5,
+  },
+  {
     id: "F-27",
     title: "組んで書く（実験）——ルビが組まれたまま打てる面",
     commands: ["novelai.openVertical"],
@@ -350,4 +356,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 451;
+export const PENDING_CHECK_TOTAL = 456;

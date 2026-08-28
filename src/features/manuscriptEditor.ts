@@ -22,6 +22,7 @@ import {
   TERM_LABELS,
 } from "../core/manuscriptRender";
 import { computeMinimalEdit } from "../core/textEdit";
+import { fromLfOffset, fromLfText, toLf, toLfOffset } from "../core/eolSpace";
 import { createEditQueue } from "../core/editQueue";
 import { countChars, formatCount } from "../core/charCount";
 import {
@@ -180,7 +181,10 @@ export class ManuscriptEditorProvider
     );
 
     const send = async (): Promise<void> => {
-      const text = document.getText();
+      // **画面へはLF区切りで渡す**（core/eolSpace.ts）。textareaは値を
+      // LFへ正規化するので、CRLFのまま渡すと本文・用語の位置・組んで書く面の
+      // 安全弁がすべて1行ごとに1文字ずつずれる（実際にずれていた）
+      const text = toLf(document.getText());
       const found = await this.deps.highlighter.indexFor(
         fromUri(document.uri)
       );
@@ -319,17 +323,20 @@ export class ManuscriptEditorProvider
           logLine(`原稿エディタ：${message.text}`);
           break;
 
-        case "chat":
+        case "chat": {
+          // 画面の位置はLF空間。文書の位置へ直してから範囲にする
+          const source = document.getText();
           await this.deps.openChat(
             document,
             message.start >= 0 && message.end > message.start
               ? new vscode.Range(
-                  document.positionAt(message.start),
-                  document.positionAt(message.end)
+                  document.positionAt(fromLfOffset(source, message.start)),
+                  document.positionAt(fromLfOffset(source, message.end))
                 )
               : undefined
           );
           break;
+        }
       }
     });
   }
@@ -341,7 +348,13 @@ export class ManuscriptEditorProvider
     document: vscode.TextDocument,
     next: string
   ): Promise<void> {
-    const edit = computeMinimalEdit(document.getText(), next);
+    // 画面から届く本文はLF区切り。**文書の改行コードへ合わせてから差分を
+    // 取る**（core/eolSpace.ts）。合わせずに差分を取ると、差分の範囲内の
+    // 改行が全部LFへ変わり、最初の1打鍵でCRLFの原稿が書き換わっていた
+    const edit = computeMinimalEdit(
+      document.getText(),
+      fromLfText(next, document.eol === vscode.EndOfLine.CRLF)
+    );
     if (!edit) return;
 
     const change = new vscode.WorkspaceEdit();
@@ -421,8 +434,12 @@ export class ManuscriptEditorProvider
       return;
     }
 
-    let start = message.start;
-    let end = message.end;
+    // 画面の位置はLF空間なので、文書の位置へ直してから使う。
+    // 直さないと、CRLFの原稿では1行につき1文字ずつ後ろを指し、
+    // 下の「今もその文字か」の確認が必ず落ちてルビが振れなかった
+    const original = document.getText();
+    let start = fromLfOffset(original, message.start);
+    let end = fromLfOffset(original, message.end);
     let base = message.text;
 
     if (start === end) {
@@ -433,7 +450,7 @@ export class ManuscriptEditorProvider
         return;
       }
       // ルビは、直前の漢字のまとまりを拾う（普通のエディタと同じ扱い）
-      const before = document.getText().slice(0, start);
+      const before = original.slice(0, start);
       const match = before.match(/[一-鿿々々ヶ]+$/u);
       if (!match) {
         void vscode.window.showInformationMessage(
@@ -485,11 +502,14 @@ export class ManuscriptEditorProvider
     );
     await vscode.workspace.applyEdit(change);
 
-    // 入れたところを選び直す。続けて直したくなることが多い
+    // 入れたところを選び直す。続けて直したくなることが多い。
+    // **画面へ返す位置はLF空間へ戻す**（入れた記法に改行は無いので、
+    // 長さはどちらの空間でも同じ）
+    const lfStart = toLfOffset(document.getText(), start);
     await panel.webview.postMessage({
       type: "select",
-      start,
-      end: start + inserted.length,
+      start: lfStart,
+      end: lfStart + inserted.length,
     });
   }
 
