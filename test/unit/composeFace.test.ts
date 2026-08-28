@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { buildManuscriptEditorHtml } from "../../src/views/manuscriptEditorHtml";
-import { NOTATION_PATTERN } from "../../src/core/manuscriptRender";
+import {
+  NOTATION_PATTERN,
+  NOTATION_RULES,
+  SITE_NOTATION_PATTERN,
+} from "../../src/core/manuscriptRender";
 
 /**
  * 組んで書く（実験）の面（設計書6.34）。
@@ -116,13 +120,16 @@ interface ComposePart {
   reading: string;
 }
 
+/** 記法のモード（.md は curly、.txt は site。設計書6.12） */
+type Mode = "curly" | "site";
+
 interface ComposeApi {
-  composeParts(line: string): ComposePart[];
+  composeParts(line: string, mode?: Mode): ComposePart[];
   composePartsToNotation(parts: ComposePart[]): string;
   composeNormalizeText(value: string): string;
   composeNormalizeNewlines(value: string): string;
-  composeBuildLine(line: string, doc: unknown): FakeNode;
-  composeBuildFragment(value: string, doc: unknown): FakeNode;
+  composeBuildLine(line: string, doc: unknown, mode?: Mode): FakeNode;
+  composeBuildFragment(value: string, doc: unknown, mode?: Mode): FakeNode;
   composeAtoms(root: FakeNode): ComposeAtom[];
   composeDomToNotation(root: FakeNode): string;
   composeOffsetToPoint(
@@ -150,13 +157,13 @@ const api = new Function(
 )() as ComposeApi;
 
 /** 記法から組み立てたDOM（偽） */
-function build(value: string): FakeNode {
-  return api.composeBuildFragment(value, fakeDoc);
+function build(value: string, mode?: Mode): FakeNode {
+  return api.composeBuildFragment(value, fakeDoc, mode);
 }
 
 /** 記法→DOM→記法 */
-function round(value: string): string {
-  return api.composeDomToNotation(build(value));
+function round(value: string, mode?: Mode): string {
+  return api.composeDomToNotation(build(value, mode));
 }
 
 describe("切り出し", () => {
@@ -168,9 +175,15 @@ describe("切り出し", () => {
   /**
    * **記法の定義は core/manuscriptRender.ts の1つだけ。** 画面側へは
    * その文字列がそのまま埋め込まれる（写しを置くと片方だけが直る）。
+   *
+   * **モードのぶんだけ見張る。** `.txt`（投稿サイトの記法）を足したとき、
+   * 片方の埋め込みを忘れると、その原稿だけ記法が生のまま出る。
    */
   it("記法の定義は、読む面と同じものが埋め込まれている", () => {
     expect(source).toContain(JSON.stringify(NOTATION_PATTERN));
+    expect(source).toContain(JSON.stringify(SITE_NOTATION_PATTERN));
+    // 捕獲の番号まで含めて、丸ごと同じものが渡っている
+    expect(source).toContain(JSON.stringify(NOTATION_RULES));
   });
 });
 
@@ -264,6 +277,237 @@ describe("記法→DOM→記法 が完全に一致する", () => {
   it("扱えない文字（U+00A0）は、一致しないと分かる", () => {
     expect(round("あ い")).not.toBe("あ い");
     expect(round("あ い")).toBe("あ い");
+  });
+});
+
+/**
+ * `.txt` の原稿（投稿サイトの記法。設計書6.12）。
+ *
+ * **`.txt` は投稿サイトから持ってきた形をそのまま保つ**決まりで、この面から
+ * ルビを振ることはできない（拡張機能側が断る）。それでも**打つたびに本文を
+ * 作り直す**のはこの面の作りそのものなので、往復が一致しなければ、
+ * ルビを振らなくても**本文が書き換わる**。curly と同じだけ並べて確かめる。
+ *
+ * **`fromSiteNotation`（波括弧の記法への変換）は、この経路では絶対に
+ * 呼ばない。** 変換した文字列を data-src に入れると、直列化した時点で
+ * 原稿が別の記法へ書き換わる。
+ */
+describe("投稿サイトの記法でも、記法→DOM→記法 が完全に一致する", () => {
+  const cases = [
+    "",
+    "あ",
+    "\n",
+    "あ\nい",
+    // 縦線ありのルビ
+    "｜漢字《かんじ》",
+    "あ｜漢字《かんじ》い",
+    "｜漢字《かんじ》あ",
+    "あ｜漢字《かんじ》",
+    "｜漢字《かんじ》｜名前《なまえ》",
+    // 半角の縦線も通る（どのサイトも両方を受ける）
+    "半角|漢字《かんじ》",
+    // 縦線なしのルビ（漢字の直後だけ）
+    "漢字《かんじ》",
+    "あ漢字《かんじ》い",
+    "漢字《かんじ》名前《なまえ》",
+    "漢字《かんじ》｜名前《なまえ》",
+    // 傍点（カクヨム・ネオページ）
+    "《《強調》》",
+    "あ《《強調》》い",
+    "《《強調》》《《再度》》",
+    "｜漢字《かんじ》と《《強調》》",
+    "《《強調》》と漢字《かんじ》",
+    // **漢字の直後の傍点。** ルビとして読むと親文字「彼」・読み「《強調」に化ける
+    "彼《《強調》》",
+    "｜彼《《強調》》",
+    // 読み仮名が空。**記法のまま平文で残す**（書きかけを消さない）
+    "｜漢字《》",
+    "漢字《》",
+    "｜漢字《 》",
+    // 記法に見えるが、規則に当たらないもの
+    "《》",
+    "｜《》",
+    "《序章》がはじまる",
+    "｜",
+    "《",
+    "》《",
+    "あ》》",
+    // 閉じ忘れ
+    "｜漢字《かん",
+    "《《あ》",
+    "《《あ",
+    "漢字《かんじ",
+    // 傍点の中の《》らしきもの
+    "《《強調》》》",
+    "《《《強調》》",
+    // なろう・アルファポリスの、ルビで代用する傍点（ルビとして組まれる）
+    "｜強調《・・》",
+    // 空白・全角空白・タブ
+    "　あ",
+    "あ  い",
+    "あ\tい",
+    // 三点リーダとの混在（素の span になる経路）
+    "…｜漢字《かんじ》…",
+    "そう……と彼女《かのじょ》は言った",
+    "《《ただ》》……",
+    // 実データに近い形（カクヨム）
+    "「｜灯《あかり》」と、《《はっきり》》言った。\n\n　だが返事は無い。",
+    "第一話\n\n　｜白瀬《しらせ》｜澪《みお》は《《ただ》》立っていた。\n",
+    "　その日、彼女《かのじょ》は｜図書塔《としょとう》へ向かった。\n" +
+      "　《《誰も》》知らない道を、｜灯《あかり》だけが知っていた。",
+  ];
+
+  it("すべての場合で、1文字も変わらない", () => {
+    for (const value of cases) {
+      expect(round(value, "site"), JSON.stringify(value)).toBe(value);
+    }
+  });
+
+  it("行の数が変わらない", () => {
+    for (const value of cases) {
+      expect(round(value, "site").split("\n")).toHaveLength(
+        value.split("\n").length
+      );
+    }
+  });
+
+  /**
+   * **モードは混ぜない**（設計書6.12）。`.txt` でルビを振ることはできない
+   * ので、`.txt` の中の波括弧を記法として畳むと、**外せない印**になる。
+   */
+  it("モードを取り違えない", () => {
+    // .txt の中の波括弧は平文（かたまりを1つも作らない）
+    const site = api.composeAtoms(build("{漢字|かんじ}と{{強調}}", "site"));
+    expect(site.filter((atom) => atom.kind === "chunk")).toEqual([]);
+    expect(round("{漢字|かんじ}と{{強調}}", "site")).toBe(
+      "{漢字|かんじ}と{{強調}}"
+    );
+
+    // .md の中の《》は平文
+    const curly = api.composeAtoms(build("｜漢字《かんじ》と《《強調》》"));
+    expect(curly.filter((atom) => atom.kind === "chunk")).toEqual([]);
+    expect(round("｜漢字《かんじ》と《《強調》》")).toBe(
+      "｜漢字《かんじ》と《《強調》》"
+    );
+  });
+
+  /** 知らないモードでも、本文を壊さない側（今までの記法）へ倒す */
+  it("モードを渡さなければ、いままでの記法で組む", () => {
+    expect(round("{漢字|かんじ}")).toBe("{漢字|かんじ}");
+    expect(api.composeParts("{漢字|かんじ}")[0].kind).toBe("ruby");
+  });
+});
+
+describe("投稿サイトの記法の部品とDOM", () => {
+  /** **かたまりが持つのは、記法そのもの**（縦線を含む） */
+  it("縦線ありのルビは、縦線ごと1つのかたまりになる", () => {
+    const parts = api.composeParts("あ｜漢字《かんじ》", "site");
+    expect(parts).toHaveLength(2);
+    expect(parts[1]).toEqual({
+      kind: "ruby",
+      src: "｜漢字《かんじ》",
+      base: "漢字",
+      reading: "かんじ",
+    });
+  });
+
+  it("縦線なしのルビも、同じ形の部品になる", () => {
+    expect(api.composeParts("漢字《かんじ》", "site")[0]).toEqual({
+      kind: "ruby",
+      src: "漢字《かんじ》",
+      base: "漢字",
+      reading: "かんじ",
+    });
+  });
+
+  it("傍点は中の文字だけを持つ", () => {
+    expect(api.composeParts("《《強調》》", "site")[0]).toEqual({
+      kind: "emphasis",
+      src: "《《強調》》",
+      base: "強調",
+      reading: "",
+    });
+  });
+
+  it("読みの無いルビは平文（記法のまま）", () => {
+    expect(api.composeParts("｜漢字《》", "site")).toEqual([
+      { kind: "text", src: "｜漢字《》", base: "｜漢字《》", reading: "" },
+    ]);
+  });
+
+  it("部品を並べ直すと元の行になる", () => {
+    for (const line of [
+      "あ｜漢字《かんじ》い《《強調》》う",
+      "漢字《》のこり",
+      "ただの文",
+      "",
+    ]) {
+      expect(api.composePartsToNotation(api.composeParts(line, "site"))).toBe(
+        line
+      );
+    }
+  });
+
+  /** 出す形は `.md` と同じ（同じ本文が面によって違って見えないこと） */
+  it("ルビ・傍点は編集不可のかたまりで、記法そのものを持つ", () => {
+    const line = build("あ｜漢字《かんじ》い《《強調》》", "site").childNodes[0];
+    const ruby = line.childNodes[1];
+    expect(ruby.nodeName).toBe("RUBY");
+    expect(ruby.getAttribute?.("contenteditable")).toBe("false");
+    // **元の文字列そのまま**（波括弧の記法へ変換したものを入れない）
+    expect(ruby.getAttribute?.("data-src")).toBe("｜漢字《かんじ》");
+    expect(ruby.childNodes[0].nodeValue).toBe("漢字");
+    expect(ruby.childNodes[1].childNodes[0].nodeValue).toBe("かんじ");
+
+    const emphasis = line.childNodes[3];
+    expect(emphasis.nodeName).toBe("SPAN");
+    expect(emphasis.getAttribute?.("class")).toBe("emphasis");
+    expect(emphasis.getAttribute?.("data-src")).toBe("《《強調》》");
+    expect(emphasis.childNodes[0].nodeValue).toBe("強調");
+  });
+
+  /** かたまりは**記法の文字数ぶん**を占める（縦線もカーソルの通り道になる） */
+  it("かたまりは、記法の文字数ぶんを占める", () => {
+    const atoms = api.composeAtoms(build("あ｜漢字《かんじ》い", "site"));
+    const chunks = atoms.filter((atom) => atom.kind === "chunk");
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].text).toBe("｜漢字《かんじ》");
+    expect(chunks[0].start).toBe(1);
+    expect(chunks[0].end).toBe(1 + "｜漢字《かんじ》".length);
+  });
+
+  /** 三点リーダの扱いは、記法によらず同じ */
+  it("三点リーダは、どちらの記法でも素の span", () => {
+    const line = build("あ……い", "site").childNodes[0];
+    expect(line.childNodes).toHaveLength(4);
+    expect(line.childNodes[1].getAttribute?.("class")).toBe("ellipsis");
+    expect(line.childNodes[1].getAttribute?.("data-src")).toBeNull();
+  });
+
+  /**
+   * **位置の往復。** カーソルの置き直しと用語の色付けがここに乗っている。
+   */
+  it("すべての位置で、記法→DOM→記法 が同じ位置に戻る", () => {
+    for (const sample of [
+      "あ｜漢字《かんじ》い",
+      "漢字《かんじ》",
+      "《《強調》》\n漢字《かんじ》",
+      "あ……｜漢字《かんじ》",
+    ]) {
+      const atoms = api.composeAtoms(build(sample, "site"));
+      for (let offset = 0; offset <= sample.length; offset++) {
+        const point = api.composeOffsetToPoint(atoms, offset);
+        expect(point, sample + " の " + offset).not.toBeNull();
+        const back = api.composePointToOffset(atoms, point!.node, point!.offset);
+        const chunk = atoms.find(
+          (atom) =>
+            atom.kind === "chunk" && offset > atom.start && offset < atom.end
+        );
+        expect(back, sample + " の " + offset).toBe(
+          chunk ? chunk.end : offset
+        );
+      }
+    }
   });
 });
 

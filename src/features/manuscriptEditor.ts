@@ -17,6 +17,7 @@ import {
 import { buildManuscriptEditorHtml } from "../views/manuscriptEditorHtml";
 import {
   collectTermSpans,
+  notationModeFor,
   renderManuscript,
   renderTermMarks,
 } from "../core/manuscriptRender";
@@ -230,6 +231,18 @@ export class ManuscriptEditorProvider
       panel.webview.cspSource
     );
 
+    /**
+     * この原稿の記法（設計書6.12）。
+     *
+     * `.txt` は投稿サイトの形をそのまま保つ決まりなので、ルビも傍点も
+     * `｜漢字《かんじ》` `《《強調》》` で書かれている。**記法のまま
+     * 見せるのではなく、こちらで組んで見せる**（作者の依頼、2026-08-29
+     * 「テキストファイルもルビなどを再現して、同様に表示できるように」）。
+     *
+     * ファイルの名前で決まるので、開いている間は変わらない。
+     */
+    const notation = notationModeFor(fromUri(document.uri));
+
     const send = async (): Promise<void> => {
       // **画面へはLF区切りで渡す**（core/eolSpace.ts）。textareaは値を
       // LFへ正規化するので、CRLFのまま渡すと本文・用語の位置・組んで書く面の
@@ -242,7 +255,9 @@ export class ManuscriptEditorProvider
       await panel.webview.postMessage({
         type: "update",
         text,
-        html: renderManuscript(text, index),
+        // **組んで書く面も、この記法で組む**（画面側に写しを持たせない）
+        notation,
+        html: renderManuscript(text, index, notation),
         // **打つ面に重ねる用語の色**（設計書6.25.6）。
         // 打つ面は textarea なので、中の一部だけを飾れない。
         // 同じ本文を重ねて、用語のところだけ色を付ける（それ以外は透明）

@@ -68,6 +68,30 @@ const EMPHASIS_KAKUYOMU = /《《([^《》\r\n]+)》》/g;
  */
 const EMPHASIS_AS_RUBY = /[|｜]([^|｜《》\r\n]+)《([・･]+)》/g;
 
+/*
+ * ## 記法を、正規表現の**文字列**としても配る
+ *
+ * 原稿エディタは `.txt` の本文を、この記法のまま組んで見せる
+ * （設計書6.12・6.25）。読む面・印刷用は `import` できるが、
+ * **組んで書く面のJSは webview のテンプレート文字列の中にあって
+ * `import` が効かない**。あちらへは文字列を埋め込むしかない。
+ *
+ * そこで、上の正規表現から `source`（本体の文字列）を取り出して配る。
+ * **写しを書かない**——同じ規則を2か所に書けば、片方だけが直る日が
+ * 必ず来る（`core/manuscriptRender.ts` の `NOTATION_RULES` が仲介する）。
+ *
+ * 捕獲の番号まで含めて意味があるので、**組み合わせるときは順番を変えない**。
+ */
+
+/** `｜漢字《かんじ》`。捕獲は［親文字, 読み］の2つ */
+export const SITE_RUBY_BAR_SOURCE = SITE_BAR.source;
+
+/** `漢字《かんじ》`（縦線なし）。捕獲は［親文字, 読み］の2つ */
+export const SITE_RUBY_BARE_SOURCE = SITE_BARE.source;
+
+/** `《《強調》》`（カクヨム・ネオページ）。捕獲は［中の文字］の1つ */
+export const SITE_EMPHASIS_SOURCE = EMPHASIS_KAKUYOMU.source;
+
 /** 傍点の代わりに使うルビの読み（文字数ぶんの中黒） */
 function dotsFor(base: string): string {
   return "・".repeat(Array.from(base).length);

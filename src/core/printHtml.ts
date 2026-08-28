@@ -1,4 +1,8 @@
-import { escapeHtml, tokenizeLine } from "./manuscriptRender";
+import {
+  escapeHtml,
+  tokenizeLine,
+  type NotationMode,
+} from "./manuscriptRender";
 
 /**
  * 印刷用に組版したHTMLを作る（PDF出力のもと）。
@@ -100,6 +104,15 @@ export interface PrintEpisode {
   heading: string;
   /** 本文。ルビ・傍点の記法はそのまま渡す（ここで組む） */
   body: string;
+  /**
+   * その話の記法（`core/manuscriptRender.ts` の `notationModeFor`）。
+   *
+   * **話ごとに持たせる。** 1つの作品に `.md` と `.txt` が混ざることがあり
+   * （投稿サイトからDLした話と、こちらで書き足した話）、作品でひとまとめに
+   * すると片方の記法が生のまま紙に出る。**省略できないようにしてある**
+   * ——新しく呼ぶ人に、どちらなのかを必ず決めさせるため。
+   */
+  notation: NotationMode;
 }
 
 export interface PrintHtmlInput {
@@ -147,7 +160,7 @@ function renderEpisode(episode: PrintEpisode): string {
   return [
     '<section class="episode">',
     ...(heading ? [`<h2 class="episode-heading">${heading}</h2>`] : []),
-    ...renderBody(episode.body),
+    ...renderBody(episode.body, episode.notation),
     "</section>",
   ].join("\n");
 }
@@ -162,7 +175,7 @@ function renderEpisode(episode: PrintEpisode): string {
  * あいだを空けないので（字下げで見分ける）、空行を捨ててしまうと
  * 場面の切り替わりが消える。空行のあとの段落にだけ空きを付ける。
  */
-function renderBody(body: string): string[] {
+function renderBody(body: string, notation: NotationMode): string[] {
   const paragraphs: string[] = [];
   let afterBlank = false;
 
@@ -173,7 +186,7 @@ function renderBody(body: string): string[] {
     }
     // 先頭の空きは、扉との境目で既に付いている
     const gap = afterBlank && paragraphs.length > 0 ? ' class="gap"' : "";
-    paragraphs.push(`<p${gap}>${renderInline(line)}</p>`);
+    paragraphs.push(`<p${gap}>${renderInline(line, notation)}</p>`);
     afterBlank = false;
   }
   return paragraphs;
@@ -185,8 +198,8 @@ function renderBody(body: string): string[] {
  * **どの経路も `escapeHtml` を通る。** ここを1つでも抜かすと、本文に
  * 書いた記号がタグとして読まれる。
  */
-function renderInline(line: string): string {
-  return tokenizeLine(line)
+function renderInline(line: string, notation: NotationMode): string {
+  return tokenizeLine(line, notation)
     .map((token) => {
       if (token.kind === "ruby") {
         return `<ruby>${escapeHtml(token.base)}<rt>${escapeHtml(

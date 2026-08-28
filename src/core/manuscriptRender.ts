@@ -1,3 +1,8 @@
+import {
+  SITE_EMPHASIS_SOURCE,
+  SITE_RUBY_BARE_SOURCE,
+  SITE_RUBY_BAR_SOURCE,
+} from "./ruby";
 import { TermIndex, type TermKind } from "./termIndex";
 
 /**
@@ -29,7 +34,36 @@ type Token =
   | { kind: "emphasis"; text: string };
 
 /**
- * ルビ・傍点の記法。**この1つを唯一の定義にする。**
+ * 原稿がどちらの記法で書かれているか（設計書6.12）。
+ *
+ * - `curly` … 拡張機能の記法 `{漢字|かんじ}` `{{強調}}`（`.md`）
+ * - `site`  … 投稿サイトの記法 `｜漢字《かんじ》` `《《強調》》`（`.txt`）
+ *
+ * **混ぜない。** `.md` の中の `《》` は組まないし、`.txt` の中の `{}` も
+ * 組まない。`.txt` は投稿サイトから持ってきた形をそのまま保つ決まりで、
+ * ルビを振る操作は `.md` 限定である。片方の面だけが両方を解釈すると、
+ * 「振れないのに消える」記法が生まれる。
+ */
+export type NotationMode = "curly" | "site";
+
+/**
+ * 1つのモードの記法。
+ *
+ * **捕獲の番号で意味を決める。** モードによって規則の数が違う（site は
+ * 縦線ありと縦線なしの2通りのルビを持つ）ので、`match[2]` が親文字だと
+ * 決め打つことができない。どの番号が何なのかを、規則と一緒に持たせる。
+ */
+export interface NotationRules {
+  /** 正規表現の本体（`g` を付けて使う） */
+  pattern: string;
+  /** 傍点の中の文字が入る捕獲番号（先に値のあるものを使う） */
+  emphasis: number[];
+  /** ルビの［親文字, 読み］の捕獲番号（先に値のあるものを使う） */
+  ruby: Array<[number, number]>;
+}
+
+/**
+ * 拡張機能の記法。**この1つを唯一の定義にする。**
  *
  * **傍点を先に見る。** `{{強調}}` はルビの規則にも当たってしまうため、
  * 後回しにすると `{強調}` というルビ（読み仮名なし）に化ける。
@@ -41,29 +75,90 @@ type Token =
 export const NOTATION_PATTERN =
   "\\{\\{([^{}\\r\\n]+)\\}\\}|\\{([^{}|\\r\\n]+)\\|([^{}|\\r\\n]*)\\}";
 
-const TOKEN = new RegExp(NOTATION_PATTERN, "g");
+/**
+ * 投稿サイトの記法。**規則そのものは `core/ruby.ts` が持つ**（写さない）。
+ *
+ * 並べる順番に意味がある。
+ *
+ * 1. 傍点 `《《強調》》` … `彼《《強調》》` のような並びを、縦線なしのルビ
+ *    （親文字「彼」・読み「《強調」）と読み違えないように、いちばん先に見る
+ * 2. 縦線ありのルビ `｜漢字《かんじ》` … 先に縦線なしを当てると、縦線が
+ *    置いてけぼりになって本文へ `｜` だけが残る
+ * 3. 縦線なしのルビ `漢字《かんじ》`
+ *
+ * `fromSiteNotation` が置換をこの順で行っているのと同じ理由である。
+ */
+export const SITE_NOTATION_PATTERN = [
+  SITE_EMPHASIS_SOURCE,
+  SITE_RUBY_BAR_SOURCE,
+  SITE_RUBY_BARE_SOURCE,
+].join("|");
 
-export function tokenizeLine(line: string): Token[] {
+/** モードごとの記法。**画面側JSへはこれを丸ごと埋め込む** */
+export const NOTATION_RULES: Record<NotationMode, NotationRules> = {
+  curly: { pattern: NOTATION_PATTERN, emphasis: [1], ruby: [[2, 3]] },
+  site: {
+    pattern: SITE_NOTATION_PATTERN,
+    emphasis: [1],
+    ruby: [
+      [2, 3],
+      [4, 5],
+    ],
+  },
+};
+
+/**
+ * そのファイルの記法。
+ *
+ * **`.md` だけが拡張機能の記法**である。判定を「ルビを振る」の可否
+ * （`features/manuscriptEditor.ts` の `insertRuby`）と同じにしておく
+ * ——振れる面と組める面がずれると、振ったのに組まれない原稿が出る。
+ */
+export function notationModeFor(fileName: string): NotationMode {
+  return fileName.toLowerCase().endsWith(".md") ? "curly" : "site";
+}
+
+/** モードごとに1つだけ作って使い回す（行ごとに作り直すと本文の長さで効く） */
+const TOKENS: Record<NotationMode, RegExp> = {
+  curly: new RegExp(NOTATION_RULES.curly.pattern, "g"),
+  site: new RegExp(NOTATION_RULES.site.pattern, "g"),
+};
+
+/** 当たった一致を、部品1つへ。**本文は何があっても落とさない** */
+function tokenFor(match: RegExpMatchArray, rules: NotationRules): Token {
+  for (const at of rules.emphasis) {
+    const text = match[at];
+    if (text !== undefined) return { kind: "emphasis", text };
+  }
+  for (const [baseAt, readingAt] of rules.ruby) {
+    const base = match[baseAt];
+    if (base === undefined) continue;
+    // 読み仮名が空の `{漢字|}`（`｜漢字《》`）は、ルビとして出しても読めない。
+    // **本文は消さずに平文へ戻す**（作者が書きかけの可能性がある）
+    const reading = match[readingAt] ?? "";
+    return reading.trim()
+      ? { kind: "ruby", base, reading }
+      : { kind: "plain", text: base };
+  }
+  // どの規則にも当たらない一致は作っていないが、出たとしても字は消さない
+  return { kind: "plain", text: match[0] };
+}
+
+export function tokenizeLine(
+  line: string,
+  mode: NotationMode = "curly"
+): Token[] {
+  const rules = NOTATION_RULES[mode];
+  const token = TOKENS[mode];
   const tokens: Token[] = [];
   let last = 0;
-  TOKEN.lastIndex = 0;
-  for (const match of line.matchAll(TOKEN)) {
+  token.lastIndex = 0;
+  for (const match of line.matchAll(token)) {
     const start = match.index ?? 0;
     if (start > last) {
       tokens.push({ kind: "plain", text: line.slice(last, start) });
     }
-    if (match[1] !== undefined) {
-      tokens.push({ kind: "emphasis", text: match[1] });
-    } else {
-      // 読み仮名が空の `{漢字|}` は、ルビとして出しても読めない。
-      // **本文は消さずに平文へ戻す**（作者が書きかけの可能性がある）
-      const reading = match[3] ?? "";
-      if (reading.trim()) {
-        tokens.push({ kind: "ruby", base: match[2], reading });
-      } else {
-        tokens.push({ kind: "plain", text: match[2] });
-      }
-    }
+    tokens.push(tokenFor(match, rules));
     last = start + match[0].length;
   }
   if (last < line.length) tokens.push({ kind: "plain", text: line.slice(last) });
@@ -133,11 +228,15 @@ function markTerms(text: string, index: TermIndex | undefined): string {
 }
 
 /** 1行ぶんのHTML。空行は高さを保つために `<br>` を入れる */
-export function renderLine(line: string, index?: TermIndex): string {
+export function renderLine(
+  line: string,
+  index?: TermIndex,
+  mode: NotationMode = "curly"
+): string {
   if (line.length === 0) return "<br>";
 
   let html = "";
-  for (const token of tokenizeLine(line)) {
+  for (const token of tokenizeLine(line, mode)) {
     switch (token.kind) {
       case "plain":
         html += markTerms(token.text, index);
@@ -163,13 +262,19 @@ export function renderLine(line: string, index?: TermIndex): string {
  * **1行を1つの段落にする。** 小説の本文は改行が意味を持つ（会話の切れ目、
  * 場面の間）。Markdown の規則どおりに空行までを1段落へ畳むと、作者が
  * 置いた改行が消えて別の文章になる。
+ *
+ * @param mode 記法（`.txt` は投稿サイトの記法で組む。`notationModeFor`）
  */
-export function renderManuscript(text: string, index?: TermIndex): string {
+export function renderManuscript(
+  text: string,
+  index?: TermIndex,
+  mode: NotationMode = "curly"
+): string {
   const lines = text.split(/\r\n|\r|\n/);
   return lines
     .map(
       (line, i) =>
-        `<p class="line" data-line="${i}">${renderLine(line, index)}</p>`
+        `<p class="line" data-line="${i}">${renderLine(line, index, mode)}</p>`
     )
     .join("\n");
 }

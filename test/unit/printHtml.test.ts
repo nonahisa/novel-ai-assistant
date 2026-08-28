@@ -6,6 +6,7 @@ import {
   type PrintPreset,
 } from "../../src/core/printHtml";
 import { timestampedFileNameCandidates } from "../../src/core/timestampedFileName";
+import type { NotationMode } from "../../src/core/manuscriptRender";
 
 /**
  * 印刷用HTML（PDF出力のもと）。
@@ -19,11 +20,12 @@ import { timestampedFileNameCandidates } from "../../src/core/timestampedFileNam
 function html(
   body: string,
   preset: PrintPreset = "bunko-vertical",
-  workTitle = "銀の航路"
+  workTitle = "銀の航路",
+  notation: NotationMode = "curly"
 ): string {
   return buildPrintHtml({
     workTitle,
-    episodes: [{ heading: "第1話　夜の駅", body }],
+    episodes: [{ heading: "第1話　夜の駅", body, notation }],
     preset,
   });
 }
@@ -85,6 +87,57 @@ describe("記法を組む", () => {
   });
 });
 
+/**
+ * `.txt` の話（設計書6.12）。
+ *
+ * **1つの作品に `.md` と `.txt` が混ざる。** 投稿サイトからDLした話と、
+ * こちらで書き足した話が並ぶためで、作品でひとまとめに決めると
+ * 片方の記法が生のまま紙に出る。**話ごとに記法を渡す。**
+ */
+describe("投稿サイトの記法の話も組む", () => {
+  function site(body: string): string {
+    return html(body, "bunko-vertical", "銀の航路", "site");
+  }
+
+  test("縦線ありのルビは <ruby> になる", () => {
+    expect(site("｜朝《あさ》の駅")).toContain("<ruby>朝<rt>あさ</rt></ruby>の駅");
+  });
+
+  test("縦線なしのルビも組む", () => {
+    expect(site("朝《あさ》の駅")).toContain("<ruby>朝<rt>あさ</rt></ruby>の駅");
+  });
+
+  test("カクヨムの傍点は圏点の印になる", () => {
+    expect(site("それは《《大事》》だ")).toContain(
+      '<span class="emphasis">大事</span>'
+    );
+  });
+
+  test("話ごとに記法が違っても、それぞれの形で組む", () => {
+    // **ここを取り違えると、片方の記法が生のまま紙に出る**
+    const out = buildPrintHtml({
+      workTitle: "銀の航路",
+      episodes: [
+        { heading: "第1話", body: "｜朝《あさ》。", notation: "site" },
+        { heading: "第2話", body: "{夜|よる}。", notation: "curly" },
+      ],
+      preset: "a5-vertical",
+    });
+
+    expect(out).toContain("<ruby>朝<rt>あさ</rt></ruby>");
+    expect(out).toContain("<ruby>夜<rt>よる</rt></ruby>");
+    // 相手の記法は、そのまま文字として出る（勝手に組まない）
+    expect(out).not.toContain("｜朝");
+    expect(out).not.toContain("{夜|よる}");
+  });
+
+  test("記法を取り違えない", () => {
+    // .txt の中の波括弧は平文、.md の中の《》は平文
+    expect(site("{朝|あさ}の駅")).toContain("{朝|あさ}の駅");
+    expect(html("｜朝《あさ》の駅")).toContain("｜朝《あさ》の駅");
+  });
+});
+
 describe("紙の形", () => {
   test("扉に作品名が入り、そこで改ページする", () => {
     const out = html("本文");
@@ -97,8 +150,8 @@ describe("紙の形", () => {
     const out = buildPrintHtml({
       workTitle: "銀の航路",
       episodes: [
-        { heading: "第1話", body: "一。" },
-        { heading: "第2話", body: "二。" },
+        { heading: "第1話", body: "一。", notation: "curly" },
+        { heading: "第2話", body: "二。", notation: "curly" },
       ],
       preset: "a5-vertical",
     });

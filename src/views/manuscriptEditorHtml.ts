@@ -38,7 +38,7 @@
  */
 
 import { MANUSCRIPT_FONTS } from "../core/manuscriptFonts";
-import { NOTATION_PATTERN } from "../core/manuscriptRender";
+import { NOTATION_RULES } from "../core/manuscriptRender";
 
 /**
  * 測る書体の名前。
@@ -826,10 +826,14 @@ body.plain .term { color: inherit; }
     scheduleSync(true);
   });
 
-  // 打つ面と裏地の見えている場所を合わせる。**ずれると色が別の字に付く**
-  write.addEventListener("scroll", function () {
+  /** 見えている場所を、打つ面から目印へ写す。**ずれると色が別の字に付く** */
+  function syncMarksScroll() {
     marks.scrollTop = write.scrollTop;
     marks.scrollLeft = write.scrollLeft;
+  }
+
+  write.addEventListener("scroll", function () {
+    syncMarksScroll();
     /*
       並べているときは、組み上がりの側も一緒に動かす（作者の要望、2026-08-28）。
       **合わせるのは書く→読むの一方向だけ。** 逆も繋ぐと、読み返すために
@@ -837,6 +841,16 @@ body.plain .term { color: inherit; }
     */
     scheduleSync(false);
   });
+
+  /*
+    **止まったところで、もう一度写す。** scroll の知らせは間引かれることが
+    あり（慣性のある動き・ホイールの連打）、最後の1回を取りこぼすと目印だけが
+    半端な位置で止まる。**この知らせを持たない環境では、いままでどおり**
+    ——無くても scroll のたびに写しているので、取りこぼしたときだけ効く。
+  */
+  if ("onscrollend" in write) {
+    write.addEventListener("scrollend", syncMarksScroll);
+  }
 
   let composing = false;
   write.addEventListener("compositionstart", function () { composing = true; });
@@ -902,13 +916,6 @@ body.plain .term { color: inherit; }
   }
 
   /**
-   * 目印を、いまの本文と一致するときだけ出す。
-   *
-   * 一致しないまま出すと、古い位置に塗られて宙に浮く。一致しない場合は
-   * 隠したままでよい——本文が変わった直後なら新しい update が向かっているし、
-   * 変換待ちなら flushPending のあとにもう一度ここを通る。
-   */
-  /**
    * 鏡の描ける幅を、打つ面の実測に合わせる。
    *
    * 打つ面には**スクロールバーがあり、その分だけ本文の幅が狭い**。
@@ -944,18 +951,38 @@ body.plain .term { color: inherit; }
     alignTimer = requestAnimationFrame(function () {
       alignTimer = null;
       alignMarksBox();
-      marks.scrollTop = write.scrollTop;
-      marks.scrollLeft = write.scrollLeft;
+      syncMarksScroll();
     });
   }
 
+  /**
+   * 目印を、いまの本文と一致するときだけ出す。
+   *
+   * ## 一致しないときは、必ず隠す
+   *
+   * 作者の実機報告（2026-08-29）「スクロールされるとたまに文字がズレます」。
+   * 目印の中身は、打った直後から新しいものが届くまで（往復で120ミリ秒＋）
+   * **古い本文のまま**である。0.24.11までは背景の淡い塗りだったので
+   * 目立たなかったが、**0.24.12で文字色にしたため、古い位置に色の付いた字が
+   * そのまま描かれる**ようになった。動かした拍子にそれが見えると、
+   * 「字がズレた」「二重に見える」として読める。
+   *
+   * ここは長らく**当てるときの照合しか持っていなかった**（一致しなければ
+   * 何もせずに戻る）ので、いったん出したものが古くなっても隠す道が無かった。
+   * **一致しないと分かった時点で隠す。**
+   *
+   * 打っている間は色が一瞬（往復のあいだ）消えるが、**ズレた字が見えるより
+   * 軽い。** 色は「その語が何か」を教えるためのもので、位置が違えば
+   * 教える相手を間違えている。
+   */
   function applyMarksIfMatch() {
-    if (!latestMarks) return;
-    if (latestMarks.forText !== write.value) return;
+    if (!latestMarks || latestMarks.forText !== write.value) {
+      marks.classList.add("stale");
+      return;
+    }
     alignMarksBox();
     marks.innerHTML = latestMarks.html;
-    marks.scrollTop = write.scrollTop;
-    marks.scrollLeft = write.scrollLeft;
+    syncMarksScroll();
     marks.classList.remove("stale");
   }
 
@@ -1628,8 +1655,21 @@ body.plain .term { color: inherit; }
     const message = event.data;
     if (message.type === "update") {
       current = message.text;
-      if (composeOn) composeTakeIncoming(message.text);
-      else takeIncoming(message.text);
+      /*
+        **記法は、組み立てるより先に受け取る**（設計書6.12）。
+        .txt は投稿サイトの記法（｜漢字《かんじ》）で書かれているので、
+        取り違えると記法が生のまま出るか、平文が記法として畳まれる。
+      */
+      const notation =
+        typeof message.notation === "string" ? message.notation : "curly";
+      const notationChanged = notation !== composeNotation;
+      composeNotation = notation;
+      if (composeOn) {
+        // 記法そのものが変わったときは、本文が同じでも組み直す
+        // （面を開いたまま原稿の種類が変わるのは稀だが、変わったら組みも変わる）
+        if (notationChanged) composeApplyText(message.text);
+        else composeTakeIncoming(message.text);
+      } else takeIncoming(message.text);
       // 覚えていた「組んで書く」は、本文が届いてから開く。
       // **一度きりにする**——安全弁で断られたときに、届くたび試し直さない
       if (composeWanted && !composeOn) {
@@ -1734,13 +1774,36 @@ body.plain .term { color: inherit; }
   let termsForText = null;
   /** 変換中に外から届いた本文。確定してから片づける */
   let composePending = null;
+  /**
+   * いま組んでいる記法（設計書6.12）。**拡張機能側が原稿の種類で決める**
+   * （.md は "curly"、.txt は "site"）。最初の update で届く。
+   *
+   * 届く前に組むことは無い（この面は本文が届いてから開く）が、
+   * 万一のときは .md の記法として扱う——.txt の本文に波括弧が
+   * 出てくることは稀で、取り違えても平文として素通りする側だから。
+   */
+  let composeNotation = "curly";
 
   /* compose:start */
   /**
    * ルビ・傍点の記法。**定義は core/manuscriptRender.ts の1つだけ**で、
    * ここへはその文字列がそのまま埋め込まれる（写しを置かない）。
+   *
+   * モードが2つある（設計書6.12）。
+   *
+   * - curly … {漢字|かんじ} と {{強調}}（.md）
+   * - site  … ｜漢字《かんじ》 と 《《強調》》（.txt。投稿サイトの形）
+   *
+   * **どの捕獲番号が親文字なのかもモードで違う**（site は縦線ありと
+   * 縦線なしの2通りのルビを持つ）ので、番号も一緒に受け取る。
    */
-  const COMPOSE_NOTATION = ${JSON.stringify(NOTATION_PATTERN)};
+  const COMPOSE_NOTATION_RULES = ${JSON.stringify(NOTATION_RULES)};
+
+  /** 知らないモードが来ても、いままでの記法で組む（本文を壊さない側へ倒す） */
+  function composeRules(mode) {
+    const rules = COMPOSE_NOTATION_RULES[mode];
+    return rules ? rules : COMPOSE_NOTATION_RULES.curly;
+  }
 
   /** 平文はつなげて1つにする（テキストノードを無駄に増やさない） */
   function composePushText(parts, text) {
@@ -1760,10 +1823,13 @@ body.plain .term { color: inherit; }
    * 読み仮名が空のルビを平文（親文字だけ）へ落とすが、それをこの面でやると
    * **記法が消えて本文が書き換わる**。ここでは元の文字列のまま平文として
    * 残す（書きかけのルビは記法のまま見えて、そのまま直せる）。
+   *
+   * @param mode "curly"（.md）か "site"（.txt）。省略すると curly
    */
-  function composeParts(line) {
+  function composeParts(line, mode) {
+    const rules = composeRules(mode);
     const parts = [];
-    const pattern = new RegExp(COMPOSE_NOTATION, "g");
+    const pattern = new RegExp(rules.pattern, "g");
     let last = 0;
     let match = pattern.exec(line);
     while (match !== null) {
@@ -1772,28 +1838,41 @@ body.plain .term { color: inherit; }
       if (match.index > last) {
         composePushText(parts, line.slice(last, match.index));
       }
-      if (match[1] !== undefined) {
-        parts.push({
-          kind: "emphasis",
-          src: match[0],
-          base: match[1],
-          reading: "",
-        });
-      } else if (match[3] !== undefined && match[3].trim() !== "") {
-        parts.push({
-          kind: "ruby",
-          src: match[0],
-          base: match[2],
-          reading: match[3],
-        });
-      } else {
-        composePushText(parts, match[0]);
-      }
+      composePushMatch(parts, match, rules);
       last = match.index + match[0].length;
       match = pattern.exec(line);
     }
     if (last < line.length) composePushText(parts, line.slice(last));
     return parts;
+  }
+
+  /**
+   * 当たった一致を部品にする。**どの番号が何なのかは rules が持つ。**
+   *
+   * .txt のルビは縦線あり（｜漢字《かんじ》）と縦線なし（漢字《かんじ》）の
+   * 2通りあり、当たったほうの番号にだけ値が入る。
+   */
+  function composePushMatch(parts, match, rules) {
+    for (const at of rules.emphasis) {
+      if (match[at] === undefined) continue;
+      parts.push({
+        kind: "emphasis",
+        src: match[0],
+        base: match[at],
+        reading: "",
+      });
+      return;
+    }
+    for (const pair of rules.ruby) {
+      const base = match[pair[0]];
+      if (base === undefined) continue;
+      const reading = match[pair[1]] === undefined ? "" : match[pair[1]];
+      if (reading.trim() === "") break;
+      parts.push({ kind: "ruby", src: match[0], base: base, reading: reading });
+      return;
+    }
+    // 読みが空のルビ・当たらなかった一致。**記法のまま平文で残す**
+    composePushText(parts, match[0]);
   }
 
   /** 部品を記法へ戻す。並べ直すだけ（ここが崩れると本文が壊れる） */
@@ -1874,10 +1953,10 @@ body.plain .term { color: inherit; }
    * doc を引数で受けるのは、**画面の外から試せるようにする**ためである
    * （test/unit/composeFace.test.ts が偽の document を渡して往復を確かめる）。
    */
-  function composeBuildLine(line, doc) {
+  function composeBuildLine(line, doc, mode) {
     const p = doc.createElement("p");
     p.setAttribute("class", "line");
-    const parts = composeParts(line);
+    const parts = composeParts(line, mode);
     if (parts.length === 0) {
       // 空行。高さを保つための詰め物（読む面の br と同じ役目）
       p.appendChild(doc.createElement("br"));
@@ -1908,10 +1987,12 @@ body.plain .term { color: inherit; }
   }
 
   /** 本文まるごとを、行の段落へ組む（渡す本文は改行を揃えてあること） */
-  function composeBuildFragment(text, doc) {
+  function composeBuildFragment(text, doc, mode) {
     const fragment = doc.createDocumentFragment();
     const lines = text.split("\\n");
-    for (const line of lines) fragment.appendChild(composeBuildLine(line, doc));
+    for (const line of lines) {
+      fragment.appendChild(composeBuildLine(line, doc, mode));
+    }
     return fragment;
   }
 
@@ -2167,7 +2248,9 @@ body.plain .term { color: inherit; }
    */
   function composeBuildChecked(text) {
     const wanted = composeNormalizeNewlines(text);
-    const built = composeBuildFragment(wanted, document);
+    // **記法は原稿の種類で決まる**（.txt は投稿サイトの記法で組む）。
+    // 安全弁は記法によらず同じ——組み直したものが元と1文字でも違えば入らない
+    const built = composeBuildFragment(wanted, document, composeNotation);
     if (composeDomToNotation(built) !== wanted) return null;
     return { fragment: built, text: wanted };
   }
@@ -2223,6 +2306,12 @@ body.plain .term { color: inherit; }
     composeClear();
     paint();
     remember();
+    /*
+      **打つ面の目印は、この面にいる間ずっと古いままだった**（組んで書く面は
+      目印を使わないので、更新もされない）。出し直す前に、いまの本文と
+      合っているかを確かめる——合っていなければ隠れたままになる
+    */
+    applyMarksIfMatch();
     write.focus();
     if (at) {
       try {

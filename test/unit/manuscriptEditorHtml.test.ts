@@ -184,6 +184,59 @@ describe("打つ面の用語の色", () => {
   it("測り直しは1フレームに1回へまとめる", () => {
     expect(code).toMatch(/scheduleAlignMarks[\s\S]{0,400}requestAnimationFrame/);
   });
+
+  /**
+   * 作者の実機報告（2026-08-29）「スクロールされるとたまに文字がズレます」。
+   *
+   * 目印の中身は、打ってから新しいものが届くまで（往復で120ミリ秒＋）
+   * **古い本文のまま**である。0.24.12で背景の塗りから**文字色**へ変えたため、
+   * 古い層がそのまま残ると「ズレた位置の色つきの字」として見えてしまう。
+   *
+   * **色が一瞬消えるほうが、ズレた字が見えるより軽い。**
+   */
+  it("本文が変わった時点で、目印を隠す", () => {
+    const input = code.slice(code.indexOf('write.addEventListener("input"'));
+    // 変換中（IME）でも textarea の値は変わる。**隠すのは composing より先**
+    expect(input.slice(0, 300)).toContain('marks.classList.add("stale")');
+    expect(input.indexOf('marks.classList.add("stale")')).toBeLessThan(
+      input.indexOf("if (composing) return;")
+    );
+    expect(html).toContain("#marks.stale { visibility: hidden; }");
+  });
+
+  /**
+   * **当てる側の照合だけでは足りない。** 一致しないと分かった時点で
+   * 隠す道が無く、いったん出した層が古くなっても残っていた。
+   */
+  it("いまの本文と一致するときだけ出し、しないときは隠す", () => {
+    const apply = code.slice(code.indexOf("function applyMarksIfMatch()"));
+    const body = apply.slice(0, apply.indexOf("\n  }"));
+    // 一致しない側（早戻り）で隠す
+    expect(body).toContain(
+      "if (!latestMarks || latestMarks.forText !== write.value) {"
+    );
+    expect(body).toContain('marks.classList.add("stale");');
+    // 表示へ戻すのは、当てたあとの1か所だけ
+    expect(body).toContain('marks.classList.remove("stale");');
+    expect([...code.matchAll(/marks\.classList\.remove\("stale"\)/g)]).toHaveLength(
+      1
+    );
+    expect(body.indexOf("marks.innerHTML = latestMarks.html")).toBeLessThan(
+      body.indexOf('marks.classList.remove("stale")')
+    );
+  });
+
+  /**
+   * scroll の知らせは間引かれることがある（慣性のある動き・ホイールの連打）。
+   * 最後の1回を取りこぼすと、目印だけが半端な位置で止まる。
+   */
+  it("スクロールが止まったところで、位置をもう一度写す", () => {
+    expect(code).toContain("function syncMarksScroll()");
+    expect(code).toContain('write.addEventListener("scroll"');
+    // 持たない環境では、いままでどおり（scroll のたびの写しだけ）
+    expect(code).toContain('if ("onscrollend" in write)');
+    expect(code).toContain('write.addEventListener("scrollend", syncMarksScroll)');
+  });
 });
 
 /**

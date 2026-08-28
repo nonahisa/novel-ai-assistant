@@ -20,6 +20,7 @@ import {
   type PrintEpisode,
   type PrintPreset,
 } from "../core/printHtml";
+import { notationModeFor } from "../core/manuscriptRender";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import { revealFolder } from "../views/openDocument";
 import { logFailure } from "../core/logger";
@@ -90,6 +91,9 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
       // 投稿サイトからDLしたファイルは、先頭にヘッダーが付いている。
       // 本文だけを組む（作品一覧の文字数計測と同じ切り分け）
       body: parseEpisodeMetadata(file.text).body,
+      // **話ごとに記法を見る。** 1つの作品に `.md` と `.txt` が混ざる
+      // ことがある（DLした話と、こちらで書き足した話）
+      notation: notationModeFor(episode.fileName),
     });
   }
 
