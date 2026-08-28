@@ -78,7 +78,7 @@ import { buildKnownAtIndex, lookupKnownAtValue,
   validateContradictions,
   type AcceptedContradiction,
 } from "../core/contradictionValidation";
-import { withCancellableProgress } from "../views/progress";
+import { withCancellableProgress, type CheckProgress } from "../views/progress";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { hashText } from "../core/textFile";
@@ -156,6 +156,15 @@ export interface ContradictionRunResult {
 export interface CheckContradictionsOptions {
   /** 話を絞る。指定しなければ作品全体 */
   filePaths?: string[];
+  /**
+   * 進み具合の届け先（作者の報告、2026-08-29）。
+   *
+   * **本文を読む段だけを届ける。** このあとに続く検証の段は、数え方
+   * （見つけた指摘の件数）も分母も違うので、同じ札の下で数が戻ることになる。
+   * ステータスバーは別の題（「検出した矛盾を検証しています」）を立てるので
+   * 取り違えないが、パネルの1行では区別できない
+   */
+  onProgress?: CheckProgress;
 }
 
 export async function checkContradictions(
@@ -313,6 +322,8 @@ export async function checkContradictions(
         message: `${done}/${total}`,
         increment: 100 / total,
       });
+      // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+      options.onProgress?.(done, total);
 
       if (raw === RETRY_SMALLER) {
         const parts = splitMergedChunk(chunk);

@@ -45,7 +45,7 @@ import {
   createLocationStore,
   createOrganizationStore,
 } from "../core/abilityStore";
-import { withCancellableProgress } from "../views/progress";
+import { withCancellableProgress, type CheckProgress } from "../views/progress";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { resolveMaxOutputTokens } from "../ai/outputLimit";
 import {
@@ -94,6 +94,13 @@ export interface CheckTyposOptions {
    * （作品一覧で1話を右クリックしたときなど）。省略すると作品全体が対象。
    */
   filePaths?: string[];
+  /**
+   * 進み具合の届け先（作者の報告、2026-08-29）。
+   *
+   * **ステータスバーの進捗と一緒に呼ぶ。** 結果が出るのは下段の提案パネルで、
+   * 作者はそこを見て待っている。渡されなければ何もしない
+   */
+  onProgress?: CheckProgress;
 }
 
 export async function checkTypos(
@@ -391,6 +398,8 @@ export async function checkTypos(
         message: `${done + 1}/${total}  ${label}`,
         increment: 100 / Math.max(total, 1),
       });
+      // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+      options.onProgress?.(done + 1, total);
       logStep(`AIへ送信: ${done + 1}/${total} ${label}`);
       const startedAt = Date.now();
 

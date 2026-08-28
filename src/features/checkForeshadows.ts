@@ -46,7 +46,7 @@ import {
   type AcceptedForeshadowResolution,
   type KnownForeshadow,
 } from "../core/foreshadowValidation";
-import { withCancellableProgress } from "../views/progress";
+import { withCancellableProgress, type CheckProgress } from "../views/progress";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import type { ProposalPanel, RecordUpdateViewItem } from "./proposalPanel";
@@ -94,9 +94,18 @@ export interface ForeshadowResolveRunResult {
 
 // ── 配置の検知（P-25）─────────────────────────────
 
+export interface CheckForeshadowsOptions {
+  /**
+   * 進み具合の届け先（作者の報告、2026-08-29）。
+   * 提案パネルへ出すために使う。渡されなければ何もしない
+   */
+  onProgress?: CheckProgress;
+}
+
 export async function checkForeshadows(
   work: WorkEntry,
-  registry: AIRegistry
+  registry: AIRegistry,
+  options: CheckForeshadowsOptions = {}
 ): Promise<ForeshadowDetectRunResult | undefined> {
   useLogFile(work.folderPath);
 
@@ -209,6 +218,8 @@ export async function checkForeshadows(
           message: `${done}/${total}`,
           increment: 100 / total,
         });
+        // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+        options.onProgress?.(done, total);
 
         if (raw === RETRY_SMALLER) {
           const parts = splitMergedChunk(chunk);
@@ -393,7 +404,8 @@ export function showForeshadowCandidates(
 
 export async function checkForeshadowResolution(
   work: WorkEntry,
-  registry: AIRegistry
+  registry: AIRegistry,
+  options: CheckForeshadowsOptions = {}
 ): Promise<ForeshadowResolveRunResult | undefined> {
   useLogFile(work.folderPath);
 
@@ -519,6 +531,8 @@ export async function checkForeshadowResolution(
           message: `${done}/${targeted.length}`,
           increment: 100 / targeted.length,
         });
+        // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+        options.onProgress?.(done, targeted.length);
         if (raw === undefined) continue;
 
         const validated = validateForeshadowResolutions(

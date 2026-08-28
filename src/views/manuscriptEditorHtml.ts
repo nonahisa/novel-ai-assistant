@@ -1184,9 +1184,8 @@ body.plain .term { color: inherit; }
    * 横書き（上下に流れる）でも同じ式で足りる——**割合ではなく差**なので、
    * 縦書きでスクロール値の数え方が違っても効く。
    */
-  function offView(el) {
-    const box = read.getBoundingClientRect();
-    const rect = el.getBoundingClientRect();
+  function offRect(container, rect) {
+    const box = container.getBoundingClientRect();
     // ぎりぎりに寄せると次の行が見えない。少しだけ内側へ入れる
     const slack = 24;
     let left = 0;
@@ -1196,6 +1195,10 @@ body.plain .term { color: inherit; }
     if (rect.top < box.top) top = rect.top - box.top - slack;
     else if (rect.bottom > box.bottom) top = rect.bottom - box.bottom + slack;
     return { left: left, top: top };
+  }
+
+  function offView(el) {
+    return offRect(read, el.getBoundingClientRect());
   }
 
   /**
@@ -1400,6 +1403,21 @@ body.plain .term { color: inherit; }
       // カーソルの置き直しはこちらの道具（設計書6.34）をそのまま使う
       compose.focus();
       composeRestoreCaret({ start: start, end: end });
+      /*
+        **選択を置くだけでは、画面が転がらない**（作者の報告、2026-08-29
+        「誤字脱字パネルから本文に飛びません」）。打つ面（textarea）は
+        焦点を入れ直せばブラウザが選択のところまで送ってくれるが、
+        contenteditable ではそれが起きない——カーソルは移っているのに、
+        見えている場所は元のままである。**指した行が画面の外なら、
+        はみ出したぶんだけ動かす**（読む面の nudgeIntoView と同じ考え方。
+        中央には寄せない）。
+      */
+      if (!composeNudgeIntoView(start)) {
+        vscode.postMessage({
+          type: "log",
+          text: "組んで書く：" + line + "行目の位置を測れず、画面を動かせませんでした",
+        });
+      }
       return;
     }
 
@@ -2662,6 +2680,42 @@ body.plain .term { color: inherit; }
       selection.addRange(range);
     } catch (error) {
       /* 置けなければ諦める（最善努力。本文は壊れない） */
+    }
+  }
+
+  /**
+   * 組んで書く面を、その位置が見えるところまで動かす。
+   *
+   * **#compose 自身が転がる入れ物**（position:absolute + overflow:auto）
+   * なので、動かすのはこの要素の scrollLeft/scrollTop である。
+   * 縦書き（左右に流れる）と横書き（上下に流れる）で式を分けないのは、
+   * **割合ではなく「はみ出した差」だけを足す**ためで、読む面の
+   * nudgeIntoView と同じ理屈が使える。
+   *
+   * 動かせたら true。位置を測れなければ false（呼んだ側が記録に残す）。
+   */
+  function composeNudgeIntoView(offset) {
+    const atoms = composeCurrentAtoms();
+    const head = composeOffsetToPoint(atoms, offset);
+    if (!head) return false;
+    try {
+      const range = document.createRange();
+      range.setStart(head.node, head.offset);
+      range.setEnd(head.node, head.offset);
+      let rect = range.getBoundingClientRect();
+      // 幅も高さも0で返る場面がある（行の頭・空行）。入れ物の側で測り直す
+      if (!rect || (rect.width === 0 && rect.height === 0)) {
+        const host =
+          head.node.nodeType === 1 ? head.node : head.node.parentElement;
+        if (!host) return false;
+        rect = host.getBoundingClientRect();
+      }
+      const off = offRect(compose, rect);
+      if (off.left !== 0) compose.scrollLeft += off.left;
+      if (off.top !== 0) compose.scrollTop += off.top;
+      return true;
+    } catch (error) {
+      return false;
     }
   }
 

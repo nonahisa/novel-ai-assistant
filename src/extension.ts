@@ -214,7 +214,7 @@ import {
 import { countUnextractedEpisodes } from "./features/extractionFreshness";
 import { chooseScope, recordCheck } from "./features/typoCheckScope";
 import { switchMode } from "./features/switchMode";
-import { openInDefaultEditor, revealFolder } from "./views/openDocument";
+import { revealFolder } from "./views/openDocument";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -768,6 +768,33 @@ export async function activate(
     })
   );
 
+  /**
+   * 検知を走らせる間、提案パネルに進み具合を出す（作者の報告、2026-08-29）。
+   *
+   * 「下に動いているときのチャンク数がでないですね」——結果が出るのは
+   * このパネルなのに、進み具合はステータスバーにしか出ていなかった。
+   *
+   * **消すのは `finally` に置く。** 中止・失敗のときは結果（`issues`）が
+   * 届かないので、画面側の「結果が来たら消す」だけでは足りない。
+   * 「3/12」が出たまま残るのが、いちばん困る形である。
+   *
+   * @param unit 数えているもの。話ごとに送る検知は「話」になる
+   */
+  async function withPanelProgress<T>(
+    work: WorkEntry,
+    label: string,
+    run: (onProgress: (done: number, total: number) => void) => Promise<T>,
+    unit = "チャンク"
+  ): Promise<T> {
+    try {
+      return await run((done, total) =>
+        proposalPanel.showRunning(work, label, done, total, unit)
+      );
+    } finally {
+      proposalPanel.finishRunning();
+    }
+  }
+
   // いま開いている画面について相談するパネル（P-21）
   // 相談から標準機能を起動する口（作者の許可、2026-08-15）。
   // **コマンド名を組み立てて executeCommand を呼ばない。** 種別で分岐する
@@ -799,21 +826,32 @@ export async function activate(
       if (!(await saveDirtyDocumentsBeforeExtraction(work, label))) return;
 
       if (kind === "checkDeviations") {
-        const result = await checkDeviations(work, aiRegistry);
+        const result = await withPanelProgress(
+          work,
+          "プロット逸脱を検知",
+          (onProgress) => checkDeviations(work, aiRegistry, { onProgress }),
+          "話"
+        );
         if (!result || result.cancelled) return;
         proposalPanel.showDeviations(work, result.issues);
         return;
       }
 
       if (kind === "checkProofread") {
-        const result = await checkProofread(work, aiRegistry);
+        const result = await withPanelProgress(work, "推敲", (onProgress) =>
+          checkProofread(work, aiRegistry, { onProgress })
+        );
         if (!result || result.cancelled) return;
         proposalPanel.showResults(work, result.issues, "推敲");
         return;
       }
 
       if (kind === "checkContradictions") {
-        const result = await checkContradictions(work, aiRegistry);
+        const result = await withPanelProgress(
+          work,
+          "矛盾を検知",
+          (onProgress) => checkContradictions(work, aiRegistry, { onProgress })
+        );
         if (!result || result.cancelled) return;
         // 矛盾が実は伏線だったときの逃げ道を添える（設計書6.35.4）
         proposalPanel.showContradictions(work, result.issues, (source) =>
@@ -840,12 +878,16 @@ export async function activate(
         return;
       }
 
-      const result = await checkTypos(
+      const result = await withPanelProgress(
         work,
-        aiRegistry,
-        kind === "checkTyposForFile" && filePath
-          ? { filePaths: [filePath] }
-          : {}
+        "誤字脱字を検知",
+        (onProgress) =>
+          checkTypos(work, aiRegistry, {
+            onProgress,
+            ...(kind === "checkTyposForFile" && filePath
+              ? { filePaths: [filePath] }
+              : {}),
+          })
       );
       if (!result) return;
       proposalPanel.showResults(work, result.issues);
@@ -2059,7 +2101,13 @@ export async function activate(
         );
 
         treeProvider.refresh(work.id);
-        await openInDefaultEditor(filePath);
+        // **本文は原稿エディタ（横書き）で開く**（作者の指定、2026-08-29。
+        // 作品一覧のクリックと同じ既定に揃える）
+        await vscode.commands.executeCommand(
+          "vscode.openWith",
+          path.toUri(filePath),
+          MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+        );
       }
     )
   );
@@ -2484,7 +2532,11 @@ export async function activate(
           return;
         }
 
-        const result = await checkForeshadows(work, aiRegistry);
+        const result = await withPanelProgress(
+          work,
+          "伏線を検知",
+          (onProgress) => checkForeshadows(work, aiRegistry, { onProgress })
+        );
         if (!result || result.cancelled) return;
 
         showForeshadowCandidates(proposalPanel, work, result.candidates);
@@ -2525,7 +2577,13 @@ export async function activate(
           return;
         }
 
-        const result = await checkForeshadowResolution(work, aiRegistry);
+        const result = await withPanelProgress(
+          work,
+          "伏線の回収を確認",
+          (onProgress) =>
+            checkForeshadowResolution(work, aiRegistry, { onProgress }),
+          "か所"
+        );
         if (!result || result.cancelled) return;
 
         showForeshadowResolutions(proposalPanel, work, result.proposals);
@@ -2566,9 +2624,15 @@ export async function activate(
         const scope = await chooseScope(work);
         if (!scope) return;
 
-        const result = await checkTypos(work, aiRegistry, {
-          filePaths: scope.filePaths,
-        });
+        const result = await withPanelProgress(
+          work,
+          "誤字脱字を検知",
+          (onProgress) =>
+            checkTypos(work, aiRegistry, {
+              filePaths: scope.filePaths,
+              onProgress,
+            })
+        );
         if (!result) return;
 
         // **絞って見たときも「検知した」と記録する。**
@@ -2630,7 +2694,12 @@ export async function activate(
           return;
         }
 
-        const result = await checkDeviations(work, aiRegistry);
+        const result = await withPanelProgress(
+          work,
+          "プロット逸脱を検知",
+          (onProgress) => checkDeviations(work, aiRegistry, { onProgress }),
+          "話"
+        );
         if (!result || result.cancelled) return;
 
         proposalPanel.showDeviations(work, result.issues);
@@ -2665,7 +2734,9 @@ export async function activate(
         // 未保存のまま読むと、画面と違う本文を推敲してしまう
         if (!(await saveDirtyDocumentsBeforeExtraction(work, "推敲"))) return;
 
-        const result = await checkProofread(work, aiRegistry);
+        const result = await withPanelProgress(work, "推敲", (onProgress) =>
+          checkProofread(work, aiRegistry, { onProgress })
+        );
         if (!result || result.cancelled) return;
 
         proposalPanel.showResults(work, result.issues, "推敲");
@@ -2712,7 +2783,11 @@ export async function activate(
         // 未保存のまま読むと、画面と違う本文を突き合わせてしまう
         if (!(await saveDirtyDocumentsBeforeExtraction(work, "矛盾検知"))) return;
 
-        const result = await checkContradictions(work, aiRegistry);
+        const result = await withPanelProgress(
+          work,
+          "矛盾を検知",
+          (onProgress) => checkContradictions(work, aiRegistry, { onProgress })
+        );
         if (!result || result.cancelled) return;
 
         // 矛盾が実は伏線だったときの逃げ道を添える（設計書6.35.4）
@@ -2752,9 +2827,15 @@ export async function activate(
         if (!(await saveDirtyDocumentsBeforeExtraction(work, "誤字脱字の検知")))
           return;
 
-        const result = await checkTypos(work, aiRegistry, {
-          filePaths: [node.episode.filePath],
-        });
+        const result = await withPanelProgress(
+          work,
+          "誤字脱字を検知",
+          (onProgress) =>
+            checkTypos(work, aiRegistry, {
+              filePaths: [node.episode.filePath],
+              onProgress,
+            })
+        );
         if (!result) return;
 
         proposalPanel.showResults(work, result.issues);

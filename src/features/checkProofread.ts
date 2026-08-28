@@ -29,7 +29,7 @@ import {
   validateProofreadIssues,
   type AcceptedProofreadIssue,
 } from "../core/proofreadValidation";
-import { withCancellableProgress } from "../views/progress";
+import { withCancellableProgress, type CheckProgress } from "../views/progress";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { KeepWordStore } from "../core/keepWordStore";
@@ -72,6 +72,11 @@ export interface ProofreadRunResult {
 export interface CheckProofreadOptions {
   /** 話を絞る。指定しなければ作品全体 */
   filePaths?: string[];
+  /**
+   * 進み具合の届け先（作者の報告、2026-08-29）。
+   * 提案パネルへ出すために使う。渡されなければ何もしない
+   */
+  onProgress?: CheckProgress;
 }
 
 export async function checkProofread(
@@ -208,6 +213,8 @@ export async function checkProofread(
         message: `${done}/${total}`,
         increment: 100 / total,
       });
+      // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+      options.onProgress?.(done, total);
       if (raw === undefined) continue;
 
       const validated = validateProofreadIssues(raw, chunk, keepWords);

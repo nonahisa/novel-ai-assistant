@@ -32,7 +32,7 @@ import {
   validateDeviations,
   type AcceptedDeviation,
 } from "../core/deviationValidation";
-import { withCancellableProgress } from "../views/progress";
+import { withCancellableProgress, type CheckProgress } from "../views/progress";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { confirmFormatFit } from "./formatFitPrompt";
 import { logFailure, logStep, useLogFile } from "../core/logger";
@@ -67,9 +67,20 @@ export interface DeviationRunResult {
 /** 1回で渡す本文の上限。長い話はここで切る */
 const MAX_CHAPTER_CHARS = 12_000;
 
+export interface CheckDeviationsOptions {
+  /**
+   * 進み具合の届け先（作者の報告、2026-08-29）。
+   *
+   * **この検知は話ごとに送る。** 数えているのはチャンクではなく話数なので、
+   * 出す側（`extension.ts`）は単位を「話」にする
+   */
+  onProgress?: CheckProgress;
+}
+
 export async function checkDeviations(
   work: WorkEntry,
-  registry: AIRegistry
+  registry: AIRegistry,
+  options: CheckDeviationsOptions = {}
 ): Promise<DeviationRunResult | undefined> {
   useLogFile(work.folderPath);
 
@@ -197,6 +208,8 @@ export async function checkDeviations(
           message: `${done}/${episodes.length}`,
           increment: 100 / episodes.length,
         });
+        // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+        options.onProgress?.(done, episodes.length);
         if (raw === undefined) continue;
 
         const validated = validateDeviations(raw, {

@@ -16,6 +16,10 @@ import {
 } from "../core/latestEpisode";
 import { buildManuscriptEditorHtml } from "../views/manuscriptEditorHtml";
 import {
+  MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
+  MANUSCRIPT_EDITOR_VIEW_TYPE,
+} from "../core/manuscriptViewTypes";
+import {
   collectTermSpans,
   notationModeFor,
   renderManuscript,
@@ -84,20 +88,38 @@ import { countSiteNotation } from "../core/ruby";
  * 「縦書きで開く」か、VS Code の「エディターを再度開く」から選ぶ。
  */
 
-export const MANUSCRIPT_EDITOR_VIEW_TYPE = "novelai.manuscriptEditor";
+/*
+  入口のIDは `core/manuscriptViewTypes.ts` にある。**作品一覧も同じIDを使う**
+  （本文は横書きの原稿エディタで開く）ので、views から features を引かずに
+  済むよう外へ出した。ここからは、これまでどおりの名前で再輸出する。
+*/
+export {
+  MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
+  MANUSCRIPT_EDITOR_VIEW_TYPE,
+};
 
 /**
- * 横書きで開く入口（作者の依頼、2026-08-27。設計書6.25.4）。
+ * 台帳の鍵（作者の報告、2026-08-29「誤字脱字パネルから本文に飛びません」）。
  *
- * **同じ画面を、向きだけ変えて開く。** VS Code の「エディターを再度開く」に
- * 「原稿（縦書）」と「原稿（横書）」が並ぶので、**開くときに選べる。**
- * 開いたあとに画面のボタンで切り替えられるのは、これまでどおり。
+ * **登録・削除・照会を、この1本に通す。** 以前は登録側が
+ * `document.uri.toString()`、照会側が `paths.toUri(filePath).toString()` で
+ * 別々に組み立てていた。同じファイルでも、Windowsのドライブ文字の大小
+ * （`c:` と `C:`）や、日本語を含む道の百分率符号化の仕方が経路によって
+ * 違えば、文字列は一致しない。**開いているのに「開いていない」と判定され、
+ * 押しても何も起きない**という終わり方になる。
+ *
+ * 比べ方は、この作品がほかの場所で使っているもの（`samePath`）と揃える。
  */
-export const MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE =
-  "novelai.manuscriptEditorHorizontal";
+export function manuscriptLedgerKey(
+  location: string | vscode.Uri
+): string {
+  const filePath =
+    typeof location === "string" ? location : fromUri(location);
+  return paths.normalizeForComparison(filePath);
+}
 
 /**
- * いま開いている原稿エディタ（文書のURI → その画面）。
+ * いま開いている原稿エディタ（原稿の場所 → その画面）。
  *
  * **入口ごとの provider ではなく、ここ1つに集める。** 縦書きと横書きで
  * `ManuscriptEditorProvider` の実体は2つあり、片方だけが台帳を持つと
@@ -132,7 +154,7 @@ const openManuscripts = new Map<
  * 開いていなければ何もしない。呼ぶのは保存を記録し終えたところ1か所だけ。
  */
 export function refreshManuscriptCounts(filePath: string): void {
-  openManuscripts.get(paths.toUri(filePath).toString())?.refreshCounts();
+  openManuscripts.get(manuscriptLedgerKey(filePath))?.refreshCounts();
 }
 
 /**
@@ -386,7 +408,7 @@ export class ManuscriptEditorProvider
     const revealLineNow = (line: number): void => {
       void panel.webview.postMessage({ type: "revealLine", line });
     };
-    const key = document.uri.toString();
+    const key = manuscriptLedgerKey(document.uri);
     const entry = {
       panel,
       revealLine: (line: number): void => {
@@ -579,17 +601,23 @@ export class ManuscriptEditorProvider
    * 引き受けられたときだけ true を返す。false のときは、呼んだ側が
    * これまでどおり素のエディタで開く——**押しても何も起きない、を作らない。**
    *
-   * 引き受けるのは次の2つだけである。
+   * 引き受けるのは次の3つである。
    *
    * 1. その原稿を原稿エディタで開いている（前に出して、行を示す）
    * 2. 開いてはいないが、**いま見ているタブが原稿エディタ**（＝作者は
    *    この画面で書いている）。同じ向きの入口で開いてから示す
+   * 3. どちらでもないが、**その原稿が登録された作品の話**である
+   *    （作者の指示、2026-08-29「本文ファイルは原稿エディター横書きで開く」）。
+   *    作品一覧から開いたときと同じ既定にそろえる
    *
-   * どちらでもなければ、作者は素のエディタで書いている。そちらへ譲る。
+   * 話でないファイル（プロット・設定資料）は、これまでどおり素のエディタへ譲る。
+   *
+   * **どの枝で降りたかを必ず残す。** 「押しても何も起きない」が実機で
+   * 起きたとき（2026-08-29）、どこで止まったのかを示すものが1つも無かった。
    */
   async revealLine(filePath: string, line: number): Promise<boolean> {
     const uri = paths.toUri(filePath);
-    const key = uri.toString();
+    const key = manuscriptLedgerKey(filePath);
 
     const open = openManuscripts.get(key);
     if (open) {
@@ -597,9 +625,21 @@ export class ManuscriptEditorProvider
       open.revealLine(line);
       return true;
     }
+    logLine(
+      `原稿エディタ：${filePath} は台帳にありません（鍵: ${key}）。開き直します。`
+    );
 
-    const viewType = activeManuscriptViewType();
-    if (!viewType) return false;
+    const viewType =
+      activeManuscriptViewType() ??
+      ((await this.isRegisteredEpisode(filePath))
+        ? MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+        : undefined);
+    if (!viewType) {
+      logLine(
+        `原稿エディタ：${filePath} は作品の話ではないため、素のエディタへ譲ります。`
+      );
+      return false;
+    }
 
     await vscode.commands.executeCommand("vscode.openWith", uri, viewType);
     const opened = openManuscripts.get(key);
@@ -607,12 +647,41 @@ export class ManuscriptEditorProvider
     // 押しても何も起きないまま終わる（素のエディタへも行かない）
     if (!opened) {
       logLine(
-        `原稿エディタ：${filePath} を開けなかったため、行を示せませんでした。`
+        `原稿エディタ：${filePath} を開けなかったため、行を示せませんでした（鍵: ${key}）。`
       );
       return false;
     }
     opened.revealLine(line);
     return true;
+  }
+
+  /**
+   * その原稿が、登録された作品の「話」か。
+   *
+   * **開く画面を決めるのは中身であって、拡張機能の都合ではない。**
+   * 本文（話）なら横書きの原稿エディタ、それ以外（プロット・設定資料）は
+   * 素のエディタ、という切り分けを、作品一覧と同じ基準で行う。
+   *
+   * 走査は、その原稿を原稿エディタで開いていないときにしか通らない
+   * （開いていれば台帳で当たる）ので、飛ぶたびに走ることはない。
+   */
+  private async isRegisteredEpisode(filePath: string): Promise<boolean> {
+    try {
+      const found = await this.deps.highlighter.indexFor(filePath);
+      if (!found) return false;
+      const { episodes } = await scanWork(found.work);
+      return episodes.some((episode) =>
+        samePath(episode.filePath, filePath)
+      );
+    } catch (error) {
+      // **走査に失敗しても、飛べなくならない。** 素のエディタへ譲る
+      logLine(
+        `原稿エディタ：${filePath} が作品の話かを確かめられませんでした（${
+          error instanceof Error ? error.message : String(error)
+        }）。`
+      );
+      return false;
+    }
   }
 
   /**

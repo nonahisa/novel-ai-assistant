@@ -95,6 +95,13 @@ body {
   font-weight: normal;
 }
 #toolbar .count { color: var(--vscode-descriptionForeground); }
+/*
+  検知の進み具合（作者の報告、2026-08-29）。**一覧に前の結果が出ている
+  ときは、ここへ小さく出す**——読んでいる指摘の場所を奪わない。
+  一覧が空のときは #empty の側へ出す（そちらのほうがよく見える）
+*/
+#toolbar .running { color: var(--vscode-descriptionForeground); font-size: 12px; }
+#running:empty { display: none; }
 #toolbar label { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 button {
   background: var(--vscode-button-background);
@@ -225,6 +232,7 @@ body.show-low .issue.low { display: flex; }
 <div id="toolbar">
   <span class="title" id="category">誤字脱字</span>
   <span class="count" id="count">0件</span>
+  <span class="running" id="running"></span>
   <label><input type="checkbox" id="showLow"> 確信度が低いものも表示</label>
   <button class="secondary" id="clear" title="この分類の一覧を空にします（本文は書き換わりません）">一覧を空にする</button>
   <button class="secondary" id="applyAll" title="確信度が「高」「中」で、修正案のあるものだけが対象です">まとめて適用</button>
@@ -241,6 +249,41 @@ const applyAllEl = document.getElementById('applyAll');
 const tabsEl = document.getElementById('tabs');
 const worksEl = document.getElementById('works');
 const clearEl = document.getElementById('clear');
+const runningEl = document.getElementById('running');
+
+/**
+ * 検知の進み具合（作者の報告、2026-08-29）。
+ *
+ * 「下に動いているときのチャンク数がでないですね」。走っている間、
+ * このパネルには何も出ていなかった（右下の通知にしか出ていない）。
+ *
+ * **止まった／終わったときは必ず消す。** 「3/12」が出たまま残ると、
+ * まだ走っているように見える。消す道は2つ——結果が届いたとき（issues）と、
+ * 中止・失敗のとき（runningDone）である。
+ */
+let runningState = null;
+/** 一覧が空のときに出ている案内。進み具合を出す間だけ差し替える */
+const emptyDefault = emptyEl.textContent;
+/** 直近に描いた件数。進み具合をどちらへ出すかの判断に使う */
+let lastItemCount = 0;
+
+function paintRunning() {
+  const text = runningState
+    ? runningState.label + 'しています… ' +
+      runningState.done + '/' + runningState.total + runningState.unit
+    : '';
+
+  // 一覧が空のときは、いちばん目に入るところへ出す
+  if (text && lastItemCount === 0) {
+    emptyEl.textContent = text;
+    emptyEl.style.display = 'block';
+    runningEl.textContent = '';
+    return;
+  }
+  emptyEl.textContent = emptyDefault;
+  emptyEl.style.display = lastItemCount === 0 ? 'block' : 'none';
+  runningEl.textContent = text;
+}
 
 showLowEl.addEventListener('change', () => {
   document.body.classList.toggle('show-low', showLowEl.checked);
@@ -331,7 +374,9 @@ function render(workTitle, items) {
     (item) => item.status === 'pending' || item.status === 'failed'
   );
   countEl.textContent = remaining.length + '件';
-  emptyEl.style.display = items.length === 0 ? 'block' : 'none';
+  lastItemCount = items.length;
+  // 案内を出すか、進み具合を出すかは1か所で決める（両方が同じ場所を使う）
+  paintRunning();
   listEl.innerHTML = items.map(renderItem).join('');
 
   listEl.querySelectorAll('[data-action]').forEach((el) => {
@@ -636,7 +681,25 @@ let lastListKey = '';
 
 window.addEventListener('message', (event) => {
   const message = event.data;
+  if (message.type === 'running') {
+    runningState = {
+      label: message.label || '検知',
+      done: message.done || 0,
+      total: message.total || 0,
+      unit: message.unit || 'チャンク',
+    };
+    paintRunning();
+    return;
+  }
+  if (message.type === 'runningDone') {
+    runningState = null;
+    paintRunning();
+    return;
+  }
   if (message.type === 'issues') {
+    // **結果が届いたら、進み具合は消す。** 走り終えているのに数字が
+    // 残っていると、まだ動いているように見える
+    runningState = null;
     const listKey = (message.workId || '') + '/' + (message.category || '');
     const keepScroll = listKey === lastListKey;
     const scrollY = window.scrollY;

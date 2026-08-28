@@ -33,6 +33,13 @@ vi.mock("vscode", () => {
           revealRange: noop,
         });
       }),
+      // **黙って終わる枝を無くした**（作者の報告、2026-08-29）。
+      // 原稿エディタ側で転んだ理由をログへ残すので、書き込み先が要る
+      createOutputChannel: () => ({
+        appendLine: noop,
+        show: noop,
+        dispose: noop,
+      }),
     },
     workspace: {
       getConfiguration: () => ({ get: (_k: string, d?: unknown) => d }),

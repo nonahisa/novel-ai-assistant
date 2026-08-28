@@ -4,6 +4,7 @@ import type { WorkEntry } from "../models/types";
 import { formatChapterNumber } from "../core/episodeParser";
 import { pathExists } from "../core/fileSystem";
 import { buildPlotTemplate } from "../core/plotTemplate";
+import { MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE } from "../core/manuscriptViewTypes";
 import { PLOT_FILE, readWorkConfig, workPaths } from "../core/workRegistry";
 import { cancelItem } from "../views/dialogs";
 import { openInDefaultEditor } from "../views/openDocument";
@@ -119,6 +120,12 @@ export async function createFirstEpisodeFile(
     );
   }
 
-  await openInDefaultEditor(filePath);
+  // **本文は原稿エディタ（横書き）で開く**（作者の指定、2026-08-29。
+  // 作品一覧のクリックと同じ既定に揃える）
+  await vscode.commands.executeCommand(
+    "vscode.openWith",
+    path.toUri(filePath),
+    MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+  );
   return filePath;
 }

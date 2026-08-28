@@ -10,6 +10,7 @@ import {
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
 import { scanWork } from "../core/scanner";
+import { MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE } from "../core/manuscriptViewTypes";
 import { SynopsisStore } from "../core/synopsisStore";
 import { synopsisKey } from "../models/synopsis";
 import { WorkRegistry } from "../core/workRegistry";
@@ -198,10 +199,23 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     );
     item.contextValue = "episode";
     item.resourceUri = toUri(ep.filePath);
+    /*
+      **本文は原稿エディタ（横書き）で開く**（作者の指示、2026-08-29）。
+
+      これまでは `vscode.open` で素のエディタへ渡していたが、VS Code 1.131 の
+      Markdown編集画面では用語の色分けもルビも右クリックの設定資料も効かない
+      （設計書6.25）。書くための画面を持っているのに、一覧から開くと
+      そちらへ行かないのでは、作者は毎回「エディターを再度開く」を通ることになる。
+
+      **縦書きではなく横書きを既定にする。** 縦書きは画面の中のボタンと
+      「エディターを再度開く」から選べる。ここで決め打つのは話（本文）だけで、
+      プロット・あらすじ・設定資料は素のエディタのままである（この行は
+      episode の枝にしかない）。
+    */
     item.command = {
-      command: "vscode.open",
+      command: "vscode.openWith",
       title: "開く",
-      arguments: [toUri(ep.filePath)],
+      arguments: [toUri(ep.filePath), MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE],
     };
 
     const chapterLabel = formatChapterLabel(ep, node.format);

@@ -44,7 +44,7 @@ import {
   type RecheckItem,
   type RecheckOutcome,
 } from "./recheckProposal";
-import { logFailure } from "../core/logger";
+import { logFailure, logLine } from "../core/logger";
 
 /**
  * 提案パネル（誤字脱字）。
@@ -322,7 +322,30 @@ export interface RecordUpdateViewItem {
   applyLabel?: string;
 }
 
-type OutgoingMessage = {
+type OutgoingMessage = IssuesMessage | RunningMessage;
+
+/**
+ * 検知の進み具合（作者の報告、2026-08-29）。
+ *
+ * 「下に動いているときのチャンク数がでないですね」——相談から誤字脱字を
+ * 実行し、結果が出る下段の提案パネルを見て待っていたが、進み具合が
+ * そこに出なかった。**右下の通知には出ているが、見ているのはこちらである。**
+ *
+ * `done` が `total` に届いても、この報せだけでは終わったことにならない
+ * （検証・後片付けが残る）。**終わりは必ず `runningDone` か `issues` で
+ * 消す**——「3/12」が出たまま残るのが、いちばん困る形である。
+ */
+type RunningMessage = {
+  type: "running" | "runningDone";
+  /** 何をしているか（「誤字脱字を検知」）。文の側で「〜しています」を足す */
+  label: string;
+  done: number;
+  total: number;
+  /** 数えている単位。話ごとに送る検知では「話」になる */
+  unit: string;
+};
+
+type IssuesMessage = {
   type: "issues";
   workTitle: string;
   /**
@@ -750,6 +773,51 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     return [...entry.categories.keys()][0] ?? this.category;
   }
 
+  /**
+   * 検知の進み具合を、このパネルに出す（作者の報告、2026-08-29）。
+   *
+   * 「下に動いているときのチャンク数がでないですね」。結果が出る場所で
+   * 待っているのだから、進み具合もそこに出ていなければならない。
+   * **右下の通知は今までどおり出す**（片方に寄せない）。
+   *
+   * 出す場所は画面側が決める。一覧が空なら中央、前の結果が出ているときは
+   * 見出しの横に小さく——**読んでいる指摘の場所を奪わない**ため。
+   *
+   * @param work どの作品の検知か。表示中の作品と違えば、画面には出さない
+   *   （別の作品を見ている最中に、見えている件数と関係のない数が動くと
+   *   何の数字か分からなくなる）
+   * @param unit 数えている単位。話ごとに送る検知（プロット逸脱）は「話」
+   */
+  showRunning(
+    work: WorkEntry,
+    label: string,
+    done: number,
+    total: number,
+    unit = "チャンク"
+  ): void {
+    // **まだ何も出していないときは、これから届く作品の進みを出してよい。**
+    // 初めての検知では `this.work` がまだ無く、ここで弾くと1回目だけ
+    // 何も出ないことになる
+    if (this.work && this.work.id !== work.id) return;
+    this.post({ type: "running", label, done, total, unit });
+  }
+
+  /**
+   * 進み具合の表示を消す。
+   *
+   * **中止しても失敗しても必ず通す**（呼び出し側の `finally`）。
+   * 結果が届けば画面側が消すが、中止・失敗のときは結果が来ない。
+   * 「3/12」が出たまま残るのが、いちばん困る形である。
+   */
+  finishRunning(): void {
+    this.post({ type: "runningDone", label: "", done: 0, total: 0, unit: "" });
+  }
+
+  /** 画面へ送る（開いていなければ何もしない） */
+  private post(message: OutgoingMessage): void {
+    void this.view?.webview.postMessage(message);
+  }
+
   /** `checkTypos` / `checkProofread` / `checkNotation` の結果を出す */
   showResults(
     work: WorkEntry,
@@ -983,7 +1051,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     const works = this.summarizeWorks(remaining);
     const contradictionMode = this.contradictions.length > 0;
     const updateMode = this.recordUpdates.length > 0;
-    const message: OutgoingMessage = {
+    const message: IssuesMessage = {
       type: "issues",
       workTitle: this.work?.title ?? "",
       workId: this.work?.id ?? "",
@@ -1214,7 +1282,12 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     const item: { filePath: string; line: number } | undefined =
       this.items.find((entry) => entry.id === id) ??
       this.contradictions.find((entry) => entry.id === id);
-    if (!item) return;
+    if (!item) {
+      // **押しても何も起きない、を黙って起こさない**（作者の報告、2026-08-29）。
+      // 一覧の描き直しと押した瞬間がすれ違うと、ここへ来ることがある
+      logLine(`提案パネル：飛び先の指摘が見つかりませんでした（id: ${id}）。`);
+      return;
+    }
 
     /*
       **原稿エディタで書いているなら、その画面のまま示す**（作者の依頼、
@@ -1224,8 +1297,14 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     */
     try {
       if (await this.revealInManuscript?.(item.filePath, item.line)) return;
-    } catch {
-      // 原稿エディタ側で転んでも、飛べる道は残す（下で素のエディタを開く）
+    } catch (error) {
+      // 原稿エディタ側で転んでも、飛べる道は残す（下で素のエディタを開く）。
+      // **理由は残す。** 残さないと「押しても何も起きない」で終わる
+      logLine(
+        `提案パネル：原稿エディタで示せませんでした（${item.filePath} ${
+          item.line
+        }行目：${error instanceof Error ? error.message : String(error)}）。`
+      );
     }
 
     try {

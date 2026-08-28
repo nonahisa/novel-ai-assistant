@@ -262,6 +262,31 @@ describe("その行を示す", () => {
       /setSelectionRange\(start, end\)[\s\S]{0,300}write\.blur\(\);\s*write\.focus\(\);/
     );
   });
+
+  /**
+   * **組んで書く面では、選択を置くだけでは画面が転がらない**
+   * （作者の報告、2026-08-29「誤字脱字パネルから本文に飛びません」）。
+   *
+   * 打つ面（textarea）は焦点を入れ直せばブラウザが送ってくれるが、
+   * contenteditable ではそれが起きない。カーソルは移っているのに、
+   * 見えている場所は元のままである。
+   */
+  it("組んで書く面は、自分で画面を動かす", () => {
+    const reveal = code.slice(code.indexOf("function revealLine(line)"));
+    expect(reveal.slice(0, 1500)).toContain("composeNudgeIntoView(start)");
+
+    const nudge = code.slice(code.indexOf("function composeNudgeIntoView("));
+    // はみ出したぶんだけ動かす（中央には寄せない。読む面と同じ考え方）
+    expect(nudge.slice(0, 900)).toContain("offRect(compose, rect)");
+    expect(nudge.slice(0, 900)).toContain("compose.scrollLeft += off.left");
+    expect(nudge.slice(0, 900)).toContain("compose.scrollTop += off.top");
+  });
+
+  /** 位置を測れずに動かせなかったことを、黙って終わらせない */
+  it("動かせなかったら、記録に残す", () => {
+    const reveal = code.slice(code.indexOf("function revealLine(line)"));
+    expect(reveal.slice(0, 1500)).toContain("画面を動かせませんでした");
+  });
 });
 
 /**
