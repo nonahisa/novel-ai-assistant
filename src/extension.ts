@@ -779,17 +779,27 @@ export async function activate(
    * 「3/12」が出たまま残るのが、いちばん困る形である。
    *
    * @param unit 数えているもの。話ごとに送る検知は「話」になる
+   * @param run 2つ目の引数 `stage` は、**段が変わる検知**（矛盾検知の検証段）
+   *   のための別の札。同じ札の下で分母の違う数を流すと数が戻って見えるので、
+   *   段ごとに札と単位を分ける
    */
   async function withPanelProgress<T>(
     work: WorkEntry,
     label: string,
-    run: (onProgress: (done: number, total: number) => void) => Promise<T>,
+    run: (
+      onProgress: (done: number, total: number) => void,
+      stage: (
+        stageLabel: string,
+        stageUnit: string
+      ) => (done: number, total: number) => void
+    ) => Promise<T>,
     unit = "チャンク"
   ): Promise<T> {
+    const reporter =
+      (stageLabel: string, stageUnit: string) => (done: number, total: number) =>
+        proposalPanel.showRunning(work, stageLabel, done, total, stageUnit);
     try {
-      return await run((done, total) =>
-        proposalPanel.showRunning(work, label, done, total, unit)
-      );
+      return await run(reporter(label, unit), reporter);
     } finally {
       proposalPanel.finishRunning();
     }
@@ -850,7 +860,12 @@ export async function activate(
         const result = await withPanelProgress(
           work,
           "矛盾を検知",
-          (onProgress) => checkContradictions(work, aiRegistry, { onProgress })
+          (onProgress, stage) =>
+            checkContradictions(work, aiRegistry, {
+              onProgress,
+              // 検証はAIを1件ずつ呼ぶので、別の札で件数を流す
+              onVerifyProgress: stage("検出した矛盾を検証", "件"),
+            })
         );
         if (!result || result.cancelled) return;
         // 矛盾が実は伏線だったときの逃げ道を添える（設計書6.35.4）
@@ -2786,7 +2801,12 @@ export async function activate(
         const result = await withPanelProgress(
           work,
           "矛盾を検知",
-          (onProgress) => checkContradictions(work, aiRegistry, { onProgress })
+          (onProgress, stage) =>
+            checkContradictions(work, aiRegistry, {
+              onProgress,
+              // 検証はAIを1件ずつ呼ぶので、別の札で件数を流す
+              onVerifyProgress: stage("検出した矛盾を検証", "件"),
+            })
         );
         if (!result || result.cancelled) return;
 

@@ -157,14 +157,21 @@ export interface CheckContradictionsOptions {
   /** 話を絞る。指定しなければ作品全体 */
   filePaths?: string[];
   /**
-   * 進み具合の届け先（作者の報告、2026-08-29）。
+   * 本文を読む段の進み具合の届け先（作者の報告、2026-08-29）。
    *
-   * **本文を読む段だけを届ける。** このあとに続く検証の段は、数え方
-   * （見つけた指摘の件数）も分母も違うので、同じ札の下で数が戻ることになる。
-   * ステータスバーは別の題（「検出した矛盾を検証しています」）を立てるので
-   * 取り違えないが、パネルの1行では区別できない
+   * 検証の段は `onVerifyProgress` へ**別に**届ける。数え方（見つけた指摘の
+   * 件数）も分母も違うので、同じ札の下へ流すと数が戻って見える。
    */
   onProgress?: CheckProgress;
+  /**
+   * 検証の段（設計書6.10.5）の進み具合の届け先。単位は「件」。
+   *
+   * 当初はここを流しておらず、本文を読み終えたあと提案パネルの進みが
+   * 「12/12チャンク」で止まったまま検証が続く形だった。検証はAIを
+   * 指摘1件につき1回呼ぶので、件数が多いと**止まって見える時間が長い**。
+   * 別の札（「検出した矛盾を検証」）で件数を流す
+   */
+  onVerifyProgress?: CheckProgress;
 }
 
 export async function checkContradictions(
@@ -490,6 +497,8 @@ export async function checkContradictions(
             message: `${++done}/${found.length}`,
             increment: 100 / found.length,
           });
+          // 提案パネルにも同じ進みを出す（本文を読む段とは別の札で）
+          options.onVerifyProgress?.(done, found.length);
 
           const outcome = await verify(entry.issue, entry.chunk, controller);
           if (outcome.undecided) verifyUndecided++;
