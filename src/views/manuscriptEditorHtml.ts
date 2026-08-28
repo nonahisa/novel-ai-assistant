@@ -623,7 +623,13 @@ body.plain .term { color: inherit; }
    * 最初の update が届くまで中身が無い。届いてから開く（composeWanted）。
    */
   let composeOn = false;
-  let composeWanted = saved.compose === true;
+  /**
+   * **組んで書くを標準にする**（作者の指定、2026-08-29。.txt も .md も）。
+   * はじめて開く原稿は組んで書くから始め、作者が「やめる」を押した原稿
+   * だけ（saved.compose === false）そのまま「書く」で開く。安全弁で
+   * 開けない原稿は、これまでどおり「書く」へ落ちる。
+   */
+  let composeWanted = saved.compose !== false;
   let size = saved.size || 16;
 
   function remember() {
