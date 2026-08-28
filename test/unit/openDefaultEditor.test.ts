@@ -97,12 +97,23 @@ describe("ファイルは既定のエディターで開く", () => {
    * `markdown.showPreview` を後から呼ぶと、作者が既定にした画面を
    * 開いた直後に押しのけることになる（`generateSettingsDocs.ts` に
    * 同じ趣旨が書いてある）。
+   *
+   * **例外は `openDocument.ts` の生成文書だけ。** 保存されていない
+   * （untitled の）生成Markdownは、`*.md` に割り当てられた編集画面が
+   * 「実在するファイル」として解決しようとして**開くこと自体に失敗する**
+   * （作者の実機報告、2026-08-29——執筆再開・マニュアルが全滅した）。
+   * 選んだ画面で開けない以上「押しのけ」ではなく、読むための文書を
+   * 組んだ表示（プレビュー）で確実に開く。実ファイルを開く経路
+   * （`openInDefaultEditor`）は引き続きこの決まりの対象である。
    */
-  it("開いたあとにプレビューを横取りしていない", () => {
-    const offenders = files.filter((file) =>
-      /executeCommand\(\s*"markdown\.showPreview"/.test(
-        readFileSync(file, "utf-8")
-      )
+  it("開いたあとにプレビューを横取りしていない（生成文書の例外を除く）", () => {
+    const allowed = "src/views/openDocument.ts";
+    const offenders = files.filter(
+      (file) =>
+        !file.endsWith(allowed.split("/").pop() as string) &&
+        /executeCommand\(\s*"markdown\.showPreview"/.test(
+          readFileSync(file, "utf-8")
+        )
     );
     expect(offenders).toEqual([]);
   });

@@ -71,7 +71,18 @@ export async function openGeneratedMarkdown(
   edit.insert(uri, new vscode.Position(0, 0), content);
   await vscode.workspace.applyEdit(edit);
 
-  await vscode.commands.executeCommand("vscode.open", uri, options);
+  // **`vscode.open`（既定の割り当て経由）では開かない。** `*.md` に
+  // 割り当てられたMarkdownの編集画面が、保存されていない文書を
+  // 「実在するファイル」として解決しようとして開けない（作者の実機報告、
+  // 2026-08-29「MDファイルが開かないケースが増えています」——執筆再開・
+  // マニュアルなど生成文書が全滅した）。生成文書は読むためのものなので、
+  // **Markdownのプレビュー（組んだ表示）で開く**。プレビューが使えない
+  // 環境では、素のテキストで開く——記法のままでも、開けないよりよい
+  try {
+    await vscode.commands.executeCommand("markdown.showPreview", uri);
+  } catch {
+    await vscode.window.showTextDocument(document, options);
+  }
 }
 
 /** 名前に使えない文字。URIの区切りと混ざる */
