@@ -19,8 +19,8 @@ import {
   collectTermSpans,
   renderManuscript,
   renderTermMarks,
-  TERM_LABELS,
 } from "../core/manuscriptRender";
+import { TERM_COLORS } from "../core/termColors";
 import { computeMinimalEdit } from "../core/textEdit";
 import { fromLfOffset, fromLfText, toLf, toLfOffset } from "../core/eolSpace";
 import { createEditQueue } from "../core/editQueue";
@@ -77,14 +77,6 @@ import type { WorkEntry } from "../models/types";
  * ことにはしない。** 作者は普通のエディタも使う。開き方は
  * 「縦書きで開く」か、VS Code の「エディターを再度開く」から選ぶ。
  */
-
-/** 用語の色。`termHighlight.ts` と同じ色を使う（画面ごとに違う色にしない） */
-const TERM_COLORS: Record<TermKind, { light: string; dark: string }> = {
-  character: { light: "#1a5fb4", dark: "#7cb7ff" },
-  location: { light: "#1c7c3c", dark: "#7ee08a" },
-  ability: { light: "#7a3ea3", dark: "#d3a4f5" },
-  organization: { light: "#9a5b00", dark: "#e8b06a" },
-};
 
 export const MANUSCRIPT_EDITOR_VIEW_TYPE = "novelai.manuscriptEditor";
 
@@ -161,6 +153,12 @@ type Incoming =
   | { type: "emphasis"; text: string; start: number; end: number }
   | { type: "copyForPosting" }
   | { type: "openTerm"; id: string; kind: TermKind }
+  /**
+   * 右クリックの時点で、**開いている**資料パネルへ該当項目を出す
+   * （作者の指示、2026-08-28）。開いていなければ何もしない——
+   * 開くのは品書きの「設定資料を見る」（openTerm）だけ。
+   */
+  | { type: "previewTerm"; id: string; kind: TermKind }
   | { type: "chat"; start: number; end: number }
   /**
    * 書体を選ぶ。
@@ -185,6 +183,11 @@ export interface ManuscriptEditorDeps {
   highlighter: TermHighlighter;
   /** 用語から設定資料を開く。extension.ts の登録と同じ道を通す */
   openSettings(work: WorkEntry, kind: TermKind, id: string): Promise<void>;
+  /**
+   * **開いている**資料パネルへ該当項目を出す（無ければ何もしない）。
+   * 右クリックのたびに新しいパネルを開いては、作者の画面を奪ってしまう。
+   */
+  previewTerm(work: WorkEntry, kind: TermKind, id: string): Promise<void>;
   /**
    * 選んだところをAIに相談する。
    *
@@ -236,10 +239,6 @@ export class ManuscriptEditorProvider
         fromUri(document.uri)
       );
       const index = found?.index;
-      const kinds = new Set<TermKind>();
-      if (index) {
-        for (const entry of index.allEntries()) kinds.add(entry.kind);
-      }
       await panel.webview.postMessage({
         type: "update",
         text,
@@ -252,11 +251,10 @@ export class ManuscriptEditorProvider
         // textarea の中に要素は無いので、当たり判定を要素で取れない
         terms: collectTermSpans(text, index),
         hasTerms: (index?.size ?? 0) > 0,
+        // **色分けの凡例は送らない**（作者の指示、2026-08-28
+        // 「文字の色分け説明は不要です」）。色の意味は設定資料パネルの
+        // タブが同じ色で示す
         colors: colorsFor(),
-        legend: [...kinds].map((kind) => ({
-          kind,
-          label: TERM_LABELS[kind],
-        })),
         ...readAppearance(this.orientation),
       });
       await this.sendCount(panel, text);
@@ -389,8 +387,28 @@ export class ManuscriptEditorProvider
           const found = await this.deps.highlighter.indexFor(
             fromUri(document.uri)
           );
-          if (!found) return;
+          if (!found) {
+            // **黙って戻らない**（作者の報告、2026-08-28「用語上で右クリック
+            // したとき、パネルの説明は切り替わりません」）。ここで落ちると
+            // 押しても何も起きないので、どこで止まったかを残す
+            logLine(
+              "原稿エディタ：右クリックの設定資料——この原稿が属する作品を" +
+                "見つけられませんでした"
+            );
+            return;
+          }
           await this.deps.openSettings(found.work, message.kind, message.id);
+          break;
+        }
+
+        case "previewTerm": {
+          // 右クリックの時点の追従。作品が分からなければ黙って何もしない
+          // （品書き自体は出ており、openTerm 側にログがある）
+          const found = await this.deps.highlighter.indexFor(
+            fromUri(document.uri)
+          );
+          if (!found) return;
+          await this.deps.previewTerm(found.work, message.kind, message.id);
           break;
         }
 

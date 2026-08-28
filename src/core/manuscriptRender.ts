@@ -174,7 +174,12 @@ export function renderManuscript(text: string, index?: TermIndex): string {
     .join("\n");
 }
 
-/** 色分けの凡例。画面の隅に出して、色の意味が分かるようにする */
+/**
+ * 用語の種類の呼び名。**定義はここだけ**（ホバーの見出しなどで使う）。
+ *
+ * 原稿エディタの下段に出していた色分けの凡例は、作者の指示で外した
+ * （2026-08-28）。色の意味は設定資料パネルのタブが同じ色で示す。
+ */
 export const TERM_LABELS: Record<TermKind, string> = {
   character: "登場人物",
   location: "場所",

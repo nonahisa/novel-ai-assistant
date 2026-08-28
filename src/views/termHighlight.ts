@@ -15,6 +15,8 @@ import {
   type TermEntry,
   type TermKind,
 } from "../core/termIndex";
+import { TERM_COLORS } from "../core/termColors";
+import { TERM_LABELS } from "../core/manuscriptRender";
 import { SUPPORTED_EXTENSIONS, type WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
 import type { Ability } from "../models/ability";
@@ -27,22 +29,13 @@ import type { Organization } from "../models/organization";
  * 種類ごとに色を変えるのは、人名か地名かを一目で区別するため。
  * 同じ青一色だと、地の文で「図書塔」と「灯」が並んだときに
  * どちらが人物か分からない。
+ *
+ * **色の定義はここに置かない。** `core/termColors.ts` の1つを、原稿
+ * エディタ・設定資料パネルのタブと分け合う——以前はここに16進を書き、
+ * 原稿エディタ側が「同じ色を使う」という注釈つきで写していた。**写しは
+ * 片方だけが直る日が来る。** 見出しの語も `core/manuscriptRender.ts`
+ * の1つだけを使う。
  */
-
-/** 種類ごとの表示色。テーマ色を使い、ライト・ダークの両方で読める色にする */
-const KIND_STYLE: Record<
-  TermKind,
-  { light: string; dark: string; label: string }
-> = {
-  // 人名は青。最も数が多く、既定色として馴染みがある
-  character: { light: "#1a5fb4", dark: "#7cb7ff", label: "登場人物" },
-  // 地名は緑。人名と混ざらない色相を選ぶ
-  location: { light: "#1c7c3c", dark: "#7ee08a", label: "場所" },
-  // 能力は紫。地の文で目立ちすぎない明度にする
-  ability: { light: "#7a3ea3", dark: "#d3a4f5", label: "能力" },
-  // 組織は橙。人名・地名・能力のどれとも混ざらない色相にする
-  organization: { light: "#9a5b00", dark: "#e8b06a", label: "組織" },
-};
 
 interface WorkSettings {
   index: TermIndex;
@@ -64,12 +57,12 @@ export class TermHighlighter implements vscode.Disposable {
   private refreshTimer: NodeJS.Timeout | undefined;
 
   constructor(private readonly registry: WorkRegistry) {
-    for (const [kind, style] of Object.entries(KIND_STYLE)) {
+    for (const [kind, color] of Object.entries(TERM_COLORS)) {
       this.decorations.set(
         kind as TermKind,
         vscode.window.createTextEditorDecorationType({
-          light: { color: style.light },
-          dark: { color: style.dark },
+          light: { color: color.light },
+          dark: { color: color.dark },
         })
       );
     }
@@ -357,7 +350,7 @@ export function buildHover(
   md.supportThemeIcons = true;
 
   const kindLabel =
-    entry.kind === "ability" ? settings.abilityTerm : KIND_STYLE[entry.kind].label;
+    entry.kind === "ability" ? settings.abilityTerm : TERM_LABELS[entry.kind];
   md.appendMarkdown(`**${entry.canonicalName}**　_${kindLabel}_\n\n`);
 
   // 別名で一致した場合、どの呼び方で当たったかを示す。

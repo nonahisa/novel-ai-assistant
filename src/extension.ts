@@ -418,6 +418,13 @@ export async function activate(
       // 本文の隣に並ぶ狭い幅を一覧に取られると、肝心の資料が読めない
       await panel.showRecord(kind, id, { collapseList: true });
     },
+    // 右クリックの時点で、**開いているパネルだけ**を追従させる
+    // （作者の指示、2026-08-28）。開いていなければ何もしない——
+    // 右クリックのたびに新しいパネルが開いては、作者の画面を奪う。
+    // 一覧の畳みも触らない（作者が開けた一覧と喧嘩しないため）
+    previewTerm: async (work, kind, id) => {
+      await findOpenSettingsPanel(work.id)?.showRecord(kind, id);
+    },
     openChat: async (document, range) => {
       // 相談パネルは普通のエディタから本文を受け取る。
       // 同じ文書を横に開いてから渡す（開かないと、前に見ていた

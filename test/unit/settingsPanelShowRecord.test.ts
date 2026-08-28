@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import * as vscode from "vscode";
 import { SettingsPanel } from "../../src/features/settingsPanel";
 
@@ -35,6 +35,8 @@ interface PanelInnards {
   detailOf(kind: string, id: string): unknown;
   refreshFromDisk(): Promise<void>;
   post(message: unknown): void;
+  /** 記録（logStep）に作品名を出すので、代役にも持たせる */
+  work: { id: string; title: string };
   /** 画面が動き出したか（`whenReady` が見ている） */
   ready: boolean;
   readyWaiters: Array<() => void>;
@@ -65,6 +67,7 @@ function panelWith(options: {
 
   const panel = Object.create(SettingsPanel.prototype) as SettingsPanel;
   const inner = panel as unknown as PanelInnards;
+  inner.work = { id: "w-1", title: "灯の塔" };
   inner.ready = options.ready !== false;
   inner.readyWaiters = [];
   inner.detailOf = (kind: string, id: string) =>
@@ -146,6 +149,39 @@ describe("開いているパネルへ、その1件を出す", () => {
     await done;
     expect(posted).toHaveLength(1);
     expect(posted[0]).toMatchObject({ type: "focus", id: "c-akari" });
+  });
+
+  /**
+   * **開きっぱなしのパネルは、待たずにその場で送る**（作者の報告、
+   * 2026-08-28「用語上で右クリックしたとき、パネルの説明は
+   * 切り替わりません」の調べもの）。
+   *
+   * `ready` は開いたときの一度きりしか来ない。**受け取った印を持たずに
+   * 毎回待つと、二度目からは制限時間ぶん（5秒）遅れる**——押しても
+   * すぐには変わらない画面になる。ここは印を持っているので即座に通る。
+   *
+   * 時計を偽物にしておくと、もし待ちに入っていれば**永久に解決しない**
+   * （進める側が誰もいない）ので、待ったかどうかがはっきり分かる。
+   */
+  test("ready 済みのパネルなら、待たずにその場で送る", async () => {
+    const { panel, inner, posted } = panelWith({ foundAfterReload: false });
+    inner.detailOf = (kind: string, id: string) => ({ kind, id, name: "灯" });
+
+    vi.useFakeTimers();
+    try {
+      await panel.showRecord("character", "c-akari", { collapseList: true });
+      expect(posted).toHaveLength(1);
+      expect(posted[0]).toMatchObject({
+        type: "focus",
+        kind: "character",
+        id: "c-akari",
+        collapseList: true,
+      });
+      // 待ち行列にも積まれていない（＝待たずに解決した）
+      expect(inner.readyWaiters).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

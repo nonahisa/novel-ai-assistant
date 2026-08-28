@@ -1,3 +1,5 @@
+import { TERM_COLORS } from "../core/termColors";
+
 /**
  * 設定資料パネルの中身（HTML / CSS / スクリプト）。
  *
@@ -6,7 +8,50 @@
  * 埋め込むと引用符ひとつで画面が壊れる。
  *
  * 色はVS Codeのテーマ変数を使う。作者のテーマに合わせるため。
+ * **例外は用語の色分け**（`core/termColors.ts`）。本文で人物が何色に
+ * 見えるかはテーマ変数では表せないので、そこだけ16進を差し込む。
  */
+
+/**
+ * タブの色分け（作者の指示、2026-08-28）。
+ *
+ * 原稿エディタの下段に出していた凡例（■登場人物 ■場所 …）を外した
+ * 代わりに、**設定資料パネルのタブを本文と同じ色にする。** 色の意味は
+ * 「そのタブの種類の色」として画面から読み取れる。
+ *
+ * VS Code の WebView は body に `vscode-light` / `vscode-dark` /
+ * `vscode-high-contrast` を付ける。**明るいほうを既定に置き、暗いテーマ
+ * だけを上書きする**——class が付かない場面でも色が消えないようにする。
+ * 高コントラストは暗いほうに寄せる（`termHighlight.ts` の扱いと同じ）。
+ */
+function termColorStyles(): string {
+  const light = Object.entries(TERM_COLORS)
+    .map(([kind, color]) => `  --novelai-${kind}: ${color.light};`)
+    .join("\n");
+  const dark = Object.entries(TERM_COLORS)
+    .map(([kind, color]) => `  --novelai-${kind}: ${color.dark};`)
+    .join("\n");
+  const tabs = Object.keys(TERM_COLORS)
+    .map(
+      (kind) =>
+        `#tabs button[data-kind="${kind}"] { color: var(--novelai-${kind}); }`
+    )
+    .join("\n");
+  return `:root {
+${light}
+}
+body.vscode-dark, body.vscode-high-contrast {
+${dark}
+}
+/* **色を付けるのはタブ名の文字色**（本文の用語と同じ表し方に揃える）。
+   作品情報・世界観は本文の色分けに無いので、色を付けない。
+
+   選んでいるタブも色は変えない。**選択の印（下の線と太字）と種類の印
+   （色）は別のもの**で、選択のときだけ色を消すと、いま見ている種類が
+   何色なのか分からなくなる。色は明暗どちらのテーマでも読める濃さを
+   選んであるので、太字にしても沈まない */
+${tabs}`;
+}
 
 export function buildSettingsPanelHtml(nonce: string, cspSource: string): string {
   return `<!DOCTYPE html>
@@ -92,6 +137,7 @@ body.collapsed #reopen { display: block; }
   border-bottom: 2px solid var(--vscode-focusBorder);
   font-weight: bold;
 }
+${termColorStyles()}
 /*
  * 幅は margin のぶんを引く。下の input 全般の width: 100% をそのまま受けると、
  * box-sizing: border-box は margin を含まないため、右へ 16px はみ出す
@@ -542,6 +588,9 @@ button.danger:hover {
     for (const entry of entries) {
       const button = document.createElement("button");
       button.textContent = entry.label + "(" + entry.count + ")";
+      // 本文の用語と同じ色をタブ名に付ける（CSSが data-kind で引く）。
+      // 色分けの無い種類（作品情報・世界観）は当たる規則が無いだけ
+      button.setAttribute("data-kind", entry.kind);
       if (entry.kind === activeKind) button.className = "active";
       button.addEventListener("click", function () {
         activeKind = entry.kind;

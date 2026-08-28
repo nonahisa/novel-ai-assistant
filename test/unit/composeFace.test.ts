@@ -346,11 +346,14 @@ describe("組み立てたDOMの形", () => {
   /**
    * 三点リーダ（作者の依頼、2026-08-28「三点リーダは行中央にしてください」）。
    *
-   * **ただの span にしない。** contenteditable では、装飾つきの span の
-   * 直後に打った文字へ書式が伝染する。この面は自分の入力でDOMを組み直さない
-   * ので、伝染した回転が消えないまま出続ける。
+   * **読む面とまったく同じ素の span にする**（作者の実機報告、2026-08-28
+   * 「組んで書くの三点リーダーはまだ変です。間を開けないでください」）。
+   * 0.24.12 は `contenteditable="false"` のかたまりにしており、CSSは
+   * 読む面から写してあったのに**縦書きで「……」の間に隙間が出た**。
+   * 編集できない要素は編集領域の中で1文字ぶんの箱として扱われないためで、
+   * **CSSを揃えるだけでは足りず、DOMの作りまで同じにする必要がある。**
    */
-  it("三点リーダは、1文字ずつの編集不可のかたまり", () => {
+  it("三点リーダは、読む面と同じ素の span（かたまりにしない）", () => {
     const root = build("あ……い");
     const line = root.childNodes[0];
     expect(line.childNodes).toHaveLength(4);
@@ -358,18 +361,27 @@ describe("組み立てたDOMの形", () => {
       const dots = line.childNodes[index];
       expect(dots.nodeName).toBe("SPAN");
       expect(dots.getAttribute?.("class")).toBe("ellipsis");
-      expect(dots.getAttribute?.("contenteditable")).toBe("false");
-      expect(dots.getAttribute?.("data-src")).toBe("…");
+      // かたまりの印は付けない。付けると編集領域の中で箱として扱われる
+      expect(dots.getAttribute?.("contenteditable")).toBeNull();
+      expect(dots.getAttribute?.("data-src")).toBeNull();
       expect(dots.childNodes[0].nodeValue).toBe("…");
     }
   });
 
-  it("三点リーダは1文字ぶんだけを占める", () => {
+  /**
+   * かたまりではなくなったので、**位置の一覧では平文と同じ扱いに戻る。**
+   * 直列化は「知らない要素は中の文字を拾う」経路で「…」に戻す。
+   */
+  it("三点リーダは平文として数える（かたまりは1つも作らない）", () => {
     const atoms = api.composeAtoms(build("あ……い"));
-    const chunks = atoms.filter((atom) => atom.kind === "chunk");
-    expect(chunks.map((chunk) => [chunk.text, chunk.start, chunk.end])).toEqual([
-      ["…", 1, 2],
-      ["…", 2, 3],
+    expect(atoms.filter((atom) => atom.kind === "chunk")).toEqual([]);
+    expect(
+      atoms.map((atom) => [atom.kind, atom.text, atom.start, atom.end])
+    ).toEqual([
+      ["text", "あ", 0, 1],
+      ["text", "…", 1, 2],
+      ["text", "…", 2, 3],
+      ["text", "い", 3, 4],
     ]);
   });
 
@@ -557,13 +569,15 @@ describe("記法の位置とDOMの位置", () => {
     expect(api.composeSelectionHasChunk(atoms, 1, 1)).toBe(false);
   });
 
-  it("三点リーダのかたまりは、重なっていても妨げにしない", () => {
+  it("三点リーダは妨げにしない（かたまりではないので当たらない）", () => {
     // 「そう……」に傍点、のような使い方を塞がないため（0.24.12）。
-    // 三点リーダは見た目のためのかたまりで、記法（ルビ・傍点）ではない
+    // 三点リーダは見た目のための印で、記法（ルビ・傍点）ではない
     const atoms = api.composeAtoms(build("そう……だ"));
     // 「…」（2〜4）を含む範囲でも false（振ってよい）
     expect(api.composeSelectionHasChunk(atoms, 0, 4)).toBe(false);
     expect(api.composeSelectionHasChunk(atoms, 2, 5)).toBe(false);
+    // 行ぜんぶを選んでも通る
+    expect(api.composeSelectionHasChunk(atoms, 0, 5)).toBe(false);
   });
 });
 
@@ -704,6 +718,58 @@ describe("画面の約束", () => {
     // 1em角に固定しないと、「……」の間に隙間があく
     expect(vertical.slice(0, 300)).toContain("width: 1em");
     expect(vertical.slice(0, 300)).toContain("height: 1em");
+  });
+
+  /**
+   * **読む面の指定と1文字も違わないこと。**
+   *
+   * 作者が確かめて「これでよい」と言ったのは読む面の形である。片方だけを
+   * 直すと、同じ本文が面によって違って見える——それ自体が不具合なので、
+   * 目で見比べるのではなく、両方のブロックを抜き出して比べる。
+   */
+  it("三点リーダのCSSは、読む面と組んで書く面で同じ", () => {
+    /** そのセレクタの { } の中身（前後の空白は落とす） */
+    function block(selector: string): string {
+      const head = html.indexOf(selector + " {");
+      expect(head, selector + " が無い").toBeGreaterThanOrEqual(0);
+      const open = html.indexOf("{", head);
+      const close = html.indexOf("}", open);
+      return html.slice(open + 1, close).trim();
+    }
+
+    expect(block("#compose .ellipsis")).toBe(block("#read .ellipsis"));
+    expect(block("body.vertical #compose .ellipsis")).toBe(
+      block("body.vertical #read .ellipsis")
+    );
+    // 空の比較で通ってしまわないよう、中身があることも見る
+    expect(block("#read .ellipsis").length).toBeGreaterThan(0);
+    expect(block("body.vertical #read .ellipsis")).toContain(
+      "transform: rotate(90deg)"
+    );
+  });
+
+  /**
+   * 素の span にした代わりの手当て（0.24.13）。
+   *
+   * span の中で打つと、回した書式が打った字へ伝染する。打つ直前に
+   * カーソルを span の外へ逃がす。**変換中（IME）は触らない**——変換の
+   * 途中で選択を動かすと、日本語入力の側が持つ位置とずれて変換が壊れる。
+   */
+  it("三点リーダの中で打つ前に、カーソルを外へ出す", () => {
+    expect(code).toContain("function composeEscapeEllipsis(");
+    expect(code).toContain("function composeEllipsisAncestor(");
+    const escape = code.slice(code.indexOf("function composeEscapeEllipsis("));
+    expect(escape.slice(0, 900)).toContain("if (composing) return;");
+    expect(escape.slice(0, 900)).toContain(
+      'if (kind === "insertCompositionText") return;'
+    );
+    expect(escape.slice(0, 900)).toContain("setStartBefore(span)");
+    expect(escape.slice(0, 900)).toContain("setStartAfter(span)");
+    // beforeinput から呼ぶ（打ち込みが起きる前でないと逃がせない）
+    const before = code.slice(
+      code.indexOf('compose.addEventListener("beforeinput"')
+    );
+    expect(before.slice(0, 400)).toContain("composeEscapeEllipsis(kind)");
   });
 
   it("面の状態を覚える", () => {

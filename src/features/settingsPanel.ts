@@ -441,6 +441,12 @@ export class SettingsPanel {
     // **開いた直後の画面へ送っても捨てられる**（スクリプトがまだ走っていない）。
     // 用語から開くときは、パネルもその場で作られていることがある
     await this.whenReady();
+    // **送ったことを記録する**（作者の報告、2026-08-28「用語上で右クリック
+    // したとき、パネルの説明は切り替わりません」）。ここまで来ていれば
+    // 疑うのは画面側、来ていなければ経路の手前と、切り分けられる
+    logStep(
+      `設定資料パネル：${this.work.title} の ${kind}/${id} を画面へ送りました`
+    );
     this.post({
       type: "focus",
       kind,
@@ -502,11 +508,24 @@ export class SettingsPanel {
    *
    * 待ち切れなくても先へ進む。画面が既に動いていれば映るし、
    * ここで止まると作者は何も起きないまま待たされる。
+   *
+   * **既に `ready` を受け取っていれば、その場で解決する。** 一度きりの
+   * 知らせを待ち続けると、開きっぱなしのパネルへは二度と送れなくなる。
+   *
+   * **待ち切れなかったことは黙って捨てない**（作者の報告、2026-08-28）。
+   * 「押しても切り替わらない」を調べるとき、ここを通ったのかどうかが
+   * 分からないと、画面側と拡張機能側のどちらを見ればよいか決められない。
    */
   private whenReady(timeoutMs = 5_000): Promise<void> {
     if (this.ready) return Promise.resolve();
     return new Promise((resolve) => {
-      const timer = setTimeout(resolve, timeoutMs);
+      const timer = setTimeout(() => {
+        logStep(
+          `設定資料パネル：画面の準備（ready）を${timeoutMs}ミリ秒待ちきれず、` +
+            "そのまま送りました"
+        );
+        resolve();
+      }, timeoutMs);
       this.readyWaiters.push(() => {
         clearTimeout(timer);
         resolve();

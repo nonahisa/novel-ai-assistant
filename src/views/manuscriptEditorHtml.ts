@@ -128,6 +128,10 @@ button.on {
   border-top: 1px solid var(--vscode-panel-border, transparent);
   background: var(--vscode-editor-background);
 }
+/* **画面の右下へ置く**（作者の依頼、2026-08-28）。
+   margin-left: auto にしておくと、この段へ左寄せの要素を足しても
+   このボタンだけが右端に残る（並び順で決め打たない） */
+#latest { margin-left: auto; }
 #surface {
   flex: 1 1 auto;
   position: relative;
@@ -239,11 +243,16 @@ body.vertical #compose {
      同じ扱いで、英数字のまとまりを横に寝かせる */
   text-orientation: mixed;
   /*
-    **傍線は行の右へ。**（作者の指示、2026-08-24）
+    **傍線は行の右へ。**（作者の指示、2026-08-24。同じ依頼が2026-08-28にも）
 
     ただし**変換中の線には効かなかった**（実機で確認、設計書6.25.2）。
     あの線を引いているのは日本語入力の層で、本文の下線とは別の道を通る。
     ここに残してあるのは、本文へ下線を引く日が来たときのためである。
+
+    **この指定は打つ面（#write）と組んで書く面（#compose）の両方に
+    かかっている**（下のセレクタに両方が並んでいる）。0.19.3 で確かめたのは
+    textarea の側だけなので、contenteditable の側（#compose）で効くかは
+    実機で見るまで分からない——描いているのが同じ層なら、やはり効かない。
 
     縦書きの日本語では、傍線（下線）は行の右側に引く。変換中に日本語入力が
     引く線もこれに従う。既定（auto）では左に出ることがあり、**打っている
@@ -302,8 +311,10 @@ body.vertical #compose p, body.vertical #compose div {
 /* **三点リーダを行の中央に寄せる**（作者の依頼、2026-08-28）。
    読む面（#read .ellipsis）で作者が確かめた形をそのまま使う——
    同じ本文が面によって違って見えるのは、それ自体が不具合である。
-   組み立て側は composeBuildEllipsis が「…」1文字ずつを
-   **編集不可のかたまり**にしている（書式が次の字へ伝染しないように） */
+   **中身は #read のブロックと1文字も違えない**（composeFace.test.ts が
+   両方を抜き出して比べる）。組み立て側も読む面と同じ素の span にしてある
+   ——0.24.12 は編集不可のかたまりにしており、CSSは同じなのに縦書きで
+   「……」の間に隙間が出た（作者の実機報告、2026-08-28） */
 #compose .ellipsis {
   vertical-align: middle;
 }
@@ -447,13 +458,10 @@ body.plain .term { color: inherit; }
   margin: 4px 0;
   background: var(--vscode-menu-separatorBackground, var(--vscode-panel-border));
 }
-#menu .head {
-  padding: 4px 14px;
-  font-size: 11px;
-  opacity: 0.7;
-}
-
-/* ── 下の帯（凡例と知らせ） ───────────── */
+/* ── 下の帯（知らせ） ─────────────────── */
+/* 色分けの凡例はここに並べていたが、**作者の指示で外した**（2026-08-28
+   「文字の色分け説明は不要です」）。色の意味は設定資料パネルのタブが
+   同じ色で示す（views/settingsPanelHtml.ts） */
 #foot {
   flex: 0 0 auto;
   display: flex;
@@ -464,10 +472,6 @@ body.plain .term { color: inherit; }
   font-size: 11px;
   opacity: 0.85;
   flex-wrap: wrap;
-}
-#foot .swatch::before {
-  content: "■";
-  margin-right: 3px;
 }
 #note {
   color: var(--vscode-notificationsInfoIcon-foreground, inherit);
@@ -504,7 +508,6 @@ body.plain .term { color: inherit; }
 </div>
 
 <div id="foot">
-  <span id="legend"></span>
   <span id="note"></span>
 </div>
 
@@ -528,7 +531,6 @@ body.plain .term { color: inherit; }
   let latestMarks = null;
   const menu = document.getElementById("menu");
   const countLabel = document.getElementById("count");
-  const legend = document.getElementById("legend");
   const note = document.getElementById("note");
   const modeButton = document.getElementById("mode");
   const dirButton = document.getElementById("dir");
@@ -1375,10 +1377,10 @@ body.plain .term { color: inherit; }
     }
 
     if (term) {
-      const head = document.createElement("div");
-      head.className = "head";
-      head.textContent = term.name;
-      menu.appendChild(head);
+      // **用語の名前は出さない**（作者の依頼、2026-08-28
+      // 「右クリックで出てくるメニューの一番上に名称はいりません」）。
+      // 右クリックした語は本人がいちばんよく分かっているので、
+      // 品書きの上から1行ぶん奪うほどの手がかりではない
       add("設定資料を見る", function () {
         vscode.postMessage({ type: "openTerm", id: term.id, kind: term.kind });
       });
@@ -1475,14 +1477,18 @@ body.plain .term { color: inherit; }
     event.preventDefault();
     // **選択は、押された時点で読んでおく**（組んで書く面。上の相談・ルビで使う）
     if (composeOn) composeMenuAt = composeSelectionNow();
-    openMenu(
-      event.clientX,
-      event.clientY,
-      composeOn
-        ? composeTermAt(event.clientX, event.clientY)
-        : termFrom(event.target),
-      selectionText().length > 0
-    );
+    const term = composeOn
+      ? composeTermAt(event.clientX, event.clientY)
+      : termFrom(event.target);
+    // **右クリックそのもので、開いている資料パネルを追従させる**
+    // （作者の指示、2026-08-28「右クリックした場合で、すでに設定資料
+    // パネルが開いている場合は、該当項目の設定資料を表示」）。
+    // パネルが開いていなければ拡張機能側が黙って何もしない——開くのは、
+    // 品書きの「設定資料を見る」を押したときだけ
+    if (term) {
+      vscode.postMessage({ type: "previewTerm", id: term.id, kind: term.kind });
+    }
+    openMenu(event.clientX, event.clientY, term, selectionText().length > 0);
   });
 
   document.addEventListener("click", function (event) {
@@ -1662,17 +1668,6 @@ body.plain .term { color: inherit; }
         }
       }
       document.body.classList.toggle("plain", message.hasTerms === false);
-      legend.innerHTML = "";
-      if (message.legend) {
-        for (const item of message.legend) {
-          const span = document.createElement("span");
-          span.className = "swatch";
-          span.style.color = "var(--novelai-" + item.kind + ")";
-          span.textContent = item.label;
-          legend.appendChild(span);
-          legend.appendChild(document.createTextNode(" "));
-        }
-      }
     } else if (message.type === "count") {
       countLabel.textContent = message.label;
     } else if (message.type === "revealLine") {
@@ -1807,16 +1802,23 @@ body.plain .term { color: inherit; }
   }
 
   /**
-   * 三点リーダ「…」のかたまり（作者の依頼、2026-08-28）。
+   * 三点リーダ「…」の印（作者の依頼、2026-08-28）。
    *
    * 位置はフォント任せで、横書きでは下に沈み、縦書きでは縦用の字形を
    * 持たないフォントで横倒しのまま出る。読む面（#read .ellipsis）と同じく、
    * 印を付けてCSSで行の中央へ寄せる。
    *
-   * **編集不可のかたまりにする**（ルビ・傍点と同じ扱い）。ただの span に
-   * すると、**その直後に打った文字へ書式が伝染する**——この面は自分の入力で
-   * DOMを組み直さないので、伝染した回転が消えないまま出続ける。
-   * かたまりなら伝染せず、消すときも「…」1文字ぶんで消える。
+   * **読む面と1文字も違わない素の span にする**（作者の実機報告、2026-08-28
+   * 「組んで書くの三点リーダーはまだ変です。間を開けないでください」）。
+   * 0.24.12 では contenteditable="false" の**かたまり**にしていたが、
+   * 編集できない要素は編集領域の中で1文字ぶんの箱として扱われず、
+   * 縦書きで「……」の点列のあいだに隙間が出た。**CSSを写しただけでは
+   * 同じに見えない**——DOMの作りまで同じにする必要がある。
+   *
+   * かたまりを外した代わりに、**打鍵の直前にカーソルを span の外へ出す**
+   * （composeEscapeEllipsis）。span の中で打つと、回した書式が次の字へ
+   * 伝染するためである。伝染しても本文は正しいままで、面を組み直せば直る
+   * ので、**常に見える隙間より軽い**という順序で選んだ。
    *
    * **1文字ずつ包む。** 「……」をまとめて回すと、回転の中心が2文字の
    * 真ん中になり、縦書きで点列が柱からはみ出す（読む面と同じ理由）。
@@ -1824,14 +1826,13 @@ body.plain .term { color: inherit; }
   function composeBuildEllipsis(doc) {
     const span = doc.createElement("span");
     span.setAttribute("class", "ellipsis");
-    span.setAttribute("contenteditable", "false");
-    // 直列化は data-src を見る。ここが「…」なので、本文は1文字のまま戻る
-    span.setAttribute("data-src", "…");
+    // data-src は付けない。直列化は**中の文字を拾う**経路（知らない要素と
+    // 同じ扱い）で「…」に戻る。付けるとかたまりとして数えられてしまう
     span.appendChild(doc.createTextNode("…"));
     return span;
   }
 
-  /** 平文を段落へ入れる。**三点リーダだけは、かたまりとして入れる** */
+  /** 平文を段落へ入れる。**三点リーダだけは、寄せるための印で包む** */
   function composeAppendText(parent, value, doc) {
     let last = 0;
     for (let i = 0; i < value.length; i++) {
@@ -1942,16 +1943,11 @@ body.plain .term { color: inherit; }
       if (kid.nodeType !== 1) continue;
       const src = kid.getAttribute ? kid.getAttribute("data-src") : null;
       if (src !== null && src !== undefined && src !== "") {
-        // かたまり（ルビ・傍点・三点リーダ）。**中は見ない**——記法そのものを持っている
+        // かたまり（ルビ・傍点）。**中は見ない**——記法そのものを持っている。
+        // 三点リーダはかたまりではない（素の span なので、下の
+        // 「知らない要素は中の文字を拾う」経路で平文として数えられる）
         atoms.push({
           kind: "chunk",
-          // 三点リーダは**見た目のためのかたまり**で、記法ではない。
-          // 「そう……」に傍点、のように**上へ記法を重ねてよい**——
-          // ルビ・傍点と同じに数えると、…を含む範囲へ何も振れなくなる。
-          // classList ではなく属性で見る（試験の偽DOMは属性しか持たない）
-          decor:
-            (kid.getAttribute ? kid.getAttribute("class") : null) ===
-            "ellipsis",
           node: kid,
           parent: node,
           index: i,
@@ -2102,12 +2098,15 @@ body.plain .term { color: inherit; }
     return offset > 0 ? atoms[atoms.length - 1].end : 0;
   }
 
-  /** その範囲に、かたまり（ルビ・傍点）が重なっているか */
+  /**
+   * その範囲に、かたまり（ルビ・傍点）が重なっているか。
+   *
+   * 三点リーダは**かたまりではない**（素の span で、平文として数えられる）
+   * ので、ここには当たらない。「そう……」に傍点、のような使い方は通る。
+   */
   function composeSelectionHasChunk(atoms, start, end) {
     for (const atom of atoms) {
-      // 三点リーダ（decor）は見逃す。見た目のためのかたまりであって
-      // 記法ではないので、その上へルビ・傍点を重ねてよい
-      if (atom.kind !== "chunk" || atom.decor) continue;
+      if (atom.kind !== "chunk") continue;
       if (atom.start < end && atom.end > start) return true;
     }
     return false;
@@ -2306,13 +2305,71 @@ body.plain .term { color: inherit; }
     }, 0);
   });
 
+  /** カーソルが三点リーダの印（span.ellipsis）の中にいるなら、その印を返す */
+  function composeEllipsisAncestor(node) {
+    let at = node;
+    while (at && at !== compose) {
+      if (
+        at.nodeType === 1 &&
+        at.getAttribute &&
+        at.getAttribute("class") === "ellipsis"
+      ) {
+        return at;
+      }
+      at = at.parentNode;
+    }
+    return null;
+  }
+
+  /**
+   * 打つ前に、カーソルを三点リーダの印の**外**へ出す。
+   *
+   * 「…」は読む面と同じ素の span で出している（かたまりにすると縦書きで
+   * 隙間が出る。composeBuildEllipsis 参照）。素の span は中へカーソルが
+   * 入るので、**そこで打った字が回った書式を受け継ぐ。**
+   *
+   * 打った字が本文として正しいことは変わらない（直列化は中の文字も拾う）
+   * ので、**これは見た目だけの話**で、面を組み直せば直る。それでも、
+   * 打つたびに字が横倒しになるのは目障りなので、先に外へ逃がしておく。
+   *
+   * **変換中（IME）は触らない。** 変換の途中で選択を動かすと、日本語入力の
+   * 側が持っている位置とずれて、変換そのものが壊れる。
+   */
+  function composeEscapeEllipsis(kind) {
+    if (composing) return;
+    // 文字を入れる操作だけ。消す操作でずらすと、消える字が変わってしまう
+    if (kind.indexOf("insert") !== 0) return;
+    if (kind === "insertCompositionText") return;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    if (!range.collapsed) return;
+    const span = composeEllipsisAncestor(range.startContainer);
+    if (!span || !span.parentNode) return;
+    // 先頭にいるなら手前へ、それ以外は後ろへ出す（打った字が同じ側に残る）
+    const atHead =
+      range.startOffset === 0 &&
+      (range.startContainer === span ||
+        range.startContainer === span.firstChild);
+    const moved = document.createRange();
+    if (atHead) moved.setStartBefore(span);
+    else moved.setStartAfter(span);
+    moved.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(moved);
+  }
+
   /**
    * **装飾のコマンドは通さない。** Ctrl+B などは記法に無いものを
    * DOMへ入れる（太字の要素）ので、直列化がそこで崩れる。
    */
   compose.addEventListener("beforeinput", function (event) {
     const kind = event.inputType || "";
-    if (kind.indexOf("format") === 0) event.preventDefault();
+    if (kind.indexOf("format") === 0) {
+      event.preventDefault();
+      return;
+    }
+    composeEscapeEllipsis(kind);
   });
 
   /**

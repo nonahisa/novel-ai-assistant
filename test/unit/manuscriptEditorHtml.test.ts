@@ -243,3 +243,64 @@ describe("並べて書く", () => {
     expect(code).toContain("vertical, reading, split, size");
   });
 });
+
+/**
+ * 下段と右クリックの品書き（作者の実機報告、2026-08-28）。
+ *
+ * - 「右クリックで出てくるメニューの一番上に名称はいりません」
+ * - 「『最新話を書く』は画面右下に配置してください」
+ * - 「文字の色分け説明は不要です」
+ */
+describe("下段と品書きの整理", () => {
+  const code = html.slice(html.indexOf("<script"));
+
+  /**
+   * 品書きの先頭に用語名を出さない。**右クリックした語は本人がいちばん
+   * よく分かっている**ので、1行ぶん取るほどの手がかりではない。
+   */
+  /**
+   * 右クリックそのもので、**開いている**資料パネルが追従する
+   * （作者の指示、2026-08-28）。開くのは品書きの「設定資料を見る」だけで、
+   * 追従は開いているパネルに限る（画面を奪わない）。
+   */
+  it("右クリックの時点で previewTerm を送る", () => {
+    const menuHandler = code.slice(
+      code.indexOf('document.addEventListener("contextmenu"')
+    );
+    expect(
+      menuHandler.slice(0, menuHandler.indexOf("openMenu("))
+    ).toContain('type: "previewTerm"');
+  });
+
+  it("右クリックの品書きに、用語の名前を出さない", () => {
+    const open = code.slice(code.indexOf("function openMenu("));
+    const body = open.slice(0, open.indexOf("function termAtCaret("));
+    expect(body).not.toContain('className = "head"');
+    expect(body).not.toContain("head.textContent = term.name");
+    // 用語があるときの入口そのものは残っている
+    expect(body).toContain("設定資料を見る");
+    // 使わなくなった見出しの装いも残さない
+    expect(html).not.toContain("#menu .head {");
+  });
+
+  /** 書いている手の近く、画面の右下に置く */
+  it("「最新話を書く」は下段の右端に寄せる", () => {
+    expect(html).toContain('<div id="bottom">');
+    expect(html).toContain('id="latest"');
+    expect(html).toContain("#latest { margin-left: auto; }");
+  });
+
+  /**
+   * 凡例は**跡形なく**外す。span も、組み立てるスクリプトも、
+   * 送る側（features/manuscriptEditor.ts）も。
+   * 色の意味は設定資料パネルのタブが同じ色で示す。
+   */
+  it("色分けの凡例を出さない", () => {
+    expect(html).not.toContain('id="legend"');
+    expect(code).not.toContain("legend");
+    expect(html).not.toContain("#foot .swatch");
+    expect(html).not.toContain('className = "swatch"');
+    // 知らせの行は残す（凡例と同じ帯に同居していた）
+    expect(html).toContain('id="note"');
+  });
+});
