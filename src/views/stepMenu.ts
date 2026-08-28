@@ -381,23 +381,27 @@ export function describeSelector(
   if (!hasAnyWork) {
     return { label: STEP_NO_WORK_LABEL, description: STEP_NO_WORK_HINT };
   }
-  if (selected) return { label: `作品：${selected.title}`, description: "" };
+  // 「選択作品：」の文言と、押して選び直す形は作者の指定（2026-08-28）
+  if (selected) {
+    return { label: `選択作品：${selected.title}`, description: "" };
+  }
   return { label: STEP_CHOOSE_WORK_LABEL, description: "" };
 }
 
 /**
  * ビューの見出し（「ステップメニュー」の右の薄字）に出す文字。
  *
- * 最上段の選択窓は、段階を開いてスクロールすると画面の外へ流れる。
- * 見出しに作品名があれば、どの状態でも「いま何に効くメニューか」が
- * 見える（作者の依頼、2026-08-27）。文言は最上段と同じものを使う。
+ * **選んだ作品名はここに出さない**（作者の撤回、2026-08-28。
+ * 「右側に作品名はやっぱり入れなくて良いです」——最上段の
+ * 「選択作品：〜」の行が代わりを務める）。残すのは、下の操作が
+ * 使えない状態の注意（未登録・未選択）だけ。
  */
 export function stepViewDescription(
   selected: WorkEntry | undefined,
   hasAnyWork: boolean
 ): string {
   if (!hasAnyWork) return STEP_NO_WORK_LABEL;
-  if (selected) return selected.title;
+  if (selected) return "";
   return STEP_CHOOSE_WORK_LABEL;
 }
 
@@ -585,8 +589,9 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
             "book",
             new vscode.ThemeColor("disabledForeground")
           )
-        : // 選べているかどうかが、ひと目で分かるようにする
-          new vscode.ThemeIcon(selected ? "check" : "book");
+        : // ✓は出さない（作者の指定、2026-08-28）。押すと選び直せる行
+          // なので、選択肢が下りてくる印（∨）にする
+          new vscode.ThemeIcon("chevron-down");
     item.tooltip = new vscode.MarkdownString(
       works.length === 0
         ? "**まだ作品が登録されていません。**\n\n" +

@@ -67,6 +67,17 @@ describe("原稿エディタのHTML", () => {
     expect(html).toContain("compositionend");
   });
 
+  /**
+   * 文字列で組み立てているので、ここが壊れると画面が真っ白になる。
+   * **`\n` のような書き方は、テンプレート文字列の側で1回ほどける**ので、
+   * 生の改行が混ざっただけでも読めなくなる。
+   */
+  it("スクリプトがJavaScriptとして読める", () => {
+    const found = html.match(/<script nonce="NONCE123">([\s\S]*?)<\/script>/);
+    expect(found, "スクリプトが見つからない").toBeTruthy();
+    expect(() => new Function(found![1])).not.toThrow();
+  });
+
   it("タグの数が合っている", () => {
     const open = [...html.matchAll(/<div\b/g)].length;
     const close = [...html.matchAll(/<\/div>/g)].length;
@@ -116,6 +127,87 @@ describe("日本語入力を壊さない", () => {
   it("見えていない「読む」面は、切り替えるまで組み立てない", () => {
     expect(code).toContain("freshHtml");
     expect(code).toContain("applyFreshHtml");
+  });
+});
+
+/**
+ * 打つ面の用語（設計書6.25.6）。作者の報告（2026-08-28）は2つ。
+ *
+ * 1. 「文字サイズを変えるとマーカーが追随しません」
+ * 2. 「用語はマーカーではなく文字色で表現してください」
+ *
+ * ずれの正体は**折り返し幅の差**である。打つ面（textarea）はスクロールバーの
+ * ぶんだけ本文が狭く、重ねる面（#marks）は overflow:hidden でバーが無い。
+ * 文字を大きくするとバーが出入りして、折り返しの位置が食い違う。
+ */
+describe("打つ面の用語の色", () => {
+  const code = html.slice(html.indexOf("<script"));
+
+  it("背景を塗らず、文字色で出す", () => {
+    expect(html).toContain(".mark-character { color: var(--novelai-character); }");
+    expect(html).toContain(".mark-location { color: var(--novelai-location); }");
+    expect(html).toContain(".mark-ability { color: var(--novelai-ability); }");
+    expect(html).toContain(
+      ".mark-organization { color: var(--novelai-organization); }"
+    );
+    // 塗りが残っていると、色と帯が二重に出る
+    expect(html).not.toContain("background: color-mix(in srgb, var(--novelai-");
+  });
+
+  /** 色は文字そのものに乗せるので、打つ面の**上**へ重ねる必要がある */
+  it("打つ面の上へ重ねる", () => {
+    const marks = html.slice(html.indexOf("#marks {"), html.indexOf("#marks.stale"));
+    expect(marks).toContain("z-index");
+    expect(marks).toContain("pointer-events: none");
+    // 変換中の文字は textarea にしか無い。透明にすると打っている字が消える
+    expect(html).toContain("color: var(--vscode-editor-foreground)");
+  });
+
+  it("スクロールバーのぶんを測って、重ねる面の枠を合わせる", () => {
+    expect(code).toContain("function alignMarksBox()");
+    expect(code).toContain("write.offsetWidth - write.clientWidth");
+    expect(code).toContain("write.offsetHeight - write.clientHeight");
+  });
+
+  /**
+   * **測り直す機会が足りていなかった**のが不具合の本体である。
+   * 本文が変わったときだけでなく、大きさ・向き・窓の大きさでも測り直す。
+   */
+  it("大きさ・向き・窓の大きさでも測り直す", () => {
+    expect(code).toContain("function scheduleAlignMarks()");
+    // paint() は大きさと向きの両方をここで当てている
+    expect(code).toMatch(/--novelai-size[\s\S]{0,200}scheduleAlignMarks\(\)/);
+    expect(code).toContain('window.addEventListener("resize", scheduleAlignMarks)');
+  });
+
+  /** 1回の操作で何度も採寸が走らないように、1フレームへまとめる */
+  it("測り直しは1フレームに1回へまとめる", () => {
+    expect(code).toMatch(/scheduleAlignMarks[\s\S]{0,400}requestAnimationFrame/);
+  });
+});
+
+/**
+ * 誤字脱字の提案から、この画面のまま場所を示す（作者の依頼、2026-08-28）。
+ *
+ * 「誤字脱字から開く場合は、現在メインで開いているエディターと同じ
+ * エディターで開いたうえで場所を示してください」。
+ */
+describe("その行を示す", () => {
+  const code = html.slice(html.indexOf("<script"));
+
+  it("revealLine を受け取る", () => {
+    expect(code).toContain('message.type === "revealLine"');
+    expect(code).toContain("function revealLine(line)");
+  });
+
+  /**
+   * 縦書きと横書きで転がす向きが違う。Chromium の
+   * 「焦点を当てると選択まで転がす」振る舞いに任せて吸収している。
+   */
+  it("選び直してから、焦点を入れ直して転がす", () => {
+    expect(code).toMatch(
+      /setSelectionRange\(start, end\)[\s\S]{0,300}write\.blur\(\);\s*write\.focus\(\);/
+    );
   });
 });
 

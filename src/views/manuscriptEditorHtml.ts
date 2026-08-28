@@ -146,10 +146,20 @@ button.on {
   font-family: var(--novelai-font, "Yu Mincho", "YuMincho",
     "Hiragino Mincho ProN", "MS Mincho", serif);
 }
-/* **打つ面の裏に敷く目印**（設計書6.25.6）。
-   打つ面と同じ字送りで同じ本文を置き、用語のところだけ背景を塗る。
-   **文字は出さない**（透明）。表の textarea の文字が本物で、
-   変換中の文字もそちらに出る */
+/* **打つ面に重ねる用語の色**（設計書6.25.6）。
+   打つ面と同じ字送りで同じ本文を置き、用語のところだけ色を付ける。
+   用語以外の文字は透明のまま——見えている字は textarea のものである。
+
+   ## なぜ「上」に重ねるのか（作者の依頼、2026-08-28）
+   マーカー（背景の塗り）ではなく**文字色**にしてほしい、という指示による。
+   背景なら裏に敷けば足りたが、色は文字そのものに乗せないと出ない。
+   同じ字形が同じ位置に重なるので、色の付いた字が黒字の上へぴったり載り、
+   「その語だけ色が変わった」ように見える。
+
+   ## なぜ textarea 側の字を透明にしないのか
+   **変換中（IME）の文字は textarea にしか無い。** 打っている最中の文字は
+   まだ本文へ入っておらず、こちらの目印にも現れない。textarea を透明に
+   すると、**打っている字が見えなくなる。** */
 #marks {
   color: transparent;
   white-space: pre-wrap;
@@ -158,19 +168,23 @@ button.on {
   overflow: hidden;
   pointer-events: none;
   user-select: none;
+  /* 打つ面より上へ。DOMの並びでは textarea が後ろにいるので、明示する */
+  z-index: 2;
 }
 /* 打っている間は隠す。**位置のずれた目印を出さない**——
    本文が変わってから新しい目印が届くまでの間、古い位置のまま残るため */
 #marks.stale { visibility: hidden; }
 /* 読む面・並べる面では、そちらに色が付くので要らない */
 body.reading #marks, body.split #marks { display: none; }
-.mark { border-radius: 2px; }
-.mark-character { background: color-mix(in srgb, var(--novelai-character) 22%, transparent); }
-.mark-location { background: color-mix(in srgb, var(--novelai-location) 22%, transparent); }
-.mark-ability { background: color-mix(in srgb, var(--novelai-ability) 22%, transparent); }
-.mark-organization { background: color-mix(in srgb, var(--novelai-organization) 22%, transparent); }
-.mark-world { background: color-mix(in srgb, var(--novelai-world, var(--novelai-character)) 22%, transparent); }
-body.plain .mark { background: transparent; }
+/* **色は読む面・組んで書く面と同じ変数から取る**（画面ごとに違う色にしない）。
+   角丸は塗りのためのものだったので、色にした今は要らない */
+.mark-character { color: var(--novelai-character); }
+.mark-location { color: var(--novelai-location); }
+.mark-ability { color: var(--novelai-ability); }
+.mark-organization { color: var(--novelai-organization); }
+.mark-world { color: var(--novelai-world, var(--novelai-character)); }
+/* 用語が1件も無い作品では、重ねた字を出さない（透明のまま） */
+body.plain .mark { color: transparent; }
 #write {
   border: none;
   resize: none;
@@ -189,13 +203,14 @@ body.plain .mark { background: transparent; }
   min-height: 1.9em;
 }
 /* 縦書き。**行の高さを「幅」として持つ**ので、指定はそのまま効く。
-   **#marks（打つ面の裏の目印）も必ず同じ向きにする。** 0.22.24まで
-   ここから漏れており、縦書きのとき裏だけ横書きで塗られて、目印が
+   **#marks（打つ面に重ねる用語の色）も必ず同じ向きにする。** 0.22.24まで
+   ここから漏れており、縦書きのとき重ねる面だけ横書きで組まれて、色が
    本文と無関係な場所（空白）に浮いていた（実機の報告、2026-08-27） */
-/* **三点リーダを行の中央に寄せる**（作者の依頼、2026-08-28。読む面だけ）。
+/* **三点リーダを行の中央に寄せる**（作者の依頼、2026-08-28）。
    横書き：欧文フォントに落ちると「…」が下に沈むので、中央を明示する。
    縦書き：横書きの向きに固定してから90度回す。フォントが縦用の字形
    （縦3点）を持つかに依存せず、同じ見た目になる。
+   ここは読む面ぶん。組んで書く面は #compose .ellipsis で同じ形にしてある。
    書く面（textarea）は文字単位の調整ができないため、フォントの形のまま */
 #read .ellipsis {
   vertical-align: middle;
@@ -284,6 +299,28 @@ body.vertical #compose p, body.vertical #compose div {
   /* 選択の見た目を、ふつうの文字と揃える */
   border-radius: 2px;
 }
+/* **三点リーダを行の中央に寄せる**（作者の依頼、2026-08-28）。
+   読む面（#read .ellipsis）で作者が確かめた形をそのまま使う——
+   同じ本文が面によって違って見えるのは、それ自体が不具合である。
+   組み立て側は composeBuildEllipsis が「…」1文字ずつを
+   **編集不可のかたまり**にしている（書式が次の字へ伝染しないように） */
+#compose .ellipsis {
+  vertical-align: middle;
+}
+/* **箱を1em角の正方形に固定する。** 寸法を決めないと箱の高さが行の高さに
+   なって「……」の間に隙間があき、フォントサイズを変えると回転の中心が
+   柱からずれる（読む面と同じ理由） */
+body.vertical #compose .ellipsis {
+  writing-mode: horizontal-tb;
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  line-height: 1em;
+  text-align: center;
+  transform: rotate(90deg);
+  transform-origin: center;
+  vertical-align: baseline;
+}
 /* 圏点は読む面と同じ出し方（em.emph と同じ指定を分け合う） */
 #compose .emphasis {
   font-style: normal;
@@ -293,7 +330,7 @@ body.vertical #compose p, body.vertical #compose div {
   -webkit-text-emphasis-position: over right;
 }
 /* **用語の色付けは CSS Custom Highlight API で行う**（設計書6.34.3）。
-   下敷き（#marks）も印の要素も使わないので、色を付けてもDOMは変わらず、
+   重ね敷き（#marks）も印の要素も使わないので、色を付けてもDOMは変わらず、
    カーソルも取り消し履歴も動かない。使えない環境では色が出ないだけ */
 ::highlight(novelai-term-character) { color: var(--novelai-character); }
 ::highlight(novelai-term-location) { color: var(--novelai-location); }
@@ -479,7 +516,7 @@ body.plain .term { color: inherit; }
   const vscode = acquireVsCodeApi();
   const write = document.getElementById("write");
   const read = document.getElementById("read");
-  /** 打つ面の裏に敷く目印（設計書6.25.6） */
+  /** 打つ面に重ねる用語の色（設計書6.25.6） */
   const marks = document.getElementById("marks");
   /** 用語の位置。右クリックで「どの用語の上か」を引くのに使う */
   let termSpans = [];
@@ -603,6 +640,9 @@ body.plain .term { color: inherit; }
       : "組んで書く（実験）";
     composeButton.classList.toggle("on", composeOn);
     document.documentElement.style.setProperty("--novelai-size", size + "px");
+    // **大きさも向きもここで変わる。** どちらも折り返し幅を変えるので、
+    // 重ねた色の枠を測り直す（実機の報告、2026-08-28）
+    scheduleAlignMarks();
     modeButton.textContent = reading ? "書く" : "読む";
     modeButton.classList.toggle("on", reading);
     dirButton.textContent = vertical !== false ? "横書きにする" : "縦書きにする";
@@ -849,13 +889,40 @@ body.plain .term { color: inherit; }
    *
    * 打つ面には**スクロールバーがあり、その分だけ本文の幅が狭い**。
    * 鏡は overflow:hidden でバーが無く、そのままだと全幅で折り返して
-   * 1行の字数が変わり、**目印が1行ずつずれて空行の上に浮く**
+   * 1行の字数が変わり、**色の付く字が1行ずつずれる**
    * （実機の報告、2026-08-27。横書きで確認された）。
    * 縦書きでは横のバーの高さぶんが同じ理由でずれる。両方を合わせる。
+   *
+   * **測り直す機会が足りていなかった**（実機の報告、2026-08-28
+   * 「文字サイズを変えるとマーカーが追随しません」）。ここを呼んでいたのは
+   * 目印が届いたときだけで、目印が届くのは**本文が変わったとき**である。
+   * 文字の大きさを変えるとスクロールバーが出たり消えたりして折り返し幅が
+   * 変わるのに、本文は変わらないので測り直されなかった。
    */
   function alignMarksBox() {
     marks.style.right = (write.offsetWidth - write.clientWidth) + "px";
     marks.style.bottom = (write.offsetHeight - write.clientHeight) + "px";
+  }
+
+  /**
+   * 測り直しの予約。**1フレームに1回**へまとめる。
+   *
+   * 大きさ・向き・本文の伸び縮み・窓の大きさと、きっかけが4つあって
+   * 同じ瞬間に重なる（向きを変えれば本文の折り返しも変わる）。
+   * まとめずに呼ぶと、1回の操作で何度も採寸が走る。
+   *
+   * **フレームまで待つのにも意味がある。** クラスや CSS 変数を変えた直後は、
+   * まだ新しい大きさで組み直されていないことがある。
+   */
+  let alignTimer = null;
+  function scheduleAlignMarks() {
+    if (alignTimer !== null) return;
+    alignTimer = requestAnimationFrame(function () {
+      alignTimer = null;
+      alignMarksBox();
+      marks.scrollTop = write.scrollTop;
+      marks.scrollLeft = write.scrollLeft;
+    });
   }
 
   function applyMarksIfMatch() {
@@ -869,11 +936,7 @@ body.plain .term { color: inherit; }
   }
 
   // 窓の大きさが変わるとスクロールバーの有無も変わりうる。合わせ直す
-  window.addEventListener("resize", function () {
-    alignMarksBox();
-    marks.scrollTop = write.scrollTop;
-    marks.scrollLeft = write.scrollLeft;
-  });
+  window.addEventListener("resize", scheduleAlignMarks);
 
   /* ── 並べているときの追いかけ ──────────────────── */
 
@@ -1223,6 +1286,63 @@ body.plain .term { color: inherit; }
     vscode.postMessage({ type: "count", text: write.value });
   }
 
+  /**
+   * その行を打つ面で示す（提案パネルの「飛ぶ」。作者の依頼、2026-08-28）。
+   *
+   * **選び直してから焦点を当て直す。** Chromium は焦点を受け取るときに、
+   * 選択のあるところまで面を転がす。縦書き（左右に流れる）と横書き
+   * （上下に流れる）で「どちらへ動かすか」が違うのを、その振る舞いに
+   * まかせて吸収している——自前で scrollLeft/scrollTop を出すと、
+   * 向きごとに別の式を持つことになる。
+   *
+   * この手が効かない環境が出たら、その行の頭に範囲を作って
+   * getBoundingClientRect で測り、はみ出しぶんを足し引きする手
+   * （並べる面の nudgeIntoView と同じ考え方）へ切り替えること。
+   */
+  function revealLine(line) {
+    const text = write.value;
+    // 行番号は1始まり（拡張機能側の指摘と同じ数え方）
+    const wanted = Math.max(0, (typeof line === "number" ? line : 1) - 1);
+    let start = 0;
+    for (let seen = 0; seen < wanted; seen++) {
+      const at = text.indexOf("\\n", start);
+      // 指摘より本文が短いことがある（外で削られたあと）。末尾で止める
+      if (at < 0) {
+        start = text.length;
+        break;
+      }
+      start = at + 1;
+    }
+    let end = text.indexOf("\\n", start);
+    if (end < 0) end = text.length;
+
+    if (composeOn) {
+      // 組んで書く面には textarea が無い。**記法の位置は同じ**なので、
+      // カーソルの置き直しはこちらの道具（設計書6.34）をそのまま使う
+      compose.focus();
+      composeRestoreCaret({ start: start, end: end });
+      return;
+    }
+
+    // 読む面だけを出していると、示した先（カーソル）が見えない。書く面へ戻す
+    if (reading && !split) {
+      reading = false;
+      paint();
+      remember();
+    }
+    write.focus();
+    try {
+      write.setSelectionRange(start, end);
+    } catch (e) {
+      /* 範囲外なら諦める（本文は壊れない） */
+    }
+    // 焦点を入れ直して、選んだところまで転がしてもらう
+    write.blur();
+    write.focus();
+    // 並べているときは、組み上がりの側も同じ行へ寄せる
+    scheduleSync(true);
+  }
+
   /* ── 右クリック ────────────────────── */
   let menuTerm = null;
 
@@ -1499,6 +1619,9 @@ body.plain .term { color: inherit; }
       if (typeof message.marks === "string") {
         latestMarks = { forText: message.text, html: message.marks };
         applyMarksIfMatch();
+        // 本文が伸び縮みするとスクロールバーが出入りする。
+        // **当てられなかったときにも測り直す**（次に出すときのため）
+        scheduleAlignMarks();
       }
       if (Array.isArray(message.terms)) {
         termSpans = message.terms;
@@ -1552,6 +1675,8 @@ body.plain .term { color: inherit; }
       }
     } else if (message.type === "count") {
       countLabel.textContent = message.label;
+    } else if (message.type === "revealLine") {
+      revealLine(message.line);
     } else if (message.type === "select" && composeOn) {
       /*
         ルビを入れたあと、入れた場所を選び直す（組んで書く面）。
@@ -1682,6 +1807,45 @@ body.plain .term { color: inherit; }
   }
 
   /**
+   * 三点リーダ「…」のかたまり（作者の依頼、2026-08-28）。
+   *
+   * 位置はフォント任せで、横書きでは下に沈み、縦書きでは縦用の字形を
+   * 持たないフォントで横倒しのまま出る。読む面（#read .ellipsis）と同じく、
+   * 印を付けてCSSで行の中央へ寄せる。
+   *
+   * **編集不可のかたまりにする**（ルビ・傍点と同じ扱い）。ただの span に
+   * すると、**その直後に打った文字へ書式が伝染する**——この面は自分の入力で
+   * DOMを組み直さないので、伝染した回転が消えないまま出続ける。
+   * かたまりなら伝染せず、消すときも「…」1文字ぶんで消える。
+   *
+   * **1文字ずつ包む。** 「……」をまとめて回すと、回転の中心が2文字の
+   * 真ん中になり、縦書きで点列が柱からはみ出す（読む面と同じ理由）。
+   */
+  function composeBuildEllipsis(doc) {
+    const span = doc.createElement("span");
+    span.setAttribute("class", "ellipsis");
+    span.setAttribute("contenteditable", "false");
+    // 直列化は data-src を見る。ここが「…」なので、本文は1文字のまま戻る
+    span.setAttribute("data-src", "…");
+    span.appendChild(doc.createTextNode("…"));
+    return span;
+  }
+
+  /** 平文を段落へ入れる。**三点リーダだけは、かたまりとして入れる** */
+  function composeAppendText(parent, value, doc) {
+    let last = 0;
+    for (let i = 0; i < value.length; i++) {
+      if (value[i] !== "…") continue;
+      if (i > last) parent.appendChild(doc.createTextNode(value.slice(last, i)));
+      parent.appendChild(composeBuildEllipsis(doc));
+      last = i + 1;
+    }
+    if (last < value.length) {
+      parent.appendChild(doc.createTextNode(value.slice(last)));
+    }
+  }
+
+  /**
    * 1行ぶんの段落を作る。**かたまり（ルビ・傍点）は編集不可**（設計書6.34.2）。
    *
    * doc を引数で受けるのは、**画面の外から試せるようにする**ためである
@@ -1698,7 +1862,7 @@ body.plain .term { color: inherit; }
     }
     for (const part of parts) {
       if (part.kind === "text") {
-        p.appendChild(doc.createTextNode(part.src));
+        composeAppendText(p, part.src, doc);
       } else if (part.kind === "ruby") {
         const ruby = doc.createElement("ruby");
         ruby.setAttribute("contenteditable", "false");
@@ -1778,9 +1942,16 @@ body.plain .term { color: inherit; }
       if (kid.nodeType !== 1) continue;
       const src = kid.getAttribute ? kid.getAttribute("data-src") : null;
       if (src !== null && src !== undefined && src !== "") {
-        // かたまり（ルビ・傍点）。**中は見ない**——記法そのものを持っている
+        // かたまり（ルビ・傍点・三点リーダ）。**中は見ない**——記法そのものを持っている
         atoms.push({
           kind: "chunk",
+          // 三点リーダは**見た目のためのかたまり**で、記法ではない。
+          // 「そう……」に傍点、のように**上へ記法を重ねてよい**——
+          // ルビ・傍点と同じに数えると、…を含む範囲へ何も振れなくなる。
+          // classList ではなく属性で見る（試験の偽DOMは属性しか持たない）
+          decor:
+            (kid.getAttribute ? kid.getAttribute("class") : null) ===
+            "ellipsis",
           node: kid,
           parent: node,
           index: i,
@@ -1934,7 +2105,9 @@ body.plain .term { color: inherit; }
   /** その範囲に、かたまり（ルビ・傍点）が重なっているか */
   function composeSelectionHasChunk(atoms, start, end) {
     for (const atom of atoms) {
-      if (atom.kind !== "chunk") continue;
+      // 三点リーダ（decor）は見逃す。見た目のためのかたまりであって
+      // 記法ではないので、その上へルビ・傍点を重ねてよい
+      if (atom.kind !== "chunk" || atom.decor) continue;
       if (atom.start < end && atom.end > start) return true;
     }
     return false;
@@ -2277,7 +2450,7 @@ body.plain .term { color: inherit; }
   /**
    * 用語のところへ色を置く。**DOMは書き換えない**（設計書6.34.3）。
    *
-   * 下敷き方式（打つ面の #marks）は textarea の制約から生まれた迂回であり、
+   * 重ね敷き方式（打つ面の #marks）は textarea の制約から生まれた迂回であり、
    * この面では要らない。印の要素を入れる方式だと、色を付け直すたびに
    * カーソルが飛び、取り消し履歴も汚れる。
    *

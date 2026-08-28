@@ -227,6 +227,21 @@ describe("記法→DOM→記法 が完全に一致する", () => {
     "第一話\n\n　{白瀬|しらせ}{澪|みお}は{{ただ}}立っていた。\n",
     "…………",
     "──{彼女|かのじょ}は、",
+    /*
+      三点リーダは「…」1文字ずつのかたまりになる（作者の依頼、2026-08-28）。
+      **かたまりにした以上、往復が崩れれば本文が壊れる。** 前後・連続・
+      ルビとの並び・行頭行末を並べる
+    */
+    "…",
+    "……",
+    "あ…",
+    "…あ",
+    "あ…い",
+    "あ……い",
+    "…\n…",
+    "…{漢字|かんじ}…",
+    "{{強調}}…",
+    "「そう……」と{彼女|かのじょ}は言った。\n\n　……返事は無い。",
   ];
 
   it("すべての場合で、1文字も変わらない", () => {
@@ -326,6 +341,36 @@ describe("組み立てたDOMの形", () => {
     expect(emphasis.getAttribute?.("class")).toBe("emphasis");
     expect(emphasis.getAttribute?.("contenteditable")).toBe("false");
     expect(emphasis.getAttribute?.("data-src")).toBe("{{強調}}");
+  });
+
+  /**
+   * 三点リーダ（作者の依頼、2026-08-28「三点リーダは行中央にしてください」）。
+   *
+   * **ただの span にしない。** contenteditable では、装飾つきの span の
+   * 直後に打った文字へ書式が伝染する。この面は自分の入力でDOMを組み直さない
+   * ので、伝染した回転が消えないまま出続ける。
+   */
+  it("三点リーダは、1文字ずつの編集不可のかたまり", () => {
+    const root = build("あ……い");
+    const line = root.childNodes[0];
+    expect(line.childNodes).toHaveLength(4);
+    for (const index of [1, 2]) {
+      const dots = line.childNodes[index];
+      expect(dots.nodeName).toBe("SPAN");
+      expect(dots.getAttribute?.("class")).toBe("ellipsis");
+      expect(dots.getAttribute?.("contenteditable")).toBe("false");
+      expect(dots.getAttribute?.("data-src")).toBe("…");
+      expect(dots.childNodes[0].nodeValue).toBe("…");
+    }
+  });
+
+  it("三点リーダは1文字ぶんだけを占める", () => {
+    const atoms = api.composeAtoms(build("あ……い"));
+    const chunks = atoms.filter((atom) => atom.kind === "chunk");
+    expect(chunks.map((chunk) => [chunk.text, chunk.start, chunk.end])).toEqual([
+      ["…", 1, 2],
+      ["…", 2, 3],
+    ]);
   });
 
   it("かたまりは data-src をそのまま出す（中の字ではなく記法）", () => {
@@ -460,6 +505,10 @@ describe("記法の位置とDOMの位置", () => {
       "あ\n\nい",
       value,
       "{{強調}}\n{漢字|かんじ}",
+      // 三点リーダも1文字ぶんのかたまり。カーソルはこれを1文字として跨ぐ
+      "あ……い",
+      "…{漢字|かんじ}…",
+      "あ…\n…い",
     ]) {
       const atoms = api.composeAtoms(build(sample));
       for (let offset = 0; offset <= sample.length; offset++) {
@@ -506,6 +555,15 @@ describe("記法の位置とDOMの位置", () => {
     expect(api.composeSelectionHasChunk(atoms, 2, 10)).toBe(true);
     // 端どうしは重ならない（かたまりの直後から選び始めたとき）
     expect(api.composeSelectionHasChunk(atoms, 1, 1)).toBe(false);
+  });
+
+  it("三点リーダのかたまりは、重なっていても妨げにしない", () => {
+    // 「そう……」に傍点、のような使い方を塞がないため（0.24.12）。
+    // 三点リーダは見た目のためのかたまりで、記法（ルビ・傍点）ではない
+    const atoms = api.composeAtoms(build("そう……だ"));
+    // 「…」（2〜4）を含む範囲でも false（振ってよい）
+    expect(api.composeSelectionHasChunk(atoms, 0, 4)).toBe(false);
+    expect(api.composeSelectionHasChunk(atoms, 2, 5)).toBe(false);
   });
 });
 
@@ -628,6 +686,24 @@ describe("画面の約束", () => {
     expect(ask.slice(0, 800)).toContain(
       "ルビや傍点の上には重ねられません"
     );
+  });
+
+  /**
+   * 三点リーダの見た目は、読む面（0.24.1で作者が確かめた形）と同じにする。
+   * **同じ本文が面によって違って見えるのは、それ自体が不具合である。**
+   */
+  it("三点リーダを行の中央に寄せる指定がある", () => {
+    expect(html).toContain("#compose .ellipsis {");
+    expect(html).toContain("body.vertical #compose .ellipsis {");
+    // 縦書きは「横書きに固定してから90度回す」（フォントの字形に頼らない）
+    const vertical = html.slice(
+      html.indexOf("body.vertical #compose .ellipsis {")
+    );
+    expect(vertical.slice(0, 300)).toContain("writing-mode: horizontal-tb");
+    expect(vertical.slice(0, 300)).toContain("transform: rotate(90deg)");
+    // 1em角に固定しないと、「……」の間に隙間があく
+    expect(vertical.slice(0, 300)).toContain("width: 1em");
+    expect(vertical.slice(0, 300)).toContain("height: 1em");
   });
 
   it("面の状態を覚える", () => {

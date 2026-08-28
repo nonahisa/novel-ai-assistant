@@ -55,6 +55,22 @@ describe("一覧を畳める", () => {
   test("畳んだ状態を覚える", () => {
     expect(script()).toContain("vscode.setState");
   });
+
+  /**
+   * 本文の用語から開いたときは、はじめから畳んでおく（作者の依頼、
+   * 2026-08-28「本文から用語を右側に出す際は、デフォルトで一覧を
+   * 出さない状態にしてください」）。
+   *
+   * **畳むのは用語から来たときだけ。** メニューから開いたときまで畳むと、
+   * 一覧から選ぶための画面で何も選べなくなる。
+   */
+  test("用語から来たときは、畳んだ状態で出す", () => {
+    const code = script();
+    expect(code).toContain("if (message.collapseList) setCollapsed(true);");
+    // 受けるのは focus のときだけ（init や detail では畳まない）
+    const focus = code.slice(code.indexOf('case "focus":'));
+    expect(focus.slice(0, 900)).toContain("message.collapseList");
+  });
 });
 
 describe("タブが詰まらない", () => {

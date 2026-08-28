@@ -237,7 +237,7 @@ describe("作品が1つだけのとき", () => {
     // 1つしか無いのに選ばせるのは、押す手間が1つ増えるだけ
     expect(provider().selectedWork()).toEqual(only);
     expect(provider().getTreeItem({ type: "selector" }).label).toBe(
-      "作品：作品A"
+      "選択作品：作品A"
     );
   });
 
@@ -283,7 +283,7 @@ describe("作品が複数あるとき", () => {
       commandOf(provider, actionNode("novelai.checkTypos"))?.arguments?.[0]
     ).toEqual({ type: "work", work: second });
     expect(provider.getTreeItem({ type: "selector" }).label).toBe(
-      "作品：作品B"
+      "選択作品：作品B"
     );
   });
 
@@ -431,7 +431,9 @@ describe("ビューの見出しに出す作品名", () => {
   // 最上段の選択窓はスクロールで画面の外へ流れる。
   // 見出しの薄字は常に見えるので、そこにも対象を出す（作者の依頼、2026-08-27）
   test("選んだ作品のタイトルが出る", () => {
-    expect(stepViewDescription(work("w1", "銀の航路"), true)).toBe("銀の航路");
+    // 作品名は見出しに出さない（作者の撤回、2026-08-28）。
+    // 最上段の「選択作品：〜」の行が代わりを務める
+    expect(stepViewDescription(work("w1", "銀の航路"), true)).toBe("");
   });
 
   test("作品が無ければ「未登録」", () => {

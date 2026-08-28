@@ -392,7 +392,7 @@ export async function activate(
         event.selections[0].active
       );
       if (!found) return;
-      findOpenSettingsPanel(found.work.id)?.showRecord(
+      await findOpenSettingsPanel(found.work.id)?.showRecord(
         found.entry.kind,
         found.entry.id
       );
@@ -414,7 +414,9 @@ export async function activate(
       const panel = await openSettingsPanel(context, work, aiRegistry, {
         beside: true,
       });
-      panel.showRecord(kind, id);
+      // **用語から開くときは、一覧を畳んで出す**（作者の依頼、2026-08-28）。
+      // 本文の隣に並ぶ狭い幅を一覧に取られると、肝心の資料が読めない
+      await panel.showRecord(kind, id, { collapseList: true });
     },
     openChat: async (document, range) => {
       // 相談パネルは普通のエディタから本文を受け取る。
@@ -435,14 +437,22 @@ export async function activate(
     supportsMultipleEditorsPerDocument: false,
   };
 
+  /**
+   * 提案パネルの「飛ぶ」から使う（作者の依頼、2026-08-28）。
+   *
+   * **台帳は入口ごとではなく1つ**（`manuscriptEditor.ts`）なので、
+   * どちらの実体から呼んでも、縦書き・横書きの両方の画面が見つかる。
+   */
+  const manuscriptProvider = new ManuscriptEditorProvider(
+    manuscriptDeps,
+    "setting",
+    MANUSCRIPT_EDITOR_VIEW_TYPE
+  );
+
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(
       MANUSCRIPT_EDITOR_VIEW_TYPE,
-      new ManuscriptEditorProvider(
-        manuscriptDeps,
-        "setting",
-        MANUSCRIPT_EDITOR_VIEW_TYPE
-      ),
+      manuscriptProvider,
       manuscriptOptions
     ),
     // **同じ画面を、横書きで開く入口**（作者の依頼、2026-08-27。設計書6.25.4）。
@@ -553,7 +563,10 @@ export async function activate(
           aiRegistry,
           { beside: true }
         );
-        panel.showRecord(found.entry.kind, found.entry.id);
+        // 本文の用語からの入口。原稿エディタの右クリックと同じ扱いにする
+        await panel.showRecord(found.entry.kind, found.entry.id, {
+          collapseList: true,
+        });
       }
     )
   );
@@ -698,8 +711,13 @@ export async function activate(
   // 提案パネル（下段・出力やデバッグコンソールと同じ場所）。
   // 誤字脱字検知の結果をここへ表示する。0.22.24から作品ごとに
   // 置き場を分けて持つ。AIは「再チェック」（P-23）が使う。
-  // 反映で承認待ちが減ったら、メニューの印を数え直す（0.23.2）
-  const proposalPanel = new ProposalPanel(aiRegistry, refreshActionBadges);
+  // 反映で承認待ちが減ったら、メニューの印を数え直す（0.23.2）。
+  // 「飛ぶ」は、原稿エディタで書いていればその画面のまま示す（0.24.7）
+  const proposalPanel = new ProposalPanel(
+    aiRegistry,
+    refreshActionBadges,
+    (filePath, line) => manuscriptProvider.revealLine(filePath, line)
+  );
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(PROPOSALS_VIEW_ID, proposalPanel, {
       webviewOptions: { retainContextWhenHidden: true },

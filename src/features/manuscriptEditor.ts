@@ -98,6 +98,53 @@ export const MANUSCRIPT_EDITOR_VIEW_TYPE = "novelai.manuscriptEditor";
 export const MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE =
   "novelai.manuscriptEditorHorizontal";
 
+/**
+ * いま開いている原稿エディタ（文書のURI → その画面）。
+ *
+ * **入口ごとの provider ではなく、ここ1つに集める。** 縦書きと横書きで
+ * `ManuscriptEditorProvider` の実体は2つあり、片方だけが台帳を持つと
+ * 「横書きで開いていた原稿へは飛べない」という取りこぼしが出る。
+ */
+const openManuscripts = new Map<
+  string,
+  {
+    panel: vscode.WebviewPanel;
+    /**
+     * その行を示す。
+     *
+     * **画面が動き出す前に頼まれることがある**（開いた直後に飛んでくる）。
+     * まだ `ready` が来ていなければ覚えておき、来たときに出す。
+     * 送っても捨てられるだけなので、待つほかにやりようがない。
+     */
+    revealLine(line: number): void;
+  }
+>();
+
+/**
+ * いまアクティブなタブが原稿エディタなら、その入口のID。
+ *
+ * **開いていない原稿へ飛ぶときに、どちらの向きで開くかを決める。**
+ * 縦書きで書いている人の画面に横書きが出ると、書いていた向きが変わる。
+ */
+function activeManuscriptViewType(): string | undefined {
+  try {
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    const input: unknown = tab?.input;
+    if (!(input instanceof vscode.TabInputCustom)) return undefined;
+    if (
+      input.viewType === MANUSCRIPT_EDITOR_VIEW_TYPE ||
+      input.viewType === MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+    ) {
+      return input.viewType;
+    }
+    return undefined;
+  } catch {
+    // タブの種類を読めない環境（古いVS Code・試験の代役）では、
+    // 「原稿エディタではない」として素のエディタへ譲る
+    return undefined;
+  }
+}
+
 /** その入口が、はじめにどちらの向きで開くか */
 export type ManuscriptOrientation =
   /** 設定（`manuscriptEditor.vertical`）に従う */
@@ -197,9 +244,9 @@ export class ManuscriptEditorProvider
         type: "update",
         text,
         html: renderManuscript(text, index),
-        // **打つ面の裏に敷く目印**（設計書6.25.6）。
+        // **打つ面に重ねる用語の色**（設計書6.25.6）。
         // 打つ面は textarea なので、中の一部だけを飾れない。
-        // 同じ本文を裏に敷いて、用語のところだけ背景を塗る
+        // 同じ本文を重ねて、用語のところだけ色を付ける（それ以外は透明）
         marks: renderTermMarks(text, index),
         // 右クリックで「どの用語の上か」を知るために使う。
         // textarea の中に要素は無いので、当たり判定を要素で取れない
@@ -214,6 +261,35 @@ export class ManuscriptEditorProvider
       });
       await this.sendCount(panel, text);
     };
+
+    /**
+     * 台帳へ載せる（誤字脱字の提案から、この画面へ飛べるようにする）。
+     *
+     * **`ready` を待ってから行を示す。** 開いた直後の画面へ送っても、
+     * まだスクリプトが走っていないので捨てられる（設定資料パネルの
+     * `whenReady` と同じ事情）。
+     */
+    let webviewReady = false;
+    let pendingReveal: number | undefined;
+    const revealLineNow = (line: number): void => {
+      void panel.webview.postMessage({ type: "revealLine", line });
+    };
+    const key = document.uri.toString();
+    const entry = {
+      panel,
+      revealLine: (line: number): void => {
+        if (!webviewReady) {
+          pendingReveal = line;
+          return;
+        }
+        revealLineNow(line);
+      },
+    };
+    openManuscripts.set(key, entry);
+    panel.onDidDispose(() => {
+      // 同じ文書が開き直されていたら、そちらの札を消さない
+      if (openManuscripts.get(key) === entry) openManuscripts.delete(key);
+    });
 
     const subscriptions: vscode.Disposable[] = [];
 
@@ -280,6 +356,13 @@ export class ManuscriptEditorProvider
       switch (message.type) {
         case "ready":
           await send();
+          webviewReady = true;
+          // 開くのを待ってもらっていた「この行を示す」を、ここで出す
+          if (pendingReveal !== undefined) {
+            const line = pendingReveal;
+            pendingReveal = undefined;
+            revealLineNow(line);
+          }
           break;
 
         case "edit":
@@ -339,6 +422,53 @@ export class ManuscriptEditorProvider
         }
       }
     });
+  }
+
+  /**
+   * その原稿を原稿エディタで開いて、行を示す（作者の依頼、2026-08-28）。
+   *
+   * 「誤字脱字から開く場合は、現在メインで開いているエディターと同じ
+   * エディターで開いたうえで場所を示してください」。提案パネルの「飛ぶ」は
+   * 素のテキストエディタしか開かず、**縦書きで書いていた面から追い出されて
+   * いた**。
+   *
+   * 引き受けられたときだけ true を返す。false のときは、呼んだ側が
+   * これまでどおり素のエディタで開く——**押しても何も起きない、を作らない。**
+   *
+   * 引き受けるのは次の2つだけである。
+   *
+   * 1. その原稿を原稿エディタで開いている（前に出して、行を示す）
+   * 2. 開いてはいないが、**いま見ているタブが原稿エディタ**（＝作者は
+   *    この画面で書いている）。同じ向きの入口で開いてから示す
+   *
+   * どちらでもなければ、作者は素のエディタで書いている。そちらへ譲る。
+   */
+  async revealLine(filePath: string, line: number): Promise<boolean> {
+    const uri = paths.toUri(filePath);
+    const key = uri.toString();
+
+    const open = openManuscripts.get(key);
+    if (open) {
+      open.panel.reveal();
+      open.revealLine(line);
+      return true;
+    }
+
+    const viewType = activeManuscriptViewType();
+    if (!viewType) return false;
+
+    await vscode.commands.executeCommand("vscode.openWith", uri, viewType);
+    const opened = openManuscripts.get(key);
+    // **開けなかったときは引き受けない。** ここで true を返すと、
+    // 押しても何も起きないまま終わる（素のエディタへも行かない）
+    if (!opened) {
+      logLine(
+        `原稿エディタ：${filePath} を開けなかったため、行を示せませんでした。`
+      );
+      return false;
+    }
+    opened.revealLine(line);
+    return true;
   }
 
   /**

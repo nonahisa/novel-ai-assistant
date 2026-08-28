@@ -506,9 +506,20 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * メニューの印（更新分を反映 残りN）はコマンド実行時にしか数え直されず、
    * **パネルから全部反映しても印が残る**不具合があった（作者の報告、2026-08-27）
    */
+  /**
+   * @param revealInManuscript 原稿エディタで開いて、その行を示す口
+   * （作者の依頼、2026-08-28）。**引き受けられたときだけ true を返す**——
+   * 素のエディタで書いている作者まで、勝手に縦書きの画面へ移さないため。
+   * パネルは原稿エディタの都合（どの向きで開くか・画面が動き出したか）を
+   * 知らなくてよいので、判断ごと外へ出してある。
+   */
   constructor(
     private readonly ai?: AIRegistry,
-    private readonly onCountsChanged?: () => void
+    private readonly onCountsChanged?: () => void,
+    private readonly revealInManuscript?: (
+      filePath: string,
+      line: number
+    ) => Promise<boolean>
   ) {}
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -1204,6 +1215,19 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       this.items.find((entry) => entry.id === id) ??
       this.contradictions.find((entry) => entry.id === id);
     if (!item) return;
+
+    /*
+      **原稿エディタで書いているなら、その画面のまま示す**（作者の依頼、
+      2026-08-28）。素のエディタが横に開くと、書いていた面から目を離すことに
+      なる。引き受けられなかったとき（素のエディタで書いている・原稿を
+      開けなかった）だけ、これまでどおり下の道を通る。
+    */
+    try {
+      if (await this.revealInManuscript?.(item.filePath, item.line)) return;
+    } catch {
+      // 原稿エディタ側で転んでも、飛べる道は残す（下で素のエディタを開く）
+    }
+
     try {
       const doc = await vscode.workspace.openTextDocument(item.filePath);
       const editor = await vscode.window.showTextDocument(doc, {

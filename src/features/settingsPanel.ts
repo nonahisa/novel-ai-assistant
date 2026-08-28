@@ -129,7 +129,7 @@ import {
 import { buildSettingsPanelHtml } from "../views/settingsPanelHtml";
 import { renderMarkdownLite } from "../core/markdownLite";
 import { withCancellableProgress } from "../views/progress";
-import { logFailure } from "../core/logger";
+import { logFailure, logStep } from "../core/logger";
 import { appendChatLog, summarizeMaterials } from "../core/chatLog";
 import * as path from "../core/paths";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
@@ -399,11 +399,55 @@ export class SettingsPanel {
   /**
    * 外から特定の1件を選ばせる。本文中の用語をクリックしたときに使う。
    * 一覧の選択状態も合わせるため、画面側で種別タブごと切り替える。
+   *
+   * ## 見つからなければ、一度だけ読み直す（作者の報告、2026-08-28）
+   *
+   * 「用語ハイライト上を右クリックした場合で、すでに設定資料パネルが
+   * 開いている場合は、該当項目の設定資料を表示してください」——**開きっぱなしの
+   * パネルは、そのあと増えた資料を知らない。** `openSettingsPanel` は既に
+   * 開いていれば `reveal` するだけで読み直さないので、開いたあとに抽出した
+   * 人物を右クリックすると、ここで `find` が外れて**黙って何も起きなかった。**
+   *
+   * 用語ハイライトはディスクの資料から引いているので、**画面が古いほうが
+   * 疑わしい。** 読み直してもう一度だけ探す。
+   *
+   * それでも無ければ、**黙って終わらない。** 押しても何も起きないと、
+   * 作者からは壊れているようにしか見えない。
+   *
+   * @param options.collapseList 一覧を畳んで出す。**本文の用語から開いた
+   *   ときだけ**（作者の依頼、2026-08-28）。本文の隣へ並べる資料なので、
+   *   狭い幅を一覧に取られると肝心の中身が読めない
    */
-  showRecord(kind: SettingsKind, id: string): void {
-    const detail = this.detailOf(kind, id);
-    if (!detail) return;
-    this.post({ type: "focus", kind, id, detail });
+  async showRecord(
+    kind: SettingsKind,
+    id: string,
+    options: { collapseList?: boolean } = {}
+  ): Promise<void> {
+    let detail = this.detailOf(kind, id);
+    if (!detail) {
+      await this.refreshFromDisk();
+      detail = this.detailOf(kind, id);
+    }
+    if (!detail) {
+      logStep(
+        `設定資料パネル：用語（${kind}/${id}）が資料に見つかりませんでした`
+      );
+      void vscode.window.showInformationMessage(
+        "設定資料に見つかりませんでした。抽出し直すと直ることがあります。"
+      );
+      return;
+    }
+
+    // **開いた直後の画面へ送っても捨てられる**（スクリプトがまだ走っていない）。
+    // 用語から開くときは、パネルもその場で作られていることがある
+    await this.whenReady();
+    this.post({
+      type: "focus",
+      kind,
+      id,
+      detail,
+      ...(options.collapseList ? { collapseList: true } : {}),
+    });
   }
 
   /**
@@ -2233,6 +2277,14 @@ type OutgoingMessage =
        * 相談から開いたときだけ入る。無ければ空にする
        */
       notes?: string;
+      /**
+       * 一覧を畳んで出す（作者の依頼、2026-08-28）。
+       *
+       * **本文の用語から開いたときだけ付ける。** 本文の隣へ並べる資料なので、
+       * 狭い幅を一覧に取られると肝心の中身が読めない。メニューなど
+       * ほかの入口から開いたときは、これまでどおり一覧から選ぶ。
+       */
+      collapseList?: boolean;
     }
   | {
       type: "saved";
