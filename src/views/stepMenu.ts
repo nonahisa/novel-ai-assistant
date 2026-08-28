@@ -114,6 +114,10 @@ const STEP_DEFS: readonly StepDef[] = [
         label: "執筆の場",
         icon: "book",
         commands: [
+          // **先頭は「執筆を再開する」**（設計書6.36.4）。
+          // 続きを書く日に最初に押すもので、AIを呼ばずにその場で出る
+          "novelai.resumeWriting",
+          "novelai.createEpisodePlot",
           "novelai.createWorkFromManuscript",
           "novelai.openVertical",
           // 大きく開くほう。**横のパネルは詳細メニューと本文の右クリックにある**

@@ -276,6 +276,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 1,
   },
   {
+    id: "F-31",
+    title: "執筆を再開する＋単話プロットの雛形",
+    commands: ["novelai.resumeWriting", "novelai.createEpisodePlot"],
+    count: 5,
+  },
+  {
     id: "F-30",
     title: "伏線のAI検知",
     commands: ["novelai.checkForeshadows", "novelai.checkForeshadowResolution", "novelai.setForeshadowStatus"],
@@ -368,4 +374,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 470;
+export const PENDING_CHECK_TOTAL = 475;

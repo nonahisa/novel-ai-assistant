@@ -164,6 +164,10 @@ import {
   openAllWorksWritingStatsPanel,
   refreshAllWorksWritingStatsPanel,
 } from "./features/allWorksWritingStatsPanel";
+import {
+  createEpisodePlot,
+  resumeWriting,
+} from "./features/resumeWriting";
 import { askText, cancelItem } from "./views/dialogs";
 import { manageKeepWords } from "./features/manageKeepWords";
 import {
@@ -1866,6 +1870,24 @@ export async function activate(
   context.subscriptions.push(
     registerCommand("novelai.showAllWorksWritingStats", async () => {
       await openAllWorksWritingStatsPanel(context, registry, deviceId);
+    })
+  );
+
+  // 執筆再開支援と単話プロット（設計書6.36）。**どちらもAIを呼ばない**。
+  // 再開の1枚は読むだけ、単話プロットは新規作成だけ（上書きしない）
+  context.subscriptions.push(
+    registerCommand("novelai.resumeWriting", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await resumeWriting(work, deviceId);
+    })
+  );
+
+  context.subscriptions.push(
+    registerCommand("novelai.createEpisodePlot", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await createEpisodePlot(work);
     })
   );
 

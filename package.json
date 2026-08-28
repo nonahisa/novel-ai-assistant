@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "「設定が前の話と食い違っていないか不安」「誤字脱字の見直しがつらい」「AIに原稿を触られたくない」——小説を書く人の困りごとを引き受けるVSCode拡張機能です。本文から設定資料を自動で作り、矛盾や誤字脱字を調べ、執筆量を記録します。AIは提案するだけで、原稿は書き換えません。無料の手元AI（Ollama / LM Studio）だけでも使え、その場合、原稿はパソコンの外へ出ません。",
-  "version": "0.24.10",
+  "version": "0.24.11",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -396,6 +396,18 @@
       {
         "command": "novelai.setForeshadowStatus",
         "title": "伏線の状態を変える",
+        "category": "小説執筆",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "novelai.resumeWriting",
+        "title": "執筆を再開する",
+        "category": "小説執筆",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "novelai.createEpisodePlot",
+        "title": "単話プロットを作る",
         "category": "小説執筆",
         "icon": "$(checklist)"
       },

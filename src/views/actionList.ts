@@ -716,6 +716,34 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
         // 分類と操作の両方に出しても、その間の小分類に無いと辿れない（6.17.1）
         counter: "staleImeDictionary",
         items: [
+          // **書き始めの2つを先頭に置く**（設計書6.36.4）。ここは
+          // 「最新話を書く」への導線（縦書きで開く）と同じ小分類で、
+          // 資料生成や新作開始の並びではない——どちらも、
+          // **今日の続きを書き始めるとき**に通る操作である
+          {
+            kind: "action",
+            command: "novelai.resumeWriting",
+            label: "執筆を再開する",
+            description: "AIを使わない",
+            icon: "debug-continue",
+            requiresWork: true,
+            detail:
+              "前回どこまで書いたか・前話までのあらすじ・未回収の伏線・単話プロットを1枚にまとめて開きます。" +
+              "**AIは呼びません。** 押した瞬間に出ます。**原稿は書き換えません。**",
+          },
+          {
+            kind: "action",
+            command: "novelai.createEpisodePlot",
+            label: "単話プロットを作る",
+            description: "AIを使わない",
+            icon: "checklist",
+            requiresWork: true,
+            detail:
+              "その話の「視点・この話の目標・展開」を書く雛形を " +
+              "設定/episode-plots/第N話.md に作って開きます。" +
+              "**筋書きはAIに作らせません。** 書くのは作者です。" +
+              "**既にあるものは上書きしません。** そのまま開きます。",
+          },
           // **MD化したい理由はルビだけではない**（プレビューで読みたい、
           // 見出しを使いたい）。以前は「ルビを振る」を押したときにだけ
           // 現れる救済の道で、作者から「どこから操作すればいいのでしょうか？」
