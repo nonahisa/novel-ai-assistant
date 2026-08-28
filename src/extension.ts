@@ -627,7 +627,9 @@ export async function activate(
       get: () => context.globalState.get<string[]>(ACTION_GROUPS_KEY, []),
       set: (groups) => void context.globalState.update(ACTION_GROUPS_KEY, groups),
     },
-    (counter) => actionDecorations.countOf(counter)
+    (counter) => actionDecorations.countOf(counter),
+    // 「テスト中」はF5（開発ホスト）だけに出す（作者の指示、2026-08-29）
+    context.extensionMode === vscode.ExtensionMode.Development
   );
   const actionView = vscode.window.createTreeView("novelai.actions", {
     treeDataProvider: actionProvider,

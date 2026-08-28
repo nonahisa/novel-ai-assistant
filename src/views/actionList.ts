@@ -1476,7 +1476,15 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
   constructor(
     private readonly registry: WorkRegistry,
     private readonly store?: GroupStateStore,
-    private readonly counts?: ActionCounts
+    private readonly counts?: ActionCounts,
+    /**
+     * 「テスト中」の分類を出すか（作者の指示、2026-08-29）。
+     *
+     * **F5（開発ホスト）のときだけ真。** ストアから入れた読者に
+     * 開発用の確認一覧を見せても、押せるものが増えるだけで意味がない。
+     * extension.ts が `ExtensionMode.Development` を渡す。
+     */
+    private readonly showTesting: boolean = true
   ) {
     this.expanded = restoreExpandedGroups(store?.get() ?? []);
     // 最初の作品を登録した時点で、作品向けの操作を出せるようになる
@@ -1575,7 +1583,10 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
 
   getChildren(node?: ActionNode): ActionNode[] {
     const hasWork = this.registry.list().length > 0;
-    const groups = visibleGroups(hasWork);
+    // 写しの分類（テスト中）は開発ホストだけに出す（作者の指示、2026-08-29）
+    const groups = visibleGroups(hasWork).filter(
+      (group) => !group.generated || this.showTesting
+    );
 
     if (!node) {
       return groups.map((group) => ({ type: "group" as const, group }));
