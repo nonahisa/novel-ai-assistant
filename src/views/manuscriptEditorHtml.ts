@@ -218,6 +218,12 @@ body.plain .mark { color: transparent; }
    書く面（textarea）は文字単位の調整ができないため、フォントの形のまま */
 #read .ellipsis {
   vertical-align: middle;
+  /* **三点リーダの字だけ、和文の明朝に固定する**（実機の報告、2026-08-29）。
+     選んだ書体が「…」を持たないと欧文へ落ち、欧文の三点リーダは下寄りの
+     字形なので、中央指定をしても沈んで見える。和文書体は最初から中央に
+     描く。1文字だけの固定なので、本文の書体の雰囲気は崩れない */
+  font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN",
+    "MS Mincho", serif;
 }
 /* **箱を1em角の正方形に固定する**（実機の報告、2026-08-28）。
    寸法を決めないと箱の高さが行の高さ（約1.5文字分）になり、
@@ -317,6 +323,12 @@ body.vertical #compose p, body.vertical #compose div {
    「……」の間に隙間が出た（作者の実機報告、2026-08-28） */
 #compose .ellipsis {
   vertical-align: middle;
+  /* **三点リーダの字だけ、和文の明朝に固定する**（実機の報告、2026-08-29）。
+     選んだ書体が「…」を持たないと欧文へ落ち、欧文の三点リーダは下寄りの
+     字形なので、中央指定をしても沈んで見える。和文書体は最初から中央に
+     描く。1文字だけの固定なので、本文の書体の雰囲気は崩れない */
+  font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN",
+    "MS Mincho", serif;
 }
 /* **箱を1em角の正方形に固定する。** 寸法を決めないと箱の高さが行の高さに
    なって「……」の間に隙間があき、フォントサイズを変えると回転の中心が
@@ -722,6 +734,10 @@ body.plain .term { color: inherit; }
     vertical = vertical === false;
     paint();
     remember();
+    // 切り分けの計器（組んで書く面のみ）。**向きを変えた直後の**計算済み
+    // スタイルを記録する——縦書きの規則が効いているかは、縦にした状態で
+    // 測らないと分からない。スタイルの再計算を1フレーム待つ
+    if (composeOn) requestAnimationFrame(composeReportEllipsis);
   });
 
   document.getElementById("latest").addEventListener("click", function () {
