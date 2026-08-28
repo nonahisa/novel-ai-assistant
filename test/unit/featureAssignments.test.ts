@@ -192,6 +192,7 @@ describe("検査ファイルは自分の機能キーだけを渡す", () => {
     ["src/features/checkProofread.ts", "proofread"],
     ["src/features/checkContradictions.ts", "contradiction"],
     ["src/features/checkDeviations.ts", "deviation"],
+    ["src/features/checkForeshadows.ts", "foreshadow"],
     ["src/features/extractCharacters.ts", "extract"],
   ];
 

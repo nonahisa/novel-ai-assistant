@@ -3,25 +3,27 @@ import type { WorkEntry } from "../models/types";
 import {
   addForeshadow,
   createForeshadowStore,
+  saveOrUpdateForeshadow,
 } from "../core/foreshadowStore";
 import {
   buildEmptyForeshadowGuide,
   buildForeshadowMarkdown,
   FORESHADOW_LIST_TITLE,
 } from "../core/foreshadowMarkdown";
+import type { Foreshadow, ForeshadowStatus } from "../models/foreshadow";
 import { logFailure } from "../core/logger";
-import { askText } from "../views/dialogs";
+import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import type { ForeshadowFromContradiction } from "./proposalPanel";
 
 /**
- * 伏線追跡の土台（設計書6.35）。
+ * 伏線追跡のうち、**AIを使わない口**（設計書6.35）。
  *
- * **この版ではAIを使わない。** 配置・回収の自動検知（P-25/P-26）は
- * 次の弾で入る。ここで作るのは、検知した結果を受け止める台帳と、
- * 作者が手で足す口、そして矛盾検知からの転送口である。
+ * 一覧を開く・手で足す・状態を変える、そして矛盾検知からの転送。
+ * 配置と回収の自動検知（P-25/P-26）は `checkForeshadows.ts` にある。
  *
- * 台帳が先に無いと、検知だけ作っても入れる先が無い。
+ * **台帳へ何を書くかを決めるのは作者である。** AIの検知は候補を並べるだけで、
+ * ここにある口だけが「作者がそう決めた」ことを表す。
  */
 
 export async function openForeshadows(work: WorkEntry): Promise<void> {
@@ -116,6 +118,184 @@ export async function addForeshadowByHand(work: WorkEntry): Promise<void> {
     logFailure("伏線の登録に失敗", { 伏線: label.trim(), 詳細: detail });
     void vscode.window.showErrorMessage(`伏線を登録できませんでした：${detail}`);
   }
+}
+
+/**
+ * 伏線の状態を、作者が手で変える（設計書6.35.1）。
+ *
+ * **「意図して開けたまま」はここからしか選べない。** 回収していないことと、
+ * 回収しないと決めたことは別で、後者は作者にしか決められない。AIの検知は
+ * `open` と `resolved` の間しか動かさない。
+ *
+ * 選ぶ順は「どれを」→「どうする」→（回収済みなら）「何話で」。
+ * どの段でも取りやめられるようにする（`cancelItem` と `askText`）。
+ */
+export async function setForeshadowStatus(work: WorkEntry): Promise<void> {
+  const store = createForeshadowStore(work);
+
+  let loaded: Awaited<ReturnType<typeof store.loadAll>>;
+  try {
+    loaded = await store.loadAll();
+  } catch (error) {
+    void vscode.window.showErrorMessage(
+      `伏線の台帳を読み込めませんでした：${messageOf(error)}`
+    );
+    return;
+  }
+  if (loaded.errors.length > 0) {
+    void vscode.window.showWarningMessage(
+      `読み込めない伏線が ${loaded.errors.length} 件あります（${loaded.errors
+        .map((error) => error.file)
+        .join("、")}）。残りだけを並べます。`
+    );
+  }
+  if (loaded.records.length === 0) {
+    void vscode.window.showInformationMessage(
+      "登録された伏線がありません。「伏線を検知する」または「伏線を手で追加」で登録してください。"
+    );
+    return;
+  }
+
+  const picked = await vscode.window.showQuickPick(
+    [
+      ...sortForPicking(loaded.records).map((record) => ({
+        label: record.label,
+        description: describeStatus(record),
+        detail: record.note.trim() || undefined,
+        record,
+      })),
+      cancelItem(),
+    ],
+    { title: "状態を変える伏線を選んでください", ignoreFocusOut: true }
+  );
+  if (!picked || isCancelItem(picked) || !("record" in picked)) return;
+  const target = picked.record;
+
+  const statusPick = await vscode.window.showQuickPick(
+    [
+      {
+        label: "回収済みにする",
+        detail: "作中で説明・成就したもの",
+        status: "resolved" as ForeshadowStatus,
+      },
+      {
+        label: "意図して開けたまま（回収しない）",
+        detail: "回収を忘れたのではなく、開けたままにすると決めたもの",
+        status: "intentional" as ForeshadowStatus,
+      },
+      {
+        label: "未回収に戻す",
+        detail: "まだ回収していないものとして、一覧の上へ戻す",
+        status: "open" as ForeshadowStatus,
+      },
+      cancelItem(),
+    ],
+    {
+      title: `「${target.label}」をどうしますか`,
+      ignoreFocusOut: true,
+    }
+  );
+  if (!statusPick || isCancelItem(statusPick) || !("status" in statusPick)) {
+    return;
+  }
+
+  let resolvedChapter: number | null = null;
+  if (statusPick.status === "resolved") {
+    const chapterText = await askText({
+      title: "回収した話数",
+      prompt: "回収した話数を数字で入れてください（分からなければ空のまま）",
+      // 分かっているなら、そのまま出して確かめてもらう
+      value:
+        target.resolvedChapter === null ? "" : String(target.resolvedChapter),
+      ignoreFocusOut: true,
+      validateInput: (value) => {
+        const trimmed = value.trim();
+        if (trimmed.length === 0) return undefined;
+        return /^\d+$/.test(trimmed)
+          ? undefined
+          : "半角の数字で入れてください（分からなければ空のままにしてください）。";
+      },
+    });
+    if (chapterText === undefined) return;
+    resolvedChapter = chapterText.trim()
+      ? parseInt(chapterText.trim(), 10)
+      : null;
+  }
+
+  try {
+    await saveOrUpdateForeshadow(work, target.id, {
+      status: statusPick.status,
+      resolvedChapter,
+      // 作者が手で回収済みにしたときは、引用を持っていない。
+      // **既にあるものは引き継ぐ**（AIの検知で入った引用を消さない）
+      resolvedQuote: target.resolvedQuote,
+    });
+    void vscode.window.showInformationMessage(
+      `「${target.label}」を${STATUS_DONE[statusPick.status]}。`
+    );
+  } catch (error) {
+    const detail = messageOf(error);
+    logFailure("伏線の状態の変更に失敗", {
+      伏線: target.label,
+      詳細: detail,
+    });
+    void vscode.window.showErrorMessage(
+      `伏線の状態を変えられませんでした：${detail}`
+    );
+  }
+}
+
+/** 変え終わったときの言い方。状態ごとに違う（「回収済みにしました」など） */
+const STATUS_DONE: Record<ForeshadowStatus, string> = {
+  open: "未回収に戻しました",
+  resolved: "回収済みにしました",
+  intentional: "意図して開けたままにしました",
+};
+
+/** 一覧に添える、いまの状態 */
+function describeStatus(record: Foreshadow): string {
+  const planted =
+    record.plantedChapter === null
+      ? "話数不明で張った"
+      : `第${record.plantedChapter}話で張った`;
+  if (record.status === "resolved") {
+    const at =
+      record.resolvedChapter === null
+        ? "話数不明"
+        : `第${record.resolvedChapter}話`;
+    return `回収済み（${at}）／${planted}`;
+  }
+  if (record.status === "intentional") {
+    return `意図して開けたまま／${planted}`;
+  }
+  return `未回収／${planted}`;
+}
+
+/**
+ * 選ぶ順。**未回収を上に置く。**
+ *
+ * 状態を変えたくなるのは、たいてい未回収のものである。同じ状態どうしは
+ * 話数の早い順（一覧のMarkdownと同じ並び）。
+ */
+function sortForPicking(records: Foreshadow[]): Foreshadow[] {
+  const rank: Record<ForeshadowStatus, number> = {
+    open: 0,
+    intentional: 1,
+    resolved: 2,
+  };
+  return [...records].sort((left, right) => {
+    if (left.status !== right.status) {
+      return rank[left.status] - rank[right.status];
+    }
+    const a = left.plantedChapter;
+    const b = right.plantedChapter;
+    if (a !== b) {
+      if (a === null) return 1;
+      if (b === null) return -1;
+      return a - b;
+    }
+    return left.id.localeCompare(right.id);
+  });
 }
 
 /**

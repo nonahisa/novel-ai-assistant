@@ -163,9 +163,12 @@ const STEP_DEFS: readonly StepDef[] = [
       "novelai.checkOpening",
       "novelai.checkDeviations",
       "novelai.checkContradictions",
-      // 伏線の一覧は矛盾の次に置く。矛盾検知の指摘から
+      // 伏線は矛盾の次に置く。矛盾検知の指摘から
       // 「伏線として登録」で飛んでくるため（設計書6.35.4）
+      "novelai.checkForeshadows",
+      "novelai.checkForeshadowResolution",
       "novelai.openForeshadows",
+      "novelai.setForeshadowStatus",
     ],
   },
   {

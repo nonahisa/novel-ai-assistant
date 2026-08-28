@@ -312,6 +312,14 @@ export interface RecordUpdateViewItem {
   source: string;
   status: "pending" | "applied" | "failed" | "dismissed";
   statusDetail?: string;
+  /**
+   * 「反映する」の代わりに出す言葉（設計書6.35.2・6.35.3）。
+   *
+   * **押した結果が何になるかで呼び名が変わる。** 設定資料なら「反映する」だが、
+   * 伏線の候補は「登録」、回収の候補は「回収済みにする」である。
+   * 同じ描画を使い回すために持たせる（無ければこれまでどおり「反映する」）。
+   */
+  applyLabel?: string;
 }
 
 type OutgoingMessage = {
@@ -854,9 +862,17 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     items: RecordUpdateViewItem[],
     apply: (id: string) => Promise<{ ok: boolean; reason?: string }>,
     /** 見送る（承認待ちから片付ける）。渡さないと「見送る」は押せても効かない */
-    dismiss: (id: string) => Promise<{ ok: boolean; reason?: string }>
+    dismiss: (id: string) => Promise<{ ok: boolean; reason?: string }>,
+    /**
+     * どの分類として出すか。
+     *
+     * **本文の置き換えではない提案は、みなこの形に載る**（設計書6.35.2）。
+     * 伏線の候補・回収の候補も「1件ずつ承認して保存する」点は設定資料の
+     * 更新と同じなので、描画と適用の道をそのまま使い、見出しだけを変える。
+     */
+    category = "設定資料の更新"
   ): void {
-    this.replaceContents(work, "設定資料の更新", {
+    this.replaceContents(work, category, {
       recordUpdates: items,
       applyRecordUpdate: apply,
       dismissRecordUpdate: dismiss,
@@ -1295,17 +1311,23 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       );
       return;
     }
+    // **押した結果が何になるかで、確認の言葉も変わる**（設計書6.35.2）。
+    // 伏線の候補に「作者が確定させた記述が書き換わります」と出すと、
+    // 何が起きるのかを取り違えたまま押させることになる
+    const label = targets[0].applyLabel ?? "反映する";
     const confirm = await vscode.window.showWarningMessage(
-      `${targets.length}件の更新をまとめて反映します。`,
+      `${targets.length}件をまとめて${conjugate(label, "します")}。`,
       {
         modal: true,
         detail:
-          "作者が確定させた記述が書き換わります。 " +
+          (targets[0].applyLabel
+            ? ""
+            : "作者が確定させた記述が書き換わります。 ") +
           "内容は一覧に出ています。1件ずつ見てから決めることもできます。",
       },
-      "反映する"
+      label
     );
-    if (confirm !== "反映する") return;
+    if (confirm !== label) return;
 
     for (const target of targets) {
       await this.applyIssue(target.id);
@@ -1313,7 +1335,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     const applied = this.recordUpdates.filter(
       (entry) => entry.status === "applied"
     ).length;
-    void vscode.window.showInformationMessage(`${applied}件を反映しました。`);
+    void vscode.window.showInformationMessage(
+      `${applied}件を${conjugate(label, "しました")}。`
+    );
   }
 
   private async applyIssue(id: string): Promise<void> {
@@ -2042,6 +2066,16 @@ function describeWriteFailure(
 /** 表示上の番号。提案の処理では item から引き直す */
 function id2(item: ProposalViewItem): string {
   return item.id;
+}
+
+/**
+ * ボタンの言葉を、文の中で使える形にする。
+ *
+ * 「登録」「反映する」「回収済みにする」が混ざるので、**文の側で活用させる。**
+ * ボタンの言葉をそのまま文へ埋めると「反映するました」になる。
+ */
+export function conjugate(label: string, tail: "します" | "しました"): string {
+  return label.endsWith("する") ? label.slice(0, -2) + tail : label + tail;
 }
 
 /**

@@ -581,6 +581,33 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           // 「伏線として登録」で飛んでくるので、行き先が近いほうが辿れる
           {
             kind: "action",
+            command: "novelai.checkForeshadows",
+            label: "伏線を検知する",
+            icon: "eye",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "後の展開を予告・示唆している記述（謎めいた言及・意味ありげな小道具・" +
+              "説明されない違和感）をAIで探します。" +
+              "**台帳へは何も自動で入りません。**候補は下段の「提案」パネルに" +
+              "「伏線の候補」として並び、**登録するものを1件ずつ選びます。**" +
+              "既に登録済みの伏線と重なる候補は出しません。",
+          },
+          {
+            kind: "action",
+            command: "novelai.checkForeshadowResolution",
+            label: "伏線の回収を確かめる",
+            icon: "check-all",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "未回収の伏線が、その後の話で回収されたかをAIで見ます。" +
+              "**回収済みの印も提案です。**「提案」パネルの「伏線の回収」で" +
+              "1件ずつ確かめて決めてください（誤って回収済みになると、" +
+              "安心して回収を忘れます）。未回収が無ければAIは呼びません。",
+          },
+          {
+            kind: "action",
             command: "novelai.openForeshadows",
             label: "伏線の一覧を開く",
             icon: "list-unordered",
@@ -588,10 +615,7 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
             detail:
               "登録した伏線を、**未回収のものを上にして**一覧にします。" +
               "「第◯話で張った」「第◯話で回収」と引用が並びます。" +
-              "**AIは使いません。**" +
-              "**伏線の自動検知は準備中です（次の版で入ります）。**" +
-              "いまは矛盾検知の指摘から「伏線として登録」するか、" +
-              "「伏線を手で追加」で登録してください。",
+              "**AIは使いません。**",
           },
           {
             kind: "action",
@@ -601,8 +625,19 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
             requiresWork: true,
             detail:
               "短い名・何を示唆しているか・張った話数を入れて、伏線を登録します。" +
-              "話数が分からなければ空のままで構いません。**AIは使いません。**" +
-              "**伏線の自動検知は準備中です（次の版で入ります）。**",
+              "話数が分からなければ空のままで構いません。**AIは使いません。**",
+          },
+          {
+            kind: "action",
+            command: "novelai.setForeshadowStatus",
+            label: "伏線の状態を変える",
+            icon: "checklist",
+            requiresWork: true,
+            detail:
+              "伏線を「回収済み」「意図して開けたまま」「未回収」に変えます。" +
+              "**「意図して開けたまま」はここからしか選べません**——" +
+              "回収を忘れたのか、開けたままにすると決めたのかは、" +
+              "作者にしか決められないためです。**AIは使いません。**",
           },
           // **編集部とのやり取りは、いちばん下に置く**（作者の指示、2026-08-22）。
           // 上に並ぶのは作者が1人で回す作業で、こちらは相手のいる作業である。

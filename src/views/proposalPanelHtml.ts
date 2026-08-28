@@ -383,6 +383,18 @@ function renderRecordChanges(item) {
   }).join('');
 }
 
+/**
+ * 済んだときの言い方。
+ *
+ * ボタンの言葉をそのまま埋めると「反映するました」になるので、文の側で
+ * 活用させる（拡張機能側の conjugate と同じ規則。WebViewからは
+ * 読み込めないため、ここに同じ1行を置いている）。
+ */
+function doneLabel(item) {
+  const label = item.applyLabel || '反映する';
+  return (label.endsWith('する') ? label.slice(0, -2) : label) + 'しました';
+}
+
 function renderRecordUpdate(item) {
   const classes = ["issue"];
   if (item.status === "applied") classes.push("applied");
@@ -393,13 +405,17 @@ function renderRecordUpdate(item) {
     '<div class="' + classes.join(' ') + '">' +
     '<div class="meta"><span class="reason">' + escapeHtml(item.name) + '</span>' +
     (item.source ? '<span class="conf">' + escapeHtml(item.source) + '</span>' : '') +
-    (item.status === "applied" ? '<span class="reason">反映しました</span>' : '') +
+    (item.status === "applied" ? '<span class="reason">' + escapeHtml(doneLabel(item)) + '</span>' : '') +
     (item.status === "failed" ? '<span class="reason">' + escapeHtml(item.statusDetail || "失敗") + '</span>' : '') +
     '</div>' +
     '<div class="quote">' + renderRecordChanges(item) + '</div>' +
     (canAct
       ? '<div class="actions">' +
-        '<button data-action="apply" data-id="' + item.id + '">反映する</button>' +
+        // **押した結果が何になるかで呼び名が変わる**（設計書6.35.2）。
+        // 設定資料は「反映する」だが、伏線の候補は「登録」、
+        // 回収の候補は「回収済みにする」である
+        '<button data-action="apply" data-id="' + item.id + '">' +
+        escapeHtml(item.applyLabel || '反映する') + '</button>' +
         '<button class="secondary" data-action="dismiss" data-id="' + item.id + '">見送る</button>' +
         '</div>'
       : '') +

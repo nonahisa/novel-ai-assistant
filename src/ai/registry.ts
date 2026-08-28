@@ -43,6 +43,7 @@ export type AssignableFeature =
   | "proofread" // 推敲
   | "contradiction" // 矛盾検知（指摘の検証・再チェックも含む）
   | "deviation" // プロットからの逸脱
+  | "foreshadow" // 伏線の検知（配置と回収。どちらも同じ台帳を見る）
   | "generate" // あらすじ・紹介文・キャッチコピー・プロット逆算・冒頭診断・感情曲線
   | "chat"; // 相談（相談パネル・設定の相談・検索語の生成・独り言）
 
@@ -56,6 +57,7 @@ export const ASSIGNABLE_FEATURE_LABELS: Record<AssignableFeature, string> = {
   proofread: "推敲",
   contradiction: "矛盾検知",
   deviation: "プロットからの逸脱",
+  foreshadow: "伏線の検知",
   generate: "あらすじ・紹介文・キャッチコピーなど",
   chat: "AIに相談",
 };
@@ -67,6 +69,7 @@ export const ASSIGNABLE_FEATURES: AssignableFeature[] = [
   "proofread",
   "contradiction",
   "deviation",
+  "foreshadow",
   "generate",
   "chat",
 ];

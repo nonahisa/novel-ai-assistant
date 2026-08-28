@@ -301,6 +301,10 @@ describe("AIの印", () => {
         "novelai.checkProofread",
         "novelai.checkContradictions",
         "novelai.checkDeviations",
+        // 伏線の検知（配置・回収。設計書6.35.2・6.35.3）。
+        // **一覧を開く・手で追加・状態を変えるは、AIを呼ばないので入らない**
+        "novelai.checkForeshadows",
+        "novelai.checkForeshadowResolution",
         "novelai.checkOpening",
         "novelai.extractSettings",
         "novelai.extractCharactersOnly",

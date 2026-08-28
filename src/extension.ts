@@ -170,7 +170,14 @@ import {
   addForeshadowByHand,
   openForeshadows,
   registerForeshadowFromContradiction,
+  setForeshadowStatus,
 } from "./features/foreshadows";
+import {
+  checkForeshadowResolution,
+  checkForeshadows,
+  showForeshadowCandidates,
+  showForeshadowResolutions,
+} from "./features/checkForeshadows";
 import {
   extendMarkdownItWithRuby,
   type MarkdownItLike,
@@ -2307,8 +2314,8 @@ export async function activate(
     )
   );
 
-  // 伏線追跡（設計書6.35）。**この版はAIを使わない**——台帳と一覧、
-  // 手で足す口、矛盾からの転送だけで、自動検知は次の弾で入る
+  // 伏線追跡（設計書6.35）。台帳と一覧・手で足す口・矛盾からの転送に加え、
+  // 配置と回収の自動検知（P-25/P-26）。**検知は何も自動で保存しない**
   context.subscriptions.push(
     registerCommand(
       "novelai.openForeshadows",
@@ -2327,6 +2334,94 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         await addForeshadowByHand(work);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.setForeshadowStatus",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await setForeshadowStatus(work);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.checkForeshadows",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+
+        // 未保存のまま読むと、画面と違う本文から伏線を拾ってしまう
+        if (!(await saveDirtyDocumentsBeforeExtraction(work, "伏線の検知"))) {
+          return;
+        }
+
+        const result = await checkForeshadows(work, aiRegistry);
+        if (!result || result.cancelled) return;
+
+        showForeshadowCandidates(proposalPanel, work, result.candidates);
+
+        const parts = [`候補 ${result.candidates.length}件`];
+        if (result.duplicateCount > 0) {
+          // 黙って落とすと「なぜ出ないのか」が分からない
+          parts.push(`既に登録済み ${result.duplicateCount}件を除外`);
+        }
+        if (result.rejectedCount > 0) {
+          // 本文に無い箇所を「引用」してくることがある
+          parts.push(`本文と合わない候補 ${result.rejectedCount}件を除外`);
+        }
+        if (result.failedChunks > 0) {
+          parts.push(`読み取れなかった ${result.failedChunks}件`);
+        }
+        vscode.window.showInformationMessage(
+          `伏線の検知が完了しました。${parts.join(" / ")}。` +
+            (result.candidates.length > 0
+              ? "台帳へはまだ入れていません。 「提案」パネルで登録するものを選んでください。"
+              : "")
+        );
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.checkForeshadowResolution",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+
+        // 未保存のまま読むと、画面と違う本文で回収を判定してしまう
+        if (
+          !(await saveDirtyDocumentsBeforeExtraction(work, "伏線の回収の確認"))
+        ) {
+          return;
+        }
+
+        const result = await checkForeshadowResolution(work, aiRegistry);
+        if (!result || result.cancelled) return;
+
+        showForeshadowResolutions(proposalPanel, work, result.proposals);
+
+        const parts = [
+          `未回収 ${result.openCount}件のうち、回収されたと読める ${result.proposals.length}件`,
+        ];
+        if (result.rejectedCount > 0) {
+          parts.push(`本文と合わない ${result.rejectedCount}件を除外`);
+        }
+        if (result.failedChunks > 0) {
+          parts.push(`読み取れなかった ${result.failedChunks}件`);
+        }
+        vscode.window.showInformationMessage(
+          `伏線の回収の確認が完了しました。${parts.join(" / ")}。` +
+            (result.proposals.length > 0
+              ? "台帳はまだ変えていません。 「提案」パネルで確かめてから決めてください。"
+              : "")
+        );
       }
     )
   );
