@@ -245,6 +245,27 @@ body.split #write, body.split #read {
 }
 body.split #read { border-left: 1px solid var(--vscode-panel-border); }
 
+/*
+  **いま打っている行の印**（作者の要望、2026-08-28）。
+  並べているとき、組み上がりのどこを打っているのかが分かるようにする。
+
+  **背景は塗らない。** 読む面の色は用語の色分けに使っており、そこへ帯を
+  敷くと本文の色が読めなくなる。行の始まる側に細い線を引くだけにする。
+
+  **箱の形を変えない**（内側の影で描く）。border を足すと、印が移るたびに
+  本文が数ピクセルずれて、行が踊って見える。
+*/
+body.split #read {
+  --novelai-caret-line: color-mix(in srgb, var(--vscode-focusBorder) 45%, transparent);
+}
+body.split #read p.line.at-caret {
+  box-shadow: inset 2px 0 0 0 var(--novelai-caret-line);
+}
+/* 縦書きでは行は上から始まるので、線も上へ引く */
+body.vertical.split #read p.line.at-caret {
+  box-shadow: inset 0 2px 0 0 var(--novelai-caret-line);
+}
+
 /* ── ルビ・傍点・用語 ─────────────────── */
 ruby > rt {
   font-size: 0.5em;
@@ -535,9 +556,14 @@ body.plain .term { color: inherit; }
   splitButton.addEventListener("click", function () {
     split = !split;
     if (split) {
+      // 追いかけの眠りは、並べ直すたびに解く（前回の眠りを持ち越さない）
+      wakeFollow();
       applyFreshHtml();
       // 並べたら、打つのはこちら側である
       reading = false;
+    } else {
+      // 並べるのをやめたら、打っている行の印も消す
+      clearCaretMark();
     }
     paint();
     remember();
@@ -545,6 +571,8 @@ body.plain .term { color: inherit; }
       requestAnimationFrame(function () {
         keepPlace(write, read);
         write.focus();
+        // 並べた直後は、打っている行が見えているところから始める
+        scheduleSync(true);
       });
     }
   });
@@ -623,12 +651,20 @@ body.plain .term { color: inherit; }
     // 確定のたびに二重に入る
     if (composing) return;
     send();
+    // 組み上がりが届くのは少しあと。先に印だけでも打っている行へ移す
+    scheduleSync(true);
   });
 
   // 打つ面と裏地の見えている場所を合わせる。**ずれると色が別の字に付く**
   write.addEventListener("scroll", function () {
     marks.scrollTop = write.scrollTop;
     marks.scrollLeft = write.scrollLeft;
+    /*
+      並べているときは、組み上がりの側も一緒に動かす（作者の要望、2026-08-28）。
+      **合わせるのは書く→読むの一方向だけ。** 逆も繋ぐと、読み返すために
+      読む面を動かした瞬間に打つ面まで動き、書きかけの場所を見失う。
+    */
+    scheduleSync(false);
   });
 
   let composing = false;
@@ -645,6 +681,8 @@ body.plain .term { color: inherit; }
       send();
       // 変換中に外から届いていた書き換えは、ここで片づける
       flushPending();
+      // 確定したので、追いかけを解禁する（変換中は止めてある）
+      scheduleSync(true);
     }, 0);
   });
 
@@ -730,41 +768,299 @@ body.plain .term { color: inherit; }
     marks.scrollLeft = write.scrollLeft;
   });
 
-  /** 溜めておいた組み上がりを当てる。見えていないときは溜めたままにする */
-  function applyFreshHtml() {
-    if (freshHtml === null) return;
-    read.innerHTML = freshHtml;
-    freshHtml = null;
-    if (split) followCaret();
+  /* ── 並べているときの追いかけ ──────────────────── */
+
+  /**
+   * 行の並びのうち、**前後が一致しない中間**を求める。
+   *
+   * 先頭から一致する数と末尾から一致する数を数え、残りを返す。
+   * 同じなら null——「触らない」が正しい答えである。
+   *
+   * **画面の外から試せるように、印で挟んである**（この印の間を
+   * test/unit/manuscriptSplitFollow.test.ts が取り出して動かす）。
+   * src/core へ出すと画面側には写しを置くことになり、
+   * **片方だけが直る日が必ず来る**ので、置き場はここ1つにした。
+   */
+  /* changedRange:start */
+  function changedRange(before, after) {
+    const max = Math.min(before.length, after.length);
+    let head = 0;
+    while (head < max && before[head] === after[head]) head++;
+    let tail = 0;
+    while (
+      tail < max - head &&
+      before[before.length - 1 - tail] === after[after.length - 1 - tail]
+    ) {
+      tail++;
+    }
+    const oldEnd = before.length - tail;
+    const newEnd = after.length - tail;
+    if (head === oldEnd && head === newEnd) return null;
+    return { start: head, oldEnd: oldEnd, newEnd: newEnd };
+  }
+  /* changedRange:end */
+
+  /** 読む面の中身が、想定どおり行の段落だけで出来ているか */
+  function allLines(items) {
+    for (const item of items) {
+      if (item.nodeName !== "P") return false;
+      if (!item.classList.contains("line")) return false;
+    }
+    return true;
   }
 
   /**
-   * 並べているとき、組み上がりの側を**カーソルのある行に合わせる**。
+   * 段落を見比べるための文字列。
    *
-   * 割合でスクロールを合わせる手もあるが、ルビや傍点で行の高さが変わるため
-   * 少しずつずれる。**行そのものを指して寄せる**ほうが確かである。
+   * **行番号（data-line）は入れない。** 改行を1つ足すと、それ以降の
+   * 番号がすべてずれる。番号まで見比べると、中身の変わっていない段落が
+   * 全部「変わった」ことになり、**改行のたびに後ろ全部を作り直す**。
+   * 番号は入れ替えたあとで振り直す（renumberLines）。
    */
-  let followTimer = null;
-  function followCaret() {
+  function shapeOf(el) {
+    return el.className + ">" + el.innerHTML;
+  }
+
+  /**
+   * 行番号を振り直す。**打っている行を指すのに使う番号**なので、
+   * 増減があったら合わせておかないと、追いかけが別の行を指す。
+   */
+  function renumberLines(from) {
+    const items = read.children;
+    for (let i = from; i < items.length; i++) {
+      items[i].setAttribute("data-line", String(i));
+    }
+  }
+
+  /**
+   * 届いた組み上がりを、**変わった段落だけ**入れ替える。
+   *
+   * 4万字の本文では段落が千を超える。並べて打っているあいだは
+   * 打った少しあとに毎回ここへ届くので、丸ごと作り直すと打つ手が止まり、
+   * **読んでいた場所（スクロール）まで毎回飛ぶ。**
+   *
+   * 想定と違う中身（段落以外が混ざっている）なら false を返し、
+   * 呼んだ側が丸ごと入れ替える。**細工より、正しく出ることが先**である。
+   */
+  function patchRead(html) {
+    // 生きた HTMLCollection のまま動かすと、取り出した先から番号がずれる
+    const before = Array.prototype.slice.call(read.children);
+    if (before.length === 0) return false;
+    const holder = document.createElement("template");
+    holder.innerHTML = html;
+    const after = Array.prototype.slice.call(holder.content.children);
+    if (after.length === 0) return false;
+    if (!allLines(before) || !allLines(after)) return false;
+
+    const range = changedRange(before.map(shapeOf), after.map(shapeOf));
+    // 中身が同じなら**触らない**。入れ直すだけでも読んでいた場所は動く
+    if (range === null) return true;
+
+    const fragment = document.createDocumentFragment();
+    for (let i = range.start; i < range.newEnd; i++) {
+      fragment.appendChild(after[i]);
+    }
+    // 入れ先は、消す区間のすぐ後ろの段落。末尾まで消すときは null（＝最後尾へ）
+    const anchor = before[range.oldEnd] || null;
+    for (let i = range.start; i < range.oldEnd; i++) {
+      read.removeChild(before[i]);
+    }
+    read.insertBefore(fragment, anchor);
+    // 行が増減したときだけ、後ろの番号がずれている
+    if (before.length !== after.length) renumberLines(range.start);
+    return true;
+  }
+
+  /** 溜めておいた組み上がりを当てる。見えていないときは溜めたままにする */
+  function applyFreshHtml() {
+    if (freshHtml === null) return;
+    const html = freshHtml;
+    freshHtml = null;
+    /*
+      印を外してから当てる。**届いたHTMLに印は付いていない**ので、
+      付けたまま比べると、その段落だけ必ず「変わった」と見なされる
+    */
+    clearCaretMark();
+    if (!patchRead(html)) read.innerHTML = html;
+    // 1フレームでも印が消えると、打っている間ずっと点滅して見える
+    markCaretLine(caretLine());
+    if (split) scheduleSync(true);
+  }
+
+  /** いま印の付いている段落。付け替えるたびに探し直さないために持つ */
+  let markedLine = null;
+
+  /** カーソルのある行（＝カーソルまでにある改行の数） */
+  function caretLine() {
+    const at = write.selectionStart;
+    if (typeof at !== "number") return 0;
+    const text = write.value;
+    const end = Math.min(at, text.length);
+    // slice で切り出すと、打鍵のたびに4万字を写すことになる。その場で数える
+    let line = 0;
+    for (let i = 0; i < end; i++) {
+      if (text.charCodeAt(i) === 10) line++;
+    }
+    return line;
+  }
+
+  function lineElement(line) {
+    return read.querySelector('[data-line="' + line + '"]');
+  }
+
+  function clearCaretMark() {
+    if (markedLine) markedLine.classList.remove("at-caret");
+    markedLine = null;
+  }
+
+  /** 打っている行に印を付ける。**並べているときだけ**（読む面は読むための面） */
+  function markCaretLine(line) {
+    if (!split) {
+      clearCaretMark();
+      return;
+    }
+    const target = lineElement(line);
+    if (target === markedLine) return;
+    clearCaretMark();
+    if (target) {
+      target.classList.add("at-caret");
+      markedLine = target;
+    }
+  }
+
+  /**
+   * 作者が読む面へ手を出したら、しばらく追いかけない。
+   *
+   * **読み返している最中に、打っている行へ引き戻されるのがいちばん困る。**
+   * 数秒眠り、時間が経つか、**カーソルが行をまたいで動いたら**
+   * （＝また書きはじめた合図）その場で起きる。
+   *
+   * 眠る合図に読む面の scroll を使わないのは、**こちらが動かしたぶんや、
+   * 本文が伸びたときの画面側の調整も scroll として届く**ためである。
+   * 縦書きでは行が右から左へ伸びるので、1行増えるだけで位置が動く。
+   * 車輪・押下・指の動きだけを「手を出した」と数える。
+   */
+  const FOLLOW_SLEEP_MS = 3000;
+  let sleepUntil = 0;
+  let sleepLine = -1;
+
+  function wakeFollow() {
+    sleepUntil = 0;
+    sleepLine = -1;
+  }
+
+  function sleepFollow() {
     if (!split) return;
-    if (followTimer) cancelAnimationFrame(followTimer);
-    followTimer = requestAnimationFrame(function () {
-      followTimer = null;
-      const before = write.value.slice(0, write.selectionStart);
-      let line = 0;
-      for (let i = 0; i < before.length; i++) {
-        if (before.charCodeAt(i) === 10) line++;
-      }
-      const target = read.querySelector('[data-line="' + line + '"]');
-      if (target && target.scrollIntoView) {
-        target.scrollIntoView({ block: "center", inline: "center" });
-      }
+    sleepUntil = Date.now() + FOLLOW_SLEEP_MS;
+    sleepLine = caretLine();
+  }
+
+  /** いま追いかけてよいか */
+  function following(line) {
+    if (sleepUntil === 0) return true;
+    if (Date.now() >= sleepUntil) {
+      wakeFollow();
+      return true;
+    }
+    if (line !== sleepLine) {
+      // 行をまたいだ＝また書きはじめた。眠りから起きる
+      wakeFollow();
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * その段落が読む面からはみ出している量。中に入っていれば 0。
+   *
+   * **scrollIntoView を使わない。** あれは上の入れ物まで動かすことがあり、
+   * #surface は overflow:hidden なので、動くと戻す手立てが無い。
+   * はみ出しを足し引きするだけなら、縦書き（左右に流れる）でも
+   * 横書き（上下に流れる）でも同じ式で足りる——**割合ではなく差**なので、
+   * 縦書きでスクロール値の数え方が違っても効く。
+   */
+  function offView(el) {
+    const box = read.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
+    // ぎりぎりに寄せると次の行が見えない。少しだけ内側へ入れる
+    const slack = 24;
+    let left = 0;
+    if (rect.left < box.left) left = rect.left - box.left - slack;
+    else if (rect.right > box.right) left = rect.right - box.right + slack;
+    let top = 0;
+    if (rect.top < box.top) top = rect.top - box.top - slack;
+    else if (rect.bottom > box.bottom) top = rect.bottom - box.bottom + slack;
+    return { left: left, top: top };
+  }
+
+  /**
+   * 読む面を、その段落が見えるところまで**そっと**動かす。
+   *
+   * 中央には寄せない。1行動くたびに画面が真ん中まで動くと、
+   * **目が付いていけない**（読んでいるほうが疲れる）。
+   */
+  function nudgeIntoView(el) {
+    const off = offView(el);
+    if (off.left === 0 && off.top === 0) return;
+    if (off.left !== 0) read.scrollLeft += off.left;
+    if (off.top !== 0) read.scrollTop += off.top;
+  }
+
+  /**
+   * 並べているときの追いかけ。**カーソルを優先する。**
+   *
+   * 割合合わせ（keepPlace）は、カーソルが画面から出るほどの大移動を拾う
+   * 補いである。カーソルの行が見えているなら、割合で合わせ直さない——
+   * 合わせ直すと、いま打っている行のほうが画面の外へ出ていく。
+   */
+  function runSync(byCaret) {
+    if (!split) return;
+    const line = caretLine();
+    markCaretLine(line);
+    // 変換中は動かさない。画面が跳ねると、変換している文字を目で追えなくなる
+    if (composing) return;
+    // 手で読み返している最中は、引き戻さない
+    if (!following(line)) return;
+    const target = lineElement(line);
+    if (byCaret) {
+      // 行が見つからないのは、組み上がりがまだ届いていないとき。
+      // **割合で飛ばさずに待つ**（次に届いたところで、もう一度ここを通る）
+      if (target) nudgeIntoView(target);
+      return;
+    }
+    if (target) {
+      const off = offView(target);
+      if (off.left === 0 && off.top === 0) return;
+    }
+    keepPlace(write, read);
+  }
+
+  /**
+   * 追いかけの予約。
+   *
+   * 打鍵とスクロールの両方から何度も呼ばれるので、**1フレームに1回**へ
+   * まとめる。同じフレームで両方が来たら、カーソルのほうを採る。
+   */
+  let syncTimer = null;
+  let syncByCaret = false;
+  function scheduleSync(byCaret) {
+    if (!split) return;
+    if (byCaret) syncByCaret = true;
+    if (syncTimer !== null) return;
+    syncTimer = requestAnimationFrame(function () {
+      syncTimer = null;
+      const wanted = syncByCaret;
+      syncByCaret = false;
+      runSync(wanted);
     });
   }
 
-  // カーソルが動いたら、組み上がりの側も追いかける
+  // カーソルが動いたら、組み上がりの側も追いかける。
+  // **変換中は追いかけない**（変換の途中で画面が動くと、変換が見づらい）
   document.addEventListener("selectionchange", function () {
-    if (document.activeElement === write) followCaret();
+    if (document.activeElement !== write) return;
+    if (composing) return;
+    scheduleSync(true);
   });
 
   /** 変換が確定したあとに、待たせていた書き換えを片づける */
@@ -1029,6 +1325,18 @@ body.plain .term { color: inherit; }
   read.addEventListener("scroll", function () {
     tip.classList.remove("open");
   });
+
+  /*
+    **読む面へ手を出したら、追いかけを眠らせる**（作者の要望、2026-08-28）。
+    読み返しているところへ、打っている行から引き戻されるのが最悪である。
+
+    合図に scroll を使わないのは、追いかけで動かしたぶんも、本文が伸びた
+    ときの調整も scroll として届くためで、それだと**自分の動きで自分が
+    眠る**。車輪・押下（つまみの掴みを含む）・指の動きだけを数える。
+  */
+  read.addEventListener("wheel", sleepFollow, { passive: true });
+  read.addEventListener("mousedown", sleepFollow);
+  read.addEventListener("touchstart", sleepFollow, { passive: true });
 
   /* ── 拡張機能からの知らせ ──────────── */
   window.addEventListener("message", function (event) {

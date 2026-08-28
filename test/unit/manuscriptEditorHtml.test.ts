@@ -137,9 +137,14 @@ describe("並べて書く", () => {
     expect(html).toContain("body.reading:not(.split) #write");
   });
 
+  /**
+   * 追いかけの中身は manuscriptSplitFollow.test.ts が見る。
+   * ここは「しかけが残っているか」だけ——`scrollIntoView` は使わない
+   * （上の入れ物まで動かすことがあり、#surface は overflow:hidden で戻せない）。
+   */
   it("組み上がりの側が、カーソルのある行を追いかける", () => {
-    expect(code).toContain("followCaret");
-    expect(code).toContain("scrollIntoView");
+    expect(code).toContain("caretLine");
+    expect(code).toContain("nudgeIntoView");
   });
 
   it("並べた状態を覚える", () => {
