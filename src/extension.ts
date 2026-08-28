@@ -955,7 +955,7 @@ export async function activate(
    *
    * **戻す口を必ず用意する。** 消えたまま戻し方が分からないと、
    * 拡張機能が壊れたようにしか見えない。相談パネルの見出しに
-   * 「作品一覧と操作メニューを出す」ボタンが出る。
+   * 「作品一覧とメニューを出す」ボタンが出る。
    */
   async function setChatFocus(on: boolean): Promise<void> {
     await vscode.commands.executeCommand(

@@ -72,7 +72,7 @@ describe("プロンプト設計書の形", () => {
    * 文書に書いた version と、実装の定数を突き合わせる。
    *
    * **文書だけを直して定数を上げ忘れる**と、古い指示で作られた応答が
-   * キャッシュから返り続ける（鍵は promptVersion|model|chunkHash）。
+   * キャッシュから返り続ける（鍵は promptVersion|providerId|model|chunkHash）。
    */
   const IMPLEMENTED: Array<[string, string, string]> = [
     ["P-02", "src/prompts/plotReverse.ts", "PLOT_REVERSE_VERSION"],
