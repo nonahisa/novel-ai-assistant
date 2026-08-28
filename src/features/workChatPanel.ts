@@ -63,7 +63,7 @@ import { detectRunIntent } from "../core/chatIntent";
 import { findTextRange } from "../core/textLocate";
 import { applyChatEdit } from "./applyChatEdit";
 import { confirmPaidUsage } from "./aiConnectivity";
-import { buildFeatureGuide } from "./featureGuide";
+import { buildFeatureGuideForQuestion } from "./featureGuide";
 import {
   prepareRetrieval,
   search,
@@ -571,6 +571,24 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     try {
       logStep(`相談: v${WORK_CHAT_VERSION} / ${resolved.model}`);
 
+      // **使い方の説明は、目次（全操作の名前）＋関係しそうな束だけ渡す。**
+      // 全文を毎回渡していたが、機能を足すたびに伸びて6,169字になっていた。
+      // 話題は追い質問（「それはどこ？」）だと直前の発言が持っているので、
+      // 作者の最後の発言も選ぶ材料にする
+      const lastAuthorTurn = [...this.history]
+        .reverse()
+        .find((turn) => turn.role === "author");
+      const guide = buildFeatureGuideForQuestion({
+        question,
+        recentAuthorTurns: lastAuthorTurn ? [lastAuthorTurn.text] : [],
+      });
+      // 何を渡したかを残す。答えがおかしいときに、説明が届いていたのかを
+      // 後から確かめられないと切り分けられない
+      logStep(
+        `相談: 使い方の説明 ${guide.reason} / ${guide.text.length}字` +
+          (guide.selected.length > 0 ? ` / ${guide.selected.join("、")}` : "")
+      );
+
       const call = (
         requestedFiles?: Array<{ path: string; content: string }>
       ) =>
@@ -591,9 +609,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
             plotFocus: this.plotFocus,
             history: this.history.slice(-HISTORY_TURNS),
             question,
-            // 使い方を聞かれたときに答えられるよう、機能の一覧を渡す。
-            // 組み立ては安いので、毎回作り直してよい（実装と食い違わない）
-            featureGuide: buildFeatureGuide(),
+            featureGuide: guide.text,
           }),
           model: resolved.model,
           // 相談は考えを広げる場なので、抽出よりは揺らす

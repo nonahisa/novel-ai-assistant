@@ -1,5 +1,10 @@
 import { ACTION_TREE, visibleEntries } from "../views/actionList";
 import { canRunProcesses } from "../core/runtime";
+import {
+  selectGuideBundles,
+  type GuideBundle,
+  type GuideSelection,
+} from "../core/guideSelect";
 
 /**
  * 「この拡張機能の使い方」をAIへ渡すための説明を組み立てる。
@@ -26,6 +31,25 @@ import { canRunProcesses } from "../core/runtime";
  * 「その機能はありません」と嘘を答える。残すのは**1文目**（何ができるか）と、
  * **「〜ません」で終わる文**（しないことの断り）だけにする。後者を落とすと、
  * 「原稿は書き換えません」「AIは使いません」が消えて、AIが逆を答えかねない。
+ *
+ * ## 短くするだけでは足りなかった（2026-08-29）
+ *
+ * 上のやり方で5,097字まで縮めたが、機能を足すたびにまた伸び、
+ * **上限のテストを引き上げ続ける**ことになった（6,000→6,300字）。
+ * 送る量が機能数に比例する形そのものが行き止まりである。
+ *
+ * そこで**目次と説明を分けた。**
+ *
+ * - `buildFeatureIndex()`——**全操作の名前だけ**。毎回送る。名前が全部あれば
+ *   「その機能はありません」と嘘を答える心配は残らない
+ * - `buildGuideBundles()`——小分類ごとの説明の束。**質問に関係しそうな束だけ**
+ *   を選んで送る（選ぶのは `core/guideSelect.ts`）
+ *
+ * `buildFeatureGuide()`（全文）は製品コードからは呼ばれなくなったが残してある。
+ * **束に漏れが無いことを検査する物差し**として使う（短い説明の全行が束の
+ * どれかに入ることを、全文と突き合わせる——`featureGuide.test.ts`）。
+ * 作者が読むマニュアル（`openManual.ts`）は `EXTRA_GUIDE` だけを使い、
+ * 操作の説明は `ACTION_TREE` から独自に（全文で）組み立てている。
  */
 
 /**
@@ -103,6 +127,175 @@ export function buildFeatureGuide(
   }
 
   return [lines.join("\n"), "", EXTRA_GUIDE].join("\n");
+}
+
+/**
+ * 操作の**目次**を作る。名前だけで、説明は入れない。
+ *
+ * **これは毎回送る。** 名前が1つでも欠けると、AIは「その機能はありません」と
+ * 嘘を答える。逆に名前さえ揃っていれば、説明が手元に無い操作でも
+ * 「詳細メニューのここにあります」とは答えられる。
+ *
+ * 末尾に【この拡張機能の考え方】を付ける。「原稿は勝手に書き換えない」
+ * 「作者が書いた内容は上書きしない」は、**どんな相談でもAIが逆を答えては
+ * いけない**ことなので、質問の中身にかかわらず常に渡す。
+ */
+export function buildFeatureIndex(): string {
+  const lines: string[] = ["【詳細メニューの操作（これで全部）】"];
+
+  // 絞り方は `buildFeatureGuide()` と同じにする。片方だけ規則が違うと、
+  // 目次に出るのに説明が無い（またはその逆の）操作ができる
+  const allowsProcesses = canRunProcesses();
+
+  for (const group of ACTION_TREE.filter((entry) => !entry.generated)) {
+    lines.push(`■ ${group.label}`);
+    for (const entry of visibleEntries(group.entries, allowsProcesses)) {
+      if (entry.kind === "action") {
+        lines.push(nameOnly(entry, ""));
+        continue;
+      }
+      lines.push(`  ▸ ${entry.label}`);
+      for (const item of visibleEntries(entry.items, allowsProcesses)) {
+        lines.push(nameOnly(item, "  "));
+      }
+    }
+  }
+
+  return [lines.join("\n"), "", extraGuideSection("この拡張機能の考え方")].join(
+    "\n"
+  );
+}
+
+/**
+ * 説明を、小分類ごとの束に切る。
+ *
+ * **なぜ小分類の単位か。** 作者は「誤字脱字はどこ？」のように、機能を1つ
+ * 名指しして聞く。だが答えるときは近くの操作もいっしょに見せたほうがよい
+ * （表記ゆれ・推敲は同じ小分類にある）。1操作ずつに切ると関連が切れ、
+ * 分類ごとに切ると1束が大きくなりすぎる。
+ *
+ * 分類の直下にある操作は、その分類の名前だけの束にする。
+ */
+export function buildGuideBundles(): GuideBundle[] {
+  const allowsProcesses = canRunProcesses();
+  const bundles: GuideBundle[] = [];
+
+  for (const group of ACTION_TREE.filter((entry) => !entry.generated)) {
+    const entries = visibleEntries(group.entries, allowsProcesses);
+
+    const direct = entries.filter((entry) => entry.kind === "action");
+    if (direct.length > 0) {
+      bundles.push({
+        key: `group:${group.label}`,
+        label: group.label,
+        text: [
+          `■ ${group.label}`,
+          ...direct.map((item) => describeAction(item, "", "short")),
+        ].join("\n"),
+      });
+    }
+
+    for (const entry of entries) {
+      if (entry.kind !== "section") continue;
+      const items = visibleEntries(entry.items, allowsProcesses);
+      if (items.length === 0) continue;
+      // 画面の階層をそのまま名前にする。作者が見ている道順と
+      // 記録に残る名前が違うと、後から追えない
+      const label = `${group.label} → ${entry.label}`;
+      bundles.push({
+        key: `section:${group.label}/${entry.label}`,
+        label,
+        text: [
+          `■ ${label}`,
+          ...items.map((item) => describeAction(item, "", "short")),
+        ].join("\n"),
+      });
+    }
+  }
+
+  // 操作メニューに出ないもの（画面・置き場所）も、聞かれることのある話題
+  // なので束にする。【この拡張機能の考え方】は目次に常に付くので入れない
+  bundles.push({
+    key: "screen",
+    label: "画面",
+    text: extraGuideSection("画面"),
+  });
+  bundles.push({
+    key: "files",
+    label: "ファイルの置き場所",
+    text: extraGuideSection("ファイルの置き場所"),
+  });
+
+  return bundles;
+}
+
+/**
+ * 相談1回ぶんの「使い方の説明」を組み立てる。
+ *
+ * 目次（全操作の名前）は常に、説明は質問に関係しそうな束だけ。
+ * `selected` は何を渡したかの記録用（`label` の並び）。
+ */
+export function buildFeatureGuideForQuestion(input: {
+  question: string;
+  /** 直前の作者の発言。「それはどこ？」のような追い質問で話題を引き継ぐ */
+  recentAuthorTurns?: string[];
+}): { text: string; selected: string[]; reason: GuideSelection["reason"] } {
+  const selection = selectGuideBundles({
+    question: input.question,
+    recentAuthorTurns: input.recentAuthorTurns,
+    bundles: buildGuideBundles(),
+  });
+
+  const blocks = [buildFeatureIndex()];
+  if (selection.selected.length > 0) {
+    // **目次と説明を見出しで分ける。** どちらも「■ 分類」で始まるので、
+    // 見出しが無いと「説明のある操作だけが全部」と読まれかねない
+    blocks.push(
+      [
+        "【関係しそうな操作の説明（ここに無い操作も、目次のものは全部あります）】",
+        ...selection.selected.map((bundle) => bundle.text),
+      ].join("\n\n")
+    );
+  }
+
+  return {
+    text: blocks.join("\n\n"),
+    selected: selection.selected.map((bundle) => bundle.label),
+    reason: selection.reason,
+  };
+}
+
+/**
+ * `EXTRA_GUIDE` から【…】の節を1つ取り出す。
+ *
+ * 目次（考え方）と束（画面・置き場所）で使い分けるが、**文面は1か所に
+ * しか持たない。** 写しを作ると、片方だけ直したときに気づけない。
+ */
+function extraGuideSection(title: string): string {
+  const heading = `【${title}】`;
+  const lines = EXTRA_GUIDE.split("\n");
+  const start = lines.indexOf(heading);
+  if (start === -1) return "";
+
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => line.startsWith("【"));
+  const body = end === -1 ? rest : rest.slice(0, end);
+  return [heading, ...body].join("\n").trim();
+}
+
+/**
+ * 目次の1行。名前と、AIを使うかの印だけ。
+ *
+ * 印は「・」1文字にする。説明の側（`describeAction`）は「  - 名前: 説明」
+ * なので、**見た目でどちらの一覧かが分かる**。81行あるので、行頭の記号を
+ * 1文字削るだけで240字ほど変わる。
+ */
+function nameOnly(
+  action: { label: string; usesAI?: boolean },
+  indent: string
+): string {
+  const mark = action.usesAI ? "（AIを使う）" : "";
+  return `${indent}・${action.label}${mark}`;
 }
 
 function describeAction(

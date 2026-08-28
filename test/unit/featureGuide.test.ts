@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { buildFeatureGuide } from "../../src/features/featureGuide";
+import {
+  buildFeatureGuide,
+  buildFeatureGuideForQuestion,
+  buildFeatureIndex,
+  buildGuideBundles,
+} from "../../src/features/featureGuide";
 import { ACTION_TREE } from "../../src/views/actionList";
 
 const guide = buildFeatureGuide();
@@ -110,17 +115,103 @@ describe("使い方の説明", () => {
 
     expect(guide).not.toContain(fullDetail);
     /*
-      上限は「気づかないうちに伸びる」のを止めるための目印である
-      （8,111字まで伸びていたのを、誰も見ていなかった）。
+      **ここには全体の字数の上限を置かない**（2026-08-29）。
 
-      **6,000では、もう1つも操作を足せなかった。** 6.36（執筆再開支援・
-      単話プロット）を足す直前で5,966字あり、残りは34字——操作の名前だけで
-      使い切る幅である。足した2つで6,154字になったので、6,300へ広げた。
+      以前は6,300字の上限があった。毎回AIへ送っていたので、伸びるのを
+      止める目印が要ったからである。だが機能を足すたびに上限を引き上げる
+      ことになり（6,000→6,300）、**送る量が機能数に比例する形そのものが
+      行き止まり**だった。
 
-      **広げたぶんは、次に足すときにまた尽きる。** これは目印として
-      正しい振る舞いで、そのときは上限を上げる前に**説明そのものを
-      短くする**ことを先に考えること（1回の相談で毎回送っている）。
+      いまは相談へ送るのは「目次＋関係する束」だけで、この全文は
+      作者が読むマニュアル（`openManual.ts`）が使う。読み物は伸びてよい。
+      代わりに目次と束の一つひとつに上限を置いてある（下の試験）。
     */
-    expect(guide.length).toBeLessThan(6300);
+  });
+});
+
+describe("相談へ渡す目次", () => {
+  const index = buildFeatureIndex();
+
+  test("全操作の名前が入る", () => {
+    // **名前だけは毎回全部渡す。** ここが欠けると、AIは
+    // 「その機能はありません」と嘘を答える。説明を絞る代わりの担保である
+    for (const action of allActions()) {
+      if (action.browserOnly) continue;
+      expect(index, action.label).toContain(action.label);
+    }
+  });
+
+  test("目次は1,600字未満", () => {
+    /*
+      毎回送るのはこれと【この拡張機能の考え方】だけなので、ここが伸びると
+      節約の意味が薄れる。**超えたら、まず説明が混ざっていないかを疑うこと。**
+      名前が増えただけなら上限を上げてよいが、伸び方は操作1つで15字ほどである。
+    */
+    expect(index.length).toBeLessThan(1600);
+  });
+
+  test("原稿を勝手に書き換えない、という断りは必ず入る", () => {
+    // **どんな相談でも、AIがこの逆を答えてはいけない。**
+    // 質問に関係するかどうかで出し分けない
+    expect(index).toContain("本文（原稿）は勝手に書き換えない");
+  });
+});
+
+describe("説明の束", () => {
+  const bundles = buildGuideBundles();
+
+  test("1つの束は1,500字未満", () => {
+    // 超えたら小分類を割る（渡す単位が大きすぎると、関係の薄い説明が
+    // まとめて付いてくる）
+    const tooLong = bundles.filter((bundle) => bundle.text.length >= 1500);
+
+    expect(
+      tooLong.map((bundle) => `${bundle.label}: ${bundle.text.length}字`)
+    ).toEqual([]);
+  });
+
+  test("束を全部つなぐと、短い説明の全行が入る", () => {
+    // **束から漏れた操作は、説明を誰も渡せない。** 分類の直下の操作は
+    // 小分類が無いので落としやすい
+    const joined = bundles.map((bundle) => bundle.text).join("\n");
+    const lines = new Set(joined.split("\n").map((line) => line.trim()));
+
+    // 操作の行だけを見る。全文の後半（画面・置き場所・考え方）にも
+    // 「- 」で始まる行があるが、あれは操作ではない
+    const expected = guide
+      .slice(0, guide.indexOf("【画面】"))
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("- "));
+
+    expect(expected.length).toBeGreaterThan(0);
+    for (const line of expected) {
+      expect(lines.has(line), line).toBe(true);
+    }
+  });
+});
+
+describe("相談1回ぶんの組み立て", () => {
+  test("本文の相談では、目次だけを渡す", () => {
+    // 作品の相談に使い方の説明は要らない。ここが節約の本体である
+    const built = buildFeatureGuideForQuestion({
+      question: "この段落は冗長ですか",
+    });
+
+    expect(built.reason).toBe("none");
+    expect(built.selected).toEqual([]);
+    expect(built.text.length).toBeLessThan(1800);
+  });
+
+  test("機能名で聞かれたら、その小分類の説明を足す", () => {
+    const built = buildFeatureGuideForQuestion({
+      question: "誤字脱字はどこ？",
+    });
+
+    expect(built.selected.some((label) => label.includes("校正・校閲"))).toBe(
+      true
+    );
+    // 目次は落とさない。説明のある操作だけが全部だと読まれては困る
+    expect(built.text).toContain("表記ゆれを検知");
   });
 });
