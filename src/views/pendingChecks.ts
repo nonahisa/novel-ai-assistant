@@ -276,6 +276,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 1,
   },
   {
+    id: "F-46",
+    title: "本文を溢れさせない——関所と固定費の実測",
+    commands: ["novelai.checkTypos", "novelai.checkContradictions", "novelai.extractSettings"],
+    count: 6,
+  },
+  {
     id: "F-45",
     title: "シーンメモ",
     commands: ["novelai.openSceneMemos"],
@@ -458,4 +464,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 569;
+export const PENDING_CHECK_TOTAL = 575;

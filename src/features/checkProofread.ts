@@ -15,7 +15,11 @@ import {
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
-import { readChunkSettings } from "./chunkSettings";
+import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
+import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
+import { OUTPUT_RESERVE_TOKENS } from "../ai/contextGuard";
+import { blankMemoLines } from "../core/sceneMemo";
+import type { KeepWord } from "../models/keepWord";
 import {
   buildProofreadPrompt,
   issueBudget,
@@ -89,28 +93,13 @@ export async function checkProofread(
   const resolved = await ensureConfigured(registry, "proofread");
   if (!resolved) return undefined;
 
-  const chunks = await collectChunks(work, registry, options);
-  if (!chunks) return undefined;
+  const prepared = await collectChunks(work, registry, options);
+  if (!prepared) return undefined;
+  const { chunks, narrativeStyle, keepWords, styleNote } = prepared;
   if (chunks.length === 0) {
     vscode.window.showWarningMessage("推敲できる本文がありませんでした。");
     return undefined;
   }
-
-  const narrativeStyle = await readNarrativePerson(work);
-  // 作者が「直さない」と決めた語。推敲は原文まるごとを置き換えるので、
-  // 含まれていたら指摘ごと出さない
-  const keepWords = await new KeepWordStore(work).loadWords();
-
-  // **誤字脱字と同じ作法を渡す**（設計書6.8.14）。片方だけに渡すと、
-  // 同じ本文について機能ごとに違う前提で判断することになる
-  const styleNote = buildStyleNote(
-    collectWorkStyle({
-      // 全チャンクを繋いで見る。1話だけでは一人称も文語かも決められない
-      bodyText: chunks.map((chunk) => chunk.text).join("\n"),
-      narrativePerson: narrativeStyle,
-      keepWords: keepWords.map((entry) => entry.word),
-    })
-  );
 
   const cache = new ChunkCache(work);
   await cache.load();
@@ -204,6 +193,18 @@ export async function checkProofread(
         const asked = await ask(chunk);
         if (asked.ok) {
           raw = asked.value;
+        } else if (asked.overflow) {
+          // 上限に入らなかった。まとめたぶんを戻す→半分に割る→諦める
+          const retry = retryOnOverflow(chunk, asked.overflow);
+          if (retry.kind === "split") {
+            queue.splice(cursor + 1, 0, ...retry.parts);
+            total += retry.parts.length;
+            logStep(`${chunk.hash}: ${retry.note}`);
+          } else {
+            // **黙って飛ばさない。** 理由を残して次のチャンクへ進む
+            failedChunks++;
+            logFailure("推敲", { チャンク: chunk.hash, 理由: retry.note });
+          }
         } else if (asked.truncated) {
           const parts = splitMergedChunk(chunk);
           if (parts.length > 1) {
@@ -244,10 +245,13 @@ export async function checkProofread(
       }
     }
 
-    /** 応答。切り詰められたときだけ、話ごとに戻して試し直す */
+    /**
+     * 応答。切り詰められたとき、または**上限に入らなかったとき**だけ、
+     * 小さくして試し直す（設計書6.27.10）
+     */
     type AskResult =
       | { ok: true; value: unknown }
-      | { ok: false; truncated: boolean };
+      | { ok: false; truncated: boolean; overflow?: AIError };
 
     async function ask(chunk: Chunk): Promise<AskResult> {
       try {
@@ -298,6 +302,11 @@ export async function checkProofread(
         if (error instanceof AIError && error.kind === "aborted") {
           return { ok: false, truncated: false };
         }
+        // **入らなかったときは、失敗として数える前に分け直しへ回す**。
+        // そのまま数えると、そのチャンクは一度も推敲されないまま終わる
+        if (isContextOverflow(error)) {
+          return { ok: false, truncated: false, overflow: error };
+        }
         failedChunks++;
         logFailure("推敲", {
           チャンク: chunk.hash,
@@ -325,16 +334,30 @@ export async function checkProofread(
 }
 
 /**
- * 作品の人称・文体をプロットから読む。
+ * 本文を読み、固定費を測り、その残りでチャンクへ切る。
  *
- * **無くても推敲はできる。** 渡すのは「三人称なのに一人称の癖を直せと
- * 言わない」ための手がかりで、必須ではない。
+ * **読むのと切るのを分けてある**（設計書6.27.10）。切る大きさは、指示と
+ * 作法が何字あるかを測ってからでないと決められないが、その作法（styleNote）を
+ * 決めるには本文が要る。読む → 測る → 切る、の順にすれば一度で済む。
+ *
+ * 作法（人称・文語かどうか）は呼び出し側でも使うので、一緒に返す。
  */
 async function collectChunks(
   work: WorkEntry,
   registry: AIRegistry,
   options: CheckProofreadOptions
-): Promise<Chunk[] | undefined> {
+): Promise<
+  | {
+      chunks: Chunk[];
+      /** 作品の人称・文体（プロットから読む）。無くても推敲はできる */
+      narrativeStyle: string;
+      /** 作者が「直さない」と決めた語 */
+      keepWords: KeepWord[];
+      /** AIへ渡す作法の説明 */
+      styleNote: string;
+    }
+  | undefined
+> {
   const scan = await scanWork(work);
   const targets = options.filePaths
     ? scan.episodes.filter((episode) =>
@@ -346,13 +369,13 @@ async function collectChunks(
       )
     : scan.episodes;
 
-  const info = await registry.resolveModelInfo("proofread");
-  // **設定を見るようにした**（設計書6.23）。以前はここだけ設定を無視して
-  // いつも自動で決めており、作者が字数を指定しても効かなかった
-  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192);
-  const maxChars = chunkSettings.chunk.chars;
-
-  const chunks: Chunk[] = [];
+  // **切る前の本文をいったん溜める**（設計書6.27.10）
+  const sources: Array<{
+    filePath: string;
+    text: string;
+    chapterStart: number | null;
+    chapterEnd: number | null;
+  }> = [];
 
   for (const episode of targets) {
     // 競合マーカーのあるファイルはAI処理をブロックする
@@ -363,22 +386,77 @@ async function collectChunks(
     } catch {
       continue;
     }
-    for (const chunk of splitIntoChunks(
-      episode.filePath,
+    sources.push({
+      filePath: episode.filePath,
       text,
-      episode.chapterStart,
-      episode.chapterEnd,
+      chapterStart: episode.chapterStart,
+      chapterEnd: episode.chapterEnd,
+    });
+  }
+
+  const narrativeStyle = await readNarrativePerson(work);
+  // 作者が「直さない」と決めた語。推敲は原文まるごとを置き換えるので、
+  // 含まれていたら指摘ごと出さない
+  const keepWords = await new KeepWordStore(work).loadWords();
+
+  // **誤字脱字と同じ作法を渡す**（設計書6.8.14）。片方だけに渡すと、
+  // 同じ本文について機能ごとに違う前提で判断することになる
+  const styleNote = buildStyleNote(
+    collectWorkStyle({
+      // 全話を繋いで見る。1話だけでは一人称も文語かも決められない。
+      // **シーンメモは落とす**（`splitIntoChunks` が本文から消すのと同じ）
+      bodyText: sources.map((source) => blankMemoLines(source.text)).join("\n"),
+      narrativePerson: narrativeStyle,
+      keepWords: keepWords.map((entry) => entry.word),
+    })
+  );
+
+  // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
+  // `maxIssues` は本文の長さで変わるが、桁は変わらない（数字1つ）ので0で測る
+  const overheadChars =
+    PROOFREAD_SYSTEM_PROMPT.length +
+    buildProofreadPrompt({
+      chunkTextWithLineNumbers: "",
+      narrativeStyle,
+      styleNote,
+      maxIssues: 0,
+    }).length;
+
+  const info = await registry.resolveModelInfo("proofread");
+  // **設定を見るようにした**（設計書6.23）。以前はここだけ設定を無視して
+  // いつも自動で決めており、作者が字数を指定しても効かなかった
+  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192, {
+    overheadChars,
+    outputTokens: OUTPUT_RESERVE_TOKENS,
+  });
+  const maxChars = chunkSettings.chunk.chars;
+
+  const chunks: Chunk[] = [];
+  for (const source of sources) {
+    for (const chunk of splitIntoChunks(
+      source.filePath,
+      source.text,
+      source.chapterStart,
+      source.chapterEnd,
       { maxChars }
     )) {
       chunks.push(chunk);
     }
   }
 
+  logStep(`推敲のチャンク: ${describeChunkSettings(chunkSettings)}`);
+
   // **1話ずつ送ると、指示のほうが本文より大きい。** 誤字脱字と同じ理由で
   // 隣どうしをまとめる（設計書6.8.10）。返ってきた行番号は
   // `locateChunkLine` で元のファイルへ戻す
   const mergeChars = chunkSettings.mergeChars;
-  return mergeChars > 0
-    ? mergeAdjacentChunks(chunks, { maxChars: mergeChars })
-    : chunks;
+  return {
+    chunks:
+      mergeChars > 0
+        ? mergeAdjacentChunks(chunks, { maxChars: mergeChars })
+        : chunks,
+    narrativeStyle,
+    keepWords,
+    styleNote,
+  };
 }

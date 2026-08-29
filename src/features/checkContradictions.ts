@@ -2,7 +2,8 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError, recoveryForAIError, type CapabilityTier } from "../ai/types";
+import { AIError, recoveryForAIError, type ModelInfo } from "../ai/types";
+import { OUTPUT_RESERVE_TOKENS } from "../ai/contextGuard";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import {
@@ -21,7 +22,12 @@ import {
   capabilityProfile,
   describeCapability,
 } from "../ai/capability";
-import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
+import {
+  describeChunkSettings,
+  readChunkSettings,
+  type ChunkFixedCost,
+} from "./chunkSettings";
+import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
 import {
   factsRevealedAfter,
   hasAppearedBy,
@@ -44,9 +50,10 @@ import {
 import {
   describeCharacter,
   describeLocation,
+  describeWorldItem,
   settingsFingerprint,
 } from "../core/settingsSummary";
-import { selectWorldview } from "../core/worldviewSelect";
+import { selectWorldview, worldviewMaxChars } from "../core/worldviewSelect";
 import { formatChapterLabel } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import {
@@ -192,17 +199,11 @@ export async function checkContradictions(
   const resolved = await ensureConfigured(registry, "contradiction");
   if (!resolved) return undefined;
 
-  const material = await collectSettings(work);
-  if (!material) return undefined;
-
-  const tasks = await collectChunks(work, registry, options);
-  if (!tasks) return undefined;
-  const { chunks, chapterLabelByFile, chunkNote, tier, unreadableEpisodes } =
-    tasks;
-  if (chunks.length === 0) {
-    vscode.window.showWarningMessage("検知できる本文がありませんでした。");
-    return undefined;
-  }
+  // **モデルの情報を先に1回だけ引く。** チャンクの大きさも、観点の絞りも、
+  // 世界観に回してよい字数も、すべてここから決まる（設計書6.27.10）。
+  // 2回引くと、2回の結果が食い違ったときにどちらで動いたのか分からなくなる
+  const info = await registry.resolveModelInfo("contradiction");
+  const tier = info?.tier;
 
   // 地力の足りないモデルには観点を絞って渡す（設計書6.28）。
   // **鍵より先に決める。** 観点が変われば答えも変わるので、
@@ -211,6 +212,50 @@ export async function checkContradictions(
     tier,
     providerId: resolved.provider.id,
   });
+  // 地力の足りないモデルでは観点を絞る。1回の負荷を下げないと検出漏れが増える
+  const categories: readonly ContradictionCategory[] =
+    capability.narrowContradictionCategories
+      ? LIGHT_CATEGORIES
+      : CONTRADICTION_CATEGORIES;
+
+  // **参照資料の上限は、モデルの上限に対する割合で決める**（設計書6.27.10）。
+  // 固定30,000字のままだと、32kのモデルでは本文を1文字も足さないうちに溢れる
+  const material = await collectSettings(
+    work,
+    worldviewMaxChars(info?.contextWindow)
+  );
+  if (!material) return undefined;
+
+  // **本文を空にしてプロンプトを組み、その字数を固定費とする。**
+  // 見込みの定数を置くと、プロンプトの改訂に置いていかれて必ず追い越される。
+  //
+  // 人物・場所はチャンクに出てきた名前だけを載せるので、**切る前には
+  // 測れない**。測れる分（指示＋世界観の見込み）をここで引き、測れない分は
+  // 送る直前の関所（`ai/contextGuard.ts`）と、逃げ道（`chunkRetry.ts`）が受ける
+  const overheadChars =
+    CONTRADICTION_CHECK_SYSTEM_PROMPT.length +
+    buildContradictionCheckPrompt({
+      chapterLabel: "",
+      chunkTextWithLineNumbers: "",
+      characterDetails: "",
+      locationDetails: "",
+      worldviewSummary: "",
+      previousSynopses: "",
+      categories,
+      futureFacts: "",
+    }).length +
+    material.referenceBudgetChars;
+
+  const tasks = await collectChunks(work, info, options, {
+    overheadChars,
+    outputTokens: OUTPUT_RESERVE_TOKENS,
+  });
+  if (!tasks) return undefined;
+  const { chunks, chapterLabelByFile, chunkNote, unreadableEpisodes } = tasks;
+  if (chunks.length === 0) {
+    vscode.window.showWarningMessage("検知できる本文がありませんでした。");
+    return undefined;
+  }
 
   // **設定が変われば、同じ本文でも答えが変わる。**
   // 材料のハッシュをキャッシュの鍵へ入れないと、設定を直したのに
@@ -297,12 +342,6 @@ export async function checkContradictions(
       `v${CONTRADICTION_CHECK_VERSION}`
   );
 
-  // 地力の足りないモデルでは観点を絞る。1回の負荷を下げないと検出漏れが増える
-  const categories: readonly ContradictionCategory[] =
-    capability.narrowContradictionCategories
-      ? LIGHT_CATEGORIES
-      : CONTRADICTION_CATEGORIES;
-
   // 下の入れ子の関数では、上の `if (!resolved) return` による絞り込みが
   // 効かない（あとから書き換わりうるとみなされる）。ここで束ねておく
   const provider = resolved.provider;
@@ -362,6 +401,20 @@ export async function checkContradictions(
         }
         continue;
       }
+      // 上限に入らなかった。**まとめたぶんを戻す→半分に割る→諦める**の順で、
+      // 諦めるときは理由を残す（設計書6.27.10）
+      if (raw instanceof AIError) {
+        const retry = retryOnOverflow(chunk, raw);
+        if (retry.kind === "split") {
+          queue.splice(cursor + 1, 0, ...retry.parts);
+          total += retry.parts.length;
+          logStep(`${chunk.hash}: ${retry.note}`);
+        } else {
+          failedChunks++;
+          logFailure("矛盾検知", { チャンク: chunk.hash, 理由: retry.note });
+        }
+        continue;
+      }
       if (raw === undefined) continue;
 
       collect(raw, chunk);
@@ -373,7 +426,14 @@ export async function checkContradictions(
         const futureCached = cache.get(chunk.hash, futureKeyBase);
         const futureRaw =
           futureCached ?? (await ask(chunk, "future", futureFacts));
-        if (futureRaw !== undefined && futureRaw !== RETRY_SMALLER) {
+        // **入らなかった向きは、ここでは分け直さない。** この段は
+        // 「あとで判明する事実」との突き合わせで、本命（settled）が
+        // 通ったチャンクの補足である。分け直すと同じ本文を二重に数える
+        if (
+          futureRaw !== undefined &&
+          futureRaw !== RETRY_SMALLER &&
+          !(futureRaw instanceof AIError)
+        ) {
           collect(futureRaw, chunk);
         }
       }
@@ -476,6 +536,10 @@ export async function checkContradictions(
         return parsed;
       } catch (error) {
         if (error instanceof AIError && error.kind === "aborted") return undefined;
+        // **入らなかったときは、失敗として数える前に分け直しへ回す**
+        // （設計書6.27.10）。そのまま数えると、そのチャンクは一度も
+        // 見られないまま「失敗1件」で終わる
+        if (isContextOverflow(error)) return error;
         failedChunks++;
         logFailure("矛盾検知", {
           チャンク: chunk.hash,
@@ -664,6 +728,13 @@ interface SettingsMaterial {
   /** 設定の中身のハッシュ。変われば検知をやり直す */
   fingerprint: string;
   /**
+   * 参照資料に見込む字数（世界観）。チャンクの大きさを決めるのに使う。
+   *
+   * **上限そのものではなく、上限と全文の小さいほう**を返す。世界観が
+   * 3項目しかない作品で30,000字を確保すると、本文が要らないほど痩せる。
+   */
+  referenceBudgetChars: number;
+  /**
    * @param chapter その本文が何話か。**その時点で分かっていることだけ**を返す
    */
   relevantFor(
@@ -693,7 +764,9 @@ interface SettingsMaterial {
  * 出てこない人物の設定まで見て「登場していない」を矛盾にしてくる。
  */
 async function collectSettings(
-  work: WorkEntry
+  work: WorkEntry,
+  /** そのモデルで世界観に使ってよい字数（`worldviewMaxChars`） */
+  worldviewMax: number
 ): Promise<SettingsMaterial | undefined> {
   const [characters, locations, abilities, organizations, world] =
     await Promise.all([
@@ -778,11 +851,18 @@ async function collectSettings(
   // 別々に鍵を作っていた頃、区切りがずれて**読みが一度も当たらなかった**
   const knownAt = buildKnownAtIndex(people);
 
+  // 世界観の全文（上限に掛ける前）の長さ。チャンクの大きさを決めるときに、
+  // 「上限いっぱい確保する」のではなく実際に必要な分だけ引くために測る
+  const worldviewWholeChars = worldItems
+    .map((item) => describeWorldItem(item).length)
+    .reduce((sum, length) => sum + length + 2, 0);
+
   return {
     characterCount: people.length,
     locationCount: places.length,
     worldCount: worldItems.length,
     fingerprint,
+    referenceBudgetChars: Math.min(worldviewMax, worldviewWholeChars),
     relevantFor(text, chapter) {
       const seenCharacters = new Set<string>();
       const seenLocations = new Set<string>();
@@ -820,6 +900,9 @@ async function collectSettings(
           items: worldItems,
           chunkText: text,
           chapter,
+          // **上限はモデルによって変わる**（設計書6.27.10）。固定30,000字だと
+          // 小さいモデルでは資料だけで上限を使い切る
+          maxChars: worldviewMax,
         }),
         // 世界観は誰が出ていても効くので、それだけでも材料になる。
         // 上限で絞っても1件は必ず残るので、項目があるかどうかで見てよい
@@ -873,22 +956,16 @@ async function collectSettings(
 /** 本文をチャンクに分ける。誤字脱字検知と同じ手順 */
 async function collectChunks(
   work: WorkEntry,
-  registry: AIRegistry,
-  options: CheckContradictionsOptions
+  /** 呼び出し側が引いたモデル情報。**ここでは引き直さない**（下のコメント） */
+  info: ModelInfo | undefined,
+  options: CheckContradictionsOptions,
+  fixedCost: ChunkFixedCost
 ): Promise<
   | {
       chunks: Chunk[];
       chapterLabelByFile: Map<string, string>;
       /** 何を根拠に大きさを決めたか。ログに残す（設計書6.23） */
       chunkNote: string;
-      /**
-       * モデルの能力。観点を絞るかの判断に使う（設計書6.28）。
-       *
-       * **ここで取ったものを返す。** 呼び出し側でもう一度
-       * `resolveModelInfo()` を呼ぶと、通信が1回増えるうえ、
-       * 2回の結果が食い違ったときにどちらで動いたのか分からなくなる。
-       */
-      tier: CapabilityTier | undefined;
       /**
        * 読めなかった話の数。
        *
@@ -911,9 +988,9 @@ async function collectChunks(
       )
     : scan.episodes;
 
-  const info = await registry.resolveModelInfo("contradiction");
-  // コンテキスト長が取れないモデルでは、誤字脱字検知と同じ既定へ落とす
-  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192);
+  // コンテキスト長が取れないモデルでは、誤字脱字検知と同じ既定へ落とす。
+  // **固定費を差し引いてから本文の割当を決める**（設計書6.27.10）
+  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192, fixedCost);
   const maxChars = chunkSettings.chunk.chars;
 
   const chunks: Chunk[] = [];
@@ -962,7 +1039,6 @@ async function collectChunks(
     chunks: merged,
     chapterLabelByFile,
     chunkNote: describeChunkSettings(chunkSettings),
-    tier: info?.tier,
     unreadableEpisodes,
   };
 }

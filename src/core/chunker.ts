@@ -123,19 +123,103 @@ export interface ChunkOptions {
 }
 
 /**
+ * 日本語1文字あたりのトークン数（安全側）。
+ *
+ * **換算はこの1つだけにする。** 以前は `decideChunkSize` が
+ * 「0.7字/トークン」を、`decideContextSize` が「1/0.7 トークン/字」を
+ * 別々に書いていた。片方だけ直すと、チャンクの大きさと確保する
+ * コンテキスト長が別の前提で決まる（設計書6.27.10）。
+ */
+export const TOKENS_PER_CHAR = 1 / 0.7;
+
+/**
+ * これ以上は小さくしないチャンクの字数。
+ *
+ * ここを割ると、1文の途中で切れて誤検出のもとになる。
+ * 「入らないから小さくする」の底でもあり、底でも入らないなら
+ * **そのモデルでは無理**と作者へ言うほうがよい（黙って切り捨てない）。
+ */
+export const MIN_CHUNK_CHARS = 1500;
+
+/** チャンクの字数の上限。大きすぎると1回の失敗で失うものが大きい */
+const MAX_CHUNK_CHARS = 20000;
+
+/**
  * モデルのコンテキスト長からチャンクサイズを決める。
  *
  * 日本語はおおむね1文字1トークン前後だが、モデルによって
  * 1.5倍程度になることもある。加えてプロンプト本体・設定情報・
  * 出力領域も同じコンテキストを消費するため、安全側に倒す。
+ *
+ * **ここは「指示や資料がどれくらいあるか」を知らない。** 35%という割合で
+ * 残りをまとめて見込んでいるだけなので、指示や参照資料が育つと足りなくなる。
+ * 実際の固定費を差し引くのは `planChunkBudget` の仕事である（設計書6.27.10）。
  */
 export function decideChunkSize(contextWindow: number): number {
   // 入力本文に割り当てる割合。残りはプロンプト・参照設定・出力に使う
   const usableTokens = Math.floor(contextWindow * 0.35);
-  // トークンあたり日本語0.7文字と見積もる（安全側）
   const chars = Math.floor(usableTokens * 0.7);
   // 極端な値を避けるため上下限を設ける
-  return Math.max(1500, Math.min(chars, 20000));
+  return Math.max(MIN_CHUNK_CHARS, Math.min(chars, MAX_CHUNK_CHARS));
+}
+
+/** `planChunkBudget` の結果。なぜその字数になったかを添える */
+export interface ChunkBudget {
+  chunkChars: number;
+  /**
+   * どう決まったか。
+   * - `requested`  … 望みどおりに取れた（固定費を引いても余裕がある）
+   * - `shrunk_to_fit` … 固定費に押されて縮めた
+   * - `minimum`   … 縮めても足りず、下限で止めた（**入らない見込み**）
+   */
+  reason: "requested" | "shrunk_to_fit" | "minimum";
+}
+
+/**
+ * 固定費（指示＋参照資料）と出力の見込みを差し引いてから、
+ * 本文に割り当てる字数を決める（設計書6.27.10）。
+ *
+ * **本文の量だけが可変で、指示の量は固定、という前提が誤りだった。**
+ * 指示（P-04a は約11,000字）も、辞書も、世界観の抜粋も育つ。育った分は
+ * どこかが痩せなければ上限を超え、Ollama では**入力が黙って切り捨てられる**。
+ * 痩せてよいのは本文だけなので、本文の割当をここで決める。
+ *
+ * `requestedChars`（設定または `decideChunkSize` の値）は**上限として扱う**。
+ * 余裕があるからといって、作者が指定した字数より大きくはしない。
+ */
+export function planChunkBudget(options: {
+  /** モデルが扱える上限（トークン） */
+  contextWindow: number;
+  /** 本文以外に毎回送る字数（system＋本文を空にした user の実測） */
+  overheadChars: number;
+  /** 応答に見込むトークン数 */
+  outputTokens: number;
+  /** 望みの字数（設定またはモデルからの自動） */
+  requestedChars: number;
+}): ChunkBudget {
+  const overheadTokens = Math.ceil(options.overheadChars * TOKENS_PER_CHAR);
+  const forBody = options.contextWindow - overheadTokens - options.outputTokens;
+  // 見積りは外れることがあるので1割の余裕を持たせる（`contextSizeForPrompt` と同じ）
+  const usableTokens = Math.floor(forBody / 1.1);
+  const fits = Math.floor(usableTokens * 0.7);
+
+  if (fits >= options.requestedChars) {
+    return { chunkChars: options.requestedChars, reason: "requested" };
+  }
+  if (fits >= MIN_CHUNK_CHARS) {
+    return { chunkChars: fits, reason: "shrunk_to_fit" };
+  }
+  // 下限でも入らない見込み。**ここでは止めない**——実際に入るかどうかは
+  // 送る直前の関所（`ai/contextGuard.ts`）が実測で判断する。
+  // 見込みだけで作者の実行を断ると、見込みが外れているときに手が無くなる。
+  //
+  // **下限へ「上げ」ない。** 作者が1,000字と指定しているのに1,500字にすると、
+  // 入らないのを直そうとして送る量を増やすことになる（この関数は本文を
+  // 痩せさせるためのもので、太らせるためのものではない）
+  return {
+    chunkChars: Math.min(MIN_CHUNK_CHARS, options.requestedChars),
+    reason: "minimum",
+  };
 }
 
 /** チャンクの大きさの決め方（設計書6.23） */
@@ -214,51 +298,6 @@ export function resolveMergeChars(options: {
 }
 
 /**
- * 本文以外に毎回送っている分の見積り（字）。
- *
- * 実測（2026-08-27、P-04a v5.1）は system 829＋指示6,823＋既知の名前
- * 約2,250＝**約10,000字**。以前の7,000は「指示が約5,600字」だった頃の
- * 値で、プロンプトの改訂に置いていかれ実測の半分になっていた
- * （設計書6.27.6）。この値が `num_ctx` を決めるので、足りないと
- * **入力は黙って切り捨てられる**。名前リストは人物が増えるほど
- * 伸びるため、実測より余裕を持たせて置く。
- */
-const PROMPT_OVERHEAD_CHARS = 12000;
-
-/** 日本語1文字あたりのトークン数（安全側）。`decideChunkSize` と同じ換算 */
-const TOKENS_PER_CHAR = 1 / 0.7;
-
-/**
- * 実際に確保するコンテキスト長を決める。
- *
- * **チャンクの大きさとコンテキスト長を別々に決めていたのが不具合だった。**
- * `decideChunkSize` はモデルの上限（131,072）から20,000字と決めるのに、
- * コンテキストは 16,384 に固定していた。20,000字の本文だけで
- * およそ28,600トークンあり、指示を足すと36,000トークンを超える。
- * **入力が入り切らず、出力の余地も残らない。**
- * その結果、応答が上限で切り詰められ、そのチャンクは丸ごと捨てられていた
- * （実データで39チャンク中33件）。
- *
- * 送るものから必要量を計算し、モデルの上限で頭打ちにする。
- * 上限をそのまま使わないのは、確保した分だけメモリを消費するためである。
- */
-export function decideContextSize(options: {
-  /** 1チャンクの本文の文字数 */
-  chunkChars: number;
-  /** 応答に見込むトークン数 */
-  outputTokens: number;
-  /** モデルが扱える上限 */
-  contextWindow: number;
-}): number {
-  const inputTokens = Math.ceil(
-    (options.chunkChars + PROMPT_OVERHEAD_CHARS) * TOKENS_PER_CHAR
-  );
-  // 見積りは外れることがあるので1割の余裕を持たせる
-  const needed = Math.ceil((inputTokens + options.outputTokens) * 1.1);
-  return Math.max(4096, Math.min(options.contextWindow, needed));
-}
-
-/**
  * 実際に送るプロンプトから、確保するコンテキスト長を決める。
  *
  * **本来は呼び出し側が `numCtx` を渡すべきで、これはその受け皿である。**
@@ -270,9 +309,11 @@ export function decideContextSize(options: {
  *
  * 実物の文字数から見積もれば、渡し忘れても切り捨ては起きない。
  *
- * `decideContextSize` と違って `PROMPT_OVERHEAD_CHARS` を足さないのは、
- * あれが「本文チャンクの字数しか分からない側」が指示のぶんを見込むための
- * 固定費だからである。**ここでは送る文字列そのものが手元にある。**
+ * **いまは全機能がこの道を通る**（設計書6.27.10）。以前は誤字脱字・抽出・
+ * 設定パネルだけが `decideContextSize` という別の道を持ち、本文以外の量を
+ * 固定12,000字と見込んでいた。固定である限り、指示や辞書が育てば必ず
+ * 追い越される——実際に7,000字が実測の半分になっていた。
+ * **送る文字列そのものが手元にあるのだから、見込む必要が無い。**
  */
 export function contextSizeForPrompt(options: {
   /** 実際に送るプロンプトの文字数（system＋user） */
@@ -283,7 +324,7 @@ export function contextSizeForPrompt(options: {
   contextWindow: number;
 }): number {
   const inputTokens = Math.ceil(options.promptChars * TOKENS_PER_CHAR);
-  // 見積りは外れることがあるので1割の余裕を持たせる（decideContextSize と同じ）
+  // 見積りは外れることがあるので1割の余裕を持たせる（`planChunkBudget` と同じ）
   const needed = Math.ceil((inputTokens + options.outputTokens) * 1.1);
   return Math.max(4096, Math.min(options.contextWindow, needed));
 }

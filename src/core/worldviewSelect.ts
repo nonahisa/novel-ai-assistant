@@ -16,13 +16,41 @@ import { describeWorldItem } from "./settingsSummary";
  */
 
 /**
- * 1チャンクへ載せる世界観の上限。
+ * 1チャンクへ載せる世界観の上限（字数の頭打ち）。
  *
  * **実測はまだ無い**（`usage.md` を回してから決める）。推定の最大
  * 20,000字超より上に置いてあるので、**いまの作品では1バイトも挙動が変わらない**。
  * 数字を見てから下げるのが本命で、これは「増える一方」を止める安全弁である。
+ *
+ * **実際に効く上限はこれではなく `worldviewMaxChars`** である（設計書6.27.10）。
+ * 固定字数だけだと、モデルを小さいものに替えたときにそのまま溢れる。
  */
 export const WORLDVIEW_MAX_CHARS = 30000;
+
+/**
+ * 世界観にまわしてよい、モデルの上限に対する割合。
+ *
+ * 参照資料の上限が固定字数だと、**モデルを小さいものに替えたときに
+ * そのまま溢れる**（設計書6.27.10の穴2）。32kのモデルでは30,000字＝
+ * 約43,000トークンで、本文を1文字も足さないうちに上限を超えている。
+ */
+const WORLDVIEW_CONTEXT_RATIO = 0.25;
+
+/**
+ * そのモデルで世界観に使ってよい字数を決める。
+ *
+ * 上限の25%をトークンから字数へ直し（0.7字/トークン）、固定の頭打ちと
+ * 小さいほうを取る。131,072のモデルなら22,937字、32,768なら5,734字。
+ *
+ * **いまの作品では、まだ一度もこの上限に当たっていない**（世界観の推定
+ * 最大が20,000字超）。当たるのは項目が増えてからで、そのときに減るのは
+ * **本文と関係の薄い項目から**である（`selectWorldview` の並べ方）。
+ */
+export function worldviewMaxChars(contextWindow: number | undefined): number {
+  if (!contextWindow || contextWindow <= 0) return WORLDVIEW_MAX_CHARS;
+  const fromModel = Math.floor(contextWindow * WORLDVIEW_CONTEXT_RATIO * 0.7);
+  return Math.min(WORLDVIEW_MAX_CHARS, fromModel);
+}
 
 /** 項目と項目の区切り。従来の組み立て（`join("\n\n")`）と同じにする */
 const SEPARATOR = "\n\n";

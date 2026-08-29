@@ -76,7 +76,6 @@ import {
   type ExcerptSource,
   type MentionExcerpt,
 } from "../core/mentionExcerpts";
-import { decideContextSize } from "../core/chunker";
 import { resolveMaxOutputTokens } from "../ai/outputLimit";
 import { loadExcerptSources } from "../core/manuscriptSources";
 import { expandNameVariants } from "../core/termIndex";
@@ -1928,20 +1927,16 @@ export class SettingsPanel {
       this.paidConfirmedFor = paidKey;
     }
 
-    const modelInfo = await this.registry.resolveModelInfo(feature);
+    // **本文以外の量を見込まない**（設計書6.27.10）。以前は「本文の抜粋
+    // ＋固定12,000字」で必要量を出していたが、固定費は指示・資料の改訂で
+    // 育つので、見込みは必ず追い越される。組み上がったプロンプトの実測から
+    // 決める道（`contextSizeForPrompt`）へ揃え、出力の見込みだけを渡す。
+    // 作者が `ollama.numCtx` を明示していれば、その指定を尊重する
     const configuredNumCtx = vscode.workspace
       .getConfiguration("novelai")
       .get<number>("ollama.numCtx", 0);
-    // 本文の抜粋は既定で最大12,000字あり、16,384で固定すると入り切らない。
-    // 抽出側と同じく、送るものから必要量を計算する
-    const numCtx =
-      configuredNumCtx > 0
-        ? configuredNumCtx
-        : decideContextSize({
-            chunkChars: EXCERPT_MAX_CHARS,
-            outputTokens: resolveMaxOutputTokens(),
-            contextWindow: modelInfo?.contextWindow ?? 16384,
-          });
+    const numCtx = configuredNumCtx > 0 ? configuredNumCtx : undefined;
+    const maxOutputTokens = resolveMaxOutputTokens();
 
     this.setBusy(true, progressLabel);
     try {
@@ -1958,6 +1953,7 @@ export class SettingsPanel {
             // 項目の提案は設定として書くので、控えめにする
             temperature: jsonSchema ? 0.3 : 0.5,
             numCtx,
+            maxOutputTokens,
             jsonSchema,
             disableThinking: true,
             signal: controller.signal,

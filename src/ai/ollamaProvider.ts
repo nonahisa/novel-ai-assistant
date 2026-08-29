@@ -10,20 +10,13 @@ import {
 } from "./types";
 import { countByteFallback, decodeByteFallback } from "../core/byteFallback";
 import { contextSizeForPrompt } from "../core/chunker";
+// 出力の見込みは**関所と同じ値**を使う（設計書6.27.10）。ここだけ別の値を
+// 持つと「関所は通ったのに num_ctx が足りない」という食い違いになる
+import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
 import { logLine } from "../core/logger";
 import { withAiWork } from "../core/aiActivity";
 
 const DEFAULT_ENDPOINT = "http://localhost:11434";
-
-/**
- * `numCtx` を渡してこない呼び出しのために、応答用に確保するトークン数。
- *
- * 渡し忘れ経路では**出力の見込みが呼び出し側にしか無い**（あらすじは短く、
- * 抽出は長い）。分からないものを小さく見積もると応答が途中で切れるので、
- * 固定で多めに確保する。**明示経路（`numCtx` あり）はこれを使わない**——
- * そちらは送るものを分かったうえで積み上げた値が来ている。
- */
-const OUTPUT_RESERVE_TOKENS = 8192;
 
 /**
  * モデル情報が取れなかったときのコンテキスト長。
@@ -230,11 +223,14 @@ export class OllamaProvider implements AIProvider {
     // 見積もる。以前はここを 8192 に固定しており、渡してこない11か所では
     // 入力が黙って切り捨てられていた（0.22.14で判明）。
     // `getModel` はキャッシュ済みなので、毎回 /api/show を叩くわけではない。
+    //
+    // **出力の見込みは呼び出し側にしか分からない**（あらすじは短く、抽出は
+    // 長い）。渡されていればそれを使い、無ければ多めの既定で確保する
     const numCtx =
       params.numCtx ??
       contextSizeForPrompt({
         promptChars: params.systemPrompt.length + params.userPrompt.length,
-        outputTokens: OUTPUT_RESERVE_TOKENS,
+        outputTokens: params.maxOutputTokens ?? OUTPUT_RESERVE_TOKENS,
         contextWindow:
           (await this.getModel(params.model))?.contextWindow ??
           UNKNOWN_CONTEXT_WINDOW,

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
   contextSizeForPrompt,
-  decideContextSize,
   mergeAdjacentChunks,
   segmentsOf,
   splitChunkInHalf,
@@ -135,59 +134,16 @@ describe("まとめたチャンクを元に戻す", () => {
   });
 });
 
+// `decideContextSize`（本文の字数＋固定12,000字で num_ctx を決めるもの）は
+// 0.25.6 で**消した**（設計書6.27.10）。ここにあった4件の検査——とくに
+// 「指示の見込みは実測（約10,000字）を下回らない」——は、**固定費の見込みが
+// 実測に置いていかれないこと**を見張るためのものだった。
+//
+// いまは全機能が `contextSizeForPrompt`（組み上がったプロンプトの実測から
+// 決める）を通り、見込むべき固定費が存在しない。**見張る対象そのものが
+// 無くなった**ので、検査も消した。本文の割当が固定費に押されて縮むことは
+// `contextBudget.test.ts` の `planChunkBudget` が見る。
 describe("確保するコンテキスト長", () => {
-  test("チャンクと指示と応答が全部入る大きさにする", () => {
-    // 20,000字のチャンクを16,384トークンのコンテキストへ送っていたため、
-    // 入力が入り切らず出力の余地も残らなかった。
-    // 実データで39チャンク中33件が「出力上限で切り詰め」になった
-    const size = decideContextSize({
-      chunkChars: 20000,
-      outputTokens: 16384,
-      contextWindow: 131072,
-    });
-
-    // 本文20,000字＋指示ほか12,000字 ≒ 45,715トークン。これに応答分が乗る
-    expect(size).toBeGreaterThan(45715 + 16384);
-    expect(size).toBeLessThanOrEqual(131072);
-  });
-
-  test("モデルの上限は超えない", () => {
-    // 超える値を渡すと、モデル側で黙って切り捨てられる
-    expect(
-      decideContextSize({
-        chunkChars: 20000,
-        outputTokens: 16384,
-        contextWindow: 8192,
-      })
-    ).toBe(8192);
-  });
-
-  test("本文が短くても、指示の分は必ず見込む", () => {
-    // 本文が10字でも、抽出は指示だけで実測約10,000字ある。
-    // 本文の長さだけで決めると、指示が入り切らない
-    expect(
-      decideContextSize({
-        chunkChars: 10,
-        outputTokens: 10,
-        contextWindow: 131072,
-      })
-    ).toBeGreaterThan(17143);
-  });
-
-  test("指示の見込みは実測（約10,000字）を下回らない", () => {
-    // かつて7,000字のまま放置され、実測（system 829＋指示6,823＋
-    // 既知の名前約2,250）の半分になっていた（設計書6.27.6）。
-    // num_ctx が足りないと入力は黙って切り捨てられ、誰も気づけない
-    const measuredOverheadChars = 10000;
-    expect(
-      decideContextSize({
-        chunkChars: 0,
-        outputTokens: 0,
-        contextWindow: 10_000_000,
-      })
-    ).toBeGreaterThanOrEqual(Math.ceil(measuredOverheadChars / 0.7));
-  });
-
   test("実物のプロンプトからは、その字数と応答が入る大きさにする", () => {
     // numCtx を渡してこない呼び出しのための見積り。
     // 30,000字は約42,858トークン。これに応答分が乗る
@@ -202,21 +158,17 @@ describe("確保するコンテキスト長", () => {
   });
 
   test("実物のプロンプトには、指示ぶんの固定費を足さない", () => {
-    // `decideContextSize` は本文チャンクの字数しか分からない側のもので、
-    // 指示のぶん（PROMPT_OVERHEAD_CHARS）を足して見込む。
-    // こちらは送る文字列そのものが手元にあるので、二重に見込まない
-    const fromPrompt = contextSizeForPrompt({
+    // 送る文字列そのものが手元にあるので、二重に見込まない。
+    // 20,000字は約28,572トークン。応答の8,192を足して1割の余裕まで
+    const size = contextSizeForPrompt({
       promptChars: 20000,
       outputTokens: 8192,
       contextWindow: 131072,
     });
-    const fromChunk = decideContextSize({
-      chunkChars: 20000,
-      outputTokens: 8192,
-      contextWindow: 131072,
-    });
 
-    expect(fromPrompt).toBeLessThan(fromChunk);
+    // 「本文＋固定12,000字」で見込んでいた頃の値（約45,715＋8,192）より小さい
+    expect(size).toBeLessThan(Math.ceil((45715 + 8192) * 1.1));
+    expect(size).toBeGreaterThanOrEqual(Math.ceil(20000 / 0.7) + 8192);
   });
 
   test("モデルの上限は超えない", () => {

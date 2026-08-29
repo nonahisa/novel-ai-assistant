@@ -11,14 +11,14 @@ import { readTextFile } from "../core/textFile";
 import { parseEpisodeMetadata } from "../core/metadataParser";
 import { parseCollectedFile } from "../core/collectedFile";
 import {
-  decideContextSize,
   mergeAdjacentChunks,
   segmentsOf,
-  splitChunkInHalf,
   splitIntoChunks,
-  splitMergedChunk,
   Chunk,
 } from "../core/chunker";
+// 分け直しの手順は1か所に置く（設計書6.27.10）。ここに写しを持つと、
+// 逃げ道を直したときに片方だけが古いままになる
+import { isContextOverflow, retryOnOverflow, splitForRetry } from "./chunkRetry";
 import {
   CharacterStore,
   CharacterStoreError,
@@ -222,24 +222,41 @@ export async function extractCharacters(
   }
 
   const contextWindow = modelInfo.contextWindow;
+  const maxOutputTokens = resolveMaxOutputTokens();
+
+  // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
+  // 抽出の指示はいちばん重く、P-04a v5.1 で約11,000字ある。ここを固定の
+  // 見込み（12,000字）で持っていたため、プロンプトの改訂に置いていかれた。
+  //
+  // **既知の名前の一覧は、この測定に入っていない。** 一覧は人物設定を
+  // 読んでから（＝チャンクを切ったあと）でないと作れず、しかも抽出が進む
+  // あいだに育つ。上限（人物100・能力50・場所50・組織50・世界観150件）で
+  // 頭打ちになる数千字ぶんは、送る直前の関所（`ai/contextGuard.ts`）と
+  // 逃げ道（`chunkRetry.ts`）が受け止める
+  const overheadChars =
+    BASE_SYSTEM_PROMPT.length +
+    buildCharacterExtractPrompt({
+      chunkText: "",
+      chapterLabel: "",
+      knownCharacterNames: [],
+    }).length;
+
   // 大きさの決め方は1か所へ集めてある（設計書6.23）
-  const chunkSettings = readChunkSettings(contextWindow);
+  const chunkSettings = readChunkSettings(contextWindow, {
+    overheadChars,
+    outputTokens: maxOutputTokens,
+  });
   const chunkChars = chunkSettings.chunk.chars;
 
-  // 実際に使うコンテキスト長。モデルの上限をそのまま使うと
-  // メモリを大量に消費するため、**送るものから必要量を計算して**確保する。
-  // 以前は 16,384 で固定しており、20,000字のチャンクが入り切らなかった
+  // 実際に使うコンテキスト長。**本文以外の量を見込まない**（設計書6.27.10）。
+  // 以前は「本文＋固定12,000字」で計算していたが、固定である限り必ず
+  // 追い越される。組み上がったプロンプトの実測から決める道
+  // （`contextSizeForPrompt`）へ揃え、出力の見込みだけを渡す。
+  // 作者が `ollama.numCtx` を明示していれば、その指定を尊重する
   const configuredNumCtx = vscode.workspace
     .getConfiguration("novelai")
     .get<number>("ollama.numCtx", 0);
-  const numCtx =
-    configuredNumCtx > 0
-      ? configuredNumCtx
-      : decideContextSize({
-          chunkChars,
-          outputTokens: resolveMaxOutputTokens(),
-          contextWindow,
-        });
+  const numCtx = configuredNumCtx > 0 ? configuredNumCtx : undefined;
 
   const scan = await scanWork(work);
   if (scan.episodes.length === 0) {
@@ -549,6 +566,7 @@ export async function extractCharacters(
             model: resolved.model,
             temperature: 0.2,
             numCtx,
+            maxOutputTokens,
             jsonSchema: CHARACTER_EXTRACT_SCHEMA as unknown as object,
             disableThinking: true,
             signal: controller.signal,
@@ -687,6 +705,23 @@ export async function extractCharacters(
             (cancelled || token.isCancellationRequested)
           ) {
             break;
+          }
+
+          // **入らなかったなら、小さくして試し直す**（設計書6.27.10）。
+          // 出力が切り詰められたときと同じ扱いだが、こちらは送る前に
+          // 分かっているので、無駄な呼び出しが1回も起きていない
+          if (isContextOverflow(e)) {
+            const retry = retryOnOverflow(chunk, e);
+            if (retry.kind === "split") {
+              queue.push(...retry.parts);
+              logStep(`${describeChunk(chunk)}: ${retry.note}`);
+              done++;
+              continue;
+            }
+            // 下限まで割っても入らない。**黙って飛ばさず、失敗として数える**
+            failures.push({ chunk, message: retry.note });
+            done++;
+            continue;
           }
 
           failures.push(
@@ -952,7 +987,13 @@ export async function extractCharacters(
  * 見込みなので止めた」という数字は、こちらでは書けない。
  */
 function hasSpecificMessage(kind: AIError["kind"]): boolean {
-  return kind === "insufficient_credit" || kind === "model_load_failed";
+  return (
+    kind === "insufficient_credit" ||
+    kind === "model_load_failed" ||
+    // 必要量と上限の数字が本文に入っている。**その数字こそが作者の手がかり**
+    // なので、一般の言い回しへ丸めない（設計書6.27.10）
+    kind === "context_overflow"
+  );
 }
 
 function toExtractionFailure(
@@ -1001,6 +1042,7 @@ function toExtractionFailure(
     permission_denied: "AIの利用権限がありません。",
     insufficient_credit: "AIサービスの残高が不足しています。",
     model_load_failed: "AIがモデルを読み込めませんでした。",
+    context_overflow: "送る量がモデルの上限を超えています。",
     rate_limited: "AIのレート上限に達しました。",
     aborted: "AI処理が中断されました。",
     unknown: "AI処理で予期しないエラーが発生しました。",
@@ -1448,21 +1490,6 @@ function describeRejectedCandidates(
     .map(([reason, count]) => `${labels[reason]} ${count}`)
     .join("、");
   return `AI出力から除外 ${rejected.length} 件（${details}）`;
-}
-
-/**
- * 出力上限で入り切らなかったチャンクを、やり直せる大きさへ分ける。
- *
- * **まとめたものは必ず話ごとに戻す。半分に割ってはいけない。**
- * 半分に割ると内訳（どこからどこまでが何話か）が消え、
- * 登場話数がまとめた範囲ぜんぶになる
- * （第4話にしか出ない人物が「第4〜6話に登場」になる）。
- * 話ごとに戻せないもの（1話が大きすぎる場合）だけ半分に割る。
- */
-function splitForRetry(chunk: Chunk): Chunk[] | undefined {
-  const byEpisode = splitMergedChunk(chunk);
-  if (byEpisode.length > 1) return byEpisode;
-  return splitChunkInHalf(chunk);
 }
 
 function describeChunk(chunk: Chunk): string {

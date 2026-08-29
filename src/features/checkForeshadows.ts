@@ -4,6 +4,7 @@ import type { WorkEntry } from "../models/types";
 import type { Foreshadow } from "../models/foreshadow";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
+import { OUTPUT_RESERVE_TOKENS } from "../ai/contextGuard";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import {
@@ -16,6 +17,7 @@ import {
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
 import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
+import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
 import { formatChapterLabel } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import {
@@ -120,8 +122,25 @@ export async function checkForeshadows(
   if (!ledger) return undefined;
 
   const info = await registry.resolveModelInfo("foreshadow");
+  // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
+  // 台帳が育つと「既に登録済みの見出し」が伸びる。伸びた分だけ本文を
+  // 痩せさせないと、上限を超えて本文の後半が黙って捨てられる
+  const detectOverheadChars =
+    FORESHADOW_DETECT_SYSTEM_PROMPT.length +
+    buildForeshadowDetectPrompt({
+      chapterLabel: "",
+      chunkText: "",
+      knownLabels: ledger.records
+        .map((record) => record.label.trim())
+        .filter(Boolean)
+        // 実際に送るときと同じ絞り方（`known.slice(-60)`）で測る
+        .slice(-60),
+    }).length;
   // コンテキスト長が取れないモデルでは、他の検知と同じ既定へ落とす
-  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192);
+  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192, {
+    overheadChars: detectOverheadChars,
+    outputTokens: OUTPUT_RESERVE_TOKENS,
+  });
   const { chunks, chapterLabelByFile, unreadableEpisodes } = await collectChunks(
     work,
     chunkSettings
@@ -243,6 +262,23 @@ export async function checkForeshadows(
           }
           continue;
         }
+        // 上限に入らなかった。まとめたぶんを戻す→半分に割る→諦める
+        if (raw instanceof AIError) {
+          const retry = retryOnOverflow(chunk, raw);
+          if (retry.kind === "split") {
+            queue.splice(cursor + 1, 0, ...retry.parts);
+            total += retry.parts.length;
+            logStep(`${chunk.hash}: ${retry.note}`);
+          } else {
+            // **黙って飛ばさない。** 理由を残して次のチャンクへ進む
+            failedChunks++;
+            logFailure("伏線の検知", {
+              チャンク: chunk.hash,
+              理由: retry.note,
+            });
+          }
+          continue;
+        }
         if (raw === undefined) continue;
 
         const validated = validateForeshadowCandidates(raw, chunk, known);
@@ -321,6 +357,9 @@ export async function checkForeshadows(
           if (error instanceof AIError && error.kind === "aborted") {
             return undefined;
           }
+          // **入らなかったときは、失敗として数える前に分け直しへ回す**
+          // （設計書6.27.10）
+          if (isContextOverflow(error)) return error;
           failedChunks++;
           logFailure("伏線の検知", {
             チャンク: chunk.hash,
@@ -444,7 +483,20 @@ export async function checkForeshadowResolution(
   if (!resolved) return undefined;
 
   const info = await registry.resolveModelInfo("foreshadow");
-  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192);
+  // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
+  // 未回収の伏線は1件も減らないまま増えることがあり、ここがいちばん育つ。
+  // 実際に渡すのは話数で絞った分だけなので、**全件で測るのは安全側**である
+  const resolveOverheadChars =
+    FORESHADOW_RESOLVE_SYSTEM_PROMPT.length +
+    buildForeshadowResolvePrompt({
+      chapterLabel: "",
+      chunkText: "",
+      foreshadows: open.map(toBrief),
+    }).length;
+  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192, {
+    overheadChars: resolveOverheadChars,
+    outputTokens: OUTPUT_RESERVE_TOKENS,
+  });
   // **話をまたいでまとめない。** 「張った話より後か」を話数で決めるので、
   // 前後の話が1つの塊になっていると、その判断ができなくなる
   const { chunks, chapterLabelByFile, unreadableEpisodes } = await collectChunks(
@@ -544,18 +596,44 @@ export async function checkForeshadowResolution(
       });
 
       let done = 0;
-      for (const entry of targeted) {
+      // **上限に入らなかったチャンクは、小さくして試し直す**（設計書6.27.10）。
+      // 処理中に増えるので、`for...of` ではなく番号で回す
+      const queue = [...targeted];
+      let total = queue.length;
+      for (let cursor = 0; cursor < queue.length; cursor++) {
         if (token.isCancellationRequested) break;
+        const entry = queue[cursor];
 
         const cached = cache.get(entry.chunk.hash, cacheKeyBase);
         const raw = cached ?? (await ask(entry.chunk, entry.targets));
         done++;
         progress.report({
-          message: `${done}/${targeted.length}`,
-          increment: 100 / targeted.length,
+          message: `${done}/${total}`,
+          increment: 100 / total,
         });
         // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-        options.onProgress?.(done, targeted.length);
+        options.onProgress?.(done, total);
+        if (raw instanceof AIError) {
+          const retry = retryOnOverflow(entry.chunk, raw);
+          if (retry.kind === "split") {
+            // **分けたら、その断片に掛かる伏線を選び直す。** 元の組を
+            // そのまま持ち回すと、張った話より前の本文にまで掛けてしまう
+            const parts = retry.parts
+              .map((chunk) => ({ chunk, targets: targetsFor(open, chunk) }))
+              .filter((part) => part.targets.length > 0);
+            queue.splice(cursor + 1, 0, ...parts);
+            total += parts.length;
+            logStep(`${entry.chunk.hash}: ${retry.note}`);
+          } else {
+            // **黙って飛ばさない。** 理由を残して次のチャンクへ進む
+            failedChunks++;
+            logFailure("伏線の回収の確認", {
+              チャンク: entry.chunk.hash,
+              理由: retry.note,
+            });
+          }
+          continue;
+        }
         if (raw === undefined) continue;
 
         const validated = validateForeshadowResolutions(
@@ -634,6 +712,9 @@ export async function checkForeshadowResolution(
           if (error instanceof AIError && error.kind === "aborted") {
             return undefined;
           }
+          // **入らなかったときは、失敗として数える前に分け直しへ回す**
+          // （設計書6.27.10）
+          if (isContextOverflow(error)) return error;
           failedChunks++;
           logFailure("伏線の回収の確認", {
             チャンク: chunk.hash,

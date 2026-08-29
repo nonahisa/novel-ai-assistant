@@ -8,8 +8,8 @@ import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import { parseEpisodeMetadata } from "../core/metadataParser";
 import { parseCollectedFile } from "../core/collectedFile";
+import { blankMemoLines } from "../core/sceneMemo";
 import {
-  decideContextSize,
   splitIntoChunks,
   withLineNumbers,
   mergeAdjacentChunks,
@@ -20,6 +20,7 @@ import {
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
 import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
+import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
 import {
   TYPO_CHECK_SCHEMA,
   TYPO_CHECK_SYSTEM_PROMPT,
@@ -88,6 +89,30 @@ interface FileChunkTask {
   chunks: Chunk[];
 }
 
+/**
+ * まだ切っていない本文の1まとまり（1ファイル、または合本の中の1話）。
+ *
+ * **切るのは、固定費（指示・辞書・作法）を測ったあと**（設計書6.27.10）。
+ * 読むのと切るのを1つのループでやっていたので、字数を決めるのに必要な
+ * 材料（辞書・作法）がまだ手元に無い時点で切っていた。
+ */
+interface SplitSource {
+  filePath: string;
+  body: string;
+  chapterStart: number | null;
+  chapterEnd: number | null;
+  /** この本文が、元ファイルの何行目から始まるか（0始まり） */
+  lineOffset: number;
+}
+
+/**
+ * 辞書へ載せる固有名詞の件数。
+ *
+ * **固定費の測定と、実際に送るときで同じ値を使う。** 別々に書くと、
+ * 片方を直したときに見込みと実物がずれる（それがこの改修で塞いだ穴である）。
+ */
+const DICTIONARY_LIMIT = 200;
+
 export interface CheckTyposOptions {
   /**
    * 対象を絞り込むファイルパス。指定すると、そのファイルだけを検知する
@@ -144,21 +169,17 @@ export async function checkTypos(
   }
 
   const contextWindow = modelInfo.contextWindow;
-  // 大きさの決め方は1か所へ集めてある（設計書6.23）
-  const chunkSettings = readChunkSettings(contextWindow);
-  const chunkChars = chunkSettings.chunk.chars;
+  const maxOutputTokens = resolveMaxOutputTokens();
 
+  // 実際に使うコンテキスト長。**本文以外の量を見込まない**（設計書6.27.10）。
+  // 以前は「本文＋固定12,000字」で計算しており、固定費（指示・辞書・作法）が
+  // 育つと足りなくなった。組み上がったプロンプトの実測から決める道
+  // （`contextSizeForPrompt`）へ揃え、出力の見込みだけを渡す。
+  // 作者が `ollama.numCtx` を明示していれば、その指定を尊重する
   const configuredNumCtx = vscode.workspace
     .getConfiguration("novelai")
     .get<number>("ollama.numCtx", 0);
-  const numCtx =
-    configuredNumCtx > 0
-      ? configuredNumCtx
-      : decideContextSize({
-          chunkChars,
-          outputTokens: resolveMaxOutputTokens(),
-          contextWindow,
-        });
+  const numCtx = configuredNumCtx > 0 ? configuredNumCtx : undefined;
 
   const scan = await scanWork(work);
   if (scan.episodes.length === 0) {
@@ -175,7 +196,10 @@ export async function checkTypos(
   }
 
   const conflicted: string[] = [];
-  const tasks: FileChunkTask[] = [];
+  // **切る前の本文をいったん溜める。** チャンクの字数は、指示と辞書と作法が
+  // 何字あるかを測ってからでないと決められない（設計書6.27.10）。
+  // 先に切ってしまうと、固定費が分かったときには切り直しになる
+  const sources: SplitSource[] = [];
 
   for (const ep of targetEpisodes) {
     const file = await readTextFile(ep.filePath);
@@ -194,17 +218,13 @@ export async function checkTypos(
         if (!episode.body.trim()) continue;
         const located = locateBody(file.text, episode.body, searchFrom);
         searchFrom = located.nextSearchIndex;
-        const chunks = splitIntoChunks(
-          ep.filePath,
-          episode.body,
-          episode.chapter,
-          episode.chapter,
-          { maxChars: chunkChars }
-        ).map((chunk) => ({
-          ...chunk,
-          startLine: chunk.startLine + located.line,
-        }));
-        tasks.push({ filePath: ep.filePath, chunks });
+        sources.push({
+          filePath: ep.filePath,
+          body: episode.body,
+          chapterStart: episode.chapter,
+          chapterEnd: episode.chapter,
+          lineOffset: located.line,
+        });
       }
       continue;
     }
@@ -212,17 +232,13 @@ export async function checkTypos(
     const meta = parseEpisodeMetadata(file.text);
     if (!meta.body.trim()) continue;
     const located = locateBody(file.text, meta.body, 0);
-    const chunks = splitIntoChunks(
-      ep.filePath,
-      meta.body,
-      ep.chapterStart,
-      ep.chapterEnd,
-      { maxChars: chunkChars }
-    ).map((chunk) => ({
-      ...chunk,
-      startLine: chunk.startLine + located.line,
-    }));
-    tasks.push({ filePath: ep.filePath, chunks });
+    sources.push({
+      filePath: ep.filePath,
+      body: meta.body,
+      chapterStart: ep.chapterStart,
+      chapterEnd: ep.chapterEnd,
+      lineOffset: located.line,
+    });
   }
 
   if (conflicted.length > 0) {
@@ -237,21 +253,7 @@ export async function checkTypos(
     if (proceed !== "除外して続行") return undefined;
   }
 
-  // **1話ずつ送ると、指示のほうが本文より大きい。** 1話2,000字の作品で
-  // 指示が約5,600字。19話なら19回ぶん同じ指示を送り直していた
-  // （2026-08-21、作者の指摘）。隣どうしをまとめて呼び出し回数を減らす。
-  //
-  // **行番号は `locateChunkLine` で元のファイルへ戻す。** まとめた本文の
-  // 通し番号のまま使うと、2話目以降の指摘が1話目の別の行を書き換える。
-  const mergeChars = chunkSettings.mergeChars;
-  const chunks =
-    mergeChars > 0
-      ? mergeAdjacentChunks(
-          tasks.flatMap((task) => task.chunks),
-          { maxChars: mergeChars }
-        )
-      : tasks.flatMap((task) => task.chunks);
-  if (chunks.length === 0) {
+  if (sources.length === 0) {
     vscode.window.showWarningMessage("処理できる本文がありません。");
     return undefined;
   }
@@ -283,12 +285,65 @@ export async function checkTypos(
   // **コードの検証は外さない。** ここは「生まれる数を減らす」ためである
   const styleNote = buildStyleNote(
     collectWorkStyle({
-      // 全チャンクを繋いで見る。1話だけでは一人称も文語かも決められない
-      bodyText: chunks.map((chunk) => chunk.text).join("\n"),
+      // 全話を繋いで見る。1話だけでは一人称も文語かも決められない。
+      // **シーンメモは落とす**（`splitIntoChunks` が本文から消すのと同じ）。
+      // 作者の覚え書きを地の文と読むと、人称の判定を誤る
+      bodyText: sources.map((source) => blankMemoLines(source.body)).join("\n"),
       narrativePerson: await readNarrativePerson(work),
       keepWords: keepWords.map((entry) => entry.word),
     })
   );
+
+  // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
+  // 辞書は作品が育つほど伸び、作法も条件で長さが変わる。見込みの定数を
+  // 置くと必ず追い越されるので、実際に送る形のまま測る
+  const overheadChars =
+    TYPO_CHECK_SYSTEM_PROMPT.length +
+    buildTypoCheckPrompt({
+      chunkTextWithLineNumbers: "",
+      properNounDictionary: protectedNames.slice(0, DICTIONARY_LIMIT),
+      styleNote,
+    }).length;
+
+  // 大きさの決め方は1か所へ集めてある（設計書6.23）。固定費を差し引いてから決める
+  const chunkSettings = readChunkSettings(contextWindow, {
+    overheadChars,
+    outputTokens: maxOutputTokens,
+  });
+  const chunkChars = chunkSettings.chunk.chars;
+
+  const tasks: FileChunkTask[] = sources.map((source) => ({
+    filePath: source.filePath,
+    chunks: splitIntoChunks(
+      source.filePath,
+      source.body,
+      source.chapterStart,
+      source.chapterEnd,
+      { maxChars: chunkChars }
+    ).map((chunk) => ({
+      ...chunk,
+      startLine: chunk.startLine + source.lineOffset,
+    })),
+  }));
+
+  // **1話ずつ送ると、指示のほうが本文より大きい。** 1話2,000字の作品で
+  // 指示が約5,600字。19話なら19回ぶん同じ指示を送り直していた
+  // （2026-08-21、作者の指摘）。隣どうしをまとめて呼び出し回数を減らす。
+  //
+  // **行番号は `locateChunkLine` で元のファイルへ戻す。** まとめた本文の
+  // 通し番号のまま使うと、2話目以降の指摘が1話目の別の行を書き換える。
+  const mergeChars = chunkSettings.mergeChars;
+  const chunks =
+    mergeChars > 0
+      ? mergeAdjacentChunks(
+          tasks.flatMap((task) => task.chunks),
+          { maxChars: mergeChars }
+        )
+      : tasks.flatMap((task) => task.chunks);
+  if (chunks.length === 0) {
+    vscode.window.showWarningMessage("処理できる本文がありません。");
+    return undefined;
+  }
 
   const dismissedHistory = new TypoDismissedHistory(work);
   const dismissed = await dismissedHistory.load();
@@ -424,7 +479,7 @@ export async function checkTypos(
       // 200語で切っていたため、固有名詞が多い作品では
       // **作者が名指しで守った語が1つも届かなかった**（2026-08-21）。
       // 作法の枠（styleNote）へ独立して出す
-      const dictionary = protectedNames.slice(0, 200);
+      const dictionary = protectedNames.slice(0, DICTIONARY_LIMIT);
       const userPrompt = buildTypoCheckPrompt({
         chunkTextWithLineNumbers: bodyWithLines,
         properNounDictionary: dictionary,
@@ -438,6 +493,7 @@ export async function checkTypos(
           model: resolved.model,
           temperature: 0.0,
           numCtx,
+          maxOutputTokens,
           jsonSchema: TYPO_CHECK_SCHEMA as unknown as object,
           disableThinking: true,
           signal: controller.signal,
@@ -532,6 +588,25 @@ export async function checkTypos(
           (cancelled || token.isCancellationRequested)
         ) {
           break;
+        }
+        // **入らなかったなら、小さくして試し直す**（設計書6.27.10）。
+        // 切り詰められたときと同じ道だが、こちらは送る前に分かっている
+        if (isContextOverflow(e)) {
+          const retry = retryOnOverflow(chunk, e);
+          if (retry.kind === "split") {
+            queue.splice(cursor + 1, 0, ...retry.parts);
+            total += retry.parts.length;
+            logStep(`${label}: ${retry.note}`);
+          } else {
+            // 下限まで割っても入らない。**黙って飛ばさず、理由を残す**
+            failedChunks++;
+            logFailure("誤字脱字検知", {
+              チャンク: label,
+              理由: retry.note,
+            });
+          }
+          done++;
+          continue;
         }
         logTypoFailure(chunk, e, {
           provider: resolved.provider.displayName,

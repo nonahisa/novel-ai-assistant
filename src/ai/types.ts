@@ -51,6 +51,16 @@ export interface GenerateParams {
   temperature: number;
   /** 実際に使うコンテキスト長。Ollamaでは num_ctx として渡す */
   numCtx?: number;
+  /**
+   * この呼び出しの応答に見込むトークン数。
+   *
+   * **`numCtx` を渡さない呼び出しのためにある。** 出力の量は機能によって
+   * 桁が違い（あらすじは短く、抽出は長い）、呼び出し側にしか分からない。
+   * 渡さなければ `OUTPUT_RESERVE_TOKENS`（`ai/contextGuard.ts`）で見込む。
+   *
+   * 送る直前の関所（同ファイル）も、この値で「入るか」を判断する。
+   */
+  maxOutputTokens?: number;
   /** JSON構造化出力のスキーマ。指定するとその形式を強制する */
   jsonSchema?: object;
   /** 思考モード対応モデルで思考を無効化するか */
@@ -238,6 +248,15 @@ export class AIError extends Error {
        * 丸めずに分け、その説明をそのまま作者へ届ける。
        */
       | "model_load_failed"
+      /**
+       * 送るものがモデルの上限に入らない（設計書6.27.10）。
+       *
+       * **送る前に分かる**唯一の失敗である。Ollama は上限を超えた入力を
+       * エラーにせず**黙って切り捨てる**ので、切り捨てられたことは
+       * 「AIが本文の後半を読んでいない」という形でしか現れない。
+       * 送る前に止めて、必要量と上限を作者へ見せる。
+       */
+      | "context_overflow"
       | "rate_limited"
       | "aborted"
       | "unknown",
@@ -283,6 +302,13 @@ export function recoveryForAIError(error: AIError): string {
       return (
         "より小さいモデルを選ぶか、LM Studioの設定でモデル読み込みの安全装置（guardrails）を確認してください。" +
         "読み込む文脈の長さは設定 novelai.lmstudio.loadContextLength で小さくできます。"
+      );
+    // 直せる手が3つある（本文の量・モデル・資料の量）ので、全部並べる。
+    // どれも作者が自分で操作できるものである
+    case "context_overflow":
+      return (
+        "本文を小さく分けるか、大きいモデルを選んでください。" +
+        "参照資料を減らす設定も効きます。"
       );
     case "rate_limited":
       return "しばらく待ってから、必要な場合に手動で再実行してください。";
