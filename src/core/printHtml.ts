@@ -3,6 +3,7 @@ import {
   tokenizeLine,
   type NotationMode,
 } from "./manuscriptRender";
+import { stripMemoLines } from "./sceneMemo";
 
 /**
  * 印刷用に組版したHTMLを作る（PDF出力のもと）。
@@ -179,7 +180,10 @@ function renderBody(body: string, notation: NotationMode): string[] {
   const paragraphs: string[] = [];
   let afterBlank = false;
 
-  for (const line of body.replace(/\r\n?/g, "\n").split("\n")) {
+  // **シーンメモは紙に出さない**（設計書6.40.2）。作者の付箋であって
+  // 読者へ渡す文章ではない。**行ごと落とす**——空行にすると、そこで
+  // 段落の空きが入って場面が切れたように読める
+  for (const line of stripMemoLines(body).replace(/\r\n?/g, "\n").split("\n")) {
     if (line.trim() === "") {
       afterBlank = true;
       continue;

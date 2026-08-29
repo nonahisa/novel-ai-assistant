@@ -239,6 +239,9 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       // （2026-08-21、作者が実機で気づいた）
       isCollectedFile(ep.collectedCount) ? `${ep.collectedCount}話ぶん` : null,
       `${modeLabel}${formatCount(pickCount(ep.counts, mode))}字`,
+      // **残っているシーンメモ**（設計書6.40.5）。0件なら出さない
+      // ——無いものの印で行の形が変わると、一覧が読みにくくなる
+      ep.memoBadge ? ep.memoBadge : null,
     ]
       .filter((part): part is string => part !== null)
       .join("　");

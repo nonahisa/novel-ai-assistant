@@ -1,4 +1,5 @@
 import type { CharCounts } from "../models/types";
+import { stripMemoLines } from "./sceneMemo";
 
 /**
  * Markdownルビ記法 {漢字|かんじ} からルビ部分を取り除く。
@@ -16,7 +17,10 @@ export function stripRuby(text: string): string {
  * String.length ではなく Intl.Segmenter / コードポイント単位で数える。
  */
 export function countChars(rawText: string, excludeRuby = true): CharCounts {
-  const text = excludeRuby ? stripRuby(rawText) : rawText;
+  // **シーンメモは執筆量ではない**（設計書6.40.2）。作者の付箋であって
+  // 読者へ出す文章ではないので、行ごと落としてから数える
+  const withoutMemo = stripMemoLines(rawText);
+  const text = excludeRuby ? stripRuby(withoutMemo) : withoutMemo;
 
   // 改行コードを LF に統一
   const normalized = text.replace(/\r\n?/g, "\n");
@@ -100,7 +104,11 @@ export const MANUSCRIPT_ROWS = 20;
  * 見た目の枚数は組版で前後するため、目安として扱う。
  */
 export function countManuscriptLines(rawText: string, excludeRuby = true): number {
-  const text = excludeRuby ? stripRuby(rawText) : rawText;
+  // メモの行は原稿用紙のマスを取らない（設計書6.40.2）。
+  // `countChars` から呼ばれるときは既に落ちているが、**外から直に
+  // 呼ばれる道がある**ので、ここでも落とす（掛け直しても結果は変わらない）
+  const withoutMemo = stripMemoLines(rawText);
+  const text = excludeRuby ? stripRuby(withoutMemo) : withoutMemo;
   const normalized = text.replace(/\r\n?/g, "\n");
 
   let total = 0;

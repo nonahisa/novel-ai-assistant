@@ -53,6 +53,12 @@ import {
   refreshRelationGraph,
 } from "./features/relationGraphPanel";
 import { openChronicle, refreshChronicle } from "./features/chroniclePanel";
+import {
+  jumpSceneMemo,
+  noteSceneMemoCaret,
+  openSceneMemoPanel,
+  refreshSceneMemos,
+} from "./features/sceneMemoPanel";
 import { editTimeline } from "./features/chronicleEdit";
 import { unifyCharacterRecords } from "./features/unifyCharacters";
 import { findMergeCandidates } from "./core/characterMerge";
@@ -216,6 +222,8 @@ import {
   MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   MANUSCRIPT_EDITOR_VIEW_TYPE,
   ManuscriptEditorProvider,
+  addMemoToOpenManuscript,
+  insertMemoLineAbove,
   refreshManuscriptCounts,
   type ManuscriptEditorDeps,
 } from "./features/manuscriptEditor";
@@ -527,6 +535,13 @@ export async function activate(
       const { convertOne } = await import("./features/markdownConvert.js");
       return convertOne(filePath);
     },
+    // シーンメモ（設計書6.40.4）。**繋ぐのはここだけ**——原稿エディタが
+    // パネルを直に読み込むと、パネル側もこちらを読むので輪になる
+    openSceneMemos: async (filePath) => {
+      await showSceneMemosFor(filePath);
+    },
+    // カーソルの追従は片方向。パネルが開いていなければ何も起きない
+    onCaretMoved: (filePath, line) => noteSceneMemoCaret(filePath, line),
     markdownDeclined: () =>
       context.globalState.get<string[]>(MARKDOWN_DECLINED_KEY, []),
     declineMarkdown: async (filePath) => {
@@ -868,6 +883,47 @@ export async function activate(
         manuscriptProvider.revealLine(filePath, line),
       editTimeline: (target) => editTimeline(target),
     });
+  };
+
+  /**
+   * シーンメモのパネル（設計書6.40.4）。
+   *
+   * 飛び先は1本の経路だけ（`revealLocation.ts`）。原稿エディタで書いて
+   * いればその画面のまま示し、素のエディタなら素のまま開く。
+   */
+  const sceneMemoDeps = {
+    revealInManuscript: (filePath: string, line: number) =>
+      manuscriptProvider.revealLine(filePath, line),
+  };
+
+  const showSceneMemos = async (
+    work: WorkEntry,
+    filePath?: string
+  ): Promise<void> => {
+    await openSceneMemoPanel(
+      context,
+      work,
+      sceneMemoDeps,
+      filePath ? { filePath } : {}
+    );
+  };
+
+  /**
+   * その本文が属する作品の、シーンメモのパネルを開く。
+   *
+   * **作品が分からなければ黙って諦めない。** 押しても何も起きないと、
+   * 壊れているのか対象外なのかが作者に伝わらない。
+   */
+  const showSceneMemosFor = async (filePath: string): Promise<void> => {
+    const found = await highlighter.indexFor(filePath);
+    if (!found) {
+      void vscode.window.showWarningMessage(
+        "この原稿が属する作品が分かりませんでした。" +
+          "作品として登録されているかご確認ください。"
+      );
+      return;
+    }
+    await showSceneMemos(found.work, filePath);
   };
 
   // 提案パネル（下段・出力やデバッグコンソールと同じ場所）。
@@ -1300,6 +1356,9 @@ export async function activate(
       void recordEditedSession(fromUri(document.uri));
       // 保存した瞬間が、書いた量を数えられる唯一の機会である（設計書6.3）
       void recordWritingProgress(fromUri(document.uri));
+      // 付箋を書き足したり消したりしたのは、保存で初めてディスクに残る。
+      // **開いているパネルだけ**が読み直す（設計書6.40.4）
+      void refreshSceneMemos(fromUri(document.uri));
     })
   );
   updateStatusBar();
@@ -2487,6 +2546,51 @@ export async function activate(
       const work = await resolveWork(node, registry);
       if (!work) return;
       await showChronicle(work);
+    })
+  );
+
+  /*
+    シーンメモ（設計書6.40）。AIは使わない——材料は本文の中の付箋だけ。
+
+    **「次へ」「戻る」はパネルが開いていなくても効く。** 作者がキー割当
+    （VS Code の設定）だけで使う道であり、そのために画面を開かせない。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.openSceneMemos", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await showSceneMemos(work);
+    }),
+    registerCommand("novelai.nextSceneMemo", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await jumpSceneMemo(work, "next", sceneMemoDeps);
+    }),
+    registerCommand("novelai.prevSceneMemo", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await jumpSceneMemo(work, "prev", sceneMemoDeps);
+    }),
+    /*
+      「ここにメモを足す」。
+
+      **原稿エディタを先に見る。** あちらは `TextEditor` を持たないので
+      `activeTextEditor` からは辿れない（見ているのが原稿エディタでも、
+      素のエディタで開いた別のファイルが「作業中」として返る）。
+    */
+    registerCommand("novelai.addSceneMemo", async () => {
+      if (await addMemoToOpenManuscript()) return;
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        void vscode.window.showInformationMessage(
+          "メモを足す本文を開いてから実行してください。"
+        );
+        return;
+      }
+      await insertMemoLineAbove(
+        editor.document,
+        editor.selection.active.line + 1
+      );
     })
   );
 

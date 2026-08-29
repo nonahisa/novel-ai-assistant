@@ -3,6 +3,7 @@ import { readTextFile } from "./textFile";
 import { parseEpisodeMetadata } from "./metadataParser";
 import { parseCollectedFile } from "./collectedFile";
 import { hashText } from "./textFile";
+import { blankMemoLines } from "./sceneMemo";
 
 /**
  * 話ごとの本文を取り出す。
@@ -10,6 +11,13 @@ import { hashText } from "./textFile";
  * 1ファイル1話の作品と、全話が1ファイルに入った合本を、同じ形で扱う。
  * あらすじ生成のように**話を単位にする機能**は、ここを通せば
  * どちらの形の作品でも同じコードで動く。
+ *
+ * ## シーンメモは、ここで消す（設計書6.40.2）
+ *
+ * **ここを通るのは、すべてAIへ渡す経路である**（各話あらすじ・紹介文・
+ * プロット逆算・書き出しの点検）。チャンクを作らずに本文をまるごと送るので、
+ * `splitIntoChunks` の側の始末が効かない。**行数は保つ**（`blankMemoLines`）
+ * ——引用の位置をAIに言わせる機能が増えたときに、行番号がずれない。
  */
 
 export interface EpisodeBody {
@@ -54,20 +62,23 @@ export async function loadEpisodeBodies(
     const collected = parseCollectedFile(content.text);
     if (collected) {
       for (const inner of collected) {
-        if (!inner.body.trim()) continue;
+        const body = blankMemoLines(inner.body);
+        if (!body.trim()) continue;
         bodies.push({
           file,
           chapter: inner.chapter,
           title: inner.title,
-          body: inner.body,
-          hash: hashText(inner.body),
+          body,
+          // **ハッシュもメモを抜いた本文から取る。** メモを直しただけで
+          // あらすじを作り直すと、AIを無駄に呼ぶことになる
+          hash: hashText(body),
           insideCollected: true,
         });
       }
       continue;
     }
 
-    const body = parseEpisodeMetadata(content.text).body;
+    const body = blankMemoLines(parseEpisodeMetadata(content.text).body);
     if (!body.trim()) continue;
     bodies.push({
       file,

@@ -39,6 +39,7 @@
 
 import { MANUSCRIPT_FONTS } from "../core/manuscriptFonts";
 import { NOTATION_RULES } from "../core/manuscriptRender";
+import { MEMO_LINE_PATTERN, MEMO_TAG_CLASS_MAP } from "../core/sceneMemo";
 
 /**
  * 測る書体の名前。
@@ -182,6 +183,21 @@ button.on {
 .mark-world { color: var(--novelai-world, var(--novelai-character)); }
 /* 用語が1件も無い作品では、重ねた字を出さない（透明のまま） */
 body.plain .mark { color: transparent; }
+/* **シーンメモの蛍光ペン**（設計書6.40.3。作者の指示、2026-08-29
+   「シーンメモした場所は、蛍光黄色でマーカーしてください」）。
+
+   打つ面（textarea）の**上**に重なる層なので、**半透明の背景だけ**を置く。
+   不透明に塗ると、下で打っている字が隠れる。字には触らない（透明のまま）
+   ので、変換中の文字もそのまま見える。
+
+   色は core/sceneMemo.ts の1か所（MEMO_MARKER_COLOR）から
+   CSS変数で届く。明暗の切り替えは拡張機能側がテーマを見て選ぶ */
+#marks .memo-line {
+  background: var(--novelai-memo-marker, rgba(255, 235, 59, 0.45));
+  border-radius: 2px;
+}
+/* 用語が無い作品でも、メモの色は消さない（body.plain は用語の話） */
+body.plain #marks .memo-line .mark { color: transparent; }
 #write {
   border: none;
   resize: none;
@@ -260,6 +276,48 @@ body.vertical #compose p, body.vertical #compose div {
   min-width: 1.9em;
   min-height: 0;
 }
+/* **シーンメモの行（付箋）**（設計書6.40.3）。
+
+   ## かたまりにしない
+   contenteditable="false" を付けないのは、**中身を普通に打てる**ことが
+   要るからである。行頭の印を消せばただの本文へ戻り、本文へ印を足せば
+   付箋になる。往復（記法↔DOM）にも一切関わらない——見た目だけを変える。
+
+   ## 背景は蛍光黄色ひとつ（作者の指示、2026-08-29）
+   タグごとに背景を変えない。作者が求めているのは「メモの場所が
+   一目で分かる」ことなので、**種類は行頭の小さな丸**で示す。
+   丸は ::before（DOMに出ない）で描く——本文のノードを増やすと
+   直列化が1文字ずれる */
+#compose p.memo, #compose div.memo {
+  position: relative;
+  background: var(--novelai-memo-marker, rgba(255, 235, 59, 0.45));
+  border-radius: 2px;
+  /* 付箋は本文より小さく。読み流すときに邪魔をしない */
+  font-size: 0.88em;
+}
+#compose .memo::before {
+  content: "";
+  position: absolute;
+  /* 横書きでは行の左、縦書きでは行の上に置く（下の vertical で差し替える） */
+  left: -0.75em;
+  top: 0.65em;
+  width: 0.42em;
+  height: 0.42em;
+  border-radius: 50%;
+  background: var(--novelai-memo-other, #6b6b6b);
+}
+body.vertical #compose .memo::before {
+  left: auto;
+  top: -0.75em;
+  right: 0.65em;
+}
+/* 種類の色。**色の値は core/sceneMemo.ts から変数で届く**（写しを置かない） */
+#compose .memo-todo::before { background: var(--novelai-memo-todo, #c01c28); }
+#compose .memo-check::before { background: var(--novelai-memo-check, #9a6700); }
+#compose .memo-foreshadow::before {
+  background: var(--novelai-memo-foreshadow, #1a5fb4);
+}
+#compose .memo-idea::before { background: var(--novelai-memo-idea, #1c7c3c); }
 /* **かたまり（ルビ・傍点）は編集不可**（設計書6.34.2）。中の文字を直接
    直せないので、消すときは1単位で消える。選んだときに1文字のように
    振る舞わせるため、余計な余白は付けない */
@@ -1094,6 +1152,17 @@ ruby > rt {
       });
     }, hasSelection);
 
+    /* ── シーンメモ（設計書6.40.3・6.40.4） ── */
+    rule();
+    add("ここにメモを足す", function () {
+      // **カーソル行の「上」に挿す**（設計書6.40.3）。いま書いている行の
+      // 下に入ると、続きを打つたびに付箋が押し下げられる
+      vscode.postMessage({ type: "addMemo", line: menuCaretLine() });
+    });
+    add("シーンメモを横に開く", function () {
+      vscode.postMessage({ type: "openMemos" });
+    });
+
     menu.classList.add("open");
     // 画面の外へはみ出さないように収める
     const box = menu.getBoundingClientRect();
@@ -1181,6 +1250,73 @@ ruby > rt {
     if (event.key === "Escape") closeMenu();
   });
 
+  /* ── カーソルの行（シーンメモ。設計書6.40.4） ────────── */
+
+  /** 本文の位置（LF空間）を、1始まりの行番号へ。読めなければ 0 */
+  function lineOfOffset(text, offset) {
+    if (typeof offset !== "number" || offset < 0) return 0;
+    return text.slice(0, offset).split("\\n").length;
+  }
+
+  /** 組んで書く面の本文。**位置を数えたのと同じものから作る** */
+  function composeTextNow() {
+    let text = "";
+    for (const atom of composeCurrentAtoms()) text += atom.text;
+    return text;
+  }
+
+  /** いまカーソルのある行（1始まり）。読めなければ 0 */
+  function caretLine() {
+    if (composeOn) {
+      const at = composeSelectionNow();
+      return at ? lineOfOffset(composeTextNow(), at.start) : 0;
+    }
+    return lineOfOffset(write.value, write.selectionStart);
+  }
+
+  /**
+   * 品書きから使う行。
+   *
+   * **組んで書く面では、品書きを開いた時点の選択を使う。** 押した瞬間には
+   * 選択が外れている（contenteditable の選択は画面じゅうで1つしかない）。
+   */
+  function menuCaretLine() {
+    if (composeOn) {
+      const at = composeMenuAt || composeSelectionNow();
+      return at ? lineOfOffset(composeTextNow(), at.start) : 0;
+    }
+    return lineOfOffset(write.value, write.selectionStart);
+  }
+
+  /*
+    カーソルが動いたことを、横のパネルへ知らせる（設計書6.40.4）。
+
+    **200ミリ秒まとめる。** 打鍵のたびに送ると、パネルは1文字ごとに
+    いちばん近い付箋を数え直すことになる。少し遅れて光っても困らない。
+
+    **片方向である。** パネルは受けて光らせるだけで、本文は動かさない
+    （本文が動くのは、パネルの行を押したときだけ）。
+  */
+  let caretTimer = null;
+  let lastCaretLine = 0;
+  function notifyCaret() {
+    if (caretTimer !== null) return;
+    caretTimer = setTimeout(function () {
+      caretTimer = null;
+      const line = caretLine();
+      // 同じ行に居るあいだは送らない（パネルの光る行は変わらない）
+      if (line <= 0 || line === lastCaretLine) return;
+      lastCaretLine = line;
+      vscode.postMessage({ type: "caret", line: line });
+    }, 200);
+  }
+  // textarea と contenteditable で拾える知らせが違うので、両方に付ける
+  document.addEventListener("selectionchange", notifyCaret);
+  write.addEventListener("click", notifyCaret);
+  write.addEventListener("keyup", notifyCaret);
+  compose.addEventListener("click", notifyCaret);
+  compose.addEventListener("keyup", notifyCaret);
+
   /* ── ホバーのチップ（作者の依頼、2026-08-28） ── */
   const tip = document.getElementById("tip");
   const TIP_KIND_LABELS = {
@@ -1188,6 +1324,9 @@ ruby > rt {
     location: "場所",
     ability: "能力",
     organization: "組織",
+    // 付箋のチップ（設計書6.40.3）。行の中では小さく出ているので、
+    // 全文はここで読む
+    memo: "シーンメモ",
   };
 
   /**
@@ -1386,6 +1525,64 @@ ruby > rt {
    */
   const COMPOSE_NOTATION_RULES = ${JSON.stringify(NOTATION_RULES)};
 
+  /**
+   * シーンメモの記法とタグの色分け（設計書6.40）。
+   *
+   * **定義は core/sceneMemo.ts の1つだけ。** ルビの記法と同じで、
+   * ここへはその文字列がそのまま埋め込まれる（写しを置くと、
+   * 拡張機能側と画面側で「どれがメモか」が食い違う日が来る）。
+   */
+  const MEMO_LINE_RE = new RegExp(${JSON.stringify(MEMO_LINE_PATTERN)});
+  const MEMO_TAG_CLASSES = ${JSON.stringify(MEMO_TAG_CLASS_MAP)};
+
+  /** タグとして読む語の長さの上限（core/sceneMemo.ts と同じ理由・同じ値） */
+  const MEMO_TAG_MAX = 12;
+
+  /** その行が付箋か。**行の先頭だけを見る**（途中の // はURL・会話文） */
+  function memoIsLine(line) {
+    return MEMO_LINE_RE.test(line);
+  }
+
+  /**
+   * 付箋の行を、タグと本文に分ける。
+   *
+   * **分け方は core/sceneMemo.ts の parseMemos と同じにする。** 画面の
+   * チップに出るタグと、横のパネルに並ぶタグが食い違うと、同じ行が
+   * 別のものに見える。日本語には語の切れ目に空白が無いので、
+   * **語が1つだけならタグではない**（それが本文である）。
+   */
+  function memoPartsOf(line) {
+    /* 変数を body と名付けない——消したはずの「並べる」面のCSS class
+       （body に続けて split と書く形）と同じ並びになり、
+       それが残っていないかを見張る試験に当たってしまう */
+    const rest = line.replace(MEMO_LINE_RE, "").replace(/^[\\s　]+/, "");
+    const words = rest.split(/[\\s　]+/).filter(function (word) {
+      return word.length > 0;
+    });
+    if (words.length === 0) return { tag: "メモ", text: "" };
+    const head = words[0];
+    if (words.length === 1) {
+      // 印とタグだけ書いて、あとから中身を足す書き方がある
+      if (MEMO_TAG_CLASSES[head]) return { tag: head, text: "" };
+      return { tag: "メモ", text: rest };
+    }
+    // 長い先頭語はタグではない（文の途中で空けただけ）
+    if (head.length > MEMO_TAG_MAX) return { tag: "メモ", text: rest };
+    return { tag: head, text: rest.slice(head.length).replace(/^[\\s　]+/, "") };
+  }
+
+  /**
+   * 付箋の行に付けるクラス。
+   *
+   * **色分けは読み替え表にある語だけで決める。** 表に無いタグは memo
+   * だけになり、灰色の丸が付く（作者が自由に付けたタグを弾かない）。
+   */
+  function memoClassFor(line) {
+    if (!memoIsLine(line)) return "";
+    const extra = MEMO_TAG_CLASSES[memoPartsOf(line).tag];
+    return extra ? "memo " + extra : "memo";
+  }
+
   /** 知らないモードが来ても、いままでの記法で組む（本文を壊さない側へ倒す） */
   function composeRules(mode) {
     const rules = COMPOSE_NOTATION_RULES[mode];
@@ -1579,7 +1776,10 @@ ruby > rt {
    */
   function composeBuildLine(line, doc, mode) {
     const p = doc.createElement("p");
-    p.setAttribute("class", "line");
+    // 付箋の行は、見た目だけを変える（設計書6.40.3）。
+    // **かたまりにはしない**——中身は普通に打てて、印を消せば本文へ戻る
+    const memo = memoClassFor(line);
+    p.setAttribute("class", memo ? "line " + memo : "line");
     const parts = composeParts(line, mode);
     if (parts.length === 0) {
       // 空行。高さを保つための詰め物（読む面の br と同じ役目）
@@ -2085,7 +2285,31 @@ ruby > rt {
     if (composing) return;
     composeSend();
     composeScheduleHighlight();
+    composeRepaintMemos();
   });
+
+  /**
+   * 行の付箋らしさを付け直す（設計書6.40.3）。
+   *
+   * **class 属性しか触らない。** ノードを足したり消したりすると
+   * DOM→記法の直列化がずれる（＝本文が壊れる）。見た目だけを変える。
+   *
+   * **打たれるたびに呼ぶ。** 組み直し（composeApplyText）は、打った本文が
+   * 返ってきたときには走らない（往復が一致するので早く戻る）ので、
+   * ここで当て直さないと、印を打っても色が付かないまま残る。
+   *
+   * **変換中は呼ばない**（呼び出し側が確定を待つ）。確定前の文字を含む
+   * 行の属性を書き換えると、変換そのものに障ることがある。
+   */
+  function composeRepaintMemos() {
+    const lines = compose.querySelectorAll("p, div");
+    for (const element of lines) {
+      // 行の入れ物だけを見る（ルビの中の要素は行ではない）
+      if (element.parentNode !== compose) continue;
+      const memo = memoClassFor(element.textContent || "");
+      element.setAttribute("class", memo ? "line " + memo : "line");
+    }
+  }
 
   compose.addEventListener("compositionstart", function () {
     composing = true;
@@ -2099,6 +2323,8 @@ ruby > rt {
       composePending = null;
       if (waiting !== null) composeTakeIncoming(waiting);
       composeScheduleHighlight();
+      // 変換で確定した行が付箋になったかもしれない（設計書6.40.3）
+      composeRepaintMemos();
     }, 0);
   });
 
@@ -2478,6 +2704,18 @@ ruby > rt {
       composeTipTimer = null;
       const at = composeTipAt;
       if (!at) return;
+      /*
+        **付箋を先に見る**（設計書6.40.3）。付箋の行は小さい字で組んで
+        いるので、長いメモは行内で読み切れない。載せたら全文をチップに出す。
+        こちらは要素があるので、位置ではなく当たり判定で引ける。
+      */
+      const memo = memoElementAt(at.x, at.y);
+      if (memo) {
+        const parts = memoPartsOf(memo.textContent || "");
+        fillTip(parts.tag, "memo", parts.text || "（メモの中身がありません）");
+        placeTip({ left: at.x, right: at.x, top: at.y, bottom: at.y });
+        return;
+      }
       const span = composeTermSpanAt(composeOffsetAtPoint(at.x, at.y));
       if (!span) {
         tip.classList.remove("open");
@@ -2488,6 +2726,15 @@ ruby > rt {
       placeTip({ left: at.x, right: at.x, top: at.y, bottom: at.y });
     });
   });
+
+  /** その座標にある付箋の行。無ければ null */
+  function memoElementAt(x, y) {
+    const target = document.elementFromPoint(x, y);
+    if (!target || !target.closest) return null;
+    const found = target.closest(".memo");
+    // 組んで書く面の外（品書き・帯）に .memo は無いが、念のため囲いを確かめる
+    return found && compose.contains(found) ? found : null;
+  }
   compose.addEventListener("mouseleave", function () {
     composeTipAt = null;
     tip.classList.remove("open");

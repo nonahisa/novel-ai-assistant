@@ -45,6 +45,11 @@ import {
   validateRuby,
   type EmphasisSite,
 } from "../core/ruby";
+import {
+  MEMO_LINE_PREFIX,
+  memoColorVars,
+  stripMemoLines,
+} from "../core/sceneMemo";
 import { pickEmphasisSite, pickStyle } from "./ruby";
 import { askText } from "../views/dialogs";
 import { logLine } from "../core/logger";
@@ -147,8 +152,34 @@ const openManuscripts = new Map<
      * 「今日 +◯字」が1回分ずつ古くなる。
      */
     refreshCounts(): void;
+    /**
+     * この画面が持っている文書（設計書6.40.4）。
+     *
+     * シーンメモの「済みにする」が、**打ちかけのまま開いている原稿**を
+     * 書き換えるために要る。ディスクを直に書くと、開いている面の
+     * （まだ保存していない）本文が勝った瞬間に消える。
+     */
+    document: vscode.TextDocument;
   }
 >();
+
+/**
+ * 原稿エディタで最後にカーソルがあった場所（設計書6.40.4）。
+ *
+ * シーンメモの「次へ」「戻る」が、どこを起点にするかを決めるために持つ。
+ * **原稿エディタは `TextEditor` を持たない**ので、VS Code の
+ * `activeTextEditor` からは取れない。
+ *
+ * **開いている面が閉じても消さない。** 閉じた直後に「次へ」を押したときに、
+ * 作品の先頭へ飛ばされるより、さっきまで居た場所の次へ進むほうが自然である。
+ */
+let lastCaret: { filePath: string; line: number } | undefined;
+
+export function lastManuscriptCaret():
+  | { filePath: string; line: number }
+  | undefined {
+  return lastCaret;
+}
 
 /**
  * その原稿を開いている画面の、下段の字数を測り直す。
@@ -157,6 +188,111 @@ const openManuscripts = new Map<
  */
 export function refreshManuscriptCounts(filePath: string): void {
   openManuscripts.get(manuscriptLedgerKey(filePath))?.refreshCounts();
+}
+
+/**
+ * カーソル行の**上**に、空の付箋の行を挿す（設計書6.40.3）。
+ *
+ * **本文の書き換えは `WorkspaceEdit` を通す。** 打ちかけを抱えた文書へ
+ * ディスクから書くと、開いている面の内容が勝った瞬間に消える。
+ *
+ * 中身を先に訊く形にはしない——思いついたことを打つ前に一手挟むことになる。
+ *
+ * @param line 1始まり。読めない値なら先頭に置く
+ */
+export async function insertMemoLineAbove(
+  document: vscode.TextDocument,
+  line: number
+): Promise<boolean> {
+  const index = Math.min(
+    Math.max((Number.isFinite(line) ? line : 1) - 1, 0),
+    Math.max(document.lineCount - 1, 0)
+  );
+
+  const change = new vscode.WorkspaceEdit();
+  change.insert(
+    document.uri,
+    new vscode.Position(index, 0),
+    `${MEMO_LINE_PREFIX}\n`
+  );
+  if (!(await vscode.workspace.applyEdit(change))) {
+    // **黙って終わらない。** 押しても何も起きないときの手がかりを残す
+    logLine(
+      `シーンメモ：${fromUri(document.uri)} の ${index + 1}行目に付箋を挿せませんでした。`
+    );
+    void vscode.window.showWarningMessage(
+      "シーンメモの行を挿せませんでした。もう一度お試しください。"
+    );
+    return false;
+  }
+
+  // 挿した行へカーソルを送る（原稿エディタで開いていれば）。
+  // **打ち始められる場所に居ないと、付箋を足した意味がない**
+  openManuscripts.get(manuscriptLedgerKey(document.uri))?.revealLine(index + 1);
+  return true;
+}
+
+/**
+ * 原稿エディタが最後に居た場所へ、付箋を挿す（コマンドの受け口）。
+ *
+ * 原稿エディタで開いていなければ `false`。呼んだ側が、素のエディタで
+ * 挿す道へ回る。
+ */
+export async function addMemoToOpenManuscript(): Promise<boolean> {
+  const caret = lastCaret;
+  if (!caret) return false;
+  const open = openManuscripts.get(manuscriptLedgerKey(caret.filePath));
+  if (!open) return false;
+  open.panel.reveal();
+  return await insertMemoLineAbove(open.document, caret.line);
+}
+
+/** 「済みにする」がどう終わったか（呼んだ側が理由を出せるようにする） */
+export type MemoLineRemoval =
+  /** 消した */
+  | { kind: "removed" }
+  /** この原稿は原稿エディタで開いていない（呼んだ側がディスクを書く） */
+  | { kind: "not_open" }
+  /** 行が読み込んだときのものと違う（本文が変わっている） */
+  | { kind: "changed" };
+
+/**
+ * 原稿エディタで開いている本文から、メモの行を消す（設計書6.40.4）。
+ *
+ * **開いている原稿はディスクではなく文書を書き換える。** 打ちかけを
+ * 抱えたまま `writeTextFilePreservingFormat` を通すと、そちらは
+ * 「未保存の変更がある」として断るか、断らなければ打ちかけを消す。
+ *
+ * **消す前に、その行が読み込んだときのものか確かめる。** 一覧を作ってから
+ * 押すまでの間に本文が変わっていることがあり、行番号だけで消すと
+ * **別の行が消える。**
+ *
+ * @param line 1始まり
+ */
+export async function removeMemoLineInOpenManuscript(
+  filePath: string,
+  line: number,
+  expectedRaw: string
+): Promise<MemoLineRemoval> {
+  const open = openManuscripts.get(manuscriptLedgerKey(filePath));
+  if (!open) return { kind: "not_open" };
+
+  const document = open.document;
+  const index = line - 1;
+  if (index < 0 || index >= document.lineCount) return { kind: "changed" };
+  if (document.lineAt(index).text !== expectedRaw) return { kind: "changed" };
+
+  const change = new vscode.WorkspaceEdit();
+  // **行まるごと（改行を含めて）消す。** 本文だけを消すと空行が残り、
+  // 段落の切れ目が増えてしまう
+  change.delete(document.uri, document.lineAt(index).rangeIncludingLineBreak);
+  if (!(await vscode.workspace.applyEdit(change))) {
+    logLine(
+      `原稿エディタ：シーンメモの行を消せませんでした（${filePath} ${line}行目）。`
+    );
+    return { kind: "changed" };
+  }
+  return { kind: "removed" };
 }
 
 /** 台帳に載るのを待つ上限。これを過ぎたら「開けなかった」とみなす */
@@ -306,7 +442,18 @@ type Incoming =
    * **黙って開かないだけ**では何が起きたか誰にも分からない。通知は出さず、
    * ログには必ず残す。
    */
-  | { type: "log"; text: string };
+  | { type: "log"; text: string }
+  /** カーソル行の**上**に `// ` の行を挿す（設計書6.40.3） */
+  | { type: "addMemo"; line: number }
+  /** シーンメモのパネルを横に開く（設計書6.40.4） */
+  | { type: "openMemos" }
+  /**
+   * カーソルが動いた（設計書6.40.4）。
+   *
+   * **画面側で200ミリ秒まとめてから届く。** 打鍵のたびに来ると、
+   * パネルが1文字ごとにいちばん近い付箋を数え直すことになる。
+   */
+  | { type: "caret"; line: number };
 
 export interface ManuscriptEditorDeps {
   highlighter: TermHighlighter;
@@ -366,6 +513,21 @@ export interface ManuscriptEditorDeps {
   markdownDeclined(): readonly string[];
   /** 断られたことを覚える */
   declineMarkdown(filePath: string): Promise<void>;
+  /**
+   * シーンメモのパネルを横に開く（設計書6.40.4）。
+   *
+   * **繋ぐのは `extension.ts` だけ。** ここからパネルを直に読み込むと、
+   * パネル側もこちらを読むので輪になる（相関図・年表と同じ理由）。
+   * 省略できる形にしてあるのは、この画面がメモの機能なしでも成り立つため。
+   */
+  openSceneMemos?: (filePath: string) => Promise<void>;
+  /**
+   * カーソルが動いたことを外へ知らせる（設計書6.40.4）。
+   *
+   * **片方向である。** パネルは受けていちばん近い付箋を光らせるだけで、
+   * こちらの本文を動かすのは、パネルの行が押されたときだけ。
+   */
+  onCaretMoved?: (filePath: string, line: number) => void;
 }
 
 export class ManuscriptEditorProvider
@@ -471,6 +633,7 @@ export class ManuscriptEditorProvider
       refreshCounts: (): void => {
         void this.sendFootCounts(panel, document);
       },
+      document,
     };
     openManuscripts.set(key, entry);
     panel.onDidDispose(() => {
@@ -621,6 +784,23 @@ export class ManuscriptEditorProvider
         case "log":
           logLine(`原稿エディタ：${message.text}`);
           break;
+
+        case "addMemo":
+          await insertMemoLineAbove(document, message.line);
+          break;
+
+        case "openMemos":
+          await this.deps.openSceneMemos?.(fromUri(document.uri));
+          break;
+
+        case "caret": {
+          // **覚えるのはこちら。** 画面はファイルの場所を知らない
+          if (message.line > 0) {
+            lastCaret = { filePath: fromUri(document.uri), line: message.line };
+            this.deps.onCaretMoved?.(lastCaret.filePath, lastCaret.line);
+          }
+          break;
+        }
 
         case "chat": {
           // 画面の位置はLF空間。文書の位置へ直してから範囲にする
@@ -1205,7 +1385,9 @@ export class ManuscriptEditorProvider
     const style = await pickStyle();
     if (!style) return;
 
-    const source = document.getText();
+    // **シーンメモは投稿しない**（設計書6.40.2）。この画面ではメモを
+    // 消さずに見せているので、外へ出す唯一の口であるここで落とす
+    const source = stripMemoLines(document.getText());
 
     // **傍点が入っているときだけ、貼り付け先を訊く**（設計書6.12.4）。
     // ルビはどのサイトでも同じ書き方で通る
@@ -1307,7 +1489,9 @@ function colorsFor(): Record<string, string> {
   const dark =
     vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark ||
     vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast;
-  const colors: Record<string, string> = {};
+  // シーンメモの蛍光ペンとタグの色（設計書6.40.3）。
+  // **16進は `core/sceneMemo.ts` にしかない**（写しを置かない）
+  const colors: Record<string, string> = memoColorVars(dark);
   for (const [kind, pair] of Object.entries(TERM_COLORS)) {
     colors[kind] = dark ? pair.dark : pair.light;
   }

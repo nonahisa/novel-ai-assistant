@@ -1,5 +1,6 @@
 import { parseEpisodeMetadata } from "./metadataParser";
 import { toSiteNotation, type RubyStyle } from "./ruby";
+import { stripMemoLines } from "./sceneMemo";
 import { sanitizeFileName } from "./episodeParser";
 
 /**
@@ -47,9 +48,14 @@ export function extractEpisodeParts(
  *
  * **前後の空行を落とす。** 投稿欄の先頭に空行が入ると、
  * サイトによっては1行目が空いた状態で公開される。
+ *
+ * **シーンメモは必ず落とす**（設計書6.40.2）。ここを抜かすと、
+ * 作者の付箋がそのまま公開される。
  */
 export function bodyForPosting(body: string, style: RubyStyle["id"]): string {
-  return toSiteNotation(body, style).replace(/^\n+/, "").replace(/\n+$/, "");
+  return toSiteNotation(stripMemoLines(body), style)
+    .replace(/^\n+/, "")
+    .replace(/\n+$/, "");
 }
 
 /**

@@ -39,6 +39,8 @@ const MARKDOWN_ALLOWED = new Set([
   "src/core/foreshadowMarkdown.ts",
   // 年表をMarkdownの文書として書き出す（設計書6.39.4）
   "src/core/chronicleMarkdown.ts",
+  // シーンメモをMarkdownの文書として書き出す（設計書6.40.4）
+  "src/core/sceneMemoMarkdown.ts",
   // 再開の1枚と単話プロットの雛形（設計書6.36）
   "src/core/resumeSheet.ts",
   // .gitignore に書き込む注釈。Markdownではないが「#」で始まる

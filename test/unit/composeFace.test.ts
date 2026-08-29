@@ -5,6 +5,12 @@ import {
   NOTATION_RULES,
   SITE_NOTATION_PATTERN,
 } from "../../src/core/manuscriptRender";
+import {
+  MEMO_LINE_PATTERN,
+  MEMO_TAG_CLASS_MAP,
+  memoTagClass,
+  parseMemos,
+} from "../../src/core/sceneMemo";
 
 /**
  * 組んで書く（実験）の面（設計書6.34）。
@@ -152,6 +158,10 @@ interface ComposeApi {
     selection: { start: number; end: number } | null,
     spans: MenuSpan[]
   ): MenuSpan | null;
+  /** シーンメモ（設計書6.40.3） */
+  memoIsLine(line: string): boolean;
+  memoPartsOf(line: string): { tag: string; text: string };
+  memoClassFor(line: string): string;
 }
 
 /** 用語の位置（`collectTermSpans` が渡してくるもののうち、判定が見る分だけ） */
@@ -166,7 +176,8 @@ const api = new Function(
     "\nreturn { composeParts, composePartsToNotation, composeNormalizeText," +
     " composeNormalizeNewlines, composeBuildLine, composeBuildFragment," +
     " composeAtoms, composeDomToNotation, composeOffsetToPoint," +
-    " composePointToOffset, composeSelectionHasChunk, pickMenuTerm };"
+    " composePointToOffset, composeSelectionHasChunk, pickMenuTerm," +
+    " memoIsLine, memoPartsOf, memoClassFor };"
 )() as ComposeApi;
 
 /** 記法から組み立てたDOM（偽） */
@@ -197,6 +208,16 @@ describe("切り出し", () => {
     expect(source).toContain(JSON.stringify(SITE_NOTATION_PATTERN));
     // 捕獲の番号まで含めて、丸ごと同じものが渡っている
     expect(source).toContain(JSON.stringify(NOTATION_RULES));
+  });
+
+  /**
+   * シーンメモの記法も、**定義は core/sceneMemo.ts の1つだけ**である
+   * （設計書6.40）。画面側に写しを置くと、拡張機能側と画面側で
+   * 「どれがメモか」が食い違う日が来る。
+   */
+  it("シーンメモの記法とタグの表も、写しではなく埋め込まれている", () => {
+    expect(source).toContain(JSON.stringify(MEMO_LINE_PATTERN));
+    expect(source).toContain(JSON.stringify(MEMO_TAG_CLASS_MAP));
   });
 });
 
@@ -1266,5 +1287,104 @@ describe("右クリックの位置が取れなかったときの記録", () => {
     expect(at.slice(0, 900)).toContain(
       "pickMenuTerm(clickOffset, composeMenuAt, termSpans)"
     );
+  });
+});
+
+/**
+ * シーンメモの付箋（設計書6.40.3）。
+ *
+ * **いちばん大事なのは、往復が変わらないこと**である。付箋は見た目だけを
+ * 変えるもので、DOM→記法の直列化には一切関わらない。ここが崩れると、
+ * メモを1つ書いただけで本文が壊れる。
+ */
+describe("シーンメモの付箋", () => {
+  it("メモの行があっても、記法→DOM→記法 は完全に一致する", () => {
+    const text = [
+      "　彼女は港を見下ろしていた。",
+      "// TODO ここに潮の匂いの{描写|びょうしゃ}を足す",
+      "／／ 伏線 銀の時計→第12話で回収",
+      "　風が吹いた。",
+    ].join("\n");
+    expect(round(text)).toBe(text);
+  });
+
+  it("メモの行の段落に、付箋のクラスとタグのクラスが付く", () => {
+    const root = build("あ\n// TODO ここ\n／／ 伏線 そこ\n// 推敲 あれ");
+    expect(root.childNodes[0].getAttribute?.("class")).toBe("line");
+    expect(root.childNodes[1].getAttribute?.("class")).toBe(
+      "line memo memo-todo"
+    );
+    expect(root.childNodes[2].getAttribute?.("class")).toBe(
+      "line memo memo-foreshadow"
+    );
+    // 読み替え表に無いタグは、灰色（クラスは memo だけ）
+    expect(root.childNodes[3].getAttribute?.("class")).toBe("line memo");
+  });
+
+  /**
+   * **かたまりにしない**（設計書6.40.3）。中身は普通に打てて、
+   * 行頭の印を消せばただの本文へ戻る。
+   */
+  it("メモの行は編集不可のかたまりにしない", () => {
+    const line = build("// TODO ここ").childNodes[0];
+    expect(line.getAttribute?.("contenteditable")).toBeNull();
+    expect(line.getAttribute?.("data-src")).toBeNull();
+    expect(line.childNodes[0].nodeValue).toBe("// TODO ここ");
+  });
+
+  it("印を消せば、ただの本文の行に戻る", () => {
+    expect(build("TODO ここ").childNodes[0].getAttribute?.("class")).toBe(
+      "line"
+    );
+  });
+
+  /**
+   * **タグの分け方が拡張機能側と食い違わない。** 画面のチップに出るタグと、
+   * 横のパネルに並ぶタグが違うと、同じ行が別のものに見える。
+   */
+  it("タグの分け方は、core/sceneMemo.ts と同じ答えになる", () => {
+    const lines = [
+      "// TODO 潮の匂いを足す",
+      "／／ 要確認 距離が合わない",
+      "// 潮の匂いを足す",
+      "// TODO",
+      "// 伏線 銀の時計",
+    ];
+    for (const line of lines) {
+      const expected = parseMemos(line)[0];
+      expect(api.memoPartsOf(line)).toEqual({
+        tag: expected.tag,
+        text: expected.text,
+      });
+      // クラスの決め方も同じ（表に無いタグは memo だけ）
+      const kindClass = memoTagClass(expected.tag);
+      expect(api.memoClassFor(line)).toBe(
+        kindClass === "memo-other" ? "memo" : `memo ${kindClass}`
+      );
+    }
+  });
+
+  it("行頭以外の // は付箋にしない", () => {
+    expect(api.memoIsLine("　彼は https://example.com を開いた。")).toBe(false);
+    expect(api.memoIsLine("　// 字下げのある行")).toBe(false);
+  });
+
+  /**
+   * 打った瞬間に色を当て直す（設計書6.40.3）。
+   *
+   * **組み直し（composeApplyText）は、打った本文が返ってきたときには
+   * 走らない**（往復が一致するので早く戻る）。当て直しが無いと、
+   * 印を打っても色が付かないまま残る。
+   */
+  it("打たれたら、class だけを当て直す", () => {
+    const code = html.slice(html.indexOf("<script"));
+    const repaint = code.slice(code.indexOf("function composeRepaintMemos("));
+    expect(repaint.slice(0, 500)).toContain("setAttribute(\"class\"");
+    // ノードを足したり消したりしない（直列化がずれる）
+    expect(repaint.slice(0, 500)).not.toContain("appendChild");
+    expect(repaint.slice(0, 500)).not.toContain("removeChild");
+    // 打たれたら呼ばれる
+    const input = code.slice(code.indexOf('compose.addEventListener("input"'));
+    expect(input.slice(0, 500)).toContain("composeRepaintMemos();");
   });
 });

@@ -3,7 +3,8 @@ import {
   SITE_RUBY_BARE_SOURCE,
   SITE_RUBY_BAR_SOURCE,
 } from "./ruby";
-import { TermIndex, type TermKind } from "./termIndex";
+import { TermIndex, type TermKind, type TermMatch } from "./termIndex";
+import { memoLineRanges } from "./sceneMemo";
 
 /**
  * 原稿エディタの表示の土台——記法の切り出し・用語の位置・記法の判定（設計書6.25）。
@@ -229,22 +230,64 @@ export const TERM_LABELS: Record<TermKind, string> = {
  *
  * 文字の色は変えない。**打っている本文の色を変えると、変換中の文字と
  * 確定した文字の見分けが付かなくなる。**
+ *
+ * ## シーンメモの蛍光ペンも、ここで敷く（設計書6.40.3）
+ *
+ * 作者の指示（2026-08-29）「シーンメモした場所は、蛍光黄色でマーカーして
+ * ください」。**半透明の背景だけを置き、字には触らない**——この重ね敷きは
+ * 打つ面の上に載るので、不透明に塗ると打っている字が隠れる。
+ * 用語の色と重なっても、片方は文字色・片方は背景なので潰し合わない。
  */
 export function renderTermMarks(text: string, index?: TermIndex): string {
-  if (!index) return escapeHtml(text);
-  const matches = index.find(text);
-  if (matches.length === 0) return escapeHtml(text);
+  const matches = index ? index.find(text) : [];
+  const memos = memoLineRanges(text);
+  if (matches.length === 0 && memos.length === 0) return escapeHtml(text);
 
   let html = "";
-  let last = 0;
+  let cursor = 0;
+  for (const range of memos) {
+    if (range.start > cursor) {
+      html += markedSlice(text, matches, cursor, range.start);
+    }
+    html +=
+      '<span class="memo-line">' +
+      markedSlice(text, matches, range.start, range.end) +
+      "</span>";
+    cursor = range.end;
+  }
+  if (cursor < text.length) {
+    html += markedSlice(text, matches, cursor, text.length);
+  }
+  return html;
+}
+
+/**
+ * `from` から `to` までを、用語の色を当てながら組む。
+ *
+ * **範囲で切れるようにしてある。** メモ行を包む `<span>` を挟むために
+ * 行の境目で組み立てを区切る必要があり、用語の一致は本文全体に対する
+ * 位置で持っているためである。用語（人名・地名）に改行は入らないので、
+ * 一致が行をまたぐことは無いが、はみ出しても字が消えないよう丸めておく。
+ */
+function markedSlice(
+  text: string,
+  matches: readonly TermMatch[],
+  from: number,
+  to: number
+): string {
+  let html = "";
+  let last = from;
   for (const match of matches) {
-    if (match.start > last) html += escapeHtml(text.slice(last, match.start));
+    if (match.end <= from || match.start >= to) continue;
+    const start = Math.max(match.start, from);
+    const end = Math.min(match.end, to);
+    if (start > last) html += escapeHtml(text.slice(last, start));
     html +=
       `<span class="mark mark-${match.entry.kind}">` +
-      `${escapeHtml(text.slice(match.start, match.end))}</span>`;
-    last = match.end;
+      `${escapeHtml(text.slice(start, end))}</span>`;
+    last = end;
   }
-  if (last < text.length) html += escapeHtml(text.slice(last));
+  if (last < to) html += escapeHtml(text.slice(last, to));
   return html;
 }
 

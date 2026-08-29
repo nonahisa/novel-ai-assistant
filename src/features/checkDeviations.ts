@@ -4,6 +4,7 @@ import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile, hashText } from "../core/textFile";
+import { blankMemoLines } from "../core/sceneMemo";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
 import {
@@ -383,7 +384,13 @@ async function collectEpisodes(
     if (episode.hasConflictMarkers) continue;
     let text: string;
     try {
-      text = (await readTextFile(episode.filePath)).text;
+      /*
+        **シーンメモはAIへ渡さない**（設計書6.40.2）。逸脱の検知は
+        `splitIntoChunks` を通らず、読んだ本文をそのまま送るので、
+        ここで落とす。**空行にする**（行ごと落とさない）のは、指摘の
+        引用位置が元の本文とずれないようにするためである。
+      */
+      text = blankMemoLines((await readTextFile(episode.filePath)).text);
     } catch (error) {
       // **記録して数える。** 黙って落とすと、その話は検知の対象から
       // 抜けたのに、作者には「何も無かった」と見える

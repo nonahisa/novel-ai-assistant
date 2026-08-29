@@ -12,6 +12,7 @@ import { readWorkConfig, workPaths } from "./workRegistry";
 import { parseEpisodeMetadata } from "./metadataParser";
 import { isConflictSideFile } from "./conflictFile";
 import { parseCollectedFile, type CollectedEpisode } from "./collectedFile";
+import { memoBadgeText, parseMemos } from "./sceneMemo";
 import { pathExists } from "./fileSystem";
 
 /**
@@ -45,6 +46,8 @@ export async function scanWork(work: WorkEntry): Promise<{
     let counts = emptyCounts();
     let hasConflictMarkers = false;
     let collected: CollectedEpisode[] | null = null;
+    /** 残っているシーンメモの印（設計書6.40.5）。無ければ空文字 */
+    let memoBadge = "";
     let meta = {
       hasMetadata: false,
       title: null as string | null,
@@ -78,8 +81,12 @@ export async function scanWork(work: WorkEntry): Promise<{
         const body = collected
           ? collected.map((episode) => episode.body).join("\n")
           : parsedMeta.body;
-        // ルビ記法はMarkdownのみ対象
+        // ルビ記法はMarkdownのみ対象。
+        // **文字数にメモは入らない**（`countChars` が落とす。設計書6.40.2）
         counts = countChars(body, ext === ".md" ? excludeRuby : false);
+        // **ここで数えるのは、既に読んだ本文をもう一度読まないため**である。
+        // 一覧の印のためだけに、全話をもう一巡することになる
+        memoBadge = memoBadgeText(parseMemos(body));
       }
       // 競合マーカーを含む場合は数えない。両方の版とマーカーが混ざったまま
       // 数えると、実際より多い字数を本当の進捗として見せてしまう
@@ -117,6 +124,7 @@ export async function scanWork(work: WorkEntry): Promise<{
       metaUpdatedAt: meta.updatedAt,
       hasConflictMarkers,
       collectedCount: collected ? collected.length : null,
+      memoBadge,
     });
   }
 

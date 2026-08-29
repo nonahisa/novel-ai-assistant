@@ -129,6 +129,8 @@ const STEP_DEFS: readonly StepDef[] = [
           // 続きを書く日に最初に押すもので、AIを呼ばずにその場で出る
           "novelai.resumeWriting",
           "novelai.createEpisodePlot",
+          // 本文の付箋を横に並べる画面（設計書6.40.4）。書きながら見るもの
+          "novelai.openSceneMemos",
           "novelai.createWorkFromManuscript",
           "novelai.openVertical",
           // 大きく開くほう。**横のパネルは詳細メニューと本文の右クリックにある**

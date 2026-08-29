@@ -15,6 +15,7 @@ import {
   type EmphasisSite,
   type RubyStyle,
 } from "../core/ruby";
+import { stripMemoLines } from "../core/sceneMemo";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
@@ -146,9 +147,13 @@ export async function copyForPosting(): Promise<void> {
   if (!style) return;
 
   const selection = editor.selection;
-  const source = selection.isEmpty
-    ? editor.document.getText()
-    : editor.document.getText(selection);
+  // **シーンメモは投稿しない**（設計書6.40.2）。貼り付ける先は
+  // サイトの投稿欄なので、ここを抜かすと作者の付箋が公開される
+  const source = stripMemoLines(
+    selection.isEmpty
+      ? editor.document.getText()
+      : editor.document.getText(selection)
+  );
 
   // **傍点が入っているときだけ、貼り付け先を訊く**（設計書6.12.4）。
   // ルビはどのサイトでも同じ書き方で通るので、傍点が無いなら

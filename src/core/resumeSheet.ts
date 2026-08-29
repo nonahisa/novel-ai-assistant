@@ -63,6 +63,21 @@ export type ResumeEpisodePlot =
   /** 話数が読み取れないので、置き場を決められない */
   | { kind: "unnumbered" };
 
+/**
+ * 本文に残っているシーンメモ1件（設計書6.40.5）。
+ *
+ * **書き始めに前回の付箋が目に入る**ようにするための節である。
+ * どの話のどこかが分かればよいので、飛び先ではなく読み物として並べる。
+ */
+export interface ResumeMemo {
+  /** 「第19話」など。話数が読めなければファイル名 */
+  label: string;
+  /** 1始まりの行番号 */
+  line: number;
+  tag: string;
+  text: string;
+}
+
 /** 今日の執筆量と目標。目標が未設定のときは呼び出し側で null にする */
 export interface ResumeTodayGoal {
   written: number;
@@ -78,6 +93,13 @@ export interface ResumeSheetInput {
   synopses: readonly ResumeSynopsis[];
   /** 未回収の伏線。0件なら節ごと出さない */
   openForeshadows: readonly ResumeForeshadow[];
+  /**
+   * 本文に残っているシーンメモ（設計書6.40.5）。
+   *
+   * **0件なら節ごと出さない。** 省略できる形にしてあるのは、
+   * この1枚を組み立てる試験の材料を全部書き直さずに済ませるためである。
+   */
+  openMemos?: readonly ResumeMemo[];
   episodePlot: ResumeEpisodePlot;
   /** 今日の目標。取れないときは null（**無理に0を出さない**） */
   todayGoal: ResumeTodayGoal | null;
@@ -131,6 +153,7 @@ export function buildResumeSheet(input: ResumeSheetInput): string {
   lines.push(...latestSection(input.latest));
   lines.push(...synopsisSection(input.synopses));
   lines.push(...foreshadowSection(input.openForeshadows));
+  lines.push(...memoSection(input.openMemos ?? []));
   lines.push(...episodePlotSection(input.episodePlot));
   lines.push(...nextStepsSection());
 
@@ -224,6 +247,37 @@ function foreshadowSection(records: readonly ResumeForeshadow[]): string[] {
     if (record.quote.trim()) {
       lines.push(`  - 引用：「${record.quote.trim()}」`);
     }
+  }
+  lines.push("");
+  return lines;
+}
+
+/**
+ * 本文に残っているシーンメモ（設計書6.40.5）。
+ *
+ * **0件なら節ごと出さない**（伏線の節と同じ理由。書き始める前に見る1枚で、
+ * 無いものの見出しに場所を取らせない）。
+ *
+ * **TODO と要確認を上に置く。** 並べ替えるのは呼び出し側ではなくここである
+ * ——「上に出す種類」は1枚の見せ方の決めごとで、材料の集め方ではない。
+ */
+const MEMO_PRIORITY_TAGS = ["TODO", "要確認"];
+
+function memoSection(memos: readonly ResumeMemo[]): string[] {
+  if (memos.length === 0) return [];
+
+  const priority = memos.filter((memo) =>
+    MEMO_PRIORITY_TAGS.includes(memo.tag)
+  );
+  const rest = memos.filter(
+    (memo) => !MEMO_PRIORITY_TAGS.includes(memo.tag)
+  );
+
+  const lines = [`## 残っているメモ（${memos.length}件）`, ""];
+  for (const memo of [...priority, ...rest]) {
+    const where = `${memo.label} ${memo.line}行目`;
+    const body = memo.text.trim() || "（中身がありません）";
+    lines.push(`- **${memo.tag}** ${body}（${where}）`);
   }
   lines.push("");
   return lines;

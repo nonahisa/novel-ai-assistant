@@ -37,9 +37,11 @@ import {
   tailParagraphs,
   type ResumeEpisodePlot,
   type ResumeForeshadow,
+  type ResumeMemo,
   type ResumeSynopsis,
   type ResumeTodayGoal,
 } from "../core/resumeSheet";
+import { parseMemos } from "../core/sceneMemo";
 
 /**
  * 執筆再開支援と単話プロット（設計書6.36）のうち、**AIを使わない口**。
@@ -82,6 +84,7 @@ export async function resumeWriting(
       : null,
     synopses: await recentSynopses(work, chapter, format, notices),
     openForeshadows: await loadOpenForeshadows(work, notices),
+    openMemos: await loadOpenMemos(episodes, format, notices),
     episodePlot: await readEpisodePlot(paths, chapter, notices),
     todayGoal: await todayGoal(work, deviceId, notices),
     notices,
@@ -205,6 +208,43 @@ function labelOf(
   format: WorkFormatKey | undefined
 ): string {
   return formatChapterLabel(episode, format) || episode.fileName;
+}
+
+/**
+ * 本文に残っているシーンメモを集める（設計書6.40.5）。
+ *
+ * **本文をもう一度読む。** 走査は一覧の印のための短い1行しか持っていない
+ * ので、中身を並べるには読み直すしかない。この1枚は押した瞬間に出る
+ * ことに意味があるが、読むだけで19話・4万字なら一瞬である。
+ *
+ * **読めない話があっても1枚は出す。** 断り書きを足して先へ進む。
+ */
+async function loadOpenMemos(
+  episodes: readonly EpisodeFile[],
+  format: WorkFormatKey | undefined,
+  notices: string[]
+): Promise<ResumeMemo[]> {
+  const memos: ResumeMemo[] = [];
+  for (const episode of episodes) {
+    // 競合の跡が残ったままのファイルは触らない（末尾の扱いと同じ）
+    if (episode.hasConflictMarkers) continue;
+    try {
+      const content = await readTextFile(episode.filePath);
+      for (const memo of parseMemos(content.text, episode.filePath)) {
+        memos.push({
+          label: labelOf(episode, format),
+          line: memo.line,
+          tag: memo.tag,
+          text: memo.text,
+        });
+      }
+    } catch (error) {
+      notices.push(
+        `${episode.fileName} のシーンメモを読めませんでした：${messageOf(error)}`
+      );
+    }
+  }
+  return memos;
 }
 
 /**

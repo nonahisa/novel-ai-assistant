@@ -60,6 +60,16 @@ export interface EpisodeFile {
    * 合本でなければ null。
    */
   collectedCount: number | null;
+  /**
+   * この話に残っているシーンメモの短い印（設計書6.40.5）。
+   *
+   * 「TODO 3」のように、いちばん多いタグと件数を出す。
+   * **無ければ空文字**（無いものの印は出さない）。
+   *
+   * 省略できるようにしてあるのは、走査を通らずに組み立てた
+   * `EpisodeFile`（試験の材料）が壊れないようにするためである。
+   */
+  memoBadge?: string;
 }
 
 export type EpisodeKind = "本編" | "プロローグ" | "エピローグ" | "幕間" | "不明";

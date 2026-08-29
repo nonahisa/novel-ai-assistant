@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildManuscriptEditorHtml } from "../../src/views/manuscriptEditorHtml";
+import { MEMO_MARKER_COLOR } from "../../src/core/sceneMemo";
 
 /**
  * 原稿エディタの画面（設計書6.25）。
@@ -501,5 +502,76 @@ describe("前の話・次の話", () => {
   /** 「最新話を書く」は右端のまま（作者の依頼、2026-08-28） */
   it("最新話を書くは、下段の右端に残る", () => {
     expect(html).toContain("#latest { margin-left: auto; }");
+  });
+});
+
+/**
+ * シーンメモ（設計書6.40.3）。
+ *
+ * 作者の指示（2026-08-29）「シーンメモした場所は、蛍光黄色でマーカーして
+ * ください」。**打つ面と組んで書く面の両方**で出す。
+ */
+describe("シーンメモの見え方", () => {
+  const code = html.slice(html.indexOf("<script"));
+
+  /**
+   * **色の定義は core/sceneMemo.ts の1か所。** 画面はCSS変数で受ける
+   * （16進を写すと、片方だけが直る日が来る）。
+   */
+  it("メモ行の背景に、蛍光黄色の変数が当たる", () => {
+    // 打つ面に重ねる目印（#marks）
+    expect(html).toContain("#marks .memo-line {");
+    // 組んで書く面の段落
+    expect(html).toContain("#compose p.memo, #compose div.memo {");
+    // どちらも同じ変数から取る
+    const uses = html.match(/var\(--novelai-memo-marker/g) ?? [];
+    expect(uses.length).toBeGreaterThanOrEqual(2);
+    // 予備の値も、core/sceneMemo.ts の蛍光黄色と同じもの
+    expect(html).toContain(MEMO_MARKER_COLOR.light);
+  });
+
+  /**
+   * **タグの色は行頭の小さな丸だけ**（作者の指示、2026-08-29）。
+   * 背景はタグによらず蛍光黄色で揃える——作者が求めているのは
+   * 「メモの場所が一目で分かる」ことである。
+   */
+  it("タグの色は行頭の丸で出す（背景は種類で変えない）", () => {
+    expect(html).toContain("#compose .memo::before {");
+    expect(html).toContain(
+      "#compose .memo-todo::before { background: var(--novelai-memo-todo"
+    );
+    // 種類ごとの背景（塗り分け）は作らない
+    expect(html).not.toContain(".memo-todo { background:");
+  });
+
+  /** 縦書きでも、丸は行の頭（上）に付く */
+  it("縦書きでは、丸を行の上へ回す", () => {
+    expect(html).toContain("body.vertical #compose .memo::before {");
+  });
+
+  /** 長いメモは行内で読み切れない。載せたら全文をチップに出す */
+  it("メモの行に載せると、チップに全文が出る", () => {
+    expect(code).toContain("function memoElementAt(");
+    expect(code).toContain('fillTip(parts.tag, "memo", parts.text');
+    expect(code).toContain('memo: "シーンメモ"');
+  });
+
+  it("右クリックの品書きに、メモを足す・横に開くがある", () => {
+    expect(code).toContain("ここにメモを足す");
+    expect(code).toContain("シーンメモを横に開く");
+    expect(code).toContain('type: "addMemo", line: menuCaretLine()');
+    expect(code).toContain('type: "openMemos"');
+  });
+
+  /**
+   * カーソルの追従（設計書6.40.4）。**打鍵ごとには送らない。**
+   * パネルは受けて光らせるだけの片方向である。
+   */
+  it("カーソルの位置は、まとめてから知らせる", () => {
+    expect(code).toContain('type: "caret", line: line');
+    const notify = code.slice(code.indexOf("function notifyCaret("));
+    expect(notify.slice(0, 500)).toContain("}, 200);");
+    // 同じ行に居るあいだは送らない
+    expect(notify.slice(0, 500)).toContain("line === lastCaretLine");
   });
 });

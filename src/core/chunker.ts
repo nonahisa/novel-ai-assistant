@@ -1,4 +1,5 @@
 import { hashText } from "./textFile";
+import { blankMemoLines } from "./sceneMemo";
 
 /**
  * チャンクに含まれる話の内訳。
@@ -300,6 +301,18 @@ const DEFAULT_OPTIONS: ChunkOptions = {
  *   2. 行末
  *   3. 句点
  * いずれも見つからない場合のみ文字数で強制的に切る。
+ *
+ * ## シーンメモは、ここで消す（設計書6.40.2）
+ *
+ * **AIへ渡す本文が通る道はここ1本である。** 誤字脱字・推敲・矛盾・伏線・
+ * 抽出は、どれも本文をこの関数へ入れてからAIへ送る。読み込み（`readTextFile`）
+ * の側で落とすと、同じ関数を使っている原稿エディタからもメモが消えてしまう
+ * ので、**チャンクへ入る直前**に1回だけ掛ける。
+ *
+ * 落とすのではなく**空行にする**（`blankMemoLines`）。誤字脱字と推敲は
+ * AIに「何行目」を言わせ、その値で本文の位置を決めるので、行が減ると
+ * **別の行を書き換える**ことになる。行数が変わらなければ `startLine` も
+ * 指摘の行番号も、元の本文と一致したままである。
  */
 export function splitIntoChunks(
   filePath: string,
@@ -312,7 +325,7 @@ export function splitIntoChunks(
   if (!Number.isInteger(opts.maxChars) || opts.maxChars < 1) {
     throw new Error("maxChars は1以上の整数にしてください。");
   }
-  const normalized = text.replace(/\r\n?/g, "\n");
+  const normalized = blankMemoLines(text.replace(/\r\n?/g, "\n"));
 
   const wholeSegment = (text: string, startLine: number): ChunkSegment[] => [
     { filePath, chapterStart, chapterEnd, start: 0, end: text.length, startLine },

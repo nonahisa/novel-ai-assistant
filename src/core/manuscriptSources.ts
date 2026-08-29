@@ -4,6 +4,7 @@ import { scanWork } from "./scanner";
 import { readTextFile } from "./textFile";
 import { parseEpisodeMetadata } from "./metadataParser";
 import { parseCollectedFile, type CollectedEpisode } from "./collectedFile";
+import { blankMemoLines } from "./sceneMemo";
 import type { ExcerptSource } from "./mentionExcerpts";
 
 /**
@@ -11,6 +12,11 @@ import type { ExcerptSource } from "./mentionExcerpts";
  *
  * 掘り下げ・チャットで本文を根拠に答えさせるための材料。
  * 競合マーカーを含むファイルは、どちらが本文か決められないので外す。
+ *
+ * **シーンメモは抜く**（設計書6.40.2）。ここは用語索引・意味検索・
+ * 掘り下げの材料になる唯一の口で、メモの中に書いた人名で場面が引かれると、
+ * 「本文に書いてある」という顔で作者のひとりごとが返ってくる。
+ * 行数は保つ（`blankMemoLines`）——抜粋の位置を数える処理がずれない。
  */
 export async function loadExcerptSources(
   work: WorkEntry
@@ -30,16 +36,17 @@ export async function loadExcerptSources(
     const collected = parseCollectedFile(file.text);
     if (collected) {
       for (const inner of collected) {
-        if (!inner.body.trim()) continue;
+        const body = blankMemoLines(inner.body);
+        if (!body.trim()) continue;
         sources.push({
           label: collectedEpisodeLabel(episode, inner),
-          text: inner.body,
+          text: body,
         });
       }
       continue;
     }
 
-    const body = parseEpisodeMetadata(file.text).body;
+    const body = blankMemoLines(parseEpisodeMetadata(file.text).body);
     if (!body.trim()) continue;
     sources.push({ label: episodeLabel(episode), text: body });
   }
