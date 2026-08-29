@@ -146,6 +146,19 @@ import { checkContradictions } from "./features/checkContradictions";
 import { checkProofread } from "./features/checkProofread";
 import { checkDeviations } from "./features/checkDeviations";
 import { checkOpening } from "./features/checkOpening";
+// 名前の点検と付け替え（設計書6.37）
+import {
+  openNameCheckPanel,
+  refreshNameCheckPanel,
+} from "./features/nameCheck";
+import {
+  applyRenameToRecords,
+  clearPendingRename,
+  describeRenameRecordsResult,
+  loadPendingRename,
+  renameCharacter,
+  savePendingRename,
+} from "./features/nameRename";
 import { pruneAllLogs } from "./features/pruneLogs";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
@@ -214,7 +227,11 @@ import {
 import { countUnextractedEpisodes } from "./features/extractionFreshness";
 import { chooseScope, recordCheck } from "./features/typoCheckScope";
 import { switchMode } from "./features/switchMode";
-import { revealFolder } from "./views/openDocument";
+import {
+  revealFolder,
+  setGeneratedStorageRoot,
+} from "./views/openDocument";
+import { GENERATED_DIR } from "./core/generatedFiles";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -280,6 +297,18 @@ export async function activate(
       logOperation?.(command);
       return callback.apply(thisArg, args);
     });
+
+  /**
+   * 作品に属さない生成文書（使い方・診断・セットアップの内訳・IME辞書の
+   * 手順）の置き場を、ここで一度だけ渡す（設計書6.17.7）。
+   *
+   * **各機能へ `context` を持ち回らない**——生成文書を開く場面は8か所あり、
+   * そのすべてに引数を足すのは、この件と関係のないところまで書き換える
+   * ことになる。`useLogFile` と同じ形にしてある
+   */
+  setGeneratedStorageRoot(
+    vscode.Uri.joinPath(context.globalStorageUri, GENERATED_DIR)
+  );
 
   const registry = new WorkRegistry(context);
   await registry.initialize();
@@ -2707,6 +2736,119 @@ export async function activate(
         }
         vscode.window.showInformationMessage(
           `表記ゆれ検知が完了しました。${parts.join(" / ")}`
+        );
+      }
+    )
+  );
+
+  /**
+   * 名前の付け替え（設計書6.37.3）。
+   *
+   * **本文は提案パネル経由でしか書き換えない。** ここでするのは
+   * 「置き換えの候補を作ってパネルへ渡す」ことと、資料の対応表を
+   * 待ちとして覚えておくことだけである。
+   */
+  const runRenameFlow = async (
+    work: WorkEntry,
+    characterId?: string,
+    suggested?: { name: string; reading?: string }
+  ): Promise<void> => {
+    // 未保存のまま読むと、画面と違う本文を走査してしまう
+    if (!(await saveDirtyDocumentsBeforeExtraction(work, "名前の付け替え"))) {
+      return;
+    }
+
+    const result = await renameCharacter(work, {
+      characterId,
+      suggestedName: suggested?.name,
+      suggestedReading: suggested?.reading,
+    });
+    if (!result) return;
+
+    // 資料を直すのは本文の適用が終わってから。対応表をここで預かる
+    await savePendingRename(context.workspaceState, work.id, result.pending);
+
+    if (result.issues.length > 0) {
+      proposalPanel.showResults(work, result.issues, "名前の付け替え");
+    }
+    vscode.window.showInformationMessage(
+      result.issues.length > 0
+        ? `本文の置き換え ${result.issues.length}件を提案パネルに出しました。` +
+            "適用が済んだら「名前の付け替えを資料にも反映」を実行してください。"
+        : "本文に置き換えるところはありませんでした。" +
+            "「名前の付け替えを資料にも反映」で資料だけ直せます。"
+    );
+  };
+
+  context.subscriptions.push(
+    registerCommand("novelai.checkNames", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await openNameCheckPanel(context, work, {
+        registry: aiRegistry,
+        // 「登場箇所」は提案パネルの「本文を見る」と同じ道を通す
+        revealInManuscript: (filePath, line) =>
+          manuscriptProvider.revealLine(filePath, line),
+        startRename: (target, characterId, suggested) =>
+          runRenameFlow(target, characterId, suggested),
+      });
+    })
+  );
+
+  context.subscriptions.push(
+    registerCommand("novelai.renameCharacter", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await runRenameFlow(work);
+    })
+  );
+
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.applyRenameToRecords",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+
+        const pending = loadPendingRename(context.workspaceState, work.id);
+        if (!pending) {
+          vscode.window.showInformationMessage(
+            "待っている付け替えがありません。先に「名前を付け替える」を実行してください。"
+          );
+          return;
+        }
+
+        // **本文が残っているうちに資料だけ直すと、両者が食い違う。**
+        // 止めはしないが、数を出してから決めてもらう
+        const remaining = proposalPanel.remainingIn(work.id, "名前の付け替え");
+        const answer = await vscode.window.showWarningMessage(
+          `「${pending.oldName}」→「${pending.newName}」を資料にも反映します。`,
+          {
+            modal: true,
+            detail:
+              (remaining > 0
+                ? `提案パネルに、まだ適用していない本文の置き換えが${remaining}件あります。\n`
+                : "") +
+              "人物・能力・場所・組織・世界観・プロット・あらすじ・伏線を直します。\n" +
+              "作者メモ（authorNotes）と資料用の補足には触れません。\n" +
+              "取り消しは Git の「復元」から行えます。",
+          },
+          "資料も直す"
+        );
+        if (answer !== "資料も直す") return;
+
+        const result = await applyRenameToRecords(work, pending);
+        // 直せなかったものが残っていても待ちは消す。同じ処理を繰り返しても
+        // 二度目は当たらない（旧い名前がもう資料に無い）
+        await clearPendingRename(context.workspaceState, work.id);
+
+        highlighter.invalidate();
+        treeProvider.refresh(work.id);
+        refreshActionBadges();
+        await refreshNameCheckPanel(work);
+
+        vscode.window.showInformationMessage(
+          describeRenameRecordsResult(pending, result)
         );
       }
     )

@@ -95,8 +95,17 @@ export const RESUME_TAIL_LIMIT = 400;
 export const EPISODE_PLOTS_DIR = "episode-plots";
 
 /** タブに出す名前。空の案内と揃える（同じ画面として読めるように） */
+/**
+ * 生成文書の種類（ファイル名の前置き。設計書6.17.7）。
+ *
+ * **表示用の題（`resumeSheetTitle`）とは分ける。** 置き場が作品ごとに
+ * 分かれているのでファイル名に作品名は要らないし、混ぜると古いものを
+ * 片付けるときの前置きが作品ごとに変わってしまう。
+ */
+export const RESUME_SHEET_KIND = "執筆再開";
+
 export function resumeSheetTitle(workTitle: string): string {
-  return `執筆再開：${workTitle}`;
+  return `${RESUME_SHEET_KIND}：${workTitle}`;
 }
 
 /**

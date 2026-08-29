@@ -19,6 +19,11 @@ import {
 import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
 import { locateBody, type TypoCheckIssue } from "./checkTypos";
 import { cancelItem } from "../views/dialogs";
+// 名前の付け替え（設計書6.37.3）も同じ文脈を使う。あちらは `core` にいて
+// 機能層を読めないので、実体は `core` へ移した。ここは既存の呼び出し口を保つ
+import { buildUniqueContext } from "../core/uniqueContext";
+
+export { buildUniqueContext };
 
 /**
  * 表記ゆれ検知（P-13）のオーケストレーション。
@@ -339,31 +344,6 @@ function buildIssue(
     // 断定はしない。既定で隠れる low にはせず medium にする
     confidence: "medium",
   };
-}
-
-/**
- * その出現箇所だけを指せる前後の文脈を作る。
- *
- * 適用処理（`proposalPanel.ts`）は行の中から `original` を `indexOf` で
- * 探すため、**同じ行に同じ語が2回出ると、2件目が1件目の位置に化ける。**
- * そこで「先頭からの検索で確かにこの位置に当たる」ところまで前後を
- * 広げてから渡す。「よい。よい。」の2件目なら「。よい」まで広げれば足りる。
- */
-export function buildUniqueContext(
-  lineText: string,
-  column: number,
-  length: number
-): string {
-  const MAX_PAD = 16;
-  for (let pad = 0; pad <= MAX_PAD; pad++) {
-    const start = Math.max(0, column - pad);
-    const end = Math.min(lineText.length, column + length + pad);
-    const window = lineText.slice(start, end);
-    if (lineText.indexOf(window) === start) return window;
-    // これ以上広げられないなら打ち切る
-    if (start === 0 && end === lineText.length) break;
-  }
-  return lineText;
 }
 
 async function loadProperNouns(work: WorkEntry): Promise<string[]> {

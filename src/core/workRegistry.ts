@@ -183,6 +183,11 @@ export const IGNORED_PATHS = [
   ".aiwriter/cache/",
   ".aiwriter/logs/",
   ".aiwriter/exports/",
+  // その場で組み立てた読み物（執筆再開の1枚・冒頭診断・伏線の一覧等）の
+  // 置き場（設計書6.17.7）。作り直せるうえ20件・30日で自動で消えるので、
+  // 同期すると追加と削除の差分が出続ける。**`.aiwriter/` 全体は除外して
+  // いない**（承認待ち等は同期する）ので、置き場を足すたびにここへ書く
+  ".aiwriter/generated/",
   ".novelai-recovery/",
   "exports/",
 ] as const;

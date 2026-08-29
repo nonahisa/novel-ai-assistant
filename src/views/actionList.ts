@@ -1026,6 +1026,42 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "この中**に載ります（あらすじを生成すると作られます）。" +
               "まだ無ければ、作る操作を案内します。",
           },
+          {
+            kind: "action",
+            command: "novelai.checkNames",
+            label: "名前の点検",
+            icon: "symbol-key",
+            requiresWork: true,
+            // 判定そのものはAIを使わない。画面の中の「候補を出す」だけがAI
+            detail:
+              "**響きの重なっている名前**を洗い出します（「ミナ」と「ミナモト」、" +
+              "「アリア」と「アリサ」など）。判定はAIを使わず、読みと表記の" +
+              "規則だけで行います。人物ごとの登場箇所も見られ、その行へ飛べます。" +
+              "画面の中の「候補を出す」だけがAIを使います。",
+          },
+          {
+            kind: "action",
+            command: "novelai.renameCharacter",
+            label: "名前を付け替える",
+            icon: "replace-all",
+            requiresWork: true,
+            detail:
+              "登場人物の名前を、**姓・名・別名までまとめて**付け替えます。" +
+              "対応表を確かめてから走り、本文の置き換えは提案パネルに並びます" +
+              "（1件ずつ適用も、まとめて適用もできます）。" +
+              "**押しただけでは本文は変わりません。**",
+          },
+          {
+            kind: "action",
+            command: "novelai.applyRenameToRecords",
+            label: "名前の付け替えを資料にも反映",
+            icon: "references",
+            requiresWork: true,
+            detail:
+              "直前の付け替えを、設定資料・プロット・あらすじ・伏線台帳にも" +
+              "当てます。**本文の適用が終わってから**実行してください。" +
+              "作者メモと資料用の補足には触れません。",
+          },
         ],
       },
     ],

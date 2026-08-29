@@ -183,7 +183,7 @@ export async function applyPendingCharacterUpdates(
   );
 
   if (choice === "内容を確認") {
-    await showDiffDocument(items);
+    await showDiffDocument(work, items);
     return;
   }
 
@@ -275,7 +275,10 @@ async function applyAll(
 }
 
 /** 何が変わるのかを読める形で出す。JSONを見比べさせない */
-async function showDiffDocument(items: ReviewItem[]): Promise<void> {
+async function showDiffDocument(
+  work: WorkEntry,
+  items: ReviewItem[]
+): Promise<void> {
   const content = [
     "# 反映待ちの更新",
     "",
@@ -288,6 +291,12 @@ async function showDiffDocument(items: ReviewItem[]): Promise<void> {
   // **どの画面で読むかは作者が決める。** 前は開いた直後に
   // `markdown.showPreview` を呼んでプレビューへ切り替えていたが、
   // それは作者が既定にした画面（Markdown編集画面など）を押しのける。
-  // 作者の報告「反映待ちの更新がデフォルトで開きません」（2026-08-27）
-  await openGeneratedMarkdown("反映待ちの更新", content, { preview: false });
+  // 作者の報告「反映待ちの更新がデフォルトで開きません」（2026-08-27）。
+  // 作品に属する読み物なので、作品の中へ置く（設計書6.17.7）
+  await openGeneratedMarkdown(
+    "反映待ちの更新",
+    content,
+    { preview: false },
+    { work }
+  );
 }

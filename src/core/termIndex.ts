@@ -42,6 +42,15 @@ export interface TermMatch {
  * 中黒・空白で区切られている場合だけ分ける。区切りが無い名前を
  * 推測で切ると、別人の名前と重なって誤って色が付く。
  */
+/**
+ * 姓と名を分ける区切り。
+ *
+ * **名前の点検（設計書6.37.1）と付け替え（6.37.3）も同じ分け方を使う。**
+ * それぞれで書くと、片方だけ「＝」を足したときに、色は付くのに衝突は
+ * 見つからない（あるいはその逆）という食い違いが起きる。
+ */
+export const NAME_PART_SEPARATOR = /[\s　・･]+/;
+
 export function expandNameVariants(names: string[]): string[] {
   const expanded = new Set<string>();
 
@@ -50,8 +59,8 @@ export function expandNameVariants(names: string[]): string[] {
     if (!trimmed) continue;
     expanded.add(trimmed);
 
-    if (!/[\s　・･]/.test(trimmed)) continue;
-    for (const part of trimmed.split(/[\s　・･]+/)) {
+    if (!NAME_PART_SEPARATOR.test(trimmed)) continue;
+    for (const part of trimmed.split(NAME_PART_SEPARATOR)) {
       // 1文字の部分は普通名詞と重なりやすいので広げない
       if (part.length >= 2) expanded.add(part);
     }

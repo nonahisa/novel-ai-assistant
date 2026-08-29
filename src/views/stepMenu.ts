@@ -108,6 +108,9 @@ const STEP_DEFS: readonly StepDef[] = [
       "novelai.plotInterview",
       "novelai.setPlotBasics",
       "novelai.generatePlot",
+      // 名付けの段階で使う（設計書6.37.5）。響きの重なりは、
+      // 増えてから直すより、付けるときに気づくほうが安い
+      "novelai.checkNames",
     ],
   },
   {

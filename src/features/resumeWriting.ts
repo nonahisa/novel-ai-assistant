@@ -32,7 +32,7 @@ import {
   buildResumeSheet,
   EPISODE_PLOTS_DIR,
   episodePlotFileName,
-  resumeSheetTitle,
+  RESUME_SHEET_KIND,
   RESUME_SYNOPSIS_COUNT,
   tailParagraphs,
   type ResumeEpisodePlot,
@@ -87,10 +87,14 @@ export async function resumeWriting(
     notices,
   });
 
-  // どの画面で読むかは作者の割り当てに任せる（`openGeneratedMarkdown`）
-  await openGeneratedMarkdown(resumeSheetTitle(work.title), sheet, {
-    preview: false,
-  });
+  // どの画面で読むかは作者の割り当てに任せる（`openGeneratedMarkdown`）。
+  // **ファイル名の前置きは種類だけ**にする（作品名は見出しに入っている）
+  await openGeneratedMarkdown(
+    RESUME_SHEET_KIND,
+    sheet,
+    { preview: false },
+    { work }
+  );
 }
 
 /**

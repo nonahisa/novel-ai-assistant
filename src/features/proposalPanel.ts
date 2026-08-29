@@ -45,6 +45,7 @@ import {
   type RecheckOutcome,
 } from "./recheckProposal";
 import { logFailure, logLine } from "../core/logger";
+import { revealTextLocation } from "./revealLocation";
 
 /**
  * 提案パネル（誤字脱字）。
@@ -1031,6 +1032,32 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     return counts;
   }
 
+  /**
+   * その作品・その分類で、まだ手を付けていない件数（設計書6.37.3）。
+   *
+   * **名前の付け替えが「資料も直す」の前に使う。** 本文の置き換えを
+   * 残したまま資料だけ直すと、本文と資料が食い違ったまま残る。
+   * 数を出してから決めてもらう。
+   */
+  remainingIn(workId: string, category: string): number {
+    // 表示中の分は手元の配列から数える（`countByCategory` と同じ理由。
+    // 1件を適用した直後は、まだ控えへ書き戻していない瞬間がある）
+    if (this.work?.id === workId && this.category === category) {
+      return [
+        ...this.items,
+        ...this.contradictions,
+        ...this.recordUpdates,
+      ].filter(isRemaining).length;
+    }
+    const bucket = this.buckets.get(workId)?.categories.get(category);
+    if (!bucket) return 0;
+    return [
+      ...bucket.items,
+      ...bucket.contradictions,
+      ...bucket.recordUpdates,
+    ].filter(isRemaining).length;
+  }
+
   private updateBadge(
     summaries: readonly CategorySummary[],
     remaining: number
@@ -1316,32 +1343,17 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       **原稿エディタで書いているなら、その画面のまま示す**（作者の依頼、
       2026-08-28）。素のエディタが横に開くと、書いていた面から目を離すことに
       なる。引き受けられなかったとき（素のエディタで書いている・原稿を
-      開けなかった）だけ、これまでどおり下の道を通る。
-    */
-    try {
-      if (await this.revealInManuscript?.(item.filePath, item.line)) return;
-    } catch (error) {
-      // 原稿エディタ側で転んでも、飛べる道は残す（下で素のエディタを開く）。
-      // **理由は残す。** 残さないと「押しても何も起きない」で終わる
-      logLine(
-        `提案パネル：原稿エディタで示せませんでした（${item.filePath} ${
-          item.line
-        }行目：${error instanceof Error ? error.message : String(error)}）。`
-      );
-    }
+      開けなかった）だけ、これまでどおり素のエディタを開く。
 
-    try {
-      const doc = await vscode.workspace.openTextDocument(item.filePath);
-      const editor = await vscode.window.showTextDocument(doc, {
-        preserveFocus: false,
-      });
-      const lineIndex = Math.min(Math.max(item.line - 1, 0), doc.lineCount - 1);
-      const range = doc.lineAt(lineIndex).range;
-      editor.selection = new vscode.Selection(range.start, range.end);
-      editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-    } catch {
-      vscode.window.showWarningMessage("該当のファイルを開けませんでした。");
-    }
+      **手順は `revealLocation.ts` に置いてある。** 名前の点検の「登場箇所」
+      （設計書6.37.4）も同じ道を通すので、ここに書き下すと2本に分かれる。
+    */
+    await revealTextLocation(
+      item.filePath,
+      item.line,
+      this.revealInManuscript,
+      "提案パネル"
+    );
   }
 
   /**

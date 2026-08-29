@@ -1,7 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { untitledMarkdownUri } from "../../src/views/openDocument";
+import {
+  openGeneratedMarkdown,
+  setGeneratedStorageRoot,
+  untitledMarkdownUri,
+} from "../../src/views/openDocument";
+import { FileSystemError, Uri, commands, workspace } from "./support/vscodeStub";
 
 /**
  * ファイルは、作者の既定のエディターで開く（設計書6.17.6）。
@@ -98,22 +103,17 @@ describe("ファイルは既定のエディターで開く", () => {
    * 開いた直後に押しのけることになる（`generateSettingsDocs.ts` に
    * 同じ趣旨が書いてある）。
    *
-   * **例外は `openDocument.ts` の生成文書だけ。** 保存されていない
-   * （untitled の）生成Markdownは、`*.md` に割り当てられた編集画面が
-   * 「実在するファイル」として解決しようとして**開くこと自体に失敗する**
-   * （作者の実機報告、2026-08-29——執筆再開・マニュアルが全滅した）。
-   * 選んだ画面で開けない以上「押しのけ」ではなく、読むための文書を
-   * 組んだ表示（プレビュー）で確実に開く。実ファイルを開く経路
-   * （`openInDefaultEditor`）は引き続きこの決まりの対象である。
+   * **例外はもう無い。** 2026-08-29の一時期、生成文書だけは
+   * プレビューで開いていた。保存されていない（untitled の）文書を
+   * `*.md` の編集画面が「実在するファイル」として解決しようとして
+   * 開けなかったためである。**いまは実ファイルとして置く**ので
+   * （設計書6.17.7）、その理由ごと無くなった。
    */
-  it("開いたあとにプレビューを横取りしていない（生成文書の例外を除く）", () => {
-    const allowed = "src/views/openDocument.ts";
-    const offenders = files.filter(
-      (file) =>
-        !file.endsWith(allowed.split("/").pop() as string) &&
-        /executeCommand\(\s*"markdown\.showPreview"/.test(
-          readFileSync(file, "utf-8")
-        )
+  it("開いたあとにプレビューを横取りしていない", () => {
+    const offenders = files.filter((file) =>
+      /executeCommand\(\s*"markdown\.showPreview"/.test(
+        readFileSync(file, "utf-8")
+      )
     );
     expect(offenders).toEqual([]);
   });
@@ -162,5 +162,82 @@ describe("その場で作るMarkdownの名前", () => {
   it("名前が空になっても、拡張子は残る", () => {
     // 表示名は呼び出し側が決めるが、万一空でも `.md` を失わない
     expect(untitledMarkdownUri("///", []).path).toBe("無題.md");
+  });
+});
+
+/**
+ * 生成文書は、実ファイルとして置いてから開く（設計書6.17.7）。
+ *
+ * **無題文書を作らないこと自体が仕様である。** 中身を入れた無題文書は
+ * 未保存の変更を抱えたまま残り、VS Code を閉じるときに「見た覚えのない
+ * 文書を保存しますか」と聞かれる。実ファイルなら `vscode.open` で開け、
+ * 作者が `*.md` へ割り当てた画面もそのまま通る。
+ */
+describe("生成文書の開き方", () => {
+  const ROOT = "C:\\storage\\generated";
+  const files = new Map<string, Uint8Array>();
+  let executeCommand: ReturnType<typeof vi.fn>;
+  let openTextDocument: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    files.clear();
+    workspace.fs = {
+      createDirectory: vi.fn(async () => undefined),
+      stat: vi.fn(async (uri: { fsPath: string }) => {
+        if (!files.has(uri.fsPath)) {
+          throw new FileSystemError("missing", "FileNotFound");
+        }
+        return { type: 1, ctime: 0, mtime: 0, size: 0 };
+      }),
+      readDirectory: vi.fn(async () =>
+        [...files.keys()].map((full) => [
+          full.slice(full.lastIndexOf("\\") + 1),
+          1,
+        ])
+      ),
+      writeFile: vi.fn(async (uri: { fsPath: string }, bytes: Uint8Array) => {
+        files.set(uri.fsPath, bytes);
+      }),
+      readFile: vi.fn(async (uri: { fsPath: string }) => {
+        const bytes = files.get(uri.fsPath);
+        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+        return bytes;
+      }),
+      rename: vi.fn(
+        async (from: { fsPath: string }, to: { fsPath: string }) => {
+          const bytes = files.get(from.fsPath);
+          if (!bytes) throw new Error("一時ファイルがありません");
+          files.set(to.fsPath, bytes);
+          files.delete(from.fsPath);
+        }
+      ),
+      delete: vi.fn(async (uri: { fsPath: string }) => {
+        files.delete(uri.fsPath);
+      }),
+    } as never;
+
+    executeCommand = vi.fn(async () => undefined);
+    (commands as { executeCommand?: unknown }).executeCommand = executeCommand;
+    openTextDocument = vi.fn();
+    (workspace as { openTextDocument?: unknown }).openTextDocument =
+      openTextDocument;
+
+    setGeneratedStorageRoot(Uri.file(ROOT) as never);
+  });
+
+  it("`vscode.open` で開く（無題文書を作らない）", async () => {
+    await openGeneratedMarkdown("使い方", "# 使い方\n");
+
+    const call = executeCommand.mock.calls[0];
+    expect(call?.[0]).toBe("vscode.open");
+    expect(String(call?.[1])).toContain("使い方_");
+    expect(openTextDocument).not.toHaveBeenCalled();
+  });
+
+  it("開き方の指定（`preview: false`）をそのまま渡す", async () => {
+    // 実ファイルになったので、タブを残す指定が効くようになった
+    await openGeneratedMarkdown("使い方", "# 使い方\n", { preview: false });
+
+    expect(executeCommand.mock.calls[0]?.[2]).toEqual({ preview: false });
   });
 });

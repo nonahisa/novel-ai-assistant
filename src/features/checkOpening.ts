@@ -135,13 +135,18 @@ export async function checkOpening(
     return;
   }
 
+  // **ファイル名には作品名を入れない。** 置き場が作品ごとに分かれており
+  // （設計書6.17.7）、作品名を混ぜると古いものを片付ける前置きが
+  // 一致しなくなる。作品名は文書の見出しに入っている
   await openGeneratedMarkdown(
-    `冒頭診断：${work.title}`,
+    OPENING_CHECK_KIND,
     renderOpeningCheck({
       workTitle: work.title,
       excerptChars: material.openingText.length,
       result,
-    })
+    }),
+    undefined,
+    { work }
   );
 }
 
@@ -206,6 +211,14 @@ export interface OpeningCheckReport {
 }
 
 /**
+ * 生成文書の種類（ファイル名の前置き。設計書6.17.7）。
+ *
+ * 見出しには作品名まで入れるが、ファイル名には入れない
+ * （置き場が作品ごとに分かれているので要らない）。
+ */
+export const OPENING_CHECK_KIND = "冒頭診断";
+
+/**
  * 診断結果をMarkdownへ整形する。
  *
  * VS Code APIに依存しない純関数にしてある（単体テストの対象）。
@@ -218,7 +231,7 @@ export function renderOpeningCheck(report: OpeningCheckReport): string {
   );
 
   const lines: string[] = [
-    `# 冒頭診断：${report.workTitle}`,
+    `# ${OPENING_CHECK_KIND}：${report.workTitle}`,
     "",
     "## 読者に伝わるか（5W1H）",
     "",

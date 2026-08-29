@@ -73,6 +73,9 @@ describe("同期対象から外す規則", () => {
     expect(missingIgnoreRules(existing)).toEqual([
       ".aiwriter/logs/",
       ".aiwriter/exports/",
+      // 生成文書の置き場（設計書6.17.7、0.26.2）。既に登録済みの作品にも
+      // 次の起動で追記される
+      ".aiwriter/generated/",
       "exports/",
     ]);
   });
