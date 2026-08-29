@@ -92,9 +92,13 @@ export interface ForeshadowStatusChange {
 /**
  * 既にある伏線の状態を書き換える。
  *
- * **既存ファイルは上書きできない**（`atomicWrite.ts` の制約）。読み込んだ
- * レコードを `SettingsStore` へ戻す形にすれば、退避と作り直しはそちらが
- * 行う。**ここで `atomicWriteFile` を直に呼ばないこと。**
+ * 読み込んだレコードを `SettingsStore` へ戻す形で保存する。`SettingsStore`
+ * は**読み込み時のハッシュ照合**（外で書き換えられていれば止める）を行った
+ * うえで、一時ファイル経由で正規の場所へ**置き換える**（`atomicWriteFile` の
+ * 指定なしの経路）。**回復先への退避はしない**——退避→新規作成をしているのは
+ * 人物（`CharacterStore.saveOrUpdate`）と本文（`writeTextFilePreservingFormat`）
+ * だけである（CLAUDE.md 規則2）。**ここで `atomicWriteFile` を直に呼ばないこと**
+ * （ハッシュ照合を通らない）。
  *
  * **必ず読んでから書く。** `SettingsStore` の外部変更の照合は
  * 「読み込み時のハッシュ」を土台にしており、読まずに書くとその照合が

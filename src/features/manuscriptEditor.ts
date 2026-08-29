@@ -29,9 +29,8 @@ import { TERM_COLORS } from "../core/termColors";
 import { computeMinimalEdit } from "../core/textEdit";
 import { fromLfOffset, fromLfText, toLf, toLfOffset } from "../core/eolSpace";
 import { createEditQueue } from "../core/editQueue";
-import { countChars, formatCount } from "../core/charCount";
+import { countChars } from "../core/charCount";
 import {
-  countModeLabel,
   currentCountMode,
   excludeRubyFromCount,
   pickCount,
@@ -727,10 +726,9 @@ export class ManuscriptEditorProvider
     const value = countFor(text);
     await panel.webview.postMessage({
       type: "count",
-      label: `${countModeLabel(currentCountMode())}${formatCount(value)}字`,
-      // **下段の「このファイル」も同じ数字を使う**（作者の指示、2026-08-29）。
-      // 画面側で数え直すと、純／総の設定やルビの扱いが食い違って、
-      // 同じ画面に2つの字数が出る
+      // **下段の「このファイル」はこの数字を使う**（作者の指示、2026-08-29）。
+      // 画面側で数え直すと、純／総の設定やルビの扱いが食い違う。
+      // 上の帯にも同じ字数を出していたが、重複なので消した（同日の指示）
       value,
     });
   }

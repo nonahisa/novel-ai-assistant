@@ -437,9 +437,15 @@ describe("下段の字数", () => {
    * **数えるのは拡張機能側**（純／総の設定もルビの扱いも向こうが持つ）。
    * 画面で数え直すと、上の帯と下の帯で違う字数が出る。
    */
-  it("このファイルの字数は、上の帯と同じ値を使う", () => {
+  it("このファイルの字数は、拡張機能が数えた値を使う", () => {
     const handler = code.slice(code.indexOf('message.type === "count"'));
-    expect(handler.slice(0, 300)).toContain("footFile = message.value");
+    expect(handler.slice(0, 400)).toContain("footFile = message.value");
+  });
+
+  /** 上の帯の字数は消した（作者の指示、2026-08-29「上を消してください」）。下段と重複していた */
+  it("上の帯に字数を出さない", () => {
+    expect(html).not.toContain('id="count"');
+    expect(code).not.toContain("countLabel");
   });
 
   /**

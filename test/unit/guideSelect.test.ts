@@ -67,20 +67,20 @@ describe("使い方の説明を選ぶ", () => {
     expect(result.reason).toBe("none");
   });
 
-  test("漠然と使い方を聞かれたら、メニュー順に渡す", () => {
-    // 機能名が1つも出てこない聞き方。ここで何も渡さないと、
-    // 名前だけを見て答えることになり、案内が薄くなる
+  test("漠然と使い方を聞かれても、束は渡さない（目次だけで答えさせる）", () => {
+    /*
+      機能名が1つも出てこない聞き方。以前はメニュー順に束を渡していたが、
+      先頭は作品管理→GitHubで、質問と関係の無い説明が付くだけだった。
+      目次に全操作の名前があるので、目次だけで答えさせる（作者の指定、
+      2026-08-29）。
+    */
     const result = selectGuideBundles({
       question: "使い方を教えて",
       bundles: BUNDLES,
     });
 
-    expect(result.reason).toBe("usage");
-    expect(result.selected.map((bundle) => bundle.key)).toEqual([
-      "proof",
-      "other",
-      "extract",
-    ]);
+    expect(result.reason).toBe("none");
+    expect(result.selected).toEqual([]);
   });
 
   test("ひらがなだけの組みでは当たったことにしない", () => {
@@ -94,8 +94,8 @@ describe("使い方の説明を選ぶ", () => {
       bundles: BUNDLES,
     });
 
-    expect(result.reason).not.toBe("matched");
-    expect(result.reason).toBe("usage");
+    expect(result.reason).toBe("none");
+    expect(result.selected).toEqual([]);
   });
 
   test("上限を超えて渡さない", () => {

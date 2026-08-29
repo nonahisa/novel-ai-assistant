@@ -104,11 +104,6 @@ button.on {
   color: var(--vscode-button-foreground);
 }
 #bar .gap { flex: 1 1 auto; }
-#bar .count {
-  font-size: 11px;
-  opacity: 0.8;
-  white-space: nowrap;
-}
 #bar .sep {
   width: 1px;
   align-self: stretch;
@@ -515,7 +510,6 @@ body.plain .term { color: inherit; }
   <button id="smaller" title="文字を小さく">ー</button>
   <button id="bigger" title="文字を大きく">＋</button>
   <div class="gap"></div>
-  <span class="count" id="count"></span>
 </div>
 
 <div id="surface">
@@ -555,7 +549,6 @@ body.plain .term { color: inherit; }
    */
   let latestMarks = null;
   const menu = document.getElementById("menu");
-  const countLabel = document.getElementById("count");
   const note = document.getElementById("note");
   /** 下段の字数（作品／このファイル／今日。作者の指示、2026-08-29） */
   const countsLabel = document.getElementById("counts");
@@ -1777,7 +1770,9 @@ body.plain .term { color: inherit; }
       }
       document.body.classList.toggle("plain", message.hasTerms === false);
     } else if (message.type === "count") {
-      countLabel.textContent = message.label;
+      // 上の帯の字数は消した（作者の指示、2026-08-29「上を消してください」。
+      // 下段の「このファイル」と同じ数字が2か所に出ていた）。届いた値は
+      // 下段だけが使う
       if (typeof message.value === "number") {
         footFile = message.value;
         paintCounts();
