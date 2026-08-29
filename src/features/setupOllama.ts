@@ -7,6 +7,7 @@ import {
 } from "../ai/ollamaLauncher";
 import { AIRegistry, runSetupWizard } from "../ai/registry";
 import { pullOllamaModel, shortenProgress } from "../core/packageInstall";
+import { RECOMMENDED_CHAT_MODEL } from "../core/requirements";
 import { runFullSetup } from "./setupWizard";
 import { withCancellableProgress, withProgress } from "../views/progress";
 
@@ -23,8 +24,15 @@ import { withCancellableProgress, withProgress } from "../views/progress";
  * そちらが何を・どれだけ・なぜ入れるのかを見せてから実行する。
  */
 
-/** 最初に薦めるモデル。作者の環境（8B・131072文脈）で実績がある */
-const RECOMMENDED_MODEL = "gemma4:e4b";
+/**
+ * 最初に薦めるモデル。**名前は `core/requirements.ts` が持つ**（規則6）。
+ *
+ * かつてここに同じ値を書いていた（`RECOMMENDED_MODEL = "gemma4:e4b"`。
+ * コメントまで一字一句同じ写しだった）。**薦めるモデルを変えるときに
+ * 片方だけ直る形**で、統合セットアップは新しいモデルを勧めるのに、
+ * こちらは古いモデルを取りに行く——という食い違いになる（0.28.6）。
+ */
+const RECOMMENDED_MODEL = RECOMMENDED_CHAT_MODEL;
 
 export async function setupOllama(registry: AIRegistry): Promise<void> {
   const endpoint = vscode.workspace

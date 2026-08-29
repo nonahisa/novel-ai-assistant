@@ -20,8 +20,8 @@ import { fillReading } from "./reading";
  * 当てずっぽうで振り分けると、作者が書いた文章を別人へ移してしまう。
  *
  * 空の新しい記録は、次の抽出で本文から埋まる。チャンクの鍵は
- * `promptVersion|model|chunkHash` なので、同じAI・同じモデルなら
- * **AIは一度も呼ばれない**（`chunkCache.ts`）。
+ * `promptVersion|providerId|model|chunkHash` なので、同じAI・同じモデル・
+ * 同じ版なら **AIは一度も呼ばれない**（`chunkCache.ts`）。
  *
  * ## 分けた事実を、両方のレコードへ残す
  *
