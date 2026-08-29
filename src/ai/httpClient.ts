@@ -112,21 +112,27 @@ export function toStatusError(
     return new AIError(
       `${label}のAPIキーが正しくありません。再登録してください。`,
       "authentication_failed",
-      trimmed
+      trimmed,
+      undefined,
+      status
     );
   }
   if (status === 403) {
     return new AIError(
       `${label}のこのAPIキーには権限がありません（モデル未開放、または請求設定が未完了の可能性があります）。`,
       "permission_denied",
-      trimmed
+      trimmed,
+      undefined,
+      status
     );
   }
   if (status === 404) {
     return new AIError(
       `指定したモデルが見つかりません。`,
       "model_not_found",
-      trimmed
+      trimmed,
+      undefined,
+      status
     );
   }
   if (status === 429) {
@@ -137,27 +143,34 @@ export function toStatusError(
       return new AIError(
         `${label}の残高が不足しています。請求設定を確認してください。`,
         "insufficient_credit",
-        trimmed
+        trimmed,
+        undefined,
+        status
       );
     }
     return new AIError(
       `${label}のレート上限に達しました。しばらく待ってから再実行してください。`,
       "rate_limited",
       trimmed,
-      retryAfterMs
+      retryAfterMs,
+      status
     );
   }
   if (status >= 500) {
     return new AIError(
       `${label}のサーバがエラーを返しました (HTTP ${status})。しばらく待ってから再実行してください。`,
       "bad_response",
-      trimmed
+      trimmed,
+      undefined,
+      status
     );
   }
   return new AIError(
     `${label}がエラーを返しました (HTTP ${status})。`,
     "bad_response",
-    trimmed
+    trimmed,
+    undefined,
+    status
   );
 }
 

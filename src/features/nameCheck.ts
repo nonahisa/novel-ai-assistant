@@ -20,7 +20,7 @@ import {
 import { readPlotText } from "../core/plotFile";
 import { isBlankPlotSection, parsePlotMarkdown } from "../core/plotDoc";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError, recoveryForAIError } from "../ai/types";
+import { AIError } from "../ai/types";
 import {
   buildNameSuggestPrompt,
   NAME_ORIGINS,
@@ -34,6 +34,7 @@ import {
 } from "../prompts/nameSuggest";
 import { buildNameCheckPanelHtml } from "../views/nameCheckPanelHtml";
 import { withCancellableProgress } from "../views/progress";
+import { reportAIError } from "./reportAIError";
 import { cancelItem } from "../views/dialogs";
 import { confirmPaidUsage } from "./aiConnectivity";
 import { revealTextLocation, type RevealInManuscript } from "./revealLocation";
@@ -407,7 +408,7 @@ async function suggestNames(
   if (failure || responseText === undefined) {
     // 中止は失敗ではない。作者が自分で止めたことを警告で知らせ直さない
     if (!(failure instanceof AIError && failure.kind === "aborted")) {
-      reportAIError(failure);
+      reportAIError("名前の候補づくり", failure);
     }
     void panel.webview.postMessage({
       type: "candidates",
@@ -537,20 +538,6 @@ async function readSetting(work: WorkEntry): Promise<string> {
   }
 }
 
-function reportAIError(error: unknown): void {
-  const message =
-    error instanceof AIError
-      ? `${error.message} ${recoveryForAIError(error)}`
-      : error instanceof Error
-        ? error.message
-        : String(error);
-  // 種別ごとに直し方が違う。ログに残さないと、作者も開発側も原因へ届かない
-  logFailure("名前の候補", {
-    種別: error instanceof AIError ? error.kind : "unknown",
-    内容: message,
-  });
-  vscode.window.showWarningMessage(`名前の候補づくりに失敗しました: ${message}`);
-}
 
 /** 画面へ渡す候補の型を、外からも使えるようにする（テスト・報告用） */
 export type { NameCandidate };

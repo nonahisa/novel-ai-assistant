@@ -404,9 +404,16 @@ export function classifyContextOverflow(
  * 組み立てた「(HTTP 400)」から読む。**読めなければ諦める**——
  * 読めないものを400と決めつけると、別の原因を上限超えに化けさせる。
  */
+/**
+ * その失敗のHTTP状態番号。
+ *
+ * **`AIError.status` を見る。** 0.28.3 までは `message` の `(HTTP 400)` を
+ * 正規表現で拾っていたが、`message` は**作者に見せる文**であって機械が
+ * 読む場所ではない。文言を直した瞬間に上限超えの判定が黙って効かなくなる
+ * ——実際、同じ日にOllamaの通知文へ手を入れている（0.28.4）。
+ */
 function httpStatusOf(error: AIError): number | undefined {
-  const matched = error.message.match(/\(HTTP (\d{3})\)/);
-  return matched ? Number(matched[1]) : undefined;
+  return error.status;
 }
 
 /**

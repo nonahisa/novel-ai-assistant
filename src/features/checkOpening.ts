@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError, recoveryForAIError } from "../ai/types";
+import { AIError } from "../ai/types";
 import { scanWork } from "../core/scanner";
 import { loadEpisodeBodies } from "../core/episodeBodies";
 import { readPlotText } from "../core/plotFile";
@@ -19,6 +19,7 @@ import {
 } from "../prompts/openingCheck";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import { withCancellableProgress } from "../views/progress";
+import { reportAIError } from "./reportAIError";
 import { confirmPaidUsage } from "./aiConnectivity";
 import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 
@@ -115,7 +116,7 @@ export async function checkOpening(
   if (failure) {
     // 中止は失敗ではない。作者が自分で止めたことを警告で知らせ直さない
     if (failure instanceof AIError && failure.kind === "aborted") return;
-    reportAIError(failure);
+    reportAIError("冒頭診断", failure);
     return;
   }
   if (responseText === undefined) return;
@@ -305,17 +306,3 @@ function cell(text: string): string {
   return text.split("|").join("\\|");
 }
 
-function reportAIError(error: unknown): void {
-  const message =
-    error instanceof AIError
-      ? `${error.message} ${recoveryForAIError(error)}`
-      : error instanceof Error
-        ? error.message
-        : String(error);
-  // 種別ごとに直し方が違う。ログに残さないと、作者も開発側も原因へ届かない
-  logFailure("冒頭診断", {
-    種別: error instanceof AIError ? error.kind : "unknown",
-    内容: message,
-  });
-  vscode.window.showWarningMessage(`冒頭診断に失敗しました: ${message}`);
-}

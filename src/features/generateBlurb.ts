@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError, recoveryForAIError } from "../ai/types";
+
 import { scanWork } from "../core/scanner";
 import { loadEpisodeBodies } from "../core/episodeBodies";
 import { SynopsisStore } from "../core/synopsisStore";
@@ -28,6 +28,7 @@ import {
 } from "../prompts/blurb";
 import { stripCodeFence } from "../core/synopsisValidation";
 import { withCancellableProgress } from "../views/progress";
+import { reportAIError } from "./reportAIError";
 import { logFailure, showLog, useLogFile } from "../core/logger";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 
@@ -526,19 +527,6 @@ function parseJson(text: string): Record<string, unknown> | null {
   }
 }
 
-function reportAIError(context: string, error: unknown): void {
-  const message =
-    error instanceof AIError
-      ? `${error.message} ${recoveryForAIError(error)}`
-      : error instanceof Error
-        ? error.message
-        : String(error);
-  logFailure(context, {
-    種別: error instanceof AIError ? error.kind : "unknown",
-    内容: message,
-  });
-  vscode.window.showWarningMessage(`${context}に失敗しました: ${message}`);
-}
 
 async function exists(filePath: string): Promise<boolean> {
   try {

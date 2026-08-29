@@ -6,7 +6,7 @@ import {
   DEFAULT_SETTINGS_DIR,
 } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError, recoveryForAIError } from "../ai/types";
+
 import { OUTPUT_RESERVE_TOKENS } from "../ai/contextGuard";
 import { scanWork } from "../core/scanner";
 import { loadEpisodeBodies, type EpisodeBody } from "../core/episodeBodies";
@@ -36,6 +36,7 @@ import {
 import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
 import { readSynopsisDoc } from "./generateBlurb";
 import { withCancellableProgress } from "../views/progress";
+import { reportAIError } from "./reportAIError";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
@@ -472,16 +473,3 @@ export function parseAnnounceResponse(text: string): AnnounceResult | null {
   };
 }
 
-function reportAIError(context: string, error: unknown): void {
-  const message =
-    error instanceof AIError
-      ? `${error.message} ${recoveryForAIError(error)}`
-      : error instanceof Error
-        ? error.message
-        : String(error);
-  logFailure(context, {
-    種別: error instanceof AIError ? error.kind : "unknown",
-    内容: message,
-  });
-  vscode.window.showWarningMessage(`${context}に失敗しました: ${message}`);
-}

@@ -266,7 +266,17 @@ export class AIError extends Error {
      * レート上限のときだけ入る。無料枠は上限が低く、
      * これを守って待てば続行できることが多い。
      */
-    readonly retryAfterMs?: number
+    readonly retryAfterMs?: number,
+    /**
+     * サーバーが返したHTTPの状態番号。HTTPを介した失敗のときだけ入る。
+     *
+     * **`message` から読み取らない。** かつては `(HTTP 400)` という
+     * 通知文を正規表現で拾っていたが、あれは**作者に見せる文**であって
+     * 機械が読む場所ではない。文言を直した瞬間に、上限超えの判定
+     * （`openaiProvider.ts` の `asContextOverflowError`）が黙って
+     * 効かなくなる（0.28.4）。
+     */
+    readonly status?: number
   ) {
     super(message);
     this.name = "AIError";

@@ -413,7 +413,13 @@ export class OllamaProvider implements AIProvider {
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
         if (response.status === 404) {
-          throw new AIError("モデルが見つかりません。", "model_not_found", detail);
+          throw new AIError(
+            "モデルが見つかりません。",
+            "model_not_found",
+            detail,
+            undefined,
+            response.status
+          );
         }
         // **モデルを載せられなかったのは「応答の形が悪い」ではない。**
         // 直し方（小さいモデル・短い文脈・メモリを空ける）がまるで違う
@@ -421,13 +427,17 @@ export class OllamaProvider implements AIProvider {
           throw new AIError(
             "Ollamaがモデルを読み込めませんでした。",
             "model_load_failed",
-            detail.slice(0, 500)
+            detail.slice(0, 500),
+            undefined,
+            response.status
           );
         }
         throw new AIError(
           `Ollamaがエラーを返しました (HTTP ${response.status})`,
           "bad_response",
-          detail.slice(0, 500)
+          detail.slice(0, 500),
+          undefined,
+          response.status
         );
       }
 
