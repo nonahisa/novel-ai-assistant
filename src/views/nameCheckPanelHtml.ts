@@ -194,7 +194,9 @@ function renderCollisions() {
   const rows = host.querySelectorAll('.collision');
   for (const row of rows) {
     row.addEventListener('click', () => {
-      focusPerson(row.dataset.a);
+      // 衝突の相手は人物とは限らない（場所・組織・能力とも組になる）。
+      // a が一覧に無いときに何も起きないと、押しても反応しない行に見える
+      if (!focusPerson(row.dataset.a)) focusPerson(row.dataset.b);
     });
   }
 }
@@ -355,13 +357,17 @@ function bindPeopleEvents(host) {
   }
 }
 
-/** 衝突の組から人物へ移る。押した先が見えないと、組と人物がつながらない */
+/**
+ * 衝突の組から人物へ移る。押した先が見えないと、組と人物がつながらない。
+ * 一覧に居なければ false を返す（呼び出し側が組の相手を試す）
+ */
 function focusPerson(id) {
   const target = document.getElementById('person-' + id);
-  if (!target) return;
+  if (!target) return false;
   target.scrollIntoView({ block: 'center' });
   target.classList.add('flash');
   setTimeout(() => { target.classList.remove('flash'); }, 1200);
+  return true;
 }
 
 function render() {

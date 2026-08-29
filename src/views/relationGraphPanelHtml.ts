@@ -359,8 +359,16 @@ function render() {
   const notes = [];
   if (data.unresolvedCount > 0) {
     notes.push(
-      "資料に無い相手 " + data.unresolvedCount + "人を点線で出しています" +
+      "資料に結べなかった相手 " + data.unresolvedCount + "人を点線で出しています" +
         "（抽出し直すと減ることがあります）。"
+    );
+  }
+  // 「資料に無い」と「同じ名前が複数いる」は直し方が違う。
+  // 抽出をやり直しても後者は減らないので、分けて出す
+  if (data.ambiguousCount > 0) {
+    notes.push(
+      "うち " + data.ambiguousCount + "人は、同じ名前の人物が資料に複数いて" +
+        "どちらか決められませんでした（別名の重なりを直すと結ばれます）。"
     );
   }
   if (data.hiddenIsolated.count > 0) {
@@ -623,7 +631,11 @@ function nodeTitle(node) {
   const lines = [node.name];
   if (node.affiliation) lines.push("所属：" + node.affiliation);
   if (node.provisional) {
-    lines.push("資料に無い相手です（名前でも別名でも当たりませんでした）");
+    // 結べない理由は2通りある（資料に居ない／同じ名前が複数いる）。
+    // 片方だけを書くと、居る人を「居ません」と言い切ることになる
+    lines.push(
+      "資料の人物に結べませんでした（名前が当たらないか、同じ名前が複数あります）"
+    );
   } else {
     lines.push("登場話数：" + node.chapterCount);
   }
@@ -796,10 +808,6 @@ window.addEventListener("message", function (event) {
       selectedEdge = null;
     }
     render();
-    return;
-  }
-  if (message.type === "notice") {
-    el.notice.textContent = message.text;
   }
 });
 

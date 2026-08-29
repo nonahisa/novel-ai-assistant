@@ -18,6 +18,15 @@ import { describe, expect, test, vi, beforeEach } from "vitest";
 /** 素のエディタで開かれたファイル */
 const openedPlain: string[] = [];
 
+/**
+ * `openTextDocument` に渡ったもの。
+ *
+ * **文字列で渡してはいけない。** 文字列を受ける口は「手元のファイルパス」と
+ * みなすので、ブラウザ上の作品（`vscode-vfs://github/...`）では開けない
+ * （CLAUDE.md 規則7）。何を渡したかまで見張る。
+ */
+const openedWith: unknown[] = [];
+
 vi.mock("vscode", () => {
   const noop = () => undefined;
   return {
@@ -44,15 +53,18 @@ vi.mock("vscode", () => {
     workspace: {
       getConfiguration: () => ({ get: (_k: string, d?: unknown) => d }),
       fs: { readFile: vi.fn(), writeFile: vi.fn(), createDirectory: vi.fn() },
-      openTextDocument: vi.fn((filePath: string) =>
-        Promise.resolve({
-          uri: { fsPath: filePath },
+      // 本物と同じく `Uri` を受ける。文字列を渡す口もあるが、
+      // そちらは手元のファイルパス専用である
+      openTextDocument: vi.fn((uri: { fsPath: string }) => {
+        openedWith.push(uri);
+        return Promise.resolve({
+          uri,
           lineCount: 50,
           lineAt: (index: number) => ({
             range: { start: index, end: index },
           }),
-        })
-      ),
+        });
+      }),
     },
     Uri: { file: (p: string) => ({ fsPath: p }) },
     EventEmitter: class {
@@ -125,6 +137,7 @@ async function jumpFirst(panel: ProposalPanel): Promise<void> {
 
 beforeEach(() => {
   openedPlain.length = 0;
+  openedWith.length = 0;
 });
 
 describe("原稿エディタで書いているときは、その画面で示す", () => {
@@ -170,5 +183,19 @@ describe("原稿エディタで書いているときは、その画面で示す"
     await jumpFirst(panel);
 
     expect(openedPlain).toEqual(["C:/小説/いじめられっ子/本文/003.txt"]);
+  });
+
+  test("素のエディタへは Uri で渡す（ブラウザ版の作品も開けるように）", async () => {
+    // 文字列を渡すと、手元のファイルパスとして解釈される。
+    // ブラウザ上の作品は `vscode-vfs://github/...` にあるので開けない
+    const panel = panelWith(undefined);
+
+    await jumpFirst(panel);
+
+    expect(openedWith).toHaveLength(1);
+    expect(typeof openedWith[0]).not.toBe("string");
+    expect((openedWith[0] as { fsPath: string }).fsPath).toBe(
+      "C:/小説/いじめられっ子/本文/003.txt"
+    );
   });
 });

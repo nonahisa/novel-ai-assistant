@@ -73,6 +73,17 @@ export async function openRelationGraph(
   await panel.initialize();
 }
 
+/**
+ * 開いている相関図を、資料から読み直す。
+ *
+ * 名前の付け替えを資料へ反映すると（設計書6.37.3）、開きっぱなしの図は
+ * 旧名のままになる。**開いていなければ何もしない**——見ていない画面のために
+ * 資料を読み直す必要はない。
+ */
+export async function refreshRelationGraph(workId: string): Promise<void> {
+  await openPanels.get(workId)?.refresh();
+}
+
 /** 画面へ送る絞り込み。画面から返ってくる形でもある */
 interface FilterView {
   minChapters: number;
@@ -135,6 +146,11 @@ class RelationGraphPanel {
   }
 
   async initialize(): Promise<void> {
+    await this.load();
+  }
+
+  /** 資料が外で変わったときに読み直す。表示の状態（中心・絞り込み）は保つ */
+  async refresh(): Promise<void> {
     await this.load();
   }
 
@@ -348,6 +364,14 @@ class RelationGraphPanel {
         names: filtered.hiddenIsolated.map((node: RelationNode) => node.name),
       },
       unresolvedCount: graph.nodes.filter((node) => node.provisional).length,
+      // **「資料に無い」と「どの人か決められない」は直し方が違う。**
+      // 前者は抽出し直せば減るが、後者は別名の重なりを直さないと減らない。
+      // 同じ名前で何人から呼ばれていても、困っている相手は1人である
+      ambiguousCount: new Set(
+        graph.unresolved
+          .filter((entry) => entry.reason === "ambiguous")
+          .map((entry) => entry.targetName)
+      ).size,
       emptyMessage: this.emptyMessage(),
       warning: this.warning(),
     };
@@ -418,6 +442,7 @@ interface GraphView {
   maxChapters: number;
   hiddenIsolated: { count: number; names: string[] };
   unresolvedCount: number;
+  ambiguousCount: number;
   emptyMessage: string;
   warning: string;
 }

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as path from "../core/paths";
 import { logLine } from "../core/logger";
 
 /**
@@ -50,7 +51,10 @@ export async function revealTextLocation(
   }
 
   try {
-    const doc = await vscode.workspace.openTextDocument(filePath);
+    // **文字列で渡さない。** 文字列を受ける口はローカルのファイルパスと
+    // みなすので、ブラウザ上の作品（`vscode-vfs://github/...`）では
+    // 開けない。場所の組み立ては `paths.ts` を通す（CLAUDE.md 規則7）
+    const doc = await vscode.workspace.openTextDocument(path.toUri(filePath));
     const editor = await vscode.window.showTextDocument(doc, {
       preserveFocus: false,
     });

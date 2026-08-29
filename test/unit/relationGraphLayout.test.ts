@@ -133,6 +133,42 @@ describe("全体図の円周配置", () => {
     expect(label.y).toBeCloseTo((a.y + b.y) / 2, 6);
   });
 
+  test("所属が多くても弧が壊れない", () => {
+    // 隙間を固定にすると、集団が多いときに隙間の合計が円周を超えて
+    // 使える角度が負になる。弧が逆さまになり、人物が1点に重なる
+    const many = buildRelationGraph(
+      Array.from({ length: 90 }, (_, index) =>
+        character(`char_${String(index).padStart(3, "0")}`, `人${index}`, {
+          affiliation: `所属${String(index).padStart(2, "0")}`,
+        })
+      )
+    );
+    const crowded = layoutCircle(many, { ...SIZE, groupBy: "affiliation" });
+
+    expect(crowded.arcs).toHaveLength(90);
+    for (const arc of crowded.arcs) {
+      expect(arc.end).toBeGreaterThan(arc.start);
+    }
+    // 弧は重ならず、順に進む（一周ぶんを超えない）
+    for (let index = 1; index < crowded.arcs.length; index++) {
+      expect(crowded.arcs[index].start).toBeGreaterThanOrEqual(
+        crowded.arcs[index - 1].end
+      );
+    }
+    expect(
+      crowded.arcs[crowded.arcs.length - 1].end - crowded.arcs[0].start
+    ).toBeLessThanOrEqual(TWO_PI + 1e-9);
+
+    // 座標が重ならない（重なると押し分けられない）
+    for (let index = 1; index < crowded.nodes.length; index++) {
+      const previous = crowded.nodes[index - 1];
+      const current = crowded.nodes[index];
+      expect(
+        Math.hypot(current.x - previous.x, current.y - previous.y)
+      ).toBeGreaterThan(NODE_RADII.small * 2);
+    }
+  });
+
   test("人物が居なくても落ちない", () => {
     // まだ何も抽出していない作品でも画面は開く
     const empty = layoutCircle(buildRelationGraph([]), SIZE);

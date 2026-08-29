@@ -1,5 +1,5 @@
 import type { Character } from "../models/character";
-import { expandNameVariants, TermIndex, type TermEntry } from "./termIndex";
+import { expandNameVariants } from "./termIndex";
 
 /**
  * 人物相関図の材料を組み立てる（設計書6.38.1）。
@@ -56,11 +56,24 @@ export interface RelationEdge {
   labels: RelationLabel[];
 }
 
+/**
+ * なぜ資料に結べなかったか。
+ *
+ * - `notFound`：その名前の人物が資料に居ない（抽出漏れか、脇役）
+ * - `ambiguous`：同じ名前の人物が複数居て、どちらか決められない
+ *
+ * **2つを分ける。** 前者は抽出すれば消えるが、後者は別名の重複を
+ * 直さないと消えない。同じ「資料に無い」で括ると、作者は抽出をやり直して
+ * 何も変わらない、を繰り返すことになる。
+ */
+export type UnresolvedReason = "notFound" | "ambiguous";
+
 /** 資料に当たらなかった相手（件数を画面の隅に出す） */
 export interface UnresolvedTarget {
   fromId: string;
   targetName: string;
   kind: RelationLabelKind;
+  reason: UnresolvedReason;
 }
 
 export interface RelationGraph {
@@ -145,13 +158,15 @@ export function buildRelationGraph(characters: Character[]): RelationGraph {
 
     // idがあればそれを信じる（設計書6.38.1）。ただし指し先が消えている
     // ことがあるので、そのときは名前の照合へ落とす（辺ごと消さない）
-    const resolvedId =
-      targetId && byId.has(targetId) ? targetId : resolve(targetName);
+    const resolved =
+      targetId && byId.has(targetId)
+        ? { id: targetId, reason: null }
+        : resolve(targetName);
 
-    if (resolvedId) {
+    if (resolved.id) {
       // 自分を呼ぶ言葉は輪にしない。図では点にしかならず、太さだけが増える
-      if (resolvedId === from.id) return;
-      addEdge(from.id, resolvedId, kind, text);
+      if (resolved.id === from.id) return;
+      addEdge(from.id, resolved.id, kind, text);
       return;
     }
 
@@ -174,7 +189,14 @@ export function buildRelationGraph(characters: Character[]): RelationGraph {
     const reportKey = keyOf([from.id, targetName, kind]);
     if (!seenUnresolved.has(reportKey)) {
       seenUnresolved.add(reportKey);
-      unresolved.push({ fromId: from.id, targetName, kind });
+      unresolved.push({
+        fromId: from.id,
+        targetName,
+        kind,
+        // idの指し先が消えていた場合も、名前で引き直して届かなければ
+        // 「資料に居ない」である
+        reason: resolved.reason ?? "notFound",
+      });
     }
   };
 
@@ -192,43 +214,52 @@ export function buildRelationGraph(characters: Character[]): RelationGraph {
   return { nodes, edges: sortEdges([...edges.values()]), unresolved };
 }
 
+/** 名前を引いた結果。結べなかったときは、その理由を添える */
+interface NameResolution {
+  id: string | null;
+  reason: UnresolvedReason | null;
+}
+
 /**
  * 名前・別名から人物を引く（設計書6.38.1）。
  *
- * 索引は `termIndex.ts` を借りる。姓だけ・名だけで呼ぶ小説の書き方に
- * 合わせた広げ方（`expandNameVariants`）と、重なったときに長いほうを採る
- * 決まりが既にそこにある。ここへ写しを作ると、片方だけ直る日が来る。
+ * 名前の広げ方は `termIndex.ts` の `expandNameVariants` を借りる。姓だけ・
+ * 名だけで呼ぶ小説の書き方に合わせた規則が既にそこにあり、ここへ写しを
+ * 作ると片方だけ直る日が来る。
+ *
+ * **当てるのは全体が一致したときだけ。** `TermIndex.find` は本文の中から
+ * 用語を探す道具なので、部分文字列にも当たる。相関図でそれを使うと、
+ * 資料に無い「アリシア」が登録済みの「リシア」に化けて、**どこにも無い線**が
+ * 図に引かれる（気づきようがない）。名前どうしを突き合わせるここでは、
+ * 索引ではなく名前の対応表で引く。
+ *
+ * **同じ名前が複数の人物に当たるときは結ばない。** 先に見つかったほうへ
+ * 線を引くと、別名が重なっているだけで別人が繋がる。図には点線の仮ノードを
+ * 残し、`ambiguous` として件数に出す（黙って落とさない・黙って繋がない）。
  */
 function createNameResolver(
   characters: Character[]
-): (name: string) => string | null {
-  const entries: TermEntry[] = [];
+): (name: string) => NameResolution {
+  const idsByName = new Map<string, Set<string>>();
   for (const character of characters) {
     const names = expandNameVariants([
       character.name,
       ...(character.aliases ?? []),
     ]);
     for (const text of names) {
-      entries.push({
-        text,
-        kind: "character",
-        id: character.id,
-        canonicalName: character.name,
-      });
+      const key = text.trim();
+      if (!key) continue;
+      const ids = idsByName.get(key);
+      if (ids) ids.add(character.id);
+      else idsByName.set(key, new Set([character.id]));
     }
   }
-  const index = new TermIndex(entries);
 
-  return (name: string): string | null => {
-    const matches = index.find(name);
-    if (matches.length === 0) return null;
-    // 重なりは索引側が長いほうを残す。残った中でも長い一致を採る——
-    // 「マルキオ・イークェス」を「マルキオ」で引き当てて別人にしないため
-    let best = matches[0];
-    for (const match of matches) {
-      if (match.entry.text.length > best.entry.text.length) best = match;
-    }
-    return best.entry.id;
+  return (name: string): NameResolution => {
+    const ids = idsByName.get(name.trim());
+    if (!ids || ids.size === 0) return { id: null, reason: "notFound" };
+    if (ids.size > 1) return { id: null, reason: "ambiguous" };
+    return { id: [...ids][0], reason: null };
   };
 }
 

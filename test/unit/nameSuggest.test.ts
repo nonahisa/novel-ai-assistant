@@ -137,6 +137,15 @@ describe("応答の読み取り", () => {
     expect(isRejectedName("名前")).toBe(true);
     expect(isRejectedName("名護屋")).toBe(false);
   });
+
+  test("プロンプトに書いた例示名を候補にしない", () => {
+    // 指示語だけでなく、**指示文に書いた具体名もそのまま返ってくる**
+    // （この作品で繰り返し起きた失敗3の型）
+    for (const example of ["ミナ", "ミナモト", "アリア", "アリサ"]) {
+      expect(isRejectedName(example), `${example} が候補に残る`).toBe(true);
+    }
+    expect(parseNameSuggest(response([{ name: "ミナモト" }]))).toEqual([]);
+  });
 });
 
 describe("候補の絞り込み（判定はコードで行う）", () => {

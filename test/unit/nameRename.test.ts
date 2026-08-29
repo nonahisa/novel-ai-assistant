@@ -61,6 +61,68 @@ describe("対応表の初期値（設計書6.37.3）", () => {
     const mapping = buildRenameMapping({ name: "アリア", aliases: [] }, "アリア");
     expect(mapping).toHaveLength(0);
   });
+
+  test("旧読み→新読みの対応を作る（既定は無効）", () => {
+    // 読みを対応表に入れないと、ルビの base だけが変わって
+    // `｜源《さなだ》` という読めない形が残る
+    const mapping = buildRenameMapping(
+      { name: "真田", reading: "さなだ", aliases: [] },
+      "源",
+      "げん"
+    );
+    expect(find(mapping, "さなだ")?.to).toBe("げん");
+    expect(find(mapping, "さなだ")?.kind).toBe("reading");
+    // 「はな」のような読みは普通名詞と重なる。作者が選んだときだけ動かす
+    expect(find(mapping, "さなだ")?.enabled).toBe(false);
+  });
+
+  test("読みが無い・変わらないなら読みの対応を作らない", () => {
+    const noOld = buildRenameMapping({ name: "真田", aliases: [] }, "源", "げん");
+    expect(noOld.filter((entry) => entry.kind === "reading")).toHaveLength(0);
+
+    const noNew = buildRenameMapping(
+      { name: "真田", reading: "さなだ", aliases: [] },
+      "源"
+    );
+    expect(noNew.filter((entry) => entry.kind === "reading")).toHaveLength(0);
+
+    const same = buildRenameMapping(
+      { name: "真田", reading: "さなだ", aliases: [] },
+      "眞田",
+      "さなだ"
+    );
+    expect(same.filter((entry) => entry.kind === "reading")).toHaveLength(0);
+  });
+});
+
+describe("ルビの読み（設計書6.37.3）", () => {
+  const source = { name: "真田", reading: "さなだ", aliases: [] as string[] };
+
+  /** 作者が確認画面で四角を全部押した状態にする */
+  function allEnabled(mapping: RenameMappingEntry[]): RenameMappingEntry[] {
+    return mapping.map((entry) => ({ ...entry, enabled: Boolean(entry.to) }));
+  }
+
+  test("読みも選べば、ルビの中の読みまで変わる", () => {
+    const mapping = allEnabled(buildRenameMapping(source, "源", "げん"));
+    expect(applyMappingToText("{真田|さなだ}が笑った。", mapping)).toBe(
+      "{源|げん}が笑った。"
+    );
+    expect(applyMappingToText("｜真田《さなだ》が笑った。", mapping)).toBe(
+      "｜源《げん》が笑った。"
+    );
+  });
+
+  test("読みを選ばなければ、base だけが変わる", () => {
+    const mapping = buildRenameMapping(source, "源", "げん").map((entry) => ({
+      ...entry,
+      // 読み以外は作者が選んだことにする（既定では読みだけが外れている）
+      enabled: entry.kind !== "reading" && Boolean(entry.to),
+    }));
+    expect(applyMappingToText("{真田|さなだ}が笑った。", mapping)).toBe(
+      "{源|さなだ}が笑った。"
+    );
+  });
 });
 
 describe("本文の置換の計画", () => {
@@ -313,5 +375,60 @@ describe("レコードへの当てはめ", () => {
     applyMappingToRecord(record, mapping, { newName: "レオン" });
     expect(record.name).toBe("マルキオ");
     expect(record.summary).toBe("マルキオの話");
+  });
+});
+
+describe("人物レコードの入れ子（設計書6.37.3）", () => {
+  const mapping: RenameMappingEntry[] = [
+    { from: "マルキオ", to: "レオン", kind: "full", enabled: true },
+  ];
+
+  /** 他人物が持つ「マルキオへの関係と呼称」。呼び方は authorLocked で守られている */
+  function neighbour() {
+    return {
+      id: "char_002",
+      name: "灯",
+      relations: [{ name: "マルキオ", relation: "師匠" }],
+      addressTerms: [
+        {
+          targetName: "マルキオ",
+          targetId: null,
+          authorLocked: true,
+          forms: [{ term: "マルキオ様", category: null }],
+        },
+      ],
+    };
+  }
+
+  test("他人物の relations と addressTerms の旧名を新名にする", () => {
+    // 残すと、相関図に旧名の点線ノード（ゴースト）が出続ける（6.38.5）
+    const next = applyMappingToRecord(neighbour(), mapping, {
+      applyCharacterLinks: true,
+    });
+    expect(next.relations[0].name).toBe("レオン");
+    expect(next.addressTerms[0].targetName).toBe("レオン");
+  });
+
+  test("呼び方そのものと authorLocked は触らない", () => {
+    // `forms[].term` は作者が固定した呼び方。当てると作者の指定が壊れる
+    const next = applyMappingToRecord(neighbour(), mapping, {
+      applyCharacterLinks: true,
+    });
+    expect(next.addressTerms[0].forms[0].term).toBe("マルキオ様");
+    expect(next.addressTerms[0].authorLocked).toBe(true);
+  });
+
+  test("指定しなければ入れ子は触らない", () => {
+    // 人物以外のレコードにも `relations` という項目はありうる
+    const next = applyMappingToRecord(neighbour(), mapping);
+    expect(next.relations[0].name).toBe("マルキオ");
+    expect(next.addressTerms[0].targetName).toBe("マルキオ");
+  });
+
+  test("元のレコードの入れ子も書き換えない", () => {
+    const record = neighbour();
+    applyMappingToRecord(record, mapping, { applyCharacterLinks: true });
+    expect(record.relations[0].name).toBe("マルキオ");
+    expect(record.addressTerms[0].targetName).toBe("マルキオ");
   });
 });

@@ -85,10 +85,9 @@ export function setGeneratedStorageRoot(root: vscode.Uri): void {
  * ときは、**従来どおり無題文書で見せる**。読み物が読めなくなるより、
  * 副作用のある形でも開くほうがましである。
  *
- * **`.aiwriter/generated/` はまだGitの除外規則に入っていない**
- * （`workRegistry.ts` の `IGNORED_PATHS` に入っているのは `cache/`・
- * `logs/`・`exports/` だけ）。作り直せる読み物をGitへ載せない方針
- * （6.17.7）に合わせるなら、そこへ1行足す必要がある。
+ * **`.aiwriter/generated/` はGitの除外規則に入っている**
+ * （`workRegistry.ts` の `IGNORED_PATHS`）。作り直せるうえ20件・30日で
+ * 自動的に消えるので、同期すると追加と削除の差分が出続ける（6.17.7）。
  *
  * @param displayName タブに出る名前。**ファイル名の前置き（種類）にもなる**
  *   ので、作品名のような一回ごとに変わる語を混ぜない（置き場が作品ごとに

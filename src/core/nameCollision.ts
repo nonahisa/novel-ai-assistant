@@ -507,8 +507,12 @@ function soundRule(a: string[], b: string[]): CollisionRule | undefined {
     return 3;
   }
 
-  // ④ 音数が同じで1音だけ違う（「まりあ」「さりあ」）
-  if (a.length === b.length) {
+  // ④ 音数が同じで1音だけ違う（「まりあ」「さりあ」）。
+  //
+  // **1音の名前どうしには当てない。** 1音は「必ず1音だけ違う」ので、
+  // 「ミ」と「サ」のような似ていない組まで全部が当たってしまう
+  // （②③が音数2以上を求めているのと同じ理由）
+  if (a.length === b.length && a.length >= 2) {
     const differences = a.filter((mora, index) => mora !== b[index]).length;
     if (differences === 1) return 4;
   }

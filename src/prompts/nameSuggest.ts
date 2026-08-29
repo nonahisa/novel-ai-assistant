@@ -21,7 +21,7 @@ import { isPlaceholderText } from "../core/placeholderText";
  *
  * プロンプトを変更したら version を上げること。
  */
-export const NAME_SUGGEST_VERSION = "1.0";
+export const NAME_SUGGEST_VERSION = "1.1";
 
 /** 一度に出させる候補の数。多すぎると系統が混ざり、少ないと選べない */
 export const NAME_SUGGEST_COUNT = 10;
@@ -70,6 +70,13 @@ export const NAME_SUGGEST_HINTS = [
   "ひらがな",
   "文化圏",
   "登場人物",
+  // **例に挙げた名前も、そのまま返ってくる。** 「ミナとミナモト」
+  // 「アリアとアリサ」は「避けるべき組」として書いているのに、モデルは
+  // 指示文に出てくる名前をそのまま候補に並べる。指示語と同じ扱いで落とす
+  "ミナ",
+  "ミナモト",
+  "アリア",
+  "アリサ",
 ] as const;
 
 export const NAME_SUGGEST_SYSTEM_PROMPT = `あなたは日本語の小説の登場人物に、名前の候補を出すアシスタントです。

@@ -48,7 +48,10 @@ import {
   setRelationGraphOpener,
   setSettingsChangeObserver,
 } from "./features/settingsPanel";
-import { openRelationGraph } from "./features/relationGraphPanel";
+import {
+  openRelationGraph,
+  refreshRelationGraph,
+} from "./features/relationGraphPanel";
 import { unifyCharacterRecords } from "./features/unifyCharacters";
 import { findMergeCandidates } from "./core/characterMerge";
 import { CharacterStore } from "./core/characterStore";
@@ -234,6 +237,7 @@ import {
   setGeneratedStorageRoot,
 } from "./views/openDocument";
 import { GENERATED_DIR } from "./core/generatedFiles";
+import { formatDayTime } from "./core/timestampedFileName";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -259,6 +263,34 @@ const STEP_WORK_KEY = "novelai.stepMenu.selectedWorkId";
  * 差分が出る（`writingStatsStore.ts` と同じ理由）。
  */
 const MARKDOWN_DECLINED_KEY = "novelai.manuscript.markdownDeclined";
+
+/**
+ * この起動が始まった時刻。
+ *
+ * **提案パネルの一覧は、端末に残らない。** VS Code を閉じると消えるので、
+ * 「未適用0件」が「全部当てた」なのか「一覧ごと消えた」なのか区別が
+ * つかない。前回の起動で作られた待ちかどうかは、これと突き合わせて見る
+ * （名前の付け替えの資料反映。設計書6.37.3）。
+ */
+const SESSION_STARTED_AT = Date.now();
+
+/** 待ちを作った時刻を、作者が読める形にする。読めない値はそのまま見せる */
+function describeCreatedAt(iso: string): string {
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? iso : formatDayTime(at);
+}
+
+/**
+ * 前回までの起動で作られたものか。
+ *
+ * 真なら、提案パネルの「未適用0件」は当てにできない——全部を適用したのか、
+ * 一覧ごと消えたのかが区別できない。**時刻が読めないときも真**にする
+ * （案内を出しすぎるほうが、黙って進むより安全である）。
+ */
+function isFromEarlierSession(iso: string): boolean {
+  const at = new Date(iso).getTime();
+  return Number.isNaN(at) || at < SESSION_STARTED_AT;
+}
 
 export async function activate(
   context: vscode.ExtensionContext
@@ -2798,6 +2830,27 @@ export async function activate(
     characterId?: string,
     suggested?: { name: string; reading?: string }
   ): Promise<void> => {
+    // **待ちは作品ごとに1つしか持てない。** 黙って上書きすると、前の
+    // 付け替えの資料が旧名のまま取り残され、対応表も消えて直しようがなくなる
+    const waiting = loadPendingRename(context.workspaceState, work.id);
+    if (waiting) {
+      const answer = await vscode.window.showWarningMessage(
+        `「${waiting.oldName}」→「${waiting.newName}」の資料への反映が、` +
+          "まだ済んでいません。",
+        {
+          modal: true,
+          detail:
+            `この待ちは ${describeCreatedAt(waiting.createdAt)} に作りました。\n` +
+            "新しい付け替えを作り終えると、この対応表は置き換わります" +
+            "（前の付け替えは、資料に反映できなくなります）。\n" +
+            "先に「名前の付け替えを資料にも反映」を実行することもできます。\n" +
+            "ここで取りやめれば、いまの待ちはそのまま残ります。",
+        },
+        "破棄して新しく始める"
+      );
+      if (answer !== "破棄して新しく始める") return;
+    }
+
     // 未保存のまま読むと、画面と違う本文を走査してしまう
     if (!(await saveDirtyDocumentsBeforeExtraction(work, "名前の付け替え"))) {
       return;
@@ -2873,7 +2926,13 @@ export async function activate(
             detail:
               (remaining > 0
                 ? `提案パネルに、まだ適用していない本文の置き換えが${remaining}件あります。\n`
-                : "") +
+                : // **0件は「全部当てた」とは限らない。** 提案パネルの一覧は
+                  // 端末に残らないので、閉じて開き直すと0件になる
+                  isFromEarlierSession(pending.createdAt)
+                  ? "提案パネルの一覧は VS Code を閉じると消えます。" +
+                    `この待ちは ${describeCreatedAt(pending.createdAt)} に作った` +
+                    "ものなので、本文の適用が済んでいるか確かめてから進めてください。\n"
+                  : "") +
               "人物・能力・場所・組織・世界観・プロット・あらすじ・伏線を直します。\n" +
               "作者メモ（authorNotes）と資料用の補足には触れません。\n" +
               "取り消しは Git の「復元」から行えます。",
@@ -2883,17 +2942,27 @@ export async function activate(
         if (answer !== "資料も直す") return;
 
         const result = await applyRenameToRecords(work, pending);
-        // 直せなかったものが残っていても待ちは消す。同じ処理を繰り返しても
-        // 二度目は当たらない（旧い名前がもう資料に無い）
-        await clearPendingRename(context.workspaceState, work.id);
+        // **直せなかったものが残っているうちは、待ちを消さない。** 消すと
+        // 対応表ごと失われ、作者は同じ入力をやり直すしかなくなる。
+        // 済んだ資料は二度目に当たらない（旧い名前がもう無い）ので、
+        // 直してからもう一度実行すれば、残りだけが直る
+        if (result.failures.length === 0) {
+          await clearPendingRename(context.workspaceState, work.id);
+        }
 
         highlighter.invalidate();
         treeProvider.refresh(work.id);
         refreshActionBadges();
         await refreshNameCheckPanel(work);
+        // 開きっぱなしの相関図は、旧名のノードを出したままになる（6.38）
+        await refreshRelationGraph(work.id);
 
         vscode.window.showInformationMessage(
-          describeRenameRecordsResult(pending, result)
+          describeRenameRecordsResult(pending, result) +
+            (result.failures.length > 0
+              ? " 直してから、もう一度「名前の付け替えを資料にも反映」を" +
+                "実行してください（対応表は預かったままにしてあります）。"
+              : "")
         );
       }
     )

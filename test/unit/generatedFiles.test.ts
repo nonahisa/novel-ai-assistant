@@ -140,6 +140,33 @@ describe("消してよいものを選ぶ", () => {
     ).toEqual(["執筆再開_2026-06-20_1200.md"]);
   });
 
+  test("`_` で区切ってあっても、時刻の形をしていなければ触らない", () => {
+    // **前置きと `.md` だけを見ていると、作者が置いた `冒頭診断_メモ.md` が
+    // 消える。** この仕組みが作る名前は必ず日付と時刻を持つ
+    const entries = [
+      aged("冒頭診断_メモ.md", 40),
+      aged("冒頭診断_2026-06-20.md", 40),
+      aged("冒頭診断_2026-06-20_12.md", 40),
+      aged("冒頭診断_下書き_2026-06-20_1200.md", 40),
+      aged("冒頭診断_2026-06-20_1200.md", 40),
+    ];
+
+    expect(
+      selectFilesToPrune(entries, "冒頭診断", { keep: 0, maxAgeDays: 30 }, NOW)
+    ).toEqual(["冒頭診断_2026-06-20_1200.md"]);
+  });
+
+  test("この仕組みが作る名前は、どれも掃除の対象になる", () => {
+    // 名前の作り方（`timestampedFileName.ts`）を変えたときに掃除だけが
+    // 取り残されると、消えない読み物が静かに溜まり続ける
+    const names = generatedFileNameCandidates("冒頭診断", AT);
+    const entries = names.map((name) => aged(name, 40));
+
+    expect(
+      selectFilesToPrune(entries, "冒頭診断", { keep: 0, maxAgeDays: 30 }, NOW)
+    ).toHaveLength(names.length);
+  });
+
   test("消すものが無ければ、空のまま返す", () => {
     expect(selectFilesToPrune([], "執筆再開", POLICY, NOW)).toEqual([]);
   });

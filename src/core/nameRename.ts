@@ -23,8 +23,9 @@ import { buildUniqueContext } from "./uniqueContext";
  * - `full`：フルネームまるごと
  * - `part`：姓・名などの部分
  * - `alias`：別名。**既定では空**（変えない）で、作者が入れたときだけ動く
+ * - `reading`：ルビの読み。**既定では無効**（作者が選んだときだけ動く）
  */
-export type RenameMappingKind = "full" | "part" | "alias";
+export type RenameMappingKind = "full" | "part" | "alias" | "reading";
 
 export interface RenameMappingEntry {
   from: string;
@@ -92,9 +93,20 @@ export function buildRenameMapping(
     mapping.push(entry(from, "", "alias"));
   }
 
-  // 読みは本文の置換には使わない（本文に読みがそのまま出るとは限らない）。
-  // レコードへは `applyMappingToRecord` の `newReading` で入れる
-  void newReading;
+  // ルビは base と読みの両方を持つ（設計書6.37.3）。読みを対応表へ入れないと
+  // `｜真田《さなだ》` が `｜源《さなだ》` になり、読めない形が本文に残る。
+  // **ただし既定は無効。** 「はな」のような読みは普通名詞と重なるので、
+  // 一括で当てると名前でないところまで書き換わる
+  const oldReading = (character.reading ?? "").trim();
+  const nextReading = (newReading ?? "").trim();
+  if (
+    oldReading &&
+    nextReading &&
+    oldReading !== nextReading &&
+    !mapping.some((existing) => existing.from === oldReading)
+  ) {
+    mapping.push(entry(oldReading, nextReading, "reading"));
+  }
 
   return mapping;
 }
@@ -108,8 +120,9 @@ function entry(
     from,
     to,
     kind,
-    // 置き換え先が空なら動きようがない。短い名前は既定で外す
-    enabled: Boolean(to) && from.length > SHORT_NAME_MAX,
+    // 置き換え先が空なら動きようがない。短い名前と読みは既定で外す
+    enabled:
+      Boolean(to) && from.length > SHORT_NAME_MAX && kind !== "reading",
   };
 }
 
@@ -221,6 +234,9 @@ export function applyMappingToText(
  * 構造（呼称・関係・食い違いの記録）はここでは触らない——`authorLocked` の
  * 呼称のように、当ててはいけないものが混じっている。
  *
+ * 例外は `applyCharacterLinks`（下）で、**人物レコードが持つ「相手の名前」**
+ * だけを当てる。
+ *
  * @param options 本人のレコードなら、新しい名前と読みをここで渡す。
  *   `name` は対応表任せにできない（2文字以下の名前は対応表が既定で
  *   無効になっているため、本人の名前が変わらないことがある）。
@@ -237,6 +253,17 @@ export interface RecordRenameOptions {
    * 拾い続け、付け替えたはずの名前が本文の色分けに出てくる。
    */
   dropAliases?: string[];
+  /**
+   * 入れ子の「相手の名前」にも当てるか。**人物レコードのときだけ真にする。**
+   *
+   * `relations[].name`（誰との関係か）と `addressTerms[].targetName`
+   * （誰を呼ぶ言葉か）は、**他の人物のレコードに残る旧名**である。ここを
+   * 直さないと、人物相関図（設計書6.38）に旧名の点線ノードが出続ける。
+   *
+   * **呼び方そのもの（`forms[].term`）には当てない。** `authorLocked` で
+   * 守られた呼び方が混じっており、当てると作者の指定を壊す。
+   */
+  applyCharacterLinks?: boolean;
 }
 
 /** 名前ではないので、対応表を当てない項目 */
@@ -288,6 +315,21 @@ export function applyMappingToRecord<T extends object>(
     }
   }
 
+  if (options.applyCharacterLinks) {
+    // 項目が無いレコードへ `undefined` を足さない（形が変わると、
+    // 呼び出し側の「変わったか」の比較が空振りする）
+    if (Array.isArray(source.relations)) {
+      next.relations = applyToLinkNames(source.relations, "name", mapping);
+    }
+    if (Array.isArray(source.addressTerms)) {
+      next.addressTerms = applyToLinkNames(
+        source.addressTerms,
+        "targetName",
+        mapping
+      );
+    }
+  }
+
   if (options.newName !== undefined && typeof source.name === "string") {
     next.name = options.newName;
   }
@@ -313,4 +355,29 @@ export function applyMappingToRecord<T extends object>(
   }
 
   return next as T;
+}
+
+/**
+ * 入れ子の並びの、指定した項目（相手の名前）だけへ対応表を当てる。
+ *
+ * **その項目以外は元のまま持ち回る。** 呼称の `forms`（作者が固定した
+ * 呼び方）や `authorLocked` を作り直すと、写し損ねが起きたときに
+ * 作者の指定が静かに消える。変わらなかった要素は元の参照をそのまま返し、
+ * 「変わったか」の比較（`JSON.stringify` の突き合わせ）にも影響させない。
+ */
+function applyToLinkNames(
+  items: readonly unknown[],
+  field: string,
+  mapping: readonly RenameMappingEntry[]
+): unknown[] {
+  return items.map((item) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return item;
+    }
+    const record = item as Record<string, unknown>;
+    const name = record[field];
+    if (typeof name !== "string") return item;
+    const next = applyMappingToText(name, mapping);
+    return next === name ? item : { ...record, [field]: next };
+  });
 }

@@ -242,9 +242,7 @@ async function confirmMapping(
   const items = filled.map((entry) => ({
     label: entry.to ? `${entry.from} → ${entry.to}` : `${entry.from}（変えない）`,
     description: describeMappingKind(entry),
-    detail: entry.to
-      ? undefined
-      : "付け替え先が空なので、この呼び方は本文にも資料にも残ります",
+    detail: describeMappingDetail(entry),
     picked: entry.enabled,
     entry,
   }));
@@ -264,6 +262,7 @@ async function confirmMapping(
 
 function describeMappingKind(entry: RenameMappingEntry): string {
   if (entry.kind === "alias") return "別名";
+  if (entry.kind === "reading") return "ルビの読み（既定では外しています）";
   if (entry.kind === "part") {
     return entry.from.length <= 2
       ? "姓または名（短いので既定では外しています）"
@@ -272,6 +271,26 @@ function describeMappingKind(entry: RenameMappingEntry): string {
   return entry.from.length <= 2
     ? "フルネーム（短いので既定では外しています）"
     : "フルネーム";
+}
+
+/**
+ * 選ぶ前に、何が起きるかを1行で見せる。
+ *
+ * **読みは何が起きるか分かりにくい。** 選ばないとルビの base だけが変わって
+ * `｜源《さなだ》` が残り、選ぶと読みが普通名詞と重なったところまで
+ * 書き換わる。どちらも押す前には見えないので、両方を書く。
+ */
+function describeMappingDetail(entry: RenameMappingEntry): string | undefined {
+  if (!entry.to) {
+    return "付け替え先が空なので、この呼び方は本文にも資料にも残ります";
+  }
+  if (entry.kind === "reading") {
+    return (
+      "ルビの読みも変えます（｜真田《さなだ》→｜源《げん》）。" +
+      "選ばないと、ルビの読みだけ旧いままになります"
+    );
+  }
+  return undefined;
 }
 
 /** 本文を走査して、置き換えの指摘を組み立てる */
@@ -424,18 +443,19 @@ async function applyToCharacters(
 
   for (const character of loaded.characters) {
     const self = character.id === pending.characterId;
-    const next = applyMappingToRecord(
-      character,
-      pending.mapping,
-      self
+    const next = applyMappingToRecord(character, pending.mapping, {
+      // **他人物が持つ「相手の名前」まで直す。** ここを残すと、付け替えた
+      // はずの旧名が人物相関図に点線のノードとして現れる（設計書6.38.5）
+      applyCharacterLinks: true,
+      ...(self
         ? {
             newName: pending.newName,
             newReading: pending.newReading,
             // 旧名を別名に残さない（残すと用語ハイライトが拾い続ける）
             dropAliases: [pending.oldName],
           }
-        : {}
-    );
+        : {}),
+    });
     if (JSON.stringify(next) === JSON.stringify(character)) continue;
 
     try {

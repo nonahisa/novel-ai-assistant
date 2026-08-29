@@ -95,6 +95,21 @@ describe("衝突の判定（設計書6.37.1の①〜⑥）", () => {
     expect(hit?.rule).toBe(4);
   });
 
+  test("④は1音の名前どうしには当てない", () => {
+    // 1音の名前は「必ず1音だけ違う」ので、すべての組が当たってしまう。
+    // 「ミ」と「サ」は響きが似ていない
+    const result = findNameCollisions([person("a", "ミ"), person("b", "サ")]);
+    expect(pairOf(result, "a", "b")).toBeUndefined();
+  });
+
+  test("④は2音からは当てる", () => {
+    const result = findNameCollisions([
+      person("a", "ミナ"),
+      person("b", "サナ"),
+    ]);
+    expect(pairOf(result, "a", "b")?.rule).toBe(4);
+  });
+
   test("⑤清音化すると重なる", () => {
     // 2音が違うので①〜④には当たらない。濁点を外すと同じになる
     const result = findNameCollisions([

@@ -103,8 +103,14 @@ export function layoutCircle(
 
   if (total > 0) {
     // 弧の間の隙間を先に取り分ける。取り分けないと、集団が多いときに
-    // 隙間の合計が円を超えて重なり出す
-    const gap = groups.length > 1 ? GROUP_GAP : 0;
+    // 隙間の合計が円を超えて重なり出す。
+    //
+    // **隙間そのものにも上限が要る。** 固定（0.08）のままだと、所属が
+    // 79に達したところで隙間の合計が円周を追い越し、使える角度が負になる
+    // （弧が逆さまになり、人物が1点に重なって押し分けられなくなる）。
+    // 隙間に半周までしか使わないよう `π/集団数` で頭を押さえる
+    const gap =
+      groups.length > 1 ? Math.min(GROUP_GAP, Math.PI / groups.length) : 0;
     const usable = Math.PI * 2 - gap * groups.length;
     let cursor = START_ANGLE;
 

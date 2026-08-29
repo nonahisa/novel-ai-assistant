@@ -122,6 +122,64 @@ describe("辺のまとめ方", () => {
   });
 });
 
+describe("名前の解決の厳しさ（設計書6.38.1）", () => {
+  test("名前の一部が一致しただけでは結ばない", () => {
+    // 未登録の「アリシア」の中に登録済みの「リシア」が入っているだけで
+    // 結ぶと、資料のどこにも無い線が図に現れる
+    const graph = buildRelationGraph([
+      character("char_001", "灯", {
+        relations: [{ name: "アリシア", relation: "友人" }],
+      }),
+      character("char_002", "リシア", {}),
+    ]);
+
+    expect(graph.unresolved).toEqual([
+      {
+        fromId: "char_001",
+        targetName: "アリシア",
+        kind: "relation",
+        reason: "notFound",
+      },
+    ]);
+    expect(graph.edges[0].b).toBe(UNRESOLVED_ID_PREFIX + "アリシア");
+  });
+
+  test("同じ名前が複数の人物に当たるときは結ばない", () => {
+    // 先勝ちで結ぶと、別人に線が引かれたまま誰も気づけない
+    const graph = buildRelationGraph([
+      character("char_001", "灯", {
+        relations: [{ name: "ハナ", relation: "友人" }],
+      }),
+      character("char_002", "花村", { aliases: ["ハナ"] }),
+      character("char_003", "華岡", { aliases: ["ハナ"] }),
+    ]);
+
+    expect(graph.unresolved).toEqual([
+      {
+        fromId: "char_001",
+        targetName: "ハナ",
+        kind: "relation",
+        reason: "ambiguous",
+      },
+    ]);
+    expect(graph.edges[0].b).toBe(UNRESOLVED_ID_PREFIX + "ハナ");
+  });
+
+  test("姓だけ・名だけで呼んでいれば結ぶ", () => {
+    // 名前の広げ方（`expandNameVariants`）はそのまま効かせる。
+    // 厳しくするのは「全体が一致すること」だけである
+    const graph = buildRelationGraph([
+      character("char_001", "灯", {
+        relations: [{ name: "マルキオ", relation: "師匠" }],
+      }),
+      character("char_002", "マルキオ・イークェス", {}),
+    ]);
+
+    expect(graph.unresolved).toHaveLength(0);
+    expect(graph.edges[0].b).toBe("char_002");
+  });
+});
+
 describe("相手の解決", () => {
   test("targetId があればそれを使う", () => {
     // 名前で引くと別人に当たる場面でも、idの指し先が正である
@@ -197,8 +255,18 @@ describe("相手の解決", () => {
     ]);
 
     expect(graph.unresolved).toEqual([
-      { fromId: "char_001", targetName: "名も無き剣士", kind: "relation" },
-      { fromId: "char_001", targetName: "名も無き剣士", kind: "address" },
+      {
+        fromId: "char_001",
+        targetName: "名も無き剣士",
+        kind: "relation",
+        reason: "notFound",
+      },
+      {
+        fromId: "char_001",
+        targetName: "名も無き剣士",
+        kind: "address",
+        reason: "notFound",
+      },
     ]);
 
     const provisional = graph.nodes.filter((node) => node.provisional);

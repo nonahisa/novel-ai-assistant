@@ -92,6 +92,25 @@ export function generatedNamePrefix(kind: string): string {
 }
 
 /**
+ * 前置きのうしろに続く、時刻の形（`2026-08-29_1430(05)(-2).md`）。
+ *
+ * **前置きだけでは足りない。** `冒頭診断_メモ.md` のように、作者が同じ
+ * 言葉で始まる名前を手で置くことがある。前置きと `.md` しか見ていないと、
+ * それを掃除が消してしまう（消したら戻せない）。
+ *
+ * 種類の名前は作者の言葉から作るので、正規表現へ混ぜない——`.` や `(` が
+ * 入っていたときに意味が変わる。**うしろの部分だけを見る。**
+ * 形は `timestampedFileName.ts` が作るものと揃える。
+ */
+const GENERATED_STAMP = /^\d{4}-\d{2}-\d{2}_\d{4}(?:\d{2})?(?:-\d+)?\.md$/;
+
+/** この仕組みが作った名前か（同じ種類のものだけを渡す） */
+function isGeneratedName(name: string, prefix: string): boolean {
+  if (!name.startsWith(prefix)) return false;
+  return GENERATED_STAMP.test(name.slice(prefix.length));
+}
+
+/**
  * 試す順に名前を並べる。
  *
  * 同じ分・同じ秒に2回書き出したときの避け方（分 → 秒 → 連番）は
@@ -167,9 +186,7 @@ export function selectFilesToPrune(
   now: Date
 ): string[] {
   const prefix = generatedNamePrefix(kind);
-  const mine = entries.filter(
-    (entry) => entry.name.startsWith(prefix) && entry.name.endsWith(".md")
-  );
+  const mine = entries.filter((entry) => isGeneratedName(entry.name, prefix));
 
   // 同じ時刻のものが並んだときは、名前の新しい順（名前に時刻が入っている）。
   // **順序が決まらないと、残る20件が実行のたびに入れ替わる**
@@ -212,7 +229,7 @@ export async function pruneGeneratedFiles(
   const entries: GeneratedFileEntry[] = [];
   for (const [name, type] of listed) {
     if (type !== vscode.FileType.File) continue;
-    if (!name.startsWith(prefix)) continue;
+    if (!isGeneratedName(name, prefix)) continue;
     try {
       const stat = await vscode.workspace.fs.stat(
         path.toUri(path.join(directory, name))
