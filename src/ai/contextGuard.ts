@@ -35,6 +35,32 @@ import { AIError } from "./types";
  */
 export const OUTPUT_RESERVE_TOKENS = 8192;
 
+/**
+ * 関所を通さない、ただ1つの呼び出し（`GenerateMeta.feature`）。
+ *
+ * **例外はこれだけである。** ここを増やすと「入らないものを黙って送る」
+ * 経路が復活し、この関所を置いた意味が無くなる。増やしたくなったら、
+ * その機能が本当に上限を測っているのかを先に疑うこと。
+ *
+ * ## なぜこれだけは通すのか
+ *
+ * 読める長さの測定（設計書6.27.11）は、**申告値が本当かを確かめる**
+ * ためのものである。申告値で止めてしまうと、申告どおりの長さまでしか
+ * 試せず、「申告以上に読めるか」が永久に分からない。さくらのAI Engine
+ * の申告値は、作者が設定に書いた当て推量にすぎない。
+ *
+ * **通しても黙って切り捨てられることはない。** 上限を超えたとき、
+ * クラウドはエラーを返し（＝入らない）、手元のAIは切り捨てた結果として
+ * 合言葉が欠けて返る（＝入らない）。測定はどちらも「入らない」と数える
+ * ので、切り捨てが見えないまま通り過ぎる経路にはならない。
+ */
+export const CONTEXT_GUARD_EXEMPT_FEATURE = "context_probe";
+
+/** その呼び出しが関所を素通りしてよいか */
+export function skipsContextGuard(feature: string | undefined): boolean {
+  return feature === CONTEXT_GUARD_EXEMPT_FEATURE;
+}
+
 export interface ContextFitInput {
   /** system プロンプトの実測字数 */
   systemChars: number;

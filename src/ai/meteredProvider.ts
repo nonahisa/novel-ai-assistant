@@ -8,7 +8,11 @@ import {
   type ProviderId,
 } from "./types";
 import { appendUsageLog } from "../core/usageLog";
-import { contextOverflow, OUTPUT_RESERVE_TOKENS } from "./contextGuard";
+import {
+  contextOverflow,
+  skipsContextGuard,
+  OUTPUT_RESERVE_TOKENS,
+} from "./contextGuard";
 import { logStep } from "../core/logger";
 
 /**
@@ -82,13 +86,19 @@ export class MeteredProvider implements AIProvider {
     const started = Date.now();
 
     // **入らないものは送らない**（設計書6.27.10）。送ってしまうと
-    // Ollama は黙って切り捨て、クラウドは料金を取ってから断る
-    const overflow = contextOverflow({
-      systemChars: params.systemPrompt.length,
-      userChars: params.userPrompt.length,
-      outputTokens: params.maxOutputTokens ?? OUTPUT_RESERVE_TOKENS,
-      contextWindow: await this.contextWindowOf(params.model),
-    });
+    // Ollama は黙って切り捨て、クラウドは料金を取ってから断る。
+    //
+    // 唯一の例外が読める長さの測定である（`skipsContextGuard` に理由）。
+    // 三項で書いてあるのは、素通りするときに上限の問い合わせ
+    // （LM Studio では毎回の1往復）まで省くため
+    const overflow = skipsContextGuard(params.meta?.feature)
+      ? undefined
+      : contextOverflow({
+          systemChars: params.systemPrompt.length,
+          userChars: params.userPrompt.length,
+          outputTokens: params.maxOutputTokens ?? OUTPUT_RESERVE_TOKENS,
+          contextWindow: await this.contextWindowOf(params.model),
+        });
     if (overflow) {
       // **送らなかったことも記録に残す。** 記録に何も出ないと、作者からは
       // 「押したのに何も起きなかった」としか見えない

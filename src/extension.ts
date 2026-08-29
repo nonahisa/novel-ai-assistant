@@ -2326,6 +2326,14 @@ export async function activate(
   );
 
   context.subscriptions.push(
+    // 実際に読める長さの測定（設計書6.27.11）。作品は要らない
+    registerCommand("novelai.measureContext", async () => {
+      const { measureContext } = await import("./features/measureContext.js");
+      await measureContext(aiRegistry);
+    })
+  );
+
+  context.subscriptions.push(
     registerCommand("novelai.showLog", () => {
       showLog();
     })

@@ -320,6 +320,9 @@ describe("AIの印", () => {
         // **どちらもAIを呼ぶ**ので、両方に印が要る
         "novelai.openChat",
         "novelai.openChatPanel",
+        // 読める長さの測定（設計書6.27.11）。作品の本文は送らないが、
+        // **AIを何度も呼ぶ**ので有料AIでは料金が出る。印は要る
+        "novelai.measureContext",
       ].sort()
     );
   });

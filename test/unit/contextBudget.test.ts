@@ -6,9 +6,11 @@ import {
   type Chunk,
 } from "../../src/core/chunker";
 import {
+  CONTEXT_GUARD_EXEMPT_FEATURE,
   OUTPUT_RESERVE_TOKENS,
   checkContextFit,
   contextOverflow,
+  skipsContextGuard,
 } from "../../src/ai/contextGuard";
 import { MeteredProvider } from "../../src/ai/meteredProvider";
 import {
@@ -312,6 +314,58 @@ describe("包みが関所を通す", () => {
       wrapped.generate({ ...params(20000), maxOutputTokens: 32768 })
     ).rejects.toMatchObject({ kind: "context_overflow" });
     expect(called).toBe(1);
+  });
+
+  describe("素通りする例外は1つだけ（設計書6.27.11）", () => {
+    test("読める長さの測定は、上限を超えていても送る", async () => {
+      // 申告値で止めると、申告どおりの長さまでしか試せず、
+      // 「申告が本当か」を確かめるという目的そのものが果たせない
+      let called = 0;
+      const wrapped = new MeteredProvider(
+        provider({ contextWindow: 8192, onGenerate: () => called++ })
+      );
+
+      await wrapped.generate({
+        ...params(120000),
+        meta: { feature: CONTEXT_GUARD_EXEMPT_FEATURE },
+      });
+      expect(called).toBe(1);
+    });
+
+    test("ほかの機能は、名前が似ていても止まる", async () => {
+      let called = 0;
+      const wrapped = new MeteredProvider(
+        provider({ contextWindow: 32768, onGenerate: () => called++ })
+      );
+
+      for (const feature of ["extract", "typo", "context_probe_2", "probe"]) {
+        await expect(
+          wrapped.generate({ ...params(40000), meta: { feature } })
+        ).rejects.toMatchObject({ kind: "context_overflow" });
+      }
+      expect(called).toBe(0);
+    });
+
+    test("機能名が無い呼び出しも止まる", async () => {
+      let called = 0;
+      const wrapped = new MeteredProvider(
+        provider({ contextWindow: 32768, onGenerate: () => called++ })
+      );
+
+      await expect(wrapped.generate(params(40000))).rejects.toMatchObject({
+        kind: "context_overflow",
+      });
+      expect(called).toBe(0);
+    });
+
+    test("素通りしてよいのは、この1つだけ", () => {
+      // 例外が増えると「入らないものを黙って送る」経路が復活する。
+      // 増やすときは、ここも一緒に考え直すことになる
+      expect(skipsContextGuard(CONTEXT_GUARD_EXEMPT_FEATURE)).toBe(true);
+      expect(skipsContextGuard(undefined)).toBe(false);
+      expect(skipsContextGuard("")).toBe(false);
+      expect(CONTEXT_GUARD_EXEMPT_FEATURE).toBe("context_probe");
+    });
   });
 });
 

@@ -1182,6 +1182,18 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.measureContext",
+            label: "AIが実際に読める長さを測る",
+            icon: "symbol-ruler",
+            requiresWork: false,
+            usesAI: true,
+            detail:
+              "AIが**申告している長さ**と、**実際に読める長さ**は食い違うことがあります。" +
+              "検査用の詰め物の先頭と末尾に合言葉を置いて送り、両方返ってくる最大の長さを測ります。" +
+              "**作品の本文は送りません。** 測った値は、押して確認してから設定へ書きます。",
+          },
+          {
+            kind: "action",
             command: "novelai.selectOllamaExecutable",
             label: "Ollamaの実行ファイル位置を指定",
             icon: "folder-opened",
