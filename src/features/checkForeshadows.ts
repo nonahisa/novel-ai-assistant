@@ -43,6 +43,7 @@ import {
   parseForeshadowDetectResult,
   parseForeshadowResolveResult,
   validateForeshadowCandidates,
+  describeRejectReasons,
   validateForeshadowResolutions,
   type AcceptedForeshadowCandidate,
   type AcceptedForeshadowResolution,
@@ -216,6 +217,7 @@ export async function checkForeshadows(
 
   const candidates: AcceptedForeshadowCandidate[] = [];
   let rejectedCount = 0;
+  const rejectReasons: Array<{ reason: string }> = [];
   let duplicateCount = 0;
   let failedChunks = 0;
   let cancelled = false;
@@ -285,6 +287,9 @@ export async function checkForeshadows(
         for (const entry of validated.rejected) {
           if (entry.reason === "duplicate") duplicateCount++;
           else rejectedCount++;
+          // **理由を捨てない。** 数だけでは、次に直すのがプロンプトなのか
+          // 照合なのか分からない（設計書6.35.7）
+          rejectReasons.push({ reason: entry.reason });
         }
         for (const candidate of validated.accepted) {
           candidates.push(candidate);
@@ -377,7 +382,10 @@ export async function checkForeshadows(
     `伏線の検知を終了: 候補 ${candidates.length}件 / 既存と重なり ${duplicateCount}件 / ` +
       `本文と合わない ${rejectedCount}件 / 読めなかった ${failedChunks}件 / ` +
       `本文を開けなかった話 ${unreadableEpisodes}件` +
-      (cancelled ? " / 中止された" : "")
+      (cancelled ? " / 中止された" : "") +
+      // 却下の内訳。**数だけでは次の一手が決まらない**（設計書6.35.7）
+      (rejectReasons.length > 0 ? `
+  却下の内訳: ${describeRejectReasons(rejectReasons)}` : "")
   );
 
   return {
@@ -583,6 +591,7 @@ export async function checkForeshadowResolution(
   const proposals: ForeshadowResolutionProposal[] = [];
   const seen = new Set<string>();
   let rejectedCount = 0;
+  const rejectReasons: Array<{ reason: string }> = [];
   let failedChunks = 0;
   let cancelled = false;
 
@@ -642,6 +651,7 @@ export async function checkForeshadowResolution(
           entry.targets
         );
         rejectedCount += validated.rejected.length;
+        rejectReasons.push(...validated.rejected.map((entry) => ({ reason: entry.reason })));
         for (const resolution of validated.accepted) {
           // **1つの伏線に回収は1つでよい。** 話の早いほうから見ているので、
           // 先に見つかったものを採る（あとの話でも触れられることはある）
@@ -732,7 +742,10 @@ export async function checkForeshadowResolution(
     `伏線の回収の確認を終了: 候補 ${proposals.length}件 / ` +
       `本文と合わない ${rejectedCount}件 / 読めなかった ${failedChunks}件 / ` +
       `本文を開けなかった話 ${unreadableEpisodes}件` +
-      (cancelled ? " / 中止された" : "")
+      (cancelled ? " / 中止された" : "") +
+      // 却下の内訳。**数だけでは次の一手が決まらない**（設計書6.35.7）
+      (rejectReasons.length > 0 ? `
+  却下の内訳: ${describeRejectReasons(rejectReasons)}` : "")
   );
 
   return {

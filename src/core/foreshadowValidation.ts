@@ -441,3 +441,44 @@ function extractBraces(text: string): string | null {
   const end = text.lastIndexOf("}");
   return start >= 0 && end > start ? text.slice(start, end + 1) : null;
 }
+
+/** 却下の理由を、作者が読める日本語にする */
+const REJECT_REASON_LABELS: Record<string, string> = {
+  shape: "形が違う",
+  placeholder: "中身の無い言葉",
+  quote_not_found: "引用が本文に無い",
+  unknown_id: "実在しない伏線番号",
+  planted_echo: "張った箇所そのもの",
+  duplicate: "既にあるものと重なり",
+};
+
+/**
+ * 却下の内訳を、ログ向けの1行にする（設計書6.35.7）。
+ *
+ * **「本文と合わない N件」だけでは、次に何をすればよいか分からない。**
+ * 実データで、伏線の回収の確認が「候補0件 / 本文と合わない10件」——
+ * つまり検出率0%——になったことがあるが、10件がどの理由で落ちたのかが
+ * 残っていないため、**プロンプトの問題なのか照合が厳しすぎるのかを
+ * 切り分けられなかった**（作者のログ、2026-08-29）。
+ *
+ * 理由ごとに次の手がまるで違う：
+ * - `unknown_id`／`quote_not_found` が多い → AIが番号や引用を作っている（プロンプト）
+ * - `planted_echo` が多い → 「回収を探せ」が伝わっていない（プロンプト）
+ * - `shape` が多い → スキーマの与え方（プロバイダの方言）
+ *
+ * 件数が0なら空文字を返す（成功した回のログを汚さない）。
+ */
+export function describeRejectReasons(
+  rejected: ReadonlyArray<{ reason: string }>
+): string {
+  if (rejected.length === 0) return "";
+  const counts = new Map<string, number>();
+  for (const entry of rejected) {
+    counts.set(entry.reason, (counts.get(entry.reason) ?? 0) + 1);
+  }
+  // 多い順に出す。同数なら理由の名前で並べて、実行ごとに順が揺れないようにする
+  const parts = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([reason, count]) => `${REJECT_REASON_LABELS[reason] ?? reason} ${count}件`);
+  return parts.join("、");
+}
