@@ -1,4 +1,5 @@
 import { spawn } from "child_process";
+import { childProcessEnv } from "../ai/childProcessEnv";
 
 /**
  * パッケージ管理から必要なものを入れる。
@@ -50,6 +51,11 @@ export const runCommand: CommandRunner = (command, args, options = {}) =>
     const child = spawn(command, [...args], {
       shell: false,
       windowsHide: true,
+      // 拡張機能ホストの `ELECTRON_RUN_AS_NODE` を継がせない（設計書6.24）。
+      // ここが起こすのはパッケージ管理（winget・brew）なのでElectronでは
+      // ないが、**同じ穴を1つだけ残さない**。将来ここからElectron製の
+      // 導入ツールを呼んだときに、原因の分からない即終了として現れる
+      env: childProcessEnv(),
     });
 
     let stdout = "";

@@ -1400,7 +1400,20 @@ export class ManuscriptEditorProvider
       new vscode.Range(document.positionAt(start), document.positionAt(end)),
       inserted
     );
-    await vscode.workspace.applyEdit(change);
+    // **入れられたかを確かめる。** 直前のハッシュ照合を通っても、
+    // 書き込みそのものは失敗しうる（文書が閉じられた・読み取り専用）。
+    // 見ないまま先へ進むと、入っていないのに選び直しだけが起きて、
+    // 作者には「振ったのに反映されない」としか見えない
+    // （シーンメモの挿入と同じ扱いに揃える。0.28.2）
+    if (!(await vscode.workspace.applyEdit(change))) {
+      logLine(
+        `${label}：${fromUri(document.uri)} の ${start}〜${end} に入れられませんでした。`
+      );
+      void vscode.window.showWarningMessage(
+        `${label}を入れられませんでした。もう一度お試しください。`
+      );
+      return;
+    }
 
     // 入れたところを選び直す。続けて直したくなることが多い。
     // **画面へ返す位置はLF空間へ戻す**（入れた記法に改行は無いので、

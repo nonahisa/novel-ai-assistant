@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { canRunProcesses } from "../core/runtime";
-import { logFailure } from "../core/logger";
+import { logFailure, logLine } from "../core/logger";
 import {
   GENERATED_DIR,
   pruneGeneratedFiles,
@@ -169,7 +169,10 @@ async function openUntitledMarkdown(
   // 長い文書（診断結果は表が何十行もある）では流れ込むのが目に見える
   const edit = new vscode.WorkspaceEdit();
   edit.insert(uri, new vscode.Position(0, 0), content);
-  await vscode.workspace.applyEdit(edit);
+  // 入らなければ空の画面が出るだけで、理由がどこにも残らない（0.28.2）
+  if (!(await vscode.workspace.applyEdit(edit))) {
+    logLine(`「${displayName}」の中身を無題の文書へ入れられませんでした。`);
+  }
 
   // 無題文書は `vscode.open` では開けない（実在するファイルとして
   // 解決しようとして失敗する）。素のテキストで開く
