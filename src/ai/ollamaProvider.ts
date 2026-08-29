@@ -32,7 +32,35 @@ interface TagsResponse {
     name: string;
     size?: number;
     details?: { parameter_size?: string; quantization_level?: string };
+    /** 新しい版の Ollama は一覧にも入れてくる。無い版もある */
+    capabilities?: string[];
   }>;
+}
+
+/**
+ * 生成に使えるモデルか。**埋め込み用のモデルを一覧に出さない**
+ * （作者の報告「bge-m3 が出るが選んでも使えない」2026-08-30）。
+ *
+ * `bge-m3` は意味検索の索引づくりに使うモデル（`ai/ollamaEmbedding.ts`）で、
+ * 文章を書かせても返らない。選べてしまうと、選んだあとで初めて失敗する。
+ *
+ * **判定は `capabilities` を主にする。** 生成できるモデルには必ず
+ * `completion` が入る（実測、2026-08-30：qwen3・gemma3・gemma4 はすべて
+ * `completion` を含み、`bge-m3` は `["embedding"]` だけ）。**モデル名を
+ * 並べた一覧にはしない**——新しいモデルが次々出るため（CLAUDE.md 規則6）。
+ *
+ * `capabilities` が取れないとき（古い版・`/api/show` が失敗したとき）だけ、
+ * **用途を表す語**で落とす。判断が付かないものは残す——一覧に余分が出る害より、
+ * 使えるモデルが消える害のほうが大きい。
+ */
+export function isGenerationModel(
+  name: string,
+  capabilities: readonly string[] | undefined
+): boolean {
+  if (capabilities && capabilities.length > 0) {
+    return capabilities.includes("completion");
+  }
+  return !/embed|rerank/i.test(name);
 }
 
 interface ShowResponse {
@@ -131,21 +159,33 @@ export class OllamaProvider implements AIProvider {
 
   async listModels(): Promise<ModelInfo[]> {
     const tags = await this.fetchJson<TagsResponse>("/api/tags", undefined, 8000);
-    const names = (tags.models ?? []).map((m) => m.name);
 
     const infos: ModelInfo[] = [];
-    for (const name of names) {
+    for (const entry of tags.models ?? []) {
+      const name = entry.name;
+      // **一覧に出さないと分かったら `/api/show` を呼ばない。**
+      // 新しい版の Ollama は `/api/tags` にも `capabilities` を入れるので、
+      // 埋め込みモデルのぶん往復が1回減る
+      if (entry.capabilities && !isGenerationModel(name, entry.capabilities)) {
+        continue;
+      }
+
       const cached = this.modelCache.get(name);
       if (cached) {
-        infos.push(cached);
+        // キャッシュには `getModel()` 経由でも入る。あちらは絞らないので、
+        // 一覧へ出す前にここでも確かめる
+        if (isGenerationModel(name, cached.capabilities)) infos.push(cached);
         continue;
       }
       try {
         const info = await this.showModel(name);
+        // 詳細は覚えておく（`getModel()` が使う）が、一覧へは出さない
         this.modelCache.set(name, info);
-        infos.push(info);
+        if (isGenerationModel(name, info.capabilities)) infos.push(info);
       } catch {
-        // 詳細が取れなくても一覧からは落とさない
+        // 詳細が取れなくても一覧からは落とさない。
+        // ただし名前から用途が明らかなものは落とす
+        if (!isGenerationModel(name, undefined)) continue;
         const fallback: ModelInfo = {
           id: name,
           displayName: name,
