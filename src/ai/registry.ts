@@ -490,7 +490,8 @@ export async function pickProviderAndModel(
     // 使えない組み合わせを設定に残さない
     const loaded = await prepareLmStudioModel(
       modelPick.model.id,
-      modelPick.model.maxContextWindow
+      modelPick.model.maxContextWindow,
+      "AIの設定"
     );
     if (!loaded) return undefined;
   }
@@ -631,32 +632,43 @@ export function formatModelContext(model: ModelInfo): string {
  * 選ばれたモデルをLM Studioへ読み込ませる。
  *
  * **セットアップ（`pickProviderAndModel`）と、AI機能の実行前
- * （`ensureConfigured`）の両方がここを通る。** 同じことを2か所で書くと、
- * 片方だけ直る。
+ * （`ensureConfigured`）と、サーバーを起こした直後（`aiConnectivity.ts`）が
+ * ここを通る。** 同じことを何か所かで書くと、どれか1つだけ直る。
+ *
+ * **読み込み済みなら、進捗を出さない。** 以前は無条件に
+ * 「LM Studioにモデルを読み込んでいます…」を出してから確かめており、
+ * 設定資料パネルの相談では**質問のたび**に出ていた（実際には何もしない）。
+ * 判断（`planLmStudioModelLoad`）と読み込み（`runLmStudioModelLoad`）を
+ * 分けて、要るときだけ進捗を出す。
  *
  * @param maxContextWindow 進捗に出す長さ。分かるときだけ渡す
+ * @param feature どの機能の入口から来たか。**ログに残す**——機能名が無いと、
+ *   止まったときに何が中断されたのか追えない
  * @returns 先へ進んでよければ true
  */
-async function prepareLmStudioModel(
+export async function prepareLmStudioModel(
   modelId: string,
-  maxContextWindow?: number
+  maxContextWindow?: number,
+  feature?: string
 ): Promise<boolean> {
-  // 読み込み済みなら何もしない。`ensureLmStudioModelLoaded` が判断する
-  // （ブラウザ版・別マシンを指しているときも、あちらで弾かれる）
-  const { ensureLmStudioModelLoaded, saveLoadedContextWindow } = await import(
-    "./lmstudioModelLoad.js"
-  );
+  const { planLmStudioModelLoad, runLmStudioModelLoad, saveLoadedContextWindow } =
+    await import("./lmstudioModelLoad.js");
+
+  // ブラウザ版・別マシンを指しているときも、ここで「何もしない」が返る
+  const plan = await planLmStudioModelLoad(modelId);
+  if (plan.kind === "skipped") return true;
 
   const contextLabel = maxContextWindow
     ? `（文脈 ${formatContext(maxContextWindow)}）`
     : "";
   const result = await withProgress(
     `LM Studioにモデルを読み込んでいます${contextLabel}…`,
-    () => ensureLmStudioModelLoaded(modelId)
+    () => runLmStudioModelLoad(modelId, plan.contextLength)
   );
 
   if (result.kind === "failed") {
     logFailure("LM Studioのモデル読み込み", {
+      機能: feature,
       モデル: modelId,
       種別: result.reason,
       詳細: result.message,
@@ -685,7 +697,7 @@ async function prepareLmStudioModel(
 
   // 読み込めたら、実際に載った長さを設定へ書き戻す。
   // **作者に写させない**（写し間違いと写し忘れが起きる）
-  if (result.kind === "loaded") await saveLoadedContextWindow();
+  if (result.kind === "loaded") await saveLoadedContextWindow(modelId);
   return true;
 }
 
@@ -709,7 +721,9 @@ export async function ensureConfigured(
     // あちらは `resolveModelInfo` が失敗したときにしか呼ばれず、
     // 通常の経路では一度も通らない
     if (resolved.provider.id === "lmstudio") {
-      if (!(await prepareLmStudioModel(resolved.model))) return undefined;
+      if (!(await prepareLmStudioModel(resolved.model, undefined, feature))) {
+        return undefined;
+      }
     }
     return resolved;
   }

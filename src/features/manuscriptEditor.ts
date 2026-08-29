@@ -25,8 +25,12 @@ import {
   renderTermMarks,
 } from "../core/manuscriptRender";
 import { TERM_COLORS } from "../core/termColors";
-import { computeMinimalEdit } from "../core/textEdit";
-import { fromLfOffset, fromLfText, toLf, toLfOffset } from "../core/eolSpace";
+import {
+  computeDocumentEdit,
+  fromLfOffset,
+  toLf,
+  toLfOffset,
+} from "../core/eolSpace";
 import { createEditQueue } from "../core/editQueue";
 import { countChars } from "../core/charCount";
 import {
@@ -153,6 +157,36 @@ const openManuscripts = new Map<
  */
 export function refreshManuscriptCounts(filePath: string): void {
   openManuscripts.get(manuscriptLedgerKey(filePath))?.refreshCounts();
+}
+
+/** 台帳に載るのを待つ上限。これを過ぎたら「開けなかった」とみなす */
+const LEDGER_WAIT_MS = 1500;
+/** 見に行く間隔 */
+const LEDGER_POLL_MS = 50;
+
+/**
+ * 取れるようになるまで待つ。上限まで取れなければ undefined。
+ *
+ * **`vscode.openWith` の完了は、台帳に載ったことを意味しない。**
+ * 台帳へ載せるのは `resolveCustomTextEditor` で、そちらは非同期に走る。
+ * 待たずに引くと「開いていない」と読めてしまい、呼び出し側が同じ原稿を
+ * 素のエディタでも開く（1つの原稿が2つの面で開く）。
+ *
+ * **台帳を直接見ずに、取り方（`get`）を受け取る。** そうしておけば、
+ * VS Codeの画面を作らずに待ち方だけを確かめられる。
+ */
+export async function waitFor<T>(
+  get: () => T | undefined,
+  budgetMs: number = LEDGER_WAIT_MS,
+  pollMs: number = LEDGER_POLL_MS
+): Promise<T | undefined> {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    const value = get();
+    if (value !== undefined) return value;
+    if (Date.now() >= deadline) return undefined;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
 }
 
 /**
@@ -307,6 +341,18 @@ export interface ManuscriptEditorDeps {
    * 記録を止めている作者には `undefined` が返る（0と書かない）。
    */
   todayFileCount(work: WorkEntry, filePath: string): Promise<number | undefined>;
+  /**
+   * 執筆量の基準を置き直す（設計書6.3.2）。
+   *
+   * **拡張機能が本文ファイルを作った直後に呼ぶ。** 記録は「ファイル数が
+   * 変わった回は数えない」（投稿サイトからの取り込みを執筆に数えないため）
+   * という決まりで動いている。「次の話 →」や「最新話を書く」で空の話を
+   * 作ったあと、作者がそこへ書いて保存すると**その回がこの決まりに当たり、
+   * 「今日 +0字」になって以後も数えられない。**
+   *
+   * ここで空のファイルごと基準に入れておけば、次の保存は差分として数えられる。
+   */
+  rebaseline(work: WorkEntry): Promise<void>;
   /**
    * 読み仮名の入った `.txt` を `.md` にする（作者の指示、2026-08-29）。
    *
@@ -646,7 +692,16 @@ export class ManuscriptEditorProvider
     }
 
     await vscode.commands.executeCommand("vscode.openWith", uri, viewType);
-    const opened = openManuscripts.get(key);
+    /*
+      **台帳に載るまで待つ。**
+
+      台帳へ載せるのは `resolveCustomTextEditor` で、そちらは非同期に走る。
+      `openWith` が戻った時点で載っている保証は無く、載っていないと false を
+      返して、呼び出し側が**同じファイルを素のエディタでも開く**（1つの原稿が
+      2つの面で開く）。開いた直後に取りに行くのが早すぎるだけなので、
+      少しだけ待てばよい。
+    */
+    const opened = await waitFor(() => openManuscripts.get(key));
     // **開けなかったときは引き受けない。** ここで true を返すと、
     // 押しても何も起きないまま終わる（素のエディタへも行かない）
     if (!opened) {
@@ -695,12 +750,14 @@ export class ManuscriptEditorProvider
     document: vscode.TextDocument,
     next: string
   ): Promise<void> {
-    // 画面から届く本文はLF区切り。**文書の改行コードへ合わせてから差分を
-    // 取る**（core/eolSpace.ts）。合わせずに差分を取ると、差分の範囲内の
-    // 改行が全部LFへ変わり、最初の1打鍵でCRLFの原稿が書き換わっていた
-    const edit = computeMinimalEdit(
+    // **差分はLF空間で取り、位置だけを文書の空間へ戻す**（core/eolSpace.ts）。
+    // 文書ぜんたいをCRLFへ揃えてから差分を取ると、LFだけの行が混ざった
+    // ファイルでは、その行から打った位置までが丸ごと差分になり、
+    // **触っていない行の改行まで書き換わる**
+    const edit = computeDocumentEdit(
       document.getText(),
-      fromLfText(next, document.eol === vscode.EndOfLine.CRLF)
+      next,
+      document.eol === vscode.EndOfLine.CRLF
     );
     if (!edit) return;
 
@@ -825,6 +882,24 @@ export class ManuscriptEditorProvider
 
     const converted = await this.deps.convertToMarkdown(filePath);
     if (!converted) return;
+
+    /*
+      **変換に成功したときだけ、元の .txt の面を閉じる。**
+
+      閉じずに残すと、作者がそのタブへ戻って打ち、保存した瞬間に
+      **消えたはずの .txt が復活する**（VS Code は無くなったファイルへも
+      保存できる）。同じ話が .txt と .md の2つになり、走査は両方を話として
+      数え、以後どちらが本物か分からなくなる。
+
+      閉じるのは新しい .md を開く**前**にする。あとにすると、開いた面が
+      すぐ後ろの `dispose` に巻き込まれて見えることがある。
+    */
+    const stale = openManuscripts.get(manuscriptLedgerKey(filePath));
+    if (stale) {
+      logLine(`原稿エディタ：.md 化にともない ${filePath} の面を閉じます。`);
+      stale.panel.dispose();
+    }
+
     // 変換すると元のファイルは消える（名前が変わる）。同じ入口で開き直す
     await this.openAsManuscript(converted);
   }
@@ -1004,7 +1079,7 @@ export class ManuscriptEditorProvider
       return;
     }
 
-    await this.createAndOpen(manuscriptDir, plan.fileName);
+    await this.createAndOpen(found.work, manuscriptDir, plan.fileName);
   }
 
   /**
@@ -1082,7 +1157,7 @@ export class ManuscriptEditorProvider
         `${formatChapterNumber(chapter, rule.digits)}${rule.extension}`
     );
     if (plan.kind !== "create") return;
-    await this.createAndOpen(manuscriptDir, plan.fileName);
+    await this.createAndOpen(found.work, manuscriptDir, plan.fileName);
   }
 
   /**
@@ -1092,6 +1167,7 @@ export class ManuscriptEditorProvider
    * 片方だけがファイル名の決まりから外れる日が来る。
    */
   private async createAndOpen(
+    work: WorkEntry,
     manuscriptDir: string,
     fileName: string
   ): Promise<void> {
@@ -1106,6 +1182,10 @@ export class ManuscriptEditorProvider
       new TextEncoder().encode("")
     );
     logLine(`原稿エディタ：${fileName} を作成`);
+    // **執筆量の基準を置き直す**（設計書6.3.2）。ここで入れておかないと、
+    // このあと作者が書いて保存した回が「ファイル数が変わった」に当たり、
+    // その分が「今日 +0字」になって消える
+    await this.deps.rebaseline(work);
     void vscode.window.showInformationMessage(`${fileName} を作りました。`);
     await this.openAsManuscript(filePath);
   }

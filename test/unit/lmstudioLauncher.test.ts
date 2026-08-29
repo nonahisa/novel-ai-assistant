@@ -2,14 +2,19 @@ import { describe, expect, test, vi } from "vitest";
 import * as path from "node:path";
 import {
   cliCandidates,
+  contextLengthRetrySteps,
   decideLoadContextLength,
   describeLoadFailure,
   describeStartFailure,
+  isInsufficientResources,
   isLocalEndpoint,
+  isRecentlyConfirmed,
+  keepTail,
   loadLmStudioModel,
   resolveCli,
   serverPort,
   startLmStudioServer,
+  LOAD_CONFIRM_TTL_MS,
   type CliOutcome,
   type LoadCliOutcome,
 } from "../../src/ai/lmstudioLauncher";
@@ -241,6 +246,40 @@ describe("サーバーの起動", () => {
     expect(outcome).toMatchObject({ ok: false, reason: "spawn_failed" });
     expect(probe).toHaveBeenCalledTimes(1);
   });
+
+  /**
+   * **`lms server start` が戻らないことがある。**
+   * LM Studio本体が立ち上がっていないと、本体の起動から始まるためである。
+   * 終了を待ち切らずに `running` を返し、疎通のポーリングへ進む
+   * （待ち続けると、進捗表示が出たまま作者を待たせ続ける）。
+   */
+  test("終了を待ち切れなくても、疎通の確認へ進む", async () => {
+    const probe = vi.fn(async () => true);
+
+    const outcome = await startLmStudioServer({
+      endpoint: "http://localhost:1234/v1",
+      cliPath: EXISTING_CLI,
+      probe,
+      runCli: fakeCli({ kind: "running" }).run,
+    });
+
+    expect(outcome).toEqual({ ok: true });
+    expect(probe).toHaveBeenCalled();
+  });
+
+  test("待ち切れないまま応答も無ければ、締切までポーリングして諦める", async () => {
+    const probe = vi.fn(async () => false);
+
+    const outcome = await startLmStudioServer({
+      endpoint: "http://localhost:1234/v1",
+      cliPath: EXISTING_CLI,
+      timeoutMs: 1200,
+      probe,
+      runCli: fakeCli({ kind: "running" }).run,
+    });
+
+    expect(outcome).toEqual({ ok: false, reason: "timeout" });
+  });
 });
 
 /**
@@ -270,6 +309,111 @@ describe("読み込む文脈の長さの決め方", () => {
   test("どちらも分からなければ指定しない", () => {
     // LM Studioの既定に任せる。当てずっぽうの数字を渡さない
     expect(decideLoadContextLength(undefined, 0)).toBeUndefined();
+  });
+});
+
+/**
+ * 断られたら、文脈を半分にして試し直す（作者の環境で実際に起きたこと）。
+ *
+ * 既定（設定 0）はモデルの最大で読み込むので、メモリの足りない機械では
+ * 安全装置に断られる。以前はそこで諦めており、`ensureConfigured` が
+ * undefined を返して**AI機能が丸ごと動かなくなっていた**——12b を未読込の
+ * まま選んだ機械では、誤字脱字も相談も一切動かない。
+ */
+describe("短くして試し直す長さの列", () => {
+  test("半分ずつ下げる（最大4回）", () => {
+    expect(contextLengthRetrySteps(131072)).toEqual([131072, 65536, 32768, 16384]);
+  });
+
+  test("8192より短くはしない", () => {
+    // ここまで下げても載らないなら、文脈の長さでは解決しない
+    expect(contextLengthRetrySteps(32768)).toEqual([32768, 16384, 8192]);
+    expect(contextLengthRetrySteps(16384)).toEqual([16384, 8192]);
+  });
+
+  test("もともと下限以下なら、そのまま1回だけ", () => {
+    // モデルの最大が短いことがある。**引き上げない**
+    expect(contextLengthRetrySteps(8192)).toEqual([8192]);
+    expect(contextLengthRetrySteps(4096)).toEqual([4096]);
+  });
+
+  test("半端な長さでも、下限で止まる", () => {
+    expect(contextLengthRetrySteps(12000)).toEqual([12000, 8192]);
+  });
+
+  test("メモリ不足のときだけ短くする", () => {
+    // モデル名の間違いなど、短くしても直らない失敗を4回試すと、
+    // 作者を待たせるだけになる
+    expect(
+      isInsufficientResources(
+        "Error: Model loading was stopped due to insufficient system resources."
+      )
+    ).toBe(true);
+    expect(isInsufficientResources("Error: model not found")).toBe(false);
+    expect(isInsufficientResources(undefined)).toBe(false);
+  });
+
+  test("案内に、文脈を短くする設定の名前を出す", () => {
+    // 「小さいモデルを選べ」だけでは、いま使いたいモデルを諦めるほかに
+    // 手が無いように見える
+    const message = describeLoadFailure({
+      ok: false,
+      reason: "load_failed",
+      detail: "Error: insufficient system resources",
+    });
+
+    expect(message).toContain("novelai.lmstudio.loadContextLength");
+  });
+});
+
+/**
+ * 「読み込み済み」と確かめたことを、しばらく覚えておく。
+ *
+ * AI機能を呼ぶたびにLM Studioへ聞きに行くと、設定資料パネルの相談では
+ * **質問のたび**にHTTPの往復と進捗表示が入っていた（実際には何もしない）。
+ * 載せ替えはLM Studioの画面で人が行うので、数十秒の古さは害にならない。
+ */
+describe("読み込み済みの覚え", () => {
+  test("30秒のうちは、聞き直さない", () => {
+    expect(isRecentlyConfirmed(1_000_000, 1_000_000 + 29_000)).toBe(true);
+  });
+
+  test("30秒を過ぎたら聞き直す", () => {
+    expect(isRecentlyConfirmed(1_000_000, 1_000_000 + LOAD_CONFIRM_TTL_MS)).toBe(
+      false
+    );
+  });
+
+  test("覚えが無ければ聞きに行く", () => {
+    // **覚えるのは成功だけ**（CLAUDE.md 規則5）。未読込・失敗は覚えない
+    expect(isRecentlyConfirmed(undefined, 1_000_000)).toBe(false);
+  });
+
+  test("時計が巻き戻っていたら、覚えを捨てる", () => {
+    // スリープ復帰などで起きる。**未来の時刻を信じない**
+    expect(isRecentlyConfirmed(2_000_000, 1_000_000)).toBe(false);
+  });
+});
+
+/**
+ * `lms load` の出力を溜め込まない。
+ *
+ * 読み込み中は進捗バーが何度も描き直され（同じ行を書き換えるために
+ * 制御文字ごと送り直す）、大きいモデルでは数MBになる。
+ * 失敗の理由は最後に出るので、末尾だけあれば足りる。
+ */
+describe("出力は末尾だけ残す", () => {
+  test("上限を超えたら、末尾を残す", () => {
+    const long = "あ".repeat(5000) + "Error: 失敗";
+
+    const kept = keepTail(long, 100);
+
+    expect(kept).toHaveLength(100);
+    expect(kept.endsWith("Error: 失敗")).toBe(true);
+  });
+
+  test("短ければそのまま", () => {
+    expect(keepTail("短い出力", 4096)).toBe("短い出力");
   });
 });
 

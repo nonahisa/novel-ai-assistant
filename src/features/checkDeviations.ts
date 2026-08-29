@@ -61,6 +61,14 @@ export interface DeviationRunResult {
   /** 照らした先がプロットに無かった件数（作者へ伝える価値がある） */
   ungroundedCount: number;
   failedChunks: number;
+  /**
+   * **本文そのものを読めなかった話の数**（AIへ渡せていない。ログに詳細）。
+   *
+   * **黙って落とさない。** 文字コードの壊れた話やロックされた話が1つあると、
+   * その話だけ検知の対象から抜けるのに、作者には「その話には何も無い」と
+   * 見える。
+   */
+  unreadableEpisodes: number;
   cancelled: boolean;
 }
 
@@ -93,7 +101,7 @@ export async function checkDeviations(
   const resolved = await ensureConfigured(registry, "deviation");
   if (!resolved) return undefined;
 
-  const episodes = await collectEpisodes(work);
+  const { episodes, unreadableEpisodes } = await collectEpisodes(work);
   if (episodes.length === 0) {
     vscode.window.showWarningMessage("検知できる本文がありませんでした。");
     return undefined;
@@ -129,7 +137,15 @@ export async function checkDeviations(
     (episode) => !cache.get(episode.hash, cacheKeyBase)
   );
   if (pending.length > 0) {
-    if (!(await confirmProviderReachable(resolved.provider, "プロット逸脱の検知"))) {
+    // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
+    // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）
+    if (
+      !(await confirmProviderReachable(
+        resolved.provider,
+        "プロット逸脱の検知",
+        resolved.model
+      ))
+    ) {
       return undefined;
     }
     const confirm = await vscode.window.showInformationMessage(
@@ -303,6 +319,7 @@ export async function checkDeviations(
     rejectedCount,
     ungroundedCount,
     failedChunks,
+    unreadableEpisodes,
     cancelled,
   };
 }
@@ -353,10 +370,13 @@ interface Episode {
   hash: string;
 }
 
-async function collectEpisodes(work: WorkEntry): Promise<Episode[]> {
+async function collectEpisodes(
+  work: WorkEntry
+): Promise<{ episodes: Episode[]; unreadableEpisodes: number }> {
   const scan = await scanWork(work);
   const format = await readWorkFormat(work);
   const out: Episode[] = [];
+  let unreadableEpisodes = 0;
 
   for (const episode of scan.episodes) {
     // 競合マーカーのあるファイルはAI処理をブロックする
@@ -364,7 +384,14 @@ async function collectEpisodes(work: WorkEntry): Promise<Episode[]> {
     let text: string;
     try {
       text = (await readTextFile(episode.filePath)).text;
-    } catch {
+    } catch (error) {
+      // **記録して数える。** 黙って落とすと、その話は検知の対象から
+      // 抜けたのに、作者には「何も無かった」と見える
+      unreadableEpisodes++;
+      logFailure("プロット逸脱の検知：本文の読み込み", {
+        ファイル: episode.filePath,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
       continue;
     }
     // **長い話は切る。** 切ったことは指摘の行番号から分かる
@@ -377,7 +404,7 @@ async function collectEpisodes(work: WorkEntry): Promise<Episode[]> {
       hash: hashText(body),
     });
   }
-  return out;
+  return { episodes: out, unreadableEpisodes };
 }
 
 async function loadSynopses(

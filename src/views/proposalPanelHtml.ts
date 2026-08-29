@@ -268,8 +268,16 @@ const emptyDefault = emptyEl.textContent;
 let lastItemCount = 0;
 
 function paintRunning() {
+  /*
+    **別の作品の検知なら、作品名を頭に付ける。**
+
+    書庫では、作品Aの結果を読みながら作品Bを検知できる。以前は表示中と
+    違う作品の進みを送らずに捨てていたため、2作品目では進みが一切
+    出なかった。作品名があれば、見えている件数と関係のない数だと分かる。
+  */
   const text = runningState
-    ? runningState.label + 'しています… ' +
+    ? (runningState.workTitle ? '〈' + runningState.workTitle + '〉' : '') +
+      runningState.label + 'しています… ' +
       runningState.done + '/' + runningState.total + runningState.unit
     : '';
 
@@ -687,6 +695,8 @@ window.addEventListener('message', (event) => {
       done: message.done || 0,
       total: message.total || 0,
       unit: message.unit || 'チャンク',
+      // 表示中の作品の検知なら空。別の作品なら題名が入る
+      workTitle: message.workTitle || '',
     };
     paintRunning();
     return;

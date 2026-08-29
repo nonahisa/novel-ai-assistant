@@ -454,6 +454,9 @@ export async function activate(
     // 下段の字数（作者の指示、2026-08-29）。**走査は一覧のキャッシュを借りる**
     workStats: (work) => treeProvider.getStats(work),
     todayFileCount: (work, filePath) => progress.todayFileCount(work, filePath),
+    // 空の話を作った直後に基準を置き直す（設計書6.3.2）。
+    // **置き直さないと、そのあと書いた分が「今日 +0字」になって消える**
+    rebaseline: (work) => progress.rebaseline(work),
     // MD化は**既存の変換と同じ経路**を通す（中のルビも直る。設計書6.12.4）
     convertToMarkdown: async (filePath) => {
       const { convertOne } = await import("./features/markdownConvert.js");
@@ -1399,7 +1402,9 @@ export async function activate(
       await openPlotFile(entry);
       await startPlotAdvice(entry);
     } else {
-      await createFirstEpisodeFile(entry);
+      // 空の第1話を作ったら、執筆量の基準を置き直す（設計書6.3.2）。
+      // **置き直さないと、作者が書いて最初に保存した分が消える**
+      await createFirstEpisodeFile(entry, (work) => progress.rebaseline(work));
     }
   }
 
@@ -2116,6 +2121,10 @@ export async function activate(
         );
 
         treeProvider.refresh(work.id);
+        // **執筆量の基準を置き直す**（設計書6.3.2）。記録は「ファイル数が
+        // 変わった回は数えない」ので、置き直さないと、このあと作者が書いて
+        // 保存した回がその決まりに当たり「今日 +0字」になって消える
+        await progress.rebaseline(work);
         // **本文は原稿エディタ（横書き）で開く**（作者の指定、2026-08-29。
         // 作品一覧のクリックと同じ既定に揃える）
         await vscode.commands.executeCommand(
@@ -2568,6 +2577,11 @@ export async function activate(
         if (result.failedChunks > 0) {
           parts.push(`読み取れなかった ${result.failedChunks}件`);
         }
+        // **本文を開けなかった話は黙らない。** その話だけ検知の対象から
+        // 抜けているのに、作者には「何も無かった」と見える
+        if (result.unreadableEpisodes > 0) {
+          parts.push(`読めなかった話 ${result.unreadableEpisodes}件（ログ参照）`);
+        }
         vscode.window.showInformationMessage(
           `伏線の検知が完了しました。${parts.join(" / ")}。` +
             (result.candidates.length > 0
@@ -2611,6 +2625,9 @@ export async function activate(
         }
         if (result.failedChunks > 0) {
           parts.push(`読み取れなかった ${result.failedChunks}件`);
+        }
+        if (result.unreadableEpisodes > 0) {
+          parts.push(`読めなかった話 ${result.unreadableEpisodes}件（ログ参照）`);
         }
         vscode.window.showInformationMessage(
           `伏線の回収の確認が完了しました。${parts.join(" / ")}。` +
@@ -2729,6 +2746,11 @@ export async function activate(
         if (result.failedChunks > 0) {
           parts.push(`読み取れなかった ${result.failedChunks}話`);
         }
+        // **本文を開けなかった話は黙らない。** その話だけ検知の対象から
+        // 抜けているのに、作者には「何も無かった」と見える
+        if (result.unreadableEpisodes > 0) {
+          parts.push(`読めなかった話 ${result.unreadableEpisodes}件（ログ参照）`);
+        }
         vscode.window.showInformationMessage(
           `プロット逸脱の検知が完了しました。${parts.join(" / ")}。` +
             (result.issues.length > 0
@@ -2825,6 +2847,11 @@ export async function activate(
         if (result.verifyNote) parts.push(result.verifyNote);
         if (result.failedChunks > 0) {
           parts.push(`読み取れなかった ${result.failedChunks}件`);
+        }
+        // **本文を開けなかった話は黙らない。** その話だけ検知の対象から
+        // 抜けているのに、作者には「何も無かった」と見える
+        if (result.unreadableEpisodes > 0) {
+          parts.push(`読めなかった話 ${result.unreadableEpisodes}件（ログ参照）`);
         }
         vscode.window.showInformationMessage(
           `矛盾検知が完了しました。${parts.join(" / ")}。` +

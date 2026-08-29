@@ -275,8 +275,15 @@ export function recoveryForAIError(error: AIError): string {
       return "APIキーの利用権限または請求設定を確認してください。";
     case "insufficient_credit":
       return "利用しているAIサービスの請求画面で、クレジットを購入してください。";
+    // **設定の名前まで出す。** 「小さいモデルを選べ」だけでは、いま使いたい
+    // モデルを諦めるほかに手が無いように見える。実際には文脈を短くすれば
+    // 載ることが多い（`lmstudioLauncher.ts` の `LOAD_CONTEXT_SETTING_HINT`
+    // と同じ文言。**片方だけ直さないこと**）
     case "model_load_failed":
-      return "より小さいモデルを選ぶか、LM Studioの設定でモデル読み込みの安全装置（guardrails）を確認してください。";
+      return (
+        "より小さいモデルを選ぶか、LM Studioの設定でモデル読み込みの安全装置（guardrails）を確認してください。" +
+        "読み込む文脈の長さは設定 novelai.lmstudio.loadContextLength で小さくできます。"
+      );
     case "rate_limited":
       return "しばらく待ってから、必要な場合に手動で再実行してください。";
     case "aborted":

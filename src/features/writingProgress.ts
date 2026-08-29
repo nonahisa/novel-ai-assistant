@@ -42,6 +42,48 @@ export interface WorkScan {
   episodes: readonly EpisodeFile[];
 }
 
+/**
+ * ファイル別の記録の鍵（作品フォルダーからの相対パス）。
+ *
+ * **記録する側と読む側で、必ずこれを通す。** 以前は両側が
+ * `path.relative()` を直に呼んでおり、ブラウザ版（`vscode-vfs://`）で
+ * 鍵が食い違って**「今日 +0字」から動かなかった。**
+ *
+ * - 記録する側（`toMeasurement`）は、走査が返す `episode.filePath`
+ *   ——ファイル名は**生のまま**（`本文/第1話.md`）
+ * - 読む側（`todayFileCount`）は `paths.fromUri(document.uri)`
+ *   ——非 `file:` では `uri.toString()` になり、日本語が
+ *   **百分率符号化される**（`%E6%9C%AC%E6%96%87/...`）
+ *
+ * そこで**符号を解いてから**相対パスにする。手元のファイル（`file:`）は
+ * 符号化されていないので、鍵の文字列はこれまでと変わらない
+ * （既にある記録と食い違わせない）。
+ *
+ * @param filePath 作品の中のファイル。絶対パスかURIの文字列
+ */
+export function fileCountKeyFor(work: WorkEntry, filePath: string): string {
+  return fileCountKey(
+    path.relative(decodePathEscapes(work.folderPath), decodePathEscapes(filePath))
+  );
+}
+
+/**
+ * 道に入った百分率符号を解く。
+ *
+ * **解けなければ、そのまま返す。** `%` を含むだけのファイル名
+ * （`50%OFF.txt`）で `decodeURIComponent` は例外を投げる。
+ * 鍵が作れないより、符号化されたままの鍵のほうがましである
+ * （少なくとも記録側と読む側で同じ結果になる）。
+ */
+function decodePathEscapes(location: string): string {
+  if (!location.includes("%")) return location;
+  try {
+    return decodeURIComponent(location);
+  } catch {
+    return location;
+  }
+}
+
 export class WritingProgressTracker {
   /** 作品ごとの直近の集計。ステータスバーが毎回ファイルを読まないために持つ */
   private readonly cache = new Map<string, WritingSummary>();
@@ -132,8 +174,9 @@ export class WritingProgressTracker {
     try {
       const sets = await this.store(work).loadAll();
       const today = statsDayKey(new Date(), boundaryHour());
-      const key = fileCountKey(path.relative(work.folderPath, filePath));
-      return fileNetOn(mergeDailyStats(sets), today, key);
+      // **鍵の作り方は記録する側と同じ関数を通す**（`fileCountKeyFor`）。
+      // 別々に組み立てていたため、ブラウザ版では一致せず常に0だった
+      return fileNetOn(mergeDailyStats(sets), today, fileCountKeyFor(work, filePath));
     } catch {
       // 統計が読めなくても本文の字数表示は続ける
       return undefined;
@@ -190,7 +233,7 @@ function toMeasurement(work: WorkEntry, scan: WorkScan): WritingMeasurement {
     // 競合を含む話は走査が0字として扱う（集計からも外れている）。
     // 内訳にも載せない——直った瞬間に「数万字書いた」ことになる
     if (episode.hasConflictMarkers) continue;
-    const key = fileCountKey(path.relative(work.folderPath, episode.filePath));
+    const key = fileCountKeyFor(work, episode.filePath);
     files[key] = { net: episode.counts.net, gross: episode.counts.gross };
   }
   return {

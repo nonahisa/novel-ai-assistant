@@ -4,6 +4,7 @@ import type {
   ConnectionTestResult,
 } from "../ai/types";
 import { lmstudioEndpoint } from "../ai/lmstudioProvider";
+import { prepareLmStudioModel } from "../ai/registry";
 import { canRunProcesses } from "../core/runtime";
 import { withProgress } from "../views/progress";
 
@@ -31,7 +32,16 @@ import { withProgress } from "../views/progress";
 export async function confirmProviderReachable(
   provider: Pick<AIProvider, "id" | "testConnection">,
   /** 確認できないときに出す文言に埋め込む、実行しようとしている処理名 */
-  actionLabel: string
+  actionLabel: string,
+  /**
+   * これから使うモデル。**LM Studioをこの場から起こしたときに要る。**
+   *
+   * サーバーが止まっている状態では `ensureConfigured` の読み込みが素通りする
+   * （読み込み状況を聞けないため）。起こしたあとに誰も読み込まないと、
+   * LM Studioが自分の既定（短い文脈）で載せ、**入力が黙って切り捨てられる**。
+   * 分からないときは省いてよい（そのときは読み込みをJITに任せる）。
+   */
+  model?: string
 ): Promise<boolean> {
   // testConnection を持たないプロバイダは確認をスキップする（実行自体は妨げない）
   if (typeof provider.testConnection !== "function") return true;
@@ -50,10 +60,10 @@ export async function confirmProviderReachable(
       };
     }
 
-    // **LM Studioへのモデルの読み込みは、ここでは行わない。**
-    // AI機能の入口（`ai/registry.ts` の `ensureConfigured`）が
-    // 必ず先に通っており、そこで済んでいる。同じことを2か所でやると、
-    // 片方だけ直したときに食い違う
+    // **通じているときは、ここでは読み込まない。**
+    // AI機能の入口（`ai/registry.ts` の `ensureConfigured`）が必ず先に通り、
+    // そこで済んでいる。読み込みが要るのは**この画面から起こしたとき**だけ
+    // で、その場合は下の「LM Studioを起動」の枝で行う
     if (result.ok) return true;
 
     // 手元で動くAIなら、この場から起動できる。別マシンを指しているときと
@@ -76,6 +86,22 @@ export async function confirmProviderReachable(
     if (action === "LM Studioを起動") {
       const started = await startLmStudioWithProgress();
       if (!started) continue; // 失敗理由は起動側で通知済み。再度この警告へ戻る
+
+      /*
+        **起こした直後に、モデルを読み込む。**
+
+        `ensureConfigured` は既に通っているが、そのときサーバーは止まって
+        いた——読み込み状況を聞けないので `unknown_model` で素通りしている。
+        ここで読み込まないと、このあとの生成でLM StudioがJITで載せ、
+        **LM Studio側の既定（短い文脈）**になる。設定 `contextWindow` には
+        前回保存した長い値（131072など）が残っているので、その長さで
+        チャンクを切ったまま送り、**入力が黙って切り捨てられる。**
+
+        `registry` の覚え（30秒）はここでは効かない。覚えているのは
+        「読み込み済みと確かめた」ことだけで、起動前に見たのは
+        「聞けなかった」だからである。
+      */
+      if (model) await prepareLmStudioModel(model, undefined, actionLabel);
       continue; // 起動できたので疎通を確認し直す
     }
     if (action === "再試行") continue;

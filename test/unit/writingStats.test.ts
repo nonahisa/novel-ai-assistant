@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { readFileSync } from "node:fs";
 import type {
   DailyStat,
   DeviceWritingStats,
@@ -27,8 +28,10 @@ import {
 } from "../../src/core/writingStats";
 import {
   describeStatusBarProgress,
+  fileCountKeyFor,
   summarize,
 } from "../../src/features/writingProgress";
+import type { WorkEntry } from "../../src/models/types";
 
 /** 作品を走査した結果の代わり */
 function measurement(
@@ -863,5 +866,168 @@ describe("ステータスバーの表示", () => {
 
     expect(summary.monthProgress.written).toBe(660);
     expect(summary.monthActiveDays).toBe(2);
+  });
+});
+
+/**
+ * 新しい話を作った直後に、基準を置き直す（設計書6.3.2）。
+ *
+ * ## 何が起きていたか
+ *
+ * 記録は「ファイル数が変わった回は数えない」という決まりで動いている
+ * （投稿サイトからダウンロードした本文を入れただけで数十万字が増えるため）。
+ * ところが「次の話 →」「最新話を書く」「新規話数ファイルを追加」
+ * 「新規作品（本文から）」では**拡張機能が自分で空のファイルを作る**。
+ * そのあと作者がそこへ書いて保存すると、その回がこの決まりに当たり、
+ * **書いた分が「今日 +0字」になって消える**（しかも基準が置き直されるので、
+ * 次の保存からは「その話は最初からあった」ことになり、消えた分は戻らない）。
+ *
+ * 作った直後に基準を置き直しておけば、空のファイルごと基準に入るので、
+ * 次の保存は素直に差分として数えられる。
+ */
+describe("新しい話を作った直後の基準", () => {
+  const at = new Date(2026, 7, 29, 10, 0);
+
+  function files(
+    entries: Record<string, number>
+  ): WritingMeasurement {
+    const map: Record<string, { net: number; gross: number }> = {};
+    let total = 0;
+    for (const [name, net] of Object.entries(entries)) {
+      map[name] = { net, gross: net };
+      total += net;
+    }
+    return {
+      net: total,
+      gross: total,
+      fileCount: Object.keys(entries).length,
+      conflictedCount: 0,
+      files: map,
+    };
+  }
+
+  test("置き直さないと、そのあと書いた分が数えられない", () => {
+    // **これが不具合そのもの。** 空の3話目を作ったまま基準を置き直さず、
+    // 作者が800字書いて保存した
+    const base = recordMeasurement(
+      emptyDeviceStats("d-0001"),
+      files({ "本文/001.txt": 1000, "本文/002.txt": 1000 }),
+      { at }
+    );
+
+    const afterWriting = recordMeasurement(
+      base.stats,
+      files({ "本文/001.txt": 1000, "本文/002.txt": 1000, "本文/003.txt": 800 }),
+      { at }
+    );
+
+    // ファイルが増えた回として扱われ、800字は消える
+    expect(afterWriting.counted).toBe(false);
+    expect(afterWriting.reason).toBe("structure_changed");
+    expect(afterWriting.stats.days).toEqual([]);
+  });
+
+  test("作った直後に置き直せば、そのあとの800字が差分として付く", () => {
+    const base = recordMeasurement(
+      emptyDeviceStats("d-0001"),
+      files({ "本文/001.txt": 1000, "本文/002.txt": 1000 }),
+      { at }
+    );
+
+    // **空のファイルを作った直後に置き直す**（拡張機能が作ったところで呼ぶ）
+    const rebased = rebaseline(
+      base.stats,
+      files({ "本文/001.txt": 1000, "本文/002.txt": 1000, "本文/003.txt": 0 }),
+      at
+    );
+
+    // そこへ作者が800字書いて保存した
+    const afterWriting = recordMeasurement(
+      rebased,
+      files({ "本文/001.txt": 1000, "本文/002.txt": 1000, "本文/003.txt": 800 }),
+      { at }
+    );
+
+    expect(afterWriting.counted).toBe(true);
+    expect(afterWriting.delta).toBe(800);
+    expect(afterWriting.stats.days[0].files).toEqual({
+      "本文/003.txt": { net: 800, gross: 800 },
+    });
+  });
+});
+
+/**
+ * 配線（拡張機能が本文ファイルを作る4か所）。
+ *
+ * **上の純関数の話は「置き直せば数えられる」までしか言っていない。**
+ * 置き直しを実際に呼んでいるかは、作る側のコードにしか無い。
+ * どれか1つでも呼び忘れると、その入口から作った話だけが数えられなくなる。
+ */
+describe("空の話を作ったら基準を置き直す配線", () => {
+  test("原稿エディタ（次の話・最新話を書く）", () => {
+    const source = readFileSync("src/features/manuscriptEditor.ts", "utf8");
+    // 作る場所（`createAndOpen`）で置き直しを呼んでいること
+    const createAndOpen = source.slice(source.indexOf("private async createAndOpen"));
+    expect(createAndOpen).toContain("this.deps.rebaseline(work)");
+  });
+
+  test("新規話数ファイルを追加（extension.ts）", () => {
+    const source = readFileSync("src/extension.ts", "utf8");
+    const addEpisode = source.slice(source.indexOf('"novelai.addEpisode"'));
+    expect(addEpisode.slice(0, 4000)).toContain("progress.rebaseline(work)");
+  });
+
+  test("新規作品（本文から）の第1話", () => {
+    const source = readFileSync("src/extension.ts", "utf8");
+    expect(source).toContain("createFirstEpisodeFile(entry, (work) =>");
+  });
+});
+
+/**
+ * ファイル別の記録の鍵（作者の報告：ブラウザ版で「今日 +0字」から動かない）。
+ *
+ * 記録する側は走査の `episode.filePath`（日本語は生のまま）、読む側は
+ * `paths.fromUri(document.uri)`（非 `file:` では**百分率符号化される**）から
+ * 鍵を作っていた。同じファイルなのに鍵が違うので、いつまでも0だった。
+ */
+describe("ファイル別の記録の鍵", () => {
+  const local: WorkEntry = {
+    id: "w1",
+    title: "いじめられっ子",
+    folderPath: "C:/小説/いじめられっ子",
+    registeredAt: "2026-08-29T00:00:00.000Z",
+  };
+
+  const browser: WorkEntry = {
+    ...local,
+    folderPath: "vscode-vfs://github/o/r/作品",
+  };
+
+  test("手元のファイルの鍵は、これまでと同じ", () => {
+    // **変えてはいけない。** 既にある記録と食い違うと、過去の分が読めなくなる
+    expect(fileCountKeyFor(local, "C:/小説/いじめられっ子/本文/第1話.md")).toBe(
+      "本文/第1話.md"
+    );
+  });
+
+  test("符号化されたURIでも、走査の道と同じ鍵になる", () => {
+    const encoded =
+      "vscode-vfs://github/o/r/%E4%BD%9C%E5%93%81/%E6%9C%AC%E6%96%87/%E7%AC%AC1%E8%A9%B1.md";
+    const raw = "vscode-vfs://github/o/r/作品/本文/第1話.md";
+
+    expect(fileCountKeyFor(browser, encoded)).toBe("本文/第1話.md");
+    expect(fileCountKeyFor(browser, raw)).toBe("本文/第1話.md");
+  });
+
+  test("作品フォルダー自体が符号化されていても揃う", () => {
+    // 登録の経路によって、`folderPath` は符号化されていることがある
+    const encodedWork: WorkEntry = {
+      ...local,
+      folderPath: "vscode-vfs://github/o/r/%E4%BD%9C%E5%93%81",
+    };
+
+    expect(
+      fileCountKeyFor(encodedWork, "vscode-vfs://github/o/r/作品/本文/第1話.md")
+    ).toBe("本文/第1話.md");
   });
 });

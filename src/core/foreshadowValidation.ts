@@ -124,12 +124,16 @@ export function validateForeshadowCandidates(
       continue;
     }
 
-    // **指示の言葉がそのまま返ってくる**（この作品で繰り返し起きた失敗3）。
-    // 名前と引用のどちらに来ても、その候補は中身が無い
-    if (
-      isEmptyAnswer(label, FORESHADOW_DETECT_HINTS) ||
-      isEmptyAnswer(quote, FORESHADOW_DETECT_HINTS)
-    ) {
+    // **指示の言葉がそのまま返ってくる**（この作品で繰り返し起きた失敗3）
+    if (isEmptyAnswer(label, FORESHADOW_DETECT_HINTS)) {
+      rejected.push({ raw: item, reason: "placeholder" });
+      continue;
+    }
+    // **引用は「本文に在るか」で決める。** ヒント語を含むかは見ない——
+    // 指示語をなぞっただけの引用は、このあとの逐語照合で落ちる。
+    // 逆に、ヒント語（「何を示唆しているか」など日本語として自然な句）が
+    // たまたま入った**本物の引用**を、ここで捨ててはいけない
+    if (isPlaceholderText(quote)) {
       rejected.push({ raw: item, reason: "placeholder" });
       continue;
     }
@@ -238,7 +242,9 @@ export function validateForeshadowResolutions(
       rejected.push({ raw: item, reason: "unknown_id" });
       continue;
     }
-    if (isEmptyAnswer(quote, FORESHADOW_RESOLVE_HINTS)) {
+    // **引用は「本文に在るか」で決める**（配置の検知と同じ理由）。
+    // 指示語をなぞっただけの引用は、このあとの逐語照合で落ちる
+    if (isPlaceholderText(quote)) {
       rejected.push({ raw: item, reason: "placeholder" });
       continue;
     }
@@ -362,6 +368,20 @@ function shortenLabel(label: string): string {
 }
 
 /**
+ * 句読点・かっこを落とす（ヒント語との照合用）。
+ *
+ * AIは指示の言葉を返すとき、かっこや読点を添えてくる
+ * （`（何を示唆しているか）`）。**言葉そのものは同じ**なので、
+ * これらを落としてから比べる。
+ */
+function normalizeForHintMatch(text: string): string {
+  return normalizeForComparison(text).replace(
+    /[、。，．,.:：;；!！?？「」『』（）()〔〕【】《》〈〉[\]{}｛｝“”"'’‘]/gu,
+    ""
+  );
+}
+
+/**
  * 中身のつもりで書かれた「中身が無い」言葉か。
  *
  * 2種類ある。**どちらも実データで返ってきた形である。**
@@ -371,12 +391,17 @@ function shortenLabel(label: string): string {
  *   2. **プロンプトの出力例に書いた言い換えそのもの**
  *      （「一覧の見出しにする名前」など）。指示の言葉は、そのまま
  *      答えとして返ってくる（`CLAUDE.md` の繰り返し起きた失敗3）
+ *
+ * **2は「丸ごと同じ」ときだけ弾く。** 以前は部分一致で見ていたため、
+ * 「この時計が**何を示唆しているか**は第3話ではまだ明かされない」のような
+ * 正当な説明まで空扱いになっていた。ヒント語は「何を示唆しているか」など
+ * 日本語として自然な言い回しなので、本物の説明の中にも普通に現れる。
  */
 function isEmptyAnswer(text: string, hints: readonly string[]): boolean {
   if (isPlaceholderText(text)) return true;
-  const body = normalizeForComparison(text);
+  const body = normalizeForHintMatch(text);
   if (!body) return true;
-  return hints.some((hint) => body.includes(normalizeForComparison(hint)));
+  return hints.some((hint) => body === normalizeForHintMatch(hint));
 }
 
 /** 中身の無い言葉が来たら、空にする（書いてあることにしない） */

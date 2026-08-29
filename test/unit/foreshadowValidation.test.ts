@@ -134,7 +134,10 @@ describe("配置の候補（P-25）", () => {
   });
 
   test("指示の言葉が返ってきたら弾く", () => {
-    // 「該当なし」も、プロンプトの出力例に書いた言い換えも、中身ではない
+    // 「該当なし」も、プロンプトの出力例に書いた言い換えも、中身ではない。
+    // **引用は「本文に在るか」で落ちる**（指示語をなぞっただけの引用は、
+    // 逐語照合を通らない）ので、理由が placeholder ではなく quote_not_found
+    // になる。どちらにせよ、その候補は作者に見せない
     const result = detect([
       candidate({ label: "該当なし" }),
       candidate({ label: "一覧の見出しにする名前" }),
@@ -145,8 +148,51 @@ describe("配置の候補（P-25）", () => {
     expect(result.rejected.map((entry) => entry.reason)).toEqual([
       "placeholder",
       "placeholder",
-      "placeholder",
+      "quote_not_found",
     ]);
+  });
+
+  /**
+   * ヒント語（「何を示唆しているか」など）は**日本語として自然な言い回し**
+   * なので、本物の説明の中にも普通に現れる。部分一致で見ていたため、
+   * 正当な示唆が空扱いになり、引用に指示語が混ざった候補が丸ごと捨てられた。
+   */
+  test("ヒント語を含むだけの説明は、空扱いにしない", () => {
+    const result = detect([
+      candidate({
+        note: "この時計が何を示唆しているかは第3話ではまだ明かされない",
+      }),
+    ]);
+
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].note).toBe(
+      "この時計が何を示唆しているかは第3話ではまだ明かされない"
+    );
+  });
+
+  test("ヒント語そのもの（かっこ付きも）は、空扱いにする", () => {
+    // 指示の言葉は、そのまま答えとして返ってくる
+    const bare = detect([candidate({ note: "何を示唆しているか" })]);
+    const bracketed = detect([candidate({ note: "（何を示唆しているか）" })]);
+
+    expect(bare.accepted[0].note).toBe("");
+    expect(bracketed.accepted[0].note).toBe("");
+  });
+
+  /**
+   * **ヒント語が混ざっていても、本文に在る引用は採る。**
+   * 落とすのは逐語照合の仕事であって、言葉の見た目ではない。
+   */
+  test("ヒント語を含む引用でも、本文に在れば採用する", () => {
+    const result = detect([
+      candidate({
+        label: "銀の懐中時計",
+        quote: "銀の懐中時計を、彼はしまい込んだ",
+        note: "何を示唆しているかは、まだ書かれていない",
+      }),
+    ]);
+
+    expect(result.accepted).toHaveLength(1);
   });
 
   test("示唆が中身の無い言葉なら、空にして候補は残す", () => {
@@ -285,11 +331,38 @@ describe("回収の候補（P-26）", () => {
   });
 
   test("指示の言葉が返ってきたら弾く", () => {
+    // **引用は「本文に在るか」で落とす。** 指示語をなぞっただけの引用は
+    // 逐語照合を通らないので、理由は quote_not_found になる。
+    // 見た目で弾かないのは、ヒント語（「どう回収されたか」など日本語として
+    // 自然な句）を含む**本物の引用**まで捨ててしまうためである
     const result = resolve([
       { id: "foreshadow_001", quote: "回収している箇所の引用", note: "" },
     ]);
 
-    expect(result.rejected[0].reason).toBe("placeholder");
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected[0].reason).toBe("quote_not_found");
+  });
+
+  test("ヒント語を含むだけの説明は、空扱いにしない", () => {
+    const result = resolve([
+      {
+        id: "foreshadow_001",
+        quote: "灯は黙って頷いた",
+        note: "どう回収されたかは、この場面では言葉にされない",
+      },
+    ]);
+
+    expect(result.accepted[0].note).toBe(
+      "どう回収されたかは、この場面では言葉にされない"
+    );
+  });
+
+  test("ヒント語そのものは、空扱いにする", () => {
+    const result = resolve([
+      { id: "foreshadow_001", quote: "灯は黙って頷いた", note: "どう回収されたか" },
+    ]);
+
+    expect(result.accepted[0].note).toBe("");
   });
 
   test("同じ伏線を二度回収したことにしない", () => {

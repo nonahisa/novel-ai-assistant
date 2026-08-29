@@ -101,8 +101,14 @@ export interface StartOptions {
   endpoint: string;
   /** 設定 `novelai.lmstudio.cliPath` で明示された場所 */
   cliPath?: string;
-  /** 起動を待つ上限 */
+  /** 起動を待つ上限（疎通のポーリングの締切） */
   timeoutMs?: number;
+  /**
+   * `lms server start` の**終了**を待つ上限。
+   *
+   * 既定は10秒。ここで打ち切っても子は殺さない（下の `defaultRunCli`）。
+   */
+  spawnWaitMs?: number;
   /** 疎通確認。テストから差し替えられるようにする */
   probe?: (endpoint: string) => Promise<boolean>;
   /**
@@ -114,6 +120,16 @@ export interface StartOptions {
    */
   runCli?: (cli: string, args: string[]) => Promise<CliOutcome>;
 }
+
+/**
+ * `lms server start` の終了を待つ既定の上限。
+ *
+ * **待ち切らずに先へ進む。** LM Studio本体が立ち上がっていないとき、
+ * `lms server start` は本体の起動から始めるので、**戻ってこないことがある**。
+ * 上限が無いと進捗表示が永久に出たままになる（作者は何が起きているか
+ * 分からない）。打ち切っても、このあとの疎通のポーリングで結果は分かる。
+ */
+const DEFAULT_SPAWN_WAIT_MS = 10000;
 
 /** `lms` を起動した結果。待っても終わらなければ `running` */
 export type CliOutcome =
@@ -141,9 +157,11 @@ export function serverPort(endpoint: string): number {
 /**
  * LM Studioのサーバーを起動し、応答するまで待つ。
  *
- * `lms server start` は**開始を指示して戻る**コマンドで、Ollamaの `serve`
- * のように動き続けるわけではない。そのため切り離し（`detached`）は要らず、
- * 終了を待ってから疎通を確かめる。
+ * `lms server start` は**開始を指示して戻る**コマンドのつもりだったが、
+ * **LM Studio本体が立ち上がっていないときは戻ってこない**（本体の起動から
+ * 始まる）。そこでOllamaと同じく切り離して（`detached`）起こし、終了待ちは
+ * `spawnWaitMs` で打ち切って疎通のポーリングへ進む。**打ち切っても子は
+ * 殺さない**——起動途中のLM Studioを殺してしまう。
  */
 export async function startLmStudioServer(
   options: StartOptions
@@ -153,7 +171,9 @@ export async function startLmStudioServer(
 
   const probe = options.probe ?? defaultProbe;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const runCli = options.runCli ?? defaultRunCli;
+  const spawnWaitMs = options.spawnWaitMs ?? DEFAULT_SPAWN_WAIT_MS;
+  const runCli =
+    options.runCli ?? ((c: string, a: string[]) => defaultRunCli(c, a, spawnWaitMs));
   const deadline = Date.now() + timeoutMs;
 
   // `-p` の長い形。ポートを省くとLM Studio側の既定になり、
@@ -197,27 +217,43 @@ export async function startLmStudioServer(
 }
 
 /**
- * `lms` を起動し、終わるまで待つ。
+ * `lms` を起動し、終わるのを上限まで待つ。
  *
  * 出力は捨てる（`stdio: "ignore"`）。成否は終了コードと、
  * このあとの疎通確認で判断できる。
+ *
+ * **切り離して起こし、待ち切れなければ `running` を返す。** LM Studio本体が
+ * 立ち上がっていないと `lms server start` は本体の起動から始めるため、
+ * 分単位で戻らないことがある。待ち続けると進捗表示が出たままになるので、
+ * `waitMs` で打ち切って疎通のポーリングへ譲る。**子は kill しない**——
+ * ここで殺すと、起動しかけたLM Studioを自分で止めることになる
+ * （Ollamaの `serve` を切り離すのと同じ考え方）。
  */
-function defaultRunCli(cli: string, args: string[]): Promise<CliOutcome> {
+function defaultRunCli(
+  cli: string,
+  args: string[],
+  waitMs = DEFAULT_SPAWN_WAIT_MS
+): Promise<CliOutcome> {
   return new Promise<CliOutcome>((resolve) => {
     let settled = false;
     const finish = (outcome: CliOutcome) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       resolve(outcome);
     };
+    const timer = setTimeout(() => finish({ kind: "running" }), waitMs);
 
     try {
       const child = spawn(cli, args, {
+        detached: true,
         stdio: "ignore",
         windowsHide: true,
       });
       child.once("error", (e: Error) => finish({ kind: "error", message: e.message }));
       child.once("exit", (code) => finish({ kind: "exited", code }));
+      // VS Codeを閉じてもサーバーが残るようにする（手で起動したのと同じ状態）
+      child.unref();
     } catch (e) {
       finish({
         kind: "error",
@@ -325,6 +361,88 @@ export function decideLoadContextLength(
 }
 
 /**
+ * これ以上は短くしない長さ。
+ *
+ * 8192 は LM Studio 側の既定と同じくらいで、ここまで下げても載らないなら
+ * **文脈の長さが原因ではない**（モデルそのものが機械に対して大きい）。
+ * さらに下げても、通ったところで本文がまともに入らない。
+ */
+const MIN_LOAD_CONTEXT_LENGTH = 8192;
+
+/** 読み込みを試す回数の上限。断られるたびに数十秒かかるので、粘りすぎない */
+const MAX_LOAD_ATTEMPTS = 4;
+
+/**
+ * 読み込みを試す文脈の長さを、長いほうから順に並べる。
+ *
+ * **既定（設定 0）はモデルの最大で読み込む**ので、メモリの足りない機械では
+ * LM Studio の安全装置に断られる。そこで断られたら半分にして試し直す——
+ * 以前はここで諦めており、`ensureConfigured` が undefined を返して
+ * **AI機能が丸ごと動かなくなっていた**（12b を未読込のまま選んだ機械で、
+ * 誤字脱字も相談も一切動かない）。
+ *
+ * 下限（8192）より短くはしない。そこまで下げても断られるなら、
+ * 文脈の長さでは解決しない。
+ */
+export function contextLengthRetrySteps(
+  start: number,
+  options: { maxAttempts?: number; floor?: number } = {}
+): number[] {
+  const maxAttempts = options.maxAttempts ?? MAX_LOAD_ATTEMPTS;
+  const floor = options.floor ?? MIN_LOAD_CONTEXT_LENGTH;
+  const first = Math.floor(start);
+  // モデルの最大がもともと下限より短いことがある。**引き上げない**
+  if (!Number.isFinite(first) || first <= floor) return [first];
+
+  const steps = [first];
+  while (steps.length < maxAttempts) {
+    const next = Math.floor(steps[steps.length - 1] / 2);
+    if (next <= floor) {
+      steps.push(floor);
+      break;
+    }
+    steps.push(next);
+  }
+  return steps;
+}
+
+/**
+ * メモリ不足で断られたか。
+ *
+ * LM Studio の安全装置（guardrails）が出す言い回しで見分ける。
+ * **これだけを再試行の対象にする**——モデル名の間違いなど、
+ * 短くしても直らない失敗を何度も試すと作者を待たせるだけである。
+ */
+export function isInsufficientResources(detail: string | undefined): boolean {
+  return /insufficient system resources/i.test(detail ?? "");
+}
+
+/** 「読み込み済み」と確かめたことを覚えておく長さ */
+export const LOAD_CONFIRM_TTL_MS = 30000;
+
+/**
+ * 「読み込み済み」と確かめた記憶が、まだ使えるか。
+ *
+ * AI機能を呼ぶたびに `readModelLoadState` でLM Studioへ聞きに行くと、
+ * 設定資料パネルの相談では**質問のたびに**HTTPの往復が入る。
+ * 載せ替えはLM Studioの画面で人が行うので、数十秒の古さは害にならない。
+ *
+ * **覚えるのは「読み込み済み」だけである**（CLAUDE.md 規則5「失敗から
+ * 学習しない」）。未読込・読み込み失敗を覚えると、作者がLM Studioの画面で
+ * 載せ直しても、こちらは古い判断のまま動き続ける。
+ */
+export function isRecentlyConfirmed(
+  confirmedAt: number | undefined,
+  now: number,
+  ttlMs: number = LOAD_CONFIRM_TTL_MS
+): boolean {
+  if (confirmedAt === undefined) return false;
+  // 時計が巻き戻った（スリープ復帰など）ときは、覚えを捨てて聞き直す
+  if (now < confirmedAt) return false;
+  return now - confirmedAt < ttlMs;
+}
+
+/**
  * モデルを、文脈の長さを指定して読み込ませる。
  *
  * **`lms unload` は呼ばない。** 読み込み済みのモデルを勝手に外すと、
@@ -364,9 +482,34 @@ export async function loadLmStudioModel(
   };
 }
 
-/** 通知に載る長さへ切る。原因の見当がつく先頭を残す */
+/**
+ * 通知に載る長さへ切る。**末尾を残す。**
+ *
+ * `lms load` の失敗の理由（「insufficient system resources … requires
+ * approximately 44.87 GB」等、約330字）は出力の**最後**に出る。先頭を残すと、
+ * 進捗バーの再描画で埋まった出力では理由が落ち、`isInsufficientResources`
+ * が見逃して**文脈を下げる再試行が走らない**。理由の1文が丸ごと入る長さにする
+ */
 function trimOutput(output: string): string {
-  return output.trim().slice(0, 300);
+  const trimmed = output.trim();
+  return trimmed.length <= 600 ? trimmed : trimmed.slice(trimmed.length - 600);
+}
+
+/** `lms load` の出力を溜めておく上限（末尾だけ残す） */
+const LOAD_OUTPUT_TAIL_CHARS = 4096;
+
+/**
+ * 末尾だけを残す。
+ *
+ * **溜め込まない。** `lms load` は読み込み中、進捗バーを何度も描き直す
+ * （同じ行を書き換えるために制御文字ごと送り直す）ので、大きいモデルでは
+ * 数MBになる。失敗の理由は**最後に出る**ので、末尾だけあれば足りる。
+ */
+export function keepTail(
+  text: string,
+  maxChars: number = LOAD_OUTPUT_TAIL_CHARS
+): string {
+  return text.length <= maxChars ? text : text.slice(text.length - maxChars);
 }
 
 /**
@@ -399,12 +542,13 @@ function defaultLoadCli(
 
     try {
       child = spawn(cli, args, { windowsHide: true });
-      // 進み具合は標準出力、失敗の理由は標準エラーに出る。両方を集める
+      // 進み具合は標準出力、失敗の理由は標準エラーに出る。両方を集めるが、
+      // **末尾だけ残す**（進捗バーの描き直しで数MBになる。`keepTail`）
       child.stdout?.on("data", (chunk: Buffer) => {
-        output += chunk.toString();
+        output = keepTail(output + chunk.toString());
       });
       child.stderr?.on("data", (chunk: Buffer) => {
-        output += chunk.toString();
+        output = keepTail(output + chunk.toString());
       });
       child.once("error", (e: Error) =>
         finish({ kind: "error", message: e.message })
@@ -418,6 +562,16 @@ function defaultLoadCli(
     }
   });
 }
+
+/**
+ * 読み込む文脈の長さを、作者が自分で決められることを伝える一言。
+ *
+ * **設定の名前をそのまま書く。** 「設定で小さくできます」だけでは、
+ * どこを触ればよいのか分からない（プログラマではない作者の環境）。
+ * 生成時の失敗（`ai/types.ts` の `recoveryForAIError`）とも同じ文言にする。
+ */
+export const LOAD_CONTEXT_SETTING_HINT =
+  "読み込む文脈の長さは設定 novelai.lmstudio.loadContextLength で小さくできます。";
 
 /** 読み込みに失敗した理由を、作者が次に取れる操作つきで説明する */
 export function describeLoadFailure(outcome: LoadOutcome): string {
@@ -436,11 +590,15 @@ export function describeLoadFailure(outcome: LoadOutcome): string {
     case "load_failed": {
       const detail = outcome.detail ?? "";
       // **メモリ不足はいちばん多く、直し方も違う。** 先に言う
-      // （生成時の失敗〈`lmstudioProvider.ts`〉と同じ言い方に揃える）
-      const head = /insufficient system resources/i.test(detail)
+      // （生成時の失敗〈`lmstudioProvider.ts`〉と同じ言い方に揃える）。
+      // **設定の名前まで出す。** 「小さいモデルを選べ」しか言われないと、
+      // いま使いたいモデルを諦めるほかに手が無いように見える。実際には
+      // 文脈を短くすれば載ることが多い（こちらでも半分ずつ試している）
+      const head = isInsufficientResources(detail)
         ? "メモリ不足の見込みで読み込みを止めました（LM Studio の安全装置）。" +
           "より小さいモデルを選ぶか、LM Studioの設定で" +
-          "モデル読み込みの安全装置（guardrails）を確認してください。"
+          "モデル読み込みの安全装置（guardrails）を確認してください。" +
+          LOAD_CONTEXT_SETTING_HINT
         : "LM Studioがモデルを読み込めませんでした。";
       return detail ? `${head}LM Studio の説明：${detail}` : head;
     }

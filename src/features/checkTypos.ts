@@ -113,7 +113,17 @@ export async function checkTypos(
 
   let modelInfo = await registry.resolveModelInfo("typo");
   if (!modelInfo) {
-    if (!(await confirmProviderReachable(resolved.provider, "誤字脱字の検知"))) {
+    // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
+    // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）。
+    // ここは「モデル情報が取れない」＝サーバーが止まっている経路そのもので、
+    // 渡さないとJITが短い文脈で載せてしまう
+    if (
+      !(await confirmProviderReachable(
+        resolved.provider,
+        "誤字脱字の検知",
+        resolved.model
+      ))
+    ) {
       return undefined;
     }
     modelInfo = await registry.resolveModelInfo("typo");
@@ -321,7 +331,13 @@ export async function checkTypos(
   const pending = chunks.filter((c) => !cache.get(c.hash, cacheKeyBase));
 
   if (pending.length > 0) {
-    if (!(await confirmProviderReachable(resolved.provider, "誤字脱字の検知"))) {
+    if (
+      !(await confirmProviderReachable(
+        resolved.provider,
+        "誤字脱字の検知",
+        resolved.model
+      ))
+    ) {
       return undefined;
     }
     const estimateMinutes = Math.ceil((pending.length * 15) / 60);

@@ -141,6 +141,14 @@ export interface ContradictionRunResult {
   rejectedCount: number;
   /** 応答が読めなかったチャンク数 */
   failedChunks: number;
+  /**
+   * **本文そのものを読めなかった話の数**（AIへ渡せていない。ログに詳細）。
+   *
+   * **黙って落とさない。** 文字コードの壊れた話やロックされた話が1つあると、
+   * その話だけ検知の対象から抜けるのに、作者には「その話には何も無い」と
+   * 見える。
+   */
+  unreadableEpisodes: number;
   cancelled: boolean;
   /** 処理したチャンク数 */
   processedChunks: number;
@@ -189,7 +197,8 @@ export async function checkContradictions(
 
   const tasks = await collectChunks(work, registry, options);
   if (!tasks) return undefined;
-  const { chunks, chapterLabelByFile, chunkNote, tier } = tasks;
+  const { chunks, chapterLabelByFile, chunkNote, tier, unreadableEpisodes } =
+    tasks;
   if (chunks.length === 0) {
     vscode.window.showWarningMessage("検知できる本文がありませんでした。");
     return undefined;
@@ -235,7 +244,15 @@ export async function checkContradictions(
 
   const pending = chunks.filter((chunk) => !cache.get(chunk.hash, cacheKeyBase));
   if (pending.length > 0) {
-    if (!(await confirmProviderReachable(resolved.provider, "矛盾検知"))) {
+    // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
+    // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）
+    if (
+      !(await confirmProviderReachable(
+        resolved.provider,
+        "矛盾検知",
+        resolved.model
+      ))
+    ) {
       return undefined;
     }
     const confirm = await vscode.window.showInformationMessage(
@@ -541,6 +558,7 @@ export async function checkContradictions(
     issues: sortContradictions(dedupe(issues)),
     rejectedCount,
     failedChunks,
+    unreadableEpisodes,
     cancelled,
     processedChunks,
     verifyNote,
@@ -871,6 +889,13 @@ async function collectChunks(
        * 2回の結果が食い違ったときにどちらで動いたのか分からなくなる。
        */
       tier: CapabilityTier | undefined;
+      /**
+       * 読めなかった話の数。
+       *
+       * **黙って落とさない。** その話だけ検知の対象から抜けるのに、
+       * 作者には「その話には何も無い」と見える。
+       */
+      unreadableEpisodes: number;
     }
   | undefined
 > {
@@ -893,13 +918,21 @@ async function collectChunks(
 
   const chunks: Chunk[] = [];
   const chapterLabelByFile = new Map<string, string>();
+  let unreadableEpisodes = 0;
 
   for (const episode of targets) {
     if (episode.hasConflictMarkers) continue;
     let text: string;
     try {
       text = (await readTextFile(episode.filePath)).text;
-    } catch {
+    } catch (error) {
+      // **記録して数える。** 黙って落とすと、その話は検知の対象から
+      // 抜けたのに、作者には「何も無かった」と見える
+      unreadableEpisodes++;
+      logFailure("矛盾検知：本文の読み込み", {
+        ファイル: episode.filePath,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
       continue;
     }
 
@@ -930,5 +963,6 @@ async function collectChunks(
     chapterLabelByFile,
     chunkNote: describeChunkSettings(chunkSettings),
     tier: info?.tier,
+    unreadableEpisodes,
   };
 }

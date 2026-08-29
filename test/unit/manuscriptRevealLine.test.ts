@@ -1,4 +1,5 @@
 import { describe, expect, test, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
 
 /**
  * 提案パネルから本文へ飛ぶ道（作者の報告、2026-08-29）。
@@ -67,6 +68,7 @@ vi.mock("../../src/core/scanner", async (importOriginal) => {
 import {
   ManuscriptEditorProvider,
   manuscriptLedgerKey,
+  waitFor,
   type ManuscriptEditorDeps,
 } from "../../src/features/manuscriptEditor";
 import { MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE } from "../../src/core/manuscriptViewTypes";
@@ -167,5 +169,75 @@ describe("開いていないときの受け皿", () => {
   test("開けなかったら、素のエディタへ譲る", async () => {
     const taken = await makeProvider().revealLine(episodePath, 40);
     expect(taken).toBe(false);
+  });
+
+  test("諦める前に、しばらく待つ", async () => {
+    // 待たずに引くと、開いた直後の一瞬だけ「開いていない」になる
+    const started = Date.now();
+    await makeProvider().revealLine(episodePath, 40);
+
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1000);
+  });
+});
+
+/**
+ * 台帳に載るのを待つ（作者の報告「誤字脱字パネルから本文に飛びません」の
+ * 残り半分）。
+ *
+ * **`vscode.openWith` の完了は、台帳に載ったことを意味しない。**
+ * 台帳へ載せるのは `resolveCustomTextEditor` で、そちらは非同期に走る。
+ * 待たずに引くと「開いていない」と読めてしまい、呼び出し側が同じ原稿を
+ * **素のエディタでも開く**（1つの原稿が2つの面で開く）。
+ */
+describe("載るまで待つ", () => {
+  test("すぐ取れれば、待たない", async () => {
+    const started = Date.now();
+
+    await expect(waitFor(() => "載っている", 1000)).resolves.toBe("載っている");
+    expect(Date.now() - started).toBeLessThan(200);
+  });
+
+  test("少し遅れて載ったものを拾う", async () => {
+    let value: string | undefined;
+    setTimeout(() => {
+      value = "あとから載った";
+    }, 120);
+
+    await expect(waitFor(() => value, 1000, 20)).resolves.toBe("あとから載った");
+  });
+
+  test("上限まで載らなければ諦める（素のエディタへ譲る）", async () => {
+    const started = Date.now();
+
+    await expect(waitFor(() => undefined, 150, 20)).resolves.toBeUndefined();
+    // **必ず待ってから諦める**（0で戻ると、直す前と同じことになる）
+    expect(Date.now() - started).toBeGreaterThanOrEqual(140);
+  });
+});
+
+/**
+ * `.md` にしたら、元の `.txt` の面を閉じる。
+ *
+ * 閉じずに残すと、作者がそのタブへ戻って打ち、保存した瞬間に
+ * **消えたはずの .txt が復活する**（VS Code は無くなったファイルへも
+ * 保存できる）。同じ話が .txt と .md の2つになり、以後どちらが本物か
+ * 分からなくなる。
+ */
+describe(".md 化のあとの後片付け", () => {
+  const source = readFileSync("src/features/manuscriptEditor.ts", "utf8");
+  const suggest = source.slice(
+    source.indexOf("private async suggestMarkdown"),
+    source.indexOf("private async insertRuby")
+  );
+
+  test("変換に成功したら、元の面を閉じる", () => {
+    expect(suggest).toContain("panel.dispose()");
+  });
+
+  test("閉じるのは変換に成功したときだけ", () => {
+    // 断られた・失敗したときに閉じると、書きかけの面を勝手に消すことになる
+    const bail = suggest.indexOf("if (!converted) return;");
+    expect(bail).toBeGreaterThan(0);
+    expect(suggest.indexOf("panel.dispose()")).toBeGreaterThan(bail);
   });
 });

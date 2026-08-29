@@ -192,7 +192,18 @@ export async function extractCharacters(
   // そのため取れない場合は、先に疎通を回復させてから取り直す。
   let modelInfo = await registry.resolveModelInfo("extract");
   if (!modelInfo) {
-    if (!(await confirmProviderReachable(resolved.provider, "設定資料の抽出"))) return false;
+    // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
+    // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）。
+    // ここは「モデル情報が取れない」＝サーバーが止まっている経路そのものである
+    if (
+      !(await confirmProviderReachable(
+        resolved.provider,
+        "設定資料の抽出",
+        resolved.model
+      ))
+    ) {
+      return false;
+    }
     modelInfo = await registry.resolveModelInfo("extract");
   }
   if (!modelInfo) {
@@ -393,7 +404,15 @@ export async function extractCharacters(
     // AIを呼ぶ前に疎通を確認する。
     // ここで確認しないと、接続できないまま全チャンクを順に試し、
     // 待たされた末に「失敗 N 件」とだけ言われることになる。
-    if (!(await confirmProviderReachable(resolved.provider, "設定資料の抽出"))) return false;
+    if (
+      !(await confirmProviderReachable(
+        resolved.provider,
+        "設定資料の抽出",
+        resolved.model
+      ))
+    ) {
+      return false;
+    }
 
     const estimateMinutes = Math.ceil((pending.length * 20) / 60);
     // 表示する上限と、実際に送る上限を同じ値にする。

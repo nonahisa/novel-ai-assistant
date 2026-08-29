@@ -343,6 +343,16 @@ type RunningMessage = {
   total: number;
   /** 数えている単位。話ごとに送る検知では「話」になる */
   unit: string;
+  /**
+   * どの作品の検知か。
+   *
+   * **書庫では、いま見ているのと別の作品を走らせられる**（作品Aの結果を
+   * 読みながら、作品Bを検知する）。以前はそれを画面へ出さずに捨てていたので、
+   * **2作品目では進みが一切出なかった**（作者の報告「下に動いているときの
+   * チャンク数がでない」が、1作品目でしか直っていなかった）。
+   * 作品名を添えて出せば、見えている件数と関係のない数だとすぐ分かる。
+   */
+  workTitle: string;
 };
 
 type IssuesMessage = {
@@ -783,9 +793,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * 出す場所は画面側が決める。一覧が空なら中央、前の結果が出ているときは
    * 見出しの横に小さく——**読んでいる指摘の場所を奪わない**ため。
    *
-   * @param work どの作品の検知か。表示中の作品と違えば、画面には出さない
-   *   （別の作品を見ている最中に、見えている件数と関係のない数が動くと
-   *   何の数字か分からなくなる）
+   * @param work どの作品の検知か。**表示中と違っても出す**——作品名を
+   *   添えるので、見えている件数と関係のない数だとすぐ分かる。以前は
+   *   ここで捨てていたため、書庫で2作品目を走らせると進みが一切出なかった
    * @param unit 数えている単位。話ごとに送る検知（プロット逸脱）は「話」
    */
   showRunning(
@@ -795,11 +805,17 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     total: number,
     unit = "チャンク"
   ): void {
-    // **まだ何も出していないときは、これから届く作品の進みを出してよい。**
-    // 初めての検知では `this.work` がまだ無く、ここで弾くと1回目だけ
-    // 何も出ないことになる
-    if (this.work && this.work.id !== work.id) return;
-    this.post({ type: "running", label, done, total, unit });
+    this.post({
+      type: "running",
+      label,
+      done,
+      total,
+      unit,
+      // **題名を出すのは、別の作品の結果を映しているときだけ。**
+      // まだ何も出していないときや、同じ作品の検知では、何の数字かは
+      // 見れば分かる——毎回題名が付くと、かえって読みにくい
+      workTitle: this.work && this.work.id !== work.id ? work.title : "",
+    });
   }
 
   /**
@@ -810,7 +826,14 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * 「3/12」が出たまま残るのが、いちばん困る形である。
    */
   finishRunning(): void {
-    this.post({ type: "runningDone", label: "", done: 0, total: 0, unit: "" });
+    this.post({
+      type: "runningDone",
+      label: "",
+      done: 0,
+      total: 0,
+      unit: "",
+      workTitle: "",
+    });
   }
 
   /** 画面へ送る（開いていなければ何もしない） */

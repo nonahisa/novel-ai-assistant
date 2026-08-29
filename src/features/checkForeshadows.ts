@@ -74,6 +74,8 @@ export interface ForeshadowDetectRunResult {
   duplicateCount: number;
   /** 応答が読めなかったチャンク数 */
   failedChunks: number;
+  /** **本文そのものを読めなかった話の数**（AIへ渡せていない。ログに詳細） */
+  unreadableEpisodes: number;
   cancelled: boolean;
 }
 
@@ -87,6 +89,8 @@ export interface ForeshadowResolveRunResult {
   proposals: ForeshadowResolutionProposal[];
   rejectedCount: number;
   failedChunks: number;
+  /** **本文そのものを読めなかった話の数**（AIへ渡せていない。ログに詳細） */
+  unreadableEpisodes: number;
   cancelled: boolean;
   /** 見に行った未回収の件数。0件のときは実行そのものを断る */
   openCount: number;
@@ -118,7 +122,7 @@ export async function checkForeshadows(
   const info = await registry.resolveModelInfo("foreshadow");
   // コンテキスト長が取れないモデルでは、他の検知と同じ既定へ落とす
   const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192);
-  const { chunks, chapterLabelByFile } = await collectChunks(
+  const { chunks, chapterLabelByFile, unreadableEpisodes } = await collectChunks(
     work,
     chunkSettings
   );
@@ -142,7 +146,15 @@ export async function checkForeshadows(
 
   const pending = chunks.filter((chunk) => !cache.get(chunk.hash, cacheKeyBase));
   if (pending.length > 0) {
-    if (!(await confirmProviderReachable(resolved.provider, "伏線の検知"))) {
+    // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
+    // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）
+    if (
+      !(await confirmProviderReachable(
+        resolved.provider,
+        "伏線の検知",
+        resolved.model
+      ))
+    ) {
       return undefined;
     }
     const confirm = await vscode.window.showInformationMessage(
@@ -182,9 +194,6 @@ export async function checkForeshadows(
     label: record.label,
     plantedQuote: record.plantedQuote,
   }));
-  const knownLabels = ledger.records
-    .map((record) => record.label.trim())
-    .filter(Boolean);
 
   const candidates: AcceptedForeshadowCandidate[] = [];
   let rejectedCount = 0;
@@ -253,6 +262,12 @@ export async function checkForeshadows(
 
       async function ask(chunk: Chunk): Promise<unknown | undefined> {
         try {
+          // **`known` から毎回組み立てる。** 以前は開始時の写しを渡して
+          // いたため、この実行中に受け入れた候補が反映されず、AIが同じ候補を
+          // 何度も出し、そのたびに検証側が捨てていた（送る量も減らない）
+          const knownLabels = known
+            .map((entry) => entry.label.trim())
+            .filter(Boolean);
           const userPrompt = buildForeshadowDetectPrompt({
             chapterLabel:
               describeChunkScope(chunk, (filePath) =>
@@ -321,7 +336,8 @@ export async function checkForeshadows(
 
   logStep(
     `伏線の検知を終了: 候補 ${candidates.length}件 / 既存と重なり ${duplicateCount}件 / ` +
-      `本文と合わない ${rejectedCount}件 / 読めなかった ${failedChunks}件` +
+      `本文と合わない ${rejectedCount}件 / 読めなかった ${failedChunks}件 / ` +
+      `本文を開けなかった話 ${unreadableEpisodes}件` +
       (cancelled ? " / 中止された" : "")
   );
 
@@ -330,6 +346,7 @@ export async function checkForeshadows(
     rejectedCount,
     duplicateCount,
     failedChunks,
+    unreadableEpisodes,
     cancelled,
   };
 }
@@ -430,7 +447,7 @@ export async function checkForeshadowResolution(
   const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192);
   // **話をまたいでまとめない。** 「張った話より後か」を話数で決めるので、
   // 前後の話が1つの塊になっていると、その判断ができなくなる
-  const { chunks, chapterLabelByFile } = await collectChunks(
+  const { chunks, chapterLabelByFile, unreadableEpisodes } = await collectChunks(
     work,
     chunkSettings,
     { merge: false }
@@ -469,7 +486,13 @@ export async function checkForeshadowResolution(
     (entry) => !cache.get(entry.chunk.hash, cacheKeyBase)
   );
   if (pending.length > 0) {
-    if (!(await confirmProviderReachable(resolved.provider, "伏線の回収の確認"))) {
+    if (
+      !(await confirmProviderReachable(
+        resolved.provider,
+        "伏線の回収の確認",
+        resolved.model
+      ))
+    ) {
       return undefined;
     }
     const confirm = await vscode.window.showInformationMessage(
@@ -626,7 +649,8 @@ export async function checkForeshadowResolution(
 
   logStep(
     `伏線の回収の確認を終了: 候補 ${proposals.length}件 / ` +
-      `本文と合わない ${rejectedCount}件 / 読めなかった ${failedChunks}件` +
+      `本文と合わない ${rejectedCount}件 / 読めなかった ${failedChunks}件 / ` +
+      `本文を開けなかった話 ${unreadableEpisodes}件` +
       (cancelled ? " / 中止された" : "")
   );
 
@@ -634,6 +658,7 @@ export async function checkForeshadowResolution(
     proposals,
     rejectedCount,
     failedChunks,
+    unreadableEpisodes,
     cancelled,
     openCount: open.length,
   };
@@ -762,6 +787,14 @@ interface CollectedChunks {
   chunks: Chunk[];
   /** ファイルごとの見出し。**まとめたチャンクでも内訳ごとに引ける** */
   chapterLabelByFile: Map<string, string>;
+  /**
+   * 読めなかった話の数。
+   *
+   * **黙って落とさない。** 文字コードの壊れた話やロックされた話が1つあると、
+   * その話だけ検知の対象から抜けるのに、作者には「その話には何も無い」と
+   * 見える。誤字脱字検知の `failedChunks` と同じく、完了報告に添える。
+   */
+  unreadableEpisodes: number;
 }
 
 /**
@@ -778,6 +811,7 @@ async function collectChunks(
   const format = await readWorkFormat(work);
   const chunks: Chunk[] = [];
   const chapterLabelByFile = new Map<string, string>();
+  let unreadableEpisodes = 0;
 
   for (const episode of scan.episodes) {
     // 競合マーカーのあるファイルはAI処理をブロックする
@@ -785,7 +819,14 @@ async function collectChunks(
     let text: string;
     try {
       text = (await readTextFile(episode.filePath)).text;
-    } catch {
+    } catch (error) {
+      // **記録して数える。** 黙って落とすと、その話は検知の対象から
+      // 抜けたのに、作者には「何も無かった」と見える
+      unreadableEpisodes++;
+      logFailure("伏線の検知：本文の読み込み", {
+        ファイル: episode.filePath,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
       continue;
     }
     if (!text.trim()) continue;
@@ -806,7 +847,7 @@ async function collectChunks(
   }
 
   if (options.merge === false || chunkSettings.mergeChars <= 0) {
-    return { chunks, chapterLabelByFile };
+    return { chunks, chapterLabelByFile, unreadableEpisodes };
   }
 
   // **1話ずつ送ると、指示のほうが本文より大きい**（設計書6.23）。
@@ -815,6 +856,7 @@ async function collectChunks(
   return {
     chunks: mergeAdjacentChunks(chunks, { maxChars: chunkSettings.mergeChars }),
     chapterLabelByFile,
+    unreadableEpisodes,
   };
 }
 

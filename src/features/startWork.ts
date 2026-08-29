@@ -97,7 +97,16 @@ export async function openPlotFile(work: WorkEntry): Promise<void> {
  * 最初の1話だけ別の形になると、話数の解析でつまずく。
  */
 export async function createFirstEpisodeFile(
-  work: WorkEntry
+  work: WorkEntry,
+  /**
+   * 作ったときだけ呼ぶ。**執筆量の基準を置き直す**ために使う（設計書6.3.2）。
+   *
+   * 記録は「ファイル数が変わった回は数えない」（投稿サイトからの取り込みを
+   * 執筆に数えないため）ので、空の第1話を作ったまま置いておくと、
+   * **作者が書いて最初に保存した回がその決まりに当たり、「今日 +0字」に
+   * なって以後も数えられない。**
+   */
+  onCreated?: (work: WorkEntry) => Promise<void>
 ): Promise<string | undefined> {
   const config = await readWorkConfig(work);
   const p = workPaths(work, config);
@@ -118,6 +127,8 @@ export async function createFirstEpisodeFile(
       path.toUri(filePath),
       new TextEncoder().encode("")
     );
+    // 作ったときだけ基準を置き直す。既にあったなら、記録はもう追えている
+    await onCreated?.(work);
   }
 
   // **本文は原稿エディタ（横書き）で開く**（作者の指定、2026-08-29。

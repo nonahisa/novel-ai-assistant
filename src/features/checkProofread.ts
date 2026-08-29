@@ -123,7 +123,11 @@ export async function checkProofread(
 
   const pending = chunks.filter((chunk) => !cache.get(chunk.hash, cacheKeyBase));
   if (pending.length > 0) {
-    if (!(await confirmProviderReachable(resolved.provider, "推敲"))) {
+    // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
+    // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）
+    if (
+      !(await confirmProviderReachable(resolved.provider, "推敲", resolved.model))
+    ) {
       return undefined;
     }
     const maxIssues = chunks.reduce(

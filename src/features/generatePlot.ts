@@ -87,7 +87,15 @@ export async function generatePlot(
   );
   if (confirm !== "実行") return;
 
-  if (!(await confirmProviderReachable(resolved.provider, "プロットの逆算"))) {
+  // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
+  // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）
+  if (
+    !(await confirmProviderReachable(
+      resolved.provider,
+      "プロットの逆算",
+      resolved.model
+    ))
+  ) {
     return;
   }
 
