@@ -1,6 +1,28 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as path from "node:path";
+
+/**
+ * `spawn` を差し替える。
+ *
+ * **本物の `lms` は起こさない**（このファイルの方針）が、
+ * `spawn` へ渡している**引数のほうを確かめたい**回がある
+ * （`ELECTRON_RUN_AS_NODE` を落としているか）。差し替えないと、
+ * この機械にLM Studioが入っているかどうかで結果が変わる。
+ */
+const { spawnMock } = vi.hoisted(() => ({
+  spawnMock:
+    vi.fn<
+      (
+        cli: string,
+        args: string[],
+        options: { env?: NodeJS.ProcessEnv }
+      ) => unknown
+    >(),
+}));
+vi.mock("node:child_process", () => ({ spawn: spawnMock }));
+
 import {
+  childProcessEnv,
   cliCandidates,
   contextLengthRetrySteps,
   decideLoadContextLength,
@@ -570,6 +592,14 @@ describe("失敗理由の説明", () => {
     expect(message).toContain("Developer");
   });
 
+  test("タイムアウトには、手で起動してからやり直す道も添える", () => {
+    // 環境変数以外の原因で待たされることもある。本体さえ上がっていれば
+    // `lms server start` は0.2秒で通るので、逃げ道として案内する
+    const message = describeStartFailure({ ok: false, reason: "timeout" });
+
+    expect(message).toContain("手で起動してから");
+  });
+
   test("起動失敗は原因も添える", () => {
     const message = describeStartFailure({
       ok: false,
@@ -582,5 +612,102 @@ describe("失敗理由の説明", () => {
 
   test("成功したときは何も言わない", () => {
     expect(describeStartFailure({ ok: true })).toBe("");
+  });
+});
+
+/**
+ * 子へ渡す環境変数（作者の報告、2026-08-30：「自動起動しませんでした」）。
+ *
+ * VS Codeの拡張機能ホストは `ELECTRON_RUN_AS_NODE=1` を持っている。
+ * これを継いだ `lms` が起こす LM Studio 本体（Electron製）は
+ * **素のNodeとして起動して即終了する**ため、`lms server start` は
+ * 60秒の時間切れになる。外すと本体は7.3秒で上がった（実機で確認）。
+ */
+describe("子へ渡す環境変数", () => {
+  test("ELECTRON_RUN_AS_NODE だけを落として、ほかは残す", () => {
+    const cleaned = childProcessEnv({
+      ELECTRON_RUN_AS_NODE: "1",
+      PATH: "x",
+    });
+
+    expect(cleaned.PATH).toBe("x");
+    expect(cleaned).not.toHaveProperty("ELECTRON_RUN_AS_NODE");
+  });
+
+  test("元のオブジェクトは変えない", () => {
+    // `delete process.env.X` にすると拡張機能ホスト自身の環境を書き換える
+    const original: NodeJS.ProcessEnv = { ELECTRON_RUN_AS_NODE: "1", PATH: "x" };
+
+    childProcessEnv(original);
+
+    expect(original.ELECTRON_RUN_AS_NODE).toBe("1");
+  });
+
+  test("もともと無ければ、そのままの写しになる", () => {
+    expect(childProcessEnv({ PATH: "x", HOME: "/home/test" })).toEqual({
+      PATH: "x",
+      HOME: "/home/test",
+    });
+  });
+});
+
+/**
+ * `spawn` へ実際に渡している中身を固定する。
+ *
+ * **純粋関数を用意しただけでは、渡し忘れに気づけない。**
+ * 起動も読み込みも `lms` を経由して LM Studio 本体を起こすので、
+ * どちらの経路でも環境変数を落としていることを確かめる。
+ */
+describe("lms を起こすときの環境変数", () => {
+  /** `lms` を起こしたことにする子。終わりは知らせず、待ち切りに任せる */
+  function fakeChild() {
+    return {
+      once: () => undefined,
+      unref: () => undefined,
+      kill: () => undefined,
+      stdout: { on: () => undefined },
+      stderr: { on: () => undefined },
+    };
+  }
+
+  beforeEach(() => {
+    spawnMock.mockReset();
+    spawnMock.mockImplementation(() => fakeChild());
+    process.env.ELECTRON_RUN_AS_NODE = "1";
+  });
+
+  afterEach(() => {
+    delete process.env.ELECTRON_RUN_AS_NODE;
+  });
+
+  test("server start では ELECTRON_RUN_AS_NODE を継がせない", async () => {
+    await startLmStudioServer({
+      endpoint: "http://localhost:1234/v1",
+      cliPath: EXISTING_CLI,
+      // 終わりを知らせない子なので、待ち切って疎通の確認へ進ませる
+      spawnWaitMs: 5,
+      probe: async () => true,
+    });
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const options = spawnMock.mock.calls[0][2];
+    expect(options.env).toBeDefined();
+    expect(options.env).not.toHaveProperty("ELECTRON_RUN_AS_NODE");
+    // 環境ごと空にしていないか（PATHが消えると lms がモデルを探せない）
+    expect(Object.keys(options.env ?? {}).length).toBeGreaterThan(0);
+  });
+
+  test("load でも ELECTRON_RUN_AS_NODE を継がせない", async () => {
+    await loadLmStudioModel({
+      cliPath: EXISTING_CLI,
+      model: "google/gemma-4-e4b",
+      // 終わりを知らせない子なので、すぐ時間切れにして手を戻す
+      timeoutMs: 5,
+    });
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock.mock.calls[0][2].env).not.toHaveProperty(
+      "ELECTRON_RUN_AS_NODE"
+    );
   });
 });

@@ -73,7 +73,34 @@ type RoundOutcome =
   | "先頭のみ"
   | "末尾のみ"
   | "無し"
-  | "関所で止まった";
+  | "関所で止まった"
+  | "エラーで入らない";
+
+/**
+ * その回のエラーを「入らなかった」と数えてよいか。
+ *
+ * **一度でも短い長さで「両方」が返っていることが条件である。**
+ * 通ったことがあるなら、接続も鍵も残高も生きていると分かっている。
+ * そこから長くしていって落ちたなら、原因は長さのほうである
+ * （設計書6.27.11「切り捨てはクラウドならエラーで『入らない』と数える」）。
+ *
+ * **一度も通っていないうちのエラーは、失敗として報告する。** ここを
+ * 緩めると、鍵の間違いや残高不足を「入らない」と誤魔化して、
+ * 「実効の上限は0字です」のような無意味な結果を出してしまう。
+ *
+ * 作者が止めたとき（`aborted`）は、当然ながら数えない。
+ */
+export function countErrorAsTooLong(
+  hadSuccessBelow: boolean,
+  error: unknown
+): boolean {
+  if (!(error instanceof AIError)) return false;
+  if (error.kind === "aborted") return false;
+  return hadSuccessBelow;
+}
+
+/** ログと通知に載せる、エラー本文の長さ */
+const ERROR_EXCERPT_CHARS = 200;
 
 export async function measureContext(registry: AIRegistry): Promise<void> {
   // 測るのは「使用するAI」。機能ごとの割当は、それぞれの機能が
@@ -110,6 +137,8 @@ export async function measureContext(registry: AIRegistry): Promise<void> {
   /** 両方返った最大の字数 */
   let low = 0;
   let rounds = 0;
+  /** エラーを「入らなかった」と数えた回数。作者へも件数で伝える */
+  let errorsCountedAsTooLong = 0;
   let failure: unknown;
   let cancelled = false;
 
@@ -183,12 +212,28 @@ export async function measureContext(registry: AIRegistry): Promise<void> {
             return;
           }
           // **関所（6.27.10）は、この測定のときだけ素通りする**ので、
-          // ここへは普通は来ない（`ai/contextGuard.ts`）。残してあるのは
-          // 保険である——プロバイダ側が「長すぎる」を
-          // `context_overflow` で返してくることはありうる。
-          // どちらにせよ「その長さでは渡せない」ことに変わりはない
+          // 関所からここへ来ることはまず無い（`ai/contextGuard.ts`）。
+          // **来るのはプロバイダ側からである**——OpenAI互換の3つは
+          // 上限超えの400を `context_overflow` に分けるようにした
+          // （2026-08-30。それまでは `bad_response` で測定が止まっていた）。
+          // どちらにせよ「その長さでは渡せない」ことに変わりはないので、
+          // 失敗にせず「入らなかった」と数えて探索を続ける
           if (error instanceof AIError && error.kind === "context_overflow") {
             outcome = "関所で止まった";
+          } else if (countErrorAsTooLong(low > 0, error)) {
+            // **エラーで打ち切らない。** より短い長さで「両方」が返って
+            // いるのだから、接続も鍵も生きている。ここで止めると
+            // 作者には「AIにつながらない」に見える（実際の報告、
+            // さくら gpt-oss-120b で128,000字→183,239字のとき）
+            outcome = "エラーで入らない";
+            errorsCountedAsTooLong += 1;
+            const detail =
+              error instanceof AIError
+                ? `${error.kind}／${(error.detail ?? error.message).slice(0, ERROR_EXCERPT_CHARS)}`
+                : String(error).slice(0, ERROR_EXCERPT_CHARS);
+            logStep(
+              `読める長さの測定：${size}字 → エラーが返ったので「入らない」と数えました（${detail}）`
+            );
           } else {
             failure = error;
             return;
@@ -221,7 +266,15 @@ export async function measureContext(registry: AIRegistry): Promise<void> {
     return;
   }
 
-  const summary = describeProbeResult({ low, sides, ceilingChars });
+  // **数え方を隠さない。** エラーを「入らない」と読み替えた回があるなら、
+  // 何回そうしたかを結果に添える（黙って読み替えると、作者は
+  // 「全部きれいに測れた」と受け取る）
+  const summary =
+    describeProbeResult({ low, sides, ceilingChars }) +
+    (errorsCountedAsTooLong > 0
+      ? `途中で ${errorsCountedAsTooLong} 回、AIがエラーを返したため、` +
+        "その長さは入らないものとして数えました。"
+      : "");
   logStep(
     `読める長さの測定を終了: ${rounds}回 / ${summary}` +
       (cancelled ? "（中止したため、途中までの結果です）" : "")

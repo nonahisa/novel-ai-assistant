@@ -13,7 +13,11 @@ import { fetchJson } from "./httpClient";
 import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
 import { forgetSecret, logLine, registerSecret } from "../core/logger";
-import { isChatModel, isUnsupportedParameter } from "./openaiProvider";
+import {
+  asContextOverflowError,
+  isChatModel,
+  isUnsupportedParameter,
+} from "./openaiProvider";
 
 /**
  * さくらのAI Engine アダプタ。
@@ -277,6 +281,14 @@ export class SakuraProvider implements ApiKeyProvider {
         response = await this.post(body, headers, params.signal);
         break;
       } catch (error) {
+        // **上限超えは、指定を外して出し直しても直らない。** 先に見て
+        // 種別を分ける。実測（gpt-oss-120b、2026-08-30）では
+        // 「Input length (170068) exceeds model's maximum context length
+        // (131072).」が400で返り、`bad_response` に丸められていたため、
+        // 「読める長さを測る」がそこで打ち切られていた
+        const overflow = asContextOverflowError(error, LABEL);
+        if (overflow) throw overflow;
+
         if (
           body.response_format !== undefined &&
           isUnsupportedParameter(error, "response_format")

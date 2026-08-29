@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { childProcessEnv } from "./childProcessEnv";
 
 /**
  * Ollamaサーバーの起動を支援する。
@@ -123,6 +124,10 @@ export async function startOllama(
       detached: true,
       stdio: "ignore",
       windowsHide: true,
+      // 拡張機能ホストの環境をそのまま継がせない（`childProcessEnv.ts`）。
+      // Ollamaは Electron ではないので今のところ害は無いが、
+      // **同じ穴を2か所に残さない**——LM Studioでは60秒の時間切れになった
+      env: childProcessEnv(),
     });
 
     // spawn自体の失敗（実行ファイルが無い等）は非同期で飛んでくる

@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "「設定が前の話と食い違っていないか不安」「誤字脱字の見直しがつらい」「AIに原稿を触られたくない」——小説を書く人の困りごとを引き受けるVSCode拡張機能です。本文から設定資料を自動で作り、矛盾や誤字脱字を調べ、執筆量を記録します。AIは提案するだけで、原稿は書き換えません。無料の手元AI（Ollama / LM Studio）だけでも使え、その場合、原稿はパソコンの外へ出ません。",
-  "version": "0.26.10",
+  "version": "0.27.0",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -706,6 +706,12 @@
         "icon": "$(book)"
       },
       {
+        "command": "novelai.readManuscriptAloud",
+        "title": "原稿を読み上げる（音読推敲）",
+        "category": "小説執筆",
+        "icon": "$(unmute)"
+      },
+      {
         "command": "novelai.addEmphasis",
         "title": "傍点を付ける",
         "category": "小説執筆",
@@ -1184,6 +1190,13 @@
           "type": "string",
           "default": "",
           "markdownDescription": "原稿の画面で使う書体です。**原稿の画面の「書体」ボタンから選べます**（この端末に入っている書体だけが選べる形で並びます）。空にすると明朝体（游明朝→ヒラギノ明朝→MS明朝の順で、入っているものを使います）。ここへ直接書くこともできます（例：`\"Noto Serif JP\", serif`）。"
+        },
+        "novelai.manuscriptEditor.readAloudRate": {
+          "type": "number",
+          "default": 1.0,
+          "minimum": 0.5,
+          "maximum": 2.0,
+          "description": "読み上げの速さ。1が標準です（原稿の画面の「読み上げ」の列でも、その場だけ変えられます）。"
         },
         "novelai.logs.retentionDays": {
           "type": "number",

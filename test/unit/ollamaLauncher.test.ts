@@ -1,5 +1,25 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as path from "node:path";
+
+/**
+ * `spawn` を差し替える。
+ *
+ * 以前は「Node自身を起こす」ことで本物のOllamaを避けていたが、
+ * それでは**`spawn` へ渡している中身**（環境変数）を確かめられない。
+ * 差し替えれば、起動処理の枝も渡した引数も両方見られる。
+ */
+const { spawnMock } = vi.hoisted(() => ({
+  spawnMock:
+    vi.fn<
+      (
+        exe: string,
+        args: string[],
+        options: { env?: NodeJS.ProcessEnv }
+      ) => unknown
+    >(),
+}));
+vi.mock("node:child_process", () => ({ spawn: spawnMock }));
+
 import {
   checkSelectedExecutable,
   describeStartFailure,
@@ -88,6 +108,22 @@ describe("実行ファイルの探索", () => {
 });
 
 describe("起動処理", () => {
+  /** Ollamaを起こしたことにする子。失敗も終了も知らせない */
+  function fakeChild() {
+    return {
+      once: () => undefined,
+      // 起動処理は「エラーが来なければ起動したとみなす」ために
+      // 300ミリ秒後に購読を外す。外せないと落ちる
+      removeListener: () => undefined,
+      unref: () => undefined,
+    };
+  }
+
+  beforeEach(() => {
+    spawnMock.mockReset();
+    spawnMock.mockImplementation(() => fakeChild());
+  });
+
   test("実行ファイルが見つからなければ起動を試みない", async () => {
     const probe = vi.fn(async () => false);
 
@@ -111,7 +147,8 @@ describe("起動処理", () => {
 
     const outcome = await startOllama({
       endpoint: "http://localhost:11434",
-      // Node自体を起動して spawn の失敗経路を避ける（serveは解釈されず即終了する）
+      // 実在するファイルを渡す（`resolveExecutable` が存在を確かめるため）。
+      // 起こす処理そのものは差し替えてある
       executablePath: process.execPath,
       timeoutMs: 10000,
       probe,
@@ -119,6 +156,30 @@ describe("起動処理", () => {
 
     expect(outcome).toEqual({ ok: true });
     expect(probe).toHaveBeenCalledTimes(3);
+  });
+
+  /**
+   * **同じ穴を2か所に残さない**（LM Studioで60秒の時間切れになった原因）。
+   * Ollamaは Electron ではないので今のところ害は無いが、
+   * 拡張機能ホストの環境をそのまま子へ継がせない。
+   */
+  test("ELECTRON_RUN_AS_NODE を子へ継がせない", async () => {
+    process.env.ELECTRON_RUN_AS_NODE = "1";
+    try {
+      await startOllama({
+        endpoint: "http://localhost:11434",
+        executablePath: process.execPath,
+        timeoutMs: 1,
+        probe: async () => true,
+      });
+
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      const options = spawnMock.mock.calls[0][2];
+      expect(options.env).toBeDefined();
+      expect(options.env).not.toHaveProperty("ELECTRON_RUN_AS_NODE");
+    } finally {
+      delete process.env.ELECTRON_RUN_AS_NODE;
+    }
   });
 
   test("待っても応答しなければタイムアウトとして返す", async () => {

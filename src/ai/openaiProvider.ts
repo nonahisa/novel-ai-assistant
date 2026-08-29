@@ -261,6 +261,12 @@ export class OpenAIProvider implements ApiKeyProvider {
         response = await this.post(body, headers, params.signal);
         break;
       } catch (error) {
+        // **上限超えは、指定を外して出し直しても直らない。** 先に見て
+        // 種別を分ける（`context_overflow` にすると、呼び出し側が
+        // 本文を刻み直して再試行できる）
+        const overflow = asContextOverflowError(error, LABEL);
+        if (overflow) throw overflow;
+
         // 推論系モデルは temperature の指定自体を拒否する
         if (body.temperature !== undefined &&
             isUnsupportedParameter(error, "temperature")) {
@@ -348,6 +354,87 @@ export class OpenAIProvider implements ApiKeyProvider {
 export function isChatModel(id: string): boolean {
   const lower = id.toLowerCase();
   return !NON_CHAT_HINTS.some((hint) => lower.includes(hint));
+}
+
+/**
+ * 「送ったものが上限に入らない」ときだけ現れる定型文。
+ *
+ * OpenAI互換のサーバ（OpenAI本家・vLLM・LM Studio）が、**上限超えの
+ * ときだけ**返す言い回しである。実測（さくらの gpt-oss-120b、
+ * 2026-08-30）で返ったのは次の本文だった。
+ *
+ * > Input length (170068) exceeds model's maximum context length (131072).
+ *
+ * **CLAUDE.md 規則5（HTTP 400を「要求の形が悪い」と決めつけない／
+ * エラー文から原因を当てにいかない）は守っている。** ここで見ているのは
+ * 「どの項目が悪いか」の当て推量ではなく、上限超えにしか出ない文である。
+ * 残高不足（`insufficient_quota` / `insufficient credit`）はこの文に
+ * ならないので、これまでどおり `bad_response` のまま流れる。
+ */
+const CONTEXT_OVERFLOW_PATTERNS: readonly RegExp[] = [
+  /maximum context length/i,
+  /context_length_exceeded/i,
+  /exceeds .*context/i,
+  /too many tokens/i,
+  /prompt is too long/i,
+];
+
+/**
+ * その失敗が「上限に入らなかった」か。
+ *
+ * **400のときだけ見る。** レート上限（429）や認証（401）の本文に
+ * 似た語が混ざっても、原因はまったく別である。
+ *
+ * `context_overflow` に分類できると、話ごと→半分と刻み直す再試行
+ * （`features/chunkRetry.ts` の `retryOnOverflow`）が効くようになり、
+ * 「読める長さを測る」も**その長さは入らない**と数えて先へ進める。
+ */
+export function classifyContextOverflow(
+  status: number,
+  bodyText: string
+): boolean {
+  if (status !== 400) return false;
+  return CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(bodyText));
+}
+
+/**
+ * HTTPの失敗の通知文から、状態番号を読む。
+ *
+ * `AIError` は番号を持たないので、`httpClient.ts` の `toStatusError` が
+ * 組み立てた「(HTTP 400)」から読む。**読めなければ諦める**——
+ * 読めないものを400と決めつけると、別の原因を上限超えに化けさせる。
+ */
+function httpStatusOf(error: AIError): number | undefined {
+  const matched = error.message.match(/\(HTTP (\d{3})\)/);
+  return matched ? Number(matched[1]) : undefined;
+}
+
+/**
+ * 上限超えの400なら、`context_overflow` の `AIError` にして返す。
+ * それ以外は undefined（呼び出し側でこれまでどおり扱う）。
+ *
+ * **OpenAI互換の3つ（ChatGPT・さくら・LM Studio）から呼ぶ。** 同じ判定を
+ * 3か所へ写すと、片方だけ直る（`isUnsupportedParameter` と同じ扱い）。
+ */
+export function asContextOverflowError(
+  error: unknown,
+  label: string
+): AIError | undefined {
+  if (!(error instanceof AIError)) return undefined;
+  // 400は `bad_response` に丸められている。ほかの種別（残高・権限・
+  // レート上限）は、そもそも上限超えではない
+  if (error.kind !== "bad_response") return undefined;
+  const status = httpStatusOf(error);
+  if (status === undefined) return undefined;
+  if (!classifyContextOverflow(status, error.detail ?? "")) return undefined;
+
+  return new AIError(
+    `${label}へ送った内容が、モデルの読める長さを超えました。`,
+    "context_overflow",
+    // **本文を捨てない。** 実際の長さと上限が書かれており、
+    // どれだけ削ればよいかはここからしか分からない
+    error.detail
+  );
 }
 
 /** そのパラメータが未対応だと言われたか */

@@ -837,6 +837,24 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "（右クリックからその設定資料を開けます）。" +
               "横書きへの切り替えと、投稿サイト用のコピーもこの画面にあります。",
           },
+          // **耳で聞くと、目では気づかないものが見つかる**（設計書6.42）。
+          // 原稿エディタを開く操作の直後に置く——読み上げはあの画面の中の
+          // 機能で、資料生成や新作開始の仲間ではない
+          {
+            kind: "action",
+            command: "novelai.readManuscriptAloud",
+            label: "原稿を読み上げる（音読推敲）",
+            description: "AIを使わない",
+            icon: "unmute",
+            usesAI: false,
+            requiresWork: true,
+            detail:
+              "原稿エディタを開いて、読み上げの列を出します。" +
+              "**OSの声で読むので、料金はかかりませんし、原稿も外へ出ません。**" +
+              "読んでいる文を光らせながら進み、引っかかったところは" +
+              "「引っかかった」でシーンメモを残せます（そこで一時停止します）。" +
+              "**原稿はメモの1行以外、何も書き換えません。**",
+          },
           {
             kind: "action",
             command: "novelai.addRuby",

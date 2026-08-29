@@ -13,7 +13,10 @@ import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
 import { logLine } from "../core/logger";
 import { parseParameterSize } from "./sakuraProvider";
-import { isUnsupportedParameter } from "./openaiProvider";
+import {
+  asContextOverflowError,
+  isUnsupportedParameter,
+} from "./openaiProvider";
 
 /**
  * LM Studio アダプタ（設計書6.24）。
@@ -433,6 +436,12 @@ export class LmStudioProvider implements AIProvider {
         // 出し直しても同じところで落ちるので、ここで打ち切る
         const loadFailure = toModelLoadError(error, params.model);
         if (loadFailure) throw loadFailure;
+
+        // **上限超えも、指定の問題ではない。** 読み込んだ文脈の長さを
+        // 超えたときも400で返るので、種別を分けて呼び出し側が刻み直せる
+        // ようにする（判定はOpenAI互換の3つで共通。写しを作らない）
+        const overflow = asContextOverflowError(error, LABEL);
+        if (overflow) throw overflow;
 
         if (
           body.response_format !== undefined &&

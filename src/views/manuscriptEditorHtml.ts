@@ -104,6 +104,12 @@ button.on {
   background: var(--vscode-button-background);
   color: var(--vscode-button-foreground);
 }
+/* **使えないものは消さずに、押せなくして薄くする**（設計書5.8、
+   core/processAvailability.ts と同じ考え方）。消してしまうと
+   「あるはずのものが無い」に見え、なぜ使えないのかが分からない。
+   理由は隣に文で出す（読み上げなら #aloudNote） */
+button:disabled { opacity: 0.45; cursor: default; }
+button:disabled:hover { background: var(--vscode-button-secondaryBackground); }
 #bar .gap { flex: 1 1 auto; }
 #bar .sep {
   width: 1px;
@@ -111,6 +117,42 @@ button.on {
   background: var(--vscode-panel-border);
   margin: 0 2px;
 }
+
+/* ── 読み上げの列（音読推敲。設計書6.42） ─────────────
+   **道具箱とは別の列にする。** 読み上げは「いま何をしているところか」が
+   続いている操作（読んでいる・止めている・引っかかった）なので、上の帯へ
+   混ぜると、押すたびに他のボタンの中から探すことになる。
+   使わないあいだは列ごと畳んでおく */
+#aloud {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+body.aloud #aloud { display: flex; }
+#aloud .pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.85;
+}
+#aloud select {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 2px 4px;
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
+  border-radius: 3px;
+  background: var(--vscode-dropdown-background, var(--vscode-editor-background));
+  color: var(--vscode-dropdown-foreground, var(--vscode-foreground));
+  /* 声の名前は長い（Microsoft Nanami Online … のような形）。列を折らない */
+  max-width: 220px;
+}
+/* 使えない理由と、その場で起きたこと（声が止まった等）を出す */
+#aloudNote { opacity: 0.85; }
 
 /* ── 本文の面 ─────────────────────────── */
 /* **下段。** 道具箱（上）とは役目が違う——上は「いま見ている原稿をどう見るか」、
@@ -133,7 +175,7 @@ button.on {
   position: relative;
   overflow: hidden;
 }
-#write, #marks, #compose {
+#write, #marks, #compose, #aloudmarks {
   position: absolute;
   inset: 0;
   padding: 24px 28px;
@@ -174,6 +216,44 @@ button.on {
 /* 打っている間は隠す。**位置のずれた目印を出さない**——
    本文が変わってから新しい目印が届くまでの間、古い位置のまま残るため */
 #marks.stale { visibility: hidden; }
+
+/* **いま読み上げている文**（打つ面。設計書6.42。レビュー指摘、2026-08-29）。
+
+   ## textarea の選択で追わない
+   はじめの実装は setSelectionRange で文を選んでいた。**選択は「次に打った
+   字が置き換える範囲」**なので、読み上げ中にうっかり空白を打つと、
+   **一文がまるごと空白1字に置き換わる**（原稿が壊れる）。
+   さらに selectionchange が飛んでカーソルの記憶（lastCaret）が読み上げ
+   位置へ動き、あとの「ここにメモを足す」が作者の居た場所に刺さらない。
+
+   そこで、用語の重ね敷き（#marks）と同じ手で**背景だけを塗る層**を1枚
+   足した。**選択にもカーソルにも触らない。**
+
+   ## 打つ面の「下」に敷く
+   #marks（用語の色）は上に重ねるが、こちらは背景を塗るので上に置くと
+   textarea の字を覆う。DOMの並びで #write より前に置き、z-index も
+   与えない（＝下に敷かれる）。textarea の背景は透明なので、塗りが透ける。
+
+   ## 色は組んで書く面と同じ
+   面が変わったら色も変わる、では追いにくい（下の .mark-reading） */
+#aloudmarks {
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  /* 字は出さない（見えている字は textarea のもの）。塗りの位置だけを持つ */
+  color: transparent;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  tab-size: 4;
+  display: none;
+}
+body.aloud #aloudmarks { display: block; }
+/* 色は組んで書く面（::highlight(novelai-reading)）と同じ薄い水色にする。
+   面が変わったら色も変わる、では追いにくい */
+#aloudmarks .mark-reading {
+  background-color: rgba(64, 160, 255, 0.28);
+  border-radius: 2px;
+}
 /* **色は組んで書く面と同じ変数から取る**（画面ごとに違う色にしない）。
    角丸は塗りのためのものだったので、色にした今は要らない */
 .mark-character { color: var(--novelai-character); }
@@ -215,7 +295,7 @@ body.plain #marks .memo-line .mark { color: transparent; }
    ここから漏れており、縦書きのとき重ねる面だけ横書きで組まれて、色が
    本文と無関係な場所（空白）に浮いていた（実機の報告、2026-08-27） */
 body.vertical #write, body.vertical #marks,
-body.vertical #compose {
+body.vertical #compose, body.vertical #aloudmarks {
   writing-mode: vertical-rl;
   /* **upright にしない。** 全部を立てると、英数字が1文字ずつ縦に
      積まれる（2026 が4行になる）。既定の mixed は日本語の組版と
@@ -263,8 +343,10 @@ body.vertical.paged #surface { padding: 0; }
   color: var(--vscode-editor-foreground);
 }
 body.compose #compose { display: block; }
-/* 打つ面（と重ねる目印）は、この面が出ている間は隠す（描かせない） */
-body.compose #write, body.compose #marks { display: none; }
+/* 打つ面（と重ねる2枚の層）は、この面が出ている間は隠す（描かせない）。
+   組んで書く面の読み上げは Highlight API で塗るので、層は要らない */
+body.compose #write, body.compose #marks,
+body.compose #aloudmarks { display: none; }
 /* 行の段落。**打っている間に増える入れ物にも効かせる**——改行で作られる
    入れ物は環境によって p と div のどちらにもなりうる（直列化の側は
    どちらも行の切れ目として読む） */
@@ -389,6 +471,16 @@ body.vertical #compose .ellipsis {
 ::highlight(novelai-term-location) { color: var(--novelai-location); }
 ::highlight(novelai-term-ability) { color: var(--novelai-ability); }
 ::highlight(novelai-term-organization) { color: var(--novelai-organization); }
+/* **いま読み上げている文**（設計書6.42）。同じ仕掛け（CSS Custom Highlight
+   API）で置くので、DOMは変わらず、カーソルも取り消し履歴も動かない。
+
+   **用語は文字色、シーンメモは蛍光黄色**なので、こちらは薄い水色の背景に
+   する（3つが同時に載っても、どれがどれか分かる）。半透明にしてあるのは、
+   明るいテーマでも暗いテーマでも下地を透かして字が読めるようにするため
+   ——不透明に塗ると、暗いテーマで字が沈む */
+::highlight(novelai-reading) {
+  background-color: rgba(64, 160, 255, 0.28);
+}
 
 /* ── ルビ ─────────────────────────── */
 /* 組んで書く面は、本物の ruby 要素を組む（#compose ruby[data-src]） */
@@ -499,13 +591,38 @@ ruby > rt {
   <button id="emph" title="選んだ文字に傍点を付けます">傍点</button>
   <div class="sep"></div>
   <button id="copy" title="投稿サイトの記法に直してコピーします">投稿用にコピー</button>
+  <button id="aloudToggle" title="読み上げの操作を出し入れします。耳で聞くと、目では気づかないリズムの悪さや誤字が見つかります">読み上げ</button>
+  <div class="sep"></div>
   <button id="font" title="本文の書体を選びます">書体</button>
   <button id="smaller" title="文字を小さく">ー</button>
   <button id="bigger" title="文字を大きく">＋</button>
   <div class="gap"></div>
 </div>
 
+<div id="aloud">
+  <button id="aloudPlay" title="カーソルのある文から読み上げます。読んでいる最中に押すと一時停止します">▶ 読む</button>
+  <button id="aloudStop" title="読み上げを終えます">■ 終える</button>
+  <label class="pick">速さ
+    <select id="aloudRate" title="読み上げの速さ。変えると次の文から効きます（設定には残しません）">
+      <option value="0.5">0.5</option>
+      <option value="0.7">0.7</option>
+      <option value="0.85">0.85</option>
+      <option value="1">1</option>
+      <option value="1.15">1.15</option>
+      <option value="1.3">1.3</option>
+      <option value="1.5">1.5</option>
+      <option value="2">2</option>
+    </select>
+  </label>
+  <label class="pick">声
+    <select id="aloudVoice" title="読み上げに使う声。この端末に入っている日本語の声だけが並びます"></select>
+  </label>
+  <button id="aloudMark" title="いま読んでいる文の上にシーンメモの印を置いて、一時停止します">⚑ 引っかかった</button>
+  <span id="aloudNote"></span>
+</div>
+
 <div id="surface">
+  <div id="aloudmarks" aria-hidden="true"></div>
   <div id="marks" aria-hidden="true"></div>
   <textarea id="write" spellcheck="false" wrap="soft"></textarea>
   <div id="compose" spellcheck="false"></div>
@@ -531,6 +648,14 @@ ruby > rt {
   const write = document.getElementById("write");
   /** 打つ面に重ねる用語の色（設計書6.25.6） */
   const marks = document.getElementById("marks");
+  /**
+   * 読み上げている文の塗り（設計書6.42）。
+   *
+   * **打つ面の「下」に敷く別の層。** 用語の色（#marks）と同じ字送りで
+   * 同じ本文を置き、読んでいる文のところだけ背景を塗る。
+   * 枠合わせと転がしは #marks と一緒に行う（下の alignMarksBox）。
+   */
+  const aloudMarks = document.getElementById("aloudmarks");
   /** 用語の位置。右クリックで「どの用語の上か」を引くのに使う */
   let termSpans = [];
   /**
@@ -659,6 +784,9 @@ ruby > rt {
 
   dirButton.addEventListener("click", function () {
     vertical = vertical === false;
+    // **向きを変えたら読み上げを止める**（設計書6.42）。組み直しで光っている
+    // 場所の測り直しが要るうえ、切り替えの最中に声だけが続くと落ち着かない
+    aloudFinish();
     paint();
     remember();
   });
@@ -753,10 +881,18 @@ ruby > rt {
     send();
   });
 
-  /** 見えている場所を、打つ面から目印へ写す。**ずれると色が別の字に付く** */
+  /**
+   * 見えている場所を、打つ面から重ね敷きへ写す。**ずれると色が別の字に付く。**
+   *
+   * 層は2枚ある——用語の色（#marks）と、読み上げている文の塗り（#aloudmarks）。
+   * **どちらも同じ値で動かす**（片方だけだと、読み上げ中に転がしたときに
+   * 塗りだけが取り残される）。
+   */
   function syncMarksScroll() {
     marks.scrollTop = write.scrollTop;
     marks.scrollLeft = write.scrollLeft;
+    aloudMarks.scrollTop = write.scrollTop;
+    aloudMarks.scrollLeft = write.scrollLeft;
   }
 
   write.addEventListener("scroll", syncMarksScroll);
@@ -848,8 +984,14 @@ ruby > rt {
    * 変わるのに、本文は変わらないので測り直されなかった。
    */
   function alignMarksBox() {
-    marks.style.right = (write.offsetWidth - write.clientWidth) + "px";
-    marks.style.bottom = (write.offsetHeight - write.clientHeight) + "px";
+    const right = (write.offsetWidth - write.clientWidth) + "px";
+    const bottom = (write.offsetHeight - write.clientHeight) + "px";
+    marks.style.right = right;
+    marks.style.bottom = bottom;
+    // **読み上げの塗りも同じ枠にする**（設計書6.42）。折り返し幅がずれると、
+    // 塗られる字が1行ずつずれる（用語の色と同じ事情）
+    aloudMarks.style.right = right;
+    aloudMarks.style.bottom = bottom;
   }
 
   /**
@@ -1440,6 +1582,34 @@ ruby > rt {
         }
       }
       document.body.classList.toggle("plain", message.hasTerms === false);
+      /* ── 読み上げ（設計書6.42） ── */
+      if (typeof message.readAloudRate === "number") {
+        aloudApplyRate(message.readAloudRate);
+      }
+      // 覚えている声は、こちらがまだ何も持っていないときだけ受け取る
+      // （作者がその場で選び直したものを、あとから来た update で戻さない）
+      if (
+        aloudVoiceName === null &&
+        typeof message.readAloudVoice === "string"
+      ) {
+        aloudVoiceName = message.readAloudVoice;
+        aloudPaintVoices();
+      }
+      /*
+        **本文が変わったら、計画を取り直す。** 位置が動いたまま読み続けると、
+        光る場所が本文とずれる（「引っかかった」でメモの行が1つ増えるのも、
+        ここで吸収される）。
+
+        **読み始めを待っている間（aloudStartAt）も取り直す。** 頼んでから
+        返るまでに打つと、届いた計画は長さが合わずに捨てられる。ここで
+        頼み直さないと、押したのに読み始めないまま終わる。
+      */
+      if (aloudOn || aloudStartAt !== null) aloudAskPlan();
+    } else if (message.type === "readingPlan") {
+      aloudTakePlan(message);
+    } else if (message.type === "showReading") {
+      // 詳細メニューの「原稿を読み上げる」。**列を出すだけ**（設計書6.42）
+      aloudOpenRow();
     } else if (message.type === "count") {
       // 上の帯の字数は消した（作者の指示、2026-08-29「上を消してください」。
       // 下段の「このファイル」と同じ数字が2か所に出ていた）。届いた値は
@@ -2155,6 +2325,9 @@ ruby > rt {
       });
       return;
     }
+    // **面を変えるときは読み上げを止める**（設計書6.42）。光らせる仕掛けが
+    // 面ごとに違う（打つ面は選択、こちらは Highlight API）ので、跨がせない
+    aloudFinish();
     // カーソルは、打つ面で見ていたところから続ける
     const at = write.selectionStart;
     composeOn = true;
@@ -2178,6 +2351,8 @@ ruby > rt {
   /** 打つ面へ戻す。**実験が転んでも、いままでの書き方は無傷で残る** */
   function composeLeave() {
     if (!composeOn) return;
+    // 面が変わると、読んでいる文の光らせ方も変わる（設計書6.42）
+    aloudFinish();
     const at = composeSelectionNow();
     composeOn = false;
     composeMenuAt = null;
@@ -2790,6 +2965,701 @@ ruby > rt {
       end: at.end,
     });
   }
+
+  /* ══ 読み上げ（音読推敲。設計書6.42） ═══════════════════ */
+
+  /**
+   * 声は OS のもの（Web Speech API の speechSynthesis）を使う。
+   * **AIもネットワークも使わない**ので、料金がかからず原稿も外へ出ない。
+   *
+   * ## 本文へ書くのは1か所だけ
+   *
+   * この仕掛けが原稿に触るのは「引っかかった」でシーンメモの行を1行
+   * 挿すときだけである（拡張機能側の readingMark）。声へ渡す文字列は
+   * 原文の**写し**で、本文には戻らない。
+   *
+   * ## 文へ割るのは拡張機能側
+   *
+   * core/readAloud.ts が作った計画（文の位置と、声へ渡す文字列）を受け取って
+   * 読むだけにする。**画面に写しを置かない**——ルビの記法は原稿の種類で
+   * 違うので、2か所に書けば片方だけが直る日が来る（記法の規則と同じ事情）。
+   */
+
+  const aloudToggle = document.getElementById("aloudToggle");
+  const aloudPlay = document.getElementById("aloudPlay");
+  const aloudStop = document.getElementById("aloudStop");
+  const aloudRate = document.getElementById("aloudRate");
+  const aloudVoice = document.getElementById("aloudVoice");
+  const aloudMark = document.getElementById("aloudMark");
+  const aloudNote = document.getElementById("aloudNote");
+
+  /** 拡張機能が作った文の並び。まだ頼んでいなければ null */
+  let aloudPlan = null;
+  /** いま読んでいる文の添字。読んでいなければ -1 */
+  let aloudAt = -1;
+  /** その文の speech。本文が変わって計画を取り直したとき、同じ文を探す鍵 */
+  let aloudSpeech = null;
+  /** 読み上げ中（一時停止も含む） */
+  let aloudOn = false;
+  /** 一時停止中 */
+  let aloudPaused = false;
+  /**
+   * **自分で止めた**という旗。
+   *
+   * speechSynthesis.cancel() は Chromium で onerror(interrupted) を起こす。
+   * それを理由の欄に出すと「止めただけなのに壊れたように見える」ので、
+   * 旗を立てて黙って捨てる。
+   */
+  let aloudSelfStop = false;
+  /** いま読ませている声。**古い声の知らせを聞き分ける**ために持つ */
+  let aloudUtterance = null;
+  /** この端末に入っている日本語の声 */
+  let aloudVoices = [];
+  /** 覚えている声の名前（拡張機能から届くか、作者がその場で選ぶ） */
+  let aloudVoiceName = null;
+  /** 計画が届いたら、この位置の文から読み始める（読み始めの予約） */
+  let aloudStartAt = null;
+  /** 速さを作者が触ったか。触ったら、設定が届いても上書きしない */
+  let aloudRateTouched = false;
+  /**
+   * 「引っかかった」を押したあと、次の計画が届くまで押せなくする。
+   *
+   * **連打すると、1つ上の行にもう1枚メモが刺さる。** 挿した行が本文へ入り、
+   * 計画を取り直すまでの間、こちらが持っている行番号は1つ古いためである。
+   */
+  let aloudMarking = false;
+  /** その場で起きたことの短い理由。無ければ空 */
+  let aloudProblem = "";
+  /**
+   * 声の世代。**止めるたびに1つ進める。**
+   *
+   * 読み始めは60ミリ秒遅らせている（aloudSpeakSoon）ので、待っている間に
+   * もう一度飛んだり終えたりすることがある。世代を見れば、**古い予約が
+   * 目を覚ましたときに黙って引き返せる。**
+   */
+  let aloudGeneration = 0;
+  /** 遅らせてある「読み始め」。止めるときに取り消す */
+  let aloudTimer = null;
+
+  /** この環境で声を出せるか（ブラウザ版・音声合成の無い環境では出せない） */
+  function aloudUsable() {
+    return (
+      !!window.speechSynthesis &&
+      typeof window.SpeechSynthesisUtterance === "function"
+    );
+  }
+
+  /**
+   * 日本語の声だけを拾う。
+   *
+   * **日本語以外の声で無理に読まない。** 英語の声へ日本語を渡すと、
+   * 仮名を1字ずつ綴るか、まったく音にならない。読めない声で読むより、
+   * 「日本語の声がありません」と言うほうがよい。
+   *
+   * **一覧は非同期に揃う**ので、voiceschanged でも呼び直す。
+   */
+  function aloudLoadVoices() {
+    if (!aloudUsable()) {
+      aloudPaintState();
+      return;
+    }
+    let all = [];
+    try {
+      all = window.speechSynthesis.getVoices() || [];
+    } catch (error) {
+      all = [];
+    }
+    aloudVoices = [];
+    for (const voice of all) {
+      const lang =
+        voice && typeof voice.lang === "string" ? voice.lang.toLowerCase() : "";
+      if (lang.indexOf("ja") === 0) aloudVoices.push(voice);
+    }
+    aloudPaintVoices();
+    aloudPaintState();
+  }
+
+  /** 声の一覧を並べ直す。覚えている声があれば、それを選んでおく */
+  function aloudPaintVoices() {
+    const wanted = aloudVoice.value || aloudVoiceName;
+    aloudVoice.innerHTML = "";
+    for (const voice of aloudVoices) {
+      const option = document.createElement("option");
+      option.value = voice.name;
+      option.textContent = voice.name;
+      aloudVoice.appendChild(option);
+    }
+    if (!wanted) return;
+    for (const option of aloudVoice.options) {
+      if (option.value !== wanted) continue;
+      aloudVoice.value = wanted;
+      return;
+    }
+  }
+
+  /** いま選ばれている声。**一覧は日本語だけ**なので、外れの声は返らない */
+  function aloudVoiceNow() {
+    for (const voice of aloudVoices) {
+      if (voice.name === aloudVoice.value) return voice;
+    }
+    return aloudVoices.length > 0 ? aloudVoices[0] : null;
+  }
+
+  /** いまの速さ（列で選んだもの。**設定へは書き戻さない**——その場限り） */
+  function aloudRateNow() {
+    const value = Number(aloudRate.value);
+    return isFinite(value) && value > 0 ? value : 1;
+  }
+
+  /**
+   * 設定の速さを、列の選択へ当てる。**いちばん近いものを選ぶ**
+   * （設定には 1.2 のような、列に無い値も書ける）。
+   *
+   * 作者がこの場で選び直したあとは当てない——その場の選択が勝つ。
+   */
+  function aloudApplyRate(value) {
+    if (aloudRateTouched) return;
+    if (typeof value !== "number" || !isFinite(value)) return;
+    let best = null;
+    for (const option of aloudRate.options) {
+      const at = Number(option.value);
+      if (best === null || Math.abs(at - value) < Math.abs(best - value)) {
+        best = at;
+      }
+    }
+    if (best !== null) aloudRate.value = String(best);
+  }
+
+  /**
+   * 押せるものと、押せない理由を出し直す。
+   *
+   * **使えないときは、消さずに押せなくして理由を書く**
+   * （core/processAvailability.ts と同じ考え方）。消すと「あるはずのものが
+   * 無い」に見え、なぜ使えないのかが分からない。
+   */
+  function aloudPaintState() {
+    let reason = "";
+    if (!aloudUsable()) {
+      reason = "この環境では読み上げが使えません";
+    } else if (aloudVoices.length === 0) {
+      reason =
+        "日本語の声が見つかりません。Windows では 設定 → 時刻と言語 → 音声 → " +
+        "音声を追加 で日本語を入れると使えます";
+    }
+    const ready = reason === "";
+    aloudNote.textContent = reason || aloudProblem;
+    aloudPlay.disabled = !ready;
+    aloudStop.disabled = !ready || !aloudOn;
+    // 印を打った直後は、計画が届くまで押せない（連打で二重に刺さる）
+    aloudMark.disabled = !ready || !aloudOn || aloudMarking;
+    aloudVoice.disabled = !ready;
+    if (!aloudOn) aloudPlay.textContent = "▶ 読む";
+    else if (aloudPaused) aloudPlay.textContent = "▶ 続ける";
+    else aloudPlay.textContent = "❚❚ 止める";
+    aloudPlay.classList.toggle("on", aloudOn && !aloudPaused);
+  }
+
+  /**
+   * その文を読ませて、読み終えたら次の文へ進む。
+   *
+   * **1文ずつ声を作る。** 全文を1つの声に渡すと、どこを読んでいるのかを
+   * 追えないし、途中で止めることもできない。
+   */
+  function aloudSpeak(index) {
+    if (!aloudPlan || index < 0 || index >= aloudPlan.length) {
+      aloudFinish();
+      return;
+    }
+    const sentence = aloudPlan[index];
+    aloudAt = index;
+    aloudSpeech = sentence.speech;
+    aloudOn = true;
+    aloudPaused = false;
+    aloudSelfStop = false;
+    aloudShow(sentence);
+
+    const utterance = new SpeechSynthesisUtterance(sentence.speech);
+    utterance.lang = "ja-JP";
+    utterance.rate = aloudRateNow();
+    const voice = aloudVoiceNow();
+    if (voice) utterance.voice = voice;
+    utterance.onend = function () {
+      // **古い声の知らせは捨てる。** cancel の直後に届くことがある
+      if (utterance !== aloudUtterance) return;
+      if (!aloudOn || aloudPaused) return;
+      aloudSpeak(aloudAt + 1);
+    };
+    utterance.onerror = function (event) {
+      if (utterance !== aloudUtterance) return;
+      const kind = event && event.error ? String(event.error) : "";
+      // 自分で止めたぶんは黙って終わる（cancel は必ずこれを起こす）
+      if (aloudSelfStop || kind === "interrupted" || kind === "canceled") return;
+      // **理由は終えたあとに置く。** aloudFinish は前の理由を消すので、
+      // 先に書くと自分で消してしまう
+      aloudFinish();
+      aloudProblem = "読み上げが止まりました（" + kind + "）";
+      aloudPaintState();
+    };
+    aloudUtterance = utterance;
+    aloudPaintState();
+    try {
+      window.speechSynthesis.speak(utterance);
+    } catch (error) {
+      aloudFinish();
+      aloudProblem = "読み上げを始められませんでした";
+      aloudPaintState();
+    }
+  }
+
+  /**
+   * 声を止める。**speechSynthesis.cancel() を呼ぶのは、ここ1か所だけ。**
+   *
+   * 終える・別の文へ飛ぶ・一時停止の3つとも、この関数を通す。cancel() は
+   * 呼ぶたびに onerror(interrupted) を起こすので、あちこちから呼ぶと
+   * 「自分で止めたのか、壊れたのか」の見分けが付かなくなる。旗を立てる
+   * ところと、遅らせてある読み始めを取り消すところも、ここへ集める。
+   */
+  function aloudCancel() {
+    // **世代を進める。** 待っている読み始めがあれば、目を覚ましても引き返す
+    aloudGeneration++;
+    if (aloudTimer !== null) {
+      clearTimeout(aloudTimer);
+      aloudTimer = null;
+    }
+    // 先に主を降ろす。古い声の知らせ（interrupted）を新しい声と取り違えない
+    aloudUtterance = null;
+    aloudSelfStop = true;
+    if (!aloudUsable()) return;
+    try {
+      window.speechSynthesis.cancel();
+    } catch (error) {
+      /* 止められない環境でも、画面の側は必ず初めの姿へ戻す */
+    }
+  }
+
+  /**
+   * 少し置いてから読み始める。
+   *
+   * **60ミリ秒待つ。** Chromium には、cancel() の直後に speak() を呼ぶと
+   * **新しい声が出ない**という癖がある（止めている最中の待ち行列へ積むと、
+   * そのまま捨てられる）。押しても無音になるより、人の耳には分からない
+   * ぐらいの間を置くほうがよい。
+   *
+   * 待っている間にもう一度飛んだ・止めたときのために、世代を見る
+   * （aloudCancel が進めるので、古い予約は何もせずに終わる）。
+   */
+  function aloudSpeakSoon(index) {
+    const generation = aloudGeneration;
+    aloudTimer = setTimeout(function () {
+      aloudTimer = null;
+      if (generation !== aloudGeneration) return;
+      aloudSpeak(index);
+    }, 60);
+  }
+
+  /** 別の文へ飛ぶ（読み始めと「ここから」） */
+  function aloudJump(index) {
+    if (!aloudUsable()) return;
+    if (!aloudPlan || index < 0 || index >= aloudPlan.length) {
+      aloudFinish();
+      return;
+    }
+    aloudCancel();
+    // 声が出るまでの間、押した手応えだけは先に画面へ出しておく
+    aloudOn = true;
+    aloudPaused = false;
+    aloudPaintState();
+    aloudSpeakSoon(index);
+  }
+
+  /** 読み上げを終える。**列は初めの姿へ戻す** */
+  function aloudFinish() {
+    aloudCancel();
+    aloudAt = -1;
+    aloudSpeech = null;
+    aloudOn = false;
+    aloudPaused = false;
+    aloudStartAt = null;
+    aloudMarking = false;
+    // **前に起きたことの理由も消す。** 終えたあとにも残っていると、
+    // 次に読み始めたときに古い断りが出たままになる
+    aloudProblem = "";
+    aloudClearHighlight();
+    aloudPaintState();
+  }
+
+  /**
+   * 一時停止。**その文を覚えたまま、声だけを止める。**
+   *
+   * speechSynthesis の pause()／resume() は使わない。Windows の Chromium は
+   * 端末に入っている声（SAPI）で pause() が効かないことがあり、**押しても
+   * 声が止まらない。** cancel() なら必ず止まる。1つの文は短いので、
+   * 続けるときに頭から読み直しても聞き直しにはならない。
+   */
+  function aloudPause() {
+    if (!aloudOn || aloudPaused) return;
+    aloudCancel();
+    aloudPaused = true;
+    aloudPaintState();
+  }
+
+  /** 続ける。**止めた文の頭から**読み直す */
+  function aloudResume() {
+    if (!aloudOn || !aloudPaused) return;
+    if (aloudAt < 0) {
+      aloudFinish();
+      return;
+    }
+    aloudPaused = false;
+    aloudPaintState();
+    aloudSpeakSoon(aloudAt);
+  }
+
+  /**
+   * 読んでいる文を光らせて、画面の中へ入れる。
+   *
+   * - 組んで書く面 … CSS Custom Highlight API（DOMを変えない。設計書6.34.3）
+   * - 打つ面 … textarea の選択。**選択は見えるうえ、自分で転がってくれる**
+   */
+  function aloudShow(sentence) {
+    if (composeOn) {
+      aloudComposeHighlight(sentence);
+      composeNudgeIntoView(sentence.start);
+      return;
+    }
+    aloudPaintWriteMark(sentence);
+  }
+
+  /**
+   * 打つ面で、読んでいる文の背景を塗る（レビュー指摘、2026-08-29）。
+   *
+   * **選択にもカーソルにも触らない。** textarea の選択は「次に打った字が
+   * 置き換える範囲」なので、選んだまま空白を打つと**一文が空白1字に
+   * 置き換わる**（原稿が壊れる）。焦点も動かさない——動かすと
+   * selectionchange が飛び、カーソルの記憶（lastCaret）が読み上げ位置へ
+   * ずれて、あとの「ここにメモを足す」が作者の居た場所に刺さらない。
+   *
+   * 塗るのは、用語の重ね敷きと同じ手（同じ本文を同じ字送りで置き、
+   * その範囲だけ背景を付ける）である。**節点は3つだけ**——前・文・後ろ。
+   * 後ろも入れるのは、層の高さを打つ面と揃えるためで、短いと転がしたときに
+   * 位置が合わなくなる。
+   */
+  function aloudPaintWriteMark(sentence) {
+    const text = write.value;
+    const start = Math.max(0, Math.min(sentence.start, text.length));
+    const end = Math.max(start, Math.min(sentence.end, text.length));
+    while (aloudMarks.firstChild) {
+      aloudMarks.removeChild(aloudMarks.firstChild);
+    }
+    aloudMarks.appendChild(document.createTextNode(text.slice(0, start)));
+    const span = document.createElement("span");
+    span.className = "mark-reading";
+    span.textContent = text.slice(start, end);
+    aloudMarks.appendChild(span);
+    aloudMarks.appendChild(document.createTextNode(text.slice(end)));
+    // 塗る前に枠と位置を合わせておかないと、下の採寸が別の場所を測る
+    alignMarksBox();
+    syncMarksScroll();
+    aloudNudgeWriteIntoView(span);
+  }
+
+  /**
+   * 読んでいる文が画面の外なら、打つ面をそこまで転がす。
+   *
+   * **focus() も setSelectionRange() も使わない**（上の理由）。
+   * 塗った span の位置を測って、はみ出したぶんだけ動かす——組んで書く面の
+   * composeNudgeIntoView と同じ考え方で、縦書き（左右に流れる）と
+   * 横書き（上下に流れる）で式を分けずに済む（offRect）。
+   */
+  function aloudNudgeWriteIntoView(span) {
+    try {
+      const rect = span.getBoundingClientRect();
+      // 空の文（幅も高さも0）では測れない。動かさずに諦める
+      if (!rect || (rect.width === 0 && rect.height === 0)) return;
+      const off = offRect(write, rect);
+      if (off.left !== 0) write.scrollLeft += off.left;
+      if (off.top !== 0) write.scrollTop += off.top;
+      // 打つ面を動かしたので、重ね敷きの見えている場所も合わせ直す
+      syncMarksScroll();
+    } catch (error) {
+      /* 測れなければ動かさない（読み上げは続く） */
+    }
+  }
+
+  /** 打つ面の塗りを消す（読み終えたとき・面を変えたとき） */
+  function aloudClearWriteMark() {
+    while (aloudMarks.firstChild) {
+      aloudMarks.removeChild(aloudMarks.firstChild);
+    }
+  }
+
+  function aloudComposeHighlight(sentence) {
+    if (!composeHighlightsUsable()) return;
+    try {
+      const atoms = composeCurrentAtoms();
+      const head = composeOffsetToPoint(atoms, sentence.start);
+      const tail = composeOffsetToPoint(atoms, sentence.end);
+      if (!head || !tail) return;
+      const range = document.createRange();
+      range.setStart(head.node, head.offset);
+      range.setEnd(tail.node, tail.offset);
+      CSS.highlights.set("novelai-reading", new Highlight(range));
+    } catch (error) {
+      // **色が出ないだけで、声は続く。** ここで止めない
+      aloudClearHighlight();
+    }
+  }
+
+  /** 光らせているものを、両方の面ぶん消す */
+  function aloudClearHighlight() {
+    aloudClearWriteMark();
+    if (!composeHighlightsUsable()) return;
+    try {
+      CSS.highlights.delete("novelai-reading");
+    } catch (error) {
+      /* 消せなくても声は出る */
+    }
+  }
+
+  /** いま画面が持っている本文（面によって出どころが違う） */
+  function aloudTextNow() {
+    return composeOn ? composeDomToNotation(compose) : write.value;
+  }
+
+  /**
+   * 文の計画を頼む。
+   *
+   * **自分が持っている本文をそのまま送る。** 拡張機能の文書は120ミリ秒
+   * 遅れて追いつく（scheduleSend）ので、向こうの本文で作られた計画は、
+   * 打った直後の本文とずれる。
+   */
+  function aloudAskPlan() {
+    vscode.postMessage({ type: "readingPlan", text: aloudTextNow() });
+  }
+
+  /**
+   * 届いた計画を受け取る。
+   *
+   * 読み上げ中に本文が変わって取り直したときは、**同じ文から続ける**。
+   * 「引っかかった」でメモの行が1つ増えるのも、この道で吸収される
+   * （メモの行は文にならないので、たいていは添字が動かない）。
+   */
+  function aloudTakePlan(message) {
+    /*
+      **頼んだときの本文と、いまの本文が違えば捨てる**（レビュー指摘、
+      2026-08-29）。頼んでから返るまでの間に打たれると、届いた位置は
+      1文字ずつずれている。**ずれた場所を光らせるくらいなら、光らせない。**
+      打てば update が来るので、そこで頼み直される（aloudStartAt は残す）。
+    */
+    if (
+      typeof message.textLength === "number" &&
+      message.textLength !== aloudTextNow().length
+    ) {
+      return;
+    }
+    aloudPlan = Array.isArray(message.sentences) ? message.sentences : [];
+    // 印を打ったぶんが本文へ入った。もう一度押してよい
+    aloudMarking = false;
+
+    if (aloudStartAt !== null) {
+      const at = aloudStartAt;
+      aloudStartAt = null;
+      if (aloudPlan.length === 0) {
+        aloudProblem = "読み上げるところがありません";
+        aloudPaintState();
+        return;
+      }
+      aloudProblem = "";
+      aloudJump(aloudIndexAt(at));
+      return;
+    }
+
+    if (!aloudOn) return;
+    const same = aloudSameSentence();
+    if (same < 0) {
+      aloudFinish();
+      return;
+    }
+    aloudAt = same;
+    aloudSpeech = aloudPlan[same].speech;
+    // 位置が動いているので、光らせ直す（声はそのまま続いている）
+    aloudShow(aloudPlan[same]);
+  }
+
+  /**
+   * 取り直した計画の中で、いま読んでいる文はどれか。
+   *
+   * **前の添字から外向きに探す**（i、i-1、i+1、i-2、i+2 …。レビュー指摘、
+   * 2026-08-29）。以前は「前の添字以降で最初」だったので、**前の文を
+   * 消したとき**——添字が1つ手前へずれる——に、同じ言い回しの後ろの文へ
+   * 当たって、あいだを飛ばして読み進めることがあった。
+   * 本文の直しは読んでいるところの近くで起きるので、近い順に探す。
+   */
+  function aloudSameSentence() {
+    if (aloudPlan.length === 0) return -1;
+    const from = aloudAt < 0 ? 0 : Math.min(aloudAt, aloudPlan.length - 1);
+    if (aloudSpeech === null) return from;
+    for (let step = 0; step < aloudPlan.length; step++) {
+      const back = from - step;
+      if (back >= 0 && aloudPlan[back].speech === aloudSpeech) return back;
+      const forward = from + step;
+      if (
+        forward < aloudPlan.length &&
+        aloudPlan[forward].speech === aloudSpeech
+      ) {
+        return forward;
+      }
+    }
+    // 見つからなければ同じ添字のまま（末尾を越えていたら最後の文）
+    return from;
+  }
+
+  /**
+   * その位置を含む文の添字。無ければ次の文（末尾なら最後）。
+   *
+   * **文の分け方は写さない**（core/readAloud.ts の findSentenceAt が持つ）。
+   * ここにあるのは、届いた並びを引くだけの探索である。
+   */
+  function aloudIndexAt(offset) {
+    if (!aloudPlan || aloudPlan.length === 0) return -1;
+    if (typeof offset !== "number") return 0;
+    for (let i = 0; i < aloudPlan.length; i++) {
+      if (offset < aloudPlan[i].end) return i;
+    }
+    return aloudPlan.length - 1;
+  }
+
+  /** いまカーソルのある位置（本文の位置。読めなければ先頭） */
+  function aloudCaretOffset() {
+    if (composeOn) {
+      const at = composeSelectionNow();
+      return at ? at.start : 0;
+    }
+    const at = write.selectionStart;
+    return typeof at === "number" ? at : 0;
+  }
+
+  /**
+   * 読み始める。**カーソルのある文から。**
+   *
+   * 計画は毎回作り直す（打ったあとの本文で読ませたい）。届いてから声を
+   * 出すので、ここでは頼んで予約するだけである。
+   */
+  function aloudStart() {
+    if (!aloudUsable() || aloudVoices.length === 0) return;
+    aloudProblem = "";
+    aloudStartAt = aloudCaretOffset();
+    aloudAskPlan();
+  }
+
+  /**
+   * 読み上げの列を出す（道具箱のボタンと、詳細メニューの showReading）。
+   *
+   * **自動では読み始めない。** 声の一覧は非同期に揃うので、開いた瞬間に
+   * 読ませようとすると、声がまだ無い状態で始めることになる。
+   * 押すのは作者である。
+   */
+  function aloudOpenRow() {
+    document.body.classList.add("aloud");
+    aloudToggle.classList.add("on");
+    aloudLoadVoices();
+    // **列のぶんだけ本文の面が縮む。** 折り返し幅が変わるので、重ね敷きの
+    // 枠を測り直す（測り直さないと、用語の色が1行ずつずれる）
+    scheduleAlignMarks();
+  }
+
+  aloudToggle.addEventListener("click", function () {
+    if (!document.body.classList.contains("aloud")) {
+      aloudOpenRow();
+      return;
+    }
+    document.body.classList.remove("aloud");
+    aloudToggle.classList.remove("on");
+    // 畳むときは必ず止める（見えない列が声を出し続けると、止め方が無い）
+    aloudFinish();
+    // 畳んだぶん本文の面が広がる。開くときと同じ理由で測り直す
+    scheduleAlignMarks();
+  });
+
+  aloudPlay.addEventListener("click", function () {
+    if (!aloudOn) {
+      aloudStart();
+      return;
+    }
+    if (aloudPaused) {
+      aloudResume();
+      return;
+    }
+    aloudPause();
+  });
+
+  aloudStop.addEventListener("click", function () {
+    aloudFinish();
+  });
+
+  aloudMark.addEventListener("click", function () {
+    if (!aloudOn || !aloudPlan || aloudMarking) return;
+    if (aloudAt < 0 || aloudAt >= aloudPlan.length) return;
+    /*
+      **行を伝えるだけ。** 本文へ書くのは拡張機能側（readingMark）で、
+      読み上げが原稿に触るのはここ1か所だけである。
+    */
+    vscode.postMessage({ type: "readingMark", line: aloudPlan[aloudAt].line });
+    // **次の計画が届くまで押せなくする。** 押した行はもう1つ下へずれており、
+    // 続けて押すと1つ上の行にもう1枚刺さる
+    aloudMarking = true;
+    // 引っかかったから印を打つので、そのまま読み進めても頭に入らない
+    aloudPause();
+  });
+
+  aloudRate.addEventListener("change", function () {
+    // その場限り。**設定へは書き戻さない**（速さは読み方で変わる）
+    aloudRateTouched = true;
+  });
+
+  aloudVoice.addEventListener("change", function () {
+    aloudVoiceName = aloudVoice.value;
+    vscode.postMessage({ type: "readingVoice", name: aloudVoiceName });
+  });
+
+  /**
+   * 読んでいる最中に本文を押したら、そこから読み直す（「ここから」）。
+   *
+   * **読んでいないときは何もしない。** 押しただけで声が出ると驚く。
+   */
+  function aloudJumpToClick() {
+    if (!aloudOn || !aloudPlan) return;
+    const index = aloudIndexAt(aloudCaretOffset());
+    if (index < 0) return;
+    aloudJump(index);
+  }
+  write.addEventListener("click", aloudJumpToClick);
+  compose.addEventListener("click", aloudJumpToClick);
+
+  if (aloudUsable()) {
+    /*
+      **声の一覧は非同期に揃う。** 開いた直後の getVoices() は空で返ることが
+      あり、そこだけを見て「日本語の声が無い」と決めると、入っているのに
+      使えないことになる。
+    */
+    try {
+      window.speechSynthesis.addEventListener("voiceschanged", aloudLoadVoices);
+    } catch (error) {
+      window.speechSynthesis.onvoiceschanged = aloudLoadVoices;
+    }
+  }
+  aloudLoadVoices();
+
+  /*
+    **画面を離れたら止める。** タブを切り替えたあとも声だけが続くと、
+    どこを読んでいるのか分からない幽霊になる（止める列も見えていない）。
+  */
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) aloudFinish();
+  });
+  window.addEventListener("pagehide", function () {
+    aloudFinish();
+  });
 
   paint();
   vscode.postMessage({ type: "ready" });

@@ -50,6 +50,7 @@ import {
   memoColorVars,
   stripMemoLines,
 } from "../core/sceneMemo";
+import { READ_ALOUD_MEMO_TEXT, buildReadingPlan } from "../core/readAloud";
 import { pickEmphasisSite, pickStyle } from "./ruby";
 import { askText } from "../views/dialogs";
 import { logLine } from "../core/logger";
@@ -153,6 +154,15 @@ const openManuscripts = new Map<
      */
     refreshCounts(): void;
     /**
+     * 読み上げの列を出す（設計書6.42）。
+     *
+     * **`revealLine` と同じで、`ready` を待ってから送る。** 開いた直後の
+     * 画面へ送っても、まだスクリプトが走っていないので捨てられる。
+     * 詳細メニューの「原稿を読み上げる」は開くのと同時に頼むので、
+     * ここを待たないと**開いたのに列が出ない**。
+     */
+    showReading(): void;
+    /**
      * この画面が持っている文書（設計書6.40.4）。
      *
      * シーンメモの「済みにする」が、**打ちかけのまま開いている原稿**を
@@ -199,10 +209,14 @@ export function refreshManuscriptCounts(filePath: string): void {
  * 中身を先に訊く形にはしない——思いついたことを打つ前に一手挟むことになる。
  *
  * @param line 1始まり。読めない値なら先頭に置く
+ * @param options `body` は印のあとに置く中身（省略すると空の付箋）。
+ *   `reveal` を false にすると、挿した行へ**飛ばない**——読み上げ中の
+ *   「引っかかった」（設計書6.42）は、聞いている最中に画面が動くと困る
  */
 export async function insertMemoLineAbove(
   document: vscode.TextDocument,
-  line: number
+  line: number,
+  options: { body?: string; reveal?: boolean } = {}
 ): Promise<boolean> {
   const index = Math.min(
     Math.max((Number.isFinite(line) ? line : 1) - 1, 0),
@@ -213,7 +227,7 @@ export async function insertMemoLineAbove(
   change.insert(
     document.uri,
     new vscode.Position(index, 0),
-    `${MEMO_LINE_PREFIX}\n`
+    `${MEMO_LINE_PREFIX}${options.body ?? ""}\n`
   );
   if (!(await vscode.workspace.applyEdit(change))) {
     // **黙って終わらない。** 押しても何も起きないときの手がかりを残す
@@ -228,7 +242,9 @@ export async function insertMemoLineAbove(
 
   // 挿した行へカーソルを送る（原稿エディタで開いていれば）。
   // **打ち始められる場所に居ないと、付箋を足した意味がない**
-  openManuscripts.get(manuscriptLedgerKey(document.uri))?.revealLine(index + 1);
+  if (options.reveal !== false) {
+    openManuscripts.get(manuscriptLedgerKey(document.uri))?.revealLine(index + 1);
+  }
   return true;
 }
 
@@ -245,6 +261,124 @@ export async function addMemoToOpenManuscript(): Promise<boolean> {
   if (!open) return false;
   open.panel.reveal();
   return await insertMemoLineAbove(open.document, caret.line);
+}
+
+/**
+ * 読み上げのために原稿を開いて、列を出す（設計書6.42。詳細メニューの入口）。
+ *
+ * **どの原稿を読むかは、作者が「いま見ているもの」に合わせる。** 探す順は3つ。
+ *
+ * 1. 原稿エディタで最後に居た原稿——**この画面は `TextEditor` を持たない**
+ *    ので、`activeTextEditor` からは辿れない（`addSceneMemo` と同じ事情）
+ * 2. 素のエディタで開いている本文（.txt / .md）
+ * 3. その作品の最後の話（何も開いていないときの受け皿）
+ *
+ * 開くのは**横書きの入口**（作品一覧から本文を開いたときと同じ既定）。
+ *
+ * **読み始めはしない。** 声の一覧は非同期に揃うので、開いた瞬間に読ませると
+ * 声が無いまま始めることになる。押していないのに声が出るのも驚く。
+ */
+export async function openManuscriptForReading(work: WorkEntry): Promise<void> {
+  const filePath = await pickReadAloudTarget(work);
+  if (!filePath) {
+    void vscode.window.showInformationMessage(
+      "読み上げる本文が見つかりませんでした。本文を開いてから実行してください。"
+    );
+    return;
+  }
+
+  const key = manuscriptLedgerKey(filePath);
+  const open = openManuscripts.get(key);
+  if (open) {
+    open.panel.reveal();
+    open.showReading();
+    return;
+  }
+
+  await vscode.commands.executeCommand(
+    "vscode.openWith",
+    paths.toUri(filePath),
+    MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+  );
+  // **台帳に載るまで待つ**（`revealLine` と同じ事情。開いた直後はまだ載らない）
+  const opened = await waitFor(() => openManuscripts.get(key));
+  if (!opened) {
+    // **黙って終わらない。** 押しても何も起きなかったときの手がかりを残す
+    logLine(
+      `読み上げ：${filePath} を開けなかったため、読み上げの列を出せませんでした。`
+    );
+    return;
+  }
+  opened.showReading();
+}
+
+/**
+ * そのファイルが、その作品のフォルダーの中にあるか（レビュー指摘、2026-08-29）。
+ *
+ * **読み上げる原稿を決めるとき、候補は3つとも作品の外を指しうる。**
+ * 原稿エディタの台帳は作品をまたいで覚えているし、素のエディタで開いている
+ * ファイルは拡張子しか見ていない。濾さないと、READMEや設計書を読み上げる。
+ *
+ * 比べ方は、この作品がほかの場所で使っているもの（`characterStore.ts` の
+ * `isPathInside`）と揃える。**前方一致では足りない**——`いじめられっ子2` は
+ * `いじめられっ子` の中ではない。
+ *
+ * **同じ道（作品フォルダーそのもの）は false。** 読む対象は本文であって、
+ * フォルダーではない。
+ */
+export function isInsideWork(folderPath: string, filePath: string): boolean {
+  if (!folderPath || !filePath) return false;
+  const parent = paths.normalizeForComparison(folderPath);
+  const candidate = paths.normalizeForComparison(filePath);
+  const relative = paths.relative(parent, candidate);
+  return relative.length > 0 && !paths.goesOutside(parent, relative);
+}
+
+/** 読み上げる原稿を決める（上の3つの順で探す）。見つからなければ undefined */
+async function pickReadAloudTarget(
+  work: WorkEntry
+): Promise<string | undefined> {
+  const caret = lastCaret;
+  if (
+    caret &&
+    openManuscripts.has(manuscriptLedgerKey(caret.filePath)) &&
+    // **台帳は作品をまたぐ。** 別の作品を開いたままここへ来ることがある
+    isInsideWork(work.folderPath, caret.filePath)
+  ) {
+    return caret.filePath;
+  }
+
+  const active = vscode.window.activeTextEditor?.document.uri;
+  if (active) {
+    const filePath = fromUri(active);
+    const lower = filePath.toLowerCase();
+    if (
+      (lower.endsWith(".txt") || lower.endsWith(".md")) &&
+      // 拡張子だけを見ると、READMEや設計書を読み上げてしまう
+      isInsideWork(work.folderPath, filePath)
+    ) {
+      return filePath;
+    }
+  }
+
+  try {
+    const { episodes } = await scanWork(work);
+    // 走査は作品の本文フォルダーだけを見るが、**受け皿でも同じ濾しを通す**
+    // （3つの候補で判定が違うと、どれが通ったのかを追えなくなる）
+    for (let i = episodes.length - 1; i >= 0; i--) {
+      if (isInsideWork(work.folderPath, episodes[i].filePath)) {
+        return episodes[i].filePath;
+      }
+    }
+  } catch (error) {
+    // **走査に失敗しても、押しても何も起きないで終わらせない**（下で断る）
+    logLine(
+      `読み上げ：${work.title} の話を走査できませんでした（${
+        error instanceof Error ? error.message : String(error)
+      }）。`
+    );
+  }
+  return undefined;
 }
 
 /** 「済みにする」がどう終わったか（呼んだ側が理由を出せるようにする） */
@@ -453,7 +587,22 @@ type Incoming =
    * **画面側で200ミリ秒まとめてから届く。** 打鍵のたびに来ると、
    * パネルが1文字ごとにいちばん近い付箋を数え直すことになる。
    */
-  | { type: "caret"; line: number };
+  | { type: "caret"; line: number }
+  /*
+    ── 読み上げ（音読推敲。設計書6.42） ──
+  */
+  /**
+   * 読み上げの計画を作ってほしい。
+   *
+   * **本文は画面が持っているものを送り返させる。** こちらの文書と画面の
+   * 表示は120ミリ秒ずれることがあり（`scheduleSend`）、こちらの本文で
+   * 計画を作ると、光らせる位置が打った分だけずれる。
+   */
+  | { type: "readingPlan"; text: string }
+  /** 読んでいる文の行に、シーンメモの印を置く */
+  | { type: "readingMark"; line: number }
+  /** 選ばれた声を覚える（端末ごと。作品には書かない） */
+  | { type: "readingVoice"; name: string };
 
 export interface ManuscriptEditorDeps {
   highlighter: TermHighlighter;
@@ -528,6 +677,16 @@ export interface ManuscriptEditorDeps {
    * こちらの本文を動かすのは、パネルの行が押されたときだけ。
    */
   onCaretMoved?: (filePath: string, line: number) => void;
+  /**
+   * 読み上げに使う声の名前（設計書6.42）。
+   *
+   * **端末に覚える**（`globalState`）。どの声が入っているかは端末ごとに
+   * 違うので、作品フォルダーへ書くと同期先で存在しない声を指す。
+   * 省略できる形にしてあるのは、この画面が読み上げ無しでも成り立つため。
+   */
+  readAloudVoice?: () => string | undefined;
+  /** 選ばれた声を覚える */
+  saveReadAloudVoice?: (name: string) => Promise<void>;
 }
 
 export class ManuscriptEditorProvider
@@ -604,6 +763,9 @@ export class ManuscriptEditorProvider
         // タブが同じ色で示す
         colors: colorsFor(),
         ...readAppearance(this.orientation),
+        // 読み上げの声は設定ではなく**端末の覚え**なので、deps から取る
+        // （設計書6.42）。覚えていなければ画面が最初の声を選ぶ
+        readAloudVoice: this.deps.readAloudVoice?.(),
       });
       await this.sendCount(panel, text);
     };
@@ -617,8 +779,13 @@ export class ManuscriptEditorProvider
      */
     let webviewReady = false;
     let pendingReveal: number | undefined;
+    /** 読み上げの列を頼まれたが、画面がまだ動き出していない（設計書6.42） */
+    let pendingReading = false;
     const revealLineNow = (line: number): void => {
       void panel.webview.postMessage({ type: "revealLine", line });
+    };
+    const showReadingNow = (): void => {
+      void panel.webview.postMessage({ type: "showReading" });
     };
     const key = manuscriptLedgerKey(document.uri);
     const entry = {
@@ -629,6 +796,13 @@ export class ManuscriptEditorProvider
           return;
         }
         revealLineNow(line);
+      },
+      showReading: (): void => {
+        if (!webviewReady) {
+          pendingReading = true;
+          return;
+        }
+        showReadingNow();
       },
       refreshCounts: (): void => {
         void this.sendFootCounts(panel, document);
@@ -713,6 +887,11 @@ export class ManuscriptEditorProvider
             pendingReveal = undefined;
             revealLineNow(line);
           }
+          // 開くのと同時に頼まれていた「読み上げの列」を、ここで出す
+          if (pendingReading) {
+            pendingReading = false;
+            showReadingNow();
+          }
           // 下段の字数は**本文より後**でよい（作品ぜんたいの走査が要る）。
           // 待たせると、開いた直後の本文の表示まで遅れる
           void this.sendFootCounts(panel, document);
@@ -791,6 +970,34 @@ export class ManuscriptEditorProvider
 
         case "openMemos":
           await this.deps.openSceneMemos?.(fromUri(document.uri));
+          break;
+
+        case "readingPlan":
+          /*
+            **文へ割るのはこちら**（`core/readAloud.ts`）。画面の中に置くと
+            確かめようがないうえ、ルビの記法は原稿の種類で違う（設計書6.12）。
+            **本文は画面が送ってきたものをそのまま使う**——こちらの文書で
+            作ると、打った直後は120ミリ秒ぶん位置がずれる。
+          */
+          await panel.webview.postMessage({
+            type: "readingPlan",
+            sentences: buildReadingPlan(message.text, notation),
+            // 画面が「自分が送った本文の計画か」を確かめるための目印
+            textLength: message.text.length,
+          });
+          break;
+
+        case "readingMark":
+          // **飛ばない**（`reveal: false`）。聞いている最中に画面が動くと、
+          // どこを読んでいたのか分からなくなる
+          await insertMemoLineAbove(document, message.line, {
+            body: READ_ALOUD_MEMO_TEXT,
+            reveal: false,
+          });
+          break;
+
+        case "readingVoice":
+          await this.deps.saveReadAloudVoice?.(message.name);
           break;
 
         case "caret": {
@@ -1472,6 +1679,8 @@ function readAppearance(orientation: ManuscriptOrientation): {
    */
   forceVertical?: boolean;
   fontFamily: string;
+  /** 読み上げの速さの既定（設計書6.42）。列で変えたぶんは書き戻さない */
+  readAloudRate: number;
 } {
   const config = vscode.workspace.getConfiguration("novelai");
   return {
@@ -1481,7 +1690,25 @@ function readAppearance(orientation: ManuscriptOrientation): {
         : config.get<boolean>("manuscriptEditor.vertical", true),
     ...(orientation === "horizontal" ? { forceVertical: false } : {}),
     fontFamily: config.get<string>("manuscriptEditor.fontFamily", "").trim(),
+    readAloudRate: clampReadAloudRate(
+      config.get<number>("manuscriptEditor.readAloudRate", 1)
+    ),
   };
+}
+
+/**
+ * **設定に書かれた値**を、画面の列が扱える 0.5〜2.0 へ畳む（設計書6.42）。
+ *
+ * 畳むのは設定の値だけで、作者が列で選んだ速さには触らない（あちらは
+ * 0.5〜2 の選択肢しか持たない）。
+ *
+ * **`package.json` の `minimum`/`maximum` は案内であって、強制ではない。**
+ * `settings.json` へ直接 `10` と書けばその値が届く。範囲の外の `rate` は、
+ * 環境によっては**声が一言も出ない**（黙って失敗する）ので、ここで畳む。
+ */
+function clampReadAloudRate(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(2, Math.max(0.5, value));
 }
 
 /** いまのテーマに合う色を選ぶ */

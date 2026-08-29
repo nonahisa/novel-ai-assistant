@@ -276,6 +276,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 1,
   },
   {
+    id: "F-49",
+    title: "読み上げ（音読推敲）",
+    commands: ["novelai.readManuscriptAloud"],
+    count: 11,
+  },
+  {
     id: "F-48",
     title: "更新告知文を作る",
     commands: ["novelai.generateAnnouncement", "novelai.configureAnnouncement"],
@@ -285,7 +291,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-47",
     title: "AIが実際に読める長さを測る",
     commands: ["novelai.measureContext"],
-    count: 6,
+    count: 7,
   },
   {
     id: "F-46",
@@ -339,7 +345,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-38",
     title: "LM Studio の起動と、モデルの読み込み",
     commands: ["novelai.testAI", "novelai.setupLmStudio", "novelai.setupAI"],
-    count: 7,
+    count: 9,
   },
   {
     id: "F-37",
@@ -476,4 +482,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 591;
+export const PENDING_CHECK_TOTAL = 605;

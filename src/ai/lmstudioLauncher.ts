@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
 import { resolveExecutable } from "./ollamaLauncher";
+import { childProcessEnv } from "./childProcessEnv";
+import { logFailure, logStep } from "../core/logger";
 
 /**
  * LM Studioのローカルサーバーの起動を支援する（設計書6.24）。
@@ -31,9 +33,23 @@ import { resolveExecutable } from "./ollamaLauncher";
  *
  * `isLocalEndpoint` はOllamaのものと同じ判断なので、`ollamaLauncher.ts`
  * から持ってきてそのまま出し直す。同じ規則を2か所に書くと、片方だけ直る。
+ *
+ * ## 起動できなかったときのために、各段をログへ残す
+ *
+ * 作者の報告（2026-08-30）「自動起動しませんでした」を確かめようとしたとき、
+ * このファイルは**ログを1行も書いていなかった**ため、どこで止まったのかが
+ * 分からなかった。指示・結果・疎通の各段を `logStep` / `logFailure` で残す。
  */
 
 export { isLocalEndpoint } from "./ollamaLauncher";
+
+/**
+ * 子へ渡す環境変数（`childProcessEnv.ts`）。
+ *
+ * **写しを作らず、そのまま出し直す。** 実体を別ファイルへ置いてあるのは、
+ * `ollamaLauncher.ts` からも使うため（こちらに置くと循環参照になる）。
+ */
+export { childProcessEnv } from "./childProcessEnv";
 
 /**
  * LM Studioのローカルサーバーの既定のポート。
@@ -167,39 +183,65 @@ export async function startLmStudioServer(
   options: StartOptions
 ): Promise<StartOutcome> {
   const cli = await resolveCli(options.cliPath);
-  if (!cli) return { ok: false, reason: "not_installed" };
+  if (!cli) {
+    logFailure("LM Studioの起動", {
+      段階: "lms の場所",
+      本文: "lms コマンドが見つかりませんでした。",
+    });
+    return { ok: false, reason: "not_installed" };
+  }
 
   const probe = options.probe ?? defaultProbe;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const spawnWaitMs = options.spawnWaitMs ?? DEFAULT_SPAWN_WAIT_MS;
   const runCli =
     options.runCli ?? ((c: string, a: string[]) => defaultRunCli(c, a, spawnWaitMs));
-  const deadline = Date.now() + timeoutMs;
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
+  const port = serverPort(options.endpoint);
+
+  logStep(`LM Studio：起動を試みます（${cli} server start --port ${port}）`);
 
   // `-p` の長い形。ポートを省くとLM Studio側の既定になり、
   // 設定した接続先と食い違ったまま「応答しない」になる
-  const outcome = await runCli(cli, [
-    "server",
-    "start",
-    "--port",
-    String(serverPort(options.endpoint)),
-  ]);
+  const outcome = await runCli(cli, ["server", "start", "--port", String(port)]);
 
   if (outcome.kind === "error") {
     // コマンドが見つからないのは「起動に失敗した」ではなく「入っていない」。
     // PATH頼みの候補（"lms"）はここまで存在確認をしていないので、
     // 通っていない機械ではこの経路で分かる。案内も別のものを出したい
-    if (/ENOENT/.test(outcome.message)) {
+    const notInstalled = /ENOENT/.test(outcome.message);
+    logFailure("LM Studioの起動", {
+      段階: "lms server start",
+      結果: notInstalled ? "コマンドが見つからない" : "起動できない",
+      本文: outcome.message,
+    });
+    if (notInstalled) {
       return { ok: false, reason: "not_installed", detail: outcome.message };
     }
     return { ok: false, reason: "spawn_failed", detail: outcome.message };
   }
 
+  logStep(
+    outcome.kind === "running"
+      ? "LM Studio：lms server start が待ち時間内に終わらなかったため、疎通の確認へ進みます。"
+      : `LM Studio：lms server start が終了コード ${outcome.code} で終わりました。`
+  );
+
   if (outcome.kind === "exited" && outcome.code !== 0) {
     // **すでに動いている場合の終了コードを測っていない。** 0以外でも
     // 実際には動いていることがありうるので、断じる前に1回だけ確かめる。
     // ここで確かめずに待ちへ入ると、失敗が分かるまで作者を1分待たせる
-    if (await probe(options.endpoint)) return { ok: true };
+    if (await probe(options.endpoint)) {
+      logStep(
+        "LM Studio：終了コードは0以外でしたが、サーバーは応答しています（すでに起動済み）。"
+      );
+      return { ok: true };
+    }
+    logFailure("LM Studioの起動", {
+      段階: "lms server start",
+      結果: `終了コード ${outcome.code}／応答なし`,
+    });
     return {
       ok: false,
       reason: "spawn_failed",
@@ -210,8 +252,23 @@ export async function startLmStudioServer(
   // 起動を指示しても、待ち受けを始めるまでには間がある。
   // 上限まで、応答するまで待つ（1回は必ず確かめる）
   for (;;) {
-    if (await probe(options.endpoint)) return { ok: true };
-    if (Date.now() >= deadline) return { ok: false, reason: "timeout" };
+    if (await probe(options.endpoint)) {
+      logStep(
+        `LM Studio：サーバーの応答を確認しました（${Date.now() - startedAt}ミリ秒）。`
+      );
+      return { ok: true };
+    }
+    if (Date.now() >= deadline) {
+      // **時間切れは、原因が分からないまま終わるいちばん困る形である。**
+      // どれだけ待ったのかを残しておかないと、設定を延ばすべきなのか
+      // 別の原因（環境変数の継承など）なのかを後から切り分けられない
+      logFailure("LM Studioの起動", {
+        段階: "疎通の確認",
+        結果: `${Date.now() - startedAt}ミリ秒待っても応答がありません`,
+        接続先: options.endpoint,
+      });
+      return { ok: false, reason: "timeout" };
+    }
     await delay(POLL_INTERVAL_MS);
   }
 }
@@ -249,6 +306,10 @@ function defaultRunCli(
         detached: true,
         stdio: "ignore",
         windowsHide: true,
+        // **拡張機能ホストの環境をそのまま継がせない**（`childProcessEnv.ts`）。
+        // `ELECTRON_RUN_AS_NODE=1` を継いだ LM Studio 本体は素のNodeとして
+        // 起動して即終了し、ここは必ず60秒の時間切れになる
+        env: childProcessEnv(),
       });
       child.once("error", (e: Error) => finish({ kind: "error", message: e.message }));
       child.once("exit", (code) => finish({ kind: "exited", code }));
@@ -452,7 +513,13 @@ export async function loadLmStudioModel(
   options: LoadOptions
 ): Promise<LoadOutcome> {
   const cli = await resolveCli(options.cliPath);
-  if (!cli) return { ok: false, reason: "not_installed" };
+  if (!cli) {
+    logFailure("LM Studioのモデル読み込み", {
+      段階: "lms の場所",
+      本文: "lms コマンドが見つかりませんでした。",
+    });
+    return { ok: false, reason: "not_installed" };
+  }
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS;
   const runCli =
@@ -463,18 +530,46 @@ export async function loadLmStudioModel(
     args.push("--context-length", String(options.contextLength));
   }
 
+  const startedAt = Date.now();
+  logStep(
+    `LM Studio：モデル「${options.model}」の読み込みを指示します` +
+      `（文脈 ${options.contextLength ?? "LM Studioの既定"}）。`
+  );
+
   const outcome = await runCli(cli, args);
 
   if (outcome.kind === "error") {
-    if (/ENOENT/.test(outcome.message)) {
+    const notInstalled = /ENOENT/.test(outcome.message);
+    logFailure("LM Studioのモデル読み込み", {
+      段階: "lms load",
+      結果: notInstalled ? "コマンドが見つからない" : "起動できない",
+      本文: outcome.message,
+    });
+    if (notInstalled) {
       return { ok: false, reason: "not_installed", detail: outcome.message };
     }
     return { ok: false, reason: "load_failed", detail: outcome.message };
   }
   if (outcome.kind === "timeout") {
+    logFailure("LM Studioのモデル読み込み", {
+      段階: "lms load",
+      結果: `${timeoutMs}ミリ秒待っても終わりませんでした`,
+      本文: trimOutput(outcome.output),
+    });
     return { ok: false, reason: "timeout", detail: trimOutput(outcome.output) };
   }
-  if (outcome.code === 0) return { ok: true };
+  if (outcome.code === 0) {
+    logStep(
+      `LM Studio：モデル「${options.model}」を読み込みました` +
+        `（${Date.now() - startedAt}ミリ秒）。`
+    );
+    return { ok: true };
+  }
+  logFailure("LM Studioのモデル読み込み", {
+    段階: "lms load",
+    結果: `終了コード ${outcome.code}`,
+    本文: trimOutput(outcome.output),
+  });
   return {
     ok: false,
     reason: "load_failed",
@@ -541,7 +636,9 @@ function defaultLoadCli(
     }, timeoutMs);
 
     try {
-      child = spawn(cli, args, { windowsHide: true });
+      // 環境変数を落とす理由は `defaultRunCli` と同じ（`childProcessEnv.ts`）。
+      // 読み込みも LM Studio 本体を起こすことがあるので、ここも同じにする
+      child = spawn(cli, args, { windowsHide: true, env: childProcessEnv() });
       // 進み具合は標準出力、失敗の理由は標準エラーに出る。両方を集めるが、
       // **末尾だけ残す**（進捗バーの描き直しで数MBになる。`keepTail`）
       child.stdout?.on("data", (chunk: Buffer) => {
@@ -624,7 +721,11 @@ export function describeStartFailure(outcome: StartOutcome): string {
     case "timeout":
       return (
         "LM Studioのサーバーの起動を待ちましたが、応答がありません。" +
-        "LM Studioの画面で「Developer」からサーバーを開始してください。"
+        "LM Studioの画面で「Developer」からサーバーを開始してください。" +
+        // **逃げ道を1つ足す。** 時間切れの原因はこちらからは分からないので、
+        // 「手で起こしてからもう一度」を示す（本体さえ上がっていれば、
+        // `lms server start` は0.2秒で通ることを実機で確認した）
+        "LM Studio を手で起動してから、もう一度お試しください。"
       );
   }
 }

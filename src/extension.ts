@@ -228,6 +228,7 @@ import {
   ManuscriptEditorProvider,
   addMemoToOpenManuscript,
   insertMemoLineAbove,
+  openManuscriptForReading,
   refreshManuscriptCounts,
   type ManuscriptEditorDeps,
 } from "./features/manuscriptEditor";
@@ -277,6 +278,14 @@ const STEP_WORK_KEY = "novelai.stepMenu.selectedWorkId";
  * 差分が出る（`writingStatsStore.ts` と同じ理由）。
  */
 const MARKDOWN_DECLINED_KEY = "novelai.manuscript.markdownDeclined";
+
+/**
+ * 読み上げに使う声の記憶先（設計書6.42）。
+ *
+ * **端末に残す。** どの声が入っているかは端末ごとに違うので、作品フォルダーへ
+ * 書くと、同期した先で存在しない声を指すことになる（MD化の断りと同じ理由）。
+ */
+const READ_ALOUD_VOICE_KEY = "novelai.readAloud.voice";
 
 /**
  * この起動が始まった時刻。
@@ -546,6 +555,11 @@ export async function activate(
     },
     // カーソルの追従は片方向。パネルが開いていなければ何も起きない
     onCaretMoved: (filePath, line) => noteSceneMemoCaret(filePath, line),
+    // 読み上げの声（設計書6.42）。**端末ごと**に覚える
+    readAloudVoice: () => context.globalState.get<string>(READ_ALOUD_VOICE_KEY),
+    saveReadAloudVoice: async (name) => {
+      await context.globalState.update(READ_ALOUD_VOICE_KEY, name);
+    },
     markdownDeclined: () =>
       context.globalState.get<string[]>(MARKDOWN_DECLINED_KEY, []),
     declineMarkdown: async (filePath) => {
@@ -667,6 +681,18 @@ export async function activate(
         uri,
         MANUSCRIPT_EDITOR_VIEW_TYPE
       );
+    }),
+    /*
+      原稿を読み上げる（音読推敲。設計書6.42）。
+
+      **開いて列を出すところまで。** 読み始めるのは作者が押したときで、
+      ここでは始めない（声の一覧は非同期に揃うので、開いた瞬間に読ませると
+      声が無いまま始めることになる）。
+    */
+    registerCommand("novelai.readManuscriptAloud", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await openManuscriptForReading(work);
     })
   );
 
