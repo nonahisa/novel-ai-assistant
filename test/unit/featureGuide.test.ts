@@ -1,13 +1,30 @@
 import { describe, expect, test } from "vitest";
 import {
-  buildFeatureGuide,
   buildFeatureGuideForQuestion,
   buildFeatureIndex,
   buildGuideBundles,
 } from "../../src/features/featureGuide";
 import { ACTION_TREE } from "../../src/views/actionList";
 
-const guide = buildFeatureGuide();
+/**
+ * 相談へ渡す「使い方の説明」（目次＋束）。
+ *
+ * ## 物差しを、全文から ACTION_TREE へ移した（0.25.2）
+ *
+ * 以前は `buildFeatureGuide()`（全文）を組み立て、束の中身が全文と
+ * 一致するかを見ていた。だが全文は製品コードから呼ばれなくなっており、
+ * **試験のためだけに残っている写し**だった。写しどうしを比べても、
+ * 両方が同時にずれれば気づけない。
+ *
+ * いまは**元になる定義（`ACTION_TREE`）を直接歩いて**、そこにある操作が
+ * 目次と束の両方に出ているかを見る。守っているものは変わらない——
+ * **操作が漏れると、AIは「その機能はありません」と嘘を答える。**
+ */
+
+const bundles = buildGuideBundles();
+/** 束をすべてつないだもの。「どれかの束に入っているか」を見るのに使う */
+const bundleText = bundles.map((bundle) => bundle.text).join("\n");
+const index = buildFeatureIndex();
 
 function allActions() {
   // 写しの分類（「テスト中」）は案内に入れない。中身は元の操作の写しである
@@ -18,15 +35,38 @@ function allActions() {
   );
 }
 
-describe("使い方の説明", () => {
-  test("操作メニューの全操作が漏れなく入る", () => {
+/** 手元（Nodeあり）の画面に出る操作 */
+function visibleActions() {
+  // **画面に出ない操作は、案内にも入れない**（`browserOnly`）。
+  // 試験は手元で走るので、ブラウザ版だけの操作は外れる
+  return allActions().filter((action) => !action.browserOnly);
+}
+
+describe("使い方の説明（目次と束）", () => {
+  test("操作メニューの全操作が、目次にも束にも漏れなく入る", () => {
     // 漏れると、AIは「その機能はありません」と嘘を答える。
     // 説明書を手で書かずメニューの定義から作るのは、これを防ぐため
-    for (const action of allActions()) {
-      // **画面に出ない操作は、案内にも入れない**（`browserOnly`）。
-      // 試験は手元（Nodeあり）で走るので、ブラウザ版だけの操作は外れる
-      if (action.browserOnly) continue;
-      expect(guide, action.label).toContain(action.label);
+    for (const action of visibleActions()) {
+      expect(index, `目次: ${action.label}`).toContain(action.label);
+      expect(bundleText, `束: ${action.label}`).toContain(action.label);
+    }
+  });
+
+  test("説明の行として（名前だけでなく）束に入る", () => {
+    /*
+      **束から漏れた操作は、説明を誰も渡せない。** 分類の直下にある操作は
+      小分類が無いので落としやすい（束は小分類ごとに切っている）。
+
+      名前が本文のどこかに出ているだけでは足りないので、`describeAction()`
+      が作る「  - 名前…」の行として出ていることを見る。
+    */
+    const lines = bundleText.split("\n").map((line) => line.trimEnd());
+
+    for (const action of visibleActions()) {
+      const found = lines.some((line) =>
+        line.startsWith(`  - ${action.label}`)
+      );
+      expect(found, action.label).toBe(true);
     }
   });
 
@@ -36,25 +76,31 @@ describe("使い方の説明", () => {
 
     expect(browserOnly.length).toBeGreaterThan(0);
     for (const action of browserOnly) {
-      expect(guide, action.label).not.toContain(action.label);
+      expect(index, `目次: ${action.label}`).not.toContain(action.label);
+      expect(bundleText, `束: ${action.label}`).not.toContain(action.label);
     }
   });
 
-  test("分類と小分類の見出しが、画面と同じ並びで入る", () => {
-    // 並びが画面と違うと「どこにあるか」を答えられない
-    // 写しの分類（「テスト中」）は案内に入れない
-    const groupPositions = ACTION_TREE.filter((group) => !group.generated).map(
-      (group) => guide.indexOf(`■ ${group.label}`)
+  test("分類の見出しが、画面と同じ並びで束に並ぶ", () => {
+    // 並びが画面と違うと「どこにあるか」を答えられない。
+    // 束は分類ごとに（分類直下 → 小分類の順で）積んであるので、
+    // 各分類が最初に現れる位置が、画面の並びと同じ順になる
+    const groups = ACTION_TREE.filter((group) => !group.generated);
+    const positions = groups.map((group) =>
+      bundles.findIndex(
+        (bundle) =>
+          bundle.label === group.label ||
+          bundle.label.startsWith(`${group.label} → `)
+      )
     );
 
-    expect(groupPositions.every((at) => at >= 0)).toBe(true);
-    const sorted = [...groupPositions].sort((a, b) => a - b);
-    expect(groupPositions).toEqual(sorted);
+    expect(positions.every((at) => at >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });
 
   test("AIを使う操作には印を付ける", () => {
     // 料金がかかることを答えられないと、案内として役に立たない
-    const line = guide
+    const line = bundleText
       .split("\n")
       .find((entry) => entry.includes("誤字脱字を検知"));
 
@@ -62,7 +108,7 @@ describe("使い方の説明", () => {
   });
 
   test("AIを使わない操作には印を付けない", () => {
-    const line = guide
+    const line = bundleText
       .split("\n")
       .find((entry) => entry.includes("表記ゆれを検知"));
 
@@ -71,18 +117,19 @@ describe("使い方の説明", () => {
 
   test("画面の説明を含む（操作メニューに出ないもの）", () => {
     for (const name of ["提案", "設定資料", "作品一覧", "右クリック"]) {
-      expect(guide, name).toContain(name);
+      expect(bundleText, name).toContain(name);
     }
   });
 
   test("ファイルの置き場所を含む", () => {
-    expect(guide).toContain("設定/plot.md");
-    expect(guide).toContain("設定/synopsis.md");
+    expect(bundleText).toContain("設定/plot.md");
+    expect(bundleText).toContain("設定/synopsis.md");
   });
 
   test("画面用の強調記号を落とす", () => {
     // ** はメニューのホバー表示用。AIへの指示と混ざると読みにくい
-    expect(guide).not.toContain("**");
+    expect(bundleText).not.toContain("*".repeat(2));
+    expect(index).not.toContain("*".repeat(2));
   });
 
   test("何ができるかの1文目は、そのまま入る", () => {
@@ -90,9 +137,10 @@ describe("使い方の説明", () => {
     const action = allActions().find(
       (entry) => entry.command === "novelai.checkNotation"
     );
-    const first = action!.detail.split("。")[0].split("*".repeat(2)).join("") + "。";
+    const first =
+      action!.detail.split("。")[0].split("*".repeat(2)).join("") + "。";
 
-    expect(guide).toContain(first);
+    expect(bundleText).toContain(first);
   });
 
   test("「〜ません」の断りは落とさない", () => {
@@ -102,10 +150,10 @@ describe("使い方の説明", () => {
       **AIが逆を答えかねない。** しないことの断りは、作者がいちばん
       知りたいことである。
     */
-    expect(guide).toContain("AIは使いません。");
+    expect(bundleText).toContain("AIは使いません。");
   });
 
-  test("但し書きまでは入れない（毎回送るので短くする）", () => {
+  test("但し書きまでは入れない（説明は短い版だけ）", () => {
     // 2文目以降の言い換え・使いどころは落とす。名前と1文目があれば、
     // 「どこにあるか」「何ができるか」には答えられる
     const action = allActions().find(
@@ -113,34 +161,11 @@ describe("使い方の説明", () => {
     );
     const fullDetail = action!.detail.split("*".repeat(2)).join("");
 
-    expect(guide).not.toContain(fullDetail);
-    /*
-      **ここには全体の字数の上限を置かない**（2026-08-29）。
-
-      以前は6,300字の上限があった。毎回AIへ送っていたので、伸びるのを
-      止める目印が要ったからである。だが機能を足すたびに上限を引き上げる
-      ことになり（6,000→6,300）、**送る量が機能数に比例する形そのものが
-      行き止まり**だった。
-
-      いまは相談へ送るのは「目次＋関係する束」だけで、この全文は
-      作者が読むマニュアル（`openManual.ts`）が使う。読み物は伸びてよい。
-      代わりに目次と束の一つひとつに上限を置いてある（下の試験）。
-    */
+    expect(bundleText).not.toContain(fullDetail);
   });
 });
 
 describe("相談へ渡す目次", () => {
-  const index = buildFeatureIndex();
-
-  test("全操作の名前が入る", () => {
-    // **名前だけは毎回全部渡す。** ここが欠けると、AIは
-    // 「その機能はありません」と嘘を答える。説明を絞る代わりの担保である
-    for (const action of allActions()) {
-      if (action.browserOnly) continue;
-      expect(index, action.label).toContain(action.label);
-    }
-  });
-
   test("目次は1,600字未満", () => {
     /*
       毎回送るのはこれと【この拡張機能の考え方】だけなので、ここが伸びると
@@ -158,8 +183,6 @@ describe("相談へ渡す目次", () => {
 });
 
 describe("説明の束", () => {
-  const bundles = buildGuideBundles();
-
   test("1つの束は1,500字未満", () => {
     // 超えたら小分類を割る（渡す単位が大きすぎると、関係の薄い説明が
     // まとめて付いてくる）
@@ -170,25 +193,15 @@ describe("説明の束", () => {
     ).toEqual([]);
   });
 
-  test("束を全部つなぐと、短い説明の全行が入る", () => {
-    // **束から漏れた操作は、説明を誰も渡せない。** 分類の直下の操作は
-    // 小分類が無いので落としやすい
-    const joined = bundles.map((bundle) => bundle.text).join("\n");
-    const lines = new Set(joined.split("\n").map((line) => line.trim()));
+  /*
+    **全体の字数の上限は置かない**（2026-08-29）。
 
-    // 操作の行だけを見る。全文の後半（画面・置き場所・考え方）にも
-    // 「- 」で始まる行があるが、あれは操作ではない
-    const expected = guide
-      .slice(0, guide.indexOf("【画面】"))
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.startsWith("- "));
-
-    expect(expected.length).toBeGreaterThan(0);
-    for (const line of expected) {
-      expect(lines.has(line), line).toBe(true);
-    }
-  });
+    以前は全文に6,300字の上限があった。毎回AIへ送っていたので、伸びるのを
+    止める目印が要ったからである。だが機能を足すたびに上限を引き上げる
+    ことになり（6,000→6,300）、**送る量が機能数に比例する形そのものが
+    行き止まり**だった。いまは相談へ送るのが「目次＋関係する束」だけなので、
+    上限は目次と束の一つひとつに置いてある。
+  */
 });
 
 describe("相談1回ぶんの組み立て", () => {

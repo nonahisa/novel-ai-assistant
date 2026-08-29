@@ -6,12 +6,17 @@ import {
 import { TermIndex, type TermKind } from "./termIndex";
 
 /**
- * 原稿エディタの「読む」面を組み立てる（設計書6.25）。
+ * 原稿エディタの表示の土台——記法の切り出し・用語の位置・記法の判定（設計書6.25）。
  *
  * 作者の指摘（2026-08-23）：VS Code 1.131 の Markdown 編集画面
  * （hybrid Markdown editor）では、用語ハイライト・右クリックの設定資料・
  * ルビの表示がどれも効かない。**あちらは拡張機能から手が出せない**ので、
  * 縦書きと投稿サイト対応まで含めて自前で持つことにした。
+ *
+ * 当初はここで「読む」面のHTMLを組み立てていた（`renderManuscript`）。
+ * 0.24.14で「組んで書く」面が既定になり、読む面は開く道が無くなったので
+ * 0.25.5で組み立ての側は消した。残っているのは、組んで書く面・打つ面の
+ * 重ね敷き・PDF出力・用語ハイライトが共通で使う部品である。
  *
  * ## ここは vscode に触らない
  *
@@ -173,111 +178,18 @@ export function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/**
- * 本文の三点リーダ「…」を、行の中央に寄せるための印で包む
- * （作者の依頼、2026-08-28）。
- *
- * 位置はフォント任せで、欧文フォントに落ちると横書きでは下に沈み、
- * 縦書きでは縦用の字形（縦3点）を持たないフォントで横倒しのまま出る。
- * 読む面はHTMLなので、印を付けてCSSで寄せられる。
- * **書く面（textarea）は文字単位の調整ができない**ので、フォントの形のまま。
- *
- * **1文字ずつ包む。** 「……」をまとめて回すと、回転の中心が2文字の
- * 真ん中になり、縦書きで点列が柱からはみ出す。
- *
- * **本文の経路だけに使う。** 属性値（data-term-name など）へ使うと、
- * 名前に「…」を含む用語でHTMLが壊れる。
- */
-function escapeBody(text: string): string {
-  return escapeHtml(text).replace(
-    /…/g,
-    '<span class="ellipsis">…</span>'
-  );
-}
+/*
+  **本文まるごとをHTMLへ組む経路は消した**（0.25.2）。
 
-/**
- * 平文に用語索引を当て、色分けの印を付ける。
- *
- * **索引が無いときは、ただ escape して返す。** 設定資料をまだ作って
- * いない作品でも、本文は読めなければならない。
- */
-function markTerms(text: string, index: TermIndex | undefined): string {
-  if (!index || index.size === 0) return escapeBody(text);
+  `renderManuscript()` と、それだけが使っていた `renderLine()` /
+  `markTerms()` / `escapeBody()` である。送り先だった原稿エディタの
+  「読む」面・「並べる」面は、0.24.14で切り替えのボタンが無くなった時点から
+  **開く道が無く**、0.25.2で面そのものを消した。
 
-  // 重なりは `find` の中で解消済み（最左最長）。「白瀬」と「白瀬澪」が
-  // 両方登録されている作品で短いほうが勝つと、名字だけが色付いて、
-  // 続く名前が地の文に見える
-  const matches = index.find(text);
-  if (matches.length === 0) return escapeBody(text);
-
-  let html = "";
-  let last = 0;
-  for (const match of matches) {
-    if (match.start > last) html += escapeBody(text.slice(last, match.start));
-    const entry = match.entry;
-    html +=
-      `<span class="term term-${entry.kind}"` +
-      ` data-term-id="${escapeHtml(entry.id)}"` +
-      ` data-term-kind="${escapeHtml(entry.kind)}"` +
-      ` data-term-name="${escapeHtml(entry.canonicalName)}"` +
-      `>${escapeBody(text.slice(match.start, match.end))}</span>`;
-    last = match.end;
-  }
-  if (last < text.length) html += escapeBody(text.slice(last));
-  return html;
-}
-
-/** 1行ぶんのHTML。空行は高さを保つために `<br>` を入れる */
-export function renderLine(
-  line: string,
-  index?: TermIndex,
-  mode: NotationMode = "curly"
-): string {
-  if (line.length === 0) return "<br>";
-
-  let html = "";
-  for (const token of tokenizeLine(line, mode)) {
-    switch (token.kind) {
-      case "plain":
-        html += markTerms(token.text, index);
-        break;
-      case "ruby":
-        // **親文字にも用語の色を当てる。** ルビが振ってある名前だけ
-        // 色が付かないと、同じ人物が別扱いに見える
-        html +=
-          `<ruby>${markTerms(token.base, index)}` +
-          `<rt>${escapeHtml(token.reading)}</rt></ruby>`;
-        break;
-      case "emphasis":
-        html += `<em class="emph">${markTerms(token.text, index)}</em>`;
-        break;
-    }
-  }
-  return html;
-}
-
-/**
- * 本文まるごとを、行ごとの `<p>` にする。
- *
- * **1行を1つの段落にする。** 小説の本文は改行が意味を持つ（会話の切れ目、
- * 場面の間）。Markdown の規則どおりに空行までを1段落へ畳むと、作者が
- * 置いた改行が消えて別の文章になる。
- *
- * @param mode 記法（`.txt` は投稿サイトの記法で組む。`notationModeFor`）
- */
-export function renderManuscript(
-  text: string,
-  index?: TermIndex,
-  mode: NotationMode = "curly"
-): string {
-  const lines = text.split(/\r\n|\r|\n/);
-  return lines
-    .map(
-      (line, i) =>
-        `<p class="line" data-line="${i}">${renderLine(line, index, mode)}</p>`
-    )
-    .join("\n");
-}
+  **記法の切り分け（`tokenizeLine`）と `escapeHtml` は残す**——PDF出力
+  （`core/printHtml.ts`）が使っている。用語の目印（`renderTermMarks`）と
+  位置の一覧（`collectTermSpans`）も、打つ面と組んで書く面が使う。
+*/
 
 /**
  * 用語の種類の呼び名。**定義はここだけ**（ホバーの見出しなどで使う）。

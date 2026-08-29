@@ -132,7 +132,7 @@ button.on {
   position: relative;
   overflow: hidden;
 }
-#write, #read, #marks, #compose {
+#write, #marks, #compose {
   position: absolute;
   inset: 0;
   padding: 24px 28px;
@@ -173,9 +173,7 @@ button.on {
 /* 打っている間は隠す。**位置のずれた目印を出さない**——
    本文が変わってから新しい目印が届くまでの間、古い位置のまま残るため */
 #marks.stale { visibility: hidden; }
-/* 読む面・並べる面では、そちらに色が付くので要らない */
-body.reading #marks, body.split #marks { display: none; }
-/* **色は読む面・組んで書く面と同じ変数から取る**（画面ごとに違う色にしない）。
+/* **色は組んで書く面と同じ変数から取る**（画面ごとに違う色にしない）。
    角丸は塗りのためのものだったので、色にした今は要らない */
 .mark-character { color: var(--novelai-character); }
 .mark-location { color: var(--novelai-location); }
@@ -196,47 +194,11 @@ body.plain .mark { color: transparent; }
   overflow-wrap: break-word;
   tab-size: 4;
 }
-#read { white-space: normal; }
-#read p.line {
-  margin: 0;
-  min-height: 1.9em;
-}
 /* 縦書き。**行の高さを「幅」として持つ**ので、指定はそのまま効く。
    **#marks（打つ面に重ねる用語の色）も必ず同じ向きにする。** 0.22.24まで
    ここから漏れており、縦書きのとき重ねる面だけ横書きで組まれて、色が
    本文と無関係な場所（空白）に浮いていた（実機の報告、2026-08-27） */
-/* **三点リーダを行の中央に寄せる**（作者の依頼、2026-08-28）。
-   横書き：欧文フォントに落ちると「…」が下に沈むので、中央を明示する。
-   縦書き：横書きの向きに固定してから90度回す。フォントが縦用の字形
-   （縦3点）を持つかに依存せず、同じ見た目になる。
-   ここは読む面ぶん。組んで書く面は #compose .ellipsis で同じ形にしてある。
-   書く面（textarea）は文字単位の調整ができないため、フォントの形のまま */
-#read .ellipsis {
-  vertical-align: middle;
-  /* **三点リーダの字だけ、和文の明朝に固定する**（実機の報告、2026-08-29）。
-     選んだ書体が「…」を持たないと欧文へ落ち、欧文の三点リーダは下寄りの
-     字形なので、中央指定をしても沈んで見える。和文書体は最初から中央に
-     描く。1文字だけの固定なので、本文の書体の雰囲気は崩れない */
-  font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN",
-    "MS Mincho", serif;
-}
-/* **箱を1em角の正方形に固定する**（実機の報告、2026-08-28）。
-   寸法を決めないと箱の高さが行の高さ（約1.5文字分）になり、
-   連続した「……」の間に隙間があく。また縦横比が崩れるため、
-   フォントサイズを変えると回転の中心が柱からずれる。
-   1em角なら送りは1文字分で、中心はフォントサイズに追従する */
-body.vertical #read .ellipsis {
-  writing-mode: horizontal-tb;
-  display: inline-block;
-  width: 1em;
-  height: 1em;
-  line-height: 1em;
-  text-align: center;
-  transform: rotate(90deg);
-  transform-origin: center;
-  vertical-align: baseline;
-}
-body.vertical #write, body.vertical #read, body.vertical #marks,
+body.vertical #write, body.vertical #marks,
 body.vertical #compose {
   writing-mode: vertical-rl;
   /* **upright にしない。** 全部を立てると、英数字が1文字ずつ縦に
@@ -266,12 +228,8 @@ body.vertical #compose {
   /* 縦書きでは上下の余白が「行頭・行末」になる */
   padding: 28px 24px;
 }
-body.vertical #read p.line { min-width: 1.9em; min-height: 0; }
 /* 縦書きのときだけ、行の長さを紙のように区切る */
 body.vertical.paged #surface { padding: 0; }
-
-body.reading:not(.split) #write { visibility: hidden; pointer-events: none; }
-body:not(.reading):not(.split) #read { visibility: hidden; pointer-events: none; }
 
 /* ── 組んで書く（実験）（設計書6.34） ─────────────
    **この面だけを出す。** 打ちながらルビ・傍点が組まれて見える代わりに、
@@ -289,8 +247,8 @@ body:not(.reading):not(.split) #read { visibility: hidden; pointer-events: none;
   color: var(--vscode-editor-foreground);
 }
 body.compose #compose { display: block; }
-/* 上の3面は、この面が出ている間は隠す（描かせない） */
-body.compose #write, body.compose #read, body.compose #marks { display: none; }
+/* 打つ面（と重ねる目印）は、この面が出ている間は隠す（描かせない） */
+body.compose #write, body.compose #marks { display: none; }
 /* 行の段落。**打っている間に増える入れ物にも効かせる**——改行で作られる
    入れ物は環境によって p と div のどちらにもなりうる（直列化の側は
    どちらも行の切れ目として読む） */
@@ -310,12 +268,16 @@ body.vertical #compose p, body.vertical #compose div {
   border-radius: 2px;
 }
 /* **三点リーダを行の中央に寄せる**（作者の依頼、2026-08-28）。
-   読む面（#read .ellipsis）で作者が確かめた形をそのまま使う——
-   同じ本文が面によって違って見えるのは、それ自体が不具合である。
-   **中身は #read のブロックと1文字も違えない**（composeFace.test.ts が
-   両方を抜き出して比べる）。組み立て側も読む面と同じ素の span にしてある
-   ——0.24.12 は編集不可のかたまりにしており、CSSは同じなのに縦書きで
-   「……」の間に隙間が出た（作者の実機報告、2026-08-28） */
+   横書き：欧文フォントに落ちると「…」が下に沈むので、中央を明示する。
+   縦書き：横書きの向きに固定してから90度回す。フォントが縦用の字形
+   （縦3点）を持つかに依存せず、同じ見た目になる。
+   書く面（textarea）は文字単位の調整ができないため、フォントの形のまま。
+
+   **この形は、かつて読む面（#read .ellipsis）で作者が確かめたもの**である
+   （0.24.1）。読む面そのものは0.25.2で消したが、確かめた値はここに残る
+   ——組み立て側も素の span にしてある。0.24.12 は編集不可のかたまりに
+   しており、CSSは同じなのに縦書きで「……」の間に隙間が出た（実機報告、
+   2026-08-28） */
 #compose .ellipsis {
   vertical-align: middle;
   /* **三点リーダの字だけ、和文の明朝に固定する**（実機の報告、2026-08-29）。
@@ -325,9 +287,11 @@ body.vertical #compose p, body.vertical #compose div {
   font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN",
     "MS Mincho", serif;
 }
-/* **箱を1em角の正方形に固定する。** 寸法を決めないと箱の高さが行の高さに
-   なって「……」の間に隙間があき、フォントサイズを変えると回転の中心が
-   柱からずれる（読む面と同じ理由） */
+/* **箱を1em角の正方形に固定する**（実機の報告、2026-08-28）。
+   寸法を決めないと箱の高さが行の高さ（約1.5文字分）になり、連続した
+   「……」の間に隙間があく。また縦横比が崩れるため、フォントサイズを
+   変えると回転の中心が柱からずれる。1em角なら送りは1文字分で、
+   中心はフォントサイズに追従する */
 body.vertical #compose .ellipsis {
   writing-mode: horizontal-tb;
   display: inline-block;
@@ -339,7 +303,20 @@ body.vertical #compose .ellipsis {
   transform-origin: center;
   vertical-align: baseline;
 }
-/* 圏点は読む面と同じ出し方（em.emph と同じ指定を分け合う） */
+/* **ダッシュも和文の明朝に固定する**（作者の実機報告、2026-08-29
+   「主従の悪だくみが始まった――」の2本のあいだに隙間が見える）。
+   選んだ書体が「―」を持たないと欧文へ落ち、欧文のダッシュは字送りより
+   線が短いので、隣り合わせても**線がつながらず隙間になる**。
+   和文書体のダッシュは字送りいっぱいに引かれるので、並べると1本に見える。
+
+   **縦書きの回転も1em角の固定も付けない**（三点リーダとはここが違う）。
+   和文書体はダッシュの縦用の字形を持っているので、縦書きでは何もしなくても
+   正しく立つ。回すと、かえって字が切れる。 */
+#compose .dash {
+  font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN",
+    "MS Mincho", serif;
+}
+/* 圏点は読み物と同じ出し方（em.emph と同じ指定を分け合う） */
 #compose .emphasis {
   font-style: normal;
   text-emphasis: filled dot;
@@ -355,64 +332,22 @@ body.vertical #compose .ellipsis {
 ::highlight(novelai-term-ability) { color: var(--novelai-ability); }
 ::highlight(novelai-term-organization) { color: var(--novelai-organization); }
 
-/*
-  並べる。**打つ面はそのまま、見る面を隣に置く。**
-  ルビを出したまま打てる画面は日本語入力（IME）を壊すので作らない
-  （設計書6.25）。代わりに、打ちながら組み上がりを見られるようにする。
-*/
-body.split #surface { display: flex; gap: 0; }
-body.split #write, body.split #read {
-  position: relative;
-  inset: auto;
-  flex: 1 1 50%;
-  min-width: 0;
-  min-height: 0;
-}
-body.split #read { border-left: 1px solid var(--vscode-panel-border); }
-
-/*
-  **いま打っている行の印**（作者の要望、2026-08-28）。
-  並べているとき、組み上がりのどこを打っているのかが分かるようにする。
-
-  **背景は塗らない。** 読む面の色は用語の色分けに使っており、そこへ帯を
-  敷くと本文の色が読めなくなる。行の始まる側に細い線を引くだけにする。
-
-  **箱の形を変えない**（内側の影で描く）。border を足すと、印が移るたびに
-  本文が数ピクセルずれて、行が踊って見える。
-*/
-body.split #read {
-  --novelai-caret-line: color-mix(in srgb, var(--vscode-focusBorder) 45%, transparent);
-}
-body.split #read p.line.at-caret {
-  box-shadow: inset 2px 0 0 0 var(--novelai-caret-line);
-}
-/* 縦書きでは行は上から始まるので、線も上へ引く */
-body.vertical.split #read p.line.at-caret {
-  box-shadow: inset 0 2px 0 0 var(--novelai-caret-line);
-}
-
-/* ── ルビ・傍点・用語 ─────────────────── */
+/* ── ルビ ─────────────────────────── */
+/* 組んで書く面は、本物の ruby 要素を組む（#compose ruby[data-src]） */
 ruby > rt {
   font-size: 0.5em;
   opacity: 0.85;
   user-select: none;
 }
-em.emph {
-  font-style: normal;
-  text-emphasis: filled dot;
-  -webkit-text-emphasis: filled dot;
-  text-emphasis-position: over right;
-  -webkit-text-emphasis-position: over right;
-}
-.term { cursor: pointer; border-radius: 2px; }
-.term:hover { background: var(--vscode-editor-hoverHighlightBackground); }
-.term-character { color: var(--novelai-character); }
-.term-location { color: var(--novelai-location); }
-.term-ability { color: var(--novelai-ability); }
-.term-organization { color: var(--novelai-organization); }
-body.plain .term { color: inherit; }
+/*
+  **用語の印（.term）と圏点（em.emph）の指定は消した**（0.25.2）。
+  この2つを出していたのは core/manuscriptRender.ts の renderManuscript で、
+  行き先は「読む」面だった。面ごと消したので、当たる要素がもう作られない。
+  いまの色分けは、打つ面が重ね敷き（.mark-*）、組んで書く面が
+  CSS Custom Highlight API（::highlight）である。
+*/
 
-/* ── ホバーのチップ（読む面。作者の依頼、2026-08-28） ───── */
+/* ── ホバーのチップ（組んで書く面。作者の依頼、2026-08-28） ───── */
 #tip {
   position: fixed;
   z-index: 15;
@@ -515,7 +450,6 @@ body.plain .term { color: inherit; }
 <div id="surface">
   <div id="marks" aria-hidden="true"></div>
   <textarea id="write" spellcheck="false" wrap="soft"></textarea>
-  <div id="read"></div>
   <div id="compose" spellcheck="false"></div>
 </div>
 
@@ -537,7 +471,6 @@ body.plain .term { color: inherit; }
 (function () {
   const vscode = acquireVsCodeApi();
   const write = document.getElementById("write");
-  const read = document.getElementById("read");
   /** 打つ面に重ねる用語の色（設計書6.25.6） */
   const marks = document.getElementById("marks");
   /** 用語の位置。右クリックで「どの用語の上か」を引くのに使う */
@@ -568,8 +501,6 @@ body.plain .term { color: inherit; }
   let lastSent = null;
   /** 変換中に外から届いた本文。確定してから片づける */
   let pending = null;
-  /** 書いている間に届いた「読む面」。切り替えるときに当てる */
-  let freshHtml = null;
 
   /**
    * その書体が、この端末に入っているか。
@@ -618,17 +549,16 @@ body.plain .term { color: inherit; }
   const saved = vscode.getState() || {};
   /** はじめの向きは設定から。**一度切り替えたら、その原稿ではそれを覚える** */
   let vertical = saved.vertical;
-  /**
-   * 読む面・並べる面（設計書6.25）。
-   *
-   * **ボタンは外した**（作者の指示、2026-08-29。組んで書くが標準）。
-   * 面と切り替えの仕掛けそのものは残してあるが、**入る道が無いので
-   * 必ず false から始める**——覚えていた状態のまま開くと、戻すボタンの
-   * 無い面に閉じ込められる（読む面には打ち込めない）。
-   */
-  let reading = false;
-  /** 打つ面と組み上がりを並べる */
-  let split = false;
+  /*
+    **「読む」面と「並べる」面は消した**（0.25.2）。
+
+    0.24.14で「組んで書く」が標準になり、切り替えのボタンを外した時点で
+    **この2つの面へ入る道が無くなっていた**（面を表す2つのフラグが、
+    どこからも true にならない）。仕掛けだけが約200行残っていたので、
+    面・CSS・追いかけ・覚えていた状態ごと消してある。
+    組んで書く面の安全弁が落ちる先は、いまも打つ面（textarea）である。
+  */
+
   /**
    * 組んで書く（実験）の面にいるか（設計書6.34）。
    *
@@ -646,20 +576,14 @@ body.plain .term { color: inherit; }
   let size = saved.size || 16;
 
   function remember() {
-    // **まだ開いていないだけの状態を、閉じたことにしない**（composeWanted）
-    vscode.setState({ vertical, reading, split, size, compose: composeOn || composeWanted });
-  }
-
-  /** 組み上がりが見えている場面か（並べているときも見えている） */
-  function showingRead() {
-    return reading || split;
+    // **まだ開いていないだけの状態を、閉じたことにしない**（composeWanted）。
+    // 消した面（reading・split）は書かない——古い state に残っていても読まない
+    vscode.setState({ vertical, size, compose: composeOn || composeWanted });
   }
 
   function paint() {
     // 設定がまだ届いていない間は縦書きとして見せる（body の初期値と揃える）
     document.body.classList.toggle("vertical", vertical !== false);
-    document.body.classList.toggle("reading", reading);
-    document.body.classList.toggle("split", split);
     document.body.classList.toggle("compose", composeOn);
     document.documentElement.style.setProperty("--novelai-size", size + "px");
     // **大きさも向きもここで変わる。** どちらも折り返し幅を変えるので、
@@ -675,40 +599,10 @@ body.plain .term { color: inherit; }
     */
   }
 
-  /** 縦書きでは「上下」ではなく「左右」に流れる。位置合わせもそれに従う */
-  function keepPlace(fromEl, toEl) {
-    if (!fromEl || !toEl) return;
-    if (vertical !== false) {
-      const total = fromEl.scrollWidth - fromEl.clientWidth;
-      if (total > 0) {
-        const ratio = fromEl.scrollLeft / total;
-        toEl.scrollLeft = ratio * (toEl.scrollWidth - toEl.clientWidth);
-      }
-    } else {
-      const total = fromEl.scrollHeight - fromEl.clientHeight;
-      if (total > 0) {
-        const ratio = fromEl.scrollTop / total;
-        toEl.scrollTop = ratio * (toEl.scrollHeight - toEl.clientHeight);
-      }
-    }
-  }
-
-  /*
-    **「読む」「並べる」のボタンは外した**（作者の指示、2026-08-29）。
-    面そのものと、切り替えに要る道具（keepPlace・applyFreshHtml・
-    wakeFollow・追いかけ）は残してある——組んで書く面が安全弁で開けない
-    原稿では「書く」面へ落ちるし、並べる面の追いかけは
-    manuscriptSplitFollow.test.ts が今も動かしている。
-  */
-
   dirButton.addEventListener("click", function () {
     vertical = vertical === false;
     paint();
     remember();
-    // 切り分けの計器（組んで書く面のみ）。**向きを変えた直後の**計算済み
-    // スタイルを記録する——縦書きの規則が効いているかは、縦にした状態で
-    // 測らないと分からない。スタイルの再計算を1フレーム待つ
-    if (composeOn) requestAnimationFrame(composeReportEllipsis);
   });
 
   document.getElementById("latest").addEventListener("click", function () {
@@ -756,9 +650,9 @@ body.plain .term { color: inherit; }
     vscode.postMessage({ type: "copyForPosting" });
   });
 
-  /** 選んでいる文字。読む面では選択範囲、書く面では textarea の選択 */
+  /** 選んでいる文字。組んで書く面では選択範囲、書く面では textarea の選択 */
   function selectionText() {
-    if (composeOn || reading) return String(window.getSelection() || "");
+    if (composeOn) return String(window.getSelection() || "");
     return write.value.slice(write.selectionStart, write.selectionEnd);
   }
 
@@ -771,8 +665,8 @@ body.plain .term { color: inherit; }
     vscode.postMessage({
       type: "ruby",
       text: text,
-      start: reading ? -1 : write.selectionStart,
-      end: reading ? -1 : write.selectionEnd,
+      start: write.selectionStart,
+      end: write.selectionEnd,
     });
   }
 
@@ -785,8 +679,8 @@ body.plain .term { color: inherit; }
     vscode.postMessage({
       type: "emphasis",
       text: text,
-      start: reading ? -1 : write.selectionStart,
-      end: reading ? -1 : write.selectionEnd,
+      start: write.selectionStart,
+      end: write.selectionEnd,
     });
   }
 
@@ -799,8 +693,6 @@ body.plain .term { color: inherit; }
     // 確定のたびに二重に入る
     if (composing) return;
     send();
-    // 組み上がりが届くのは少しあと。先に印だけでも打っている行へ移す
-    scheduleSync(true);
   });
 
   /** 見えている場所を、打つ面から目印へ写す。**ずれると色が別の字に付く** */
@@ -809,15 +701,7 @@ body.plain .term { color: inherit; }
     marks.scrollLeft = write.scrollLeft;
   }
 
-  write.addEventListener("scroll", function () {
-    syncMarksScroll();
-    /*
-      並べているときは、組み上がりの側も一緒に動かす（作者の要望、2026-08-28）。
-      **合わせるのは書く→読むの一方向だけ。** 逆も繋ぐと、読み返すために
-      読む面を動かした瞬間に打つ面まで動き、書きかけの場所を見失う。
-    */
-    scheduleSync(false);
-  });
+  write.addEventListener("scroll", syncMarksScroll);
 
   /*
     **止まったところで、もう一度写す。** scroll の知らせは間引かれることが
@@ -843,8 +727,6 @@ body.plain .term { color: inherit; }
       send();
       // 変換中に外から届いていた書き換えは、ここで片づける
       flushPending();
-      // 確定したので、追いかけを解禁する（変換中は止めてある）
-      scheduleSync(true);
     }, 0);
   });
 
@@ -966,210 +848,8 @@ body.plain .term { color: inherit; }
   // 窓の大きさが変わるとスクロールバーの有無も変わりうる。合わせ直す
   window.addEventListener("resize", scheduleAlignMarks);
 
-  /* ── 並べているときの追いかけ ──────────────────── */
-
   /**
-   * 行の並びのうち、**前後が一致しない中間**を求める。
-   *
-   * 先頭から一致する数と末尾から一致する数を数え、残りを返す。
-   * 同じなら null——「触らない」が正しい答えである。
-   *
-   * **画面の外から試せるように、印で挟んである**（この印の間を
-   * test/unit/manuscriptSplitFollow.test.ts が取り出して動かす）。
-   * src/core へ出すと画面側には写しを置くことになり、
-   * **片方だけが直る日が必ず来る**ので、置き場はここ1つにした。
-   */
-  /* changedRange:start */
-  function changedRange(before, after) {
-    const max = Math.min(before.length, after.length);
-    let head = 0;
-    while (head < max && before[head] === after[head]) head++;
-    let tail = 0;
-    while (
-      tail < max - head &&
-      before[before.length - 1 - tail] === after[after.length - 1 - tail]
-    ) {
-      tail++;
-    }
-    const oldEnd = before.length - tail;
-    const newEnd = after.length - tail;
-    if (head === oldEnd && head === newEnd) return null;
-    return { start: head, oldEnd: oldEnd, newEnd: newEnd };
-  }
-  /* changedRange:end */
-
-  /** 読む面の中身が、想定どおり行の段落だけで出来ているか */
-  function allLines(items) {
-    for (const item of items) {
-      if (item.nodeName !== "P") return false;
-      if (!item.classList.contains("line")) return false;
-    }
-    return true;
-  }
-
-  /**
-   * 段落を見比べるための文字列。
-   *
-   * **行番号（data-line）は入れない。** 改行を1つ足すと、それ以降の
-   * 番号がすべてずれる。番号まで見比べると、中身の変わっていない段落が
-   * 全部「変わった」ことになり、**改行のたびに後ろ全部を作り直す**。
-   * 番号は入れ替えたあとで振り直す（renumberLines）。
-   */
-  function shapeOf(el) {
-    return el.className + ">" + el.innerHTML;
-  }
-
-  /**
-   * 行番号を振り直す。**打っている行を指すのに使う番号**なので、
-   * 増減があったら合わせておかないと、追いかけが別の行を指す。
-   */
-  function renumberLines(from) {
-    const items = read.children;
-    for (let i = from; i < items.length; i++) {
-      items[i].setAttribute("data-line", String(i));
-    }
-  }
-
-  /**
-   * 届いた組み上がりを、**変わった段落だけ**入れ替える。
-   *
-   * 4万字の本文では段落が千を超える。並べて打っているあいだは
-   * 打った少しあとに毎回ここへ届くので、丸ごと作り直すと打つ手が止まり、
-   * **読んでいた場所（スクロール）まで毎回飛ぶ。**
-   *
-   * 想定と違う中身（段落以外が混ざっている）なら false を返し、
-   * 呼んだ側が丸ごと入れ替える。**細工より、正しく出ることが先**である。
-   */
-  function patchRead(html) {
-    // 生きた HTMLCollection のまま動かすと、取り出した先から番号がずれる
-    const before = Array.prototype.slice.call(read.children);
-    if (before.length === 0) return false;
-    const holder = document.createElement("template");
-    holder.innerHTML = html;
-    const after = Array.prototype.slice.call(holder.content.children);
-    if (after.length === 0) return false;
-    if (!allLines(before) || !allLines(after)) return false;
-
-    const range = changedRange(before.map(shapeOf), after.map(shapeOf));
-    // 中身が同じなら**触らない**。入れ直すだけでも読んでいた場所は動く
-    if (range === null) return true;
-
-    const fragment = document.createDocumentFragment();
-    for (let i = range.start; i < range.newEnd; i++) {
-      fragment.appendChild(after[i]);
-    }
-    // 入れ先は、消す区間のすぐ後ろの段落。末尾まで消すときは null（＝最後尾へ）
-    const anchor = before[range.oldEnd] || null;
-    for (let i = range.start; i < range.oldEnd; i++) {
-      read.removeChild(before[i]);
-    }
-    read.insertBefore(fragment, anchor);
-    // 行が増減したときだけ、後ろの番号がずれている
-    if (before.length !== after.length) renumberLines(range.start);
-    return true;
-  }
-
-  /** 溜めておいた組み上がりを当てる。見えていないときは溜めたままにする */
-  function applyFreshHtml() {
-    if (freshHtml === null) return;
-    const html = freshHtml;
-    freshHtml = null;
-    /*
-      印を外してから当てる。**届いたHTMLに印は付いていない**ので、
-      付けたまま比べると、その段落だけ必ず「変わった」と見なされる
-    */
-    clearCaretMark();
-    if (!patchRead(html)) read.innerHTML = html;
-    // 1フレームでも印が消えると、打っている間ずっと点滅して見える
-    markCaretLine(caretLine());
-    if (split) scheduleSync(true);
-  }
-
-  /** いま印の付いている段落。付け替えるたびに探し直さないために持つ */
-  let markedLine = null;
-
-  /** カーソルのある行（＝カーソルまでにある改行の数） */
-  function caretLine() {
-    const at = write.selectionStart;
-    if (typeof at !== "number") return 0;
-    const text = write.value;
-    const end = Math.min(at, text.length);
-    // slice で切り出すと、打鍵のたびに4万字を写すことになる。その場で数える
-    let line = 0;
-    for (let i = 0; i < end; i++) {
-      if (text.charCodeAt(i) === 10) line++;
-    }
-    return line;
-  }
-
-  function lineElement(line) {
-    return read.querySelector('[data-line="' + line + '"]');
-  }
-
-  function clearCaretMark() {
-    if (markedLine) markedLine.classList.remove("at-caret");
-    markedLine = null;
-  }
-
-  /** 打っている行に印を付ける。**並べているときだけ**（読む面は読むための面） */
-  function markCaretLine(line) {
-    if (!split) {
-      clearCaretMark();
-      return;
-    }
-    const target = lineElement(line);
-    if (target === markedLine) return;
-    clearCaretMark();
-    if (target) {
-      target.classList.add("at-caret");
-      markedLine = target;
-    }
-  }
-
-  /**
-   * 作者が読む面へ手を出したら、しばらく追いかけない。
-   *
-   * **読み返している最中に、打っている行へ引き戻されるのがいちばん困る。**
-   * 数秒眠り、時間が経つか、**カーソルが行をまたいで動いたら**
-   * （＝また書きはじめた合図）その場で起きる。
-   *
-   * 眠る合図に読む面の scroll を使わないのは、**こちらが動かしたぶんや、
-   * 本文が伸びたときの画面側の調整も scroll として届く**ためである。
-   * 縦書きでは行が右から左へ伸びるので、1行増えるだけで位置が動く。
-   * 車輪・押下・指の動きだけを「手を出した」と数える。
-   */
-  const FOLLOW_SLEEP_MS = 3000;
-  let sleepUntil = 0;
-  let sleepLine = -1;
-
-  function wakeFollow() {
-    sleepUntil = 0;
-    sleepLine = -1;
-  }
-
-  function sleepFollow() {
-    if (!split) return;
-    sleepUntil = Date.now() + FOLLOW_SLEEP_MS;
-    sleepLine = caretLine();
-  }
-
-  /** いま追いかけてよいか */
-  function following(line) {
-    if (sleepUntil === 0) return true;
-    if (Date.now() >= sleepUntil) {
-      wakeFollow();
-      return true;
-    }
-    if (line !== sleepLine) {
-      // 行をまたいだ＝また書きはじめた。眠りから起きる
-      wakeFollow();
-      return true;
-    }
-    return false;
-  }
-
-  /**
-   * その段落が読む面からはみ出している量。中に入っていれば 0。
+   * その要素が入れ物からはみ出している量。中に入っていれば 0。
    *
    * **scrollIntoView を使わない。** あれは上の入れ物まで動かすことがあり、
    * #surface は overflow:hidden なので、動くと戻す手立てが無い。
@@ -1189,80 +869,6 @@ body.plain .term { color: inherit; }
     else if (rect.bottom > box.bottom) top = rect.bottom - box.bottom + slack;
     return { left: left, top: top };
   }
-
-  function offView(el) {
-    return offRect(read, el.getBoundingClientRect());
-  }
-
-  /**
-   * 読む面を、その段落が見えるところまで**そっと**動かす。
-   *
-   * 中央には寄せない。1行動くたびに画面が真ん中まで動くと、
-   * **目が付いていけない**（読んでいるほうが疲れる）。
-   */
-  function nudgeIntoView(el) {
-    const off = offView(el);
-    if (off.left === 0 && off.top === 0) return;
-    if (off.left !== 0) read.scrollLeft += off.left;
-    if (off.top !== 0) read.scrollTop += off.top;
-  }
-
-  /**
-   * 並べているときの追いかけ。**カーソルを優先する。**
-   *
-   * 割合合わせ（keepPlace）は、カーソルが画面から出るほどの大移動を拾う
-   * 補いである。カーソルの行が見えているなら、割合で合わせ直さない——
-   * 合わせ直すと、いま打っている行のほうが画面の外へ出ていく。
-   */
-  function runSync(byCaret) {
-    if (!split) return;
-    const line = caretLine();
-    markCaretLine(line);
-    // 変換中は動かさない。画面が跳ねると、変換している文字を目で追えなくなる
-    if (composing) return;
-    // 手で読み返している最中は、引き戻さない
-    if (!following(line)) return;
-    const target = lineElement(line);
-    if (byCaret) {
-      // 行が見つからないのは、組み上がりがまだ届いていないとき。
-      // **割合で飛ばさずに待つ**（次に届いたところで、もう一度ここを通る）
-      if (target) nudgeIntoView(target);
-      return;
-    }
-    if (target) {
-      const off = offView(target);
-      if (off.left === 0 && off.top === 0) return;
-    }
-    keepPlace(write, read);
-  }
-
-  /**
-   * 追いかけの予約。
-   *
-   * 打鍵とスクロールの両方から何度も呼ばれるので、**1フレームに1回**へ
-   * まとめる。同じフレームで両方が来たら、カーソルのほうを採る。
-   */
-  let syncTimer = null;
-  let syncByCaret = false;
-  function scheduleSync(byCaret) {
-    if (!split) return;
-    if (byCaret) syncByCaret = true;
-    if (syncTimer !== null) return;
-    syncTimer = requestAnimationFrame(function () {
-      syncTimer = null;
-      const wanted = syncByCaret;
-      syncByCaret = false;
-      runSync(wanted);
-    });
-  }
-
-  // カーソルが動いたら、組み上がりの側も追いかける。
-  // **変換中は追いかけない**（変換の途中で画面が動くと、変換が見づらい）
-  document.addEventListener("selectionchange", function () {
-    if (document.activeElement !== write) return;
-    if (composing) return;
-    scheduleSync(true);
-  });
 
   /** 変換が確定したあとに、待たせていた書き換えを片づける */
   function flushPending() {
@@ -1372,7 +978,7 @@ body.plain .term { color: inherit; }
    *
    * この手が効かない環境が出たら、その行の頭に範囲を作って
    * getBoundingClientRect で測り、はみ出しぶんを足し引きする手
-   * （並べる面の nudgeIntoView と同じ考え方）へ切り替えること。
+   * （組んで書く面の composeNudgeIntoView と同じ考え方）へ切り替えること。
    */
   function revealLine(line) {
     const text = write.value;
@@ -1402,8 +1008,8 @@ body.plain .term { color: inherit; }
         焦点を入れ直せばブラウザが選択のところまで送ってくれるが、
         contenteditable ではそれが起きない——カーソルは移っているのに、
         見えている場所は元のままである。**指した行が画面の外なら、
-        はみ出したぶんだけ動かす**（読む面の nudgeIntoView と同じ考え方。
-        中央には寄せない）。
+        はみ出したぶんだけ動かす**（中央には寄せない。1行動くたびに画面が
+        真ん中まで動くと、目が付いていけない）。
       */
       if (!composeNudgeIntoView(start)) {
         vscode.postMessage({
@@ -1414,12 +1020,6 @@ body.plain .term { color: inherit; }
       return;
     }
 
-    // 読む面だけを出していると、示した先（カーソル）が見えない。書く面へ戻す
-    if (reading && !split) {
-      reading = false;
-      paint();
-      remember();
-    }
     write.focus();
     try {
       write.setSelectionRange(start, end);
@@ -1429,8 +1029,6 @@ body.plain .term { color: inherit; }
     // 焦点を入れ直して、選んだところまで転がしてもらう
     write.blur();
     write.focus();
-    // 並べているときは、組み上がりの側も同じ行へ寄せる
-    scheduleSync(true);
   }
 
   /* ── 右クリック ────────────────────── */
@@ -1475,7 +1073,10 @@ body.plain .term { color: inherit; }
       rule();
     }
 
-    add("ルビを振る", askRuby, hasSelection || !reading);
+    // **ルビは選んでいなくても押せる。** 選択が無ければ拡張機能側が
+    // 直前の漢字のまとまりを拾う（傍点は選んだ範囲そのものに付けるので、
+    // 選択が要る）
+    add("ルビを振る", askRuby);
     add("傍点を付ける", askEmphasis, hasSelection);
     rule();
     add("投稿サイト用にコピー", function () {
@@ -1488,14 +1089,8 @@ body.plain .term { color: inherit; }
       const at = composeOn ? composeMenuAt : null;
       vscode.postMessage({
         type: "chat",
-        start: composeOn
-          ? at
-            ? at.start
-            : -1
-          : reading
-            ? -1
-            : write.selectionStart,
-        end: composeOn ? (at ? at.end : -1) : reading ? -1 : write.selectionEnd,
+        start: composeOn ? (at ? at.start : -1) : write.selectionStart,
+        end: composeOn ? (at ? at.end : -1) : write.selectionEnd,
       });
     }, hasSelection);
 
@@ -1586,15 +1181,7 @@ body.plain .term { color: inherit; }
     if (event.key === "Escape") closeMenu();
   });
 
-  /** 読む面で用語を押したら、そのまま資料を開く */
-  read.addEventListener("click", function (event) {
-    const term = termFrom(event.target);
-    if (term) {
-      vscode.postMessage({ type: "openTerm", id: term.id, kind: term.kind });
-    }
-  });
-
-  /* ── 読む面のホバーのチップ（作者の依頼、2026-08-28） ── */
+  /* ── ホバーのチップ（作者の依頼、2026-08-28） ── */
   const tip = document.getElementById("tip");
   const TIP_KIND_LABELS = {
     character: "人物",
@@ -1603,20 +1190,12 @@ body.plain .term { color: inherit; }
     organization: "組織",
   };
 
-  /** 紹介の一文。届いた用語の一覧（termSpans）から同じidを引く */
-  function tipSummaryOf(id) {
-    for (const span of termSpans) {
-      if (span.id === id && span.summary) return span.summary;
-    }
-    return "";
-  }
-
   /**
    * チップの中身を作って出す。
    *
-   * **組んで書く面（設計書6.34）とここで分け合う。** あちらは要素ではなく
-   * 位置から用語を引くが、**出すものは同じ**である（同じ見た目のチップが
-   * 2つの作りで別々に育つのを避ける）。
+   * 呼ぶのは組んで書く面（設計書6.34）だけになったが、**組み立てはここに
+   * 置いたままにする**——用語の見せ方（名前・種別・紹介の一文）は面が
+   * 増えても同じものにしたい。
    */
   function fillTip(name, kind, summary) {
     tip.innerHTML = "";
@@ -1650,45 +1229,6 @@ body.plain .term { color: inherit; }
     tip.style.top = Math.max(4, top) + "px";
   }
 
-  read.addEventListener("mouseover", function (event) {
-    const el =
-      event.target && event.target.closest
-        ? event.target.closest(".term")
-        : null;
-    if (!el) {
-      tip.classList.remove("open");
-      return;
-    }
-    fillTip(
-      el.getAttribute("data-term-name"),
-      el.getAttribute("data-term-kind"),
-      tipSummaryOf(el.getAttribute("data-term-id"))
-    );
-    placeTip(el.getBoundingClientRect());
-  });
-  read.addEventListener("mouseout", function (event) {
-    const el =
-      event.target && event.target.closest
-        ? event.target.closest(".term")
-        : null;
-    if (el) tip.classList.remove("open");
-  });
-  read.addEventListener("scroll", function () {
-    tip.classList.remove("open");
-  });
-
-  /*
-    **読む面へ手を出したら、追いかけを眠らせる**（作者の要望、2026-08-28）。
-    読み返しているところへ、打っている行から引き戻されるのが最悪である。
-
-    合図に scroll を使わないのは、追いかけで動かしたぶんも、本文が伸びた
-    ときの調整も scroll として届くためで、それだと**自分の動きで自分が
-    眠る**。車輪・押下（つまみの掴みを含む）・指の動きだけを数える。
-  */
-  read.addEventListener("wheel", sleepFollow, { passive: true });
-  read.addEventListener("mousedown", sleepFollow);
-  read.addEventListener("touchstart", sleepFollow, { passive: true });
-
   /* ── 拡張機能からの知らせ ──────────── */
   window.addEventListener("message", function (event) {
     const message = event.data;
@@ -1715,14 +1255,6 @@ body.plain .term { color: inherit; }
         composeWanted = false;
         composeEnter();
       }
-      /*
-        **打っている間は、読む面を組み立て直さない。**
-        4万字の本文では段落が千を超える。打つたびにそれを作り直すと、
-        画面がつかえて「変換が途中で止まった」ように感じる。
-        見えていないのだから、切り替えるときに作ればよい。
-      */
-      freshHtml = message.html;
-      if (showingRead()) applyFreshHtml();
       if (typeof message.marks === "string") {
         latestMarks = { forText: message.text, html: message.marks };
         applyMarksIfMatch();
@@ -1797,7 +1329,7 @@ body.plain .term { color: inherit; }
       */
       composeWantSelect = { start: message.start, end: message.end };
       composeRestoreCaret(composeWantSelect);
-    } else if (message.type === "select" && !reading) {
+    } else if (message.type === "select") {
       // ルビを入れたあと、入れた場所を選び直す
       write.focus();
       try { write.setSelectionRange(message.start, message.end); } catch (e) { /* 範囲外 */ }
@@ -1961,10 +1493,9 @@ body.plain .term { color: inherit; }
    * 三点リーダ「…」の印（作者の依頼、2026-08-28）。
    *
    * 位置はフォント任せで、横書きでは下に沈み、縦書きでは縦用の字形を
-   * 持たないフォントで横倒しのまま出る。読む面（#read .ellipsis）と同じく、
-   * 印を付けてCSSで行の中央へ寄せる。
+   * 持たないフォントで横倒しのまま出る。印を付けてCSSで行の中央へ寄せる。
    *
-   * **読む面と1文字も違わない素の span にする**（作者の実機報告、2026-08-28
+   * **飾りを持たない素の span にする**（作者の実機報告、2026-08-28
    * 「組んで書くの三点リーダーはまだ変です。間を開けないでください」）。
    * 0.24.12 では contenteditable="false" の**かたまり**にしていたが、
    * 編集できない要素は編集領域の中で1文字ぶんの箱として扱われず、
@@ -1988,13 +1519,51 @@ body.plain .term { color: inherit; }
     return span;
   }
 
-  /** 平文を段落へ入れる。**三点リーダだけは、寄せるための印で包む** */
+  /**
+   * ダッシュに使われる2つの文字。
+   *
+   * **見た目はほとんど同じだが、別の文字である**（欧文の U+2014 EM DASH と
+   * 和文の U+2015 HORIZONTAL BAR）。ソースに直に書くと、どちらを書いたのか
+   * 読む人にも分からなくなるので、符号から作る。
+   */
+  const DASH_CHARS = String.fromCodePoint(0x2014) + String.fromCodePoint(0x2015);
+
+  /**
+   * ダッシュの印（作者の実機報告、2026-08-29
+   * 「主従の悪だくみが始まった――」の2本のあいだに隙間が見える）。
+   *
+   * 隙間の正体は**書体の取り違え**である。選んだ書体が「―」を持たないと
+   * 欧文へ落ち、欧文のダッシュは字送りより線が短いので、並べても
+   * つながらない。CSSで和文の明朝に固定するために印を付ける。
+   *
+   * **入っていた字をそのまま入れる**（U+2014 なら U+2014 のまま）。
+   * ここで字を揃えてしまうと、**打っただけで本文が書き換わる**——
+   * 字を揃えるのは、作法チェック（core/writingStyleCheck.ts）の提案を
+   * 作者が承認したときだけである。
+   *
+   * 三点リーダと同じく、**1文字ずつ包んだ素の span** にする
+   * （composeBuildEllipsis の但し書きがそのまま当てはまる）。
+   */
+  function composeBuildDash(doc, char) {
+    const span = doc.createElement("span");
+    span.setAttribute("class", "dash");
+    // data-src は付けない（三点リーダと同じ。中の文字を拾う経路で元へ戻る）
+    span.appendChild(doc.createTextNode(char));
+    return span;
+  }
+
+  /** 平文を段落へ入れる。**三点リーダとダッシュは、揃えるための印で包む** */
   function composeAppendText(parent, value, doc) {
     let last = 0;
     for (let i = 0; i < value.length; i++) {
-      if (value[i] !== "…") continue;
+      const char = value[i];
+      const isEllipsis = char === "…";
+      const isDash = DASH_CHARS.indexOf(char) >= 0;
+      if (!isEllipsis && !isDash) continue;
       if (i > last) parent.appendChild(doc.createTextNode(value.slice(last, i)));
-      parent.appendChild(composeBuildEllipsis(doc));
+      parent.appendChild(
+        isEllipsis ? composeBuildEllipsis(doc) : composeBuildDash(doc, char)
+      );
       last = i + 1;
     }
     if (last < value.length) {
@@ -2269,6 +1838,69 @@ body.plain .term { color: inherit; }
     }
     return false;
   }
+
+  /**
+   * 右クリックで開く品書きが、どの用語を指すか。
+   *
+   * ## なぜ純粋な関数にしてあるか
+   *
+   * 判定を間違えると**別人の設定資料が開く**。実機でしか動かない部品
+   * （画面の座標→本文の位置、選択範囲）を引数で受け取る形にして、
+   * 判定そのものを画面の外から試せるようにした。
+   *
+   * ## 直した不具合（作者の実機報告、2026-08-29）
+   *
+   * 「用語の上で右クリックしても設定資料パネルが切り替わらない」。
+   * ログには**同じ人物が6回続けて**送られていた。
+   *
+   * 原因は**残っている選択**である。誤字脱字パネルから本文へ飛ぶと
+   * （revealLine）、その行がまるごと選ばれたままになる。以前の判定は
+   * 「選択が空でなければ、選択に重なる最初の用語」だったので、
+   * **その行に人物が1人いると、以後どこを押してもその人物**になった。
+   *
+   * ## 決め方
+   *
+   * 1. 押した位置が**選択の中**なら、選択に重なる最初の用語
+   *    （「選んでから右クリック」を守る）
+   * 2. そうでなければ、**押した位置**の用語
+   * 3. 押した位置が分からないとき（座標を本文の位置に直せない環境。
+   *    縦書きで起きているらしい）は、**カーソルの位置**で引く——
+   *    右クリックはカーソルを押したところへ動かすので、選択が縮退して
+   *    いれば、その start が押した位置である
+   *
+   * @param clickOffset 画面の座標から求めた本文の位置（求まらなければ null）
+   * @param selection いまの選択（{ start, end }。無ければ null）
+   * @param spans 用語の位置の一覧
+   */
+  function pickMenuTerm(clickOffset, selection, spans) {
+    const hasRange =
+      selection && typeof selection.end === "number" &&
+      selection.end > selection.start;
+
+    // 1. 押したところが選択の中なら、選んだものを引く
+    if (hasRange && clickOffset !== null &&
+        clickOffset >= selection.start && clickOffset <= selection.end) {
+      for (const span of spans) {
+        if (span.start < selection.end && span.end > selection.start) {
+          return span;
+        }
+      }
+      // 選択の中に用語が無いなら、押した位置で引き直す（下へ落ちる）
+    }
+
+    // 2・3. 押した位置。取れなければカーソル（縮退した選択）の位置
+    let offset = clickOffset;
+    if (offset === null && selection && selection.end === selection.start) {
+      offset = selection.start;
+    }
+    if (offset === null) return null;
+
+    // **端は含めない。** 用語の直後で右クリックして隣の資料が開くと分かりにくい
+    for (const span of spans) {
+      if (offset >= span.start && offset < span.end) return span;
+    }
+    return null;
+  }
   /* compose:end */
 
   /**
@@ -2326,10 +1958,6 @@ body.plain .term { color: inherit; }
     // カーソルは、打つ面で見ていたところから続ける
     const at = write.selectionStart;
     composeOn = true;
-    // **この面だけを出す。** 3つの面と混ぜない（どこで打っているか分からなくなる）
-    reading = false;
-    split = false;
-    clearCaretMark();
     compose.setAttribute("contenteditable", "true");
     try {
       // 改行で作られる入れ物を p に揃える（既定は環境によって違う）
@@ -2345,7 +1973,6 @@ body.plain .term { color: inherit; }
     compose.focus();
     composeRestoreCaret({ start: at, end: at });
     composeScheduleHighlight();
-    composeReportEllipsis();
   }
 
   /** 打つ面へ戻す。**実験が転んでも、いままでの書き方は無傷で残る** */
@@ -2450,38 +2077,6 @@ body.plain .term { color: inherit; }
     composeInvalidate();
     composeRestoreCaret(at);
     composeScheduleHighlight();
-    composeReportEllipsis();
-  }
-
-  /**
-   * 三点リーダの組みが**実機で**効いているかを記録する（切り分けの計器）。
-   *
-   * 0.24.13時点で「中央に来ない」の実機報告が続いたが、CSS・組み立てとも
-   * 静的には正しい。作者にDevToolsを開かせずに、span の個数と計算済み
-   * スタイルをログへ出す。原因が特定できたら消してよい。
-   */
-  function composeReportEllipsis() {
-    try {
-      const spans = compose.querySelectorAll(".ellipsis");
-      let style = "（0個）";
-      if (spans.length > 0) {
-        const cs = getComputedStyle(spans[0]);
-        style =
-          "vertical-align=" + cs.verticalAlign +
-          " display=" + cs.display +
-          " writing-mode=" + cs.writingMode +
-          " transform=" + cs.transform;
-      }
-      const under = getComputedStyle(compose).textUnderlinePosition;
-      vscode.postMessage({
-        type: "log",
-        text:
-          "組んで書く：三点リーダ" + spans.length + "個 " + style +
-          " ／ 下線位置=" + under,
-      });
-    } catch (error) {
-      // 計器が本体を壊しては本末転倒。黙って続ける
-    }
   }
 
   compose.addEventListener("input", function () {
@@ -2507,28 +2102,31 @@ body.plain .term { color: inherit; }
     }, 0);
   });
 
-  /** カーソルが三点リーダの印（span.ellipsis）の中にいるなら、その印を返す */
+  /**
+   * カーソルが**字を揃えるための印**の中にいるなら、その印を返す。
+   *
+   * 印は2種類ある——三点リーダ（span.ellipsis）とダッシュ（span.dash）。
+   * **どちらも素の span なので、中へカーソルが入る**（かたまりにすると
+   * 縦書きで隙間が出るため、そうしてある）。逃がす扱いは同じでよい。
+   */
   function composeEllipsisAncestor(node) {
     let at = node;
     while (at && at !== compose) {
-      if (
-        at.nodeType === 1 &&
-        at.getAttribute &&
-        at.getAttribute("class") === "ellipsis"
-      ) {
-        return at;
-      }
+      const name =
+        at.nodeType === 1 && at.getAttribute ? at.getAttribute("class") : null;
+      if (name === "ellipsis" || name === "dash") return at;
       at = at.parentNode;
     }
     return null;
   }
 
   /**
-   * 打つ前に、カーソルを三点リーダの印の**外**へ出す。
+   * 打つ前に、カーソルを**字を揃えるための印**（三点リーダ・ダッシュ）の
+   * 外へ出す。
    *
-   * 「…」は読む面と同じ素の span で出している（かたまりにすると縦書きで
-   * 隙間が出る。composeBuildEllipsis 参照）。素の span は中へカーソルが
-   * 入るので、**そこで打った字が回った書式を受け継ぐ。**
+   * どちらも素の span で出している（かたまりにすると縦書きで隙間が出る。
+   * composeBuildEllipsis 参照）。素の span は中へカーソルが入るので、
+   * **そこで打った字が、印に掛けた書式（回転・書体）を受け継ぐ。**
    *
    * 打った字が本文として正しいことは変わらない（直列化は中の文字も拾う）
    * ので、**これは見た目だけの話**で、面を組み直せば直る。それでも、
@@ -2684,8 +2282,7 @@ body.plain .term { color: inherit; }
    * **#compose 自身が転がる入れ物**（position:absolute + overflow:auto）
    * なので、動かすのはこの要素の scrollLeft/scrollTop である。
    * 縦書き（左右に流れる）と横書き（上下に流れる）で式を分けないのは、
-   * **割合ではなく「はみ出した差」だけを足す**ためで、読む面の
-   * nudgeIntoView と同じ理屈が使える。
+   * **割合ではなく「はみ出した差」だけを足す**ためである（offRect）。
    *
    * 動かせたら true。位置を測れなければ false（呼んだ側が記録に残す）。
    */
@@ -2837,19 +2434,31 @@ body.plain .term { color: inherit; }
   }
 
   /**
-   * 押されたところの用語。
+   * 押されたところの用語。**決め方は pickMenuTerm が持つ**（試せる形）。
    *
-   * **範囲を選んでいれば、そちらに重なる用語を優先する**（打つ面と同じ）。
-   * 点だけだと、選んでから右クリックしたときに選んだ語を引けない。
+   * ここがやるのは、実機でしか取れない2つ——画面の座標を本文の位置に
+   * 直すことと、いまの選択を読むこと——を渡すところまでである。
    */
   function composeTermAt(x, y) {
-    const at = composeMenuAt;
-    if (at && at.end > at.start) {
-      for (const span of termSpans) {
-        if (span.start < at.end && span.end > at.start) return span;
-      }
+    const clickOffset = composeOffsetAtPoint(x, y);
+    if (clickOffset === null) {
+      /*
+        **縦書きで座標を本文の位置に直せない**という報告がある
+        （作者の実機報告、2026-08-29「右クリックしても設定資料を見るが
+        出ない」）。caretRangeFromPoint の縦書きでの振る舞いは実機でしか
+        確かめられないので、切り分けの手がかりを残す。
+
+        出るのは品書きを開く1回につき1行だけで、**正常なら出ない**ので
+        記録が溢れることはない。
+      */
+      vscode.postMessage({
+        type: "log",
+        text:
+          "原稿エディタ：右クリックの位置を本文の位置に直せませんでした（縦書き=" +
+          (vertical !== false) + "）",
+      });
     }
-    return composeTermSpanAt(composeOffsetAtPoint(x, y));
+    return pickMenuTerm(clickOffset, composeMenuAt, termSpans);
   }
 
   /**

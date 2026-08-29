@@ -45,9 +45,11 @@ import {
  * - `buildGuideBundles()`——小分類ごとの説明の束。**質問に関係しそうな束だけ**
  *   を選んで送る（選ぶのは `core/guideSelect.ts`）
  *
- * `buildFeatureGuide()`（全文）は製品コードからは呼ばれなくなったが残してある。
- * **束に漏れが無いことを検査する物差し**として使う（短い説明の全行が束の
- * どれかに入ることを、全文と突き合わせる——`featureGuide.test.ts`）。
+ * 全文をひとまとめに組み立てる `buildFeatureGuide()` は、この2つへ置き換えた
+ * 時点で誰からも呼ばれなくなったので**消した**（0.25.2）。束に漏れが無いか
+ * どうかは、全文と突き合わせる代わりに `ACTION_TREE` を直接歩いて確かめる
+ * （`featureGuide.test.ts`）——**元になる定義と照らすほうが、写しどうしを
+ * 比べるより確かである。**
  * 作者が読むマニュアル（`openManual.ts`）は `EXTRA_GUIDE` だけを使い、
  * 操作の説明は `ACTION_TREE` から独自に（全文で）組み立てている。
  */
@@ -88,48 +90,6 @@ export const EXTRA_GUIDE = `
 `.trim();
 
 /**
- * 操作の一覧を、AIが読める形にまとめる。
- *
- * 見出しの階層はメニューと同じにする。作者が画面で見ている並びと
- * 説明の並びが違うと、「どこにあるか」を答えられない。
- */
-export function buildFeatureGuide(
-  options: {
-    /**
-     * 説明の詳しさ。
-     *
-     * - `short`（既定）：1文目まで。**毎回送るのはこちら**
-     * - `full`：全文。作者が「詳しく」と聞いたときに渡す道を作るための口
-     */
-    detail?: "short" | "full";
-  } = {}
-): string {
-  const detailLevel = options.detail ?? "short";
-  const lines: string[] = ["【詳細メニューにある操作】"];
-
-  // **画面に無い操作を案内させない。** 環境によって出さない操作があるので、
-  // 一覧も同じ規則で絞る（`isItemVisibleInRuntime`）
-  const allowsProcesses = canRunProcesses();
-
-  // 写しの分類（「テスト中」）は案内に入れない。同じ機能を2回案内することになる
-  for (const group of ACTION_TREE.filter((entry) => !entry.generated)) {
-    lines.push(`■ ${group.label}`);
-    for (const entry of visibleEntries(group.entries, allowsProcesses)) {
-      if (entry.kind === "action") {
-        lines.push(describeAction(entry, "", detailLevel));
-        continue;
-      }
-      lines.push(`  ▸ ${entry.label}`);
-      for (const item of visibleEntries(entry.items, allowsProcesses)) {
-        lines.push(describeAction(item, "  ", detailLevel));
-      }
-    }
-  }
-
-  return [lines.join("\n"), "", EXTRA_GUIDE].join("\n");
-}
-
-/**
  * 操作の**目次**を作る。名前だけで、説明は入れない。
  *
  * **これは毎回送る。** 名前が1つでも欠けると、AIは「その機能はありません」と
@@ -143,8 +103,10 @@ export function buildFeatureGuide(
 export function buildFeatureIndex(): string {
   const lines: string[] = ["【詳細メニューの操作（これで全部）】"];
 
-  // 絞り方は `buildFeatureGuide()` と同じにする。片方だけ規則が違うと、
-  // 目次に出るのに説明が無い（またはその逆の）操作ができる
+  // **画面に無い操作を案内させない。** 環境によって出さない操作があるので、
+  // 一覧も同じ規則で絞る（`isItemVisibleInRuntime`）。絞り方は
+  // `buildGuideBundles()` と揃える——片方だけ規則が違うと、目次に出るのに
+  // 説明が無い（またはその逆の）操作ができる
   const allowsProcesses = canRunProcesses();
 
   for (const group of ACTION_TREE.filter((entry) => !entry.generated)) {
@@ -180,6 +142,7 @@ export function buildGuideBundles(): GuideBundle[] {
   const allowsProcesses = canRunProcesses();
   const bundles: GuideBundle[] = [];
 
+  // 写しの分類（「テスト中」）は案内に入れない。同じ機能を2回案内することになる
   for (const group of ACTION_TREE.filter((entry) => !entry.generated)) {
     const entries = visibleEntries(group.entries, allowsProcesses);
 
@@ -190,7 +153,7 @@ export function buildGuideBundles(): GuideBundle[] {
         label: group.label,
         text: [
           `■ ${group.label}`,
-          ...direct.map((item) => describeAction(item, "", "short")),
+          ...direct.map((item) => describeAction(item, "")),
         ].join("\n"),
       });
     }
@@ -207,7 +170,7 @@ export function buildGuideBundles(): GuideBundle[] {
         label,
         text: [
           `■ ${label}`,
-          ...items.map((item) => describeAction(item, "", "short")),
+          ...items.map((item) => describeAction(item, "")),
         ].join("\n"),
       });
     }
@@ -298,16 +261,21 @@ function nameOnly(
   return `${indent}・${action.label}${mark}`;
 }
 
+/**
+ * 説明の1行。
+ *
+ * **短い版しか作らない。** 全文を渡す口（`detail: "full"`）は
+ * `buildFeatureGuide()` と一緒に消した（0.25.2）——束はどれも
+ * 相談へ渡すためのものなので、全文が要る場面が無い。
+ */
 function describeAction(
   action: { label: string; detail: string; usesAI?: boolean },
-  indent: string,
-  level: "short" | "full"
+  indent: string
 ): string {
   // 強調の記号は画面用なので落とす。AIへの指示と混ざると読みにくい。
   // 記号そのものを文字列に書かない（画面に出す文字を見張る試験に引っかかる）
   const emphasis = "*".repeat(2);
-  const full = action.detail.split(emphasis).join("");
-  const detail = level === "full" ? full : shorten(full);
+  const detail = shorten(action.detail.split(emphasis).join(""));
   const mark = action.usesAI ? "（AIを使う）" : "";
   return `${indent}  - ${action.label}${mark}: ${detail}`;
 }

@@ -22,8 +22,9 @@ import {
  * ## 画面のJSを、画面の外から動かす
  *
  * 画面のJSは webview のテンプレート文字列の中にしか無い（`src/core` へ
- * 写すと、**片方だけが直る日が必ず来る**）。`manuscriptSplitFollow.test.ts`
- * と同じく、配られるHTMLから印の間を切り出して `new Function` で動かす。
+ * 写すと、**片方だけが直る日が必ず来る**）。そこで、配られるHTMLから
+ * 印（`compose:start` 〜 `compose:end`）の間を切り出し、`new Function` で
+ * 動かす——**試しているのは、そのまま画面へ渡る本物**である。
  *
  * DOMの実装はこの環境に無いので、**組み立てに使う document を差し替える**
  * （画面側の関数は `doc` を引数で受け取るように書いてある）。
@@ -146,6 +147,18 @@ interface ComposeApi {
     start: number,
     end: number
   ): boolean;
+  pickMenuTerm(
+    clickOffset: number | null,
+    selection: { start: number; end: number } | null,
+    spans: MenuSpan[]
+  ): MenuSpan | null;
+}
+
+/** 用語の位置（`collectTermSpans` が渡してくるもののうち、判定が見る分だけ） */
+interface MenuSpan {
+  start: number;
+  end: number;
+  id: string;
 }
 
 const api = new Function(
@@ -153,7 +166,7 @@ const api = new Function(
     "\nreturn { composeParts, composePartsToNotation, composeNormalizeText," +
     " composeNormalizeNewlines, composeBuildLine, composeBuildFragment," +
     " composeAtoms, composeDomToNotation, composeOffsetToPoint," +
-    " composePointToOffset, composeSelectionHasChunk };"
+    " composePointToOffset, composeSelectionHasChunk, pickMenuTerm };"
 )() as ComposeApi;
 
 /** 記法から組み立てたDOM（偽） */
@@ -192,6 +205,17 @@ describe("切り出し", () => {
  * 組んで書く面は、打つたびに DOM から本文を作り直して文書へ返す。
  * 往復が一致しなければ、打っただけで本文が書き換わる。
  */
+/**
+ * ダッシュに使われる2つの文字。
+ *
+ * **見た目でも編集画面でも見分けが付かない**ので、符号から作る
+ * （直に書くと、試験が何を試しているのか誰にも分からなくなる）。
+ */
+/** 欧文のダッシュ（U+2014 EM DASH） */
+const DASH_EM = String.fromCodePoint(0x2014);
+/** 和文のダッシュ（U+2015 HORIZONTAL BAR） */
+const DASH_BAR = String.fromCodePoint(0x2015);
+
 describe("記法→DOM→記法 が完全に一致する", () => {
   const cases = [
     "",
@@ -255,6 +279,22 @@ describe("記法→DOM→記法 が完全に一致する", () => {
     "…{漢字|かんじ}…",
     "{{強調}}…",
     "「そう……」と{彼女|かのじょ}は言った。\n\n　……返事は無い。",
+    /*
+      ダッシュも1文字ずつのかたまりになる（作者の実機報告、2026-08-29）。
+      **入っていた字をそのまま戻すこと**が肝心で、ここで字を揃えてしまうと
+      **打っただけで本文が書き換わる。** 欧文（U+2014）と和文（U+2015）が
+      混ざった並びを必ず含める——作者の原稿で実際に混ざっていた形である。
+    */
+    DASH_EM,
+    DASH_BAR,
+    DASH_BAR + DASH_BAR,
+    DASH_EM + DASH_BAR,
+    DASH_BAR + DASH_EM,
+    "あ" + DASH_BAR + "い",
+    "主従の悪だくみが始まった" + DASH_EM + DASH_BAR,
+    DASH_BAR + "{彼女|かのじょ}は、",
+    DASH_BAR + "\n" + DASH_EM,
+    "…" + DASH_BAR + "…",
   ];
 
   it("すべての場合で、1文字も変わらない", () => {
@@ -613,6 +653,50 @@ describe("組み立てたDOMの形", () => {
   });
 
   /**
+   * ダッシュ（作者の実機報告、2026-08-29「主従の悪だくみが始まった――」の
+   * 2本のあいだに隙間が見える）。
+   *
+   * 隙間の正体は**書体の取り違え**で、この行は欧文の U+2014 と和文の
+   * U+2015 が1本ずつだった。欧文のダッシュは字送りより線が短いので、
+   * 並べてもつながらない。CSSで和文の明朝へ固定するために印を付ける。
+   *
+   * **入っていた字をそのまま入れること。** ここで字を揃えると、
+   * **面を開いただけで本文が書き換わる**——字を揃えるのは作法チェックの
+   * 提案を作者が承認したときだけである。
+   */
+  it("ダッシュは、字をそのままにした素の span", () => {
+    const line = build("あ" + DASH_EM + DASH_BAR + "い").childNodes[0];
+    expect(line.childNodes).toHaveLength(4);
+
+    // 入っていた順に、入っていた字のまま
+    for (const [index, char] of [
+      [1, DASH_EM],
+      [2, DASH_BAR],
+    ] as const) {
+      const dash = line.childNodes[index];
+      expect(dash.nodeName).toBe("SPAN");
+      expect(dash.getAttribute?.("class")).toBe("dash");
+      // かたまりの印は付けない（三点リーダと同じ。付けると隙間が出る）
+      expect(dash.getAttribute?.("contenteditable")).toBeNull();
+      expect(dash.getAttribute?.("data-src")).toBeNull();
+      expect(dash.childNodes[0].nodeValue).toBe(char);
+    }
+  });
+
+  it("ダッシュも平文として数える（かたまりは1つも作らない）", () => {
+    const atoms = api.composeAtoms(build("あ" + DASH_EM + DASH_BAR + "い"));
+    expect(atoms.filter((atom) => atom.kind === "chunk")).toEqual([]);
+    expect(
+      atoms.map((atom) => [atom.kind, atom.text, atom.start, atom.end])
+    ).toEqual([
+      ["text", "あ", 0, 1],
+      ["text", DASH_EM, 1, 2],
+      ["text", DASH_BAR, 2, 3],
+      ["text", "い", 3, 4],
+    ]);
+  });
+
+  /**
    * かたまりではなくなったので、**位置の一覧では平文と同じ扱いに戻る。**
    * 直列化は「知らない要素は中の文字を拾う」経路で「…」に戻す。
    */
@@ -952,8 +1036,8 @@ describe("画面の約束", () => {
   });
 
   /**
-   * 三点リーダの見た目は、読む面（0.24.1で作者が確かめた形）と同じにする。
-   * **同じ本文が面によって違って見えるのは、それ自体が不具合である。**
+   * 三点リーダの見た目は、**0.24.1で作者が読む面で確かめた形**である。
+   * 読む面そのものは0.25.2で消したが、確かめた値はここに残っている。
    */
   it("三点リーダを行の中央に寄せる指定がある", () => {
     expect(html).toContain("#compose .ellipsis {");
@@ -970,13 +1054,17 @@ describe("画面の約束", () => {
   });
 
   /**
-   * **読む面の指定と1文字も違わないこと。**
+   * **作者が確かめた値そのものを、ここで押さえる。**
    *
-   * 作者が確かめて「これでよい」と言ったのは読む面の形である。片方だけを
-   * 直すと、同じ本文が面によって違って見える——それ自体が不具合なので、
-   * 目で見比べるのではなく、両方のブロックを抜き出して比べる。
+   * 0.25.2まではもう1つ「読む」面（`#read .ellipsis`）があり、この2つの
+   * ブロックが1文字も違わないことを比べていた——作者が確かめて「これで
+   * よい」と言ったのは読む面の形だったので、片方だけ直すと同じ本文が面に
+   * よって違って見えたからである。読む面を消して比べる相手が無くなったので、
+   * **値を直に書いて押さえる**。とくに欧文フォールバックの字形（下寄りの
+   * 三点リーダ）へ落ちないよう、和文の明朝を指定する行は落とせない
+   * （実機の報告、2026-08-29）。
    */
-  it("三点リーダのCSSは、読む面と組んで書く面で同じ", () => {
+  it("三点リーダのCSSに、作者が確かめた指定がそろっている", () => {
     /** そのセレクタの { } の中身（前後の空白は落とす） */
     function block(selector: string): string {
       const head = html.indexOf(selector + " {");
@@ -986,15 +1074,41 @@ describe("画面の約束", () => {
       return html.slice(open + 1, close).trim();
     }
 
-    expect(block("#compose .ellipsis")).toBe(block("#read .ellipsis"));
-    expect(block("body.vertical #compose .ellipsis")).toBe(
-      block("body.vertical #read .ellipsis")
-    );
-    // 空の比較で通ってしまわないよう、中身があることも見る
-    expect(block("#read .ellipsis").length).toBeGreaterThan(0);
-    expect(block("body.vertical #read .ellipsis")).toContain(
-      "transform: rotate(90deg)"
-    );
+    const flat = block("#compose .ellipsis");
+    expect(flat).toContain("vertical-align: middle");
+    // 選んだ書体が「…」を持たないと欧文へ落ち、下寄りの字形で沈んで見える
+    expect(flat).toContain('"Yu Mincho"');
+
+    const vertical = block("body.vertical #compose .ellipsis");
+    expect(vertical).toContain("writing-mode: horizontal-tb");
+    expect(vertical).toContain("transform: rotate(90deg)");
+    // 1em角に固定しないと、「……」の間に隙間があく
+    expect(vertical).toContain("width: 1em");
+    expect(vertical).toContain("height: 1em");
+  });
+
+  /**
+   * ダッシュの書体（作者の実機報告、2026-08-29）。
+   *
+   * 欧文のダッシュは字送りより線が短いので、和文書体を持たない環境へ
+   * 落ちると**線がつながらず隙間になる。** 和文の明朝へ固定して防ぐ。
+   *
+   * **回転と1em角は付けない**（三点リーダとはここが違う）。和文書体は
+   * ダッシュの縦用の字形を持っているので、縦書きでは何もしなくても
+   * 正しく立つ。回すと、かえって字が切れる。
+   */
+  it("ダッシュは和文の明朝に固定し、縦書きでは回さない", () => {
+    function block(selector: string): string {
+      const head = html.indexOf(selector + " {");
+      expect(head, selector + " が無い").toBeGreaterThanOrEqual(0);
+      const open = html.indexOf("{", head);
+      const close = html.indexOf("}", open);
+      return html.slice(open + 1, close).trim();
+    }
+
+    expect(block("#compose .dash")).toContain('"Yu Mincho"');
+    // 縦書き向けの規則そのものを置かない
+    expect(html).not.toContain("body.vertical #compose .dash");
   });
 
   /**
@@ -1004,9 +1118,22 @@ describe("画面の約束", () => {
    * カーソルを span の外へ逃がす。**変換中（IME）は触らない**——変換の
    * 途中で選択を動かすと、日本語入力の側が持つ位置とずれて変換が壊れる。
    */
-  it("三点リーダの中で打つ前に、カーソルを外へ出す", () => {
+  it("三点リーダ・ダッシュの中で打つ前に、カーソルを外へ出す", () => {
     expect(code).toContain("function composeEscapeEllipsis(");
     expect(code).toContain("function composeEllipsisAncestor(");
+
+    /*
+      **ダッシュの印にも効かせる**（0.25.2）。三点リーダと同じ素の span で
+      出しているので、中で打つと掛けた書体を受け継ぐ問題も同じである。
+      印を1種類しか見ていないと、ダッシュの中で打った字だけが化ける。
+    */
+    const ancestor = code.slice(
+      code.indexOf("function composeEllipsisAncestor(")
+    );
+    expect(ancestor.slice(0, 600)).toContain(
+      'name === "ellipsis" || name === "dash"'
+    );
+
     const escape = code.slice(code.indexOf("function composeEscapeEllipsis("));
     expect(escape.slice(0, 900)).toContain("if (composing) return;");
     expect(escape.slice(0, 900)).toContain(
@@ -1036,5 +1163,108 @@ describe("画面の約束", () => {
     expect(code).toContain("function composeLeave(");
     const apply = code.slice(code.indexOf("function composeApplyText("));
     expect(apply.slice(0, 700)).toContain("composeLeave();");
+  });
+});
+
+/**
+ * 右クリックが指す用語（作者の実機報告、2026-08-29）。
+ *
+ * 「用語の上で右クリックしても設定資料パネルが切り替わらない」——記録には
+ * **同じ人物が6回続けて**送られていた。
+ *
+ * 犯人は**残っている選択**である。誤字脱字パネルから本文へ飛ぶと
+ * （revealLine）、その行がまるごと選ばれたままになる。以前の判定は
+ * 「選択が空でなければ、選択に重なる最初の用語」だったので、その行に
+ * 人物が1人いると、**以後どこを押してもその人物**になった。
+ *
+ * 判定は `pickMenuTerm` に切り出してある——実機でしか動かない部分
+ * （座標→本文の位置）を引数で受け取るので、ここから直に動かせる。
+ */
+describe("右クリックが指す用語", () => {
+  /** 「あ<コリンナ>うえ<図書塔>き」のような並び */
+  const spans = [
+    { start: 2, end: 6, id: "char_002" },
+    { start: 10, end: 13, id: "loc_001" },
+  ];
+
+  it("選択の中を押したら、選んだものを引く", () => {
+    // 「選んでから右クリック」は、これまでどおり効く
+    const found = api.pickMenuTerm(4, { start: 2, end: 6 }, spans);
+    expect(found?.id).toBe("char_002");
+  });
+
+  /**
+   * **これが直った不具合そのものである。**
+   * 行をまるごと選んだ状態（ジャンプの直後）で、選択の外を押したとき。
+   */
+  it("選択があっても、その外を押したら押した位置のものを引く", () => {
+    // 0〜8 が選ばれている（その中に char_002 がいる）が、押したのは 11
+    const found = api.pickMenuTerm(11, { start: 0, end: 8 }, spans);
+    expect(found?.id).toBe("loc_001");
+  });
+
+  it("選択の外で、用語の無いところを押したら何も指さない", () => {
+    expect(api.pickMenuTerm(9, { start: 0, end: 8 }, spans)).toBeNull();
+  });
+
+  /**
+   * 縦書きで座標を本文の位置に直せない環境があるらしい（実機の報告）。
+   * 右クリックはカーソルを押したところへ動かすので、**選択が縮退して
+   * いれば、その start が押した位置**である。
+   */
+  it("押した位置が分からなければ、カーソルの位置で引く", () => {
+    const found = api.pickMenuTerm(null, { start: 11, end: 11 }, spans);
+    expect(found?.id).toBe("loc_001");
+  });
+
+  it("押した位置も選択も取れなければ、何も指さない", () => {
+    expect(api.pickMenuTerm(null, null, spans)).toBeNull();
+    // 範囲のある選択は「押した位置」の代わりにならない（どこを押したか不明）
+    expect(api.pickMenuTerm(null, { start: 2, end: 6 }, spans)).toBeNull();
+  });
+
+  /** 用語の直後で右クリックして隣の資料が開くと分かりにくい */
+  it("用語の終わりちょうどは含めない", () => {
+    expect(api.pickMenuTerm(6, null, spans)).toBeNull();
+    // 始まりちょうどは含める
+    expect(api.pickMenuTerm(2, null, spans)?.id).toBe("char_002");
+  });
+
+  /**
+   * 選択の中に用語が無いなら、押した位置で引き直す。
+   * **選んだだけで、押したところの資料が引けなくなるのは困る。**
+   */
+  it("選択の中に用語が無ければ、押した位置で引き直す", () => {
+    // 6〜9 を選んだ状態で、選択の端（用語のある 10〜13 の手前）ではなく
+    // 選択の中の 8 を押した。選択には用語が無いので、押した位置で引く
+    expect(api.pickMenuTerm(8, { start: 6, end: 9 }, spans)).toBeNull();
+    // 選択の中を押していて、そこに用語があれば引ける
+    expect(api.pickMenuTerm(11, { start: 9, end: 13 }, spans)?.id).toBe(
+      "loc_001"
+    );
+  });
+});
+
+/**
+ * 位置を本文へ直せなかったことを記録する（縦書きの切り分け。実機の報告）。
+ *
+ * **正常なら1行も出ない。** 出るなら、その環境では座標→本文の位置の変換が
+ * 効いていないということで、そこから先の当たり判定は全部あてにならない。
+ */
+describe("右クリックの位置が取れなかったときの記録", () => {
+  const code = html.slice(html.indexOf("<script"));
+
+  it("品書きを開く1回につき1行だけ、縦横とともに残す", () => {
+    const at = code.slice(code.indexOf("function composeTermAt("));
+    expect(at.slice(0, 900)).toContain("if (clickOffset === null) {");
+    expect(at.slice(0, 900)).toContain(
+      "右クリックの位置を本文の位置に直せませんでした"
+    );
+    // 縦書きかどうかが分からないと、切り分けにならない
+    expect(at.slice(0, 900)).toContain("(vertical !== false)");
+    // 判定そのものは切り出した関数に任せる（ここで二重に持たない）
+    expect(at.slice(0, 900)).toContain(
+      "pickMenuTerm(clickOffset, composeMenuAt, termSpans)"
+    );
   });
 });

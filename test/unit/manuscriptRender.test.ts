@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   collectTermSpans,
   notationModeFor,
-  renderLine,
-  renderManuscript,
   renderTermMarks,
   termSpanAt,
   tokenizeLine,
@@ -249,121 +247,15 @@ describe("記法はファイルの種類で決める", () => {
   });
 });
 
-describe("1行を組み立てる", () => {
-  it("ルビを <ruby> にする", () => {
-    expect(renderLine("{灯|あかり}")).toBe(
-      "<ruby>灯<rt>あかり</rt></ruby>"
-    );
-  });
+/*
+  **`renderLine()` / `renderManuscript()` の検査は消した**（0.25.2）。
+  組み立てた先が「読む」面しか無く、その面を消したときに関数も消えた。
+  三点リーダの印（`<span class="ellipsis">`）の検査もここにあったが、
+  同じ役目は組んで書く面が引き継いでいるので `composeFace.test.ts` が見る。
 
-  it("傍点を <em> にする", () => {
-    expect(renderLine("{{絶対}}")).toBe('<em class="emph">絶対</em>');
-  });
-
-  /** HTMLを書かれても、そのまま流さない */
-  it("本文中のHTMLを escape する", () => {
-    expect(renderLine("<script>alert(1)</script>")).toBe(
-      "&lt;script&gt;alert(1)&lt;/script&gt;"
-    );
-  });
-
-  it("読み仮名の中のHTMLも escape する", () => {
-    expect(renderLine("{名|<b>}")).toContain("<rt>&lt;b&gt;</rt>");
-  });
-
-  it("空行は高さを保つ", () => {
-    expect(renderLine("")).toBe("<br>");
-  });
-
-  it("用語に色分けの印を付ける", () => {
-    const html = renderLine("灯が笑った", index([{ text: "灯" }]));
-    expect(html).toContain('class="term term-character"');
-    expect(html).toContain('data-term-id="char_001"');
-    expect(html).toContain(">灯</span>");
-    expect(html).toContain("が笑った");
-  });
-
-  /** ルビが振ってある名前だけ色が付かないと、別人に見える */
-  it("ルビの親文字にも用語の色を当てる", () => {
-    const html = renderLine("{灯|あかり}", index([{ text: "灯" }]));
-    expect(html).toContain("<ruby>");
-    expect(html).toContain('class="term term-character"');
-    expect(html).toContain("<rt>あかり</rt>");
-  });
-
-  /** 記法の記号をまたいだ一致を作らない */
-  it("ルビの記号をまたいで用語を拾わない", () => {
-    const html = renderLine("{灯|あかり}火", index([{ text: "灯火" }]));
-    expect(html).not.toContain("term-character");
-  });
-
-  it("索引が空でも本文は出る", () => {
-    expect(renderLine("灯が笑った", index([]))).toBe("灯が笑った");
-  });
-
-  /** `.txt` でも、見た目は `.md` と同じになること（作者の依頼、2026-08-29） */
-  it("投稿サイトの記法も、同じ <ruby>・圏点になる", () => {
-    expect(renderLine("｜灯《あかり》", undefined, "site")).toBe(
-      renderLine("{灯|あかり}", undefined, "curly")
-    );
-    expect(renderLine("灯《あかり》", undefined, "site")).toBe(
-      "<ruby>灯<rt>あかり</rt></ruby>"
-    );
-    expect(renderLine("《《絶対》》", undefined, "site")).toBe(
-      '<em class="emph">絶対</em>'
-    );
-  });
-
-  it("投稿サイトの記法でも、親文字に用語の色が付く", () => {
-    const html = renderLine("｜灯《あかり》", index([{ text: "灯" }]), "site");
-    expect(html).toContain("<ruby>");
-    expect(html).toContain('class="term term-character"');
-    expect(html).toContain("<rt>あかり</rt>");
-  });
-
-  it("種別ごとに違う印を付ける", () => {
-    const html = renderLine(
-      "図書塔",
-      index([{ text: "図書塔", kind: "location", id: "loc_001" }])
-    );
-    expect(html).toContain("term-location");
-  });
-});
-
-describe("本文まるごと", () => {
-  /** 改行が意味を持つので、空行までを1段落へ畳まない */
-  it("1行を1段落にする", () => {
-    const html = renderManuscript("一行目\n二行目");
-    expect(html).toContain('<p class="line" data-line="0">一行目</p>');
-    expect(html).toContain('<p class="line" data-line="1">二行目</p>');
-  });
-
-  it("CRLFでも行がずれない", () => {
-    const html = renderManuscript("一行目\r\n二行目");
-    expect(html).toContain('data-line="1">二行目</p>');
-    expect(html).not.toContain("\r");
-  });
-
-  it("空行も1段落として残る", () => {
-    const html = renderManuscript("一行目\n\n三行目");
-    expect(html).toContain('<p class="line" data-line="1"><br></p>');
-    expect(html).toContain('data-line="2">三行目</p>');
-  });
-
-  it("行数が本文と一致する", () => {
-    const text = "あ\nい\nう\nえ\nお";
-    const count = [...renderManuscript(text).matchAll(/data-line=/g)].length;
-    expect(count).toBe(5);
-  });
-
-  it("記法のモードは、本文まるごとの経路にも通る", () => {
-    const html = renderManuscript("｜灯《あかり》\n《《絶対》》", undefined, "site");
-    expect(html).toContain('data-line="0"><ruby>灯<rt>あかり</rt></ruby></p>');
-    expect(html).toContain('data-line="1"><em class="emph">絶対</em></p>');
-    // 既定は今までどおり（記法のまま出る）
-    expect(renderManuscript("｜灯《あかり》")).toContain("｜灯《あかり》");
-  });
-});
+  **記法の切り分け（`tokenizeLine`）の検査は上に残っている。** PDF出力が
+  同じ関数を使うので、こちらは消せない。
+*/
 
 /**
  * 「書く」面の裏に敷く目印（作者の依頼、2026-08-27。設計書6.25.6）。
@@ -454,24 +346,3 @@ describe("用語の位置", () => {
   });
 });
 
-/**
- * 三点リーダの中央寄せ（作者の依頼、2026-08-28）。
- *
- * 位置はフォント任せで、欧文フォントに落ちると横書きで下に沈み、
- * 縦書きで横倒しのまま出る。読む面はHTMLなので印を付けてCSSで寄せる。
- * 書く面（textarea）は文字単位の調整ができないため対象外。
- */
-describe("三点リーダの印", () => {
-  it("「…」が1文字ずつ ellipsis の印で包まれる", () => {
-    const html = renderLine("だが……そうか", undefined);
-    expect(html).toBe(
-      'だが<span class="ellipsis">…</span><span class="ellipsis">…</span>そうか'
-    );
-  });
-
-  it("用語の色分けの中の「…」も包まれ、属性値は包まれない", () => {
-    const html = renderLine("白…瀬は言った", index([{ text: "白…瀬" }]));
-    expect(html).toContain('>白<span class="ellipsis">…</span>瀬</span>');
-    expect(html).toContain('data-term-name="白…瀬"');
-  });
-});

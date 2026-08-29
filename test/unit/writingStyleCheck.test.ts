@@ -53,6 +53,76 @@ describe("三点リーダー・ダッシュの偶数使用", () => {
   });
 });
 
+/**
+ * ダッシュに使われる2つの文字（作者の実機報告、2026-08-29）。
+ *
+ * 「主従の悪だくみが始まった――」の2本のあいだに隙間が見え、しかも
+ * **偶数個なのに「奇数だ」と指摘された。** 片方が欧文の U+2014、もう片方が
+ * 和文の U+2015 だったためである。
+ *
+ * **この2つは、見た目でも編集画面でも見分けが付かない。** 取り違えると
+ * 試験そのものが嘘になるので、ここでは符号から文字を作る。
+ */
+describe("ダッシュの字の混在", () => {
+  /** 欧文のダッシュ（U+2014 EM DASH） */
+  const EM = String.fromCodePoint(0x2014);
+  /** 和文のダッシュ（U+2015 HORIZONTAL BAR）。作法で使うのはこちら */
+  const BAR = String.fromCodePoint(0x2015);
+
+  test("字が違うことを、まず確かめておく", () => {
+    // ここが同じなら、以下の試験は何も見ていないことになる
+    expect(EM).not.toBe(BAR);
+  });
+
+  test("混ざった2個は、偶数でも指摘して字を揃える", () => {
+    const chunk = makeChunk("主従の悪だくみが始まった" + EM + BAR);
+    const findings = checkWritingStyle(chunk);
+    const found = findings.find((f) => f.target === EM + BAR);
+
+    expect(found).toBeDefined();
+    // 個数はそのまま2個。字だけを和文へ揃える
+    expect(found?.suggestion).toBe(BAR + BAR);
+    expect(found?.reason).toContain("ダッシュの字が混ざっています");
+    expect(found?.confidence).toBe("medium");
+  });
+
+  test("欧文のダッシュ1個は、字を揃えたうえで偶数にする", () => {
+    const chunk = makeChunk("突然" + EM + "扉が開いた。");
+    const findings = checkWritingStyle(chunk);
+    const found = findings.find((f) => f.target === EM);
+
+    expect(found).toBeDefined();
+    expect(found?.suggestion).toBe(BAR + BAR);
+  });
+
+  test("和文のダッシュだけの偶数個は、これまでどおり指摘しない", () => {
+    const chunk = makeChunk("突然" + BAR + BAR + "扉が開いた。");
+    const findings = checkWritingStyle(chunk);
+
+    expect(findings.find((f) => f.target.includes(BAR))).toBeUndefined();
+  });
+
+  test("和文のダッシュだけの奇数個は、これまでどおりの理由で指摘する", () => {
+    const chunk = makeChunk("突然" + BAR + "扉が開いた。");
+    const findings = checkWritingStyle(chunk);
+    const found = findings.find((f) => f.target === BAR);
+
+    expect(found).toBeDefined();
+    expect(found?.suggestion).toBe(BAR + BAR);
+    // 字は混ざっていないので、混在の理由文にはしない
+    expect(found?.reason).not.toContain("ダッシュの字が混ざっています");
+  });
+
+  test("三点リーダーの判定は変えていない", () => {
+    // ダッシュ側をいじった巻き添えで「…」が壊れていないこと
+    const odd = checkWritingStyle(makeChunk("彼は…と呟いた。"));
+    expect(odd.find((f) => f.target === "…")?.suggestion).toBe("……");
+
+    const even = checkWritingStyle(makeChunk("彼は……と呟いた。"));
+    expect(even.find((f) => f.target.includes("…"))).toBeUndefined();
+  });
+});
+
 describe("鉤括弧内文末の句点", () => {
   test("「。」の組み合わせを検出し、句点を落とす提案にする", () => {
     const chunk = makeChunk("「これはテストだ。」と彼は言った。");

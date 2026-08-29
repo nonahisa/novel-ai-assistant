@@ -22,7 +22,6 @@ import {
 import {
   collectTermSpans,
   notationModeFor,
-  renderManuscript,
   renderTermMarks,
 } from "../core/manuscriptRender";
 import { TERM_COLORS } from "../core/termColors";
@@ -377,7 +376,13 @@ export class ManuscriptEditorProvider
         text,
         // **組んで書く面も、この記法で組む**（画面側に写しを持たせない）
         notation,
-        html: renderManuscript(text, index, notation),
+        /*
+          **組み上がりのHTMLはもう送らない**（0.25.2）。
+          送り先だった「読む」面・「並べる」面は、0.24.14で切り替えの
+          ボタンが無くなった時点から**開く道が無く**、画面側は届いたHTMLを
+          溜めるだけになっていた。4万字の本文では段落が千を超えるので、
+          打つたびにそれを組んでいたことになる。
+        */
         // **打つ面に重ねる用語の色**（設計書6.25.6）。
         // 打つ面は textarea なので、中の一部だけを飾れない。
         // 同じ本文を重ねて、用語のところだけ色を付ける（それ以外は透明）

@@ -20,10 +20,29 @@ import type { AcceptedTypoIssue } from "./typoCheckValidation";
  * 折り返すWeb小説のテキストファイルには当てはまらない。
  */
 
+/**
+ * ダッシュに使われる2つの文字。
+ *
+ * **見た目はほとんど同じだが、別の文字である。** エディタで並べても
+ * 見分けが付かないので、**ソースには字を直に書かず、符号で書く**
+ * （下の文言もこの定数から組み立てる。直に打つと、どちらを書いたのか
+ * 読む人にも書いた本人にも分からない）。
+ *
+ * 作者の原稿で実際に混ざっていた（実機の報告、2026-08-29
+ * 「主従の悪だくみが始まった――」の2本の間に隙間が見える）。
+ */
+/** 欧文のダッシュ（U+2014 EM DASH）。和文書体では字形が短く、隣と連結しない */
+const EM_DASH = String.fromCodePoint(0x2014);
+/** 和文のダッシュ（U+2015 HORIZONTAL BAR）。作法で使うのはこちら */
+const HORIZONTAL_BAR = String.fromCodePoint(0x2015);
+
 const REASON_ELLIPSIS =
   "文章作法：三点リーダー「…」は偶数個続けて使う書き方が一般的です。意図的な表現であれば無視してください。";
 const REASON_DASH =
-  "文章作法：ダッシュ「―」は偶数個続けて使う書き方が一般的です。意図的な表現であれば無視してください。";
+  `文章作法：ダッシュ「${HORIZONTAL_BAR}」は偶数個続けて使う書き方が一般的です。意図的な表現であれば無視してください。`;
+const REASON_DASH_MIXED =
+  `文章作法：ダッシュの字が混ざっています（欧文の「${EM_DASH}」と和文の「${HORIZONTAL_BAR}」）。` +
+  `同じ「${HORIZONTAL_BAR}」に揃えると、表示の隙間も消えます。意図的な表現であれば無視してください。`;
 const REASON_CLOSING_QUOTE_PERIOD =
   "文章作法：鉤括弧の文末には句点を付けない書き方が一般的です。意図的な表現であれば無視してください。";
 const REASON_MARK_SPACING =
@@ -38,7 +57,7 @@ export function checkWritingStyle(chunk: Chunk): AcceptedTypoIssue[] {
   lines.forEach((lineText, index) => {
     const lineNumber = chunk.startLine + index + 1;
     findings.push(...findOddRuns(lineText, lineNumber, "…", REASON_ELLIPSIS));
-    findings.push(...findOddRuns(lineText, lineNumber, "―", REASON_DASH));
+    findings.push(...findDashRuns(lineText, lineNumber));
     findings.push(...findClosingQuotePeriods(lineText, lineNumber));
     findings.push(...findMissingSpaceAfterMark(lineText, lineNumber));
   });
@@ -51,7 +70,57 @@ function contextAround(line: string, start: number, end: number): string {
   return line.slice(from, to);
 }
 
-/** 「…」「―」等が奇数個連続している箇所を検出する */
+/**
+ * ダッシュの連なりを見る。**2つの文字をまとめて1つの連なりとして数える。**
+ *
+ * ## なぜ字の種類をまたいで数えるのか（実機の報告、2026-08-29）
+ *
+ * 作者の原稿に「始まった――」があり、**画面では隙間が見え、作法チェックは
+ * 偶数個なのに「1個だから奇数」と指摘した。** 2本のうち片方が欧文の
+ * U+2014、もう片方が和文の U+2015 だったためである。片方だけを数えると、
+ * 見た目に2本ある連なりが「1個ずつの連なりが2つ」に割れる。
+ *
+ * ## 何を指摘するか
+ *
+ * 1. **字が混ざっている**（連なりに U+2014 が1つでもある）——個数が偶数でも
+ *    指摘する。**隙間が見えるのはこちらが原因**であり、個数の問題ではない。
+ *    直し方は U+2015 へ揃えること（奇数なら偶数に足しておく）
+ * 2. **U+2015 だけで奇数個**——これまでどおり、1つ足して偶数にする
+ *
+ * どちらでもない（U+2015 だけで偶数個）ときは、何も言わない。
+ */
+function findDashRuns(
+  line: string,
+  lineNumber: number
+): AcceptedTypoIssue[] {
+  const findings: AcceptedTypoIssue[] = [];
+  // 2つの文字を区別せず、続いているかぎり1つの連なりとして拾う
+  const pattern = new RegExp(`[${EM_DASH}${HORIZONTAL_BAR}]+`, "gu");
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(line))) {
+    const run = match[0];
+    const mixed = run.includes(EM_DASH);
+    // 揃っていて偶数個なら、作法どおりなので何も言わない
+    if (!mixed && run.length % 2 === 0) continue;
+
+    // 何個が正しいかは決められないため、最小限の変更（足りなければ1個足して
+    // 偶数にする）に留める。字が混ざっているときは、そのうえで字を揃える
+    const evenLength = run.length % 2 === 0 ? run.length : run.length + 1;
+    findings.push({
+      line: lineNumber,
+      original: contextAround(line, match.index, match.index + run.length),
+      target: run,
+      suggestion: mixed
+        ? HORIZONTAL_BAR.repeat(evenLength)
+        : run + HORIZONTAL_BAR,
+      reason: mixed ? REASON_DASH_MIXED : REASON_DASH,
+      confidence: "medium",
+    });
+  }
+  return findings;
+}
+
+/** 「…」が奇数個連続している箇所を検出する */
 function findOddRuns(
   line: string,
   lineNumber: number,

@@ -32,9 +32,15 @@ describe("原稿エディタのHTML", () => {
     expect(html).toContain("縦書きと横書きを切り替えます");
   });
 
-  it("書く面と読む面の両方がある", () => {
+  /**
+   * 面は2つだけになった（0.25.2）。「読む」面（#read）と「並べる」面は、
+   * 切り替えのボタンを外した0.24.14の時点で**開く道が無く**なっていたので
+   * 消してある。打つ面は、組んで書く面の安全弁が落ちる先として要る。
+   */
+  it("打つ面と、組んで書く面がある", () => {
     expect(html).toContain('<textarea id="write"');
-    expect(html).toContain('<div id="read">');
+    expect(html).toContain('<div id="compose"');
+    expect(html).not.toContain('id="read"');
   });
 
   /** 縦書きは CSS の writing-mode で効かせる */
@@ -123,11 +129,6 @@ describe("日本語入力を壊さない", () => {
     expect(code).toContain("setSelectionRange");
   });
 
-  /** 4万字の本文で、打つたびに千個の段落を作り直すとつかえる */
-  it("見えていない「読む」面は、切り替えるまで組み立てない", () => {
-    expect(code).toContain("freshHtml");
-    expect(code).toContain("applyFreshHtml");
-  });
 });
 
 /**
@@ -290,20 +291,17 @@ describe("その行を示す", () => {
 });
 
 /**
- * 打ちながら組み上がりを見る（作者の要望「ワードのようにはできませんか？」）。
+ * 消した面が戻ってこないようにする（0.25.2）。
  *
- * **打つ面には手を入れない。** ルビを出したまま打てる画面はIMEを壊すので、
- * 見る面を隣に置く形にした（設計書6.25.1）。
+ * 「読む」面と「並べる」面は、0.24.14で切り替えのボタンを外した時点から
+ * **入る道が無かった**（面を表す2つのフラグが、どこからも true にならない）。
+ * 機構だけが約200行残っていたので消したが、**消したものは黙って戻る**——
+ * 部分的に書き戻された機構は、動かないまま次に読む人を惑わせる。
  */
-describe("並べて書く", () => {
+describe("消した「読む」「並べる」の面", () => {
   const code = html.slice(html.indexOf("<script"));
 
-  /**
-   * **ボタンは外した**（作者の指示、2026-08-29。組んで書くが標準）。
-   * 面と切り替えの仕掛けそのものは残っている——組んで書く面が安全弁で
-   * 開けない原稿では「書く」面へ落ちるので、そちらの道具は要る。
-   */
-  it("「読む」「並べる」「組んで書くのをやめる」のボタンは出さない", () => {
+  it("切り替えのボタンを出さない", () => {
     expect(html).not.toContain('id="split"');
     expect(html).not.toContain('id="mode"');
     expect(html).not.toContain('id="composeMode"');
@@ -311,33 +309,45 @@ describe("並べて書く", () => {
     expect(html).not.toContain("組んで書くのをやめる");
   });
 
+  it("面のフラグそのものが無い", () => {
+    expect(code).not.toContain("let reading");
+    expect(code).not.toContain("let split");
+  });
+
+  it("面のCSSも、面を引く処理も無い", () => {
+    expect(html).not.toContain("body.split");
+    expect(html).not.toContain("body.reading");
+    expect(code).not.toContain('getElementById("read")');
+
+    /*
+      **`#read` を1つも飾らないこと。** ただし「かつて読む面で作者が
+      確かめた形である」という由来は、三点リーダのCSSのコメントに残して
+      ある（消すと、なぜこの値なのかが分からなくなる）。そこで文中の
+      言及ではなく、**規則の見出し（`{` で終わる行）**だけを見る。
+    */
+    const selectors = html
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .filter((line) => line.endsWith("{"));
+
+    expect(selectors.filter((line) => line.includes("#read"))).toEqual([]);
+  });
+
+  /** 古い state に残っていても読まない（読んで無視する形も残さない） */
+  it("覚えていた面を読まない", () => {
+    expect(code).not.toContain("saved.reading");
+    expect(code).not.toContain("saved.split");
+    expect(code).toContain("vscode.setState({ vertical, size,");
+  });
+
   /**
-   * ボタンが無い以上、覚えていた状態で開くと**戻れない面に閉じ込められる**
-   * （読む面には打ち込めない）。必ず「書く」から始める。
+   * **切り分けの計器も消した**（0.25.2）。三点リーダが行の中央に来ない
+   * 不具合（0.24.13〜14）を追うために、計算済みスタイルをログへ書いていた。
+   * 原因（欧文フォールバックの字形）は解明・修正済みで、いまは打つたびに
+   * `getComputedStyle` を走らせてログを1行出すだけになっていた。
    */
-  it("覚えていた読む面・並べる面では開かない", () => {
-    expect(code).not.toContain("saved.reading === true");
-    expect(code).not.toContain("saved.split === true");
-    expect(code).toMatch(/let reading = false;[\s\S]{0,200}let split = false;/);
-  });
-
-  it("並べると、両方の面が見える", () => {
-    expect(html).toContain("body.split #write, body.split #read");
-    expect(html).toContain("body.reading:not(.split) #write");
-  });
-
-  /**
-   * 追いかけの中身は manuscriptSplitFollow.test.ts が見る。
-   * ここは「しかけが残っているか」だけ——`scrollIntoView` は使わない
-   * （上の入れ物まで動かすことがあり、#surface は overflow:hidden で戻せない）。
-   */
-  it("組み上がりの側が、カーソルのある行を追いかける", () => {
-    expect(code).toContain("caretLine");
-    expect(code).toContain("nudgeIntoView");
-  });
-
-  it("並べた状態を覚える", () => {
-    expect(code).toContain("vertical, reading, split, size");
+  it("三点リーダの計器が無い", () => {
+    expect(code).not.toContain("composeReportEllipsis");
   });
 });
 
