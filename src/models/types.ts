@@ -103,6 +103,20 @@ export interface WorkStats {
   conflictedCount: number;
 }
 
+/**
+ * 更新告知（設計書6.41）で使う、作者の決めごと。
+ *
+ * ここに置くのは、**作品ごとに変わり、かつ端末をまたいで同じであるべき**
+ * ものだから。VSCodeの設定に置くと、別の端末では空になり、
+ * 設定資料に置くと作品の中身と混ざる。
+ */
+export interface WorkAnnounceConfig {
+  /** 告知に付けるハッシュタグ。先頭の `#` は読み込み時に補う */
+  hashtags: string[];
+  /** 作品ページのURL。**空でもよい**（そのときは告知文に目印を残す） */
+  workUrl: string;
+}
+
 /** .aiwriter/config.json の内容（フェーズ0で使う範囲） */
 export interface WorkConfig {
   schemaVersion: string;
@@ -112,6 +126,13 @@ export interface WorkConfig {
   /** 設定フォルダの相対パス（既定 "設定"） */
   settingsDir: string;
   createdAt: string;
+  /**
+   * 更新告知の設定。**省略できる。**
+   *
+   * 設定していない作品でも告知文は作れる（URLは目印のまま残す）。
+   * 必須にすると、既にある `config.json` がすべて読めなくなる。
+   */
+  announce?: WorkAnnounceConfig;
 }
 
 export const CONFIG_SCHEMA_VERSION = "0.1";

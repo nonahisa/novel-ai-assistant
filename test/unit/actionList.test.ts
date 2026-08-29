@@ -313,6 +313,9 @@ describe("AIの印", () => {
         "novelai.extractOrganizationsOnly",
         "novelai.extractWorldOnly",
         "novelai.generateCatchphrases",
+        // 更新告知文（P-30）。**告知の設定は入らない**——訊いて保存するだけで
+        // AIを呼ばないので、印を付けると料金が出るように見える
+        "novelai.generateAnnouncement",
         "novelai.generatePlot",
         "novelai.generateSynopses",
         "novelai.generateWorkBlurb",

@@ -276,6 +276,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 1,
   },
   {
+    id: "F-48",
+    title: "更新告知文を作る",
+    commands: ["novelai.generateAnnouncement", "novelai.configureAnnouncement"],
+    count: 10,
+  },
+  {
     id: "F-47",
     title: "AIが実際に読める長さを測る",
     commands: ["novelai.measureContext"],
@@ -470,4 +476,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 581;
+export const PENDING_CHECK_TOTAL = 591;

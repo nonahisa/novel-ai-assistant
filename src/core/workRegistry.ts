@@ -7,6 +7,7 @@ import {
   CONFIG_SCHEMA_VERSION,
   DEFAULT_MANUSCRIPT_DIR,
   DEFAULT_SETTINGS_DIR,
+  WorkAnnounceConfig,
   WorkConfig,
   WorkEntry,
 } from "../models/types";
@@ -402,13 +403,74 @@ export function parseWorkConfig(raw: unknown): WorkConfig {
     }
   }
 
+  const announce = parseAnnounceConfig(value.announce);
+
   return {
     schemaVersion: (value.schemaVersion as string).trim(),
     workTitle: (value.workTitle as string).trim(),
     manuscriptDir: (value.manuscriptDir as string).trim(),
     settingsDir: (value.settingsDir as string).trim(),
     createdAt: (value.createdAt as string).trim(),
+    // **持っているときだけ入れる。** `announce: undefined` を常に置くと、
+    // 書き戻したJSONに欄が現れたり消えたりして、Gitの差分が毎回濁る
+    ...(announce ? { announce } : {}),
   };
+}
+
+/**
+ * 更新告知の設定（設計書6.41）を読む。
+ *
+ * **壊れていても投げない。** ここは告知文を作るときにしか使わない欄で、
+ * 手で書き間違えたせいで作品そのものが開けなくなるほうが困る。
+ * 読めない形なら `announce` ごと無かったことにして、他の欄は読む。
+ */
+function parseAnnounceConfig(raw: unknown): WorkAnnounceConfig | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return undefined;
+  }
+  const value = raw as Record<string, unknown>;
+
+  // 欄そのものの型が違うときは、作者が何を意図したか決められない。
+  // 半端に読むと「設定したはずのタグが黙って消える」ので、丸ごと捨てる
+  if (value.hashtags !== undefined && !Array.isArray(value.hashtags)) {
+    return undefined;
+  }
+  if (value.workUrl !== undefined && typeof value.workUrl !== "string") {
+    return undefined;
+  }
+
+  // **揃えてから重ねを落とす。** 「創作」と「#創作」は書き方が違うだけで
+  // 同じタグなので、そのまま並べると投稿に同じものが2つ出る。
+  // `Set` は先に入れたほうを残すので、作者が書いた順が保たれる
+  const hashtags = [
+    ...new Set(
+      (value.hashtags ?? [])
+        .filter((item: unknown): item is string => typeof item === "string")
+        .map(normalizeHashtag)
+        .filter((tag: string) => tag.length > 0)
+    ),
+  ];
+
+  return {
+    hashtags,
+    workUrl: typeof value.workUrl === "string" ? value.workUrl.trim() : "",
+  };
+}
+
+/**
+ * ハッシュタグの形を揃える。
+ *
+ * 作者は「創作」とも「#創作」とも書く。**空白はタグを切ってしまう**ので
+ * 落とす（「# 創作」と書かれても1つのタグとして通す）。
+ *
+ * **全角の「＃」も落とす。** 日本語入力ではこちらがそのまま出るので、
+ * 半角だけを見ていると「#＃創作」になり、投稿サイトではタグとして
+ * 扱われない。先頭の `#`／`＃` をまとめて落としてから半角を1つ付けるので、
+ * 何度通しても同じ形になる。
+ */
+function normalizeHashtag(raw: string): string {
+  const body = raw.replace(/\s+/gu, "").replace(/^[#＃]+/u, "");
+  return body ? `#${body}` : "";
 }
 
 function resolveInsideWork(root: string, subdir: string, key: string): string {

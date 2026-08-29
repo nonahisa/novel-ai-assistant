@@ -62,6 +62,73 @@ describe("作品設定", () => {
     );
   });
 
+  test("告知の設定が無ければ、欄ごと持たない", () => {
+    // 既にある config.json は announce を持たない。必須にすると全部読めなくなる
+    expect(parseWorkConfig(validConfig).announce).toBeUndefined();
+  });
+
+  test("ハッシュタグの形を揃える", () => {
+    const config = parseWorkConfig({
+      ...validConfig,
+      announce: {
+        // 「#」の有無、途中の空白、空文字が混ざるのが実際の書かれ方
+        hashtags: ["創作", "#カクヨム", "# 小説 更新", "", "   "],
+        workUrl: " https://example.com/works/1 ",
+      },
+    });
+
+    expect(config.announce).toEqual({
+      hashtags: ["#創作", "#カクヨム", "#小説更新"],
+      workUrl: "https://example.com/works/1",
+    });
+  });
+
+  test("全角の「＃」も半角ひとつに揃える", () => {
+    // 日本語入力では「＃」がそのまま出る。揃えないと「#＃創作」になり、
+    // 投稿サイトではタグとして扱われない
+    expect(
+      parseWorkConfig({
+        ...validConfig,
+        announce: { hashtags: ["＃創作", "##二重", "＃＃混在"], workUrl: "" },
+      }).announce?.hashtags
+    ).toEqual(["#創作", "#二重", "#混在"]);
+  });
+
+  test("同じタグは1つにまとめる（先に書いたほうを残す）", () => {
+    // 「創作」と「#創作」は揃えたあとでは同じもの。並べると投稿が読みにくい
+    expect(
+      parseWorkConfig({
+        ...validConfig,
+        announce: {
+          hashtags: ["創作", "#創作", "＃創作", "#カクヨム"],
+          workUrl: "",
+        },
+      }).announce?.hashtags
+    ).toEqual(["#創作", "#カクヨム"]);
+  });
+
+  test("URLは空でもよい", () => {
+    // 未入力でも告知文は作れる（目印を残す）
+    expect(
+      parseWorkConfig({
+        ...validConfig,
+        announce: { hashtags: ["#創作"], workUrl: "" },
+      }).announce
+    ).toEqual({ hashtags: ["#創作"], workUrl: "" });
+  });
+
+  test.each([
+    { announce: "壊れた文字列" },
+    { announce: { hashtags: "創作 カクヨム", workUrl: "" } },
+    { announce: { hashtags: ["#創作"], workUrl: 123 } },
+  ])("告知の設定が壊れていても、他の欄は読む（%o）", (broken) => {
+    // 手で書き間違えたせいで作品そのものが開けなくなるほうが困る
+    const config = parseWorkConfig({ ...validConfig, ...broken });
+
+    expect(config.announce).toBeUndefined();
+    expect(config.workTitle).toBe("テスト作品");
+  });
+
   test.each(["..\\outside", "C:\\outside", "本文\\..\\..\\outside"])(
     "作品ルート外へ出る本文パス %s を拒否する",
     (manuscriptDir) => {

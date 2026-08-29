@@ -43,6 +43,8 @@ const MARKDOWN_ALLOWED = new Set([
   "src/core/sceneMemoMarkdown.ts",
   // 再開の1枚と単話プロットの雛形（設計書6.36）
   "src/core/resumeSheet.ts",
+  // 更新告知文をMarkdownの文書として開く（P-30）
+  "src/core/announcement.ts",
   // .gitignore に書き込む注釈。Markdownではないが「#」で始まる
   "src/core/workRegistry.ts",
   // MarkdownString（ツールチップ）として渡す

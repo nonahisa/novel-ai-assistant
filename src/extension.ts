@@ -43,6 +43,10 @@ import {
   generateWorkBlurb,
 } from "./features/generateBlurb";
 import {
+  configureAnnouncement,
+  generateAnnouncement,
+} from "./features/generateAnnouncement";
+import {
   findOpenSettingsPanel,
   openSettingsPanel,
   setRelationGraphOpener,
@@ -3483,6 +3487,28 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         await generateCatchphrases(work, aiRegistry);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.generateAnnouncement",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await generateAnnouncement(work, aiRegistry);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.configureAnnouncement",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await configureAnnouncement(work);
       }
     )
   );

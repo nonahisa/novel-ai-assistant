@@ -720,6 +720,29 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.generateAnnouncement",
+            label: "更新告知文を作る",
+            icon: "megaphone",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "話を選ぶと、その本文からネタバレしない告知文をX用・活動報告用・" +
+              "後書き用の3種作ります。ハッシュタグとURLは設定から付け、" +
+              "貼るのは作者です（投稿サイトへは書き込みません）。",
+          },
+          {
+            kind: "action",
+            command: "novelai.configureAnnouncement",
+            label: "告知の設定（ハッシュタグ・URL）",
+            description: "AIを使わない",
+            icon: "gear",
+            requiresWork: true,
+            detail:
+              "更新告知に付けるハッシュタグと作品ページのURLを決めます。" +
+              "作品ごとに覚えるので、告知を作るたびに入れ直す必要はありません。",
+          },
+          {
+            kind: "action",
             command: "novelai.generateSynopses",
             label: "各話あらすじを生成",
             icon: "list-ordered",

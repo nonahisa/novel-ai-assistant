@@ -391,7 +391,13 @@ export async function refreshSynopsisDoc(
   await writeSynopsisDoc(work, workTitle, (current) => current);
 }
 
-async function readSynopsisDoc(work: WorkEntry): Promise<SynopsisDoc> {
+/**
+ * `設定/synopsis.md` を読む。無ければ空の内容を返す。
+ *
+ * **更新告知（P-30）も同じものを読む**ので公開してある。写しを作ると、
+ * 見出しの形を変えたときに片方だけが読めなくなる。
+ */
+export async function readSynopsisDoc(work: WorkEntry): Promise<SynopsisDoc> {
   try {
     const bytes = await vscode.workspace.fs.readFile(
       path.toUri(await synopsisPath(work))
