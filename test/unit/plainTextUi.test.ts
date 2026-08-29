@@ -37,6 +37,8 @@ const MARKDOWN_ALLOWED = new Set([
   "src/features/applyPendingUpdates.ts",
   // 伏線の一覧をMarkdownの文書として開く（設計書6.35.5）
   "src/core/foreshadowMarkdown.ts",
+  // 年表をMarkdownの文書として書き出す（設計書6.39.4）
+  "src/core/chronicleMarkdown.ts",
   // 再開の1枚と単話プロットの雛形（設計書6.36）
   "src/core/resumeSheet.ts",
   // .gitignore に書き込む注釈。Markdownではないが「#」で始まる

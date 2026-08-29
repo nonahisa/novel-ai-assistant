@@ -134,6 +134,8 @@ const STEP_DEFS: readonly StepDef[] = [
           // 大きく開くほう。**横のパネルは詳細メニューと本文の右クリックにある**
           "novelai.openChatPanel",
           "novelai.showWritingStats",
+          // 書いたものを別の軸（作中の時間）で見直す画面（設計書6.39）
+          "novelai.openChronicle",
         ],
       },
       {

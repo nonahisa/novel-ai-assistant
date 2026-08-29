@@ -152,6 +152,29 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           "目標を設定していれば達成率も出ます。" +
           "話ごとの文字数一覧（長さの偏り）も同じ画面で見られます。",
       },
+      // 年表は執筆統計の隣に置く。どちらも「書いたものを別の軸で
+      //見直す」画面で、AIを呼ばずにその場で出る（設計書6.39）
+      {
+        kind: "action",
+        command: "novelai.openChronicle",
+        label: "年表",
+        icon: "list-ordered",
+        requiresWork: true,
+        detail:
+          "話数順と時系列順で、話ごとの出来事を並べます。" +
+          "登場人物・変化・能力・呼称・伏線・あらすじを1枚にまとめた画面です。" +
+          "AIは使いません（材料はすべて既にある記録です）。",
+      },
+      {
+        kind: "action",
+        command: "novelai.editTimeline",
+        label: "時期・系統を編集する",
+        icon: "calendar",
+        requiresWork: true,
+        detail:
+          "作中の時期（「十年前・火事の夜」など）と、本編以外の筋" +
+          "（IF編・夢・劇中劇）を作ります。年表を時系列順で並べるのに使います。",
+      },
       {
         kind: "action",
         command: "novelai.showEditHistory",

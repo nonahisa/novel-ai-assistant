@@ -52,6 +52,8 @@ import {
   openRelationGraph,
   refreshRelationGraph,
 } from "./features/relationGraphPanel";
+import { openChronicle, refreshChronicle } from "./features/chroniclePanel";
+import { editTimeline } from "./features/chronicleEdit";
 import { unifyCharacterRecords } from "./features/unifyCharacters";
 import { findMergeCandidates } from "./core/characterMerge";
 import { CharacterStore } from "./core/characterStore";
@@ -847,6 +849,26 @@ export async function activate(
   context.subscriptions.push({
     dispose: () => setRelationGraphOpener(undefined),
   });
+
+  /**
+   * 年表の入口（設計書6.39）。
+   *
+   * 相関図と同じく、設定資料パネルと原稿エディタへの繋ぎはここだけに置く。
+   * 年表の側からそれらを読み込むと、読み合いの輪ができる。
+   */
+  const showChronicle = async (work: WorkEntry): Promise<void> => {
+    await openChronicle(context, work, {
+      openSettingsRecord: async (target, id) => {
+        const panel = await openSettingsPanel(context, target, aiRegistry);
+        await panel.showRecord("character", id);
+      },
+      // 本文へ飛ぶ道は1本だけ（`revealLocation.ts`）。原稿エディタで
+      // 書いていればその画面のまま示し、素のエディタなら素のまま開く
+      revealInManuscript: (filePath, line) =>
+        manuscriptProvider.revealLine(filePath, line),
+      editTimeline: (target) => editTimeline(target),
+    });
+  };
 
   // 提案パネル（下段・出力やデバッグコンソールと同じ場所）。
   // 誤字脱字検知の結果をここへ表示する。0.22.24から作品ごとに
@@ -2457,6 +2479,26 @@ export async function activate(
         await showRelationGraph(work, characterId);
       }
     )
+  );
+
+  // 年表（設計書6.39）。AIは使わない——材料はすべて既にある記録である
+  context.subscriptions.push(
+    registerCommand("novelai.openChronicle", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await showChronicle(work);
+    })
+  );
+
+  // 時期・系統を作る流れ（6.39.3）。年表の中からも同じ関数を呼ぶ
+  context.subscriptions.push(
+    registerCommand("novelai.editTimeline", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await editTimeline(work);
+      // 開きっぱなしの年表が古いままでは、作った手応えがない
+      await refreshChronicle(work.id);
+    })
   );
 
   context.subscriptions.push(
