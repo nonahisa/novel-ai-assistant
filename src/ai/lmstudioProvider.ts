@@ -55,8 +55,30 @@ import { isUnsupportedParameter } from "./openaiProvider";
  * **「手元で動く＝非力」でも「最新だから最上位」でもない。**
  */
 
-const DEFAULT_ENDPOINT = "http://localhost:1234/v1";
+/**
+ * LM Studioの既定の接続先。
+ *
+ * **export しているのは、起動の導線（`features/aiConnectivity.ts`）が
+ * 同じ値を要るため。** 写しを作ると、片方だけ直したときに
+ * 「起動したポートと、話しかけるポートが違う」という形で表に出る。
+ */
+export const DEFAULT_ENDPOINT = "http://localhost:1234/v1";
 const LABEL = "LM Studio";
+
+/**
+ * LM Studioの接続先。末尾の `/` は落とす。
+ *
+ * **読み方をここ1つに寄せている。** 起動の導線（`aiConnectivity.ts`）と
+ * 導入案内（`setupLmStudio.ts`）とモデル読み込み（`lmstudioModelLoad.ts`）が
+ * 同じ値を要る。写しを作ると、起動したポートと話しかけるポートが食い違う。
+ */
+export function lmstudioEndpoint(): string {
+  const configured = vscode.workspace
+    .getConfiguration("novelai")
+    .get<string>("lmstudio.endpoint", DEFAULT_ENDPOINT)
+    .trim();
+  return (configured || DEFAULT_ENDPOINT).replace(/\/+$/, "");
+}
 
 interface ModelListResponse {
   data?: Array<{ id?: string; object?: string }>;
@@ -139,11 +161,7 @@ export class LmStudioProvider implements AIProvider {
   private nativeFailureLogged = false;
 
   private get endpoint(): string {
-    const configured = vscode.workspace
-      .getConfiguration("novelai")
-      .get<string>("lmstudio.endpoint", DEFAULT_ENDPOINT)
-      .trim();
-    return (configured || DEFAULT_ENDPOINT).replace(/\/+$/, "");
+    return lmstudioEndpoint();
   }
 
   private get contextWindow(): number {
@@ -246,7 +264,16 @@ export class LmStudioProvider implements AIProvider {
     if (cached) {
       // 読み込んだ長さが取れたモデルは、そちらが実際の値なので優先する。
       // 取れないモデルにだけ「設定を直したら次から効く」を残す
-      return { ...cached, contextWindow: loaded ?? this.contextWindow };
+      return {
+        ...cached,
+        contextWindow: loaded ?? this.contextWindow,
+        // **読み込み状況は写しを使わない。** 拡張機能がこのあとモデルを
+        // 読み込むので、一覧を引いた時点の「未読込」はすぐ古くなる
+        loaded:
+          nativeEntry?.state === undefined
+            ? cached.loaded
+            : nativeEntry.state === "loaded",
+      };
     }
     return this.describe(id, nativeEntry);
   }
@@ -272,6 +299,39 @@ export class LmStudioProvider implements AIProvider {
       if (shortest === undefined || length < shortest) shortest = length;
     }
     return shortest;
+  }
+
+  /**
+   * そのモデルの読み込み状況。取れなければ undefined。
+   *
+   * **拡張機能からモデルを読み込む**（`lmstudioModelLoad.ts`）ために要る。
+   * 未読込なら、こちらが文脈の長さを指定して読み込ませたい——JITに任せると
+   * LM Studio側の既定の短い長さで載り、作者には「文脈 8k」としか見えない
+   * （作者の報告、2026-08-29）。
+   *
+   * 取り方は `readNativeModels` に寄せてある（写しを作らない）。
+   */
+  async readModelLoadState(id: string): Promise<
+    | {
+        loaded: boolean;
+        /** モデルが対応できる最大。**読み込むときの指定にだけ使う** */
+        maxContextLength?: number;
+        /** いま読み込まれている長さ。未読込なら undefined */
+        loadedContextLength?: number;
+      }
+    | undefined
+  > {
+    const entry = (await this.readNativeModels())?.get(id);
+    if (!entry) return undefined;
+    const max = entry.max_context_length;
+    return {
+      loaded: entry.state === "loaded",
+      maxContextLength:
+        typeof max === "number" && Number.isFinite(max) && max > 0
+          ? max
+          : undefined,
+      loadedContextLength: loadedContextLength(entry),
+    };
   }
 
   /**
@@ -311,6 +371,7 @@ export class LmStudioProvider implements AIProvider {
 
   private describe(id: string, native?: NativeModelEntry): ModelInfo {
     const parameterSize = parseParameterSize(id);
+    const max = native?.max_context_length;
     const info: ModelInfo = {
       id,
       displayName: id,
@@ -320,6 +381,15 @@ export class LmStudioProvider implements AIProvider {
       capabilities: ["JSON強制"],
       // 公開重みのモデルなので、Ollamaと同じ物差しで測る
       tier: inferTier(parameterSize, "ollama"),
+      // **表示のためだけに持つ。** 未読込のモデルに「文脈 8k」と出ると
+      // 実際より小さく見えるが、`contextWindow` へ入れると今度は
+      // 実際より大きい想定で送ってしまう（設定値のままにする）
+      maxContextWindow:
+        typeof max === "number" && Number.isFinite(max) && max > 0
+          ? max
+          : undefined,
+      // 状況が取れない古い版では undefined のまま（「未読込」と断じない）
+      loaded: native?.state === undefined ? undefined : native.state === "loaded",
     };
     this.modelCache.set(id, info);
     return info;
@@ -359,6 +429,11 @@ export class LmStudioProvider implements AIProvider {
         response = await this.post(body, params.signal);
         break;
       } catch (error) {
+        // **モデルが載らないのは、指定の問題ではない。** 指定を外して
+        // 出し直しても同じところで落ちるので、ここで打ち切る
+        const loadFailure = toModelLoadError(error, params.model);
+        if (loadFailure) throw loadFailure;
+
         if (
           body.response_format !== undefined &&
           isUnsupportedParameter(error, "response_format")
@@ -430,4 +505,60 @@ export class LmStudioProvider implements AIProvider {
       label: LABEL,
     });
   }
+}
+
+/** 応答本文から読み取るLM Studioの説明の上限。通知に収まる長さにする */
+const LOAD_FAILURE_REASON_LIMIT = 300;
+
+/**
+ * 「モデルを読み込めなかった」失敗なら、理由を添えた `AIError` にして返す。
+ * それ以外の失敗なら undefined（呼び出し側でこれまでどおり扱う）。
+ *
+ * **HTTP 400 を「要求の形が悪い」と決めつけない。** LM Studioは読み込みに
+ * 失敗したときも400を返し、`bad_response` に丸めると
+ * 「出力上限とモデル設定を確認してください」という見当外れの案内になる。
+ * 実際に返ってきたのは次のような本文である（この機械で実測、2026-08-29）。
+ *
+ * > Failed to load model "google/gemma-4-12b-qat". Error: Model loading was
+ * > stopped due to insufficient system resources. …requires approximately
+ * > 44.87 GB of memory…
+ *
+ * **原因も直し方もLM Studio自身が言っている。** ここで捨てず、そのまま
+ * 作者へ渡す（英文のままなのは、訳すと必要な数字や設定名が消えるため）。
+ */
+function toModelLoadError(error: unknown, model: string): AIError | undefined {
+  if (!(error instanceof AIError)) return undefined;
+  const detail = error.detail ?? "";
+  if (!detail.includes("Failed to load model")) return undefined;
+
+  const parts = [`LM Studio がモデル「${model}」を読み込めませんでした。`];
+  if (/insufficient system resources/i.test(detail)) {
+    parts.push(
+      "メモリ不足の見込みで読み込みを止めました（LM Studio の安全装置）。"
+    );
+  }
+  parts.push(`LM Studio の説明：${extractLoadFailureReason(detail)}`);
+
+  return new AIError(parts.join(""), "model_load_failed", detail);
+}
+
+/**
+ * 応答本文からLM Studioの説明だけを取り出す。
+ *
+ * OpenAI互換の形（`{"error":{"message":…}}`）で返るが、**JSONとして
+ * 読めなくても諦めない**——本文は500字で切られており、長い説明では
+ * 途中で切れて構文が壊れる。読めなければ本文をそのまま使う。
+ */
+function extractLoadFailureReason(detail: string): string {
+  let reason = detail;
+  try {
+    const parsed = JSON.parse(detail) as { error?: { message?: string } };
+    if (typeof parsed.error?.message === "string") {
+      reason = parsed.error.message;
+    }
+  } catch {
+    // 壊れたJSONは黙って本文のまま使う。ここで例外を出すと、
+    // 本来伝えたい「読み込めなかった」ごと消える
+  }
+  return reason.trim().slice(0, LOAD_FAILURE_REASON_LIMIT);
 }

@@ -465,7 +465,7 @@ export async function pickProviderAndModel(
         label: m.displayName,
         description: [
           m.parameterSize ?? "",
-          `文脈 ${formatContext(m.contextWindow)}`,
+          formatModelContext(m),
           tierLabel[m.tier],
         ]
           .filter(Boolean)
@@ -481,6 +481,19 @@ export async function pickProviderAndModel(
     { title: "使用するモデルを選んでください", ignoreFocusOut: true }
   );
   if (!modelPick || !("model" in modelPick)) return undefined;
+
+  // **生成を試す前に、LM Studioへモデルを読み込ませる。**
+  // JITに任せるとLM Studio側の既定の短い文脈で載り、作者には
+  // 「文脈 8k」としか見えない（作者の報告、2026-08-29）
+  if (providerPick.providerId === "lmstudio") {
+    // 読み込みを断られたなら、このあとの生成でも断られる。
+    // 使えない組み合わせを設定に残さない
+    const loaded = await prepareLmStudioModel(
+      modelPick.model.id,
+      modelPick.model.maxContextWindow
+    );
+    if (!loaded) return undefined;
+  }
 
   // 選んだモデルで実際に生成できるか確かめる。
   // モデル一覧は残高ゼロでも返ってくるので、ここまでの確認では
@@ -596,6 +609,87 @@ function formatContext(tokens: number): string {
 }
 
 /**
+ * モデル選択に出す文脈の表示。
+ *
+ * **未読込のモデルに、設定値をそのまま出さない。** LM Studioは読み込んで
+ * いないモデルも一覧に返し、その文脈長は「読み込むときに決まる」ので
+ * まだ分からない。以前はここに設定値（既定8192）が出ており、
+ * 131072まで読めるモデルが「文脈 8k」と表示されていた
+ * （作者の報告、2026-08-29）。
+ *
+ * `contextWindow` そのものは変えない（本文の分割に使う値で、実際より
+ * 大きく見積もると入力が黙って切り捨てられる）。**表示だけを分ける。**
+ */
+export function formatModelContext(model: ModelInfo): string {
+  if (model.loaded === false && model.maxContextWindow) {
+    return `文脈 最大${formatContext(model.maxContextWindow)}（選ぶと読み込みます）`;
+  }
+  return `文脈 ${formatContext(model.contextWindow)}`;
+}
+
+/**
+ * 選ばれたモデルをLM Studioへ読み込ませる。
+ *
+ * **セットアップ（`pickProviderAndModel`）と、AI機能の実行前
+ * （`ensureConfigured`）の両方がここを通る。** 同じことを2か所で書くと、
+ * 片方だけ直る。
+ *
+ * @param maxContextWindow 進捗に出す長さ。分かるときだけ渡す
+ * @returns 先へ進んでよければ true
+ */
+async function prepareLmStudioModel(
+  modelId: string,
+  maxContextWindow?: number
+): Promise<boolean> {
+  // 読み込み済みなら何もしない。`ensureLmStudioModelLoaded` が判断する
+  // （ブラウザ版・別マシンを指しているときも、あちらで弾かれる）
+  const { ensureLmStudioModelLoaded, saveLoadedContextWindow } = await import(
+    "./lmstudioModelLoad.js"
+  );
+
+  const contextLabel = maxContextWindow
+    ? `（文脈 ${formatContext(maxContextWindow)}）`
+    : "";
+  const result = await withProgress(
+    `LM Studioにモデルを読み込んでいます${contextLabel}…`,
+    () => ensureLmStudioModelLoaded(modelId)
+  );
+
+  if (result.kind === "failed") {
+    logFailure("LM Studioのモデル読み込み", {
+      モデル: modelId,
+      種別: result.reason,
+      詳細: result.message,
+    });
+    // **待ちきれなかっただけなら止めない。** 裏で読み込みが続いている
+    // ことがあり、JITでそのまま使えることも多い
+    if (result.reason === "timeout") return true;
+
+    // 載らないと分かっているのに、チャンクを送り続けて作者を待たせない
+    const action = await vscode.window.showErrorMessage(
+      result.message,
+      "ログを表示",
+      "閉じる"
+    );
+    if (action === "ログを表示") showLog();
+    return false;
+  }
+
+  if (result.kind === "skipped" && result.reason === "not_installed") {
+    // `lms` が無いだけ。JITに任せれば動くので、実行は妨げない
+    logStep(
+      `LM Studio：lms コマンドが無いため、モデル「${modelId}」の読み込みはLM Studioに任せます。`
+    );
+    return true;
+  }
+
+  // 読み込めたら、実際に載った長さを設定へ書き戻す。
+  // **作者に写させない**（写し間違いと写し忘れが起きる）
+  if (result.kind === "loaded") await saveLoadedContextWindow();
+  return true;
+}
+
+/**
  * AI機能の実行前に呼ぶ。未設定ならウィザードを出す。
  *
  * **機能キーは必須。** その機能に割当があればそれを使う（設計書6.28.7）。
@@ -605,7 +699,20 @@ export async function ensureConfigured(
   feature: AssignableFeature | "default"
 ): Promise<{ provider: AIProvider; model: string } | undefined> {
   const resolved = registry.resolve(feature);
-  if (resolved) return resolved;
+  if (resolved) {
+    // **ここがAI機能の入口である。** すべての機能がこれを最初に呼び、
+    // このあと `resolveModelInfo()` で本文の分割の大きさを決める。
+    // 読み込みをそれより前に置かないと、LM Studioが自分で読み込んだ
+    // 短い文脈（JIT）を基準に分割してしまう（作者の報告、2026-08-29）。
+    //
+    // 疎通確認（`features/aiConnectivity.ts`）ではここに置けない——
+    // あちらは `resolveModelInfo` が失敗したときにしか呼ばれず、
+    // 通常の経路では一度も通らない
+    if (resolved.provider.id === "lmstudio") {
+      if (!(await prepareLmStudioModel(resolved.model))) return undefined;
+    }
+    return resolved;
+  }
 
   const answer = await vscode.window.showInformationMessage(
     "AIがまだ設定されていません。設定しますか？",
@@ -614,6 +721,7 @@ export async function ensureConfigured(
   );
   if (answer !== "設定する") return undefined;
 
+  // ウィザードの中で読み込みまで済ませてある（`pickProviderAndModel`）
   const ok = await runSetupWizard(registry);
   return ok ? registry.resolve(feature) : undefined;
 }

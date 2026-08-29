@@ -66,6 +66,11 @@ export function describeProbeFailure(error: AIError): string {
   // 残高不足は原因がはっきりしているので、そのまま伝える。
   // 待っても回復しないので、再試行を促してはいけない
   if (error.kind === "insufficient_credit") return error.message;
+  // モデルを読み込めなかった場合も、AI側が理由（メモリがいくら足りないか）を
+  // 具体的に言っている。定型文で覆うと、その理由が作者に届かない
+  if (error.kind === "model_load_failed") {
+    return `${error.message}${recoveryForAIError(error)}`;
+  }
   return `モデルの一覧は取得できましたが、実際の生成に失敗しました。${recoveryForAIError(
     error
   )}（詳細はログを参照）`;

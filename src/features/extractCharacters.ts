@@ -927,11 +927,13 @@ export async function extractCharacters(
  * 原因がはっきりしていて、こちらで書いた説明をそのまま出すべき失敗か。
  *
  * 定型文だけでは何をすればよいか伝わらないものに限る。
- * プロバイダーの応答本文をそのまま出さないという方針は崩さない
- * （これらのメッセージはすべて拡張機能側で組み立てている）。
+ * メッセージの組み立ては拡張機能側が行う（プロバイダーの応答本文を
+ * そのまま流さない）。**ただしモデルの読み込み失敗だけは、AI側が言った
+ * 理由を引用して組み立てている**——「約44.87GB必要で、続けると固まる
+ * 見込みなので止めた」という数字は、こちらでは書けない。
  */
 function hasSpecificMessage(kind: AIError["kind"]): boolean {
-  return kind === "insufficient_credit";
+  return kind === "insufficient_credit" || kind === "model_load_failed";
 }
 
 function toExtractionFailure(
@@ -979,6 +981,7 @@ function toExtractionFailure(
     authentication_failed: "AIの認証に失敗しました。",
     permission_denied: "AIの利用権限がありません。",
     insufficient_credit: "AIサービスの残高が不足しています。",
+    model_load_failed: "AIがモデルを読み込めませんでした。",
     rate_limited: "AIのレート上限に達しました。",
     aborted: "AI処理が中断されました。",
     unknown: "AI処理で予期しないエラーが発生しました。",
@@ -1293,6 +1296,8 @@ function isFatalProviderFailure(kind: AIError["kind"]): boolean {
     kind === "permission_denied" ||
     // 待っても直らない。残りのチャンクを試すだけ無駄になる
     kind === "insufficient_credit" ||
+    // モデルが載らないのも同じ。実行中にLM Studio側で外れると起きる
+    kind === "model_load_failed" ||
     kind === "rate_limited";
 }
 

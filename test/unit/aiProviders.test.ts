@@ -1032,6 +1032,63 @@ describe("AIプロバイダ境界", () => {
       expect(models.map((m) => m.id)).toEqual([loadedModel.id]);
     });
 
+    test("読み込み状況と対応できる最大を、そのまま読み取れる", async () => {
+      // 拡張機能がモデルを読み込む（`lmstudioModelLoad.ts`）ために要る。
+      // 未読込かどうかと、どこまで指定できるかが分からないと決められない
+      stubLmStudio(
+        [loadedModel, notLoadedModel],
+        [loadedModel.id, notLoadedModel.id]
+      );
+      const provider = new LmStudioProvider();
+
+      expect(await provider.readModelLoadState(loadedModel.id)).toEqual({
+        loaded: true,
+        maxContextLength: 131072,
+        loadedContextLength: 131072,
+      });
+      expect(await provider.readModelLoadState(notLoadedModel.id)).toEqual({
+        loaded: false,
+        maxContextLength: 262144,
+        // 未読込には無い。**ここを埋めると、載ってもいない長さを実測と誤る**
+        loadedContextLength: undefined,
+      });
+    });
+
+    test("知らないモデルと、口の無い版では読み込み状況を返さない", async () => {
+      // 分からないまま読み込ませない（JITに任せる）
+      stubLmStudio([loadedModel], [loadedModel.id]);
+      expect(
+        await new LmStudioProvider().readModelLoadState("no/such-model")
+      ).toBeUndefined();
+
+      stubLmStudio(undefined, [loadedModel.id]);
+      expect(
+        await new LmStudioProvider().readModelLoadState(loadedModel.id)
+      ).toBeUndefined();
+    });
+
+    test("一覧には、対応できる最大と読み込み状況を添える", async () => {
+      // 表示を分けるために使う（`contextWindow` は分割に使う値なので変えない）
+      stubContextWindowSetting(8192);
+      stubLmStudio([notLoadedModel], [notLoadedModel.id]);
+
+      const models = await new LmStudioProvider().listModels();
+
+      expect(models[0].loaded).toBe(false);
+      expect(models[0].maxContextWindow).toBe(262144);
+      // 分割に使う値は、これまでどおり設定値のまま
+      expect(models[0].contextWindow).toBe(8192);
+    });
+
+    test("読み込み状況が取れない版では、未読込と断じない", async () => {
+      stubLmStudio(undefined, ["some-model-7b"]);
+
+      const models = await new LmStudioProvider().listModels();
+
+      expect(models[0].loaded).toBeUndefined();
+      expect(models[0].maxContextWindow).toBeUndefined();
+    });
+
     test("導入案内の初期値には、読み込み済みのうち短いほうを返す", async () => {
       // 設定値は全モデル共通の予備なので、長いほうに合わせると
       // 短いモデルを選んだときに入力が切り捨てられる
@@ -1043,6 +1100,73 @@ describe("AIプロバイダ境界", () => {
       stubLmStudio([loadedModel, shorter], [loadedModel.id, shorter.id]);
 
       expect(await new LmStudioProvider().readLoadedContextWindow()).toBe(8192);
+    });
+  });
+
+  /**
+   * モデルを読み込めなかったとき、LM Studioが言った理由をそのまま届ける
+   * （作者の依頼、2026-08-29）。
+   *
+   * これまではHTTP 400を `bad_response` に丸めており、通知は
+   * 「出力上限とモデル設定を確認してください」という**見当外れの案内**に
+   * なっていた。実際の原因はメモリ不足で、それはLM Studio自身が
+   * 具体的に言っている。
+   */
+  describe("LM Studioのモデル読み込み失敗", () => {
+    /** この機械で `google/gemma-4-12b-qat` を要求して実際に返った本文（2026-08-29） */
+    const loadFailureBody = {
+      error: {
+        message:
+          'Failed to load model "google/gemma-4-12b-qat". Error: Model loading was stopped due to insufficient system resources. Under the current settings, this model requires approximately 44.87 GB of memory, and continuing to load it would likely overload your system and cause it to freeze. If you think this is incorrect, you can adjust the model loading guardrails in settings.',
+        type: "invalid_request_error",
+        param: "model",
+        code: null,
+      },
+    };
+
+    const params = {
+      systemPrompt: "system",
+      userPrompt: "user",
+      model: "google/gemma-4-12b-qat",
+      temperature: 0.2,
+    };
+
+    test("読み込み失敗は専用の種別にし、理由をそのまま伝える", async () => {
+      const fetchMock = vi.fn(async () => jsonResponse(loadFailureBody, 400));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const error = await new LmStudioProvider()
+        .generate(params)
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(AIError);
+      const aiError = error as AIError;
+      expect(aiError.kind).toBe("model_load_failed");
+      // どのモデルで起きたのかが分からないと、選び直しようがない
+      expect(aiError.message).toContain("google/gemma-4-12b-qat");
+      expect(aiError.message).toContain("メモリ不足");
+      // LM Studioの説明（必要なメモリ量）を捨てない
+      expect(aiError.message).toContain("44.87 GB");
+      expect(aiError.detail).toContain("Failed to load model");
+
+      // 指定を外して出し直しても同じところで落ちる。1回で打ち切る
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("読み込み失敗でない400は、これまでどおり扱う", async () => {
+      // 何でも「モデルが載らない」と言い出さないことの確認
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          jsonResponse({ error: { message: "Invalid 'messages'." } }, 400)
+        )
+      );
+
+      const error = await new LmStudioProvider()
+        .generate(params)
+        .catch((e: unknown) => e);
+
+      expect((error as AIError).kind).toBe("bad_response");
     });
   });
 });

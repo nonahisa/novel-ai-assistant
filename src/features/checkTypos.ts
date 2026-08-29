@@ -684,6 +684,9 @@ function isFatalProviderFailure(kind: AIError["kind"]): boolean {
     kind === "authentication_failed" ||
     kind === "permission_denied" ||
     kind === "insufficient_credit" ||
+    // モデルが載らないのは待っても直らない。実行中にLM Studio側で
+    // モデルが外れると起きる（入口の読み込みを通り抜けた場合の備え）
+    kind === "model_load_failed" ||
     kind === "rate_limited"
   );
 }

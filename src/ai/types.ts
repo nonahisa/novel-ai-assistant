@@ -27,6 +27,21 @@ export interface ModelInfo {
    * 設定値がこれを超える場合に丸めるために使う。
    */
   maxOutputTokens?: number;
+  /**
+   * モデルが対応できる最大のコンテキスト長。**表示にだけ使う。**
+   *
+   * `contextWindow`（＝本文の分割に使う値）には入れない。まだ読み込んで
+   * いないモデルを実際より大きく見積もると、入力が黙って切り捨てられる。
+   * いまのところLM Studioだけが入れる（ほかは undefined のまま）。
+   */
+  maxContextWindow?: number;
+  /**
+   * いま読み込まれているか。分からなければ undefined。
+   *
+   * LM Studioは読み込んでいないモデルも一覧に返すため、
+   * 「これから読み込む」ことを選ぶ前に伝えたい。
+   */
+  loaded?: boolean;
 }
 
 export interface GenerateParams {
@@ -214,6 +229,15 @@ export class AIError extends Error {
        * レート上限と違って待っても回復せず、権限の問題とも直し方が違うので分ける。
        */
       | "insufficient_credit"
+      /**
+       * モデルを読み込めなかった。
+       *
+       * 手元で動くAI（LM Studio）で、要求したモデルがメモリに載らないときに
+       * 起きる。**理由はAI側が具体的に教えてくれる**（「約44.87GB必要で、
+       * 続けると固まる見込みなので止めた」など）ので、`bad_response` に
+       * 丸めずに分け、その説明をそのまま作者へ届ける。
+       */
+      | "model_load_failed"
       | "rate_limited"
       | "aborted"
       | "unknown",
@@ -251,6 +275,8 @@ export function recoveryForAIError(error: AIError): string {
       return "APIキーの利用権限または請求設定を確認してください。";
     case "insufficient_credit":
       return "利用しているAIサービスの請求画面で、クレジットを購入してください。";
+    case "model_load_failed":
+      return "より小さいモデルを選ぶか、LM Studioの設定でモデル読み込みの安全装置（guardrails）を確認してください。";
     case "rate_limited":
       return "しばらく待ってから、必要な場合に手動で再実行してください。";
     case "aborted":

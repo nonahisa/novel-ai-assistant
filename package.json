@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "「設定が前の話と食い違っていないか不安」「誤字脱字の見直しがつらい」「AIに原稿を触られたくない」——小説を書く人の困りごとを引き受けるVSCode拡張機能です。本文から設定資料を自動で作り、矛盾や誤字脱字を調べ、執筆量を記録します。AIは提案するだけで、原稿は書き換えません。無料の手元AI（Ollama / LM Studio）だけでも使え、その場合、原稿はパソコンの外へ出ません。",
-  "version": "0.25.4",
+  "version": "0.25.5",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -1259,6 +1259,17 @@
           "default": 180,
           "minimum": 10,
           "description": "LM Studioの1回の呼び出しのタイムアウト（秒）。手元のPCで動かすため、大きなモデルでは長めに必要です。"
+        },
+        "novelai.lmstudio.cliPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "LM Studio のコマンド（lms）の場所。空なら `~/.lmstudio/bin` と PATH を探します。"
+        },
+        "novelai.lmstudio.loadContextLength": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "拡張機能がモデルを読み込むときに指定する文脈の長さ。**0 ならモデルの最大**まで使います。大きいほどメモリを使います。"
         },
         "novelai.chunkSizeMode": {
           "type": "string",

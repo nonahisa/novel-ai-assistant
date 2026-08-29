@@ -3,20 +3,22 @@ import type {
   AIProvider,
   ConnectionTestResult,
 } from "../ai/types";
+import { lmstudioEndpoint } from "../ai/lmstudioProvider";
+import { canRunProcesses } from "../core/runtime";
 import { withProgress } from "../views/progress";
 
 /**
- * AIへの疎通確認と、ローカルOllamaの起動導線。
+ * AIへの疎通確認と、手元で動くAI（Ollama・LM Studio）の起動導線。
  *
  * 設定資料の抽出・誤字脱字検知など、AIを繰り返し呼ぶ機能で共通に使う。
  * 抽出機能側にあったものをそのまま切り出しただけで、中身は変えていない。
  *
- * **`ai/ollamaLauncher.ts` は動的importで持ってくる。** あちらは
- * `node:child_process` を静的importしているNode専用のファイルで、
- * このファイル自体はどのAIプロバイダでも通る道（`extractCharacters.ts`
- * 経由でブラウザ版にも必要）なので、静的importすると巻き込んでしまう
- * （設計書5.8.5）。呼ぶのはOllamaを選んでいるときだけなので、
- * ブラウザでは実際には呼ばれない。
+ * **`ai/ollamaLauncher.ts` と `ai/lmstudioLauncher.ts` は動的importで
+ * 持ってくる。** どちらも `node:child_process` を静的importしている
+ * Node専用のファイルで、このファイル自体はどのAIプロバイダでも通る道
+ * （`extractCharacters.ts` 経由でブラウザ版にも必要）なので、静的import
+ * すると巻き込んでしまう（設計書5.8.5）。呼ぶのはOllama・LM Studioを
+ * 選んでいるときだけなので、ブラウザでは実際には呼ばれない。
  */
 
 /**
@@ -48,15 +50,19 @@ export async function confirmProviderReachable(
       };
     }
 
+    // **LM Studioへのモデルの読み込みは、ここでは行わない。**
+    // AI機能の入口（`ai/registry.ts` の `ensureConfigured`）が
+    // 必ず先に通っており、そこで済んでいる。同じことを2か所でやると、
+    // 片方だけ直したときに食い違う
     if (result.ok) return true;
 
-    // ローカルのOllamaなら、この場から起動できる
-    const canStart =
-      provider.id === "ollama" && (await isLocalOllamaEndpoint());
+    // 手元で動くAIなら、この場から起動できる。別マシンを指しているときと
+    // ブラウザ版では、押しても必ず失敗するので選択肢自体を出さない
+    const startLabel = await localStartLabel(provider.id);
 
     const action = await vscode.window.showWarningMessage(
       `AIに接続できないため、${actionLabel}を開始できません。\n${result.message}`,
-      ...(canStart ? ["Ollamaを起動"] : []),
+      ...(startLabel ? [startLabel] : []),
       "再試行",
       "設定を開く",
       "中止"
@@ -64,6 +70,11 @@ export async function confirmProviderReachable(
 
     if (action === "Ollamaを起動") {
       const started = await startOllamaWithProgress();
+      if (!started) continue; // 失敗理由は起動側で通知済み。再度この警告へ戻る
+      continue; // 起動できたので疎通を確認し直す
+    }
+    if (action === "LM Studioを起動") {
+      const started = await startLmStudioWithProgress();
       if (!started) continue; // 失敗理由は起動側で通知済み。再度この警告へ戻る
       continue; // 起動できたので疎通を確認し直す
     }
@@ -78,6 +89,25 @@ export async function confirmProviderReachable(
   }
 }
 
+/**
+ * この場から起動できるなら、そのボタンの文言。できなければ undefined。
+ *
+ * **サービス名を決め打ちしない。** 使っているのがLM Studioなのに
+ * 「Ollamaを起動」と出ては、押しても何も起きない
+ * （Geminiを使っているのに「Claudeの…」と出た不具合と同じ形）。
+ */
+async function localStartLabel(
+  providerId: string
+): Promise<string | undefined> {
+  if (providerId === "ollama") {
+    return (await isLocalOllamaEndpoint()) ? "Ollamaを起動" : undefined;
+  }
+  if (providerId === "lmstudio") {
+    return (await isLocalLmStudioEndpoint()) ? "LM Studioを起動" : undefined;
+  }
+  return undefined;
+}
+
 export function ollamaEndpoint(): string {
   return vscode.workspace
     .getConfiguration("novelai")
@@ -87,6 +117,56 @@ export function ollamaEndpoint(): string {
 export async function isLocalOllamaEndpoint(): Promise<boolean> {
   const { isLocalEndpoint } = await import("../ai/ollamaLauncher.js");
   return isLocalEndpoint(ollamaEndpoint());
+}
+
+export async function isLocalLmStudioEndpoint(): Promise<boolean> {
+  // ブラウザ版では外部プロセスを起こせない。Node専用のファイルを
+  // 読み込む前に確かめる（読み込んだ時点で落ちるため）
+  if (!canRunProcesses()) return false;
+  const { isLocalEndpoint } = await import("../ai/lmstudioLauncher.js");
+  return isLocalEndpoint(lmstudioEndpoint());
+}
+
+/** LM Studioのサーバーを起動し、応答するまで進捗を出しながら待つ */
+export async function startLmStudioWithProgress(): Promise<boolean> {
+  const { describeStartFailure, startLmStudioServer } = await import(
+    "../ai/lmstudioLauncher.js"
+  );
+  const outcome = await withProgress(
+    "LM Studioのサーバーを起動しています…",
+    () =>
+      startLmStudioServer({
+        endpoint: lmstudioEndpoint(),
+        cliPath: vscode.workspace
+          .getConfiguration("novelai")
+          .get<string>("lmstudio.cliPath", ""),
+      })
+  );
+
+  if (outcome.ok) {
+    vscode.window.showInformationMessage("LM Studioのサーバーを起動しました。");
+    return true;
+  }
+
+  // コマンドが見つからないときは、場所を指定できる場所まで連れて行く。
+  // 「設定で指定してください」と言うだけでは、どこにあるのか分からない
+  if (outcome.reason === "not_installed") {
+    const action = await vscode.window.showWarningMessage(
+      describeStartFailure(outcome),
+      "設定を開く",
+      "閉じる"
+    );
+    if (action === "設定を開く") {
+      await vscode.commands.executeCommand(
+        "workbench.action.openSettings",
+        "novelai.lmstudio.cliPath"
+      );
+    }
+    return false;
+  }
+
+  await vscode.window.showWarningMessage(describeStartFailure(outcome));
+  return false;
 }
 
 /** Ollamaを起動し、応答するまで進捗を出しながら待つ */

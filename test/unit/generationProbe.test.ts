@@ -73,6 +73,30 @@ describe("生成できるかの確認", () => {
     expect(result.error?.kind).toBe("insufficient_credit");
   });
 
+  test("モデルを読み込めなかった理由は、定型文で覆わない", async () => {
+    // 「一覧は取得できましたが、実際の生成に失敗しました」で始めると、
+    // AI側が言っている具体的な理由（メモリがいくら足りないか）が
+    // 後ろへ押しやられる。原因が分かっているものに定型文は要らない
+    const result = await probeGeneration(
+      provider(async () => {
+        throw new AIError(
+          "LM Studio がモデル「google/gemma-4-12b-qat」を読み込めませんでした。" +
+            "メモリ不足の見込みで読み込みを止めました（LM Studio の安全装置）。",
+          "model_load_failed"
+        );
+      }),
+      "google/gemma-4-12b-qat"
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("google/gemma-4-12b-qat");
+    expect(result.message).toContain("メモリ不足");
+    expect(result.message).not.toContain("モデルの一覧は取得できましたが");
+    // 次に何をすればよいかは添える
+    expect(result.message).toContain("より小さいモデル");
+    expect(result.error?.kind).toBe("model_load_failed");
+  });
+
   test("それ以外の失敗は、一覧は引けたことを添えて伝える", async () => {
     const result = await probeGeneration(
       provider(async () => {

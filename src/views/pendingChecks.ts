@@ -276,6 +276,18 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 1,
   },
   {
+    id: "F-39",
+    title: "ダッシュの混在と、組んで書く面の隙間",
+    commands: ["novelai.checkTypos", "novelai.openVertical"],
+    count: 4,
+  },
+  {
+    id: "F-38",
+    title: "LM Studio の起動と、モデルの読み込み",
+    commands: ["novelai.testAI", "novelai.setupLmStudio", "novelai.setupAI"],
+    count: 7,
+  },
+  {
     id: "F-37",
     title: "矛盾検知の検証段の進み表示",
     commands: ["novelai.checkContradictions"],
@@ -410,4 +422,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 512;
+export const PENDING_CHECK_TOTAL = 523;

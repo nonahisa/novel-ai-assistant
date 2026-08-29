@@ -1,5 +1,13 @@
 import * as vscode from "vscode";
-import { LmStudioProvider } from "../ai/lmstudioProvider";
+// 接続先の読み方はプロバイダ側の1つに寄せる。写すと、起動したポートと
+// 話しかけるポートが食い違う
+import { LmStudioProvider, lmstudioEndpoint } from "../ai/lmstudioProvider";
+import {
+  describeStartFailure,
+  isLocalEndpoint,
+  resolveCli,
+  startLmStudioServer,
+} from "../ai/lmstudioLauncher";
 import { AIRegistry, runSetupWizard } from "../ai/registry";
 import {
   detectPackageManager,
@@ -23,12 +31,17 @@ import { withCancellableProgress, withProgress } from "../views/progress";
  * `setupOllama.ts` を持っていた。**足りないものを1つずつ、順に案内する**
  * という組み立てはOllamaと同じにしてある。
  *
- * ## Ollamaと決定的に違うところ——こちらからは起動できない
+ * ## サーバーの開始は、こちらから行える
  *
- * Ollamaは実行ファイルを持つので拡張機能から起こせるが、**LM StudioはGUIの
- * アプリで、サーバーの開始もモデルの読み込みも画面の操作でしか行えない。**
- * 自動化できるふりをしない。**案内して、作者が操作したあとに確かめ直す**
- * （「もう一度確かめる」で①へ戻る輪）。
+ * **2026-08-29に前提を改めた。** ここには「LM StudioはGUIのアプリなので、
+ * サーバーの開始も画面の操作でしか行えない」と書いてあったが、**LM Studioは
+ * `lms` というCLIを同梱しており、`lms server start` で開始できる**
+ * （作者の依頼：「LMスタジオの起動をOllamaと同じ形でお願いします」）。
+ * まず自分で起こしてみて、`lms` が見つからないときだけ案内に戻る。
+ *
+ * それでも**案内の輪は残す。** CLIを有効にしていない機械もあり、
+ * モデルの取得はやはり画面の操作でしか行えない。作者が操作したあとに
+ * 確かめ直せる道（「もう一度確かめる」で①へ戻る輪）は要る。
  *
  * ## モデル名を薦めない
  *
@@ -58,28 +71,32 @@ export async function setupLmStudio(registry: AIRegistry): Promise<void> {
     );
 
     if (!connection.ok) {
-      if (!offeredInstall) {
+      // ② まず自分で起こしてみる。`lms` があれば、作者に画面を触らせずに済む
+      const attempt = await tryStartServer();
+      if (attempt === "started") continue;
+
+      // ③ `lms` が無いなら、そもそも入っていない見込みが高い。
+      // 起動できたのに繋がらない場合（"failed"）は入れ直しの話ではないので、
+      // 導入は勧めずに手順の案内だけを出す
+      if (attempt !== "failed" && !offeredInstall) {
         offeredInstall = true;
-        // ② 入っていないのか、起動していないだけなのかは**こちらからは
-        // 見分けられない**（LM Studioは実行ファイルの場所が決まっていない）。
-        // 両方の道を並べて、作者に選んでもらう
         if (!(await offerInstall())) return;
       }
-      // ③ 起動・サーバー開始・モデル読み込みの案内
+      // ④ 起動・サーバー開始・モデル読み込みの案内
       if (!(await guideStartServer())) return;
       continue;
     }
 
-    // ④ 繋がったが、モデルが読み込まれていない
+    // ⑤ 繋がったが、モデルが読み込まれていない
     if ((connection.modelCount ?? 0) === 0) {
       if (!(await guideLoadModel())) return;
       continue;
     }
 
-    // ⑤ コンテキスト長を合わせる
+    // ⑥ コンテキスト長を合わせる
     await askContextWindow(provider);
 
-    // ⑥ 使うAIとして選ぶ
+    // ⑦ 使うAIとして選ぶ
     const action = await vscode.window.showInformationMessage(
       `${connection.message} このままLM Studioを使う設定にしますか？`,
       "設定する",
@@ -90,6 +107,51 @@ export async function setupLmStudio(registry: AIRegistry): Promise<void> {
     }
     return;
   }
+}
+
+/**
+ * サーバーを自分で起こしてみた結果。
+ *
+ * `not_installed` と `unavailable` を分けているのは**次に勧めるものが違う**
+ * ため——前者は「入れる」、後者（ブラウザ版・別マシンを指しているとき）は
+ * 入れても解決しない。ただしどちらも「起動できたのに繋がらない」ではないので、
+ * 呼び出し側では同じ扱いになる。
+ */
+type StartAttempt = "started" | "not_installed" | "failed" | "unavailable";
+
+/**
+ * `lms server start` でサーバーを起こしてみる。
+ *
+ * **勝手には起こさない**という方針は崩していない。ここは作者が
+ * 「LM Studioのセットアップ」を選んで始めた案内の中である。
+ */
+async function tryStartServer(): Promise<StartAttempt> {
+  const endpoint = lmstudioEndpoint();
+  // ブラウザ版では外部プロセスを起こせない。別マシンのLM Studioも
+  // こちらからは起こせないので、試みるだけ無駄になる
+  if (!canRunProcesses() || !isLocalEndpoint(endpoint)) return "unavailable";
+
+  const cliPath = vscode.workspace
+    .getConfiguration("novelai")
+    .get<string>("lmstudio.cliPath", "");
+
+  // **先に有無だけ確かめる。** ここを飛ばすと、`lms` が無い機械では
+  // 輪を回るたびに「起動しています…」が一瞬出ては消える。
+  // 何も起きていないのに動いたように見せない
+  if (!(await resolveCli(cliPath))) return "not_installed";
+
+  const outcome = await withProgress(
+    "LM Studioのサーバーを起動しています…",
+    () => startLmStudioServer({ endpoint, cliPath })
+  );
+
+  if (outcome.ok) return "started";
+  // `lms` が無いことは、このあとの導入の勧めが同じことを言う。
+  // ここで通知すると、同じ話を2枚続けて出すことになる
+  if (outcome.reason === "not_installed") return "not_installed";
+
+  vscode.window.showWarningMessage(describeStartFailure(outcome));
+  return "failed";
 }
 
 /**
@@ -164,7 +226,11 @@ async function guideStartServer(): Promise<boolean> {
   const action = await vscode.window.showInformationMessage(
     "LM Studioを起動し、左の「Developer」からローカルサーバーを開始してください。" +
       "そのうえで、使いたいモデルを読み込みます。" +
-      "できたら「もう一度確かめる」を押してください。",
+      "できたら「もう一度確かめる」を押してください。" +
+      // CLIを有効にしておけば、次からはここまで来ずに済むことを伝える。
+      // 一度きりの操作で、以後の手間がなくなる
+      "（LM Studioの設定でCLI（lms）を有効にしておくと、" +
+      "次からはこの画面から起動できます。）",
     retry,
     "閉じる"
   );
