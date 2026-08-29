@@ -294,14 +294,19 @@ export function recoveryForAIError(error: AIError): string {
       return "APIキーの利用権限または請求設定を確認してください。";
     case "insufficient_credit":
       return "利用しているAIサービスの請求画面で、クレジットを購入してください。";
-    // **設定の名前まで出す。** 「小さいモデルを選べ」だけでは、いま使いたい
-    // モデルを諦めるほかに手が無いように見える。実際には文脈を短くすれば
-    // 載ることが多い（`lmstudioLauncher.ts` の `LOAD_CONTEXT_SETTING_HINT`
-    // と同じ文言。**片方だけ直さないこと**）
+    // **「小さいモデルを選べ」だけにしない。** いま使いたいモデルを諦める
+    // ほかに手が無いように見えるが、実際には文脈を短くすれば載ることが多い。
+    //
+    // **サービス名は書かない。** 以前はLM Studio決め打ちで、設定名まで
+    // 出していた。Ollamaも同じ種別を返すようになり（作者の報告、2026-08-30。
+    // 19GBのモデルで `error loading model`）、Ollamaを使っているのに
+    // 「LM Studioの設定で…」と出る状態だった。サービスごとの具体策は、
+    // 投げる側が `message` に添える（LM Studio は
+    // `lmstudioLauncher.ts` の `LOAD_CONTEXT_SETTING_HINT`）
     case "model_load_failed":
       return (
-        "より小さいモデルを選ぶか、LM Studioの設定でモデル読み込みの安全装置（guardrails）を確認してください。" +
-        "読み込む文脈の長さは設定 novelai.lmstudio.loadContextLength で小さくできます。"
+        "より小さいモデルを選ぶか、読み込むときの文脈の長さを短くしてください。" +
+        "ほかのアプリを閉じてメモリを空けると載ることもあります。"
       );
     // 直せる手が3つある（本文の量・モデル・資料の量）ので、全部並べる。
     // どれも作者が自分で操作できるものである

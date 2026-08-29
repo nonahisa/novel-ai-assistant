@@ -38,6 +38,31 @@ interface TagsResponse {
 }
 
 /**
+ * その応答が「モデルを載せられなかった」ものか。
+ *
+ * 作者の報告（2026-08-30）：19GBの `gemma4:26b` で読める長さを測ろうとして
+ * HTTP 500 と
+ * `llama-server process has terminated: … failed to initialize the context: …
+ * error loading model: vector` が返り、`bad_response` に丸められた結果、
+ * 「出力上限とモデル設定を確認してください」という的外れな案内が出た。
+ * 実際に要るのは「小さいモデルにする・文脈を短くする・メモリを空ける」である。
+ *
+ * **見るのは「読み込みに失敗した」と名指ししている定型文だけ**にする。
+ * 原因（メモリ・壊れた重み・非対応）まで当てにいかない（CLAUDE.md 規則5）。
+ * 詳しい理由はOllamaが本文に書いてくるので、`detail` に載せてログへ流す。
+ */
+export function isModelLoadFailure(detail: string): boolean {
+  return [
+    /error loading model/i,
+    /failed to initialize the context/i,
+    /llama_init_from_model/i,
+    /llama-server process has terminated/i,
+    /unable to load model/i,
+    /requires more system memory/i,
+  ].some((pattern) => pattern.test(detail));
+}
+
+/**
  * 生成に使えるモデルか。**埋め込み用のモデルを一覧に出さない**
  * （作者の報告「bge-m3 が出るが選んでも使えない」2026-08-30）。
  *
@@ -389,6 +414,15 @@ export class OllamaProvider implements AIProvider {
         const detail = await response.text().catch(() => "");
         if (response.status === 404) {
           throw new AIError("モデルが見つかりません。", "model_not_found", detail);
+        }
+        // **モデルを載せられなかったのは「応答の形が悪い」ではない。**
+        // 直し方（小さいモデル・短い文脈・メモリを空ける）がまるで違う
+        if (isModelLoadFailure(detail)) {
+          throw new AIError(
+            "Ollamaがモデルを読み込めませんでした。",
+            "model_load_failed",
+            detail.slice(0, 500)
+          );
         }
         throw new AIError(
           `Ollamaがエラーを返しました (HTTP ${response.status})`,

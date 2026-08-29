@@ -23,6 +23,7 @@ import {
 import { notationModeFor } from "../core/manuscriptRender";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import { revealFolder } from "../views/openDocument";
+import { openInDefaultApp } from "../core/openExternalFile";
 import { logFailure } from "../core/logger";
 
 /**
@@ -125,7 +126,7 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
 
   // `.html` は既定のブラウザに関連づいている。VS Code の中で開くと
   // 印刷（Ctrl+P）が使えないので、外のブラウザへ渡す
-  await vscode.env.openExternal(path.toUri(target));
+  const opened = await openInDefaultApp(target);
 
   const droppedNote =
     conflicted.length > 0
@@ -133,6 +134,22 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
           "、"
         )}）。`
       : "";
+
+  // **開けたかどうかで案内を変える。** 以前は戻り値を見ずに
+  // 「ブラウザで開きました」と告げており、VS Codeがエラーダイアログを
+  // 出しているのに成功したことになっていた（作者の報告、2026-08-30）
+  if (!opened) {
+    logFailure("印刷用HTMLをブラウザで開く", { 作品: work.title, 場所: target });
+    const action = await vscode.window.showWarningMessage(
+      "印刷用のファイルは作りましたが、ブラウザを開けませんでした。" +
+        "フォルダーの中の .html をダブルクリックすると開きます。" +
+        "開いたら印刷（Ctrl+P）で送信先を「PDFに保存」にしてください。" +
+        droppedNote,
+      "フォルダーを開く"
+    );
+    if (action === "フォルダーを開く") await revealFolder(target);
+    return;
+  }
 
   const action = await vscode.window.showInformationMessage(
     "ブラウザで開きました。印刷（Ctrl+P）で送信先を「PDFに保存」にするとPDFになります。" +
