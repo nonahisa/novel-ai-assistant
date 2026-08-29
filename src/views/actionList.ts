@@ -1012,6 +1012,19 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.openRelationGraph",
+            label: "人物相関図",
+            icon: "type-hierarchy",
+            requiresWork: true,
+            // 材料は抽出済みの関係・呼称・所属で、AIは呼ばない
+            detail:
+              "登場人物のつながりを図にします。作品全体を円で見る図と、" +
+              "1人を中心に見る図の2種類があります（設定資料の人物詳細に" +
+              "ある「相関図」からは、その人を中心に開きます）。" +
+              "AIは使いません。抽出済みの関係・呼称・所属だけで描きます。",
+          },
+          {
+            kind: "action",
             command: "novelai.openSynopsisDocs",
             label: "紹介文・あらすじを閲覧",
             icon: "preview",

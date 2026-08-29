@@ -276,6 +276,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 1,
   },
   {
+    id: "F-43",
+    title: "人物相関図",
+    commands: ["novelai.openRelationGraph", "novelai.openSettingsPanel"],
+    count: 9,
+  },
+  {
     id: "F-42",
     title: "生成した文書の実ファイル化と自動掃除",
     commands: ["novelai.resumeWriting", "novelai.openManual", "novelai.checkOpening"],
@@ -440,4 +446,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 543;
+export const PENDING_CHECK_TOTAL = 552;

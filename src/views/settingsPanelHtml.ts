@@ -904,6 +904,27 @@ button.danger:hover {
       }
     }
 
+    /*
+      人物には相関図への入口を置く（設計書6.38.3、作者の指示）。
+
+      この人の周りに誰が居るかを見たくなるのは、その人の資料を開いて
+      いるときである。メニューまで戻らせない。押すと、その人を中心にした
+      図が開く（既に相関図を開いていれば、中心だけ切り替わる）。
+    */
+    if (detail.kind === "character") {
+      const graphRow = document.createElement("div");
+      graphRow.className = "row";
+      const graphButton = document.createElement("button");
+      graphButton.type = "button";
+      graphButton.textContent = "相関図";
+      graphButton.title = detail.name + " を中心にした人物相関図を開きます";
+      graphButton.addEventListener("click", function () {
+        post("relationGraph", { kind: detail.kind, id: detail.id });
+      });
+      graphRow.appendChild(graphButton);
+      el.detail.appendChild(graphRow);
+    }
+
     // ── 作者による書き換え
     el.detail.appendChild(heading("設定を書き換える"));
     const inputs = {};

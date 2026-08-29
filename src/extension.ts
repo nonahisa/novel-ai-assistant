@@ -45,8 +45,10 @@ import {
 import {
   findOpenSettingsPanel,
   openSettingsPanel,
+  setRelationGraphOpener,
   setSettingsChangeObserver,
 } from "./features/settingsPanel";
+import { openRelationGraph } from "./features/relationGraphPanel";
 import { unifyCharacterRecords } from "./features/unifyCharacters";
 import { findMergeCandidates } from "./core/characterMerge";
 import { CharacterStore } from "./core/characterStore";
@@ -782,6 +784,36 @@ export async function activate(
   });
   context.subscriptions.push({
     dispose: () => setSettingsChangeObserver(undefined),
+  });
+
+  /**
+   * 人物相関図の入口（設計書6.38）。
+   *
+   * 2つのパネルは互いを開く（設定資料の人物詳細から相関図へ、相関図から
+   * 設定資料へ）。どちらかがもう一方を読み込むと輪になるので、繋ぐのは
+   * ここだけにしてある。
+   */
+  const showRelationGraph = async (
+    work: WorkEntry,
+    characterId?: string
+  ): Promise<void> => {
+    await openRelationGraph(
+      context,
+      work,
+      {
+        openSettingsRecord: async (target, id) => {
+          const panel = await openSettingsPanel(context, target, aiRegistry);
+          await panel.showRecord("character", id);
+        },
+      },
+      characterId ? { characterId } : {}
+    );
+  };
+  setRelationGraphOpener((work, characterId) =>
+    showRelationGraph(work, characterId)
+  );
+  context.subscriptions.push({
+    dispose: () => setRelationGraphOpener(undefined),
   });
 
   // 提案パネル（下段・出力やデバッグコンソールと同じ場所）。
@@ -2378,6 +2410,19 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         await openSettingsPanel(context, work, aiRegistry);
+      }
+    )
+  );
+
+  // 人物相関図（設計書6.38）。引数に人物を取れる——設定資料パネルの
+  // 「相関図」は、この道を通ってその人を中心に開く
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.openRelationGraph",
+      async (node?: WorkNode, characterId?: string) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await showRelationGraph(work, characterId);
       }
     )
   );

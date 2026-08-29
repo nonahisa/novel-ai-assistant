@@ -303,6 +303,25 @@ export function setSettingsChangeObserver(
   changeObserver = observer;
 }
 
+/**
+ * 人物詳細の「相関図」を押されたときに呼ぶ口（設計書6.38.3）。
+ *
+ * 相関図パネルをここから直に読み込まない。相関図の側にも
+ * 「設定資料を開く」があり、互いに読み合う輪になる。`changeObserver` と
+ * 同じ形にして、繋ぐのは `extension.ts` の仕事にしてある。
+ */
+let relationGraphOpener:
+  | ((work: WorkEntry, characterId: string) => Promise<void>)
+  | undefined;
+
+export function setRelationGraphOpener(
+  opener:
+    | ((work: WorkEntry, characterId: string) => Promise<void>)
+    | undefined
+): void {
+  relationGraphOpener = opener;
+}
+
 export class SettingsPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly characterStore: CharacterStore;
@@ -919,11 +938,31 @@ export class SettingsPanel {
         case "applyRuby":
           await this.handleApplyRuby();
           return;
+        case "relationGraph":
+          await this.handleRelationGraph(message.id);
+          return;
       }
     } catch (error) {
       this.setBusy(false);
       this.post({ type: "error", message: describeError(error) });
     }
+  }
+
+  /**
+   * その人物を中心にした相関図を開く（設計書6.38.3）。
+   *
+   * 押しても何も起きないのがいちばん困るので、繋がっていなければ
+   * そう言う（黙って終わらない）。
+   */
+  private async handleRelationGraph(id: string): Promise<void> {
+    if (!relationGraphOpener) {
+      void vscode.window.showInformationMessage(
+        "人物相関図を開けませんでした。詳細メニューの" +
+          "「資料管理 → 設定資料閲覧 → 人物相関図」からお試しください。"
+      );
+      return;
+    }
+    await relationGraphOpener(this.work, id);
   }
 
   /**
@@ -2252,6 +2291,8 @@ type PanelMessage =
   | { type: "separate"; kind: SettingsKind; id: string; alias: string }
   /** 資料の読み仮名を、本文のルビとして振る（設計書6.12.5） */
   | { type: "applyRuby" }
+  /** その人物を中心にした人物相関図を開く（設計書6.38.3） */
+  | { type: "relationGraph"; kind: SettingsKind; id: string }
   | {
       type: "promoteConflict";
       kind: SettingsKind;
