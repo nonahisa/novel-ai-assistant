@@ -68,7 +68,11 @@ export async function generateWorkBlurb(
 
   const response = await withCancellableProgress(
     "作品紹介文を作っています",
-    async () => {
+    async (_progress, token) => {
+      // **中止ボタンをAIまで届かせる。** 受け取らないと、ボタンは出るのに
+      // 押しても何も起きない（有料AIでは課金が続く）。0.28.3
+      const controller = new AbortController();
+      token.onCancellationRequested(() => controller.abort());
       try {
         return await resolved.provider.generate({
           systemPrompt: BLURB_SYSTEM_PROMPT,
@@ -83,6 +87,7 @@ export async function generateWorkBlurb(
           temperature: 0.5,
           jsonSchema: BLURB_SCHEMA as unknown as object,
           disableThinking: true,
+          signal: controller.signal,
           meta: { feature: "blurb", workFolder: work.folderPath },
         });
       } catch (error) {
@@ -164,7 +169,10 @@ export async function generateCatchphrases(
     const rejected = await history.load();
     const response = await withCancellableProgress(
       "キャッチコピーを考えています",
-      async () => {
+      async (_progress, token) => {
+        // 中止ボタンをAIまで届かせる（0.28.3）
+        const controller = new AbortController();
+        token.onCancellationRequested(() => controller.abort());
         try {
           return await resolved.provider.generate({
             systemPrompt: BLURB_SYSTEM_PROMPT,
@@ -181,6 +189,7 @@ export async function generateCatchphrases(
             meta: { feature: "catchphrase", workFolder: work.folderPath },
             jsonSchema: CATCHPHRASE_SCHEMA as unknown as object,
             disableThinking: true,
+            signal: controller.signal,
           });
         } catch (error) {
           reportAIError("キャッチコピーの生成", error);

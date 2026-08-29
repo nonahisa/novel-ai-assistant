@@ -147,6 +147,12 @@ export async function generateSynopses(
           message: `${done + 1}/${pending.length} ${episodeBodyLabel(episode)}`,
         });
 
+        // **話と話の間だけでなく、1話の途中でも止まるようにする。**
+        // 1話ぶんの呼び出しに数十秒かかるので、上のループ先頭の判定だけ
+        // では「押したのにその話が終わるまで止まらない」ことになる（0.28.3）
+        const controller = new AbortController();
+        token.onCancellationRequested(() => controller.abort());
+
         try {
           const response = await resolved.provider.generate({
             systemPrompt: SYNOPSIS_SYSTEM_PROMPT,
@@ -162,6 +168,7 @@ export async function generateSynopses(
             temperature: 0.3,
             jsonSchema: SYNOPSIS_SCHEMA as unknown as object,
             disableThinking: true,
+            signal: controller.signal,
             meta: { feature: "synopsis", workFolder: work.folderPath },
           });
 

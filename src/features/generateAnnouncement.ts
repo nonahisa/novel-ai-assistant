@@ -111,7 +111,11 @@ export async function generateAnnouncement(
 
   const response = await withCancellableProgress(
     "更新告知文を作っています",
-    async () => {
+    async (_progress, token) => {
+      // **中止ボタンをAIまで届かせる。** 受け取らないと、ボタンは出るのに
+      // 押しても何も起きない（有料AIでは課金が続く）。0.28.3
+      const controller = new AbortController();
+      token.onCancellationRequested(() => controller.abort());
       try {
         return await resolved.provider.generate({
           systemPrompt: ANNOUNCE_SYSTEM_PROMPT,
@@ -121,6 +125,7 @@ export async function generateAnnouncement(
           temperature: 0.5,
           jsonSchema: ANNOUNCE_SCHEMA as unknown as object,
           disableThinking: true,
+          signal: controller.signal,
           meta: { feature: "announce", workFolder: work.folderPath },
         });
       } catch (error) {
