@@ -85,7 +85,7 @@ import {
   ensureConfigured,
   type AssignableFeature,
 } from "../ai/registry";
-import { confirmPaidUsage } from "./aiConnectivity";
+import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { prepareRetrieval, search, type RetrievalContext } from "./vectorSearch";
 import {
   buildSearchQuery,
@@ -1907,6 +1907,33 @@ export class SettingsPanel {
   ): Promise<string | undefined> {
     const resolved = await ensureConfigured(this.registry, feature);
     if (!resolved) return undefined;
+
+    /*
+      **繋がるかを、費用の確認より先に確かめる**（設計書6.51）。
+      繋がらないと分かっているのに料金の話をしても意味がない。
+
+      置くのは**この共通の口**である。相談（`chat`）も「AIで再読込」
+      （`extract`）もここへ集まるので、1か所で両方を賄える。
+      **`expandSearchTerms` には入れない**——検索語づくりは相談1回に
+      付随する下ごしらえで、失敗しても質問文そのままで検索を続ける作りに
+      なっており、独立した確認の対象にしていない（中止の配線と同じ扱い）。
+
+      名前を機能で分けるのは、押したボタンと違うことを言わないため。
+      「AIで再読込」を押したのに「設定資料の相談を開始できません」と
+      出ては、何の話か分からない。
+
+      モデル名を渡すのは、LM Studioをこの場から起こしたときの読み込みに
+      要るため（`aiConnectivity.ts`）。
+    */
+    if (
+      !(await confirmProviderReachable(
+        resolved.provider,
+        feature === "extract" ? "設定資料の読み直し" : "設定資料の相談",
+        resolved.model
+      ))
+    ) {
+      return undefined;
+    }
 
     // 有料のAIは呼ぶたびに課金される。**このパネルを開いている間に一度だけ
     // 確認を取る。** 相談も項目の充実も何度も押すものなので、毎回モーダルを

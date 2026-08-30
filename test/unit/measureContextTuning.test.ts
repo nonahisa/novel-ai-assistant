@@ -63,6 +63,9 @@ vi.mock("../../src/ai/registry", () => ({
 
 vi.mock("../../src/features/aiConnectivity", () => ({
   confirmPaidUsage: vi.fn(async () => true),
+  // 疎通の確認は通ったものとして先へ進める（設計書6.51）。
+  // ここで測っているのは待ち時間の台帳への書き込みであって、接続ではない
+  confirmProviderReachable: vi.fn(async () => true),
 }));
 
 vi.mock("../../src/views/progress", () => ({

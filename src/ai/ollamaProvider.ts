@@ -305,6 +305,16 @@ export class OllamaProvider implements AIProvider {
           UNKNOWN_CONTEXT_WINDOW,
       });
 
+    // **どの長さで確保したかを残す。** これが記録に無かったせいで、
+    // 「抽出中にコンソールが一瞬ずつ何度も出る」という報告（2026-08-30）の
+    // 原因——`num_ctx` がチャンクごとに変わってモデルが読み込み直されていた
+    // ——を、ログからは追えなかった（設計書6.52）
+    logLine(
+      `Ollama：num_ctx ${numCtx}（${params.model} / 送信 ${
+        params.systemPrompt.length + params.userPrompt.length
+      }字）`
+    );
+
     const body: Record<string, unknown> = {
       model: params.model,
       stream: false,

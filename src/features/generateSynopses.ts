@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
+import { confirmProviderReachable } from "./aiConnectivity";
 import { AIError, recoveryForAIError } from "../ai/types";
 import { scanWork } from "../core/scanner";
 import {
@@ -106,6 +107,22 @@ export async function generateSynopses(
       "すべての話のあらすじが最新です。本文を変えた話だけを作り直します。"
     );
     return true;
+  }
+
+  // **繋がるかを、費用の確認より先に確かめる**（設計書6.51）。
+  // 繋がらないと分かっているのに料金の話をしても意味がない。
+  // 置くのは「作り直しが要る話が1つも無い」で抜けたあと——
+  // AIを1度も呼ばない回に起動を促しても、作者を迷わせるだけである
+  // （`checkTypos.ts` が `pending.length > 0` のときだけ呼ぶのと同じ）。
+  // モデル名を渡すのは、LM Studioをこの場から起こしたときの読み込みに要るため
+  if (
+    !(await confirmProviderReachable(
+      resolved.provider,
+      "各話あらすじの作成",
+      resolved.model
+    ))
+  ) {
+    return false;
   }
 
   const estimateMinutes = Math.ceil((pending.length * 15) / 60);

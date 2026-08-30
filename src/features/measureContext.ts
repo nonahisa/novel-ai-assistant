@@ -32,7 +32,7 @@ import {
   type ModelTuning,
 } from "../core/modelTuning";
 import { withCancellableProgress } from "../views/progress";
-import { confirmPaidUsage } from "./aiConnectivity";
+import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 
 /**
  * AIチューニング（設計書6.27.11・6.49）。
@@ -217,6 +217,31 @@ async function runMeasurement(
 ): Promise<void> {
   const resolved = await ensureConfigured(registry, feature);
   if (!resolved) return;
+
+  /*
+    **繋がるかを、いちばん先に確かめる**（設計書6.51）。
+
+    ここは「AIが止まっている」に最初にぶつかる機能である——時間切れの通知
+    から誘われて押した作者が、「Ollamaに接続できません」とだけ言われて
+    起動する手立てが無かった（作者の報告、2026-08-30）。
+
+    置くのは `resolveModelInfo` より前。止まったままでは申告値も取れず、
+    測れる上限を実際より小さく見積もったまま先へ進んでしまう。
+    費用の確認より前でもある——繋がらないと分かっているのに
+    料金の話をしても意味がない。
+
+    モデル名を渡す。LM Studioをこの場から起こしたとき、起こした直後に
+    読み込ませるために要る（`aiConnectivity.ts`）。
+  */
+  if (
+    !(await confirmProviderReachable(
+      resolved.provider,
+      "AIチューニング",
+      resolved.model
+    ))
+  ) {
+    return;
+  }
 
   const modelInfo = await registry.resolveModelInfo(feature);
   const declaredTokens = modelInfo?.contextWindow;
