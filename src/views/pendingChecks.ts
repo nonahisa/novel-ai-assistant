@@ -276,6 +276,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 1,
   },
   {
+    id: "F-50",
+    title: "Ollamaの起動——ポートを握ったまま応答しない古いOllamaを見分ける",
+    commands: ["novelai.setupOllama"],
+    count: 3,
+  },
+  {
     id: "F-49",
     title: "読み上げ（音読推敲）",
     commands: ["novelai.readManuscriptAloud"],
@@ -482,4 +488,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 616;
+export const PENDING_CHECK_TOTAL = 619;

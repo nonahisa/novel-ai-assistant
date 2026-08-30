@@ -14,7 +14,9 @@ const { spawnMock } = vi.hoisted(() => ({
       (
         exe: string,
         args: string[],
-        options: { env?: NodeJS.ProcessEnv }
+        // `stdio` も見る。標準エラーを受け取れる形で起こしているかは、
+        // bind失敗を読めるかどうかそのものである（0.28.15）
+        options: { env?: NodeJS.ProcessEnv; stdio?: unknown }
       ) => unknown
     >(),
 }));
@@ -25,7 +27,9 @@ import {
   describeStartFailure,
   executableCandidates,
   isLocalEndpoint,
+  isPortInUseError,
   openDialogFilters,
+  portFromBindError,
   resolveExecutable,
   startOllama,
 } from "../../src/ai/ollamaLauncher";
@@ -127,6 +131,52 @@ describe("実行ファイルの探索", () => {
   });
 });
 
+/**
+ * 作者の機械で実際に出た1行（`%LOCALAPPDATA%\Ollama\server-1.log`、2026-08-31）。
+ * 前のOllamaがポートを握ったまま応答せず、新しい `ollama serve` が
+ * bind に失敗して即終了することを9回くり返していた。
+ */
+const BIND_ERROR =
+  "Error: listen tcp 127.0.0.1:11434: bind: Only one usage of each socket " +
+  "address (protocol/network address/port) is normally permitted.";
+
+describe("ポートが使われたままかの見分け", () => {
+  test("Windowsのbind失敗の定型を見分ける", () => {
+    expect(isPortInUseError(BIND_ERROR)).toBe(true);
+  });
+
+  test("macOS/Linuxのbind失敗の定型も見分ける", () => {
+    expect(
+      isPortInUseError(
+        "Error: listen tcp 127.0.0.1:11434: bind: address already in use"
+      )
+    ).toBe(true);
+  });
+
+  test("無関係な失敗や空文字はポート衝突と見なさない", () => {
+    // ここを緩めると、まったく別の原因を「Ollamaを終了してください」と
+    // 案内してしまい、作者が直せない指示を渡されることになる
+    expect(isPortInUseError("Error: unknown command \"serve\"")).toBe(false);
+    expect(isPortInUseError("panic: runtime error: invalid memory address")).toBe(
+      false
+    );
+    expect(isPortInUseError("")).toBe(false);
+  });
+
+  test("握られていたポートを、失敗の文から読み取る", () => {
+    expect(portFromBindError(BIND_ERROR)).toBe("11434");
+    // IPv6でも同じ形（`[::1]:11500: bind: …`）
+    expect(
+      portFromBindError("listen tcp [::1]:11500: bind: address already in use")
+    ).toBe("11500");
+  });
+
+  test("ポートが読み取れない文では undefined を返す（呼ぶ側が既定を補う）", () => {
+    expect(portFromBindError("bind: address already in use")).toBeUndefined();
+    expect(portFromBindError("")).toBeUndefined();
+  });
+});
+
 describe("起動処理", () => {
   /** Ollamaを起こしたことにする子。失敗も終了も知らせない */
   function fakeChild() {
@@ -137,6 +187,58 @@ describe("起動処理", () => {
       removeListener: () => undefined,
       unref: () => undefined,
     };
+  }
+
+  /**
+   * 台本どおりに振る舞う子を作る（`spawner` から返す）。
+   *
+   * bind失敗は**標準エラーへ1行書いてコード1で即終了する**という形なので、
+   * 「標準エラーの中身」「終了コード」「spawn自体の失敗」を組み合わせて
+   * 渡せるようにしてある。`seen` には、判定が済んだあとの後始末
+   * （パイプを閉じたか・切り離したか）が残る。
+   */
+  function scriptedChild(script: {
+    stderr?: string;
+    exit?: number | null;
+    error?: string;
+  }) {
+    const dataListeners: ((chunk: Buffer) => void)[] = [];
+    const seen = { removedListeners: false, destroyed: false, unrefs: 0 };
+    const child = {
+      stderr: {
+        on(_event: "data", listener: (chunk: Buffer) => void) {
+          dataListeners.push(listener);
+        },
+        removeAllListeners() {
+          seen.removedListeners = true;
+        },
+        destroy() {
+          seen.destroyed = true;
+        },
+      },
+      once(event: "error" | "exit", listener: (arg: never) => void) {
+        // 受け口は `never` で受けて、知らせるときに実際の型へ戻す。
+        // `ChildProcess` と作り物の両方を渡せるようにしてあるため
+        const notify = listener as (arg: Error | number | null) => void;
+        // 本物と同じく、購読が済んだあとのタイミングで知らせる
+        if (event === "error" && script.error !== undefined) {
+          setTimeout(() => notify(new Error(script.error)), 0);
+        }
+        if (event === "exit" && script.exit !== undefined) {
+          setTimeout(() => {
+            // 終了の前に標準エラーが届く（本物と同じ順序）
+            for (const listen of dataListeners) {
+              listen(Buffer.from(script.stderr ?? ""));
+            }
+            notify(script.exit ?? null);
+          }, 0);
+        }
+      },
+      unref() {
+        seen.unrefs++;
+      },
+    };
+    return { child, seen };
   }
 
   beforeEach(() => {
@@ -215,6 +317,211 @@ describe("起動処理", () => {
     expect(outcome).toEqual({ ok: false, reason: "timeout" });
     expect(probe.mock.calls.length).toBeGreaterThan(0);
   });
+
+  /**
+   * **標準エラーを受け取れる形で起こす**（0.28.15）。
+   *
+   * 以前は `stdio: "ignore"` だったため、bind失敗で即終了したことも、
+   * その理由も見えず、30秒待った末に「応答しませんでした」としか
+   * 言えなかった（作者の報告「CLIが9回、一瞬だけ立ち上がった」）。
+   */
+  test("Windowsでは標準エラーだけを受け取る形で起こす", async () => {
+    await startOllama({
+      endpoint: "http://localhost:11434",
+      executablePath: process.execPath,
+      timeoutMs: 1,
+      spawnWatchMs: 20,
+      platform: "win32",
+      probe: async () => true,
+    });
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock.mock.calls[0][2].stdio).toEqual(["ignore", "ignore", "pipe"]);
+  });
+
+  /**
+   * **Windows以外では標準エラーを受け取らない。**
+   *
+   * こちらは起動直後の1秒を見たら読み手を閉じるが、Goのランタイムは
+   * fd 2 への書き込みが壊れたパイプに当たると SIGPIPE で終了する。
+   * POSIXでは、閉じた直後の最初のログ1行で `ollama serve` 本体が
+   * 落ちうる——**起動を助けるはずの処理が、起動を壊す。**
+   */
+  test.each(["darwin", "linux"] as const)(
+    "%s では標準エラーを受け取らない（serveを殺さない）",
+    async (platform) => {
+      await startOllama({
+        endpoint: "http://localhost:11434",
+        executablePath: process.execPath,
+        timeoutMs: 1,
+        spawnWatchMs: 20,
+        platform,
+        probe: async () => true,
+      });
+
+      const stdio = spawnMock.mock.calls[0][2].stdio;
+      // まとめて "ignore" でも、3つ並べた形でも、標準エラーは閉じている
+      expect(Array.isArray(stdio) ? stdio[2] : stdio).toBe("ignore");
+    }
+  );
+
+  test("ポートを掴まれて落ちても、既にOllamaが応答するなら起動済みとして扱う", async () => {
+    // LM Studio と同じ扱い：「すでに動いている」と断じる前に1回確かめる
+    const { child } = scriptedChild({ exit: 1, stderr: BIND_ERROR });
+    const probe = vi.fn(async () => true);
+
+    const outcome = await startOllama({
+      endpoint: "http://localhost:11434",
+      executablePath: process.execPath,
+      timeoutMs: 30000,
+      spawnWatchMs: 3000,
+      probe,
+      spawner: () => child,
+    });
+
+    expect(outcome).toEqual({ ok: true });
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+
+  test("ポートを掴まれたまま応答も無ければ、古いOllamaが残っていると見分ける", async () => {
+    const { child } = scriptedChild({ exit: 1, stderr: BIND_ERROR });
+    const probe = vi.fn(async () => false);
+
+    const outcome = await startOllama({
+      endpoint: "http://localhost:11434",
+      executablePath: process.execPath,
+      // 時間切れ（30秒待つ経路）へ落ちないことも確かめたい。
+      // 落ちていれば、この上限のぶんだけ待たされる
+      timeoutMs: 30000,
+      spawnWatchMs: 3000,
+      probe,
+      spawner: () => child,
+    });
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe("port_in_use_stale");
+      expect(outcome.detail).toContain("bind");
+    }
+    // 疎通は1回だけ。応答しないと分かった時点で待たずに案内する
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+
+  test("bind以外の理由で落ちたときは、標準エラーを添えて起動失敗にする", async () => {
+    const { child } = scriptedChild({
+      exit: 1,
+      stderr: 'Error: unknown command "serve" for "ollama"',
+    });
+    const probe = vi.fn(async () => false);
+
+    const outcome = await startOllama({
+      endpoint: "http://localhost:11434",
+      executablePath: process.execPath,
+      timeoutMs: 30000,
+      spawnWatchMs: 3000,
+      probe,
+      spawner: () => child,
+    });
+
+    expect(outcome).toEqual({
+      ok: false,
+      reason: "spawn_failed",
+      detail: 'Error: unknown command "serve" for "ollama"',
+    });
+    // ポート衝突ではないので、疎通を確かめる意味は無い
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  /**
+   * **切り離しを壊していないこと。**
+   *
+   * `unref()` が外すのは子プロセスの参照だけで、`stdio` のパイプは
+   * 別に残る。持ち続けると拡張機能ホストがそれに掴まれ、
+   * 「VS Codeを閉じてもOllamaが残る」というこれまでの動きが崩れる。
+   */
+  test("走り続ける場合は、標準エラーを閉じてから切り離す", async () => {
+    const { child, seen } = scriptedChild({}); // 終了も失敗も知らせない
+
+    const outcome = await startOllama({
+      endpoint: "http://localhost:11434",
+      executablePath: process.execPath,
+      timeoutMs: 5000,
+      spawnWatchMs: 30,
+      probe: async () => true,
+      spawner: () => child,
+    });
+
+    expect(outcome).toEqual({ ok: true });
+    expect(seen.removedListeners).toBe(true);
+    expect(seen.destroyed).toBe(true);
+    expect(seen.unrefs).toBe(1);
+  });
+
+  /**
+   * 理由が読めないOS（Windows以外）でも、**即終了したこと自体は分かる**。
+   * いちばん多い原因（既に動いている）かどうかは疎通で見分けられる。
+   */
+  test("理由が読めないまま即終了しても、応答があれば起動済みとして扱う", async () => {
+    const { child } = scriptedChild({ exit: 1 }); // 標準エラーは受け取れない
+    const probe = vi.fn(async () => true);
+
+    const outcome = await startOllama({
+      endpoint: "http://localhost:11434",
+      executablePath: process.execPath,
+      timeoutMs: 30000,
+      spawnWatchMs: 3000,
+      platform: "linux",
+      probe,
+      spawner: () => child,
+    });
+
+    expect(outcome).toEqual({ ok: true });
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+
+  test("理由が読めず応答も無ければ、終了コードを添えて起動失敗にする", async () => {
+    const { child } = scriptedChild({ exit: 1 });
+    const probe = vi.fn(async () => false);
+
+    const outcome = await startOllama({
+      endpoint: "http://localhost:11434",
+      executablePath: process.execPath,
+      // 時間切れ（30秒待つ経路）へ落ちないことも確かめる
+      timeoutMs: 30000,
+      spawnWatchMs: 3000,
+      platform: "linux",
+      probe,
+      spawner: () => child,
+    });
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe("spawn_failed");
+      // 理由は名指しできないが、終了コードだけは残す
+      expect(outcome.detail).toContain("1");
+    }
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+
+  test("spawn自体が失敗したときは、これまでどおり起動失敗として返す", async () => {
+    const { child } = scriptedChild({ error: "spawn ENOENT" });
+    const probe = vi.fn(async () => false);
+
+    const outcome = await startOllama({
+      endpoint: "http://localhost:11434",
+      executablePath: process.execPath,
+      timeoutMs: 30000,
+      spawnWatchMs: 3000,
+      probe,
+      spawner: () => child,
+    });
+
+    expect(outcome).toEqual({
+      ok: false,
+      reason: "spawn_failed",
+      detail: "spawn ENOENT",
+    });
+  });
 });
 
 describe("選択された実行ファイルの検証", () => {
@@ -287,6 +594,34 @@ describe("失敗理由の説明", () => {
     const message = describeStartFailure({ ok: false, reason: "timeout" });
 
     expect(message).toContain("再試行");
+  });
+
+  test("ポートを掴んだままのOllamaには、終わらせ方まで案内する", () => {
+    // 作者はプログラマではない。「ポートが使われています」だけでは
+    // 何をすればよいか分からないので、終わらせ方を2通り示す
+    const message = describeStartFailure({
+      ok: false,
+      reason: "port_in_use_stale",
+    });
+
+    expect(message).toContain("タスクトレイ");
+    expect(message).toContain("ollama.exe");
+    // 失敗の文が無ければ、Ollamaの既定のポートを言う
+    expect(message).toContain("11434");
+  });
+
+  test("接続先を変えている場合は、実際に握られていたポートを案内する", () => {
+    // 決め打ちにすると、既定から変えている作者に見当違いの番号を探させる
+    const message = describeStartFailure({
+      ok: false,
+      reason: "port_in_use_stale",
+      detail:
+        "Error: listen tcp 127.0.0.1:11500: bind: Only one usage of each socket " +
+        "address (protocol/network address/port) is normally permitted.",
+    });
+
+    expect(message).toContain("11500");
+    expect(message).not.toContain("11434");
   });
 
   test("起動失敗は手動起動を促し、原因も添える", () => {
