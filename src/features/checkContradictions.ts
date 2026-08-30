@@ -2,7 +2,12 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError, recoveryForAIError, type ModelInfo } from "../ai/types";
+import {
+  AIError,
+  isFatalProviderFailure,
+  recoveryForAIError,
+  type ModelInfo,
+} from "../ai/types";
 import { OUTPUT_RESERVE_TOKENS } from "../ai/contextGuard";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
@@ -358,6 +363,8 @@ export async function checkContradictions(
   let verifyUndecided = 0;
   let failedChunks = 0;
   let cancelled = false;
+  // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
+  let fatalFailure = "";
   let processedChunks = 0;
 
   await withCancellableProgress("矛盾を検知しています", async (progress, token) => {
@@ -376,6 +383,7 @@ export async function checkContradictions(
 
     for (let cursor = 0; cursor < queue.length; cursor++) {
       if (token.isCancellationRequested) break;
+      if (fatalFailure) break;
       const chunk = queue[cursor];
 
       const cached = cache.get(chunk.hash, cacheKeyBase);
@@ -540,6 +548,12 @@ export async function checkContradictions(
         // （設計書6.27.10）。そのまま数えると、そのチャンクは一度も
         // 見られないまま「失敗1件」で終わる
         if (isContextOverflow(error)) return error;
+        // **同じ失敗を積まない。** 環境側の失敗はどのチャンクでも同じに
+        // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
+        if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
+          fatalFailure = `${error.message} ${recoveryForAIError(error)}`.trim();
+          logStep(`残りのチャンクは試しません: ${fatalFailure}`);
+        }
         failedChunks++;
         logFailure("矛盾検知", {
           チャンク: chunk.hash,

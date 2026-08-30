@@ -2,7 +2,12 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError, type ProviderId } from "../ai/types";
+import {
+  AIError,
+  isConnectivityFailure,
+  isFatalProviderFailure,
+  type ProviderId,
+} from "../ai/types";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
@@ -821,25 +826,6 @@ function logTypoFailure(
           ? `${error.name}: ${error.message}`
           : String(error),
   });
-}
-
-function isConnectivityFailure(kind: AIError["kind"]): boolean {
-  // 途中で切れるのが続くのも「AI側が落ちている」の形である
-  return (
-    kind === "not_running" || kind === "timeout" || kind === "connection_lost"
-  );
-}
-
-function isFatalProviderFailure(kind: AIError["kind"]): boolean {
-  return (
-    kind === "authentication_failed" ||
-    kind === "permission_denied" ||
-    kind === "insufficient_credit" ||
-    // モデルが載らないのは待っても直らない。実行中にLM Studio側で
-    // モデルが外れると起きる（入口の読み込みを通り抜けた場合の備え）
-    kind === "model_load_failed" ||
-    kind === "rate_limited"
-  );
 }
 
 const CONNECTIVITY_FAILURE_LIMIT = 3;

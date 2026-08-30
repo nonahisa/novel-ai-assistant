@@ -3,7 +3,11 @@ import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import type { Foreshadow } from "../models/foreshadow";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError, recoveryForAIError } from "../ai/types";
+import {
+  AIError,
+  isFatalProviderFailure,
+  recoveryForAIError,
+} from "../ai/types";
 import { OUTPUT_RESERVE_TOKENS } from "../ai/contextGuard";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
@@ -221,6 +225,8 @@ export async function checkForeshadows(
   let duplicateCount = 0;
   let failedChunks = 0;
   let cancelled = false;
+  // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
+  let fatalFailure = "";
 
   await withCancellableProgress(
     "伏線になりそうな記述を探しています",
@@ -239,6 +245,7 @@ export async function checkForeshadows(
 
       for (let cursor = 0; cursor < queue.length; cursor++) {
         if (token.isCancellationRequested) break;
+        if (fatalFailure) break;
         const chunk = queue[cursor];
 
         const cached = cache.get(chunk.hash, cacheKeyBase);
@@ -365,6 +372,12 @@ export async function checkForeshadows(
           // **入らなかったときは、失敗として数える前に分け直しへ回す**
           // （設計書6.27.10）
           if (isContextOverflow(error)) return error;
+          // **同じ失敗を積まない。** 環境側の失敗はどのチャンクでも同じに
+          // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
+          if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
+            fatalFailure = `${error.message} ${recoveryForAIError(error)}`.trim();
+            logStep(`残りのチャンクは試しません: ${fatalFailure}`);
+          }
           failedChunks++;
           logFailure("伏線の検知", {
             チャンク: chunk.hash,
@@ -383,6 +396,11 @@ export async function checkForeshadows(
       `本文と合わない ${rejectedCount}件 / 読めなかった ${failedChunks}件 / ` +
       `本文を開けなかった話 ${unreadableEpisodes}件` +
       (cancelled ? " / 中止された" : "") +
+      // **止めた理由を残す。** 「読めなかった1件」だけでは、残りを
+      // 試していないことが読み取れない
+      (fatalFailure
+        ? ` / ${fatalFailure} のため残りは試していません`
+        : "") +
       // 却下の内訳。**数だけでは次の一手が決まらない**（設計書6.35.7）
       (rejectReasons.length > 0 ? `
   却下の内訳: ${describeRejectReasons(rejectReasons)}` : "")
@@ -594,6 +612,8 @@ export async function checkForeshadowResolution(
   const rejectReasons: Array<{ reason: string }> = [];
   let failedChunks = 0;
   let cancelled = false;
+  // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
+  let fatalFailure = "";
 
   await withCancellableProgress(
     "伏線が回収されたかを見ています",
@@ -611,6 +631,7 @@ export async function checkForeshadowResolution(
       let total = queue.length;
       for (let cursor = 0; cursor < queue.length; cursor++) {
         if (token.isCancellationRequested) break;
+        if (fatalFailure) break;
         const entry = queue[cursor];
 
         const cached = cache.get(entry.chunk.hash, cacheKeyBase);
@@ -725,6 +746,12 @@ export async function checkForeshadowResolution(
           // **入らなかったときは、失敗として数える前に分け直しへ回す**
           // （設計書6.27.10）
           if (isContextOverflow(error)) return error;
+          // **同じ失敗を積まない。** 環境側の失敗はどのチャンクでも同じに
+          // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
+          if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
+            fatalFailure = `${error.message} ${recoveryForAIError(error)}`.trim();
+            logStep(`残りのチャンクは試しません: ${fatalFailure}`);
+          }
           failedChunks++;
           logFailure("伏線の回収の確認", {
             チャンク: chunk.hash,
@@ -743,6 +770,11 @@ export async function checkForeshadowResolution(
       `本文と合わない ${rejectedCount}件 / 読めなかった ${failedChunks}件 / ` +
       `本文を開けなかった話 ${unreadableEpisodes}件` +
       (cancelled ? " / 中止された" : "") +
+      // **止めた理由を残す。** 「読めなかった1件」だけでは、残りを
+      // 試していないことが読み取れない
+      (fatalFailure
+        ? ` / ${fatalFailure} のため残りは試していません`
+        : "") +
       // 却下の内訳。**数だけでは次の一手が決まらない**（設計書6.35.7）
       (rejectReasons.length > 0 ? `
   却下の内訳: ${describeRejectReasons(rejectReasons)}` : "")

@@ -295,6 +295,51 @@ export class AIError extends Error {
   }
 }
 
+/**
+ * 待っても直らない失敗か。**残りのチャンクを試すだけ無駄になる**もの。
+ *
+ * チャンク単位の失敗で全体を止めないのが原則だが（CLAUDE.md 実装スタイル）、
+ * **それはチャンクの中身が原因の失敗に向けた原則**である。ここに並ぶのは
+ * どのチャンクでも同じように起きる「環境側の失敗」で、続けても同じ失敗を
+ * 積むだけになる。
+ *
+ * **実際に起きた**（2026-08-30の作者のログ）。載らない大きさのモデルを
+ * 選んだまま伏線の回収確認を回し、**9チャンクすべてが同じ
+ * `model_load_failed` で失敗**していた。1回目で止めて理由を1つ出すほうが、
+ * 同じ失敗を9つ並べるより作者の手がかりになる。
+ *
+ * ここを増やすときは「作者が何かを直すまで、次のチャンクでも必ず同じに
+ * なるか」で判断する。**`timeout` と `not_running` は入れない**——一時的な
+ * ことがあり、`isConnectivityFailure` の側で回数を数えて扱う。
+ */
+export function isFatalProviderFailure(kind: AIError["kind"]): boolean {
+  return (
+    kind === "authentication_failed" ||
+    kind === "permission_denied" ||
+    kind === "insufficient_credit" ||
+    // モデルが載らないのも同じ。実行中にLM Studio側で外れると起きる
+    kind === "model_load_failed" ||
+    kind === "rate_limited"
+  );
+}
+
+/**
+ * 繋がらなかっただけの失敗か。一時的なことがあるので、
+ * 続けて何回起きたかを数えて判断する（数える側は呼び出し元）。
+ */
+export function isConnectivityFailure(kind: AIError["kind"]): boolean {
+  // **答えの途中で切れたのも、ここに入れる**（`connection_lost`）。
+  // 1回なら通信の揺らぎだが、続けて起きるならAI側が落ちている——
+  // 数え方も止め方も `not_running` と同じでよい。
+  //
+  // 判定を1か所へ集めた版（0.28.14）と、種別を足した版が同じ日に
+  // 別々の機械で入ったため、集約した側にこの種別が入っていなかった。
+  // 入れ忘れると、切れ続けても3回で止まらず全チャンクを空振りする
+  return (
+    kind === "not_running" || kind === "timeout" || kind === "connection_lost"
+  );
+}
+
 /** 失敗種別ごとに、作者が次に行える具体的な操作を1つ返す。 */
 export function recoveryForAIError(error: AIError): string {
   switch (error.kind) {
