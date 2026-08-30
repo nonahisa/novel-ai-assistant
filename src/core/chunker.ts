@@ -326,8 +326,25 @@ export function contextSizeForPrompt(options: {
   const inputTokens = Math.ceil(options.promptChars * TOKENS_PER_CHAR);
   // 見積りは外れることがあるので1割の余裕を持たせる（`planChunkBudget` と同じ）
   const needed = Math.ceil((inputTokens + options.outputTokens) * 1.1);
-  return Math.max(4096, Math.min(options.contextWindow, needed));
+  // **段に丸めて、チャンクごとに値が動かないようにする**（設計書6.53）。
+  //
+  // Ollama は `num_ctx` が変わるとモデルを読み込み直す。チャンクの長さは
+  // 1つずつ違うので、丸めないと**毎回読み込み直しになる**——作者の報告
+  // 「設定資料抽出中、一瞬CLの画面が複数回立ち上がる。チャンクの度に」
+  // （2026-08-30）はこれで、内部の runner が起動し直すたびにコンソールが
+  // 一瞬見えていた。読み込み直しは遅いので、時間切れの一因にもなる。
+  const stepped = Math.ceil(needed / CONTEXT_STEP) * CONTEXT_STEP;
+  return Math.max(4096, Math.min(options.contextWindow, stepped));
 }
+
+/**
+ * `num_ctx` を丸める段。
+ *
+ * **小さすぎると丸める意味が無く、大きすぎると要らないメモリを確保する。**
+ * 4096 なら、20,000字と18,000字のチャンク（約28,600と約25,700トークン）が
+ * 同じ 32768 に収まる。確保が増えるのは最大でこの段のぶんだけである。
+ */
+const CONTEXT_STEP = 4096;
 
 const DEFAULT_OPTIONS: ChunkOptions = {
   maxChars: 8000,

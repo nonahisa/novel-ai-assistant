@@ -185,6 +185,19 @@ describe("P-26 回収の検知", () => {
     expect(prompt).toContain("張った話：第3話");
   });
 
+  test("張った箇所そのものを回収と見なさせない", () => {
+    // **実データで最多の誤りだった。** 却下8件のうち5件が `planted_echo`
+    // ——渡した「張った箇所」の文をそのまま回収として挙げていた
+    // （作者のログ、2026-08-30 22:54）。一覧には「張った箇所：「…」」と
+    // 書いておきながら、それを挙げるなとは書いていなかった
+    const prompt = buildForeshadowResolvePrompt(input);
+
+    expect(prompt).toContain("回収と見なさないもの");
+    expect(prompt).toMatch(/「張った箇所」に書かれている文そのもの/);
+    // 同じ話の中に張った箇所が入りうることも伝える（それが起きた回だった）
+    expect(prompt).toMatch(/同じ話の中に張った箇所が含まれることがあります/);
+  });
+
   test("話数が分からないものには、話数の行を書かない", () => {
     // 「不明」と書くと、それを手掛かりに判断されかねない
     const prompt = buildForeshadowResolvePrompt({

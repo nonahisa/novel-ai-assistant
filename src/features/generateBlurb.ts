@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
+import { confirmProviderReachable } from "./aiConnectivity";
 
 import { scanWork } from "../core/scanner";
 import { loadEpisodeBodies } from "../core/episodeBodies";
@@ -56,6 +57,20 @@ export async function generateWorkBlurb(
 
   const material = await collectMaterial(work);
   if (!material) return;
+
+  // **繋がるかを、費用の確認より先に確かめる**（設計書6.51）。
+  // 繋がらないと分かっているのに料金の話をしても意味がない。
+  // 材料が集まらなかった回（上で return する）はAIを呼ばないので、ここに置く。
+  // モデル名を渡すのは、LM Studioをこの場から起こしたときの読み込みに要るため
+  if (
+    !(await confirmProviderReachable(
+      resolved.provider,
+      "作品紹介文の作成",
+      resolved.model
+    ))
+  ) {
+    return;
+  }
 
   const costNotice = resolved.provider.isPaid
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
@@ -153,6 +168,19 @@ export async function generateCatchphrases(
 
   const material = await collectMaterial(work);
   if (!material) return;
+
+  // **繋がるかを、費用の確認より先に確かめる**（設計書6.51）。
+  // 紹介文と同じ扱い。「別の案を出す」で何度も回る作りなので、
+  // 入口で1回だけ確かめる（ループの中には置かない）
+  if (
+    !(await confirmProviderReachable(
+      resolved.provider,
+      "キャッチコピーの作成",
+      resolved.model
+    ))
+  ) {
+    return;
+  }
 
   const history = new CatchphraseHistory(work);
   const costNotice = resolved.provider.isPaid

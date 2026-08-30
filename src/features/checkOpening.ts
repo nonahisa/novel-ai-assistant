@@ -20,7 +20,7 @@ import {
 import { openGeneratedMarkdown } from "../views/openDocument";
 import { withCancellableProgress } from "../views/progress";
 import { reportAIError } from "./reportAIError";
-import { confirmPaidUsage } from "./aiConnectivity";
+import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 
 /**
@@ -62,6 +62,21 @@ export async function checkOpening(
 
   const material = await collectOpening(work);
   if (!material) return;
+
+  // **繋がるかを、費用の確認より先に確かめる**（設計書6.51）。
+  // 繋がらないと分かっているのに料金の話をしても意味がない。
+  // 材料が集まらなかった回（上で return する）はAIを1度も呼ばないので、
+  // ここより手前には置かない。モデル名を渡すのは、LM Studioを
+  // この場から起こしたときの読み込みに要るため（`aiConnectivity.ts`）
+  if (
+    !(await confirmProviderReachable(
+      resolved.provider,
+      "冒頭の診断",
+      resolved.model
+    ))
+  ) {
+    return;
+  }
 
   const ok = await confirmPaidUsage(resolved.provider, {
     actionLabel: "冒頭診断",

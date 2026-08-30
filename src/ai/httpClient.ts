@@ -10,100 +10,54 @@ import { AIError } from "./types";
  */
 
 /**
- * `fetch` が投げた失敗を、種別と手がかりに分ける（作者のログ、2026-08-29）。
+ * `fetch` が投げた失敗が、**Node自身の待ち時間切れ**か。
  *
- * ## なぜ要るか
+ * **`AbortError` だけがタイムアウトではない。** Nodeの `fetch`（undici）は
+ * こちらの `AbortController` とは別に自前の待ち時間を持っており、そちらが
+ * 切れると `TypeError: fetch failed` を投げる。名前が `AbortError` では
+ * ないので、そのままでは「接続できない」（`not_running`）に落ちる。
+ * **直し方が真逆になる**——起動を確かめても直らず、要るのは待ち時間を
+ * 延ばすかチャンクを小さくすることである。
  *
- * Node の `fetch` は、どんな理由で失敗しても `TypeError: fetch failed` と
- * しか名乗らない。**理由は `cause` にだけ入っている。** 以前はここを見ずに
- * すべて `not_running`（AIが起動していない）に丸めていたので、実機のログに
- * こうなった。
+ * 見るのは `cause.code`。**文言では判定しない**（0.28.4と同じ理由）。
  *
- *     15:26:05 AIへ送信: 1/9
- *     15:31:14 種別: not_running ／ 詳細: fetch failed
- *
- * **5分9秒も答えていたものを「起動していない」と言っていた。** 起動して
- * いなければ接続は即座に断られるし、その直前にモデル一覧も引けている。
- * 案内（AIを起動してください）は的外れで、しかもログに残るのは
- * `fetch failed` の5文字だけ——**原因にたどり着く手がかりが無かった**
- * （規則5「エラーの本文を捨てない」に反していた）。
- *
- * ## 分け方
- *
- * `cause` の `code` だけを見る。**文面では判断しない**（Nodeの版で変わるし、
- * 環境によって訳される）。**分からないものは動かさない**——これまでどおり
- * `not_running` に落とす。案内が変わってしまうので、確かめられたものだけ移す。
+ * **既定でこれが起きる秒数は当てにしない。** 手元のNode 24では、応答を
+ * 返さないサーバへ投げても6分待って切れなかった（2026-08-31に実測）。
+ * 版や環境で変わるので、`fetch failed` を見たら`cause.code`で判ずる。
  */
-export function classifyFetchFailure(error: Error, label: string): AIError {
-  const codes = failureCodes(error);
-  const detail = describeCause(error, codes);
-
-  if (codes.some((code) => DROPPED_CODES.has(code))) {
-    return new AIError(
-      `${label}との接続が答えの途中で切れました。`,
-      "connection_lost",
-      detail
-    );
-  }
-  if (codes.some((code) => TIMEOUT_CODES.has(code))) {
-    // こちらのタイマーより先に、通信の層が諦めた場合。作者から見れば
-    // 「時間切れ」であり、直し方（待ち時間を延ばす）も同じである
-    return new AIError(
-      `${label}の応答が時間内に届きませんでした。`,
-      "timeout",
-      detail
-    );
-  }
-  return new AIError(
-    `${label}に接続できません。ネットワーク接続を確認してください。`,
-    "not_running",
-    detail
-  );
-}
-
-/** 答えている途中で切れた。**起動していないのとは別物** */
-const DROPPED_CODES = new Set([
-  "ECONNRESET",
-  "EPIPE",
-  "UND_ERR_SOCKET",
-  "ERR_STREAM_PREMATURE_CLOSE",
-]);
-
-/** 通信の層が先に諦めた。作者にとっては時間切れ */
-const TIMEOUT_CODES = new Set([
-  "UND_ERR_HEADERS_TIMEOUT",
-  "UND_ERR_BODY_TIMEOUT",
-  "UND_ERR_CONNECT_TIMEOUT",
-  "ETIMEDOUT",
-]);
-
 /**
- * `cause` の連なりをたどって `code` を集める。
+ * `fetch failed` の**中身**を、ログに残せる形にする。
  *
- * undici は `TypeError → AggregateError → 個々のエラー` のように
- * 何段も包むことがあるので、**1段だけ見て終わらない**。
+ * Nodeの `fetch` は失敗をすべて `TypeError: fetch failed` にまとめ、
+ * **本当の理由は `cause` にしか無い**。`err.message` だけを残すと、
+ * ログには「fetch failed」の5文字しか出ず、
+ * 「Ollamaが落ちた」「接続が切れた」「時間切れ」の区別が付かない。
+ *
+ * **実際に困った**（作者のログ、2026-08-31 00:03）。抽出の9チャンク目が
+ * 303秒で `種別: not_running / 詳細: fetch failed` になったが、8チャンク
+ * 目まで通っているのでOllamaは動いていた。**符号が残っていないため、
+ * 何が起きたのか後から判らない**（CLAUDE.md 規則5「エラーの本文を捨てない」）。
  */
-function failureCodes(error: unknown, depth = 0): string[] {
-  if (depth > 4 || error === null || typeof error !== "object") return [];
-  const holder = error as { code?: unknown; cause?: unknown; errors?: unknown };
-  const codes: string[] = [];
-  if (typeof holder.code === "string") codes.push(holder.code);
-  if (Array.isArray(holder.errors)) {
-    for (const nested of holder.errors) {
-      codes.push(...failureCodes(nested, depth + 1));
-    }
+export function describeFetchFailure(error: unknown): string {
+  const cause = (error as { cause?: { code?: unknown; message?: unknown } })?.cause;
+  const message =
+    error instanceof Error ? error.message : String(error ?? "不明な失敗");
+  if (!cause) return message;
+  const parts = [message];
+  if (typeof cause.code === "string") parts.push(cause.code);
+  if (typeof cause.message === "string" && cause.message !== message) {
+    parts.push(cause.message);
   }
-  codes.push(...failureCodes(holder.cause, depth + 1));
-  return codes;
+  return parts.join(" / ");
 }
 
-/** ログへ残す手がかり。**`fetch failed` だけでは何も分からない** */
-function describeCause(error: Error, codes: string[]): string {
-  const causeMessage =
-    error.cause instanceof Error ? error.cause.message : undefined;
-  return [error.message, codes.join("/"), causeMessage]
-    .filter((part): part is string => Boolean(part && part.length > 0))
-    .join(" / ");
+export function isFetchTimeout(error: unknown): boolean {
+  const code = (error as { cause?: { code?: unknown } })?.cause?.code;
+  return (
+    code === "UND_ERR_HEADERS_TIMEOUT" ||
+    code === "UND_ERR_BODY_TIMEOUT" ||
+    code === "UND_ERR_CONNECT_TIMEOUT"
+  );
 }
 
 export interface JsonRequest {
@@ -180,7 +134,21 @@ export async function fetchJson<T>(request: JsonRequest): Promise<T> {
         "timeout"
       );
     }
-    throw classifyFetchFailure(err, request.label);
+    // **Node自身の待ち時間切れは「接続できない」ではない**（isFetchTimeout）
+    if (isFetchTimeout(error)) {
+      throw new AIError(
+        `${request.label}の応答がタイムアウトしました（Node側の上限）。` +
+          "待ち時間を延ばすか、一度に送る量を減らしてください。",
+        "timeout",
+        describeFetchFailure(error)
+      );
+    }
+    // 接続拒否・名前解決失敗はネットワーク側の問題とみなす
+    throw new AIError(
+      `${request.label}に接続できません。ネットワーク接続を確認してください。`,
+      "not_running",
+      describeFetchFailure(error)
+    );
   } finally {
     clearTimeout(timer);
     request.signal?.removeEventListener("abort", onExternalAbort);

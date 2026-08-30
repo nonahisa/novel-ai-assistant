@@ -36,7 +36,7 @@ import { buildNameCheckPanelHtml } from "../views/nameCheckPanelHtml";
 import { withCancellableProgress } from "../views/progress";
 import { reportAIError } from "./reportAIError";
 import { cancelItem } from "../views/dialogs";
-import { confirmPaidUsage } from "./aiConnectivity";
+import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { revealTextLocation, type RevealInManuscript } from "./revealLocation";
 import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 
@@ -346,6 +346,20 @@ async function suggestNames(
 
   const origin = await pickOrigin();
   if (origin === undefined) return;
+
+  // **繋がるかを、費用の確認より先に確かめる**（設計書6.51）。
+  // 繋がらないと分かっているのに料金の話をしても意味がない。
+  // 由来を選ばずに閉じた回（上で return する）はAIを呼ばないので、ここに置く。
+  // モデル名を渡すのは、LM Studioをこの場から起こしたときの読み込みに要るため
+  if (
+    !(await confirmProviderReachable(
+      resolved.provider,
+      "名前の候補づくり",
+      resolved.model
+    ))
+  ) {
+    return;
+  }
 
   const ok = await confirmPaidUsage(resolved.provider, {
     actionLabel: "名前の候補",

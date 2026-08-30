@@ -10,10 +10,10 @@ import {
 } from "./types";
 import { countByteFallback, decodeByteFallback } from "../core/byteFallback";
 import { contextSizeForPrompt } from "../core/chunker";
+import { describeFetchFailure, isFetchTimeout } from "./httpClient";
 // 出力の見込みは**関所と同じ値**を使う（設計書6.27.10）。ここだけ別の値を
 // 持つと「関所は通ったのに num_ctx が足りない」という食い違いになる
 import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
-import { classifyFetchFailure } from "./httpClient";
 import { logLine } from "../core/logger";
 import { withAiWork } from "../core/aiActivity";
 import { resolveTimeoutMs } from "../core/modelTuning";
@@ -306,6 +306,16 @@ export class OllamaProvider implements AIProvider {
           UNKNOWN_CONTEXT_WINDOW,
       });
 
+    // **どの長さで確保したかを残す。** これが記録に無かったせいで、
+    // 「抽出中にコンソールが一瞬ずつ何度も出る」という報告（2026-08-30）の
+    // 原因——`num_ctx` がチャンクごとに変わってモデルが読み込み直されていた
+    // ——を、ログからは追えなかった（設計書6.53）
+    logLine(
+      `Ollama：num_ctx ${numCtx}（${params.model} / 送信 ${
+        params.systemPrompt.length + params.userPrompt.length
+      }字）`
+    );
+
     const body: Record<string, unknown> = {
       model: params.model,
       stream: false,
@@ -466,15 +476,22 @@ export class OllamaProvider implements AIProvider {
           "timeout"
         );
       }
-      // **切れ方で分ける**（`classifyFetchFailure`。写しを作らない）。
-      // 「起動していない」と「答えの途中で切れた」は直し方が違う
-      const classified = classifyFetchFailure(err, "Ollama");
+      // **Node自身の待ち時間切れは「未起動」ではない。** 起動を確かめても
+      // 直らないので、案内が真逆になる
+      if (isFetchTimeout(e)) {
+        throw new AIError(
+          "Ollamaの応答がタイムアウトしました。" +
+            "待ち時間を延ばすか、一度に送る量を減らしてください。",
+          "timeout",
+          describeFetchFailure(e)
+        );
+      }
+      // 接続拒否・名前解決失敗はサーバ未起動とみなす。
+      // **符号まで残す**——「fetch failed」だけでは後から原因を追えない
       throw new AIError(
-        classified.kind === "not_running"
-          ? `Ollamaに接続できません（${this.endpoint}）`
-          : classified.message,
-        classified.kind,
-        classified.detail
+        `Ollamaに接続できません（${this.endpoint}）`,
+        "not_running",
+        describeFetchFailure(e)
       );
     } finally {
       clearTimeout(timer);

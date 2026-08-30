@@ -6,6 +6,7 @@ import {
   DEFAULT_SETTINGS_DIR,
 } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
+import { confirmProviderReachable } from "./aiConnectivity";
 
 import { OUTPUT_RESERVE_TOKENS } from "../ai/contextGuard";
 import { scanWork } from "../core/scanner";
@@ -69,6 +70,22 @@ export async function generateAnnouncement(
   if (!picked) return;
 
   const material = await collectMaterial(work, picked.episode, picked.format);
+
+  // **繋がるかを、費用の確認より先に確かめる**（設計書6.51）。
+  // 繋がらないと分かっているのに料金の話をしても意味がない。
+  // 話を選ばずに抜けた回（上で return する）はAIを呼ばないので、ここに置く。
+  // このあとの `resolveModelInfo` も、止まったままでは申告値を取れず
+  // 既定の8192へ落ちてしまう——本文が黙って短く切られる。
+  // モデル名を渡すのは、LM Studioをこの場から起こしたときの読み込みに要るため
+  if (
+    !(await confirmProviderReachable(
+      resolved.provider,
+      "更新告知文の作成",
+      resolved.model
+    ))
+  ) {
+    return;
+  }
 
   const costNotice = resolved.provider.isPaid
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`

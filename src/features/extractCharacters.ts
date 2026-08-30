@@ -1040,7 +1040,6 @@ function toExtractionFailure(
 
   const labels: Record<AIError["kind"], string> = {
     not_running: "AIに接続できませんでした。",
-    connection_lost: "AIとの接続が答えの途中で切れました。",
     model_not_found: "選択中のモデルを利用できませんでした。",
     timeout: "AIの応答が時間内に完了しませんでした。",
     bad_response: "AIの応答を利用できませんでした。",
