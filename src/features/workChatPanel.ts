@@ -62,7 +62,7 @@ import type { Chatter } from "../core/chatter";
 import { detectRunIntent } from "../core/chatIntent";
 import { findTextRange } from "../core/textLocate";
 import { applyChatEdit } from "./applyChatEdit";
-import { confirmPaidUsage } from "./aiConnectivity";
+import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { buildFeatureGuideForQuestion } from "./featureGuide";
 import {
   prepareRetrieval,
@@ -529,6 +529,37 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     if (!resolved) {
       this.postError(
         "AIが設定されていません。詳細メニューの「AIの設定」から設定してください。"
+      );
+      return;
+    }
+
+    /*
+      **繋がるかを、費用の確認より先に確かめる**（設計書6.51）。
+
+      止まっているAIへ相談を送っても、パネルの中に赤い文字が出るだけで
+      **起こす手立てが無かった**。ここを通せば「Ollamaを起動」
+      「LM Studioを起動」を出せる。繋がらないと分かっているのに
+      料金の話を先に出しても意味がないので、`confirmPaidUsage` より前に置く
+      （ほかの機能と同じ並び。`checkOpening.ts` を参照）。
+
+      **相談1回につき1度だけ。** 下の `call` は材料を求められたときに
+      二度目を呼ぶが、この確認はその外側にあるので二重には出ない。
+
+      モデル名を渡すのは、LM Studioをこの場から起こしたあとの読み込みに
+      要るため（`aiConnectivity.ts` の `model` 引数の説明）。
+    */
+    if (
+      !(await confirmProviderReachable(
+        resolved.provider,
+        "AIへの相談",
+        resolved.model
+      ))
+    ) {
+      // **黙って戻らない。** 送ったのに何も起きない画面がいちばん困る。
+      // 失敗と同じ経路（赤い文字）で伝えると、入力の待ち状態も戻る
+      this.postError(
+        "AIに接続できないため、相談を送りませんでした。" +
+          "AIを起動してから、もう一度お試しください。"
       );
       return;
     }
@@ -1645,9 +1676,16 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     question: string
   ): Promise<string[]> {
     try {
-      // 検索語づくりは相談1回に付随する下ごしらえなので、相談の割当に従う
+      // 検索語づくりは相談1回に付随する下ごしらえなので、相談の割当に従う。
+      // **ここでは疎通を確かめない**——相談の本体（`ask`）が既に1度通して
+      // おり、ここでも出すと同じ確認が二重に出る。失敗しても `[]` を返して
+      // 質問文のまま検索へ進む。
       const resolved = this.ai.resolve("chat");
-      if (!resolved) return [];
+      if (!resolved) {
+        // 静かに空を返すと、検索語が効いていないことに誰も気づけない
+        logStep("相談: AIが未設定のため検索語を作らず、質問文のまま検索します");
+        return [];
+      }
       const names = await this.characterNames(work);
       const result = await resolved.provider.generate({
         systemPrompt: SEARCH_TERMS_SYSTEM_PROMPT,

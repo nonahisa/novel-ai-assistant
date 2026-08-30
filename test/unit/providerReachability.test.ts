@@ -32,12 +32,6 @@ const ALLOWED_WITHOUT_REACHABILITY = new Map<string, string>([
     "recheckProposal.ts",
     "解決済みのプロバイダを引数で受け取る部品。AIを選ぶ入口は呼び出し側（提案パネル）が持つ",
   ],
-  [
-    "workChatPanel.ts",
-    "相談パネルは進捗と失敗の扱いをパネル内で持ち、ほかの機能と流れが違う。" +
-      "**将来はここも揃えるべき**——止まっているAIへ相談を送っても、" +
-      "パネルの中に赤い文字が出るだけで起こす手立てが無い",
-  ],
 ]);
 
 /**
