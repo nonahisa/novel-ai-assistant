@@ -3804,6 +3804,10 @@ function notifyRunCompletion(options: {
   /** 全体の件数。分かるときだけ渡す（「3件中2件」と言えるようにする） */
   totalCount?: number;
   tail?: string;
+  /** 失敗に時間切れが混じっていたか。混じっていればチューニングへ誘う（6.49） */
+  timedOut?: boolean;
+  /** いま使うAIが有料か。**渡さないときは中立に言う**（誤って「無料」と言わない） */
+  isPaid?: boolean;
 }): void {
   const summary = options.parts.join(" / ");
 
@@ -3812,12 +3816,32 @@ function notifyRunCompletion(options: {
       options.totalCount !== undefined && options.totalCount > 0
         ? `${options.totalCount}件中`
         : "";
-    void vscode.window.showWarningMessage(
-      `${options.headline}は一部を処理できませんでした（${total}${options.failedCount}件が失敗）。` +
-        `${summary}。` +
-        "失敗した部分は見ていないので、そこに何かあっても出ていません。" +
-        "ログで理由を確かめ、もう一度実行してください（成功した部分は再利用されます）。"
-    );
+    // 時間切れが混じっているときだけ、チューニングへ誘う。
+    // 料金の断りは、有料と分かっているときだけ強く言う
+    const tuningNote = options.timedOut
+      ? "時間切れが起きています。「AIチューニングを実行」で、" +
+        "このモデルに合った待ち時間を測れます" +
+        (options.isPaid === true
+          ? "（AIを呼ぶので料金がかかります）。"
+          : options.isPaid === false
+            ? "（AIを呼びますが、このAIは無料です）。"
+            : "（AIを呼びます。有料のAIでは料金がかかります）。")
+      : "";
+    const buttons = options.timedOut ? ["AIチューニングを実行"] : [];
+    void vscode.window
+      .showWarningMessage(
+        `${options.headline}は一部を処理できませんでした（${total}${options.failedCount}件が失敗）。` +
+          `${summary}。` +
+          "失敗した部分は見ていないので、そこに何かあっても出ていません。" +
+          "ログで理由を確かめ、もう一度実行してください（成功した部分は再利用されます）。" +
+          tuningNote,
+        ...buttons
+      )
+      .then((answer) => {
+        if (answer === "AIチューニングを実行") {
+          void vscode.commands.executeCommand("novelai.measureContext");
+        }
+      });
     return;
   }
 
@@ -3835,6 +3859,11 @@ function reportTypoCheckResult(label: string, result: TypoCheckRunResult): void 
     parts,
     failedCount: result.failedChunks,
     totalCount: result.totalChunks,
+    // **時間切れが1件でもあれば、測って直せることを伝える。**
+    // 有料かどうかも渡す——「実行しますか」と誘う以上、押す前に
+    // 料金が出るのかどうかが分かっていなければならない
+    timedOut: result.timedOutChunks > 0,
+    isPaid: result.usedPaidProvider,
   });
 }
 

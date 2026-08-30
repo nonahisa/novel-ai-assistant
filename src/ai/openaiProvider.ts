@@ -14,6 +14,7 @@ import { fetchJson } from "./httpClient";
 import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
 import { forgetSecret, registerSecret } from "../core/logger";
+import { resolveTimeoutMs, tunedContextWindow } from "../core/modelTuning";
 
 /** APIキーの保存先。settings.json ではなくOSの資格情報ストア */
 const SECRET_KEY = "novelai.openai.apiKey";
@@ -113,12 +114,9 @@ export class OpenAIProvider implements ApiKeyProvider {
       .replace(/\/+$/, "");
   }
 
-  private get requestTimeoutMs(): number {
-    return (
-      vscode.workspace
-        .getConfiguration("novelai")
-        .get<number>("openai.timeoutSeconds", 180) * 1000
-    );
+  /** 1回の呼び出しで待つミリ秒。台帳（AIチューニング）→ 設定 → 既定 の順 */
+  private requestTimeoutMs(model: string): number {
+    return resolveTimeoutMs(this.id, model, 180);
   }
 
   /**
@@ -128,8 +126,13 @@ export class OpenAIProvider implements ApiKeyProvider {
    * モデルごとの表を持つと新モデルが出るたびに古くなるため、
    * 設定値を使う。チャンク分割の基準になるので、
    * 実際より大きいと入力が黙って切り捨てられる。
+   *
+   * **AIチューニングで測った値があれば、そちらを先に使う**（設計書6.49）。
+   * 設定は1つしか無いので、長さの違うモデルを行き来すると必ず食い違う。
    */
-  private get contextWindow(): number {
+  private contextWindowFor(model: string): number {
+    const tuned = tunedContextWindow(this.id, model);
+    if (tuned !== undefined) return tuned;
     const configured = vscode.workspace
       .getConfiguration("novelai")
       .get<number>("openai.contextWindow", 128000);
@@ -197,7 +200,7 @@ export class OpenAIProvider implements ApiKeyProvider {
       const info: ModelInfo = {
         id,
         displayName: id,
-        contextWindow: this.contextWindow,
+        contextWindow: this.contextWindowFor(id),
         // クラウドモデルはパラメータ数を公開していない
         parameterSize: null,
         capabilities: ["JSON強制"],
@@ -214,13 +217,13 @@ export class OpenAIProvider implements ApiKeyProvider {
     const cached = this.modelCache.get(id);
     if (cached) {
       // 設定でコンテキスト長を変えた場合に古い値を返さない
-      return { ...cached, contextWindow: this.contextWindow };
+      return { ...cached, contextWindow: this.contextWindowFor(id) };
     }
     // 一覧に出ないモデルでも作者が明示的に選んでいれば使えるようにする
     return {
       id,
       displayName: id,
-      contextWindow: this.contextWindow,
+      contextWindow: this.contextWindowFor(id),
       parameterSize: null,
       capabilities: [],
       tier: inferTier(null, "openai"),
@@ -258,7 +261,7 @@ export class OpenAIProvider implements ApiKeyProvider {
     let response: ChatResponse | undefined;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        response = await this.post(body, headers, params.signal);
+        response = await this.post(body, headers, params.model, params.signal);
         break;
       } catch (error) {
         // **上限超えは、指定を外して出し直しても直らない。** 先に見て
@@ -333,6 +336,8 @@ export class OpenAIProvider implements ApiKeyProvider {
   private async post(
     body: Record<string, unknown>,
     headers: Record<string, string>,
+    // **待ち時間はモデルごとに違う**ので、名前を明示的に受け取る
+    model: string,
     signal: AbortSignal | undefined
   ): Promise<ChatResponse> {
     return fetchJson<ChatResponse>({
@@ -340,7 +345,7 @@ export class OpenAIProvider implements ApiKeyProvider {
       method: "POST",
       headers,
       body,
-      timeoutMs: this.requestTimeoutMs,
+      timeoutMs: this.requestTimeoutMs(model),
       signal,
       label: LABEL,
     });

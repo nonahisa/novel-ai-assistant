@@ -1224,14 +1224,15 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.measureContext",
-            label: "AIが実際に読める長さを測る",
+            label: "AIチューニング（測って設定を合わせる）",
             icon: "symbol-ruler",
             requiresWork: false,
             usesAI: true,
             detail:
-              "AIが**申告している長さ**と、**実際に読める長さ**は食い違うことがあります。" +
-              "検査用の詰め物の先頭と末尾に合言葉を置いて送り、両方返ってくる最大の長さを測ります。" +
-              "**作品の本文は送りません。** 測った値は、押して確認してから設定へ書きます。",
+              "そのモデルが実際に読める長さと、必要な待ち時間を測ります（AIを使います）。" +
+              "**測った値は、いま選んでいるモデルの設定として覚えます**" +
+              "——モデルを切り替えれば、そのモデルの値に変わります。" +
+              "有料AIでは実行前に見込みを出します。",
           },
           {
             kind: "action",

@@ -89,6 +89,23 @@ export interface TypoCheckRunResult {
    * ——本文の3分の2が未検査なのに、誤字が無かったように読める（0.28.8）。
    */
   totalChunks: number;
+  /**
+   * そのうち、時間切れで落ちたチャンクの数。
+   *
+   * **失敗の総数とは別に数える。** 時間切れだけは作者が直せる
+   * ——待ち時間を延ばせばよい——のに、ほかの失敗と混ざっていると
+   * 「AIが不調」としか読めない。1件でもあれば、通知から
+   * 「AIチューニング」へ誘って秒数を測らせる（設計書6.49）。
+   */
+  timedOutChunks: number;
+  /**
+   * この回に使ったAIが有料か。
+   *
+   * **時間切れの案内で「料金がかかります」と言い切るために要る。**
+   * 「AIチューニングを実行しますか」と誘う以上、それが有料の呼び出しなのか
+   * 無料なのかは、押す前に分かっていなければならない。
+   */
+  usedPaidProvider: boolean;
   dismissedCount: number;
   cancelled: boolean;
 }
@@ -434,6 +451,8 @@ export async function checkTypos(
 
   let rejectedCount = 0;
   let failedChunks = 0;
+  /** 時間切れで落ちた数。作者へ「待ち時間を測れます」と出すかの判断に使う */
+  let timedOutChunks = 0;
   let cancelled = false;
   let connectivityLost = false;
   let consecutiveConnectivityFailures = 0;
@@ -622,6 +641,9 @@ export async function checkTypos(
           model: resolved.model,
         });
         failedChunks++;
+        // **時間切れだけは別に数える。** 直し方が「待ち時間を延ばす」で
+        // はっきりしており、ほかの失敗と束ねると案内が出せない
+        if (e instanceof AIError && e.kind === "timeout") timedOutChunks++;
         if (e instanceof AIError && isFatalProviderFailure(e.kind)) {
           done++;
           break;
@@ -660,6 +682,8 @@ export async function checkTypos(
       rejectedCount,
       failedChunks,
       totalChunks: chunks.length,
+      timedOutChunks,
+      usedPaidProvider: resolved.provider.isPaid,
       dismissedCount: 0,
       cancelled: true,
     };
@@ -680,6 +704,8 @@ export async function checkTypos(
     rejectedCount,
     failedChunks,
     totalChunks: chunks.length,
+    timedOutChunks,
+    usedPaidProvider: resolved.provider.isPaid,
     dismissedCount: 0,
     cancelled: false,
   };

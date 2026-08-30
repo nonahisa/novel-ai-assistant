@@ -13,6 +13,7 @@ import {
 import { fetchJson } from "./httpClient";
 import { toGeminiSchema } from "./jsonSchema";
 import { forgetSecret, logLine, registerSecret } from "../core/logger";
+import { resolveTimeoutMs } from "../core/modelTuning";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
 import { buildAttemptPlan, type OptionAttempt } from "./optionFallback";
 
@@ -109,12 +110,15 @@ export class GeminiProvider implements ApiKeyProvider {
       .replace(/\/+$/, "");
   }
 
-  private get requestTimeoutMs(): number {
-    return (
-      vscode.workspace
-        .getConfiguration("novelai")
-        .get<number>("gemini.timeoutSeconds", 180) * 1000
-    );
+  /**
+   * 1回の呼び出しで待つミリ秒。台帳（AIチューニング）→ 設定 → 既定 の順。
+   *
+   * **上限のほうは台帳を見ない。** Geminiはモデル一覧が
+   * `inputTokenLimit` を返すので、測った値で上書きすると
+   * 「取れている正しい値」を潰すことになる（設計書6.49）。
+   */
+  private requestTimeoutMs(model: string): number {
+    return resolveTimeoutMs(this.id, model, 180);
   }
 
   private async headers(): Promise<Record<string, string>> {
@@ -423,7 +427,7 @@ export class GeminiProvider implements ApiKeyProvider {
       method: "POST",
       headers,
       body,
-      timeoutMs: this.requestTimeoutMs,
+      timeoutMs: this.requestTimeoutMs(model),
       signal,
       label: LABEL,
     });

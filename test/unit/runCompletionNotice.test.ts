@@ -20,6 +20,24 @@ function source(): string {
   return fs.readFileSync(EXTENSION, "utf8");
 }
 
+/**
+ * `notifyRunCompletion` の本体を、**次の関数定義までを丸ごと**取り出す。
+ *
+ * **固定長の窓（`slice(start, start + 2000)`）にしない。** かつてそう
+ * 書いており、本体に数行足しただけで窓の外へはみ出した末尾の検査
+ * （「成功時だけ完了しましたと言う」）が、**無関係な追記で落ちる**状態に
+ * なっていた。落ちても原因が「文字数」なので、直し方が誰にも分からない。
+ */
+function notifyRunCompletionBody(): string {
+  const code = source();
+  const start = code.indexOf("function notifyRunCompletion");
+  const next = code.indexOf(
+    "\nfunction ",
+    start + "function notifyRunCompletion".length
+  );
+  return code.slice(start, next > 0 ? next : code.length);
+}
+
 describe("一部が失敗したら「完了」と言わない", () => {
   /**
    * 直接 `showInformationMessage` へ「〜が完了しました」を渡している箇所。
@@ -47,10 +65,8 @@ describe("一部が失敗したら「完了」と言わない", () => {
   });
 
   test("共通の入口は、失敗があれば警告にして「見ていない」と伝える", () => {
-    const code = source();
-    const start = code.indexOf("function notifyRunCompletion");
-    expect(start).toBeGreaterThan(0);
-    const body = code.slice(start, start + 2000);
+    expect(source().indexOf("function notifyRunCompletion")).toBeGreaterThan(0);
+    const body = notifyRunCompletionBody();
 
     // 失敗時は警告、かつ「完了」と言わない
     expect(body).toContain("showWarningMessage");
@@ -59,6 +75,51 @@ describe("一部が失敗したら「完了」と言わない", () => {
     expect(body).toMatch(/失敗した部分は見ていない/);
     // 成功時だけ「完了しました」
     expect(body).toMatch(/が完了しました/);
+  });
+
+  /**
+   * 時間切れのときは、直し方まで出す（作者の要望、2026-08-30
+   * 「タイムアウトが起きているときも、その旨を明示して検査を促せば良い」）。
+   *
+   * **何秒あれば足りるかは測れば分かる**（設計書6.49）。作者に秒数を
+   * 当てさせず、「AIチューニング」へ1押しで行けるようにする。
+   * チューニングはAIを呼ぶので、**料金の断りを落とさない**。
+   */
+  test("時間切れが混じっていたら、チューニングへの導線を出す", () => {
+    const body = notifyRunCompletionBody();
+
+    // 押せるボタンにする（文章だけだと、どこから実行するのか分からない）
+    expect(body).toContain("AIチューニングを実行");
+    expect(body).toContain('executeCommand("novelai.measureContext")');
+    // 時間切れでないときにまで出さない（毎回出ると誰も読まなくなる）
+    expect(body).toMatch(/timedOut/);
+  });
+
+  /**
+   * 料金の断りは、**分かっているなら言い切る**（作者の要望、2026-08-30
+   * 「有料であればそれも明示して」）。
+   *
+   * 有料と無料で言い分け、**どちらか分からないときだけ中立にする**。
+   * 「無料です」と間違って言うことだけは、どの経路でも起きてはならない。
+   */
+  test("チューニングの料金を、有料・無料・不明で言い分ける", () => {
+    const body = notifyRunCompletionBody();
+
+    expect(body).toMatch(/AIを呼ぶので料金がかかります/);
+    expect(body).toMatch(/AIを呼びますが、このAIは無料です/);
+    expect(body).toMatch(/有料のAIでは料金がかかります/);
+    // 「無料です」と言ってよいのは isPaid === false のときだけ。
+    // 既定値や `??` で false へ倒すと、有料AIに「無料です」と出る
+    expect(body).toContain("options.isPaid === false");
+    expect(body).not.toMatch(/isPaid\s*(\?\?|\|\|)/);
+  });
+
+  test("誤字脱字の通知は、時間切れの件数と有料かどうかを渡している", () => {
+    // **空振りさせない。** `notifyRunCompletion` に口だけ用意して
+    // 誰も渡していないと、案内は永久に出ない
+    const code = source();
+    expect(code).toMatch(/timedOut: result\.timedOutChunks > 0/);
+    expect(code).toMatch(/isPaid: result\.usedPaidProvider/);
   });
 
   test("失敗の件数を渡している呼び出しが複数ある（空振りしていない）", () => {

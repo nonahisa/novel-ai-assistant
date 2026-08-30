@@ -12,6 +12,7 @@ import { fetchJson } from "./httpClient";
 import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
 import { logLine } from "../core/logger";
+import { resolveTimeoutMs, tunedContextWindow } from "../core/modelTuning";
 import { parseParameterSize } from "./sakuraProvider";
 import {
   asContextOverflowError,
@@ -167,7 +168,19 @@ export class LmStudioProvider implements AIProvider {
     return lmstudioEndpoint();
   }
 
-  private get contextWindow(): number {
+  /**
+   * 作者が申告したコンテキスト長。
+   *
+   * **AIチューニングの台帳を先に見る**（設計書6.49）。測って分かった値の
+   * ほうが、手で書いた当て推量より確かである。
+   *
+   * **ただし「いま読み込まれている長さ」には勝たせない**（呼び出し側を参照）。
+   * LM Studioは読み込むときに長さを指定するので、8192で読み込んだモデルへ
+   * 「測ったら131072だった」を当てると、そのぶん黙って切り捨てられる。
+   */
+  private contextWindowFor(model: string): number {
+    const tuned = tunedContextWindow(this.id, model);
+    if (tuned !== undefined) return tuned;
     const configured = vscode.workspace
       .getConfiguration("novelai")
       .get<number>("lmstudio.contextWindow", 8192);
@@ -184,11 +197,9 @@ export class LmStudioProvider implements AIProvider {
     return `${this.endpoint.replace(/\/v1$/, "")}/api/v0/models`;
   }
 
-  private get requestTimeoutMs(): number {
-    const seconds = vscode.workspace
-      .getConfiguration("novelai")
-      .get<number>("lmstudio.timeoutSeconds", 180);
-    return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 180_000;
+  /** 1回の呼び出しで待つミリ秒。台帳（AIチューニング）→ 設定 → 既定 の順 */
+  private requestTimeoutMs(model: string): number {
+    return resolveTimeoutMs(this.id, model, 180);
   }
 
   /**
@@ -269,7 +280,7 @@ export class LmStudioProvider implements AIProvider {
       // 取れないモデルにだけ「設定を直したら次から効く」を残す
       return {
         ...cached,
-        contextWindow: loaded ?? this.contextWindow,
+        contextWindow: loaded ?? this.contextWindowFor(id),
         // **読み込み状況は写しを使わない。** 拡張機能がこのあとモデルを
         // 読み込むので、一覧を引いた時点の「未読込」はすぐ古くなる
         loaded:
@@ -378,8 +389,9 @@ export class LmStudioProvider implements AIProvider {
     const info: ModelInfo = {
       id,
       displayName: id,
-      // 読み込んだ長さが分かればそれが実際の値。分からなければ作者の申告
-      contextWindow: loadedContextLength(native) ?? this.contextWindow,
+      // 読み込んだ長さが分かればそれが実際の値。
+      // 分からなければ、測った値（AIチューニング）か作者の申告へ落とす
+      contextWindow: loadedContextLength(native) ?? this.contextWindowFor(id),
       parameterSize,
       capabilities: ["JSON強制"],
       // 公開重みのモデルなので、Ollamaと同じ物差しで測る
@@ -429,7 +441,7 @@ export class LmStudioProvider implements AIProvider {
     let response: ChatResponse | undefined;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        response = await this.post(body, params.signal);
+        response = await this.post(body, params.model, params.signal);
         break;
       } catch (error) {
         // **モデルが載らないのは、指定の問題ではない。** 指定を外して
@@ -503,13 +515,16 @@ export class LmStudioProvider implements AIProvider {
 
   private async post(
     body: Record<string, unknown>,
+    // **待ち時間はモデルごとに違う**ので、名前を明示的に受け取る
+    // （`body.model` から読み取ると、型の無い場所に依存が生まれる）
+    model: string,
     signal: AbortSignal | undefined
   ): Promise<ChatResponse> {
     return fetchJson<ChatResponse>({
       url: `${this.endpoint}/chat/completions`,
       method: "POST",
       body,
-      timeoutMs: this.requestTimeoutMs,
+      timeoutMs: this.requestTimeoutMs(model),
       signal,
       label: LABEL,
     });

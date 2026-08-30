@@ -15,6 +15,7 @@ import { contextSizeForPrompt } from "../core/chunker";
 import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
 import { logLine } from "../core/logger";
 import { withAiWork } from "../core/aiActivity";
+import { resolveTimeoutMs } from "../core/modelTuning";
 
 const DEFAULT_ENDPOINT = "http://localhost:11434";
 
@@ -143,12 +144,15 @@ export class OllamaProvider implements AIProvider {
     return raw.replace(/\/+$/, "");
   }
 
-  private get requestTimeoutMs(): number {
-    return (
-      vscode.workspace
-        .getConfiguration("novelai")
-        .get<number>("ollama.timeoutSeconds", 180) * 1000
-    );
+  /**
+   * 1回の呼び出しで待つミリ秒。
+   *
+   * **AIチューニングの台帳を先に見る**（設計書6.49）。同じOllamaでも
+   * 3Bと26Bでは応答にかかる時間がまるで違うので、プロバイダ単位の
+   * 設定1つでは、どちらかが必ず切れる。台帳に無ければ従来どおり設定を読む。
+   */
+  private requestTimeoutMs(model: string): number {
+    return resolveTimeoutMs(this.id, model, 180);
   }
 
   async isConfigured(): Promise<boolean> {
@@ -329,7 +333,7 @@ export class OllamaProvider implements AIProvider {
       res = await this.fetchJson<ChatResponse>(
         "/api/chat",
         body,
-        this.requestTimeoutMs,
+        this.requestTimeoutMs(params.model),
         params.signal
       );
     } catch (e) {

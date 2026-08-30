@@ -4,6 +4,7 @@ import { fetchJson } from "./httpClient";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
 import { buildAttemptPlan, type OptionAttempt } from "./optionFallback";
 import { forgetSecret, logLine, registerSecret } from "../core/logger";
+import { resolveTimeoutMs } from "../core/modelTuning";
 import { isWebRuntime } from "../core/runtime";
 
 /**
@@ -133,12 +134,19 @@ export class ClaudeProvider implements ApiKeyProvider {
     return DEFAULT_ENDPOINT;
   }
 
-  private get requestTimeoutMs(): number {
-    return (
-      vscode.workspace
-        .getConfiguration("novelai")
-        .get<number>("claude.timeoutSeconds", 180) * 1000
-    );
+  /**
+   * 1回の呼び出しで待つミリ秒。台帳（AIチューニング）→ 設定 → 既定 の順。
+   *
+   * **既定が300秒なのはClaudeだけ**（package.json）。ここへ渡す数も
+   * それに合わせる——180にすると、設定を宣言していない場面（試験など）で
+   * 黙って短くなる。
+   *
+   * **上限のほうは台帳を見ない。** Claudeはモデル一覧が
+   * `max_input_tokens` を返すので、測った値で上書きすると
+   * 「取れている正しい値」を潰すことになる（設計書6.49）。
+   */
+  private requestTimeoutMs(model: string): number {
+    return resolveTimeoutMs(this.id, model, 300);
   }
 
   /**
@@ -323,7 +331,7 @@ export class ClaudeProvider implements ApiKeyProvider {
           method: "POST",
           headers,
           body: buildBody(attempt.support),
-          timeoutMs: this.requestTimeoutMs,
+          timeoutMs: this.requestTimeoutMs(params.model),
           signal: params.signal,
           label: LABEL,
         });

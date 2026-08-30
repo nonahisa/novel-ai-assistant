@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { countErrorAsTooLong } from "../../src/features/measureContext";
+import {
+  countErrorAsTooLong,
+  doubledTimeoutSeconds,
+} from "../../src/features/measureContext";
 import { AIError } from "../../src/ai/types";
+import { MAX_TIMEOUT_SECONDS } from "../../src/core/modelTuning";
 
 /**
  * 「AIが実際に読める長さを測る」の、エラーの数え方（作者のログ、
@@ -45,6 +49,40 @@ describe("エラーを「入らなかった」と数えてよいか", () => {
     // 事実のほうを信じる（CLAUDE.md 規則5「エラー文から原因を当てにいかない」）
     for (const kind of ["bad_response", "timeout", "unknown"] as const) {
       expect(countErrorAsTooLong(true, new AIError("失敗", kind))).toBe(true);
+    }
+  });
+});
+
+/**
+ * 時間切れになった回だけ、待ち時間を延ばして測り直す（作者の依頼、
+ * 2026-08-30「タイムアウト問題が出たら、その設定も調整してみるのは
+ * どうでしょうか？」）。
+ *
+ * **時間切れは「長すぎた」とは限らない。** 待ち時間の設定がそのモデルに
+ * 合っていないだけかもしれず、そのまま「入らない」と数えると実効の上限を
+ * 実際より短く見積もる。
+ */
+describe("測り直すときに延ばす待ち時間", () => {
+  test("倍にする", () => {
+    // 何秒あれば足りるかは分からないので、当て推量の刻みを持ち込まない
+    expect(doubledTimeoutSeconds(180)).toBe(360);
+    expect(doubledTimeoutSeconds(240)).toBe(480);
+  });
+
+  test("上限を超えるぶんは切り詰める", () => {
+    expect(doubledTimeoutSeconds(400)).toBe(MAX_TIMEOUT_SECONDS);
+    expect(doubledTimeoutSeconds(400)).toBe(600);
+  });
+
+  test("すでに上限なら、延ばさない（undefined）", () => {
+    // ここで倍にし続けると、測定が終わらなくなる
+    expect(doubledTimeoutSeconds(600)).toBeUndefined();
+    expect(doubledTimeoutSeconds(900)).toBeUndefined();
+  });
+
+  test("読めない秒数では延ばさない", () => {
+    for (const seconds of [0, -1, Number.NaN]) {
+      expect(doubledTimeoutSeconds(seconds), String(seconds)).toBeUndefined();
     }
   });
 });

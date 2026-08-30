@@ -304,9 +304,13 @@ describe("AIプロバイダ境界", () => {
   });
 
   test("Ollamaは内部タイムアウトによる中止をtimeoutとして返す", async () => {
+    // **0秒ではなく、いちばん短い正の秒数を使う。** 待ち時間の解決は
+    // `core/modelTuning.ts` に寄せてあり、0や負や非数は「壊れた設定」として
+    // 既定へ落とす（手で settings.json を書き換えて即失敗する状態を作れないように）。
+    // ここで見たいのは「内側の時計が切れたらtimeoutを返す」ことなので、1ミリ秒でよい
     workspace.getConfiguration = () => ({
       get: <T>(key: string, defaultValue: T): T =>
-        key === "ollama.timeoutSeconds" ? (0 as T) : defaultValue,
+        key === "ollama.timeoutSeconds" ? (0.001 as T) : defaultValue,
     });
     vi.stubGlobal(
       "fetch",
