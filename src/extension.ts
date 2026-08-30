@@ -24,7 +24,12 @@ import {
 } from "./core/episodeParser";
 import { scanWork } from "./core/scanner";
 import { SUPPORTED_EXTENSIONS, WorkEntry } from "./models/types";
-import { AIRegistry, runSetupWizard } from "./ai/registry";
+import {
+  AIRegistry,
+  ASSIGNABLE_FEATURES,
+  runSetupWizard,
+  type AssignableFeature,
+} from "./ai/registry";
 import {
   extractCharacters,
   saveDirtyDocumentsBeforeExtraction,
@@ -2362,10 +2367,17 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    // 実際に読める長さの測定（設計書6.27.11）。作品は要らない
-    registerCommand("novelai.measureContext", async () => {
+    // AIチューニング（設計書6.27.11・6.49）。作品は要らない。
+    //
+    // **機能キーを受け取る。** 時間切れの通知から呼ばれたときは、その機能の
+    // 割当先（設計書6.28.9）を測らないと、測ったAIと切れたAIが別物になる。
+    // コマンドパレットからは引数なしで来るので、そのときは既定を測る
+    registerCommand("novelai.measureContext", async (feature?: unknown) => {
       const { measureContext } = await import("./features/measureContext.js");
-      await measureContext(aiRegistry);
+      await measureContext(
+        aiRegistry,
+        isAssignableFeature(feature) ? feature : "default"
+      );
     })
   );
 
@@ -3808,6 +3820,8 @@ function notifyRunCompletion(options: {
   timedOut?: boolean;
   /** いま使うAIが有料か。**渡さないときは中立に言う**（誤って「無料」と言わない） */
   isPaid?: boolean;
+  /** どの機能のAIを測らせるか。**渡さないと既定のAIを測って空振りする**（6.28.9） */
+  tuningFeature?: AssignableFeature;
 }): void {
   const summary = options.parts.join(" / ");
 
@@ -3839,7 +3853,12 @@ function notifyRunCompletion(options: {
       )
       .then((answer) => {
         if (answer === "AIチューニングを実行") {
-          void vscode.commands.executeCommand("novelai.measureContext");
+          // **その機能の割当先を測らせる。** 引数なしだと既定のAIを測り、
+          // 割当が別なら「測ったのに直らない」ことになる
+          void vscode.commands.executeCommand(
+            "novelai.measureContext",
+            options.tuningFeature
+          );
         }
       });
     return;
@@ -3847,6 +3866,19 @@ function notifyRunCompletion(options: {
 
   void vscode.window.showInformationMessage(
     `${options.headline}が完了しました。${summary}。${options.tail ?? ""}`
+  );
+}
+
+/**
+ * コマンドの引数として来たものが、機能別割当のキーか。
+ *
+ * **一覧はコマンド側で持たない**（`ASSIGNABLE_FEATURES` が唯一の定義）。
+ * コマンドは外から任意の値で叩けるので、知らない値は「既定」に落とす。
+ */
+function isAssignableFeature(value: unknown): value is AssignableFeature {
+  return (
+    typeof value === "string" &&
+    (ASSIGNABLE_FEATURES as string[]).includes(value)
   );
 }
 
@@ -3864,6 +3896,8 @@ function reportTypoCheckResult(label: string, result: TypoCheckRunResult): void 
     // 料金が出るのかどうかが分かっていなければならない
     timedOut: result.timedOutChunks > 0,
     isPaid: result.usedPaidProvider,
+    // 誤字脱字に割り当てたAIを測らせる（既定とは別のことがある）
+    tuningFeature: "typo",
   });
 }
 

@@ -1,5 +1,9 @@
 import * as vscode from "vscode";
-import { AIRegistry, ensureConfigured } from "../ai/registry";
+import {
+  AIRegistry,
+  ensureConfigured,
+  type AssignableFeature,
+} from "../ai/registry";
 import { AIError, recoveryForAIError, type ProviderId } from "../ai/types";
 import { CONTEXT_GUARD_EXEMPT_FEATURE } from "../ai/contextGuard";
 import { TOKENS_PER_CHAR } from "../core/chunker";
@@ -136,22 +140,89 @@ export function doubledTimeoutSeconds(
   return Math.min(MAX_TIMEOUT_SECONDS, currentSeconds * 2);
 }
 
+/**
+ * 有料AIに見せる、送る量の見込み（トークン）。
+ *
+ * 土台は「探索の枝を全部たどったときの詰め物の合計」（`worstCaseProbeChars`）
+ * で、実際にはこれより少なく済む。**そこへ測り直しの1回を足す。**
+ * 時間切れになった回は同じ長さをもう一度送るので、探索のぶんだけでは
+ * 足りない——最悪は上限の長さで1回なので、その分を見込む。
+ *
+ * **少なく見せる側へは倒さない。** 見せた額より多く請求されるのが
+ * いちばん悪い（記録82で同じ判断をしている）。
+ */
+export function estimateProbeTokens(ceilingChars: number): number {
+  return probeCharsToTokens(worstCaseProbeChars(ceilingChars) + ceilingChars);
+}
+
 /** ログと通知に載せる、エラー本文の長さ */
 const ERROR_EXCERPT_CHARS = 200;
 
-export async function measureContext(registry: AIRegistry): Promise<void> {
-  // 測るのは「使用するAI」。機能ごとの割当は、それぞれの機能が
-  // 自分の割当先を使うので、既定を測っておけば基準になる
-  const resolved = await ensureConfigured(registry, "default");
+/**
+ * 測定が途中で終わっても要る後始末を、外側へ渡すための入れ物。
+ *
+ * **`finally` で必ず戻したい**が、戻す処理は測定の中で組み立てられる
+ * （延ばす前の値を知っているのはあちらだけ）。ここへ置いておけば、
+ * どんな終わり方をしても外側が拾える。
+ */
+interface TuningCleanup {
+  /** 延ばした待ち時間を戻す。台帳へ反映したときは消される */
+  restoreTimeout?: () => Promise<void>;
+}
+
+/**
+ * AIチューニングの入口。
+ *
+ * **後始末のためだけの殻である。** 中身は `runMeasurement` にあり、
+ * ここは「延ばした待ち時間を必ず戻す」ことだけを引き受ける。
+ *
+ * 以前は戻す処理を出口ごと（失敗・中止・非反映）に置いていた。
+ * **通知や設定の書き込みが投げた瞬間に、倍にした待ち時間が残る**——
+ * そのモデルの全機能が以後その秒数を待つようになり、しかも
+ * `logFailure` を通らないので理由がどこにも残らなかった
+ * （規則5「エラーの本文を捨てない」）。
+ */
+export async function measureContext(
+  registry: AIRegistry,
+  feature: AssignableFeature | "default" = "default"
+): Promise<void> {
+  const cleanup: TuningCleanup = {};
+  try {
+    await runMeasurement(registry, feature, cleanup);
+  } catch (error) {
+    // 測定そのものの失敗は `runMeasurement` が中で捌く。ここへ来るのは
+    // 通知や設定の書き込みが投げたとき——黙って消さず、ログと通知へ出す
+    reportFailure(error);
+  } finally {
+    await cleanup.restoreTimeout?.();
+  }
+}
+
+async function runMeasurement(
+  registry: AIRegistry,
+  /**
+   * どの機能のAIを測るか。
+   *
+   * **省略すると既定のAIを測る**（コマンドパレットから呼ばれたとき）。
+   * **時間切れの通知から呼ばれたときは、その機能のキーが渡る**——
+   * 機能別割当（設計書6.28.9）があると、既定と実際に使ったAIが別物になる。
+   * 誤字脱字だけ「さくら / gpt-oss-120b」を割り当てている作者が、さくらで
+   * 時間切れになってボタンを押したのに既定のOllamaを測る、という食い違いが
+   * 起きていた。台帳の鍵まで `ollama/…` になるので、**さくらの待ち時間は
+   * 1秒も変わらない**（作者には「測ったのに直らない」としか見えない）。
+   */
+  feature: AssignableFeature | "default",
+  /** 延ばした待ち時間を戻す手を、外側（`measureContext`）へ預ける入れ物 */
+  cleanup: TuningCleanup
+): Promise<void> {
+  const resolved = await ensureConfigured(registry, feature);
   if (!resolved) return;
 
-  const modelInfo = await registry.resolveModelInfo("default");
+  const modelInfo = await registry.resolveModelInfo(feature);
   const declaredTokens = modelInfo?.contextWindow;
   const ceilingChars = ceilingCharsFor(declaredTokens);
 
-  // 見込みは「各回の詰め物の合計」。探索の枝を全部たどった最大なので、
-  // 実際にはこれより少なく済む（`worstCaseProbeChars` に理由）
-  const estimateTokens = probeCharsToTokens(worstCaseProbeChars(ceilingChars));
+  const estimateTokens = estimateProbeTokens(ceilingChars);
   const ok = await confirmPaidUsage(resolved.provider, {
     actionLabel: "AIチューニング",
     model: resolved.model,
@@ -207,19 +278,21 @@ export async function measureContext(registry: AIRegistry): Promise<void> {
    * 落とすほどのことではない。延ばせなかったのなら、この回は
    * これまでどおり「入らない」と数えて先へ進む。
    *
-   * **ほかの欄を消さない。** 上限を測ってあるモデルなら、その値を
-   * 抱えたまま待ち時間だけを差し替える。
+   * **ほかの欄は `saveModelTuning` が守る**（生の設定値へ、この欄だけを
+   * 差し替える）。ここで現在値を読んで丸ごと書き戻すと、作者が手で書いた
+   * 読めない欄まで巻き添えで消える。
    */
   const raiseTimeout = async (seconds: number): Promise<boolean> => {
     const current = modelTuning(resolved.provider.id, resolved.model);
     try {
       await saveModelTuning(resolved.provider.id, resolved.model, {
-        ...(current ?? {}),
         timeoutSeconds: seconds,
       });
       // **書けたときだけ覚える。** 書けていないのに戻しにいくと、
       // 作者が自分で入れた値をこちらが消してしまう
       timeoutBeforeRaise = current?.timeoutSeconds;
+      // ここから先はどんな終わり方をしても戻す。外側の `finally` が拾う
+      cleanup.restoreTimeout = restoreTimeout;
       return true;
     } catch (error) {
       logStep(
@@ -239,13 +312,15 @@ export async function measureContext(registry: AIRegistry): Promise<void> {
    * 中止した・失敗した——のすべてで元へ戻す。
    *
    * 元が「欄が無かった」なら `undefined` を渡して欄ごと消させる
-   * （`saveModelTuning` の約束）。
+   * （`saveModelTuning` の約束）。ほかの欄はあちらが守る。
+   *
+   * **ここから外へ例外を出さない。** 呼ぶのは `finally` の中であり、
+   * ここで投げると本来の失敗を覆い隠してしまう。
    */
   const restoreTimeout = async (): Promise<void> => {
     if (raisedTimeoutSeconds === undefined) return;
     try {
       await saveModelTuning(resolved.provider.id, resolved.model, {
-        ...(modelTuning(resolved.provider.id, resolved.model) ?? {}),
         timeoutSeconds: timeoutBeforeRaise,
       });
       logStep(
@@ -421,9 +496,8 @@ export async function measureContext(registry: AIRegistry): Promise<void> {
     }
   );
 
+  // どちらの出口でも、延ばした待ち時間は外側の `finally` が戻す
   if (failure) {
-    // 失敗した測定の結果は反映されない。延ばした待ち時間も残さない
-    await restoreTimeout();
     reportFailure(failure);
     return;
   }
@@ -431,7 +505,6 @@ export async function measureContext(registry: AIRegistry): Promise<void> {
   // 中止しても、通った長さが分かっていれば見せる。
   // 有料AIでは、ここまでの呼び出しの代金はもう払っている
   if (cancelled && low <= 0) {
-    await restoreTimeout();
     logStep("読める長さの測定：中止しました。");
     return;
   }
@@ -467,9 +540,9 @@ export async function measureContext(registry: AIRegistry): Promise<void> {
     cancelled,
     longestResponseSeconds,
   });
-  // 反映されなかったなら、測る前の設定へ戻す。反映されたときは
-  // 見立てた秒数で上書きされているので、戻す相手がもう無い
-  if (!applied) await restoreTimeout();
+  // 反映したなら、戻す相手がもう無い（見立てた秒数で上書きされている）。
+  // 反映しなかったときは後始末を残したままにして、外側の `finally` に任せる
+  if (applied) cleanup.restoreTimeout = undefined;
 }
 
 /** 送ってから返るまでの秒数。ログに出すので、秒より細かくしない */
@@ -550,7 +623,10 @@ async function offerToSave(input: {
   if (answer !== "設定に反映") return false;
 
   // 台帳に入れる上限は**トークン数**（字数ではない）。通った最大の字数は
-  // `measuredChars` に別に残す——あとから「何字で測ったのか」を辿れるように
+  // `measuredChars` に別に残す——あとから「何字で測ったのか」を辿れるように。
+  //
+  // **ここに無い欄は消えない**（`saveModelTuning` が生の設定値へ差し替える）。
+  // 作者が手で書いた覚書などは、測るたびに消えてよいものではない
   const tuning: ModelTuning = {
     ...(writesContext ? { contextWindow: tokens } : {}),
     timeoutSeconds,

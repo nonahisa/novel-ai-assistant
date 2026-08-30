@@ -2,9 +2,14 @@ import { describe, expect, test } from "vitest";
 import {
   countErrorAsTooLong,
   doubledTimeoutSeconds,
+  estimateProbeTokens,
 } from "../../src/features/measureContext";
 import { AIError } from "../../src/ai/types";
 import { MAX_TIMEOUT_SECONDS } from "../../src/core/modelTuning";
+import {
+  probeCharsToTokens,
+  worstCaseProbeChars,
+} from "../../src/core/contextProbe";
 
 /**
  * 「AIが実際に読める長さを測る」の、エラーの数え方（作者のログ、
@@ -84,5 +89,31 @@ describe("測り直すときに延ばす待ち時間", () => {
     for (const seconds of [0, -1, Number.NaN]) {
       expect(doubledTimeoutSeconds(seconds), String(seconds)).toBeUndefined();
     }
+  });
+});
+
+/**
+ * 有料AIに見せる送信量の見込み。
+ *
+ * **測り直しの1回を勘定に入れる。** 時間切れになった回は同じ長さを
+ * もう一度送るので、探索の枝をたどっただけの `worstCaseProbeChars` では
+ * 足りない。**見せた額より多く請求される側にずれる**のがいちばん悪い
+ * （記録82で同じ判断をしている——「2倍だと少なく見せる」）。
+ */
+describe("送信量の見込み", () => {
+  const ceiling = 90_000;
+
+  test("測り直しの1回を足す（探索のぶんだけでは足りない）", () => {
+    const searchOnly = probeCharsToTokens(worstCaseProbeChars(ceiling));
+
+    expect(estimateProbeTokens(ceiling)).toBeGreaterThan(searchOnly);
+  });
+
+  test("足すのは、いちばん長い1回ぶん", () => {
+    // 測り直すのは**同じ長さ**をもう一度である。最悪でも上限の長さで
+    // 1回なので、それ以上を見込むと今度は多すぎて実行をためらわせる
+    expect(estimateProbeTokens(ceiling)).toBe(
+      probeCharsToTokens(worstCaseProbeChars(ceiling) + ceiling)
+    );
   });
 });

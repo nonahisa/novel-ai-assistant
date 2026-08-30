@@ -53,6 +53,13 @@ export enum StatusBarAlignment {
   Right = 2,
 }
 
+/** 設定の書き込み先。値は本物のVS Codeに合わせる */
+export enum ConfigurationTarget {
+  Global = 1,
+  Workspace = 2,
+  WorkspaceFolder = 3,
+}
+
 export class CancellationTokenSource {
   private cancelled = false;
   private readonly listeners: Array<() => void> = [];

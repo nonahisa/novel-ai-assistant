@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { logLine } from "./logger";
 
 /**
  * AIチューニング——**モデルごと**の上限と待ち時間の台帳（設計書6.49）。
@@ -43,6 +44,16 @@ export const MIN_TIMEOUT_SECONDS = 180;
  * 大きさを見直すほうが作者のためになる。
  */
 export const MAX_TIMEOUT_SECONDS = 600;
+
+/**
+ * これを下回るコンテキスト長は、台帳に入っていても使わない。
+ *
+ * **`novelai.modelTuning` は `object` の設定なので、`minimum` が効かない**
+ * （プロバイダごとの `contextWindow` には効いている）。手で `5` と書けば、
+ * 送る前から失敗が決まった値でその機能が丸ごと使えなくなる。
+ * さくら・ChatGPTの設定が持っている下限と同じ値にしてある。
+ */
+const MIN_CONTEXT_WINDOW = 1024;
 
 /** 作者が設定画面で読みやすいように、この刻みへ丸める */
 const TIMEOUT_STEP_SECONDS = 30;
@@ -162,20 +173,67 @@ export function modelTuning(
   return readTuningTable().get(modelTuningKey(providerId, model));
 }
 
-/** 測って分かった実効のコンテキスト長（トークン）。無ければ undefined */
+/**
+ * 同じ注意を何度も書かないための覚え。
+ *
+ * 台帳は**呼び出しのたびに読む**ので、挟んだことを毎回書くとログが
+ * その1行で埋まり、ほかの失敗が見えなくなる。
+ */
+const reportedOnce = new Set<string>();
+
+function noteOnce(message: string): void {
+  if (reportedOnce.has(message)) return;
+  reportedOnce.add(message);
+  logLine(message);
+}
+
+/**
+ * 測って分かった実効のコンテキスト長（トークン）。無ければ undefined。
+ *
+ * **小さすぎる値は使わない。** 設定の型が `object` なので、VS Code側の
+ * `minimum` が効かない（上の `MIN_CONTEXT_WINDOW` に理由）。無視したときは
+ * 呼び出し側が従来の設定へ落ちる。
+ */
 export function tunedContextWindow(
   providerId: string,
   model: string
 ): number | undefined {
-  return modelTuning(providerId, model)?.contextWindow;
+  const tuned = modelTuning(providerId, model)?.contextWindow;
+  if (tuned === undefined) return undefined;
+  if (tuned < MIN_CONTEXT_WINDOW) {
+    // **黙って別の値を使わない。** 作者が書いた値が効いていないことは、
+    // 「入力が切り捨てられた」形でしか現れないので、必ず言う
+    noteOnce(
+      `AIチューニング：${modelTuningKey(providerId, model)} のコンテキスト長 ` +
+        `${tuned} は小さすぎるため使いません（${MIN_CONTEXT_WINDOW} 以上にしてください）。` +
+        "設定のほうの値を使います。"
+    );
+    return undefined;
+  }
+  return tuned;
 }
 
-/** 測って分かった待ち時間（秒）。無ければ undefined */
+/**
+ * 測って分かった待ち時間（秒）。無ければ undefined。
+ *
+ * **上限で挟む。** 手で `100000` と書くと、1回の呼び出しが27時間待つ。
+ * 上限は書き込み側（`recommendTimeoutSeconds`）でしか守られていないので、
+ * 読む側でも同じ線を引く。
+ */
 export function tunedTimeoutSeconds(
   providerId: string,
   model: string
 ): number | undefined {
-  return modelTuning(providerId, model)?.timeoutSeconds;
+  const tuned = modelTuning(providerId, model)?.timeoutSeconds;
+  if (tuned === undefined) return undefined;
+  if (tuned > MAX_TIMEOUT_SECONDS) {
+    noteOnce(
+      `AIチューニング：${modelTuningKey(providerId, model)} の待ち時間 ` +
+        `${tuned} 秒は長すぎるため、${MAX_TIMEOUT_SECONDS} 秒までに抑えます。`
+    );
+    return MAX_TIMEOUT_SECONDS;
+  }
+  return tuned;
 }
 
 /**
@@ -215,11 +273,15 @@ export function resolveTimeoutMs(
 }
 
 /**
- * そのモデルぶんの調整値を書く。
+ * そのモデルぶんの調整値を、**指定した欄だけ差し替えて**書く。
  *
- * **ほかのモデルの項目を消さない。** 読んだものへ、その鍵だけ差し替えて
- * 書き戻す。**読めなかった項目も残す**——こちらが読めないだけで作者が
- * 手で書いたものかもしれず、黙って消してよいものではない。
+ * **土台にするのは生の設定値である。** `parseModelTuning` を通したものを
+ * 書き戻すと、こちらが解釈できなかった欄が黙って消える。作者が
+ * `{"contextWindow": "131072", "memo": "26Bはこれ"}` と手で書いていたら、
+ * 測って戻すだけでその2つが消えることになる。**読めない欄・知らない欄は
+ * そのまま残す**——こちらが読めないだけで、作者にとっては意味がある。
+ *
+ * ほかのモデルの項目も、当然ながら触らない。
  *
  * **欄を消したいときは `undefined` を渡す。** 測り直しのために一時的に
  * 延ばした待ち時間を元へ戻すとき、「元は欄が無かった」を表す手段が要る
@@ -233,22 +295,41 @@ export async function saveModelTuning(
   tuning: ModelTuning
 ): Promise<void> {
   const configuration = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const raw = configuration.get<unknown>(TUNING_SETTING);
-  const table: Record<string, unknown> =
-    typeof raw === "object" && raw !== null && !Array.isArray(raw)
-      ? { ...(raw as Record<string, unknown>) }
-      : {};
+  const table = asRecord(configuration.get<unknown>(TUNING_SETTING));
 
   const key = modelTuningKey(providerId, model);
-  const entry = Object.fromEntries(
-    Object.entries(tuning).filter(([, value]) => value !== undefined)
-  );
+  const entry = asRecord(table[key]);
+  for (const [name, value] of Object.entries(tuning)) {
+    if (value === undefined) delete entry[name];
+    else entry[name] = value;
+  }
   if (Object.keys(entry).length === 0) {
     delete table[key];
   } else {
     table[key] = entry;
   }
 
-  // 機械全体の設定にする。読み込み方も契約も、作品ではなく環境の側の事情で決まる
-  await configuration.update(TUNING_SETTING, table, true);
+  // **読まれる場所へ書く。** `get` は作品フォルダ（ワークスペース）の値を
+  // 優先するのに、`update` を必ず機械全体へ向けると、書いても読まれない。
+  // 作者からは「反映を押したのに何も変わらない」としか見えず、
+  // 無言で効かない状態になる。
+  //
+  // 作品フォルダ側に値が無いときは、これまでどおり機械全体へ書く——
+  // 読み込み方も契約も、作品ではなく環境の側の事情で決まる
+  const hasWorkspaceValue =
+    configuration.inspect(TUNING_SETTING)?.workspaceValue !== undefined;
+  await configuration.update(
+    TUNING_SETTING,
+    table,
+    hasWorkspaceValue
+      ? vscode.ConfigurationTarget.Workspace
+      : vscode.ConfigurationTarget.Global
+  );
+}
+
+/** 素の物なら浅い写しを、そうでなければ空の物を返す（元は書き換えない） */
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : {};
 }

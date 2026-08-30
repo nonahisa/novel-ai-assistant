@@ -90,9 +90,31 @@ describe("一部が失敗したら「完了」と言わない", () => {
 
     // 押せるボタンにする（文章だけだと、どこから実行するのか分からない）
     expect(body).toContain("AIチューニングを実行");
-    expect(body).toContain('executeCommand("novelai.measureContext")');
+    expect(body).toContain('"novelai.measureContext"');
     // 時間切れでないときにまで出さない（毎回出ると誰も読まなくなる）
     expect(body).toMatch(/timedOut/);
+  });
+
+  /**
+   * **測るのは「時間切れになった機能が使うAI」でなければならない**
+   * （設計書6.28.9の機能別割当）。
+   *
+   * 誤字脱字だけ「さくら / gpt-oss-120b」を割り当て、既定は「Ollama」
+   * という作者がいる。機能キーを渡さないと既定のOllamaを測ってしまい、
+   * **さくらの待ち時間は1秒も変わらない**。作者には「測ったのに直らない」
+   * としか見えず、料金の断りも食い違う（無料のOllamaで判定して
+   * 有料AIを呼ぶ経路ができる）。
+   */
+  test("チューニングには、その機能のキーを渡す", () => {
+    const body = notifyRunCompletionBody();
+
+    // 呼び出しに機能キーを載せる（引数なしだと既定のAIを測ってしまう）
+    expect(body).toMatch(
+      /executeCommand\(\s*"novelai\.measureContext",\s*options\.tuningFeature/
+    );
+
+    // 誤字脱字の通知は "typo" を渡している（`AssignableFeature` のキー）
+    expect(source()).toMatch(/tuningFeature: "typo"/);
   });
 
   /**
