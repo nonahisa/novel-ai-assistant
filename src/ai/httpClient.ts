@@ -9,6 +9,57 @@ import { AIError } from "./types";
  * SDKの機能をほとんど使わないため。
  */
 
+/**
+ * `fetch` が投げた失敗が、**Node自身の待ち時間切れ**か。
+ *
+ * **`AbortError` だけがタイムアウトではない。** Nodeの `fetch`（undici）は
+ * こちらの `AbortController` とは別に自前の待ち時間を持っており、そちらが
+ * 切れると `TypeError: fetch failed` を投げる。名前が `AbortError` では
+ * ないので、そのままでは「接続できない」（`not_running`）に落ちる。
+ * **直し方が真逆になる**——起動を確かめても直らず、要るのは待ち時間を
+ * 延ばすかチャンクを小さくすることである。
+ *
+ * 見るのは `cause.code`。**文言では判定しない**（0.28.4と同じ理由）。
+ *
+ * **既定でこれが起きる秒数は当てにしない。** 手元のNode 24では、応答を
+ * 返さないサーバへ投げても6分待って切れなかった（2026-08-31に実測）。
+ * 版や環境で変わるので、`fetch failed` を見たら`cause.code`で判ずる。
+ */
+/**
+ * `fetch failed` の**中身**を、ログに残せる形にする。
+ *
+ * Nodeの `fetch` は失敗をすべて `TypeError: fetch failed` にまとめ、
+ * **本当の理由は `cause` にしか無い**。`err.message` だけを残すと、
+ * ログには「fetch failed」の5文字しか出ず、
+ * 「Ollamaが落ちた」「接続が切れた」「時間切れ」の区別が付かない。
+ *
+ * **実際に困った**（作者のログ、2026-08-31 00:03）。抽出の9チャンク目が
+ * 303秒で `種別: not_running / 詳細: fetch failed` になったが、8チャンク
+ * 目まで通っているのでOllamaは動いていた。**符号が残っていないため、
+ * 何が起きたのか後から判らない**（CLAUDE.md 規則5「エラーの本文を捨てない」）。
+ */
+export function describeFetchFailure(error: unknown): string {
+  const cause = (error as { cause?: { code?: unknown; message?: unknown } })?.cause;
+  const message =
+    error instanceof Error ? error.message : String(error ?? "不明な失敗");
+  if (!cause) return message;
+  const parts = [message];
+  if (typeof cause.code === "string") parts.push(cause.code);
+  if (typeof cause.message === "string" && cause.message !== message) {
+    parts.push(cause.message);
+  }
+  return parts.join(" / ");
+}
+
+export function isFetchTimeout(error: unknown): boolean {
+  const code = (error as { cause?: { code?: unknown } })?.cause?.code;
+  return (
+    code === "UND_ERR_HEADERS_TIMEOUT" ||
+    code === "UND_ERR_BODY_TIMEOUT" ||
+    code === "UND_ERR_CONNECT_TIMEOUT"
+  );
+}
+
 export interface JsonRequest {
   url: string;
   method?: "GET" | "POST";
@@ -83,11 +134,20 @@ export async function fetchJson<T>(request: JsonRequest): Promise<T> {
         "timeout"
       );
     }
+    // **Node自身の待ち時間切れは「接続できない」ではない**（isFetchTimeout）
+    if (isFetchTimeout(error)) {
+      throw new AIError(
+        `${request.label}の応答がタイムアウトしました（Node側の上限）。` +
+          "待ち時間を延ばすか、一度に送る量を減らしてください。",
+        "timeout",
+        describeFetchFailure(error)
+      );
+    }
     // 接続拒否・名前解決失敗はネットワーク側の問題とみなす
     throw new AIError(
       `${request.label}に接続できません。ネットワーク接続を確認してください。`,
       "not_running",
-      err.message
+      describeFetchFailure(error)
     );
   } finally {
     clearTimeout(timer);

@@ -10,6 +10,7 @@ import {
 } from "./types";
 import { countByteFallback, decodeByteFallback } from "../core/byteFallback";
 import { contextSizeForPrompt } from "../core/chunker";
+import { describeFetchFailure, isFetchTimeout } from "./httpClient";
 // 出力の見込みは**関所と同じ値**を使う（設計書6.27.10）。ここだけ別の値を
 // 持つと「関所は通ったのに num_ctx が足りない」という食い違いになる
 import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
@@ -475,11 +476,22 @@ export class OllamaProvider implements AIProvider {
           "timeout"
         );
       }
-      // 接続拒否・名前解決失敗はサーバ未起動とみなす
+      // **Node自身の待ち時間切れは「未起動」ではない。** 起動を確かめても
+      // 直らないので、案内が真逆になる
+      if (isFetchTimeout(e)) {
+        throw new AIError(
+          "Ollamaの応答がタイムアウトしました。" +
+            "待ち時間を延ばすか、一度に送る量を減らしてください。",
+          "timeout",
+          describeFetchFailure(e)
+        );
+      }
+      // 接続拒否・名前解決失敗はサーバ未起動とみなす。
+      // **符号まで残す**——「fetch failed」だけでは後から原因を追えない
       throw new AIError(
         `Ollamaに接続できません（${this.endpoint}）`,
         "not_running",
-        err.message
+        describeFetchFailure(e)
       );
     } finally {
       clearTimeout(timer);
