@@ -1076,11 +1076,17 @@ export async function activate(
         proposalPanel.showContradictions(work, result.issues, (source) =>
           registerForeshadowFromContradiction(work, source)
         );
-        // 検証で消したことは、こちらの入口からでも伝える（設計書6.10.5）
-        if (result.verifyNote) {
-          void vscode.window.showInformationMessage(
-            `矛盾検知が完了しました。指摘 ${result.issues.length}件 / ${result.verifyNote}。`
-          );
+        // 検証で消したことは、こちらの入口からでも伝える（設計書6.10.5）。
+        // **矛盾検知は入口が2つある。** 片方だけ直すと、同じ機能なのに
+        // 通知の言うことが食い違う（0.28.8で揃えた）
+        if (result.verifyNote || result.failedChunks > 0) {
+          const parts = [`指摘 ${result.issues.length}件`];
+          if (result.verifyNote) parts.push(result.verifyNote);
+          notifyRunCompletion({
+            headline: "矛盾検知",
+            parts,
+            failedCount: result.failedChunks,
+          });
         }
         return;
       }
@@ -2872,12 +2878,15 @@ export async function activate(
         if (result.unreadableEpisodes > 0) {
           parts.push(`読めなかった話 ${result.unreadableEpisodes}件（ログ参照）`);
         }
-        vscode.window.showInformationMessage(
-          `伏線の検知が完了しました。${parts.join(" / ")}。` +
-            (result.candidates.length > 0
+        notifyRunCompletion({
+          headline: "伏線の検知",
+          parts,
+          failedCount: result.failedChunks,
+          tail:
+            result.candidates.length > 0
               ? "台帳へはまだ入れていません。 「提案」パネルで登録するものを選んでください。"
-              : "")
-        );
+              : "",
+        });
       }
     )
   );
@@ -2919,12 +2928,15 @@ export async function activate(
         if (result.unreadableEpisodes > 0) {
           parts.push(`読めなかった話 ${result.unreadableEpisodes}件（ログ参照）`);
         }
-        vscode.window.showInformationMessage(
-          `伏線の回収の確認が完了しました。${parts.join(" / ")}。` +
-            (result.proposals.length > 0
+        notifyRunCompletion({
+          headline: "伏線の回収の確認",
+          parts,
+          failedCount: result.failedChunks,
+          tail:
+            result.proposals.length > 0
               ? "台帳はまだ変えていません。 「提案」パネルで確かめてから決めてください。"
-              : "")
-        );
+              : "",
+        });
       }
     )
   );
@@ -3191,12 +3203,15 @@ export async function activate(
         if (result.unreadableEpisodes > 0) {
           parts.push(`読めなかった話 ${result.unreadableEpisodes}件（ログ参照）`);
         }
-        vscode.window.showInformationMessage(
-          `プロット逸脱の検知が完了しました。${parts.join(" / ")}。` +
-            (result.issues.length > 0
+        notifyRunCompletion({
+          headline: "プロット逸脱の検知",
+          parts,
+          failedCount: result.failedChunks,
+          tail:
+            result.issues.length > 0
               ? "本文は書き換えていません。 プロットのほうが古いこともあります。"
-              : "")
-        );
+              : "",
+        });
       }
     )
   );
@@ -3226,9 +3241,11 @@ export async function activate(
         if (result.failedChunks > 0) {
           parts.push(`読み取れなかった ${result.failedChunks}件`);
         }
-        vscode.window.showInformationMessage(
-          `推敲が完了しました。${parts.join(" / ")}。`
-        );
+        notifyRunCompletion({
+          headline: "推敲",
+          parts,
+          failedCount: result.failedChunks,
+        });
       }
     )
   );
@@ -3293,12 +3310,15 @@ export async function activate(
         if (result.unreadableEpisodes > 0) {
           parts.push(`読めなかった話 ${result.unreadableEpisodes}件（ログ参照）`);
         }
-        vscode.window.showInformationMessage(
-          `矛盾検知が完了しました。${parts.join(" / ")}。` +
-            (result.issues.length > 0
+        notifyRunCompletion({
+          headline: "矛盾検知",
+          parts,
+          failedCount: result.failedChunks,
+          tail:
+            result.issues.length > 0
               ? "本文は書き換えていません。 設定と本文のどちらを直すかは作者が決めてください。"
-              : "")
-        );
+              : "",
+        });
       }
     )
   );
@@ -3762,12 +3782,60 @@ function findWorkForPath(
     });
 }
 
+/**
+ * 実行の結果を通知する。**一部でも失敗していれば「完了」と言わない。**
+ *
+ * 実データで、誤字脱字検知が3件中2件タイムアウトした回に
+ * 「完了しました。指摘 0件 / 失敗 2チャンク」と出ていた
+ * （作者のログ、2026-08-29）。作者からは「誤字が無かった」と読めるが、
+ * 実際には**本文の3分の2を見ていない**。同じ形が伏線・逸脱・推敲・矛盾にも
+ * あったので、通知の入口をここへ集めた（0.28.8）。
+ *
+ * 失敗があるときは、①見出しを「一部を処理できませんでした」に変え
+ * ②通知そのものを警告にし ③**見ていない部分があること**を言葉で伝える。
+ *
+ * @param headline 「伏線の検知」のような処理の名前（「が完了しました」は付けない）
+ * @param tail 成功時にだけ添える案内（「台帳へはまだ入れていません」など）
+ */
+function notifyRunCompletion(options: {
+  headline: string;
+  parts: string[];
+  failedCount: number;
+  /** 全体の件数。分かるときだけ渡す（「3件中2件」と言えるようにする） */
+  totalCount?: number;
+  tail?: string;
+}): void {
+  const summary = options.parts.join(" / ");
+
+  if (options.failedCount > 0) {
+    const total =
+      options.totalCount !== undefined && options.totalCount > 0
+        ? `${options.totalCount}件中`
+        : "";
+    void vscode.window.showWarningMessage(
+      `${options.headline}は一部を処理できませんでした（${total}${options.failedCount}件が失敗）。` +
+        `${summary}。` +
+        "失敗した部分は見ていないので、そこに何かあっても出ていません。" +
+        "ログで理由を確かめ、もう一度実行してください（成功した部分は再利用されます）。"
+    );
+    return;
+  }
+
+  void vscode.window.showInformationMessage(
+    `${options.headline}が完了しました。${summary}。${options.tail ?? ""}`
+  );
+}
+
 /** 誤字脱字検知の結果を要約して通知する。作品全体・1話単位のどちらからも呼ぶ */
 function reportTypoCheckResult(label: string, result: TypoCheckRunResult): void {
   const parts = [`指摘 ${result.issues.length}件`];
-  if (result.failedChunks > 0) parts.push(`失敗 ${result.failedChunks}チャンク`);
   if (result.rejectedCount > 0) parts.push(`除外 ${result.rejectedCount}件`);
-  vscode.window.showInformationMessage(`${label}が完了しました。${parts.join(" / ")}`);
+  notifyRunCompletion({
+    headline: label,
+    parts,
+    failedCount: result.failedChunks,
+    totalCount: result.totalChunks,
+  });
 }
 
 /** ツリーから呼ばれた場合はそのノード、コマンドパレットからは選択させる */

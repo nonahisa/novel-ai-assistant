@@ -80,6 +80,15 @@ export interface TypoCheckRunResult {
   issues: TypoCheckIssue[];
   rejectedCount: number;
   failedChunks: number;
+  /**
+   * 送るはずだったチャンクの総数。
+   *
+   * **失敗の件数だけでは「どれだけ検査できていないか」が分からない。**
+   * 実データで「3件中2件が失敗」した回に、作者へは
+   * 「完了しました。指摘 0件 / 失敗 2チャンク」としか出ていなかった
+   * ——本文の3分の2が未検査なのに、誤字が無かったように読める（0.28.8）。
+   */
+  totalChunks: number;
   dismissedCount: number;
   cancelled: boolean;
 }
@@ -646,7 +655,14 @@ export async function checkTypos(
     vscode.window.showInformationMessage(
       "誤字脱字検知を中止しました。完了済みの処理は次回再利用されます。"
     );
-    return { issues, rejectedCount, failedChunks, dismissedCount: 0, cancelled: true };
+    return {
+      issues,
+      rejectedCount,
+      failedChunks,
+      totalChunks: chunks.length,
+      dismissedCount: 0,
+      cancelled: true,
+    };
   }
 
   if (connectivityLost) {
@@ -663,6 +679,7 @@ export async function checkTypos(
     issues,
     rejectedCount,
     failedChunks,
+    totalChunks: chunks.length,
     dismissedCount: 0,
     cancelled: false,
   };
