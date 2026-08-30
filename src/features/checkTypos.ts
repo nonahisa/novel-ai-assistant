@@ -773,6 +773,11 @@ function logTypoFailure(
   logFailure("誤字脱字検知の失敗", {
     ファイル: describeChunkFile(chunk.filePath, chunk),
     使用中のAI: `${used.provider} / ${used.model}`,
+    // **送った量を残す。** タイムアウトの記録が「180秒で切れた」だけだと、
+    // あとから見ても「大きすぎたのか、AIが遅かったのか」を切り分けられない
+    // （実測：この作品の応答は中央34秒・90%点124秒で、上限180秒に余裕が
+    // 無かった。作者のログ、2026-08-29）。0.28.9
+    送った本文: `${chunk.text.length}字`,
     種別: error instanceof AIError ? error.kind : "不明",
     詳細:
       error instanceof AIError
