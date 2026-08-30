@@ -21,7 +21,7 @@ import {
   type ProbeSides,
   type ProbeState,
 } from "../core/contextProbe";
-import { logFailure, logStep, showLog } from "../core/logger";
+import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 import {
   MAX_TIMEOUT_SECONDS,
   modelTuning,
@@ -50,7 +50,10 @@ import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
  * 測った値が使われていた。
  *
  * **作品は要らない。** 測っているのはモデルの性質であって、
- * 作品の性質ではない。
+ * 作品の性質ではない。**ログの置き場所としてだけ受け取る**——
+ * 出力パネルはVS Codeを閉じると消えるので、点滅や時間切れの原因を
+ * 後から追うには作品フォルダの `actions.log` にも残っている必要がある
+ * （決められないときは出力パネルだけ。無理に書き先を作らない）。
  */
 
 /**
@@ -141,6 +144,35 @@ export function doubledTimeoutSeconds(
 }
 
 /**
+ * 測定のあいだ、`num_ctx` をこれより小さくはしない。
+ *
+ * ここまで下げても載らないなら、下げ続けても測定にならない——4,000字
+ * （約5,700トークン）が最初に送る長さなので、8,192を割ると**1回目から
+ * 切り捨てられた状態**で測ることになり、何を測っているのか分からなくなる。
+ */
+export const MIN_FIXED_NUM_CTX = 8192;
+
+/**
+ * モデルが載らなかったとき、次に試す `num_ctx`。
+ * これ以上小さくできないなら undefined（＝測定を諦める）。
+ *
+ * **半分にするだけ。** どれだけ減らせば載るかはこちらには分からないので、
+ * 当て推量の刻みを持ち込まない（`doubledTimeoutSeconds` と同じ考え方）。
+ *
+ * 半分が下限を割るときは、**下限そのものを一度だけ試す。** 申告 10,000 の
+ * ような値で「半分の 5,000 は下限未満だから諦める」とすると、まだ試して
+ * いない 8,192 を飛ばして中止することになる。
+ */
+export function halvedNumCtx(current: number | undefined): number | undefined {
+  if (current === undefined) return undefined;
+  if (!Number.isFinite(current) || current <= 0) return undefined;
+  const halved = Math.floor(current / 2);
+  if (halved >= MIN_FIXED_NUM_CTX) return halved;
+  if (current > MIN_FIXED_NUM_CTX) return MIN_FIXED_NUM_CTX;
+  return undefined;
+}
+
+/**
  * 有料AIに見せる、送る量の見込み（トークン）。
  *
  * 土台は「探索の枝を全部たどったときの詰め物の合計」（`worstCaseProbeChars`）
@@ -184,8 +216,19 @@ interface TuningCleanup {
  */
 export async function measureContext(
   registry: AIRegistry,
-  feature: AssignableFeature | "default" = "default"
+  feature: AssignableFeature | "default" = "default",
+  /**
+   * ログを残す作品フォルダ。**測定そのものには使わない。**
+   *
+   * 渡されなければ出力パネルにだけ残す（これまでの動き）。作品を
+   * 決めるために作者へ問いかけはしない——測るのはモデルの性質であって、
+   * どの作品を選んでも結果は同じなので、訊く理由が無い。
+   */
+  workFolderPath?: string
 ): Promise<void> {
+  // **ここで先に決める。** 中で失敗しても、その失敗がファイルに残る
+  if (workFolderPath) useLogFile(workFolderPath);
+
   const cleanup: TuningCleanup = {};
   try {
     await runMeasurement(registry, feature, cleanup);
@@ -269,6 +312,39 @@ async function runMeasurement(
       `測れる上限 ${ceilingChars} 字`
   );
 
+  /**
+   * 測定のあいだ、**全部の呼び出しへ同じ値で渡す** `num_ctx`（設計書6.53）。
+   *
+   * Ollama は `num_ctx` が変わるとモデルを読み込み直し、内部の runner を
+   * 起こす（作者の報告「AIチューニングで画面が点滅しています」、2026-08-31）。
+   * 0.28.17 で4096の段に丸めたが、**この機能の仕事は送る長さを倍々に
+   * 変えることそのもの**なので、段では吸収しきれず毎回読み込み直しになる。
+   * 1つに固定すれば読み込みは1回で済み、測定も速くなる。
+   *
+   * 値は**モデルの申告値**。プロバイダが長さから決めるときも上限は申告値
+   * なので、固定しても「入る/入らない」の境目は動かない——短い回で
+   * 要らないメモリを確保するだけである。
+   *
+   * 申告値を取れないときは undefined のまま渡さない（これまでどおり
+   * プロバイダが送る長さから決める）。**当て推量の値を入れない。**
+   */
+  let fixedNumCtx =
+    declaredTokens !== undefined &&
+    Number.isFinite(declaredTokens) &&
+    declaredTokens > 0
+      ? declaredTokens
+      : undefined;
+  /**
+   * 申告値のままでは載らず、下げたときの**元の値**。
+   * 下げたことを結果に添えるために覚えておく（黙って下げない）。
+   */
+  let loweredFromNumCtx: number | undefined;
+  logStep(
+    fixedNumCtx === undefined
+      ? "読める長さの測定：num_ctx は固定しません（申告値を取れませんでした）。"
+      : `読める長さの測定：num_ctx を ${fixedNumCtx} に固定して測ります。`
+  );
+
   const sides: ProbeSides = { headDropped: false, tailDropped: false };
   /** 両方返った最大の字数 */
   let low = 0;
@@ -293,6 +369,14 @@ async function runMeasurement(
    */
   let timeoutBeforeRaise: number | undefined;
   let failure: unknown;
+  /**
+   * `num_ctx` を下限まで下げても載らなかったときの失敗。
+   *
+   * **ほかの失敗と分けて持つ。** 原因が「長さ」ではなく「モデルが
+   * この機械に載らない」ことだと言い切れる唯一の場面なので、
+   * 案内もそれ専用にする。
+   */
+  let loadFailure: AIError | undefined;
   let cancelled = false;
 
   /**
@@ -411,6 +495,10 @@ async function runMeasurement(
               // 書き写すだけなので、揺らす理由がまったく無い
               temperature: 0,
               maxOutputTokens: PROBE_OUTPUT_TOKENS,
+              // **測定のあいだ動かさない。** 長さに合わせて変えると、
+              // 送る長さを変えるたびにOllamaがモデルを読み込み直す
+              // （画面が点滅する。設計書6.53）
+              numCtx: fixedNumCtx,
               disableThinking: true,
               // 作品に属さない呼び出しなので workFolder は付けない
               // （どこかの作品の送信量に混ぜると、その作品の数字が狂う）。
@@ -443,6 +531,47 @@ async function runMeasurement(
             if (error instanceof AIError && error.kind === "aborted") {
               cancelled = true;
               return;
+            }
+
+            /*
+              **モデルが載らないのは「長すぎた」ではない。**
+
+              固定した `num_ctx` ぶんのメモリを確保できなかっただけで、
+              送った字数とは関係が無い（固定しているので、どの回でも
+              同じように失敗する）。ここを「入らない」と数えると、
+              **一度も通らないまま「実効の上限は0字」**という無意味な
+              結果になる。
+
+              申告値は載るとは限らない——`gemma4:12b` は8GB、この機械の
+              VRAMも8GBで、申告は262144である。**載らなければ測定そのものが
+              できない**ので、確保量を半分にして測り直す（作者の指示、
+              2026-08-31）。下げたことは必ず伝える。
+            */
+            if (error instanceof AIError && error.kind === "model_load_failed") {
+              const current = fixedNumCtx;
+              const lowered = halvedNumCtx(current);
+              if (current === undefined || lowered === undefined) {
+                // 下限まで下げても載らない。長さを変えても直らないので、
+                // ここで止めて「モデルが大きすぎる」ことだけを伝える
+                loadFailure = error;
+                return;
+              }
+              loweredFromNumCtx ??= current;
+              fixedNumCtx = lowered;
+              const reason = (error.detail ?? error.message).slice(
+                0,
+                ERROR_EXCERPT_CHARS
+              );
+              logStep(
+                `読める長さの測定：num_ctx ${current} ではモデルを読み込めません` +
+                  `でした。${lowered} へ下げて測り直します（${reason}）`
+              );
+              progress.report({
+                message:
+                  `モデルを読み込めなかったので、num_ctx を ${lowered} へ` +
+                  "下げて送り直しています…",
+              });
+              continue;
             }
 
             // **時間切れは「長すぎた」とは限らない。** 待ち時間の設定が
@@ -522,6 +651,13 @@ async function runMeasurement(
   );
 
   // どちらの出口でも、延ばした待ち時間は外側の `finally` が戻す
+  //
+  // **読み込みの失敗を先に見る。** 「測れなかった」の理由として、
+  // ほかのどの失敗より作者の手が届く（別のモデルを選べばよい）
+  if (loadFailure) {
+    reportModelLoadFailure(loadFailure, fixedNumCtx);
+    return;
+  }
   if (failure) {
     reportFailure(failure);
     return;
@@ -551,7 +687,10 @@ async function runMeasurement(
     (raisedTimeoutSeconds !== undefined
       ? `途中で時間切れになったため、待ち時間を一時的に ${raisedTimeoutSeconds} 秒へ` +
         "延ばして測り直しました。"
-      : "");
+      : "") +
+    // **どの `num_ctx` で測ったかを言う。** 同じモデルでも確保量が違えば
+    // 結果は変わるので、これが無いと作者は「なぜこの結果か」を追えない
+    describeFixedNumCtx(fixedNumCtx, loweredFromNumCtx);
   logStep(
     `読める長さの測定を終了: ${rounds}回 / ${summary}` +
       (cancelled ? "（中止したため、途中までの結果です）" : "")
@@ -568,6 +707,64 @@ async function runMeasurement(
   // 反映したなら、戻す相手がもう無い（見立てた秒数で上書きされている）。
   // 反映しなかったときは後始末を残したままにして、外側の `finally` に任せる
   if (applied) cleanup.restoreTimeout = undefined;
+}
+
+/**
+ * 結果に添える「どの `num_ctx` で測ったか」の一文。
+ *
+ * **下げたなら、下げる前の値も出す。** 「65536で測りました」だけでは、
+ * 作者には申告どおりに測れたように見える——実際には申告値が載らなかった
+ * のだから、結果の読み方（このモデルはこの機械では申告どおり使えない）が
+ * まるで違う。
+ */
+export function describeFixedNumCtx(
+  fixedNumCtx: number | undefined,
+  loweredFromNumCtx: number | undefined
+): string {
+  if (fixedNumCtx === undefined) return "";
+  const fixed = fixedNumCtx.toLocaleString("ja-JP");
+  if (loweredFromNumCtx === undefined) {
+    return `num_ctx は ${fixed} に固定して測りました。`;
+  }
+  return (
+    `申告の ${loweredFromNumCtx.toLocaleString("ja-JP")} では読み込めなかった` +
+    `ため、num_ctx を ${fixed} に下げて測りました。`
+  );
+}
+
+/**
+ * `num_ctx` を下限まで下げても載らなかったときの報せ。
+ *
+ * **ここだけ専用にする。** 測定の仕事は「長さを変えながら送る」ことなので、
+ * 確保そのものができないなら測りようが無い。長さを疑わせず、
+ * 「このモデルはこの機械には大きい」とだけ伝える。
+ *
+ * **AIが返した理由を添える**（必要なメモリ量など、直し方の手がかりは
+ * 向こうにしかない。CLAUDE.md 規則5「エラーの本文を捨てない」）。
+ */
+function reportModelLoadFailure(
+  error: AIError,
+  triedNumCtx: number | undefined
+): void {
+  logFailure("読める長さの測定", {
+    種別: error.kind,
+    "最後に試したnum_ctx": triedNumCtx,
+    詳細: error.detail,
+    本文: error.message,
+  });
+  const tried =
+    triedNumCtx !== undefined
+      ? `num_ctx を ${triedNumCtx.toLocaleString("ja-JP")} まで下げましたが、`
+      : "";
+  void vscode.window
+    .showErrorMessage(
+      `${tried}モデルを読み込めませんでした。より小さいモデルをお試しください。\n` +
+        (error.detail ?? error.message).slice(0, ERROR_EXCERPT_CHARS),
+      "ログを見る"
+    )
+    .then((answer) => {
+      if (answer === "ログを見る") showLog();
+    });
 }
 
 /** 送ってから返るまでの秒数。ログに出すので、秒より細かくしない */

@@ -326,7 +326,7 @@ export function contextSizeForPrompt(options: {
   const inputTokens = Math.ceil(options.promptChars * TOKENS_PER_CHAR);
   // 見積りは外れることがあるので1割の余裕を持たせる（`planChunkBudget` と同じ）
   const needed = Math.ceil((inputTokens + options.outputTokens) * 1.1);
-  // **段に丸めて、チャンクごとに値が動かないようにする**（設計書6.52）。
+  // **段に丸めて、チャンクごとに値が動かないようにする**（設計書6.53）。
   //
   // Ollama は `num_ctx` が変わるとモデルを読み込み直す。チャンクの長さは
   // 1つずつ違うので、丸めないと**毎回読み込み直しになる**——作者の報告

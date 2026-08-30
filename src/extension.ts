@@ -2376,7 +2376,11 @@ export async function activate(
       const { measureContext } = await import("./features/measureContext.js");
       await measureContext(
         aiRegistry,
-        isAssignableFeature(feature) ? feature : "default"
+        isAssignableFeature(feature) ? feature : "default",
+        // **測定に作品は要らないが、ログの置き場所には要る**（設計書6.53）。
+        // 出力パネルはVS Codeを閉じると消えるので、点滅や時間切れの原因を
+        // 作者が後から追えるよう、作品フォルダの `actions.log` にも残す
+        logTargetWorkFolder(registry)
       );
     })
   );
@@ -3792,6 +3796,27 @@ function findWorkForPath(
       const relative = path.relative(normalizedWork, normalize(filePath));
       return relative.length > 0 && !path.goesOutside(normalizedWork, relative);
     });
+}
+
+/**
+ * 作品を持たない操作のログを、どの作品フォルダへ残すか。
+ *
+ * **作者に問いかけない。** AIチューニング（設計書6.49）のように作品を
+ * 要さない操作でも、ログがファイルに残らないと原因を追えない
+ * （出力パネルはVS Codeを閉じると消える）。かといって
+ * 「どの作品のログに書きますか」と訊くのは、作者にとって意味の無い問いである
+ * ——測っているのはモデルの性質であって、どの作品を選んでも結果は同じ。
+ *
+ * そこで**迷いようが無いときだけ**決める。開いているファイルの作品、
+ * それも無ければ登録が1つのときのその作品。決められなければ undefined を
+ * 返し、これまでどおり出力パネルにだけ残す（無理に書き先を作らない）。
+ */
+function logTargetWorkFolder(registry: WorkRegistry): string | undefined {
+  const uri = vscode.window.activeTextEditor?.document.uri;
+  const opened = uri ? findWorkForPath(registry, fromUri(uri)) : undefined;
+  if (opened) return opened.folderPath;
+  const works = registry.list();
+  return works.length === 1 ? works[0].folderPath : undefined;
 }
 
 /**
