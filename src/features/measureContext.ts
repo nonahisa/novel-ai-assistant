@@ -6,7 +6,7 @@ import {
 } from "../ai/registry";
 import { AIError, recoveryForAIError, type ProviderId } from "../ai/types";
 import { CONTEXT_GUARD_EXEMPT_FEATURE } from "../ai/contextGuard";
-import { TOKENS_PER_CHAR } from "../core/chunker";
+import { contextSizeForPrompt, TOKENS_PER_CHAR } from "../core/chunker";
 import {
   buildProbePrompt,
   describeProbeResult,
@@ -144,32 +144,43 @@ export function doubledTimeoutSeconds(
 }
 
 /**
- * 測定のあいだ、`num_ctx` をこれより小さくはしない。
+ * その回に送る詰め物の長さから、渡す `num_ctx` を決める（設計書6.53.2）。
  *
- * ここまで下げても載らないなら、下げ続けても測定にならない——4,000字
- * （約5,700トークン）が最初に送る長さなので、8,192を割ると**1回目から
- * 切り捨てられた状態**で測ることになり、何を測っているのか分からなくなる。
+ * **申告値に固定してはいけない。** 0.29.2 では読み込み直しを避けるために
+ * 申告値へ固定したが、実機のログで害のほうが大きいと分かった（2026-08-31）。
+ * 申告 262,144 の `gemma4:12b` を固定で載せると、**KVキャッシュだけで
+ * 約4.9GB**（非SWA 4,096MiB＋SWA 960MiB）を確保する。モデル本体が約3.6GB
+ * なので合計8.5GB——**8GBのVRAMに収まらない。**
+ *
+ * ここで効いてくるのが、**Ollamaは「載らない」を失敗として返さない**こと
+ * である。溢れたぶんは黙ってCPUへ逃がすので、こちらから見ると成功したまま
+ * 速度だけが10分の1になる。実機では16,000字の1回に264秒かかり、それより
+ * 長い回は軒並み300秒で時間切れになった。結果として「実効の上限は
+ * 約17,000字」という、**モデルの性質ではなく確保しすぎたメモリを測った値**
+ * が出た。**多めに取っておけば安全、が成り立たない。**
+ *
+ * だから、その回に本当に要るぶんだけを渡す。丸めの段（4,096）は通常の
+ * 呼び出しと同じものを使う——測定は長さを倍々に変えるので読み込み直しは
+ * 起きるが、それは**探索の回数だけ（数回）**であり、チャンクごとに起きて
+ * いた抽出中の点滅（6.53.1）とは桁が違う。
+ *
+ * @param promptChars その回に送るプロンプト全体の字数
+ * @param ceiling モデルの申告値。取れないときは undefined
+ * @returns 渡す `num_ctx`。申告値を取れないなら undefined
+ *   （これまでどおりプロバイダが送る長さから決める）
  */
-export const MIN_FIXED_NUM_CTX = 8192;
-
-/**
- * モデルが載らなかったとき、次に試す `num_ctx`。
- * これ以上小さくできないなら undefined（＝測定を諦める）。
- *
- * **半分にするだけ。** どれだけ減らせば載るかはこちらには分からないので、
- * 当て推量の刻みを持ち込まない（`doubledTimeoutSeconds` と同じ考え方）。
- *
- * 半分が下限を割るときは、**下限そのものを一度だけ試す。** 申告 10,000 の
- * ような値で「半分の 5,000 は下限未満だから諦める」とすると、まだ試して
- * いない 8,192 を飛ばして中止することになる。
- */
-export function halvedNumCtx(current: number | undefined): number | undefined {
-  if (current === undefined) return undefined;
-  if (!Number.isFinite(current) || current <= 0) return undefined;
-  const halved = Math.floor(current / 2);
-  if (halved >= MIN_FIXED_NUM_CTX) return halved;
-  if (current > MIN_FIXED_NUM_CTX) return MIN_FIXED_NUM_CTX;
-  return undefined;
+export function numCtxForProbe(
+  promptChars: number,
+  ceiling: number | undefined
+): number | undefined {
+  if (ceiling === undefined || !Number.isFinite(ceiling) || ceiling <= 0) {
+    return undefined;
+  }
+  return contextSizeForPrompt({
+    promptChars,
+    outputTokens: PROBE_OUTPUT_TOKENS,
+    contextWindow: ceiling,
+  });
 }
 
 /**
@@ -313,36 +324,24 @@ async function runMeasurement(
   );
 
   /**
-   * 測定のあいだ、**全部の呼び出しへ同じ値で渡す** `num_ctx`（設計書6.53）。
+   * `num_ctx` の上限。**上限であって、固定値ではない**（設計書6.53.2）。
    *
-   * Ollama は `num_ctx` が変わるとモデルを読み込み直し、内部の runner を
-   * 起こす（作者の報告「AIチューニングで画面が点滅しています」、2026-08-31）。
-   * 0.28.17 で4096の段に丸めたが、**この機能の仕事は送る長さを倍々に
-   * 変えることそのもの**なので、段では吸収しきれず毎回読み込み直しになる。
-   * 1つに固定すれば読み込みは1回で済み、測定も速くなる。
-   *
-   * 値は**モデルの申告値**。プロバイダが長さから決めるときも上限は申告値
-   * なので、固定しても「入る/入らない」の境目は動かない——短い回で
-   * 要らないメモリを確保するだけである。
-   *
-   * 申告値を取れないときは undefined のまま渡さない（これまでどおり
-   * プロバイダが送る長さから決める）。**当て推量の値を入れない。**
+   * 各回に渡す値は `numCtxForProbe` が送る長さから決め、この値で頭打ちに
+   * する。固定にすると、短い回でも申告ぶんのKVキャッシュを確保して
+   * GPUから溢れ、**黙ってCPUへ落ちる**（そちらの理由は `numCtxForProbe`）。
    */
-  let fixedNumCtx =
+  const numCtxCeiling =
     declaredTokens !== undefined &&
     Number.isFinite(declaredTokens) &&
     declaredTokens > 0
       ? declaredTokens
       : undefined;
-  /**
-   * 申告値のままでは載らず、下げたときの**元の値**。
-   * 下げたことを結果に添えるために覚えておく（黙って下げない）。
-   */
-  let loweredFromNumCtx: number | undefined;
+  /** 実際に渡したうちの最大値。結果に添えるために覚える */
+  let largestNumCtxUsed: number | undefined;
   logStep(
-    fixedNumCtx === undefined
-      ? "読める長さの測定：num_ctx は固定しません（申告値を取れませんでした）。"
-      : `読める長さの測定：num_ctx を ${fixedNumCtx} に固定して測ります。`
+    numCtxCeiling === undefined
+      ? "読める長さの測定：num_ctx は指定しません（申告値を取れませんでした）。"
+      : `読める長さの測定：num_ctx は送る長さに合わせます（上限 ${numCtxCeiling}）。`
   );
 
   const sides: ProbeSides = { headDropped: false, tailDropped: false };
@@ -464,7 +463,10 @@ async function runMeasurement(
           return;
         }
         rounds += 1;
-        const size = state.current;
+        // **絞り込みを控えに取る。** `state` はこの回の中で何度か
+        // 書き換わるので、そのたびに `ProbeState | undefined` へ戻る
+        const round: ProbeState = state;
+        const size = round.current;
         progress.report({
           message: `${size.toLocaleString("ja-JP")} 字を送っています（${rounds}回目）…`,
         });
@@ -486,6 +488,15 @@ async function runMeasurement(
             tailWord,
           });
 
+          // **その回に要るぶんだけを渡す。** 上限で頭打ちにする
+          const numCtx = numCtxForProbe(
+            prompt.systemPrompt.length + prompt.userPrompt.length,
+            numCtxCeiling
+          );
+          if (numCtx !== undefined) {
+            largestNumCtxUsed = Math.max(largestNumCtxUsed ?? 0, numCtx);
+          }
+
           const sentAt = Date.now();
           try {
             const response = await resolved.provider.generate({
@@ -495,10 +506,9 @@ async function runMeasurement(
               // 書き写すだけなので、揺らす理由がまったく無い
               temperature: 0,
               maxOutputTokens: PROBE_OUTPUT_TOKENS,
-              // **測定のあいだ動かさない。** 長さに合わせて変えると、
-              // 送る長さを変えるたびにOllamaがモデルを読み込み直す
-              // （画面が点滅する。設計書6.53）
-              numCtx: fixedNumCtx,
+              // **その回に要るぶんだけ。** 申告値に固定すると、確保した
+              // KVキャッシュがVRAMから溢れて黙ってCPUへ落ちる（6.53.2）
+              numCtx,
               disableThinking: true,
               // 作品に属さない呼び出しなので workFolder は付けない
               // （どこかの作品の送信量に混ぜると、その作品の数字が狂う）。
@@ -534,44 +544,43 @@ async function runMeasurement(
             }
 
             /*
-              **モデルが載らないのは「長すぎた」ではない。**
+              **読み込めなかったのが「長さのせい」かどうかは、下で通って
+              いるかで決まる。**
 
-              固定した `num_ctx` ぶんのメモリを確保できなかっただけで、
-              送った字数とは関係が無い（固定しているので、どの回でも
-              同じように失敗する）。ここを「入らない」と数えると、
-              **一度も通らないまま「実効の上限は0字」**という無意味な
-              結果になる。
+              `num_ctx` を送る長さに合わせるようにしたので（6.53.2）、
+              確保量はその回の長さに比例する。したがって：
 
-              申告値は載るとは限らない——`gemma4:12b` は8GB、この機械の
-              VRAMも8GBで、申告は262144である。**載らなければ測定そのものが
-              できない**ので、確保量を半分にして測り直す（作者の指示、
-              2026-08-31）。下げたことは必ず伝える。
+              - **一度も通っていない**なら、いちばん短い回すら載らなかった
+                ということ。長さを変えても直らないので、**モデルがこの機械に
+                大きすぎる**と伝えて止める
+              - **下で通っている**なら、モデル自体は載っている。この回だけ
+                載らなかったのは長さのせいなので、ふつうに「入らない」と
+                数えて探索を続ける
+
+              固定していた頃（0.29.2）は確保量が長さと無関係だったため、
+              どの回でも同じように失敗した。だから「入らない」と数えては
+              いけなかった。**前提が変わったので、扱いも変える。**
             */
             if (error instanceof AIError && error.kind === "model_load_failed") {
-              const current = fixedNumCtx;
-              const lowered = halvedNumCtx(current);
-              if (current === undefined || lowered === undefined) {
-                // 下限まで下げても載らない。長さを変えても直らないので、
-                // ここで止めて「モデルが大きすぎる」ことだけを伝える
+              if (low <= 0) {
                 loadFailure = error;
                 return;
               }
-              loweredFromNumCtx ??= current;
-              fixedNumCtx = lowered;
               const reason = (error.detail ?? error.message).slice(
                 0,
                 ERROR_EXCERPT_CHARS
               );
+              errorsCountedAsTooLong += 1;
               logStep(
-                `読める長さの測定：num_ctx ${current} ではモデルを読み込めません` +
-                  `でした。${lowered} へ下げて測り直します（${reason}）`
+                `読める長さの測定：${size}字 → この長さではモデルを読み込めません` +
+                  `でした。「入らない」と数えます（${reason}）`
               );
-              progress.report({
-                message:
-                  `モデルを読み込めなかったので、num_ctx を ${lowered} へ` +
-                  "下げて送り直しています…",
-              });
-              continue;
+              // **`outcome` を決めて、この回を抜ける。**
+              // `continue` にすると内側のループ（同じ長さの送り直し）が
+              // 回り続ける。`break` でないと、下の `countErrorAsTooLong`
+              // にも掛かって同じ回を2回数えてしまう
+              outcome = "エラーで入らない";
+              break;
             }
 
             // **時間切れは「長すぎた」とは限らない。** 待ち時間の設定が
@@ -645,7 +654,7 @@ async function runMeasurement(
           low = Math.max(low, size);
           longestResponseSeconds = Math.max(longestResponseSeconds, seconds);
         }
-        state = nextProbeSize(state, bothReturned);
+        state = nextProbeSize(round, bothReturned);
       }
     }
   );
@@ -655,7 +664,7 @@ async function runMeasurement(
   // **読み込みの失敗を先に見る。** 「測れなかった」の理由として、
   // ほかのどの失敗より作者の手が届く（別のモデルを選べばよい）
   if (loadFailure) {
-    reportModelLoadFailure(loadFailure, fixedNumCtx);
+    reportModelLoadFailure(loadFailure, largestNumCtxUsed);
     return;
   }
   if (failure) {
@@ -690,7 +699,7 @@ async function runMeasurement(
       : "") +
     // **どの `num_ctx` で測ったかを言う。** 同じモデルでも確保量が違えば
     // 結果は変わるので、これが無いと作者は「なぜこの結果か」を追えない
-    describeFixedNumCtx(fixedNumCtx, loweredFromNumCtx);
+    describeProbeNumCtx(largestNumCtxUsed);
   logStep(
     `読める長さの測定を終了: ${rounds}回 / ${summary}` +
       (cancelled ? "（中止したため、途中までの結果です）" : "")
@@ -712,23 +721,16 @@ async function runMeasurement(
 /**
  * 結果に添える「どの `num_ctx` で測ったか」の一文。
  *
- * **下げたなら、下げる前の値も出す。** 「65536で測りました」だけでは、
- * 作者には申告どおりに測れたように見える——実際には申告値が載らなかった
- * のだから、結果の読み方（このモデルはこの機械では申告どおり使えない）が
- * まるで違う。
+ * **同じモデルでも確保量が違えば結果は変わる。** これが無いと、作者は
+ * 「なぜこの結果になったのか」を後から追えない。
  */
-export function describeFixedNumCtx(
-  fixedNumCtx: number | undefined,
-  loweredFromNumCtx: number | undefined
+export function describeProbeNumCtx(
+  largestNumCtxUsed: number | undefined
 ): string {
-  if (fixedNumCtx === undefined) return "";
-  const fixed = fixedNumCtx.toLocaleString("ja-JP");
-  if (loweredFromNumCtx === undefined) {
-    return `num_ctx は ${fixed} に固定して測りました。`;
-  }
+  if (largestNumCtxUsed === undefined) return "";
   return (
-    `申告の ${loweredFromNumCtx.toLocaleString("ja-JP")} では読み込めなかった` +
-    `ため、num_ctx を ${fixed} に下げて測りました。`
+    `num_ctx は送る長さに合わせました（この測定で最大 ` +
+    `${largestNumCtxUsed.toLocaleString("ja-JP")}）。`
   );
 }
 

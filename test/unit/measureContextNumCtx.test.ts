@@ -8,21 +8,26 @@ import {
 } from "../../src/ai/types";
 
 /**
- * AIチューニングのあいだ、`num_ctx` を1つに固定する（設計書6.52）。
+ * AIチューニングの `num_ctx` は、**その回に送る長さに合わせる**
+ * （設計書6.53.2）。
  *
- * Ollama は `num_ctx` が変わるとモデルを読み込み直し、内部の runner を
- * 起こす——作者の報告「AIチューニングで画面が点滅しています」
- * （2026-08-31）はこれである。**この機能の仕事は送る長さを倍々に
- * 変えることそのもの**なので、4096の段に丸めるだけでは吸収できない。
- *
- * ただし申告値がそのまま載るとは限らない（`gemma4:12b` は8GB、この機械の
- * VRAMも8GBで、申告は262144）。**載らないと測定そのものができない**ので、
- * 半分ずつ下げて逃げ道を作り、下げたことは必ず作者へ伝える。
+ * 0.29.2 では点滅を止めるために申告値へ固定したが、実機のログで害の
+ * ほうが大きいと分かった（2026-08-31）。申告 262,144 の `gemma4:12b` を
+ * 固定で載せると KVキャッシュだけで約4.9GB を確保し、モデル本体 3.6GB と
+ * 合わせて8GBのVRAMに収まらない。しかも **Ollamaは「載らない」を失敗として
+ * 返さず、黙ってCPUへ逃がす**ので、速度だけが10分の1になる——測定結果は
+ * 「実効の上限 約17,000字」という、確保しすぎたメモリを測っただけの値に
+ * なった。**多めに取っておけば安全、が成り立たない。**
  */
 
 const state = vi.hoisted(() => ({
   /** これから何回、モデルの読み込みに失敗させるか */
   loadFailuresLeft: 0,
+  /**
+   * 何回目の呼び出しから、モデルの読み込みに失敗させるか（1始まり）。
+   * **「下で通ってから載らなくなる」場面**を作るために要る
+   */
+  failLoadFromCall: undefined as number | undefined,
   /** 各回の `generate` が受け取った `num_ctx` */
   numCtxCalls: [] as Array<number | undefined>,
   /** 申告値。undefined なら「申告値を取れない」場面 */
@@ -61,6 +66,16 @@ vi.mock("../../src/ai/registry", () => ({
       isPaid: false,
       generate: async (params: GenerateParams): Promise<GenerateResult> => {
         state.numCtxCalls.push(params.numCtx);
+        if (
+          state.failLoadFromCall !== undefined &&
+          state.numCtxCalls.length >= state.failLoadFromCall
+        ) {
+          throw new AIError(
+            "Ollamaがモデルを読み込めませんでした。",
+            "model_load_failed",
+            "error loading model: unable to allocate CUDA0 buffer"
+          );
+        }
         if (state.loadFailuresLeft > 0) {
           state.loadFailuresLeft -= 1;
           throw new AIError(
@@ -109,9 +124,8 @@ vi.mock("../../src/views/progress", () => ({
 }));
 
 import {
-  halvedNumCtx,
   measureContext,
-  MIN_FIXED_NUM_CTX,
+  numCtxForProbe,
 } from "../../src/features/measureContext";
 
 /** 申告値。8GBのVRAMには載らない大きさ（作者の機械の実例） */
@@ -161,6 +175,7 @@ function allText(showInformationMessage: ReturnType<typeof vi.fn>): string {
 
 beforeEach(() => {
   state.loadFailuresLeft = 0;
+  state.failLoadFromCall = undefined;
   state.numCtxCalls = [];
   state.declaredContextWindow = DECLARED;
   log.steps = [];
@@ -168,47 +183,56 @@ beforeEach(() => {
   log.logFiles = [];
 });
 
-describe("下げる段の決め方", () => {
-  test("半分にする", () => {
-    expect(halvedNumCtx(262144)).toBe(131072);
-    expect(halvedNumCtx(32768)).toBe(16384);
+describe("その回の num_ctx の決め方", () => {
+  test("送る長さに比例して増える（固定していた頃はどちらも申告値だった）", () => {
+    const small = numCtxForProbe(4000, DECLARED) as number;
+    const large = numCtxForProbe(32000, DECLARED) as number;
+    expect(large).toBeGreaterThan(small);
+    // **申告値を確保しない。** ここが 262,144 に戻ると、KVキャッシュが
+    // VRAMから溢れて黙ってCPUへ落ちる（実機で確認、2026-08-31）
+    expect(large).toBeLessThan(DECLARED);
   });
 
-  test("半分が下限を割るなら、下限そのものを一度だけ試す", () => {
-    // 申告 10,000 で「半分の 5,000 は下限未満だから諦める」とすると、
-    // まだ試していない 8,192 を飛ばして中止することになる
-    expect(halvedNumCtx(10000)).toBe(MIN_FIXED_NUM_CTX);
-    expect(halvedNumCtx(16384)).toBe(MIN_FIXED_NUM_CTX);
+  test("申告値で頭打ちにする", () => {
+    expect(numCtxForProbe(1_000_000, 32768)).toBe(32768);
   });
 
-  test("下限そのものが載らなければ、もう下げない", () => {
-    expect(halvedNumCtx(MIN_FIXED_NUM_CTX)).toBeUndefined();
-    expect(halvedNumCtx(4096)).toBeUndefined();
+  test("4096の段に丸めるので、近い長さなら同じ値になる", () => {
+    const value = numCtxForProbe(20000, DECLARED) as number;
+    expect(value % 4096).toBe(0);
+    expect(numCtxForProbe(20500, DECLARED)).toBe(value);
   });
 
-  test("申告値が無ければ下げようが無い", () => {
-    expect(halvedNumCtx(undefined)).toBeUndefined();
-    expect(halvedNumCtx(0)).toBeUndefined();
-    expect(halvedNumCtx(Number.NaN)).toBeUndefined();
+  test("申告値を取れないなら渡さない（当て推量の値を入れない）", () => {
+    expect(numCtxForProbe(4000, undefined)).toBeUndefined();
+    expect(numCtxForProbe(4000, 0)).toBeUndefined();
+    expect(numCtxForProbe(4000, Number.NaN)).toBeUndefined();
   });
 });
 
 describe("測定のあいだの num_ctx", () => {
-  test("全部の呼び出しで同じ値（申告値）を渡す", async () => {
+  test("申告値を確保せず、その回の長さに合わせる", async () => {
     installSettings({});
     const { showInformationMessage } = answerWith("そのままにする");
 
     await measureContext(registry);
 
-    // 何回送ったかは探索の都合で変わる。**変わらないことが要点**である
     expect(state.numCtxCalls.length).toBeGreaterThan(2);
-    expect(new Set(state.numCtxCalls)).toEqual(new Set([DECLARED]));
-    // 固定したことを、測る前に1行残す
-    expect(log.steps.some((line) => line.includes(`num_ctx を ${DECLARED} に固定`))).toBe(
-      true
-    );
-    // 結果にも、どの値で測ったかを添える
-    expect(allText(showInformationMessage)).toContain("num_ctx は 262,144 に固定して測りました");
+    // **短い回で申告ぶんを確保しない。** 全部が 262,144 で埋まっていたのが
+    // 0.29.2 の姿で、実機ではそれが原因でCPUへ落ちていた。
+    // いちばん短い回（4,000字）は、申告値の1割にも満たないはずである
+    expect(state.numCtxCalls[0]).toBeLessThan(DECLARED / 10);
+    // 送る長さが違えば値も違う（1つに固まっていないこと）
+    expect(new Set(state.numCtxCalls).size).toBeGreaterThan(1);
+    // いちばん長い回だけは申告値に届いてよい——**そこを測るための回**であり、
+    // 「その長さは無理」と分かること自体が測定の結果になる
+    expect(Math.max(...state.numCtxCalls.map((value) => value ?? 0))).toBe(DECLARED);
+    // 測る前に、どう決めるかを1行残す
+    expect(
+      log.steps.some((line) => line.includes("num_ctx は送る長さに合わせます"))
+    ).toBe(true);
+    // 結果にも、いくつまで使ったかを添える
+    expect(allText(showInformationMessage)).toContain("num_ctx は送る長さに合わせました");
   });
 
   test("申告値を取れないときは渡さない（長さから決めるこれまでの動き）", async () => {
@@ -220,36 +244,13 @@ describe("測定のあいだの num_ctx", () => {
 
     expect(state.numCtxCalls.length).toBeGreaterThan(0);
     expect(state.numCtxCalls.every((value) => value === undefined)).toBe(true);
-    expect(log.steps.some((line) => line.includes("num_ctx は固定しません"))).toBe(true);
+    expect(log.steps.some((line) => line.includes("num_ctx は指定しません"))).toBe(true);
   });
 });
 
 describe("モデルが載らなかったとき", () => {
-  test("半分にして測り直し、以後もその値で通す", async () => {
-    state.loadFailuresLeft = 1;
-    installSettings({});
-    const { showInformationMessage } = answerWith("そのままにする");
-
-    await measureContext(registry);
-
-    // 1回目＝申告値で失敗、2回目以降＝半分
-    expect(state.numCtxCalls[0]).toBe(DECLARED);
-    expect(state.numCtxCalls.length).toBeGreaterThan(2);
-    expect(new Set(state.numCtxCalls.slice(1))).toEqual(new Set([DECLARED / 2]));
-
-    // **下げたことを隠さない。** ログと結果の両方に出す
-    expect(
-      log.steps.some(
-        (line) =>
-          line.includes("読み込めません") && line.includes(`${DECLARED / 2} へ下げて`)
-      )
-    ).toBe(true);
-    expect(allText(showInformationMessage)).toContain(
-      "申告の 262,144 では読み込めなかったため、num_ctx を 131,072 に下げて測りました"
-    );
-  });
-
-  test("下限まで下げても載らなければ、理由を伝えて中止する", async () => {
+  test("一度も通っていないなら、モデルが大きすぎると伝えて中止する", async () => {
+    // 1回目から載らない＝いちばん短い長さすら載らない
     state.loadFailuresLeft = 99;
     const values: Record<string, unknown> = {};
     installSettings(values);
@@ -257,10 +258,8 @@ describe("モデルが載らなかったとき", () => {
 
     await measureContext(registry);
 
-    // 262144 → 131072 → … → 8192 まで試して打ち切る
-    expect(state.numCtxCalls).toEqual([
-      262144, 131072, 65536, 32768, 16384, MIN_FIXED_NUM_CTX,
-    ]);
+    // **長さを変えて粘らない。** 直し方は「別のモデルを選ぶ」しかない
+    expect(state.numCtxCalls.length).toBe(1);
     // **「入らない」と数えて0字と報告しない。** 測れなかったことを言う
     expect(showInformationMessage).not.toHaveBeenCalled();
     const message = String(showErrorMessage.mock.calls[0]?.[0] ?? "");
@@ -271,6 +270,28 @@ describe("モデルが載らなかったとき", () => {
     // 測れていないのだから、台帳へは何も書かない
     expect(values.modelTuning).toBeUndefined();
     expect(log.failures.length).toBe(1);
+  });
+
+  test("下で通っているなら、その長さは「入らない」と数えて探索を続ける", async () => {
+    // 1回目（いちばん短い長さ）は通り、2回目から載らない。
+    // **`num_ctx` を長さに合わせた今、載らないのは長さのせいである**
+    state.failLoadFromCall = 2;
+    installSettings({});
+    const { showInformationMessage, showErrorMessage } = answerWith("そのままにする");
+
+    await measureContext(registry);
+
+    // 止まらずに探索を続けている
+    expect(state.numCtxCalls.length).toBeGreaterThan(2);
+    // 「モデルが大きすぎる」ではなく、ふつうの結果として報告する
+    expect(showErrorMessage).not.toHaveBeenCalled();
+    const text = allText(showInformationMessage);
+    expect(text).toContain("実効の上限");
+    // **数え方を隠さない**（エラーを「入らない」と読み替えた件数を出す）
+    expect(text).toContain("AIがエラーを返したため");
+    expect(
+      log.steps.some((line) => line.includes("「入らない」と数えます"))
+    ).toBe(true);
   });
 });
 

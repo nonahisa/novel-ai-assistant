@@ -297,7 +297,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-47",
     title: "AIチューニング（測って設定を合わせる）",
     commands: ["novelai.measureContext"],
-    count: 16,
+    count: 18,
   },
   {
     id: "F-46",
@@ -488,4 +488,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 619;
+export const PENDING_CHECK_TOTAL = 621;
