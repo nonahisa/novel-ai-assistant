@@ -194,19 +194,6 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
         requiresWork: true,
         detail: "文字数と原稿用紙の枚数を作品全体で集計します。",
       },
-      {
-        kind: "action",
-        command: "novelai.setWorkGoals",
-        label: "この作品の目標を決める",
-        icon: "target",
-        requiresWork: true,
-        detail:
-          "**作品ごと**の目標です（設定の1日・1月の目標は全作品で共有です）。" +
-          "1記事あたりの目標文字数を決めると、文字数一覧の「長い・短い」を" +
-          "平均ではなく目標と比べます。" +
-          "応募先の**締切日・作品の文字量・日間目標**を入れると、" +
-          "執筆量パネルに「あと何日・あと何字・1日あたり何字」が出ます。",
-      },
     ],
   },
 
@@ -478,19 +465,6 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
       },
       {
         kind: "action",
-        command: "novelai.setPlotBasics",
-        label: "形式とジャンルを決める",
-        icon: "tag",
-        requiresWork: true,
-        detail:
-          "短編・短編集・長編・大長編・SNS記事のどれかと、ジャンルを選んで" +
-          "プロットへ書きます。**ジャンルは投稿先ごとに体系が違う**ため" +
-          "（小説家になろう20・カクヨム12・アルファポリス16・ネオページ59）、" +
-          "どこのジャンルかを添えて書きます。複数の投稿先を選べます。" +
-          "プロットの他の部分には触れません。",
-      },
-      {
-        kind: "action",
         command: "novelai.generatePlot",
         label: "本文からプロットを起こす",
         icon: "sparkle",
@@ -519,18 +493,6 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "誤変換・脱字・衍字など、明らかな入力ミスだけをAIで検知します。" +
               "指摘は下段の「提案」パネルに出て、内容を確認してから" +
               "1件ずつ適用・無視を選べます。自動では書き換えません。",
-          },
-          {
-            kind: "action",
-            command: "novelai.manageKeepWords",
-            label: "直さない語を管理",
-            icon: "circle-slash",
-            requiresWork: true,
-            detail:
-              "方言・口癖・独自の言い回しを登録すると、誤字脱字と推敲で" +
-              "指摘されなくなります。固有名詞は自動で守られますが、" +
-              "「はよ」「あらへん」のような話し方は固有名詞ではないので" +
-              "ここへ足してください。設定/keep_words.json に控えます。",
           },
           {
             kind: "action",
@@ -729,17 +691,6 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "話を選ぶと、その本文からネタバレしない告知文をX用・活動報告用・" +
               "後書き用の3種作ります。ハッシュタグとURLは設定から付け、" +
               "貼るのは作者です（投稿サイトへは書き込みません）。",
-          },
-          {
-            kind: "action",
-            command: "novelai.configureAnnouncement",
-            label: "告知の設定（ハッシュタグ・URL）",
-            description: "AIを使わない",
-            icon: "gear",
-            requiresWork: true,
-            detail:
-              "更新告知に付けるハッシュタグと作品ページのURLを決めます。" +
-              "作品ごとに覚えるので、告知を作るたびに入れ直す必要はありません。",
           },
           {
             kind: "action",
@@ -1052,16 +1003,6 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
-            command: "novelai.manageCustomFields",
-            label: "一覧に項目を増やす",
-            icon: "list-selection",
-            requiresWork: true,
-            detail:
-              "「誕生日」「身長」のように、作品に必要な項目を人物設定へ足します。" +
-              "足した項目は全員の設定資料に並びます。外しても入力済みの内容は消えません。",
-          },
-          {
-            kind: "action",
             command: "novelai.applyPendingUpdates",
             label: "更新分を反映",
             description: "承認制",
@@ -1185,6 +1126,84 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
         detail:
           "文字数の数え方、執筆目標、AIの応答待ち時間などの設定を開きます。" +
           "この拡張機能の設定だけを絞り込んで表示します。",
+      },
+      {
+        /*
+          **一度決めれば、しばらく変えないもの**をここへ集める（設計書6.56）。
+
+          作者の指摘「表に出ている状態のものが多くあります。たくさんあり
+          すぎて目が滑ります」（2026-08-31）。これらは執筆のたびに押すもの
+          ではないのに、毎日使う操作と同じ高さに並んでいた——「この作品の
+          目標を決める」は執筆データに、「形式とジャンルを決める」は
+          執筆AI支援に、というふうに**設定だけが散らばっていた**ので、
+          探すときも見つけにくかった。
+
+          **消さずに、しまう。** 使う場所から遠くなるが、どれも
+          「決めたらしばらく触らない」ものなので、一段深くても困らない。
+        */
+        kind: "section",
+        label: "作品ごとの設定",
+        icon: "settings-gear",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.setWorkGoals",
+            label: "この作品の目標を決める",
+            icon: "target",
+            requiresWork: true,
+            detail:
+              "**作品ごと**の目標です（設定の1日・1月の目標は全作品で共有です）。" +
+              "1記事あたりの目標文字数を決めると、文字数一覧の「長い・短い」を" +
+              "平均ではなく目標と比べます。" +
+              "応募先の**締切日・作品の文字量・日間目標**を入れると、" +
+              "執筆量パネルに「あと何日・あと何字・1日あたり何字」が出ます。",
+          },
+          {
+            kind: "action",
+            command: "novelai.setPlotBasics",
+            label: "形式とジャンルを決める",
+            icon: "tag",
+            requiresWork: true,
+            detail:
+              "短編・短編集・長編・大長編・SNS記事のどれかと、ジャンルを選んで" +
+              "プロットへ書きます。**ジャンルは投稿先ごとに体系が違う**ため" +
+              "（小説家になろう20・カクヨム12・アルファポリス16・ネオページ59）、" +
+              "どこのジャンルかを添えて書きます。複数の投稿先を選べます。" +
+              "プロットの他の部分には触れません。",
+          },
+          {
+            kind: "action",
+            command: "novelai.manageKeepWords",
+            label: "直さない語を管理",
+            icon: "circle-slash",
+            requiresWork: true,
+            detail:
+              "方言・口癖・独自の言い回しを登録すると、誤字脱字と推敲で" +
+              "指摘されなくなります。固有名詞は自動で守られますが、" +
+              "「はよ」「あらへん」のような話し方は固有名詞ではないので" +
+              "ここへ足してください。設定/keep_words.json に控えます。",
+          },
+          {
+            kind: "action",
+            command: "novelai.manageCustomFields",
+            label: "一覧に項目を増やす",
+            icon: "list-selection",
+            requiresWork: true,
+            detail:
+              "「誕生日」「身長」のように、作品に必要な項目を人物設定へ足します。" +
+              "足した項目は全員の設定資料に並びます。外しても入力済みの内容は消えません。",
+          },
+          {
+            kind: "action",
+            command: "novelai.configureAnnouncement",
+            label: "告知の設定（ハッシュタグ・URL）",
+            icon: "gear",
+            requiresWork: true,
+            detail:
+              "更新告知に付けるハッシュタグと作品ページのURLを決めます。" +
+              "作品ごとに覚えるので、告知を作るたびに入れ直す必要はありません。",
+          },
+        ],
       },
       {
         kind: "section",
