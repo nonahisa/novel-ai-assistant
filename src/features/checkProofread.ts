@@ -2,7 +2,11 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError, recoveryForAIError } from "../ai/types";
+import {
+  AIError,
+  isFatalProviderFailure,
+  recoveryForAIError,
+} from "../ai/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import {
@@ -167,6 +171,8 @@ export async function checkProofread(
   let overBudgetCount = 0;
   let failedChunks = 0;
   let cancelled = false;
+  // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
+  let fatalFailure = "";
 
   await withCancellableProgress("推敲しています", async (progress, token) => {
     const controller = new AbortController();
@@ -184,6 +190,7 @@ export async function checkProofread(
     for (let cursor = 0; cursor < queue.length; cursor++) {
       const chunk = queue[cursor];
       if (token.isCancellationRequested) break;
+      if (fatalFailure) break;
 
       const cached = cache.get(chunk.hash, cacheKeyBase);
       let raw: unknown | undefined;
@@ -306,6 +313,12 @@ export async function checkProofread(
         // そのまま数えると、そのチャンクは一度も推敲されないまま終わる
         if (isContextOverflow(error)) {
           return { ok: false, truncated: false, overflow: error };
+        }
+        // **同じ失敗を積まない。** 環境側の失敗はどのチャンクでも同じに
+        // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
+        if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
+          fatalFailure = `${error.message} ${recoveryForAIError(error)}`.trim();
+          logStep(`残りのチャンクは試しません: ${fatalFailure}`);
         }
         failedChunks++;
         logFailure("推敲", {

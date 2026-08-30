@@ -4,7 +4,13 @@ import * as path from "../core/paths";
 import { WorkEntry } from "../models/types";
 import { Character } from "../models/character";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError, recoveryForAIError, type ProviderId } from "../ai/types";
+import {
+  AIError,
+  isConnectivityFailure,
+  isFatalProviderFailure,
+  recoveryForAIError,
+  type ProviderId,
+} from "../ai/types";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
@@ -1267,14 +1273,6 @@ async function showRecoveryPaths(recoveryPaths: string[]): Promise<void> {
   await vscode.window.showTextDocument(doc);
 }
 
-/**
- * 接続断とみなす失敗の種別。
- * 単発なら通信の揺らぎかもしれないが、連続するならAI側が落ちている。
- */
-function isConnectivityFailure(kind: AIError["kind"]): boolean {
-  return kind === "not_running" || kind === "timeout";
-}
-
 /** 1回あたりの待機時間の上限。これを超える指定なら待たずに失敗として扱う */
 const MAX_RATE_LIMIT_WAIT_MS = 90_000;
 
@@ -1351,16 +1349,6 @@ function delay(
 
 /** 連続でこの回数だけ接続に失敗したら、残りのチャンクを試さず中断する */
 const CONNECTIVITY_FAILURE_LIMIT = 3;
-
-function isFatalProviderFailure(kind: AIError["kind"]): boolean {
-  return kind === "authentication_failed" ||
-    kind === "permission_denied" ||
-    // 待っても直らない。残りのチャンクを試すだけ無駄になる
-    kind === "insufficient_credit" ||
-    // モデルが載らないのも同じ。実行中にLM Studio側で外れると起きる
-    kind === "model_load_failed" ||
-    kind === "rate_limited";
-}
 
 function shouldOfferSettings(kind: AIError["kind"]): boolean {
   return kind === "not_running" ||
