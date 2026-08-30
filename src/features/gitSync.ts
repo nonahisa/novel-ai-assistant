@@ -264,7 +264,13 @@ export class GitSyncMonitor implements vscode.Disposable {
       "後で"
     );
     if (action === "設定資料を抽出") {
-      await vscode.commands.executeCommand("novelai.extractSettings");
+      // **どの作品かは、この知らせが既に名指ししている**（作者の報告、
+      // 2026-08-30）。引数無しで呼ぶと作品選択からやり直させることになり、
+      // 「〈作品名〉で更新されました」と言った直後に同じことを訊ねる形になる
+      await vscode.commands.executeCommand("novelai.extractSettings", {
+        type: "work",
+        work,
+      });
     }
   }
 

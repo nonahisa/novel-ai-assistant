@@ -60,7 +60,11 @@ async function pickScope(
       "本文を .md にする"
     );
     if (answer === "本文を .md にする") {
-      await vscode.commands.executeCommand("novelai.convertToMarkdown");
+      // この作品の .txt を変える話をしている。引数無しだと作品選択へ戻す
+      await vscode.commands.executeCommand("novelai.convertToMarkdown", {
+        type: "work",
+        work,
+      });
     }
     return undefined;
   }

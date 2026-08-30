@@ -229,6 +229,18 @@ export class AIError extends Error {
     message: string,
     readonly kind:
       | "not_running"
+      /**
+       * 答えを受け取っている途中で接続が切れた（作者のログ、2026-08-29）。
+       *
+       * **`not_running` と分ける。** あちらの案内は「AIを起動し、接続先設定を
+       * 確認してください」だが、実機で起きたのは**5分ものあいだ答えていた
+       * あとの切断**で、AIは起動していた（直前にモデル一覧を引けている）。
+       * 起動を促しても直らないどころか、作者は起動済みのものを見に行く。
+       *
+       * 手元のAIでは、モデルがメモリから外れた・落ちたときに起きやすい。
+       * ただし**原因を断定しない**（規則5「エラー文から原因を当てにいかない」）。
+       */
+      | "connection_lost"
       | "model_not_found"
       | "timeout"
       | "bad_response"
@@ -288,6 +300,17 @@ export function recoveryForAIError(error: AIError): string {
   switch (error.kind) {
     case "not_running":
       return "AIを起動し、接続先設定を確認してください。";
+    case "connection_lost":
+      // **「起動してください」と言わない。** 切れるまで答えていたのだから、
+      // 起動はしている。手元のAIでいちばん多いのはモデルが載りきらずに
+      // 落ちる場合なので、次に取れる操作として小さいモデルを挙げる。
+      // ただし**断定はしない**（原因はログの code でしか分からない）
+      return (
+        "AIとの接続が答えの途中で切れました。AIが動いたままか確かめてください。" +
+        "手元のAIなら、メモリが足りずにモデルが落ちていることがあります" +
+        "（より小さいモデルにすると直ることがあります）。" +
+        "切れた理由はログに残しています。"
+      );
     case "model_not_found":
       return "利用可能なモデルを選び直してください。";
     case "timeout":

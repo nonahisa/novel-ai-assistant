@@ -229,7 +229,11 @@ async function collectMaterial(
       "中止"
     );
     if (action === "各話あらすじを作る") {
-      await vscode.commands.executeCommand("novelai.generateSynopses");
+      // どの作品かは決まっている。引数無しだと作品選択からやり直させる
+      await vscode.commands.executeCommand("novelai.generateSynopses", {
+        type: "work",
+        work,
+      });
     }
     return undefined;
   }

@@ -148,7 +148,11 @@ export async function restoreFromHistory(work: WorkEntry): Promise<void> {
     "閉じる"
   );
   if (action === "GitHubへ送信") {
-    await vscode.commands.executeCommand("novelai.gitPush");
+    // いま復元した作品を送る。引数無しだと作品選択からやり直させる
+    await vscode.commands.executeCommand("novelai.gitPush", {
+      type: "work",
+      work,
+    });
   }
 }
 

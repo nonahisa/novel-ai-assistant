@@ -13,6 +13,7 @@ import { contextSizeForPrompt } from "../core/chunker";
 // 出力の見込みは**関所と同じ値**を使う（設計書6.27.10）。ここだけ別の値を
 // 持つと「関所は通ったのに num_ctx が足りない」という食い違いになる
 import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
+import { classifyFetchFailure } from "./httpClient";
 import { logLine } from "../core/logger";
 import { withAiWork } from "../core/aiActivity";
 import { resolveTimeoutMs } from "../core/modelTuning";
@@ -465,11 +466,15 @@ export class OllamaProvider implements AIProvider {
           "timeout"
         );
       }
-      // 接続拒否・名前解決失敗はサーバ未起動とみなす
+      // **切れ方で分ける**（`classifyFetchFailure`。写しを作らない）。
+      // 「起動していない」と「答えの途中で切れた」は直し方が違う
+      const classified = classifyFetchFailure(err, "Ollama");
       throw new AIError(
-        `Ollamaに接続できません（${this.endpoint}）`,
-        "not_running",
-        err.message
+        classified.kind === "not_running"
+          ? `Ollamaに接続できません（${this.endpoint}）`
+          : classified.message,
+        classified.kind,
+        classified.detail
       );
     } finally {
       clearTimeout(timer);

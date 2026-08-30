@@ -1034,6 +1034,7 @@ function toExtractionFailure(
 
   const labels: Record<AIError["kind"], string> = {
     not_running: "AIに接続できませんでした。",
+    connection_lost: "AIとの接続が答えの途中で切れました。",
     model_not_found: "選択中のモデルを利用できませんでした。",
     timeout: "AIの応答が時間内に完了しませんでした。",
     bad_response: "AIの応答を利用できませんでした。",
@@ -1272,7 +1273,11 @@ async function showRecoveryPaths(recoveryPaths: string[]): Promise<void> {
  * 単発なら通信の揺らぎかもしれないが、連続するならAI側が落ちている。
  */
 function isConnectivityFailure(kind: AIError["kind"]): boolean {
-  return kind === "not_running" || kind === "timeout";
+  // 途中で切れるのが続くのも「AI側が落ちている」の形である。
+  // 3回続けば残りのチャンクを試さず中断する（数十分の空振りを避ける）
+  return (
+    kind === "not_running" || kind === "timeout" || kind === "connection_lost"
+  );
 }
 
 /** 1回あたりの待機時間の上限。これを超える指定なら待たずに失敗として扱う */

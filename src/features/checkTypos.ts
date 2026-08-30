@@ -824,7 +824,10 @@ function logTypoFailure(
 }
 
 function isConnectivityFailure(kind: AIError["kind"]): boolean {
-  return kind === "not_running" || kind === "timeout";
+  // 途中で切れるのが続くのも「AI側が落ちている」の形である
+  return (
+    kind === "not_running" || kind === "timeout" || kind === "connection_lost"
+  );
 }
 
 function isFatalProviderFailure(kind: AIError["kind"]): boolean {

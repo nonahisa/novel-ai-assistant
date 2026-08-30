@@ -474,6 +474,10 @@ export async function collectEditorProposals(work: WorkEntry): Promise<void> {
     "閉じる"
   );
   if (next === "提案を見る") {
-    await vscode.commands.executeCommand("novelai.reviewProposals");
+    // いま取り込んだ作品の提案を見る。引数無しだと作品選択からやり直させる
+    await vscode.commands.executeCommand("novelai.reviewProposals", {
+      type: "work",
+      work,
+    });
   }
 }
