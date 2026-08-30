@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { childProcessEnv } from "./childProcessEnv";
+import { logFailure, logStep } from "../core/logger";
 
 /**
  * Ollamaサーバーの起動を支援する。
@@ -27,8 +28,18 @@ export function isLocalEndpoint(endpoint: string): boolean {
 /**
  * 実行ファイルの候補を、探す順に返す。
  *
- * 先頭の "ollama" はPATH解決に任せるもの。
- * PATHが通っていない環境のために、既定のインストール先も見る。
+ * **既定の置き場所を先、PATHを後にする**（`lmstudioLauncher.ts` と同じ順）。
+ *
+ * 逆にしていたせいで、**PATHの候補が存在確認なしで必ず返り、実在する
+ * インストール先が一度も試されなかった**（`resolveExecutable` は
+ * 区切りを含まない候補をPATH解決に任せてそのまま返す）。コメントは
+ * 「PATHが通っていない環境のために既定のインストール先も見る」と
+ * 書いてあったが、そこへ到達する道が無かった。
+ *
+ * **Windowsでは現実に起こる**：インストーラがPATHを更新しても、
+ * すでに動いているVS Codeの環境には反映されない。入れた直後に
+ * 起動を試すと「見つからない」で失敗する（作者の報告
+ * 「Ollamaが自動で立ち上がりません」2026-08-30）。0.28.14
  */
 export function executableCandidates(
   platform: NodeJS.Platform = process.platform,
@@ -40,20 +51,20 @@ export function executableCandidates(
       env.LOCALAPPDATA ?? path.join(homedir, "AppData", "Local");
     const programFiles = env.ProgramFiles ?? "C:\\Program Files";
     return [
-      "ollama.exe",
       path.join(localAppData, "Programs", "Ollama", "ollama.exe"),
       path.join(programFiles, "Ollama", "ollama.exe"),
+      "ollama.exe",
     ];
   }
   if (platform === "darwin") {
     return [
-      "ollama",
       "/opt/homebrew/bin/ollama",
       "/usr/local/bin/ollama",
       "/Applications/Ollama.app/Contents/Resources/ollama",
+      "ollama",
     ];
   }
-  return ["ollama", "/usr/local/bin/ollama", "/usr/bin/ollama"];
+  return ["/usr/local/bin/ollama", "/usr/bin/ollama", "ollama"];
 }
 
 /**
@@ -113,11 +124,24 @@ export interface StartOptions {
 export async function startOllama(
   options: StartOptions
 ): Promise<StartOutcome> {
+  // **各段を残す。** LM Studioで「起動しない」と報告されたとき、
+  // 起動処理が一切ログを書いておらず**何が起きたか確かめられなかった**
+  // （設計書6.24）。Ollamaでも同じ報告を受けて同じ状況になったので、
+  // 同じ扱いに揃える（0.28.14）
   const exe = await resolveExecutable(options.executablePath);
-  if (!exe) return { ok: false, reason: "not_installed" };
+  if (!exe) {
+    logFailure("Ollamaの起動", {
+      理由: "実行ファイルが見つからない",
+      探した場所: executableCandidates().join(" / "),
+      設定: options.executablePath ?? "（未指定）",
+    });
+    return { ok: false, reason: "not_installed" };
+  }
+  logStep(`Ollama：起動を試みます（${exe} serve）`);
 
   const probe = options.probe ?? defaultProbe;
   const timeoutMs = options.timeoutMs ?? 30000;
+  const startedAt = Date.now();
 
   try {
     const child = spawn(exe, ["serve"], {
@@ -141,24 +165,31 @@ export async function startOllama(
       }, 300);
     });
     if (spawnError) {
+      logFailure("Ollamaの起動", { 場所: exe, 内容: spawnError.message });
       return { ok: false, reason: "spawn_failed", detail: spawnError.message };
     }
 
     child.unref();
   } catch (e) {
-    return {
-      ok: false,
-      reason: "spawn_failed",
-      detail: e instanceof Error ? e.message : String(e),
-    };
+    const detail = e instanceof Error ? e.message : String(e);
+    logFailure("Ollamaの起動", { 場所: exe, 内容: detail });
+    return { ok: false, reason: "spawn_failed", detail };
   }
 
   // 起動しても即座には応答しないため、応答するまで待つ
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await probe(options.endpoint)) return { ok: true };
+    if (await probe(options.endpoint)) {
+      logStep(`Ollama：応答を確認しました（${Date.now() - startedAt}ミリ秒）`);
+      return { ok: true };
+    }
     await delay(500);
   }
+  logFailure("Ollamaの起動", {
+    場所: exe,
+    理由: `${Math.round(timeoutMs / 1000)}秒待っても応答しませんでした`,
+    接続先: options.endpoint,
+  });
   return { ok: false, reason: "timeout" };
 }
 

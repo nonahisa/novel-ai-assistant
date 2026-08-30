@@ -55,16 +55,36 @@ describe("起動してよい接続先の判定", () => {
 });
 
 describe("実行ファイルの探索", () => {
-  test("Windowsでは既定のインストール先を候補に含める", () => {
+  test("Windowsでは既定のインストール先を先に見て、PATHは最後にする", () => {
     const candidates = executableCandidates(
       "win32",
       { LOCALAPPDATA: "C:\\Users\\test\\AppData\\Local" },
       "C:\\Users\\test"
     );
 
-    expect(candidates[0]).toBe("ollama.exe");
-    expect(candidates).toContain(
+    // **順序が要件そのもの**（0.28.14）。`resolveExecutable` は区切りを
+    // 含まない候補を存在確認せずに返すので、PATHを先頭に置くと
+    // **実在するインストール先が一度も試されない**。Windowsでは
+    // インストーラがPATHを更新しても、すでに動いているVS Codeには
+    // 反映されないため、これは現実に起こる（作者の報告
+    // 「Ollamaが自動で立ち上がりません」）
+    expect(candidates[0]).toBe(
       path.join("C:\\Users\\test\\AppData\\Local", "Programs", "Ollama", "ollama.exe")
+    );
+    expect(candidates.at(-1)).toBe("ollama.exe");
+  });
+
+  test("macOS・LinuxでもPATHは最後に置く", () => {
+    expect(executableCandidates("darwin", {}, "/Users/test").at(-1)).toBe("ollama");
+    expect(executableCandidates("linux", {}, "/home/test").at(-1)).toBe("ollama");
+  });
+
+  test("既定の場所が実在すれば、PATHへ行かずにそれを使う", async () => {
+    // 不具合の再現：PATHを先に置いていたときは、実在する場所があっても
+    // 存在確認なしで "ollama.exe" が返っていた
+    const real = path.join(__dirname, "support", "vscodeStub.ts");
+    await expect(resolveExecutable(undefined, [real, "ollama.exe"])).resolves.toBe(
+      real
     );
   });
 
