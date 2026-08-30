@@ -136,7 +136,8 @@ export interface LaunchedProcess {
 export interface LaunchedStderr {
   on(event: "data", listener: (chunk: Buffer | string) => void): void;
   removeAllListeners(): void;
-  destroy(): void;
+  /** 判定後に読み捨てへ移るとき、イベントループを掴まないようにする */
+  unref?(): void;
 }
 
 export interface StartOptions {
@@ -145,6 +146,11 @@ export interface StartOptions {
   executablePath?: string;
   /** 起動を待つ上限。初回起動は数秒かかる */
   timeoutMs?: number;
+  /**
+   * 起こす前に、既にあるOllamaが立ち上がるのを待つ長さ（`WAIT_FOR_EXISTING_MS`）。
+   * テストから0にして、待たずに起こす枝を通すためにある
+   */
+  waitForExistingMs?: number;
   /** 起動直後を見張る窓の長さ。テストから短くするためにある */
   spawnWatchMs?: number;
   /**
@@ -174,6 +180,23 @@ export interface StartOptions {
  * 長くすると正常な起動がそのぶん遅くなる。
  */
 const SPAWN_WATCH_MS = 1000;
+
+/**
+ * 起こす前に、常駐アプリ側のOllamaが立ち上がるのを待つ長さ（設計書6.55）。
+ *
+ * **待つのは取り合いを避けるためである。** Ollamaは導入時に自分を
+ * スタートアップへ登録するので、ログイン直後は向こうも起動中である。
+ * こちらが先にポートを取ると、向こうは取り返そうと1秒ごとに `serve` を
+ * 起こし続け、そのたびに黒いコンソールが一瞬開く。
+ *
+ * **長くしすぎない。** 本当に動いていないとき、作者はこの秒数だけ
+ * 余計に待たされる。3秒は、Ollamaの起動（数秒）に間に合わせつつ、
+ * 待たされたと感じにくい範囲で選んだ。
+ */
+const WAIT_FOR_EXISTING_MS = 3000;
+
+/** 応答を確かめる間隔。起動待ちのポーリングと同じ刻みにする */
+const PROBE_INTERVAL_MS = 500;
 
 /**
  * 溜めておく標準エラーの上限。
@@ -231,6 +254,49 @@ type ServeSignal =
 export async function startOllama(
   options: StartOptions
 ): Promise<StartOutcome> {
+  const probe = options.probe ?? defaultProbe;
+
+  /*
+    **起こす前に、もう動いていないかを確かめる**（設計書6.55）。
+
+    確かめずに起こすと、既に動いているときでも `ollama serve` を1つ
+    余計に起こすことになる。それは bind に失敗して即死するので害が
+    無さそうに見えるが、**Windowsではそのたびに黒いコンソールが
+    一瞬開く**——作者の報告「点滅するようになりました」（2026-08-31）
+    はこれである。
+
+    ここを通れば、実行ファイルが見つからなくても成功にできる。
+    **動いているものに繋ぐのに、実行ファイルは要らない。**
+  */
+  if (await probe(options.endpoint)) {
+    logStep("Ollama：既に動いているので、起動しません。");
+    return { ok: true };
+  }
+
+  /*
+    **すぐには起こさず、少しだけ待つ**（設計書6.55）。
+
+    Ollamaは導入時に自分をスタートアップへ登録するので、**ログイン直後は
+    常駐アプリ側のOllamaが立ち上がっている最中**である。そこへこちらが
+    先回りして起こすと、こちらがポートを取り、**常駐アプリが取り返そうと
+    1秒ごとに `serve` を起こし続ける**（作者の機械で実測：4分間に232回、
+    そのすべてが bind エラー。黒い窓が延々と点滅する）。
+
+    数秒待って向こうに譲れば、この取り合いそのものが起きない。
+    待っても上がってこないなら、こちらで起こす。
+  */
+  const waitMs = options.waitForExistingMs ?? WAIT_FOR_EXISTING_MS;
+  if (waitMs > 0) {
+    const until = Date.now() + waitMs;
+    while (Date.now() < until) {
+      await delay(PROBE_INTERVAL_MS);
+      if (await probe(options.endpoint)) {
+        logStep("Ollama：待っているあいだに立ち上がりました（起動しません）。");
+        return { ok: true };
+      }
+    }
+  }
+
   // **各段を残す。** LM Studioで「起動しない」と報告されたとき、
   // 起動処理が一切ログを書いておらず**何が起きたか確かめられなかった**
   // （設計書6.24）。Ollamaでも同じ報告を受けて同じ状況になったので、
@@ -246,7 +312,6 @@ export async function startOllama(
   }
   logStep(`Ollama：起動を試みます（${exe} serve）`);
 
-  const probe = options.probe ?? defaultProbe;
   const timeoutMs = options.timeoutMs ?? 30000;
   const startedAt = Date.now();
 
@@ -317,7 +382,13 @@ export async function startOllama(
         ok: false,
         reason: "spawn_failed",
         // 理由が無くても、せめて終了コードは残す（前は何も添えられなかった）
-        detail: `serve が終了コード ${signal.code} で終わりました。`,
+        // **`null` をそのまま作者に見せない。** シグナルで終わると
+        // 終了コードは `null` になる。「終了コード null」では、
+        // プログラマではない作者に何も伝わらない
+        detail:
+          signal.code === null
+            ? "serve が、こちらの知らない理由で終了しました。"
+            : `serve が終了コード ${signal.code} で終わりました。`,
       };
     }
 
@@ -449,9 +520,27 @@ function releaseStderr(child: LaunchedProcess): void {
   if (!stderr) return;
   try {
     stderr.removeAllListeners();
-    stderr.destroy();
+    /*
+      **閉じずに、読み捨てる。**
+
+      当初は `destroy()` で閉じていたが、**閉じると子が死ぬ**ことが
+      実測で分かった（2026-08-31。`detached` + `stdio:[ignore,ignore,pipe]`
+      で起こしたNodeの子は、親がパイプを閉じた41ミリ秒後、次の書き込みで
+      終了コード1で終わった。20回とも同じ）。Ollamaは Go で、ログの
+      書き込みエラーを捨てるのでおそらく生き残るが、**そこに賭ける理由が
+      無い**——賭けに負けると「起こした1秒後に serve が死に、30秒待って
+      時間切れ」という、0.29.4が直そうとしたものより悪い症状になる。
+
+      かといって読むのをやめるだけでは、パイプが詰まって（Windowsでは
+      64KB程度）**今度は serve が書き込みで止まる**。だから
+      「開けたまま、来たものを捨てる」。あわせて `unref()` で、この
+      パイプが拡張機能ホストのイベントループを掴まないようにする——
+      掴んだままだと「VS Codeを閉じてもOllamaは残る」が崩れる。
+    */
+    stderr.on("data", () => {});
+    stderr.unref?.();
   } catch {
-    // 閉じられなくても起動の判定には影響しない。ここで止めるほうが害が大きい
+    // 後始末に失敗しても起動の判定には影響しない。ここで止めるほうが害が大きい
   }
 }
 

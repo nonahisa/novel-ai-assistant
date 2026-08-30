@@ -177,7 +177,6 @@ describe("ポートが使われたままかの見分け", () => {
   });
 });
 
-describe("起動処理", () => {
   /** Ollamaを起こしたことにする子。失敗も終了も知らせない */
   function fakeChild() {
     return {
@@ -203,17 +202,26 @@ describe("起動処理", () => {
     error?: string;
   }) {
     const dataListeners: ((chunk: Buffer) => void)[] = [];
-    const seen = { removedListeners: false, destroyed: false, unrefs: 0 };
+    const seen = {
+      removedListeners: false,
+      destroyed: false,
+      unrefs: 0,
+      stderrUnrefs: 0,
+      /** 後始末のあとに付け直された購読の数（読み捨ての口） */
+      dataListenersAfterRelease: 0,
+    };
     const child = {
       stderr: {
         on(_event: "data", listener: (chunk: Buffer) => void) {
+          if (seen.removedListeners) seen.dataListenersAfterRelease += 1;
           dataListeners.push(listener);
         },
         removeAllListeners() {
           seen.removedListeners = true;
+          dataListeners.length = 0;
         },
-        destroy() {
-          seen.destroyed = true;
+        unref() {
+          seen.stderrUnrefs += 1;
         },
       },
       once(event: "error" | "exit", listener: (arg: never) => void) {
@@ -246,17 +254,87 @@ describe("起動処理", () => {
     spawnMock.mockImplementation(() => fakeChild());
   });
 
-  test("実行ファイルが見つからなければ起動を試みない", async () => {
+/**
+ * 起こす前の確認では応答せず、**起こしたあとは応答する** probe。
+ *
+ * 0.29.6 から `startOllama` は最初に1回だけ「もう動いていないか」を
+ * 確かめる（設計書6.55）。常に `true` を返す probe を渡すと、そこで
+ * 「既に動いている」と判定されて**起こす処理そのものを通らない**ので、
+ * 起動の枝を試すテストはこれを使う。
+ */
+function probeAfterSpawn(): () => Promise<boolean> {
+  let asked = 0;
+  return async () => {
+    asked += 1;
+    return asked > 1;
+  };
+}
+
+describe("起こす前に、もう動いていないかを確かめる（設計書6.55）", () => {
+  test("応答があれば、起こさずに成功を返す", async () => {
+    const outcome = await startOllama({
+      endpoint: "http://localhost:11434",
+      waitForExistingMs: 0,
+      executablePath: process.execPath,
+      probe: async () => true,
+    });
+
+    expect(outcome).toEqual({ ok: true });
+    // **ここが要点。** 確かめずに起こすと、bindに失敗して即死する serve が
+    // 1つ増え、Windowsでは黒いコンソールが一瞬開く（作者の報告、2026-08-31）
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  test("実行ファイルが無くても、応答していれば成功にする", async () => {
+    // **動いているものに繋ぐのに、実行ファイルは要らない**
+    const outcome = await startOllama({
+      endpoint: "http://localhost:11434",
+      waitForExistingMs: 0,
+      executablePath: "C:\\no\\such\\ollama.exe",
+      probe: async () => true,
+    });
+
+    expect(outcome).toEqual({ ok: true });
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  test("待っているあいだに立ち上がったら、起こさない", async () => {
+    // 常駐アプリ側のOllamaが少し遅れて上がってくる状況
+    let asked = 0;
+    const probe = vi.fn(async () => {
+      asked += 1;
+      return asked >= 3;
+    });
+
+    const outcome = await startOllama({
+      endpoint: "http://localhost:11434",
+      waitForExistingMs: 3000,
+      executablePath: process.execPath,
+      probe,
+    });
+
+    expect(outcome).toEqual({ ok: true });
+    // **取り合いが起きない。** こちらが起こしていないので、
+    // 向こうが取り返そうと1秒ごとに serve を起こし続けることも無い
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("起動処理（つづき）", () => {
+  test("実行ファイルが見つからず、応答も無ければ起動を試みない", async () => {
     const probe = vi.fn(async () => false);
 
     const outcome = await startOllama({
       endpoint: "http://localhost:11434",
+      waitForExistingMs: 0,
       executablePath: "C:\\no\\such\\ollama.exe",
       probe,
     });
 
     expect(outcome).toEqual({ ok: false, reason: "not_installed" });
-    expect(probe).not.toHaveBeenCalled();
+    // 確かめには行く（応答があれば実行ファイルは要らないため）
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   test("応答するまで待ってから成功を返す", async () => {
@@ -269,6 +347,7 @@ describe("起動処理", () => {
 
     const outcome = await startOllama({
       endpoint: "http://localhost:11434",
+      waitForExistingMs: 0,
       // 実在するファイルを渡す（`resolveExecutable` が存在を確かめるため）。
       // 起こす処理そのものは差し替えてある
       executablePath: process.execPath,
@@ -277,6 +356,7 @@ describe("起動処理", () => {
     });
 
     expect(outcome).toEqual({ ok: true });
+    // 起こす前の確認を含めて3回（設計書6.55）
     expect(probe).toHaveBeenCalledTimes(3);
   });
 
@@ -290,9 +370,10 @@ describe("起動処理", () => {
     try {
       await startOllama({
         endpoint: "http://localhost:11434",
+        waitForExistingMs: 0,
         executablePath: process.execPath,
         timeoutMs: 1,
-        probe: async () => true,
+        probe: probeAfterSpawn(),
       });
 
       expect(spawnMock).toHaveBeenCalledTimes(1);
@@ -309,6 +390,7 @@ describe("起動処理", () => {
 
     const outcome = await startOllama({
       endpoint: "http://localhost:11434",
+      waitForExistingMs: 0,
       executablePath: process.execPath,
       timeoutMs: 1200,
       probe,
@@ -328,11 +410,12 @@ describe("起動処理", () => {
   test("Windowsでは標準エラーだけを受け取る形で起こす", async () => {
     await startOllama({
       endpoint: "http://localhost:11434",
+      waitForExistingMs: 0,
       executablePath: process.execPath,
       timeoutMs: 1,
       spawnWatchMs: 20,
       platform: "win32",
-      probe: async () => true,
+      probe: probeAfterSpawn(),
     });
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
@@ -352,11 +435,12 @@ describe("起動処理", () => {
     async (platform) => {
       await startOllama({
         endpoint: "http://localhost:11434",
+        waitForExistingMs: 0,
         executablePath: process.execPath,
         timeoutMs: 1,
         spawnWatchMs: 20,
         platform,
-        probe: async () => true,
+        probe: probeAfterSpawn(),
       });
 
       const stdio = spawnMock.mock.calls[0][2].stdio;
@@ -372,6 +456,7 @@ describe("起動処理", () => {
 
     const outcome = await startOllama({
       endpoint: "http://localhost:11434",
+      waitForExistingMs: 0,
       executablePath: process.execPath,
       timeoutMs: 30000,
       spawnWatchMs: 3000,
@@ -389,6 +474,7 @@ describe("起動処理", () => {
 
     const outcome = await startOllama({
       endpoint: "http://localhost:11434",
+      waitForExistingMs: 0,
       executablePath: process.execPath,
       // 時間切れ（30秒待つ経路）へ落ちないことも確かめたい。
       // 落ちていれば、この上限のぶんだけ待たされる
@@ -404,7 +490,8 @@ describe("起動処理", () => {
       expect(outcome.detail).toContain("bind");
     }
     // 疎通は1回だけ。応答しないと分かった時点で待たずに案内する
-    expect(probe).toHaveBeenCalledTimes(1);
+    // 起こす前の確認で1回、落ちたあとの救済で1回（設計書6.55）
+    expect(probe).toHaveBeenCalledTimes(2);
   });
 
   test("bind以外の理由で落ちたときは、標準エラーを添えて起動失敗にする", async () => {
@@ -416,6 +503,7 @@ describe("起動処理", () => {
 
     const outcome = await startOllama({
       endpoint: "http://localhost:11434",
+      waitForExistingMs: 0,
       executablePath: process.execPath,
       timeoutMs: 30000,
       spawnWatchMs: 3000,
@@ -428,8 +516,9 @@ describe("起動処理", () => {
       reason: "spawn_failed",
       detail: 'Error: unknown command "serve" for "ollama"',
     });
-    // ポート衝突ではないので、疎通を確かめる意味は無い
-    expect(probe).not.toHaveBeenCalled();
+    // 起こす前の確認で1回だけ。理由が読めているので、落ちたあとに
+    // もう一度確かめる意味は無い（ポート衝突ではないと分かっている）
+    expect(probe).toHaveBeenCalledTimes(1);
   });
 
   /**
@@ -439,21 +528,35 @@ describe("起動処理", () => {
    * 別に残る。持ち続けると拡張機能ホストがそれに掴まれ、
    * 「VS Codeを閉じてもOllamaが残る」というこれまでの動きが崩れる。
    */
-  test("走り続ける場合は、標準エラーを閉じてから切り離す", async () => {
+  /**
+   * **閉じずに、読み捨てへ移る**（0.29.6）。
+   *
+   * 当初は `destroy()` で閉じていたが、実測で**閉じると子が死ぬ**と
+   * 分かった（親がパイプを閉じた直後、子は次の書き込みで終了する）。
+   * かといって読むのをやめるだけではパイプが詰まって子が止まるので、
+   * 「開けたまま捨てる」しかない。
+   */
+  test("走り続ける場合は、標準エラーを閉じずに読み捨てへ移る", async () => {
     const { child, seen } = scriptedChild({}); // 終了も失敗も知らせない
 
     const outcome = await startOllama({
       endpoint: "http://localhost:11434",
+      waitForExistingMs: 0,
       executablePath: process.execPath,
       timeoutMs: 5000,
       spawnWatchMs: 30,
-      probe: async () => true,
+      probe: probeAfterSpawn(),
       spawner: () => child,
     });
 
     expect(outcome).toEqual({ ok: true });
     expect(seen.removedListeners).toBe(true);
-    expect(seen.destroyed).toBe(true);
+    // **閉じない。** ここが true に戻ると、Ollamaを殺しうる作りへ逆戻りする
+    expect(seen.destroyed).toBe(false);
+    // 読み捨ての購読は付け直す（付けないとパイプが詰まって子が止まる）
+    expect(seen.dataListenersAfterRelease).toBeGreaterThan(0);
+    // パイプがイベントループを掴まないようにする
+    expect(seen.stderrUnrefs).toBe(1);
     expect(seen.unrefs).toBe(1);
   });
 
@@ -463,10 +566,12 @@ describe("起動処理", () => {
    */
   test("理由が読めないまま即終了しても、応答があれば起動済みとして扱う", async () => {
     const { child } = scriptedChild({ exit: 1 }); // 標準エラーは受け取れない
-    const probe = vi.fn(async () => true);
+    // 起こす前の確認では応答せず、即終了したあとの救済で応答する
+    const probe = vi.fn(probeAfterSpawn());
 
     const outcome = await startOllama({
       endpoint: "http://localhost:11434",
+      waitForExistingMs: 0,
       executablePath: process.execPath,
       timeoutMs: 30000,
       spawnWatchMs: 3000,
@@ -476,7 +581,8 @@ describe("起動処理", () => {
     });
 
     expect(outcome).toEqual({ ok: true });
-    expect(probe).toHaveBeenCalledTimes(1);
+    // 起こす前の確認で1回、落ちたあとの救済で1回（設計書6.55）
+    expect(probe).toHaveBeenCalledTimes(2);
   });
 
   test("理由が読めず応答も無ければ、終了コードを添えて起動失敗にする", async () => {
@@ -485,6 +591,7 @@ describe("起動処理", () => {
 
     const outcome = await startOllama({
       endpoint: "http://localhost:11434",
+      waitForExistingMs: 0,
       executablePath: process.execPath,
       // 時間切れ（30秒待つ経路）へ落ちないことも確かめる
       timeoutMs: 30000,
@@ -500,7 +607,8 @@ describe("起動処理", () => {
       // 理由は名指しできないが、終了コードだけは残す
       expect(outcome.detail).toContain("1");
     }
-    expect(probe).toHaveBeenCalledTimes(1);
+    // 起こす前の確認で1回、落ちたあとの救済で1回（設計書6.55）
+    expect(probe).toHaveBeenCalledTimes(2);
   });
 
   test("spawn自体が失敗したときは、これまでどおり起動失敗として返す", async () => {
@@ -509,6 +617,7 @@ describe("起動処理", () => {
 
     const outcome = await startOllama({
       endpoint: "http://localhost:11434",
+      waitForExistingMs: 0,
       executablePath: process.execPath,
       timeoutMs: 30000,
       spawnWatchMs: 3000,

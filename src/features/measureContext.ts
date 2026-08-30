@@ -176,11 +176,17 @@ export function numCtxForProbe(
   if (ceiling === undefined || !Number.isFinite(ceiling) || ceiling <= 0) {
     return undefined;
   }
-  return contextSizeForPrompt({
-    promptChars,
-    outputTokens: PROBE_OUTPUT_TOKENS,
-    contextWindow: ceiling,
-  });
+  // **頭打ちを最後に掛ける。** `contextSizeForPrompt` は下限（4,096）を
+  // 上限より後に適用するので、申告が4,096未満のモデルでは申告を超えた
+  // 値が返る。「申告値で頭打ち」という約束をここで守り直す
+  return Math.min(
+    ceiling,
+    contextSizeForPrompt({
+      promptChars,
+      outputTokens: PROBE_OUTPUT_TOKENS,
+      contextWindow: ceiling,
+    })
+  );
 }
 
 /**
@@ -338,6 +344,14 @@ async function runMeasurement(
       : undefined;
   /** 実際に渡したうちの最大値。結果に添えるために覚える */
   let largestNumCtxUsed: number | undefined;
+  /**
+   * 一度でもモデルが載って応答が返ったか。
+   *
+   * **`low` の代わりに使う。** `low` は「合言葉が両方返った」ときだけ
+   * 増えるので、「載ったが写し損ねた」回を数え落とす（`model_load_failed`
+   * の扱いを分けるときに、それでは誤診断になる）。
+   */
+  let everLoaded = false;
   logStep(
     numCtxCeiling === undefined
       ? "読める長さの測定：num_ctx は指定しません（申告値を取れませんでした）。"
@@ -520,6 +534,8 @@ async function runMeasurement(
               signal: controller.signal,
             });
             seconds = elapsedSeconds(sentAt);
+            // **返ってきた＝モデルは載った。** 合言葉を写せたかとは別である
+            everLoaded = true;
             const judged = judgeProbeAnswer(response.text, headWord, tailWord);
             outcome = judged.head
               ? judged.tail
@@ -562,7 +578,17 @@ async function runMeasurement(
               いけなかった。**前提が変わったので、扱いも変える。**
             */
             if (error instanceof AIError && error.kind === "model_load_failed") {
-              if (low <= 0) {
+              /*
+                **「載ったことがあるか」で見る。`low` では見ない**（0.29.6）。
+
+                `low` が増えるのは「合言葉が**両方**返った」回だけである。
+                小さいモデルは、載ってはいるが写し損ねる（「無し」）ことが
+                あり、そのとき `low` は 0 のままになる。そこから短い長さへ
+                降りて読み込みに失敗すると、**より大きい num_ctx で載って
+                いたのに**「このモデルはこの機械には大きすぎる」と言って
+                しまう。見るべきは「一度でも生成が返ったか」である。
+              */
+              if (!everLoaded) {
                 loadFailure = error;
                 return;
               }
@@ -750,13 +776,23 @@ function reportModelLoadFailure(
 ): void {
   logFailure("読める長さの測定", {
     種別: error.kind,
-    "最後に試したnum_ctx": triedNumCtx,
+    "この回のnum_ctx": triedNumCtx,
     詳細: error.detail,
     本文: error.message,
   });
+  /*
+    **「下げましたが」と言わない**（0.29.6）。
+
+    0.29.5 で「半分ずつ下げる」仕組みを消したのに、案内文だけが
+    「num_ctx を N まで下げましたが」のまま残っていた。**一度も
+    下げていないのに下げたと言う**のは、作者を誤った方へ導く
+    （「これ以上は打つ手が無い」と読める）。
+
+    いま渡っているのは**その回に使った値**なので、そう言う。
+  */
   const tried =
     triedNumCtx !== undefined
-      ? `num_ctx を ${triedNumCtx.toLocaleString("ja-JP")} まで下げましたが、`
+      ? `num_ctx を ${triedNumCtx.toLocaleString("ja-JP")} で試しましたが、`
       : "";
   void vscode.window
     .showErrorMessage(
