@@ -571,8 +571,13 @@ export async function checkTypos(
         }
 
         consecutiveConnectivityFailures = 0;
+        // **分母は `total` を使う。** 送る側（上）と同じ値でなければ、
+        // 同じ実行の中で分母が食い違う。`total` は入り切らなかったチャンクを
+        // 分割して送り直すたびに増えるので、`pending.length` は途中で古くなる
+        // （実際のログに「AIへ送信: 4/9」と「応答を受信: 4/7」が並んでいた。
+        // 作者のログ、2026-08-30）。0.28.13
         logStep(
-          `応答を受信: ${done + 1}/${pending.length} ${label} ` +
+          `応答を受信: ${done + 1}/${total} ${label} ` +
             `（${Math.round((Date.now() - startedAt) / 1000)}秒）`
         );
 
@@ -660,10 +665,14 @@ export async function checkTypos(
       done++;
     }
 
+    // 分母は送受信と同じ `total`。**`chunks.length` は分割の前の数**なので、
+    // 分割が起きた回は「9/7」のように分子が分母を超える（作者のログで発覚）
     logStep(
-      `誤字脱字検知を終了: ${done}/${chunks.length}（失敗 ${failedChunks}件${
-        cancelled ? " / 中止された" : ""
-      }）`
+      `誤字脱字検知を終了: ${done}/${total}（失敗 ${failedChunks}件${
+        total > chunks.length
+          ? ` / 入り切らず ${total - chunks.length}回に分けた`
+          : ""
+      }${cancelled ? " / 中止された" : ""}）`
     );
 
     try {
