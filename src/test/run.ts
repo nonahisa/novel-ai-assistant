@@ -40,7 +40,6 @@ const COMMANDS = [
   "novelai.refresh",
   "novelai.addEpisode",
   "novelai.openWorkFolder",
-  "novelai.showWorkStats",
   "novelai.showWritingStats",
   "novelai.setupAI",
   "novelai.testAI",
