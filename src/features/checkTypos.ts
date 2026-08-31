@@ -206,11 +206,6 @@ export async function checkTypos(
   // 以前は「本文＋固定12,000字」で計算しており、固定費（指示・辞書・作法）が
   // 育つと足りなくなった。組み上がったプロンプトの実測から決める道
   // （`contextSizeForPrompt`）へ揃え、出力の見込みだけを渡す。
-  // 作者が `ollama.numCtx` を明示していれば、その指定を尊重する
-  const configuredNumCtx = vscode.workspace
-    .getConfiguration("novelai")
-    .get<number>("ollama.numCtx", 0);
-  const numCtx = configuredNumCtx > 0 ? configuredNumCtx : undefined;
 
   const scan = await scanWork(work);
   if (scan.episodes.length === 0) {
@@ -525,7 +520,7 @@ export async function checkTypos(
           userPrompt,
           model: resolved.model,
           temperature: 0.0,
-          numCtx,
+
           maxOutputTokens,
           jsonSchema: TYPO_CHECK_SCHEMA as unknown as object,
           disableThinking: true,

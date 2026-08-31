@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "「設定が前の話と食い違っていないか不安」「誤字脱字の見直しがつらい」「AIに原稿を触られたくない」——小説を書く人の困りごとを引き受けるVSCode拡張機能です。本文から設定資料を自動で作り、矛盾や誤字脱字を調べ、執筆量を記録します。AIは提案するだけで、原稿は書き換えません。無料の手元AI（Ollama / LM Studio）だけでも使え、その場合、原稿はパソコンの外へ出ません。",
-  "version": "0.29.7",
+  "version": "0.29.10",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -192,12 +192,6 @@
         "category": "小説執筆"
       },
       {
-        "command": "novelai.showWorkStats",
-        "title": "作品の文字数を表示",
-        "category": "小説執筆",
-        "icon": "$(graph)"
-      },
-      {
         "command": "novelai.showWritingStats",
         "title": "執筆統計を表示",
         "category": "小説執筆",
@@ -383,7 +377,7 @@
       },
       {
         "command": "novelai.manageKeepWords",
-        "title": "直さない語を管理",
+        "title": "指摘対象外を管理",
         "category": "小説執筆",
         "icon": "$(circle-slash)"
       },
@@ -911,16 +905,19 @@
           "group": "1_solo@1"
         }
       ],
+      "editor/title": [
+        {
+          "command": "novelai.openChat",
+          "title": "横のパネルへ移動",
+          "when": "activeWebviewPanelId == novelai.chatPanel",
+          "group": "1_chat@1"
+        }
+      ],
       "view/item/context": [
         {
           "command": "novelai.addEpisode",
           "when": "view == novelai.works && viewItem == work",
           "group": "inline"
-        },
-        {
-          "command": "novelai.showWorkStats",
-          "when": "view == novelai.works && viewItem == work",
-          "group": "1_stats@1"
         },
         {
           "command": "novelai.showWritingStats",
@@ -1048,10 +1045,6 @@
         },
         {
           "command": "novelai.openWorkFolder",
-          "when": "false"
-        },
-        {
-          "command": "novelai.showWorkStats",
           "when": "false"
         },
         {
@@ -1270,7 +1263,7 @@
         "novelai.ollama.endpoint": {
           "type": "string",
           "default": "http://localhost:11434",
-          "description": "OllamaのエンドポイントURL"
+          "markdownDescription": "OllamaのエンドポイントURL\n\n[Ollamaのセットアップ…](command:novelai.setupOllama)"
         },
         "novelai.ollama.executablePath": {
           "type": "string",
@@ -1292,7 +1285,7 @@
         "novelai.modelTuning": {
           "type": "object",
           "default": {},
-          "description": "AIチューニングで測った、モデルごとの上限と待ち時間。「AIチューニング」を実行して「設定に反映」を押すと書き込まれます。手で消せば測る前の状態に戻ります。"
+          "markdownDescription": "AIチューニングで測った、モデルごとの上限と待ち時間。「AIチューニング」を実行して「設定に反映」を押すと書き込まれます。手で消せば測る前の状態に戻ります。\n\n**AIの用意**\n\n[セットアップ（必要なものを入れる）…](command:novelai.runFullSetup)\n\n[機能ごとにAIを割り当てる…](command:novelai.assignFeatureAI)"
         },
         "novelai.mergeChunkChars": {
           "type": "number",
@@ -1349,7 +1342,7 @@
         "novelai.lmstudio.endpoint": {
           "type": "string",
           "default": "http://localhost:1234/v1",
-          "markdownDescription": "LM StudioのローカルサーバーのURL。LM Studioの「Developer」画面でサーバーを開始したときに表示される値に合わせます。通常は変更不要です。"
+          "markdownDescription": "LM StudioのローカルサーバーのURL。LM Studioの「Developer」画面でサーバーを開始したときに表示される値に合わせます。通常は変更不要です。\n\n[LM Studioのセットアップ…](command:novelai.setupLmStudio)"
         },
         "novelai.lmstudio.contextWindow": {
           "type": "number",
@@ -1412,7 +1405,7 @@
         "novelai.vectorSearch.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "相談で使う「意味検索」（ベクトルDB）を使います。切っていても、質問を使って場面を探すこと自体は行われます（語句一致）。入にすると言い換えでの質問にも当たりやすくなりますが、埋め込みモデルの取得（約1.2GB）と、作品ごとの索引づくりが必要になります。非力な機械では切ったままをおすすめします。"
+          "markdownDescription": "相談で使う「意味検索」（ベクトルDB）を使います。切っていても、質問を使って場面を探すこと自体は行われます（語句一致）。入にすると言い換えでの質問にも当たりやすくなりますが、埋め込みモデルの取得（約1.2GB）と、作品ごとの索引づくりが必要になります。非力な機械では切ったままをおすすめします。\n\n[意味検索の準備…](command:novelai.setupVectorSearch)\n\n[検索用の索引を作る・更新する…](command:novelai.buildVectorIndex)\n\n[検索用の索引を削除する…](command:novelai.clearVectorIndex)"
         },
         "novelai.vectorSearch.model": {
           "type": "string",
@@ -1462,7 +1455,7 @@
             "編集者：本文の校正・校閲だけを行えます。設定資料や執筆の機能は使えません"
           ],
           "default": "author",
-          "description": "この環境をどちらとして使うか。編集部の方は「editor」にしてください。操作の記録に残る種別も変わります。"
+          "markdownDescription": "この環境をどちらとして使うか。編集部の方は「editor」にしてください。操作の記録に残る種別も変わります。\n\n[作者／編集者を切り替える…](command:novelai.switchMode)"
         }
       }
     },

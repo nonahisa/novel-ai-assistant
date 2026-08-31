@@ -42,7 +42,7 @@ export async function manageKeepWords(work: WorkEntry): Promise<void> {
         cancelItem("閉じる"),
       ],
       {
-        title: `${work.title}：直さない語（${words.length}件）`,
+        title: `${work.title}：指摘対象外の語（${words.length}件）`,
         placeHolder:
           words.length === 0
             ? "まだ1件もありません。方言や口癖を足すと、誤字脱字と推敲で指摘されなくなります"
@@ -72,7 +72,7 @@ export async function manageKeepWords(work: WorkEntry): Promise<void> {
 
 async function addWord(store: KeepWordStore): Promise<void> {
   const word = await askText({
-    title: "直さない語を足す",
+    title: "指摘対象外の語を足す",
     prompt: "本文に出てくる形で書いてください（例：はよ、せやかて、あらへん）",
     placeHolder: "守りたい語",
     validateInput: (value) => validateKeepWord(value) ?? undefined,

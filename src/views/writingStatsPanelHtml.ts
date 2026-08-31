@@ -294,7 +294,15 @@ function renderCards() {
   cards.push(card(
     state.totalsCardLabel || '作品の総量', formatCount(state.totals.net) + '字',
     '原稿用紙 約' + formatCount(state.totals.pages) + '枚 / ' + state.totals.files + 'ファイル' +
-      (state.totals.workCount !== undefined ? ' / ' + state.totals.workCount + '作品' : ''),
+      (state.totals.workCount !== undefined ? ' / ' + state.totals.workCount + '作品' : '') +
+      // 「作品の文字数を表示」を畳んだぶん、あちらにしか無かった2つを添える。
+      // 全作品の合計では渡らないので、あるときだけ出す
+      (state.totals.gross !== undefined
+        ? ' / 総文字数 ' + formatCount(state.totals.gross) + '字'
+        : '') +
+      (state.totals.paragraphs !== undefined
+        ? ' / ' + formatCount(state.totals.paragraphs) + '段落'
+        : ''),
     null
   ));
 

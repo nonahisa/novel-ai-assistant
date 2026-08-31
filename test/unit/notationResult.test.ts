@@ -85,12 +85,12 @@ describe("0件のとき、理由を言い分ける", () => {
   });
 
   it("全部が「今後直さない」に登録済みだった", () => {
-    // 次に取る手が違う（「直さない語を管理」から外す）
+    // 次に取る手が違う（「指摘対象外を管理」から外す）
     const text = describeNotationResult(
       result({ selectedCount: 2, unifiedCount: 2, dismissedCount: 30 })
     );
     expect(text).toContain("30件");
-    expect(text).toContain("直さない語を管理");
+    expect(text).toContain("指摘対象外を管理");
   });
 
   it("どの理由にも当てはまらなくても、黙らない", () => {

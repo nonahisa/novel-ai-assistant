@@ -81,7 +81,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-12",
     title: "チャンクの大きさの設定",
     commands: ["novelai.openExtensionSettings"],
-    count: 5,
+    count: 7,
   },
   {
     id: "A-13",
@@ -206,13 +206,13 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
   {
     id: "F-7",
     title: "文字数の数え方",
-    commands: ["novelai.showWorkStats"],
+    commands: ["novelai.showWritingStats"],
     count: 6,
   },
   {
     id: "F-8",
     title: "「1話ぶん」の印",
-    commands: ["novelai.showWorkStats"],
+    commands: ["novelai.showWritingStats"],
     count: 1,
   },
   {
@@ -279,7 +279,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-51",
     title: "詳細メニューの整理——散らばっていた「設定」を1か所へ集めた",
     commands: ["novelai.setWorkGoals", "novelai.setPlotBasics", "novelai.manageKeepWords", "novelai.manageCustomFields", "novelai.configureAnnouncement"],
-    count: 3,
+    count: 10,
   },
   {
     id: "F-50",
@@ -494,4 +494,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 627;
+export const PENDING_CHECK_TOTAL = 636;

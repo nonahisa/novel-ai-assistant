@@ -61,6 +61,7 @@ import { readEpisodeContents } from "./extractionFreshness";
 import { resolveMaxOutputTokens } from "../ai/outputLimit";
 import { PendingUpdateStore } from "../core/pendingUpdates";
 import { applyPendingCharacterUpdates } from "./applyPendingUpdates";
+import type { ProposalPanel } from "./proposalPanel";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
 import { readChunkSettings } from "./chunkSettings";
@@ -174,6 +175,17 @@ export interface ExtractCharactersOptions {
    * つまり種別を分けても、作者が払う金額と待ち時間は増えない。
    */
   kinds?: readonly ExtractKind[];
+  /**
+   * 提案パネル。**抽出のあとの「反映するか」をここへ出す**（設計書5.6・6.57.1）。
+   *
+   * 渡さないと `applyPendingCharacterUpdates` がダイアログの道へ落ちる。
+   * **窓口が2つになると、片方を見落とす**——本文の直しは提案パネル、
+   * 設定資料の更新は別のダイアログ、では作者が両方を見て回ることになる。
+   *
+   * 実際に渡し忘れていた（作者の指摘、2026-09-01）。抽出の完了報告から
+   * 押す「更新分を反映」だけが、パネルを通らずダイアログを開いていた。
+   */
+  proposalPanel?: ProposalPanel;
 }
 
 /**
@@ -258,11 +270,6 @@ export async function extractCharacters(
   // 以前は「本文＋固定12,000字」で計算していたが、固定である限り必ず
   // 追い越される。組み上がったプロンプトの実測から決める道
   // （`contextSizeForPrompt`）へ揃え、出力の見込みだけを渡す。
-  // 作者が `ollama.numCtx` を明示していれば、その指定を尊重する
-  const configuredNumCtx = vscode.workspace
-    .getConfiguration("novelai")
-    .get<number>("ollama.numCtx", 0);
-  const numCtx = configuredNumCtx > 0 ? configuredNumCtx : undefined;
 
   const scan = await scanWork(work);
   if (scan.episodes.length === 0) {
@@ -272,15 +279,14 @@ export async function extractCharacters(
 
   // 1話が短い作品では、本文より指示のほうが大きい（実データで2〜3倍）。
   // 隣どうしをまとめて1回で送ると、呼び出し回数も送信量も減る。
-  // 0を指定すると結合しない（1話ずつ処理していた頃の動きに戻す）
-  const configuredMergeChars = vscode.workspace
-    .getConfiguration("novelai")
-    .get<number>("mergeChunkChars", 6000);
-  const mergeChars =
-    Number.isInteger(configuredMergeChars) && configuredMergeChars >= 1
-      ? // 分割の目安を超えて詰め込まない
-        Math.min(configuredMergeChars, chunkChars)
-      : 0;
+  //
+  // **決め方は `readChunkSettings` が持っている**（設計書6.23・6.58）。
+  // ここには「`mergeChunkChars` を読み、既定は6,000」という**写し**が
+  // 残っていた。そのため「モデルによって可変」を選んでいても、
+  // **まとめ送信だけが 6,000字で頭打ち**になっていた——チャンクの上限を
+  // 上げても束ねる量が増えない、という作者の指摘（2026-09-01）の原因である。
+  // 自動のときは `resolveMergeChars` がチャンクの大きさまで詰める。
+  const mergeChars = chunkSettings.mergeChars;
 
   // 競合マーカーを含むファイルはAI処理をブロックする
   const conflicted: string[] = [];
@@ -571,7 +577,7 @@ export async function extractCharacters(
             userPrompt,
             model: resolved.model,
             temperature: 0.2,
-            numCtx,
+
             maxOutputTokens,
             jsonSchema: CHARACTER_EXTRACT_SCHEMA as unknown as object,
             disableThinking: true,
@@ -924,10 +930,13 @@ export async function extractCharacters(
     failure.kind ? shouldOfferSettings(failure.kind) : false
   );
   const actions = [
-    ...(pendingUpdateCount > 0 ? ["更新分を反映"] : []),
+    // **承認待ちがあるなら、いちばん上に置く**（作者の指摘、2026-09-01）。
+    // 抽出のあとに作者が決めるのは「全部反映するか、1件ずつ選ぶか」で、
+    // それを引き受けるのは提案パネルである（設計書5.6・6.57.1）
+    ...(pendingUpdateCount > 0 ? ["提案を見る"] : []),
     ...(failures.length > 0 ? ["詳細を表示", "ログを表示"] : []),
     ...(hasSettingsFailure ? ["設定を開く"] : []),
-    ...(merged ? ["一覧を開く"] : []),
+    ...(merged ? ["設定資料を見る"] : []),
   ];
   const action =
     failures.length > 0 ||
@@ -938,8 +947,10 @@ export async function extractCharacters(
       ? await vscode.window.showWarningMessage(message, ...actions)
       : await vscode.window.showInformationMessage(message, ...actions);
 
-  if (action === "更新分を反映") {
-    await applyPendingCharacterUpdates(work);
+  if (action === "提案を見る") {
+    // **提案パネルへ渡す**（設計書5.6）。渡さないとダイアログの道へ落ち、
+    // 本文の直しと設定資料の更新で窓口が2つに分かれる
+    await applyPendingCharacterUpdates(work, options.proposalPanel);
   } else if (action === "詳細を表示") {
     await showFailureDetails(failures);
   } else if (action === "ログを表示") {
@@ -949,13 +960,30 @@ export async function extractCharacters(
       "workbench.action.openSettings",
       `novelai.${resolved.provider.id}`
     );
-  } else if (action === "一覧を開く") {
-    const store2 = new CharacterStore(work);
-    const dir = await store2.ensureDir();
-    await vscode.commands.executeCommand(
-      "revealInExplorer",
-      path.toUri(dir)
-    );
+  } else if (action === "設定資料を見る") {
+    /*
+      **設定資料パネルを開く**（設計書6.57）。
+
+      以前はここで `revealInExplorer` を呼び、人物フォルダをVS Codeの
+      エクスプローラーで選ばせていた。**作品がワークスペースの外にあると
+      これは効かない**——VS Codeは開いていないフォルダの中を指せないので、
+      代わりに**いま開いているファイルが選ばれる**。作者の報告
+      「一覧を開くを選択すると synopsis.md が開きます」（2026-09-01）は
+      これで、`synopsis.md` はたまたま開いていたファイルだった。
+
+      **作品フォルダは、ワークスペースの外にあるのがふつうである**
+      （原稿は原稿の置き場所にあり、拡張機能の開発とは別の場所にある）。
+      だからフォルダを指す道ではなく、**抽出した中身をそのまま見せる
+      設定資料パネル**へ繋ぐ。ラベルの「一覧」も、フォルダではなく
+      こちらを指している。
+
+      **作品を引数で渡す**（設計書6.52）。渡さないと「どの作品ですか」と
+      訊かれる——たったいまその作品を抽出したのに、である。
+    */
+    await vscode.commands.executeCommand("novelai.openSettingsPanel", {
+      type: "work",
+      work,
+    });
   }
 
   // **取り込んだ話を書き留める**（設計書6.21.3）。

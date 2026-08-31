@@ -168,7 +168,10 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
     devicesColumn: "環境",
     totals: {
       net: scanned.stats.totals.net,
+      // **総文字数と段落数も渡す**（設計書6.56.4）。「作品の文字数を表示」を
+      // 畳んだので、あちらでしか見られなかった2つをここで見せる
       gross: scanned.stats.totals.gross,
+      paragraphs: scanned.stats.totals.paragraphs,
       pages: toManuscriptPages(scanned.stats.totals.manuscriptLines),
       files: scanned.stats.fileCount,
     },

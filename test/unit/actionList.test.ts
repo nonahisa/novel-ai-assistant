@@ -134,7 +134,7 @@ describe("操作メニューの構成", () => {
     const commands = commandsOf(false);
 
     expect(commands).toContain("novelai.extractSettings");
-    expect(commands).toContain("novelai.showWorkStats");
+    expect(commands).toContain("novelai.showWritingStats");
     expect(commands).toContain("novelai.gitSync");
   });
 
@@ -276,11 +276,15 @@ describe("操作メニューの構成", () => {
     );
 
     // 「GitHubで作品管理」は作品が要るが、**消さずに出して押せなくする**
+    //
+    // **並び順も見る。** 「編集部とやり取り」は作者の指示で末尾へ移した
+    // （2026-08-31）。編集部と組まない作者には出番が無く、毎日使う
+    // 「新作開始」「既存作追加」より上にあると目が滑る
     expect(sections.map((section) => section.label)).toEqual([
       "GitHubで作品管理",
-      "編集部とやり取り",
       "新作開始",
       "既存作追加",
+      "編集部とやり取り",
     ]);
   });
 });

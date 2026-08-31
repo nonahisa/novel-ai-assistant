@@ -409,7 +409,7 @@ export function describeNotationResult(
     return (
       `${result.unifiedCount}組を揃えることにしましたが、` +
       `${result.dismissedCount}件はすべて「今後直さない」に登録済みでした。` +
-      "「直さない語を管理」から外せます。"
+      "「指摘対象外を管理」から外せます。"
     );
   }
   return "指摘は作られませんでした。選んだ組では書き換える箇所がありませんでした。";

@@ -78,6 +78,23 @@ export interface ActionItem {
    * false に畳まれ、この項目を並べている枝ごと落ちる。
    */
   devOnly?: boolean;
+  /**
+   * 詳細メニューには並べないが、**実体はここに置いたままにする**操作か
+   * （設計書6.56.3）。
+   *
+   * 作者の指示で詳細メニューから外した操作のうち、**簡単ステップメニューは
+   * 使い続けるもの**がここに当たる（ルビ・傍点・作者／編集者の切り替え）。
+   *
+   * **消してしまうと、写しが生まれる。** 簡単ステップメニューはコマンドIDで
+   * 参照して、見出しと説明をこの木から引く仕組みである（`stepMenu.ts`）。
+   * ここから消すと、あちらが自前の見出しを持つことになり、
+   * **2か所を直さないと食い違う**状態へ戻ってしまう。
+   *
+   * 「消さずに出さない」は、この作品で繰り返し採っている形である
+   * （`processAvailability.ts` の「押せなくして理由を出す」、
+   * `browserOnly` の「動くが出番が無い」）。
+   */
+  hiddenFromActionList?: boolean;
 }
 
 export interface ActionSection {
@@ -185,14 +202,6 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           "誰が何を直したかを、作者・編集者・AIの3つに色分けして並べます。" +
           "編集部と一緒に書いているとき、相手の直しを見落とさないための画面です。" +
           "この画面から履歴は変えられません。",
-      },
-      {
-        kind: "action",
-        command: "novelai.showWorkStats",
-        label: "作品の文字数を表示",
-        icon: "symbol-numeric",
-        requiresWork: true,
-        detail: "文字数と原稿用紙の枚数を作品全体で集計します。",
       },
     ],
   },
@@ -302,33 +311,6 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
       },
       {
         kind: "section",
-        label: "編集部とやり取り",
-        icon: "organization",
-        items: [
-          {
-            kind: "action",
-            command: "novelai.shareWithEditor",
-            label: "編集部へ渡す",
-            icon: "repo-push",
-            requiresWork: true,
-            detail:
-              "この作品だけを入れた非公開リポジトリを作り、本文と設定資料を送ります。" +
-              "ほかの作品は渡りません。編集部が書けるのは提案だけで、本文は書き換わりません。",
-          },
-          {
-            kind: "action",
-            command: "novelai.collectEditorProposals",
-            label: "編集部の提案を取り込む",
-            icon: "repo-pull",
-            requiresWork: true,
-            detail:
-              "編集部が書いた提案を取り寄せて、提案パネルへ並べます。" +
-              "本文には触りません。採るかどうかは1件ずつ作者が決めます。",
-          },
-        ],
-      },
-      {
-        kind: "section",
         label: "新作開始",
         icon: "new-folder",
         items: [
@@ -381,6 +363,33 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
         ],
       },
+      {
+        kind: "section",
+        label: "編集部とやり取り",
+        icon: "organization",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.shareWithEditor",
+            label: "編集部へ渡す",
+            icon: "repo-push",
+            requiresWork: true,
+            detail:
+              "この作品だけを入れた非公開リポジトリを作り、本文と設定資料を送ります。" +
+              "ほかの作品は渡りません。編集部が書けるのは提案だけで、本文は書き換わりません。",
+          },
+          {
+            kind: "action",
+            command: "novelai.collectEditorProposals",
+            label: "編集部の提案を取り込む",
+            icon: "repo-pull",
+            requiresWork: true,
+            detail:
+              "編集部が書いた提案を取り寄せて、提案パネルへ並べます。" +
+              "本文には触りません。採るかどうかは1件ずつ作者が決めます。",
+          },
+        ],
+      },
     ],
   },
 
@@ -395,7 +404,11 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
       {
         kind: "action",
         command: "novelai.openChatPanel",
-        label: "AIに相談する",
+        // **見出しと中身を合わせる**（作者の報告、2026-08-31）。
+        // 「AIに相談する」とだけ書いてあったので、押すと本文の領域に
+        // 大きく開くことが読めなかった——`package.json` のコマンド名は
+        // はじめから「AIに相談する（大きく開く）」で、こちらだけがずれていた
+        label: "AIに相談する（大きく開く）",
         icon: "comment-discussion",
         // 作品のファイルを開いていないと材料が無く、
         // 「作品のファイルを開いてください」としか答えられない
@@ -416,15 +429,21 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
       {
         kind: "action",
         command: "novelai.openChat",
-        label: "AIに相談する（横のパネル）",
-        icon: "comment-discussion",
+        label: "横のパネルへ移動",
+        icon: "layout-sidebar-left",
         requiresWork: true,
         usesAI: true,
         // **大きい画面と両方を残す**（作者の指定、2026-08-28）。
         // 範囲を選んで聞くときは本文が見えている必要があり、
         // 大きい画面では隠れてしまう
+        //
+        // **「開く」ではなく「移動」と書く**（作者の報告、2026-08-31）。
+        // このパネルは左に出しっぱなしなので、押しても**もう開いている**
+        // ことがほとんどで、「クリックしても動作しません」と見えていた。
+        // していることは「そこへ行く」であって「開く」ではない
         detail:
-          "同じ相談を、左の細いパネルで行います。" +
+          "同じ相談を、左の細いパネルで行います（**既に開いているときは、" +
+          "そこへ移動するだけです**）。" +
           "**範囲を選んでから聞くと、そこについての相談として扱います。**" +
           "本文を見ながら聞きたいときは、こちらを使ってください。" +
           "会話は大きい画面と共通なので、どちらで聞いても続きから話せます。",
@@ -493,6 +512,21 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "誤変換・脱字・衍字など、明らかな入力ミスだけをAIで検知します。" +
               "指摘は下段の「提案」パネルに出て、内容を確認してから" +
               "1件ずつ適用・無視を選べます。自動では書き換えません。",
+          },
+          {
+            kind: "action",
+            command: "novelai.manageKeepWords",
+            // **誤字脱字検知のすぐ下に置く**（作者の指示、2026-09-01）。
+            // 指摘を見て「これは直さなくていい」と思った、その場で足す
+            // ものなので、設定として離れた場所に置くと辿り着けない
+            label: "指摘対象外を管理",
+            icon: "circle-slash",
+            requiresWork: true,
+            detail:
+              "方言・口癖・独自の言い回しを登録すると、誤字脱字と推敲で" +
+              "指摘されなくなります。固有名詞は自動で守られますが、" +
+              "「はよ」「あらへん」のような話し方は固有名詞ではないので" +
+              "ここへ足してください。設定/keep_words.json に控えます。",
           },
           {
             kind: "action",
@@ -811,6 +845,9 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
             command: "novelai.addRuby",
             // 開いているファイルに対して働くので、作品の登録は要らない
             requiresWork: false,
+            // **詳細メニューには出さない**（作者の指示、2026-08-31）。
+            // 簡単ステップメニューの「入力を楽に」からは今までどおり使う
+            hiddenFromActionList: true,
             label: "ルビを振る",
             icon: "text-size",
             detail:
@@ -821,8 +858,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.addEmphasis",
-            // 開いているファイルに対して働くので、作品の登録は要らない
             requiresWork: false,
+            hiddenFromActionList: true,
             label: "傍点を付ける",
             icon: "three-bars",
             detail:
@@ -1111,6 +1148,10 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
         label: "作者／編集者を切り替える",
         icon: "person",
         requiresWork: false,
+        // **詳細メニューには出さない**（作者の指示、2026-08-31）。
+        // 設定管理の `novelai.mode` から切り替える。
+        // 簡単ステップメニューの「編集部校正・校閲」からは今までどおり使う
+        hiddenFromActionList: true,
         detail:
           "この環境を「編集者」として使うと、**本文の校正・校閲だけ**を行える" +
           "状態になります。編集部の方と一緒に書くときに使います。" +
@@ -1173,18 +1214,6 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
-            command: "novelai.manageKeepWords",
-            label: "直さない語を管理",
-            icon: "circle-slash",
-            requiresWork: true,
-            detail:
-              "方言・口癖・独自の言い回しを登録すると、誤字脱字と推敲で" +
-              "指摘されなくなります。固有名詞は自動で守られますが、" +
-              "「はよ」「あらへん」のような話し方は固有名詞ではないので" +
-              "ここへ足してください。設定/keep_words.json に控えます。",
-          },
-          {
-            kind: "action",
             command: "novelai.manageCustomFields",
             label: "一覧に項目を増やす",
             icon: "list-selection",
@@ -1221,6 +1250,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            // **詳細メニューには出さない**（設定管理へ移した。設計書6.56.3）
+            hiddenFromActionList: true,
             command: "novelai.assignFeatureAI",
             label: "機能ごとにAIを割り当てる",
             icon: "list-selection",
@@ -1255,6 +1286,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            // **詳細メニューには出さない**（設定管理へ移した。設計書6.56.3）
+            hiddenFromActionList: true,
             command: "novelai.selectOllamaExecutable",
             label: "Ollamaの実行ファイル位置を指定",
             icon: "folder-opened",
@@ -1271,6 +1304,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
         items: [
           {
             kind: "action",
+            // **詳細メニューには出さない**（設定管理へ移した。設計書6.56.3）
+            hiddenFromActionList: true,
             command: "novelai.runFullSetup",
             label: "セットアップ（必要なものを入れる）",
             icon: "checklist",
@@ -1283,6 +1318,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            // **詳細メニューには出さない**（設定管理へ移した。設計書6.56.3）
+            hiddenFromActionList: true,
             command: "novelai.setupOllama",
             label: "Ollamaのセットアップ",
             icon: "cloud-download",
@@ -1294,6 +1331,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            // **詳細メニューには出さない**（設定管理へ移した。設計書6.56.3）
+            hiddenFromActionList: true,
             command: "novelai.setupLmStudio",
             label: "LM Studioのセットアップ",
             icon: "cloud-download",
@@ -1315,6 +1354,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
         items: [
           {
             kind: "action",
+            // **詳細メニューには出さない**（設定管理へ移した。設計書6.56.3）
+            hiddenFromActionList: true,
             command: "novelai.setupVectorSearch",
             label: "意味検索（ベクトルDB）の準備",
             icon: "search-fuzzy",
@@ -1328,6 +1369,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            // **詳細メニューには出さない**（設定管理へ移した。設計書6.56.3）
+            hiddenFromActionList: true,
             command: "novelai.buildVectorIndex",
             label: "検索用の索引を作る・更新する",
             icon: "database",
@@ -1339,6 +1382,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            // **詳細メニューには出さない**（設定管理へ移した。設計書6.56.3）
+            hiddenFromActionList: true,
             command: "novelai.clearVectorIndex",
             // 名前は「作る・更新する」と対にしておく。
             // 片方だけ言い回しを変えると、並べたときに対応が見えない
@@ -1494,6 +1539,24 @@ export function isItemVisibleInRuntime(
   return !item.browserOnly || !runtimeAllowsProcesses;
 }
 
+/**
+ * 詳細メニューの**画面に**並べる項目か（設計書6.56.3）。
+ *
+ * **`isItemVisibleInRuntime` と分けてある。** あちらは「この環境で
+ * 動くか」で、AIへ渡す機能の一覧（`featureGuide`）や実機確認リストの
+ * 突き合わせも通る。`hiddenFromActionList` は**画面に出すかどうかだけ**の
+ * 話なので、そちらまで巻き込むと「メニューに無い操作」として
+ * 案内からも確認リストからも消え、**存在ごと見えなくなる**
+ * （実際、まとめて消したときに4つの検査が落ちた）。
+ */
+export function isItemShownInActionList(
+  item: ActionItem,
+  runtimeAllowsProcesses: boolean
+): boolean {
+  if (item.hiddenFromActionList) return false;
+  return isItemVisibleInRuntime(item, runtimeAllowsProcesses);
+}
+
 /** 分類・小分類の中身を、いまの環境に合わせて絞る */
 export function visibleEntries<T extends ActionItem | ActionSection>(
   entries: readonly T[],
@@ -1504,6 +1567,28 @@ export function visibleEntries<T extends ActionItem | ActionSection>(
       entry.kind !== "action" ||
       isItemVisibleInRuntime(entry, runtimeAllowsProcesses)
   );
+}
+
+/**
+ * 分類・小分類の中身から、**詳細メニューの画面に並べるもの**だけを取る。
+ *
+ * `visibleEntries` との違いは `hiddenFromActionList` を見るかどうかだけで、
+ * 使い分けは `isItemShownInActionList` の説明にある。
+ */
+export function shownEntries<T extends ActionItem | ActionSection>(
+  entries: readonly T[],
+  runtimeAllowsProcesses: boolean
+): T[] {
+  return entries.filter((entry) => {
+    if (entry.kind === "action") {
+      return isItemShownInActionList(entry, runtimeAllowsProcesses);
+    }
+    // **中身が全部隠れた小分類は、見出しごと畳む。** 開いても何も無い行を
+    // 残すと、片づけたはずのメニューがかえって分かりにくくなる
+    return entry.items.some((item) =>
+      isItemShownInActionList(item, runtimeAllowsProcesses)
+    );
+  });
 }
 
 /**
@@ -1752,7 +1837,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       return groups.map((group) => ({ type: "group" as const, group }));
     }
     if (node.type === "group") {
-      return visibleEntries(node.group.entries, canRunProcesses()).map((entry) =>
+      return shownEntries(node.group.entries, canRunProcesses()).map((entry) =>
         entry.kind === "section"
           ? {
               type: "section" as const,
@@ -1763,7 +1848,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       );
     }
     if (node.type === "section") {
-      return visibleEntries(node.section.items, canRunProcesses()).map((item) => ({
+      return shownEntries(node.section.items, canRunProcesses()).map((item) => ({
         type: "action" as const,
         item,
       }));

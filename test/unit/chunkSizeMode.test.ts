@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import {
   CHUNK_SIZE_MODE_AUTO,
   CHUNK_SIZE_MODE_MANUAL,
@@ -167,4 +169,92 @@ describe("まとめたチャンクが含む話", () => {
     // 1つのファイルが2つに割れているとき
     expect(describeChunkScope(chunk(["1.md", "1.md"]), label)).toBe("第1話");
   });
+});
+
+/**
+ * **まとめ送信の決め方を、機能ごとに持たない**（設計書6.23・6.58）。
+ *
+ * `extractCharacters.ts` は `readChunkSettings` を呼びながら、その結果の
+ * `mergeChars` を捨てて `mergeChunkChars`（既定6,000）を自前で読み直して
+ * いた。そのため「モデルによって可変」を選んでいても**まとめ送信だけが
+ * 6,000字で頭打ち**になり、チャンクの上限を上げても束ねる量が増えなかった
+ * （作者の指摘、2026-09-01）。設定の説明文のほうは初めから
+ * 「可変のときはモデルが受けられる量まで詰めます」と書いてあり、
+ * **文書が正しくコードが古い**状態だった。
+ */
+describe("まとめ送信の決め方は1か所だけが持つ", () => {
+  /** 設定を直接読んでよいのは、決め方を持つ `chunkSettings.ts` だけ */
+  const ALLOWED = ["src/features/chunkSettings.ts"];
+
+  it("mergeChunkChars を読むのは chunkSettings.ts だけ", () => {
+    const root = path.join(__dirname, "..", "..");
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!entry.name.endsWith(".ts")) continue;
+        const relative = path
+          .relative(root, full)
+          .split(path.sep)
+          .join("/");
+        if (ALLOWED.includes(relative)) continue;
+        // コメントの中の言及は数えない（経緯を書き残すため）
+        const code = fs
+          .readFileSync(full, "utf8")
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .replace(/\/\/.*$/gm, "");
+        if (code.includes("mergeChunkChars")) offenders.push(relative);
+      }
+    };
+    walk(path.join(root, "src"));
+
+    expect(offenders).toEqual([]);
+  });
+});
+
+/**
+ * **プロバイダの設定は、そのプロバイダが1か所で受ける**（設計書6.58）。
+ *
+ * `novelai.ollama.numCtx` は、誤字脱字・抽出・設定パネルの3か所が
+ * それぞれ自前で読んでいた。**AIを呼ぶ17か所のうち、指定が効くのは
+ * その3つだけ**で、推敲・矛盾検知・伏線・あらすじ・紹介文などでは
+ * 効かなかった（作者の指摘、2026-09-01）。同じ設定が機能によって
+ * 効いたり効かなかったりするのは、作者から見て理由が無い。
+ */
+describe("プロバイダの設定を、機能ごとに読まない", () => {
+  const PROVIDER_SETTINGS: ReadonlyArray<{ key: string; owner: string }> = [
+    { key: "ollama.numCtx", owner: "src/ai/ollamaProvider.ts" },
+  ];
+
+  it.each(PROVIDER_SETTINGS)(
+    "$key を読むのは $owner だけ",
+    ({ key, owner }) => {
+      const root = path.join(__dirname, "..", "..");
+      const offenders: string[] = [];
+      const walk = (dir: string): void => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            walk(full);
+            continue;
+          }
+          if (!entry.name.endsWith(".ts")) continue;
+          const relative = path.relative(root, full).split(path.sep).join("/");
+          if (relative === owner) continue;
+          const code = fs
+            .readFileSync(full, "utf8")
+            .replace(/\/\*[\s\S]*?\*\//g, "")
+            .replace(/\/\/.*$/gm, "");
+          if (code.includes(`"${key}"`)) offenders.push(relative);
+        }
+      };
+      walk(path.join(root, "src"));
+
+      expect(offenders).toEqual([]);
+    }
+  );
 });

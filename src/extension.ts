@@ -2205,34 +2205,6 @@ export async function activate(
     )
   );
 
-  context.subscriptions.push(
-    registerCommand(
-      "novelai.showWorkStats",
-      async (node?: WorkNode) => {
-        const work = await resolveWork(node, registry);
-        if (!work) return;
-
-        const result = await scanWork(work);
-        const t = result.stats.totals;
-        const lines = [
-          `作品: ${work.title}`,
-          `ファイル数: ${result.stats.fileCount}`,
-          `純文字数: ${formatCount(t.net)} 字`,
-          `総文字数: ${formatCount(t.gross)} 字`,
-          `段落数: ${formatCount(t.paragraphs)}`,
-          `原稿用紙換算: 約 ${formatCount(toManuscriptPages(t.manuscriptLines))} 枚`,
-        ];
-        const action = await vscode.window.showInformationMessage(
-          lines.join("  /  "),
-          { modal: true },
-          "執筆量を見る"
-        );
-        if (action === "執筆量を見る") {
-          await openWritingStatsPanel(context, work, deviceId);
-        }
-      }
-    )
-  );
 
   context.subscriptions.push(
     registerCommand(
@@ -2717,6 +2689,8 @@ export async function activate(
 
         const saved = await extractCharacters(work, aiRegistry, {
           kinds: [kind],
+          // 抽出後の「提案を見る」を提案パネルへ通す（設計書6.57.1）
+          proposalPanel,
         });
         if (!saved) return;
 
@@ -2792,7 +2766,10 @@ export async function activate(
 
         if (!(await saveDirtyDocumentsBeforeExtraction(work))) return;
 
-        const extracted = await extractCharacters(work, aiRegistry);
+        const extracted = await extractCharacters(work, aiRegistry, {
+          // 抽出後の「提案を見る」を提案パネルへ通す（設計書6.57.1）
+          proposalPanel,
+        });
         treeProvider.refresh(work.id);
         // 抽出で承認待ちが増えることがある。押さなくても気づけるよう数え直す
         refreshActionBadges();

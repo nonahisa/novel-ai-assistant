@@ -1958,11 +1958,6 @@ export class SettingsPanel {
     // ＋固定12,000字」で必要量を出していたが、固定費は指示・資料の改訂で
     // 育つので、見込みは必ず追い越される。組み上がったプロンプトの実測から
     // 決める道（`contextSizeForPrompt`）へ揃え、出力の見込みだけを渡す。
-    // 作者が `ollama.numCtx` を明示していれば、その指定を尊重する
-    const configuredNumCtx = vscode.workspace
-      .getConfiguration("novelai")
-      .get<number>("ollama.numCtx", 0);
-    const numCtx = configuredNumCtx > 0 ? configuredNumCtx : undefined;
     const maxOutputTokens = resolveMaxOutputTokens();
 
     this.setBusy(true, progressLabel);
@@ -1979,7 +1974,7 @@ export class SettingsPanel {
             // 掘り下げは多少ふくらみがあってよい。抽出（0.2）より少し高くする。
             // 項目の提案は設定として書くので、控えめにする
             temperature: jsonSchema ? 0.3 : 0.5,
-            numCtx,
+
             maxOutputTokens,
             jsonSchema,
             disableThinking: true,

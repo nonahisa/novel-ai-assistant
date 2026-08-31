@@ -29,6 +29,24 @@ const DEFAULT_ENDPOINT = "http://localhost:11434";
  */
 const UNKNOWN_CONTEXT_WINDOW = 8192;
 
+/**
+ * 作者が明示した `num_ctx`（設計書6.58）。指定が無ければ undefined。
+ *
+ * **読むのはここだけにする。** 以前は誤字脱字・抽出・設定パネルの3か所が
+ * それぞれ同じ数行を持っており、**AIを呼ぶ17か所のうち3か所でしか
+ * 指定が効いていなかった**。作者から見れば「設定したのに効く機能と
+ * 効かない機能がある」という状態で、理由を説明できない
+ * （`chunkChars` で同じことが起きている。6.23）。
+ *
+ * **0は「指定なし」。** 設定の説明にそう書いてあり、既定値でもある。
+ */
+export function configuredNumCtx(): number | undefined {
+  const configured = vscode.workspace
+    .getConfiguration("novelai")
+    .get<number>("ollama.numCtx", 0);
+  return configured > 0 ? configured : undefined;
+}
+
 interface TagsResponse {
   models?: Array<{
     name: string;
@@ -298,6 +316,12 @@ export class OllamaProvider implements AIProvider {
     // 長い）。渡されていればそれを使い、無ければ多めの既定で確保する
     const numCtx =
       params.numCtx ??
+      // **作者の指定は、ここ1か所で受ける**（設計書6.58）。
+      // 以前は誤字脱字・抽出・設定パネルの3か所が自前で
+      // `novelai.ollama.numCtx` を読んでおり、**残る14の機能では
+      // 指定が効いていなかった**。同じ設定が機能によって効いたり
+      // 効かなかったりするのは、作者から見て理由が無い（6.23と同じ形）
+      configuredNumCtx() ??
       contextSizeForPrompt({
         promptChars: params.systemPrompt.length + params.userPrompt.length,
         outputTokens: params.maxOutputTokens ?? OUTPUT_RESERVE_TOKENS,
@@ -325,6 +349,22 @@ export class OllamaProvider implements AIProvider {
       ],
       options: {
         temperature: params.temperature,
+        /*
+          **`num_predict` は送らない。出力に上限を掛けない**
+          （作者の判断、2026-09-01。設計書6.58.2）。
+
+          ほかの5つのプロバイダは `novelai.maxOutputTokens` を送信時の
+          上限として渡すが、**Ollamaにだけは渡さない**。これは書き忘れでは
+          なく、設定の説明にも「Ollamaへは送りません」と書いてある。
+
+          **上限を掛けると、長い応答が途中で切れる。** 抽出の応答はJSONで、
+          途中で切れると解析できず**そのチャンクは丸ごと捨てられる**
+          （呼び出し1回ぶんが無駄になる）。手元のOllamaは呼ぶだけなら
+          無料なので、クラウドのように「切ってでも節約する」理由が無い。
+
+          `maxOutputTokens` は**確保するコンテキスト長の計算にだけ**使う
+          （上の `numCtx`）。応答用に空けておく分であって、上限ではない。
+        */
         // これを指定しないとOllamaは既定の短いコンテキストで動き、
         // 入力が黙って切り捨てられる。長文処理では必須。
         num_ctx: numCtx,
