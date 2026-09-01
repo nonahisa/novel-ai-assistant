@@ -47,6 +47,29 @@ export function configuredNumCtx(): number | undefined {
   return configured > 0 ? configured : undefined;
 }
 
+/**
+ * このモデルの実効の上限（設計書6.58.4）。
+ *
+ * **作者が `num_ctx` を決めているなら、それがこのモデルの上限である。**
+ * 申告値をそのまま配ると、**送る直前の関所が見ている上限と、実際に送る
+ * `num_ctx` が食い違う**——関所は申告の262,144と比べて「入る」と言うのに、
+ * Ollamaへは指定の8,192で送るので、**入力が黙って切り捨てられる**
+ * （0.22.14で塞いだのと同じ穴）。
+ *
+ * ここで1つにしておけば、**関所・チャンクの分割・送信の3つが揃う**。
+ *
+ * **指定のほうが大きいときは、申告値を超えない。** モデルが読めない量を
+ * 「読める」と扱っても、切り捨てられるだけである。
+ */
+export function effectiveContextWindow(
+  declared: number,
+  configured: number | undefined
+): number {
+  if (configured === undefined || !Number.isFinite(configured)) return declared;
+  if (configured <= 0) return declared;
+  return Math.min(declared, configured);
+}
+
 interface TagsResponse {
   models?: Array<{
     name: string;
@@ -272,7 +295,20 @@ export class OllamaProvider implements AIProvider {
     return {
       id: name,
       displayName: name,
-      contextWindow,
+      /*
+        **作者が `num_ctx` を決めているなら、それがこのモデルの上限である**
+        （設計書6.58.4）。
+
+        申告値をそのまま返すと、**送る直前の関所が見ている上限と、実際に
+        送る `num_ctx` が食い違う**。関所（`meteredProvider`）は申告値
+        （たとえば262,144）と比べて「入る」と判断するのに、Ollamaへは
+        作者の指定（たとえば8,192）で送るので、**入力が黙って切り捨てられる**
+        ——0.22.14 で塞いだのと同じ穴である。
+
+        チャンクの大きさもここから決まるので、絞れば送る量ごと縮む。
+        **上限を1つにすれば、関所・分割・送信の3つが自動的に揃う。**
+      */
+      contextWindow: effectiveContextWindow(contextWindow, configuredNumCtx()),
       parameterSize,
       capabilities: res.capabilities ?? [],
       tier: inferTier(parameterSize, "ollama"),
