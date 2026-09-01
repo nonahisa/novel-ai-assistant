@@ -4,8 +4,15 @@ import {
   ensureConfigured,
   type AssignableFeature,
 } from "../ai/registry";
-import { AIError, recoveryForAIError, type ProviderId } from "../ai/types";
+import {
+  AIError,
+  recoveryForAIError,
+  type AIProvider,
+  type ProviderId,
+} from "../ai/types";
 import { CONTEXT_GUARD_EXEMPT_FEATURE } from "../ai/contextGuard";
+import { isLocalProvider } from "../ai/otherLocalAi";
+import { resolveMaxOutputTokens } from "../ai/outputLimit";
 import { contextSizeForPrompt, TOKENS_PER_CHAR } from "../core/chunker";
 import {
   buildProbePrompt,
@@ -22,6 +29,16 @@ import {
   type ProbeState,
 } from "../core/contextProbe";
 import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
+import {
+  buildOutputProbePrompt,
+  countOutputLines,
+  describeOutputProbeResult,
+  nextOutputProbeSize,
+  startOutputProbeState,
+  MAX_OUTPUT_LINES,
+  OUTPUT_PROBE_SYSTEM_PROMPT,
+  type OutputProbeState,
+} from "../core/outputProbe";
 import {
   MAX_TIMEOUT_SECONDS,
   modelTuning,
@@ -729,7 +746,7 @@ async function runMeasurement(
   // **数え方を隠さない。** エラーを「入らない」と読み替えた回があるなら、
   // 何回そうしたかを結果に添える（黙って読み替えると、作者は
   // 「全部きれいに測れた」と受け取る）
-  const summary =
+  const inputSummary =
     describeProbeResult({ low, sides, ceilingChars }) +
     (longestResponseSeconds > 0
       ? `いちばん時間がかかった回は ${longestResponseSeconds} 秒でした。`
@@ -748,9 +765,29 @@ async function runMeasurement(
     // 結果は変わるので、これが無いと作者は「なぜこの結果か」を追えない
     describeProbeNumCtx(largestNumCtxUsed);
   logStep(
-    `読める長さの測定を終了: ${rounds}回 / ${summary}` +
+    `読める長さの測定を終了: ${rounds}回 / ${inputSummary}` +
       (cancelled ? "（中止したため、途中までの結果です）" : "")
   );
+
+  /*
+    **続けて「書ける量」を測る**（設計書6.61）。
+
+    手元のAIには出力上限を訊く口が無い（Ollamaの `/api/show` にも
+    LM Studio にもその項目は無い）ので、測るしかない。クラウドは申告値を
+    APIから取れるうえ出力トークンは単価が高いので、**測らないし、
+    測っていないことを黙って混ぜもしない**（何も言わない）。
+
+    読める長さが測れたときだけ続ける。中止・失敗のあとに新しい呼び出しを
+    足すのは、作者の「やめる」に反する。
+
+    **台帳へは書かない。** チャンクの天井との繋ぎ込みは別の判断なので、
+    いまは報告だけにとどめる。
+  */
+  const outputSummary =
+    !cancelled && low > 0 && isLocalProvider(resolved.provider.id)
+      ? await measureOutputLimit(resolved.provider, resolved.model)
+      : "";
+  const summary = inputSummary + outputSummary;
 
   const applied = await offerToSave({
     providerId: resolved.provider.id,
@@ -763,6 +800,179 @@ async function runMeasurement(
   // 反映したなら、戻す相手がもう無い（見立てた秒数で上書きされている）。
   // 反映しなかったときは後始末を残したままにして、外側の `finally` に任せる
   if (applied) cleanup.restoreTimeout = undefined;
+}
+
+/**
+ * **1回の応答でどれだけ書けるか**を測る（設計書6.61）。
+ *
+ * 組み立てと数え方と言葉は `core/outputProbe.ts` にあり、ここは入力側と
+ * 同じく「送る・数える・作者へ見せる」だけを持つ。
+ *
+ * @returns 結果の一文。測れなかったときは空文字（**入力側の結果には
+ * 触らない**——ここで何が起きても、読める長さの報告は出す）
+ */
+async function measureOutputLimit(
+  provider: AIProvider,
+  model: string
+): Promise<string> {
+  const maxOutputTokens = resolveMaxOutputTokens();
+  /*
+    頼める行数の上限。
+
+    1行（"0001" ＋ 改行）はおよそ2〜4トークンなので、設定の出力上限を
+    2で割る。**「設定ぶんは頼める」側へ倒している**——3や4で割ると、
+    設定どおり書けるモデルでも頼む前から頭打ちになり、「上限まで書き切った」
+    としか分からない。多めに頼みすぎたぶんは、書き切れずに探索が縮めるだけで
+    済むので、少なく頼むより害が小さい。
+  */
+  const ceilingLines = Math.min(
+    MAX_OUTPUT_LINES,
+    Math.ceil(maxOutputTokens / 2)
+  );
+
+  /** 最後まで書けた最大の行数 */
+  let low = 0;
+  /** その回にAIが実際に使った出力トークン数（応答に付いてくる実数） */
+  let bestTokens: number | undefined;
+  let rounds = 0;
+  /** 中止・失敗で探索を打ち切ったか */
+  let stopped = false;
+
+  logStep(
+    `書ける量の測定を開始: 上限 ${ceilingLines} 行 / ` +
+      `出力上限の設定 ${maxOutputTokens} トークン`
+  );
+
+  await withCancellableProgress(
+    "AIチューニング：1回に書ける量を測っています",
+    async (progress, token) => {
+      const controller = new AbortController();
+      token.onCancellationRequested(() => controller.abort());
+
+      let state: OutputProbeState | undefined =
+        startOutputProbeState(ceilingLines);
+      while (state) {
+        // 回と回の間で押されたときは、次を送らずに抜ける（入力側と同じ）
+        if (token.isCancellationRequested) {
+          stopped = true;
+          return;
+        }
+        const round: OutputProbeState = state;
+        rounds += 1;
+        progress.report({
+          message:
+            `${round.current.toLocaleString("ja-JP")} 行を頼んでいます` +
+            `（${rounds}回目）…`,
+        });
+
+        const sentAt = Date.now();
+        /** その回に頼んだ量を書き切れたか */
+        let completed = false;
+        try {
+          const response = await provider.generate({
+            systemPrompt: OUTPUT_PROBE_SYSTEM_PROMPT,
+            userPrompt: buildOutputProbePrompt(round.current),
+            model,
+            // 番号を数えるだけなので、揺らす理由がまったく無い
+            temperature: 0,
+            // **測っているのがこの上限である。** ここを削ると、
+            // プロバイダの既定値を測ることになる
+            maxOutputTokens,
+            /*
+              **`num_ctx` は渡さない。** 入力側は「その回に送る長さ」が
+              測る対象そのものなので計算して渡すが、こちらは送る指示が
+              数行しかない。渡さなければプロバイダが送る長さから決め、
+              作者の指定（6.58）とも揃う。出力の見込みは
+              `maxOutputTokens` のほうで伝わる。
+            */
+            disableThinking: true,
+            // 作品に属さない呼び出しなので workFolder は付けない。
+            // 機能名は関所側の定数から取る（入力側と同じ理由）
+            meta: { feature: CONTEXT_GUARD_EXEMPT_FEATURE },
+            signal: controller.signal,
+          });
+          const seconds = elapsedSeconds(sentAt);
+          const written = countOutputLines(response.text);
+          const tokens = response.usage?.outputTokens;
+          completed = written >= round.current;
+          logStep(
+            `書ける量の測定：${round.current}行 → ` +
+              (completed ? "書き切った" : `${written}行で止まった`) +
+              `（${seconds}秒` +
+              (tokens !== undefined ? ` / 出力${tokens}トークン` : "") +
+              "）"
+          );
+          if (completed && round.current > low) {
+            low = round.current;
+            bestTokens = tokens;
+          }
+        } catch (error) {
+          const seconds = elapsedSeconds(sentAt);
+          if (error instanceof AIError && error.kind === "aborted") {
+            stopped = true;
+            return;
+          }
+          if (error instanceof AIError && error.kind === "timeout") {
+            // **時間切れも「その量は書けない」である。** 待っても返って
+            // こない長さは、作者にとって書けないのと変わらない。
+            // ここで探索を止めると、書ける量が分からないまま終わる
+            logStep(
+              `書ける量の測定：${round.current}行 → ${seconds}秒で時間切れ。` +
+                "書き切れなかったものとして数えます。"
+            );
+            completed = false;
+          } else {
+            /*
+              **出力の測定だけを打ち切る。** 入力の結果は既に手にあり、
+              こちらの失敗で捨ててよいものではない（作者にとっては
+              「読める長さも測れなかった」に見えてしまう）。
+
+              通知は出さず、ログにだけ残す——測定の主目的は果たせており、
+              ここでエラーを重ねると本来の結果が読み飛ばされる
+              （規則5「エラーの本文を捨てない」ので、ログには必ず残す）。
+            */
+            logFailure("書ける量の測定", {
+              種別: error instanceof AIError ? error.kind : undefined,
+              行数: round.current,
+              詳細: error instanceof AIError ? error.detail : undefined,
+              本文: error instanceof Error ? error.message : String(error),
+            });
+            stopped = true;
+            return;
+          }
+        }
+        state = nextOutputProbeSize(round, completed);
+      }
+    }
+  );
+
+  /*
+    **途中でやめたときに「1行も書けなかった」と言わない。**
+
+    `describeOutputProbeResult` は 0行を「AIの設定か接続の側に原因が
+    ある」と読む。それは**最後まで探索して0行だった**ときの意味であって、
+    中止や別の失敗で測れなかったことを指してはいけない。
+  */
+  if (stopped && low <= 0) {
+    logStep(`書ける量の測定を終了: ${rounds}回 / 測り切れませんでした。`);
+    return "";
+  }
+
+  // **途中で終わったことは、ログだけでなく通知にも出す。** 探索を
+  // 打ち切った値は「そこまでは書けた」であって「ここが上限」ではない
+  const summary =
+    describeOutputProbeResult({
+      lines: low,
+      tokens: bestTokens,
+      reachedCeiling: low >= ceilingLines,
+    }) +
+    (stopped ? "（測定が途中で終わったため、そこまでの結果です）" : "") +
+    // **「覚えた」と誤解させない。** この通知の末尾には「設定に反映
+    // しますか」が続くので、書ける量も一緒に覚えると読める。反映される
+    // のは読める長さと待ち時間だけである（台帳との繋ぎ込みは6.61）
+    "書ける量は今回の参考値で、設定には入れません。";
+  logStep(`書ける量の測定を終了: ${rounds}回 / ${summary}`);
+  return summary;
 }
 
 /**
