@@ -88,6 +88,22 @@ const MIN_CEILING_TOKENS = 256 * 1024;
  * **待ち時間のほうは6つとも書く。** こちらはどのAIでも取りようがなく、
  * 実際に切れているのはローカルの小さいモデルとクラウドの両方である。
  */
+/**
+ * 申告の文脈長が**当て推量**であるプロバイダ（設計書6.62.1）。
+ *
+ * ここは作者が設定（`novelai.sakura.contextWindow` など）に書いた値を
+ * そのまま返してくるだけなので、**申告より長く読めるかもしれない**。
+ * だから 256K までは試す。
+ *
+ * **ほかは信じる。** Ollama は `/api/show`、LM Studio は読み込み済み
+ * モデル、Gemini・Claude は API から取れる**実測に基づく値**である。
+ * 超えて送っても必ず弾かれるので、いちばん大きい1回を捨てるだけになる。
+ */
+const GUESSED_CONTEXT_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
+  "sakura",
+  "openai",
+]);
+
 const CONTEXT_TUNABLE_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
   "sakura",
   "lmstudio",
@@ -305,7 +321,12 @@ async function runMeasurement(
 
   const modelInfo = await registry.resolveModelInfo(feature);
   const declaredTokens = modelInfo?.contextWindow;
-  const ceilingChars = ceilingCharsFor(declaredTokens);
+  // **申告が実測に基づく相手は、そこを超えて試さない**（設計書6.62.1）。
+  // 当て推量なのは、作者が設定に書く さくら・ChatGPT だけである
+  const ceilingChars = ceilingCharsFor(
+    declaredTokens,
+    !GUESSED_CONTEXT_PROVIDERS.has(resolved.provider.id)
+  );
 
   const estimateTokens = estimateProbeTokens(ceilingChars);
   const ok = await confirmPaidUsage(resolved.provider, {
@@ -822,8 +843,27 @@ function elapsedSeconds(sentAt: number): number {
  * 返したいので、指示と応答の分を含めたまま返すと、上限のあたりで
  * 詰め物が申告値をわずかに超えてしまう。
  */
-function ceilingCharsFor(declaredTokens: number | undefined): number {
-  const tokens = Math.max(declaredTokens ?? 0, MIN_CEILING_TOKENS);
+function ceilingCharsFor(
+  declaredTokens: number | undefined,
+  /**
+   * 申告値を信じてよいか（設計書6.62.1）。
+   *
+   * **申告が実測に基づくなら、それを超えて試さない。** LM Studio は
+   * 読み込み済みモデルの文脈長を返すので、そこを超える長さは**必ず
+   * 弾かれる**——作者のログ（2026-09-01）では、申告 131,072 のモデルへ
+   * 261,770トークン相当を送り、「関所で止まった」で1回を捨てていた。
+   * しかも 6.59 で公称値へ跳ぶようにしたぶん、**捨てるのはいちばん
+   * 大きい回**になる。
+   *
+   * 逆に、さくらの申告値は**作者が設定に書いた当て推量**なので、
+   * そこで止めると「申告以上に読めるか」を永久に確かめられない。
+   * だから信じてよい相手だけを分ける。
+   */
+  trustDeclared: boolean
+): number {
+  const tokens = trustDeclared
+    ? (declaredTokens ?? MIN_CEILING_TOKENS)
+    : Math.max(declaredTokens ?? 0, MIN_CEILING_TOKENS);
   const usableTokens = tokens - PROBE_OUTPUT_TOKENS;
   const chars = Math.floor(usableTokens / TOKENS_PER_CHAR) - probeOverheadChars();
   return Math.max(MIN_PROBE_CHARS, chars);

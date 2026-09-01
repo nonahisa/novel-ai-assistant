@@ -276,6 +276,18 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 1,
   },
   {
+    id: "F-53",
+    title: "F5限定：Ollamaの応答を流しながら受け取る実験",
+    commands: ["novelai.extractSettings", "novelai.openChatPanel"],
+    count: 2,
+  },
+  {
+    id: "F-52",
+    title: "待ち時間300秒の壁——通信部品（undici）側の上限も設定に合わせた",
+    commands: ["novelai.extractSettings"],
+    count: 1,
+  },
+  {
     id: "F-51",
     title: "詳細メニューの整理——散らばっていた「設定」を1か所へ集めた",
     commands: ["novelai.setWorkGoals", "novelai.setPlotBasics", "novelai.manageKeepWords", "novelai.manageCustomFields", "novelai.configureAnnouncement"],
@@ -494,4 +506,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 638;
+export const PENDING_CHECK_TOTAL = 641;

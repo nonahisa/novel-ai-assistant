@@ -11,6 +11,12 @@ import {
 import { countByteFallback, decodeByteFallback } from "../core/byteFallback";
 import { contextSizeForPrompt } from "../core/chunker";
 import { describeFetchFailure, isFetchTimeout } from "./httpClient";
+import {
+  applyStreamLine,
+  emptyStreamedChat,
+  streamingEnabled,
+  takeCompleteLines,
+} from "./ollamaStream";
 // 出力の見込みは**関所と同じ値**を使う（設計書6.27.10）。ここだけ別の値を
 // 持つと「関所は通ったのに num_ctx が足りない」という食い違いになる
 import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
@@ -417,12 +423,27 @@ export class OllamaProvider implements AIProvider {
 
     let res: ChatResponse;
     try {
-      res = await this.fetchJson<ChatResponse>(
-        "/api/chat",
-        body,
-        this.requestTimeoutMs(params.model),
-        params.signal
-      );
+      /*
+        **流して受け取る道は、開発ビルドでだけ通る**（設計書6.63.1）。
+
+        `__DEV_HELPERS__` は本番ビルドで false に畳まれ、esbuild が
+        この枝ごと落とす（`esbuild.js`）。作者がF5で確かめるための実験で、
+        利用者へ出すのは「通信部品の待ち時間を明示する」ほう
+        （`fetchTimeouts.ts`）である。
+      */
+      res = __DEV_HELPERS__ && streamingEnabled()
+        ? await this.streamChat(
+            body,
+            this.requestTimeoutMs(params.model),
+            params.signal,
+            params.onThinking
+          )
+        : await this.fetchJson<ChatResponse>(
+            "/api/chat",
+            body,
+            this.requestTimeoutMs(params.model),
+            params.signal
+          );
     } catch (e) {
       if (e instanceof AIError) throw e;
       throw new AIError(String(e), "unknown");
@@ -470,6 +491,129 @@ export class OllamaProvider implements AIProvider {
       truncated: res.done_reason === "length",
       elapsedMs: Date.now() - started,
     };
+  }
+
+  /**
+   * `/api/chat` を**流しながら**受け取る（設計書6.63.1。開発ビルド限定）。
+   *
+   * 受け取った断片を `ollamaStream.ts` が組み立て、`stream:false` の
+   * 応答と同じ形（`ChatResponse`）にして返す。**呼ぶ側は違いを知らない。**
+   *
+   * **待ち時間の扱いが変わる。** ヘッダーは即座に届くので「ヘッダー待ち」の
+   * 上限には当たらない。代わりに、**最後の断片が届いてからの間**を
+   * こちらの待ち時間で見る——生成が続いている限り断片が流れてくるので、
+   * 止まったときだけ切れる。
+   */
+  private async streamChat(
+    body: Record<string, unknown>,
+    timeoutMs: number,
+    externalSignal?: AbortSignal,
+    /** 思考が届くたびに呼ぶ。相談パネルが画面へ流す（設計書6.63.2） */
+    onThinking?: (delta: string) => void
+  ): Promise<ChatResponse> {
+    const controller = new AbortController();
+    let abortSource: "caller" | "timeout" | undefined;
+    const abort = (source: "caller" | "timeout") => {
+      if (abortSource !== undefined) return;
+      abortSource = source;
+      controller.abort();
+    };
+    // **断片が届くたびに数え直す。** 全体の上限にすると、長い生成が
+    // まっとうに進んでいても途中で切ってしまう
+    let timer = setTimeout(() => abort("timeout"), timeoutMs);
+    const bump = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => abort("timeout"), timeoutMs);
+    };
+    const onExternalAbort = () => abort("caller");
+    if (externalSignal?.aborted) onExternalAbort();
+    else externalSignal?.addEventListener("abort", onExternalAbort);
+
+    const started = Date.now();
+    try {
+      const response = await fetch(`${this.endpoint}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, stream: true }),
+        signal: controller.signal,
+      });
+      if (!response.ok || !response.body) {
+        throw new AIError(
+          `Ollamaがエラーを返しました (HTTP ${response.status})。`,
+          "bad_response"
+        );
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const state = emptyStreamedChat();
+      let buffer = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bump();
+        buffer += decoder.decode(value, { stream: true });
+        const { lines, rest } = takeCompleteLines(buffer);
+        buffer = rest;
+        for (const line of lines) {
+          const before = state.thinking ?? "";
+          applyStreamLine(state, line);
+          // **増えた分だけを渡す。** 全文を毎回渡すと、受け取る側が
+          // 差分を計算する羽目になり、同じ理屈が2か所に散る
+          const after = state.thinking ?? "";
+          if (onThinking && after.length > before.length) {
+            onThinking(after.slice(before.length));
+          }
+        }
+      }
+      /*
+        **最後に取り込み器を空にする**（設計書6.63.1）。
+
+        `decode(value, { stream: true })` は、**多バイト文字の途中で切れた
+        バイトを内部に溜めて次へ持ち越す**。日本語は1文字3バイトなので、
+        断片の境目が文字の途中に落ちるのはむしろ普通である。
+        持ち越しの仕組みがあるおかげでそこは壊れないが、
+        **最後に空にしないと、溜まったままの分が消える。**
+
+        引数なしの `decode()` が、その持ち越しを吐き出す。
+      */
+      buffer += decoder.decode();
+      // 最後の断片（改行で終わっていない場合）も取り込む
+      applyStreamLine(state, buffer);
+
+      logLine(
+        `Ollama：流して受信（${Math.round((Date.now() - started) / 1000)}秒 / ` +
+          `${state.content.length}字 / 出力 ${state.evalCount ?? "不明"}トークン）`
+      );
+
+      return {
+        message: { content: state.content },
+        done_reason: state.truncated ? "length" : "stop",
+        error: state.error,
+        eval_count: state.evalCount,
+        prompt_eval_count: state.promptEvalCount,
+      } as ChatResponse;
+    } catch (error) {
+      if (error instanceof AIError) throw error;
+      const err = error as Error;
+      if (err.name === "AbortError") {
+        if (abortSource === "caller") {
+          throw new AIError("処理が中止されました。", "aborted");
+        }
+        throw new AIError(
+          `Ollamaの応答がタイムアウトしました（${Math.round(timeoutMs / 1000)}秒）。`,
+          "timeout"
+        );
+      }
+      throw new AIError(
+        "Ollamaに接続できません。",
+        "not_running",
+        describeFetchFailure(error)
+      );
+    } finally {
+      clearTimeout(timer);
+      externalSignal?.removeEventListener("abort", onExternalAbort);
+    }
   }
 
   private async fetchJson<T>(

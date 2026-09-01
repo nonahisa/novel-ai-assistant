@@ -1,3 +1,4 @@
+import { timeoutDispatcher } from "./fetchTimeouts";
 import { AIError } from "./types";
 
 /**
@@ -91,6 +92,10 @@ export async function fetchJson<T>(request: JsonRequest): Promise<T> {
   }
 
   try {
+    // **Nodeの通信部品にも、こちらの待ち時間を渡す**（設計書6.63）。
+    // 渡さないと、応答ヘッダーを待つ上限（既定300秒）が先に効いてしまい、
+    // 設定した待ち時間の出番が来ない
+    const dispatcher = await timeoutDispatcher(request.timeoutMs);
     const response = await fetch(request.url, {
       method: request.method ?? (request.body === undefined ? "GET" : "POST"),
       headers: {
@@ -99,7 +104,9 @@ export async function fetchJson<T>(request: JsonRequest): Promise<T> {
       },
       body: request.body === undefined ? undefined : JSON.stringify(request.body),
       signal: controller.signal,
-    });
+      // 型には無い（Node独自の拡張）。ブラウザでは undefined になり無視される
+      ...(dispatcher ? { dispatcher } : {}),
+    } as RequestInit);
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");

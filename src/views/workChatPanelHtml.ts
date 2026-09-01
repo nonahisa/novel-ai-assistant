@@ -266,6 +266,10 @@ const inputEl = document.getElementById('input');
 const sendEl = document.getElementById('send');
 const clearEl = document.getElementById('clear');
 const thinkingEl = document.getElementById('thinking');
+/** 流れてきた思考。答えが出たら捨てる */
+let thought = '';
+/** 画面に出す思考の長さ。長すぎると入力欄まで押し下げる */
+const THOUGHT_TAIL = 120;
 const hintEl = document.getElementById('hint');
 // ツールバーは大きく開いたときにしか無い。**必ず有無を確かめてから使う**
 const chooseWorkEl = document.getElementById('choose-work');
@@ -656,8 +660,26 @@ window.addEventListener('message', (event) => {
     thinkingEl.textContent = message.summary + '。考えています…';
     return;
   }
+  if (message.type === 'thought') {
+    /*
+      **AIが考えている中身を流す**（設計書6.63.2）。
+
+      大きく開いた画面で長い相談をすると、答えが返るまで何も起きない
+      時間が続く。少なくとも「動いている」ことと「何を考えているか」は
+      見せられる。
+
+      **末尾を見せる。** 思考は長くなるので、頭から出すとすぐ画面外へ
+      流れ、動いていることが分からなくなる。
+      **答えそのものは流さない**——書きかけを読むと、作者が途中の判断で
+      動いてしまう。
+    */
+    thought += message.delta || '';
+    thinkingEl.textContent = '考えています… ' + thought.slice(-THOUGHT_TAIL);
+    return;
+  }
   if (message.type === 'answer') {
     setBusy(false);
+    thought = '';
     thinkingEl.textContent = '考えています…';
     const turn = appendTurn('AI', message.reply, undefined, message.html);
     if (message.locate) appendLocate(turn, message.locate);

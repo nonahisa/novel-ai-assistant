@@ -38,8 +38,25 @@ export async function probeGeneration(
       userPrompt: PROBE_PROMPT,
       model,
       temperature: 0,
-      // 本文を渡さないので文脈は最小でよい（Ollamaでは num_ctx になる）
-      numCtx: 1024,
+      /*
+        **文脈の広さを決め打ちしない**（設計書6.62）。
+
+        以前は `numCtx: 1024` と書いていた。本文を渡さないので最小でよい、
+        という理屈だったが、**そのぶんだけ害があった**。
+
+        1. **モデルが初期化できないことがある。** 作者の機械で `gemma4:26b`
+           を1024で読み込ませたところ、llama-server が
+           `Gemma4Assistant requires ctx_other to be set` とスタック破壊で
+           落ちた（2026-09-01のログ）。**確認するはずの処理が、確認の対象を
+           壊していた**
+        2. **余分な読み込みが1回増える。** 1024で読み込んだ直後に、本番の
+           呼び出しが別の値で読み込み直す（6.53.3に「残っていること」として
+           書いてあった問題そのもの）
+
+        渡さなければ、プロバイダが**送る長さから決める**（`contextSizeForPrompt`。
+        15字なので下限の4,096になる）。作者が `ollama.numCtx` を指定していれば
+        そちらが使われ、**本番の呼び出しと同じ値になる**ので読み込み直しも減る。
+      */
       disableThinking: true,
     });
     return { ok: true };

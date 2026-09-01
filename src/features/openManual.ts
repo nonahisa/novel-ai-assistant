@@ -1,5 +1,5 @@
 import { ACTION_TREE, visibleEntries, type ActionItem } from "../views/actionList";
-import { STEP_MENU } from "../views/stepMenu";
+import { STEP_MENU, STEP_REFERENCED_COMMANDS } from "../views/stepMenu";
 import { canRunProcesses } from "../core/runtime";
 import { EXTRA_GUIDE } from "./featureGuide";
 import { openGeneratedMarkdown } from "../views/openDocument";
@@ -87,10 +87,10 @@ function stepChapter(): string {
       }
       if (entry.kind === "section") {
         lines.push(`- ${entry.label}`);
-        for (const item of entry.items) lines.push(`  ${actionLine(item)}`);
+        for (const item of entry.items) lines.push(`  ${actionLine(item, false)}`);
         continue;
       }
-      lines.push(actionLine(entry));
+      lines.push(actionLine(entry, false));
     }
     lines.push("");
   }
@@ -104,6 +104,7 @@ function actionChapter(allowsProcesses: boolean): string {
     "## 操作の一覧",
     "",
     "詳細メニュー（左の一覧）に並んでいるものと同じ順です。",
+    "一部の操作はメニューに出さず、設定管理や簡単ステップメニューから使います（その旨を添えてあります）。",
     "",
   ];
 
@@ -145,9 +146,29 @@ function guideChapter(): string {
   return ["## 画面と考え方", "", body].join("\n");
 }
 
-function actionLine(action: ActionItem): string {
+function actionLine(action: ActionItem, noteLocation = true): string {
   const mark = action.usesAI ? "（AIを使う）" : "";
-  return `- ${action.label}${mark}: ${plain(action.detail)}`;
+  return `- ${action.label}${mark}${noteLocation ? whereToFind(action) : ""}: ${plain(action.detail)}`;
+}
+
+/**
+ * 詳細メニューに**出ない**操作には、実際の入口を添える（設計書6.56.3）。
+ *
+ * マニュアルは冒頭で「詳細メニューに並んでいるものと同じ順です」と言う。
+ * 0.29.8 で一部の操作を画面から隠したので、そのまま載せると**メニューに
+ * 無いものを「ある」と書く**ことになる（作者の指示「マニュアル更新も
+ * お願いします」2026-09-02）。
+ *
+ * **どこにあるかは、手で書かずに導く。** 簡単ステップメニューが参照して
+ * いるか（`STEP_REFERENCED_COMMANDS`）で見分けられる——参照されていれば
+ * そちらから、いなければ設定管理の説明のリンクから使う操作である。
+ * 手で書くと、置き場所を変えたときにマニュアルだけが古いままになる。
+ */
+function whereToFind(action: ActionItem): string {
+  if (!action.hiddenFromActionList) return "";
+  return STEP_REFERENCED_COMMANDS.includes(action.command)
+    ? "（簡単ステップメニューから）"
+    : "（設定管理の説明のリンクから）";
 }
 
 /**

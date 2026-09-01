@@ -625,6 +625,19 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       ) =>
         resolved.provider.generate({
           systemPrompt: WORK_CHAT_SYSTEM_PROMPT,
+          /*
+            **考えている中身を画面へ流す**（設計書6.63.2）。
+
+            大きく開いた画面で長い相談をすると、答えが返るまで何も
+            起きない時間が続く。思考を流せば、少なくとも「動いている」
+            ことと「何を考えているか」が見える。
+
+            **流して受け取る道でしか呼ばれない**（いまは開発ビルド限定）。
+            まとめて受け取る形では、応答が全部そろってから届くので
+            流す余地が無い——呼ばれなければ、画面はこれまでどおり
+            「考えています…」のままである。
+          */
+          onThinking: (delta) => this.postAll({ type: "thought", delta }),
           // 作品の外のファイルについての相談は、どの作品にも属さないので
           // 記録しない（`workFolder` が無ければ記録されない）
           meta: { feature: "work_chat", workFolder: context?.work.folderPath },
