@@ -217,7 +217,10 @@ describe("測定のあいだの num_ctx", () => {
 
     await measureContext(registry);
 
-    expect(state.numCtxCalls.length).toBeGreaterThan(2);
+    // 申告どおり読めるモデルは**2回で終わる**（設計書6.59。小さく1回
+    // 当ててから公称値へ跳ぶ）。ここが1回になると、跳ぶ前の確認が
+    // 消えたことになる
+    expect(state.numCtxCalls.length).toBeGreaterThanOrEqual(2);
     // **短い回で申告ぶんを確保しない。** 全部が 262,144 で埋まっていたのが
     // 0.29.2 の姿で、実機ではそれが原因でCPUへ落ちていた。
     // いちばん短い回（4,000字）は、申告値の1割にも満たないはずである

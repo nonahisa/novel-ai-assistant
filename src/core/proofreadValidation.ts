@@ -103,6 +103,57 @@ export function hasLongSentence(text: string): boolean {
  */
 const REPEAT_MIN_LENGTH = 3;
 
+/**
+ * 修正案が、原文の**うしろを丸ごと落としていないか**（設計書6.60）。
+ *
+ * 推敲は**原文まるごとを置き換える**。だから修正案は、直した箇所だけでなく
+ * 原文と同じ範囲を覆っていなければならない。ところがAIは、**直した断片だけ**を
+ * 返すことがある。
+ *
+ * 作者の報告（2026-09-01、実データ）：
+ *
+ * - 原文　「悶絶しながらしながら沼ワニに近づくと、槍は中ほどからぽっきり折れていた。」
+ * - 修正案「悶絶しながら」
+ * - 理由　「冗長：『しながら』が重複しています」
+ *
+ * 指摘そのものは正しい。だが押すと、**一文が6文字になる**——沼ワニも槍も
+ * 消える。作者の言う「適用すると変になります」はこれである。
+ *
+ * **見分け方は2つを重ねる。** 片方だけでは誤って弾く。
+ *
+ * 1. **半分以上が消えている**（`TAIL_KEEP_RATIO` 未満）。上の例は36字が6字で、
+ *    17%しか残っていない
+ * 2. **原文の末尾が、修正案のどこにも無い**。冗長を削っても、文の終わりは
+ *    残るはずである
+ *
+ * **1つ目を厳しくしすぎない。** 最初 0.7 で書いたところ、
+ * 「彼は静かに頷いたのであった。」→「彼は静かに頷いた。」（64%）という
+ * **まっとうな語尾の直しまで弾いた**。末尾が変わるのは語尾を直す修正案では
+ * 当たり前で、そこは2つ目の条件だけでは見分けられない。
+ * **原稿を守るための網が、直してくれる案まで捨てては本末転倒である。**
+ *
+ * **弾くのは修正案だけで、指摘は残す**（`語尾単調` や「空文字」と同じ扱い）。
+ * 「ここが重複している」は正しい情報なので、作者が手で直せばよい。
+ * **原稿を壊すより、直し方を作者に委ねるほうがよい。**
+ */
+const TAIL_KEEP_RATIO = 0.5;
+/** 末尾として見る長さ。1文節ぶんあれば、落ちたかどうかは分かる */
+const TAIL_SAMPLE_LENGTH = 8;
+
+export function dropsOriginalTail(
+  original: string,
+  suggestion: string
+): boolean {
+  if (!suggestion) return false;
+  const from = normalizeForComparison(original);
+  const to = normalizeForComparison(suggestion);
+  if (!from || !to) return false;
+  // 長さがさほど変わらないなら、断片だけを返したのではない
+  if (to.length >= from.length * TAIL_KEEP_RATIO) return false;
+  const tail = from.slice(-Math.min(TAIL_SAMPLE_LENGTH, from.length));
+  return !to.includes(tail);
+}
+
 export function hasRepetition(text: string): boolean {
   const body = text.replace(/\s/g, "");
   for (let start = 0; start + REPEAT_MIN_LENGTH <= body.length; start++) {
@@ -315,8 +366,13 @@ export function validateProofreadIssues(
     // 作者が決めること（プロンプトにも書いたが、守られない前提で切る）。
     // 原文は複数文で50字制限に収まらず途中で切れていることがあり、
     // そこへ修正案が付くと**切れた範囲がまるごと置き換わる**
+    // **原文のうしろを落とした修正案は使わない**（設計書6.60）。
+    // 推敲は原文まるごとを置き換えるので、直した断片だけを返されると
+    // 残りが消える。指摘は残し、直し方は作者に委ねる
     const usableSuggestion =
-      reason === "語尾単調" || isPlaceholderText(suggestion, true)
+      reason === "語尾単調" ||
+      isPlaceholderText(suggestion, true) ||
+      dropsOriginalTail(original, suggestion)
         ? ""
         : suggestion;
     // 原文と同じものを「修正案」として返してくる。押しても何も起きない。
