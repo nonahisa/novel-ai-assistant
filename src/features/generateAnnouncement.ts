@@ -34,7 +34,11 @@ import {
   buildAnnouncePrompt,
   type AnnounceResult,
 } from "../prompts/announce";
-import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
+import {
+  describeChunkSettings,
+  readChunkSettings,
+  resolveModelInfoOrWarn,
+} from "./chunkSettings";
 import { readSynopsisDoc } from "./generateBlurb";
 import { withCancellableProgress } from "../views/progress";
 import { reportAIError } from "./reportAIError";
@@ -103,9 +107,17 @@ export async function generateAnnouncement(
   const overheadChars =
     ANNOUNCE_SYSTEM_PROMPT.length +
     buildAnnouncePrompt({ ...material.prompt, bodyExcerpt: "" }).length;
-  const info = await registry.resolveModelInfo("generate");
-  // コンテキスト長が取れないモデルでは、他の機能と同じ既定へ落とす
-  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192, {
+  // **黙って8,192へ落とさない**（設計書6.64）。取れないまま進むと本文の
+  // 切り出しが実際より短くなる。手順は5機能と同じ共通の1か所に寄せる
+  const info = await resolveModelInfoOrWarn({
+    registry,
+    feature: "generate",
+    provider: resolved.provider,
+    model: resolved.model,
+    actionLabel: "更新告知文の生成",
+  });
+  if (!info) return;
+  const chunkSettings = readChunkSettings(info.contextWindow, {
     overheadChars,
     outputTokens: OUTPUT_RESERVE_TOKENS,
   });

@@ -24,7 +24,11 @@ import {
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
-import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
+import {
+  describeChunkSettings,
+  readChunkSettings,
+  resolveModelInfoOrWarn,
+} from "./chunkSettings";
 import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
 import {
   TYPO_CHECK_SCHEMA,
@@ -167,37 +171,16 @@ export async function checkTypos(
   const resolved = await ensureConfigured(registry, "typo");
   if (!resolved) return undefined;
 
-  let modelInfo = await registry.resolveModelInfo("typo");
-  if (!modelInfo) {
-    // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
-    // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）。
-    // ここは「モデル情報が取れない」＝サーバーが止まっている経路そのもので、
-    // 渡さないとJITが短い文脈で載せてしまう
-    if (
-      !(await confirmProviderReachable(
-        resolved.provider,
-        "誤字脱字の検知",
-        resolved.model
-      ))
-    ) {
-      return undefined;
-    }
-    modelInfo = await registry.resolveModelInfo("typo");
-  }
-  if (!modelInfo) {
-    const action = await vscode.window.showWarningMessage(
-      `モデル「${resolved.model}」の情報を取得できませんでした。` +
-        "このまま実行すると本文の分割単位が変わり、" +
-        "これまでの処理済みキャッシュが使えなくなります。" +
-        "モデルを選び直してから、もう一度実行してください。",
-      "AIの設定を開く",
-      "中止"
-    );
-    if (action === "AIの設定を開く") {
-      await vscode.commands.executeCommand("novelai.setupAI");
-    }
-    return undefined;
-  }
+  // モデル情報はチャンクの字数を決めるのに使う。取れないまま既定値で進むと
+  // 分割単位が変わり、キャッシュが全滅する。**手順は1か所にある**（6.27.10）
+  const modelInfo = await resolveModelInfoOrWarn({
+    registry,
+    feature: "typo",
+    provider: resolved.provider,
+    model: resolved.model,
+    actionLabel: "誤字脱字の検知",
+  });
+  if (!modelInfo) return undefined;
 
   const contextWindow = modelInfo.contextWindow;
   const maxOutputTokens = resolveMaxOutputTokens();
@@ -472,7 +455,17 @@ export async function checkTypos(
     // 捨てるとその話は丸ごと検査されないまま終わる（抽出で実際に起きた）。
     // 処理中に足すので、`for...of` ではなく番号で回す
     const queue = [...chunks];
-    let total = pending.length;
+    /**
+     * 進捗の分母。**未処理の件数ではなく、全チャンク数である。**
+     *
+     * キャッシュ命中のチャンクも下で `done++` するので、分母を
+     * `pending.length` にすると分子が分母を超える（処理済みが9件・
+     * 未処理が2件の作品で「11/2」と出た）。0.28.13で送受信のログだけを
+     * `total` へ揃えたが、その `total` の初期値がここで未処理の件数の
+     * ままだった。分け直しで増える分（`total += …`）はどちらの数え方でも
+     * 同じように足す。
+     */
+    let total = chunks.length;
     for (let cursor = 0; cursor < queue.length; cursor++) {
       const chunk = queue[cursor];
       if (token.isCancellationRequested) break;

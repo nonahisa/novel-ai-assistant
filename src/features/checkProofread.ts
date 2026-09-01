@@ -6,6 +6,7 @@ import {
   AIError,
   isFatalProviderFailure,
   recoveryForAIError,
+  type ModelInfo,
 } from "../ai/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
@@ -19,7 +20,11 @@ import {
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
-import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
+import {
+  describeChunkSettings,
+  readChunkSettings,
+  resolveModelInfoOrWarn,
+} from "./chunkSettings";
 import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
 import { OUTPUT_RESERVE_TOKENS } from "../ai/contextGuard";
 import { blankMemoLines } from "../core/sceneMemo";
@@ -97,7 +102,20 @@ export async function checkProofread(
   const resolved = await ensureConfigured(registry, "proofread");
   if (!resolved) return undefined;
 
-  const prepared = await collectChunks(work, registry, options);
+  // **モデル情報はここで1回だけ引く**（設計書6.27.10）。以前はチャンクを
+  // 作る側が引き、取れないときは黙って `?? 8192` へ落ちていた——131,072の
+  // モデルでもチャンクが1,500字になり、キャッシュが全滅して呼び出し回数が
+  // 十数倍になる。作者には「急に遅くなった」としか見えない
+  const info = await resolveModelInfoOrWarn({
+    registry,
+    feature: "proofread",
+    provider: resolved.provider,
+    model: resolved.model,
+    actionLabel: "推敲",
+  });
+  if (!info) return undefined;
+
+  const prepared = await collectChunks(work, info, options);
   if (!prepared) return undefined;
   const { chunks, narrativeStyle, keepWords, styleNote } = prepared;
   if (chunks.length === 0) {
@@ -357,7 +375,8 @@ export async function checkProofread(
  */
 async function collectChunks(
   work: WorkEntry,
-  registry: AIRegistry,
+  /** 呼び出し側が引いたモデル情報。**ここでは引き直さない**（1回だけ引く） */
+  info: ModelInfo,
   options: CheckProofreadOptions
 ): Promise<
   | {
@@ -435,10 +454,9 @@ async function collectChunks(
       maxIssues: 0,
     }).length;
 
-  const info = await registry.resolveModelInfo("proofread");
   // **設定を見るようにした**（設計書6.23）。以前はここだけ設定を無視して
   // いつも自動で決めており、作者が字数を指定しても効かなかった
-  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192, {
+  const chunkSettings = readChunkSettings(info.contextWindow, {
     overheadChars,
     outputTokens: OUTPUT_RESERVE_TOKENS,
   });

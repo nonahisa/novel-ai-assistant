@@ -21,6 +21,7 @@ import {
   segmentsOf,
   splitIntoChunks,
   Chunk,
+  MIN_CHUNK_CHARS,
 } from "../core/chunker";
 // 分け直しの手順は1か所に置く（設計書6.27.10）。ここに写しを持つと、
 // 逃げ道を直したときに片方だけが古いままになる
@@ -64,7 +65,7 @@ import { applyPendingCharacterUpdates } from "./applyPendingUpdates";
 import type { ProposalPanel } from "./proposalPanel";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
-import { readChunkSettings } from "./chunkSettings";
+import { readChunkSettings, resolveModelInfoOrWarn } from "./chunkSettings";
 import {
   AbilitySystemStore,
   createAbilityStore,
@@ -207,37 +208,15 @@ export async function extractCharacters(
   // モデル情報はチャンクサイズを決めるのに使う。
   // 取得できないまま既定値で進むと、本来より細かく分割され、
   // ハッシュが変わって既存のキャッシュが全て無駄になる。
-  // そのため取れない場合は、先に疎通を回復させてから取り直す。
-  let modelInfo = await registry.resolveModelInfo("extract");
-  if (!modelInfo) {
-    // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
-    // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）。
-    // ここは「モデル情報が取れない」＝サーバーが止まっている経路そのものである
-    if (
-      !(await confirmProviderReachable(
-        resolved.provider,
-        "設定資料の抽出",
-        resolved.model
-      ))
-    ) {
-      return false;
-    }
-    modelInfo = await registry.resolveModelInfo("extract");
-  }
-  if (!modelInfo) {
-    const action = await vscode.window.showWarningMessage(
-      `モデル「${resolved.model}」の情報を取得できませんでした。` +
-        "このまま実行すると本文の分割単位が変わり、" +
-        "これまでの処理済みキャッシュが使えなくなります。" +
-        "モデルを選び直してから、もう一度実行してください。",
-      "AIの設定を開く",
-      "中止"
-    );
-    if (action === "AIの設定を開く") {
-      await vscode.commands.executeCommand("novelai.setupAI");
-    }
-    return false;
-  }
+  // **手順は1か所にある**（`chunkSettings.ts`。設計書6.27.10）
+  const modelInfo = await resolveModelInfoOrWarn({
+    registry,
+    feature: "extract",
+    provider: resolved.provider,
+    model: resolved.model,
+    actionLabel: "設定資料の抽出",
+  });
+  if (!modelInfo) return false;
 
   const contextWindow = modelInfo.contextWindow;
   const maxOutputTokens = resolveMaxOutputTokens();
@@ -322,10 +301,18 @@ export async function extractCharacters(
       // 実データ（219話・70万字）では、6,000字でまとめると174回になり、
       // 分ける前の41回から4倍以上に増えてしまう。話数はまとめても
       // 内訳（segments）に残るので、元の大きさまで詰め直してよい。
-      // ただし作者が「まとめない」を選んでいるときは、その指定に従う
+      //
+      // **詰め直す先は `mergeChars` である**（設計書6.23）。自動のときは
+      // `resolveMergeChars` がチャンクの大きさまで詰めるので、上の
+      // 「元の大きさまで詰め直す」はそのまま成り立つ。一方で作者が
+      // 「文字数を指定する」を選んでいるときは、`chunkChars` を渡すと
+      // **合本だけが Merge Chunk Chars の指定を無視する**ことになる
+      // ——ばらのファイルの作品（下の `mergeAdjacentChunks`）では効くのに、
+      // 合本では効かない、という理由の無い違いになる。作者の指定に従う。
+      // 「まとめない」（0）を選んでいるときは、まとめないまま送る
       rawChunks.push(
         ...(mergeChars > 0
-          ? mergeAdjacentChunks(perEpisode, { maxChars: chunkChars })
+          ? mergeAdjacentChunks(perEpisode, { maxChars: mergeChars })
           : perEpisode)
       );
       continue;
@@ -648,19 +635,44 @@ export async function extractCharacters(
             // この呼び出しぶんがまるごと無駄になる（実データで39件中33件）。
             //   1. まとめたものなら、元の話ごとに戻す
             //   2. 1話でも入り切らないなら、半分に割る
-            const split = splitForRetry(chunk);
+            // **底は `MIN_CHUNK_CHARS`（1,500字）。** 既定の1,000字だと、
+            // 「割りすぎると文の途中で切れて誤検出のもとになる」という
+            // `chunkRetry.ts` の底と食い違う（同じ本文が、通った道によって
+            // 違う細かさまで割られる）
+            const split = splitForRetry(chunk, MIN_CHUNK_CHARS);
             if (split && split.length > 1) {
-              queue.push(...split);
+              // **いま処理中の位置の直後へ挿す。** 末尾へ回してはいけない。
+              // 抽出は既知の名前（`buildKnownCharacterNames`）を積みながら
+              // 進むので、後回しにするとその話だけ**渡される既知名が変わる**
+              // ——キャッシュの中身が「分け直しが起きたかどうか」に依存し、
+              // 同じ本文・同じモデルでも回ごとに違う結果が残る
+              queue.splice(position + 1, 0, ...split);
               // **同じ大きさの残りも、先に割っておく。**
               // 1件ずつ失敗を繰り返すと、その回数だけ呼び出しが無駄になる
               // （実データでは39チャンク中33件が同じ理由で失敗した）
               const tooBig = chunk.text.length;
               let presplit = 0;
-              for (let rest = position + 1; rest < queue.length; rest++) {
-                if (queue[rest].text.length < tooBig) continue;
-                // ここも切り詰められた本人と同じ手順で分ける。
+              // いま挿した断片は既に割ってあるので、その後ろから見る
+              for (
+                let rest = position + 1 + split.length;
+                rest < queue.length;
+                rest++
+              ) {
+                if (
+                  !shouldPresplitChunk({
+                    chunkChars: queue[rest].text.length,
+                    tooBigChars: tooBig,
+                    // **キャッシュを先に引く。** 命中しているものを割ると、
+                    // その命中を捨てたうえ二度と当たらない鍵を作る
+                    cached:
+                      cache.get(queue[rest].hash, cacheKeyBase) !== undefined,
+                  })
+                ) {
+                  continue;
+                }
+                // ここも切り詰められた本人と同じ手順・同じ底で分ける。
                 // 半分に割るだけだと、まとめたものの内訳が消える
-                const smaller = splitForRetry(queue[rest]);
+                const smaller = splitForRetry(queue[rest], MIN_CHUNK_CHARS);
                 if (!smaller || smaller.length <= 1) continue;
                 queue.splice(rest, 1, ...smaller);
                 presplit++;
@@ -725,7 +737,9 @@ export async function extractCharacters(
           if (isContextOverflow(e)) {
             const retry = retryOnOverflow(chunk, e);
             if (retry.kind === "split") {
-              queue.push(...retry.parts);
+              // 切り詰められたときと同じく、**いま処理中の位置の直後へ挿す**
+              // （末尾へ回すと、その話だけ渡される既知名が変わる）
+              queue.splice(position + 1, 0, ...retry.parts);
               logStep(`${describeChunk(chunk)}: ${retry.note}`);
               done++;
               continue;
@@ -1486,6 +1500,35 @@ export function selectChangedCharacters(
 ): Character[] {
   const changed = new Set(changedIds);
   return characters.filter((character) => changed.has(character.id));
+}
+
+/**
+ * 出力上限で切り詰められたあと、**まだ送っていないチャンクを先回りで
+ * 分け直すか**を決める（判断だけで、副作用は持たない）。
+ *
+ * 切り詰められた本人と同じ大きさのものは、送っても同じ理由で失敗する
+ * 見込みが高い。1件ずつ失敗を繰り返すと、その回数だけ呼び出しが無駄になる
+ * （実データでは39チャンク中33件が同じ理由で失敗した）。
+ *
+ * **キャッシュに答えがあるものは分けない。** 分けると `wholeFile:false` の
+ * 別のチャンクになり、ハッシュも変わる。つまり
+ *
+ *   - いま持っている命中を捨てる（そのチャンクをもう一度AIへ送ることになる）
+ *   - **二度と当たらない鍵**を作る（次回はまた元の大きさで切り直されるため、
+ *     分け直した断片のハッシュは残っても使われない）
+ *
+ * の2つが同時に起きる。そもそも送らないチャンクなので、失敗もしない。
+ */
+export function shouldPresplitChunk(options: {
+  /** これから送るチャンクの字数 */
+  chunkChars: number;
+  /** 切り詰められたチャンクの字数 */
+  tooBigChars: number;
+  /** そのチャンクの答えがキャッシュにあるか */
+  cached: boolean;
+}): boolean {
+  if (options.cached) return false;
+  return options.chunkChars >= options.tooBigChars;
 }
 
 function describeRejectedCandidates(

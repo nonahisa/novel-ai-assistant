@@ -371,6 +371,17 @@ const DEFAULT_OPTIONS: ChunkOptions = {
  * AIに「何行目」を言わせ、その値で本文の位置を決めるので、行が減ると
  * **別の行を書き換える**ことになる。行数が変わらなければ `startLine` も
  * 指摘の行番号も、元の本文と一致したままである。
+ *
+ * ## 中身の無い本文からは、チャンクを1つも作らない
+ *
+ * 送っても何も指摘できないものを送っても、呼び出しが1回無駄になるだけである。
+ * それだけなら実害は小さいが、**空のチャンクは行番号の対応を壊す**
+ * ——まとめたとき（`mergeAdjacentChunks`）に区切りが入らず、内訳の開始位置が
+ * 前の内訳と重なって、指摘が別のファイルの行だと判定される。
+ *
+ * 空になる道は「メモ行だけで末尾に改行が無い話」（ここで全部消える）と
+ * 「0バイトの話ファイル」の2つ。呼び出し側には `.trim()` の関所がある機能と
+ * 無い機能があるので、**通り道であるここで塞ぐ。**
  */
 export function splitIntoChunks(
   filePath: string,
@@ -384,6 +395,9 @@ export function splitIntoChunks(
     throw new Error("maxChars は1以上の整数にしてください。");
   }
   const normalized = blankMemoLines(text.replace(/\r\n?/g, "\n"));
+  // **空白しか残らなかったら、1つも返さない。** 中身の無いチャンクは
+  // AIへ送っても何も返らないうえ、まとめたときに位置の対応を壊す
+  if (!normalized.trim()) return [];
 
   const wholeSegment = (text: string, startLine: number): ChunkSegment[] => [
     { filePath, chapterStart, chapterEnd, start: 0, end: text.length, startLine },
@@ -477,6 +491,16 @@ export function mergeAdjacentChunks(
   };
 
   for (const chunk of chunks) {
+    // **本文が空のチャンクは、束に入れずに捨てる。** 空の本文からは何も
+    // 抽出・指摘できないので、送っても失うものが無い。一方、束に入れると
+    // `joinChunks` が区切りを入れられず（入れる判断を「ここまでの本文が
+    // あるか」で決めている）、**内訳の開始位置が前の内訳と重なる**
+    // ——`locateChunkLine` は前から見るので、指摘が空のほうのファイルの
+    // 行だと判定され、行番号を戻せずに黙って捨てられる。
+    //
+    // **`flush()` はしない。** ここで束を切ると、空の話が1つ挟まっただけで
+    // 前後がまとまらなくなる（合本ではそれが何度も起きる）。素通しにする
+    if (chunk.text.trim() === "") continue;
     // 分割された断片は、そのファイルだけで完結させる
     if (!isWholeFile(chunk)) {
       flush();

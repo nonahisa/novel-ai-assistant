@@ -30,6 +30,7 @@ import {
 import {
   describeChunkSettings,
   readChunkSettings,
+  resolveModelInfoOrWarn,
   type ChunkFixedCost,
 } from "./chunkSettings";
 import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
@@ -206,9 +207,19 @@ export async function checkContradictions(
 
   // **モデルの情報を先に1回だけ引く。** チャンクの大きさも、観点の絞りも、
   // 世界観に回してよい字数も、すべてここから決まる（設計書6.27.10）。
-  // 2回引くと、2回の結果が食い違ったときにどちらで動いたのか分からなくなる
-  const info = await registry.resolveModelInfo("contradiction");
-  const tier = info?.tier;
+  // 2回引くと、2回の結果が食い違ったときにどちらで動いたのか分からなくなる。
+  //
+  // **取れなければ止める。** 以前はここで `?? 8192` へ黙って落ちており、
+  // 131,072のモデルでもチャンクが1,500字になってキャッシュが全滅していた
+  const info = await resolveModelInfoOrWarn({
+    registry,
+    feature: "contradiction",
+    provider: resolved.provider,
+    model: resolved.model,
+    actionLabel: "矛盾検知",
+  });
+  if (!info) return undefined;
+  const tier = info.tier;
 
   // 地力の足りないモデルには観点を絞って渡す（設計書6.28）。
   // **鍵より先に決める。** 観点が変われば答えも変わるので、
@@ -227,7 +238,7 @@ export async function checkContradictions(
   // 固定30,000字のままだと、32kのモデルでは本文を1文字も足さないうちに溢れる
   const material = await collectSettings(
     work,
-    worldviewMaxChars(info?.contextWindow)
+    worldviewMaxChars(info.contextWindow)
   );
   if (!material) return undefined;
 
@@ -971,7 +982,7 @@ async function collectSettings(
 async function collectChunks(
   work: WorkEntry,
   /** 呼び出し側が引いたモデル情報。**ここでは引き直さない**（下のコメント） */
-  info: ModelInfo | undefined,
+  info: ModelInfo,
   options: CheckContradictionsOptions,
   fixedCost: ChunkFixedCost
 ): Promise<
@@ -1002,9 +1013,10 @@ async function collectChunks(
       )
     : scan.episodes;
 
-  // コンテキスト長が取れないモデルでは、誤字脱字検知と同じ既定へ落とす。
-  // **固定費を差し引いてから本文の割当を決める**（設計書6.27.10）
-  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192, fixedCost);
+  // **固定費を差し引いてから本文の割当を決める**（設計書6.27.10）。
+  // コンテキスト長が取れないときは、ここまで来ない
+  // （`resolveModelInfoOrWarn` が理由を出して止めている）
+  const chunkSettings = readChunkSettings(info.contextWindow, fixedCost);
   const maxChars = chunkSettings.chunk.chars;
 
   const chunks: Chunk[] = [];

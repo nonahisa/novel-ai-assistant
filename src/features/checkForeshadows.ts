@@ -20,7 +20,11 @@ import {
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
-import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
+import {
+  describeChunkSettings,
+  readChunkSettings,
+  resolveModelInfoOrWarn,
+} from "./chunkSettings";
 import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
 import { formatChapterLabel } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
@@ -126,7 +130,18 @@ export async function checkForeshadows(
   const ledger = await loadLedger(work);
   if (!ledger) return undefined;
 
-  const info = await registry.resolveModelInfo("foreshadow");
+  // **取れなければ止める**（設計書6.27.10）。以前はここで `?? 8192` へ
+  // 黙って落ちており、131,072のモデルでもチャンクが1,500字になって
+  // キャッシュが全滅し、呼び出し回数が十数倍になっていた
+  const info = await resolveModelInfoOrWarn({
+    registry,
+    feature: "foreshadow",
+    provider: resolved.provider,
+    model: resolved.model,
+    actionLabel: "伏線の検知",
+  });
+  if (!info) return undefined;
+
   // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
   // 台帳が育つと「既に登録済みの見出し」が伸びる。伸びた分だけ本文を
   // 痩せさせないと、上限を超えて本文の後半が黙って捨てられる
@@ -141,8 +156,7 @@ export async function checkForeshadows(
         // 実際に送るときと同じ絞り方（`known.slice(-60)`）で測る
         .slice(-60),
     }).length;
-  // コンテキスト長が取れないモデルでは、他の検知と同じ既定へ落とす
-  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192, {
+  const chunkSettings = readChunkSettings(info.contextWindow, {
     overheadChars: detectOverheadChars,
     outputTokens: OUTPUT_RESERVE_TOKENS,
   });
@@ -508,7 +522,16 @@ export async function checkForeshadowResolution(
   const resolved = await ensureConfigured(registry, "foreshadow");
   if (!resolved) return undefined;
 
-  const info = await registry.resolveModelInfo("foreshadow");
+  // 検知と同じく、取れなければ止める（黙って 8,192 へ落ちない）
+  const info = await resolveModelInfoOrWarn({
+    registry,
+    feature: "foreshadow",
+    provider: resolved.provider,
+    model: resolved.model,
+    actionLabel: "伏線の回収の確認",
+  });
+  if (!info) return undefined;
+
   // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
   // 未回収の伏線は1件も減らないまま増えることがあり、ここがいちばん育つ。
   // 実際に渡すのは話数で絞った分だけなので、**全件で測るのは安全側**である
@@ -519,7 +542,7 @@ export async function checkForeshadowResolution(
       chunkText: "",
       foreshadows: open.map(toBrief),
     }).length;
-  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192, {
+  const chunkSettings = readChunkSettings(info.contextWindow, {
     overheadChars: resolveOverheadChars,
     outputTokens: OUTPUT_RESERVE_TOKENS,
   });
