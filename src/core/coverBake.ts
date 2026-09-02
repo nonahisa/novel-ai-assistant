@@ -180,13 +180,12 @@ export async function readCoverSource(
   side: CoverSide,
   imagePath: string | null
 ): Promise<CoverSource | null> {
-  const baked = bakedCoverPath(settingsDir, side);
-  const bakedAt = await bakedTime(baked);
-  if (bakedAt) {
+  const baked = await bakedCoverInfo(settingsDir, side);
+  if (baked) {
     return {
       fileName: BAKED_COVER_FILES[side],
-      data: await vscode.workspace.fs.readFile(path.toUri(baked)),
-      bakedAt,
+      data: await vscode.workspace.fs.readFile(path.toUri(baked.filePath)),
+      bakedAt: baked.bakedAt,
     };
   }
 
@@ -201,14 +200,53 @@ export async function readCoverSource(
   };
 }
 
-/** 焼いた画像の更新時刻。無ければ null（読めないときも「無い」と同じ） */
-async function bakedTime(filePath: string): Promise<Date | null> {
+/**
+ * 焼いた画像が「あるか・いつのものか」だけを見る（設計書6.65.8）。
+ *
+ * **中身は読まない。** エディター画面は、焼いた画像があるかどうかで
+ * 見せ方を変えるが、バイト列は要らない（`asWebviewUri` で読む）。
+ * 読めないときは「無い」と同じ扱いにする——本へ入らないことに変わりはない。
+ */
+export async function bakedCoverInfo(
+  settingsDir: string,
+  side: CoverSide
+): Promise<{ filePath: string; bakedAt: Date } | null> {
+  const filePath = bakedCoverPath(settingsDir, side);
   try {
     const stat = await vscode.workspace.fs.stat(path.toUri(filePath));
-    return new Date(stat.mtime);
+    return { filePath, bakedAt: new Date(stat.mtime) };
   } catch {
     return null;
   }
+}
+
+/**
+ * 焼いた画像を消す（設計書6.65.8）。消せたら、その場所を返す。
+ *
+ * ## なぜ消す道が要るのか
+ *
+ * 焼いた画像は元イラストより先に拾われる。焼いたあとで元イラストを
+ * 差し替えたり、`coverImagePath` を空にしたりすると、**画面と本の中身が
+ * 食い違う**（本には古い焼き上がりが入り続ける）。作者が選んで消せる
+ * ようにしておけば、どちらの場合も「画面で見えているもの＝本に入るもの」に
+ * 戻せる。
+ *
+ * **消してよいのは `_合成済み` の2つだけ**である。だから場所は
+ * `bakedCoverPath` からしか取らない——組み立てで作ると、作者の手置きの
+ * 表紙を消す道ができてしまう。
+ *
+ * 無いものを消そうとしたときは null を返す（呼び出し側が「消すものが
+ * ありません」と言えるように）。
+ */
+export async function deleteBakedCover(
+  settingsDir: string,
+  side: CoverSide
+): Promise<string | null> {
+  const baked = await bakedCoverInfo(settingsDir, side);
+  if (!baked) return null;
+
+  await vscode.workspace.fs.delete(path.toUri(baked.filePath));
+  return baked.filePath;
 }
 
 /**
@@ -258,6 +296,21 @@ export function describeBakedAt(at: Date): string {
 
 function pad(value: number): string {
   return String(value).padStart(2, "0");
+}
+
+/**
+ * エディター画面で、焼いた画像を見せているときの一言（設計書6.65.8）。
+ *
+ * **焼いたあとは、合成の欄を触っても本の表紙は変わらない**（焼き直すまで）。
+ * 画面が合成の途中経過を見せ続けると、作者は「これが本に入る」と読む。
+ * プレビューも書き出しと同じ拾い順（焼いた→元→無し）にしたうえで、
+ * いつ焼いたものを見ているのかをここで言う。
+ */
+export function describeBakedPreview(at: Date): string {
+  return (
+    `焼いた画像を表示中（${describeBakedAt(at)}）。` +
+    "合成をやり直すには焼き直してください。"
+  );
 }
 
 /**

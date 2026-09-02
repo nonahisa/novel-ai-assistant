@@ -53,6 +53,26 @@ describe("本へ載せる人物を選ぶ", () => {
   test("1人も残らないこともある（そのときは面を出さない側が決める）", () => {
     expect(selectBookCharacters([person("モブ", { isMob: true })])).toEqual([]);
   });
+
+  /**
+   * **名前の無い人物は載せない**（設計書6.65.11）。
+   *
+   * 台帳には、抽出の途中で作られた名前の空のレコードが混ざることがある。
+   * そのまま組むと**中身の無い人物の枠**が本に並ぶ（名前も紹介文も無い
+   * `<div>` だけ）。読者から見れば意味の無い空白であり、載せる用が無い。
+   *
+   * ここで落とすので、画面の「◯人が載ります」にも入らない（見えている
+   * 人数と本の中身がずれない）。
+   */
+  test("名前が空の人物は載せない（欄の人数にも入らない）", () => {
+    const selected = selectBookCharacters([
+      person("月島灯"),
+      person(""),
+      person("   "),
+    ]);
+
+    expect(selected.map((entry) => entry.name)).toEqual(["月島灯"]);
+  });
 });
 
 describe("本へ入れる項目", () => {
@@ -173,6 +193,33 @@ describe("一覧の面の組み方", () => {
     ]);
 
     expect(html.indexOf("わたる")).toBeLessThan(html.indexOf("あかり"));
+  });
+
+  /**
+   * 組む側でも名前の空は落とす。**空の要素は出さない**という奥付・紹介文と
+   * 同じ約束で、ここが最後の関所になる（選び方を変えても空の枠は出ない）。
+   */
+  test("名前が空の人物は、枠ごと出さない", () => {
+    const html = buildCharacterPageFragment([
+      { name: "月島灯", reading: null, summary: "", iconHref: null },
+      { name: "   ", reading: null, summary: "名無し", iconHref: "portrait-1.png" },
+    ]);
+
+    expect([...html.matchAll(/<div class="character">/g)]).toHaveLength(1);
+    expect(html).toContain("月島灯");
+    expect(html).not.toContain("名無し");
+    // 名前が無いのに絵だけ載る、ということも起きない
+    expect(html).not.toContain("portrait-1.png");
+  });
+
+  test("全員の名前が空なら、人物の枠は1つも出ない", () => {
+    const html = buildCharacterPageFragment([
+      { name: "", reading: null, summary: "", iconHref: null },
+    ]);
+
+    expect(html).not.toContain('<div class="character">');
+    // 見出しの枠そのものは残る（面を出すかは呼び出し側が決める）
+    expect(html).toContain("登場人物");
   });
 
   test("見出しは「登場人物」", () => {

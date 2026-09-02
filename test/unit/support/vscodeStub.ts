@@ -11,6 +11,12 @@ export const workspace = {
   }),
 };
 
+/** 画面に出た知らせを覗くための形。テスト側で差し替えて使う */
+export type StubMessage = (
+  message: string,
+  ...items: unknown[]
+) => Promise<string | undefined>;
+
 export const window = {
   // 診断ログ。テストでは中身を読まないので、書き込めるだけでよい
   createOutputChannel: () => ({
@@ -18,6 +24,24 @@ export const window = {
     show() {},
     dispose() {},
   }),
+  /**
+   * 通知の3つ。**書き換えられる形で置く。**
+   *
+   * 既定は「出しただけで、作者は何も押さなかった」——完了通知の文言を
+   * 見張るテストは、これを差し替えて中身を受け取る。
+   */
+  showInformationMessage: (async () => undefined) as StubMessage,
+  showWarningMessage: (async () => undefined) as StubMessage,
+  showErrorMessage: (async () => undefined) as StubMessage,
+  /**
+   * WebViewパネル。**既定は作らずに断る。**
+   *
+   * パネルを開くテストは、受け取った postMessage を覗ける作り物へ
+   * 差し替える（差し替え忘れに気づけるよう、既定は例外にしてある）。
+   */
+  createWebviewPanel: ((..._args: unknown[]): unknown => {
+    throw new Error("createWebviewPanel はテスト側で差し替えてください。");
+  }) as (...args: unknown[]) => unknown,
   // 進捗の中止ボタン。テストでは押さないので、作られるだけでよい
   createStatusBarItem: () => ({
     text: "",
@@ -51,6 +75,13 @@ export enum ProgressLocation {
 export enum StatusBarAlignment {
   Left = 1,
   Right = 2,
+}
+
+/** パネルを開く位置。値は本物のVS Codeに合わせる */
+export enum ViewColumn {
+  Active = -1,
+  Beside = -2,
+  One = 1,
 }
 
 /** 設定の書き込み先。値は本物のVS Codeに合わせる */

@@ -193,26 +193,46 @@ export function imageMediaType(fileName: string, label = "表紙"): string {
   const matched = /\.([A-Za-z0-9]+)$/.exec(fileName.trim());
   if (!matched) {
     throw new Error(
-      `${label}「${fileName}」に拡張子がありません。png・jpg・jpeg・webp のいずれかにしてください。`
+      `${label}「${fileName}」に拡張子がありません。${IMAGE_EXTENSIONS} のいずれかにしてください。`
     );
   }
   const extension = matched[1].toLowerCase();
+  // **webp だけは、断る理由と直し方を言う。** 「入れられません」だけでは、
+  // よく使われている形式がなぜ駄目なのか作者に伝わらない
+  if (extension === "webp") {
+    throw new Error(
+      `${label}の種類「webp」は、EPUBのリーダーで表示できない恐れがあるため本に入れられません。` +
+        "PNGかJPEGに変換してください。"
+    );
+  }
   const mediaType = IMAGE_MEDIA_TYPES[extension];
   if (!mediaType) {
     throw new Error(
-      `${label}の種類「${extension}」は本に入れられません。png・jpg・jpeg・webp のいずれかにしてください。`
+      `${label}の種類「${extension}」は本に入れられません。${IMAGE_EXTENSIONS} のいずれかにしてください。`
     );
   }
   return mediaType;
 }
 
-/** EPUB3が「どのリーダーでも表示できる」と定めている画像の種類 */
+/**
+ * 本へ入れられる画像の種類。
+ *
+ * **EPUB 3.0 が中核の形式と定めているもの**から、ラスタ画像の3つを採る
+ * （SVGは中身がXMLで、逃がしも検証も別物になるので扱わない）。
+ *
+ * **webp は入れない。** 中核の形式に入ったのは EPUB 3.3 からで、この本の
+ * OPFが名乗るのは `version="3.0"` である。古いリーダーは表示できず、
+ * epubcheck 4系も咎める。断るときは変換先（PNG・JPEG）まで言う。
+ */
 const IMAGE_MEDIA_TYPES: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
-  webp: "image/webp",
+  gif: "image/gif",
 };
+
+/** 断り文で並べる種類。**受け取れないものを勧めない**ため1か所で持つ */
+const IMAGE_EXTENSIONS = "png・jpg・jpeg・gif";
 
 /**
  * 書体の種類（設計書6.65.11）。
@@ -312,10 +332,8 @@ export function buildEpub(book: EpubBook): Uint8Array {
         body: buildCharacterPageFragment(characters.map((item) => item.entry)),
       })
     );
-    for (const item of characters) {
-      if (item.portrait) {
-        files[`${ROOT}/${item.portrait.packagedName}`] = item.portrait.data;
-      }
+    for (const portrait of uniquePortraits(characters)) {
+      files[`${ROOT}/${portrait.packagedName}`] = portrait.data;
     }
   }
 
@@ -402,6 +420,14 @@ function packIllustrations(
  * **1人の絵が読めなくても、その人を落とさない。** 名前だけ載せて本は出す
  * （設計書6.65.11。挿絵と同じ流儀）。ここへ届く前に読めなかったものは
  * `icon: null` になっている。
+ *
+ * **同じ絵は1回だけ入れる**（挿絵と同じ）。集合写真を何人もの欄に置く
+ * 使い方があり、同じバイト列を人数ぶん詰めると本が重くなる。見分けは
+ * 作品フォルダからの相対パスで行う。
+ *
+ * **名前の空の人物は届かない**（`epubCharacterPage.ts` の `selectBookCharacters`
+ * が落とす）。ここで数え直さないのは、画面の注記と本の中身を同じ規則で
+ * 決めるためである。
  */
 function packCharacters(
   characters: readonly EpubBookCharacter[]
@@ -410,21 +436,26 @@ function packCharacters(
   // **番号は絵の側で数える。** 人物の番号で付けると、絵の無い人が
   // 混ざったとたんに `portrait-1` の無い本ができる（読めはするが、
   // 中身を覗いた作者が「1枚目が消えた」と読む）
-  let portraits = 0;
+  const portraits = new Map<string, PackagedIllustration>();
 
   for (const character of characters) {
     let portrait: PackagedIllustration | null = null;
     if (character.icon) {
-      portraits++;
-      portrait = {
-        id: `portrait-${portraits}`,
-        packagedName: `portrait-${portraits}${extensionOf(
-          character.icon.sourcePath
-        )}`,
-        // 扱えない種類は、本を組む前に分かる言葉で断る
-        mediaType: imageMediaType(character.icon.sourcePath, "人物イラスト"),
-        data: character.icon.data,
-      };
+      const sourcePath = character.icon.sourcePath;
+      const known = portraits.get(sourcePath);
+      if (known) {
+        portrait = known;
+      } else {
+        const index = portraits.size + 1;
+        portrait = {
+          id: `portrait-${index}`,
+          packagedName: `portrait-${index}${extensionOf(sourcePath)}`,
+          // 扱えない種類は、本を組む前に分かる言葉で断る
+          mediaType: imageMediaType(sourcePath, "人物イラスト"),
+          data: character.icon.data,
+        };
+        portraits.set(sourcePath, portrait);
+      }
     }
 
     packed.push({
@@ -439,6 +470,24 @@ function packCharacters(
   }
 
   return packed;
+}
+
+/**
+ * ZIPへ入れる人物イラスト。**同じ絵は1つにまとめる。**
+ *
+ * ファイルの書き出しとOPFのmanifestが同じ並びを見るための1か所である
+ * （manifest に同じidが2つ並ぶと epubcheck が咎める）。
+ */
+function uniquePortraits(
+  characters: readonly PackagedCharacter[]
+): PackagedIllustration[] {
+  const seen = new Map<string, PackagedIllustration>();
+  for (const item of characters) {
+    if (item.portrait && !seen.has(item.portrait.id)) {
+      seen.set(item.portrait.id, item.portrait);
+    }
+  }
+  return [...seen.values()];
 }
 
 /**
@@ -590,13 +639,11 @@ function contentOpf(
           `    <item id="characters" href="${CHARACTERS_NAME}" media-type="application/xhtml+xml" />`,
         ]
       : []),
-    ...characters
-      .map((item) => item.portrait)
-      .filter((portrait): portrait is PackagedIllustration => portrait !== null)
-      .map(
-        (portrait) =>
-          `    <item id="${portrait.id}" href="${portrait.packagedName}" media-type="${portrait.mediaType}" />`
-      ),
+    // **同じ絵を2人で使っても1行だけ。** 同じidが2つ並ぶと epubcheck が咎める
+    ...uniquePortraits(characters).map(
+      (portrait) =>
+        `    <item id="${portrait.id}" href="${portrait.packagedName}" media-type="${portrait.mediaType}" />`
+    ),
     // 同梱した書体。**manifest に無いファイルは本の中に無いのと同じ**なので、
     // ここを落とすと `@font-face` だけが残って字が変わらない
     ...[fonts.body, fonts.heading]
@@ -773,12 +820,14 @@ export function buildTocFragment(
 }
 
 function flatItems(entries: readonly EpubTocEntry[]): string[] {
-  return entries.map(
-    (entry) =>
-      `    <li><a href="${escapeXml(entry.href)}">${escapeXml(
-        entry.label
-      )}</a></li>`
-  );
+  return entries.map((entry) => tocItem(entry, "    "));
+}
+
+/** 目次の1行。章の中と外で字下げだけが変わる */
+function tocItem(entry: EpubTocEntry, indent: string): string {
+  return `${indent}<li><a href="${escapeXml(entry.href)}">${escapeXml(
+    entry.label
+  )}</a></li>`;
 }
 
 /**
@@ -788,28 +837,42 @@ function flatItems(entries: readonly EpubTocEntry[]): string[] {
  * 「`a` か `span`、続けて `ol`」だけで、`h2` を入れると本の検証で落ちる。
  * 束ね名が続くあいだは同じ章にまとめ、変わったところで章を切る
  * （並べ替えはしない——本の順序が変わってしまう）。
+ *
+ * **束ね名が読めない話は、章に包まない**（設計書6.65.6）。以前は空の
+ * 束ね名でも章を開いていたので、名前の無い章の見出し
+ * （`<span class="toc-group"></span>`）が立っていた。**書いていない構成を
+ * 本へ載せない**という約束は、章を捏造しないことと同じである。
+ * 束ねられない話は一覧の項目として、その場の順序のまま置く。
  */
 function groupedItems(entries: readonly EpubTocEntry[]): string[] {
   const out: string[] = [];
+  /** いま開いている章の名前。null なら章の外にいる */
   let current: string | null = null;
+
+  const closeGroup = (): void => {
+    if (current === null) return;
+    out.push("      </ol>", "    </li>");
+    current = null;
+  };
 
   for (const entry of entries) {
     const group = (entry.group ?? "").trim();
+    if (!group) {
+      closeGroup();
+      out.push(tocItem(entry, "    "));
+      continue;
+    }
     if (group !== current) {
-      if (current !== null) out.push("      </ol>", "    </li>");
+      closeGroup();
       current = group;
       out.push(
         `    <li><span class="toc-group">${escapeXml(group)}</span>`,
         "      <ol>"
       );
     }
-    out.push(
-      `        <li><a href="${escapeXml(entry.href)}">${escapeXml(
-        entry.label
-      )}</a></li>`
-    );
+    out.push(tocItem(entry, "        "));
   }
-  if (current !== null) out.push("      </ol>", "    </li>");
+  closeGroup();
   return out;
 }
 

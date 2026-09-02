@@ -91,12 +91,21 @@ function coverSection(
   pathFieldId: string,
   pathLabel: string,
   bakeButtonId: string,
-  bakeLabel: string
+  bakeLabel: string,
+  unbakeButtonId: string,
+  unbakeLabel: string
 ): string {
   return [
     `    <h2>${heading}</h2>`,
     `    <label><span>${pathLabel}</span><input id="${pathFieldId}" type="text"></label>`,
     `    <p class="note" id="${side}-bake-note"></p>`,
+    // **焼いた画像の話は、合成の欄の外に置く。** 元イラストの指定を
+    // 消しても焼いた画像は残り（本にも入り）、そのとき合成の欄は畳まれる。
+    // 中に入れると、消す手立てごと見えなくなる（設計書6.65.8）
+    `    <p class="note" id="${side}-baked-note"></p>`,
+    `    <div class="cover-actions" id="${side}-baked-actions" hidden>`,
+    `      <button id="${unbakeButtonId}">${unbakeLabel}</button>`,
+    "    </div>",
     `    <div id="${side}-compose">`,
     ...COVER_ELEMENTS.map((element) =>
       coverElementRow(side, element.key, element.label)
@@ -313,7 +322,9 @@ ${coverSection(
   "coverImagePath",
   "元イラストの場所（作品フォルダからの相対パス）",
   "bakeFront",
-  "表紙を焼く"
+  "表紙を焼く",
+  "unbakeFront",
+  "焼いた画像を消す"
 )}
 
 ${coverSection(
@@ -322,7 +333,9 @@ ${coverSection(
   "backCoverImagePath",
   "元イラストの場所（作品フォルダからの相対パス）",
   "bakeBack",
-  "裏表紙を焼く"
+  "裏表紙を焼く",
+  "unbakeBack",
+  "焼いた画像を消す"
 )}
 
     <h2>登場人物一覧</h2>
@@ -721,6 +734,13 @@ field('export').addEventListener('click', function () {
 });
 field('bakeFront').addEventListener('click', function () { bake('front'); });
 field('bakeBack').addEventListener('click', function () { bake('back'); });
+// 消すのは拡張機能側の仕事（場所を画面で組み立てない）
+field('unbakeFront').addEventListener('click', function () {
+  post('unbake', { side: 'front', config: readForm() });
+});
+field('unbakeBack').addEventListener('click', function () {
+  post('unbake', { side: 'back', config: readForm() });
+});
 field('episodeSelect').addEventListener('change', function () {
   episodePath = field('episodeSelect').value;
   // 段落は話ごとに違う。貰い直すまでは空にしておく（前の話の段落へ
@@ -880,6 +900,12 @@ function applyCompose(data) {
     const info = (data.compose || {})[side] || {};
     field(side + '-compose').hidden = info.enabled !== true;
     field(side + '-bake-note').textContent = info.reason || '';
+
+    // 焼いた画像があるときだけ、その注記と「消す」を出す。
+    // 中身の言葉は拡張機能側が持つ（画面では組み立てない）
+    const baked = info.baked || null;
+    field(side + '-baked-note').textContent = baked ? baked.note : '';
+    field(side + '-baked-actions').hidden = !baked;
 
     const source = info.uri || null;
     if (source === sources[side]) return;

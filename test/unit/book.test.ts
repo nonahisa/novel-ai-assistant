@@ -147,6 +147,28 @@ describe("壊れた設計図は受け取らない", () => {
     expect(() => parseBookConfig({ author: {} }, "氷の街")).toThrow();
   });
 
+  /**
+   * **schemaVersion だけを特別扱いしない。**
+   *
+   * ここだけ「文字列でなければ既定へ倒す」だったので、`schemaVersion: 2` と
+   * 書いた設計図が黙って `"0.1"` の本として組まれていた。倒すと作者は
+   * 「指定が効いていない」ことに気づけない（綴じ方向・飾りと同じ扱いにする）。
+   */
+  test("schemaVersion が文字列でなければ弾く（黙って既定へ倒さない）", () => {
+    expect(() => parseBookConfig({ schemaVersion: 2 }, "氷の街")).toThrow();
+    expect(() => parseBookConfig({ schemaVersion: null }, "氷の街")).toThrow();
+  });
+
+  test("schemaVersion が書かれていなければ既定で埋める", () => {
+    // 「書いていない」と「別の型で書いた」は違う。無い項目は既定でよい
+    expect(parseBookConfig({}, "氷の街").schemaVersion).toBe(
+      BOOK_SCHEMA_VERSION
+    );
+    expect(
+      parseBookConfig({ schemaVersion: "9.9" }, "氷の街").schemaVersion
+    ).toBe("9.9");
+  });
+
   test("表紙の場所は作品フォルダの外を指せない", () => {
     // 相対パスと言いながら `..` や絶対パスを書かれると、作品の外の
     // ファイルを本へ詰めることになる

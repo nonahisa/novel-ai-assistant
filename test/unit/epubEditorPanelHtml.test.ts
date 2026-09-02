@@ -162,6 +162,39 @@ describe("左の設定の欄", () => {
   });
 
   /**
+   * 焼いた画像を消す入口（設計書6.65.8）。
+   *
+   * 焼いた画像は元イラストより先に拾われるので、**焼いたあとに元絵を
+   * 差し替えても本は変わらない**。消せる道が無いと、作者は
+   * `設定/書籍/` を自分で開いて消すしかない。
+   */
+  it("焼いた画像を消す入口が、表紙・裏表紙それぞれにある", () => {
+    expect(html).toContain('id="unbakeFront"');
+    expect(html).toContain('id="unbakeBack"');
+    expect(html).toContain("焼いた画像を消す");
+    expect(script).toContain("post('unbake'");
+  });
+
+  /**
+   * **合成の欄の外に置く。** 元イラストの指定を消しても焼いた画像は残り
+   * （本にも入る）、そのとき合成の欄は畳まれる。中に入れると、消す手立て
+   * ごと見えなくなる。
+   */
+  it("消す入口は、合成の欄の中に入れない", () => {
+    const compose = html.indexOf('id="front-compose"');
+    expect(compose).toBeGreaterThan(0);
+    expect(html.indexOf('id="unbakeFront"')).toBeLessThan(compose);
+  });
+
+  it("焼いた画像の注記を出す場所がある（言葉は拡張機能側が持つ）", () => {
+    expect(html).toContain('id="front-baked-note"');
+    expect(html).toContain('id="back-baked-note"');
+    // いつ焼いたかの言い方を画面で組み立てない（設計書6.65.6）
+    expect(script).toContain("baked.note");
+    expect(script).not.toContain("焼いた画像を表示中");
+  });
+
+  /**
    * 登場人物一覧（設計書6.65.11）。**既定は出さない**ので、
    * 画面には「出す」を選ぶ入口だけがある。
    */

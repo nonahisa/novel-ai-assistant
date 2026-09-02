@@ -3,9 +3,12 @@ import { beforeEach, describe, expect, test } from "vitest";
 import {
   BAKED_COVER_FILES,
   MAX_BAKED_COVER_BYTES,
+  bakedCoverInfo,
   bakedCoverPath,
   decodePngDataUrl,
+  deleteBakedCover,
   describeBakedAt,
+  describeBakedPreview,
   describeCoverUse,
   readCoverSource,
   saveBakedCover,
@@ -240,6 +243,85 @@ describe("保存と読み出し", () => {
 
   test("裏表紙は、どちらも無ければ面ごと出さない", async () => {
     expect(await readCoverSource(workFolder, settings, "back", null)).toBe(null);
+  });
+
+  /**
+   * 焼いた画像が「ある・いつのものか」だけを見る口（設計書6.65.8）。
+   *
+   * **画面が中身を読まずに済むようにする。** エディターのプレビューは、
+   * 焼いた画像があるかどうかで見せ方を変えるが、バイト列は要らない
+   * （`asWebviewUri` で読むため）。
+   */
+  test("焼いた画像の有無と時刻を、中身を読まずに答える", async () => {
+    expect(await bakedCoverInfo(settings, "front")).toBeNull();
+
+    await saveBakedCover(settings, "front", pngDataUrl());
+    const info = await bakedCoverInfo(settings, "front");
+
+    expect(info?.filePath).toBe(bakedCoverPath(settings, "front"));
+    expect(info?.bakedAt).toBeInstanceOf(Date);
+    // 裏表紙は別の持ち物（片方を焼いても、もう片方は無いまま）
+    expect(await bakedCoverInfo(settings, "back")).toBeNull();
+  });
+
+  /**
+   * 焼いた画像を消す（設計書6.65.8）。
+   *
+   * 焼いたあとに元イラストを差し替えると、**画面には新しい絵、本には
+   * 古い焼き上がり**という食い違いが起きる。作者が選んで消せる道を用意し、
+   * 消したら元イラストの拾い方に戻る。
+   */
+  test("焼いた画像を消すと、元イラストの拾い方に戻る", async () => {
+    disk.set(
+      diskPath(path.join(workFolder, "素材", "表紙.png")),
+      new Uint8Array([1, 2, 3])
+    );
+    await saveBakedCover(settings, "front", pngDataUrl());
+
+    const removed = await deleteBakedCover(settings, "front");
+
+    expect(removed).toBe(bakedCoverPath(settings, "front"));
+    expect(disk.has(diskPath(removed as string))).toBe(false);
+    const source = await readCoverSource(
+      workFolder,
+      settings,
+      "front",
+      "素材/表紙.png"
+    );
+    expect(source?.fileName).toBe("素材/表紙.png");
+  });
+
+  test("消してよいのは「_合成済み」の2つだけ（元イラストは残る）", async () => {
+    const original = diskPath(path.join(workFolder, "素材", "表紙.png"));
+    disk.set(original, new Uint8Array([1]));
+    await saveBakedCover(settings, "front", pngDataUrl());
+    await saveBakedCover(settings, "back", pngDataUrl());
+
+    await deleteBakedCover(settings, "front");
+
+    // 元イラストにも、もう片方の焼き上がりにも触らない
+    expect(disk.has(original)).toBe(true);
+    expect(disk.has(diskPath(bakedCoverPath(settings, "back")))).toBe(true);
+  });
+
+  test("焼いた画像が無ければ、消すものが無いと分かる（null）", async () => {
+    expect(await deleteBakedCover(settings, "front")).toBeNull();
+  });
+});
+
+/**
+ * プレビューで「焼いた画像を見ている」と伝える一言（設計書6.65.8）。
+ *
+ * 焼いたあとは、合成の欄を触っても本の表紙は変わらない（焼き直すまで）。
+ * **見ているものと本の中身が食い違わない**よう、いつ焼いたものかを出す。
+ */
+describe("焼いた画像を見せているときの注記", () => {
+  test("いつ焼いたものかと、やり直し方を伝える", () => {
+    const text = describeBakedPreview(new Date(2026, 8, 3, 14, 5));
+
+    expect(text).toContain("焼いた画像を表示中");
+    expect(text).toContain("2026年9月3日 14:05");
+    expect(text).toContain("焼き直");
   });
 });
 

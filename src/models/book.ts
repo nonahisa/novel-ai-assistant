@@ -376,6 +376,10 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
   const value = objectValue(raw, "設定/書籍/book.json");
   const defaults = defaultBookConfig(workTitle);
 
+  // **schemaVersion だけを特別扱いしない。** ここだけ「文字列でなければ
+  // 既定へ倒す」だったので、`schemaVersion: 2` と書いた設計図が黙って
+  // 既定の版として組まれていた（作者は指定が効いていないことに気づけない）
+  optionalString(value.schemaVersion, "schemaVersion");
   optionalString(value.title, "title");
   optionalString(value.author, "author");
   optionalString(value.illustrator, "illustrator");
@@ -393,9 +397,7 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
 
   return {
     schemaVersion:
-      typeof value.schemaVersion === "string"
-        ? value.schemaVersion
-        : BOOK_SCHEMA_VERSION,
+      (value.schemaVersion as string | undefined) ?? BOOK_SCHEMA_VERSION,
     // 空白だけの題名は「書いていない」と同じに扱う
     title: title || defaults.title,
     author: ((value.author as string | undefined) ?? defaults.author).trim(),

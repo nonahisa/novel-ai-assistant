@@ -15,7 +15,7 @@ import { stripMemoLines } from "./sceneMemo";
  * やめる**。だからここは、
  *
  *   - 空要素を自分で閉じる（`<br />`）
- *   - 本文も見出しも属性値も、必ず `escapeHtml` を通す
+ *   - 本文も見出しも属性値も、必ず `escapeXml` を通す
  *
  * の2つを守る。
  *
@@ -28,7 +28,7 @@ import { stripMemoLines } from "./sceneMemo";
  *
  * そこでPDF出力（`printHtml.ts`）と同じ手を採る——記法の切り分け
  * （`manuscriptRender.ts` の `tokenizeLine`）を借りて、**平文・ルビ・傍点の
- * どれも `escapeHtml` を通してから**組み立てる。記法の定義は増やさない。
+ * どれも `escapeXml` を通してから**組み立てる。記法の定義は増やさない。
  * `.md`（`{漢字|かんじ}`）と `.txt`（`｜漢字《かんじ》`）の両方を扱えるのも、
  * この経路の利点である。
  *
@@ -39,11 +39,44 @@ import { stripMemoLines } from "./sceneMemo";
 /**
  * XMLの中で使ってはいけない文字を逃がす。
  *
- * **定義を増やさない**ので `manuscriptRender.ts` のものをそのまま使う。
- * `'` は逃がさないが、XMLの本文でも二重引用符で囲んだ属性値でも生のまま
- * で正しい（属性は必ず `"` で囲む）。
+ * **定義を増やさない**ので、記号の逃がしは `manuscriptRender.ts` のものを
+ * そのまま使う。`'` は逃がさないが、XMLの本文でも二重引用符で囲んだ属性値
+ * でも生のままで正しい（属性は必ず `"` で囲む）。
+ *
+ * ## 制御文字は落とす
+ *
+ * XML 1.0 は U+0009（タブ）・U+000A（改行）・U+000D（復帰）**以外**のC0
+ * 制御文字を、文書のどこにも置けないと定めている——実体参照（`&#12;`）に
+ * しても駄目である。ワープロや変換ソフトが混ぜたフォームフィード**1文字で
+ * 本ごと開けなくなる**。
+ *
+ * **逃がしの入口で落とす**ので、本文・見出し・題名・人名・解説文・属性値の
+ * どれにも効く（この関数を通らない道を作らないこと）。置換ではなく除去に
+ * するのは、見えない字を「?」のような見える字へ化けさせないためである。
  */
-export const escapeXml = escapeHtml;
+export function escapeXml(value: string): string {
+  return escapeHtml(value.replace(FORBIDDEN_CONTROL_CHARS, ""));
+}
+
+/**
+ * XMLに書けないC0制御文字（U+0000〜0008・000B・000C・000E〜001F）。
+ *
+ * **文字そのものをソースへ書かない。** 生の制御文字を置くと git や grep が
+ * ファイルをバイナリ扱いする（CLAUDE.mdの約束）ので、**文字番号から
+ * 組み立てる**。
+ */
+function buildForbiddenControlChars(): RegExp {
+  const chars: string[] = [];
+  for (let code = 0x00; code <= 0x1f; code++) {
+    // タブ・改行・復帰の3つだけは、XMLに書いてよい
+    if (code === 0x09 || code === 0x0a || code === 0x0d) continue;
+    chars.push(String.fromCharCode(code));
+  }
+  // どれも正規表現の特別な字ではないので、そのまま文字の並びにしてよい
+  return new RegExp(`[${chars.join("")}]`, "g");
+}
+
+const FORBIDDEN_CONTROL_CHARS = buildForbiddenControlChars();
 
 export interface EpubChapterSource {
   /** 話の見出し。**呼び出し側が組む**（`episodeLabel.ts` の作り方に合わせる） */
@@ -165,6 +198,43 @@ export function describePlacementOverflow(
   return overflow.kind === "illustration"
     ? `${head}末尾に置きました。`
     : `${head}末尾なので、改ページは入りません。`;
+}
+
+/**
+ * 画像が見つからない挿絵の言い方（設計書6.65.10）。
+ *
+ * **画面でも書き出しでも起きることは同じ**（その挿絵は本に入らない）なので、
+ * 言い方を1か所に置く。位置の超過（末尾には入る）と違い、こちらは1枚
+ * まるごと入らないので、そう言い切る。
+ */
+export function describeMissingIllustrationImage(imagePath: string): string {
+  return (
+    `挿絵の画像「${imagePath}」が見つかりません。` +
+    "この挿絵は本に入りません。"
+  );
+}
+
+/**
+ * 競合で本から外れた話に置かれていた指定の言い方（設計書6.65.10）。
+ *
+ * 未解決の競合を含む話は本から外れる。**その話に付けた挿絵・改ページも
+ * 一緒に消える**のに、外れたことしか伝えていなかった（挿絵が入らない理由が
+ * 作者に分からない）。指定が無ければ null を返す——言うことが無いのに
+ * 「0件も入っていません」と伝えても、読む手間が増えるだけである。
+ */
+export function describeDroppedPlacements(
+  heading: string,
+  counts: { illustrations: number; pageBreaks: number }
+): string | null {
+  const parts: string[] = [];
+  if (counts.illustrations > 0) parts.push(`挿絵${counts.illustrations}件`);
+  if (counts.pageBreaks > 0) parts.push(`改ページ${counts.pageBreaks}件`);
+  if (parts.length === 0) return null;
+
+  return (
+    `競合の印がある${heading.trim() || "この話"}は本から外れたため、` +
+    `${parts.join("・")}も入っていません。`
+  );
 }
 
 /**
@@ -358,6 +428,10 @@ function normalizedLines(body: string): string[] {
  *
  * 本文の前後の空行は、詰める設定に関わらず落とす。話の頭に空きが入ると、
  * 見出しから本文までの間が話ごとに不揃いになる。
+ *
+ * **改ページの位置では、直前の空行を出さない**（設計書6.65.10）。改ページ
+ * そのものが場面の区切りなので空きの用が無く、残すと前の面の末尾に空白の
+ * 行だけが積まれる（読者からは「本文が終わったのに白紙が続く」と見える）。
  */
 function renderBody(
   body: string,
@@ -405,8 +479,9 @@ function renderBody(
       paragraph++;
       inParagraph = true;
     }
-    // 先頭の空行（out が空）は捨てる
-    if (out.length > 0) {
+    // 先頭の空行（out が空）は捨てる。**改ページの直前の空行も出さない**
+    // ——改ページが場面の区切りなので、前の面の末尾に空きは要らない
+    if (out.length > 0 && !pendingBreak) {
       const keep = options.collapseBlankLines ? Math.max(0, blanks - 1) : blanks;
       for (let i = 0; i < keep; i++) out.push(BLANK_PARAGRAPH);
     }

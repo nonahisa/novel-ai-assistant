@@ -55,12 +55,18 @@ export interface EpubCharacterEntry {
  * 本へ載せる人物を選ぶ（設計書6.65.11）。
  *
  * **並べ替えない。** 台帳の並びは作者が決めたものなので、本でも守る。
+ *
+ * **名前の空の人物は落とす。** 台帳には抽出の途中で作られた名前の無い
+ * レコードが混ざることがあり、そのまま組むと中身の無い枠が本に並ぶ
+ * （読者から見れば意味の無い空白である）。ここで落とすので、画面の
+ * 「◯人が載ります」にも入らない——**見えている人数と本の中身がずれない**。
  */
 export function selectBookCharacters(
   characters: readonly Character[]
 ): Character[] {
   return characters.filter(
     (character) =>
+      character.name.trim() !== "" &&
       character.status === "登場済み" &&
       !character.isMob &&
       character.spoilerLevel === BOOK_SPOILER_LEVEL
@@ -106,6 +112,11 @@ export function characterIconPath(icon: string | null): string | null {
  * 1人ぶんは「イラスト（あれば）→名前→紹介文（あれば）」の順。
  * **無い項目は要素ごと出さない**——空の `<p>` は「紹介文が無い」ではなく
  * 「空の紹介文がある」という主張になる（奥付と同じ約束）。
+ *
+ * **名前の空の人物は、枠ごと出さない。** 名前が無ければ誰の欄なのか読者に
+ * 分からず、絵と紹介文だけが宙に浮く。載せる人を選ぶのは
+ * `selectBookCharacters` だが、ここが最後の関所である（選び方を変えても
+ * 空の枠は出ない）。
  */
 export function buildCharacterPageFragment(
   entries: readonly EpubCharacterEntry[]
@@ -113,7 +124,9 @@ export function buildCharacterPageFragment(
   return [
     '<section class="characters">',
     '<h1 class="characters-heading">登場人物</h1>',
-    ...entries.flatMap((entry) => characterFragment(entry)),
+    ...entries
+      .filter((entry) => entry.name.trim() !== "")
+      .flatMap((entry) => characterFragment(entry)),
     "</section>",
   ].join("\n");
 }

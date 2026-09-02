@@ -4,7 +4,10 @@ import {
   buildChapterPlacement,
   buildChapterXhtml,
   countParagraphs,
+  describeDroppedPlacements,
+  describeMissingIllustrationImage,
   describePlacementOverflow,
+  escapeXml,
   missingEpisodeNotices,
   placementsIn,
   splitParagraphs,
@@ -77,6 +80,84 @@ describe("XMLとして閉じている", () => {
     const html = fragment("あ\n\n\nい", { collapseBlankLines: false });
     expect(html).toContain("<br />");
     expect(html).not.toMatch(/<br>/);
+  });
+});
+
+/**
+ * XMLに書けない制御文字（設計書6.65.4）。
+ *
+ * XML 1.0 は U+0009・U+000A・U+000D 以外のC0制御文字を**文書のどこにも
+ * 置けない**と定めている（実体参照にしても駄目）。変換ソフトが混ぜた
+ * フォームフィード1文字で本ごと開けなくなるので、**逃がしの入口で落とす**。
+ *
+ * **生の制御文字はソースへ置かない**（CLAUDE.mdの約束。gitやgrepがバイナリ
+ * 扱いする）。ここでは文字番号から作る——エスケープの書き方を間違えて
+ * 生の1バイトが紛れ込む事故そのものを避けられる。
+ */
+describe("制御文字を落とす", () => {
+  /** フォームフィード。変換ソフトが混ぜる代表格 */
+  const formFeed = String.fromCharCode(0x0c);
+  const nul = String.fromCharCode(0x00);
+  const backspace = String.fromCharCode(0x08);
+  const unitSeparator = String.fromCharCode(0x1f);
+
+  /** XMLに書けない制御文字が残っていないか */
+  function hasForbidden(text: string): boolean {
+    return [...text].some((char) => {
+      const code = char.charCodeAt(0);
+      return code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d;
+    });
+  }
+
+  test("フォームフィードやNULは、逃がしの入口で消える", () => {
+    expect(escapeXml(`あ${formFeed}い`)).toBe("あい");
+    expect(escapeXml(`あ${nul}い${backspace}う${unitSeparator}え`)).toBe(
+      "あいうえ"
+    );
+  });
+
+  test("置換ではなく除去する（見えない字を別の字に化けさせない）", () => {
+    expect(escapeXml(`あ${formFeed}い`)).toHaveLength(2);
+  });
+
+  test("タブ・改行・復帰は残す（XMLで書いてよい3つ）", () => {
+    expect(escapeXml("あ\tい\nう\rえ")).toBe("あ\tい\nう\rえ");
+  });
+
+  test("逃がしそのものは、いままでどおり効く", () => {
+    expect(escapeXml('A & B <tag> "引用"')).toBe(
+      "A &amp; B &lt;tag&gt; &quot;引用&quot;"
+    );
+  });
+
+  test("本文にも見出しにも効く（入口が1つだから）", () => {
+    const html = fragment(`あ${formFeed}い`, {
+      heading: `第一話${nul}　出会い`,
+    });
+
+    expect(html).toContain("<p>あい</p>");
+    expect(html).toContain("第一話　出会い");
+    expect(hasForbidden(html)).toBe(false);
+  });
+
+  test("解説文と画像の場所にも効く", () => {
+    const html = buildChapterPlacement(
+      { heading: "第一話", body: "あ", notation: "curly" },
+      {
+        collapseBlankLines: true,
+        illustrations: [
+          {
+            afterParagraph: 1,
+            href: `illust${formFeed}1.png`,
+            caption: `出会い${formFeed}の場面`,
+          },
+        ],
+      }
+    ).html;
+
+    expect(html).toContain('src="illust1.png"');
+    expect(html).toContain("<figcaption>出会いの場面</figcaption>");
+    expect(hasForbidden(html)).toBe(false);
   });
 });
 
@@ -235,6 +316,57 @@ describe("挿絵とページ分割", () => {
     expect(html).toContain("<p>あ</p>");
   });
 
+  /**
+   * 改ページの直前の空行（設計書6.65.10）。
+   *
+   * **改ページそのものが場面の区切り**なので、空きの段落は要らない。
+   * 残すと、前の面の末尾に空白だけの行が積まれる（読者からは「本文が
+   * 終わったのに白紙が続く」ように見える）。
+   */
+  test("改ページの位置では、直前の空行を出さない", () => {
+    const result = placed("あ\n\n\n\nい", {
+      pageBreaks: [1],
+      collapseBlankLines: false,
+    });
+
+    expect(result.html).not.toContain('class="blank"');
+    expect(result.html).toContain('<p class="page-break">い</p>');
+  });
+
+  test("詰める設定に関わらず、空行は残らない", () => {
+    for (const collapseBlankLines of [true, false]) {
+      const html = placed("あ\n\n\n\n\nい", {
+        pageBreaks: [1],
+        collapseBlankLines,
+      }).html;
+      expect(html).not.toContain('class="blank"');
+    }
+  });
+
+  test("改ページの無いところの空行は、いままでどおり残る", () => {
+    // 直したのは「改ページの位置」だけである
+    const html = placed("あ\n\n\nい\n\n\nう", {
+      pageBreaks: [2],
+      collapseBlankLines: false,
+    }).html;
+
+    // 1段落目と2段落目のあいだの空きは残り、改ページの前の空きだけが消える
+    expect([...html.matchAll(/<p class="blank">/g)]).toHaveLength(2);
+    expect(html).toContain('<p class="page-break">う</p>');
+  });
+
+  test("プレビューの印も、空行を挟まず段落の直後に出る", () => {
+    const html = placed("あ\n\n\nい", {
+      pageBreaks: [1],
+      collapseBlankLines: false,
+      markPageBreaks: true,
+    }).html;
+
+    expect(html).toContain(
+      '<p>あ</p>\n<div class="page-break-mark"><span>ここで改ページ</span></div>\n<p class="page-break">い</p>'
+    );
+  });
+
   test("話の末尾を指したら何も付かない（後ろに段落が無い）", () => {
     const result = placed("あ\n\nい", { pageBreaks: [2] });
 
@@ -350,6 +482,57 @@ describe("挿絵とページ分割", () => {
     );
     expect(bare).toBe(placed("あ\n\nい").html);
     expect(bare).not.toContain("figure");
+  });
+});
+
+/**
+ * 画像が見つからない挿絵（設計書6.65.10）。
+ *
+ * **画面でも書き出しでも「本に入らない」ことは同じ**なので、言い方を
+ * 1か所に置く。位置の超過（末尾には入る）と違い、こちらは1枚まるごと
+ * 入らない。
+ */
+describe("読めない挿絵の言い方", () => {
+  test("どのパスが読めないのかを出す", () => {
+    const note = describeMissingIllustrationImage("素材/挿絵1.png");
+
+    expect(note).toContain("素材/挿絵1.png");
+    expect(note).toContain("本に入りません");
+  });
+});
+
+/**
+ * 競合で本から外れた話に置かれていた指定（設計書6.65.10）。
+ *
+ * 競合マーカーのある話は本に入らない。**その話に付けた挿絵・改ページも
+ * 一緒に消える**ので、消えたことを言う（黙って捨てない）。
+ */
+describe("競合で外れた話の指定", () => {
+  test("挿絵と改ページの件数を、話の名前と一緒に伝える", () => {
+    const note = describeDroppedPlacements("第三話　再会", {
+      illustrations: 2,
+      pageBreaks: 1,
+    });
+
+    expect(note).toContain("第三話　再会");
+    expect(note).toContain("挿絵2件");
+    expect(note).toContain("改ページ1件");
+  });
+
+  test("片方だけなら、片方だけを言う", () => {
+    const note = describeDroppedPlacements("第三話", {
+      illustrations: 0,
+      pageBreaks: 3,
+    });
+
+    expect(note).toContain("改ページ3件");
+    expect(note).not.toContain("挿絵");
+  });
+
+  test("指定が無ければ何も言わない（外れたことは別の文が伝える）", () => {
+    expect(
+      describeDroppedPlacements("第三話", { illustrations: 0, pageBreaks: 0 })
+    ).toBeNull();
   });
 });
 

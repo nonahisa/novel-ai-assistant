@@ -12,6 +12,9 @@ import { BookStore, BookStoreError, episodePathFor } from "../core/bookStore";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import {
   BAKED_COVER_FILES,
+  bakedCoverInfo,
+  deleteBakedCover,
+  describeBakedPreview,
   readImageDataUrl,
   saveBakedCover,
   type CoverSide,
@@ -27,6 +30,7 @@ import type { NotationMode } from "../core/manuscriptRender";
 import {
   buildChapterFragment,
   countParagraphs,
+  describeMissingIllustrationImage,
   describePlacementOverflow,
   missingEpisodeNotices,
   placementsIn,
@@ -35,6 +39,7 @@ import {
   type EpubIllustrationPlacement,
 } from "../core/epubXhtml";
 import {
+  buildBackCoverFragment,
   buildColophonFragment,
   buildCoverFragment,
   buildEpubCss,
@@ -140,6 +145,24 @@ interface PreviewEpisode {
   /** 絶対パス。**画面へは渡さない**（作品の外を教える必要が無い） */
   filePath: string;
   notation: NotationMode;
+  /**
+   * 未解決の競合を含むか（設計書6.65.10）。
+   *
+   * **この話は本から外れる**（`exportEpub` が外す）。走査が既に見ている
+   * ので、ここで本文を読み直さずに分かる。
+   */
+  conflicted: boolean;
+}
+
+/**
+ * 焼いた画像を画面で見せるための一式（設計書6.65.8）。
+ *
+ * **中身は持たない。** 画面は `asWebviewUri` で読むので、要るのは在りかと
+ * 「いつ焼いたか」だけである。
+ */
+interface BakedPreview {
+  uri: string;
+  bakedAt: Date;
 }
 
 const openPanels = new Map<string, PanelState>();
@@ -257,7 +280,10 @@ export async function openEpubEditorPanel(
     state.current = merged.config;
 
     if (parsed.type === "change") {
-      panel.webview.postMessage({ type: "preview", data: previewData(state) });
+      panel.webview.postMessage({
+        type: "preview",
+        data: await previewData(state),
+      });
       return;
     }
 
@@ -268,6 +294,11 @@ export async function openEpubEditorPanel(
 
     if (parsed.type === "bake") {
       await bakeCover(state, coverSide(parsed.side), parsed.dataUrl ?? "");
+      return;
+    }
+
+    if (parsed.type === "unbake") {
+      await removeBakedCover(state, coverSide(parsed.side));
       return;
     }
 
@@ -391,6 +422,12 @@ async function bakeCover(
   const unsaved = isDirty(state)
     ? "（合成の指定はまだ未保存です。「保存」で book.json へ残ります）"
     : "";
+  // **焼いたら面を出し直す。** 本へ入るのは焼いた画像なので、プレビューも
+  // そちらへ切り替わらないと、画面と本の中身が食い違う（設計書6.65.8）
+  state.panel.webview.postMessage({
+    type: "preview",
+    data: await previewData(state),
+  });
   state.panel.webview.postMessage({
     type: "status",
     text: `${label}を焼きました${unsaved}`,
@@ -399,6 +436,89 @@ async function bakeCover(
     `${label}を焼きました。\n${target}\n` +
       `次の書き出しから、この画像が${label}になります。`
   );
+}
+
+/**
+ * 焼いた画像を消す（設計書6.65.8）。
+ *
+ * ## なぜ消す道が要るのか
+ *
+ * 焼いた画像は元イラストより先に拾われる。**焼いたあとで元イラストを
+ * 差し替えても、`coverImagePath` を空にしても、本には古い焼き上がりが
+ * 入り続ける**（作者からは「直したのに変わらない」と見える）。消す道を
+ * 置けば、どちらの場合も「画面で見えているもの＝本に入るもの」へ戻せる。
+ *
+ * **消すのは `設定/書籍/` の `_合成済み` の2つだけ**である。場所は
+ * `bakedCoverPath` から取り（`core/coverBake.ts`）、組み立てでは作らない
+ * ——作者が手で置いた表紙を消す道を、間違っても作らないため。
+ */
+async function removeBakedCover(
+  state: PanelState,
+  side: CoverSide
+): Promise<void> {
+  const label = sideLabel(side);
+
+  let removed: string | null;
+  try {
+    removed = await deleteBakedCover(await settingsDir(state.work), side);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logFailure("焼いた表紙の削除", {
+      作品: state.work.title,
+      面: label,
+      内容: message,
+    });
+    state.panel.webview.postMessage({
+      type: "status",
+      text: message,
+      isError: true,
+    });
+    await vscode.window.showErrorMessage(
+      `${label}の焼いた画像を消せませんでした。${message}`
+    );
+    return;
+  }
+
+  if (!removed) {
+    // 消すものが無い。**画面は何も変わらない**ので、出し直しもしない
+    state.panel.webview.postMessage({
+      type: "status",
+      text: `${label}の焼いた画像はありません。`,
+    });
+    return;
+  }
+
+  // 面を出し直してから status を送る（先に送ると、面の出し直しが消す）
+  state.panel.webview.postMessage({
+    type: "preview",
+    data: await previewData(state),
+  });
+  state.panel.webview.postMessage({
+    type: "status",
+    text: `${label}の焼いた画像を消しました`,
+  });
+  void vscode.window.showInformationMessage(
+    `${label}の焼いた画像を消しました。\n${removed}\n${describeAfterUnbake(
+      state,
+      side
+    )}`
+  );
+}
+
+/** 消したあと、次の書き出しで何が入るか。**本と同じ拾い順で言う** */
+function describeAfterUnbake(state: PanelState, side: CoverSide): string {
+  const label = sideLabel(side);
+  const source =
+    side === "back"
+      ? state.current.backCoverImagePath
+      : state.current.coverImagePath;
+
+  if (source) {
+    return `次の書き出しからは、元イラスト（${source}）が${label}になります。`;
+  }
+  return side === "back"
+    ? "元イラストの指定も無いので、裏表紙の面は本に入りません。"
+    : "元イラストの指定も無いので、題名だけの扉が表紙になります。";
 }
 
 /** 画面の値をファイルへ書く。書けたら true（呼び出し側はそこで続ける） */
@@ -412,7 +532,7 @@ async function saveDraft(work: WorkEntry, state: PanelState): Promise<boolean> {
   state.saved = state.current;
   state.panel.webview.postMessage({
     type: "preview",
-    data: previewData(state),
+    data: await previewData(state),
   });
   return true;
 }
@@ -423,13 +543,22 @@ async function panelData(state: PanelState) {
     title: `${state.work.title} の本`,
     filePath: await state.store.filePath(),
     config: state.current,
-    ...previewData(state),
+    ...(await previewData(state)),
   };
 }
 
-/** 欄を触るたびに作り直すもの（面とCSS） */
-function previewData(state: PanelState) {
+/**
+ * 欄を触るたびに作り直すもの（面とCSS）。
+ *
+ * **ファイルを見に行くので非同期である。** 焼いた画像があるか、挿絵の
+ * 画像が置かれているか——どちらも「いま」の状態を見せないと、画面と本の
+ * 中身が食い違う（覚え込むと、作者が画像を置いても警告が消えない）。
+ */
+async function previewData(state: PanelState) {
   const vertical = state.current.writingMode === "vertical";
+  const baked = await bakedCovers(state);
+  const missingImages = await missingIllustrationImages(state);
+
   return {
     // **書き出しと同じCSS**を、画面の枠の中へ閉じ込めただけのもの。
     // 同梱する書体も当てる（設計書6.65.11）——本と同じ字面で確かめられ
@@ -441,21 +570,94 @@ function previewData(state: PanelState) {
       }),
       ".epub-page"
     ),
-    pages: buildPages(state, vertical),
+    pages: buildPages(state, vertical, baked),
     characterNotice: characterNotice(state),
     compose: {
-      front: composeState(state, "front"),
-      back: composeState(state, "back"),
+      front: composeState(state, "front", baked.front),
+      back: composeState(state, "back", baked.back),
     },
     // 挿絵の欄で選ぶ話の一覧。**絶対パスは渡さない**
     episodes: state.source.episodes.map((episode) => ({
       path: episode.path,
-      label: episode.label,
+      label: episodeChoiceLabel(episode),
     })),
-    placementWarnings: placementWarnings(state),
+    placementWarnings: placementWarnings(state, missingImages),
     notice: state.source.notice,
     dirty: isDirty(state),
   };
+}
+
+/**
+ * 話を選ぶ欄に出す名前（設計書6.65.10）。
+ *
+ * **競合の印がある話は本から外れる**（`exportEpub` が外す）のに、欄には
+ * ふつうに並んでいた。挿絵や改ページを置いても入らない理由が分からない。
+ *
+ * **選べなくはしない。** 競合を直せばそのまま入るので、指定は残してよい
+ * ——伝えるのは「いまのままでは本に入らない」ことだけである。
+ */
+function episodeChoiceLabel(episode: PreviewEpisode): string {
+  return episode.conflicted
+    ? `${episode.label}（競合のため本から外れます）`
+    : episode.label;
+}
+
+/**
+ * 焼いた画像の在りかと時刻（設計書6.65.8）。
+ *
+ * **読めなくても画面は開く。** 作品設定が読めないときは「焼いていない」と
+ * 同じ扱いにする——本へ入らないことに変わりはない。
+ */
+async function bakedCovers(
+  state: PanelState
+): Promise<Record<CoverSide, BakedPreview | null>> {
+  let settings: string;
+  try {
+    settings = await settingsDir(state.work);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logFailure("焼いた表紙の確認", { 作品: state.work.title, 内容: message });
+    return { front: null, back: null };
+  }
+
+  const read = async (side: CoverSide): Promise<BakedPreview | null> => {
+    const info = await bakedCoverInfo(settings, side);
+    if (!info) return null;
+    return {
+      // 焼いた画像は `設定/書籍/` の中、つまり作品フォルダの中にある
+      // （`localResourceRoots` が許している範囲）
+      uri: state.panel.webview
+        .asWebviewUri(path.toUri(info.filePath))
+        .toString(),
+      bakedAt: info.bakedAt,
+    };
+  };
+
+  return { front: await read("front"), back: await read("back") };
+}
+
+/**
+ * 画像の見つからない挿絵（設計書6.65.10）。
+ *
+ * **本に入らないことを、書き出す前に伝える。** 欄には行があるので、
+ * 場所を打ち間違えていても「入る」ように見えていた。
+ *
+ * **覚え込まない。** 作者が画像を置いた瞬間に警告が消えてほしいので、
+ * 面を作り直すたびに見に行く（同じ場所は1度だけ）。
+ */
+async function missingIllustrationImages(state: PanelState): Promise<string[]> {
+  const checked = new Set<string>();
+  const missing: string[] = [];
+
+  for (const item of state.current.illustrations) {
+    if (checked.has(item.imagePath)) continue;
+    checked.add(item.imagePath);
+    if (!(await exists(state.work, item.imagePath))) {
+      missing.push(item.imagePath);
+    }
+  }
+
+  return missing;
 }
 
 /**
@@ -465,14 +667,20 @@ function previewData(state: PanelState) {
  * 改題すれば指し先が消える。言い方は `epubXhtml.ts` が1か所で持つので、
  * 書き出しの通知と食い違わない。
  *
- * 並びは「入らないもの（指し先が無い）」→「ずれたもの（位置の超過）」。
- * 入らないほうが直す用が大きい。
+ * 並びは「入らないもの（指し先が無い・画像が無い）」→「ずれたもの（位置の
+ * 超過）」。入らないほうが直す用が大きい。
  */
-function placementWarnings(state: PanelState): string[] {
+function placementWarnings(
+  state: PanelState,
+  missingImages: readonly string[]
+): string[] {
   const labels = new Map(
     state.source.episodes.map((episode) => [episode.path, episode.label])
   );
   const notes: string[] = missingEpisodeNotices(labels.keys(), state.current);
+  // 画像が置かれていない挿絵も「入らないもの」である（言い方は
+  // `epubXhtml.ts` が1か所で持つので、書き出しの通知と食い違わない）
+  notes.push(...missingImages.map(describeMissingIllustrationImage));
 
   const check = (
     kind: "illustration" | "pageBreak",
@@ -544,7 +752,7 @@ async function sendParagraphs(
   // 段落数が分かった。ずれの知らせを出し直す
   state.panel.webview.postMessage({
     type: "preview",
-    data: previewData(state),
+    data: await previewData(state),
   });
 }
 
@@ -622,12 +830,25 @@ async function countPlacedEpisodes(
  * （`processAvailability.ts` と同じ流儀）。消してしまうと、作者は
  * 「合成ができない画面なのだ」と受け取ってしまう。
  */
-function composeState(state: PanelState, side: CoverSide) {
+function composeState(
+  state: PanelState,
+  side: CoverSide,
+  baked: BakedPreview | null
+) {
   const label = sideLabel(side);
   const relative =
     side === "back"
       ? state.current.backCoverImagePath
       : state.current.coverImagePath;
+
+  // 焼いた画像は**元イラストの指定が無くても残っている**（本にも入る）。
+  // 消す道は、合成の欄が畳まれていても押せるところに置く（設計書6.65.8）
+  const bakedNote = baked
+    ? {
+        note: describeBakedPreview(baked.bakedAt),
+        fileName: BAKED_COVER_FILES[side],
+      }
+    : null;
 
   if (!relative) {
     return {
@@ -636,6 +857,7 @@ function composeState(state: PanelState, side: CoverSide) {
       reason:
         `${label}の元イラストが指定されていないので、合成の欄は使えません。` +
         `作品フォルダに画像を置き、上の欄にその場所（例：素材/${label}.png）を書いてください。`,
+      baked: bakedNote,
     };
   }
 
@@ -648,6 +870,7 @@ function composeState(state: PanelState, side: CoverSide) {
     reason:
       `「${label}を焼く」を押すと 設定/${BOOK_DIR}/${BAKED_COVER_FILES[side]} へ保存され、` +
       "書き出しはその画像を使います。",
+    baked: bakedNote,
   };
 }
 
@@ -672,31 +895,50 @@ interface PreviewPage {
  * 見た目どおりに編集しているつもりで別の本ができる。並びは
  * 表紙→タイトルページ→（目次）→本文→奥付（設計書6.65.3の表）。
  */
-function buildPages(state: PanelState, vertical: boolean): PreviewPage[] {
+function buildPages(
+  state: PanelState,
+  vertical: boolean,
+  baked: Record<CoverSide, BakedPreview | null>
+): PreviewPage[] {
   const config = state.current;
   const source = state.source;
   const pages: PreviewPage[] = [];
+  // 登場人物一覧の面が出るか。**目次の行と面の有無を同じ条件で決める**
+  // （片方だけ出ると、目次から飛べない行ができる。設計書6.65.11）
+  const hasCharacters =
+    config.characterPage.enabled && source.characters.length > 0;
 
+  // **表紙も書き出しと同じ拾い順**（焼いた→元→無し。設計書6.65.8）。
+  // 焼いたあとも合成の途中経過を見せていたので、元イラストを差し替えたり
+  // `coverImagePath` を空にしたりすると、画面と本の中身が食い違っていた
   pages.push(
-    config.coverImagePath
+    baked.front
       ? {
           label: "表紙",
-          // 中身は canvas が描く。**ここで組んだHTMLは使わない**
-          html: "",
-          compose: "front",
-          note:
-            "元イラストに、下の欄で選んだ文字を重ねた見た目です。" +
-            "「表紙を焼く」を押すまでは、元イラストがそのまま入ります。",
+          // 本へ入るのと同じ組み方（画像1枚を敷く断片）で見せる
+          html: buildCoverFragment(config, { href: baked.front.uri }),
+          note: describeBakedPreview(baked.front.bakedAt),
           vertical,
         }
-      : {
-          label: "表紙",
-          html: buildCoverFragment(config, null),
-          note:
-            "表紙の画像が指定されていないので、題名だけの扉が表紙になります" +
-            "（次のタイトルページと同じ組み方です）。",
-          vertical,
-        }
+      : config.coverImagePath
+        ? {
+            label: "表紙",
+            // 中身は canvas が描く。**ここで組んだHTMLは使わない**
+            html: "",
+            compose: "front",
+            note:
+              "元イラストに、下の欄で選んだ文字を重ねた見た目です。" +
+              "「表紙を焼く」を押すまでは、元イラストがそのまま入ります。",
+            vertical,
+          }
+        : {
+            label: "表紙",
+            html: buildCoverFragment(config, null),
+            note:
+              "表紙の画像が指定されていないので、題名だけの扉が表紙になります" +
+              "（次のタイトルページと同じ組み方です）。",
+            vertical,
+          }
   );
 
   pages.push({
@@ -707,10 +949,15 @@ function buildPages(state: PanelState, vertical: boolean): PreviewPage[] {
   });
 
   if (config.tocEnabled) {
+    // **競合の印がある話は、本にも目次にも入らない**（`exportEpub` が外す）。
+    // プレビューに並べると、本には無い行を見ていることになる
+    const listed = source.episodes.filter((entry) => !entry.conflicted);
+    const dropped = source.episodes.length - listed.length;
+
     pages.push({
       label: "目次",
       html: buildTocFragment(
-        source.episodes.map((entry) => ({
+        listed.map((entry) => ({
           // プレビューでは飛ばない。見た目は行き先で変わらない
           href: "#",
           label: entry.label,
@@ -720,19 +967,19 @@ function buildPages(state: PanelState, vertical: boolean): PreviewPage[] {
           pattern: config.tocPattern,
           ornament: config.tocOrnament,
           colophonHref: "#",
+          // **登場人物一覧の行は、書き出しと同じ条件で入れる**（6.65.11）。
+          // 入れ忘れていたので、本には有る行がプレビューだけ無かった
+          charactersHref: hasCharacters ? "#" : null,
         }
       ),
-      note:
-        source.episodes.length === 0
-          ? "本文が見つからないので、目次は空です。"
-          : null,
+      note: tocNote(source.episodes.length, dropped),
       vertical,
     });
   }
 
   // 登場人物一覧は目次の後・本文の前（設計書6.65.11）。**載せる人が
   // 居なければ、本と同じく面ごと出さない**（理由は欄の注記で伝える）
-  if (config.characterPage.enabled && source.characters.length > 0) {
+  if (hasCharacters) {
     pages.push({
       label: "登場人物",
       html: buildCharacterPageFragment(
@@ -787,7 +1034,16 @@ function buildPages(state: PanelState, vertical: boolean): PreviewPage[] {
 
   // 裏表紙は本の最終面（設計書6.65.8）。表紙と同じく「焼いた→元→無し」
   // の順で入るので、焼く前でも面そのものは出る
-  if (config.backCoverImagePath) {
+  if (baked.back) {
+    pages.push({
+      label: "裏表紙",
+      html: buildBackCoverFragment({ href: baked.back.uri }),
+      note:
+        "本の最終面（奥付の後ろ）になります。" +
+        describeBakedPreview(baked.back.bakedAt),
+      vertical,
+    });
+  } else if (config.backCoverImagePath) {
     pages.push({
       label: "裏表紙",
       html: "",
@@ -800,6 +1056,22 @@ function buildPages(state: PanelState, vertical: boolean): PreviewPage[] {
   }
 
   return pages;
+}
+
+/**
+ * 目次の面に添える一言。
+ *
+ * **入らない話があることは、目次を見た時点で分かるようにする**
+ * （設計書6.65.10）。競合を直せば入るので、消えたのではなく「いまは
+ * 入らない」と言う。
+ */
+function tocNote(total: number, dropped: number): string | null {
+  const notes: string[] = [];
+  if (total === 0) notes.push("本文が見つからないので、目次は空です。");
+  if (dropped > 0) {
+    notes.push(`競合の印がある${dropped}話は、本にも目次にも入りません。`);
+  }
+  return notes.length > 0 ? notes.join("") : null;
 }
 
 /**
@@ -917,6 +1189,9 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
     group: episodeGroupLabel(episode),
     filePath: episode.filePath,
     notation: notationModeFor(episode.fileName),
+    // **走査が既に見ている**ので、ここで本文を読み直さなくてよい
+    // （競合のある話は本から外れる。設計書6.65.10）
+    conflicted: episode.hasConflictMarkers,
   }));
 
   const first = await readFirstChapter(scan.episodes, format, work.folderPath);

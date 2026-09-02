@@ -637,6 +637,56 @@ describe("目次の配置パターン（設計書6.65.6）", () => {
     expect(nav).not.toContain("toc-group");
     expect(nav).toContain("第一話　出会い");
   });
+
+  /**
+   * **束ね名が読めないものは束ねない**（設計書6.65.6）。
+   *
+   * 束ねられる話と束ねられない話が混ざる作品（本編＋名前だけのファイル）で、
+   * 読めないほうまで章に包むと**名前の無い章の見出し**が立つ。作者が
+   * 書いていない構成が本に載るのは、章を捏造するのと同じである。
+   */
+  test("束ね名の無い話は、章に包まず一覧の項目として置く", () => {
+    const nav = open(
+      buildEpub({
+        ...book({
+          chapters: [
+            { heading: "第一話　出会い", body: "あ", notation: "curly", group: "本編" },
+            // 話数も種別も読めないファイル。`episodeGroupLabel` は空を返す
+            { heading: "あとがき", body: "い", notation: "curly", group: "" },
+            { heading: "第二話　別れ", body: "う", notation: "curly", group: "本編" },
+          ],
+        }),
+        config: { ...defaultBookConfig("氷の街"), tocPattern: "chapters" },
+      })
+    )["OEBPS/nav.xhtml"];
+
+    // 空の見出しを立てない
+    expect(nav).not.toContain('<span class="toc-group"></span>');
+    expect([...nav.matchAll(/<span class="toc-group">/g)]).toHaveLength(2);
+    // 束ねられない話も、消さずに一覧の項目として置く
+    expect(nav).toContain("あとがき");
+    // 並びは本の順のまま（並べ替えない）
+    expect(nav.indexOf("第一話")).toBeLessThan(nav.indexOf("あとがき"));
+    expect(nav.indexOf("あとがき")).toBeLessThan(nav.indexOf("第二話"));
+  });
+
+  test("束ね名が全部読めなければ、章の見出しは1つも立たない", () => {
+    const nav = open(
+      buildEpub({
+        ...book({
+          chapters: [
+            { heading: "前編", body: "あ", notation: "curly", group: "  " },
+            { heading: "後編", body: "い", notation: "curly" },
+          ],
+        }),
+        config: { ...defaultBookConfig("氷の街"), tocPattern: "chapters" },
+      })
+    )["OEBPS/nav.xhtml"];
+
+    expect(nav).not.toContain("toc-group");
+    expect(nav).toContain("前編");
+    expect(nav).toContain("後編");
+  });
 });
 
 describe("目次と奥付の飾り（設計書6.65.6）", () => {
@@ -757,12 +807,37 @@ describe("表紙画像の種類", () => {
     expect(imageMediaType("表紙.png")).toBe("image/png");
     expect(imageMediaType("表紙.JPG")).toBe("image/jpeg");
     expect(imageMediaType("表紙.jpeg")).toBe("image/jpeg");
-    expect(imageMediaType("表紙.webp")).toBe("image/webp");
+    // GIFはEPUB3の中核の形式（3.0から）。断る理由が無い
+    expect(imageMediaType("表紙.gif")).toBe("image/gif");
   });
 
   test("扱えない種類は、分かる言葉で断る", () => {
     expect(() => imageMediaType("表紙.bmp")).toThrow(/bmp/);
     expect(() => imageMediaType("表紙")).toThrow();
+  });
+
+  /**
+   * **webp は受け取らない。**
+   *
+   * EPUB 3.3 で中核の形式に入ったばかりで、この本のOPFが名乗るのは
+   * `version="3.0"` である。古いリーダーは表示できず、epubcheck 4系は
+   * 咎める。**「入れられません」だけでは作者が次に何をすればよいか
+   * 分からない**ので、変換先まで言う。
+   */
+  test("webp は、変換先まで言って断る", () => {
+    expect(() => imageMediaType("表紙.webp")).toThrow(/webp/);
+    expect(() => imageMediaType("表紙.webp")).toThrow(/PNG/);
+    expect(() => imageMediaType("表紙.WEBP")).toThrow(/PNG/);
+    // 案内する種類にも webp を並べない（断りながら勧めることになる）
+    expect(() => imageMediaType("表紙.bmp")).not.toThrow(/webp/);
+  });
+
+  test("挿絵・人物イラストでも同じ種類しか受け取らない", () => {
+    // 片方だけ緩いと、そちらが抜け道になる（表紙・裏表紙と同じ約束）
+    expect(() => imageMediaType("素材/挿絵.webp", "挿絵")).toThrow(/挿絵/);
+    expect(() =>
+      imageMediaType("素材/月島.webp", "人物イラスト")
+    ).toThrow(/人物イラスト/);
   });
 });
 
@@ -882,6 +957,39 @@ describe("登場人物一覧の面", () => {
     expect(files["OEBPS/content.opf"]).not.toMatch(
       /<item[^>]*id="portrait-1"[^>]*cover-image/
     );
+  });
+
+  /**
+   * **同じ絵は1回だけ入れる**（挿絵と同じ流儀。設計書6.65.11）。
+   *
+   * 集合写真を家族3人ぶんの欄に置くような使い方で、同じバイト列が
+   * 人数ぶん詰まると本が重くなる。OPFのmanifestも、同じidが2つ並ぶと
+   * epubcheck が咎める。
+   */
+  test("同じイラストを2人で使っても、入るのは1回だけ", () => {
+    const icon = {
+      sourcePath: "素材/家族写真.png",
+      data: new Uint8Array([0x89, 0x50]),
+    };
+    const files = open(
+      buildEpub({
+        ...withConfig({ characterPage: { enabled: true, showIcons: true } }),
+        characters: [
+          { name: "月島灯", reading: null, summary: "", icon },
+          { name: "月島渉", reading: null, summary: "", icon },
+        ],
+      })
+    );
+    const opf = files["OEBPS/content.opf"];
+    const page = files["OEBPS/characters.xhtml"];
+
+    expect(
+      Object.keys(files).filter((name) => name.startsWith("OEBPS/portrait-"))
+    ).toEqual(["OEBPS/portrait-1.png"]);
+    // 2人とも同じ絵を指す（載る人は減らない）
+    expect([...page.matchAll(/src="portrait-1\.png"/g)]).toHaveLength(2);
+    // manifest に同じidを2つ並べない
+    expect([...opf.matchAll(/id="portrait-1"/g)]).toHaveLength(1);
   });
 
   /**

@@ -35,6 +35,7 @@ import {
 import { CharacterStore } from "../core/characterStore";
 import {
   countParagraphs,
+  describeDroppedPlacements,
   describePlacementOverflow,
   missingEpisodeNotices,
   placementsIn,
@@ -43,6 +44,7 @@ import { episodePathFor } from "../core/bookStore";
 import {
   describeCoverUse,
   readCoverSource,
+  type CoverSide,
   type CoverSource,
 } from "../core/coverBake";
 import { randomUuid } from "../core/runtime";
@@ -141,20 +143,28 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       );
       return;
     }
+    const heading = bookHeading(episode, format);
+    const episodePath = episodePathFor(work.folderPath, episode.filePath);
     // **未解決の競合をそのまま組まない。** マーカーと両方の版が混ざった本は
     // 読めないうえ、配ってから気づくことになる（PDF出力と同じ）
     if (file.hasConflictMarkers) {
       conflicted.push(episode.fileName);
+      // **その話に置いた挿絵・改ページも一緒に消える。** 話が外れたことしか
+      // 言わないと、挿絵が入らない理由が作者に分からない（設計書6.65.10）
+      const dropped = describeDroppedPlacements(heading, {
+        illustrations: placementsIn(config.illustrations, episodePath).length,
+        pageBreaks: placementsIn(config.pageBreaks, episodePath).length,
+      });
+      if (dropped) notices.push(dropped);
       continue;
     }
-    const heading = bookHeading(episode, format);
     // 投稿サイトからDLしたファイルは、先頭にヘッダーが付いている。
     // 本文だけを組む（作品一覧の文字数計測と同じ切り分け）
     const body = parseEpisodeMetadata(file.text).body;
     const placements = await collectPlacements({
       work,
       config,
-      episodePath: episodePathFor(work.folderPath, episode.filePath),
+      episodePath,
       heading,
       body,
       images,
@@ -182,16 +192,25 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     return;
   }
 
+  // **表紙と裏表紙は別々に捕まえる。** まとめて捕まえていたので、裏表紙が
+  // 読めないときにも coverImagePath を直せと案内していた（直す先が違う）
+  let settings: string;
   let cover: CoverSource | null;
-  let backCover: CoverSource | null;
   try {
-    const settings = await settingsDir(work);
+    settings = await settingsDir(work);
     cover = await readCoverSource(
       work.folderPath,
       settings,
       "front",
       config.coverImagePath
     );
+  } catch (error) {
+    await reportCoverFailure(work, "front", error);
+    return;
+  }
+
+  let backCover: CoverSource | null;
+  try {
     // **裏表紙も表紙と同じ拾い方**（焼いた→元→無し）。焼くまで裏表紙が
     // 出ないと、場所を指定した作者に何も起きない理由が分からない
     backCover = await readCoverSource(
@@ -201,12 +220,7 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       config.backCoverImagePath
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logFailure("表紙画像の読み込み", { 作品: work.title, 内容: message });
-    await vscode.window.showErrorMessage(
-      `表紙の画像を読めませんでした。${message}` +
-        `　設定/${BOOK_DIR}/${BOOK_FILE} の coverImagePath を確かめてください。`
-    );
+    await reportCoverFailure(work, "back", error);
     return;
   }
 
@@ -267,6 +281,32 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     "フォルダーを開く"
   );
   if (action === "フォルダーを開く") await revealFolder(target);
+}
+
+/**
+ * 表紙・裏表紙が読めなかったことを伝える（設計書6.65.8）。
+ *
+ * **どちらの面かで、直す先が違う。** 案内する項目名（`coverImagePath` /
+ * `backCoverImagePath`）を取り違えると、作者は合っている行を睨むことになる。
+ */
+async function reportCoverFailure(
+  work: WorkEntry,
+  side: CoverSide,
+  error: unknown
+): Promise<void> {
+  const label = side === "back" ? "裏表紙" : "表紙";
+  const field = side === "back" ? "backCoverImagePath" : "coverImagePath";
+  const message = error instanceof Error ? error.message : String(error);
+
+  logFailure("表紙画像の読み込み", {
+    作品: work.title,
+    面: label,
+    内容: message,
+  });
+  await vscode.window.showErrorMessage(
+    `${label}の画像を読めませんでした。${message}` +
+      `　設定/${BOOK_DIR}/${BOOK_FILE} の ${field} を確かめてください。`
+  );
 }
 
 /**
