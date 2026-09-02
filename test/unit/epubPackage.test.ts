@@ -31,6 +31,7 @@ function book(overrides: Partial<EpubBook> = {}): EpubBook {
       { heading: "第二話　別れ", body: "う", notation: "curly" },
     ],
     cover: null,
+    backCover: null,
     identifier: "urn:uuid:00000000-0000-4000-8000-000000000000",
     modified: "2026-09-03T00:00:00Z",
     ...overrides,
@@ -232,6 +233,73 @@ describe("表紙", () => {
   function opfHas(files: Record<string, string>, id: string): boolean {
     return files["OEBPS/content.opf"].includes(`id="${id}"`);
   }
+});
+
+/**
+ * 裏表紙（設計書6.65.8）。
+ *
+ * **本の最終面**である（奥付の後ろ）。焼いた画像が無ければ面ごと出さない
+ * ——空の裏表紙が1面挟まるより、無いほうがよい。
+ */
+describe("裏表紙", () => {
+  const backCover = {
+    fileName: "裏表紙_合成済み.png",
+    data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+  };
+
+  test("画像があれば、奥付の後ろの最終面になる", () => {
+    const files = open(buildEpub(book({ backCover })));
+    const opf = files["OEBPS/content.opf"];
+    const order = [...opf.matchAll(/<itemref idref="([^"]+)"/g)].map(
+      (match) => match[1]
+    );
+
+    expect(order[order.length - 1]).toBe("backcover");
+    expect(order[order.length - 2]).toBe("colophon");
+    expect(files["OEBPS/backcover.xhtml"]).toContain('src="backcover.png"');
+    expect(files["OEBPS/backcover.png"]).toBeDefined();
+  });
+
+  test("manifest に載る。ただし cover-image の印は表紙だけが持つ", () => {
+    const opf = open(
+      buildEpub(
+        book({
+          cover: { fileName: "表紙.png", data: new Uint8Array([0x89]) },
+          backCover,
+        })
+      )
+    )["OEBPS/content.opf"];
+
+    expect(opf).toContain('id="backcover-image"');
+    // `cover-image` は本に1つだけ。裏表紙にも付けると検証で落ちる
+    expect([...opf.matchAll(/properties="cover-image"/g)].length).toBe(1);
+  });
+
+  test("画像が無ければ、面そのものが無い", () => {
+    const files = open(buildEpub(book()));
+
+    expect(files["OEBPS/backcover.xhtml"]).toBeUndefined();
+    expect(files["OEBPS/content.opf"]).not.toContain("backcover");
+  });
+
+  test("焼いていない元イラスト（PNG以外）でも最終面に載る", () => {
+    // 合成していない裏表紙も本へ入る。**表紙と同じ拾い方**なので、
+    // 種類はPNGとは限らない
+    const files = open(
+      buildEpub(
+        book({
+          backCover: {
+            fileName: "素材/裏表紙.jpg",
+            data: new Uint8Array([0xff, 0xd8]),
+          },
+        })
+      )
+    );
+
+    expect(files["OEBPS/backcover.jpg"]).toBeDefined();
+    expect(files["OEBPS/content.opf"]).toContain('media-type="image/jpeg"');
+    expect(files["OEBPS/backcover.xhtml"]).toContain('src="backcover.jpg"');
+  });
 });
 
 describe("タイトルページ（扉）", () => {

@@ -17,7 +17,12 @@ import { readWorkFormat } from "../core/workFormatStore";
 import { bookHeading, episodeGroupLabel } from "../core/episodeLabel";
 import { timestampedFileNameCandidates } from "../core/timestampedFileName";
 import { notationModeFor } from "../core/manuscriptRender";
-import { buildEpub, type EpubChapter, type EpubCover } from "../core/epubPackage";
+import { buildEpub, type EpubChapter } from "../core/epubPackage";
+import {
+  describeCoverUse,
+  readCoverSource,
+  type CoverSource,
+} from "../core/coverBake";
 import { randomUuid } from "../core/runtime";
 import { revealFolder } from "../views/openDocument";
 import { logFailure } from "../core/logger";
@@ -110,9 +115,24 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     return;
   }
 
-  let cover: EpubCover | null;
+  let cover: CoverSource | null;
+  let backCover: CoverSource | null;
   try {
-    cover = await readCover(work, config);
+    const settings = await settingsDir(work);
+    cover = await readCoverSource(
+      work.folderPath,
+      settings,
+      "front",
+      config.coverImagePath
+    );
+    // **裏表紙も表紙と同じ拾い方**（焼いた→元→無し）。焼くまで裏表紙が
+    // 出ないと、場所を指定した作者に何も起きない理由が分からない
+    backCover = await readCoverSource(
+      work.folderPath,
+      settings,
+      "back",
+      config.backCoverImagePath
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logFailure("表紙画像の読み込み", { 作品: work.title, 内容: message });
@@ -129,6 +149,7 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       config,
       chapters,
       cover,
+      backCover,
       // 本を見分ける唯一の札。書き出すたびに新しい本として扱われる
       identifier: `urn:uuid:${randomUuid()}`,
       modified: isoSeconds(new Date()),
@@ -158,27 +179,25 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
           "、"
         )}）。`
       : "";
-  const coverNote = cover ? "" : "\n表紙は題名だけの扉にしました。";
-
   const action = await vscode.window.showInformationMessage(
     `EPUBを書き出しました（${chapters.length}話）。\n${target}` +
-      coverNote +
+      describeCoverUse(cover, backCover) +
       droppedNote,
     "フォルダーを開く"
   );
   if (action === "フォルダーを開く") await revealFolder(target);
 }
 
+/** `設定/` の場所。作品設定でフォルダ名を変えていればそれに従う */
+async function settingsDir(work: WorkEntry): Promise<string> {
+  return workPaths(work, await readWorkConfig(work)).settings;
+}
+
 /**
  * 本の設計図を読む。**無ければ作品名から既定値**、壊れていれば例外。
  */
 async function readBookConfig(work: WorkEntry): Promise<BookConfig> {
-  const workConfig = await readWorkConfig(work);
-  const target = path.join(
-    workPaths(work, workConfig).settings,
-    BOOK_DIR,
-    BOOK_FILE
-  );
+  const target = path.join(await settingsDir(work), BOOK_DIR, BOOK_FILE);
 
   let bytes: Uint8Array;
   try {
@@ -197,23 +216,6 @@ async function readBookConfig(work: WorkEntry): Promise<BookConfig> {
     JSON.parse(new TextDecoder().decode(bytes)),
     work.title
   );
-}
-
-/**
- * 表紙画像を読む。指定が無ければ null（文字だけの扉になる）。
- *
- * **指定があるのに読めなければ止める。** 黙って扉に差し替えると、
- * 表紙を用意したつもりの本が表紙なしで出来上がる。
- */
-async function readCover(
-  work: WorkEntry,
-  config: BookConfig
-): Promise<EpubCover | null> {
-  if (!config.coverImagePath) return null;
-
-  const target = path.join(work.folderPath, config.coverImagePath);
-  const data = await vscode.workspace.fs.readFile(path.toUri(target));
-  return { fileName: config.coverImagePath, data };
 }
 
 /** 書き出し先。**新規作成だけ**を使い、名前がぶつかったら別名にする */

@@ -8,8 +8,9 @@
  * **画像は埋め込まず、作品フォルダからの相対パスで参照する。** JSONへ
  * base64 で入れると、1文字直すたびに数百KBの差分がGitへ積まれる。
  *
- * VS Code API に依存しない（`models` の約束）。第1段（6.65.4）で使う項目
- * だけを持つ。表紙の合成・挿絵・書体は第3段でここへ足す。
+ * VS Code API に依存しない（`models` の約束）。第1段（6.65.4）の項目に、
+ * 第3段の前半で表紙・裏表紙の合成指定（6.65.8）を足した。挿絵・書体は
+ * 第3段の後半でここへ足す。
  */
 
 import {
@@ -62,6 +63,74 @@ export const BOOK_ORNAMENTS: readonly BookOrnament[] = [
   "center",
 ];
 
+/**
+ * 表紙に重ねる文字の置き場所（設計書6.65.8）。
+ *
+ * 上・中・下 × 左・中央・右の**9か所のプリセット**である。自由ドラッグに
+ * すると book.json に座標の小数が並び、差分が読めなくなるうえ、同じ本を
+ * 2台で直したときの同期の衝突が増える。
+ */
+export type CoverAnchor =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "middle-left"
+  | "middle-center"
+  | "middle-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right";
+
+export const COVER_ANCHORS: readonly CoverAnchor[] = [
+  "top-left",
+  "top-center",
+  "top-right",
+  "middle-left",
+  "middle-center",
+  "middle-right",
+  "bottom-left",
+  "bottom-center",
+  "bottom-right",
+];
+
+/**
+ * 字の大きさ。**ポイント数では持たない。**
+ *
+ * 元イラストの寸法は作品ごとに違うので、絶対値で持つと同じ「24」が
+ * ある本では大見出し、別の本では読めない小ささになる。焼くときに
+ * 画像の短い辺からの割合として使う（`views/epubEditorPanelHtml.ts`）。
+ */
+export type CoverTextSize = "large" | "medium" | "small";
+
+export const COVER_TEXT_SIZES: readonly CoverTextSize[] = [
+  "large",
+  "medium",
+  "small",
+];
+
+/** 表紙に重ねられる4つの要素。書誌情報の4項目と1対1で対応する */
+export const COVER_ELEMENT_KEYS = [
+  "title",
+  "author",
+  "illustrator",
+  "label",
+] as const;
+
+export type CoverElementKey = (typeof COVER_ELEMENT_KEYS)[number];
+
+export interface CoverTextStyle {
+  /** 出すか。**出さない指定も残す**（消すと、戻すたびに置き場所を選び直すことになる） */
+  visible: boolean;
+  anchor: CoverAnchor;
+  size: CoverTextSize;
+  /** `#ffffff` の形。白・黒は画面のボタンで選び、それ以外は16進で書く */
+  color: string;
+  vertical: boolean;
+}
+
+/** 1枚の表紙ぶんの合成指定 */
+export type CoverLayout = Record<CoverElementKey, CoverTextStyle>;
+
 export interface BookConfig {
   schemaVersion: string;
   /** 題名。空なら作品名で埋める（無題の本を作らない） */
@@ -94,12 +163,84 @@ export interface BookConfig {
   collapseBlankLines: boolean;
   /** 表紙画像。作品フォルダからの相対パス。無ければ文字だけの扉になる */
   coverImagePath: string | null;
+  /**
+   * 裏表紙の元イラスト。作品フォルダからの相対パス（表紙と同じ検証）。
+   *
+   * **本へ入るのは合成して焼いた `裏表紙_合成済み.png` だけ**である
+   * （設計書6.65.8）。ここはエディター画面で下絵として読むためにある。
+   */
+  backCoverImagePath: string | null;
+  /** 表紙の合成指定。**焼いた画像が無ければ書き出しの見た目は変わらない** */
+  coverLayout: CoverLayout;
+  /** 裏表紙の合成指定。表紙とは別に持つ（同じ体裁とは限らない） */
+  backCoverLayout: CoverLayout;
 }
 
 export const BOOK_SCHEMA_VERSION = "0.1";
 /** `設定/` の下のフォルダ名 */
 export const BOOK_DIR = "書籍";
 export const BOOK_FILE = "book.json";
+
+/**
+ * 表紙の合成の既定（設計書6.65.8）。
+ *
+ * 題名を上・中央に大きく、作者名を下・右に。**どちらも縦書き・白**——
+ * 日本語の小説の表紙でいちばん多い置き方であり、暗いイラストの上でも
+ * 読める。絵師名とレーベル名は**出さない**：書いていない作品のほうが
+ * 多く、空の項目を勝手に載せると「イラスト　」だけが焼き込まれる。
+ *
+ * **この既定値は書き出しの見た目を変えない。** 合成が本へ入るのは
+ * 「焼いた画像」がある本だけで、焼くのは作者が押したときだけである。
+ */
+export function defaultCoverLayout(): CoverLayout {
+  return {
+    title: {
+      visible: true,
+      anchor: "top-center",
+      size: "large",
+      color: "#ffffff",
+      vertical: true,
+    },
+    author: {
+      visible: true,
+      anchor: "bottom-right",
+      size: "medium",
+      color: "#ffffff",
+      vertical: true,
+    },
+    illustrator: {
+      visible: false,
+      anchor: "bottom-left",
+      size: "small",
+      color: "#ffffff",
+      vertical: true,
+    },
+    label: {
+      visible: false,
+      anchor: "bottom-center",
+      size: "small",
+      color: "#ffffff",
+      vertical: false,
+    },
+  };
+}
+
+/**
+ * 裏表紙の合成の既定。
+ *
+ * **何も出さない。** 裏表紙は絵だけのことが多く、題名や作者名は表紙と
+ * 奥付に既にある。出したい人が選べばよい（置き場所の既定だけは、
+ * 選んだ瞬間に妥当な場所へ出るよう入れてある）。
+ */
+export function defaultBackCoverLayout(): CoverLayout {
+  const layout = defaultCoverLayout();
+  return {
+    title: { ...layout.title, visible: false },
+    author: { ...layout.author, visible: false },
+    illustrator: { ...layout.illustrator, visible: false },
+    label: { ...layout.label, visible: false },
+  };
+}
 
 export function defaultBookConfig(title: string): BookConfig {
   return {
@@ -118,6 +259,9 @@ export function defaultBookConfig(title: string): BookConfig {
     colophonOrnament: "none",
     collapseBlankLines: true,
     coverImagePath: null,
+    backCoverImagePath: null,
+    coverLayout: defaultCoverLayout(),
+    backCoverLayout: defaultBackCoverLayout(),
   };
 }
 
@@ -146,6 +290,7 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
   optionalEnum(value.colophonOrnament, "colophonOrnament", BOOK_ORNAMENTS);
   optionalBoolean(value.collapseBlankLines, "collapseBlankLines");
   optionalNullableString(value.coverImagePath, "coverImagePath");
+  optionalNullableString(value.backCoverImagePath, "backCoverImagePath");
 
   const title = ((value.title as string | undefined) ?? "").trim();
 
@@ -176,31 +321,116 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
     collapseBlankLines:
       (value.collapseBlankLines as boolean | undefined) ??
       defaults.collapseBlankLines,
-    coverImagePath: coverPath(value.coverImagePath),
+    coverImagePath: coverPath(value.coverImagePath, "表紙"),
+    backCoverImagePath: coverPath(value.backCoverImagePath, "裏表紙"),
+    coverLayout: parseCoverLayout(
+      value.coverLayout,
+      "coverLayout",
+      defaults.coverLayout
+    ),
+    backCoverLayout: parseCoverLayout(
+      value.backCoverLayout,
+      "backCoverLayout",
+      defaults.backCoverLayout
+    ),
   };
 }
 
 /**
- * 表紙の場所を確かめる。
+ * 合成指定を読む。**書かれている要素だけを差し替える。**
+ *
+ * 作者が `title` の色だけを手で書いたときに、残りの3要素が消えては
+ * 困る。ほかの台帳と同じで、**知らない値は既定へ倒さず例外にする**
+ * ——倒すと「指定したのに効かない」ことに気づけない。
+ */
+function parseCoverLayout(
+  raw: unknown,
+  name: string,
+  defaults: CoverLayout
+): CoverLayout {
+  if (raw === undefined || raw === null) return defaults;
+  const value = objectValue(raw, name);
+
+  return {
+    title: parseCoverText(value.title, `${name}.title`, defaults.title),
+    author: parseCoverText(value.author, `${name}.author`, defaults.author),
+    illustrator: parseCoverText(
+      value.illustrator,
+      `${name}.illustrator`,
+      defaults.illustrator
+    ),
+    label: parseCoverText(value.label, `${name}.label`, defaults.label),
+  };
+}
+
+function parseCoverText(
+  raw: unknown,
+  name: string,
+  defaults: CoverTextStyle
+): CoverTextStyle {
+  if (raw === undefined || raw === null) return { ...defaults };
+  const value = objectValue(raw, name);
+
+  optionalBoolean(value.visible, `${name}.visible`);
+  optionalEnum(value.anchor, `${name}.anchor`, COVER_ANCHORS);
+  optionalEnum(value.size, `${name}.size`, COVER_TEXT_SIZES);
+  optionalString(value.color, `${name}.color`);
+  optionalBoolean(value.vertical, `${name}.vertical`);
+
+  return {
+    visible: (value.visible as boolean | undefined) ?? defaults.visible,
+    anchor: (value.anchor as CoverAnchor | undefined) ?? defaults.anchor,
+    size: (value.size as CoverTextSize | undefined) ?? defaults.size,
+    color: coverColor(value.color as string | undefined, name, defaults.color),
+    vertical: (value.vertical as boolean | undefined) ?? defaults.vertical,
+  };
+}
+
+/**
+ * 文字の色。**16進だけを受け取る。**
+ *
+ * `white` のような色名やCSSの関数を通すと、canvasの `fillStyle` が黙って
+ * 解釈できないものを受け取って**黒で描く**（例外にならない）。焼いてから
+ * 「なぜか黒い」と気づくより、書いた時点で断るほうが早い。
+ */
+function coverColor(
+  raw: string | undefined,
+  name: string,
+  fallback: string
+): string {
+  const value = (raw ?? "").trim();
+  if (!value) return fallback;
+  if (!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value)) {
+    throw new Error(
+      `${name}.color の色「${value}」を読み取れません。#ffffff のような16進で書いてください。`
+    );
+  }
+  return value.toLowerCase();
+}
+
+/**
+ * 表紙・裏表紙の場所を確かめる。
  *
  * **作品フォルダの外は指せない。** 「相対パス」と決めてあるところへ
  * 絶対パスや `..` を書かれると、作品と関係のないファイルを本へ詰めて
  * 配ることになる。ここは `models` なので場所の解決はできないが、
  * **形の上で外を向いているもの**は受け取らずに済む。
+ *
+ * 表紙と裏表紙で**同じ関数を通す**。片方だけ緩いと、そちらが抜け道になる。
  */
-function coverPath(raw: unknown): string | null {
+function coverPath(raw: unknown, label: string): string | null {
   const value = ((raw as string | null | undefined) ?? "").trim();
   if (!value) return null;
 
   const normalized = value.replace(/\\/g, "/");
   if (normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)) {
     throw new Error(
-      `表紙の場所「${value}」は作品フォルダからの相対パスで書いてください（絶対パスは使えません）。`
+      `${label}の場所「${value}」は作品フォルダからの相対パスで書いてください（絶対パスは使えません）。`
     );
   }
   if (normalized.split("/").includes("..")) {
     throw new Error(
-      `表紙の場所「${value}」が作品フォルダの外を指しています。`
+      `${label}の場所「${value}」が作品フォルダの外を指しています。`
     );
   }
   return normalized;

@@ -1,7 +1,15 @@
 import * as vscode from "vscode";
+import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
-import { parseBookConfig, type BookConfig } from "../models/book";
+import { BOOK_DIR, parseBookConfig, type BookConfig } from "../models/book";
 import { BookStore, BookStoreError } from "../core/bookStore";
+import { readWorkConfig, workPaths } from "../core/workRegistry";
+import {
+  BAKED_COVER_FILES,
+  readImageDataUrl,
+  saveBakedCover,
+  type CoverSide,
+} from "../core/coverBake";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import { parseEpisodeMetadata } from "../core/metadataParser";
@@ -11,7 +19,6 @@ import { bookHeading, episodeGroupLabel } from "../core/episodeLabel";
 import { notationModeFor } from "../core/manuscriptRender";
 import {
   buildChapterFragment,
-  escapeXml,
   type EpubChapterSource,
 } from "../core/epubXhtml";
 import {
@@ -56,6 +63,7 @@ import { logFailure } from "../core/logger";
  */
 interface PanelState {
   panel: vscode.WebviewPanel;
+  work: WorkEntry;
   store: BookStore;
   /** 画面の中のいまの値 */
   current: BookConfig;
@@ -101,7 +109,7 @@ export async function openEpubEditorPanel(
     existing.panel.reveal();
     existing.panel.webview.postMessage({
       type: "book",
-      data: await panelData(work, existing),
+      data: await panelData(existing),
     });
     return;
   }
@@ -110,9 +118,24 @@ export async function openEpubEditorPanel(
     "novelai.epubEditor",
     `EPUB: ${work.title}`,
     vscode.ViewColumn.Active,
-    { enableScripts: true, retainContextWhenHidden: true }
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      // **作者のイラストを画面に出すのはここが初めて**（設計書6.65.8）。
+      // 作品フォルダを許さないと `asWebviewUri` のURIでも読み込まれない。
+      // 許すのは作品フォルダだけ——ここを広げると、作品と関係のない
+      // ファイルまでWebViewから読めることになる
+      localResourceRoots: [path.toUri(work.folderPath)],
+    }
   );
-  const state: PanelState = { panel, store, current: saved, saved, source };
+  const state: PanelState = {
+    panel,
+    work,
+    store,
+    current: saved,
+    saved,
+    source,
+  };
 
   openPanels.set(work.id, state);
   context.subscriptions.push(panel);
@@ -127,6 +150,8 @@ export async function openEpubEditorPanel(
     const parsed = message as {
       type?: string;
       config?: Record<string, unknown>;
+      side?: string;
+      dataUrl?: string;
     };
 
     if (parsed.type === "ready") {
@@ -134,28 +159,53 @@ export async function openEpubEditorPanel(
       // 画面から準備完了を知らせてもらってから送る（ほかのパネルと同じ）
       panel.webview.postMessage({
         type: "book",
-        data: await panelData(work, state),
+        data: await panelData(state),
       });
       return;
     }
 
     if (!parsed.config) return;
 
-    const next = mergeConfig(state.current, parsed.config, work.title);
-    if (!next) {
-      // 画面の選択肢しか送られてこないはずで、ここへ来るのは不具合である。
-      // 黙って直すと、作者は指定が効いていないことに気づけない
+    const merged = mergeConfig(state.current, parsed.config, work.title);
+    if (merged.error) {
+      // 表紙の場所のように、作者が字で書く欄がある。**読めない値は
+      // そのまま伝える**——「読み取れませんでした」だけでは、
+      // どこを直せばよいのか分からない
       panel.webview.postMessage({
         type: "status",
-        text: "設定の値を読み取れませんでした。パネルを開き直してください。",
+        text: merged.error,
         isError: true,
       });
       return;
     }
-    state.current = next;
+    state.current = merged.config;
 
     if (parsed.type === "change") {
       panel.webview.postMessage({ type: "preview", data: previewData(state) });
+      return;
+    }
+
+    if (parsed.type === "imageData") {
+      await sendImageData(state, coverSide(parsed.side));
+      return;
+    }
+
+    if (parsed.type === "bake") {
+      await bakeCover(state, coverSide(parsed.side), parsed.dataUrl ?? "");
+      return;
+    }
+
+    if (parsed.type === "bakeFailed") {
+      // canvas から画像を取り出せなかった。**画面の不具合なので、
+      // 作者にできることは開き直すことだけ**である
+      const side = coverSide(parsed.side);
+      panel.webview.postMessage({
+        type: "status",
+        text:
+          `${sideLabel(side)}の合成結果を取り出せませんでした。` +
+          "パネルを開き直してからもう一度お試しください。",
+        isError: true,
+      });
       return;
     }
 
@@ -182,6 +232,99 @@ export async function openEpubEditorPanel(
   });
 }
 
+/** 画面から届いた面の名。知らない値は表紙として扱う（無視より安全） */
+function coverSide(raw: string | undefined): CoverSide {
+  return raw === "back" ? "back" : "front";
+}
+
+function sideLabel(side: CoverSide): string {
+  return side === "back" ? "裏表紙" : "表紙";
+}
+
+/** `設定/` の場所。作品設定でフォルダ名を変えていればそれに従う */
+async function settingsDir(work: WorkEntry): Promise<string> {
+  return workPaths(work, await readWorkConfig(work)).settings;
+}
+
+/**
+ * 元イラストの中身を画面へ渡す（`readImageDataUrl` の説明を参照）。
+ *
+ * **読めなくても止めない。** 画面は「絵の無い合成」として静かに諦める
+ * ——ここで通知を出すと、場所を打っている途中の1文字ごとに叱ることになる。
+ */
+async function sendImageData(
+  state: PanelState,
+  side: CoverSide
+): Promise<void> {
+  const relative =
+    side === "back"
+      ? state.current.backCoverImagePath
+      : state.current.coverImagePath;
+
+  let dataUrl: string | null = null;
+  if (relative) {
+    try {
+      dataUrl = await readImageDataUrl(state.work.folderPath, relative);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logFailure("表紙の元イラストの読み込み", {
+        作品: state.work.title,
+        場所: relative,
+        内容: message,
+      });
+    }
+  }
+
+  state.panel.webview.postMessage({ type: "imageData", side, dataUrl });
+}
+
+/**
+ * 合成した画像を `設定/書籍/` へ焼く（設計書6.65.8）。
+ *
+ * **合成の指定（book.json）はここでは保存しない。** 焼いた画像と設計図は
+ * 別の持ち物で、まとめて書くと「保存に失敗したので画像も焼けなかった」の
+ * ような分かりにくい止まり方をする。未保存があることは status で伝える。
+ */
+async function bakeCover(
+  state: PanelState,
+  side: CoverSide,
+  dataUrl: string
+): Promise<void> {
+  const label = sideLabel(side);
+
+  let target: string;
+  try {
+    const settings = await settingsDir(state.work);
+    target = (await saveBakedCover(settings, side, dataUrl)).filePath;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logFailure("表紙の合成", {
+      作品: state.work.title,
+      面: label,
+      内容: message,
+    });
+    state.panel.webview.postMessage({
+      type: "status",
+      text: message,
+      isError: true,
+    });
+    await vscode.window.showErrorMessage(`${label}を焼けませんでした。${message}`);
+    return;
+  }
+
+  const unsaved = isDirty(state)
+    ? "（合成の指定はまだ未保存です。「保存」で book.json へ残ります）"
+    : "";
+  state.panel.webview.postMessage({
+    type: "status",
+    text: `${label}を焼きました${unsaved}`,
+  });
+  void vscode.window.showInformationMessage(
+    `${label}を焼きました。\n${target}\n` +
+      `次の書き出しから、この画像が${label}になります。`
+  );
+}
+
 /** 画面の値をファイルへ書く。書けたら true（呼び出し側はそこで続ける） */
 async function saveDraft(work: WorkEntry, state: PanelState): Promise<boolean> {
   try {
@@ -199,9 +342,9 @@ async function saveDraft(work: WorkEntry, state: PanelState): Promise<boolean> {
 }
 
 /** 画面へ渡すもの一式（最初の1回だけ。欄の値も含む） */
-async function panelData(work: WorkEntry, state: PanelState) {
+async function panelData(state: PanelState) {
   return {
-    title: `${work.title} の本`,
+    title: `${state.work.title} の本`,
     filePath: await state.store.filePath(),
     config: state.current,
     ...previewData(state),
@@ -215,8 +358,48 @@ function previewData(state: PanelState) {
     // **書き出しと同じCSS**を、画面の枠の中へ閉じ込めただけのもの
     css: scopeCssForPreview(buildEpubCss(vertical), ".epub-page"),
     pages: buildPages(state.current, state.source, vertical),
+    compose: {
+      front: composeState(state, "front"),
+      back: composeState(state, "back"),
+    },
     notice: state.source.notice,
     dirty: isDirty(state),
+  };
+}
+
+/**
+ * 合成の欄を使えるか、使えないなら理由（設計書6.65.8）。
+ *
+ * **元イラストが無いときは、欄を消さずに畳んで理由を出す**
+ * （`processAvailability.ts` と同じ流儀）。消してしまうと、作者は
+ * 「合成ができない画面なのだ」と受け取ってしまう。
+ */
+function composeState(state: PanelState, side: CoverSide) {
+  const label = sideLabel(side);
+  const relative =
+    side === "back"
+      ? state.current.backCoverImagePath
+      : state.current.coverImagePath;
+
+  if (!relative) {
+    return {
+      enabled: false,
+      uri: null,
+      reason:
+        `${label}の元イラストが指定されていないので、合成の欄は使えません。` +
+        `作品フォルダに画像を置き、上の欄にその場所（例：素材/${label}.png）を書いてください。`,
+    };
+  }
+
+  return {
+    enabled: true,
+    // 作品フォルダの中だけがWebViewから読める（`localResourceRoots`）
+    uri: state.panel.webview
+      .asWebviewUri(path.toUri(path.join(state.work.folderPath, relative)))
+      .toString(),
+    reason:
+      `「${label}を焼く」を押すと 設定/${BOOK_DIR}/${BAKED_COVER_FILES[side]} へ保存され、` +
+      "書き出しはその画像を使います。",
   };
 }
 
@@ -225,6 +408,13 @@ interface PreviewPage {
   html: string;
   note: string | null;
   vertical: boolean;
+  /**
+   * 合成の面のとき、どちらの面か。
+   *
+   * **中身のHTMLではなく canvas を置く。** 本へ入るのは画像1枚なので、
+   * ここに「書き出しと同じ断片」というものが無い（設計書6.65.8）。
+   */
+  compose?: CoverSide;
 }
 
 /**
@@ -245,11 +435,12 @@ function buildPages(
     config.coverImagePath
       ? {
           label: "表紙",
-          // 画像そのものは出さない（WebViewへ画像を渡すのは第3段）
-          html: coverPlaceholderFragment(config.coverImagePath),
+          // 中身は canvas が描く。**ここで組んだHTMLは使わない**
+          html: "",
+          compose: "front",
           note:
-            "表紙は画像1枚です（書き出した本には入ります）。" +
-            "画像の表示と、題名を焼き込む合成は第3段で作ります。",
+            "元イラストに、下の欄で選んだ文字を重ねた見た目です。" +
+            "「表紙を焼く」を押すまでは、元イラストがそのまま入ります。",
           vertical,
         }
       : {
@@ -311,16 +502,21 @@ function buildPages(
     vertical,
   });
 
-  return pages;
-}
+  // 裏表紙は本の最終面（設計書6.65.8）。表紙と同じく「焼いた→元→無し」
+  // の順で入るので、焼く前でも面そのものは出る
+  if (config.backCoverImagePath) {
+    pages.push({
+      label: "裏表紙",
+      html: "",
+      compose: "back",
+      note:
+        "本の最終面（奥付の後ろ）になります。" +
+        "「裏表紙を焼く」を押すまでは、元イラストがそのまま入ります。",
+      vertical,
+    });
+  }
 
-/** 表紙画像の代わりに出す枠。**画像そのものは第3段まで出さない** */
-function coverPlaceholderFragment(fileName: string): string {
-  return (
-    '<div class="cover-placeholder">表紙画像：' +
-    escapeXml(fileName) +
-    "</div>"
-  );
+  return pages;
 }
 
 /**
@@ -423,11 +619,14 @@ function mergeConfig(
   current: BookConfig,
   patch: Record<string, unknown>,
   workTitle: string
-): BookConfig | null {
+): { config: BookConfig; error: null } | { config: BookConfig; error: string } {
   try {
-    return parseBookConfig({ ...current, ...patch }, workTitle);
-  } catch {
-    return null;
+    return { config: parseBookConfig({ ...current, ...patch }, workTitle), error: null };
+  } catch (error) {
+    // 表紙の場所は作者が字で書く欄なので、**読めない値の中身をそのまま
+    // 伝える**。画面はいまの値のまま据え置く（勝手に直さない）
+    const message = error instanceof Error ? error.message : String(error);
+    return { config: current, error: message };
   }
 }
 

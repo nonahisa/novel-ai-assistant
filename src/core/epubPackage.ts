@@ -50,6 +50,7 @@ const NAV_NAME = "nav.xhtml";
 const COVER_NAME = "cover.xhtml";
 const TITLEPAGE_NAME = "titlepage.xhtml";
 const COLOPHON_NAME = "colophon.xhtml";
+const BACKCOVER_NAME = "backcover.xhtml";
 
 /** 本の中の1話。組み方は `epubXhtml.ts` が持つので、そのまま通す */
 export interface EpubChapter extends EpubChapterSource {
@@ -75,6 +76,14 @@ export interface EpubBook {
   /** 表紙画像。無ければ題名と作者名の扉になる */
   cover: EpubCover | null;
   /**
+   * 裏表紙の画像（設計書6.65.8）。**本の最終面**になる。
+   *
+   * **無ければ面ごと出さない。** 空の裏表紙が1面挟まるより、無いほうが
+   * よい（表紙のように「文字だけの代わり」は作らない——裏表紙は絵が
+   * 無ければ用が無い）。
+   */
+  backCover: EpubCover | null;
+  /**
    * `dc:identifier`。本を見分ける唯一の札。
    *
    * **呼び出し側が渡す。** ここで作ると同じ内容から毎回違う本ができて、
@@ -91,18 +100,18 @@ export interface EpubBook {
  * **中身は見ない。** 種類を当てにいくより、扱えないものを分かる言葉で
  * 断るほうが作者の手間が少ない（拡張子を直せば済む）。
  */
-export function imageMediaType(fileName: string): string {
+export function imageMediaType(fileName: string, label = "表紙"): string {
   const matched = /\.([A-Za-z0-9]+)$/.exec(fileName.trim());
   if (!matched) {
     throw new Error(
-      `表紙「${fileName}」に拡張子がありません。png・jpg・jpeg・webp のいずれかにしてください。`
+      `${label}「${fileName}」に拡張子がありません。png・jpg・jpeg・webp のいずれかにしてください。`
     );
   }
   const extension = matched[1].toLowerCase();
   const mediaType = IMAGE_MEDIA_TYPES[extension];
   if (!mediaType) {
     throw new Error(
-      `表紙の種類「${extension}」は本に入れられません。png・jpg・jpeg・webp のいずれかにしてください。`
+      `${label}の種類「${extension}」は本に入れられません。png・jpg・jpeg・webp のいずれかにしてください。`
     );
   }
   return mediaType;
@@ -132,6 +141,13 @@ export function buildEpub(book: EpubBook): Uint8Array {
         packagedName: `cover${extensionOf(book.cover.fileName)}`,
       }
     : null;
+  const backCover = book.backCover
+    ? {
+        ...book.backCover,
+        mediaType: imageMediaType(book.backCover.fileName, "裏表紙"),
+        packagedName: `backcover${extensionOf(book.backCover.fileName)}`,
+      }
+    : null;
 
   const chapters = book.chapters.map((chapter, index) => ({
     ...chapter,
@@ -144,7 +160,7 @@ export function buildEpub(book: EpubBook): Uint8Array {
     mimetype: [encode(EPUB_MIMETYPE), { level: 0 }],
     "META-INF/container.xml": encode(containerXml()),
     [`${ROOT}/content.opf`]: encode(
-      contentOpf(book, chapters, cover, vertical)
+      contentOpf(book, chapters, cover, backCover, vertical)
     ),
     [`${ROOT}/${CSS_NAME}`]: encode(buildEpubCss(vertical)),
     [`${ROOT}/${NAV_NAME}`]: encode(navXhtml(chapters, config, vertical)),
@@ -154,6 +170,18 @@ export function buildEpub(book: EpubBook): Uint8Array {
   };
 
   if (cover) files[`${ROOT}/${cover.packagedName}`] = cover.data;
+
+  if (backCover) {
+    files[`${ROOT}/${backCover.packagedName}`] = backCover.data;
+    files[`${ROOT}/${BACKCOVER_NAME}`] = encode(
+      buildXhtmlDocument({
+        title: "裏表紙",
+        cssHref: CSS_NAME,
+        vertical,
+        body: buildBackCoverFragment({ href: backCover.packagedName }),
+      })
+    );
+  }
 
   for (const chapter of chapters) {
     files[`${ROOT}/${chapter.fileName}`] = encode(
@@ -205,6 +233,7 @@ function contentOpf(
   book: EpubBook,
   chapters: readonly PackagedChapter[],
   cover: PackagedCover | null,
+  backCover: PackagedCover | null,
   vertical: boolean
 ): string {
   const config = book.config;
@@ -256,6 +285,14 @@ function contentOpf(
         `    <item id="${chapter.id}" href="${chapter.fileName}" media-type="application/xhtml+xml" />`
     ),
     `    <item id="colophon" href="${COLOPHON_NAME}" media-type="application/xhtml+xml" />`,
+    // 裏表紙の画像には `cover-image` を付けない。**本に1つだけ**と
+    // 決められており、2つ付けると epubcheck で落ちる
+    ...(backCover
+      ? [
+          `    <item id="backcover" href="${BACKCOVER_NAME}" media-type="application/xhtml+xml" />`,
+          `    <item id="backcover-image" href="${backCover.packagedName}" media-type="${backCover.mediaType}" />`,
+        ]
+      : []),
   ];
 
   const spine = [
@@ -269,6 +306,9 @@ function contentOpf(
     ...(config.tocEnabled ? ['    <itemref idref="nav" />'] : []),
     ...chapters.map((chapter) => `    <itemref idref="${chapter.id}" />`),
     '    <itemref idref="colophon" />',
+    // 裏表紙は本の最終面（設計書6.65.8）。縦書きの本は右→左に開くので、
+    // 読み進んだいちばん左が裏表紙になる
+    ...(backCover ? ['    <itemref idref="backcover" />'] : []),
   ];
 
   // 縦書きは右から左へ開く。横書きは既定（左→右）なので**書かない**
@@ -488,6 +528,20 @@ export function buildCoverFragment(
     `<img src="${escapeXml(image.href)}" alt="${escapeXml(
       config.title || "表紙"
     )}" />`,
+    "</div>",
+  ].join("\n");
+}
+
+/**
+ * 裏表紙の断片（設計書6.65.8）。
+ *
+ * **表紙と同じ組み方**（1枚を面いっぱいに）で、CSSも表紙のものを使い回す。
+ * 文字を重ねる合成は既に画像へ焼き込まれているので、ここでは載せない。
+ */
+export function buildBackCoverFragment(image: { href: string }): string {
+  return [
+    '<div class="cover-image">',
+    `<img src="${escapeXml(image.href)}" alt="裏表紙" />`,
     "</div>",
   ].join("\n");
 }

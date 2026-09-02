@@ -28,6 +28,17 @@ describe("EPUBエディターのHTML", () => {
     expect(html).toContain("style-src vscode-resource: 'nonce-NONCE123'");
   });
 
+  /**
+   * 作者のイラストを画面に出すのはここが初めて（設計書6.65.8）。
+   * **`img-src` を足さないと、`asWebviewUri` で作ったURIでも出ない。**
+   */
+  it("画像だけは読み込ませる（作品フォルダと、焼く前の下絵）", () => {
+    expect(html).toContain("img-src vscode-resource: data:");
+    // 画像以外の口は開けたままにしない
+    expect(html).not.toContain("connect-src");
+    expect(html).not.toContain("img-src *");
+  });
+
   it("埋め込みの印が残っていない", () => {
     const body = html.slice(html.indexOf("<body"));
     expect(body).not.toContain("${");
@@ -76,6 +87,49 @@ describe("左の設定の欄", () => {
     expect(html).toContain('id="save"');
     expect(html).toContain('id="export"');
   });
+
+  /**
+   * 表紙・裏表紙の合成（設計書6.65.8）。要素は4つ、置き場所は9か所の
+   * プリセット。**座標は持たない**（自由ドラッグにすると、book.json に
+   * 小数が並んで差分が読めなくなる）。
+   */
+  it("表紙・裏表紙それぞれに、4要素ぶんの欄がある", () => {
+    for (const side of ["front", "back"]) {
+      for (const element of ["title", "author", "illustrator", "label"]) {
+        expect(html).toContain(`id="${side}-${element}-visible"`);
+        expect(html).toContain(`id="${side}-${element}-anchor"`);
+        expect(html).toContain(`id="${side}-${element}-size"`);
+        expect(html).toContain(`id="${side}-${element}-color"`);
+        expect(html).toContain(`id="${side}-${element}-vertical"`);
+      }
+    }
+  });
+
+  it("置き場所は9つのプリセットだけ", () => {
+    const anchors = [
+      "top-left",
+      "top-center",
+      "top-right",
+      "middle-left",
+      "middle-center",
+      "middle-right",
+      "bottom-left",
+      "bottom-center",
+      "bottom-right",
+    ];
+    for (const anchor of anchors) {
+      expect(html).toContain(`value="${anchor}"`);
+    }
+    // 座標を入れる欄は持たない
+    expect(html).not.toContain('id="front-title-x"');
+  });
+
+  it("焼く入口と、元イラストの場所を書く欄がある", () => {
+    expect(html).toContain('id="bakeFront"');
+    expect(html).toContain('id="bakeBack"');
+    expect(html).toContain('id="coverImagePath"');
+    expect(html).toContain('id="backCoverImagePath"');
+  });
 });
 
 describe("右のプレビュー", () => {
@@ -123,5 +177,19 @@ describe("画面から拡張機能へ返すもの", () => {
     // 保存はハッシュ照合つきで拡張機能側が行う（設計書6.65.6）
     expect(script).not.toContain("book.json");
     expect(script).not.toContain("writeFile");
+  });
+
+  it("焼いたPNGはdataURLで渡す", () => {
+    // 合成できるのはcanvasだけ。焼いた結果を**ファイルにするのは
+    // 拡張機能側**である（設計書6.65.8）
+    expect(script).toContain("post('bake'");
+    expect(script).toContain("toDataURL('image/png')");
+  });
+
+  it("画像が読めなかったときは、拡張機能へ中身を頼み直す", () => {
+    // `asWebviewUri` の画像をcanvasへ描くと、環境によっては
+    // 「汚れた canvas」になって `toDataURL` が落ちる。落ちたら
+    // 拡張機能からバイト列（dataURL）を貰って描き直す
+    expect(script).toContain("post('imageData'");
   });
 });

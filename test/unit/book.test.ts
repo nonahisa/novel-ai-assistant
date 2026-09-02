@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
   BOOK_SCHEMA_VERSION,
+  defaultBackCoverLayout,
   defaultBookConfig,
+  defaultCoverLayout,
   parseBookConfig,
 } from "../../src/models/book";
 
@@ -25,12 +27,37 @@ describe("本の設計図の既定値", () => {
       tocEnabled: true,
       collapseBlankLines: true,
       coverImagePath: null,
+      backCoverImagePath: null,
       // **既定は「いままでどおりの見た目」**（設計書6.65.6）。
       // 目次は本文と同じ流れの一覧、飾りは無し
       tocPattern: "vertical",
       tocOrnament: "none",
       colophonOrnament: "none",
+      coverLayout: defaultCoverLayout(),
+      backCoverLayout: defaultBackCoverLayout(),
     });
+  });
+
+  test("表紙の合成は、題名と作者名だけを出す（設計書6.65.8）", () => {
+    const layout = defaultCoverLayout();
+
+    expect(layout.title).toEqual({
+      visible: true,
+      anchor: "top-center",
+      size: "large",
+      color: "#ffffff",
+      vertical: true,
+    });
+    expect(layout.author).toEqual({
+      visible: true,
+      anchor: "bottom-right",
+      size: "medium",
+      color: "#ffffff",
+      vertical: true,
+    });
+    // 絵師名とレーベル名は、出すと決めた人だけが出す
+    expect(layout.illustrator.visible).toBe(false);
+    expect(layout.label.visible).toBe(false);
   });
 
   test("空のJSONオブジェクトは、既定値そのものになる", () => {
@@ -125,5 +152,122 @@ describe("壊れた設計図は受け取らない", () => {
       null
     );
     expect(parseBookConfig({}, "氷の街").coverImagePath).toBe(null);
+  });
+
+  test("裏表紙の場所も作品フォルダの外を指せない", () => {
+    // 表紙とまったく同じ検証。片方だけ緩いと、そちらが抜け道になる
+    expect(() =>
+      parseBookConfig({ backCoverImagePath: "../../秘密.png" }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig({ backCoverImagePath: "D:\\写真\\裏.png" }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig({ backCoverImagePath: "/etc/passwd" }, "氷の街")
+    ).toThrow();
+    expect(
+      parseBookConfig({ backCoverImagePath: "素材/裏表紙.png" }, "氷の街")
+        .backCoverImagePath
+    ).toBe("素材/裏表紙.png");
+  });
+});
+
+/**
+ * 表紙・裏表紙の合成指定（設計書6.65.8）。
+ *
+ * 置き場所は9か所のプリセットで、座標は持たない。**知らない値は
+ * 黙って既定へ倒さない**——ほかの項目と同じで、倒すと作者は指定が
+ * 効いていないことに気づけない。
+ */
+describe("合成指定の検証", () => {
+  test("9つのプリセットの外は弾く", () => {
+    expect(() =>
+      parseBookConfig({ coverLayout: { title: { anchor: "まんなか" } } }, "氷の街")
+    ).toThrow();
+    // 「上・中・下」「左・中央・右」の組み合わせ以外は作らない
+    expect(() =>
+      parseBookConfig({ coverLayout: { title: { anchor: "center" } } }, "氷の街")
+    ).toThrow();
+  });
+
+  test("9つのプリセットはすべて受け取る", () => {
+    for (const anchor of [
+      "top-left",
+      "top-center",
+      "top-right",
+      "middle-left",
+      "middle-center",
+      "middle-right",
+      "bottom-left",
+      "bottom-center",
+      "bottom-right",
+    ]) {
+      expect(
+        parseBookConfig({ coverLayout: { title: { anchor } } }, "氷の街")
+          .coverLayout.title.anchor
+      ).toBe(anchor);
+    }
+  });
+
+  test("字の大きさは大・中・小だけ", () => {
+    expect(() =>
+      parseBookConfig({ coverLayout: { title: { size: "特大" } } }, "氷の街")
+    ).toThrow();
+    expect(
+      parseBookConfig({ coverLayout: { title: { size: "small" } } }, "氷の街")
+        .coverLayout.title.size
+    ).toBe("small");
+  });
+
+  test("色は16進でなければ弾く", () => {
+    expect(() =>
+      parseBookConfig({ coverLayout: { title: { color: "しろ" } } }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig({ coverLayout: { title: { color: "#12345" } } }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig({ coverLayout: { title: { color: "rgb(0,0,0)" } } }, "氷の街")
+    ).toThrow();
+  });
+
+  test("16進は3桁でも6桁でもよく、小文字に揃える", () => {
+    expect(
+      parseBookConfig({ coverLayout: { title: { color: "#FA0" } } }, "氷の街")
+        .coverLayout.title.color
+    ).toBe("#fa0");
+    expect(
+      parseBookConfig({ coverLayout: { title: { color: "#1A2B3C" } } }, "氷の街")
+        .coverLayout.title.color
+    ).toBe("#1a2b3c");
+  });
+
+  test("書いてある要素だけを差し替え、残りは既定のまま", () => {
+    const config = parseBookConfig(
+      { backCoverLayout: { label: { visible: true, anchor: "middle-center" } } },
+      "氷の街"
+    );
+
+    expect(config.backCoverLayout.label.visible).toBe(true);
+    expect(config.backCoverLayout.label.anchor).toBe("middle-center");
+    // 触っていない要素は既定のまま（部分的に書かれたJSONを壊さない）
+    expect(config.backCoverLayout.title).toEqual(
+      defaultBackCoverLayout().title
+    );
+    // 表紙の指定は裏表紙とは別物である
+    expect(config.coverLayout).toEqual(defaultCoverLayout());
+  });
+
+  test("合成指定の形が違えば弾く", () => {
+    expect(() => parseBookConfig({ coverLayout: "上" }, "氷の街")).toThrow();
+    expect(() =>
+      parseBookConfig({ coverLayout: { title: "上" } }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig({ coverLayout: { title: { visible: "はい" } } }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig({ coverLayout: { title: { vertical: 1 } } }, "氷の街")
+    ).toThrow();
   });
 });
