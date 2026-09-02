@@ -302,6 +302,148 @@ describe("裏表紙", () => {
   });
 });
 
+/**
+ * 挿絵（設計書6.65.10）。
+ *
+ * 本文の流れに `<figure>` で入れる。**ZIPの中の名前は機械名に付け替える**
+ * ——表紙と同じ理由で、空白や日本語のファイル名だと画像を出さない
+ * リーダーがある。
+ */
+describe("挿絵", () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+
+  function illustrated(): EpubBook {
+    return book({
+      chapters: [
+        {
+          heading: "第一話　出会い",
+          body: "あ\n\nい",
+          notation: "curly",
+          illustrations: [
+            {
+              afterParagraph: 1,
+              sourcePath: "素材/挿絵 1.png",
+              data: png,
+              caption: "出会いの場面",
+            },
+          ],
+        },
+        {
+          heading: "第二話　別れ",
+          body: "う",
+          notation: "curly",
+          // 同じ画像を2か所で使う。ZIPには1回だけ入る
+          illustrations: [
+            {
+              afterParagraph: 1,
+              sourcePath: "素材/挿絵 1.png",
+              data: png,
+              caption: "",
+            },
+            {
+              afterParagraph: 1,
+              sourcePath: "素材/挿絵2.jpg",
+              data: new Uint8Array([0xff, 0xd8]),
+              caption: "",
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  test("画像は機械名でZIPへ入り、manifest に載る", () => {
+    const files = open(buildEpub(illustrated()));
+    const opf = files["OEBPS/content.opf"];
+
+    expect(files["OEBPS/illust-1.png"]).toBeDefined();
+    expect(files["OEBPS/illust-2.jpg"]).toBeDefined();
+    // 作者のファイル名（空白・日本語）はZIPの中に持ち込まない
+    expect(files["OEBPS/素材/挿絵 1.png"]).toBeUndefined();
+    expect(opf).toMatch(
+      /<item[^>]*id="illust-1"[^>]*href="illust-1\.png"[^>]*media-type="image\/png"/
+    );
+    expect(opf).toMatch(/<item[^>]*href="illust-2\.jpg"/);
+    // 表紙ではないので `cover-image` は付けない
+    expect([...opf.matchAll(/properties="cover-image"/g)].length).toBe(0);
+  });
+
+  test("同じ画像を2か所で使っても、入るのは1回だけ", () => {
+    const files = open(buildEpub(illustrated()));
+
+    expect(
+      Object.keys(files).filter((name) => name.startsWith("OEBPS/illust-"))
+    ).toEqual(["OEBPS/illust-1.png", "OEBPS/illust-2.jpg"]);
+    // 2話目も同じ画像を指す
+    expect(files["OEBPS/chapter-002.xhtml"]).toContain('src="illust-1.png"');
+  });
+
+  test("本文の指定した段落の直後に入り、解説文が添う", () => {
+    const files = open(buildEpub(illustrated()));
+    const chapter = files["OEBPS/chapter-001.xhtml"];
+
+    expect(chapter).toMatch(/<p>あ<\/p>\n<figure class="illustration">/);
+    expect(chapter).toContain("<figcaption>出会いの場面</figcaption>");
+    expect(files["OEBPS/style.css"]).toContain(".illustration");
+  });
+
+  test("改ページは次の段落のクラスになる（XHTMLは分けない）", () => {
+    const files = open(
+      buildEpub(
+        book({
+          chapters: [
+            {
+              heading: "第一話",
+              body: "あ\n\nい",
+              notation: "curly",
+              pageBreaks: [1],
+            },
+          ],
+        })
+      )
+    );
+
+    expect(files["OEBPS/chapter-001.xhtml"]).toContain(
+      '<p class="page-break">い</p>'
+    );
+    // 古いリーダー用の書き方も並べる
+    expect(files["OEBPS/style.css"]).toContain("page-break-before: always");
+    expect(files["OEBPS/style.css"]).toContain("break-before: page");
+  });
+
+  test("扱えない種類は、分かる言葉で断る", () => {
+    expect(() =>
+      buildEpub(
+        book({
+          chapters: [
+            {
+              heading: "第一話",
+              body: "あ",
+              notation: "curly",
+              illustrations: [
+                {
+                  afterParagraph: 1,
+                  sourcePath: "素材/挿絵.bmp",
+                  data: png,
+                  caption: "",
+                },
+              ],
+            },
+          ],
+        })
+      )
+    ).toThrow(/bmp/);
+  });
+
+  test("挿絵が無ければ、いままでと同じ本になる", () => {
+    const files = open(buildEpub(book()));
+    expect(
+      Object.keys(files).filter((name) => name.includes("illust"))
+    ).toEqual([]);
+    expect(files["OEBPS/chapter-001.xhtml"]).not.toContain("figure");
+  });
+});
+
 describe("タイトルページ（扉）", () => {
   /**
    * 表紙とは別の1面である（設計書6.65.3の表）。表紙が画像1枚のとき、

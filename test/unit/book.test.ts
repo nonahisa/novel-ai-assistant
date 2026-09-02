@@ -35,6 +35,9 @@ describe("本の設計図の既定値", () => {
       colophonOrnament: "none",
       coverLayout: defaultCoverLayout(),
       backCoverLayout: defaultBackCoverLayout(),
+      // 挿絵とページ分割は、指定するまで空（設計書6.65.10）
+      illustrations: [],
+      pageBreaks: [],
     });
   });
 
@@ -269,5 +272,128 @@ describe("合成指定の検証", () => {
     expect(() =>
       parseBookConfig({ coverLayout: { title: { vertical: 1 } } }, "氷の街")
     ).toThrow();
+  });
+});
+
+/**
+ * 挿絵とページ分割（設計書6.65.10）。
+ *
+ * どちらも「第N話の第M段落のあと」という位置指定で、**原稿には目印を
+ * 書き込まない**。ここで見るのは、手で書かれたJSONを受け取ってよいかだけ
+ * である（話が実在するかは書き出し時に確かめる——ここはファイルの一覧を
+ * 持たない）。
+ */
+describe("挿絵の指定", () => {
+  const one = {
+    episodePath: "本文/第1話.txt",
+    afterParagraph: 3,
+    imagePath: "素材/挿絵1.png",
+    caption: "出会いの場面",
+  };
+
+  test("書いてあれば、そのまま読み取る", () => {
+    expect(parseBookConfig({ illustrations: [one] }, "氷の街").illustrations)
+      .toEqual([one]);
+  });
+
+  test("解説文は空でよい（省略も同じ）", () => {
+    const config = parseBookConfig(
+      {
+        illustrations: [
+          { ...one, caption: "" },
+          {
+            episodePath: "本文/第2話.txt",
+            afterParagraph: 1,
+            imagePath: "素材/挿絵2.png",
+          },
+        ],
+      },
+      "氷の街"
+    );
+
+    expect(config.illustrations[0].caption).toBe("");
+    expect(config.illustrations[1].caption).toBe("");
+  });
+
+  test("画像の場所は作品フォルダの外を指せない（表紙と同じ検証）", () => {
+    for (const imagePath of ["../../秘密.png", "C:/tmp/挿絵.png", "/etc/passwd"]) {
+      expect(() =>
+        parseBookConfig({ illustrations: [{ ...one, imagePath }] }, "氷の街")
+      ).toThrow();
+    }
+  });
+
+  test("画像の場所が空なら弾く（絵の無い挿絵は作らない）", () => {
+    expect(() =>
+      parseBookConfig({ illustrations: [{ ...one, imagePath: "" }] }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig(
+        { illustrations: [{ ...one, imagePath: undefined }] },
+        "氷の街"
+      )
+    ).toThrow();
+  });
+
+  test("段落番号は1以上の整数だけ", () => {
+    for (const afterParagraph of [0, -1, 1.5, "3", null]) {
+      expect(() =>
+        parseBookConfig({ illustrations: [{ ...one, afterParagraph }] }, "氷の街")
+      ).toThrow();
+    }
+    expect(
+      parseBookConfig(
+        { illustrations: [{ ...one, afterParagraph: 1 }] },
+        "氷の街"
+      ).illustrations[0].afterParagraph
+    ).toBe(1);
+  });
+
+  test("話の指定が空なら弾く", () => {
+    expect(() =>
+      parseBookConfig({ illustrations: [{ ...one, episodePath: "  " }] }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig({ illustrations: [{ ...one, episodePath: 3 }] }, "氷の街")
+    ).toThrow();
+  });
+
+  test("話の区切りは / に揃える（Windowsで書かれても同じ指定になる）", () => {
+    expect(
+      parseBookConfig(
+        { illustrations: [{ ...one, episodePath: "本文\\第1話.txt" }] },
+        "氷の街"
+      ).illustrations[0].episodePath
+    ).toBe("本文/第1話.txt");
+  });
+
+  test("配列でなければ弾く", () => {
+    expect(() =>
+      parseBookConfig({ illustrations: { ...one } }, "氷の街")
+    ).toThrow();
+    expect(() => parseBookConfig({ illustrations: ["挿絵"] }, "氷の街")).toThrow();
+  });
+});
+
+describe("ページ分割の指定", () => {
+  const one = { episodePath: "本文/第1話.txt", afterParagraph: 5 };
+
+  test("書いてあれば、そのまま読み取る", () => {
+    expect(parseBookConfig({ pageBreaks: [one] }, "氷の街").pageBreaks).toEqual([
+      one,
+    ]);
+  });
+
+  test("挿絵とまったく同じ検証を通す", () => {
+    // 片方だけ緩いと、そちらが抜け道になる（表紙と裏表紙と同じ理由）
+    for (const afterParagraph of [0, -2, 2.5, "5"]) {
+      expect(() =>
+        parseBookConfig({ pageBreaks: [{ ...one, afterParagraph }] }, "氷の街")
+      ).toThrow();
+    }
+    expect(() =>
+      parseBookConfig({ pageBreaks: [{ ...one, episodePath: "" }] }, "氷の街")
+    ).toThrow();
+    expect(() => parseBookConfig({ pageBreaks: "5" }, "氷の街")).toThrow();
   });
 });

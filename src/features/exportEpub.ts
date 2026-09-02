@@ -17,7 +17,19 @@ import { readWorkFormat } from "../core/workFormatStore";
 import { bookHeading, episodeGroupLabel } from "../core/episodeLabel";
 import { timestampedFileNameCandidates } from "../core/timestampedFileName";
 import { notationModeFor } from "../core/manuscriptRender";
-import { buildEpub, type EpubChapter } from "../core/epubPackage";
+import {
+  buildEpub,
+  imageMediaType,
+  type EpubChapter,
+  type EpubIllustration,
+} from "../core/epubPackage";
+import {
+  countParagraphs,
+  describePlacementOverflow,
+  missingEpisodeNotices,
+  placementsIn,
+} from "../core/epubXhtml";
+import { episodePathFor } from "../core/bookStore";
 import {
   describeCoverUse,
   readCoverSource,
@@ -31,7 +43,14 @@ import { logFailure } from "../core/logger";
  * 本文からEPUB3の電子書籍を組んで書き出す（設計書6.65.4の第1段）。
  *
  * **原稿は読むだけで、1文字も書き換えない。** 空行の詰めもページの
- * 割りも書き出し時の変換であって、原稿ファイルには触れない。
+ * 割りも書き出し時の変換であって、原稿ファイルには触れない。挿絵の
+ * 位置も book.json が持ち、原稿へ目印を書き込まない（設計書6.65.10）。
+ *
+ * ## 挿絵の1枚で本を止めない
+ *
+ * 画像が読めなければ**その挿絵だけ**飛ばし、位置が本文より後ろなら
+ * 末尾へ置く。どちらも完了通知で伝える——本が出ないより、ずれたことが
+ * 分かるほうがよい。ただし黙って捨てもしない。
  *
  * ## 本の設計図が無くても1回は出せる
  *
@@ -73,6 +92,28 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
   const chapters: EpubChapter[] = [];
   /** 競合マーカーが残っている話。組んでも読めない本になるので外す */
   const conflicted: string[] = [];
+  /**
+   * 挿絵まわりで作者へ伝えること（設計書6.65.10）。
+   *
+   * **本は出す。** 位置がずれた・画像が1枚読めなかった、で本ごと出ない
+   * ほうが困る。ただし黙って捨てもしないので、完了通知にまとめて出す。
+   */
+  const placementNotes: string[] = [];
+  /** 読んだ画像。同じ絵を何話でも使えるので、1度読んだら覚えておく */
+  const images = new Map<string, Uint8Array | null>();
+
+  // **指し先の話が無い指定は、どの話にも入らない。** 改題・移動で必ず
+  // 起きるので、入らなかったことを先に伝える（設計書6.65.10）。
+  // 競合を含む話も「ある」と数える——そちらは別の言葉で既に伝えている
+  placementNotes.push(
+    ...missingEpisodeNotices(
+      scan.episodes.map((episode) =>
+        episodePathFor(work.folderPath, episode.filePath)
+      ),
+      config
+    )
+  );
+
   for (const episode of scan.episodes) {
     let file: TextFileContent;
     try {
@@ -94,16 +135,30 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       conflicted.push(episode.fileName);
       continue;
     }
+    const heading = bookHeading(episode, format);
+    // 投稿サイトからDLしたファイルは、先頭にヘッダーが付いている。
+    // 本文だけを組む（作品一覧の文字数計測と同じ切り分け）
+    const body = parseEpisodeMetadata(file.text).body;
+    const placements = await collectPlacements({
+      work,
+      config,
+      episodePath: episodePathFor(work.folderPath, episode.filePath),
+      heading,
+      body,
+      images,
+      notes: placementNotes,
+    });
+
     chapters.push({
-      heading: bookHeading(episode, format),
+      heading,
       // 目次を「章ごとに区切る」にしたときの束ね名（設計書6.65.6）。
       // 読み取れなければ空文字が返り、一覧のまま出る
       group: episodeGroupLabel(episode),
-      // 投稿サイトからDLしたファイルは、先頭にヘッダーが付いている。
-      // 本文だけを組む（作品一覧の文字数計測と同じ切り分け）
-      body: parseEpisodeMetadata(file.text).body,
+      body,
       // **話ごとに記法を見る。** 1つの作品に `.md` と `.txt` が混ざる
       notation: notationModeFor(episode.fileName),
+      illustrations: placements.illustrations,
+      pageBreaks: placements.pageBreaks,
     });
   }
 
@@ -179,13 +234,131 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
           "、"
         )}）。`
       : "";
+  // 挿絵のずれと読めなかった画像は、**本が出たあとに必ず伝える**
+  const placementNote =
+    placementNotes.length > 0 ? `\n${placementNotes.join("\n")}` : "";
   const action = await vscode.window.showInformationMessage(
     `EPUBを書き出しました（${chapters.length}話）。\n${target}` +
       describeCoverUse(cover, backCover) +
-      droppedNote,
+      droppedNote +
+      placementNote,
     "フォルダーを開く"
   );
   if (action === "フォルダーを開く") await revealFolder(target);
+}
+
+/**
+ * その話の挿絵とページ分割を集める（設計書6.65.10）。
+ *
+ * **1枚の失敗で本を止めない。** 画像が読めなければその挿絵だけ飛ばし、
+ * 位置が本文より後ろなら末尾へ置く。どちらも `notes` に積んで、
+ * 完了通知で作者へ伝える（黙って捨てない）。
+ */
+async function collectPlacements(input: {
+  work: WorkEntry;
+  config: BookConfig;
+  episodePath: string;
+  heading: string;
+  body: string;
+  images: Map<string, Uint8Array | null>;
+  notes: string[];
+}): Promise<{ illustrations: EpubIllustration[]; pageBreaks: number[] }> {
+  // 段落の数え方は `epubXhtml.ts` が1か所で持つ（詰める前の段落番号）
+  const paragraphs = countParagraphs(input.body);
+  const illustrations: EpubIllustration[] = [];
+
+  for (const item of placementsIn(
+    input.config.illustrations,
+    input.episodePath
+  )) {
+    const data = await readIllustration(
+      input.work,
+      input.images,
+      item.imagePath,
+      input.notes
+    );
+    // 画像が無い挿絵は入らない。**ずれの警告も出さない**——入らなかった
+    // ものの位置を言われても、作者にできることが増えない
+    if (!data) continue;
+
+    if (item.afterParagraph > paragraphs) {
+      input.notes.push(
+        describePlacementOverflow(input.heading, {
+          kind: "illustration",
+          afterParagraph: item.afterParagraph,
+        })
+      );
+    }
+    illustrations.push({
+      afterParagraph: item.afterParagraph,
+      sourcePath: item.imagePath,
+      data,
+      caption: item.caption,
+    });
+  }
+
+  const pageBreaks: number[] = [];
+  for (const item of placementsIn(input.config.pageBreaks, input.episodePath)) {
+    if (item.afterParagraph > paragraphs) {
+      input.notes.push(
+        describePlacementOverflow(input.heading, {
+          kind: "pageBreak",
+          afterParagraph: item.afterParagraph,
+        })
+      );
+    }
+    pageBreaks.push(item.afterParagraph);
+  }
+
+  return { illustrations, pageBreaks };
+}
+
+/**
+ * 挿絵の画像を読む。**読めなければ null**（その挿絵だけ飛ばす）。
+ *
+ * 同じ絵を何度でも使えるので、読んだ結果は覚えておく。読めなかったことも
+ * 覚えて、1枚につき1度だけ伝える（同じ絵を10か所で使っていたら10回
+ * 叱られる、ということにしない）。
+ */
+async function readIllustration(
+  work: WorkEntry,
+  images: Map<string, Uint8Array | null>,
+  imagePath: string,
+  notes: string[]
+): Promise<Uint8Array | null> {
+  const cached = images.get(imagePath);
+  if (cached !== undefined) return cached;
+
+  // **本を組む前に種類を確かめる。** 組み立ての途中で落ちると、
+  // 挿絵1枚のために本そのものが出ない
+  try {
+    imageMediaType(imagePath, "挿絵");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    notes.push(`${message}この挿絵は飛ばしました。`);
+    images.set(imagePath, null);
+    return null;
+  }
+
+  try {
+    const data = await vscode.workspace.fs.readFile(
+      path.toUri(path.join(work.folderPath, imagePath))
+    );
+    images.set(imagePath, data);
+    return data;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logFailure("挿絵の読み込み", {
+      作品: work.title,
+      場所: imagePath,
+      内容: message,
+    });
+    notes.push(
+      `挿絵の画像「${imagePath}」を読めませんでした。この挿絵は飛ばしました。`
+    );
+    images.set(imagePath, null);
+    return null;
+  }
 }
 
 /** `設定/` の場所。作品設定でフォルダ名を変えていればそれに従う */

@@ -52,6 +52,27 @@ const TITLEPAGE_NAME = "titlepage.xhtml";
 const COLOPHON_NAME = "colophon.xhtml";
 const BACKCOVER_NAME = "backcover.xhtml";
 
+/**
+ * 本文へ挟む挿絵1枚（設計書6.65.10）。
+ *
+ * **ZIPの中の名前はここで決めない。** 画像の中身と、それがどの画像かを
+ * 見分ける手がかり（作品フォルダからの相対パス）だけを持つ。
+ */
+export interface EpubIllustration {
+  /** 第M段落のあと（詰める前の段落番号） */
+  afterParagraph: number;
+  /**
+   * 作品フォルダからの相対パス。
+   *
+   * **同じ画像かどうかの見分けに使う。** 1枚の絵を2か所で使う本で、
+   * 同じバイト列を2回ZIPへ入れない。種類（media-type）の判定にも使う。
+   */
+  sourcePath: string;
+  data: Uint8Array;
+  /** 解説文。空なら `<figcaption>` を出さない */
+  caption: string;
+}
+
 /** 本の中の1話。組み方は `epubXhtml.ts` が持つので、そのまま通す */
 export interface EpubChapter extends EpubChapterSource {
   /**
@@ -62,6 +83,10 @@ export interface EpubChapter extends EpubChapterSource {
    * `core/episodeLabel.ts` の `episodeGroupLabel`。
    */
   group?: string;
+  /** この話へ挟む挿絵（設計書6.65.10） */
+  illustrations?: readonly EpubIllustration[];
+  /** この話の中で改ページする位置（第M段落のあと） */
+  pageBreaks?: readonly number[];
 }
 
 export interface EpubCover {
@@ -154,13 +179,14 @@ export function buildEpub(book: EpubBook): Uint8Array {
     id: `chapter-${String(index + 1).padStart(3, "0")}`,
     fileName: `chapter-${String(index + 1).padStart(3, "0")}.xhtml`,
   }));
+  const illustrations = packIllustrations(chapters);
 
   const files: Zippable = {
     // **先頭・無圧縮。** ここを外すとリーダーが本と認識しない
     mimetype: [encode(EPUB_MIMETYPE), { level: 0 }],
     "META-INF/container.xml": encode(containerXml()),
     [`${ROOT}/content.opf`]: encode(
-      contentOpf(book, chapters, cover, backCover, vertical)
+      contentOpf(book, chapters, cover, backCover, illustrations, vertical)
     ),
     [`${ROOT}/${CSS_NAME}`]: encode(buildEpubCss(vertical)),
     [`${ROOT}/${NAV_NAME}`]: encode(navXhtml(chapters, config, vertical)),
@@ -183,17 +209,67 @@ export function buildEpub(book: EpubBook): Uint8Array {
     );
   }
 
+  for (const image of illustrations.values()) {
+    files[`${ROOT}/${image.packagedName}`] = image.data;
+  }
+
   for (const chapter of chapters) {
     files[`${ROOT}/${chapter.fileName}`] = encode(
       buildChapterXhtml(chapter, {
         collapseBlankLines: config.collapseBlankLines,
         cssHref: CSS_NAME,
         vertical,
+        // 本の中では、挿絵は機械名で指す（`packIllustrations` を参照）
+        illustrations: (chapter.illustrations ?? []).map((item) => ({
+          afterParagraph: item.afterParagraph,
+          href: illustrations.get(item.sourcePath)?.packagedName ?? "",
+          caption: item.caption,
+        })),
+        pageBreaks: chapter.pageBreaks,
       })
     );
   }
 
   return zipSync(files);
+}
+
+/**
+ * 挿絵の画像を、ZIPへ入れる形へまとめる（設計書6.65.10）。
+ *
+ * **名前は `illust-1.png` のような機械名に付け替える。** 表紙と同じ理由で、
+ * 空白や日本語のファイル名だと画像を出さないリーダーがある。
+ *
+ * **同じ画像は1回だけ入れる。** 1枚の絵を章の扉として何度も使う本で、
+ * 同じバイト列を人数ぶん詰めると本が重くなる。見分けは作品フォルダから
+ * の相対パスで行う。
+ */
+function packIllustrations(
+  chapters: readonly PackagedChapter[]
+): Map<string, PackagedIllustration> {
+  const packed = new Map<string, PackagedIllustration>();
+
+  for (const chapter of chapters) {
+    for (const item of chapter.illustrations ?? []) {
+      if (packed.has(item.sourcePath)) continue;
+      const index = packed.size + 1;
+      packed.set(item.sourcePath, {
+        id: `illust-${index}`,
+        packagedName: `illust-${index}${extensionOf(item.sourcePath)}`,
+        // 扱えない種類は、本を組む前に分かる言葉で断る
+        mediaType: imageMediaType(item.sourcePath, "挿絵"),
+        data: item.data,
+      });
+    }
+  }
+
+  return packed;
+}
+
+interface PackagedIllustration {
+  id: string;
+  packagedName: string;
+  mediaType: string;
+  data: Uint8Array;
 }
 
 interface PackagedChapter extends EpubChapter {
@@ -234,6 +310,7 @@ function contentOpf(
   chapters: readonly PackagedChapter[],
   cover: PackagedCover | null,
   backCover: PackagedCover | null,
+  illustrations: ReadonlyMap<string, PackagedIllustration>,
   vertical: boolean
 ): string {
   const config = book.config;
@@ -280,6 +357,11 @@ function contentOpf(
           `    <item id="cover-image" href="${cover.packagedName}" media-type="${cover.mediaType}" properties="cover-image" />`,
         ]
       : []),
+    // 挿絵は表紙ではないので `cover-image` を付けない（本に1つだけ）
+    ...[...illustrations.values()].map(
+      (image) =>
+        `    <item id="${image.id}" href="${image.packagedName}" media-type="${image.mediaType}" />`
+    ),
     ...chapters.map(
       (chapter) =>
         `    <item id="${chapter.id}" href="${chapter.fileName}" media-type="application/xhtml+xml" />`
@@ -667,6 +749,18 @@ export function buildEpubCss(vertical: boolean): string {
     "  -epub-text-emphasis: filled sesame;",
     "  -webkit-text-emphasis: filled sesame;",
     "  text-emphasis: filled sesame;",
+    "}",
+    // 挿絵（設計書6.65.10）。本文の流れに入るので、面いっぱいには広げず
+    // 前後に空きを取る。解説文は画像の直後（重ねない）
+    "figure { margin: 0; padding: 0; }",
+    ".illustration { margin-block: 2em; text-align: center; }",
+    ".illustration img { max-inline-size: 100%; max-block-size: 100%; }",
+    ".illustration figcaption { font-size: 0.85em; margin-block-start: 0.6em; }",
+    // 話の途中の改ページ。**古い書き方も並べる**（`page-break-before` しか
+    // 見ないリーダーが現役で、片方だけだと場面が割れない）
+    ".page-break {",
+    "  page-break-before: always;",
+    "  break-before: page;",
     "}",
     // 表紙は1枚を面いっぱいに。はみ出させない
     ".cover-image { text-align: center; margin: 0; padding: 0; }",

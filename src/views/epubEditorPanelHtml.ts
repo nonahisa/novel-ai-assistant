@@ -229,6 +229,39 @@ button.primary {
   background: var(--vscode-input-background);
 }
 .cover-actions { margin-top: 10px; }
+/* 挿絵とページ分割の欄（設計書6.65.10）。段落は数が多いので枠の中で送る */
+#paragraphList {
+  max-block-size: 340px;
+  overflow: auto;
+  border: 1px solid var(--vscode-panel-border);
+}
+.para-row {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+.para-row:last-child { border-bottom: none; }
+.para-head { font-size: 12px; line-height: 1.5; margin-bottom: 4px; }
+.para-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.para-actions label.check { margin: 0; }
+.para-illust { margin-top: 6px; }
+/* 位置のずれは、書き出す前にここで見える（複数行で並べる） */
+#placementWarnings { white-space: pre-line; }
+.note.error { color: var(--vscode-errorForeground); }
+/*
+ * プレビューにだけ出る改ページの印（core/epubXhtml.ts が組む）。
+ * **本には入らない。** 画面は1枚の面なので実際には割れず、印が無いと
+ * 「指定が効いていない」と読めてしまう。縦組みの面でも読めるよう横組みで出す
+ */
+.epub-page .page-break-mark {
+  writing-mode: horizontal-tb;
+  margin: 1em 0;
+  padding: 2px 6px;
+  border: 1px dashed var(--vscode-descriptionForeground);
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-font-family);
+  font-size: 11px;
+  text-align: center;
+}
 </style>
 <style nonce="${nonce}" id="book-style"></style>
 </head>
@@ -291,6 +324,12 @@ ${coverSection(
   "bakeBack",
   "裏表紙を焼く"
 )}
+
+    <h2>挿絵とページ分割</h2>
+    <label><span>話</span><select id="episodeSelect"></select></label>
+    <p class="note" id="placementNotice"></p>
+    <p class="note error" id="placementWarnings"></p>
+    <div id="paragraphList"></div>
 
     <p class="note" id="filePath"></p>
   </section>
@@ -383,7 +422,178 @@ function readLayout(side) {
   return layout;
 }
 
+/* ---- 挿絵とページ分割（設計書6.65.10） ----------------------------- */
+
+/**
+ * 設計図の指定の写し。**話を選び直しても消えない**ように外に持つ。
+ * 画像の場所を書く前の挿絵もここには残る（設計図へは載せない）。
+ */
+let illustrations = [];
+let pageBreaks = [];
+/** いま選んでいる話と、その段落の冒頭（拡張機能から貰う） */
+let episodePath = '';
+let paragraphs = [];
+
+function samePlace(item, number) {
+  return item.episodePath === episodePath && item.afterParagraph === number;
+}
+
+function illustrationAt(number) {
+  for (let index = 0; index < illustrations.length; index++) {
+    if (samePlace(illustrations[index], number)) return illustrations[index];
+  }
+  return null;
+}
+
+function hasBreak(number) {
+  return pageBreaks.some(function (item) { return samePlace(item, number); });
+}
+
+function toggleBreak(number, on) {
+  pageBreaks = pageBreaks.filter(function (item) {
+    return !samePlace(item, number);
+  });
+  if (on) pageBreaks.push({ episodePath: episodePath, afterParagraph: number });
+  scheduleChange();
+}
+
+function toggleIllustration(number, on) {
+  illustrations = illustrations.filter(function (item) {
+    return !samePlace(item, number);
+  });
+  if (on) {
+    illustrations.push({
+      episodePath: episodePath,
+      afterParagraph: number,
+      imagePath: '',
+      caption: ''
+    });
+  }
+  // 場所を書く欄が増える（減る）ので、この行だけでなく一覧を組み直す
+  renderParagraphs();
+  scheduleChange();
+}
+
+function toggleField(label, checked, onChange) {
+  const wrap = document.createElement('label');
+  wrap.className = 'check';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = checked;
+  box.addEventListener('change', function () { onChange(box.checked); });
+  const text = document.createElement('span');
+  text.textContent = label;
+  wrap.appendChild(box);
+  wrap.appendChild(text);
+  return wrap;
+}
+
+function textField(label, value, onInput) {
+  const wrap = document.createElement('label');
+  const caption = document.createElement('span');
+  caption.textContent = label;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = value || '';
+  // **打っている途中で組み直さない**（打鍵のたびに欄から指が離れる）
+  input.addEventListener('input', function () { onInput(input.value); });
+  wrap.appendChild(caption);
+  wrap.appendChild(input);
+  return wrap;
+}
+
+function illustrationFields(item) {
+  const box = document.createElement('div');
+  box.className = 'para-illust';
+  box.appendChild(textField(
+    '画像の場所（作品フォルダからの相対パス）',
+    item.imagePath,
+    function (value) { item.imagePath = value; scheduleChange(); }
+  ));
+  box.appendChild(textField(
+    '解説文（省略できます）',
+    item.caption,
+    function (value) { item.caption = value; scheduleChange(); }
+  ));
+  return box;
+}
+
+/**
+ * 段落の一覧。番号だけでは、どこを指しているのか作者に分からないので
+ * 冒頭を添える。**本文は textContent で入れる**（原稿をHTMLとして
+ * 解釈させない）。
+ */
+function renderParagraphs() {
+  const host = field('paragraphList');
+  host.textContent = '';
+
+  paragraphs.forEach(function (text, index) {
+    const number = index + 1;
+    const row = document.createElement('div');
+    row.className = 'para-row';
+
+    const head = document.createElement('div');
+    head.className = 'para-head';
+    head.textContent = number + '　' + text;
+    row.appendChild(head);
+
+    const actions = document.createElement('div');
+    actions.className = 'para-actions';
+    const illustration = illustrationAt(number);
+    actions.appendChild(toggleField('ここに挿絵', illustration !== null,
+      function (on) { toggleIllustration(number, on); }));
+    actions.appendChild(toggleField('ここで改ページ', hasBreak(number),
+      function (on) { toggleBreak(number, on); }));
+    row.appendChild(actions);
+
+    if (illustration) row.appendChild(illustrationFields(illustration));
+    host.appendChild(row);
+  });
+}
+
+/** 話の一覧。選んでいた話が残っていればそのまま、無ければ先頭にする */
+function fillEpisodes(list) {
+  const select = field('episodeSelect');
+  const previous = episodePath;
+  const episodes = list || [];
+  select.textContent = '';
+
+  let found = false;
+  episodes.forEach(function (episode) {
+    const option = document.createElement('option');
+    option.value = episode.path;
+    option.textContent = episode.label;
+    select.appendChild(option);
+    if (episode.path === previous) found = true;
+  });
+
+  episodePath = found ? previous : (episodes[0] ? episodes[0].path : '');
+  select.value = episodePath;
+  paragraphs = [];
+  renderParagraphs();
+  if (episodePath) post('episode', { episodePath: episodePath });
+}
+
+function applyWarnings(data) {
+  field('placementWarnings').textContent =
+    (data.placementWarnings || []).join('\\n');
+}
+
 function fillForm(config) {
+  illustrations = (config.illustrations || []).map(function (item) {
+    return {
+      episodePath: item.episodePath,
+      afterParagraph: item.afterParagraph,
+      imagePath: item.imagePath,
+      caption: item.caption
+    };
+  });
+  pageBreaks = (config.pageBreaks || []).map(function (item) {
+    return {
+      episodePath: item.episodePath,
+      afterParagraph: item.afterParagraph
+    };
+  });
   field('bookTitle').value = config.title || '';
   field('author').value = config.author || '';
   field('illustrator').value = config.illustrator || '';
@@ -411,6 +621,24 @@ function readForm() {
   });
   SIDES.forEach(function (side) {
     config[LAYOUT_KEYS[side]] = readLayout(side);
+  });
+  // **場所を書く前の挿絵は、設計図へ載せない。** 絵の無い挿絵は
+  // 受け取ってもらえないので、書き終わるまで欄の中だけで待たせる
+  config.illustrations = illustrations
+    .filter(function (item) { return (item.imagePath || '').trim(); })
+    .map(function (item) {
+      return {
+        episodePath: item.episodePath,
+        afterParagraph: item.afterParagraph,
+        imagePath: item.imagePath.trim(),
+        caption: (item.caption || '').trim()
+      };
+    });
+  config.pageBreaks = pageBreaks.map(function (item) {
+    return {
+      episodePath: item.episodePath,
+      afterParagraph: item.afterParagraph
+    };
   });
   return config;
 }
@@ -450,6 +678,14 @@ field('export').addEventListener('click', function () {
 });
 field('bakeFront').addEventListener('click', function () { bake('front'); });
 field('bakeBack').addEventListener('click', function () { bake('back'); });
+field('episodeSelect').addEventListener('change', function () {
+  episodePath = field('episodeSelect').value;
+  // 段落は話ごとに違う。貰い直すまでは空にしておく（前の話の段落へ
+  // 挿絵を付けてしまわないため）
+  paragraphs = [];
+  renderParagraphs();
+  post('episode', { episodePath: episodePath });
+});
 
 function setStatus(text, isError) {
   const status = field('status');
@@ -672,15 +908,26 @@ window.addEventListener('message', function (event) {
     field('title').textContent = data.title;
     field('filePath').textContent = data.filePath;
     fillForm(data.config);
+    fillEpisodes(data.episodes);
     applyCompose(data);
+    applyWarnings(data);
     renderPages(data);
     setStatus(data.dirty ? '未保存の変更があります' : '', false);
     return;
   }
   if (message.type === 'preview') {
     applyCompose(message.data);
+    applyWarnings(message.data);
     renderPages(message.data);
     setStatus(message.data.dirty ? '未保存の変更があります' : '', false);
+    return;
+  }
+  if (message.type === 'paragraphs') {
+    // 選び直したあとに古い返事が届くことがある。**いまの話のものだけ**採る
+    if (message.episodePath !== episodePath) return;
+    paragraphs = message.items || [];
+    field('placementNotice').textContent = message.notice || '';
+    renderParagraphs();
     return;
   }
   if (message.type === 'imageData') {

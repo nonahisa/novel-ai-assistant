@@ -1,7 +1,14 @@
 import { describe, expect, test } from "vitest";
 import {
   buildChapterFragment,
+  buildChapterPlacement,
   buildChapterXhtml,
+  countParagraphs,
+  describePlacementOverflow,
+  missingEpisodeNotices,
+  placementsIn,
+  splitParagraphs,
+  type EpubBodyOptions,
 } from "../../src/core/epubXhtml";
 
 /**
@@ -126,6 +133,223 @@ describe("シーンメモは本へ入れない", () => {
     const html = fragment("あ\n// あとで直す\nい");
     expect(html).not.toContain("あとで直す");
     expect([...html.matchAll(/<p>/g)]).toHaveLength(2);
+  });
+});
+
+/**
+ * 挿絵とページ分割（設計書6.65.10）。
+ *
+ * 位置は「第M段落のあと」で、**段落は詰める前の数え方**——空行で区切った
+ * 塊で数える。`collapseBlankLines` を切り替えても位置がずれてはいけない
+ * （切り替えたとたんに挿絵が別の場面へ移る本になる）。
+ */
+describe("段落の数え方", () => {
+  test("空行で区切った塊を1段落と数える", () => {
+    expect(countParagraphs("あ\n\nい\n\n\nう")).toBe(3);
+    // 続いた行は1つの塊。空行が段落を分ける
+    expect(countParagraphs("あ\nい\n\nう")).toBe(2);
+    expect(countParagraphs("")).toBe(0);
+  });
+
+  test("前後の空行は数に入らない", () => {
+    expect(countParagraphs("\n\nあ\n\n\n")).toBe(1);
+  });
+
+  test("シーンメモの行は段落に数えない（本にも入らないので）", () => {
+    expect(countParagraphs("あ\n// あとで直す\n\nい")).toBe(2);
+  });
+
+  test("段落の中身も取り出せる（欄の一覧に使う）", () => {
+    expect(splitParagraphs("あ\nい\n\nう")).toEqual(["あ\nい", "う"]);
+  });
+});
+
+describe("挿絵とページ分割", () => {
+  function placed(body: string, options: Partial<EpubBodyOptions> = {}) {
+    return buildChapterPlacement(
+      { heading: "第一話", body, notation: "curly" },
+      { collapseBlankLines: true, ...options }
+    );
+  }
+
+  const illustration = {
+    afterParagraph: 2,
+    href: "illust-1.png",
+    caption: "",
+  };
+
+  test("挿絵は指定した段落の直後に入る", () => {
+    const html = placed("あ\n\nい\n\nう", {
+      illustrations: [illustration],
+    }).html;
+
+    expect(html).toMatch(/<p>い<\/p>\n<figure class="illustration">/);
+    expect(html.indexOf("<figure")).toBeLessThan(html.indexOf("<p>う</p>"));
+  });
+
+  test("詰める設定を変えても、同じ段落の直後に入る", () => {
+    // **これが「詰める前の段落番号」の意味**である（設計書6.65.10）
+    const body = "あ\n\nい\n\n\nう";
+    for (const collapseBlankLines of [true, false]) {
+      const html = placed(body, {
+        collapseBlankLines,
+        illustrations: [illustration],
+      }).html;
+      expect(html).toMatch(/<p>い<\/p>\n<figure/);
+    }
+  });
+
+  test("解説文があれば figcaption を添える", () => {
+    const html = placed("あ\n\nい", {
+      illustrations: [{ ...illustration, afterParagraph: 1, caption: "出会い" }],
+    }).html;
+
+    expect(html).toContain("<figcaption>出会い</figcaption>");
+    expect(html).toContain('alt="出会い"');
+  });
+
+  test("解説文が空なら figcaption を出さない", () => {
+    const html = placed("あ\n\nい", {
+      illustrations: [{ ...illustration, afterParagraph: 1 }],
+    }).html;
+
+    expect(html).toContain("<figure");
+    expect(html).not.toContain("figcaption");
+  });
+
+  test("解説文と画像の場所も、XMLとして逃がす", () => {
+    const html = placed("あ", {
+      illustrations: [
+        { afterParagraph: 1, href: "illust&1.png", caption: 'A & B <tag>' },
+      ],
+    }).html;
+
+    expect(html).toContain("A &amp; B &lt;tag&gt;");
+    expect(html).toContain('src="illust&amp;1.png"');
+  });
+
+  test("改ページは次の段落にクラスが付く", () => {
+    const html = placed("あ\n\nい", { pageBreaks: [1] }).html;
+
+    expect(html).toContain('<p class="page-break">い</p>');
+    expect(html).toContain("<p>あ</p>");
+  });
+
+  test("話の末尾を指したら何も付かない（後ろに段落が無い）", () => {
+    const result = placed("あ\n\nい", { pageBreaks: [2] });
+
+    expect(result.html).not.toContain("page-break");
+    expect(result.overflow).toEqual([]);
+  });
+
+  test("段落数を超えた挿絵は末尾に置き、超えたことを返す", () => {
+    const result = placed("あ\n\nい", {
+      illustrations: [{ ...illustration, afterParagraph: 9 }],
+    });
+
+    expect(result.paragraphCount).toBe(2);
+    expect(result.overflow).toEqual([
+      { kind: "illustration", afterParagraph: 9 },
+    ]);
+    // 黙って捨てない。末尾には入る
+    expect(result.html.indexOf("<figure")).toBeGreaterThan(
+      result.html.indexOf("<p>い</p>")
+    );
+  });
+
+  test("段落数を超えた改ページも、超えたことを返す", () => {
+    const result = placed("あ\n\nい", { pageBreaks: [9] });
+
+    expect(result.overflow).toEqual([{ kind: "pageBreak", afterParagraph: 9 }]);
+    expect(result.html).not.toContain("page-break");
+  });
+
+  test("超過の言い方は1か所で作る（書き出しと画面で食い違わせない）", () => {
+    expect(
+      describePlacementOverflow("第一話　出会い", {
+        kind: "illustration",
+        afterParagraph: 9,
+      })
+    ).toContain("第9段落");
+    expect(
+      describePlacementOverflow("第一話　出会い", {
+        kind: "illustration",
+        afterParagraph: 9,
+      })
+    ).toContain("第一話　出会い");
+  });
+
+  test("プレビューのときだけ、改ページの位置に印を置く", () => {
+    // 画面は1枚の面なので実際には割れない。**見えないより印**（6.65.10）
+    expect(
+      placed("あ\n\nい", { pageBreaks: [1], markPageBreaks: true }).html
+    ).toContain("ここで改ページ");
+    // 本には入れない
+    expect(placed("あ\n\nい", { pageBreaks: [1] }).html).not.toContain(
+      "ここで改ページ"
+    );
+  });
+
+  /**
+   * 指し先の話が見つからない指定（設計書6.65.10）。
+   *
+   * **改題・移動で必ず起きる。** 位置の超過と同じで、黙って消さずに伝える
+   * ——ただしこちらは末尾へ置くこともできない（入る先の話が無い）。
+   */
+  test("見つからない話の指定は、本に入らない", () => {
+    const items = [
+      { episodePath: "本文/第1話.txt", afterParagraph: 1 },
+      { episodePath: "本文/第3話.txt", afterParagraph: 1 },
+    ];
+
+    expect(placementsIn(items, "本文/第1話.txt")).toHaveLength(1);
+    // 改題された話を指しているものは、どの話にも選ばれない
+    expect(placementsIn(items, "本文/第2話.txt")).toEqual([]);
+  });
+
+  test("見つからない話の挿絵・改ページは、パス付きで知らせる", () => {
+    const notes = missingEpisodeNotices(["本文/第1話.txt"], {
+      illustrations: [{ episodePath: "本文/第3話.txt" }],
+      pageBreaks: [{ episodePath: "本文/第4話.txt" }],
+    });
+
+    expect(notes).toHaveLength(2);
+    // 作者が「あれを改題したからだ」と辿れるよう、パスを出す
+    expect(notes[0]).toContain("本文/第3話.txt");
+    expect(notes[0]).toContain("挿絵");
+    expect(notes[1]).toContain("本文/第4話.txt");
+    expect(notes[1]).toContain("改ページ");
+  });
+
+  test("見つかる話については何も言わない", () => {
+    expect(
+      missingEpisodeNotices(["本文/第1話.txt", "本文/第2話.txt"], {
+        illustrations: [{ episodePath: "本文/第1話.txt" }],
+        pageBreaks: [{ episodePath: "本文/第2話.txt" }],
+      })
+    ).toEqual([]);
+  });
+
+  test("同じ話に何枚あっても、言うのは1度だけ", () => {
+    // 同じ文が3つ並んでも、作者に伝わるものは増えない
+    expect(
+      missingEpisodeNotices([], {
+        illustrations: [
+          { episodePath: "本文/第3話.txt" },
+          { episodePath: "本文/第3話.txt" },
+        ],
+        pageBreaks: [],
+      })
+    ).toHaveLength(1);
+  });
+
+  test("指定が無ければ、いままでと同じものが出る", () => {
+    const bare = buildChapterFragment(
+      { heading: "第一話", body: "あ\n\nい", notation: "curly" },
+      { collapseBlankLines: true }
+    );
+    expect(bare).toBe(placed("あ\n\nい").html);
+    expect(bare).not.toContain("figure");
   });
 });
 

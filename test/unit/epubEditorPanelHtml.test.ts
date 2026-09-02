@@ -124,6 +124,28 @@ describe("左の設定の欄", () => {
     expect(html).not.toContain('id="front-title-x"');
   });
 
+  /**
+   * 挿絵とページ分割（設計書6.65.10）。話を選び、段落の一覧から
+   * 「ここに挿絵」「ここで改ページ」を付け外しする。
+   */
+  it("話を選ぶ欄と、段落の一覧を置く場所がある", () => {
+    expect(html).toContain('id="episodeSelect"');
+    expect(html).toContain('id="paragraphList"');
+    // 位置の超過は、書き出す前にここで見える
+    expect(html).toContain('id="placementWarnings"');
+  });
+
+  it("段落の一覧は拡張機能から貰う（画面で本文を切らない）", () => {
+    expect(script).toContain("post('episode'");
+    expect(script).toContain("data.episodes");
+  });
+
+  it("段落の見出しは textContent で入れる（本文をHTMLとして解釈しない）", () => {
+    expect(script).not.toContain("innerHTML = paragraph");
+    expect(script).toContain("ここに挿絵");
+    expect(script).toContain("ここで改ページ");
+  });
+
   it("焼く入口と、元イラストの場所を書く欄がある", () => {
     expect(html).toContain('id="bakeFront"');
     expect(html).toContain('id="bakeBack"');

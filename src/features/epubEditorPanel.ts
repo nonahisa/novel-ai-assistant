@@ -1,8 +1,13 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
-import { BOOK_DIR, parseBookConfig, type BookConfig } from "../models/book";
-import { BookStore, BookStoreError } from "../core/bookStore";
+import {
+  BOOK_DIR,
+  parseBookConfig,
+  type BookBodyPosition,
+  type BookConfig,
+} from "../models/book";
+import { BookStore, BookStoreError, episodePathFor } from "../core/bookStore";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import {
   BAKED_COVER_FILES,
@@ -16,10 +21,17 @@ import { parseEpisodeMetadata } from "../core/metadataParser";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
 import { bookHeading, episodeGroupLabel } from "../core/episodeLabel";
-import { notationModeFor } from "../core/manuscriptRender";
+import { notationModeFor, tokenizeLine } from "../core/manuscriptRender";
+import type { NotationMode } from "../core/manuscriptRender";
 import {
   buildChapterFragment,
+  countParagraphs,
+  describePlacementOverflow,
+  missingEpisodeNotices,
+  placementsIn,
+  splitParagraphs,
   type EpubChapterSource,
+  type EpubIllustrationPlacement,
 } from "../core/epubXhtml";
 import {
   buildColophonFragment,
@@ -70,14 +82,35 @@ interface PanelState {
   /** 最後にファイルへ書いた値。こことの差が「未保存」 */
   saved: BookConfig;
   source: PreviewSource;
+  /**
+   * 話ごとの段落数（設計書6.65.10）。
+   *
+   * **読んだ話だけが入る。** 数えていない話について「位置が本文より
+   * 後ろです」とは言えない（嘘になる）。話を選んだときと、開いた時点で
+   * 指定のある話について数える。
+   */
+  paragraphs: Map<string, number>;
 }
 
 /** プレビューに使う本文の材料。パネルを開いたときに1度だけ集める */
 interface PreviewSource {
-  entries: Array<{ label: string; group: string }>;
+  episodes: PreviewEpisode[];
   /** 1話目（競合を含まない最初の話）。無ければ null */
   firstChapter: EpubChapterSource | null;
+  /** その1話目を book.json ではどう指すか（挿絵の絞り込みに使う） */
+  firstChapterPath: string | null;
   notice: string | null;
+}
+
+/** 目次と、挿絵の欄の「話を選ぶ」に出す1話 */
+interface PreviewEpisode {
+  /** book.json の `episodePath` と同じ形（作品フォルダからの相対パス） */
+  path: string;
+  label: string;
+  group: string;
+  /** 絶対パス。**画面へは渡さない**（作品の外を教える必要が無い） */
+  filePath: string;
+  notation: NotationMode;
 }
 
 const openPanels = new Map<string, PanelState>();
@@ -97,6 +130,9 @@ export async function openEpubEditorPanel(
   }
 
   const source = await collectSource(work);
+  // 指定のある話だけ、開いた時点で段落数を数えておく。**位置のずれを
+  // 書き出して初めて知るのでは遅い**（設計書6.65.10）
+  const paragraphs = await countPlacedEpisodes(source, saved);
 
   const existing = openPanels.get(work.id);
   if (existing) {
@@ -106,6 +142,7 @@ export async function openEpubEditorPanel(
     existing.saved = saved;
     existing.current = saved;
     existing.source = source;
+    existing.paragraphs = paragraphs;
     existing.panel.reveal();
     existing.panel.webview.postMessage({
       type: "book",
@@ -135,6 +172,7 @@ export async function openEpubEditorPanel(
     current: saved,
     saved,
     source,
+    paragraphs,
   };
 
   openPanels.set(work.id, state);
@@ -152,6 +190,7 @@ export async function openEpubEditorPanel(
       config?: Record<string, unknown>;
       side?: string;
       dataUrl?: string;
+      episodePath?: string;
     };
 
     if (parsed.type === "ready") {
@@ -161,6 +200,14 @@ export async function openEpubEditorPanel(
         type: "book",
         data: await panelData(state),
       });
+      return;
+    }
+
+    if (parsed.type === "episode") {
+      // 段落の一覧は**本文を読まないと作れない**。選ばれた話だけ読む
+      // （欄を触るたびに全話を読み直すと、題名を打つだけで作品全体を
+      // 走査することになる）
+      await sendParagraphs(state, parsed.episodePath ?? "");
       return;
     }
 
@@ -357,14 +404,177 @@ function previewData(state: PanelState) {
   return {
     // **書き出しと同じCSS**を、画面の枠の中へ閉じ込めただけのもの
     css: scopeCssForPreview(buildEpubCss(vertical), ".epub-page"),
-    pages: buildPages(state.current, state.source, vertical),
+    pages: buildPages(state, vertical),
     compose: {
       front: composeState(state, "front"),
       back: composeState(state, "back"),
     },
+    // 挿絵の欄で選ぶ話の一覧。**絶対パスは渡さない**
+    episodes: state.source.episodes.map((episode) => ({
+      path: episode.path,
+      label: episode.label,
+    })),
+    placementWarnings: placementWarnings(state),
     notice: state.source.notice,
     dirty: isDirty(state),
   };
+}
+
+/**
+ * 指定がそのとおりに入らないもの（設計書6.65.10）。
+ *
+ * **書き出しを待たずに、欄で見せる。** 原稿を書き直せば位置はずれ、
+ * 改題すれば指し先が消える。言い方は `epubXhtml.ts` が1か所で持つので、
+ * 書き出しの通知と食い違わない。
+ *
+ * 並びは「入らないもの（指し先が無い）」→「ずれたもの（位置の超過）」。
+ * 入らないほうが直す用が大きい。
+ */
+function placementWarnings(state: PanelState): string[] {
+  const labels = new Map(
+    state.source.episodes.map((episode) => [episode.path, episode.label])
+  );
+  const notes: string[] = missingEpisodeNotices(labels.keys(), state.current);
+
+  const check = (
+    kind: "illustration" | "pageBreak",
+    item: BookBodyPosition
+  ): void => {
+    const count = state.paragraphs.get(item.episodePath);
+    // **数えていない話については黙る。** 読んでもいないのに
+    // 「本文より後ろです」と言うと、当たっていても偶然になる
+    if (count === undefined || item.afterParagraph <= count) return;
+    notes.push(
+      describePlacementOverflow(labels.get(item.episodePath) ?? item.episodePath, {
+        kind,
+        afterParagraph: item.afterParagraph,
+      })
+    );
+  };
+
+  for (const item of state.current.illustrations) check("illustration", item);
+  for (const item of state.current.pageBreaks) check("pageBreak", item);
+  return notes;
+}
+
+/**
+ * 選ばれた話の段落を画面へ渡す（設計書6.65.10の「段落の一覧」）。
+ *
+ * **原稿は読むだけ。** 冒頭20字ほどを見せるのは、番号だけでは
+ * どこを指しているのか作者に分からないためである。
+ */
+async function sendParagraphs(
+  state: PanelState,
+  episodePath: string
+): Promise<void> {
+  const episode = state.source.episodes.find(
+    (entry) => entry.path === episodePath
+  );
+  if (!episode) {
+    state.panel.webview.postMessage({
+      type: "paragraphs",
+      episodePath,
+      items: [],
+      notice: "この話の本文が見つかりません。",
+    });
+    return;
+  }
+
+  const body = await readEpisodeBody(episode);
+  if (body === null) {
+    state.panel.webview.postMessage({
+      type: "paragraphs",
+      episodePath,
+      items: [],
+      notice:
+        "この話は読めませんでした（未解決の競合を含む話は本にも入りません）。",
+    });
+    return;
+  }
+
+  const items = splitParagraphs(body).map((paragraph) =>
+    paragraphPreview(paragraph, episode.notation)
+  );
+  state.paragraphs.set(episodePath, items.length);
+
+  state.panel.webview.postMessage({
+    type: "paragraphs",
+    episodePath,
+    items,
+    notice: null,
+  });
+  // 段落数が分かった。ずれの知らせを出し直す
+  state.panel.webview.postMessage({
+    type: "preview",
+    data: previewData(state),
+  });
+}
+
+/**
+ * 段落の冒頭。
+ *
+ * **記法は外して見せる。** `{漢字|かんじ}` のままでは20字のうち何字かが
+ * 記号に食われ、どの場面なのか読み取れない（組むときと同じ `tokenizeLine`
+ * を使う——記法の定義を増やさない）。
+ */
+function paragraphPreview(paragraph: string, notation: NotationMode): string {
+  const plain = paragraph
+    .split("\n")
+    .map((line) =>
+      tokenizeLine(line, notation)
+        .map((token) => (token.kind === "ruby" ? token.base : token.text))
+        .join("")
+    )
+    .join(" ")
+    .trim();
+
+  return plain.length > PREVIEW_CHARS
+    ? `${plain.slice(0, PREVIEW_CHARS)}…`
+    : plain;
+}
+
+const PREVIEW_CHARS = 20;
+
+/** 話の本文。読めない話・競合のある話は null（本にも入らない） */
+async function readEpisodeBody(episode: PreviewEpisode): Promise<string | null> {
+  try {
+    const file = await readTextFile(episode.filePath);
+    if (file.hasConflictMarkers) return null;
+    return parseEpisodeMetadata(file.text).body;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logFailure("EPUBエディターの段落一覧", {
+      ファイル: episode.path,
+      内容: message,
+    });
+    return null;
+  }
+}
+
+/**
+ * 位置指定のある話だけ、先に段落数を数える。
+ *
+ * 全話を読むと、開くたびに作品全体を走査することになる。**指定のある話
+ * だけ**なら、たいていは数話で済む。
+ */
+async function countPlacedEpisodes(
+  source: PreviewSource,
+  config: BookConfig
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  const wanted = new Set(
+    [...config.illustrations, ...config.pageBreaks].map(
+      (item) => item.episodePath
+    )
+  );
+
+  for (const episode of source.episodes) {
+    if (!wanted.has(episode.path) || counts.has(episode.path)) continue;
+    const body = await readEpisodeBody(episode);
+    if (body !== null) counts.set(episode.path, countParagraphs(body));
+  }
+
+  return counts;
 }
 
 /**
@@ -424,11 +634,9 @@ interface PreviewPage {
  * 見た目どおりに編集しているつもりで別の本ができる。並びは
  * 表紙→タイトルページ→（目次）→本文→奥付（設計書6.65.3の表）。
  */
-function buildPages(
-  config: BookConfig,
-  source: PreviewSource,
-  vertical: boolean
-): PreviewPage[] {
+function buildPages(state: PanelState, vertical: boolean): PreviewPage[] {
+  const config = state.current;
+  const source = state.source;
   const pages: PreviewPage[] = [];
 
   pages.push(
@@ -464,7 +672,7 @@ function buildPages(
     pages.push({
       label: "目次",
       html: buildTocFragment(
-        source.entries.map((entry) => ({
+        source.episodes.map((entry) => ({
           // プレビューでは飛ばない。見た目は行き先で変わらない
           href: "#",
           label: entry.label,
@@ -477,7 +685,7 @@ function buildPages(
         }
       ),
       note:
-        source.entries.length === 0
+        source.episodes.length === 0
           ? "本文が見つからないので、目次は空です。"
           : null,
       vertical,
@@ -485,12 +693,26 @@ function buildPages(
   }
 
   if (source.firstChapter) {
+    // **冒頭に収まっている指定だけを出す。** プレビューが読んでいるのは
+    // 1話目の冒頭だけなので、その先の指定まで当てはめると「本文より
+    // 後ろだから末尾へ」が働いて、実際の本と違う場所に挿絵が出る
+    const shown = countParagraphs(source.firstChapter.body);
+    const placed = placementsFor(state, source.firstChapterPath, shown);
+
     pages.push({
       label: "本文の冒頭",
       html: buildChapterFragment(source.firstChapter, {
         collapseBlankLines: config.collapseBlankLines,
+        illustrations: placed.illustrations,
+        pageBreaks: placed.pageBreaks,
+        // 画面は1枚の面なので実際には割れない。印だけ置く（6.65.10）
+        markPageBreaks: true,
       }),
-      note: "1話目の冒頭だけを出しています（本には全話が入ります）。",
+      note:
+        "1話目の冒頭だけを出しています（本には全話が入ります）。" +
+        (placed.hidden
+          ? "冒頭より後ろの挿絵・改ページは、ここには出ません。"
+          : ""),
       vertical,
     });
   }
@@ -520,10 +742,58 @@ function buildPages(
 }
 
 /**
+ * 挿絵と改ページのうち、プレビューに出せるもの（設計書6.65.10）。
+ *
+ * 画像は `asWebviewUri` で見せる。**作品フォルダの中だけ**がWebViewから
+ * 読める（`localResourceRoots`）ので、外を指すパスはそもそも book.json の
+ * 検証で弾かれている。
+ */
+function placementsFor(
+  state: PanelState,
+  episodePath: string | null,
+  shownParagraphs: number
+): {
+  illustrations: EpubIllustrationPlacement[];
+  pageBreaks: number[];
+  hidden: boolean;
+} {
+  if (!episodePath) return { illustrations: [], pageBreaks: [], hidden: false };
+
+  const withinView = <T extends BookBodyPosition>(items: readonly T[]): T[] =>
+    items.filter((item) => item.afterParagraph <= shownParagraphs);
+
+  // 話の突き合わせ方は `epubXhtml.ts` が1か所で持つ（書き出しと同じ規則）
+  const illustrations = placementsIn(state.current.illustrations, episodePath);
+  const pageBreaks = placementsIn(state.current.pageBreaks, episodePath);
+  const shownIllustrations = withinView(illustrations);
+  const shownBreaks = withinView(pageBreaks);
+
+  return {
+    illustrations: shownIllustrations.map((item) => ({
+      afterParagraph: item.afterParagraph,
+      href: imageUri(state, item.imagePath),
+      caption: item.caption,
+    })),
+    pageBreaks: shownBreaks.map((item) => item.afterParagraph),
+    hidden:
+      shownIllustrations.length < illustrations.length ||
+      shownBreaks.length < pageBreaks.length,
+  };
+}
+
+/** 作品フォルダの中の画像を、WebViewから読める形にする */
+function imageUri(state: PanelState, relativePath: string): string {
+  return state.panel.webview
+    .asWebviewUri(path.toUri(path.join(state.work.folderPath, relativePath)))
+    .toString();
+}
+
+/**
  * プレビューの材料を集める。
  *
  * **原稿は読むだけ**で、読むのも1話目の冒頭までである。見出しは
- * 走査の結果（ファイル名とヘッダー）から作れるので、全話を開く必要はない。
+ * 走査の結果（ファイル名とヘッダー）から作れるので、全話を開く必要はない
+ * （挿絵の欄で話を選んだときだけ、その話を読む）。
  */
 async function collectSource(work: WorkEntry): Promise<PreviewSource> {
   const scan = await scanWork(work);
@@ -531,21 +801,27 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
 
   if (scan.episodes.length === 0) {
     return {
-      entries: [],
+      episodes: [],
       firstChapter: null,
+      firstChapterPath: null,
       notice: `「${work.title}」に本文のファイルが見つかりません。`,
     };
   }
 
-  const entries = scan.episodes.map((episode) => ({
+  const episodes: PreviewEpisode[] = scan.episodes.map((episode) => ({
+    // book.json の `episodePath` と同じ作り方を通す（書き出しと共用）
+    path: episodePathFor(work.folderPath, episode.filePath),
     label: bookHeading(episode, format),
     group: episodeGroupLabel(episode),
+    filePath: episode.filePath,
+    notation: notationModeFor(episode.fileName),
   }));
 
-  const first = await readFirstChapter(scan.episodes, format);
+  const first = await readFirstChapter(scan.episodes, format, work.folderPath);
   return {
-    entries,
+    episodes,
     firstChapter: first.chapter,
+    firstChapterPath: first.episodePath,
     notice: first.notice,
   };
 }
@@ -553,8 +829,13 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
 /** 冒頭に出す1話。競合マーカーのある話は本にも入らないので飛ばす */
 async function readFirstChapter(
   episodes: readonly EpisodeFile[],
-  format: WorkFormatKey | undefined
-): Promise<{ chapter: EpubChapterSource | null; notice: string | null }> {
+  format: WorkFormatKey | undefined,
+  workFolder: string
+): Promise<{
+  chapter: EpubChapterSource | null;
+  episodePath: string | null;
+  notice: string | null;
+}> {
   for (const episode of episodes) {
     let text: string;
     let conflicted: boolean;
@@ -570,6 +851,7 @@ async function readFirstChapter(
       });
       return {
         chapter: null,
+        episodePath: null,
         notice: `${episode.fileName} を読めませんでした。${message}`,
       };
     }
@@ -581,12 +863,14 @@ async function readFirstChapter(
         body: excerpt(parseEpisodeMetadata(text).body),
         notation: notationModeFor(episode.fileName),
       },
+      episodePath: episodePathFor(workFolder, episode.filePath),
       notice: null,
     };
   }
 
   return {
     chapter: null,
+    episodePath: null,
     notice:
       "本文はすべて未解決の競合を含んでいます。「競合解決」で直してください。",
   };

@@ -9,16 +9,19 @@
  * base64 で入れると、1文字直すたびに数百KBの差分がGitへ積まれる。
  *
  * VS Code API に依存しない（`models` の約束）。第1段（6.65.4）の項目に、
- * 第3段の前半で表紙・裏表紙の合成指定（6.65.8）を足した。挿絵・書体は
- * 第3段の後半でここへ足す。
+ * 第3段の前半で表紙・裏表紙の合成指定（6.65.8）を、後半の前側で挿絵と
+ * ページ分割（6.65.10）を足した。書体はまだここに無い。
  */
 
 import {
+  invalid,
   objectValue,
   optionalBoolean,
   optionalEnum,
   optionalNullableString,
+  optionalObjectArray,
   optionalString,
+  requireNonEmptyString,
 } from "./jsonValidation";
 
 /** 綴じ方向。縦書きなら右→左、横書きなら左→右に開く */
@@ -131,6 +134,40 @@ export interface CoverTextStyle {
 /** 1枚の表紙ぶんの合成指定 */
 export type CoverLayout = Record<CoverElementKey, CoverTextStyle>;
 
+/**
+ * 本文の中の位置（設計書6.65.10）。挿絵とページ分割が共に使う。
+ *
+ * **話は番号ではなくファイルの相対パスで指す。** 話数は並べ替えや改題で
+ * 動くが、パスはその話そのものを指し続ける。
+ *
+ * **段落は「詰める前の段落番号」**（空行で区切った塊）で数える。
+ * `collapseBlankLines` を切り替えたとたんに挿絵が別の場面へ移る、という
+ * ことが起きないようにするためである。数え方の実装は
+ * `core/epubXhtml.ts` の `countParagraphs` が1か所で持つ。
+ */
+export interface BookBodyPosition {
+  /** 作品フォルダからの相対パス（区切りは `/` に揃える） */
+  episodePath: string;
+  /** 第M段落のあと。1以上 */
+  afterParagraph: number;
+}
+
+/** 本文の途中に入れる挿絵（設計書6.65.10） */
+export interface BookIllustration extends BookBodyPosition {
+  /** 画像。作品フォルダからの相対パス（表紙とまったく同じ検証） */
+  imagePath: string;
+  /**
+   * 解説文。空なら `<figcaption>` そのものを出さない。
+   *
+   * **画像の上には重ねない。** EPUBのリフロー画面では絶対配置の重ね書きが
+   * リーダーごとに崩れる（設計書6.65.10）。
+   */
+  caption: string;
+}
+
+/** 話の途中で改ページする位置（場面替わり用。設計書6.65.10） */
+export type BookPageBreak = BookBodyPosition;
+
 export interface BookConfig {
   schemaVersion: string;
   /** 題名。空なら作品名で埋める（無題の本を作らない） */
@@ -174,6 +211,16 @@ export interface BookConfig {
   coverLayout: CoverLayout;
   /** 裏表紙の合成指定。表紙とは別に持つ（同じ体裁とは限らない） */
   backCoverLayout: CoverLayout;
+  /**
+   * 本文へ挟む挿絵（設計書6.65.10）。**原稿には目印を書き込まない。**
+   *
+   * 位置がずれること（原稿を書き足した・段落を削った）は防げないが、
+   * 検知はできる。書き出しとプレビューの両方で、段落数を超えた指定を
+   * 警告して末尾へ置く。
+   */
+  illustrations: BookIllustration[];
+  /** 話の途中の改ページ。XHTMLは分けず、次の段落にクラスを付ける */
+  pageBreaks: BookPageBreak[];
 }
 
 export const BOOK_SCHEMA_VERSION = "0.1";
@@ -262,6 +309,10 @@ export function defaultBookConfig(title: string): BookConfig {
     backCoverImagePath: null,
     coverLayout: defaultCoverLayout(),
     backCoverLayout: defaultBackCoverLayout(),
+    // 挿絵もページ分割も、指定するまでは何も起きない（既定の本の
+    // 見た目を変えないこと。ほかの項目と同じ約束）
+    illustrations: [],
+    pageBreaks: [],
   };
 }
 
@@ -333,7 +384,73 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
       "backCoverLayout",
       defaults.backCoverLayout
     ),
+    illustrations: parseIllustrations(value.illustrations),
+    pageBreaks: parsePageBreaks(value.pageBreaks),
   };
+}
+
+/**
+ * 挿絵の指定を読む（設計書6.65.10）。
+ *
+ * **話が実在するかはここでは見ない。** `models` はファイルの一覧を持たない
+ * ので、原稿が消えている・改題されたことに気づけるのは書き出しと画面である。
+ * ここで確かめるのは「受け取ってよい形か」だけにする。
+ */
+function parseIllustrations(raw: unknown): BookIllustration[] {
+  return (
+    optionalObjectArray(raw, "illustrations", (entry, entryPath) => {
+      optionalString(entry.caption, `${entryPath}.caption`);
+      // 絵の無い挿絵は作らない。場所が空のまま保存されると、書き出しの
+      // たびに「読めません」と言い続けることになる
+      requireNonEmptyString(entry.imagePath, `${entryPath}.imagePath`);
+      return {
+        ...bodyPosition(entry, entryPath),
+        imagePath: relativeInsideWork(
+          (entry.imagePath as string).trim(),
+          "挿絵"
+        ),
+        caption: ((entry.caption as string | undefined) ?? "").trim(),
+      };
+    }) ?? []
+  );
+}
+
+/** ページ分割の指定。**挿絵とまったく同じ位置の検証を通す** */
+function parsePageBreaks(raw: unknown): BookPageBreak[] {
+  return (
+    optionalObjectArray(raw, "pageBreaks", (entry, entryPath) =>
+      bodyPosition(entry, entryPath)
+    ) ?? []
+  );
+}
+
+/** 「第N話の第M段落のあと」の共通部分。片方だけ緩くしない */
+function bodyPosition(
+  entry: Record<string, unknown>,
+  entryPath: string
+): BookBodyPosition {
+  requireNonEmptyString(entry.episodePath, `${entryPath}.episodePath`);
+  return {
+    // **区切りは `/` に揃える。** Windowsで書かれた `本文\第1話.txt` と
+    // 走査結果を突き合わせられないと、指定した挿絵が黙って出なくなる
+    episodePath: (entry.episodePath as string).trim().replace(/\\/g, "/"),
+    afterParagraph: paragraphNumber(
+      entry.afterParagraph,
+      `${entryPath}.afterParagraph`
+    ),
+  };
+}
+
+/**
+ * 「第M段落のあと」の M。**1以上の整数だけ**を受け取る。
+ *
+ * 0や小数を通すと位置が黙ってずれる（例外にならないぶん見つけにくい）。
+ * 話数の検証（`optionalNullableNumber`）と同じ考え方だが、こちらは
+ * 省略も0も許さない——「第0段落のあと」に置き場所は無い。
+ */
+function paragraphNumber(raw: unknown, path: string): number {
+  if (!Number.isSafeInteger(raw) || (raw as number) < 1) invalid(path);
+  return raw as number;
 }
 
 /**
@@ -421,7 +538,16 @@ function coverColor(
 function coverPath(raw: unknown, label: string): string | null {
   const value = ((raw as string | null | undefined) ?? "").trim();
   if (!value) return null;
+  return relativeInsideWork(value, label);
+}
 
+/**
+ * 作品フォルダの中を指す相対パスとして読む。
+ *
+ * 表紙・裏表紙・挿絵の**3か所とも同じ関数を通す**。片方だけ緩いと、
+ * そちらが抜け道になる（裏表紙を足したときに決めた約束を、挿絵でも守る）。
+ */
+function relativeInsideWork(value: string, label: string): string {
   const normalized = value.replace(/\\/g, "/");
   if (normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)) {
     throw new Error(

@@ -209,6 +209,24 @@ export class BookStore {
   }
 }
 
+/**
+ * 話を book.json でどう指すか（設計書6.65.10）。
+ *
+ * **話数ではなく、作品フォルダからの相対パスで指す。** 話数は並べ替えや
+ * 改題で動くが、パスはその話そのものを指し続ける。
+ *
+ * **区切りは `/` に揃える。** 手元のWindowsでは `path.relative` が `\` を
+ * 返し、ブラウザ上の作品（`vscode-vfs://`）では `/` を返す。同じ作品を
+ * 2つの環境で開いたときに指定が食い違わないよう、ここで揃える
+ * （`models/book.ts` の読み込み側も同じ形に直している）。
+ *
+ * 書き出しとエディター画面の**両方がこれを通す**。片方が別の作り方を
+ * すると、画面で付けた挿絵が本に出ないという分かりにくい壊れ方をする。
+ */
+export function episodePathFor(workFolder: string, filePath: string): string {
+  return path.relative(workFolder, filePath).replace(/\\/g, "/");
+}
+
 /** 外部変更で止めたときの言い方。作者が次に何をすればよいかまで書く */
 function externalChangeMessage(reason: string): string {
   return (
