@@ -681,3 +681,39 @@ describe("ブラウザ版でだけ出す操作", () => {
     expect(commands).toContain("novelai.diagnoseWeb");
   });
 });
+
+describe("開発ビルドでだけ出す操作（ストリーミング実験）", () => {
+  /**
+   * F5限定の実験（設計書6.63.1）を、押して入切できるようにした
+   * （作者の依頼、2026-09-03）。環境変数 `NOVELAI_OLLAMA_STREAM=1` を
+   * `.vscode/launch.json` へ書く道しか無く、試すまでが遠すぎた。
+   *
+   * **`browserOnly` とは扱いが違う。** あちらは定義を残して出さないだけだが、
+   * こちらは**本番ビルドでは定義ごと落ちる**（`__DEV_HELPERS__` の枝の中で
+   * 展開している）。試験は開発ビルドとして走るので、ここでは在ることを見る。
+   */
+  function toggle() {
+    return allActions().find(
+      (action) => action.command === "novelai.dev.toggleOllamaStream"
+    );
+  }
+
+  test("AIの小分類に、開発用の印つきで並ぶ", () => {
+    const item = toggle();
+
+    expect(item?.devOnly).toBe(true);
+    // 環境で消す印（browserOnly）とは別物。手元でもブラウザ版でも出す
+    expect(isItemVisibleInRuntime(item!, true)).toBe(true);
+  });
+
+  test("置き場所は「拡張機能の設定」→「AI」", () => {
+    const group = ACTION_TREE.find((entry) => entry.label === "拡張機能の設定");
+    const ai = group?.entries.find(
+      (entry) => entry.kind === "section" && entry.label === "AI"
+    );
+    const commands =
+      ai?.kind === "section" ? ai.items.map((item) => item.command) : [];
+
+    expect(commands).toContain("novelai.dev.toggleOllamaStream");
+  });
+});

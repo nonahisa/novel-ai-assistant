@@ -1295,6 +1295,36 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
             detail:
               "Ollamaを自動で見つけられない場合に、ollama.exe の場所を指定します。",
           },
+          /*
+            **開発ビルドでだけ並べる**（作者の依頼、2026-09-03）。
+
+            `devOnly` は「配布物には定義ごと入らない」印なので、項目そのものを
+            `__DEV_HELPERS__` の枝の中に置く。本番ビルドでは条件が false に
+            畳まれ、**この配列に1件も入らない**——押しても何も起きない
+            ボタンが残らない（コマンドの実体も `src/dev/` ごと落ちる）。
+
+            入切の実体は `src/dev/streamToggle.ts`。実験の入口が
+            `.vscode/launch.json` の環境変数しか無く、試すまでが遠すぎた。
+          */
+          ...(__DEV_HELPERS__
+            ? [
+                {
+                  kind: "action" as const,
+                  command: "novelai.dev.toggleOllamaStream",
+                  label: "Ollamaのストリーミング受信を切り替える（実験）",
+                  icon: "beaker",
+                  requiresWork: false,
+                  devOnly: true,
+                  detail:
+                    "**開発ホスト（F5）限定の実験です**（設計書6.63.1）。" +
+                    "Ollamaの応答を、生成が終わってからまとめて受け取るのではなく" +
+                    "**流しながら**受け取ります。" +
+                    "**切り替えはこのウィンドウの間だけで、保存しません**" +
+                    "——開き直すと、配布と同じ道（まとめて受け取る）へ戻ります。" +
+                    "効いているかは、ログに「流して受信」が出るかで分かります。",
+                },
+              ]
+            : []),
         ],
       },
       {

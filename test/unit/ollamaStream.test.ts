@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   applyStreamLine,
   emptyStreamedChat,
+  setStreamingOverride,
+  streamingEnabled,
   takeCompleteLines,
 } from "../../src/ai/ollamaStream";
 
@@ -129,5 +131,49 @@ describe("思考の扱い", () => {
     const state = emptyStreamedChat();
     applyStreamLine(state, '{"message":{"content":"あ"},"done":false}');
     expect(state.thinking).toBeUndefined();
+  });
+});
+
+/**
+ * **走らせたまま切り替えられること**（作者の依頼、2026-09-03）。
+ *
+ * 環境変数だけだと `.vscode/launch.json` を書き換えてF5を掛け直すまで
+ * 試せない。詳細メニューから押せるようにするために、実行中に上書きできる
+ * 入口を設ける。**上書きはウィンドウを閉じるまで**で、どこにも保存しない。
+ */
+describe("実験の入切", () => {
+  afterEach(() => {
+    // **必ず戻す。** 残ると、あとに走る試験が実験の側だけを通ってしまう
+    setStreamingOverride(undefined);
+    delete process.env.NOVELAI_OLLAMA_STREAM;
+  });
+
+  it("入にすると、環境変数が無くても有効になる", () => {
+    delete process.env.NOVELAI_OLLAMA_STREAM;
+    setStreamingOverride(true);
+    expect(streamingEnabled()).toBe(true);
+  });
+
+  it("切にすると、環境変数が立っていても無効になる", () => {
+    // launch.json に書いたまま、その場で切りたいことがある
+    process.env.NOVELAI_OLLAMA_STREAM = "1";
+    setStreamingOverride(false);
+    expect(streamingEnabled()).toBe(false);
+  });
+
+  it("undefined へ戻すと、環境変数の値に従う", () => {
+    setStreamingOverride(true);
+    setStreamingOverride(undefined);
+    expect(streamingEnabled()).toBe(false);
+
+    process.env.NOVELAI_OLLAMA_STREAM = "1";
+    expect(streamingEnabled()).toBe(true);
+  });
+
+  it("何もしなければ、既定は切", () => {
+    // **配布する道が検査されない状態にしない**（既定を入にすると、
+    // 単体試験が実験の側だけを通る）
+    delete process.env.NOVELAI_OLLAMA_STREAM;
+    expect(streamingEnabled()).toBe(false);
   });
 });

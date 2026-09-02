@@ -278,8 +278,8 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
   {
     id: "F-53",
     title: "F5限定：Ollamaの応答を流しながら受け取る実験",
-    commands: ["novelai.extractSettings", "novelai.openChatPanel"],
-    count: 2,
+    commands: ["novelai.dev.toggleOllamaStream"],
+    count: 5,
   },
   {
     id: "F-52",
@@ -506,4 +506,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 646;
+export const PENDING_CHECK_TOTAL = 649;

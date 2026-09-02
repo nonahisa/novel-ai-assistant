@@ -96,7 +96,9 @@ export function buildPendingCheckGroup(
     icon: "beaker",
     generated: true,
     entries: sections,
-    tooltip: describeGroup(pending),
+    // **辿れない節の見分けには、木そのものが要る**（本番ビルドでは
+    // 開発用の項目が落ちるので、指し先が消えている節が出る）
+    tooltip: describeGroup(pending, tree),
   };
 }
 
@@ -185,25 +187,59 @@ function describePending(
 /**
  * どの操作からも辿れない節。
  *
- * 環境が要るもの（G節）や、見るだけのもの（作品一覧の印）は、押す操作が無い。
+ * 辿れないのは2通りある。
+ *
+ * 1. **押す操作が無い**（`<!-- 対象: -->` を書けない節）。環境が要るもの
+ *    （G節）や、見るだけのもの（作品一覧の印）がこれにあたる
+ * 2. **指している操作が、いまのメニューに無い。** 開発ビルド限定の操作
+ *    （`devOnly`）は本番ビルドで枝ごと落ちるので、その節を指す行は
+ *    上の `pendingItemsOf` からも生まれない（作者の裁定、2026-09-03）
+ *
+ * **2を見落とすと、その分が黙って消える。** 行は出ないのに総数には
+ * 入ったままなので、作者からは「数が合わない」としか見えない。
+ * 木を渡して**実在するコマンドを1つでも持つか**で判断する。
+ *
  * **黙って落とさない**——数を作者へ伝えて、確認リストを直に見てもらう。
  */
 export function unreachableSections(
-  pending: readonly PendingCheckSection[]
+  pending: readonly PendingCheckSection[],
+  tree: readonly ActionGroup[]
 ): PendingCheckSection[] {
-  return pending.filter((section) => section.commands.length === 0);
+  const known = commandsIn(tree);
+  return pending.filter(
+    (section) => !section.commands.some((command) => known.has(command))
+  );
+}
+
+/** その木に実在するコマンドID（小分類の中も見る） */
+function commandsIn(tree: readonly ActionGroup[]): Set<string> {
+  const known = new Set<string>();
+  for (const group of tree) {
+    for (const entry of group.entries) {
+      if (entry.kind === "action") {
+        known.add(entry.command);
+        continue;
+      }
+      for (const item of entry.items) known.add(item.command);
+    }
+  }
+  return known;
 }
 
 /**
  * 分類そのものの説明。
  *
- * **押す操作の無い節があることを、必ず伝える。** 環境が要るもの（AIの鍵）や
- * 見るだけのもの（作品一覧の印）は、ここからは辿れない。黙って落とすと、
+ * **辿れない節があることを、必ず伝える。** 環境が要るもの（AIの鍵）や
+ * 見るだけのもの（作品一覧の印）、いまのメニューに無い操作を指しているもの
+ * （開発ビルド限定の道具）は、ここからは辿れない。黙って落とすと、
  * **並んでいるものが全部だと読めてしまう。**
  */
-function describeGroup(pending: readonly PendingCheckSection[]): string {
+function describeGroup(
+  pending: readonly PendingCheckSection[],
+  tree: readonly ActionGroup[]
+): string {
   const total = pending.reduce((sum, section) => sum + section.count, 0);
-  const orphans = unreachableSections(pending);
+  const orphans = unreachableSections(pending, tree);
   const orphanCount = orphans.reduce((sum, section) => sum + section.count, 0);
 
   const lines = [
@@ -216,7 +252,10 @@ function describeGroup(pending: readonly PendingCheckSection[]): string {
       "",
       `うち**${orphanCount}件は、ここからは辿れません**` +
         `（${orphans.map((section) => section.id || section.title).join("・")}）。` +
-        "押す操作が無いもの（見るだけ・環境が要るもの）です。確認リストを直接ご覧ください。"
+        "押す操作が無いもの（見るだけ・環境が要るもの）と、" +
+        // 開発ビルド限定の道具は、配布物では枝ごと落ちる（設計書6.63.1の実験など）。
+        // **辿れない理由が違うだけで、黙って消してよい理由にはならない**
+        "いまのメニューに無い操作を指しているものです。確認リストを直接ご覧ください。"
     );
   }
   return lines.join("\n");

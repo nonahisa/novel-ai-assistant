@@ -31,10 +31,29 @@
  */
 
 /**
+ * 走らせたまま切り替えた分。**どこにも保存しない**（下の理由書きを参照）。
+ *
+ * `undefined` は「切り替えていない」——そのときは環境変数を見る。
+ */
+let overrideEnabled: boolean | undefined;
+
+/**
  * この実験を使うか（開発ビルドでだけ意味がある）。
  *
- * **既定は「使わない」。** 有効にするのは環境変数 `NOVELAI_OLLAMA_STREAM=1`
- * で、F5の起動設定（`.vscode/launch.json` の `env`）に足して使う。
+ * **既定は「使わない」。** 入口は2つある。
+ *
+ * 1. 環境変数 `NOVELAI_OLLAMA_STREAM=1`。F5の起動設定
+ *    （`.vscode/launch.json` の `env`）に足して使う
+ * 2. 詳細メニューの「テスト中」→ 拡張機能の設定 → AI から切り替える
+ *    （`src/dev/streamToggle.ts`。作者の依頼、2026-09-03）
+ *
+ * **1を残してあるのは、起動時から流したい人のため**である。2で切り替えれば
+ * 起動し直さずに試せるが、launch.json に書いておけば毎回そこから始まる。
+ *
+ * **切り替えは、このウィンドウを閉じるまでの間だけ**にする（保存しない）。
+ * 実験の旗を設定へ永続させると、**実験したことを忘れた頃に、本番の道とは
+ * 違う挙動で悩む**ことになる。開発ホストを開き直せば必ず既定へ戻る、が
+ * 実験の後始末として確実である。
  *
  * **設定（`novelai.*`）にはしない。** 配布物では枝ごと落ちるので、
  * 設定画面に「何もしない項目」が並ぶことになる。
@@ -44,7 +63,17 @@
  * 通らなくなった（2026-09-02）——配布する道が検査されない状態は危うい。
  */
 export function streamingEnabled(): boolean {
-  return process.env.NOVELAI_OLLAMA_STREAM === "1";
+  return overrideEnabled ?? process.env.NOVELAI_OLLAMA_STREAM === "1";
+}
+
+/**
+ * 走らせたまま入切する。
+ *
+ * `undefined` を渡すと切り替えを取り消し、環境変数の判断へ戻る
+ * （試験は後始末でこれを呼ぶ。残ると、あとに走る試験が実験の側だけを通る）。
+ */
+export function setStreamingOverride(value: boolean | undefined): void {
+  overrideEnabled = value;
 }
 
 /** 流れてきた応答をまとめたもの。`stream:false` の応答と同じ形に揃える */

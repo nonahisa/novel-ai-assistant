@@ -627,6 +627,10 @@ export async function activate(
       "./dev/reflectOperationLog.js"
     );
     context.subscriptions.push(registerReflectOperationLog(context));
+    // Ollamaを流して受け取る実験の入切（設計書6.63.1）。
+    // **押した分は保存しない**——ウィンドウを閉じれば配布と同じ道へ戻る
+    const { registerStreamToggle } = await import("./dev/streamToggle.js");
+    context.subscriptions.push(registerStreamToggle(context));
   }
 
   context.subscriptions.push(
