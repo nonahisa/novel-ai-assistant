@@ -1,5 +1,5 @@
 import { zipSync, type Zippable } from "fflate";
-import type { BookConfig } from "../models/book";
+import type { BookConfig, BookOrnament, TocPattern } from "../models/book";
 import {
   buildChapterXhtml,
   buildXhtmlDocument,
@@ -31,6 +31,13 @@ import {
  * 第1段では**全部を `OEBPS/` 直下**へ置き、リンクはどこから見ても
  * ファイル名だけで済むようにした。
  *
+ * ## 面の断片は外から呼べるようにしてある（第2段）
+ *
+ * エディター画面（`features/epubEditorPanel.ts`）のプレビューは、
+ * **ここで作った断片とCSSをそのまま出す**。画面用の組版をもう1つ書くと、
+ * 「見た目どおりに編集できる」という要件がその日から壊れる
+ * （設計書6.65.6）。
+ *
  * ここは vscode に触らない（単体テストできる）。
  */
 
@@ -41,10 +48,20 @@ const ROOT = "OEBPS";
 const CSS_NAME = "style.css";
 const NAV_NAME = "nav.xhtml";
 const COVER_NAME = "cover.xhtml";
+const TITLEPAGE_NAME = "titlepage.xhtml";
 const COLOPHON_NAME = "colophon.xhtml";
 
 /** 本の中の1話。組み方は `epubXhtml.ts` が持つので、そのまま通す */
-export type EpubChapter = EpubChapterSource;
+export interface EpubChapter extends EpubChapterSource {
+  /**
+   * 目次を章ごとに区切るときの束ね名（設計書6.65.6）。
+   *
+   * **無ければ束ねない。** 話数しか分からない作品で章を捏造すると、
+   * 作者が書いていない構成が本に載る。作り方は
+   * `core/episodeLabel.ts` の `episodeGroupLabel`。
+   */
+  group?: string;
+}
 
 export interface EpubCover {
   /** 元のファイル名。種類の判定にだけ使う（ZIPの中では `cover.<拡張子>`） */
@@ -129,9 +146,10 @@ export function buildEpub(book: EpubBook): Uint8Array {
     [`${ROOT}/content.opf`]: encode(
       contentOpf(book, chapters, cover, vertical)
     ),
-    [`${ROOT}/${CSS_NAME}`]: encode(styleCss(vertical)),
-    [`${ROOT}/${NAV_NAME}`]: encode(navXhtml(chapters, vertical)),
+    [`${ROOT}/${CSS_NAME}`]: encode(buildEpubCss(vertical)),
+    [`${ROOT}/${NAV_NAME}`]: encode(navXhtml(chapters, config, vertical)),
     [`${ROOT}/${COVER_NAME}`]: encode(coverXhtml(config, cover, vertical)),
+    [`${ROOT}/${TITLEPAGE_NAME}`]: encode(titlePageXhtml(config, vertical)),
     [`${ROOT}/${COLOPHON_NAME}`]: encode(colophonXhtml(config, vertical)),
   };
 
@@ -227,6 +245,7 @@ function contentOpf(
     `    <item id="nav" href="${NAV_NAME}" media-type="application/xhtml+xml" properties="nav" />`,
     `    <item id="style" href="${CSS_NAME}" media-type="text/css" />`,
     `    <item id="cover" href="${COVER_NAME}" media-type="application/xhtml+xml" />`,
+    `    <item id="titlepage" href="${TITLEPAGE_NAME}" media-type="application/xhtml+xml" />`,
     ...(cover
       ? [
           `    <item id="cover-image" href="${cover.packagedName}" media-type="${cover.mediaType}" properties="cover-image" />`,
@@ -241,6 +260,10 @@ function contentOpf(
 
   const spine = [
     '    <itemref idref="cover" />',
+    // 扉は表紙の直後・目次の前（設計書6.65.3の表の並び）。
+    // **出したり消したりしない**——表紙が画像1枚の本では、題名や
+    // 作者名を読む場所がここしかない
+    '    <itemref idref="titlepage" />',
     // **目次を外しても `nav.xhtml` は残す**（EPUB3で必須）。
     // ここで外すのは「読む順路に並べるか」だけである
     ...(config.tocEnabled ? ['    <itemref idref="nav" />'] : []),
@@ -277,31 +300,154 @@ function contentOpf(
  */
 function navXhtml(
   chapters: readonly PackagedChapter[],
+  config: BookConfig,
   vertical: boolean
 ): string {
-  const items = [
-    ...chapters.map(
-      (chapter) =>
-        `    <li><a href="${chapter.fileName}">${escapeXml(
-          chapter.heading.trim() || chapter.fileName
-        )}</a></li>`
-    ),
-    `    <li><a href="${COLOPHON_NAME}">奥付</a></li>`,
-  ];
-
   return buildXhtmlDocument({
     title: "目次",
     cssHref: CSS_NAME,
     vertical,
-    body: [
-      '<nav epub:type="toc" id="toc">',
-      '<h1 class="nav-heading">目次</h1>',
-      '  <ol class="nav-list">',
-      ...items,
-      "  </ol>",
-      "</nav>",
-    ].join("\n"),
+    body: buildTocFragment(
+      chapters.map((chapter) => ({
+        href: chapter.fileName,
+        label: chapter.heading.trim() || chapter.fileName,
+        group: chapter.group,
+      })),
+      {
+        pattern: config.tocPattern,
+        ornament: config.tocOrnament,
+        colophonHref: COLOPHON_NAME,
+      }
+    ),
   });
+}
+
+/** 目次に並べる1行 */
+export interface EpubTocEntry {
+  /** 行き先。プレビューでは押しても飛ばないが、同じものを渡す */
+  href: string;
+  label: string;
+  /** 章ごとに区切るときの束ね名。無ければ束ねない */
+  group?: string;
+}
+
+export interface EpubTocOptions {
+  pattern: TocPattern;
+  ornament: BookOrnament;
+  /** 末尾に置く奥付への行。null なら出さない */
+  colophonHref?: string | null;
+}
+
+/**
+ * 目次の断片（`<nav>` ごと）。**書き出しとプレビューが共に使う。**
+ *
+ * ## `<nav>` の中には見出しと `<ol>` しか置けない
+ *
+ * EPUB3は目次の `nav` の中身を「見出し（あれば）＋ `ol`」と定めており、
+ * 飾りの罫線をそのあいだへ挟むと epubcheck が咎める。**飾りは見出しの
+ * 中へ入れる**——`<span>` も `<svg>` も見出しの中に置ける文字物なので、
+ * 仕様を外れずに「見出しの下の飾り」を作れる。
+ *
+ * ## 章で束ねるのは、束ね名があるときだけ
+ *
+ * 束ね名が1つも無ければ一覧のまま出す。話数しか分からない作品に
+ * 「本編」だけの見出しを立てても、作者に伝わるものが増えない。
+ */
+export function buildTocFragment(
+  entries: readonly EpubTocEntry[],
+  options: EpubTocOptions
+): string {
+  const grouped =
+    options.pattern === "chapters" &&
+    entries.some((entry) => (entry.group ?? "").trim() !== "");
+
+  const listClass = grouped
+    ? "nav-list toc-chapters"
+    : options.pattern === "horizontal"
+      ? "nav-list toc-horizontal"
+      : "nav-list toc-vertical";
+
+  const colophon =
+    options.colophonHref === null || options.colophonHref === undefined
+      ? []
+      : [`    <li><a href="${escapeXml(options.colophonHref)}">奥付</a></li>`];
+
+  return [
+    '<nav epub:type="toc" id="toc">',
+    `<h1 class="nav-heading">目次${buildOrnamentFragment(
+      options.ornament
+    )}</h1>`,
+    `  <ol class="${listClass}">`,
+    ...(grouped ? groupedItems(entries) : flatItems(entries)),
+    ...colophon,
+    "  </ol>",
+    "</nav>",
+  ].join("\n");
+}
+
+function flatItems(entries: readonly EpubTocEntry[]): string[] {
+  return entries.map(
+    (entry) =>
+      `    <li><a href="${escapeXml(entry.href)}">${escapeXml(
+        entry.label
+      )}</a></li>`
+  );
+}
+
+/**
+ * 章ごとに区切った並び。
+ *
+ * **束ね名は `<span>` で出す。** 目次の `li` の中に置けるのは
+ * 「`a` か `span`、続けて `ol`」だけで、`h2` を入れると本の検証で落ちる。
+ * 束ね名が続くあいだは同じ章にまとめ、変わったところで章を切る
+ * （並べ替えはしない——本の順序が変わってしまう）。
+ */
+function groupedItems(entries: readonly EpubTocEntry[]): string[] {
+  const out: string[] = [];
+  let current: string | null = null;
+
+  for (const entry of entries) {
+    const group = (entry.group ?? "").trim();
+    if (group !== current) {
+      if (current !== null) out.push("      </ol>", "    </li>");
+      current = group;
+      out.push(
+        `    <li><span class="toc-group">${escapeXml(group)}</span>`,
+        "      <ol>"
+      );
+    }
+    out.push(
+      `        <li><a href="${escapeXml(entry.href)}">${escapeXml(
+        entry.label
+      )}</a></li>`
+    );
+  }
+  if (current !== null) out.push("      </ol>", "    </li>");
+  return out;
+}
+
+/**
+ * 目次・奥付の飾り（設計書6.65.6）。
+ *
+ * **外部ファイルにしない。** 画像を1つ足すたびにOPFのmanifestへ載せる
+ * 必要があり、載せ忘れると「本は開くが飾りだけ出ない」という気づきにくい
+ * 壊れ方をする。罫線はCSS、中央飾りはここに書いたSVGで持つ。
+ *
+ * 縦組みでも横組みでも同じ向きで見えるよう、**中央飾りは左右対称の形**に
+ * してある（横長の飾りは、縦組みの本で寝てしまう）。
+ */
+export function buildOrnamentFragment(kind: BookOrnament): string {
+  if (kind === "rule") return '<span class="ornament ornament-rule"></span>';
+  if (kind === "center") {
+    return (
+      '<span class="ornament ornament-center">' +
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"' +
+      ' width="24" height="24" aria-hidden="true" role="presentation">' +
+      '<path d="M12 2 L16 12 L12 22 L8 12 Z" fill="currentColor" />' +
+      "</svg></span>"
+    );
+  }
+  return "";
 }
 
 /**
@@ -315,43 +461,92 @@ function coverXhtml(
   cover: PackagedCover | null,
   vertical: boolean
 ): string {
-  const body = cover
-    ? [
-        '<div class="cover-image">',
-        `<img src="${escapeXml(cover.packagedName)}" alt="${escapeXml(
-          config.title || "表紙"
-        )}" />`,
-        "</div>",
-      ]
-    : [
-        '<div class="title-page">',
-        `<h1 class="book-title">${escapeXml(config.title || "無題")}</h1>`,
-        ...(config.author
-          ? [`<p class="book-author">${escapeXml(config.author)}</p>`]
-          : []),
-        ...(config.illustrator
-          ? [
-              `<p class="book-illustrator">イラスト　${escapeXml(
-                config.illustrator
-              )}</p>`,
-            ]
-          : []),
-        ...(config.label
-          ? [`<p class="book-label">${escapeXml(config.label)}</p>`]
-          : []),
-        "</div>",
-      ];
-
   return buildXhtmlDocument({
     title: config.title || "無題",
     cssHref: CSS_NAME,
     vertical,
-    body: body.join("\n"),
+    body: buildCoverFragment(
+      config,
+      cover ? { href: cover.packagedName } : null
+    ),
   });
 }
 
-/** 奥付。第1段では書誌情報だけ（飾りは第3段） */
+/**
+ * 表紙の断片。画像があれば1枚を敷き、無ければ**題名だけの扉**になる。
+ *
+ * 画像が無いときの表紙は `buildTitlePageFragment` そのものである
+ * （第1段からこの形。扉の面を別に足すのは第3段）。
+ */
+export function buildCoverFragment(
+  config: BookConfig,
+  image: { href: string } | null
+): string {
+  if (!image) return buildTitlePageFragment(config);
+  return [
+    '<div class="cover-image">',
+    `<img src="${escapeXml(image.href)}" alt="${escapeXml(
+      config.title || "表紙"
+    )}" />`,
+    "</div>",
+  ].join("\n");
+}
+
+/**
+ * タイトルページ（扉）。表紙とは別の1面である（設計書6.65.3）。
+ *
+ * 表紙が画像1枚のとき、**題名や作者名を文字で読める場所はここだけ**に
+ * なる。書いていない項目が多くても面ごと省いたりはしない——面が出たり
+ * 消えたりするほうが、作者にも読者にも分かりにくい。
+ */
+function titlePageXhtml(config: BookConfig, vertical: boolean): string {
+  return buildXhtmlDocument({
+    title: config.title || "無題",
+    cssHref: CSS_NAME,
+    vertical,
+    body: buildTitlePageFragment(config),
+  });
+}
+
+/** 題名・作者名・イラストレーター名・レーベル名を組んだ扉 */
+export function buildTitlePageFragment(config: BookConfig): string {
+  return [
+    '<div class="title-page">',
+    `<h1 class="book-title">${escapeXml(config.title || "無題")}</h1>`,
+    ...(config.author
+      ? [`<p class="book-author">${escapeXml(config.author)}</p>`]
+      : []),
+    ...(config.illustrator
+      ? [
+          `<p class="book-illustrator">イラスト　${escapeXml(
+            config.illustrator
+          )}</p>`,
+        ]
+      : []),
+    ...(config.label
+      ? [`<p class="book-label">${escapeXml(config.label)}</p>`]
+      : []),
+    "</div>",
+  ].join("\n");
+}
+
+/** 奥付 */
 function colophonXhtml(config: BookConfig, vertical: boolean): string {
+  return buildXhtmlDocument({
+    title: "奥付",
+    cssHref: CSS_NAME,
+    vertical,
+    body: buildColophonFragment(config),
+  });
+}
+
+/**
+ * 奥付の断片。書誌情報と飾りだけを組む。
+ *
+ * **空の項目は行ごと出さない。** 「著者　（空欄）」の並んだ奥付は、
+ * 作者が書き忘れたのか、そういう本なのかが読み手に分からない。
+ */
+export function buildColophonFragment(config: BookConfig): string {
   const rows = [
     ["題名", config.title || "無題"],
     ["著者", config.author],
@@ -359,22 +554,19 @@ function colophonXhtml(config: BookConfig, vertical: boolean): string {
     ["発行", config.label],
   ].filter(([, value]) => value);
 
-  return buildXhtmlDocument({
-    title: "奥付",
-    cssHref: CSS_NAME,
-    vertical,
-    body: [
-      '<div class="colophon">',
-      '<h1 class="colophon-heading">奥付</h1>',
-      '  <dl class="colophon-list">',
-      ...rows.flatMap(([label, value]) => [
-        `    <dt>${escapeXml(label)}</dt>`,
-        `    <dd>${escapeXml(value)}</dd>`,
-      ]),
-      "  </dl>",
-      "</div>",
-    ].join("\n"),
-  });
+  return [
+    '<div class="colophon">',
+    `<h1 class="colophon-heading">奥付${buildOrnamentFragment(
+      config.colophonOrnament
+    )}</h1>`,
+    '  <dl class="colophon-list">',
+    ...rows.flatMap(([label, value]) => [
+      `    <dt>${escapeXml(label)}</dt>`,
+      `    <dd>${escapeXml(value)}</dd>`,
+    ]),
+    "  </dl>",
+    "</div>",
+  ].join("\n");
 }
 
 /**
@@ -384,7 +576,7 @@ function colophonXhtml(config: BookConfig, vertical: boolean): string {
  * 見ないリーダー（iBooks系の一部）が現役で、片方だけだと縦書きの本が
  * 横に流れる。
  */
-function styleCss(vertical: boolean): string {
+export function buildEpubCss(vertical: boolean): string {
   const direction = vertical
     ? [
         "html {",
@@ -431,9 +623,60 @@ function styleCss(vertical: boolean): string {
     ".book-illustrator, .book-label { margin-block-start: 1em; }",
     ".nav-heading, .colophon-heading { font-size: 1.5em; margin-block-end: 2em; }",
     ".nav-list { line-height: 2.4; }",
+    // 目次だけ横組みにする配置（設計書6.65.6）。**縦組みへの上書きは
+    // 持たない**——本文が横組みの本のCSSに縦組みの指定が現れると、
+    // 何も選んでいない作者の本の見た目が版で変わる
+    ".toc-horizontal {",
+    "  -epub-writing-mode: horizontal-tb;",
+    "  writing-mode: horizontal-tb;",
+    "}",
+    // 章で束ねた並び。章の見出しは行頭に立て、話は一段下げる
+    ".toc-chapters { list-style: none; padding-inline-start: 0; }",
+    ".toc-chapters ol { list-style: none; padding-inline-start: 1.5em; }",
+    ".toc-group { display: block; margin-block-start: 1.5em; font-size: 1.1em; }",
+    // 飾りは見出しの中に置く（`buildOrnamentFragment` の説明を参照）
+    ".ornament { display: block; margin-block-start: 0.6em; text-align: center; }",
+    ".ornament-rule {",
+    "  border-block-start: 1px solid currentColor;",
+    "  inline-size: 60%;",
+    "  margin-inline: auto;",
+    "}",
+    ".ornament-center svg { fill: currentColor; }",
     ".colophon-list dt { margin-block-start: 1em; font-size: 0.9em; }",
     "",
   ].join("\n");
+}
+
+/**
+ * プレビュー用に、本のCSSを枠の中へ閉じ込める（設計書6.65.6）。
+ *
+ * **画面用のCSSを別に書かない。** 書き出しと同じ `buildEpubCss` から
+ * 作り、`html`・`body` を枠そのものへ、ほかの選択子を枠の中へ置き換える
+ * だけにする。2つ持つと、直したほうだけが本物になる。
+ *
+ * ここで扱うのは**自分で書いたCSS**だけである（入れ子の `@media` などは
+ * 出てこない）。汎用のCSSパーサではないので、外から来たCSSは通さないこと。
+ */
+export function scopeCssForPreview(css: string, scope: string): string {
+  const rules: string[] = [];
+
+  for (const rule of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+    // `@charset "UTF-8";` のような文は選択子ではない。最後の `;` までを捨てる
+    const head = rule[1].slice(rule[1].lastIndexOf(";") + 1);
+    const selectors = head
+      .split(",")
+      .map((selector) => selector.trim())
+      .filter(Boolean)
+      .map((selector) =>
+        selector === "html" || selector === "body"
+          ? scope
+          : `${scope} ${selector}`
+      );
+    if (selectors.length === 0) continue;
+    rules.push(`${selectors.join(", ")} {${rule[2]}}`);
+  }
+
+  return rules.join("\n");
 }
 
 function extensionOf(fileName: string): string {

@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
-import type { EpisodeFile, WorkEntry } from "../models/types";
+import type { WorkEntry } from "../models/types";
 import {
   BOOK_DIR,
   BOOK_FILE,
@@ -14,11 +14,7 @@ import { parseEpisodeMetadata } from "../core/metadataParser";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { readWorkFormat } from "../core/workFormatStore";
-import type { WorkFormatKey } from "../core/workFormat";
-import {
-  episodeTitle,
-  formatChapterLabel,
-} from "../core/episodeLabel";
+import { bookHeading, episodeGroupLabel } from "../core/episodeLabel";
 import { timestampedFileNameCandidates } from "../core/timestampedFileName";
 import { notationModeFor } from "../core/manuscriptRender";
 import { buildEpub, type EpubChapter, type EpubCover } from "../core/epubPackage";
@@ -94,7 +90,10 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       continue;
     }
     chapters.push({
-      heading: headingFor(episode, format),
+      heading: bookHeading(episode, format),
+      // 目次を「章ごとに区切る」にしたときの束ね名（設計書6.65.6）。
+      // 読み取れなければ空文字が返り、一覧のまま出る
+      group: episodeGroupLabel(episode),
       // 投稿サイトからDLしたファイルは、先頭にヘッダーが付いている。
       // 本文だけを組む（作品一覧の文字数計測と同じ切り分け）
       body: parseEpisodeMetadata(file.text).body,
@@ -215,21 +214,6 @@ async function readCover(
   const target = path.join(work.folderPath, config.coverImagePath);
   const data = await vscode.workspace.fs.readFile(path.toUri(target));
   return { fileName: config.coverImagePath, data };
-}
-
-/**
- * 本に出す見出し。
- *
- * PDF出力と同じ作り方にする（`episodeLabel.ts`）。話数と題が二重に
- * 並ばないよう、`episodeTitle` を通すのを忘れないこと。
- */
-function headingFor(
-  episode: EpisodeFile,
-  format: WorkFormatKey | undefined
-): string {
-  const chapter = formatChapterLabel(episode, format);
-  const title = episodeTitle(episode, chapter);
-  return [chapter, title].filter(Boolean).join("　") || episode.fileName;
 }
 
 /** 書き出し先。**新規作成だけ**を使い、名前がぶつかったら別名にする */

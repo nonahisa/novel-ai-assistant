@@ -113,6 +113,57 @@ export function stripChapterLabel(
 }
 
 /**
+ * 本（EPUB）に出す1話の見出し（設計書6.65）。
+ *
+ * **書き出しとエディター画面のプレビューが同じものを使う。** 別々に
+ * 組み立てると、プレビューで見た見出しと本の見出しが食い違う。
+ * 話数と題が二重に並ばないよう、`episodeTitle` を必ず通す。
+ */
+export function bookHeading(
+  ep: Pick<
+    EpisodeFile,
+    | "kind"
+    | "chapterStart"
+    | "chapterEnd"
+    | "date"
+    | "dateSeq"
+    | "metaTitle"
+    | "subtitle"
+    | "fileName"
+  >,
+  format?: WorkFormatKey
+): string {
+  const chapter = formatChapterLabel(ep, format);
+  const title = episodeTitle(ep, chapter);
+  return [chapter, title].filter(Boolean).join("　") || ep.fileName;
+}
+
+/**
+ * 目次を章ごとに区切るときの、束ねの名前（設計書6.65.6）。
+ *
+ * **章の情報は、この作品のどこにも無い。** ファイル名から読み取れるのは
+ * 話数と種別（プロローグ・幕間・エピローグ）だけなので、そこまでで
+ * 束ねる。読み取れないものは空文字を返し、**章を捏造しない**——
+ * 作者が書いていない構成が本に載るのがいちばん困る。
+ *
+ * 日付で名付けられたSNS記事は月でまとめる。続きものではないので
+ * 「第N話」の並びより、月のほうが読み手の探し方に近い（設計書6.4.6）。
+ */
+export function episodeGroupLabel(
+  ep: Pick<EpisodeFile, "kind" | "chapterStart" | "date">
+): string {
+  if (ep.date) {
+    const matched = /^(\d{4})-(\d{2})/.exec(ep.date);
+    if (matched) return `${matched[1]}年${Number(matched[2])}月`;
+    return "";
+  }
+  if (ep.kind !== "本編" && ep.kind !== "不明") return ep.kind;
+  // 話数が読み取れた本編だけを「本編」でまとめる。番号も種別も
+  // 分からないものは、どこへ入れるべきか決められない
+  return ep.chapterStart !== null ? "本編" : "";
+}
+
+/**
  * 合本（1ファイルに複数話）と見なす最小の話数。
  *
  * **1話しか入っていないものを合本とは呼ばない。** 投稿サイトの

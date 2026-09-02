@@ -2,8 +2,14 @@ import { describe, expect, test } from "vitest";
 import { unzipSync } from "fflate";
 import {
   EPUB_MIMETYPE,
+  buildColophonFragment,
+  buildCoverFragment,
   buildEpub,
+  buildEpubCss,
+  buildTitlePageFragment,
+  buildTocFragment,
   imageMediaType,
+  scopeCssForPreview,
   type EpubBook,
 } from "../../src/core/epubPackage";
 import { defaultBookConfig, type BookConfig } from "../../src/models/book";
@@ -228,6 +234,73 @@ describe("表紙", () => {
   }
 });
 
+describe("タイトルページ（扉）", () => {
+  /**
+   * 表紙とは別の1面である（設計書6.65.3の表）。表紙が画像1枚のとき、
+   * 題名や作者名を読む場所がここになる。
+   */
+  test("表紙の直後・目次の前に置く", () => {
+    const opf = open(buildEpub(book()))["OEBPS/content.opf"];
+    const order = [...opf.matchAll(/<itemref idref="([^"]+)"/g)].map(
+      (match) => match[1]
+    );
+
+    expect(order[0]).toBe("cover");
+    expect(order[1]).toBe("titlepage");
+    expect(order[2]).toBe("nav");
+    expect(order[3]).toBe("chapter-001");
+  });
+
+  test("目次ページを外しても、扉は残る", () => {
+    const opf = open(buildEpub(withConfig({ tocEnabled: false })))[
+      "OEBPS/content.opf"
+    ];
+    const order = [...opf.matchAll(/<itemref idref="([^"]+)"/g)].map(
+      (match) => match[1]
+    );
+
+    expect(order[0]).toBe("cover");
+    expect(order[1]).toBe("titlepage");
+    expect(order[2]).toBe("chapter-001");
+  });
+
+  test("manifest に載る（載せ忘れると本の中に無いのと同じ）", () => {
+    const files = open(buildEpub(book()));
+
+    expect(files["OEBPS/titlepage.xhtml"]).toBeDefined();
+    expect(files["OEBPS/content.opf"]).toMatch(
+      /<item[^>]*id="titlepage"[^>]*href="titlepage\.xhtml"/
+    );
+  });
+
+  test("書誌情報が並ぶ。空の項目は出さない", () => {
+    const withAll = open(
+      buildEpub(
+        withConfig({ author: "野中", illustrator: "絵師", label: "○○文庫" })
+      )
+    )["OEBPS/titlepage.xhtml"];
+
+    expect(withAll).toContain("氷の街");
+    expect(withAll).toContain("野中");
+    expect(withAll).toContain("絵師");
+    expect(withAll).toContain("○○文庫");
+
+    const bare = open(buildEpub(withConfig({ author: "", label: "" })))[
+      "OEBPS/titlepage.xhtml"
+    ];
+    expect(bare).toContain("氷の街");
+    expect(bare).not.toContain("book-author");
+    expect(bare).not.toContain("book-label");
+  });
+
+  test("扉の断片は、プレビューへ渡すものと同じ", () => {
+    const config = { ...defaultBookConfig("氷の街"), author: "野中" };
+    expect(open(buildEpub({ ...book(), config }))["OEBPS/titlepage.xhtml"]).toContain(
+      buildTitlePageFragment(config)
+    );
+  });
+});
+
 describe("目次（nav）", () => {
   test("話が順番どおり並ぶ", () => {
     const nav = open(buildEpub(book()))["OEBPS/nav.xhtml"];
@@ -295,6 +368,176 @@ describe("本文と体裁", () => {
 
   test("話が1つも無ければ組まない", () => {
     expect(() => buildEpub(book({ chapters: [] }))).toThrow();
+  });
+});
+
+describe("目次の配置パターン（設計書6.65.6）", () => {
+  /** 章で束ねられる材料。プロローグ・本編・幕間が混ざった本 */
+  function grouped(): EpubBook {
+    return book({
+      chapters: [
+        { heading: "プロローグ", body: "あ", notation: "curly", group: "プロローグ" },
+        { heading: "第一話　出会い", body: "い", notation: "curly", group: "本編" },
+        { heading: "幕間1", body: "う", notation: "curly", group: "幕間" },
+      ],
+    });
+  }
+
+  test("既定は本文と同じ流れの一覧（いままでどおり）", () => {
+    const nav = open(buildEpub(book()))["OEBPS/nav.xhtml"];
+
+    expect(nav).toContain('class="nav-list toc-vertical"');
+    expect(nav).not.toContain("toc-group");
+  });
+
+  test("横組みの一覧は、目次だけ横組みにする", () => {
+    const files = open(buildEpub(withConfig({ tocPattern: "horizontal" })));
+
+    expect(files["OEBPS/nav.xhtml"]).toContain('class="nav-list toc-horizontal"');
+    // 見た目を決めるのはCSS。断片の目印とCSSが揃っていないと効かない
+    expect(files["OEBPS/style.css"]).toContain(".toc-horizontal");
+  });
+
+  test("章ごとに区切ると、章の見出しが出る", () => {
+    const nav = open(buildEpub(grouped()))["OEBPS/nav.xhtml"];
+    expect(nav).not.toContain("toc-group");
+
+    const chaptered = open(
+      buildEpub({
+        ...grouped(),
+        config: { ...defaultBookConfig("氷の街"), tocPattern: "chapters" },
+      })
+    )["OEBPS/nav.xhtml"];
+
+    expect(chaptered).toContain('class="toc-group"');
+    expect(chaptered).toContain(">プロローグ<");
+    expect(chaptered).toContain(">本編<");
+    expect(chaptered).toContain(">幕間<");
+    // 話は消えない。束ねるだけである
+    expect(chaptered).toContain("第一話　出会い");
+  });
+
+  test("章ごとでも、束ねる名前が無ければ一覧のまま", () => {
+    // `group` を持たない材料（合本や日付だけのファイル）で見出しを捏造しない
+    const nav = open(
+      buildEpub(withConfig({ tocPattern: "chapters" }))
+    )["OEBPS/nav.xhtml"];
+
+    expect(nav).not.toContain("toc-group");
+    expect(nav).toContain("第一話　出会い");
+  });
+});
+
+describe("目次と奥付の飾り（設計書6.65.6）", () => {
+  test("「なし」では飾りが出ない", () => {
+    const files = open(buildEpub(book()));
+
+    expect(files["OEBPS/nav.xhtml"]).not.toContain("ornament");
+    expect(files["OEBPS/colophon.xhtml"]).not.toContain("ornament");
+  });
+
+  test("罫線はCSSで引く（外部ファイルを増やさない）", () => {
+    const files = open(
+      buildEpub(withConfig({ tocOrnament: "rule", colophonOrnament: "rule" }))
+    );
+
+    expect(files["OEBPS/nav.xhtml"]).toContain("ornament-rule");
+    expect(files["OEBPS/colophon.xhtml"]).toContain("ornament-rule");
+    expect(files["OEBPS/style.css"]).toContain(".ornament-rule");
+    // 画像ファイルは増やさない
+    expect(Object.keys(files).filter((name) => name.endsWith(".svg"))).toEqual([]);
+  });
+
+  test("中央飾りは断片の中のSVG", () => {
+    const nav = open(buildEpub(withConfig({ tocOrnament: "center" })))[
+      "OEBPS/nav.xhtml"
+    ];
+
+    expect(nav).toContain("ornament-center");
+    // XHTMLの中のSVGは名前空間が要る（無いとリーダーが本ごと開けない）
+    expect(nav).toContain('<svg xmlns="http://www.w3.org/2000/svg"');
+  });
+
+  test("目次の飾りと奥付の飾りは別々に選べる", () => {
+    const files = open(
+      buildEpub(withConfig({ tocOrnament: "center", colophonOrnament: "none" }))
+    );
+
+    expect(files["OEBPS/nav.xhtml"]).toContain("ornament-center");
+    expect(files["OEBPS/colophon.xhtml"]).not.toContain("ornament");
+  });
+});
+
+describe("プレビューと書き出しは同じ断片を使う（設計書6.65.6）", () => {
+  /**
+   * **エディター画面のプレビューは、ここで作った断片をそのまま出す。**
+   * 画面用の組版をもう1つ書くと、見た目どおりという要件がその日から壊れる。
+   */
+  test("目次の断片が、書き出したnav.xhtmlの中にそのまま入っている", () => {
+    const config = { ...defaultBookConfig("氷の街"), tocOrnament: "rule" as const };
+    const nav = open(buildEpub({ ...book(), config }))["OEBPS/nav.xhtml"];
+
+    expect(nav).toContain(
+      buildTocFragment(
+        [
+          { href: "chapter-001.xhtml", label: "第一話　出会い" },
+          { href: "chapter-002.xhtml", label: "第二話　別れ" },
+        ],
+        {
+          pattern: config.tocPattern,
+          ornament: config.tocOrnament,
+          colophonHref: "colophon.xhtml",
+        }
+      )
+    );
+  });
+
+  test("奥付・表紙・扉の断片も、そのまま入っている", () => {
+    const config = {
+      ...defaultBookConfig("氷の街"),
+      author: "野中",
+      colophonOrnament: "center" as const,
+    };
+    const files = open(buildEpub({ ...book(), config }));
+
+    expect(files["OEBPS/colophon.xhtml"]).toContain(
+      buildColophonFragment(config)
+    );
+    expect(files["OEBPS/cover.xhtml"]).toContain(buildCoverFragment(config, null));
+    // 表紙画像が無いときの表紙は、題名だけの扉そのもの
+    expect(buildCoverFragment(config, null)).toBe(buildTitlePageFragment(config));
+  });
+
+  test("CSSも同じものを渡す", () => {
+    const css = open(buildEpub(book()))["OEBPS/style.css"];
+    expect(css).toBe(buildEpubCss(true));
+  });
+});
+
+describe("プレビュー用にCSSを閉じ込める", () => {
+  /**
+   * 画面の中では `html` や `body` に当ててしまうとパネル全体が本の体裁に
+   * なる。**同じCSSを1か所から作り**、選択子だけを枠の中へ閉じ込める。
+   */
+  const scoped = scopeCssForPreview(buildEpubCss(true), ".epub-page");
+
+  test("html と body は枠そのものになる", () => {
+    expect(scoped).toContain(".epub-page {");
+    expect(scoped).not.toMatch(/(^|\n)html\s*\{/);
+    expect(scoped).not.toMatch(/(^|\n)body\s*\{/);
+  });
+
+  test("ほかの選択子は枠の中に限る", () => {
+    expect(scoped).toContain(".epub-page .nav-list");
+    expect(scoped).toContain(".epub-page ruby");
+  });
+
+  test("@charset は落とす（画面のCSSには置けない）", () => {
+    expect(scoped).not.toContain("@charset");
+  });
+
+  test("縦書きの指定は残る（見た目どおりが要件）", () => {
+    expect(scoped).toContain("writing-mode: vertical-rl");
   });
 });
 

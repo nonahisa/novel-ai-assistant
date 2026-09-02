@@ -25,6 +25,11 @@ describe("本の設計図の既定値", () => {
       tocEnabled: true,
       collapseBlankLines: true,
       coverImagePath: null,
+      // **既定は「いままでどおりの見た目」**（設計書6.65.6）。
+      // 目次は本文と同じ流れの一覧、飾りは無し
+      tocPattern: "vertical",
+      tocOrnament: "none",
+      colophonOrnament: "none",
     });
   });
 
@@ -47,6 +52,9 @@ describe("本の設計図の既定値", () => {
         tocEnabled: false,
         collapseBlankLines: false,
         coverImagePath: "素材/表紙.png",
+        tocPattern: "chapters",
+        tocOrnament: "rule",
+        colophonOrnament: "center",
       },
       "氷の街"
     );
@@ -59,6 +67,9 @@ describe("本の設計図の既定値", () => {
     expect(config.tocEnabled).toBe(false);
     expect(config.collapseBlankLines).toBe(false);
     expect(config.coverImagePath).toBe("素材/表紙.png");
+    expect(config.tocPattern).toBe("chapters");
+    expect(config.tocOrnament).toBe("rule");
+    expect(config.colophonOrnament).toBe("center");
   });
 });
 
@@ -71,6 +82,16 @@ describe("壊れた設計図は受け取らない", () => {
 
   test("知らない綴じ方向は弾く（黙って縦書きにしない）", () => {
     expect(() => parseBookConfig({ writingMode: "たて" }, "氷の街")).toThrow();
+  });
+
+  test("知らない目次のパターン・飾りは弾く", () => {
+    // 綴じ方向と同じ扱い。読めない値を黙って既定へ倒すと、
+    // 作者は「指定が効いていない」ことに気づけない
+    expect(() => parseBookConfig({ tocPattern: "たて組み" }, "氷の街")).toThrow();
+    expect(() => parseBookConfig({ tocOrnament: "花" }, "氷の街")).toThrow();
+    expect(() =>
+      parseBookConfig({ colophonOrnament: "けいせん" }, "氷の街")
+    ).toThrow();
   });
 
   test("真偽値のところに文字列が入っていたら弾く", () => {

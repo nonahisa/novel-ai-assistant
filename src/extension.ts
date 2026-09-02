@@ -77,6 +77,7 @@ import { applyPendingCharacterUpdates } from "./features/applyPendingUpdates";
 import { exportImeDictionary } from "./features/exportImeDictionary";
 import { exportPdf } from "./features/exportPdf";
 import { exportEpub } from "./features/exportEpub";
+import { openEpubEditorPanel } from "./features/epubEditorPanel";
 import { manageCustomFields } from "./features/manageCustomFields";
 import { TermHighlighter } from "./views/termHighlight";
 import { ActionListProvider, nodeKey } from "./views/actionList";
@@ -2459,6 +2460,17 @@ export async function activate(
       });
       if (!work) return;
       await exportEpub(work);
+    })
+  );
+
+  context.subscriptions.push(
+    registerCommand("novelai.openEpubEditor", async (node?: WorkRef) => {
+      // 書き出しと同じく、外のアプリを起こさないのでブラウザ版でも開ける
+      const work = await resolveWork(node, registry, {
+        title: "EPUBエディターで開く作品を選択",
+      });
+      if (!work) return;
+      await openEpubEditorPanel(context, work);
     })
   );
 

@@ -938,6 +938,20 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.openEpubEditor",
+            label: "EPUBエディター（試作）",
+            description: "AIを使わない",
+            icon: "book",
+            requiresWork: true,
+            detail:
+              "本の見た目を確かめながら、書誌情報・組み方・目次・奥付を決めます。" +
+              "左の欄を変えると、右のプレビューが**書き出しと同じ組版で**追従します。" +
+              "決めた内容は `設定/書籍/book.json` へ保存し、そのまま書き出せます。" +
+              "**いまは文字の面だけです**——表紙の画像や挿絵の表示は先の段で作ります。" +
+              "**原稿は書き換えません。** AIは呼びません。",
+          },
+          {
+            kind: "action",
             command: "novelai.exportImeDictionary",
             label: "IME辞書を出力",
             description: "AIを使わない",

@@ -28,6 +28,40 @@ export const BOOK_WRITING_MODES: readonly BookWritingMode[] = [
   "horizontal",
 ];
 
+/**
+ * 目次ページの並べ方（設計書6.65.6）。
+ *
+ * - `vertical`：**本文と同じ流れ**の一覧（縦組みの本なら縦に並ぶ）。既定
+ * - `horizontal`：目次だけ横組みにする（縦組みの本でもここは横に読む）
+ * - `chapters`：章ごとに区切り、章の見出しを立てる
+ *
+ * **`vertical` を「必ず縦組み」にしていない。** 横組みの本で既定のまま
+ * 目次だけ縦になると、作者が何も選んでいないのに見た目が変わる。
+ * 既定は「いままでどおり」でなければならない（0.29.18の実装で決めた）。
+ */
+export type TocPattern = "vertical" | "horizontal" | "chapters";
+
+export const TOC_PATTERNS: readonly TocPattern[] = [
+  "vertical",
+  "horizontal",
+  "chapters",
+];
+
+/**
+ * 目次・奥付の飾り（設計書6.65.6）。
+ *
+ * **画像ファイルは増やさない。** `rule` はCSSの罫線、`center` は断片の
+ * 中に書いたSVGである。外部ファイルにすると、OPFのmanifestへ載せ忘れた
+ * ときに「本は開くが飾りだけ出ない」という分かりにくい壊れ方をする。
+ */
+export type BookOrnament = "none" | "rule" | "center";
+
+export const BOOK_ORNAMENTS: readonly BookOrnament[] = [
+  "none",
+  "rule",
+  "center",
+];
+
 export interface BookConfig {
   schemaVersion: string;
   /** 題名。空なら作品名で埋める（無題の本を作らない） */
@@ -44,6 +78,12 @@ export interface BookConfig {
    * ここが決めるのは「読む順路（spine）へ並べるか」だけである。
    */
   tocEnabled: boolean;
+  /** 目次ページの並べ方。`tocEnabled` が false なら見た目に影響しない */
+  tocPattern: TocPattern;
+  /** 目次ページの飾り */
+  tocOrnament: BookOrnament;
+  /** 奥付の飾り。目次とは別に選べる（片方だけ飾りたいことがある） */
+  colophonOrnament: BookOrnament;
   /**
    * 続いた空行を1つ減らすか（設計書6.65.2「改行が2つ並んでいたら1つに」）。
    *
@@ -71,6 +111,11 @@ export function defaultBookConfig(title: string): BookConfig {
     // 日本語の小説は縦書きが既定。横書きは作者が選んだときだけ
     writingMode: "vertical",
     tocEnabled: true,
+    // **既定は「いままでどおりの見た目」。** 第1段で書き出した本と
+    // 同じものが出ないと、版を上げただけで本の体裁が変わる
+    tocPattern: "vertical",
+    tocOrnament: "none",
+    colophonOrnament: "none",
     collapseBlankLines: true,
     coverImagePath: null,
   };
@@ -96,6 +141,9 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
   optionalString(value.label, "label");
   optionalEnum(value.writingMode, "writingMode", BOOK_WRITING_MODES);
   optionalBoolean(value.tocEnabled, "tocEnabled");
+  optionalEnum(value.tocPattern, "tocPattern", TOC_PATTERNS);
+  optionalEnum(value.tocOrnament, "tocOrnament", BOOK_ORNAMENTS);
+  optionalEnum(value.colophonOrnament, "colophonOrnament", BOOK_ORNAMENTS);
   optionalBoolean(value.collapseBlankLines, "collapseBlankLines");
   optionalNullableString(value.coverImagePath, "coverImagePath");
 
@@ -118,6 +166,13 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
       defaults.writingMode,
     tocEnabled:
       (value.tocEnabled as boolean | undefined) ?? defaults.tocEnabled,
+    tocPattern:
+      (value.tocPattern as TocPattern | undefined) ?? defaults.tocPattern,
+    tocOrnament:
+      (value.tocOrnament as BookOrnament | undefined) ?? defaults.tocOrnament,
+    colophonOrnament:
+      (value.colophonOrnament as BookOrnament | undefined) ??
+      defaults.colophonOrnament,
     collapseBlankLines:
       (value.collapseBlankLines as boolean | undefined) ??
       defaults.collapseBlankLines,
