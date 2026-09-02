@@ -919,6 +919,25 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.exportEpub",
+            label: "EPUBを書き出す（試作）",
+            description: "AIを使わない",
+            icon: "book",
+            requiresWork: true,
+            detail:
+              "本文をEPUB3の電子書籍に組んで `.aiwriter/exports/` へ書き出します" +
+              "（Kindle・honto などのリーダーで開けます）。" +
+              "縦書き・横書き、ルビ・傍点、目次、奥付を組みます。" +
+              // 「まだ土台の段階です」と書いていたら、相談の束選びが
+              // 「この段落は…」という本文の相談に当たってしまった
+              // （二文字組みの「の段」で拾われる）。言い回しで避ける
+              "**いまは土台までです**——表紙は画像1枚をそのまま使い、" +
+              "挿絵や登場人物一覧はまだ入りません。" +
+              "書誌情報は `設定/書籍/book.json` に書きます（無ければ作品名で組みます）。" +
+              "**原稿は書き換えません。** AIは呼びません。",
+          },
+          {
+            kind: "action",
             command: "novelai.exportImeDictionary",
             label: "IME辞書を出力",
             description: "AIを使わない",

@@ -76,6 +76,7 @@ import type { ChatRunKind } from "./core/chatEdit";
 import { applyPendingCharacterUpdates } from "./features/applyPendingUpdates";
 import { exportImeDictionary } from "./features/exportImeDictionary";
 import { exportPdf } from "./features/exportPdf";
+import { exportEpub } from "./features/exportEpub";
 import { manageCustomFields } from "./features/manageCustomFields";
 import { TermHighlighter } from "./views/termHighlight";
 import { ActionListProvider, nodeKey } from "./views/actionList";
@@ -2445,6 +2446,19 @@ export async function activate(
       });
       if (!work) return;
       await exportPdf(work);
+    })
+  );
+
+  context.subscriptions.push(
+    registerCommand("novelai.exportEpub", async (node?: WorkRef) => {
+      // **`canRunProcesses()` で止めない。** PDF出力は外のブラウザを
+      // 起こすので手元のVS Codeが要るが、こちらは作品フォルダへ
+      // ファイルを1つ書くだけで、ブラウザ版でも成立する
+      const work = await resolveWork(node, registry, {
+        title: "EPUBにする作品を選択",
+      });
+      if (!work) return;
+      await exportEpub(work);
     })
   );
 
