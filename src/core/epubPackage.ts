@@ -1,11 +1,20 @@
 import { zipSync, type Zippable } from "fflate";
-import type { BookConfig, BookOrnament, TocPattern } from "../models/book";
+import {
+  BOOK_FONT_EXTENSIONS,
+  type BookConfig,
+  type BookOrnament,
+  type TocPattern,
+} from "../models/book";
 import {
   buildChapterXhtml,
   buildXhtmlDocument,
   escapeXml,
   type EpubChapterSource,
 } from "./epubXhtml";
+import {
+  buildCharacterPageFragment,
+  type EpubCharacterEntry,
+} from "./epubCharacterPage";
 
 /**
  * EPUB3の中身を組み立てて、1つのZIP（＝.epubファイル）にする
@@ -51,6 +60,25 @@ const COVER_NAME = "cover.xhtml";
 const TITLEPAGE_NAME = "titlepage.xhtml";
 const COLOPHON_NAME = "colophon.xhtml";
 const BACKCOVER_NAME = "backcover.xhtml";
+const CHARACTERS_NAME = "characters.xhtml";
+
+/**
+ * 同梱した書体を指す名前（設計書6.65.11）。
+ *
+ * **CSSの中でだけ使う名前**なので、作者のフォント名（「源ノ明朝」など）は
+ * 使わない。同じ名前のフォントが端末に入っていると、どちらが当たるか
+ * リーダーまかせになる。
+ */
+const BODY_FONT_FAMILY = "BookBody";
+const HEADING_FONT_FAMILY = "BookHeading";
+
+/**
+ * 同梱しないときの体裁。**最後は必ず `serif`**（設計書6.65.11）。
+ *
+ * 明朝を先に並べる。ゴシックで組んだ小説は読み疲れる（PDF出力と同じ並び）。
+ */
+const BASE_FONT_STACK =
+  '"Yu Mincho", "游明朝", "Hiragino Mincho ProN", serif';
 
 /**
  * 本文へ挟む挿絵1枚（設計書6.65.10）。
@@ -95,6 +123,32 @@ export interface EpubCover {
   data: Uint8Array;
 }
 
+/**
+ * 登場人物一覧へ載せる1人（設計書6.65.11）。
+ *
+ * 名前・読み仮名・紹介文の3つだけを持つ（絞り方は
+ * `epubCharacterPage.ts`）。イラストは**中身と見分けの手がかり**を渡し、
+ * ZIPの中の名前はここで機械名に付け替える（挿絵と同じ）。
+ */
+export interface EpubBookCharacter {
+  name: string;
+  reading: string | null;
+  summary: string;
+  icon: { sourcePath: string; data: Uint8Array } | null;
+}
+
+/** 同梱する書体1つ（設計書6.65.11） */
+export interface EpubFont {
+  /** 元のファイル名。種類の判定に使う（ZIPの中では `font-body.<拡張子>`） */
+  fileName: string;
+  data: Uint8Array;
+}
+
+export interface EpubFonts {
+  body: EpubFont | null;
+  heading: EpubFont | null;
+}
+
 export interface EpubBook {
   config: BookConfig;
   chapters: readonly EpubChapter[];
@@ -108,6 +162,16 @@ export interface EpubBook {
    * 無ければ用が無い）。
    */
   backCover: EpubCover | null;
+  /**
+   * 登場人物一覧に載せる人（設計書6.65.11）。
+   *
+   * **絞り込みは呼び出し側で済ませてある。** ここは受け取ったものを順に
+   * 並べるだけで、台帳の事情（登場済みか・ネタバレ区分）は知らない。
+   * `config.characterPage.enabled` が false なら、渡されていても面は出ない。
+   */
+  characters?: readonly EpubBookCharacter[];
+  /** 同梱する書体（設計書6.65.11）。無ければ第1段と同じ本になる */
+  fonts?: EpubFonts;
   /**
    * `dc:identifier`。本を見分ける唯一の札。
    *
@@ -150,6 +214,28 @@ const IMAGE_MEDIA_TYPES: Record<string, string> = {
   webp: "image/webp",
 };
 
+/**
+ * 書体の種類（設計書6.65.11）。
+ *
+ * 画像と同じく**中身は見ない**。扱える種類は `models/book.ts` が持つので、
+ * ここは media-type への対応だけを持つ（2か所で種類を数え上げない）。
+ */
+export function fontMediaType(fileName: string, label = "書体"): string {
+  const matched = /\.([A-Za-z0-9]+)$/.exec(fileName.trim());
+  const extension = matched ? matched[1].toLowerCase() : "";
+  if (!extension) {
+    throw new Error(
+      `${label}「${fileName}」に拡張子がありません。ttf・otf のいずれかにしてください。`
+    );
+  }
+  if (!BOOK_FONT_EXTENSIONS.includes(extension)) {
+    throw new Error(
+      `${label}の種類「${extension}」は本に入れられません。ttf・otf のいずれかにしてください。`
+    );
+  }
+  return `font/${extension}`;
+}
+
 export function buildEpub(book: EpubBook): Uint8Array {
   if (book.chapters.length === 0) {
     throw new Error("本文が1話もないので、本を組めませんでした。");
@@ -180,20 +266,62 @@ export function buildEpub(book: EpubBook): Uint8Array {
     fileName: `chapter-${String(index + 1).padStart(3, "0")}.xhtml`,
   }));
   const illustrations = packIllustrations(chapters);
+  // **面を出すのは「出す設定」かつ「載せる人が居る」ときだけ**
+  // （設計書6.65.11）。空の一覧が1面挟まるより、無いほうがよい
+  const characters = config.characterPage.enabled
+    ? packCharacters(book.characters ?? [])
+    : [];
+  const fonts = packFonts(book.fonts);
 
   const files: Zippable = {
     // **先頭・無圧縮。** ここを外すとリーダーが本と認識しない
     mimetype: [encode(EPUB_MIMETYPE), { level: 0 }],
     "META-INF/container.xml": encode(containerXml()),
     [`${ROOT}/content.opf`]: encode(
-      contentOpf(book, chapters, cover, backCover, illustrations, vertical)
+      contentOpf(
+        book,
+        chapters,
+        cover,
+        backCover,
+        illustrations,
+        characters,
+        fonts,
+        vertical
+      )
     ),
-    [`${ROOT}/${CSS_NAME}`]: encode(buildEpubCss(vertical)),
-    [`${ROOT}/${NAV_NAME}`]: encode(navXhtml(chapters, config, vertical)),
+    [`${ROOT}/${CSS_NAME}`]: encode(
+      buildEpubCss(vertical, {
+        bodyHref: fonts.body?.packagedName ?? null,
+        headingHref: fonts.heading?.packagedName ?? null,
+      })
+    ),
+    [`${ROOT}/${NAV_NAME}`]: encode(
+      navXhtml(chapters, config, characters.length > 0, vertical)
+    ),
     [`${ROOT}/${COVER_NAME}`]: encode(coverXhtml(config, cover, vertical)),
     [`${ROOT}/${TITLEPAGE_NAME}`]: encode(titlePageXhtml(config, vertical)),
     [`${ROOT}/${COLOPHON_NAME}`]: encode(colophonXhtml(config, vertical)),
   };
+
+  if (characters.length > 0) {
+    files[`${ROOT}/${CHARACTERS_NAME}`] = encode(
+      buildXhtmlDocument({
+        title: "登場人物",
+        cssHref: CSS_NAME,
+        vertical,
+        body: buildCharacterPageFragment(characters.map((item) => item.entry)),
+      })
+    );
+    for (const item of characters) {
+      if (item.portrait) {
+        files[`${ROOT}/${item.portrait.packagedName}`] = item.portrait.data;
+      }
+    }
+  }
+
+  for (const font of [fonts.body, fonts.heading]) {
+    if (font) files[`${ROOT}/${font.packagedName}`] = font.data;
+  }
 
   if (cover) files[`${ROOT}/${cover.packagedName}`] = cover.data;
 
@@ -265,6 +393,98 @@ function packIllustrations(
   return packed;
 }
 
+/**
+ * 登場人物一覧の材料を、ZIPへ入れる形へまとめる（設計書6.65.11）。
+ *
+ * **イラストの名前は `portrait-1.png` の機械名に付け替える。** 表紙・挿絵と
+ * 同じ理由で、空白や日本語のファイル名だと画像を出さないリーダーがある。
+ *
+ * **1人の絵が読めなくても、その人を落とさない。** 名前だけ載せて本は出す
+ * （設計書6.65.11。挿絵と同じ流儀）。ここへ届く前に読めなかったものは
+ * `icon: null` になっている。
+ */
+function packCharacters(
+  characters: readonly EpubBookCharacter[]
+): PackagedCharacter[] {
+  const packed: PackagedCharacter[] = [];
+  // **番号は絵の側で数える。** 人物の番号で付けると、絵の無い人が
+  // 混ざったとたんに `portrait-1` の無い本ができる（読めはするが、
+  // 中身を覗いた作者が「1枚目が消えた」と読む）
+  let portraits = 0;
+
+  for (const character of characters) {
+    let portrait: PackagedIllustration | null = null;
+    if (character.icon) {
+      portraits++;
+      portrait = {
+        id: `portrait-${portraits}`,
+        packagedName: `portrait-${portraits}${extensionOf(
+          character.icon.sourcePath
+        )}`,
+        // 扱えない種類は、本を組む前に分かる言葉で断る
+        mediaType: imageMediaType(character.icon.sourcePath, "人物イラスト"),
+        data: character.icon.data,
+      };
+    }
+
+    packed.push({
+      entry: {
+        name: character.name,
+        reading: character.reading,
+        summary: character.summary,
+        iconHref: portrait?.packagedName ?? null,
+      },
+      portrait,
+    });
+  }
+
+  return packed;
+}
+
+/**
+ * 書体をZIPへ入れる形へまとめる（設計書6.65.11）。
+ *
+ * ZIPの中の名前は `font-body.<拡張子>`。**作者のファイル名は使わない**
+ * （表紙・挿絵と同じ理由）。
+ */
+function packFonts(fonts: EpubFonts | undefined): PackagedFonts {
+  return {
+    body: packFont(fonts?.body ?? null, "body", "本文用の書体"),
+    heading: packFont(fonts?.heading ?? null, "heading", "見出し用の書体"),
+  };
+}
+
+function packFont(
+  font: EpubFont | null,
+  slot: "body" | "heading",
+  label: string
+): PackagedFont | null {
+  if (!font) return null;
+  return {
+    id: `font-${slot}`,
+    packagedName: `font-${slot}${extensionOf(font.fileName)}`,
+    mediaType: fontMediaType(font.fileName, label),
+    data: font.data,
+  };
+}
+
+interface PackagedCharacter {
+  entry: EpubCharacterEntry;
+  portrait: PackagedIllustration | null;
+}
+
+interface PackagedFont {
+  id: string;
+  packagedName: string;
+  mediaType: string;
+  data: Uint8Array;
+}
+
+interface PackagedFonts {
+  body: PackagedFont | null;
+  heading: PackagedFont | null;
+}
+
 interface PackagedIllustration {
   id: string;
   packagedName: string;
@@ -311,6 +531,8 @@ function contentOpf(
   cover: PackagedCover | null,
   backCover: PackagedCover | null,
   illustrations: ReadonlyMap<string, PackagedIllustration>,
+  characters: readonly PackagedCharacter[],
+  fonts: PackagedFonts,
   vertical: boolean
 ): string {
   const config = book.config;
@@ -362,6 +584,27 @@ function contentOpf(
       (image) =>
         `    <item id="${image.id}" href="${image.packagedName}" media-type="${image.mediaType}" />`
     ),
+    // 登場人物一覧と、その人物イラスト（設計書6.65.11）
+    ...(characters.length > 0
+      ? [
+          `    <item id="characters" href="${CHARACTERS_NAME}" media-type="application/xhtml+xml" />`,
+        ]
+      : []),
+    ...characters
+      .map((item) => item.portrait)
+      .filter((portrait): portrait is PackagedIllustration => portrait !== null)
+      .map(
+        (portrait) =>
+          `    <item id="${portrait.id}" href="${portrait.packagedName}" media-type="${portrait.mediaType}" />`
+      ),
+    // 同梱した書体。**manifest に無いファイルは本の中に無いのと同じ**なので、
+    // ここを落とすと `@font-face` だけが残って字が変わらない
+    ...[fonts.body, fonts.heading]
+      .filter((font): font is PackagedFont => font !== null)
+      .map(
+        (font) =>
+          `    <item id="${font.id}" href="${font.packagedName}" media-type="${font.mediaType}" />`
+      ),
     ...chapters.map(
       (chapter) =>
         `    <item id="${chapter.id}" href="${chapter.fileName}" media-type="application/xhtml+xml" />`
@@ -386,6 +629,9 @@ function contentOpf(
     // **目次を外しても `nav.xhtml` は残す**（EPUB3で必須）。
     // ここで外すのは「読む順路に並べるか」だけである
     ...(config.tocEnabled ? ['    <itemref idref="nav" />'] : []),
+    // 登場人物一覧は**目次の後・本文の前**（設計書6.65.11）。目次を出さない
+    // 本でも本文の前に置く——読み始める前に人物を見せる面だからである
+    ...(characters.length > 0 ? ['    <itemref idref="characters" />'] : []),
     ...chapters.map((chapter) => `    <itemref idref="${chapter.id}" />`),
     '    <itemref idref="colophon" />',
     // 裏表紙は本の最終面（設計書6.65.8）。縦書きの本は右→左に開くので、
@@ -423,6 +669,7 @@ function contentOpf(
 function navXhtml(
   chapters: readonly PackagedChapter[],
   config: BookConfig,
+  hasCharacters: boolean,
   vertical: boolean
 ): string {
   return buildXhtmlDocument({
@@ -439,6 +686,7 @@ function navXhtml(
         pattern: config.tocPattern,
         ornament: config.tocOrnament,
         colophonHref: COLOPHON_NAME,
+        charactersHref: hasCharacters ? CHARACTERS_NAME : null,
       }
     ),
   });
@@ -458,6 +706,13 @@ export interface EpubTocOptions {
   ornament: BookOrnament;
   /** 末尾に置く奥付への行。null なら出さない */
   colophonHref?: string | null;
+  /**
+   * 先頭に置く登場人物一覧への行（設計書6.65.11）。null なら出さない。
+   *
+   * **先頭に置くのは、面が本文の前にあるから**である。目次の並びと
+   * 読む順路が食い違うと、目次から飛んだ読者が戻れなくなる。
+   */
+  charactersHref?: string | null;
 }
 
 /**
@@ -493,6 +748,15 @@ export function buildTocFragment(
     options.colophonHref === null || options.colophonHref === undefined
       ? []
       : [`    <li><a href="${escapeXml(options.colophonHref)}">奥付</a></li>`];
+  // 登場人物一覧は本文の前の面なので、目次でも話より前に置く
+  const characters =
+    options.charactersHref === null || options.charactersHref === undefined
+      ? []
+      : [
+          `    <li><a href="${escapeXml(
+            options.charactersHref
+          )}">登場人物</a></li>`,
+        ];
 
   return [
     '<nav epub:type="toc" id="toc">',
@@ -500,6 +764,7 @@ export function buildTocFragment(
       options.ornament
     )}</h1>`,
     `  <ol class="${listClass}">`,
+    ...characters,
     ...(grouped ? groupedItems(entries) : flatItems(entries)),
     ...colophon,
     "  </ol>",
@@ -712,7 +977,20 @@ export function buildColophonFragment(config: BookConfig): string {
  * 見ないリーダー（iBooks系の一部）が現役で、片方だけだと縦書きの本が
  * 横に流れる。
  */
-export function buildEpubCss(vertical: boolean): string {
+export interface EpubCssFonts {
+  /**
+   * 本文用の書体の在りか。**呼び出し側が決める**——本ではZIPの中の
+   * 機械名（`font-body.ttf`）、画面では `asWebviewUri` のURIになる
+   * （挿絵・人物イラストと同じ流儀）。
+   */
+  bodyHref?: string | null;
+  headingHref?: string | null;
+}
+
+export function buildEpubCss(
+  vertical: boolean,
+  fonts: EpubCssFonts = {}
+): string {
   const direction = vertical
     ? [
         "html {",
@@ -727,16 +1005,30 @@ export function buildEpubCss(vertical: boolean): string {
 
   return [
     "@charset \"UTF-8\";",
+    // 同梱した書体（設計書6.65.11）。**指定が無ければ1行も出さない**
+    // ——第1段から本の見た目を変えないため
+    ...fontFaces(fonts),
     ...direction,
     "body {",
     // 明朝を先に。ゴシックで組んだ小説は読み疲れる（PDF出力と同じ並び）。
-    // **書体は同梱しない**（第3段。ライセンスの確認が要る）
-    '  font-family: "Yu Mincho", "游明朝", "Hiragino Mincho ProN", serif;',
+    // **同梱した書体を先頭に、`serif` を最後に**置く（設計書6.65.11）。
+    // フォントを読まないリーダーでも本文が消えないようにするため
+    `  font-family: ${fontStack(fonts.bodyHref, BODY_FONT_FAMILY)};`,
     "  line-height: 1.8;",
     "  margin: 0;",
     "  padding: 0;",
     "}",
     "h1, h2, p { margin: 0; padding: 0; font-weight: normal; }",
+    // 見出し用の書体は h1・h2 に当てる（話の見出し・目次・奥付・登場人物が
+    // 全部これ）。指定が無ければ、この行そのものを出さない
+    ...(fonts.headingHref
+      ? [
+          `h1, h2 { font-family: ${fontStack(
+            fonts.headingHref,
+            HEADING_FONT_FAMILY
+          )}; }`,
+        ]
+      : []),
     ".chapter-heading { font-size: 1.3em; letter-spacing: 0.1em; margin-block-end: 2.5em; }",
     // 段落のあいだは空けない。字下げ（全角空白）で見分けるのが日本語の組み方
     "p { margin: 0; text-indent: 0; }",
@@ -769,8 +1061,18 @@ export function buildEpubCss(vertical: boolean): string {
     ".book-title { font-size: 2em; letter-spacing: 0.25em; }",
     ".book-author { margin-block-start: 3em; font-size: 1.2em; }",
     ".book-illustrator, .book-label { margin-block-start: 1em; }",
-    ".nav-heading, .colophon-heading { font-size: 1.5em; margin-block-end: 2em; }",
+    ".nav-heading, .colophon-heading, .characters-heading {",
+    "  font-size: 1.5em;",
+    "  margin-block-end: 2em;",
+    "}",
     ".nav-list { line-height: 2.4; }",
+    // 登場人物一覧（設計書6.65.11）。1人ぶんを続けて組み、間を空ける。
+    // イラストは挿絵と同じく面からはみ出させない
+    ".character { margin-block-end: 2.5em; }",
+    ".character-portrait { text-align: center; margin-block-end: 0.6em; }",
+    ".character-portrait img { max-inline-size: 40%; max-block-size: 40%; }",
+    ".character-name { font-size: 1.2em; letter-spacing: 0.05em; }",
+    ".character-summary { margin-block-start: 0.5em; font-size: 0.95em; }",
     // 目次だけ横組みにする配置（設計書6.65.6）。**縦組みへの上書きは
     // 持たない**——本文が横組みの本のCSSに縦組みの指定が現れると、
     // 何も選んでいない作者の本の見た目が版で変わる
@@ -796,6 +1098,38 @@ export function buildEpubCss(vertical: boolean): string {
 }
 
 /**
+ * 同梱した書体の宣言（設計書6.65.11）。
+ *
+ * **サブセット化はしない**（6.65.3）。使う字だけ抜くほうが軽くなるが、
+ * 壊れたフォントを作る危険のほうが、ファイルサイズより高くつく。
+ */
+function fontFaces(fonts: EpubCssFonts): string[] {
+  const face = (family: string, href: string): string[] => [
+    "@font-face {",
+    `  font-family: "${family}";`,
+    `  src: url("${href}");`,
+    "  font-weight: normal;",
+    "  font-style: normal;",
+    "}",
+  ];
+
+  return [
+    ...(fonts.bodyHref ? face(BODY_FONT_FAMILY, fonts.bodyHref) : []),
+    ...(fonts.headingHref ? face(HEADING_FONT_FAMILY, fonts.headingHref) : []),
+  ];
+}
+
+/**
+ * 書体の並び。**同梱した書体を先頭に、`serif` を最後に**置く。
+ *
+ * 同梱していなければ、第1段からの並びがそのまま出る（本の見た目を
+ * 変えないこと）。
+ */
+function fontStack(href: string | null | undefined, family: string): string {
+  return href ? `"${family}", ${BASE_FONT_STACK}` : BASE_FONT_STACK;
+}
+
+/**
  * プレビュー用に、本のCSSを枠の中へ閉じ込める（設計書6.65.6）。
  *
  * **画面用のCSSを別に書かない。** 書き出しと同じ `buildEpubCss` から
@@ -811,6 +1145,12 @@ export function scopeCssForPreview(css: string, scope: string): string {
   for (const rule of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
     // `@charset "UTF-8";` のような文は選択子ではない。最後の `;` までを捨てる
     const head = rule[1].slice(rule[1].lastIndexOf(";") + 1);
+    // `@font-face` は選択子ではないので、**閉じ込めずにそのまま出す**
+    // （`.epub-page @font-face` にすると書体そのものが読み込まれない）
+    if (head.trim().startsWith("@")) {
+      rules.push(`${head.trim()} {${rule[2]}}`);
+      continue;
+    }
     const selectors = head
       .split(",")
       .map((selector) => selector.trim())

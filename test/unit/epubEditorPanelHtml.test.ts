@@ -39,6 +39,14 @@ describe("EPUBエディターのHTML", () => {
     expect(html).not.toContain("img-src *");
   });
 
+  /**
+   * 同梱する書体は、プレビューにも当てる（設計書6.65.11）。
+   * **`font-src` を足さないと `@font-face` が読み込まれない。**
+   */
+  it("書体だけは読み込ませる（プレビューに当てるため）", () => {
+    expect(html).toContain("font-src vscode-resource:");
+  });
+
   it("埋め込みの印が残っていない", () => {
     const body = html.slice(html.indexOf("<body"));
     expect(body).not.toContain("${");
@@ -151,6 +159,35 @@ describe("左の設定の欄", () => {
     expect(html).toContain('id="bakeBack"');
     expect(html).toContain('id="coverImagePath"');
     expect(html).toContain('id="backCoverImagePath"');
+  });
+
+  /**
+   * 登場人物一覧（設計書6.65.11）。**既定は出さない**ので、
+   * 画面には「出す」を選ぶ入口だけがある。
+   */
+  it("登場人物一覧の欄がある（出す・出さないとイラストの有無）", () => {
+    expect(html).toContain('id="characterPageEnabled"');
+    expect(html).toContain('id="characterPageIcons"');
+    expect(html).toContain("登場人物");
+  });
+
+  /**
+   * 書体（設計書6.65.11）。**ライセンスの注意書きは常に出す**——
+   * 埋め込みが許諾されているかを確かめられるのは作者だけである。
+   */
+  it("書体の欄と、ライセンスの注意書きがある", () => {
+    expect(html).toContain('id="fontBody"');
+    expect(html).toContain('id="fontHeading"');
+    expect(html).toContain(
+      "フォントの埋め込みが許諾されているかは、作者の責任でご確認ください"
+    );
+  });
+
+  it("注意書きは畳まれない（hidden の中に入れない）", () => {
+    // 「使えないときだけ出す」注記（合成の欄）と違い、これは常に見える
+    const note = html.indexOf("フォントの埋め込みが許諾されているか");
+    expect(note).toBeGreaterThan(0);
+    expect(html.slice(note - 400, note)).not.toContain("hidden");
   });
 });
 

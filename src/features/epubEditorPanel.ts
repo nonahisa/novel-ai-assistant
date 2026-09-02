@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
+import type { Character } from "../models/character";
 import {
   BOOK_DIR,
   parseBookConfig,
@@ -41,6 +42,13 @@ import {
   buildTocFragment,
   scopeCssForPreview,
 } from "../core/epubPackage";
+import {
+  buildCharacterPageFragment,
+  characterIconPath,
+  selectBookCharacters,
+  toCharacterEntry,
+} from "../core/epubCharacterPage";
+import { CharacterStore } from "../core/characterStore";
 import { buildEpubEditorPanelHtml } from "../views/epubEditorPanelHtml";
 import { exportEpub } from "./exportEpub";
 import { logFailure } from "../core/logger";
@@ -100,6 +108,27 @@ interface PreviewSource {
   /** その1話目を book.json ではどう指すか（挿絵の絞り込みに使う） */
   firstChapterPath: string | null;
   notice: string | null;
+  /**
+   * 登場人物一覧に載る人（設計書6.65.11）。
+   *
+   * **欄を切り替えるたびに台帳を読み直さない**ので、開いたときに1度だけ
+   * 集める（本文と同じ扱い）。台帳を直したら、パネルを開き直せば入る。
+   */
+  characters: PreviewCharacter[];
+}
+
+/** 一覧に載る人物1人。**台帳の項目を全部は持たない**（設計書6.65.11） */
+interface PreviewCharacter {
+  name: string;
+  reading: string | null;
+  summary: string;
+  /**
+   * 人物イラストの場所（作品フォルダからの相対パス）。
+   *
+   * **無い・読めない・外を指しているものは null**。その人物は名前だけに
+   * なる（本と同じ振る舞い）。
+   */
+  iconPath: string | null;
 }
 
 /** 目次と、挿絵の欄の「話を選ぶ」に出す1話 */
@@ -402,9 +431,18 @@ async function panelData(state: PanelState) {
 function previewData(state: PanelState) {
   const vertical = state.current.writingMode === "vertical";
   return {
-    // **書き出しと同じCSS**を、画面の枠の中へ閉じ込めただけのもの
-    css: scopeCssForPreview(buildEpubCss(vertical), ".epub-page"),
+    // **書き出しと同じCSS**を、画面の枠の中へ閉じ込めただけのもの。
+    // 同梱する書体も当てる（設計書6.65.11）——本と同じ字面で確かめられ
+    // ないと、書体を選ぶ意味が無い
+    css: scopeCssForPreview(
+      buildEpubCss(vertical, {
+        bodyHref: fontUri(state, state.current.fonts.body),
+        headingHref: fontUri(state, state.current.fonts.heading),
+      }),
+      ".epub-page"
+    ),
     pages: buildPages(state, vertical),
+    characterNotice: characterNotice(state),
     compose: {
       front: composeState(state, "front"),
       back: composeState(state, "back"),
@@ -692,6 +730,29 @@ function buildPages(state: PanelState, vertical: boolean): PreviewPage[] {
     });
   }
 
+  // 登場人物一覧は目次の後・本文の前（設計書6.65.11）。**載せる人が
+  // 居なければ、本と同じく面ごと出さない**（理由は欄の注記で伝える）
+  if (config.characterPage.enabled && source.characters.length > 0) {
+    pages.push({
+      label: "登場人物",
+      html: buildCharacterPageFragment(
+        source.characters.map((character) => ({
+          name: character.name,
+          reading: character.reading,
+          summary: character.summary,
+          iconHref:
+            config.characterPage.showIcons && character.iconPath
+              ? imageUri(state, character.iconPath)
+              : null,
+        }))
+      ),
+      note:
+        "設定資料から組んだ面です（名前と紹介文だけが入ります）。" +
+        "内容を直すときは設定資料の側を直してください。",
+      vertical,
+    });
+  }
+
   if (source.firstChapter) {
     // **冒頭に収まっている指定だけを出す。** プレビューが読んでいるのは
     // 1話目の冒頭だけなので、その先の指定まで当てはめると「本文より
@@ -789,6 +850,45 @@ function imageUri(state: PanelState, relativePath: string): string {
 }
 
 /**
+ * 同梱する書体を、WebViewから読める形にする（設計書6.65.11）。
+ *
+ * 画面のCSPに `font-src` を足してある（`views/epubEditorPanelHtml.ts`）。
+ * **読めなくても止めない**——`@font-face` が空振りするだけで、`serif` が
+ * 受け止める（本のときと同じ）。
+ */
+function fontUri(state: PanelState, relativePath: string | null): string | null {
+  return relativePath ? imageUri(state, relativePath) : null;
+}
+
+/**
+ * 登場人物一覧の欄に出す一言（設計書6.65.11）。
+ *
+ * **「出す」を選んだのに何も起きない**ことがあるので、その理由をここで
+ * 伝える。台帳の絞り（登場済み・モブでない・公開）は本と同じなので、
+ * 画面で見えないものは本にも入らない。
+ */
+function characterNotice(state: PanelState): string | null {
+  if (!state.current.characterPage.enabled) return null;
+
+  const characters = state.source.characters;
+  if (characters.length === 0) {
+    return (
+      "載せられる人物が居ないので、この面は本に入りません" +
+      "（載るのは「登場済み・モブでない・公開」の人物だけです）。"
+    );
+  }
+
+  const missing = state.current.characterPage.showIcons
+    ? characters.filter((character) => character.iconPath === null).length
+    : 0;
+  const base = `${characters.length}人が載ります。`;
+  // イラストが無い人物は名前だけになる。**黙って名前だけにしない**
+  return missing > 0
+    ? `${base}うち${missing}人はイラストが見つからないので、名前だけになります。`
+    : base;
+}
+
+/**
  * プレビューの材料を集める。
  *
  * **原稿は読むだけ**で、読むのも1話目の冒頭までである。見出しは
@@ -805,6 +905,8 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
       firstChapter: null,
       firstChapterPath: null,
       notice: `「${work.title}」に本文のファイルが見つかりません。`,
+      // 本文がまだ無くても、人物一覧の欄は使える（設定資料は別に育つ）
+      characters: await collectCharacters(work),
     };
   }
 
@@ -823,7 +925,60 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
     firstChapter: first.chapter,
     firstChapterPath: first.episodePath,
     notice: first.notice,
+    characters: await collectCharacters(work),
   };
+}
+
+/**
+ * 登場人物一覧に載る人を集める（設計書6.65.11）。
+ *
+ * **台帳は読むだけ**である。絞り方（登場済み・モブでない・公開）は
+ * `epubCharacterPage.ts` が1か所で持つので、書き出しと食い違わない。
+ *
+ * **読めなくても画面は開く。** 人物一覧が空になるだけで、書誌情報や
+ * 本文のプレビューは使える（設定資料の不具合で編集できなくなるほうが困る）。
+ */
+async function collectCharacters(
+  work: WorkEntry
+): Promise<PreviewCharacter[]> {
+  let characters: Character[];
+  try {
+    characters = (await new CharacterStore(work).loadAll()).characters;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logFailure("EPUBエディターの登場人物一覧", {
+      作品: work.title,
+      内容: message,
+    });
+    return [];
+  }
+
+  const out: PreviewCharacter[] = [];
+  for (const character of selectBookCharacters(characters)) {
+    const entry = toCharacterEntry(character);
+    const iconPath = characterIconPath(character.icon);
+    out.push({
+      name: entry.name,
+      reading: entry.reading,
+      summary: entry.summary,
+      // **画面でも「読めるか」を先に見る。** 本では読めない絵を落として
+      // 名前だけにするので、見えているものと出来上がりを揃える
+      iconPath: iconPath && (await exists(work, iconPath)) ? iconPath : null,
+    });
+  }
+  return out;
+}
+
+/** 作品フォルダの中のファイルがあるか。読めないものは「無い」と同じ */
+async function exists(work: WorkEntry, relativePath: string): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(
+      path.toUri(path.join(work.folderPath, relativePath))
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** 冒頭に出す1話。競合マーカーのある話は本にも入らないので飛ばす */

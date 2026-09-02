@@ -38,7 +38,18 @@ describe("本の設計図の既定値", () => {
       // 挿絵とページ分割は、指定するまで空（設計書6.65.10）
       illustrations: [],
       pageBreaks: [],
+      // **登場人物一覧の既定は「出さない」**（設計書6.65.11）。設定資料は
+      // AIが読み取ったものが混ざっており、不意に本へ入るのは事故である
+      characterPage: { enabled: false, showIcons: true },
+      // 書体も、指定するまで同梱しない（ライセンスの確認は作者の責任）
+      fonts: { body: null, heading: null },
     });
+  });
+
+  test("登場人物一覧は、選ばないかぎり本へ入らない（設計書6.65.11）", () => {
+    expect(defaultBookConfig("氷の街").characterPage.enabled).toBe(false);
+    // 出すと決めた人は、たいてい顔も出したい。イラストの側は既定で入
+    expect(defaultBookConfig("氷の街").characterPage.showIcons).toBe(true);
   });
 
   test("表紙の合成は、題名と作者名だけを出す（設計書6.65.8）", () => {
@@ -172,6 +183,97 @@ describe("壊れた設計図は受け取らない", () => {
       parseBookConfig({ backCoverImagePath: "素材/裏表紙.png" }, "氷の街")
         .backCoverImagePath
     ).toBe("素材/裏表紙.png");
+  });
+});
+
+/**
+ * 登場人物一覧と書体（設計書6.65.11）。
+ *
+ * どちらも**指定するまで本の見た目を変えない**（ほかの項目と同じ約束）。
+ */
+describe("登場人物一覧の検証", () => {
+  test("出す・出さないとイラストの有無を受け取る", () => {
+    const config = parseBookConfig(
+      { characterPage: { enabled: true, showIcons: false } },
+      "氷の街"
+    );
+
+    expect(config.characterPage).toEqual({ enabled: true, showIcons: false });
+  });
+
+  test("書いてある側だけを差し替える（片方だけ書いても消えない）", () => {
+    expect(
+      parseBookConfig({ characterPage: { enabled: true } }, "氷の街")
+        .characterPage
+    ).toEqual({ enabled: true, showIcons: true });
+  });
+
+  test("真偽値でなければ弾く", () => {
+    expect(() =>
+      parseBookConfig({ characterPage: { enabled: "はい" } }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig({ characterPage: { showIcons: 1 } }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig({ characterPage: "出す" }, "氷の街")
+    ).toThrow();
+  });
+});
+
+describe("書体の検証", () => {
+  test("作品フォルダの中の .ttf / .otf を受け取る", () => {
+    const config = parseBookConfig(
+      { fonts: { body: "素材/本文.ttf", heading: "素材\\見出し.OTF" } },
+      "氷の街"
+    );
+
+    expect(config.fonts.body).toBe("素材/本文.ttf");
+    // 区切りは `/` に揃える（表紙・挿絵と同じ）
+    expect(config.fonts.heading).toBe("素材/見出し.OTF");
+  });
+
+  test("指定しなければ null（同梱しない）", () => {
+    expect(parseBookConfig({ fonts: {} }, "氷の街").fonts).toEqual({
+      body: null,
+      heading: null,
+    });
+    expect(parseBookConfig({ fonts: { body: "  " } }, "氷の街").fonts.body).toBe(
+      null
+    );
+  });
+
+  test("作品フォルダの外は指せない（表紙・挿絵とまったく同じ）", () => {
+    expect(() =>
+      parseBookConfig({ fonts: { body: "../../C:/Windows/Fonts/msmincho.ttc" } }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig({ fonts: { body: "C:/Windows/Fonts/msgothic.ttf" } }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig({ fonts: { heading: "/usr/share/fonts/a.otf" } }, "氷の街")
+    ).toThrow();
+  });
+
+  /**
+   * **本へ入れられない種類は、書いた時点で断る。** 組み立ての途中で
+   * 落ちると、書体1つのために本そのものが出ない（表紙と同じ考え方）。
+   */
+  test("扱えない拡張子は弾く", () => {
+    expect(() =>
+      parseBookConfig({ fonts: { body: "素材/本文.woff2" } }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig({ fonts: { body: "素材/本文.ttc" } }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig({ fonts: { heading: "素材/見出し" } }, "氷の街")
+    ).toThrow();
+  });
+
+  test("文字列でなければ弾く", () => {
+    expect(() => parseBookConfig({ fonts: { body: 1 } }, "氷の街")).toThrow();
+    expect(() => parseBookConfig({ fonts: "明朝" }, "氷の街")).toThrow();
   });
 });
 

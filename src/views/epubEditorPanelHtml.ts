@@ -115,7 +115,7 @@ export function buildEpubEditorPanelHtml(
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; img-src ${cspSource} data:; style-src ${cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+      content="default-src 'none'; img-src ${cspSource} data:; font-src ${cspSource}; style-src ${cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>EPUBエディター</title>
 <style nonce="${nonce}">
@@ -325,6 +325,22 @@ ${coverSection(
   "裏表紙を焼く"
 )}
 
+    <h2>登場人物一覧</h2>
+    <label class="check"><input id="characterPageEnabled" type="checkbox"><span>登場人物一覧の面を入れる</span></label>
+    <label class="check"><input id="characterPageIcons" type="checkbox"><span>人物イラストを添える</span></label>
+    <p class="note">載るのは「登場済み・モブでない・公開」の人物の、名前と紹介文だけです。並びは設定資料の順になります。</p>
+    <p class="note" id="characterNotice"></p>
+
+    <h2>書体</h2>
+    <label><span>本文用（作品フォルダからの相対パス。.ttf / .otf）</span><input id="fontBody" type="text"></label>
+    <label><span>見出し用（同上）</span><input id="fontHeading" type="text"></label>
+    <!--
+      **ライセンスの注意書きは常に出す**（設計書6.65.3・6.65.11）。
+      埋め込みが許諾されているかを確かめられるのは作者だけであり、
+      畳んだり、指定したときだけ出したりはしない
+    -->
+    <p class="note">フォントの埋め込みが許諾されているかは、作者の責任でご確認ください（フォントのライセンスをご覧ください）。</p>
+
     <h2>挿絵とページ分割</h2>
     <label><span>話</span><select id="episodeSelect"></select></label>
     <p class="note" id="placementNotice"></p>
@@ -362,6 +378,10 @@ const TEXTS = ['bookTitle', 'author', 'illustrator', 'label'];
 const CHOICES = ['writingMode', 'tocPattern', 'tocOrnament', 'colophonOrnament'];
 const CHECKS = ['collapseBlankLines', 'tocEnabled'];
 const PATHS = ['coverImagePath', 'backCoverImagePath'];
+/** 登場人物一覧の2つ（設計書6.65.11）。入れ子なので CHECKS とは別に扱う */
+const CHARACTER_CHECKS = { characterPageEnabled: 'enabled', characterPageIcons: 'showIcons' };
+/** 書体の2枠。欄の中身は作品フォルダからの相対パス（空なら同梱しない） */
+const FONT_FIELDS = { fontBody: 'body', fontHeading: 'heading' };
 
 /** 合成の面は2つだけ。IDの前半に使う */
 const SIDES = ['front', 'back'];
@@ -577,6 +597,8 @@ function fillEpisodes(list) {
 function applyWarnings(data) {
   field('placementWarnings').textContent =
     (data.placementWarnings || []).join('\\n');
+  // 登場人物一覧は「出す」を選んでも空のことがある。理由は拡張機能側が持つ
+  field('characterNotice').textContent = data.characterNotice || '';
 }
 
 function fillForm(config) {
@@ -601,6 +623,14 @@ function fillForm(config) {
   CHOICES.forEach(function (id) { field(id).value = config[id]; });
   CHECKS.forEach(function (id) { field(id).checked = config[id] === true; });
   PATHS.forEach(function (id) { field(id).value = config[id] || ''; });
+  const characterPage = config.characterPage || {};
+  Object.keys(CHARACTER_CHECKS).forEach(function (id) {
+    field(id).checked = characterPage[CHARACTER_CHECKS[id]] === true;
+  });
+  const fonts = config.fonts || {};
+  Object.keys(FONT_FIELDS).forEach(function (id) {
+    field(id).value = fonts[FONT_FIELDS[id]] || '';
+  });
   SIDES.forEach(function (side) {
     fillLayout(side, config[LAYOUT_KEYS[side]]);
   });
@@ -619,6 +649,19 @@ function readForm() {
     const value = field(id).value.trim();
     config[id] = value ? value : null;
   });
+  const characterPage = {};
+  Object.keys(CHARACTER_CHECKS).forEach(function (id) {
+    characterPage[CHARACTER_CHECKS[id]] = field(id).checked;
+  });
+  config.characterPage = characterPage;
+  // 書体は空欄なら null（同梱しない）。**空文字を送らない**——
+  // 拡張機能側の検証は「書いてあるが読めない場所」として叱ってしまう
+  const fonts = {};
+  Object.keys(FONT_FIELDS).forEach(function (id) {
+    const value = field(id).value.trim();
+    fonts[FONT_FIELDS[id]] = value ? value : null;
+  });
+  config.fonts = fonts;
   SIDES.forEach(function (side) {
     config[LAYOUT_KEYS[side]] = readLayout(side);
   });
@@ -655,10 +698,10 @@ function scheduleChange() {
   }, 200);
 }
 
-TEXTS.concat(PATHS).forEach(function (id) {
+TEXTS.concat(PATHS).concat(Object.keys(FONT_FIELDS)).forEach(function (id) {
   field(id).addEventListener('input', scheduleChange);
 });
-CHOICES.concat(CHECKS).forEach(function (id) {
+CHOICES.concat(CHECKS).concat(Object.keys(CHARACTER_CHECKS)).forEach(function (id) {
   field(id).addEventListener('change', scheduleChange);
 });
 SIDES.forEach(function (side) {

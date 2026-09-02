@@ -10,7 +10,7 @@
  *
  * VS Code API に依存しない（`models` の約束）。第1段（6.65.4）の項目に、
  * 第3段の前半で表紙・裏表紙の合成指定（6.65.8）を、後半の前側で挿絵と
- * ページ分割（6.65.10）を足した。書体はまだここに無い。
+ * ページ分割（6.65.10）を、後側で登場人物一覧と書体（6.65.11）を足した。
  */
 
 import {
@@ -168,6 +168,44 @@ export interface BookIllustration extends BookBodyPosition {
 /** 話の途中で改ページする位置（場面替わり用。設計書6.65.10） */
 export type BookPageBreak = BookBodyPosition;
 
+/**
+ * 登場人物一覧の面を出すか（設計書6.65.11）。
+ *
+ * **既定は「出さない」。** 設定資料には本文からAIが読み取ったものが
+ * 混ざっており、確かめていない記述やネタバレが不意に本へ入るのは事故で
+ * ある。作者がここで選んで初めて面が増える。
+ */
+export interface BookCharacterPage {
+  enabled: boolean;
+  /** 人物イラスト（台帳の `icon`）を添えるか。読めない人物は名前だけ */
+  showIcons: boolean;
+}
+
+/**
+ * 同梱する書体（設計書6.65.11）。
+ *
+ * **枠は本文用と見出し用の2つだけ。** 増やすより、まず2枠で足りるかを
+ * 実機で見る。どちらも作品フォルダの中の .ttf／.otf への相対パスで、
+ * null なら同梱しない（＝リーダー側の明朝で組まれる）。
+ *
+ * **埋め込みが許諾されているかは作者の責任である**（6.65.3）。ここでは
+ * 判定できないので、選択欄に注意書きを常に出す。
+ */
+export interface BookFonts {
+  body: string | null;
+  heading: string | null;
+}
+
+/**
+ * 本へ入れられる書体の種類。
+ *
+ * **`.woff`／`.woff2` は入れない。** EPUB3の必須形式ではあるが、作者が
+ * 手元に持っているのはたいてい .ttf か .otf であり、変換して壊れた
+ * フォントを本へ入れるより、扱える種類を絞って断るほうがよい
+ * （サブセット化をしないと決めたのと同じ考え方）。
+ */
+export const BOOK_FONT_EXTENSIONS: readonly string[] = ["ttf", "otf"];
+
 export interface BookConfig {
   schemaVersion: string;
   /** 題名。空なら作品名で埋める（無題の本を作らない） */
@@ -221,6 +259,10 @@ export interface BookConfig {
   illustrations: BookIllustration[];
   /** 話の途中の改ページ。XHTMLは分けず、次の段落にクラスを付ける */
   pageBreaks: BookPageBreak[];
+  /** 登場人物一覧（設計書6.65.11）。**既定は出さない** */
+  characterPage: BookCharacterPage;
+  /** 同梱する書体（設計書6.65.11）。既定はどちらも null（同梱しない） */
+  fonts: BookFonts;
 }
 
 export const BOOK_SCHEMA_VERSION = "0.1";
@@ -313,6 +355,10 @@ export function defaultBookConfig(title: string): BookConfig {
     // 見た目を変えないこと。ほかの項目と同じ約束）
     illustrations: [],
     pageBreaks: [],
+    // **登場人物一覧は既定で出さない**（設計書6.65.11）。ただし出すと
+    // 決めた人はたいてい顔も見せたいので、イラストの側は既定で入れる
+    characterPage: { enabled: false, showIcons: true },
+    fonts: { body: null, heading: null },
   };
 }
 
@@ -386,7 +432,73 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
     ),
     illustrations: parseIllustrations(value.illustrations),
     pageBreaks: parsePageBreaks(value.pageBreaks),
+    characterPage: parseCharacterPage(
+      value.characterPage,
+      defaults.characterPage
+    ),
+    fonts: parseFonts(value.fonts),
   };
+}
+
+/**
+ * 登場人物一覧の指定（設計書6.65.11）。
+ *
+ * **書かれている側だけを差し替える。** 作者が `enabled` だけを手で書いた
+ * ときに、イラストの有無まで既定へ戻っては困る（合成指定と同じ扱い）。
+ */
+function parseCharacterPage(
+  raw: unknown,
+  defaults: BookCharacterPage
+): BookCharacterPage {
+  if (raw === undefined || raw === null) return { ...defaults };
+  const value = objectValue(raw, "characterPage");
+
+  optionalBoolean(value.enabled, "characterPage.enabled");
+  optionalBoolean(value.showIcons, "characterPage.showIcons");
+
+  return {
+    enabled: (value.enabled as boolean | undefined) ?? defaults.enabled,
+    showIcons: (value.showIcons as boolean | undefined) ?? defaults.showIcons,
+  };
+}
+
+/** 同梱する書体（設計書6.65.11）。表紙と同じ検証に、拡張子の確認を足す */
+function parseFonts(raw: unknown): BookFonts {
+  if (raw === undefined || raw === null) return { body: null, heading: null };
+  const value = objectValue(raw, "fonts");
+
+  optionalNullableString(value.body, "fonts.body");
+  optionalNullableString(value.heading, "fonts.heading");
+
+  return {
+    body: fontPath(value.body, "本文用の書体"),
+    heading: fontPath(value.heading, "見出し用の書体"),
+  };
+}
+
+/**
+ * 書体の場所。**表紙とまったく同じ「外を指せない」検証**を通し、
+ * さらに扱える種類かを見る。
+ *
+ * 種類をここで断るのは、書き出しの途中で落ちると**書体1つのために本
+ * そのものが出ない**からである（表紙画像と同じ考え方）。
+ */
+function fontPath(raw: unknown, label: string): string | null {
+  const value = ((raw as string | null | undefined) ?? "").trim();
+  if (!value) return null;
+
+  const normalized = relativeInsideWork(value, label);
+  const matched = /\.([A-Za-z0-9]+)$/.exec(normalized);
+  const extension = matched ? matched[1].toLowerCase() : "";
+  if (!BOOK_FONT_EXTENSIONS.includes(extension)) {
+    throw new Error(
+      `${label}「${value}」は本に入れられません。` +
+        `${BOOK_FONT_EXTENSIONS.map((item) => `.${item}`).join(
+          "・"
+        )} のファイルを指定してください。`
+    );
+  }
+  return normalized;
 }
 
 /**

@@ -19,10 +19,20 @@ import { timestampedFileNameCandidates } from "../core/timestampedFileName";
 import { notationModeFor } from "../core/manuscriptRender";
 import {
   buildEpub,
+  fontMediaType,
   imageMediaType,
+  type EpubBookCharacter,
   type EpubChapter,
+  type EpubFont,
+  type EpubFonts,
   type EpubIllustration,
 } from "../core/epubPackage";
+import {
+  characterIconPath,
+  selectBookCharacters,
+  toCharacterEntry,
+} from "../core/epubCharacterPage";
+import { CharacterStore } from "../core/characterStore";
 import {
   countParagraphs,
   describePlacementOverflow,
@@ -93,19 +103,21 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
   /** 競合マーカーが残っている話。組んでも読めない本になるので外す */
   const conflicted: string[] = [];
   /**
-   * 挿絵まわりで作者へ伝えること（設計書6.65.10）。
+   * 本は出るが、指定どおりにならなかったことを作者へ伝える言葉
+   * （設計書6.65.10・6.65.11）。
    *
-   * **本は出す。** 位置がずれた・画像が1枚読めなかった、で本ごと出ない
-   * ほうが困る。ただし黙って捨てもしないので、完了通知にまとめて出す。
+   * **本は出す。** 挿絵の位置がずれた・画像が1枚読めなかった・人物の
+   * イラストが無い・書体が読めない——どれも本ごと出ないほうが困る。
+   * ただし黙って捨てもしないので、完了通知にまとめて出す。
    */
-  const placementNotes: string[] = [];
+  const notices: string[] = [];
   /** 読んだ画像。同じ絵を何話でも使えるので、1度読んだら覚えておく */
   const images = new Map<string, Uint8Array | null>();
 
   // **指し先の話が無い指定は、どの話にも入らない。** 改題・移動で必ず
   // 起きるので、入らなかったことを先に伝える（設計書6.65.10）。
   // 競合を含む話も「ある」と数える——そちらは別の言葉で既に伝えている
-  placementNotes.push(
+  notices.push(
     ...missingEpisodeNotices(
       scan.episodes.map((episode) =>
         episodePathFor(work.folderPath, episode.filePath)
@@ -146,7 +158,7 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       heading,
       body,
       images,
-      notes: placementNotes,
+      notes: notices,
     });
 
     chapters.push({
@@ -198,6 +210,14 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     return;
   }
 
+  // **登場人物一覧と書体は、どちらも失敗で本を止めない**（設計書6.65.11）。
+  // 台帳が読めない・イラストが1枚読めない・書体が読めない——いずれも
+  // 本は出し、何が入らなかったかを完了通知で伝える
+  const characters = config.characterPage.enabled
+    ? await collectCharacters(work, config.characterPage.showIcons, notices)
+    : [];
+  const fonts = await collectFonts(work, config.fonts, notices);
+
   let epub: Uint8Array;
   try {
     epub = buildEpub({
@@ -205,6 +225,8 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       chapters,
       cover,
       backCover,
+      characters,
+      fonts,
       // 本を見分ける唯一の札。書き出すたびに新しい本として扱われる
       identifier: `urn:uuid:${randomUuid()}`,
       modified: isoSeconds(new Date()),
@@ -234,14 +256,14 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
           "、"
         )}）。`
       : "";
-  // 挿絵のずれと読めなかった画像は、**本が出たあとに必ず伝える**
-  const placementNote =
-    placementNotes.length > 0 ? `\n${placementNotes.join("\n")}` : "";
+  // 挿絵のずれ・読めなかった画像・入らなかった書体は、
+  // **本が出たあとに必ず伝える**
+  const noticeText = notices.length > 0 ? `\n${notices.join("\n")}` : "";
   const action = await vscode.window.showInformationMessage(
     `EPUBを書き出しました（${chapters.length}話）。\n${target}` +
       describeCoverUse(cover, backCover) +
       droppedNote +
-      placementNote,
+      noticeText,
     "フォルダーを開く"
   );
   if (action === "フォルダーを開く") await revealFolder(target);
@@ -311,6 +333,176 @@ async function collectPlacements(input: {
   }
 
   return { illustrations, pageBreaks };
+}
+
+/**
+ * 登場人物一覧に載せる人を集める（設計書6.65.11）。
+ *
+ * **台帳は読むだけで、1文字も書き換えない**（原稿と同じ扱い）。
+ *
+ * **台帳が読めなくても本は出す。** 人物一覧が入らなかったことを伝えて、
+ * 残りの面で本を組む——設定資料の不具合で本文が配れなくなるほうが困る。
+ */
+async function collectCharacters(
+  work: WorkEntry,
+  showIcons: boolean,
+  notices: string[]
+): Promise<EpubBookCharacter[]> {
+  let loaded: Awaited<ReturnType<CharacterStore["loadAll"]>>;
+  try {
+    loaded = await new CharacterStore(work).loadAll();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logFailure("登場人物一覧の読み込み", { 作品: work.title, 内容: message });
+    notices.push(
+      `登場人物の設定を読めませんでした（${message}）。登場人物一覧は入れていません。`
+    );
+    return [];
+  }
+
+  // 壊れた人物ファイルは `loadAll` が読み飛ばす。**黙って減らさない**
+  if (loaded.errors.length > 0) {
+    notices.push(
+      `登場人物の設定のうち${loaded.errors.length}件は読めなかったので、一覧から外れています` +
+        `（${loaded.errors.map((entry) => entry.file).join("、")}）。`
+    );
+  }
+
+  const selected = selectBookCharacters(loaded.characters);
+  if (selected.length === 0) {
+    notices.push(
+      "登場人物一覧に載せられる人物が居ませんでした" +
+        "（載るのは「登場済み・モブでない・公開」の人物だけです）。"
+    );
+    return [];
+  }
+
+  const characters: EpubBookCharacter[] = [];
+  /** 読んだ人物イラスト。同じ絵を2人で使うことは無いが、読み直しは避ける */
+  const icons = new Map<string, Uint8Array | null>();
+
+  for (const character of selected) {
+    const entry = toCharacterEntry(character);
+    const iconPath = showIcons ? characterIconPath(character.icon) : null;
+    // **イラストが読めなくても、その人を落とさない。** 名前だけ載せる
+    const data = iconPath
+      ? await readCharacterIcon(work, icons, iconPath, notices)
+      : null;
+
+    characters.push({
+      name: entry.name,
+      reading: entry.reading,
+      summary: entry.summary,
+      icon: iconPath && data ? { sourcePath: iconPath, data } : null,
+    });
+  }
+
+  return characters;
+}
+
+/**
+ * 人物イラストを読む。**読めなければ null**（その人物は名前だけ）。
+ *
+ * 1枚につき1度だけ伝える（挿絵と同じ）。
+ */
+async function readCharacterIcon(
+  work: WorkEntry,
+  icons: Map<string, Uint8Array | null>,
+  iconPath: string,
+  notices: string[]
+): Promise<Uint8Array | null> {
+  const cached = icons.get(iconPath);
+  if (cached !== undefined) return cached;
+
+  // **本を組む前に種類を確かめる。** 組み立ての途中で落ちると、
+  // イラスト1枚のために本そのものが出ない
+  try {
+    imageMediaType(iconPath, "人物イラスト");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    notices.push(`${message}この人物は名前だけにしました。`);
+    icons.set(iconPath, null);
+    return null;
+  }
+
+  try {
+    const data = await vscode.workspace.fs.readFile(
+      path.toUri(path.join(work.folderPath, iconPath))
+    );
+    icons.set(iconPath, data);
+    return data;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logFailure("人物イラストの読み込み", {
+      作品: work.title,
+      場所: iconPath,
+      内容: message,
+    });
+    notices.push(
+      `人物イラスト「${iconPath}」を読めませんでした。この人物は名前だけにしました。`
+    );
+    icons.set(iconPath, null);
+    return null;
+  }
+}
+
+/**
+ * 同梱する書体を読む（設計書6.65.11）。
+ *
+ * **読めなければ組み込まずに本を出す。** 字が変わらないだけで、本文は
+ * 読める（`serif` が最後に控えている）。黙って落とさず、通知に出す。
+ *
+ * **ライセンスの確認はしない・できない。** 埋め込みが許諾されているかは
+ * 作者の責任である（設計書6.65.3。画面に注意書きを常に出してある）。
+ */
+async function collectFonts(
+  work: WorkEntry,
+  fonts: BookConfig["fonts"],
+  notices: string[]
+): Promise<EpubFonts> {
+  return {
+    body: await readFont(work, fonts.body, "本文用の書体", notices),
+    heading: await readFont(work, fonts.heading, "見出し用の書体", notices),
+  };
+}
+
+async function readFont(
+  work: WorkEntry,
+  relativePath: string | null,
+  label: string,
+  notices: string[]
+): Promise<EpubFont | null> {
+  if (!relativePath) return null;
+
+  // 種類は book.json の検証も見ているが、手編集されるJSONなので
+  // 組み立ての前にもう一度確かめる（表紙・挿絵と同じ）
+  try {
+    fontMediaType(relativePath, label);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    notices.push(`${message}この書体は組み込んでいません。`);
+    return null;
+  }
+
+  try {
+    return {
+      fileName: relativePath,
+      data: await vscode.workspace.fs.readFile(
+        path.toUri(path.join(work.folderPath, relativePath))
+      ),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logFailure("書体の読み込み", {
+      作品: work.title,
+      場所: relativePath,
+      内容: message,
+    });
+    notices.push(
+      `${label}「${relativePath}」を読めませんでした。この書体は組み込んでいません。`
+    );
+    return null;
+  }
 }
 
 /**

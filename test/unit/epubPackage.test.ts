@@ -8,6 +8,7 @@ import {
   buildEpubCss,
   buildTitlePageFragment,
   buildTocFragment,
+  fontMediaType,
   imageMediaType,
   scopeCssForPreview,
   type EpubBook,
@@ -762,5 +763,258 @@ describe("表紙画像の種類", () => {
   test("扱えない種類は、分かる言葉で断る", () => {
     expect(() => imageMediaType("表紙.bmp")).toThrow(/bmp/);
     expect(() => imageMediaType("表紙")).toThrow();
+  });
+});
+
+/**
+ * 登場人物一覧（設計書6.65.11）。
+ *
+ * **目次の後・本文の前の1面**である。既定では出さないので、`enabled` を
+ * 立てたときだけ面が増える。
+ */
+describe("登場人物一覧の面", () => {
+  const characters = [
+    {
+      name: "月島灯",
+      reading: "つきしまあかり",
+      summary: "生活保護課の新人",
+      icon: null,
+    },
+    { name: "白石", reading: null, summary: "", icon: null },
+  ];
+
+  function order(files: Record<string, string>): string[] {
+    return [...files["OEBPS/content.opf"].matchAll(/<itemref idref="([^"]+)"/g)].map(
+      (match) => match[1]
+    );
+  }
+
+  test("目次の後・本文の前に入る", () => {
+    const files = open(
+      buildEpub({
+        ...withConfig({ characterPage: { enabled: true, showIcons: true } }),
+        characters,
+      })
+    );
+    const spine = order(files);
+
+    expect(spine.indexOf("nav")).toBeLessThan(spine.indexOf("characters"));
+    expect(spine.indexOf("characters")).toBeLessThan(
+      spine.indexOf("chapter-001")
+    );
+    expect(files["OEBPS/characters.xhtml"]).toContain("月島灯");
+    expect(files["OEBPS/content.opf"]).toContain('href="characters.xhtml"');
+  });
+
+  test("目次を出さない本でも、本文の前に入る", () => {
+    const spine = order(
+      open(
+        buildEpub({
+          ...withConfig({
+            tocEnabled: false,
+            characterPage: { enabled: true, showIcons: true },
+          }),
+          characters,
+        })
+      )
+    );
+
+    expect(spine.indexOf("characters")).toBeLessThan(
+      spine.indexOf("chapter-001")
+    );
+    expect(spine).not.toContain("nav");
+  });
+
+  test("目次からも辿れる（本文の前なので先頭に置く）", () => {
+    const nav = open(
+      buildEpub({
+        ...withConfig({ characterPage: { enabled: true, showIcons: true } }),
+        characters,
+      })
+    )["OEBPS/nav.xhtml"];
+
+    expect(nav).toContain('href="characters.xhtml"');
+    expect(nav.indexOf("characters.xhtml")).toBeLessThan(
+      nav.indexOf("chapter-001.xhtml")
+    );
+  });
+
+  test("既定（出さない）なら、面そのものが無い", () => {
+    const files = open(buildEpub({ ...book(), characters }));
+
+    expect(files["OEBPS/characters.xhtml"]).toBeUndefined();
+    expect(files["OEBPS/content.opf"]).not.toContain("characters");
+  });
+
+  test("出す設定でも、載せる人物が居なければ面を作らない", () => {
+    const files = open(
+      buildEpub(
+        withConfig({ characterPage: { enabled: true, showIcons: true } })
+      )
+    );
+
+    expect(files["OEBPS/characters.xhtml"]).toBeUndefined();
+  });
+
+  /** 挿絵と同じ流儀。作者のファイル名は使わず、機械名に付け替える */
+  test("人物イラストは portrait-1 の機械名で入る", () => {
+    const files = open(
+      buildEpub({
+        ...withConfig({ characterPage: { enabled: true, showIcons: true } }),
+        characters: [
+          {
+            name: "月島灯",
+            reading: null,
+            summary: "",
+            icon: {
+              sourcePath: "素材/月島 灯.png",
+              data: new Uint8Array([0x89, 0x50]),
+            },
+          },
+        ],
+      })
+    );
+
+    expect(files["OEBPS/portrait-1.png"]).toBeDefined();
+    expect(files["OEBPS/characters.xhtml"]).toContain('src="portrait-1.png"');
+    expect(files["OEBPS/content.opf"]).toContain('id="portrait-1"');
+    // 表紙の印は本に1つだけ。人物イラストには付けない
+    expect(files["OEBPS/content.opf"]).not.toMatch(
+      /<item[^>]*id="portrait-1"[^>]*cover-image/
+    );
+  });
+
+  /**
+   * **イラストが読めない人物も、名前だけで載る**（設計書6.65.11）。
+   * ここへ届く前に読めなかったものは `icon: null` になっている。
+   */
+  test("イラストの無い人物が混ざっても、載る人は減らない", () => {
+    const files = open(
+      buildEpub({
+        ...withConfig({ characterPage: { enabled: true, showIcons: true } }),
+        characters: [
+          { name: "白石", reading: null, summary: "", icon: null },
+          {
+            name: "月島灯",
+            reading: null,
+            summary: "",
+            icon: {
+              sourcePath: "素材/月島.png",
+              data: new Uint8Array([0x89, 0x50]),
+            },
+          },
+        ],
+      })
+    );
+    const page = files["OEBPS/characters.xhtml"];
+
+    expect(page).toContain("白石");
+    expect(page).toContain("月島灯");
+    // 絵のある人だけが画像を持つ（機械名は絵の側で1から数える）
+    expect([...page.matchAll(/<img /g)].length).toBe(1);
+    expect(page).toContain('src="portrait-1.png"');
+    expect(files["OEBPS/portrait-1.png"]).toBeDefined();
+  });
+});
+
+/**
+ * 書体の組み込み（設計書6.65.11）。
+ *
+ * **フォールバックは必ず serif を後ろに置く。** 同梱フォントを読まない
+ * リーダーでも、本文が消えないようにするためである。
+ */
+describe("書体の同梱", () => {
+  const bodyFont = {
+    fileName: "素材/本文.ttf",
+    data: new Uint8Array([0x00, 0x01, 0x00, 0x00]),
+  };
+  const headingFont = {
+    fileName: "素材/見出し.otf",
+    data: new Uint8Array([0x4f, 0x54, 0x54, 0x4f]),
+  };
+
+  test("manifest に載り、@font-face で当たる", () => {
+    const files = open(
+      buildEpub({ ...book(), fonts: { body: bodyFont, heading: headingFont } })
+    );
+    const opf = files["OEBPS/content.opf"];
+    const css = files["OEBPS/style.css"];
+
+    expect(opf).toContain('href="font-body.ttf"');
+    expect(opf).toContain('media-type="font/ttf"');
+    expect(opf).toContain('href="font-heading.otf"');
+    expect(opf).toContain('media-type="font/otf"');
+    expect(files["OEBPS/font-body.ttf"]).toBeDefined();
+    expect(files["OEBPS/font-heading.otf"]).toBeDefined();
+
+    expect(css).toContain("@font-face");
+    expect(css).toContain('url("font-body.ttf")');
+    expect(css).toContain('url("font-heading.otf")');
+  });
+
+  test("本文用は body に、見出し用は見出しに当たる", () => {
+    const css = open(
+      buildEpub({ ...book(), fonts: { body: bodyFont, heading: headingFont } })
+    )["OEBPS/style.css"];
+
+    const bodyRule = /body \{[^}]*\}/.exec(css)?.[0] ?? "";
+    expect(bodyRule).toContain("BookBody");
+    // 見出しは h1・h2 に当てる（話の見出し・目次・奥付が全部これ）
+    expect(css).toMatch(/h1, h2[^{]*\{[^}]*BookHeading/);
+  });
+
+  test("フォールバックの最後は必ず serif", () => {
+    const css = open(
+      buildEpub({ ...book(), fonts: { body: bodyFont, heading: headingFont } })
+    )["OEBPS/style.css"];
+    // `@font-face` の中の font-family は「同梱した書体の名前」であって
+    // 並びではない。字を当てている側だけを見る
+    const stacks = css.replace(/@font-face \{[^}]*\}/g, "");
+
+    const found = [...stacks.matchAll(/font-family:([^;]*);/g)];
+    expect(found.length).toBeGreaterThan(1);
+    for (const rule of found) {
+      expect(rule[1].trim().endsWith("serif"), rule[0]).toBe(true);
+    }
+  });
+
+  test("片方だけの指定もできる", () => {
+    const css = open(
+      buildEpub({ ...book(), fonts: { body: bodyFont, heading: null } })
+    )["OEBPS/style.css"];
+
+    expect(css).toContain('url("font-body.ttf")');
+    expect(css).not.toContain("BookHeading");
+  });
+
+  test("指定が無ければ @font-face そのものが無い（第1段と同じ本）", () => {
+    const files = open(buildEpub(book()));
+
+    expect(files["OEBPS/style.css"]).not.toContain("@font-face");
+    expect(files["OEBPS/content.opf"]).not.toContain("font/ttf");
+  });
+
+  test("扱えない種類は、分かる言葉で断る", () => {
+    expect(() => fontMediaType("本文.woff2")).toThrow(/woff2/);
+    expect(() => fontMediaType("本文")).toThrow();
+    expect(fontMediaType("本文.TTF")).toBe("font/ttf");
+    expect(fontMediaType("見出し.otf")).toBe("font/otf");
+  });
+
+  /** 画面のプレビューにも同じ書体を当てる（設計書6.65.11） */
+  test("プレビュー用に閉じ込めても @font-face は外に残る", () => {
+    const scoped = scopeCssForPreview(
+      buildEpubCss(true, {
+        bodyHref: "https://example/font-body.ttf",
+        headingHref: null,
+      }),
+      ".epub-page"
+    );
+
+    expect(scoped).toContain("@font-face {");
+    // 枠の中へ閉じ込めると、@font-face そのものが効かなくなる
+    expect(scoped).not.toContain(".epub-page @font-face");
+    expect(scoped).toContain('url("https://example/font-body.ttf")');
+    expect(scoped).toContain(".epub-page {");
   });
 });
