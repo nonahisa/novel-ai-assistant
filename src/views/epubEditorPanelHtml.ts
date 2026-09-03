@@ -339,6 +339,15 @@ button.primary {
       <option value="center">中央飾り</option>
     </select></label>
 
+    <!--
+      あとがき（設計書6.65.15）。**原稿は作者が書く**ので、ここは
+      書く場所を開く入口だけを置く。原稿が無ければ雛形を作ってから開く
+      （面が本へ入るのは、中身を書いたときだけ）
+    -->
+    <h2>あとがき</h2>
+    <p class="note">本文の後ろに1面として入ります。原稿は 設定/書籍/あとがき.md に書きます（まだ無ければ作ります）。</p>
+    <div class="cover-actions"><button id="openAfterword">あとがきを書く</button></div>
+
     <h2>奥付</h2>
     <label><span>飾り</span><select id="colophonOrnament">
       <option value="none">なし</option>
@@ -789,6 +798,10 @@ field('save').addEventListener('click', function () {
 });
 field('export').addEventListener('click', function () {
   post('export', { config: readForm() });
+});
+/* あとがきの原稿を開く。作るのも開くのも拡張機能側の仕事（場所を画面で組み立てない） */
+field('openAfterword').addEventListener('click', function () {
+  post('openAfterword', { config: readForm() });
 });
 field('bakeFront').addEventListener('click', function () { bake('front'); });
 field('bakeBack').addEventListener('click', function () { bake('back'); });

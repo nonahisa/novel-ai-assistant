@@ -234,6 +234,116 @@ export interface BookFonts {
  */
 export const BOOK_FONT_EXTENSIONS: readonly string[] = ["ttf", "otf"];
 
+/**
+ * 本を組み立てる「面」の種類（設計書6.65.15）。
+ *
+ * **並びがそのまま本の並びになる。** 種類ごとの設定は最小限で、
+ * 中身（書誌情報・目次の体裁・人物の絞り込み）は従来どおり `BookConfig` の
+ * 各項目が持つ——ここへ写すと、同じ設定が2か所にある状態になる。
+ *
+ * **章区切りは持たない**（設計書6.65.15）。章立ての台帳（`設定/章立て.json`。
+ * 6.66）が正で、二重管理にしない。
+ */
+export const BOOK_BLOCK_TYPES = [
+  /** 表紙 */
+  "cover",
+  /** 中表紙（タイトルページ） */
+  "halfTitle",
+  /** 口絵（本文の前に置く画像の面） */
+  "frontIllustration",
+  /** 扉絵（任意の位置に挿せる画像の面） */
+  "sectionArt",
+  "toc",
+  /** 人物紹介 */
+  "characters",
+  /** 本文一式。**1冊にちょうど1つ** */
+  "body",
+  "afterword",
+  /** 奥付 */
+  "colophon",
+  "backCover",
+] as const;
+
+export type BookBlockType = (typeof BOOK_BLOCK_TYPES)[number];
+
+/** 画像1枚で1面になる種類。口絵と扉絵は**置ける場所だけが違う** */
+export const BOOK_IMAGE_BLOCK_TYPES = [
+  "frontIllustration",
+  "sectionArt",
+] as const;
+
+export type BookImageBlockType = (typeof BOOK_IMAGE_BLOCK_TYPES)[number];
+
+/** 面の呼び名。**通知にも画面にも同じ言葉を出す**ため1か所で持つ */
+export const BOOK_BLOCK_LABELS: Record<BookBlockType, string> = {
+  cover: "表紙",
+  halfTitle: "中表紙",
+  frontIllustration: "口絵",
+  sectionArt: "扉絵",
+  toc: "目次",
+  characters: "人物紹介",
+  body: "本文",
+  afterword: "あとがき",
+  colophon: "奥付",
+  backCover: "裏表紙",
+};
+
+/** 画像の面（口絵・扉絵）。場所の検証は表紙・挿絵とまったく同じ */
+export interface BookImageBlock {
+  type: BookImageBlockType;
+  /** 作品フォルダからの相対パス */
+  imagePath: string;
+  /** 図版の下に添える文。空なら出さない（挿絵と同じ） */
+  caption: string;
+}
+
+/** 画像以外の面。**種類のほかに持つものが無い**（設定は BookConfig 側） */
+export interface BookPlainBlock {
+  type: Exclude<BookBlockType, BookImageBlockType>;
+}
+
+export type BookBlock = BookImageBlock | BookPlainBlock;
+
+/** 画像の面か（型を絞るためだけの判定。並び替えの都合で何度も要る） */
+export function isBookImageBlock(block: BookBlock): block is BookImageBlock {
+  return (BOOK_IMAGE_BLOCK_TYPES as readonly string[]).includes(block.type);
+}
+
+/**
+ * 1冊に1つまでの面。
+ *
+ * 扉絵（`sectionArt`）だけは何枚でも挿せる——章の変わり目ごとに絵を置く
+ * 使い方があり、そこを縛ると本が作れなくなる。口絵も同じ理由で複数を許す。
+ */
+const SINGLE_BLOCK_TYPES: readonly BookBlockType[] = [
+  "cover",
+  "halfTitle",
+  "toc",
+  "characters",
+  "body",
+  "afterword",
+  "colophon",
+  "backCover",
+];
+
+/**
+ * 並べ替えの基準になる順（既定の並びの順そのもの）。
+ *
+ * **目次・人物紹介を並びへ戻すときの置き場所を決めるためだけ**に使う。
+ * 扉絵は「任意の位置に挿せる」面なので、この表に順位を持たない。
+ */
+const BLOCK_ORDER: readonly BookBlockType[] = [
+  "cover",
+  "halfTitle",
+  "frontIllustration",
+  "toc",
+  "characters",
+  "body",
+  "afterword",
+  "colophon",
+  "backCover",
+];
+
 export interface BookConfig {
   schemaVersion: string;
   /** 題名。空なら作品名で埋める（無題の本を作らない） */
@@ -293,12 +403,32 @@ export interface BookConfig {
   characterPage: BookCharacterPage;
   /** 同梱する書体（設計書6.65.11）。既定はどちらも null（同梱しない） */
   fonts: BookFonts;
+  /**
+   * 面の並び（設計書6.65.15）。**順序がそのまま本の並びになる。**
+   *
+   * **省略できる。** blocks を知らない版で書かれた book.json をそのまま
+   * 読めるようにするためで、読み込み時に既定の並びを組んで補う
+   * （`parseBookConfig`）。**ファイルは書き換えない**——保存して初めて
+   * この項目が book.json へ入る。
+   *
+   * 使う側は必ず `resolveBookBlocks` を通すこと。書いてある並びと、
+   * 目次・人物紹介の設定との食い違いをそこで揃える。
+   */
+  blocks?: BookBlock[];
 }
 
 export const BOOK_SCHEMA_VERSION = "0.1";
 /** `設定/` の下のフォルダ名 */
 export const BOOK_DIR = "書籍";
 export const BOOK_FILE = "book.json";
+/**
+ * あとがきの原稿（設計書6.65.15）。
+ *
+ * **JSONではなくMarkdownで持つ。** 長い文章をJSONへ入れると、改行が
+ * `\n` の並びになって作者が読めず、Gitの差分も1行にまとまる。
+ * `設定/書籍/` に置くので、`設定/` と一緒に同期・復元できる。
+ */
+export const AFTERWORD_FILE = "あとがき.md";
 
 /**
  * 表紙の合成の既定（設計書6.65.8）。
@@ -365,6 +495,91 @@ export function defaultBackCoverLayout(): CoverLayout {
   };
 }
 
+/**
+ * 既定の面の並び（設計書6.65.15）。**純粋関数**である。
+ *
+ * blocks を持たない book.json を、**いままでと同じ本**として読むための
+ * 並びでもある（表紙→中表紙→目次→人物紹介→本文→奥付→裏表紙）。
+ *
+ * ## あとがきを既定の並びに入れている
+ *
+ * 設計書の並びにあとがきは無いが、**原稿（`設定/書籍/あとがき.md`）が
+ * 無ければ面ごと出ない**ので、いままでの本の中身は1文字も変わらない。
+ * 入れておかないと、あとがきを書く入口だけあって本に載らない——並びを
+ * 編む画面（段C）ができるまで、作者にできることが無くなってしまう。
+ *
+ * ## 裏表紙は「有無」で足し引きしない
+ *
+ * 裏表紙の面が本へ入るかは、**焼いた画像か元イラストがあるか**で決まる
+ * （設計書6.65.8の拾い順）。`backCoverImagePath` だけを見て並びから外すと、
+ * 焼いた画像しか無い本の裏表紙が消える。並びには常に置き、画像が無ければ
+ * 組み立て側が面を出さない。
+ */
+export function defaultBookBlocks(settings: {
+  tocEnabled: boolean;
+  characterPage: { enabled: boolean };
+}): BookBlock[] {
+  return [
+    { type: "cover" },
+    { type: "halfTitle" },
+    ...(settings.tocEnabled ? [{ type: "toc" } as BookPlainBlock] : []),
+    ...(settings.characterPage.enabled
+      ? [{ type: "characters" } as BookPlainBlock]
+      : []),
+    { type: "body" },
+    { type: "afterword" },
+    { type: "colophon" },
+    { type: "backCover" },
+  ];
+}
+
+/**
+ * 実際に組む面の並び（設計書6.65.15）。**書き出しも画面もここを通す。**
+ *
+ * 並びを編む画面はまだ無い（段C）ので、**目次・人物紹介の有無を決めるのは
+ * いまも左の欄のチェック**である。blocks が保存されたあとにチェックを
+ * 切り替えても効くよう、ここで足し引きして揃える——揃えないと、
+ * 一度保存した本は目次のチェックが二度と効かなくなる。
+ */
+export function resolveBookBlocks(config: BookConfig): BookBlock[] {
+  if (!config.blocks) return defaultBookBlocks(config);
+
+  let blocks = [...config.blocks];
+  blocks = syncOptionalBlock(blocks, "toc", config.tocEnabled);
+  blocks = syncOptionalBlock(
+    blocks,
+    "characters",
+    config.characterPage.enabled
+  );
+  return blocks;
+}
+
+/**
+ * 1つの面を、設定に合わせて並びへ足す／から外す。
+ *
+ * 足すときの置き場所は `BLOCK_ORDER`（既定の並びの順）から決める——
+ * **順位を持たない扉絵は読み飛ばす**（どこに置かれていても、目次の位置の
+ * 手がかりにならないため）。順位の上の面が1つも無ければ末尾へ置く。
+ */
+function syncOptionalBlock(
+  blocks: readonly BookBlock[],
+  type: BookBlockType,
+  wanted: boolean
+): BookBlock[] {
+  const found = blocks.some((block) => block.type === type);
+  if (found === wanted) return [...blocks];
+  if (!wanted) return blocks.filter((block) => block.type !== type);
+
+  const rank = BLOCK_ORDER.indexOf(type);
+  const at = blocks.findIndex((block) => {
+    const other = BLOCK_ORDER.indexOf(block.type);
+    return other >= 0 && other > rank;
+  });
+  const out = [...blocks];
+  out.splice(at < 0 ? out.length : at, 0, { type } as BookPlainBlock);
+  return out;
+}
+
 export function defaultBookConfig(title: string): BookConfig {
   return {
     schemaVersion: BOOK_SCHEMA_VERSION,
@@ -395,6 +610,11 @@ export function defaultBookConfig(title: string): BookConfig {
     // 決めた人はたいてい顔も見せたいので、イラストの側は既定で入れる
     characterPage: { enabled: false, showIcons: true },
     fonts: { body: null, heading: null },
+    // 面の並び（設計書6.65.15）。**いままでの本と同じ並び**である
+    blocks: defaultBookBlocks({
+      tocEnabled: true,
+      characterPage: { enabled: false },
+    }),
   };
 }
 
@@ -474,12 +694,95 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
     ),
     illustrations: parseIllustrations(value.illustrations),
     pageBreaks: parsePageBreaks(value.pageBreaks),
+    // **blocks が無ければ、いまの設定から既定の並びを組む**（設計書
+    // 6.65.15）。ここで組んでもファイルは書き換わらない——保存して初めて
+    // book.json に入る
+    blocks:
+      parseBlocks(value.blocks) ??
+      defaultBookBlocks({
+        tocEnabled:
+          (value.tocEnabled as boolean | undefined) ?? defaults.tocEnabled,
+        characterPage: parseCharacterPage(
+          value.characterPage,
+          defaults.characterPage
+        ),
+      }),
     characterPage: parseCharacterPage(
       value.characterPage,
       defaults.characterPage
     ),
     fonts: parseFonts(value.fonts),
   };
+}
+
+/**
+ * 面の並びを読む（設計書6.65.15）。**書いていなければ undefined。**
+ *
+ * 呼び出し側が「書いていない」と「空の並び（面が1つも無い本）」を
+ * 見分けられるようにしてある——空の並びは本文の無い本なので、下の検査で
+ * 断る。既定の並びで補うのは、項目そのものが無いときだけである。
+ */
+function parseBlocks(raw: unknown): BookBlock[] | undefined {
+  const blocks = optionalObjectArray(raw, "blocks", (entry, entryPath) => {
+    requireNonEmptyString(entry.type, `${entryPath}.type`);
+    const type = (entry.type as string).trim();
+    // **知らない種類は受け取らない。** 既定へ倒すと、書いた面と違うものが
+    // 黙って本へ入る（表紙の合成指定と同じ約束）
+    if (!(BOOK_BLOCK_TYPES as readonly string[]).includes(type)) {
+      throw new Error(
+        `${entryPath}.type「${type}」は知らない面の種類です。` +
+          `${BOOK_BLOCK_TYPES.join("・")} のいずれかにしてください。`
+      );
+    }
+
+    if ((BOOK_IMAGE_BLOCK_TYPES as readonly string[]).includes(type)) {
+      const label = BOOK_BLOCK_LABELS[type as BookBlockType];
+      // 絵の無い口絵・扉絵は作らない（挿絵と同じ理由）
+      requireNonEmptyString(entry.imagePath, `${entryPath}.imagePath`);
+      optionalString(entry.caption, `${entryPath}.caption`);
+      return {
+        type: type as BookImageBlockType,
+        // 表紙・挿絵とまったく同じ検証を通す（片方だけ緩くしない）
+        imagePath: relativeInsideWork((entry.imagePath as string).trim(), label),
+        caption: ((entry.caption as string | undefined) ?? "").trim(),
+      };
+    }
+
+    return { type: type as BookPlainBlock["type"] };
+  });
+
+  if (!blocks) return undefined;
+  assertBlockCounts(blocks);
+  return blocks;
+}
+
+/**
+ * 並びとして成り立っているか。
+ *
+ * **本文はちょうど1つ**——0では本にならず、2つあると同じ話が二度入る。
+ * 表紙や奥付のように1冊に1つしかない面も、重ねて書けない（どちらの設定が
+ * 効いたのか分からない本ができる）。
+ */
+function assertBlockCounts(blocks: readonly BookBlock[]): void {
+  const count = (type: BookBlockType): number =>
+    blocks.filter((block) => block.type === type).length;
+
+  if (count("body") !== 1) {
+    throw new Error(
+      `blocks には本文（body）の面をちょうど1つ書いてください（いまは${count(
+        "body"
+      )}つです）。`
+    );
+  }
+  for (const type of SINGLE_BLOCK_TYPES) {
+    if (count(type) > 1) {
+      throw new Error(
+        `blocks の${BOOK_BLOCK_LABELS[type]}（${type}）が${count(
+          type
+        )}つあります。この面は1冊に1つだけです。`
+      );
+    }
+  }
 }
 
 /**

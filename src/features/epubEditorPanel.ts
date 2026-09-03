@@ -3,10 +3,14 @@ import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
 import {
+  AFTERWORD_FILE,
+  BOOK_BLOCK_LABELS,
   BOOK_DIR,
   parseBookConfig,
+  resolveBookBlocks,
   type BookBodyPosition,
   type BookConfig,
+  type BookImageBlock,
 } from "../models/book";
 import { BookStore, BookStoreError, episodePathFor } from "../core/bookStore";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
@@ -35,6 +39,7 @@ import type { NotationMode } from "../core/manuscriptRender";
 import {
   buildChapterFragment,
   countParagraphs,
+  describeMissingFaceImage,
   describeMissingIllustrationImage,
   describePlacementOverflow,
   missingEpisodeNotices,
@@ -44,10 +49,13 @@ import {
   type EpubIllustrationPlacement,
 } from "../core/epubXhtml";
 import {
+  AFTERWORD_HEADING,
+  buildAfterwordFragment,
   buildBackCoverFragment,
   buildColophonFragment,
   buildCoverFragment,
   buildEpubCss,
+  buildPlateFragment,
   buildTitlePageFragment,
   buildTocFragment,
   buildTocLabel,
@@ -61,6 +69,8 @@ import {
 } from "../core/epubCharacterPage";
 import { CharacterStore } from "../core/characterStore";
 import { buildEpubEditorPanelHtml } from "../views/epubEditorPanelHtml";
+import { openInDefaultEditor } from "../views/openDocument";
+import { atomicWriteFile } from "../core/atomicWrite";
 import { exportEpub } from "./exportEpub";
 import { logFailure } from "../core/logger";
 
@@ -126,6 +136,19 @@ interface PreviewSource {
    * 集める（本文と同じ扱い）。台帳を直したら、パネルを開き直せば入る。
    */
   characters: PreviewCharacter[];
+  /**
+   * あとがきの原稿（設計書6.65.15）。**中身が無ければ null**（面も出ない）。
+   *
+   * 本文と同じで、**開いたときに1度だけ**読む。書いたものをプレビューへ
+   * 映すには、パネルを開き直す（欄を触るたびに読み直さない）。
+   */
+  afterword: PreviewAfterword | null;
+}
+
+/** あとがきの原稿。組版は本文とまったく同じ経路を通る */
+interface PreviewAfterword {
+  text: string;
+  notation: NotationMode;
 }
 
 /** 一覧に載る人物1人。**台帳の項目を全部は持たない**（設計書6.65.11） */
@@ -326,6 +349,12 @@ export async function openEpubEditorPanel(
           "パネルを開き直してからもう一度お試しください。",
         isError: true,
       });
+      return;
+    }
+
+    if (parsed.type === "openAfterword") {
+      // **原稿は作者が書く**（設計書6.65.15）。ここは入口だけを用意する
+      await openAfterword(state);
       return;
     }
 
@@ -571,6 +600,9 @@ async function previewData(state: PanelState) {
   const vertical = state.current.writingMode === "vertical";
   const baked = await bakedCovers(state);
   const missingImages = await missingIllustrationImages(state);
+  // 口絵・扉絵の画像（設計書6.65.15）。**面ごと本に入らない**ので、
+  // 画面でも面を出さずに理由を言う（挿絵と同じ「覚え込まない」扱い）
+  const missingFaces = await missingFaceImages(state);
 
   return {
     // **書き出しと同じCSS**を、画面の枠の中へ閉じ込めただけのもの。
@@ -583,7 +615,7 @@ async function previewData(state: PanelState) {
       }),
       ".epub-page"
     ),
-    pages: buildPages(state, vertical, baked),
+    pages: buildPages(state, vertical, baked, missingFaces),
     characterNotice: characterNotice(state),
     compose: {
       front: composeState(state, "front", baked.front),
@@ -594,7 +626,7 @@ async function previewData(state: PanelState) {
       path: episode.path,
       label: episodeChoiceLabel(episode),
     })),
-    placementWarnings: placementWarnings(state, missingImages),
+    placementWarnings: placementWarnings(state, missingImages, missingFaces),
     notice: state.source.notice,
     dirty: isDirty(state),
   };
@@ -674,6 +706,35 @@ async function missingIllustrationImages(state: PanelState): Promise<string[]> {
 }
 
 /**
+ * 画像の見つからない口絵・扉絵（設計書6.65.15）。
+ *
+ * 返すのは「場所 → 面の呼び名」である。**面を出さない判断と、警告の文の
+ * 両方が同じものを見る**——片方だけ直すと、面が消えているのに理由が
+ * 出ない（またはその逆）ことになる。
+ *
+ * 挿絵と同じく**覚え込まない**（作者が画像を置いた瞬間に警告が消える）。
+ */
+async function missingFaceImages(
+  state: PanelState
+): Promise<Map<string, string>> {
+  const missing = new Map<string, string>();
+  const checked = new Set<string>();
+
+  for (const block of resolveBookBlocks(state.current)) {
+    if (block.type !== "frontIllustration" && block.type !== "sectionArt") {
+      continue;
+    }
+    if (checked.has(block.imagePath)) continue;
+    checked.add(block.imagePath);
+    if (!(await exists(state.work, block.imagePath))) {
+      missing.set(block.imagePath, BOOK_BLOCK_LABELS[block.type]);
+    }
+  }
+
+  return missing;
+}
+
+/**
  * 指定がそのとおりに入らないもの（設計書6.65.10）。
  *
  * **書き出しを待たずに、欄で見せる。** 原稿を書き直せば位置はずれ、
@@ -685,7 +746,8 @@ async function missingIllustrationImages(state: PanelState): Promise<string[]> {
  */
 function placementWarnings(
   state: PanelState,
-  missingImages: readonly string[]
+  missingImages: readonly string[],
+  missingFaces: ReadonlyMap<string, string>
 ): string[] {
   const labels = new Map(
     state.source.episodes.map((episode) => [episode.path, episode.label])
@@ -694,6 +756,10 @@ function placementWarnings(
   // 画像が置かれていない挿絵も「入らないもの」である（言い方は
   // `epubXhtml.ts` が1か所で持つので、書き出しの通知と食い違わない）
   notes.push(...missingImages.map(describeMissingIllustrationImage));
+  // 口絵・扉絵は面ごと入らない（設計書6.65.15）
+  for (const [imagePath, label] of missingFaces) {
+    notes.push(describeMissingFaceImage(label, imagePath));
+  }
 
   const check = (
     kind: "illustration" | "pageBreak",
@@ -905,13 +971,18 @@ interface PreviewPage {
  * プレビューに出す面。
  *
  * **本に入る面と、順番まで同じにする。** ここで足したり省いたりすると、
- * 見た目どおりに編集しているつもりで別の本ができる。並びは
- * 表紙→タイトルページ→（目次）→本文→奥付（設計書6.65.3の表）。
+ * 見た目どおりに編集しているつもりで別の本ができる。並びは設計図の
+ * `blocks`（設計書6.65.15）——書いていない本は既定の並び（表紙→
+ * タイトルページ→目次→人物紹介→本文→あとがき→奥付→裏表紙）になる。
+ *
+ * **中身の無い面は、本と同じ条件で出さない**（載せる人の居ない人物一覧、
+ * 画像の無い口絵、まだ書いていないあとがき、画像の無い裏表紙）。
  */
 function buildPages(
   state: PanelState,
   vertical: boolean,
-  baked: Record<CoverSide, BakedPreview | null>
+  baked: Record<CoverSide, BakedPreview | null>,
+  missingFaces: ReadonlyMap<string, string>
 ): PreviewPage[] {
   const config = state.current;
   const source = state.source;
@@ -921,151 +992,277 @@ function buildPages(
   const hasCharacters =
     config.characterPage.enabled && source.characters.length > 0;
 
-  // **表紙も書き出しと同じ拾い順**（焼いた→元→無し。設計書6.65.8）。
-  // 焼いたあとも合成の途中経過を見せていたので、元イラストを差し替えたり
-  // `coverImagePath` を空にしたりすると、画面と本の中身が食い違っていた
-  pages.push(
-    baked.front
-      ? {
-          label: "表紙",
-          // 本へ入るのと同じ組み方（画像1枚を敷く断片）で見せる
-          html: buildCoverFragment(config, { href: baked.front.uri }),
-          note: describeBakedPreview(baked.front.bakedAt),
+  const add = (page: PreviewPage | null): void => {
+    if (page) pages.push(page);
+  };
+
+  for (const block of resolveBookBlocks(config)) {
+    switch (block.type) {
+      case "cover":
+        add(coverPage(state, vertical, baked.front));
+        break;
+      case "halfTitle":
+        add({
+          label: "タイトルページ",
+          html: buildTitlePageFragment(config),
+          note: null,
           vertical,
-        }
-      : config.coverImagePath
-        ? {
-            label: "表紙",
-            // 中身は canvas が描く。**ここで組んだHTMLは使わない**
-            html: "",
-            compose: "front",
-            note:
-              "元イラストに、下の欄で選んだ文字を重ねた見た目です。" +
-              "「表紙を焼く」を押すまでは、元イラストがそのまま入ります。",
-            vertical,
-          }
-        : {
-            label: "表紙",
-            html: buildCoverFragment(config, null),
-            note:
-              "表紙の画像が指定されていないので、題名だけの扉が表紙になります" +
-              "（次のタイトルページと同じ組み方です）。",
-            vertical,
-          }
-  );
-
-  pages.push({
-    label: "タイトルページ",
-    html: buildTitlePageFragment(config),
-    note: null,
-    vertical,
-  });
-
-  if (config.tocEnabled) {
-    // **競合の印がある話は、本にも目次にも入らない**（`exportEpub` が外す）。
-    // プレビューに並べると、本には無い行を見ていることになる
-    const listed = source.episodes.filter((entry) => !entry.conflicted);
-    const dropped = source.episodes.length - listed.length;
-
-    pages.push({
-      label: "目次",
-      html: buildTocFragment(
-        listed.map((entry) => ({
-          // プレビューでは飛ばない。見た目は行き先で変わらない
-          href: "#",
-          // **書き出しと同じ組み替えを通す**（`tocEntryStyle`。設計書
-          // 6.65.15）。ここだけ `entry.label`（番号＋題の固定形）を出すと、
-          // 見た目どおりに編集できるという要件が崩れる
-          label: buildTocLabel(
-            { heading: entry.label, fileName: entry.path, numberLabel: entry.numberLabel, title: entry.title },
-            config.tocEntryStyle
-          ),
-          group: entry.group,
-        })),
-        {
-          pattern: config.tocPattern,
-          ornament: config.tocOrnament,
-          colophonHref: "#",
+        });
+        break;
+      case "toc":
+        add(tocPage(state, vertical, hasCharacters));
+        break;
+      case "characters":
+        add(hasCharacters ? charactersPage(state, vertical) : null);
+        break;
+      case "frontIllustration":
+      case "sectionArt":
+        add(platePage(state, block, vertical, missingFaces));
+        break;
+      case "body":
+        add(bodyPage(state, vertical));
+        break;
+      case "afterword":
+        add(afterwordPage(state, vertical));
+        break;
+      case "colophon":
+        add({
+          label: "奥付",
+          html: buildColophonFragment(config, vertical),
+          note: null,
           vertical,
-          // **登場人物一覧の行は、書き出しと同じ条件で入れる**（6.65.11）。
-          // 入れ忘れていたので、本には有る行がプレビューだけ無かった
-          charactersHref: hasCharacters ? "#" : null,
-        }
-      ),
-      note: tocNote(source.episodes.length, dropped),
-      vertical,
-    });
+        });
+        break;
+      case "backCover":
+        add(backCoverPage(state, vertical, baked.back));
+        break;
+    }
   }
 
-  // 登場人物一覧は目次の後・本文の前（設計書6.65.11）。**載せる人が
-  // 居なければ、本と同じく面ごと出さない**（理由は欄の注記で伝える）
-  if (hasCharacters) {
-    pages.push({
-      label: "登場人物",
-      html: buildCharacterPageFragment(
-        source.characters.map((character) => ({
-          name: character.name,
-          reading: character.reading,
-          summary: character.summary,
-          iconHref:
-            config.characterPage.showIcons && character.iconPath
-              ? imageUri(state, character.iconPath)
-              : null,
-        }))
-      ),
+  return pages;
+}
+
+/**
+ * 表紙の面。**書き出しと同じ拾い順**（焼いた→元→無し。設計書6.65.8）。
+ *
+ * 焼いたあとも合成の途中経過を見せていたので、元イラストを差し替えたり
+ * `coverImagePath` を空にしたりすると、画面と本の中身が食い違っていた。
+ */
+function coverPage(
+  state: PanelState,
+  vertical: boolean,
+  baked: BakedPreview | null
+): PreviewPage {
+  const config = state.current;
+  if (baked) {
+    return {
+      label: "表紙",
+      // 本へ入るのと同じ組み方（画像1枚を敷く断片）で見せる
+      html: buildCoverFragment(config, { href: baked.uri }),
+      note: describeBakedPreview(baked.bakedAt),
+      vertical,
+    };
+  }
+  if (config.coverImagePath) {
+    return {
+      label: "表紙",
+      // 中身は canvas が描く。**ここで組んだHTMLは使わない**
+      html: "",
+      compose: "front",
       note:
-        "設定資料から組んだ面です（名前と紹介文だけが入ります）。" +
-        "内容を直すときは設定資料の側を直してください。",
+        "元イラストに、下の欄で選んだ文字を重ねた見た目です。" +
+        "「表紙を焼く」を押すまでは、元イラストがそのまま入ります。",
       vertical,
-    });
+    };
   }
+  return {
+    label: "表紙",
+    html: buildCoverFragment(config, null),
+    note:
+      "表紙の画像が指定されていないので、題名だけの扉が表紙になります" +
+      "（次のタイトルページと同じ組み方です）。",
+    vertical,
+  };
+}
 
-  if (source.firstChapter) {
-    // **冒頭に収まっている指定だけを出す。** プレビューが読んでいるのは
-    // 1話目の冒頭だけなので、その先の指定まで当てはめると「本文より
-    // 後ろだから末尾へ」が働いて、実際の本と違う場所に挿絵が出る
-    const shown = countParagraphs(source.firstChapter.body);
-    const placed = placementsFor(state, source.firstChapterPath, shown);
+/** 目次の面。**競合の印がある話は、本にも目次にも入らない** */
+function tocPage(
+  state: PanelState,
+  vertical: boolean,
+  hasCharacters: boolean
+): PreviewPage {
+  const config = state.current;
+  const source = state.source;
+  // プレビューに並べると、本には無い行を見ていることになる
+  const listed = source.episodes.filter((entry) => !entry.conflicted);
+  const dropped = source.episodes.length - listed.length;
 
-    pages.push({
-      label: "本文の冒頭",
-      html: buildChapterFragment(source.firstChapter, {
-        collapseBlankLines: config.collapseBlankLines,
-        illustrations: placed.illustrations,
-        pageBreaks: placed.pageBreaks,
-        // 画面は1枚の面なので実際には割れない。印だけ置く（6.65.10）
-        markPageBreaks: true,
+  return {
+    label: "目次",
+    html: buildTocFragment(
+      listed.map((entry) => ({
+        // プレビューでは飛ばない。見た目は行き先で変わらない
+        href: "#",
+        // **書き出しと同じ組み替えを通す**（`tocEntryStyle`。設計書
+        // 6.65.15）。ここだけ `entry.label`（番号＋題の固定形）を出すと、
+        // 見た目どおりに編集できるという要件が崩れる
+        label: buildTocLabel(
+          {
+            heading: entry.label,
+            fileName: entry.path,
+            numberLabel: entry.numberLabel,
+            title: entry.title,
+          },
+          config.tocEntryStyle
+        ),
+        group: entry.group,
+      })),
+      {
+        pattern: config.tocPattern,
+        ornament: config.tocOrnament,
+        colophonHref: "#",
         vertical,
-      }),
-      note:
-        "1話目の冒頭だけを出しています（本には全話が入ります）。" +
-        (placed.hidden
-          ? "冒頭より後ろの挿絵・改ページは、ここには出ません。"
-          : ""),
-      vertical,
-    });
-  }
-
-  pages.push({
-    label: "奥付",
-    html: buildColophonFragment(config, vertical),
-    note: null,
+        // **登場人物一覧・あとがきの行は、書き出しと同じ条件で入れる**
+        // （6.65.11・6.65.15）。片方だけ入れると、本には有る行が
+        // プレビューだけ無い（あるいはその逆）ことになる
+        charactersHref: hasCharacters ? "#" : null,
+        afterwordHref: state.source.afterword ? "#" : null,
+      }
+    ),
+    note: tocNote(source.episodes.length, dropped),
     vertical,
-  });
+  };
+}
 
-  // 裏表紙は本の最終面（設計書6.65.8）。表紙と同じく「焼いた→元→無し」
-  // の順で入るので、焼く前でも面そのものは出る
-  if (baked.back) {
-    pages.push({
+/** 登場人物一覧の面（設計書6.65.11） */
+function charactersPage(state: PanelState, vertical: boolean): PreviewPage {
+  const config = state.current;
+  return {
+    label: "登場人物",
+    html: buildCharacterPageFragment(
+      state.source.characters.map((character) => ({
+        name: character.name,
+        reading: character.reading,
+        summary: character.summary,
+        iconHref:
+          config.characterPage.showIcons && character.iconPath
+            ? imageUri(state, character.iconPath)
+            : null,
+      }))
+    ),
+    note:
+      "設定資料から組んだ面です（名前と紹介文だけが入ります）。" +
+      "内容を直すときは設定資料の側を直してください。",
+    vertical,
+  };
+}
+
+/**
+ * 口絵・扉絵の面（設計書6.65.15）。**画像が無ければ面を出さない**
+ * （本と同じ。理由は欄の警告で言う）。
+ */
+function platePage(
+  state: PanelState,
+  block: BookImageBlock,
+  vertical: boolean,
+  missingFaces: ReadonlyMap<string, string>
+): PreviewPage | null {
+  const label = BOOK_BLOCK_LABELS[block.type];
+  if (missingFaces.has(block.imagePath)) return null;
+
+  return {
+    label,
+    html: buildPlateFragment(
+      {
+        // 画面は `asWebviewUri` のURIで読む（本ではZIPの中の機械名になる）
+        href: imageUri(state, block.imagePath),
+        caption: block.caption,
+        label,
+      },
+      vertical
+    ),
+    note: `${label}は1枚で1つの面になります（本文の組み方には入りません）。`,
+    vertical,
+  };
+}
+
+/** 本文の面。**冒頭に収まっている指定だけを出す**（設計書6.65.10） */
+function bodyPage(state: PanelState, vertical: boolean): PreviewPage | null {
+  const source = state.source;
+  if (!source.firstChapter) return null;
+
+  // プレビューが読んでいるのは1話目の冒頭だけなので、その先の指定まで
+  // 当てはめると「本文より後ろだから末尾へ」が働いて、実際の本と違う
+  // 場所に挿絵が出る
+  const shown = countParagraphs(source.firstChapter.body);
+  const placed = placementsFor(state, source.firstChapterPath, shown);
+
+  return {
+    label: "本文の冒頭",
+    html: buildChapterFragment(source.firstChapter, {
+      collapseBlankLines: state.current.collapseBlankLines,
+      illustrations: placed.illustrations,
+      pageBreaks: placed.pageBreaks,
+      // 画面は1枚の面なので実際には割れない。印だけ置く（6.65.10）
+      markPageBreaks: true,
+      vertical,
+    }),
+    note:
+      "1話目の冒頭だけを出しています（本には全話が入ります）。" +
+      (placed.hidden
+        ? "冒頭より後ろの挿絵・改ページは、ここには出ません。"
+        : ""),
+    vertical,
+  };
+}
+
+/**
+ * あとがきの面（設計書6.65.15）。**原稿が無ければ面ごと出ない。**
+ *
+ * 組版は本文とまったく同じ（`buildAfterwordFragment`）。原稿を読むのは
+ * パネルを開いたときだけなので、書いたものを映すには開き直す。
+ */
+function afterwordPage(
+  state: PanelState,
+  vertical: boolean
+): PreviewPage | null {
+  const afterword = state.source.afterword;
+  if (!afterword) return null;
+
+  return {
+    label: AFTERWORD_HEADING,
+    html: buildAfterwordFragment(afterword, {
+      collapseBlankLines: state.current.collapseBlankLines,
+      vertical,
+    }),
+    note:
+      `設定/${BOOK_DIR}/${AFTERWORD_FILE} を組んだ面です。` +
+      "書き直したら、このパネルを開き直すと反映されます。",
+    vertical,
+  };
+}
+
+/**
+ * 裏表紙の面（設計書6.65.8）。表紙と同じく「焼いた→元→無し」の順で
+ * 入るので、焼く前でも面そのものは出る。
+ */
+function backCoverPage(
+  state: PanelState,
+  vertical: boolean,
+  baked: BakedPreview | null
+): PreviewPage | null {
+  if (baked) {
+    return {
       label: "裏表紙",
-      html: buildBackCoverFragment({ href: baked.back.uri }),
+      html: buildBackCoverFragment({ href: baked.uri }),
       note:
         "本の最終面（奥付の後ろ）になります。" +
-        describeBakedPreview(baked.back.bakedAt),
+        describeBakedPreview(baked.bakedAt),
       vertical,
-    });
-  } else if (config.backCoverImagePath) {
-    pages.push({
+    };
+  }
+  if (state.current.backCoverImagePath) {
+    return {
       label: "裏表紙",
       html: "",
       compose: "back",
@@ -1073,10 +1270,9 @@ function buildPages(
         "本の最終面（奥付の後ろ）になります。" +
         "「裏表紙を焼く」を押すまでは、元イラストがそのまま入ります。",
       vertical,
-    });
+    };
   }
-
-  return pages;
+  return null;
 }
 
 /**
@@ -1200,6 +1396,7 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
       notice: `「${work.title}」に本文のファイルが見つかりません。`,
       // 本文がまだ無くても、人物一覧の欄は使える（設定資料は別に育つ）
       characters: await collectCharacters(work),
+      afterword: await collectAfterword(work),
     };
   }
 
@@ -1227,7 +1424,110 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
     firstChapterPath: first.episodePath,
     notice: first.notice,
     characters: await collectCharacters(work),
+    afterword: await collectAfterword(work),
   };
+}
+
+/**
+ * あとがきの原稿を読む（設計書6.65.15）。**中身が無ければ null。**
+ *
+ * 空かどうかは**本へ出る段落があるか**で見る（書き出しと同じ判断。
+ * 付箋（`//`）だけの雛形は「まだ書いていない」）。読めなくても画面は
+ * 開く——あとがきの面が出ないだけで、ほかの欄は使える。
+ */
+async function collectAfterword(
+  work: WorkEntry
+): Promise<PreviewAfterword | null> {
+  let target: string;
+  try {
+    target = path.join(await settingsDir(work), BOOK_DIR, AFTERWORD_FILE);
+  } catch {
+    return null;
+  }
+
+  try {
+    const file = await readTextFile(target);
+    // 未解決の競合を含む原稿は本にも入らない（本文と同じ扱い）
+    if (file.hasConflictMarkers) return null;
+    if (countParagraphs(file.text) === 0) return null;
+    return { text: file.text, notation: notationModeFor(AFTERWORD_FILE) };
+  } catch {
+    // まだ書いていないのが普通の状態である（通知も記録もしない）
+    return null;
+  }
+}
+
+/**
+ * あとがきの原稿を開く（設計書6.65.15）。**無ければ雛形を作ってから開く。**
+ *
+ * 作るのは `mode: "create"`（新規作成だけ）である——既にある原稿を
+ * 上書きする道は、間違っても作らない（作者が書いたものを消さない）。
+ * 雛形は**見出しの無い空**で、付箋の行を1つだけ置く（付箋は本に入らない
+ * ので、書き出しても面は増えない）。
+ */
+async function openAfterword(state: PanelState): Promise<void> {
+  const work = state.work;
+  let target: string;
+  try {
+    target = path.join(await settingsDir(work), BOOK_DIR, AFTERWORD_FILE);
+  } catch (error) {
+    await reportAfterwordFailure(work, state.panel, error);
+    return;
+  }
+
+  try {
+    await vscode.workspace.fs.stat(path.toUri(target));
+  } catch {
+    try {
+      await vscode.workspace.fs.createDirectory(
+        path.toUri(path.dirname(target))
+      );
+      await atomicWriteFile(
+        target,
+        new TextEncoder().encode(AFTERWORD_TEMPLATE),
+        { mode: "create" }
+      );
+    } catch (error) {
+      await reportAfterwordFailure(work, state.panel, error);
+      return;
+    }
+  }
+
+  await openInDefaultEditor(target);
+  state.panel.webview.postMessage({
+    type: "status",
+    text: `${AFTERWORD_FILE} を開きました（書いたらパネルを開き直すとプレビューに入ります）`,
+  });
+}
+
+/**
+ * あとがきの雛形。
+ *
+ * **見出しは書かない**（本の側で「あとがき」を立てる）。行頭の `//` は
+ * シーンメモの印（設計書6.40）で、本にも字数にも入らない。
+ */
+const AFTERWORD_TEMPLATE = [
+  "// ここにあとがきを書いてください。この行（先頭が「//」）は本に入りません。",
+  "// 見出しの「あとがき」は本の側で付くので、書かなくてかまいません。",
+  "",
+  "",
+].join("\n");
+
+async function reportAfterwordFailure(
+  work: WorkEntry,
+  panel: vscode.WebviewPanel,
+  error: unknown
+): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  logFailure("あとがきの原稿を開く", { 作品: work.title, 内容: message });
+  panel.webview.postMessage({
+    type: "status",
+    text: `${AFTERWORD_FILE} を開けませんでした。${message}`,
+    isError: true,
+  });
+  await vscode.window.showErrorMessage(
+    `${AFTERWORD_FILE} を開けませんでした。${message}`
+  );
 }
 
 /**

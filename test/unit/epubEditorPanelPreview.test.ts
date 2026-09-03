@@ -5,6 +5,7 @@ import { emptyCharacter } from "../../src/models/character";
 import { BAKED_COVER_FILES } from "../../src/core/coverBake";
 import type { WorkEntry } from "../../src/models/types";
 import {
+  commands,
   FileSystemError,
   FileType,
   Uri,
@@ -40,6 +41,8 @@ interface PreviewPayload {
 }
 
 const posted: Array<{ type?: string; data?: PreviewPayload }> = [];
+/** `vscode.commands.executeCommand` に渡されたもの（ファイルを開く道） */
+const executed: Array<{ command: string; args: unknown[] }> = [];
 /** 画面から拡張機能へ送る口（押した操作を再現する） */
 let toExtension: ((message: unknown) => void) | null = null;
 const disk = new Map<string, Uint8Array>();
@@ -165,9 +168,16 @@ beforeEach(() => {
   disk.clear();
   posted.length = 0;
   shown.length = 0;
+  executed.length = 0;
   toExtension = null;
   installDisk();
   installPanel();
+  (
+    commands as { executeCommand?: (...args: unknown[]) => unknown }
+  ).executeCommand = (command: unknown, ...args: unknown[]) => {
+    executed.push({ command: String(command), args });
+    return Promise.resolve(undefined);
+  };
 
   window.showInformationMessage = async (message: string) => {
     shown.push(message);
@@ -468,5 +478,154 @@ describe("焼いた画像を消す（設計書6.65.8）", () => {
 
     const status = posted.filter((message) => message.type === "status");
     expect(JSON.stringify(status)).toContain("焼いた画像はありません");
+  });
+});
+
+/**
+ * 面の並び（設計書6.65.15の段B）。
+ *
+ * **プレビューの並びは本の並びである。** 並びを編む画面（段C）はまだ
+ * 無いが、book.json に書かれた並びには従う——ここが食い違うと、画面で
+ * 見ていたものと違う本が出てくる。
+ */
+describe("プレビューの面の並び（設計書6.65.15）", () => {
+  beforeEach(() => {
+    put("本文/第1話.txt", "あ\n\nい");
+  });
+
+  function labels(): string[] {
+    return latest().pages.map((entry) => entry.label);
+  }
+
+  test("blocks を書いていない本は、いままでどおりの並び", async () => {
+    // **回帰の見張り。** 面の名前も順序も第2段から変えない
+    writeBook({ title: "氷の街" });
+
+    await open();
+
+    expect(labels()).toEqual([
+      "表紙",
+      "タイトルページ",
+      "目次",
+      "本文の冒頭",
+      "奥付",
+    ]);
+  });
+
+  test("書いた並びの順に、面が出る", async () => {
+    writeBook({
+      title: "氷の街",
+      // 目次を出す設定のままだと、並びに書いていなくても目次が戻る
+      // （段Bではチェックが正。`resolveBookBlocks`）
+      tocEnabled: false,
+      blocks: [
+        { type: "body" },
+        { type: "halfTitle" },
+        { type: "cover" },
+        { type: "colophon" },
+      ],
+    });
+
+    await open();
+
+    expect(labels()).toEqual([
+      "本文の冒頭",
+      "タイトルページ",
+      "表紙",
+      "奥付",
+    ]);
+  });
+
+  test("口絵は画像の面として出る（解説文つき）", async () => {
+    putBytes("素材/口絵.png", [0x89, 0x50]);
+    writeBook({
+      title: "氷の街",
+      blocks: [
+        { type: "cover" },
+        { type: "frontIllustration", imagePath: "素材/口絵.png", caption: "朝" },
+        { type: "body" },
+      ],
+    });
+
+    await open();
+    const plate = latest().pages.find((entry) => entry.label === "口絵");
+
+    expect(plate).toBeDefined();
+    // 画面は `asWebviewUri` のURIで読む（本ではZIPの中の機械名になる）
+    expect(plate?.html).toContain("口絵.png");
+    expect(plate?.html).toContain("<figcaption>朝</figcaption>");
+  });
+
+  test("画像の無い口絵は、面を出さずに警告する（本にも入らない）", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [
+        { type: "body" },
+        { type: "sectionArt", imagePath: "素材/無い扉絵.png" },
+      ],
+    });
+
+    await open();
+
+    expect(labels()).not.toContain("扉絵");
+    const warnings = latest().placementWarnings.join("\n");
+    expect(warnings).toContain("素材/無い扉絵.png");
+    expect(warnings).toContain("本に入りません");
+  });
+
+  test("あとがきの原稿があれば、本文と同じ組版で面になる", async () => {
+    writeBook({ title: "氷の街" });
+    put("設定/書籍/あとがき.md", "{拙作|せっさく}をお読みいただき");
+
+    await open();
+    const afterword = latest().pages.find(
+      (entry) => entry.label === "あとがき"
+    );
+
+    expect(afterword).toBeDefined();
+    expect(afterword?.html).toContain("<ruby>拙作<rt>せっさく</rt></ruby>");
+  });
+
+  test("あとがきの原稿が無ければ、面も出ない", async () => {
+    writeBook({ title: "氷の街" });
+
+    await open();
+
+    expect(labels()).not.toContain("あとがき");
+  });
+});
+
+describe("あとがきを書く入口（設計書6.65.15）", () => {
+  beforeEach(() => {
+    put("本文/第1話.txt", "あ\n\nい");
+    writeBook({ title: "氷の街" });
+  });
+
+  function afterwordPath(): string {
+    return diskPath(path.join(work.folderPath, "設定", "書籍", "あとがき.md"));
+  }
+
+  test("原稿が無ければ雛形を作って開く（中身は本に入らない一言だけ）", async () => {
+    await open();
+    await send({ type: "openAfterword", config: {} });
+
+    const bytes = disk.get(afterwordPath());
+    expect(bytes).toBeDefined();
+    const text = new TextDecoder().decode(bytes as Uint8Array);
+    // 付箋（`//`）だけなので、書き出しても面は増えない
+    expect(text.split("\n").every((line) => line.trim() === "" || line.startsWith("//"))).toBe(true);
+    expect(executed.map((entry) => entry.command)).toContain("vscode.open");
+  });
+
+  test("既にある原稿は上書きしない（開くだけ）", async () => {
+    put("設定/書籍/あとがき.md", "書きかけの文章");
+
+    await open();
+    await send({ type: "openAfterword", config: {} });
+
+    expect(new TextDecoder().decode(disk.get(afterwordPath()) as Uint8Array)).toBe(
+      "書きかけの文章"
+    );
+    expect(executed.map((entry) => entry.command)).toContain("vscode.open");
   });
 });

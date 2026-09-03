@@ -2,9 +2,12 @@ import { describe, expect, test } from "vitest";
 import {
   BOOK_SCHEMA_VERSION,
   defaultBackCoverLayout,
+  defaultBookBlocks,
   defaultBookConfig,
   defaultCoverLayout,
   parseBookConfig,
+  resolveBookBlocks,
+  type BookBlock,
 } from "../../src/models/book";
 
 /**
@@ -44,6 +47,12 @@ describe("本の設計図の既定値", () => {
       characterPage: { enabled: false, showIcons: true },
       // 書体も、指定するまで同梱しない（ライセンスの確認は作者の責任）
       fonts: { body: null, heading: null },
+      // 面の並び（設計書6.65.15）。**既定はいままでの本と同じ並び**で、
+      // 目次・人物紹介の有無はその時の設定から組む
+      blocks: defaultBookBlocks({
+        tocEnabled: true,
+        characterPage: { enabled: false },
+      }),
     });
   });
 
@@ -569,5 +578,249 @@ describe("ページ分割の指定", () => {
       parseBookConfig({ pageBreaks: [{ ...one, episodePath: "" }] }, "氷の街")
     ).toThrow();
     expect(() => parseBookConfig({ pageBreaks: "5" }, "氷の街")).toThrow();
+  });
+});
+
+/**
+ * 面の並び（設計書6.65.15の段B）。
+ *
+ * **並びがそのまま本の並びになる。** ここで見るのは「作者が書いた並びを
+ * そのまま読めること」と「blocks の無い既存の book.json が、いままでと
+ * 同じ本になること」の2つである。
+ */
+describe("ブロックの既定の並び（設計書6.65.15）", () => {
+  const types = (blocks: readonly BookBlock[]): string[] =>
+    blocks.map((block) => block.type);
+
+  test("既定は 表紙→中表紙→目次→本文→あとがき→奥付→裏表紙", () => {
+    // **あとがきの面は既定の並びに入れてある。** 原稿
+    // （設定/書籍/あとがき.md）が無ければ面ごと出ないので、いままでの
+    // 本の中身は変わらない——けれども作者が書いた瞬間に本へ入る
+    expect(
+      types(
+        defaultBookBlocks({ tocEnabled: true, characterPage: { enabled: false } })
+      )
+    ).toEqual([
+      "cover",
+      "halfTitle",
+      "toc",
+      "body",
+      "afterword",
+      "colophon",
+      "backCover",
+    ]);
+  });
+
+  test("目次を出さない設定なら、目次の面は並びに入らない", () => {
+    expect(
+      types(
+        defaultBookBlocks({
+          tocEnabled: false,
+          characterPage: { enabled: false },
+        })
+      )
+    ).not.toContain("toc");
+  });
+
+  test("人物紹介を出す設定なら、目次の後・本文の前に入る", () => {
+    const order = types(
+      defaultBookBlocks({ tocEnabled: true, characterPage: { enabled: true } })
+    );
+
+    expect(order.indexOf("characters")).toBeGreaterThan(order.indexOf("toc"));
+    expect(order.indexOf("characters")).toBeLessThan(order.indexOf("body"));
+  });
+
+  test("blocks の無い book.json は、既定の並びで読める（ファイルは書き換えない）", () => {
+    const config = parseBookConfig({ title: "氷の街" }, "氷の街");
+
+    expect(types(resolveBookBlocks(config))).toEqual(
+      types(
+        defaultBookBlocks({ tocEnabled: true, characterPage: { enabled: false } })
+      )
+    );
+  });
+});
+
+describe("ブロックの検証（設計書6.65.15）", () => {
+  const minimal = [
+    { type: "cover" },
+    { type: "body" },
+    { type: "colophon" },
+  ];
+
+  test("書いてある並びは、そのままの順で読み取る", () => {
+    const config = parseBookConfig(
+      {
+        blocks: [
+          { type: "cover" },
+          { type: "frontIllustration", imagePath: "素材/口絵.png", caption: "旅立ち" },
+          { type: "body" },
+        ],
+      },
+      "氷の街"
+    );
+
+    expect(config.blocks?.map((block) => block.type)).toEqual([
+      "cover",
+      "frontIllustration",
+      "body",
+    ]);
+    expect(config.blocks?.[1]).toEqual({
+      type: "frontIllustration",
+      imagePath: "素材/口絵.png",
+      caption: "旅立ち",
+    });
+  });
+
+  test("本文はちょうど1つ（無い・2つのどちらも弾く）", () => {
+    expect(() =>
+      parseBookConfig({ blocks: [{ type: "cover" }] }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig(
+        { blocks: [{ type: "body" }, { type: "body" }] },
+        "氷の街"
+      )
+    ).toThrow();
+  });
+
+  test("1冊に1つの面は、重ねて書けない", () => {
+    for (const type of [
+      "cover",
+      "halfTitle",
+      "toc",
+      "characters",
+      "afterword",
+      "colophon",
+      "backCover",
+    ]) {
+      expect(() =>
+        parseBookConfig(
+          { blocks: [...minimal, { type }, { type }] },
+          "氷の街"
+        ),
+        `${type} が2つ書けてしまう`
+      ).toThrow();
+    }
+  });
+
+  test("扉絵は何枚でも挿せる（1つだけの面ではない）", () => {
+    const config = parseBookConfig(
+      {
+        blocks: [
+          { type: "body" },
+          { type: "sectionArt", imagePath: "素材/扉1.png" },
+          { type: "sectionArt", imagePath: "素材/扉2.png" },
+        ],
+      },
+      "氷の街"
+    );
+
+    expect(config.blocks).toHaveLength(3);
+  });
+
+  test("知らない種類は受け取らない（黙って落とさない）", () => {
+    expect(() =>
+      parseBookConfig({ blocks: [...minimal, { type: "chapterBreak" }] }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig({ blocks: [...minimal, { type: "" }] }, "氷の街")
+    ).toThrow();
+    expect(() => parseBookConfig({ blocks: [{ type: 3 }] }, "氷の街")).toThrow();
+    expect(() => parseBookConfig({ blocks: "cover" }, "氷の街")).toThrow();
+  });
+
+  test("画像の面は、作品フォルダの外を指せない（表紙・挿絵と同じ検証）", () => {
+    for (const imagePath of [
+      "/etc/passwd",
+      "C:/秘密/絵.png",
+      "../ほかの作品/絵.png",
+    ]) {
+      expect(() =>
+        parseBookConfig(
+          { blocks: [{ type: "body" }, { type: "frontIllustration", imagePath }] },
+          "氷の街"
+        ),
+        `${imagePath} を受け取ってしまう`
+      ).toThrow();
+    }
+  });
+
+  test("画像の面に場所が無ければ弾く（絵の無い口絵は作らない）", () => {
+    expect(() =>
+      parseBookConfig(
+        { blocks: [{ type: "body" }, { type: "frontIllustration" }] },
+        "氷の街"
+      )
+    ).toThrow();
+    expect(() =>
+      parseBookConfig(
+        {
+          blocks: [
+            { type: "body" },
+            { type: "sectionArt", imagePath: "   " },
+          ],
+        },
+        "氷の街"
+      )
+    ).toThrow();
+  });
+
+  test("章区切りは blocks に持たない（章立ての台帳が正。設計書6.66）", () => {
+    expect(() =>
+      parseBookConfig({ blocks: [...minimal, { type: "chapter" }] }, "氷の街")
+    ).toThrow();
+  });
+});
+
+describe("設定の切り替えに、並びが追従する（設計書6.65.15）", () => {
+  /**
+   * 段Bには並びを編む画面がまだ無い。**目次・人物紹介のチェックが正**なので、
+   * blocks が保存されたあとにチェックを戻しても効くようにする（戻せないと、
+   * 版を上げただけで目次の消えた本ができる）。
+   */
+  test("目次を出す設定に戻すと、目次の面が並びへ戻る", () => {
+    const config = parseBookConfig(
+      { tocEnabled: true, blocks: [{ type: "cover" }, { type: "body" }] },
+      "氷の街"
+    );
+
+    const order = resolveBookBlocks(config).map((block) => block.type);
+    expect(order).toEqual(["cover", "toc", "body"]);
+  });
+
+  test("目次を出さない設定なら、並びに書いてあっても外す", () => {
+    const config = parseBookConfig(
+      {
+        tocEnabled: false,
+        blocks: [{ type: "cover" }, { type: "toc" }, { type: "body" }],
+      },
+      "氷の街"
+    );
+
+    expect(resolveBookBlocks(config).map((block) => block.type)).toEqual([
+      "cover",
+      "body",
+    ]);
+  });
+
+  test("人物紹介も同じ（本文の前へ戻る）", () => {
+    const config = parseBookConfig(
+      {
+        characterPage: { enabled: true },
+        blocks: [{ type: "cover" }, { type: "body" }, { type: "colophon" }],
+      },
+      "氷の街"
+    );
+
+    // 目次は既定で出す設定なので、こちらも一緒に戻る（目次→人物紹介の順）
+    expect(resolveBookBlocks(config).map((block) => block.type)).toEqual([
+      "cover",
+      "toc",
+      "characters",
+      "body",
+      "colophon",
+    ]);
   });
 });

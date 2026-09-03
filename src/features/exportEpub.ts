@@ -2,10 +2,13 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import {
+  AFTERWORD_FILE,
+  BOOK_BLOCK_LABELS,
   BOOK_DIR,
   BOOK_FILE,
   defaultBookConfig,
   parseBookConfig,
+  resolveBookBlocks,
   type BookConfig,
 } from "../models/book";
 import { scanWork } from "../core/scanner";
@@ -26,6 +29,7 @@ import {
   buildEpub,
   fontMediaType,
   imageMediaType,
+  type EpubBlock,
   type EpubBookCharacter,
   type EpubChapter,
   type EpubFont,
@@ -243,6 +247,15 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     ? await collectCharacters(work, config.characterPage.showIcons, notices)
     : [];
   const fonts = await collectFonts(work, config.fonts, notices);
+  // 面の並び（設計書6.65.15）。**中身を読めなかった面だけを外す**
+  // ——口絵1枚のために本そのものが出ないほうが困る（挿絵と同じ流儀）
+  const blocks = await collectBlocks({
+    work,
+    config,
+    settings,
+    images,
+    notices,
+  });
 
   let epub: Uint8Array;
   try {
@@ -253,6 +266,7 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       backCover,
       characters,
       fonts,
+      blocks,
       // 本を見分ける唯一の札。書き出すたびに新しい本として扱われる
       identifier: `urn:uuid:${randomUuid()}`,
       modified: isoSeconds(new Date()),
@@ -385,6 +399,116 @@ async function collectPlacements(input: {
   }
 
   return { illustrations, pageBreaks };
+}
+
+/**
+ * 面の並びを、中身つきで集める（設計書6.65.15）。
+ *
+ * **読めなかった面だけを外す。** 口絵の画像が1枚無い、あとがきをまだ
+ * 書いていない——どれも本ごと出ないほうが困る（挿絵と同じ流儀）。
+ * 外したことは通知に積むが、**あとがきの原稿がまだ無いときだけは黙る**
+ * ——既定の並びにはあとがきの面が入っているので、書かない作者にも
+ * 毎回言うことになるからである。
+ */
+async function collectBlocks(input: {
+  work: WorkEntry;
+  config: BookConfig;
+  settings: string;
+  images: Map<string, Uint8Array | null>;
+  notices: string[];
+}): Promise<EpubBlock[]> {
+  const blocks: EpubBlock[] = [];
+
+  for (const block of resolveBookBlocks(input.config)) {
+    if (block.type === "frontIllustration" || block.type === "sectionArt") {
+      const label = BOOK_BLOCK_LABELS[block.type];
+      const data = await readWorkImage({
+        work: input.work,
+        images: input.images,
+        imagePath: block.imagePath,
+        label,
+        skipped: `この${label}の面は入れていません。`,
+        notes: input.notices,
+      });
+      if (!data) continue;
+      blocks.push({
+        type: block.type,
+        sourcePath: block.imagePath,
+        data,
+        caption: block.caption,
+      });
+      continue;
+    }
+
+    if (block.type === "afterword") {
+      const text = await readAfterword(input.work, input.settings, input.notices);
+      if (text === null) continue;
+      blocks.push({
+        type: "afterword",
+        // `.md` なので `{漢字|かんじ}` の記法で読む（本文と同じ見分け方）
+        notation: notationModeFor(AFTERWORD_FILE),
+        text,
+      });
+      continue;
+    }
+
+    blocks.push({ type: block.type });
+  }
+
+  return blocks;
+}
+
+/**
+ * あとがきの原稿を読む（設計書6.65.15）。**入らないときは null。**
+ *
+ * - まだ無い … 黙って面を出さない（上の説明のとおり）
+ * - 読めない・競合がある … 通知に出して面を出さない
+ * - 中身が空 … 通知に出す（作者は書いたつもりでいる）
+ *
+ * 空かどうかは**本へ出る段落があるか**で見る。付箋（`//`）だけの雛形は
+ * 本に1文字も出ないので、書いていないのと同じに扱う（本の側の判断と
+ * 揃える。`core/epubPackage.ts`）。
+ */
+async function readAfterword(
+  work: WorkEntry,
+  settings: string,
+  notices: string[]
+): Promise<string | null> {
+  const target = path.join(settings, BOOK_DIR, AFTERWORD_FILE);
+  const where = `設定/${BOOK_DIR}/${AFTERWORD_FILE}`;
+
+  let file: TextFileContent;
+  try {
+    file = await readTextFile(target);
+  } catch (error) {
+    if (
+      error instanceof vscode.FileSystemError &&
+      error.code === "FileNotFound"
+    ) {
+      return null;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    logFailure("あとがきの読み込み", { 作品: work.title, 内容: message });
+    notices.push(`${where} を読めませんでした。あとがきの面は入れていません。`);
+    return null;
+  }
+
+  // 未解決の競合をそのまま組まない（本文とまったく同じ扱い）
+  if (file.hasConflictMarkers) {
+    notices.push(
+      `${where} に未解決の競合があるため、あとがきの面は入れていません。`
+    );
+    return null;
+  }
+
+  if (countParagraphs(file.text) === 0) {
+    notices.push(
+      `${where} にまだ本文がないので、あとがきの面は入れていません。`
+    );
+    return null;
+  }
+
+  return file.text;
 }
 
 /**
@@ -570,37 +694,65 @@ async function readIllustration(
   imagePath: string,
   notes: string[]
 ): Promise<Uint8Array | null> {
-  const cached = images.get(imagePath);
+  return readWorkImage({
+    work,
+    images,
+    imagePath,
+    label: "挿絵",
+    skipped: "この挿絵は飛ばしました。",
+    notes,
+  });
+}
+
+/**
+ * 作品フォルダの中の画像を1枚読む。**読めなければ null。**
+ *
+ * 挿絵（設計書6.65.10）と口絵・扉絵（6.65.15）が共に使う。**呼び分けるのは
+ * 呼び名と、入らなかったときの言い方だけ**にしてある——同じ失敗を2通りの
+ * 言葉で伝えると、作者は別のことが起きたと読む。
+ */
+async function readWorkImage(input: {
+  work: WorkEntry;
+  /** 読んだ画像の覚え。読めなかったことも覚える（1枚につき1度だけ言う） */
+  images: Map<string, Uint8Array | null>;
+  imagePath: string;
+  label: string;
+  /** 入らなかったことの言い方（「この挿絵は飛ばしました。」） */
+  skipped: string;
+  notes: string[];
+}): Promise<Uint8Array | null> {
+  const cached = input.images.get(input.imagePath);
   if (cached !== undefined) return cached;
 
   // **本を組む前に種類を確かめる。** 組み立ての途中で落ちると、
-  // 挿絵1枚のために本そのものが出ない
+  // 画像1枚のために本そのものが出ない
   try {
-    imageMediaType(imagePath, "挿絵");
+    imageMediaType(input.imagePath, input.label);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    notes.push(`${message}この挿絵は飛ばしました。`);
-    images.set(imagePath, null);
+    input.notes.push(`${message}${input.skipped}`);
+    input.images.set(input.imagePath, null);
     return null;
   }
 
   try {
     const data = await vscode.workspace.fs.readFile(
-      path.toUri(path.join(work.folderPath, imagePath))
+      path.toUri(path.join(input.work.folderPath, input.imagePath))
     );
-    images.set(imagePath, data);
+    input.images.set(input.imagePath, data);
     return data;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logFailure("挿絵の読み込み", {
-      作品: work.title,
-      場所: imagePath,
+    logFailure("画像の読み込み", {
+      作品: input.work.title,
+      種類: input.label,
+      場所: input.imagePath,
       内容: message,
     });
-    notes.push(
-      `挿絵の画像「${imagePath}」を読めませんでした。この挿絵は飛ばしました。`
+    input.notes.push(
+      `${input.label}の画像「${input.imagePath}」を読めませんでした。${input.skipped}`
     );
-    images.set(imagePath, null);
+    input.images.set(input.imagePath, null);
     return null;
   }
 }

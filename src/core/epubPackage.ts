@@ -1,18 +1,25 @@
 import { zipSync, type Zippable } from "fflate";
 import {
+  BOOK_BLOCK_LABELS,
   BOOK_FONT_EXTENSIONS,
+  isBookImageBlock,
+  resolveBookBlocks,
+  type BookBlockType,
   type BookConfig,
   type BookOrnament,
   type TocEntryStyle,
   type TocPattern,
 } from "../models/book";
 import {
+  buildChapterFragment,
   buildChapterXhtml,
   buildXhtmlDocument,
+  countParagraphs,
   escapeDisplayText,
   escapeXml,
   type EpubChapterSource,
 } from "./epubXhtml";
+import type { NotationMode } from "./manuscriptRender";
 import {
   buildCharacterPageFragment,
   type EpubCharacterEntry,
@@ -63,6 +70,10 @@ const TITLEPAGE_NAME = "titlepage.xhtml";
 const COLOPHON_NAME = "colophon.xhtml";
 const BACKCOVER_NAME = "backcover.xhtml";
 const CHARACTERS_NAME = "characters.xhtml";
+const AFTERWORD_NAME = "afterword.xhtml";
+
+/** あとがきの面の見出し。**本文の話と同じ組み方で1面にする**（6.65.15） */
+export const AFTERWORD_HEADING = "あとがき";
 
 /**
  * 同梱した書体を指す名前（設計書6.65.11）。
@@ -162,6 +173,48 @@ export interface EpubFonts {
   heading: EpubFont | null;
 }
 
+/**
+ * 組み立てる面1つ（設計書6.65.15）。**並びがそのまま本の並びになる。**
+ *
+ * `models/book.ts` の `BookBlock` と種類は同じだが、**中身を持つ**ところが
+ * 違う——口絵・扉絵は画像のバイト列、あとがきは原稿の文字列である
+ * （設計図はファイルの場所しか持たない。読むのは `features/exportEpub.ts`）。
+ * 読めなかった面は、呼び出し側が並びから外して渡す（挿絵と同じ流儀で、
+ * 1枚の失敗で本を止めない）。
+ */
+export type EpubBlock =
+  | EpubPlainBlock
+  | EpubPlateBlock
+  | EpubAfterwordBlock;
+
+/** 中身を持たない面。組み方は設計図（`BookConfig`）と本文が決める */
+export interface EpubPlainBlock {
+  type: Exclude<BookBlockType, "frontIllustration" | "sectionArt" | "afterword">;
+}
+
+/**
+ * 画像1枚の面（口絵・扉絵）。
+ *
+ * **ZIPの中の名前はここで決めない**（挿絵と同じ）。中身と、同じ絵かを
+ * 見分ける手がかりだけを持つ。
+ */
+export interface EpubPlateBlock {
+  type: "frontIllustration" | "sectionArt";
+  /** 作品フォルダからの相対パス。同じ絵の見分けと種類の判定に使う */
+  sourcePath: string;
+  data: Uint8Array;
+  /** 図版の下に添える文。空なら `<figcaption>` を出さない */
+  caption: string;
+}
+
+/** あとがきの面。原稿は `設定/書籍/あとがき.md`（読むのは呼び出し側） */
+export interface EpubAfterwordBlock {
+  type: "afterword";
+  text: string;
+  /** 記法。`.md` なので `curly`（`notationModeFor` の結果を渡す） */
+  notation: NotationMode;
+}
+
 export interface EpubBook {
   config: BookConfig;
   chapters: readonly EpubChapter[];
@@ -185,6 +238,14 @@ export interface EpubBook {
   characters?: readonly EpubBookCharacter[];
   /** 同梱する書体（設計書6.65.11）。無ければ第1段と同じ本になる */
   fonts?: EpubFonts;
+  /**
+   * 面の並び（設計書6.65.15）。**省略すると設計図から既定の並びを組む。**
+   *
+   * 省略したときは口絵・扉絵・あとがきが出ない——どれも中身（画像・原稿）が
+   * 要り、ここは中身を読みに行かないからである。書き出しと画面は必ず
+   * 渡すこと（`features/exportEpub.ts`）。
+   */
+  blocks?: readonly EpubBlock[];
   /**
    * `dc:identifier`。本を見分ける唯一の札。
    *
@@ -305,36 +366,53 @@ export function buildEpub(book: EpubBook): Uint8Array {
     ? packCharacters(book.characters ?? [])
     : [];
   const fonts = packFonts(book.fonts);
+  // 面の並び（設計書6.65.15）。**渡されていなければ設計図から組む**
+  const blocks = book.blocks ?? defaultBlocksOf(config);
+  const plates = packPlates(blocks);
 
+  const packaged: PackagedBook = {
+    book,
+    config,
+    vertical,
+    blocks,
+    chapters,
+    cover,
+    backCover,
+    illustrations,
+    characters,
+    fonts,
+    plates: plates.faces,
+    plateImages: plates.images,
+    // **中身の無いあとがきは面ごと出さない**（設計書6.65.15）
+    afterword: afterwordOf(blocks),
+  };
   const files: Zippable = {
     // **先頭・無圧縮。** ここを外すとリーダーが本と認識しない
     mimetype: [encode(EPUB_MIMETYPE), { level: 0 }],
     "META-INF/container.xml": encode(containerXml()),
-    [`${ROOT}/content.opf`]: encode(
-      contentOpf(
-        book,
-        chapters,
-        cover,
-        backCover,
-        illustrations,
-        characters,
-        fonts,
-        vertical
-      )
-    ),
+    [`${ROOT}/content.opf`]: encode(contentOpf(packaged)),
     [`${ROOT}/${CSS_NAME}`]: encode(
       buildEpubCss(vertical, {
         bodyHref: fonts.body?.packagedName ?? null,
         headingHref: fonts.heading?.packagedName ?? null,
       })
     ),
-    [`${ROOT}/${NAV_NAME}`]: encode(
-      navXhtml(chapters, config, characters.length > 0, vertical)
-    ),
-    [`${ROOT}/${COVER_NAME}`]: encode(coverXhtml(config, cover, vertical)),
-    [`${ROOT}/${TITLEPAGE_NAME}`]: encode(titlePageXhtml(config, vertical)),
-    [`${ROOT}/${COLOPHON_NAME}`]: encode(colophonXhtml(config, vertical)),
+    // **`nav.xhtml` は並びに目次が無くても作る**（EPUB3で必須。第1段からの
+    // 約束）。並びが決めるのは「読む順路へ入れるか」だけである
+    [`${ROOT}/${NAV_NAME}`]: encode(navXhtml(packaged)),
   };
+
+  // **並びに無い面は、ファイルごと作らない**（設計書6.65.15）。読まれない
+  // 面が本の中に残ると、目録との食い違いを epubcheck が咎める
+  if (hasBlock(packaged, "cover")) {
+    files[`${ROOT}/${COVER_NAME}`] = encode(coverXhtml(config, cover, vertical));
+  }
+  if (hasBlock(packaged, "halfTitle")) {
+    files[`${ROOT}/${TITLEPAGE_NAME}`] = encode(titlePageXhtml(config, vertical));
+  }
+  if (hasBlock(packaged, "colophon")) {
+    files[`${ROOT}/${COLOPHON_NAME}`] = encode(colophonXhtml(config, vertical));
+  }
 
   if (characters.length > 0) {
     files[`${ROOT}/${CHARACTERS_NAME}`] = encode(
@@ -350,13 +428,47 @@ export function buildEpub(book: EpubBook): Uint8Array {
     }
   }
 
+  // 口絵・扉絵（設計書6.65.15）。面はブロックごと、画像は同じ絵なら1つ
+  for (const face of plates.faces.values()) {
+    files[`${ROOT}/${face.fileName}`] = encode(
+      buildXhtmlDocument({
+        title: face.label,
+        cssHref: CSS_NAME,
+        vertical,
+        body: buildPlateFragment(
+          { href: face.image.packagedName, caption: face.caption, label: face.label },
+          vertical
+        ),
+      })
+    );
+  }
+  for (const image of plates.images) {
+    files[`${ROOT}/${image.packagedName}`] = image.data;
+  }
+
+  if (packaged.afterword) {
+    files[`${ROOT}/${AFTERWORD_NAME}`] = encode(
+      buildXhtmlDocument({
+        title: AFTERWORD_HEADING,
+        cssHref: CSS_NAME,
+        vertical,
+        body: buildAfterwordFragment(packaged.afterword, {
+          collapseBlankLines: config.collapseBlankLines,
+          vertical,
+        }),
+      })
+    );
+  }
+
   for (const font of [fonts.body, fonts.heading]) {
     if (font) files[`${ROOT}/${font.packagedName}`] = font.data;
   }
 
+  // 表紙の画像は、表紙の面が並びに無くても入れる。**本棚に出る絵**
+  // （`properties="cover-image"`）であって、面とは別の役目だからである
   if (cover) files[`${ROOT}/${cover.packagedName}`] = cover.data;
 
-  if (backCover) {
+  if (showsBackCover(packaged) && backCover) {
     files[`${ROOT}/${backCover.packagedName}`] = backCover.data;
     files[`${ROOT}/${BACKCOVER_NAME}`] = encode(
       buildXhtmlDocument({
@@ -390,6 +502,84 @@ export function buildEpub(book: EpubBook): Uint8Array {
   }
 
   return zipSync(files);
+}
+
+/**
+ * 設計図から既定の面の並びを組む（設計書6.65.15）。
+ *
+ * **口絵・扉絵・あとがきは出せない。** どれも中身（画像のバイト列・原稿）が
+ * 要るのに、ここはファイルを読みに行かないからである。中身を用意できるのは
+ * 呼び出し側（`features/exportEpub.ts`）だけなので、そちらは必ず `blocks` を
+ * 渡す。ここは第1段からの呼び出し（単体テストを含む）を壊さないための道である。
+ */
+function defaultBlocksOf(config: BookConfig): EpubBlock[] {
+  return resolveBookBlocks(config)
+    .filter((block) => !isBookImageBlock(block) && block.type !== "afterword")
+    .map((block) => ({ type: block.type }) as EpubPlainBlock);
+}
+
+/**
+ * 本へ入るあとがき（設計書6.65.15）。**中身が無ければ null。**
+ *
+ * 空かどうかは**本文と同じ数え方**（`countParagraphs`）で見る。付箋
+ * （`//` で始まる行。設計書6.40）だけを書いた雛形は本へ1文字も出ないので、
+ * 「まだ書いていない」と読む——見出しだけの空の面を1つ挟むほうが害が大きい。
+ */
+function afterwordOf(
+  blocks: readonly EpubBlock[]
+): EpubAfterwordBlock | null {
+  const found = blocks.find(
+    (block): block is EpubAfterwordBlock => block.type === "afterword"
+  );
+  if (!found) return null;
+  return countParagraphs(found.text) > 0 ? found : null;
+}
+
+/**
+ * 口絵・扉絵をZIPへ入れる形へまとめる（設計書6.65.15）。
+ *
+ * **画像は挿絵とまったく同じ流儀**——`plate-1.png` の機械名に付け替え、
+ * 同じ絵は1回だけ入れる（1枚の絵を口絵と扉絵で使い回す本がある）。
+ *
+ * **面はブロックごとに1つ**である。同じ絵を2か所に置けば面は2つになる
+ * （画像は1つ）ので、面の番号と画像の番号は別々に数える。
+ */
+function packPlates(blocks: readonly EpubBlock[]): {
+  faces: Map<EpubBlock, PackagedPlate>;
+  images: PackagedIllustration[];
+} {
+  const faces = new Map<EpubBlock, PackagedPlate>();
+  const images = new Map<string, PackagedIllustration>();
+
+  for (const block of blocks) {
+    if (block.type !== "frontIllustration" && block.type !== "sectionArt") {
+      continue;
+    }
+    const label = BOOK_BLOCK_LABELS[block.type];
+    let image = images.get(block.sourcePath);
+    if (!image) {
+      const index = images.size + 1;
+      image = {
+        id: `plate-${index}`,
+        packagedName: `plate-${index}${extensionOf(block.sourcePath)}`,
+        // 扱えない種類は、本を組む前に分かる言葉で断る（挿絵と同じ）
+        mediaType: imageMediaType(block.sourcePath, label),
+        data: block.data,
+      };
+      images.set(block.sourcePath, image);
+    }
+
+    const faceIndex = faces.size + 1;
+    faces.set(block, {
+      id: `plate-page-${faceIndex}`,
+      fileName: `plate-page-${faceIndex}.xhtml`,
+      label,
+      caption: block.caption,
+      image,
+    });
+  }
+
+  return { faces, images: [...images.values()] };
 }
 
 /**
@@ -535,6 +725,52 @@ interface PackagedCharacter {
   portrait: PackagedIllustration | null;
 }
 
+/** ZIPへ入れた口絵・扉絵の1面（画像は複数の面で共有しうる） */
+interface PackagedPlate {
+  id: string;
+  fileName: string;
+  /** 「口絵」「扉絵」。題名と代替文に使う */
+  label: string;
+  caption: string;
+  image: PackagedIllustration;
+}
+
+/**
+ * 組み立ての材料一式。
+ *
+ * **目録（OPF）と目次（nav）へ引数で渡さない。** 面が増えるたびに引数が
+ * 増え、渡し忘れた面が「ファイルはあるのに本の中に無い」という分かりにくい
+ * 壊れ方をする。1つの入れ物にして、同じものを見て組む。
+ */
+interface PackagedBook {
+  book: EpubBook;
+  config: BookConfig;
+  vertical: boolean;
+  blocks: readonly EpubBlock[];
+  chapters: readonly PackagedChapter[];
+  cover: PackagedCover | null;
+  backCover: PackagedCover | null;
+  illustrations: ReadonlyMap<string, PackagedIllustration>;
+  characters: readonly PackagedCharacter[];
+  fonts: PackagedFonts;
+  /** 面ごとの口絵・扉絵。**鍵はブロックそのもの**（同じ絵でも別の面） */
+  plates: ReadonlyMap<EpubBlock, PackagedPlate>;
+  /** ZIPへ入れる画像（同じ絵は1つ） */
+  plateImages: readonly PackagedIllustration[];
+  /** 本へ入るあとがき。中身が無ければ null */
+  afterword: EpubAfterwordBlock | null;
+}
+
+/** その種類の面が並びにあるか */
+function hasBlock(packaged: PackagedBook, type: BookBlockType): boolean {
+  return packaged.blocks.some((block) => block.type === type);
+}
+
+/** 裏表紙の面を出すか。**並びにあり、かつ画像があるとき**だけ */
+function showsBackCover(packaged: PackagedBook): boolean {
+  return packaged.backCover !== null && hasBlock(packaged, "backCover");
+}
+
 interface PackagedFont {
   id: string;
   packagedName: string;
@@ -587,16 +823,17 @@ function containerXml(): string {
  * 「作者名が空文字である」という主張になり、リーダーによっては
  * 著者欄が空白のまま本棚へ並ぶ。
  */
-function contentOpf(
-  book: EpubBook,
-  chapters: readonly PackagedChapter[],
-  cover: PackagedCover | null,
-  backCover: PackagedCover | null,
-  illustrations: ReadonlyMap<string, PackagedIllustration>,
-  characters: readonly PackagedCharacter[],
-  fonts: PackagedFonts,
-  vertical: boolean
-): string {
+function contentOpf(packaged: PackagedBook): string {
+  const {
+    book,
+    chapters,
+    cover,
+    backCover,
+    illustrations,
+    characters,
+    fonts,
+    vertical,
+  } = packaged;
   const config = book.config;
 
   const metadata = [
@@ -634,8 +871,18 @@ function contentOpf(
   const manifest = [
     `    <item id="nav" href="${NAV_NAME}" media-type="application/xhtml+xml" properties="nav" />`,
     `    <item id="style" href="${CSS_NAME}" media-type="text/css" />`,
-    `    <item id="cover" href="${COVER_NAME}" media-type="application/xhtml+xml" />`,
-    `    <item id="titlepage" href="${TITLEPAGE_NAME}" media-type="application/xhtml+xml" />`,
+    // **並びに無い面は、目録にも載せない**（設計書6.65.15）。載せると
+    // 本の中に読まれない面が残り、epubcheck も咎める
+    ...(hasBlock(packaged, "cover")
+      ? [
+          `    <item id="cover" href="${COVER_NAME}" media-type="application/xhtml+xml" />`,
+        ]
+      : []),
+    ...(hasBlock(packaged, "halfTitle")
+      ? [
+          `    <item id="titlepage" href="${TITLEPAGE_NAME}" media-type="application/xhtml+xml" />`,
+        ]
+      : []),
     ...(cover
       ? [
           `    <item id="cover-image" href="${cover.packagedName}" media-type="${cover.mediaType}" properties="cover-image" />`,
@@ -665,14 +912,32 @@ function contentOpf(
         (font) =>
           `    <item id="${font.id}" href="${font.packagedName}" media-type="${font.mediaType}" />`
       ),
+    // 口絵・扉絵（設計書6.65.15）。面はブロックごと、画像は同じ絵なら1つ
+    ...[...packaged.plates.values()].map(
+      (face) =>
+        `    <item id="${face.id}" href="${face.fileName}" media-type="application/xhtml+xml" />`
+    ),
+    ...packaged.plateImages.map(
+      (image) =>
+        `    <item id="${image.id}" href="${image.packagedName}" media-type="${image.mediaType}" />`
+    ),
     ...chapters.map(
       (chapter) =>
         `    <item id="${chapter.id}" href="${chapter.fileName}" media-type="application/xhtml+xml" />`
     ),
-    `    <item id="colophon" href="${COLOPHON_NAME}" media-type="application/xhtml+xml" />`,
+    ...(packaged.afterword
+      ? [
+          `    <item id="afterword" href="${AFTERWORD_NAME}" media-type="application/xhtml+xml" />`,
+        ]
+      : []),
+    ...(hasBlock(packaged, "colophon")
+      ? [
+          `    <item id="colophon" href="${COLOPHON_NAME}" media-type="application/xhtml+xml" />`,
+        ]
+      : []),
     // 裏表紙の画像には `cover-image` を付けない。**本に1つだけ**と
     // 決められており、2つ付けると epubcheck で落ちる
-    ...(backCover
+    ...(showsBackCover(packaged) && backCover
       ? [
           `    <item id="backcover" href="${BACKCOVER_NAME}" media-type="application/xhtml+xml" />`,
           `    <item id="backcover-image" href="${backCover.packagedName}" media-type="${backCover.mediaType}" />`,
@@ -680,24 +945,9 @@ function contentOpf(
       : []),
   ];
 
-  const spine = [
-    '    <itemref idref="cover" />',
-    // 扉は表紙の直後・目次の前（設計書6.65.3の表の並び）。
-    // **出したり消したりしない**——表紙が画像1枚の本では、題名や
-    // 作者名を読む場所がここしかない
-    '    <itemref idref="titlepage" />',
-    // **目次を外しても `nav.xhtml` は残す**（EPUB3で必須）。
-    // ここで外すのは「読む順路に並べるか」だけである
-    ...(config.tocEnabled ? ['    <itemref idref="nav" />'] : []),
-    // 登場人物一覧は**目次の後・本文の前**（設計書6.65.11）。目次を出さない
-    // 本でも本文の前に置く——読み始める前に人物を見せる面だからである
-    ...(characters.length > 0 ? ['    <itemref idref="characters" />'] : []),
-    ...chapters.map((chapter) => `    <itemref idref="${chapter.id}" />`),
-    '    <itemref idref="colophon" />',
-    // 裏表紙は本の最終面（設計書6.65.8）。縦書きの本は右→左に開くので、
-    // 読み進んだいちばん左が裏表紙になる
-    ...(backCover ? ['    <itemref idref="backcover" />'] : []),
-  ];
+  const spine = spineRefs(packaged).map(
+    (id) => `    <itemref idref="${id}" />`
+  );
 
   // 縦書きは右から左へ開く。横書きは既定（左→右）なので**書かない**
   const direction = vertical ? ' page-progression-direction="rtl"' : "";
@@ -720,18 +970,75 @@ function contentOpf(
 }
 
 /**
+ * 読む順路（spine）に並べる面のid（設計書6.65.15）。
+ *
+ * **並びの順そのままに写す。** ここが本の並びを決める唯一の場所である
+ * ——面ごとに「どこへ入れるか」を書き足していくと、増やすたびに順序の
+ * 決まりが散らばる。
+ *
+ * 出さない面の見分けは**中身があるか**で決める。人物が1人も居ない一覧、
+ * 画像の無い裏表紙、中身の無いあとがきは、並びに書いてあっても出さない
+ * （空の面が1つ挟まるより、無いほうがよい）。
+ */
+function spineRefs(packaged: PackagedBook): string[] {
+  const out: string[] = [];
+
+  for (const block of packaged.blocks) {
+    switch (block.type) {
+      case "cover":
+        out.push("cover");
+        break;
+      case "halfTitle":
+        out.push("titlepage");
+        break;
+      // **目次を外しても `nav.xhtml` は残す**（EPUB3で必須）。
+      // ここで決めるのは「読む順路に並べるか」だけである
+      case "toc":
+        out.push("nav");
+        break;
+      case "characters":
+        if (packaged.characters.length > 0) out.push("characters");
+        break;
+      case "frontIllustration":
+      case "sectionArt": {
+        const face = packaged.plates.get(block);
+        if (face) out.push(face.id);
+        break;
+      }
+      case "body":
+        out.push(...packaged.chapters.map((chapter) => chapter.id));
+        break;
+      case "afterword":
+        if (packaged.afterword) out.push("afterword");
+        break;
+      case "colophon":
+        out.push("colophon");
+        break;
+      // 裏表紙は画像があるときだけ（設計書6.65.8）。縦書きの本は右→左に
+      // 開くので、読み進んだいちばん左が裏表紙になる
+      case "backCover":
+        if (showsBackCover(packaged)) out.push("backcover");
+        break;
+    }
+  }
+
+  return out;
+}
+
+/**
  * 目次。
  *
  * `nav.xhtml` は EPUB3 の必須ファイルで、リーダーの「目次」ボタンが
- * 見るのもこれである。`tocEnabled` が false でも作り、読む順路
- * （`spine`）へ並べないことで「読み物としての目次ページ」だけを省く。
+ * 見るのもこれである。並びに目次が無くても作り、読む順路（`spine`）へ
+ * 並べないことで「読み物としての目次ページ」だけを省く。
+ *
+ * **載せるのは、目次から飛ぶ値打ちのある面だけ**である（設計書6.65.15）。
+ * 人物紹介・あとがき・奥付は本文と同じ読み物なので載せ、表紙・中表紙・
+ * 口絵・扉絵は載せない——1行ぶん増えるだけで、読者は表紙を目次から
+ * 探さない。
  */
-function navXhtml(
-  chapters: readonly PackagedChapter[],
-  config: BookConfig,
-  hasCharacters: boolean,
-  vertical: boolean
-): string {
+function navXhtml(packaged: PackagedBook): string {
+  const { chapters, config, vertical } = packaged;
   return buildXhtmlDocument({
     title: "目次",
     cssHref: CSS_NAME,
@@ -745,8 +1052,10 @@ function navXhtml(
       {
         pattern: config.tocPattern,
         ornament: config.tocOrnament,
-        colophonHref: COLOPHON_NAME,
-        charactersHref: hasCharacters ? CHARACTERS_NAME : null,
+        colophonHref: hasBlock(packaged, "colophon") ? COLOPHON_NAME : null,
+        charactersHref:
+          packaged.characters.length > 0 ? CHARACTERS_NAME : null,
+        afterwordHref: packaged.afterword ? AFTERWORD_NAME : null,
         vertical,
       }
     ),
@@ -812,6 +1121,13 @@ export interface EpubTocOptions {
    */
   charactersHref?: string | null;
   /**
+   * 本文の後に置くあとがきへの行（設計書6.65.15）。null なら出さない。
+   *
+   * **奥付より前に置く。** 目次の並びと読む順路が食い違うと、目次から
+   * 飛んだ読者が本の中で迷う（人物紹介を先頭に置くのと同じ理由）。
+   */
+  afterwordHref?: string | null;
+  /**
    * 縦書きか（設計書6.65.15）。**省略時は false**。
    *
    * 目次の行の半角の数字・「!」「?」は、縦書きの本のときだけ縦中横にする。
@@ -863,6 +1179,16 @@ export function buildTocFragment(
           )}">登場人物</a></li>`,
         ];
 
+  // あとがきは本文の後・奥付の前（本の並びと同じ順に置く）
+  const afterword =
+    options.afterwordHref === null || options.afterwordHref === undefined
+      ? []
+      : [
+          `    <li><a href="${escapeXml(
+            options.afterwordHref
+          )}">${AFTERWORD_HEADING}</a></li>`,
+        ];
+
   return [
     '<nav epub:type="toc" id="toc">',
     `<h1 class="nav-heading">目次${buildOrnamentFragment(
@@ -871,6 +1197,7 @@ export function buildTocFragment(
     `  <ol class="${listClass}">`,
     ...characters,
     ...(grouped ? groupedItems(entries, vertical) : flatItems(entries, vertical)),
+    ...afterword,
     ...colophon,
     "  </ol>",
     "</nav>",
@@ -1007,6 +1334,59 @@ export function buildCoverFragment(
     )}" />`,
     "</div>",
   ].join("\n");
+}
+
+/**
+ * 口絵・扉絵の断片（設計書6.65.15）。**書き出しとプレビューが共に使う。**
+ *
+ * **解説文は画像に重ねず、下に添える**（挿絵と同じ。設計書6.65.10）。
+ * EPUBのリフロー画面では絶対配置の重ね書きがリーダーごとに崩れる。
+ *
+ * 表紙のように面いっぱいへ敷くのではなく、`figure` で組む——口絵は
+ * 本文と同じ流れの中の1面であり、解説文が添うことがあるからである。
+ */
+export function buildPlateFragment(
+  plate: { href: string; caption: string; label: string },
+  vertical = false
+): string {
+  const caption = plate.caption.trim();
+  return [
+    '<figure class="plate">',
+    // 代替文は解説文があればそれを。無ければ面の呼び名（「口絵」）——
+    // **空の alt は「飾りなので読み上げなくてよい」の意味になる**。
+    // 属性値なので縦中横は通さない（span を挟むと属性が壊れる）
+    `<img src="${escapeXml(plate.href)}" alt="${escapeXml(
+      caption || plate.label
+    )}" />`,
+    ...(caption
+      ? [`<figcaption>${escapeDisplayText(caption, vertical)}</figcaption>`]
+      : []),
+    "</figure>",
+  ].join("\n");
+}
+
+/**
+ * あとがきの断片（設計書6.65.15）。**本文とまったく同じ組版**である。
+ *
+ * 話の断片（`buildChapterFragment`）をそのまま使うので、段落の詰め方も
+ * ルビも傍点も縦中横も本文と同じ経路を通る——あとがき用の組み方をもう1つ
+ * 書くと、本文だけ直した日から食い違い始める。
+ */
+export function buildAfterwordFragment(
+  afterword: { text: string; notation: NotationMode },
+  options: { collapseBlankLines: boolean; vertical: boolean }
+): string {
+  return buildChapterFragment(
+    {
+      heading: AFTERWORD_HEADING,
+      body: afterword.text,
+      notation: afterword.notation,
+    },
+    {
+      collapseBlankLines: options.collapseBlankLines,
+      vertical: options.vertical,
+    }
+  );
 }
 
 /**
@@ -1188,6 +1568,11 @@ export function buildEpubCss(
     ".illustration { margin-block: 2em; text-align: center; }",
     ".illustration img { max-inline-size: 100%; max-block-size: 100%; }",
     ".illustration figcaption { font-size: 0.85em; margin-block-start: 0.6em; }",
+    // 口絵・扉絵（設計書6.65.15）。**それだけで1面**なので、挿絵のように
+    // 前後の空きは取らず、面いっぱいに収まる大きさへ納める
+    ".plate { margin: 0; padding: 0; text-align: center; }",
+    ".plate img { max-inline-size: 100%; max-block-size: 100%; }",
+    ".plate figcaption { font-size: 0.85em; margin-block-start: 0.6em; }",
     // 話の途中の改ページ。**古い書き方も並べる**（`page-break-before` しか
     // 見ないリーダーが現役で、片方だけだと場面が割れない）
     ".page-break {",

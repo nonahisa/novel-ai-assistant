@@ -1,5 +1,6 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
+import { unzipSync } from "fflate";
 import { exportEpub } from "../../src/features/exportEpub";
 import type { WorkEntry } from "../../src/models/types";
 import {
@@ -263,5 +264,95 @@ describe("表紙・裏表紙が読めないとき（設計書6.65.8）", () => {
 
     expect(textOf("error")).toBe("");
     expect(textOf("info")).toContain("EPUBを書き出しました");
+  });
+});
+
+/**
+ * 面の並び（設計書6.65.15の段B）。
+ *
+ * **中身の読めない面だけを外して、本は出す**（挿絵と同じ流儀）。
+ * あとがきだけは、**まだ書いていないときに黙る**——既定の並びに面が
+ * 入っているので、書かない作者にも毎回言うことになる。
+ */
+describe("口絵・あとがきの面（設計書6.65.15）", () => {
+  beforeEach(() => {
+    put("本文/第1話.txt", "あ\n\nい");
+  });
+
+  /** 書き出された本を開き直す（ZIPの中の名前だけを見る） */
+  function exported(): string[] {
+    const found = [...disk.entries()].find(([name]) => name.endsWith(".epub"));
+    if (!found) throw new Error("EPUBが書き出されていません");
+    return Object.keys(unzipSync(found[1]));
+  }
+
+  test("あとがきの原稿があれば、面として本へ入る", async () => {
+    writeBook({ title: "氷の街" });
+    put("設定/書籍/あとがき.md", "お読みいただきありがとうございました。");
+
+    await exportEpub(work);
+
+    expect(exported()).toContain("OEBPS/afterword.xhtml");
+    // 入ったことは面の存在で分かる。余計な知らせは足さない
+    expect(textOf("info")).not.toContain("あとがき");
+  });
+
+  test("あとがきの原稿がまだ無ければ、何も言わない（面も出ない）", async () => {
+    writeBook({ title: "氷の街" });
+
+    await exportEpub(work);
+
+    expect(exported()).not.toContain("OEBPS/afterword.xhtml");
+    expect(textOf("info")).not.toContain("あとがき");
+  });
+
+  test("原稿はあるのに中身が無ければ、入らなかったことを伝える", async () => {
+    writeBook({ title: "氷の街" });
+    // 雛形のまま（付箋の行だけ）は「まだ書いていない」と読む
+    put("設定/書籍/あとがき.md", "// ここにあとがきを書いてください\n");
+
+    await exportEpub(work);
+
+    expect(exported()).not.toContain("OEBPS/afterword.xhtml");
+    expect(textOf("info")).toContain("あとがき");
+    expect(textOf("info")).toContain("EPUBを書き出しました");
+  });
+
+  test("口絵の画像が読めなければ、その面だけ外して本は出す", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [
+        { type: "cover" },
+        { type: "frontIllustration", imagePath: "素材/無い口絵.png" },
+        { type: "body" },
+      ],
+    });
+
+    await exportEpub(work);
+    const info = textOf("info");
+
+    expect(info).toContain("EPUBを書き出しました");
+    expect(info).toContain("口絵");
+    expect(info).toContain("素材/無い口絵.png");
+    expect(exported()).not.toContain("OEBPS/plate-page-1.xhtml");
+  });
+
+  test("画像が置いてあれば、口絵の面が本へ入る", async () => {
+    putBytes("素材/口絵.png", [0x89, 0x50, 0x4e, 0x47]);
+    writeBook({
+      title: "氷の街",
+      blocks: [
+        { type: "cover" },
+        { type: "frontIllustration", imagePath: "素材/口絵.png", caption: "朝" },
+        { type: "body" },
+      ],
+    });
+
+    await exportEpub(work);
+    const names = exported();
+
+    expect(names).toContain("OEBPS/plate-page-1.xhtml");
+    expect(names).toContain("OEBPS/plate-1.png");
+    expect(textOf("info")).not.toContain("読めませんでした");
   });
 });

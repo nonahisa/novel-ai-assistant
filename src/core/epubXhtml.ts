@@ -269,6 +269,23 @@ export function describeMissingIllustrationImage(imagePath: string): string {
 }
 
 /**
+ * 画像が見つからない面（口絵・扉絵）の言い方（設計書6.65.15）。
+ *
+ * 挿絵（上）と分けてあるのは**入らないものが違う**からである——挿絵は
+ * 本文の中の1枚だが、こちらは面が1つ丸ごと消える。言い方は書き出しと
+ * 画面で同じにするため、ここに1つだけ置く。
+ */
+export function describeMissingFaceImage(
+  label: string,
+  imagePath: string
+): string {
+  return (
+    `${label}の画像「${imagePath}」が見つかりません。` +
+    `この${label}の面は本に入りません。`
+  );
+}
+
+/**
  * 競合で本から外れた話に置かれていた指定の言い方（設計書6.65.10）。
  *
  * 未解決の競合を含む話は本から外れる。**その話に付けた挿絵・改ページも

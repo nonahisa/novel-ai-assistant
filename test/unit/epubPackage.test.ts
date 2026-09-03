@@ -1244,3 +1244,243 @@ describe("書体の同梱", () => {
     expect(scoped).toContain(".epub-page {");
   });
 });
+
+/**
+ * 面の並び（設計書6.65.15の段B）。
+ *
+ * **blocks の順が読む順（spine）になる。** ここで固定するのは2つ——
+ * 書いた順のとおりに並ぶことと、**blocks を書いていない本がいままでと
+ * 1面も変わらない**こと（回帰の見張り）。
+ */
+describe("ブロックの並びで面を組む（設計書6.65.15）", () => {
+  function spine(files: Record<string, string>): string[] {
+    return [
+      ...files["OEBPS/content.opf"].matchAll(/<itemref idref="([^"]+)"/g),
+    ].map((match) => match[1]);
+  }
+
+  test("blocks を書いていない本は、いままでと同じ並びのまま", () => {
+    // **第1段からの本を1面も変えない。** 数えるのではなく並びごと固定する
+    expect(spine(open(buildEpub(book())))).toEqual([
+      "cover",
+      "titlepage",
+      "nav",
+      "chapter-001",
+      "chapter-002",
+      "colophon",
+    ]);
+  });
+
+  test("書いた順が、そのまま読む順になる", () => {
+    const files = open(
+      buildEpub(
+        book({
+          blocks: [
+            { type: "body" },
+            { type: "halfTitle" },
+            { type: "cover" },
+            { type: "colophon" },
+          ],
+        })
+      )
+    );
+
+    expect(spine(files)).toEqual([
+      "chapter-001",
+      "chapter-002",
+      "titlepage",
+      "cover",
+      "colophon",
+    ]);
+  });
+
+  test("並びに無い面は、ファイルごと作らない", () => {
+    const files = open(
+      buildEpub(book({ blocks: [{ type: "cover" }, { type: "body" }] }))
+    );
+
+    expect(files["OEBPS/colophon.xhtml"]).toBeUndefined();
+    expect(files["OEBPS/content.opf"]).not.toContain('href="colophon.xhtml"');
+    // **nav.xhtml だけは残す**（EPUB3で必須。第1段からの約束）
+    expect(files["OEBPS/nav.xhtml"]).toBeDefined();
+    expect(spine(files)).toEqual(["cover", "chapter-001", "chapter-002"]);
+  });
+});
+
+describe("口絵・扉絵の面（設計書6.65.15）", () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+
+  function plated(): Record<string, string> {
+    return open(
+      buildEpub(
+        book({
+          blocks: [
+            { type: "cover" },
+            {
+              type: "frontIllustration",
+              sourcePath: "素材/口絵.png",
+              data: png,
+              caption: "旅立ちの朝",
+            },
+            { type: "body" },
+          ],
+        })
+      )
+    );
+  }
+
+  test("画像は機械名でZIPへ入り、面と一緒に manifest へ載る", () => {
+    const files = plated();
+    const opf = files["OEBPS/content.opf"];
+
+    // 作者のファイル名は使わない（表紙・挿絵と同じ理由）
+    expect(files["OEBPS/plate-1.png"]).toBeDefined();
+    expect(files["OEBPS/素材/口絵.png"]).toBeUndefined();
+    expect(opf).toContain('href="plate-1.png"');
+    expect(opf).toContain('media-type="image/png"');
+    expect(opf).toContain('href="plate-page-1.xhtml"');
+    // 表紙は本に1つだけ。口絵に cover-image の印は付かない
+    expect(opf).not.toMatch(
+      /<item[^>]*href="plate-1\.png"[^>]*properties="cover-image"/
+    );
+  });
+
+  test("解説文は図版の下に添える（画像には重ねない）", () => {
+    const face = plated()["OEBPS/plate-page-1.xhtml"];
+
+    expect(face).toContain('src="plate-1.png"');
+    expect(face).toContain("<figcaption>旅立ちの朝</figcaption>");
+    expect(face.indexOf("<img")).toBeLessThan(face.indexOf("<figcaption>"));
+  });
+
+  test("解説文が無ければ figcaption そのものを出さない", () => {
+    const files = open(
+      buildEpub(
+        book({
+          blocks: [
+            { type: "body" },
+            {
+              type: "sectionArt",
+              sourcePath: "素材/扉.png",
+              data: png,
+              caption: "",
+            },
+          ],
+        })
+      )
+    );
+
+    expect(files["OEBPS/plate-page-1.xhtml"]).not.toContain("<figcaption>");
+  });
+
+  test("同じ絵を2か所で使っても、画像が入るのは1回だけ（面は2つ）", () => {
+    const files = open(
+      buildEpub(
+        book({
+          blocks: [
+            {
+              type: "frontIllustration",
+              sourcePath: "素材/絵.png",
+              data: png,
+              caption: "",
+            },
+            { type: "body" },
+            {
+              type: "sectionArt",
+              sourcePath: "素材/絵.png",
+              data: png,
+              caption: "",
+            },
+          ],
+        })
+      )
+    );
+    const opf = files["OEBPS/content.opf"];
+
+    expect(files["OEBPS/plate-1.png"]).toBeDefined();
+    expect(files["OEBPS/plate-2.png"]).toBeUndefined();
+    // 面は2つ。**同じ絵を2度詰めない**（挿絵・人物イラストと同じ流儀）
+    expect(files["OEBPS/plate-page-1.xhtml"]).toBeDefined();
+    expect(files["OEBPS/plate-page-2.xhtml"]).toBeDefined();
+    expect(opf.match(/href="plate-1\.png"/g)).toHaveLength(1);
+  });
+
+  test("扱えない種類は、分かる言葉で断る", () => {
+    expect(() =>
+      buildEpub(
+        book({
+          blocks: [
+            { type: "body" },
+            {
+              type: "frontIllustration",
+              sourcePath: "素材/口絵.webp",
+              data: png,
+              caption: "",
+            },
+          ],
+        })
+      )
+    ).toThrow(/口絵/);
+  });
+});
+
+describe("あとがきの面（設計書6.65.15）", () => {
+  function withAfterword(text: string): Record<string, string> {
+    return open(
+      buildEpub(
+        book({
+          blocks: [
+            { type: "body" },
+            { type: "afterword", text, notation: "curly" },
+            { type: "colophon" },
+          ],
+        })
+      )
+    );
+  }
+
+  test("本文と同じ組版で1面になり、見出しは「あとがき」", () => {
+    const files = withAfterword("{拙作|せっさく}をお読みいただき\n\nありがとう");
+    const face = files["OEBPS/afterword.xhtml"];
+
+    expect(face).toContain("あとがき");
+    // 本文と同じ組版（ルビが組まれ、段落は <p> になる）
+    expect(face).toContain("<ruby>拙作<rt>せっさく</rt></ruby>");
+    expect(face).toContain("<p>ありがとう</p>");
+    expect(files["OEBPS/content.opf"]).toContain('href="afterword.xhtml"');
+  });
+
+  test("読む順は本文の後・奥付の前", () => {
+    const spine = [
+      ...withAfterword("ありがとう")["OEBPS/content.opf"].matchAll(
+        /<itemref idref="([^"]+)"/g
+      ),
+    ].map((match) => match[1]);
+
+    expect(spine).toEqual([
+      "chapter-001",
+      "chapter-002",
+      "afterword",
+      "colophon",
+    ]);
+  });
+
+  test("目次にも行が入る（本文の後・奥付の前）", () => {
+    const nav = withAfterword("ありがとう")["OEBPS/nav.xhtml"];
+
+    expect(nav).toContain('<a href="afterword.xhtml">あとがき</a>');
+    expect(nav.indexOf("afterword.xhtml")).toBeLessThan(
+      nav.indexOf("colophon.xhtml")
+    );
+  });
+
+  test("中身が無ければ、面ごと出さない", () => {
+    for (const text of ["", "   \n\n", "// まだ書いていない"]) {
+      const files = withAfterword(text);
+
+      expect(files["OEBPS/afterword.xhtml"], text).toBeUndefined();
+      expect(files["OEBPS/content.opf"]).not.toContain("afterword.xhtml");
+      expect(files["OEBPS/nav.xhtml"]).not.toContain("あとがき");
+    }
+  });
+});

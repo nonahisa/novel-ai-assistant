@@ -342,6 +342,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 5,
   },
   {
+    id: "F-64",
+    title: "EPUBのブロック（段B）",
+    commands: ["novelai.openEpubEditor"],
+    count: 6,
+  },
+  {
     id: "F-52",
     title: "待ち時間300秒の壁——通信部品（undici）側の上限も設定に合わせた",
     commands: ["novelai.extractSettings"],
@@ -566,4 +572,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 720;
+export const PENDING_CHECK_TOTAL = 726;
