@@ -10,7 +10,12 @@ import {
   workPaths,
 } from "./core/workRegistry";
 import { checkDictionaryFreshness } from "./core/imeDictionaryStatus";
-import { WorkTreeProvider, WorkNode, EpisodeNode } from "./views/workTree";
+import {
+  WorkTreeProvider,
+  WorkNode,
+  EpisodeNode,
+  ChapterNode,
+} from "./views/workTree";
 import {
   countChars,
   formatCount,
@@ -256,6 +261,11 @@ import {
   copySubtitle,
   renameWithSubtitle,
 } from "./features/episodeCopy";
+import {
+  removeChapter,
+  renameChapter,
+  startChapterAt,
+} from "./features/manageChapters";
 import { countUnextractedEpisodes } from "./features/extractionFreshness";
 import { chooseScope, recordCheck } from "./features/typoCheckScope";
 import { switchMode } from "./features/switchMode";
@@ -3769,6 +3779,32 @@ export async function activate(
         treeProvider.refresh(node.work.id);
       }
     )
+  );
+
+  /*
+    章立て（設計書6.66.2）。**木のノードが引数に要る**ので、
+    コマンドパレットには出さない（`package.json` の commandPalette）。
+    台帳が変わったときだけ作品一覧を作り直す。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.startChapter", async (node?: EpisodeNode) => {
+      if (!node) return;
+      if (await startChapterAt(node.work, node.episode)) {
+        treeProvider.refresh(node.work.id);
+      }
+    }),
+    registerCommand("novelai.renameChapter", async (node?: ChapterNode) => {
+      if (!node) return;
+      if (await renameChapter(node.work, node.chapter)) {
+        treeProvider.refresh(node.work.id);
+      }
+    }),
+    registerCommand("novelai.removeChapter", async (node?: ChapterNode) => {
+      if (!node) return;
+      if (await removeChapter(node.work, node.chapter)) {
+        treeProvider.refresh(node.work.id);
+      }
+    })
   );
 
   context.subscriptions.push(

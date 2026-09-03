@@ -430,8 +430,13 @@ export class OllamaProvider implements AIProvider {
         この枝ごと落とす（`esbuild.js`）。作者がF5で確かめるための実験で、
         利用者へ出すのは「通信部品の待ち時間を明示する」ほう
         （`fetchTimeouts.ts`）である。
+
+        **呼び出し側が断れる**（`disableStreaming`。2026-09-03）。流す道は
+        断片が届くたびに待ち時間を数え直すので、**繰り返しに崩れて書き続ける
+        モデルを永遠に待つ**。測定はそれでは終わらないので、絶対の締め切りの
+        ある道（`fetchJson`）を通す。理由の詳しくは `ai/types.ts` にある。
       */
-      res = __DEV_HELPERS__ && streamingEnabled()
+      res = __DEV_HELPERS__ && streamingEnabled() && !params.disableStreaming
         ? await this.streamChat(
             body,
             this.requestTimeoutMs(params.model),

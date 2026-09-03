@@ -10,6 +10,13 @@ import {
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
 import { scanWork } from "../core/scanner";
+import type { Chapter } from "../models/chapter";
+import { ChapterStore } from "../core/chapterStore";
+import {
+  chapterNodeId,
+  formatChapterRange,
+  groupEpisodesByChapter,
+} from "../core/chapterGrouping";
 import { MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE } from "../core/manuscriptViewTypes";
 import { SynopsisStore } from "../core/synopsisStore";
 import { synopsisKey } from "../models/synopsis";
@@ -20,7 +27,7 @@ import {
   countModeLabel,
 } from "../core/countSettings";
 
-export type TreeNode = WorkNode | EpisodeNode | MessageNode;
+export type TreeNode = WorkNode | ChapterNode | EpisodeNode | MessageNode;
 
 export class WorkNode {
   readonly type = "work" as const;
@@ -34,6 +41,26 @@ export class WorkNode {
      * 「登録したのに出てこない」という、原因の分からない終わり方になる。
      */
     public readonly loadError?: string
+  ) {}
+}
+
+/**
+ * 章の折りたたみ（設計書6.66.3）。
+ *
+ * 章のある作品では、作品と話のあいだにこれが入る。**章の無い作品では
+ * 作らない**——いままでどおり作品の直下に話が並ぶ。
+ */
+export class ChapterNode {
+  readonly type = "chapter" as const;
+  constructor(
+    public readonly work: WorkEntry,
+    public readonly chapter: Chapter,
+    /** この章に入る話。開始の話が見つからない章では空 */
+    public readonly episodes: EpisodeFile[],
+    /** 開始の話が作品の中に見つからない（改題・削除が典型） */
+    public readonly missingStart: boolean,
+    /** 作品の形式。話数の言い方が変わる（EpisodeNode と同じ理由で持たせる） */
+    public readonly format?: WorkFormatKey
   ) {}
 }
 
@@ -79,6 +106,14 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private synopses = new Map<string, Map<string, string>>();
 
   /**
+   * 章の台帳（作品ID -> 章の一覧、設計書6.66.3）。
+   *
+   * あらすじと同じく、**作品を開くたびに1回だけ読む**。章ノードは
+   * 折りたたみのたびに描き直されるので、そこで読むとJSONを何度も開く。
+   */
+  private chapters = new Map<string, Chapter[]>();
+
+  /**
    * @param syncBadge GitHub同期に残っているものを短く表す文字列を返す。
    *   ツリーがGit連携そのものに依存しないよう、関数で受け取る。
    * @param syncTooltip その内訳（ホバーで読む）。
@@ -97,9 +132,11 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     if (workId) {
       this.cache.delete(workId);
       this.synopses.delete(workId);
+      this.chapters.delete(workId);
     } else {
       this.cache.clear();
       this.synopses.clear();
+      this.chapters.clear();
     }
     this._onDidChangeTreeData.fire();
   }
@@ -187,6 +224,40 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         ]
           .filter((line) => line !== null)
           .join("\n")
+      );
+      return item;
+    }
+
+    if (node.type === "chapter") {
+      // 開始の話が見つからない章も、黙って消さずに出す（設計書6.66.1）。
+      // 名前のうしろに理由を書き、作者が直せるようにする
+      const label = node.missingStart
+        ? `${node.chapter.name}（開始の話が見つかりません）`
+        : node.chapter.name;
+      const item = new vscode.TreeItem(
+        label,
+        vscode.TreeItemCollapsibleState.Collapsed
+      );
+      item.contextValue = "chapter";
+      // **IDに名前を入れない。** 折りたたみの開閉はVS CodeがIDで
+      // 覚えるので、名前から作ると改名のたびに開き直しになる（6.66.3）
+      item.id = chapterNodeId(node.work.id, node.chapter.startEpisodePath);
+      item.iconPath = new vscode.ThemeIcon(
+        node.missingStart ? "warning" : "folder"
+      );
+      item.description = node.missingStart
+        ? node.chapter.startEpisodePath
+        : formatChapterRange(node.episodes, node.format);
+      item.tooltip = new vscode.MarkdownString(
+        [
+          `**${node.chapter.name}**`,
+          "",
+          `- 開始の話: ${node.chapter.startEpisodePath}`,
+          node.missingStart
+            ? "\n開始の話が見つかりません。話の名前が変わったか、削除されています。" +
+              "\n章を外すか、いまの話から章を始め直してください（話は消えません）。"
+            : `- ${formatChapterRange(node.episodes, node.format)}`,
+        ].join("\n")
       );
       return item;
     }
@@ -369,12 +440,79 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       }
       await this.loadSynopses(node.work);
       const format = await readWorkFormat(node.work);
-      return result.episodes.map(
-        (e) => new EpisodeNode(node.work, e, format)
+
+      /*
+        章の台帳を読む（設計書6.66.3）。
+
+        **読めなくても話は出す。** 章はまとめ方であって、話そのものでは
+        ない。台帳が壊れているからといって作品が空に見えるのでは、
+        作者は何が起きたのか分からない。理由を1行足したうえで、
+        いままでどおりの並び（章なし）を出す。
+      */
+      let chapters: Chapter[];
+      try {
+        chapters = await this.loadChapters(node.work);
+      } catch (error) {
+        return [
+          new MessageNode(
+            `⚠ 章立てを読めません: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          ),
+          ...result.episodes.map((e) => new EpisodeNode(node.work, e, format)),
+        ];
+      }
+
+      // 章が1つも無ければ、いままでどおり作品の直下に話を並べる
+      if (chapters.length === 0) {
+        return result.episodes.map((e) => new EpisodeNode(node.work, e, format));
+      }
+
+      const grouped = groupEpisodesByChapter(
+        result.episodes,
+        chapters,
+        node.work.folderPath
+      );
+      return [
+        // 最初の章より前の話は、章ノードより前に並べる（6.66.1）
+        ...grouped.ungrouped.map((e) => new EpisodeNode(node.work, e, format)),
+        ...grouped.groups.map(
+          (group) =>
+            new ChapterNode(
+              node.work,
+              group.chapter,
+              group.episodes,
+              group.missingStart,
+              format
+            )
+        ),
+      ];
+    }
+
+    if (node.type === "chapter") {
+      return node.episodes.map(
+        (e) => new EpisodeNode(node.work, e, node.format)
       );
     }
 
     return [];
+  }
+
+  /**
+   * 章の台帳を読み込む（作品ごとに1回）。
+   *
+   * **描画のたびに読まない。** 章ノードは話の数だけ描き直されるので、
+   * そのたびにJSONを読むと1回の描画で何度もファイルを開くことになる
+   * （あらすじ・作品の形式と同じ扱い）。
+   */
+  private async loadChapters(work: WorkEntry): Promise<Chapter[]> {
+    const cached = this.chapters.get(work.id);
+    if (cached) return cached;
+    // **失敗は覚えない。** 作者がJSONを直したら、開き直すだけで
+    // 読めるようになってほしい（あらすじと違い、章は一覧の形を変える）
+    const set = await new ChapterStore(work).load();
+    this.chapters.set(work.id, set.chapters);
+    return set.chapters;
   }
 
   /**

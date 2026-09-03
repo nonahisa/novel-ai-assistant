@@ -54,6 +54,22 @@ describe("生成できるかの確認", () => {
     expect(seen?.jsonSchema).toBeUndefined();
   });
 
+  test("流し受信は使わない。確かめるのは配布と同じ道である", async () => {
+    // 開発ビルド限定の流し受信（設計書6.63.1）で確認を通すと、
+    // **作者が実際に使う道とは別の道**が生きていることを確かめてしまう。
+    // 「生成できるか」の答えとして、それでは意味がない
+    let seen: GenerateParams | undefined;
+    await probeGeneration(
+      provider(async (params) => {
+        seen = params;
+        return { text: "はい", truncated: false, elapsedMs: 1 };
+      }),
+      "claude-opus-5"
+    );
+
+    expect(seen?.disableStreaming).toBe(true);
+  });
+
   test("残高不足はそのまま伝える", async () => {
     // 待っても回復しないので、再試行を促してはいけない
     const result = await probeGeneration(

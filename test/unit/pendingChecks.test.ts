@@ -45,8 +45,19 @@ describe("確認リストから作った一覧", () => {
   });
 
   test("指している操作は、すべて実在する", () => {
-    // 文書に書いたコマンドIDを打ち間違えると、**何も出ない**まま気づけない
-    const known = new Set(allActions().map((action) => action.command));
+    // 文書に書いたコマンドIDを打ち間違える・改名し忘れると、**何も出ない**まま
+    // 気づけない。判定は package.json の登録コマンドと突き合わせる——
+    // 詳細メニュー（ACTION_TREE）だけを見ていたが、章立て（F-60）のように
+    // **右クリック専用でメニューに無いコマンド**が初めて現れた（0.29.25）。
+    // メニューから辿れないこと自体は「辿れない節」の勘定（0.29.16）が
+    // 名前つきで数えるので、ここでは「実在するか」だけを見る
+    const manifest = JSON.parse(
+      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+    ) as { contributes: { commands: Array<{ command: string }> } };
+    const known = new Set(
+      manifest.contributes.commands.map((entry) => entry.command)
+    );
+    // 開発ビルド限定のコマンド（devOnly）は package.json に載るので追加不要
 
     for (const section of PENDING_CHECKS) {
       for (const command of section.commands) {

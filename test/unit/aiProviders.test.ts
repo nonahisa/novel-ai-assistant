@@ -10,6 +10,7 @@ import { OpenAIProvider } from "../../src/ai/openaiProvider";
 import { GeminiProvider } from "../../src/ai/geminiProvider";
 import { LmStudioProvider } from "../../src/ai/lmstudioProvider";
 import { AIError } from "../../src/ai/types";
+import { setStreamingOverride } from "../../src/ai/ollamaStream";
 import { workspace } from "./support/vscodeStub";
 
 const ollamaParams = {
@@ -397,6 +398,61 @@ describe("AIプロバイダ境界", () => {
 
     await expect(new OllamaProvider().generate(ollamaParams)).rejects.toMatchObject({
       kind: "bad_response",
+    });
+  });
+
+  /**
+   * **測定は、配布と同じ受け取り方で行う**（作者の報告「F5でAIチューニングが
+   * 終わりません」2026-09-03）。
+   *
+   * 流して受け取る道（設計書6.63.1、開発ビルド限定）は**断片が届くたびに
+   * 待ち時間を数え直す**ので、繰り返しに崩れて延々と書き続けるモデルを
+   * 永遠に待つ。測定は時間切れを「その量は書けない」と数えて前へ進む設計
+   * なので、**絶対の締め切り**が要る。
+   */
+  describe("流し受信を断る旗", () => {
+    afterEach(() => {
+      // **必ず戻す。** 残ると、あとに走る試験が実験の側だけを通ってしまう
+      setStreamingOverride(undefined);
+    });
+
+    test("実験が入でも、disableStreaming の呼び出しは流す道を通らない", async () => {
+      setStreamingOverride(true);
+      const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+        // まとめて受け取る道（`fetchJson`）は `stream: false` のまま送る
+        expect(JSON.parse(String(init?.body)).stream).toBe(false);
+        return ollamaResponse("はい");
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await new OllamaProvider().generate({
+        ...ollamaParams,
+        disableStreaming: true,
+      });
+
+      expect(result.text).toBe("はい");
+      // 統計もまとめて受け取る道のものが返る
+      expect(result.usage).toEqual({ inputTokens: 100, outputTokens: 20 });
+    });
+
+    test("旗を立てなければ、実験が入のときは流す道を通る", async () => {
+      // **配布する道だけを検査した気にならないための対**。旗の効き目は
+      // 「流す道が生きている」ことと対で確かめないと意味がない
+      setStreamingOverride(true);
+      const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+        expect(JSON.parse(String(init?.body)).stream).toBe(true);
+        return new Response(
+          '{"message":{"content":"はい"},"done":false}\n' +
+            '{"done":true,"done_reason":"stop","eval_count":3,"prompt_eval_count":9}\n',
+          { status: 200, headers: { "Content-Type": "application/x-ndjson" } }
+        );
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await new OllamaProvider().generate(ollamaParams);
+
+      expect(result.text).toBe("はい");
+      expect(result.usage).toEqual({ inputTokens: 9, outputTokens: 3 });
     });
   });
 

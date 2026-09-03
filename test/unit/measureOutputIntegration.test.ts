@@ -212,6 +212,16 @@ describe("手元のAIでは、読める長さのあとに書ける量も測る",
     // 書き写すだけの入力側と同じく、揺らす理由が無い
     expect(probe.temperature).toBe(0);
     expect(probe.disableThinking).toBe(true);
+    /*
+      **流し受信は断る**（作者の報告「F5でAIチューニングが終わりません」
+      2026-09-03）。流す道は断片が届くたびに待ち時間を数え直すので、
+      数千行の列挙を頼まれて繰り返しに崩れたモデルを**永遠に待つ**。
+      時間切れを「その量は書けない」と数えて前へ進む設計（`outputProbe.ts`）
+      なので、絶対の締め切りが要る。
+    */
+    expect(probe.disableStreaming).toBe(true);
+    // **入力側も同じ。** 測るのは配布と同じ道の性能である
+    expect(state.calls[0]?.disableStreaming).toBe(true);
     // 設定の出力上限をそのまま渡す（測っているのがこの上限だから）
     expect(probe.maxOutputTokens).toBe(16384);
     // **num_ctx は渡さない。** 送る長さから決めさせる（6.62.2）
