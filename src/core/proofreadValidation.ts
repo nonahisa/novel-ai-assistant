@@ -53,6 +53,8 @@ export interface RejectedProofreadIssue {
     | "not_long"
     /** 「同語反復」の札だが、繰り返しが無い */
     | "not_repeated"
+    /** 「語尾単調」の札だが、同じ語尾が4文以上続いていない */
+    | "not_monotonous"
     /** 作者が「直さない」と決めた語を含む */
     | "kept_word"
     /** 「同語反復」の札だが、台詞の中＝人物の話し方である */
@@ -81,14 +83,80 @@ const LONG_SENTENCE_COMMAS = 5;
  * 当てはまる一文が無ければ、それは長文の指摘ではない。
  */
 export function hasLongSentence(text: string): boolean {
-  // 句点・感嘆符・疑問符で文に割る（閉じ括弧が続く場合はそこまで）
-  for (const sentence of text.split(/(?<=[。！？])[」』）]*/)) {
-    const body = sentence.trim();
+  for (const body of splitIntoSentences(text)) {
     if (body.length <= LONG_SENTENCE_CHARS) continue;
     const commas = (body.match(/[、，]/g) ?? []).length;
     if (commas >= LONG_SENTENCE_COMMAS) return true;
   }
   return false;
+}
+
+/**
+ * 句点・感嘆符・疑問符で文に割る（閉じ括弧が続く場合はそこまで）。
+ *
+ * 長文と語尾単調の両方が同じ切り方を要る。**写しを作らない**ため、
+ * ここに1つだけ置いて共用する。
+ */
+export function splitIntoSentences(text: string): string[] {
+  return text
+    .split(/(?<=[。！？])[」』）]*/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 0);
+}
+
+/**
+ * 「語尾単調」の札が、本当に語尾の連続に貼られているか
+ * （作者の報告、2026-09-04）。
+ *
+ * 画面には「『〜た。』で終わる文が5連続です」と出ていたが、実際の文末は
+ * 「いる。／いた。／だろう。／ないわ」／だ。」で、**どこにも5連続は無かった。**
+ * AIは数を数えられない。長文・同語反復と同じで、**連続は数えられるので
+ * コードで確かめる。**
+ *
+ * 数え方は3つ決めてある。
+ *
+ * 1. **語尾は「文末の1文字＋句点」で見る**（「た。」「だ。」「る。」）。
+ *    **「た。」と「だ。」は別**——濁点で意味が違うので、同じ語尾として
+ *    数えると今回のような数え違いが素通りする
+ * 2. **台詞は数えず、地の文の連続も切らない。** 台詞を挟んでも地の文の
+ *    リズムは続いているが、台詞の語尾は人物の話し方であって地の文の
+ *    単調さとは別物である（`isDialogueOnly` と同じ考え方）
+ * 3. **AIの言う語尾とは突き合わせない。** 説明文の解析は壊れやすいので、
+ *    「どの語尾であれ4連続以上が実在するか」だけを見る。語尾の言い違いは
+ *    実害が小さい（作者が本文を見れば分かる）
+ *
+ * 見るのはチャンク全体で、指摘の位置とは照合しない。**語尾単調は範囲の
+ * 指摘で、1行に錨を下ろせない**ためである。
+ */
+export const MONOTONOUS_ENDING_RUN = 4;
+
+export function hasMonotonousEnding(text: string): boolean {
+  let previous = "";
+  let run = 0;
+  for (const sentence of splitIntoSentences(withoutDialogue(text))) {
+    const ending = endingOf(sentence);
+    // 台詞の切れ端や、句点で終わっていない断片は数えない。
+    // **連続も切らない**（数えないものが間に挟まっただけである）
+    if (!ending) continue;
+    run = ending === previous ? run + 1 : 1;
+    previous = ending;
+    if (run >= MONOTONOUS_ENDING_RUN) return true;
+  }
+  return false;
+}
+
+/** 文末の1文字＋句点。句点で終わっていなければ語尾として数えない */
+function endingOf(sentence: string): string | undefined {
+  const matched = /(.)([。！？])$/u.exec(sentence);
+  return matched ? matched[1] + matched[2] : undefined;
+}
+
+/**
+ * 台詞（「」『』）を取り除く。閉じていない台詞は、閉じ括弧が現れないまま
+ * 終わる形（本文の切れ目）なので、そこまでを台詞と見る。
+ */
+function withoutDialogue(text: string): string {
+  return text.replace(/[「『][^」』]*[」』]?/gu, "");
 }
 
 /**
@@ -182,8 +250,7 @@ export function hasRepetition(text: string): boolean {
  */
 export function isDialogueOnly(text: string): boolean {
   // 台詞を取り除いた残りに、意味のある文字が残るか
-  const outside = text
-    .replace(/[「『][^」』]*[」』]?/gu, "")
+  const outside = withoutDialogue(text)
     // 閉じ括弧が先に来る形（台詞の途中を抜き出した場合）も落とす
     .replace(/^[^「『]*[」』]/u, "")
     .replace(/[\s　、。！？…―ー）\)]/gu, "");
@@ -292,6 +359,12 @@ export function validateProofreadIssues(
   const firstLine = chunk.startLine + 1;
   const lastLine = chunk.startLine + lineCount;
 
+  // **語尾の連続はチャンクごとに1回だけ数える。** 指摘の数だけ数え直しても
+  // 答えは同じで、長いチャンクでは無駄が積み上がる
+  let monotonyInChunk: boolean | undefined;
+  const chunkHasMonotony = (): boolean =>
+    (monotonyInChunk ??= hasMonotonousEnding(chunk.text));
+
   const passed: AcceptedProofreadIssue[] = [];
   for (const item of list) {
     if (!isRecord(item)) {
@@ -340,6 +413,13 @@ export function validateProofreadIssues(
     // 喋りも、強調の反復も、直したら人物が変わってしまう
     if (reason === "同語反復" && isDialogueOnly(original)) {
       rejected.push({ raw: item, reason: "dialogue_voice" });
+      continue;
+    }
+    // **「語尾単調」も数えられる。** AIは「〜た。が5連続」と言うが、実際は
+    // 並んでいないことがある（作者の報告、2026-09-04）。**言い値を作者へ
+    // 届けない。** 4連続がチャンクのどこにも無ければ、それは語尾の指摘ではない
+    if (reason === "語尾単調" && !chunkHasMonotony()) {
+      rejected.push({ raw: item, reason: "not_monotonous" });
       continue;
     }
     // **札ではなく中身を見る。** 語彙や文体の話が、許した札を着て入ってくる。

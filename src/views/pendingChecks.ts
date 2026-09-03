@@ -333,7 +333,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-62",
     title: "EPUBの3つの直し",
     commands: ["novelai.openEpubEditor"],
-    count: 4,
+    count: 6,
   },
   {
     id: "F-63",
@@ -578,4 +578,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 734;
+export const PENDING_CHECK_TOTAL = 736;

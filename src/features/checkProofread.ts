@@ -78,6 +78,13 @@ export interface ProofreadRunResult {
   rejectedCount: number;
   /** 上限で切ったぶん（作者へ「絞りました」と伝えるため） */
   overBudgetCount: number;
+  /**
+   * 語尾単調で、数え直したら4連続に届かなかったぶん（作者の報告、2026-09-04）。
+   *
+   * **黙って捨てない。** AIが数え違えているという事実は、この機能の
+   * 当たり具合を測るときの手掛かりになる
+   */
+  monotonyDroppedCount: number;
   failedChunks: number;
   cancelled: boolean;
 }
@@ -194,6 +201,7 @@ export async function checkProofread(
   const issues: ProofreadIssue[] = [];
   let rejectedCount = 0;
   let overBudgetCount = 0;
+  let monotonyDroppedCount = 0;
   let failedChunks = 0;
   let cancelled = false;
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
@@ -258,6 +266,9 @@ export async function checkProofread(
       rejectedCount += validated.rejected.length;
       overBudgetCount += validated.rejected.filter(
         (entry) => entry.reason === "over_budget"
+      ).length;
+      monotonyDroppedCount += validated.rejected.filter(
+        (entry) => entry.reason === "not_monotonous"
       ).length;
       for (const issue of validated.accepted) {
         // **どのファイルの何行目かを、ここで確定させる。** まとめたチャンクでは
@@ -363,10 +374,19 @@ export async function checkProofread(
 
   await cache.save();
 
+  if (monotonyDroppedCount > 0) {
+    // **どれだけ数え違えていたかを残す。** この観点は実モデルでの当たり具合を
+    // まだ測れていないので、記録が測る手掛かりになる
+    logStep(
+      `語尾単調：数え直して4連続未満だったため${monotonyDroppedCount}件除外`
+    );
+  }
+
   return {
     issues: sortProofreadIssues(issues) as ProofreadIssue[],
     rejectedCount,
     overBudgetCount,
+    monotonyDroppedCount,
     failedChunks,
     cancelled,
   };

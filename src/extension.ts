@@ -3291,6 +3291,10 @@ export async function activate(
           // 黙って絞ると「これで全部」と受け取られる
           parts.push(`多すぎたぶん ${result.overBudgetCount}件を絞り込み`);
         }
+        if (result.monotonyDroppedCount > 0) {
+          // AIの「〜た。が5連続」を数え直して外したぶん（2026-09-04）
+          parts.push(`語尾の数え違い ${result.monotonyDroppedCount}件を除外`);
+        }
         if (result.failedChunks > 0) {
           parts.push(`読み取れなかった ${result.failedChunks}件`);
         }
