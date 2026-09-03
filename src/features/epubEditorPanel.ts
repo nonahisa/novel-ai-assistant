@@ -25,6 +25,7 @@ import { BookStore, BookStoreError, episodePathFor } from "../core/bookStore";
 import { ChapterStore } from "../core/chapterStore";
 import type { Chapter } from "../models/chapter";
 import {
+  episodeGroupLabels,
   formatChapterRange,
   groupEpisodesByChapter,
 } from "../core/chapterGrouping";
@@ -47,7 +48,6 @@ import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
 import {
   bookHeading,
-  episodeGroupLabel,
   episodeTitle,
   formatChapterLabel,
 } from "../core/episodeLabel";
@@ -682,13 +682,32 @@ async function addChapter(state: PanelState): Promise<void> {
   if (!(await startChapterAt(state.work, chosen))) return;
 
   // 台帳が変わった。一覧を組み直し、作品一覧にも反映させる
-  state.source.outline = await collectOutline(state.work, state.source);
+  await refreshChapterViews(state);
   state.panel.webview.postMessage({
     type: "preview",
     data: await previewData(state),
   });
   await vscode.commands.executeCommand("novelai.refresh");
   status(state, "章立ての台帳へ書きました（本の並びには入りません）");
+}
+
+/**
+ * 台帳を読み直して、章に関わる画面の材料を作り直す（設計書6.66.4の3）。
+ *
+ * **一覧の行と目次の束ねを、必ず一緒に直す。** 章を足したのに目次の
+ * 束ねが古いままだと、同じ画面の中で章の切れ目が2通りに見える。
+ */
+async function refreshChapterViews(state: PanelState): Promise<void> {
+  const chapters = await loadChapterLedger(state.work);
+  const labels = episodeGroupLabels(
+    state.source.episodeFiles,
+    chapters,
+    state.work.folderPath
+  );
+  for (const episode of state.source.episodes) {
+    episode.group = labels.get(episode.path) ?? "";
+  }
+  state.source.outline = collectOutline(state.work, state.source, chapters);
 }
 
 /** `設定/` の場所。作品設定でフォルダ名を変えていればそれに従う */
@@ -1778,15 +1797,27 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
     };
   }
 
+  // **台帳は1度だけ読む。** 目次の束ねと段Cの一覧が別々に読むと、
+  // 読んだ間に外で直されたときに画面の中で食い違う
+  const chapters = await loadChapterLedger(work);
+  const groupLabels = episodeGroupLabels(
+    scan.episodes,
+    chapters,
+    work.folderPath
+  );
+
   const episodes: PreviewEpisode[] = scan.episodes.map((episode) => {
     const numberLabel = formatChapterLabel(episode, format);
+    const relative = episodePathFor(work.folderPath, episode.filePath);
     return {
       // book.json の `episodePath` と同じ作り方を通す（書き出しと共用）
-      path: episodePathFor(work.folderPath, episode.filePath),
+      path: relative,
       label: bookHeading(episode, format),
       numberLabel,
       title: episodeTitle(episode, numberLabel),
-      group: episodeGroupLabel(episode),
+      // 目次の束ね名は**台帳が正**（設計書6.66.4の3）。台帳が無ければ
+      // 従来のファイル名由来の束ねに倒れる。**書き出しと同じ部品**を通す
+      group: groupLabels.get(relative) ?? "",
       filePath: episode.filePath,
       notation: notationModeFor(episode.fileName),
       // **走査が既に見ている**ので、ここで本文を読み直さなくてよい
@@ -1808,8 +1839,24 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
     characters: await collectCharacters(work),
     afterword: await collectAfterword(work),
   };
-  source.outline = await collectOutline(work, source);
+  source.outline = collectOutline(work, source, chapters);
   return source;
+}
+
+/**
+ * 章立ての台帳を読む。**読めなくても画面は開く**（章の無い作品として扱う）。
+ *
+ * 章はまとめ方であって話ではないので、本文の一覧が空に見えるほうが
+ * 害が大きい（作品一覧と同じ判断）。
+ */
+async function loadChapterLedger(work: WorkEntry): Promise<Chapter[]> {
+  try {
+    return (await new ChapterStore(work).load()).chapters;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logFailure("EPUBエディターの章立て", { 作品: work.title, 内容: message });
+    return [];
+  }
 }
 
 /**
@@ -1818,21 +1865,15 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
  * **章の束ね方は作品一覧と同じ部品**（`groupEpisodesByChapter`）を通す。
  * ここで別に束ねると、一覧の章の切れ目とこの画面の切れ目がずれる。
  *
- * **台帳が読めなくても話は出す。** 章はまとめ方であって話ではないので、
- * 本文の一覧が空に見えるほうが害が大きい（作品一覧と同じ判断）。
+ * **台帳が読めなくても話は出す**（`loadChapterLedger` が空を返す）。章は
+ * まとめ方であって話ではないので、本文の一覧が空に見えるほうが害が大きい
+ * （作品一覧と同じ判断）。
  */
-async function collectOutline(
+function collectOutline(
   work: WorkEntry,
-  source: PreviewSource
-): Promise<OutlineEntry[]> {
-  let chapters: Chapter[] = [];
-  try {
-    chapters = (await new ChapterStore(work).load()).chapters;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logFailure("EPUBエディターの章立て", { 作品: work.title, 内容: message });
-  }
-
+  source: PreviewSource,
+  chapters: readonly Chapter[]
+): OutlineEntry[] {
   const labels = new Map(
     source.episodes.map((episode) => [
       episode.path,

@@ -114,3 +114,78 @@ describe("見出しに話数を二重に出さない", () => {
     expect(build(null)).toContain("## 第1話");
   });
 });
+
+/**
+ * 章の見出しを挟む（設計書6.66.4の3）。
+ *
+ * 章立ての台帳がある作品では、各話あらすじの一覧に**章ごとの見出し**を
+ * 挟む。挟む場所は「その章が始まる話の直前」で、最初の章より前の話は
+ * 先頭にそのまま並ぶ。
+ *
+ * **台帳が無い作品は、いままでどおり**（章の見出しは1つも出ない）。
+ */
+describe("章の見出しを挟む", () => {
+  const set = {
+    schemaVersion: "0.1",
+    episodes: [
+      episode({ chapter: 1, fileName: "001.txt", synopsis: "序。" }),
+      episode({ chapter: 2, fileName: "002.txt", synopsis: "旅立ち。" }),
+      episode({ chapter: 3, fileName: "003.txt", synopsis: "出会い。" }),
+    ],
+  };
+
+  test("章が始まる話の直前に見出しを挟む", () => {
+    const md = buildSynopsisListMarkdown(set, {
+      ...options,
+      chapters: [
+        { name: "第一章　出立", startKey: "#2", range: "第2話〜第3話・2話" },
+      ],
+    });
+
+    expect(md).toContain("## 第一章　出立（第2話〜第3話・2話）");
+    // 章の見出しは第2話の前。第1話（章なし）は見出しより上に残る
+    expect(md.indexOf("序。")).toBeLessThan(md.indexOf("第一章　出立"));
+    expect(md.indexOf("第一章　出立")).toBeLessThan(md.indexOf("旅立ち。"));
+  });
+
+  test("章があるときは、話の見出しを1段深くする", () => {
+    // 章と話が同じ深さだと、章の下に話が入っているように読めない
+    const md = buildSynopsisListMarkdown(set, {
+      ...options,
+      chapters: [{ name: "第一章", startKey: "#1", range: "" }],
+    });
+
+    expect(md).toContain("## 第一章");
+    expect(md).toContain("### 第1話");
+  });
+
+  test("範囲が無ければ、章名だけを出す", () => {
+    const md = buildSynopsisListMarkdown(set, {
+      ...options,
+      chapters: [{ name: "第一章", startKey: "#1", range: "" }],
+    });
+
+    expect(md).toContain("## 第一章\n");
+    expect(md).not.toContain("第一章（");
+  });
+
+  test("台帳が無ければ、いままでどおり章の見出しは出ない", () => {
+    const md = buildSynopsisListMarkdown(set, options);
+
+    expect(md).not.toContain("### ");
+    expect(md).toContain("## 第1話");
+  });
+
+  test("紹介文の文書へ差し込むときも、章が話より浅い", () => {
+    // `## 各話あらすじ` の下に入るので、章は `###`、話は `####`
+    const md = buildSynopsisListMarkdown(set, {
+      ...options,
+      headingLevel: 2,
+      includeTitle: false,
+      chapters: [{ name: "第一章", startKey: "#1", range: "第1話〜第3話・3話" }],
+    });
+
+    expect(md).toContain("### 第一章（第1話〜第3話・3話）");
+    expect(md).toContain("#### 第1話");
+  });
+});

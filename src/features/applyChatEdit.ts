@@ -13,6 +13,7 @@ import {
   type SynopsisDoc,
 } from "../core/synopsisDoc";
 import { buildSynopsisListMarkdown } from "../core/synopsisMarkdown";
+import { loadSynopsisChapterMarks } from "../core/synopsisChapters";
 import { buildEmotionCurveMarkdown } from "../core/emotionCurve";
 import { SynopsisStore } from "../core/synopsisStore";
 import type { ChatEdit } from "../core/chatEdit";
@@ -153,6 +154,9 @@ async function buildEpisodeSection(
         workTitle: work.title,
         headingLevel: 2,
         includeTitle: false,
+        // 章の見出しも `generateBlurb` と同じ形で挟む（設計書6.66.4の3）。
+        // 片方だけ挟むと、書き換えた経路によって文書の形が変わる
+        chapters: await loadSynopsisChapterMarks(work, set),
       }),
       emotion: buildEmotionCurveMarkdown(set.episodes),
     };

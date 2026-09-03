@@ -1,7 +1,11 @@
 import type { EpisodeFile } from "../models/types";
 import { normalizeEpisodePath, type Chapter } from "../models/chapter";
 import { episodePathFor } from "./bookStore";
-import { episodeUnit, formatChapterLabel } from "./episodeLabel";
+import {
+  episodeGroupLabel,
+  episodeUnit,
+  formatChapterLabel,
+} from "./episodeLabel";
 import type { WorkFormatKey } from "./workFormat";
 
 /**
@@ -92,6 +96,59 @@ export function groupEpisodesByChapter(
       })),
     ],
   };
+}
+
+/**
+ * 目次を束ねる名前を、話ごとに決める（設計書6.66.4の3）。
+ *
+ * **台帳があれば台帳が正。** EPUBの「章ごとに区切る」目次は長らく
+ * ファイル名から読み取れるもの（種別と話数）だけで束ねていた
+ * ——`episodeGroupLabel` の但し書きにあるとおり、**章の情報が作品の
+ * どこにも無かった**からである（設計書6.65.7の4）。章立ての台帳（6.66）が
+ * できたので、そちらがあるときは章名で束ねる。
+ *
+ * **台帳が空の作品は、いままでどおり**ファイル名由来の束ねに倒す
+ * （動いているものを壊さない）。
+ *
+ * 返す表の鍵は**作品フォルダからの相対パス**（`episodePathFor` と同じ形）で、
+ * 値は束ね名である。**束ねない話は空文字**——最初の章より前の話と、
+ * 開始の話が見つからない章がこれにあたる。空文字の話を目次側は
+ * 章に包まない（`epubPackage.ts` の `groupedItems`）ので、
+ * **作者が書いていない章を捏造しない**という約束はそのまま保たれる。
+ */
+export function episodeGroupLabels(
+  episodes: readonly EpisodeFile[],
+  chapters: readonly Chapter[],
+  workFolder: string
+): Map<string, string> {
+  const labels = new Map<string, string>();
+
+  if (chapters.length === 0) {
+    for (const episode of episodes) {
+      labels.set(
+        episodePathFor(workFolder, episode.filePath),
+        episodeGroupLabel(episode)
+      );
+    }
+    return labels;
+  }
+
+  // 台帳がある作品では、束ねの切れ目は台帳だけが決める。
+  // 章の外に残った話は空文字（束ねない）で置く
+  for (const episode of episodes) {
+    labels.set(episodePathFor(workFolder, episode.filePath), "");
+  }
+  for (const group of groupEpisodesByChapter(episodes, chapters, workFolder)
+    .groups) {
+    // 開始の話が見つからない章は、束ねる場所が決まらない（`episodes` が空）
+    for (const episode of group.episodes) {
+      labels.set(
+        episodePathFor(workFolder, episode.filePath),
+        group.chapter.name
+      );
+    }
+  }
+  return labels;
 }
 
 /**

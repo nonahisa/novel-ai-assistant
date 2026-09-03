@@ -357,7 +357,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-66",
     title: "章立てのAI提案",
     commands: ["novelai.proposeChapters"],
-    count: 7,
+    count: 10,
   },
   {
     id: "F-52",
@@ -584,4 +584,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 743;
+export const PENDING_CHECK_TOTAL = 746;

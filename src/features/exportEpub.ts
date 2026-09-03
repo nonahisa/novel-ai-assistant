@@ -19,10 +19,12 @@ import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { readWorkFormat } from "../core/workFormatStore";
 import {
   bookHeading,
-  episodeGroupLabel,
   episodeTitle,
   formatChapterLabel,
 } from "../core/episodeLabel";
+import { episodeGroupLabels } from "../core/chapterGrouping";
+import { ChapterStore } from "../core/chapterStore";
+import type { Chapter } from "../models/chapter";
 import { timestampedFileNameCandidates } from "../core/timestampedFileName";
 import { notationModeFor } from "../core/manuscriptRender";
 import {
@@ -137,6 +139,30 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     )
   );
 
+  /**
+   * 目次の束ね名（設計書6.66.4の3）。
+   *
+   * **章立ての台帳があれば台帳が正**で、無ければ従来のファイル名由来の
+   * 束ねに倒す。台帳が読めなかったときも本は出す（章はまとめ方であって
+   * 本文ではない）が、**黙って従来の束ねに戻さない**——目次の章が
+   * 変わった理由が作者に分からなくなる。
+   */
+  let chapterLedger: Chapter[] = [];
+  try {
+    chapterLedger = (await new ChapterStore(work).load()).chapters;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logFailure("EPUBの章立て", { 作品: work.title, 内容: message });
+    notices.push(
+      `章立ての台帳を読めなかったので、目次は話数の並びで束ねました（${message}）`
+    );
+  }
+  const groupLabels = episodeGroupLabels(
+    scan.episodes,
+    chapterLedger,
+    work.folderPath
+  );
+
   for (const episode of scan.episodes) {
     let file: TextFileContent;
     try {
@@ -189,9 +215,9 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       heading,
       numberLabel,
       title,
-      // 目次を「章ごとに区切る」にしたときの束ね名（設計書6.65.6）。
+      // 目次を「章ごとに区切る」にしたときの束ね名（設計書6.65.6・6.66.4の3）。
       // 読み取れなければ空文字が返り、一覧のまま出る
-      group: episodeGroupLabel(episode),
+      group: groupLabels.get(episodePath) ?? "",
       body,
       // **話ごとに記法を見る。** 1つの作品に `.md` と `.txt` が混ざる
       notation: notationModeFor(episode.fileName),

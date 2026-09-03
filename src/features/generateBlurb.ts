@@ -14,6 +14,7 @@ import {
   type SynopsisDoc,
 } from "../core/synopsisDoc";
 import { buildSynopsisListMarkdown } from "../core/synopsisMarkdown";
+import { loadSynopsisChapterMarks } from "../core/synopsisChapters";
 import { buildEmotionCurveMarkdown } from "../core/emotionCurve";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { atomicWriteFile, createManagedRecoveryPath } from "../core/atomicWrite";
@@ -411,6 +412,9 @@ async function buildEpisodeSection(
       workTitle,
       headingLevel: 2,
       includeTitle: false,
+      // 章立ての台帳がある作品は、章ごとに見出しを挟む（設計書6.66.4の3）。
+      // 台帳が無ければ印は空で、いままでどおりの一覧になる
+      chapters: await loadSynopsisChapterMarks(work, set),
     }),
     emotion: buildEmotionCurveMarkdown(set.episodes),
   };

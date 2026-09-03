@@ -913,6 +913,54 @@ describe("章区切り（設計書6.65.15の段C）", () => {
 
     expect(disk.has(chaptersPath())).toBe(false);
   });
+
+  /**
+   * 目次の束ね（設計書6.66.4の3）。
+   *
+   * **プレビューと書き出しが同じ束ね方を通る。** 別々に束ねると、
+   * 画面で見た目次と本の目次が食い違う（`exportEpub` 側は
+   * `epubChapterToc.test.ts` が見張る）。
+   */
+  test("「章ごとに区切る」目次は、台帳の章名で束ねる", async () => {
+    writeBook({ title: "氷の街", tocPattern: "chapters" });
+    put(
+      "設定/章立て.json",
+      JSON.stringify({
+        schemaVersion: "1",
+        chapters: [{ name: "第二章　邂逅", startEpisodePath: "本文/第2話.txt" }],
+      })
+    );
+
+    await open();
+    const toc = page("目次").html;
+
+    expect(toc).toContain('<span class="toc-group">第二章　邂逅</span>');
+    // ファイル名由来の束ね（「本編」）は、台帳がある作品では出ない
+    expect(toc).not.toContain('<span class="toc-group">本編</span>');
+  });
+
+  test("台帳が無ければ、目次は従来のファイル名由来の束ねのまま", async () => {
+    writeBook({ title: "氷の街", tocPattern: "chapters" });
+
+    await open();
+
+    expect(page("目次").html).toContain('<span class="toc-group">本編</span>');
+  });
+
+  test("章を足したら、その場で目次の束ねも変わる", async () => {
+    // 一覧の行だけ直して目次の束ねを古いままにすると、同じ画面の中で
+    // 章の切れ目が2通りに見える
+    writeBook({ title: "氷の街", tocPattern: "chapters" });
+    pickSecondEpisode();
+    window.showInputBox = async () => "第二章　邂逅";
+
+    await open();
+    await send({ type: "addChapter", config: {} });
+
+    expect(page("目次").html).toContain(
+      '<span class="toc-group">第二章　邂逅</span>'
+    );
+  });
 });
 
 describe("あとがきを書く入口（設計書6.65.15）", () => {

@@ -2,6 +2,7 @@ import * as path from "path";
 import { describe, expect, test } from "vitest";
 import {
   chapterNodeId,
+  episodeGroupLabels,
   formatChapterRange,
   groupEpisodesByChapter,
 } from "../../src/core/chapterGrouping";
@@ -204,5 +205,51 @@ describe("章ノードのID", () => {
     expect(chapterNodeId("work_1", "本文/003.txt")).not.toBe(
       chapterNodeId("work_2", "本文/003.txt")
     );
+  });
+});
+
+/**
+ * 目次の束ね名（設計書6.66.4の3）。
+ *
+ * 台帳があれば**台帳の章名が正**で、無ければファイル名由来の従来の束ね
+ * （`episodeGroupLabel`）へ倒す。動いているものを壊さないための切り替えなので、
+ * **両方の道を見張る。**
+ */
+describe("目次の束ね名（台帳が正）", () => {
+  const chapters = [chapter("第一章　出立", "003.txt"), chapter("第二章　邂逅", "006.txt")];
+
+  test("台帳があれば、章名で束ねる", () => {
+    const labels = episodeGroupLabels(episodes, chapters, WORK_FOLDER);
+
+    expect(labels.get("本文/003.txt")).toBe("第一章　出立");
+    expect(labels.get("本文/005.txt")).toBe("第一章　出立");
+    expect(labels.get("本文/006.txt")).toBe("第二章　邂逅");
+  });
+
+  test("最初の章より前の話は束ねない（章なしのまま先頭に並ぶ）", () => {
+    const labels = episodeGroupLabels(episodes, chapters, WORK_FOLDER);
+
+    // ここを「本編」で束ねると、台帳に無い章が本の目次に立つ
+    expect(labels.get("本文/001.txt")).toBe("");
+    expect(labels.get("本文/002.txt")).toBe("");
+  });
+
+  test("台帳が空なら、従来のファイル名由来の束ねのまま", () => {
+    const labels = episodeGroupLabels(episodes, [], WORK_FOLDER);
+
+    expect(labels.get("本文/001.txt")).toBe("本編");
+    expect(labels.get("本文/008.txt")).toBe("本編");
+  });
+
+  test("開始の話が見つからない章では、その章に束ねない", () => {
+    const labels = episodeGroupLabels(
+      episodes,
+      [chapter("第一章", "003.txt"), chapter("幻の章", "999.txt")],
+      WORK_FOLDER
+    );
+
+    // 第3話以降は第一章のまま。指し先の無い章は誰も束ねない
+    expect(labels.get("本文/008.txt")).toBe("第一章");
+    expect([...labels.values()]).not.toContain("幻の章");
   });
 });
