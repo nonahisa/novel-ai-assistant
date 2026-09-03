@@ -79,6 +79,30 @@ function coverElementRow(side: string, key: string, label: string): string {
 }
 
 /**
+ * 枠の余白の色を選ぶ欄（設計書6.65.15の3）。
+ *
+ * 表紙・裏表紙の枠は横1：縦1.4に固定してあり、元イラストが違う比率のときは
+ * 縮めて中央に納め、余った部分をこの色で塗る。文字要素の色（白・黒・任意）と
+ * まったく同じ選び方にする——色の選び方を2通り作らない。
+ */
+function frameBackgroundRow(side: string): string {
+  const id = `${side}-frameBackground`;
+  return [
+    '    <div class="cover-row">',
+    '      <span>枠の余白の色（元イラストが枠と違う比率のとき）</span>',
+    '      <div class="cover-controls">',
+    `        <select id="${id}-color" title="色">` +
+      '<option value="#000000">黒</option>' +
+      '<option value="#ffffff">白</option>' +
+      '<option value="custom">任意</option>' +
+      "</select>",
+    `        <input id="${id}-colorPick" type="color" title="任意の色">`,
+    "      </div>",
+    "    </div>",
+  ].join("\n");
+}
+
+/**
  * 表紙・裏表紙1面ぶんの欄。
  *
  * **元イラストが無いときは、この塊ごと畳んで理由を出す**（`hidden`）。
@@ -110,6 +134,7 @@ function coverSection(
     ...COVER_ELEMENTS.map((element) =>
       coverElementRow(side, element.key, element.label)
     ),
+    frameBackgroundRow(side),
     `      <div class="cover-actions"><button id="${bakeButtonId}">${bakeLabel}</button></div>`,
     "    </div>",
   ].join("\n");
@@ -303,6 +328,11 @@ button.primary {
       <option value="horizontal">一覧（目次だけ横組み）</option>
       <option value="chapters">章ごとに区切る</option>
     </select></label>
+    <label><span>見出しの形</span><select id="tocEntryStyle">
+      <option value="numberAndTitle">番号＋題</option>
+      <option value="titleOnly">題だけ</option>
+      <option value="numberOnly">番号だけ</option>
+    </select></label>
     <label><span>飾り</span><select id="tocOrnament">
       <option value="none">なし</option>
       <option value="rule">罫線</option>
@@ -388,7 +418,7 @@ function field(id) {
 }
 
 const TEXTS = ['bookTitle', 'author', 'illustrator', 'label'];
-const CHOICES = ['writingMode', 'tocPattern', 'tocOrnament', 'colophonOrnament'];
+const CHOICES = ['writingMode', 'tocPattern', 'tocEntryStyle', 'tocOrnament', 'colophonOrnament'];
 const CHECKS = ['collapseBlankLines', 'tocEnabled'];
 const PATHS = ['coverImagePath', 'backCoverImagePath'];
 /** 登場人物一覧の2つ（設計書6.65.11）。入れ子なので CHECKS とは別に扱う */
@@ -423,6 +453,12 @@ function expandHex(color) {
   return /^#[0-9a-f]{6}$/.test(value) ? value : '#ffffff';
 }
 
+/**
+ * 枠の余白の色（設計書6.65.15の3）。**既定は黒**——書いてなければ
+ * 拡張機能側の既定と合わせる（defaultCoverLayout と同じ値）。
+ */
+const DEFAULT_FRAME_BACKGROUND = '#000000';
+
 function fillLayout(side, layout) {
   const source = layout || {};
   ELEMENTS.forEach(function (key) {
@@ -436,6 +472,12 @@ function fillLayout(side, layout) {
     field(styleId(side, key, 'color')).value = named ? color : 'custom';
     field(styleId(side, key, 'colorPick')).value = color;
   });
+
+  const frame = expandHex(source.frameBackground || DEFAULT_FRAME_BACKGROUND);
+  const frameNamed = frame === '#ffffff' || frame === '#000000';
+  field(styleId(side, 'frameBackground', 'color')).value =
+    frameNamed ? frame : 'custom';
+  field(styleId(side, 'frameBackground', 'colorPick')).value = frame;
 }
 
 function readLayout(side) {
@@ -452,7 +494,19 @@ function readLayout(side) {
       vertical: field(styleId(side, key, 'vertical')).checked
     };
   });
+
+  const frameChoice = field(styleId(side, 'frameBackground', 'color')).value;
+  layout.frameBackground = frameChoice === 'custom'
+    ? field(styleId(side, 'frameBackground', 'colorPick')).value
+    : frameChoice;
+
   return layout;
+}
+
+/** 枠の余白の色を読む。欄が見つからない・空なら既定（黒）にする */
+function frameBackgroundOf(side) {
+  const value = readLayout(side).frameBackground;
+  return value ? value : DEFAULT_FRAME_BACKGROUND;
 }
 
 /* ---- 挿絵とページ分割（設計書6.65.10） ----------------------------- */
@@ -724,6 +778,10 @@ SIDES.forEach(function (side) {
         field(styleId(side, key, part)).addEventListener('change', scheduleChange);
       });
   });
+  ['color', 'colorPick'].forEach(function (part) {
+    field(styleId(side, 'frameBackground', part))
+      .addEventListener('change', scheduleChange);
+  });
 });
 
 field('save').addEventListener('click', function () {
@@ -769,8 +827,19 @@ const pending = { front: false, back: false };
 
 /** 字の大きさは、絵の短い辺からの割合で決める（寸法が作品ごとに違うため） */
 const SIZE_RATIO = { large: 0.1, medium: 0.065, small: 0.045 };
-/** 焼くPNGの上限。大きすぎると受け取り側で断られる */
+/**
+ * 合成の面の枠（設計書6.65.15の3、2026-09-03に作者の指示で4:3から変更）。
+ *
+ * **横1：縦1.4に固定する。** 一般的な書籍の判型に近い縦長の比率。
+ * プレビューも焼きも、この枠を前提に組む——別々の比率で持つと、
+ * 見えているものと焼けたものがずれる（6.65.6が禁じている「2つ持つ」と同じ形）。
+ */
+const FRAME_RATIO = 1.4;
+/** 焼くPNGの長辺の上限。大きすぎると受け取り側で断られる */
 const MAX_EDGE = 2400;
+/** 枠の寸法。長辺（縦）を上限に合わせ、横をそこから割り出す */
+const FRAME_WIDTH = Math.round(MAX_EDGE / FRAME_RATIO);
+const FRAME_HEIGHT = MAX_EDGE;
 const FONT_STACK = '"Yu Mincho", "游明朝", "Hiragino Mincho ProN", serif';
 
 function loadImage(side, src, retried) {
@@ -797,20 +866,38 @@ function loadImage(side, src, retried) {
   image.src = src;
 }
 
+/**
+ * 合成の面を描く（設計書6.65.15の3）。
+ *
+ * **canvasの大きさは、常に横1：縦1.4の枠で固定する。** 元イラストの
+ * 寸法をそのまま使っていたので、比率の違う絵がそのまま面いっぱいの形に
+ * なっていた。ここからは、枠の中へ**はみ出させず縮めて中央に納め**、
+ * 余った部分を frameBackground の色で塗る（作者の色選びの既定は黒）。
+ */
 function drawCover(side) {
   const canvas = document.getElementById('canvas-' + side);
   if (!canvas) return;
   const image = images[side];
   if (!image) return;
 
-  const longest = Math.max(image.naturalWidth, image.naturalHeight) || 1;
-  const scale = Math.min(1, MAX_EDGE / longest);
-  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+  canvas.width = FRAME_WIDTH;
+  canvas.height = FRAME_HEIGHT;
 
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = frameBackgroundOf(side);
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const scale = Math.min(
+    canvas.width / (image.naturalWidth || 1),
+    canvas.height / (image.naturalHeight || 1)
+  );
+  const drawWidth = Math.max(1, Math.round(image.naturalWidth * scale));
+  const drawHeight = Math.max(1, Math.round(image.naturalHeight * scale));
+  const offsetX = Math.round((canvas.width - drawWidth) / 2);
+  const offsetY = Math.round((canvas.height - drawHeight) / 2);
+  ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+
   drawTexts(ctx, canvas, readLayout(side));
 }
 

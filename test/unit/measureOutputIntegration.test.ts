@@ -198,7 +198,8 @@ beforeEach(() => {
 
 describe("手元のAIでは、読める長さのあとに書ける量も測る", () => {
   test("入力の測定に続けて出力の測定が走り、結果を同じ通知で見せる", async () => {
-    installSettings({});
+    const values: Record<string, unknown> = {};
+    installSettings(values);
     const { showInformationMessage } = answerWith("そのままにする");
 
     await measureContext(registry);
@@ -230,6 +231,13 @@ describe("手元のAIでは、読める長さのあとに書ける量も測る",
     expect(probe.meta?.feature).toBe(CONTEXT_GUARD_EXEMPT_FEATURE);
     // 作品に属さない呼び出しなので、どの作品の送信量にも混ぜない
     expect(probe.meta?.workFolder).toBeUndefined();
+    /*
+      **`capOutputTokens` は出力の測定だけが立てる**（設計書6.65.14の4）。
+      入力側（合言葉を書き写すだけの呼び出し）まで立ててしまうと、
+      その回の応答が短い上限で切られかねない。
+    */
+    expect(probe.capOutputTokens).toBe(true);
+    expect(state.calls[0]?.capOutputTokens).not.toBe(true);
 
     // 入力の結果と出力の結果が、1つの通知に並ぶ
     const text = noticeText(showInformationMessage);
@@ -242,11 +250,31 @@ describe("手元のAIでは、読める長さのあとに書ける量も測る",
         (line) => line.includes("書ける量の測定") && line.includes("書き切った")
       )
     ).toBe(true);
+
+    /*
+      **測り終えたら台帳へ保存する**（設計書6.65.14の1）。ここは
+      「参考値の報告だけ」（6.61）から、実際に繋がるところへ進んだ核心
+      なので、通知の文言だけでなく台帳の中身そのものを確かめる。
+    */
+    const tuning = (values.modelTuning as Record<string, unknown> | undefined)?.[
+      "ollama/gemma4:12b"
+    ] as Record<string, unknown> | undefined;
+    expect(tuning?.measuredOutputTokens).toBeGreaterThan(0);
+
+    /*
+      この場面（既定の `trueLimit=9999` で、上限8,192行＝約24,576トークン
+      まで書き切る）では、まとめ送信の従来の上限（自動モードでチャンク
+      いっぱいの20,000字）のほうがまだ小さいので、絞られない。
+      「黙って変えない」の裏返しとして、絞らなかったこともきちんと言う。
+    */
+    expect(text).toContain("上限はそのまま");
+    expect(text).not.toContain("まとめ送信の上限を");
   });
 
   test("書ける量が少ない相手では、その近くの値を報告する", async () => {
     state.trueLimit = 300;
-    installSettings({});
+    const values: Record<string, unknown> = {};
+    installSettings(values);
     const { showInformationMessage } = answerWith("そのままにする");
 
     await measureContext(registry);
@@ -266,6 +294,20 @@ describe("手元のAIでは、読める長さのあとに書ける量も測る",
         (line) => line.includes("書ける量の測定") && line.includes("行で止まった")
       )
     ).toBe(true);
+
+    /*
+      **書ける量が小さいモデルでは、まとめ送信の上限が実際に絞られる**
+      （設計書6.65.14の2・3）。自動モードの従来の上限（20,000字）に対し、
+      この場面の実測（300行前後 ≈ 900トークン以下）から出る上限は
+      ずっと小さいので、「絞った」ことを言う一文が出るはずである。
+    */
+    const tuning = (values.modelTuning as Record<string, unknown> | undefined)?.[
+      "ollama/gemma4:12b"
+    ] as Record<string, unknown> | undefined;
+    expect(tuning?.measuredOutputTokens).toBeGreaterThan(0);
+    expect(tuning?.measuredOutputTokens).toBeLessThan(1000);
+    expect(text).toContain("まとめ送信の上限を");
+    expect(text).not.toContain("上限はそのまま");
   });
 
   test("時間切れは「その量は書けない」と数えて、探索を続ける", async () => {
@@ -282,6 +324,37 @@ describe("手元のAIでは、読める長さのあとに書ける量も測る",
     expect(outputCalls().length).toBeGreaterThan(1);
     expect(showErrorMessage).not.toHaveBeenCalled();
     expect(noticeText(showInformationMessage)).toContain("書けたのは");
+  });
+
+  /**
+   * **中止したときは、台帳へ書かない**（設計書6.65.14の1）。
+   *
+   * 途中までの `low` は「そこまでは確かめられた」であって「これが上限」
+   * ではない。古い実測（あれば）のほうが信頼できるので、上書きしない。
+   */
+  test("中止したときは、台帳へ書かない（低い値でも上書きしない）", async () => {
+    // 1回目は成功させて low>0 にしたあと、2回目で中止させる
+    state.outputErrors = {
+      2: new AIError("処理が中止されました。", "aborted"),
+    };
+    const values: Record<string, unknown> = {
+      // 前回の実測が既にある、という場面を再現する
+      modelTuning: { "ollama/gemma4:12b": { measuredOutputTokens: 12345 } },
+    };
+    installSettings(values);
+    const { showInformationMessage } = answerWith("そのままにする");
+
+    await measureContext(registry);
+
+    const tuning = (values.modelTuning as Record<string, unknown>)[
+      "ollama/gemma4:12b"
+    ] as Record<string, unknown>;
+    // 新しい値で上書きされていない。古い実測がそのまま残る
+    expect(tuning.measuredOutputTokens).toBe(12345);
+    // 出力側は「途中で終わった」ことを言う（新しい値を覚えたとは言わない）
+    const text = noticeText(showInformationMessage);
+    expect(text).toContain("書けたのは");
+    expect(text).not.toContain("まとめ送信の上限を");
   });
 });
 

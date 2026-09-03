@@ -78,6 +78,47 @@ function buildForbiddenControlChars(): RegExp {
 
 const FORBIDDEN_CONTROL_CHARS = buildForbiddenControlChars();
 
+/**
+ * 半角の縦中横（設計書6.65.15の2）。
+ *
+ * 縦書きの本で、半角の数字・「!」「?」が1〜3文字だけ連続していたら
+ * `<span class="tcy">` で包む。CSS側（`epubPackage.ts` の `buildEpubCss`）
+ * が `text-combine-upright: all` を当て、縦の行の中で横向きに寝かせず
+ * 1文字ぶんの幅へ収める。**4文字以上は従来どおり横倒しのまま**——3文字を
+ * 超えると1文字ぶんに収まらず、かえって読みにくくなる。
+ *
+ * **`escapeXml` のあとの、エスケープ済みの文字列に対して行う。** 逃がす前の
+ * 生の文字列に対してだと、`&`（`&amp;`になる文字そのもの）を巻き込んで
+ * 壊れたタグを作りかねない。
+ *
+ * 数値実体参照（`&#8230;` のような、逃がした `&amp;` の直後に `#` と数字が
+ * 続く形）の中の数字は包まない。**直前が `&` か `#` の数字run**は対象から
+ * 外す——包むと、実体参照の意味を持つ数字の並びが縦中横のspanで割れて
+ * リーダーによっては元の記号として読めなくなる。
+ */
+export function applyTateChuYoko(escaped: string): string {
+  return escaped.replace(
+    /[0-9!?]+/g,
+    (run: string, offset: number, whole: string) => {
+      if (run.length > 3) return run;
+      const before = offset > 0 ? whole[offset - 1] : "";
+      if (before === "&" || before === "#") return run;
+      return `<span class="tcy">${run}</span>`;
+    }
+  );
+}
+
+/**
+ * 逃がし済みの文字列を、縦書きのときだけ縦中横まで通す。
+ *
+ * **テキストノードだけに使う。** `href`・`alt` のような属性値へ通すと
+ * `<span>` がそのまま値の中の文字列として入り、属性が壊れる。
+ */
+export function escapeDisplayText(value: string, vertical: boolean): string {
+  const escaped = escapeXml(value);
+  return vertical ? applyTateChuYoko(escaped) : escaped;
+}
+
 export interface EpubChapterSource {
   /** 話の見出し。**呼び出し側が組む**（`episodeLabel.ts` の作り方に合わせる） */
   heading: string;
@@ -115,6 +156,13 @@ export interface EpubBodyOptions {
    * いない」と読めてしまうので、印だけ置く（設計書6.65.10）。
    */
   markPageBreaks?: boolean;
+  /**
+   * 縦書きか（設計書6.65.15）。**省略時は false**（横書きと同じ扱い）。
+   *
+   * 半角の数字・「!」「?」の縦中横（`applyTateChuYoko`）は縦書きのときだけ
+   * 効く。横書きの本で寝かせると、かえって読みにくくなる。
+   */
+  vertical?: boolean;
 }
 
 /** 位置指定の種類。知らせの言い方をここで分ける */
@@ -163,13 +211,19 @@ export function buildChapterPlacement(
   chapter: EpubChapterSource,
   options: EpubBodyOptions
 ): EpubChapterPlacement {
+  const vertical = options.vertical ?? false;
   const heading = chapter.heading.trim();
   const body = renderBody(chapter.body, chapter.notation, options);
   return {
     html: [
       '<section class="chapter">',
       ...(heading
-        ? [`<h2 class="chapter-heading">${escapeXml(heading)}</h2>`]
+        ? [
+            `<h2 class="chapter-heading">${escapeDisplayText(
+              heading,
+              vertical
+            )}</h2>`,
+          ]
         : []),
       ...body.lines,
       "</section>",
@@ -438,6 +492,7 @@ function renderBody(
   notation: NotationMode,
   options: EpubBodyOptions
 ): { lines: string[]; paragraphCount: number; overflow: EpubPlacementOverflow[] } {
+  const vertical = options.vertical ?? false;
   const lines = normalizedLines(body);
   // 位置は1以上の整数（`models/book.ts` が保証する）。それでも念のため
   // 揃えておく——0や小数が届いても、挿絵を黙って落とさないため
@@ -458,7 +513,9 @@ function renderBody(
   /** 段落の切れ目。ここで「第M段落のあと」の指定を消化する */
   const closeParagraph = (): void => {
     for (const item of illustrations) {
-      if (item.afterParagraph === paragraph) out.push(figureFragment(item));
+      if (item.afterParagraph === paragraph) {
+        out.push(figureFragment(item, vertical));
+      }
     }
     if (pageBreaks.includes(paragraph)) {
       if (options.markPageBreaks) out.push(PAGE_BREAK_MARK);
@@ -494,7 +551,8 @@ function renderBody(
     out.push(
       `<p${marked ? ` class="${PAGE_BREAK_CLASS}"` : ""}>${renderInline(
         line,
-        notation
+        notation,
+        vertical
       )}</p>`
     );
   }
@@ -506,7 +564,7 @@ function renderBody(
   const overflow: EpubPlacementOverflow[] = [];
   for (const item of illustrations) {
     if (item.afterParagraph <= paragraph) continue;
-    out.push(figureFragment(item));
+    out.push(figureFragment(item, vertical));
     overflow.push({
       kind: "illustration",
       afterParagraph: item.afterParagraph,
@@ -534,16 +592,22 @@ function positionOf(value: number): number {
  * 解説文が無ければ `figcaption` そのものを出さない——空の要素は
  * 「説明が無い」ではなく「空の説明がある」という主張になる。
  */
-function figureFragment(item: EpubIllustrationPlacement): string {
+function figureFragment(
+  item: EpubIllustrationPlacement,
+  vertical: boolean
+): string {
   const caption = item.caption.trim();
   return [
     '<figure class="illustration">',
     // 代替文は解説文があればそれを使う。無ければ「挿絵」——空の alt は
-    // 「飾りなので読み上げなくてよい」の意味になってしまう
+    // 「飾りなので読み上げなくてよい」の意味になってしまう。
+    // **属性値なので縦中横は通さない**（span を挟むと属性が壊れる）
     `<img src="${escapeXml(item.href)}" alt="${escapeXml(
       caption || "挿絵"
     )}" />`,
-    ...(caption ? [`<figcaption>${escapeXml(caption)}</figcaption>`] : []),
+    ...(caption
+      ? [`<figcaption>${escapeDisplayText(caption, vertical)}</figcaption>`]
+      : []),
     "</figure>",
   ].join("\n");
 }
@@ -573,19 +637,31 @@ const BLANK_PARAGRAPH = '<p class="blank"><br /></p>';
  *
  * **どの経路も `escapeXml` を通る。** ここを1つでも抜かすと、本文に
  * 書いた記号がタグとして読まれ、XMLとして開けない本になる。
+ *
+ * **縦書きのときは、続けて縦中横も通す**（`escapeDisplayText`。設計書
+ * 6.65.15）。ルビの読み・傍点の中身も対象にする——数字を含む語に傍点を
+ * 打つ書き方もあるため、経路を分けない。
  */
-function renderInline(line: string, notation: NotationMode): string {
+function renderInline(
+  line: string,
+  notation: NotationMode,
+  vertical: boolean
+): string {
   return tokenizeLine(line, notation)
     .map((token) => {
       if (token.kind === "ruby") {
-        return `<ruby>${escapeXml(token.base)}<rt>${escapeXml(
-          token.reading
-        )}</rt></ruby>`;
+        return `<ruby>${escapeDisplayText(
+          token.base,
+          vertical
+        )}<rt>${escapeDisplayText(token.reading, vertical)}</rt></ruby>`;
       }
       if (token.kind === "emphasis") {
-        return `<span class="emphasis">${escapeXml(token.text)}</span>`;
+        return `<span class="emphasis">${escapeDisplayText(
+          token.text,
+          vertical
+        )}</span>`;
       }
-      return escapeXml(token.text);
+      return escapeDisplayText(token.text, vertical);
     })
     .join("");
 }

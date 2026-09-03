@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import {
+  capMergeCharsByOutputTokens,
   parseChunkSizeMode,
   planChunkBudget,
   resolveChunkChars,
@@ -8,6 +9,7 @@ import {
   type ChunkSizeMode,
   type ResolvedChunkSize,
 } from "../core/chunker";
+import { modelTuning } from "../core/modelTuning";
 import { confirmProviderReachable } from "./aiConnectivity";
 import type { AIProvider, ModelInfo } from "../ai/types";
 import type { AssignableFeature } from "../ai/registry";
@@ -27,6 +29,14 @@ export interface ChunkSettings {
   chunk: ResolvedChunkSize;
   /** まとめて送るときの1回ぶんの字数。0ならまとめない */
   mergeChars: number;
+  /**
+   * 書ける量（設計書6.61）による絞り込みが効く**前**の、まとめ送信の上限。
+   *
+   * 絞られていないとき（台帳に実測が無い・絞る前のほうが小さいなど）は
+   * undefined——そのときは `mergeChars` と同じ値になるので、別に持たない。
+   * 「なぜこの字数になったか」を作者へ見せるためだけにある（設計書6.65.14の2・3）。
+   */
+  mergeCharsBeforeOutputCap?: number;
   /**
    * 固定費を差し引いた結果。差し引く材料を渡されなければ undefined。
    *
@@ -128,7 +138,16 @@ export async function resolveModelInfoOrWarn(options: {
 
 export function readChunkSettings(
   contextWindow: number,
-  fixedCost?: ChunkFixedCost
+  fixedCost?: ChunkFixedCost,
+  /**
+   * 書ける量（設計書6.61）で、まとめ送信の上限をさらに絞るための指定
+   * （設計書6.65.14の2）。
+   *
+   * **省略すると、これまでどおり絞らない。** 呼び出し側（誤字脱字・
+   * 設定資料の抽出など）を1つずつ対応させるまでの間、動作を変えないため
+   * の逃げ道である——渡さない限り、この関数の挙動は前と同じになる。
+   */
+  outputTuning?: { providerId: string; model: string }
 ): ChunkSettings {
   const config = vscode.workspace.getConfiguration("novelai");
   const mode = parseChunkSizeMode(config.get<string>("chunkSizeMode"));
@@ -158,13 +177,32 @@ export function readChunkSettings(
     ? { ...requested, chars: budget.chunkChars }
     : requested;
 
-  const mergeChars = resolveMergeChars({
+  const requestedMergeChars = resolveMergeChars({
     mode,
     configured: config.get<number>("mergeChunkChars"),
     chunkChars: chunk.chars,
   });
 
-  return { mode, chunk, mergeChars, budget };
+  // **絞るのは、指定されたモデルの実測が台帳にあるときだけ**
+  // （設計書6.65.14の2）。渡されなければ `modelTuning` を引かないので、
+  // 対応していない呼び出し側の挙動は変わらない
+  const measuredOutputTokens = outputTuning
+    ? modelTuning(outputTuning.providerId, outputTuning.model)?.measuredOutputTokens
+    : undefined;
+  const mergeChars = capMergeCharsByOutputTokens(
+    requestedMergeChars,
+    measuredOutputTokens
+  );
+
+  return {
+    mode,
+    chunk,
+    mergeChars,
+    ...(mergeChars < requestedMergeChars
+      ? { mergeCharsBeforeOutputCap: requestedMergeChars }
+      : {}),
+    budget,
+  };
 }
 
 /**
@@ -182,7 +220,12 @@ export function describeChunkSettings(settings: ChunkSettings): string {
         : "字数の指定が無いためモデルから";
   const merge =
     settings.mergeChars > 0
-      ? `／まとめ送信 ${settings.mergeChars}字`
+      ? `／まとめ送信 ${settings.mergeChars}字` +
+        // **書ける量で絞られたことも書く**（設計書6.65.14の2）。書かないと、
+        // 作者には「まとめ送信の設定が効いていない」ように見える
+        (settings.mergeCharsBeforeOutputCap !== undefined
+          ? `（書ける量の実測で ${settings.mergeCharsBeforeOutputCap}字から絞り込み）`
+          : "")
       : "／まとめ送信なし";
   // **何を差し引いたかまで書く。** 設定に20,000字と書いたのに18,000字で
   // 動いていると、作者からは設定が効いていないように見える

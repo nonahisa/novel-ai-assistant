@@ -542,6 +542,124 @@ describe("目次（nav）", () => {
   });
 });
 
+describe("目次の見出しの形（設計書6.65.15）", () => {
+  /** 番号と題を別々に持つ話（`features/exportEpub.ts` が渡す形） */
+  function withEntries(): EpubBook {
+    return book({
+      chapters: [
+        {
+          heading: "第1話　出会い",
+          numberLabel: "第1話",
+          title: "出会い",
+          body: "あ",
+          notation: "curly",
+        },
+        {
+          heading: "第2話　別れ",
+          numberLabel: "第2話",
+          title: "別れ",
+          body: "い",
+          notation: "curly",
+        },
+      ],
+    });
+  }
+
+  function tocLabels(config: Partial<BookConfig> = {}): string[] {
+    // **横書きに固定する。** 縦中横（設計書6.65.15の2）は別のdescribeで見る
+    // ——番号に含まれる数字が `<span class="tcy">` で割れると、ここで見たい
+    // 「番号＋題の組み方」の比較がしづらくなる
+    const nav = open(
+      buildEpub({
+        ...withEntries(),
+        config: {
+          ...defaultBookConfig("氷の街"),
+          writingMode: "horizontal",
+          ...config,
+        },
+      })
+    )["OEBPS/nav.xhtml"];
+    return [
+      ...nav.matchAll(/<a href="chapter-\d+\.xhtml">([^<]*)<\/a>/g),
+    ].map((match) => match[1]);
+  }
+
+  test("既定（numberAndTitle）は番号＋題で、いままでどおりの見た目", () => {
+    expect(tocLabels()).toEqual(["第1話　出会い", "第2話　別れ"]);
+  });
+
+  test("titleOnly は題だけ", () => {
+    expect(tocLabels({ tocEntryStyle: "titleOnly" })).toEqual([
+      "出会い",
+      "別れ",
+    ]);
+  });
+
+  test("numberOnly は番号だけ", () => {
+    expect(tocLabels({ tocEntryStyle: "numberOnly" })).toEqual([
+      "第1話",
+      "第2話",
+    ]);
+  });
+
+  test("番号・題を持たない話（呼び出し側が heading だけ渡す形）は heading のまま", () => {
+    // `book()` の既定チャプターは numberLabel・title を持たない
+    const nav = open(
+      buildEpub(withConfig({ tocEntryStyle: "titleOnly" }))
+    )["OEBPS/nav.xhtml"];
+    expect(nav).toContain("第一話　出会い");
+  });
+});
+
+describe("半角の縦中横（設計書6.65.15）", () => {
+  function verticalBook(): EpubBook {
+    return book({
+      config: {
+        ...defaultBookConfig("氷の街"),
+        writingMode: "vertical",
+        author: "野中1号",
+      },
+      chapters: [{ heading: "第1話　出会い", body: "あ", notation: "curly" }],
+    });
+  }
+
+  function horizontalBook(): EpubBook {
+    return book({
+      config: {
+        ...defaultBookConfig("氷の街"),
+        writingMode: "horizontal",
+        author: "野中1号",
+      },
+      chapters: [{ heading: "第1話　出会い", body: "あ", notation: "curly" }],
+    });
+  }
+
+  test("CSSに3種の書き方が並ぶ", () => {
+    const css = open(buildEpub(book()))["OEBPS/style.css"];
+    expect(css).toContain("text-combine-upright: all");
+    expect(css).toContain("-webkit-text-combine: horizontal");
+    expect(css).toContain("-epub-text-combine: horizontal");
+  });
+
+  test("縦書きの目次・見出し・奥付では数字が tcy で包まれる", () => {
+    const files = open(buildEpub(verticalBook()));
+    expect(files["OEBPS/nav.xhtml"]).toContain('<span class="tcy">1</span>');
+    expect(files["OEBPS/chapter-001.xhtml"]).toContain(
+      '<span class="tcy">1</span>'
+    );
+    expect(files["OEBPS/colophon.xhtml"]).toContain(
+      '<span class="tcy">1</span>'
+    );
+  });
+
+  test("横書きでは包まない", () => {
+    const files = open(buildEpub(horizontalBook()));
+    expect(files["OEBPS/nav.xhtml"]).not.toContain('class="tcy"');
+    expect(files["OEBPS/chapter-001.xhtml"]).not.toContain('class="tcy"');
+    expect(files["OEBPS/colophon.xhtml"]).not.toContain('class="tcy"');
+  });
+});
+
 describe("本文と体裁", () => {
   test("話ごとに1つのXHTMLになる", () => {
     const files = open(buildEpub(book()));

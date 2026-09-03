@@ -52,6 +52,25 @@ export const TOC_PATTERNS: readonly TocPattern[] = [
 ];
 
 /**
+ * 目次の1行に出す見出しの形（設計書6.65.15）。
+ *
+ * - `numberAndTitle`：番号＋題（既定。いままでどおりの見た目）
+ * - `titleOnly`：題だけ
+ * - `numberOnly`：番号だけ
+ *
+ * **既定を変えない。** 重複除去（`episodeLabel.ts` の `stripChapterLabel`）
+ * を先に直したので、既定のままでも「第1話　第1話」のような二重は
+ * 出なくなる——この選択肢は、それでも番号や題だけにしたい作者のためのもの。
+ */
+export type TocEntryStyle = "numberAndTitle" | "titleOnly" | "numberOnly";
+
+export const TOC_ENTRY_STYLES: readonly TocEntryStyle[] = [
+  "numberAndTitle",
+  "titleOnly",
+  "numberOnly",
+];
+
+/**
  * 目次・奥付の飾り（設計書6.65.6）。
  *
  * **画像ファイルは増やさない。** `rule` はCSSの罫線、`center` は断片の
@@ -131,8 +150,17 @@ export interface CoverTextStyle {
   vertical: boolean;
 }
 
-/** 1枚の表紙ぶんの合成指定 */
-export type CoverLayout = Record<CoverElementKey, CoverTextStyle>;
+/**
+ * 1枚の表紙ぶんの合成指定。
+ *
+ * **`frameBackground` は文字要素ではなく枠そのものの色**（設計書6.65.15）。
+ * 表紙・裏表紙の枠は横1：縦1.4に固定し、元イラストが枠と違う比率のときは
+ * 縮めて中央に納め、余った部分をこの色で塗る。
+ */
+export type CoverLayout = Record<CoverElementKey, CoverTextStyle> & {
+  /** 余白の色。`#ffffff` の形。白・黒は画面のボタンで選び、それ以外は16進 */
+  frameBackground: string;
+};
 
 /**
  * 本文の中の位置（設計書6.65.10）。挿絵とページ分割が共に使う。
@@ -224,6 +252,8 @@ export interface BookConfig {
   tocEnabled: boolean;
   /** 目次ページの並べ方。`tocEnabled` が false なら見た目に影響しない */
   tocPattern: TocPattern;
+  /** 目次の1行に出す見出しの形（設計書6.65.15）。既定は番号＋題 */
+  tocEntryStyle: TocEntryStyle;
   /** 目次ページの飾り */
   tocOrnament: BookOrnament;
   /** 奥付の飾り。目次とは別に選べる（片方だけ飾りたいことがある） */
@@ -311,6 +341,9 @@ export function defaultCoverLayout(): CoverLayout {
       color: "#ffffff",
       vertical: false,
     },
+    // **既定は黒**（作者の指定、2026-09-03）。白イラストの余白が
+    // 目立たないよう、黒を既定にしておく
+    frameBackground: "#000000",
   };
 }
 
@@ -328,6 +361,7 @@ export function defaultBackCoverLayout(): CoverLayout {
     author: { ...layout.author, visible: false },
     illustrator: { ...layout.illustrator, visible: false },
     label: { ...layout.label, visible: false },
+    frameBackground: layout.frameBackground,
   };
 }
 
@@ -344,6 +378,8 @@ export function defaultBookConfig(title: string): BookConfig {
     // **既定は「いままでどおりの見た目」。** 第1段で書き出した本と
     // 同じものが出ないと、版を上げただけで本の体裁が変わる
     tocPattern: "vertical",
+    // **既定は「番号＋題」**（いままでどおりの見た目。重複除去のあとの形）
+    tocEntryStyle: "numberAndTitle",
     tocOrnament: "none",
     colophonOrnament: "none",
     collapseBlankLines: true,
@@ -387,6 +423,7 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
   optionalEnum(value.writingMode, "writingMode", BOOK_WRITING_MODES);
   optionalBoolean(value.tocEnabled, "tocEnabled");
   optionalEnum(value.tocPattern, "tocPattern", TOC_PATTERNS);
+  optionalEnum(value.tocEntryStyle, "tocEntryStyle", TOC_ENTRY_STYLES);
   optionalEnum(value.tocOrnament, "tocOrnament", BOOK_ORNAMENTS);
   optionalEnum(value.colophonOrnament, "colophonOrnament", BOOK_ORNAMENTS);
   optionalBoolean(value.collapseBlankLines, "collapseBlankLines");
@@ -412,6 +449,9 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
       (value.tocEnabled as boolean | undefined) ?? defaults.tocEnabled,
     tocPattern:
       (value.tocPattern as TocPattern | undefined) ?? defaults.tocPattern,
+    tocEntryStyle:
+      (value.tocEntryStyle as TocEntryStyle | undefined) ??
+      defaults.tocEntryStyle,
     tocOrnament:
       (value.tocOrnament as BookOrnament | undefined) ?? defaults.tocOrnament,
     colophonOrnament:
@@ -581,6 +621,9 @@ function parseCoverLayout(
 ): CoverLayout {
   if (raw === undefined || raw === null) return defaults;
   const value = objectValue(raw, name);
+  // 色以外の型（数値など）を通すと `coverColor` の `.trim()` が落ちる
+  // （文字要素の色と同じ検証を先に通す）
+  optionalString(value.frameBackground, `${name}.frameBackground`);
 
   return {
     title: parseCoverText(value.title, `${name}.title`, defaults.title),
@@ -591,6 +634,12 @@ function parseCoverLayout(
       defaults.illustrator
     ),
     label: parseCoverText(value.label, `${name}.label`, defaults.label),
+    // 枠の余白の色（設計書6.65.15）。文字要素と同じ16進の検証を通す
+    frameBackground: coverColor(
+      value.frameBackground as string | undefined,
+      `${name}.frameBackground`,
+      defaults.frameBackground
+    ),
   };
 }
 

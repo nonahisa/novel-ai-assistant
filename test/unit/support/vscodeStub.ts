@@ -34,6 +34,18 @@ export const window = {
   showWarningMessage: (async () => undefined) as StubMessage,
   showErrorMessage: (async () => undefined) as StubMessage,
   /**
+   * 入力欄（`views/dialogs.ts` の `askText` が通す唯一の窓口）。
+   *
+   * 既定は「入力欄の初期値をそのまま確定した」体にする——`askText` は
+   * 呼び出し側が渡した `value` をそのまま返せば、既定のファイル名で
+   * 進むテストが書ける。取りやめを試すテストは `undefined` へ差し替える。
+   */
+  showInputBox: (async (options?: { value?: string }) =>
+    options?.value) as (options?: {
+    value?: string;
+    [key: string]: unknown;
+  }) => Promise<string | undefined>,
+  /**
    * WebViewパネル。**既定は作らずに断る。**
    *
    * パネルを開くテストは、受け取った postMessage を覗ける作り物へ

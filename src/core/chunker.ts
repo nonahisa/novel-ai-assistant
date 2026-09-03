@@ -298,6 +298,69 @@ export function resolveMergeChars(options: {
 }
 
 /**
+ * 応答率＝**入力1字あたり、応答が何トークンになるか**（設計書6.65.14の2）。
+ *
+ * 20,000字の抽出から6,000トークン級のJSONが返る実測感覚を、初期値
+ * 0.3として置いた。**字とトークンをまたぐ換算はここに含まない**——
+ * `TOKENS_PER_CHAR`（入力側の字→トークン換算）とは別物であり、
+ * 混ぜて使うと二重に換算してしまう。**経験則の初期値**なので、
+ * 実測が積み上がったら見直す——書ける量の測定を「参考値の報告だけ」
+ * （6.61）から台帳への保存へ進める際、この比率が未検証のまま黙って
+ * 設定を変えると、まとめ送信が急に縮んで「なぜか遅くなった」が起きる
+ * ため、二段構えにした。この定数を分けたのが、まさにその二段目である。
+ */
+export const OUTPUT_RESPONSE_RATIO = 0.3;
+
+/**
+ * 応答率の見積もりが外れても、なお余裕を持たせるための掛け目。
+ *
+ * 根拠が実測1件しか無い比率（`OUTPUT_RESPONSE_RATIO`）を、そのまま
+ * 上限へ使わない。多めに削っておけば、比率が外れていた場合の害は
+ * 「まとめ送信が少し細かくなる」で済む（呼び出し回数が増えるだけで、
+ * 応答が切れて丸ごと捨てられるよりずっと軽い）。
+ */
+export const OUTPUT_SAFETY_MARGIN = 0.8;
+
+/**
+ * 書ける量（実測の出力トークン数）から、まとめ送信の上限をさらに絞る
+ * （設計書6.65.14の2）。
+ *
+ * `min(従来の上限, 書ける量トークン × 安全率0.8 ÷ 応答率0.3)`。
+ * **字とトークンをまたぐ換算（`TOKENS_PER_CHAR`）はこの式に含まない**
+ * ——応答率0.3が「入力1字あたり応答0.3トークン」という定義そのもの
+ * なので、そこへさらに字/トークンの換算を掛けると二重に換算してしまう。
+ *
+ * まとめ送信でこの字数を超えて詰めても、応答が出力上限で切れて
+ * **そのまとめ全体が解析できずに捨てられる**だけである。台帳に実測が
+ * 無いモデルでは、これまでどおり `mergeChars` をそのまま返す
+ * （測っていないモデルの挙動は変えない）。
+ *
+ * **`mergeChars <= 0` は絞らない。** 0は「まとめない」という設定の意味を
+ * 持つ特別な値であって、上限の字数ではない。
+ *
+ * @param mergeChars 絞る前の、まとめ送信の上限（字）
+ * @param measuredOutputTokens 台帳（`core/modelTuning.ts`）に入っている
+ *   実測の出力トークン数。無ければ undefined
+ */
+export function capMergeCharsByOutputTokens(
+  mergeChars: number,
+  measuredOutputTokens: number | undefined
+): number {
+  if (mergeChars <= 0) return mergeChars;
+  if (
+    measuredOutputTokens === undefined ||
+    !Number.isFinite(measuredOutputTokens) ||
+    measuredOutputTokens <= 0
+  ) {
+    return mergeChars;
+  }
+  const cap = Math.floor(
+    (measuredOutputTokens * OUTPUT_SAFETY_MARGIN) / OUTPUT_RESPONSE_RATIO
+  );
+  return Math.min(mergeChars, cap);
+}
+
+/**
  * 実際に送るプロンプトから、確保するコンテキスト長を決める。
  *
  * **本来は呼び出し側が `numCtx` を渡すべきで、これはその受け皿である。**

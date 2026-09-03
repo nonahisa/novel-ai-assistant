@@ -3,11 +3,13 @@ import {
   BOOK_FONT_EXTENSIONS,
   type BookConfig,
   type BookOrnament,
+  type TocEntryStyle,
   type TocPattern,
 } from "../models/book";
 import {
   buildChapterXhtml,
   buildXhtmlDocument,
+  escapeDisplayText,
   escapeXml,
   type EpubChapterSource,
 } from "./epubXhtml";
@@ -115,6 +117,17 @@ export interface EpubChapter extends EpubChapterSource {
   illustrations?: readonly EpubIllustration[];
   /** この話の中で改ページする位置（第M段落のあと） */
   pageBreaks?: readonly number[];
+  /**
+   * 目次の「番号だけ」で使う章ラベル（設計書6.65.15）。
+   * `episodeLabel.ts` の `formatChapterLabel` の結果をそのまま渡す。
+   *
+   * **話の本文側の見出し（`heading`）は変えない。** `tocEntryStyle` が
+   * 効くのは目次だけで、本文の `<h2>` はいつも「番号＋題」のままにする
+   * ——章の扉を開いたときに、その話がどれか分からなくなっては困る。
+   */
+  numberLabel?: string;
+  /** 目次の「題だけ」で使う題（`episodeLabel.ts` の `episodeTitle` の結果） */
+  title?: string | null;
 }
 
 export interface EpubCover {
@@ -726,7 +739,7 @@ function navXhtml(
     body: buildTocFragment(
       chapters.map((chapter) => ({
         href: chapter.fileName,
-        label: chapter.heading.trim() || chapter.fileName,
+        label: buildTocLabel(chapter, config.tocEntryStyle),
         group: chapter.group,
       })),
       {
@@ -734,9 +747,47 @@ function navXhtml(
         ornament: config.tocOrnament,
         colophonHref: COLOPHON_NAME,
         charactersHref: hasCharacters ? CHARACTERS_NAME : null,
+        vertical,
       }
     ),
   });
+}
+
+/**
+ * 目次の1行に出す見出しの形（設計書6.65.15）。
+ *
+ * `numberLabel`／`title` が届いていない話（呼び出し側が古い形のまま
+ * `heading` だけを渡した場合）は、いつもどおり `heading` を出す——
+ * この2つは省略可能なので、渡さない使い手を壊さない。
+ *
+ * 番号も題もどちらも読み取れなければ `heading`、それも空なら
+ * ファイル名へ倒す（空の目次行を作らない）。
+ */
+export function buildTocLabel(
+  chapter: {
+    heading: string;
+    fileName: string;
+    numberLabel?: string;
+    title?: string | null;
+  },
+  style: TocEntryStyle
+): string {
+  if (chapter.numberLabel === undefined && chapter.title === undefined) {
+    return chapter.heading.trim() || chapter.fileName;
+  }
+  const numberLabel = chapter.numberLabel ?? "";
+  const title = chapter.title ?? "";
+  const parts =
+    style === "titleOnly"
+      ? [title]
+      : style === "numberOnly"
+        ? [numberLabel]
+        : [numberLabel, title];
+  const joined = parts
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .join("　");
+  return joined || chapter.heading.trim() || chapter.fileName;
 }
 
 /** 目次に並べる1行 */
@@ -760,6 +811,12 @@ export interface EpubTocOptions {
    * 読む順路が食い違うと、目次から飛んだ読者が戻れなくなる。
    */
   charactersHref?: string | null;
+  /**
+   * 縦書きか（設計書6.65.15）。**省略時は false**。
+   *
+   * 目次の行の半角の数字・「!」「?」は、縦書きの本のときだけ縦中横にする。
+   */
+  vertical?: boolean;
 }
 
 /**
@@ -781,6 +838,7 @@ export function buildTocFragment(
   entries: readonly EpubTocEntry[],
   options: EpubTocOptions
 ): string {
+  const vertical = options.vertical ?? false;
   const grouped =
     options.pattern === "chapters" &&
     entries.some((entry) => (entry.group ?? "").trim() !== "");
@@ -812,22 +870,25 @@ export function buildTocFragment(
     )}</h1>`,
     `  <ol class="${listClass}">`,
     ...characters,
-    ...(grouped ? groupedItems(entries) : flatItems(entries)),
+    ...(grouped ? groupedItems(entries, vertical) : flatItems(entries, vertical)),
     ...colophon,
     "  </ol>",
     "</nav>",
   ].join("\n");
 }
 
-function flatItems(entries: readonly EpubTocEntry[]): string[] {
-  return entries.map((entry) => tocItem(entry, "    "));
+function flatItems(
+  entries: readonly EpubTocEntry[],
+  vertical: boolean
+): string[] {
+  return entries.map((entry) => tocItem(entry, "    ", vertical));
 }
 
 /** 目次の1行。章の中と外で字下げだけが変わる */
-function tocItem(entry: EpubTocEntry, indent: string): string {
-  return `${indent}<li><a href="${escapeXml(entry.href)}">${escapeXml(
-    entry.label
-  )}</a></li>`;
+function tocItem(entry: EpubTocEntry, indent: string, vertical: boolean): string {
+  return `${indent}<li><a href="${escapeXml(
+    entry.href
+  )}">${escapeDisplayText(entry.label, vertical)}</a></li>`;
 }
 
 /**
@@ -844,7 +905,10 @@ function tocItem(entry: EpubTocEntry, indent: string): string {
  * 本へ載せない**という約束は、章を捏造しないことと同じである。
  * 束ねられない話は一覧の項目として、その場の順序のまま置く。
  */
-function groupedItems(entries: readonly EpubTocEntry[]): string[] {
+function groupedItems(
+  entries: readonly EpubTocEntry[],
+  vertical: boolean
+): string[] {
   const out: string[] = [];
   /** いま開いている章の名前。null なら章の外にいる */
   let current: string | null = null;
@@ -859,18 +923,21 @@ function groupedItems(entries: readonly EpubTocEntry[]): string[] {
     const group = (entry.group ?? "").trim();
     if (!group) {
       closeGroup();
-      out.push(tocItem(entry, "    "));
+      out.push(tocItem(entry, "    ", vertical));
       continue;
     }
     if (group !== current) {
       closeGroup();
       current = group;
       out.push(
-        `    <li><span class="toc-group">${escapeXml(group)}</span>`,
+        `    <li><span class="toc-group">${escapeDisplayText(
+          group,
+          vertical
+        )}</span>`,
         "      <ol>"
       );
     }
-    out.push(tocItem(entry, "        "));
+    out.push(tocItem(entry, "        ", vertical));
   }
   closeGroup();
   return out;
@@ -1000,7 +1067,7 @@ function colophonXhtml(config: BookConfig, vertical: boolean): string {
     title: "奥付",
     cssHref: CSS_NAME,
     vertical,
-    body: buildColophonFragment(config),
+    body: buildColophonFragment(config, vertical),
   });
 }
 
@@ -1010,7 +1077,10 @@ function colophonXhtml(config: BookConfig, vertical: boolean): string {
  * **空の項目は行ごと出さない。** 「著者　（空欄）」の並んだ奥付は、
  * 作者が書き忘れたのか、そういう本なのかが読み手に分からない。
  */
-export function buildColophonFragment(config: BookConfig): string {
+export function buildColophonFragment(
+  config: BookConfig,
+  vertical = false
+): string {
   const rows = [
     ["題名", config.title || "無題"],
     ["著者", config.author],
@@ -1026,7 +1096,7 @@ export function buildColophonFragment(config: BookConfig): string {
     '  <dl class="colophon-list">',
     ...rows.flatMap(([label, value]) => [
       `    <dt>${escapeXml(label)}</dt>`,
-      `    <dd>${escapeXml(value)}</dd>`,
+      `    <dd>${escapeDisplayText(value, vertical)}</dd>`,
     ]),
     "  </dl>",
     "</div>",
@@ -1104,6 +1174,13 @@ export function buildEpubCss(
     "  -epub-text-emphasis: filled sesame;",
     "  -webkit-text-emphasis: filled sesame;",
     "  text-emphasis: filled sesame;",
+    "}",
+    // 半角の縦中横（設計書6.65.15）。**古いリーダー向けの書き方も並べる**
+    // ——縦書き・圏点と同じ理由で、標準の書き方しか見ないリーダーがある
+    ".tcy {",
+    "  -epub-text-combine: horizontal;",
+    "  -webkit-text-combine: horizontal;",
+    "  text-combine-upright: all;",
     "}",
     // 挿絵（設計書6.65.10）。本文の流れに入るので、面いっぱいには広げず
     // 前後に空きを取る。解説文は画像の直後（重ねない）

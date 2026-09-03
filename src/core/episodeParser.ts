@@ -87,8 +87,13 @@ function isRealDate(value: string): boolean {
   );
 }
 
-/** 全角数字を半角に変換 */
-function toHalfWidthDigits(s: string): string {
+/**
+ * 全角数字を半角に変換。
+ *
+ * **`episodeLabel.ts` からも使う。** 章ラベルと題の数字が全角・半角で
+ * 食い違っていても同じ話数として見分けるため（設計書6.65.15）。
+ */
+export function toHalfWidthDigits(s: string): string {
   return s.replace(/[０-９]/g, (c) =>
     String.fromCharCode(c.charCodeAt(0) - 0xfee0)
   );

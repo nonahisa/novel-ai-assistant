@@ -14,7 +14,12 @@ import { parseEpisodeMetadata } from "../core/metadataParser";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { readWorkFormat } from "../core/workFormatStore";
-import { bookHeading, episodeGroupLabel } from "../core/episodeLabel";
+import {
+  bookHeading,
+  episodeGroupLabel,
+  episodeTitle,
+  formatChapterLabel,
+} from "../core/episodeLabel";
 import { timestampedFileNameCandidates } from "../core/timestampedFileName";
 import { notationModeFor } from "../core/manuscriptRender";
 import {
@@ -144,6 +149,11 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       return;
     }
     const heading = bookHeading(episode, format);
+    // 目次の見出しの形（設計書6.65.15）は番号と題を別々に持つ。
+    // **本文側の `<h2>`（= heading）はいつも番号＋題のまま**——ここで
+    // 別々に持つのは目次だけの都合である
+    const numberLabel = formatChapterLabel(episode, format);
+    const title = episodeTitle(episode, numberLabel);
     const episodePath = episodePathFor(work.folderPath, episode.filePath);
     // **未解決の競合をそのまま組まない。** マーカーと両方の版が混ざった本は
     // 読めないうえ、配ってから気づくことになる（PDF出力と同じ）
@@ -173,6 +183,8 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
 
     chapters.push({
       heading,
+      numberLabel,
+      title,
       // 目次を「章ごとに区切る」にしたときの束ね名（設計書6.65.6）。
       // 読み取れなければ空文字が返り、一覧のまま出る
       group: episodeGroupLabel(episode),

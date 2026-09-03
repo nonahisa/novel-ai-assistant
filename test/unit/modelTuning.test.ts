@@ -99,6 +99,25 @@ describe("台帳の読み取り", () => {
     expect(table.get("ollama/b")).toEqual({ contextWindow: 8192 });
   });
 
+  /**
+   * **書ける量（設計書6.65.14の1）は、読める量と同じ台帳の同じ欄検査を通る。**
+   * 別の欄を新設しても、既存の壊れた欄の扱い（数の検査・読める欄だけ残す）は
+   * 素通しでよいはずなので、既存の項目に混ぜて確かめる。
+   */
+  test("measuredOutputTokens もそのまま読み、数でなければ捨てる", () => {
+    const table = parseModelTuning({
+      "ollama/gemma4:12b": {
+        contextWindow: 131072,
+        measuredOutputTokens: 6500,
+      },
+      "ollama/壊れた出力": { contextWindow: 8192, measuredOutputTokens: "6500" },
+    });
+
+    expect(table.get("ollama/gemma4:12b")?.measuredOutputTokens).toBe(6500);
+    // 壊れた欄だけ落ちて、同じ項目の他の欄は残る
+    expect(table.get("ollama/壊れた出力")).toEqual({ contextWindow: 8192 });
+  });
+
   test("配列・null・数・未設定は、台帳ではないので空として読む", () => {
     for (const raw of [[], null, undefined, 42, "文字列"]) {
       expect(parseModelTuning(raw).size, String(raw)).toBe(0);

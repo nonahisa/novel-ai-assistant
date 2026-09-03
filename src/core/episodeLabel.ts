@@ -1,4 +1,5 @@
 import type { EpisodeFile } from "../models/types";
+import { toHalfWidthDigits } from "./episodeParser";
 import type { WorkFormatKey } from "./workFormat";
 
 /**
@@ -97,6 +98,13 @@ export function episodeTitle(
  *
  * 題が話数だけの場合（「第16話」）は何も返さない。
  * 見出しと同じ文字を右にもう一度出しても、伝わる情報が増えない。
+ *
+ * **全角数字・ゼロ埋めの違いも同じ話数として見る**（設計書6.65.15）。
+ * 投稿サイトのDLは題に「第001話」（ゼロ埋め）や「第１話」（全角）の形で
+ * 話数を持つことがあり、章ラベル（「第1話」）とは文字列として一致しない。
+ * EPUBの目次で「第1話　第001話　◯◯」と二重に出た（作者の報告、
+ * 2026-09-03）。単純な `startsWith` では見逃すので、数字の並びだけを
+ * 値として比べる。
  */
 export function stripChapterLabel(
   title: string | null | undefined,
@@ -104,12 +112,64 @@ export function stripChapterLabel(
 ): string | null {
   const raw = title?.trim();
   if (!raw) return null;
-  if (!chapterLabel || !raw.startsWith(chapterLabel)) return raw;
+  if (!chapterLabel) return raw;
+
+  const matchLength = duplicatedPrefixLength(raw, chapterLabel);
+  if (matchLength === null) return raw;
+
   // 「第1話」に続く区切り（空白・記号）も一緒に落とす
-  const rest = raw
-    .slice(chapterLabel.length)
-    .replace(/^[\s　:：・．.。、,，\-–—]+/, "");
+  const rest = raw.slice(matchLength).replace(/^[\s　:：・．.。、,，\-–—]+/, "");
   return rest.length > 0 ? rest : null;
+}
+
+/**
+ * `raw` の先頭が `chapterLabel` と同じ話数を指しているか。
+ *
+ * 一致すれば `raw` 側での一致した長さ（全角・ゼロ埋めで `chapterLabel` と
+ * 文字数が違いうる）を返す。指していなければ null。
+ *
+ * まず `chapterLabel` の中の数字の並びを `[0-9０-９]+` に置き換えた
+ * 正規表現を作り、`raw` の先頭がその形と合うかを見る。合っていても
+ * **数字の値（全角→半角・ゼロ埋めを外して比較）が違えば別の話数**なので
+ * 一致とはしない——「第1話」で「第12話から始まる題」を誤って剥がさない
+ * ため。
+ */
+function duplicatedPrefixLength(
+  raw: string,
+  chapterLabel: string
+): number | null {
+  const pattern = chapterLabelPattern(chapterLabel);
+  const matched = pattern.exec(raw);
+  if (!matched) return null;
+
+  const rawNumbers = numbersOf(matched[0]);
+  const labelNumbers = numbersOf(chapterLabel);
+  if (rawNumbers.length !== labelNumbers.length) return null;
+  if (!rawNumbers.every((value, index) => value === labelNumbers[index])) {
+    return null;
+  }
+  return matched[0].length;
+}
+
+/** 数字の並びを、全角→半角・先頭のゼロ埋めを外した形で取り出す */
+function numbersOf(value: string): string[] {
+  return (value.match(/[0-9０-９]+/g) ?? []).map((run) => {
+    const half = toHalfWidthDigits(run).replace(/^0+(?=\d)/, "");
+    return half;
+  });
+}
+
+/**
+ * `chapterLabel` の数字の並びを、桁数を問わない形へ組み替えた正規表現。
+ *
+ * `第1話` → `/^第[0-9０-９]+話/`。数字以外の文字（全角括弧を含む）は
+ * そのまま残す——`chapterLabel` は `formatChapterLabel` が作るので、
+ * 正規表現の特殊文字が混ざるのは半角の記号（日付の `-` など）だけである。
+ */
+function chapterLabelPattern(chapterLabel: string): RegExp {
+  const escaped = chapterLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const withWildcard = escaped.replace(/[0-9０-９]+/g, "[0-9０-９]+");
+  return new RegExp(`^${withWildcard}`);
 }
 
 /**

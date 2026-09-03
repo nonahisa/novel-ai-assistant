@@ -382,6 +382,38 @@ export class OllamaProvider implements AIProvider {
       }字）`
     );
 
+    const options: Record<string, unknown> = {
+      temperature: params.temperature,
+      /*
+        **`num_predict` は送らない。出力に上限を掛けない**
+        （作者の判断、2026-09-01。設計書6.58.2）。
+
+        ほかの5つのプロバイダは `novelai.maxOutputTokens` を送信時の
+        上限として渡すが、**Ollamaにだけは渡さない**。これは書き忘れでは
+        なく、設定の説明にも「Ollamaへは送りません」と書いてある。
+
+        **上限を掛けると、長い応答が途中で切れる。** 抽出の応答はJSONで、
+        途中で切れると解析できず**そのチャンクは丸ごと捨てられる**
+        （呼び出し1回ぶんが無駄になる）。手元のOllamaは呼ぶだけなら
+        無料なので、クラウドのように「切ってでも節約する」理由が無い。
+
+        `maxOutputTokens` は**確保するコンテキスト長の計算にだけ**使う
+        （上の `numCtx`）。応答用に空けておく分であって、上限ではない。
+
+        **測定だけは例外**（設計書6.65.14の4）。「書ける量」の測定
+        （`features/measureContext.ts` の `measureOutputLimit`）は、
+        設定値を超えて書けても測定の役には立たないうえ、繰り返しに崩れた
+        モデルを待ち続ける害のほうが大きい。呼び出し側が
+        `capOutputTokens: true` を立てたときだけ、下で `num_predict` を足す。
+      */
+      // これを指定しないとOllamaは既定の短いコンテキストで動き、
+      // 入力が黙って切り捨てられる。長文処理では必須。
+      num_ctx: numCtx,
+    };
+    if (params.capOutputTokens && params.maxOutputTokens !== undefined) {
+      options.num_predict = params.maxOutputTokens;
+    }
+
     const body: Record<string, unknown> = {
       model: params.model,
       stream: false,
@@ -389,28 +421,7 @@ export class OllamaProvider implements AIProvider {
         { role: "system", content: params.systemPrompt },
         { role: "user", content: params.userPrompt },
       ],
-      options: {
-        temperature: params.temperature,
-        /*
-          **`num_predict` は送らない。出力に上限を掛けない**
-          （作者の判断、2026-09-01。設計書6.58.2）。
-
-          ほかの5つのプロバイダは `novelai.maxOutputTokens` を送信時の
-          上限として渡すが、**Ollamaにだけは渡さない**。これは書き忘れでは
-          なく、設定の説明にも「Ollamaへは送りません」と書いてある。
-
-          **上限を掛けると、長い応答が途中で切れる。** 抽出の応答はJSONで、
-          途中で切れると解析できず**そのチャンクは丸ごと捨てられる**
-          （呼び出し1回ぶんが無駄になる）。手元のOllamaは呼ぶだけなら
-          無料なので、クラウドのように「切ってでも節約する」理由が無い。
-
-          `maxOutputTokens` は**確保するコンテキスト長の計算にだけ**使う
-          （上の `numCtx`）。応答用に空けておく分であって、上限ではない。
-        */
-        // これを指定しないとOllamaは既定の短いコンテキストで動き、
-        // 入力が黙って切り捨てられる。長文処理では必須。
-        num_ctx: numCtx,
-      },
+      options,
     };
 
     if (params.jsonSchema) {

@@ -31,6 +31,7 @@ describe("本の設計図の既定値", () => {
       // **既定は「いままでどおりの見た目」**（設計書6.65.6）。
       // 目次は本文と同じ流れの一覧、飾りは無し
       tocPattern: "vertical",
+      tocEntryStyle: "numberAndTitle",
       tocOrnament: "none",
       colophonOrnament: "none",
       coverLayout: defaultCoverLayout(),
@@ -74,6 +75,11 @@ describe("本の設計図の既定値", () => {
     expect(layout.label.visible).toBe(false);
   });
 
+  test("表紙の枠の余白は黒が既定（設計書6.65.15）", () => {
+    expect(defaultCoverLayout().frameBackground).toBe("#000000");
+    expect(defaultBackCoverLayout().frameBackground).toBe("#000000");
+  });
+
   test("空のJSONオブジェクトは、既定値そのものになる", () => {
     expect(parseBookConfig({}, "氷の街")).toEqual(defaultBookConfig("氷の街"));
   });
@@ -94,6 +100,7 @@ describe("本の設計図の既定値", () => {
         collapseBlankLines: false,
         coverImagePath: "素材/表紙.png",
         tocPattern: "chapters",
+        tocEntryStyle: "titleOnly",
         tocOrnament: "rule",
         colophonOrnament: "center",
       },
@@ -109,6 +116,7 @@ describe("本の設計図の既定値", () => {
     expect(config.collapseBlankLines).toBe(false);
     expect(config.coverImagePath).toBe("素材/表紙.png");
     expect(config.tocPattern).toBe("chapters");
+    expect(config.tocEntryStyle).toBe("titleOnly");
     expect(config.tocOrnament).toBe("rule");
     expect(config.colophonOrnament).toBe("center");
   });
@@ -129,6 +137,9 @@ describe("壊れた設計図は受け取らない", () => {
     // 綴じ方向と同じ扱い。読めない値を黙って既定へ倒すと、
     // 作者は「指定が効いていない」ことに気づけない
     expect(() => parseBookConfig({ tocPattern: "たて組み" }, "氷の街")).toThrow();
+    expect(() =>
+      parseBookConfig({ tocEntryStyle: "番号だけ" }, "氷の街")
+    ).toThrow();
     expect(() => parseBookConfig({ tocOrnament: "花" }, "氷の街")).toThrow();
     expect(() =>
       parseBookConfig({ colophonOrnament: "けいせん" }, "氷の街")
@@ -383,6 +394,45 @@ describe("合成指定の検証", () => {
     );
     // 表紙の指定は裏表紙とは別物である
     expect(config.coverLayout).toEqual(defaultCoverLayout());
+  });
+
+  /**
+   * 枠の余白の色（設計書6.65.15）。表紙の枠を横1：縦1.4に固定したので、
+   * 元イラストが比率違いのときに余った部分をこの色で塗る。
+   * **文字要素の色とまったく同じ検証**（白・黒・16進のみ）を通す。
+   */
+  test("枠の余白の色は白・黒・16進だけ", () => {
+    expect(
+      parseBookConfig({ coverLayout: { frameBackground: "#ffffff" } }, "氷の街")
+        .coverLayout.frameBackground
+    ).toBe("#ffffff");
+    expect(
+      parseBookConfig({ coverLayout: { frameBackground: "#000000" } }, "氷の街")
+        .coverLayout.frameBackground
+    ).toBe("#000000");
+    expect(
+      parseBookConfig({ coverLayout: { frameBackground: "#1A2B3C" } }, "氷の街")
+        .coverLayout.frameBackground
+    ).toBe("#1a2b3c");
+    expect(() =>
+      parseBookConfig({ coverLayout: { frameBackground: "しろ" } }, "氷の街")
+    ).toThrow();
+    expect(() =>
+      parseBookConfig(
+        { coverLayout: { frameBackground: "rgb(0,0,0)" } },
+        "氷の街"
+      )
+    ).toThrow();
+    expect(() =>
+      parseBookConfig({ coverLayout: { frameBackground: 0 } }, "氷の街")
+    ).toThrow();
+  });
+
+  test("枠の余白の色を書かなければ既定（黒）のまま", () => {
+    expect(
+      parseBookConfig({ coverLayout: { title: { visible: false } } }, "氷の街")
+        .coverLayout.frameBackground
+    ).toBe("#000000");
   });
 
   test("合成指定の形が違えば弾く", () => {

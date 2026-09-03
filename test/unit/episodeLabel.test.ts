@@ -56,6 +56,40 @@ describe("本に出す見出し（EPUB・設計書6.65）", () => {
       "メモ.txt"
     );
   });
+
+  /**
+   * EPUBの目次で「第1話　第001話 ◯◯」と二重に出た不具合（設計書6.65.15、
+   * 作者の報告2026-09-03）。投稿サイトのDLは題にゼロ埋め・全角の話数を
+   * 持つことがあり、章ラベル（半角・ゼロ埋め無し）とは文字列として
+   * 一致しないため、以前の実装（`raw.startsWith(chapterLabel)`）は
+   * 見逃していた。
+   */
+  it("題の話数がゼロ埋めでも二重にしない", () => {
+    expect(
+      bookHeading(
+        episode({ chapterStart: 1, metaTitle: "第001話　気がついたら幽霊に" }),
+        undefined
+      )
+    ).toBe("第1話　気がついたら幽霊に");
+  });
+
+  it("題の話数が全角でも二重にしない", () => {
+    expect(
+      bookHeading(
+        episode({ chapterStart: 1, metaTitle: "第１話　気がついたら幽霊に" }),
+        undefined
+      )
+    ).toBe("第1話　気がついたら幽霊に");
+  });
+
+  it("違う話数を指す題は剥がさない（第1話から第12話の題を誤って削らない）", () => {
+    expect(
+      bookHeading(
+        episode({ chapterStart: 1, metaTitle: "第12話から続く騒動" }),
+        undefined
+      )
+    ).toBe("第1話　第12話から続く騒動");
+  });
 });
 
 describe("目次を章ごとに区切るときの束ね名（設計書6.65.6）", () => {

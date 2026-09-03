@@ -237,8 +237,11 @@ describe("目次のプレビュー（設計書6.65.11）", () => {
     const toc = page("目次").html;
 
     expect(toc).toContain("登場人物");
-    // 本と同じ並び（本文の前）である
-    expect(toc.indexOf("登場人物")).toBeLessThan(toc.indexOf("第1話"));
+    // 本と同じ並び（本文の前）である。既定は縦書きなので、話数の「1」は
+    // 縦中横のspanで包まれる（設計書6.65.15の2）
+    expect(toc.indexOf("登場人物")).toBeLessThan(
+      toc.indexOf('第<span class="tcy">1</span>話')
+    );
     // 面そのものも出る（行だけあって飛び先が無い、を作らない）
     expect(latest().pages.map((entry) => entry.label)).toContain("登場人物");
   });
@@ -293,8 +296,9 @@ describe("競合のある話（設計書6.65.10）", () => {
     await open();
     const toc = page("目次");
 
-    expect(toc.html).toContain("第1話");
-    expect(toc.html).not.toContain("第2話");
+    // 既定は縦書きなので、話数の「1」は縦中横のspanで包まれる（設計書6.65.15の2）
+    expect(toc.html).toContain('第<span class="tcy">1</span>話');
+    expect(toc.html).not.toContain('第<span class="tcy">2</span>話');
     // 黙って消さない。入らない理由は面の注記で言う
     expect(toc.note).toContain("競合");
   });

@@ -100,6 +100,23 @@ export interface GenerateParams {
    * `ai/ollamaProvider.ts` だけ）。
    */
   disableStreaming?: boolean;
+  /**
+   * `maxOutputTokens` を、実際に上限として送るか（設計書6.65.14の4）。
+   *
+   * **既定（false/未指定）では送らない。** 出力上限を掛けない方針
+   * （作者の判断、2026-09-01。`ai/ollamaProvider.ts` のコメントに理由がある）
+   * はここでは変えない——長い応答が途中で切れると、抽出のJSONが
+   * 解析できずそのチャンクが丸ごと捨てられる。
+   *
+   * **`true` にしてよいのは「書ける量」の測定だけ**（`features/measureContext.ts`
+   * の `measureOutputLimit`）。設定値を超えて書けても測定の役には立たず、
+   * 実測（25分かかった回が10分以上縮んだ）では待ち時間の無駄のほうが大きい。
+   *
+   * **見るのは `ai/ollamaProvider.ts` だけでよい。** ほかのプロバイダは
+   * もともと `maxOutputTokens` を送信時の上限として渡しているので、
+   * この旗が無くても同じ効果になる。
+   */
+  capOutputTokens?: boolean;
   signal?: AbortSignal;
   /**
    * この呼び出しが何であるか。**AIへは送らない。**

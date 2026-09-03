@@ -26,6 +26,16 @@ export interface ModelTuning {
   readonly timeoutSeconds?: number;
   /** 先頭と末尾の合言葉が両方返った、最大の字数 */
   readonly measuredChars?: number;
+  /**
+   * 1回の応答で書けた、実測の出力トークン数（設計書6.65.14の1）。
+   *
+   * **読める長さ（`measuredChars`）と違い、確認なしで自動的に保存される**
+   * ——まとめ送信の上限を絞るためだけに使う参考値で、`contextWindow` や
+   * `timeoutSeconds` のように呼び出しの挙動そのものを変える設定ではない。
+   * 台帳へ繋いだ理由は設計書6.65.14（作者の指摘「設定に入れないのは
+   * なぜでしょうか？　チューニングの意味がないように思う」）。
+   */
+  readonly measuredOutputTokens?: number;
   /** 測った時刻（ISO 8601）。古い測定だと分かるように残す */
   readonly measuredAt?: string;
 }
@@ -99,6 +109,7 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
     const contextWindow = positiveNumber(entry.contextWindow);
     const timeoutSeconds = positiveNumber(entry.timeoutSeconds);
     const measuredChars = positiveNumber(entry.measuredChars);
+    const measuredOutputTokens = positiveNumber(entry.measuredOutputTokens);
     const measuredAt =
       typeof entry.measuredAt === "string" && entry.measuredAt.trim().length > 0
         ? entry.measuredAt
@@ -110,6 +121,7 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
       ...(contextWindow !== undefined ? { contextWindow } : {}),
       ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
       ...(measuredChars !== undefined ? { measuredChars } : {}),
+      ...(measuredOutputTokens !== undefined ? { measuredOutputTokens } : {}),
       ...(measuredAt !== undefined ? { measuredAt } : {}),
     };
     // 何も読めなかった項目は、持っていても引く値が無い

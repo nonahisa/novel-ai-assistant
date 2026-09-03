@@ -50,6 +50,7 @@ import {
 } from "../core/modelTuning";
 import { withCancellableProgress } from "../views/progress";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
+import { readChunkSettings } from "./chunkSettings";
 
 /**
  * AIチューニング（設計書6.27.11・6.49）。
@@ -82,6 +83,15 @@ import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
  * 判定してしまう。少なすぎて誤判定するほうが、多すぎて損するより悪い。
  */
 const PROBE_OUTPUT_TOKENS = 128;
+
+/**
+ * モデルのコンテキスト長が取れないときに、まとめ送信の上限を導く計算へ
+ * 渡す既定値（設計書6.65.14の2）。
+ *
+ * `ai/ollamaProvider.ts` の `UNKNOWN_CONTEXT_WINDOW` と同じ考え方
+ * ——取れないときは、これまでの既定と同じ値に倒す。
+ */
+const FALLBACK_CONTEXT_WINDOW = 8192;
 
 /**
  * 申告値がどれだけ小さくても、ここまでは試す。
@@ -780,7 +790,7 @@ async function runMeasurement(
   );
 
   /*
-    **続けて「書ける量」を測る**（設計書6.61）。
+    **続けて「書ける量」を測る**（設計書6.61・6.65.14）。
 
     手元のAIには出力上限を訊く口が無い（Ollamaの `/api/show` にも
     LM Studio にもその項目は無い）ので、測るしかない。クラウドは申告値を
@@ -790,12 +800,21 @@ async function runMeasurement(
     読める長さが測れたときだけ続ける。中止・失敗のあとに新しい呼び出しを
     足すのは、作者の「やめる」に反する。
 
-    **台帳へは書かない。** チャンクの天井との繋ぎ込みは別の判断なので、
-    いまは報告だけにとどめる。
+    **測り終えたら台帳へ保存し、まとめ送信の上限へ繋ぐ**（6.65.14）。
+    「参考値の報告だけ」（6.61）では繋ぎようが無く、「チューニングの意味が
+    ないように思う」という指摘を受けた（作者の指摘、2026-09-03）。
+    詳しくは `measureOutputLimit` の中にある。
   */
   const outputSummary =
     !cancelled && low > 0 && isLocalProvider(resolved.provider.id)
-      ? await measureOutputLimit(resolved.provider, resolved.model)
+      ? await measureOutputLimit(
+          resolved.provider,
+          resolved.model,
+          // まとめ送信の上限を導くのに要る、このモデルのコンテキスト長。
+          // 取れないときは、これまでの既定（`ollamaProvider.ts` の
+          // `UNKNOWN_CONTEXT_WINDOW`）と同じ値に倒す
+          declaredTokens ?? FALLBACK_CONTEXT_WINDOW
+        )
       : "";
   const summary = inputSummary + outputSummary;
 
@@ -813,17 +832,21 @@ async function runMeasurement(
 }
 
 /**
- * **1回の応答でどれだけ書けるか**を測る（設計書6.61）。
+ * **1回の応答でどれだけ書けるか**を測る（設計書6.61・6.65.14）。
  *
  * 組み立てと数え方と言葉は `core/outputProbe.ts` にあり、ここは入力側と
- * 同じく「送る・数える・作者へ見せる」だけを持つ。
+ * 同じく「送る・数える・作者へ見せる」だけを持つ。**測り終えたら、台帳
+ * （`core/modelTuning.ts`）へ実測の出力トークン数を保存し、まとめ送信の
+ * 上限（`features/chunkSettings.ts`）へ繋ぐところまでを持つ**（6.65.14）。
  *
  * @returns 結果の一文。測れなかったときは空文字（**入力側の結果には
  * 触らない**——ここで何が起きても、読める長さの報告は出す）
  */
 async function measureOutputLimit(
   provider: AIProvider,
-  model: string
+  model: string,
+  /** まとめ送信の上限を導くのに要る、このモデルのコンテキスト長（設計書6.65.14の2） */
+  contextWindow: number
 ): Promise<string> {
   const maxOutputTokens = resolveMaxOutputTokens();
   /*
@@ -888,6 +911,13 @@ async function measureOutputLimit(
             // **測っているのがこの上限である。** ここを削ると、
             // プロバイダの既定値を測ることになる
             maxOutputTokens,
+            /*
+              **設定値を超えて書けても測定の役には立たない**（設計書6.65.14の4）。
+              普段の生成では出力上限を掛けない方針（`ai/ollamaProvider.ts`）を
+              ここでだけ外す——25分かかった回（設定16,384に対し20,337トークン）
+              が10分以上縮む。見るのは `ai/ollamaProvider.ts` だけでよい。
+            */
+            capOutputTokens: true,
             /*
               **`num_ctx` は渡さない。** 入力側は「その回に送る長さ」が
               測る対象そのものなので計算して渡すが、こちらは送る指示が
@@ -982,6 +1012,47 @@ async function measureOutputLimit(
     return "";
   }
 
+  /*
+    **測り終えたら、台帳へ保存する**（設計書6.65.14の1）。
+
+    6.61では「参考値の報告だけ」で、台帳へは書いていなかった。それでは
+    まとめ送信の上限へ繋ぎようが無く、「チューニングの意味がないように
+    思う」という指摘を受けた（作者の指摘、2026-09-03）。
+
+    **中止・失敗で打ち切ったとき（`stopped`）は書かない。** 途中までの
+    `low` は「そこまでは確かめられた」であって「これが上限」ではないので、
+    古い実測（あれば）のほうが信頼できる。`bestTokens` が無いとき
+    （完走したのに応答が出力トークン数を返さなかった、など）も、
+    保存できる数字が無いので書かない。
+  */
+  let mergeCapMessage = "";
+  if (!stopped && bestTokens !== undefined) {
+    try {
+      await saveModelTuning(provider.id, model, {
+        measuredOutputTokens: bestTokens,
+      });
+      // **保存した直後の台帳を読み直す。** まとめ送信の上限がどう変わったかは
+      // `chunkSettings.ts`（唯一の決め手）に訊かないと分からない——ここで
+      // 独自に計算すると、決め方が2か所に散る（設計書6.58.3と同じ理由）
+      const settings = readChunkSettings(contextWindow, undefined, {
+        providerId: provider.id,
+        model,
+      });
+      mergeCapMessage =
+        settings.mergeCharsBeforeOutputCap !== undefined
+          ? `この結果から、まとめ送信の上限を` +
+            `${settings.mergeChars.toLocaleString("ja-JP")}字にしました。`
+          : `上限はそのまま（${settings.mergeChars.toLocaleString("ja-JP")}字）です。`;
+    } catch (error) {
+      // **書けなくても測定そのものは落とさない**（`raiseTimeout` と同じ方針）。
+      // エラーの本文は捨てない（CLAUDE.md 規則5）
+      logStep(
+        "書ける量の測定：台帳へ保存できませんでした" +
+          `（${error instanceof Error ? error.message : String(error)}）。`
+      );
+    }
+  }
+
   // **途中で終わったことは、ログだけでなく通知にも出す。** 探索を
   // 打ち切った値は「そこまでは書けた」であって「ここが上限」ではない
   const summary =
@@ -991,10 +1062,10 @@ async function measureOutputLimit(
       reachedCeiling: low >= ceilingLines,
     }) +
     (stopped ? "（測定が途中で終わったため、そこまでの結果です）" : "") +
-    // **「覚えた」と誤解させない。** この通知の末尾には「設定に反映
-    // しますか」が続くので、書ける量も一緒に覚えると読める。反映される
-    // のは読める長さと待ち時間だけである（台帳との繋ぎ込みは6.61）
-    "書ける量は今回の参考値で、設定には入れません。";
+    // **保存できたときは、その結果（まとめ送信の上限）を言う。**
+    // 保存できなかったとき（中止・失敗・台帳への書き込み失敗）は、
+    // これまでどおり「参考値だけ」であることを伝える
+    (mergeCapMessage || "書ける量は今回の参考値で、設定には入れません。");
   logStep(`書ける量の測定を終了: ${rounds}回 / ${summary}`);
   return summary;
 }

@@ -91,6 +91,17 @@ describe("左の設定の欄", () => {
     expect(html).toContain('id="colophonOrnament"');
   });
 
+  /**
+   * 目次の見出しの形（設計書6.65.15の1）。番号＋題／題だけ／番号だけの
+   * 3択で、既定（`numberAndTitle`）はいままでどおりの見た目になる。
+   */
+  it("目次の見出しの形が選べる（番号＋題／題だけ／番号だけ）", () => {
+    expect(html).toContain('id="tocEntryStyle"');
+    expect(html).toContain('value="numberAndTitle"');
+    expect(html).toContain('value="titleOnly"');
+    expect(html).toContain('value="numberOnly"');
+  });
+
   it("保存と書き出しの入口がある", () => {
     expect(html).toContain('id="save"');
     expect(html).toContain('id="export"');
@@ -111,6 +122,33 @@ describe("左の設定の欄", () => {
         expect(html).toContain(`id="${side}-${element}-vertical"`);
       }
     }
+  });
+
+  /**
+   * 枠の余白の色（設計書6.65.15の3）。表紙・裏表紙の枠は横1：縦1.4に
+   * 固定してあり、元イラストが違う比率のときに余った部分をこの色で塗る。
+   * 文字要素の色（白・黒・任意）とまったく同じ選び方にする。
+   */
+  it("枠の余白の色を選ぶ欄が、表紙・裏表紙それぞれにある", () => {
+    for (const side of ["front", "back"]) {
+      expect(html).toContain(`id="${side}-frameBackground-color"`);
+      expect(html).toContain(`id="${side}-frameBackground-colorPick"`);
+    }
+    // 既定は黒。白・任意も選べる
+    expect(script).toContain("DEFAULT_FRAME_BACKGROUND = '#000000'");
+  });
+
+  /**
+   * 表紙・裏表紙の枠（設計書6.65.15の3、作者の指示で4:3から1:1.4へ変更）。
+   * canvasの寸法は元イラストの比率ではなく、常にこの枠に固定する
+   * ——元イラストは縮めて中央に納め、はみ出させない。
+   */
+  it("合成の枠は横1：縦1.4に固定する（元イラストの比率をそのまま使わない）", () => {
+    expect(script).toContain("FRAME_RATIO = 1.4");
+    expect(script).toContain("canvas.width = FRAME_WIDTH");
+    expect(script).toContain("canvas.height = FRAME_HEIGHT");
+    // 元イラストの寸法をそのまま canvas の大きさにしない
+    expect(script).not.toContain("canvas.width = Math.max(1, Math.round(image.naturalWidth");
   });
 
   it("置き場所は9つのプリセットだけ", () => {

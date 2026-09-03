@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   CHUNK_SIZE_MODE_AUTO,
   CHUNK_SIZE_MODE_MANUAL,
+  OUTPUT_RESPONSE_RATIO,
+  OUTPUT_SAFETY_MARGIN,
+  capMergeCharsByOutputTokens,
   decideChunkSize,
   describeChunkScope,
   parseChunkSizeMode,
@@ -11,6 +14,9 @@ import {
   resolveMergeChars,
   type Chunk,
 } from "../../src/core/chunker";
+import { workspace } from "./support/vscodeStub";
+import { readChunkSettings } from "../../src/features/chunkSettings";
+import { saveModelTuning } from "../../src/core/modelTuning";
 
 /**
  * チャンクの大きさの決め方（設計書6.23）。
@@ -117,6 +123,109 @@ describe("まとめて送るときの字数", () => {
     expect(
       resolveMergeChars({ mode: "manual", configured: 0, chunkChars: 20000 })
     ).toBe(0);
+  });
+});
+
+/**
+ * **書ける量で、まとめ送信の上限をさらに絞る**（設計書6.65.14の2）。
+ *
+ * 作者の指摘（2026-09-03）「設定に入れないのはなぜでしょうか？
+ * チューニングの意味がないように思う」を受け、書ける量の測定（6.61）を
+ * まとめ送信の上限へ繋いだ。`min(従来の上限, 書ける量トークン × 安全率0.8
+ * ÷ 応答率0.3)`。
+ *
+ * **応答率0.3は「入力1字あたり応答0.3トークン」の見込みそのもの**で、
+ * 字とトークンをまたぐ換算（`TOKENS_PER_CHAR`）はこの式に含まない
+ * ——含めると二重に換算してしまう（本体の裁定、2026-09-03）。
+ */
+describe("capMergeCharsByOutputTokens（純関数）", () => {
+  it("台帳の実測が小さいモデルでは、上限を絞る（6,500トークン→約17,333字）", () => {
+    const requested = 20000;
+    const capped = capMergeCharsByOutputTokens(requested, 6500);
+
+    expect(capped).toBeLessThan(requested);
+    expect(capped).toBeGreaterThan(0);
+    // 式をそのまま書き下して確かめる（定数が変わっても追随する）
+    expect(capped).toBe(
+      Math.floor((6500 * OUTPUT_SAFETY_MARGIN) / OUTPUT_RESPONSE_RATIO)
+    );
+    expect(capped).toBe(17333);
+  });
+
+  it("書ける量が十分大きければ、絞らない（従来の上限のまま）", () => {
+    expect(capMergeCharsByOutputTokens(20000, 1_000_000)).toBe(20000);
+  });
+
+  it("台帳に実測が無ければ、従来どおり", () => {
+    expect(capMergeCharsByOutputTokens(20000, undefined)).toBe(20000);
+  });
+
+  /** 0は「まとめない」という設定の意味を持つ特別な値であって、上限の字数ではない */
+  it("『まとめない』（0）は、実測があっても絞らない", () => {
+    expect(capMergeCharsByOutputTokens(0, 6500)).toBe(0);
+  });
+});
+
+describe("readChunkSettings と台帳の繋ぎ込み", () => {
+  afterEach(() => {
+    // 既定へ戻す。他のテストファイルの `workspace` と共有の作り物なので、
+    // 差し替えたままにすると後続のテストに影響する
+    workspace.getConfiguration = () => ({
+      get: <T>(_key: string, defaultValue: T): T => defaultValue,
+    });
+  });
+
+  function installSettings(values: Record<string, unknown>): void {
+    workspace.getConfiguration = () =>
+      ({
+        get: <T>(key: string, defaultValue?: T): T =>
+          (key in values ? values[key] : defaultValue) as T,
+        inspect: () => ({ workspaceValue: undefined }),
+        update: async (key: string, value: unknown) => {
+          values[key] = value;
+        },
+      }) as unknown as ReturnType<typeof workspace.getConfiguration>;
+  }
+
+  it("providerId/modelを渡すと、台帳の実測でmergeCharsが絞られる", async () => {
+    installSettings({});
+    await saveModelTuning("ollama", "gemma4:12b", {
+      measuredOutputTokens: 6500,
+    });
+
+    const withoutTuning = readChunkSettings(262144);
+    const withTuning = readChunkSettings(262144, undefined, {
+      providerId: "ollama",
+      model: "gemma4:12b",
+    });
+
+    expect(withTuning.mergeChars).toBeLessThan(withoutTuning.mergeChars);
+    expect(withTuning.mergeCharsBeforeOutputCap).toBe(withoutTuning.mergeChars);
+    // 絞られていないほうには、絞る前の値を持たせない
+    expect(withoutTuning.mergeCharsBeforeOutputCap).toBeUndefined();
+  });
+
+  /** **渡さない呼び出し側の挙動は変えない。** 対応させるまでの逃げ道 */
+  it("providerId/modelを渡さなければ、これまでどおり絞らない", async () => {
+    installSettings({});
+    await saveModelTuning("ollama", "gemma4:12b", {
+      measuredOutputTokens: 6500,
+    });
+
+    const settings = readChunkSettings(262144);
+
+    expect(settings.mergeCharsBeforeOutputCap).toBeUndefined();
+  });
+
+  it("台帳に実測が無いモデルを指定しても、絞らない", async () => {
+    installSettings({});
+
+    const settings = readChunkSettings(262144, undefined, {
+      providerId: "ollama",
+      model: "測っていないモデル",
+    });
+
+    expect(settings.mergeCharsBeforeOutputCap).toBeUndefined();
   });
 });
 

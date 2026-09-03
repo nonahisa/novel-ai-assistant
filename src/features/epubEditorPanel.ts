@@ -24,7 +24,12 @@ import { readTextFile } from "../core/textFile";
 import { parseEpisodeMetadata } from "../core/metadataParser";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
-import { bookHeading, episodeGroupLabel } from "../core/episodeLabel";
+import {
+  bookHeading,
+  episodeGroupLabel,
+  episodeTitle,
+  formatChapterLabel,
+} from "../core/episodeLabel";
 import { notationModeFor, tokenizeLine } from "../core/manuscriptRender";
 import type { NotationMode } from "../core/manuscriptRender";
 import {
@@ -45,6 +50,7 @@ import {
   buildEpubCss,
   buildTitlePageFragment,
   buildTocFragment,
+  buildTocLabel,
   scopeCssForPreview,
 } from "../core/epubPackage";
 import {
@@ -140,7 +146,14 @@ interface PreviewCharacter {
 interface PreviewEpisode {
   /** book.json の `episodePath` と同じ形（作品フォルダからの相対パス） */
   path: string;
+  /** 番号＋題（挿絵の「話を選ぶ」欄など、目次以外でも使う既定の見え方） */
   label: string;
+  /**
+   * 目次の見出しの形（設計書6.65.15）。`label` から番号と題を分けて持つ
+   * ——目次だけ `tocEntryStyle` に従って組み替えるため。
+   */
+  numberLabel: string;
+  title: string | null;
   group: string;
   /** 絶対パス。**画面へは渡さない**（作品の外を教える必要が無い） */
   filePath: string;
@@ -960,13 +973,20 @@ function buildPages(
         listed.map((entry) => ({
           // プレビューでは飛ばない。見た目は行き先で変わらない
           href: "#",
-          label: entry.label,
+          // **書き出しと同じ組み替えを通す**（`tocEntryStyle`。設計書
+          // 6.65.15）。ここだけ `entry.label`（番号＋題の固定形）を出すと、
+          // 見た目どおりに編集できるという要件が崩れる
+          label: buildTocLabel(
+            { heading: entry.label, fileName: entry.path, numberLabel: entry.numberLabel, title: entry.title },
+            config.tocEntryStyle
+          ),
           group: entry.group,
         })),
         {
           pattern: config.tocPattern,
           ornament: config.tocOrnament,
           colophonHref: "#",
+          vertical,
           // **登場人物一覧の行は、書き出しと同じ条件で入れる**（6.65.11）。
           // 入れ忘れていたので、本には有る行がプレビューだけ無かった
           charactersHref: hasCharacters ? "#" : null,
@@ -1015,6 +1035,7 @@ function buildPages(
         pageBreaks: placed.pageBreaks,
         // 画面は1枚の面なので実際には割れない。印だけ置く（6.65.10）
         markPageBreaks: true,
+        vertical,
       }),
       note:
         "1話目の冒頭だけを出しています（本には全話が入ります）。" +
@@ -1027,7 +1048,7 @@ function buildPages(
 
   pages.push({
     label: "奥付",
-    html: buildColophonFragment(config),
+    html: buildColophonFragment(config, vertical),
     note: null,
     vertical,
   });
@@ -1182,17 +1203,22 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
     };
   }
 
-  const episodes: PreviewEpisode[] = scan.episodes.map((episode) => ({
-    // book.json の `episodePath` と同じ作り方を通す（書き出しと共用）
-    path: episodePathFor(work.folderPath, episode.filePath),
-    label: bookHeading(episode, format),
-    group: episodeGroupLabel(episode),
-    filePath: episode.filePath,
-    notation: notationModeFor(episode.fileName),
-    // **走査が既に見ている**ので、ここで本文を読み直さなくてよい
-    // （競合のある話は本から外れる。設計書6.65.10）
-    conflicted: episode.hasConflictMarkers,
-  }));
+  const episodes: PreviewEpisode[] = scan.episodes.map((episode) => {
+    const numberLabel = formatChapterLabel(episode, format);
+    return {
+      // book.json の `episodePath` と同じ作り方を通す（書き出しと共用）
+      path: episodePathFor(work.folderPath, episode.filePath),
+      label: bookHeading(episode, format),
+      numberLabel,
+      title: episodeTitle(episode, numberLabel),
+      group: episodeGroupLabel(episode),
+      filePath: episode.filePath,
+      notation: notationModeFor(episode.fileName),
+      // **走査が既に見ている**ので、ここで本文を読み直さなくてよい
+      // （競合のある話は本から外れる。設計書6.65.10）
+      conflicted: episode.hasConflictMarkers,
+    };
+  });
 
   const first = await readFirstChapter(scan.episodes, format, work.folderPath);
   return {

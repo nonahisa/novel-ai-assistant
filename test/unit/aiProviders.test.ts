@@ -171,6 +171,62 @@ describe("AIプロバイダ境界", () => {
     expect(result.truncated).toBe(false);
   });
 
+  /**
+   * **`num_predict` は普段は送らない**（設計書6.58.2）。測定
+   * （`features/measureContext.ts`）だけが例外で `capOutputTokens` を
+   * 立てる（設計書6.65.14の4）。この2つを対で確かめないと、旗が
+   * 実際には何も送っていないのに通った気になりかねない。
+   */
+  test("capOutputTokensが無ければ、num_predictを送らない（既定の生成）", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.options.num_predict).toBeUndefined();
+      return ollamaResponse("ok");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new OllamaProvider().generate({
+      ...ollamaParams,
+      maxOutputTokens: 4096,
+    });
+
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  test("capOutputTokensを立てたときだけ、maxOutputTokensをnum_predictとして送る", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.options.num_predict).toBe(4096);
+      return ollamaResponse("ok");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new OllamaProvider().generate({
+      ...ollamaParams,
+      maxOutputTokens: 4096,
+      capOutputTokens: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  test("capOutputTokensを立てても、maxOutputTokensが無ければnum_predictを送らない", async () => {
+    // 送る値が無いのに 0 やNaNを送ると、モデルによっては0行で切られる
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.options.num_predict).toBeUndefined();
+      return ollamaResponse("ok");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new OllamaProvider().generate({
+      ...ollamaParams,
+      capOutputTokens: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
   test("numCtxを渡さない呼び出しでも、プロンプトが収まる大きさを確保する", async () => {
     // generate の呼び出し15か所のうち11か所が numCtx を渡しておらず、
     // 既定の 8192 のまま送っていた（0.22.14で判明）。チャンクはモデル可変で

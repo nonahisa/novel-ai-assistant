@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  applyTateChuYoko,
   buildChapterFragment,
   buildChapterPlacement,
   buildChapterXhtml,
@@ -7,6 +8,7 @@ import {
   describeDroppedPlacements,
   describeMissingIllustrationImage,
   describePlacementOverflow,
+  escapeDisplayText,
   escapeXml,
   missingEpisodeNotices,
   placementsIn,
@@ -22,7 +24,11 @@ import {
  */
 function fragment(
   body: string,
-  options?: { collapseBlankLines?: boolean; heading?: string }
+  options?: {
+    collapseBlankLines?: boolean;
+    heading?: string;
+    vertical?: boolean;
+  }
 ): string {
   return buildChapterFragment(
     {
@@ -30,7 +36,10 @@ function fragment(
       body,
       notation: "curly",
     },
-    { collapseBlankLines: options?.collapseBlankLines ?? true }
+    {
+      collapseBlankLines: options?.collapseBlankLines ?? true,
+      vertical: options?.vertical,
+    }
   );
 }
 
@@ -80,6 +89,95 @@ describe("XMLとして閉じている", () => {
     const html = fragment("あ\n\n\nい", { collapseBlankLines: false });
     expect(html).toContain("<br />");
     expect(html).not.toMatch(/<br>/);
+  });
+});
+
+/**
+ * 半角の縦中横（設計書6.65.15の2）。
+ *
+ * 縦書きの本文・見出しで、半角の数字・「!」「?」の1〜3文字の連続を
+ * `<span class="tcy">` で包む。4文字以上は従来どおり横倒しのまま。
+ */
+describe("半角の縦中横", () => {
+  test("1〜3文字の数字・!・?は tcy で包む", () => {
+    expect(applyTateChuYoko("12")).toBe('<span class="tcy">12</span>');
+    expect(applyTateChuYoko("!?")).toBe('<span class="tcy">!?</span>');
+    expect(applyTateChuYoko("100")).toBe('<span class="tcy">100</span>');
+  });
+
+  test("4文字以上は包まない（横倒しのまま）", () => {
+    expect(applyTateChuYoko("2026")).toBe("2026");
+  });
+
+  test("&amp; のような逃がし済みの文字は壊さない", () => {
+    expect(applyTateChuYoko("A &amp; B")).toBe("A &amp; B");
+  });
+
+  /**
+   * `&#39;` のような数値実体参照は、逃がされると `&amp;#39;` になる。
+   * この中の「39」は実体参照の一部なので、桁数（2桁）だけでは
+   * 3文字以下の判定に引っかかって包まれてしまう。**直前が `#` の数字は
+   * 対象から外す**ことで、実体参照を壊さない（設計書6.65.15）。
+   */
+  test("数値実体参照の中の数字は包まない（&#39; など）", () => {
+    const escaped = escapeXml("それは&#39;引用&#39;です");
+    expect(escaped).toContain("&amp;#39;");
+    expect(applyTateChuYoko(escaped)).not.toContain('<span class="tcy">39');
+  });
+
+  test("横書きでは包まない", () => {
+    expect(escapeDisplayText("12", false)).toBe("12");
+  });
+
+  test("縦書きでは escapeDisplayText が escape と tcy を両方通す", () => {
+    expect(escapeDisplayText("A & 12", true)).toBe(
+      'A &amp; <span class="tcy">12</span>'
+    );
+  });
+
+  test("本文の中の数字が縦書きの話でだけ tcy になる", () => {
+    const vertical = fragment("西暦12年、戦が始まった", { vertical: true });
+    const horizontal = fragment("西暦12年、戦が始まった", {
+      vertical: false,
+    });
+    expect(vertical).toContain('<span class="tcy">12</span>');
+    expect(horizontal).not.toContain('<span class="tcy">');
+    expect(horizontal).toContain("西暦12年");
+  });
+
+  test("見出しの数字も、縦書きのときだけ tcy になる", () => {
+    const vertical = fragment("本文", {
+      heading: "第1話　出会い",
+      vertical: true,
+    });
+    const horizontal = fragment("本文", {
+      heading: "第1話　出会い",
+      vertical: false,
+    });
+    expect(vertical).toContain(
+      '<h2 class="chapter-heading">第<span class="tcy">1</span>話　出会い</h2>'
+    );
+    expect(horizontal).toContain(
+      '<h2 class="chapter-heading">第1話　出会い</h2>'
+    );
+  });
+
+  test("解説文の数字も、縦書きのときだけ tcy になる", () => {
+    const html = buildChapterPlacement(
+      { heading: "第一話", body: "あ", notation: "curly" },
+      {
+        collapseBlankLines: true,
+        vertical: true,
+        illustrations: [
+          { afterParagraph: 1, href: "illust-1.png", caption: "その1枚" },
+        ],
+      }
+    ).html;
+    expect(html).toContain(
+      '<figcaption>その<span class="tcy">1</span>枚</figcaption>'
+    );
+    // alt は属性値なので span を差し込まない
+    expect(html).toContain('alt="その1枚"');
   });
 });
 

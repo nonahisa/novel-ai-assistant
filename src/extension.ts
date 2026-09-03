@@ -3807,6 +3807,50 @@ export async function activate(
     })
   );
 
+  /*
+    話の挿入と削除（設計書6.67）。**木のノードが引数に要る**ので、
+    コマンドパレットには出さない（`package.json` の commandPalette）。
+
+    実装は `node:child_process`（`core/git.ts`）を静的importしているため、
+    ここでは動的import（`await import(...)`）を通す
+    （`novelai.gitSync` などと同じ約束、設計書5.8.5）。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.insertEpisodeBefore", async (node?: EpisodeNode) => {
+      if (!node) return;
+      const episodes = await treeProvider.getEpisodes(node.work);
+      const { insertEpisodeBefore } = await import("./features/insertEpisode.js");
+      const result = await insertEpisodeBefore(node.work, node.episode, episodes);
+      if (result.changed) treeProvider.refresh(node.work.id);
+      if (result.newFilePath) {
+        // 新規作成した回は「保存でファイル数が変わった回」に当たるため、
+        // 執筆量の基準を置き直す（`novelai.addEpisode` と同じ理由、設計書6.3.2）
+        await progress.rebaseline(node.work);
+        await vscode.commands.executeCommand(
+          "vscode.openWith",
+          path.toUri(result.newFilePath),
+          MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+        );
+      }
+    }),
+    registerCommand(
+      "novelai.removeEpisodeAndRenumber",
+      async (node?: EpisodeNode) => {
+        if (!node) return;
+        const episodes = await treeProvider.getEpisodes(node.work);
+        const { removeEpisodeAndRenumber } = await import(
+          "./features/removeEpisode.js"
+        );
+        const result = await removeEpisodeAndRenumber(
+          node.work,
+          node.episode,
+          episodes
+        );
+        if (result.changed) treeProvider.refresh(node.work.id);
+      }
+    )
+  );
+
   context.subscriptions.push(
     registerCommand("novelai.switchMode", async () => {
       await switchMode();
