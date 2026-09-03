@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "「設定が前の話と食い違っていないか不安」「誤字脱字の見直しがつらい」「AIに原稿を触られたくない」——小説を書く人の困りごとを引き受けるVSCode拡張機能です。本文から設定資料を自動で作り、矛盾や誤字脱字を調べ、執筆量を記録します。AIは提案するだけで、原稿は書き換えません。無料の手元AI（Ollama / LM Studio）だけでも使え、その場合、原稿はパソコンの外へ出ません。",
-  "version": "0.30.3",
+  "version": "0.30.4",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -843,6 +843,18 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.proposeChapters",
+        "title": "章立てをAIに提案させる",
+        "icon": "$(list-tree)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.suggestChapterName",
+        "title": "この章の名前の案を出す",
+        "icon": "$(sparkle)",
+        "category": "小説執筆"
+      },
+      {
         "command": "novelai.insertEpisodeBefore",
         "title": "この話の前に挿入",
         "icon": "$(add)",
@@ -979,6 +991,11 @@
           "group": "1_stats@5"
         },
         {
+          "command": "novelai.proposeChapters",
+          "when": "view == novelai.works && viewItem == work",
+          "group": "1_stats@6"
+        },
+        {
           "command": "novelai.gitSync",
           "when": "view == novelai.works && viewItem == work",
           "group": "2_open@1"
@@ -1047,6 +1064,11 @@
           "command": "novelai.renameChapter",
           "when": "view == novelai.works && viewItem == chapter",
           "group": "3_chapter@1"
+        },
+        {
+          "command": "novelai.suggestChapterName",
+          "when": "view == novelai.works && viewItem == chapter",
+          "group": "3_chapter@2"
         },
         {
           "command": "novelai.removeChapter",
@@ -1133,6 +1155,10 @@
         },
         {
           "command": "novelai.removeChapter",
+          "when": "false"
+        },
+        {
+          "command": "novelai.suggestChapterName",
           "when": "false"
         },
         {

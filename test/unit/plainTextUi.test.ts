@@ -58,6 +58,7 @@ const MARKDOWN_ALLOWED = new Set([
   "src/prompts/proofread.ts",
   "src/prompts/workChat.ts",
   "src/prompts/settingsEnrich.ts",
+  "src/prompts/chapterPropose.ts",
   // 記録ファイル（人が読む前提のログ）
   "src/core/logger.ts",
   // 診断の結果をMarkdownの文書として開く（作者がそのまま貼れるように）

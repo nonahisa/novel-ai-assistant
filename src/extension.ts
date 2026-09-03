@@ -266,6 +266,10 @@ import {
   renameChapter,
   startChapterAt,
 } from "./features/manageChapters";
+import {
+  proposeChapters,
+  suggestChapterName,
+} from "./features/proposeChapters";
 import { countUnextractedEpisodes } from "./features/extractionFreshness";
 import { chooseScope, recordCheck } from "./features/typoCheckScope";
 import { switchMode } from "./features/switchMode";
@@ -3809,6 +3813,34 @@ export async function activate(
         treeProvider.refresh(node.work.id);
       }
     })
+  );
+
+  /*
+    章立てのAIの提案（P-31、設計書6.66.4）。
+
+    **提案は台帳へ直接入らない。** 章分けの提案は提案パネルに並び、
+    作者が承認した1件ずつが `ChapterStore` へ入る——入った時点で
+    作品一覧を作り直す（折りたたみは台帳から作られるため）。
+
+    章名の提案だけは、章ノードが引数に要るのでコマンドパレットに出さない。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.proposeChapters", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await proposeChapters(work, aiRegistry, proposalPanel, {
+        onChaptersChanged: () => treeProvider.refresh(work.id),
+      });
+    }),
+    registerCommand(
+      "novelai.suggestChapterName",
+      async (node?: ChapterNode) => {
+        if (!node) return;
+        if (await suggestChapterName(node.work, node.chapter, aiRegistry)) {
+          treeProvider.refresh(node.work.id);
+        }
+      }
+    )
   );
 
   /*
