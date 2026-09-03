@@ -166,6 +166,17 @@ describe("感嘆符・疑問符後の空白", () => {
     const findings = checkWritingStyle(chunk);
     expect(findings.filter((f) => f.reason.includes("感嘆符"))).toHaveLength(0);
   });
+
+  test("あらゆる閉じ括弧・句読点・リーダーの直前も検出しない", () => {
+    // 「！》」に「1マス空けて」と出た（作者の指摘、2026-09-04）。
+    // 」』）以外の閉じが一覧から漏れていた
+    const chunk = makeChunk(
+      "《破城槌！》『応！』（噓！）【何！】〔まさか！〕｛おい！｝［да！］" +
+        "“なに！”とある。おい！、待て！。ほう！…続く！―終わり"
+    );
+    const findings = checkWritingStyle(chunk);
+    expect(findings.filter((f) => f.reason.includes("感嘆符"))).toHaveLength(0);
+  });
 });
 
 describe("行番号とテスト対象外のルール", () => {

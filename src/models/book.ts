@@ -204,6 +204,11 @@ export type BookPageBreak = BookBodyPosition;
  * ある。作者がここで選んで初めて面が増える。
  */
 export interface BookCharacterPage {
+  /**
+   * **いまは読み込み互換のためだけの項目**（設計書6.65.15の段C）。
+   * 面を出すかは `blocks` に置いてあるかどうかが決める。`tocEnabled` と
+   * 同じ扱いで、画面からは書き換えない。
+   */
   enabled: boolean;
   /** 人物イラスト（台帳の `icon`）を添えるか。読めない人物は名前だけ */
   showIcons: boolean;
@@ -314,28 +319,14 @@ export function isBookImageBlock(block: BookBlock): block is BookImageBlock {
  *
  * 扉絵（`sectionArt`）だけは何枚でも挿せる——章の変わり目ごとに絵を置く
  * 使い方があり、そこを縛ると本が作れなくなる。口絵も同じ理由で複数を許す。
- */
-const SINGLE_BLOCK_TYPES: readonly BookBlockType[] = [
-  "cover",
-  "halfTitle",
-  "toc",
-  "characters",
-  "body",
-  "afterword",
-  "colophon",
-  "backCover",
-];
-
-/**
- * 並べ替えの基準になる順（既定の並びの順そのもの）。
  *
- * **目次・人物紹介を並びへ戻すときの置き場所を決めるためだけ**に使う。
- * 扉絵は「任意の位置に挿せる」面なので、この表に順位を持たない。
+ * **組み替え画面のパレットも、この表を見て押せなくする**（設計書6.65.15の
+ * 段C）。「置けない種類を押せてしまい、保存のときに初めて断られる」を
+ * 作らないため、判断の元は1か所に置く。
  */
-const BLOCK_ORDER: readonly BookBlockType[] = [
+export const BOOK_SINGLE_BLOCK_TYPES: readonly BookBlockType[] = [
   "cover",
   "halfTitle",
-  "frontIllustration",
   "toc",
   "characters",
   "body",
@@ -356,8 +347,11 @@ export interface BookConfig {
   /**
    * 読み物としての目次ページを入れるか。
    *
-   * **`nav.xhtml` そのものは EPUB3 で必須**なので、false でも作る。
-   * ここが決めるのは「読む順路（spine）へ並べるか」だけである。
+   * **いまは読み込み互換のためだけの項目である**（設計書6.65.15の段C）。
+   * 目次の面を入れるかは `blocks` に置いてあるかどうかが決めるので、
+   * ここを見るのは「blocks を持たない古い book.json から既定の並びを
+   * 組む」ときだけになった。**画面からは書き換えない**（作者が手で書いた
+   * 値を、並びの編集のついでに塗り替えないため）。
    */
   tocEnabled: boolean;
   /** 目次ページの並べ方。`tocEnabled` が false なら見た目に影響しない */
@@ -411,8 +405,9 @@ export interface BookConfig {
    * （`parseBookConfig`）。**ファイルは書き換えない**——保存して初めて
    * この項目が book.json へ入る。
    *
-   * 使う側は必ず `resolveBookBlocks` を通すこと。書いてある並びと、
-   * 目次・人物紹介の設定との食い違いをそこで揃える。
+   * 使う側は必ず `resolveBookBlocks` を通すこと（書いていない本のために
+   * 既定の並びを組むのはそこ1か所である）。**段Cからはここが正**で、
+   * 目次・人物紹介の設定に追従させない。
    */
   blocks?: BookBlock[];
 }
@@ -536,48 +531,103 @@ export function defaultBookBlocks(settings: {
 /**
  * 実際に組む面の並び（設計書6.65.15）。**書き出しも画面もここを通す。**
  *
- * 並びを編む画面はまだ無い（段C）ので、**目次・人物紹介の有無を決めるのは
- * いまも左の欄のチェック**である。blocks が保存されたあとにチェックを
- * 切り替えても効くよう、ここで足し引きして揃える——揃えないと、
- * 一度保存した本は目次のチェックが二度と効かなくなる。
+ * ## 並びが正である（段C、本体の裁定）
+ *
+ * 段Bまでは「目次・人物紹介のチェック欄が正」で、ここで欄の値へ blocks を
+ * 追従させていた（並びを編む画面がまだ無かったため）。段Cで組み替え画面が
+ * できたので、**書いてある並びをそのまま返す**。追従を残すと、画面で外した
+ * 目次が古いチェックの値で戻ってきて、**作者が並べたとおりの本にならない**
+ * ——二重管理をここで断つ。
+ *
+ * `tocEnabled`・`characterPage.enabled` は**読み込み互換のためだけ**に残る
+ * （blocks を持たない古い book.json から既定の並びを組む材料。`BookConfig`
+ * の項目の説明も参照）。
  */
 export function resolveBookBlocks(config: BookConfig): BookBlock[] {
-  if (!config.blocks) return defaultBookBlocks(config);
+  return config.blocks ? [...config.blocks] : defaultBookBlocks(config);
+}
 
-  let blocks = [...config.blocks];
-  blocks = syncOptionalBlock(blocks, "toc", config.tocEnabled);
-  blocks = syncOptionalBlock(
-    blocks,
-    "characters",
-    config.characterPage.enabled
-  );
-  return blocks;
+/** 1冊に1つまでの面か（パレットで押せなくする判断に使う） */
+export function isSingleBookBlockType(type: BookBlockType): boolean {
+  return BOOK_SINGLE_BLOCK_TYPES.includes(type);
 }
 
 /**
- * 1つの面を、設定に合わせて並びへ足す／から外す。
+ * その種類を、いまの並びへもう1つ置けるか（設計書6.65.15の段C）。
  *
- * 足すときの置き場所は `BLOCK_ORDER`（既定の並びの順）から決める——
- * **順位を持たない扉絵は読み飛ばす**（どこに置かれていても、目次の位置の
- * 手がかりにならないため）。順位の上の面が1つも無ければ末尾へ置く。
+ * 口絵・扉絵は何枚でも置ける。1冊に1つの面は、既にあれば置けない
+ * （本文もここに入るので、複製そのものができない）。
  */
-function syncOptionalBlock(
+export function canAddBookBlock(
   blocks: readonly BookBlock[],
-  type: BookBlockType,
-  wanted: boolean
-): BookBlock[] {
-  const found = blocks.some((block) => block.type === type);
-  if (found === wanted) return [...blocks];
-  if (!wanted) return blocks.filter((block) => block.type !== type);
+  type: BookBlockType
+): boolean {
+  if (!isSingleBookBlockType(type)) return true;
+  return !blocks.some((block) => block.type === type);
+}
 
-  const rank = BLOCK_ORDER.indexOf(type);
-  const at = blocks.findIndex((block) => {
-    const other = BLOCK_ORDER.indexOf(block.type);
-    return other >= 0 && other > rank;
-  });
+/**
+ * その位置の面を消せるか。**本文だけは消せない**（1冊にちょうど1つ）。
+ *
+ * 消せない理由を画面で組み立てずに済むよう、判断はここに置く
+ * （`assertBlockCounts` が断る形と、画面の押せなさを一致させる）。
+ */
+export function canRemoveBookBlock(
+  blocks: readonly BookBlock[],
+  index: number
+): boolean {
+  const block = blocks[index];
+  return block !== undefined && block.type !== "body";
+}
+
+/**
+ * 選んだ面の**後ろへ**1つ挿す（設計書6.65.15の段C）。
+ *
+ * **置けないときは null を返す。** 呼び出し側が理由を作者へ伝えられるよう、
+ * 黙って何もしない（＝押しても無反応）にはしない。選択が無い（負の値）
+ * ときは末尾へ置く。
+ */
+export function insertBookBlockAfter(
+  blocks: readonly BookBlock[],
+  index: number,
+  block: BookBlock
+): BookBlock[] | null {
+  if (!canAddBookBlock(blocks, block.type)) return null;
   const out = [...blocks];
-  out.splice(at < 0 ? out.length : at, 0, { type } as BookPlainBlock);
+  const at = index < 0 || index >= out.length ? out.length : index + 1;
+  out.splice(at, 0, block);
   return out;
+}
+
+/**
+ * 面を1つ上（`-1`）／下（`+1`）へ動かす。
+ *
+ * **端では null。** ドラッグを作らない代わりの操作なので（webviewでの
+ * 検証が重く、誤操作の巻き戻しも要る）、押せない場所は画面側でも
+ * 押せなくする——その判断をここと共有する。
+ */
+export function moveBookBlock(
+  blocks: readonly BookBlock[],
+  index: number,
+  direction: -1 | 1
+): BookBlock[] | null {
+  const to = index + direction;
+  if (index < 0 || index >= blocks.length) return null;
+  if (to < 0 || to >= blocks.length) return null;
+
+  const out = [...blocks];
+  const [moved] = out.splice(index, 1);
+  out.splice(to, 0, moved);
+  return out;
+}
+
+/** 面を1つ消す。**本文は消せない**（`canRemoveBookBlock`）ので null */
+export function removeBookBlockAt(
+  blocks: readonly BookBlock[],
+  index: number
+): BookBlock[] | null {
+  if (!canRemoveBookBlock(blocks, index)) return null;
+  return blocks.filter((_, position) => position !== index);
 }
 
 export function defaultBookConfig(title: string): BookConfig {
@@ -774,7 +824,7 @@ function assertBlockCounts(blocks: readonly BookBlock[]): void {
       )}つです）。`
     );
   }
-  for (const type of SINGLE_BLOCK_TYPES) {
+  for (const type of BOOK_SINGLE_BLOCK_TYPES) {
     if (count(type) > 1) {
       throw new Error(
         `blocks の${BOOK_BLOCK_LABELS[type]}（${type}）が${count(

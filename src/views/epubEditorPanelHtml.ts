@@ -1,10 +1,21 @@
 /**
- * EPUBエディターの画面（設計書6.65.6・6.65.8）。
+ * EPUBエディターの画面（設計書6.65.6・6.65.8・6.65.15）。
  *
- * 左に設定の欄、右にプレビュー。**本の面の中身は組み立てない。**
- * 面のXHTML断片と本のCSSは拡張機能側（`core/epubPackage.ts`）が作り、
- * ここは受け取って並べるだけである。画面で組み直した時点で、
- * 「見た目どおりに編集できる」という要件が壊れる。
+ * **右に狭い縦のパレット、左が作業スペース**（段C。作者の指定）。
+ * 作業スペースは上から「本の設定」「本の並び」「選んだ面の設定とプレビュー」の
+ * 3段で、面の設定は**選んだ面のものだけ**が出る。設定の欄が縦に長く並ぶだけの
+ * 画面では、本の構造（面の並び）が見えなかった。
+ *
+ * **本の面の中身は組み立てない。** 面のXHTML断片と本のCSSは拡張機能側
+ * （`core/epubPackage.ts`）が作り、ここは受け取って並べるだけである。
+ * 画面で組み直した時点で、「見た目どおりに編集できる」という要件が壊れる。
+ *
+ * ## 並べ替えにドラッグを使わない
+ *
+ * クリックで挿し、「上へ」「下へ」「削除」で動かす。ドラッグは
+ * **webviewでの検証が重い**（DOMイベントを組み合わせた操作は単体テストで
+ * 再現できず、実機でしか確かめられない）うえ、掴み損ねたときの
+ * **誤操作の巻き戻し**まで作ることになる。確実に動く操作を選んだ。
  *
  * ## 合成だけは、ここが描く
  *
@@ -17,6 +28,28 @@
  * 値はすべて postMessage で渡し、HTMLへ文字列として埋め込まない
  * （題名の引用符で画面が壊れるのを防ぐ。ほかのパネルと同じ）。
  */
+
+/**
+ * 右のパレットに並べるもの（設計書6.65.15。作者の指定した順）。
+ *
+ * **`chapter` だけは面ではない。** 章区切りは章立ての台帳（6.66）が正なので、
+ * 押すと台帳を書き換える——`blocks` には入らない。パレットに並べるのは、
+ * 作者から見れば「本へ挿すもの」が同じ場所に揃っているほうが分かりやすい
+ * ためである（押せなくする理由と同じで、判断は拡張機能側が持つ）。
+ */
+const PALETTE: ReadonlyArray<{ key: string; icon: string; label: string }> = [
+  { key: "cover", icon: "📕", label: "表紙" },
+  { key: "halfTitle", icon: "📄", label: "中表紙" },
+  { key: "frontIllustration", icon: "🖼", label: "口絵" },
+  { key: "sectionArt", icon: "🎴", label: "扉絵" },
+  { key: "toc", icon: "🗂", label: "目次" },
+  { key: "characters", icon: "👤", label: "人物紹介" },
+  { key: "chapter", icon: "🔖", label: "章区切り" },
+  { key: "body", icon: "📖", label: "本文" },
+  { key: "afterword", icon: "✍", label: "あとがき" },
+  { key: "colophon", icon: "🏷", label: "奥付" },
+  { key: "backCover", icon: "📗", label: "裏表紙" },
+];
 
 /** 合成できる要素と、その値をどの欄から取るか（設計書6.65.8） */
 const COVER_ELEMENTS: ReadonlyArray<{ key: string; label: string }> = [
@@ -51,6 +84,20 @@ function options(
   return list
     .map((item) => `<option value="${item.value}">${item.label}</option>`)
     .join("");
+}
+
+/** パレットの1つ。押せる・押せないと理由は拡張機能側から届く */
+function paletteButton(entry: {
+  key: string;
+  icon: string;
+  label: string;
+}): string {
+  return [
+    `      <button class="palette-button" id="palette-${entry.key}" data-block="${entry.key}">`,
+    `        <span class="palette-icon">${entry.icon}</span>`,
+    `        <span class="palette-label">${entry.label}</span>`,
+    "      </button>",
+  ].join("\n");
 }
 
 /** 1要素ぶんの欄。IDは `front-title-anchor` の形で組み立てる */
@@ -89,7 +136,7 @@ function frameBackgroundRow(side: string): string {
   const id = `${side}-frameBackground`;
   return [
     '    <div class="cover-row">',
-    '      <span>枠の余白の色（元イラストが枠と違う比率のとき）</span>',
+    "      <span>枠の余白の色（元イラストが枠と違う比率のとき）</span>",
     '      <div class="cover-controls">',
     `        <select id="${id}-color" title="色">` +
       '<option value="#000000">黒</option>' +
@@ -103,32 +150,28 @@ function frameBackgroundRow(side: string): string {
 }
 
 /**
- * 表紙・裏表紙1面ぶんの欄。
+ * 表紙・裏表紙1面ぶんの欄（設計書6.65.8）。
  *
- * **元イラストが無いときは、この塊ごと畳んで理由を出す**（`hidden`）。
+ * **元イラストが無いときは、合成の塊ごと畳んで理由を出す**（`hidden`）。
  * 消してしまうと「なぜ合成の欄が無いのか」が分からない
  * （`processAvailability.ts` と同じ流儀）。
  */
 function coverSection(
   side: string,
-  heading: string,
   pathFieldId: string,
-  pathLabel: string,
   bakeButtonId: string,
   bakeLabel: string,
-  unbakeButtonId: string,
-  unbakeLabel: string
+  unbakeButtonId: string
 ): string {
   return [
-    `    <h2>${heading}</h2>`,
-    `    <label><span>${pathLabel}</span><input id="${pathFieldId}" type="text"></label>`,
+    `    <label><span>元イラストの場所（作品フォルダからの相対パス）</span><input id="${pathFieldId}" type="text"></label>`,
     `    <p class="note" id="${side}-bake-note"></p>`,
     // **焼いた画像の話は、合成の欄の外に置く。** 元イラストの指定を
     // 消しても焼いた画像は残り（本にも入り）、そのとき合成の欄は畳まれる。
     // 中に入れると、消す手立てごと見えなくなる（設計書6.65.8）
     `    <p class="note" id="${side}-baked-note"></p>`,
     `    <div class="cover-actions" id="${side}-baked-actions" hidden>`,
-    `      <button id="${unbakeButtonId}">${unbakeLabel}</button>`,
+    `      <button id="${unbakeButtonId}">焼いた画像を消す</button>`,
     "    </div>",
     `    <div id="${side}-compose">`,
     ...COVER_ELEMENTS.map((element) =>
@@ -138,6 +181,18 @@ function coverSection(
     `      <div class="cover-actions"><button id="${bakeButtonId}">${bakeLabel}</button></div>`,
     "    </div>",
   ].join("\n");
+}
+
+/**
+ * 面ごとの設定の欄1つ。**選んだ面のものだけを出す**（`hidden` の付け外し）。
+ *
+ * `name` は種類そのものではなく「欄の名前」である——口絵と扉絵は置ける場所
+ * だけが違い、設定は同じなので、1つの欄（`image`）を使い回す。
+ */
+function pane(name: string, body: readonly string[]): string {
+  return [`  <div class="pane" id="pane-${name}" hidden>`, ...body, "  </div>"].join(
+    "\n"
+  );
 }
 
 export function buildEpubEditorPanelHtml(
@@ -181,8 +236,34 @@ h2 {
   font-weight: normal;
 }
 main { display: flex; align-items: flex-start; gap: 16px; padding: 16px; }
-#form { width: 360px; flex: none; }
-#preview { flex: 1; min-width: 0; }
+/* 左が作業スペース、右が狭い縦のパレット（設計書6.65.15の段C） */
+#workspace { flex: 1; min-width: 0; }
+#palette {
+  width: 104px;
+  flex: none;
+  position: sticky;
+  top: 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+}
+.palette-title { font-size: 11px; color: var(--vscode-descriptionForeground); }
+/* アイコンと短いラベルを縦に積む。狭い列なので横に並べると読めない */
+.palette-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 2px;
+  width: 100%;
+  text-align: center;
+}
+.palette-button:disabled { opacity: 0.4; cursor: default; }
+.palette-icon { font-size: 18px; line-height: 1.1; }
+.palette-label { font-size: 11px; }
 label { display: block; margin: 6px 0; }
 label span { display: block; font-size: 12px; color: var(--vscode-descriptionForeground); }
 input[type="text"], select {
@@ -207,7 +288,7 @@ button {
   font-size: inherit;
   font-family: inherit;
 }
-button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+button:hover:enabled { background: var(--vscode-button-secondaryHoverBackground); }
 button.primary {
   background: var(--vscode-button-background);
   color: var(--vscode-button-foreground);
@@ -215,6 +296,34 @@ button.primary {
 #status { font-size: 12px; color: var(--vscode-descriptionForeground); }
 #status.error { color: var(--vscode-errorForeground); }
 .note { font-size: 12px; color: var(--vscode-descriptionForeground); line-height: 1.6; }
+/* 本の並び。1行が1つの面で、選んでいる行の設定が下に出る */
+#blockList {
+  border: 1px solid var(--vscode-panel-border);
+  max-block-size: 320px;
+  overflow: auto;
+}
+.block-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+.block-row:last-child { border-bottom: none; }
+.block-row.selected { background: var(--vscode-list-activeSelectionBackground); }
+.block-row.selected .block-pick { color: var(--vscode-list-activeSelectionForeground); }
+.block-pick {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  color: var(--vscode-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.block-actions { display: flex; gap: 4px; flex: none; }
+.block-actions button { padding: 2px 6px; font-size: 11px; }
 .page-frame { margin-bottom: 18px; }
 .page-label { font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 4px; }
 .page-note { font-size: 12px; color: var(--vscode-descriptionForeground); margin-top: 4px; }
@@ -263,6 +372,23 @@ button.primary {
   background: var(--vscode-input-background);
 }
 .cover-actions { margin-top: 10px; }
+/* 話と章の一覧（設計書6.65.15の段C）。章の行は読み取り専用である */
+#episodeList {
+  max-block-size: 220px;
+  overflow: auto;
+  border: 1px solid var(--vscode-panel-border);
+  margin-bottom: 8px;
+}
+.episode-row { display: block; width: 100%; text-align: left; background: transparent; color: var(--vscode-foreground); }
+.episode-row.selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+.chapter-row {
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  background: var(--vscode-editorWidget-background, transparent);
+  border-top: 1px solid var(--vscode-panel-border);
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
 /* 挿絵とページ分割の欄（設計書6.65.10）。段落は数が多いので枠の中で送る */
 #paragraphList {
   max-block-size: 340px;
@@ -307,85 +433,19 @@ button.primary {
   <button id="export" class="primary">EPUBを書き出す</button>
 </header>
 <main>
-  <section id="form">
-    <h2>書誌情報</h2>
+  <section id="workspace">
+    <h2>本の設定</h2>
     <label><span>題名</span><input id="bookTitle" type="text"></label>
     <label><span>作者名</span><input id="author" type="text"></label>
     <label><span>イラストレーター名</span><input id="illustrator" type="text"></label>
     <label><span>レーベル名</span><input id="label" type="text"></label>
-
-    <h2>組み方</h2>
     <label><span>綴じ方向</span><select id="writingMode">
       <option value="vertical">縦書き（右から左へ開く）</option>
       <option value="horizontal">横書き（左から右へ開く）</option>
     </select></label>
     <label class="check"><input id="collapseBlankLines" type="checkbox"><span>続いた空行を1つ減らす</span></label>
-
-    <h2>目次</h2>
-    <label class="check"><input id="tocEnabled" type="checkbox"><span>読み物としての目次ページを入れる</span></label>
-    <label><span>並べ方</span><select id="tocPattern">
-      <option value="vertical">一覧（本文と同じ流れ）</option>
-      <option value="horizontal">一覧（目次だけ横組み）</option>
-      <option value="chapters">章ごとに区切る</option>
-    </select></label>
-    <label><span>見出しの形</span><select id="tocEntryStyle">
-      <option value="numberAndTitle">番号＋題</option>
-      <option value="titleOnly">題だけ</option>
-      <option value="numberOnly">番号だけ</option>
-    </select></label>
-    <label><span>飾り</span><select id="tocOrnament">
-      <option value="none">なし</option>
-      <option value="rule">罫線</option>
-      <option value="center">中央飾り</option>
-    </select></label>
-
-    <!--
-      あとがき（設計書6.65.15）。**原稿は作者が書く**ので、ここは
-      書く場所を開く入口だけを置く。原稿が無ければ雛形を作ってから開く
-      （面が本へ入るのは、中身を書いたときだけ）
-    -->
-    <h2>あとがき</h2>
-    <p class="note">本文の後ろに1面として入ります。原稿は 設定/書籍/あとがき.md に書きます（まだ無ければ作ります）。</p>
-    <div class="cover-actions"><button id="openAfterword">あとがきを書く</button></div>
-
-    <h2>奥付</h2>
-    <label><span>飾り</span><select id="colophonOrnament">
-      <option value="none">なし</option>
-      <option value="rule">罫線</option>
-      <option value="center">中央飾り</option>
-    </select></label>
-
-${coverSection(
-  "front",
-  "表紙",
-  "coverImagePath",
-  "元イラストの場所（作品フォルダからの相対パス）",
-  "bakeFront",
-  "表紙を焼く",
-  "unbakeFront",
-  "焼いた画像を消す"
-)}
-
-${coverSection(
-  "back",
-  "裏表紙",
-  "backCoverImagePath",
-  "元イラストの場所（作品フォルダからの相対パス）",
-  "bakeBack",
-  "裏表紙を焼く",
-  "unbakeBack",
-  "焼いた画像を消す"
-)}
-
-    <h2>登場人物一覧</h2>
-    <label class="check"><input id="characterPageEnabled" type="checkbox"><span>登場人物一覧の面を入れる</span></label>
-    <label class="check"><input id="characterPageIcons" type="checkbox"><span>人物イラストを添える</span></label>
-    <p class="note">載るのは「登場済み・モブでない・公開」の人物の、名前と紹介文だけです。並びは設定資料の順になります。</p>
-    <p class="note" id="characterNotice"></p>
-
-    <h2>書体</h2>
-    <label><span>本文用（作品フォルダからの相対パス。.ttf / .otf）</span><input id="fontBody" type="text"></label>
-    <label><span>見出し用（同上）</span><input id="fontHeading" type="text"></label>
+    <label><span>本文用の書体（作品フォルダからの相対パス。.ttf / .otf）</span><input id="fontBody" type="text"></label>
+    <label><span>見出し用の書体（同上）</span><input id="fontHeading" type="text"></label>
     <!--
       **ライセンスの注意書きは常に出す**（設計書6.65.3・6.65.11）。
       埋め込みが許諾されているかを確かめられるのは作者だけであり、
@@ -393,18 +453,84 @@ ${coverSection(
     -->
     <p class="note">フォントの埋め込みが許諾されているかは、作者の責任でご確認ください（フォントのライセンスをご覧ください）。</p>
 
-    <h2>挿絵とページ分割</h2>
-    <label><span>話</span><select id="episodeSelect"></select></label>
-    <p class="note" id="placementNotice"></p>
+    <h2>本の並び</h2>
+    <p class="note">右のパレットを押すと、選んでいる面の後ろへ入ります。並べ替えは「上へ」「下へ」、外すのは「削除」です（本文は1冊に1つなので外せません）。</p>
+    <div id="blockList"></div>
     <p class="note error" id="placementWarnings"></p>
-    <div id="paragraphList"></div>
 
+    <h2 id="blockHeading">選んだ面</h2>
+    <div id="blockSettings">
+${pane("cover", [
+  coverSection("front", "coverImagePath", "bakeFront", "表紙を焼く", "unbakeFront"),
+])}
+${pane("backCover", [
+  '    <p class="note">本の最終面（奥付の後ろ）です。画像が無ければ、並びに置いてあっても面は出ません。</p>',
+  coverSection(
+    "back",
+    "backCoverImagePath",
+    "bakeBack",
+    "裏表紙を焼く",
+    "unbakeBack"
+  ),
+])}
+${pane("halfTitle", [
+  '    <p class="note">題名と作者名だけの面です。中身は上の「本の設定」の書誌情報から組みます。</p>',
+])}
+${pane("toc", [
+  '    <label><span>並べ方</span><select id="tocPattern">',
+  '      <option value="vertical">一覧（本文と同じ流れ）</option>',
+  '      <option value="horizontal">一覧（目次だけ横組み）</option>',
+  '      <option value="chapters">章ごとに区切る</option>',
+  "    </select></label>",
+  '    <label><span>見出しの形</span><select id="tocEntryStyle">',
+  '      <option value="numberAndTitle">番号＋題</option>',
+  '      <option value="titleOnly">題だけ</option>',
+  '      <option value="numberOnly">番号だけ</option>',
+  "    </select></label>",
+  '    <label><span>飾り</span><select id="tocOrnament">',
+  '      <option value="none">なし</option>',
+  '      <option value="rule">罫線</option>',
+  '      <option value="center">中央飾り</option>',
+  "    </select></label>",
+  '    <p class="note">この面を本から外すときは、上の並びで「削除」を押してください。</p>',
+])}
+${pane("characters", [
+  '    <label class="check"><input id="characterPageIcons" type="checkbox"><span>人物イラストを添える</span></label>',
+  '    <p class="note">載るのは「登場済み・モブでない・公開」の人物の、名前と紹介文だけです。並びは設定資料の順になります。</p>',
+  '    <p class="note" id="characterNotice"></p>',
+])}
+${pane("image", [
+  '    <label><span>画像の場所（作品フォルダからの相対パス）</span><input id="blockImagePath" type="text"></label>',
+  '    <label><span>解説文（省略できます）</span><input id="blockCaption" type="text"></label>',
+  '    <p class="note">1枚で1つの面になります（本文の組み方には入りません）。扉絵は何枚でも、好きな位置に挿せます。</p>',
+])}
+${pane("body", [
+  '    <p class="note">話と章の一覧です。章の行は章立ての台帳から出しています——章の追加・名前の変更・取り外しは、作品一覧の右クリックから行ってください。</p>',
+  '    <div id="episodeList"></div>',
+  '    <p class="note" id="placementNotice"></p>',
+  '    <div id="paragraphList"></div>',
+])}
+${pane("afterword", [
+  '    <p class="note">本文の後ろに1面として入ります。原稿は 設定/書籍/あとがき.md に書きます（まだ無ければ作ります）。書いていなければ、並びに置いてあっても面は出ません。</p>',
+  '    <div class="cover-actions"><button id="openAfterword">あとがきを書く</button></div>',
+])}
+${pane("colophon", [
+  '    <label><span>飾り</span><select id="colophonOrnament">',
+  '      <option value="none">なし</option>',
+  '      <option value="rule">罫線</option>',
+  '      <option value="center">中央飾り</option>',
+  "    </select></label>",
+])}
+    </div>
+
+    <div id="pages"></div>
+    <p class="note" id="notice"></p>
     <p class="note" id="filePath"></p>
   </section>
-  <section id="preview">
-    <p class="note" id="notice"></p>
-    <div id="pages"></div>
-  </section>
+  <nav id="palette">
+    <div class="palette-title">入れる</div>
+${PALETTE.map(paletteButton).join("\n")}
+  </nav>
 </main>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
@@ -428,10 +554,14 @@ function field(id) {
 
 const TEXTS = ['bookTitle', 'author', 'illustrator', 'label'];
 const CHOICES = ['writingMode', 'tocPattern', 'tocEntryStyle', 'tocOrnament', 'colophonOrnament'];
-const CHECKS = ['collapseBlankLines', 'tocEnabled'];
+/*
+ * 目次・人物紹介の「入れる」チェックは持たない（設計書6.65.15の段C）。
+ * **並びに置いてあるかどうかが決める。** 設計図に残っている「入れるか」の
+ * 2項目は古い設計図を読むためだけのもので、画面からは送らない
+ * （送ると、作者が手で書いた値を塗り替えてしまう）。
+ */
+const CHECKS = ['collapseBlankLines'];
 const PATHS = ['coverImagePath', 'backCoverImagePath'];
-/** 登場人物一覧の2つ（設計書6.65.11）。入れ子なので CHECKS とは別に扱う */
-const CHARACTER_CHECKS = { characterPageEnabled: 'enabled', characterPageIcons: 'showIcons' };
 /** 書体の2枠。欄の中身は作品フォルダからの相対パス（空なら同梱しない） */
 const FONT_FIELDS = { fontBody: 'body', fontHeading: 'heading' };
 
@@ -446,7 +576,24 @@ const ELEMENT_FIELDS = {
   label: 'label'
 };
 const LAYOUT_KEYS = { front: 'coverLayout', back: 'backCoverLayout' };
-const PATH_KEYS = { front: 'coverImagePath', back: 'backCoverImagePath' };
+
+/**
+ * 面の種類 → 設定の欄の名前。**口絵と扉絵は同じ欄**（置ける場所だけが違う）。
+ * 面の呼び名や順序は持たない——それは拡張機能側が決める。
+ */
+const PANES = {
+  cover: 'cover',
+  halfTitle: 'halfTitle',
+  frontIllustration: 'image',
+  sectionArt: 'image',
+  toc: 'toc',
+  characters: 'characters',
+  body: 'body',
+  afterword: 'afterword',
+  colophon: 'colophon',
+  backCover: 'backCover'
+};
+const PANE_NAMES = ['cover', 'backCover', 'halfTitle', 'toc', 'characters', 'image', 'body', 'afterword', 'colophon'];
 
 function styleId(side, key, part) {
   return side + '-' + key + '-' + part;
@@ -518,7 +665,98 @@ function frameBackgroundOf(side) {
   return value ? value : DEFAULT_FRAME_BACKGROUND;
 }
 
-/* ---- 挿絵とページ分割（設計書6.65.10） ----------------------------- */
+/* ---- 本の並び（設計書6.65.15の段C） -------------------------------- */
+
+/**
+ * いまの並びと、選んでいる面。**中身は拡張機能側が組んだものを受け取る**
+ * ——ここで面の呼び名や順序を持つと、二重管理になる。
+ */
+let blocks = [];
+let selected = 0;
+/** 最後に届いた面（プレビュー）。選び直しでは貰い直さずに出し分ける */
+let pages = [];
+
+function moveButton(text, index, direction, disabled) {
+  const button = document.createElement('button');
+  button.textContent = text;
+  button.disabled = disabled;
+  button.addEventListener('click', function () {
+    post('moveBlock', { index: index, direction: direction, config: readForm() });
+  });
+  return button;
+}
+
+function renderBlocks() {
+  const host = field('blockList');
+  host.textContent = '';
+
+  blocks.forEach(function (block, index) {
+    const row = document.createElement('div');
+    row.className = index === selected ? 'block-row selected' : 'block-row';
+
+    const pick = document.createElement('button');
+    pick.className = 'block-pick';
+    // 呼び名も添え書きも拡張機能側の言葉である（画面で組み立てない）
+    pick.textContent = block.detail
+      ? block.label + '　' + block.detail
+      : block.label;
+    pick.addEventListener('click', function () { selectBlock(index); });
+    row.appendChild(pick);
+
+    const actions = document.createElement('div');
+    actions.className = 'block-actions';
+    actions.appendChild(moveButton('上へ', index, -1, index === 0));
+    actions.appendChild(
+      moveButton('下へ', index, 1, index === blocks.length - 1)
+    );
+    // **消せない面には、削除のボタンそのものを出さない。** 押してから
+    // 断られるより、初めから無いほうが分かりやすい（本文がこれに当たる）
+    if (block.removable) {
+      const remove = document.createElement('button');
+      remove.textContent = '削除';
+      remove.addEventListener('click', function () {
+        post('removeBlock', { index: index, config: readForm() });
+      });
+      actions.appendChild(remove);
+    }
+    row.appendChild(actions);
+    host.appendChild(row);
+  });
+}
+
+/** 選んだ面の設定の欄だけを出す。ほかは畳む（消さない） */
+function renderPanes() {
+  const block = blocks[selected] || null;
+  const wanted = block ? PANES[block.type] : null;
+  PANE_NAMES.forEach(function (name) {
+    field('pane-' + name).hidden = name !== wanted;
+  });
+  field('blockHeading').textContent = block ? block.label : '選んだ面';
+
+  if (block && wanted === 'image') {
+    field('blockImagePath').value = block.imagePath || '';
+    field('blockCaption').value = block.caption || '';
+  }
+}
+
+function selectBlock(index) {
+  selected = index;
+  renderBlocks();
+  renderPanes();
+  renderPages();
+}
+
+/** 画像の面の欄を変えたら、その面だけを直してもらう（設計図は拡張機能側） */
+function sendBlockEdit() {
+  post('blockEdit', {
+    index: selected,
+    imagePath: field('blockImagePath').value,
+    caption: field('blockCaption').value,
+    config: readForm()
+  });
+}
+
+/* ---- 話と章の一覧（設計書6.65.15の段C） ---------------------------- */
 
 /**
  * 設計図の指定の写し。**話を選び直しても消えない**ように外に持つ。
@@ -529,6 +767,8 @@ let pageBreaks = [];
 /** いま選んでいる話と、その段落の冒頭（拡張機能から貰う） */
 let episodePath = '';
 let paragraphs = [];
+/** 話と章の並び。章の行は読み取り専用（台帳が正。設計書6.66） */
+let outline = [];
 
 function samePlace(item, number) {
   return item.episodePath === episodePath && item.afterParagraph === number;
@@ -647,33 +887,68 @@ function renderParagraphs() {
   });
 }
 
-/** 話の一覧。選んでいた話が残っていればそのまま、無ければ先頭にする */
-function fillEpisodes(list) {
-  const select = field('episodeSelect');
-  const previous = episodePath;
-  const episodes = list || [];
-  select.textContent = '';
+/**
+ * 話と章の一覧。**章の行は押せない**（台帳が正。直すのは作品一覧の
+ * 右クリックからで、その案内は欄の上に常に出してある）。
+ */
+function renderOutline() {
+  const host = field('episodeList');
+  host.textContent = '';
 
-  let found = false;
-  episodes.forEach(function (episode) {
-    const option = document.createElement('option');
-    option.value = episode.path;
-    option.textContent = episode.label;
-    select.appendChild(option);
-    if (episode.path === previous) found = true;
+  outline.forEach(function (entry) {
+    if (entry.kind === 'chapter') {
+      const row = document.createElement('div');
+      row.className = 'chapter-row';
+      row.textContent = entry.label;
+      host.appendChild(row);
+      return;
+    }
+    const row = document.createElement('button');
+    row.className = entry.path === episodePath
+      ? 'episode-row selected'
+      : 'episode-row';
+    row.textContent = entry.label;
+    row.addEventListener('click', function () { selectEpisode(entry.path); });
+    host.appendChild(row);
   });
+}
 
-  episodePath = found ? previous : (episodes[0] ? episodes[0].path : '');
-  select.value = episodePath;
+function selectEpisode(path) {
+  episodePath = path;
+  // 段落は話ごとに違う。貰い直すまでは空にしておく（前の話の段落へ
+  // 挿絵を付けてしまわないため）
   paragraphs = [];
+  renderOutline();
   renderParagraphs();
-  if (episodePath) post('episode', { episodePath: episodePath });
+  post('episode', { episodePath: episodePath });
+}
+
+/** 一覧を貰い直す。選んでいた話が残っていればそのまま、無ければ先頭にする */
+function fillOutline(list) {
+  outline = list || [];
+  const episodes = outline.filter(function (entry) {
+    return entry.kind === 'episode';
+  });
+  const found = episodes.some(function (entry) {
+    return entry.path === episodePath;
+  });
+  const next = found ? episodePath : (episodes[0] ? episodes[0].path : '');
+
+  if (next !== episodePath) {
+    episodePath = next;
+    paragraphs = [];
+    renderOutline();
+    renderParagraphs();
+    if (episodePath) post('episode', { episodePath: episodePath });
+    return;
+  }
+  renderOutline();
 }
 
 function applyWarnings(data) {
   field('placementWarnings').textContent =
     (data.placementWarnings || []).join('\\n');
-  // 登場人物一覧は「出す」を選んでも空のことがある。理由は拡張機能側が持つ
+  // 人物紹介は面を置いても空のことがある。理由は拡張機能側が持つ
   field('characterNotice').textContent = data.characterNotice || '';
 }
 
@@ -700,9 +975,7 @@ function fillForm(config) {
   CHECKS.forEach(function (id) { field(id).checked = config[id] === true; });
   PATHS.forEach(function (id) { field(id).value = config[id] || ''; });
   const characterPage = config.characterPage || {};
-  Object.keys(CHARACTER_CHECKS).forEach(function (id) {
-    field(id).checked = characterPage[CHARACTER_CHECKS[id]] === true;
-  });
+  field('characterPageIcons').checked = characterPage.showIcons === true;
   const fonts = config.fonts || {};
   Object.keys(FONT_FIELDS).forEach(function (id) {
     field(id).value = fonts[FONT_FIELDS[id]] || '';
@@ -725,11 +998,9 @@ function readForm() {
     const value = field(id).value.trim();
     config[id] = value ? value : null;
   });
-  const characterPage = {};
-  Object.keys(CHARACTER_CHECKS).forEach(function (id) {
-    characterPage[CHARACTER_CHECKS[id]] = field(id).checked;
-  });
-  config.characterPage = characterPage;
+  // **「入れるか」は送らない**（設計書6.65.15の段C）。並びが正なので、
+  // 送ると作者が手で書いた「入れるか」の値を塗り替えてしまう
+  config.characterPage = { showIcons: field('characterPageIcons').checked };
   // 書体は空欄なら null（同梱しない）。**空文字を送らない**——
   // 拡張機能側の検証は「書いてあるが読めない場所」として叱ってしまう
   const fonts = {};
@@ -777,7 +1048,7 @@ function scheduleChange() {
 TEXTS.concat(PATHS).concat(Object.keys(FONT_FIELDS)).forEach(function (id) {
   field(id).addEventListener('input', scheduleChange);
 });
-CHOICES.concat(CHECKS).concat(Object.keys(CHARACTER_CHECKS)).forEach(function (id) {
+CHOICES.concat(CHECKS).concat(['characterPageIcons']).forEach(function (id) {
   field(id).addEventListener('change', scheduleChange);
 });
 SIDES.forEach(function (side) {
@@ -792,6 +1063,35 @@ SIDES.forEach(function (side) {
       .addEventListener('change', scheduleChange);
   });
 });
+['blockImagePath', 'blockCaption'].forEach(function (id) {
+  field(id).addEventListener('change', sendBlockEdit);
+});
+
+/*
+ * パレット。押すと「選んでいる面の後ろ」へ入る（章区切りだけは台帳へ）。
+ *
+ * **並びも種類もHTMLの側から読む。** 一覧をここへ写すと、パレットを
+ * 増やしたときに2か所を直すことになる。
+ */
+Array.prototype.forEach.call(
+  document.querySelectorAll('.palette-button'),
+  function (button) {
+    const key = button.getAttribute('data-block');
+    button.addEventListener('click', function () {
+      // 章区切りは面ではない。台帳（設計書6.66）が正なので、並びへは入れず
+      // 「どの話から始めるか」を拡張機能側に訊いてもらう
+      if (key === 'chapter') {
+        post('addChapter', { config: readForm() });
+        return;
+      }
+      post('insertBlock', {
+        blockType: key,
+        index: selected,
+        config: readForm()
+      });
+    });
+  }
+);
 
 field('save').addEventListener('click', function () {
   post('save', { config: readForm() });
@@ -811,14 +1111,6 @@ field('unbakeFront').addEventListener('click', function () {
 });
 field('unbakeBack').addEventListener('click', function () {
   post('unbake', { side: 'back', config: readForm() });
-});
-field('episodeSelect').addEventListener('change', function () {
-  episodePath = field('episodeSelect').value;
-  // 段落は話ごとに違う。貰い直すまでは空にしておく（前の話の段落へ
-  // 挿絵を付けてしまわないため）
-  paragraphs = [];
-  renderParagraphs();
-  post('episode', { episodePath: episodePath });
 });
 
 function setStatus(text, isError) {
@@ -1017,22 +1309,43 @@ function applyCompose(data) {
   });
 }
 
-/* ---- 面を並べる ---------------------------------------------------- */
+/* ---- 面を出す ------------------------------------------------------ */
+
+/** パレットの押せる・押せないと、その理由（判断は拡張機能側が持つ） */
+function applyPalette(list) {
+  (list || []).forEach(function (entry) {
+    const button = field('palette-' + entry.key);
+    if (!button) return;
+    button.disabled = entry.enabled !== true;
+    button.title = entry.reason || '';
+  });
+}
 
 /**
- * 面を並べる。
+ * 選んだ面のプレビューを出す。
  *
  * **中身は拡張機能側で組んだ断片をそのまま置く。** 書き出しと同じものを
  * 見せるのが要件なので、ここで組み立て直さない（設計書6.65.6）。
  * 合成の面だけは canvas を置き、焼くときと同じ関数で描く。
  */
-function renderPages(data) {
+function renderPages() {
   const host = field('pages');
   host.textContent = '';
-  const style = field('book-style');
-  if (typeof data.css === 'string') style.textContent = data.css;
 
-  (data.pages || []).forEach(function (page) {
+  const shown = pages.filter(function (page) {
+    return page.blockIndex === selected;
+  });
+
+  if (shown.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'note';
+    // 出ない理由は上の警告と面の注記が言う。ここは「出ない」ことだけ
+    empty.textContent = 'この面は、いまのままでは本に入りません。';
+    host.appendChild(empty);
+    return;
+  }
+
+  shown.forEach(function (page) {
     const frame = document.createElement('div');
     frame.className = 'page-frame';
 
@@ -1066,6 +1379,23 @@ function renderPages(data) {
   });
 
   SIDES.forEach(drawCover);
+}
+
+/** 面の並びとプレビューを受け取る。選びは拡張機能が言うときだけ動かす */
+function applyPages(data) {
+  const style = field('book-style');
+  if (typeof data.css === 'string') style.textContent = data.css;
+  pages = data.pages || [];
+  blocks = data.blocks || [];
+
+  if (typeof data.selectBlock === 'number') selected = data.selectBlock;
+  if (selected >= blocks.length) selected = blocks.length - 1;
+  if (selected < 0) selected = 0;
+
+  applyPalette(data.palette);
+  renderBlocks();
+  renderPanes();
+  renderPages();
   field('notice').textContent = data.notice || '';
 }
 
@@ -1077,17 +1407,18 @@ window.addEventListener('message', function (event) {
     field('title').textContent = data.title;
     field('filePath').textContent = data.filePath;
     fillForm(data.config);
-    fillEpisodes(data.episodes);
+    fillOutline(data.outline);
     applyCompose(data);
     applyWarnings(data);
-    renderPages(data);
+    applyPages(data);
     setStatus(data.dirty ? '未保存の変更があります' : '', false);
     return;
   }
   if (message.type === 'preview') {
+    fillOutline(message.data.outline);
     applyCompose(message.data);
     applyWarnings(message.data);
-    renderPages(message.data);
+    applyPages(message.data);
     setStatus(message.data.dirty ? '未保存の変更があります' : '', false);
     return;
   }

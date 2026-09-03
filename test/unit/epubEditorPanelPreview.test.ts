@@ -34,10 +34,16 @@ interface PreviewPage {
 
 interface PreviewPayload {
   pages: PreviewPage[];
-  episodes: Array<{ path: string; label: string }>;
+  /** 本の並びの行（設計書6.65.15の段C） */
+  blocks: Array<{ type: string; label: string; detail: string | null; removable: boolean }>;
+  /** パレットの押せる・押せないと理由 */
+  palette: Array<{ key: string; enabled: boolean; reason: string }>;
+  /** 話と章の一覧（章の行は読み取り専用） */
+  outline: Array<{ kind: string; path?: string; label: string }>;
   placementWarnings: string[];
   characterNotice: string | null;
   compose: Record<string, { baked: { note: string } | null }>;
+  selectBlock?: number;
 }
 
 const posted: Array<{ type?: string; data?: PreviewPayload }> = [];
@@ -292,14 +298,17 @@ describe("競合のある話（設計書6.65.10）", () => {
    */
   test("話を選ぶ欄に、本から外れることを書く", async () => {
     await open();
-    const labels = latest().episodes.map((entry) => entry.label);
+    const episodes = latest().outline.filter(
+      (entry) => entry.kind === "episode"
+    );
+    const labels = episodes.map((entry) => entry.label);
 
     expect(labels.some((label) => label.includes("第1話"))).toBe(true);
     expect(
       labels.find((label) => label.includes("第2話"))
     ).toContain("競合のため本から外れます");
     // **選べなくはしない**（直せば入るので、指定は残してよい）
-    expect(latest().episodes).toHaveLength(2);
+    expect(episodes).toHaveLength(2);
   });
 
   test("目次のプレビューには、競合の話を並べない", async () => {
@@ -515,9 +524,9 @@ describe("プレビューの面の並び（設計書6.65.15）", () => {
   test("書いた並びの順に、面が出る", async () => {
     writeBook({
       title: "氷の街",
-      // 目次を出す設定のままだと、並びに書いていなくても目次が戻る
-      // （段Bではチェックが正。`resolveBookBlocks`）
-      tocEnabled: false,
+      // **`tocEnabled` は書かない。** 段Bでは「目次を出す設定のままだと
+      // 並びに書いていなくても目次が戻る」ため false を書いていたが、
+      // 段Cで並びが正になったので、既定（出す）のままでも戻らない
       blocks: [
         { type: "body" },
         { type: "halfTitle" },
@@ -592,6 +601,317 @@ describe("プレビューの面の並び（設計書6.65.15）", () => {
     await open();
 
     expect(labels()).not.toContain("あとがき");
+  });
+});
+
+/**
+ * 本の並びを編む（設計書6.65.15の段C）。
+ *
+ * **並びが正になった。** 画面から挿す・動かす・外すと `blocks` が変わり、
+ * 保存すると book.json へ入る——目次・人物紹介のチェック欄はもう関係しない。
+ */
+describe("並びの編集（設計書6.65.15の段C）", () => {
+  beforeEach(() => {
+    put("本文/第1話.txt", "あ\n\nい");
+  });
+
+  function bookPath(): string {
+    return diskPath(path.join(work.folderPath, "設定", "書籍", "book.json"));
+  }
+
+  /** 保存したあとの book.json の並び（画面の言い分ではなく、書かれたもの） */
+  async function savedBlocks(): Promise<string[]> {
+    await send({ type: "save", config: {} });
+    const bytes = disk.get(bookPath());
+    if (!bytes) throw new Error("book.json が書かれていません");
+    const config = JSON.parse(new TextDecoder().decode(bytes)) as {
+      blocks?: Array<{ type: string }>;
+    };
+    return (config.blocks ?? []).map((block) => block.type);
+  }
+
+  function types(): string[] {
+    return latest().blocks.map((block) => block.type);
+  }
+
+  test("パレットの種類を挿すと、選んでいる面の後ろへ入る", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover" }, { type: "body" }, { type: "colophon" }],
+    });
+
+    await open();
+    await send({ type: "insertBlock", blockType: "toc", index: 0, config: {} });
+
+    expect(types()).toEqual(["cover", "toc", "body", "colophon"]);
+    // 入れた面を選ばせる（続けて設定を触れるように）
+    expect(latest().selectBlock).toBe(1);
+    expect(await savedBlocks()).toEqual(["cover", "toc", "body", "colophon"]);
+  });
+
+  test("1冊に1つの面は、既にあれば挿さずに理由を言う", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover" }, { type: "body" }],
+    });
+
+    await open();
+    const mark = posted.length;
+    await send({ type: "insertBlock", blockType: "cover", index: 0, config: {} });
+
+    expect(types()).toEqual(["cover", "body"]);
+    // 押しても無反応にはしない（理由を言う）
+    expect(JSON.stringify(posted.slice(mark))).toContain("1冊に1つだけ");
+  });
+
+  test("上へ・下へで並びが入れ替わる", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover" }, { type: "toc" }, { type: "body" }],
+    });
+
+    await open();
+    await send({ type: "moveBlock", index: 1, direction: -1, config: {} });
+
+    expect(types()).toEqual(["toc", "cover", "body"]);
+    await send({ type: "moveBlock", index: 0, direction: 1, config: {} });
+    expect(types()).toEqual(["cover", "toc", "body"]);
+  });
+
+  test("削除すると、本からもプレビューからも消える", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover" }, { type: "toc" }, { type: "body" }],
+    });
+
+    await open();
+    expect(latest().pages.map((entry) => entry.label)).toContain("目次");
+
+    await send({ type: "removeBlock", index: 1, config: {} });
+
+    expect(types()).toEqual(["cover", "body"]);
+    expect(latest().pages.map((entry) => entry.label)).not.toContain("目次");
+    expect(await savedBlocks()).toEqual(["cover", "body"]);
+  });
+
+  /** **本文は1冊にちょうど1つ**。消せないし、増やせない */
+  test("本文は削除も複製もできない", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover" }, { type: "body" }],
+    });
+
+    await open();
+    const body = latest().blocks.find((block) => block.type === "body");
+    expect(body?.removable).toBe(false);
+    expect(
+      latest().palette.find((entry) => entry.key === "body")?.enabled
+    ).toBe(false);
+
+    await send({ type: "removeBlock", index: 1, config: {} });
+    expect(types()).toEqual(["cover", "body"]);
+  });
+
+  test("パレットは、既にある面を押せなくして理由を持つ", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover" }, { type: "body" }],
+    });
+
+    await open();
+    const palette = latest().palette;
+
+    // 章区切りを含めて11種ぶん（面10種＋章区切り）
+    expect(palette).toHaveLength(11);
+    expect(palette.find((entry) => entry.key === "cover")?.enabled).toBe(false);
+    expect(palette.find((entry) => entry.key === "cover")?.reason).toContain(
+      "1冊に1つだけ"
+    );
+    // 口絵・扉絵は何枚でも置ける
+    expect(
+      palette.find((entry) => entry.key === "sectionArt")?.enabled
+    ).toBe(true);
+    expect(palette.find((entry) => entry.key === "toc")?.enabled).toBe(true);
+  });
+
+  test("口絵は、絵の場所を訊いてから挿す（絵の無い面は作らない）", async () => {
+    putBytes("素材/口絵.png", [0x89, 0x50]);
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover" }, { type: "body" }],
+    });
+    window.showInputBox = async () => "素材/口絵.png";
+
+    await open();
+    await send({
+      type: "insertBlock",
+      blockType: "frontIllustration",
+      index: 0,
+      config: {},
+    });
+
+    expect(types()).toEqual(["cover", "frontIllustration", "body"]);
+    // 行には、どの絵かを添える（同じ呼び名の面が並ぶため）
+    expect(
+      latest().blocks.find((block) => block.type === "frontIllustration")?.detail
+    ).toBe("素材/口絵.png");
+  });
+
+  test("絵の場所を取りやめたら、面は増えない", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover" }, { type: "body" }],
+    });
+    window.showInputBox = async () => undefined;
+
+    await open();
+    await send({
+      type: "insertBlock",
+      blockType: "sectionArt",
+      index: 0,
+      config: {},
+    });
+
+    expect(types()).toEqual(["cover", "body"]);
+  });
+});
+
+/**
+ * 目次・人物紹介は並びが決める（設計書6.65.15の段C）。
+ *
+ * 段Bまではチェック欄（`tocEnabled`・`characterPage.enabled`）が正だった。
+ * **チェック欄の値は書き換えず、見もしない**——古い book.json から既定の
+ * 並びを組む材料としてだけ残っている。
+ */
+describe("チェック欄ではなく並びが決める（設計書6.65.15の段C）", () => {
+  beforeEach(() => {
+    put("本文/第1話.txt", "あ\n\nい");
+  });
+
+  test("目次を出す設定でも、並びに無ければ面は出ない", async () => {
+    writeBook({
+      title: "氷の街",
+      tocEnabled: true,
+      blocks: [{ type: "cover" }, { type: "body" }],
+    });
+
+    await open();
+
+    expect(latest().pages.map((entry) => entry.label)).not.toContain("目次");
+  });
+
+  test("人物紹介は、チェックが false でも並びにあれば出る", async () => {
+    writeCharacter("char_001", "月島灯");
+    writeBook({
+      title: "氷の街",
+      characterPage: { enabled: false, showIcons: false },
+      blocks: [{ type: "characters" }, { type: "body" }],
+    });
+
+    await open();
+
+    expect(latest().pages.map((entry) => entry.label)).toContain("登場人物");
+  });
+
+  test("イラストの有無を変えても、チェック欄の値は書き換えない", async () => {
+    writeCharacter("char_001", "月島灯");
+    writeBook({
+      title: "氷の街",
+      characterPage: { enabled: true, showIcons: true },
+      blocks: [{ type: "characters" }, { type: "body" }],
+    });
+
+    await open();
+    // 画面が送ってくるのはイラストの有無だけである
+    await send({
+      type: "save",
+      config: { characterPage: { showIcons: false } },
+    });
+
+    const bytes = disk.get(
+      diskPath(path.join(work.folderPath, "設定", "書籍", "book.json"))
+    );
+    const config = JSON.parse(
+      new TextDecoder().decode(bytes as Uint8Array)
+    ) as { characterPage: { enabled: boolean; showIcons: boolean } };
+    expect(config.characterPage).toEqual({ enabled: true, showIcons: false });
+  });
+});
+
+/**
+ * 章区切り（設計書6.65.15の段C・6.66）。
+ *
+ * **章立ての台帳が正なので、blocks には入らない。** パレットから押しても
+ * 書き換わるのは `設定/章立て.json` だけである。
+ */
+describe("章区切り（設計書6.65.15の段C）", () => {
+  beforeEach(() => {
+    put("本文/第1話.txt", "あ\n\nい");
+    put("本文/第2話.txt", "う\n\nえ");
+    writeBook({ title: "氷の街" });
+  });
+
+  function chaptersPath(): string {
+    return diskPath(path.join(work.folderPath, "設定", "章立て.json"));
+  }
+
+  /** 選択画面。**この作り物では2話目を選ぶ**（先頭以外を選べることも見る） */
+  function pickSecondEpisode(): void {
+    (window as unknown as Record<string, unknown>).showQuickPick = async (
+      items: Array<{ label: string }>
+    ) => items.find((item) => item.label.includes("第2話"));
+  }
+
+  test("押すと台帳へ書く（blocks には入らない）", async () => {
+    pickSecondEpisode();
+    window.showInputBox = async () => "第二章　邂逅";
+
+    await open();
+    const before = latest().blocks.map((block) => block.type);
+    await send({ type: "addChapter", config: {} });
+
+    const bytes = disk.get(chaptersPath());
+    expect(bytes).toBeDefined();
+    const set = JSON.parse(new TextDecoder().decode(bytes as Uint8Array)) as {
+      chapters: Array<{ name: string; startEpisodePath: string }>;
+    };
+    expect(set.chapters).toEqual([
+      { name: "第二章　邂逅", startEpisodePath: "本文/第2話.txt" },
+    ]);
+    // **面は1つも増えない**（章は本の並びの持ち物ではない）
+    expect(latest().blocks.map((block) => block.type)).toEqual(before);
+  });
+
+  test("台帳の章は、話の一覧に読み取り専用の行として挟まる", async () => {
+    put(
+      "設定/章立て.json",
+      JSON.stringify({
+        schemaVersion: "1",
+        chapters: [{ name: "第二章　邂逅", startEpisodePath: "本文/第2話.txt" }],
+      })
+    );
+
+    await open();
+    const outline = latest().outline;
+
+    expect(outline.map((entry) => entry.kind)).toEqual([
+      "episode",
+      "chapter",
+      "episode",
+    ]);
+    expect(outline[1].label).toContain("第二章　邂逅");
+    // 章の行には選び先が無い（押しても話を選べない）
+    expect(outline[1].path).toBeUndefined();
+  });
+
+  test("取りやめたら、台帳は作らない", async () => {
+    (window as unknown as Record<string, unknown>).showQuickPick = async () =>
+      undefined;
+
+    await open();
+    await send({ type: "addChapter", config: {} });
+
+    expect(disk.has(chaptersPath())).toBe(false);
   });
 });
 

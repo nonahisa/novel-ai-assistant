@@ -13,7 +13,11 @@ import {
   scopeCssForPreview,
   type EpubBook,
 } from "../../src/core/epubPackage";
-import { defaultBookConfig, type BookConfig } from "../../src/models/book";
+import {
+  defaultBookBlocks,
+  defaultBookConfig,
+  type BookConfig,
+} from "../../src/models/book";
 
 /**
  * EPUB3のZIP組み立て（設計書6.65.4の第1段）。
@@ -39,8 +43,24 @@ function book(overrides: Partial<EpubBook> = {}): EpubBook {
   };
 }
 
+/**
+ * 設定を1つだけ差し替えた本。
+ *
+ * **並びも一緒に組み直す**（設計書6.65.15の段C）。段Bまでは
+ * `resolveBookBlocks` が目次・人物紹介のチェック欄へ blocks を追従させて
+ * いたので、`tocEnabled` だけを差し替えれば並びも変わった。段Cで**並びが
+ * 正**になったため、設定だけを変えても並びは動かない——ここで既定の並びを
+ * 組み直しておかないと、テストは「設定を変えたのに面が変わらない」ことを
+ * 見てしまう（`blocks` を書いた本を試すときは、そのまま渡せばよい）。
+ */
 function withConfig(patch: Partial<BookConfig>): EpubBook {
-  return book({ config: { ...defaultBookConfig("氷の街"), ...patch } });
+  const config = { ...defaultBookConfig("氷の街"), ...patch };
+  return book({
+    config: {
+      ...config,
+      blocks: patch.blocks ?? defaultBookBlocks(config),
+    },
+  });
 }
 
 function open(zip: Uint8Array): Record<string, string> {

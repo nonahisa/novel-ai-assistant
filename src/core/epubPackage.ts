@@ -360,15 +360,17 @@ export function buildEpub(book: EpubBook): Uint8Array {
     fileName: `chapter-${String(index + 1).padStart(3, "0")}.xhtml`,
   }));
   const illustrations = packIllustrations(chapters);
-  // **面を出すのは「出す設定」かつ「載せる人が居る」ときだけ**
-  // （設計書6.65.11）。空の一覧が1面挟まるより、無いほうがよい
-  const characters = config.characterPage.enabled
-    ? packCharacters(book.characters ?? [])
-    : [];
   const fonts = packFonts(book.fonts);
   // 面の並び（設計書6.65.15）。**渡されていなければ設計図から組む**
   const blocks = book.blocks ?? defaultBlocksOf(config);
   const plates = packPlates(blocks);
+  // **面を出すのは「並びに置いてある」かつ「載せる人が居る」ときだけ**
+  // （設計書6.65.11・6.65.15の段C）。空の一覧が1面挟まるより、無いほうが
+  // よい。**元は `characterPage.enabled` を見ていた**が、段Cで並びが正に
+  // なったので、チェック欄の値だけが残った本で面が消えないよう並びを見る
+  const characters = blocks.some((block) => block.type === "characters")
+    ? packCharacters(book.characters ?? [])
+    : [];
 
   const packaged: PackagedBook = {
     book,

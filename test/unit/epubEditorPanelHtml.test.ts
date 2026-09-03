@@ -68,6 +68,102 @@ describe("EPUBエディターのHTML", () => {
   });
 });
 
+/**
+ * 右の縦のパレット（設計書6.65.15の段C。作者の指定）。
+ *
+ * **11種のボタンを上から下へ**、アイコンと短いラベルで並べる。
+ * 押せる・押せないと理由は拡張機能側が決めるので、ここにあるのは
+ * 「並んでいること」と「押したら何を知らせるか」だけである。
+ */
+describe("右の縦のパレット（設計書6.65.15）", () => {
+  const buttons = [...html.matchAll(/data-block="([^"]+)"/g)].map(
+    (match) => match[1]
+  );
+
+  it("11種のボタンが、作者の指定した順に並ぶ", () => {
+    expect(buttons).toEqual([
+      "cover",
+      "halfTitle",
+      "frontIllustration",
+      "sectionArt",
+      "toc",
+      "characters",
+      "chapter",
+      "body",
+      "afterword",
+      "colophon",
+      "backCover",
+    ]);
+  });
+
+  it("アイコンと短いラベルが付く", () => {
+    expect(html).toContain('class="palette-icon"');
+    expect(html).toContain('class="palette-label"');
+    for (const key of buttons) {
+      expect(html).toContain(`id="palette-${key}"`);
+    }
+  });
+
+  /** 押せなくする判断も理由も拡張機能側が持つ（画面で組み立てない） */
+  it("押せる・押せないと理由は拡張機能から受け取る", () => {
+    expect(script).toContain("data.palette");
+    expect(script).toContain("button.disabled = entry.enabled !== true");
+    expect(script).toContain("button.title = entry.reason");
+    // 「1冊に1つ」の言い方を画面に書かない
+    expect(script).not.toContain("1冊に1つ");
+  });
+
+  it("押すと、選んでいる面の後ろへ入れてもらう", () => {
+    expect(script).toContain("post('insertBlock'");
+    expect(script).toContain("index: selected");
+  });
+
+  /** 章区切りは面ではない。台帳（設計書6.66）が正なので blocks へ入れない */
+  it("章区切りだけは、並びではなく台帳へ知らせる", () => {
+    expect(script).toContain("post('addChapter'");
+    expect(script).toContain("if (key === 'chapter')");
+  });
+
+  /**
+   * **ドラッグは作らない**（設計書6.65.15の段C）。webviewでの検証が重く、
+   * 掴み損ねたときの巻き戻しも要る。クリック挿入と上へ・下へで確実にする。
+   */
+  it("ドラッグの仕掛けを持たない", () => {
+    expect(html).not.toContain("draggable");
+    expect(script).not.toContain("dragstart");
+    expect(script).not.toContain("dragover");
+    expect(script).not.toContain("drop");
+  });
+});
+
+describe("本の並びの欄（設計書6.65.15）", () => {
+  it("並びを置く場所と、選んだ面の設定の場所がある", () => {
+    expect(html).toContain('id="blockList"');
+    expect(html).toContain('id="blockSettings"');
+    expect(html).toContain('id="blockHeading"');
+  });
+
+  it("上へ・下へ・削除で編める", () => {
+    expect(script).toContain("post('moveBlock'");
+    expect(script).toContain("post('removeBlock'");
+    expect(script).toContain("上へ");
+    expect(script).toContain("下へ");
+  });
+
+  /**
+   * **消せない面には、削除のボタンそのものを出さない**（本文がこれに当たる）。
+   * 押してから断られるより、初めから無いほうが分かりやすい。
+   */
+  it("削除のボタンは、消せる面にだけ出す", () => {
+    expect(script).toContain("if (block.removable)");
+  });
+
+  it("面の呼び名は拡張機能から受け取る（画面で持たない）", () => {
+    expect(script).toContain("block.label");
+    expect(script).toContain("data.blocks");
+  });
+});
+
 describe("左の設定の欄", () => {
   it("書誌情報の4つがある", () => {
     expect(html).toContain('id="bookTitle"');
@@ -81,10 +177,48 @@ describe("左の設定の欄", () => {
     expect(html).toContain('id="collapseBlankLines"');
   });
 
-  it("目次のありなし・パターン・飾りがある", () => {
-    expect(html).toContain('id="tocEnabled"');
+  it("目次のパターン・見出しの形・飾りがある", () => {
     expect(html).toContain('id="tocPattern"');
     expect(html).toContain('id="tocOrnament"');
+  });
+
+  /**
+   * **並びが正になった**（設計書6.65.15の段C）。目次・人物紹介を入れるかは
+   * 並びに置いてあるかどうかが決めるので、チェック欄そのものを畳んだ。
+   * 残しておくと、チェックと並びのどちらが効くのか作者に分からない。
+   */
+  it("「入れる」のチェック欄を持たない（並びが正）", () => {
+    expect(html).not.toContain('id="tocEnabled"');
+    expect(html).not.toContain('id="characterPageEnabled"');
+    // 送りもしない（送ると、作者が手で書いた値を塗り替える）
+    expect(script).not.toContain("tocEnabled");
+    expect(script).not.toContain("characterPageEnabled");
+  });
+
+  /** 面ごとの設定は、その面を選んだときだけ出す（畳むだけで消さない） */
+  it("面ごとの設定の欄が、種類ごとにある", () => {
+    for (const name of [
+      "cover",
+      "backCover",
+      "halfTitle",
+      "toc",
+      "characters",
+      "image",
+      "body",
+      "afterword",
+      "colophon",
+    ]) {
+      expect(html).toContain(`id="pane-${name}"`);
+    }
+    // 口絵と扉絵は置ける場所だけが違うので、欄は1つを使い回す
+    expect(script).toContain("frontIllustration: 'image'");
+    expect(script).toContain("sectionArt: 'image'");
+  });
+
+  it("口絵・扉絵の欄は、選んだ面の絵を直す", () => {
+    expect(html).toContain('id="blockImagePath"');
+    expect(html).toContain('id="blockCaption"');
+    expect(script).toContain("post('blockEdit'");
   });
 
   it("奥付の飾りがある", () => {
@@ -182,17 +316,28 @@ describe("左の設定の欄", () => {
   /**
    * 挿絵とページ分割（設計書6.65.10）。話を選び、段落の一覧から
    * 「ここに挿絵」「ここで改ページ」を付け外しする。
+   *
+   * 段Cで話を選ぶ欄は**話と章の一覧**になった（設計書6.65.15）。
+   * 章の行は台帳から来る読み取り専用の行で、押しても選べない。
    */
-  it("話を選ぶ欄と、段落の一覧を置く場所がある", () => {
-    expect(html).toContain('id="episodeSelect"');
+  it("話と章の一覧と、段落の一覧を置く場所がある", () => {
+    expect(html).toContain('id="episodeList"');
     expect(html).toContain('id="paragraphList"');
     // 位置の超過は、書き出す前にここで見える
     expect(html).toContain('id="placementWarnings"');
   });
 
+  it("章の行は押せない（直すのは作品一覧の右クリック）", () => {
+    // 押せる行（話）はボタン、章は div として組む
+    expect(script).toContain("entry.kind === 'chapter'");
+    expect(script).toContain("chapter-row");
+    // 直し方の案内は欄に常に出しておく
+    expect(html).toContain("作品一覧の右クリック");
+  });
+
   it("段落の一覧は拡張機能から貰う（画面で本文を切らない）", () => {
     expect(script).toContain("post('episode'");
-    expect(script).toContain("data.episodes");
+    expect(script).toContain("data.outline");
   });
 
   it("段落の見出しは textContent で入れる（本文をHTMLとして解釈しない）", () => {
@@ -242,13 +387,12 @@ describe("左の設定の欄", () => {
   });
 
   /**
-   * 登場人物一覧（設計書6.65.11）。**既定は出さない**ので、
-   * 画面には「出す」を選ぶ入口だけがある。
+   * 登場人物一覧（設計書6.65.11）。面を入れるかは並びが決めるので、
+   * ここに残るのは**イラストを添えるか**だけである（段C）。
    */
-  it("登場人物一覧の欄がある（出す・出さないとイラストの有無）", () => {
-    expect(html).toContain('id="characterPageEnabled"');
+  it("登場人物一覧の欄は、イラストの有無だけを持つ", () => {
     expect(html).toContain('id="characterPageIcons"');
-    expect(html).toContain("登場人物");
+    expect(html).toContain('id="characterNotice"');
   });
 
   /**
@@ -271,7 +415,15 @@ describe("左の設定の欄", () => {
   });
 });
 
-describe("右のプレビュー", () => {
+describe("選んだ面のプレビュー", () => {
+  /**
+   * 段Cでプレビューは**選んだ面だけ**になった（作業スペースの下段）。
+   * 面と行の突き合わせは番号で行う——同じ呼び名の面（扉絵）が並ぶため。
+   */
+  it("選んでいる面だけを出す", () => {
+    expect(script).toContain("page.blockIndex === selected");
+  });
+
   it("面を並べる場所と、本のCSSを流し込む場所がある", () => {
     expect(html).toContain('id="pages"');
     // 本のCSSは拡張機能側から届く。**nonce付きの空の枠**を先に置いておく

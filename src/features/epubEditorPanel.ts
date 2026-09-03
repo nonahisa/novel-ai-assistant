@@ -5,14 +5,31 @@ import type { Character } from "../models/character";
 import {
   AFTERWORD_FILE,
   BOOK_BLOCK_LABELS,
+  BOOK_BLOCK_TYPES,
   BOOK_DIR,
+  canAddBookBlock,
+  canRemoveBookBlock,
+  insertBookBlockAfter,
+  isBookImageBlock,
+  moveBookBlock,
   parseBookConfig,
+  removeBookBlockAt,
   resolveBookBlocks,
+  type BookBlock,
+  type BookBlockType,
   type BookBodyPosition,
   type BookConfig,
   type BookImageBlock,
 } from "../models/book";
 import { BookStore, BookStoreError, episodePathFor } from "../core/bookStore";
+import { ChapterStore } from "../core/chapterStore";
+import type { Chapter } from "../models/chapter";
+import {
+  formatChapterRange,
+  groupEpisodesByChapter,
+} from "../core/chapterGrouping";
+import { startChapterAt } from "./manageChapters";
+import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import {
   BAKED_COVER_FILES,
@@ -124,6 +141,23 @@ interface PanelState {
 /** プレビューに使う本文の材料。パネルを開いたときに1度だけ集める */
 interface PreviewSource {
   episodes: PreviewEpisode[];
+  /**
+   * 走査そのままの話（設計書6.65.15の段C）。
+   *
+   * **章立ての束ねと、「ここから章を始める」に渡すために持つ。**
+   * `PreviewEpisode` は画面へ渡す形なので、台帳の側が必要とする
+   * `EpisodeFile` は落ちている。
+   */
+  episodeFiles: EpisodeFile[];
+  /** 話数の言い方を決める作品の形式（章の範囲「第1話〜第5話」に使う） */
+  format: WorkFormatKey | undefined;
+  /**
+   * 話と章の一覧（設計書6.65.15の段C）。
+   *
+   * **章の行は台帳から写したもの**で、画面では直せない（6.66が正）。
+   * 章を足したときだけ組み直す。
+   */
+  outline: OutlineEntry[];
   /** 1話目（競合を含まない最初の話）。無ければ null */
   firstChapter: EpubChapterSource | null;
   /** その1話目を book.json ではどう指すか（挿絵の絞り込みに使う） */
@@ -188,6 +222,40 @@ interface PreviewEpisode {
    * ので、ここで本文を読み直さずに分かる。
    */
   conflicted: boolean;
+}
+
+/**
+ * 話と章の一覧の1行（設計書6.65.15の段C）。
+ *
+ * **章の行は読み取り専用**である。章立ての台帳（6.66）が正なので、
+ * 直すのは作品一覧の右クリックからで、この一覧では選ぶこともできない。
+ */
+type OutlineEntry =
+  | { kind: "chapter"; label: string }
+  | { kind: "episode"; path: string; label: string };
+
+/**
+ * 本の並びの1行（設計書6.65.15の段C）。
+ *
+ * **呼び名も「消せるか」も拡張機能側で決める。** 画面が面の呼び名を持つと、
+ * 種類を増やしたときに2か所を直すことになる（`BOOK_BLOCK_LABELS` が1か所）。
+ */
+interface BlockRow {
+  type: BookBlockType;
+  label: string;
+  /** 行に添える一言（口絵・扉絵の画像の場所）。無ければ null */
+  detail: string | null;
+  imagePath?: string;
+  caption?: string;
+  /** 削除のボタンを出すか。**本文だけ false**（1冊にちょうど1つ） */
+  removable: boolean;
+}
+
+/** パレットの1つ。押せるか、押せない（押せる）理由 */
+interface PaletteEntry {
+  key: string;
+  enabled: boolean;
+  reason: string;
 }
 
 /**
@@ -279,6 +347,12 @@ export async function openEpubEditorPanel(
       side?: string;
       dataUrl?: string;
       episodePath?: string;
+      /** 並びの編集（設計書6.65.15の段C）。位置は画面が覚えている */
+      index?: number;
+      direction?: number;
+      blockType?: string;
+      imagePath?: string;
+      caption?: string;
     };
 
     if (parsed.type === "ready") {
@@ -352,6 +426,41 @@ export async function openEpubEditorPanel(
       return;
     }
 
+    // 並びの編集（設計書6.65.15の段C）。**どれも `blocks` を作り直すだけ**で、
+    // 原稿にも台帳にも触らない（章区切りだけが例外で、下の `addChapter`）
+    if (parsed.type === "insertBlock") {
+      await insertBlock(state, parsed.blockType ?? "", parsed.index ?? -1);
+      return;
+    }
+
+    if (parsed.type === "moveBlock") {
+      await moveBlockAt(
+        state,
+        parsed.index ?? -1,
+        parsed.direction === -1 ? -1 : 1
+      );
+      return;
+    }
+
+    if (parsed.type === "removeBlock") {
+      await removeBlockAt(state, parsed.index ?? -1);
+      return;
+    }
+
+    if (parsed.type === "blockEdit") {
+      await editImageBlock(state, parsed.index ?? -1, {
+        imagePath: parsed.imagePath ?? "",
+        caption: parsed.caption ?? "",
+      });
+      return;
+    }
+
+    if (parsed.type === "addChapter") {
+      // **章は blocks に入らない**（台帳が正。設計書6.65.15・6.66）
+      await addChapter(state);
+      return;
+    }
+
     if (parsed.type === "openAfterword") {
       // **原稿は作者が書く**（設計書6.65.15）。ここは入口だけを用意する
       await openAfterword(state);
@@ -388,6 +497,198 @@ function coverSide(raw: string | undefined): CoverSide {
 
 function sideLabel(side: CoverSide): string {
   return side === "back" ? "裏表紙" : "表紙";
+}
+
+/* ---- 本の並びを編む（設計書6.65.15の段C） -------------------------- */
+
+/** 画面の右上に出す一言。ここを通しておくと、送り忘れの形が揃う */
+function status(state: PanelState, text: string, isError = false): void {
+  state.panel.webview.postMessage({ type: "status", text, isError });
+}
+
+/**
+ * 並びを差し替える。**必ず `parseBookConfig` を通す**（`mergeConfig`）。
+ *
+ * 画面から来た並びをそのまま設計図へ入れると、**受け取ってもらえない
+ * book.json を保存してしまう**（絵の場所が空の口絵、2つある表紙）。
+ * 読めない形なら、そう言って画面の値は据え置く。
+ *
+ * @param selectBlock 直したあとに選ばせたい行。省略すると画面の選びが残る
+ */
+async function applyBlocks(
+  state: PanelState,
+  blocks: readonly BookBlock[],
+  selectBlock?: number
+): Promise<boolean> {
+  const merged = mergeConfig(
+    state.current,
+    { blocks: [...blocks] },
+    state.work.title
+  );
+  if (merged.error) {
+    status(state, merged.error, true);
+    return false;
+  }
+
+  state.current = merged.config;
+  // **面を出し直してから status を送る**（先に送ると、面の出し直しが消す。
+  // 焼いた画像を消すときと同じ順序）
+  const data = await previewData(state);
+  state.panel.webview.postMessage({
+    type: "preview",
+    data: selectBlock === undefined ? data : { ...data, selectBlock },
+  });
+  return true;
+}
+
+/** 画面から届いた種類。知らない値は受け取らない（黙って別の面にしない） */
+function blockTypeOf(raw: string): BookBlockType | null {
+  return (BOOK_BLOCK_TYPES as readonly string[]).includes(raw)
+    ? (raw as BookBlockType)
+    : null;
+}
+
+/**
+ * 選んでいる面の後ろへ1つ挿す。
+ *
+ * **口絵・扉絵は、絵の場所を先に訊く。** 絵の無い面は設計図が受け取らない
+ * ので（`models/book.ts`）、空のまま挿すと保存できない本ができる。
+ */
+async function insertBlock(
+  state: PanelState,
+  rawType: string,
+  index: number
+): Promise<void> {
+  const type = blockTypeOf(rawType);
+  if (!type) return;
+
+  const blocks = resolveBookBlocks(state.current);
+  const label = BOOK_BLOCK_LABELS[type];
+
+  let block: BookBlock;
+  if (type === "frontIllustration" || type === "sectionArt") {
+    const imagePath = await askText({
+      title: `${label}を入れる`,
+      prompt: `${label}にする画像の場所を、作品フォルダからの相対パスで書いてください。`,
+      placeHolder: "素材/口絵.png",
+      validateInput: (value) =>
+        value.trim() ? undefined : "画像の場所を書いてください。",
+    });
+    if (!imagePath?.trim()) return;
+    block = { type, imagePath: imagePath.trim(), caption: "" };
+  } else {
+    block = { type };
+  }
+
+  const next = insertBookBlockAfter(blocks, index, block);
+  if (!next) {
+    status(state, `${label}は1冊に1つだけです。既に本の並びに入っています。`, true);
+    return;
+  }
+
+  const at = index < 0 || index >= blocks.length ? blocks.length : index + 1;
+  if (!(await applyBlocks(state, next, at))) return;
+  status(
+    state,
+    `${label}を入れました（「保存」を押すと book.json に残ります）`
+  );
+}
+
+/** 面を1つ上下へ動かす。端では何も起きない（画面でも押せなくしてある） */
+async function moveBlockAt(
+  state: PanelState,
+  index: number,
+  direction: -1 | 1
+): Promise<void> {
+  const blocks = resolveBookBlocks(state.current);
+  const next = moveBookBlock(blocks, index, direction);
+  if (!next) return;
+  await applyBlocks(state, next, index + direction);
+}
+
+/** 面を1つ外す。**本文は外せない**（画面にも削除のボタンを出していない） */
+async function removeBlockAt(state: PanelState, index: number): Promise<void> {
+  const blocks = resolveBookBlocks(state.current);
+  if (!canRemoveBookBlock(blocks, index)) {
+    status(
+      state,
+      "本文は1冊にちょうど1つなので、本の並びから外せません。",
+      true
+    );
+    return;
+  }
+
+  const label = BOOK_BLOCK_LABELS[blocks[index].type];
+  const next = removeBookBlockAt(blocks, index);
+  if (!next) return;
+  // 消した行の1つ手前を選ばせる（末尾を消したときに選びが宙に浮かない）
+  if (!(await applyBlocks(state, next, Math.max(0, index - 1)))) return;
+  status(state, `${label}を本の並びから外しました`);
+}
+
+/** 口絵・扉絵の欄（絵の場所と解説文）を書き換える */
+async function editImageBlock(
+  state: PanelState,
+  index: number,
+  values: { imagePath: string; caption: string }
+): Promise<void> {
+  const blocks = resolveBookBlocks(state.current);
+  const block = blocks[index];
+  if (!block || !isBookImageBlock(block)) return;
+
+  const next = blocks.map((entry, position) =>
+    position === index
+      ? {
+          ...(entry as BookImageBlock),
+          imagePath: values.imagePath.trim(),
+          caption: values.caption.trim(),
+        }
+      : entry
+  );
+  await applyBlocks(state, next);
+}
+
+/**
+ * 章区切りを入れる（設計書6.65.15・6.66）。
+ *
+ * **並びには入れない。** 章立ての台帳（`設定/章立て.json`）が正なので、
+ * 書き込みは作品一覧と同じ道（`startChapterAt`）を通す——ハッシュ照合も
+ * 重複の判定も、そちらが1か所で持っている。
+ */
+async function addChapter(state: PanelState): Promise<void> {
+  const episodes = state.source.episodeFiles;
+  if (episodes.length === 0) {
+    status(state, "本文の話が見つからないので、章を始められません。", true);
+    return;
+  }
+
+  const items = episodes.map((episode) => ({
+    label: bookHeading(episode, state.source.format),
+    description: episode.fileName,
+    episode,
+  }));
+  const picked = await vscode.window.showQuickPick(
+    [...items, cancelItem()],
+    {
+      title: "章区切りを入れる",
+      placeHolder: "どの話から章を始めますか？",
+      ignoreFocusOut: true,
+    }
+  );
+  if (!picked || isCancelItem(picked)) return;
+
+  const chosen = (picked as { episode?: EpisodeFile }).episode;
+  if (!chosen) return;
+  if (!(await startChapterAt(state.work, chosen))) return;
+
+  // 台帳が変わった。一覧を組み直し、作品一覧にも反映させる
+  state.source.outline = await collectOutline(state.work, state.source);
+  state.panel.webview.postMessage({
+    type: "preview",
+    data: await previewData(state),
+  });
+  await vscode.commands.executeCommand("novelai.refresh");
+  status(state, "章立ての台帳へ書きました（本の並びには入りません）");
 }
 
 /** `設定/` の場所。作品設定でフォルダ名を変えていればそれに従う */
@@ -603,8 +904,12 @@ async function previewData(state: PanelState) {
   // 口絵・扉絵の画像（設計書6.65.15）。**面ごと本に入らない**ので、
   // 画面でも面を出さずに理由を言う（挿絵と同じ「覚え込まない」扱い）
   const missingFaces = await missingFaceImages(state);
+  const blocks = resolveBookBlocks(state.current);
 
   return {
+    // 本の並びと、パレットの押せる・押せない（設計書6.65.15の段C）
+    blocks: blockRows(blocks),
+    palette: paletteEntries(blocks),
     // **書き出しと同じCSS**を、画面の枠の中へ閉じ込めただけのもの。
     // 同梱する書体も当てる（設計書6.65.11）——本と同じ字面で確かめられ
     // ないと、書体を選ぶ意味が無い
@@ -621,15 +926,67 @@ async function previewData(state: PanelState) {
       front: composeState(state, "front", baked.front),
       back: composeState(state, "back", baked.back),
     },
-    // 挿絵の欄で選ぶ話の一覧。**絶対パスは渡さない**
-    episodes: state.source.episodes.map((episode) => ({
-      path: episode.path,
-      label: episodeChoiceLabel(episode),
-    })),
+    // 本文の面で選ぶ話と、その間に挟まる章（設計書6.65.15の段C）。
+    // **絶対パスは渡さない**（作品の外を画面へ教える必要が無い）
+    outline: state.source.outline,
     placementWarnings: placementWarnings(state, missingImages, missingFaces),
     notice: state.source.notice,
     dirty: isDirty(state),
   };
+}
+
+/**
+ * 本の並びの行（設計書6.65.15の段C）。
+ *
+ * **呼び名は `BOOK_BLOCK_LABELS` の1か所から取る。** 通知にも画面にも
+ * 同じ言葉が出る（種類を増やしたときに直す場所を増やさない）。
+ */
+function blockRows(blocks: readonly BookBlock[]): BlockRow[] {
+  return blocks.map((block, index) => ({
+    type: block.type,
+    label: BOOK_BLOCK_LABELS[block.type],
+    // 口絵・扉絵は同じ呼び名の面が並ぶので、どの絵かを添える
+    detail: isBookImageBlock(block) ? block.imagePath : null,
+    imagePath: isBookImageBlock(block) ? block.imagePath : undefined,
+    caption: isBookImageBlock(block) ? block.caption : undefined,
+    removable: canRemoveBookBlock(blocks, index),
+  }));
+}
+
+/**
+ * パレットの押せる・押せないと、その理由（設計書6.65.15の段C）。
+ *
+ * **押せない理由は必ず言う。** 反応しないボタンは不具合に見える
+ * （`processAvailability.ts` と同じ流儀で、消さずに畳んで理由を出す）。
+ */
+function paletteEntries(blocks: readonly BookBlock[]): PaletteEntry[] {
+  const entries: PaletteEntry[] = BOOK_BLOCK_TYPES.map((type) => {
+    const label = BOOK_BLOCK_LABELS[type];
+    if (canAddBookBlock(blocks, type)) {
+      return {
+        key: type,
+        enabled: true,
+        reason: `${label}の面を、選んでいる面の後ろへ入れます。`,
+      };
+    }
+    return {
+      key: type,
+      enabled: false,
+      reason:
+        type === "body"
+          ? "本文は1冊にちょうど1つです（増やすことも外すこともできません）。"
+          : `${label}は1冊に1つだけです。既に本の並びに入っています。`,
+    };
+  });
+
+  // 章区切りは面ではない（台帳が正。設計書6.66）ので、常に押せる
+  entries.push({
+    key: "chapter",
+    enabled: true,
+    reason:
+      "どの話から章を始めるかを訊いて、章立ての台帳へ書きます（本の並びには入りません）。",
+  });
+  return entries;
 }
 
 /**
@@ -965,6 +1322,13 @@ interface PreviewPage {
    * ここに「書き出しと同じ断片」というものが無い（設計書6.65.8）。
    */
   compose?: CoverSide;
+  /**
+   * 本の並びの何行目の面か（設計書6.65.15の段C）。
+   *
+   * **画面は選んだ面のプレビューだけを出す。** 行と面を突き合わせるのは
+   * 番号でしかできない——同じ呼び名の面（扉絵）が並ぶことがある。
+   */
+  blockIndex?: number;
 }
 
 /**
@@ -987,16 +1351,22 @@ function buildPages(
   const config = state.current;
   const source = state.source;
   const pages: PreviewPage[] = [];
+  const blocks = resolveBookBlocks(config);
   // 登場人物一覧の面が出るか。**目次の行と面の有無を同じ条件で決める**
-  // （片方だけ出ると、目次から飛べない行ができる。設計書6.65.11）
+  // （片方だけ出ると、目次から飛べない行ができる。設計書6.65.11）。
+  // **並びに置いてあるかで決める**——段Cで blocks が正になったので、
+  // チェック欄（`characterPage.enabled`）はもう見ない
   const hasCharacters =
-    config.characterPage.enabled && source.characters.length > 0;
+    blocks.some((block) => block.type === "characters") &&
+    source.characters.length > 0;
 
+  let index = -1;
   const add = (page: PreviewPage | null): void => {
-    if (page) pages.push(page);
+    if (page) pages.push({ ...page, blockIndex: index });
   };
 
-  for (const block of resolveBookBlocks(config)) {
+  for (const block of blocks) {
+    index++;
     switch (block.type) {
       case "cover":
         add(coverPage(state, vertical, baked.front));
@@ -1357,7 +1727,12 @@ function fontUri(state: PanelState, relativePath: string | null): string | null 
  * 画面で見えないものは本にも入らない。
  */
 function characterNotice(state: PanelState): string | null {
-  if (!state.current.characterPage.enabled) return null;
+  // **並びに置いてあるときだけ言う**（設計書6.65.15の段C）。置いていない
+  // 面について「載る人が居ません」と言っても、作者にできることが無い
+  const placed = resolveBookBlocks(state.current).some(
+    (block) => block.type === "characters"
+  );
+  if (!placed) return null;
 
   const characters = state.source.characters;
   if (characters.length === 0) {
@@ -1391,6 +1766,9 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
   if (scan.episodes.length === 0) {
     return {
       episodes: [],
+      episodeFiles: [],
+      format,
+      outline: [],
       firstChapter: null,
       firstChapterPath: null,
       notice: `「${work.title}」に本文のファイルが見つかりません。`,
@@ -1418,14 +1796,82 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
   });
 
   const first = await readFirstChapter(scan.episodes, format, work.folderPath);
-  return {
+  const source: PreviewSource = {
     episodes,
+    episodeFiles: [...scan.episodes],
+    format,
+    // 章立ては台帳から写す（下で組む。段Cの一覧に章の行が挟まる）
+    outline: [],
     firstChapter: first.chapter,
     firstChapterPath: first.episodePath,
     notice: first.notice,
     characters: await collectCharacters(work),
     afterword: await collectAfterword(work),
   };
+  source.outline = await collectOutline(work, source);
+  return source;
+}
+
+/**
+ * 話と章の一覧を組む（設計書6.65.15の段C・6.66）。
+ *
+ * **章の束ね方は作品一覧と同じ部品**（`groupEpisodesByChapter`）を通す。
+ * ここで別に束ねると、一覧の章の切れ目とこの画面の切れ目がずれる。
+ *
+ * **台帳が読めなくても話は出す。** 章はまとめ方であって話ではないので、
+ * 本文の一覧が空に見えるほうが害が大きい（作品一覧と同じ判断）。
+ */
+async function collectOutline(
+  work: WorkEntry,
+  source: PreviewSource
+): Promise<OutlineEntry[]> {
+  let chapters: Chapter[] = [];
+  try {
+    chapters = (await new ChapterStore(work).load()).chapters;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logFailure("EPUBエディターの章立て", { 作品: work.title, 内容: message });
+  }
+
+  const labels = new Map(
+    source.episodes.map((episode) => [
+      episode.path,
+      episodeChoiceLabel(episode),
+    ])
+  );
+  const out: OutlineEntry[] = [];
+  const addEpisodes = (list: readonly EpisodeFile[]): void => {
+    for (const episode of list) {
+      const relative = episodePathFor(work.folderPath, episode.filePath);
+      out.push({
+        kind: "episode",
+        path: relative,
+        label: labels.get(relative) ?? episode.fileName,
+      });
+    }
+  };
+
+  const grouping = groupEpisodesByChapter(
+    source.episodeFiles,
+    chapters,
+    work.folderPath
+  );
+  // 最初の章より前の話は章なし。作品一覧と同じ並べ方である
+  addEpisodes(grouping.ungrouped);
+  for (const group of grouping.groups) {
+    out.push({
+      kind: "chapter",
+      // 指し先の無い章も**黙って消さない**（作品一覧と同じ言い方）
+      label: group.missingStart
+        ? `${group.chapter.name}（開始の話が見つかりません）`
+        : `${group.chapter.name}（${formatChapterRange(
+            group.episodes,
+            source.format
+          )}）`,
+    });
+    addEpisodes(group.episodes);
+  }
+  return out;
 }
 
 /**
@@ -1661,13 +2107,36 @@ function mergeConfig(
   workTitle: string
 ): { config: BookConfig; error: null } | { config: BookConfig; error: string } {
   try {
-    return { config: parseBookConfig({ ...current, ...patch }, workTitle), error: null };
+    return {
+      config: parseBookConfig(
+        { ...current, ...patch, characterPage: characterPagePatch(current, patch) },
+        workTitle
+      ),
+      error: null,
+    };
   } catch (error) {
     // 表紙の場所は作者が字で書く欄なので、**読めない値の中身をそのまま
     // 伝える**。画面はいまの値のまま据え置く（勝手に直さない）
     const message = error instanceof Error ? error.message : String(error);
     return { config: current, error: message };
   }
+}
+
+/**
+ * 登場人物一覧の指定だけは、**中を混ぜて重ねる**（設計書6.65.15の段C）。
+ *
+ * 画面が送ってくるのはイラストの有無（`showIcons`）だけである。丸ごと
+ * 差し替えると、作者が book.json に手で書いた `enabled` が既定へ落ちる
+ * ——「チェック欄の値は書き換えない」という段Cの約束をここで守る。
+ */
+function characterPagePatch(
+  current: BookConfig,
+  patch: Record<string, unknown>
+): unknown {
+  const incoming = patch.characterPage;
+  if (incoming === undefined || incoming === null) return current.characterPage;
+  if (typeof incoming !== "object") return incoming;
+  return { ...current.characterPage, ...(incoming as Record<string, unknown>) };
 }
 
 function isDirty(state: PanelState): boolean {

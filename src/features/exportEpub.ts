@@ -243,7 +243,12 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
   // **登場人物一覧と書体は、どちらも失敗で本を止めない**（設計書6.65.11）。
   // 台帳が読めない・イラストが1枚読めない・書体が読めない——いずれも
   // 本は出し、何が入らなかったかを完了通知で伝える
-  const characters = config.characterPage.enabled
+  // **台帳を読むのは、人物紹介の面が並びにあるときだけ**（設計書6.65.15の
+  // 段C）。元は `characterPage.enabled` を見ていたが、段Cで並びが正に
+  // なったので、置いてある面の中身だけを集める
+  const characters = resolveBookBlocks(config).some(
+    (block) => block.type === "characters"
+  )
     ? await collectCharacters(work, config.characterPage.showIcons, notices)
     : [];
   const fonts = await collectFonts(work, config.fonts, notices);

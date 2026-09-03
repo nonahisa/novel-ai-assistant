@@ -1,11 +1,16 @@
 import { describe, expect, test } from "vitest";
 import {
   BOOK_SCHEMA_VERSION,
+  canAddBookBlock,
+  canRemoveBookBlock,
   defaultBackCoverLayout,
   defaultBookBlocks,
   defaultBookConfig,
   defaultCoverLayout,
+  insertBookBlockAfter,
+  moveBookBlock,
   parseBookConfig,
+  removeBookBlockAt,
   resolveBookBlocks,
   type BookBlock,
 } from "../../src/models/book";
@@ -774,23 +779,34 @@ describe("ブロックの検証（設計書6.65.15）", () => {
   });
 });
 
-describe("設定の切り替えに、並びが追従する（設計書6.65.15）", () => {
-  /**
-   * 段Bには並びを編む画面がまだ無い。**目次・人物紹介のチェックが正**なので、
-   * blocks が保存されたあとにチェックを戻しても効くようにする（戻せないと、
-   * 版を上げただけで目次の消えた本ができる）。
-   */
-  test("目次を出す設定に戻すと、目次の面が並びへ戻る", () => {
+/**
+ * **書いてある並びが正である**（設計書6.65.15の段C。本体の裁定）。
+ *
+ * ## この節は段Bのテストを書き換えたものである
+ *
+ * 段Bには並びを編む画面が無く、目次・人物紹介の有無を決めるのは左の欄の
+ * チェックだった。そのため `resolveBookBlocks` は blocks を欄の値へ
+ * 追従させており、ここには「目次を出す設定に戻すと、目次の面が並びへ戻る」
+ * 「出さない設定なら、並びに書いてあっても外す」「人物紹介も同じ」の
+ * 3つが並んでいた。**段Cで並びを編む画面ができ、blocks が正になったので、
+ * その3つは反対のことを確かめるものへ置き換えた**——追従が残っていると、
+ * 画面で外した目次が古いチェックの値で戻ってきて、作者が並べたとおりの
+ * 本にならない（二重管理をここで断つ）。
+ */
+describe("並びが正で、設定に追従しない（設計書6.65.15の段C）", () => {
+  test("目次を出す設定でも、並びに無ければ目次の面は入らない", () => {
     const config = parseBookConfig(
       { tocEnabled: true, blocks: [{ type: "cover" }, { type: "body" }] },
       "氷の街"
     );
 
-    const order = resolveBookBlocks(config).map((block) => block.type);
-    expect(order).toEqual(["cover", "toc", "body"]);
+    expect(resolveBookBlocks(config).map((block) => block.type)).toEqual([
+      "cover",
+      "body",
+    ]);
   });
 
-  test("目次を出さない設定なら、並びに書いてあっても外す", () => {
+  test("目次を出さない設定でも、並びに書いてあれば入る", () => {
     const config = parseBookConfig(
       {
         tocEnabled: false,
@@ -801,11 +817,12 @@ describe("設定の切り替えに、並びが追従する（設計書6.65.15）
 
     expect(resolveBookBlocks(config).map((block) => block.type)).toEqual([
       "cover",
+      "toc",
       "body",
     ]);
   });
 
-  test("人物紹介も同じ（本文の前へ戻る）", () => {
+  test("人物紹介も同じ（チェック欄は並びを動かさない）", () => {
     const config = parseBookConfig(
       {
         characterPage: { enabled: true },
@@ -814,13 +831,121 @@ describe("設定の切り替えに、並びが追従する（設計書6.65.15）
       "氷の街"
     );
 
-    // 目次は既定で出す設定なので、こちらも一緒に戻る（目次→人物紹介の順）
     expect(resolveBookBlocks(config).map((block) => block.type)).toEqual([
       "cover",
-      "toc",
-      "characters",
       "body",
       "colophon",
     ]);
+  });
+
+  /**
+   * **チェック欄は読み込み互換のためだけに残っている。** blocks を持たない
+   * 古い book.json では、いまも既定の並びを組む材料である（ここが効かなく
+   * なると、目次を切っていた本が版を上げただけで目次つきになる）。
+   */
+  test("blocks の無い本では、いまもチェック欄が既定の並びを決める", () => {
+    const config = parseBookConfig({ tocEnabled: false }, "氷の街");
+
+    expect(resolveBookBlocks(config).map((block) => block.type)).not.toContain(
+      "toc"
+    );
+  });
+});
+
+/**
+ * 並びの編集（設計書6.65.15の段C）。
+ *
+ * 画面はクリックで挿し、「上へ」「下へ」「削除」で動かす。**その計算は
+ * ここが1か所で持つ**——押せる・押せないの判断（パレットを畳む理由）と、
+ * 実際に並びが変わる計算が別々だと、押せたのに変わらないボタンができる。
+ */
+describe("並びを編む（設計書6.65.15の段C）", () => {
+  const base: BookBlock[] = [
+    { type: "cover" },
+    { type: "toc" },
+    { type: "body" },
+    { type: "colophon" },
+  ];
+  const types = (blocks: readonly BookBlock[] | null): string[] =>
+    (blocks ?? []).map((block) => block.type);
+
+  test("選んだ面の後ろへ入る", () => {
+    expect(types(insertBookBlockAfter(base, 1, { type: "characters" }))).toEqual(
+      ["cover", "toc", "characters", "body", "colophon"]
+    );
+  });
+
+  test("選んでいなければ末尾へ入る", () => {
+    expect(
+      types(insertBookBlockAfter(base, -1, { type: "backCover" }))
+    ).toEqual(["cover", "toc", "body", "colophon", "backCover"]);
+  });
+
+  test("1冊に1つの面は、既にあれば入れられない（null で断る）", () => {
+    expect(insertBookBlockAfter(base, 0, { type: "toc" })).toBeNull();
+    expect(canAddBookBlock(base, "toc")).toBe(false);
+    // **本文も同じ。** 複製できないことは、パレットの押せなさで伝える
+    expect(canAddBookBlock(base, "body")).toBe(false);
+  });
+
+  test("扉絵と口絵は何枚でも入る（置ける場所だけが違う面）", () => {
+    const once = insertBookBlockAfter(base, 0, {
+      type: "sectionArt",
+      imagePath: "素材/扉1.png",
+      caption: "",
+    });
+    expect(canAddBookBlock(once ?? [], "sectionArt")).toBe(true);
+    expect(
+      types(
+        insertBookBlockAfter(once ?? [], 2, {
+          type: "sectionArt",
+          imagePath: "素材/扉2.png",
+          caption: "",
+        })
+      )
+    ).toEqual(["cover", "sectionArt", "toc", "sectionArt", "body", "colophon"]);
+  });
+
+  test("上へ・下へで入れ替わる", () => {
+    expect(types(moveBookBlock(base, 1, -1))).toEqual([
+      "toc",
+      "cover",
+      "body",
+      "colophon",
+    ]);
+    expect(types(moveBookBlock(base, 1, 1))).toEqual([
+      "cover",
+      "body",
+      "toc",
+      "colophon",
+    ]);
+  });
+
+  test("端では動かない（null で断る）", () => {
+    expect(moveBookBlock(base, 0, -1)).toBeNull();
+    expect(moveBookBlock(base, base.length - 1, 1)).toBeNull();
+  });
+
+  test("削除は1つだけ消す", () => {
+    expect(types(removeBookBlockAt(base, 1))).toEqual([
+      "cover",
+      "body",
+      "colophon",
+    ]);
+  });
+
+  /** **本文は消せない。** 0では本にならない（`assertBlockCounts` と同じ判断） */
+  test("本文は削除できない", () => {
+    expect(canRemoveBookBlock(base, 2)).toBe(false);
+    expect(removeBookBlockAt(base, 2)).toBeNull();
+    expect(canRemoveBookBlock(base, 0)).toBe(true);
+  });
+
+  test("元の並びは書き換えない（保存に失敗しても画面だけが変わらない）", () => {
+    insertBookBlockAfter(base, 0, { type: "afterword" });
+    moveBookBlock(base, 0, 1);
+    removeBookBlockAt(base, 0);
+
+    expect(types(base)).toEqual(["cover", "toc", "body", "colophon"]);
   });
 });
