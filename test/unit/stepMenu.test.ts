@@ -446,6 +446,57 @@ describe("準備中の項目", () => {
 
     expect(posting?.detail).toContain("投稿サイト用に変換してコピー");
   });
+
+  test("実装できたものは、枠を外して実物に置き換える", () => {
+    // 枠（準備中）は**まだコマンドが無い段階**を伝えるためのもので、
+    // 実装が済んだら消す。残したままだと「予定」と薄字で出続け、
+    // 実際には使える機能を作者が探しに行かない
+    expect(
+      stepPlaceholders().map((entry) => entry.label),
+      "実装済みの枠が残っている"
+    ).toEqual(["WEB投稿支援（準備中）"]);
+  });
+});
+
+/**
+ * 第7段「電子出版等」（作者の指定、2026-09-03）。
+ *
+ * EPUB（設計書6.65）は 0.29.17〜0.29.22 で実装できたので、「予定」の枠を
+ * 外して実物を載せる。**操作の実体は詳細メニューの木だけが持つ**ので、
+ * ここはコマンドIDで参照するだけである。
+ */
+describe("第7段に、電子書籍の操作が載る", () => {
+  const publishStep = () =>
+    STEP_MENU.find((step) => step.label === "7. 電子出版等")!;
+
+  test("PDF・EPUB書き出し・EPUBエディターが並ぶ", () => {
+    expect(
+      publishStep().entries.map((entry) =>
+        entry.kind === "action" ? entry.command : entry.label
+      )
+    ).toEqual([
+      "novelai.exportPdf",
+      "novelai.exportEpub",
+      "novelai.openEpubEditor",
+    ]);
+  });
+
+  test("実体は詳細メニューの木から引いている（写しではない）", () => {
+    // 名前や説明をここへ書き写すと、木を直したときに片方だけ古くなる
+    for (const command of ["novelai.exportEpub", "novelai.openEpubEditor"]) {
+      const inTree = allActions().find((entry) => entry.command === command);
+      const inStep = stepActions().find((entry) => entry.command === command);
+
+      expect(inTree, `${command} が詳細メニューにない`).toBeTruthy();
+      expect(inStep, `${command} が第7段にない`).toBe(inTree);
+    }
+  });
+
+  test("段の説明が、いま作れるものと合っている", () => {
+    // 「いまはPDFまで」と書いたままにすると、載せた操作と食い違う
+    expect(publishStep().detail).toContain("EPUB");
+    expect(publishStep().detail).not.toContain("いまはPDF（印刷用）まで");
+  });
 });
 
 describe("AIと件数の印", () => {

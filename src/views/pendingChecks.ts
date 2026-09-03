@@ -312,6 +312,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 8,
   },
   {
+    id: "F-59",
+    title: "相談画面の切り替えと、再起動後の表示",
+    commands: ["novelai.openChatPanel"],
+    count: 8,
+  },
+  {
     id: "F-52",
     title: "待ち時間300秒の壁——通信部品（undici）側の上限も設定に合わせた",
     commands: ["novelai.extractSettings"],
@@ -536,4 +542,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 689;
+export const PENDING_CHECK_TOTAL = 697;

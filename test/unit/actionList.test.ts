@@ -9,7 +9,9 @@ import {
   disabledHint,
   explainDisabled,
   isActionEnabled,
+  isItemShownInActionList,
   isItemVisibleInRuntime,
+  shownEntries,
   visibleEntries,
   REQUIRES_WORK_HINT,
   restoreExpandedGroups,
@@ -678,6 +680,65 @@ describe("ブラウザ版でだけ出す操作", () => {
     const commands = allActions().map((action) => action.command);
 
     expect(commands).toContain("novelai.diagnoseWeb");
+  });
+});
+
+/**
+ * 相談の入口を、相談の画面そのものへ移した（作者の指定、2026-09-03）。
+ *
+ * 横の細いパネルの「メインに表示」ボタンが入口になったので、詳細メニューの
+ * 項目は要らなくなった。**ただし木からは消さない**——簡単ステップメニューが
+ * コマンドIDでこの項目を引いており（`stepMenu.ts`）、消すと見出しと説明を
+ * 失う。0.29.9 で作った `hiddenFromActionList`（設計書6.56.3）で、
+ * 実体を残したまま画面にだけ出さない。
+ */
+describe("相談の項目は、木に残して画面から隠す", () => {
+  function chatPanelAction() {
+    return allActions().find(
+      (action) => action.command === "novelai.openChatPanel"
+    );
+  }
+
+  test("木には残る（簡単ステップメニューが参照している）", () => {
+    const action = chatPanelAction();
+
+    expect(action, "木から消すと簡単ステップメニューが壊れる").toBeTruthy();
+    expect(action?.label).toBe("AIに相談する（大きく開く）");
+    // 隠すのは画面だけ。動く環境かどうかの判定には混ぜない
+    expect(isItemVisibleInRuntime(action!, true)).toBe(true);
+  });
+
+  test("詳細メニューの画面には出さない", () => {
+    const action = chatPanelAction();
+
+    expect(action?.hiddenFromActionList).toBe(true);
+    expect(isItemShownInActionList(action!, true)).toBe(false);
+  });
+
+  test("「執筆AI支援」を描画すると、この項目だけが落ちる", () => {
+    const group = ACTION_TREE.find((entry) => entry.label === "執筆AI支援");
+    const has = (entries: readonly { kind: string }[]) =>
+      entries.some(
+        (entry) =>
+          entry.kind === "action" &&
+          (entry as { command: string }).command === "novelai.openChatPanel"
+      );
+
+    // 画面（getChildren）が使うのは shownEntries のほう
+    expect(has(shownEntries(group!.entries, true))).toBe(false);
+    // AIへ渡す機能の一覧・実機確認リストが使うほうには残る
+    expect(has(visibleEntries(group!.entries, true))).toBe(true);
+    // 見出しごと畳まれてはいない（ほかの操作が残っている）
+    expect(shownEntries(group!.entries, true).length).toBeGreaterThan(0);
+  });
+
+  test("「相談する作品を選ぶ」はそのまま出す", () => {
+    const chooseWork = allActions().find(
+      (action) => action.command === "novelai.chooseChatWork"
+    );
+
+    expect(chooseWork, "相談する作品を選ぶが見当たらない").toBeTruthy();
+    expect(chooseWork?.hiddenFromActionList).toBeFalsy();
   });
 });
 

@@ -86,6 +86,11 @@ import {
   stepNodeKey,
   stepViewDescription,
 } from "./views/stepMenu";
+import {
+  FOCUS_CHAT_KEY,
+  SOLO_VIEW_KEY,
+  resetViewVisibility,
+} from "./views/viewVisibility";
 import { ActionDecorationProvider } from "./views/actionDecorations";
 import { PendingUpdateStore } from "./core/pendingUpdates";
 // 作品を選ぶ場面で「未処理の提案が何件あるか」を出すために使う。
@@ -372,6 +377,23 @@ export async function activate(
    */
   setGeneratedStorageRoot(
     vscode.Uri.joinPath(context.globalStorageUri, GENERATED_DIR)
+  );
+
+  /*
+    **左のビューを、素の状態から始める**（作者の報告、2026-09-03
+    「再起動したとき、詳細メニューの下に『AIに相談』が無いことがある」）。
+
+    ビューの出し入れを決めている印（`novelai.focusChat`・`novelai.soloView`）を
+    持っているのはVS Code側で、拡張機能ではない。**拡張機能ホストだけが
+    再起動したとき、前の印はそのまま残る**——`soloView = 'actions'` が
+    残っていれば、相談のビューだけ消えた状態で立ち上がる。理由は
+    `viewVisibility.ts` にある。
+
+    **ビューを前面に出したりはしない。** サイドバーを開けば見出しが在る、
+    という状態に戻すだけである。
+  */
+  await resetViewVisibility((key, value) =>
+    vscode.commands.executeCommand("setContext", key, value)
   );
 
   const registry = new WorkRegistry(context);
@@ -1194,11 +1216,9 @@ export async function activate(
    * 「作品一覧とメニューを出す」ボタンが出る。
    */
   async function setChatFocus(on: boolean): Promise<void> {
-    await vscode.commands.executeCommand(
-      "setContext",
-      "novelai.focusChat",
-      on
-    );
+    // 印の名前は `viewVisibility.ts` が持つ。写しを作ると、
+    // 起動時に戻すつもりの印と別のものを立ててしまう
+    await vscode.commands.executeCommand("setContext", FOCUS_CHAT_KEY, on);
   }
 
   /**
@@ -1220,13 +1240,13 @@ export async function activate(
    * **覚えない（globalState へ書かない）。** 閉じた状態のまま再起動すると、
    * 出し方を知らない作者には拡張機能が壊れたようにしか見えない。
    * 起動のたびに全部出るほうが、閉じ込め事故より安い。
+   *
+   * **覚えないだけでは足りなかった**（作者の報告、2026-09-03）。印を持つのは
+   * VS Code側なので、拡張機能ホストだけが再起動すると前の印が残る。
+   * 起動時に `resetViewVisibility` で入れ直している。
    */
   async function setSoloView(view: string | undefined): Promise<void> {
-    await vscode.commands.executeCommand(
-      "setContext",
-      "novelai.soloView",
-      view
-    );
+    await vscode.commands.executeCommand("setContext", SOLO_VIEW_KEY, view);
   }
 
   // ─── AIの独り言（設計書6.21） ───

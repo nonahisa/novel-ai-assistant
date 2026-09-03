@@ -116,6 +116,83 @@ describe("2つの画面で同じ会話を見る", () => {
   });
 });
 
+/**
+ * 面の行き来（作者の指定、2026-09-03）。
+ *
+ * 詳細メニューから相談の項目を消したので、**画面の中で行き来できないと
+ * 大きく開く道が無くなる**。横の細いパネルには「メインに表示」、
+ * 大きい画面には「サブに戻す」を出す。
+ *
+ * **両方に両方を出さない。** いま見ている面へ移るボタンが並んでいると、
+ * どちらが今の面なのか分からなくなる。
+ */
+describe("メインとサブを行き来する", () => {
+  /** 入力欄の下の並び（「最初から」「送る」が入っている行）を取り出す */
+  function composerRow(html: string): string {
+    const found = html.match(
+      /<div id="composer">[\s\S]*?<div class="row">([\s\S]*?)<\/div>/
+    );
+    expect(found, "入力欄の下の並びが見つからない").toBeTruthy();
+    return found![1];
+  }
+
+  test("横のパネルには「メインに表示」だけを出す", () => {
+    expect(SIDEBAR).toContain('id="to-main"');
+    expect(SIDEBAR).toContain("メインに表示");
+    expect(SIDEBAR).not.toContain('id="to-sub"');
+    expect(SIDEBAR).not.toContain("サブに戻す");
+  });
+
+  test("大きい画面には「サブに戻す」だけを出す", () => {
+    expect(LARGE).toContain('id="to-sub"');
+    expect(LARGE).toContain("サブに戻す");
+    expect(LARGE).not.toContain('id="to-main"');
+    expect(LARGE).not.toContain("メインに表示");
+  });
+
+  test("「最初から」「送る」と同じ並びの、左側に置く", () => {
+    for (const [name, html, id] of [
+      ["横のパネル", SIDEBAR, "to-main"],
+      ["大きい画面", LARGE, "to-sub"],
+    ] as const) {
+      const row = composerRow(html);
+
+      expect(row, `${name}：同じ並びに入っていない`).toContain(`id="${id}"`);
+      expect(row.indexOf(`id="${id}"`), `${name}：「最初から」より右にある`)
+        .toBeLessThan(row.indexOf('id="clear"'));
+      expect(row.indexOf(`id="${id}"`), `${name}：「送る」より右にある`)
+        .toBeLessThan(row.indexOf('id="send"'));
+    }
+  });
+
+  test("押すと拡張機能側へ渡す（webviewからコマンドを呼ばない）", () => {
+    // 面の切り替えはコマンドの実行なので、拡張機能側の仕事である
+    expect(script(SIDEBAR)).toContain("type: 'showInMain'");
+    expect(script(LARGE)).toContain("type: 'showInSub'");
+  });
+
+  test("相手の面のボタンが無くても落ちない", () => {
+    // ツールバーと同じ理由。有無を確かめずに触ると画面が真っ白になる
+    for (const html of [SIDEBAR, LARGE]) {
+      const code = script(html);
+      expect(code).toContain("if (toMainEl)");
+      expect(code).toContain("if (toSubEl)");
+    }
+  });
+
+  test("考えている間は押せない", () => {
+    // 答えを待っている最中に面を畳むと、届いた答えの行き先が変わる
+    for (const html of [SIDEBAR, LARGE]) {
+      const code = script(html);
+      const at = code.indexOf("function setBusy");
+      const body = code.slice(at, at + 500);
+
+      expect(body).toContain("toMainEl");
+      expect(body).toContain("toSubEl");
+    }
+  });
+});
+
 describe("「できること」から機能を起動する", () => {
   test("押すと拡張機能側へ渡る", () => {
     expect(script(LARGE)).toContain("type: 'quickRun'");

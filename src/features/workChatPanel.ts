@@ -160,7 +160,21 @@ type Incoming =
   /** 会話をMarkdownのメモとして残す */
   | { type: "saveNote" }
   /** 使い方のマニュアルを開く */
-  | { type: "openManual" };
+  | { type: "openManual" }
+  /**
+   * 横の細いパネルから、本文の領域へ大きく開く（作者の指定、2026-09-03）。
+   *
+   * 詳細メニューから相談の項目を消したので、**ここが大きく開く入口**になる。
+   * 横のパネルはドックされたビューなので、そのまま残る。
+   */
+  | { type: "showInMain" }
+  /**
+   * 大きい画面から、横の細いパネルへ戻す。
+   *
+   * 「戻す」なので**大きい画面は残さない**。両方に同じ会話が並んだまま
+   * 場所だけ増えると、どちらを見ればよいのか分からなくなる。
+   */
+  | { type: "showInSub" };
 
 /**
  * 標準機能を起動する口。
@@ -482,6 +496,23 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
     if (message.type === "openManual") {
       await openManual();
+      return;
+    }
+    if (message.type === "showInMain") {
+      /*
+        **コマンドを通す。** `openLargePanel()` を直に呼んでも開けるが、
+        コマンド側は開く前に「いま開いている本文」を覚えさせている。
+        直に呼ぶと、その一手間だけが抜けた別経路が増える。
+      */
+      await vscode.commands.executeCommand("novelai.openChatPanel");
+      return;
+    }
+    if (message.type === "showInSub") {
+      // 先に横のパネルを出す。閉じてから開くと、行き先が無い一瞬ができる
+      await vscode.commands.executeCommand("novelai.openChat");
+      // 「戻す」なので大きい画面は畳む。押せるのは大きい画面だけなので、
+      // 送り元がその画面であることは決まっている
+      this.panel?.dispose();
       return;
     }
     if (message.type === "applyEdit") {

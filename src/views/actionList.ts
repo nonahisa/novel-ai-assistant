@@ -410,6 +410,10 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
         // はじめから「AIに相談する（大きく開く）」で、こちらだけがずれていた
         label: "AIに相談する（大きく開く）",
         icon: "comment-discussion",
+        // **詳細メニューには出さない**（作者の指定、2026-09-03。
+        // 横のパネルの「メインに表示」ボタンが入口。簡単ステップメニューには残る）。
+        // **消さずに隠す**——`stepMenu.ts` がこの項目をコマンドIDで引いている
+        hiddenFromActionList: true,
         // 作品のファイルを開いていないと材料が無く、
         // 「作品のファイルを開いてください」としか答えられない
         requiresWork: true,

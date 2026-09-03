@@ -166,10 +166,31 @@ function actionLine(action: ActionItem, noteLocation = true): string {
  */
 function whereToFind(action: ActionItem): string {
   if (!action.hiddenFromActionList) return "";
+  const special = SPECIAL_ENTRANCES[action.command];
+  if (special) return special;
   return STEP_REFERENCED_COMMANDS.includes(action.command)
     ? "（簡単ステップメニューから）"
     : "（設定管理の説明のリンクから）";
 }
+
+/**
+ * 導き方では当てられない入口（作者の指定、2026-09-03）。
+ *
+ * `whereToFind` は「簡単ステップメニューが参照しているか」で入口を当てる。
+ * ふつうはそれで足りるが、**相談の画面だけは入口がメニューの外にある**——
+ * 横の細いパネル（本文の右クリックから開く）の「メインに表示」ボタンが、
+ * 大きく開くいちばん近い道である。導きに任せると「簡単ステップメニューから」
+ * とだけ書き、その道が案内から消える。
+ *
+ * **例外はここへ集める。** 説明文（`detail`）へ書き足す手もあるが、
+ * detail はメニューのホバーとAIへ渡す説明にも出るので、
+ * マニュアルの都合の一文が3か所に散らばることになる。
+ */
+const SPECIAL_ENTRANCES: Readonly<Record<string, string>> = {
+  "novelai.openChatPanel":
+    "（横の「AIに相談」パネルの「メインに表示」ボタンから。" +
+    "簡単ステップメニューにもあります）",
+};
 
 /**
  * 説明文から、画面用の強調の印を落とす。

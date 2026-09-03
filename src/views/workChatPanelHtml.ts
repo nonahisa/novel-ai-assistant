@@ -20,6 +20,13 @@
  *
  * `large` のときだけツールバー（作品を選ぶ・会話をメモに保存・できること）を
  * 出す。横の狭いパネルに同じものを置くと、肝心の会話が押し出される。
+ *
+ * ## 面の行き来（作者の指定、2026-09-03）
+ *
+ * 詳細メニューから相談の項目を消したので、**画面の中で行き来できないと
+ * 大きく開く道が無くなる**。入力欄の下に、いま居ない側へ移るボタンを
+ * 1つだけ出す（横なら「メインに表示」、大きい画面なら「サブに戻す」）。
+ * 両方に両方を出すと、どちらが今の面なのか読めなくなる。
  */
 /**
  * 大きく開いたときだけ出すツールバー。
@@ -253,6 +260,11 @@ ${large ? TOOLBAR_HTML : ""}
 <div id="composer">
   <textarea id="input" placeholder="聞きたいことを書いてください（Ctrl+Enterで送信）"></textarea>
   <div class="row">
+    ${
+      large
+        ? `<button class="action secondary" id="to-sub">サブに戻す</button>`
+        : `<button class="action secondary" id="to-main">メインに表示</button>`
+    }
     <span class="hint" id="hint"></span>
     <button class="action secondary" id="clear">最初から</button>
     <button class="action" id="send">送る</button>
@@ -276,6 +288,10 @@ const chooseWorkEl = document.getElementById('choose-work');
 const saveNoteEl = document.getElementById('save-note');
 const openManualEl = document.getElementById('open-manual');
 const quickRunListEl = document.getElementById('quickrun-list');
+// 面を移るボタンは、いま居ない側のぶんが1つだけ在る。
+// **どちらの面でも同じ書き方で扱う**ので、片方は必ず null になる
+const toMainEl = document.getElementById('to-main');
+const toSubEl = document.getElementById('to-sub');
 
 /** 直前の返事に付いていた選択肢。番号入力で選べるようにする */
 let currentOptions = [];
@@ -295,6 +311,15 @@ function setBusy(value) {
   busy = value;
   thinkingEl.hidden = !value;
   sendEl.disabled = value;
+  /*
+    **答えを待っている間は、面を移らせない。**
+
+    会話そのものは拡張機能側が1つだけ持っているので失われないが、
+    横へ戻すほうはこの画面を閉じる。返事が届く前に閉じると、
+    まだ履歴に積まれていない今の質問だけが、移った先に出ない。
+  */
+  if (toMainEl) toMainEl.disabled = value;
+  if (toSubEl) toSubEl.disabled = value;
   document.querySelectorAll('.option').forEach((el) => {
     el.disabled = value;
   });
@@ -573,6 +598,24 @@ if (saveNoteEl) {
 if (openManualEl) {
   openManualEl.addEventListener('click', () => {
     vscode.postMessage({ type: 'openManual' });
+  });
+}
+
+/*
+  面を移る。**コマンドを呼ぶのは拡張機能側**である（既存の口と同じ流儀）。
+  webviewから直接コマンドを実行できる仕組みは作らない——画面から届いた
+  文字列がそのままコマンド名になる余地を、どこにも残さないため。
+*/
+if (toMainEl) {
+  toMainEl.addEventListener('click', () => {
+    if (busy) return;
+    vscode.postMessage({ type: 'showInMain' });
+  });
+}
+if (toSubEl) {
+  toSubEl.addEventListener('click', () => {
+    if (busy) return;
+    vscode.postMessage({ type: 'showInSub' });
   });
 }
 

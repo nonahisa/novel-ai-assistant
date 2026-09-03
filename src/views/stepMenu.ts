@@ -232,16 +232,14 @@ const STEP_DEFS: readonly StepDef[] = [
     icon: "package",
     detail:
       "書き上げた作品を、紙や電子書籍の形にして出す段階です。" +
-      "いまはPDF（印刷用）まで作れます。",
+      "PDF（印刷用）とEPUB（電子書籍）が作れます。" +
+      "本の見た目はEPUBエディターで確かめながら決められます。",
+    // **「EPUB出力（予定）」の枠は外した**（作者の指定、2026-09-03）。
+    // 設計書6.65が実装できたので、枠ではなく実物を載せる
     entries: [
       "novelai.exportPdf",
-      {
-        kind: "placeholder",
-        label: "EPUB出力（予定）",
-        icon: "book",
-        detail:
-          "電子書籍（EPUB等）への書き出しを予定しています。まだ使えません。",
-      },
+      "novelai.exportEpub",
+      "novelai.openEpubEditor",
     ],
   },
   {
