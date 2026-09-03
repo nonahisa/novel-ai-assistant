@@ -126,13 +126,38 @@ export class ChapterProposalApplier {
         種類: error instanceof ChapterStoreError ? error.kind : "unknown",
         詳細: detail,
       });
-      return { ok: false, reason: detail };
+      return { ok: false, reason: await this.recover(error, detail) };
     }
 
     // 保存できてから手元を進める。**順序を逆にしない**——失敗した回を
     // 反映済みとして数えると、次の承認が消えた章の上に重なる
     this.set = next;
     return { ok: true };
+  }
+
+  /**
+   * 外で台帳が変わって止まったときは、**その場で読み直す**（設計書6.66.4）。
+   *
+   * 読み直さないと、このパネルの承認は**二度と通らない**。手元の
+   * `ChapterStore` は古いハッシュを覚えたままなので、作者が何度押しても
+   * 同じ理由で止まり、**AIを呼び直す（＝もう一度課金される）以外に道が無い**。
+   *
+   * **今回の1件は反映しない。** 読み直した内容を見ずに重ねると、外で
+   * 加わった章を上書きしうる。次の承認から、新しい内容の上に載る。
+   */
+  private async recover(error: unknown, detail: string): Promise<string> {
+    const kind = error instanceof ChapterStoreError ? error.kind : "unknown";
+    if (kind !== "modified_externally") return detail;
+
+    try {
+      this.set = await this.store.load();
+    } catch (reloadError) {
+      logFailure("章立ての提案の反映（読み直し）", {
+        内容: describeError(reloadError),
+      });
+      return detail;
+    }
+    return `${detail}　最新の章立てを読み直しました。もう一度押すと、その内容の上に反映します。`;
   }
 }
 

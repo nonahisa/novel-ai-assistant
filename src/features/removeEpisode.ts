@@ -5,14 +5,14 @@ import {
   applyRenumberPlan,
   planRemoval,
 } from "../core/episodeRenumber";
-import { followEpisodeLedgers } from "./episodeLedgers";
+import { followEpisodeLedgers, type RemovedEpisode } from "./episodeLedgers";
 import {
-  describeSkippedDetail,
+  describeRenumberTargets,
   findConflictedEpisodes,
+  findUnsavedEpisodes,
   offerIndependentRenameCommit,
   reportRenumberOutcome,
 } from "./episodeRenumberShared";
-import { hasUnsavedChanges } from "../core/textFile";
 
 /**
  * この話を削除し、後ろの話数を詰める（設計書6.67.4）。
@@ -65,13 +65,26 @@ export async function removeEpisodeAndRenumber(
     return { changed: false };
   }
 
-  const dirtyNote = hasUnsavedChanges(episode.filePath)
-    ? "未保存の変更も破棄されます。"
-    : "";
-  const skippedDetail = describeSkippedDetail(plan);
+  /*
+    **未保存のまま開かれている話があれば、始めない**（設計書6.67.2）。
+    消す話も対象に含める——未保存の編集を抱えたままごみ箱へ送ると、
+    そのあとエディタが保存して**消したはずの話が戻る**ことがある。
+  */
+  const unsaved = findUnsavedEpisodes([
+    episode.filePath,
+    ...plan.renames.map((rename) => rename.fromPath),
+  ]);
+  if (unsaved.length > 0) {
+    void vscode.window.showErrorMessage(
+      `未保存の変更がある話（${unsaved.join("、")}）が削除・付け替えの対象です。` +
+        "保存してからやり直してください。"
+    );
+    return { changed: false };
+  }
+
   const detail =
-    `ごみ箱に移動します。元に戻すことができます。${dirtyNote}` +
-    (skippedDetail ? `\n${skippedDetail}` : "");
+    "ごみ箱に移動します。元に戻すことができます。\n" +
+    describeRenumberTargets(work, plan);
 
   const answer = await vscode.window.showWarningMessage(
     `「${episode.fileName}」を削除し、第${plan.pivot}話以降の${plan.renames.length}件の話数を詰めます。`,
@@ -102,14 +115,22 @@ export async function removeEpisodeAndRenumber(
     });
   });
 
-  const summary = await followEpisodeLedgers(
-    work,
-    outcome.done,
-    { pivot: plan.pivot, delta: -1, removed: plan.pivot },
-    episode.filePath
-  );
+  const summary = await followEpisodeLedgers(work, outcome.done, {
+    filePath: episode.filePath,
+    number: plan.pivot,
+    next: nextEpisodeAfter(episodes, plan, outcome),
+  });
 
-  reportRenumberOutcome("削除", plan.pivot, outcome, summary);
+  reportRenumberOutcome({
+    action: "削除",
+    pivot: plan.pivot,
+    outcome,
+    summary,
+    emptyDetail:
+      plan.skipped.length > 0
+        ? "動かせる話が無かったため付け替えなし"
+        : "後ろに話が無いため付け替えなし",
+  });
 
   // **削除そのものはコミットに含めない。** 名前だけの独立コミットは
   // 「話数の調整」だけを表すもの（設計書6.67.1）。削除は内容の変更なので、
@@ -121,4 +142,38 @@ export async function removeEpisodeAndRenumber(
   );
 
   return { changed: true };
+}
+
+/**
+ * 消した話の**次の話**（付け替えが済んだあとの姿）。後ろに話が無ければ undefined。
+ *
+ * 開始の話を消された章の移し先に使う（設計書6.67.3）。**付け替え後の姿で
+ * 返す**——章の台帳はパスで話を指すので、動く前の場所を渡すと存在しない
+ * ファイルを指す。付け替えが止まって動かなかった話は、元の場所のままである。
+ */
+function nextEpisodeAfter(
+  episodes: readonly EpisodeFile[],
+  plan: { pivot: number; folder: string },
+  outcome: { done: readonly { fromPath: string; toPath: string; newNumber: number }[] }
+): RemovedEpisode["next"] {
+  const folder = path.normalizeForComparison(plan.folder);
+  const candidates = episodes
+    .filter(
+      (candidate) =>
+        candidate.chapterStart !== null &&
+        candidate.chapterStart > plan.pivot &&
+        path.normalizeForComparison(path.dirname(candidate.filePath)) === folder
+    )
+    .sort((left, right) => (left.chapterStart ?? 0) - (right.chapterStart ?? 0));
+  const next = candidates[0];
+  if (!next) return undefined;
+
+  const moved = outcome.done.find(
+    (rename) =>
+      path.normalizeForComparison(rename.fromPath) ===
+      path.normalizeForComparison(next.filePath)
+  );
+  return moved
+    ? { filePath: moved.toPath, number: moved.newNumber }
+    : { filePath: next.filePath, number: next.chapterStart };
 }

@@ -2,6 +2,9 @@ import * as path from "path";
 import { describe, expect, test } from "vitest";
 import {
   applyRenumberPlan,
+  episodeNameStyleOf,
+  episodeNumberMoves,
+  insertedEpisodeFileName,
   planInsertion,
   planRemoval,
   renumberCharacter,
@@ -60,9 +63,122 @@ describe("ファイル名の話数だけを差し替える", () => {
   });
 });
 
+describe("新しい話の名前は、隣の話の書き方に合わせる", () => {
+  test("ファイル名の書き方を読み取る", () => {
+    expect(episodeNameStyleOf("第3話 再会.md")).toEqual({
+      numberPart: "第3話",
+      separator: " ",
+      ext: ".md",
+    });
+    expect(episodeNameStyleOf("007_湖畔の誓い.txt")).toEqual({
+      numberPart: "007",
+      separator: "_",
+      ext: ".txt",
+    });
+    // サブタイトルの無い話では、区切りは分からない（null）
+    expect(episodeNameStyleOf("003.txt")).toEqual({
+      numberPart: "003",
+      separator: null,
+      ext: ".txt",
+    });
+    expect(episodeNameStyleOf("episode_0001_はじまり.txt")).toEqual({
+      numberPart: "episode_0001",
+      separator: "_",
+      ext: ".txt",
+    });
+    // 話数を持たない名前からは、書き方を決められない
+    expect(episodeNameStyleOf("プロローグ.txt")).toBeNull();
+  });
+
+  const fallback = { digits: 3, extension: ".txt" };
+
+  test("「第◯話」の作品では「第◯話」で作る（拡張子も隣に合わせる）", () => {
+    expect(
+      insertedEpisodeFileName({
+        neighborFileName: "第3話 再会.md",
+        number: 3,
+        subtitle: "出立",
+        fallback,
+      })
+    ).toBe("第3話 出立.md");
+  });
+
+  test("区切りも隣に合わせる", () => {
+    expect(
+      insertedEpisodeFileName({
+        neighborFileName: "003_出会い.txt",
+        number: 3,
+        subtitle: "出立",
+        fallback,
+      })
+    ).toBe("003_出立.txt");
+  });
+
+  test("ゼロ埋めの桁を保つ。隣にサブタイトルが無ければ区切りは既定", () => {
+    expect(
+      insertedEpisodeFileName({
+        neighborFileName: "0003.txt",
+        number: 3,
+        subtitle: "出立",
+        fallback,
+      })
+    ).toBe("0003_出立.txt");
+    // サブタイトルを書かなければ、番号だけ
+    expect(
+      insertedEpisodeFileName({
+        neighborFileName: "0003.txt",
+        number: 3,
+        subtitle: "",
+        fallback,
+      })
+    ).toBe("0003.txt");
+  });
+
+  test("英字プレフィックスの作品でも、その書き方のまま", () => {
+    expect(
+      insertedEpisodeFileName({
+        neighborFileName: "ep03.txt",
+        number: 3,
+        subtitle: "出立",
+        fallback,
+      })
+    ).toBe("ep03_出立.txt");
+  });
+
+  test("隣が無い（書き方を読めない）ときだけ、設定の既定から作る", () => {
+    expect(
+      insertedEpisodeFileName({
+        neighborFileName: null,
+        number: 4,
+        subtitle: "",
+        fallback,
+      })
+    ).toBe("004.txt");
+    expect(
+      insertedEpisodeFileName({
+        neighborFileName: "プロローグ.txt",
+        number: 4,
+        subtitle: "出立",
+        fallback,
+      })
+    ).toBe("004_出立.txt");
+  });
+
+  test("ファイル名に使えない記号は、全角へ落とす", () => {
+    expect(
+      insertedEpisodeFileName({
+        neighborFileName: "003.txt",
+        number: 3,
+        subtitle: "再会/別離",
+        fallback,
+      })
+    ).toBe("003_再会／別離.txt");
+  });
+});
+
 describe("挿入の計画", () => {
   test("挿入位置より後ろだけが +1 され、実行は降順", () => {
-    const plan = planInsertion(numbered, 3);
+    const plan = planInsertion(numbered, 3, DIR);
     expect(plan.delta).toBe(1);
     expect(plan.renames.map((r) => [r.fromFileName, r.toFileName])).toEqual([
       ["005.txt", "006.txt"],
@@ -72,18 +188,18 @@ describe("挿入の計画", () => {
   });
 
   test("先頭に挿入すると全部が動く", () => {
-    const plan = planInsertion(numbered, 1);
+    const plan = planInsertion(numbered, 1, DIR);
     expect(plan.renames).toHaveLength(5);
     expect(plan.renames[0].fromFileName).toBe("005.txt");
     expect(plan.renames[plan.renames.length - 1].fromFileName).toBe("001.txt");
   });
 
   test("末尾の次に挿入すると、動く話は無い", () => {
-    expect(planInsertion(numbered, 6).renames).toHaveLength(0);
+    expect(planInsertion(numbered, 6, DIR).renames).toHaveLength(0);
   });
 
   test("話が1つでも通る", () => {
-    const plan = planInsertion([ep("001.txt")], 1);
+    const plan = planInsertion([ep("001.txt")], 1, DIR);
     expect(plan.renames.map((r) => r.toFileName)).toEqual(["002.txt"]);
   });
 
@@ -95,7 +211,7 @@ describe("挿入の計画", () => {
       ep("幕間1.txt"),
       ep("2026-08-16_余話.txt"),
     ];
-    const plan = planInsertion(episodes, 1);
+    const plan = planInsertion(episodes, 1, DIR);
     expect(plan.renames.map((r) => r.fromFileName)).toEqual([
       "002.txt",
       "001.txt",
@@ -108,7 +224,7 @@ describe("挿入の計画", () => {
   });
 
   test("話数の範囲を持つ合本は動かさず、理由つきで返す", () => {
-    const plan = planInsertion([ep("001.txt"), ep("003-005_合本.txt")], 2);
+    const plan = planInsertion([ep("001.txt"), ep("003-005_合本.txt")], 2, DIR);
     expect(plan.renames).toHaveLength(0);
     expect(plan.skipped).toHaveLength(1);
     expect(plan.skipped[0]).toMatchObject({
@@ -117,25 +233,50 @@ describe("挿入の計画", () => {
     });
   });
 
+  test("名前に範囲が無くても、合本なら動かさない", () => {
+    // なろうの一括ダウンロードは `001.txt` のような名前で全話を入れる。
+    // 名前だけを見て動かすと、中の219話ぶんの話数と食い違う（A-3）
+    const plan = planInsertion(
+      [
+        { filePath: path.join(DIR, "003.txt"), fileName: "003.txt", collectedCount: 219 },
+        ep("004.txt"),
+      ],
+      3,
+      DIR
+    );
+    expect(plan.renames.map((r) => r.fromFileName)).toEqual(["004.txt"]);
+    expect(plan.skipped).toMatchObject([{ fileName: "003.txt", reason: "range" }]);
+  });
+
   test("2つの話が同じ名前へ行き着くときは、始める前に知らせる", () => {
     // 「9.txt」と「09.txt」は、どちらも第9話。1つずらすと両方 10.txt になる。
     // 実行してしまってからでは片方が消えている
-    const plan = planInsertion([ep("9.txt"), ep("09.txt")], 9);
+    const plan = planInsertion([ep("9.txt"), ep("09.txt")], 9, DIR);
     expect(plan.collisions.length).toBeGreaterThan(0);
     expect(plan.collisions.map((c) => c.toFileName)).toContain("10.txt");
   });
 
-  test("別のフォルダの同じ名前は、ぶつかりではない", () => {
-    // 走査は下の階層まで見る。名前だけで比べると、番外編フォルダの
-    // 003.txt を「ぶつかる」と誤って断ってしまう
+  test("別のフォルダの話は、そもそも対象にしない", () => {
+    // 番外編・下書きは独自の番号で並んでいる。基準の話と同じフォルダーの
+    // 話だけを動かす（A-4）
     const plan = planInsertion(
       [
         ep("003.txt"),
+        ep("004.txt"),
         { filePath: path.join(DIR, "番外", "004.txt"), fileName: "004.txt" },
+        { filePath: path.join(DIR, "番外", "序.txt"), fileName: "序.txt" },
       ],
-      3
+      3,
+      DIR
     );
+    expect(plan.folder).toBe(DIR);
+    expect(plan.renames.map((r) => r.fromPath)).toEqual([
+      path.join(DIR, "004.txt"),
+      path.join(DIR, "003.txt"),
+    ]);
     expect(plan.collisions).toHaveLength(0);
+    // 別フォルダの番号無しの話は、そのままの一覧にも出さない
+    expect(plan.unnumbered).toEqual([]);
   });
 });
 
@@ -164,11 +305,37 @@ describe("削除の計画", () => {
       planRemoval([ep("プロローグ.txt")], path.join(DIR, "プロローグ.txt"))
     ).toThrow();
   });
+
+  test("合本を指すと、計画を作れない（中の話数を詰められない）", () => {
+    const collected = {
+      filePath: path.join(DIR, "001.txt"),
+      fileName: "001.txt",
+      collectedCount: 219,
+    };
+    expect(() =>
+      planRemoval([collected, ep("002.txt")], collected.filePath)
+    ).toThrow();
+  });
+
+  test("対象は、消す話と同じフォルダーの話だけ", () => {
+    const plan = planRemoval(
+      [
+        ...numbered,
+        { filePath: path.join(DIR, "番外", "004.txt"), fileName: "004.txt" },
+      ],
+      path.join(DIR, "003.txt")
+    );
+    expect(plan.folder).toBe(DIR);
+    expect(plan.renames.map((r) => r.fromPath)).toEqual([
+      path.join(DIR, "004.txt"),
+      path.join(DIR, "005.txt"),
+    ]);
+  });
 });
 
 describe("付け替えの実行", () => {
   test("全部済めば、済んだ一覧だけが返る", async () => {
-    const plan = planInsertion(numbered, 3);
+    const plan = planInsertion(numbered, 3, DIR);
     const done: string[] = [];
     const outcome = await applyRenumberPlan(plan, async (from, to) => {
       done.push(`${path.basename(from)}→${path.basename(to)}`);
@@ -183,7 +350,7 @@ describe("付け替えの実行", () => {
   });
 
   test("1件でも失敗したらそこで止まり、どこまで進んだかが分かる", async () => {
-    const plan = planInsertion(numbered, 3);
+    const plan = planInsertion(numbered, 3, DIR);
     const outcome = await applyRenumberPlan(plan, async (from) => {
       if (path.basename(from) === "004.txt") throw new Error("使用中です");
     });
@@ -241,6 +408,80 @@ describe("パスで指している台帳の追従", () => {
   });
 });
 
+describe("削除された話から始まる章の追従", () => {
+  test("開始が消えた章は、次の話へ移る", () => {
+    // 第3話を消して 004.txt→003.txt が済んだ状態。第二章は第3話から
+    // 始まっていた
+    const chapters: Chapter[] = [
+      { name: "第一章", startEpisodePath: "本文/001.txt" },
+      { name: "第二章", startEpisodePath: "本文/003.txt" },
+    ];
+    const result = renumberChapterSet(
+      chapters,
+      new Map([
+        ["本文/004.txt", "本文/003.txt"],
+        ["本文/005.txt", "本文/004.txt"],
+      ]),
+      { path: "本文/003.txt", nextPath: "本文/003.txt" }
+    );
+
+    expect(result.chapters.map((c) => c.startEpisodePath)).toEqual([
+      "本文/001.txt",
+      "本文/003.txt",
+    ]);
+    expect(result.movedStarts).toEqual([
+      { name: "第二章", toPath: "本文/003.txt" },
+    ]);
+    expect(result.dropped).toEqual([]);
+  });
+
+  test("移した先が次の章の開始と重なるなら、その章を外す（中身が空）", () => {
+    // 第二章は第3話1話だけの章。第3話を消すと、次の第4話（→003.txt）は
+    // もう第三章の開始である。**保存ごと落ちて黙る**のを避けるため、
+    // 重複を作らずに空の章を外す
+    const chapters: Chapter[] = [
+      { name: "第二章", startEpisodePath: "本文/003.txt" },
+      { name: "第三章", startEpisodePath: "本文/004.txt" },
+    ];
+    const result = renumberChapterSet(
+      chapters,
+      new Map([["本文/004.txt", "本文/003.txt"]]),
+      { path: "本文/003.txt", nextPath: "本文/003.txt" }
+    );
+
+    expect(result.chapters).toEqual([
+      { name: "第三章", startEpisodePath: "本文/003.txt" },
+    ]);
+    expect(result.dropped).toEqual(["第二章"]);
+    expect(result.movedStarts).toEqual([]);
+  });
+
+  test("後ろに話が無ければ、その章は外す", () => {
+    const chapters: Chapter[] = [
+      { name: "終章", startEpisodePath: "本文/005.txt" },
+    ];
+    const result = renumberChapterSet(chapters, new Map(), {
+      path: "本文/005.txt",
+    });
+
+    expect(result.chapters).toEqual([]);
+    expect(result.dropped).toEqual(["終章"]);
+  });
+
+  test("削除でないときは、これまでどおり付け替えるだけ", () => {
+    const chapters: Chapter[] = [
+      { name: "第二章", startEpisodePath: "本文/003.txt" },
+    ];
+    const result = renumberChapterSet(
+      chapters,
+      new Map([["本文/003.txt", "本文/004.txt"]])
+    );
+    expect(result.changed).toBe(1);
+    expect(result.chapters[0].startEpisodePath).toBe("本文/004.txt");
+    expect(result.dropped).toEqual([]);
+  });
+});
+
 describe("話数の数字で指している台帳の追従", () => {
   function personWithChapters() {
     const person = emptyCharacter("char_001", "月島灯");
@@ -274,10 +515,16 @@ describe("話数の数字で指している台帳の追従", () => {
     return person;
   }
 
-  test("挿入位置より後ろの話数だけが +1 される", () => {
+  /** 「第3話の前に挿入」で3〜5話が動いた、の対応表 */
+  const inserted = new Map([
+    [3, 4],
+    [4, 5],
+    [5, 6],
+  ]);
+
+  test("実際に動いた話数だけが付け替わる", () => {
     const result = renumberCharacter(personWithChapters(), {
-      pivot: 3,
-      delta: 1,
+      moved: inserted,
     });
     expect(result.character.appearedChapters).toEqual([1, 4, 6]);
     expect(result.character.firstPerson.variants[0].chapters).toEqual([2, 5]);
@@ -289,19 +536,41 @@ describe("話数の数字で指している台帳の追従", () => {
     expect(result.changed).toBe(6);
   });
 
-  test("挿入位置より前は動かない", () => {
+  test("対応表が空なら、1つも動かない", () => {
     const result = renumberCharacter(personWithChapters(), {
-      pivot: 9,
-      delta: 1,
+      moved: new Map(),
     });
     expect(result.changed).toBe(0);
     expect(result.character.appearedChapters).toEqual([1, 3, 5]);
   });
 
-  test("削除では、後ろが −1 され、消えた話の番号だけが落ちる", () => {
+  test("途中で止まった付け替えでは、動いた話だけが付け替わる", () => {
+    // 「第3話の前に挿入」が 005→006 まで済んで、004→005 で止まった。
+    // **台帳だけ最後まで進めると、原稿と食い違う**（A-1の再現）
     const result = renumberCharacter(personWithChapters(), {
-      pivot: 3,
-      delta: -1,
+      moved: new Map([[5, 6]]),
+    });
+    expect(result.character.appearedChapters).toEqual([1, 3, 6]);
+  });
+
+  test("動かせなかった話（合本・判定不能）の話数は、そのまま残る", () => {
+    // 第4話が合本で動かせず skipped になった場合、対応表にも入らない
+    const result = renumberCharacter(personWithChapters(), {
+      moved: new Map([
+        [3, 4],
+        [5, 6],
+      ]),
+    });
+    // 4 は動かない（4 のままの原稿がそこに残っている）
+    expect(result.character.firstPerson.variants[0].chapters).toEqual([2, 4]);
+  });
+
+  test("削除では、動いた話が詰まり、消えた話の番号だけが落ちる", () => {
+    const result = renumberCharacter(personWithChapters(), {
+      moved: new Map([
+        [4, 3],
+        [5, 4],
+      ]),
       removed: 3,
     });
     // 3 は消え、5 は 4 へ詰まる
@@ -313,7 +582,16 @@ describe("話数の数字で指している台帳の追従", () => {
 
   test("元の人物は書き換えない（保存に失敗しても画面が食い違わない）", () => {
     const person = personWithChapters();
-    renumberCharacter(person, { pivot: 1, delta: 1 });
+    renumberCharacter(person, { moved: new Map([[1, 2]]) });
     expect(person.appearedChapters).toEqual([1, 3, 5]);
+  });
+
+  test("済んだ付け替えから、話数の対応表を作る", () => {
+    const plan = planInsertion(numbered, 3, DIR);
+    expect([...episodeNumberMoves(plan.renames).entries()].sort()).toEqual([
+      [3, 4],
+      [4, 5],
+      [5, 6],
+    ]);
   });
 });

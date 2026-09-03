@@ -1,5 +1,5 @@
 import * as path from "./paths";
-import { parseEpisodeFileName } from "./episodeParser";
+import { parseEpisodeFileName, sanitizeFileName } from "./episodeParser";
 import { normalizeEpisodePath, type Chapter } from "../models/chapter";
 import type { Character } from "../models/character";
 import type {
@@ -25,6 +25,14 @@ import type { BookIllustration, BookPageBreak } from "../models/book";
 export interface RenumberEpisode {
   filePath: string;
   fileName: string;
+  /**
+   * 1つのファイルに何話も入っている（合本）ときの、中の話数。合本でなければ null。
+   *
+   * **名前に範囲が無くても合本は動かさない。** なろうの一括ダウンロードは
+   * `001.txt` のような単話と見分けの付かない名前で全話を入れてくる。
+   * 名前だけを見て動かすと、中に書かれた219話ぶんの話数と食い違う。
+   */
+  collectedCount?: number | null;
 }
 
 /** 動かさなかった理由 */
@@ -56,6 +64,13 @@ export interface RenumberPlan {
   /** ずらす向き。+1 が挿入、−1 が削除 */
   delta: 1 | -1;
   /**
+   * 対象のフォルダー。**基準の話と同じフォルダーの話しか動かさない**。
+   *
+   * 番外編や下書きは、本編とは別の番号で並んでいることが多い。作品の
+   * 下を全部まとめて動かすと、**巻き込まれた番外編の番号が黙ってずれる**。
+   */
+  folder: string;
+  /**
    * **実行する順に並んでいる**（6.67.2）。
    * 挿入（+1）は後ろから降順、削除（−1）は前から昇順。
    * 逆順で動かすと、先に居る相手のファイルを踏む。
@@ -79,11 +94,22 @@ export interface RenumberPlan {
   collisions: EpisodeRename[];
 }
 
-/** 話数を数字で持っている台帳をどうずらすか */
+/**
+ * 話数を数字で持っている台帳をどうずらすか。
+ *
+ * **「pivot より後ろを ±1」という算術ではなく、実際に動いた話の対応表で
+ * 動かす**（設計書6.67.3）。算術で動かすと、次の2つが黙って壊れる。
+ *
+ *   1. 付け替えが途中で止まったとき、**台帳だけが最後まで進む**
+ *   2. 合本や名前の読めない話（`skipped`）は原稿が動いていないのに、
+ *      台帳のその話数だけがずれる
+ */
 export interface EpisodeShift {
-  /** この話数以降（挿入）／この話数より後ろ（削除）を動かす */
-  pivot: number;
-  delta: 1 | -1;
+  /**
+   * 旧話数 → 新話数。**実際に動いた話だけ**が入る（`outcome.done` から作る）。
+   * **ここに無い話数は1つも触らない。**
+   */
+  moved: ReadonlyMap<number, number>;
   /**
    * 削除された話数。**その番号は台帳から落とす**。
    *
@@ -156,6 +182,76 @@ export function renameWithNumber(
   );
 }
 
+/** ファイル名の書き方。**作者が選んだ形をそのまま写し取る** */
+export interface EpisodeNameStyle {
+  /** 番号までの部分（`003`／`第3話`／`ep03`）。桁も全角も書いてあるまま */
+  numberPart: string;
+  /** 番号とサブタイトルのあいだの区切り。隣にサブタイトルが無ければ null */
+  separator: string | null;
+  /** 拡張子（`.txt`／`.md`） */
+  ext: string;
+}
+
+/** サブタイトルの前に置かれる区切り（`episodeParser` の読みと同じ並び） */
+const SEPARATORS = /[\s_.．・-]+$/;
+
+/**
+ * ファイル名から書き方を読み取る（設計書6.67.4）。
+ *
+ * **番号の部分は差し替えない。** 読み取るのは隣の話の名前で、その番号は
+ * これから作る話の番号と同じ（挿入位置に居た話だから）である。作り直すと
+ * ゼロ埋めや全角の書き方が変わってしまう。
+ *
+ * 話数を持たない名前・サブタイトルの位置を決められない名前では null。
+ * **当て推量で作らない**（`renameWithNumber` と同じ構え）。
+ */
+export function episodeNameStyleOf(fileName: string): EpisodeNameStyle | null {
+  if (!isSingleNumbered(fileName)) return null;
+  const ext = path.extname(fileName);
+  const base = fileName.slice(0, fileName.length - ext.length);
+  const subtitle = parseEpisodeFileName(fileName).subtitle;
+  if (!subtitle) return { numberPart: base, separator: null, ext };
+
+  const index = base.lastIndexOf(subtitle);
+  if (index <= 0) return null;
+  const numberPart = base.slice(0, index).replace(SEPARATORS, "");
+  if (!numberPart) return null;
+  return { numberPart, separator: base.slice(numberPart.length, index), ext };
+}
+
+/** サブタイトルを付けるときの既定の区切り（`episodeRename.ts` と同じ） */
+const DEFAULT_SEPARATOR = "_";
+
+/**
+ * 挿入する新しい話のファイル名を決める（設計書6.67.4）。
+ *
+ * **作品のファイル名の流儀は、作品自身がいちばん知っている。** 設定
+ * （`episodeNumberDigits`／`episodeFileExtension`）は、まだ話が1つも
+ * 無いときの初期値である。`第3話 再会.md` で書いている作品に `003.txt` を
+ * 作ると、その1話だけ書き方が違う話が混ざり、並びも読み方も揃わなくなる。
+ *
+ * @param neighborFileName 挿入位置に居た話の名前（付け替え**前**）。
+ *   無い・読めないときだけ `fallback` の設定から作る
+ */
+export function insertedEpisodeFileName(input: {
+  neighborFileName: string | null;
+  number: number;
+  subtitle: string;
+  fallback: { digits: number; extension: string };
+}): string {
+  const style = input.neighborFileName
+    ? episodeNameStyleOf(input.neighborFileName)
+    : null;
+  const numberPart =
+    style?.numberPart ??
+    String(input.number).padStart(input.fallback.digits, "0");
+  const ext = style?.ext ?? input.fallback.extension;
+  const cleaned = sanitizeFileName(input.subtitle).trim();
+  if (!cleaned) return `${numberPart}${ext}`;
+  // 隣にサブタイトルが無ければ、どの区切りを好むのかは分からない
+  return `${numberPart}${style?.separator ?? DEFAULT_SEPARATOR}${cleaned}${ext}`;
+}
+
 /**
  * 単話の話数を1つだけ持つ話か。
  *
@@ -173,9 +269,17 @@ function isSingleNumbered(fileName: string): boolean {
   );
 }
 
-/** 話数の範囲（合本）か。片方だけ動かせないので、まとめて断る */
-function isRange(fileName: string): boolean {
-  const parsed = parseEpisodeFileName(fileName);
+/**
+ * 何話ぶんかが1つに入っているファイル（合本）か。
+ *
+ * **判断の材料は2つある。** 名前に範囲が書いてあるもの（`003-005_合本.txt`）
+ * と、名前は単話に見えるのに中身が合本のもの（走査が数えた `collectedCount`）。
+ * 片方だけ見ていると、なろうの一括ダウンロード（`001.txt` に全話）が
+ * 単話として動かされ、中に書かれた話数と食い違う。
+ */
+function isCollected(episode: RenumberEpisode): boolean {
+  if ((episode.collectedCount ?? 0) > 1) return true;
+  const parsed = parseEpisodeFileName(episode.fileName);
   return (
     parsed.chapterStart !== null &&
     parsed.chapterEnd !== null &&
@@ -194,14 +298,17 @@ export function episodeNumberOf(fileName: string): number | null {
  * この話の前に1話ぶん割り込ませる計画（6.67.2）。
  *
  * @param position 挿入する位置の話数。**この話数以降が後ろへずれる**
+ * @param folder 対象のフォルダー。**基準の話と同じフォルダーの話だけ**を動かす
  */
 export function planInsertion(
   episodes: readonly RenumberEpisode[],
-  position: number
+  position: number,
+  folder: string
 ): RenumberPlan {
   return buildPlan(episodes, {
     pivot: position,
     delta: 1,
+    folder,
     affects: (n) => n >= position,
   });
 }
@@ -224,6 +331,14 @@ export function planRemoval(
       path.normalizeForComparison(targetFilePath)
   );
   const fileName = target?.fileName ?? path.basename(targetFilePath);
+  if (target && isCollected(target)) {
+    // 合本の中には何話も入っている。1つ消して後ろを1つ詰めても、
+    // 中の話数とは合わない（6.67.2の「合本は動かさない」と同じ理由）
+    throw new Error(
+      `「${fileName}」は複数の話がまとまったファイル（合本）です。` +
+        "話数を詰められないため、先に「合本を話ごとに分ける」をお試しください。"
+    );
+  }
   const number = episodeNumberOf(fileName);
   if (number === null) {
     throw new Error(
@@ -234,14 +349,35 @@ export function planRemoval(
   return buildPlan(
     // 消す話そのものは付け替えの対象でも、ぶつかりの相手でもない
     episodes.filter((episode) => episode !== target),
-    { pivot: number, delta: -1, affects: (n) => n > number }
+    {
+      pivot: number,
+      delta: -1,
+      folder: path.dirname(target?.filePath ?? targetFilePath),
+      affects: (n) => n > number,
+    }
   );
 }
 
 function buildPlan(
-  episodes: readonly RenumberEpisode[],
-  spec: { pivot: number; delta: 1 | -1; affects: (n: number) => boolean }
+  allEpisodes: readonly RenumberEpisode[],
+  spec: {
+    pivot: number;
+    delta: 1 | -1;
+    folder: string;
+    affects: (n: number) => boolean;
+  }
 ): RenumberPlan {
+  /*
+    **同じフォルダーの話だけを相手にする**（6.67.4）。番外編・下書き・
+    連載中の別作品が下の階層に並んでいることがあり、それぞれ独自の番号で
+    並んでいる。まとめて動かすと、作者が触っていない番号までずれる。
+  */
+  const folderKey = path.normalizeForComparison(spec.folder);
+  const episodes = allEpisodes.filter(
+    (episode) =>
+      path.normalizeForComparison(path.dirname(episode.filePath)) === folderKey
+  );
+
   const renames: EpisodeRename[] = [];
   const skipped: SkippedEpisode[] = [];
   const unnumbered: string[] = [];
@@ -254,22 +390,24 @@ function buildPlan(
   const stationary = new Set<string>();
 
   for (const episode of episodes) {
+    if (isCollected(episode)) {
+      // 合本は中の各話のタイトルにも話数が書かれている。ファイル名だけ
+      // 動かすと中身と食い違うが、**本文には触れない**約束なので直せない
+      skipped.push({
+        fileName: episode.fileName,
+        reason: "range",
+        detail:
+          "複数の話がまとまったファイル（合本）です。" +
+          "話数の付け替えでは動かしません。先に「合本を話ごとに分ける」をお試しください。",
+      });
+      stationary.add(path.normalizeForComparison(episode.filePath));
+      continue;
+    }
+
     const number = episodeNumberOf(episode.fileName);
 
     if (number === null) {
-      if (isRange(episode.fileName)) {
-        // 合本は中の各話のタイトルにも話数が書かれている。ファイル名だけ
-        // 動かすと中身と食い違うが、**本文には触れない**約束なので直せない
-        skipped.push({
-          fileName: episode.fileName,
-          reason: "range",
-          detail:
-            "複数の話がまとまったファイル（合本）です。" +
-            "話数の付け替えでは動かしません。先に「合本を話ごとに分ける」をお試しください。",
-        });
-      } else {
-        unnumbered.push(episode.fileName);
-      }
+      unnumbered.push(episode.fileName);
       stationary.add(path.normalizeForComparison(episode.filePath));
       continue;
     }
@@ -312,6 +450,7 @@ function buildPlan(
   return {
     pivot: spec.pivot,
     delta: spec.delta,
+    folder: spec.folder,
     renames,
     skipped,
     unnumbered,
@@ -404,23 +543,134 @@ export function relativeMoves(
 }
 
 /**
+ * 済んだ付け替えから「旧話数 → 新話数」の対応表を作る（6.67.3）。
+ *
+ * **算術（pivot と delta）で台帳を動かさないための土台である。**
+ * 実際に名前が変わった話だけがここへ入り、止まった分・動かせなかった分は
+ * 入らない。入らなかった話数は台帳でも触らない。
+ */
+export function episodeNumberMoves(
+  done: readonly EpisodeRename[]
+): Map<number, number> {
+  const moves = new Map<number, number>();
+  for (const item of done) moves.set(item.oldNumber, item.newNumber);
+  return moves;
+}
+
+/**
+ * 済んだ付け替えの「旧話数 → 旧・新のファイル名」。
+ *
+ * 各話あらすじだけが**ファイル名でも話を指している**ので、名前を
+ * 付け替えるのに要る。**話数から引く**のは、同じ名前の話が別のフォルダーに
+ * あっても取り違えないためである（`fileName` を鍵にすると、番外編の
+ * `003.txt` のあらすじが本編の付け替えに巻き込まれる）。
+ */
+export function renamedFileNamesByNumber(
+  done: readonly EpisodeRename[]
+): Map<number, { fromFileName: string; toFileName: string }> {
+  const names = new Map<number, { fromFileName: string; toFileName: string }>();
+  for (const item of done) {
+    names.set(item.oldNumber, {
+      fromFileName: item.fromFileName,
+      toFileName: item.toFileName,
+    });
+  }
+  return names;
+}
+
+/** 削除した話と、その次の話（付け替え後）。章立ての追従に要る */
+export interface RemovedEpisodePaths {
+  /** 消えた話の相対パス */
+  path: string;
+  /** 次の話の、**付け替え後の**相対パス。後ろに話が無ければ undefined */
+  nextPath?: string;
+}
+
+export interface ChapterRenumberResult {
+  chapters: Chapter[];
+  changed: number;
+  /** 開始の話が消えたので、開始を次の話へ移した章 */
+  movedStarts: Array<{ name: string; toPath: string }>;
+  /** 中身が空になったので外した章 */
+  dropped: string[];
+}
+
+/**
  * 章立ての開始の話を付け替える（6.67.3）。
+ *
+ * **削除された話から始まっていた章を、そのままにしない**（6.67.3の追記）。
+ * 消えた話を指したままだと「開始の話が見つかりません」の章が残り、しかも
+ * その場所へ繰り上がってきた次の話を別の章が指していると、**開始の重複で
+ * 保存が丸ごと落ちる**（`duplicate_start`）。台帳の追従が黙って全部
+ * 失敗するので、ここで畳んでおく。
+ *
+ *   - 開始が消えた章 → **開始を次の話へ移す**
+ *   - 移した先が別の章の開始と重なる → **その章を外す**（中身が空になった章）
+ *   - 後ろに話が無い → 同じく外す
+ *
+ * どちらも件数を返し、呼ぶ側が完了通知に出す（**黙って書き換えない**）。
  *
  * **元の配列は書き換えない。** 保存に失敗したときに、画面に出ている
  * 一覧だけが変わってしまうのを避ける（`models/chapter.ts` と同じ流儀）。
  */
 export function renumberChapterSet(
   chapters: readonly Chapter[],
-  moves: ReadonlyMap<string, string>
-): { chapters: Chapter[]; changed: number } {
-  let changed = 0;
-  const next = chapters.map((chapter) => {
-    const moved = moves.get(normalizeEpisodePath(chapter.startEpisodePath));
-    if (!moved) return { ...chapter };
-    changed++;
-    return { ...chapter, startEpisodePath: moved };
+  moves: ReadonlyMap<string, string>,
+  removed?: RemovedEpisodePaths
+): ChapterRenumberResult {
+  const removedPath = removed ? normalizeEpisodePath(removed.path) : null;
+  const nextPath = removed?.nextPath
+    ? normalizeEpisodePath(removed.nextPath)
+    : null;
+
+  /*
+    **判断は「付け替える前のパス」で行う。** 削除では、消えた話の場所へ
+    次の話が繰り上がってくる（`004.txt`→`003.txt`）。先に付け替えてから
+    「消えた話から始まる章」を探すと、繰り上がってきた話を開始に持つ
+    別の章を、消えた話の章と取り違える。
+  */
+  const slots = chapters.map((chapter) => {
+    const start = normalizeEpisodePath(chapter.startEpisodePath);
+    if (removedPath !== null && start === removedPath) {
+      return { chapter, start: nextPath, fromRemoved: true, byMove: false };
+    }
+    const moved = moves.get(start);
+    return {
+      chapter,
+      start: moved ?? start,
+      fromRemoved: false,
+      byMove: moved !== undefined,
+    };
   });
-  return { chapters: next, changed };
+
+  const otherStarts = new Set(
+    slots
+      .filter((slot) => !slot.fromRemoved && slot.start !== null)
+      .map((slot) => slot.start as string)
+  );
+
+  const next: Chapter[] = [];
+  const movedStarts: Array<{ name: string; toPath: string }> = [];
+  const dropped: string[] = [];
+  let changed = 0;
+
+  for (const slot of slots) {
+    if (slot.fromRemoved) {
+      if (slot.start === null || otherStarts.has(slot.start)) {
+        dropped.push(slot.chapter.name);
+        changed++;
+        continue;
+      }
+      movedStarts.push({ name: slot.chapter.name, toPath: slot.start });
+      changed++;
+      next.push({ ...slot.chapter, startEpisodePath: slot.start });
+      continue;
+    }
+    if (slot.byMove) changed++;
+    next.push({ ...slot.chapter, startEpisodePath: slot.start as string });
+  }
+
+  return { chapters: next, changed, movedStarts, dropped };
 }
 
 export interface BookPositions {
@@ -468,6 +718,9 @@ export function renumberBookPositions(
 /**
  * 話数の数字の並びをずらす（6.67.3）。
  *
+ * **対応表に載っている話数だけを動かす。** 載っていない話数は、原稿の
+ * ほうも動いていない（途中で止まった・合本で動かせなかった）ので触らない。
+ *
  * 削除された話の番号は**落とす**。詰めたあと、その番号には別の話が
  * 来ているので、残すと黙って別人の話にすり替わる。落ちるのは
  * 「その話に出ていた」という**事実**だけで、値は親のレコードに残る。
@@ -483,13 +736,12 @@ function shiftChapters(
       changed++;
       continue;
     }
-    const affects =
-      shift.delta > 0 ? chapter >= shift.pivot : chapter > shift.pivot;
-    if (!affects) {
+    const moved = shift.moved.get(chapter);
+    if (moved === undefined) {
       next.push(chapter);
       continue;
     }
-    next.push(chapter + shift.delta);
+    next.push(moved);
     changed++;
   }
   // 重複を作らない（削除で 4 と 5 が両方 4 になることがある）
@@ -514,10 +766,9 @@ function shiftOne(
   if (shift.removed !== undefined && chapter === shift.removed) {
     return { chapter: null, changed: true };
   }
-  const affects =
-    shift.delta > 0 ? chapter >= shift.pivot : chapter > shift.pivot;
-  if (!affects) return { chapter, changed: false };
-  return { chapter: chapter + shift.delta, changed: true };
+  const moved = shift.moved.get(chapter);
+  if (moved === undefined) return { chapter, changed: false };
+  return { chapter: moved, changed: true };
 }
 
 /**
@@ -671,24 +922,46 @@ export function renumberSynopses<
 >(
   episodes: readonly T[],
   shift: EpisodeShift,
-  /** 旧ファイル名 → 新ファイル名。走査した話の名前だけを渡す */
-  renamedFiles: ReadonlyMap<string, string>
+  /** 旧話数 → 旧・新のファイル名（`renamedFileNamesByNumber`） */
+  renamedFiles: ReadonlyMap<number, { fromFileName: string; toFileName: string }>
 ): { episodes: T[]; changed: number; orphaned: number } {
-  const counter = new ShiftCounter(shift);
+  let changed = 0;
   let orphaned = 0;
 
   const next = episodes.map((episode) => {
-    const isRemoved =
-      shift.removed !== undefined && episode.chapter === shift.removed;
-    if (isRemoved) orphaned++;
-    return {
-      ...episode,
-      chapter: counter.one(episode.chapter),
-      fileName: renamedFiles.get(episode.fileName) ?? episode.fileName,
-    };
+    const counter = new ShiftCounter(shift);
+    const chapter = counter.one(episode.chapter);
+    if (shift.removed !== undefined && episode.chapter === shift.removed) {
+      orphaned++;
+    }
+
+    /*
+      **名前を書き換えるのは、その話数の付け替えと名前が一致する行だけ。**
+      あらすじは行ごとに話数とファイル名の両方を持つ（`synopsisKey`）。
+      話数から引いた付け替えの元の名前と、その行の名前が食い違うなら、
+      それは合本など別のファイルから作ったあらすじである——名前まで
+      書き換えると、実在しないファイルを指すことになる。
+    */
+    const renamed =
+      episode.chapter !== null ? renamedFiles.get(episode.chapter) : undefined;
+    const fileName =
+      renamed && sameFileName(renamed.fromFileName, episode.fileName)
+        ? renamed.toFileName
+        : episode.fileName;
+
+    // **話数だけでなく、名前が変わった行も数える**（数えないと保存されない）
+    if (counter.changed > 0 || fileName !== episode.fileName) changed++;
+    return { ...episode, chapter, fileName };
   });
 
-  return { episodes: next, changed: counter.changed, orphaned };
+  return { episodes: next, changed, orphaned };
+}
+
+/** ファイル名が同じか。Windowsは大文字小文字を区別しない */
+function sameFileName(left: string, right: string): boolean {
+  return (
+    path.normalizeForComparison(left) === path.normalizeForComparison(right)
+  );
 }
 
 /**

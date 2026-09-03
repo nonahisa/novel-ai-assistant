@@ -15,7 +15,9 @@ import { TimelineStore } from "../core/timelineStore";
 import { PendingUpdateStore } from "../core/pendingUpdates";
 import type { RecordConflict } from "../models/jsonValidation";
 import {
+  episodeNumberMoves,
   relativeMoves,
+  renamedFileNamesByNumber,
   renumberBookPositions,
   renumberCharacter,
   renumberChapterSet,
@@ -60,6 +62,10 @@ import { logFailure } from "../core/logger";
  */
 export interface LedgerFollowSummary {
   chapters: number;
+  /** 開始の話が消えたので、次の話へ移した章（「第二章」→「第3話」） */
+  chapterStartMoves: Array<{ name: string; toLabel: string }>;
+  /** 中身が空になったので外した章の名前 */
+  chapterDrops: string[];
   bookPositions: number;
   bookOrphaned: number;
   characters: number;
@@ -76,9 +82,11 @@ export interface LedgerFollowSummary {
   failures: string[];
 }
 
-function emptySummary(): LedgerFollowSummary {
+export function emptyLedgerFollowSummary(): LedgerFollowSummary {
   return {
     chapters: 0,
+    chapterStartMoves: [],
+    chapterDrops: [],
     bookPositions: 0,
     bookOrphaned: 0,
     characters: 0,
@@ -95,32 +103,53 @@ function emptySummary(): LedgerFollowSummary {
   };
 }
 
+/** 削除された話。削除の追従にだけ渡す（挿入では渡さない） */
+export interface RemovedEpisode {
+  /** 消えた話の絶対パス（本の設計図の孤児検出・章立ての付け替えに使う） */
+  filePath: string;
+  /** 消えた話の話数。台帳からはこの番号だけを落とす */
+  number: number;
+  /**
+   * 消えた話の**次の話**（付け替えが済んだあとの姿）。後ろに話が無ければ
+   * undefined。開始の話を消された章を、どこへ移すかに使う（6.67.3）。
+   */
+  next?: { filePath: string; number: number | null };
+}
+
 /**
- * @param removedFilePath 削除のときだけ渡す。消えた話の絶対パス
- *   （本の設計図の孤児検出に使う。挿入では渡さない）
+ * 台帳を、**実際に動いた話の対応表**で追従させる。
+ *
+ * `done` は済んだ付け替えだけなので、途中で止まった付け替えや、動かせ
+ * なかった話（合本・名前の読めない話）は対応表に入らない——入らない話数は
+ * 台帳でも動かさない。**算術（pivot 以降を ±1）に戻さないこと。**
  */
 export async function followEpisodeLedgers(
   work: WorkEntry,
   done: readonly EpisodeRename[],
-  shift: EpisodeShift,
-  removedFilePath?: string
+  removed?: RemovedEpisode
 ): Promise<LedgerFollowSummary> {
-  const summary = emptySummary();
+  const summary = emptyLedgerFollowSummary();
   const toRelative = (filePath: string) => episodePathFor(work.folderPath, filePath);
   const moves = relativeMoves(done, toRelative);
-  const removedRelPath = removedFilePath
-    ? normalizeEpisodePath(toRelative(removedFilePath))
+  const shift: EpisodeShift = {
+    moved: episodeNumberMoves(done),
+    removed: removed?.number,
+  };
+  const removedPaths = removed
+    ? {
+        path: normalizeEpisodePath(toRelative(removed.filePath)),
+        nextPath: removed.next
+          ? normalizeEpisodePath(toRelative(removed.next.filePath))
+          : undefined,
+      }
     : undefined;
-  const renamedFileNames = new Map(
-    done.map((rename) => [rename.fromFileName, rename.toFileName])
-  );
 
-  await followChapters(work, moves, summary);
-  await followBook(work, moves, removedRelPath, summary);
+  await followChapters(work, moves, removedPaths, removed?.next?.number, summary);
+  await followBook(work, moves, removedPaths?.path, summary);
   await followCharacters(work, shift, summary);
   await followSettingsRecords(work, shift, summary);
   await followForeshadows(work, shift, summary);
-  await followSynopses(work, shift, renamedFileNames, summary);
+  await followSynopses(work, shift, renamedFileNamesByNumber(done), summary);
   await followTimeline(work, moves, summary);
   await followPendingCharacterUpdates(work, shift, summary);
 
@@ -130,15 +159,27 @@ export async function followEpisodeLedgers(
 async function followChapters(
   work: WorkEntry,
   moves: ReadonlyMap<string, string>,
+  removed: { path: string; nextPath?: string } | undefined,
+  /** 次の話の、付け替え後の話数（通知の「第◯話へ移しました」に使う） */
+  nextNumber: number | null | undefined,
   summary: LedgerFollowSummary
 ): Promise<void> {
   try {
     const store = new ChapterStore(work);
     const set = await store.load();
-    const result = renumberChapterSet(set.chapters, moves);
+    const result = renumberChapterSet(set.chapters, moves, removed);
     if (result.changed === 0) return;
     await store.save({ ...set, chapters: result.chapters });
     summary.chapters = result.changed;
+    // **移した先・外したことは、必ず作者へ見せる**（黙って章を動かさない）
+    summary.chapterStartMoves = result.movedStarts.map((moved) => ({
+      name: moved.name,
+      toLabel:
+        nextNumber !== null && nextNumber !== undefined
+          ? `第${nextNumber}話`
+          : `「${moved.toPath}」`,
+    }));
+    summary.chapterDrops = result.dropped;
   } catch (error) {
     summary.failures.push(`章立て：${messageOf(error, "章立ての追従")}`);
   }
@@ -233,6 +274,8 @@ async function followSettingsRecords(
 }
 
 interface ChapteredStorable extends StorableRecord {
+  /** 失敗を伝えるときの呼び名。IDだけでは作者にどれか分からない */
+  name: string;
   appearedChapters: number[];
   conflicts: RecordConflict[];
 }
@@ -246,12 +289,15 @@ async function followSettingsStore<T extends ChapteredStorable>(
 ): Promise<void> {
   try {
     const { records } = await store.loadAll();
-    const changed = records
-      .map((record) => ({ record, result: renumberSettingsRecord(record, shift) }))
-      .filter((pair) => pair.result.changed > 0);
-    if (changed.length === 0) return;
-    await store.saveAll(changed.map((pair) => pair.result.record));
-    summary[key] = changed.reduce((sum, pair) => sum + pair.result.changed, 0);
+    summary[key] = await saveEachRecord(
+      records.map((record) => ({
+        display: `${label}「${record.name}」`,
+        result: renumberSettingsRecord(record, shift),
+      })),
+      (record) => store.saveAll([record]),
+      `${label}の話数の追従`,
+      summary
+    );
   } catch (error) {
     summary.failures.push(`${label}：${messageOf(error, `${label}の話数の追従`)}`);
   }
@@ -265,21 +311,57 @@ async function followForeshadows(
   try {
     const store = createForeshadowStore(work);
     const { records } = await store.loadAll();
-    const changed = records
-      .map((record) => ({ record, result: renumberForeshadow(record, shift) }))
-      .filter((pair) => pair.result.changed > 0);
-    if (changed.length === 0) return;
-    await store.saveAll(changed.map((pair) => pair.result.record));
-    summary.foreshadows = changed.reduce((sum, pair) => sum + pair.result.changed, 0);
+    summary.foreshadows = await saveEachRecord(
+      records.map((record) => ({
+        display: `伏線「${record.label}」`,
+        result: renumberForeshadow(record, shift),
+      })),
+      (record) => store.saveAll([record]),
+      "伏線の話数の追従",
+      summary
+    );
   } catch (error) {
     summary.failures.push(`伏線：${messageOf(error, "伏線の話数の追従")}`);
   }
 }
 
+/**
+ * 1件ずつ保存して、**書けたものだけを数える**（設計書6.67.3）。
+ *
+ * まとめて保存したうえで件数を後から代入すると、途中で失敗したときに
+ * 「0件」になる。実際には何件か書けているので、**作者が次に何を確かめれば
+ * よいのか分からなくなる**（人物の追従は元から1件ずつで、そちらに合わせた）。
+ */
+async function saveEachRecord<T>(
+  entries: ReadonlyArray<{
+    display: string;
+    result: { record: T; changed: number };
+  }>,
+  save: (record: T) => Promise<void>,
+  context: string,
+  summary: LedgerFollowSummary
+): Promise<number> {
+  let changed = 0;
+  for (const entry of entries) {
+    if (entry.result.changed === 0) continue;
+    try {
+      await save(entry.result.record);
+      changed += entry.result.changed;
+    } catch (error) {
+      summary.failures.push(`${entry.display}：${messageOf(error, context)}`);
+    }
+  }
+  return changed;
+}
+
 async function followSynopses(
   work: WorkEntry,
   shift: EpisodeShift,
-  renamedFileNames: ReadonlyMap<string, string>,
+  /** 旧話数 → 旧・新のファイル名。**名前でなく話数から引く**（取り違え防止） */
+  renamedFileNames: ReadonlyMap<
+    number,
+    { fromFileName: string; toFileName: string }
+  >,
   summary: LedgerFollowSummary
 ): Promise<void> {
   try {
@@ -287,6 +369,8 @@ async function followSynopses(
     const set = await store.load();
     if (set.episodes.length === 0) return;
     const result = renumberSynopses(set.episodes, shift, renamedFileNames);
+    // **`changed` にはファイル名だけが変わった行も入る**（数えないと、
+    // 名前を書き換えたまま保存されずに捨てられる）
     if (result.changed === 0 && result.orphaned === 0) return;
     if (result.changed > 0) {
       await store.save({ ...set, episodes: result.episodes });
@@ -375,12 +459,20 @@ export function describeLedgerFollowSummary(summary: LedgerFollowSummary): strin
   if (summary.organizations > 0) parts.push(`組織の話数${summary.organizations}件`);
   if (summary.world > 0) parts.push(`世界観の話数${summary.world}件`);
   if (summary.foreshadows > 0) parts.push(`伏線の話数${summary.foreshadows}件`);
-  if (summary.synopses > 0) parts.push(`各話あらすじの話数${summary.synopses}件`);
+  if (summary.synopses > 0) parts.push(`各話あらすじ${summary.synopses}件`);
   if (summary.timeline > 0) parts.push(`年表${summary.timeline}件`);
   if (summary.pendingCharacterUpdates > 0)
     parts.push(`保留中の人物更新案${summary.pendingCharacterUpdates}件`);
 
   const notes: string[] = [];
+  // **章の開始が動いたことは、件数ではなく章の名前で伝える**（作者は
+  // 「章立て1件」では、どの章がどこへ移ったのか分からない）
+  for (const moved of summary.chapterStartMoves) {
+    notes.push(`章「${moved.name}」の開始を${moved.toLabel}へ移しました`);
+  }
+  for (const name of summary.chapterDrops) {
+    notes.push(`章「${name}」は中身が空になったため外しました`);
+  }
   if (summary.bookOrphaned > 0)
     notes.push(`消えた話を指す挿絵・ページ位置が${summary.bookOrphaned}件残っています`);
   if (summary.synopsesOrphaned > 0)

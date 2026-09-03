@@ -166,6 +166,53 @@ describe("提案の承認と台帳への書き込み", () => {
     expect(result.reason ?? "").toContain("章");
     expect(disk.get(chaptersPath)).toEqual(outside);
   });
+
+  test("外で変わって止まったあとは、読み直して次の承認から通る（D）", async () => {
+    disk.set(
+      chaptersPath,
+      utf8(
+        JSON.stringify({
+          schemaVersion: "1",
+          chapters: [{ name: "第一章", startEpisodePath: "本文/001.txt" }],
+        })
+      )
+    );
+    const applier = await applierOf();
+
+    // 提案を眺めているあいだに、別の端末で章が1つ足された
+    disk.set(
+      chaptersPath,
+      utf8(
+        JSON.stringify({
+          schemaVersion: "1",
+          chapters: [
+            { name: "第一章", startEpisodePath: "本文/001.txt" },
+            { name: "別の端末で足した章", startEpisodePath: "本文/010.txt" },
+          ],
+        })
+      )
+    );
+
+    const first = await applier.apply({
+      name: "王都の章",
+      startEpisodePath: "本文/006.txt",
+    });
+    expect(first.ok).toBe(false);
+    // **読み直したことを伝える**（作者が「もう一度押せばよい」と分かる）
+    expect(first.reason ?? "").toContain("もう一度");
+
+    // **AIを呼び直させない。** 同じパネルの同じ提案が、次の承認で通る
+    const second = await applier.apply({
+      name: "王都の章",
+      startEpisodePath: "本文/006.txt",
+    });
+    expect(second).toEqual({ ok: true });
+    expect(saved().map((entry) => entry.name)).toEqual([
+      "第一章",
+      "別の端末で足した章",
+      "王都の章",
+    ]);
+  });
 });
 
 describe("提案パネルに出す1件の文言", () => {

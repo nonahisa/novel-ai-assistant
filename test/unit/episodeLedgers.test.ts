@@ -123,10 +123,9 @@ describe("話数を指している台帳の追従", () => {
       ],
     });
 
-    const summary = await followEpisodeLedgers(work, [rename("003.txt", "004.txt")], {
-      pivot: 3,
-      delta: 1,
-    });
+    const summary = await followEpisodeLedgers(work, [
+      rename("003.txt", "004.txt"),
+    ]);
 
     expect(summary.chapters).toBe(1);
     expect(summary.failures).toEqual([]);
@@ -147,10 +146,9 @@ describe("話数を指している台帳の追従", () => {
       pageBreaks: [{ episodePath: "本文/003.txt", afterParagraph: 5 }],
     });
 
-    const summary = await followEpisodeLedgers(work, [rename("003.txt", "004.txt")], {
-      pivot: 3,
-      delta: 1,
-    });
+    const summary = await followEpisodeLedgers(work, [
+      rename("003.txt", "004.txt"),
+    ]);
 
     expect(summary.bookPositions).toBe(2);
     expect(summary.bookOrphaned).toBe(0);
@@ -173,8 +171,11 @@ describe("話数を指している台帳の追従", () => {
     const summary = await followEpisodeLedgers(
       work,
       [rename("004.txt", "003.txt")],
-      { pivot: 3, delta: -1, removed: 3 },
-      episodePath("003.txt")
+      {
+        filePath: episodePath("003.txt"),
+        number: 3,
+        next: { filePath: episodePath("003.txt"), number: 3 },
+      }
     );
 
     expect(summary.bookOrphaned).toBe(1);
@@ -183,16 +184,17 @@ describe("話数を指している台帳の追従", () => {
     expect(after.illustrations[0].episodePath).toBe("本文/003.txt");
   });
 
-  test("登場人物の話数が付いてくる。挿入位置より前は動かない（話数の数字で指すもの）", async () => {
+  test("登場人物の話数が付いてくる。動かなかった話は動かない（話数の数字で指すもの）", async () => {
     const characterStore = new CharacterStore(work);
     const person = emptyCharacter("char_001", "月島灯");
     person.appearedChapters = [1, 3, 5];
     await characterStore.save(person);
 
-    const summary = await followEpisodeLedgers(work, [rename("003.txt", "004.txt")], {
-      pivot: 3,
-      delta: 1,
-    });
+    // 第3話の前に挿入して 005→006・003→004 が済んだ（第1話は動いていない）
+    const summary = await followEpisodeLedgers(work, [
+      rename("005.txt", "006.txt"),
+      rename("003.txt", "004.txt"),
+    ]);
 
     expect(summary.characters).toBeGreaterThan(0);
     expect(summary.failures).toEqual([]);
@@ -206,10 +208,10 @@ describe("話数を指している台帳の追従", () => {
     ability.appearedChapters = [2, 5];
     await abilityStore.saveAll([ability]);
 
-    const summary = await followEpisodeLedgers(work, [rename("003.txt", "004.txt")], {
-      pivot: 3,
-      delta: 1,
-    });
+    const summary = await followEpisodeLedgers(work, [
+      rename("005.txt", "006.txt"),
+      rename("003.txt", "004.txt"),
+    ]);
 
     expect(summary.abilities).toBe(1);
     const { records } = await createAbilityStore(work).loadAll();
@@ -223,10 +225,10 @@ describe("話数を指している台帳の追従", () => {
     foreshadow.resolvedChapter = 5;
     await foreshadowStore.saveAll([foreshadow]);
 
-    const summary = await followEpisodeLedgers(work, [rename("003.txt", "004.txt")], {
-      pivot: 3,
-      delta: 1,
-    });
+    const summary = await followEpisodeLedgers(work, [
+      rename("005.txt", "006.txt"),
+      rename("003.txt", "004.txt"),
+    ]);
 
     expect(summary.foreshadows).toBe(1);
     const { records } = await createForeshadowStore(work).loadAll();
@@ -255,10 +257,9 @@ describe("話数を指している台帳の追従", () => {
       ],
     });
 
-    const summary = await followEpisodeLedgers(work, [rename("003.txt", "004.txt")], {
-      pivot: 3,
-      delta: 1,
-    });
+    const summary = await followEpisodeLedgers(work, [
+      rename("003.txt", "004.txt"),
+    ]);
 
     expect(summary.synopses).toBeGreaterThan(0);
     const after = await new SynopsisStore(work).load();
@@ -303,10 +304,9 @@ describe("話数を指している台帳の追従", () => {
       return readFile(uri as never);
     };
 
-    const summary = await followEpisodeLedgers(work, [rename("003.txt", "004.txt")], {
-      pivot: 3,
-      delta: 1,
-    });
+    const summary = await followEpisodeLedgers(work, [
+      rename("003.txt", "004.txt"),
+    ]);
 
     // 章立ては失敗として報告され、原稿の付け替え（呼び出し側の仕事）は
     // ここでは巻き戻さない。**ほかの台帳（人物）は失敗の影響を受けない**
@@ -322,7 +322,164 @@ describe("話数を指している台帳の追従", () => {
   });
 
   test("何も動かないときは、報告の文章が空になる", async () => {
-    const summary = await followEpisodeLedgers(work, [], { pivot: 99, delta: 1 });
+    const summary = await followEpisodeLedgers(work, []);
     expect(describeLedgerFollowSummary(summary)).toBe("");
+  });
+
+  test("途中で止まった付け替えでは、動いた話の話数だけが動く（A-1）", async () => {
+    // 「第3話の前に挿入」で 005→006 まで済み、004→005 で止まった。
+    // **算術（第3話以降を+1）で台帳を動かすと、原稿は 003・004 のままなのに
+    // 台帳だけが 004・005 を指す**
+    const characterStore = new CharacterStore(work);
+    const person = emptyCharacter("char_001", "月島灯");
+    person.appearedChapters = [3, 4, 5];
+    await characterStore.save(person);
+
+    await followEpisodeLedgers(work, [rename("005.txt", "006.txt")]);
+
+    const { characters } = await new CharacterStore(work).loadAll();
+    expect(characters[0].appearedChapters).toEqual([3, 4, 6]);
+  });
+
+  test("動かせなかった話（合本）の話数は、台帳でも動かさない（A-1）", async () => {
+    // 第4話が合本で skipped になり、003→004 と 005→006 だけが済んだ
+    const abilityStore = createAbilityStore(work);
+    const ability = emptyAbility("abil_001", "光の刃");
+    ability.appearedChapters = [3, 4, 5];
+    await abilityStore.saveAll([ability]);
+
+    await followEpisodeLedgers(work, [
+      rename("005.txt", "006.txt"),
+      rename("003.txt", "004.txt"),
+    ]);
+
+    const { records } = await createAbilityStore(work).loadAll();
+    expect(records[0].appearedChapters).toEqual([4, 6]);
+  });
+
+  test("開始の話を消された章は、次の話へ移り、通知に出る（B-1）", async () => {
+    const chapterStore = new ChapterStore(work);
+    const set = await chapterStore.load();
+    await chapterStore.save({
+      ...set,
+      chapters: [
+        { name: "第一章", startEpisodePath: "本文/001.txt" },
+        { name: "第二章", startEpisodePath: "本文/003.txt" },
+      ],
+    });
+
+    const summary = await followEpisodeLedgers(
+      work,
+      [rename("004.txt", "003.txt"), rename("005.txt", "004.txt")],
+      {
+        filePath: episodePath("003.txt"),
+        number: 3,
+        next: { filePath: episodePath("003.txt"), number: 3 },
+      }
+    );
+
+    expect(summary.failures).toEqual([]);
+    expect(summary.chapterStartMoves).toEqual([
+      { name: "第二章", toLabel: "第3話" },
+    ]);
+    const after = await new ChapterStore(work).load();
+    expect(after.chapters.map((c) => c.startEpisodePath)).toEqual([
+      "本文/001.txt",
+      "本文/003.txt",
+    ]);
+    expect(describeLedgerFollowSummary(summary)).toContain("第二章");
+  });
+
+  test("空になった章は外れる。開始の重複で保存ごと落ちない（B-1）", async () => {
+    const chapterStore = new ChapterStore(work);
+    const set = await chapterStore.load();
+    await chapterStore.save({
+      ...set,
+      chapters: [
+        { name: "第二章", startEpisodePath: "本文/003.txt" },
+        { name: "第三章", startEpisodePath: "本文/004.txt" },
+      ],
+    });
+
+    const summary = await followEpisodeLedgers(
+      work,
+      [rename("004.txt", "003.txt")],
+      {
+        filePath: episodePath("003.txt"),
+        number: 3,
+        next: { filePath: episodePath("003.txt"), number: 3 },
+      }
+    );
+
+    // **`duplicate_start` で章立ての保存が丸ごと落ちない**
+    expect(summary.failures).toEqual([]);
+    expect(summary.chapterDrops).toEqual(["第二章"]);
+    const after = await new ChapterStore(work).load();
+    expect(after.chapters).toEqual([
+      { name: "第三章", startEpisodePath: "本文/003.txt" },
+    ]);
+  });
+
+  test("設定資料は1件ずつ数える。1件書けなくても、書けたぶんは数に出る（B-2）", async () => {
+    const abilityStore = createAbilityStore(work);
+    const first = emptyAbility("abil_001", "光の刃");
+    first.appearedChapters = [3];
+    const second = emptyAbility("abil_002", "影渡り");
+    second.appearedChapters = [3];
+    await abilityStore.saveAll([first, second]);
+
+    // 「影渡り」のファイルだけ書き込めない体にする
+    const rename0 = workspace.fs.rename;
+    workspace.fs.rename = async (
+      from: { fsPath: string },
+      to: { fsPath: string },
+      options?: { overwrite?: boolean }
+    ) => {
+      if (to.fsPath.includes("abil_002")) throw new Error("使用中です");
+      return rename0(from as never, to as never, options as never);
+    };
+
+    const summary = await followEpisodeLedgers(work, [
+      rename("003.txt", "004.txt"),
+    ]);
+
+    expect(summary.abilities).toBe(1);
+    expect(summary.failures).toHaveLength(1);
+    expect(summary.failures[0]).toContain("影渡り");
+  });
+
+  test("あらすじの名前は、その話数の付け替えと名前が合う行だけ変える（B-4）", async () => {
+    const synopsisStore = new SynopsisStore(work);
+    const row = (chapter: number | null, fileName: string) => ({
+      chapter,
+      fileName,
+      title: null,
+      synopsis: "祭りの準備をする。",
+      sourceHash: "",
+      model: null,
+      promptVersion: null,
+      autoGenerated: true,
+      authorNotes: "",
+      emotion: null,
+      updatedAt: null,
+    });
+    await synopsisStore.save({
+      ...emptySynopsisSet(),
+      // 第3話のあらすじが、番外編の同じ名前のファイルから作られている体
+      episodes: [row(3, "003.txt"), row(4, "番外003.txt")],
+    });
+
+    await followEpisodeLedgers(work, [
+      rename("004.txt", "005.txt"),
+      rename("003.txt", "004.txt"),
+    ]);
+
+    const after = await new SynopsisStore(work).load();
+    expect(after.episodes[0]).toMatchObject({ chapter: 4, fileName: "004.txt" });
+    // 話数は付いてくるが、名前は別のファイルのものなので触らない
+    expect(after.episodes[1]).toMatchObject({
+      chapter: 5,
+      fileName: "番外003.txt",
+    });
   });
 });

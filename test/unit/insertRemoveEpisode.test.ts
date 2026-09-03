@@ -129,9 +129,10 @@ describe("話の挿入・削除", () => {
     expect(seenMessage).toContain("3件");
   });
 
-  test("挿入：付け替えたあと、指定した番号の位置に空のファイルができる", async () => {
+  test("挿入：付け替えたあと、挿入位置の番号で空のファイルができる", async () => {
     window.showWarningMessage = async () => "付け替える";
-    window.showInputBox = async () => "003.txt";
+    // サブタイトルは空のまま確定した（番号だけのファイル名になる）
+    window.showInputBox = async () => "";
     const episodes = [1, 2, 3, 4, 5].map((n) =>
       episode(`${String(n).padStart(3, "0")}.txt`)
     );
@@ -219,6 +220,190 @@ describe("話の挿入・削除", () => {
     // 何も動いていない
     expect(disk.has(diskPath("本文", "005.txt"))).toBe(true);
     expect(disk.has(diskPath("本文", "006.txt"))).toBe(false);
+  });
+
+  test("挿入：訊くのはサブタイトルだけで、番号は挿入位置から決まる（A-6）", async () => {
+    window.showWarningMessage = async () => "付け替える";
+    let seenPrompt = "";
+    window.showInputBox = async (options?: { prompt?: string }) => {
+      seenPrompt = options?.prompt ?? "";
+      return "湖畔の誓い";
+    };
+    const episodes = [1, 2, 3, 4, 5].map((n) =>
+      episode(`${String(n).padStart(3, "0")}.txt`)
+    );
+
+    const result = await insertEpisodeBefore(work, episode("003.txt"), episodes);
+
+    expect(seenPrompt).toContain("サブタイトル");
+    expect(disk.has(diskPath("本文", "003_湖畔の誓い.txt"))).toBe(true);
+    expect(result.newFilePath).toBe(diskPath("本文", "003_湖畔の誓い.txt"));
+  });
+
+  test("挿入：新しい話の名前は、隣の話の書き方に合わせる", async () => {
+    // 「第◯話 サブタイトル.md」で書いている作品。設定の既定（3桁・.txt）
+    // ではなく、**この作品の流儀**で作る
+    window.showWarningMessage = async () => "付け替える";
+    window.showInputBox = async () => "出立";
+    disk.clear();
+    const names = ["第1話 目覚め.md", "第2話 旅立ち.md", "第3話 再会.md"];
+    for (const name of names) {
+      disk.set(diskPath("本文", name), new TextEncoder().encode(""));
+    }
+    const episodes = names.map((name, index) =>
+      episode(name, {
+        ext: ".md",
+        chapterStart: index + 1,
+        chapterEnd: index + 1,
+      })
+    );
+
+    const result = await insertEpisodeBefore(work, episodes[2], episodes);
+
+    expect(disk.has(diskPath("本文", "第3話 出立.md"))).toBe(true);
+    expect(result.newFilePath).toBe(diskPath("本文", "第3話 出立.md"));
+    // 元の第3話は第4話へ繰り下がっている
+    expect(disk.has(diskPath("本文", "第4話 再会.md"))).toBe(true);
+  });
+
+  test("挿入：ゼロ埋めの桁も隣に合わせる（設定は3桁でも4桁のまま）", async () => {
+    window.showWarningMessage = async () => "付け替える";
+    window.showInputBox = async () => "出立";
+    disk.clear();
+    const names = ["0001.txt", "0002.txt", "0003.txt"];
+    for (const name of names) {
+      disk.set(diskPath("本文", name), new TextEncoder().encode(""));
+    }
+    const episodes = names.map((name, index) =>
+      episode(name, { chapterStart: index + 1, chapterEnd: index + 1 })
+    );
+
+    await insertEpisodeBefore(work, episodes[2], episodes);
+
+    expect(disk.has(diskPath("本文", "0003_出立.txt"))).toBe(true);
+    expect(disk.has(diskPath("本文", "0004.txt"))).toBe(true);
+  });
+
+  test("挿入：名前がぶつかったら、既存のファイルは開かない（A-5）", async () => {
+    window.showWarningMessage = async () => "付け替える";
+    window.showInputBox = async () => "既存";
+    let errorMessage = "";
+    window.showErrorMessage = async (message: string) => {
+      errorMessage = message;
+      return undefined;
+    };
+    // 走査に載っていない（番号を持たない名前の）ファイルが、既にその名前で居る
+    disk.set(diskPath("本文", "003_既存.txt"), new TextEncoder().encode("原稿"));
+    const episodes = [1, 2, 3, 4, 5].map((n) =>
+      episode(`${String(n).padStart(3, "0")}.txt`)
+    );
+
+    const result = await insertEpisodeBefore(work, episode("003.txt"), episodes);
+
+    expect(errorMessage).toContain("同じ名前");
+    // **既存の原稿を開かない。** 開くと、作者は自分が今作った話だと思って書く
+    expect(result.newFilePath).toBeUndefined();
+    expect(
+      new TextDecoder().decode(disk.get(diskPath("本文", "003_既存.txt"))!)
+    ).toBe("原稿");
+  });
+
+  test("挿入：確認の説明に、対象のフォルダーと内訳が出る（A-4・B-5）", async () => {
+    let seenDetail = "";
+    window.showWarningMessage = async (
+      _message: string,
+      options?: unknown
+    ) => {
+      seenDetail = (options as { detail?: string })?.detail ?? "";
+      return undefined;
+    };
+    const episodes = [
+      ...[1, 2, 3].map((n) => episode(`${String(n).padStart(3, "0")}.txt`)),
+      episode("プロローグ.txt"),
+    ];
+
+    await insertEpisodeBefore(work, episode("003.txt"), episodes);
+
+    expect(seenDetail).toContain("本文");
+    expect(seenDetail).toContain("プロローグ");
+  });
+
+  test("挿入：付け替える話に未保存の変更があれば、始めない（A-2）", async () => {
+    let asked = false;
+    window.showWarningMessage = async () => {
+      asked = true;
+      return "付け替える";
+    };
+    let errorMessage = "";
+    window.showErrorMessage = async (message: string) => {
+      errorMessage = message;
+      return undefined;
+    };
+    workspace.textDocuments = [
+      {
+        uri: { fsPath: diskPath("本文", "004.txt") },
+        isDirty: true,
+        getText: () => "",
+      },
+    ];
+    const episodes = [1, 2, 3, 4, 5].map((n) =>
+      episode(`${String(n).padStart(3, "0")}.txt`)
+    );
+
+    const result = await insertEpisodeBefore(work, episode("003.txt"), episodes);
+
+    expect(result.changed).toBe(false);
+    expect(asked).toBe(false);
+    expect(errorMessage).toContain("保存");
+    expect(errorMessage).toContain("004.txt");
+    expect(disk.has(diskPath("本文", "006.txt"))).toBe(false);
+  });
+
+  test("削除：消す話に未保存の変更があれば、始めない（A-2）", async () => {
+    window.showWarningMessage = async () => "削除する";
+    let errorMessage = "";
+    window.showErrorMessage = async (message: string) => {
+      errorMessage = message;
+      return undefined;
+    };
+    workspace.textDocuments = [
+      {
+        uri: { fsPath: diskPath("本文", "003.txt") },
+        isDirty: true,
+        getText: () => "",
+      },
+    ];
+    const episodes = [1, 2, 3, 4, 5].map((n) =>
+      episode(`${String(n).padStart(3, "0")}.txt`)
+    );
+
+    const result = await removeEpisodeAndRenumber(
+      work,
+      episode("003.txt"),
+      episodes
+    );
+
+    expect(result.changed).toBe(false);
+    expect(errorMessage).toContain("保存");
+    // 消えていない
+    expect(disk.has(diskPath("本文", "003.txt"))).toBe(true);
+  });
+
+  test("削除：末尾の話でも、消したことを伝える（E）", async () => {
+    window.showWarningMessage = async () => "削除する";
+    let info = "";
+    window.showInformationMessage = async (message: string) => {
+      info = message;
+      return undefined;
+    };
+    const episodes = [1, 2, 3, 4, 5].map((n) =>
+      episode(`${String(n).padStart(3, "0")}.txt`)
+    );
+
+    await removeEpisodeAndRenumber(work, episode("005.txt"), episodes);
+
+    expect(info).toContain("第5話を削除しました");
+    expect(info).not.toContain("付け替える話はありませんでした");
   });
 
   test("削除：削除する話自身の競合マーカーでも断る", async () => {

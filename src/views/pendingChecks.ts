@@ -327,7 +327,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-61",
     title: "話の挿入と削除",
     commands: ["novelai.insertEpisodeBefore", "novelai.removeEpisodeAndRenumber"],
-    count: 6,
+    count: 10,
   },
   {
     id: "F-62",
@@ -584,4 +584,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 746;
+export const PENDING_CHECK_TOTAL = 750;
