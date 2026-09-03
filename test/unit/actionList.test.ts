@@ -323,9 +323,8 @@ describe("AIの印", () => {
         "novelai.generatePlot",
         "novelai.generateSynopses",
         "novelai.generateWorkBlurb",
-        // 相談は2つの入口を持つ（本文の領域に大きく開く／横の細いパネル）。
-        // **どちらもAIを呼ぶ**ので、両方に印が要る
-        "novelai.openChat",
+        // 相談のメニューの入口は「大きく開く」だけ（横の細いパネルは
+        // 本文の右クリックのみ。0.29.23で項目を消した——作者の指定）
         "novelai.openChatPanel",
         // 読める長さの測定（設計書6.27.11）。作品の本文は送らないが、
         // **AIを何度も呼ぶ**ので有料AIでは料金が出る。印は要る

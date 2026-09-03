@@ -133,7 +133,7 @@ const STEP_DEFS: readonly StepDef[] = [
           "novelai.openSceneMemos",
           "novelai.createWorkFromManuscript",
           "novelai.openVertical",
-          // 大きく開くほう。**横のパネルは詳細メニューと本文の右クリックにある**
+          // 大きく開くほう。**横のパネルは本文の右クリックだけにある**（0.29.23）
           "novelai.openChatPanel",
           "novelai.showWritingStats",
           // 書いたものを別の軸（作中の時間）で見直す画面（設計書6.39）
