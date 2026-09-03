@@ -6,7 +6,9 @@ import {
   CHUNK_SIZE_MODE_MANUAL,
   OUTPUT_RESPONSE_RATIO,
   OUTPUT_SAFETY_MARGIN,
+  UNTUNED_CHUNK_CHARS,
   capMergeCharsByOutputTokens,
+  capUntunedChunkChars,
   decideChunkSize,
   describeChunkScope,
   parseChunkSizeMode,
@@ -189,8 +191,14 @@ describe("readChunkSettings と台帳の繋ぎ込み", () => {
 
   it("providerId/modelを渡すと、台帳の実測でmergeCharsが絞られる", async () => {
     installSettings({});
+    // **読める量の実測（measuredChars）も一緒に持たせる。** 6.65.16の
+    // 未チューニング安全既定はチャンク上限そのものを6,000字に抑えるので、
+    // 読める量が未測定のままだとチャンクが先に縮み、この検査がmergeChars
+    // の絞り込み（6.65.14）だけを見られなくなる。実際の作者のgemma4:12bは
+    // 読める量・書ける量の両方が実測済みなので、この形が実態に合う
     await saveModelTuning("ollama", "gemma4:12b", {
       measuredOutputTokens: 6500,
+      measuredChars: 60000,
     });
 
     const withoutTuning = readChunkSettings(262144);
@@ -226,6 +234,98 @@ describe("readChunkSettings と台帳の繋ぎ込み", () => {
     });
 
     expect(settings.mergeCharsBeforeOutputCap).toBeUndefined();
+  });
+});
+
+/**
+ * **未チューニングの安全既定**（設計書6.65.16の1）。
+ *
+ * 作者の依頼（2026-09-03）「非力なマシンのローカルLLMでも動く程度に」。
+ * 従来の既定は「モデルの申告値を信じて自動的に広げる」で、131kを名乗る
+ * 小型モデルでも初回から20,000字を送っていた。**読める量の実測
+ * （`measuredChars`）が台帳に無いモデルだけ**、自動モードのチャンク上限を
+ * 6,000字に抑える。実測があるモデル・手動モードは、これまでどおり
+ * 最大20,000字まで広げる。
+ */
+describe("capUntunedChunkChars（純関数）", () => {
+  it("実測が無ければ、6,000字に抑える", () => {
+    expect(capUntunedChunkChars(20000, undefined)).toBe(UNTUNED_CHUNK_CHARS);
+  });
+
+  it("実測があれば、そのまま通す", () => {
+    expect(capUntunedChunkChars(20000, 60000)).toBe(20000);
+  });
+
+  /** 6,000字よりもともと小さい値を、6,000字へ引き上げたりはしない */
+  it("もともと6,000字未満なら、そのまま", () => {
+    expect(capUntunedChunkChars(3000, undefined)).toBe(3000);
+  });
+});
+
+describe("readChunkSettings と未チューニングの安全既定の繋ぎ込み", () => {
+  afterEach(() => {
+    workspace.getConfiguration = () => ({
+      get: <T>(_key: string, defaultValue: T): T => defaultValue,
+    });
+  });
+
+  function installSettings(values: Record<string, unknown>): void {
+    workspace.getConfiguration = () =>
+      ({
+        get: <T>(key: string, defaultValue?: T): T =>
+          (key in values ? values[key] : defaultValue) as T,
+        inspect: () => ({ workspaceValue: undefined }),
+        update: async (key: string, value: unknown) => {
+          values[key] = value;
+        },
+      }) as unknown as ReturnType<typeof workspace.getConfiguration>;
+  }
+
+  it("自動モード＋未チューニングなら、6,000字に抑える", () => {
+    installSettings({});
+
+    const settings = readChunkSettings(262144, undefined, {
+      providerId: "ollama",
+      model: "測っていないモデル",
+    });
+
+    expect(settings.chunk.chars).toBe(UNTUNED_CHUNK_CHARS);
+    expect(settings.chunkCharsBeforeUntunedCap).toBe(decideChunkSize(262144));
+  });
+
+  it("自動モード＋読める量の実測があれば、従来の導出のまま（最大20,000字）", async () => {
+    installSettings({});
+    await saveModelTuning("ollama", "gemma4:12b", { measuredChars: 90000 });
+
+    const settings = readChunkSettings(262144, undefined, {
+      providerId: "ollama",
+      model: "gemma4:12b",
+    });
+
+    expect(settings.chunk.chars).toBe(decideChunkSize(262144));
+    expect(settings.chunkCharsBeforeUntunedCap).toBeUndefined();
+  });
+
+  it("手動モードなら、未チューニングでも作者の指定した字数を尊重する", () => {
+    installSettings({ chunkSizeMode: CHUNK_SIZE_MODE_MANUAL, chunkChars: 15000 });
+
+    const settings = readChunkSettings(262144, undefined, {
+      providerId: "ollama",
+      model: "測っていないモデル",
+    });
+
+    expect(settings.chunk.chars).toBe(15000);
+    expect(settings.chunkCharsBeforeUntunedCap).toBeUndefined();
+  });
+
+  /** 渡す側を1機能ずつ揃えるまでの逃げ道。挙動を変えない */
+  it("outputTuningを渡さなければ、これまでどおり抑えない", () => {
+    installSettings({});
+
+    const settings = readChunkSettings(262144);
+
+    expect(settings.chunk.chars).toBe(decideChunkSize(262144));
+    expect(settings.chunkCharsBeforeUntunedCap).toBeUndefined();
   });
 });
 

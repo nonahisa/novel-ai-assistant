@@ -2,7 +2,7 @@
 
 **書くこと以外を、引き受けます。** 小説の執筆で積み重なる「書く前」と「書いた後」の仕事——設定資料づくり、見直し、投稿の準備——を、**原稿には手を触れないAI**と一緒に片づけるための拡張機能です。
 
-このリポジトリの版：**0.29.26**（話の挿入・削除と、EPUBの目次重複・見出し形式・縦中横・表紙比率の直しを追加。0.28.0＝VSIX配布版）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.30.0**（未チューニングのモデルでも初回から動く安全既定を追加。0.29.13〜0.29.26の機能をまとめたVSIX配布版）。Marketplace に出ている版はこれより遅れることがあります。
 
 ## こんな困りごとのための道具です
 
@@ -935,7 +935,7 @@ AI処理の記録は「**ログを開く**」（ヘルプ）で開けます。�
 | `novelai.ollama.endpoint` | `http://localhost:11434` | OllamaのURL |
 | `novelai.ollama.executablePath` | `""`（自動検出） | `ollama` 実行ファイルの場所。拡張機能からOllamaを起動するときにだけ使います |
 | `novelai.ollama.numCtx` | `0`（自動） | AIへ渡すコンテキスト長。**Ollamaは既定値が小さく、指定しないと入力が切り捨てられます** |
-| `novelai.ollama.timeoutSeconds` | `180` | 1回の呼び出しのタイムアウト |
+| `novelai.ollama.timeoutSeconds` | `300` | 1回の呼び出しのタイムアウト（CPUだけの環境でも1回を切らない長さ） |
 | `novelai.claude.timeoutSeconds` | `300` | Claudeの1回の呼び出しのタイムアウト。**新しいモデルは思考しながら答えるため3分を超えることがあり**、短すぎると応答の直前で打ち切ってそのチャンクを丸ごと失います |
 | `novelai.openai.endpoint` | `https://api.openai.com/v1` | ChatGPTのURL。互換サービスを使う場合のみ変更します |
 | `novelai.openai.timeoutSeconds` | `180` | ChatGPTの1回の呼び出しのタイムアウト |
@@ -949,7 +949,7 @@ AI処理の記録は「**ログを開く**」（ヘルプ）で開けます。�
 | `novelai.maxOutputTokens` | `16384` | 1回の応答で受け取る最大トークン数。Claude・ChatGPT・Geminiへはこの値をそのまま送ります。**出力は入力より単価が高い**ので、必要以上に大きくしないでください。Ollamaへは送りませんが、確保するコンテキスト長の計算には使われます |
 | `novelai.lmstudio.endpoint` | `http://localhost:1234/v1` | LM StudioのローカルサーバーのURL。LM Studioの「Developer」画面で表示される値に合わせます |
 | `novelai.lmstudio.contextWindow` | `8192` | LM Studioのコンテキスト長。**APIから取得できないため、モデルを読み込んだときに指定した長さに合わせてください。実際より大きいと入力が切り捨てられます** |
-| `novelai.lmstudio.timeoutSeconds` | `180` | LM Studioの1回の呼び出しのタイムアウト |
+| `novelai.lmstudio.timeoutSeconds` | `300` | LM Studioの1回の呼び出しのタイムアウト（CPUだけの環境でも1回を切らない長さ） |
 | `novelai.lmstudio.cliPath` | `""`（自動検出） | LM Studioのコマンド（`lms`）の場所。拡張機能からLM Studioのサーバーを起動するときにだけ使います。空なら `~/.lmstudio/bin` とPATHを探します |
 | `novelai.lmstudio.loadContextLength` | `0`（モデルの最大） | 拡張機能がモデルを読み込むときに指定する文脈の長さ。`0` ならそのモデルが対応できる最大まで使います。大きいほどメモリを使うので、足りない場合はここで抑えます |
 | `novelai.chunkSizeMode` | `モデルによって可変` | AIへ1回に送る本文の量の決め方。既定では**使うAIのコンテキスト長から自動で決めます**（長く受けられるモデルほどまとめて送るので、呼び出し回数が減ります）。誤字脱字・推敲・矛盾検知・設定資料の抽出のすべてに効きます |

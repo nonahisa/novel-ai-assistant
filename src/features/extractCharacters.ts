@@ -59,7 +59,10 @@ import {
 } from "../core/logger";
 import { writeExtractedIndex } from "../core/extractedIndexStore";
 import { readEpisodeContents } from "./extractionFreshness";
-import { resolveMaxOutputTokens } from "../ai/outputLimit";
+import {
+  resolveMaxOutputTokens,
+  resolveOutputTokensForPlanning,
+} from "../ai/outputLimit";
 import { PendingUpdateStore } from "../core/pendingUpdates";
 import { applyPendingCharacterUpdates } from "./applyPendingUpdates";
 import type { ProposalPanel } from "./proposalPanel";
@@ -219,7 +222,13 @@ export async function extractCharacters(
   if (!modelInfo) return false;
 
   const contextWindow = modelInfo.contextWindow;
-  const maxOutputTokens = resolveMaxOutputTokens();
+  // **応答の見込みに実測を使う**（設計書6.65.16の2）。台帳に書ける量の
+  // 実測があればそれ、無ければ既定の見込み（8,192）を上限とする
+  const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
+  const maxOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model
+  );
 
   // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
   // 抽出の指示はいちばん重く、P-04a v5.1 で約11,000字ある。ここを固定の
@@ -239,10 +248,14 @@ export async function extractCharacters(
     }).length;
 
   // 大きさの決め方は1か所へ集めてある（設計書6.23）
-  const chunkSettings = readChunkSettings(contextWindow, {
-    overheadChars,
-    outputTokens: maxOutputTokens,
-  });
+  const chunkSettings = readChunkSettings(
+    contextWindow,
+    {
+      overheadChars,
+      outputTokens: maxOutputTokens,
+    },
+    outputTuning
+  );
   const chunkChars = chunkSettings.chunk.chars;
 
   // 実際に使うコンテキスト長。**本文以外の量を見込まない**（設計書6.27.10）。

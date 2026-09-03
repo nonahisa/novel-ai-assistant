@@ -145,6 +145,41 @@ export const MIN_CHUNK_CHARS = 1500;
 const MAX_CHUNK_CHARS = 20000;
 
 /**
+ * 未チューニング時の、自動モードのチャンク上限（設計書6.65.16の1）。
+ *
+ * 従来の既定は「モデルの申告値を信じて自動的に広げる」で、131kを名乗る
+ * 小型モデルでも初回から20,000字を送っていた。非力なマシンでは
+ * **KVキャッシュが膨れて時間切れの温床**になる（作者の依頼、2026-09-03
+ * 「プロンプト全体と本文が受け入れ可能で、非力なマシンのローカルLLMでも
+ * 動く程度に」）。チューニング台帳に読める量の実測（`measuredChars`）が
+ * 無いモデルだけ、ここで安全側に抑える——プロンプト固定費＋本文6,000字＋
+ * 応答見込みなら num_ctx は1万数千トークンに収まり、8GB級＋4Bモデルでも
+ * 1回1〜3分で回る見込みである。実測すればこの天井が20,000字まで一気に
+ * 広がる（狙いどおり「チューニングで速くなった」が体感できる）。
+ */
+export const UNTUNED_CHUNK_CHARS = 6000;
+
+/**
+ * 自動モードのチャンク字数を、未チューニングなら安全側に抑える
+ * （設計書6.65.16の1）。
+ *
+ * **手動モードはここを通らない。** 作者が字数を指定しているなら、
+ * 未チューニングでもそのまま尊重する——`readChunkSettings` が
+ * 自動モードのときだけこの関数を呼ぶ。
+ *
+ * @param resolvedChars 自動モードで決まった字数（`resolveChunkChars` の結果）
+ * @param measuredReadChars 台帳（`core/modelTuning.ts`）に入っている、
+ *   読める量の実測字数（`ModelTuning.measuredChars`）。無ければ undefined
+ */
+export function capUntunedChunkChars(
+  resolvedChars: number,
+  measuredReadChars: number | undefined
+): number {
+  if (measuredReadChars !== undefined) return resolvedChars;
+  return Math.min(resolvedChars, UNTUNED_CHUNK_CHARS);
+}
+
+/**
  * モデルのコンテキスト長からチャンクサイズを決める。
  *
  * 日本語はおおむね1文字1トークン前後だが、モデルによって

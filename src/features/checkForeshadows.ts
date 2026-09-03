@@ -8,7 +8,7 @@ import {
   isFatalProviderFailure,
   recoveryForAIError,
 } from "../ai/types";
-import { OUTPUT_RESERVE_TOKENS } from "../ai/contextGuard";
+import { resolveOutputTokensForPlanning } from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import {
@@ -156,10 +156,19 @@ export async function checkForeshadows(
         // 実際に送るときと同じ絞り方（`known.slice(-60)`）で測る
         .slice(-60),
     }).length;
-  const chunkSettings = readChunkSettings(info.contextWindow, {
-    overheadChars: detectOverheadChars,
-    outputTokens: OUTPUT_RESERVE_TOKENS,
-  });
+  // **応答の見込みに実測を使う**（設計書6.65.16の2）
+  const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
+  const chunkSettings = readChunkSettings(
+    info.contextWindow,
+    {
+      overheadChars: detectOverheadChars,
+      outputTokens: resolveOutputTokensForPlanning(
+        outputTuning.providerId,
+        outputTuning.model
+      ),
+    },
+    outputTuning
+  );
   const { chunks, chapterLabelByFile, unreadableEpisodes } = await collectChunks(
     work,
     chunkSettings
@@ -226,6 +235,11 @@ export async function checkForeshadows(
 
   const provider = resolved.provider;
   const model = resolved.model;
+  // num_ctx の確保にも同じ見込みを使う（設計書6.65.16の2）
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model
+  );
   // **既に台帳にあるものは出さない**（設計書6.35.2）。処理しながら
   // 増やしていくので、同じ候補が隣のチャンクから二度出ることもなくなる
   const known: KnownForeshadow[] = ledger.records.map((record) => ({
@@ -346,6 +360,7 @@ export async function checkForeshadows(
             model,
             // 取り出すだけの仕事なので揺らさない
             temperature: 0.0,
+            maxOutputTokens: plannedOutputTokens,
             jsonSchema: FORESHADOW_DETECT_SCHEMA as unknown as object,
             disableThinking: true,
             signal: controller.signal,
@@ -542,10 +557,19 @@ export async function checkForeshadowResolution(
       chunkText: "",
       foreshadows: open.map(toBrief),
     }).length;
-  const chunkSettings = readChunkSettings(info.contextWindow, {
-    overheadChars: resolveOverheadChars,
-    outputTokens: OUTPUT_RESERVE_TOKENS,
-  });
+  // **応答の見込みに実測を使う**（設計書6.65.16の2）
+  const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
+  const chunkSettings = readChunkSettings(
+    info.contextWindow,
+    {
+      overheadChars: resolveOverheadChars,
+      outputTokens: resolveOutputTokensForPlanning(
+        outputTuning.providerId,
+        outputTuning.model
+      ),
+    },
+    outputTuning
+  );
   // **話をまたいでまとめない。** 「張った話より後か」を話数で決めるので、
   // 前後の話が1つの塊になっていると、その判断ができなくなる
   const { chunks, chapterLabelByFile, unreadableEpisodes } = await collectChunks(
@@ -627,6 +651,11 @@ export async function checkForeshadowResolution(
 
   const provider = resolved.provider;
   const model = resolved.model;
+  // num_ctx の確保にも同じ見込みを使う（設計書6.65.16の2）
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model
+  );
   const byId = new Map(open.map((record) => [record.id, record]));
 
   const proposals: ForeshadowResolutionProposal[] = [];
@@ -726,6 +755,7 @@ export async function checkForeshadowResolution(
             userPrompt,
             model,
             temperature: 0.0,
+            maxOutputTokens: plannedOutputTokens,
             jsonSchema: FORESHADOW_RESOLVE_SCHEMA as unknown as object,
             disableThinking: true,
             signal: controller.signal,

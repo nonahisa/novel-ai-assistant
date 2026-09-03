@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import {
   capMergeCharsByOutputTokens,
+  capUntunedChunkChars,
   parseChunkSizeMode,
   planChunkBudget,
   resolveChunkChars,
@@ -37,6 +38,16 @@ export interface ChunkSettings {
    * 「なぜこの字数になったか」を作者へ見せるためだけにある（設計書6.65.14の2・3）。
    */
   mergeCharsBeforeOutputCap?: number;
+  /**
+   * 未チューニングの安全既定（設計書6.65.16の1）で抑える**前**の、
+   * 自動モードのチャンク字数。
+   *
+   * 抑えられていないとき（手動モード・読める量の実測がある・outputTuning
+   * 未対応の呼び出し側など）は undefined——そのときは `chunk.chars` の
+   * もとになった値と同じなので、別に持たない。「なぜこの字数になったか」を
+   * 作者へ見せるためだけにある（`mergeCharsBeforeOutputCap` と同じ形）。
+   */
+  chunkCharsBeforeUntunedCap?: number;
   /**
    * 固定費を差し引いた結果。差し引く材料を渡されなければ undefined。
    *
@@ -140,10 +151,15 @@ export function readChunkSettings(
   contextWindow: number,
   fixedCost?: ChunkFixedCost,
   /**
-   * 書ける量（設計書6.61）で、まとめ送信の上限をさらに絞るための指定
-   * （設計書6.65.14の2）。
+   * 台帳（`core/modelTuning.ts`）を引くための指定。2つの絞り込みに使う。
    *
-   * **省略すると、これまでどおり絞らない。** 呼び出し側（誤字脱字・
+   * 1. **未チューニングの安全既定**（設計書6.65.16の1）：自動モードで、
+   *    読める量の実測（`measuredChars`）が無いモデルはチャンク上限を
+   *    `UNTUNED_CHUNK_CHARS`（6,000字）に抑える
+   * 2. 書ける量（設計書6.61）で、まとめ送信の上限をさらに絞る
+   *    （設計書6.65.14の2）
+   *
+   * **省略すると、これまでどおりどちらも絞らない。** 呼び出し側（誤字脱字・
    * 設定資料の抽出など）を1つずつ対応させるまでの間、動作を変えないため
    * の逃げ道である——渡さない限り、この関数の挙動は前と同じになる。
    */
@@ -158,6 +174,21 @@ export function readChunkSettings(
     contextWindow,
   });
 
+  const tuning = outputTuning
+    ? modelTuning(outputTuning.providerId, outputTuning.model)
+    : undefined;
+
+  // **未チューニングの安全既定**（設計書6.65.16の1）。自動モードだけが
+  // 対象——手動で字数を指定しているなら、未チューニングでも作者の指定を
+  // そのまま尊重する。outputTuning を渡さない呼び出し側は、対応させる
+  // までの逃げ道としてこれまでどおり抑えない
+  const untunedCapApplies = mode === "auto" && outputTuning !== undefined;
+  const cappedChars = untunedCapApplies
+    ? capUntunedChunkChars(requested.chars, tuning?.measuredChars)
+    : requested.chars;
+  const requestedAfterSafetyCap: ResolvedChunkSize =
+    cappedChars === requested.chars ? requested : { ...requested, chars: cappedChars };
+
   // 固定費が分かっているなら、そのぶんを本文から引く。**引かないと、
   // 指示や資料が育ったときに本文が押し出されて溢れる**（溢れた分は
   // Ollama では黙って捨てられる）
@@ -167,15 +198,15 @@ export function readChunkSettings(
           contextWindow,
           overheadChars: fixedCost.overheadChars,
           outputTokens: fixedCost.outputTokens,
-          requestedChars: requested.chars,
+          requestedChars: requestedAfterSafetyCap.chars,
         }),
         overheadChars: fixedCost.overheadChars,
       }
     : undefined;
 
   const chunk: ResolvedChunkSize = budget
-    ? { ...requested, chars: budget.chunkChars }
-    : requested;
+    ? { ...requestedAfterSafetyCap, chars: budget.chunkChars }
+    : requestedAfterSafetyCap;
 
   const requestedMergeChars = resolveMergeChars({
     mode,
@@ -184,11 +215,9 @@ export function readChunkSettings(
   });
 
   // **絞るのは、指定されたモデルの実測が台帳にあるときだけ**
-  // （設計書6.65.14の2）。渡されなければ `modelTuning` を引かないので、
+  // （設計書6.65.14の2）。渡されなければ `tuning` が undefined のままなので、
   // 対応していない呼び出し側の挙動は変わらない
-  const measuredOutputTokens = outputTuning
-    ? modelTuning(outputTuning.providerId, outputTuning.model)?.measuredOutputTokens
-    : undefined;
+  const measuredOutputTokens = tuning?.measuredOutputTokens;
   const mergeChars = capMergeCharsByOutputTokens(
     requestedMergeChars,
     measuredOutputTokens
@@ -200,6 +229,9 @@ export function readChunkSettings(
     mergeChars,
     ...(mergeChars < requestedMergeChars
       ? { mergeCharsBeforeOutputCap: requestedMergeChars }
+      : {}),
+    ...(cappedChars < requested.chars
+      ? { chunkCharsBeforeUntunedCap: requested.chars }
       : {}),
     budget,
   };
@@ -218,6 +250,12 @@ export function describeChunkSettings(settings: ChunkSettings): string {
       : settings.chunk.from === "setting"
         ? "設定の指定値"
         : "字数の指定が無いためモデルから";
+  // **未チューニングの安全既定で抑えたことも書く**（設計書6.65.16の1）。
+  // 書かないと、作者には「チャンクの上限が効いていない」ように見える
+  const untuned =
+    settings.chunkCharsBeforeUntunedCap !== undefined
+      ? `（未チューニングのため ${settings.chunkCharsBeforeUntunedCap}字から抑制）`
+      : "";
   const merge =
     settings.mergeChars > 0
       ? `／まとめ送信 ${settings.mergeChars}字` +
@@ -237,5 +275,5 @@ export function describeChunkSettings(settings: ChunkSettings): string {
           ? "（縮めても入り切らない見込み。下限で送ります）"
           : "")
     : "";
-  return `1チャンク ${settings.chunk.chars}字（${source}）${merge}${budget}`;
+  return `1チャンク ${settings.chunk.chars}字（${source}）${untuned}${merge}${budget}`;
 }

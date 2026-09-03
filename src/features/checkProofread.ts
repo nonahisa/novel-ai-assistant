@@ -26,7 +26,7 @@ import {
   resolveModelInfoOrWarn,
 } from "./chunkSettings";
 import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
-import { OUTPUT_RESERVE_TOKENS } from "../ai/contextGuard";
+import { resolveOutputTokensForPlanning } from "../ai/outputLimit";
 import { blankMemoLines } from "../core/sceneMemo";
 import type { KeepWord } from "../models/keepWord";
 import {
@@ -115,7 +115,14 @@ export async function checkProofread(
   });
   if (!info) return undefined;
 
-  const prepared = await collectChunks(work, info, options);
+  // **応答の見込みに実測を使う**（設計書6.65.16の2）
+  const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model
+  );
+
+  const prepared = await collectChunks(work, info, options, outputTuning);
   if (!prepared) return undefined;
   const { chunks, narrativeStyle, keepWords, styleNote } = prepared;
   if (chunks.length === 0) {
@@ -294,6 +301,7 @@ export async function checkProofread(
           model,
           // 言い回しの提案なので、事実の突き合わせより少しだけ揺らす
           temperature: 0.2,
+          maxOutputTokens: plannedOutputTokens,
           jsonSchema: PROOFREAD_SCHEMA as unknown as object,
           disableThinking: true,
           signal: controller.signal,
@@ -377,7 +385,9 @@ async function collectChunks(
   work: WorkEntry,
   /** 呼び出し側が引いたモデル情報。**ここでは引き直さない**（1回だけ引く） */
   info: ModelInfo,
-  options: CheckProofreadOptions
+  options: CheckProofreadOptions,
+  /** 未チューニングの安全既定・書ける量の絞り込み用（設計書6.65.16） */
+  outputTuning: { providerId: string; model: string }
 ): Promise<
   | {
       chunks: Chunk[];
@@ -456,10 +466,17 @@ async function collectChunks(
 
   // **設定を見るようにした**（設計書6.23）。以前はここだけ設定を無視して
   // いつも自動で決めており、作者が字数を指定しても効かなかった
-  const chunkSettings = readChunkSettings(info.contextWindow, {
-    overheadChars,
-    outputTokens: OUTPUT_RESERVE_TOKENS,
-  });
+  const chunkSettings = readChunkSettings(
+    info.contextWindow,
+    {
+      overheadChars,
+      outputTokens: resolveOutputTokensForPlanning(
+        outputTuning.providerId,
+        outputTuning.model
+      ),
+    },
+    outputTuning
+  );
   const maxChars = chunkSettings.chunk.chars;
 
   const chunks: Chunk[] = [];

@@ -8,7 +8,7 @@ import {
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { confirmProviderReachable } from "./aiConnectivity";
 
-import { OUTPUT_RESERVE_TOKENS } from "../ai/contextGuard";
+import { resolveOutputTokensForPlanning } from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
 import { loadEpisodeBodies, type EpisodeBody } from "../core/episodeBodies";
 import { readWorkFormat } from "../core/workFormatStore";
@@ -117,10 +117,20 @@ export async function generateAnnouncement(
     actionLabel: "更新告知文の生成",
   });
   if (!info) return;
-  const chunkSettings = readChunkSettings(info.contextWindow, {
-    overheadChars,
-    outputTokens: OUTPUT_RESERVE_TOKENS,
-  });
+  // **応答の見込みに実測を使う**（設計書6.65.16の2）
+  const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model
+  );
+  const chunkSettings = readChunkSettings(
+    info.contextWindow,
+    {
+      overheadChars,
+      outputTokens: plannedOutputTokens,
+    },
+    outputTuning
+  );
   const budgetChars = chunkSettings.chunk.chars;
 
   // **頭から詰める。** 告知が示すのは今回の話の「入口」なので、
@@ -153,6 +163,7 @@ export async function generateAnnouncement(
           model: resolved.model,
           // 読ませる文章なので、抽出より少し揺らす（紹介文と同じ）
           temperature: 0.5,
+          maxOutputTokens: plannedOutputTokens,
           jsonSchema: ANNOUNCE_SCHEMA as unknown as object,
           disableThinking: true,
           signal: controller.signal,

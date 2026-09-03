@@ -8,7 +8,7 @@ import {
   recoveryForAIError,
   type ModelInfo,
 } from "../ai/types";
-import { OUTPUT_RESERVE_TOKENS } from "../ai/contextGuard";
+import { resolveOutputTokensForPlanning } from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import {
@@ -262,10 +262,22 @@ export async function checkContradictions(
     }).length +
     material.referenceBudgetChars;
 
-  const tasks = await collectChunks(work, info, options, {
-    overheadChars,
-    outputTokens: OUTPUT_RESERVE_TOKENS,
-  });
+  // **応答の見込みに実測を使う**（設計書6.65.16の2）
+  const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model
+  );
+  const tasks = await collectChunks(
+    work,
+    info,
+    options,
+    {
+      overheadChars,
+      outputTokens: plannedOutputTokens,
+    },
+    outputTuning
+  );
   if (!tasks) return undefined;
   const { chunks, chapterLabelByFile, chunkNote, unreadableEpisodes } = tasks;
   if (chunks.length === 0) {
@@ -506,6 +518,7 @@ export async function checkContradictions(
           model,
           // 事実の突き合わせなので揺らさない
           temperature: 0.0,
+          maxOutputTokens: plannedOutputTokens,
           jsonSchema: CONTRADICTION_CHECK_SCHEMA as unknown as object,
           disableThinking: true,
           signal: controller.signal,
@@ -687,6 +700,7 @@ export async function checkContradictions(
         }),
         model,
         temperature: 0.0,
+        maxOutputTokens: plannedOutputTokens,
         jsonSchema: CONTRADICTION_VERIFY_SCHEMA as unknown as object,
         disableThinking: true,
         signal: controller.signal,
@@ -984,7 +998,9 @@ async function collectChunks(
   /** 呼び出し側が引いたモデル情報。**ここでは引き直さない**（下のコメント） */
   info: ModelInfo,
   options: CheckContradictionsOptions,
-  fixedCost: ChunkFixedCost
+  fixedCost: ChunkFixedCost,
+  /** 未チューニングの安全既定・書ける量の絞り込み用（設計書6.65.16） */
+  outputTuning: { providerId: string; model: string }
 ): Promise<
   | {
       chunks: Chunk[];
@@ -1016,7 +1032,11 @@ async function collectChunks(
   // **固定費を差し引いてから本文の割当を決める**（設計書6.27.10）。
   // コンテキスト長が取れないときは、ここまで来ない
   // （`resolveModelInfoOrWarn` が理由を出して止めている）
-  const chunkSettings = readChunkSettings(info.contextWindow, fixedCost);
+  const chunkSettings = readChunkSettings(
+    info.contextWindow,
+    fixedCost,
+    outputTuning
+  );
   const maxChars = chunkSettings.chunk.chars;
 
   const chunks: Chunk[] = [];

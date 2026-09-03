@@ -57,7 +57,10 @@ import {
 } from "../core/abilityStore";
 import { withCancellableProgress, type CheckProgress } from "../views/progress";
 import { logFailure, logStep, useLogFile } from "../core/logger";
-import { resolveMaxOutputTokens } from "../ai/outputLimit";
+import {
+  resolveMaxOutputTokens,
+  resolveOutputTokensForPlanning,
+} from "../ai/outputLimit";
 import {
   rateLimitWaitMs,
   describeRateLimitGiveUp,
@@ -183,7 +186,13 @@ export async function checkTypos(
   if (!modelInfo) return undefined;
 
   const contextWindow = modelInfo.contextWindow;
-  const maxOutputTokens = resolveMaxOutputTokens();
+  // **応答の見込みに実測を使う**（設計書6.65.16の2）。台帳に書ける量の
+  // 実測があればそれ、無ければ既定の見込み（8,192）を上限とする
+  const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
+  const maxOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model
+  );
 
   // 実際に使うコンテキスト長。**本文以外の量を見込まない**（設計書6.27.10）。
   // 以前は「本文＋固定12,000字」で計算しており、固定費（指示・辞書・作法）が
@@ -315,10 +324,14 @@ export async function checkTypos(
     }).length;
 
   // 大きさの決め方は1か所へ集めてある（設計書6.23）。固定費を差し引いてから決める
-  const chunkSettings = readChunkSettings(contextWindow, {
-    overheadChars,
-    outputTokens: maxOutputTokens,
-  });
+  const chunkSettings = readChunkSettings(
+    contextWindow,
+    {
+      overheadChars,
+      outputTokens: maxOutputTokens,
+    },
+    outputTuning
+  );
   const chunkChars = chunkSettings.chunk.chars;
 
   const tasks: FileChunkTask[] = sources.map((source) => ({
