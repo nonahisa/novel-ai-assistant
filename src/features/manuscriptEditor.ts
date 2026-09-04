@@ -18,12 +18,17 @@ import { buildManuscriptEditorHtml } from "../views/manuscriptEditorHtml";
 import {
   MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   MANUSCRIPT_EDITOR_VIEW_TYPE,
+  manuscriptViewTypeFor,
 } from "../core/manuscriptViewTypes";
+import type { WorkFormatKey } from "../core/workFormat";
 import {
   collectTermSpans,
   notationModeFor,
   renderTermMarks,
 } from "../core/manuscriptRender";
+import { isNoteStyleTarget } from "../core/noteStyle";
+import { renderNotePreview } from "../core/notePreview";
+import { readWorkFormat } from "../core/workFormatStore";
 import { TERM_COLORS } from "../core/termColors";
 import {
   computeDocumentEdit,
@@ -273,7 +278,8 @@ export async function addMemoToOpenManuscript(): Promise<boolean> {
  * 2. 素のエディタで開いている本文（.txt / .md）
  * 3. その作品の最後の話（何も開いていないときの受け皿）
  *
- * 開くのは**横書きの入口**（作品一覧から本文を開いたときと同じ既定）。
+ * 開くのは**タイプに合わせた入口**（作品一覧から本文を開いたときと同じ既定。
+ * 小説は横書き、脚本は縦書き。設計書6.70）。
  *
  * **読み始めはしない。** 声の一覧は非同期に揃うので、開いた瞬間に読ませると
  * 声が無いまま始めることになる。押していないのに声が出るのも驚く。
@@ -298,7 +304,9 @@ export async function openManuscriptForReading(work: WorkEntry): Promise<void> {
   await vscode.commands.executeCommand(
     "vscode.openWith",
     paths.toUri(filePath),
-    MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+    // 向きの既定はタイプが決める（設計書6.70。脚本だけ縦書き）。
+    // **ここで別の決め方をしない**——作品一覧から開いたときと同じ入口にする
+    manuscriptViewTypeFor(await formatOf(work))
   );
   // **台帳に載るまで待つ**（`revealLine` と同じ事情。開いた直後はまだ載らない）
   const opened = await waitFor(() => openManuscripts.get(key));
@@ -529,6 +537,20 @@ function activeManuscriptViewType(): string | undefined {
   }
 }
 
+/**
+ * その作品のタイプ（設計書6.70）。**読めなければ undefined。**
+ *
+ * プロットが無い・壊れている作品でも、開けなくなってはいけない。
+ * そのときは「決めていない」と同じ扱いで、これまでどおり横書きになる。
+ */
+async function formatOf(work: WorkEntry): Promise<WorkFormatKey | undefined> {
+  try {
+    return await readWorkFormat(work);
+  } catch {
+    return undefined;
+  }
+}
+
 /** その入口が、はじめにどちらの向きで開くか */
 export type ManuscriptOrientation =
   /** 設定（`manuscriptEditor.vertical`）に従う */
@@ -602,7 +624,15 @@ type Incoming =
   /** 読んでいる文の行に、シーンメモの印を置く */
   | { type: "readingMark"; line: number }
   /** 選ばれた声を覚える（端末ごと。作品には書かない） */
-  | { type: "readingVoice"; name: string };
+  | { type: "readingVoice"; name: string }
+  /**
+   * 「noteに貼ったときの見た目」の面を開いた・閉じた（設計書6.69）。
+   *
+   * **開いているあいだだけ組む。** 本文ぜんたいをHTMLへ組んで送る道は
+   * 0.25.2で一度やめている（打つたびに千の段落を組んでいた）。
+   * SNS記事は短いとはいえ、閉じている面のために組む理由は無い。
+   */
+  | { type: "notePreview"; on: boolean };
 
 export interface ManuscriptEditorDeps {
   highlighter: TermHighlighter;
@@ -729,6 +759,13 @@ export class ManuscriptEditorProvider
      */
     const notation = notationModeFor(fromUri(document.uri));
 
+    /**
+     * 「noteに貼ったときの見た目」の面が開いているか（設計書6.69）。
+     *
+     * 画面から届く知らせで切り替わる。**閉じているあいだは組まない。**
+     */
+    let notePreviewWanted = false;
+
     const send = async (): Promise<void> => {
       // **画面へはLF区切りで渡す**（core/eolSpace.ts）。textareaは値を
       // LFへ正規化するので、CRLFのまま渡すと本文・用語の位置・組んで書く面の
@@ -738,9 +775,26 @@ export class ManuscriptEditorProvider
         fromUri(document.uri)
       );
       const index = found?.index;
+      /*
+        **この原稿はSNS記事か**（設計書6.69）。形式の在り処はプロットの
+        「形式」の節ひとつ（`core/workFormatStore.ts`。読んだ結果は
+        向こうが覚えているので、打つたびにファイルを読むことにはならない）。
+        作品を引けなければ `undefined` を渡し、判定はファイル名へ落ちる。
+      */
+      const format = found ? await readWorkFormat(found.work) : undefined;
+      const noteLike = isNoteStyleTarget(fromUri(document.uri), format);
       await panel.webview.postMessage({
         type: "update",
         text,
+        // note風の組版と、切り替えボタンの出し入れ（設計書6.69）
+        noteLike,
+        /*
+          「noteに貼ったときの見た目」。**開いているあいだだけ組む**
+          （閉じている面のために本文ぜんたいを組む理由が無い）。
+        */
+        ...(noteLike && notePreviewWanted
+          ? { notePreview: renderNotePreview(text) }
+          : {}),
         // **組んで書く面も、この記法で組む**（画面側に写しを持たせない）
         notation,
         /*
@@ -1000,6 +1054,12 @@ export class ManuscriptEditorProvider
           await this.deps.saveReadAloudVoice?.(message.name);
           break;
 
+        case "notePreview":
+          // **開いたその場で組んで返す**（次に打つまで空のままにしない）
+          notePreviewWanted = message.on;
+          if (notePreviewWanted) await send();
+          break;
+
         case "caret": {
           // **覚えるのはこちら。** 画面はファイルの場所を知らない
           if (message.line > 0) {
@@ -1066,10 +1126,13 @@ export class ManuscriptEditorProvider
       `原稿エディタ：${filePath} は台帳にありません（鍵: ${key}）。開き直します。`
     );
 
+    // **いま開いている向きが最優先**（縦書きで書いている人の画面を横にしない）。
+    // 開いていなければ、その作品のタイプに合わせた入口で開く（設計書6.70）
+    const episodeWork = await this.registeredEpisodeWork(filePath);
     const viewType =
       activeManuscriptViewType() ??
-      ((await this.isRegisteredEpisode(filePath))
-        ? MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+      (episodeWork
+        ? manuscriptViewTypeFor(await formatOf(episodeWork))
         : undefined);
     if (!viewType) {
       logLine(
@@ -1102,23 +1165,29 @@ export class ManuscriptEditorProvider
   }
 
   /**
-   * その原稿が、登録された作品の「話」か。
+   * その原稿が、登録された作品の「話」なら、その作品。
    *
    * **開く画面を決めるのは中身であって、拡張機能の都合ではない。**
-   * 本文（話）なら横書きの原稿エディタ、それ以外（プロット・設定資料）は
+   * 本文（話）なら原稿エディタ、それ以外（プロット・設定資料）は
    * 素のエディタ、という切り分けを、作品一覧と同じ基準で行う。
+   *
+   * **作品まで返す。** 開く向きの既定はタイプで決まる（設計書6.70）ので、
+   * 「話かどうか」だけでは足りない。
    *
    * 走査は、その原稿を原稿エディタで開いていないときにしか通らない
    * （開いていれば台帳で当たる）ので、飛ぶたびに走ることはない。
    */
-  private async isRegisteredEpisode(filePath: string): Promise<boolean> {
+  private async registeredEpisodeWork(
+    filePath: string
+  ): Promise<WorkEntry | undefined> {
     try {
       const found = await this.deps.highlighter.indexFor(filePath);
-      if (!found) return false;
+      if (!found) return undefined;
       const { episodes } = await scanWork(found.work);
-      return episodes.some((episode) =>
+      const isEpisode = episodes.some((episode) =>
         samePath(episode.filePath, filePath)
       );
+      return isEpisode ? found.work : undefined;
     } catch (error) {
       // **走査に失敗しても、飛べなくならない。** 素のエディタへ譲る
       logLine(
@@ -1126,7 +1195,7 @@ export class ManuscriptEditorProvider
           error instanceof Error ? error.message : String(error)
         }）。`
       );
-      return false;
+      return undefined;
     }
   }
 

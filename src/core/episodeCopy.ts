@@ -1,5 +1,10 @@
 import { parseEpisodeMetadata } from "./metadataParser";
-import { toSiteNotation, type RubyStyle } from "./ruby";
+import {
+  hasEmphasis,
+  toSiteNotation,
+  type EmphasisSite,
+  type RubyStyle,
+} from "./ruby";
 import { stripMemoLines } from "./sceneMemo";
 import { sanitizeFileName } from "./episodeParser";
 
@@ -51,11 +56,37 @@ export function extractEpisodeParts(
  *
  * **シーンメモは必ず落とす**（設計書6.40.2）。ここを抜かすと、
  * 作者の付箋がそのまま公開される。
+ *
+ * @param site 傍点の書き方だけがこれで変わる（6.12.4）。投稿キット（6.68）は
+ *   貼り付け先のサイトから決めて渡す。**既定はカクヨム**——渡さない
+ *   呼び出し（手で選んでコピーする経路）の見た目を変えないためである
  */
-export function bodyForPosting(body: string, style: RubyStyle["id"]): string {
-  return toSiteNotation(stripMemoLines(body), style)
+export function bodyForPosting(
+  body: string,
+  style: RubyStyle["id"],
+  site: EmphasisSite = "kakuyomu"
+): string {
+  return toSiteNotation(stripMemoLines(body), style, site)
     .replace(/^\n+/, "")
     .replace(/\n+$/, "");
+}
+
+/**
+ * 貼り付け先のサイトを訊く必要があるか（設計書6.12.4）。
+ *
+ * **訊いても答えが変わらないなら訊かない**（5.7.3）。ルビはどのサイトでも
+ * 同じ書き方で通るので、傍点が入っていなければ尋ねる意味がない。
+ * 別記法・HTML・括弧書きは、傍点の出し方がその記法だけで決まる。
+ *
+ * この判断を1か所に置いてあるのは、**「投稿サイト用にコピー」の入口が
+ * 3つある**（原稿エディタ・エディタの右クリック・作品一覧の話）ためで、
+ * 書き写すと片方だけ訊かないままになる。
+ */
+export function needsEmphasisSite(
+  body: string,
+  style: RubyStyle["id"]
+): boolean {
+  return style === "site" && hasEmphasis(stripMemoLines(body));
 }
 
 /**

@@ -5,9 +5,12 @@ import {
   bodyForPosting,
   extractEpisodeParts,
   nameWithSubtitle,
+  needsEmphasisSite,
 } from "../core/episodeCopy";
 import { readTextFile } from "../core/textFile";
-import { RUBY_STYLES, type RubyStyle } from "../core/ruby";
+import { RUBY_STYLES, type EmphasisSite, type RubyStyle } from "../core/ruby";
+// 貼り付け先を訊く画面は1つにする（写すと、片方だけ選べる先が増える）
+import { pickEmphasisSite } from "./ruby";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import { recordEdit } from "../core/actorContext";
 import { logFailure } from "../core/logger";
@@ -53,7 +56,21 @@ export async function copyBodyForPosting(episode: EpisodeFile): Promise<void> {
   const style = await pickStyle();
   if (!style) return;
 
-  const text = bodyForPosting(parts.body, style.id);
+  /*
+    **傍点が入っているときだけ、貼り付け先を訊く**（設計書6.12.4）。
+
+    ここは長らくカクヨム記法で固定されており、なろう・アルファポリスへ
+    貼ると `《《大事》》` がそのまま読者に見えていた（0.30.7で修正）。
+    ルビはどのサイトでも同じ書き方なので、傍点が無ければ訊かない。
+  */
+  let site: EmphasisSite = "kakuyomu";
+  if (needsEmphasisSite(parts.body, style.id)) {
+    const picked = await pickEmphasisSite();
+    if (!picked) return;
+    site = picked;
+  }
+
+  const text = bodyForPosting(parts.body, style.id, site);
   if (!text) {
     void vscode.window.showWarningMessage(
       `${episode.fileName} に本文が見つかりませんでした。`

@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "「設定が前の話と食い違っていないか不安」「誤字脱字の見直しがつらい」「AIに原稿を触られたくない」——小説を書く人の困りごとを引き受けるVSCode拡張機能です。本文から設定資料を自動で作り、矛盾や誤字脱字を調べ、執筆量を記録します。AIは提案するだけで、原稿は書き換えません。無料の手元AI（Ollama / LM Studio）だけでも使え、その場合、原稿はパソコンの外へ出ません。",
-  "version": "0.30.6",
+  "version": "0.30.7",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -747,6 +747,24 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.postNewEpisode",
+        "title": "新話を投稿する",
+        "icon": "$(rocket)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.postThisEpisode",
+        "title": "この話を投稿する",
+        "icon": "$(rocket)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.configurePostingSites",
+        "title": "投稿サイトの設定",
+        "icon": "$(settings-gear)",
+        "category": "小説執筆"
+      },
+      {
         "command": "novelai.showEditHistory",
         "title": "編集履歴を見る",
         "category": "小説執筆",
@@ -967,112 +985,127 @@
       "view/item/context": [
         {
           "command": "novelai.addEpisode",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
           "group": "inline"
         },
         {
           "command": "novelai.showWritingStats",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
           "group": "1_stats@2"
         },
         {
           "command": "novelai.openSettingsPanel",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-(novel|script|unset)$/",
           "group": "1_stats@3"
         },
         {
           "command": "novelai.extractSettings",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-(novel|script|unset)$/",
           "group": "1_stats@4"
         },
         {
           "command": "novelai.generateSynopses",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-(novel|script|unset)$/",
           "group": "1_stats@5"
         },
         {
           "command": "novelai.proposeChapters",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-(novel|script|unset)$/",
           "group": "1_stats@6"
         },
         {
+          "command": "novelai.postNewEpisode",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
+          "group": "1_stats@7"
+        },
+        {
+          "command": "novelai.configurePostingSites",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
+          "group": "1_stats@8"
+        },
+        {
           "command": "novelai.gitSync",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
           "group": "2_open@1"
         },
         {
           "command": "novelai.openWorkFolder",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
           "group": "2_open@2"
         },
         {
           "command": "novelai.removeWork",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
           "group": "9_danger"
         },
         {
           "command": "novelai.checkTyposForFile",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "1_actions@1"
         },
         {
           "command": "novelai.splitCollectedFile",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-(novel|script|unset)$/",
           "group": "1_actions@2"
         },
         {
           "command": "novelai.convertToMarkdown",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "1_actions@3"
         },
         {
+          "command": "novelai.postThisEpisode",
+          "when": "view == novelai.works && viewItem =~ /^episode-/",
+          "group": "2_copy@0"
+        },
+        {
           "command": "novelai.copySubtitle",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "2_copy@1"
         },
         {
           "command": "novelai.copyBodyForPosting",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "2_copy@2"
         },
         {
           "command": "novelai.renameWithSubtitle",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-(novel|script|unset)$/",
           "group": "2_copy@3"
         },
         {
           "command": "novelai.startChapter",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-(novel|script|unset)$/",
           "group": "3_chapter@1"
         },
         {
           "command": "novelai.insertEpisodeBefore",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-(novel|script|unset)$/",
           "group": "4_renumber@1"
         },
         {
           "command": "novelai.removeEpisodeAndRenumber",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-(novel|script|unset)$/",
           "group": "4_renumber@2"
         },
         {
           "command": "novelai.deleteEpisodeFile",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "9_danger"
         },
         {
           "command": "novelai.renameChapter",
-          "when": "view == novelai.works && viewItem == chapter",
+          "when": "view == novelai.works && viewItem =~ /^chapter-(novel|script|unset)$/",
           "group": "3_chapter@1"
         },
         {
           "command": "novelai.suggestChapterName",
-          "when": "view == novelai.works && viewItem == chapter",
+          "when": "view == novelai.works && viewItem =~ /^chapter-(novel|script|unset)$/",
           "group": "3_chapter@2"
         },
         {
           "command": "novelai.removeChapter",
-          "when": "view == novelai.works && viewItem == chapter",
+          "when": "view == novelai.works && viewItem =~ /^chapter-(novel|script|unset)$/",
           "group": "9_danger"
         }
       ],
@@ -1162,6 +1195,10 @@
           "when": "false"
         },
         {
+          "command": "novelai.postThisEpisode",
+          "when": "false"
+        },
+        {
           "command": "novelai.insertEpisodeBefore",
           "when": "false"
         },
@@ -1199,6 +1236,14 @@
         },
         {
           "command": "novelai.configureAnnouncement",
+          "when": "true"
+        },
+        {
+          "command": "novelai.postNewEpisode",
+          "when": "true"
+        },
+        {
+          "command": "novelai.configurePostingSites",
           "when": "true"
         },
         {

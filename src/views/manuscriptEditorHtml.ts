@@ -482,6 +482,109 @@ body.vertical #compose .ellipsis {
   background-color: rgba(64, 160, 255, 0.28);
 }
 
+/* ── SNS記事のnote風（設計書6.69） ─────────────────
+   **ここから下は、すべて body.note / body.notepv の中に閉じ込める。**
+   小説の原稿の見え方を1pxも変えないための決まりで、
+   test/unit/manuscriptEditorNote.test.ts が規則の見出しを見張っている。
+
+   ## 編集面は、テーマに馴染ませたまま「組み方」だけをnoteに寄せる
+   紙面を白く塗らないのは、**重ね敷きの色が全部テーマ由来**だからである
+   （用語の文字色・シーンメモの蛍光ペン・読み上げの塗りは、
+   features/manuscriptEditor.ts の colorsFor() が明暗を見て選んでいる）。
+   暗いテーマのまま紙面だけ白くすると、暗い地に合わせて選ばれた
+   明るい文字色が白地に載って読めなくなる。それに、ここは作者が一日じゅう
+   打つ面である。**noteの読み味のうち、字の並び方（幅・行間・書体）だけを
+   借りる。** 白い紙面が要る場面は、下のプレビュー面が受け持つ。
+
+   ## 縦書きには当てない
+   noteは横書きの読み物で、縦書きに620pxの段を作っても行が短くなるだけ */
+body.note:not(.vertical) #write,
+body.note:not(.vertical) #marks,
+body.note:not(.vertical) #compose,
+body.note:not(.vertical) #aloudmarks {
+  /* **4枚まとめて同じ padding にする。** 1枚でも折り返し幅が違うと、
+     重ねた色が本文と無関係な場所へ浮く（0.22.24で直した不具合の再発） */
+  padding-left: max(28px, calc((100% - 620px) / 2));
+  padding-right: max(28px, calc((100% - 620px) / 2));
+  line-height: 1.8;
+  /* noteの本文はゴシック。作者が書体を選んでいれば、そちらを立てる */
+  font-family: var(--novelai-font, "Hiragino Kaku Gothic ProN", "Yu Gothic",
+    "YuGothic", "Meiryo", sans-serif);
+}
+
+/* ── note風プレビュー（「貼ったときの見た目」） ─────────
+   **ここは書く面ではなく、確かめる面である。** だから紙面はテーマに
+   合わせず、noteの読み味（明るい地に濃い字）で固定する。重ね敷きの層は
+   載らないので、色が読めなくなる心配もない */
+#notepv {
+  position: absolute;
+  inset: 0;
+  display: none;
+  overflow: auto;
+  padding: 32px 28px 64px;
+  background: #ffffff;
+  color: #333333;
+  font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "YuGothic",
+    "Meiryo", sans-serif;
+  /* 字の大きさだけは道具箱の ＋／ー に従う（押して何も起きないと壊れて見える） */
+  font-size: var(--novelai-size, 16px);
+  line-height: 1.8;
+}
+body.notepv #notepv { display: block; }
+/* **ほかの面は描かせない。** 二重に見えるうえ、重ね敷きは位置を測り続ける */
+body.notepv #write, body.notepv #marks,
+body.notepv #compose, body.notepv #aloudmarks { display: none; }
+#notepv .note-page {
+  max-width: 620px;
+  margin: 0 auto;
+  /* 注意の印を左のガターへ置くための基準 */
+  position: relative;
+}
+#notepv p, #notepv h1, #notepv h2, #notepv h3,
+#notepv ul, #notepv ol, #notepv blockquote {
+  position: relative;
+  margin: 0 0 1.2em;
+}
+/* 空行は、そのまま間隔として残す（noteは空行が1つの塊になる） */
+#notepv .note-empty { margin: 0 0 1.2em; min-height: 0.6em; }
+#notepv .note-h1 { font-size: 1.5em; font-weight: 700; margin: 1.6em 0 0.8em; }
+#notepv .note-h2 { font-size: 1.22em; font-weight: 700; margin: 1.5em 0 0.7em; }
+#notepv .note-h3 { font-size: 1.06em; font-weight: 700; margin: 1.4em 0 0.6em; }
+#notepv .note-quote {
+  padding: 0.2em 0 0.2em 1em;
+  border-left: 3px solid #d0d0d0;
+  color: #555555;
+}
+#notepv .note-hr {
+  border: none;
+  border-top: 1px solid #dcdcdc;
+  margin: 2em 0;
+}
+#notepv .note-list { padding-left: 1.5em; }
+#notepv .note-item { margin: 0 0 0.4em; }
+/* **リンクは下線だけ。** 押しても開かない（飛び先そのものを持たせていない） */
+#notepv .note-link { text-decoration: underline; }
+/* noteに無い記法の印（設計書6.69）。
+   **うるさくしない。** 行の左のガターへ小さく置き、理由はホバーで出す
+   ——書いている手を止めるほどの知らせではない */
+#notepv .note-warn {
+  position: absolute;
+  left: -1.4em;
+  color: #c07000;
+  font-size: 0.8em;
+  opacity: 0.75;
+  cursor: help;
+  user-select: none;
+}
+/* リストの項目と引用の中では、印がガターからはみ出さないよう内側に寄せる */
+#notepv .note-item .note-warn { left: -1.2em; }
+
+/* 道具箱のnote用のボタンは、SNS記事のときだけ出す
+   （小説の道具箱にボタンを増やさない） */
+.note-only { display: none; }
+body.notelike button.note-only { display: inline-block; }
+body.notelike .sep.note-only { display: block; }
+
 /* ── ルビ ─────────────────────────── */
 /* 組んで書く面は、本物の ruby 要素を組む（#compose ruby[data-src]） */
 ruby > rt {
@@ -592,6 +695,9 @@ ruby > rt {
   <div class="sep"></div>
   <button id="copy" title="投稿サイトの記法に直してコピーします">投稿用にコピー</button>
   <button id="aloudToggle" title="読み上げの操作を出し入れします。耳で聞くと、目では気づかないリズムの悪さや誤字が見つかります">読み上げ</button>
+  <div class="sep note-only"></div>
+  <button id="noteStyle" class="note-only" title="noteの読み味に近い組版（幅・行間・書体）で表示します。もう一度押すと、いつもの表示に戻ります">note風</button>
+  <button id="notePv" class="note-only" title="noteに貼ったときの見た目を出します。noteに無い記法には印が付きます">貼り付け後</button>
   <div class="sep"></div>
   <button id="font" title="本文の書体を選びます">書体</button>
   <button id="smaller" title="文字を小さく">ー</button>
@@ -626,6 +732,7 @@ ruby > rt {
   <div id="marks" aria-hidden="true"></div>
   <textarea id="write" spellcheck="false" wrap="soft"></textarea>
   <div id="compose" spellcheck="false"></div>
+  <div id="notepv"></div>
 </div>
 
 <div id="bottom">
@@ -671,6 +778,11 @@ ruby > rt {
   const dirButton = document.getElementById("dir");
   /** 組んで書く（実験。設計書6.34） */
   const compose = document.getElementById("compose");
+  /* ── SNS記事のnote風（設計書6.69） ── */
+  const noteStyleButton = document.getElementById("noteStyle");
+  const notePvButton = document.getElementById("notePv");
+  /** 「noteに貼ったときの見た目」の面 */
+  const notepv = document.getElementById("notepv");
 
   /** いま画面が持っている本文。拡張機能から来たものと比べるために持つ */
   let current = "";
@@ -758,16 +870,58 @@ ruby > rt {
   let composeWanted = saved.compose !== false;
   let size = saved.size || 16;
 
+  /**
+   * この原稿はSNS記事か（設計書6.69）。**決めるのは拡張機能側**
+   * ——作品の形式（プロットの「形式」の節）を知っているのは向こうである。
+   */
+  let noteLike = false;
+  /**
+   * note風の組版で見せるか。
+   *
+   * **SNS記事では既定で入れる**（作者の依頼、2026-09-04）。押せばいつもの
+   * 表示へ戻り、その原稿ではそれを覚える。小説の原稿では noteLike が false
+   * なので、この値が何であっても効かない。
+   */
+  let noteStyle = saved.noteStyle !== false;
+  /**
+   * 「貼ったときの見た目」の面を開いているか。
+   *
+   * **覚えない。** 開き直したときは書く面から始めたい（確かめる面は、
+   * 確かめたいときに開くもの）。
+   */
+  let notePv = false;
+
   function remember() {
     // **まだ開いていないだけの状態を、閉じたことにしない**（composeWanted）。
     // 消した面（reading・split）は書かない——古い state に残っていても読まない
-    vscode.setState({ vertical, size, compose: composeOn || composeWanted });
+    vscode.setState({ vertical, size, compose: composeOn || composeWanted,
+      noteStyle: noteStyle });
   }
 
   function paint() {
     // 設定がまだ届いていない間は縦書きとして見せる（body の初期値と揃える）
     document.body.classList.toggle("vertical", vertical !== false);
     document.body.classList.toggle("compose", composeOn);
+    /* ── SNS記事のnote風（設計書6.69） ──
+       **小説の原稿では noteLike が false なので、どの札も付かない。**
+       ボタンそのものも出ない（.note-only） */
+    document.body.classList.toggle("notelike", noteLike);
+    document.body.classList.toggle("note", noteLike && noteStyle);
+    document.body.classList.toggle("notepv", noteLike && notePv);
+    noteStyleButton.classList.toggle("on", noteLike && noteStyle);
+    notePvButton.classList.toggle("on", noteLike && notePv);
+    /*
+      **縦書きでは、組版のボタンは押せなくして理由を出す**
+      （消さない。core/processAvailability.ts と同じ考え方）。noteは横書きの
+      読み物なので、縦書きに620pxの段を作っても行が短くなるだけである。
+      押しても何も起きないボタンは、壊れているようにしか見えない。
+    */
+    noteStyleButton.disabled = vertical !== false;
+    noteStyleButton.title =
+      vertical !== false
+        ? "note風の組版は横書きのときだけ効きます（noteは横書きの読み物です）"
+        : "noteの読み味に近い組版（幅・行間・書体）で表示します。" +
+          "もう一度押すと、いつもの表示に戻ります";
     document.documentElement.style.setProperty("--novelai-size", size + "px");
     // **大きさも向きもここで変わる。** どちらも折り返し幅を変えるので、
     // 重ねた色の枠を測り直す（実機の報告、2026-08-28）
@@ -789,6 +943,28 @@ ruby > rt {
     aloudFinish();
     paint();
     remember();
+  });
+
+  /* ── SNS記事のnote風の切り替え（設計書6.69） ──
+     **既存の切り替えと同じ流儀**（帯のボタン1つ、押されている間は .on）。
+     note風は見せ方だけの話なので、本文には一切触らない */
+  noteStyleButton.addEventListener("click", function () {
+    noteStyle = !noteStyle;
+    // 折り返し幅が変わる。重ねた色の枠を測り直す（向き・大きさと同じ理由）
+    paint();
+    remember();
+  });
+
+  notePvButton.addEventListener("click", function () {
+    notePv = !notePv;
+    /*
+      **開いているあいだだけ組ませる。** 本文ぜんたいをHTMLへ組むのは、
+      0.25.2で一度やめた道である（打つたびに千の段落を組んでいた）。
+      閉じているときは、拡張機能側にも作らせない。
+    */
+    vscode.postMessage({ type: "notePreview", on: notePv });
+    // 面を出し入れすると、打つ面の折り返し幅が変わる（枠を測り直す）
+    paint();
   });
 
   document.getElementById("latest").addEventListener("click", function () {
@@ -1582,6 +1758,22 @@ ruby > rt {
         }
       }
       document.body.classList.toggle("plain", message.hasTerms === false);
+      /* ── SNS記事のnote風（設計書6.69） ── */
+      if (typeof message.noteLike === "boolean" && message.noteLike !== noteLike) {
+        noteLike = message.noteLike;
+        // SNS記事でなくなったら、確かめる面は閉じる（開いたままにしない）
+        if (!noteLike) notePv = false;
+        paint();
+      }
+      if (typeof message.notePreview === "string") {
+        /*
+          **紙面の入れ物は画面側で被せる。** 中身（かたまりの並び）を
+          組むのは core/notePreview.ts で、そちらは「noteに貼ったときの
+          見た目」だけを知っていればよい。
+        */
+        notepv.innerHTML =
+          '<div class="note-page">' + message.notePreview + "</div>";
+      }
       /* ── 読み上げ（設計書6.42） ── */
       if (typeof message.readAloudRate === "number") {
         aloudApplyRate(message.readAloudRate);

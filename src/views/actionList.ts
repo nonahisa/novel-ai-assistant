@@ -883,6 +883,35 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "（傍点はサイトによって書き方が違うためです）。" +
               "**原稿は書き換えません。**",
           },
+          // **投稿の入口は「投稿サイト用にコピー」の隣に置く**（設計書6.68）。
+          // 1話ぶんの貼り付け作業を、変換・コピー・ページを開く・記録まで
+          // ひと続きにしたもの——同じ場面で使う操作なので、隣に並べる
+          {
+            kind: "action",
+            command: "novelai.postNewEpisode",
+            label: "新話を投稿する",
+            description: "AIを使わない",
+            icon: "rocket",
+            requiresWork: true,
+            detail:
+              "未投稿の話を見つけて、サイトごとに**本文を変換してコピー→投稿ページを開く→" +
+              "記録する**まで案内します（なろう・カクヨム・アルファポリス・note）。" +
+              "**投稿そのものは作者が行います。** この拡張機能が投稿サイトへ" +
+              "書き込むことはありません（自動投稿は規約で禁じられています）。" +
+              "**原稿は書き換えません。**",
+          },
+          {
+            kind: "action",
+            command: "novelai.configurePostingSites",
+            label: "投稿サイトの設定",
+            description: "AIを使わない",
+            icon: "settings-gear",
+            requiresWork: true,
+            detail:
+              "この作品を出すサイトの追加・投稿ページのURLの変更・外す、と" +
+              "「どの話まで投稿済みか」の引き直しができます。" +
+              "**サイトを外しても、これまでの投稿の記録は消えません。**",
+          },
           {
             kind: "action",
             command: "novelai.importRuby",

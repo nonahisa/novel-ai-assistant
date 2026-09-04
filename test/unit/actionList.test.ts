@@ -626,6 +626,48 @@ describe("校正・校閲の並び", () => {
   });
 });
 
+/**
+ * 投稿キット（設計書6.68）。
+ *
+ * **入口は2つとも同じ小分類に置く。** 「新話を投稿する」と、その設定
+ * （サイト・URL・投稿済みの基準線）が離れていると、URLを直したいときに
+ * どこを探せばよいのか分からない。
+ */
+describe("投稿キットの入口", () => {
+  function otherSupport() {
+    for (const group of ACTION_TREE) {
+      for (const entry of group.entries) {
+        if (entry.kind === "section" && entry.label === "その他支援") {
+          return entry;
+        }
+      }
+    }
+    throw new Error("「その他支援」が見つかりません");
+  }
+
+  test("「新話を投稿する」と「投稿サイトの設定」が同じ小分類に並ぶ", () => {
+    const commands = otherSupport().items.map((item) => item.command);
+
+    expect(commands).toContain("novelai.postNewEpisode");
+    expect(commands).toContain("novelai.configurePostingSites");
+    // 投稿サイト用のコピーの隣（同じ場面で使う操作をばらけさせない）
+    expect(commands.indexOf("novelai.configurePostingSites")).toBe(
+      commands.indexOf("novelai.postNewEpisode") + 1
+    );
+  });
+
+  /** **AIは呼ばない。** 呼ぶのは最後の更新告知（別の操作）だけである */
+  test("どちらにもAIの印を付けない", () => {
+    for (const command of [
+      "novelai.postNewEpisode",
+      "novelai.configurePostingSites",
+    ]) {
+      const action = allActions().find((entry) => entry.command === command);
+      expect(action?.usesAI, command).toBeFalsy();
+    }
+  });
+});
+
 describe("ブラウザ版でだけ出す操作", () => {
   /**
    * 作者の指摘（2026-08-26）：「操作メニューのヘルプの動作を診断ってまだ使うでしょうか？」

@@ -12,6 +12,8 @@
  * 一致していることは `test/unit/manuscriptEditorEntries.test.ts` が見る。
  */
 
+import type { WorkFormatKey } from "./workFormat";
+
 export const MANUSCRIPT_EDITOR_VIEW_TYPE = "novelai.manuscriptEditor";
 
 /**
@@ -22,3 +24,19 @@ export const MANUSCRIPT_EDITOR_VIEW_TYPE = "novelai.manuscriptEditor";
  */
 export const MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE =
   "novelai.manuscriptEditorHorizontal";
+
+/**
+ * そのタイプの本文を開くときの、既定の入口（設計書6.70）。
+ *
+ * **脚本だけ縦書きにする**（作者の指定、2026-09-04）。台本は縦書きで
+ * 組むのが普通で、横書きで開くと書き出しの一行目から向きを直すことに
+ * なる。ほかのタイプはこれまでどおり横書き。
+ *
+ * 型だけを見る関数にしてあるので、`views` からでも `features` からでも
+ * 同じ答えを引ける（開く場所ごとに違う既定を持たせない）。
+ */
+export function manuscriptViewTypeFor(format?: WorkFormatKey): string {
+  return format === "script"
+    ? MANUSCRIPT_EDITOR_VIEW_TYPE
+    : MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE;
+}

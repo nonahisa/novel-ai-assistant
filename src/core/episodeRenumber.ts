@@ -716,6 +716,45 @@ export function renumberBookPositions(
 }
 
 /**
+ * 投稿状態の記録の指し先を付け替える（6.67.3・6.68.2）。
+ *
+ * **消えた話の記録は、挿絵と違って落とす。** 挿絵は「作者が置いたもの」
+ * なので孤児として残すが、投稿の記録を残すと**別の話が投稿済みに見える**
+ * ——削除で詰めたあと、`本文/003.txt` には繰り上がってきた次の話が居る。
+ * その話をまだ出していなくても「出した」と読まれ、キットが飛ばしてしまう
+ * （話数を落とす `EpisodeShift.removed` と同じ理由）。
+ *
+ * **元の配列は書き換えない**（保存に失敗したときに画面だけ進めない）。
+ */
+export function renumberPostingPosts<T extends { episodePath: string }>(
+  posts: readonly T[],
+  moves: ReadonlyMap<string, string>,
+  removedPath?: string
+): { posts: T[]; changed: number; dropped: number } {
+  const removed = removedPath ? normalizeEpisodePath(removedPath) : null;
+  let changed = 0;
+  let dropped = 0;
+
+  const next: T[] = [];
+  for (const post of posts) {
+    const key = normalizeEpisodePath(post.episodePath);
+    if (removed !== null && key === removed) {
+      dropped++;
+      continue;
+    }
+    const moved = moves.get(key);
+    if (!moved) {
+      next.push({ ...post });
+      continue;
+    }
+    changed++;
+    next.push({ ...post, episodePath: moved });
+  }
+
+  return { posts: next, changed, dropped };
+}
+
+/**
  * 話数の数字の並びをずらす（6.67.3）。
  *
  * **対応表に載っている話数だけを動かす。** 載っていない話数は、原稿の

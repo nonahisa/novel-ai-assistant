@@ -978,8 +978,11 @@ describe("空の話を作ったら基準を置き直す配線", () => {
   });
 
   test("新規作品（本文から）の第1話", () => {
+    // 引数が増えて折り返しても見つけられるよう、呼び出しの範囲で見る
+    // （作品タイプを渡すようになった。設計書6.70）
     const source = readFileSync("src/extension.ts", "utf8");
-    expect(source).toContain("createFirstEpisodeFile(entry, (work) =>");
+    const call = source.slice(source.indexOf("createFirstEpisodeFile("));
+    expect(call.slice(0, 200)).toContain("progress.rebaseline(work)");
   });
 });
 

@@ -22,12 +22,14 @@ import {
   renumberCharacter,
   renumberChapterSet,
   renumberForeshadow,
+  renumberPostingPosts,
   renumberSettingsRecord,
   renumberSynopses,
   renumberTimelineEpisodes,
   type EpisodeRename,
   type EpisodeShift,
 } from "../core/episodeRenumber";
+import { PostingStore, PostingStoreError } from "../core/postingStore";
 import { normalizeEpisodePath } from "../models/chapter";
 import { logFailure } from "../core/logger";
 
@@ -41,7 +43,8 @@ import { logFailure } from "../core/logger";
  *
  * 洗い出した台帳（実装時に全台帳を検索して確かめた）：
  *   - パスで指すもの：章立て（`ChapterStore`）、本の設計図の挿絵・
- *     ページ分割（`BookStore`）、年表の話の指し先（`TimelineStore`）
+ *     ページ分割（`BookStore`）、年表の話の指し先（`TimelineStore`）、
+ *     投稿状態（`PostingStore`。設計書6.68.2）
  *   - 話数の数字で指すもの：登場人物（`CharacterStore`）、能力・場所・
  *     組織・世界観（`SettingsStore` 系）、伏線（`foreshadowStore`）、
  *     各話あらすじ（`SynopsisStore`）、保留中の人物更新案
@@ -78,6 +81,10 @@ export interface LedgerFollowSummary {
   synopsesOrphaned: number;
   timeline: number;
   pendingCharacterUpdates: number;
+  /** 指し先を付け替えた投稿の記録（設計書6.68.2） */
+  posting: number;
+  /** 消えた話を指していたので外した投稿の記録。**黙って外さない**ために数える */
+  postingDropped: number;
   /** 台帳ごとの失敗。「台帳名：理由」の形。原稿の付け替えは失敗しても戻さない */
   failures: string[];
 }
@@ -99,6 +106,8 @@ export function emptyLedgerFollowSummary(): LedgerFollowSummary {
     synopsesOrphaned: 0,
     timeline: 0,
     pendingCharacterUpdates: 0,
+    posting: 0,
+    postingDropped: 0,
     failures: [],
   };
 }
@@ -152,6 +161,7 @@ export async function followEpisodeLedgers(
   await followSynopses(work, shift, renamedFileNamesByNumber(done), summary);
   await followTimeline(work, moves, summary);
   await followPendingCharacterUpdates(work, shift, summary);
+  await followPosting(work, moves, removedPaths?.path, summary);
 
   return summary;
 }
@@ -427,6 +437,31 @@ async function followPendingCharacterUpdates(
   }
 }
 
+/**
+ * 投稿状態の記録を付け替える（設計書6.68.2）。
+ *
+ * **投稿サイトへは何もしない。** 書き換えるのは手元の台帳だけである。
+ */
+async function followPosting(
+  work: WorkEntry,
+  moves: ReadonlyMap<string, string>,
+  removedRelPath: string | undefined,
+  summary: LedgerFollowSummary
+): Promise<void> {
+  try {
+    const store = new PostingStore(work);
+    const ledger = await store.load();
+    if (ledger.posts.length === 0) return;
+    const result = renumberPostingPosts(ledger.posts, moves, removedRelPath);
+    if (result.changed === 0 && result.dropped === 0) return;
+    await store.save({ ...ledger, posts: result.posts });
+    summary.posting = result.changed;
+    summary.postingDropped = result.dropped;
+  } catch (error) {
+    summary.failures.push(`投稿状態：${messageOf(error, "投稿状態の追従")}`);
+  }
+}
+
 function messageOf(error: unknown, context: string): string {
   const message = error instanceof Error ? error.message : String(error);
   // `kind` を持つのはハッシュ照合系のエラーだけ（各話あらすじ・年表は
@@ -435,7 +470,8 @@ function messageOf(error: unknown, context: string): string {
     error instanceof ChapterStoreError ||
     error instanceof BookStoreError ||
     error instanceof CharacterStoreError ||
-    error instanceof SettingsStoreError
+    error instanceof SettingsStoreError ||
+    error instanceof PostingStoreError
       ? error.kind
       : "unknown";
   logFailure(context, {
@@ -463,6 +499,7 @@ export function describeLedgerFollowSummary(summary: LedgerFollowSummary): strin
   if (summary.timeline > 0) parts.push(`年表${summary.timeline}件`);
   if (summary.pendingCharacterUpdates > 0)
     parts.push(`保留中の人物更新案${summary.pendingCharacterUpdates}件`);
+  if (summary.posting > 0) parts.push(`投稿状態${summary.posting}件`);
 
   const notes: string[] = [];
   // **章の開始が動いたことは、件数ではなく章の名前で伝える**（作者は
@@ -477,6 +514,10 @@ export function describeLedgerFollowSummary(summary: LedgerFollowSummary): strin
     notes.push(`消えた話を指す挿絵・ページ位置が${summary.bookOrphaned}件残っています`);
   if (summary.synopsesOrphaned > 0)
     notes.push(`消えた話のあらすじが${summary.synopsesOrphaned}件残っています`);
+  // **外したことは必ず言う。** 残すと別の話が投稿済みに見えるので落としたが、
+  // 黙って落とすと「出したはずの記録が消えた」と読まれる
+  if (summary.postingDropped > 0)
+    notes.push(`消えた話の投稿の記録を${summary.postingDropped}件外しました`);
 
   if (parts.length === 0 && notes.length === 0) return "";
   const body = parts.length > 0 ? `${parts.join("・")}を付け替えました。` : "";

@@ -127,7 +127,14 @@ export const EMPHASIS_SITES: EmphasisSiteChoice[] = [
 ];
 
 export interface RubyStyle {
-  id: "site" | "alphapolis-hash" | "html";
+  /**
+   * `paren` は**括弧書き**（`漢字（かんじ）`）。
+   *
+   * noteにはルビの記法が無いので、読みを本文の中へ落とす（設計書6.68.3）。
+   * **`RUBY_STYLES` には入れない**——投稿キットがサイトから選ぶもので、
+   * 「どの形で書き出しますか」で作者に選ばせる場面が無い。
+   */
+  id: "site" | "alphapolis-hash" | "html" | "paren";
   label: string;
   detail: string;
 }
@@ -205,6 +212,18 @@ export function toSiteNotation(
         )
         .replace(INTERNAL, (_, base, reading) =>
           reading ? `#${base}__${reading}__#` : base
+        );
+    case "paren":
+      /*
+        **noteにはルビの記法が無い**（設計書6.68.3）。`｜漢字《かんじ》` を
+        そのまま貼れば、読者の目の前に記号が並ぶ。読みは括弧に入れて
+        本文の中へ落とし、**傍点は印だけを落として文字を残す**
+        （ルビでの代用も効かないため。`stripRuby` と同じ「印は本文ではない」）。
+      */
+      return text
+        .replace(EMPHASIS_INTERNAL, "$1")
+        .replace(INTERNAL, (_, base: string, reading: string) =>
+          reading ? `${base}（${reading}）` : base
         );
     case "html":
       return text

@@ -4,6 +4,13 @@ import type { WorkRegistry } from "../core/workRegistry";
 import { currentMode } from "../core/actorContext";
 import type { WorkMode } from "../core/editorMode";
 import { canRunProcesses } from "../core/runtime";
+import type { WorkFormatKey } from "../core/workFormat";
+import { readWorkFormat } from "../core/workFormatStore";
+import {
+  isCommandVisibleForColumn,
+  workTypeColumn,
+  type WorkTypeColumn,
+} from "../core/workTypeVisibility";
 import {
   actionResourceUri,
   allActions,
@@ -335,6 +342,49 @@ export function resolveSteps(
   return { steps, missing };
 }
 
+/**
+ * 選んだ作品のタイプに合う段だけを残す（設計書6.70.1）。
+ *
+ * **判断は表（`core/workTypeVisibility.ts`）に任せる。** ここで
+ * 「メモ集なら伏線は出さない」と書き始めると、右クリック側の判断と
+ * 二重になり、片方だけ直したときに食い違う。
+ *
+ * 中身が全部消えた小分類は見出しごと畳み、entries が空になった段は
+ * 段ごと出さない（詳細メニューの `shownEntries` と同じ考え方——
+ * 開いても何も無い行は、片づけたつもりで分かりにくくしているだけ）。
+ *
+ * @param column タイプの列。**undefined なら絞らない**
+ *   （タイプを決めていない作品と、作品を選んでいないとき）
+ */
+export function filterSteps(
+  steps: readonly Step[],
+  column: WorkTypeColumn | undefined
+): Step[] {
+  if (!column) return [...steps];
+
+  const visible = (command: string): boolean =>
+    isCommandVisibleForColumn(command, column);
+
+  const filtered: Step[] = [];
+  for (const step of steps) {
+    const entries: Step["entries"] = [];
+    for (const entry of step.entries) {
+      if (entry.kind === "action") {
+        if (visible(entry.command)) entries.push(entry);
+        continue;
+      }
+      if (entry.kind === "placeholder") {
+        entries.push(entry);
+        continue;
+      }
+      const items = entry.items.filter((item) => visible(item.command));
+      if (items.length > 0) entries.push({ ...entry, items });
+    }
+    if (entries.length > 0) filtered.push({ ...step, entries });
+  }
+  return filtered;
+}
+
 /** 定義が参照しているコマンドIDをすべて挙げる（テストで実在を確かめる） */
 function referencedCommands(defs: readonly StepDef[]): string[] {
   const commands: string[] = [];
@@ -532,15 +582,69 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
    */
   private readonly expanded: Set<string>;
 
+  /**
+   * 作品ごとのタイプ（設計書6.70.1）。
+   *
+   * **描画は同期なので、読めた結果をここへ置く。** まだ読んでいない
+   * あいだは絞らない（全部出す）ので、遅れて絞り込まれることはあっても、
+   * 出るはずの操作が最初から見えない状態にはならない。
+   */
+  private readonly formats = new Map<string, WorkFormatKey | undefined>();
+
   constructor(
     private readonly registry: WorkRegistry,
     private readonly workStore?: StepWorkStore,
     private readonly groupStore?: GroupStateStore,
-    private readonly counts?: ActionCounts
+    private readonly counts?: ActionCounts,
+    /**
+     * 作品のタイプを読む口。試験で差し替えるために関数で受け取る
+     * （プロットを読む処理そのものは `workFormatStore` の1か所だけ）。
+     */
+    private readonly loadFormat: (
+      work: WorkEntry
+    ) => Promise<WorkFormatKey | undefined> = readWorkFormat
   ) {
     this.expanded = restoreExpandedSteps(groupStore?.get() ?? []);
     // 作品が増減すると、最上段の表示も押せる操作も変わる
     registry.onDidChange(() => this._onDidChangeTreeData.fire());
+  }
+
+  /**
+   * 選んでいる作品のタイプを読み込む。読めたら表示を作り直す。
+   *
+   * **描画の途中では待てない**（`getTreeItem` も `getChildren` も同期の
+   * 形で答える）ので、読み込みは背後で走らせ、結果が出てから並べ直す。
+   * 作品を選び直したときと、ツリーを描くときに呼ぶ。
+   */
+  async loadSelectedFormat(): Promise<void> {
+    const work = this.selectedWork();
+    if (!work || this.formats.has(work.id)) return;
+    let format: WorkFormatKey | undefined;
+    try {
+      format = await this.loadFormat(work);
+    } catch {
+      // 読めなければ「決めていない」と同じ扱い。絞らずに全部出す
+      format = undefined;
+    }
+    this.formats.set(work.id, format);
+    this._onDidChangeTreeData.fire();
+  }
+
+  /**
+   * いま並べる段。**作品を選んでいなければ絞らない。**
+   *
+   * 何に効くか決まっていないのに項目を消すと、初めて使う人には
+   * 「入れたのに機能が足りない」に見える。
+   */
+  visibleSteps(): readonly Step[] {
+    const work = this.selectedWork();
+    if (!work) return STEP_MENU;
+    if (!this.formats.has(work.id)) {
+      // まだ読んでいない。背後で読ませて、いまは全部出す
+      void this.loadSelectedFormat();
+      return STEP_MENU;
+    }
+    return filterSteps(STEP_MENU, workTypeColumn(this.formats.get(work.id)));
   }
 
   /** 画面で開閉したときに呼ぶ。次回起動時もこの状態で開く */
@@ -569,6 +673,21 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
     this.refresh();
   }
 
+  /**
+   * 覚えたタイプを捨てる。**プロットの `## 形式` が書き換わったときに呼ぶ。**
+   *
+   * 呼ばないと、タイプを変えたのにステップの並びが前のままになる
+   * （作品一覧が `invalidateWorkFormat` で読み直すのと同じ理由）。
+   */
+  invalidateFormats(workId?: string): void {
+    if (workId) {
+      this.formats.delete(workId);
+    } else {
+      this.formats.clear();
+    }
+    this.refresh();
+  }
+
   refresh(): void {
     this._onDidChangeTreeData.fire();
   }
@@ -588,7 +707,7 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
       // 押す前に見えるようにする
       return [
         { type: "selector" },
-        ...STEP_MENU.map((step) => ({ type: "step" as const, step })),
+        ...this.visibleSteps().map((step) => ({ type: "step" as const, step })),
       ];
     }
     if (node.type === "step") {

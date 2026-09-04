@@ -3,10 +3,12 @@ import { toUri } from "../core/paths";
 import { EpisodeFile, WorkEntry, WorkStats } from "../models/types";
 import { emptyCounts, formatCount, toManuscriptPages } from "../core/charCount";
 import {
+  episodeListLabel,
   episodeTitle,
   formatChapterLabel,
   isCollectedFile,
 } from "../core/episodeLabel";
+import { workTypeContextValue } from "../core/workTypeVisibility";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
 import { scanWork } from "../core/scanner";
@@ -17,7 +19,15 @@ import {
   formatChapterRange,
   groupEpisodesByChapter,
 } from "../core/chapterGrouping";
-import { MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE } from "../core/manuscriptViewTypes";
+import { manuscriptViewTypeFor } from "../core/manuscriptViewTypes";
+import { PostingStore } from "../core/postingStore";
+import {
+  emptyPostingLedger,
+  postingSiteLabels,
+  unpostedSites,
+  type PostingLedger,
+} from "../models/posting";
+import { episodePathFor } from "../core/bookStore";
 import { SynopsisStore } from "../core/synopsisStore";
 import { synopsisKey } from "../models/synopsis";
 import { WorkRegistry } from "../core/workRegistry";
@@ -40,7 +50,15 @@ export class WorkNode {
      * **登録されている以上、読めなくても一覧には出す。** 隠すと
      * 「登録したのに出てこない」という、原因の分からない終わり方になる。
      */
-    public readonly loadError?: string
+    public readonly loadError?: string,
+    /**
+     * 作品のタイプ（設計書6.70）。右クリックを絞る印
+     * （`contextValue`）に織り込む。
+     *
+     * **描画（`getTreeItem`）は同期なので、ここで持たせておく**
+     * （話・章のノードと同じ理由）。
+     */
+    public readonly format?: WorkFormatKey
   ) {}
 }
 
@@ -114,6 +132,17 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private chapters = new Map<string, Chapter[]>();
 
   /**
+   * 投稿状態（作品ID -> 台帳、設計書6.68.2）。
+   *
+   * あらすじ・章と同じく**作品を開くたびに1回だけ読む**。話の行は
+   * 描き直しのたびに `getTreeItem` を通るので、そこで読むとJSONを
+   * 何度も開くことになる。
+   *
+   * **読めなくても一覧は出す**（読めなければ印が出ないだけ）。
+   */
+  private posting = new Map<string, PostingLedger>();
+
+  /**
    * @param syncBadge GitHub同期に残っているものを短く表す文字列を返す。
    *   ツリーがGit連携そのものに依存しないよう、関数で受け取る。
    * @param syncTooltip その内訳（ホバーで読む）。
@@ -133,10 +162,12 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       this.cache.delete(workId);
       this.synopses.delete(workId);
       this.chapters.delete(workId);
+      this.posting.delete(workId);
     } else {
       this.cache.clear();
       this.synopses.clear();
       this.chapters.clear();
+      this.posting.clear();
     }
     this._onDidChangeTreeData.fire();
   }
@@ -170,7 +201,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         work.title,
         vscode.TreeItemCollapsibleState.Collapsed
       );
-      item.contextValue = "work";
+      // タイプを織り込む（設計書6.70.1）。右クリックの `when` はこれを見る
+      item.contextValue = workTypeContextValue("work", node.format);
       item.iconPath = new vscode.ThemeIcon("book");
 
       // 走査に失敗した作品は、字数の代わりに理由を出す。
@@ -238,7 +270,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         label,
         vscode.TreeItemCollapsibleState.Collapsed
       );
-      item.contextValue = "chapter";
+      item.contextValue = workTypeContextValue("chapter", node.format);
       // **IDに名前を入れない。** 折りたたみの開閉はVS CodeがIDで
       // 覚えるので、名前から作ると改名のたびに開き直しになる（6.66.3）
       item.id = chapterNodeId(node.work.id, node.chapter.startEpisodePath);
@@ -268,7 +300,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       ep.fileName,
       vscode.TreeItemCollapsibleState.None
     );
-    item.contextValue = "episode";
+    item.contextValue = workTypeContextValue("episode", node.format);
     item.resourceUri = toUri(ep.filePath);
     /*
       **本文は原稿エディタ（横書き）で開く**（作者の指示、2026-08-29）。
@@ -282,19 +314,29 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       「エディターを再度開く」から選べる。ここで決め打つのは話（本文）だけで、
       プロット・あらすじ・設定資料は素のエディタのままである（この行は
       episode の枝にしかない）。
+
+      **例外は脚本**（設計書6.70）。台本は縦書きで組むのが普通なので、
+      向きの既定を `manuscriptViewTypeFor` に決めさせる（開く場所ごとに
+      違う既定を持たない）。
     */
     item.command = {
       command: "vscode.openWith",
       title: "開く",
-      arguments: [toUri(ep.filePath), MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE],
+      arguments: [toUri(ep.filePath), manuscriptViewTypeFor(node.format)],
     };
 
     const chapterLabel = formatChapterLabel(ep, node.format);
     const title = episodeTitle(ep, chapterLabel);
+    // まだ出していないサイト（設計書6.68.2）。対象サイトを1つも登録して
+    // いない作品では空になる＝印も出ない
+    const unposted = this.unpostedSitesFor(node.work, ep);
 
     // 話数を先頭に出す。タイトルが長くても話数と文字数が隠れないようにするため。
     // label（太字側）は短く保ち、可変長のタイトルは description に置く。
-    item.label = chapterLabel || ep.fileName;
+    //
+    // **創作メモ集では、番号の無いファイルは題名がそのまま見出しになる**
+    // （設計書6.70）。メモに番号は要らない
+    item.label = episodeListLabel(ep, chapterLabel, node.format);
     // タイトルの無い話でファイル名を出さないのは、行ごとに形が変わって
     // 一覧が読みにくくなるためである。話数はlabelに出ており、
     // ファイル名はホバーで確かめられる
@@ -313,6 +355,9 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       // **残っているシーンメモ**（設計書6.40.5）。0件なら出さない
       // ——無いものの印で行の形が変わると、一覧が読みにくくなる
       ep.memoBadge ? ep.memoBadge : null,
+      // **未投稿のサイト数**（設計書6.68.2）。0件なら出さない。
+      // どのサイトが遅れているかはホバーで読む（印は短くしか書けない）
+      unposted.length > 0 ? `未投稿${unposted.length}` : null,
     ]
       .filter((part): part is string => part !== null)
       .join("　");
@@ -326,7 +371,9 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       item.description = "⚠ 未解決の競合（文字数は未集計）";
     } else if (ep.isInitialName && !ep.metaTitle) {
       item.iconPath = new vscode.ThemeIcon("circle-outline");
-    } else if (ep.kind === "不明") {
+    } else if (ep.kind === "不明" && node.format !== "memo") {
+      // **創作メモ集では「？」を出さない**（設計書6.70）。番号を持たない
+      // ファイルが普通なので、印を付けると全部のメモが不備に見える
       item.iconPath = new vscode.ThemeIcon("question");
     } else {
       item.iconPath = new vscode.ThemeIcon("file-text");
@@ -366,13 +413,23 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         // 一覧からファイル名を外したので、ホバーでは必ず出す
         `- ファイル: ${ep.fileName}`,
         `- 種別: ${ep.kind}`,
-        `- 話数: ${chapterLabel || "判定不能"}`,
+        // **創作メモ集で「判定不能」と書かない**（設計書6.70）。
+        // 番号を振らないのが普通で、直すべき不備ではない
+        chapterLabel
+          ? `- 話数: ${chapterLabel}`
+          : node.format === "memo"
+            ? null
+            : "- 話数: 判定不能",
         isCollectedFile(ep.collectedCount)
           ? `- 全話が1ファイルに入っています（${ep.collectedCount}話ぶん）。話ごとに分けて扱います`
           : null,
         `- 純文字数: ${formatCount(ep.counts.net)} 字`,
         `- 総文字数: ${formatCount(ep.counts.gross)} 字`,
         `- 段落数: ${ep.counts.paragraphs}`,
+        // **どのサイトが遅れているかを、ここで読めるようにする**（6.68.2）
+        unposted.length > 0
+          ? `- まだ出していないサイト: ${postingSiteLabels(unposted)}`
+          : null,
         ep.hasMetadata ? "- 投稿サイト形式のヘッダーを検出（本文のみ計測）" : null,
         mismatchNote ? `- ${mismatchNote}` : null,
         ep.metaUpdatedAt ? `- 更新日時: ${ep.metaUpdatedAt}` : null,
@@ -401,7 +458,12 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         // 見え方になっていた（2026-08-22、作者のブラウザ版で発生）
         try {
           const result = await this.load(w);
-          nodes.push(new WorkNode(w, result.stats));
+          // タイプは右クリックの絞り込みに要る（設計書6.70.1）。
+          // 読み取り自体は `workFormatStore` が作品ごとに覚えているので、
+          // 一覧を描き直すたびにプロットを読み直すことにはならない
+          nodes.push(
+            new WorkNode(w, result.stats, undefined, await this.formatOf(w))
+          );
         } catch (error) {
           nodes.push(
             new WorkNode(
@@ -439,7 +501,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         ];
       }
       await this.loadSynopses(node.work);
-      const format = await readWorkFormat(node.work);
+      await this.loadPosting(node.work);
+      const format = await this.formatOf(node.work);
 
       /*
         章の台帳を読む（設計書6.66.3）。
@@ -499,6 +562,20 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   }
 
   /**
+   * 作品のタイプ（設計書6.70）。**読めなくても一覧は出す。**
+   *
+   * プロットが壊れている・まだ無い作品では「決めていない」扱いになり、
+   * いままでどおり全部の操作が右クリックに出る（隠しすぎない）。
+   */
+  private async formatOf(work: WorkEntry): Promise<WorkFormatKey | undefined> {
+    try {
+      return await readWorkFormat(work);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * 章の台帳を読み込む（作品ごとに1回）。
    *
    * **描画のたびに読まない。** 章ノードは話の数だけ描き直されるので、
@@ -513,6 +590,39 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     const set = await new ChapterStore(work).load();
     this.chapters.set(work.id, set.chapters);
     return set.chapters;
+  }
+
+  /**
+   * 投稿状態を読み込む（作品ごとに1回）。**読めなくても一覧は出す。**
+   *
+   * 章と違って一覧の形を変えるものではなく、行に印を足すだけなので、
+   * 台帳が壊れていることは印が出ないことで足りる（理由はキットを
+   * 実行したときに出る）。
+   */
+  private async loadPosting(work: WorkEntry): Promise<void> {
+    if (this.posting.has(work.id)) return;
+    let ledger = emptyPostingLedger();
+    try {
+      ledger = await new PostingStore(work).load();
+    } catch {
+      // 読めない台帳は「サイト未登録」と同じ扱い。印が出ないだけ
+    }
+    this.posting.set(work.id, ledger);
+  }
+
+  /**
+   * その話で、まだ出していないサイト。
+   *
+   * **対象サイトを1つも登録していない作品では常に空**（＝印を出さない）。
+   * 投稿キットを使わない作者の一覧に「未投稿」が全話ぶん並ばないようにする。
+   */
+  private unpostedSitesFor(work: WorkEntry, episode: EpisodeFile) {
+    const ledger = this.posting.get(work.id);
+    if (!ledger || ledger.sites.length === 0) return [];
+    return unpostedSites(
+      ledger,
+      episodePathFor(work.folderPath, episode.filePath)
+    );
   }
 
   /**

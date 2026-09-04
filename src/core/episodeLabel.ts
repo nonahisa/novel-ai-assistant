@@ -41,8 +41,45 @@ const POST_UNIT: EpisodeUnit = {
     to !== undefined && to !== from ? `投稿${from}〜${to}` : `投稿${from}`,
 };
 
+/**
+ * 創作メモ集の単位（設計書6.70）。
+ *
+ * **メモは続きものではない。** SNS記事と同じ側の扱いで、
+ * 「第3話」ではなく「メモ3」と数える。番号を持たないメモのほうが
+ * 多いので、この見出しが出るのは番号付きのファイルだけになる。
+ */
+const MEMO_UNIT: EpisodeUnit = {
+  noun: "メモ",
+  label: (from, to) =>
+    to !== undefined && to !== from ? `メモ${from}〜${to}` : `メモ${from}`,
+};
+
 export function episodeUnit(format?: WorkFormatKey): EpisodeUnit {
-  return format === "sns" ? POST_UNIT : CHAPTER_UNIT;
+  if (format === "sns") return POST_UNIT;
+  if (format === "memo") return MEMO_UNIT;
+  // 脚本は「第◯話＝1回ぶんの台本」なので、小説と同じ数え方のまま
+  return CHAPTER_UNIT;
+}
+
+/**
+ * 一覧の見出しに出す文字（設計書6.70）。
+ *
+ * 番号が読めた話は、その見出し（「第3話」「メモ3」）をそのまま使う。
+ * 読めなかったときに何を出すかがタイプで変わる。
+ *
+ * - **創作メモ集**：番号が無いのは普通のこと。題名（拡張子を落とした
+ *   ファイル名）をそのまま見出しにする
+ * - **それ以外**：番号が読めないのは不備なので、ファイル名を拡張子ごと
+ *   出す。直すときの手掛かりになる
+ */
+export function episodeListLabel(
+  ep: Pick<EpisodeFile, "fileName">,
+  chapterLabel: string,
+  format?: WorkFormatKey
+): string {
+  if (chapterLabel) return chapterLabel;
+  if (format !== "memo") return ep.fileName;
+  return ep.fileName.replace(/\.[^.]+$/, "") || ep.fileName;
 }
 
 /**

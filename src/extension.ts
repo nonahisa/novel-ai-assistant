@@ -25,8 +25,15 @@ import {
   formatChapterNumber,
   nextChapterNumber,
   nextDatedName,
+  nextUntitledName,
   parseEpisodeFileName,
 } from "./core/episodeParser";
+// 新しい話の中身と、開く向き。どちらもタイプで変わる（設計書6.70）
+import {
+  newEpisodeExtension,
+  newEpisodeTemplate,
+} from "./core/episodeTemplate";
+import { manuscriptViewTypeFor } from "./core/manuscriptViewTypes";
 import { scanWork } from "./core/scanner";
 import { SUPPORTED_EXTENSIONS, WorkEntry } from "./models/types";
 import {
@@ -42,8 +49,10 @@ import {
 // Node専用（node:child_process / node:path）。選ぶ操作の中で動的importする（設計書5.8.5）
 import {
   chooseWorkStartMode,
+  chooseWorkType,
   createFirstEpisodeFile,
   openPlotFile,
+  skipsStartModeQuestion,
   type WorkStartMode,
 } from "./features/startWork";
 import { generateSettingsDocs } from "./features/generateSettingsDocs";
@@ -174,6 +183,9 @@ import {
   invalidateWorkFormat,
   readWorkFormat,
 } from "./core/workFormatStore";
+import type { WorkFormatKey } from "./core/workFormat";
+// 作品タイプの在り処はプロットの `## 形式` ひとつ（設計書6.70）
+import { writePlotSections } from "./core/plotFile";
 import { statsDayKey } from "./core/writingStats";
 import { setWorkGoals } from "./features/setWorkGoals";
 import { checkContradictions } from "./features/checkContradictions";
@@ -266,6 +278,10 @@ import {
   renameChapter,
   startChapterAt,
 } from "./features/manageChapters";
+import {
+  configurePostingSites,
+  postNewEpisode,
+} from "./features/postingKit";
 import {
   proposeChapters,
   suggestChapterName,
@@ -1429,6 +1445,9 @@ export async function activate(
       // 直したのに一覧が「第3話」のままでは、直った気がしない
       if (path.basename(document.fileName).toLowerCase() === "plot.md") {
         invalidateWorkFormat();
+        // 簡単ステップメニューも、タイプで絞ったものを並べ直す（設計書6.70.1）。
+        // 忘れると、タイプを変えたのに前のタイプの並びが残る
+        stepProvider.invalidateFormats();
       }
       treeProvider.refresh();
       // 「直前にどの環境で書いていたか」を残す（設計書5.5.2）。
@@ -1632,9 +1651,21 @@ export async function activate(
     });
     if (!title) return;
 
-    // 始め方はフォルダーを作る前に訊く。作ったあとで取り消されると、
-    // 中身の無い作品フォルダーだけが残る
-    const startMode = mode ?? (await chooseWorkStartMode(title.trim()));
+    // **タイプも始め方も、フォルダーを作る前に訊く。** 作ったあとで
+    // 取り消されると、中身の無い作品フォルダーだけが残る
+    const workType = await chooseWorkType(title.trim());
+    if (!workType) return;
+    const format =
+      workType === "unset" ? undefined : (workType.key as WorkFormatKey);
+
+    /*
+      **創作メモ集には「始め方」を訊かない**（設計書6.70）。プロットの
+      無いタイプなので選びようがなく、選ばせても書くのはメモである。
+      訊かずに最初のメモ（無題.md）を開く。
+    */
+    const startMode = skipsStartModeQuestion(format)
+      ? "manuscript"
+      : (mode ?? (await chooseWorkStartMode(title.trim())));
     if (!startMode) return;
 
     const folderPath = path.join(parentPath, title.trim());
@@ -1652,6 +1683,29 @@ export async function activate(
     const entry = await registry.add(folderPath, title.trim());
     if (!entry) return;
 
+    /*
+      **タイプの在り処はプロットの `## 形式` ひとつ**（設計書6.4.5・6.70）。
+
+      `.aiwriter/config.json` にも持たせると二重管理になり、作者が
+      プロットを書き換えたときにどちらが本当か分からなくなる。
+      「本文から書き始める」を選んだ作品でも、タイプを決めたなら
+      そのためだけに `設定/plot.md` を作る（決めなければ作らない）。
+      **書くのは「形式」の節だけ**——`updatePlotMarkdown` は頼まれた節しか
+      書かないので、創作メモ集にプロットの見出し一式が並ぶことはない。
+    */
+    if (workType !== "unset") {
+      try {
+        await writePlotSections(entry, { format: workType.label });
+        invalidateWorkFormat(entry.id);
+      } catch (e) {
+        // タイプを書けなくても作品は作れている。**作業を止めない**
+        vscode.window.showWarningMessage(
+          `作品タイプをプロットへ書けませんでした（${String(e)}）。` +
+            "「形式とジャンルを決める」からやり直せます。"
+        );
+      }
+    }
+
     treeProvider.refresh();
     if (startMode === "plot") {
       await openPlotFile(entry);
@@ -1659,7 +1713,11 @@ export async function activate(
     } else {
       // 空の第1話を作ったら、執筆量の基準を置き直す（設計書6.3.2）。
       // **置き直さないと、作者が書いて最初に保存した分が消える**
-      await createFirstEpisodeFile(entry, (work) => progress.rebaseline(work));
+      await createFirstEpisodeFile(
+        entry,
+        (work) => progress.rebaseline(work),
+        format
+      );
     }
   }
 
@@ -1707,6 +1765,17 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         await setPlotBasics(work);
+        /*
+          **ここが「作品タイプを後から変える」入口である**（設計書6.70）。
+
+          書き換えたのはプロットのファイルそのものなので、保存の合図
+          （`onDidSaveTextDocument`）は流れてこない。覚えている形式を
+          捨てないと、一覧の見出しも右クリックもステップも前のタイプの
+          ままで、**変えたのに何も起きていないように見える。**
+        */
+        invalidateWorkFormat(work.id);
+        treeProvider.refresh(work.id);
+        stepProvider.invalidateFormats(work.id);
       }
     ),
     registerCommand(
@@ -2307,18 +2376,31 @@ export async function activate(
 
         const cfg = vscode.workspace.getConfiguration("novelai");
         const digits = cfg.get<number>("episodeNumberDigits", 3);
-        const ext = cfg.get<string>("episodeFileExtension", ".txt");
+        const configuredExt = cfg.get<string>("episodeFileExtension", ".txt");
 
         // SNS記事は投稿日で管理する（設計書6.4.6）。**同じ日に何本でも書ける**ので、
-        // 今日の日付が埋まっていれば `_2`, `_3` と番号を足す
+        // 今日の日付が埋まっていれば `_2`, `_3` と番号を足す。
+        // 創作メモ集は題名で並ぶ（設計書6.70）ので「無題」から始める
         const format = await readWorkFormat(work);
+        // メモだけは `.md`（設計書6.70。設定は「原稿をどの形で書くか」の話）
+        const ext = newEpisodeExtension(format, configuredExt);
         const defaultName =
           format === "sns"
             ? `${nextDatedName(parsed, statsDayKey(new Date(), boundaryHour()))}${ext}`
-            : `${formatChapterNumber(next, digits)}${ext}`;
+            : format === "memo"
+              ? nextUntitledName(
+                  episodes.map((e) => e.fileName),
+                  "無題",
+                  ext
+                )
+              : `${formatChapterNumber(next, digits)}${ext}`;
         const fileName = await askText({
           prompt:
-            format === "sns" ? "新規投稿ファイルの名前" : "新規話数ファイルの名前",
+            format === "sns"
+              ? "新規投稿ファイルの名前"
+              : format === "memo"
+                ? "新規メモの名前（題名がそのままファイル名になります）"
+                : "新規話数ファイルの名前",
           value: defaultName,
           valueSelection: [0, defaultName.length - ext.length],
           validateInput: (v) => {
@@ -2344,7 +2426,8 @@ export async function activate(
 
         await vscode.workspace.fs.writeFile(
           path.toUri(filePath),
-          new TextEncoder().encode("")
+          // 脚本だけは柱・ト書き・セリフの雛形から始める（設計書6.70）
+          new TextEncoder().encode(newEpisodeTemplate(format))
         );
 
         treeProvider.refresh(work.id);
@@ -2352,12 +2435,12 @@ export async function activate(
         // 変わった回は数えない」ので、置き直さないと、このあと作者が書いて
         // 保存した回がその決まりに当たり「今日 +0字」になって消える
         await progress.rebaseline(work);
-        // **本文は原稿エディタ（横書き）で開く**（作者の指定、2026-08-29。
-        // 作品一覧のクリックと同じ既定に揃える）
+        // **本文は原稿エディタで開く**（作者の指定、2026-08-29。作品一覧の
+        // クリックと同じ既定に揃える）。向きはタイプで決まる（脚本は縦書き）
         await vscode.commands.executeCommand(
           "vscode.openWith",
           path.toUri(filePath),
-          MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+          manuscriptViewTypeFor(format)
         );
       }
     )
@@ -3785,6 +3868,43 @@ export async function activate(
         if (!node) return;
         await renameWithSubtitle(node.work, node.episode);
         treeProvider.refresh(node.work.id);
+      }
+    )
+  );
+
+  /*
+    投稿キット（設計書6.68）。**投稿サイトへは書き込まない**——変換と
+    コピー、投稿ページを開くこと、記録だけを機械が引き受ける。
+
+    入口は2つある。作品から始めると**未投稿のいちばん古い話**、話から
+    始めるとその話。どちらも未保存の本文を先に保存させる
+    （画面と違う本文を投稿欄へ渡さないため。`copyBodyForPosting` と同じ）。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.postNewEpisode", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      if (!(await saveDirtyDocumentsBeforeExtraction(work, "投稿の準備"))) return;
+      const result = await postNewEpisode(work, aiRegistry);
+      // 未投稿の印が変わるので、記録したときだけ一覧を作り直す
+      if (result.changed) treeProvider.refresh(work.id);
+    }),
+    registerCommand("novelai.postThisEpisode", async (node?: EpisodeNode) => {
+      if (!node) return;
+      if (!(await saveDirtyDocumentsBeforeExtraction(node.work, "投稿の準備"))) {
+        return;
+      }
+      const result = await postNewEpisode(node.work, aiRegistry, node.episode);
+      if (result.changed) treeProvider.refresh(node.work.id);
+    }),
+    registerCommand(
+      "novelai.configurePostingSites",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        // **AIは呼ばない。** サイト・URL・投稿済みの基準線を決めるだけ
+        const result = await configurePostingSites(work);
+        if (result.changed) treeProvider.refresh(work.id);
       }
     )
   );

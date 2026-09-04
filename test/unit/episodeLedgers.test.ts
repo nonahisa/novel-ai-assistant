@@ -13,6 +13,7 @@ import { CharacterStore } from "../../src/core/characterStore";
 import { createAbilityStore } from "../../src/core/abilityStore";
 import { createForeshadowStore } from "../../src/core/foreshadowStore";
 import { SynopsisStore } from "../../src/core/synopsisStore";
+import { PostingStore } from "../../src/core/postingStore";
 import { defaultBookConfig } from "../../src/models/book";
 import { emptyCharacter } from "../../src/models/character";
 import { emptyAbility } from "../../src/models/ability";
@@ -481,5 +482,80 @@ describe("話数を指している台帳の追従", () => {
       chapter: 5,
       fileName: "番外003.txt",
     });
+  });
+
+  /**
+   * 投稿状態（設計書6.68.2）。**パスで話を指す**ので、章立て・挿絵と
+   * 同じく付け替えで指し先を書き換える。
+   */
+  test("投稿状態の記録が付いてくる（パスで指すもの）", async () => {
+    const store = new PostingStore(work);
+    const ledger = await store.load();
+    await store.save({
+      ...ledger,
+      posts: [
+        {
+          episodePath: "本文/003.txt",
+          site: "kakuyomu",
+          postedAt: "2026-09-04T00:00:00.000Z",
+        },
+        {
+          episodePath: "本文/001.txt",
+          site: "kakuyomu",
+          postedAt: "2026-09-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const summary = await followEpisodeLedgers(work, [
+      rename("003.txt", "004.txt"),
+    ]);
+
+    expect(summary.posting).toBe(1);
+    expect(summary.failures).toEqual([]);
+    const after = await new PostingStore(work).load();
+    expect(after.posts.map((post) => post.episodePath)).toEqual([
+      "本文/004.txt",
+      "本文/001.txt",
+    ]);
+    expect(describeLedgerFollowSummary(summary)).toContain("投稿状態1件");
+  });
+
+  /**
+   * **消えた話の記録は落とす。**
+   *
+   * 挿絵（孤児として残す）と扱いが違う。詰めたあとの `本文/003.txt` は
+   * **繰り上がってきた別の話**なので、残すと「もう投稿済み」と読まれ、
+   * まだ出していない話が飛ばされる（話数を落とす `EpisodeShift.removed`
+   * と同じ理由）。
+   */
+  test("消えた話の投稿記録は落とす（別の話が投稿済みに見えないように）", async () => {
+    const store = new PostingStore(work);
+    const ledger = await store.load();
+    await store.save({
+      ...ledger,
+      posts: [
+        {
+          episodePath: "本文/003.txt",
+          site: "kakuyomu",
+          postedAt: "2026-09-04T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const summary = await followEpisodeLedgers(
+      work,
+      [rename("004.txt", "003.txt")],
+      {
+        filePath: episodePath("003.txt"),
+        number: 3,
+        next: { filePath: episodePath("003.txt"), number: 3 },
+      }
+    );
+
+    expect(summary.postingDropped).toBe(1);
+    const after = await new PostingStore(work).load();
+    expect(after.posts).toEqual([]);
+    expect(describeLedgerFollowSummary(summary)).toContain("投稿の記録");
   });
 });

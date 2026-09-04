@@ -360,6 +360,24 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 10,
   },
   {
+    id: "F-67",
+    title: "投稿キット",
+    commands: ["novelai.postNewEpisode", "novelai.configurePostingSites"],
+    count: 7,
+  },
+  {
+    id: "F-68",
+    title: "note風エディタ",
+    commands: ["novelai.openVertical"],
+    count: 4,
+  },
+  {
+    id: "F-69",
+    title: "作品タイプと表示絞り込み",
+    commands: ["novelai.setPlotBasics"],
+    count: 5,
+  },
+  {
     id: "F-52",
     title: "待ち時間300秒の壁——通信部品（undici）側の上限も設定に合わせた",
     commands: ["novelai.extractSettings"],
@@ -584,4 +602,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 750;
+export const PENDING_CHECK_TOTAL = 766;

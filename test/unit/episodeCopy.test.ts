@@ -3,6 +3,7 @@ import {
   bodyForPosting,
   extractEpisodeParts,
   nameWithSubtitle,
+  needsEmphasisSite,
 } from "../../src/core/episodeCopy";
 import {
   formatChapterLabel,
@@ -75,6 +76,60 @@ describe("投稿サイト用の本文", () => {
 
   test("ルビが無ければ、本文はそのまま", () => {
     expect(bodyForPosting("ただの本文。", "site")).toBe("ただの本文。");
+  });
+
+  /**
+   * **傍点はサイトによって書き方が違う**（設計書6.12.4）。
+   * なろう・アルファポリスへ貼る本文にカクヨムの `《《…》》` が出ると、
+   * 読者の目の前に記号が並ぶ。
+   */
+  describe("傍点の貼り付け先", () => {
+    test("なろう・アルファポリスはルビで代用する", () => {
+      expect(bodyForPosting("これは{{大事}}だ", "site", "narou")).toBe(
+        "これは｜大事《・・》だ"
+      );
+    });
+
+    test("カクヨム・ネオページは専用の記法", () => {
+      expect(bodyForPosting("これは{{大事}}だ", "site", "kakuyomu")).toBe(
+        "これは《《大事》》だ"
+      );
+    });
+
+    test("渡さなければ、これまでどおりカクヨムの書き方", () => {
+      expect(bodyForPosting("これは{{大事}}だ", "site")).toBe(
+        "これは《《大事》》だ"
+      );
+    });
+
+    test("noteへ貼る括弧書きでは、傍点の印だけを落とす", () => {
+      expect(bodyForPosting("{森|もり}と{{大事}}", "paren")).toBe(
+        "森（もり）と大事"
+      );
+    });
+
+    /**
+     * **訊いても答えが変わらないなら訊かない**（設計書5.7.3）。
+     * ルビはどのサイトでも同じ書き方で通るので、傍点が無ければ
+     * 貼り付け先を尋ねる意味がない（`features/ruby.ts` と同じ判断）。
+     */
+    describe("貼り付け先を訊くかどうか", () => {
+      test("投稿サイト記法で、傍点が入っているときだけ訊く", () => {
+        expect(needsEmphasisSite("これは{{大事}}だ", "site")).toBe(true);
+      });
+
+      test("傍点が無ければ訊かない", () => {
+        expect(needsEmphasisSite("{森|もり}を歩く", "site")).toBe(false);
+      });
+
+      test("記法が決まっているもの（別記法・HTML・括弧書き）は訊かない", () => {
+        for (const style of ["alphapolis-hash", "html", "paren"] as const) {
+          expect(needsEmphasisSite("これは{{大事}}だ", style), style).toBe(
+            false
+          );
+        }
+      });
+    });
   });
 });
 

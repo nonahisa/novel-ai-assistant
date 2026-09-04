@@ -16,7 +16,9 @@ export type WorkFormatKey =
   | "shortCollection"
   | "long"
   | "epic"
-  | "sns";
+  | "sns"
+  | "memo"
+  | "script";
 
 export interface WorkFormatDef {
   key: WorkFormatKey;
@@ -62,6 +64,23 @@ export const WORK_FORMATS: readonly WorkFormatDef[] = [
     description:
       "同じアカウントの投稿を1つのフォルダーにまとめたもの。" +
       "話数ではなく投稿の並びとして扱う",
+  },
+  // **創作メモ集と脚本は、ここへ足すだけで通る**（設計書6.70）。
+  // 形式（＝作品タイプ）の在り処はプロットの `## 形式` ひとつなので、
+  // 新しい台帳も新しい判定も要らない
+  {
+    key: "memo",
+    label: "創作メモ集",
+    description:
+      "思いついたことを書き溜めておく場所。数える単位は「メモ」で、" +
+      "題名だけのファイルがそのまま並ぶ",
+  },
+  {
+    key: "script",
+    label: "脚本",
+    description:
+      "台本の形で書く作品。第◯話が1回ぶんの台本になる。" +
+      "新しい話は柱・ト書き・セリフの雛形から始まり、縦書きで開く",
   },
 ];
 
