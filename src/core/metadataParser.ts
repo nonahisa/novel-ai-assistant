@@ -82,6 +82,17 @@ const TITLE_LABELS = ["タイトル", "エピソードタイトル"];
 const EPISODE_SEPARATOR = /^-{3,}\s*エピソード\s*\d*\s*開始\s*-{3,}$/;
 
 /**
+ * その行が話の区切りか。
+ *
+ * **判定の写しを作らない。** 合本を割れなかったときの逃げ道
+ * （`bookChapters.ts`）が「区切り行しか無いファイル」を見分けるのに要る。
+ * 別の正規表現を書くと、区切りの書き方が増えたときに片方だけが古くなる。
+ */
+export function isEpisodeSeparatorLine(line: string): boolean {
+  return EPISODE_SEPARATOR.test(line.trim());
+}
+
+/**
  * 本文の後ろに続く見出し（本体の裁定、2026-09-04）。
  *
  * ダウンロードファイルは本文のあとへ【後書き】【リアクション】を続ける。

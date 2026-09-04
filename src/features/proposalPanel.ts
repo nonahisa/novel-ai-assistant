@@ -1388,6 +1388,12 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * 「壊れている」としか見えないので、理由をその指摘の下へ書く。
    * ただし作者が自分で断ったとき（有料の確認・未設定・繋がらない）は
    * 何も書かない——ダイアログで既に伝わっており、断ったのに失敗したように見える。
+   *
+   * **答えは、待ち終えてから引き直したほうへ書く**（0.32.6のレビュー）。
+   * 数十秒待つあいだに同じ分類の検知がもう一度走ると、`replaceContents` が
+   * まだ手を付けていない指摘を新しい中身へ置き換え、`this.items` ごと
+   * 差し替わる。掴んだままの参照へ書くと、答えは捨てられた側に付いて
+   * 画面には何も出ない。**idは決定的**なので引き直せる。
    */
   private async askNotationFor(id: string): Promise<void> {
     const item = this.items.find((entry) => entry.id === id);
@@ -1409,25 +1415,36 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       });
       if (outcome.kind === "cancelled") return;
 
+      // ここから先は、いま画面に出ているほうへ書く（上の注釈）
+      const current = this.items.find((entry) => entry.id === id);
+      // 差し替えのあとに消えていることもある（作者が見送った等）。
+      // 行き先が無いなら、書かずに終える——無い相手を作り直さない
+      if (!current) return;
+
       if (outcome.kind === "failed") {
-        item.adviceNote = outcome.reason;
+        current.adviceNote = outcome.reason;
         return;
       }
 
-      item.adviceNote = describeNotationAdvice(outcome.advice);
+      current.adviceNote = describeNotationAdvice(outcome.advice);
       // **何を訊いて何が返ったかを残す**（「伏線として登録」と同じ流儀）。
       // 本文は書き換えていないので、適用とは別の印で記録する
       await appendAiActionLog(work, {
         category: "typo",
         action: "asked",
-        file: item.fileName,
-        line: item.line,
+        file: current.fileName,
+        line: current.line,
         target: group.label,
-        suggestion: item.adviceNote,
+        suggestion: current.adviceNote,
       });
     } finally {
-      // **必ず戻す。** 途中で失敗しても、押せないままの行を残さない
+      // **必ず戻す。** 途中で失敗しても、押せないままの行を残さない。
+      // 掴んだままの参照と、引き直したほうの**両方**を下ろす——差し替えで
+      // 新しく来た指摘は `askingAdvice` を持たないが、差し替えが
+      // 起きなかったときは同じ物なので、二度書いても害はない
       item.askingAdvice = false;
+      const current = this.items.find((entry) => entry.id === id);
+      if (current) current.askingAdvice = false;
       this.postItems();
     }
   }

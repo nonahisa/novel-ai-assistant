@@ -112,7 +112,18 @@ export async function applyChatToSettings(
   turns: readonly WorkChatTurn[],
   deps: ChatSettingsSyncDeps
 ): Promise<ChatSettingsSyncResult> {
-  if (turns.length === 0) {
+  /*
+    **押した時点の会話を写し取って、以降はこれだけを見る**（0.32.6のレビュー）。
+
+    渡されるのは相談パネルが持っている生の配列で、**この処理の途中でも
+    伸びる**（費用の確認は、作者がダイアログを読むぶんだけ待つ）。
+    覚え書き（ダイジェスト）を押した時点で作り、送る中身を後から組むと、
+    2つがずれる——次に押したときに「反映済み」と言われて、途中で足した
+    発言が永久に反映されなくなる。
+  */
+  const snapshot = [...turns];
+
+  if (snapshot.length === 0) {
     void vscode.window.showInformationMessage(
       "まだ会話がありません。相談してから押してください。"
     );
@@ -123,7 +134,7 @@ export async function applyChatToSettings(
     **AIを呼ぶ前にダイジェストを見る。** 同じ会話で二度押したときに
     料金だけかかって「反映済みです」と出るのでは、押した意味がない。
   */
-  const digest = chatHistoryDigest(turns);
+  const digest = chatHistoryDigest(snapshot);
   if (digest === (await readSyncDigest(work, STATE_FILE, STATE_KEY))) {
     void vscode.window.showInformationMessage(
       "この相談は反映済みです（会話が進んでから、もう一度お試しください）。"
@@ -177,17 +188,23 @@ export async function applyChatToSettings(
   });
   if (!ok) return { ...EMPTY, failed: true };
 
-  const trimmed = trimChatHistory(turns, MAX_CONVERSATION_CHARS);
+  const trimmed = trimChatHistory(snapshot, MAX_CONVERSATION_CHARS);
   const conversation = formatChatConversation(trimmed.turns);
   // **既知の名前は絞らずに全部渡す。** 絞ると、漏れた人物が毎回
   // 「新規」として提案される
   const knownNames = loaded.characters.map((character) => character.name);
 
-  let verified: VerifiedChatDecisions;
+  /**
+   * 拾い出しの結果。**「読めなかった」を空振りと区別する**（0.32.6のレビュー）。
+   * 読めなかった回に覚え書きを書くと、その会話は二度と送れなくなる。
+   */
+  let outcome:
+    | { malformed: true; text: string }
+    | { malformed: false; verified: VerifiedChatDecisions };
   try {
     // **中止できるようにする**（設計書6.43）。相談の会話を丸ごと送るので
     // 数十秒かかることがあり、有料AIではその間ずっと課金される
-    verified = await withCancellableProgress(
+    outcome = await withCancellableProgress(
       "相談から決まったことを拾っています",
       async (_progress, token) => {
         const controller = new AbortController();
@@ -212,12 +229,18 @@ export async function applyChatToSettings(
           meta: { feature: "chat_settings_sync", workFolder: work.folderPath },
           signal: controller.signal,
         });
+        const parsed = parseChatSettingsSync(response.text);
+        // **読めなかったことを、0件として飲み込まない。**
+        // 応答そのものは呼び出し側で記録へ残す（ここでは判断だけ）
+        if (parsed.malformed) {
+          return { malformed: true as const, text: response.text };
+        }
         // **根拠が会話に実在するかを、ここで確かめる。**
         // AIが「決まった」と言っただけのものは積まない
-        return verifyChatDecisions(
-          parseChatSettingsSync(response.text),
-          conversation
-        );
+        return {
+          malformed: false as const,
+          verified: verifyChatDecisions(parsed.decisions, trimmed.turns),
+        };
       }
     );
   } catch (error) {
@@ -236,6 +259,22 @@ export async function applyChatToSettings(
     return { ...EMPTY, failed: true };
   }
 
+  if (outcome.malformed) {
+    // **応答の中身を捨てない**（実装ルール5）。何が返ってきたのかが
+    // 分からないと、プロンプトが悪いのかモデルが悪いのかを切り分けられない
+    logFailure("相談を資料へ反映：AIの答えを読み取れませんでした", {
+      作品: work.title,
+      モデル: resolved.model,
+      応答: outcome.text.slice(0, 400),
+    });
+    // **覚え書きを残さない。** もう一度押せば、同じ会話をやり直せる
+    void vscode.window.showWarningMessage(
+      "AIの答えを読み取れませんでした。もう一度試せます。"
+    );
+    return { ...EMPTY, failed: true };
+  }
+
+  const verified = outcome.verified;
   const plan = buildPlotCharacterUpdates(verified.entries, loaded.characters);
 
   if (plan.updates.length > 0 || plan.creations.length > 0) {

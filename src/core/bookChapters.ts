@@ -8,7 +8,10 @@ import {
   isCollectedFile,
   type BookChapterHeading,
 } from "./episodeLabel";
-import { parseEpisodeMetadata } from "./metadataParser";
+import {
+  isEpisodeSeparatorLine,
+  parseEpisodeMetadata,
+} from "./metadataParser";
 import type { WorkFormatKey } from "./workFormat";
 
 /**
@@ -61,7 +64,14 @@ export function bookChaptersOf(
         insideOrder: inner.order,
       });
     }
-    return chapters;
+    // **1章も取れなかったら、割る前へ倒す**（0.32.6のレビュー）。
+    // 区切りは2本以上あるのに【本文】ラベルがどこにも無い形があり、
+    // 全話の body が空になるので上の「白紙は入れない」が全話に効いて、
+    // **その原稿が本から丸ごと消えていた。** 頭書きが混ざるほうが、
+    // 本文が消えるよりましである
+    if (chapters.length > 0 || !hasWritingOutsideSeparators(rawText)) {
+      return chapters;
+    }
   }
 
   // 単話（区切りが無い／1本だけ）は、いままでどおり1ファイル＝1章。
@@ -88,9 +98,27 @@ export function bookChaptersOf(
 export function bookChapterBodies(rawText: string): string[] {
   const collected = parseCollectedFile(rawText);
   if (collected && isCollectedFile(collected.length)) {
-    return collected
+    const bodies = collected
       .map((inner) => inner.body)
       .filter((body) => body.trim() !== "");
+    // 割れなかったときの倒し方は `bookChaptersOf` と揃える。
+    // **別々に切ると、画面で指した段落と挿絵の入る場所がずれる**
+    if (bodies.length > 0 || !hasWritingOutsideSeparators(rawText)) {
+      return bodies;
+    }
   }
   return [parseEpisodeMetadata(rawText).body];
+}
+
+/**
+ * 区切り行を除いて、何か書かれているか。
+ *
+ * **「割れなかった」と「本当に空」を分ける。** 区切り行しか無いファイルを
+ * 単話へ倒すと、白紙のページが本に入る（それは従来どおり0章＋通知でよい）。
+ */
+function hasWritingOutsideSeparators(rawText: string): boolean {
+  return rawText
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .some((line) => line.trim() !== "" && !isEpisodeSeparatorLine(line));
 }

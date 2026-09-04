@@ -292,6 +292,22 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    */
   private applyingToSettings = false;
 
+  /**
+   * いま持っている会話が、どの作品についてのものか（設計書6.72）。
+   *
+   * **会話は「最初から」でしか消えない。** 作品を選び直しても、別の作品の
+   * ファイルを開いても残る。ところが資料への反映とメモの保存は、作品を
+   * `resolveContext()` から、会話を `this.history` から取っていた——
+   * **作品Aの相談で決めたことが、作品Bの承認待ちや `設定/相談メモ/` へ
+   * 入る**余地があった（0.32.6のレビュー）。設定資料はGitで同期されるので、
+   * 混ざったものは他の端末にも広がる。
+   *
+   * `retrievalWorkId` と同じ流儀で、会話を積むときに一緒に覚えておく。
+   * **どの作品にも属さない相談（作品の外のファイル）では上書きしない**——
+   * 一度どこかの作品に結び付いた会話は、そのままにしておく。
+   */
+  private historyWorkId: string | undefined;
+
   /** 検索の材料。作品が変わるまで使い回す（毎回読み直すと重い） */
   private retrieval: RetrievalContext | undefined;
   private retrievalWorkId: string | undefined;
@@ -489,6 +505,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
     if (message.type === "clear") {
       this.history = [];
+      // 会話が消えたら、どの作品のものかも忘れる（次の相談は白紙から）
+      this.historyWorkId = undefined;
       // 会話をやり直すなら、料金の確認も取り直す
       this.paidConfirmedFor = undefined;
       // もう片方の画面にも、消えたことを伝える
@@ -744,6 +762,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         { role: "author", text: question },
         { role: "assistant", text: answer.reply }
       );
+      // **積むのと同じ場所で、どの作品の会話かを覚える。** 別のところで
+      // 更新すると、会話と記録がずれる余地が生まれる（設計書6.72）
+      if (context) this.historyWorkId = context.work.id;
 
       // 提案は先に解釈しておく。**記録には解釈後のものを残す。**
       // AIが返した生の値を残しても、実際に押せる形になったかが分からない
@@ -1359,6 +1380,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       );
       return;
     }
+    // **別の作品の `設定/` へメモを書かない。** 同期されるので、
+    // 混ざったものは他の端末にも広がる
+    if (!this.isHistoryAbout(context.work, "保存")) return;
 
     try {
       const work = context.work;
@@ -1412,9 +1436,19 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * **どの作品の、どの会話について押されたか**を渡すことだけである。
    */
   private async applyToSettings(): Promise<void> {
-    // 押している最中にもう一度押されたら、無視する。画面側でもボタンを
-    // 止めているが、**2つの画面から同時に押せる**ので、こちらでも見る
-    if (this.applyingToSettings) return;
+    // 押している最中にもう一度押されたら、走らせない。画面側でもボタンを
+    // 止めているが、**2つの画面から同時に押せる**ので、こちらでも見る。
+    //
+    // **黙って戻らない。** もう片方の画面はボタンを押せない状態にして
+    // 返事を待っているので、何も返さないとそのまま固まる（0.32.6のレビュー）
+    if (this.applyingToSettings) {
+      this.postAll({
+        type: "note",
+        message: "資料への反映を実行中です。終わるまでお待ちください。",
+      });
+      this.postAll({ type: "applyToSettingsDone" });
+      return;
+    }
 
     if (this.history.length === 0) {
       this.postAll({ type: "note", message: "まだ会話がありません。" });
@@ -1427,6 +1461,11 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       this.postError(
         "作品のファイルを開くか、「相談する作品を選ぶ」で作品を決めてください。"
       );
+      this.postAll({ type: "applyToSettingsDone" });
+      return;
+    }
+    // **別の作品の承認待ちへ積まない**（設計書6.72）
+    if (!this.isHistoryAbout(context.work, "反映")) {
       this.postAll({ type: "applyToSettingsDone" });
       return;
     }
@@ -1447,6 +1486,38 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       this.applyingToSettings = false;
       this.postAll({ type: "applyToSettingsDone" });
     }
+  }
+
+  /**
+   * いま持っている会話が、この作品についてのものか（設計書6.72）。
+   *
+   * **違うなら、書き出す前に止める。** 資料への反映も相談メモの保存も、
+   * 作品を「いま開いているもの」から、会話を「覚えているもの」から取る。
+   * 会話は作品を切り替えても残るので、**押した瞬間の作品へ、別の作品の
+   * 相談が流れ込む**（0.32.6のレビュー）。設定資料もメモもGitで同期される
+   * ため、混ざったものは他の端末にも広がる。
+   *
+   * **黙って止めない。** どの作品の会話なのかを名指しで伝えないと、
+   * 作者は何を直せばよいのか分からない（「最初から」を押すか、その作品を
+   * 開き直すか、のどちらかである）。
+   *
+   * どの作品にも結び付いていない会話（作品の外のファイルについての相談）は
+   * 通す。混ざる相手が無く、止めても作者にできることが無い。
+   */
+  private isHistoryAbout(work: WorkEntry, action: string): boolean {
+    if (!this.historyWorkId || this.historyWorkId === work.id) return true;
+
+    const owner = this.registry
+      .list()
+      .find((entry) => entry.id === this.historyWorkId);
+    this.postAll({
+      type: "note",
+      message:
+        `この会話は「${owner?.title ?? "別の作品"}」についてのものです。` +
+        `その作品を開いてから${action}してください` +
+        `（この作品の相談として始めるなら「最初から」を押してください）。`,
+    });
+    return false;
   }
 
   /**

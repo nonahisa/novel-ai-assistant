@@ -1,4 +1,5 @@
 import type { AIProvider } from "../ai/types";
+import { logStep } from "../core/logger";
 import { readTextFile } from "../core/textFile";
 import type { WorkEntry } from "../models/types";
 import {
@@ -7,6 +8,7 @@ import {
   CHATTER_COMMENT_MIN_CHARS,
   CHATTER_COMMENT_SCHEMA,
   CHATTER_COMMENT_SYSTEM_PROMPT,
+  CHATTER_COMMENT_VERSION,
   parseChatterComment,
   tailExcerpt,
 } from "../prompts/chatterComment";
@@ -43,6 +45,14 @@ export async function requestChatterComment(
   const excerpt = tailExcerpt(content.text, CHATTER_COMMENT_EXCERPT_CHARS);
   // 書きかけの数行に「盛り上がってきましたね」は的外れになる
   if ([...excerpt].length < CHATTER_COMMENT_MIN_CHARS) return undefined;
+
+  // **どの版・どのモデルで訊いたかを残す**（ほかのAI機能と同じ流儀）。
+  // 独り言は画面に何も出さずに黙ることがあるので、記録が無いと
+  // 「呼んだのか、そもそも呼ばなかったのか」すら分からない
+  logStep(
+    `独り言の感想: v${CHATTER_COMMENT_VERSION} / ${resolved.model}` +
+      ` / 本文${excerpt.length}字`
+  );
 
   const result = await resolved.provider.generate({
     systemPrompt: CHATTER_COMMENT_SYSTEM_PROMPT,

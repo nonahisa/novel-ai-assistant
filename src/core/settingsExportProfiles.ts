@@ -374,6 +374,120 @@ const CHARACTER_AS_OF_FIELDS = [
 const LOCATION_AS_OF_FIELDS = ["summary", "region", "description"];
 
 /**
+ * 時点の記録を持たない人物の項目（本体の裁定、0.32.6）。
+ *
+ * 年齢・容姿・服装・別名と、作者が足した項目は、**いつ変わったのかの記録が
+ * 無い**。第N話までの資料として渡しても、載るのは最新の値である。
+ *
+ * **落とさない。** これらはイラスト発注の中心項目で、外すと資料が用を
+ * なさない。代わりに冒頭で正直に断る——渡された側が「第3話時点の姿だ」と
+ * 思い込むのがいちばん困る。
+ */
+const UNDATED_CHARACTER_FIELDS: readonly CharacterExportField[] = [
+  "aliases",
+  "age",
+  "looks",
+  "clothing",
+  "customFields",
+];
+
+/**
+ * 第N話までに、その記録が世に出ているか。
+ *
+ * **`settingsAsOf.ts` の `hasAppearedBy` とは向きが逆である。** あちらは
+ * 登場話の記録が無いレコードを通す——矛盾検知では、記録が無いだけで設定を
+ * 捨てると突き合わせる材料が消えるので、それが正しい。
+ *
+ * **書き出しでは逆に効く**（0.32.6のレビュー）。まだ本文に書いていない
+ * 人物・場所・能力の設定が、第1話までの資料にそのまま載っていた。
+ * 渡す相手には「その時点までの話」しか見せない約束なので、
+ * **確実に判定できないものは、出さない側へ倒す**（設計書6.75）。
+ *
+ * 矛盾検知の挙動は動かさない（`settingsAsOf.ts` には触っていない）。
+ */
+function appearsBy(
+  record: {
+    appearedChapters: readonly number[];
+    /** 世界観だけは「未登場」の印を持たない */
+    status?: "登場済み" | "未登場";
+  },
+  chapter: number | null
+): boolean {
+  if (chapter === null) return true;
+  // 作者が「未登場（設定のみ）」と決めたものは、登場話が入っていても出さない
+  if (record.status === "未登場") return false;
+  const known = record.appearedChapters.filter((at) => Number.isFinite(at));
+  if (known.length === 0) return false;
+  return Math.min(...known) <= chapter;
+}
+
+/** その提供先・その時点で、このレコードを出してよいか */
+function isExportable(
+  record: {
+    spoilerLevel: string;
+    appearedChapters: readonly number[];
+    status?: "登場済み" | "未登場";
+  },
+  profile: AudienceProfile,
+  chapter: number | null
+): boolean {
+  return (
+    isVisibleAtSpoilerLevel(record.spoilerLevel, profile.spoilerLevel) &&
+    appearsBy(record, chapter)
+  );
+}
+
+/**
+ * 名前で引ける索引。**別名も同じ相手として引く。**
+ *
+ * 同じ呼び名の記録が複数あるときは全部持つ。出す・出さないの判断は
+ * **全員が出してよいときだけ通す**——1人でも伏せる相手が混ざっているなら、
+ * その名前は伏せた相手を指しているかもしれない。
+ */
+function nameIndexOf<T extends { name: string; aliases: readonly string[] }>(
+  records: readonly T[]
+): Map<string, T[]> {
+  const index = new Map<string, T[]>();
+  for (const record of records) {
+    for (const raw of [record.name, ...record.aliases]) {
+      const key = raw.trim();
+      if (!key) continue;
+      const found = index.get(key) ?? [];
+      found.push(record);
+      index.set(key, found);
+    }
+  }
+  return index;
+}
+
+/**
+ * 名前で引いた相手を、資料に出してよいか。
+ *
+ * **引き当てられない名前は、時点を絞ったときだけ落とす。** その相手が
+ * いつ登場するのかを言えない以上、出さない側へ倒すしかない。全話ぶんの
+ * 資料では絞る理由が無いので、これまでどおり出す（AIが本文から拾った
+ * 呼び名は、資料の記録と一字一句同じとは限らない）。
+ */
+function mentionAllowed<
+  T extends {
+    name: string;
+    aliases: readonly string[];
+    spoilerLevel: string;
+    appearedChapters: readonly number[];
+    status?: "登場済み" | "未登場";
+  },
+>(
+  index: Map<string, T[]>,
+  name: string,
+  profile: AudienceProfile,
+  chapter: number | null
+): boolean {
+  const found = index.get(name.trim());
+  if (!found || found.length === 0) return chapter === null;
+  return found.every((record) => isExportable(record, profile, chapter));
+}
+
+/**
  * 提供先の型に合わせた設定資料を組み立てる。
  *
  * @param audience 提供先の型
@@ -488,6 +602,26 @@ function headerLines(
         "（補足・AIの掘り下げ・判断待ちの食い違い）は、先の話の内容が混ざって" +
         "いないと言い切れないので含めていません。"
     );
+    /*
+      **落とせない項目は、落とさずに断る**（本体の裁定、0.32.6）。
+
+      年齢・容姿・服装・別名と作者が足した項目には、いつ変わったのかの
+      記録が無い。落とすとイラスト発注の資料が用をなさないので載せるが、
+      渡された側が「第N話時点の姿だ」と思い込まないよう、ここで正直に言う。
+    */
+    const undated = (profile.characters ?? []).filter((field) =>
+      UNDATED_CHARACTER_FIELDS.includes(field)
+    );
+    if (undated.length > 0) {
+      const names = undated.map((field) => CHARACTER_FIELD_LABELS[field]);
+      lines.push(
+        "",
+        `ただし ${names.join("・")} は時点の記録を持たないため、` +
+          "この資料でも最新の値で載っています（作中で変わっていれば、" +
+          "第" +
+          `${options.chapter}話の時点とは違うことがあります）。`
+      );
+    }
   }
   lines.push("");
   return lines;
@@ -587,10 +721,7 @@ function characterSection(
   undatedText: boolean
 ): string[] {
   const visible = data.characters
-    .filter((character) =>
-      isVisibleAtSpoilerLevel(character.spoilerLevel, profile.spoilerLevel)
-    )
-    .filter((character) => hasAppearedBy(character.appearedChapters, chapter))
+    .filter((character) => isExportable(character, profile, chapter))
     .map((character) =>
       recordAsOf(character, CHARACTER_AS_OF_FIELDS, chapter)
     );
@@ -604,6 +735,17 @@ function characterSection(
     return lines;
   }
 
+  /*
+    **名指しされた相手も、同じ関門を通す**（0.32.6のレビュー）。
+    関係・呼称・能力は「別の記録の名前」を書く欄なので、その記録を出さないと
+    決めていても、名前だけがここから漏れていた。索引は人物ぶんの走査に
+    なるので、1人ずつではなく**種別ごとに1回だけ**作る。
+  */
+  const mentions: MentionIndexes = {
+    characters: nameIndexOf(data.characters),
+    abilities: nameIndexOf(data.abilities),
+  };
+
   const depth = profile.grouped && fields.includes("affiliation") ? 4 : 3;
   if (depth === 4) {
     for (const [affiliation, members] of groupBy(
@@ -613,12 +755,34 @@ function characterSection(
     )) {
       lines.push(`### ${affiliation}`, "");
       for (const character of members) {
-        lines.push(...describeCharacter(character, fields, data, chapter, undatedText, depth));
+        lines.push(
+          ...describeCharacter(
+            character,
+            fields,
+            data,
+            profile,
+            mentions,
+            chapter,
+            undatedText,
+            depth
+          )
+        );
       }
     }
   } else {
     for (const character of named) {
-      lines.push(...describeCharacter(character, fields, data, chapter, undatedText, depth));
+      lines.push(
+        ...describeCharacter(
+          character,
+          fields,
+          data,
+          profile,
+          mentions,
+          chapter,
+          undatedText,
+          depth
+        )
+      );
     }
   }
 
@@ -637,10 +801,21 @@ function characterSection(
   return lines;
 }
 
+/**
+ * 名指しされた相手を引く索引。**種別ごとに1回だけ作って持ち回る。**
+ * 人物ごとに作り直すと、記録の数だけ二乗で効いてくる。
+ */
+interface MentionIndexes {
+  characters: Map<string, Character[]>;
+  abilities: Map<string, Ability[]>;
+}
+
 function describeCharacter(
   character: Character,
   fields: readonly CharacterExportField[],
   data: SettingsExportData,
+  profile: AudienceProfile,
+  mentions: MentionIndexes,
   chapter: number | null,
   undatedText: boolean,
   depth: number
@@ -693,8 +868,21 @@ function describeCharacter(
   }
   if (has(fields, "addressTerms")) {
     for (const term of character.addressTerms) {
+      // **相手を出さないと決めたなら、呼び方も出さない**（0.32.6のレビュー）。
+      // 「終幕の男への呼称」という見出しだけで、その人物の存在が漏れる
+      if (
+        !mentionAllowed(mentions.characters, term.targetName, profile, chapter)
+      ) {
+        continue;
+      }
       const forms = term.forms
-        .filter((form) => form.firstChapter === null || upTo(form.firstChapter, chapter))
+        // **いつから使われた呼び方か分からないものは、時点を絞ったら
+        // 出さない。** 第3話までの資料に、第9話で始まる呼び方が載りうる
+        .filter((form) =>
+          form.firstChapter === null
+            ? chapter === null
+            : upTo(form.firstChapter, chapter)
+        )
         .map((form) => {
           const period = formatPeriod(form.firstChapter, form.lastChapter);
           const context = form.context ? `／${form.context}` : "";
@@ -714,7 +902,12 @@ function describeCharacter(
       .filter(
         (ability) =>
           startsBy(ability.appearedChapters, chapter) &&
-          (ability.firstChapter === null || upTo(ability.firstChapter, chapter))
+          (ability.firstChapter === null ||
+            upTo(ability.firstChapter, chapter)) &&
+          // **能力の台帳のほうで伏せたものは、人物欄にも書かない**
+          // （0.32.6のレビュー）。能力の章に出ないだけでは足りず、
+          // 「能力: 終焉」の1行で名前が漏れていた
+          mentionAllowed(mentions.abilities, ability.name, profile, chapter)
       )
       .map((ability) =>
         ability.mastery === "習得済み"
@@ -724,13 +917,17 @@ function describeCharacter(
       .join("、");
     if (abilities) bullet("能力", abilities);
   }
-  if (has(fields, "relations") && character.relations.length > 0) {
-    bullet(
-      "関係",
-      character.relations
-        .map((relation) => `${relation.name}（${relation.relation}）`)
-        .join("、")
-    );
+  if (has(fields, "relations")) {
+    // **相手を出さないと決めたなら、関係の行にも名前を出さない**
+    // （0.32.6のレビュー）。人物そのものは伏せたのに、
+    // 「関係: 白鳥（同僚）」でその存在が漏れていた
+    const relations = character.relations
+      .filter((relation) =>
+        mentionAllowed(mentions.characters, relation.name, profile, chapter)
+      )
+      .map((relation) => `${relation.name}（${relation.relation}）`)
+      .join("、");
+    if (relations) bullet("関係", relations);
   }
   if (has(fields, "customFields")) {
     for (const field of data.customFields ?? []) {
@@ -798,10 +995,7 @@ function locationSection(
   undatedText: boolean
 ): string[] {
   const visible = data.locations
-    .filter((location) =>
-      isVisibleAtSpoilerLevel(location.spoilerLevel, profile.spoilerLevel)
-    )
-    .filter((location) => hasAppearedBy(location.appearedChapters, chapter))
+    .filter((location) => isExportable(location, profile, chapter))
     .map((location) => recordAsOf(location, LOCATION_AS_OF_FIELDS, chapter));
 
   const lines = ["## 場所", ""];
@@ -862,11 +1056,11 @@ function abilitySection(
   undatedText: boolean
 ): string[] {
   const term = abilityTermOf(data);
-  const visible = data.abilities
-    .filter((ability) =>
-      isVisibleAtSpoilerLevel(ability.spoilerLevel, profile.spoilerLevel)
-    )
-    .filter((ability) => hasAppearedBy(ability.appearedChapters, chapter));
+  const visible = data.abilities.filter((ability) =>
+    isExportable(ability, profile, chapter)
+  );
+  // 「使い手」は人物の名前なので、人物と同じ関門を通す（設計書6.75）
+  const charactersByName = nameIndexOf(data.characters);
 
   const lines = [`## ${term}`, ""];
   if (visible.length === 0) {
@@ -902,8 +1096,11 @@ function abilitySection(
       if (has(fields, "limitation") && ability.limitation) {
         lines.push(`- **制約**: ${ability.limitation}`);
       }
-      if (has(fields, "userNames") && ability.userNames.length > 0) {
-        lines.push(`- **使い手**: ${ability.userNames.join("、")}`);
+      if (has(fields, "userNames")) {
+        const users = ability.userNames.filter((name) =>
+          mentionAllowed(charactersByName, name, profile, chapter)
+        );
+        if (users.length > 0) lines.push(`- **使い手**: ${users.join("、")}`);
       }
       lines.push(
         ...commonTailLines(
@@ -934,13 +1131,9 @@ function organizationSection(
   chapter: number | null,
   undatedText: boolean
 ): string[] {
-  const visible = data.organizations
-    .filter((organization) =>
-      isVisibleAtSpoilerLevel(organization.spoilerLevel, profile.spoilerLevel)
-    )
-    .filter((organization) =>
-      hasAppearedBy(organization.appearedChapters, chapter)
-    );
+  const visible = data.organizations.filter((organization) =>
+    isExportable(organization, profile, chapter)
+  );
 
   const lines = ["## 組織", ""];
   if (visible.length === 0) {
@@ -948,9 +1141,11 @@ function organizationSection(
     return lines;
   }
 
-  // 所属する人物は、その時点で出ている人だけを引く
+  // **所属する人物は、その提供先に出してよい人だけを引く**（0.32.6の
+  // レビュー）。公開範囲を見ていなかったので、作者だけの印を付けた人物の
+  // 名前が、組織の欄からそのまま漏れていた
   const members = data.characters
-    .filter((character) => hasAppearedBy(character.appearedChapters, chapter))
+    .filter((character) => isExportable(character, profile, chapter))
     .map((character) => ({
       name: character.name,
       affiliation: character.affiliation,
@@ -1027,11 +1222,9 @@ function worldSection(
   chapter: number | null,
   undatedText: boolean
 ): string[] {
-  const visible = data.world
-    .filter((item) =>
-      isVisibleAtSpoilerLevel(item.spoilerLevel, profile.spoilerLevel)
-    )
-    .filter((item) => hasAppearedBy(item.appearedChapters, chapter));
+  const visible = data.world.filter((item) =>
+    isExportable(item, profile, chapter)
+  );
 
   const lines = ["## 世界観", ""];
   if (visible.length === 0) {

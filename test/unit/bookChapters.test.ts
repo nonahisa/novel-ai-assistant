@@ -147,6 +147,63 @@ describe("合本は話ごとに割る", () => {
 });
 
 /**
+ * 【本文】ラベルを持たない合本（0.32.6のレビューで見つかった）。
+ *
+ * 区切り行は2本以上あるのに、どの塊にも【本文】が無い形がある。
+ * 話ごとの `body` が全部空になるので、上の「白紙の章は入れない」が
+ * 全話に効き、**その原稿が本から丸ごと消えていた。**
+ *
+ * 割れないなら、割る前（＝全文が1章として本に入る）へ戻すほうが害が小さい。
+ * **本文が消えるより、頭書きが混ざるほうがましである。**
+ */
+describe("割れない合本は、単話の道へ倒す", () => {
+  const NO_BODY_LABEL = [
+    "------- エピソード1開始 -------",
+    "【エピソードタイトル】",
+    "１話　転生",
+    "",
+    "　朝が来た。",
+    "",
+    "------- エピソード2開始 -------",
+    "【エピソードタイトル】",
+    "２話　再会",
+    "",
+    "　昼が来た。",
+  ].join("\n");
+
+  test("本文ラベルが無ければ、全文が1章として入る", () => {
+    const parts = bookChaptersOf(episode(), NO_BODY_LABEL);
+
+    expect(parts).toHaveLength(1);
+    expect(parts[0].body).toContain("　朝が来た。");
+    expect(parts[0].body).toContain("　昼が来た。");
+    // 割れなかったので、合本ではなく単話として数える
+    expect(parts[0].insideOrder).toBe(null);
+  });
+
+  test("段落の一覧も同じ切り分けになる（挿絵の位置がずれない）", () => {
+    const bodies = bookChapterBodies(NO_BODY_LABEL);
+
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toContain("　朝が来た。");
+    expect(bodies[0]).toContain("　昼が来た。");
+  });
+
+  /** 本当に何も書かれていないファイルは、これまでどおり0章（通知が出る） */
+  test("区切り行しか無いファイルは、章が1つもできない", () => {
+    const onlySeparators = [
+      "------- エピソード1開始 -------",
+      "",
+      "------- エピソード2開始 -------",
+      "",
+    ].join("\n");
+
+    expect(bookChaptersOf(episode(), onlySeparators)).toHaveLength(0);
+    expect(bookChapterBodies(onlySeparators)).toHaveLength(0);
+  });
+});
+
+/**
  * **単話は1文字も変えない**（回帰の固定）。合本を割る道を足したせいで、
  * いままで出ていた本が変わっては困る。
  */

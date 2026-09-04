@@ -135,23 +135,48 @@ export interface RawChatDecision {
   evidence: string;
 }
 
+/** 応答を読んだ結果 */
+export interface ParsedChatSettingsSync {
+  decisions: RawChatDecision[];
+  /**
+   * 答えの形そのものが読めなかったか。
+   *
+   * **「読めなかった」と「読めたが決定は0件」は違う**（0.32.6のレビュー）。
+   * どちらも空配列にしていたため、読めなかった回にも「反映済み」の覚え書きが
+   * 書かれ、その会話は二度と送れなくなっていた。
+   */
+  malformed: boolean;
+}
+
+/**
+ * 「読めなかった」を1か所で作る（`malformed` の書き忘れを防ぐ）。
+ * **毎回作り直す**——使い回すと、呼び出し側が配列へ足したときに漏れる。
+ */
+function unreadable(): ParsedChatSettingsSync {
+  return { decisions: [], malformed: true };
+}
+
 /**
  * 応答から決定の一覧を取り出す。
  *
- * **形が合わないものは黙って捨てる。** ここで見るのは「3つの文字列が
+ * **形が合わない1件は黙って捨てる。** ここで見るのは「3つの文字列が
  * 揃っているか」だけで、中身が本物かどうか（指示語の言い換えでないか、
  * 根拠が会話に実在するか）は `core/chatSettingsSync.ts` が判定する。
  * 形の検査と中身の検査を1か所に混ぜると、どちらの理由で落ちたのかを
  * 作者へ伝えられなくなる。
+ *
+ * ただし**答えの入れ物ごと読めなかったとき**（JSONが無い・壊れている・
+ * `decisions` が配列でない）は、そう名乗る。呼び出し側が「もう一度
+ * 試せます」と言えるようにするためである。
  */
-export function parseChatSettingsSync(text: string): RawChatDecision[] {
+export function parseChatSettingsSync(text: string): ParsedChatSettingsSync {
   const source = extractJson(text);
-  if (!source) return [];
+  if (!source) return unreadable();
   try {
     const parsed: unknown = JSON.parse(source);
-    if (typeof parsed !== "object" || parsed === null) return [];
+    if (typeof parsed !== "object" || parsed === null) return unreadable();
     const decisions = (parsed as { decisions?: unknown }).decisions;
-    if (!Array.isArray(decisions)) return [];
+    if (!Array.isArray(decisions)) return unreadable();
 
     const out: RawChatDecision[] = [];
     for (const raw of decisions) {
@@ -167,9 +192,9 @@ export function parseChatSettingsSync(text: string): RawChatDecision[] {
         evidence: asString(item.evidence),
       });
     }
-    return out;
+    return { decisions: out, malformed: false };
   } catch {
-    return [];
+    return unreadable();
   }
 }
 

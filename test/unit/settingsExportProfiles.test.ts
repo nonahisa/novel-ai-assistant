@@ -439,3 +439,350 @@ describe("第N話までに絞る", () => {
     expect(built).toContain("母への負い目");
   });
 });
+
+/**
+ * ネタバレの漏れ（0.32.6のレビュー）。
+ *
+ * 提供先別の書き出しは「渡す相手によって出してよい情報が違う」ための機能
+ * なので、**漏れは機能そのものの否定になる。** 見つかったのは6か所。
+ *
+ * 1. 未登場のレコードが「第N話まで」を素通りする
+ * 2. 関係（相手の名前）が話数でも公開範囲でも絞られない
+ * 3. 組織の「所属する人物」に、作者だけの印を付けた人物が出る
+ * 4. 人物欄の能力名と、能力の「使い手」が絞られない
+ * 5. 呼称の相手が絞られない
+ * 6. 時点の記録を持たない項目が、断りなく最新の値で載る
+ */
+describe("未登場のレコードは、時点を絞ったら出さない", () => {
+  /**
+   * `hasAppearedBy` は登場話が空だと通す。**矛盾検知ではそれが正しい**
+   * （記録が無いだけで設定を捨てると、突き合わせる材料が消える）が、
+   * 書き出しでは逆に効く——第1話までの資料に、まだ書いていない人物の
+   * 設定がそのまま載る。
+   */
+  test("登場話の記録が無い人物は、第N話までの資料に出ない", () => {
+    const data = baseData();
+    data.characters = [
+      fullCharacter(),
+      {
+        ...emptyCharacter("char_009", "終幕の男"),
+        summary: "最終話で正体が明かされる。",
+        appearedChapters: [],
+      },
+    ];
+
+    const built = buildExportMarkdown("editorial", data, {
+      ...OPTIONS,
+      chapter: 1,
+    });
+
+    expect(built).toContain("月島灯");
+    expect(built).not.toContain("最終話で正体が明かされる。");
+  });
+
+  test("全話ぶんなら、これまでどおり出す", () => {
+    const data = baseData();
+    data.characters = [
+      {
+        ...emptyCharacter("char_009", "終幕の男"),
+        summary: "最終話で正体が明かされる。",
+        appearedChapters: [],
+      },
+    ];
+
+    expect(
+      buildExportMarkdown("editorial", data, { ...OPTIONS, chapter: null })
+    ).toContain("最終話で正体が明かされる。");
+  });
+
+  test("「未登場（設定のみ）」の印が付いたものも出さない", () => {
+    const data = baseData();
+    data.characters = [
+      {
+        ...emptyCharacter("char_009", "終幕の男"),
+        summary: "設定だけ作ってある。",
+        status: "未登場",
+        // 登場話に数字が入っていても、未登場の印が勝つ
+        appearedChapters: [1],
+      },
+    ];
+
+    expect(
+      buildExportMarkdown("editorial", data, { ...OPTIONS, chapter: 5 })
+    ).not.toContain("設定だけ作ってある。");
+  });
+
+  test("場所・能力・組織・世界観にも同じ守りが要る", () => {
+    const data = baseData();
+    data.locations = [
+      { ...emptyLocation("loc_009", "封印の間"), description: "地下の広間。" },
+    ];
+    data.abilities = [
+      { ...emptyAbility("abil_009", "終焉"), description: "世界を閉じる。" },
+    ];
+    data.organizations = [
+      {
+        ...emptyOrganization("org_009", "影の議会"),
+        description: "黒幕の集まり。",
+      },
+    ];
+    data.world = [
+      { ...emptyWorldItem("wld_009", "門"), description: "最後に開く門。" },
+    ];
+
+    const built = buildExportMarkdown("editorial", data, {
+      ...OPTIONS,
+      chapter: 1,
+    });
+
+    for (const leaked of [
+      "地下の広間。",
+      "世界を閉じる。",
+      "黒幕の集まり。",
+      "最後に開く門。",
+    ]) {
+      expect(built, leaked).not.toContain(leaked);
+    }
+  });
+});
+
+describe("関係（相手の名前）を絞る", () => {
+  /** 相手（白鳥）を資料に置いた状態を作る */
+  function withPartner(overrides: Partial<Character> = {}): SettingsExportData {
+    const data = baseData();
+    data.characters = [
+      { ...fullCharacter(), relations: [{ name: "白鳥", relation: "同僚" }] },
+      {
+        ...emptyCharacter("char_002", "白鳥"),
+        summary: "本当は敵側の人物。",
+        appearedChapters: [1],
+        ...overrides,
+      },
+    ];
+    return data;
+  }
+
+  test("作者だけの印が付いた相手との関係は、行ごと出さない", () => {
+    const data = withPartner({ spoilerLevel: "author_only" });
+
+    const built = buildExportMarkdown("editorial", data, {
+      ...OPTIONS,
+      chapter: null,
+    });
+
+    // 人物そのものが出ないだけでは足りない。**関係の行に名前が残る**
+    expect(built).not.toContain("本当は敵側の人物。");
+    expect(built).not.toContain("白鳥（同僚）");
+  });
+
+  test("あとから登場する相手との関係も出さない", () => {
+    const data = withPartner({ appearedChapters: [9] });
+
+    const built = buildExportMarkdown("editorial", data, {
+      ...OPTIONS,
+      chapter: 3,
+    });
+
+    expect(built).not.toContain("白鳥（同僚）");
+  });
+
+  test("その時点で出ている相手との関係は、これまでどおり出す", () => {
+    const built = buildExportMarkdown("editorial", withPartner(), {
+      ...OPTIONS,
+      chapter: 3,
+    });
+
+    expect(built).toContain("白鳥（同僚）");
+  });
+
+  test("資料に居ない名前は、時点を絞ったときだけ落とす", () => {
+    // 引き当てられない以上、その相手がいつ出るのかを言えない。
+    // **確実に判定できないものは、出さない側へ倒す**（設計書6.75）
+    const data = baseData();
+
+    expect(
+      buildExportMarkdown("editorial", data, { ...OPTIONS, chapter: 3 })
+    ).not.toContain("白鳥（同僚）");
+    // 全話ぶんなら、絞る理由が無いので従来どおり
+    expect(
+      buildExportMarkdown("editorial", data, { ...OPTIONS, chapter: null })
+    ).toContain("白鳥（同僚）");
+  });
+});
+
+describe("組織の「所属する人物」を絞る", () => {
+  test("作者だけの印が付いた人物は並べない", () => {
+    const data = baseData();
+    data.characters = [
+      { ...fullCharacter(), affiliation: "窓口課" },
+      {
+        ...emptyCharacter("char_002", "潜入者"),
+        affiliation: "窓口課",
+        appearedChapters: [1],
+        spoilerLevel: "author_only",
+      },
+    ];
+
+    const built = buildExportMarkdown("editorial", data, {
+      ...OPTIONS,
+      chapter: null,
+    });
+
+    expect(built).toContain("**所属する人物**");
+    expect(built).not.toContain("潜入者");
+  });
+
+  test("その時点でまだ出ていない人物も並べない", () => {
+    const data = baseData();
+    data.characters = [
+      { ...fullCharacter(), affiliation: "窓口課" },
+      {
+        ...emptyCharacter("char_002", "後任"),
+        affiliation: "窓口課",
+        appearedChapters: [],
+      },
+    ];
+
+    const built = buildExportMarkdown("editorial", data, {
+      ...OPTIONS,
+      chapter: 3,
+    });
+
+    expect(built).not.toContain("後任");
+  });
+});
+
+describe("能力を絞る", () => {
+  test("人物欄の能力名も、公開範囲で絞る", () => {
+    const data = baseData();
+    data.abilities = [
+      {
+        ...emptyAbility("abil_001", "霊視"),
+        appearedChapters: [2],
+        spoilerLevel: "author_only",
+      },
+    ];
+
+    const built = buildExportMarkdown("editorial", data, {
+      ...OPTIONS,
+      chapter: null,
+    });
+
+    // 能力の章に出ないだけでは足りない。**人物欄の「能力」に名前が残る**
+    expect(built).not.toContain("**能力**: 霊視");
+  });
+
+  test("能力の「使い手」も、話数と公開範囲で絞る", () => {
+    const data = baseData();
+    data.characters = [
+      fullCharacter(),
+      { ...emptyCharacter("char_002", "影の使い手"), appearedChapters: [9] },
+    ];
+    data.abilities = [
+      {
+        ...emptyAbility("abil_001", "霊視"),
+        appearedChapters: [2],
+        userNames: ["月島灯", "影の使い手"],
+      },
+    ];
+
+    const built = buildExportMarkdown("editorial", data, {
+      ...OPTIONS,
+      chapter: 3,
+    });
+
+    expect(built).toContain("**使い手**: 月島灯");
+    expect(built).not.toContain("影の使い手");
+  });
+});
+
+describe("呼称の相手を絞る", () => {
+  test("作者だけの印が付いた相手への呼称は、行ごと出さない", () => {
+    const data = baseData();
+    data.characters = [
+      fullCharacter(),
+      {
+        ...emptyCharacter("char_002", "白鳥"),
+        appearedChapters: [1],
+        spoilerLevel: "author_only",
+      },
+    ];
+
+    const built = buildExportMarkdown("editorial", data, {
+      ...OPTIONS,
+      chapter: null,
+    });
+
+    expect(built).not.toContain("白鳥への呼称");
+  });
+
+  test("あとから登場する相手への呼称も出さない", () => {
+    const data = baseData();
+    data.characters = [
+      fullCharacter(),
+      { ...emptyCharacter("char_002", "白鳥"), appearedChapters: [9] },
+    ];
+
+    const built = buildExportMarkdown("editorial", data, {
+      ...OPTIONS,
+      chapter: 3,
+    });
+
+    expect(built).not.toContain("白鳥への呼称");
+  });
+
+  test("いつから使われたか分からない呼称は、時点を絞ったら出さない", () => {
+    const data = baseData();
+    const base = fullCharacter();
+    data.characters = [
+      {
+        ...base,
+        addressTerms: [
+          {
+            ...base.addressTerms[0],
+            forms: [{ ...base.addressTerms[0].forms[0], firstChapter: null }],
+          },
+        ],
+      },
+      { ...emptyCharacter("char_002", "白鳥"), appearedChapters: [1] },
+    ];
+
+    expect(
+      buildExportMarkdown("editorial", data, { ...OPTIONS, chapter: 3 })
+    ).not.toContain("白鳥さん");
+    // 全話ぶんなら、これまでどおり出す
+    expect(
+      buildExportMarkdown("editorial", data, { ...OPTIONS, chapter: null })
+    ).toContain("白鳥さん");
+  });
+});
+
+/**
+ * 時点の記録を持たない項目（本体の裁定、0.32.6）。
+ *
+ * 年齢・容姿・服装・別名と作者が足した項目は、いつ変わったかの記録が無い。
+ * **落とすと資料が用をなさない**（イラスト発注の中心項目である）ので、
+ * 落とさずに、冒頭で正直に断る。
+ */
+describe("時点の記録を持たない項目を、冒頭で断る", () => {
+  test("第N話までに絞ったときは、そう書く", () => {
+    const built = build("illustration", 3);
+
+    expect(built).toContain("時点の記録を持たない");
+    for (const label of ["年齢", "容姿", "服装"]) {
+      expect(built, label).toContain(label);
+    }
+    // 中身そのものは、これまでどおり載る（落とさない）
+    expect(built).toContain("17歳");
+    expect(built).toContain("紺のブレザーに赤いマフラー");
+  });
+
+  test("全話ぶんのときは、断り書きを出さない", () => {
+    expect(build("illustration", null)).not.toContain("時点の記録を持たない");
+  });
+
+  test("その型が出さない項目は、断り書きにも並べない", () => {
+    // 紹介向けは名前と紹介文だけなので、断るものが無い
+    expect(build("introduction", 3)).not.toContain("時点の記録を持たない");
+  });
+});

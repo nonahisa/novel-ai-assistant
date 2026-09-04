@@ -57,6 +57,26 @@ export function formatChatConversation(
 }
 
 /**
+ * 作者の発言だけを並べたもの。**根拠の照合に使う**（0.32.6のレビュー）。
+ *
+ * この機能が拾うのは「**作者が**決めたこと」である。会話全体と照らすと、
+ * AIが自分の提案文を引用しただけで逐語一致が通り、作者が受け入れて
+ * いない案まで承認待ちへ積まれる（P-32のプロンプトは「作者の発言を必ず
+ * 1つ含める」と言っているが、**AIの言うことは信用しない**）。
+ *
+ * 話し手の札（「作者:」）は付けない。**引用に札は入らない**ので、
+ * 付けると行の境目で偽の一致が生まれる余地だけが増える。
+ */
+export function formatAuthorConversation(
+  turns: readonly WorkChatTurn[]
+): string {
+  return turns
+    .filter((turn) => turn.role === "author")
+    .map((turn) => turn.text)
+    .join("\n");
+}
+
+/**
  * 会話の内容ハッシュ。**同じ相談を二度積まない**ための鍵である。
  *
  * **並べ替えたら別物になる**（plotの `plotCharactersDigest` との違い）。
@@ -107,21 +127,35 @@ export function trimChatHistory(
  * **AIが「決まった」と言っただけでは積まない。** 通すのは、
  *   1. 名前と決定の文が、指示語の言い換えでないこと
  *   2. 根拠の引用が、会話の中に逐語で実在すること
- * の両方を満たしたものだけである。落ちたものは黙って捨てず、理由つきで
+ *   3. その引用の断片が、**作者の発言の中に**1つ以上あること
+ * のすべてを満たしたものだけである。落ちたものは黙って捨てず、理由つきで
  * 返す（完了通知に「根拠が確認できず見送りN件」と出す）。
+ *
+ * 3を足したのは0.32.6のレビューによる。会話全体とだけ照らしていたので、
+ * **AIが自分の提案文を引用すれば通っていた。** それは「AIがそう言った」
+ * ことの証拠でしかなく、作者が受け入れたかどうかを何も言っていない。
  *
  * 照合は `groundedEvidence` と同じ流儀にする——空白の全角半角差と、
  * gemma系が返すバイト表記（`<0xE3>`）を落としてから比べ、**断片のどれか
  * 1つでも会話にあれば通す**。すべてを求めると、句点で切れた末尾の
  * 一片が合わないだけで本物の引用まで落ちる。
+ *
+ * **会話は文字列ではなく発言の並びで受け取る。** 組み立てをここで行えば、
+ * AIへ渡した文と照合する文がずれようがない（別々に組むと、正しい引用まで
+ * 落ちる／見ていない文と照合して通る、のどちらも起こりうる）。
  */
 export function verifyChatDecisions(
   decisions: readonly RawChatDecision[],
-  conversation: string
+  turns: readonly WorkChatTurn[]
 ): VerifiedChatDecisions {
   const entries: PlotCharacterEntry[] = [];
   const rejected: ChatDecisionRejection[] = [];
-  const normalizedConversation = normalizeForComparison(conversation);
+  const normalizedConversation = normalizeForComparison(
+    formatChatConversation(turns)
+  );
+  const normalizedAuthorSaid = normalizeForComparison(
+    formatAuthorConversation(turns)
+  );
 
   for (const decision of decisions) {
     const name = decision.name.trim();
@@ -141,7 +175,12 @@ export function verifyChatDecisions(
     const grounded = segments.some((segment) =>
       normalizedConversation.includes(segment)
     );
-    if (!grounded) {
+    // **作者の発言にも当たっていること。** 会話にあるだけでは、
+    // AIが自分の案を写しただけかもしれない
+    const fromAuthor = segments.some((segment) =>
+      normalizedAuthorSaid.includes(segment)
+    );
+    if (!grounded || !fromAuthor) {
       rejected.push({ name, reason: "ungrounded" });
       continue;
     }

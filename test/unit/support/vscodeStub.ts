@@ -68,6 +68,16 @@ export const window = {
   onDidChangeActiveTextEditor: (_listener: unknown) => ({
     dispose() {},
   }),
+  /**
+   * 該当箇所に掛ける色。**作られるだけでよい**——本文の見た目は実機でしか
+   * 確かめられないので、ここでは相談パネルなどが組み立てられれば足りる。
+   */
+  createTextEditorDecorationType: (_options?: unknown) => ({
+    key: "stub-decoration",
+    dispose() {},
+  }),
+  /** いま開いている本文。**既定は「開いていない」** */
+  activeTextEditor: undefined as unknown,
 };
 export const commands = {};
 

@@ -238,7 +238,20 @@ export class ChatterService implements vscode.Disposable {
         )
       );
       const comment = raw ? validateChatterComment(raw) : undefined;
-      if (!comment) return;
+      if (!comment) {
+        // **黙るのはよいが、何も残さないのはよくない**（設計書6.21.4の
+        // 「黙る（ログのみ）」の「ログ」。0.32.6のレビュー）。検査で落ちた
+        // 一言がどこにも無いと、「AIが黙っている」のか「言おうとしたが
+        // 落ちた」のかを、作者も開発側も区別できない。
+        // **答えが返らなかった回（undefined）は残さない**——見送る中身が無い
+        if (raw) {
+          logFailure("独り言の感想（検査で見送りました）", {
+            作品: work.title,
+            答え: raw.slice(0, 200),
+          });
+        }
+        return;
+      }
 
       this.lastSpokeAt = Date.now();
       this.deps.post(

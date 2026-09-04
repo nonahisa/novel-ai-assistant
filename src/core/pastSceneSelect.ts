@@ -1,7 +1,9 @@
 import { Bm25Index } from "./bm25";
 import { sha1Text } from "./hash";
 import type { ExcerptSource } from "./mentionExcerpts";
-import { splitPassages } from "./retrievalCorpus";
+// **葉の部品から取る**（`retrievalCorpus` は台帳を読むために
+// VS Code APIを引き込む。ここは純粋関数だけで居たい）
+import { splitPassages } from "./passages";
 
 /**
  * 矛盾検知へ渡す「過去の関連場面」を選ぶ（設計書6.74）。
@@ -120,6 +122,38 @@ export function buildPastScenes(
     }
   }
   return scenes;
+}
+
+/**
+ * その作品で、過去の場面が1件でも渡りうるか（0.32.6のレビュー）。
+ *
+ * **渡りようがないのに「渡します」と告げない。** 合本（1ファイルに全話）の
+ * 作品では、チャンクの話数がファイル単位に決まるため、全チャンクが
+ * 「その合本の中の最小話数」を名乗る。`select` は自分より前の話しか
+ * 渡さないので、抜粋は必ず0件になる——それでも確認ダイアログは
+ * 「前の話の本文からも探して渡します」と言い、索引まで組んでいた。
+ *
+ * 見るのは**いちばん後ろのチャンクと、いちばん前の場面**だけでよい。
+ * その2つで届かないなら、どの組み合わせでも届かない。
+ *
+ * 合本をチャンクの段階で話ごとに割る根治は、ここではしない
+ * （チャンクの切れ目が変わり、処理済みのキャッシュが全部飛ぶ）。
+ */
+export function anyPastSceneReachable(
+  scenes: readonly PastScene[],
+  chunkChapters: readonly (number | null)[]
+): boolean {
+  let latestChunk: number | undefined;
+  for (const chapter of chunkChapters) {
+    if (typeof chapter !== "number" || !Number.isFinite(chapter)) continue;
+    if (latestChunk === undefined || chapter > latestChunk) {
+      latestChunk = chapter;
+    }
+  }
+  // 話数の分かるチャンクが1つも無ければ、`select` は必ず空を返す
+  if (latestChunk === undefined) return false;
+  const limit = latestChunk;
+  return scenes.some((scene) => scene.chapter < limit);
 }
 
 export interface PastSceneSelection {

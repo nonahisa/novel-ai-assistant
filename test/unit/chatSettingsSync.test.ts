@@ -51,13 +51,30 @@ vi.mock("../../src/core/chatLog", () => ({
   },
 }));
 
+/**
+ * 送る直前に割り込む口。
+ *
+ * 費用の確認は作者がダイアログを読むぶんだけ待つので、**その間に会話が
+ * 伸びる**ことが実際にありうる（A-4の再現に使う）。
+ */
+const hooks = vi.hoisted(() => ({ beforeSend: () => undefined as void }));
+
 vi.mock("../../src/features/aiConnectivity", () => ({
   confirmProviderReachable: async () => true,
-  confirmPaidUsage: async () => true,
+  confirmPaidUsage: async () => {
+    hooks.beforeSend();
+    return true;
+  },
 }));
 
+/** 失敗の記録は覗ける形にする（読めなかった応答が残っているかを見る） */
+const failures = vi.hoisted(
+  () => [] as Array<{ context: string; detail: Record<string, unknown> }>
+);
 vi.mock("../../src/core/logger", () => ({
-  logFailure: vi.fn(),
+  logFailure: (context: string, detail: Record<string, unknown>) => {
+    failures.push({ context, detail });
+  },
   logStep: vi.fn(),
 }));
 
@@ -88,6 +105,9 @@ const {
   trimChatHistory,
   verifyChatDecisions,
 } = await import("../../src/core/chatSettingsSync");
+const { parseChatSettingsSync } = await import(
+  "../../src/prompts/chatSettingsSync"
+);
 const { applyChatToSettings } = await import(
   "../../src/features/chatSettingsSync"
 );
@@ -169,8 +189,6 @@ describe("会話をAIへ渡す形にする", () => {
 });
 
 describe("P-32の答えを検証する", () => {
-  const conversation = formatChatConversation(CONVERSATION);
-
   test("会話にある引用なら通す", () => {
     const result = verifyChatDecisions(
       [
@@ -180,7 +198,7 @@ describe("P-32の答えを検証する", () => {
           evidence: "灯の年齢は17歳にします",
         },
       ],
-      conversation
+      CONVERSATION
     );
 
     expect(result.rejected).toEqual([]);
@@ -198,7 +216,7 @@ describe("P-32の答えを検証する", () => {
           evidence: "澪は剣術の達人にしましょう",
         },
       ],
-      conversation
+      CONVERSATION
     );
 
     expect(result.entries).toEqual([]);
@@ -214,11 +232,112 @@ describe("P-32の答えを検証する", () => {
           evidence: "灯の年齢は17歳にします",
         },
       ],
-      conversation
+      CONVERSATION
     );
 
     expect(result.entries).toEqual([]);
     expect(result.rejected).toEqual([{ name: "灯", reason: "placeholder" }]);
+  });
+
+  /**
+   * **「作者が決めた」の根拠は、作者の発言でなければならない**
+   * （0.32.6のレビュー）。
+   *
+   * 照合の母材が会話全体だったので、AIが自分の提案文を引用すれば逐語一致で
+   * 通った。それは「AIがそう言った」ことの証拠でしかなく、作者が受け入れた
+   * かどうかは何も言っていない。**AIの案が、作者の決定として資料に入る。**
+   */
+  test("AIの発言にしか無い引用は、作者が決めた証拠にならない", () => {
+    const result = verifyChatDecisions(
+      [
+        {
+          name: "灯",
+          decided: "年齢は16歳",
+          // 会話には確かにある。ただしAI側の提案文である
+          evidence: "16歳か17歳が収まりがよさそうです",
+        },
+      ],
+      CONVERSATION
+    );
+
+    expect(result.entries).toEqual([]);
+    expect(result.rejected).toEqual([{ name: "灯", reason: "ungrounded" }]);
+  });
+
+  test("作者の発言を含む引用なら、AIの発言が混ざっていても通す", () => {
+    const result = verifyChatDecisions(
+      [
+        {
+          name: "灯",
+          decided: "年齢は17歳。",
+          evidence: "16歳か17歳が収まりがよさそうです。灯の年齢は17歳にします",
+        },
+      ],
+      CONVERSATION
+    );
+
+    expect(result.rejected).toEqual([]);
+    expect(result.entries).toEqual([{ name: "灯", summary: "年齢は17歳。" }]);
+  });
+
+  test("作者が一度も喋っていない会話からは、何も拾わない", () => {
+    const result = verifyChatDecisions(
+      [
+        {
+          name: "灯",
+          decided: "年齢は16歳",
+          evidence: "16歳が収まりがよさそうです",
+        },
+      ],
+      [turn("assistant", "16歳が収まりがよさそうです。")]
+    );
+
+    expect(result.entries).toEqual([]);
+  });
+});
+
+/**
+ * AIの答えが読めなかった回（0.32.6のレビュー）。
+ *
+ * 壊れたJSONは黙って空配列になっていたので、「読めなかった」と
+ * 「読めたが決定は0件だった」の区別が付かなかった。**前者でダイジェストを
+ * 書くと、以後その会話は「反映済み」になり、二度と試せなくなる。**
+ */
+describe("応答が読めたかどうかを返す", () => {
+  test("決定が0件でも、読めていれば読めたと言う", () => {
+    expect(parseChatSettingsSync('{"decisions": []}')).toEqual({
+      decisions: [],
+      malformed: false,
+    });
+  });
+
+  test("JSONが見つからなければ、読めなかったと言う", () => {
+    expect(parseChatSettingsSync("すみません、判断できませんでした。")).toEqual(
+      { decisions: [], malformed: true }
+    );
+  });
+
+  test("途中で切れたJSONも、読めなかったと言う", () => {
+    const cut = '{"decisions": [{"name": "灯", "decided": "年齢は17歳"';
+    expect(parseChatSettingsSync(cut).malformed).toBe(true);
+  });
+
+  test("decisions が配列でなければ、読めなかったと言う", () => {
+    expect(parseChatSettingsSync('{"decisions": "なし"}').malformed).toBe(true);
+  });
+
+  test("読めた分は、これまでどおり取り出す", () => {
+    const text = JSON.stringify({
+      decisions: [
+        { name: "灯", decided: "年齢は17歳", evidence: "17歳にします" },
+      ],
+    });
+    expect(parseChatSettingsSync(text)).toEqual({
+      malformed: false,
+      decisions: [
+        { name: "灯", decided: "年齢は17歳", evidence: "17歳にします" },
+      ],
+    });
   });
 });
 
@@ -267,6 +386,8 @@ describe("相談を資料へ反映する", () => {
   beforeEach(() => {
     disk.clear();
     announced = [];
+    failures.length = 0;
+    hooks.beforeSend = () => undefined;
     state.logged = [];
     state.stage.mockClear();
     state.loadErrors = [];
@@ -490,6 +611,93 @@ describe("相談を資料へ反映する", () => {
     // 覚え書きも残さない（直したあとにやり直せるようにする）
     expect(disk.has(statePath)).toBe(false);
     expect(ai.generate).not.toHaveBeenCalled();
+  });
+
+  /**
+   * 読めなかった回（0.32.6のレビュー）。
+   *
+   * **ダイジェストを書かない。** 書くと以後その会話は「反映済み」になり、
+   * 作者はもう一度試すことができない（同じ会話は二度と送れない）。
+   */
+  test("答えが読めなかったら、覚え書きを残さずに、もう一度試せる", async () => {
+    const broken = testAi("すみません、判断できませんでした。");
+
+    const result = await run(broken);
+
+    expect(result.failed).toBe(true);
+    expect(state.stage).not.toHaveBeenCalled();
+    // 覚え書きが無いので、次に押せば同じ会話をもう一度送れる
+    expect(disk.has(statePath)).toBe(false);
+    expect(announced.join("")).toContain("読み取れませんでした");
+
+    const retry = testAi(
+      answer([
+        {
+          name: "灯",
+          decided: "年齢は17歳。",
+          evidence: "灯の年齢は17歳にします",
+        },
+      ])
+    );
+    const second = await run(retry);
+
+    expect(retry.generate).toHaveBeenCalledTimes(1);
+    expect(second.staged).toBe(1);
+  });
+
+  test("読めなかった応答の中身を、記録に残す", async () => {
+    // **捨てると、なぜ読めなかったのかを誰も追えない**（実装ルール5）
+    await run(testAi("```\nおかしな答え\n```"));
+
+    const logged = failures.find((entry) => entry.context.includes("相談"));
+    expect(logged, "読めなかった応答が記録に残っていない").toBeTruthy();
+    expect(String(logged!.detail["応答"])).toContain("おかしな答え");
+  });
+
+  test("読めて0件だったときは、これまでどおり覚え書きを残す", async () => {
+    const result = await run(testAi(answer([])));
+
+    expect(result.failed).toBe(false);
+    expect(disk.has(statePath)).toBe(true);
+    expect(announced.join("")).toContain("見つかりませんでした");
+  });
+
+  /**
+   * 反映の途中で会話が伸びる（0.32.6のレビュー）。
+   *
+   * 費用の確認は作者がダイアログを読むぶんだけ待つ。その間に相談を続けると、
+   * **覚え書き（ダイジェスト）は押した時点の会話、送る中身は伸びたあとの
+   * 会話**になり、次に押したときに「反映済み」と言われて新しい発言が
+   * 永久に反映されなくなる。押した時点の写しだけで進める。
+   */
+  test("押した時点の会話だけを送る（途中で伸びても混ぜない）", async () => {
+    const turns = [...CONVERSATION];
+    hooks.beforeSend = () => {
+      turns.push(turn("author", "澪は剣術の達人ということにします"));
+    };
+    const ai = testAi(answer([]));
+
+    await run(ai, turns);
+
+    const sent = ai.generate.mock.calls[0][0] as { userPrompt: string };
+    expect(sent.userPrompt).toContain("灯の年齢は17歳にします");
+    expect(sent.userPrompt).not.toContain("澪は剣術の達人ということにします");
+  });
+
+  test("伸びたあとの会話は、次に押せばちゃんと送れる", async () => {
+    const turns = [...CONVERSATION];
+    hooks.beforeSend = () => {
+      turns.push(turn("author", "澪は剣術の達人ということにします"));
+    };
+    await run(testAi(answer([])), turns);
+
+    hooks.beforeSend = () => undefined;
+    const again = testAi(answer([]));
+    const result = await run(again, turns);
+
+    // 覚え書きは「押した時点の会話」のものなので、伸びた会話は別物になる
+    expect(result.unchanged).toBe(false);
+    expect(again.generate).toHaveBeenCalledTimes(1);
   });
 
   test("何をしたかを相談ログへ1件残す", async () => {

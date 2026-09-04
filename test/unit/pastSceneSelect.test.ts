@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  anyPastSceneReachable,
   buildPastScenes,
   pastSceneMaxChars,
   promptVersionWithPastScenes,
@@ -255,5 +256,45 @@ describe("上限の決め方", () => {
   test("コンテキスト長が分からなければ、固定の頭打ちを使う", () => {
     expect(pastSceneMaxChars(undefined)).toBe(PAST_SCENE_MAX_CHARS);
     expect(pastSceneMaxChars(0)).toBe(PAST_SCENE_MAX_CHARS);
+  });
+});
+
+/**
+ * 1件でも渡りうるか（0.32.6のレビューで見つかった）。
+ *
+ * **合本（1ファイルに全話）の作品では、抜粋は必ず0件になる。** チャンクの
+ * 話数はファイル単位に決まるので、全チャンクが「その合本の最小話数」を
+ * 名乗り、`scene.chapter < chunk.chapterStart` を満たす場面が存在しない。
+ * それでも確認ダイアログは「前の話の本文からも…渡します」と告げていた。
+ *
+ * **告げるのも、索引を組むのも、実際に渡りうるときだけにする。**
+ */
+describe("渡りうるかを先に見る", () => {
+  const built = buildPastScenes([
+    source("第1話", 1, "本文です。"),
+    source("第2話", 2, "本文です。"),
+    source("第3話", 3, "本文です。"),
+  ]);
+
+  test("話ごとにファイルが分かれていれば、渡りうる", () => {
+    expect(anyPastSceneReachable(built, [1, 2, 3])).toBe(true);
+  });
+
+  test("合本1ファイルなら、どのチャンクにも渡らない", () => {
+    // 全チャンクが同じ話数（＝合本の中の最小話数）を名乗る
+    expect(anyPastSceneReachable(built, [1, 1, 1])).toBe(false);
+  });
+
+  test("話数の分からないチャンクだけなら、渡らない", () => {
+    expect(anyPastSceneReachable(built, [null, null])).toBe(false);
+  });
+
+  test("場面が1つも無ければ、渡らない", () => {
+    expect(anyPastSceneReachable([], [1, 2, 3])).toBe(false);
+  });
+
+  test("後ろの話のチャンクが1つでもあれば、渡りうる", () => {
+    // 話数の読めないチャンクが混ざっていても、判断は変わらない
+    expect(anyPastSceneReachable(built, [null, 1, 5])).toBe(true);
   });
 });

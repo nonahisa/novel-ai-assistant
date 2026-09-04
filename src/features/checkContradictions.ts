@@ -61,6 +61,7 @@ import {
 } from "../core/settingsSummary";
 import { selectWorldview, worldviewMaxChars } from "../core/worldviewSelect";
 import {
+  anyPastSceneReachable,
   buildPastScenes,
   pastSceneMaxChars,
   promptVersionWithPastScenes,
@@ -306,7 +307,13 @@ export async function checkContradictions(
   // 逃げ道（`chunkRetry.ts`）が受ける——ここで見込みを足すと、抜粋が0件の
   // 作品まで本文の割当が痩せ、チャンクの切れ目が変わってキャッシュが飛ぶ
   const pastSceneBudget = pastSceneMaxChars(info.contextWindow);
-  const pastSceneIndex = await collectPastScenes(work);
+  // **渡りうるときだけ組む**（0.32.6のレビュー）。合本（1ファイルに全話）の
+  // 作品では、全チャンクが合本の最小話数を名乗るので抜粋は必ず0件になる。
+  // それでも索引を組み、確認ダイアログでは「渡します」と告げていた
+  const pastSceneIndex = await collectPastScenes(
+    work,
+    chunks.map((chunk) => chunk.chapterStart)
+  );
   /** チャンクごとの抜粋。鍵を決めるときと送るときで、同じものを使う */
   const pastSceneByChunk = new Map<string, string>();
 
@@ -870,7 +877,12 @@ interface SettingsMaterial {
     hasAnything: boolean;
   };
   /**
-   * その本文に出てくる人物・場所の呼び名（設計書6.74）。
+   * その本文に出てくる、索引にある語（設計書6.74）。
+   *
+   * **種別で絞らない。** いま索引に載っているのは人物と場所だが、能力名・
+   * 組織名も過去の場面を引く語としては同じように役に立つ（本体の裁定、
+   * 0.32.6）。索引へ足せばそのまま検索語になるよう、ここでは
+   * `TermKind` を見ずに全部返す。
    *
    * **本文に現れた表記そのもの**を返す（正式名称ではない）。過去の場面は
    * 語句一致で引くので、本文が「灯くん」としか書いていないのに正式名称の
@@ -1103,14 +1115,22 @@ async function collectSettings(
  * **読めなくても検知は続ける。** 過去の場面は補助の材料であり、
  * 無ければ従来どおりの入力に戻るだけである。ここで止めると、
  * 本文が1つ壊れているだけで矛盾検知そのものが使えなくなる。
+ *
+ * **1件も渡りようがない作品では、索引を組まない**（0.32.6のレビュー）。
+ * 合本（1ファイルに全話）はチャンクの話数がファイル単位に決まるため、
+ * どのチャンクにも「自分より前の話の場面」が存在しない。索引作り
+ * （BM25）はそこそこ重く、確認ダイアログの一文も嘘になる。
  */
 async function collectPastScenes(
-  work: WorkEntry
+  work: WorkEntry,
+  /** チャンクの話数。**渡りうるかの判断に要る**（`anyPastSceneReachable`） */
+  chunkChapters: readonly (number | null)[]
 ): Promise<PastSceneIndex | undefined> {
   try {
     const loaded = await loadExcerptSources(work);
     const scenes = buildPastScenes(loaded.sources);
     if (scenes.length === 0) return undefined;
+    if (!anyPastSceneReachable(scenes, chunkChapters)) return undefined;
     return new PastSceneIndex(scenes);
   } catch (error) {
     logFailure("矛盾検知：過去の場面の読み込み", {

@@ -1,4 +1,23 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+/**
+ * 記録は覗ける形にする。
+ *
+ * 独り言は**黙るのが既定**なので、見送った一言がどこにも残らないと
+ * 「なぜ何も言わないのか」を後から確かめようがない（設計書6.21.4）。
+ */
+const failures = vi.hoisted(
+  () => [] as Array<{ context: string; detail: Record<string, unknown> }>
+);
+vi.mock("../../src/core/logger", () => ({
+  logFailure: (context: string, detail: Record<string, unknown>) => {
+    failures.push({ context, detail });
+  },
+  logStep: () => undefined,
+  logLine: () => undefined,
+  useLogFile: () => undefined,
+}));
+
 import {
   ChatterService,
   QUIET_GAP_MS,
@@ -55,7 +74,10 @@ function idle(service: ChatterService): void {
     Date.now() - IDLE_THRESHOLD_MS - 1;
 }
 
-beforeEach(() => resetAiActivity());
+beforeEach(() => {
+  resetAiActivity();
+  failures.length = 0;
+});
 afterEach(() => {
   workspace.getConfiguration = originalGetConfiguration;
 });
@@ -447,6 +469,53 @@ describe("本文の感想", () => {
     await tickUntilComment(service);
 
     expect(d.posted.map((c) => c.kind)).not.toContain("manuscriptComment");
+  });
+
+  /**
+   * **黙る（ログのみ）の「ログ」を実装する**（設計書6.21.4、0.32.6のレビュー）。
+   *
+   * 検査で落ちた一言はどこにも残っていなかったので、「AIが黙っている」のか
+   * 「言おうとしたが検査で落ちた」のかを、作者も開発側も区別できなかった。
+   * **画面には出さない**（頼まれていない発言の失敗を知らせるのが、
+   * 独り言のいちばん邪魔な出方である）が、記録には必ず残す。
+   */
+  test("検査で落とした一言は、画面に出さずに記録へ残す", async () => {
+    const d = quiet({ requestComment: async () => "あ".repeat(61) });
+    const service = new ChatterService(d);
+
+    await tickUntilComment(service);
+
+    const logged = failures.find((entry) =>
+      entry.context.includes("独り言の感想")
+    );
+    expect(logged, "見送った一言が記録に残っていない").toBeTruthy();
+    // **答えの中身を残す。** 何を言おうとして落ちたのかが分からないと、
+    // 検査が厳しすぎるのかAIの答えが悪いのかを切り分けられない
+    expect(String(logged!.detail["答え"])).toContain("あ");
+    expect(logged!.detail["作品"]).toBe("作品");
+  });
+
+  test("言えた回は、見送りとして記録しない", async () => {
+    const d = quiet({ requestComment: async () => "静かな幕切れですね。" });
+    const service = new ChatterService(d);
+
+    await tickUntilComment(service);
+
+    expect(failures.filter((e) => e.context.includes("独り言の感想"))).toEqual(
+      []
+    );
+  });
+
+  /** 取りに行けなかった回（undefined）は、答えが無いので記録しない */
+  test("そもそも答えが返らなかった回は、見送りとして記録しない", async () => {
+    const d = quiet({ requestComment: async () => undefined });
+    const service = new ChatterService(d);
+
+    await tickUntilComment(service);
+
+    expect(failures.filter((e) => e.context.includes("独り言の感想"))).toEqual(
+      []
+    );
   });
 
   test("同じ話へ2度取りに行かない", async () => {
