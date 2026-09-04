@@ -25,6 +25,12 @@ import {
   requireNonEmptyString,
 } from "./jsonValidation";
 
+/*
+  この台帳は**サイトごとの作品情報とランキングも持つ**（設計書6.68.5）。
+  どちらも**作者が手で入れた値だけ**である——サイトを読みにいく処理は
+  1行も無い（6.68.1と同じ線）。
+*/
+
 /** 保存先のファイル名。`設定/` の直下に置く（Gitで同期する） */
 export const POSTING_FILE = "投稿状態.json";
 
@@ -124,10 +130,53 @@ export function postingSiteLabels(ids: readonly PostingSiteId[]): string {
     .join("・");
 }
 
+/**
+ * そのサイトでの、この作品の情報（設計書6.68.5）。
+ *
+ * **すべて任意で、すべて作者の手入力である。** サイトから取ってこない
+ * ので、空のまま使い続けられることが仕様の一部になる（訊かれて答えられ
+ * ない項目を必須にしない）。
+ */
+export interface PostingSiteProfile {
+  /** サイト内の作品ID（なろうのNコードなど） */
+  workId?: string;
+  /** 作品ページのURL。**そのサイトのドメインだけ**受ける */
+  workUrl?: string;
+  /** サイトのジャンル。呼び方はサイトごとに違うので自由入力 */
+  genre?: string;
+  /** 作者のメモ。こちらからは書き換えない */
+  note?: string;
+}
+
 export interface PostingSiteEntry {
   site: PostingSiteId;
   /** 作者が貼った新規エピソード投稿ページのURL（作品IDを含む） */
   newEpisodeUrl: string;
+  /**
+   * サイトごとの作品情報（6.68.5）。**空なら項目ごと持たない。**
+   *
+   * 空の入れ物を持たせると、読んで書き戻すだけで台帳の中身が増える
+   * （`importedBaseline` を `false` で書き足さないのと同じ理由）。
+   */
+  profile?: PostingSiteProfile;
+}
+
+/**
+ * 作者が画面で見た順位の記録（設計書6.68.5）。
+ *
+ * **サイトから取りに行かない。** ランキングのページを機械で読むのは
+ * 6.68.1で断った線の内側にある。ここに入るのは、作者が見て打った値だけ。
+ */
+export interface PostingRankingRecord {
+  site: PostingSiteId;
+  /** 記録した日時（ISO8601）。順位が出た日時ではなく、書き留めた日時 */
+  recordedAt: string;
+  /** 種別。日間・週間・月間・ジャンル名など、**サイトの呼び方のまま** */
+  board: string;
+  /** 順位。1以上の整数 */
+  rank: number;
+  /** 作者のメモ（任意） */
+  note?: string;
 }
 
 export interface PostingRecord {
@@ -154,10 +203,21 @@ export interface PostingLedger {
   /** この作品を出すサイトと、その投稿ページ。空なら投稿キットは未設定 */
   sites: PostingSiteEntry[];
   posts: PostingRecord[];
+  /**
+   * 順位の記録（6.68.5）。**追記だけ**で、古い記録は書き換えない。
+   *
+   * この欄が無い台帳（この機能より前のもの）は空として読む。
+   */
+  rankings: PostingRankingRecord[];
 }
 
 export function emptyPostingLedger(): PostingLedger {
-  return { schemaVersion: POSTING_SCHEMA_VERSION, sites: [], posts: [] };
+  return {
+    schemaVersion: POSTING_SCHEMA_VERSION,
+    sites: [],
+    posts: [],
+    rankings: [],
+  };
 }
 
 /**
@@ -174,10 +234,29 @@ export function validateNewEpisodeUrl(
   site: PostingSiteId,
   value: string
 ): string | null {
-  const info = postingSiteInfo(site);
   const trimmed = value.trim();
   if (!trimmed) return "投稿ページのURLを入力してください。";
+  return validateSiteUrl(site, trimmed);
+}
 
+/**
+ * 作品ページのURLとして受けられるか（設計書6.68.5）。
+ *
+ * **空でもよい。** 投稿ページのURLと違い、これは無くても機能が成り立つ
+ * 任意の情報である（無ければリンクを出さないだけ）。入っているときは、
+ * 投稿ページと同じくドメインだけを確かめる。
+ */
+export function validateWorkPageUrl(
+  site: PostingSiteId,
+  value: string
+): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return validateSiteUrl(site, trimmed);
+}
+
+function validateSiteUrl(site: PostingSiteId, trimmed: string): string | null {
+  const info = postingSiteInfo(site);
   let url: URL;
   try {
     url = new URL(trimmed);
@@ -215,7 +294,8 @@ export function parsePostingLedger(raw: unknown): PostingLedger {
       if (validateNewEpisodeUrl(site, url)) {
         invalid(`${entryPath}.newEpisodeUrl`);
       }
-      return { site, newEpisodeUrl: url };
+      const profile = parseSiteProfile(entry.profile, site, `${entryPath}.profile`);
+      return { site, newEpisodeUrl: url, ...(profile ? { profile } : {}) };
     }) ?? [];
 
   assertUniqueSites(sites);
@@ -236,12 +316,81 @@ export function parsePostingLedger(raw: unknown): PostingLedger {
       };
     }) ?? [];
 
+  const rankings =
+    optionalObjectArray(value.rankings, "rankings", (entry, entryPath) => {
+      const site = requireSiteId(entry.site, `${entryPath}.site`);
+      requireNonEmptyString(entry.recordedAt, `${entryPath}.recordedAt`);
+      requireNonEmptyString(entry.board, `${entryPath}.board`);
+      // **順位は直さずに止める。** 0位や1.5位は打ち間違いだが、
+      // どう直すのが正しいかはこちらには分からない
+      if (!isRank(entry.rank)) invalid(`${entryPath}.rank`);
+      optionalString(entry.note, `${entryPath}.note`);
+      const note = ((entry.note as string | undefined) ?? "").trim();
+      return {
+        site,
+        recordedAt: (entry.recordedAt as string).trim(),
+        board: (entry.board as string).trim(),
+        rank: entry.rank as number,
+        ...(note ? { note } : {}),
+      };
+    }) ?? [];
+
   return {
     schemaVersion:
       (value.schemaVersion as string | undefined) ?? POSTING_SCHEMA_VERSION,
     sites,
     posts,
+    rankings,
   };
+}
+
+/**
+ * サイトごとの作品情報を読む（6.68.5）。
+ *
+ * **空の入れ物は作らない。** 全部の欄が空なら `undefined` を返し、
+ * 台帳には項目ごと書かない（読んで書き戻すだけで中身が増えないように）。
+ */
+function parseSiteProfile(
+  raw: unknown,
+  site: PostingSiteId,
+  path: string
+): PostingSiteProfile | undefined {
+  if (raw === undefined) return undefined;
+  const value = objectValue(raw, path);
+  for (const key of ["workId", "workUrl", "genre", "note"] as const) {
+    optionalString(value[key], `${path}.${key}`);
+  }
+  const workUrl = ((value.workUrl as string | undefined) ?? "").trim();
+  // **別のサイトのURLは直さずに止める**（投稿ページのURLと同じ扱い）
+  if (workUrl && validateWorkPageUrl(site, workUrl)) invalid(`${path}.workUrl`);
+  return normalizeSiteProfile({
+    workId: value.workId as string | undefined,
+    workUrl,
+    genre: value.genre as string | undefined,
+    note: value.note as string | undefined,
+  });
+}
+
+/**
+ * 作品情報を整える。前後の空白を落とし、**空の欄は持たない。**
+ *
+ * すべて空なら `undefined`（＝作品情報を入れていない）。
+ */
+export function normalizeSiteProfile(
+  profile: PostingSiteProfile | undefined
+): PostingSiteProfile | undefined {
+  if (!profile) return undefined;
+  const next: PostingSiteProfile = {};
+  for (const key of ["workId", "workUrl", "genre", "note"] as const) {
+    const value = (profile[key] ?? "").trim();
+    if (value) next[key] = value;
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+/** 順位として受けられる値か。**1以上の整数だけ**（0位も-1位も無い） */
+function isRank(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 1;
 }
 
 function requireSiteId(value: unknown, path: string): PostingSiteId {
@@ -274,7 +423,17 @@ export function withSites(
   ledger: PostingLedger,
   sites: readonly PostingSiteEntry[]
 ): PostingLedger {
-  const next = sites.map((entry) => ({ ...entry }));
+  const next = sites.map((entry) => {
+    // **作品情報も写しで持つ。** 浅い写しのままだと、新しい台帳から
+    // 作品IDを書き換えたときに元の台帳の中身まで変わる
+    const profile = normalizeSiteProfile(entry.profile);
+    const copy: PostingSiteEntry = {
+      site: entry.site,
+      newEpisodeUrl: entry.newEpisodeUrl,
+    };
+    if (profile) copy.profile = profile;
+    return copy;
+  });
   assertUniqueSites(next);
   return { ...ledger, sites: next };
 }
@@ -384,4 +543,124 @@ export function firstUnpostedEpisodePath(
 ): string | undefined {
   if (ledger.sites.length === 0) return undefined;
   return episodePaths.find((episodePath) => unpostedSites(ledger, episodePath).length > 0);
+}
+
+/**
+ * 順位を書き足す（設計書6.68.5）。**元の台帳は書き換えない。**
+ *
+ * **追記だけで、既にある記録には触らない。** 順位は「そのとき何位だったか」
+ * の記録なので、同じ種別の記録が2つあっても畳んではいけない
+ * （投稿の記録が1件に保たれるのとは、ここが違う）。
+ */
+export function withRanking(
+  ledger: PostingLedger,
+  record: PostingRankingRecord
+): PostingLedger {
+  if (!isRank(record.rank)) invalid("rank");
+  const board = record.board.trim();
+  if (!board) invalid("board");
+  const note = (record.note ?? "").trim();
+  return {
+    ...ledger,
+    rankings: [
+      ...ledger.rankings,
+      {
+        site: record.site,
+        recordedAt: record.recordedAt,
+        board,
+        rank: record.rank,
+        // **空のメモは持たせない**（台帳が中身の無い欄で膨らまないように）
+        ...(note ? { note } : {}),
+      },
+    ],
+  };
+}
+
+/** そのサイトの記録を、新しい順で返す（画面はこの順に並べる） */
+export function rankingsForSite(
+  ledger: PostingLedger,
+  site: PostingSiteId
+): PostingRankingRecord[] {
+  return ledger.rankings
+    .filter((entry) => entry.site === site)
+    .sort((left, right) => compareRecordedAtDesc(left, right));
+}
+
+/** そのサイトの最新の順位。1件も無ければ undefined */
+export function latestRanking(
+  ledger: PostingLedger,
+  site: PostingSiteId
+): PostingRankingRecord | undefined {
+  return rankingsForSite(ledger, site)[0];
+}
+
+/**
+ * 種別の候補（設計書6.68.5）。
+ *
+ * **こちらで一覧を決め打ちしない。** 「日間」「週間」の呼び方はサイトごとに
+ * 違い、企画やジャンル別の名前は作品ごとに違う。作者が過去に使った言葉を
+ * そのまま候補にする——そのサイトで使ったものを先に、次にほかのサイトのもの。
+ */
+export function rankingBoards(
+  ledger: PostingLedger,
+  site: PostingSiteId
+): string[] {
+  const newestFirst = [...ledger.rankings].sort(compareRecordedAtDesc);
+  const boards: string[] = [];
+  for (const entry of newestFirst) {
+    if (entry.site === site && !boards.includes(entry.board)) {
+      boards.push(entry.board);
+    }
+  }
+  for (const entry of newestFirst) {
+    if (!boards.includes(entry.board)) boards.push(entry.board);
+  }
+  return boards;
+}
+
+/**
+ * 新しい順に並べるための比較。
+ *
+ * ふつうはISO8601なので文字列のままでも並ぶが、作者が手で直した台帳には
+ * 別の書き方が入りうる。日時として読めるならその値で、読めなければ
+ * 文字列で比べる（並ばないより、崩れずに並ぶほうがよい）。
+ */
+function compareRecordedAtDesc(
+  left: PostingRankingRecord,
+  right: PostingRankingRecord
+): number {
+  const leftTime = Date.parse(left.recordedAt);
+  const rightTime = Date.parse(right.recordedAt);
+  if (!Number.isNaN(leftTime) && !Number.isNaN(rightTime)) {
+    return rightTime - leftTime;
+  }
+  return right.recordedAt.localeCompare(left.recordedAt);
+}
+
+/**
+ * 作者が打った順位を数として読む（設計書6.68.5）。
+ *
+ * **全角の数字も読む。** 日本語入力のまま打てば「１２」になるのが自然で、
+ * それを断るのは作者に変換の仕方を疑わせるだけである。
+ *
+ * @returns 1以上の整数。読めなければ null
+ */
+export function parseRankInput(value: string): number | null {
+  const normalized = value
+    .trim()
+    // 全角数字を半角へ（U+FF10〜U+FF19）
+    .replace(/[０-９]/g, (char) =>
+      String.fromCharCode(char.charCodeAt(0) - 0xfee0)
+    );
+  if (!/^\d+$/.test(normalized)) return null;
+  const rank = Number(normalized);
+  return isRank(rank) ? rank : null;
+}
+
+/** 順位の入力を断るときの言い方。問題なければ null */
+export function validateRankInput(value: string): string | null {
+  if (!value.trim()) return "順位を数字で入力してください。";
+  return parseRankInput(value) === null
+    ? "順位は1以上の整数で入力してください（1位なら 1）。"
+    : null;
 }

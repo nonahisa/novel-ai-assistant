@@ -2,6 +2,7 @@ import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
 import { unzipSync } from "fflate";
 import { exportEpub } from "../../src/features/exportEpub";
+import { emptyCharacter } from "../../src/models/character";
 import type { WorkEntry } from "../../src/models/types";
 import {
   FileSystemError,
@@ -354,5 +355,91 @@ describe("口絵・あとがきの面（設計書6.65.15）", () => {
     expect(names).toContain("OEBPS/plate-page-1.xhtml");
     expect(names).toContain("OEBPS/plate-1.png");
     expect(textOf("info")).not.toContain("読めませんでした");
+  });
+});
+
+/**
+ * 保留の面（設計書6.65.15の段D。作者の依頼、2026-09-04）。
+ *
+ * **設計図には残るが、本には1面も入らない。** 比較のために置いてある案を、
+ * 書き出しが拾ってしまっては保留の意味が無い。
+ */
+describe("保留の面は本に入らない（設計書6.65.15の段D）", () => {
+  beforeEach(() => {
+    put("本文/第1話.txt", "あ\n\nい");
+  });
+
+  /** 書き出された本を開き直す（ZIPの中の名前だけを見る） */
+  function exported(): string[] {
+    const found = [...disk.entries()].find(([name]) => name.endsWith(".epub"));
+    if (!found) throw new Error("EPUBが書き出されていません");
+    return Object.keys(unzipSync(found[1]));
+  }
+
+  test("保留の口絵は、面も画像も本へ入らない", async () => {
+    putBytes("素材/口絵.png", [0x89, 0x50, 0x4e, 0x47]);
+    writeBook({
+      title: "氷の街",
+      blocks: [
+        { type: "cover" },
+        {
+          type: "frontIllustration",
+          imagePath: "素材/口絵.png",
+          suspended: true,
+        },
+        { type: "body" },
+      ],
+    });
+
+    await exportEpub(work);
+    const names = exported();
+
+    expect(textOf("info")).toContain("EPUBを書き出しました");
+    expect(names).not.toContain("OEBPS/plate-page-1.xhtml");
+    expect(names).not.toContain("OEBPS/plate-1.png");
+    // 保留は作者が自分で選んだこと。**読めなかったときのような苦情は出さない**
+    expect(textOf("info")).not.toContain("読めませんでした");
+  });
+
+  /**
+   * **表紙のブロックが有効に1つも無ければ、表紙の面は入らない**
+   * （並びが正、の原則どおり）。焼いた画像が設定フォルダに在っても同じである。
+   */
+  test("表紙が全部保留なら、表紙の面は入らない（焼いた画像があっても）", async () => {
+    putBytes("設定/書籍/表紙_合成済み.png", [0x89, 0x50, 0x4e, 0x47]);
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover", suspended: true }, { type: "body" }],
+    });
+
+    await exportEpub(work);
+    const names = exported();
+
+    expect(names).not.toContain("OEBPS/cover.xhtml");
+    // **本棚に出る絵（cover-image）は入れたまま**である。面とは別の役目で、
+    // 表紙の面を並びから外したときと同じ扱い（`core/epubPackage.ts`）
+    expect(names).toContain("OEBPS/cover.png");
+  });
+
+  test("保留の人物紹介は、面も目次の行も出ない", async () => {
+    writeBook({
+      title: "氷の街",
+      characterPage: { enabled: true, showIcons: false },
+      blocks: [
+        { type: "toc" },
+        { type: "characters", suspended: true },
+        { type: "body" },
+      ],
+    });
+    put(
+      "設定/characters/char_001.json",
+      JSON.stringify(emptyCharacter("char_001", "月島灯"))
+    );
+
+    await exportEpub(work);
+    const names = exported();
+
+    expect(names).not.toContain("OEBPS/characters.xhtml");
+    expect(names).toContain("OEBPS/nav.xhtml");
   });
 });

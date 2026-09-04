@@ -943,7 +943,24 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
             detail:
               "この作品を出すサイトの追加・投稿ページのURLの変更・外す、と" +
               "「どの話まで投稿済みか」の引き直しができます。" +
+              "サイトごとの作品ID・作品ページのURL・ジャンルも入れられます" +
+              "（どれも空のままで構いません）。" +
               "**サイトを外しても、これまでの投稿の記録は消えません。**",
+          },
+          // **設定の隣に置く**（設計書6.68.5）。作品情報を入れる画面と、
+          // そこで見た順位を書き足す操作は、同じ場面で使う
+          {
+            kind: "action",
+            command: "novelai.recordRanking",
+            label: "ランキングを記録する",
+            description: "AIを使わない",
+            icon: "graph",
+            requiresWork: true,
+            detail:
+              "投稿サイトで見た順位を書き留めます（サイト→種別→順位の3つを訊きます）。" +
+              "**サイトから自動で取ってくることはありません**" +
+              "——記録するのは、作者が画面で見た値だけです。" +
+              "履歴は執筆量パネルの「サイトの記録」で見られます。",
           },
           {
             kind: "action",
@@ -1006,6 +1023,9 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
             description: "AIを使わない",
             icon: "book",
             requiresWork: true,
+            // **エディター内の書き出しボタンに一本化**（作者の指定、
+            // 2026-09-04）。コマンド自体はエディターから使うので木には残す
+            hiddenFromActionList: true,
             detail:
               "本文をEPUB3の電子書籍に組んで `.aiwriter/exports/` へ書き出します" +
               "（Kindle・honto などのリーダーで開けます）。" +

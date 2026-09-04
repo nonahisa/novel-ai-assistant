@@ -201,6 +201,82 @@ describe("投稿状態の台帳の読み書き", () => {
     expect(reopened.posts[1].importedBaseline).toBeUndefined();
   });
 
+  /**
+   * サイトごとの作品情報とランキング（設計書6.68.5）。
+   *
+   * **保存で落とさない。** 書き戻すときに項目ごと消えると、作者が
+   * 手で入れた作品IDやジャンルが投稿1回ぶんの記録と引き換えに消える。
+   */
+  test("作品情報とランキングは、保存して読み直しても残る", async () => {
+    const store = new PostingStore(work);
+    const ledger = await store.load();
+    await store.save({
+      ...ledger,
+      sites: [
+        {
+          site: "kakuyomu",
+          newEpisodeUrl: kakuyomuUrl,
+          profile: {
+            workId: "1177354054892",
+            workUrl: "https://kakuyomu.jp/works/1177354054892",
+            genre: "異世界ファンタジー",
+          },
+        },
+      ],
+      rankings: [
+        {
+          site: "kakuyomu",
+          recordedAt: "2026-09-04T00:00:00.000Z",
+          board: "週間",
+          rank: 12,
+          note: "更新直後",
+        },
+      ],
+    });
+
+    const reopened = await new PostingStore(work).load();
+    expect(reopened.sites[0].profile?.genre).toBe("異世界ファンタジー");
+    expect(reopened.rankings).toEqual([
+      {
+        site: "kakuyomu",
+        recordedAt: "2026-09-04T00:00:00.000Z",
+        board: "週間",
+        rank: 12,
+        note: "更新直後",
+      },
+    ]);
+  });
+
+  /** この機能より前に作られた台帳（`rankings` も `profile` も無い）を読む */
+  test("欄の無い古い台帳を読んでも、投稿の記録は変わらない", async () => {
+    disk.set(
+      ledgerPath,
+      utf8(
+        JSON.stringify({
+          schemaVersion: "1",
+          sites: [{ site: "kakuyomu", newEpisodeUrl: kakuyomuUrl }],
+          posts: [
+            {
+              episodePath: "本文/001.txt",
+              site: "kakuyomu",
+              postedAt: "2026-09-01T00:00:00.000Z",
+            },
+          ],
+        })
+      )
+    );
+
+    const store = new PostingStore(work);
+    const ledger = await store.load();
+    expect(ledger.rankings).toEqual([]);
+    expect(ledger.sites[0].profile).toBeUndefined();
+
+    // 読んだものをそのまま書き戻せる（外部変更の照合にも引っかからない）
+    await store.save(ledger);
+    const reopened = await new PostingStore(work).load();
+    expect(reopened.posts[0].postedAt).toBe("2026-09-01T00:00:00.000Z");
+  });
+
   test("知らないサイトが書いてあれば、読めないと言って止める", async () => {
     disk.set(
       ledgerPath,

@@ -6,6 +6,7 @@ import {
   BOOK_BLOCK_LABELS,
   BOOK_DIR,
   BOOK_FILE,
+  activeBookBlocks,
   defaultBookConfig,
   parseBookConfig,
   resolveBookBlocks,
@@ -271,8 +272,9 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
   // 本は出し、何が入らなかったかを完了通知で伝える
   // **台帳を読むのは、人物紹介の面が並びにあるときだけ**（設計書6.65.15の
   // 段C）。元は `characterPage.enabled` を見ていたが、段Cで並びが正に
-  // なったので、置いてある面の中身だけを集める
-  const characters = resolveBookBlocks(config).some(
+  // なったので、置いてある面の中身だけを集める。**保留の面は数えない**
+  // （段D）——本に入らない面のために台帳を読んでも、本の中身は変わらない
+  const characters = activeBookBlocks(resolveBookBlocks(config)).some(
     (block) => block.type === "characters"
   )
     ? await collectCharacters(work, config.characterPage.showIcons, notices)
@@ -440,6 +442,11 @@ async function collectPlacements(input: {
  * 外したことは通知に積むが、**あとがきの原稿がまだ無いときだけは黙る**
  * ——既定の並びにはあとがきの面が入っているので、書かない作者にも
  * 毎回言うことになるからである。
+ *
+ * **保留の面は、ここへ来る前に落とす**（設計書6.65.15の段D）。中身を読みに
+ * 行かないので画像1枚ぶんの手間も省けるし、**外したことも言わない**
+ * ——作者が自分で保留にしたのだから、書き出すたびに知らせる用は無い
+ * （読めなかった面の通知と混ざると、直すべきものが埋もれる）。
  */
 async function collectBlocks(input: {
   work: WorkEntry;
@@ -450,7 +457,7 @@ async function collectBlocks(input: {
 }): Promise<EpubBlock[]> {
   const blocks: EpubBlock[] = [];
 
-  for (const block of resolveBookBlocks(input.config)) {
+  for (const block of activeBookBlocks(resolveBookBlocks(input.config))) {
     if (block.type === "frontIllustration" || block.type === "sectionArt") {
       const label = BOOK_BLOCK_LABELS[block.type];
       const data = await readWorkImage({

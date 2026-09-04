@@ -152,8 +152,12 @@ export class PostingStore {
     const body = JSON.stringify(
       {
         schemaVersion: ledger.schemaVersion || POSTING_SCHEMA_VERSION,
+        // サイトの欄には作品情報（6.68.5）が入っている。**項目を並べて
+        // 書き直さない**——並べると、欄が増えたときにここだけ古くなって
+        // 作者が入れた値が保存で落ちる
         sites: ledger.sites,
         posts: ledger.posts,
+        rankings: ledger.rankings ?? [],
       },
       null,
       2

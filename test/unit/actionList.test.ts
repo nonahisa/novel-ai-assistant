@@ -659,11 +659,25 @@ describe("投稿キットの入口", () => {
     );
   });
 
+  /**
+   * ランキングの記録（設計書6.68.5）。**設定の隣に置く。**
+   * サイトごとの作品情報を入れる画面（設定）と、そこで見た順位を書き足す
+   * 操作は、同じ「投稿サイトとのやり取り」の場面で使う。
+   */
+  test("「ランキングを記録する」が、投稿サイトの設定の隣に並ぶ", () => {
+    const commands = otherSupport().items.map((item) => item.command);
+
+    expect(commands.indexOf("novelai.recordRanking")).toBe(
+      commands.indexOf("novelai.configurePostingSites") + 1
+    );
+  });
+
   /** **AIは呼ばない。** 呼ぶのは最後の更新告知（別の操作）だけである */
   test("どちらにもAIの印を付けない", () => {
     for (const command of [
       "novelai.postNewEpisode",
       "novelai.configurePostingSites",
+      "novelai.recordRanking",
     ]) {
       const action = allActions().find((entry) => entry.command === command);
       expect(action?.usesAI, command).toBeFalsy();
@@ -779,6 +793,24 @@ describe("相談の項目は、木に残して画面から隠す", () => {
     expect(has(visibleEntries(group!.entries, true))).toBe(true);
     // 見出しごと畳まれてはいない（ほかの操作が残っている）
     expect(shownEntries(group!.entries, true).length).toBeGreaterThan(0);
+  });
+
+  /**
+   * 「EPUBへ書き出す」の入口を、エディターの中へ一本化した
+   * （作者の指定、2026-09-04）。書き出しボタンはEPUBエディターの中に
+   * 既にあり、外にも同じ入口があると「どちらから出すのが正しいのか」が
+   * 分からない。**コマンド自体は残す**（エディターから呼ぶため）。
+   */
+  test("EPUBの書き出しは、木に残したまま画面から隠す", () => {
+    const action = allActions().find(
+      (entry) => entry.command === "novelai.exportEpub"
+    );
+
+    expect(action, "木から消すとエディターの説明の出どころが無くなる").toBeTruthy();
+    expect(action?.hiddenFromActionList).toBe(true);
+    expect(isItemShownInActionList(action!, true)).toBe(false);
+    // 隠すのは画面だけ。動く環境かどうかの判定には混ぜない
+    expect(isItemVisibleInRuntime(action!, true)).toBe(true);
   });
 
   test("「相談する作品を選ぶ」はそのまま出す", () => {

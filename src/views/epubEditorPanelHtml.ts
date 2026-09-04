@@ -263,6 +263,17 @@ main { display: flex; align-items: flex-start; gap: 16px; padding: 16px; }
 }
 .rail-icon { font-size: 18px; line-height: 1.1; }
 .rail-label { font-size: 11px; }
+/*
+ * 保留の面（設計書6.65.15の段D）。**薄くするだけで、消さない。**
+ * 比較のために置いてあるものなので、並びの中の位置が見えていないと困る。
+ */
+.rail-row.suspended { opacity: 0.45; }
+.rail-badge {
+  font-size: 9px;
+  padding: 0 4px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-panel-border);
+}
 /* 落とし先の線。掴んだ行がどこへ入るのかを、離す前に見せる */
 .rail-row.drop-before { box-shadow: 0 -2px 0 0 var(--vscode-focusBorder) inset; }
 .rail-row.drop-after { box-shadow: 0 2px 0 0 var(--vscode-focusBorder) inset; }
@@ -787,12 +798,13 @@ function renderBlocks() {
     // **行はボタンにする。** ドラッグできる div にすると、キーボードだけで
     // 面を選ぶ道が消える（掴めない人の道を残すのが段Dの趣旨である）
     const row = document.createElement('button');
-    row.className = index === selected && currentScreen === 'block'
+    row.className = (index === selected && currentScreen === 'block'
       ? 'rail-row selected'
-      : 'rail-row';
+      : 'rail-row') + (block.suspended ? ' suspended' : '');
     row.draggable = true;
     // 呼び名も添え書きも拡張機能側の言葉である（画面で組み立てない）
-    row.title = block.detail ? block.label + '　' + block.detail : block.label;
+    row.title = (block.detail ? block.label + '　' + block.detail : block.label)
+      + (block.suspended ? '（保留中：本には入りません）' : '');
 
     const icon = document.createElement('span');
     icon.className = 'rail-icon';
@@ -803,6 +815,15 @@ function renderBlocks() {
     label.className = 'rail-label';
     label.textContent = block.label;
     row.appendChild(label);
+
+    // 保留の印（設計書6.65.15の段D）。**薄いだけでは気づけない**ので、
+    // 言葉でも出す（本に入らないことは、黙って起きてはいけない）
+    if (block.suspended) {
+      const badge = document.createElement('span');
+      badge.className = 'rail-badge';
+      badge.textContent = '保留';
+      row.appendChild(badge);
+    }
 
     row.addEventListener('click', function () { selectBlock(index); });
     row.addEventListener('contextmenu', function (event) {
@@ -961,6 +982,18 @@ function openMenu(index, x, y) {
   menu.appendChild(menuItem('下へ', index === blocks.length - 1, function () {
     post('moveBlock', { index: index, direction: 1, config: readForm() });
   }));
+  // 保留（設計書6.65.15の段D）。**いまの状態に対する1行だけ**を出す。
+  // 「保留にできるか」は拡張機能側の判断（本文には出ない）。解除できるか
+  // は押したときに見て、同じ種類の有効な面が居れば理由を言って断る
+  if (block.suspended) {
+    menu.appendChild(menuItem('保留を解除', false, function () {
+      post('suspendBlock', { index: index, suspended: false, config: readForm() });
+    }));
+  } else if (block.suspendable) {
+    menu.appendChild(menuItem('保留にする', false, function () {
+      post('suspendBlock', { index: index, suspended: true, config: readForm() });
+    }));
+  }
   // **消せない面には、削除の行そのものを出さない。** 押してから断られるより、
   // 初めから無いほうが分かりやすい（本文がこれに当たる）
   if (block.removable) {
@@ -1603,7 +1636,12 @@ function renderPages() {
 
     const caption = document.createElement('div');
     caption.className = 'page-label';
-    caption.innerHTML = escapeHtml(page.label);
+    // 保留の面は見えるが、本には入らない（設計書6.65.15の段D）。
+    // **見ているものが本に入らないことを、その場で言う。**
+    // 添える言葉はここに書いた定文（記号を含まない）なので、
+    // エスケープを通すのは拡張機能側から届く見出しだけでよい
+    caption.innerHTML = escapeHtml(page.label)
+      + (page.suspended ? '（保留中：本には入りません）' : '');
     frame.appendChild(caption);
 
     const sheet = document.createElement('div');

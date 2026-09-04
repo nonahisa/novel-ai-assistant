@@ -190,6 +190,10 @@ const SPECIAL_ENTRANCES: Readonly<Record<string, string>> = {
   "novelai.openChatPanel":
     "（横の「AIに相談」パネルの「メインに表示」ボタンから。" +
     "簡単ステップメニューにもあります）",
+  // 入口をエディターの中へ一本化した（作者の指定、2026-09-04）。
+  // 導き方（簡単ステップメニューにあるか）では当てられない場所にある
+  "novelai.exportEpub":
+    "（EPUBエディターの中の「EPUBを書き出す」ボタンから）",
 };
 
 /**

@@ -7,15 +7,20 @@ import {
   BOOK_BLOCK_LABELS,
   BOOK_BLOCK_TYPES,
   BOOK_DIR,
+  activeBookBlocks,
   canAddBookBlock,
   canRemoveBookBlock,
+  canResumeBookBlock,
+  canSuspendBookBlock,
   dropBookBlock,
   insertBookBlockAfter,
+  isBookBlockSuspended,
   isBookImageBlock,
   moveBookBlock,
   parseBookConfig,
   removeBookBlockAt,
   resolveBookBlocks,
+  setBookBlockSuspended,
   type BookBlock,
   type BookBlockType,
   type BookBodyPosition,
@@ -250,6 +255,18 @@ interface BlockRow {
   caption?: string;
   /** 削除のボタンを出すか。**本文だけ false**（1冊にちょうど1つ） */
   removable: boolean;
+  /**
+   * 保留中か（設計書6.65.15の段D）。行は薄く出し、「保留」の印を添える
+   * ——**消えたのではなく、本に入らないだけ**だと分かるようにする。
+   */
+  suspended: boolean;
+  /**
+   * 保留にできるか。**本文だけ false**（本文の無い本になる）。
+   *
+   * 「本文かどうか」の判断を画面へ写さないための項目である（削除の
+   * `removable` と同じ扱い）。
+   */
+  suspendable: boolean;
 }
 
 /**
@@ -366,6 +383,8 @@ export async function openEpubEditorPanel(
       blockType?: string;
       imagePath?: string;
       caption?: string;
+      /** 保留の切り替え（設計書6.65.15の段D）。真なら保留、偽なら解除 */
+      suspended?: boolean;
     };
 
     if (parsed.type === "ready") {
@@ -464,6 +483,12 @@ export async function openEpubEditorPanel(
 
     if (parsed.type === "removeBlock") {
       await removeBlockAt(state, parsed.index ?? -1);
+      return;
+    }
+
+    if (parsed.type === "suspendBlock") {
+      // 保留の切り替え（設計書6.65.15の段D）。**面は消えない**
+      await setSuspended(state, parsed.index ?? -1, parsed.suspended === true);
       return;
     }
 
@@ -668,6 +693,72 @@ async function removeBlockAt(state: PanelState, index: number): Promise<void> {
   // 消した行の1つ手前を選ばせる（末尾を消したときに選びが宙に浮かない）
   if (!(await applyBlocks(state, next, Math.max(0, index - 1)))) return;
   status(state, `${label}を本の並びから外しました`);
+}
+
+/**
+ * 面の保留を切り替える（設計書6.65.15の段D。作者の依頼、2026-09-04）。
+ *
+ * **保留は消すことの代わりではない。** 面は並びに残り、選べば編集画面も
+ * プレビューも出る——表紙を2案持って見比べるための道である。本へ入らない
+ * のは書き出しとプレビューの組み立て（`activeBookBlocks`）が外すから。
+ *
+ * **断るときは必ず理由を言う。** できないことは2つあり、直し方が違う：
+ * 本文の保留（そもそもできない）と、同じ種類の有効な面が居る解除
+ * （もう片方を先に保留か削除にすれば通る）。
+ */
+async function setSuspended(
+  state: PanelState,
+  index: number,
+  suspended: boolean
+): Promise<void> {
+  const blocks = resolveBookBlocks(state.current);
+  const block = blocks[index];
+  if (!block) return;
+
+  const label = BOOK_BLOCK_LABELS[block.type];
+  const next = setBookBlockSuspended(blocks, index, suspended);
+  if (!next) {
+    const reason = suspendRefusal(blocks, index, suspended, label);
+    if (reason) status(state, reason, true);
+    return;
+  }
+
+  // 切り替えた面をそのまま選ばせる（2案を見比べる流れが途切れない）
+  if (!(await applyBlocks(state, next, index))) return;
+  status(
+    state,
+    suspended
+      ? `${label}を保留にしました（本には入りませんが、選べば見比べられます）`
+      : `${label}の保留を解除しました（本に入ります）`
+  );
+}
+
+/**
+ * 保留を切り替えられない理由（設計書6.65.15の段D）。
+ *
+ * **言えることが無ければ null。** 範囲の外や、既にその状態になっている
+ * ときは「押しても何も起きない」でよい（並びが変わらないので、作者に
+ * できることも無い）。
+ */
+function suspendRefusal(
+  blocks: readonly BookBlock[],
+  index: number,
+  suspended: boolean,
+  label: string
+): string | null {
+  const block = blocks[index];
+  if (!block) return null;
+
+  if (suspended) {
+    return block.type === "body"
+      ? "本文は保留にできません（本文の無い本になります）。"
+      : null;
+  }
+  // 解除できないのは「同じ種類の有効な面が居る」ときだけである
+  // （`canResumeBookBlock`）。**黙って2つ有効にしない**
+  return isBookBlockSuspended(block) && !canResumeBookBlock(blocks, index)
+    ? `${label}は1冊に1つだけです。先にもう片方を保留にするか、削除してください。`
+    : null;
 }
 
 /** 口絵・扉絵の欄（絵の場所と解説文）を書き換える */
@@ -1013,6 +1104,11 @@ function blockRows(blocks: readonly BookBlock[]): BlockRow[] {
     imagePath: isBookImageBlock(block) ? block.imagePath : undefined,
     caption: isBookImageBlock(block) ? block.caption : undefined,
     removable: canRemoveBookBlock(blocks, index),
+    // 保留（設計書6.65.15の段D）。**解除できるかはここで決めない**
+    // ——同じ種類の有効な面が居るかは押したときに見て、理由を言って断る
+    // （「押しても無反応」を作らないための、挿入と同じ扱い）
+    suspended: isBookBlockSuspended(block),
+    suspendable: canSuspendBookBlock(blocks, index),
   }));
 }
 
@@ -1396,6 +1492,14 @@ interface PreviewPage {
    * 番号でしかできない——同じ呼び名の面（扉絵）が並ぶことがある。
    */
   blockIndex?: number;
+  /**
+   * 保留の面か（設計書6.65.15の段D）。
+   *
+   * **本には入らないが、選べば見える。** 見えなければ2案を見比べられない
+   * ——保留を入れた目的そのものが果たせない。画面はこの印で「本には
+   * 入りません」と添える（黙って入らないのが、いちばん困る）。
+   */
+  suspended?: boolean;
 }
 
 /**
@@ -1408,6 +1512,12 @@ interface PreviewPage {
  *
  * **中身の無い面は、本と同じ条件で出さない**（載せる人の居ない人物一覧、
  * 画像の無い口絵、まだ書いていないあとがき、画像の無い裏表紙）。
+ *
+ * ## 保留の面は「出すが、本の組み立てには入れない」（設計書6.65.15の段D）
+ *
+ * 面そのものは作る——選べば見えないと、2案を見比べるという保留の目的が
+ * 果たせない。**外れるのは本の組み立てのほう**で、たとえば保留の人物紹介は
+ * 目次の「登場人物」の行を作らない（本には無い行を見ていることになる）。
  */
 function buildPages(
   state: PanelState,
@@ -1419,21 +1529,25 @@ function buildPages(
   const source = state.source;
   const pages: PreviewPage[] = [];
   const blocks = resolveBookBlocks(config);
-  // 登場人物一覧の面が出るか。**目次の行と面の有無を同じ条件で決める**
+  // **本に入る面だけで、本の中身を決める**（設計書6.65.15の段D）
+  const active = activeBookBlocks(blocks);
+  // 登場人物一覧の面が本に入るか。**目次の行と面の有無を同じ条件で決める**
   // （片方だけ出ると、目次から飛べない行ができる。設計書6.65.11）。
   // **並びに置いてあるかで決める**——段Cで blocks が正になったので、
   // チェック欄（`characterPage.enabled`）はもう見ない
   const hasCharacters =
-    blocks.some((block) => block.type === "characters") &&
+    active.some((block) => block.type === "characters") &&
     source.characters.length > 0;
 
   let index = -1;
+  let suspended = false;
   const add = (page: PreviewPage | null): void => {
-    if (page) pages.push({ ...page, blockIndex: index });
+    if (page) pages.push({ ...page, blockIndex: index, suspended });
   };
 
   for (const block of blocks) {
     index++;
+    suspended = isBookBlockSuspended(block);
     switch (block.type) {
       case "cover":
         add(coverPage(state, vertical, baked.front));
@@ -1449,8 +1563,10 @@ function buildPages(
       case "toc":
         add(tocPage(state, vertical, hasCharacters));
         break;
+      // **保留でも、載る人が居れば面は出す**（比較のため。段D）。目次の
+      // 行に出るかどうかは `hasCharacters`（本に入る面だけ）が決める
       case "characters":
-        add(hasCharacters ? charactersPage(state, vertical) : null);
+        add(source.characters.length > 0 ? charactersPage(state, vertical) : null);
         break;
       case "frontIllustration":
       case "sectionArt":

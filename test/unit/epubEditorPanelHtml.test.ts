@@ -200,6 +200,23 @@ describe("右クリックの自前メニュー（設計書6.65.15の段D）", ()
     expect(script).toContain("if (block.removable)");
   });
 
+  /**
+   * 保留（設計書6.65.15の段D。作者の依頼、2026-09-04）。
+   *
+   * **状態で1つだけ出す。** 保留中なら「解除」、有効なら「保留にする」で、
+   * 本文には出さない（保留にすると本が空になるため）。判断は拡張機能側が
+   * 渡す（`suspended`・`suspendable`）——画面で「本文かどうか」を見ない。
+   */
+  it("保留にする・保留を解除が、状態で出し分かれる", () => {
+    expect(script).toContain("保留にする");
+    expect(script).toContain("保留を解除");
+    expect(script).toContain("post('suspendBlock'");
+    expect(script).toContain("if (block.suspended)");
+    expect(script).toContain("block.suspendable");
+    // 「本文だから出さない」の判断を画面に写さない
+    expect(script).not.toContain("=== 'body'");
+  });
+
   /** 章区切りは面ではない。台帳（設計書6.66）が正なので blocks へ入れない */
   it("章区切りだけは、並びではなく台帳へ知らせる", () => {
     expect(script).toContain("post('addChapter'");

@@ -307,6 +307,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.postNewEpisode": "allTypes",
   "novelai.postThisEpisode": "allTypes",
   "novelai.configurePostingSites": "allTypes",
+  // 順位はどのタイプの作品にも付く（SNS記事もメモ集も投稿できる）
+  "novelai.recordRanking": "allTypes",
 
   // ── 書き出し ──
   // PDFは「いま手元にある文字をそのまま紙にする」道具なので全タイプ。

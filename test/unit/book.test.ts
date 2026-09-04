@@ -1,18 +1,23 @@
 import { describe, expect, test } from "vitest";
 import {
   BOOK_SCHEMA_VERSION,
+  activeBookBlocks,
   canAddBookBlock,
   canRemoveBookBlock,
+  canResumeBookBlock,
+  canSuspendBookBlock,
   defaultBackCoverLayout,
   defaultBookBlocks,
   defaultBookConfig,
   defaultCoverLayout,
   dropBookBlock,
   insertBookBlockAfter,
+  isBookBlockSuspended,
   moveBookBlock,
   parseBookConfig,
   removeBookBlockAt,
   resolveBookBlocks,
+  setBookBlockSuspended,
   type BookBlock,
 } from "../../src/models/book";
 
@@ -1022,5 +1027,230 @@ describe("落とし先の並び（設計書6.65.15の段D）", () => {
   test("元の並びは書き換えない", () => {
     dropBookBlock(base, 0, 3);
     expect(types(base)).toEqual(["cover", "toc", "body", "colophon"]);
+  });
+});
+
+/**
+ * 面の保留（設計書6.65.15の段D。作者の依頼、2026-09-04）。
+ *
+ * **消さずに本から外す**ための印である。狙いは比較で、表紙を2案持って
+ * 片方を保留にし、見比べてから決められるようにする——だから「1冊に1つ」の
+ * 数えは**有効なものだけ**を見る。
+ *
+ * **保留は消すことの代わりではない。** 保留した面も設計図に残り、保存すれば
+ * book.json に `suspended: true` として書かれる（作者の書いた面を消さない、
+ * という約束はここでも変わらない）。
+ */
+describe("面の保留（設計書6.65.15の段D）", () => {
+  const types = (blocks: readonly BookBlock[] | null): string[] =>
+    (blocks ?? []).map((block) => block.type);
+
+  test("suspended を書いた面は、保留として読み取る", () => {
+    const config = parseBookConfig(
+      {
+        blocks: [
+          { type: "cover", suspended: true },
+          { type: "cover" },
+          { type: "body" },
+        ],
+      },
+      "氷の街"
+    );
+
+    expect(config.blocks?.[0]).toEqual({ type: "cover", suspended: true });
+    // **有効な面には項目を足さない。** 足すと、いままでの book.json が
+    // 保存のたびに `suspended: false` だらけになる
+    expect(config.blocks?.[1]).toEqual({ type: "cover" });
+  });
+
+  /** **古い book.json はそのまま読める。** 省略＝有効である */
+  test("suspended を書いていない面は、有効のまま（項目も増やさない）", () => {
+    const config = parseBookConfig(
+      { blocks: [{ type: "cover" }, { type: "body" }] },
+      "氷の街"
+    );
+
+    expect(config.blocks).toEqual([{ type: "cover" }, { type: "body" }]);
+    expect(activeBookBlocks(config.blocks ?? [])).toHaveLength(2);
+  });
+
+  test("画像の面も保留にできる（絵の場所の検証はそのまま）", () => {
+    const config = parseBookConfig(
+      {
+        blocks: [
+          { type: "body" },
+          { type: "sectionArt", imagePath: "素材/扉.png", suspended: true },
+        ],
+      },
+      "氷の街"
+    );
+
+    expect(config.blocks?.[1]).toEqual({
+      type: "sectionArt",
+      imagePath: "素材/扉.png",
+      caption: "",
+      suspended: true,
+    });
+  });
+
+  test("suspended が真偽値でなければ弾く（黙って有効にしない）", () => {
+    expect(() =>
+      parseBookConfig(
+        { blocks: [{ type: "cover", suspended: "yes" }, { type: "body" }] },
+        "氷の街"
+      )
+    ).toThrow();
+  });
+
+  /** **本文は保留にできない**（本文の無い本になる。削除と同じ理由） */
+  test("本文の保留は受け取らない", () => {
+    expect(() =>
+      parseBookConfig(
+        { blocks: [{ type: "cover" }, { type: "body", suspended: true }] },
+        "氷の街"
+      )
+    ).toThrow();
+  });
+
+  /** これが本命：表紙を2案持って見比べる（作者の依頼） */
+  test("1冊に1つの面でも、片方が保留なら2つ書ける", () => {
+    const config = parseBookConfig(
+      {
+        blocks: [
+          { type: "cover" },
+          { type: "cover", suspended: true },
+          { type: "body" },
+        ],
+      },
+      "氷の街"
+    );
+
+    expect(config.blocks).toHaveLength(3);
+  });
+
+  test("有効な面が2つあれば、いままでどおり弾く", () => {
+    expect(() =>
+      parseBookConfig(
+        {
+          blocks: [{ type: "cover" }, { type: "cover" }, { type: "body" }],
+        },
+        "氷の街"
+      )
+    ).toThrow();
+  });
+
+  test("保留があれば、同じ種類をもう1つ挿せる", () => {
+    const blocks: BookBlock[] = [
+      { type: "cover", suspended: true },
+      { type: "body" },
+    ];
+
+    expect(canAddBookBlock(blocks, "cover")).toBe(true);
+    expect(types(insertBookBlockAfter(blocks, 0, { type: "cover" }))).toEqual([
+      "cover",
+      "cover",
+      "body",
+    ]);
+  });
+
+  test("保留にすると suspended が付く（解除すると項目ごと消える）", () => {
+    const blocks: BookBlock[] = [{ type: "cover" }, { type: "body" }];
+
+    const suspended = setBookBlockSuspended(blocks, 0, true);
+    expect(suspended?.[0]).toEqual({ type: "cover", suspended: true });
+
+    const resumed = setBookBlockSuspended(suspended ?? [], 0, false);
+    expect(resumed?.[0]).toEqual({ type: "cover" });
+    // 元の並びは書き換えない（ほかの編集と同じ約束）
+    expect(blocks[0]).toEqual({ type: "cover" });
+  });
+
+  test("本文は保留にできない（null で断る）", () => {
+    const blocks: BookBlock[] = [{ type: "cover" }, { type: "body" }];
+
+    expect(canSuspendBookBlock(blocks, 1)).toBe(false);
+    expect(setBookBlockSuspended(blocks, 1, true)).toBeNull();
+    expect(canSuspendBookBlock(blocks, 0)).toBe(true);
+  });
+
+  /**
+   * **解除は、同じ種類の有効な面が居れば断る。** 黙って2つ有効にすると、
+   * どちらの設定が効いた本なのか作者に分からなくなる（`assertBlockCounts`
+   * が保存で断る形と、ここでの断り方を一致させる）。
+   */
+  test("同じ種類の有効な面が居れば、保留を解除できない", () => {
+    const blocks: BookBlock[] = [
+      { type: "cover" },
+      { type: "cover", suspended: true },
+      { type: "body" },
+    ];
+
+    expect(canResumeBookBlock(blocks, 1)).toBe(false);
+    expect(setBookBlockSuspended(blocks, 1, false)).toBeNull();
+  });
+
+  test("同じ種類が居なければ解除できる", () => {
+    const blocks: BookBlock[] = [
+      { type: "cover", suspended: true },
+      { type: "body" },
+    ];
+
+    expect(canResumeBookBlock(blocks, 0)).toBe(true);
+    expect(types(setBookBlockSuspended(blocks, 0, false))).toEqual([
+      "cover",
+      "body",
+    ]);
+  });
+
+  /** 扉絵・口絵は何枚でも置けるので、解除も縛らない */
+  test("何枚でも置ける面は、有効なものが居ても解除できる", () => {
+    const blocks: BookBlock[] = [
+      { type: "body" },
+      { type: "sectionArt", imagePath: "素材/扉1.png", caption: "" },
+      {
+        type: "sectionArt",
+        imagePath: "素材/扉2.png",
+        caption: "",
+        suspended: true,
+      },
+    ];
+
+    expect(canResumeBookBlock(blocks, 2)).toBe(true);
+  });
+
+  test("保留の面も削除はできる（保留は消すことの代わりではない）", () => {
+    const blocks: BookBlock[] = [
+      { type: "cover", suspended: true },
+      { type: "body" },
+    ];
+
+    expect(canRemoveBookBlock(blocks, 0)).toBe(true);
+    expect(types(removeBookBlockAt(blocks, 0))).toEqual(["body"]);
+  });
+
+  test("範囲の外は何も起きない（null で断る）", () => {
+    const blocks: BookBlock[] = [{ type: "cover" }, { type: "body" }];
+
+    expect(setBookBlockSuspended(blocks, -1, true)).toBeNull();
+    expect(setBookBlockSuspended(blocks, 9, true)).toBeNull();
+    expect(canSuspendBookBlock(blocks, 9)).toBe(false);
+    expect(canResumeBookBlock(blocks, 9)).toBe(false);
+    // 有効な面を「解除」しようとしても、何も起きない
+    expect(setBookBlockSuspended(blocks, 0, false)).toBeNull();
+  });
+
+  test("有効な面だけを取り出せる（出力はこれを見る）", () => {
+    const blocks: BookBlock[] = [
+      { type: "cover" },
+      { type: "toc", suspended: true },
+      { type: "body" },
+    ];
+
+    expect(activeBookBlocks(blocks).map((block) => block.type)).toEqual([
+      "cover",
+      "body",
+    ]);
+    expect(isBookBlockSuspended(blocks[1])).toBe(true);
+    expect(isBookBlockSuspended(blocks[0])).toBe(false);
   });
 });

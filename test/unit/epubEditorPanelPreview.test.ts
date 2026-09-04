@@ -30,12 +30,23 @@ interface PreviewPage {
   html: string;
   note: string | null;
   compose?: string;
+  /** 保留の面か（設計書6.65.15の段D）。選べば見えるが、本には入らない */
+  suspended?: boolean;
 }
 
 interface PreviewPayload {
   pages: PreviewPage[];
   /** 本の並びの行（設計書6.65.15の段C） */
-  blocks: Array<{ type: string; label: string; detail: string | null; removable: boolean }>;
+  blocks: Array<{
+    type: string;
+    label: string;
+    detail: string | null;
+    removable: boolean;
+    /** 保留中か（設計書6.65.15の段D） */
+    suspended?: boolean;
+    /** 保留にできるか。**本文だけ false**（本が空になる） */
+    suspendable?: boolean;
+  }>;
   /** 右クリックの「この後ろに挿入」に出す種類（設計書6.65.15の段D） */
   insertTypes: Array<{
     key: string;
@@ -1135,5 +1146,201 @@ describe("バックアップの頭書き（設計書6.65.15の段D）", () => {
     // 冒頭は字下げを落として見せる（`paragraphPreview`）
     expect(latestParagraphs()).toEqual(["朝が来た。", "鐘が鳴る。"]);
     expect(page("本文の冒頭").html).toContain("朝が来た。");
+  });
+});
+
+/**
+ * 面の保留（設計書6.65.15の段D。作者の依頼、2026-09-04）。
+ *
+ * **「出力には入らないが、比較用に残る」**が狙いである。だから
+ * 　・本の組み立て（目次の行・人物一覧の面）からは外れる
+ * 　・並びの行には残り、選べば編集画面もプレビューも見える
+ * の両方を、同じ受け口から確かめる。**見えなければ比較にならない。**
+ */
+describe("面の保留（設計書6.65.15の段D）", () => {
+  beforeEach(() => {
+    put("本文/第1話.txt", "あ\n\nい");
+  });
+
+  function bookPath(): string {
+    return diskPath(path.join(work.folderPath, "設定", "書籍", "book.json"));
+  }
+
+  /** 保存したあとの book.json の並び（画面の言い分ではなく、書かれたもの） */
+  async function savedBlocks(): Promise<
+    Array<{ type: string; suspended?: boolean }>
+  > {
+    await send({ type: "save", config: {} });
+    const bytes = disk.get(bookPath());
+    if (!bytes) throw new Error("book.json が書かれていません");
+    const config = JSON.parse(new TextDecoder().decode(bytes)) as {
+      blocks?: Array<{ type: string; suspended?: boolean }>;
+    };
+    return config.blocks ?? [];
+  }
+
+  test("保留にすると行に印が付き、保存すると book.json に残る", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover" }, { type: "toc" }, { type: "body" }],
+    });
+
+    await open();
+    await send({ type: "suspendBlock", index: 1, suspended: true, config: {} });
+
+    const row = latest().blocks[1];
+    expect(row.type).toBe("toc");
+    expect(row.suspended).toBe(true);
+    // **行は消えない**（比較のために置いてあるものなので）
+    expect(latest().blocks.map((block) => block.type)).toEqual([
+      "cover",
+      "toc",
+      "body",
+    ]);
+    expect(await savedBlocks()).toEqual([
+      { type: "cover" },
+      { type: "toc", suspended: true },
+      { type: "body" },
+    ]);
+  });
+
+  test("保留を解除すると、book.json から項目ごと消える", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover", suspended: true }, { type: "body" }],
+    });
+
+    await open();
+    expect(latest().blocks[0].suspended).toBe(true);
+
+    await send({ type: "suspendBlock", index: 0, suspended: false, config: {} });
+
+    expect(latest().blocks[0].suspended).toBe(false);
+    expect(await savedBlocks()).toEqual([{ type: "cover" }, { type: "body" }]);
+  });
+
+  /** **本文は保留にできない**（本が空になる）。メニューにも出さない */
+  test("本文には保留のメニューを出さない", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover" }, { type: "body" }],
+    });
+
+    await open();
+
+    expect(latest().blocks[0].suspendable).toBe(true);
+    expect(latest().blocks[1].suspendable).toBe(false);
+
+    // 送られてきても受け取らない（画面の作りだけに頼らない）
+    await send({ type: "suspendBlock", index: 1, suspended: true, config: {} });
+    expect(latest().blocks[1].suspended).toBe(false);
+  });
+
+  /** これが本命：表紙を2案持って見比べる（作者の依頼） */
+  test("表紙を保留にすると、もう1つ表紙を挿せる", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover" }, { type: "body" }],
+    });
+
+    await open();
+    expect(
+      latest().insertTypes.find((entry) => entry.key === "cover")?.enabled
+    ).toBe(false);
+
+    await send({ type: "suspendBlock", index: 0, suspended: true, config: {} });
+    expect(
+      latest().insertTypes.find((entry) => entry.key === "cover")?.enabled
+    ).toBe(true);
+
+    await send({ type: "insertBlock", blockType: "cover", index: 0, config: {} });
+    expect(latest().blocks.map((block) => block.type)).toEqual([
+      "cover",
+      "cover",
+      "body",
+    ]);
+  });
+
+  /** **黙って2つ有効にしない。** 断る理由も言う */
+  test("同じ種類の有効な面が居れば、解除を断って理由を言う", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [
+        { type: "cover" },
+        { type: "cover", suspended: true },
+        { type: "body" },
+      ],
+    });
+
+    await open();
+    const mark = posted.length;
+    await send({ type: "suspendBlock", index: 1, suspended: false, config: {} });
+
+    expect(latest().blocks[1].suspended).toBe(true);
+    const said = JSON.stringify(posted.slice(mark));
+    expect(said).toContain("表紙");
+    expect(said).toContain("先に");
+  });
+
+  /**
+   * **本の組み立てからは外れる。** 目次の「登場人物」の行は、人物紹介の面が
+   * 本に入るときだけ出る（設計書6.65.11）——保留にしたら行も消える。
+   */
+  test("保留の人物紹介は、目次の行に出ない", async () => {
+    writeCharacter("char_001", "月島灯");
+    writeBook({
+      title: "氷の街",
+      blocks: [
+        { type: "toc" },
+        { type: "characters", suspended: true },
+        { type: "body" },
+      ],
+    });
+
+    await open();
+
+    expect(page("目次").html).not.toContain("登場人物");
+  });
+
+  test("保留にしていなければ、いままでどおり目次に行が出る", async () => {
+    writeCharacter("char_001", "月島灯");
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "toc" }, { type: "characters" }, { type: "body" }],
+    });
+
+    await open();
+
+    expect(page("目次").html).toContain("登場人物");
+  });
+
+  /**
+   * **保留の面を選べば、その面のプレビューは見える**（作者の依頼）。
+   * 見えなければ、2案を見比べるという保留の狙いが果たせない。
+   */
+  test("保留の面も、選べばプレビューが出る（印つき）", async () => {
+    writeCharacter("char_001", "月島灯");
+    writeBook({
+      title: "氷の街",
+      blocks: [
+        { type: "toc" },
+        { type: "characters", suspended: true },
+        { type: "body" },
+      ],
+    });
+
+    await open();
+    const characters = latest().pages.find(
+      (entry) => entry.label === "登場人物"
+    );
+
+    expect(characters).toBeDefined();
+    expect(characters?.html).toContain("月島灯");
+    // **保留であることは画面で分かる**（黙って本に入らないのが、いちばん困る）
+    expect(characters?.suspended).toBe(true);
+    // 有効な面には印を付けない
+    expect(
+      latest().pages.find((entry) => entry.label === "目次")?.suspended
+    ).toBe(false);
   });
 });

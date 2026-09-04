@@ -293,8 +293,24 @@ export const BOOK_BLOCK_LABELS: Record<BookBlockType, string> = {
   backCover: "裏表紙",
 };
 
+/**
+ * どの面にも付く印（設計書6.65.15の段D。作者の依頼、2026-09-04）。
+ *
+ * **保留は「消さずに本から外す」印である。** 狙いは比較で、表紙を2案
+ * 持って片方を保留にし、見比べてから決められるようにする。だから
+ * 「1冊に1つ」の数えは**有効な面だけ**を見る（`canAddBookBlock`）。
+ *
+ * **省略＝有効。** 保留でない面には項目そのものを書かない——`false` を
+ * 書き足すと、いままでの book.json が保存のたびに `suspended: false`
+ * だらけになり、Gitの差分が読めなくなる。
+ */
+export interface BookBlockSuspension {
+  /** 保留中か。省略＝有効（本に入る） */
+  suspended?: boolean;
+}
+
 /** 画像の面（口絵・扉絵）。場所の検証は表紙・挿絵とまったく同じ */
-export interface BookImageBlock {
+export interface BookImageBlock extends BookBlockSuspension {
   type: BookImageBlockType;
   /** 作品フォルダからの相対パス */
   imagePath: string;
@@ -303,7 +319,7 @@ export interface BookImageBlock {
 }
 
 /** 画像以外の面。**種類のほかに持つものが無い**（設定は BookConfig 側） */
-export interface BookPlainBlock {
+export interface BookPlainBlock extends BookBlockSuspension {
   type: Exclude<BookBlockType, BookImageBlockType>;
 }
 
@@ -552,18 +568,102 @@ export function isSingleBookBlockType(type: BookBlockType): boolean {
   return BOOK_SINGLE_BLOCK_TYPES.includes(type);
 }
 
+/** 保留中の面か（設計書6.65.15の段D）。**省略＝有効** */
+export function isBookBlockSuspended(block: BookBlock): boolean {
+  return block.suspended === true;
+}
+
 /**
- * その種類を、いまの並びへもう1つ置けるか（設計書6.65.15の段C）。
+ * 本に入る面だけ（設計書6.65.15の段D）。
+ *
+ * **書き出しとプレビューの組み立ては、必ずここを通す。** 保留の面は
+ * 設計図には残るが、本の中には1面も出ない——「並びに書いてあるかで
+ * 決める」という段Cの約束を、保留の印まで含めて1か所で持つ。
+ */
+export function activeBookBlocks(blocks: readonly BookBlock[]): BookBlock[] {
+  return blocks.filter((block) => !isBookBlockSuspended(block));
+}
+
+/**
+ * その種類を、いまの並びへもう1つ置けるか（設計書6.65.15の段C・段D）。
  *
  * 口絵・扉絵は何枚でも置ける。1冊に1つの面は、既にあれば置けない
  * （本文もここに入るので、複製そのものができない）。
+ *
+ * **数えるのは有効な面だけである**（段D）。表紙を保留にしてもう1案を
+ * 挿し、見比べてから決める——これが保留の本来の狙いなので、保留の面は
+ * 「置いてある」と数えない。
  */
 export function canAddBookBlock(
   blocks: readonly BookBlock[],
   type: BookBlockType
 ): boolean {
   if (!isSingleBookBlockType(type)) return true;
-  return !blocks.some((block) => block.type === type);
+  return !activeBookBlocks(blocks).some((block) => block.type === type);
+}
+
+/**
+ * その位置の面を保留にできるか（設計書6.65.15の段D）。
+ *
+ * **本文だけは保留にできない。** 本文の無い本になるので、削除を断るのと
+ * 同じ理由である（`canRemoveBookBlock` と判断を揃える）。
+ */
+export function canSuspendBookBlock(
+  blocks: readonly BookBlock[],
+  index: number
+): boolean {
+  const block = blocks[index];
+  if (block === undefined || isBookBlockSuspended(block)) return false;
+  return block.type !== "body";
+}
+
+/**
+ * その位置の面の保留を解除できるか（設計書6.65.15の段D）。
+ *
+ * **同じ種類の有効な面が居れば解除できない。** 黙って2つ有効にすると、
+ * どちらの設定が効いた本なのか作者に分からなくなる（保存のときに
+ * `assertBlockCounts` が断る形と、ここでの断り方を揃える）。断る言葉は
+ * 呼び出し側が出す——「押しても無反応」にはしない。
+ */
+export function canResumeBookBlock(
+  blocks: readonly BookBlock[],
+  index: number
+): boolean {
+  const block = blocks[index];
+  if (block === undefined || !isBookBlockSuspended(block)) return false;
+  if (!isSingleBookBlockType(block.type)) return true;
+  return !blocks.some(
+    (entry, position) =>
+      position !== index &&
+      entry.type === block.type &&
+      !isBookBlockSuspended(entry)
+  );
+}
+
+/**
+ * 面の保留を切り替える（設計書6.65.15の段D）。**できないときは null。**
+ *
+ * 解除したら `suspended` を**項目ごと消す**。`false` を残すと、保留を
+ * 一度も使っていない本と使ってやめた本で book.json の形が変わってしまう
+ * （省略＝有効、という読み方を1つに保つ）。
+ */
+export function setBookBlockSuspended(
+  blocks: readonly BookBlock[],
+  index: number,
+  suspended: boolean
+): BookBlock[] | null {
+  const allowed = suspended
+    ? canSuspendBookBlock(blocks, index)
+    : canResumeBookBlock(blocks, index);
+  if (!allowed) return null;
+
+  return blocks.map((block, position) => {
+    if (position !== index) return block;
+    if (suspended) return { ...block, suspended: true };
+    const resumed = { ...block };
+    delete resumed.suspended;
+    return resumed;
+  });
 }
 
 /**
@@ -816,6 +916,13 @@ function parseBlocks(raw: unknown): BookBlock[] | undefined {
       );
     }
 
+    // 保留の印（設計書6.65.15の段D）。**省略＝有効**なので、書いていない
+    // 面には項目を足さずに返す（`false` を書き足すと、いままでの
+    // book.json が保存のたびに `suspended: false` だらけになる）
+    optionalBoolean(entry.suspended, `${entryPath}.suspended`);
+    const suspension =
+      entry.suspended === true ? ({ suspended: true } as const) : {};
+
     if ((BOOK_IMAGE_BLOCK_TYPES as readonly string[]).includes(type)) {
       const label = BOOK_BLOCK_LABELS[type as BookBlockType];
       // 絵の無い口絵・扉絵は作らない（挿絵と同じ理由）
@@ -826,10 +933,11 @@ function parseBlocks(raw: unknown): BookBlock[] | undefined {
         // 表紙・挿絵とまったく同じ検証を通す（片方だけ緩くしない）
         imagePath: relativeInsideWork((entry.imagePath as string).trim(), label),
         caption: ((entry.caption as string | undefined) ?? "").trim(),
+        ...suspension,
       };
     }
 
-    return { type: type as BookPlainBlock["type"] };
+    return { type: type as BookPlainBlock["type"], ...suspension };
   });
 
   if (!blocks) return undefined;
@@ -843,11 +951,22 @@ function parseBlocks(raw: unknown): BookBlock[] | undefined {
  * **本文はちょうど1つ**——0では本にならず、2つあると同じ話が二度入る。
  * 表紙や奥付のように1冊に1つしかない面も、重ねて書けない（どちらの設定が
  * 効いたのか分からない本ができる）。
+ *
+ * **数えるのは有効な面だけである**（設計書6.65.15の段D）。保留の面は本に
+ * 1面も入らないので、表紙を2案書いて片方を保留にした設計図は受け取る
+ * ——これが保留の狙い（比較）そのものである。ただし**本文の保留は断る**：
+ * 本文の無い本になり、削除を断っている意味が無くなる。
  */
 function assertBlockCounts(blocks: readonly BookBlock[]): void {
+  const active = activeBookBlocks(blocks);
   const count = (type: BookBlockType): number =>
-    blocks.filter((block) => block.type === type).length;
+    active.filter((block) => block.type === type).length;
 
+  if (blocks.some((block) => block.type === "body" && isBookBlockSuspended(block))) {
+    throw new Error(
+      "blocks の本文（body）は保留にできません（本文の無い本になります）。"
+    );
+  }
   if (count("body") !== 1) {
     throw new Error(
       `blocks には本文（body）の面をちょうど1つ書いてください（いまは${count(
@@ -860,7 +979,8 @@ function assertBlockCounts(blocks: readonly BookBlock[]): void {
       throw new Error(
         `blocks の${BOOK_BLOCK_LABELS[type]}（${type}）が${count(
           type
-        )}つあります。この面は1冊に1つだけです。`
+        )}つあります。この面は1冊に1つだけです` +
+          "（片方を保留にすれば、見比べるために2つ置けます）。"
       );
     }
   }

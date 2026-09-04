@@ -245,12 +245,10 @@ const STEP_DEFS: readonly StepDef[] = [
       "本の見た目はEPUBエディターで確かめながら決められます。",
     // **「EPUB出力（予定）」の枠は外した**（作者の指定、2026-09-03）。
     // 設計書6.65が実装できたので、枠ではなく実物を載せる
-    entries: [
-      "novelai.exportPdf",
-      // エディターが上、書き出しが下（作者の指定、2026-09-04）
-      "novelai.openEpubEditor",
-      "novelai.exportEpub",
-    ],
+    // **「EPUBへ書き出す」はここに置かない**（作者の指定、2026-09-04）。
+    // 書き出しボタンはEPUBエディターの中にあり、外にも同じ入口があると
+    // 「どちらから出すのが正しいのか」が分からない
+    entries: ["novelai.exportPdf", "novelai.openEpubEditor"],
   },
   {
     // **番号を付けない**（作者の指定、2026-08-29）。流れの中の一段階ではなく、

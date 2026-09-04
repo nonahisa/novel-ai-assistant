@@ -2,13 +2,20 @@ import * as vscode from "vscode";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import {
   firstUnpostedEpisodePath,
+  latestRanking,
+  normalizeSiteProfile,
+  parseRankInput,
   POSTING_SITES,
   postingSiteInfo,
   postingSiteLabels,
+  rankingBoards,
   unpostedSites,
   validateNewEpisodeUrl,
+  validateRankInput,
+  validateWorkPageUrl,
   withBaselinePosts,
   withPost,
+  withRanking,
   withSites,
   type PostingLedger,
   type PostingSiteEntry,
@@ -333,8 +340,20 @@ export async function configurePostingSites(
   const ledger = await load(store, work);
   if (!ledger) return { changed: false };
 
-  const entries = await askSites(work, ledger.sites);
-  if (!entries) return { changed: false };
+  const chosen = await askSites(work, ledger.sites);
+  if (!chosen) return { changed: false };
+
+  /*
+    **設定は2段に分ける**（設計書6.68.5）。1段目は投稿の入口（サイトと
+    投稿ページのURL）で、これが無いと投稿キットが動かない。作品ID・
+    作品ページ・ジャンルは「あると便利」なだけなので、**入れるかどうかを
+    先に訊いてから**訊く。
+
+    3サイト登録している作品では、まとめて訊くと入力欄が6つ続く。
+    そこまで並ぶと、必須の答えまで「まだ終わらないのか」と読まれる。
+  */
+  const entries =
+    chosen.length > 0 ? await askSiteProfiles(work, chosen) : chosen;
 
   if (entries.length === 0) {
     const answer = await vscode.window.showWarningMessage(
@@ -447,9 +466,299 @@ async function askSites(
     // **1つでも取りやめたら、何も覚えない。** 半分だけ登録されると、
     // 次に押したときに「なぜこのサイトを訊かれないのか」が分からない
     if (url === undefined) return undefined;
-    entries.push({ site: item.site, newEpisodeUrl: url.trim() });
+    entries.push({
+      site: item.site,
+      newEpisodeUrl: url.trim(),
+      // **作品情報は持ち越す**（6.68.5）。URLを直しただけで、作者が
+      // 入れた作品IDやジャンルが消えては困る
+      ...(existing?.profile ? { profile: { ...existing.profile } } : {}),
+    });
   }
   return entries;
+}
+
+/**
+ * サイトごとの作品情報を訊く（設計書6.68.5）。
+ *
+ * **全部が任意で、空のまま飛ばせる。** サイトの作品IDやジャンルは、
+ * 覚えていないこともあれば、まだ決めていないこともある。答えられない
+ * 質問を必須にすると、設定そのものを最後まで通せなくなる。
+ *
+ * **取りやめ（Esc）は「ここまでで終える」**として扱い、それまでに
+ * 入れたぶんは残す。投稿ページのURL（必須）とは扱いを変えている——
+ * あちらは半端に登録されると次の案内が壊れるが、こちらは入っている
+ * ところまでが素直に使える。
+ */
+async function askSiteProfiles(
+  work: WorkEntry,
+  entries: readonly PostingSiteEntry[]
+): Promise<PostingSiteEntry[]> {
+  const picked = await vscode.window.showQuickPick(
+    [
+      // **入れないほうを先頭に置く**（更新告知の誘いと同じ形）。ここまでで
+      // 投稿はできる状態になっており、作品情報は「あると便利」なだけである
+      cancelItem("作品情報は入れずに終える"),
+      {
+        label: "$(edit) 作品ID・作品ページ・ジャンルも入れる",
+        detail:
+          "サイトごとに3つ訊きます（どれも空のままで構いません）。" +
+          "執筆量パネルの「サイトの記録」に出ます",
+        detailed: true,
+      },
+    ],
+    {
+      title: `${work.title} の投稿サイトの情報`,
+      placeHolder: "サイトごとの作品情報も入れますか（あとからでも足せます）",
+      ignoreFocusOut: true,
+    }
+  );
+  // **取りやめても、選んだサイトは失わない。** ここで捨てると、必須の
+  // 答え（サイトとURL）まで任意の質問の巻き添えになる
+  if (!picked || isCancelItem(picked) || !("detailed" in picked)) {
+    return entries.map((entry) => ({ ...entry }));
+  }
+
+  const next: PostingSiteEntry[] = [];
+  let stopped = false;
+  for (const entry of entries) {
+    if (stopped) {
+      next.push({ ...entry });
+      continue;
+    }
+    const info = postingSiteInfo(entry.site);
+    const current = entry.profile;
+
+    const workId = await askText({
+      title: `${info.label} での作品ID`,
+      prompt:
+        `${info.label}のこの作品のID（なろうのNコードなど）を入れてください。` +
+        "分からなければ空のままで構いません",
+      value: current?.workId,
+      placeHolder: "n1234ab",
+      ignoreFocusOut: true,
+    });
+    if (workId === undefined) {
+      stopped = true;
+      next.push({ ...entry });
+      continue;
+    }
+
+    const workUrl = await askText({
+      title: `${info.label} の作品ページのURL`,
+      prompt:
+        "読者が見る作品ページのURLを貼ってください（空のままで構いません）。" +
+        "執筆量パネルからここを開けるようになります",
+      value: current?.workUrl,
+      placeHolder: `https://${info.domain}/`,
+      ignoreFocusOut: true,
+      // **確かめるのはドメインだけ**（6.68.1）。ページは読みにいかない
+      validateInput: (value) =>
+        validateWorkPageUrl(entry.site, value) ?? undefined,
+    });
+    if (workUrl === undefined) {
+      stopped = true;
+      next.push({ ...entry });
+      continue;
+    }
+
+    const genre = await askText({
+      title: `${info.label} でのジャンル`,
+      prompt:
+        `${info.label}で選んでいるジャンルを入れてください（空のままで構いません）`,
+      value: current?.genre,
+      placeHolder: "ハイファンタジー",
+      ignoreFocusOut: true,
+    });
+    if (genre === undefined) {
+      stopped = true;
+      next.push({ ...entry });
+      continue;
+    }
+
+    const profile = normalizeSiteProfile({
+      workId,
+      workUrl,
+      genre,
+      // **作者が書いたメモは訊かないし、消さない**（台帳を手で直したときの
+      // 書き込みが、この画面を通るたびに消えてはいけない）
+      note: current?.note,
+    });
+    next.push({
+      site: entry.site,
+      newEpisodeUrl: entry.newEpisodeUrl,
+      ...(profile ? { profile } : {}),
+    });
+  }
+  return next;
+}
+
+/**
+ * ランキングを記録する（設計書6.68.5）。
+ *
+ * **サイトへは取りにいかない。** ランキングのページを機械で読むのは、
+ * 自動投稿を断ったのと同じ線の内側にある（6.68.1）。ここが記録するのは
+ * **作者が画面で見て打った値だけ**である。
+ *
+ * 訊く順は「サイト → 種別 → 順位 → メモ」。日時は書き留めた時刻を自動で
+ * 入れる（順位が出た時刻は、作者にも分からないことがある）。
+ */
+export async function recordRanking(
+  work: WorkEntry
+): Promise<PostingKitResult> {
+  const store = new PostingStore(work);
+  const ledger = await load(store, work);
+  if (!ledger) return { changed: false };
+
+  /*
+    **サイトが1つも登録されていなければ、そこへ誘導する。**
+    どのサイトの順位かを訊いても答えようがないので、選択画面すら出さない。
+  */
+  if (ledger.sites.length === 0) {
+    const answer = await vscode.window.showWarningMessage(
+      `${work.title} には投稿サイトが登録されていません。` +
+        "「投稿サイトの設定」でサイトを登録すると、そのサイトの順位を記録できます。",
+      "投稿サイトの設定"
+    );
+    if (answer === "投稿サイトの設定") return await configurePostingSites(work);
+    return { changed: false };
+  }
+
+  const site = await askRankingSite(work, ledger);
+  if (!site) return { changed: false };
+  const info = postingSiteInfo(site);
+
+  const board = await askRankingBoard(ledger, site);
+  if (board === undefined) return { changed: false };
+
+  const rankText = await askText({
+    title: `${info.label} の${board}の順位`,
+    prompt: "いま何位でしたか。数字で入れてください（1位なら 1）",
+    placeHolder: "12",
+    ignoreFocusOut: true,
+    validateInput: (value) => validateRankInput(value) ?? undefined,
+  });
+  if (rankText === undefined) return { changed: false };
+  const rank = parseRankInput(rankText);
+  // 入力欄で断っているので、ここへ来るのは画面の作りが変わったときだけ
+  if (rank === null) return { changed: false };
+
+  const note = await askText({
+    title: "メモ（任意）",
+    prompt:
+      "覚えておきたいことがあれば入れてください" +
+      "（空のままでも、取りやめても、順位は記録します）",
+    placeHolder: "更新直後",
+    ignoreFocusOut: true,
+  });
+
+  const next = withRanking(ledger, {
+    site,
+    recordedAt: new Date().toISOString(),
+    board,
+    rank,
+    // **メモの取りやめは「メモ無し」**として扱う（ここまでの答えを
+    // 捨てるほうが、作者にとっては大きな損である）
+    ...(note?.trim() ? { note: note.trim() } : {}),
+  });
+  if (!(await save(store, work, next))) return { changed: false };
+
+  void vscode.window.showInformationMessage(
+    `${info.label} ${board} ${rank}位 を記録しました。` +
+      "執筆量パネルの「サイトの記録」で履歴を見られます。"
+  );
+  return { changed: true };
+}
+
+/** どのサイトの順位か。**登録してあるサイトの中から選ぶ** */
+async function askRankingSite(
+  work: WorkEntry,
+  ledger: PostingLedger
+): Promise<PostingSiteId | undefined> {
+  const picked = await vscode.window.showQuickPick(
+    [
+      ...ledger.sites.map((entry) => {
+        const info = postingSiteInfo(entry.site);
+        const latest = latestRanking(ledger, entry.site);
+        return {
+          label: info.label,
+          // 前回の記録を添える。「前より上がったか」がこの操作の関心である
+          description: latest
+            ? `前回 ${latest.board} ${latest.rank}位`
+            : "記録はまだありません",
+          site: entry.site,
+        };
+      }),
+      cancelItem(),
+    ],
+    {
+      title: `${work.title} のランキングを記録`,
+      placeHolder: "どのサイトの順位ですか",
+      ignoreFocusOut: true,
+    }
+  );
+  if (!picked || isCancelItem(picked) || !("site" in picked)) return undefined;
+  return picked.site;
+}
+
+/**
+ * 種別（日間・週間・ジャンル別…）を訊く。
+ *
+ * **候補はこちらで決め打ちしない**（6.68.5）。サイトごとに呼び方が違い、
+ * 企画やジャンル別の名前は作品ごとに違う。**作者が過去に使った言葉**を
+ * 候補に出し、無ければそのまま入力欄で訊く（空の候補一覧を見せない）。
+ */
+async function askRankingBoard(
+  ledger: PostingLedger,
+  site: PostingSiteId
+): Promise<string | undefined> {
+  const info = postingSiteInfo(site);
+  const boards = rankingBoards(ledger, site);
+
+  if (boards.length > 0) {
+    const used = new Set(
+      ledger.rankings
+        .filter((entry) => entry.site === site)
+        .map((entry) => entry.board)
+    );
+    const picked = await vscode.window.showQuickPick(
+      [
+        ...boards.map((board) => ({
+          label: board,
+          description: used.has(board)
+            ? undefined
+            : "ほかのサイトで使った種別",
+          board,
+        })),
+        {
+          label: "$(edit) 別の種別を入力する",
+          detail: "日間・週間・月間・ジャンル別など、サイトの呼び方のままで結構です",
+          board: null,
+        },
+        cancelItem(),
+      ],
+      {
+        title: `${info.label} のランキングの種別`,
+        placeHolder: "どのランキングの順位ですか",
+        ignoreFocusOut: true,
+      }
+    );
+    if (!picked || isCancelItem(picked) || !("board" in picked)) {
+      return undefined;
+    }
+    if (typeof picked.board === "string") return picked.board;
+  }
+
+  const value = await askText({
+    title: `${info.label} のランキングの種別`,
+    prompt:
+      "ランキングの種別を入れてください（日間・週間・月間・ジャンル別など、" +
+      "サイトの呼び方のままで結構です）",
+    placeHolder: "日間",
+    ignoreFocusOut: true,
+    validateInput: (input) =>
+      input.trim() ? undefined : "種別を入れてください。",
+  });
+  return value?.trim() || undefined;
 }
 
 /**

@@ -2,6 +2,7 @@ import { zipSync, type Zippable } from "fflate";
 import {
   BOOK_BLOCK_LABELS,
   BOOK_FONT_EXTENSIONS,
+  activeBookBlocks,
   isBookImageBlock,
   resolveBookBlocks,
   type BookBlockType,
@@ -513,9 +514,13 @@ export function buildEpub(book: EpubBook): Uint8Array {
  * 要るのに、ここはファイルを読みに行かないからである。中身を用意できるのは
  * 呼び出し側（`features/exportEpub.ts`）だけなので、そちらは必ず `blocks` を
  * 渡す。ここは第1段からの呼び出し（単体テストを含む）を壊さないための道である。
+ *
+ * **保留の面はここで落とす**（設計書6.65.15の段D）。`EpubBlock` は保留の印を
+ * 持たない——本を組む側は「入る面だけ」を受け取る、と決めておけば、面を
+ * 増やすたびに保留の見落としを探さずに済む。
  */
 function defaultBlocksOf(config: BookConfig): EpubBlock[] {
-  return resolveBookBlocks(config)
+  return activeBookBlocks(resolveBookBlocks(config))
     .filter((block) => !isBookImageBlock(block) && block.type !== "afterword")
     .map((block) => ({ type: block.type }) as EpubPlainBlock);
 }

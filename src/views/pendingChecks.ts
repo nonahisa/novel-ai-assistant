@@ -606,6 +606,24 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 11,
   },
   {
+    id: "F-74",
+    title: "サイトごとの作品情報とランキング記録",
+    commands: ["novelai.configurePostingSites", "novelai.recordRanking", "novelai.showWritingStats"],
+    count: 6,
+  },
+  {
+    id: "F-75",
+    title: "EPUBブロックの保留",
+    commands: ["novelai.openEpubEditor"],
+    count: 7,
+  },
+  {
+    id: "F-76",
+    title: "EPUB書き出しメニューの一本化",
+    commands: ["novelai.exportEpub", "novelai.openEpubEditor"],
+    count: 2,
+  },
+  {
     id: "",
     title: "LM Studio",
     commands: ["novelai.setupLmStudio", "novelai.setupAI", "novelai.testAI"],
@@ -626,4 +644,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 791;
+export const PENDING_CHECK_TOTAL = 806;

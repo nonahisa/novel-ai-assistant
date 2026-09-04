@@ -299,6 +299,7 @@ import {
 import {
   configurePostingSites,
   postNewEpisode,
+  recordRanking,
 } from "./features/postingKit";
 import {
   proposeChapters,
@@ -4089,11 +4090,23 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
-        // **AIは呼ばない。** サイト・URL・投稿済みの基準線を決めるだけ
+        // **AIは呼ばない。** サイト・URL・作品情報・基準線を決めるだけ
         const result = await configurePostingSites(work);
         if (result.changed) treeProvider.refresh(work.id);
       }
-    )
+    ),
+    /*
+      ランキングの記録（設計書6.68.5）。**サイトへは取りにいかない**——
+      作者が画面で見た順位を台帳へ書き足すだけである。
+
+      一覧は作り直さない。未投稿の印は順位では変わらず、記録のたびに
+      作品一覧を組み直しても見た目は同じである。
+    */
+    registerCommand("novelai.recordRanking", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await recordRanking(work);
+    })
   );
 
   /*

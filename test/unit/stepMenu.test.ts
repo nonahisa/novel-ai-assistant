@@ -469,22 +469,20 @@ describe("第7段に、電子書籍の操作が載る", () => {
   const publishStep = () =>
     STEP_MENU.find((step) => step.label === "7. 電子出版等")!;
 
-  test("PDF・EPUB書き出し・EPUBエディターが並ぶ", () => {
+  test("PDFとEPUBエディターが並ぶ（書き出しはエディターの中）", () => {
+    // **「EPUBへ書き出す」は外のメニューから外した**（作者の指定、
+    // 2026-09-04）。書き出しボタンはエディターの中にあり、外にも同じ
+    // 入口があると「どちらから出すのが正しいのか」が分からない
     expect(
       publishStep().entries.map((entry) =>
         entry.kind === "action" ? entry.command : entry.label
       )
-    ).toEqual([
-      "novelai.exportPdf",
-      // エディターが上、書き出しが下（作者の指定、2026-09-04）
-      "novelai.openEpubEditor",
-      "novelai.exportEpub",
-    ]);
+    ).toEqual(["novelai.exportPdf", "novelai.openEpubEditor"]);
   });
 
   test("実体は詳細メニューの木から引いている（写しではない）", () => {
     // 名前や説明をここへ書き写すと、木を直したときに片方だけ古くなる
-    for (const command of ["novelai.exportEpub", "novelai.openEpubEditor"]) {
+    for (const command of ["novelai.openEpubEditor"]) {
       const inTree = allActions().find((entry) => entry.command === command);
       const inStep = stepActions().find((entry) => entry.command === command);
 

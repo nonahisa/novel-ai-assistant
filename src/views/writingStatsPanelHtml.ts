@@ -132,6 +132,18 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
 .mini { position: relative; height: 8px; background: var(--vscode-panel-border); border-radius: 4px; min-width: 60px; }
 .mini > span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--vscode-charts-blue, #3794ff); }
 .note { color: var(--vscode-descriptionForeground); font-size: 12px; margin: 12px 0; line-height: 1.6; }
+/* サイトの記録（設計書6.68.5）。作品情報の1行と、その下に順位の履歴 */
+.site { margin-bottom: 18px; }
+.site-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
+.site-name { font-weight: 600; }
+.site-meta { font-size: 12px; color: var(--vscode-descriptionForeground); }
+.site-latest { font-size: 12px; }
+a, .link {
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  text-decoration: none;
+}
+a:hover, .link:hover { text-decoration: underline; }
 .empty { padding: 24px 0; color: var(--vscode-descriptionForeground); line-height: 1.7; }
 .conflicted { color: var(--vscode-editorWarning-foreground, #cca700); }
 </style>
@@ -152,6 +164,7 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
     <div class="chart-wrap"><svg id="chart" width="100%" height="240"></svg></div>
     <div class="note" id="chart-note"></div>
     <div id="devices"></div>
+    <div id="site-records"></div>
   </section>
   ${hasEpisodesTab ? `<section class="page" id="page-episodes">
     <div class="cards" id="episode-cards"></div>
@@ -432,6 +445,85 @@ function renderDevices() {
     '</tbody></table>';
 }
 
+/**
+ * サイトの記録（設計書6.68.5）。
+ *
+ * **1件も無ければ、節ごと出さない。** 空の見出しと空の表が増えるだけで、
+ * 執筆量を見にきた人の邪魔になる。
+ *
+ * 作品ページは**拡張機能側へ頼んで開く**（openExternal）。画面の中から
+ * 直接どこかへ繋ぐことはしない。
+ */
+function renderSiteRecords() {
+  const host = document.getElementById('site-records');
+  if (!host) return;
+  const records = (state && state.siteRecords) || [];
+  if (records.length === 0) {
+    host.innerHTML = '';
+    return;
+  }
+
+  const blocks = records.map((record) => {
+    const meta = [];
+    if (record.workId) meta.push('作品ID ' + escapeHtml(record.workId));
+    if (record.genre) meta.push('ジャンル ' + escapeHtml(record.genre));
+    if (!record.registered) meta.push('いまは投稿先から外しています');
+    if (record.note) meta.push(escapeHtml(record.note));
+
+    const head = ['<div class="site-name">' + escapeHtml(record.label) + '</div>'];
+    if (meta.length > 0) {
+      head.push('<div class="site-meta">' + meta.join(' ／ ') + '</div>');
+    }
+    if (record.workUrl) {
+      head.push(
+        '<div class="site-meta"><span class="link" data-url="' +
+        escapeHtml(record.workUrl) + '">作品ページを開く</span></div>'
+      );
+    }
+    if (record.latest) {
+      head.push(
+        '<div class="site-latest">最新 ' + escapeHtml(record.latest.board) + ' ' +
+        formatCount(record.latest.rank) + '位' +
+        '（' + escapeHtml(formatWhen(record.latest.recordedAt)) + '）</div>'
+      );
+    }
+
+    const rows = record.history.map((row) =>
+      '<tr><td>' + escapeHtml(formatWhen(row.recordedAt)) + '</td>' +
+      '<td>' + escapeHtml(row.board) + '</td>' +
+      '<td class="num">' + formatCount(row.rank) + '</td>' +
+      '<td>' + escapeHtml(row.note || '') + '</td></tr>'
+    );
+    const table = rows.length > 0
+      ? '<table><thead><tr><th>日時</th><th>種別</th><th class="num">順位</th>' +
+        '<th>メモ</th></tr></thead><tbody>' + rows.join('') + '</tbody></table>'
+      : '';
+
+    return '<div class="site"><div class="site-head">' + head.join('') + '</div>' +
+      table + '</div>';
+  });
+
+  host.innerHTML =
+    '<h3>サイトの記録</h3>' + blocks.join('') +
+    '<div class="note">順位は「ランキングを記録する」で書き足した値です。' +
+    'サイトから自動で取ってくることはありません。</div>';
+
+  host.querySelectorAll('[data-url]').forEach((el) => {
+    el.addEventListener('click', () => {
+      vscode.postMessage({ type: 'openExternal', url: el.dataset.url });
+    });
+  });
+}
+
+/** 記録した日時。読めない値はそのまま出す（作者が手で書いたかもしれない） */
+function formatWhen(value) {
+  const when = new Date(value);
+  if (Number.isNaN(when.getTime())) return String(value);
+  const pad = (number) => String(number).padStart(2, '0');
+  return when.getFullYear() + '/' + pad(when.getMonth() + 1) + '/' +
+    pad(when.getDate()) + ' ' + pad(when.getHours()) + ':' + pad(when.getMinutes());
+}
+
 function renderEpisodes() {
   if (!state || !state.episodes) return;
   const summary = state.episodes.summary;
@@ -497,6 +589,7 @@ window.addEventListener('message', (event) => {
   renderCards();
   renderChart();
   renderDevices();
+  renderSiteRecords();
   renderEpisodes();
 });
 

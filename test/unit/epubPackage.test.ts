@@ -1325,6 +1325,56 @@ describe("ブロックの並びで面を組む（設計書6.65.15）", () => {
     expect(files["OEBPS/nav.xhtml"]).toBeDefined();
     expect(spine(files)).toEqual(["cover", "chapter-001", "chapter-002"]);
   });
+
+  /**
+   * 保留の面（設計書6.65.15の段D）。**設計図には残るが、本には1面も入らない。**
+   *
+   * ここは `blocks` を渡さない道（設計図から既定の並びを組む）を見ている。
+   * 中身を読む道（`features/exportEpub.ts`）は書き出しのテストが見る。
+   */
+  test("保留の面は、読む順路にもファイルにも入らない", () => {
+    const files = open(
+      buildEpub(
+        withConfig({
+          blocks: [
+            { type: "cover", suspended: true },
+            { type: "halfTitle" },
+            { type: "body" },
+            { type: "colophon" },
+          ],
+        })
+      )
+    );
+
+    expect(spine(files)).toEqual([
+      "titlepage",
+      "chapter-001",
+      "chapter-002",
+      "colophon",
+    ]);
+    expect(files["OEBPS/cover.xhtml"]).toBeUndefined();
+  });
+
+  /**
+   * **表紙を2案持って見比べる**（保留の本来の狙い）。片方が保留なら、
+   * 本へ入るのは有効なほうの1面だけである。
+   */
+  test("表紙が2つあっても、有効な1つだけが本に入る", () => {
+    const files = open(
+      buildEpub(
+        withConfig({
+          blocks: [
+            { type: "cover" },
+            { type: "cover", suspended: true },
+            { type: "body" },
+          ],
+        })
+      )
+    );
+
+    expect(spine(files)).toEqual(["cover", "chapter-001", "chapter-002"]);
+    expect(files["OEBPS/cover.xhtml"]).toBeDefined();
+  });
 });
 
 describe("口絵・扉絵の面（設計書6.65.15）", () => {

@@ -4,13 +4,20 @@ import {
   emptyPostingLedger,
   firstUnpostedEpisodePath,
   isPosted,
+  latestRanking,
   parsePostingLedger,
+  parseRankInput,
   postingSiteInfo,
   postingSiteLabels,
+  rankingBoards,
+  rankingsForSite,
   unpostedSites,
   validateNewEpisodeUrl,
+  validateRankInput,
+  validateWorkPageUrl,
   withBaselinePosts,
   withPost,
+  withRanking,
   withSites,
   type PostingLedger,
 } from "../../src/models/posting";
@@ -372,5 +379,321 @@ describe("投稿済みの基準線", () => {
         ],
       })
     ).toThrow();
+  });
+});
+
+/**
+ * サイトごとの作品情報（設計書6.68.5）。
+ *
+ * **サイトへ取りに行かない。** ここに入るのは作者が手で入れた値だけである
+ * （作品ID・作品ページのURL・ジャンル・メモ）。どれも任意で、
+ * **空のまま使い続けられる**こと自体が仕様である。
+ */
+describe("サイトごとの作品情報", () => {
+  test("作品ページのURLは、そのサイトのドメインだけ受ける", () => {
+    expect(validateWorkPageUrl("narou", "https://ncode.syosetu.com/n1234ab/")).toBeNull();
+    expect(validateWorkPageUrl("kakuyomu", url.narou)).toContain("kakuyomu.jp");
+    expect(validateWorkPageUrl("note", "note.com/nonahisa")).toContain("http");
+  });
+
+  /** **入れないまま進める。** 任意の情報なので、空を「間違い」と言わない */
+  test("作品ページのURLは、空でもよい（投稿ページのURLとはここが違う）", () => {
+    expect(validateWorkPageUrl("narou", "")).toBeNull();
+    expect(validateWorkPageUrl("narou", "   ")).toBeNull();
+    // 投稿ページのほうは、無いと投稿の案内が成り立たないので必須のまま
+    expect(validateNewEpisodeUrl("narou", "")).toContain("URL");
+  });
+
+  test("書いてある作品情報を、そのまま読む", () => {
+    const ledger = parsePostingLedger({
+      sites: [
+        {
+          site: "narou",
+          newEpisodeUrl: url.narou,
+          profile: {
+            workId: "n1234ab",
+            workUrl: "https://ncode.syosetu.com/n1234ab/",
+            genre: "ハイファンタジー",
+            note: "完結済みで再掲",
+          },
+        },
+      ],
+    });
+
+    expect(ledger.sites[0].profile).toEqual({
+      workId: "n1234ab",
+      workUrl: "https://ncode.syosetu.com/n1234ab/",
+      genre: "ハイファンタジー",
+      note: "完結済みで再掲",
+    });
+  });
+
+  test("別のサイトの作品ページURLは、直さずに止める", () => {
+    expect(() =>
+      parsePostingLedger({
+        sites: [
+          {
+            site: "note",
+            newEpisodeUrl: url.note,
+            profile: { workUrl: url.kakuyomu },
+          },
+        ],
+      })
+    ).toThrow();
+  });
+
+  test("空の作品情報は持ち歩かない（読み直すたびに中身が増えない）", () => {
+    const ledger = parsePostingLedger({
+      sites: [
+        {
+          site: "note",
+          newEpisodeUrl: url.note,
+          profile: { workId: "  ", genre: "" },
+        },
+      ],
+    });
+
+    expect(ledger.sites[0].profile).toBeUndefined();
+  });
+
+  test("サイトを置き換えても、作品情報は写しで持つ（元の台帳を書き換えない）", () => {
+    const before = withSites(emptyPostingLedger(), [
+      {
+        site: "narou",
+        newEpisodeUrl: url.narou,
+        profile: { workId: "n1234ab" },
+      },
+    ]);
+    const after = withSites(before, [
+      {
+        site: "narou",
+        newEpisodeUrl: url.narou,
+        profile: { workId: "n9999zz" },
+      },
+    ]);
+
+    expect(before.sites[0].profile?.workId).toBe("n1234ab");
+    expect(after.sites[0].profile?.workId).toBe("n9999zz");
+  });
+});
+
+/**
+ * ランキングの記録（設計書6.68.5）。
+ *
+ * **サイトから取りに行かない**（6.68.1と同じ線）。記録するのは、作者が
+ * 画面で見た値だけである。種別（日間・週間・ジャンル別…）はサイトごとに
+ * 呼び方が違うので**自由入力**にし、こちらで一覧を決め打ちしない。
+ */
+describe("ランキングの記録", () => {
+  const registered: PostingLedger = withSites(emptyPostingLedger(), [
+    { site: "narou", newEpisodeUrl: url.narou },
+    { site: "kakuyomu", newEpisodeUrl: url.kakuyomu },
+  ]);
+
+  function ranked(
+    site: "narou" | "kakuyomu",
+    recordedAt: string,
+    board: string,
+    rank: number
+  ) {
+    return { site, recordedAt, board, rank } as const;
+  }
+
+  test("追記しても、既にある記録は1つも変わらない", () => {
+    const first = withRanking(
+      registered,
+      ranked("narou", "2026-09-01T00:00:00.000Z", "日間", 12)
+    );
+    const second = withRanking(
+      first,
+      ranked("narou", "2026-09-04T00:00:00.000Z", "日間", 5)
+    );
+
+    expect(first.rankings).toHaveLength(1);
+    expect(second.rankings).toHaveLength(2);
+    expect(second.rankings[0]).toEqual(first.rankings[0]);
+  });
+
+  test("順位は1以上の整数だけ（0・負・小数は断る）", () => {
+    for (const rank of [0, -1, 1.5]) {
+      expect(() =>
+        withRanking(registered, {
+          site: "narou",
+          recordedAt: "2026-09-04T00:00:00.000Z",
+          board: "日間",
+          rank,
+        })
+      ).toThrow();
+    }
+  });
+
+  test("メモは任意（無ければ項目ごと持たない）", () => {
+    const ledger = withRanking(registered, {
+      site: "narou",
+      recordedAt: "2026-09-04T00:00:00.000Z",
+      board: "日間",
+      rank: 12,
+    });
+
+    expect(ledger.rankings[0].note).toBeUndefined();
+  });
+
+  test("新しい順で読める（画面はこの順に並べる）", () => {
+    let ledger = withRanking(
+      registered,
+      ranked("narou", "2026-09-01T00:00:00.000Z", "日間", 12)
+    );
+    ledger = withRanking(
+      ledger,
+      ranked("narou", "2026-09-04T00:00:00.000Z", "週間", 3)
+    );
+    ledger = withRanking(
+      ledger,
+      ranked("kakuyomu", "2026-09-03T00:00:00.000Z", "週間", 40)
+    );
+
+    expect(rankingsForSite(ledger, "narou").map((entry) => entry.rank)).toEqual([
+      3, 12,
+    ]);
+    expect(latestRanking(ledger, "narou")?.board).toBe("週間");
+    // ほかのサイトの記録は混ざらない
+    expect(latestRanking(ledger, "kakuyomu")?.rank).toBe(40);
+    expect(latestRanking(ledger, "note")).toBeUndefined();
+  });
+
+  /** **候補は作者が使った言葉から作る。** こちらで種別を決め打ちしない */
+  test("過去に使った種別が、そのサイトのぶんから先に並ぶ", () => {
+    let ledger = withRanking(
+      registered,
+      ranked("narou", "2026-09-01T00:00:00.000Z", "日間", 12)
+    );
+    ledger = withRanking(
+      ledger,
+      ranked("narou", "2026-09-04T00:00:00.000Z", "週間", 3)
+    );
+    ledger = withRanking(
+      ledger,
+      ranked("narou", "2026-09-05T00:00:00.000Z", "日間", 8)
+    );
+    ledger = withRanking(
+      ledger,
+      ranked("kakuyomu", "2026-09-03T00:00:00.000Z", "ジャンル別", 40)
+    );
+
+    // 新しく使ったものが先。同じ種別は1つにまとめる
+    expect(rankingBoards(ledger, "narou")).toEqual([
+      "日間",
+      "週間",
+      "ジャンル別",
+    ]);
+    // そのサイトの記録が無ければ、ほかのサイトで使った種別を新しい順に出す
+    expect(rankingBoards(ledger, "note")).toEqual([
+      "日間",
+      "週間",
+      "ジャンル別",
+    ]);
+  });
+
+  test("読み書きで、記録がそのまま残る", () => {
+    const ledger = parsePostingLedger({
+      rankings: [
+        {
+          site: "narou",
+          recordedAt: "2026-09-04T00:00:00.000Z",
+          board: "日間",
+          rank: 12,
+          note: "更新直後",
+        },
+      ],
+    });
+
+    expect(ledger.rankings[0]).toEqual({
+      site: "narou",
+      recordedAt: "2026-09-04T00:00:00.000Z",
+      board: "日間",
+      rank: 12,
+      note: "更新直後",
+    });
+  });
+
+  test("順位が壊れていれば、読めないと言って止める（黙って直さない）", () => {
+    for (const rank of [0, -3, 2.5, "12位"]) {
+      expect(() =>
+        parsePostingLedger({
+          rankings: [
+            {
+              site: "narou",
+              recordedAt: "2026-09-04T00:00:00.000Z",
+              board: "日間",
+              rank,
+            },
+          ],
+        })
+      ).toThrow();
+    }
+  });
+
+  test("種別が空なら止める（何の順位か分からない記録を残さない）", () => {
+    expect(() =>
+      parsePostingLedger({
+        rankings: [
+          {
+            site: "narou",
+            recordedAt: "2026-09-04T00:00:00.000Z",
+            board: "  ",
+            rank: 3,
+          },
+        ],
+      })
+    ).toThrow();
+  });
+
+  /**
+   * **古い台帳がそのまま読めること。** この機能より前に作られた
+   * `投稿状態.json` には `rankings` も `profile` も無い。
+   */
+  test("欄の無い古い台帳は、空として読める", () => {
+    const ledger = parsePostingLedger({
+      schemaVersion: "1",
+      sites: [{ site: "narou", newEpisodeUrl: url.narou }],
+      posts: [
+        {
+          episodePath: "本文/001.txt",
+          site: "narou",
+          postedAt: "2026-09-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(ledger.rankings).toEqual([]);
+    expect(ledger.sites[0].profile).toBeUndefined();
+    // 既にある記録は、読み直しで1つも変わらない
+    expect(ledger.posts).toHaveLength(1);
+  });
+});
+
+/**
+ * 順位の入力（設計書6.68.5）。
+ *
+ * **日本語入力のまま打つと全角になる。** 「１２」を断ると、作者は
+ * 変換の仕方を疑うことになる——読めるものは読む。
+ */
+describe("順位の入力", () => {
+  test("半角も全角も、同じ数として読む", () => {
+    expect(parseRankInput("12")).toBe(12);
+    expect(parseRankInput("１２")).toBe(12);
+    expect(parseRankInput(" 3 ")).toBe(3);
+  });
+
+  test("1未満・小数・数でないものは読まない", () => {
+    for (const value of ["0", "-1", "1.5", "", "十二", "12位"]) {
+      expect(parseRankInput(value), value).toBeNull();
+    }
+  });
+
+  test("断るときは、理由を日本語で返す", () => {
+    expect(validateRankInput("12")).toBeNull();
+    expect(validateRankInput("0")).toContain("1");
+    expect(validateRankInput("")).toContain("順位");
   });
 });
