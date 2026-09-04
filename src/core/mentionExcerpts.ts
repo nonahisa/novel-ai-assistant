@@ -16,6 +16,15 @@ export interface ExcerptSource {
   /** 「第12話」「プロローグ」など、AIに示す出典 */
   label: string;
   text: string;
+  /**
+   * この出典に含まれる**最後の**話数。読み取れなければ null／未設定。
+   *
+   * 矛盾検知が「いま調べている話より前だけを渡す」を守るために使う
+   * （設計書6.74）。**最後の話数**にしてあるのは、第3〜5話をまとめた
+   * ファイルを第4話へ渡すと、第5話（＝後の話）が混ざるためである。
+   * 使わない機能（掘り下げ・相談）は見なくてよい。
+   */
+  chapter?: number | null;
 }
 
 export interface MentionExcerpt {

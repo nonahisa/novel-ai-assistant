@@ -41,6 +41,7 @@ export async function loadExcerptSources(
         sources.push({
           label: collectedEpisodeLabel(episode, inner),
           text: body,
+          chapter: inner.chapter,
         });
       }
       continue;
@@ -48,7 +49,11 @@ export async function loadExcerptSources(
 
     const body = blankMemoLines(parseEpisodeMetadata(file.text).body);
     if (!body.trim()) continue;
-    sources.push({ label: episodeLabel(episode), text: body });
+    sources.push({
+      label: episodeLabel(episode),
+      text: body,
+      chapter: episodeChapter(episode),
+    });
   }
 
   return { sources, conflicted };
@@ -82,6 +87,21 @@ export function collectedEpisodeLabel(
   const chapter =
     inner.chapter !== null ? `第${inner.chapter}話` : `${file.fileName}の${inner.order}番目`;
   return inner.title ? `${chapter} ${inner.title}` : chapter;
+}
+
+/**
+ * その話が「第何話」かを返す。決められなければ null。
+ *
+ * **本編（と、種別を読めなかったもの）だけを数える。** プロローグ・
+ * 幕間・エピローグは `chapterStart` に番号が入っていても「第N話」では
+ * ないので（`chapterPart` が「プロローグ1」と書き分けている）、
+ * 話数として扱うと本編の第1話と前後を比べてしまう。
+ *
+ * 範囲を持つ話は**終わりの話数**を返す（`ExcerptSource.chapter` の注釈）。
+ */
+function episodeChapter(episode: EpisodeFile): number | null {
+  if (episode.kind !== "本編" && episode.kind !== "不明") return null;
+  return episode.chapterEnd ?? episode.chapterStart;
 }
 
 function chapterPart(episode: EpisodeFile): string {

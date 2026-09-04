@@ -20,7 +20,7 @@ import {
   withLineNumbers,
   type Chunk,
 } from "../core/chunker";
-import { ChunkCache } from "../core/chunkCache";
+import { ChunkCache, type CacheKeyBase } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
 import {
   capabilityCacheTag,
@@ -60,6 +60,13 @@ import {
   settingsFingerprint,
 } from "../core/settingsSummary";
 import { selectWorldview, worldviewMaxChars } from "../core/worldviewSelect";
+import {
+  buildPastScenes,
+  pastSceneMaxChars,
+  promptVersionWithPastScenes,
+  PastSceneIndex,
+} from "../core/pastSceneSelect";
+import { loadExcerptSources } from "../core/manuscriptSources";
 import { formatChapterLabel } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import {
@@ -241,6 +248,11 @@ export async function checkContradictions(
     worldviewMaxChars(info.contextWindow)
   );
   if (!material) return undefined;
+  // 下の入れ子の関数では、上の `if (!material) return` による絞り込みが
+  // 効かない（関数宣言は巻き上がるので、絞り込みの前に呼ばれうるとみなされる）。
+  // **ここで束ねる。** 過去の場面を引く関数が、鍵を決める段（＝下の
+  // `settings` の宣言より前）から呼ばれるので、束ねる場所も前へ出してある
+  const settings = material;
 
   // **本文を空にしてプロンプトを組み、その字数を固定費とする。**
   // 見込みの定数を置くと、プロンプトの改訂に置いていかれて必ず追い越される。
@@ -285,6 +297,19 @@ export async function checkContradictions(
     return undefined;
   }
 
+  // **過去の関連場面の索引を、ここで1回だけ作る**（設計書6.74）。
+  // チャンクごとに全話を読み直すと、作品の大きさぶんだけ二乗で効く。
+  //
+  // **チャンクの割当（`overheadChars`）には足していない。** 人物・場所の
+  // 設定と同じく、チャンクに出た名前しだいで量が変わる材料なので、
+  // 切る前には測れない。入るかどうかは送る直前の関所（`ai/contextGuard.ts`）と
+  // 逃げ道（`chunkRetry.ts`）が受ける——ここで見込みを足すと、抜粋が0件の
+  // 作品まで本文の割当が痩せ、チャンクの切れ目が変わってキャッシュが飛ぶ
+  const pastSceneBudget = pastSceneMaxChars(info.contextWindow);
+  const pastSceneIndex = await collectPastScenes(work);
+  /** チャンクごとの抜粋。鍵を決めるときと送るときで、同じものを使う */
+  const pastSceneByChunk = new Map<string, string>();
+
   // **設定が変われば、同じ本文でも答えが変わる。**
   // 材料のハッシュをキャッシュの鍵へ入れないと、設定を直したのに
   // 古い指摘が出続ける
@@ -315,7 +340,11 @@ export async function checkContradictions(
     model: resolved.model,
   };
 
-  const pending = chunks.filter((chunk) => !cache.get(chunk.hash, cacheKeyBase));
+  // **鍵は渡す抜粋ごとに変える**（設計書6.74）。過去の話を書き直したら、
+  // 同じチャンクでも答えが変わりうる（settingsFingerprint と同じ理屈）
+  const pending = chunks.filter(
+    (chunk) => !cache.get(chunk.hash, keyWithPastScenes(cacheKeyBase, chunk))
+  );
   if (pending.length > 0) {
     // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
     // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）
@@ -337,6 +366,12 @@ export async function checkContradictions(
             `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
           `材料: 人物${material.characterCount}人 / 場所${material.locationCount}件 / ` +
             `世界観${material.worldCount}件`,
+          // **送る量が増えることを黙らない**（設計書6.74）。過去の本文を
+          // 足すので、有料AIでは料金にも効く
+          pastSceneIndex
+            ? `前の話の本文からも、名前の出てくる場面を探して渡します` +
+              `（${pastSceneIndex.size}か所から最大${pastSceneBudget}字）。`
+            : "",
           "",
           "この機能は本文を書き換えません。 設定と食い違う箇所を並べるだけで、",
           "どちらを直すかは作者が決めます（設定側が古いこともあります）。",
@@ -374,7 +409,6 @@ export async function checkContradictions(
   // 効かない（あとから書き換わりうるとみなされる）。ここで束ねておく
   const provider = resolved.provider;
   const model = resolved.model;
-  const settings = material;
 
   /**
    * 検出した1件。**検証まで、どのチャンクの何行目かを持ち回る**
@@ -409,7 +443,7 @@ export async function checkContradictions(
       if (fatalFailure) break;
       const chunk = queue[cursor];
 
-      const cached = cache.get(chunk.hash, cacheKeyBase);
+      const cached = cache.get(chunk.hash, keyWithPastScenes(cacheKeyBase, chunk));
       const raw = cached ?? (await ask(chunk, "settled"));
       done++;
       progress.report({
@@ -496,6 +530,10 @@ export async function checkContradictions(
       try {
         const bodyWithLines = withLineNumbers(chunk);
         const previousSynopses = settings.synopsesBefore(chunk.chapterStart);
+        // **「あとで判明する事実」の向きには渡さない**（設計書6.74）。
+        // あちらは本命（settled）が通ったチャンクの補足で、既に実データで
+        // 測ってある。入力を増やすと、測った結果と別のものになる
+        const pastScenes = mode === "future" ? "" : pastScenesFor(chunk);
         const userPrompt = buildContradictionCheckPrompt({
           // **まとめたチャンクは、話が1つとは限らない。**
           // 1つ目の話の名前だけを渡すと、2話目以降の本文を
@@ -510,6 +548,7 @@ export async function checkContradictions(
           previousSynopses,
           categories,
           futureFacts,
+          pastScenes,
         });
 
         const response = await provider.generate({
@@ -536,6 +575,9 @@ export async function checkContradictions(
               世界観: relevant.worldview.length,
               あらすじ: previousSynopses.length,
               未来の事実: futureFacts.length,
+              // **新しく増えた材料は、独立した項目で測る**（設計書6.74）。
+              // 上限（モデル比）が妥当かは実測を見てからでないと決められない
+              過去場面: pastScenes.length,
             }),
           },
         });
@@ -562,7 +604,9 @@ export async function checkContradictions(
         }
         await cache.set(
           chunk.hash,
-          mode === "future" ? futureKeyBase : cacheKeyBase,
+          mode === "future"
+            ? futureKeyBase
+            : keyWithPastScenes(cacheKeyBase, chunk),
           parsed
         );
         return parsed;
@@ -665,6 +709,45 @@ export async function checkContradictions(
     processedChunks,
     verifyNote,
   };
+
+  /**
+   * そのチャンクへ渡す、過去の関連場面（設計書6.74）。無ければ空文字。
+   *
+   * **同じチャンクを2度引かない。** 鍵を決めるときと、実際に送るときの
+   * 2回要る——揺れると鍵と中身が食い違う。`select` は決定的なので
+   * 引き直しても同じ結果になるが、覚えておくほうが速い。
+   */
+  function pastScenesFor(chunk: Chunk): string {
+    const remembered = pastSceneByChunk.get(chunk.hash);
+    if (remembered !== undefined) return remembered;
+
+    // **名前が1つも出ないチャンクでは引かない。** 検索語が無いまま引くと
+    // 無関係な場面が並び、従来より悪くなる（＝そのときは従来と同じ入力）
+    const selected = pastSceneIndex
+      ? pastSceneIndex.select({
+          chapter: chunk.chapterStart,
+          terms: settings.namesIn(chunk.text),
+          maxChars: pastSceneBudget,
+        })
+      : "";
+    pastSceneByChunk.set(chunk.hash, selected);
+    return selected;
+  }
+
+  /**
+   * 渡した抜粋の内容を鍵に混ぜる（設計書6.74）。
+   *
+   * **0件のときは混ぜない。** 混ぜると、抜粋を渡していないチャンクの
+   * 鍵まで変わり、これまで処理済みだったぶんが無駄に飛ぶ。
+   */
+  function keyWithPastScenes(base: CacheKeyBase, chunk: Chunk): CacheKeyBase {
+    const scenes = pastScenesFor(chunk);
+    if (!scenes) return base;
+    return {
+      ...base,
+      promptVersion: promptVersionWithPastScenes(base.promptVersion, scenes),
+    };
+  }
 
   /** 1件だけを見て、本当に矛盾かを問い直す */
   async function verify(
@@ -786,6 +869,14 @@ interface SettingsMaterial {
     worldview: string;
     hasAnything: boolean;
   };
+  /**
+   * その本文に出てくる人物・場所の呼び名（設計書6.74）。
+   *
+   * **本文に現れた表記そのもの**を返す（正式名称ではない）。過去の場面は
+   * 語句一致で引くので、本文が「灯くん」としか書いていないのに正式名称の
+   * 「月島 灯」で引くと当たらない。
+   */
+  namesIn(text: string): string[];
   /**
    * その本文より**あと**で判明する事実（設計書6.10.4）。
    * 無ければ空文字。
@@ -950,6 +1041,17 @@ async function collectSettings(
         ),
       };
     },
+    namesIn(text) {
+      const names: string[] = [];
+      for (const match of index.find(text)) {
+        const term = match.entry.text.trim();
+        if (!term || names.includes(term)) continue;
+        names.push(term);
+      }
+      // **件数は切らない。** どれを検索語に使うかは選抜側の判断で、
+      // ここは「本文に出た名前」をそのまま渡す役目（`pastSceneSelect`）
+      return names;
+    },
     futureFactsFor(text, chapter) {
       if (chapter === null) return "";
       const lines: string[] = [];
@@ -990,6 +1092,32 @@ async function collectSettings(
   // 能力・組織はまだ渡していない（引継ぎ書に残した）
   void abilitySystem;
   void organizations;
+}
+
+/**
+ * 過去の場面の索引を作る（設計書6.74）。
+ *
+ * **1回の検知で1回だけ呼ぶ。** 全話を読み直すので、チャンクごとに
+ * 呼ぶと作品の大きさぶんだけ二乗で効く。
+ *
+ * **読めなくても検知は続ける。** 過去の場面は補助の材料であり、
+ * 無ければ従来どおりの入力に戻るだけである。ここで止めると、
+ * 本文が1つ壊れているだけで矛盾検知そのものが使えなくなる。
+ */
+async function collectPastScenes(
+  work: WorkEntry
+): Promise<PastSceneIndex | undefined> {
+  try {
+    const loaded = await loadExcerptSources(work);
+    const scenes = buildPastScenes(loaded.sources);
+    if (scenes.length === 0) return undefined;
+    return new PastSceneIndex(scenes);
+  } catch (error) {
+    logFailure("矛盾検知：過去の場面の読み込み", {
+      詳細: error instanceof Error ? error.message : String(error),
+    });
+    return undefined;
+  }
 }
 
 /** 本文をチャンクに分ける。誤字脱字検知と同じ手順 */
