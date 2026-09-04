@@ -20,6 +20,7 @@ import {
   groupEpisodesByChapter,
 } from "../core/chapterGrouping";
 import { manuscriptViewTypeFor } from "../core/manuscriptViewTypes";
+import { listWorkMemos, type WorkMemo } from "../core/workMemos";
 import { PostingStore } from "../core/postingStore";
 import {
   emptyPostingLedger,
@@ -37,7 +38,13 @@ import {
   countModeLabel,
 } from "../core/countSettings";
 
-export type TreeNode = WorkNode | ChapterNode | EpisodeNode | MessageNode;
+export type TreeNode =
+  | WorkNode
+  | ChapterNode
+  | EpisodeNode
+  | MemoFolderNode
+  | MemoFileNode
+  | MessageNode;
 
 export class WorkNode {
   readonly type = "work" as const;
@@ -97,6 +104,33 @@ export class EpisodeNode {
   ) {}
 }
 
+/**
+ * 作品ごとのメモの折りたたみ（設計書6.71）。
+ *
+ * **メモが1つも無い作品では作らない。** 使わない作者の一覧に空の枝を
+ * 並べないためで、章の枝（6.66.3）と同じ考え方である。話の並びの
+ * **後ろ**に置く——メモは原稿ではないので、原稿より前に来てはいけない。
+ */
+export class MemoFolderNode {
+  readonly type = "memoFolder" as const;
+  constructor(
+    public readonly work: WorkEntry,
+    public readonly memos: WorkMemo[],
+    /** 作品の形式。右クリックの絞り込みに要る（ほかのノードと同じ理由） */
+    public readonly format?: WorkFormatKey
+  ) {}
+}
+
+/** メモ1つ。クリックで開き、右クリックから削除できる */
+export class MemoFileNode {
+  readonly type = "memoFile" as const;
+  constructor(
+    public readonly work: WorkEntry,
+    public readonly memo: WorkMemo,
+    public readonly format?: WorkFormatKey
+  ) {}
+}
+
 export class MessageNode {
   readonly type = "message" as const;
   constructor(public readonly text: string) {}
@@ -143,6 +177,14 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private posting = new Map<string, PostingLedger>();
 
   /**
+   * 作品ごとのメモ（作品ID -> メモの一覧、設計書6.71）。
+   *
+   * 章・投稿と同じく**作品を開くたびに1回だけ読む**。フォルダの中を
+   * 数えるだけとはいえ、描き直しのたびに読むとファイルを何度も開く。
+   */
+  private memos = new Map<string, WorkMemo[]>();
+
+  /**
    * @param syncBadge GitHub同期に残っているものを短く表す文字列を返す。
    *   ツリーがGit連携そのものに依存しないよう、関数で受け取る。
    * @param syncTooltip その内訳（ホバーで読む）。
@@ -163,11 +205,13 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       this.synopses.delete(workId);
       this.chapters.delete(workId);
       this.posting.delete(workId);
+      this.memos.delete(workId);
     } else {
       this.cache.clear();
       this.synopses.clear();
       this.chapters.clear();
       this.posting.clear();
+      this.memos.clear();
     }
     this._onDidChangeTreeData.fire();
   }
@@ -290,6 +334,56 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
               "\n章を外すか、いまの話から章を始め直してください（話は消えません）。"
             : `- ${formatChapterRange(node.episodes, node.format)}`,
         ].join("\n")
+      );
+      return item;
+    }
+
+    if (node.type === "memoFolder") {
+      // 件数は名前の中に出す。**行の右側（description）は空けておく**
+      // ——話の行では文字数が出る場所で、そこに件数が並ぶと数字を読み違える
+      const item = new vscode.TreeItem(
+        `メモ（${node.memos.length}件）`,
+        vscode.TreeItemCollapsibleState.Collapsed
+      );
+      item.contextValue = workTypeContextValue("memoFolder", node.format);
+      // 開閉はVS CodeがIDで覚える。作品ごとに1つしか無いので作品IDで足りる
+      item.id = `${node.work.id}:memo`;
+      item.iconPath = new vscode.ThemeIcon("note");
+      item.tooltip = new vscode.MarkdownString(
+        [
+          "**メモ**",
+          "",
+          "この作品のためのメモです。",
+          "話数・文字数・あらすじ・投稿・校正のどれにも入りません。",
+          "",
+          "右クリックの「メモを追加」から増やせます。",
+        ].join("\n")
+      );
+      return item;
+    }
+
+    if (node.type === "memoFile") {
+      const item = new vscode.TreeItem(
+        node.memo.title,
+        vscode.TreeItemCollapsibleState.None
+      );
+      item.contextValue = workTypeContextValue("memoFile", node.format);
+      item.resourceUri = toUri(node.memo.filePath);
+      item.iconPath = new vscode.ThemeIcon("note");
+      /*
+        **原稿エディタでは開かない**（設計書6.71）。
+
+        話の行は原稿エディタ（6.25）へ渡しているが、メモは原稿ではない。
+        用語の色分けもルビも要らない書き散らしの場なので、
+        いつものMarkdownの画面で開く。
+      */
+      item.command = {
+        command: "vscode.open",
+        title: "メモを開く",
+        arguments: [toUri(node.memo.filePath)],
+      };
+      item.tooltip = new vscode.MarkdownString(
+        [`**${node.memo.title}**`, "", `\`${node.memo.filePath}\``].join("\n")
       );
       return item;
     }
@@ -495,14 +589,19 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
           ),
         ];
       }
+      const format = await this.formatOf(node.work);
+      // メモの枝は話の後ろに置く（設計書6.71）。**原稿より前に来ない**
+      const memos = await this.memoNodes(node.work, format);
+
       if (result.episodes.length === 0) {
+        // 本文はまだ無くても、メモだけ書き始めている作品はある
         return [
           new MessageNode("本文ファイルがありません（txt / md）"),
+          ...memos,
         ];
       }
       await this.loadSynopses(node.work);
       await this.loadPosting(node.work);
-      const format = await this.formatOf(node.work);
 
       /*
         章の台帳を読む（設計書6.66.3）。
@@ -523,12 +622,16 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
             }`
           ),
           ...result.episodes.map((e) => new EpisodeNode(node.work, e, format)),
+          ...memos,
         ];
       }
 
       // 章が1つも無ければ、いままでどおり作品の直下に話を並べる
       if (chapters.length === 0) {
-        return result.episodes.map((e) => new EpisodeNode(node.work, e, format));
+        return [
+          ...result.episodes.map((e) => new EpisodeNode(node.work, e, format)),
+          ...memos,
+        ];
       }
 
       const grouped = groupEpisodesByChapter(
@@ -549,6 +652,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
               format
             )
         ),
+        ...memos,
       ];
     }
 
@@ -558,7 +662,35 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       );
     }
 
+    if (node.type === "memoFolder") {
+      return node.memos.map(
+        (memo) => new MemoFileNode(node.work, memo, node.format)
+      );
+    }
+
     return [];
+  }
+
+  /**
+   * メモの枝（0件なら空）。
+   *
+   * **読めなくても一覧は出す。** メモは原稿ではないので、置き場を読めない
+   * ことで作品が空に見えてはいけない（枝が出ないだけで済ませる）。
+   */
+  private async memoNodes(
+    work: WorkEntry,
+    format?: WorkFormatKey
+  ): Promise<MemoFolderNode[]> {
+    let memos = this.memos.get(work.id);
+    if (!memos) {
+      try {
+        memos = await listWorkMemos(work);
+      } catch {
+        memos = [];
+      }
+      this.memos.set(work.id, memos);
+    }
+    return memos.length > 0 ? [new MemoFolderNode(work, memos, format)] : [];
   }
 
   /**

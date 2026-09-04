@@ -15,6 +15,8 @@ import {
   WorkNode,
   EpisodeNode,
   ChapterNode,
+  MemoFolderNode,
+  MemoFileNode,
 } from "./views/workTree";
 import {
   countChars,
@@ -278,6 +280,11 @@ import {
   renameChapter,
   startChapterAt,
 } from "./features/manageChapters";
+import {
+  addWorkMemo,
+  removeWorkMemo,
+  transferMemo,
+} from "./features/manageWorkMemos";
 import {
   configurePostingSites,
   postNewEpisode,
@@ -3905,6 +3912,44 @@ export async function activate(
         // **AIは呼ばない。** サイト・URL・投稿済みの基準線を決めるだけ
         const result = await configurePostingSites(work);
         if (result.changed) treeProvider.refresh(work.id);
+      }
+    )
+  );
+
+  /*
+    作品ごとのメモ（設計書6.71）。
+
+    **触るのはメモのファイルだけ。** 原稿にも台帳にも書き込まない。
+    移管は「移した元」と「移した先」の両方の一覧を作り直す
+    ——片方だけだと、移したメモが2つの作品に見えたままになる。
+  */
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.addWorkMemo",
+      async (node?: WorkRef | MemoFolderNode | MemoFileNode) => {
+        // メモの枝からも足せる。そちらは作品が分かっているので訊かない
+        const work =
+          node && (node.type === "memoFolder" || node.type === "memoFile")
+            ? node.work
+            : await resolveWork(node, registry);
+        if (!work) return;
+        if (await addWorkMemo(work)) treeProvider.refresh(work.id);
+      }
+    ),
+    registerCommand("novelai.removeWorkMemo", async (node?: MemoFileNode) => {
+      if (!node) return;
+      if (await removeWorkMemo(node.work, node.memo)) {
+        treeProvider.refresh(node.work.id);
+      }
+    }),
+    registerCommand(
+      "novelai.transferMemoToWork",
+      async (node?: EpisodeNode) => {
+        if (!node) return;
+        const moved = await transferMemo(node.work, node.episode, registry);
+        if (!moved) return;
+        treeProvider.refresh(moved.fromWorkId);
+        treeProvider.refresh(moved.toWorkId);
       }
     )
   );

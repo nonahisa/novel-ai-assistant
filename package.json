@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "「設定が前の話と食い違っていないか不安」「誤字脱字の見直しがつらい」「AIに原稿を触られたくない」——小説を書く人の困りごとを引き受けるVSCode拡張機能です。本文から設定資料を自動で作り、矛盾や誤字脱字を調べ、執筆量を記録します。AIは提案するだけで、原稿は書き換えません。無料の手元AI（Ollama / LM Studio）だけでも使え、その場合、原稿はパソコンの外へ出ません。",
-  "version": "0.30.7",
+  "version": "0.30.8",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -843,6 +843,24 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.addWorkMemo",
+        "title": "メモを追加",
+        "icon": "$(note)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.removeWorkMemo",
+        "title": "メモを削除（ごみ箱へ）",
+        "icon": "$(trash)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.transferMemoToWork",
+        "title": "このメモを作品へ移管",
+        "icon": "$(arrow-right)",
+        "category": "小説執筆"
+      },
+      {
         "command": "novelai.startChapter",
         "title": "ここから章を始める",
         "icon": "$(folder)",
@@ -1024,6 +1042,11 @@
           "group": "1_stats@8"
         },
         {
+          "command": "novelai.addWorkMemo",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
+          "group": "1_stats@9"
+        },
+        {
           "command": "novelai.gitSync",
           "when": "view == novelai.works && viewItem =~ /^work-/",
           "group": "2_open@1"
@@ -1107,6 +1130,21 @@
           "command": "novelai.removeChapter",
           "when": "view == novelai.works && viewItem =~ /^chapter-(novel|script|unset)$/",
           "group": "9_danger"
+        },
+        {
+          "command": "novelai.transferMemoToWork",
+          "when": "view == novelai.works && viewItem =~ /^episode-memo$/",
+          "group": "1_actions@4"
+        },
+        {
+          "command": "novelai.addWorkMemo",
+          "when": "view == novelai.works && viewItem =~ /^memoFolder-/",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "novelai.removeWorkMemo",
+          "when": "view == novelai.works && viewItem =~ /^memoFile-/",
+          "group": "9_danger"
         }
       ],
       "editor/context": [
@@ -1176,6 +1214,18 @@
         },
         {
           "command": "novelai.deleteEpisodeFile",
+          "when": "false"
+        },
+        {
+          "command": "novelai.addWorkMemo",
+          "when": "false"
+        },
+        {
+          "command": "novelai.removeWorkMemo",
+          "when": "false"
+        },
+        {
+          "command": "novelai.transferMemoToWork",
           "when": "false"
         },
         {

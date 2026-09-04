@@ -1190,6 +1190,19 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.addWorkMemo",
+            label: "メモを追加",
+            icon: "note",
+            requiresWork: true,
+            detail:
+              "この作品のためのメモを1つ作ります（`設定/メモ/題名.md`）。" +
+              "**話数・文字数・あらすじ・投稿・校正のどれにも入りません。** " +
+              "作ったメモは作品一覧の「メモ」の枝に並び、そこから開けます。" +
+              "創作メモ集で育てたメモは、そのメモの右クリックから" +
+              "「このメモを作品へ移管」で移せます。",
+          },
+          {
+            kind: "action",
             command: "novelai.applyRenameToRecords",
             label: "名前の付け替えを資料にも反映",
             icon: "references",

@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   COMMAND_FEATURES,
   FEATURE_COLUMNS,
+  WORK_TREE_NODE_KINDS,
   WORK_TYPE_COLUMNS,
   WORK_TYPE_CONTEXT_UNSET,
   featureOfCommand,
@@ -57,9 +58,15 @@ function inTable(command: string): boolean {
   return !OUT_OF_TABLE.some((pattern) => pattern.test(command));
 }
 
-/** その `when` に噛み合う contextValue をすべて挙げる */
+/**
+ * その `when` に噛み合う contextValue をすべて挙げる。
+ *
+ * **ノードの種別は `workTypeVisibility` から取る。** ここに写しを置くと、
+ * 種別を足したとき（メモの枝、6.71）に**新しい項目だけが照合から漏れ**、
+ * 検査が素通りする。
+ */
 function matchedContextValues(when: string): string[] {
-  const candidates = (["work", "chapter", "episode"] as const).flatMap((kind) =>
+  const candidates = WORK_TREE_NODE_KINDS.flatMap((kind) =>
     [...WORK_TYPE_COLUMNS, WORK_TYPE_CONTEXT_UNSET].map(
       (suffix) => `${kind}-${suffix}`
     )
@@ -125,7 +132,19 @@ describe("小説では、いままでどおり全部見える", () => {
       (command) => !isCommandVisibleForColumn(command, "novel")
     );
 
-    expect(hidden, "小説で消えるコマンド").toEqual([]);
+    /*
+      **小説から消えてよいのは、創作メモ集にしか置き場の無い操作だけ。**
+
+      「このメモを作品へ移管」（設計書6.71）は、移す元がメモ集の
+      メモであることが前提の操作である。小説の話に出しても、
+      移す先が「本文から設定資料の下へ」になってしまう。
+
+      ここを配列で固定しているのは、**うっかり物語向けの機能を
+      メモ集専用にしても気づけるようにする**ためである。
+    */
+    expect(hidden, "小説で消えるコマンド").toEqual([
+      "novelai.transferMemoToWork",
+    ]);
   });
 
   test("タイプを決めていない作品でも、すべて見える", () => {
@@ -186,6 +205,48 @@ describe("タイプに合わない操作は出さない", () => {
     }
   });
 
+  test("メモの追加・削除は、どのタイプでも出る（設計書6.71）", () => {
+    // メモはどの作品にも要る。**メモ集だけのものではない**
+    for (const command of ["novelai.addWorkMemo", "novelai.removeWorkMemo"]) {
+      for (const column of WORK_TYPE_COLUMNS) {
+        expect(
+          isCommandVisibleForColumn(command, column),
+          `${command}/${column}`
+        ).toBe(true);
+      }
+    }
+  });
+
+  test("メモの移管は、創作メモ集だけに出る（設計書6.71）", () => {
+    expect(isCommandVisibleForColumn("novelai.transferMemoToWork", "memo")).toBe(
+      true
+    );
+    for (const column of ["novel", "sns", "script"] as const) {
+      expect(
+        isCommandVisibleForColumn("novelai.transferMemoToWork", column),
+        column
+      ).toBe(false);
+    }
+  });
+
+  test("メモの移管は、タイプ未設定にも出ない（unsetは絞らない方針の唯一の例外）", () => {
+    // 移管はファイルを作品から抜く操作で、小説の原稿を誤ってメモへ移す
+    // 事故のほうが「未設定では見せる」利便より重い（本体の裁定、2026-09-04）。
+    // package.json の when も episode-memo の完全一致であること
+    const manifest = JSON.parse(
+      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+    ) as {
+      contributes: {
+        menus: Record<string, Array<{ command: string; when?: string }>>;
+      };
+    };
+    const entry = manifest.contributes.menus["view/item/context"].find(
+      (item) => item.command === "novelai.transferMemoToWork"
+    );
+    expect(entry?.when).toContain("/^episode-memo$/");
+    expect(entry?.when).not.toContain("unset");
+  });
+
   test("執筆統計・校正・同期・投稿キットは、どのタイプでも出る", () => {
     for (const command of [
       "novelai.showWritingStats",
@@ -219,6 +280,11 @@ describe("右クリック（package.json の when）が表と噛み合う", () =
   });
 
   test("出す・出さないが、表のとおりになっている", () => {
+    // **unset（タイプ未設定）を含めない唯一の例外**：メモの移管。
+    // ファイルを作品から抜く操作で、未設定の小説の原稿を誤ってメモへ
+    // 移す事故のほうが「未設定では見せる」利便より重い（本体の裁定、2026-09-04）
+    const UNSET_EXCLUDED = new Set(["novelai.transferMemoToWork"]);
+
     for (const entry of contextMenu) {
       const matched = matchedContextValues(entry.when ?? "");
       const kinds = new Set(matched.map((value) => value.split("-")[0]));
@@ -231,8 +297,8 @@ describe("右クリック（package.json の when）が表と噛み合う", () =
         ...WORK_TYPE_COLUMNS.filter((column) =>
           isCommandVisibleForColumn(entry.command, column)
         ),
-        // タイプを決めていない作品では絞り込まない
-        WORK_TYPE_CONTEXT_UNSET,
+        // タイプを決めていない作品では絞り込まない（例外は上の一覧だけ）
+        ...(UNSET_EXCLUDED.has(entry.command) ? [] : [WORK_TYPE_CONTEXT_UNSET]),
       ].map((suffix) => `${kind}-${suffix}`);
 
       expect([...matched].sort(), entry.command).toEqual(expected.sort());
@@ -244,6 +310,9 @@ describe("右クリック（package.json の when）が表と噛み合う", () =
     // 何も出ない（実際に噛み合っていることを、両側から確かめる）
     expect(workTypeContextValue("episode", "memo")).toBe("episode-memo");
     expect(workTypeContextValue("work", "long")).toBe("work-novel");
+    // メモの枝（設計書6.71）。作品と話の印に紛れないよう別の種別にする
+    expect(workTypeContextValue("memoFolder", "long")).toBe("memoFolder-novel");
+    expect(workTypeContextValue("memoFile", "sns")).toBe("memoFile-sns");
     expect(workTypeContextValue("chapter", undefined)).toBe(
       `chapter-${WORK_TYPE_CONTEXT_UNSET}`
     );

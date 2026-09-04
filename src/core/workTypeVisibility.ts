@@ -49,8 +49,31 @@ export const WORK_TYPE_COLUMNS: readonly WorkTypeColumn[] = [
  */
 export const WORK_TYPE_CONTEXT_UNSET = "unset";
 
-/** 作品一覧のノードの種類。`contextValue` の前半になる */
-export type WorkTreeNodeKind = "work" | "chapter" | "episode";
+/**
+ * 作品一覧のノードの種類。`contextValue` の前半になる。
+ *
+ * メモの枝（設計書6.71）も種別を持つ。**話（`episode`）と混ぜない**
+ * ——メモは原稿ではないので、話に出る操作（投稿・章立て・話数の挿入）が
+ * 出てはいけない。
+ */
+export type WorkTreeNodeKind =
+  | "work"
+  | "chapter"
+  | "episode"
+  | "memoFolder"
+  | "memoFile";
+
+/**
+ * 種別の一覧。**`package.json` の `when` と突き合わせるテストが読む。**
+ * 種別を足したときに、新しい項目だけが照合から漏れないようにする。
+ */
+export const WORK_TREE_NODE_KINDS: readonly WorkTreeNodeKind[] = [
+  "work",
+  "chapter",
+  "episode",
+  "memoFolder",
+  "memoFile",
+];
 
 /** その形式が、表のどの列にあたるか。決めていなければ undefined */
 export function workTypeColumn(
@@ -102,7 +125,9 @@ export type WorkFeature =
   /** 番号で数えるタイプだけ（話数の挿入・削除・合本の分割） */
   | "numbered"
   /** 投稿サイト向けの変換・取り込み */
-  | "posting";
+  | "posting"
+  /** 創作メモ集だけ（メモを作品へ移管する。設計書6.71） */
+  | "memoOnly";
 
 export const FEATURE_COLUMNS: Record<WorkFeature, readonly WorkTypeColumn[]> = {
   allTypes: ["novel", "sns", "memo", "script"],
@@ -119,6 +144,15 @@ export const FEATURE_COLUMNS: Record<WorkFeature, readonly WorkTypeColumn[]> = {
     （変換先の絞り込みは次の作業）。
   */
   posting: ["novel", "sns", "memo", "script"],
+  /*
+    **ここだけは「迷ったら出す」に倒せない**（設計書6.71）。
+
+    「このメモを作品へ移管」は、押した話ファイルを別の作品の
+    `設定/メモ/` へ**動かす**操作である。小説の話に出してしまうと、
+    本文が1話まるごと設定資料の下へ消える見え方になる。
+    移す元がメモであることが前提なので、メモ集だけに出す。
+  */
+  memoOnly: ["memo"],
 };
 
 /**
@@ -160,6 +194,13 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.removeEpisodeAndRenumber": "numbered",
   "novelai.splitCollectedFile": "numbered",
   "novelai.renameWithSubtitle": "numbered",
+
+  // ── 作品ごとのメモ（設計書6.71） ──
+  // メモはどの作品にも要る。**創作メモ集だけのものではない**
+  "novelai.addWorkMemo": "allTypes",
+  "novelai.removeWorkMemo": "allTypes",
+  // 移管だけはメモ集から出る道なので、メモ集の話にしか出さない
+  "novelai.transferMemoToWork": "memoOnly",
 
   // ── 章立て（設計書6.66）。話の連なりがある作品のもの ──
   "novelai.startChapter": "story",

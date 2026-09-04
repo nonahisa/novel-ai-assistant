@@ -65,6 +65,50 @@ describe("本文フォルダの選択", () => {
     ]);
   });
 
+  test("設定フォルダの中は歩かない（メモは原稿ではない）", async () => {
+    /*
+      作品ごとのメモは `設定/メモ/題名.md` に置く（設計書6.71）。
+
+      **メモが原稿として拾われると、話数・文字数・あらすじ・投稿・校正の
+      すべてに紛れ込む。** 走査が `設定` を飛ばすことに乗っているので、
+      その前提が崩れていないことをここで押さえる。
+    */
+    const readDirectory = vi.fn(async (uri: { fsPath: string }) => {
+      if (uri.fsPath.endsWith("設定")) {
+        return [["メモ", FileType.Directory]];
+      }
+      if (uri.fsPath.endsWith("メモ")) {
+        return [["書き出しの案.md", FileType.File]];
+      }
+      return [
+        ["001.txt", FileType.File],
+        ["設定", FileType.Directory],
+      ];
+    });
+    workspace.fs = {
+      readFile: vi.fn(async (uri: { fsPath: string }) => {
+        if (uri.fsPath.endsWith(".json")) {
+          throw new FileSystemError("設定なし", "FileNotFound");
+        }
+        return new TextEncoder().encode("灯が歩いた。");
+      }),
+      stat: vi.fn(async () => {
+        throw new FileSystemError("本文なし", "FileNotFound");
+      }),
+      readDirectory,
+    };
+
+    const result = await scanWork(work);
+
+    expect(result.episodes.map((episode) => episode.fileName)).toEqual([
+      "001.txt",
+    ]);
+    // そもそも中を覗きにいかない
+    expect(
+      readDirectory.mock.calls.map(([uri]) => uri.fsPath).join("|")
+    ).not.toContain("設定");
+  });
+
   test.each(["NoPermissions", "Unknown"])(
     "本文フォルダのstatが%sなら作品ルートへフォールバックせず伝播する",
     async (code) => {
