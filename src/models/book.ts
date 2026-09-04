@@ -320,9 +320,9 @@ export function isBookImageBlock(block: BookBlock): block is BookImageBlock {
  * 扉絵（`sectionArt`）だけは何枚でも挿せる——章の変わり目ごとに絵を置く
  * 使い方があり、そこを縛ると本が作れなくなる。口絵も同じ理由で複数を許す。
  *
- * **組み替え画面のパレットも、この表を見て押せなくする**（設計書6.65.15の
- * 段C）。「置けない種類を押せてしまい、保存のときに初めて断られる」を
- * 作らないため、判断の元は1か所に置く。
+ * **組み替え画面の「この後ろに挿入」も、この表を見て行を出す**（設計書
+ * 6.65.15の段D）。「置けない種類を選べてしまい、保存のときに初めて
+ * 断られる」を作らないため、判断の元は1か所に置く。
  */
 export const BOOK_SINGLE_BLOCK_TYPES: readonly BookBlockType[] = [
   "cover",
@@ -602,8 +602,8 @@ export function insertBookBlockAfter(
 /**
  * 面を1つ上（`-1`）／下（`+1`）へ動かす。
  *
- * **端では null。** ドラッグを作らない代わりの操作なので（webviewでの
- * 検証が重く、誤操作の巻き戻しも要る）、押せない場所は画面側でも
+ * **端では null。** 右クリックのメニューから押す操作なので（設計書6.65.15の
+ * 段D。ドラッグが苦手な人の道として残してある）、押せない場所は画面側でも
  * 押せなくする——その判断をここと共有する。
  */
 export function moveBookBlock(
@@ -617,6 +617,37 @@ export function moveBookBlock(
 
   const out = [...blocks];
   const [moved] = out.splice(index, 1);
+  out.splice(to, 0, moved);
+  return out;
+}
+
+/**
+ * 掴んだ面を、別の隙間へ落とす（設計書6.65.15の段D。作者の指定）。
+ *
+ * `before` は**落とし先の隙間の番号**である。0 は先頭、`blocks.length` は
+ * 末尾で、`n` は「いま n 番目にある面の手前」を指す。画面が測るのは
+ * 「どの行のどちら側で離したか」だけで、**並びの計算はここが持つ**
+ * ——ドラッグの見え方は実機でしか確かめられないが、並びの変化はここで
+ * 固定できる（段Dでドラッグを入れるときの、いちばんの心配ごと）。
+ *
+ * **何も変わらないときは null を返す。** 自分自身の上（前の隙間でも後ろの
+ * 隙間でも並びは同じ）と範囲の外は「動かさなかった」と同じに扱う。Escで
+ * 取りやめたときや枠の外で離したときに、並びが黙って変わらないための砦。
+ */
+export function dropBookBlock(
+  blocks: readonly BookBlock[],
+  from: number,
+  before: number
+): BookBlock[] | null {
+  if (from < 0 || from >= blocks.length) return null;
+  if (before < 0 || before > blocks.length) return null;
+
+  // 掴んだ面を抜いたあとの位置へ直す（後ろへ動かすときは1つ手前になる）
+  const to = before > from ? before - 1 : before;
+  if (to === from) return null;
+
+  const out = [...blocks];
+  const [moved] = out.splice(from, 1);
   out.splice(to, 0, moved);
   return out;
 }

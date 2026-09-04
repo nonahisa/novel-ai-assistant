@@ -9,6 +9,7 @@ import {
   BOOK_DIR,
   canAddBookBlock,
   canRemoveBookBlock,
+  dropBookBlock,
   insertBookBlockAfter,
   isBookImageBlock,
   moveBookBlock,
@@ -251,9 +252,18 @@ interface BlockRow {
   removable: boolean;
 }
 
-/** パレットの1つ。押せるか、押せない（押せる）理由 */
-interface PaletteEntry {
+/**
+ * 右クリックの「この後ろに挿入」に並べる種類（設計書6.65.15の段D）。
+ *
+ * **呼び名も「置けるか」も拡張機能側で決める。** 段Cまでは右のパレットの
+ * 押せる・押せないだったものが、段Dでメニューの行になった——出す場所が
+ * 変わっただけで、判断の持ち主は変えていない。
+ */
+interface InsertTypeEntry {
   key: string;
+  /** メニューに出す呼び名（`BOOK_BLOCK_LABELS` の1か所から取る） */
+  label: string;
+  /** 置けるか。**置けないものはメニューに出さない**（作者の指定） */
   enabled: boolean;
   reason: string;
 }
@@ -350,6 +360,9 @@ export async function openEpubEditorPanel(
       /** 並びの編集（設計書6.65.15の段C）。位置は画面が覚えている */
       index?: number;
       direction?: number;
+      /** ドラッグ（設計書6.65.15の段D）。掴んだ面と、落とした隙間 */
+      from?: number;
+      before?: number;
       blockType?: string;
       imagePath?: string;
       caption?: string;
@@ -439,6 +452,13 @@ export async function openEpubEditorPanel(
         parsed.index ?? -1,
         parsed.direction === -1 ? -1 : 1
       );
+      return;
+    }
+
+    if (parsed.type === "dropBlock") {
+      // ドラッグで落とした（設計書6.65.15の段D）。取りやめ（Escや枠の外）は
+      // 画面が知らせてこないので、ここへ来る＝どこかへ落ちた、である
+      await dropBlockAt(state, parsed.from ?? -1, parsed.before ?? -1);
       return;
     }
 
@@ -604,6 +624,30 @@ async function moveBlockAt(
   const next = moveBookBlock(blocks, index, direction);
   if (!next) return;
   await applyBlocks(state, next, index + direction);
+}
+
+/**
+ * 掴んだ面を、落とした隙間へ動かす（設計書6.65.15の段D。作者の指定）。
+ *
+ * **並びの計算は `dropBookBlock` が持つ**（画面は「どの行のどちら側で
+ * 離したか」だけを測る）。落とし先が元と同じ・範囲の外なら null が返り、
+ * **何も起きない**——Escで取りやめたときや枠の外で離したときに、並びが
+ * 黙って変わらないのはこの一本道による。
+ *
+ * **本文も動かせる**（外せないだけ）。章の後ろに置く本のように、本文の
+ * 位置を変える組み方があるので、移動まで縛らない。
+ */
+async function dropBlockAt(
+  state: PanelState,
+  from: number,
+  before: number
+): Promise<void> {
+  const blocks = resolveBookBlocks(state.current);
+  const next = dropBookBlock(blocks, from, before);
+  if (!next) return;
+
+  // 動かした面をそのまま選ばせる（続けて設定を触れるように）
+  await applyBlocks(state, next, before > from ? before - 1 : before);
 }
 
 /** 面を1つ外す。**本文は外せない**（画面にも削除のボタンを出していない） */
@@ -926,9 +970,9 @@ async function previewData(state: PanelState) {
   const blocks = resolveBookBlocks(state.current);
 
   return {
-    // 本の並びと、パレットの押せる・押せない（設計書6.65.15の段C）
+    // 本の並び（右の縦の列）と、右クリックで挿せる種類（設計書6.65.15の段D）
     blocks: blockRows(blocks),
-    palette: paletteEntries(blocks),
+    insertTypes: insertTypeEntries(blocks),
     // **書き出しと同じCSS**を、画面の枠の中へ閉じ込めただけのもの。
     // 同梱する書体も当てる（設計書6.65.11）——本と同じ字面で確かめられ
     // ないと、書体を選ぶ意味が無い
@@ -973,23 +1017,26 @@ function blockRows(blocks: readonly BookBlock[]): BlockRow[] {
 }
 
 /**
- * パレットの押せる・押せないと、その理由（設計書6.65.15の段C）。
+ * 「この後ろに挿入」に並べる種類（設計書6.65.15の段D）。
  *
- * **押せない理由は必ず言う。** 反応しないボタンは不具合に見える
- * （`processAvailability.ts` と同じ流儀で、消さずに畳んで理由を出す）。
+ * **置ける種類だけがメニューに出る**（作者の指定）——1冊に1つの面が既に
+ * 置いてあれば、その行は出さない。理由の文言は残してある：断るときに
+ * 同じ言葉を使うためで（`insertBlock`）、言い方を2つ持たない。
  */
-function paletteEntries(blocks: readonly BookBlock[]): PaletteEntry[] {
-  const entries: PaletteEntry[] = BOOK_BLOCK_TYPES.map((type) => {
+function insertTypeEntries(blocks: readonly BookBlock[]): InsertTypeEntry[] {
+  const entries: InsertTypeEntry[] = BOOK_BLOCK_TYPES.map((type) => {
     const label = BOOK_BLOCK_LABELS[type];
     if (canAddBookBlock(blocks, type)) {
       return {
         key: type,
+        label,
         enabled: true,
-        reason: `${label}の面を、選んでいる面の後ろへ入れます。`,
+        reason: `${label}の面を、右クリックした面の後ろへ入れます。`,
       };
     }
     return {
       key: type,
+      label,
       enabled: false,
       reason:
         type === "body"
@@ -998,9 +1045,10 @@ function paletteEntries(blocks: readonly BookBlock[]): PaletteEntry[] {
     };
   });
 
-  // 章区切りは面ではない（台帳が正。設計書6.66）ので、常に押せる
+  // 章区切りは面ではない（台帳が正。設計書6.66）ので、いつでも挿せる
   entries.push({
     key: "chapter",
+    label: "章区切り",
     enabled: true,
     reason:
       "どの話から章を始めるかを訊いて、章立ての台帳へ書きます（本の並びには入りません）。",

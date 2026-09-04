@@ -1,21 +1,32 @@
 /**
  * EPUBエディターの画面（設計書6.65.6・6.65.8・6.65.15）。
  *
- * **右に狭い縦のパレット、左が作業スペース**（段C。作者の指定）。
- * 作業スペースは上から「本の設定」「本の並び」「選んだ面の設定とプレビュー」の
- * 3段で、面の設定は**選んだ面のものだけ**が出る。設定の欄が縦に長く並ぶだけの
- * 画面では、本の構造（面の並び）が見えなかった。
+ * **右が本の並び、左が「いま編んでいる1つ」の画面**（段D。作者の指定）。
+ * 右の狭い列にはいまの本の構成をアイコンの縦列で出し、左には**選んだ
+ * ブロックだけの編集画面**（そのブロックの設定と、そのブロックのプレビュー）
+ * を出す。全部の設定を縦に積んだ長い1ページにしない——設定の欄が並ぶだけの
+ * 画面では、本の構造も、いま何を触っているのかも見えなかった。
+ *
+ * **本全体の設定は、並びの外の1画面**である（書誌情報・綴じ方向・空行の詰め・
+ * 書体）。どのブロックにも属さないので、右の列の最上部に**並びとは区別した
+ * 固定の入口**を置き、そこから開く（ドラッグの対象にも、削除の対象にもしない）。
  *
  * **本の面の中身は組み立てない。** 面のXHTML断片と本のCSSは拡張機能側
  * （`core/epubPackage.ts`）が作り、ここは受け取って並べるだけである。
  * 画面で組み直した時点で、「見た目どおりに編集できる」という要件が壊れる。
  *
- * ## 並べ替えにドラッグを使わない
+ * ## 並べ替えのドラッグと、右クリックのメニュー（段D）
  *
- * クリックで挿し、「上へ」「下へ」「削除」で動かす。ドラッグは
- * **webviewでの検証が重い**（DOMイベントを組み合わせた操作は単体テストで
- * 再現できず、実機でしか確かめられない）うえ、掴み損ねたときの
- * **誤操作の巻き戻し**まで作ることになる。確実に動く操作を選んだ。
+ * 段Cでは「ドラッグは作らない」と決めていた（webviewでの検証が重い）が、
+ * **作者の指定でドラッグを入れた**。縦1列の並べ替えに限れば、確かめるべき
+ * ことは「どの隙間へ落ちたか」だけに絞れる——そこで、**並びの計算は
+ * 拡張機能側の純関数（`dropBookBlock`）に置き、画面は掴んだ行と落とした
+ * 隙間だけを知らせる**。取りやめ（Escや枠の外で離す）では何も知らせない
+ * ので、並びは変わらない。
+ *
+ * 挿入・上下・削除は**右クリックの自前のメニュー**へ畳んだ（行がすっきりし、
+ * ドラッグが苦手な人の道も残る）。webviewにはVS Codeのメニューが出ないので、
+ * 小さなメニューを自分で描く（クリック外し・Escで閉じる）。
  *
  * ## 合成だけは、ここが描く
  *
@@ -28,28 +39,6 @@
  * 値はすべて postMessage で渡し、HTMLへ文字列として埋め込まない
  * （題名の引用符で画面が壊れるのを防ぐ。ほかのパネルと同じ）。
  */
-
-/**
- * 右のパレットに並べるもの（設計書6.65.15。作者の指定した順）。
- *
- * **`chapter` だけは面ではない。** 章区切りは章立ての台帳（6.66）が正なので、
- * 押すと台帳を書き換える——`blocks` には入らない。パレットに並べるのは、
- * 作者から見れば「本へ挿すもの」が同じ場所に揃っているほうが分かりやすい
- * ためである（押せなくする理由と同じで、判断は拡張機能側が持つ）。
- */
-const PALETTE: ReadonlyArray<{ key: string; icon: string; label: string }> = [
-  { key: "cover", icon: "📕", label: "表紙" },
-  { key: "halfTitle", icon: "📄", label: "中表紙" },
-  { key: "frontIllustration", icon: "🖼", label: "口絵" },
-  { key: "sectionArt", icon: "🎴", label: "扉絵" },
-  { key: "toc", icon: "🗂", label: "目次" },
-  { key: "characters", icon: "👤", label: "人物紹介" },
-  { key: "chapter", icon: "🔖", label: "章区切り" },
-  { key: "body", icon: "📖", label: "本文" },
-  { key: "afterword", icon: "✍", label: "あとがき" },
-  { key: "colophon", icon: "🏷", label: "奥付" },
-  { key: "backCover", icon: "📗", label: "裏表紙" },
-];
 
 /** 合成できる要素と、その値をどの欄から取るか（設計書6.65.8） */
 const COVER_ELEMENTS: ReadonlyArray<{ key: string; label: string }> = [
@@ -84,20 +73,6 @@ function options(
   return list
     .map((item) => `<option value="${item.value}">${item.label}</option>`)
     .join("");
-}
-
-/** パレットの1つ。押せる・押せないと理由は拡張機能側から届く */
-function paletteButton(entry: {
-  key: string;
-  icon: string;
-  label: string;
-}): string {
-  return [
-    `      <button class="palette-button" id="palette-${entry.key}" data-block="${entry.key}">`,
-    `        <span class="palette-icon">${entry.icon}</span>`,
-    `        <span class="palette-label">${entry.label}</span>`,
-    "      </button>",
-  ].join("\n");
 }
 
 /** 1要素ぶんの欄。IDは `front-title-anchor` の形で組み立てる */
@@ -236,9 +211,9 @@ h2 {
   font-weight: normal;
 }
 main { display: flex; align-items: flex-start; gap: 16px; padding: 16px; }
-/* 左が作業スペース、右が狭い縦のパレット（設計書6.65.15の段C） */
+/* 左が「いま編んでいる1つ」の画面、右が本の並び（設計書6.65.15の段D） */
 #workspace { flex: 1; min-width: 0; }
-#palette {
+#rail {
   width: 104px;
   flex: none;
   position: sticky;
@@ -250,9 +225,16 @@ main { display: flex; align-items: flex-start; gap: 16px; padding: 16px; }
   border: 1px solid var(--vscode-panel-border);
   border-radius: 4px;
 }
-.palette-title { font-size: 11px; color: var(--vscode-descriptionForeground); }
+.rail-title { font-size: 11px; color: var(--vscode-descriptionForeground); }
+.rail-hint {
+  font-size: 10px;
+  line-height: 1.5;
+  margin: 6px 0 0;
+  color: var(--vscode-descriptionForeground);
+}
+#blockList { display: flex; flex-direction: column; gap: 4px; }
 /* アイコンと短いラベルを縦に積む。狭い列なので横に並べると読めない */
-.palette-button {
+.rail-row {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -260,10 +242,64 @@ main { display: flex; align-items: flex-start; gap: 16px; padding: 16px; }
   padding: 6px 2px;
   width: 100%;
   text-align: center;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+  /* 掴んでいる最中に文字が選択されると、行き先の線が見えなくなる */
+  user-select: none;
 }
-.palette-button:disabled { opacity: 0.4; cursor: default; }
-.palette-icon { font-size: 18px; line-height: 1.1; }
-.palette-label { font-size: 11px; }
+/* 本の設定は並びの外にある固定の入口。並びの行と見分けが付くようにする */
+.rail-fixed {
+  border-bottom: 1px solid var(--vscode-panel-border);
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+  border-radius: 2px 2px 0 0;
+}
+.rail-row.selected {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+.rail-icon { font-size: 18px; line-height: 1.1; }
+.rail-label { font-size: 11px; }
+/* 落とし先の線。掴んだ行がどこへ入るのかを、離す前に見せる */
+.rail-row.drop-before { box-shadow: 0 -2px 0 0 var(--vscode-focusBorder) inset; }
+.rail-row.drop-after { box-shadow: 0 2px 0 0 var(--vscode-focusBorder) inset; }
+/*
+ * 右クリックの自前メニュー（設計書6.65.15の段D）。
+ * **webviewにVS Codeのメニューは出ない**ので、自分で描く。
+ */
+.menu {
+  position: fixed;
+  z-index: 10;
+  min-width: 168px;
+  padding: 4px 0;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+  border-radius: 4px;
+}
+.menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 4px 12px;
+  background: transparent;
+  color: inherit;
+  border-radius: 0;
+}
+.menu-item:hover:enabled { background: var(--vscode-list-hoverBackground); }
+.menu-item:disabled { opacity: 0.4; cursor: default; }
+/* ぶら下げずに開く。狭い場所に浮かせると、画面の端で切れて選べなくなる */
+.submenu {
+  border-top: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+  border-bottom: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+  margin: 2px 0;
+  max-block-size: 240px;
+  overflow: auto;
+}
+.submenu .menu-item { padding-inline-start: 24px; }
 label { display: block; margin: 6px 0; }
 label span { display: block; font-size: 12px; color: var(--vscode-descriptionForeground); }
 input[type="text"], select {
@@ -296,34 +332,6 @@ button.primary {
 #status { font-size: 12px; color: var(--vscode-descriptionForeground); }
 #status.error { color: var(--vscode-errorForeground); }
 .note { font-size: 12px; color: var(--vscode-descriptionForeground); line-height: 1.6; }
-/* 本の並び。1行が1つの面で、選んでいる行の設定が下に出る */
-#blockList {
-  border: 1px solid var(--vscode-panel-border);
-  max-block-size: 320px;
-  overflow: auto;
-}
-.block-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 6px;
-  border-bottom: 1px solid var(--vscode-panel-border);
-}
-.block-row:last-child { border-bottom: none; }
-.block-row.selected { background: var(--vscode-list-activeSelectionBackground); }
-.block-row.selected .block-pick { color: var(--vscode-list-activeSelectionForeground); }
-.block-pick {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  background: transparent;
-  color: var(--vscode-foreground);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.block-actions { display: flex; gap: 4px; flex: none; }
-.block-actions button { padding: 2px 6px; font-size: 11px; }
 .page-frame { margin-bottom: 18px; }
 .page-label { font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 4px; }
 .page-note { font-size: 12px; color: var(--vscode-descriptionForeground); margin-top: 4px; }
@@ -434,6 +442,12 @@ button.primary {
 </header>
 <main>
   <section id="workspace">
+    <!--
+      **本全体の設定は、それだけで1画面**（設計書6.65.15の段D。作者の指定）。
+      どのブロックにも属さない設定（書誌情報・綴じ方向・空行の詰め・書体）を
+      ここへ集め、ブロックの編集画面とは入れ替えで出す
+    -->
+    <div id="pane-bookSettings">
     <h2>本の設定</h2>
     <label><span>題名</span><input id="bookTitle" type="text"></label>
     <label><span>作者名</span><input id="author" type="text"></label>
@@ -452,12 +466,13 @@ button.primary {
       畳んだり、指定したときだけ出したりはしない
     -->
     <p class="note">フォントの埋め込みが許諾されているかは、作者の責任でご確認ください（フォントのライセンスをご覧ください）。</p>
+    </div>
 
-    <h2>本の並び</h2>
-    <p class="note">右のパレットを押すと、選んでいる面の後ろへ入ります。並べ替えは「上へ」「下へ」、外すのは「削除」です（本文は1冊に1つなので外せません）。</p>
-    <div id="blockList"></div>
-    <p class="note error" id="placementWarnings"></p>
-
+    <!--
+      **選んだブロックだけの編集画面**（設計書6.65.15の段D）。
+      いま何を編んでいるかの見出し・その設定・その面のプレビューで1画面
+    -->
+    <div id="blockScreen" hidden>
     <h2 id="blockHeading">選んだ面</h2>
     <div id="blockSettings">
 ${pane("cover", [
@@ -474,7 +489,7 @@ ${pane("backCover", [
   ),
 ])}
 ${pane("halfTitle", [
-  '    <p class="note">題名と作者名だけの面です。中身は上の「本の設定」の書誌情報から組みます。</p>',
+  '    <p class="note">題名と作者名だけの面です。中身は「本の設定」の画面の書誌情報から組みます。</p>',
 ])}
 ${pane("toc", [
   '    <label><span>並べ方</span><select id="tocPattern">',
@@ -492,7 +507,7 @@ ${pane("toc", [
   '      <option value="rule">罫線</option>',
   '      <option value="center">中央飾り</option>',
   "    </select></label>",
-  '    <p class="note">この面を本から外すときは、上の並びで「削除」を押してください。</p>',
+  '    <p class="note">この面を本から外すときは、右の並びでこの面を右クリックして「削除」を選んでください。</p>',
 ])}
 ${pane("characters", [
   '    <label class="check"><input id="characterPageIcons" type="checkbox"><span>人物イラストを添える</span></label>',
@@ -524,14 +539,32 @@ ${pane("colophon", [
     </div>
 
     <div id="pages"></div>
+    </div>
+
+    <!--
+      本全体に関わる知らせは、どちらの画面でも見えるところへ置く
+      （位置のずれは書き出す前に気づけないと意味がない）
+    -->
+    <p class="note error" id="placementWarnings"></p>
     <p class="note" id="notice"></p>
     <p class="note" id="filePath"></p>
   </section>
-  <nav id="palette">
-    <div class="palette-title">入れる</div>
-${PALETTE.map(paletteButton).join("\n")}
+  <nav id="rail">
+    <div class="rail-title">本の並び</div>
+    <!--
+      **並びの外にある固定の入口**（設計書6.65.15の段D）。ドラッグの対象にも
+      削除の対象にもしない——本全体の設定は、本の面ではないからである
+    -->
+    <button id="railBook" class="rail-row rail-fixed">
+      <span class="rail-icon">⚙</span>
+      <span class="rail-label">本の設定</span>
+    </button>
+    <div id="blockList"></div>
+    <p class="rail-hint">ドラッグで並べ替え。右クリックで挿入・上へ・下へ・削除。</p>
   </nav>
 </main>
+<!-- 右クリックの自前メニュー（webviewにVS Codeのメニューは出ない） -->
+<div id="blockMenu" class="menu" hidden></div>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
 let sending = null;
@@ -665,7 +698,7 @@ function frameBackgroundOf(side) {
   return value ? value : DEFAULT_FRAME_BACKGROUND;
 }
 
-/* ---- 本の並び（設計書6.65.15の段C） -------------------------------- */
+/* ---- 右の縦の並び（設計書6.65.15の段D） ---------------------------- */
 
 /**
  * いまの並びと、選んでいる面。**中身は拡張機能側が組んだものを受け取る**
@@ -673,17 +706,77 @@ function frameBackgroundOf(side) {
  */
 let blocks = [];
 let selected = 0;
+/**
+ * いま出している画面（作者の指定、段D）。book は本全体の設定で、
+ * **並びの外にある固定の入口**から開く。
+ */
+let currentScreen = 'block';
+/** 「この後ろに挿入」に出せる種類。判断も呼び名も拡張機能側が持つ */
+let insertTypes = [];
 /** 最後に届いた面（プレビュー）。選び直しでは貰い直さずに出し分ける */
 let pages = [];
 
-function moveButton(text, index, direction, disabled) {
-  const button = document.createElement('button');
-  button.textContent = text;
-  button.disabled = disabled;
-  button.addEventListener('click', function () {
-    post('moveBlock', { index: index, direction: direction, config: readForm() });
-  });
-  return button;
+/**
+ * 面の絵柄。**呼び名は持たない**（拡張機能側の BOOK_BLOCK_LABELS が1か所）。
+ * 知らない種類でも行が消えないよう、既定の絵柄を置いてある。
+ */
+const ICONS = {
+  cover: '📕',
+  halfTitle: '📄',
+  frontIllustration: '🖼',
+  sectionArt: '🎴',
+  toc: '🗂',
+  characters: '👤',
+  body: '📖',
+  afterword: '✍',
+  colophon: '🏷',
+  backCover: '📗',
+  chapter: '🔖'
+};
+const DEFAULT_ICON = '📄';
+
+function iconOf(type) {
+  return ICONS[type] || DEFAULT_ICON;
+}
+
+/** 掴んでいる行。**-1 は掴んでいない**（取りやめると必ずここへ戻る） */
+let dragFrom = -1;
+
+/**
+ * 落とし先の隙間（設計書6.65.15の段D）。行の高さの半分より上で離したら
+ * 「その行の手前」、どの行より下なら末尾である。
+ * **番号を出すだけで、並びは組み替えない**——計算は拡張機能側が持つ。
+ */
+function dropSlotAt(y) {
+  const rows = field('blockList').children;
+  for (let index = 0; index < rows.length; index++) {
+    const rect = rows[index].getBoundingClientRect();
+    if (y < rect.top + rect.height / 2) return index;
+  }
+  return rows.length;
+}
+
+/** 行き先の線。負の値なら消すだけ（掴んでいないときと取りやめのとき） */
+function markDropSlot(slot) {
+  const rows = field('blockList').children;
+  for (let index = 0; index < rows.length; index++) {
+    rows[index].classList.remove('drop-before');
+    rows[index].classList.remove('drop-after');
+  }
+  if (slot < 0 || rows.length === 0) return;
+  if (slot < rows.length) rows[slot].classList.add('drop-before');
+  else rows[rows.length - 1].classList.add('drop-after');
+}
+
+/**
+ * 掴んでいる印を消す。**知らせは送らない。**
+ *
+ * Escや枠の外で離したときにここへ来る——何も送らないので、並びは変わらない
+ * （落としたときだけ dropBlock を送る一本道にしてある）。
+ */
+function clearDrag() {
+  dragFrom = -1;
+  markDropSlot(-1);
 }
 
 function renderBlocks() {
@@ -691,47 +784,68 @@ function renderBlocks() {
   host.textContent = '';
 
   blocks.forEach(function (block, index) {
-    const row = document.createElement('div');
-    row.className = index === selected ? 'block-row selected' : 'block-row';
-
-    const pick = document.createElement('button');
-    pick.className = 'block-pick';
+    // **行はボタンにする。** ドラッグできる div にすると、キーボードだけで
+    // 面を選ぶ道が消える（掴めない人の道を残すのが段Dの趣旨である）
+    const row = document.createElement('button');
+    row.className = index === selected && currentScreen === 'block'
+      ? 'rail-row selected'
+      : 'rail-row';
+    row.draggable = true;
     // 呼び名も添え書きも拡張機能側の言葉である（画面で組み立てない）
-    pick.textContent = block.detail
-      ? block.label + '　' + block.detail
-      : block.label;
-    pick.addEventListener('click', function () { selectBlock(index); });
-    row.appendChild(pick);
+    row.title = block.detail ? block.label + '　' + block.detail : block.label;
 
-    const actions = document.createElement('div');
-    actions.className = 'block-actions';
-    actions.appendChild(moveButton('上へ', index, -1, index === 0));
-    actions.appendChild(
-      moveButton('下へ', index, 1, index === blocks.length - 1)
-    );
-    // **消せない面には、削除のボタンそのものを出さない。** 押してから
-    // 断られるより、初めから無いほうが分かりやすい（本文がこれに当たる）
-    if (block.removable) {
-      const remove = document.createElement('button');
-      remove.textContent = '削除';
-      remove.addEventListener('click', function () {
-        post('removeBlock', { index: index, config: readForm() });
-      });
-      actions.appendChild(remove);
-    }
-    row.appendChild(actions);
+    const icon = document.createElement('span');
+    icon.className = 'rail-icon';
+    icon.textContent = iconOf(block.type);
+    row.appendChild(icon);
+
+    const label = document.createElement('span');
+    label.className = 'rail-label';
+    label.textContent = block.label;
+    row.appendChild(label);
+
+    row.addEventListener('click', function () { selectBlock(index); });
+    row.addEventListener('contextmenu', function (event) {
+      // webviewにVS Codeのメニューは出ないので、自前のものを開く
+      event.preventDefault();
+      selectBlock(index);
+      openMenu(index, event.clientX, event.clientY);
+    });
+    row.addEventListener('dragstart', function (event) {
+      dragFrom = index;
+      closeMenu();
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        // 中身を入れないと、ドラッグが始まらないブラウザがある
+        event.dataTransfer.setData('text/plain', String(index));
+      }
+    });
+    row.addEventListener('dragend', clearDrag);
+
     host.appendChild(row);
   });
+
+  field('railBook').className = currentScreen === 'book'
+    ? 'rail-row rail-fixed selected'
+    : 'rail-row rail-fixed';
 }
 
-/** 選んだ面の設定の欄だけを出す。ほかは畳む（消さない） */
-function renderPanes() {
-  const block = blocks[selected] || null;
+/**
+ * いま編んでいる1つだけを出す（作者の指定、設計書6.65.15の段D）。
+ *
+ * **欄そのものは作り直さず、畳むだけ**である。作り直すと、打ちかけの字が
+ * 画面を切り替えるたびに消える。
+ */
+function renderScreen() {
+  const block = currentScreen === 'block' ? (blocks[selected] || null) : null;
+  field('pane-bookSettings').hidden = currentScreen !== 'book';
+  field('blockScreen').hidden = currentScreen === 'book';
+
   const wanted = block ? PANES[block.type] : null;
   PANE_NAMES.forEach(function (name) {
     field('pane-' + name).hidden = name !== wanted;
   });
-  field('blockHeading').textContent = block ? block.label : '選んだ面';
+  if (block) field('blockHeading').textContent = block.label + 'の編集';
 
   if (block && wanted === 'image') {
     field('blockImagePath').value = block.imagePath || '';
@@ -739,11 +853,135 @@ function renderPanes() {
   }
 }
 
+/**
+ * 打ちかけの値を、いますぐ拡張機能へ渡す（作者の指定、段D）。
+ *
+ * 画面を切り替える前に必ず通す。待ち合わせ（scheduleChange）のままだと、
+ * **切り替えの拍子に打ちかけの1文字が落ちる**。
+ */
+function flushChange() {
+  if (sending) {
+    clearTimeout(sending);
+    sending = null;
+  }
+  post('change', { config: readForm() });
+}
+
 function selectBlock(index) {
+  flushChange();
+  currentScreen = 'block';
   selected = index;
   renderBlocks();
-  renderPanes();
+  renderScreen();
   renderPages();
+}
+
+/** 本全体の設定へ移る。並びの外なので、選んでいた面はそのまま覚えておく */
+function selectBookScreen() {
+  flushChange();
+  currentScreen = 'book';
+  renderBlocks();
+  renderScreen();
+}
+
+/* ---- 右クリックの自前メニュー（設計書6.65.15の段D） ---------------- */
+
+function menuItem(text, disabled, onPick) {
+  const button = document.createElement('button');
+  button.className = 'menu-item';
+  button.textContent = text;
+  button.disabled = disabled === true;
+  if (!disabled) {
+    button.addEventListener('click', function () {
+      closeMenu();
+      onPick();
+    });
+  }
+  return button;
+}
+
+/**
+ * 「この後ろに挿入」に並べる種類。
+ *
+ * **置ける種類だけを出す**（作者の指定）——もう置けない面は行ごと出さない。
+ * 何が置けるかの判断も、呼び名も拡張機能側が持つ。
+ */
+function insertSubmenu(index) {
+  const box = document.createElement('div');
+  box.className = 'submenu';
+  insertTypes.forEach(function (entry) {
+    if (entry.enabled !== true) return;
+    const item = menuItem(
+      iconOf(entry.key) + '　' + entry.label,
+      false,
+      function () {
+        // 章区切りは面ではない。台帳（設計書6.66）が正なので並びへは入れず、
+        // 「どの話から始めるか」を拡張機能側に訊いてもらう
+        if (entry.key === 'chapter') {
+          post('addChapter', { config: readForm() });
+          return;
+        }
+        post('insertBlock', {
+          blockType: entry.key,
+          index: index,
+          config: readForm()
+        });
+      }
+    );
+    item.title = entry.reason || '';
+    box.appendChild(item);
+  });
+  return box;
+}
+
+function openMenu(index, x, y) {
+  const block = blocks[index];
+  if (!block) return;
+
+  const menu = field('blockMenu');
+  menu.textContent = '';
+
+  const submenu = insertSubmenu(index);
+  submenu.hidden = true;
+  const opener = document.createElement('button');
+  opener.className = 'menu-item';
+  opener.textContent = 'この後ろに挿入 ▶';
+  opener.addEventListener('click', function () {
+    submenu.hidden = !submenu.hidden;
+  });
+  opener.addEventListener('mouseenter', function () {
+    submenu.hidden = false;
+  });
+  menu.appendChild(opener);
+  menu.appendChild(submenu);
+
+  menu.appendChild(menuItem('上へ', index === 0, function () {
+    post('moveBlock', { index: index, direction: -1, config: readForm() });
+  }));
+  menu.appendChild(menuItem('下へ', index === blocks.length - 1, function () {
+    post('moveBlock', { index: index, direction: 1, config: readForm() });
+  }));
+  // **消せない面には、削除の行そのものを出さない。** 押してから断られるより、
+  // 初めから無いほうが分かりやすい（本文がこれに当たる）
+  if (block.removable) {
+    menu.appendChild(menuItem('削除', false, function () {
+      post('removeBlock', { index: index, config: readForm() });
+    }));
+  }
+
+  menu.hidden = false;
+  // 画面の外へはみ出させない（右端・下端で右クリックしても全部見える）
+  const width = menu.offsetWidth || 168;
+  const height = menu.offsetHeight || 120;
+  menu.style.left = Math.max(0, Math.min(x, window.innerWidth - width)) + 'px';
+  menu.style.top = Math.max(0, Math.min(y, window.innerHeight - height)) + 'px';
+}
+
+function closeMenu() {
+  const menu = field('blockMenu');
+  if (menu.hidden) return;
+  menu.hidden = true;
+  menu.textContent = '';
 }
 
 /** 画像の面の欄を変えたら、その面だけを直してもらう（設計図は拡張機能側） */
@@ -1068,30 +1306,54 @@ SIDES.forEach(function (side) {
 });
 
 /*
- * パレット。押すと「選んでいる面の後ろ」へ入る（章区切りだけは台帳へ）。
+ * ドラッグでの並べ替え（設計書6.65.15の段D。作者の指定）。
  *
- * **並びも種類もHTMLの側から読む。** 一覧をここへ写すと、パレットを
- * 増やしたときに2か所を直すことになる。
+ * 受け取り手は**並びの箱そのもの**に付ける。行ごとに付けると、いちばん下の
+ * 行より下（＝末尾へ落とす）で離したときに誰も受け取らない。
+ *
+ * **箱の外では preventDefault をしない**ので、枠の外で離しても drop は
+ * 起きない＝知らせも送らない＝並びは変わらない。
  */
-Array.prototype.forEach.call(
-  document.querySelectorAll('.palette-button'),
-  function (button) {
-    const key = button.getAttribute('data-block');
-    button.addEventListener('click', function () {
-      // 章区切りは面ではない。台帳（設計書6.66）が正なので、並びへは入れず
-      // 「どの話から始めるか」を拡張機能側に訊いてもらう
-      if (key === 'chapter') {
-        post('addChapter', { config: readForm() });
-        return;
-      }
-      post('insertBlock', {
-        blockType: key,
-        index: selected,
-        config: readForm()
-      });
-    });
-  }
-);
+field('blockList').addEventListener('dragover', function (event) {
+  if (dragFrom < 0) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  markDropSlot(dropSlotAt(event.clientY));
+});
+field('blockList').addEventListener('dragleave', function (event) {
+  // 行から行へ移るときにも起きる。**箱そのものから出たときだけ**消す
+  // （毎回消すと、線が点滅して行き先が読めない）
+  const host = field('blockList');
+  if (event.relatedTarget && host.contains(event.relatedTarget)) return;
+  markDropSlot(-1);
+});
+field('blockList').addEventListener('drop', function (event) {
+  if (dragFrom < 0) return;
+  event.preventDefault();
+  const from = dragFrom;
+  const before = dropSlotAt(event.clientY);
+  clearDrag();
+  // **並びの計算は拡張機能側**（dropBookBlock）。同じ場所・範囲の外なら
+  // 向こうで何も起きない——画面が並びを組み替えることはしない
+  post('dropBlock', { from: from, before: before, config: readForm() });
+});
+
+/** 本全体の設定は、並びの外の1画面（作者の指定、段D） */
+field('railBook').addEventListener('click', selectBookScreen);
+
+/* メニューは、外を押しても Esc でも閉じる（自前なので自分で閉じる） */
+document.addEventListener('click', function (event) {
+  const menu = field('blockMenu');
+  if (menu.hidden) return;
+  if (!menu.contains(event.target)) closeMenu();
+});
+document.addEventListener('keydown', function (event) {
+  if (event.key !== 'Escape') return;
+  closeMenu();
+  // ドラッグ中のEscは、掴んでいる印を消すだけ（並びは変えない）
+  clearDrag();
+});
+window.addEventListener('scroll', closeMenu, true);
 
 field('save').addEventListener('click', function () {
   post('save', { config: readForm() });
@@ -1311,16 +1573,6 @@ function applyCompose(data) {
 
 /* ---- 面を出す ------------------------------------------------------ */
 
-/** パレットの押せる・押せないと、その理由（判断は拡張機能側が持つ） */
-function applyPalette(list) {
-  (list || []).forEach(function (entry) {
-    const button = field('palette-' + entry.key);
-    if (!button) return;
-    button.disabled = entry.enabled !== true;
-    button.title = entry.reason || '';
-  });
-}
-
 /**
  * 選んだ面のプレビューを出す。
  *
@@ -1387,14 +1639,18 @@ function applyPages(data) {
   if (typeof data.css === 'string') style.textContent = data.css;
   pages = data.pages || [];
   blocks = data.blocks || [];
+  insertTypes = data.insertTypes || [];
 
-  if (typeof data.selectBlock === 'number') selected = data.selectBlock;
+  if (typeof data.selectBlock === 'number') {
+    selected = data.selectBlock;
+    // 挿した・動かした面をそのまま編めるよう、その面の画面へ移る
+    currentScreen = 'block';
+  }
   if (selected >= blocks.length) selected = blocks.length - 1;
   if (selected < 0) selected = 0;
 
-  applyPalette(data.palette);
   renderBlocks();
-  renderPanes();
+  renderScreen();
   renderPages();
   field('notice').textContent = data.notice || '';
 }

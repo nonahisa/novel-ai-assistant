@@ -7,6 +7,7 @@ import {
   defaultBookBlocks,
   defaultBookConfig,
   defaultCoverLayout,
+  dropBookBlock,
   insertBookBlockAfter,
   moveBookBlock,
   parseBookConfig,
@@ -946,6 +947,80 @@ describe("並びを編む（設計書6.65.15の段C）", () => {
     moveBookBlock(base, 0, 1);
     removeBookBlockAt(base, 0);
 
+    expect(types(base)).toEqual(["cover", "toc", "body", "colophon"]);
+  });
+});
+
+/**
+ * ドラッグで落とした先の並び（設計書6.65.15の段D。作者の指定）。
+ *
+ * **ドラッグの見た目と、並びの変化を分ける。** 掴んだ・線が出た・離した
+ * という見え方はwebviewでしか確かめられないが、「どこへ落ちたらどうなるか」
+ * はここで固定できる。画面が渡すのは「どの隙間へ落としたか」だけで、
+ * 計算はこの関数が1か所で持つ。
+ */
+describe("落とし先の並び（設計書6.65.15の段D）", () => {
+  const base: BookBlock[] = [
+    { type: "cover" },
+    { type: "toc" },
+    { type: "body" },
+    { type: "colophon" },
+  ];
+  const types = (blocks: readonly BookBlock[] | null): string[] =>
+    (blocks ?? []).map((block) => block.type);
+
+  test("前の隙間へ落とすと、その面の手前に入る", () => {
+    // 目次（1）を表紙（0）の前へ
+    expect(types(dropBookBlock(base, 1, 0))).toEqual([
+      "toc",
+      "cover",
+      "body",
+      "colophon",
+    ]);
+  });
+
+  test("後ろの隙間へ落とすと、その面の後ろに入る", () => {
+    // 表紙（0）を本文（2）の後ろ＝隙間3へ
+    expect(types(dropBookBlock(base, 0, 3))).toEqual([
+      "toc",
+      "body",
+      "cover",
+      "colophon",
+    ]);
+  });
+
+  test("末尾の隙間へ落とすと、いちばん後ろに来る", () => {
+    expect(types(dropBookBlock(base, 0, base.length))).toEqual([
+      "toc",
+      "body",
+      "colophon",
+      "cover",
+    ]);
+  });
+
+  /**
+   * **自分自身の上に落としたら、何も変わらない。** 前の隙間でも後ろの
+   * 隙間でも並びは同じなので、どちらも「動かさなかった」と同じに扱う
+   * （変わっていないのに未保存の印が付くのを防ぐ）。
+   */
+  test("自分自身の上に落としても変わらない（null で断る）", () => {
+    expect(dropBookBlock(base, 1, 1)).toBeNull();
+    expect(dropBookBlock(base, 1, 2)).toBeNull();
+  });
+
+  /**
+   * **枠の外・範囲の外は何も起きない**（作者の指定）。Escで取りやめたときや、
+   * 掴んだまま画面の外で離したときに、並びが黙って変わってはいけない。
+   */
+  test("範囲の外は何も起きない（null で断る）", () => {
+    expect(dropBookBlock(base, -1, 2)).toBeNull();
+    expect(dropBookBlock(base, base.length, 0)).toBeNull();
+    expect(dropBookBlock(base, 0, -1)).toBeNull();
+    expect(dropBookBlock(base, 0, base.length + 1)).toBeNull();
+  });
+
+  test("元の並びは書き換えない", () => {
+    dropBookBlock(base, 0, 3);
     expect(types(base)).toEqual(["cover", "toc", "body", "colophon"]);
   });
 });

@@ -69,98 +69,210 @@ describe("EPUBエディターのHTML", () => {
 });
 
 /**
- * 右の縦のパレット（設計書6.65.15の段C。作者の指定）。
+ * 右の縦の並び（設計書6.65.15の段D。作者の指定）。
  *
- * **11種のボタンを上から下へ**、アイコンと短いラベルで並べる。
- * 押せる・押せないと理由は拡張機能側が決めるので、ここにあるのは
- * 「並んでいること」と「押したら何を知らせるか」だけである。
+ * 段Cの「種類のパレット」を廃し、**いまの本の構成そのもの**をアイコンの
+ * 縦列で出す。呼び名も「消せるか」も拡張機能側が持つので、ここにあるのは
+ * 「並べていること」と「押したら何を知らせるか」だけである。
  */
-describe("右の縦のパレット（設計書6.65.15）", () => {
-  const buttons = [...html.matchAll(/data-block="([^"]+)"/g)].map(
-    (match) => match[1]
-  );
-
-  it("11種のボタンが、作者の指定した順に並ぶ", () => {
-    expect(buttons).toEqual([
-      "cover",
-      "halfTitle",
-      "frontIllustration",
-      "sectionArt",
-      "toc",
-      "characters",
-      "chapter",
-      "body",
-      "afterword",
-      "colophon",
-      "backCover",
-    ]);
+describe("右の縦の並び（設計書6.65.15の段D）", () => {
+  /** 段Cのパレットは無くなった。残っていると、入口が2つある画面になる */
+  it("種類のパレットのHTMLが消えている", () => {
+    expect(html).not.toContain("palette-button");
+    expect(html).not.toContain("data-block=");
+    expect(html).not.toContain('id="palette-');
+    expect(html).not.toContain("palette-icon");
   });
 
-  it("アイコンと短いラベルが付く", () => {
-    expect(html).toContain('class="palette-icon"');
-    expect(html).toContain('class="palette-label"');
-    for (const key of buttons) {
-      expect(html).toContain(`id="palette-${key}"`);
-    }
+  it("右の列に、本の並びと固定の「本の設定」の入口がある", () => {
+    expect(html).toContain('id="rail"');
+    expect(html).toContain('id="railBook"');
+    expect(html).toContain('id="blockList"');
   });
 
-  /** 押せなくする判断も理由も拡張機能側が持つ（画面で組み立てない） */
-  it("押せる・押せないと理由は拡張機能から受け取る", () => {
-    expect(script).toContain("data.palette");
-    expect(script).toContain("button.disabled = entry.enabled !== true");
-    expect(script).toContain("button.title = entry.reason");
+  /** 狭い列なので、アイコンと短いラベルを縦に積む */
+  it("行はアイコンと短いラベルで組む", () => {
+    expect(script).toContain("rail-icon");
+    expect(script).toContain("rail-label");
+    // 呼び名は拡張機能側の言葉である（画面で組み立てない）
+    expect(script).toContain("block.label");
+    expect(script).toContain("data.blocks");
+  });
+
+  it("選んでいる行を強調する", () => {
+    expect(html).toContain(".rail-row.selected");
+    expect(script).toContain("'rail-row selected'");
+  });
+
+  /**
+   * **本の設定は並びの外**（作者の指定）。ドラッグの対象にも削除の対象にも
+   * しない——本全体の設定は、本の面ではないからである。
+   */
+  it("「本の設定」の入口は並びの中に入れない", () => {
+    const list = html.indexOf('id="blockList"');
+    expect(html.indexOf('id="railBook"')).toBeLessThan(list);
+    expect(html).toContain("rail-fixed");
+  });
+});
+
+/**
+ * ドラッグでの並べ替え（設計書6.65.15の段D。作者の指定）。
+ *
+ * 段Cでは「ドラッグは作らない」と決めていたが、作者の指定で入れた。
+ * **並びの計算は拡張機能側の純関数**に置き、画面は掴んだ行と落とした隙間
+ * だけを知らせる——見た目（掴む・線が出る）は実機でしか確かめられないが、
+ * 「知らせる中身」と「何も知らせない場合」はここで固定できる。
+ */
+describe("ドラッグでの並べ替え（設計書6.65.15の段D）", () => {
+  it("行を掴める（縦1列の並べ替え）", () => {
+    expect(script).toContain("row.draggable = true");
+    expect(script).toContain("dragstart");
+  });
+
+  it("落とし先を線で示す", () => {
+    expect(script).toContain("dragover");
+    expect(script).toContain("drop-before");
+    expect(script).toContain("drop-after");
+    expect(html).toContain(".rail-row.drop-before");
+    expect(html).toContain(".rail-row.drop-after");
+  });
+
+  it("落としたら、掴んだ行と隙間だけを知らせる", () => {
+    expect(script).toContain("post('dropBlock'");
+    expect(script).toContain("from: from");
+    expect(script).toContain("before: before");
+    // **画面で並びを組み替えない**（設計図を作るのは拡張機能側）
+    expect(script).not.toContain("blocks.splice");
+  });
+
+  /**
+   * **取りやめでは何も変わらない**（作者の指定）。Escで取りやめたときも、
+   * 枠の外で離したときも、知らせを送らない一本道にしてある。
+   */
+  it("取りやめ（Esc・枠の外）では何も知らせない", () => {
+    expect(script).toContain("dragend");
+    expect(script).toContain("function clearDrag");
+    expect(script).toContain("dragFrom = -1");
+    expect(script).toContain("Escape");
+    // 落とし先を受け取るのは並びの箱だけ（外では preventDefault をしない）
+    expect(script).toContain("field('blockList').addEventListener('drop'");
+  });
+});
+
+/**
+ * 右クリックの自前メニュー（設計書6.65.15の段D。作者の指定）。
+ *
+ * **webviewにVS Codeのメニューは出ない**ので、小さなメニューを自分で描く。
+ * 挿入・上へ・下へ・削除はここへ畳んだ（行がすっきりし、ドラッグが苦手な
+ * 人の道も残る）。
+ */
+describe("右クリックの自前メニュー（設計書6.65.15の段D）", () => {
+  it("メニューを置く場所があり、右クリックで開く", () => {
+    expect(html).toContain('id="blockMenu"');
+    expect(script).toContain("contextmenu");
+    expect(script).toContain("function openMenu");
+  });
+
+  it("挿入・上へ・下へ・削除がある", () => {
+    expect(script).toContain("この後ろに挿入");
+    expect(script).toContain("上へ");
+    expect(script).toContain("下へ");
+    expect(script).toContain("削除");
+    expect(script).toContain("post('insertBlock'");
+    expect(script).toContain("post('moveBlock'");
+    expect(script).toContain("post('removeBlock'");
+  });
+
+  /** 置ける種類だけを出す。判断も呼び名も拡張機能側が持つ */
+  it("挿入の一覧は、置ける種類だけを拡張機能から受け取る", () => {
+    expect(script).toContain("data.insertTypes");
+    expect(script).toContain("if (entry.enabled !== true) return");
+    expect(script).toContain("entry.label");
     // 「1冊に1つ」の言い方を画面に書かない
     expect(script).not.toContain("1冊に1つ");
   });
 
-  it("押すと、選んでいる面の後ろへ入れてもらう", () => {
-    expect(script).toContain("post('insertBlock'");
-    expect(script).toContain("index: selected");
+  /**
+   * **消せない面には、削除の行そのものを出さない**（本文がこれに当たる）。
+   * 押してから断られるより、初めから無いほうが分かりやすい。
+   */
+  it("削除は、消せる面にだけ出す", () => {
+    expect(script).toContain("if (block.removable)");
   });
 
   /** 章区切りは面ではない。台帳（設計書6.66）が正なので blocks へ入れない */
   it("章区切りだけは、並びではなく台帳へ知らせる", () => {
     expect(script).toContain("post('addChapter'");
-    expect(script).toContain("if (key === 'chapter')");
+    expect(script).toContain("entry.key === 'chapter'");
   });
 
-  /**
-   * **ドラッグは作らない**（設計書6.65.15の段C）。webviewでの検証が重く、
-   * 掴み損ねたときの巻き戻しも要る。クリック挿入と上へ・下へで確実にする。
-   */
-  it("ドラッグの仕掛けを持たない", () => {
-    expect(html).not.toContain("draggable");
-    expect(script).not.toContain("dragstart");
-    expect(script).not.toContain("dragover");
-    expect(script).not.toContain("drop");
+  it("クリック外し・Escで閉じる（自前なので自分で閉じる）", () => {
+    expect(script).toContain("function closeMenu");
+    expect(script).toContain("menu.contains(event.target)");
+    expect(script).toContain("Escape");
   });
 });
 
-describe("本の並びの欄（設計書6.65.15）", () => {
-  it("並びを置く場所と、選んだ面の設定の場所がある", () => {
-    expect(html).toContain('id="blockList"');
+/**
+ * ブロックごとに独立した編集画面（作者の指定、2026-09-04。段D）。
+ *
+ * 左に出すのは**選んだブロック専用の1画面**（そのブロックの設定と、その
+ * ブロックのプレビュー）だけである。全ブロックの設定欄を縦に積んだ長い
+ * ページにしない。本全体の設定は、並びの外の独立した1画面。
+ */
+describe("ブロックごとの編集画面（設計書6.65.15の段D）", () => {
+  it("本の設定と、選んだブロックの画面が分かれている", () => {
+    expect(html).toContain('id="pane-bookSettings"');
+    expect(html).toContain('id="blockScreen"');
     expect(html).toContain('id="blockSettings"');
-    expect(html).toContain('id="blockHeading"');
   });
 
-  it("上へ・下へ・削除で編める", () => {
-    expect(script).toContain("post('moveBlock'");
-    expect(script).toContain("post('removeBlock'");
-    expect(script).toContain("上へ");
-    expect(script).toContain("下へ");
+  it("出すのはどちらか片方だけ（縦に積まない）", () => {
+    expect(script).toContain(
+      "field('pane-bookSettings').hidden = currentScreen !== 'book'"
+    );
+    expect(script).toContain(
+      "field('blockScreen').hidden = currentScreen === 'book'"
+    );
+    // 面ごとの設定も、選んだ1つだけ
+    expect(script).toContain("field('pane-' + name).hidden = name !== wanted");
+  });
+
+  it("いま何を編集しているかの見出しが出る", () => {
+    expect(html).toContain('id="blockHeading"');
+    expect(script).toContain("'の編集'");
+  });
+
+  it("本の設定の入口を押すと、その画面へ移る", () => {
+    expect(script).toContain("function selectBookScreen");
+    expect(script).toContain("field('railBook').addEventListener('click'");
+  });
+
+  /** 保存・書き出しは、どちらの画面でも見えるところに置く */
+  it("保存と書き出しは、常に見えるヘッダーにある", () => {
+    const header = html.slice(html.indexOf("<header"), html.indexOf("</header>"));
+    expect(header).toContain('id="save"');
+    expect(header).toContain('id="export"');
   });
 
   /**
-   * **消せない面には、削除のボタンそのものを出さない**（本文がこれに当たる）。
-   * 押してから断られるより、初めから無いほうが分かりやすい。
+   * **切り替えで打ちかけの値を失わない**（作者の指定）。切り替える前に
+   * いまの欄を拡張機能へ渡し、欄そのものは畳むだけで作り直さない。
    */
-  it("削除のボタンは、消せる面にだけ出す", () => {
-    expect(script).toContain("if (block.removable)");
+  it("切り替えの前に、打ちかけの値を拡張機能へ渡す", () => {
+    expect(script).toContain("function flushChange");
+    expect(script).toContain("function selectBlock");
+    const select = script.slice(script.indexOf("function selectBlock"));
+    expect(select.slice(0, 200)).toContain("flushChange()");
   });
 
-  it("面の呼び名は拡張機能から受け取る（画面で持たない）", () => {
-    expect(script).toContain("block.label");
-    expect(script).toContain("data.blocks");
+  it("画面を切り替えても、欄を作り直さない（打った字が残る）", () => {
+    // 欄を埋め直すのは、設計図を貰ったときだけ（`fillForm`）
+    const render = script.slice(
+      script.indexOf("function renderScreen"),
+      script.indexOf("function flushChange")
+    );
+    expect(render).not.toContain("fillForm");
   });
 });
 

@@ -36,8 +36,13 @@ interface PreviewPayload {
   pages: PreviewPage[];
   /** 本の並びの行（設計書6.65.15の段C） */
   blocks: Array<{ type: string; label: string; detail: string | null; removable: boolean }>;
-  /** パレットの押せる・押せないと理由 */
-  palette: Array<{ key: string; enabled: boolean; reason: string }>;
+  /** 右クリックの「この後ろに挿入」に出す種類（設計書6.65.15の段D） */
+  insertTypes: Array<{
+    key: string;
+    label: string;
+    enabled: boolean;
+    reason: string;
+  }>;
   /** 話と章の一覧（章の行は読み取り専用） */
   outline: Array<{ kind: string; path?: string; label: string }>;
   placementWarnings: string[];
@@ -705,33 +710,100 @@ describe("並びの編集（設計書6.65.15の段C）", () => {
     const body = latest().blocks.find((block) => block.type === "body");
     expect(body?.removable).toBe(false);
     expect(
-      latest().palette.find((entry) => entry.key === "body")?.enabled
+      latest().insertTypes.find((entry) => entry.key === "body")?.enabled
     ).toBe(false);
 
     await send({ type: "removeBlock", index: 1, config: {} });
     expect(types()).toEqual(["cover", "body"]);
   });
 
-  test("パレットは、既にある面を押せなくして理由を持つ", async () => {
+  /**
+   * 挿入の一覧（設計書6.65.15の段D）。右クリックのメニューに出すのは
+   * **置ける種類だけ**なので、置けないものには理由を添えて false を渡す
+   * （画面がその行を出さない）。呼び名も拡張機能側が持つ。
+   */
+  test("挿入の一覧は、既にある面を置けないものとして理由を持つ", async () => {
     writeBook({
       title: "氷の街",
       blocks: [{ type: "cover" }, { type: "body" }],
     });
 
     await open();
-    const palette = latest().palette;
+    const insertTypes = latest().insertTypes;
 
     // 章区切りを含めて11種ぶん（面10種＋章区切り）
-    expect(palette).toHaveLength(11);
-    expect(palette.find((entry) => entry.key === "cover")?.enabled).toBe(false);
-    expect(palette.find((entry) => entry.key === "cover")?.reason).toContain(
+    expect(insertTypes).toHaveLength(11);
+    expect(insertTypes.find((entry) => entry.key === "cover")?.enabled).toBe(
+      false
+    );
+    expect(insertTypes.find((entry) => entry.key === "cover")?.reason).toContain(
       "1冊に1つだけ"
     );
     // 口絵・扉絵は何枚でも置ける
     expect(
-      palette.find((entry) => entry.key === "sectionArt")?.enabled
+      insertTypes.find((entry) => entry.key === "sectionArt")?.enabled
     ).toBe(true);
-    expect(palette.find((entry) => entry.key === "toc")?.enabled).toBe(true);
+    expect(insertTypes.find((entry) => entry.key === "toc")?.enabled).toBe(true);
+    // **呼び名は拡張機能側が持つ**（メニューの文字を画面で組み立てない）
+    expect(insertTypes.find((entry) => entry.key === "toc")?.label).toBe("目次");
+    expect(insertTypes.find((entry) => entry.key === "chapter")?.label).toBe(
+      "章区切り"
+    );
+  });
+
+  /**
+   * ドラッグで落とした並び（設計書6.65.15の段D。作者の指定）。
+   *
+   * 画面から届くのは「掴んだ面」と「落とした隙間」だけで、計算は
+   * `dropBookBlock` が持つ。**取りやめ（Esc・枠の外）では何も変わらない**
+   * ことを、ここでも受け口の側から固定しておく。
+   */
+  test("落とした隙間へ並びが動く", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover" }, { type: "toc" }, { type: "body" }],
+    });
+
+    await open();
+    // 目次（1）を先頭の隙間（0）へ
+    await send({ type: "dropBlock", from: 1, before: 0, config: {} });
+
+    expect(types()).toEqual(["toc", "cover", "body"]);
+    // 動かした面をそのまま選ばせる（続けて設定を触れるように）
+    expect(latest().selectBlock).toBe(0);
+    expect(await savedBlocks()).toEqual(["toc", "cover", "body"]);
+  });
+
+  test("本文も動かせる（外せないだけで、位置は変えられる）", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover" }, { type: "toc" }, { type: "body" }],
+    });
+
+    await open();
+    await send({ type: "dropBlock", from: 2, before: 1, config: {} });
+
+    expect(types()).toEqual(["cover", "body", "toc"]);
+  });
+
+  test("自分自身の上・範囲の外へ落としても、何も変わらない", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "cover" }, { type: "toc" }, { type: "body" }],
+    });
+
+    await open();
+    const mark = posted.length;
+    await send({ type: "dropBlock", from: 1, before: 1, config: {} });
+    await send({ type: "dropBlock", from: 1, before: 2, config: {} });
+    await send({ type: "dropBlock", from: 1, before: 9, config: {} });
+    await send({ type: "dropBlock", from: -1, before: 0, config: {} });
+
+    expect(types()).toEqual(["cover", "toc", "body"]);
+    // 並びが変わらないので、選び直しの指示も出さない
+    expect(
+      posted.slice(mark).some((message) => message.data?.selectBlock !== undefined)
+    ).toBe(false);
   });
 
   test("口絵は、絵の場所を訊いてから挿す（絵の無い面は作らない）", async () => {
@@ -995,5 +1067,73 @@ describe("あとがきを書く入口（設計書6.65.15）", () => {
       "書きかけの文章"
     );
     expect(executed.map((entry) => entry.command)).toContain("vscode.open");
+  });
+});
+
+/**
+ * バックアップの頭書き（設計書6.65.15の段D。作者の指定）。
+ *
+ * 作者の原稿には、投稿サイトのダウンロードツールが付けた頭書きが残って
+ * いることがある。**本にも、段落の一覧にも入れない。** 組版と段落番号が
+ * 同じ切り出し（`parseEpisodeMetadata`）を通っていないと、画面で指した
+ * 段落と挿絵の入る場所がずれる（設計書6.65.10）。
+ */
+describe("バックアップの頭書き（設計書6.65.15の段D）", () => {
+  const BACKUP = [
+    "-------- エピソード1開始 --------",
+    "【エピソードタイトル】",
+    "１話　転生",
+    "",
+    "【本文】",
+    "　朝が来た。",
+    "",
+    "　鐘が鳴る。",
+  ].join("\n");
+
+  /** 最後に届いた段落の一覧（挿絵・改ページを置く欄の中身） */
+  function latestParagraphs(): string[] {
+    for (let index = posted.length - 1; index >= 0; index--) {
+      const message = posted[index] as { type?: string; items?: string[] };
+      if (message.type === "paragraphs") return message.items ?? [];
+    }
+    throw new Error("段落の一覧が1度も渡っていません");
+  }
+
+  test("本文の面に、頭書きの見出しが入らない", async () => {
+    put("本文/第1話.txt", BACKUP);
+    writeBook({ title: "氷の街" });
+
+    await open();
+    const body = page("本文の冒頭").html;
+
+    expect(body).toContain("朝が来た。");
+    expect(body).not.toContain("エピソードタイトル");
+    expect(body).not.toContain("エピソード1開始");
+    expect(body).not.toContain("【本文】");
+  });
+
+  test("段落の一覧は、頭書きを除いた本文の段落から始まる", async () => {
+    put("本文/第1話.txt", BACKUP);
+    writeBook({ title: "氷の街" });
+
+    await open();
+    await send({ type: "episode", episodePath: "本文/第1話.txt" });
+
+    // 2段落ちょうど。頭書きが混ざると、1番目が「１話　転生」になる
+    // 冒頭は字下げを落として見せる（`paragraphPreview`）
+    expect(latestParagraphs()).toEqual(["朝が来た。", "鐘が鳴る。"]);
+  });
+
+  /** 頭書きの無い原稿は、いままでどおり1文字も落ちない（回帰の固定） */
+  test("頭書きの無い原稿は、いままでどおり全部が本文になる", async () => {
+    put("本文/第1話.txt", "　朝が来た。\n\n　鐘が鳴る。");
+    writeBook({ title: "氷の街" });
+
+    await open();
+    await send({ type: "episode", episodePath: "本文/第1話.txt" });
+
+    // 冒頭は字下げを落として見せる（`paragraphPreview`）
+    expect(latestParagraphs()).toEqual(["朝が来た。", "鐘が鳴る。"]);
+    expect(page("本文の冒頭").html).toContain("朝が来た。");
   });
 });

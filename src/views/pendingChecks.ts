@@ -349,9 +349,9 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
   },
   {
     id: "F-65",
-    title: "EPUBのブロック式画面（段C）",
+    title: "EPUBのブロック式画面（段C→段D）",
     commands: ["novelai.openEpubEditor"],
-    count: 8,
+    count: 7,
   },
   {
     id: "F-66",
@@ -626,4 +626,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 792;
+export const PENDING_CHECK_TOTAL = 791;
