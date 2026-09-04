@@ -46,6 +46,7 @@ import {
 } from "./recheckProposal";
 import { logFailure, logLine } from "../core/logger";
 import { revealTextLocation } from "./revealLocation";
+import { openInDefaultEditor } from "../views/openDocument";
 
 /**
  * 提案パネル（誤字脱字）。
@@ -61,6 +62,16 @@ import { revealTextLocation } from "./revealLocation";
  */
 
 export const PROPOSALS_VIEW_ID = "novelai.proposalsView";
+
+/**
+ * 単話プロットの判定の分類名（設計書6.36.3）。
+ *
+ * **2つに分ける。** 分類は差し替えなので、同じ名前に載せると
+ * 「本文と照合」を掛けた瞬間に「設計を検査」の結果が消える。
+ * 見る場面も違う（書く前／書いたあと）。
+ */
+export const EPISODE_PLOT_CATEGORY = "単話プロット";
+export const EPISODE_PLOT_CONTRAST_CATEGORY = "単話プロットと本文";
 
 /**
  * 画面へ送る直前に、違うところと「再チェックできるか」を添える。
@@ -97,7 +108,8 @@ function forView(item: ProposalViewItem): ProposalViewItem {
 function contradictionForView(
   item: ContradictionViewItem
 ): ContradictionViewItem {
-  return { ...item, canRecheck: true };
+  // **出さないと決めた指摘だけを外す**（単話プロットの判定。設計書6.36.3）
+  return { ...item, canRecheck: item.allowRecheck !== false };
 }
 
 export interface ProposalViewItem {
@@ -228,8 +240,33 @@ export interface ContradictionViewItem {
    */
   leftLabel: string;
   rightLabel: string;
-  /** 「設定資料を見る」の代わりに何を開くか */
-  openTarget: "settings" | "plot";
+  /**
+   * 「設定資料を見る」の代わりに何を開くか。
+   *
+   * `"file"` は `openPath` のファイルを開く（単話プロット。設計書6.36.3）。
+   * `"none"` はボタンごと出さない——**押しても何も起きない口を作らない。**
+   */
+  openTarget: "settings" | "plot" | "file" | "none";
+  /** `openTarget` が `"file"` のときに開くファイル */
+  openPath?: string;
+  /** 相手側を開くボタンの言葉。無ければ `openTarget` から決める */
+  openLabel?: string;
+  /**
+   * 「本文を見る」の代わりに出す言葉。
+   *
+   * 単話プロットの検査（P-27）は本文を見ていないので、飛ぶ先は
+   * 単話プロットそのものである。**「本文を見る」と書いてプロットが
+   * 開いては、押した作者が戸惑う。**
+   */
+  jumpLabel?: string;
+  /**
+   * 「再チェック」を出してよいか（**既定は出す**）。
+   *
+   * 単話プロットの判定（6.36.3）では出さない。再チェックは本文だけを
+   * 読み直して問うので、**物差し（箇条書き）が渡らない**——確かめた
+   * ことにならないのに、確かめたように見える。
+   */
+  allowRecheck?: boolean;
 }
 
 /**
@@ -938,6 +975,103 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   }
 
   /**
+   * 単話プロットの検査（P-27）の結果を出す（設計書6.36.3）。
+   *
+   * **適用の口も、修正案も無い。** 単話プロットは作者が書くもので、
+   * AIに直させない（6.36.2）。飛ぶ先は本文ではなく**単話プロットの
+   * その行**なので、押すボタンの名前もそちらに揃える。
+   */
+  showEpisodePlotFindings(
+    work: WorkEntry,
+    plotPath: string,
+    findings: ReadonlyArray<{
+      item: string;
+      line: number;
+      kind: string;
+      reason: string;
+    }>
+  ): void {
+    const contradictions: ContradictionViewItem[] = findings.map(
+      (finding, index) => ({
+        id: `ep:${finding.line}:${index}`,
+        filePath: plotPath,
+        fileName: path.basename(plotPath),
+        // 本文のチャンクではないので、指紋は持たない
+        chunkHash: "",
+        line: finding.line,
+        excerpt: finding.item,
+        category: finding.kind,
+        settingSays: finding.kind,
+        textSays: finding.reason,
+        note: "",
+        // **AIの見立てに強弱を付けさせていない。** 付けさせると、
+        // その値ごと信じることになる（種別だけで足りる指摘である）
+        confidence: "medium",
+        status: "pending",
+        leftLabel: "見立て",
+        rightLabel: "理由",
+        jumpLabel: "単話プロットを開く",
+        openTarget: "none",
+        allowRecheck: false,
+      })
+    );
+    this.replaceContents(work, EPISODE_PLOT_CATEGORY, { contradictions });
+  }
+
+  /**
+   * 単話プロットと本文の照合（P-28）の結果を出す（設計書6.36.3）。
+   *
+   * **プロット逸脱の隣の形。** どちらが正しいかは作者にしか決められない
+   * （**箇条書きのほうが古いこともある**）ので、適用の口を持たせず、
+   * 「本文を見る」と「単話プロットを開く」の2つだけを出す。
+   */
+  showEpisodePlotContrast(
+    work: WorkEntry,
+    plotPath: string,
+    episodePath: string,
+    findings: ReadonlyArray<{
+      kind: string;
+      plotItem: string | null;
+      plotLine: number | null;
+      excerpt: string | null;
+      line: number | null;
+      reason: string;
+    }>
+  ): void {
+    const contradictions: ContradictionViewItem[] = findings.map(
+      (finding, index) => ({
+        id: `ec:${finding.line ?? finding.plotLine ?? 0}:${index}`,
+        filePath: episodePath,
+        fileName: path.basename(episodePath),
+        chunkHash: "",
+        // 本文を指していない指摘（起きていない）は、話の頭へ飛ばす
+        line: finding.line ?? 1,
+        // **引用が無いときは、箇条書きのほうを見出しに出す。**
+        // 空欄を出すと、何の指摘なのか分からない
+        excerpt: finding.excerpt ?? finding.plotItem ?? "",
+        category: finding.kind,
+        settingSays: finding.plotItem ?? "（該当する項目はありません）",
+        textSays: finding.reason,
+        note:
+          finding.excerpt === null
+            ? "本文には見当たりません（飛び先は話の先頭です）"
+            : "",
+        confidence: "medium",
+        status: "pending",
+        leftLabel: "箇条書きでは",
+        rightLabel: "この話では",
+        openTarget: "file",
+        openPath: plotPath,
+        openLabel: "単話プロットを開く",
+        allowRecheck: false,
+      })
+    );
+    this.replaceContents(work, EPISODE_PLOT_CONTRAST_CATEGORY, {
+      contradictions,
+    });
+  }
+
+  /**
    * 編集部からの提案を表示する（設計書5.6）。
    *
    * **誤字脱字の指摘と形が同じ**なので、適用・無視の道をそのまま使える。
@@ -1211,11 +1345,21 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   /**
    * 照らした相手側を開く。**本文だけを直す道を示さないため。**
    *
-   * 矛盾なら設定資料、プロット逸脱ならプロット。
+   * 矛盾なら設定資料、プロット逸脱ならプロット、単話プロットの照合なら
+   * その話の単話プロット（設計書6.36.3）。
    */
   private async openSettingsFor(id: string): Promise<void> {
     const item = this.contradictions.find((entry) => entry.id === id);
     if (!item || !this.work) return;
+
+    if (item.openTarget === "none") return;
+    if (item.openTarget === "file") {
+      // **ファイルを直に開く。** 単話プロットには「開くコマンド」が無く、
+      // どの話かはこの指摘だけが知っている
+      if (item.openPath) await openInDefaultEditor(item.openPath);
+      return;
+    }
+
     const ref = { type: "work", work: this.work };
     await vscode.commands.executeCommand(
       item.openTarget === "plot"

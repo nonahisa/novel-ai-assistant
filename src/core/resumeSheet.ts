@@ -379,6 +379,23 @@ export function episodePlotFileName(chapter: number): string {
 }
 
 /**
+ * ファイル名から話数を読み取る（`episodePlotFileName` の逆）。
+ *
+ * **作る側の隣に置く。** 名前の決め方を変えたときに、読む側だけが
+ * 古いまま残ると「開いているのに、どの話か分からない」が起きる
+ * （単話プロットを開いたままAI判定を掛ける道で使う。設計書6.36.3）。
+ * 読めなければ null——**推測で埋めない。**
+ */
+export function episodePlotChapterFromFileName(
+  fileName: string
+): number | null {
+  const matched = /^第(\d+)話\.md$/.exec(fileName);
+  if (!matched) return null;
+  const chapter = Number(matched[1]);
+  return Number.isSafeInteger(chapter) && chapter >= 0 ? chapter : null;
+}
+
+/**
  * 単話プロットの雛形（設計書6.36.2）。
  *
  * **AIに筋書きを作らせない。** 3つの問いを置くだけにして、答えるのは

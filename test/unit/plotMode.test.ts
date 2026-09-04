@@ -6,6 +6,7 @@ import type { ChapterSynopsis } from "../../src/models/synopsis";
 import { isBlankPlotSection, parsePlotMarkdown } from "../../src/core/plotDoc";
 import { buildPlotTemplate } from "../../src/core/plotTemplate";
 import {
+  EPISODE_PLOT_CHECK_LABELS,
   PLOT_MODE_AI_COMMANDS,
   appendPlotSection,
   buildPlotEpisodeRows,
@@ -236,6 +237,70 @@ describe("あらすじの冒頭", () => {
 
   test("改行は空白に畳む（1行で見せる）", () => {
     expect(synopsisHead("一行目\n二行目")).toBe("一行目 二行目");
+  });
+});
+
+/**
+ * 単話プロットのAI判定の入口（設計書6.36.3）。
+ *
+ * **押しても何も起きないボタンを置かない。** 単話プロットが無ければ
+ * 照らす相手が無く、本文が無ければ照合する先が無い。
+ */
+describe("単話プロットのAI判定のボタンの出し分け", () => {
+  function rowsFor(over: Partial<EpisodeFile>, plots: Set<number>) {
+    return buildPlotEpisodeRows({
+      episodes: [
+        episode({
+          fileName: "003.txt",
+          chapterStart: 3,
+          chapterEnd: 3,
+          ...over,
+        }),
+      ],
+      chapters: [],
+      workFolder: "C:/work",
+      synopses: [],
+      episodePlotChapters: plots,
+    });
+  }
+
+  const withText = {
+    counts: {
+      gross: 1200,
+      net: 1100,
+      lines: 40,
+      paragraphs: 12,
+      manuscriptLines: 60,
+    },
+  };
+
+  test("単話プロットが無ければ、どちらも出さない", () => {
+    expect(rowsFor(withText, new Set())[0].episodePlotChecks).toEqual([]);
+  });
+
+  test("本文が無ければ、照合は出さない（設計の検査だけ）", () => {
+    expect(rowsFor({}, new Set([3]))[0].episodePlotChecks).toEqual(["design"]);
+  });
+
+  test("両方あれば、両方出す", () => {
+    expect(rowsFor(withText, new Set([3]))[0].episodePlotChecks).toEqual([
+      "design",
+      "contrast",
+    ]);
+  });
+
+  test("競合の跡が残る本文とは照合しない（AI処理をブロックする）", () => {
+    expect(
+      rowsFor({ ...withText, hasConflictMarkers: true }, new Set([3]))[0]
+        .episodePlotChecks
+    ).toEqual(["design"]);
+  });
+
+  test("ボタンの名前は1か所だけが持つ", () => {
+    for (const kind of ["design", "contrast"] as const) {
+      expect(EPISODE_PLOT_CHECK_LABELS[kind].label.length).toBeGreaterThan(0);
+      expect(EPISODE_PLOT_CHECK_LABELS[kind].detail).toContain("AI");
+    }
   });
 });
 

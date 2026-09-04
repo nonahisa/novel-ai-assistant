@@ -154,8 +154,58 @@ export interface PlotEpisodeRow {
   hasEpisodePlot: boolean;
   /** 単話プロットを作れるか。**話数が読めない話は作れない**（6.36.2） */
   canCreateEpisodePlot: boolean;
+  /** この行で押せるAI判定（設計書6.36.3）。**押せないものは並べない** */
+  episodePlotChecks: EpisodePlotCheckAction[];
   /** 各話あらすじの冒頭。無ければ空 */
   synopsisHead: string;
+}
+
+/**
+ * 単話プロットに掛けられるAI判定（設計書6.36.3）。
+ *
+ * - `design`：P-27。書いた設計だけを見る（**本文は要らない**）
+ * - `contrast`：P-28。その話の本文と箇条書きを照らす
+ */
+export type EpisodePlotCheckAction = "design" | "contrast";
+
+/**
+ * ボタンの名前と説明。**画面に出す言葉はここだけが持つ。**
+ *
+ * プロットモードのパネルと詳細メニューの両方が読む。写しを作ると、
+ * 片方だけ直したときに同じ操作が2つの名前で並ぶ。
+ */
+export const EPISODE_PLOT_CHECK_LABELS: Record<
+  EpisodePlotCheckAction,
+  { label: string; detail: string }
+> = {
+  design: {
+    label: "設計を検査",
+    detail:
+      "単話プロットの展開が、この話の目標に向かっているかをAIに見せます。" +
+      "本文は要りません。指摘するだけで、プロットは書き換えません。",
+  },
+  contrast: {
+    label: "本文と照合",
+    detail:
+      "この話の本文と、単話プロットの箇条書きをAIで照らし合わせます。" +
+      "本文もプロットも書き換えません。箇条書きのほうが古いこともあります。",
+  },
+};
+
+/**
+ * その行で押せるAI判定（設計書6.36.3）。
+ *
+ * **押しても何も起きないボタンを置かない。** 単話プロットが無ければ
+ * 照らす相手が無く、本文が無ければ照合する先が無い。競合の跡が残る本文は
+ * AI処理をブロックする（この作品の決まり）ので、照合の相手にしない。
+ */
+export function episodePlotChecksFor(
+  row: Pick<PlotEpisodeRow, "hasEpisodePlot" | "hasManuscript" | "conflicted">
+): EpisodePlotCheckAction[] {
+  if (!row.hasEpisodePlot) return [];
+  return row.hasManuscript && !row.conflicted
+    ? ["design", "contrast"]
+    : ["design"];
 }
 
 /**
@@ -204,6 +254,12 @@ export function buildPlotEpisodeRows(
   return input.episodes.map((episode) => {
     const chapter = episodePlotChapterOf(episode);
     const label = formatChapterLabel(episode, input.format) || episode.fileName;
+    const state = {
+      hasManuscript: episode.counts.net > 0,
+      conflicted: episode.hasConflictMarkers,
+      hasEpisodePlot:
+        chapter !== null && input.episodePlotChapters.has(chapter),
+    };
     return {
       filePath: episode.filePath,
       fileName: episode.fileName,
@@ -215,11 +271,9 @@ export function buildPlotEpisodeRows(
         "",
       net: episode.counts.net,
       gross: episode.counts.gross,
-      hasManuscript: episode.counts.net > 0,
-      conflicted: episode.hasConflictMarkers,
-      hasEpisodePlot:
-        chapter !== null && input.episodePlotChapters.has(chapter),
+      ...state,
       canCreateEpisodePlot: chapter !== null,
+      episodePlotChecks: episodePlotChecksFor(state),
       synopsisHead: synopsisHead(findSynopsisFor(synopses, episode)?.synopsis ?? ""),
     };
   });

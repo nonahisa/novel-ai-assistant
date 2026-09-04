@@ -396,6 +396,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 6,
   },
   {
+    id: "F-73",
+    title: "単話プロットのAI判定",
+    commands: ["novelai.checkEpisodePlot"],
+    count: 7,
+  },
+  {
     id: "F-52",
     title: "待ち時間300秒の壁——通信部品（undici）側の上限も設定に合わせた",
     commands: ["novelai.extractSettings"],
@@ -620,4 +626,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 785;
+export const PENDING_CHECK_TOTAL = 792;

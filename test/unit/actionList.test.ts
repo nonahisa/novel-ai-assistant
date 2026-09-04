@@ -307,6 +307,9 @@ describe("AIの印", () => {
         "novelai.checkProofread",
         "novelai.checkContradictions",
         "novelai.checkDeviations",
+        // 単話プロットの検査・本文との照合（P-27・P-28。設計書6.36.3）。
+        // **入口は1つ。** どちらを掛けるかは実行時に選ぶ
+        "novelai.checkEpisodePlot",
         // 伏線の検知（配置・回収。設計書6.35.2・6.35.3）。
         // **一覧を開く・手で追加・状態を変えるは、AIを呼ばないので入らない**
         "novelai.checkForeshadows",

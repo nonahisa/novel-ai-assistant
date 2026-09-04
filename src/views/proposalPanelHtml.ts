@@ -518,8 +518,13 @@ function renderContradiction(item) {
     recheckNote +
     (canAct
       ? '<div class="actions">' +
-        '<button data-action="jump" data-id="' + item.id + '"' + disabled + '>本文を見る</button>' +
-        '<button class="secondary" data-action="openSettings" data-id="' + item.id + '"' + disabled + '>' + (item.openTarget === 'plot' ? 'プロットを見る' : '設定資料を見る') + '</button>' +
+        // **飛び先に合った名前を出す。** 単話プロットの検査（P-27）は
+        // 本文を見ていないので、押すと開くのは単話プロットである
+        '<button data-action="jump" data-id="' + item.id + '"' + disabled + '>' + escapeHtml(item.jumpLabel || '本文を見る') + '</button>' +
+        // 照らす相手が無い指摘（P-27）では、このボタンごと出さない
+        (item.openTarget === 'none'
+          ? ''
+          : '<button class="secondary" data-action="openSettings" data-id="' + item.id + '"' + disabled + '>' + escapeHtml(item.openLabel || (item.openTarget === 'plot' ? 'プロットを見る' : '設定資料を見る')) + '</button>') +
         '<button class="secondary" data-action="dismiss" data-id="' + item.id + '"' + disabled + '>無視</button>' +
         // **矛盾ではなく伏線だった、という道**（設計書6.35.4）。
         // 矛盾検知は「意図した違和感」も食い違いとして拾うので、

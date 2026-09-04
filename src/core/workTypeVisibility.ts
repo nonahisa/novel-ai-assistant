@@ -256,6 +256,9 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.checkOpening": "allTypes",
   // 筋・設定と突き合わせる検知は、物語のあるタイプだけ
   "novelai.checkDeviations": "story",
+  // 単話プロットの検査・本文との照合（設計書6.36.3）。
+  // 単話プロットそのものが物語向けの道具である
+  "novelai.checkEpisodePlot": "story",
   "novelai.checkContradictions": "story",
   "novelai.checkForeshadows": "story",
   "novelai.checkForeshadowResolution": "story",

@@ -7,12 +7,14 @@ import type { WorkFormatKey } from "../core/workFormat";
 import { PLOT_SECTIONS } from "../core/plotDoc";
 import { readPlotText, writePlotText } from "../core/plotFile";
 import {
+  EPISODE_PLOT_CHECK_LABELS,
   PLOT_MODE_AI_COMMANDS,
   appendPlotSection,
   buildPlotEpisodeRows,
   episodePlotChapterOf,
   listPlotHeadings,
   unusedPlotSections,
+  type EpisodePlotCheckAction,
   type PlotEpisodeRow,
 } from "../core/plotMode";
 import { computeMinimalEdit } from "../core/textEdit";
@@ -30,6 +32,7 @@ import { openInDefaultEditor } from "../views/openDocument";
 import { allActions } from "../views/actionList";
 import { ensurePlotFile } from "./startWork";
 import { createEpisodePlot } from "./resumeWriting";
+import type { EpisodePlotCheckRef } from "./checkEpisodePlot";
 import { syncPlotCharacters } from "./plotCharacterSync";
 
 /**
@@ -130,7 +133,12 @@ type PanelMessage =
   | { type: "syncCharacters" }
   | { type: "openEpisode"; filePath: string }
   | { type: "createEpisodePlot"; chapter: number | null }
-  | { type: "openEpisodePlot"; chapter: number | null };
+  | { type: "openEpisodePlot"; chapter: number | null }
+  | {
+      type: "checkEpisodePlot";
+      chapter: number | null;
+      check: EpisodePlotCheckAction;
+    };
 
 class PlotModePanel {
   private readonly panel: vscode.WebviewPanel;
@@ -234,6 +242,9 @@ class PlotModePanel {
         case "openEpisodePlot":
           await this.openEpisodePlot(message.chapter);
           return;
+        case "checkEpisodePlot":
+          await this.checkEpisodePlot(message.chapter, message.check);
+          return;
       }
     } catch (error) {
       const detail = messageOf(error);
@@ -332,6 +343,26 @@ class PlotModePanel {
       viewColumn: vscode.ViewColumn.One,
     });
     await this.load();
+  }
+
+  /**
+   * 単話プロットのAI判定（P-27・P-28、設計書6.36.3）。
+   *
+   * **既存のコマンドを呼ぶだけ**（AIの3つと同じ決まり）。どの話の
+   * どちらを掛けるかは、この行が知っているのでそのまま渡す。
+   */
+  private async checkEpisodePlot(
+    chapter: number | null,
+    check: EpisodePlotCheckAction
+  ): Promise<void> {
+    if (chapter === null) return;
+    const ref: EpisodePlotCheckRef = {
+      type: "episodePlot",
+      work: this.work,
+      chapter,
+      check,
+    };
+    await vscode.commands.executeCommand("novelai.checkEpisodePlot", ref);
   }
 
   private async openEpisodePlot(chapter: number | null): Promise<void> {
@@ -480,6 +511,11 @@ class PlotModePanel {
         episodes: this.rows.map((row) => ({
           ...row,
           chars: pickCount({ ...zeroCounts, net: row.net, gross: row.gross }, mode),
+          // ボタンの名前は `core/plotMode.ts` だけが持つ（写しを作らない）
+          checks: row.episodePlotChecks.map((check) => ({
+            check,
+            ...EPISODE_PLOT_CHECK_LABELS[check],
+          })),
         })),
         emptyEpisodes: `まだ${this.unitNoun}がありません。`,
         notice: this.notices.join(" "),

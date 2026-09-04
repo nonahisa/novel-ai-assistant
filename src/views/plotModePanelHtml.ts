@@ -250,6 +250,10 @@ el.episodes.addEventListener("click", function (event) {
     post("openEpisodePlot", { chapter: chapter });
     return;
   }
+  if (target.classList.contains("check-plot")) {
+    post("checkEpisodePlot", { chapter: chapter, check: target.dataset.check });
+    return;
+  }
   post("openEpisode", { filePath: target.dataset.path });
 });
 
@@ -320,6 +324,17 @@ function renderEpisode(row) {
       '<button class="plot-btn create-plot" data-path="' + escapeHtml(row.filePath) +
       '" data-chapter="' + escapeHtml(chapterAttr) +
       '" title="視点・目標・展開の雛形を作って開きます（AIは書きません）">単話プロットを作る</button>';
+  }
+
+  // 単話プロットのAI判定（設計書6.36.3）。**出せるものだけが届く**
+  // ——押しても何も起きないボタンは、拡張機能側で落としてある
+  for (const entry of row.checks || []) {
+    button +=
+      '<button class="plot-btn check-plot" data-path="' + escapeHtml(row.filePath) +
+      '" data-chapter="' + escapeHtml(chapterAttr) +
+      '" data-check="' + escapeHtml(entry.check) +
+      '" title="' + escapeHtml(entry.detail) + '">' +
+      escapeHtml(entry.label) + "</button>";
   }
 
   return '<div class="episode">' +

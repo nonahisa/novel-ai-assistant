@@ -196,6 +196,14 @@ import { setWorkGoals } from "./features/setWorkGoals";
 import { checkContradictions } from "./features/checkContradictions";
 import { checkProofread } from "./features/checkProofread";
 import { checkDeviations } from "./features/checkDeviations";
+// 単話プロットのAI判定2種（P-27・P-28。設計書6.36.3）
+import {
+  checkEpisodePlotDesign,
+  contrastEpisodePlot,
+  pickEpisodePlotTarget,
+  type EpisodePlotCheckRef,
+} from "./features/checkEpisodePlot";
+import { episodePlotChapterOfPath } from "./core/episodePlotDoc";
 import { checkOpening } from "./features/checkOpening";
 // 名前の点検と付け替え（設計書6.37）
 import {
@@ -3403,6 +3411,138 @@ export async function activate(
     )
   );
 
+  /**
+   * 単話プロットのAI判定2種（P-27・P-28、設計書6.36.3）。
+   *
+   * **入口は1つにまとめる。** どの話の、どちらの判定かは
+   * `pickEpisodePlotTarget` が決める——プロットモードの一覧から来たときは
+   * 両方分かっているので訊き返さず、単話プロットを開いた状態の右クリック
+   * からはファイル名で話数が分かる。
+   */
+  context.subscriptions.push(
+    registerCommand("novelai.checkEpisodePlot", async (arg?: unknown) => {
+      const ref = asEpisodePlotRef(arg);
+      // 開いているファイルが単話プロットなら、その話数を使う
+      // （右クリック・コマンドパレットのどちらから来ても同じ）
+      const uri =
+        arg instanceof vscode.Uri
+          ? arg
+          : vscode.window.activeTextEditor?.document.uri;
+      const openedPath = uri ? fromUri(uri) : undefined;
+      const openedChapter = openedPath
+        ? episodePlotChapterOfPath(openedPath)
+        : null;
+
+      const work =
+        ref?.work ??
+        (openedPath ? findWorkForPath(registry, openedPath) : undefined) ??
+        (await resolveWork(
+          arg instanceof vscode.Uri ? undefined : (arg as WorkRef | undefined),
+          registry
+        ));
+      if (!work) return;
+
+      const target = ref
+        ? { chapter: ref.chapter, check: ref.check }
+        : await pickEpisodePlotTarget(work, {
+            ...(openedChapter === null ? {} : { chapter: openedChapter }),
+          });
+      if (!target) return;
+
+      if (target.check === "design") {
+        // **本文は読まないが、単話プロットは読む。** 書きかけのまま
+        // 走らせると、画面と違う箇条書きを送ることになる
+        if (
+          !(await saveDirtyDocumentsBeforeExtraction(
+            work,
+            "単話プロットの検査"
+          ))
+        ) {
+          return;
+        }
+        const result = await withPanelProgress(
+          work,
+          "単話プロットを検査",
+          (onProgress) =>
+            checkEpisodePlotDesign(work, target.chapter, aiRegistry, {
+              onProgress,
+            }),
+          "件"
+        );
+        if (!result || result.cancelled) return;
+
+        proposalPanel.showEpisodePlotFindings(
+          work,
+          result.plotPath,
+          result.findings
+        );
+        const parts = [`指摘 ${result.findings.length}件`];
+        if (result.rejectedCount > 0) {
+          parts.push(
+            `捨てた ${result.rejectedCount}件（${result.rejectSummary}）`
+          );
+        }
+        if (result.blanks.length > 0) {
+          // 空の節があると、見られる観点が減る。**黙って減らさない**
+          parts.push(`まだ書かれていない節：${result.blanks.join("・")}`);
+        }
+        notifyRunCompletion({
+          headline: `${result.chapterLabel}の単話プロットの検査`,
+          parts,
+          failedCount: result.failed ? 1 : 0,
+          tail:
+            result.findings.length > 0
+              ? "プロットは書き換えていません。 直すかどうかは作者が決めます。"
+              : "",
+        });
+        return;
+      }
+
+      if (
+        !(await saveDirtyDocumentsBeforeExtraction(
+          work,
+          "単話プロットと本文の照合"
+        ))
+      ) {
+        return;
+      }
+      const result = await withPanelProgress(
+        work,
+        "本文と単話プロットを照合",
+        (onProgress) =>
+          contrastEpisodePlot(work, target.chapter, aiRegistry, { onProgress }),
+        "件"
+      );
+      if (!result || result.cancelled) return;
+
+      proposalPanel.showEpisodePlotContrast(
+        work,
+        result.plotPath,
+        result.episodePath,
+        result.findings
+      );
+      const parts = [`指摘 ${result.findings.length}件`];
+      if (result.rejectedCount > 0) {
+        parts.push(
+          `捨てた ${result.rejectedCount}件（${result.rejectSummary}）`
+        );
+      }
+      if (result.droppedChars > 0) {
+        // **切った後ろは見ていない。** 0件を「食い違いなし」と読ませない
+        parts.push(`長さの上限で ${result.droppedChars}字を送っていません`);
+      }
+      notifyRunCompletion({
+        headline: `${result.chapterLabel}の本文と単話プロットの照合`,
+        parts,
+        failedCount: result.failed ? 1 : 0,
+        tail:
+          result.findings.length > 0
+            ? "本文もプロットも書き換えていません。 箇条書きのほうが古いこともあります。"
+            : "",
+      });
+    })
+  );
+
   context.subscriptions.push(
     registerCommand(
       "novelai.checkProofread",
@@ -4123,6 +4263,23 @@ export function deactivate(): void {
   // 後片付けは context.subscriptions に任せる。
   // ログだけは遅延生成でsubscriptionsに載っていないので個別に閉じる
   disposeLog();
+}
+
+/**
+ * プロットモードの一覧から渡された引数か（設計書6.36.3）。
+ *
+ * **形を確かめてから使う。** 右クリック（`Uri`）・詳細メニュー（`WorkRef`）・
+ * コマンドパレット（引数なし）と同じ口を通るので、名前だけで信じない。
+ */
+function asEpisodePlotRef(arg: unknown): EpisodePlotCheckRef | undefined {
+  if (typeof arg !== "object" || arg === null) return undefined;
+  const candidate = arg as Partial<EpisodePlotCheckRef>;
+  if (candidate.type !== "episodePlot") return undefined;
+  if (!candidate.work || typeof candidate.chapter !== "number") return undefined;
+  if (candidate.check !== "design" && candidate.check !== "contrast") {
+    return undefined;
+  }
+  return candidate as EpisodePlotCheckRef;
 }
 
 /**
