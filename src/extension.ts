@@ -184,6 +184,7 @@ import { openPlotMode, refreshPlotMode } from "./features/plotModePanel";
 import { syncPlotCharacters } from "./features/plotCharacterSync";
 import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
 import { ChatterService } from "./features/chatterService";
+import { requestChatterComment } from "./features/chatterComment";
 import { setPlotBasics } from "./features/setPlotBasics";
 import {
   invalidateWorkFormat,
@@ -1327,6 +1328,15 @@ export async function activate(
       pendingUpdates: actionDecorations.countOf("pendingUpdates"),
       mergeCandidates: actionDecorations.countOf("mergeCandidates"),
     }),
+    // **本文を読んだ感想**（設計書6.21.4）。相談パネルへ出るものなので、
+    // 割当も相談（`chat`）に相乗りする。有料かどうかは向こうでも見る
+    requestComment: (work, manuscriptPath, signal) =>
+      requestChatterComment(
+        work,
+        manuscriptPath,
+        () => aiRegistry.resolve("chat"),
+        signal
+      ),
   });
   chatter.start();
   context.subscriptions.push(chatter);

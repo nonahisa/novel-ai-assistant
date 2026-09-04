@@ -40,6 +40,9 @@ function deps(overrides: Partial<ChatterDeps> = {}): ChatterDeps & {
     // どの試験でも抽出の申し出が混ざって「何を確かめたか」がぼやける
     unextractedEpisodes: async () => 0,
     counts: () => ({ pendingUpdates: 0, mergeCandidates: 0 }),
+    // **既定では感想を取りに行けないことにする。** ここで文面を返すと、
+    // 既存の試験に「AIの感想」が混ざって、何を確かめたのかがぼやける
+    requestComment: async () => undefined,
     ...overrides,
   };
 }
@@ -332,5 +335,152 @@ describe("まだ取り込んでいない話の申し出", () => {
     await service.tick();
 
     expect(calls).toBe(1);
+  });
+});
+
+/**
+ * 本文を読んで言う一言（設計書6.21.4、P-34）。
+ *
+ * **AIを呼ぶのは「言ってよい」と決まってからだけである。** 黙る回にも
+ * 呼びに行くと、10分ごとの様子見のたびに手元のAIを無駄に走らせる。
+ * そして**失敗は画面に出さない**——独り言のエラー表示ほど邪魔なものはない。
+ */
+describe("本文の感想", () => {
+  /** 感想以外に言うことが無い状態。祝いも申し出も出ない */
+  function quiet(overrides: Partial<ChatterDeps> = {}) {
+    return deps({
+      summary: async () => ({ today: "2026-09-05", written: 100, streak: 0 }),
+      ...overrides,
+    });
+  }
+
+  /** 言えることを1つずつ吐き出させて、感想の番まで進める */
+  async function tickUntilComment(service: ChatterService): Promise<void> {
+    for (let round = 0; round < 5; round++) {
+      idle(service);
+      (service as unknown as { lastSpokeAt: number }).lastSpokeAt = 0;
+      await service.tick();
+    }
+  }
+
+  test("取りに行けたら、その文面を出す", async () => {
+    const d = quiet({
+      requestComment: async () => "戦闘の緊張感が伝わってきます。",
+    });
+    const service = new ChatterService(d);
+
+    await tickUntilComment(service);
+
+    expect(d.posted.map((c) => c.text)).toContain(
+      "戦闘の緊張感が伝わってきます。"
+    );
+  });
+
+  test("読ませるのは、直近に保存した本文", async () => {
+    const asked: string[] = [];
+    const service = new ChatterService(
+      quiet({
+        requestComment: async (_work, manuscriptPath) => {
+          asked.push(manuscriptPath);
+          return "静かな幕切れですね。";
+        },
+      })
+    );
+
+    await tickUntilComment(service);
+
+    expect(asked).toEqual(["C:\\novels\\work\\001.txt"]);
+  });
+
+  test("有料のAIでは取りに行かない", async () => {
+    // **頼まれていない発言で課金しない。** 感想でも例外にしない
+    let calls = 0;
+    const d = quiet({
+      resolveAi: () => ({ paid: true }),
+      requestComment: async () => {
+        calls++;
+        return "面白いですね。";
+      },
+    });
+    const service = new ChatterService(d);
+
+    await tickUntilComment(service);
+
+    expect(calls).toBe(0);
+    expect(d.posted).toHaveLength(0);
+  });
+
+  test("AIが仕事中なら取りに行かない", async () => {
+    let calls = 0;
+    const d = quiet({
+      requestComment: async () => {
+        calls++;
+        return "面白いですね。";
+      },
+    });
+    const service = new ChatterService(d);
+    beginAiWork();
+
+    await tickUntilComment(service);
+
+    expect(calls).toBe(0);
+    expect(d.posted).toHaveLength(0);
+  });
+
+  test("失敗しても、画面には何も出さない", async () => {
+    const d = quiet({
+      requestComment: async () => {
+        throw new Error("繋がりません");
+      },
+    });
+    const service = new ChatterService(d);
+
+    await expect(tickUntilComment(service)).resolves.toBeUndefined();
+    expect(d.posted.map((c) => c.kind)).not.toContain("manuscriptComment");
+  });
+
+  test("読めない答えは出さない", async () => {
+    // 60字を超える答え・指示語のなぞりは、独り言として使えない
+    const d = quiet({ requestComment: async () => "あ".repeat(61) });
+    const service = new ChatterService(d);
+
+    await tickUntilComment(service);
+
+    expect(d.posted.map((c) => c.kind)).not.toContain("manuscriptComment");
+  });
+
+  test("同じ話へ2度取りに行かない", async () => {
+    // 失敗した回も数える。**繋がらないAIへ10分おきに聞き直さない**
+    let calls = 0;
+    const service = new ChatterService(
+      quiet({
+        requestComment: async () => {
+          calls++;
+          throw new Error("繋がりません");
+        },
+      })
+    );
+
+    await tickUntilComment(service);
+
+    expect(calls).toBe(1);
+  });
+
+  test("ほかに言うことがあるうちは取りに行かない", async () => {
+    let calls = 0;
+    const d = quiet({
+      counts: () => ({ pendingUpdates: 3, mergeCandidates: 0 }),
+      requestComment: async () => {
+        calls++;
+        return "面白いですね。";
+      },
+    });
+    const service = new ChatterService(d);
+    idle(service);
+
+    await service.tick();
+
+    expect(calls).toBe(0);
+    expect(d.posted[0].kind).toBe("pendingUpdates");
   });
 });

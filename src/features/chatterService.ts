@@ -1,7 +1,13 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
-import { isAiBusy } from "../core/aiActivity";
-import { decideChatter, type Chatter, type ChatterState } from "../core/chatter";
+import { isAiBusy, withAiWork } from "../core/aiActivity";
+import {
+  decideChatter,
+  type Chatter,
+  type ChatterCommentRequest,
+  type ChatterState,
+} from "../core/chatter";
+import { validateChatterComment } from "../core/chatterCommentValidation";
 import { logFailure } from "../core/logger";
 import { SUPPORTED_EXTENSIONS, type WorkEntry } from "../models/types";
 import { dailyGoal } from "./writingProgress";
@@ -48,6 +54,16 @@ export const QUIET_GAP_MS = 10 * 60 * 1_000;
 export const UNEXTRACTED_INTERVAL_MS = 5 * 60 * 1_000;
 
 /**
+ * 本文の感想を待つ上限（設計書6.21.4）。
+ *
+ * **誰も待っていない発言である。** 作者は感想を頼んでいないので、
+ * 返ってこないなら諦めるのが正しい。抽出のような長い待ち時間
+ * （既定180秒）をここへ持ち込むと、その間ずっとAIが埋まり、
+ * 作者が自分で頼んだ処理の順番が後ろへ回る。
+ */
+export const COMMENT_TIMEOUT_MS = 30 * 1_000;
+
+/**
  * 使う相手を、必要な分だけの形で受け取る。
  *
  * `WorkChatPanel` や `AIRegistry` をそのまま要求すると、
@@ -73,6 +89,21 @@ export interface ChatterDeps {
   unextractedEpisodes(work: WorkEntry): Promise<number | undefined>;
   /** 承認待ち・重複の件数。操作メニューのバッジと同じ数 */
   counts(): { pendingUpdates: number; mergeCandidates: number };
+  /**
+   * 本文を読ませて、感想の一言をもらう（設計書6.21.4）。
+   *
+   * **呼ばれるのは「言ってよい」と決まってからだけである。** 黙る回にも
+   * 呼びに行くと、様子見のたびに手元のAIを無駄に走らせる。
+   *
+   * 言えるものが無ければ undefined を返す。**任意にしていない**のは、
+   * 配線を忘れても動いてしまう作りにすると、忘れたことに誰も
+   * 気づけないためである（`GenerateMeta` で踏んだのと同じ形）。
+   */
+  requestComment(
+    work: WorkEntry,
+    manuscriptPath: string,
+    signal: AbortSignal
+  ): Promise<string | undefined>;
 }
 
 export class ChatterService implements vscode.Disposable {
@@ -155,21 +186,73 @@ export class ChatterService implements vscode.Disposable {
 
     try {
       const state = await this.snapshot(work);
-      const chatter = decideChatter(state);
-      if (!chatter) return;
+      const decision = decideChatter(state);
+      if (!decision) return;
 
+      // **取りに行く前に「言った」ことにする。** 感想の道は失敗しうるが、
+      // 失敗のたびに数えないと、繋がらないAIへ様子見のたびに聞き直す
       const already = this.said.get(state.saidKey) ?? new Set<string>();
-      already.add(chatter.key);
+      already.add(decision.key);
       this.said.set(state.saidKey, already);
-      this.lastSpokeAt = Date.now();
 
-      this.deps.post(chatter, work, this.currentPath);
+      if (decision.kind === "commentRequest") {
+        await this.speakComment(decision, work);
+        return;
+      }
+
+      this.lastSpokeAt = Date.now();
+      this.deps.post(decision, work, this.currentPath);
     } catch (error) {
       // 独り言のために執筆を止めない。黙って諦め、ログにだけ残す
       logFailure("独り言", {
         作品: work.title,
         詳細: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  /**
+   * 本文を読ませて、感想を1つ出す（設計書6.21.4）。
+   *
+   * **失敗は画面に出さない。** 読めない答え・繋がらない・時間切れ、
+   * どれも黙ってログへ落とす。頼まれてもいない発言の失敗を知らせるのは、
+   * 独り言のいちばん邪魔な出方である。
+   *
+   * 言えなかったときは `lastSpokeAt` を動かさない。**何も言っていない**
+   * のだから、次の様子見で祝いや申し出が出るのを止める理由が無い。
+   */
+  private async speakComment(
+    request: ChatterCommentRequest,
+    work: WorkEntry
+  ): Promise<void> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), COMMENT_TIMEOUT_MS);
+    try {
+      // **自分の呼び出しの間も「AIが仕事中」にする。** そうしないと、
+      // 次の様子見が空いていると勘違いして、重ねて呼びに行く
+      const raw = await withAiWork(() =>
+        this.deps.requestComment(
+          work,
+          request.manuscriptPath,
+          controller.signal
+        )
+      );
+      const comment = raw ? validateChatterComment(raw) : undefined;
+      if (!comment) return;
+
+      this.lastSpokeAt = Date.now();
+      this.deps.post(
+        { key: request.key, kind: "manuscriptComment", text: comment },
+        work,
+        this.currentPath
+      );
+    } catch (error) {
+      logFailure("独り言の感想（黙って諦めました）", {
+        作品: work.title,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      clearTimeout(timer);
     }
   }
 
