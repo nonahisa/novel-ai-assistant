@@ -164,8 +164,19 @@ export interface AiActionLogEntry {
    * （設計書6.35.4）。画面上は `"dismissed"` と同じく「片付いた」だが、
    * **理由がまるごと違う**——「矛盾ではない」ではなく「意図した違和感で
    * あり、別の場所で追いかけている」である。
+   *
+   * `"asked"` は、**その指摘についてAIに訊いただけ**の場合
+   * （表記ゆれのAI問い合わせ。P-33、設計書6.73）。本文にも設定資料にも
+   * 一切書いていないので、`"applied"` とは厳に分ける——混ぜると、
+   * 訊いただけの語が「適用済み」として次の検知から外れる（設計書6.8.12）。
    */
-  action: "applied" | "dismissed" | "reverted" | "resolved" | "foreshadowed";
+  action:
+    | "applied"
+    | "dismissed"
+    | "reverted"
+    | "resolved"
+    | "foreshadowed"
+    | "asked";
   file: string;
   line: number;
   target: string;

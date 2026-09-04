@@ -45,6 +45,11 @@ import {
   type RecheckOutcome,
 } from "./recheckProposal";
 import { logFailure, logLine } from "../core/logger";
+import {
+  askNotationAdvice,
+  describeNotationAdvice,
+} from "./notationAdvice";
+import type { NotationAdviceGroup } from "../prompts/notationAdvice";
 import { revealTextLocation } from "./revealLocation";
 import { openInDefaultEditor } from "../views/openDocument";
 
@@ -172,6 +177,25 @@ export interface ProposalViewItem {
    * 提案の側にも書き戻す必要がある（設計書5.6）。
    */
   proposalId?: string;
+  /**
+   * どの表記ゆれの組から出た指摘か（設計書6.73）。
+   *
+   * **表記ゆれの指摘だけが持つ。** 「AIに訊く」を出すかどうかも、AIへ
+   * 渡す材料も、これ1つで決まる——分類名で分岐すると、材料の無い指摘に
+   * ボタンだけ出る形（押しても何も起きない口）が作れてしまう。
+   */
+  notation?: NotationAdviceGroup;
+  /**
+   * AIの答え（P-33）。**指摘の下に出すだけで、本文には何もしない。**
+   * 訊けなかったときは、その理由がここへ入る（指摘は残す）。
+   */
+  adviceNote?: string;
+  /**
+   * AIへ問い合わせている最中か。**押した手応えを返し、二度押しを止める。**
+   * 再チェックの `busy` とは分ける——同じ行で走る別の問いなので、
+   * どちらが動いているのかが画面の言葉で分かるようにする。
+   */
+  askingAdvice?: boolean;
 }
 
 /**
@@ -436,6 +460,8 @@ type IncomingMessage =
   | { type: "openSettings"; id: string }
   /** その食い違いは矛盾ではなく伏線だった（設計書6.35.4） */
   | { type: "registerForeshadow"; id: string }
+  /** どちらの表記に揃えるかをAIに訊く（設計書6.73） */
+  | { type: "askNotation"; id: string }
   /** 作者が本文を手で書き直したあと、その指摘が解消したかを確かめる */
   | { type: "recheck"; id: string }
   | { type: "applyAll" }
@@ -882,8 +908,16 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   /** `checkTypos` / `checkProofread` / `checkNotation` の結果を出す */
   showResults(
     work: WorkEntry,
-    /** 推敲は `explanation`（なぜ読みにくいか）を持つ。誤字脱字は持たない */
-    issues: Array<TypoCheckIssue & { explanation?: string }>,
+    /**
+     * 推敲は `explanation`（なぜ読みにくいか）を持つ。誤字脱字は持たない。
+     * 表記ゆれは `notation`（どの組から出たか。設計書6.73）を持つ
+     */
+    issues: Array<
+      TypoCheckIssue & {
+        explanation?: string;
+        notation?: NotationAdviceGroup;
+      }
+    >,
     category = "誤字脱字"
   ): void {
     const items: ProposalViewItem[] = issues.map((issue, index) => ({
@@ -899,6 +933,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       detail: proposalDetail(issue),
       confidence: issue.confidence,
       status: "pending",
+      // 表記ゆれだけが持つ（設計書6.73）。あれば「AIに訊く」を出す
+      notation: issue.notation,
     }));
     this.replaceContents(work, category, { items });
   }
@@ -1343,6 +1379,60 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   }
 
   /**
+   * どちらの表記に揃えるかをAIに訊く（P-33、設計書6.73）。
+   *
+   * **答えは指摘の下に出すだけで、本文には何もしない。** 揃えるかどうかも、
+   * どう直すかも作者が決める（同じ行の「適用」「今後直さない」がそのまま使える）。
+   *
+   * **訊けなかったことを、黙って終わらせない。** 押したのに無反応だと
+   * 「壊れている」としか見えないので、理由をその指摘の下へ書く。
+   * ただし作者が自分で断ったとき（有料の確認・未設定・繋がらない）は
+   * 何も書かない——ダイアログで既に伝わっており、断ったのに失敗したように見える。
+   */
+  private async askNotationFor(id: string): Promise<void> {
+    const item = this.items.find((entry) => entry.id === id);
+    if (!item || !this.work) return;
+    // 材料が無ければ口も出していない（押しても何も起きない道を作らない）
+    if (!item.notation) return;
+    // 二重に押されても、1回だけ走らせる
+    if (item.askingAdvice) return;
+    const work = this.work;
+    const group = item.notation;
+
+    item.askingAdvice = true;
+    this.postItems();
+    try {
+      const outcome = await askNotationAdvice({
+        work,
+        registry: this.ai,
+        group,
+      });
+      if (outcome.kind === "cancelled") return;
+
+      if (outcome.kind === "failed") {
+        item.adviceNote = outcome.reason;
+        return;
+      }
+
+      item.adviceNote = describeNotationAdvice(outcome.advice);
+      // **何を訊いて何が返ったかを残す**（「伏線として登録」と同じ流儀）。
+      // 本文は書き換えていないので、適用とは別の印で記録する
+      await appendAiActionLog(work, {
+        category: "typo",
+        action: "asked",
+        file: item.fileName,
+        line: item.line,
+        target: group.label,
+        suggestion: item.adviceNote,
+      });
+    } finally {
+      // **必ず戻す。** 途中で失敗しても、押せないままの行を残さない
+      item.askingAdvice = false;
+      this.postItems();
+    }
+  }
+
+  /**
    * 照らした相手側を開く。**本文だけを直す道を示さないため。**
    *
    * 矛盾なら設定資料、プロット逸脱ならプロット、単話プロットの照合なら
@@ -1391,6 +1481,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         return;
       case "registerForeshadow":
         await this.registerForeshadowFor(message.id);
+        return;
+      case "askNotation":
+        await this.askNotationFor(message.id);
         return;
       case "recheck":
         await this.recheckIssue(message.id);

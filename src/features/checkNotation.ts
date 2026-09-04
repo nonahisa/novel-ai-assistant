@@ -18,6 +18,11 @@ import {
 } from "../core/abilityStore";
 import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
 import { locateBody, type TypoCheckIssue } from "./checkTypos";
+import {
+  NOTATION_ADVICE_EXCERPTS_PER_FORM,
+  NOTATION_ADVICE_EXCERPT_MAX_CHARS,
+  type NotationAdviceGroup,
+} from "../prompts/notationAdvice";
 import { cancelItem } from "../views/dialogs";
 // 名前の付け替え（設計書6.37.3）も同じ文脈を使う。あちらは `core` にいて
 // 機能層を読めないので、実体は `core` へ移した。ここは既存の呼び出し口を保つ
@@ -41,8 +46,20 @@ export { buildUniqueContext };
  * 処理を新しく作らない（CLAUDE.mdの「4か所目の同じ失敗」を避ける）。
  */
 
+/**
+ * 表記ゆれの指摘。
+ *
+ * 誤字脱字と同じ形（`TypoCheckIssue`）に、**その指摘がどの組から出たか**を
+ * 添えたもの（設計書6.73）。提案パネルの「AIに訊く」が、この材料を
+ * そのままP-33へ渡す。**添えられていない指摘もありうる**ので任意にしてある
+ * （材料が無ければ、パネルは口ごと出さない）。
+ */
+export type NotationCheckIssue = TypoCheckIssue & {
+  notation?: NotationAdviceGroup;
+};
+
 export interface NotationCheckRunResult {
-  issues: TypoCheckIssue[];
+  issues: NotationCheckIssue[];
   /** 見つかった組の数 */
   groupCount: number;
   /** 作者が「揃える」を選んだ組の数 */
@@ -151,7 +168,7 @@ export async function checkNotation(
   }
 
   const dismissed = await new TypoDismissedHistory(work).load();
-  const issues: TypoCheckIssue[] = [];
+  const issues: NotationCheckIssue[] = [];
   let unifiedCount = 0;
   let dismissedCount = 0;
   /** 途中で閉じたか。0件だったときに理由を伝えるために持つ */
@@ -169,10 +186,12 @@ export async function checkNotation(
     if (keep === null) continue;
 
     unifiedCount++;
+    // **組ごとに1度だけ組み立てる。** 同じ材料を出現の数だけ作り直さない
+    const material = notationMaterial(group);
     for (const form of group.forms) {
       if (form.surface === keep) continue;
       for (const occurrence of form.occurrences) {
-        const issue = buildIssue(group, occurrence, form.surface, keep);
+        const issue = buildIssue(group, occurrence, form.surface, keep, material);
         if (dismissed.has(dismissKey(issue.filePath, issue))) {
           dismissedCount++;
           continue;
@@ -316,12 +335,38 @@ function exampleOf(group: NotationVariantGroup): string {
   return `${name} ${first.line}行目: ${first.lineText.trim().slice(0, 60)}`;
 }
 
+/**
+ * 「AIに訊く」へ渡す材料を組み立てる（設計書6.73）。
+ *
+ * **数と出現例の両方を渡す。** 数だけでは「多いほうに揃える」しか言えず、
+ * それはAIに訊くまでもない。出現例があれば、会話文だけ別の書き方をして
+ * いる（＝わざと揺らしている）ことも読み取れる。
+ *
+ * 本文そのものは送らない。**渡すのはこの組に関わる行だけ**である。
+ */
+function notationMaterial(group: NotationVariantGroup): NotationAdviceGroup {
+  return {
+    label: group.label,
+    forms: group.forms.map((form) => ({
+      surface: form.surface,
+      count: form.occurrences.length,
+      excerpts: form.occurrences
+        .slice(0, NOTATION_ADVICE_EXCERPTS_PER_FORM)
+        .map((occurrence) =>
+          occurrence.lineText.trim().slice(0, NOTATION_ADVICE_EXCERPT_MAX_CHARS)
+        )
+        .filter(Boolean),
+    })),
+  };
+}
+
 function buildIssue(
   group: NotationVariantGroup,
   occurrence: { filePath: string; line: number; lineText: string; column: number },
   from: string,
-  to: string
-): TypoCheckIssue {
+  to: string,
+  material: NotationAdviceGroup
+): NotationCheckIssue {
   const context = buildUniqueContext(
     occurrence.lineText,
     occurrence.column,
@@ -343,6 +388,9 @@ function buildIssue(
     // 揃える方針は作者が選んでいるが、語の切れ目の判定は機械なので
     // 断定はしない。既定で隠れる low にはせず medium にする
     confidence: "medium",
+    // **どの組から出た指摘かを添える**（設計書6.73）。作者が「AIに訊く」を
+    // 押したとき、これが無ければ何を訊けばよいか分からない
+    notation: material,
   };
 }
 

@@ -154,6 +154,15 @@ body.show-low .issue.low { display: flex; }
   border-left: 2px solid var(--vscode-focusBorder);
   padding-left: 8px;
 }
+/* AIに訊いた答え（設計書6.73）。**再チェックの結果とは分ける**——
+   あちらは「直ったか」で、こちらは「どちらに揃えるとよいか」の助言である。
+   どちらも不具合ではないので赤で出さない */
+.advice-note {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  border-left: 2px solid var(--vscode-textLink-foreground);
+  padding-left: 8px;
+}
 .issue-head {
   display: flex;
   align-items: center;
@@ -609,9 +618,13 @@ function renderItem(item) {
   const recheckNote = item.recheckNote
     ? '<div class="recheck-note">' + escapeHtml(item.recheckNote) + '</div>'
     : '';
-  // **再チェック中はこの行の操作を全部止める。** AIの答えは数秒〜数十秒
-  // かかる。その間に「適用」を押されると、確かめている最中の本文が変わる
-  const disabled = item.busy ? ' disabled' : '';
+  // AIに訊いた答え（設計書6.73）。**助言であって、本文には何もしていない**
+  const adviceNote = item.adviceNote
+    ? '<div class="advice-note">' + escapeHtml(item.adviceNote) + '</div>'
+    : '';
+  // **AIに問い合わせている間も、この行の操作を全部止める。** 答えを待つ間に
+  // 「適用」を押されると、どちらに揃えるかを訊いている最中の本文が変わる
+  const disabled = (item.busy || item.askingAdvice) ? ' disabled' : '';
 
   // 「冗長」の一語だけでは、何と何の話なのか分からない。説明を添える
   const explain = [item.reason, item.detail].filter(Boolean).join('：');
@@ -645,6 +658,7 @@ function renderItem(item) {
     body +
     statusDetail +
     recheckNote +
+    adviceNote +
     (canAct
       ? '<div class="actions">' +
         (hasFix
@@ -653,6 +667,13 @@ function renderItem(item) {
         '<button class="secondary" data-action="dismiss" data-id="' + item.id + '"' + disabled + '>無視</button>' +
         (canKeep(item)
           ? '<button class="secondary" data-action="keepWord" data-id="' + item.id + '" title="この語を今後どの話でも指摘しません"' + disabled + '>今後直さない</button>'
+          : '') +
+        // **どちらに揃えるかは、機械には決められない**（設計書6.73）。
+        // 揺れの組の材料を持っている指摘（表記ゆれ）にだけ出す。
+        // 答えは下に出るだけで、本文は書き換わらない
+        (item.notation
+          ? '<button class="secondary" data-action="askNotation" data-id="' + item.id + '" title="どちらの表記に揃えるとよいかをAIに訊きます（本文は書き換わりません）"' + disabled + '>' +
+            (item.askingAdvice ? 'AIに問い合わせ中…' : 'AIに訊く') + '</button>'
           : '') +
         // **本文を手で書き直したあと、解消したかを確かめる**（作者の依頼）。
         // 修正案の有無を問わず出す——誤字脱字でも「そうじゃない」直し方を
