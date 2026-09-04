@@ -1236,8 +1236,13 @@ describe("面の保留（設計書6.65.15の段D）", () => {
     expect(latest().blocks[1].suspended).toBe(false);
   });
 
-  /** これが本命：表紙を2案持って見比べる（作者の依頼） */
-  test("表紙を保留にすると、もう1つ表紙を挿せる", async () => {
+  /**
+   * **仕様を戻した**（0.32.0のレビュー）。表紙を保留にすればもう1枚
+   * 挿せる形にしていたが、**表紙の中身は `BookConfig` に1つしかない**ので、
+   * 2枚置いても同じ面が並ぶだけで「2案の見比べ」にならない。挿入の可否は
+   * `canAddBookBlock` 任せなので、画面のほうも押せなくなる。
+   */
+  test("表紙を保留にしても、もう1つ表紙は挿せない", async () => {
     writeBook({
       title: "氷の街",
       blocks: [{ type: "cover" }, { type: "body" }],
@@ -1251,11 +1256,11 @@ describe("面の保留（設計書6.65.15の段D）", () => {
     await send({ type: "suspendBlock", index: 0, suspended: true, config: {} });
     expect(
       latest().insertTypes.find((entry) => entry.key === "cover")?.enabled
-    ).toBe(true);
+    ).toBe(false);
 
+    // 送られてきても受け取らない（画面の作りだけに頼らない）
     await send({ type: "insertBlock", blockType: "cover", index: 0, config: {} });
     expect(latest().blocks.map((block) => block.type)).toEqual([
-      "cover",
       "cover",
       "body",
     ]);
@@ -1342,5 +1347,70 @@ describe("面の保留（設計書6.65.15の段D）", () => {
     expect(
       latest().pages.find((entry) => entry.label === "目次")?.suspended
     ).toBe(false);
+  });
+
+  /**
+   * **本に入らないものについては言わない**（0.32.0のレビュー）。
+   *
+   * 保留の扉絵は書き出しでも組み立てでも外れるので、絵が見つからなくても
+   * 本は何も変わらない。それでも警告を出すと、直しようのない（そして
+   * 直さなくてよい）注意書きが欄に居座る。
+   */
+  test("保留の扉絵は、画像が無くても警告に出ない", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [
+        { type: "body" },
+        { type: "sectionArt", imagePath: "素材/無い扉絵.png", suspended: true },
+      ],
+    });
+
+    await open();
+
+    expect(latest().placementWarnings.join("\n")).not.toContain(
+      "素材/無い扉絵.png"
+    );
+  });
+
+  test("有効な扉絵の警告は、いままでどおり出る", async () => {
+    writeBook({
+      title: "氷の街",
+      blocks: [
+        { type: "body" },
+        { type: "sectionArt", imagePath: "素材/無い扉絵.png" },
+      ],
+    });
+
+    await open();
+
+    expect(latest().placementWarnings.join("\n")).toContain("素材/無い扉絵.png");
+  });
+
+  /**
+   * **「載ります」と言うのは、本に入るときだけ**（0.32.0のレビュー）。
+   * 保留の人物紹介について人数を告げると、出ない面の話をしたことになる。
+   */
+  test("人物紹介が保留だけなら、案内を出さない", async () => {
+    writeCharacter("char_001", "月島灯");
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "characters", suspended: true }, { type: "body" }],
+    });
+
+    await open();
+
+    expect(latest().characterNotice).toBeNull();
+  });
+
+  test("有効な人物紹介なら、いままでどおり人数を伝える", async () => {
+    writeCharacter("char_001", "月島灯");
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "characters" }, { type: "body" }],
+    });
+
+    await open();
+
+    expect(latest().characterNotice).toContain("1人");
   });
 });

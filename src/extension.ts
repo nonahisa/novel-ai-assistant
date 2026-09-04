@@ -4092,7 +4092,11 @@ export async function activate(
         if (!work) return;
         // **AIは呼ばない。** サイト・URL・作品情報・基準線を決めるだけ
         const result = await configurePostingSites(work);
-        if (result.changed) treeProvider.refresh(work.id);
+        if (!result.changed) return;
+        treeProvider.refresh(work.id);
+        // 作品情報は執筆量パネルの「サイトの記録」に出る。開いたままの
+        // パネルが古い値を映し続けないよう、その場で作り直す
+        await refreshWritingStatsPanel(work, deviceId);
       }
     ),
     /*
@@ -4101,11 +4105,15 @@ export async function activate(
 
       一覧は作り直さない。未投稿の印は順位では変わらず、記録のたびに
       作品一覧を組み直しても見た目は同じである。
+
+      **執筆量パネルは作り直す。** 記録した順位が出るのはそこなので、
+      開いたままだと「記録しました」と言われた順位が画面に無い。
     */
     registerCommand("novelai.recordRanking", async (node?: WorkNode) => {
       const work = await resolveWork(node, registry);
       if (!work) return;
-      await recordRanking(work);
+      const result = await recordRanking(work);
+      if (result.changed) await refreshWritingStatsPanel(work, deviceId);
     })
   );
 

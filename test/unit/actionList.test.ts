@@ -27,7 +27,10 @@ import { ActionDecorationProvider } from "../../src/views/actionDecorations";
 import type { WorkRegistry } from "../../src/core/workRegistry";
 
 interface PackageManifest {
-  contributes: { commands: Array<{ command: string }> };
+  contributes: {
+    commands: Array<{ command: string }>;
+    menus: { commandPalette: Array<{ command: string; when: string }> };
+  };
 }
 
 /** 作品が1件ある体にする。分類の中身が空にならないようにするだけ */
@@ -811,6 +814,22 @@ describe("相談の項目は、木に残して画面から隠す", () => {
     expect(isItemShownInActionList(action!, true)).toBe(false);
     // 隠すのは画面だけ。動く環境かどうかの判定には混ぜない
     expect(isItemVisibleInRuntime(action!, true)).toBe(true);
+  });
+
+  /**
+   * **コマンドパレットも塞ぐ**（0.32.0のレビュー）。詳細メニューからだけ
+   * 消しても、Ctrl+Shift+P で「EPUBを書き出す（試作）」が出てきては
+   * 「どちらから出すのが正しいのか」が分からないままである。
+   */
+  test("EPUBの書き出しは、コマンドパレットにも出さない", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+    ) as PackageManifest;
+    const hidden = manifest.contributes.menus.commandPalette
+      .filter((entry) => entry.when === "false")
+      .map((entry) => entry.command);
+
+    expect(hidden).toContain("novelai.exportEpub");
   });
 
   test("「相談する作品を選ぶ」はそのまま出す", () => {

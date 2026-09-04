@@ -2,6 +2,7 @@ import {
   POSTING_SITES,
   postingSiteInfo,
   rankingsForSite,
+  siteProfile,
   type PostingLedger,
   type PostingRankingRecord,
   type PostingSiteId,
@@ -49,6 +50,10 @@ export interface PostingSiteRecord {
  * **見せるものが無いサイトは並べない。** 投稿ページのURLを登録しただけの
  * サイトは、ここに出しても空の行が増えるだけである（作品情報も順位も
  * 1つも無ければ、呼ぶ側は節ごと出さない）。
+ *
+ * **作品情報は登録から独立している**（設計書6.68.5）。台帳直下の
+ * `siteProfiles` を見るので、**投稿先から外したサイトでも作品情報の行が
+ * 出る**——順位を残しているのと同じ扱いである。
  */
 export function buildPostingSiteRecords(
   ledger: PostingLedger
@@ -57,13 +62,12 @@ export function buildPostingSiteRecords(
 
   // 並びは `POSTING_SITES` に揃える（画面ごとに順番が変わらないように）
   for (const info of POSTING_SITES) {
-    const entry = ledger.sites.find((site) => site.site === info.id);
-    const profile = entry?.profile;
+    const registered = ledger.sites.some((site) => site.site === info.id);
+    const profile = siteProfile(ledger, info.id);
     const history = rankingsForSite(ledger, info.id).map(toRow);
-    const hasProfile = Boolean(
-      profile?.workId || profile?.workUrl || profile?.genre || profile?.note
-    );
-    if (!hasProfile && history.length === 0) continue;
+    // 出すのは「作品情報がある」か「順位がある」ときだけ。登録しただけの
+    // サイトは、まだ見せるものが無い（空の行を増やさない）
+    if (!profile && history.length === 0) continue;
 
     records.push({
       site: info.id,
@@ -72,7 +76,7 @@ export function buildPostingSiteRecords(
       workUrl: profile?.workUrl ?? null,
       genre: profile?.genre ?? null,
       note: profile?.note ?? null,
-      registered: Boolean(entry),
+      registered,
       latest: history[0] ?? null,
       history,
     });

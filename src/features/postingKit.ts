@@ -3,12 +3,12 @@ import type { EpisodeFile, WorkEntry } from "../models/types";
 import {
   firstUnpostedEpisodePath,
   latestRanking,
-  normalizeSiteProfile,
   parseRankInput,
   POSTING_SITES,
   postingSiteInfo,
   postingSiteLabels,
   rankingBoards,
+  siteProfile,
   unpostedSites,
   validateNewEpisodeUrl,
   validateRankInput,
@@ -16,6 +16,7 @@ import {
   withBaselinePosts,
   withPost,
   withRanking,
+  withSiteProfile,
   withSites,
   type PostingLedger,
   type PostingSiteEntry,
@@ -332,6 +333,10 @@ async function setUpPosting(
  * **サイトを外しても、そのサイトへ出した記録は消さない。** 出した事実は
  * 変わらないし、また出すことにしたときに戻ってくる（未投稿の印は登録した
  * サイトしか見ないので、外している間は数えられない）。
+ *
+ * **作品情報と順位も同じ**（設計書6.68.5）。どちらも台帳直下にあり、
+ * `sites` の置き換えでは動かない——0.32.0では作品情報がサイトの欄の中に
+ * あったため、チェックを外すと作者が書いたメモごと消えていた。
  */
 export async function configurePostingSites(
   work: WorkEntry
@@ -352,10 +357,12 @@ export async function configurePostingSites(
     3サイト登録している作品では、まとめて訊くと入力欄が6つ続く。
     そこまで並ぶと、必須の答えまで「まだ終わらないのか」と読まれる。
   */
-  const entries =
-    chosen.length > 0 ? await askSiteProfiles(work, chosen) : chosen;
+  // **作品情報はサイトの登録と別の配列に持つ**（設計書6.68.5）。だから
+  // チェックを外しても、そのサイトの作品IDも作者のメモも消えない
+  let next = withSites(ledger, chosen);
+  if (chosen.length > 0) next = await askSiteProfiles(work, next, chosen);
 
-  if (entries.length === 0) {
+  if (chosen.length === 0) {
     const answer = await vscode.window.showWarningMessage(
       `${work.title} の投稿先をすべて外しますか？`,
       {
@@ -370,19 +377,19 @@ export async function configurePostingSites(
     if (answer !== "すべて外す") return { changed: false };
   }
 
-  const withNewSites = withSites(ledger, entries);
+  const withNewSites = next;
   if (!(await save(store, work, withNewSites))) return { changed: false };
   void vscode.window.showInformationMessage(
-    entries.length === 0
+    chosen.length === 0
       ? `${work.title} の投稿先をすべて外しました（記録は残っています）。`
       : `${work.title} の投稿先を ${postingSiteLabels(
-          entries.map((entry) => entry.site)
+          chosen.map((entry) => entry.site)
         )} にしました。`
   );
 
   // **基準線は、続けて引き直せるようにする**（サイトを足した直後は、
   // その新しいサイトだけ全話が未投稿になっている）
-  if (entries.length > 0) {
+  if (chosen.length > 0) {
     const picked = await vscode.window.showQuickPick(
       [
         cancelItem("引き直さずに終わる"),
@@ -466,13 +473,9 @@ async function askSites(
     // **1つでも取りやめたら、何も覚えない。** 半分だけ登録されると、
     // 次に押したときに「なぜこのサイトを訊かれないのか」が分からない
     if (url === undefined) return undefined;
-    entries.push({
-      site: item.site,
-      newEpisodeUrl: url.trim(),
-      // **作品情報は持ち越す**（6.68.5）。URLを直しただけで、作者が
-      // 入れた作品IDやジャンルが消えては困る
-      ...(existing?.profile ? { profile: { ...existing.profile } } : {}),
-    });
+    // **作品情報の持ち越しは要らない**（6.68.5）。作品情報は台帳直下の
+    // `siteProfiles` にあり、サイトの一覧を置き換えても動かない
+    entries.push({ site: item.site, newEpisodeUrl: url.trim() });
   }
   return entries;
 }
@@ -491,8 +494,9 @@ async function askSites(
  */
 async function askSiteProfiles(
   work: WorkEntry,
+  ledger: PostingLedger,
   entries: readonly PostingSiteEntry[]
-): Promise<PostingSiteEntry[]> {
+): Promise<PostingLedger> {
   const picked = await vscode.window.showQuickPick(
     [
       // **入れないほうを先頭に置く**（更新告知の誘いと同じ形）。ここまでで
@@ -515,18 +519,15 @@ async function askSiteProfiles(
   // **取りやめても、選んだサイトは失わない。** ここで捨てると、必須の
   // 答え（サイトとURL）まで任意の質問の巻き添えになる
   if (!picked || isCancelItem(picked) || !("detailed" in picked)) {
-    return entries.map((entry) => ({ ...entry }));
+    return ledger;
   }
 
-  const next: PostingSiteEntry[] = [];
-  let stopped = false;
+  let next = ledger;
   for (const entry of entries) {
-    if (stopped) {
-      next.push({ ...entry });
-      continue;
-    }
     const info = postingSiteInfo(entry.site);
-    const current = entry.profile;
+    // 既に入っている値を初期値に出す。**外して再登録しても残っている**
+    // （作品情報はサイトの登録と別に持つので、外した間も消えていない）
+    const current = siteProfile(next, entry.site);
 
     const workId = await askText({
       title: `${info.label} での作品ID`,
@@ -537,11 +538,9 @@ async function askSiteProfiles(
       placeHolder: "n1234ab",
       ignoreFocusOut: true,
     });
-    if (workId === undefined) {
-      stopped = true;
-      next.push({ ...entry });
-      continue;
-    }
+    // **Escは「ここまでで終える」。** 入れたぶんはそのまま残し、
+    // まだ訊いていないサイトの作品情報にも触らない
+    if (workId === undefined) return next;
 
     const workUrl = await askText({
       title: `${info.label} の作品ページのURL`,
@@ -555,11 +554,7 @@ async function askSiteProfiles(
       validateInput: (value) =>
         validateWorkPageUrl(entry.site, value) ?? undefined,
     });
-    if (workUrl === undefined) {
-      stopped = true;
-      next.push({ ...entry });
-      continue;
-    }
+    if (workUrl === undefined) return next;
 
     const genre = await askText({
       title: `${info.label} でのジャンル`,
@@ -569,24 +564,15 @@ async function askSiteProfiles(
       placeHolder: "ハイファンタジー",
       ignoreFocusOut: true,
     });
-    if (genre === undefined) {
-      stopped = true;
-      next.push({ ...entry });
-      continue;
-    }
+    if (genre === undefined) return next;
 
-    const profile = normalizeSiteProfile({
+    next = withSiteProfile(next, entry.site, {
       workId,
       workUrl,
       genre,
       // **作者が書いたメモは訊かないし、消さない**（台帳を手で直したときの
       // 書き込みが、この画面を通るたびに消えてはいけない）
       note: current?.note,
-    });
-    next.push({
-      site: entry.site,
-      newEpisodeUrl: entry.newEpisodeUrl,
-      ...(profile ? { profile } : {}),
     });
   }
   return next;

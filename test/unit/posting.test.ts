@@ -11,6 +11,7 @@ import {
   postingSiteLabels,
   rankingBoards,
   rankingsForSite,
+  siteProfile,
   unpostedSites,
   validateNewEpisodeUrl,
   validateRankInput,
@@ -18,6 +19,7 @@ import {
   withBaselinePosts,
   withPost,
   withRanking,
+  withSiteProfile,
   withSites,
   type PostingLedger,
 } from "../../src/models/posting";
@@ -406,6 +408,103 @@ describe("サイトごとの作品情報", () => {
 
   test("書いてある作品情報を、そのまま読む", () => {
     const ledger = parsePostingLedger({
+      sites: [{ site: "narou", newEpisodeUrl: url.narou }],
+      siteProfiles: [
+        {
+          site: "narou",
+          workId: "n1234ab",
+          workUrl: "https://ncode.syosetu.com/n1234ab/",
+          genre: "ハイファンタジー",
+          note: "完結済みで再掲",
+        },
+      ],
+    });
+
+    expect(siteProfile(ledger, "narou")).toEqual({
+      workId: "n1234ab",
+      workUrl: "https://ncode.syosetu.com/n1234ab/",
+      genre: "ハイファンタジー",
+      note: "完結済みで再掲",
+    });
+  });
+
+  test("別のサイトの作品ページURLは、直さずに止める", () => {
+    expect(() =>
+      parsePostingLedger({
+        sites: [{ site: "note", newEpisodeUrl: url.note }],
+        siteProfiles: [{ site: "note", workUrl: url.kakuyomu }],
+      })
+    ).toThrow();
+  });
+
+  test("空の作品情報は持ち歩かない（読み直すたびに中身が増えない）", () => {
+    const ledger = parsePostingLedger({
+      sites: [{ site: "note", newEpisodeUrl: url.note }],
+      siteProfiles: [{ site: "note", workId: "  ", genre: "" }],
+    });
+
+    expect(ledger.siteProfiles).toEqual([]);
+    expect(siteProfile(ledger, "note")).toBeUndefined();
+  });
+
+  /**
+   * **作品情報はサイトの登録から独立している**（設計書6.68.5）。
+   *
+   * 台帳直下の `siteProfiles` に持つので、投稿サイトの設定でチェックを
+   * 外しても消えない——作者が書いた `note` まで巻き添えにしない
+   * （`rankings` を残しているのと同じ理由）。
+   */
+  test("サイトを外しても、そのサイトの作品情報は残る", () => {
+    const before = withSiteProfile(
+      withSites(emptyPostingLedger(), [
+        { site: "narou", newEpisodeUrl: url.narou },
+      ]),
+      "narou",
+      { workId: "n1234ab", note: "完結済みで再掲" }
+    );
+
+    // 「なろうのチェックを外す」＝サイトの一覧を空にして置き換える
+    const after = withSites(before, []);
+
+    expect(after.sites).toEqual([]);
+    expect(siteProfile(after, "narou")).toEqual({
+      workId: "n1234ab",
+      note: "完結済みで再掲",
+    });
+  });
+
+  test("作品情報を書き換えても、元の台帳は変わらない（写しで持つ）", () => {
+    const before = withSiteProfile(emptyPostingLedger(), "narou", {
+      workId: "n1234ab",
+    });
+    const after = withSiteProfile(before, "narou", { workId: "n9999zz" });
+
+    expect(siteProfile(before, "narou")?.workId).toBe("n1234ab");
+    expect(siteProfile(after, "narou")?.workId).toBe("n9999zz");
+    // 並びは動かさない（Gitの差分が、直した1行だけになるように）
+    expect(after.siteProfiles.map((entry) => entry.site)).toEqual(["narou"]);
+  });
+
+  test("全部の欄を空にすると、作品情報の行ごと消える", () => {
+    const before = withSiteProfile(emptyPostingLedger(), "narou", {
+      workId: "n1234ab",
+    });
+    const after = withSiteProfile(before, "narou", { workId: "  " });
+
+    expect(after.siteProfiles).toEqual([]);
+  });
+});
+
+/**
+ * 旧形式（`sites[].profile`）の読み取り（設計書6.68.5）。
+ *
+ * 0.32.0 までは作品情報をサイトの欄の中に持っていた。**その台帳を読んでも
+ * 値は1つも失わない**——読み込みで台帳直下の `siteProfiles` へ持ち上げる。
+ * 書き出しは新形式だけで、`sites[].profile` はもう書かない。
+ */
+describe("旧形式の作品情報を持ち上げる", () => {
+  test("`sites[].profile` は `siteProfiles` へ持ち上がる", () => {
+    const ledger = parsePostingLedger({
       sites: [
         {
           site: "narou",
@@ -417,18 +516,24 @@ describe("サイトごとの作品情報", () => {
             note: "完結済みで再掲",
           },
         },
+        { site: "kakuyomu", newEpisodeUrl: url.kakuyomu },
       ],
     });
 
-    expect(ledger.sites[0].profile).toEqual({
+    expect(siteProfile(ledger, "narou")).toEqual({
       workId: "n1234ab",
       workUrl: "https://ncode.syosetu.com/n1234ab/",
       genre: "ハイファンタジー",
       note: "完結済みで再掲",
     });
+    // 持ち上げたら、サイトの欄には残さない（書き戻しで新形式になる）
+    expect(
+      (ledger.sites[0] as unknown as { profile?: unknown }).profile
+    ).toBeUndefined();
+    expect(siteProfile(ledger, "kakuyomu")).toBeUndefined();
   });
 
-  test("別のサイトの作品ページURLは、直さずに止める", () => {
+  test("旧形式の作品ページURLも、そのサイトのドメインだけ受ける", () => {
     expect(() =>
       parsePostingLedger({
         sites: [
@@ -442,38 +547,36 @@ describe("サイトごとの作品情報", () => {
     ).toThrow();
   });
 
-  test("空の作品情報は持ち歩かない（読み直すたびに中身が増えない）", () => {
+  /**
+   * **新形式を優先する。** 両方あるのは、新形式で書いたあとに古い版で
+   * 開いた台帳などである。どちらか片方しか採れないので、新しいほうを採る。
+   */
+  test("`siteProfiles` と旧 `sites[].profile` が両方あれば、新形式が勝つ", () => {
     const ledger = parsePostingLedger({
       sites: [
         {
-          site: "note",
-          newEpisodeUrl: url.note,
-          profile: { workId: "  ", genre: "" },
+          site: "narou",
+          newEpisodeUrl: url.narou,
+          profile: { workId: "旧", genre: "旧ジャンル" },
         },
       ],
+      siteProfiles: [{ site: "narou", workId: "新" }],
     });
 
-    expect(ledger.sites[0].profile).toBeUndefined();
+    expect(siteProfile(ledger, "narou")).toEqual({ workId: "新" });
+    expect(ledger.siteProfiles).toHaveLength(1);
   });
 
-  test("サイトを置き換えても、作品情報は写しで持つ（元の台帳を書き換えない）", () => {
-    const before = withSites(emptyPostingLedger(), [
-      {
-        site: "narou",
-        newEpisodeUrl: url.narou,
-        profile: { workId: "n1234ab" },
-      },
-    ]);
-    const after = withSites(before, [
-      {
-        site: "narou",
-        newEpisodeUrl: url.narou,
-        profile: { workId: "n9999zz" },
-      },
-    ]);
-
-    expect(before.sites[0].profile?.workId).toBe("n1234ab");
-    expect(after.sites[0].profile?.workId).toBe("n9999zz");
+  test("同じサイトの作品情報が2つ書いてあれば、読めないと言って止める", () => {
+    expect(() =>
+      parsePostingLedger({
+        sites: [{ site: "narou", newEpisodeUrl: url.narou }],
+        siteProfiles: [
+          { site: "narou", workId: "n1234ab" },
+          { site: "narou", workId: "n9999zz" },
+        ],
+      })
+    ).toThrow();
   });
 });
 
@@ -666,7 +769,7 @@ describe("ランキングの記録", () => {
     });
 
     expect(ledger.rankings).toEqual([]);
-    expect(ledger.sites[0].profile).toBeUndefined();
+    expect(ledger.siteProfiles).toEqual([]);
     // 既にある記録は、読み直しで1つも変わらない
     expect(ledger.posts).toHaveLength(1);
   });

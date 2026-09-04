@@ -296,9 +296,12 @@ export const BOOK_BLOCK_LABELS: Record<BookBlockType, string> = {
 /**
  * どの面にも付く印（設計書6.65.15の段D。作者の依頼、2026-09-04）。
  *
- * **保留は「消さずに本から外す」印である。** 狙いは比較で、表紙を2案
- * 持って片方を保留にし、見比べてから決められるようにする。だから
- * 「1冊に1つ」の数えは**有効な面だけ**を見る（`canAddBookBlock`）。
+ * **保留は「消さずに本から外す」印である。** あとがきや口絵を、消さずに
+ * 今回の本からだけ外せるようにする。
+ *
+ * **1冊に1つの面を2枚置くための印ではない**（0.32.0のレビューで戻した）。
+ * 表紙などの中身は `BookConfig` に1つしかないので、2枚置いても同じ面が
+ * 並ぶだけである（`canAddBookBlock`）。
  *
  * **省略＝有効。** 保留でない面には項目そのものを書かない——`false` を
  * 書き足すと、いままでの book.json が保存のたびに `suspended: false`
@@ -590,16 +593,20 @@ export function activeBookBlocks(blocks: readonly BookBlock[]): BookBlock[] {
  * 口絵・扉絵は何枚でも置ける。1冊に1つの面は、既にあれば置けない
  * （本文もここに入るので、複製そのものができない）。
  *
- * **数えるのは有効な面だけである**（段D）。表紙を保留にしてもう1案を
- * 挿し、見比べてから決める——これが保留の本来の狙いなので、保留の面は
- * 「置いてある」と数えない。
+ * **数えるのは保留も含めた全ブロックである。** 段Dでは「有効な面だけ」と
+ * して、表紙を保留にすればもう1案を挿せるようにしていたが、**面の中身は
+ * `BookConfig` に1つしかないので、2枚あっても同じものが並ぶだけ**だった
+ * （表紙・遊び紙・目次・人物紹介・奥付・裏表紙のいずれも、書誌情報や
+ * 目次の体裁といった本に1つの設定欄から組む）。狙っていた「2案の見比べ」
+ * にならないので、数え方を戻した。**面ごとに中身を持てるようになったら
+ * （将来の段E）、有効のみ数える形へ緩める。**
  */
 export function canAddBookBlock(
   blocks: readonly BookBlock[],
   type: BookBlockType
 ): boolean {
   if (!isSingleBookBlockType(type)) return true;
-  return !activeBookBlocks(blocks).some((block) => block.type === type);
+  return !blocks.some((block) => block.type === type);
 }
 
 /**
@@ -624,6 +631,12 @@ export function canSuspendBookBlock(
  * どちらの設定が効いた本なのか作者に分からなくなる（保存のときに
  * `assertBlockCounts` が断る形と、ここでの断り方を揃える）。断る言葉は
  * 呼び出し側が出す——「押しても無反応」にはしない。
+ *
+ * **`canAddBookBlock` が保留も数えるようになっても、この判定は残す**
+ * （0.32.0のレビュー）。画面からは「有効1＋保留1」を作れなくなったが、
+ * book.json を手で書けばその形は作れる。読み込みは受け入れ（`assertBlockCounts`
+ * は有効のみ数える）、**解除だけを断る**——作者が書いたものを消さずに、
+ * 2つ有効になることだけを防ぐ守りである。
  */
 export function canResumeBookBlock(
   blocks: readonly BookBlock[],
@@ -953,9 +966,12 @@ function parseBlocks(raw: unknown): BookBlock[] | undefined {
  * 効いたのか分からない本ができる）。
  *
  * **数えるのは有効な面だけである**（設計書6.65.15の段D）。保留の面は本に
- * 1面も入らないので、表紙を2案書いて片方を保留にした設計図は受け取る
- * ——これが保留の狙い（比較）そのものである。ただし**本文の保留は断る**：
- * 本文の無い本になり、削除を断っている意味が無くなる。
+ * 1面も入らないので、表紙を2案書いて片方を保留にした設計図は**読める**。
+ * 画面からはもう作れない形（`canAddBookBlock` が保留も数える）だが、
+ * **手で書いた設計図を読めなくしない**——作者が書いたものを、こちらの
+ * 都合で「壊れている」と言わないための受け皿である（解除だけは
+ * `canResumeBookBlock` が断る）。ただし**本文の保留は断る**：本文の無い
+ * 本になり、削除を断っている意味が無くなる。
  */
 function assertBlockCounts(blocks: readonly BookBlock[]): void {
   const active = activeBookBlocks(blocks);
@@ -980,7 +996,7 @@ function assertBlockCounts(blocks: readonly BookBlock[]): void {
         `blocks の${BOOK_BLOCK_LABELS[type]}（${type}）が${count(
           type
         )}つあります。この面は1冊に1つだけです` +
-          "（片方を保留にすれば、見比べるために2つ置けます）。"
+          "（片方を保留にすれば読み込めますが、本に入るのは1つだけです）。"
       );
     }
   }

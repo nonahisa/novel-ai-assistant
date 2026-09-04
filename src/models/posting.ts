@@ -148,17 +148,20 @@ export interface PostingSiteProfile {
   note?: string;
 }
 
+/**
+ * 台帳直下に持つ、サイトごとの作品情報（設計書6.68.5）。
+ *
+ * **投稿先の登録（`sites`）とは別の配列である。** 0.32.0 までは
+ * `sites[].profile` に入れていたが、投稿サイトの設定でチェックを外すと
+ * `sites` の置き換えに巻き込まれて**作者が書いたメモごと消えていた**。
+ * 順位（`rankings`）と同じく、登録とは独立して残す。
+ */
+export type PostingSiteProfileEntry = { site: PostingSiteId } & PostingSiteProfile;
+
 export interface PostingSiteEntry {
   site: PostingSiteId;
   /** 作者が貼った新規エピソード投稿ページのURL（作品IDを含む） */
   newEpisodeUrl: string;
-  /**
-   * サイトごとの作品情報（6.68.5）。**空なら項目ごと持たない。**
-   *
-   * 空の入れ物を持たせると、読んで書き戻すだけで台帳の中身が増える
-   * （`importedBaseline` を `false` で書き足さないのと同じ理由）。
-   */
-  profile?: PostingSiteProfile;
 }
 
 /**
@@ -202,6 +205,13 @@ export interface PostingLedger {
   schemaVersion: string;
   /** この作品を出すサイトと、その投稿ページ。空なら投稿キットは未設定 */
   sites: PostingSiteEntry[];
+  /**
+   * サイトごとの作品情報（6.68.5）。**`sites` とは独立して残る。**
+   *
+   * 投稿先から外したサイトの作品情報も、ここに残り続ける（順位と同じ）。
+   * この欄が無い台帳（旧形式）は、`sites[].profile` から持ち上げて読む。
+   */
+  siteProfiles: PostingSiteProfileEntry[];
   posts: PostingRecord[];
   /**
    * 順位の記録（6.68.5）。**追記だけ**で、古い記録は書き換えない。
@@ -215,6 +225,7 @@ export function emptyPostingLedger(): PostingLedger {
   return {
     schemaVersion: POSTING_SCHEMA_VERSION,
     sites: [],
+    siteProfiles: [],
     posts: [],
     rankings: [],
   };
@@ -284,6 +295,12 @@ export function parsePostingLedger(raw: unknown): PostingLedger {
   const value = objectValue(raw, `設定/${POSTING_FILE}`);
   optionalString(value.schemaVersion, "schemaVersion");
 
+  /*
+    **旧形式（`sites[].profile`）は、読みながら持ち上げる**（設計書6.68.5）。
+    ここで拾っておかないと、書き戻したときに作者が入れた作品情報が消える。
+  */
+  const legacyProfiles: PostingSiteProfileEntry[] = [];
+
   const sites =
     optionalObjectArray(value.sites, "sites", (entry, entryPath) => {
       const site = requireSiteId(entry.site, `${entryPath}.site`);
@@ -295,10 +312,37 @@ export function parsePostingLedger(raw: unknown): PostingLedger {
         invalid(`${entryPath}.newEpisodeUrl`);
       }
       const profile = parseSiteProfile(entry.profile, site, `${entryPath}.profile`);
-      return { site, newEpisodeUrl: url, ...(profile ? { profile } : {}) };
+      if (profile) legacyProfiles.push({ site, ...profile });
+      return { site, newEpisodeUrl: url };
     }) ?? [];
 
   assertUniqueSites(sites);
+
+  const explicitProfiles =
+    optionalObjectArray(
+      value.siteProfiles,
+      "siteProfiles",
+      (entry, entryPath) => {
+        const site = requireSiteId(entry.site, `${entryPath}.site`);
+        const profile = parseSiteProfile(entry, site, entryPath);
+        return { site, ...(profile ?? {}) };
+      }
+    ) ?? [];
+
+  assertUniqueSiteProfiles(explicitProfiles);
+
+  /*
+    **明示的な `siteProfiles` が勝つ。** 両方に同じサイトが書いてあるのは、
+    新形式で書いたあと古い版で開いた台帳などである。どちらか片方しか
+    採れないので、新しいほうを採る。
+  */
+  const siteProfiles = [
+    // 全欄が空のものは持ち歩かない（読んで書き戻すだけで中身が増えない）
+    ...explicitProfiles.filter((entry) => hasSiteProfile(entry)),
+    ...legacyProfiles.filter(
+      (entry) => !explicitProfiles.some((kept) => kept.site === entry.site)
+    ),
+  ];
 
   const posts =
     optionalObjectArray(value.posts, "posts", (entry, entryPath) => {
@@ -339,6 +383,7 @@ export function parsePostingLedger(raw: unknown): PostingLedger {
     schemaVersion:
       (value.schemaVersion as string | undefined) ?? POSTING_SCHEMA_VERSION,
     sites,
+    siteProfiles,
     posts,
     rankings,
   };
@@ -346,6 +391,9 @@ export function parsePostingLedger(raw: unknown): PostingLedger {
 
 /**
  * サイトごとの作品情報を読む（6.68.5）。
+ *
+ * **新形式（`siteProfiles[]`）と旧形式（`sites[].profile`）の両方が通る。**
+ * 検証を1か所に置いておかないと、片方だけ緩くなって抜け道になる。
  *
  * **空の入れ物は作らない。** 全部の欄が空なら `undefined` を返し、
  * 台帳には項目ごと書かない（読んで書き戻すだけで中身が増えないように）。
@@ -388,6 +436,62 @@ export function normalizeSiteProfile(
   return Object.keys(next).length > 0 ? next : undefined;
 }
 
+/** 作品情報として中身があるか（欄が1つでも埋まっているか） */
+function hasSiteProfile(profile: PostingSiteProfile): boolean {
+  return Boolean(
+    profile.workId || profile.workUrl || profile.genre || profile.note
+  );
+}
+
+/**
+ * そのサイトの作品情報（設計書6.68.5）。**読む側は必ずここを通す。**
+ *
+ * 投稿先として登録してあるかは見ない——外したサイトの作品情報も残るのが
+ * この配列の狙いである。
+ */
+export function siteProfile(
+  ledger: PostingLedger,
+  site: PostingSiteId
+): PostingSiteProfile | undefined {
+  const found = ledger.siteProfiles.find((entry) => entry.site === site);
+  if (!found) return undefined;
+  const { site: _site, ...profile } = found;
+  return hasSiteProfile(profile) ? profile : undefined;
+}
+
+/**
+ * サイトごとの作品情報を差し替える。**元の台帳は書き換えない。**
+ *
+ * **1サイトずつ入れ替える。** 配列ごと置き換える形にすると、いま登録して
+ * いないサイトの作品情報が、設定をやり直すたびに落ちる（`sites` を丸ごと
+ * 置き換えて作品情報が消えていた不具合と同じ形になる）。
+ *
+ * 全欄が空になったら行ごと消す。並びは動かさない——書き換えのたびに末尾へ
+ * 移すと、1文字直しただけでGitの差分が2行になる。
+ */
+export function withSiteProfile(
+  ledger: PostingLedger,
+  site: PostingSiteId,
+  profile: PostingSiteProfile | undefined
+): PostingLedger {
+  const normalized = normalizeSiteProfile(profile);
+  if (!normalized) {
+    return {
+      ...ledger,
+      siteProfiles: ledger.siteProfiles.filter((entry) => entry.site !== site),
+    };
+  }
+
+  const next: PostingSiteProfileEntry = { site, ...normalized };
+  const found = ledger.siteProfiles.some((entry) => entry.site === site);
+  return {
+    ...ledger,
+    siteProfiles: found
+      ? ledger.siteProfiles.map((entry) => (entry.site === site ? next : entry))
+      : [...ledger.siteProfiles, next],
+  };
+}
+
 /** 順位として受けられる値か。**1以上の整数だけ**（0位も-1位も無い） */
 function isRank(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 1;
@@ -418,22 +522,42 @@ export function assertUniqueSites(sites: readonly PostingSiteEntry[]): void {
   }
 }
 
-/** 対象サイトを置き換える。**元の台帳は書き換えない** */
+/**
+ * 同じサイトの作品情報が2つ書かれていないことを確かめる。
+ *
+ * **後勝ちで畳まない**（`assertUniqueSites` と同じ理由）。作品IDが2つ
+ * あるとき、どちらが本当かは作者にしか分からない。
+ */
+export function assertUniqueSiteProfiles(
+  profiles: readonly PostingSiteProfileEntry[]
+): void {
+  const seen = new Set<PostingSiteId>();
+  for (const entry of profiles) {
+    if (seen.has(entry.site)) {
+      invalid(
+        `siteProfiles（${postingSiteInfo(entry.site).label}が2つあります）`
+      );
+    }
+    seen.add(entry.site);
+  }
+}
+
+/**
+ * 対象サイトを置き換える。**元の台帳は書き換えない**
+ *
+ * **作品情報（`siteProfiles`）には触らない**（設計書6.68.5）。ここが
+ * 触っていたころは、投稿サイトの設定でチェックを外した拍子に、そのサイトの
+ * 作品IDも作者が書いたメモも消えていた。順位と同じで、投稿先から外しても
+ * 書いたものは残る。
+ */
 export function withSites(
   ledger: PostingLedger,
   sites: readonly PostingSiteEntry[]
 ): PostingLedger {
-  const next = sites.map((entry) => {
-    // **作品情報も写しで持つ。** 浅い写しのままだと、新しい台帳から
-    // 作品IDを書き換えたときに元の台帳の中身まで変わる
-    const profile = normalizeSiteProfile(entry.profile);
-    const copy: PostingSiteEntry = {
-      site: entry.site,
-      newEpisodeUrl: entry.newEpisodeUrl,
-    };
-    if (profile) copy.profile = profile;
-    return copy;
-  });
+  const next = sites.map((entry) => ({
+    site: entry.site,
+    newEpisodeUrl: entry.newEpisodeUrl,
+  }));
   assertUniqueSites(next);
   return { ...ledger, sites: next };
 }

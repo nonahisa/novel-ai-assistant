@@ -3,6 +3,7 @@ import * as path from "./paths";
 import { fromUri } from "./paths";
 import type { WorkEntry } from "../models/types";
 import {
+  assertUniqueSiteProfiles,
   assertUniqueSites,
   emptyPostingLedger,
   parsePostingLedger,
@@ -136,6 +137,8 @@ export class PostingStore {
     // （読み込みでは弾いているので、ここは書く側の最後の関所）
     try {
       assertUniqueSites(ledger.sites);
+      // 作品情報も同じ関所を通す（片方だけ緩いと、そちらが抜け道になる）
+      assertUniqueSiteProfiles(ledger.siteProfiles ?? []);
     } catch (error) {
       throw new PostingStoreError(
         `投稿状態を保存できませんでした。${
@@ -152,10 +155,20 @@ export class PostingStore {
     const body = JSON.stringify(
       {
         schemaVersion: ledger.schemaVersion || POSTING_SCHEMA_VERSION,
-        // サイトの欄には作品情報（6.68.5）が入っている。**項目を並べて
-        // 書き直さない**——並べると、欄が増えたときにここだけ古くなって
-        // 作者が入れた値が保存で落ちる
+        // **項目を並べて書き直さない**——並べると、欄が増えたときに
+        // ここだけ古くなって作者が入れた値が保存で落ちる
         sites: ledger.sites,
+        /*
+          サイトごとの作品情報（6.68.5）。**書き出しは新形式だけ**で、
+          旧形式（`sites[].profile`）はもう書かない（読み込みで台帳直下へ
+          持ち上げてある）。
+
+          **1件も無ければ欄ごと書かない。** 空の入れ物を足すと、この機能を
+          使っていない作品の台帳が、投稿1回ぶんの記録と一緒に膨らむ。
+        */
+        ...(ledger.siteProfiles?.length
+          ? { siteProfiles: ledger.siteProfiles }
+          : {}),
         posts: ledger.posts,
         rankings: ledger.rankings ?? [],
       },

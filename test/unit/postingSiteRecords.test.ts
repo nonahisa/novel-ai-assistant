@@ -6,6 +6,7 @@ import {
 import {
   emptyPostingLedger,
   withRanking,
+  withSiteProfile,
   withSites,
   type PostingLedger,
 } from "../../src/models/posting";
@@ -41,18 +42,11 @@ describe("サイトの記録を組み立てる", () => {
   });
 
   test("作品情報を入れたサイトだけが並ぶ", () => {
-    const ledger = withSites(emptyPostingLedger(), [
-      {
-        site: "narou",
-        newEpisodeUrl: url.narou,
-        profile: {
-          workId: "n1234ab",
-          workUrl: "https://ncode.syosetu.com/n1234ab/",
-          genre: "ハイファンタジー",
-        },
-      },
-      { site: "kakuyomu", newEpisodeUrl: url.kakuyomu },
-    ]);
+    const ledger = withSiteProfile(registered(), "narou", {
+      workId: "n1234ab",
+      workUrl: "https://ncode.syosetu.com/n1234ab/",
+      genre: "ハイファンタジー",
+    });
 
     const records = buildPostingSiteRecords(ledger);
     expect(records).toHaveLength(1);
@@ -114,6 +108,24 @@ describe("サイトの記録を組み立てる", () => {
     expect(records).toHaveLength(1);
     expect(records[0].site).toBe("note");
     expect(records[0].registered).toBe(false);
+  });
+
+  /**
+   * **作品情報はサイトの登録から独立している**（設計書6.68.5）。順位と
+   * 同じで、投稿先から外しても書いたものは残り、パネルにも出る。
+   */
+  test("登録を外したサイトでも、作品情報の行は出る", () => {
+    const ledger = withSiteProfile(emptyPostingLedger(), "alphapolis", {
+      workId: "123456",
+      note: "完結済み",
+    });
+
+    const records = buildPostingSiteRecords(ledger);
+    expect(records).toHaveLength(1);
+    expect(records[0].site).toBe("alphapolis");
+    expect(records[0].registered).toBe(false);
+    expect(records[0].workId).toBe("123456");
+    expect(records[0].note).toBe("完結済み");
   });
 
   test("並びは投稿サイトの一覧と同じ順（画面ごとに順番が変わらない）", () => {

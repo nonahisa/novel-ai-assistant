@@ -1,7 +1,11 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
 import { PostingStore, PostingStoreError } from "../../src/core/postingStore";
-import { emptyPostingLedger } from "../../src/models/posting";
+import {
+  emptyPostingLedger,
+  siteProfile,
+  withSites,
+} from "../../src/models/posting";
 import type { WorkEntry } from "../../src/models/types";
 import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
 
@@ -212,15 +216,13 @@ describe("投稿状態の台帳の読み書き", () => {
     const ledger = await store.load();
     await store.save({
       ...ledger,
-      sites: [
+      sites: [{ site: "kakuyomu", newEpisodeUrl: kakuyomuUrl }],
+      siteProfiles: [
         {
           site: "kakuyomu",
-          newEpisodeUrl: kakuyomuUrl,
-          profile: {
-            workId: "1177354054892",
-            workUrl: "https://kakuyomu.jp/works/1177354054892",
-            genre: "異世界ファンタジー",
-          },
+          workId: "1177354054892",
+          workUrl: "https://kakuyomu.jp/works/1177354054892",
+          genre: "異世界ファンタジー",
         },
       ],
       rankings: [
@@ -235,7 +237,11 @@ describe("投稿状態の台帳の読み書き", () => {
     });
 
     const reopened = await new PostingStore(work).load();
-    expect(reopened.sites[0].profile?.genre).toBe("異世界ファンタジー");
+    expect(siteProfile(reopened, "kakuyomu")?.genre).toBe("異世界ファンタジー");
+    // サイトを外しても作品情報は消えない（台帳直下に持つ）
+    expect(siteProfile(withSites(reopened, []), "kakuyomu")?.genre).toBe(
+      "異世界ファンタジー"
+    );
     expect(reopened.rankings).toEqual([
       {
         site: "kakuyomu",
@@ -269,12 +275,67 @@ describe("投稿状態の台帳の読み書き", () => {
     const store = new PostingStore(work);
     const ledger = await store.load();
     expect(ledger.rankings).toEqual([]);
-    expect(ledger.sites[0].profile).toBeUndefined();
+    expect(ledger.siteProfiles).toEqual([]);
 
     // 読んだものをそのまま書き戻せる（外部変更の照合にも引っかからない）
     await store.save(ledger);
     const reopened = await new PostingStore(work).load();
     expect(reopened.posts[0].postedAt).toBe("2026-09-01T00:00:00.000Z");
+  });
+
+  /**
+   * 旧形式（`sites[].profile`）の台帳（設計書6.68.5）。
+   *
+   * **読めば台帳直下へ持ち上がり、書き戻すと新形式になる。** 値は1つも
+   * 失わない——サイトの欄の中に残したままだと、チェックを外した拍子に
+   * 作者が書いたメモごと消える。
+   */
+  test("旧形式の作品情報は、書き戻すと新形式になる", async () => {
+    disk.set(
+      ledgerPath,
+      utf8(
+        JSON.stringify({
+          schemaVersion: "1",
+          sites: [
+            {
+              site: "kakuyomu",
+              newEpisodeUrl: kakuyomuUrl,
+              profile: { workId: "1177354054892", note: "毎週金曜更新" },
+            },
+          ],
+          posts: [],
+        })
+      )
+    );
+
+    const store = new PostingStore(work);
+    const ledger = await store.load();
+    expect(siteProfile(ledger, "kakuyomu")).toEqual({
+      workId: "1177354054892",
+      note: "毎週金曜更新",
+    });
+
+    await store.save(ledger);
+    const written = JSON.parse(new TextDecoder().decode(disk.get(ledgerPath)!));
+    expect(written.sites).toEqual([
+      { site: "kakuyomu", newEpisodeUrl: kakuyomuUrl },
+    ]);
+    expect(written.siteProfiles).toEqual([
+      { site: "kakuyomu", workId: "1177354054892", note: "毎週金曜更新" },
+    ]);
+  });
+
+  /** **空の入れ物は書き足さない**（読んで書き戻すだけで中身が増えない） */
+  test("作品情報が1つも無ければ、siteProfiles の欄ごと書かない", async () => {
+    const store = new PostingStore(work);
+    const ledger = await store.load();
+    await store.save({
+      ...ledger,
+      sites: [{ site: "kakuyomu", newEpisodeUrl: kakuyomuUrl }],
+    });
+
+    const written = JSON.parse(new TextDecoder().decode(disk.get(ledgerPath)!));
+    expect("siteProfiles" in written).toBe(false);
   });
 
   test("知らないサイトが書いてあれば、読めないと言って止める", async () => {

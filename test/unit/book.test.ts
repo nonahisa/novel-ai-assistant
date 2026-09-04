@@ -1139,18 +1139,25 @@ describe("面の保留（設計書6.65.15の段D）", () => {
     ).toThrow();
   });
 
-  test("保留があれば、同じ種類をもう1つ挿せる", () => {
+  /**
+   * **仕様を戻した**（0.32.0のレビュー）。0.32.0では「数えるのは有効な面
+   * だけ」に緩め、保留にすればもう1枚挿せるようにしていた。
+   *
+   * だが表紙・遊び紙・目次・人物紹介・奥付・裏表紙の中身は、どれも
+   * `BookConfig`（本に1つの設定欄）から来る。2枚置いても**完全に同じ面が
+   * 2枚並ぶだけ**で、狙っていた「2案の見比べ」はできない。挿せないほうが
+   * 正しい——面ごとに中身を持てるようになったら（将来の段E）緩める。
+   */
+  test("保留の面が居ても、同じ種類はもう挿せない（同じものが並ぶだけ）", () => {
     const blocks: BookBlock[] = [
       { type: "cover", suspended: true },
       { type: "body" },
     ];
 
-    expect(canAddBookBlock(blocks, "cover")).toBe(true);
-    expect(types(insertBookBlockAfter(blocks, 0, { type: "cover" }))).toEqual([
-      "cover",
-      "cover",
-      "body",
-    ]);
+    expect(canAddBookBlock(blocks, "cover")).toBe(false);
+    expect(insertBookBlockAfter(blocks, 0, { type: "cover" })).toBeNull();
+    // 何枚でも置ける種類は、保留があっても今までどおり挿せる
+    expect(canAddBookBlock(blocks, "sectionArt")).toBe(true);
   });
 
   test("保留にすると suspended が付く（解除すると項目ごと消える）", () => {

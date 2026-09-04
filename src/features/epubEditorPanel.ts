@@ -1233,6 +1233,10 @@ async function missingIllustrationImages(state: PanelState): Promise<string[]> {
  * 出ない（またはその逆）ことになる。
  *
  * 挿絵と同じく**覚え込まない**（作者が画像を置いた瞬間に警告が消える）。
+ *
+ * **保留の面は見ない**（設計書6.65.15の段D）。本に入らないものについて
+ * 「絵が見つかりません」と言っても、作者にできることは無い——書き出し側と
+ * 同じ判断（`activeBookBlocks`）に揃える。
  */
 async function missingFaceImages(
   state: PanelState
@@ -1240,7 +1244,7 @@ async function missingFaceImages(
   const missing = new Map<string, string>();
   const checked = new Set<string>();
 
-  for (const block of resolveBookBlocks(state.current)) {
+  for (const block of activeBookBlocks(resolveBookBlocks(state.current))) {
     if (block.type !== "frontIllustration" && block.type !== "sectionArt") {
       continue;
     }
@@ -1910,9 +1914,10 @@ function fontUri(state: PanelState, relativePath: string | null): string | null 
  * 画面で見えないものは本にも入らない。
  */
 function characterNotice(state: PanelState): string | null {
-  // **並びに置いてあるときだけ言う**（設計書6.65.15の段C）。置いていない
-  // 面について「載る人が居ません」と言っても、作者にできることが無い
-  const placed = resolveBookBlocks(state.current).some(
+  // **本に入るときだけ言う**（設計書6.65.15の段C・段D）。並びに置いて
+  // いない面や、保留にした面について「◯人が載ります」と言うと、出ない面の
+  // 話をしたことになる（`activeBookBlocks` を通して書き出しと揃える）
+  const placed = activeBookBlocks(resolveBookBlocks(state.current)).some(
     (block) => block.type === "characters"
   );
   if (!placed) return null;

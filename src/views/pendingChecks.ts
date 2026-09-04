@@ -609,19 +609,19 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-74",
     title: "サイトごとの作品情報とランキング記録",
     commands: ["novelai.configurePostingSites", "novelai.recordRanking", "novelai.showWritingStats"],
-    count: 6,
+    count: 8,
   },
   {
     id: "F-75",
     title: "EPUBブロックの保留",
     commands: ["novelai.openEpubEditor"],
-    count: 7,
+    count: 8,
   },
   {
     id: "F-76",
     title: "EPUB書き出しメニューの一本化",
     commands: ["novelai.exportEpub", "novelai.openEpubEditor"],
-    count: 2,
+    count: 3,
   },
   {
     id: "",
@@ -644,4 +644,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 806;
+export const PENDING_CHECK_TOTAL = 810;
