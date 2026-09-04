@@ -187,8 +187,11 @@ describe("相談へ渡す目次", () => {
 
       1,800→1,850：EPUBエディター（設計書6.65.6）で1つ増えた（名前だけで
       約15字）。説明は混ざっていない。
+
+      1,850→1,900：プロットモードの画面（設計書6.4.8）で1つ増えた
+      （名前だけで約12字）。説明は混ざっていない。
     */
-    expect(index.length).toBeLessThan(1850);
+    expect(index.length).toBeLessThan(1900);
   });
 
   test("原稿を勝手に書き換えない、という断りは必ず入る", () => {
@@ -229,7 +232,7 @@ describe("相談1回ぶんの組み立て", () => {
 
     expect(built.reason).toBe("none");
     expect(built.selected).toEqual([]);
-    expect(built.text.length).toBeLessThan(1850);
+    expect(built.text.length).toBeLessThan(1900);
   });
 
   test("機能名で聞かれたら、その小分類の説明を足す", () => {

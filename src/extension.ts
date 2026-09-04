@@ -178,6 +178,8 @@ import {
   describeNotationResult,
 } from "./features/checkNotation";
 import { generatePlot } from "./features/generatePlot";
+// プロットモードの画面（設計書6.4.8）。plot.md は左の普通のエディタで書く
+import { openPlotMode, refreshPlotMode } from "./features/plotModePanel";
 import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
 import { ChatterService } from "./features/chatterService";
 import { setPlotBasics } from "./features/setPlotBasics";
@@ -1466,6 +1468,9 @@ export async function activate(
       // 付箋を書き足したり消したりしたのは、保存で初めてディスクに残る。
       // **開いているパネルだけ**が読み直す（設計書6.40.4）
       void refreshSceneMemos(fromUri(document.uri));
+      // プロットと単話プロットの保存で、プロットモードの目次と印を
+      // 作り直す（設計書6.4.8。開き直さなくても追いつくようにする）
+      void refreshPlotMode(fromUri(document.uri));
     })
   );
   updateStatusBar();
@@ -1754,6 +1759,16 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         await openPlotFile(work);
+      }
+    ),
+    // プロットモード（設計書6.4.8）。**左に plot.md、右に作業パネル**。
+    // パネルは読むだけ＋既存の操作の呼び出しだけで、書き込みの道は増やさない
+    registerCommand(
+      "novelai.openPlotMode",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await openPlotMode(context, work);
       }
     ),
     // 対話でプロットを埋める（設計書6.4.7）。**AIに筋書きを作らせず、

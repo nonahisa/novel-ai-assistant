@@ -112,6 +112,8 @@ const STEP_DEFS: readonly StepDef[] = [
     entries: [
       "novelai.createWorkWithPlot",
       "novelai.createPlot",
+      // プロットを書く場（設計書6.4.8）。目次と話の見取り図を横に並べる
+      "novelai.openPlotMode",
       "novelai.plotInterview",
       "novelai.setPlotBasics",
       "novelai.generatePlot",

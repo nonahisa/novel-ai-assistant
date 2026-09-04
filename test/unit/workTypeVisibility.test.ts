@@ -166,6 +166,8 @@ describe("小説では、いままでどおり全部見える", () => {
 describe("タイプに合わない操作は出さない", () => {
   const storyOnly = [
     "novelai.createPlot",
+    // プロットモードの画面（設計書6.4.8）
+    "novelai.openPlotMode",
     "novelai.generatePlot",
     "novelai.generateSynopses",
     "novelai.checkContradictions",

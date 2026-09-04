@@ -131,26 +131,36 @@ export async function chooseWorkStartMode(
  * 上書きしては、作者の作業が消えてしまう。
  */
 export async function openPlotFile(work: WorkEntry): Promise<void> {
+  const plotPath = await ensurePlotFile(work);
+  // 作者が .md に割り当てたエディターで開く（設計書6.17.6）
+  await openInDefaultEditor(plotPath);
+}
+
+/**
+ * プロットの在り処を返す。無ければテンプレートから作る。
+ *
+ * **開くところは呼び手に任せる。** プロットモード（設計書6.4.8）は
+ * 目次から行へ飛ばすために `TextEditor` の実体を要るので、
+ * 割り当て任せの `vscode.open` では受け取れない。作るかどうかの判断だけを
+ * ここに置けば、**書きかけのプロットをテンプレートで上書きしない**という
+ * 約束は1か所で守られる。
+ */
+export async function ensurePlotFile(work: WorkEntry): Promise<string> {
   const config = await readWorkConfig(work);
   const settingsDir = workPaths(work, config).settings;
   const plotPath = path.join(settingsDir, PLOT_FILE);
 
-  const existed = await pathExists(plotPath);
-  if (!existed) {
-    await vscode.workspace.fs.createDirectory(path.toUri(settingsDir));
-    await vscode.workspace.fs.writeFile(
-      path.toUri(plotPath),
-      new TextEncoder().encode(buildPlotTemplate(work.title))
-    );
-  }
+  if (await pathExists(plotPath)) return plotPath;
 
-  // 作者が .md に割り当てたエディターで開く（設計書6.17.6）
-  await openInDefaultEditor(plotPath);
-  if (!existed) {
-    vscode.window.showInformationMessage(
-      `「${work.title}」のプロット（${PLOT_FILE}）を作りました。`
-    );
-  }
+  await vscode.workspace.fs.createDirectory(path.toUri(settingsDir));
+  await vscode.workspace.fs.writeFile(
+    path.toUri(plotPath),
+    new TextEncoder().encode(buildPlotTemplate(work.title))
+  );
+  vscode.window.showInformationMessage(
+    `「${work.title}」のプロット（${PLOT_FILE}）を作りました。`
+  );
+  return plotPath;
 }
 
 /**

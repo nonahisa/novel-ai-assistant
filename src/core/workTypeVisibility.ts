@@ -211,6 +211,9 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
 
   // ── プロット・構想 ──
   "novelai.createPlot": "story",
+  // プロットモードの画面（設計書6.4.8）。話の連なりを見取り図にするもので、
+  // 続きものでない作品（メモ集・SNS記事）には並べる筋が無い
+  "novelai.openPlotMode": "story",
   "novelai.plotInterview": "story",
   "novelai.generatePlot": "story",
   "novelai.createEpisodePlot": "story",

@@ -455,6 +455,21 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           "**見出しも順番も自由に決められます**（決まった欄を埋める形ではありません）。" +
           "書きかけのプロットがあれば、そのまま開くだけです。",
       },
+      // **プロットを書く場（設計書6.4.8）。** 「つくる」の次に置く——
+      // 作ったプロットを育てるときは、たいていこちらから入る
+      {
+        kind: "action",
+        command: "novelai.openPlotMode",
+        label: "プロットモードを開く",
+        description: "AIを使わない",
+        icon: "book",
+        requiresWork: true,
+        detail:
+          "左に 設定/plot.md、右に作業パネルを並べます。" +
+          "パネルには**節の目次**（押すとその行へ移ります）・まだ立てていない見出しの候補・" +
+          "話の並び（単話プロットの有無・文字数・章名・各話あらすじの冒頭）が出ます。" +
+          "**プロットを書くのは左のエディタです**（欄に写して埋める形ではありません）。",
+      },
       {
         kind: "action",
         command: "novelai.plotInterview",
