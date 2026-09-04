@@ -247,8 +247,9 @@ const STEP_DEFS: readonly StepDef[] = [
     // 設計書6.65が実装できたので、枠ではなく実物を載せる
     entries: [
       "novelai.exportPdf",
-      "novelai.exportEpub",
+      // エディターが上、書き出しが下（作者の指定、2026-09-04）
       "novelai.openEpubEditor",
+      "novelai.exportEpub",
     ],
   },
   {

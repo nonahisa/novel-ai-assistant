@@ -476,8 +476,9 @@ describe("第7段に、電子書籍の操作が載る", () => {
       )
     ).toEqual([
       "novelai.exportPdf",
-      "novelai.exportEpub",
+      // エディターが上、書き出しが下（作者の指定、2026-09-04）
       "novelai.openEpubEditor",
+      "novelai.exportEpub",
     ]);
   });
 
