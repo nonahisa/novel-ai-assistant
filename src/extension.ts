@@ -58,6 +58,7 @@ import {
   type WorkStartMode,
 } from "./features/startWork";
 import { generateSettingsDocs } from "./features/generateSettingsDocs";
+import { exportSettingsForAudience } from "./features/exportSettingsForAudience";
 import { generateSynopses } from "./features/generateSynopses";
 import {
   generateCatchphrases,
@@ -2847,6 +2848,18 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         await generateSettingsDocs(work);
+      }
+    )
+  );
+
+  // 提供先を選んだ書き出し（設計書6.75）。全部入りとは別のファイルを作る
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.exportSettingsForAudience",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await exportSettingsForAudience(work);
       }
     )
   );

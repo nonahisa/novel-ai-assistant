@@ -35,8 +35,14 @@ const SPOILER_ORDER: Record<string, number> = {
   author_only: 2,
 };
 
-/** 指定した公開範囲に含めてよいか */
-function isVisible(
+/**
+ * 指定した公開範囲に含めてよいか。
+ *
+ * 提供先別の書き出し（`settingsExportProfiles.ts`、設計書6.75）も同じ
+ * 判断を要る。**写しを作らない**——片方だけ直すと「編集部向けには出ないのに
+ * 全部入りには出る」といったずれが、画面を見比べるまで分からない。
+ */
+export function isVisibleAtSpoilerLevel(
   level: string,
   limit: SettingsMarkdownOptions["spoilerLevel"]
 ): boolean {
@@ -56,7 +62,7 @@ export function buildAbilityMarkdown(
   options: SettingsMarkdownOptions
 ): string {
   const visible = abilities.filter((ability) =>
-    isVisible(ability.spoilerLevel, options.spoilerLevel)
+    isVisibleAtSpoilerLevel(ability.spoilerLevel, options.spoilerLevel)
   );
   const term = system.abilityTerm || "能力";
   const lines: string[] = [`# ${options.workTitle} ${term}一覧`, ""];
@@ -133,8 +139,10 @@ function describeAbility(ability: Ability, term: string): string[] {
  * 掘り下げは本文からの解釈であり、根拠の逐語照合ができない。
  * 事実と同じ体裁で並べると、作者が読み返したときに
  * どこまでが本文に書いてあることなのか分からなくなる。
+ *
+ * 提供先別の書き出し（6.75）も同じ体裁で並べるので公開している。
  */
-function aiNoteLines(notes: AiNote[]): string[] {
+export function aiNoteLines(notes: AiNote[]): string[] {
   if (notes.length === 0) return [];
 
   const lines: string[] = ["", "**AIによる掘り下げ**（作者が承認したもの。本文からの解釈を含みます）", ""];
@@ -161,7 +169,7 @@ export function buildOrganizationMarkdown(
   options: SettingsMarkdownOptions
 ): string {
   const visible = organizations.filter((organization) =>
-    isVisible(organization.spoilerLevel, options.spoilerLevel)
+    isVisibleAtSpoilerLevel(organization.spoilerLevel, options.spoilerLevel)
   );
   const lines: string[] = [`# ${options.workTitle} 組織一覧`, ""];
 
@@ -253,7 +261,7 @@ export function buildWorldMarkdown(
   options: SettingsMarkdownOptions
 ): string {
   const visible = items.filter((item) =>
-    isVisible(item.spoilerLevel, options.spoilerLevel)
+    isVisibleAtSpoilerLevel(item.spoilerLevel, options.spoilerLevel)
   );
   const lines: string[] = [`# ${options.workTitle} 世界観`, ""];
 
@@ -303,7 +311,7 @@ export function buildLocationMarkdown(
   options: SettingsMarkdownOptions
 ): string {
   const visible = locations.filter((location) =>
-    isVisible(location.spoilerLevel, options.spoilerLevel)
+    isVisibleAtSpoilerLevel(location.spoilerLevel, options.spoilerLevel)
   );
   const lines: string[] = [`# ${options.workTitle} 場所一覧`, ""];
 
@@ -357,7 +365,7 @@ export function buildCharacterMarkdown(
   options: SettingsMarkdownOptions
 ): string {
   const visible = characters.filter((character) =>
-    isVisible(character.spoilerLevel, options.spoilerLevel)
+    isVisibleAtSpoilerLevel(character.spoilerLevel, options.spoilerLevel)
   );
   const named = visible.filter((character) => !character.isMob);
   const mobs = visible.filter((character) => character.isMob);
@@ -609,7 +617,8 @@ function formatRange(start: number, end: number): string {
   return `${start}〜${end}`;
 }
 
-function formatPeriod(
+/** 呼称が使われていた期間。提供先別の書き出し（6.75）も同じ書き方をする */
+export function formatPeriod(
   firstChapter: number | null,
   lastChapter: number | null
 ): string {

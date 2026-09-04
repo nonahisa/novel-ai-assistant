@@ -280,6 +280,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.showSettingsForTerm": "story",
   "novelai.manageCustomFields": "story",
   "novelai.generateSettingsDocs": "story",
+  // 提供先別の書き出し（設計書6.75）。元が設定資料なので同じ列に載せる
+  "novelai.exportSettingsForAudience": "story",
   "novelai.generateCharacterDocs": "story",
   "novelai.generateLocationDocs": "story",
   "novelai.generateAbilityDocs": "story",

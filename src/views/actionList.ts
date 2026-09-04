@@ -987,6 +987,19 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.exportSettingsForAudience",
+            label: "提供先を選んで設定資料を書き出す",
+            description: "AIを使わない",
+            icon: "mail",
+            requiresWork: true,
+            detail:
+              "渡す相手に合わせて、出す項目を絞った設定資料を1つのファイルに" +
+              "書き出します（編集部向け／イラスト・デザイン発注向け／" +
+              "あらすじ・設定の紹介向け）。「第N話までの情報だけ」も選べます。" +
+              "含めた項目と含めなかった項目はファイルの冒頭に書きます。AIは呼びません。",
+          },
+          {
+            kind: "action",
             command: "novelai.exportPdf",
             label: "PDF出力（印刷用）",
             description: "AIを使わない",
