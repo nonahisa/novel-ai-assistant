@@ -235,6 +235,47 @@ export function bookHeading(
   return [chapter, title].filter(Boolean).join("　") || ep.fileName;
 }
 
+/** 本に出す1章ぶんの見出し。目次は番号と題を別々に使う（設計書6.65.15） */
+export interface BookChapterHeading {
+  /** 本文の `<h2>` に出す形（「第1話　転生」） */
+  heading: string;
+  /** 目次の「番号だけ」で使う。読み取れなければ空文字 */
+  numberLabel: string;
+  /** 目次の「題だけ」で使う。無ければ null */
+  title: string | null;
+}
+
+/**
+ * 合本（1ファイルに複数話）の中の1話の見出し（設計書6.65.15）。
+ *
+ * **同じ本の中で、単話ファイルの話と同じ形にする。** 出典名を作る
+ * `collectedEpisodeLabel`（`core/manuscriptSources.ts`）と考え方は同じ
+ * ——話数が読めなければ**並び順を話数として出さない**——が、あちらは
+ * AIへ渡す出典名で、こちらは本の見出しである。本では話数の言い方が作品の
+ * 形式で変わる（SNS記事は「投稿3」）ので、`bookHeading` と同じ部品
+ * （`episodeUnit`・`stripChapterLabel`）を通す。
+ *
+ * 話数も題も読み取れないときだけ、ファイル名と並び順に倒す——本文の
+ * 1行目を勝手に見出しにするより、どの塊なのかが作者に伝わる。
+ */
+export function collectedBookHeading(
+  file: Pick<EpisodeFile, "fileName">,
+  inner: { chapter: number | null; title: string | null; order: number },
+  format?: WorkFormatKey
+): BookChapterHeading {
+  const numberLabel =
+    inner.chapter !== null ? episodeUnit(format).label(inner.chapter) : "";
+  // 題に「第1話」が残っている合本があるので、単話と同じ剥がし方を通す
+  const title = stripChapterLabel(inner.title, numberLabel);
+  const heading = [numberLabel, title].filter(Boolean).join("　");
+
+  return {
+    heading: heading || `${file.fileName}の${inner.order}番目`,
+    numberLabel,
+    title,
+  };
+}
+
 /**
  * 目次を章ごとに区切るときの、束ねの名前（設計書6.65.6）。
  *

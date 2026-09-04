@@ -654,6 +654,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 6,
   },
   {
+    id: "F-82",
+    title: "合本のEPUB・PDF分割",
+    commands: ["novelai.openEpubEditor", "novelai.exportPdf"],
+    count: 5,
+  },
+  {
     id: "",
     title: "LM Studio",
     commands: ["novelai.setupLmStudio", "novelai.setupAI", "novelai.testAI"],
@@ -674,4 +680,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 841;
+export const PENDING_CHECK_TOTAL = 846;

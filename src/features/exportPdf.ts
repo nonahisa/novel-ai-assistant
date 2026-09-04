@@ -3,16 +3,12 @@ import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile, type TextFileContent } from "../core/textFile";
-import { parseEpisodeMetadata } from "../core/metadataParser";
+import { bookChaptersOf } from "../core/bookChapters";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
-import {
-  episodeTitle,
-  episodeUnit,
-  formatChapterLabel,
-} from "../core/episodeLabel";
+import { bookHeading, episodeUnit } from "../core/episodeLabel";
 import { timestampedFileNameCandidates } from "../core/timestampedFileName";
 import {
   buildPrintHtml,
@@ -66,6 +62,8 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
   const chapters: PrintEpisode[] = [];
   /** 競合マーカーが残っている話。組んでも読めない紙になるので外す */
   const conflicted: string[] = [];
+  /** 区切りだけで、紙に出る本文が1文字も無かった合本。**黙って減らさない** */
+  const empty: string[] = [];
   for (const episode of selected) {
     let file: TextFileContent;
     try {
@@ -87,21 +85,36 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
       conflicted.push(episode.fileName);
       continue;
     }
-    chapters.push({
-      heading: headingFor(episode, format),
-      // 投稿サイトからDLしたファイルは、先頭にヘッダーが付いている。
-      // 本文だけを組む（作品一覧の文字数計測と同じ切り分け）
-      body: parseEpisodeMetadata(file.text).body,
-      // **話ごとに記法を見る。** 1つの作品に `.md` と `.txt` が混ざる
-      // ことがある（DLした話と、こちらで書き足した話）
-      notation: notationModeFor(episode.fileName),
-    });
+    // 投稿サイトからDLしたファイルは、先頭にヘッダーが付いている。
+    // 合本（1ファイルに複数話）は話ごとに割って、1話＝1章で組む
+    // （設計書6.65.15。切り分けは `core/bookChapters.ts` が1か所で持ち、
+    // EPUBと同じものを通す——別々に切ると、同じ原稿から出た本と紙で
+    // 話の切れ目が違うことになる）
+    const parts = bookChaptersOf(episode, file.text, format);
+    if (parts.length === 0) {
+      empty.push(episode.fileName);
+      continue;
+    }
+
+    for (const part of parts) {
+      chapters.push({
+        heading: part.heading,
+        body: part.body,
+        // **話ごとに記法を見る。** 1つの作品に `.md` と `.txt` が混ざる
+        // ことがある（DLした話と、こちらで書き足した話）
+        notation: notationModeFor(episode.fileName),
+      });
+    }
   }
 
   if (chapters.length === 0) {
+    // **理由で言い分ける**（EPUBと同じ）。競合が1つも無いのに
+    // 「競合解決で直して」と言われると、作者は在りもしないマーカーを探す
     void vscode.window.showWarningMessage(
-      "選んだ本文はすべて未解決の競合を含んでいるため、書き出しませんでした。" +
-        "「競合解決」で直してからもう一度お試しください。"
+      conflicted.length > 0
+        ? "選んだ本文はすべて未解決の競合を含んでいるため、書き出しませんでした。" +
+            "「競合解決」で直してからもう一度お試しください。"
+        : "紙に出せる本文がありませんでした。" + emptyNote(empty)
     );
     return;
   }
@@ -129,11 +142,11 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
   const opened = await openInDefaultApp(target);
 
   const droppedNote =
-    conflicted.length > 0
+    (conflicted.length > 0
       ? `\n未解決の競合を含む${conflicted.length}件は外しました（${conflicted.join(
           "、"
         )}）。`
-      : "";
+      : "") + emptyNote(empty);
 
   // **開けたかどうかで案内を変える。** 以前は戻り値を見ずに
   // 「ブラウザで開きました」と告げており、VS Codeがエラーダイアログを
@@ -197,7 +210,9 @@ async function pickEpisodes(
   // 「OK」「キャンセル」を出すので、項目として並べるとかえって紛らわしい
   const picked = await vscode.window.showQuickPick(
     episodes.map((episode) => ({
-      label: headingFor(episode, format),
+      // 選ぶ画面の見出しは、紙に出る単話の見出しと同じ部品で作る
+      // （合本は1行で1ファイルを指すので、割る前の見出しでよい）
+      label: bookHeading(episode, format),
       description: episode.fileName,
       episode,
     })),
@@ -230,18 +245,16 @@ async function pickPreset(): Promise<PrintPreset | undefined> {
 }
 
 /**
- * 紙に出す見出し。
+ * 本文が1文字も無かった合本を伝える言葉。無ければ空文字。
  *
- * 作品一覧と同じ作り方にする（`episodeLabel.ts`）。話数と題が二重に
- * 並ばないよう、`episodeTitle` を通すのを忘れないこと。
+ * **黙って減らさない。** 話が紙に入らなかった理由は、作者にしか直せない
+ * （EPUBの同じ場面と揃えてある）。
  */
-function headingFor(
-  episode: EpisodeFile,
-  format: WorkFormatKey | undefined
-): string {
-  const chapter = formatChapterLabel(episode, format);
-  const title = episodeTitle(episode, chapter);
-  return [chapter, title].filter(Boolean).join("　") || episode.fileName;
+function emptyNote(empty: readonly string[]): string {
+  if (empty.length === 0) return "";
+  return `\n紙に出る本文が無かった${empty.length}件は外しました（${empty.join(
+    "、"
+  )}）。`;
 }
 
 /** 書き出し先。**新規作成だけ**を使い、名前がぶつかったら別名にする */

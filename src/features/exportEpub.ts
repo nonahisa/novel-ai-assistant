@@ -14,15 +14,11 @@ import {
 } from "../models/book";
 import { scanWork } from "../core/scanner";
 import { readTextFile, type TextFileContent } from "../core/textFile";
-import { parseEpisodeMetadata } from "../core/metadataParser";
+import { bookChaptersOf } from "../core/bookChapters";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { readWorkFormat } from "../core/workFormatStore";
-import {
-  bookHeading,
-  episodeTitle,
-  formatChapterLabel,
-} from "../core/episodeLabel";
+import { bookHeading } from "../core/episodeLabel";
 import { episodeGroupLabels } from "../core/chapterGrouping";
 import { ChapterStore } from "../core/chapterStore";
 import type { Chapter } from "../models/chapter";
@@ -180,11 +176,6 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       return;
     }
     const heading = bookHeading(episode, format);
-    // 目次の見出しの形（設計書6.65.15）は番号と題を別々に持つ。
-    // **本文側の `<h2>`（= heading）はいつも番号＋題のまま**——ここで
-    // 別々に持つのは目次だけの都合である
-    const numberLabel = formatChapterLabel(episode, format);
-    const title = episodeTitle(episode, numberLabel);
     const episodePath = episodePathFor(work.folderPath, episode.filePath);
     // **未解決の競合をそのまま組まない。** マーカーと両方の版が混ざった本は
     // 読めないうえ、配ってから気づくことになる（PDF出力と同じ）
@@ -200,37 +191,64 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       continue;
     }
     // 投稿サイトからDLしたファイルは、先頭にヘッダーが付いている。
-    // 本文だけを組む（作品一覧の文字数計測と同じ切り分け）
-    const body = parseEpisodeMetadata(file.text).body;
-    const placements = await collectPlacements({
-      work,
-      config,
-      episodePath,
-      heading,
-      body,
-      images,
-      notes: notices,
-    });
+    // 合本（1ファイルに複数話）は話ごとに割って、1話＝1章で組む
+    // （設計書6.65.15。切り分けは `core/bookChapters.ts` が1か所で持つ）
+    const parts = bookChaptersOf(episode, file.text, format);
+    if (parts.length === 0) {
+      // 合本の区切りだけがあって、どの話にも本文が無かった。**黙って
+      // 減らさない**——話が本に入らなかった理由は、作者にしか直せない
+      notices.push(
+        `${episode.fileName} には本に入る本文がありませんでした（区切りだけの合本です）。`
+      );
+      continue;
+    }
 
-    chapters.push({
-      heading,
-      numberLabel,
-      title,
-      // 目次を「章ごとに区切る」にしたときの束ね名（設計書6.65.6・6.66.4の3）。
-      // 読み取れなければ空文字が返り、一覧のまま出る
-      group: groupLabels.get(episodePath) ?? "",
-      body,
-      // **話ごとに記法を見る。** 1つの作品に `.md` と `.txt` が混ざる
-      notation: notationModeFor(episode.fileName),
-      illustrations: placements.illustrations,
-      pageBreaks: placements.pageBreaks,
-    });
+    for (const [index, part] of parts.entries()) {
+      // **挿絵・改ページの指定はファイル単位**（`book.json` は話の中の
+      // どこかまでは持たない）。合本では最初の話にだけ効かせる——全部の話へ
+      // 配ると、1つの指定で同じ絵が何枚も入る。位置が本文より後ろへ出た
+      // ことは、いままでどおり `collectPlacements` が伝える
+      const placements =
+        index === 0
+          ? await collectPlacements({
+              work,
+              config,
+              episodePath,
+              heading: part.heading,
+              body: part.body,
+              images,
+              notes: notices,
+            })
+          : { illustrations: [], pageBreaks: [] };
+
+      chapters.push({
+        // 目次の見出しの形（設計書6.65.15）は番号と題を別々に持つ。
+        // **本文側の `<h2>`（= heading）はいつも番号＋題のまま**——ここで
+        // 別々に持つのは目次だけの都合である
+        heading: part.heading,
+        numberLabel: part.numberLabel,
+        title: part.title,
+        // 目次を「章ごとに区切る」にしたときの束ね名（設計書6.65.6・6.66.4の3）。
+        // 読み取れなければ空文字が返り、一覧のまま出る。**合本の各話は、
+        // その合本ファイルの束ねに揃う**（章立ての台帳もファイル単位である）
+        group: groupLabels.get(episodePath) ?? "",
+        body: part.body,
+        // **話ごとに記法を見る。** 1つの作品に `.md` と `.txt` が混ざる
+        notation: notationModeFor(episode.fileName),
+        illustrations: placements.illustrations,
+        pageBreaks: placements.pageBreaks,
+      });
+    }
   }
 
   if (chapters.length === 0) {
+    // **理由で言い分ける。** 競合が1つも無いのに「競合解決で直して」と
+    // 言われると、作者は在りもしないマーカーを探すことになる
     void vscode.window.showWarningMessage(
-      "選んだ本文はすべて未解決の競合を含んでいるため、書き出しませんでした。" +
-        "「競合解決」で直してからもう一度お試しください。"
+      conflicted.length > 0
+        ? "選んだ本文はすべて未解決の競合を含んでいるため、書き出しませんでした。" +
+            "「競合解決」で直してからもう一度お試しください。"
+        : "本に入れられる本文がありませんでした。" + noticeLines(notices)
     );
     return;
   }
@@ -331,7 +349,7 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       : "";
   // 挿絵のずれ・読めなかった画像・入らなかった書体は、
   // **本が出たあとに必ず伝える**
-  const noticeText = notices.length > 0 ? `\n${notices.join("\n")}` : "";
+  const noticeText = noticeLines(notices);
   const action = await vscode.window.showInformationMessage(
     `EPUBを書き出しました（${chapters.length}話）。\n${target}` +
       describeCoverUse(cover, backCover) +
@@ -340,6 +358,11 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     "フォルダーを開く"
   );
   if (action === "フォルダーを開く") await revealFolder(target);
+}
+
+/** 伝えることを行に分ける。無ければ空文字（余計な改行を足さない） */
+function noticeLines(notices: readonly string[]): string {
+  return notices.length > 0 ? `\n${notices.join("\n")}` : "";
 }
 
 /**

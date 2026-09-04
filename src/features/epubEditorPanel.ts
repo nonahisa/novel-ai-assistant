@@ -49,7 +49,7 @@ import {
 } from "../core/coverBake";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
-import { parseEpisodeMetadata } from "../core/metadataParser";
+import { bookChapterBodies, bookChaptersOf } from "../core/bookChapters";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
 import {
@@ -1384,12 +1384,19 @@ function paragraphPreview(paragraph: string, notation: NotationMode): string {
 
 const PREVIEW_CHARS = 20;
 
-/** 話の本文。読めない話・競合のある話は null（本にも入らない） */
+/**
+ * 話の本文。読めない話・競合のある話は null（本にも入らない）。
+ *
+ * **合本は最初の話ぶんだけを返す。** 位置の指定（挿絵・改ページ）は
+ * ファイル単位なので、書き出しも合本の最初の話にだけ効かせている
+ * （`features/exportEpub.ts`）。段落の数え方をそちらへ揃えないと、
+ * 画面で指した段落と挿絵の入る場所がずれる（設計書6.65.10）。
+ */
 async function readEpisodeBody(episode: PreviewEpisode): Promise<string | null> {
   try {
     const file = await readTextFile(episode.filePath);
     if (file.hasConflictMarkers) return null;
-    return parseEpisodeMetadata(file.text).body;
+    return bookChapterBodies(file.text)[0] ?? "";
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logFailure("EPUBエディターの段落一覧", {
@@ -2269,10 +2276,15 @@ async function readFirstChapter(
     }
     if (conflicted) continue;
 
+    // **本と同じ切り分けを通す**（設計書6.65.15）。合本のファイルでは、
+    // 本の1章目＝合本の1話目なので、プレビューもその話を見せる
+    const first = bookChaptersOf(episode, text, format)[0];
+    if (!first) continue;
+
     return {
       chapter: {
-        heading: bookHeading(episode, format),
-        body: excerpt(parseEpisodeMetadata(text).body),
+        heading: first.heading,
+        body: excerpt(first.body),
         notation: notationModeFor(episode.fileName),
       },
       episodePath: episodePathFor(workFolder, episode.filePath),

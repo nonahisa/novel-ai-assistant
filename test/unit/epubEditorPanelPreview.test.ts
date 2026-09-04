@@ -1147,6 +1147,61 @@ describe("バックアップの頭書き（設計書6.65.15の段D）", () => {
     expect(latestParagraphs()).toEqual(["朝が来た。", "鐘が鳴る。"]);
     expect(page("本文の冒頭").html).toContain("朝が来た。");
   });
+
+  /**
+   * 合本（1ファイルに複数話）も、**本と同じ切り分け**を通す
+   * （設計書6.65.15。`core/bookChapters.ts`）。
+   *
+   * 段落の一覧は**最初の話ぶん**である。挿絵・改ページの指定はファイル
+   * 単位で、書き出しも合本の最初の話にだけ効かせているので、ここが
+   * 合本まるごとの段落だと、指した位置と入る位置がずれる。
+   */
+  const COLLECTED = [
+    "------- エピソード1開始 -------",
+    "【エピソードタイトル】",
+    "１話　転生",
+    "",
+    "【本文】",
+    "　朝が来た。",
+    "",
+    "　鐘が鳴る。",
+    "",
+    "【後書き】",
+    "　ありがとうございます。",
+    "",
+    "------- エピソード2開始 -------",
+    "【エピソードタイトル】",
+    "２話　再会",
+    "",
+    "【本文】",
+    "　昼が来た。",
+  ].join("\n");
+
+  test("合本の冒頭プレビューは、1話目だけを見せる", async () => {
+    put("本文/全話.txt", COLLECTED);
+    writeBook({ title: "氷の街" });
+
+    await open();
+    const body = page("本文の冒頭").html;
+
+    expect(body).toContain("朝が来た。");
+    // 見出しは1話目のもの（縦書きでは数字が `tcy` に包まれる）
+    expect(body.replace(/<[^>]+>/g, "")).toContain("第1話　転生");
+    expect(body).not.toContain("エピソード2開始");
+    expect(body).not.toContain("【本文】");
+    expect(body).not.toContain("ありがとうございます");
+    expect(body).not.toContain("昼が来た。");
+  });
+
+  test("合本の段落の一覧も、1話目の本文だけになる", async () => {
+    put("本文/全話.txt", COLLECTED);
+    writeBook({ title: "氷の街" });
+
+    await open();
+    await send({ type: "episode", episodePath: "本文/全話.txt" });
+
+    expect(latestParagraphs()).toEqual(["朝が来た。", "鐘が鳴る。"]);
+  });
 });
 
 /**
