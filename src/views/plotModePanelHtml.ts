@@ -103,6 +103,9 @@ button:disabled { opacity: 0.45; cursor: default; }
 #candidates button:hover { opacity: 1; }
 #aiActions { display: flex; flex-direction: column; gap: 4px; padding: 4px 12px 0; }
 #aiActions button { text-align: left; }
+/* AIを使わない入口。同じ並びに置くが、見分けが付くように薄くする */
+#syncActions { display: flex; flex-direction: column; gap: 4px; padding: 4px 12px 0; }
+#syncActions button { text-align: left; opacity: 0.85; }
 .episode {
   display: flex;
   align-items: flex-start;
@@ -162,6 +165,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   <div id="candidates"></div>
   <h2>AIに頼む</h2>
   <div id="aiActions"></div>
+  <div id="syncActions"></div>
   <h2 id="episodesHeading">話の並び</h2>
   <div class="note" id="episodesNote"></div>
   <div id="episodes"></div>
@@ -180,6 +184,7 @@ const el = {
   headingsNote: document.getElementById("headingsNote"),
   candidates: document.getElementById("candidates"),
   aiActions: document.getElementById("aiActions"),
+  syncActions: document.getElementById("syncActions"),
   episodes: document.getElementById("episodes"),
   episodesHeading: document.getElementById("episodesHeading"),
   episodesNote: document.getElementById("episodesNote"),
@@ -219,6 +224,18 @@ el.aiActions.addEventListener("click", function (event) {
   const target = event.target.closest("[data-command]");
   if (!target) return;
   post("command", { command: target.dataset.command });
+});
+
+/**
+ * AIを使わない入口（いまは「プロットの人物を資料へ反映」だけ）。
+ *
+ * 押したことを伝えるだけで、読み書きは向こうが既存の道
+ * （承認待ちへ積む）を通る。ここでは資料も plot.md も書き換えない
+ */
+el.syncActions.addEventListener("click", function (event) {
+  const target = event.target.closest("[data-action]");
+  if (!target) return;
+  post(target.dataset.action);
 });
 
 el.episodes.addEventListener("click", function (event) {
@@ -268,6 +285,15 @@ function renderAiActions() {
     );
   }
   el.aiActions.innerHTML = html.join("");
+
+  const sync = [];
+  for (const entry of data.syncActions || []) {
+    sync.push(
+      '<button data-action="' + escapeHtml(entry.action) + '" title="' +
+        escapeHtml(entry.detail) + '">' + escapeHtml(entry.label) + "</button>"
+    );
+  }
+  el.syncActions.innerHTML = sync.join("");
 }
 
 function renderEpisode(row) {

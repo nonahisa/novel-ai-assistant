@@ -390,6 +390,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 7,
   },
   {
+    id: "F-72",
+    title: "plotから資料への差分反映",
+    commands: ["novelai.openPlotMode"],
+    count: 6,
+  },
+  {
     id: "F-52",
     title: "待ち時間300秒の壁——通信部品（undici）側の上限も設定に合わせた",
     commands: ["novelai.extractSettings"],
@@ -614,4 +620,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 779;
+export const PENDING_CHECK_TOTAL = 785;

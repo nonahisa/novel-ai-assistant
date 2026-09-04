@@ -30,6 +30,7 @@ import { openInDefaultEditor } from "../views/openDocument";
 import { allActions } from "../views/actionList";
 import { ensurePlotFile } from "./startWork";
 import { createEpisodePlot } from "./resumeWriting";
+import { syncPlotCharacters } from "./plotCharacterSync";
 
 /**
  * プロットモードの画面（設計書6.4.8）。
@@ -126,6 +127,7 @@ type PanelMessage =
   | { type: "reveal"; line: number }
   | { type: "addSection"; key: string }
   | { type: "command"; command: string }
+  | { type: "syncCharacters" }
   | { type: "openEpisode"; filePath: string }
   | { type: "createEpisodePlot"; chapter: number | null }
   | { type: "openEpisodePlot"; chapter: number | null };
@@ -210,6 +212,14 @@ class PlotModePanel {
           return;
         case "command":
           await this.runCommand(message.command);
+          return;
+        case "syncCharacters":
+          // **保存を待たずに積める**（設計書6.4.9）。開いている文書の
+          // 中身をそのまま渡す——書きかけの人物欄も反映の対象にする
+          await syncPlotCharacters(this.work, {
+            plotText: this.openPlotDocument()?.getText(),
+            force: true,
+          });
           return;
         case "openEpisode":
           // 本文は作者が割り当てた画面で開く（原稿エディタを含む）。
@@ -462,6 +472,7 @@ class PlotModePanel {
         })),
         headings,
         aiActions: aiActions(),
+        syncActions: SYNC_ACTIONS,
         episodesHeading: `${this.unitNoun}の並び`,
         episodesNote:
           "上から読むと、作品の流れが分かります。" +
@@ -485,6 +496,26 @@ const zeroCounts = {
   paragraphs: 0,
   manuscriptLines: 0,
 };
+
+/**
+ * AIを使わない入口（設計書6.4.9）。
+ *
+ * **コマンドは作らない。** 押す場所はこのパネルの中だけで、操作メニューを
+ * 増やさない。押しても資料は変わらない——承認待ちへ積むだけである。
+ */
+const SYNC_ACTIONS: ReadonlyArray<{
+  action: "syncCharacters";
+  label: string;
+  detail: string;
+}> = [
+  {
+    action: "syncCharacters",
+    label: "プロットの人物を資料へ反映",
+    detail:
+      "「主要登場人物」に書いた人を、設定資料の更新案として積みます。" +
+      "AIは使いません。承認するまで資料は変わりません。",
+  },
+];
 
 /**
  * AIの入口に出す3つ。**名前も説明も `ACTION_TREE` から引く**

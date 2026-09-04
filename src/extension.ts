@@ -180,6 +180,7 @@ import {
 import { generatePlot } from "./features/generatePlot";
 // プロットモードの画面（設計書6.4.8）。plot.md は左の普通のエディタで書く
 import { openPlotMode, refreshPlotMode } from "./features/plotModePanel";
+import { syncPlotCharacters } from "./features/plotCharacterSync";
 import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
 import { ChatterService } from "./features/chatterService";
 import { setPlotBasics } from "./features/setPlotBasics";
@@ -1457,6 +1458,10 @@ export async function activate(
         // 簡単ステップメニューも、タイプで絞ったものを並べ直す（設計書6.70.1）。
         // 忘れると、タイプを変えたのに前のタイプの並びが残る
         stepProvider.invalidateFormats();
+        // 「主要登場人物」に書き足した人を、設定資料の更新案として積む
+        // （設計書6.4.9）。**台帳へは書かない**——承認待ちに積むだけで、
+        // 反映は作者が「更新分を反映」で承認したときに起きる
+        void syncPlotCharactersOnSave(fromUri(document.uri));
       }
       treeProvider.refresh();
       // 「直前にどの環境で書いていたか」を残す（設計書5.5.2）。
@@ -1496,6 +1501,26 @@ export async function activate(
     refreshManuscriptCounts(filePath);
     await refreshWritingStatsPanel(work, deviceId);
     await refreshAllWorksWritingStatsPanel(registry, deviceId);
+  }
+
+  /**
+   * 保存された plot.md の「主要登場人物」を、更新案として積む（設計書6.4.9）。
+   *
+   * **前回と同じ内容なら何もしないし、何も言わない。** 保存のたびに同じ
+   * 提案が積まれる画面にしない。失敗しても保存の流れを止めない
+   * （書いている手を、資料の都合で止めない）。
+   */
+  async function syncPlotCharactersOnSave(filePath: string): Promise<void> {
+    const work = findWorkForPath(registry, filePath);
+    if (!work) return;
+    try {
+      await syncPlotCharacters(work);
+    } catch (error) {
+      logFailure("プロットからの人物反映に失敗", {
+        作品: work.title,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /** 保存された本文が属する作品に、この環境の編集記録を残す */

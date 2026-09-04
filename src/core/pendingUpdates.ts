@@ -20,12 +20,53 @@ import { atomicWriteFile } from "./atomicWrite";
 
 const PENDING_DIR = "pending-characters";
 
+/**
+ * その更新案がどこから来たか（設計書6.4.9）。
+ *
+ * 省略（`undefined`）は**AIの抽出**である。出どころを持たせる前に積まれた
+ * ファイルがそう読まれるので、既定を変えてはいけない。
+ *
+ * plot: 作者が plot.md の「主要登場人物」へ書いたもの。AIの読みではなく
+ *   作者の文なので、承認するときの見方が変わる
+ */
+export type PendingUpdateSource = "plot";
+
+/** 出どころの短い呼び名。画面に出す文言はここだけが持つ */
+export function pendingSourceLabel(
+  source: PendingUpdateSource | undefined
+): string {
+  return source === "plot" ? "プロットから" : "";
+}
+
+/**
+ * 何の案か（設計書6.4.9）。
+ *
+ * 省略（`undefined`）は**既存レコードの更新**である。これまで積まれた
+ * ものはすべてそれなので、既定を変えてはいけない。
+ *
+ * creation: まだ台帳に無い人物を作る案。**IDは仮**（`PENDING_CREATION_ID`）で、
+ *   本当の採番は承認したときに行う——積んだ時点で採ると、別の作品操作で
+ *   同じ番号が先に使われる
+ */
+export type PendingUpdateKind = "creation";
+
 export interface PendingUpdate {
-  /** 更新案。既存レコードと同じID */
+  /** 更新案。既存レコードと同じID（新規案では仮のID） */
   character: Character;
   /** 保留ファイルのパス。反映後に片付ける */
   filePath: string;
+  /** どこから来た提案か。古いファイルには無い（＝抽出） */
+  source?: PendingUpdateSource;
+  /** 何の案か。古いファイルには無い（＝既存レコードの更新） */
+  kind?: PendingUpdateKind;
 }
+
+/**
+ * 新規案のIDは仮である（`core/plotCharacterSync.ts` の
+ * `PENDING_CREATION_ID`）。`parseCharacter` がIDの形（`char_数字`）を
+ * 確かめるので空にはできないが、**その番号のまま台帳へ入れてはいけない**
+ * ——`applyPendingUpdates` が承認のときに採り直す。
+ */
 
 export class PendingUpdateStore {
   constructor(private readonly work: WorkEntry) {}
@@ -34,18 +75,56 @@ export class PendingUpdateStore {
     return path.join(this.work.folderPath, AIWRITER_DIR, PENDING_DIR);
   }
 
-  async stage(characters: Character[]): Promise<void> {
+  /**
+   * 更新案を積む。
+   *
+   * @param options.source 出どころ。**省略したときは、その人物の
+   *   既にある更新案から引き継ぐ。** 話数の付け替え（`episodeLedgers`）は
+   *   中身だけを直して積み直すので、ここで落とすと「プロットから」の
+   *   印が黙って消える
+   * @param options.kind 新規案なら `"creation"`。**ファイル名を名前で作る**
+   *   ——新規案のIDは仮なので、IDで名付けると別の名前の案どうしが
+   *   同じファイルを取り合って、先に積んだ案が黙って消える
+   */
+  async stage(
+    characters: Character[],
+    options: { source?: PendingUpdateSource; kind?: PendingUpdateKind } = {}
+  ): Promise<void> {
     if (characters.length === 0) return;
     await vscode.workspace.fs.createDirectory(
       path.toUri(this.directory)
     );
 
     for (const character of characters) {
-      const target = path.join(this.directory, `${character.id}.json`);
-      const body = `${JSON.stringify(character, null, 2)}\n`;
+      const target = path.join(
+        this.directory,
+        pendingFileName(character, options.kind)
+      );
+      const source = options.source ?? (await this.sourceOf(target));
+      // 何も伝えることが無いものは、**これまでどおり人物のJSONそのもの**を
+      // 書く。包みを増やすのは、出どころか種別があるときだけでよい
+      const payload =
+        source || options.kind
+          ? { ...(options.kind ? { kind: options.kind } : {}), ...(source ? { source } : {}), character }
+          : character;
+      const body = `${JSON.stringify(payload, null, 2)}\n`;
       // 保留ファイルは作者の原稿ではないので、上書きしてよい。
       // 同じ人物の更新案が2つ並んでも作者が困るだけ
       await atomicWriteFile(target, new TextEncoder().encode(body));
+    }
+  }
+
+  /** 既にある更新案の出どころ。無ければ undefined（読めなくても同じ） */
+  private async sourceOf(
+    filePath: string
+  ): Promise<PendingUpdateSource | undefined> {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(path.toUri(filePath));
+      const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+      return readSource(parsed);
+    } catch {
+      // 無い・壊れているときは引き継ぐものが無いだけ。積むこと自体は続ける
+      return undefined;
     }
   }
 
@@ -80,7 +159,12 @@ export class PendingUpdateStore {
           path.toUri(filePath)
         );
         const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-        updates.push({ character: parseCharacter(parsed), filePath });
+        updates.push({
+          character: parseCharacter(unwrap(parsed)),
+          filePath,
+          source: readSource(parsed),
+          kind: readKind(parsed),
+        });
       } catch (error) {
         errors.push({
           file: name,
@@ -105,4 +189,52 @@ export class PendingUpdateStore {
   async count(): Promise<number> {
     return (await this.loadAll()).updates.length;
   }
+}
+
+/**
+ * 保留ファイルの中身から人物を取り出す。
+ *
+ * **2つの形がある。** 出どころを持たせる前（設計書6.4.9より前）に
+ * 積まれたものは人物のJSONそのもので、作者の環境にはそれが残っている。
+ * 読めなくすると、確認を待っている提案が黙って消える。
+ */
+function unwrap(parsed: unknown): unknown {
+  if (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    !Array.isArray(parsed) &&
+    "character" in parsed
+  ) {
+    return (parsed as { character: unknown }).character;
+  }
+  return parsed;
+}
+
+function readSource(parsed: unknown): PendingUpdateSource | undefined {
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const source = (parsed as { source?: unknown }).source;
+  return source === "plot" ? "plot" : undefined;
+}
+
+function readKind(parsed: unknown): PendingUpdateKind | undefined {
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const kind = (parsed as { kind?: unknown }).kind;
+  return kind === "creation" ? "creation" : undefined;
+}
+
+/**
+ * 保留ファイルの名前。
+ *
+ * 更新案はこれまでどおりレコードのID。新規案は**名前**で付ける
+ * （IDが仮であるため。同じ名前を積み直したときだけ上書きされる）。
+ */
+function pendingFileName(
+  character: Character,
+  kind: PendingUpdateKind | undefined
+): string {
+  if (kind !== "creation") return `${character.id}.json`;
+  const safeName = character.name
+    .replace(/[/\\:*?"<>|\s]/g, "")
+    .slice(0, 30);
+  return `new_${safeName || character.id}.json`;
 }
