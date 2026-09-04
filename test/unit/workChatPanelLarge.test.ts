@@ -193,6 +193,50 @@ describe("メインとサブを行き来する", () => {
   });
 });
 
+/**
+ * 相談を資料へ反映する（設計書6.72）。
+ *
+ * **入口はこのボタンだけ**である（コマンドは作らない）。横のパネルで
+ * 相談を終えたときに大きく開き直させないため、両方の面に出す。
+ */
+describe("相談を資料へ反映するボタン", () => {
+  for (const [name, html] of [
+    ["大きい画面", LARGE],
+    ["横のパネル", SIDEBAR],
+  ] as const) {
+    test(`${name}に出る`, () => {
+      expect(html).toContain('id="apply-settings"');
+      expect(html).toContain("相談を資料へ反映");
+    });
+
+    test(`${name}：会話が無いうちは押せない`, () => {
+      // 1往復も無い会話を送っても、AIを呼んで空振りするだけ
+      expect(html).toContain('id="apply-settings" disabled');
+      const code = script(html);
+      expect(code).toContain("exchanges === 0");
+    });
+
+    test(`${name}：押すと拡張機能側へ渡す`, () => {
+      expect(script(html)).toContain("type: 'applyToSettings'");
+    });
+
+    test(`${name}：走っている間は二度押せない`, () => {
+      const code = script(html);
+      const at = code.indexOf("function updateApplyState");
+      const body = code.slice(at, at + 300);
+
+      expect(body).toContain("busy || applying || exchanges === 0");
+      // 終わったら押せる状態へ戻す（戻し忘れると二度と押せない）
+      expect(code).toContain("message.type === 'applyToSettingsDone'");
+    });
+
+    test(`${name}：ボタンが無くても落ちない`, () => {
+      // ツールバーと同じ理由。有無を確かめずに触ると画面が真っ白になる
+      expect(script(html)).toContain("if (applyToSettingsEl)");
+    });
+  }
+});
+
 describe("「できること」から機能を起動する", () => {
   test("押すと拡張機能側へ渡る", () => {
     expect(script(LARGE)).toContain("type: 'quickRun'");

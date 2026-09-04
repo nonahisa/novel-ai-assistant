@@ -162,6 +162,8 @@ textarea:focus { outline: 1px solid var(--vscode-focusBorder); }
   gap: 6px;
   align-items: center;
   margin-top: 6px;
+  /* 横の細いパネルではボタンが収まらない。折り返して全部見せる */
+  flex-wrap: wrap;
 }
 #composer .hint {
   flex: 1;
@@ -265,6 +267,7 @@ ${large ? TOOLBAR_HTML : ""}
         ? `<button class="action secondary" id="to-sub">サブに戻す</button>`
         : `<button class="action secondary" id="to-main">メインに表示</button>`
     }
+    <button class="action secondary" id="apply-settings" disabled>相談を資料へ反映</button>
     <span class="hint" id="hint"></span>
     <button class="action secondary" id="clear">最初から</button>
     <button class="action" id="send">送る</button>
@@ -292,12 +295,24 @@ const quickRunListEl = document.getElementById('quickrun-list');
 // **どちらの面でも同じ書き方で扱う**ので、片方は必ず null になる
 const toMainEl = document.getElementById('to-main');
 const toSubEl = document.getElementById('to-sub');
+// 「相談を資料へ反映」（設計書6.72）。**両方の面に置く**——
+// 横のパネルで相談を終えたときに、大きく開き直させない
+const applyToSettingsEl = document.getElementById('apply-settings');
 
 /** 直前の返事に付いていた選択肢。番号入力で選べるようにする */
 let currentOptions = [];
 /** 「できること」に並べる機能。拡張機能側から届く */
 let quickRuns = [];
 let busy = false;
+/**
+ * これまでに返ってきた答えの数（設計書6.72）。
+ *
+ * **1往復も無い会話は資料へ反映できない。** 押せてしまうと、AIを呼んで
+ * 「何も見つかりませんでした」と返るだけの空振りになる。
+ */
+let exchanges = 0;
+/** 資料へ反映している最中か。**返事が来るまで二度押しさせない** */
+let applying = false;
 
 function escapeHtml(text) {
   return String(text)
@@ -320,9 +335,22 @@ function setBusy(value) {
   */
   if (toMainEl) toMainEl.disabled = value;
   if (toSubEl) toSubEl.disabled = value;
+  updateApplyState();
   document.querySelectorAll('.option').forEach((el) => {
     el.disabled = value;
   });
+}
+
+/**
+ * 「相談を資料へ反映」が押せるかを決める。
+ *
+ * 押せるのは**答えが1つ以上あって、いま何も走っていないとき**だけ。
+ * 3つの条件を1か所で見るのは、押せる・押せないの判断が散らばると
+ * 「考え中なのに押せる」ような取りこぼしが必ず出るためである。
+ */
+function updateApplyState() {
+  if (!applyToSettingsEl) return;
+  applyToSettingsEl.disabled = busy || applying || exchanges === 0;
 }
 
 /**
@@ -337,6 +365,9 @@ function resetLog() {
   logEl.appendChild(emptyEl);
   emptyEl.hidden = false;
   currentOptions = [];
+  // 会話が消えたのだから、資料へ反映するものも無くなる
+  exchanges = 0;
+  updateApplyState();
   updateHint();
 }
 
@@ -619,6 +650,22 @@ if (toSubEl) {
   });
 }
 
+/*
+  相談で決まったことを、設定資料の更新案として積む（設計書6.72）。
+
+  **押しても資料は変わらない。** 積まれるのは承認待ちで、反映するかは
+  「更新分を反映」で作者が決める。ここで伝えられるのはそこまでなので、
+  結果の知らせは拡張機能側の通知に任せる。
+*/
+if (applyToSettingsEl) {
+  applyToSettingsEl.addEventListener('click', () => {
+    if (busy || applying || exchanges === 0) return;
+    applying = true;
+    updateApplyState();
+    vscode.postMessage({ type: 'applyToSettings' });
+  });
+}
+
 inputEl.addEventListener('keydown', (event) => {
   // Ctrl+Enter で送る。Enterだけだと改行が打てない
   if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
@@ -665,8 +712,11 @@ window.addEventListener('message', (event) => {
         appendTurn('あなた', turn.text, 'author');
       } else {
         appendTurn('AI', turn.text, undefined, turn.html);
+        // 後から開いた画面でも「相談を資料へ反映」を押せるようにする
+        exchanges++;
       }
     });
+    updateApplyState();
     scrollToBottom();
     return;
   }
@@ -724,6 +774,9 @@ window.addEventListener('message', (event) => {
     setBusy(false);
     thought = '';
     thinkingEl.textContent = '考えています…';
+    // 1往復できたので、資料へ反映できる会話になった
+    exchanges++;
+    updateApplyState();
     const turn = appendTurn('AI', message.reply, undefined, message.html);
     if (message.locate) appendLocate(turn, message.locate);
     if (message.edit) appendEdit(turn, message.edit);
@@ -742,6 +795,12 @@ window.addEventListener('message', (event) => {
       appendOptions(turn, message.options);
     }
     scrollToBottom();
+    return;
+  }
+  if (message.type === 'applyToSettingsDone') {
+    // 成否にかかわらず、押せる状態へ戻す。結果は通知と note が伝える
+    applying = false;
+    updateApplyState();
     return;
   }
   if (message.type === 'note') {

@@ -62,6 +62,10 @@ import type { Chatter } from "../core/chatter";
 import { detectRunIntent } from "../core/chatIntent";
 import { findTextRange } from "../core/textLocate";
 import { applyChatEdit } from "./applyChatEdit";
+import {
+  applyChatToSettings,
+  type ChatSettingsSyncResult,
+} from "./chatSettingsSync";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { buildFeatureGuideForQuestion } from "./featureGuide";
 import {
@@ -159,6 +163,13 @@ type Incoming =
   | { type: "quickRun"; kind: string }
   /** 会話をMarkdownのメモとして残す */
   | { type: "saveNote" }
+  /**
+   * 相談で決まったことを、設定資料の更新案として積む（設計書6.72）。
+   *
+   * **資料はここでは変わらない。** 積むのは承認待ちだけで、反映は
+   * これまでどおり「更新分を反映」を作者が押したときである。
+   */
+  | { type: "applyToSettings" }
   /** 使い方のマニュアルを開く */
   | { type: "openManual" }
   /**
@@ -272,6 +283,14 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 無料のOllamaから有料のClaudeへ移ったとき、黙って課金が始まっては困る。
    */
   private paidConfirmedFor: string | undefined;
+
+  /**
+   * 資料への反映が走っている最中か（設計書6.72）。
+   *
+   * **画面が2つある**ので、画面側でボタンを止めるだけでは足りない。
+   * 二重に走ると、同じ会話から同じ更新案を二度積むことになる。
+   */
+  private applyingToSettings = false;
 
   /** 検索の材料。作品が変わるまで使い回す（毎回読み直すと重い） */
   private retrieval: RetrievalContext | undefined;
@@ -492,6 +511,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
     if (message.type === "saveNote") {
       await this.saveNote();
+      return;
+    }
+    if (message.type === "applyToSettings") {
+      await this.applyToSettings();
       return;
     }
     if (message.type === "openManual") {
@@ -1379,6 +1402,54 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   }
 
   /**
+   * 相談で決まったことを、設定資料の更新案として積む（設計書6.72）。
+   *
+   * **ここでは資料を書き換えない。** 積むのは承認待ちで、台帳へ入るのは
+   * 作者が「更新分を反映」で承認したときである（抽出・プロット反映と
+   * まったく同じ道）。
+   *
+   * 中身は `features/chatSettingsSync.ts` が持つ。パネル側の仕事は
+   * **どの作品の、どの会話について押されたか**を渡すことだけである。
+   */
+  private async applyToSettings(): Promise<void> {
+    // 押している最中にもう一度押されたら、無視する。画面側でもボタンを
+    // 止めているが、**2つの画面から同時に押せる**ので、こちらでも見る
+    if (this.applyingToSettings) return;
+
+    if (this.history.length === 0) {
+      this.postAll({ type: "note", message: "まだ会話がありません。" });
+      this.postAll({ type: "applyToSettingsDone" });
+      return;
+    }
+
+    const context = await this.resolveContext();
+    if (!context) {
+      this.postError(
+        "作品のファイルを開くか、「相談する作品を選ぶ」で作品を決めてください。"
+      );
+      this.postAll({ type: "applyToSettingsDone" });
+      return;
+    }
+
+    this.applyingToSettings = true;
+    try {
+      const result = await applyChatToSettings(context.work, this.history, {
+        ai: this.ai,
+      });
+      // 通知は反映の側が出す。ここには**会話の場に残る一行**を置く
+      // （通知は消えるので、何をしたのかが会話から追えなくなる）
+      this.postAll({ type: "note", message: describeChatSync(result) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logFailure("相談から資料への反映", { 内容: message });
+      this.postError(`資料へ反映できませんでした: ${message}`);
+    } finally {
+      this.applyingToSettings = false;
+      this.postAll({ type: "applyToSettingsDone" });
+    }
+  }
+
+  /**
    * まだ使われていない保存先を決める。
    *
    * 同じ分に2回保存すると名前がぶつかる。**上書きはしない**ので、
@@ -1917,6 +1988,25 @@ function describeStagedProposals(staged: {
     );
   }
   return out;
+}
+
+/**
+ * 資料への反映の結果を、会話の場に残す一行にする（設計書6.72）。
+ *
+ * **通知は消えるが、会話は残る。** 何件積んだのかが会話から追えないと、
+ * あとで承認待ちを開いたときに「これはどの相談から来たのか」が分からない。
+ */
+function describeChatSync(result: ChatSettingsSyncResult): string {
+  if (result.unchanged) return "この相談は反映済みです。";
+  if (result.failed) return "資料への反映は行いませんでした。";
+
+  const total = result.staged + result.creations.length;
+  if (total === 0) return "相談から反映できる決定は見つかりませんでした。";
+  return (
+    `相談から人物${total}件の更新案を積みました` +
+    `（新規${result.creations.length}件・更新${result.staged}件）。` +
+    "「更新分を反映」で確認できます。"
+  );
 }
 
 /**

@@ -1,7 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "../core/paths";
-import { AIWRITER_DIR, type WorkEntry } from "../models/types";
-import { atomicWriteFile } from "../core/atomicWrite";
+import type { WorkEntry } from "../models/types";
 import { CharacterStore } from "../core/characterStore";
 import { PendingUpdateStore } from "../core/pendingUpdates";
 import { parsePlotMarkdown } from "../core/plotDoc";
@@ -14,6 +12,7 @@ import {
   type PlotCharacterSkip,
 } from "../core/plotCharacterSync";
 import { logFailure } from "../core/logger";
+import { readSyncDigest, writeSyncDigest } from "./syncDigest";
 
 /**
  * plot.md の「主要登場人物」を、設定資料の更新案として積む（設計書6.4.9）。
@@ -30,13 +29,13 @@ import { logFailure } from "../core/logger";
  * 保存のたびに同じ行が増える提案パネルは、読まれなくなる。前回積んだ節の
  * 内容ハッシュを `.aiwriter/plot-sync.json` に覚え、変わったときだけ積む。
  *
- * **`.aiwriter` に置くのは、これが台帳ではなく機械の覚え書きだから**である
- * （承認待ちやチャンクキャッシュと同じ置き場）。作者が読む `設定/` を
- * 未確定のファイルで散らかさない。消えても、同じ提案がもう一度積まれる
- * だけで済む（別の端末で反映済みなら、差分が無いので何も起きない）。
+ * 覚え書きの読み書きそのものは `syncDigest.ts` が持つ（相談からの反映
+ * （6.72）と同じ仕掛けなので、2か所に書かない）。
  */
 
 const STATE_FILE = "plot-sync.json";
+/** 覚え書きの中の項目名。**変えると、既に反映済みの環境が積み直す** */
+const STATE_KEY = "mainCharactersDigest";
 
 export interface PlotCharacterSyncResult {
   /** 承認待ちへ積んだ件数 */
@@ -214,45 +213,11 @@ function describeSkipped(skipped: readonly PlotCharacterSkip[]): string[] {
   return lines;
 }
 
-function statePath(work: WorkEntry): string {
-  return path.join(work.folderPath, AIWRITER_DIR, STATE_FILE);
-}
-
 /** 前回積んだ節の内容ハッシュ。無い・壊れていれば undefined */
 async function readDigest(work: WorkEntry): Promise<string | undefined> {
-  try {
-    const bytes = await vscode.workspace.fs.readFile(
-      path.toUri(statePath(work))
-    );
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-    if (typeof parsed !== "object" || parsed === null) return undefined;
-    const value = (parsed as { mainCharactersDigest?: unknown })
-      .mainCharactersDigest;
-    return typeof value === "string" ? value : undefined;
-  } catch {
-    // 覚え書きなので、無ければ「まだ積んでいない」と読めばよい。
-    // 壊れていても直さない（次の書き込みで作り直る）
-    return undefined;
-  }
+  return readSyncDigest(work, STATE_FILE, STATE_KEY);
 }
 
 async function writeDigest(work: WorkEntry, digest: string): Promise<void> {
-  const target = statePath(work);
-  try {
-    await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
-    const body = `${JSON.stringify(
-      { mainCharactersDigest: digest, updatedAt: new Date().toISOString() },
-      null,
-      2
-    )}\n`;
-    // 機械の覚え書きなので上書きしてよい（作者の原稿ではない）
-    await atomicWriteFile(target, new TextEncoder().encode(body));
-  } catch (error) {
-    // 覚え書きが残せなくても、積んだこと自体は成立している。
-    // 次の保存で同じ提案がもう一度積まれるだけ
-    logFailure("プロット反映の覚え書きを保存できませんでした", {
-      作品: work.title,
-      詳細: error instanceof Error ? error.message : String(error),
-    });
-  }
+  await writeSyncDigest(work, STATE_FILE, STATE_KEY, digest, "プロット反映");
 }

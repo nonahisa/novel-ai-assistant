@@ -28,14 +28,18 @@ const PENDING_DIR = "pending-characters";
  *
  * plot: 作者が plot.md の「主要登場人物」へ書いたもの。AIの読みではなく
  *   作者の文なので、承認するときの見方が変わる
+ * chat: 相談の中で作者が決めたこと（設計書6.72）。AIが拾い出してはいるが、
+ *   出どころは**作者自身の発言**である（根拠の引用を会話と照合している）
  */
-export type PendingUpdateSource = "plot";
+export type PendingUpdateSource = "plot" | "chat";
 
 /** 出どころの短い呼び名。画面に出す文言はここだけが持つ */
 export function pendingSourceLabel(
   source: PendingUpdateSource | undefined
 ): string {
-  return source === "plot" ? "プロットから" : "";
+  if (source === "plot") return "プロットから";
+  if (source === "chat") return "相談から";
+  return "";
 }
 
 /**
@@ -213,7 +217,9 @@ function unwrap(parsed: unknown): unknown {
 function readSource(parsed: unknown): PendingUpdateSource | undefined {
   if (typeof parsed !== "object" || parsed === null) return undefined;
   const source = (parsed as { source?: unknown }).source;
-  return source === "plot" ? "plot" : undefined;
+  // 知らない値は「出どころ無し」として読む。**捨てずに残す**のではなく
+  // 落とすのは、画面に出す文言を持たないものを表示できないため
+  return source === "plot" || source === "chat" ? source : undefined;
 }
 
 function readKind(parsed: unknown): PendingUpdateKind | undefined {

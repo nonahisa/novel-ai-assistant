@@ -1,7 +1,10 @@
 import * as nodePath from "path";
 import { beforeEach, describe, expect, test } from "vitest";
 import { FileSystemError, FileType, Uri, workspace } from "./support/vscodeStub";
-import { PendingUpdateStore } from "../../src/core/pendingUpdates";
+import {
+  PendingUpdateStore,
+  pendingSourceLabel,
+} from "../../src/core/pendingUpdates";
 import { emptyCharacter } from "../../src/models/character";
 import type { WorkEntry } from "../../src/models/types";
 
@@ -95,6 +98,40 @@ describe("承認待ちの更新案の出どころ", () => {
     expect(errors).toEqual([]);
     expect(updates).toHaveLength(1);
     expect(updates[0].character.name).toBe("太志");
+    expect(updates[0].source).toBeUndefined();
+  });
+
+  /**
+   * 相談から積んだもの（設計書6.72）。
+   *
+   * プロットから来たものとも、AIの抽出から来たものとも見分けが付くこと。
+   * 出どころによって、承認するときの見方が変わる。
+   */
+  test("相談から積んだ提案も、印つきで読み戻せる", async () => {
+    const store = new PendingUpdateStore(work);
+    await store.stage([{ ...emptyCharacter("char_004", "灯"), summary: "17歳" }], {
+      source: "chat",
+    });
+
+    const { updates, errors } = await store.loadAll();
+    expect(errors).toEqual([]);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].source).toBe("chat");
+    expect(pendingSourceLabel(updates[0].source)).toBe("相談から");
+  });
+
+  test("知らない出どころは、印なしとして読む（古い環境が壊れない）", async () => {
+    const character = emptyCharacter("char_005", "澪");
+    disk.set(
+      diskPath(nodePath.join(pendingDir, "char_005.json")),
+      new TextEncoder().encode(
+        `${JSON.stringify({ source: "未知", character }, null, 2)}\n`
+      )
+    );
+
+    const { updates, errors } = await new PendingUpdateStore(work).loadAll();
+    expect(errors).toEqual([]);
+    expect(updates[0].character.name).toBe("澪");
     expect(updates[0].source).toBeUndefined();
   });
 
