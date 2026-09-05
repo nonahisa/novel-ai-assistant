@@ -247,6 +247,10 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.editTimeline": "story",
 
   // ── 校正・校閲。書いた文字がある限り、どのタイプでも効く ──
+  // まとめ実行（設計書6.80）は、走らせるものを選ぶ画面である。
+  // 物語向けの検知も選べるが、**選ばなければ走らない**ので、
+  // 入口そのものは誤字脱字と同じ列に置く
+  "novelai.runProofreadingSuite": "allTypes",
   "novelai.checkTypos": "allTypes",
   "novelai.checkTyposForFile": "allTypes",
   "novelai.manageKeepWords": "allTypes",

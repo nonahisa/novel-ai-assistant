@@ -256,6 +256,14 @@ import {
   showForeshadowCandidates,
   showForeshadowResolutions,
 } from "./features/checkForeshadows";
+// 校正のまとめ実行（設計書6.80）。各コマンドは「結果を出さずに終わった」を
+// 戻り値で伝える——まとめ実行はそれを見て、残りを走らせるかどうかを決める
+import { runProofreadingSuite } from "./features/proofreadingSuite";
+import {
+  CHECK_CANCELLED,
+  CHECK_COMPLETED,
+  PROOFREADING_SUITE_COMMAND,
+} from "./core/proofreadingSuite";
 import {
   extendMarkdownItWithRuby,
   type MarkdownItLike,
@@ -3077,11 +3085,11 @@ export async function activate(
       "novelai.checkForeshadows",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文から伏線を拾ってしまう
         if (!(await saveDirtyDocumentsBeforeExtraction(work, "伏線の検知"))) {
-          return;
+          return CHECK_CANCELLED;
         }
 
         const result = await withPanelProgress(
@@ -3089,7 +3097,7 @@ export async function activate(
           "伏線を検知",
           (onProgress) => checkForeshadows(work, aiRegistry, { onProgress })
         );
-        if (!result || result.cancelled) return;
+        if (!result || result.cancelled) return CHECK_CANCELLED;
 
         showForeshadowCandidates(proposalPanel, work, result.candidates);
 
@@ -3119,6 +3127,7 @@ export async function activate(
               ? "台帳へはまだ入れていません。 「提案」パネルで登録するものを選んでください。"
               : "",
         });
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -3173,22 +3182,45 @@ export async function activate(
     )
   );
 
+  /*
+    校正のまとめ実行（設計書6.80）。
+
+    **ここでは処理を持たない。** 走らせるのは既にあるコマンドで、確認・
+    見積もり・札・通知は各機能のものをそのまま通す。まとめ側が持つのは
+    「どれを・どの順で」と「終わったあとの内訳」だけである。
+  */
+  context.subscriptions.push(
+    registerCommand(
+      PROOFREADING_SUITE_COMMAND,
+      async (node?: WorkRef) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await runProofreadingSuite(work, {
+          memento: context.globalState,
+          // 内訳は提案パネルの残り件数から数える（設計書6.37.3）。
+          // 各機能の戻り値を覗くと、機能ごとに違う数え方を写すことになる
+          remainingIn: (category) => proposalPanel.remainingIn(work.id, category),
+        });
+      }
+    )
+  );
+
   context.subscriptions.push(
     registerCommand(
       "novelai.checkTypos",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を検知してしまう
         if (!(await saveDirtyDocumentsBeforeExtraction(work, "誤字脱字の検知")))
-          return;
+          return CHECK_CANCELLED;
 
         // **前回から書いた分だけに絞れる**（設計書6.8.7）。
         // 聞く意味があるときだけ聞く（一度も検知していない・全部が対象・
         // 1件も無い、のいずれでも聞かない）
         const scope = await chooseScope(work);
-        if (!scope) return;
+        if (!scope) return CHECK_CANCELLED;
 
         const result = await withPanelProgress(
           work,
@@ -3199,7 +3231,7 @@ export async function activate(
               onProgress,
             })
         );
-        if (!result) return;
+        if (!result) return CHECK_CANCELLED;
 
         // **絞って見たときも「検知した」と記録する。**
         // 記録しないと、次回また同じ話が「前回から書いた分」に出る
@@ -3210,6 +3242,7 @@ export async function activate(
           scope.kind === "changed" ? "誤字脱字検知（前回から書いた分）" : "誤字脱字検知",
           result
         );
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -3219,18 +3252,19 @@ export async function activate(
       "novelai.checkNotation",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を数えてしまう
         if (!(await saveDirtyDocumentsBeforeExtraction(work, "表記ゆれの検知")))
-          return;
+          return CHECK_CANCELLED;
 
         const result = await checkNotation(work);
-        if (!result || result.cancelled) return;
+        if (!result || result.cancelled) return CHECK_CANCELLED;
 
         proposalPanel.showResults(work, result.issues, "表記ゆれ");
 
-        if (result.groupCount === 0) return;
+        // 0組のときは知らせるものが無い（検知そのものは走り切っている）
+        if (result.groupCount === 0) return CHECK_COMPLETED;
         const parts = [`${result.groupCount}組を検出`];
         if (result.unifiedCount > 0) {
           parts.push(`${result.unifiedCount}組を揃える`);
@@ -3242,6 +3276,7 @@ export async function activate(
         vscode.window.showInformationMessage(
           `表記ゆれ検知が完了しました。${parts.join(" / ")}`
         );
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -3401,13 +3436,13 @@ export async function activate(
       "novelai.checkDeviations",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を照らしてしまう
         if (
           !(await saveDirtyDocumentsBeforeExtraction(work, "プロット逸脱の検知"))
         ) {
-          return;
+          return CHECK_CANCELLED;
         }
 
         const result = await withPanelProgress(
@@ -3416,7 +3451,7 @@ export async function activate(
           (onProgress) => checkDeviations(work, aiRegistry, { onProgress }),
           "話"
         );
-        if (!result || result.cancelled) return;
+        if (!result || result.cancelled) return CHECK_CANCELLED;
 
         proposalPanel.showDeviations(work, result.issues);
 
@@ -3448,6 +3483,7 @@ export async function activate(
               ? "本文は書き換えていません。 プロットのほうが古いこともあります。"
               : "",
         });
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -3589,15 +3625,17 @@ export async function activate(
       "novelai.checkProofread",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を推敲してしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "推敲"))) return;
+        if (!(await saveDirtyDocumentsBeforeExtraction(work, "推敲"))) {
+          return CHECK_CANCELLED;
+        }
 
         const result = await withPanelProgress(work, "推敲", (onProgress) =>
           checkProofread(work, aiRegistry, { onProgress })
         );
-        if (!result || result.cancelled) return;
+        if (!result || result.cancelled) return CHECK_CANCELLED;
 
         proposalPanel.showResults(work, result.issues, "推敲");
 
@@ -3624,6 +3662,7 @@ export async function activate(
           parts,
           failedCount: result.failedChunks,
         });
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -3633,14 +3672,16 @@ export async function activate(
       "novelai.checkOpening",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う冒頭を診断してしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "冒頭診断"))) return;
+        if (!(await saveDirtyDocumentsBeforeExtraction(work, "冒頭診断"))) {
+          return CHECK_CANCELLED;
+        }
 
         // **完了の通知を出さない。** 結果そのものが文書として開くので、
         // 「できました」を重ねると画面の手前に確認が1枚増えるだけになる
-        await checkOpening(work, aiRegistry);
+        return await checkOpening(work, aiRegistry);
       }
     )
   );
@@ -3650,10 +3691,12 @@ export async function activate(
       "novelai.checkContradictions",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を突き合わせてしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "矛盾検知"))) return;
+        if (!(await saveDirtyDocumentsBeforeExtraction(work, "矛盾検知"))) {
+          return CHECK_CANCELLED;
+        }
 
         const result = await withPanelProgress(
           work,
@@ -3665,7 +3708,7 @@ export async function activate(
               onVerifyProgress: stage("検出した矛盾を検証", "件"),
             })
         );
-        if (!result || result.cancelled) return;
+        if (!result || result.cancelled) return CHECK_CANCELLED;
 
         // 矛盾が実は伏線だったときの逃げ道を添える（設計書6.35.4）
         proposalPanel.showContradictions(work, result.issues, (source) =>
@@ -3697,6 +3740,7 @@ export async function activate(
               ? "本文は書き換えていません。 設定と本文のどちらを直すかは作者が決めてください。"
               : "",
         });
+        return CHECK_COMPLETED;
       }
     )
   );

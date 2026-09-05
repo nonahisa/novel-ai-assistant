@@ -19,6 +19,18 @@ import {
 } from "../prompts/openingCheck";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import { withCancellableProgress } from "../views/progress";
+/*
+  まとめ実行（設計書6.80）へ「結果を出さずに終わった」を伝えるための印。
+
+  **振る舞いは変えていない。** これまで `return` していたところで、
+  同じ形の値を返すようにしただけである。冒頭診断だけは結果が文書として
+  開くため、ほかの検知と違って「件数」で終わりを判断できない。
+*/
+import {
+  CHECK_CANCELLED,
+  CHECK_COMPLETED,
+  type CheckCommandOutcome,
+} from "../core/proofreadingSuite";
 import { reportAIError } from "./reportAIError";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import {
@@ -59,15 +71,15 @@ const INTENTIONAL_MARKER = "意図的";
 export async function checkOpening(
   work: WorkEntry,
   registry: AIRegistry
-): Promise<void> {
+): Promise<CheckCommandOutcome> {
   useLogFile(work.folderPath);
 
   // 冒頭診断は「生成系」の割当に従う（あらすじ・紹介文と同じ扱い）
   const resolved = await ensureConfigured(registry, "generate");
-  if (!resolved) return;
+  if (!resolved) return CHECK_CANCELLED;
 
   const material = await collectOpening(work);
-  if (!material) return;
+  if (!material) return CHECK_CANCELLED;
 
   // **繋がるかを、費用の確認より先に確かめる**（設計書6.51）。
   // 繋がらないと分かっているのに料金の話をしても意味がない。
@@ -81,7 +93,7 @@ export async function checkOpening(
       resolved.model
     ))
   ) {
-    return;
+    return CHECK_CANCELLED;
   }
 
   const ok = await confirmPaidUsage(resolved.provider, {
@@ -92,7 +104,7 @@ export async function checkOpening(
       `送るのは第1話の冒頭 ${material.openingText.length}字だけです。\n` +
       "本文は書き換えません。",
   });
-  if (!ok) return;
+  if (!ok) return CHECK_CANCELLED;
 
   let responseText: string | undefined;
   let failure: unknown;
@@ -136,11 +148,13 @@ export async function checkOpening(
 
   if (failure) {
     // 中止は失敗ではない。作者が自分で止めたことを警告で知らせ直さない
-    if (failure instanceof AIError && failure.kind === "aborted") return;
+    if (failure instanceof AIError && failure.kind === "aborted") {
+      return CHECK_CANCELLED;
+    }
     reportAIError("冒頭診断", failure);
-    return;
+    return CHECK_CANCELLED;
   }
-  if (responseText === undefined) return;
+  if (responseText === undefined) return CHECK_CANCELLED;
 
   const result = parseOpeningCheck(responseText);
   if (!result) {
@@ -154,7 +168,7 @@ export async function checkOpening(
       "ログを見る"
     );
     if (answer === "ログを見る") showLog();
-    return;
+    return CHECK_CANCELLED;
   }
 
   // **ファイル名には作品名を入れない。** 置き場が作品ごとに分かれており
@@ -170,6 +184,7 @@ export async function checkOpening(
     undefined,
     { work }
   );
+  return CHECK_COMPLETED;
 }
 
 interface OpeningMaterial {

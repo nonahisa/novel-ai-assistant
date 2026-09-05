@@ -183,6 +183,8 @@ const STEP_DEFS: readonly StepDef[] = [
       "書いた本文を、人に見せる前に自分で見直す段階です。" +
       "本文は勝手に書き換わりません。指摘を1件ずつ見て決めます。",
     entries: [
+      // まとめて走らせる入口を先頭に置く（設計書6.80）
+      "novelai.runProofreadingSuite",
       "novelai.checkTypos",
       "novelai.manageKeepWords",
       "novelai.checkNotation",

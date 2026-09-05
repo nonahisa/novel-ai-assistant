@@ -306,6 +306,10 @@ describe("AIの印", () => {
     expect(aiCommands).toEqual(
       [
         "novelai.plotInterview",
+        // 校正のまとめ実行（設計書6.80）。**走らせるのは既存の検知**なので、
+        // 選び方によってはAIを1度も呼ばない。それでも印は要る——既定の
+        // 4つには誤字脱字・推敲・矛盾が入っており、料金が出るためである
+        "novelai.runProofreadingSuite",
         "novelai.checkTypos",
         "novelai.checkProofread",
         "novelai.checkContradictions",
@@ -636,7 +640,10 @@ describe("校正・校閲の並び", () => {
     // 毎日通るのは上のほう。相手のいる作業を上に置くと、そこを通り抜ける
     const commands = proofreadingSection().items.map((item) => item.command);
 
-    expect(commands[0]).toBe("novelai.checkTypos");
+    // 先頭はまとめ実行（設計書6.80）。1つずつ押して回る分類なので、
+    // まとめて走らせる入口を最初に見せる
+    expect(commands[0]).toBe("novelai.runProofreadingSuite");
+    expect(commands[1]).toBe("novelai.checkTypos");
     expect(commands).toContain("novelai.checkProofread");
     // 校閲ロックより前に、検知の類がすべて並んでいる
     const lockAt = commands.indexOf("novelai.toggleReviewLock");

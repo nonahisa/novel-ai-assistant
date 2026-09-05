@@ -502,6 +502,23 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
         label: "校正・校閲",
         icon: "search-fuzzy",
         items: [
+          // **分類の先頭に置く**（設計書6.80）。1つずつ押して回るのが
+          // ここでの常なので、まとめて走らせる入口を最初に見せる
+          {
+            kind: "action",
+            command: "novelai.runProofreadingSuite",
+            label: "校正をまとめて実行",
+            icon: "checklist",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "この分類の検知を、選んだものだけ順に走らせます" +
+              "（表記ゆれ・誤字脱字・推敲・冒頭診断・プロット逸脱・矛盾・伏線）。" +
+              "**走らせるものは毎回選べます**（前回の選択を覚えています）。" +
+              "**順番は軽いものから重いものへ固定**で、選んだ順ではありません。" +
+              "結果はいつもどおり下段の「提案」パネルに溜まり、" +
+              "**本文は書き換えません。**途中で中止すると、残りは走りません。",
+          },
           {
             kind: "action",
             command: "novelai.checkTypos",
