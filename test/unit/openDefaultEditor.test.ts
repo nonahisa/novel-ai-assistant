@@ -240,4 +240,36 @@ describe("生成文書の開き方", () => {
 
     expect(executeCommand.mock.calls[0]?.[2]).toEqual({ preview: false });
   });
+
+  /**
+   * `vscode-userdata:` スキームの置き場も、実体のあるOSのパスへ書く。
+   *
+   * 拡張機能開発ホストでは `globalStorageUri` がこのスキームで渡ってくる。
+   * `fromUri` の一般規則（`file:` 以外はURIの文字列）に任せると
+   * `mkdir "C:\vscode-userdata:..."` になって落ち、生成文書がすべて
+   * 無題文書へ落ちていた（実機で発見、2026-09-05）。`setGeneratedStorageRoot`
+   * が `fsPath` を使う分岐を通ることを確かめる
+   */
+  it("`vscode-userdata` のUriを渡すと、fsPath配下（実パス）へ書く", async () => {
+    const UD_ROOT = "C:\\userdata\\generated";
+    setGeneratedStorageRoot(
+      Uri.from({ scheme: "vscode-userdata", path: UD_ROOT }) as never
+    );
+
+    await openGeneratedMarkdown("使い方", "# 使い方\n");
+
+    // 開いた先が、`vscode-userdata:` の文字列表現
+    // （`vscode-userdata:C:\userdata\generated\...`）ではなく、
+    // `fsPath` の指す実パス（`…\generated\…`）配下になっていることを見る。
+    // 直す前は `path.fromUri` が `root.toString()` を返し、
+    // `mkdir "C:\vscode-userdata:..."` になって書けず、無題文書へ落ちていた
+    const call = executeCommand.mock.calls[0];
+    expect(call?.[0]).toBe("vscode.open");
+    const opened = call?.[1] as { fsPath: string };
+    expect(opened.fsPath.toLowerCase().startsWith(UD_ROOT.toLowerCase())).toBe(
+      true
+    );
+    expect(opened.fsPath).toContain("使い方_");
+    expect(openTextDocument).not.toHaveBeenCalled();
+  });
 });
