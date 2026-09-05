@@ -62,6 +62,7 @@ import { readEpisodeContents } from "./extractionFreshness";
 import {
   resolveMaxOutputTokens,
   resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
 } from "../ai/outputLimit";
 import { PendingUpdateStore } from "../core/pendingUpdates";
 import { applyPendingCharacterUpdates } from "./applyPendingUpdates";
@@ -225,7 +226,15 @@ export async function extractCharacters(
   // **応答の見込みに実測を使う**（設計書6.65.16の2）。台帳に書ける量の
   // 実測があればそれ、無ければ既定の見込み（8,192）を上限とする
   const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
-  const maxOutputTokens = resolveOutputTokensForPlanning(
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model
+  );
+  // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
+  // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
+  // 半分になる。抽出のJSONは途中で切れると解析できず、**そのチャンクが
+  // 丸ごと捨てられる**（呼び出し1回ぶんが無駄になる）
+  const sendOutputTokens = resolveOutputTokensForSend(
     outputTuning.providerId,
     outputTuning.model
   );
@@ -252,7 +261,7 @@ export async function extractCharacters(
     contextWindow,
     {
       overheadChars,
-      outputTokens: maxOutputTokens,
+      outputTokens: plannedOutputTokens,
     },
     outputTuning
   );
@@ -582,7 +591,8 @@ export async function extractCharacters(
             model: resolved.model,
             temperature: 0.2,
 
-            maxOutputTokens,
+            maxOutputTokens: sendOutputTokens,
+            plannedOutputTokens,
             jsonSchema: CHARACTER_EXTRACT_SCHEMA as unknown as object,
             disableThinking: true,
             signal: controller.signal,

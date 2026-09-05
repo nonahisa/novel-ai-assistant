@@ -16,7 +16,10 @@ import { SynopsisStore } from "../core/synopsisStore";
 import { findSynopsis } from "../models/synopsis";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import type { AIProvider } from "../ai/types";
-import { resolveOutputTokensForPlanning } from "../ai/outputLimit";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { confirmProviderReachable } from "./aiConnectivity";
 import {
   describeChunkSettings,
@@ -776,7 +779,13 @@ async function callAI(input: {
           // 構成の読み取りなので、抽出寄りに落ち着かせる（名前だけは少し揺らす
           // ほうが案が散るが、同じプロンプトで2つの役をこなすので中間に置く）
           temperature: 0.4,
-          maxOutputTokens: resolveOutputTokensForPlanning(
+          // **上限と見込みは別物**（設計書6.77の第2段）。見込みを上限として
+          // 送ると、測っていないモデルでは上限が設定値の半分になる
+          maxOutputTokens: resolveOutputTokensForSend(
+            input.provider.id,
+            input.model
+          ),
+          plannedOutputTokens: resolveOutputTokensForPlanning(
             input.provider.id,
             input.model
           ),

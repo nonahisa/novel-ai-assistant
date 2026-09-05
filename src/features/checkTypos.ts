@@ -61,6 +61,7 @@ import { logFailure, logStep, useLogFile } from "../core/logger";
 import {
   resolveMaxOutputTokens,
   resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
 } from "../ai/outputLimit";
 import {
   rateLimitWaitMs,
@@ -190,7 +191,15 @@ export async function checkTypos(
   // **応答の見込みに実測を使う**（設計書6.65.16の2）。台帳に書ける量の
   // 実測があればそれ、無ければ既定の見込み（8,192）を上限とする
   const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
-  const maxOutputTokens = resolveOutputTokensForPlanning(
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model
+  );
+  // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
+  // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
+  // 半分になり、長い応答が途中で切れる——抽出のJSONは切れると解析できず、
+  // そのチャンクが丸ごと捨てられる
+  const sendOutputTokens = resolveOutputTokensForSend(
     outputTuning.providerId,
     outputTuning.model
   );
@@ -329,7 +338,7 @@ export async function checkTypos(
     contextWindow,
     {
       overheadChars,
-      outputTokens: maxOutputTokens,
+      outputTokens: plannedOutputTokens,
     },
     outputTuning
   );
@@ -534,7 +543,8 @@ export async function checkTypos(
             model: resolved.model,
             temperature: 0.0,
 
-            maxOutputTokens,
+            maxOutputTokens: sendOutputTokens,
+            plannedOutputTokens,
             jsonSchema: TYPO_CHECK_SCHEMA as unknown as object,
             disableThinking: true,
             signal: controller.signal,

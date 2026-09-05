@@ -261,7 +261,11 @@ export class ClaudeProvider implements ApiKeyProvider {
     // モデルごとの対応状況を見て、送ってよいパラメータだけを組み立てる。
     // 未対応のパラメータを送るとモデルによっては400で弾かれるため。
     const raw = await this.rawCapabilities(params.model, params.signal);
-    const maxTokens = await this.resolveMaxTokens(params.model, params.signal);
+    const maxTokens = await this.resolveMaxTokens(
+      params.model,
+      params.maxOutputTokens,
+      params.signal
+    );
     throwIfAborted(params.signal);
 
     // モデルの申告する対応状況だけでは足りない。実際に400で拒否される項目が
@@ -416,11 +420,24 @@ export class ClaudeProvider implements ApiKeyProvider {
     };
   }
 
-  /** 出力トークンの上限。設定値とモデル上限の小さい方 */
-  private async resolveMaxTokens(model: string, signal?: AbortSignal): Promise<number> {
+  /**
+   * 出力トークンの上限。**呼び出し側の見込みを尊重し**、モデル上限で丸める。
+   *
+   * `requested` は `GenerateParams.maxOutputTokens`（設計書6.77の第2段）。
+   * 以前はこれを見ずに常に設定値を送っていたため、同じ欄がOllamaでだけ
+   * 効くという状態だった。渡されなければ従来どおり設定値を使う。
+   */
+  private async resolveMaxTokens(
+    model: string,
+    requested: number | undefined,
+    signal?: AbortSignal
+  ): Promise<number> {
     throwIfAborted(signal);
     const raw = await this.rawModel(model, signal);
-    return clampToModelLimit(resolveMaxOutputTokens(), raw?.max_tokens ?? 8192);
+    return clampToModelLimit(
+      requested ?? resolveMaxOutputTokens(),
+      raw?.max_tokens ?? 8192
+    );
   }
 
   private rawModelCache = new Map<string, ClaudeModel>();

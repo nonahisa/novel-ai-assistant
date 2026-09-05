@@ -9,6 +9,10 @@ import type { WorkRegistry } from "../core/workRegistry";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { AIRegistry } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
 import { episodeLabel } from "../core/manuscriptSources";
 import { SYNOPSIS_FILE } from "../core/synopsisDoc";
@@ -730,6 +734,17 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           model: resolved.model,
           // 相談は考えを広げる場なので、抽出よりは揺らす
           temperature: 0.7,
+          // **上限と見込みは別物**（設計書6.77の第2段）。上限は実測が
+          // あればそこまで、無ければ設定値。見込みはOllamaの `num_ctx` の
+          // 確保に使う値で、上限として送ってはいけない
+          maxOutputTokens: resolveOutputTokensForSend(
+            resolved.provider.id,
+            resolved.model
+          ),
+          plannedOutputTokens: resolveOutputTokensForPlanning(
+            resolved.provider.id,
+            resolved.model
+          ),
           jsonSchema: WORK_CHAT_SCHEMA as unknown as object,
           disableThinking: true,
         });
@@ -754,7 +769,15 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       }
 
       if (!answer.reply) {
-        this.postError("返事が空でした。もう一度お試しください。");
+        // **切り詰めは、切り詰めとして伝える**（設計書6.77の第2段。
+        // あらすじ生成と同じ文言）。「返事が空でした」だけだと、作者からは
+        // 出力上限が足りないのかAIの気まぐれなのか区別が付かない
+        this.postError(
+          result.truncated
+            ? "応答が出力上限で切り詰められました。質問を短くするか、" +
+              "設定の「1回の応答の上限」を大きくしてお試しください。"
+            : "返事が空でした。もう一度お試しください。"
+        );
         return;
       }
 

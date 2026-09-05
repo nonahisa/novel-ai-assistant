@@ -70,3 +70,30 @@ export function resolveOutputTokensForPlanning(
   const ceiling = measured !== undefined ? measured : OUTPUT_RESERVE_TOKENS;
   return Math.min(configured, ceiling);
 }
+
+/**
+ * **実際に上限として送る**トークン数（`generate` の `maxOutputTokens`。
+ * 設計書6.77の第2段）。
+ *
+ * `min(設定, 実測 ?? 設定)`——つまり実測があればそこまで、無ければ設定値。
+ *
+ * **見込み（上の `resolveOutputTokensForPlanning`）と分けている理由。**
+ * あちらは実測が無いとき `OUTPUT_RESERVE_TOKENS`（8,192）で頭を打つが、
+ * それは「場所をどれだけ空けるか」の話であって「どこまで書いてよいか」
+ * ではない。**見込みをそのまま上限として送ると、測っていないモデルでは
+ * 上限が設定値の半分になり、長い応答が途中で切れる**（抽出のJSONは
+ * 切れると解析できず、そのチャンクが丸ごと捨てられる）。0.32.11で実際に
+ * そうなりかけたので、欄そのものを2つに分けた。
+ *
+ * **実測は「そこまで書けた」ことの記録なので、上限にしてよい。**
+ * それ以上を許しても書けないことは測って分かっている。設定値を超える
+ * 実測は設定値で丸める——作者が設定で下げたなら、そちらが勝つ。
+ */
+export function resolveOutputTokensForSend(
+  providerId: string,
+  model: string
+): number {
+  const configured = resolveMaxOutputTokens();
+  const measured = modelTuning(providerId, model)?.measuredOutputTokens;
+  return Math.min(configured, measured ?? configured);
+}

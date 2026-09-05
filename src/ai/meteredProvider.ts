@@ -8,11 +8,8 @@ import {
   type ProviderId,
 } from "./types";
 import { appendUsageLog } from "../core/usageLog";
-import {
-  contextOverflow,
-  skipsContextGuard,
-  OUTPUT_RESERVE_TOKENS,
-} from "./contextGuard";
+import { contextOverflow, skipsContextGuard } from "./contextGuard";
+import { resolveMaxOutputTokens } from "./outputLimit";
 import { logStep } from "../core/logger";
 import { AiQueueAbortError, acquireCall } from "../core/aiSequence";
 
@@ -71,6 +68,11 @@ export class MeteredProvider implements AIProvider {
     return this.inner.isPaid;
   }
 
+  /** 関所がこれを見る（下の `outputTokensFor`）ので、落とさずに通す */
+  get capsOutput(): boolean | undefined {
+    return this.inner.capsOutput;
+  }
+
   isConfigured(): Promise<boolean> {
     return this.inner.isConfigured();
   }
@@ -103,7 +105,7 @@ export class MeteredProvider implements AIProvider {
       : contextOverflow({
           systemChars: params.systemPrompt.length,
           userChars: params.userPrompt.length,
-          outputTokens: params.maxOutputTokens ?? OUTPUT_RESERVE_TOKENS,
+          outputTokens: this.outputTokensFor(params),
           contextWindow: await this.contextWindowOf(params.model),
         });
     if (overflow) {
@@ -170,6 +172,38 @@ export class MeteredProvider implements AIProvider {
       }
       throw error;
     }
+  }
+
+  /**
+   * 関所が「応答のぶん」として数えるトークン数（設計書6.77の第2段）。
+   *
+   * **プロバイダによって向きが逆になる。理由は、実際に場所を食うものが
+   * 違うからである。**
+   *
+   * - **上限を送るプロバイダ（クラウド5社）**：`実上限 → 見込み → 設定値`。
+   *   渡した上限がそのまま送られるので、**その席を空けておかないと入らない。**
+   *   以前はここで既定を `OUTPUT_RESERVE_TOKENS`（8,192）にしていたが、
+   *   実際に送られるのは設定値（既定16,384）だったので、**関所を通ったのに
+   *   上限を超える**という逆向きの食い違いが残っていた
+   * - **上限を送らないプロバイダ（Ollama）**：`見込み → 実上限 → 設定値`。
+   *   あちらは `num_predict` を送らず（設計書6.58.2）、`num_ctx` を
+   *   **見込みぶんだけ**確保する。実際に消費されるのは見込みのほうなので、
+   *   実上限で数えると「確保は足りているのに関所が断る」ことになる
+   *   （32kのモデルで、送れる本文が約17,200字から約11,470字へ縮む）
+   *
+   * **印が無ければ「上限を送る側」として扱う**（安全側）。付け忘れが
+   * 「実際より小さく見積もって送る」ほうへ倒れると、黙って切り捨てられる
+   * 経路が復活する。
+   *
+   * 式を組むのはここである。`contextGuard.ts` は VS Code に依存させない
+   * 決まりなので、設定を読む処理をあちらへ入れない。
+   */
+  private outputTokensFor(params: GenerateParams): number {
+    const [first, second] =
+      this.inner.capsOutput === false
+        ? [params.plannedOutputTokens, params.maxOutputTokens]
+        : [params.maxOutputTokens, params.plannedOutputTokens];
+    return first ?? second ?? resolveMaxOutputTokens();
   }
 
   /** 上限が分からないと記録したモデル。**同じモデルでは一度だけ書く** */

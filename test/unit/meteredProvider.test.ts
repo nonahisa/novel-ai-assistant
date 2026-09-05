@@ -263,6 +263,14 @@ describe("包んでも元のプロバイダと同じに見える", () => {
     expect(provider.isPaid).toBe(true);
   });
 
+  test("「上限を掛けない」という印も、そのまま通す", () => {
+    // 関所がこれを見て見込みと実上限を選ぶ（設計書6.77の第2段）。
+    // 包みが落とすと、Ollamaが上限を掛ける側として扱われる
+    const provider = new MeteredProvider(fakeProvider({ capsOutput: false }));
+
+    expect(provider.capsOutput).toBe(false);
+  });
+
   test("getModel を持たないプロバイダには生やさない", () => {
     // 「持っているかどうか」で呼び出し側が分岐する（resolveModelInfo）。
     // 生やすと、一覧から探す道が使われなくなってモデル情報が取れない

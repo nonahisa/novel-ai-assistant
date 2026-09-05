@@ -261,7 +261,9 @@ export class SakuraProvider implements ApiKeyProvider {
         { role: "user", content: params.userPrompt },
       ],
       temperature: params.temperature,
-      max_tokens: resolveMaxOutputTokens(),
+      // **呼び出し側の見込みを尊重する**（設計書6.77の第2段）。
+      // 渡されない呼び出しはこれまでどおり設定値で送る
+      max_tokens: params.maxOutputTokens ?? resolveMaxOutputTokens(),
       stream: false,
     };
 

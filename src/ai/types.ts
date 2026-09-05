@@ -67,15 +67,36 @@ export interface GenerateParams {
    */
   onThinking?: (delta: string) => void;
   /**
-   * この呼び出しの応答に見込むトークン数。
+   * この呼び出しで**実際に上限として送る**トークン数（設計書6.77の第2段）。
+   *
+   * Ollama以外の5プロバイダは、これを `max_tokens` 等としてそのまま送る
+   * （渡されなければグローバル設定 `novelai.maxOutputTokens`）。
+   * **Ollamaだけは上限を掛けない**（設計書6.58.2。長い応答が途中で切れると
+   * 抽出のJSONが解析できず、そのチャンクが丸ごと捨てられる）。
+   *
+   * **「見込み」と混ぜないこと。** 場所の確保に見込む量は
+   * `plannedOutputTokens` である。同じ欄を両方に使うと、確保を小さくする
+   * つもりの値がそのまま実際の上限になり、応答が切れる
+   * （0.32.11で一度そうなった）。
+   *
+   * 送る直前の関所（`ai/contextGuard.ts`）は、まずこの値で判断する。
+   */
+  maxOutputTokens?: number;
+  /**
+   * この呼び出しの応答に**見込む**トークン数（設計書6.77の第2段）。
+   *
+   * **場所を空けるためだけの値である。上限として送らない。**
+   * Ollamaの `num_ctx` の確保と、関所の見込みのフォールバックに使う。
    *
    * **`numCtx` を渡さない呼び出しのためにある。** 出力の量は機能によって
    * 桁が違い（あらすじは短く、抽出は長い）、呼び出し側にしか分からない。
    * 渡さなければ `OUTPUT_RESERVE_TOKENS`（`ai/contextGuard.ts`）で見込む。
    *
-   * 送る直前の関所（同ファイル）も、この値で「入るか」を判断する。
+   * 台帳に実測があれば、それより多くは書けないと分かっているので、
+   * 実測ぶんだけ確保すればよい（`resolveOutputTokensForPlanning`）。
+   * **非力な機械では、この差がそのまま無駄なメモリになる。**
    */
-  maxOutputTokens?: number;
+  plannedOutputTokens?: number;
   /** JSON構造化出力のスキーマ。指定するとその形式を強制する */
   jsonSchema?: object;
   /** 思考モード対応モデルで思考を無効化するか */
@@ -195,6 +216,21 @@ export interface AIProvider {
    * 実行前の確認で処理量とコストを示すかどうかの判断に使う。
    */
   readonly isPaid: boolean;
+  /**
+   * 渡された出力上限（`GenerateParams.maxOutputTokens`）を、**実際に
+   * APIへ送るか**（設計書6.77の第2段）。**無指定は「送る」扱い。**
+   *
+   * 送る直前の関所（`ai/meteredProvider.ts`）が、見込みと実上限の
+   * どちらで場所を数えるかを、これで決める。
+   *
+   * **`false` なのはOllamaだけである。** あちらは `num_predict` を送らず
+   * （設計書6.58.2）、代わりに `num_ctx` を見込みぶんだけ確保するので、
+   * **実際に場所を食うのは見込みのほう**になる。
+   *
+   * **プロバイダIDで分岐しないために置いている。** LM Studio のように
+   * Ollama互換の口を持つものがあり、名前は当てにならない。
+   */
+  readonly capsOutput?: boolean;
   /** 呼び出せる状態か（APIキー設定済み、サーバ起動済みなど） */
   isConfigured(): Promise<boolean>;
   testConnection(): Promise<ConnectionTestResult>;

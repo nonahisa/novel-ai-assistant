@@ -2,7 +2,10 @@ import { describe, expect, it, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { workspace } from "./support/vscodeStub";
-import { resolveOutputTokensForPlanning } from "../../src/ai/outputLimit";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../../src/ai/outputLimit";
 import { saveModelTuning } from "../../src/core/modelTuning";
 
 /**
@@ -81,6 +84,60 @@ describe("resolveOutputTokensForPlanning", () => {
     expect(resolveOutputTokensForPlanning("sakura", "gpt-oss-120b")).toBe(
       8192
     );
+  });
+});
+
+/**
+ * **実際に上限として送る値**（設計書6.77の第2段）。
+ *
+ * 見込み（上の `resolveOutputTokensForPlanning`）と分けてある。あちらの
+ * 8,192の頭打ちは「場所をどれだけ空けるか」の話であって、「どこまで
+ * 書いてよいか」ではない。**見込みをそのまま上限として送ると、測って
+ * いないモデルでは上限が設定値の半分になり、長い応答が途中で切れる。**
+ */
+describe("resolveOutputTokensForSend", () => {
+  afterEach(() => {
+    workspace.getConfiguration = () => ({
+      get: <T>(_key: string, defaultValue: T): T => defaultValue,
+    });
+  });
+
+  it("台帳に実測が無ければ、設定値をそのまま送る（8,192で頭を打たない）", async () => {
+    installSettings({ maxOutputTokens: 16384 });
+
+    expect(resolveOutputTokensForSend("ollama", "測っていないモデル")).toBe(
+      16384
+    );
+  });
+
+  it("台帳に実測があれば、そこまでを上限にする", async () => {
+    // 実測は「そこまで書けた」ことの記録なので、上限にしてよい。
+    // それ以上を許しても書けないことは測って分かっている
+    installSettings({ maxOutputTokens: 16384 });
+    await saveModelTuning("ollama", "gemma4:12b", {
+      measuredOutputTokens: 6500,
+    });
+
+    expect(resolveOutputTokensForSend("ollama", "gemma4:12b")).toBe(6500);
+  });
+
+  it("設定のほうが小さければ、設定が勝つ", async () => {
+    // 作者が設定で下げたのなら、実測より作者の指定を採る
+    installSettings({ maxOutputTokens: 2000 });
+    await saveModelTuning("ollama", "gemma4:12b", {
+      measuredOutputTokens: 6500,
+    });
+
+    expect(resolveOutputTokensForSend("ollama", "gemma4:12b")).toBe(2000);
+  });
+
+  it("同じモデル名でもプロバイダが違えば台帳を混同しない", async () => {
+    installSettings({ maxOutputTokens: 16384 });
+    await saveModelTuning("ollama", "gpt-oss-120b", {
+      measuredOutputTokens: 6500,
+    });
+
+    expect(resolveOutputTokensForSend("sakura", "gpt-oss-120b")).toBe(16384);
   });
 });
 

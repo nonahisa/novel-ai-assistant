@@ -567,7 +567,13 @@ async function runMeasurement(
               model: resolved.model,
               // 書き写すだけなので、揺らす理由がまったく無い
               temperature: 0,
-              maxOutputTokens: PROBE_OUTPUT_TOKENS,
+              // **見込みであって、上限ではない**（設計書6.77の第2段）。
+              // 128は「合言葉2つ＋前置きが収まる」ための確保であって、
+              // 「そこまでしか書くな」ではない。上限として送ると、前置きの
+              // 長い機種で末尾の合言葉が落ち、**読めていたのに「読めなかった」**
+              // と判定する——下の `PROBE_OUTPUT_TOKENS` のコメントが恐れて
+              // いるのは、まさにこれである
+              plannedOutputTokens: PROBE_OUTPUT_TOKENS,
               // **その回に要るぶんだけ。** 申告値に固定すると、確保した
               // KVキャッシュがVRAMから溢れて黙ってCPUへ落ちる（6.53.2）
               numCtx,

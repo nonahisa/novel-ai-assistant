@@ -8,7 +8,10 @@ import {
   isFatalProviderFailure,
   recoveryForAIError,
 } from "../ai/types";
-import { resolveOutputTokensForPlanning } from "../ai/outputLimit";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import {
@@ -241,6 +244,13 @@ export async function checkForeshadows(
     outputTuning.providerId,
     outputTuning.model
   );
+  // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
+  // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
+  // 半分になり、長い応答が途中で切れる
+  const sendOutputTokens = resolveOutputTokensForSend(
+    outputTuning.providerId,
+    outputTuning.model
+  );
   // **既に台帳にあるものは出さない**（設計書6.35.2）。処理しながら
   // 増やしていくので、同じ候補が隣のチャンクから二度出ることもなくなる
   const known: KnownForeshadow[] = ledger.records.map((record) => ({
@@ -365,7 +375,8 @@ export async function checkForeshadows(
             model,
             // 取り出すだけの仕事なので揺らさない
             temperature: 0.0,
-            maxOutputTokens: plannedOutputTokens,
+            maxOutputTokens: sendOutputTokens,
+            plannedOutputTokens,
             jsonSchema: FORESHADOW_DETECT_SCHEMA as unknown as object,
             disableThinking: true,
             signal: controller.signal,
@@ -661,6 +672,11 @@ export async function checkForeshadowResolution(
     outputTuning.providerId,
     outputTuning.model
   );
+  // 確保と上限は別物（設計書6.77の第2段。検知側と同じ理由）
+  const sendOutputTokens = resolveOutputTokensForSend(
+    outputTuning.providerId,
+    outputTuning.model
+  );
   const byId = new Map(open.map((record) => [record.id, record]));
 
   const proposals: ForeshadowResolutionProposal[] = [];
@@ -762,7 +778,8 @@ export async function checkForeshadowResolution(
             userPrompt,
             model,
             temperature: 0.0,
-            maxOutputTokens: plannedOutputTokens,
+            maxOutputTokens: sendOutputTokens,
+            plannedOutputTokens,
             jsonSchema: FORESHADOW_RESOLVE_SCHEMA as unknown as object,
             disableThinking: true,
             signal: controller.signal,

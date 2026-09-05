@@ -241,8 +241,10 @@ export class OpenAIProvider implements ApiKeyProvider {
         { role: "user", content: params.userPrompt },
       ],
       temperature: params.temperature,
-      // 新しいモデルは max_tokens を受け付けず、こちらの名前を要求する
-      max_completion_tokens: resolveMaxOutputTokens(),
+      // 新しいモデルは max_tokens を受け付けず、こちらの名前を要求する。
+      // **呼び出し側の見込みを尊重する**（設計書6.77の第2段）。渡されない
+      // 呼び出しはこれまでどおり設定値で送る
+      max_completion_tokens: params.maxOutputTokens ?? resolveMaxOutputTokens(),
     };
 
     if (params.jsonSchema) {

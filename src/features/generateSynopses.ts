@@ -4,6 +4,10 @@ import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { AIError, recoveryForAIError } from "../ai/types";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
 import {
   episodeBodyLabel,
@@ -144,6 +148,21 @@ export async function generateSynopses(
     .filter((character) => !character.isMob)
     .map((character) => character.name);
 
+  // **応答の見込みに実測を使う**（設計書6.65.16の2、6.77の第2段）。
+  // あらすじは1話ぶんで短いが、渡さないとOllamaの `num_ctx` が
+  // 既定の8,192で確保される
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    resolved.provider.id,
+    resolved.model
+  );
+  // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
+  // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
+  // 半分になり、長い応答が途中で切れる
+  const sendOutputTokens = resolveOutputTokensForSend(
+    resolved.provider.id,
+    resolved.model
+  );
+
   const failures: Array<{ label: string; message: string }> = [];
   const subtitleCandidates: Array<{
     episode: EpisodeBody;
@@ -187,6 +206,8 @@ export async function generateSynopses(
             model: resolved.model,
             // あらすじは事実を並べるだけなので、揺らす必要がない
             temperature: 0.3,
+            maxOutputTokens: sendOutputTokens,
+            plannedOutputTokens,
             jsonSchema: SYNOPSIS_SCHEMA as unknown as object,
             disableThinking: true,
             signal: controller.signal,

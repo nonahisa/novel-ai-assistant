@@ -2,6 +2,10 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { confirmProviderReachable } from "./aiConnectivity";
 
 import { scanWork } from "../core/scanner";
@@ -83,6 +87,21 @@ export async function generateWorkBlurb(
   );
   if (confirm !== "実行") return;
 
+  // **応答の見込みに実測を使う**（設計書6.65.16の2、6.77の第2段）。
+  // 紹介文は400字ほどだが、渡さないとOllamaの `num_ctx` が
+  // 既定の8,192で確保される
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    resolved.provider.id,
+    resolved.model
+  );
+  // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
+  // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
+  // 半分になり、長い応答が途中で切れる
+  const sendOutputTokens = resolveOutputTokensForSend(
+    resolved.provider.id,
+    resolved.model
+  );
+
   const response = await withCancellableProgress(
     "作品紹介文を作っています",
     async (_progress, token) => {
@@ -102,6 +121,8 @@ export async function generateWorkBlurb(
           model: resolved.model,
           // 紹介文は読ませる文章なので、抽出より少し揺らす
           temperature: 0.5,
+          maxOutputTokens: sendOutputTokens,
+          plannedOutputTokens,
           jsonSchema: BLURB_SCHEMA as unknown as object,
           disableThinking: true,
           signal: controller.signal,
@@ -117,12 +138,23 @@ export async function generateWorkBlurb(
 
   const parsed = parseBlurbResponse(response.text);
   if (!parsed) {
+    // **切り詰めは、切り詰めとして伝える**（設計書6.77の第2段。あらすじ生成と
+    // 同じ文言）。「読み取れませんでした」だけだと、作者からは上限が足りない
+    // のかAIの気まぐれなのか区別が付かない
+    const truncated = response.truncated === true;
     logFailure("作品紹介文の生成", {
-      理由: "応答を読み取れません",
+      理由: truncated
+        ? "応答が出力上限で切り詰められました"
+        : "応答を読み取れません",
       応答: response.text.slice(0, 400),
     });
     vscode.window
-      .showWarningMessage("応答を読み取れませんでした。", "ログを見る")
+      .showWarningMessage(
+        truncated
+          ? "応答が出力上限で切り詰められました。"
+          : "応答を読み取れませんでした。",
+        "ログを見る"
+      )
       .then((answer) => {
         if (answer === "ログを見る") showLog();
       });

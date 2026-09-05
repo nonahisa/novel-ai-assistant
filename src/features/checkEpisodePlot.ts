@@ -3,7 +3,10 @@ import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError, recoveryForAIError, type AIProvider } from "../ai/types";
-import { resolveOutputTokensForPlanning } from "../ai/outputLimit";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
 import { readTextFile, hashText } from "../core/textFile";
 import { blankMemoLines } from "../core/sceneMemo";
@@ -366,6 +369,17 @@ export async function checkEpisodePlotDesign(
           label: "単話プロットの検査",
           chapterLabel,
           parts: { 箇条書き: userPrompt.length },
+          // 送るのは箇条書きだけで小さいが、**照合側と同じ扱いにする**
+          // （設計書6.77の第2段）。同じ機能の2つの呼び出しで扱いが違うと、
+          // 片方だけ直したときに気づけない
+          maxOutputTokens: resolveOutputTokensForSend(
+            resolved.provider.id,
+            resolved.model
+          ),
+          plannedOutputTokens: resolveOutputTokensForPlanning(
+            resolved.provider.id,
+            resolved.model
+          ),
           signal: controller.signal,
         }));
       progress.report({ message: "1/1", increment: 100 });
@@ -442,6 +456,13 @@ export async function contrastEpisodePlot(
     model: resolved.model,
   };
   const plannedOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model
+  );
+  // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
+  // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
+  // 半分になり、長い応答が途中で切れる
+  const sendOutputTokens = resolveOutputTokensForSend(
     outputTuning.providerId,
     outputTuning.model
   );
@@ -555,7 +576,8 @@ export async function contrastEpisodePlot(
           label: "単話プロットと本文の照合",
           chapterLabel,
           parts: { 本文: body.length, 箇条書き: items.join("").length },
-          maxOutputTokens: plannedOutputTokens,
+          maxOutputTokens: sendOutputTokens,
+          plannedOutputTokens,
           signal: controller.signal,
         }));
       progress.report({ message: "1/1", increment: 100 });
@@ -750,7 +772,10 @@ async function ask(options: {
   label: string;
   chapterLabel: string;
   parts: Record<string, number>;
+  /** 実際に送る出力上限（設計書6.77の第2段） */
   maxOutputTokens?: number;
+  /** 場所の確保に見込む量。**上限としては送らない**（同上） */
+  plannedOutputTokens?: number;
   signal: AbortSignal;
 }): Promise<unknown | undefined> {
   try {
@@ -760,9 +785,14 @@ async function ask(options: {
       model: options.model,
       // 判断を伴うので、事実の突き合わせより少しだけ揺らす（P-11と同じ）
       temperature: 0.2,
+      // **未指定なら欄ごと落とす。** `undefined` を明示的に渡すと、
+      // プロバイダ側の `?? 既定` が効かなくなる書き方が混ざりうる
       ...(options.maxOutputTokens === undefined
         ? {}
         : { maxOutputTokens: options.maxOutputTokens }),
+      ...(options.plannedOutputTokens === undefined
+        ? {}
+        : { plannedOutputTokens: options.plannedOutputTokens }),
       jsonSchema: options.schema,
       disableThinking: true,
       signal: options.signal,

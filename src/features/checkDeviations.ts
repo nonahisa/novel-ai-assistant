@@ -2,6 +2,10 @@ import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
 import { readTextFile, hashText } from "../core/textFile";
 import { blankMemoLines } from "../core/sceneMemo";
@@ -199,6 +203,19 @@ export async function checkDeviations(
     : DEVIATION_TYPES;
   const provider = resolved.provider;
   const model = resolved.model;
+  // **応答の見込みに実測を使う**（設計書6.65.16の2、6.77の第2段）。
+  // 渡さないと、Ollamaの `num_ctx` が既定の8,192で確保される
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    resolved.provider.id,
+    model
+  );
+  // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
+  // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
+  // 半分になり、長い応答が途中で切れる
+  const sendOutputTokens = resolveOutputTokensForSend(
+    resolved.provider.id,
+    model
+  );
 
   const issues: DeviationIssue[] = [];
   let rejectedCount = 0;
@@ -273,6 +290,8 @@ export async function checkDeviations(
             model,
             // 判断を伴うので、事実の突き合わせより少しだけ揺らす
             temperature: 0.2,
+            maxOutputTokens: sendOutputTokens,
+            plannedOutputTokens,
             jsonSchema: DEVIATION_CHECK_SCHEMA as unknown as object,
             disableThinking: true,
             signal: controller.signal,
@@ -292,9 +311,14 @@ export async function checkDeviations(
           const parsed = parseDeviationResult(response.text);
           if (!parsed) {
             failedChunks++;
+            // **切り詰めと「変な形で返った」を分ける**（設計書6.77の第2段）。
+            // 一緒くたにすると、上限が足りないのかAIの気まぐれなのかが
+            // 記録から分からず、直しようがない
             logFailure("プロット逸脱検知", {
               話: episode.label,
-              理由: "応答を読み取れません",
+              理由: response.truncated
+                ? "応答が出力上限で切り詰められました"
+                : "応答を読み取れません",
               応答: response.text.slice(0, 300),
             });
             return undefined;

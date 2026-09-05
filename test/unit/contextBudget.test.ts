@@ -26,6 +26,7 @@ import {
   WORLDVIEW_MAX_CHARS,
   worldviewMaxChars,
 } from "../../src/core/worldviewSelect";
+import { workspace } from "./support/vscodeStub";
 
 /**
  * 本文を溢れさせない仕組みの検査（設計書6.27.10）。
@@ -298,6 +299,58 @@ describe("包みが関所を通す", () => {
     expect(called).toBe(1);
   });
 
+  /**
+   * **既定の見込みは設定値（16,384）である**（0.32.11、設計書6.77の第2段）。
+   *
+   * 以前はここが `OUTPUT_RESERVE_TOKENS`（8,192）だった。関所が8,192で
+   * 判断し、実際には設定値の16,384が送られていたので、**関所を通ったのに
+   * 上限を超える**という逆向きの食い違いが残っていた。見込みと実送信を
+   * 同じ式（`params.maxOutputTokens ?? resolveMaxOutputTokens()`）に揃えた。
+   */
+  test("出力の見込みが渡されなければ、設定値（16,384）で数える", async () => {
+    let called = 0;
+    // 入力＋8,192なら入るが、入力＋16,384では超える大きさにする
+    const inputTokens = tokensFor(1000 + 20000);
+    const wrapped = new MeteredProvider(
+      provider({
+        contextWindow: inputTokens + OUTPUT_RESERVE_TOKENS + 1000,
+        onGenerate: () => called++,
+      })
+    );
+
+    await expect(wrapped.generate(params(20000))).rejects.toMatchObject({
+      kind: "context_overflow",
+    });
+    expect(called).toBe(0);
+  });
+
+  test("作者が設定を小さくすれば、関所の見込みもそれに従う", async () => {
+    // 新しい定数を置いたのではなく、**実送信と同じ設定**を読んでいることの
+    // 裏取り。定数を置き換えただけなら、設定を変えても結果は変わらない
+    let called = 0;
+    const inputTokens = tokensFor(1000 + 20000);
+    const wrapped = new MeteredProvider(
+      provider({
+        contextWindow: inputTokens + OUTPUT_RESERVE_TOKENS + 1000,
+        onGenerate: () => called++,
+      })
+    );
+
+    const original = workspace.getConfiguration;
+    workspace.getConfiguration = (() => ({
+      get: <T>(key: string, defaultValue: T): T =>
+        (key === "maxOutputTokens" ? 2000 : defaultValue) as T,
+    })) as typeof workspace.getConfiguration;
+    try {
+      await wrapped.generate(params(20000));
+    } finally {
+      // 作り物はテストファイル間で共有される。戻さないと後続へ漏れる
+      workspace.getConfiguration = original;
+    }
+
+    expect(called).toBe(1);
+  });
+
   test("出力の見込みが渡されれば、その分も数える", async () => {
     let called = 0;
     // 入力だけなら入るが、出力の見込みを足すと超える大きさにする
@@ -307,13 +360,140 @@ describe("包みが関所を通す", () => {
       provider({ contextWindow, onGenerate: () => called++ })
     );
 
-    await wrapped.generate(params(20000));
+    // 渡された値が小さければ、既定（設定値16,384）ではなくそちらで判断する
+    await wrapped.generate({ ...params(20000), maxOutputTokens: 8192 });
     expect(called).toBe(1);
 
     await expect(
       wrapped.generate({ ...params(20000), maxOutputTokens: 32768 })
     ).rejects.toMatchObject({ kind: "context_overflow" });
     expect(called).toBe(1);
+  });
+
+  /**
+   * 見る順番は **実上限 → 見込み → 設定値**（設計書6.77の第2段）。
+   *
+   * 実上限が分かっているならそれが実際に送られる量なので、それで判断する。
+   * 無ければ場所の確保に使う見込みを採り、どちらも無ければ実送信の既定
+   * （設定値）に揃える。
+   */
+  test("実上限が渡されていれば、見込みより実上限で数える", async () => {
+    let called = 0;
+    const inputTokens = tokensFor(1000 + 20000);
+    const wrapped = new MeteredProvider(
+      provider({
+        contextWindow: inputTokens + OUTPUT_RESERVE_TOKENS + 1000,
+        onGenerate: () => called++,
+      })
+    );
+
+    // 見込みは入る大きさだが、実際に送られるのは入らない大きさ
+    await expect(
+      wrapped.generate({
+        ...params(20000),
+        maxOutputTokens: 32768,
+        plannedOutputTokens: 4096,
+      })
+    ).rejects.toMatchObject({ kind: "context_overflow" });
+    expect(called).toBe(0);
+  });
+
+  test("実上限が無ければ、見込みで数える", async () => {
+    let called = 0;
+    const inputTokens = tokensFor(1000 + 20000);
+    const wrapped = new MeteredProvider(
+      provider({
+        contextWindow: inputTokens + OUTPUT_RESERVE_TOKENS + 1000,
+        onGenerate: () => called++,
+      })
+    );
+
+    // 見込みが無ければ設定値（16,384）で数えて断るところを、
+    // 見込み（4,096）が渡されているので通る
+    await wrapped.generate({ ...params(20000), plannedOutputTokens: 4096 });
+    expect(called).toBe(1);
+  });
+
+  /**
+   * **上限を掛けないプロバイダでは、見込みのほうで数える**（設計書6.77の
+   * 第2段。`AIProvider.capsOutput`）。
+   *
+   * 向きが逆なのには理由がある。**実際に場所を食うものが違う。**
+   * クラウドは渡した上限をそのまま送るので、上限ぶんの席を空けておく
+   * 必要がある。Ollamaは上限を送らない（設計書6.58.2）代わりに
+   * `num_ctx` を見込みぶんだけ確保するので、**実際に消費されるのは
+   * 見込みのほう**である。ここを実上限で見ると、32kのモデルで
+   * 「確保は足りているのに関所が断る」ことになる。
+   *
+   * **プロバイダIDでは分岐しない。** LM Studio のようにOllama互換の口を
+   * 持つものがあり、名前は当てにならない。
+   */
+  describe("上限を掛けないプロバイダ（設計書6.77）", () => {
+    /** 32kのモデル相当。見込み8,192なら入るが、実上限16,384では入らない */
+    const inputTokens = tokensFor(1000 + 20000);
+    const contextWindow = inputTokens + OUTPUT_RESERVE_TOKENS + 1000;
+
+    function sized(options: {
+      capsOutput?: boolean;
+      onGenerate: () => void;
+    }): AIProvider {
+      const base = provider({ contextWindow, onGenerate: options.onGenerate });
+      return options.capsOutput === undefined
+        ? base
+        : { ...base, capsOutput: options.capsOutput };
+    }
+
+    const both = {
+      maxOutputTokens: 16384,
+      plannedOutputTokens: OUTPUT_RESERVE_TOKENS,
+    };
+
+    test("上限を掛けないプロバイダは、見込みで数えるので通る", async () => {
+      let called = 0;
+      const wrapped = new MeteredProvider(
+        sized({ capsOutput: false, onGenerate: () => called++ })
+      );
+
+      await wrapped.generate({ ...params(20000), ...both });
+      expect(called).toBe(1);
+    });
+
+    test("上限を掛けるプロバイダは、実上限で数えるので断る", async () => {
+      let called = 0;
+      const wrapped = new MeteredProvider(
+        sized({ capsOutput: true, onGenerate: () => called++ })
+      );
+
+      await expect(
+        wrapped.generate({ ...params(20000), ...both })
+      ).rejects.toMatchObject({ kind: "context_overflow" });
+      expect(called).toBe(0);
+    });
+
+    test("印を持たないプロバイダは、上限を掛ける側として扱う", async () => {
+      // **安全側に倒す。** 印の付け忘れで「実際より小さく見積もって送る」
+      // ほうへ倒れると、黙って切り捨てられる経路が復活する
+      let called = 0;
+      const wrapped = new MeteredProvider(sized({ onGenerate: () => called++ }));
+
+      await expect(
+        wrapped.generate({ ...params(20000), ...both })
+      ).rejects.toMatchObject({ kind: "context_overflow" });
+      expect(called).toBe(0);
+    });
+
+    test("上限を掛けないプロバイダでも、見込みが無ければ実上限で数える", async () => {
+      // 見込みを渡してこない呼び出し（独り言など）まで甘くはしない
+      let called = 0;
+      const wrapped = new MeteredProvider(
+        sized({ capsOutput: false, onGenerate: () => called++ })
+      );
+
+      await expect(
+        wrapped.generate({ ...params(20000), maxOutputTokens: 16384 })
+      ).rejects.toMatchObject({ kind: "context_overflow" });
+      expect(called).toBe(0);
+    });
   });
 
   describe("素通りする例外は1つだけ（設計書6.27.11）", () => {

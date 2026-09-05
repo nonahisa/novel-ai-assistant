@@ -303,8 +303,10 @@ export class GeminiProvider implements ApiKeyProvider {
     // 対応している機能まで永久に使わなくなる（Claudeで実際に起きた）
     const stored = this.supportFor(params.model);
 
+    // **呼び出し側の見込みを尊重する**（設計書6.77の第2段）。渡されない
+    // 呼び出しはこれまでどおり設定値。丸め（モデルの申告上限）は最後に掛ける
     const maxOutputTokens = clampToModelLimit(
-      resolveMaxOutputTokens(),
+      params.maxOutputTokens ?? resolveMaxOutputTokens(),
       this.modelCache.get(params.model)?.maxOutputTokens
     );
 

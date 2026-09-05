@@ -181,6 +181,12 @@ export class OllamaProvider implements AIProvider {
   readonly displayName = "Ollama（ローカル）";
   /** 自分の機械で動かすので課金は無い */
   readonly isPaid = false;
+  /**
+   * **出力に上限を掛けない**（設計書6.58.2）。`num_predict` を送らず、
+   * `num_ctx` を見込みぶんだけ確保する——だから関所も、実上限ではなく
+   * 見込みで場所を数える（設計書6.77の第2段）。
+   */
+  readonly capsOutput = false;
 
   /** モデル詳細のキャッシュ。/api/show は毎回呼ぶと重いため */
   private modelCache = new Map<string, ModelInfo>();
@@ -366,7 +372,22 @@ export class OllamaProvider implements AIProvider {
       configuredNumCtx() ??
       contextSizeForPrompt({
         promptChars: params.systemPrompt.length + params.userPrompt.length,
-        outputTokens: params.maxOutputTokens ?? OUTPUT_RESERVE_TOKENS,
+        /*
+          **見込み → 実上限 → 既定**の順で読む（設計書6.77の第2段）。
+
+          確保に使うのは `plannedOutputTokens`（`min(設定, 実測 ?? 8,192)`）
+          である。実上限（`maxOutputTokens`）のほうは、測っていないモデルでは
+          設定値そのもの（既定16,384）なので、こちらで確保すると `num_ctx` が
+          倍近くに育ち、非力な機械のメモリを食う——6.58.2で避けた副作用が
+          そのまま戻る。
+
+          実上限へ落ちるのは、見込みを渡してこない呼び出し（独り言の200など）
+          のためである。どちらも無ければ従来どおり `OUTPUT_RESERVE_TOKENS`。
+        */
+        outputTokens:
+          params.plannedOutputTokens ??
+          params.maxOutputTokens ??
+          OUTPUT_RESERVE_TOKENS,
         contextWindow:
           (await this.getModel(params.model))?.contextWindow ??
           UNKNOWN_CONTEXT_WINDOW,
