@@ -337,9 +337,21 @@ async function shareToX(work: WorkEntry, composedX: string): Promise<boolean> {
     いる。貼り付けの経路にもう1つ数え方を作ると、同じ投稿に2つの基準が
     できて、どちらの警告が正しいのか作者に分からなくなる。
   */
-  await vscode.env.openExternal(
-    vscode.Uri.parse(xIntentUrl(xPostWithUrl(composedX, url)))
-  );
+  /*
+    **`vscode.Uri.parse` を通さない**（設計書6.79.8）。通すと問い合わせ
+    （`?text=…`）が復号され、`xIntentUrl` が `%23` に包んだ「#」も
+    `%26` に包んだ「&」も生の記号へ戻る——「#」から先は断片として
+    切り離され、「&」から先は別の引数として読まれる。**告知は
+    ハッシュタグの行とURLの行が要**なので、投稿欄がそこで切れると
+    使いものにならない。
+
+    `openExternal` は**文字列を渡せばそのまま外部へ渡す**（VS Codeで
+    知られている作法）。型の上では Uri しか受け取らないので、ここだけ
+    型を破る。**この1か所に限る**——ほかの `openExternal` は問い合わせを
+    持たないURLなので、`Uri.parse` のままでよい。
+  */
+  const intentUrl = xIntentUrl(xPostWithUrl(composedX, url));
+  await vscode.env.openExternal(intentUrl as unknown as vscode.Uri);
 
   // **投稿ボタンは作者が押す。** ここを言わないと、拡張機能が勝手に
   // 投稿したと読まれかねない

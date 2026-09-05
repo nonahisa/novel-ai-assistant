@@ -275,6 +275,37 @@ describe("Xへ貼り付ける", () => {
     expect(sharedText()).toContain("https://example.com/works/1");
   });
 
+  /*
+    **ハッシュタグの手前で切れないこと**（0.33.2で見つかった不具合）。
+
+    `xIntentUrl` は「#」を `%23` に包むが、`vscode.Uri.parse` を通すと
+    問い合わせが復号されて生の「#」へ戻る——そこから先が断片として
+    切り離され、投稿欄にはハッシュタグもURLも入らない。**告知はタグ行と
+    URL行が要**なので、往復で崩れないことをここで固定する。
+  */
+  test("ハッシュタグ・「&」を含む告知が、そのままの形で投稿画面へ届く", async () => {
+    const withMarks =
+      "第13話「邂逅」 更新しました\n塔とR&Dの話です。\n#創作 #小説\n{URL}";
+    stubNotifications([X_SHARE_LABEL, undefined]);
+
+    await offerAnnouncementActions({
+      work,
+      texts: { ...texts, x: withMarks },
+      warningCount: 0,
+    });
+
+    const text = sharedText();
+    expect(text).toContain("#創作 #小説");
+    expect(text).toContain("塔とR&Dの話です。");
+    // 「#」以降が断片として捨てられていれば、末尾のURLは届かない
+    expect(text).toContain("https://ncode.syosetu.com/n1234ab/");
+    expect(text).toBe(
+      withMarks.replace("{URL}", "https://ncode.syosetu.com/n1234ab/")
+    );
+    // 「&」が別の引数として読まれていないこと（載せるのは text だけ）
+    expect([...new URL(env.opened[0]).searchParams.keys()]).toEqual(["text"]);
+  });
+
   test("コピーは今までどおり動く（貼り付けを足しても壊さない）", async () => {
     stubNotifications(["活動報告用をコピー", undefined]);
 

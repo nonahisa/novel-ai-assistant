@@ -32,6 +32,7 @@ const episodePath = path.join(work.folderPath, "本文", "013_邂逅.txt");
 
 const narouUrl =
   "https://syosetu.com/usernovelmanage/isnoveluploadmenu/ncode/n1234ab/";
+const kakuyomuUrl = "https://kakuyomu.jp/my/works/16816927859/episodes/new";
 const noteUrl = "https://note.com/notes/new";
 
 const body = ['「引くな」と彼は言った。', "", "そして——歩き出した。"].join("\n");
@@ -65,7 +66,13 @@ function utf8(value: string): Uint8Array {
   return new TextEncoder().encode(value);
 }
 
-/** 投稿サイトを登録済みの台帳。なろうには作品ID（Nコード）も入れてある */
+/**
+ * 投稿サイトを登録済みの台帳。カクヨムには作品IDも入れてある。
+ *
+ * **3サイト並べてある**——貼り込み係へ渡せるのはカクヨムだけで、
+ * なろうとnoteでは選択肢が出ないことを1度に確かめるため（6.79.1）。
+ * サイトを回る順は `POSTING_SITES` の並び（なろう→カクヨム→note）。
+ */
 function writeLedger(): void {
   disk.set(
     ledgerPath,
@@ -74,9 +81,10 @@ function writeLedger(): void {
         schemaVersion: "1",
         sites: [
           { site: "narou", newEpisodeUrl: narouUrl },
+          { site: "kakuyomu", newEpisodeUrl: kakuyomuUrl },
           { site: "note", newEpisodeUrl: noteUrl },
         ],
-        siteProfiles: [{ site: "narou", workId: "n1234ab" }],
+        siteProfiles: [{ site: "kakuyomu", workId: "16816927859" }],
         posts: [],
         rankings: [],
       })
@@ -168,9 +176,11 @@ describe("貼り込み係へ渡す形でコピー", () => {
     disk.set(Uri.file(episodePath).fsPath, utf8(body));
   });
 
-  test("なろうでは封筒が出て、noteでは選択肢に出ない", async () => {
+  test("カクヨムでは封筒が出て、なろう・noteでは選択肢に出ない", async () => {
     const picks = stubQuickPick([
-      // なろう：封筒でコピー → もう一度出る画面で「投稿しました」
+      // なろう：貼り込み係が受け取らないので飛ばす
+      (items) => byAnswer(items, "skip"),
+      // カクヨム：封筒でコピー → もう一度出る画面で「投稿しました」
       (items) => byAnswer(items, "envelope"),
       (items) => byAnswer(items, "posted"),
       // note：貼り込み係に対応していないので飛ばす
@@ -187,17 +197,22 @@ describe("貼り込み係へ渡す形でコピー", () => {
 
     expect(result.changed).toBe(true);
 
-    // なろうの画面には貼り込み係の項目がある
-    expect(byAnswer(picks[0].items, "envelope")?.label).toContain("貼り込み係");
-    // **noteには出さない**（規約の原文を確かめるまで後回し／6.79.1）
-    expect(byAnswer(picks[2].items, "envelope")).toBeUndefined();
+    // カクヨムの画面には貼り込み係の項目がある
+    expect(byAnswer(picks[1].items, "envelope")?.label).toContain("貼り込み係");
+    /*
+      **なろうとnoteには出さない**（6.79.1）。どちらも規約の判断が
+      済んでおらず、貼り込み係の側も受け取らない——押せる形で置くと、
+      投稿画面で待っても何も起きない理由が作者に分からない
+    */
+    expect(byAnswer(picks[0].items, "envelope")).toBeUndefined();
+    expect(byAnswer(picks[3].items, "envelope")).toBeUndefined();
     /*
       コピーしたあとの案内で、**次に何をするか**と**送信は作者が押す**ことを
       言う（6.79.2の2）。ここを落とすと、貼り込み係が勝手に投稿すると
       読まれかねない
     */
-    expect(picks[1].placeHolder).toContain("貼り込み係");
-    expect(picks[1].placeHolder).toContain("送信はご自身で");
+    expect(picks[2].placeHolder).toContain("貼り込み係");
+    expect(picks[2].placeHolder).toContain("送信はご自身で");
 
     // 記録は残る（貼り込み係へ渡しても、投稿したのは作者である）
     expect(readLedger().posts).toHaveLength(1);
@@ -206,6 +221,8 @@ describe("貼り込み係へ渡す形でコピー", () => {
   test("封筒には、変換済みの本文・題名・台帳の作品IDが入る", async () => {
     let copied = "";
     stubQuickPick([
+      // なろうは飛ばして、カクヨムで封筒を選ぶ
+      (items) => byAnswer(items, "skip"),
       (items) => byAnswer(items, "envelope"),
       () => {
         // 封筒を選んだ直後のクリップボードを覗く（次の画面が出た時点）
@@ -218,11 +235,11 @@ describe("貼り込み係へ渡す形でコピー", () => {
 
     const envelope = parsePostingEnvelope(copied);
     expect(envelope).not.toBeNull();
-    expect(envelope?.site).toBe("narou");
+    expect(envelope?.site).toBe("kakuyomu");
     // 題名の欄へ入るのはサブタイトル（「サブタイトルをコピー」と同じ値）
     expect(envelope?.title).toBe("邂逅");
     // 取り違え照合に使う作品ID（6.79.6の2）
-    expect(envelope?.workId).toBe("n1234ab");
+    expect(envelope?.workId).toBe("16816927859");
     // 本文はサイト向けに変換したもの。改行も引用符もそのまま通る
     expect(envelope?.body).toBe(body);
   });
@@ -233,7 +250,7 @@ describe("貼り込み係へ渡す形でコピー", () => {
       utf8(
         JSON.stringify({
           schemaVersion: "1",
-          sites: [{ site: "narou", newEpisodeUrl: narouUrl }],
+          sites: [{ site: "kakuyomu", newEpisodeUrl: kakuyomuUrl }],
           posts: [],
           rankings: [],
         })

@@ -231,12 +231,42 @@ class StubUri {
     readonly authority: string,
     readonly path: string,
     readonly fsPath: string,
-    readonly text: string
+    readonly text: string,
+    /** 問い合わせ（`?` の後ろ）。**本物と同じく復号した形で持つ** */
+    readonly query: string = ""
   ) {}
 
   toString(): string {
     return this.text;
   }
+}
+
+/**
+ * 問い合わせ部分を復号する（本物の `vscode.Uri.parse` の再現）。
+ *
+ * **本物は `?` の後ろを percent-decode して持つ。** そのため
+ * `text=%23創作` のように包んだ「#」が生の `#` へ戻り、そこから先が
+ * 断片（fragment）として切り離される——`encodeURIComponent` で守った
+ * つもりの投稿文が、ハッシュタグの手前で切れる（設計書6.79.8）。
+ *
+ * ここを素通しにしていたころは、`openExternal` へ Uri を渡す不具合が
+ * テストでは一度も再現しなかった。**スタブが本物より親切だと、実機でしか
+ * 出ない壊れ方を作ってしまう。**
+ */
+function decodeUriQuery(value: string): { query: string; text: string } {
+  const start = value.indexOf("?");
+  if (start < 0) return { query: "", text: value };
+  const end = value.indexOf("#", start);
+  const raw = end < 0 ? value.slice(start + 1) : value.slice(start + 1, end);
+  let query: string;
+  try {
+    query = decodeURIComponent(raw);
+  } catch {
+    // 壊れた％列は本物も直さない（読めないものを推測で埋めない）
+    query = raw;
+  }
+  const tail = end < 0 ? "" : value.slice(end);
+  return { query, text: `${value.slice(0, start + 1)}${query}${tail}` };
 }
 
 export const Uri = {
@@ -258,15 +288,32 @@ export const Uri = {
    * **本物に近づけてある。** 以前は道の部分に文字列まるごとを入れていたが、
    * それではブラウザ版のURI（`vscode-vfs://github/...`）を扱う処理を
    * 確かめられない（`authority` が undefined になって黙って壊れる）。
+   *
+   * **問い合わせ（`?` の後ろ）も本物と同じく復号する**（`decodeUriQuery`）。
    */
   parse: (value: string) => {
     const match = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^/?#]*)([^?#]*)/.exec(value);
+    const decoded = decodeUriQuery(value);
     if (!match) {
       const scheme = value.split(":")[0] ?? "";
-      return new StubUri(scheme, "", value, value, value);
+      return new StubUri(
+        scheme,
+        "",
+        value,
+        value,
+        decoded.text,
+        decoded.query
+      );
     }
     const body = match[3] || "/";
-    return new StubUri(match[1], match[2], body, body, value);
+    return new StubUri(
+      match[1],
+      match[2],
+      body,
+      body,
+      decoded.text,
+      decoded.query
+    );
   },
 };
 

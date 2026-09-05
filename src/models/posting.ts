@@ -53,6 +53,19 @@ export interface PostingSiteInfo {
   /** 入力欄に出す例。どこのURLを貼ればよいのかを言葉より早く伝える */
   urlExample: string;
   /**
+   * 作品IDの入力欄に出す例（設計書6.68.5）。
+   *
+   * **サイトごとに形が違う。** なろうはNコード（`n1234ab`）、カクヨムは
+   * 作品ページURLの数字、**アルファポリスは「作者番号＋作品番号」の
+   * 2部構成**である。全部に `n1234ab` を出していたころは、なろう以外の
+   * サイトで何を入れればよいのか分からず、作者番号だけを入れた作品IDが
+   * 台帳に残った——貼り込み係の照合はその形を当てにできない
+   * （URLを合成しない理由は `core/snsShare.ts` に書いてある）。
+   *
+   * noteには「作品」の単位が無いので、空のままでよいと言い切る。
+   */
+  workIdExample: string;
+  /**
    * ルビの出し方（`core/ruby.ts` の `RubyStyle["id"]` と同じ値）。
    *
    * **値を書き写しているのは、`models` が `core` に依存しないため**
@@ -82,6 +95,7 @@ export const POSTING_SITES: readonly PostingSiteInfo[] = [
     domain: "syosetu.com",
     urlExample:
       "https://syosetu.com/usernovelmanage/isnoveluploadmenu/ncode/n0000aa/",
+    workIdExample: "n1234ab（Nコード）",
     notation: "site",
     // なろうには傍点の記法が無く、ルビで代用する（6.12.4）
     emphasis: "narou",
@@ -91,6 +105,7 @@ export const POSTING_SITES: readonly PostingSiteInfo[] = [
     label: "カクヨム",
     domain: "kakuyomu.jp",
     urlExample: "https://kakuyomu.jp/my/works/0000000000/episodes/new",
+    workIdExample: "16816927859（作品ページURLの数字）",
     notation: "site",
     emphasis: "kakuyomu",
   },
@@ -99,6 +114,8 @@ export const POSTING_SITES: readonly PostingSiteInfo[] = [
     label: "アルファポリス",
     domain: "alphapolis.co.jp",
     urlExample: "https://www.alphapolis.co.jp/novel/manage/000000/0000",
+    // **2つの番号を「/」で繋げて入れてもらう。** 片方だけでは作品を指せない
+    workIdExample: "123456/7890123（作者番号／作品番号）",
     notation: "site",
     // アルファポリスもなろうと同じくルビで代用する
     emphasis: "narou",
@@ -108,6 +125,8 @@ export const POSTING_SITES: readonly PostingSiteInfo[] = [
     label: "note",
     domain: "note.com",
     urlExample: "https://note.com/notes/new",
+    // noteには「作品」の単位が無い（記事とマガジン）。空のままでよい
+    workIdExample: "空のままで構いません（noteでは使いません）",
     // **noteにはルビの記法が無い**ので括弧書きへ落とす（6.68.3）
     notation: "paren",
     emphasis: "kakuyomu",

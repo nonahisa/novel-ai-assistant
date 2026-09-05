@@ -587,11 +587,17 @@ async function askSiteProfiles(
 
     const workId = await askText({
       title: `${info.label} での作品ID`,
+      /*
+        **例はサイトごとに出す**（`info.workIdExample`）。IDの形はサイトで
+        まるきり違い、なろうのNコードだけを例に出していたころは、
+        アルファポリスの欄に作者番号だけが入った——あの作品IDは
+        「作者番号＋作品番号」で1つなので、片方では作品を指せない。
+      */
       prompt:
-        `${info.label}のこの作品のID（なろうのNコードなど）を入れてください。` +
+        `${info.label}のこの作品のIDを入れてください。` +
         "分からなければ空のままで構いません",
       value: current?.workId,
-      placeHolder: "n1234ab",
+      placeHolder: info.workIdExample,
       ignoreFocusOut: true,
     });
     // **Escは「ここまでで終える」。** 入れたぶんはそのまま残し、

@@ -147,15 +147,18 @@ describe("封筒を読む", () => {
 /**
  * 対象サイト（設計書6.79.8の「対応サイトの順」）。
  *
- * **noteは出さない**——規約の原文を人の目で確かめるまで後回しである
- * （6.79.1）。ここが唯一の判断の置き場で、画面はこれを引く。
+ * **noteとなろうは出さない**——どちらも規約の判断が済んでおらず
+ * （6.79.1）、**貼り込み係の側も受け取らない**。ここが唯一の判断の
+ * 置き場で、画面はこれを引く。
  */
 describe("貼り込み係に渡せるサイト", () => {
-  test("カクヨム・アルファポリス・なろうだけ", () => {
+  test("カクヨム・アルファポリスだけ", () => {
     expect(supportsPasteHelper("kakuyomu")).toBe(true);
     expect(supportsPasteHelper("alphapolis")).toBe(true);
-    expect(supportsPasteHelper("narou")).toBe(true);
+    // **受け取らない相手へ封筒を出さない。** 出すと、投稿画面で
+    // ボタンを押しても何も起きない理由が作者に分からない
+    expect(supportsPasteHelper("narou")).toBe(false);
     expect(supportsPasteHelper("note")).toBe(false);
-    expect([...pasteHelperSites()]).not.toContain("note");
+    expect([...pasteHelperSites()]).toEqual(["kakuyomu", "alphapolis"]);
   });
 });
