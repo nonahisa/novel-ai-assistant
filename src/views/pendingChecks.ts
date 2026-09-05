@@ -660,6 +660,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 5,
   },
   {
+    id: "F-83",
+    title: "AI呼び出しの全体キュー",
+    commands: ["novelai.checkTypos", "novelai.checkContradictions"],
+    count: 6,
+  },
+  {
     id: "",
     title: "LM Studio",
     commands: ["novelai.setupLmStudio", "novelai.setupAI", "novelai.testAI"],
@@ -680,4 +686,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 851;
+export const PENDING_CHECK_TOTAL = 857;

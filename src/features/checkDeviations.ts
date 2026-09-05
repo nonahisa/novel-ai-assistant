@@ -33,7 +33,8 @@ import {
   validateDeviations,
   type AcceptedDeviation,
 } from "../core/deviationValidation";
-import { withCancellableProgress, type CheckProgress } from "../views/progress";
+import { type CheckProgress } from "../views/progress";
+import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { confirmFormatFit } from "./formatFitPrompt";
 import { logFailure, logStep, useLogFile } from "../core/logger";
@@ -205,8 +206,15 @@ export async function checkDeviations(
   let failedChunks = 0;
   let cancelled = false;
 
-  await withCancellableProgress(
+  // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）。
+  // 関所（送信を1件ずつ）だけだと、機能どうしが交互に流れて
+  // モデルの読み込み直しが往復する
+  await withAiTurnProgress(
     "プロットとの食い違いを見ています",
+    {
+      label: "プロットからの逸脱の検知",
+      onCancelled: () => (cancelled = true),
+    },
     async (progress, token) => {
       const controller = new AbortController();
       token.onCancellationRequested(() => {

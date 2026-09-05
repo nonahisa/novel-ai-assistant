@@ -14,6 +14,7 @@ import {
   OUTPUT_RESERVE_TOKENS,
 } from "./contextGuard";
 import { logStep } from "../core/logger";
+import { AiQueueAbortError, acquireCall } from "../core/aiSequence";
 
 /**
  * AI呼び出しの送信量を記録するために、プロバイダを包む。
@@ -41,6 +42,12 @@ import { logStep } from "../core/logger";
  * 記録と同じ理由である。**全プロバイダ・全機能がここを通る**ので、
  * 1か所で見れば「入らないものを送ってしまう」経路が残らない。
  * 各機能に書くと、新しい機能を足した人が書き忘れる。
+ *
+ * ## リクエストの関所も、ここに置く（設計書6.76）
+ *
+ * 理由は上の2つとまったく同じである。**全プロバイダ・全機能がここを
+ * 通る**ので、1か所で1件ずつに絞れば、機能を足した人が並列に投げて
+ * しまう経路が残らない。
  */
 export class MeteredProvider implements AIProvider {
   /** 元が実装しているときだけ生やす（上のコメントの理由） */
@@ -83,7 +90,7 @@ export class MeteredProvider implements AIProvider {
    * 「答えが返らなかった理由」を後から追えない（設計書6.20.2と同じ考え方）。
    */
   async generate(params: GenerateParams): Promise<GenerateResult> {
-    const started = Date.now();
+    let started = Date.now();
 
     // **入らないものは送らない**（設計書6.27.10）。送ってしまうと
     // Ollama は黙って切り捨て、クラウドは料金を取ってから断る。
@@ -106,8 +113,32 @@ export class MeteredProvider implements AIProvider {
       throw overflow;
     }
 
+    // **順番待ちは、上限の確認が済んでからにする**（設計書6.76）。
+    // 入らないと分かっているものを列に並ばせてから断るのは無駄で、
+    // その間ほかの機能を待たせることになる。
+    //
+    // ここで待つのは**実送信のあいだだけ**である。上の `contextWindowOf`
+    // はプロバイダによっては1往復するが、数ミリ秒なので関所の外に置いて、
+    // 待たせる時間を短くしている
+    let release: () => void;
     try {
-      const result = await this.inner.generate(params);
+      release = await this.enterQueue(params.signal);
+    } catch (error) {
+      // 送っていないので、所要時間は0で残す。**順番待ちの長さを
+      // AIの遅さとして記録しない**（overflow のときと同じ扱い）
+      this.record(params, { elapsedMs: 0, error: describeError(error) });
+      throw error;
+    }
+    // 待ち時間を所要時間に混ぜない。混ぜると「AIが遅くなった」と読めてしまう
+    started = Date.now();
+
+    try {
+      let result: GenerateResult;
+      try {
+        result = await this.inner.generate(params);
+      } finally {
+        release();
+      }
       this.record(params, {
         usage: result.usage,
         elapsedMs: result.elapsedMs,
@@ -119,6 +150,24 @@ export class MeteredProvider implements AIProvider {
         elapsedMs: Date.now() - started,
         error: describeError(error),
       });
+      throw error;
+    }
+  }
+
+  /**
+   * 送る順番を取る（設計書6.76のリクエストの関所）。
+   *
+   * **中止は既存の流儀へ言い換える。** 呼び出し側は例外なく
+   * `AIError` の `aborted` を見て「作者が止めた」と判断しており
+   * （通知を出さない分岐）、別の型を投げると失敗として報告してしまう。
+   */
+  private async enterQueue(signal?: AbortSignal): Promise<() => void> {
+    try {
+      return await acquireCall(signal);
+    } catch (error) {
+      if (error instanceof AiQueueAbortError) {
+        throw new AIError("処理が中止されました。", "aborted");
+      }
       throw error;
     }
   }

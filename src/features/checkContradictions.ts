@@ -100,6 +100,7 @@ import { buildKnownAtIndex, lookupKnownAtValue,
   type AcceptedContradiction,
 } from "../core/contradictionValidation";
 import { withCancellableProgress, type CheckProgress } from "../views/progress";
+import { withAiTurn } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { hashText } from "../core/textFile";
@@ -431,276 +432,290 @@ export async function checkContradictions(
   let fatalFailure = "";
   let processedChunks = 0;
 
-  await withCancellableProgress("矛盾を検知しています", async (progress, token) => {
-    const controller = new AbortController();
-    token.onCancellationRequested(() => {
-      cancelled = true;
-      controller.abort();
-    });
-
-    // **まとめたチャンクは、切り詰められたら分けて試し直す**（設計書6.23）。
-    // 部分的なJSONは読めないので、まとめたせいで入り切らなかったのなら
-    // 元の大きさで出し直すほうがよい。処理中に増えるので配列で持つ
-    const queue = [...chunks];
-    let total = queue.length;
-    let done = 0;
-
-    for (let cursor = 0; cursor < queue.length; cursor++) {
-      if (token.isCancellationRequested) break;
-      if (fatalFailure) break;
-      const chunk = queue[cursor];
-
-      const cached = cache.get(chunk.hash, keyWithPastScenes(cacheKeyBase, chunk));
-      const raw = cached ?? (await ask(chunk, "settled"));
-      done++;
-      progress.report({
-        message: `${done}/${total}`,
-        increment: 100 / total,
-      });
-      // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-      options.onProgress?.(done, total);
-
-      if (raw === RETRY_SMALLER) {
-        const parts = splitMergedChunk(chunk);
-        if (parts.length > 1) {
-          queue.splice(cursor + 1, 0, ...parts);
-          total += parts.length;
-          logStep(
-            `切り詰められたため ${parts.length} 話に分けて試し直します: ${chunk.hash}`
-          );
-        } else {
-          failedChunks++;
-        }
-        continue;
-      }
-      // 上限に入らなかった。**まとめたぶんを戻す→半分に割る→諦める**の順で、
-      // 諦めるときは理由を残す（設計書6.27.10）
-      if (raw instanceof AIError) {
-        const retry = retryOnOverflow(chunk, raw);
-        if (retry.kind === "split") {
-          queue.splice(cursor + 1, 0, ...retry.parts);
-          total += retry.parts.length;
-          logStep(`${chunk.hash}: ${retry.note}`);
-        } else {
-          failedChunks++;
-          logFailure("矛盾検知", { チャンク: chunk.hash, 理由: retry.note });
-        }
-        continue;
-      }
-      if (raw === undefined) continue;
-
-      collect(raw, chunk);
-
-      // **あとで判明する事実とも突き合わせる**（設計書6.10.4）。
-      // 「まだ知らない」ではなく「両立しない」を探す、逆向きの見方である
-      const futureFacts = settings.futureFactsFor(chunk.text, chunk.chapterStart);
-      if (futureFacts) {
-        const futureCached = cache.get(chunk.hash, futureKeyBase);
-        const futureRaw =
-          futureCached ?? (await ask(chunk, "future", futureFacts));
-        // **入らなかった向きは、ここでは分け直さない。** この段は
-        // 「あとで判明する事実」との突き合わせで、本命（settled）が
-        // 通ったチャンクの補足である。分け直すと同じ本文を二重に数える
-        if (
-          futureRaw !== undefined &&
-          futureRaw !== RETRY_SMALLER &&
-          !(futureRaw instanceof AIError)
-        ) {
-          collect(futureRaw, chunk);
-        }
-      }
-      processedChunks++;
-    }
-
-    /** 応答を検証して、どのチャンクの指摘かを覚えておく */
-    function collect(raw: unknown, chunk: Chunk): void {
-      const validated = validateContradictions(raw, chunk);
-      rejectedCount += validated.rejected.length;
-      for (const issue of validated.accepted) {
-        found.push({ issue, chunk });
-      }
-    }
-
-    async function ask(
-      chunk: Chunk,
-      mode: "settled" | "future",
-      futureFacts = ""
-    ): Promise<unknown | undefined> {
-      // **まとめたチャンクでは、いちばん前の話に合わせる。**
-      // うしろに合わせると、前半の話にとって「まだ分かっていないこと」を
-      // 材料に渡すことになる（設計書6.10.3）
-      const relevant = settings.relevantFor(chunk.text, chunk.chapterStart);
-      // **照らし合わせる相手が無いチャンクは飛ばす。**
-      // 材料なしで問うと、本文だけを見て矛盾を作り出す
-      if (!relevant.hasAnything) return undefined;
-
-      try {
-        const bodyWithLines = withLineNumbers(chunk);
-        const previousSynopses = settings.synopsesBefore(chunk.chapterStart);
-        // **「あとで判明する事実」の向きには渡さない**（設計書6.74）。
-        // あちらは本命（settled）が通ったチャンクの補足で、既に実データで
-        // 測ってある。入力を増やすと、測った結果と別のものになる
-        const pastScenes = mode === "future" ? "" : pastScenesFor(chunk);
-        const userPrompt = buildContradictionCheckPrompt({
-          // **まとめたチャンクは、話が1つとは限らない。**
-          // 1つ目の話の名前だけを渡すと、2話目以降の本文を
-          // 1話目だと言って読ませることになる
-          chapterLabel: describeChunkScope(chunk, (filePath) =>
-            chapterLabelByFile.get(filePath)
-          ),
-          chunkTextWithLineNumbers: bodyWithLines,
-          characterDetails: relevant.characters,
-          locationDetails: relevant.locations,
-          worldviewSummary: relevant.worldview,
-          previousSynopses,
-          categories,
-          futureFacts,
-          pastScenes,
-        });
-
-        const response = await provider.generate({
-          systemPrompt: CONTRADICTION_CHECK_SYSTEM_PROMPT,
-          userPrompt,
-          model,
-          // 事実の突き合わせなので揺らさない
-          temperature: 0.0,
-          maxOutputTokens: plannedOutputTokens,
-          jsonSchema: CONTRADICTION_CHECK_SCHEMA as unknown as object,
-          disableThinking: true,
-          signal: controller.signal,
-          meta: {
-            feature:
-              mode === "future" ? "contradiction_future" : "contradiction_check",
-            workFolder: work.folderPath,
-            parts: measureParts(userPrompt, {
-              本文: bodyWithLines.length,
-              人物: relevant.characters.length,
-              場所: relevant.locations.length,
-              // ここだけ上限が無かった（設計書6.27.6の穴2）。いまは
-              // `WORLDVIEW_MAX_CHARS` で頭を打つが、**実測はまだ無い**ので、
-              // 何字になるのかを測れるよう独立した項目として出し続ける
-              世界観: relevant.worldview.length,
-              あらすじ: previousSynopses.length,
-              未来の事実: futureFacts.length,
-              // **新しく増えた材料は、独立した項目で測る**（設計書6.74）。
-              // 上限（モデル比）が妥当かは実測を見てからでないと決められない
-              過去場面: pastScenes.length,
-            }),
-          },
-        });
-
-        if (response.truncated || !response.text.trim()) {
-          // まとめたせいで入り切らなかったのなら、元の大きさなら通る見込みが
-          // ある。**捨てるより試すほうがよい**（部分的なJSONは解析できない）
-          logFailure("矛盾検知", {
-            チャンク: chunk.hash,
-            理由: "応答が上限で切り詰められました",
-          });
-          return RETRY_SMALLER;
-        }
-
-        const parsed = parseContradictionResult(response.text);
-        if (!parsed) {
-          failedChunks++;
-          logFailure("矛盾検知", {
-            チャンク: chunk.hash,
-            理由: "応答を読み取れません",
-            応答: response.text.slice(0, 300),
-          });
-          return undefined;
-        }
-        await cache.set(
-          chunk.hash,
-          mode === "future"
-            ? futureKeyBase
-            : keyWithPastScenes(cacheKeyBase, chunk),
-          parsed
-        );
-        return parsed;
-      } catch (error) {
-        if (error instanceof AIError && error.kind === "aborted") return undefined;
-        // **入らなかったときは、失敗として数える前に分け直しへ回す**
-        // （設計書6.27.10）。そのまま数えると、そのチャンクは一度も
-        // 見られないまま「失敗1件」で終わる
-        if (isContextOverflow(error)) return error;
-        // **同じ失敗を積まない。** 環境側の失敗はどのチャンクでも同じに
-        // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
-        if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
-          fatalFailure = `${error.message} ${recoveryForAIError(error)}`.trim();
-          logStep(`残りのチャンクは試しません: ${fatalFailure}`);
-        }
-        failedChunks++;
-        logFailure("矛盾検知", {
-          チャンク: chunk.hash,
-          詳細:
-            error instanceof AIError
-              ? `${error.message} ${recoveryForAIError(error)}`
-              : error instanceof Error
-                ? error.message
-                : String(error),
-        });
-        return undefined;
-      }
-    }
-  });
-
-  // ── 検証（設計書6.10.5）─────────────────────────
-  //
-  // **検出は本文を読みながら行う。** 1回で何十行も見て、設定も世界観も
-  // 突き合わせるので、1件ずつを吟味する余裕が無い。ここでは**1件だけ**を
-  // 見て、「これは本当に矛盾か」を問い直す。
+  /**
+   * 検証を通った指摘。**札を取る前に置く**——順番待ちの最中に中止されると
+   * 下の処理そのものが行われないので、中で宣言すると参照できない
+   */
   const issues: AcceptedContradiction[] = [];
-  if (found.length > 0 && !cancelled) {
-    await withCancellableProgress(
-      "検出した矛盾を検証しています",
-      async (progress, token) => {
+
+  // **検出と検証は、ひと続きの仕事として1つの札で回す**（設計書6.76）。
+  // 関所（送信を1件ずつ）だけでは、ほかの一括処理と交互に流れて
+  // モデルの読み込み直しが往復する。検証だけ別の札にすると、
+  // 本文を読む段と検証の段のあいだに別の機能が割り込む
+  await withAiTurn(
+    { label: "矛盾の検知", onCancelled: () => (cancelled = true) },
+    async () => {
+      await withCancellableProgress("矛盾を検知しています", async (progress, token) => {
         const controller = new AbortController();
         token.onCancellationRequested(() => {
           cancelled = true;
           controller.abort();
         });
 
+        // **まとめたチャンクは、切り詰められたら分けて試し直す**（設計書6.23）。
+        // 部分的なJSONは読めないので、まとめたせいで入り切らなかったのなら
+        // 元の大きさで出し直すほうがよい。処理中に増えるので配列で持つ
+        const queue = [...chunks];
+        let total = queue.length;
         let done = 0;
-        for (const entry of found) {
+
+        for (let cursor = 0; cursor < queue.length; cursor++) {
           if (token.isCancellationRequested) break;
+          if (fatalFailure) break;
+          const chunk = queue[cursor];
+
+          const cached = cache.get(chunk.hash, keyWithPastScenes(cacheKeyBase, chunk));
+          const raw = cached ?? (await ask(chunk, "settled"));
+          done++;
           progress.report({
-            message: `${++done}/${found.length}`,
-            increment: 100 / found.length,
+            message: `${done}/${total}`,
+            increment: 100 / total,
           });
-          // 提案パネルにも同じ進みを出す（本文を読む段とは別の札で）
-          options.onVerifyProgress?.(done, found.length);
+          // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+          options.onProgress?.(done, total);
 
-          const outcome = await verify(entry.issue, entry.chunk, controller);
-          if (outcome.undecided) verifyUndecided++;
-          if (!outcome.keep) {
-            verifyRejected.push({ reason: outcome.reason });
-            logStep(
-              `検証で取り下げ: ${entry.issue.excerpt.slice(0, 20)} ` +
-                `（${outcome.reason}／${outcome.explanation}）`
-            );
+          if (raw === RETRY_SMALLER) {
+            const parts = splitMergedChunk(chunk);
+            if (parts.length > 1) {
+              queue.splice(cursor + 1, 0, ...parts);
+              total += parts.length;
+              logStep(
+                `切り詰められたため ${parts.length} 話に分けて試し直します: ${chunk.hash}`
+              );
+            } else {
+              failedChunks++;
+            }
             continue;
           }
-
-          // **どのファイルの何行目かを、ここで確定させる。** まとめた
-          // チャンクではAIが返す行番号がまとめた本文の通し番号になっており、
-          // そのまま使うと別の話のファイルの、まったく違う行を指す
-          const at = locateChunkLine(entry.chunk, entry.issue.line);
-          if (!at) {
-            // 戻せない行は捨てる。どこの話か決められない
-            rejectedCount++;
+          // 上限に入らなかった。**まとめたぶんを戻す→半分に割る→諦める**の順で、
+          // 諦めるときは理由を残す（設計書6.27.10）
+          if (raw instanceof AIError) {
+            const retry = retryOnOverflow(chunk, raw);
+            if (retry.kind === "split") {
+              queue.splice(cursor + 1, 0, ...retry.parts);
+              total += retry.parts.length;
+              logStep(`${chunk.hash}: ${retry.note}`);
+            } else {
+              failedChunks++;
+              logFailure("矛盾検知", { チャンク: chunk.hash, 理由: retry.note });
+            }
             continue;
           }
-          issues.push({
-            ...entry.issue,
-            filePath: at.filePath,
-            line: at.line,
-            // 検証で分かったことは、作者の判断材料になる
-            note: appendNote(entry.issue.note, outcome.explanation),
-          });
+          if (raw === undefined) continue;
+
+          collect(raw, chunk);
+
+          // **あとで判明する事実とも突き合わせる**（設計書6.10.4）。
+          // 「まだ知らない」ではなく「両立しない」を探す、逆向きの見方である
+          const futureFacts = settings.futureFactsFor(chunk.text, chunk.chapterStart);
+          if (futureFacts) {
+            const futureCached = cache.get(chunk.hash, futureKeyBase);
+            const futureRaw =
+              futureCached ?? (await ask(chunk, "future", futureFacts));
+            // **入らなかった向きは、ここでは分け直さない。** この段は
+            // 「あとで判明する事実」との突き合わせで、本命（settled）が
+            // 通ったチャンクの補足である。分け直すと同じ本文を二重に数える
+            if (
+              futureRaw !== undefined &&
+              futureRaw !== RETRY_SMALLER &&
+              !(futureRaw instanceof AIError)
+            ) {
+              collect(futureRaw, chunk);
+            }
+          }
+          processedChunks++;
         }
+
+        /** 応答を検証して、どのチャンクの指摘かを覚えておく */
+        function collect(raw: unknown, chunk: Chunk): void {
+          const validated = validateContradictions(raw, chunk);
+          rejectedCount += validated.rejected.length;
+          for (const issue of validated.accepted) {
+            found.push({ issue, chunk });
+          }
+        }
+
+        async function ask(
+          chunk: Chunk,
+          mode: "settled" | "future",
+          futureFacts = ""
+        ): Promise<unknown | undefined> {
+          // **まとめたチャンクでは、いちばん前の話に合わせる。**
+          // うしろに合わせると、前半の話にとって「まだ分かっていないこと」を
+          // 材料に渡すことになる（設計書6.10.3）
+          const relevant = settings.relevantFor(chunk.text, chunk.chapterStart);
+          // **照らし合わせる相手が無いチャンクは飛ばす。**
+          // 材料なしで問うと、本文だけを見て矛盾を作り出す
+          if (!relevant.hasAnything) return undefined;
+
+          try {
+            const bodyWithLines = withLineNumbers(chunk);
+            const previousSynopses = settings.synopsesBefore(chunk.chapterStart);
+            // **「あとで判明する事実」の向きには渡さない**（設計書6.74）。
+            // あちらは本命（settled）が通ったチャンクの補足で、既に実データで
+            // 測ってある。入力を増やすと、測った結果と別のものになる
+            const pastScenes = mode === "future" ? "" : pastScenesFor(chunk);
+            const userPrompt = buildContradictionCheckPrompt({
+              // **まとめたチャンクは、話が1つとは限らない。**
+              // 1つ目の話の名前だけを渡すと、2話目以降の本文を
+              // 1話目だと言って読ませることになる
+              chapterLabel: describeChunkScope(chunk, (filePath) =>
+                chapterLabelByFile.get(filePath)
+              ),
+              chunkTextWithLineNumbers: bodyWithLines,
+              characterDetails: relevant.characters,
+              locationDetails: relevant.locations,
+              worldviewSummary: relevant.worldview,
+              previousSynopses,
+              categories,
+              futureFacts,
+              pastScenes,
+            });
+
+            const response = await provider.generate({
+              systemPrompt: CONTRADICTION_CHECK_SYSTEM_PROMPT,
+              userPrompt,
+              model,
+              // 事実の突き合わせなので揺らさない
+              temperature: 0.0,
+              maxOutputTokens: plannedOutputTokens,
+              jsonSchema: CONTRADICTION_CHECK_SCHEMA as unknown as object,
+              disableThinking: true,
+              signal: controller.signal,
+              meta: {
+                feature:
+                  mode === "future" ? "contradiction_future" : "contradiction_check",
+                workFolder: work.folderPath,
+                parts: measureParts(userPrompt, {
+                  本文: bodyWithLines.length,
+                  人物: relevant.characters.length,
+                  場所: relevant.locations.length,
+                  // ここだけ上限が無かった（設計書6.27.6の穴2）。いまは
+                  // `WORLDVIEW_MAX_CHARS` で頭を打つが、**実測はまだ無い**ので、
+                  // 何字になるのかを測れるよう独立した項目として出し続ける
+                  世界観: relevant.worldview.length,
+                  あらすじ: previousSynopses.length,
+                  未来の事実: futureFacts.length,
+                  // **新しく増えた材料は、独立した項目で測る**（設計書6.74）。
+                  // 上限（モデル比）が妥当かは実測を見てからでないと決められない
+                  過去場面: pastScenes.length,
+                }),
+              },
+            });
+
+            if (response.truncated || !response.text.trim()) {
+              // まとめたせいで入り切らなかったのなら、元の大きさなら通る見込みが
+              // ある。**捨てるより試すほうがよい**（部分的なJSONは解析できない）
+              logFailure("矛盾検知", {
+                チャンク: chunk.hash,
+                理由: "応答が上限で切り詰められました",
+              });
+              return RETRY_SMALLER;
+            }
+
+            const parsed = parseContradictionResult(response.text);
+            if (!parsed) {
+              failedChunks++;
+              logFailure("矛盾検知", {
+                チャンク: chunk.hash,
+                理由: "応答を読み取れません",
+                応答: response.text.slice(0, 300),
+              });
+              return undefined;
+            }
+            await cache.set(
+              chunk.hash,
+              mode === "future"
+                ? futureKeyBase
+                : keyWithPastScenes(cacheKeyBase, chunk),
+              parsed
+            );
+            return parsed;
+          } catch (error) {
+            if (error instanceof AIError && error.kind === "aborted") return undefined;
+            // **入らなかったときは、失敗として数える前に分け直しへ回す**
+            // （設計書6.27.10）。そのまま数えると、そのチャンクは一度も
+            // 見られないまま「失敗1件」で終わる
+            if (isContextOverflow(error)) return error;
+            // **同じ失敗を積まない。** 環境側の失敗はどのチャンクでも同じに
+            // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
+            if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
+              fatalFailure = `${error.message} ${recoveryForAIError(error)}`.trim();
+              logStep(`残りのチャンクは試しません: ${fatalFailure}`);
+            }
+            failedChunks++;
+            logFailure("矛盾検知", {
+              チャンク: chunk.hash,
+              詳細:
+                error instanceof AIError
+                  ? `${error.message} ${recoveryForAIError(error)}`
+                  : error instanceof Error
+                    ? error.message
+                    : String(error),
+            });
+            return undefined;
+          }
+        }
+      });
+
+      // ── 検証（設計書6.10.5）─────────────────────────
+      //
+      // **検出は本文を読みながら行う。** 1回で何十行も見て、設定も世界観も
+      // 突き合わせるので、1件ずつを吟味する余裕が無い。ここでは**1件だけ**を
+      // 見て、「これは本当に矛盾か」を問い直す。
+      if (found.length > 0 && !cancelled) {
+        await withCancellableProgress(
+          "検出した矛盾を検証しています",
+          async (progress, token) => {
+            const controller = new AbortController();
+            token.onCancellationRequested(() => {
+              cancelled = true;
+              controller.abort();
+            });
+
+            let done = 0;
+            for (const entry of found) {
+              if (token.isCancellationRequested) break;
+              progress.report({
+                message: `${++done}/${found.length}`,
+                increment: 100 / found.length,
+              });
+              // 提案パネルにも同じ進みを出す（本文を読む段とは別の札で）
+              options.onVerifyProgress?.(done, found.length);
+
+              const outcome = await verify(entry.issue, entry.chunk, controller);
+              if (outcome.undecided) verifyUndecided++;
+              if (!outcome.keep) {
+                verifyRejected.push({ reason: outcome.reason });
+                logStep(
+                  `検証で取り下げ: ${entry.issue.excerpt.slice(0, 20)} ` +
+                    `（${outcome.reason}／${outcome.explanation}）`
+                );
+                continue;
+              }
+
+              // **どのファイルの何行目かを、ここで確定させる。** まとめた
+              // チャンクではAIが返す行番号がまとめた本文の通し番号になっており、
+              // そのまま使うと別の話のファイルの、まったく違う行を指す
+              const at = locateChunkLine(entry.chunk, entry.issue.line);
+              if (!at) {
+                // 戻せない行は捨てる。どこの話か決められない
+                rejectedCount++;
+                continue;
+              }
+              issues.push({
+                ...entry.issue,
+                filePath: at.filePath,
+                line: at.line,
+                // 検証で分かったことは、作者の判断材料になる
+                note: appendNote(entry.issue.note, outcome.explanation),
+              });
+            }
+          }
+        );
       }
-    );
-  }
+    }
+  );
 
   await cache.save();
 

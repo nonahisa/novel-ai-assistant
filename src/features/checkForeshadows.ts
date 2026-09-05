@@ -57,7 +57,8 @@ import {
   type AcceptedForeshadowResolution,
   type KnownForeshadow,
 } from "../core/foreshadowValidation";
-import { withCancellableProgress, type CheckProgress } from "../views/progress";
+import { type CheckProgress } from "../views/progress";
+import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import type { ProposalPanel, RecordUpdateViewItem } from "./proposalPanel";
@@ -256,8 +257,12 @@ export async function checkForeshadows(
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
   let fatalFailure = "";
 
-  await withCancellableProgress(
+  // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）。
+  // 関所（送信を1件ずつ）だけだと、機能どうしが交互に流れて
+  // モデルの読み込み直しが往復する
+  await withAiTurnProgress(
     "伏線になりそうな記述を探しています",
+    { label: "伏線の検知", onCancelled: () => (cancelled = true) },
     async (progress, token) => {
       const controller = new AbortController();
       token.onCancellationRequested(() => {
@@ -667,8 +672,10 @@ export async function checkForeshadowResolution(
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
   let fatalFailure = "";
 
-  await withCancellableProgress(
+  // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）
+  await withAiTurnProgress(
     "伏線が回収されたかを見ています",
+    { label: "伏線の回収の確認", onCancelled: () => (cancelled = true) },
     async (progress, token) => {
       const controller = new AbortController();
       token.onCancellationRequested(() => {

@@ -19,6 +19,9 @@ vi.mock("../../src/core/usageLog", async (importOriginal) => {
 
 const { MeteredProvider } = await import("../../src/ai/meteredProvider");
 const { AIError } = await import("../../src/ai/types");
+const { resetAiSequence, acquireRun } = await import(
+  "../../src/core/aiSequence"
+);
 import type {
   AIProvider,
   GenerateParams,
@@ -56,6 +59,7 @@ function params(overrides: Partial<GenerateParams> = {}): GenerateParams {
 
 beforeEach(() => {
   appended.length = 0;
+  resetAiSequence();
 });
 
 describe("送信量を記録する包み", () => {
@@ -159,6 +163,92 @@ describe("送信量を記録する包み", () => {
 
     expect(appended[0].entry.truncated).toBe(true);
     expect(appended[0].entry.numCtx).toBe(16_384);
+  });
+});
+
+describe("リクエストの関所（設計書6.76）", () => {
+  /**
+   * 実際に送っている最中かどうかを見張る作り物。
+   *
+   * **重なったら、その場で印を残す。** あとから所要時間を眺めても
+   * 「重なっていたのか、たまたま速かったのか」は分からない。
+   */
+  function watchfulProvider(): {
+    provider: AIProvider;
+    overlapped: () => boolean;
+    order: string[];
+  } {
+    let inFlight = 0;
+    let overlapped = false;
+    const order: string[] = [];
+    return {
+      overlapped: () => overlapped,
+      order,
+      provider: fakeProvider({
+        generate: async (p: GenerateParams): Promise<GenerateResult> => {
+          inFlight++;
+          if (inFlight > 1) overlapped = true;
+          order.push(`開始:${p.model}`);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          order.push(`終了:${p.model}`);
+          inFlight--;
+          return { text: "{}", truncated: false, elapsedMs: 1 };
+        },
+      }),
+    };
+  }
+
+  test("2つを同時に呼んでも、実送信は重ならない", async () => {
+    const watch = watchfulProvider();
+    const provider = new MeteredProvider(watch.provider);
+
+    await Promise.all([
+      provider.generate(params({ model: "あ" })),
+      provider.generate(params({ model: "い" })),
+    ]);
+
+    expect(watch.overlapped()).toBe(false);
+    expect(watch.order).toEqual(["開始:あ", "終了:あ", "開始:い", "終了:い"]);
+  });
+
+  test("順番待ちの最中に中止されたら、そもそも送らない", async () => {
+    let sent = 0;
+    const provider = new MeteredProvider(
+      fakeProvider({
+        generate: async (): Promise<GenerateResult> => {
+          sent++;
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return { text: "{}", truncated: false, elapsedMs: 1 };
+        },
+      })
+    );
+
+    const controller = new AbortController();
+    const first = provider.generate(params({ model: "先客" }));
+    const second = provider.generate(
+      params({ model: "待ち", signal: controller.signal })
+    );
+    // 先客が送っている間に取りやめる
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    controller.abort();
+
+    await expect(second).rejects.toMatchObject({ kind: "aborted" });
+    await first;
+
+    expect(sent).toBe(1);
+  });
+
+  test("札を持っている機能も、関所は普通に通れる", async () => {
+    // デッドロックの禁止則（札 → 関所の一方向）が守られていることの裏取り。
+    // 札を持ったまま送れないと、一括処理が1件目で止まる
+    const release = await acquireRun("誤字脱字検知");
+    const provider = new MeteredProvider(fakeProvider());
+
+    await expect(provider.generate(params())).resolves.toMatchObject({
+      text: "{}",
+    });
+
+    release();
   });
 });
 

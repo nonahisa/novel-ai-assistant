@@ -30,7 +30,7 @@ import {
   type SubtitleSuggestion,
 } from "../prompts/synopsis";
 import { CharacterStore } from "../core/characterStore";
-import { withCancellableProgress } from "../views/progress";
+import { withAiTurnProgress } from "./aiTurn";
 import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 import { renameEpisodeFile } from "../core/episodeRename";
 import { confirmFormatFit } from "./formatFitPrompt";
@@ -152,8 +152,12 @@ export async function generateSynopses(
   let done = 0;
   let cancelled = false;
 
-  await withCancellableProgress(
+  // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）。
+  // 話の数だけAIを呼ぶので、ほかの一括処理と交互に流すと
+  // モデルの読み込み直しが往復する
+  await withAiTurnProgress(
     "あらすじを作っています",
+    { label: "各話あらすじの生成", onCancelled: () => (cancelled = true) },
     async (progress, token) => {
       for (const episode of pending) {
         if (token.isCancellationRequested) {
