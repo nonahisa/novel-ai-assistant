@@ -474,11 +474,27 @@ function renderSiteRecords() {
     if (meta.length > 0) {
       head.push('<div class="site-meta">' + meta.join(' ／ ') + '</div>');
     }
+    const links = [];
     if (record.workUrl) {
-      head.push(
-        '<div class="site-meta"><span class="link" data-url="' +
-        escapeHtml(record.workUrl) + '">作品ページを開く</span></div>'
+      links.push(
+        '<span class="link" data-url="' + escapeHtml(record.workUrl) +
+        '">作品ページを開く</span>'
       );
+    }
+    /*
+      なろうの分析リンク（設計書6.79.7）。**なろうの行にしか入らない。**
+      なろうは規約でAPI以外の自動収集を禁じているので、こちらから読みに
+      いく代わりに、公認データの分析サイトへ作者が飛べるようにする。
+      ——開くのは作者のブラウザで、この拡張機能はHTTPを発しない。
+    */
+    if (record.analysisUrl) {
+      links.push(
+        '<span class="link" data-url="' + escapeHtml(record.analysisUrl) +
+        '">分析（Narou.fun）を開く</span>'
+      );
+    }
+    if (links.length > 0) {
+      head.push('<div class="site-meta">' + links.join(' ／ ') + '</div>');
     }
     if (record.latest) {
       head.push(
@@ -503,10 +519,15 @@ function renderSiteRecords() {
       table + '</div>';
   });
 
+  // 分析リンクも「開くだけ」であることを、その場で言う（6.79.7）
+  const analysisNote = records.some((record) => record.analysisUrl)
+    ? '分析（Narou.fun）はブラウザで開くだけで、中身を読み取ることもしません。'
+    : '';
+
   host.innerHTML =
     '<h3>サイトの記録</h3>' + blocks.join('') +
     '<div class="note">順位は「ランキングを記録する」で書き足した値です。' +
-    'サイトから自動で取ってくることはありません。</div>';
+    'サイトから自動で取ってくることはありません。' + analysisNote + '</div>';
 
   host.querySelectorAll('[data-url]').forEach((el) => {
     el.addEventListener('click', () => {

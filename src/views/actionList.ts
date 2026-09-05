@@ -929,6 +929,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
             detail:
               "未投稿の話を見つけて、サイトごとに**本文を変換してコピー→投稿ページを開く→" +
               "記録する**まで案内します（なろう・カクヨム・アルファポリス・note）。" +
+              "案内の中から「**貼り込み係へ渡す形でコピー**」も選べます" +
+              "（ブラウザ拡張が投稿画面の欄を埋めます。送信はご自身で）。" +
               "**投稿そのものは作者が行います。** この拡張機能が投稿サイトへ" +
               "書き込むことはありません（自動投稿は規約で禁じられています）。" +
               "**原稿は書き換えません。**",
@@ -2038,6 +2040,28 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
 /** 印を付けるための架空のURI。実在するファイルは指さない */
 export const ACTION_SCHEME = "novelai-action";
 
+/**
+ * 簡単ステップメニュー用の鍵の頭。
+ *
+ * 詳細メニューの鍵は区画が1つ（`/操作名`）なので、頭を1つ足すだけで
+ * 衝突しなくなる。`nodeKey` が返すのは分類名・「分類/小分類」・コマンドIDで、
+ * どれもこの語そのものにはならない。
+ */
+const WORK_SCOPE_PREFIX = "work";
+
+/**
+ * 印の宛先。**どの範囲の件数を出すかが、鍵で決まる。**
+ *
+ * 詳細メニューは作品を選ばずに見るので**全作品合計**を出し、
+ * 簡単ステップメニューは最上段で作品を選ぶ画面なので
+ * **選んだ作品だけ**を出す（設計書6.29）。同じ鍵を使うと同じ数字が出て、
+ * 選択作品の件数に見えてしまう（作者の実機報告、2026-09-05）。
+ */
+export type ActionDecorationTarget =
+  | { scope: "all"; key: string }
+  /** `workId` が undefined なのは、作品をまだ選んでいないとき */
+  | { scope: "work"; key: string; workId: string | undefined };
+
 export function actionResourceUri(node: ActionNode): vscode.Uri {
   return vscode.Uri.from({
     scheme: ACTION_SCHEME,
@@ -2046,11 +2070,53 @@ export function actionResourceUri(node: ActionNode): vscode.Uri {
   });
 }
 
-/** URIから元の鍵へ戻す */
-export function actionKeyFromUri(uri: vscode.Uri): string | undefined {
+/**
+ * 簡単ステップメニュー用の目印。**作品IDを鍵に混ぜる。**
+ *
+ * 作品を選んでいないときはIDを入れない。件数は出さないが、
+ * 「AI」の印は作品に関わらないので、目印そのものは付ける。
+ */
+export function stepActionResourceUri(
+  node: ActionNode,
+  workId: string | undefined
+): vscode.Uri {
+  const key = encodeURIComponent(nodeKey(node));
+  return vscode.Uri.from({
+    scheme: ACTION_SCHEME,
+    path:
+      workId === undefined
+        ? `/${WORK_SCOPE_PREFIX}/${key}`
+        : `/${WORK_SCOPE_PREFIX}/${encodeURIComponent(workId)}/${key}`,
+  });
+}
+
+/** URIから元の鍵と、件数の範囲へ戻す */
+export function actionTargetFromUri(
+  uri: vscode.Uri
+): ActionDecorationTarget | undefined {
   if (uri.scheme !== ACTION_SCHEME) return undefined;
+  // 鍵は encodeURIComponent 済みなので、区画の中に `/` は現れない
+  const parts = uri.path.replace(/^\//, "").split("/");
   try {
-    return decodeURIComponent(uri.path.replace(/^\//, ""));
+    if (parts[0] === WORK_SCOPE_PREFIX) {
+      if (parts.length === 2) {
+        return {
+          scope: "work",
+          key: decodeURIComponent(parts[1]),
+          workId: undefined,
+        };
+      }
+      if (parts.length === 3) {
+        return {
+          scope: "work",
+          key: decodeURIComponent(parts[2]),
+          workId: decodeURIComponent(parts[1]),
+        };
+      }
+      return undefined;
+    }
+    if (parts.length !== 1) return undefined;
+    return { scope: "all", key: decodeURIComponent(parts[0]) };
   } catch {
     return undefined;
   }

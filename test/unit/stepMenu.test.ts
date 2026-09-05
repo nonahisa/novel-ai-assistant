@@ -19,10 +19,13 @@ import {
 import {
   ACTION_SCHEME,
   allActions,
+  stepActionResourceUri,
   REQUIRES_WORK_HINT,
+  type ActionCounter,
   type ActionItem,
   type GroupStateStore,
 } from "../../src/views/actionList";
+import { ActionDecorationProvider } from "../../src/views/actionDecorations";
 import type { WorkEntry } from "../../src/models/types";
 import type { WorkRegistry } from "../../src/core/workRegistry";
 
@@ -107,6 +110,21 @@ function stepPlaceholders(): StepPlaceholder[] {
 
 /** 操作の節点を作る。名前で引けないと、テストが並び順に縛られる */
 function actionNode(command: string): StepNode {
+  const item = stepActions().find((entry) => entry.command === command);
+  if (!item) {
+    throw new Error(`操作「${command}」が簡単ステップメニューにありません`);
+  }
+  return { type: "action", item };
+}
+
+/**
+ * 印の宛先を作る。詳細メニューと同じ `ActionNode` の形で渡す
+ * （印の仕組みは1つしかなく、簡単ステップメニュー用に別の型を作らない）。
+ */
+function decorationNode(command: string): {
+  type: "action";
+  item: ActionItem;
+} {
   const item = stepActions().find((entry) => entry.command === command);
   if (!item) {
     throw new Error(`操作「${command}」が簡単ステップメニューにありません`);
@@ -512,6 +530,107 @@ describe("AIと件数の印", () => {
     expect(item.resourceUri?.path).toContain(
       encodeURIComponent("novelai.checkTypos")
     );
+  });
+
+  /*
+    **バッジは選択中の作品だけを数える**（作者の実機報告、2026-09-05）。
+
+    簡単ステップメニューは最上段で作品を選ぶ画面なので、行の末尾の数字は
+    その作品のものだと読める。ところが詳細メニューと同じ鍵を使っていたため、
+    全作品合計がそのまま出ていた——選択作品は重複0・反映待ち0なのに
+    「24」「1」と並んでいた。
+  */
+  const badgeOf = (
+    decorations: ActionDecorationProvider,
+    command: string,
+    workId: string | undefined
+  ): string | undefined =>
+    decorations.provideFileDecoration(
+      stepActionResourceUri(decorationNode(command), workId)
+    )?.badge as string | undefined;
+
+  /** 作品ごとに違う件数を返す口。合算（作品を渡さない）は26件 */
+  const perWorkCounts = async (
+    _counter: ActionCounter,
+    workId?: string
+  ): Promise<number> => {
+    if (workId === "wA") return 2;
+    if (workId === "wB") return 24;
+    return 26;
+  };
+
+  test("選んだ作品の件数だけを出す", async () => {
+    const decorations = new ActionDecorationProvider(perWorkCounts);
+
+    await decorations.refreshWork("wA");
+    expect(badgeOf(decorations, "novelai.unifyCharacters", "wA")).toBe("2");
+
+    await decorations.refreshWork("wB");
+    expect(badgeOf(decorations, "novelai.unifyCharacters", "wB")).toBe("24");
+  });
+
+  test("作品を選んでいなければ件数を出さない", async () => {
+    // どの作品の数字か分からないものを出すと、選択中の作品の件数に見える。
+    // 「どこかに溜まっている」の気づきは詳細メニュー（全作品合計）が担う
+    const decorations = new ActionDecorationProvider(perWorkCounts);
+    await decorations.refresh();
+    await decorations.refreshWork("wA");
+
+    expect(badgeOf(decorations, "novelai.unifyCharacters", undefined)).toBeUndefined();
+    // AIの印は作品に関わらないので、選んでいなくても出す
+    expect(badgeOf(decorations, "novelai.checkTypos", undefined)).toBe("AI");
+  });
+
+  test("ツールチップで、どの範囲の数字かが分かる", async () => {
+    const decorations = new ActionDecorationProvider(perWorkCounts);
+    await decorations.refreshWork("wA");
+
+    const tooltip = decorations.provideFileDecoration(
+      stepActionResourceUri(
+        decorationNode("novelai.applyPendingUpdates"),
+        "wA"
+      )
+    )?.tooltip;
+
+    expect(tooltip).toContain("選択中の作品");
+  });
+
+  test("メニューの項目は、選んだ作品ごとに別の目印を持つ", () => {
+    // 同じ鍵だと同じ数字が出る（それが今回の不具合）
+    const works = [work("wA", "作品A"), work("wB", "作品B")];
+    const pathFor = (savedId: string | undefined): string | undefined =>
+      new StepMenuProvider(fakeRegistry(works), memoryWorkStore(savedId))
+        .getTreeItem(actionNode("novelai.unifyCharacters"))
+        .resourceUri?.path;
+
+    expect(pathFor("wA")).toContain(encodeURIComponent("wA"));
+    expect(pathFor("wB")).toContain(encodeURIComponent("wB"));
+    expect(pathFor("wA")).not.toBe(pathFor("wB"));
+    // 未選択のときは作品が入らない（＝件数が出ない目印）
+    expect(pathFor(undefined)).not.toContain(encodeURIComponent("wA"));
+  });
+
+  test("ホバーの件数も、選んだ作品だけを数える", () => {
+    const works = [work("wA", "作品A"), work("wB", "作品B")];
+    const counts = (_counter: ActionCounter, workId: string): number =>
+      workId === "wA" ? 2 : 24;
+    const tooltipFor = (savedId: string | undefined): string => {
+      const provider = new StepMenuProvider(
+        fakeRegistry(works),
+        memoryWorkStore(savedId),
+        undefined,
+        counts
+      );
+      const tooltip = provider.getTreeItem(
+        actionNode("novelai.unifyCharacters")
+      ).tooltip;
+      return typeof tooltip === "string" ? tooltip : (tooltip?.value ?? "");
+    };
+
+    expect(tooltipFor("wA")).toContain("未反映: 2 件");
+    expect(tooltipFor("wB")).toContain("未反映: 24 件");
+    // 作品を選んでいなければ、件数そのものを出さない
+    expect(tooltipFor(undefined)).not.toContain("未反映:");
   });
 });
 

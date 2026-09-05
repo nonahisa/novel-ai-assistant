@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   buildPostingSiteRecords,
   isOpenableWorkUrl,
+  narouAnalysisUrl,
 } from "../../src/core/postingSiteRecords";
 import {
   emptyPostingLedger,
@@ -167,6 +168,89 @@ describe("作品ページのリンク", () => {
   });
 });
 
+/**
+ * なろうの分析リンク（設計書6.79.7）。
+ *
+ * **拡張機能はNarou.funへHTTPを発しない。** 作るのはURLだけで、読みに
+ * いくのはブラウザを開いた作者である（6.68の原則そのまま）。
+ *
+ * **形式検証を通ったときだけリンクにする。** Nコードでないものを埋めた
+ * URLは、押しても存在しないページに着く——壊れたリンクは出さない。
+ */
+describe("なろうの分析リンク", () => {
+  test("作品IDがNコードなら、分析ページのURLを作る", () => {
+    expect(narouAnalysisUrl("n1234ab")).toBe(
+      "https://db.narou.fun/works/n1234ab"
+    );
+    // 英字1字のNコードもある
+    expect(narouAnalysisUrl("n9999a")).toBe("https://db.narou.fun/works/n9999a");
+  });
+
+  test("大文字・前後の空白は整えてから使う", () => {
+    expect(narouAnalysisUrl(" N1234AB ")).toBe(
+      "https://db.narou.fun/works/n1234ab"
+    );
+  });
+
+  test("作品IDが空なら、作品ページのURLから拾う", () => {
+    expect(narouAnalysisUrl(null, "https://ncode.syosetu.com/n1234ab/")).toBe(
+      "https://db.narou.fun/works/n1234ab"
+    );
+    // 話のページを貼っていても、先頭のNコードを拾う
+    expect(narouAnalysisUrl("", "https://ncode.syosetu.com/n1234ab/13/")).toBe(
+      "https://db.narou.fun/works/n1234ab"
+    );
+  });
+
+  test("作品IDのほうを先に使う", () => {
+    expect(
+      narouAnalysisUrl("n1234ab", "https://ncode.syosetu.com/n9999zz/")
+    ).toBe("https://db.narou.fun/works/n1234ab");
+  });
+
+  test("作品IDがNコードでなければ、作品ページのURLへ落ちる", () => {
+    expect(
+      narouAnalysisUrl("わからない", "https://ncode.syosetu.com/n1234ab/")
+    ).toBe("https://db.narou.fun/works/n1234ab");
+  });
+
+  test("Nコードが見つからなければ、リンクを作らない", () => {
+    expect(narouAnalysisUrl(undefined, undefined)).toBeUndefined();
+    expect(narouAnalysisUrl("", "")).toBeUndefined();
+    // 形が違うもの（数字4桁・英字1〜2字でない）
+    expect(narouAnalysisUrl("1234ab")).toBeUndefined();
+    expect(narouAnalysisUrl("n123ab")).toBeUndefined();
+    expect(narouAnalysisUrl("n1234abc")).toBeUndefined();
+    expect(narouAnalysisUrl("n1234")).toBeUndefined();
+    // 作品ページのURLに作品IDが無い（マイページなど）
+    expect(narouAnalysisUrl(null, "https://syosetu.com/")).toBeUndefined();
+    expect(narouAnalysisUrl(null, "これはURLではない")).toBeUndefined();
+  });
+
+  test("なろうの行にだけ、分析リンクを添える", () => {
+    let ledger = withSiteProfile(registered(), "narou", {
+      workId: "n1234ab",
+    });
+    ledger = withSiteProfile(ledger, "kakuyomu", {
+      workId: "1177354054892",
+    });
+
+    const records = buildPostingSiteRecords(ledger);
+    expect(records.map((entry) => entry.analysisUrl)).toEqual([
+      "https://db.narou.fun/works/n1234ab",
+      // カクヨムには分析サイトのリンクを作らない（6.79.7はなろうの代替）
+      null,
+    ]);
+  });
+
+  test("なろうでもNコードが無ければ、リンクを出さない", () => {
+    const ledger = withSiteProfile(registered(), "narou", {
+      genre: "ハイファンタジー",
+    });
+    expect(buildPostingSiteRecords(ledger)[0].analysisUrl).toBeNull();
+  });
+});
+
 describe("執筆量パネルの側", () => {
   test("節の置き場と、開く道の配線がある", () => {
     const html = buildWritingStatsPanelHtml("nonce", "vscode-resource:");
@@ -175,5 +259,8 @@ describe("執筆量パネルの側", () => {
     expect(html).toContain('id="site-records"');
     // リンクは画面から直接開かず、拡張機能側へ頼む（openExternal）
     expect(html).toContain("openExternal");
+    // 分析リンク（6.79.7）。作るのはURLだけで、読みにいくのは作者である
+    expect(html).toContain("analysisUrl");
+    expect(html).toContain("分析（Narou.fun）を開く");
   });
 });

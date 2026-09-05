@@ -7,6 +7,7 @@ import {
   validateAnnouncement,
   X_URL_WEIGHT,
   X_WEIGHTED_LIMIT,
+  xPostWithUrl,
   xWeightedLength,
 } from "../../src/core/announcement";
 import {
@@ -113,6 +114,41 @@ describe("X用の投稿の組み立て", () => {
         workUrl: "",
       })
     ).toContain("{URL}");
+  });
+});
+
+describe("貼り付ける直前のURLの差し込み", () => {
+  const composed = composeXPost({
+    body: "本文です。",
+    episodeLabel: "第3話",
+    hashtags: ["#創作"],
+    workUrl: "",
+  });
+
+  test("目印（{URL}）を、決まったURLへ差し替える", () => {
+    // 貼り付け先（6.79.8）で決めたURLは、目印の場所へ入れる。
+    // 末尾へ足すだけにすると、目印が残ったまま投稿されてしまう
+    expect(xPostWithUrl(composed, "https://ncode.syosetu.com/n1234ab/")).toBe(
+      "第3話 更新しました\n本文です。\n#創作\nhttps://ncode.syosetu.com/n1234ab/"
+    );
+  });
+
+  test("URLが決まらなければ、目印の行ごと落とす", () => {
+    // 「{URL}」がそのまま読者の目に触れないようにする（URL無しで文だけ貼る）
+    expect(xPostWithUrl(composed, "")).toBe("第3話 更新しました\n本文です。\n#創作");
+  });
+
+  test("既にURLが入っている告知には、足さない", () => {
+    // 告知の設定でURLを入れてある作品。2つ並ぶと、どちらが本物か分からない
+    const withUrl = composeXPost({
+      body: "本文です。",
+      episodeLabel: "第3話",
+      hashtags: [],
+      workUrl: "https://example.com/works/1",
+    });
+    expect(xPostWithUrl(withUrl, "https://ncode.syosetu.com/n1234ab/")).toBe(
+      withUrl
+    );
   });
 });
 

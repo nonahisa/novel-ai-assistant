@@ -24,10 +24,21 @@ import {
   buildAnnouncementMarkdown,
   composeXPost,
   remainingCopyChoices,
+  URL_PLACEHOLDER,
   validateAnnouncement,
+  xPostWithUrl,
   xWeightedLength,
   type AnnouncementCopyKind,
 } from "../core/announcement";
+import { workListUrl, X_SHARE_LABEL, xIntentUrl } from "../core/snsShare";
+import { isOpenableWorkUrl } from "../core/postingSiteRecords";
+import { PostingStore } from "../core/postingStore";
+import {
+  POSTING_SITES,
+  postingSiteInfo,
+  siteProfile,
+  type PostingSiteId,
+} from "../models/posting";
 import { readWorkConfig, writeWorkConfig } from "../core/workRegistry";
 import { stripCodeFence } from "../core/synopsisValidation";
 import {
@@ -236,47 +247,205 @@ export async function generateAnnouncement(
   });
   await openGeneratedMarkdown("更新告知文", markdown, undefined, { work });
 
-  await offerCopies(
-    {
+  await offerAnnouncementActions({
+    work,
+    texts: {
       x: composedX,
       activityReport: parsed.activityReport,
       afterword: parsed.afterword,
     },
-    warnings.length
-  );
+    warningCount: warnings.length,
+  });
 }
 
 /**
- * 3種を、作者が閉じるまで何度でもコピーさせる。
+ * 結果画面。3種を、作者が閉じるまで何度でもコピーさせる。
  *
  * **1回で終わらせない。** 作者はたいていX用と活動報告用の両方を貼るので、
  * 1つ選んだ時点で通知が消えると、残りは開いた文書から手で拾うことになる。
  *
  * **modal にしない。** 開いた文書を見ながら押せるようにするため。
- * **ここで文章を作り直さない。** AIも呼ばない——コピーの入口を出すだけである。
+ * **ここで文章を作り直さない。** AIも呼ばない——コピーとXの投稿画面への
+ * 入口を出すだけである（設計書6.79.8）。
+ *
+ * **export してあるのは、AIを呼ばずに配線を確かめるため**
+ * （`test/unit/announcementShare.test.ts`）。
  */
-async function offerCopies(
-  texts: Record<AnnouncementCopyKind, string>,
-  warningCount: number
-): Promise<void> {
+export async function offerAnnouncementActions(input: {
+  work: WorkEntry;
+  texts: Record<AnnouncementCopyKind, string>;
+  warningCount: number;
+}): Promise<void> {
   const copied = new Set<AnnouncementCopyKind>();
+  let shared = false;
 
   for (;;) {
     const choices = remainingCopyChoices(copied);
-    if (choices.length === 0) return; // 3つとも押した
+    // **貼り付けは最後に置く。** 並びを変えると、いつもの位置で押している
+    // 作者の手が空振りする（通知のボタンは左から順に並ぶ）
+    const buttons = [
+      ...choices.map((choice) => choice.label),
+      ...(shared ? [] : [X_SHARE_LABEL]),
+    ];
+    if (buttons.length === 0) return; // 全部押した
 
     const answer = await vscode.window.showInformationMessage(
-      copyPromptMessage(copied, warningCount),
-      ...choices.map((choice) => choice.label)
+      copyPromptMessage(copied, input.warningCount),
+      ...buttons
     );
     // 閉じられた（Esc・×）。押し続けさせない
     if (answer === undefined) return;
 
+    if (answer === X_SHARE_LABEL) {
+      // **取りやめたら選択肢を残す。** URLの入力をEscで抜けただけなので、
+      // もう一度押せないと、告知を作り直すところからやり直しになる
+      shared = await shareToX(input.work, input.texts.x);
+      continue;
+    }
+
     const chosen = choices.find((choice) => choice.label === answer);
     if (!chosen) return;
-    await vscode.env.clipboard.writeText(texts[chosen.kind]);
+    await vscode.env.clipboard.writeText(input.texts[chosen.kind]);
     copied.add(chosen.kind);
   }
+}
+
+/**
+ * Xの投稿画面を開く（設計書6.79.8）。
+ *
+ * **開くだけで、投稿はしない。** 使うのはXが公式に用意している貼り付け口
+ * （Web Intent）で、こちらからHTTPは1本も発しない——投稿画面をブラウザで
+ * 開き、**投稿ボタンを押すのは作者**である（6.79.2の一線）。
+ *
+ * @returns 開いたら true。取りやめたら false（ボタンを残す）
+ */
+async function shareToX(work: WorkEntry, composedX: string): Promise<boolean> {
+  /*
+    **URLが既に入っている告知では、訊かない。** 告知の設定（`announce.workUrl`）
+    でURLを入れてある作品は、`composeXPost` の時点で末尾がURLになっている。
+    そこでサイトを選ばせても、選んだ答えは使いようがない（重ねて足さない）。
+  */
+  const url = composedX.includes(URL_PLACEHOLDER)
+    ? await resolveWorkListUrl(work)
+    : "";
+  // Esc＝取りやめ。空文字は「URL無しで文だけ貼る」という答えなので分ける
+  if (url === undefined) return false;
+
+  /*
+    **字数はここで数え直さない**（設計書6.79.8）。Xは長さに関わらずURLを
+    23字で数えるが、その検査は `validateAnnouncement`（6.41）が済ませて
+    いる。貼り付けの経路にもう1つ数え方を作ると、同じ投稿に2つの基準が
+    できて、どちらの警告が正しいのか作者に分からなくなる。
+  */
+  await vscode.env.openExternal(
+    vscode.Uri.parse(xIntentUrl(xPostWithUrl(composedX, url)))
+  );
+
+  // **投稿ボタンは作者が押す。** ここを言わないと、拡張機能が勝手に
+  // 投稿したと読まれかねない
+  void vscode.window.showInformationMessage(
+    "Xの投稿画面が開きます。内容を確かめて、投稿ボタンはご自身で押してください。"
+  );
+  return true;
+}
+
+/**
+ * 告知に載せる、作品の**各話一覧**のURLを決める（設計書6.79.8）。
+ *
+ * 台帳（投稿状態.json）に登録したサイトのうち、URLを決められるものを
+ * 候補にする。**複数あれば選ばせる**——どのサイトへ誘導したいかは、
+ * その回の作者の都合であって、こちらには決められない。
+ *
+ * @returns URL。空文字は「URL無しで文だけ貼る」、`undefined` は取りやめ
+ */
+async function resolveWorkListUrl(
+  work: WorkEntry
+): Promise<string | undefined> {
+  const candidates = await workListUrlCandidates(work);
+
+  // 1つだけなら訊かない（貼る前に投稿画面で目に入る）
+  if (candidates.length === 1) return candidates[0].url;
+
+  if (candidates.length > 1) {
+    const picked = await vscode.window.showQuickPick(
+      [
+        ...candidates.map((candidate) => ({
+          label: postingSiteInfo(candidate.site).label,
+          description: candidate.url,
+          url: candidate.url,
+        })),
+        {
+          label: "$(edit) 別のURLを入力する",
+          detail: "ここに無いサイトの作品ページや、まとめページを貼るとき",
+          url: null,
+        },
+        cancelItem(),
+      ],
+      {
+        title: `${work.title} の告知に載せるURL`,
+        placeHolder: "どのサイトの作品ページへ誘導しますか",
+        ignoreFocusOut: true,
+      }
+    );
+    if (!picked || isCancelItem(picked) || !("url" in picked)) return undefined;
+    if (typeof picked.url === "string") return picked.url;
+  }
+
+  return askShareUrl();
+}
+
+/** 手入力で受ける（自動で決められないサイト・登録が無い作品） */
+async function askShareUrl(): Promise<string | undefined> {
+  const value = await askText({
+    title: "告知に載せる作品ページのURL",
+    prompt:
+      "作品の各話一覧（作品ページ）のURLを貼ってください。" +
+      "空のまま確定すると、URLを付けずに告知文だけを貼ります",
+    placeHolder: "https://ncode.syosetu.com/n1234ab/",
+    ignoreFocusOut: true,
+    // **空は通す**（URL無しで貼るという答え）。形だけを確かめる
+    validateInput: (input) =>
+      !input.trim() || isOpenableWorkUrl(input)
+        ? undefined
+        : "http:// か https:// から始まるURLを貼ってください。",
+  });
+  if (value === undefined) return undefined;
+  return value.trim();
+}
+
+interface WorkListUrlCandidate {
+  site: PostingSiteId;
+  url: string;
+}
+
+/**
+ * 台帳から、URLを決められるサイトを並べる。
+ *
+ * **読めなくても告知を止めない。** 台帳が壊れていても、手入力へ落ちれば
+ * 貼り付けはできる（ここで止めると、告知文まで無駄になる）。
+ */
+async function workListUrlCandidates(
+  work: WorkEntry
+): Promise<WorkListUrlCandidate[]> {
+  let candidates: WorkListUrlCandidate[] = [];
+  try {
+    const ledger = await new PostingStore(work).load();
+    candidates = ledger.sites.flatMap((entry) => {
+      const url = workListUrl(entry.site, siteProfile(ledger, entry.site));
+      return url ? [{ site: entry.site, url }] : [];
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    logFailure("告知に載せるURLの読み取り", { 作品: work.title, 内容: detail });
+    return [];
+  }
+
+  // 並びは `POSTING_SITES` に揃える（画面ごとに順番が変わらないように）
+  return candidates.sort(
+    (left, right) =>
+      POSTING_SITES.findIndex((info) => info.id === left.site) -
+      POSTING_SITES.findIndex((info) => info.id === right.site)
+  );
 }
 
 /**

@@ -12,14 +12,13 @@ import {
   type WorkTypeColumn,
 } from "../core/workTypeVisibility";
 import {
-  actionResourceUri,
   allActions,
   disabledHint,
   explainDisabled,
   isActionEnabled,
+  stepActionResourceUri,
   REQUIRES_WORK_HINT,
   type ActionCounter,
-  type ActionCounts,
   type ActionItem,
   type GroupStateStore,
 } from "./actionList";
@@ -569,6 +568,19 @@ export interface StepWorkStore {
   set(id: string | undefined): void;
 }
 
+/**
+ * 件数を答える口。**作品を渡す。**
+ *
+ * 詳細メニューの `ActionCounts` とは分ける。あちらは作品を選ばずに見るので
+ * 全作品合計でよいが、こちらは最上段で作品を選ぶ画面なので、
+ * 選んだ作品の件数でなければ意味が食い違う（作者の実機報告、2026-09-05。
+ * 選択作品は重複0なのに「24」と出ていた）。
+ */
+export type StepActionCounts = (
+  counter: ActionCounter,
+  workId: string
+) => number;
+
 export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
     StepNode | undefined | void
@@ -596,7 +608,7 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
     private readonly registry: WorkRegistry,
     private readonly workStore?: StepWorkStore,
     private readonly groupStore?: GroupStateStore,
-    private readonly counts?: ActionCounts,
+    private readonly counts?: StepActionCounts,
     /**
      * 作品のタイプを読む口。試験で差し替えるために関数で受け取る
      * （プロットを読む処理そのものは `workFormatStore` の1か所だけ）。
@@ -834,8 +846,13 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
         count > 0 ? `\n\n未反映: ${count} 件` : "",
       ].join("")
     );
-    // 「AI」と件数の印は、詳細メニューと同じ目印で出す（新しい仕組みは作らない）
-    item.resourceUri = actionResourceUri({ type: "action", item: action });
+    // 「AI」と件数の印は、詳細メニューと同じ仕組みで出す（新しい仕組みは作らない）。
+    // ただし**目印には選んだ作品を混ぜる**——同じ鍵にすると、詳細メニュー用の
+    // 全作品合計がそのまま出る（作者の実機報告、2026-09-05）
+    item.resourceUri = stepActionResourceUri(
+      { type: "action", item: action },
+      selected?.id
+    );
 
     if (enabled) {
       item.command = {
@@ -852,7 +869,11 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
   }
 
   private countOf(counter: ActionCounter | undefined): number {
-    return counter && this.counts ? this.counts(counter) : 0;
+    if (!counter || !this.counts) return 0;
+    // **作品を選んでいないときは数えない**（設計書6.29）。
+    // どの作品の数字か分からないものを出すと、選択中の作品の件数に見える
+    const work = this.selectedWork();
+    return work ? this.counts(counter, work.id) : 0;
   }
 
   /** 段階・小分類を閉じたままでも、溜まっていることが分かるようにする */

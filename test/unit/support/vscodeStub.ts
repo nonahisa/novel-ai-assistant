@@ -81,6 +81,32 @@ export const window = {
 };
 export const commands = {};
 
+/**
+ * 外の世界へ出る2つの道（クリップボードと、ブラウザで開くこと）。
+ *
+ * 投稿キット（設計書6.68）が使う外向きの道はこの2つだけで、**サイトへ
+ * HTTPを発する道は本物にも無い**。テストからは「何をコピーしたか」
+ * 「どこを開いたか」を覗く。
+ */
+export const env = {
+  clipboard: {
+    /** 直近にコピーした文字列。テストはここを読む */
+    text: "",
+    async writeText(value: string): Promise<void> {
+      env.clipboard.text = value;
+    },
+    async readText(): Promise<string> {
+      return env.clipboard.text;
+    },
+  },
+  /** 開いたURL。**開いただけ**で、中身は読まない（本物も同じ） */
+  opened: [] as string[],
+  openExternal: async (uri: { toString(): string }): Promise<boolean> => {
+    env.opened.push(uri.toString());
+    return true;
+  },
+};
+
 export const authentication = {
   getSession: async (
     _providerId: string,

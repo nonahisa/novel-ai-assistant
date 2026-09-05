@@ -460,6 +460,26 @@ describe("件数の印", () => {
     ).toBeUndefined();
   });
 
+  test("詳細メニューは全作品を合わせて数える", async () => {
+    // **作品を選ばずに見るメニュー**なので、「どこかに溜まっている」ことが
+    // 分かればよい（設計書6.17）。簡単ステップメニューが選択中の作品だけを
+    // 数えるようになっても（2026-09-05）、こちらは合算のままにする
+    const provider = new ActionDecorationProvider(async (_counter, workId) =>
+      workId === undefined ? 26 : 2
+    );
+    await provider.refresh();
+
+    expect(
+      provider.provideFileDecoration(
+        actionResourceUri(actionNode("novelai.unifyCharacters"))
+      )?.badge
+    ).toBe("26");
+    expect(
+      provider.provideFileDecoration(actionResourceUri(groupNode("資料管理")))
+        ?.badge
+    ).toBe("26");
+  });
+
   test("数えられなくてもメニューは出す", async () => {
     // 設定JSONが壊れていても、操作そのものは押せるべき
     const provider = new ActionDecorationProvider(async () => {

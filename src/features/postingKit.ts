@@ -27,6 +27,10 @@ import { episodePathFor } from "../core/bookStore";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import { bodyForPosting, extractEpisodeParts } from "../core/episodeCopy";
+import {
+  buildPostingEnvelope,
+  supportsPasteHelper,
+} from "../core/postingEnvelope";
 import { hasEmphasis } from "../core/ruby";
 import { formatChapterLabel } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
@@ -57,7 +61,14 @@ import { generateAnnouncement } from "./generateAnnouncement";
  */
 
 /** 1サイトぶんの案内で、作者が選べること */
-type SiteAnswer = "posted" | "subtitle" | "body" | "skip" | "abort";
+type SiteAnswer =
+  | "posted"
+  | "subtitle"
+  | "body"
+  /** 貼り込み係（ブラウザ拡張）へ渡すJSON封筒でコピーする（設計書6.79.3） */
+  | "envelope"
+  | "skip"
+  | "abort";
 
 export interface PostingKitResult {
   /** 台帳を書き換えたか。呼ぶ側が作品一覧を作り直すのに使う */
@@ -214,6 +225,10 @@ function pickOldestUnposted(
  * 変換 → クリップボード → 投稿ページを開く → 「投稿しましたか？」の順。
  * **通知のボタンではなく選択画面にしてある**——サブタイトルと本文を
  * 行き来しながら貼るので、選び直せる必要がある（通知は押すと閉じる）。
+ *
+ * **貼り込み係へ渡す形（設計書6.79.3）も、この選択画面の1項目に置く。**
+ * 別のコマンドを立てると、サイトと話をもう一度選び直すことになる——ここは
+ * 既に「どのサイトへ、どの話を」が決まっていて、投稿画面も開いている。
  */
 async function walkSite(input: {
   ledger: PostingLedger;
@@ -260,6 +275,22 @@ async function walkSite(input: {
           detail: "クリップボードへ入れ直します",
           answer: "body" as const,
         },
+        /*
+          貼り込み係へ渡す形（設計書6.79.3）。**対応していないサイトでは
+          選択肢そのものを出さない**——押せる形で置いておくと、noteの
+          投稿画面で待っても何も起きない理由が作者に分からない。
+        */
+        ...(supportsPasteHelper(input.site)
+          ? [
+              {
+                label: "$(link-external) 貼り込み係へ渡す形でコピー",
+                detail:
+                  "題名と本文をまとめた形でコピーします。" +
+                  "投稿画面でブラウザ拡張のボタンを押すと、欄が埋まります",
+                answer: "envelope" as const,
+              },
+            ]
+          : []),
         {
           label: "$(debug-step-over) このサイトは飛ばす",
           detail: "記録せずに次のサイトへ進みます（あとでまた案内します）",
@@ -293,6 +324,31 @@ async function walkSite(input: {
     if (picked.answer === "body") {
       await vscode.env.clipboard.writeText(body);
       hint = `本文（${body.length.toLocaleString("ja-JP")}字）をコピーし直しました`;
+      continue;
+    }
+    if (picked.answer === "envelope") {
+      /*
+        **渡すのは、いま作ったものと同じ変換済みの本文**（6.79.3）。
+        封筒に包むだけで、サイトごとの記法変換は上の `bodyForPosting` が
+        通っている——ここで作り直すと、傍点の扱いが2か所に散る。
+
+        **題名の欄にはサブタイトルを入れる。** 「サブタイトルをコピー」で
+        案内しているのと同じ値で揃える（読み取れなければ話の見出し）。
+
+        作品IDは**入っていれば**添える（6.68.5）。貼り込み係が投稿画面の
+        URLと突き合わせて、別の作品の画面への貼り込みを止める（6.79.6の2）。
+      */
+      await vscode.env.clipboard.writeText(
+        buildPostingEnvelope({
+          site: input.site,
+          workId: siteProfile(input.ledger, input.site)?.workId,
+          title: input.subtitle?.trim() || input.label,
+          body,
+        })
+      );
+      hint =
+        "貼り込み係へ渡す形でコピーしました。投稿画面を開いて、" +
+        "貼り込み係（ブラウザ拡張）のボタンを押してください。送信はご自身で";
       continue;
     }
     return picked.answer;

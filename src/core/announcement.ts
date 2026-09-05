@@ -153,6 +153,40 @@ export function composeXPost(parts: XPostParts): string {
 }
 
 /**
+ * 貼り付ける直前に、決まったURLを告知文へ入れる（設計書6.79.8）。
+ *
+ * 告知文の末尾には、作者が設定したURLか目印（`{URL}`）が入っている
+ * （`composeXPost`）。SNSへ貼るときには**そのURLが決まっている**ので、
+ * 目印を差し替える。
+ *
+ * **末尾へ足すだけにしない。** 目印が残ったまま投稿されるか、URLが2つ
+ * 並ぶかのどちらかになる。**URLが決まらなければ目印の行ごと落とす**
+ * ——「{URL}」という文字列が読者の目に触れるほうが、URLが無いことより悪い。
+ *
+ * **ここでは字数を数え直さない**（設計書6.79.8）。Xの重み付き字数の検査は
+ * `validateAnnouncement` が既に済ませており、貼り付けの経路で数え方を
+ * もう1つ作ると、同じ投稿に2つの基準ができる。
+ *
+ * @param url 決まったURL。空文字は「URL無しで文だけ貼る」という答え
+ */
+export function xPostWithUrl(composedX: string, url: string): string {
+  const link = url.trim();
+  if (composedX.includes(URL_PLACEHOLDER)) {
+    if (!link) {
+      // 目印だけの行を落とす（本文の中に混ざっている目印は差し替えに任せる）
+      return composedX
+        .split("\n")
+        .filter((line) => line.trim() !== URL_PLACEHOLDER)
+        .join("\n")
+        .replace(/\n+$/u, "");
+    }
+    return composedX.split(URL_PLACEHOLDER).join(link);
+  }
+  // 目印が無い＝作者が設定したURLが既に入っている。重ねて足さない
+  return composedX;
+}
+
+/**
  * 出来上がった告知文の気になる点を挙げる。
  *
  * **切り詰めない。** 読者に見せる文章に正解は無いので、機械が勝手に

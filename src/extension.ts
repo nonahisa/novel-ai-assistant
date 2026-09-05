@@ -817,11 +817,15 @@ export async function activate(
   context.subscriptions.push(treeView);
 
   // 操作の末尾に出す印（「AI」と未反映の件数）。
-  // 件数は全作品を合わせて数える。作品を選ばずにメニューを見るため、
-  // 「どこかに溜まっている」ことが分かればよい
-  const actionDecorations = new ActionDecorationProvider(async (counter) => {
+  // 詳細メニューの件数は全作品を合わせて数える。作品を選ばずにメニューを見るため、
+  // 「どこかに溜まっている」ことが分かればよい。
+  // **簡単ステップメニューは作品を1つ渡してくる**（最上段で選ぶ画面なので、
+  // 合算を出すと選択作品の件数に見える。作者の実機報告、2026-09-05）
+  const actionDecorations = new ActionDecorationProvider(async (counter, workId) => {
     let total = 0;
-    for (const work of registry.list()) {
+    for (const work of workId === undefined
+      ? registry.list()
+      : registry.list().filter((entry) => entry.id === workId)) {
       try {
         if (counter === "pendingUpdates") {
           total += await new PendingUpdateStore(work).count();
@@ -894,7 +898,8 @@ export async function activate(
       get: () => context.globalState.get<string[]>(STEP_GROUPS_KEY, []),
       set: (groups) => void context.globalState.update(STEP_GROUPS_KEY, groups),
     },
-    (counter) => actionDecorations.countOf(counter)
+    // **選んだ作品だけを数える**（設計書6.29）。詳細メニューの合算とは別
+    (counter, workId) => actionDecorations.countOfWork(workId, counter)
   );
   const stepView = vscode.window.createTreeView("novelai.steps", {
     treeDataProvider: stepProvider,
@@ -925,13 +930,18 @@ export async function activate(
   );
   context.subscriptions.push(stepView);
 
-  /** 未反映の件数を数え直す。抽出・反映のあとに呼ぶ */
+  /** 未反映の件数を数え直す。抽出・反映のあと、作品を選び直したあとに呼ぶ */
   const refreshActionBadges = (): void => {
     void actionDecorations.refresh().then(() => {
       actionProvider.refresh();
       // 同じ操作が2つのメニューに出るので、両方を引き直す
       stepProvider.refresh();
     });
+    // 簡単ステップメニューは選んだ作品だけを数えるので、別に数え直す
+    // （合算からその作品ぶんは割り出せない）
+    void actionDecorations
+      .refreshWork(stepProvider.selectedWork()?.id)
+      .then(() => stepProvider.refresh());
   };
   // 起動直後にも数える。前回の抽出で溜まったままのことがある
   refreshActionBadges();
@@ -2087,6 +2097,9 @@ export async function activate(
       );
       if (!picked || !("work" in picked)) return;
       stepProvider.selectWork(picked.work.id);
+      // **末尾の件数は選んだ作品のもの**なので、切り替えたら数え直す
+      // （そうしないと、前の作品の件数が並んだままになる）
+      refreshActionBadges();
     })
   );
 
