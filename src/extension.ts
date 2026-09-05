@@ -3422,6 +3422,10 @@ export async function activate(
         if (result.unreadableEpisodes > 0) {
           parts.push(`読めなかった話 ${result.unreadableEpisodes}件（ログ参照）`);
         }
+        // **プロットを切ったことも黙らない**（設計書6.77の第2段）。
+        // 末尾を落として問うたのに、作者からは「そこには指摘が無かった」と
+        // 見える。検知の中で**一度だけ**組み立てた案内をそのまま出す
+        if (result.plotTrimmedNote) parts.push(result.plotTrimmedNote);
         notifyRunCompletion({
           headline: "プロット逸脱の検知",
           parts,

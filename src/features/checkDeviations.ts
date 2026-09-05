@@ -17,6 +17,7 @@ import {
   describeCapability,
 } from "../ai/capability";
 import { SynopsisStore } from "../core/synopsisStore";
+import { referenceBudgetChars } from "../core/sizeBudget";
 import { readPlotText } from "../core/plotFile";
 import { isBlankPlotSection, parsePlotMarkdown } from "../core/plotDoc";
 import { formatChapterLabel } from "../core/episodeLabel";
@@ -75,11 +76,88 @@ export interface DeviationRunResult {
    * 見える。
    */
   unreadableEpisodes: number;
+  /**
+   * プロットを切って送ったときの案内（切らなかったときは undefined）。
+   *
+   * **黙って切らない。** プロットの末尾を落として問うているのに、
+   * 作者からは「その部分については何も指摘が無かった」と見える。
+   * 完了報告に**一度だけ**出す（話ごとに繰り返さない）。
+   */
+  plotTrimmedNote?: string;
   cancelled: boolean;
 }
 
 /** 1回で渡す本文の上限。長い話はここで切る */
 const MAX_CHAPTER_CHARS = 12_000;
+
+/**
+ * プロットにまわしてよい、モデルの上限に対する割合と、固定の頭打ち
+ * （設計書6.77の第2段、6.27.4）。
+ *
+ * **世界観と同じ扱いにする**——プロットも「参照資料」であり、逸脱検知に
+ * とっては最重要の資料なので、資料の中では最大の枠（25%・30,000字）を与える。
+ * 世界観（`worldviewSelect.ts`）と値を揃えてあるが、**寄せない**——
+ * どれだけまわしてよいかは用途ごとの判断であり、片方の都合でもう片方が
+ * 動くのを避ける（`sizeBudget.ts` が寄せるのは式だけ）。
+ *
+ * **ここだけ上限が無かった。** プロットは話の数だけ繰り返し送られるので、
+ * 長いプロットの作品では、送る量が話数ぶんに膨らむ。
+ */
+const PLOT_CONTEXT_RATIO = 0.25;
+export const PLOT_MAX_CHARS = 30_000;
+
+/**
+ * そのモデルでプロットに使ってよい字数。
+ *
+ * 131,072のモデルなら22,937字、8,192なら1,433字。固定字数だけだと、
+ * モデルを小さいものに替えたときにそのまま溢れる（設計書6.27.10の穴2）。
+ */
+export function plotMaxChars(contextWindow: number | undefined): number {
+  return referenceBudgetChars(
+    contextWindow,
+    PLOT_CONTEXT_RATIO,
+    PLOT_MAX_CHARS
+  );
+}
+
+/**
+ * プロットを上限まで切る。
+ *
+ * **切るのは末尾から**（＝残すのは先頭）。プロットは冒頭に設定・あらすじの
+ * 骨子が来る書式（`plotTemplate.ts`）で、末尾ほど細部になる。逸脱の判定に
+ * 効くのは骨格のほうである。
+ *
+ * **行の途中では切らない。** 切れ端の一行が残ると、AIはそれを完結した
+ * 一文として読み、書かれていない筋を読み取る。最後の改行まで戻す。
+ * ただし改行が一つも無いプロットでは戻れないので、そのときは素直に
+ * 上限で切る（空を返すと、照らし合わせる相手が消える）。
+ *
+ * **上限内なら1バイトも変えない。** ここが1文字でも変わると、大多数の
+ * 作品で送る内容が変わってしまう。
+ */
+export function trimPlotForDeviation(
+  plot: string,
+  maxChars: number
+): { text: string; trimmed: boolean } {
+  if (plot.length <= maxChars) return { text: plot, trimmed: false };
+  const head = plot.slice(0, maxChars);
+  const lastBreak = head.lastIndexOf("\n");
+  return {
+    text: lastBreak > 0 ? head.slice(0, lastBreak) : head,
+    trimmed: true,
+  };
+}
+
+/** 切ったことを伝える一文（完了報告とログで同じ言い方をする） */
+export function describePlotTrim(
+  usedChars: number,
+  totalChars: number
+): string {
+  return (
+    `プロットが長いため先頭 ${usedChars.toLocaleString("ja-JP")}字だけを使いました` +
+    `（全体 ${totalChars.toLocaleString("ja-JP")}字）`
+  );
+}
 
 export interface CheckDeviationsOptions {
   /**
@@ -124,17 +202,31 @@ export async function checkDeviations(
     providerId: resolved.provider.id,
   });
 
+  // **プロットにも上限を置く**（設計書6.77の第2段）。プロットは話の数だけ
+  // 繰り返し送られるので、ここだけ無上限だと長いプロットの作品で送る量が
+  // 跳ね上がる。**話ごとの送信の外で一度だけ切る**——中で切ると、同じ案内を
+  // 話数ぶん出すことになる
+  const plotBudget = plotMaxChars(modelInfo?.contextWindow);
+  const plotTrim = trimPlotForDeviation(plot, plotBudget);
+  const plotText = plotTrim.text;
+  const plotTrimmedNote = plotTrim.trimmed
+    ? describePlotTrim(plotText.length, plot.length)
+    : undefined;
+  if (plotTrimmedNote) logStep(`プロット逸脱検知：${plotTrimmedNote}`);
+
   const cache = new ChunkCache(work);
   await cache.load();
   // **プロットが変われば、同じ本文でも答えが変わる。**
-  // 含めないと、プロットを直したのに古い指摘が出続ける（矛盾検知と同じ）
+  // 含めないと、プロットを直したのに古い指摘が出続ける（矛盾検知と同じ）。
+  // **鍵に入れるのは実際に送るほう**（切ったあと）である。全文で鍵を作ると、
+  // モデルを小さいものに替えて送る量が変わったのに、前の答えを使い回す
   const cacheKeyBase = {
     feature: "deviation_check",
     // 見る種別が変われば答えも変わるので、鍵にも入れる。絞らないときは
     // 印が空になるので、`high` のモデルの鍵はこれまでと同じままになる
     promptVersion:
       `${DEVIATION_CHECK_VERSION}:` +
-      `${capabilityCacheTag(capability)}${hashText(plot).slice(0, 16)}`,
+      `${capabilityCacheTag(capability)}${hashText(plotText).slice(0, 16)}`,
     providerId: resolved.provider.id,
     model: resolved.model,
   };
@@ -197,7 +289,6 @@ export async function checkDeviations(
       `${episodes.length}話 / v${DEVIATION_CHECK_VERSION}`
   );
 
-  const plotText = plot;
   const types: readonly DeviationType[] = capability.narrowDeviationTypes
     ? LIGHT_DEVIATION_TYPES
     : DEVIATION_TYPES;
@@ -256,7 +347,9 @@ export async function checkDeviations(
 
         const validated = validateDeviations(raw, {
           text: episode.text,
-          plot,
+          // **照らすのは「送ったプロット」である。** 切り落とした先の一節を
+          // 引いた指摘は、AIが見ていない箇所を当てたことになる（＝根拠が無い）
+          plot: plotText,
         });
         rejectedCount += validated.rejected.length;
         ungroundedCount += validated.rejected.filter(
@@ -300,8 +393,8 @@ export async function checkDeviations(
               workFolder: work.folderPath,
               parts: measureParts(userPrompt, {
                 本文: bodyWithLines.length,
-                // **プロットは毎回全文を送っている。** 話の数だけ繰り返すので、
-                // 長いプロットの作品ほど効いてくる。実際の量を測る
+                // **プロットは話の数だけ繰り返し送られる。** 長いプロットの
+                // 作品ほど効いてくるので、**上限で切ったあとの**実際の量を測る
                 プロット: plotText.length,
                 あらすじ: surroundingSynopses.length,
               }),
@@ -353,6 +446,7 @@ export async function checkDeviations(
     ungroundedCount,
     failedChunks,
     unreadableEpisodes,
+    plotTrimmedNote,
     cancelled,
   };
 }

@@ -35,6 +35,7 @@
  * | `core/sizeBudget.ts` | 参照資料の予算（`referenceBudgetChars`） | モデル比＋頭打ち |
  * | `core/worldviewSelect.ts` | 矛盾検知へ渡す世界観の字数 | モデル比＋頭打ち |
  * | `core/pastSceneSelect.ts` | 矛盾検知へ渡す過去場面の字数 | モデル比＋頭打ち |
+ * | `features/checkDeviations.ts` | 逸脱検知へ渡すプロットの字数 | モデル比＋頭打ち |
  * | `core/pastSceneSelect.ts` | 過去場面の検索語数・件数 | 固定件数 |
  * | `core/chunker.ts` | チャンク字数の自動決定と上下限 | モデル比／固定字数 |
  * | `core/chunker.ts` | 固定費を引いた本文の割当 | モデル比 |
@@ -99,8 +100,11 @@
  * **第2段（挙動変更）で触る予定のもの**は設計書6.77に列挙してある
  * ——関所の出力見込み（`OUTPUT_RESERVE_TOKENS`）と実送信の既定
  * （`DEFAULT_MAX_OUTPUT_TOKENS`）が2倍違う、プロバイダによって
- * `maxOutputTokens` が効いたり効かなかったりする、逸脱検知のプロット無上限。
+ * `maxOutputTokens` が効いたり効かなかったりする。
  * **このファイルは第1段（挙動不変）の産物なので、値の是正はここでしない。**
+ *
+ * 逸脱検知のプロット無上限は**片付いた**（`features/checkDeviations.ts` の
+ * `plotMaxChars`。世界観と同じ25%・30,000字で、上限内なら挙動不変）。
  */
 
 /**
