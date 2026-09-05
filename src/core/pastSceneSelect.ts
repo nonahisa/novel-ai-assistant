@@ -4,6 +4,7 @@ import type { ExcerptSource } from "./mentionExcerpts";
 // **葉の部品から取る**（`retrievalCorpus` は台帳を読むために
 // VS Code APIを引き込む。ここは純粋関数だけで居たい）
 import { splitPassages } from "./passages";
+import { referenceBudgetChars } from "./sizeBudget";
 
 /**
  * 矛盾検知へ渡す「過去の関連場面」を選ぶ（設計書6.74）。
@@ -88,9 +89,12 @@ const SEPARATOR = "\n\n";
  * と同じ流儀。0.7字/トークンで換算する）。
  */
 export function pastSceneMaxChars(contextWindow: number | undefined): number {
-  if (!contextWindow || contextWindow <= 0) return PAST_SCENE_MAX_CHARS;
-  const fromModel = Math.floor(contextWindow * PAST_SCENE_CONTEXT_RATIO * 0.7);
-  return Math.min(PAST_SCENE_MAX_CHARS, fromModel);
+  // 世界観と同じ式を通す（設計書6.77）。比率と頭打ちだけがここの判断
+  return referenceBudgetChars(
+    contextWindow,
+    PAST_SCENE_CONTEXT_RATIO,
+    PAST_SCENE_MAX_CHARS
+  );
 }
 
 /**

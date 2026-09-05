@@ -1,5 +1,6 @@
 import { hashText } from "./textFile";
 import { blankMemoLines } from "./sceneMemo";
+import { CHARS_PER_TOKEN, TOKENS_PER_CHAR } from "./sizeBudget";
 
 /**
  * チャンクに含まれる話の内訳。
@@ -123,14 +124,13 @@ export interface ChunkOptions {
 }
 
 /**
- * 日本語1文字あたりのトークン数（安全側）。
+ * 字↔トークンの換算。**定義は `core/sizeBudget.ts` にある**（設計書6.77）。
  *
- * **換算はこの1つだけにする。** 以前は `decideChunkSize` が
- * 「0.7字/トークン」を、`decideContextSize` が「1/0.7 トークン/字」を
- * 別々に書いていた。片方だけ直すと、チャンクの大きさと確保する
- * コンテキスト長が別の前提で決まる（設計書6.27.10）。
+ * ここから再exportしているのは、`TOKENS_PER_CHAR` を `chunker` から取って
+ * いる呼び出し側（関所・コンテキストの実測・測定機能）を書き換えずに済ませる
+ * ためである。**新しく書くものは `sizeBudget` から直接取る。**
  */
-export const TOKENS_PER_CHAR = 1 / 0.7;
+export { TOKENS_PER_CHAR };
 
 /**
  * これ以上は小さくしないチャンクの字数。
@@ -193,7 +193,7 @@ export function capUntunedChunkChars(
 export function decideChunkSize(contextWindow: number): number {
   // 入力本文に割り当てる割合。残りはプロンプト・参照設定・出力に使う
   const usableTokens = Math.floor(contextWindow * 0.35);
-  const chars = Math.floor(usableTokens * 0.7);
+  const chars = Math.floor(usableTokens * CHARS_PER_TOKEN);
   // 極端な値を避けるため上下限を設ける
   return Math.max(MIN_CHUNK_CHARS, Math.min(chars, MAX_CHUNK_CHARS));
 }
@@ -236,7 +236,7 @@ export function planChunkBudget(options: {
   const forBody = options.contextWindow - overheadTokens - options.outputTokens;
   // 見積りは外れることがあるので1割の余裕を持たせる（`contextSizeForPrompt` と同じ）
   const usableTokens = Math.floor(forBody / 1.1);
-  const fits = Math.floor(usableTokens * 0.7);
+  const fits = Math.floor(usableTokens * CHARS_PER_TOKEN);
 
   if (fits >= options.requestedChars) {
     return { chunkChars: options.requestedChars, reason: "requested" };
