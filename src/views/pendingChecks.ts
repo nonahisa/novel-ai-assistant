@@ -27,7 +27,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-1",
     title: "誤字脱字・推敲の適用",
     commands: ["novelai.checkTypos", "novelai.checkProofread"],
-    count: 13,
+    count: 12,
   },
   {
     id: "A-3",
@@ -81,7 +81,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-12",
     title: "チャンクの大きさの設定",
     commands: ["novelai.openExtensionSettings"],
-    count: 7,
+    count: 6,
   },
   {
     id: "A-13",
@@ -130,12 +130,6 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     title: "提案パネルが開くか",
     commands: ["novelai.reviewProposals"],
     count: 20,
-  },
-  {
-    id: "B-4",
-    title: "編集履歴の色分け",
-    commands: ["novelai.showEditHistory"],
-    count: 3,
   },
   {
     id: "B-5",
@@ -255,7 +249,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-15",
     title: "作品選択の残件数",
     commands: ["novelai.unifyCharacters"],
-    count: 7,
+    count: 5,
   },
   {
     id: "F-16",
@@ -267,7 +261,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-17",
     title: "簡単ステップメニュー",
     commands: [],
-    count: 5,
+    count: 4,
   },
   {
     id: "F-18",
@@ -315,7 +309,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-59",
     title: "相談画面の切り替えと、再起動後の表示",
     commands: ["novelai.openChatPanel"],
-    count: 8,
+    count: 5,
   },
   {
     id: "F-60",
@@ -339,7 +333,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-63",
     title: "未チューニングの安全既定",
     commands: ["novelai.measureContext"],
-    count: 5,
+    count: 4,
   },
   {
     id: "F-64",
@@ -702,10 +696,16 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 8,
   },
   {
+    id: "F-90",
+    title: "読者の反応の取り込みとメニュー分割",
+    commands: ["novelai.recordReaderStats", "novelai.importReaderStats"],
+    count: 6,
+  },
+  {
     id: "",
     title: "LM Studio",
     commands: ["novelai.setupLmStudio", "novelai.setupAI", "novelai.testAI"],
-    count: 15,
+    count: 12,
   },
   {
     id: "",
@@ -722,4 +722,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 880;
+export const PENDING_CHECK_TOTAL = 871;

@@ -201,6 +201,101 @@ export interface PostingRankingRecord {
   note?: string;
 }
 
+/**
+ * 読者の反応の数値（設計書6.79.7）。
+ *
+ * **読めた欄だけを持つ。** 「読めなかった」を0で埋めると、次に読んだときに
+ * 減ったように見える——PVが0の日と、PVを読めなかった日は別のことである。
+ */
+export interface ReaderStatsMetrics {
+  /** 閲覧数（PV） */
+  pv?: number;
+  /** ユニークの閲覧者数 */
+  unique?: number;
+  /** ブックマーク・フォロー・お気に入りの数（サイトによって呼び方が違う） */
+  bookmarks?: number;
+  /** 評価ポイント */
+  points?: number;
+  /** いいね・星の数 */
+  likes?: number;
+  comments?: number;
+  reviews?: number;
+}
+
+export interface ReaderStatsMetricInfo {
+  key: keyof ReaderStatsMetrics;
+  /** 画面と入力欄に出す名前 */
+  label: string;
+  /** 数のあとに付ける単位（評価の「pt」）。無ければ付けない */
+  unit?: string;
+  /** 入力欄に出す例 */
+  example: string;
+}
+
+/**
+ * 扱う数値と、その並び（設計書6.79.7）。
+ *
+ * **一覧はここ1つだけが持つ。** 手入力の訊く順・封筒の読み取り・画面の
+ * 並びが同じ順になるようにする（写しを作ると、片方だけ増えて欄が消える）。
+ *
+ * **サイトごとに出し分けない。** カクヨムに「レビュー」、アルファポリスに
+ * 「ブックマーク」が無いとしても、空欄で飛ばせる以上、サイトごとの表を
+ * 持つ理由が無い——表を持てば、サイトが仕様を変えるたびに直す羽目になる。
+ */
+export const READER_STATS_METRICS: readonly ReaderStatsMetricInfo[] = [
+  { key: "pv", label: "PV", example: "1234" },
+  { key: "unique", label: "ユニーク", example: "567" },
+  { key: "bookmarks", label: "ブックマーク", example: "89" },
+  { key: "points", label: "評価", unit: "pt", example: "780" },
+  { key: "likes", label: "いいね", example: "42" },
+  { key: "comments", label: "コメント", example: "3" },
+  { key: "reviews", label: "レビュー", example: "1" },
+];
+
+/** 作品全体の数字か、1話ぶんの数字か */
+export type ReaderStatsScope = "work" | "episode";
+
+/**
+ * 解析の粒度。**無ければ「その時点の値」**（累計の表示をそのまま写したもの）。
+ */
+export type ReaderStatsPeriod = "day" | "month" | "year" | "total";
+
+export const READER_STATS_PERIODS: readonly ReaderStatsPeriod[] = [
+  "day",
+  "month",
+  "year",
+  "total",
+];
+
+/** 手で打ったのか、貼り込み係の封筒から来たのか */
+export type ReaderStatsSource = "helper" | "manual";
+
+/**
+ * 読者の反応の記録（設計書6.79.7）。
+ *
+ * **追記だけで、畳まない**（順位と同じ流儀）。同じ日に2回読めば2件になる
+ * ——これは「いま何件か」の台帳ではなく、「いつ何件だったか」の履歴である。
+ *
+ * **こちらからサイトを読みにいく処理は無い**（6.68.1の線はそのまま）。
+ * 入るのは作者が打った値か、作者が自分で開いた管理画面から貼り込み係が
+ * 作った封筒だけである。
+ */
+export interface ReaderStatsRecord {
+  site: PostingSiteId;
+  /** 読み取った日時（ISO8601）。サイトが集計した時刻ではない */
+  readAt: string;
+  scope: ReaderStatsScope;
+  /** 話数。`scope` が `"episode"` のときだけ入る（読めないこともある） */
+  episode?: number;
+  period?: ReaderStatsPeriod;
+  /** 期間の見出し（"2026-09-05"／"2026-09"／"2026"）。粒度と対で持つ */
+  periodKey?: string;
+  metrics: ReaderStatsMetrics;
+  source: ReaderStatsSource;
+  /** 作者のメモ（任意） */
+  note?: string;
+}
+
 export interface PostingRecord {
   /** 作品フォルダからの相対パス（区切りは `/`） */
   episodePath: string;
@@ -238,6 +333,12 @@ export interface PostingLedger {
    * この欄が無い台帳（この機能より前のもの）は空として読む。
    */
   rankings: PostingRankingRecord[];
+  /**
+   * 読者の反応の記録（6.79.7）。**順位と同じく追記だけ。**
+   *
+   * この欄が無い台帳（この機能より前のもの）は空として読む。
+   */
+  readerStats: ReaderStatsRecord[];
 }
 
 export function emptyPostingLedger(): PostingLedger {
@@ -247,6 +348,7 @@ export function emptyPostingLedger(): PostingLedger {
     siteProfiles: [],
     posts: [],
     rankings: [],
+    readerStats: [],
   };
 }
 
@@ -398,6 +500,39 @@ export function parsePostingLedger(raw: unknown): PostingLedger {
       };
     }) ?? [];
 
+  /*
+    読者の反応（6.79.7）。**欄が無ければ空**——この機能より前の台帳を
+    読めなくしない。中身は `assertReaderStatsRecord` が1か所で確かめる
+    （読み込みと書き込みで基準がずれると、片方が抜け道になる）。
+  */
+  const readerStats =
+    optionalObjectArray(value.readerStats, "readerStats", (entry, entryPath) => {
+      const site = requireSiteId(entry.site, `${entryPath}.site`);
+      requireNonEmptyString(entry.readAt, `${entryPath}.readAt`);
+      optionalString(entry.periodKey, `${entryPath}.periodKey`);
+      optionalString(entry.note, `${entryPath}.note`);
+      const note = ((entry.note as string | undefined) ?? "").trim();
+      const record: ReaderStatsRecord = {
+        site,
+        readAt: (entry.readAt as string).trim(),
+        scope: entry.scope as ReaderStatsScope,
+        ...(entry.episode === undefined
+          ? {}
+          : { episode: entry.episode as number }),
+        ...(entry.period === undefined
+          ? {}
+          : { period: entry.period as ReaderStatsPeriod }),
+        ...(entry.periodKey === undefined
+          ? {}
+          : { periodKey: (entry.periodKey as string).trim() }),
+        metrics: parseReaderStatsMetrics(entry.metrics, `${entryPath}.metrics`),
+        source: entry.source as ReaderStatsSource,
+        ...(note ? { note } : {}),
+      };
+      assertReaderStatsRecord(record, entryPath);
+      return record;
+    }) ?? [];
+
   return {
     schemaVersion:
       (value.schemaVersion as string | undefined) ?? POSTING_SCHEMA_VERSION,
@@ -405,7 +540,29 @@ export function parsePostingLedger(raw: unknown): PostingLedger {
     siteProfiles,
     posts,
     rankings,
+    readerStats,
   };
+}
+
+/**
+ * 読者の反応の数値を読む。**知らない欄は持ち歩かない。**
+ *
+ * 手で書き足された欄をそのまま残すと、書き戻したときに「こちらが作った
+ * 欄」に見える。読めるものだけを写す（数として読めない値はここで止める）。
+ */
+function parseReaderStatsMetrics(
+  raw: unknown,
+  path: string
+): ReaderStatsMetrics {
+  const value = objectValue(raw, path);
+  const metrics: ReaderStatsMetrics = {};
+  for (const info of READER_STATS_METRICS) {
+    const entry = value[info.key];
+    if (entry === undefined) continue;
+    if (!isReaderStatsCount(entry)) invalid(`${path}.${info.key}`);
+    metrics[info.key] = entry;
+  }
+  return metrics;
 }
 
 /**
@@ -805,5 +962,224 @@ export function validateRankInput(value: string): string | null {
   if (!value.trim()) return "順位を数字で入力してください。";
   return parseRankInput(value) === null
     ? "順位は1以上の整数で入力してください（1位なら 1）。"
+    : null;
+}
+
+/*
+  ここから下は読者の反応（設計書6.79.7）。
+
+  **順位（`withRanking`）と同じ流儀で書いてある**——追記だけ、畳まない、
+  読めない値は直さずに止める。違うのは、数値が1件に何個も入ることと、
+  「作品全体か1話か」「どの期間か」を一緒に持つことだけである。
+*/
+
+/** 読者の反応の数として受けられる値か。**0以上の整数だけ** */
+function isReaderStatsCount(value: unknown): value is number {
+  // 0は「読んだが0だった」という意味を持つので受ける（順位の1以上とは違う）
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+/** 数値が1つでも入っているか */
+export function hasReaderStatsMetrics(metrics: ReaderStatsMetrics): boolean {
+  return READER_STATS_METRICS.some(
+    (info) => metrics[info.key] !== undefined
+  );
+}
+
+/**
+ * 粒度ごとの期間の書き方。
+ *
+ * **形を決めておかないと、並べたときに揃わない。** 「2026-09-05」と
+ * 「2026/9/5」が混ざった履歴は、機械にも人にも同じ日として読めない。
+ */
+const READER_STATS_PERIOD_KEY: Record<
+  Exclude<ReaderStatsPeriod, "total">,
+  { pattern: RegExp; example: string }
+> = {
+  day: { pattern: /^\d{4}-\d{2}-\d{2}$/, example: "2026-09-05" },
+  month: { pattern: /^\d{4}-\d{2}$/, example: "2026-09" },
+  year: { pattern: /^\d{4}$/, example: "2026" },
+};
+
+/** その粒度の期間として読める書き方か */
+export function isReaderStatsPeriodKey(
+  period: ReaderStatsPeriod,
+  value: string | undefined
+): boolean {
+  // 累計（total）と「その時点」は期間を持たない
+  if (period === "total") return value === undefined;
+  return (
+    value !== undefined && READER_STATS_PERIOD_KEY[period].pattern.test(value)
+  );
+}
+
+/** 期間の入力を断るときの言い方。問題なければ null */
+export function validateReaderStatsPeriodKey(
+  period: Exclude<ReaderStatsPeriod, "total">,
+  value: string
+): string | null {
+  const trimmed = value.trim();
+  const info = READER_STATS_PERIOD_KEY[period];
+  if (!trimmed) return `期間を入力してください（例：${info.example}）。`;
+  return info.pattern.test(trimmed)
+    ? null
+    : `期間は ${info.example} の形で入力してください。`;
+}
+
+/**
+ * 記録として受けられるかを確かめる。**読めなければ直さずに止める。**
+ *
+ * 読み込みと保存の両方がここを通る（片方だけ緩いと、そちらが抜け道になる）。
+ */
+export function assertReaderStatsRecord(
+  record: ReaderStatsRecord,
+  path = "readerStats"
+): void {
+  if (!POSTING_SITES.some((site) => site.id === record.site)) {
+    invalid(`${path}.site`);
+  }
+  if (typeof record.readAt !== "string" || !record.readAt.trim()) {
+    invalid(`${path}.readAt`);
+  }
+  if (record.scope !== "work" && record.scope !== "episode") {
+    invalid(`${path}.scope`);
+  }
+  if (record.episode !== undefined) {
+    // **作品全体の数字に話数は付かない。** 付いていたらどちらが本当か
+    // こちらには決められない（畳まずに止める）
+    if (record.scope !== "episode") invalid(`${path}.episode`);
+    if (!Number.isSafeInteger(record.episode) || record.episode < 1) {
+      invalid(`${path}.episode`);
+    }
+  }
+  if (record.period !== undefined) {
+    if (!READER_STATS_PERIODS.includes(record.period)) {
+      invalid(`${path}.period`);
+    }
+    // 粒度と期間は対で意味を持つ。「日別」だけあっても、いつの日か読めない
+    if (!isReaderStatsPeriodKey(record.period, record.periodKey)) {
+      invalid(`${path}.periodKey`);
+    }
+  } else if (record.periodKey !== undefined) {
+    invalid(`${path}.periodKey`);
+  }
+  for (const info of READER_STATS_METRICS) {
+    const value = record.metrics[info.key];
+    if (value !== undefined && !isReaderStatsCount(value)) {
+      invalid(`${path}.metrics.${info.key}`);
+    }
+  }
+  // **中身の無い記録は残さない。** 「読んだ」という事実だけの行が並んでも、
+  // あとから見て何も分からない
+  if (!hasReaderStatsMetrics(record.metrics)) invalid(`${path}.metrics`);
+  if (record.source !== "helper" && record.source !== "manual") {
+    invalid(`${path}.source`);
+  }
+}
+
+/** 台帳ぜんぶの記録を確かめる（保存の関所が使う） */
+export function assertReaderStatsRecords(
+  records: readonly ReaderStatsRecord[]
+): void {
+  records.forEach((record, index) =>
+    assertReaderStatsRecord(record, `readerStats[${index}]`)
+  );
+}
+
+/**
+ * 読者の反応を書き足す（設計書6.79.7）。**元の台帳は書き換えない。**
+ *
+ * **追記だけで、既にある記録には触らない**（`withRanking` と同じ理由）。
+ * 同じ日に2回読めば2件になる——「そのとき何件だったか」の履歴だからである。
+ */
+export function withReaderStats(
+  ledger: PostingLedger,
+  record: ReaderStatsRecord
+): PostingLedger {
+  const note = (record.note ?? "").trim();
+  const metrics: ReaderStatsMetrics = {};
+  for (const info of READER_STATS_METRICS) {
+    const value = record.metrics[info.key];
+    if (value !== undefined) metrics[info.key] = value;
+  }
+
+  const next: ReaderStatsRecord = {
+    site: record.site,
+    readAt: record.readAt,
+    scope: record.scope,
+    // **空の欄は持たせない**（読んで書き戻すだけで中身が増えないように）
+    ...(record.episode === undefined ? {} : { episode: record.episode }),
+    ...(record.period === undefined ? {} : { period: record.period }),
+    ...(record.periodKey === undefined ? {} : { periodKey: record.periodKey }),
+    metrics,
+    source: record.source,
+    ...(note ? { note } : {}),
+  };
+  assertReaderStatsRecord(next);
+
+  return {
+    ...ledger,
+    readerStats: [...(ledger.readerStats ?? []), next],
+  };
+}
+
+/** そのサイトの反応を、新しい順で返す（画面はこの順に並べる） */
+export function readerStatsForSite(
+  ledger: PostingLedger,
+  site: PostingSiteId
+): ReaderStatsRecord[] {
+  return (ledger.readerStats ?? [])
+    .filter((entry) => entry.site === site)
+    .sort((left, right) => compareReadAtDesc(left, right));
+}
+
+/** そのサイトの最新の反応。1件も無ければ undefined */
+export function latestReaderStats(
+  ledger: PostingLedger,
+  site: PostingSiteId
+): ReaderStatsRecord | undefined {
+  return readerStatsForSite(ledger, site)[0];
+}
+
+/** 新しい順に並べるための比較（順位の `compareRecordedAtDesc` と同じ考え方） */
+function compareReadAtDesc(
+  left: ReaderStatsRecord,
+  right: ReaderStatsRecord
+): number {
+  const leftTime = Date.parse(left.readAt);
+  const rightTime = Date.parse(right.readAt);
+  if (!Number.isNaN(leftTime) && !Number.isNaN(rightTime)) {
+    return rightTime - leftTime;
+  }
+  return right.readAt.localeCompare(left.readAt);
+}
+
+/**
+ * 作者が打った数を読む（設計書6.79.7）。**全角の数字も読む。**
+ *
+ * 順位（`parseRankInput`）と違い、**0を受ける**——「いいねは0だった」は
+ * 記録に値する事実である。
+ *
+ * @returns 0以上の整数。読めなければ null
+ */
+export function parseReaderStatsCount(value: string): number | null {
+  const normalized = value
+    .trim()
+    // 全角数字を半角へ（U+FF10〜U+FF19）
+    .replace(/[０-９]/g, (char) =>
+      String.fromCharCode(char.charCodeAt(0) - 0xfee0)
+    )
+    // 「1,234」のように区切って打つ人がいる（画面からはその形で読める）
+    .replace(/[,，]/g, "");
+  if (!/^\d+$/.test(normalized)) return null;
+  const count = Number(normalized);
+  return isReaderStatsCount(count) ? count : null;
+}
+
+/** 数の入力を断るときの言い方。**空欄は飛ばせる**ので、空は断らない */
+export function validateReaderStatsCount(value: string): string | null {
+  if (!value.trim()) return null;
+  return parseReaderStatsCount(value) === null
+    ? "0以上の整数で入力してください（読めなければ空のままで構いません）。"
     : null;
 }

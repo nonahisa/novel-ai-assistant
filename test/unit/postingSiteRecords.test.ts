@@ -7,9 +7,11 @@ import {
 import {
   emptyPostingLedger,
   withRanking,
+  withReaderStats,
   withSiteProfile,
   withSites,
   type PostingLedger,
+  type ReaderStatsRecord,
 } from "../../src/models/posting";
 import { buildWritingStatsPanelHtml } from "../../src/views/writingStatsPanelHtml";
 
@@ -251,6 +253,96 @@ describe("なろうの分析リンク", () => {
   });
 });
 
+/**
+ * 読者の反応（設計書6.79.7）。
+ *
+ * **サイトの行に、最新の反応と履歴を添える。** 台帳にあるのは、作者が
+ * 手で打った値か、作者が自分で開いた管理画面から貼り付けた封筒だけである。
+ */
+describe("読者の反応の行", () => {
+  function withStats(ledger: PostingLedger, patch: Partial<ReaderStatsRecord>) {
+    return withReaderStats(ledger, {
+      site: "kakuyomu",
+      readAt: "2026-09-05T00:00:00.000Z",
+      scope: "work",
+      metrics: { pv: 1234 },
+      source: "manual",
+      ...patch,
+    });
+  }
+
+  test("記録が無ければ、反応の欄は空のまま", () => {
+    const ledger = withSiteProfile(registered(), "kakuyomu", {
+      workId: "1177354054892",
+    });
+    const record = buildPostingSiteRecords(ledger)[0];
+
+    expect(record.readerLatest).toBeNull();
+    expect(record.readerHistory).toEqual([]);
+  });
+
+  test("反応だけがあるサイトも、行として出す", () => {
+    const record = buildPostingSiteRecords(withStats(registered(), {}))[0];
+
+    expect(record.site).toBe("kakuyomu");
+    // あるものだけを並べる（読めなかった欄は出さない）
+    expect(record.readerLatest?.metrics).toBe("PV 1,234");
+    expect(record.readerLatest?.scope).toBe("作品全体");
+    expect(record.readerLatest?.period).toBe("その時点");
+    expect(record.readerLatest?.source).toBe("手入力");
+  });
+
+  test("あるものだけを、決まった並びで書く", () => {
+    const record = buildPostingSiteRecords(
+      withStats(registered(), {
+        metrics: { pv: 1234, bookmarks: 56, points: 789, likes: 12 },
+      })
+    )[0];
+
+    expect(record.readerLatest?.metrics).toBe(
+      "PV 1,234／ブックマーク 56／評価 789pt／いいね 12"
+    );
+  });
+
+  test("履歴は新しい順で、範囲と粒度が読める", () => {
+    let ledger = withStats(registered(), {
+      readAt: "2026-09-01T00:00:00.000Z",
+      period: "month",
+      periodKey: "2026-08",
+    });
+    ledger = withStats(ledger, {
+      readAt: "2026-09-05T00:00:00.000Z",
+      scope: "episode",
+      episode: 3,
+      metrics: { pv: 120 },
+      source: "helper",
+    });
+
+    const record = buildPostingSiteRecords(ledger)[0];
+    expect(record.readerHistory.map((row) => row.scope)).toEqual([
+      "第3話",
+      "作品全体",
+    ]);
+    expect(record.readerHistory[0].source).toBe("貼り付け");
+    expect(record.readerHistory[1].period).toBe("月 2026-08");
+  });
+
+  test("履歴は20行までにする（画面が履歴で埋まらないように）", () => {
+    let ledger = registered();
+    for (let index = 0; index < 25; index++) {
+      ledger = withStats(ledger, {
+        readAt: `2026-09-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        metrics: { pv: index + 1 },
+      });
+    }
+
+    const record = buildPostingSiteRecords(ledger)[0];
+    expect(record.readerHistory).toHaveLength(20);
+    // 落とすのは古いほうから（新しい順の先頭は残る）
+    expect(record.readerHistory[0].metrics).toBe("PV 25");
+  });
+});
+
 describe("執筆量パネルの側", () => {
   test("節の置き場と、開く道の配線がある", () => {
     const html = buildWritingStatsPanelHtml("nonce", "vscode-resource:");
@@ -262,5 +354,13 @@ describe("執筆量パネルの側", () => {
     // 分析リンク（6.79.7）。作るのはURLだけで、読みにいくのは作者である
     expect(html).toContain("analysisUrl");
     expect(html).toContain("分析（Narou.fun）を開く");
+  });
+
+  test("読者の反応の最新値と履歴を出す配線がある（設計書6.79.7）", () => {
+    const html = buildWritingStatsPanelHtml("nonce", "vscode-resource:");
+
+    expect(html).toContain("readerLatest");
+    expect(html).toContain("readerHistory");
+    expect(html).toContain("読者の反応");
   });
 });

@@ -2,10 +2,14 @@ import {
   POSTING_SITES,
   postingSiteInfo,
   rankingsForSite,
+  readerStatsForSite,
+  READER_STATS_METRICS,
   siteProfile,
   type PostingLedger,
   type PostingRankingRecord,
   type PostingSiteId,
+  type ReaderStatsMetrics,
+  type ReaderStatsRecord,
 } from "../models/posting";
 
 /**
@@ -50,7 +54,39 @@ export interface PostingSiteRecord {
   latest: PostingRankingRow | null;
   /** 新しい順 */
   history: PostingRankingRow[];
+  /** 最新の反応（設計書6.79.7）。1件も無ければ null */
+  readerLatest: ReaderStatsRow | null;
+  /** 反応の履歴。新しい順で、`READER_STATS_HISTORY_LIMIT` 行まで */
+  readerHistory: ReaderStatsRow[];
 }
+
+/**
+ * 画面に出す1行ぶんの読者の反応（設計書6.79.7）。
+ *
+ * **数字は文字列に組んでから渡す。** 「あるものだけを並べる」のは、
+ * どの欄が読めたかを知っている側（ここ）の仕事である——画面の側で
+ * 組み立てると、同じ判断が2か所（執筆量パネルと将来の出力）に散る。
+ */
+export interface ReaderStatsRow {
+  readAt: string;
+  /** 「作品全体」「第3話」 */
+  scope: string;
+  /** 「その時点」「日 2026-09-05」「累計」 */
+  period: string;
+  /** 「PV 1,234／ブックマーク 56」——**読めた欄だけ** */
+  metrics: string;
+  /** 「手入力」「貼り付け」。数字の出どころは、見る側の判断材料になる */
+  source: string;
+  note: string | null;
+}
+
+/**
+ * 履歴に出す行数の上限。
+ *
+ * **執筆量を見にきた画面が、反応の履歴で埋まらないようにする。** 日ごとに
+ * 読めば1か月で30行になる。台帳からは1件も消さない（消すのは表示だけ）。
+ */
+export const READER_STATS_HISTORY_LIMIT = 20;
 
 /**
  * サイトごとの記録を組み立てる。
@@ -73,9 +109,15 @@ export function buildPostingSiteRecords(
     const registered = ledger.sites.some((site) => site.site === info.id);
     const profile = siteProfile(ledger, info.id);
     const history = rankingsForSite(ledger, info.id).map(toRow);
-    // 出すのは「作品情報がある」か「順位がある」ときだけ。登録しただけの
-    // サイトは、まだ見せるものが無い（空の行を増やさない）
-    if (!profile && history.length === 0) continue;
+    const readerHistory = readerStatsForSite(ledger, info.id)
+      // **古いほうから落とす**（新しい順に並んでいるので先頭を残す）
+      .slice(0, READER_STATS_HISTORY_LIMIT)
+      .map(toReaderRow);
+    // 出すのは「作品情報がある」か「順位がある」か「反応がある」ときだけ。
+    // 登録しただけのサイトは、まだ見せるものが無い（空の行を増やさない）
+    if (!profile && history.length === 0 && readerHistory.length === 0) {
+      continue;
+    }
 
     records.push({
       site: info.id,
@@ -93,6 +135,8 @@ export function buildPostingSiteRecords(
           : null,
       latest: history[0] ?? null,
       history,
+      readerLatest: readerHistory[0] ?? null,
+      readerHistory,
     });
   }
 
@@ -106,6 +150,58 @@ function toRow(record: PostingRankingRecord): PostingRankingRow {
     rank: record.rank,
     note: record.note ?? null,
   };
+}
+
+function toReaderRow(record: ReaderStatsRecord): ReaderStatsRow {
+  return {
+    readAt: record.readAt,
+    scope: readerScopeLabel(record),
+    period: readerPeriodLabel(record),
+    metrics: formatReaderStatsMetrics(record.metrics),
+    source: record.source === "helper" ? "貼り付け" : "手入力",
+    note: record.note ?? null,
+  };
+}
+
+/** 「作品全体」「第3話」。話数を読めなかった行は、そう書く */
+function readerScopeLabel(record: ReaderStatsRecord): string {
+  if (record.scope === "work") return "作品全体";
+  return record.episode === undefined ? "話（番号なし）" : `第${record.episode}話`;
+}
+
+/** 「その時点」「日 2026-09-05」「累計」 */
+function readerPeriodLabel(record: ReaderStatsRecord): string {
+  switch (record.period) {
+    case "day":
+      return `日 ${record.periodKey ?? ""}`.trim();
+    case "month":
+      return `月 ${record.periodKey ?? ""}`.trim();
+    case "year":
+      return `年 ${record.periodKey ?? ""}`.trim();
+    case "total":
+      return "累計";
+    default:
+      // 粒度を持たない記録は「画面に出ていた値をそのまま写した」もの
+      return "その時点";
+  }
+}
+
+/**
+ * 数字を1行に組む（設計書6.79.7）。**読めた欄だけを、決まった順で並べる。**
+ *
+ * 並びは `READER_STATS_METRICS` が唯一の置き場である（手入力で訊く順・
+ * 封筒の読み取り・ここが同じ順になる）。
+ */
+export function formatReaderStatsMetrics(metrics: ReaderStatsMetrics): string {
+  return READER_STATS_METRICS.filter(
+    (info) => metrics[info.key] !== undefined
+  )
+    .map((info) => {
+      const value = metrics[info.key] as number;
+      // 3桁区切りは、サイトの画面と同じ読み方に揃えるため
+      return `${info.label} ${value.toLocaleString("ja-JP")}${info.unit ?? ""}`;
+    })
+    .join("／");
 }
 
 /**

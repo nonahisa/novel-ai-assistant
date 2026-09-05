@@ -315,6 +315,9 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.configurePostingSites": "allTypes",
   // 順位はどのタイプの作品にも付く（SNS記事もメモ集も投稿できる）
   "novelai.recordRanking": "allTypes",
+  // 読者の反応も同じ（設計書6.79.7）。PVやいいねは作品のタイプを選ばない
+  "novelai.importReaderStats": "allTypes",
+  "novelai.recordReaderStats": "allTypes",
 
   // ── 書き出し ──
   // PDFは「いま手元にある文字をそのまま紙にする」道具なので全タイプ。

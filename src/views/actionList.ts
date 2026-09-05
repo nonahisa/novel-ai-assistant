@@ -1016,6 +1016,36 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "——記録するのは、作者が画面で見た値だけです。" +
               "履歴は執筆量パネルの「サイトの記録」で見られます。",
           },
+          // **順位の隣に置く**（設計書6.79.7）。どちらも「投稿したあとに
+          // サイトで見た数字を書き留める」操作で、使う場面が同じである
+          {
+            kind: "action",
+            command: "novelai.importReaderStats",
+            label: "読者の反応を貼り付けて取り込む",
+            description: "AIを使わない",
+            icon: "clippy",
+            requiresWork: true,
+            // 「〜ません」の断りは、相談へ渡す束にも残る（`featureGuide` の
+            // `shorten`）。**しないことの断りは、言い切りの文で書く**
+            detail:
+              "貼り込み係（ブラウザ拡張）が管理画面から読んだPV・評価などを、" +
+              "クリップボード経由で台帳へ書き足します。" +
+              "**この拡張機能が投稿サイトへ通信することはありません。**" +
+              "対応はカクヨムとアルファポリスだけです（ほかは手入力のみ）。",
+          },
+          {
+            kind: "action",
+            command: "novelai.recordReaderStats",
+            label: "読者の反応を手入力する",
+            description: "AIを使わない",
+            icon: "heart",
+            requiresWork: true,
+            detail:
+              "サイトで見たPV・評価・いいねなどを書き留めます" +
+              "（サイト→範囲→粒度→数値の順に訊きます）。" +
+              "**サイトから自動で取ってくることはありません。**" +
+              "読めた数字だけで結構です。履歴は執筆量パネルの「サイトの記録」に出ます。",
+          },
           {
             kind: "action",
             command: "novelai.importRuby",

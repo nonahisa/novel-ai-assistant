@@ -138,6 +138,8 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
 .site-name { font-weight: 600; }
 .site-meta { font-size: 12px; color: var(--vscode-descriptionForeground); }
 .site-latest { font-size: 12px; }
+/* 順位の表と読者の反応の表を見分けるための小見出し（設計書6.79.7） */
+.site-sub { font-size: 12px; color: var(--vscode-descriptionForeground); margin: 10px 0 2px; }
 a, .link {
   color: var(--vscode-textLink-foreground);
   cursor: pointer;
@@ -503,6 +505,19 @@ function renderSiteRecords() {
         '（' + escapeHtml(formatWhen(record.latest.recordedAt)) + '）</div>'
       );
     }
+    /*
+      読者の反応（設計書6.79.7）。**あるものだけが並んだ文字列**が届く
+      （どの欄が読めたかの判断は core 側が持つ）。
+    */
+    if (record.readerLatest) {
+      head.push(
+        '<div class="site-latest">最新の反応 ' +
+        escapeHtml(record.readerLatest.metrics) +
+        '（' + escapeHtml(record.readerLatest.scope) + '・' +
+        escapeHtml(record.readerLatest.period) + '　' +
+        escapeHtml(formatWhen(record.readerLatest.readAt)) + '）</div>'
+      );
+    }
 
     const rows = record.history.map((row) =>
       '<tr><td>' + escapeHtml(formatWhen(row.recordedAt)) + '</td>' +
@@ -515,19 +530,42 @@ function renderSiteRecords() {
         '<th>メモ</th></tr></thead><tbody>' + rows.join('') + '</tbody></table>'
       : '';
 
+    // **反応の表には見出しを付ける。** 順位の表と2つ並ぶので、
+    // どちらの数字なのかが列名だけでは分からない
+    const readerRows = (record.readerHistory || []).map((row) =>
+      '<tr><td>' + escapeHtml(formatWhen(row.readAt)) + '</td>' +
+      '<td>' + escapeHtml(row.scope) + '</td>' +
+      '<td>' + escapeHtml(row.period) + '</td>' +
+      '<td>' + escapeHtml(row.metrics) + '</td>' +
+      '<td>' + escapeHtml(row.source) + '</td></tr>'
+    );
+    const readerTable = readerRows.length > 0
+      ? '<div class="site-sub">読者の反応</div>' +
+        '<table><thead><tr><th>日時</th><th>範囲</th><th>粒度</th>' +
+        '<th>反応</th><th>出どころ</th></tr></thead><tbody>' +
+        readerRows.join('') + '</tbody></table>'
+      : '';
+
     return '<div class="site"><div class="site-head">' + head.join('') + '</div>' +
-      table + '</div>';
+      table + readerTable + '</div>';
   });
 
   // 分析リンクも「開くだけ」であることを、その場で言う（6.79.7）
   const analysisNote = records.some((record) => record.analysisUrl)
     ? '分析（Narou.fun）はブラウザで開くだけで、中身を読み取ることもしません。'
     : '';
+  // 反応の出どころも、その場で言う（6.79.7）。巡回して集めた数字ではない
+  const readerNote = records.some(
+    (record) => (record.readerHistory || []).length > 0
+  )
+    ? '読者の反応は、手入力か、ご自身で開いた管理画面から貼り付けたものだけです。'
+    : '';
 
   host.innerHTML =
     '<h3>サイトの記録</h3>' + blocks.join('') +
     '<div class="note">順位は「ランキングを記録する」で書き足した値です。' +
-    'サイトから自動で取ってくることはありません。' + analysisNote + '</div>';
+    'サイトから自動で取ってくることはありません。' + readerNote + analysisNote +
+    '</div>';
 
   host.querySelectorAll('[data-url]').forEach((el) => {
     el.addEventListener('click', () => {

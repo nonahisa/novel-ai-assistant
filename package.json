@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "「設定が前の話と食い違っていないか不安」「誤字脱字の見直しがつらい」「AIに原稿を触られたくない」——小説を書く人の困りごとを引き受けるVSCode拡張機能です。プロットづくりから執筆・校正・投稿の準備、EPUB・PDFでの出版までを一つの場所で。本文から設定資料を自動で作り、矛盾・誤字脱字・伏線の回収漏れを調べ、執筆量を記録します。AIは提案するだけで、原稿は書き換えません。無料の手元AI（Ollama / LM Studio）だけでも使え、その場合、原稿はパソコンの外へ出ません。※現在テスト中です。動作の確認が済んでいない機能が含まれます。",
-  "version": "0.33.8",
+  "version": "0.33.9",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -811,6 +811,18 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.importReaderStats",
+        "title": "読者の反応を貼り付けて取り込む",
+        "icon": "$(clippy)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.recordReaderStats",
+        "title": "読者の反応を手入力する",
+        "icon": "$(heart)",
+        "category": "小説執筆"
+      },
+      {
         "command": "novelai.showEditHistory",
         "title": "編集履歴を見る",
         "category": "小説執筆",
@@ -1098,9 +1110,19 @@
           "group": "1_stats@9"
         },
         {
-          "command": "novelai.addWorkMemo",
+          "command": "novelai.importReaderStats",
           "when": "view == novelai.works && viewItem =~ /^work-/",
           "group": "1_stats@10"
+        },
+        {
+          "command": "novelai.recordReaderStats",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
+          "group": "1_stats@11"
+        },
+        {
+          "command": "novelai.addWorkMemo",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
+          "group": "1_stats@12"
         },
         {
           "command": "novelai.gitSync",
@@ -1363,6 +1385,14 @@
         },
         {
           "command": "novelai.recordRanking",
+          "when": "true"
+        },
+        {
+          "command": "novelai.importReaderStats",
+          "when": "true"
+        },
+        {
+          "command": "novelai.recordReaderStats",
           "when": "true"
         },
         {

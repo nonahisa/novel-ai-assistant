@@ -315,6 +315,10 @@ import {
   recordRanking,
 } from "./features/postingKit";
 import {
+  importReaderStats,
+  recordReaderStats,
+} from "./features/readerStats";
+import {
   proposeChapters,
   suggestChapterName,
 } from "./features/proposeChapters";
@@ -4225,6 +4229,25 @@ export async function activate(
       const work = await resolveWork(node, registry);
       if (!work) return;
       const result = await recordRanking(work);
+      if (result.changed) await refreshWritingStatsPanel(work, deviceId);
+    }),
+    /*
+      読者の反応（設計書6.79.7）。**順位と同じ扱い**——サイトへは取りに
+      いかず、作者が打った値か、作者が自分で開いた管理画面から貼り込み係が
+      作った封筒を受けるだけである。
+
+      記録が出るのは執筆量パネルなので、そちらを作り直す（一覧は変わらない）。
+    */
+    registerCommand("novelai.importReaderStats", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      const result = await importReaderStats(work);
+      if (result.changed) await refreshWritingStatsPanel(work, deviceId);
+    }),
+    registerCommand("novelai.recordReaderStats", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      const result = await recordReaderStats(work);
       if (result.changed) await refreshWritingStatsPanel(work, deviceId);
     })
   );

@@ -2,6 +2,10 @@ import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import type { AIRegistry } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { CharacterStore } from "../core/characterStore";
 import { appendChatLog } from "../core/chatLog";
 import { PendingUpdateStore } from "../core/pendingUpdates";
@@ -224,6 +228,20 @@ export async function applyChatToSettings(
           model: resolved.model,
           // 拾い出しなので揺らさない（抽出と同じ扱い）
           temperature: 0.2,
+          /*
+            **実際に送る上限と、場所の見込みは別物である**（設計書6.77の
+            第2段）。渡さないと、関所も実送信もグローバル設定（既定16,384）
+            で動く——会話を丸ごと送るこの機能では、非力な機械で確保する
+            `num_ctx` がいちばん大きくなる。
+          */
+          maxOutputTokens: resolveOutputTokensForSend(
+            resolved.provider.id,
+            resolved.model
+          ),
+          plannedOutputTokens: resolveOutputTokensForPlanning(
+            resolved.provider.id,
+            resolved.model
+          ),
           jsonSchema: CHAT_SETTINGS_SYNC_SCHEMA as unknown as object,
           disableThinking: true,
           meta: { feature: "chat_settings_sync", workFolder: work.folderPath },

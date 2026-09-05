@@ -125,6 +125,9 @@ const PASSES_BOTH_TOKENS: Array<[file: string, marker: string]> = [
   ["workChatPanel.ts", '"search_terms"'],
   ["settingsPanel.ts", '"search_terms"'],
   ["settingsPanel.ts", '"settings_enrich"'],
+  // 0.33.9で残っていた1か所（設計書6.77の第2段その1）。相談の会話を丸ごと
+  // 送るので、ここが設定値のままだと非力な機械で `num_ctx` がいちばん育つ
+  ["chatSettingsSync.ts", '"chat_settings_sync"'],
 ];
 
 describe("出力トークンの2つの欄の配り先", () => {
@@ -279,6 +282,26 @@ describe("切り詰めを、切り詰めとして伝える", () => {
     expect(
       source.includes("切り詰め"),
       `${file} に切り詰めを伝える文言が無い`
+    ).toBe(true);
+  });
+
+  /**
+   * 設定の取り込み（掘り下げ・項目の充実）も、**文言を自前で書かない**。
+   *
+   * 上限が実測から来ているときに「設定を大きくして」と言うのは嘘で、
+   * 作者は直らない操作を繰り返す（`truncatedOutputAdvice` の判定が唯一の
+   * 置き場である）。値と出どころを一緒に受け取る口を通す。
+   */
+  test("設定の取り込みは、上限の出どころごと truncatedOutputAdvice へ渡す", () => {
+    const source = read("settingsPanel.ts");
+
+    expect(
+      source.includes("resolveOutputLimitForSend"),
+      "出どころつきの口を使っていない"
+    ).toBe(true);
+    expect(
+      source.includes("truncatedOutputAdvice"),
+      "切り詰めの案内を自前で書いている"
     ).toBe(true);
   });
 });

@@ -3,6 +3,7 @@ import * as path from "./paths";
 import { fromUri } from "./paths";
 import type { WorkEntry } from "../models/types";
 import {
+  assertReaderStatsRecords,
   assertUniqueSiteProfiles,
   assertUniqueSites,
   emptyPostingLedger,
@@ -41,6 +42,8 @@ export type PostingStoreErrorKind =
   | "modified_externally"
   | "invalid_json"
   | "duplicate_site"
+  /** 読者の反応の記録が、記録として読めない（設計書6.79.7） */
+  | "invalid_record"
   | "unsaved_changes"
   | "not_loaded";
 
@@ -149,6 +152,23 @@ export class PostingStore {
       );
     }
 
+    /*
+      読者の反応（設計書6.79.7）も、**書く側の最後の関所を通す。**
+      封筒（ブラウザ拡張）から来た値が混ざる経路なので、読み込みだけを
+      厳しくしても足りない——中身の無い記録や負の数を台帳へ入れない。
+    */
+    try {
+      assertReaderStatsRecords(ledger.readerStats ?? []);
+    } catch (error) {
+      throw new PostingStoreError(
+        `投稿状態を保存できませんでした。${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        "invalid_record",
+        this.target ?? undefined
+      );
+    }
+
     const target = await this.filePath();
     await this.assertSaveAllowed(target);
 
@@ -171,6 +191,14 @@ export class PostingStore {
           : {}),
         posts: ledger.posts,
         rankings: ledger.rankings ?? [],
+        /*
+          読者の反応（6.79.7）。**1件も無ければ欄ごと書かない**——作品情報
+          （`siteProfiles`）と同じで、使っていない作品の台帳を空の入れ物で
+          膨らませない。
+        */
+        ...(ledger.readerStats?.length
+          ? { readerStats: ledger.readerStats }
+          : {}),
       },
       null,
       2

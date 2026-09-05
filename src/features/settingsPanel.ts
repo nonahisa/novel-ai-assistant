@@ -77,8 +77,10 @@ import {
   type MentionExcerpt,
 } from "../core/mentionExcerpts";
 import {
+  resolveOutputLimitForSend,
   resolveOutputTokensForPlanning,
   resolveOutputTokensForSend,
+  truncatedOutputAdvice,
 } from "../ai/outputLimit";
 import { loadExcerptSources } from "../core/manuscriptSources";
 import { expandNameVariants } from "../core/termIndex";
@@ -1977,10 +1979,16 @@ export class SettingsPanel {
     // 以前はここが `resolveMaxOutputTokens()` をそのまま使っており、台帳に
     // 実測が付いても値は設定値のまま古びていた。決め方は `ai/outputLimit.ts`
     // の1か所だけが持つ
-    const maxOutputTokens = resolveOutputTokensForSend(
+    //
+    // **出どころごと受け取る。** 切り詰められたときの直し方は、上限が
+    // 設定から来たのか実測から来たのかで変わる（`truncatedOutputAdvice`）。
+    // 実測で頭打ちなのに「設定を大きくして」と言うと、作者は直らない操作を
+    // 繰り返すことになる
+    const outputLimit = resolveOutputLimitForSend(
       resolved.provider.id,
       resolved.model
     );
+    const maxOutputTokens = outputLimit.tokens;
     const plannedOutputTokens = resolveOutputTokensForPlanning(
       resolved.provider.id,
       resolved.model
@@ -2019,8 +2027,9 @@ export class SettingsPanel {
       if (result.truncated) {
         this.post({
           type: "error",
-          message:
-            "AIの応答が出力上限で切り詰められました。観点を絞って、もう一度試してください。",
+          // 文言は `ai/outputLimit.ts` が持つ（判定の置き場を2つにしない）。
+          // ここで足すのは、この画面でできる絞り方だけ
+          message: `${truncatedOutputAdvice(outputLimit)}観点を絞ると通ることがあります。`,
         });
         return undefined;
       }
