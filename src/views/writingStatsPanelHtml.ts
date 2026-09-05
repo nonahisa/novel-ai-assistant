@@ -460,8 +460,20 @@ function renderSiteRecords() {
   const host = document.getElementById('site-records');
   if (!host) return;
   const records = (state && state.siteRecords) || [];
+  /*
+    **台帳を読めなかったことは、画面で言う**（設計書6.79.7、0.33.9）。
+    以前はログへ残すだけだったので、作者からは「サイトの記録」が理由も
+    分からず消えたようにしか見えなかった。ほかの統計は従来どおり出す。
+  */
+  const failure = (state && state.siteRecordsError) || '';
+  const failureNote = failure
+    ? '<div class="note">サイトの記録を読めませんでした：' +
+      escapeHtml(failure) + '</div>'
+    : '';
   if (records.length === 0) {
-    host.innerHTML = '';
+    host.innerHTML = failureNote
+      ? '<h3>サイトの記録</h3>' + failureNote
+      : '';
     return;
   }
 
@@ -530,48 +542,74 @@ function renderSiteRecords() {
         '<th>メモ</th></tr></thead><tbody>' + rows.join('') + '</tbody></table>'
       : '';
 
-    // **反応の表には見出しを付ける。** 順位の表と2つ並ぶので、
-    // どちらの数字なのかが列名だけでは分からない
-    const readerRows = (record.readerHistory || []).map((row) =>
-      '<tr><td>' + escapeHtml(formatWhen(row.readAt)) + '</td>' +
-      '<td>' + escapeHtml(row.scope) + '</td>' +
-      '<td>' + escapeHtml(row.period) + '</td>' +
-      '<td>' + escapeHtml(row.metrics) + '</td>' +
-      '<td>' + escapeHtml(row.source) + '</td></tr>'
-    );
-    const readerTable = readerRows.length > 0
-      ? '<div class="site-sub">読者の反応</div>' +
-        '<table><thead><tr><th>日時</th><th>範囲</th><th>粒度</th>' +
-        '<th>反応</th><th>出どころ</th></tr></thead><tbody>' +
-        readerRows.join('') + '</tbody></table>'
-      : '';
+    const readerTable = renderReaderStatsTable(record.readerHistory || []);
 
     return '<div class="site"><div class="site-head">' + head.join('') + '</div>' +
       table + readerTable + '</div>';
   });
 
-  // 分析リンクも「開くだけ」であることを、その場で言う（6.79.7）
-  const analysisNote = records.some((record) => record.analysisUrl)
-    ? '分析（Narou.fun）はブラウザで開くだけで、中身を読み取ることもしません。'
-    : '';
-  // 反応の出どころも、その場で言う（6.79.7）。巡回して集めた数字ではない
-  const readerNote = records.some(
-    (record) => (record.readerHistory || []).length > 0
-  )
-    ? '読者の反応は、手入力か、ご自身で開いた管理画面から貼り付けたものだけです。'
-    : '';
-
+  const note = siteRecordsNote(records);
   host.innerHTML =
-    '<h3>サイトの記録</h3>' + blocks.join('') +
-    '<div class="note">順位は「ランキングを記録する」で書き足した値です。' +
-    'サイトから自動で取ってくることはありません。' + readerNote + analysisNote +
-    '</div>';
+    '<h3>サイトの記録</h3>' + failureNote + blocks.join('') +
+    // 言うことが無ければ、空の但し書きを置かない（作品情報だけの作品）
+    (note ? '<div class="note">' + note + '</div>' : '');
 
   host.querySelectorAll('[data-url]').forEach((el) => {
     el.addEventListener('click', () => {
       vscode.postMessage({ type: 'openExternal', url: el.dataset.url });
     });
   });
+}
+
+/**
+ * 読者の反応の表（設計書6.79.7）。
+ *
+ * **見出しを付ける。** 順位の表と2つ並ぶので、どちらの数字なのかが
+ * 列名だけでは分からない。
+ *
+ * **メモの列も出す**（0.33.9のレビュー）。手入力でも封筒でもメモは台帳に
+ * 入るのに、ここに列が無かったので、書いたのに二度と読めない欄になっていた
+ * （順位の表と同じ形にする）。
+ */
+function renderReaderStatsTable(rows) {
+  const body = (rows || []).map((row) =>
+    '<tr><td>' + escapeHtml(formatWhen(row.readAt)) + '</td>' +
+    '<td>' + escapeHtml(row.scope) + '</td>' +
+    '<td>' + escapeHtml(row.period) + '</td>' +
+    '<td>' + escapeHtml(row.metrics) + '</td>' +
+    '<td>' + escapeHtml(row.source) + '</td>' +
+    '<td>' + escapeHtml(row.note || '') + '</td></tr>'
+  );
+  if (body.length === 0) return '';
+  return '<div class="site-sub">読者の反応</div>' +
+    '<table><thead><tr><th>日時</th><th>範囲</th><th>粒度</th>' +
+    '<th>反応</th><th>出どころ</th><th>メモ</th></tr></thead><tbody>' +
+    body.join('') + '</tbody></table>';
+}
+
+/**
+ * 表の下の注記。**あるものについてだけ言う**（0.33.9のレビュー）。
+ *
+ * 順位を1件も記録していない作品でも「順位は…」で始まっていたので、反応だけを
+ * 記録している作者には身に覚えのない説明になっていた。どの但し書きも
+ * 「サイトから自動で取ってこない」ことを言うためにある（6.68.1の線）。
+ */
+function siteRecordsNote(records) {
+  const notes = [];
+  if (records.some((record) => (record.history || []).length > 0)) {
+    notes.push('順位は「ランキングを記録する」で書き足した値です。' +
+      'サイトから自動で取ってくることはありません。');
+  }
+  if (records.some((record) => (record.readerHistory || []).length > 0)) {
+    notes.push('読者の反応は、手入力か、ご自身で開いた管理画面から' +
+      '貼り付けたものだけです。');
+  }
+  // 分析リンクも「開くだけ」であることを、その場で言う（6.79.7）
+  if (records.some((record) => record.analysisUrl)) {
+    notes.push('分析（Narou.fun）はブラウザで開くだけで、' +
+      '中身を読み取ることもしません。');
+  }
+  return notes.join('');
 }
 
 /** 記録した日時。読めない値はそのまま出す（作者が手で書いたかもしれない） */

@@ -168,7 +168,10 @@ export function parseReaderStatsEnvelope(
     );
   }
 
-  const { workId, readAt, entries } = value;
+  const { readAt, entries } = value;
+  // **`null` は「欄なし」と同じ**（0.33.9）。読めなかった欄を `null` で書くのは
+  // 素直な書き方で、そこで断ると数字が正しい封筒まで丸ごと落ちる
+  const workId = absent(value.workId) ? undefined : value.workId;
   if (workId !== undefined && typeof workId !== "string") {
     return reject("封筒の作品IDを読めませんでした。");
   }
@@ -205,6 +208,17 @@ export function parseReaderStatsEnvelope(
   };
 }
 
+/**
+ * 書かれていない欄か。**`null` も「欄なし」として扱う**（0.33.9）。
+ *
+ * 封筒を作るのは別プロジェクト（ブラウザ拡張）で、読めなかった欄を `null` で
+ * 書くのは素直な書き方である。断ると、数字は正しいのに書き方の流儀だけで
+ * 封筒ごと落ちる——**1行でも読めなければ封筒ごと断る**作りなので、影響が大きい。
+ */
+function absent(value: unknown): boolean {
+  return value === undefined || value === null;
+}
+
 /** 1行を読む。読めなければ undefined（呼ぶ側が封筒ごと断る） */
 function parseEntry(raw: unknown): ReaderStatsEnvelopeEntry | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
@@ -215,7 +229,7 @@ function parseEntry(raw: unknown): ReaderStatsEnvelopeEntry | undefined {
   const scope = value.scope;
   if (scope !== "work" && scope !== "episode") return undefined;
 
-  const episode = value.episode;
+  const episode = absent(value.episode) ? undefined : value.episode;
   if (episode !== undefined) {
     // 作品全体の行に話数は付かない（どちらが本当かこちらには決められない）
     if (scope !== "episode") return undefined;
@@ -224,7 +238,7 @@ function parseEntry(raw: unknown): ReaderStatsEnvelopeEntry | undefined {
     }
   }
 
-  const period = value.period;
+  const period = absent(value.period) ? undefined : value.period;
   if (
     period !== undefined &&
     (typeof period !== "string" ||
@@ -232,10 +246,16 @@ function parseEntry(raw: unknown): ReaderStatsEnvelopeEntry | undefined {
   ) {
     return undefined;
   }
-  const periodKey = value.periodKey;
-  if (periodKey !== undefined && typeof periodKey !== "string") {
+  const rawPeriodKey = absent(value.periodKey) ? undefined : value.periodKey;
+  if (rawPeriodKey !== undefined && typeof rawPeriodKey !== "string") {
     return undefined;
   }
+  // **空文字も「欄なし」。** 期間を読めなかった行が、粒度だけの行として
+  // 断られてしまう（`"" ` は日付でも月でもない）
+  const periodKey =
+    rawPeriodKey !== undefined && rawPeriodKey.trim() === ""
+      ? undefined
+      : rawPeriodKey;
   /*
     **粒度と期間は対で意味を持つ**（台帳の `assertReaderStatsRecord` と
     同じ基準）。「日別」だけあっても、いつの日か読めない——ここで通すと、

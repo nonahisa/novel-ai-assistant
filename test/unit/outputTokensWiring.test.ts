@@ -286,22 +286,63 @@ describe("切り詰めを、切り詰めとして伝える", () => {
   });
 
   /**
-   * 設定の取り込み（掘り下げ・項目の充実）も、**文言を自前で書かない**。
+   * 設定の取り込み（掘り下げ・項目の充実）・相談の反映・キャッチコピーは、
+   * **文言を自前で書かない**。
    *
    * 上限が実測から来ているときに「設定を大きくして」と言うのは嘘で、
    * 作者は直らない操作を繰り返す（`truncatedOutputAdvice` の判定が唯一の
    * 置き場である）。値と出どころを一緒に受け取る口を通す。
    */
-  test("設定の取り込みは、上限の出どころごと truncatedOutputAdvice へ渡す", () => {
-    const source = read("settingsPanel.ts");
+  test.each(["settingsPanel.ts", "chatSettingsSync.ts", "generateBlurb.ts"])(
+    "%s は、上限の出どころごと truncatedOutputAdvice へ渡す",
+    (file) => {
+      const source = read(file);
 
-    expect(
-      source.includes("resolveOutputLimitForSend"),
-      "出どころつきの口を使っていない"
-    ).toBe(true);
-    expect(
-      source.includes("truncatedOutputAdvice"),
-      "切り詰めの案内を自前で書いている"
-    ).toBe(true);
-  });
+      expect(
+        source.includes("resolveOutputLimitForSend"),
+        `${file} が出どころつきの口を使っていない`
+      ).toBe(true);
+      expect(
+        source.includes("truncatedOutputAdvice"),
+        `${file} が切り詰めの案内を自前で書いている`
+      ).toBe(true);
+    }
+  );
+
+  /**
+   * **同じファイルに2つの経路がある機能は、経路ごとに見る**（0.33.9）。
+   *
+   * 紹介文（P-06）とキャッチコピー（P-08）は `generateBlurb.ts` に同居して
+   * いる。ファイル全体の `includes` だけだと、**キャッチコピー側が揃って
+   * いれば紹介文側が自前の文言のままでも通る**——実際そうなっていた。
+   */
+  test.each([["generateWorkBlurb"], ["generateCatchphrases"]])(
+    "generateBlurb.ts の %s は、上限の出どころごと案内へ渡す",
+    (name) => {
+      const body = functionBody(read("generateBlurb.ts"), name);
+
+      expect(body, `${name} が見つからない`).not.toBe("");
+      expect(
+        body.includes("resolveOutputLimitForSend"),
+        `${name} が出どころつきの口を使っていない`
+      ).toBe(true);
+      expect(
+        body.includes("truncatedOutputAdvice"),
+        `${name} が切り詰めの案内を自前で書いている`
+      ).toBe(true);
+    }
+  );
 });
+
+/**
+ * その関数の本体だけを切り出す（次の `export` の手前まで）。
+ *
+ * 関数の中まで構文解析はしない——欄の有無を見る `hasField` と同じで、
+ * **書き忘れは「無い」ことなので、無いことを見る検査でよい。**
+ */
+function functionBody(source: string, name: string): string {
+  const start = source.indexOf(`function ${name}(`);
+  if (start < 0) return "";
+  const next = source.indexOf("\nexport ", start);
+  return next < 0 ? source.slice(start) : source.slice(start, next);
+}

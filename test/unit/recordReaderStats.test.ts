@@ -272,7 +272,33 @@ describe("読者の反応を手入力する", () => {
     expect(informed.concat(warned).join("")).toContain("記録しませんでした");
   });
 
-  test("取りやめ（Esc）では何も書かない", async () => {
+  /**
+   * **数値の段のEscは「入力おわり」**（0.33.9のレビュー、中2）。
+   *
+   * 数値は7問あり、読めるのは2つか3つというのが普通である。残りを空欄で
+   * 送り続けるより、Escで抜けるほうが自然な操作になる——ここで捨てると、
+   * 打った値が黙って消える。取りやめの出口は、前の3つの選択画面にある
+   * （順位のメモのEscを「メモ無し」として扱うのと同じ判断）。
+   */
+  test("数値の途中でEscを押したら、そこまでの値で記録する", async () => {
+    bothSites();
+
+    stubQuickPick([
+      (items) => items.find((item) => item.site === "narou"),
+      (items) => items.find((item) => item.scope === "work"),
+      (items) => items.find((item) => item.period === null),
+    ]);
+    // PV・ユニーク・ブックマークを入れて、4問目（評価）でEsc
+    stubInputs(["1234", "567", "89", undefined]);
+
+    const result = await recordReaderStats(work);
+
+    expect(result.changed).toBe(true);
+    const saved = (readLedger().readerStats ?? [])[0];
+    expect(saved.metrics).toEqual({ pv: 1234, unique: 567, bookmarks: 89 });
+  });
+
+  test("1問目でEscを押したら、記録せずに知らせる", async () => {
     bothSites();
     const before = disk.get(ledgerPath);
 
@@ -281,13 +307,34 @@ describe("読者の反応を手入力する", () => {
       (items) => items.find((item) => item.scope === "work"),
       (items) => items.find((item) => item.period === null),
     ]);
-    // PVを入れたあとにEsc
-    stubInputs(["1234", undefined]);
+    stubInputs([undefined]);
 
     const result = await recordReaderStats(work);
 
     expect(result.changed).toBe(false);
     expect(disk.get(ledgerPath)).toEqual(before);
+    expect(informed.concat(warned).join("")).toContain("記録しませんでした");
+  });
+
+  /**
+   * **話番号にカンマは効かせない**（0.33.9のレビュー、L6）。
+   *
+   * 数値の欄は「1,234」と打たれるので区切りを落とすが、話番号で同じことを
+   * すると「1,2」が12話になる——別の話の数字が混ざって、あとから分けられない。
+   */
+  test("話番号にカンマが入っていたら、入力欄で断る", async () => {
+    bothSites();
+
+    stubQuickPick([
+      (items) => items.find((item) => item.site === "kakuyomu"),
+      (items) => items.find((item) => item.scope === "episode"),
+      (items) => items.find((item) => item.period === null),
+    ]);
+    const asked = stubInputs(["1,2", undefined]);
+
+    await recordReaderStats(work);
+
+    expect(asked[0].rejected).toBeTruthy();
   });
 });
 

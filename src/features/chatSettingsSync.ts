@@ -3,8 +3,9 @@ import type { WorkEntry } from "../models/types";
 import type { AIRegistry } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
 import {
+  resolveOutputLimitForSend,
   resolveOutputTokensForPlanning,
-  resolveOutputTokensForSend,
+  truncatedOutputAdvice,
 } from "../ai/outputLimit";
 import { CharacterStore } from "../core/characterStore";
 import { appendChatLog } from "../core/chatLog";
@@ -198,13 +199,29 @@ export async function applyChatToSettings(
   // 「新規」として提案される
   const knownNames = loaded.characters.map((character) => character.name);
 
+  /*
+    **上限は、出どころごと受け取る**（設計書6.77の第2段、0.33.9のレビュー）。
+    切り詰められたときの直し方は、上限が設定から来たのか実測から来たのかで
+    変わる（`truncatedOutputAdvice`）。実測で頭打ちなのに「設定を大きくして」
+    と言うと、作者は直らない操作を繰り返すことになる。
+  */
+  const outputLimit = resolveOutputLimitForSend(
+    resolved.provider.id,
+    resolved.model
+  );
+
   /**
    * 拾い出しの結果。**「読めなかった」を空振りと区別する**（0.32.6のレビュー）。
    * 読めなかった回に覚え書きを書くと、その会話は二度と送れなくなる。
+   *
+   * **切り詰めも別に持つ**（0.33.9のレビュー）。会話を丸ごと送るこの機能は
+   * 上限に当たりやすく、「読み取れませんでした」としか言わないと、作者は
+   * 同じ会話を何度も送り直すことになる。
    */
   let outcome:
-    | { malformed: true; text: string }
-    | { malformed: false; verified: VerifiedChatDecisions };
+    | { kind: "truncated"; text: string }
+    | { kind: "malformed"; text: string }
+    | { kind: "ok"; verified: VerifiedChatDecisions };
   try {
     // **中止できるようにする**（設計書6.43）。相談の会話を丸ごと送るので
     // 数十秒かかることがあり、有料AIではその間ずっと課金される
@@ -234,10 +251,7 @@ export async function applyChatToSettings(
             で動く——会話を丸ごと送るこの機能では、非力な機械で確保する
             `num_ctx` がいちばん大きくなる。
           */
-          maxOutputTokens: resolveOutputTokensForSend(
-            resolved.provider.id,
-            resolved.model
-          ),
+          maxOutputTokens: outputLimit.tokens,
           plannedOutputTokens: resolveOutputTokensForPlanning(
             resolved.provider.id,
             resolved.model
@@ -247,16 +261,23 @@ export async function applyChatToSettings(
           meta: { feature: "chat_settings_sync", workFolder: work.folderPath },
           signal: controller.signal,
         });
+        /*
+          **切り詰めを先に見る。** 途中で切れた応答はJSONとしても読めない
+          ので、読み取りの失敗として扱うと「AIの気まぐれ」に見えてしまう。
+        */
+        if (response.truncated) {
+          return { kind: "truncated" as const, text: response.text };
+        }
         const parsed = parseChatSettingsSync(response.text);
         // **読めなかったことを、0件として飲み込まない。**
         // 応答そのものは呼び出し側で記録へ残す（ここでは判断だけ）
         if (parsed.malformed) {
-          return { malformed: true as const, text: response.text };
+          return { kind: "malformed" as const, text: response.text };
         }
         // **根拠が会話に実在するかを、ここで確かめる。**
         // AIが「決まった」と言っただけのものは積まない
         return {
-          malformed: false as const,
+          kind: "ok" as const,
           verified: verifyChatDecisions(parsed.decisions, trimmed.turns),
         };
       }
@@ -277,7 +298,28 @@ export async function applyChatToSettings(
     return { ...EMPTY, failed: true };
   }
 
-  if (outcome.malformed) {
+  if (outcome.kind === "truncated") {
+    logFailure("相談を資料へ反映：応答が出力上限で切り詰められました", {
+      作品: work.title,
+      モデル: resolved.model,
+      上限: `${outputLimit.tokens}（${outputLimit.source}）`,
+      応答: responseExcerptForLog(outcome.text),
+    });
+    /*
+      **覚え書きを残さない**（読めなかったときと同じ扱い）。切り詰めは
+      やり直せる失敗なので、この会話を「反映済み」にしてはいけない。
+
+      文言は `ai/outputLimit.ts` が持つ（判定の置き場を2つにしない）。
+      ここで足すのは、この機能でできる絞り方だけである。
+    */
+    void vscode.window.showWarningMessage(
+      `${truncatedOutputAdvice(outputLimit)}` +
+        "会話が長いときは、反映したい範囲まで新しい相談を始めてください。"
+    );
+    return { ...EMPTY, failed: true };
+  }
+
+  if (outcome.kind === "malformed") {
     // **応答の中身を捨てない**（実装ルール5）。何が返ってきたのかが
     // 分からないと、プロンプトが悪いのかモデルが悪いのかを切り分けられない
     logFailure("相談を資料へ反映：AIの答えを読み取れませんでした", {

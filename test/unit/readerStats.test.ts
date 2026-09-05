@@ -6,10 +6,15 @@ import {
   READER_STATS_ENVELOPE_VERSION,
 } from "../../src/core/readerStatsEnvelope";
 import {
+  assertReaderStatsRecords,
   emptyPostingLedger,
   latestReaderStats,
   parsePostingLedger,
+  parseReaderStatsEpisode,
   readerStatsForSite,
+  readPostingLedger,
+  validateReaderStatsEpisode,
+  validateReaderStatsPeriodKey,
   withReaderStats,
   withSiteProfile,
   withSites,
@@ -212,6 +217,180 @@ describe("読者の反応の台帳", () => {
 });
 
 /**
+ * **知らない指標が混ざった台帳**（0.33.9のレビュー、中1）。
+ *
+ * 台帳は `設定/` に置いてGitで同期する。**新しい版の拡張機能が足した指標を、
+ * 古い版の機械が読む**ことが現実に起きる——そのとき、知らない欄しか無い行で
+ * 台帳ぜんぶが読めなくなると、投稿系の機能が丸ごと止まる。
+ * その行だけを読み飛ばし、ほかの行と台帳は読めるようにする。
+ */
+describe("知らない指標だけの行", () => {
+  const base = {
+    schemaVersion: "1",
+    sites: [{ site: "narou", newEpisodeUrl: url.narou }],
+    posts: [],
+  };
+  const known = {
+    site: "narou",
+    readAt: "2026-09-05T00:00:00.000Z",
+    scope: "work",
+    metrics: { pv: 10 },
+    source: "manual",
+  };
+  const unknownOnly = {
+    ...known,
+    readAt: "2026-09-06T00:00:00.000Z",
+    // 将来の版が足した指標（この版は知らない）
+    metrics: { reviewsPerDay: 3 },
+  };
+
+  test("知らない欄しか無い行は読み飛ばし、ほかの行も台帳も読める", () => {
+    const ledger = parsePostingLedger({
+      ...base,
+      readerStats: [known, unknownOnly],
+    });
+
+    expect(ledger.readerStats).toHaveLength(1);
+    expect(ledger.readerStats[0].metrics).toEqual({ pv: 10 });
+    // 台帳そのものは読めている（投稿系の機能が止まらない）
+    expect(ledger.sites).toHaveLength(1);
+  });
+
+  test("読み飛ばした件数を返す（呼ぶ側が記録へ残せる）", () => {
+    const result = readPostingLedger({
+      ...base,
+      readerStats: [known, unknownOnly, unknownOnly],
+    });
+
+    expect(result.skippedReaderStats).toBe(2);
+    expect(result.ledger.readerStats).toHaveLength(1);
+  });
+
+  test("知っている欄が1つでもあれば、その行は残る（知らない欄だけ捨てる）", () => {
+    const ledger = parsePostingLedger({
+      ...base,
+      readerStats: [{ ...known, metrics: { pv: 10, reviewsPerDay: 3 } }],
+    });
+
+    expect(ledger.readerStats[0].metrics).toEqual({ pv: 10 });
+  });
+
+  test("欄がひとつも無い行は、直さずに止める（手で消した跡は読み飛ばさない）", () => {
+    expect(() =>
+      parsePostingLedger({ ...base, readerStats: [{ ...known, metrics: {} }] })
+    ).toThrow();
+  });
+
+  test("書き側は従来どおり拒否する（読みだけを緩める）", () => {
+    expect(() =>
+      withReaderStats(registered(), record({ metrics: {} }))
+    ).toThrow();
+    expect(() =>
+      assertReaderStatsRecords([record({ metrics: {} })])
+    ).toThrow();
+  });
+});
+
+/**
+ * **最新の反応の選び方**（0.33.9のレビュー、L4）。
+ *
+ * 貼り込み係の封筒は1回の読み取りで何行も入るので、**同じ `readAt` の行が
+ * 並ぶ**。「最新の反応」に1話ぶんの数字が出ると、作品の勢いを読み違える。
+ */
+describe("同じ日時のときの並び", () => {
+  test("作品全体を先にする", () => {
+    let ledger = withReaderStats(
+      registered(),
+      record({ scope: "episode", episode: 3, metrics: { pv: 120 } })
+    );
+    ledger = withReaderStats(ledger, record({ metrics: { pv: 1234 } }));
+
+    expect(latestReaderStats(ledger, "kakuyomu")?.scope).toBe("work");
+    expect(latestReaderStats(ledger, "kakuyomu")?.metrics.pv).toBe(1234);
+  });
+
+  test("範囲が同じなら、累計・粒度なしを先にする", () => {
+    let ledger = withReaderStats(
+      registered(),
+      record({ period: "day", periodKey: "2026-09-05", metrics: { pv: 12 } })
+    );
+    ledger = withReaderStats(ledger, record({ metrics: { pv: 1234 } }));
+
+    expect(latestReaderStats(ledger, "kakuyomu")?.period).toBeUndefined();
+    expect(latestReaderStats(ledger, "kakuyomu")?.metrics.pv).toBe(1234);
+  });
+});
+
+/**
+ * **期間の入力**（0.33.9のレビュー、L5）。形だけでなく、実在するかを見る。
+ */
+describe("期間の入力", () => {
+  test("月は01〜12だけ", () => {
+    expect(validateReaderStatsPeriodKey("month", "2026-09")).toBeNull();
+    expect(validateReaderStatsPeriodKey("month", "2026-13")).toBeTruthy();
+    expect(validateReaderStatsPeriodKey("month", "2026-00")).toBeTruthy();
+  });
+
+  test("日は実在する日付だけ", () => {
+    expect(validateReaderStatsPeriodKey("day", "2026-09-05")).toBeNull();
+    // 閏年の2月29日は実在する
+    expect(validateReaderStatsPeriodKey("day", "2024-02-29")).toBeNull();
+    expect(validateReaderStatsPeriodKey("day", "2026-02-29")).toBeTruthy();
+    expect(validateReaderStatsPeriodKey("day", "2026-04-31")).toBeTruthy();
+    expect(validateReaderStatsPeriodKey("day", "2026-09-00")).toBeTruthy();
+  });
+
+  /**
+   * **読み込みは形だけを見る。** ここまで厳しくすると、手で打ち間違えた
+   * 1行で台帳ぜんぶが読めなくなる（中1で直したのと同じ形の事故になる）。
+   */
+  test("台帳の読み込みは、実在しない日付でも止めない", () => {
+    const ledger = parsePostingLedger({
+      schemaVersion: "1",
+      sites: [{ site: "narou", newEpisodeUrl: url.narou }],
+      readerStats: [
+        {
+          site: "narou",
+          readAt: "2026-09-05T00:00:00.000Z",
+          scope: "work",
+          period: "day",
+          periodKey: "2026-02-30",
+          metrics: { pv: 1 },
+          source: "manual",
+        },
+      ],
+    });
+
+    expect(ledger.readerStats).toHaveLength(1);
+  });
+});
+
+/**
+ * **話番号の入力**（0.33.9のレビュー、L6）。
+ *
+ * 数値（PVなど）は「1,234」と打たれるので区切りを落とすが、**話番号で
+ * 同じことをすると「1,2」が12話になる**——別の話の数字が混ざる。
+ */
+describe("話番号の入力", () => {
+  test("カンマは受けない", () => {
+    expect(parseReaderStatsEpisode("1,2")).toBeNull();
+    expect(parseReaderStatsEpisode("1，2")).toBeNull();
+    expect(validateReaderStatsEpisode("1,2")).toBeTruthy();
+  });
+
+  test("1以上の整数だけ。全角の数字は読む", () => {
+    expect(parseReaderStatsEpisode("3")).toBe(3);
+    expect(parseReaderStatsEpisode("３")).toBe(3);
+    expect(parseReaderStatsEpisode(" 12 ")).toBe(12);
+    expect(parseReaderStatsEpisode("0")).toBeNull();
+    expect(parseReaderStatsEpisode("-1")).toBeNull();
+    expect(parseReaderStatsEpisode("")).toBeNull();
+    expect(validateReaderStatsEpisode("")).toBeTruthy();
+    expect(validateReaderStatsEpisode("3")).toBeNull();
+  });
+});
+
+/**
  * 逆向きの封筒（設計書6.79.7の3）。
  *
  * **貼り込みの封筒（`novelai-post`）とは別の形である。** 向こうは母艦→ブラウザ、
@@ -300,6 +479,53 @@ describe("読者の反応の封筒", () => {
     for (const raw of broken) {
       expect(parseReaderStatsEnvelope(JSON.stringify(raw)).ok).toBe(false);
     }
+  });
+
+  /**
+   * **`null` は「欄なし」と同じに扱う**（0.33.9のレビュー、L3）。
+   *
+   * 封筒を作るのは別プロジェクト（ブラウザ拡張）で、読めなかった欄を
+   * `null` で書くのは素直な書き方である。断ると、**封筒ごと取り込めない**
+   * ——数字は正しいのに、書き方の流儀だけで落ちることになる。
+   */
+  test("null の欄は、書かれていないものとして読む", () => {
+    const result = parseReaderStatsEnvelope(
+      JSON.stringify({
+        ...envelope,
+        workId: null,
+        entries: [
+          {
+            scope: "work",
+            episode: null,
+            period: null,
+            periodKey: null,
+            note: null,
+            metrics: { pv: 1 },
+          },
+        ],
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.envelope.workId).toBeUndefined();
+    expect(result.envelope.entries[0]).toEqual({
+      scope: "work",
+      metrics: { pv: 1 },
+    });
+  });
+
+  test("空文字の periodKey も、欄なしとして読む", () => {
+    const result = parseReaderStatsEnvelope(
+      JSON.stringify({
+        ...envelope,
+        entries: [{ scope: "work", periodKey: "   ", metrics: { pv: 1 } }],
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.envelope.entries[0].periodKey).toBeUndefined();
   });
 
   test("組み立てと読み取りが往復する（別プロジェクトとの約束を固定する）", () => {

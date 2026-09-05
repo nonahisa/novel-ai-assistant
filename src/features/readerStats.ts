@@ -3,9 +3,11 @@ import type { WorkEntry } from "../models/types";
 import {
   latestReaderStats,
   parseReaderStatsCount,
+  parseReaderStatsEpisode,
   postingSiteInfo,
   READER_STATS_METRICS,
   validateReaderStatsCount,
+  validateReaderStatsEpisode,
   validateReaderStatsPeriodKey,
   withReaderStats,
   type PostingLedger,
@@ -157,19 +159,14 @@ export async function recordReaderStats(
       prompt: "話番号を数字で入れてください（第3話なら 3）",
       placeHolder: "3",
       ignoreFocusOut: true,
-      validateInput: (value) => {
-        if (!value.trim()) return "話番号を入力してください。";
-        const parsed = parseReaderStatsCount(value);
-        // 数の読み方は数値と同じ（全角も受ける）が、**0話は無い**
-        return parsed === null || parsed < 1
-          ? "話番号は1以上の整数で入力してください。"
-          : undefined;
-      },
+      // **話番号は数値とは別の読み方をする**（0.33.9）。数値は「1,234」と
+      // 打たれるので区切りを落とすが、話番号でそれをすると「1,2」が12話になる
+      validateInput: (value) => validateReaderStatsEpisode(value) ?? undefined,
     });
     if (text === undefined) return UNCHANGED;
-    const parsed = parseReaderStatsCount(text);
+    const parsed = parseReaderStatsEpisode(text);
     // 入力欄で断っているので、ここへ来るのは画面の作りが変わったときだけ
-    if (parsed === null || parsed < 1) return UNCHANGED;
+    if (parsed === null) return UNCHANGED;
     episode = parsed;
   }
 
@@ -191,9 +188,9 @@ export async function recordReaderStats(
     periodKey = text.trim();
   }
 
+  // **数値の段のEscは「入力おわり」**（0.33.9）。取りやめの出口は、
+  // ここより前の3つの選択画面にある（`askSite`・`askScope`・`askPeriod`）
   const metrics = await askMetrics(info.label);
-  // Escは取りやめ（ここまでの答えも書かない）
-  if (!metrics) return UNCHANGED;
 
   if (Object.keys(metrics).length === 0) {
     void vscode.window.showInformationMessage(
@@ -321,23 +318,28 @@ async function askPeriod(
 /**
  * 数値を順に訊く。**空欄は飛ばせる。**
  *
- * @returns 入れてもらった数値。取りやめ（Esc）なら undefined
+ * **Escは「入力おわり」として扱う**（0.33.9のレビュー）。7問あって読めるのは
+ * 2つか3つ、というのが普通なので、残りをEscで抜けるのは自然な操作である。
+ * ここで捨てると、**打った値が黙って消える**——取りやめの出口は、この前の
+ * 3つの選択画面（サイト・範囲・粒度）の「取りやめる」にある。順位のメモの
+ * Escを「メモ無し」として扱うのと同じ判断である。
+ *
+ * @returns 入れてもらった数値。1つも入らなければ空（呼ぶ側が知らせる）
  */
-async function askMetrics(
-  siteLabel: string
-): Promise<ReaderStatsMetrics | undefined> {
+async function askMetrics(siteLabel: string): Promise<ReaderStatsMetrics> {
   const metrics: ReaderStatsMetrics = {};
   for (const info of READER_STATS_METRICS) {
     const text = await askText({
       title: `${siteLabel} の${info.label}`,
       prompt:
         `${info.label}の数を入れてください` +
-        "（そのサイトに無い項目や、読めなかった項目は空のままで構いません）",
+        "（そのサイトに無い項目や、読めなかった項目は空のままで構いません。" +
+        "Escを押すと、ここまでの値で記録します）",
       placeHolder: info.example,
       ignoreFocusOut: true,
       validateInput: (value) => validateReaderStatsCount(value) ?? undefined,
     });
-    if (text === undefined) return undefined;
+    if (text === undefined) break;
     const value = parseReaderStatsCount(text);
     // 空欄は「読めなかった」。0で埋めると、次に読んだとき減ったように見える
     if (value !== null) metrics[info.key] = value;

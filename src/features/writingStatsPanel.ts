@@ -181,6 +181,7 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
     perEpisodeGoal: goals.perEpisodeChars,
   });
   const contest = buildContestProgress(goals, scanned.stats.totals.net, today);
+  const siteRecords = await readSiteRecords(work);
 
   return {
     title: `${work.title} の執筆量`,
@@ -219,8 +220,10 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
     },
     episodes: table,
     // サイトごとの作品情報と順位の履歴（設計書6.68.5）。
-    // **1件も無ければ空の配列**で渡し、画面は節ごと出さない
-    siteRecords: await readSiteRecords(work),
+    // **1件も無ければ空の配列**で渡し、画面は節ごと出さない。
+    // 読めなかったときは理由を添える（黙って消さない。0.33.9）
+    siteRecords: siteRecords.records,
+    siteRecordsError: siteRecords.error,
     // 締切のある作品では、いちばん上に「あと何日・あと何字」を出す。
     // 数字だけでは間に合うか判断できないので、文にして添える
     contest: contest
@@ -247,23 +250,40 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
   };
 }
 
+/** 「サイトの記録」の読み込み結果。読めなかったときは理由を持つ */
+export interface SiteRecordsResult {
+  records: PostingSiteRecord[];
+  /** 読めなかった理由。読めていれば null（画面はこの行を出さない） */
+  error: string | null;
+}
+
 /**
  * 投稿状態の台帳から「サイトの記録」を読む（設計書6.68.5）。
  *
  * **読めなくても執筆量パネルは開く。** ここは添え物なので、台帳が壊れて
  * いるからといって文字数のグラフまで見られなくなるのは筋が悪い。
- * 黙って落とさないよう、理由はログへ残す（通知は出さない——パネルを
- * 開くたびに同じ知らせが出ると、直すまで邪魔になる）。
+ *
+ * **ただし黙って消さない**（0.33.9のレビュー）。以前はログへ残すだけだった
+ * ので、作者からは「サイトの記録」が理由も分からず消えたようにしか見え
+ * なかった。理由は画面へ1行だけ出す（通知は出さない——パネルを開くたびに
+ * 同じ知らせが出ると、直すまで邪魔になる）。**エクスポートしてあるのは
+ * 試験から呼ぶため**で、呼ぶのはこのファイルの中だけである。
  */
-async function readSiteRecords(work: WorkEntry): Promise<PostingSiteRecord[]> {
+export async function readSiteRecords(
+  work: WorkEntry
+): Promise<SiteRecordsResult> {
   try {
-    return buildPostingSiteRecords(await new PostingStore(work).load());
+    return {
+      records: buildPostingSiteRecords(await new PostingStore(work).load()),
+      error: null,
+    };
   } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
     logFailure("執筆量パネルのサイトの記録の読み込み", {
       作品: work.title,
-      内容: error instanceof Error ? error.message : String(error),
+      内容: detail,
     });
-    return [];
+    return { records: [], error: detail };
   }
 }
 

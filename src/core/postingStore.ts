@@ -7,7 +7,7 @@ import {
   assertUniqueSiteProfiles,
   assertUniqueSites,
   emptyPostingLedger,
-  parsePostingLedger,
+  readPostingLedger,
   POSTING_FILE,
   POSTING_SCHEMA_VERSION,
   type PostingLedger,
@@ -15,6 +15,7 @@ import {
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { hashBytes } from "./textFile";
 import { atomicWriteFile } from "./atomicWrite";
+import { logStep } from "./logger";
 
 /**
  * 投稿状態の台帳（`設定/投稿状態.json`）の読み書き（設計書6.68.2）。
@@ -69,6 +70,15 @@ export class PostingStore {
    */
   private snapshot: string | null = null;
   private loaded = false;
+  /**
+   * 読み込みで読み飛ばした、読者の反応の行（JSONそのままの形。0.33.9）。
+   *
+   * **保存でそのまま書き戻す。** 読めなかったからといって落とすと、
+   * 新しい版の機械が書いた行を、こちらが黙って消すことになる
+   * （同期で降ってきた「投稿済み」を上書きしないのと同じ理由）。
+   * 検証はしない——読めないものを整えれば、整えた形がこちらの作り物になる。
+   */
+  private skippedReaderStatsRows: unknown[] = [];
 
   constructor(private readonly work: WorkEntry) {}
 
@@ -95,6 +105,8 @@ export class PostingStore {
     const target = await this.filePath();
     this.loaded = false;
     this.snapshot = null;
+    // 前に読んだ台帳の行を、別の台帳へ持ち込まない
+    this.skippedReaderStatsRows = [];
 
     let bytes: Uint8Array | null = null;
     try {
@@ -110,7 +122,23 @@ export class PostingStore {
 
     let ledger: PostingLedger;
     try {
-      ledger = parsePostingLedger(JSON.parse(new TextDecoder().decode(bytes)));
+      const read = readPostingLedger(
+        JSON.parse(new TextDecoder().decode(bytes))
+      );
+      ledger = read.ledger;
+      /*
+        **読み飛ばした行があれば、記録に残す**（設計書6.79.7、0.33.9）。
+        知らない指標しか無い行は台帳を止めずに飛ばすが、黙って減らすと
+        「記録したはずの行が無い」ことにしか気づけない。通知は出さない
+        ——開くたびに同じ知らせが出ると、直すまで邪魔になる。
+      */
+      this.skippedReaderStatsRows = read.skippedReaderStatsRows;
+      if (read.skippedReaderStats > 0) {
+        logStep(
+          `設定/${POSTING_FILE}: この版が知らない指標しか無い読者の反応を ` +
+            `${read.skippedReaderStats}件 読み飛ばしました（保存時もそのまま持ち回します）`
+        );
+      }
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       throw new PostingStoreError(
@@ -172,6 +200,19 @@ export class PostingStore {
     const target = await this.filePath();
     await this.assertSaveAllowed(target);
 
+    /*
+      **読み飛ばした行を、末尾へ書き戻す**（0.33.9）。読めた行だけを
+      書き戻すと、新しい版の機械が書いた行をこちらが消すことになる。
+
+      並びは元の位置へ戻さず末尾でよい——**追記だけの配列**で、読む側は
+      `readAt` で並べ直す（`readerStatsForSite`）。位置を覚えて戻すには
+      読み飛ばした行の前後関係も持ち回ることになり、得るものが無い。
+    */
+    const readerStats: unknown[] = [
+      ...(ledger.readerStats ?? []),
+      ...this.skippedReaderStatsRows,
+    ];
+
     const body = JSON.stringify(
       {
         schemaVersion: ledger.schemaVersion || POSTING_SCHEMA_VERSION,
@@ -194,11 +235,10 @@ export class PostingStore {
         /*
           読者の反応（6.79.7）。**1件も無ければ欄ごと書かない**——作品情報
           （`siteProfiles`）と同じで、使っていない作品の台帳を空の入れ物で
-          膨らませない。
+          膨らませない。読み飛ばした行だけがある台帳では、**その行だけを
+          書く**（読めないからといって落とさない）。
         */
-        ...(ledger.readerStats?.length
-          ? { readerStats: ledger.readerStats }
-          : {}),
+        ...(readerStats.length ? { readerStats } : {}),
       },
       null,
       2

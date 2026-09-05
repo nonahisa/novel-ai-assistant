@@ -407,12 +407,46 @@ function validateSiteUrl(site: PostingSiteId, trimmed: string): string | null {
 }
 
 /**
+ * 台帳を読んだ結果（設計書6.79.7）。
+ *
+ * **読み飛ばした件数を、台帳と一緒に返す。** 黙って減らすと、あとから
+ * 「記録したはずの行が無い」ことにしか気づけない。記録へ残すのは呼ぶ側
+ * （`core/postingStore.ts`）の仕事である——`models` はログを持たない。
+ */
+export interface PostingLedgerReadResult {
+  ledger: PostingLedger;
+  /** 知らない指標しか無かったので読み飛ばした、読者の反応の行数 */
+  skippedReaderStats: number;
+  /**
+   * 読み飛ばした行そのもの（**JSONそのままの形**）。
+   *
+   * **保存で消さないために返す**（0.33.9）。読み飛ばした行を持たずに
+   * 書き戻すと、**新しい版の機械が書いた行を、古い版の機械が黙って消す**
+   * ——台帳は `設定/` に置いてGitで同期するので、これは現実に起きる。
+   *
+   * **`PostingLedger` には載せない。** あの型が表すのは「読めた行」だけで
+   * あり、読めなかったものを混ぜると、台帳を読む側が中身を当てにできなく
+   * なる。持ち回すのは書き戻す口（`core/postingStore.ts`）の仕事である。
+   */
+  skippedReaderStatsRows: unknown[];
+}
+
+/**
  * 作者が手で編集したJSONを読む。**壊れていたら例外を投げる。**
  *
  * 勝手に直して上書きすると、作者が貼ったURLや投稿の記録が黙って消える
  * （章立て・本の設計図と同じ約束）。
  */
 export function parsePostingLedger(raw: unknown): PostingLedger {
+  return readPostingLedger(raw).ledger;
+}
+
+/**
+ * 台帳を読み、**読み飛ばした行の件数も返す**（設計書6.79.7）。
+ *
+ * 件数まで要らない呼び出し側は `parsePostingLedger` を使う。
+ */
+export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
   const value = objectValue(raw, `設定/${POSTING_FILE}`);
   optionalString(value.schemaVersion, "schemaVersion");
 
@@ -505,42 +539,81 @@ export function parsePostingLedger(raw: unknown): PostingLedger {
     読めなくしない。中身は `assertReaderStatsRecord` が1か所で確かめる
     （読み込みと書き込みで基準がずれると、片方が抜け道になる）。
   */
-  const readerStats =
-    optionalObjectArray(value.readerStats, "readerStats", (entry, entryPath) => {
-      const site = requireSiteId(entry.site, `${entryPath}.site`);
-      requireNonEmptyString(entry.readAt, `${entryPath}.readAt`);
-      optionalString(entry.periodKey, `${entryPath}.periodKey`);
-      optionalString(entry.note, `${entryPath}.note`);
-      const note = ((entry.note as string | undefined) ?? "").trim();
-      const record: ReaderStatsRecord = {
-        site,
-        readAt: (entry.readAt as string).trim(),
-        scope: entry.scope as ReaderStatsScope,
-        ...(entry.episode === undefined
-          ? {}
-          : { episode: entry.episode as number }),
-        ...(entry.period === undefined
-          ? {}
-          : { period: entry.period as ReaderStatsPeriod }),
-        ...(entry.periodKey === undefined
-          ? {}
-          : { periodKey: (entry.periodKey as string).trim() }),
-        metrics: parseReaderStatsMetrics(entry.metrics, `${entryPath}.metrics`),
-        source: entry.source as ReaderStatsSource,
-        ...(note ? { note } : {}),
-      };
-      assertReaderStatsRecord(record, entryPath);
-      return record;
-    }) ?? [];
+  // 読み飛ばした行は、**生のまま**覚えておく（書き戻す側が持ち回る）
+  const skippedReaderStatsRows: unknown[] = [];
+
+  const parsedReaderStats =
+    optionalObjectArray<ReaderStatsRecord | null>(
+      value.readerStats,
+      "readerStats",
+      (entry, entryPath) => {
+        const site = requireSiteId(entry.site, `${entryPath}.site`);
+        requireNonEmptyString(entry.readAt, `${entryPath}.readAt`);
+        optionalString(entry.periodKey, `${entryPath}.periodKey`);
+        optionalString(entry.note, `${entryPath}.note`);
+        const note = ((entry.note as string | undefined) ?? "").trim();
+        const read = parseReaderStatsMetrics(
+          entry.metrics,
+          `${entryPath}.metrics`
+        );
+        /*
+          **知らない指標しか無い行は、この行だけを読み飛ばす**（0.33.9）。
+
+          台帳は `設定/` に置いてGitで同期するので、**新しい版が足した指標を
+          古い版の機械が読む**ことが現実に起きる。ここで例外を投げると台帳
+          ぜんぶが読めなくなり、投稿系の機能が丸ごと止まって、執筆量パネルの
+          「サイトの記録」が無言で消える。読める行と台帳は読めるようにする。
+
+          **知っている欄が1つでもあれば、その行は残す**（知らない欄だけ捨てる
+          のは従来どおり）。欄がひとつも書かれていない行は、指標を手で消した
+          跡なので、これまでどおり直さずに止める。
+
+          **飛ばした行は、読んだ形のまま控える。** 整えてから控えると、
+          整えた形が「こちらが作った行」になる——読めなかったものは、
+          読めなかったなりに、そのまま書き戻すのが唯一の安全な扱いである。
+        */
+        if (!hasReaderStatsMetrics(read.metrics) && read.sawUnknown) {
+          skippedReaderStatsRows.push(entry);
+          return null;
+        }
+        const record: ReaderStatsRecord = {
+          site,
+          readAt: (entry.readAt as string).trim(),
+          scope: entry.scope as ReaderStatsScope,
+          ...(entry.episode === undefined
+            ? {}
+            : { episode: entry.episode as number }),
+          ...(entry.period === undefined
+            ? {}
+            : { period: entry.period as ReaderStatsPeriod }),
+          ...(entry.periodKey === undefined
+            ? {}
+            : { periodKey: (entry.periodKey as string).trim() }),
+          metrics: read.metrics,
+          source: entry.source as ReaderStatsSource,
+          ...(note ? { note } : {}),
+        };
+        assertReaderStatsRecord(record, entryPath);
+        return record;
+      }
+    ) ?? [];
+
+  const readerStats = parsedReaderStats.filter(
+    (record): record is ReaderStatsRecord => record !== null
+  );
 
   return {
-    schemaVersion:
-      (value.schemaVersion as string | undefined) ?? POSTING_SCHEMA_VERSION,
-    sites,
-    siteProfiles,
-    posts,
-    rankings,
-    readerStats,
+    ledger: {
+      schemaVersion:
+        (value.schemaVersion as string | undefined) ?? POSTING_SCHEMA_VERSION,
+      sites,
+      siteProfiles,
+      posts,
+      rankings,
+      readerStats,
+    },
+    skippedReaderStats: skippedReaderStatsRows.length,
+    skippedReaderStatsRows,
   };
 }
 
@@ -549,11 +622,15 @@ export function parsePostingLedger(raw: unknown): PostingLedger {
  *
  * 手で書き足された欄をそのまま残すと、書き戻したときに「こちらが作った
  * 欄」に見える。読めるものだけを写す（数として読めない値はここで止める）。
+ *
+ * **知らない欄を見たかどうかも返す**（0.33.9）。知らない欄しか無い行は、
+ * 呼ぶ側がその行だけを読み飛ばす——`{}` になったのが「未来の版の指標」
+ * なのか「欄を消した跡」なのかは、ここでしか見分けられない。
  */
 function parseReaderStatsMetrics(
   raw: unknown,
   path: string
-): ReaderStatsMetrics {
+): { metrics: ReaderStatsMetrics; sawUnknown: boolean } {
   const value = objectValue(raw, path);
   const metrics: ReaderStatsMetrics = {};
   for (const info of READER_STATS_METRICS) {
@@ -562,7 +639,9 @@ function parseReaderStatsMetrics(
     if (!isReaderStatsCount(entry)) invalid(`${path}.${info.key}`);
     metrics[info.key] = entry;
   }
-  return metrics;
+  const known = new Set<string>(READER_STATS_METRICS.map((info) => info.key));
+  const sawUnknown = Object.keys(value).some((key) => !known.has(key));
+  return { metrics, sawUnknown };
 }
 
 /**
@@ -1013,7 +1092,16 @@ export function isReaderStatsPeriodKey(
   );
 }
 
-/** 期間の入力を断るときの言い方。問題なければ null */
+/**
+ * 期間の入力を断るときの言い方。問題なければ null。
+ *
+ * **入力のときだけ、実在する日付かまで確かめる**（0.33.9）。「2026-13」や
+ * 「2026-02-30」は打ち間違いで、そのまま入れると並べたときに行方不明になる。
+ *
+ * **読み込み（`isReaderStatsPeriodKey`）は形だけを見る。** あちらまで
+ * 厳しくすると、古い台帳に1つ打ち間違いがあるだけで台帳ぜんぶが読めなく
+ * なる——直せるのは打つ瞬間だけで、読む瞬間ではない。
+ */
 export function validateReaderStatsPeriodKey(
   period: Exclude<ReaderStatsPeriod, "total">,
   value: string
@@ -1021,9 +1109,37 @@ export function validateReaderStatsPeriodKey(
   const trimmed = value.trim();
   const info = READER_STATS_PERIOD_KEY[period];
   if (!trimmed) return `期間を入力してください（例：${info.example}）。`;
-  return info.pattern.test(trimmed)
+  if (!info.pattern.test(trimmed)) {
+    return `期間は ${info.example} の形で入力してください。`;
+  }
+  return isRealPeriodKey(period, trimmed)
     ? null
-    : `期間は ${info.example} の形で入力してください。`;
+    : `${trimmed} という${period === "month" ? "月" : "日"}はありません。実在する日付を入力してください（例：${info.example}）。`;
+}
+
+/**
+ * 形の合った期間キーが、実在する年月日を指しているか。
+ *
+ * 日は `Date` で往復させて確かめる——2月30日は3月2日として作られるので、
+ * 作ったあとに元の値へ戻るかを見れば、実在しない日を見分けられる。
+ */
+function isRealPeriodKey(
+  period: Exclude<ReaderStatsPeriod, "total">,
+  value: string
+): boolean {
+  if (period === "year") return true;
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(5, 7));
+  if (month < 1 || month > 12) return false;
+  if (period === "month") return true;
+  const day = Number(value.slice(8, 10));
+  // UTCで作る（手元の時計の時間帯で日付がずれないように）
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
 }
 
 /**
@@ -1141,8 +1257,30 @@ export function latestReaderStats(
   return readerStatsForSite(ledger, site)[0];
 }
 
-/** 新しい順に並べるための比較（順位の `compareRecordedAtDesc` と同じ考え方） */
+/**
+ * 新しい順に並べるための比較（順位の `compareRecordedAtDesc` と同じ考え方）。
+ *
+ * **同じ日時のときの順も決めておく**（0.33.9）。貼り込み係の封筒は1回の
+ * 読み取りで何行も入るので、`readAt` が同じ行が並ぶのが普通である。並びが
+ * 決まっていないと、「最新の反応」に1話ぶんの数字や日別の数字が出て、
+ * 作品の勢いを読み違える。
+ *
+ *   1. 作品全体（`work`）を先に——見出しに出したいのは作品の数字
+ *   2. 累計・粒度なしを先に——「その時点の値」が作品の現在地に近い
+ */
 function compareReadAtDesc(
+  left: ReaderStatsRecord,
+  right: ReaderStatsRecord
+): number {
+  const byTime = compareReadAtOnly(left, right);
+  if (byTime !== 0) return byTime;
+  const byScope = readerScopeRank(left) - readerScopeRank(right);
+  if (byScope !== 0) return byScope;
+  return readerPeriodRank(left) - readerPeriodRank(right);
+}
+
+/** 日時だけで比べる。読めない書き方なら文字列で比べる（崩さずに並べる） */
+function compareReadAtOnly(
   left: ReaderStatsRecord,
   right: ReaderStatsRecord
 ): number {
@@ -1152,6 +1290,16 @@ function compareReadAtDesc(
     return rightTime - leftTime;
   }
   return right.readAt.localeCompare(left.readAt);
+}
+
+/** 作品全体が先（0）、1話ぶんが後（1） */
+function readerScopeRank(record: ReaderStatsRecord): number {
+  return record.scope === "work" ? 0 : 1;
+}
+
+/** 累計・粒度なしが先（0）、日別・月別・年別が後（1） */
+function readerPeriodRank(record: ReaderStatsRecord): number {
+  return record.period === undefined || record.period === "total" ? 0 : 1;
 }
 
 /**
@@ -1181,5 +1329,34 @@ export function validateReaderStatsCount(value: string): string | null {
   if (!value.trim()) return null;
   return parseReaderStatsCount(value) === null
     ? "0以上の整数で入力してください（読めなければ空のままで構いません）。"
+    : null;
+}
+
+/**
+ * 作者が打った話番号を読む（設計書6.79.7）。**全角の数字は読む。**
+ *
+ * **数値（`parseReaderStatsCount`）とは別に持つ**（0.33.9）。あちらは
+ * 「1,234」と打たれるので区切りを落とすが、**話番号で同じことをすると
+ * 「1,2」が12話になる**——別の話の数字が台帳へ混ざり、あとから分けられない。
+ *
+ * @returns 1以上の整数。読めなければ null（0話も -1話も無い）
+ */
+export function parseReaderStatsEpisode(value: string): number | null {
+  const normalized = value
+    .trim()
+    // 全角数字を半角へ（U+FF10〜U+FF19）
+    .replace(/[０-９]/g, (char) =>
+      String.fromCharCode(char.charCodeAt(0) - 0xfee0)
+    );
+  if (!/^\d+$/.test(normalized)) return null;
+  const episode = Number(normalized);
+  return Number.isSafeInteger(episode) && episode >= 1 ? episode : null;
+}
+
+/** 話番号の入力を断るときの言い方。問題なければ null */
+export function validateReaderStatsEpisode(value: string): string | null {
+  if (!value.trim()) return "話番号を入力してください。";
+  return parseReaderStatsEpisode(value) === null
+    ? "話番号は1以上の整数で入力してください（第3話なら 3）。"
     : null;
 }

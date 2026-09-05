@@ -4,6 +4,7 @@ import { PostingStore, PostingStoreError } from "../../src/core/postingStore";
 import {
   emptyPostingLedger,
   siteProfile,
+  withReaderStats,
   withSites,
 } from "../../src/models/posting";
 import type { WorkEntry } from "../../src/models/types";
@@ -336,6 +337,100 @@ describe("投稿状態の台帳の読み書き", () => {
 
     const written = JSON.parse(new TextDecoder().decode(disk.get(ledgerPath)!));
     expect("siteProfiles" in written).toBe(false);
+  });
+
+  /**
+   * **読み飛ばした行を、保存で消さない**（設計書6.79.7、0.33.9）。
+   *
+   * 知らない指標しか無い行は読み飛ばすが、読み飛ばしたまま書き戻すと
+   * **新しい版の機械が書いた行を、古い版の機械が黙って消す**ことになる
+   * （台帳は `設定/` に置いてGitで同期するので、これは現実に起きる）。
+   * 読めなくても、生のまま持ち回して書き戻す。
+   */
+  describe("この版が知らない指標しか無い行", () => {
+    const unknownRow = {
+      site: "kakuyomu",
+      readAt: "2026-09-06T00:00:00.000Z",
+      scope: "work",
+      // 将来の版が足した指標（この版は知らない）
+      metrics: { reviewsPerDay: 3 },
+      source: "manual",
+    };
+    const knownRow = {
+      site: "kakuyomu",
+      readAt: "2026-09-05T00:00:00.000Z",
+      scope: "work",
+      metrics: { pv: 10 },
+      source: "manual",
+    };
+
+    function writeLedger(readerStats: unknown[]): void {
+      disk.set(
+        ledgerPath,
+        utf8(
+          JSON.stringify(
+            {
+              schemaVersion: "1",
+              sites: [{ site: "kakuyomu", newEpisodeUrl: kakuyomuUrl }],
+              posts: [],
+              readerStats,
+            },
+            null,
+            2
+          )
+        )
+      );
+    }
+
+    function writtenLedger(): { readerStats?: unknown[] } {
+      return JSON.parse(new TextDecoder().decode(disk.get(ledgerPath)!));
+    }
+
+    test("反応を1件足して保存しても、読み飛ばした行は元の形のまま残る", async () => {
+      writeLedger([knownRow, unknownRow]);
+      const store = new PostingStore(work);
+      const ledger = await store.load();
+      // 読める行だけが台帳に載る（型は「読めた行」だけを表す）
+      expect(ledger.readerStats).toHaveLength(1);
+
+      await store.save(
+        withReaderStats(ledger, {
+          site: "kakuyomu",
+          readAt: "2026-09-07T00:00:00.000Z",
+          scope: "work",
+          metrics: { pv: 20 },
+          source: "manual",
+        })
+      );
+
+      const written = writtenLedger();
+      expect(written.readerStats).toHaveLength(3);
+      // **中身を書き換えない。** 読めなかったものを整えると、整えた形が
+      // 「こちらが作った行」になってしまう
+      expect(written.readerStats).toContainEqual(unknownRow);
+    });
+
+    test("読める行が1つも無くても、読み飛ばした行は消えない", async () => {
+      writeLedger([unknownRow]);
+      const store = new PostingStore(work);
+      const ledger = await store.load();
+      expect(ledger.readerStats).toEqual([]);
+
+      await store.save(ledger);
+
+      expect(writtenLedger().readerStats).toEqual([unknownRow]);
+    });
+
+    test("読み飛ばしが無ければ、出力は従来どおり（欄ごと書かない）", async () => {
+      const store = new PostingStore(work);
+      const ledger = await store.load();
+      await store.save({
+        ...ledger,
+        sites: [{ site: "kakuyomu", newEpisodeUrl: kakuyomuUrl }],
+      });
+
+      expect("readerStats" in writtenLedger()).toBe(false);
+    });
   });
 
   test("知らないサイトが書いてあれば、読めないと言って止める", async () => {

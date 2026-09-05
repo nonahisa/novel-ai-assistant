@@ -343,7 +343,133 @@ describe("読者の反応の行", () => {
   });
 });
 
+/**
+ * 画面の組み立て（WebViewのスクリプト）を、そのまま呼べる形にして確かめる。
+ * 手は年表・人物相関図の画面の検査と同じ（中括弧の対応で切り出す）。
+ */
+const panelHtml = buildWritingStatsPanelHtml("NONCE123", "vscode-resource:");
+const panelScript = (() => {
+  const found = panelHtml.match(/<script nonce="NONCE123">([\s\S]*?)<\/script>/);
+  if (!found) throw new Error("スクリプトが見つかりません");
+  return found[1];
+})();
+
+function extractFunction(source: string, name: string): string {
+  const head = source.indexOf("function " + name + "(");
+  expect(head, name + " が見つからない").toBeGreaterThanOrEqual(0);
+  let depth = 0;
+  let started = false;
+  for (let index = head; index < source.length; index++) {
+    if (source[index] === "{") {
+      depth++;
+      started = true;
+    } else if (source[index] === "}") {
+      depth--;
+      if (started && depth === 0) return source.slice(head, index + 1);
+    }
+  }
+  throw new Error(name + " の終わりが見つからない");
+}
+
+function panelFunction<T>(name: string, needs: string[] = []): T {
+  return new Function(
+    [
+      ...needs.map((dependency) => extractFunction(panelScript, dependency)),
+      extractFunction(panelScript, name),
+      "return " + name + ";",
+    ].join("\n")
+  )() as T;
+}
+
 describe("執筆量パネルの側", () => {
+  /**
+   * **反応の表にもメモの列を出す**（0.33.9のレビュー、L2）。
+   *
+   * 順位の表にはメモの列があるのに、反応の表には無かった。手入力でも封筒でも
+   * メモは台帳に入るので、書いたのに二度と読めない欄になっていた。
+   */
+  test("反応の表に、メモの列がある", () => {
+    const render = panelFunction<
+      (
+        rows: Array<{
+          readAt: string;
+          scope: string;
+          period: string;
+          metrics: string;
+          source: string;
+          note: string | null;
+        }>
+      ) => string
+    >("renderReaderStatsTable", ["escapeHtml", "formatWhen"]);
+
+    const html = render([
+      {
+        readAt: "2026-09-05T00:00:00.000Z",
+        scope: "作品全体",
+        period: "その時点",
+        metrics: "PV 1,234",
+        source: "手入力",
+        note: "更新直後",
+      },
+    ]);
+
+    expect(html).toContain("<th>メモ</th>");
+    expect(html).toContain("更新直後");
+    // メモの無い行でも列は消えない（表がずれる）
+    const noNote = render([
+      {
+        readAt: "2026-09-05T00:00:00.000Z",
+        scope: "作品全体",
+        period: "その時点",
+        metrics: "PV 1,234",
+        source: "手入力",
+        note: null,
+      },
+    ]);
+    expect(noNote).toContain("<td></td>");
+  });
+
+  /**
+   * **注記は、あるものについてだけ言う**（0.33.9のレビュー、L8）。
+   *
+   * 順位を1件も記録していない作品でも「順位は…」で始まる注記が出ていた。
+   * 反応だけを記録している作者には、身に覚えのない説明になる。
+   */
+  test("順位が無い作品の注記は、「順位は」で始めない", () => {
+    const note = panelFunction<
+      (
+        records: Array<{
+          history: unknown[];
+          readerHistory: unknown[];
+          analysisUrl: string | null;
+        }>
+      ) => string
+    >("siteRecordsNote");
+
+    const readerOnly = note([
+      { history: [], readerHistory: [{}], analysisUrl: null },
+    ]);
+    expect(readerOnly.startsWith("順位は")).toBe(false);
+    expect(readerOnly).toContain("読者の反応は");
+
+    // 順位があるときは、これまでどおり順位の但し書きから始める
+    const withRank = note([
+      { history: [{}], readerHistory: [], analysisUrl: null },
+    ]);
+    expect(withRank.startsWith("順位は")).toBe(true);
+  });
+
+  /**
+   * **台帳が読めなかったことを、画面で言う**（0.33.9のレビュー、中1）。
+   *
+   * 以前はログへ残すだけだったので、作者からは「サイトの記録」が黙って
+   * 消えたようにしか見えなかった。
+   */
+  test("台帳を読めなかった理由を出す配線がある", () => {
+    expect(panelHtml).toContain("siteRecordsError");
+    expect(panelHtml).toContain("サイトの記録を読めませんでした");
+  });
+
   test("節の置き場と、開く道の配線がある", () => {
     const html = buildWritingStatsPanelHtml("nonce", "vscode-resource:");
 

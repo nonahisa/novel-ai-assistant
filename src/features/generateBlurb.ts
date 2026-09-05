@@ -3,8 +3,9 @@ import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import {
+  resolveOutputLimitForSend,
   resolveOutputTokensForPlanning,
-  resolveOutputTokensForSend,
+  truncatedOutputAdvice,
 } from "../ai/outputLimit";
 import { confirmProviderReachable } from "./aiConnectivity";
 
@@ -110,10 +111,15 @@ export async function generateWorkBlurb(
   // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
   // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
   // 半分になり、長い応答が途中で切れる
-  const sendOutputTokens = resolveOutputTokensForSend(
+  //
+  // **上限は出どころごと受け取る**（キャッチコピー側と同じ、0.33.9）。
+  // 切り詰められたときの直し方は、上限が設定から来たのか実測から来たのかで
+  // 変わる（実測で頭打ちなのに「設定を大きくして」と言うのは嘘になる）
+  const outputLimit = resolveOutputLimitForSend(
     resolved.provider.id,
     resolved.model
   );
+  const sendOutputTokens = outputLimit.tokens;
 
   const response = await withCancellableProgress(
     "作品紹介文を作っています",
@@ -163,8 +169,10 @@ export async function generateWorkBlurb(
     });
     vscode.window
       .showWarningMessage(
+        // **文言を自前で書かない**（0.33.9）。上限が実測から来ているときに
+        // 「設定を大きくして」と言うのは嘘で、作者は直らない操作を繰り返す
         truncated
-          ? "応答が出力上限で切り詰められました。"
+          ? truncatedOutputAdvice(outputLimit)
           : "応答を読み取れませんでした。",
         "ログを見る"
       )
@@ -235,10 +243,14 @@ export async function generateCatchphrases(
     resolved.provider.id,
     resolved.model
   );
-  const sendOutputTokens = resolveOutputTokensForSend(
+  // **上限は出どころごと受け取る**（設計書6.77の第2段、0.33.9のレビュー）。
+  // 切り詰められたときの直し方は、上限が設定から来たのか実測から来たのかで
+  // 変わる（実測で頭打ちなのに「設定を大きくして」と言うのは嘘になる）
+  const outputLimit = resolveOutputLimitForSend(
     resolved.provider.id,
     resolved.model
   );
+  const sendOutputTokens = outputLimit.tokens;
 
   const history = new CatchphraseHistory(work);
   const costNotice = resolved.provider.isPaid
@@ -295,12 +307,22 @@ export async function generateCatchphrases(
         candidate.text.length <= CATCHPHRASE_MAX_CHARS
     );
     if (valid.length === 0) {
+      /*
+        **切り詰めは、切り詰めとして伝える**（紹介文と同じ扱い、0.33.9）。
+        「案が返りませんでした」だけだと、作者からは上限が足りないのか
+        AIの気まぐれなのか区別が付かず、同じ操作を繰り返すことになる。
+      */
+      const truncated = response.truncated === true;
       logFailure("キャッチコピーの生成", {
-        理由: "使える案がありません",
+        理由: truncated
+          ? "応答が出力上限で切り詰められました"
+          : "使える案がありません",
         応答: responseExcerptForLog(response.text),
       });
       const retry = await vscode.window.showWarningMessage(
-        `${CATCHPHRASE_MAX_CHARS}字以内の案が返りませんでした。`,
+        truncated
+          ? truncatedOutputAdvice(outputLimit)
+          : `${CATCHPHRASE_MAX_CHARS}字以内の案が返りませんでした。`,
         "もう一度",
         "やめる"
       );

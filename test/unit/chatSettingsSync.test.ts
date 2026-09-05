@@ -356,8 +356,12 @@ interface TestAi {
   generate: ReturnType<typeof vi.fn>;
 }
 
-function testAi(text: string, isPaid = false): TestAi {
-  const generate = vi.fn(async () => ({ text }));
+function testAi(
+  text: string,
+  isPaid = false,
+  extra: { truncated?: boolean } = {}
+): TestAi {
+  const generate = vi.fn(async () => ({ text, ...extra }));
   const provider = {
     id: "ollama",
     displayName: "Ollama",
@@ -646,6 +650,29 @@ describe("相談を資料へ反映する", () => {
 
     expect(retry.generate).toHaveBeenCalledTimes(1);
     expect(second.staged).toBe(1);
+  });
+
+  /**
+   * **切り詰めは、切り詰めとして伝える**（0.33.9のレビュー、中3）。
+   *
+   * 相談の会話を丸ごと送るので、ここは上限に当たりやすい。「読み取れません
+   * でした」としか言わないと、作者は同じ会話を何度も送り直すことになる。
+   */
+  test("応答が切り詰められたら、上限の出どころつきで案内し、覚え書きを残さない", async () => {
+    const cut = testAi('{"decisions": [{"name": "灯"', false, {
+      truncated: true,
+    });
+
+    const result = await run(cut);
+
+    expect(result.failed).toBe(true);
+    expect(state.stage).not.toHaveBeenCalled();
+    // 覚え書きが無いので、もう一度試せる（読めなかったときと同じ扱い）
+    expect(disk.has(statePath)).toBe(false);
+    const message = announced.join("");
+    expect(message).toContain("切り詰め");
+    // この機能でできる絞り方まで言う（会話は短くできる）
+    expect(message).toContain("新しい相談");
   });
 
   test("読めなかった応答の中身を、記録に残す", async () => {
