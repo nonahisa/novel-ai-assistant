@@ -94,6 +94,15 @@ export interface ProofreadRunResult {
    * 当たり具合を測るときの手掛かりになる
    */
   monotonyDroppedCount: number;
+  /**
+   * 語尾単調で、**同じ連続を指していたのでまとめたぶん**
+   * （作者の報告、2026-09-05）。
+   *
+   * AIは同じ並びを別々の指摘として何枚も返してくる。錨をコードの数えた
+   * 連続へ付け替えると重なりが見えるので、1枚に畳む。
+   * **黙って減らさない**——作者には「同じ場所の話が何件あったか」を伝える
+   */
+  monotonyMergedCount: number;
   failedChunks: number;
   cancelled: boolean;
 }
@@ -218,6 +227,7 @@ export async function checkProofread(
   let rejectedCount = 0;
   let overBudgetCount = 0;
   let monotonyDroppedCount = 0;
+  let monotonyMergedCount = 0;
   let failedChunks = 0;
   let cancelled = false;
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
@@ -291,6 +301,9 @@ export async function checkProofread(
         ).length;
         monotonyDroppedCount += validated.rejected.filter(
           (entry) => entry.reason === "not_monotonous"
+        ).length;
+        monotonyMergedCount += validated.rejected.filter(
+          (entry) => entry.reason === "monotony_duplicate"
         ).length;
         for (const issue of validated.accepted) {
           // **どのファイルの何行目かを、ここで確定させる。** まとめたチャンクでは
@@ -405,12 +418,16 @@ export async function checkProofread(
       `語尾単調：数え直して4連続未満だったため${monotonyDroppedCount}件除外`
     );
   }
+  if (monotonyMergedCount > 0) {
+    logStep(`語尾単調：同じ連続の重複${monotonyMergedCount}件をまとめた`);
+  }
 
   return {
     issues: sortProofreadIssues(issues) as ProofreadIssue[],
     rejectedCount,
     overBudgetCount,
     monotonyDroppedCount,
+    monotonyMergedCount,
     failedChunks,
     cancelled,
   };

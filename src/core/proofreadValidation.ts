@@ -55,6 +55,13 @@ export interface RejectedProofreadIssue {
     | "not_repeated"
     /** 「語尾単調」の札だが、同じ語尾が4文以上続いていない */
     | "not_monotonous"
+    /**
+     * 「語尾単調」の札で、**すでに出した連続と同じまとまり**を指している。
+     *
+     * AIは同じ連続を別々の指摘として何枚も返してくる（作者の報告、
+     * 2026-09-05。同じ並びに3枚並んだ）。連続は1つで1件なので畳む
+     */
+    | "monotony_duplicate"
     /** 作者が「直さない」と決めた語を含む */
     | "kept_word"
     /** 「同語反復」の札だが、台詞の中＝人物の話し方である */
@@ -98,10 +105,49 @@ export function hasLongSentence(text: string): boolean {
  * ここに1つだけ置いて共用する。
  */
 export function splitIntoSentences(text: string): string[] {
-  return text
-    .split(/(?<=[。！？])[」』）]*/)
-    .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length > 0);
+  return splitSentencesWithOffsets(text).map((sentence) => sentence.body);
+}
+
+/**
+ * 文に割りつつ、**その文が元の文字列のどこから始まるか**も返す。
+ *
+ * 語尾単調は「どこの連続か」を作者へ示すので、行番号が要る。
+ * 行番号は位置からしか出せないため、割ると同時に位置を持って回る。
+ *
+ * 割り方は `splitIntoSentences` と同じ（句点・感嘆符・疑問符で切り、
+ * 直後の閉じ括弧はそこまでを1文に含めずに読み飛ばす）。**写しを作らない**ため、
+ * `splitIntoSentences` はこちらを呼ぶ。
+ */
+function splitSentencesWithOffsets(
+  text: string
+): Array<{ body: string; start: number }> {
+  const sentences: Array<{ body: string; start: number }> = [];
+  const push = (piece: string, from: number): void => {
+    const body = piece.trim();
+    if (body.length === 0) return;
+    // trim で落ちた先頭の空白ぶん、開始位置をずらす（行番号がずれる）
+    sentences.push({
+      body,
+      start: from + (piece.length - piece.trimStart().length),
+    });
+  };
+
+  let from = 0;
+  let cursor = 0;
+  while (cursor < text.length) {
+    if (!"。！？".includes(text[cursor])) {
+      cursor++;
+      continue;
+    }
+    const end = cursor + 1;
+    let next = end;
+    while (next < text.length && "」』）".includes(text[next])) next++;
+    push(text.slice(from, end), from);
+    from = next;
+    cursor = next;
+  }
+  push(text.slice(from), from);
+  return sentences;
 }
 
 /**
@@ -130,19 +176,190 @@ export function splitIntoSentences(text: string): string[] {
  */
 export const MONOTONOUS_ENDING_RUN = 4;
 
-export function hasMonotonousEnding(text: string): boolean {
-  let previous = "";
-  let run = 0;
-  for (const sentence of splitIntoSentences(withoutDialogue(text))) {
-    const ending = endingOf(sentence);
-    // 台詞の切れ端や、句点で終わっていない断片は数えない。
-    // **連続も切らない**（数えないものが間に挟まっただけである）
+/**
+ * 連続の実体。**画面に出すのはこれだけ**（AIの言い値は使わない）。
+ */
+export interface MonotonousRun {
+  /** 続いている語尾（文末の1文字＋句点） */
+  ending: string;
+  /** 続いている文の数 */
+  count: number;
+  /** 最初の文が始まる行（ファイル内の1始まりの行番号） */
+  startLine: number;
+  /** 最後の文が終わる行 */
+  endLine: number;
+  /** 各文の書き出し（長ければ `MONOTONOUS_HEAD_CHARS` 字＋「…」） */
+  heads: string[];
+  /**
+   * 先頭の文（切っていないもの）。
+   *
+   * 画面の引用に使う。**`heads[0]` は「…」で切ってあるので使えない**——
+   * 引用は本文に実在する文字列でなければならない（提案パネルは
+   * 引用の当たる場所を本文から探す）
+   */
+  first: string;
+}
+
+/** 書き出しとして見せる字数。1文節ぶんあれば、どの文かは分かる */
+const MONOTONOUS_HEAD_CHARS = 12;
+
+/**
+ * 語尾の連続を、**まとまりごとに取り出す**（作者の報告、2026-09-05）。
+ *
+ * `hasMonotonousEnding` は「チャンクのどこかに4連続があるか」しか
+ * 答えないので、画面には**AIが選んだ1行**（「た。」で終わらない台詞のことも
+ * あった）と**AIの言い値の連続数**が並んでいた。作者の言葉は
+ * 「よくわからなかった」である。
+ *
+ * 数え方は `hasMonotonousEnding` と同じ（地の文だけ・台詞は連続を切らない・
+ * 「た。」と「だ。」は別・句点で終わらない断片は数えない）。
+ * 違うのは、**どこの・何文かまで返す**ところだけ。
+ *
+ * **台詞は消さずに空白へ置き換える。** 消すと後ろの行が繰り上がり、
+ * 返す行番号が本文とずれる（改行はそのまま残す）。
+ *
+ * @param text チャンクの本文
+ * @param firstLine そのチャンクの1行目が、ファイルの何行目か（1始まり）
+ */
+export function findMonotonousRuns(
+  text: string,
+  firstLine: number
+): MonotonousRun[] {
+  const masked = maskDialogue(text);
+  const lineOf = lineCounter(masked);
+
+  // 語尾のある文だけを、位置つきで並べる。
+  // **数えない文は落とすだけで、連続は切らない**（`hasMonotonousEnding` と同じ）
+  const counted: Array<{ ending: string; start: number; end: number }> = [];
+  for (const sentence of splitSentencesWithOffsets(masked)) {
+    const ending = endingOf(sentence.body);
     if (!ending) continue;
-    run = ending === previous ? run + 1 : 1;
-    previous = ending;
-    if (run >= MONOTONOUS_ENDING_RUN) return true;
+    counted.push({
+      ending,
+      start: sentence.start,
+      end: sentence.start + sentence.body.length,
+    });
   }
-  return false;
+
+  const runs: MonotonousRun[] = [];
+  let from = 0;
+  for (let cursor = 1; cursor <= counted.length; cursor++) {
+    // 語尾が変わるまで（＝まとまりの終わりまで）伸ばす
+    if (cursor < counted.length && counted[cursor].ending === counted[from].ending) {
+      continue;
+    }
+    const group = counted.slice(from, cursor);
+    from = cursor;
+    if (group.length < MONOTONOUS_ENDING_RUN) continue;
+    const last = group[group.length - 1];
+    const sentenceOf = (sentence: { start: number; end: number }): string =>
+      text.slice(sentence.start, sentence.end);
+    runs.push({
+      ending: group[0].ending,
+      count: group.length,
+      first: sentenceOf(group[0]),
+      startLine: firstLine + lineOf(group[0].start),
+      // 終わりの位置は句点の**次**を指しているので、句点そのものの行を見る
+      endLine: firstLine + lineOf(last.end - 1),
+      // **書き出しは元の本文から取る**（空白へ置き換えた側から取ると、
+      // 台詞の抜けた穴がそのまま見えてしまう）
+      heads: group.map((sentence) => headOf(sentenceOf(sentence))),
+    });
+  }
+  return runs;
+}
+
+/** 文の書き出し。改行は畳む（1文が複数行にまたがることがある） */
+function headOf(sentence: string): string {
+  const body = sentence.replace(/\r?\n/g, "").trim();
+  const chars = Array.from(body);
+  return chars.length > MONOTONOUS_HEAD_CHARS
+    ? `${chars.slice(0, MONOTONOUS_HEAD_CHARS).join("")}…`
+    : body;
+}
+
+/**
+ * 位置から「そこまでに改行がいくつあるか」を引く。
+ *
+ * 文の数だけ数え直すと本文の長さに対して二乗になるので、
+ * 改行の位置を一度だけ集めて二分探索する。
+ */
+function lineCounter(text: string): (offset: number) => number {
+  const breaks: number[] = [];
+  for (let index = 0; index < text.length; index++) {
+    if (text[index] === "\n") breaks.push(index);
+  }
+  return (offset) => {
+    let low = 0;
+    let high = breaks.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (breaks[middle] < offset) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
+}
+
+export function hasMonotonousEnding(text: string): boolean {
+  // **判定は連続の実体から出す。** 数え方を2か所に置くと必ず食い違う
+  return findMonotonousRuns(text, 1).length > 0;
+}
+
+/**
+ * 指摘の行から、いちばん近い連続を選ぶ。
+ *
+ * AIの錨は当てにならない（台詞の1行に下ろされていた）が、**どのあたりを
+ * 見て言っているかの手掛かりにはなる。** チャンクに連続が2つ以上あるとき、
+ * 遠いほうへ付け替えると別の場所の話になってしまうので、近いほうを選ぶ。
+ * 範囲の中に入っていれば距離0。同じ距離なら先に出てくるほうを採る。
+ */
+export function nearestMonotonousRun(
+  runs: MonotonousRun[],
+  line: number
+): MonotonousRun | undefined {
+  let nearest: MonotonousRun | undefined;
+  let shortest = Number.POSITIVE_INFINITY;
+  for (const run of runs) {
+    const distance =
+      line < run.startLine
+        ? run.startLine - line
+        : line > run.endLine
+          ? line - run.endLine
+          : 0;
+    if (distance < shortest) {
+      nearest = run;
+      shortest = distance;
+    }
+  }
+  // 行が読めない（範囲外・NaN）ときは、チャンクの最初の連続へ付ける
+  return nearest ?? runs[0];
+}
+
+/** 説明文に並べる書き出しの数。多いと1行に収まらず、かえって読みにくい */
+const MONOTONOUS_HEADS_SHOWN = 2;
+
+/**
+ * 語尾単調の説明文を、**コードが数えた実体から**組み立てる
+ * （作者の報告、2026-09-05）。
+ *
+ * AIの `explanation`（「〜た。が5連続しています」）は使わない。
+ * 数を数えるのはAIの苦手なことで、実際に連続していない数を言ってくる。
+ * 語尾も文数も行範囲も、ここに来るのはコードが数えた値だけである。
+ *
+ * **直し方は書かない。** どう散らすかは文体そのものなので、決めるのは作者。
+ */
+export function describeMonotonousRun(run: MonotonousRun): string {
+  const shown = run.heads.slice(0, MONOTONOUS_HEADS_SHOWN).join(" ／ ");
+  const rest = run.heads.length > MONOTONOUS_HEADS_SHOWN ? " ／ …" : "";
+  const range =
+    run.startLine === run.endLine
+      ? `${run.startLine}行目`
+      : `${run.startLine}〜${run.endLine}行目`;
+  return (
+    `「${run.ending}」で終わる地の文が${run.count}文続いています（${range}）：` +
+    `${shown}${rest}。直し方は作者が決めてください`
+  );
 }
 
 /** 文末の1文字＋句点。句点で終わっていなければ語尾として数えない */
@@ -152,11 +369,26 @@ function endingOf(sentence: string): string | undefined {
 }
 
 /**
- * 台詞（「」『』）を取り除く。閉じていない台詞は、閉じ括弧が現れないまま
+ * 台詞（「」『』）。閉じていない台詞は、閉じ括弧が現れないまま
  * 終わる形（本文の切れ目）なので、そこまでを台詞と見る。
  */
+const DIALOGUE = /[「『][^」』]*[」』]?/gu;
+
+/** 台詞を取り除く */
 function withoutDialogue(text: string): string {
-  return text.replace(/[「『][^」』]*[」』]?/gu, "");
+  return text.replace(DIALOGUE, "");
+}
+
+/**
+ * 台詞を、**同じ長さの空白へ置き換える**（改行は残す）。
+ *
+ * 行番号を返す処理は、消してしまうと後ろの行が繰り上がって本文とずれる。
+ * 位置を保ったまま「無いことにする」ために、長さを変えずに潰す。
+ */
+function maskDialogue(text: string): string {
+  // `u` を付けない。付けると代用対（サロゲートペア）を1文字として
+  // 空白1つに置き換えてしまい、長さ＝位置が狂う
+  return text.replace(DIALOGUE, (matched) => matched.replace(/[^\n]/g, " "));
 }
 
 /**
@@ -361,9 +593,12 @@ export function validateProofreadIssues(
 
   // **語尾の連続はチャンクごとに1回だけ数える。** 指摘の数だけ数え直しても
   // 答えは同じで、長いチャンクでは無駄が積み上がる
-  let monotonyInChunk: boolean | undefined;
-  const chunkHasMonotony = (): boolean =>
-    (monotonyInChunk ??= hasMonotonousEnding(chunk.text));
+  let monotonyInChunk: MonotonousRun[] | undefined;
+  const monotonousRuns = (): MonotonousRun[] =>
+    (monotonyInChunk ??= findMonotonousRuns(chunk.text, firstLine));
+  // **同じ連続に何枚も出さない**（作者の報告、2026-09-05）。
+  // 錨を付け替えると、AIが別々に出した指摘が同じ1か所を指すことがある
+  const shownRuns = new Set<string>();
 
   const passed: AcceptedProofreadIssue[] = [];
   for (const item of list) {
@@ -418,7 +653,7 @@ export function validateProofreadIssues(
     // **「語尾単調」も数えられる。** AIは「〜た。が5連続」と言うが、実際は
     // 並んでいないことがある（作者の報告、2026-09-04）。**言い値を作者へ
     // 届けない。** 4連続がチャンクのどこにも無ければ、それは語尾の指摘ではない
-    if (reason === "語尾単調" && !chunkHasMonotony()) {
+    if (reason === "語尾単調" && monotonousRuns().length === 0) {
       rejected.push({ raw: item, reason: "not_monotonous" });
       continue;
     }
@@ -428,13 +663,22 @@ export function validateProofreadIssues(
       rejected.push({ raw: item, reason: "forbidden_aspect" });
       continue;
     }
-    if (line < firstLine || line > lastLine) {
+    // **語尾単調だけは、AIの錨を照合しない**（本体の判断、2026-09-05）。
+    // この札の `line` と `original` は下で捨て、コードが数えた連続の
+    // 先頭行と先頭の文へ差し替える。**捨てる値で指摘を落とすと、実在する
+    // 連続の指摘がAIの言い間違いだけで消える。** 本文にあるかどうかは、
+    // 連続そのものを本文から数えている時点で確かめ終えている
+    const anchorFromAi = reason !== "語尾単調";
+    if (anchorFromAi && (line < firstLine || line > lastLine)) {
       rejected.push({ raw: item, reason: "line_out_of_range" });
       continue;
     }
     // **原文が本文に実在するかを見る。** 言い換えた「原文」を返すことがあり、
     // そのまま適用すると本文のどこにも当たらない
-    if (!normalizedChunk.includes(normalizeForComparison(original))) {
+    if (
+      anchorFromAi &&
+      !normalizedChunk.includes(normalizeForComparison(original))
+    ) {
       rejected.push({ raw: item, reason: "original_not_found" });
       continue;
     }
@@ -466,16 +710,37 @@ export function validateProofreadIssues(
       continue;
     }
 
+    // **語尾単調だけは、錨も文言もコードの数えた実体へ差し替える**
+    // （作者の報告、2026-09-05）。AIの `line` は連続と関係のない台詞行の
+    // ことがあり、`explanation` の連続数は数え違えている。
+    // 直したのは作者へ見せるものだけで、AIの出力そのものは変えていない
+    const run =
+      reason === "語尾単調"
+        ? nearestMonotonousRun(monotonousRuns(), line)
+        : undefined;
+    if (run) {
+      const key = `${run.startLine}|${run.ending}`;
+      if (shownRuns.has(key)) {
+        rejected.push({ raw: item, reason: "monotony_duplicate" });
+        continue;
+      }
+      shownRuns.add(key);
+    }
+    // 連続の先頭の文を引用にする。`heads` は「…」で切ってあるので使えない
+    // （引用は本文に実在する文字列でなければならない）
+    const anchor = run?.first ?? "";
+
     passed.push({
-      line,
-      original,
+      line: run ? run.startLine : line,
+      original: anchor || original,
       // 推敲は原文まるごとを置き換える（誤字脱字のような部分置換ではない）
-      target: original,
+      target: anchor || original,
       suggestion: usableSuggestion,
       reason,
       // 漢字ひらきには、常用漢字表との照合結果を参考として添える
-      explanation:
-        reason === "漢字ひらき"
+      explanation: run
+        ? describeMonotonousRun(run)
+        : reason === "漢字ひらき"
           ? withNonJouyouNote(asString(item.explanation), original)
           : asString(item.explanation),
       confidence: level(item.confidence),

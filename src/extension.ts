@@ -3610,6 +3610,12 @@ export async function activate(
           // AIの「〜た。が5連続」を数え直して外したぶん（2026-09-04）
           parts.push(`語尾の数え違い ${result.monotonyDroppedCount}件を除外`);
         }
+        if (result.monotonyMergedCount > 0) {
+          // 同じ並びに何枚も出ていたぶん（2026-09-05）。黙って減らさない
+          parts.push(
+            `語尾単調：同じ連続の重複${result.monotonyMergedCount}件をまとめた`
+          );
+        }
         if (result.failedChunks > 0) {
           parts.push(`読み取れなかった ${result.failedChunks}件`);
         }
