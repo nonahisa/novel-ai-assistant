@@ -229,6 +229,27 @@ describe("画面の出し分け", () => {
     expect(html).toContain("runningState.workTitle");
   });
 
+  /**
+   * 0件のときの案内は、どの分類でも同じものが出る（実機確認 2026-09-05）。
+   *
+   * 以前は「誤字脱字を検知」「表記ゆれを検知」の2つだけを挙げていたため、
+   * 矛盾検知を走らせて0件だった作者に、別の機能を勧めているように読めた。
+   */
+  test("0件の案内に、特定の分類の名前を書かない", () => {
+    const empty = html.slice(html.indexOf('<div id="empty">'));
+    const line = empty.slice(0, empty.indexOf("</div>"));
+    for (const name of [
+      "誤字脱字を検知",
+      "表記ゆれを検知",
+      "推敲",
+      "矛盾を検知",
+      "プロット逸脱",
+    ]) {
+      expect(line, name).not.toContain(name);
+    }
+    expect(line).toContain("この分類の検知");
+  });
+
   /** 一覧が空のときは中央、出ているときは見出しの横（読む場所を奪わない） */
   test("一覧が空かどうかで、出す場所を変える", () => {
     expect(html).toContain("lastItemCount === 0");

@@ -246,7 +246,14 @@ body.show-low .issue.low { display: flex; }
   <button class="secondary" id="clear" title="この分類の一覧を空にします（本文は書き換わりません）">一覧を空にする</button>
   <button class="secondary" id="applyAll" title="確信度が「高」「中」で、修正案のあるものだけが対象です">まとめて適用</button>
 </div>
-<div id="empty">まだ検知結果がありません。「誤字脱字を検知」または「表記ゆれを検知」を実行してください。</div>
+<!--
+  **分類の名前を書かない。** この案内は誤字脱字・表記ゆれ・推敲・矛盾・
+  プロット逸脱…どのタブでも同じものが出る。以前は「誤字脱字を検知」「表記ゆれを
+  検知」の2つだけを挙げていたため、矛盾検知を走らせた直後に0件だった作者へ
+  「別の機能を実行してください」と言っているように読めた（実機確認 2026-09-05）。
+  分類ごとの対応表を持つと、分類が増えるたびに更新漏れが起きるので持たない。
+-->
+<div id="empty">まだ検知結果がありません。この分類の検知を実行すると、ここに指摘が並びます。</div>
 <div id="list"></div>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();

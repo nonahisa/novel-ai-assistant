@@ -445,6 +445,15 @@ export async function checkContradictions(
   let cancelled = false;
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
   let fatalFailure = "";
+  /**
+   * 検出の段の進み（何チャンク見たか／分母）。**中の関数ではなく、ここに置く。**
+   *
+   * 最後に「矛盾検知を終了」の1行を残すのに要る（誤字脱字側と同じ形）。
+   * 中止や失敗で抜けた回でも、抜けたところまでの数がそのまま残る。
+   * 分母は分け直しで増えるので、`chunks.length` とは別に持つ。
+   */
+  let chunksDone = 0;
+  let chunksTotal = chunks.length;
   let processedChunks = 0;
 
   /**
@@ -471,8 +480,6 @@ export async function checkContradictions(
         // 部分的なJSONは読めないので、まとめたせいで入り切らなかったのなら
         // 元の大きさで出し直すほうがよい。処理中に増えるので配列で持つ
         const queue = [...chunks];
-        let total = queue.length;
-        let done = 0;
 
         for (let cursor = 0; cursor < queue.length; cursor++) {
           if (token.isCancellationRequested) break;
@@ -481,19 +488,19 @@ export async function checkContradictions(
 
           const cached = cache.get(chunk.hash, keyWithPastScenes(cacheKeyBase, chunk));
           const raw = cached ?? (await ask(chunk, "settled"));
-          done++;
+          chunksDone++;
           progress.report({
-            message: `${done}/${total}`,
-            increment: 100 / total,
+            message: `${chunksDone}/${chunksTotal}`,
+            increment: 100 / chunksTotal,
           });
           // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-          options.onProgress?.(done, total);
+          options.onProgress?.(chunksDone, chunksTotal);
 
           if (raw === RETRY_SMALLER) {
             const parts = splitMergedChunk(chunk);
             if (parts.length > 1) {
               queue.splice(cursor + 1, 0, ...parts);
-              total += parts.length;
+              chunksTotal += parts.length;
               logStep(
                 `切り詰められたため ${parts.length} 話に分けて試し直します: ${chunk.hash}`
               );
@@ -508,7 +515,7 @@ export async function checkContradictions(
             const retry = retryOnOverflow(chunk, raw);
             if (retry.kind === "split") {
               queue.splice(cursor + 1, 0, ...retry.parts);
-              total += retry.parts.length;
+              chunksTotal += retry.parts.length;
               logStep(`${chunk.hash}: ${retry.note}`);
             } else {
               failedChunks++;
@@ -738,8 +745,34 @@ export async function checkContradictions(
   const verifyNote = describeVerifyResults(verifyRejected, verifyUndecided);
   if (verifyNote) logStep(`矛盾検知の検証: ${verifyNote}`);
 
+  const accepted = sortContradictions(dedupe(issues));
+
+  /*
+    **開始したら、必ず終了の1行を残す**（実機確認 2026-09-05）。
+
+    これまでは「矛盾検知を開始」のあと、検証の取り下げ行で途切れていた。
+    操作ログだけを見ると、終わったのか途中で落ちたのかが分からない。
+    誤字脱字側（`checkTypos.ts`）と同じ形にそろえる。
+
+    中止・打ち切りでもここへ来る——`withAiTurn` は札を取れなければ本体を
+    走らせずに戻り、ループの `break` も関数の外へは抜けないため、
+    どの経路でも「そこまで何チャンク見たか」が残る。
+    分母は分け直しで増えた後の数（`chunksTotal`）。
+  */
+  logStep(
+    `矛盾検知を終了: ${chunksDone}/${chunksTotal}` +
+      `（失敗 ${failedChunks}件 / 指摘 ${accepted.length}件` +
+      ` / 検証で取り下げ ${verifyRejected.length}件` +
+      (chunksTotal > chunks.length
+        ? ` / 入り切らず ${chunksTotal - chunks.length}回に分けた`
+        : "") +
+      (cancelled ? " / 中止された" : "") +
+      (fatalFailure ? " / 途中で打ち切った" : "") +
+      "）"
+  );
+
   return {
-    issues: sortContradictions(dedupe(issues)),
+    issues: accepted,
     rejectedCount,
     failedChunks,
     unreadableEpisodes,
