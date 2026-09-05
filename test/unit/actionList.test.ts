@@ -574,6 +574,42 @@ describe("開閉を覚える", () => {
   });
 });
 
+describe("分類のツールチップ", () => {
+  /**
+   * **tooltip を設定しないと、resourceUri のパスがそのまま出る。**
+   *
+   * 件数の印を出すために分類・小分類にも `resourceUri` を付けているが、
+   * VS Code は tooltip を持たない項目に resourceUri のパスを既定の
+   * ツールチップとして表示する。鍵は `encodeURIComponent` 済みなので、
+   * 「%E8%B3%87%E6%96%99...」という読めない文字列が画面に漏れた
+   * （作者の実機報告、2026-09-05）。
+   */
+  const tooltipTextOf = (node: ActionNode): string => {
+    const provider = new ActionListProvider(fakeRegistry(), memoryStore());
+    const tooltip = provider.getTreeItem(node).tooltip;
+    if (tooltip === undefined) throw new Error("ツールチップがありません");
+    return typeof tooltip === "string" ? tooltip : tooltip.value;
+  };
+
+  test("説明の無い分類・小分類にも、表示名のツールチップが付く", () => {
+    for (const group of ACTION_TREE) {
+      const groupText = tooltipTextOf(groupNode(group.label));
+      // 説明を持つ分類はそれを出し、持たない分類は表示名を出す
+      expect(groupText).toBe(group.tooltip ?? group.label);
+      expect(groupText).not.toContain("%");
+
+      for (const entry of group.entries) {
+        if (entry.kind !== "section") continue;
+        const sectionText = tooltipTextOf(
+          sectionNode(group.label, entry.label)
+        );
+        expect(sectionText).toBe(entry.label);
+        expect(sectionText).not.toContain("%");
+      }
+    }
+  });
+});
+
 describe("操作メニューの印の色", () => {
   const pkg = JSON.parse(readFileSync("package.json", "utf-8")) as {
     contributes: {

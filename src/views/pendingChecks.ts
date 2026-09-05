@@ -165,7 +165,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-1",
     title: "ファイルの開き方",
     commands: ["novelai.createPlot"],
-    count: 5,
+    count: 4,
   },
   {
     id: "F-2",
@@ -204,16 +204,10 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 6,
   },
   {
-    id: "F-8",
-    title: "「1話ぶん」の印",
-    commands: ["novelai.showWritingStats"],
-    count: 1,
-  },
-  {
     id: "F-9",
     title: "操作メニューの色",
     commands: [],
-    count: 2,
+    count: 1,
   },
   {
     id: "F-10",
@@ -231,7 +225,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-12",
     title: "動作を診断を、手元では隠した",
     commands: [],
-    count: 3,
+    count: 1,
   },
   {
     id: "F-13",
@@ -262,12 +256,6 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     title: "簡単ステップメニュー",
     commands: [],
     count: 4,
-  },
-  {
-    id: "F-18",
-    title: "設定資料パネルの絞り込み欄",
-    commands: ["novelai.openSettingsPanel"],
-    count: 1,
   },
   {
     id: "F-53",
@@ -309,7 +297,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-59",
     title: "相談画面の切り替えと、再起動後の表示",
     commands: ["novelai.openChatPanel"],
-    count: 5,
+    count: 4,
   },
   {
     id: "F-60",
@@ -405,7 +393,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-51",
     title: "詳細メニューの整理——散らばっていた「設定」を1か所へ集めた",
     commands: ["novelai.setWorkGoals", "novelai.setPlotBasics", "novelai.manageKeepWords", "novelai.manageCustomFields", "novelai.configureAnnouncement"],
-    count: 9,
+    count: 8,
   },
   {
     id: "F-50",
@@ -447,7 +435,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-44",
     title: "年表——話数順と時系列順",
     commands: ["novelai.openChronicle", "novelai.editTimeline"],
-    count: 7,
+    count: 6,
   },
   {
     id: "F-43",
@@ -722,4 +710,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 871;
+export const PENDING_CHECK_TOTAL = 862;

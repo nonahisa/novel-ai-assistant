@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
-import { logLine } from "../core/logger";
+import { logStep } from "../core/logger";
 
 /**
  * 本文の「その行」を示す（設計書6.37.4）。
@@ -38,12 +38,27 @@ export async function revealTextLocation(
   /** 記録に残すときの呼び名。どの画面から飛んだのかが分かるようにする */
   source = "提案パネル"
 ): Promise<void> {
+  /*
+    **降りた枝は、どれも1行残す**（`manuscriptEditor.ts` の `revealLine` と
+    同じ考え方）。年表から話を押しても何も起きず、通知もログも1行も無くて
+    原因を追えなかった（実機で発見、2026-09-05）。飛べなかったときに
+    「どこで止まったか」が残っていないと、画面側と拡張機能側のどちらの
+    不具合かすら分からない。
+  */
+  if (!filePath) {
+    logStep(`${source}：飛び先のファイルが空だったので、何も開きませんでした。`);
+    return;
+  }
+
   try {
-    if (await revealInManuscript?.(filePath, line)) return;
+    if (await revealInManuscript?.(filePath, line)) {
+      logStep(`${source}：原稿エディタが引き受けました（${filePath} ${line}行目）。`);
+      return;
+    }
   } catch (error) {
     // 原稿エディタ側で転んでも、飛べる道は残す（下で素のエディタを開く）。
     // **理由は残す。** 残さないと「押しても何も起きない」で終わる
-    logLine(
+    logStep(
       `${source}：原稿エディタで示せませんでした（${filePath} ${line}行目：${
         error instanceof Error ? error.message : String(error)
       }）。`
@@ -62,7 +77,15 @@ export async function revealTextLocation(
     const range = doc.lineAt(lineIndex).range;
     editor.selection = new vscode.Selection(range.start, range.end);
     editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-  } catch {
+    logStep(`${source}：素のエディタで示しました（${filePath} ${line}行目）。`);
+  } catch (error) {
+    // **例外の中身を捨てない。** 通知は一言で済ませても、原因（見つからない
+    // のか、開けないのか）はログに残らないと作者も開発側もたどり着けない
+    logStep(
+      `${source}：素のエディタでも開けませんでした（${filePath}：${
+        error instanceof Error ? error.message : String(error)
+      }）。`
+    );
     vscode.window.showWarningMessage("該当のファイルを開けませんでした。");
   }
 }

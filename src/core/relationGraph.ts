@@ -436,13 +436,70 @@ export function filterRelationGraph(
   }
 
   const remaining = new Set(nodes.map((node) => node.id));
-  const unresolved = graph.unresolved.filter(
-    (entry) =>
-      remaining.has(entry.fromId) &&
-      remaining.has(UNRESOLVED_ID_PREFIX + entry.targetName)
-  );
 
-  return { graph: { nodes, edges, unresolved }, hiddenIsolated };
+  return {
+    graph: { nodes, edges, unresolved: restrictUnresolved(graph, remaining) },
+    hiddenIsolated,
+  };
+}
+
+/**
+ * 「結べなかった一覧」を、いま図に残っている相手だけに絞る。
+ *
+ * **呼ぶ側（絞り込みと個人中心図）が、それぞれ違う絞り方をしないための
+ * 唯一の入口である。** 個人中心図は以前ここを写さずに「呼んだ側
+ * （`fromId`）が図に居るか」だけで絞っており、点線を出していない相手まで
+ * 一覧に残っていた。その一覧から内訳（同名で決められなかった数）を数えて
+ * いたため、注記が「6人のうち8人」と、内訳が全体を超えた。
+ *
+ * 両端——呼んだ側と、点線で出している相手そのもの——を見る。
+ */
+export function restrictUnresolved(
+  graph: RelationGraph,
+  visibleIds: ReadonlySet<string>
+): UnresolvedTarget[] {
+  return graph.unresolved.filter(
+    (entry) =>
+      visibleIds.has(entry.fromId) &&
+      visibleIds.has(UNRESOLVED_ID_PREFIX + entry.targetName)
+  );
+}
+
+/** 画面の下に出す注記の件数（全体と、その内訳） */
+export interface UnresolvedCounts {
+  /** 資料に結べず、点線で出している相手の人数 */
+  unresolvedCount: number;
+  /** そのうち、同じ名前の人物が資料に複数いて決められなかった人数 */
+  ambiguousCount: number;
+}
+
+/**
+ * 注記の件数を数える（設計書6.38.5）。
+ *
+ * **2つの件数を必ず同じ集合——画面に点線で出している仮ノードそのもの——
+ * から数える。** 片方をノード、片方を一覧から別々に数えると、絞り込みの
+ * 効き方の違いがそのまま「内訳が全体を超える」形で注記に出る（実際に
+ * 個人中心図で起きた）。ここを通す限り `ambiguousCount <= unresolvedCount`
+ * が成り立つ。
+ *
+ * 「資料に無い」と「どの人か決められない」は直し方が違うので分けて出す。
+ * 前者は抽出し直せば減るが、後者は別名の重なりを直さないと減らない。
+ * 同じ名前で何人から呼ばれていても、困っている相手は1人である。
+ */
+export function countUnresolved(graph: RelationGraph): UnresolvedCounts {
+  const shown = new Set(
+    graph.nodes.filter((node) => node.provisional).map((node) => node.id)
+  );
+  const ambiguous = new Set(
+    graph.unresolved
+      .filter(
+        (entry) =>
+          entry.reason === "ambiguous" &&
+          shown.has(UNRESOLVED_ID_PREFIX + entry.targetName)
+      )
+      .map((entry) => entry.targetName)
+  );
+  return { unresolvedCount: shown.size, ambiguousCount: ambiguous.size };
 }
 
 function sortEdges(edges: RelationEdge[]): RelationEdge[] {

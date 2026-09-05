@@ -2031,7 +2031,15 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       item.contextValue = node.type === "group" ? "actionGroup" : "actionSection";
       // **ここに出せないものを黙って落とさない**（「テスト中」で使う）
       const groupTooltip = node.type === "group" ? node.group.tooltip : undefined;
-      if (groupTooltip) item.tooltip = new vscode.MarkdownString(groupTooltip);
+      // **tooltip は必ず設定する。** 未設定のまま resourceUri だけを付けると、
+      // VS Code は resourceUri のパスを既定のツールチップとして表示する。
+      // 目印の鍵は encodeURIComponent 済みなので、
+      // 「%E8%B3%87%E6%96%99…」という読めない文字列が画面に漏れていた
+      // （作者の実機報告、2026-09-05）。説明を持たない分類・小分類には、
+      // せめて表示名を入れておく
+      item.tooltip = groupTooltip
+        ? new vscode.MarkdownString(groupTooltip)
+        : label;
       item.iconPath = new vscode.ThemeIcon(icon);
       // 件数の印（FileDecorationProvider）を出すための目印
       item.resourceUri = actionResourceUri(node);

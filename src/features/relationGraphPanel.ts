@@ -10,9 +10,11 @@ import { logFailure, logStep } from "../core/logger";
 import { buildRelationGraphPanelHtml } from "../views/relationGraphPanelHtml";
 import {
   buildRelationGraph,
+  countUnresolved,
   egoGraph,
   filterRelationGraph,
   isUnresolvedId,
+  restrictUnresolved,
   NO_AFFILIATION_KEY,
   type RelationGraph,
   type RelationGraphFilter,
@@ -326,9 +328,10 @@ class RelationGraphPanel {
       graph = {
         nodes: ego.nodes,
         edges: ego.edges,
-        unresolved: filtered.graph.unresolved.filter((entry) =>
-          visible.has(entry.fromId)
-        ),
+        // 絞り込みと同じ絞り方（両端が図に残っているか）を通す。呼んだ側
+        // だけで絞ると、点線を出していない相手が一覧に残り、注記の内訳が
+        // 全体を超える
+        unresolved: restrictUnresolved(filtered.graph, visible),
       };
       layout = layoutEgo(ego, EGO_CANVAS);
       const center = ego.nodes.find((node) => node.id === this.centerId);
@@ -363,15 +366,10 @@ class RelationGraphPanel {
         count: filtered.hiddenIsolated.length,
         names: filtered.hiddenIsolated.map((node: RelationNode) => node.name),
       },
-      unresolvedCount: graph.nodes.filter((node) => node.provisional).length,
-      // **「資料に無い」と「どの人か決められない」は直し方が違う。**
-      // 前者は抽出し直せば減るが、後者は別名の重なりを直さないと減らない。
-      // 同じ名前で何人から呼ばれていても、困っている相手は1人である
-      ambiguousCount: new Set(
-        graph.unresolved
-          .filter((entry) => entry.reason === "ambiguous")
-          .map((entry) => entry.targetName)
-      ).size,
+      // 全体と内訳は必ず同じ集合から数える（`countUnresolved`）。
+      // ここで別々に数えると、全体図と個人中心図で絞り込みの効き方が違い、
+      // 内訳が全体を超えた注記が出る
+      ...countUnresolved(graph),
       emptyMessage: this.emptyMessage(),
       warning: this.warning(),
     };

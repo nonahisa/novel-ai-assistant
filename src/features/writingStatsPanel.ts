@@ -1,5 +1,6 @@
-import { openInDefaultEditor } from "../views/openDocument";
 import * as vscode from "vscode";
+// ブラウザ版でも同じ場所を指すため、`node:path` ではなくこちらを使う
+import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { toManuscriptPages } from "../core/charCount";
 import { buildEpisodeCountTable } from "../core/episodeCharTable";
@@ -28,6 +29,7 @@ import { PostingStore } from "../core/postingStore";
 import { logFailure } from "../core/logger";
 import { episodeUnit } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
+import { manuscriptViewTypeFor } from "../core/manuscriptViewTypes";
 import { readWorkGoalsOrEmpty } from "../core/workGoalsStore";
 import {
   buildContestProgress,
@@ -75,12 +77,15 @@ export async function openWritingStatsPanel(
   context.subscriptions.push(panel);
   panel.onDidDispose(() => openPanels.delete(work.id));
 
+  // 見出しの語（「話」か「投稿」か）と、本文を開く画面の向きの両方に使う
+  const format = await readWorkFormat(work);
+
   const nonce = createNonce();
   panel.webview.html = buildWritingStatsPanelHtml(
     nonce,
     panel.webview.cspSource,
     // SNS記事では「投稿ごとの文字数」。話数ではなく投稿の並びである
-    { unitNoun: episodeUnit(await readWorkFormat(work)).noun }
+    { unitNoun: episodeUnit(format).noun }
   );
 
   panel.webview.onDidReceiveMessage(async (message: unknown) => {
@@ -109,9 +114,25 @@ export async function openWritingStatsPanel(
       return;
     }
     if (parsed.type === "open" && parsed.filePath) {
-      await openInDefaultEditor(parsed.filePath, {
-        viewColumn: vscode.ViewColumn.Beside,
-      });
+      /*
+        **本文は原稿エディタで開く**（作者の実機報告、2026-09-05）。
+
+        ここは「話ごとの文字数」の行なので、届く `filePath` は必ず本文である。
+        `openInDefaultEditor` は `.txt` の関連付け（テキストエディター）に
+        従うため、同じファイルなのに作品一覧から開いたときだけ原稿エディタ、
+        統計から開くと素のエディタ、と入口で画面が変わっていた。
+
+        `views/workTree.ts` の話の行と**同じコマンド・同じ入口ID**を使う。
+        向きの既定（脚本だけ縦書き）も `manuscriptViewTypeFor` が持っている
+        ので、ここで決め直さない。
+      */
+      await vscode.commands.executeCommand(
+        "vscode.openWith",
+        path.toUri(parsed.filePath),
+        manuscriptViewTypeFor(format),
+        // 統計を見ながら本文を開くので、パネルの隣に出す（従来どおり）
+        { viewColumn: vscode.ViewColumn.Beside }
+      );
     }
   });
 }
