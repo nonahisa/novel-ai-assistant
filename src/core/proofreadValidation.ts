@@ -1,4 +1,4 @@
-import type { Chunk } from "./chunker";
+import { locateChunkLine, segmentsOf, type Chunk } from "./chunker";
 import { normalizeForComparison } from "./groundedEvidence";
 import { isPlaceholderText } from "./placeholderText";
 import { nonJouyouKanjiIn } from "./jouyouKanji";
@@ -37,6 +37,15 @@ export interface AcceptedProofreadIssue {
   reason: ProofreadReason;
   explanation: string;
   confidence: "high" | "medium" | "low";
+  /**
+   * 語尾単調のときの、連続そのもの（設計書6.30.4）。
+   *
+   * **ここでは説明文を組まない。** 説明文には行範囲が入るが、`line` は
+   * まだ**チャンクが振った番号**であって、ファイルの行番号ではない。
+   * まとめたチャンク（`mergeAdjacentChunks`）ではこの2つが食い違うので、
+   * 行が確定する `locateProofreadIssue` まで実体のまま持ち回る。
+   */
+  monotony?: MonotonousRun;
 }
 
 export interface RejectedProofreadIssue {
@@ -184,9 +193,16 @@ export interface MonotonousRun {
   ending: string;
   /** 続いている文の数 */
   count: number;
-  /** 最初の文が始まる行（ファイル内の1始まりの行番号） */
+  /**
+   * 最初の文が始まる行。
+   *
+   * **`withLineNumbers` が振ったのと同じ番号**（`chunk.startLine + n + 1`）で、
+   * ファイルの行番号とは限らない。まとめたチャンクではまとめた本文の
+   * 通し番号になる——ファイルの行へ直すのは `locateChunkLine` の仕事で、
+   * その1か所に寄せてある（設計書6.30.4）。
+   */
   startLine: number;
-  /** 最後の文が終わる行 */
+  /** 最後の文が終わる行（`startLine` と同じ番号の付け方） */
   endLine: number;
   /** 各文の書き出し（長ければ `MONOTONOUS_HEAD_CHARS` 字＋「…」） */
   heads: string[];
@@ -218,8 +234,8 @@ const MONOTONOUS_HEAD_CHARS = 12;
  * **台詞は消さずに空白へ置き換える。** 消すと後ろの行が繰り上がり、
  * 返す行番号が本文とずれる（改行はそのまま残す）。
  *
- * @param text チャンクの本文
- * @param firstLine そのチャンクの1行目が、ファイルの何行目か（1始まり）
+ * @param text 数える本文（チャンク、またはその内訳1つぶん）
+ * @param firstLine その本文の1行目に付いている行番号（1始まり）
  */
 export function findMonotonousRuns(
   text: string,
@@ -307,6 +323,38 @@ export function hasMonotonousEnding(text: string): boolean {
 }
 
 /**
+ * チャンクの中の連続を、**内訳（話）ごとに**数える（設計書6.30.4）。
+ *
+ * まとめたチャンク（`mergeAdjacentChunks`）をひとつながりの本文として
+ * 数えると、**第1話の末尾2文と第2話の冒頭2文で「た。」の4連続ができる。**
+ * 話が変われば語りも切れているので、それは地の文の単調さではない。
+ * 内訳の切れ目で必ず数え直す。
+ *
+ * 返す行番号は `withLineNumbers` と同じ番号（チャンクの中での通し番号）に
+ * 揃える。ファイルの行へ直すのは `locateChunkLine` の1か所だけである。
+ */
+export function findMonotonousRunsInChunk(chunk: Chunk): MonotonousRun[] {
+  const runs: MonotonousRun[] = [];
+  for (const segment of segmentsOf(chunk)) {
+    const body = chunk.text.slice(segment.start, segment.end);
+    // この内訳の1行目が、チャンクの中で何行目に当たるか
+    const firstLine =
+      chunk.startLine + countNewlines(chunk.text, segment.start) + 1;
+    runs.push(...findMonotonousRuns(body, firstLine));
+  }
+  return runs;
+}
+
+/** `upto` の手前までにある改行の数 */
+function countNewlines(text: string, upto: number): number {
+  let count = 0;
+  for (let index = 0; index < upto; index++) {
+    if (text[index] === "\n") count++;
+  }
+  return count;
+}
+
+/**
  * 指摘の行から、いちばん近い連続を選ぶ。
  *
  * AIの錨は当てにならない（台詞の1行に下ろされていた）が、**どのあたりを
@@ -348,6 +396,12 @@ const MONOTONOUS_HEADS_SHOWN = 2;
  * 語尾も文数も行範囲も、ここに来るのはコードが数えた値だけである。
  *
  * **直し方は書かない。** どう散らすかは文体そのものなので、決めるのは作者。
+ * **「直し方は作者が決めてください」も書かない**——添えるのは提案パネルの
+ * 1か所（修正案の無い指摘すべてに付く）で、ここでも書くと二重になる。
+ *
+ * **渡すのはファイルの行番号に直したあとの `run`**（設計書6.30.4）。
+ * チャンクの通し番号のまま組むと、カードの見出し（ファイル行）と
+ * 説明文の行範囲が食い違う。
  */
 export function describeMonotonousRun(run: MonotonousRun): string {
   const shown = run.heads.slice(0, MONOTONOUS_HEADS_SHOWN).join(" ／ ");
@@ -358,13 +412,22 @@ export function describeMonotonousRun(run: MonotonousRun): string {
       : `${run.startLine}〜${run.endLine}行目`;
   return (
     `「${run.ending}」で終わる地の文が${run.count}文続いています（${range}）：` +
-    `${shown}${rest}。直し方は作者が決めてください`
+    `${shown}${rest}`
   );
 }
 
-/** 文末の1文字＋句点。句点で終わっていなければ語尾として数えない */
+/**
+ * 文末の1文字＋句点。句点で終わっていなければ語尾として数えない。
+ *
+ * **空白は飛ばす。** 台詞は同じ長さの空白へ置き換えてあるので
+ * （`maskDialogue`）、「彼は跳ねた「うん」。」のように台詞が句点の直前に
+ * あると、素直に1文字前を見ると語尾が「 。」になる。そのままだと
+ * 前後の「た。」と別物になって連続が切れ、画面にも「 。」と出る。
+ */
 function endingOf(sentence: string): string | undefined {
-  const matched = /(.)([。！？])$/u.exec(sentence);
+  // 句点の手前に空白が挟まっていたら、それを飛ばして1文字前を見る。
+  // `u` を付けた `\s` は全角空白（U+3000）も含むので、これで足りる
+  const matched = /([^\s])\s*([。！？])$/u.exec(sentence);
   return matched ? matched[1] + matched[2] : undefined;
 }
 
@@ -595,7 +658,7 @@ export function validateProofreadIssues(
   // 答えは同じで、長いチャンクでは無駄が積み上がる
   let monotonyInChunk: MonotonousRun[] | undefined;
   const monotonousRuns = (): MonotonousRun[] =>
-    (monotonyInChunk ??= findMonotonousRuns(chunk.text, firstLine));
+    (monotonyInChunk ??= findMonotonousRunsInChunk(chunk));
   // **同じ連続に何枚も出さない**（作者の報告、2026-09-05）。
   // 錨を付け替えると、AIが別々に出した指摘が同じ1か所を指すことがある
   const shownRuns = new Set<string>();
@@ -737,13 +800,17 @@ export function validateProofreadIssues(
       target: anchor || original,
       suggestion: usableSuggestion,
       reason,
-      // 漢字ひらきには、常用漢字表との照合結果を参考として添える
+      // **語尾単調の説明文はここでは組まない**（設計書6.30.4）。行範囲が
+      // 入るが、行はまだチャンクの通し番号である。実体だけを持ち回り、
+      // ファイルの行が決まる `locateProofreadIssue` で組む
       explanation: run
-        ? describeMonotonousRun(run)
+        ? ""
         : reason === "漢字ひらき"
-          ? withNonJouyouNote(asString(item.explanation), original)
+          ? // 漢字ひらきには、常用漢字表との照合結果を参考として添える
+            withNonJouyouNote(asString(item.explanation), original)
           : asString(item.explanation),
       confidence: level(item.confidence),
+      ...(run ? { monotony: run } : {}),
     });
   }
 
@@ -756,6 +823,47 @@ export function validateProofreadIssues(
   }
 
   return { accepted, rejected };
+}
+
+/**
+ * 指摘の行を、**チャンクの通し番号からファイルの行番号へ直す**
+ * （設計書6.30.4）。
+ *
+ * まとめたチャンク（`mergeAdjacentChunks`）では `withLineNumbers` が振った
+ * 番号がまとめた本文の通し番号になっている。ここを通さずに使うと、
+ * 2話目以降の指摘が1話目のまったく違う行を指す。
+ *
+ * **語尾単調の説明文もここで組む。** 説明文には行範囲が入るので、
+ * 行が確定する前に組むと、カードの見出し（ファイル行）と食い違ったまま
+ * 凍る。**行の解決は `locateChunkLine` の1か所だけ**にする。
+ *
+ * 範囲の外を指していれば `undefined`（AIは平気で範囲外の行を返す）。
+ */
+export function locateProofreadIssue(
+  chunk: Chunk,
+  issue: AcceptedProofreadIssue
+): (AcceptedProofreadIssue & { filePath: string }) | undefined {
+  const at = locateChunkLine(chunk, issue.line);
+  if (!at) return undefined;
+
+  // 連続そのものは画面へ出す値ではないので、ここで落とす
+  const { monotony, ...rest } = issue;
+  if (!monotony) return { ...rest, line: at.line, filePath: at.filePath };
+
+  // 連続は内訳ごとに数えてあるので、終わりも同じファイルに収まる。
+  // それでも戻せなかったときは、始まりの行だけで言う（黙って捨てない）
+  const end = locateChunkLine(chunk, monotony.endLine);
+  const endLine = end && end.filePath === at.filePath ? end.line : at.line;
+  return {
+    ...rest,
+    line: at.line,
+    filePath: at.filePath,
+    explanation: describeMonotonousRun({
+      ...monotony,
+      startLine: at.line,
+      endLine,
+    }),
+  };
 }
 
 /**

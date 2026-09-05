@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { describeNotationResult } from "../../src/features/checkNotation";
+import {
+  describeNotationResult,
+  readGroupSelection,
+} from "../../src/features/checkNotation";
 import type { NotationCheckRunResult } from "../../src/features/checkNotation";
 import type { TypoCheckIssue } from "../../src/features/checkTypos";
 
@@ -99,5 +102,30 @@ describe("0件のとき、理由を言い分ける", () => {
     );
     expect(text.length).toBeGreaterThan(0);
     expect(text).toContain("指摘は作られませんでした");
+  });
+});
+
+/**
+ * 揃える組の選択の読み方（作者の実機報告、2026-09-05）。
+ *
+ * 「校正をまとめて実行で表記ゆれを何も選ばないと動かず終わります」。
+ * **「0組のまま確定」と「Escで閉じた」を同じ `undefined` に潰していた**
+ * ため、まとめ実行（設計書6.80）が「作者が止めた」と読んで残りの校正を
+ * 1つも走らせず、しかも1件目なので通知も出なかった。
+ */
+describe("揃える組の選択", () => {
+  it("何も選ばずに確定したのは「今回は揃えない」（止める意思ではない）", () => {
+    expect(readGroupSelection([])).toEqual({ kind: "none" });
+  });
+
+  it("Escで閉じたのは、止める意思", () => {
+    expect(readGroupSelection(undefined)).toEqual({ kind: "cancelled" });
+  });
+
+  it("選ばれた組はそのまま渡す", () => {
+    expect(readGroupSelection(["良い/よい"])).toEqual({
+      kind: "picked",
+      groups: ["良い/よい"],
+    });
   });
 });

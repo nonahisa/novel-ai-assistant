@@ -71,6 +71,15 @@ export interface NotationCheckRunResult {
   selectedCount?: number;
   /** 組ごとの選択を途中で閉じたか */
   stoppedEarly?: boolean;
+  /**
+   * 揃える組を**1つも選ばずに確定した**（作者の実機報告、2026-09-05）。
+   *
+   * **`cancelled` と分ける。** 「今回は揃えない」と決めただけであって、
+   * 校正のまとめ実行（設計書6.80）を止める意思ではない。ここを一緒に
+   * していたため、まとめ実行が表記ゆれの次から**何も走らずに終わって**
+   * いた（しかも1件目なので通知も出なかった）。
+   */
+  noGroupsChosen?: boolean;
 }
 
 export async function checkNotation(
@@ -149,10 +158,24 @@ export async function checkNotation(
     return { issues: [], groupCount: 0, unifiedCount: 0, dismissedCount: 0, cancelled: false };
   }
 
-  const picked = await pickGroups(groups);
-  if (!picked) {
+  const selection = readGroupSelection(await pickGroups(groups));
+  if (selection.kind === "cancelled") {
     return { issues: [], groupCount: groups.length, unifiedCount: 0, dismissedCount: 0, cancelled: true };
   }
+  if (selection.kind === "none") {
+    // **0組のまま確定は「今回は揃えない」。** 止める意思ではないので、
+    // まとめ実行（設計書6.80）は次の検知へ進んでよい
+    return {
+      issues: [],
+      groupCount: groups.length,
+      unifiedCount: 0,
+      dismissedCount: 0,
+      cancelled: false,
+      selectedCount: 0,
+      noGroupsChosen: true,
+    };
+  }
+  const picked = selection.groups;
 
   // **14組あれば14回聞かれる。** 1回で決められる道を用意する（6.8.9）
   const mode =
@@ -212,6 +235,29 @@ export async function checkNotation(
   };
 }
 
+/**
+ * 揃える組の選択の答えを読む（作者の実機報告、2026-09-05）。
+ *
+ * **「0組のまま確定」と「閉じた」は別物である。** どちらも
+ * `undefined` に潰していたため、まとめ実行（設計書6.80）が
+ * 「作者が止めた」と読んで残りの校正を走らせなかった。
+ *
+ * - 何も選ばずに確定（空配列）→ **今回は揃えない。** 校正は続けてよい
+ * - Escで閉じた（undefined）→ **止める意思。** 残りも走らせない
+ */
+export type GroupSelection<T> =
+  | { readonly kind: "picked"; readonly groups: readonly T[] }
+  | { readonly kind: "none" }
+  | { readonly kind: "cancelled" };
+
+export function readGroupSelection<T>(
+  picked: readonly T[] | undefined
+): GroupSelection<T> {
+  if (picked === undefined) return { kind: "cancelled" };
+  if (picked.length === 0) return { kind: "none" };
+  return { kind: "picked", groups: picked };
+}
+
 /** 揃えたい組を選ばせる。既定では何も選ばない（勝手に直さない） */
 async function pickGroups(
   groups: NotationVariantGroup[]
@@ -234,11 +280,13 @@ async function pickGroups(
   if (!picked) return undefined;
   if (picked.length === 0) {
     // **黙って終わらない。** 押したのに何も起きないと、
-    // 作者は壊れていると受け取る（2026-08-21、作者の報告）
+    // 作者は壊れていると受け取る（2026-08-21、作者の報告）。
+    // **空配列のまま返す**——「今回は揃えない」であって中止ではないので、
+    // ここで undefined に潰さない（`readGroupSelection`）
     void vscode.window.showInformationMessage(
       "揃える組が1つも選ばれていません。左端の四角を押して選んでください。"
     );
-    return undefined;
+    return [];
   }
   return picked.map((item) => item.group);
 }

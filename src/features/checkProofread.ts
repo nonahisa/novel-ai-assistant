@@ -15,7 +15,6 @@ import {
   withLineNumbers,
   mergeAdjacentChunks,
   splitMergedChunk,
-  locateChunkLine,
   type Chunk,
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
@@ -40,6 +39,7 @@ import {
   PROOFREAD_VERSION,
 } from "../prompts/proofread";
 import {
+  locateProofreadIssue,
   parseProofreadResult,
   sortProofreadIssues,
   validateProofreadIssues,
@@ -308,18 +308,14 @@ export async function checkProofread(
         for (const issue of validated.accepted) {
           // **どのファイルの何行目かを、ここで確定させる。** まとめたチャンクでは
           // AIが返す行番号がまとめた本文の通し番号になっており、そのまま使うと
-          // 別の話のファイルの、まったく違う行を書き換える
-          const at = locateChunkLine(chunk, issue.line);
-          if (!at) {
+          // 別の話のファイルの、まったく違う行を書き換える。
+          // 語尾単調の説明文（行範囲が入る）も、ここで組み上がる
+          const located = locateProofreadIssue(chunk, issue);
+          if (!located) {
             rejectedCount++;
             continue;
           }
-          issues.push({
-            ...issue,
-            line: at.line,
-            filePath: at.filePath,
-            chunkHash: chunk.hash,
-          });
+          issues.push({ ...located, chunkHash: chunk.hash });
         }
       }
 

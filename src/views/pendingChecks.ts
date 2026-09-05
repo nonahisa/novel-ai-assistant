@@ -693,13 +693,13 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-88",
     title: "ステップメニューのバッジと投稿・告知の新機能",
     commands: ["novelai.showWritingStats", "novelai.generateAnnouncement"],
-    count: 11,
+    count: 12,
   },
   {
     id: "F-89",
     title: "校正をまとめて実行",
     commands: ["novelai.runProofreadingSuite"],
-    count: 6,
+    count: 8,
   },
   {
     id: "",
@@ -722,4 +722,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 891;
+export const PENDING_CHECK_TOTAL = 894;

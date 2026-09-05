@@ -20,15 +20,17 @@ import {
 import { openGeneratedMarkdown } from "../views/openDocument";
 import { withCancellableProgress } from "../views/progress";
 /*
-  まとめ実行（設計書6.80）へ「結果を出さずに終わった」を伝えるための印。
+  まとめ実行（設計書6.80）へ、終わり方を伝えるための印。
 
-  **振る舞いは変えていない。** これまで `return` していたところで、
-  同じ形の値を返すようにしただけである。冒頭診断だけは結果が文書として
-  開くため、ほかの検知と違って「件数」で終わりを判断できない。
+  **「止めた」と「失敗した」を分ける。** 作者の中止・確認での取りやめ・
+  前提不足は `CHECK_CANCELLED`（残りも走らせない）、AIの失敗と応答の
+  読み取り失敗は `CHECK_FAILED`（次の検知へ進む）。冒頭診断だけは結果が
+  文書として開くため、ほかの検知と違って「件数」で終わりを判断できない。
 */
 import {
   CHECK_CANCELLED,
   CHECK_COMPLETED,
+  CHECK_FAILED,
   type CheckCommandOutcome,
 } from "../core/proofreadingSuite";
 import { reportAIError } from "./reportAIError";
@@ -152,7 +154,9 @@ export async function checkOpening(
       return CHECK_CANCELLED;
     }
     reportAIError("冒頭診断", failure);
-    return CHECK_CANCELLED;
+    // **AIの失敗は「止めた」ではない**（設計書6.80）。まとめ実行は次の検知へ
+    // 進んでよい——レート上限も接続の失敗も、次の機能では起きないことがある
+    return CHECK_FAILED;
   }
   if (responseText === undefined) return CHECK_CANCELLED;
 
@@ -168,7 +172,8 @@ export async function checkOpening(
       "ログを見る"
     );
     if (answer === "ログを見る") showLog();
-    return CHECK_CANCELLED;
+    // 応答を読めなかったのも失敗である（次の検知は走らせる）
+    return CHECK_FAILED;
   }
 
   // **ファイル名には作品名を入れない。** 置き場が作品ごとに分かれており

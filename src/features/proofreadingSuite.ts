@@ -1,12 +1,13 @@
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
-import { withCancellableProgress } from "../views/progress";
+import { withProgress } from "../views/progress";
+import { logFailure } from "../core/logger";
 import {
   PROOFREADING_CHECKS,
   PROOFREADING_SUITE_SELECTION_KEY,
   describeStep,
   describeSuiteResult,
-  isCancelledOutcome,
+  outcomeKindOf,
   parseStoredSelection,
   serializeSelection,
   sortToRunOrder,
@@ -34,6 +35,20 @@ import {
  *
  * 並べて走らせると、作者は「いま何を見ているのか」を見失う。中止したら
  * 残りは走らせない——止めたのに次が始まるのは、押した意味が無い。
+ *
+ * ## 中止ボタンは持たない（0.33.7のレビュー）
+ *
+ * ここで `withCancellableProgress` を使うと、**中止ボタンが2つ並ぶ**——
+ * まとめ側と、いま走っている検知のものである。作者が選択画面（6.76）で
+ * 「まとめ」を選んで止めても、その合図は走っている検知へ届かず、検知は
+ * 最後まで走り切っていた。中止は**実行中の検知のもの1つ**に寄せる。
+ * 検知が止まれば `cancelled` が返り、まとめもそこで残りを走らせない。
+ *
+ * ## 失敗しても、残りは走らせる
+ *
+ * AIの失敗や応答の読み取り失敗は、次の検知を止める理由にならない。
+ * 例外を投げるコマンドがあっても内訳ごと失わないよう、1件ずつ包んで
+ * 記録し、**通知は必ず出す**（`finally`）。
  */
 
 /** 前回の選択の控え。`context.globalState` をそのまま渡せる形だけを要求する */
@@ -107,33 +122,53 @@ export async function runProofreadingSuite(
   /** 中止で走らせなかったものの、先頭の位置。走り切ったら -1 */
   let stoppedAt = -1;
 
-  await withCancellableProgress("校正をまとめて実行", async (progress, token) => {
-    for (const [index, check] of checks.entries()) {
-      if (token.isCancellationRequested) {
-        stoppedAt = index;
-        return;
+  try {
+    await withProgress("校正をまとめて実行", async (progress) => {
+      for (const [index, check] of checks.entries()) {
+        progress.report({
+          message: describeStep(index + 1, checks.length, check.label),
+        });
+
+        let outcome: unknown;
+        try {
+          outcome = await vscode.commands.executeCommand(check.command, ref);
+        } catch (error) {
+          // **例外で内訳ごと失わない。** ここで抜けると、それまでに走った
+          // 機能の結果も作者へ伝わらないまま終わる
+          logFailure("校正のまとめ実行", {
+            機能: check.label,
+            詳細: error instanceof Error ? error.message : String(error),
+          });
+          done.push({ label: check.label, failed: true });
+          continue;
+        }
+
+        const kind = outcomeKindOf(outcome);
+        // 各機能の中止（進捗の中止・確認での取りやめ・前提不足）で止める
+        if (kind === "cancelled") {
+          stoppedAt = index;
+          return;
+        }
+        // **失敗は次へ進む。** レート上限も解析の失敗も、次の機能では
+        // 起きないことのほうが多い
+        if (kind === "failed") {
+          done.push({ label: check.label, failed: true });
+          continue;
+        }
+
+        done.push(countOf(check, deps));
       }
-      progress.report({
-        message: describeStep(index + 1, checks.length, check.label),
-      });
-
-      const outcome = await vscode.commands.executeCommand(check.command, ref);
-      // 各機能の中止（進捗の中止・確認での取りやめ）を、まとめ側の中止と読む
-      if (isCancelledOutcome(outcome)) {
-        stoppedAt = index;
-        return;
-      }
-
-      done.push(countOf(check, deps));
-    }
-  });
-
-  const message = describeSuiteResult({
-    done,
-    remaining:
-      stoppedAt < 0 ? [] : checks.slice(stoppedAt).map((check) => check.label),
-  });
-  if (message) void vscode.window.showInformationMessage(message);
+    });
+  } finally {
+    // **知らせは必ず出す。** ここまでに何が走ったかは、途中で何が起きても
+    // 作者へ伝える値がある
+    const message = describeSuiteResult({
+      done,
+      remaining:
+        stoppedAt < 0 ? [] : checks.slice(stoppedAt).map((check) => check.label),
+    });
+    if (message) void vscode.window.showInformationMessage(message);
+  }
 }
 
 /**

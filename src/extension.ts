@@ -256,13 +256,16 @@ import {
   showForeshadowCandidates,
   showForeshadowResolutions,
 } from "./features/checkForeshadows";
-// 校正のまとめ実行（設計書6.80）。各コマンドは「結果を出さずに終わった」を
-// 戻り値で伝える——まとめ実行はそれを見て、残りを走らせるかどうかを決める
+// 校正のまとめ実行（設計書6.80）。各コマンドは終わり方を戻り値で伝える——
+// **止めた（cancelled）と失敗した（failed）は別物**で、残りを走らせるかが違う。
+// ここの7コマンドが返すのは中止と完走だけで、`CHECK_FAILED` を立てるのは
+// AIの失敗を自分で掴んでいる機能の側（`checkOpening.ts`）である
 import { runProofreadingSuite } from "./features/proofreadingSuite";
 import {
   CHECK_CANCELLED,
   CHECK_COMPLETED,
   PROOFREADING_SUITE_COMMAND,
+  type CheckCommandOutcome,
 } from "./core/proofreadingSuite";
 import {
   extendMarkdownItWithRuby,
@@ -384,6 +387,26 @@ function describeCreatedAt(iso: string): string {
 function isFromEarlierSession(iso: string): boolean {
   const at = new Date(iso).getTime();
   return Number.isNaN(at) || at < SESSION_STARTED_AT;
+}
+
+/**
+ * 校正のコマンドで、未保存の本文を保存してから走らせる（設計書6.80）。
+ *
+ * **保存できなかったのも「中止」として返す。** 作者が「中止」を選んだのと
+ * 原因は違うが、**次の検知でも同じ理由でまた止まる**——保存できない文書は
+ * そこに残ったままである。「失敗（`CHECK_FAILED`）は次へ進む」のは、
+ * 次では起きないかもしれない失敗（AIのレート上限・応答の解析）に対する
+ * 扱いであって、前提が欠けたままの状態には当てはまらない。
+ *
+ * @returns 保存できたら `undefined`。走らせられないときは、そのまま
+ *   返してよい戻り値
+ */
+async function saveBeforeCheck(
+  work: WorkEntry,
+  actionLabel: string
+): Promise<CheckCommandOutcome | undefined> {
+  const saved = await saveDirtyDocumentsBeforeExtraction(work, actionLabel);
+  return saved ? undefined : CHECK_CANCELLED;
 }
 
 export async function activate(
@@ -1196,6 +1219,8 @@ export async function activate(
       if (kind === "checkNotation") {
         const result = await checkNotation(work);
         if (!result || result.cancelled) return;
+        // 0組のまま確定したときは、選択画面が既に理由を伝えている
+        if (result.noGroupsChosen) return;
         proposalPanel.showResults(work, result.issues, "表記ゆれ");
         // **黙って終わらない。** 0件のときに理由を言わないと、作者は
         // 壊れていると受け取る（2026-08-21、作者の報告）
@@ -3088,9 +3113,8 @@ export async function activate(
         if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文から伏線を拾ってしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "伏線の検知"))) {
-          return CHECK_CANCELLED;
-        }
+        const unsaved = await saveBeforeCheck(work, "伏線の検知");
+        if (unsaved) return unsaved;
 
         const result = await withPanelProgress(
           work,
@@ -3213,8 +3237,8 @@ export async function activate(
         if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を検知してしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "誤字脱字の検知")))
-          return CHECK_CANCELLED;
+        const unsaved = await saveBeforeCheck(work, "誤字脱字の検知");
+        if (unsaved) return unsaved;
 
         // **前回から書いた分だけに絞れる**（設計書6.8.7）。
         // 聞く意味があるときだけ聞く（一度も検知していない・全部が対象・
@@ -3255,11 +3279,15 @@ export async function activate(
         if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を数えてしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "表記ゆれの検知")))
-          return CHECK_CANCELLED;
+        const unsaved = await saveBeforeCheck(work, "表記ゆれの検知");
+        if (unsaved) return unsaved;
 
         const result = await checkNotation(work);
         if (!result || result.cancelled) return CHECK_CANCELLED;
+        // **0組のまま確定は「今回は揃えない」**（作者の実機報告、2026-09-05）。
+        // 選択画面が既に理由を伝えているので知らせを重ねず、提案パネルも
+        // 触らない。ただし止める意思ではないので、まとめ実行は次へ進む
+        if (result.noGroupsChosen) return CHECK_COMPLETED;
 
         proposalPanel.showResults(work, result.issues, "表記ゆれ");
 
@@ -3439,11 +3467,8 @@ export async function activate(
         if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を照らしてしまう
-        if (
-          !(await saveDirtyDocumentsBeforeExtraction(work, "プロット逸脱の検知"))
-        ) {
-          return CHECK_CANCELLED;
-        }
+        const unsaved = await saveBeforeCheck(work, "プロット逸脱の検知");
+        if (unsaved) return unsaved;
 
         const result = await withPanelProgress(
           work,
@@ -3628,9 +3653,8 @@ export async function activate(
         if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を推敲してしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "推敲"))) {
-          return CHECK_CANCELLED;
-        }
+        const unsaved = await saveBeforeCheck(work, "推敲");
+        if (unsaved) return unsaved;
 
         const result = await withPanelProgress(work, "推敲", (onProgress) =>
           checkProofread(work, aiRegistry, { onProgress })
@@ -3675,9 +3699,8 @@ export async function activate(
         if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う冒頭を診断してしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "冒頭診断"))) {
-          return CHECK_CANCELLED;
-        }
+        const unsaved = await saveBeforeCheck(work, "冒頭診断");
+        if (unsaved) return unsaved;
 
         // **完了の通知を出さない。** 結果そのものが文書として開くので、
         // 「できました」を重ねると画面の手前に確認が1枚増えるだけになる
@@ -3694,9 +3717,8 @@ export async function activate(
         if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を突き合わせてしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "矛盾検知"))) {
-          return CHECK_CANCELLED;
-        }
+        const unsaved = await saveBeforeCheck(work, "矛盾検知");
+        if (unsaved) return unsaved;
 
         const result = await withPanelProgress(
           work,

@@ -203,7 +203,7 @@ describe("走らせ方", () => {
 
   test("中止したら、残りは走らせない", async () => {
     selection = ["notation", "typos", "proofread"];
-    outcomes = { "novelai.checkTypos": { cancelled: true } };
+    outcomes = { "novelai.checkTypos": { kind: "cancelled" } };
 
     await run();
 
@@ -219,6 +219,89 @@ describe("走らせ方", () => {
     expect(calls).toEqual([
       "novelai.checkOpening",
       "novelai.checkContradictions",
+    ]);
+  });
+
+  test("失敗しても、残りは走らせる", async () => {
+    /*
+      **失敗は止める理由にならない**（0.33.7のレビュー）。レート上限も
+      応答の解析の失敗も、次の機能では起きないことのほうが多い。
+    */
+    selection = ["notation", "typos", "proofread"];
+    outcomes = { "novelai.checkTypos": { kind: "failed" } };
+
+    await run();
+
+    expect(calls).toEqual([
+      "novelai.checkNotation",
+      "novelai.checkTypos",
+      "novelai.checkProofread",
+    ]);
+  });
+
+  test("表記ゆれで0組を選んで確定しても、次へ進む", async () => {
+    /*
+      作者の実機報告（2026-09-05）「表記ゆれを何も選ばないと動かず終わります」。
+      **0組のまま確定は「今回は揃えない」であって、止める意思ではない。**
+      表記ゆれのコマンド側で完走（`CHECK_COMPLETED`）を返すようにした。
+    */
+    selection = ["notation", "typos", "proofread"];
+    outcomes = { "novelai.checkNotation": { kind: "completed" } };
+    remaining = { 表記ゆれ: 0, 誤字脱字: 2, 推敲: 1 };
+
+    await run();
+
+    expect(calls).toEqual([
+      "novelai.checkNotation",
+      "novelai.checkTypos",
+      "novelai.checkProofread",
+    ]);
+    expect(announced).toEqual([
+      "校正をまとめて実行しました。表記ゆれ0件・誤字脱字2件・推敲1件。" +
+        "提案パネルで確認できます。",
+    ]);
+  });
+
+  test("表記ゆれをEscで閉じたら、そこで止めて残りを伝える", async () => {
+    selection = ["notation", "typos", "proofread"];
+    outcomes = { "novelai.checkNotation": { kind: "cancelled" } };
+
+    await run();
+
+    expect(calls).toEqual(["novelai.checkNotation"]);
+    expect(announced).toEqual([
+      "校正をまとめて実行：1件も実行せずに止まりました" +
+        "（残り：表記ゆれ・誤字脱字・推敲）。",
+    ]);
+  });
+
+  test("コマンドが例外を投げても、内訳は失われない", async () => {
+    /*
+      **例外で通知ごと失わない**（0.33.7のレビュー）。ここで抜けると、
+      それまでに走った機能の結果も作者へ伝わらないまま終わっていた。
+    */
+    selection = ["notation", "typos", "proofread"];
+    remaining = { 表記ゆれ: 2, 推敲: 1 };
+    Object.assign(commands, {
+      executeCommand: async (command: string) => {
+        calls.push(command);
+        if (command === "novelai.checkTypos") {
+          throw new Error("わざと壊した");
+        }
+        return undefined;
+      },
+    });
+
+    await run();
+
+    expect(calls).toEqual([
+      "novelai.checkNotation",
+      "novelai.checkTypos",
+      "novelai.checkProofread",
+    ]);
+    expect(announced).toEqual([
+      "校正をまとめて実行しました。表記ゆれ2件・誤字脱字は失敗しました・推敲1件。" +
+        "提案パネルで確認できます。",
     ]);
   });
 });
@@ -239,7 +322,7 @@ describe("終わったときの知らせ", () => {
   test("中止したら、そこまでの内訳と残りを伝える", async () => {
     selection = ["notation", "proofread", "contradictions"];
     remaining = { 表記ゆれ: 2 };
-    outcomes = { "novelai.checkProofread": { cancelled: true } };
+    outcomes = { "novelai.checkProofread": { kind: "cancelled" } };
 
     await run();
 
@@ -249,12 +332,19 @@ describe("終わったときの知らせ", () => {
     ]);
   });
 
-  test("1つ目で中止されたら、何も知らせない", async () => {
+  test("1つ目で中止されても、黙って終わらない", async () => {
+    /*
+      **通知ゼロを作らない**（0.33.7のレビュー）。1件目で止まると `done` が
+      空になり、作者からは「押したのに何も起きない」としか見えなかった。
+    */
     selection = ["notation", "typos"];
-    outcomes = { "novelai.checkNotation": { cancelled: true } };
+    outcomes = { "novelai.checkNotation": { kind: "cancelled" } };
 
     await run();
 
-    expect(announced).toEqual([]);
+    expect(announced).toEqual([
+      "校正をまとめて実行：1件も実行せずに止まりました" +
+        "（残り：表記ゆれ・誤字脱字）。",
+    ]);
   });
 });

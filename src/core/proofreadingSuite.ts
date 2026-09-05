@@ -154,37 +154,50 @@ export function parseStoredSelection(
 }
 
 /**
- * 校正の各コマンドが、まとめ実行へ返す答え。
+ * 校正の各コマンドが、まとめ実行へ返す答え（設計書6.80）。
  *
- * **`cancelled` は「結果を出さずに終わった」の印である**——作者が中止した、
- * 確認で取りやめた、前提（AIの設定・未保存の本文）が揃わなかった、の
- * どれでも立てる。理由を分けないのは、**どれであっても次を走らせる意味が
- * 無い**ためである（同じ理由でまた止まる）。
+ * **「止める」と「失敗した」を分ける**（0.33.7のレビュー）。0.33.6では
+ * 結果を出さずに終わったものを一律で中止扱いにしていたが、**AIの失敗や
+ * 応答の読み取り失敗は、次の検知を止める理由にならない**——レート上限も
+ * 解析の失敗も、次の機能では起きないことのほうが多い。
  *
- * 戻り値を足しただけで、コマンド自身の振る舞いは何も変えていない。
+ * - `cancelled` … 作者が止めた・確認で取りやめた・前提が無い
+ *   （AI未設定・作品未選択・本文なし）。**残りも走らせない**（同じ理由で
+ *   また止まる）
+ * - `failed` … 走ろうとして失敗した（AIエラー・応答を読めない・保存できない）。
+ *   **次へ進み**、内訳に「◯◯は失敗しました」と出す
+ * - `completed` … 走り切った
  */
+export type CheckOutcomeKind = "completed" | "cancelled" | "failed";
+
 export interface CheckCommandOutcome {
-  readonly cancelled: boolean;
+  readonly kind: CheckOutcomeKind;
 }
 
 /** 結果を出さずに終わった（まとめ実行はここで止まる） */
-export const CHECK_CANCELLED: CheckCommandOutcome = { cancelled: true };
+export const CHECK_CANCELLED: CheckCommandOutcome = { kind: "cancelled" };
 
 /** 走り切った（まとめ実行は次へ進む） */
-export const CHECK_COMPLETED: CheckCommandOutcome = { cancelled: false };
+export const CHECK_COMPLETED: CheckCommandOutcome = { kind: "completed" };
+
+/** 走ろうとして失敗した（まとめ実行は次へ進み、内訳に失敗と書く） */
+export const CHECK_FAILED: CheckCommandOutcome = { kind: "failed" };
 
 /**
- * コマンドが返した「中止した」の印。
+ * コマンドが返した印を読む。
  *
  * **何も返さないコマンドは、走り切ったものとして扱う。** 戻り値を持たない
  * 入口から呼ばれたときに、まとめ実行が勝手に止まってはいけない。
  */
+export function outcomeKindOf(outcome: unknown): CheckOutcomeKind {
+  if (typeof outcome !== "object" || outcome === null) return "completed";
+  const kind = (outcome as { kind?: unknown }).kind;
+  return kind === "cancelled" || kind === "failed" ? kind : "completed";
+}
+
+/** 作者が止めた（＝残りも走らせない）か。**失敗はここに入らない** */
 export function isCancelledOutcome(outcome: unknown): boolean {
-  return (
-    typeof outcome === "object" &&
-    outcome !== null &&
-    (outcome as { cancelled?: unknown }).cancelled === true
-  );
+  return outcomeKindOf(outcome) === "cancelled";
 }
 
 /** 進み具合の文字（「2/4：推敲」） */
@@ -201,6 +214,13 @@ export interface SuiteStepResult {
   readonly label: string;
   /** 分類を持たない機能（冒頭診断）は数えない */
   readonly count?: number;
+  /**
+   * 走ろうとして失敗した。
+   *
+   * **件数は持たない**——結果が出ていないので、パネルに残っている数を
+   * その機能の成果として並べると、前の実行の残りを今回の結果と読ませる。
+   */
+  readonly failed?: boolean;
 }
 
 export interface SuiteRunSummary {
@@ -216,8 +236,15 @@ export interface SuiteRunSummary {
  * 中止で飛ばした機能まで済んだと読める。
  */
 export function describeSuiteResult(summary: SuiteRunSummary): string {
-  // 1つも走らないうちに取りやめたときは、報告することが無い
-  if (summary.done.length === 0) return "";
+  if (summary.done.length === 0) {
+    // 走らせるものを選んだのに1件も走らなかったのなら、**黙らない**
+    // （1件目で止まると通知がゼロだった。0.33.7のレビュー）
+    if (summary.remaining.length === 0) return "";
+    return (
+      "校正をまとめて実行：1件も実行せずに止まりました" +
+      `（残り：${summary.remaining.join("・")}）。`
+    );
+  }
 
   const head =
     summary.remaining.length > 0
@@ -227,13 +254,17 @@ export function describeSuiteResult(summary: SuiteRunSummary): string {
       : "校正をまとめて実行しました。";
 
   const parts = summary.done.map((step) =>
-    step.count === undefined
-      ? `${step.label}（結果は別の文書に出しました）`
-      : `${step.label}${step.count}件`
+    step.failed
+      ? `${step.label}は失敗しました`
+      : step.count === undefined
+        ? `${step.label}（結果は別の文書に出しました）`
+        : `${step.label}${step.count}件`
   );
 
   // 件数を持つ機能が1つも無いときは、パネルの話をしない
-  const counted = summary.done.filter((step) => step.count !== undefined);
+  const counted = summary.done.filter(
+    (step) => !step.failed && step.count !== undefined
+  );
   const total = counted.reduce((sum, step) => sum + (step.count ?? 0), 0);
   const tail =
     counted.length === 0
