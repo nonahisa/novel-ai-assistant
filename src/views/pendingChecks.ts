@@ -219,7 +219,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-11",
     title: "作品一覧の同期の印",
     commands: [],
-    count: 6,
+    count: 5,
   },
   {
     id: "F-12",
@@ -716,4 +716,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 854;
+export const PENDING_CHECK_TOTAL = 853;
