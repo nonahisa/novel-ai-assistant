@@ -87,7 +87,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-13",
     title: "縦書きの原稿エディタ",
     commands: ["novelai.openVertical"],
-    count: 56,
+    count: 55,
   },
   {
     id: "A-14",
@@ -273,7 +273,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-55",
     title: "EPUBエディター（試作）",
     commands: ["novelai.openEpubEditor"],
-    count: 7,
+    count: 6,
   },
   {
     id: "F-56",
@@ -333,7 +333,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-65",
     title: "EPUBのブロック式画面（段C→段D）",
     commands: ["novelai.openEpubEditor"],
-    count: 7,
+    count: 5,
   },
   {
     id: "F-66",
@@ -435,7 +435,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-44",
     title: "年表——話数順と時系列順",
     commands: ["novelai.openChronicle", "novelai.editTimeline"],
-    count: 6,
+    count: 5,
   },
   {
     id: "F-43",
@@ -549,7 +549,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-25",
     title: "PDF出力（印刷用）",
     commands: ["novelai.exportPdf"],
-    count: 12,
+    count: 8,
   },
   {
     id: "F-24",
@@ -716,4 +716,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 863;
+export const PENDING_CHECK_TOTAL = 854;
