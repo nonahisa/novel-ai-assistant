@@ -876,6 +876,16 @@ async function measureOutputLimit(
   let rounds = 0;
   /** 中止・失敗で探索を打ち切ったか */
   let stopped = false;
+  /**
+   * 時間切れの回が1度でもあったか（設計書6.77の第2段）。
+   *
+   * 時間切れは下で「その量は書けなかった」と数えるので、**遅いだけの
+   * モデルでは、実際には書けるのに小さい実測が出る。** その値を
+   * 実送信のハード上限にすると「測っただけで以後すべての応答が切られる」
+   * ので、台帳へ印を残して上限としては使わせない
+   * （`ai/outputLimit.ts` の `resolveOutputLimitForSend`）。
+   */
+  let timedOut = false;
 
   logStep(
     `書ける量の測定を開始: 上限 ${ceilingLines} 行 / ` +
@@ -981,6 +991,8 @@ async function measureOutputLimit(
                 "書き切れなかったものとして数えます。"
             );
             completed = false;
+            // **数え方を台帳にも残す。** この結果は上限として使わせない
+            timedOut = true;
           } else {
             /*
               **出力の測定だけを打ち切る。** 入力の結果は既に手にあり、
@@ -1036,6 +1048,10 @@ async function measureOutputLimit(
     try {
       await saveModelTuning(provider.id, model, {
         measuredOutputTokens: bestTokens,
+        // **時間切れが無かったなら、前の印を消す**（`undefined` を渡すと
+        // その欄だけ落ちる）。測り直して素直に終わったのに、前回の印が
+        // 残って上限が広がらないままになるのを防ぐ
+        outputMeasureTimedOut: timedOut ? true : undefined,
       });
       // **保存した直後の台帳を読み直す。** まとめ送信の上限がどう変わったかは
       // `chunkSettings.ts`（唯一の決め手）に訊かないと分からない——ここで
@@ -1068,6 +1084,12 @@ async function measureOutputLimit(
       reachedCeiling: low >= ceilingLines,
     }) +
     (stopped ? "（測定が途中で終わったため、そこまでの結果です）" : "") +
+    // **数え方を隠さない**（入力側で「エラーを入らないと数えた回数」を
+    // 出しているのと同じ）。時間切れ混じりの値は、送る上限には使わない
+    (timedOut
+      ? "途中で時間切れになった回があるため、この値は1回の応答の上限としては" +
+        "使いません（送る量の見立てにだけ使います）。"
+      : "") +
     // **保存できたときは、その結果（まとめ送信の上限）を言う。**
     // 保存できなかったとき（中止・失敗・台帳への書き込み失敗）は、
     // これまでどおり「参考値だけ」であることを伝える

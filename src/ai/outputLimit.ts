@@ -17,8 +17,16 @@ import { modelTuning } from "../core/modelTuning";
 /** 既定値。抽出のJSONが収まり、かつ極端に大きくない値 */
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
 
-/** これ以上小さいと抽出のJSONが収まらない */
-const MINIMUM = 1024;
+/**
+ * これ以上小さいと抽出のJSONが収まらない。
+ *
+ * **設定から来た値も、測って分かった値も、同じ床を通す。**
+ * 送っても必ず途中で切れる上限は、そのチャンクを丸ごと捨てるのと同じである。
+ */
+export const MINIMUM_OUTPUT_TOKENS = 1024;
+
+/** 中で書くときの短い別名（既存の呼び出しをそのままにするため） */
+const MINIMUM = MINIMUM_OUTPUT_TOKENS;
 
 export function resolveMaxOutputTokens(): number {
   const config = vscode.workspace.getConfiguration("novelai");
@@ -71,11 +79,41 @@ export function resolveOutputTokensForPlanning(
   return Math.min(configured, ceiling);
 }
 
+/** 上限の出どころ。案内の文言を分けるためだけにある */
+export type OutputLimitSource = "設定" | "実測";
+
+/** 実際に送る上限と、その値がどこから来たか */
+export interface OutputTokenLimit {
+  readonly tokens: number;
+  readonly source: OutputLimitSource;
+}
+
 /**
- * **実際に上限として送る**トークン数（`generate` の `maxOutputTokens`。
- * 設計書6.77の第2段）。
+ * **実際に上限として送る**トークン数と、その出どころ（設計書6.77の第2段）。
  *
- * `min(設定, 実測 ?? 設定)`——つまり実測があればそこまで、無ければ設定値。
+ * `max(1024, min(設定, 実測 ?? 設定))`——実測があればそこまで、無ければ設定値。
+ * ただし**床（1,024）は必ず通す**、そして**時間切れ混じりの実測は使わない**。
+ *
+ * ## 床を通す理由（0.33.0で入れ直した）
+ *
+ * ほかの関数（`resolveMaxOutputTokens`・`clampToModelLimit`）はどれも
+ * 床を掛けているのに、**実際に送るこの口だけが素通り**だった。
+ * 「書ける量」の測定は時間切れを「書けない」と数えるので、遅いモデルでは
+ * 数百トークンの実測が台帳へ入りうる。0.32.11からこの値がハード上限に
+ * なったため、**測っただけで以後すべての応答が切られる**状態が作れた。
+ *
+ * ## 時間切れ混じりを使わない理由
+ *
+ * 「待っても返らなかった」は「書けない」の証拠として弱い（`ModelTuning`
+ * の `outputMeasureTimedOut`）。**見込み（`resolveOutputTokensForPlanning`）
+ * と まとめ送信の絞り込み（`features/chunkSettings.ts`）では従来どおり使う**
+ * ——あちらは場所の確保と量の見立てなので、小さく見るぶんには安全側に働く。
+ * こちらだけが「どこまで書いてよいか」を決める、取り返しのつかない値である。
+ *
+ * ## 出どころを返す理由
+ *
+ * 切り詰められたときの案内は、上限が設定から来たのか実測から来たのかで
+ * 直し方が違う。**同じ判定を2か所で書かない**ために、値と一緒に返す。
  *
  * **見込み（上の `resolveOutputTokensForPlanning`）と分けている理由。**
  * あちらは実測が無いとき `OUTPUT_RESERVE_TOKENS`（8,192）で頭を打つが、
@@ -89,11 +127,47 @@ export function resolveOutputTokensForPlanning(
  * それ以上を許しても書けないことは測って分かっている。設定値を超える
  * 実測は設定値で丸める——作者が設定で下げたなら、そちらが勝つ。
  */
+export function resolveOutputLimitForSend(
+  providerId: string,
+  model: string
+): OutputTokenLimit {
+  const configured = resolveMaxOutputTokens();
+  const tuning = modelTuning(providerId, model);
+  const measured = tuning?.measuredOutputTokens;
+  if (measured === undefined || tuning?.outputMeasureTimedOut === true) {
+    return { tokens: configured, source: "設定" };
+  }
+  const tokens = Math.max(MINIMUM, Math.min(configured, measured));
+  // 設定より下がっていないなら、効いているのは設定のほうである
+  return { tokens, source: tokens < configured ? "実測" : "設定" };
+}
+
+/** 送る上限の値だけが要るとき（大半の呼び出し側） */
 export function resolveOutputTokensForSend(
   providerId: string,
   model: string
 ): number {
-  const configured = resolveMaxOutputTokens();
-  const measured = modelTuning(providerId, model)?.measuredOutputTokens;
-  return Math.min(configured, measured ?? configured);
+  return resolveOutputLimitForSend(providerId, model).tokens;
+}
+
+/**
+ * 応答が上限で切り詰められたときに、作者へ出す直し方。
+ *
+ * **上限の出どころで文言を変える。** 実測が効いているのに
+ * 「設定の『1回の応答の上限』を大きくして」と言うのは**嘘**である
+ * ——大きくしても実測で頭打ちのままで、作者は直らない操作を繰り返す。
+ */
+export function truncatedOutputAdvice(limit: OutputTokenLimit): string {
+  if (limit.source === "実測") {
+    return (
+      "応答が出力上限で切り詰められました。上限は、AIチューニングで測った" +
+      `「書ける量」の実測（約${limit.tokens.toLocaleString("ja-JP")}トークン）です。` +
+      "質問を短くするか、AIチューニングで測り直す（または設定 " +
+      "novelai.modelTuning からこのモデルの measuredOutputTokens を消す）と広がります。"
+    );
+  }
+  return (
+    "応答が出力上限で切り詰められました。質問を短くするか、" +
+    "設定の「1回の応答の上限」を大きくしてお試しください。"
+  );
 }

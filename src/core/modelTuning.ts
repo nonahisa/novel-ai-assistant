@@ -36,6 +36,24 @@ export interface ModelTuning {
    * なぜでしょうか？　チューニングの意味がないように思う」）。
    */
   readonly measuredOutputTokens?: number;
+  /**
+   * その測定に**時間切れの回が混じっていた**か（設計書6.77の第2段）。
+   *
+   * `measureOutputLimit` は時間切れを「その量は書けない」と数える。
+   * 待っても返らない長さは作者にとって書けないのと同じ、という判断だが、
+   * **「書けない」の証拠としては弱い**——遅いだけのモデルでは、実際には
+   * 書けるのに数百トークンで探索が終わる。
+   *
+   * 0.32.11から実測が**実送信のハード上限**になったので、この弱い値を
+   * そのまま上限にすると「測っただけで以後すべての応答が切られ、設定を
+   * 上げても直らない」状態が作れてしまう。だから印を残し、
+   * **上限としては使わない**（見込みや まとめ送信の絞り込みでは使う。
+   * あちらは小さく見るぶんには安全側である）。
+   *
+   * **無い台帳は従来どおり**——印が付く前に測った値は、これまでと同じ
+   * 扱いのままにする（読み側の互換）。
+   */
+  readonly outputMeasureTimedOut?: boolean;
   /** 測った時刻（ISO 8601）。古い測定だと分かるように残す */
   readonly measuredAt?: string;
 }
@@ -110,6 +128,10 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
     const timeoutSeconds = positiveNumber(entry.timeoutSeconds);
     const measuredChars = positiveNumber(entry.measuredChars);
     const measuredOutputTokens = positiveNumber(entry.measuredOutputTokens);
+    // **true のときだけ持つ。** 「印が無い」と「印が false」を分けても
+    // 使い道が無いうえ、false を書き戻すと設定に意味の無い欄が並ぶ
+    const outputMeasureTimedOut =
+      entry.outputMeasureTimedOut === true ? true : undefined;
     const measuredAt =
       typeof entry.measuredAt === "string" && entry.measuredAt.trim().length > 0
         ? entry.measuredAt
@@ -122,6 +144,7 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
       ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
       ...(measuredChars !== undefined ? { measuredChars } : {}),
       ...(measuredOutputTokens !== undefined ? { measuredOutputTokens } : {}),
+      ...(outputMeasureTimedOut !== undefined ? { outputMeasureTimedOut } : {}),
       ...(measuredAt !== undefined ? { measuredAt } : {}),
     };
     // 何も読めなかった項目は、持っていても引く値が無い

@@ -10,8 +10,9 @@ import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { AIRegistry } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
 import {
+  resolveOutputLimitForSend,
   resolveOutputTokensForPlanning,
-  resolveOutputTokensForSend,
+  truncatedOutputAdvice,
 } from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
 import { episodeLabel } from "../core/manuscriptSources";
@@ -696,6 +697,14 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           (guide.selected.length > 0 ? ` / ${guide.selected.join("、")}` : "")
       );
 
+      // **上限と、その出どころを一度に取る。** 切り詰められたときの案内は
+      // 出どころで変わる（実測が効いているのに「設定を大きくして」と言うのは
+      // 嘘になる）。判定は `ai/outputLimit.ts` の1か所だけが持つ
+      const outputLimit = resolveOutputLimitForSend(
+        resolved.provider.id,
+        resolved.model
+      );
+
       const call = (
         requestedFiles?: Array<{ path: string; content: string }>
       ) =>
@@ -737,10 +746,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           // **上限と見込みは別物**（設計書6.77の第2段）。上限は実測が
           // あればそこまで、無ければ設定値。見込みはOllamaの `num_ctx` の
           // 確保に使う値で、上限として送ってはいけない
-          maxOutputTokens: resolveOutputTokensForSend(
-            resolved.provider.id,
-            resolved.model
-          ),
+          maxOutputTokens: outputLimit.tokens,
           plannedOutputTokens: resolveOutputTokensForPlanning(
             resolved.provider.id,
             resolved.model
@@ -774,8 +780,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         // 出力上限が足りないのかAIの気まぐれなのか区別が付かない
         this.postError(
           result.truncated
-            ? "応答が出力上限で切り詰められました。質問を短くするか、" +
-              "設定の「1回の応答の上限」を大きくしてお試しください。"
+            ? truncatedOutputAdvice(outputLimit)
             : "返事が空でした。もう一度お試しください。"
         );
         return;

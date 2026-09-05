@@ -11,6 +11,7 @@ import {
 import { fetchJson } from "./httpClient";
 import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
+import { withAiWork } from "../core/aiActivity";
 import { logLine } from "../core/logger";
 import {
   resolveContextWindow,
@@ -428,7 +429,23 @@ export class LmStudioProvider implements AIProvider {
     return info;
   }
 
+  /**
+   * 独り言（`core/chatter.ts`）が「いま話しかけてよいか」を見るので、
+   * 依頼のあいだは仕事中の印を立てる（`ollamaProvider.ts` と同じ形）。
+   *
+   * **手元のAIは、どれも立てる。** 以前はOllamaにだけ入れており、
+   * 「独り言は無料の手元AIでしか動かないので他は要らない」と書いてあったが、
+   * **LM Studioはまさにその手元の無料AIである**（0.18.0で足したときに
+   * 見落とした）。印が無いと、抽出の最中に独り言が割り込み、30秒の
+   * 締め切りで必ず時間切れになる。
+   */
   async generate(params: GenerateParams): Promise<GenerateResult> {
+    return withAiWork(() => this.generateInner(params));
+  }
+
+  private async generateInner(
+    params: GenerateParams
+  ): Promise<GenerateResult> {
     const started = Date.now();
 
     const body: Record<string, unknown> = {

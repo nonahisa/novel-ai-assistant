@@ -346,8 +346,9 @@ export class OllamaProvider implements AIProvider {
    * 独り言（`core/chatter.ts`）が「いま話しかけてよいか」を見るので、
    * 依頼のあいだは仕事中の印を立てる。
    *
-   * **Ollamaにだけ入れている。** 独り言は無料のローカルAIでしか動かさない
-   * （有料のAIで勝手に課金しないため）ので、他のプロバイダでは要らない。
+   * **手元のAIには、どれも入れる**（`lmstudioProvider.ts` にも同じものがある）。
+   * 独り言は無料のローカルAIでしか動かさない（有料のAIで勝手に課金しない
+   * ため）ので、クラウドの4つでは要らない。
    */
   async generate(params: GenerateParams): Promise<GenerateResult> {
     return withAiWork(() => this.generateInner(params));

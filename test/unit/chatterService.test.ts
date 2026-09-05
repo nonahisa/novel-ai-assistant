@@ -25,6 +25,11 @@ import {
 } from "../../src/features/chatterService";
 import { IDLE_THRESHOLD_MS, type Chatter } from "../../src/core/chatter";
 import { beginAiWork, resetAiActivity } from "../../src/core/aiActivity";
+import {
+  acquireCall,
+  acquireRun,
+  resetAiSequence,
+} from "../../src/core/aiSequence";
 import type { WorkEntry } from "../../src/models/types";
 import { workspace } from "./support/vscodeStub";
 
@@ -76,6 +81,7 @@ function idle(service: ChatterService): void {
 
 beforeEach(() => {
   resetAiActivity();
+  resetAiSequence();
   failures.length = 0;
 });
 afterEach(() => {
@@ -518,8 +524,19 @@ describe("本文の感想", () => {
     );
   });
 
-  test("同じ話へ2度取りに行かない", async () => {
-    // 失敗した回も数える。**繋がらないAIへ10分おきに聞き直さない**
+  /**
+   * **鍵は、言えたときに消費する**（0.33.0のレビュー）。
+   *
+   * 以前は取りに行く前に「言った」ことにしていたので、**一度でも
+   * 時間切れになると、その話についての一言は二度と出なかった。**
+   * 独り言は30秒しか待たない（`COMMENT_TIMEOUT_MS`）ので、一括処理と
+   * 重なれば必ず時間切れになる——つまり「必ず失われる」経路があった。
+   *
+   * かといって無制限に聞き直すと、繋がらないAIへ1分ごとに聞き続ける
+   * （それが「取りに行く前に言ったことにする」の守ろうとしたもの）。
+   * **その日2回まで**にして、両方を立てる。
+   */
+  test("失敗しても2回までは取りに行き、それ以上は諦める", async () => {
     let calls = 0;
     const service = new ChatterService(
       quiet({
@@ -532,7 +549,108 @@ describe("本文の感想", () => {
 
     await tickUntilComment(service);
 
+    expect(calls).toBe(2);
+  });
+
+  test("1回目が失敗しても、2回目に言えたらその文面を出す", async () => {
+    let calls = 0;
+    const d = quiet({
+      requestComment: async () => {
+        calls++;
+        if (calls === 1) throw new Error("時間切れです");
+        return "静かな幕切れですね。";
+      },
+    });
+    const service = new ChatterService(d);
+
+    await tickUntilComment(service);
+
+    expect(d.posted.map((c) => c.text)).toContain("静かな幕切れですね。");
+  });
+
+  test("言えた回の鍵は消費する（同じ話へ言い直さない）", async () => {
+    let calls = 0;
+    const service = new ChatterService(
+      quiet({
+        requestComment: async () => {
+          calls++;
+          return "静かな幕切れですね。";
+        },
+      })
+    );
+
+    await tickUntilComment(service);
+
     expect(calls).toBe(1);
+  });
+
+  test("検査で見送った回は鍵を消費する（聞き直しても同じ答えが返る）", async () => {
+    // AIは答えられている。中身が独り言に向かないだけなので、
+    // もう一度訊いても同じ答えが返りやすい
+    let calls = 0;
+    const service = new ChatterService(
+      quiet({
+        requestComment: async () => {
+          calls++;
+          return "あ".repeat(61);
+        },
+      })
+    );
+
+    await tickUntilComment(service);
+
+    expect(calls).toBe(1);
+  });
+
+  /**
+   * **列が混んでいるときは、そもそも取りに行かない**（設計書6.76・6.21.4）。
+   *
+   * 0.32.9のキューで、送信は全体で1件ずつになった。独り言が列の後ろへ
+   * 並ぶと、30秒の締め切りは**待っているあいだに切れる**——AIは1文字も
+   * 書いていないのに時間切れになる。鍵は消費しないので、空いた頃に
+   * また判断すればよい。
+   */
+  test("一括処理が札を持っているあいだは取りに行かない", async () => {
+    let calls = 0;
+    const d = quiet({
+      requestComment: async () => {
+        calls++;
+        return "静かな幕切れですね。";
+      },
+    });
+    const service = new ChatterService(d);
+    const release = await acquireRun("誤字脱字の検知");
+
+    await tickUntilComment(service);
+    expect(calls).toBe(0);
+
+    // 空いたら取りに行く。**鍵は消費されていない**
+    release();
+    idle(service);
+    (service as unknown as { lastSpokeAt: number }).lastSpokeAt = 0;
+    await service.tick();
+
+    expect(calls).toBe(1);
+  });
+
+  test("送信の順番待ちがあるあいだは取りに行かない", async () => {
+    let calls = 0;
+    const d = quiet({
+      requestComment: async () => {
+        calls++;
+        return "静かな幕切れですね。";
+      },
+    });
+    const service = new ChatterService(d);
+    // 1件が送信中で、もう1件が順番待ち——独り言は3番目になる
+    const release = await acquireCall();
+    const waiting = acquireCall().catch(() => undefined);
+
+    await tickUntilComment(service);
+
+    expect(calls).toBe(0);
+    release();
+    await waiting;
   });
 
   test("ほかに言うことがあるうちは取りに行かない", async () => {

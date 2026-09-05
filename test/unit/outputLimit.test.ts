@@ -3,10 +3,14 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { workspace } from "./support/vscodeStub";
 import {
+  MINIMUM_OUTPUT_TOKENS,
+  resolveOutputLimitForSend,
   resolveOutputTokensForPlanning,
   resolveOutputTokensForSend,
+  truncatedOutputAdvice,
 } from "../../src/ai/outputLimit";
 import { saveModelTuning } from "../../src/core/modelTuning";
+import { readChunkSettings } from "../../src/features/chunkSettings";
 
 /**
  * チャンク予算・num_ctx の確保に見込む出力トークン数（設計書6.65.16の2）。
@@ -138,6 +142,149 @@ describe("resolveOutputTokensForSend", () => {
     });
 
     expect(resolveOutputTokensForSend("sakura", "gpt-oss-120b")).toBe(16384);
+  });
+});
+
+/**
+ * **実測が、そのまま実送信の上限になることの危うさ**（0.33.0のレビュー）。
+ *
+ * 「書ける量」の測定（`features/measureContext.ts` の `measureOutputLimit`）は
+ * **時間切れを「書けなかった」と数える**。遅いモデルでは、実際には書けるのに
+ * 数百トークンで探索が終わり、その値が台帳へ入る。0.32.11からこの値が
+ * 実送信のハード上限になったため、**測っただけで以後すべての応答が切られ、
+ * 設定を上げても直らない**状態が作れてしまった。
+ *
+ * 二重に守る。
+ *
+ * 1. **床（1,024）を通す。** ほかの関数はすべて掛けているのに、送信の口だけ
+ *    素通りだった。抽出のJSONが収まらない上限を送っても、そのチャンクは
+ *    丸ごと捨てられるだけである
+ * 2. **時間切れ混じりの測定は、上限として使わない。** 「待っても返らなかった」
+ *    は「書けない」の証拠として弱い。**見込み（planning）や まとめ送信の
+ *    絞り込みでは従来どおり使う**——あちらは場所の確保と量の見立てなので、
+ *    安全側に小さく見るぶんには害が無い
+ */
+describe("実測を実送信の上限に使うときの守り", () => {
+  afterEach(() => {
+    workspace.getConfiguration = () => ({
+      get: <T>(_key: string, defaultValue: T): T => defaultValue,
+    });
+  });
+
+  it("実測が小さすぎても、送る上限は1,024を下回らない", async () => {
+    installSettings({ maxOutputTokens: 16384 });
+    await saveModelTuning("ollama", "遅いモデル", {
+      measuredOutputTokens: 900,
+    });
+
+    expect(resolveOutputTokensForSend("ollama", "遅いモデル")).toBe(
+      MINIMUM_OUTPUT_TOKENS
+    );
+  });
+
+  it("時間切れ混じりの実測は、送る上限に使わない（設定値へ落とす）", async () => {
+    installSettings({ maxOutputTokens: 16384 });
+    await saveModelTuning("ollama", "遅いモデル", {
+      measuredOutputTokens: 2000,
+      outputMeasureTimedOut: true,
+    });
+
+    expect(resolveOutputTokensForSend("ollama", "遅いモデル")).toBe(16384);
+  });
+
+  it("印の無い実測は、これまでどおり上限になる", async () => {
+    installSettings({ maxOutputTokens: 16384 });
+    await saveModelTuning("ollama", "gemma4:12b", {
+      measuredOutputTokens: 6500,
+    });
+
+    expect(resolveOutputTokensForSend("ollama", "gemma4:12b")).toBe(6500);
+  });
+
+  it("見込み（planning）は、時間切れ混じりの実測でも使う", async () => {
+    // 見込みは「場所をどれだけ空けるか」なので、小さく見るぶんには安全
+    installSettings({ maxOutputTokens: 16384 });
+    await saveModelTuning("ollama", "遅いモデル", {
+      measuredOutputTokens: 2000,
+      outputMeasureTimedOut: true,
+    });
+
+    expect(resolveOutputTokensForPlanning("ollama", "遅いモデル")).toBe(2000);
+  });
+
+  it("まとめ送信の絞り込みも、時間切れ混じりの実測で絞る", async () => {
+    installSettings({});
+    await saveModelTuning("ollama", "遅いモデル", {
+      measuredOutputTokens: 2000,
+      outputMeasureTimedOut: true,
+      measuredChars: 60000,
+    });
+
+    const settings = readChunkSettings(262144, undefined, {
+      providerId: "ollama",
+      model: "遅いモデル",
+    });
+
+    expect(settings.mergeCharsBeforeOutputCap).toBeDefined();
+  });
+});
+
+/**
+ * 上限の**出どころ**（0.33.0のレビュー）。
+ *
+ * 切り詰められたときの案内は、上限が設定値から来ているのか実測から
+ * 来ているのかで直し方が違う。実測が効いているのに「設定を大きくして」と
+ * 言うのは**嘘**である（大きくしても実測で頭打ちのままになる）。
+ * **判定は1か所に持つ**——2か所で書くと、片方だけ直したときに食い違う。
+ */
+describe("上限の出どころ", () => {
+  afterEach(() => {
+    workspace.getConfiguration = () => ({
+      get: <T>(_key: string, defaultValue: T): T => defaultValue,
+    });
+  });
+
+  it("実測が無ければ、出どころは設定", async () => {
+    installSettings({ maxOutputTokens: 16384 });
+
+    expect(resolveOutputLimitForSend("ollama", "測っていないモデル")).toEqual({
+      tokens: 16384,
+      source: "設定",
+    });
+  });
+
+  it("実測で絞られていれば、出どころは実測", async () => {
+    installSettings({ maxOutputTokens: 16384 });
+    await saveModelTuning("ollama", "gemma4:12b", {
+      measuredOutputTokens: 6500,
+    });
+
+    expect(resolveOutputLimitForSend("ollama", "gemma4:12b")).toEqual({
+      tokens: 6500,
+      source: "実測",
+    });
+  });
+
+  it("設定のほうが小さければ、出どころは設定", async () => {
+    installSettings({ maxOutputTokens: 2000 });
+    await saveModelTuning("ollama", "gemma4:12b", {
+      measuredOutputTokens: 6500,
+    });
+
+    expect(resolveOutputLimitForSend("ollama", "gemma4:12b")).toEqual({
+      tokens: 2000,
+      source: "設定",
+    });
+  });
+
+  it("案内文は出どころで変わる", () => {
+    expect(truncatedOutputAdvice({ tokens: 16384, source: "設定" })).toContain(
+      "1回の応答の上限"
+    );
+    const measured = truncatedOutputAdvice({ tokens: 900, source: "実測" });
+    expect(measured).toContain("AIチューニング");
+    // **設定を上げろ、とは言わない。** 実測が上限なので直らない
+    expect(measured).not.toContain("1回の応答の上限");
   });
 });
 

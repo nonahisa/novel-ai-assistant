@@ -118,6 +118,37 @@ describe("台帳の読み取り", () => {
     expect(table.get("ollama/壊れた出力")).toEqual({ contextWindow: 8192 });
   });
 
+  /**
+   * **時間切れ混じりの測定の印**（0.33.0のレビュー）。
+   *
+   * 「書ける量」の測定は時間切れを「書けなかった」と数えるので、遅い
+   * モデルでは実際より小さい実測が入りうる。その値を実送信の上限へ
+   * そのまま使わないための印であり、**無い台帳は従来どおり**に読む。
+   */
+  test("outputMeasureTimedOut は true のときだけ読む", () => {
+    const table = parseModelTuning({
+      "ollama/遅い": { measuredOutputTokens: 900, outputMeasureTimedOut: true },
+      "ollama/速い": { measuredOutputTokens: 6500, outputMeasureTimedOut: false },
+      "ollama/壊れ": { measuredOutputTokens: 6500, outputMeasureTimedOut: "はい" },
+    });
+
+    expect(table.get("ollama/遅い")?.outputMeasureTimedOut).toBe(true);
+    // false と壊れた値は、欄ごと持たない（設定に空の欄を並べない）
+    expect(table.get("ollama/速い")).toEqual({ measuredOutputTokens: 6500 });
+    expect(table.get("ollama/壊れ")).toEqual({ measuredOutputTokens: 6500 });
+  });
+
+  test("印の無い旧い台帳は、これまでどおり読める", () => {
+    const table = parseModelTuning({
+      "ollama/gemma4:12b": { measuredOutputTokens: 6500, timeoutSeconds: 300 },
+    });
+
+    expect(table.get("ollama/gemma4:12b")).toEqual({
+      measuredOutputTokens: 6500,
+      timeoutSeconds: 300,
+    });
+  });
+
   test("配列・null・数・未設定は、台帳ではないので空として読む", () => {
     for (const raw of [[], null, undefined, 42, "文字列"]) {
       expect(parseModelTuning(raw).size, String(raw)).toBe(0);

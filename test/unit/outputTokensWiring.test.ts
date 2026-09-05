@@ -135,9 +135,13 @@ describe("出力トークンの2つの欄の配り先", () => {
         source.includes("resolveOutputTokensForPlanning"),
         `${file} が resolveOutputTokensForPlanning を使っていない`
       ).toBe(true);
+      // **値だけを取る口（`…TokensForSend`）と、値と出どころを取る口
+      // （`…LimitForSend`）のどちらでもよい。** 中で同じ判定を通るので、
+      // 決め方は1か所のままである（出どころは切り詰めの案内に使う）
       expect(
-        source.includes("resolveOutputTokensForSend"),
-        `${file} が resolveOutputTokensForSend を使っていない`
+        source.includes("resolveOutputTokensForSend") ||
+          source.includes("resolveOutputLimitForSend"),
+        `${file} が実上限を専用の関数で決めていない`
       ).toBe(true);
     }
   );
