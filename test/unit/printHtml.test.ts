@@ -7,6 +7,7 @@ import {
 } from "../../src/core/printHtml";
 import { timestampedFileNameCandidates } from "../../src/core/timestampedFileName";
 import type { NotationMode } from "../../src/core/manuscriptRender";
+import { SCRIPT_LINE_CSS } from "../../src/core/scriptLines";
 
 /**
  * 印刷用HTML（PDF出力のもと）。
@@ -247,5 +248,74 @@ describe("書き出し先の名前", () => {
     const names = timestampedFileNameCandidates("印刷用", AT, ".html", 20);
 
     expect(new Set(names).size).toBe(names.length);
+  });
+});
+
+/**
+ * 脚本の組版（設計書6.70）。
+ *
+ * **紙と画面で組み方を分けない。** 印を付ける規則（`core/scriptLines.ts`）も
+ * 組み方の指定（`SCRIPT_LINE_CSS`）も1か所にあり、原稿エディタと
+ * ここが同じものを埋め込む。
+ */
+describe("脚本の組版", () => {
+  /** 柱・ト書き・セリフが1つずつ並んだ、雛形そのままの本文 */
+  const SCRIPT_BODY = ["○駅前・夜", "", "　太郎、ドアを開ける。", "", "太郎「行こう」"].join(
+    "\n"
+  );
+
+  function scriptHtml(body = SCRIPT_BODY): string {
+    return buildPrintHtml({
+      workTitle: "夜の駅",
+      episodes: [{ heading: "第1話", body, notation: "curly" }],
+      preset: "bunko-vertical",
+      format: "script",
+    });
+  }
+
+  test("行の種別が class として付く", () => {
+    const out = scriptHtml();
+
+    expect(out).toContain('<p class="script-hashira">○駅前・夜</p>');
+    expect(out).toContain('class="gap script-togaki"');
+    expect(out).toContain('class="gap script-serifu"');
+  });
+
+  test("どれにも当たらない行には、印を付けない", () => {
+    const out = scriptHtml("太郎は駅へ向かった。");
+
+    expect(out).toContain("<p>太郎は駅へ向かった。</p>");
+    // 本文の側に印が無いこと（組み方の指定は head にあるので、そちらは見ない）
+    expect(out.slice(out.indexOf("<body"))).not.toContain("script-");
+  });
+
+  test("組み方の指定は、写しではなく core/scriptLines.ts のものが入る", () => {
+    expect(scriptHtml()).toContain(SCRIPT_LINE_CSS);
+  });
+
+  test("ルビは脚本でも今までどおり組まれる", () => {
+    const out = scriptHtml("{太郎|たろう}「行こう」");
+
+    expect(out).toContain('<p class="script-serifu">');
+    expect(out).toContain("<ruby>太郎<rt>たろう</rt></ruby>");
+  });
+
+  /** **脚本以外の紙は1バイトも変わらない**（タイプを渡さないときと同じ） */
+  test("脚本でなければ、これまでと同じHTML", () => {
+    const plain = buildPrintHtml({
+      workTitle: "夜の駅",
+      episodes: [{ heading: "第1話", body: SCRIPT_BODY, notation: "curly" }],
+      preset: "bunko-vertical",
+    });
+    const asLong = buildPrintHtml({
+      workTitle: "夜の駅",
+      episodes: [{ heading: "第1話", body: SCRIPT_BODY, notation: "curly" }],
+      preset: "bunko-vertical",
+      format: "long",
+    });
+
+    expect(asLong).toBe(plain);
+    expect(plain).not.toContain("script-");
+    expect(plain).not.toContain(SCRIPT_LINE_CSS);
   });
 });

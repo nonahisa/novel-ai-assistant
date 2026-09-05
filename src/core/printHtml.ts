@@ -4,6 +4,8 @@ import {
   type NotationMode,
 } from "./manuscriptRender";
 import { stripMemoLines } from "./sceneMemo";
+import { SCRIPT_LINE_CSS, scriptLineClass } from "./scriptLines";
+import type { WorkFormatKey } from "./workFormat";
 
 /**
  * 印刷用に組版したHTMLを作る（PDF出力のもと）。
@@ -120,6 +122,14 @@ export interface PrintHtmlInput {
   workTitle: string;
   episodes: readonly PrintEpisode[];
   preset: PrintPreset;
+  /**
+   * 作品のタイプ（設計書6.70）。**脚本だけ組み方が変わる。**
+   *
+   * 省略できるようにしてあるのは、タイプを決めていない作品
+   * （プロットに `## 形式` が無い）があるためで、そのときは
+   * これまでどおりの組み方になる。
+   */
+  format?: WorkFormatKey;
 }
 
 /**
@@ -140,14 +150,14 @@ export function buildPrintHtml(input: PrintHtmlInput): string {
     '<meta charset="utf-8">',
     `<title>${title}</title>`,
     "<style>",
-    buildStyle(preset),
+    buildStyle(preset, input.format),
     "</style>",
     "</head>",
     "<body>",
     '<div class="sheet">',
     // 1ページ目は題だけの扉。ここで改ページして本文へ移る
     `<section class="cover"><h1 class="cover-title">${title}</h1></section>`,
-    ...input.episodes.map(renderEpisode),
+    ...input.episodes.map((episode) => renderEpisode(episode, input.format)),
     "</div>",
     "</body>",
     "</html>",
@@ -156,12 +166,15 @@ export function buildPrintHtml(input: PrintHtmlInput): string {
 }
 
 /** 1話ぶん。**話ごとに改ページする**（本の体裁に合わせる） */
-function renderEpisode(episode: PrintEpisode): string {
+function renderEpisode(
+  episode: PrintEpisode,
+  format: WorkFormatKey | undefined
+): string {
   const heading = escapeHtml(episode.heading.trim());
   return [
     '<section class="episode">',
     ...(heading ? [`<h2 class="episode-heading">${heading}</h2>`] : []),
-    ...renderBody(episode.body, episode.notation),
+    ...renderBody(episode.body, episode.notation, format),
     "</section>",
   ].join("\n");
 }
@@ -175,8 +188,16 @@ function renderEpisode(episode: PrintEpisode): string {
  * **空行は、段落と段落のあいだの空きにする。** 日本語の小説では段落の
  * あいだを空けないので（字下げで見分ける）、空行を捨ててしまうと
  * 場面の切り替わりが消える。空行のあとの段落にだけ空きを付ける。
+ *
+ * **脚本のときだけ、行の種別を印として付ける**（設計書6.70）。
+ * 判定も組み方も `core/scriptLines.ts` が持っており、原稿エディタと
+ * 同じものが当たる——画面で見た形のまま紙になる。
  */
-function renderBody(body: string, notation: NotationMode): string[] {
+function renderBody(
+  body: string,
+  notation: NotationMode,
+  format?: WorkFormatKey
+): string[] {
   const paragraphs: string[] = [];
   let afterBlank = false;
 
@@ -188,9 +209,15 @@ function renderBody(body: string, notation: NotationMode): string[] {
       afterBlank = true;
       continue;
     }
+    const names: string[] = [];
     // 先頭の空きは、扉との境目で既に付いている
-    const gap = afterBlank && paragraphs.length > 0 ? ' class="gap"' : "";
-    paragraphs.push(`<p${gap}>${renderInline(line, notation)}</p>`);
+    if (afterBlank && paragraphs.length > 0) names.push("gap");
+    if (format === "script") {
+      const kind = scriptLineClass(line);
+      if (kind) names.push(kind);
+    }
+    const attr = names.length > 0 ? ` class="${names.join(" ")}"` : "";
+    paragraphs.push(`<p${attr}>${renderInline(line, notation)}</p>`);
     afterBlank = false;
   }
   return paragraphs;
@@ -225,10 +252,19 @@ function renderInline(line: string, notation: NotationMode): string {
  * （`break-*`）だけを見るブラウザと、古い書き方だけを見るブラウザが
  * どちらも現役である。取り違えると、話の境目で改ページされない。
  */
-function buildStyle(preset: PrintPresetInfo): string {
+function buildStyle(
+  preset: PrintPresetInfo,
+  format: WorkFormatKey | undefined
+): string {
   const vertical = preset.vertical
     ? ["html, body { writing-mode: vertical-rl; }"]
     : [];
+  /*
+    脚本の組み方（設計書6.70）。**値は原稿エディタと同じものを埋め込む**
+    ——`core/scriptLines.ts` の1か所にあり、こちらへ写しは置かない。
+    脚本でない作品の紙は、これまでと1バイトも変わらない
+  */
+  const script = format === "script" ? [SCRIPT_LINE_CSS] : [];
 
   return [
     `@page { size: ${preset.size}; margin: 15mm; }`,
@@ -256,6 +292,7 @@ function buildStyle(preset: PrintPresetInfo): string {
     // 段落のあいだは空けない。字下げ（全角空白）で見分けるのが日本語の組み方
     "p { margin: 0; }",
     "p.gap { margin-block-start: 1.5em; }",
+    ...script,
     "ruby { ruby-align: center; }",
     "rt { font-size: 0.5em; letter-spacing: 0; }",
     // 傍点は圏点（ゴマ点）で出す。位置の指定は既定のまま

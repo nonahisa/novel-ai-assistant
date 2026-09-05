@@ -40,6 +40,12 @@
 import { MANUSCRIPT_FONTS } from "../core/manuscriptFonts";
 import { NOTATION_RULES } from "../core/manuscriptRender";
 import { MEMO_LINE_PATTERN, MEMO_TAG_CLASS_MAP } from "../core/sceneMemo";
+import {
+  SCRIPT_LINE_CLASSES,
+  SCRIPT_LINE_CSS,
+  SCRIPT_LINE_RULES,
+} from "../core/scriptLines";
+import type { WorkFormatKey } from "../core/workFormat";
 
 /**
  * 測る書体の名前。
@@ -56,8 +62,28 @@ const PROBE_FONT_NAMES = MANUSCRIPT_FONTS.map((font) => font.probe).filter(
 
 export function buildManuscriptEditorHtml(
   nonce: string,
-  cspSource: string
+  cspSource: string,
+  /**
+   * この原稿の作品タイプ（設計書6.70）。**脚本だけ組み方が変わる**
+   * （柱・ト書き・セリフ）。
+   *
+   * 省略できるようにしてあるのは、タイプを決めていない作品
+   * （プロットに `## 形式` が無い）と、作品を引けなかったときのためで、
+   * そのときはこれまでどおりの画面になる。**脚本以外では、出来上がる
+   * HTMLが1バイトも変わらない**（test/unit/composeFace.test.ts が見張る）。
+   */
+  format?: WorkFormatKey
 ): string {
+  /** 脚本の作品か。埋め込む規則と組み方の指定は、これで決まる */
+  const isScript = format === "script";
+  /**
+   * 脚本の組み方（設計書6.70）。**値は `core/scriptLines.ts` の1か所**
+   * から借りる（PDFも同じ文字列を埋め込む。写しを置かない）。
+   *
+   * 脚本でなければ空文字＝**規則が1つも増えない**。行頭の改行ごと
+   * 空にしてあるので、脚本以外のHTMLは以前と1文字も変わらない。
+   */
+  const scriptCss = isScript ? `\n${SCRIPT_LINE_CSS}` : "";
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -399,7 +425,7 @@ body.vertical #compose .memo::before {
 #compose .memo-foreshadow::before {
   background: var(--novelai-memo-foreshadow, #1a5fb4);
 }
-#compose .memo-idea::before { background: var(--novelai-memo-idea, #1c7c3c); }
+#compose .memo-idea::before { background: var(--novelai-memo-idea, #1c7c3c); }${scriptCss}
 /* **かたまり（ルビ・傍点）は編集不可**（設計書6.34.2）。中の文字を直接
    直せないので、消すときは1単位で消える。選んだときに1文字のように
    振る舞わせるため、余計な余白は付けない */
@@ -1900,6 +1926,48 @@ ruby > rt {
   /** タグとして読む語の長さの上限（core/sceneMemo.ts と同じ理由・同じ値） */
   const MEMO_TAG_MAX = 12;
 
+  /**
+   * 脚本の行の見分け方（設計書6.70）。
+   *
+   * **定義は core/scriptLines.ts の1つだけ。** 記法・シーンメモと同じで、
+   * ここへはその規則がそのまま埋め込まれる（画面と紙で組み方が
+   * 食い違わないようにするため）。
+   *
+   * **脚本でない作品では、規則は空**である。判定の道は残るが、
+   * どの行にも当たらないので印は付かない。
+   */
+  const SCRIPT_LINE_RULES = ${JSON.stringify(isScript ? SCRIPT_LINE_RULES : [])};
+  const SCRIPT_LINE_CLASSES = ${JSON.stringify(SCRIPT_LINE_CLASSES)};
+
+  /** 行ごとに作り直さない（打つたびに全行を見るので、行数ぶん効く） */
+  const SCRIPT_LINE_MATCHERS = SCRIPT_LINE_RULES.map(function (rule) {
+    return { cls: SCRIPT_LINE_CLASSES[rule.kind], re: new RegExp(rule.pattern) };
+  });
+
+  /** その行に付ける種別の印。当たらなければ空文字 */
+  function scriptLineClass(line) {
+    for (const matcher of SCRIPT_LINE_MATCHERS) {
+      if (matcher.re.test(line)) return matcher.cls;
+    }
+    return "";
+  }
+
+  /**
+   * 行の入れ物に付ける class。
+   *
+   * **組み立て（composeBuildLine）と当て直し（composeRepaintMemos）で
+   * 同じものを使う。** 別々に組み立てると、打った瞬間に片方の印だけが
+   * 消える（付箋を打ったら脚本の印が落ちる、という形で必ず出る）。
+   */
+  function composeLineClass(line) {
+    let names = "line";
+    const memo = memoClassFor(line);
+    if (memo) names += " " + memo;
+    const script = scriptLineClass(line);
+    if (script) names += " " + script;
+    return names;
+  }
+
   /** その行が付箋か。**行の先頭だけを見る**（途中の // はURL・会話文） */
   function memoIsLine(line) {
     return MEMO_LINE_RE.test(line);
@@ -2138,10 +2206,9 @@ ruby > rt {
    */
   function composeBuildLine(line, doc, mode) {
     const p = doc.createElement("p");
-    // 付箋の行は、見た目だけを変える（設計書6.40.3）。
-    // **かたまりにはしない**——中身は普通に打てて、印を消せば本文へ戻る
-    const memo = memoClassFor(line);
-    p.setAttribute("class", memo ? "line " + memo : "line");
+    // 付箋の行（設計書6.40.3）と脚本の行（設計書6.70）は、**見た目だけ**を
+    // 変える。**かたまりにはしない**——中身は普通に打てて、印を消せば本文へ戻る
+    p.setAttribute("class", composeLineClass(line));
     const parts = composeParts(line, mode);
     if (parts.length === 0) {
       // 空行。高さを保つための詰め物（読む面の br と同じ役目）
@@ -2656,7 +2723,12 @@ ruby > rt {
   });
 
   /**
-   * 行の付箋らしさを付け直す（設計書6.40.3）。
+   * 行の付箋らしさ（設計書6.40.3）と、脚本の行の種別（設計書6.70）を
+   * 付け直す。
+   *
+   * **脚本の種別も、打つほど変わる**（行頭に柱の記号を足した瞬間に柱になり、
+   * 役名を書いた瞬間にセリフになる）。付箋とまったく同じ事情なので、
+   * 道を分けずにここへ乗せる。
    *
    * **class 属性しか触らない。** ノードを足したり消したりすると
    * DOM→記法の直列化がずれる（＝本文が壊れる）。見た目だけを変える。
@@ -2673,8 +2745,7 @@ ruby > rt {
     for (const element of lines) {
       // 行の入れ物だけを見る（ルビの中の要素は行ではない）
       if (element.parentNode !== compose) continue;
-      const memo = memoClassFor(element.textContent || "");
-      element.setAttribute("class", memo ? "line " + memo : "line");
+      element.setAttribute("class", composeLineClass(element.textContent || ""));
     }
   }
 

@@ -736,15 +736,43 @@ export class ManuscriptEditorProvider
     private readonly viewType: string = MANUSCRIPT_EDITOR_VIEW_TYPE
   ) {}
 
+  /**
+   * 開いた本文の作品タイプ（設計書6.70）。**引けなければ undefined。**
+   *
+   * 作品を探す道は、用語索引と同じもの（`indexFor`）を通す。**別の探し方を
+   * 増やさない**——同じファイルに対して「色が付く作品」と「組み方を決める
+   * 作品」が食い違うと、原因の分からない見た目の違いになる。
+   */
+  private async formatOfDocument(
+    document: vscode.TextDocument
+  ): Promise<WorkFormatKey | undefined> {
+    try {
+      const found = await this.deps.highlighter.indexFor(fromUri(document.uri));
+      return found ? await formatOf(found.work) : undefined;
+    } catch {
+      // 索引を作れない作品（設定資料が壊れている等）でも、原稿は開ける
+      return undefined;
+    }
+  }
+
   async resolveCustomTextEditor(
     document: vscode.TextDocument,
     panel: vscode.WebviewPanel,
     _token: vscode.CancellationToken
   ): Promise<void> {
     panel.webview.options = { enableScripts: true };
+    /*
+      **作品タイプは、画面を組み立てる前に決める**（設計書6.70）。脚本は
+      柱・ト書き・セリフを組み分けるので、あとから知らせる形にすると
+      開いた直後だけ小説の組み方で出て、1拍おいて組み直ることになる。
+
+      引けなければ undefined＝これまでどおりの画面（タイプを決めていない
+      作品でも、作品の外のファイルでも、開けなくなってはいけない）。
+    */
     panel.webview.html = buildManuscriptEditorHtml(
       createNonce(),
-      panel.webview.cspSource
+      panel.webview.cspSource,
+      await this.formatOfDocument(document)
     );
 
     /**

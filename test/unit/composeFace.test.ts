@@ -1388,3 +1388,91 @@ describe("シーンメモの付箋", () => {
     expect(input.slice(0, 500)).toContain("composeRepaintMemos();");
   });
 });
+
+/**
+ * 脚本の行の組み方（設計書6.70）。
+ *
+ * **判定は core/scriptLines.ts の1か所**にあり、画面側へはその規則が
+ * そのまま埋め込まれる（写しを置くと、画面と紙で組み方が食い違う）。
+ * 印は class だけで、DOMの形は変えない——組んで書く面でノードを増やすと、
+ * 直列化（DOM→記法）が1文字ずれて**本文が壊れる**。
+ */
+describe("脚本の行（組んで書く面）", () => {
+  /** 脚本の作品として組んだ画面 */
+  const scriptHtml = buildManuscriptEditorHtml(
+    "NONCE123",
+    "vscode-resource:",
+    "script"
+  );
+  const scriptCode = scriptHtml.slice(scriptHtml.indexOf("<script"));
+  const scriptSource = scriptCode.slice(
+    scriptCode.indexOf("/* compose:start */"),
+    scriptCode.indexOf("/* compose:end */")
+  );
+  const scriptApi = new Function(
+    scriptSource +
+      "\nreturn { composeBuildLine, composeBuildFragment," +
+      " composeDomToNotation, composeLineClass };"
+  )() as {
+    composeBuildLine(line: string, doc: unknown, mode?: Mode): FakeNode;
+    composeBuildFragment(value: string, doc: unknown, mode?: Mode): FakeNode;
+    composeDomToNotation(root: FakeNode): string;
+    composeLineClass(line: string): string;
+  };
+
+  function classOf(line: string): string {
+    const node = scriptApi.composeBuildLine(line, fakeDoc);
+    return (node.attributes ?? {}).class ?? "";
+  }
+
+  it("柱・ト書き・セリフに、それぞれの印が付く", () => {
+    expect(classOf("○駅前・夜")).toBe("line script-hashira");
+    expect(classOf("　太郎、ドアを開ける。")).toBe("line script-togaki");
+    expect(classOf("太郎「行こう」")).toBe("line script-serifu");
+  });
+
+  it("どれにも当たらない行には、印を付けない", () => {
+    expect(classOf("太郎は駅へ向かった。")).toBe("line");
+    expect(classOf("")).toBe("line");
+  });
+
+  /** 付箋（シーンメモ）と重なっても、両方の印が残る */
+  it("付箋の印と一緒に付く", () => {
+    expect(classOf("//「銀の時計」を出す")).toBe("line memo script-serifu");
+  });
+
+  /** **印を付けても、本文は1文字も変わらない**（往復が一致する） */
+  it("記法→DOM→記法 は、脚本でも一致する", () => {
+    const body = ["○駅前・夜", "", "　{太郎|たろう}、ドアを開ける。", "太郎「行こう」"].join(
+      "\n"
+    );
+    expect(
+      scriptApi.composeDomToNotation(
+        scriptApi.composeBuildFragment(body, fakeDoc)
+      )
+    ).toBe(body);
+  });
+
+  /**
+   * 打った瞬間に当て直す（付箋と同じ道に乗せる）。行の種別は打つほど
+   * 変わる（`○` を足した瞬間に柱になる）ので、組み立てのときだけでは足りない。
+   */
+  it("打たれたら、種別の印も当て直す", () => {
+    const repaint = scriptCode.slice(
+      scriptCode.indexOf("function composeRepaintMemos(")
+    );
+    expect(repaint.slice(0, 600)).toContain("composeLineClass(");
+  });
+
+  /** 脚本でない作品の画面は、これまでと変わらない */
+  it("脚本以外では、印が付かない", () => {
+    const node = api.composeBuildLine("○駅前・夜", fakeDoc);
+    expect((node.attributes ?? {}).class ?? "").toBe("line");
+  });
+
+  it("脚本以外の画面は、タイプを渡さないときと1バイトも変わらない", () => {
+    expect(
+      buildManuscriptEditorHtml("NONCE123", "vscode-resource:", "long")
+    ).toBe(html);
+  });
+});

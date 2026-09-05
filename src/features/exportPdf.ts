@@ -123,6 +123,10 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
     workTitle: work.title,
     episodes: chapters,
     preset,
+    // **タイプで組み方が変わる**（設計書6.70。脚本は柱・ト書き・セリフ）。
+    // 上で読んだものをそのまま渡す——ここで読み直すと、選んでいる間に
+    // プロットが書き換わったときに、見出しと組み方で別のタイプを指す
+    format,
   });
 
   let target: string;

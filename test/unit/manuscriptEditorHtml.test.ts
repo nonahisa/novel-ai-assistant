@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { buildManuscriptEditorHtml } from "../../src/views/manuscriptEditorHtml";
 import { MEMO_MARKER_COLOR } from "../../src/core/sceneMemo";
+import {
+  SCRIPT_LINE_CLASSES,
+  SCRIPT_LINE_CSS,
+  SCRIPT_LINE_RULES,
+} from "../../src/core/scriptLines";
 
 /**
  * 原稿エディタの画面（設計書6.25）。
@@ -861,5 +866,37 @@ describe("画面のJSの書き方", () => {
     const found = html.match(/<script nonce="NONCE123">([\s\S]*?)<\/script>/);
     expect(found, "スクリプトが見つからない").toBeTruthy();
     expect(found![1].includes("`")).toBe(false);
+  });
+});
+
+/**
+ * 脚本の組み方（設計書6.70）。
+ *
+ * **組み方の指定は core/scriptLines.ts の1か所**にあり、画面と紙
+ * （PDF。core/printHtml.ts）が同じ文字列を埋め込む。
+ */
+describe("脚本の組み方", () => {
+  const script = buildManuscriptEditorHtml(
+    "NONCE123",
+    "vscode-resource:",
+    "script"
+  );
+
+  it("脚本のときだけ、行の組み方の指定が入る", () => {
+    expect(script).toContain(SCRIPT_LINE_CSS);
+    expect(html).not.toContain(SCRIPT_LINE_CSS);
+  });
+
+  /** 判定の規則も写しではなく、そのまま埋め込まれている */
+  it("行の見分け方も、写しではなく埋め込まれている", () => {
+    expect(script).toContain(JSON.stringify(SCRIPT_LINE_RULES));
+    expect(script).toContain(JSON.stringify(SCRIPT_LINE_CLASSES));
+  });
+
+  /** タイプを渡さない画面（これまでの呼び方）は、脚本以外と同じ */
+  it("脚本以外では、これまでと同じ画面", () => {
+    expect(buildManuscriptEditorHtml("NONCE123", "vscode-resource:", "memo")).toBe(
+      html
+    );
   });
 });
