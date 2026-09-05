@@ -20,8 +20,29 @@ export const EXPECTED_ARCHIVE_FILES = [
   "extension/media/icon.svg",
 ];
 
-const FORBIDDEN_CONTENT_PATTERNS = [
-  /sk-ant-[A-Za-z0-9_-]{20,}/,
+/**
+ * 配布物に入っていてはいけない文字列。
+ *
+ * **鍵の接頭辞は `src/core/logger.ts` の `SECRET_PREFIXES` と揃える。**
+ * 片方に足してもう片方を忘れるのが一番ありがちな壊れ方なので、
+ * `test/unit/secretScanParity.test.ts` が両者の揃いを見張っている
+ * （こちらは素のNodeで動く `.mjs`、あちらはTypeScriptなので、
+ * 定義そのものは共有できない）。
+ *
+ * **語の途中は見ない**（`(?<![A-Za-z0-9])`）。`sk-` は `task-` `risk-` の
+ * 中にも現れるので、そこまで拾うと配布のたびに無関係な行で止まり、
+ * 走査そのものが信用されなくなる。
+ */
+export const FORBIDDEN_CONTENT_PATTERNS = [
+  // OpenAI・Anthropic（`sk-ant-` は `sk-` に含まれるが、由来が分かるよう残す）
+  /(?<![A-Za-z0-9])sk-ant-[A-Za-z0-9_-]{20,}/,
+  /(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}/,
+  // Google（Gemini）
+  /(?<![A-Za-z0-9])AIza[A-Za-z0-9_-]{20,}/,
+  /(?<![A-Za-z0-9])AQ\.[A-Za-z0-9_-]{20,}/,
+  // GitHub。同期のトークンで、URLに埋め込まれた形でも紛れ込みうる
+  /(?<![A-Za-z0-9])gh[pours]_[A-Za-z0-9_-]{20,}/,
+  /(?<![A-Za-z0-9])github_pat_[A-Za-z0-9_-]{20,}/,
   /C:\\Users\\/i,
   /Documents\\/i,
   /_test_extract/i,

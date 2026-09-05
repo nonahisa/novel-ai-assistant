@@ -14,6 +14,7 @@ import { fetchJson } from "./httpClient";
 import { toGeminiSchema } from "./jsonSchema";
 import { forgetSecret, logLine, registerSecret } from "../core/logger";
 import { resolveTimeoutMs } from "../core/modelTuning";
+import { customEndpointNotice } from "../core/endpointNotice";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
 import { buildAttemptPlan, type OptionAttempt } from "./optionFallback";
 
@@ -157,7 +158,9 @@ export class GeminiProvider implements ApiKeyProvider {
       }
       return {
         ok: true,
-        message: `Geminiに接続しました（モデル ${models.length} 件）`,
+        message:
+          `Geminiに接続しました（モデル ${models.length} 件）` +
+          customEndpointNotice(this.endpoint, DEFAULT_ENDPOINT),
         modelCount: models.length,
       };
     } catch (error) {

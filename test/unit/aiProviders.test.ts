@@ -172,6 +172,50 @@ describe("AIプロバイダ境界", () => {
   });
 
   /**
+   * 宛先の設定は、以前はワークスペース（作品リポジトリ）からも書けた。
+   * `machine` スコープにして塞いだうえで、**万一差し替えられていたら
+   * 作者の目に触れる**ようにしておく（保険）。
+   */
+  test("既定と違う宛先のときは、接続の知らせに宛先を出す", async () => {
+    workspace.getConfiguration = () => ({
+      get: <T>(key: string, defaultValue: T): T =>
+        key === "ollama.endpoint" ? ("http://192.168.1.9:11434" as T) : defaultValue,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ models: [{ name: "test-model" }] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+      )
+    );
+
+    const result = await new OllamaProvider().testConnection();
+
+    expect(result.ok).toBe(true);
+    expect(result.message).toContain("192.168.1.9");
+  });
+
+  test("既定の宛先なら、知らせに宛先を出さない（普段の画面を汚さない）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ models: [{ name: "test-model" }] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+      )
+    );
+
+    const result = await new OllamaProvider().testConnection();
+
+    expect(result.message).toBe("Ollamaに接続しました（モデル 1 件）");
+  });
+
+  /**
    * **`num_predict` は普段は送らない**（設計書6.58.2）。測定
    * （`features/measureContext.ts`）だけが例外で `capOutputTokens` を
    * 立てる（設計書6.65.14の4）。この2つを対で確かめないと、旗が

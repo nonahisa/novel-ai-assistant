@@ -23,6 +23,7 @@ import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
 import { logLine } from "../core/logger";
 import { withAiWork } from "../core/aiActivity";
 import { resolveTimeoutMs } from "../core/modelTuning";
+import { customEndpointNotice } from "../core/endpointNotice";
 
 const DEFAULT_ENDPOINT = "http://localhost:11434";
 
@@ -228,7 +229,9 @@ export class OllamaProvider implements AIProvider {
       }
       return {
         ok: true,
-        message: `Ollamaに接続しました（モデル ${count} 件）`,
+        message:
+          `Ollamaに接続しました（モデル ${count} 件）` +
+          customEndpointNotice(this.endpoint, DEFAULT_ENDPOINT),
         modelCount: count,
       };
     } catch (e) {

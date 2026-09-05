@@ -13,6 +13,7 @@ import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
 import { logLine } from "../core/logger";
 import { resolveTimeoutMs, tunedContextWindow } from "../core/modelTuning";
+import { customEndpointNotice } from "../core/endpointNotice";
 import { parseParameterSize } from "./sakuraProvider";
 import {
   asContextOverflowError,
@@ -231,7 +232,9 @@ export class LmStudioProvider implements AIProvider {
       }
       return {
         ok: true,
-        message: `LM Studioに接続しました（モデル ${models.length} 件）`,
+        message:
+          `LM Studioに接続しました（モデル ${models.length} 件）` +
+          customEndpointNotice(lmstudioEndpoint(), DEFAULT_ENDPOINT),
         modelCount: models.length,
       };
     } catch (error) {

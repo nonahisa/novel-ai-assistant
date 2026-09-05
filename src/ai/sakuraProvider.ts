@@ -14,6 +14,7 @@ import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
 import { forgetSecret, logLine, registerSecret } from "../core/logger";
 import { resolveTimeoutMs, tunedContextWindow } from "../core/modelTuning";
+import { customEndpointNotice } from "../core/endpointNotice";
 import {
   asContextOverflowError,
   isChatModel,
@@ -183,7 +184,9 @@ export class SakuraProvider implements ApiKeyProvider {
       }
       return {
         ok: true,
-        message: `さくらのAI Engineに接続しました（モデル ${models.length} 件）`,
+        message:
+          `さくらのAI Engineに接続しました（モデル ${models.length} 件）` +
+          customEndpointNotice(this.endpoint, DEFAULT_ENDPOINT),
         modelCount: models.length,
       };
     } catch (error) {

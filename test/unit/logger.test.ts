@@ -31,6 +31,25 @@ describe("ログの伏せ字", () => {
     );
   });
 
+  test.each([
+    ["ghp_1234567890abcdefghij", "ghp_***"],
+    ["gho_1234567890abcdefghij", "gho_***"],
+    ["ghu_1234567890abcdefghij", "ghu_***"],
+    ["ghs_1234567890abcdefghij", "ghs_***"],
+    ["ghr_1234567890abcdefghij", "ghr_***"],
+    ["github_pat_11ABCDEFG0abcdefghij", "github_pat_***"],
+  ])("GitHubのトークンも伏せる: %s", (secret, expected) => {
+    // GitHub同期の失敗はURLごとログに残る。作者がトークンを埋め込んだURLを
+    // 貼っていると、そのままログへ出ていた
+    expect(redactSecrets(`remote: ${secret}`)).toBe(`remote: ${expected}`);
+  });
+
+  test("URLに埋め込まれた資格情報を落とす", () => {
+    expect(
+      redactSecrets("送り先を登録: https://user:ghp_abcdefghij@github.com/a/b.git")
+    ).toBe("送り先を登録: https://***@github.com/a/b.git");
+  });
+
   test("普通の文章は変えない", () => {
     const message = "モデルが見つかりません (HTTP 404)";
 
@@ -40,5 +59,12 @@ describe("ログの伏せ字", () => {
   test("短い似た文字列は伏せない", () => {
     // 「sk-」で始まるだけの短い語まで潰すと、読めるはずの情報が消える
     expect(redactSecrets("sk-1")).toBe("sk-1");
+  });
+
+  test("語の途中の「sk-」は伏せない", () => {
+    // `task-` `risk-` のような語まで潰すと、ログが伏せ字だらけになって読めない
+    const message = "task-list-item-checkbox が見つかりません";
+
+    expect(redactSecrets(message)).toBe(message);
   });
 });

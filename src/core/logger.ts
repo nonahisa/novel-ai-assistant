@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "./paths";
+import { redactUrlCredentials } from "./redactUrl";
 
 /**
  * 診断用のログ。
@@ -153,11 +154,49 @@ export function redactSecrets(text: string): string {
     }
   }
 
+  // URLに埋め込まれた資格情報。GitHub同期の失敗はURLごとログに残るので、
+  // 接頭辞の判定より先に、形そのものを落とす
+  result = redactUrlCredentials(result);
+
   // 登録し損ねたキーへの保険。接頭辞は変わりうるので、これだけに頼らない
-  return result
-    .replace(/sk-[A-Za-z0-9_-]{8,}/g, "sk-***")
-    .replace(/AIza[A-Za-z0-9_-]{8,}/g, "AIza***")
-    .replace(/AQ\.[A-Za-z0-9_-]{8,}/g, "AQ.***");
+  for (const prefix of SECRET_PREFIXES) {
+    result = result.replace(secretPattern(prefix), `${prefix}***`);
+  }
+  return result;
+}
+
+/**
+ * 伏せ字にするキーの接頭辞。
+ *
+ * **`scripts/releaseSupport.mjs` の出口走査と揃える。** 片方だけに足すのが
+ * 一番ありがちな壊れ方なので、`test/unit/secretScanParity.test.ts` が
+ * 「同じ形の値を両方が知っているか」を見張っている。
+ *
+ * GitHubのトークン（`ghp_` など）は、`https://<トークン>@github.com/...` の
+ * 形でURLに埋め込まれてログへ流れ込む。
+ */
+export const SECRET_PREFIXES = [
+  "sk-",
+  "AIza",
+  "AQ.",
+  "ghp_",
+  "gho_",
+  "ghu_",
+  "ghs_",
+  "ghr_",
+  "github_pat_",
+] as const;
+
+/**
+ * 接頭辞から、伏せ字の判定に使う正規表現を作る。
+ *
+ * **語の途中は見ない**（`(?<![A-Za-z0-9])`）。`sk-` は `task-` `risk-` の
+ * 中にも現れるので、そこまで潰すと「task-list-item-checkbox」が
+ * 「task-***」になってログが読めなくなる。
+ */
+function secretPattern(prefix: string): RegExp {
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![A-Za-z0-9])${escaped}[A-Za-z0-9_-]{8,}`, "g");
 }
 
 /**

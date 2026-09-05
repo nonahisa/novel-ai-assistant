@@ -15,6 +15,7 @@ import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
 import { forgetSecret, registerSecret } from "../core/logger";
 import { resolveTimeoutMs, tunedContextWindow } from "../core/modelTuning";
+import { customEndpointNotice } from "../core/endpointNotice";
 
 /** APIキーの保存先。settings.json ではなくOSの資格情報ストア */
 const SECRET_KEY = "novelai.openai.apiKey";
@@ -174,7 +175,9 @@ export class OpenAIProvider implements ApiKeyProvider {
       }
       return {
         ok: true,
-        message: `ChatGPTに接続しました（モデル ${models.length} 件）`,
+        message:
+          `ChatGPTに接続しました（モデル ${models.length} 件）` +
+          customEndpointNotice(this.endpoint, DEFAULT_ENDPOINT),
         modelCount: models.length,
       };
     } catch (error) {

@@ -240,7 +240,29 @@ export async function pushSetUpstream(
 export function validateRepositoryUrl(input: string): string | undefined {
   const url = input.trim();
   if (url.length === 0) return "URLを入力してください。";
-  if (/^https?:\/\/[^/\s]+\/[^/\s]+\/[^/\s]+$/.test(url)) return undefined;
+
+  // **鍵を埋め込んだURLは受け取らない。**
+  // GitHubの案内どおりに `https://<トークン>@github.com/...` を貼る人がいるが、
+  // そのURLは `.git/config` に平文で残り、ログにも出る。
+  // 認証はOSの保管場所（Windowsなら資格情報マネージャー）に任せる。
+  //
+  // 見るのは http(s) だけ——ssh の `git@` は資格情報ではなく利用者名である
+  // （`ssh://` は下の形で `git@` に限って受けている）
+  const host = /^https?:\/\/([^/\s]*)/i.exec(url)?.[1];
+  if (host?.includes("@")) {
+    return (
+      "トークンやパスワードはURLに書かないでください。" +
+      "https://github.com/ユーザー名/リポジトリ名.git の形で入力してください。"
+    );
+  }
+
+  // **平文の http は断る。** 未公開の原稿が、そのまま回線を流れる。
+  // 打ち間違いであることがほとんどで、通しても送信で失敗する
+  if (/^http:\/\//i.test(url)) {
+    return "https:// で始まるURLを入力してください（http では原稿が保護されません）。";
+  }
+
+  if (/^https:\/\/[^/\s]+\/[^/\s]+\/[^/\s]+$/.test(url)) return undefined;
   if (/^git@[^:\s]+:[^/\s]+\/[^/\s]+$/.test(url)) return undefined;
   if (/^ssh:\/\/git@[^/\s]+\/[^/\s]+\/[^/\s]+$/.test(url)) return undefined;
   return "https://github.com/ユーザー名/リポジトリ名.git の形で入力してください。";

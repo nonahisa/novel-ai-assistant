@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "「設定が前の話と食い違っていないか不安」「誤字脱字の見直しがつらい」「AIに原稿を触られたくない」——小説を書く人の困りごとを引き受けるVSCode拡張機能です。本文から設定資料を自動で作り、矛盾や誤字脱字を調べ、執筆量を記録します。AIは提案するだけで、原稿は書き換えません。無料の手元AI（Ollama / LM Studio）だけでも使え、その場合、原稿はパソコンの外へ出ません。",
-  "version": "0.32.11",
+  "version": "0.32.12",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -36,6 +36,22 @@
   "activationEvents": [],
   "main": "./dist/extension.js",
   "browser": "./dist/browser-extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "信頼していないフォルダーでは、AIの接続先・実行ファイルと、作者／編集者の切り替えの設定を読みません（お使いのパソコンの設定のほうを使います）。原稿の表示や文字数はそのまま使えます。",
+      "restrictedConfigurations": [
+        "novelai.mode",
+        "novelai.ollama.endpoint",
+        "novelai.ollama.executablePath",
+        "novelai.lmstudio.endpoint",
+        "novelai.lmstudio.cliPath",
+        "novelai.openai.endpoint",
+        "novelai.gemini.endpoint",
+        "novelai.sakura.endpoint"
+      ]
+    }
+  },
   "contributes": {
     "customEditors": [
       {
@@ -1522,11 +1538,13 @@
         },
         "novelai.ollama.endpoint": {
           "type": "string",
+          "scope": "machine",
           "default": "http://localhost:11434",
           "markdownDescription": "OllamaのエンドポイントURL\n\n[Ollamaのセットアップ…](command:novelai.setupOllama)"
         },
         "novelai.ollama.executablePath": {
           "type": "string",
+          "scope": "machine",
           "default": "",
           "markdownDescription": "`ollama` 実行ファイルの場所。**空なら自動検出**します（PATHと既定のインストール先を探索）。拡張機能からOllamaを起動するときにだけ使います。自動検出に失敗する場合のみ指定してください。\n\n[ファイルを選択…](command:novelai.selectOllamaExecutable)"
         },
@@ -1573,6 +1591,7 @@
         },
         "novelai.openai.endpoint": {
           "type": "string",
+          "scope": "machine",
           "default": "https://api.openai.com/v1",
           "description": "ChatGPT（OpenAI API）のエンドポイントURL。互換サービスを使う場合のみ変更してください。"
         },
@@ -1590,6 +1609,7 @@
         },
         "novelai.gemini.endpoint": {
           "type": "string",
+          "scope": "machine",
           "default": "https://generativelanguage.googleapis.com/v1beta",
           "description": "GeminiのエンドポイントURL。通常は変更不要です。"
         },
@@ -1601,6 +1621,7 @@
         },
         "novelai.lmstudio.endpoint": {
           "type": "string",
+          "scope": "machine",
           "default": "http://localhost:1234/v1",
           "markdownDescription": "LM StudioのローカルサーバーのURL。LM Studioの「Developer」画面でサーバーを開始したときに表示される値に合わせます。通常は変更不要です。\n\n[LM Studioのセットアップ…](command:novelai.setupLmStudio)"
         },
@@ -1618,6 +1639,7 @@
         },
         "novelai.lmstudio.cliPath": {
           "type": "string",
+          "scope": "machine",
           "default": "",
           "markdownDescription": "LM Studio のコマンド（lms）の場所。空なら `~/.lmstudio/bin` と PATH を探します。"
         },
@@ -1689,6 +1711,7 @@
         },
         "novelai.sakura.endpoint": {
           "type": "string",
+          "scope": "machine",
           "default": "https://api.ai.sakura.ad.jp/v1",
           "description": "さくらのAI EngineのAPIの宛先。OpenAI互換の口を使います。通常は変える必要がありません。"
         },
@@ -1706,6 +1729,7 @@
         },
         "novelai.mode": {
           "type": "string",
+          "scope": "machine",
           "enum": [
             "author",
             "editor"

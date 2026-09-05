@@ -22,6 +22,7 @@ import {
   validateRepositoryUrl,
 } from "../core/gitSetup";
 import { logFailure, logStep, showLog } from "../core/logger";
+import { redactUrlCredentials } from "../core/redactUrl";
 import { withProgress } from "../views/progress";
 import { askText , cancelItem } from "../views/dialogs";
 
@@ -538,7 +539,11 @@ async function firstPush(
     target.folderPath,
     15_000
   );
-  const remoteUrl = remote.stdout.trim() || "（送り先が取得できませんでした）";
+  // 古い作品フォルダーには、URLに鍵を埋め込んだ送り先が残っていることがある
+  // （いまは登録時に断っている）。**画面にもログにも鍵を出さない**
+  const remoteUrl =
+    redactUrlCredentials(remote.stdout.trim()) ||
+    "（送り先が取得できませんでした）";
 
   // **何作品ぶんが出ていくのかを、送る前に言う。**
   // 1つの置き場に複数の作品が入っているのが既定の形なので（設計書5.7.9）、
