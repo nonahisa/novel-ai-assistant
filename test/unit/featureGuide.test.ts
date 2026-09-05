@@ -3,6 +3,7 @@ import {
   buildFeatureGuideForQuestion,
   buildFeatureIndex,
   buildGuideBundles,
+  EXTRA_GUIDE,
 } from "../../src/features/featureGuide";
 import { ACTION_TREE } from "../../src/views/actionList";
 
@@ -40,6 +41,17 @@ function visibleActions() {
   // **画面に出ない操作は、案内にも入れない**（`browserOnly`）。
   // 試験は手元で走るので、ブラウザ版だけの操作は外れる
   return allActions().filter((action) => !action.browserOnly);
+}
+
+/** `EXTRA_GUIDE` から【…】の節を1つ取り出す（製品側と同じ切り方） */
+function extraSection(title: string): string {
+  const lines = EXTRA_GUIDE.split("\n");
+  const start = lines.indexOf(`【${title}】`);
+  expect(start, `節が無い: ${title}`).toBeGreaterThanOrEqual(0);
+
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => line.startsWith("【"));
+  return (end === -1 ? rest : rest.slice(0, end)).join("\n").trim();
 }
 
 describe("使い方の説明（目次と束）", () => {
@@ -121,6 +133,63 @@ describe("使い方の説明（目次と束）", () => {
     }
   });
 
+  test("メニューに出ないボタンと振る舞いが、名前で目次に載る", () => {
+    /*
+      パネルの中のボタン（相談・提案・EPUBエディター・執筆統計）と、
+      作者が押さないのに働くもの（独り言・順番待ち）は `ACTION_TREE` に
+      無い。**目次に名前が無ければ、AIは「そんな機能はありません」と
+      答える**——操作の漏れとまったく同じ害である。
+
+      名前は `EXTRA_GUIDE` の節から機械的に切り出しているので、
+      節へ足したものは自動で目次に載る。ここではその切り出しが
+      効いていることを見る。
+    */
+    const section = extraSection("メニューに出ないボタンと振る舞い");
+    const names = section
+      .split("\n")
+      .filter((line) => line.startsWith("- "))
+      .map((line) => line.slice(2).split(": ")[0]);
+
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) {
+      expect(index, `目次: ${name}`).toContain(`・${name}`);
+      expect(bundleText, `束: ${name}`).toContain(name);
+    }
+  });
+
+  test("0.30〜0.33で足したものが、案内から消えていない", () => {
+    // 上の検査は「節にあるものが目次へ回る」ことしか見ない。
+    // **節から丸ごと消えたときに気づけない**ので、名前を名指しで置く
+    for (const name of [
+      "相談を資料へ反映",
+      "AIに訊く",
+      "EPUBエディターの右の並び",
+      "貼り込み係へ渡す形でコピー",
+      "Xへ貼り付ける",
+      "サイトの記録",
+      "AIの独り言の感想",
+      "AI機能の順番待ち",
+    ]) {
+      expect(index, `目次: ${name}`).toContain(name);
+      expect(bundleText, `束: ${name}`).toContain(name);
+    }
+  });
+
+  test("メニューに出ないボタンにも、しないことの断りを残す", () => {
+    // 「本文は書き換えません」「送信は作者が押します」が落ちると、
+    // AIが逆を答えかねない（説明の短縮と同じ理由）
+    for (const note of [
+      "承認するまで資料は変わりません",
+      "本文は書き換えません",
+      "本には入りません",
+      "送信は必ず作者が押します",
+      "投稿ボタンは作者が押します",
+      "自動でアクセスすることはありません",
+    ]) {
+      expect(bundleText, note).toContain(note);
+    }
+  });
+
   test("ファイルの置き場所を含む", () => {
     expect(bundleText).toContain("設定/plot.md");
     expect(bundleText).toContain("設定/synopsis.md");
@@ -193,8 +262,14 @@ describe("相談へ渡す目次", () => {
 
       1,900→1,950：提供先別の設定資料の書き出し（設計書6.75）で1つ増えた
       （名前だけで約20字）。説明は混ざっていない。
+
+      1,950→2,100：メニューに出ないボタンと振る舞い（0.30〜0.33で入った8件）
+      の**名前だけ**を目次へ足した（約160字）。パネルの中のボタンは
+      `ACTION_TREE` に項目が無く、目次に名前が無いとAIが「そんな機能は
+      ありません」と答える——操作の漏れと同じ害なので、操作と同じ扱いにした。
+      説明は束（`hidden`）の側にあり、目次には混ざっていない。
     */
-    expect(index.length).toBeLessThan(1950);
+    expect(index.length).toBeLessThan(2100);
   });
 
   test("原稿を勝手に書き換えない、という断りは必ず入る", () => {
@@ -236,7 +311,7 @@ describe("相談1回ぶんの組み立て", () => {
     expect(built.reason).toBe("none");
     expect(built.selected).toEqual([]);
     // 上限は目次と同じ（渡しているものが目次そのものなので、揃えておく）
-    expect(built.text.length).toBeLessThan(1950);
+    expect(built.text.length).toBeLessThan(2100);
   });
 
   test("機能名で聞かれたら、その小分類の説明を足す", () => {
