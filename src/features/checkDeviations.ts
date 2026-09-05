@@ -39,6 +39,7 @@ import {
   type AcceptedDeviation,
 } from "../core/deviationValidation";
 import { type CheckProgress } from "../views/progress";
+import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { confirmFormatFit } from "./formatFitPrompt";
@@ -164,7 +165,7 @@ export function describePlotTrim(
   );
 }
 
-export interface CheckDeviationsOptions {
+export interface CheckDeviationsOptions extends SuiteAwareOptions {
   /**
    * 進み具合の届け先（作者の報告、2026-08-29）。
    *
@@ -184,7 +185,7 @@ export async function checkDeviations(
   // 短編集・SNS記事では、話が続かないので「プロットからの逸脱」が成り立たない
   if (!(await confirmFormatFit(work, "plotReverse"))) return undefined;
 
-  const plot = await loadPlot(work);
+  const plot = await loadPlot(work, options);
   if (!plot) return undefined;
 
   const resolved = await ensureConfigured(registry, "deviation");
@@ -251,41 +252,47 @@ export async function checkDeviations(
     ) {
       return undefined;
     }
-    const confirm = await vscode.window.showInformationMessage(
-      `${work.title} のプロット逸脱を検知します。`,
-      {
-        modal: true,
-        detail: [
-          `${episodes.length}話中 ${pending.length}話を処理します` +
-            `（処理済み ${episodes.length - pending.length}話はスキップ）。`,
-          "",
-          "本文は書き換えません。 プロットと違う箇所を並べるだけで、",
-          "プロットのほうが古いこともあります。",
-          // **実測に基づく断り。** 黙って動かして0件を返すより、
-          // 先に「効かない」と言うほうがよい（設計書6.10.2）。
-          // **「手元の」でも「Ollama」でもなく、地力で言う**——同じことは
-          // LM Studio の小さいモデルでも、クラウドの小さいモデルでも起きる
-          capability.warnDeviationIneffective
-            ? "\n小さめのモデルでは、この機能はほとんど働きません。\n" +
-              "実データで5回測ったところ、gemma4:e4b と gemma4:12b は\n" +
-              "プロットに載せた話と外した話を見分けられませんでした。\n" +
-              "大きなモデル（Claude・ChatGPT・Gemini など）をお使いください。\n" +
-              "（このモデルでは「間延び」も見ません。判定が難しく的外れが増えるため）"
-            : "",
-          // 種別を絞ると鍵が変わり、キャッシュが総入れ替えになる
-          pending.length === episodes.length && episodes.length > 1
-            ? "\n（見る種別が前回から変わっているため、今回はすべて送り直します）"
-            : "",
-          resolved.provider.isPaid
-            ? `\n${resolved.provider.displayName} は話ごとに課金されます。`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      },
-      "実行"
-    );
-    if (confirm !== "実行") return undefined;
+    const detail = [
+      `${episodes.length}話中 ${pending.length}話を処理します` +
+        `（処理済み ${episodes.length - pending.length}話はスキップ）。`,
+      "",
+      "本文は書き換えません。 プロットと違う箇所を並べるだけで、",
+      "プロットのほうが古いこともあります。",
+      // **実測に基づく断り。** 黙って動かして0件を返すより、
+      // 先に「効かない」と言うほうがよい（設計書6.10.2）。
+      // **「手元の」でも「Ollama」でもなく、地力で言う**——同じことは
+      // LM Studio の小さいモデルでも、クラウドの小さいモデルでも起きる
+      capability.warnDeviationIneffective
+        ? "\n小さめのモデルでは、この機能はほとんど働きません。\n" +
+          "実データで5回測ったところ、gemma4:e4b と gemma4:12b は\n" +
+          "プロットに載せた話と外した話を見分けられませんでした。\n" +
+          "大きなモデル（Claude・ChatGPT・Gemini など）をお使いください。\n" +
+          "（このモデルでは「間延び」も見ません。判定が難しく的外れが増えるため）"
+        : "",
+      // 種別を絞ると鍵が変わり、キャッシュが総入れ替えになる
+      pending.length === episodes.length && episodes.length > 1
+        ? "\n（見る種別が前回から変わっているため、今回はすべて送り直します）"
+        : "",
+      resolved.provider.isPaid
+        ? `\n${resolved.provider.displayName} は話ごとに課金されます。`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    if (options.suiteConfirmed) {
+      // まとめ実行が先に1回だけ確認している（設計書6.80）。
+      // **飛ばした中身はログへ残す**——「小さめのモデルではほとんど働きません」
+      // という実測に基づく断りは、この確認の中にしか書かれていない
+      logStep(`プロット逸脱検知：まとめ実行のため確認を省略\n${detail}`);
+    } else {
+      const confirm = await vscode.window.showInformationMessage(
+        `${work.title} のプロット逸脱を検知します。`,
+        { modal: true, detail },
+        "実行"
+      );
+      if (confirm !== "実行") return undefined;
+    }
   }
 
   logStep(
@@ -462,7 +469,11 @@ export async function checkDeviations(
  * **中身が空なら実行しない。** 見出しだけのテンプレートを渡しても、
  * 照らし合わせる相手にはならない。
  */
-async function loadPlot(work: WorkEntry): Promise<string | undefined> {
+async function loadPlot(
+  work: WorkEntry,
+  /** まとめ実行の印。前提が無いときの伝え方が変わる（設計書6.80） */
+  suite: SuiteAwareOptions
+): Promise<string | undefined> {
   const text = await readPlotText(work);
   const sections = parsePlotMarkdown(text).sections;
   const written = Object.values(sections).filter(
@@ -470,6 +481,16 @@ async function loadPlot(work: WorkEntry): Promise<string | undefined> {
   );
 
   if (written.length === 0) {
+    // **まとめ実行では、ここで作者を止めない**（設計書6.80）。プロットが
+    // 要るのはこの検知だけなので、残りまで巻き添えで止めない。
+    // 理由は最後のまとめへ一言として並べる
+    if (suite.suiteConfirmed) {
+      suite.noteMissing?.(
+        "プロット逸脱は、照らし合わせるプロットがまだ無いため実行しませんでした" +
+          "（「プロットをつくる」か「本文からプロットを起こす」で作ってください）。"
+      );
+      return undefined;
+    }
     const answer = await vscode.window.showWarningMessage(
       "照らし合わせるプロットがまだありません。",
       {

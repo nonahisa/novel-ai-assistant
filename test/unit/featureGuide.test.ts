@@ -280,8 +280,15 @@ describe("相談へ渡す目次", () => {
       2,100→2,200：読者の反応の取り込み（設計書6.79.7）で操作が2つ増えた
       （「読者の反応を貼り付けて取り込む」「読者の反応を手入力する」の
       **名前だけ**で約34字）。説明は混ざっていない。
+
+      2,200→2,600：**作者の裁定で上げた（2026-09-05）。** 前回2,200へ
+      上げた時点で残りが100字を切っており、操作を数個足すたびに上限を
+      触ることになっていた。**目次は全操作の名前を持つのが役目なので、
+      束のように割って減らすことができない**——名前が1つ欠ければ、AIは
+      「その機能はありません」と嘘を答える。落ちたときに確かめるのは
+      これまでどおり「説明が混ざっていないか」だけである。
     */
-    expect(index.length).toBeLessThan(2200);
+    expect(index.length).toBeLessThan(2600);
   });
 
   test("原稿を勝手に書き換えない、という断りは必ず入る", () => {
@@ -334,6 +341,47 @@ describe("説明の束", () => {
     「その他支援」を割ったのと同じ手順）。上げ続ければ、送る量が機能数に
     比例する行き止まり（6.27）へ戻る。
   */
+  /*
+    **「校正・校閲」を「校正」と「伏線・矛盾」へ割った**（0.33.10、
+    作者の裁定 2026-09-05）。1,285字あり、上限1,500まで200字ほどしか
+    残っていなかった。**メニューの並びは変えていない**——割ったのは
+    相談へ渡す束だけで、詳細メニューの見た目は今までどおりである
+    （並びは別のところで決まっており、勝手に動かすと作者の手順が変わる）。
+
+    割った線は「文の直し」と「話の整合」のあいだである。作者が見るものが
+    違う——前者は1文ずつの言い回し、後者は話をまたいだ辻褄——ので、
+    質問もどちらかに寄る。
+  */
+  test("「校正・校閲」は、校正と伏線・矛盾に割ってある", () => {
+    const labels = bundles.map((bundle) => bundle.label);
+
+    expect(labels).toContain("執筆AI支援 → 校正");
+    expect(labels).toContain("執筆AI支援 → 伏線・矛盾");
+    expect(labels.some((label) => label.includes("校正・校閲"))).toBe(false);
+  });
+
+  test("割った先が、それぞれの持ち場の操作を持つ", () => {
+    const find = (label: string) =>
+      bundles.find((bundle) => bundle.label === label)?.text ?? "";
+
+    const proofread = find("執筆AI支援 → 校正");
+    const consistency = find("執筆AI支援 → 伏線・矛盾");
+
+    // 文の直し
+    expect(proofread).toContain("誤字脱字を検知");
+    expect(proofread).toContain("表記ゆれを検知");
+    expect(proofread).toContain("推敲する");
+    // 表に載せていない操作は、割る前と同じ側（校正）に残る
+    expect(proofread).toContain("編集部からの提案を見る");
+
+    // 話の整合
+    expect(consistency).toContain("矛盾を検知");
+    expect(consistency).toContain("プロットからの逸脱を検知");
+    expect(consistency).toContain("伏線を検知する");
+    expect(consistency).toContain("伏線の回収を確かめる");
+    expect(consistency).toContain("単話プロットを検査");
+  });
+
   test("割った2つの束は、どちらも1,100字未満（足す余地を残す）", () => {
     // **上限ぎりぎりに割り直しても意味が無い。** 割った直後から
     // 1字下に戻るなら、次の1操作でまた同じ作業になる
@@ -371,7 +419,7 @@ describe("相談1回ぶんの組み立て", () => {
     expect(built.reason).toBe("none");
     expect(built.selected).toEqual([]);
     // 上限は目次と同じ（渡しているものが目次そのものなので、揃えておく）
-    expect(built.text.length).toBeLessThan(2200);
+    expect(built.text.length).toBeLessThan(2600);
   });
 
   test("機能名で聞かれたら、その小分類の説明を足す", () => {
@@ -379,9 +427,8 @@ describe("相談1回ぶんの組み立て", () => {
       question: "誤字脱字はどこ？",
     });
 
-    expect(built.selected.some((label) => label.includes("校正・校閲"))).toBe(
-      true
-    );
+    // 束は「校正」と「伏線・矛盾」に割ってある（0.33.10）。誤字脱字は前者
+    expect(built.selected).toContain("執筆AI支援 → 校正");
     // 目次は落とさない。説明のある操作だけが全部だと読まれては困る
     expect(built.text).toContain("表記ゆれを検知");
   });

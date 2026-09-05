@@ -173,7 +173,11 @@ import {
 // CONFLICT_SCHEME・ConflictContentProvider・resolveWorkConflicts も
 // core/git.ts 経由。競合はgit操作でしか起きないので、動的importする
 import type { ConflictContentProvider as ConflictContentProviderType } from "./features/resolveConflicts";
-import { checkTypos, type TypoCheckRunResult } from "./features/checkTypos";
+import {
+  checkTypos,
+  resolveTypoScope,
+  type TypoCheckRunResult,
+} from "./features/checkTypos";
 import {
   checkNotation,
   describeNotationResult,
@@ -260,12 +264,18 @@ import {
 // **止めた（cancelled）と失敗した（failed）は別物**で、残りを走らせるかが違う。
 // ここの7コマンドが返すのは中止と完走だけで、`CHECK_FAILED` を立てるのは
 // AIの失敗を自分で掴んでいる機能の側（`checkOpening.ts`）である
-import { runProofreadingSuite } from "./features/proofreadingSuite";
+import {
+  collectSuiteEstimate,
+  runProofreadingSuite,
+} from "./features/proofreadingSuite";
 import {
   CHECK_CANCELLED,
   CHECK_COMPLETED,
   PROOFREADING_SUITE_COMMAND,
+  checkFailed,
+  isSuiteConfirmed,
   type CheckCommandOutcome,
+  type CheckRunOptions,
 } from "./core/proofreadingSuite";
 import {
   extendMarkdownItWithRuby,
@@ -323,7 +333,7 @@ import {
   suggestChapterName,
 } from "./features/proposeChapters";
 import { countUnextractedEpisodes } from "./features/extractionFreshness";
-import { chooseScope, recordCheck } from "./features/typoCheckScope";
+import { recordCheck } from "./features/typoCheckScope";
 import { switchMode } from "./features/switchMode";
 import {
   revealFolder,
@@ -3112,7 +3122,7 @@ export async function activate(
   context.subscriptions.push(
     registerCommand(
       "novelai.checkForeshadows",
-      async (node?: WorkNode) => {
+      async (node?: WorkNode, options?: CheckRunOptions) => {
         const work = await resolveWork(node, registry);
         if (!work) return CHECK_CANCELLED;
 
@@ -3120,10 +3130,12 @@ export async function activate(
         const unsaved = await saveBeforeCheck(work, "伏線の検知");
         if (unsaved) return unsaved;
 
+        const suiteConfirmed = isSuiteConfirmed(options);
         const result = await withPanelProgress(
           work,
           "伏線を検知",
-          (onProgress) => checkForeshadows(work, aiRegistry, { onProgress })
+          (onProgress) =>
+            checkForeshadows(work, aiRegistry, { onProgress, suiteConfirmed })
         );
         if (!result || result.cancelled) return CHECK_CANCELLED;
 
@@ -3228,6 +3240,9 @@ export async function activate(
           // 内訳は提案パネルの残り件数から数える（設計書6.37.3）。
           // 各機能の戻り値を覗くと、機能ごとに違う数え方を写すことになる
           remainingIn: (category) => proposalPanel.remainingIn(work.id, category),
+          // 確認に出す量の見積もり。**取れなくても確認は出す**ので、
+          // ここで失敗しても呼び出し側は止まらない
+          estimate: (checks) => collectSuiteEstimate(work, aiRegistry, checks),
         });
       }
     )
@@ -3236,7 +3251,7 @@ export async function activate(
   context.subscriptions.push(
     registerCommand(
       "novelai.checkTypos",
-      async (node?: WorkNode) => {
+      async (node?: WorkNode, options?: CheckRunOptions) => {
         const work = await resolveWork(node, registry);
         if (!work) return CHECK_CANCELLED;
 
@@ -3247,7 +3262,8 @@ export async function activate(
         // **前回から書いた分だけに絞れる**（設計書6.8.7）。
         // 聞く意味があるときだけ聞く（一度も検知していない・全部が対象・
         // 1件も無い、のいずれでも聞かない）
-        const scope = await chooseScope(work);
+        const suiteConfirmed = isSuiteConfirmed(options);
+        const scope = await resolveTypoScope(work, { suiteConfirmed });
         if (!scope) return CHECK_CANCELLED;
 
         const result = await withPanelProgress(
@@ -3257,6 +3273,7 @@ export async function activate(
             checkTypos(work, aiRegistry, {
               filePaths: scope.filePaths,
               onProgress,
+              suiteConfirmed,
             })
         );
         if (!result) return CHECK_CANCELLED;
@@ -3466,7 +3483,7 @@ export async function activate(
   context.subscriptions.push(
     registerCommand(
       "novelai.checkDeviations",
-      async (node?: WorkNode) => {
+      async (node?: WorkNode, options?: CheckRunOptions) => {
         const work = await resolveWork(node, registry);
         if (!work) return CHECK_CANCELLED;
 
@@ -3474,12 +3491,21 @@ export async function activate(
         const unsaved = await saveBeforeCheck(work, "プロット逸脱の検知");
         if (unsaved) return unsaved;
 
+        // プロットが無いときの理由を受ける口（矛盾検知と同じ形。設計書6.80）
+        let missing = "";
+        const suiteConfirmed = isSuiteConfirmed(options);
         const result = await withPanelProgress(
           work,
           "プロット逸脱を検知",
-          (onProgress) => checkDeviations(work, aiRegistry, { onProgress }),
+          (onProgress) =>
+            checkDeviations(work, aiRegistry, {
+              onProgress,
+              suiteConfirmed,
+              noteMissing: (reason) => (missing = reason),
+            }),
           "話"
         );
+        if (missing) return checkFailed(missing);
         if (!result || result.cancelled) return CHECK_CANCELLED;
 
         proposalPanel.showDeviations(work, result.issues);
@@ -3652,7 +3678,7 @@ export async function activate(
   context.subscriptions.push(
     registerCommand(
       "novelai.checkProofread",
-      async (node?: WorkNode) => {
+      async (node?: WorkNode, options?: CheckRunOptions) => {
         const work = await resolveWork(node, registry);
         if (!work) return CHECK_CANCELLED;
 
@@ -3660,8 +3686,9 @@ export async function activate(
         const unsaved = await saveBeforeCheck(work, "推敲");
         if (unsaved) return unsaved;
 
+        const suiteConfirmed = isSuiteConfirmed(options);
         const result = await withPanelProgress(work, "推敲", (onProgress) =>
-          checkProofread(work, aiRegistry, { onProgress })
+          checkProofread(work, aiRegistry, { onProgress, suiteConfirmed })
         );
         if (!result || result.cancelled) return CHECK_CANCELLED;
 
@@ -3716,7 +3743,7 @@ export async function activate(
   context.subscriptions.push(
     registerCommand(
       "novelai.checkContradictions",
-      async (node?: WorkNode) => {
+      async (node?: WorkNode, options?: CheckRunOptions) => {
         const work = await resolveWork(node, registry);
         if (!work) return CHECK_CANCELLED;
 
@@ -3724,6 +3751,11 @@ export async function activate(
         const unsaved = await saveBeforeCheck(work, "矛盾検知");
         if (unsaved) return unsaved;
 
+        // **前提が無くて走れなかった理由を受ける**（設計書6.80）。まとめ実行
+        // では警告のダイアログを出す場が無いので、理由を持ち帰って最後の
+        // まとめへ並べる。この口を足すのはコマンドの側である
+        let missing = "";
+        const suiteConfirmed = isSuiteConfirmed(options);
         const result = await withPanelProgress(
           work,
           "矛盾を検知",
@@ -3732,8 +3764,13 @@ export async function activate(
               onProgress,
               // 検証はAIを1件ずつ呼ぶので、別の札で件数を流す
               onVerifyProgress: stage("検出した矛盾を検証", "件"),
+              suiteConfirmed,
+              noteMissing: (reason) => (missing = reason),
             })
         );
+        // **中止ではなく失敗にする。** 残りの検知はこの前提を要らないので、
+        // ここで列を止めると関係のない機能まで走らずに終わる
+        if (missing) return checkFailed(missing);
         if (!result || result.cancelled) return CHECK_CANCELLED;
 
         // 矛盾が実は伏線だったときの逃げ道を添える（設計書6.35.4）

@@ -56,6 +56,9 @@ import {
   createOrganizationStore,
 } from "../core/abilityStore";
 import { type CheckProgress } from "../views/progress";
+import type { SuiteAwareOptions } from "../core/proofreadingSuite";
+import type { ScopeChoice } from "../core/typoCheckScope";
+import { chooseScope } from "./typoCheckScope";
 import { withAiTurnProgress } from "./aiTurn";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import {
@@ -153,7 +156,7 @@ interface SplitSource {
  */
 const DICTIONARY_LIMIT = 200;
 
-export interface CheckTyposOptions {
+export interface CheckTyposOptions extends SuiteAwareOptions {
   /**
    * 対象を絞り込むファイルパス。指定すると、そのファイルだけを検知する
    * （作品一覧で1話を右クリックしたときなど）。省略すると作品全体が対象。
@@ -166,6 +169,35 @@ export interface CheckTyposOptions {
    * 作者はそこを見て待っている。渡されなければ何もしない
    */
   onProgress?: CheckProgress;
+}
+
+/**
+ * 対象範囲（「前回から書いた分だけ」か「全体」か）を決める。
+ *
+ * **まとめ実行では聞かない**（設計書6.80）。量と料金の確認を1枚へまとめた
+ * のに、そのあと誤字脱字だけが選択画面を出すと、**作者はボタン1回で
+ * 放置できない**——まとめ実行の目的そのものが果たせなくなる。
+ *
+ * 飛ばすときは**「全体」を選んだことにする。** 処理済みのチャンクは
+ * キャッシュが飛ばすので送る量はほとんど変わらず、逆に「書いた分だけ」を
+ * 勝手に選ぶと、まだ一度も見ていない話が黙って対象から外れる。
+ *
+ * @returns 取りやめなら undefined（呼び出し側は検知へ進まない）
+ */
+export async function resolveTypoScope(
+  work: WorkEntry,
+  options: Pick<CheckTyposOptions, "suiteConfirmed"> = {}
+): Promise<ScopeChoice | undefined> {
+  if (!options.suiteConfirmed) return chooseScope(work);
+
+  // **飛ばした判断はログへ残す**（確認を省略したときと同じ扱い）。
+  // 残さないと、あとから「なぜ全話ぶん走ったのか」を追えない
+  useLogFile(work.folderPath);
+  logStep(
+    "誤字脱字検知：まとめ実行のため対象は全体" +
+      "（「前回から書いた分だけ」は聞かず、処理済みはキャッシュで飛ばします）"
+  );
+  return { kind: "all" };
 }
 
 export async function checkTypos(
@@ -439,16 +471,25 @@ export async function checkTypos(
       pending.length === chunks.length && chunks.length > 1
         ? "\n（前回から本文の分け方が変わっているため、今回はすべて送り直します）"
         : "";
-    const confirm = await vscode.window.showInformationMessage(
+    const notice =
       `${chunks.length} チャンク中 ${pending.length} 件を処理します` +
-        `（処理済み ${chunks.length - pending.length} 件はスキップ）。\n` +
-        `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度\n` +
-        costNotice +
-        allPending,
-      "実行",
-      "中止"
-    );
-    if (confirm !== "実行") return undefined;
+      `（処理済み ${chunks.length - pending.length} 件はスキップ）。\n` +
+      `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度\n` +
+      costNotice +
+      allPending;
+    if (options.suiteConfirmed) {
+      // まとめ実行が先に1回だけ確認している（設計書6.80）。
+      // **飛ばした中身は捨てずにログへ残す**——あとから件数と見積もりを
+      // 突き合わせられないと、料金の問い合わせに答えられない
+      logStep(`誤字脱字検知：まとめ実行のため確認を省略\n${notice}`);
+    } else {
+      const confirm = await vscode.window.showInformationMessage(
+        notice,
+        "実行",
+        "中止"
+      );
+      if (confirm !== "実行") return undefined;
+    }
   } else if (chunks.length > 0) {
     vscode.window.showInformationMessage(
       "AIでの検知はすべてのチャンクが処理済みです。キャッシュから結果を再表示します。"

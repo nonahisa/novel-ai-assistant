@@ -46,6 +46,7 @@ import {
   type AcceptedProofreadIssue,
 } from "../core/proofreadValidation";
 import { type CheckProgress } from "../views/progress";
+import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
 import {
@@ -107,7 +108,7 @@ export interface ProofreadRunResult {
   cancelled: boolean;
 }
 
-export interface CheckProofreadOptions {
+export interface CheckProofreadOptions extends SuiteAwareOptions {
   /** 話を絞る。指定しなければ作品全体 */
   filePaths?: string[];
   /**
@@ -184,35 +185,41 @@ export async function checkProofread(
       (sum, chunk) => sum + issueBudget(chunk.text.length),
       0
     );
-    const confirm = await vscode.window.showInformationMessage(
-      `${work.title} の推敲を行います。`,
-      {
-        modal: true,
-        detail: [
-          `${chunks.length}チャンク中 ${pending.length}件を処理します` +
-            `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
-          // **まとめ方を変えると、キャッシュが総入れ替えになる。** 何も
-          // 変えていないのに全件が対象になると、作者は不具合だと思う
-          pending.length === chunks.length && chunks.length > 1
-            ? "（前回から本文の分け方が変わっているため、今回はすべて送り直します）"
-            : "",
-          "",
-          "見るのは6つだけです（冗長・同語反復・係り受け・長すぎる文・" +
-            "読みに詰まる漢字・語尾の単調さ）。",
-          "語彙や文体、描写の増減には触れません。",
-          `指摘は多くても ${maxIssues}件までに絞ります（1000字あたり3件）。`,
-          "",
-          "本文は書き換えません。 指摘を1件ずつ確認して適用します。",
-          resolved.provider.isPaid
-            ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      },
-      "実行"
-    );
-    if (confirm !== "実行") return undefined;
+    const detail = [
+      `${chunks.length}チャンク中 ${pending.length}件を処理します` +
+        `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
+      // **まとめ方を変えると、キャッシュが総入れ替えになる。** 何も
+      // 変えていないのに全件が対象になると、作者は不具合だと思う
+      pending.length === chunks.length && chunks.length > 1
+        ? "（前回から本文の分け方が変わっているため、今回はすべて送り直します）"
+        : "",
+      "",
+      "見るのは6つだけです（冗長・同語反復・係り受け・長すぎる文・" +
+        "読みに詰まる漢字・語尾の単調さ）。",
+      "語彙や文体、描写の増減には触れません。",
+      `指摘は多くても ${maxIssues}件までに絞ります（1000字あたり3件）。`,
+      "",
+      "本文は書き換えません。 指摘を1件ずつ確認して適用します。",
+      resolved.provider.isPaid
+        ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    if (options.suiteConfirmed) {
+      // まとめ実行が先に1回だけ確認している（設計書6.80）。
+      // **飛ばした中身はログへ残す**——絞り込みの上限や課金の断りは、
+      // この確認の中にしか書かれていない
+      logStep(`推敲：まとめ実行のため確認を省略\n${detail}`);
+    } else {
+      const confirm = await vscode.window.showInformationMessage(
+        `${work.title} の推敲を行います。`,
+        { modal: true, detail },
+        "実行"
+      );
+      if (confirm !== "実行") return undefined;
+    }
   }
 
   logStep(

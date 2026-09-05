@@ -103,6 +103,7 @@ import { buildKnownAtIndex, lookupKnownAtValue,
   type AcceptedContradiction,
 } from "../core/contradictionValidation";
 import { withCancellableProgress, type CheckProgress } from "../views/progress";
+import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurn } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
 import {
@@ -191,7 +192,7 @@ export interface ContradictionRunResult {
   verifyNote: string;
 }
 
-export interface CheckContradictionsOptions {
+export interface CheckContradictionsOptions extends SuiteAwareOptions {
   /** 話を絞る。指定しなければ作品全体 */
   filePaths?: string[];
   /**
@@ -255,7 +256,8 @@ export async function checkContradictions(
   // 固定30,000字のままだと、32kのモデルでは本文を1文字も足さないうちに溢れる
   const material = await collectSettings(
     work,
-    worldviewMaxChars(info.contextWindow)
+    worldviewMaxChars(info.contextWindow),
+    options
   );
   if (!material) return undefined;
   // 下の入れ子の関数では、上の `if (!material) return` による絞り込みが
@@ -380,45 +382,51 @@ export async function checkContradictions(
     ) {
       return undefined;
     }
-    const confirm = await vscode.window.showInformationMessage(
-      `${work.title} の矛盾を検知します。`,
-      {
-        modal: true,
-        detail: [
-          `${chunks.length}チャンク中 ${pending.length}件を処理します` +
-            `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
-          `材料: 人物${material.characterCount}人 / 場所${material.locationCount}件 / ` +
-            `世界観${material.worldCount}件`,
-          // **送る量が増えることを黙らない**（設計書6.74）。過去の本文を
-          // 足すので、有料AIでは料金にも効く
-          pastSceneIndex
-            ? `前の話の本文からも、名前の出てくる場面を探して渡します` +
-              `（${pastSceneIndex.size}か所から最大${pastSceneBudget}字）。`
-            : "",
-          "",
-          "この機能は本文を書き換えません。 設定と食い違う箇所を並べるだけで、",
-          "どちらを直すかは作者が決めます（設定側が古いこともあります）。",
-          // **絞ったことを黙って行わない。** 指摘の件数が減るので、
-          // 理由が画面に出ていないと作者には分からない（設計書6.28）
-          capability.narrowContradictionCategories
-            ? `\nこのモデルでは、見る観点を7つから3つ（人物・状態・時系列）へ絞ります。\n` +
-              "一度にたくさん見せると、かえって見落としが増えるためです。"
-            : "",
-          // **観点を絞ると鍵が変わり、キャッシュが総入れ替えになる。**
-          // 何も変えていないのに全件が対象になると、作者は不具合だと思う
-          pending.length === chunks.length && chunks.length > 1
-            ? "\n（見る観点が前回から変わっているため、今回はすべて送り直します）"
-            : "",
-          resolved.provider.isPaid
-            ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      },
-      "実行"
-    );
-    if (confirm !== "実行") return undefined;
+    const detail = [
+      `${chunks.length}チャンク中 ${pending.length}件を処理します` +
+        `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
+      `材料: 人物${material.characterCount}人 / 場所${material.locationCount}件 / ` +
+        `世界観${material.worldCount}件`,
+      // **送る量が増えることを黙らない**（設計書6.74）。過去の本文を
+      // 足すので、有料AIでは料金にも効く
+      pastSceneIndex
+        ? `前の話の本文からも、名前の出てくる場面を探して渡します` +
+          `（${pastSceneIndex.size}か所から最大${pastSceneBudget}字）。`
+        : "",
+      "",
+      "この機能は本文を書き換えません。 設定と食い違う箇所を並べるだけで、",
+      "どちらを直すかは作者が決めます（設定側が古いこともあります）。",
+      // **絞ったことを黙って行わない。** 指摘の件数が減るので、
+      // 理由が画面に出ていないと作者には分からない（設計書6.28）
+      capability.narrowContradictionCategories
+        ? `\nこのモデルでは、見る観点を7つから3つ（人物・状態・時系列）へ絞ります。\n` +
+          "一度にたくさん見せると、かえって見落としが増えるためです。"
+        : "",
+      // **観点を絞ると鍵が変わり、キャッシュが総入れ替えになる。**
+      // 何も変えていないのに全件が対象になると、作者は不具合だと思う
+      pending.length === chunks.length && chunks.length > 1
+        ? "\n（見る観点が前回から変わっているため、今回はすべて送り直します）"
+        : "",
+      resolved.provider.isPaid
+        ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    if (options.suiteConfirmed) {
+      // まとめ実行が先に1回だけ確認している（設計書6.80）。
+      // **飛ばした中身はログへ残す**——観点を絞ったことや、過去の場面を
+      // 足したことは、この確認の中にしか書かれていない
+      logStep(`矛盾検知：まとめ実行のため確認を省略\n${detail}`);
+    } else {
+      const confirm = await vscode.window.showInformationMessage(
+        `${work.title} の矛盾を検知します。`,
+        { modal: true, detail },
+        "実行"
+      );
+      if (confirm !== "実行") return undefined;
+    }
   }
 
   logStep(
@@ -973,7 +981,9 @@ interface SettingsMaterial {
 async function collectSettings(
   work: WorkEntry,
   /** そのモデルで世界観に使ってよい字数（`worldviewMaxChars`） */
-  worldviewMax: number
+  worldviewMax: number,
+  /** まとめ実行の印。前提が無いときの伝え方が変わる（設計書6.80） */
+  suite: SuiteAwareOptions
 ): Promise<SettingsMaterial | undefined> {
   const [characters, locations, abilities, organizations, world] =
     await Promise.all([
@@ -989,6 +999,17 @@ async function collectSettings(
   const worldItems = world.records;
 
   if (people.length === 0 && places.length === 0 && worldItems.length === 0) {
+    // **まとめ実行では、ここで作者を止めない**（設計書6.80）。走らせられない
+    // ことに変わりはないが、この前提は矛盾検知だけのものなので、残りの検知
+    // （誤字脱字・伏線など）まで巻き添えで止まるのは筋が通らない。
+    // 理由を持ち帰って、最後のまとめへ一言として並べる
+    if (suite.suiteConfirmed) {
+      suite.noteMissing?.(
+        "矛盾は、突き合わせる設定資料がまだ無いため実行しませんでした" +
+          "（先に「設定資料をまとめて抽出」を実行してください）。"
+      );
+      return undefined;
+    }
     const answer = await vscode.window.showWarningMessage(
       "突き合わせる設定資料がまだありません。",
       {

@@ -61,6 +61,7 @@ import {
   type KnownForeshadow,
 } from "../core/foreshadowValidation";
 import { type CheckProgress } from "../views/progress";
+import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
 import {
@@ -118,7 +119,7 @@ export interface ForeshadowResolveRunResult {
 
 // ── 配置の検知（P-25）─────────────────────────────
 
-export interface CheckForeshadowsOptions {
+export interface CheckForeshadowsOptions extends SuiteAwareOptions {
   /**
    * 進み具合の届け先（作者の報告、2026-08-29）。
    * 提案パネルへ出すために使う。渡されなければ何もしない
@@ -213,27 +214,32 @@ export async function checkForeshadows(
     ) {
       return undefined;
     }
-    const confirm = await vscode.window.showInformationMessage(
-      `${work.title} の伏線を検知します。`,
-      {
-        modal: true,
-        detail: [
-          `${chunks.length}チャンク中 ${pending.length}件を処理します` +
-            `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
-          `既に登録されている伏線: ${ledger.records.length}件`,
-          "",
-          "台帳へは何も自動で入りません。 候補を「提案」パネルへ並べますので、",
-          "登録するものを1件ずつ選んでください。",
-          resolved.provider.isPaid
-            ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      },
-      "実行"
-    );
-    if (confirm !== "実行") return undefined;
+    const detail = [
+      `${chunks.length}チャンク中 ${pending.length}件を処理します` +
+        `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
+      `既に登録されている伏線: ${ledger.records.length}件`,
+      "",
+      "台帳へは何も自動で入りません。 候補を「提案」パネルへ並べますので、",
+      "登録するものを1件ずつ選んでください。",
+      resolved.provider.isPaid
+        ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    if (options.suiteConfirmed) {
+      // まとめ実行が先に1回だけ確認している（設計書6.80）。
+      // **飛ばした中身はログへ残す**（既に登録済みの件数と課金の断り）
+      logStep(`伏線の検知：まとめ実行のため確認を省略\n${detail}`);
+    } else {
+      const confirm = await vscode.window.showInformationMessage(
+        `${work.title} の伏線を検知します。`,
+        { modal: true, detail },
+        "実行"
+      );
+      if (confirm !== "実行") return undefined;
+    }
   }
 
   logStep(

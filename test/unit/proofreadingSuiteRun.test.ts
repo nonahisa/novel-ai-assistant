@@ -40,6 +40,10 @@ let outcomes: Record<string, unknown> = {};
 let remaining: Record<string, number> = {};
 /** 画面に出た知らせ */
 let announced: string[] = [];
+/** 最初に1回だけ出す確認（modal）。中身は「見出し＋詳細」 */
+let confirmed: string[] = [];
+/** その確認で作者が押すもの。undefined なら取りやめ */
+let confirmAnswer: string | undefined = "実行";
 /** QuickPickへ並んだもの */
 let offered: OfferedItem[] = [];
 /** 何を選ぶか。undefined なら Esc（取りやめ） */
@@ -65,6 +69,13 @@ async function run(initial?: unknown): Promise<void> {
   await runProofreadingSuite(work, {
     memento: memento(initial),
     remainingIn: (category) => remaining[category] ?? 0,
+    // 見積もりは本物では走査とモデル照会が要る。ここでは固定値で置き換える
+    estimate: async () => ({
+      totalChars: 41000,
+      chunkCount: 12,
+      providerNames: ["Gemini"],
+      isPaid: true,
+    }),
   });
 }
 
@@ -74,6 +85,8 @@ beforeEach(() => {
   outcomes = {};
   remaining = {};
   announced = [];
+  confirmed = [];
+  confirmAnswer = "実行";
   offered = [];
   selection = undefined;
   saved = undefined;
@@ -102,7 +115,21 @@ beforeEach(() => {
     },
   });
 
-  window.showInformationMessage = (async (message: string) => {
+  // **確認（modal）と知らせ（非modal）を分けて受ける。** 同じ関数で出す
+  // ので、区別しないと「確認が何回出たか」を数えられない
+  window.showInformationMessage = (async (
+    message: string,
+    options?: unknown
+  ) => {
+    if (
+      options !== null &&
+      typeof options === "object" &&
+      "modal" in (options as Record<string, unknown>)
+    ) {
+      const detail = (options as { detail?: string }).detail ?? "";
+      confirmed.push(`${message}\n${detail}`);
+      return confirmAnswer;
+    }
     announced.push(message);
     return undefined;
   }) as typeof window.showInformationMessage;
@@ -161,6 +188,62 @@ describe("選び方", () => {
     expect(announced).toEqual([
       "走らせるものが1つも選ばれていないので、何もしませんでした。",
     ]);
+  });
+});
+
+describe("有料の確認は、最初に1回だけ", () => {
+  /*
+    **7回聞くのは、聞いていないのと同じである**（設計書6.80）。1回目に
+    「実行」を押した作者は、残りも同じ意味で押す——押し続けるうちに
+    中身を読まなくなるので、確認としては働かなくなる。
+  */
+  test("選んだ直後に1回だけ出し、各機能へ「確認済み」を渡す", async () => {
+    selection = ["notation", "typos", "proofread"];
+    const passed: unknown[] = [];
+    Object.assign(commands, {
+      executeCommand: async (command: string, ...args: unknown[]) => {
+        calls.push(command);
+        passed.push(args[1]);
+        return undefined;
+      },
+    });
+
+    await run();
+
+    expect(confirmed).toHaveLength(1);
+    expect(confirmed[0]).toContain("試しの作品 の校正をまとめて実行します。");
+    expect(confirmed[0]).toContain(
+      "走らせるもの（この順）：表記ゆれ・誤字脱字・推敲"
+    );
+    // AIを使うのは誤字脱字と推敲の2つ（表記ゆれは機械判定）
+    expect(confirmed[0]).toContain("選んだ2機能それぞれが本文を");
+    expect(passed).toEqual([
+      { suite: { confirmed: true } },
+      { suite: { confirmed: true } },
+      { suite: { confirmed: true } },
+    ]);
+  });
+
+  test("確認で取りやめたら、1つも走らせない", async () => {
+    selection = ["typos", "proofread"];
+    confirmAnswer = undefined;
+
+    await run();
+
+    expect(calls).toEqual([]);
+    // **控えは残す。** 選び直したこと自体は作者の意思である
+    expect(saved).toEqual(["typos", "proofread"]);
+    expect(announced).toEqual([]);
+  });
+
+  test("AIを使わない機能だけなら、確認を出さない", async () => {
+    // 表記ゆれは機械判定。送る量も料金も発生しないので、聞く意味が無い
+    selection = ["notation"];
+
+    await run();
+
+    expect(confirmed).toEqual([]);
+    expect(calls).toEqual(["novelai.checkNotation"]);
   });
 });
 
@@ -316,6 +399,30 @@ describe("終わったときの知らせ", () => {
     expect(announced).toEqual([
       "校正をまとめて実行しました。誤字脱字3件・推敲12件・矛盾0件。" +
         "提案パネルで確認できます。",
+    ]);
+  });
+
+  test("前提が無くて走れなかった理由は、まとめの末尾へ出す", async () => {
+    /*
+      **確認を1回にした代わりに、機能ごとの警告を出す場が無くなった。**
+      「設定資料がまだ無い」は作者が次に何をすればよいかを決める情報なので、
+      まとめの知らせへ持ち越す（設計書6.80）。
+    */
+    selection = ["typos", "contradictions"];
+    remaining = { 誤字脱字: 1 };
+    outcomes = {
+      "novelai.checkContradictions": {
+        kind: "failed",
+        notes: ["矛盾：突き合わせる設定資料がまだありません。"],
+      },
+    };
+
+    await run();
+
+    expect(announced).toEqual([
+      "校正をまとめて実行しました。誤字脱字1件・矛盾は失敗しました。" +
+        "提案パネルで確認できます。" +
+        "矛盾：突き合わせる設定資料がまだありません。",
     ]);
   });
 

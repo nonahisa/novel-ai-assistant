@@ -1,4 +1,4 @@
-import { ACTION_TREE, visibleEntries } from "../views/actionList";
+import { ACTION_TREE, visibleEntries, type ActionItem } from "../views/actionList";
 import { canRunProcesses } from "../core/runtime";
 import {
   selectGuideBundles,
@@ -153,6 +153,68 @@ export function buildFeatureIndex(): string {
   ].join("\n");
 }
 
+/** 小分類を、束としてだけ割るときの1つぶん */
+interface GuideBundleSplit {
+  /** 割った先の名前（`執筆AI支援 → 伏線・矛盾` の後半にあたる） */
+  readonly label: string;
+  /** ここへ入れる操作のコマンドID */
+  readonly commands: readonly string[];
+}
+
+/**
+ * 小分類を、**束としてだけ**割る表（設計書6.19.4）。
+ *
+ * ## メニューは変えない
+ *
+ * 割るのは相談へ渡す説明の単位だけで、詳細メニュー（`ACTION_TREE`）の
+ * 並びには手を付けない。**メニューの並びは作者の手順そのもの**であり、
+ * AIへ送る量の都合で動かしてよいものではない。0.33.8で「その他支援」を
+ * 割ったときは分類ごと割ったが、今回は**画面はそのままで束だけ割る**。
+ *
+ * ## 先頭が受け皿である
+ *
+ * 表に載せなかった操作は、**先頭の束へ残る。** こうしておくと、あとから
+ * 操作を足した人が表への追記を忘れても、どの束からも消えることはない
+ * （名前が束から消えると、AIはその機能の説明を渡してもらえなくなる）。
+ * 漏れが無いことは `featureGuide.test.ts` が `ACTION_TREE` と突き合わせて見る。
+ */
+const GUIDE_BUNDLE_SPLITS: Record<string, readonly GuideBundleSplit[]> = {
+  /*
+    「校正・校閲」は1,285字あり、上限1,500まで200字ほどしか残っていなかった
+    （作者の裁定、2026-09-05）。割る線は「文の直し」と「話の整合」のあいだ
+    である——前者は1文ずつの言い回しを見る作業、後者は話をまたいだ辻褄を
+    見る作業で、作者が知りたいときの場面が違う。質問もどちらかに寄るので、
+    片方だけを渡せば送る量が半分になる。
+  */
+  "校正・校閲": [
+    {
+      // 受け皿。校閲ロック・編集部の提案など、表に載せていない操作も残る
+      label: "校正",
+      commands: [
+        "novelai.runProofreadingSuite",
+        "novelai.checkTypos",
+        "novelai.manageKeepWords",
+        "novelai.checkNotation",
+        "novelai.checkProofread",
+        "novelai.checkOpening",
+      ],
+    },
+    {
+      label: "伏線・矛盾",
+      commands: [
+        "novelai.checkDeviations",
+        "novelai.checkEpisodePlot",
+        "novelai.checkContradictions",
+        "novelai.checkForeshadows",
+        "novelai.checkForeshadowResolution",
+        "novelai.openForeshadows",
+        "novelai.addForeshadow",
+        "novelai.setForeshadowStatus",
+      ],
+    },
+  ],
+};
+
 /**
  * 説明を、小分類ごとの束に切る。
  *
@@ -161,6 +223,7 @@ export function buildFeatureIndex(): string {
  * （表記ゆれ・推敲は同じ小分類にある）。1操作ずつに切ると関連が切れ、
  * 分類ごとに切ると1束が大きくなりすぎる。
  *
+ * 大きく育った小分類は `GUIDE_BUNDLE_SPLITS` でさらに割る（画面は変えない）。
  * 分類の直下にある操作は、その分類の名前だけの束にする。
  */
 export function buildGuideBundles(): GuideBundle[] {
@@ -187,17 +250,21 @@ export function buildGuideBundles(): GuideBundle[] {
       if (entry.kind !== "section") continue;
       const items = visibleEntries(entry.items, allowsProcesses);
       if (items.length === 0) continue;
-      // 画面の階層をそのまま名前にする。作者が見ている道順と
-      // 記録に残る名前が違うと、後から追えない
-      const label = `${group.label} → ${entry.label}`;
-      bundles.push({
-        key: `section:${group.label}/${entry.label}`,
-        label,
-        text: [
-          `■ ${label}`,
-          ...items.map((item) => describeAction(item, "")),
-        ].join("\n"),
-      });
+
+      for (const part of splitSectionItems(entry.label, items)) {
+        // 画面の階層をそのまま名前にする。作者が見ている道順と
+        // 記録に残る名前が違うと、後から追えない
+        // （束だけ割った小分類は、割った先の名前で並ぶ）
+        const label = `${group.label} → ${part.label}`;
+        bundles.push({
+          key: `section:${group.label}/${part.label}`,
+          label,
+          text: [
+            `■ ${label}`,
+            ...part.items.map((item) => describeAction(item, "")),
+          ].join("\n"),
+        });
+      }
     }
   }
 
@@ -258,6 +325,42 @@ export function buildFeatureGuideForQuestion(input: {
     selected: selection.selected.map((bundle) => bundle.label),
     reason: selection.reason,
   };
+}
+
+/**
+ * 小分類の操作を、束の単位へ割る。
+ *
+ * 表（`GUIDE_BUNDLE_SPLITS`）に無い小分類はそのまま1つで返すので、
+ * **割っていない小分類の振る舞いは変わらない。**
+ *
+ * 並びは画面の順のまま保つ。表に書いた順ではない——作者が見ている順と
+ * 説明の順が違うと、「上から3つ目」のような答え方ができなくなる。
+ */
+function splitSectionItems(
+  sectionLabel: string,
+  items: readonly ActionItem[]
+): { label: string; items: ActionItem[] }[] {
+  const splits = GUIDE_BUNDLE_SPLITS[sectionLabel];
+  if (!splits || splits.length === 0) {
+    return [{ label: sectionLabel, items: [...items] }];
+  }
+
+  // どの操作をどこへ入れるか。**先頭は受け皿**なので、表に無いものは
+  // ここへ落ちる（0番目を既定にしておけば、書き漏らしで消えない）
+  const indexOf = new Map<string, number>();
+  splits.forEach((split, position) => {
+    for (const command of split.commands) indexOf.set(command, position);
+  });
+
+  const buckets = splits.map((split) => ({
+    label: split.label,
+    items: [] as ActionItem[],
+  }));
+  for (const item of items) {
+    buckets[indexOf.get(item.command) ?? 0].items.push(item);
+  }
+  // 画面に1つも出ない束（環境で全部隠れた場合）は作らない
+  return buckets.filter((bucket) => bucket.items.length > 0);
 }
 
 /**

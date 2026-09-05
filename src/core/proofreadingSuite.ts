@@ -31,6 +31,14 @@ export interface ProofreadingCheck {
   /** 選択画面に添える1行の説明 */
   readonly detail: string;
   /**
+   * AIへ本文を送るか。
+   *
+   * **確認の文面がここで変わる**（設計書6.80）。送る量も料金も発生しない
+   * 機能（表記ゆれ）だけを選んだときは、確認そのものを出さない。判定を
+   * 呼び出し側へ写すと、機能を足したときに片方だけ古くなる。
+   */
+  readonly usesAI: boolean;
+  /**
    * 提案パネルの分類名。**持たないものは結果がパネルに出ない**
    * （冒頭診断は文書として開く）ので、件数を数えない。
    */
@@ -57,6 +65,7 @@ export const PROOFREADING_CHECKS: readonly ProofreadingCheck[] = [
     label: "表記ゆれ",
     command: "novelai.checkNotation",
     detail: "同じ語が2通りで書かれている箇所を探します（AIを使いません）。",
+    usesAI: false,
     category: "表記ゆれ",
   },
   {
@@ -64,6 +73,7 @@ export const PROOFREADING_CHECKS: readonly ProofreadingCheck[] = [
     label: "誤字脱字",
     command: "novelai.checkTypos",
     detail: "誤変換・脱字など、明らかな入力ミスをAIで探します。",
+    usesAI: true,
     category: "誤字脱字",
   },
   {
@@ -71,6 +81,7 @@ export const PROOFREADING_CHECKS: readonly ProofreadingCheck[] = [
     label: "推敲",
     command: "novelai.checkProofread",
     detail: "読みにくい箇所だけをAIで指摘します。",
+    usesAI: true,
     category: "推敲",
   },
   {
@@ -79,12 +90,14 @@ export const PROOFREADING_CHECKS: readonly ProofreadingCheck[] = [
     label: "冒頭診断",
     command: "novelai.checkOpening",
     detail: "第1話の冒頭だけを見て、伝わり方と引きを診断します。",
+    usesAI: true,
   },
   {
     id: "deviations",
     label: "プロット逸脱",
     command: "novelai.checkDeviations",
     detail: "プロットと本文を照らし、外れた展開や停滞を探します。",
+    usesAI: true,
     category: "プロット逸脱",
   },
   {
@@ -92,6 +105,7 @@ export const PROOFREADING_CHECKS: readonly ProofreadingCheck[] = [
     label: "矛盾",
     command: "novelai.checkContradictions",
     detail: "設定資料と本文の食い違いを探します。",
+    usesAI: true,
     category: "矛盾",
   },
   {
@@ -99,6 +113,7 @@ export const PROOFREADING_CHECKS: readonly ProofreadingCheck[] = [
     label: "伏線の検知",
     command: "novelai.checkForeshadows",
     detail: "後の展開を示唆している記述を探し、登録の候補にします。",
+    usesAI: true,
     category: "伏線の候補",
   },
 ];
@@ -172,6 +187,14 @@ export type CheckOutcomeKind = "completed" | "cancelled" | "failed";
 
 export interface CheckCommandOutcome {
   readonly kind: CheckOutcomeKind;
+  /**
+   * まとめの知らせへ持ち越す一言（設計書6.80）。
+   *
+   * **確認を1回にした代わりに、機能ごとの警告を出す場が無くなった。**
+   * 「突き合わせる設定資料がまだありません」は作者が次に何をするかを
+   * 決める情報なので、黙って失敗にせず理由ごと持ち帰る。
+   */
+  readonly notes?: readonly string[];
 }
 
 /** 結果を出さずに終わった（まとめ実行はここで止まる） */
@@ -182,6 +205,220 @@ export const CHECK_COMPLETED: CheckCommandOutcome = { kind: "completed" };
 
 /** 走ろうとして失敗した（まとめ実行は次へ進み、内訳に失敗と書く） */
 export const CHECK_FAILED: CheckCommandOutcome = { kind: "failed" };
+
+/**
+ * 理由つきの失敗。
+ *
+ * 前提が無くて走れなかったとき（設定資料が無い・プロットが無い）に使う。
+ * **中止（`cancelled`）にしない**——残りの検知はその前提を要らないので、
+ * ここで列を止めると関係のない機能まで走らずに終わる。
+ */
+export function checkFailed(...notes: string[]): CheckCommandOutcome {
+  return { kind: "failed", notes };
+}
+
+/** コマンドが持ち帰った一言。持っていなければ空 */
+export function outcomeNotesOf(outcome: unknown): string[] {
+  if (typeof outcome !== "object" || outcome === null) return [];
+  const notes = (outcome as { notes?: unknown }).notes;
+  if (!Array.isArray(notes)) return [];
+  return notes.filter((note): note is string => typeof note === "string");
+}
+
+/**
+ * 各検知のコマンドが受け取る、任意の第2引数（設計書6.80）。
+ *
+ * **メニューからの単独実行では渡らない。** 渡らなければ、これまでどおり
+ * 機能ごとの確認が出る——単独で押した作者は、その1回ぶんの量と料金を
+ * まだ知らされていない。
+ */
+export interface CheckRunOptions {
+  readonly suite?: SuiteFeatureContext;
+}
+
+/**
+ * まとめ実行から呼ばれていることを伝える印。
+ *
+ * `noteMissing` は**コマンドの登録側（`extension.ts`）が足す**。
+ * まとめ実行が送るのは `{ confirmed: true }` だけなので、コマンドの
+ * 境界をまたぐのは素の値だけである。
+ */
+export interface SuiteFeatureContext {
+  /** まとめ実行が、量と料金の確認を先に1回だけ取ってある */
+  readonly confirmed: true;
+  /**
+   * 前提が無くて走れなかった理由を伝える口。
+   *
+   * **戻り値の型を増やさないための逃げ道である。** 各検知の戻り値は
+   * それぞれ10項目近くあり、「前提が無い」ためだけに空の結果を組み立てると、
+   * 呼び出し側が「走って0件だった」と読み違える。
+   */
+  readonly noteMissing?: (reason: string) => void;
+}
+
+/**
+ * 各検知の関数が受ける、まとめ実行まわりの任意項目（設計書6.80）。
+ *
+ * **5つの機能で同じものを持つので、置き場は1つにする。** 写しを作ると、
+ * 片方だけ意味が変わったときに「まとめ実行なのに確認が出る機能」ができる。
+ */
+export interface SuiteAwareOptions {
+  /**
+   * まとめ実行から呼ばれている。
+   *
+   * 量と料金の確認は**まとめ実行が最初に1回だけ**取ってあるので、
+   * 機能ごとの「続けますか」は出さない。**飛ばした中身は捨てず、
+   * `logStep` へ残すこと**——逸脱検知の「小さめのモデルではほとんど
+   * 働きません」のような断りは、その確認の中にしか書かれていない。
+   */
+  suiteConfirmed?: boolean;
+  /**
+   * 前提が無くて走れなかった理由の伝え先（まとめ実行のときだけ渡る）。
+   *
+   * 単独実行では作者へ警告のダイアログを出せばよいが、まとめ実行では
+   * 出す場が無い。理由を持ち帰って、最後のまとめへ一言として並べる。
+   */
+  noteMissing?: (reason: string) => void;
+}
+
+/** まとめ実行が確認を済ませているか（コマンドの第2引数を読む） */
+export function isSuiteConfirmed(options: unknown): boolean {
+  return suiteContextOf(options) !== undefined;
+}
+
+/** コマンドの第2引数から、まとめ実行の印を取り出す */
+export function suiteContextOf(
+  options: unknown
+): SuiteFeatureContext | undefined {
+  if (typeof options !== "object" || options === null) return undefined;
+  const suite = (options as { suite?: unknown }).suite;
+  if (typeof suite !== "object" || suite === null) return undefined;
+  return (suite as { confirmed?: unknown }).confirmed === true
+    ? (suite as SuiteFeatureContext)
+    : undefined;
+}
+
+/**
+ * 1チャンクにかかるおおよその秒数。
+ *
+ * 誤字脱字検知が前から使っている見込み（`checkTypos.ts` の `estimateMinutes`）
+ * と同じ値である。**新しい換算を作らない**——ここだけ別の数字にすると、
+ * 単独で走らせたときとまとめ実行で目安が食い違う。
+ */
+const SECONDS_PER_CHUNK = 15;
+
+/** まとめ実行の確認に出す、送る量とAIの見積もり */
+export interface SuiteEstimate {
+  /** 本文の総文字数 */
+  readonly totalChars: number;
+  /** 1機能あたりのチャンク数 */
+  readonly chunkCount: number;
+  /** 使うAIの名前（機能別に割り当てていれば複数になる） */
+  readonly providerNames: readonly string[];
+  /** 1つでも有料なら真 */
+  readonly isPaid: boolean;
+}
+
+export interface SuiteConfirmInput {
+  readonly workTitle: string;
+  /** 走らせる機能の名前（走る順） */
+  readonly labels: readonly string[];
+  /** そのうち、AIへ本文を送るものの数 */
+  readonly aiCheckCount: number;
+  /** 見積もり。取れなければ省く（量の話をしない） */
+  readonly estimate?: SuiteEstimate;
+}
+
+/**
+ * まとめ実行の、**最初に1回だけ**出す確認（設計書6.80）。
+ *
+ * ## なぜ1回にするのか
+ *
+ * 7つの機能を順に呼ぶと、各機能の確認が7回出ていた。1回目に「実行」を
+ * 押した作者は、残り6回も同じ意味で押す——押し続けるうちに中身を
+ * 読まなくなるので、**確認としては働かなくなる。** 量と料金を1枚に
+ * まとめて、選んだ直後に1度だけ問う。
+ *
+ * @returns 出す確認。AIを使う機能が1つも無ければ `undefined`（表記ゆれ
+ *   だけを選んだときは、送る量も料金も発生しないので聞く意味が無い）
+ */
+export function buildSuiteConfirm(
+  input: SuiteConfirmInput
+): { message: string; detail: string } | undefined {
+  if (input.aiCheckCount === 0) return undefined;
+
+  const estimate = input.estimate;
+  const lines: string[] = [
+    `走らせるもの（この順）：${input.labels.join("・")}`,
+  ];
+
+  if (estimate) {
+    lines.push(
+      `本文 ${withCommas(estimate.totalChars)}字 / ${estimate.chunkCount}チャンク`
+    );
+  }
+  if (estimate && estimate.providerNames.length > 0) {
+    lines.push(`使うAI：${estimate.providerNames.join("・")}`);
+  }
+  lines.push("");
+
+  const n = input.aiCheckCount;
+  if (estimate) {
+    const total = n * estimate.chunkCount;
+    // **かけ算を見せる。** 「36チャンク」とだけ書くと、1機能ぶんだと
+    // 読まれる。機能の数だけ本文を送り直すことが、ここでいちばん重い
+    lines.push(
+      `選んだ${n}機能それぞれが本文をチャンクごとに送ります` +
+        `（最大 ${n}×${estimate.chunkCount}＝${total}チャンク。` +
+        "処理済みのチャンクは飛ばします）。"
+    );
+    if (estimate.isPaid) {
+      lines.push("チャンクごとに課金されます。");
+    } else {
+      // 無料のAI（Ollama・LM Studio）では料金の話をしない。
+      // 作者が知りたいのは「どれくらい待つか」だけである
+      lines.push(
+        `目安 ${Math.ceil((total * SECONDS_PER_CHUNK) / 60)}分程度（処理済みのぶんだけ短くなります）。`
+      );
+    }
+  } else {
+    // 見積もりが取れない（モデルの詳細を引けない）ときでも、確認そのものは
+    // 出す。押した覚えのないまま走り始めるのがいちばん困る
+    lines.push(`選んだ${n}機能それぞれが、本文をAIへ送ります。`);
+    if (estimate === undefined) {
+      lines.push("送る量は、実行時にモデルの大きさから決まります。");
+    }
+  }
+
+  lines.push("");
+  // **このあと聞かれない、と先に言う。** 言わないと、作者は機能ごとの
+  // 確認を待って画面の前を離れられない
+  lines.push(
+    "このあと機能ごとの確認は出しません。 本文は書き換えません。" +
+      "途中で中止すると、残りは走りません。"
+  );
+
+  return {
+    message: `${input.workTitle} の校正をまとめて実行します。`,
+    detail: lines.join("\n"),
+  };
+}
+
+/**
+ * 3桁ごとに区切る。
+ *
+ * `toLocaleString()` は環境の地域設定で区切りが変わるので使わない
+ * （試験の期待値が端末によって変わる）。
+ */
+function withCommas(value: number): string {
+  const digits = String(Math.trunc(Math.abs(value)));
+  let out = "";
+  for (let i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 === 0) out += ",";
+    out += digits[i];
+  }
+  return value < 0 ? `-${out}` : out;
+}
 
 /**
  * コマンドが返した印を読む。
@@ -221,6 +458,13 @@ export interface SuiteStepResult {
    * その機能の成果として並べると、前の実行の残りを今回の結果と読ませる。
    */
   readonly failed?: boolean;
+  /**
+   * まとめの末尾へ持ち越す一言（前提が無くて走れなかった理由など）。
+   *
+   * **「失敗しました」だけでは、作者はAIが落ちたのだと思う。** 走れなかった
+   * 理由が「設定資料がまだ無い」なら、そう書けば次の一手が分かる。
+   */
+  readonly notes?: readonly string[];
 }
 
 export interface SuiteRunSummary {
@@ -273,5 +517,9 @@ export function describeSuiteResult(summary: SuiteRunSummary): string {
         ? "提案パネルで確認できます。"
         : "手を付ける指摘は残っていません。";
 
-  return `${head}${parts.join("・")}。${tail}`;
+  // 走れなかった理由は最後に並べる。件数の内訳に混ぜると、どれが結果で
+  // どれが断りなのか読み分けられなくなる
+  const notes = summary.done.flatMap((step) => step.notes ?? []).join("");
+
+  return `${head}${parts.join("・")}。${tail}${notes}`;
 }
