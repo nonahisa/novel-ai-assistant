@@ -22,12 +22,21 @@ const BUNDLES: GuideBundle[] = [
     ].join("\n"),
   },
   {
-    key: "other",
-    label: "執筆AI支援 → その他支援",
+    key: "writing",
+    label: "執筆AI支援 → 原稿づくり",
     text: [
-      "■ 執筆AI支援 → その他支援",
+      "■ 執筆AI支援 → 原稿づくり",
       "  - ルビを振る: 漢字にルビを振ります。",
       "  - 迷ったとき: どうすればいいか案内します。",
+    ].join("\n"),
+  },
+  {
+    key: "posting",
+    label: "執筆AI支援 → 投稿・書き出し",
+    text: [
+      "■ 執筆AI支援 → 投稿・書き出し",
+      "  - 新話を投稿する: 未投稿の話を投稿ページまで案内します。",
+      "  - EPUBを書き出す: 本文を電子書籍に組みます。",
     ].join("\n"),
   },
   {
@@ -119,7 +128,29 @@ describe("使い方の説明を選ぶ", () => {
     });
 
     expect(result.reason).toBe("matched");
-    expect(result.selected.map((bundle) => bundle.key)).toContain("other");
+    expect(result.selected.map((bundle) => bundle.key)).toContain("writing");
+  });
+
+  /*
+    **割った2つの束の名前が、互いの当たりにならないこと**（0.33.8）。
+
+    選び方は文字2つ組みの一致なので、**見出しの名前そのものも材料になる。**
+    「その他支援」を「原稿づくり」と「投稿・書き出し」に割ったとき、
+    片方の質問で両方が返るようだと、割っても送る量が減らない
+    ——分けた意味がそこで消える。
+  */
+  test("割った2つの束は、互いに引っぱり合わない", () => {
+    const posting = selectGuideBundles({
+      question: "新話を投稿するにはどうしますか",
+      bundles: BUNDLES,
+    });
+    expect(posting.selected.map((bundle) => bundle.key)).toEqual(["posting"]);
+
+    const writing = selectGuideBundles({
+      question: "ルビを振りたい",
+      bundles: BUNDLES,
+    });
+    expect(writing.selected.map((bundle) => bundle.key)).toEqual(["writing"]);
   });
 
   test("当たりの多い束を先に置く", () => {

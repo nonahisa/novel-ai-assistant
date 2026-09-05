@@ -259,7 +259,14 @@ describe("1件を確かめる", () => {
 
   function request(content: string, provider: { generate: typeof replying }) {
     return {
-      provider: provider as unknown as { generate: (p: GenerateParams) => Promise<GenerateResult> },
+      // `id` は出力上限の台帳を引くのに要る（`ai/outputLimit.ts`）。
+      // 偽物なので、台帳に無い名前でよい——設定値がそのまま使われる
+      provider: {
+        ...(provider as unknown as {
+          generate: (p: GenerateParams) => Promise<GenerateResult>;
+        }),
+        id: "ollama",
+      },
       model: "gemma4:e4b",
       workFolder: "C:/小説/いじめられっ子",
       category: "誤字脱字",

@@ -12,6 +12,7 @@ import { AIError, recoveryForAIError } from "../ai/types";
 import {
   resolveOutputLimitForSend,
   resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
   truncatedOutputAdvice,
 } from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
@@ -1906,6 +1907,17 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         userPrompt: buildSearchTermsPrompt({ question, knownTerms: names }),
         model: resolved.model,
         temperature: 0.2,
+        // **相談の本体と同じ2欄を渡す**（設計書6.77の第2段）。ここは相談1回に
+        // 付随してもう1回呼ぶ道なので、本体だけに配ると**相談1回のうち半分は
+        // 設定値のまま**という、外から見えない食い違いが残る
+        maxOutputTokens: resolveOutputTokensForSend(
+          resolved.provider.id,
+          resolved.model
+        ),
+        plannedOutputTokens: resolveOutputTokensForPlanning(
+          resolved.provider.id,
+          resolved.model
+        ),
         jsonSchema: SEARCH_TERMS_SCHEMA,
         disableThinking: true,
         meta: { feature: "search_terms", workFolder: work.folderPath },

@@ -668,14 +668,16 @@ describe("校正・校閲の並び", () => {
  */
 describe("投稿キットの入口", () => {
   function otherSupport() {
+    // 0.33.8で「その他支援」を2つに割った（下の describe に理由）。
+    // 投稿まわりは「投稿・書き出し」の側に揃っている
     for (const group of ACTION_TREE) {
       for (const entry of group.entries) {
-        if (entry.kind === "section" && entry.label === "その他支援") {
+        if (entry.kind === "section" && entry.label === "投稿・書き出し") {
           return entry;
         }
       }
     }
-    throw new Error("「その他支援」が見つかりません");
+    throw new Error("「投稿・書き出し」が見つかりません");
   }
 
   test("「新話を投稿する」と「投稿サイトの設定」が同じ小分類に並ぶ", () => {
@@ -713,6 +715,99 @@ describe("投稿キットの入口", () => {
       expect(action?.usesAI, command).toBeFalsy();
     }
   });
+});
+
+/**
+ * 「その他支援」を2つに割った（0.33.8、設計書6.17）。
+ *
+ * **きっかけは相談へ渡す説明の束である。** 小分類ひとまとまりが1つの束に
+ * なるので（`features/featureGuide.ts`）、20項目まで育った「その他支援」は
+ * 1,499字——上限1,500の1字下だった。上限を上げれば「送る量が機能数に
+ * 比例する」行き止まり（設計書6.27）へ戻るので、**小分類そのものを割った。**
+ *
+ * **線は、作者が使う場面で引いた。** 原稿を書き、整えている最中に押す操作と、
+ * 書き上がったものを外へ出す（投稿・印刷・電子書籍・資料の受け渡し）操作は、
+ * 同じ日でも違う時間に押す。「その他」という名前で1つに積んでいたのは、
+ * 分ける理由が無かったからではなく、**分ける手が入っていなかっただけ**である。
+ */
+describe("原稿づくりと投稿・書き出し", () => {
+  function writingSupport() {
+    for (const group of ACTION_TREE) {
+      for (const entry of group.entries) {
+        if (entry.kind === "section" && entry.label === "原稿づくり") {
+          return entry;
+        }
+      }
+    }
+    throw new Error("「原稿づくり」が見つかりません");
+  }
+
+  test("「その他支援」はもう無い", () => {
+    const sections = ACTION_TREE.flatMap((group) =>
+      group.entries.filter((entry) => entry.kind === "section")
+    );
+
+    expect(sections.map((section) => section.label)).not.toContain("その他支援");
+  });
+
+  test("原稿づくりには、書く・整える操作だけが並ぶ", () => {
+    const commands = writingSupport().items.map((item) => item.command);
+
+    // **書き始めの2つを先頭に置く**（設計書6.36.4）。割ってもここは動かさない
+    expect(commands[0]).toBe("novelai.resumeWriting");
+    expect(commands[1]).toBe("novelai.createEpisodePlot");
+    // 整える側（ルビ・傍点）まで、同じ小分類に残す
+    expect(commands).toContain("novelai.addRuby");
+    expect(commands).toContain("novelai.addEmphasis");
+    // 外へ出す操作は入れない
+    expect(commands).not.toContain("novelai.copyForPosting");
+    expect(commands).not.toContain("novelai.exportEpub");
+  });
+
+  test("投稿・書き出しには、外へ出す操作だけが並ぶ", () => {
+    const commands = otherSupportCommands();
+
+    // 投稿サイト用の変換が先頭。ここから「出す」場面に変わる
+    expect(commands[0]).toBe("novelai.copyForPosting");
+    for (const command of [
+      "novelai.exportPdf",
+      "novelai.exportEpub",
+      "novelai.generateSettingsDocs",
+      "novelai.exportImeDictionary",
+    ]) {
+      expect(commands, command).toContain(command);
+    }
+    expect(commands).not.toContain("novelai.addRuby");
+  });
+
+  /**
+   * IME辞書が古いままだと、抽出した語が変換に出ない（6.17.1）。
+   * **印は、その操作が入っている小分類に付ける。** 割ったときに置き去りに
+   * すると、閉じたままの小分類の中で古びていることに気づけない。
+   */
+  test("IME辞書の印は、投稿・書き出しの側に付く", () => {
+    const section = ACTION_TREE.flatMap((group) =>
+      group.entries.filter(
+        (entry) => entry.kind === "section" && entry.label === "投稿・書き出し"
+      )
+    )[0];
+
+    expect(section?.kind === "section" ? section.counter : undefined).toBe(
+      "staleImeDictionary"
+    );
+    expect(writingSupport().counter).toBeUndefined();
+  });
+
+  function otherSupportCommands(): string[] {
+    for (const group of ACTION_TREE) {
+      for (const entry of group.entries) {
+        if (entry.kind === "section" && entry.label === "投稿・書き出し") {
+          return entry.items.map((item) => item.command);
+        }
+      }
+    }
+    throw new Error("「投稿・書き出し」が見つかりません");
+  }
 });
 
 describe("ブラウザ版でだけ出す操作", () => {

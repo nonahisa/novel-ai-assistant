@@ -2,6 +2,10 @@ import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError } from "../ai/types";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
 import { loadEpisodeBodies } from "../core/episodeBodies";
 import { readPlotText } from "../core/plotFile";
@@ -131,6 +135,17 @@ export async function checkOpening(
         // 判定と根拠を出すだけなので、揺らす理由が無い。
         // 0にしないのは、同じ言い回しが6要素に並ぶのを避けるため
         temperature: 0.2,
+        // **応答の見込みと実上限を分けて渡す**（設計書6.77の第2段）。
+        // 渡さないと、関所もOllamaの `num_ctx` も設定値（既定16,384）で
+        // 動く——6要素の判定と根拠なので、実際にはその何分の一も使わない
+        maxOutputTokens: resolveOutputTokensForSend(
+          resolved.provider.id,
+          resolved.model
+        ),
+        plannedOutputTokens: resolveOutputTokensForPlanning(
+          resolved.provider.id,
+          resolved.model
+        ),
         jsonSchema: OPENING_CHECK_SCHEMA as unknown as object,
         disableThinking: true,
         // **numCtx は渡さない。** 送るのは冒頭3,000字だけなので、

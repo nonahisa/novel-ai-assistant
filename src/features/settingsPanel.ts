@@ -76,7 +76,10 @@ import {
   type ExcerptSource,
   type MentionExcerpt,
 } from "../core/mentionExcerpts";
-import { resolveMaxOutputTokens } from "../ai/outputLimit";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { loadExcerptSources } from "../core/manuscriptSources";
 import { expandNameVariants } from "../core/termIndex";
 import { evidencePhrases } from "../core/groundedEvidence";
@@ -1841,6 +1844,17 @@ export class SettingsPanel {
         }),
         model: resolved.model,
         temperature: 0.2,
+        // **本体（設定の取り込み）と同じ2欄を渡す**（設計書6.77の第2段）。
+        // 下ごしらえだけ設定値のままだと、相談1回のうち片方だけが
+        // 実測に従うという、外から見えない食い違いになる
+        maxOutputTokens: resolveOutputTokensForSend(
+          resolved.provider.id,
+          resolved.model
+        ),
+        plannedOutputTokens: resolveOutputTokensForPlanning(
+          resolved.provider.id,
+          resolved.model
+        ),
         jsonSchema: SEARCH_TERMS_SCHEMA,
         disableThinking: true,
         // 相談1回につき、これがもう1回ぶんの呼び出しになる（P-22）。
@@ -1958,7 +1972,19 @@ export class SettingsPanel {
     // ＋固定12,000字」で必要量を出していたが、固定費は指示・資料の改訂で
     // 育つので、見込みは必ず追い越される。組み上がったプロンプトの実測から
     // 決める道（`contextSizeForPrompt`）へ揃え、出力の見込みだけを渡す。
-    const maxOutputTokens = resolveMaxOutputTokens();
+    //
+    // **その見込みと、実際に送る上限は別物である**（設計書6.77の第2段）。
+    // 以前はここが `resolveMaxOutputTokens()` をそのまま使っており、台帳に
+    // 実測が付いても値は設定値のまま古びていた。決め方は `ai/outputLimit.ts`
+    // の1か所だけが持つ
+    const maxOutputTokens = resolveOutputTokensForSend(
+      resolved.provider.id,
+      resolved.model
+    );
+    const plannedOutputTokens = resolveOutputTokensForPlanning(
+      resolved.provider.id,
+      resolved.model
+    );
 
     this.setBusy(true, progressLabel);
     try {
@@ -1976,6 +2002,7 @@ export class SettingsPanel {
             temperature: jsonSchema ? 0.3 : 0.5,
 
             maxOutputTokens,
+            plannedOutputTokens,
             jsonSchema,
             disableThinking: true,
             signal: controller.signal,

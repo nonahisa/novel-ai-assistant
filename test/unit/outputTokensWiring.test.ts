@@ -27,9 +27,14 @@ import * as nodePath from "node:path";
  * 非力な機械では、その差がそのまま無駄なメモリになる。
  */
 const FEATURES = nodePath.join(__dirname, "..", "..", "src", "features");
+const AI = nodePath.join(__dirname, "..", "..", "src", "ai");
 
 function read(file: string): string {
   return fs.readFileSync(nodePath.join(FEATURES, file), "utf8");
+}
+
+function readAi(file: string): string {
+  return fs.readFileSync(nodePath.join(AI, file), "utf8");
 }
 
 /**
@@ -105,6 +110,21 @@ const PASSES_BOTH_TOKENS: Array<[file: string, marker: string]> = [
   ["generateSynopses.ts", '"synopsis"'],
   ["generateBlurb.ts", '"blurb"'],
   ["workChatPanel.ts", '"work_chat"'],
+  // 0.33.8で残っていた9か所（設計書6.77の第2段その1の細部6「残る宿題」）。
+  // **12機能に配った時点で残りを放置すると、関所だけが設定値で数える。**
+  // 見た目には動くので、非力な機械で `num_ctx` が育っていることに
+  // 誰も気づけない——実際、0.32.11から0.33.8まで気づかれなかった
+  ["generateBlurb.ts", '"catchphrase"'],
+  ["checkOpening.ts", '"opening_check"'],
+  ["generatePlot.ts", '"plot_reverse"'],
+  ["nameCheck.ts", '"name_suggest"'],
+  ["notationAdvice.ts", '"notation_advice"'],
+  ["recheckProposal.ts", '"recheck"'],
+  // 検索語づくりは相談1回に付随してもう1回呼ぶ（P-22）。**本体だけに
+  // 配っても、相談1回のうち半分は設定値のままになる**
+  ["workChatPanel.ts", '"search_terms"'],
+  ["settingsPanel.ts", '"search_terms"'],
+  ["settingsPanel.ts", '"settings_enrich"'],
 ];
 
 describe("出力トークンの2つの欄の配り先", () => {
@@ -180,6 +200,59 @@ describe("測定の2つの呼び出し", () => {
     expect(call, "書ける量の測定の generate 呼び出しが見つからない").toBeDefined();
     expect(hasField(call!, "maxOutputTokens"), "実上限を送っていない").toBe(true);
     expect(call).toContain("capOutputTokens: true");
+  });
+});
+
+/**
+ * **配らないと決めた呼び出しと、その理由**（設計書6.77の第2段その1）。
+ *
+ * 0.33.8で残りを配ったとき、配らなかったものを**書き留めずに済ませない。**
+ * 一覧に無いと、次に読む人は「配り忘れ」と読んで足しにいく——理由のある
+ * 例外は、理由ごと検査に残す。
+ */
+describe("2つの欄を、意図して配らない呼び出し", () => {
+  /**
+   * 独り言の感想は、返らせるのが1文だけである（`maxOutputTokens: 200`）。
+   *
+   * **見込みを配ると、かえって大きくなる。** `resolveOutputTokensForPlanning`
+   * は `min(設定, 実測 ?? 8,192)` なので、どう転んでも200より大きい値が
+   * 出る。関所は `見込み → 実上限` の順で読む（Ollama）ため、200と書いて
+   * あるのに8,192ぶんの席を確保することになる。**ここは実測より正確な値を
+   * 呼び出し側が知っている、数少ない場所である。**
+   */
+  test("独り言の感想は、200の固定だけを渡す", () => {
+    const call = generateCalls(read("chatterComment.ts")).find((text) =>
+      text.includes('"chatter_comment"')
+    );
+
+    expect(call, "独り言の generate 呼び出しが見つからない").toBeDefined();
+    expect(call).toContain("maxOutputTokens: 200");
+    expect(hasField(call!, "plannedOutputTokens"), "見込みを渡している").toBe(
+      false
+    );
+  });
+
+  /**
+   * 生成の下見（接続テスト）は、**どの欄も渡さない。**
+   *
+   * ここが答えるのは「このあと抽出を始めてよいか」だけで、送るのは
+   * 15字・返るのは「はい」の一言である。**大きさの摘みを1つでも決め打ちすると、
+   * 確認するはずの処理が確認の対象を壊す**——`numCtx: 1024` を書いていた
+   * ときに `gemma4:26b` の読み込みがスタック破壊で落ちた（設計書6.62）。
+   * `plannedOutputTokens` は `numCtx` と同じ受け皿（`contextSizeForPrompt`）へ
+   * 入るので、同じ摘みを別の名前で戻すことになる。
+   *
+   * 配っても得るものが無い。クラウド5社は渡さなければ設定値をモデル上限で
+   * 丸めて送り（`clampToModelLimit`）、Ollama は `num_predict` を送らない。
+   */
+  test("生成の下見は、どちらの欄も渡さない", () => {
+    const call = generateCalls(readAi("generationProbe.ts"))[0];
+
+    expect(call, "下見の generate 呼び出しが見つからない").toBeDefined();
+    expect(hasField(call!, "maxOutputTokens"), "実上限を渡している").toBe(false);
+    expect(hasField(call!, "plannedOutputTokens"), "見込みを渡している").toBe(
+      false
+    );
   });
 });
 

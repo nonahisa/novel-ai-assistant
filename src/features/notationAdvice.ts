@@ -2,6 +2,10 @@ import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import type { AIRegistry } from "../ai/registry";
 import { AIError } from "../ai/types";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { logFailure, logStep, responseExcerptForLog } from "../core/logger";
 import {
@@ -131,6 +135,17 @@ export async function askNotationAdvice(
       model: resolved.model,
       // 判断であって創作ではない。揺らす理由がない
       temperature: 0.0,
+      // **見込みと実上限を分けて渡す**（設計書6.77の第2段）。返るのは
+      // どちらに揃えるかと理由だけだが、渡さないと関所も `num_ctx` も
+      // 設定値（既定16,384）で数える
+      maxOutputTokens: resolveOutputTokensForSend(
+        resolved.provider.id,
+        resolved.model
+      ),
+      plannedOutputTokens: resolveOutputTokensForPlanning(
+        resolved.provider.id,
+        resolved.model
+      ),
       jsonSchema: buildNotationAdviceSchema(group),
       disableThinking: true,
       signal: request.signal,

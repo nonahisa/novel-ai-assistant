@@ -228,6 +228,18 @@ export async function generateCatchphrases(
     return;
   }
 
+  // **紹介文と同じ2欄を渡す**（設計書6.77の第2段）。案が3つ返るだけなので
+  // 応答は短いが、渡さないと関所とOllamaの `num_ctx` が設定値（既定16,384）で
+  // 動き、ループを回すたびにその席を確保することになる
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    resolved.provider.id,
+    resolved.model
+  );
+  const sendOutputTokens = resolveOutputTokensForSend(
+    resolved.provider.id,
+    resolved.model
+  );
+
   const history = new CatchphraseHistory(work);
   const costNotice = resolved.provider.isPaid
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
@@ -261,6 +273,8 @@ export async function generateCatchphrases(
             model: resolved.model,
             // 案を出させるので、いちばん揺らす
             temperature: 0.9,
+            maxOutputTokens: sendOutputTokens,
+            plannedOutputTokens,
             meta: { feature: "catchphrase", workFolder: work.folderPath },
             jsonSchema: CATCHPHRASE_SCHEMA as unknown as object,
             disableThinking: true,

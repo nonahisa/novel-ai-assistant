@@ -22,6 +22,10 @@ import { isBlankPlotSection, parsePlotMarkdown } from "../core/plotDoc";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError } from "../ai/types";
 import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
+import {
   buildNameSuggestPrompt,
   NAME_ORIGINS,
   NAME_SUGGEST_COUNT,
@@ -409,6 +413,16 @@ async function suggestNames(
           model: resolved.model,
           // 候補は広く出させる。当たり外れは作者が選ぶ（P-29）
           temperature: 0.8,
+          // **見込みと実上限を分けて渡す**（設計書6.77の第2段）。名前の候補は
+          // 短いが、渡さないと設定値（既定16,384）ぶんの席を毎回確保する
+          maxOutputTokens: resolveOutputTokensForSend(
+            resolved.provider.id,
+            resolved.model
+          ),
+          plannedOutputTokens: resolveOutputTokensForPlanning(
+            resolved.provider.id,
+            resolved.model
+          ),
           jsonSchema: NAME_SUGGEST_SCHEMA as unknown as object,
           disableThinking: true,
           meta: { feature: "name_suggest", workFolder: work.folderPath },
