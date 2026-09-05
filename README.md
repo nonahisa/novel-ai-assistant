@@ -1034,6 +1034,24 @@ VSCodeで `F5` を押すと、拡張機能が読み込まれた新しいVSCode�
 npm run watch
 ```
 
+### VSIXを作ってGitHub Releaseへ上げる
+
+```powershell
+npm run package:vsix     # release/ にVSIXを作る（リリースゲートを通ります）
+npm run verify:vsix      # 中身・隔離インストール・版を検証する
+npm run release:github   # タグを押して GitHub Release を作り、VSIXを添付する
+```
+
+`npm run release:github` は、**作業ツリーがきれいで、`main` が `origin/main` と同じで、`gh` にログイン済み**でなければ何もせずに止まります（足りないものを日本語で並べます）。VSIXが無ければ `package:vsix` から作り、既定で `verify:vsix` も通してから上げます。リリースノートは `docs/releases/vX.Y.Z.md` があればそれを、無ければ `CHANGELOG.md` の先頭の節を使います。最後に **Release のURLとVSIXのSHA-256** を表示します。
+
+```powershell
+npm run release:github -- --dry-run              # 実行するコマンドを見るだけ
+npm run release:github -- --skip-verify          # verify:vsix を省く
+npm run release:github -- --notes .\notes.md     # ノートを手書きのものにする
+```
+
+同じタグのReleaseが既にある場合は、作り直さずにVSIXとノートを差し替えます。**Marketplaceへの公開（`npm run publish:marketplace`）は別の操作です。**
+
 ### Sakura AI Engine スモークテスト
 
 さくらのAI Engine の接続確認は、拡張機能からは実行されません。GitHub Actions では  

@@ -1822,6 +1822,7 @@
     "prepackage:vsix": "npm run check:release",
     "package:vsix": "node scripts/packageVsix.mjs",
     "verify:vsix": "node scripts/verifyVsix.mjs",
+    "release:github": "node scripts/releaseGithub.mjs",
     "build:icon": "node scripts/buildIcon.mjs",
     "publish:marketplace": "node scripts/publishMarketplace.mjs"
   },
