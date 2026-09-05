@@ -18,7 +18,7 @@ import {
   buildPlotCharacterUpdates,
   type PlotCharacterSkip,
 } from "../core/plotCharacterSync";
-import { logFailure, logStep } from "../core/logger";
+import { logFailure, logStep, responseExcerptForLog } from "../core/logger";
 import {
   buildChatSettingsSyncPrompt,
   parseChatSettingsSync,
@@ -265,7 +265,7 @@ export async function applyChatToSettings(
     logFailure("相談を資料へ反映：AIの答えを読み取れませんでした", {
       作品: work.title,
       モデル: resolved.model,
-      応答: outcome.text.slice(0, 400),
+      応答: responseExcerptForLog(outcome.text),
     });
     // **覚え書きを残さない。** もう一度押せば、同じ会話をやり直せる
     void vscode.window.showWarningMessage(

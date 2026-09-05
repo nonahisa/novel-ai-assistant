@@ -46,7 +46,13 @@ import { readSynopsisDoc } from "./generateBlurb";
 import { withCancellableProgress } from "../views/progress";
 import { reportAIError } from "./reportAIError";
 import { openGeneratedMarkdown } from "../views/openDocument";
-import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  showLog,
+  useLogFile,
+} from "../core/logger";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
@@ -195,7 +201,7 @@ export async function generateAnnouncement(
   if (!parsed) {
     logFailure("更新告知文の生成", {
       理由: "応答を読み取れません",
-      応答: response.text.slice(0, 400),
+      応答: responseExcerptForLog(response.text),
     });
     vscode.window
       .showWarningMessage("応答を読み取れませんでした。", "ログを見る")

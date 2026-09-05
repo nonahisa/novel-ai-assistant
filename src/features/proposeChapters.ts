@@ -42,7 +42,13 @@ import {
 } from "../core/chapterProposalValidation";
 import { withCancellableProgress } from "../views/progress";
 import { reportAIError } from "./reportAIError";
-import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  showLog,
+  useLogFile,
+} from "../core/logger";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 // **型だけを取る。** パネルの実体は呼び出し側（`extension.ts`）が作ったものを
 // 受け取るので、ここで束に取り込む必要がない（`checkForeshadows` と同じ）
@@ -285,7 +291,7 @@ export async function proposeChapters(
   if (!parsed) {
     logFailure("章立ての提案", {
       理由: "応答を読み取れません",
-      応答: text.slice(0, 400),
+      応答: responseExcerptForLog(text),
     });
     vscode.window
       .showWarningMessage("応答を読み取れませんでした。", "ログを見る")
@@ -436,7 +442,7 @@ export async function suggestChapterName(
     if (!parsed) {
       logFailure("章名の提案", {
         理由: "応答を読み取れません",
-        応答: text.slice(0, 400),
+        応答: responseExcerptForLog(text),
       });
     }
     vscode.window

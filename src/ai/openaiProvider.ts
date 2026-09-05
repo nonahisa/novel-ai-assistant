@@ -14,13 +14,35 @@ import { fetchJson } from "./httpClient";
 import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
 import { forgetSecret, registerSecret } from "../core/logger";
-import { resolveTimeoutMs, tunedContextWindow } from "../core/modelTuning";
+import {
+  resolveContextWindow,
+  resolveTimeoutMs,
+  type ContextWindowSource,
+} from "../core/modelTuning";
 import { customEndpointNotice } from "../core/endpointNotice";
 
 /** APIキーの保存先。settings.json ではなくOSの資格情報ストア */
 const SECRET_KEY = "novelai.openai.apiKey";
 const DEFAULT_ENDPOINT = "https://api.openai.com/v1";
 const LABEL = "ChatGPT";
+
+/**
+ * コンテキスト長の決め方（設計書6.77の第2段）。
+ *
+ * OpenAIのモデル一覧APIはコンテキスト長を返さない。モデルごとの表を持つと
+ * 新モデルが出るたびに古くなるため、設定値を使う。チャンク分割の基準に
+ * なるので、実際より大きいと入力が黙って切り捨てられる。
+ *
+ * **AIチューニングで測った値があれば、そちらを先に使う**（設計書6.49）。
+ * 設定は1つしか無いので、長さの違うモデルを行き来すると必ず食い違う。
+ *
+ * export しているのは、3社ぶんの読み順を試験が突き合わせるため。
+ */
+export const OPENAI_CONTEXT_WINDOW: ContextWindowSource = {
+  settingKey: "openai.contextWindow",
+  fallback: 128000,
+  minimum: 1024,
+};
 
 /**
  * 会話に使えないモデルを一覧から外すための語。
@@ -120,24 +142,9 @@ export class OpenAIProvider implements ApiKeyProvider {
     return resolveTimeoutMs(this.id, model, 180);
   }
 
-  /**
-   * コンテキスト長。
-   *
-   * OpenAIのモデル一覧APIはコンテキスト長を返さない。
-   * モデルごとの表を持つと新モデルが出るたびに古くなるため、
-   * 設定値を使う。チャンク分割の基準になるので、
-   * 実際より大きいと入力が黙って切り捨てられる。
-   *
-   * **AIチューニングで測った値があれば、そちらを先に使う**（設計書6.49）。
-   * 設定は1つしか無いので、長さの違うモデルを行き来すると必ず食い違う。
-   */
+  /** コンテキスト長。台帳（AIチューニング）→ 設定 → 既定 の順 */
   private contextWindowFor(model: string): number {
-    const tuned = tunedContextWindow(this.id, model);
-    if (tuned !== undefined) return tuned;
-    const configured = vscode.workspace
-      .getConfiguration("novelai")
-      .get<number>("openai.contextWindow", 128000);
-    return configured >= 1024 ? configured : 128000;
+    return resolveContextWindow(this.id, model, OPENAI_CONTEXT_WINDOW);
   }
 
   private async headers(): Promise<Record<string, string>> {

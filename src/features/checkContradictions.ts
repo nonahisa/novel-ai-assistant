@@ -105,7 +105,12 @@ import { buildKnownAtIndex, lookupKnownAtValue,
 import { withCancellableProgress, type CheckProgress } from "../views/progress";
 import { withAiTurn } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
-import { logFailure, logStep, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  useLogFile,
+} from "../core/logger";
 import { hashText } from "../core/textFile";
 
 /**
@@ -630,7 +635,7 @@ export async function checkContradictions(
               logFailure("矛盾検知", {
                 チャンク: chunk.hash,
                 理由: "応答を読み取れません",
-                応答: response.text.slice(0, 300),
+                応答: responseExcerptForLog(response.text),
               });
               return undefined;
             }

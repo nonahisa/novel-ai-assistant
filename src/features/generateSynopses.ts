@@ -35,7 +35,13 @@ import {
 } from "../prompts/synopsis";
 import { CharacterStore } from "../core/characterStore";
 import { withAiTurnProgress } from "./aiTurn";
-import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  showLog,
+  useLogFile,
+} from "../core/logger";
 import { renameEpisodeFile } from "../core/episodeRename";
 import { confirmFormatFit } from "./formatFitPrompt";
 import { cancelItem, isCancelItem } from "../views/dialogs";
@@ -224,7 +230,7 @@ export async function generateSynopses(
             });
             logFailure(`あらすじ生成（${episodeBodyLabel(episode)}）`, {
               理由: "応答を読み取れません",
-              応答: response.text.slice(0, 400),
+              応答: responseExcerptForLog(response.text),
             });
             continue;
           }

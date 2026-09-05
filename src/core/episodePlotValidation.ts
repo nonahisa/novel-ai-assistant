@@ -1,5 +1,8 @@
 import { normalizeForComparison } from "./groundedEvidence";
 import { isPlaceholderText } from "./placeholderText";
+// 引用の長さの上限は**逸脱検知が持つものを借りる**（設計書6.77の第2段）。
+// 以前は同名同値の定数を両方が持っており、片方だけ直す壊れ方ができた
+import { MAX_EXCERPT_CHARS } from "./deviationValidation";
 import type { EpisodePlotItem } from "./episodePlotDoc";
 import {
   EPISODE_PLOT_CHECK_HINTS,
@@ -55,15 +58,6 @@ export interface RejectedEpisodePlotFinding {
   raw: unknown;
   reason: EpisodePlotRejectReason;
 }
-
-/**
- * 引用の長さの上限。
- *
- * 逸脱検知と同じ値にする。プロンプトでは30字と言っているが、**実データで
- * 数百字の塊を返してきた**（P-11、第9話）。それは引用ではなく、どこを
- * 指しているのか分からない。
- */
-const MAX_EXCERPT_CHARS = 80;
 
 /**
  * 指した箇条書きが実在するか。実在するならその行を返す。

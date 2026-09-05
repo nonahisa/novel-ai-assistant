@@ -275,6 +275,64 @@ export function resolveTimeoutSeconds(
     : fallbackSeconds;
 }
 
+/**
+ * コンテキスト長の決め方。プロバイダごとに違うのは、この3つだけである。
+ *
+ * `resolveContextWindow` へ渡す。**値をここに書かない**——既定も設定名も
+ * プロバイダ側の事情なので、持つのはプロバイダのファイルである。
+ */
+export interface ContextWindowSource {
+  /** プロバイダごとの設定名（`novelai.` を除く） */
+  readonly settingKey: string;
+  /** 設定も台帳も無い／使えないときの既定 */
+  readonly fallback: number;
+  /**
+   * これ未満の設定値は使わない（`package.json` の `minimum` と揃える）。
+   * **0なら「正の数ならなんでも」**——LM Studioは読み込んだ長さに
+   * 合わせる予備なので、小さい値も作者の意図として尊重する。
+   */
+  readonly minimum: number;
+}
+
+/**
+ * そのモデルが読める長さ（トークン）。
+ * **台帳（AIチューニング）→ プロバイダごとの設定 → 既定** の順で決める。
+ *
+ * ## 台帳を見るのは、申告しないプロバイダだけ
+ *
+ * ChatGPT・LM Studio・さくらのAIは、モデル一覧APIがコンテキスト長を
+ * 返さない。だから「測って台帳へ書く」（設計書6.49）が要る。
+ *
+ * **Ollama・Gemini・ClaudeはAPIが申告するので、台帳を見ない。**
+ * 申告のほうが正しく、モデルが差し替わればその場で新しい値になる。
+ * ここへ台帳を挟むと、**古い実測が正しい申告を静かに上書きする**
+ * ——モデルを入れ替えたのに前のモデルの長さで分割し続ける、という
+ * 気づきようのない壊れ方になる。台帳は「申告できないプロバイダの
+ * 実測の置き場」であって、全プロバイダ共通の上書き機構ではない。
+ *
+ * ## 3社が同じ順番を別々に書いていた
+ *
+ * 読み順・下限・落とし先が3か所に写されており、片方だけ直すと
+ * 「ChatGPTでは効くのにさくらでは効かない」が静かに生まれる
+ * （待ち時間の `resolveTimeoutSeconds` と同じ理由。設計書6.77の第2段）。
+ */
+export function resolveContextWindow(
+  providerId: string,
+  model: string,
+  source: ContextWindowSource
+): number {
+  const tuned = tunedContextWindow(providerId, model);
+  if (tuned !== undefined) return tuned;
+  const configured = vscode.workspace
+    .getConfiguration(CONFIG_SECTION)
+    .get<number>(source.settingKey, source.fallback);
+  return Number.isFinite(configured) &&
+    configured > 0 &&
+    configured >= source.minimum
+    ? configured
+    : source.fallback;
+}
+
 /** `resolveTimeoutSeconds` のミリ秒版。プロバイダはこちらを使う */
 export function resolveTimeoutMs(
   providerId: string,

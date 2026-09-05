@@ -48,7 +48,12 @@ import {
 import { type CheckProgress } from "../views/progress";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
-import { logFailure, logStep, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  useLogFile,
+} from "../core/logger";
 import { KeepWordStore } from "../core/keepWordStore";
 import {
   buildStyleNote,
@@ -354,7 +359,7 @@ export async function checkProofread(
               理由: response.truncated
                 ? "応答が上限で切り詰められました"
                 : "応答を読み取れません",
-              応答: response.text.slice(0, 300),
+              応答: responseExcerptForLog(response.text),
             });
             return { ok: false, truncated: response.truncated === true };
           }

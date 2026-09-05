@@ -3,7 +3,7 @@ import type { WorkEntry } from "../models/types";
 import type { AIRegistry } from "../ai/registry";
 import { AIError } from "../ai/types";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
-import { logFailure, logStep } from "../core/logger";
+import { logFailure, logStep, responseExcerptForLog } from "../core/logger";
 import {
   parseNotationAdvice,
   type NotationAdvice,
@@ -166,7 +166,7 @@ export async function askNotationAdvice(
     logFailure(ACTION_LABEL, {
       組: group.label,
       理由: "答えを読み取れません（選択肢に無い表記か、形が違う）",
-      応答: text.slice(0, 400),
+      応答: responseExcerptForLog(text),
     });
     return { kind: "failed", reason: "AIの答えを読み取れませんでした。" };
   }

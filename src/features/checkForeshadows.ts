@@ -63,7 +63,12 @@ import {
 import { type CheckProgress } from "../views/progress";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
-import { logFailure, logStep, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  useLogFile,
+} from "../core/logger";
 import type { ProposalPanel, RecordUpdateViewItem } from "./proposalPanel";
 
 /**
@@ -404,7 +409,7 @@ export async function checkForeshadows(
             logFailure("伏線の検知", {
               チャンク: chunk.hash,
               理由: "応答を読み取れません",
-              応答: response.text.slice(0, 300),
+              応答: responseExcerptForLog(response.text),
             });
             return undefined;
           }
@@ -810,7 +815,7 @@ export async function checkForeshadowResolution(
             logFailure("伏線の回収の確認", {
               チャンク: chunk.hash,
               理由: "応答を読み取れません",
-              応答: response.text.slice(0, 300),
+              応答: responseExcerptForLog(response.text),
             });
             return undefined;
           }

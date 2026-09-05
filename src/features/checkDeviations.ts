@@ -42,7 +42,12 @@ import { type CheckProgress } from "../views/progress";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { confirmFormatFit } from "./formatFitPrompt";
-import { logFailure, logStep, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  useLogFile,
+} from "../core/logger";
 
 /**
  * プロット逸脱・間延び検知（P-11、設計書6.10.2）。
@@ -412,7 +417,7 @@ export async function checkDeviations(
               理由: response.truncated
                 ? "応答が出力上限で切り詰められました"
                 : "応答を読み取れません",
-              応答: response.text.slice(0, 300),
+              応答: responseExcerptForLog(response.text),
             });
             return undefined;
           }

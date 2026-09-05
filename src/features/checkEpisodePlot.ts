@@ -62,7 +62,12 @@ import {
 } from "./chunkSettings";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { withCancellableProgress, type CheckProgress } from "../views/progress";
-import { logFailure, logStep, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  useLogFile,
+} from "../core/logger";
 
 /**
  * 単話プロットのAI判定2種（P-27・P-28、設計書6.36.3）。
@@ -810,7 +815,7 @@ async function ask(options: {
         理由: response.truncated
           ? "応答が上限で切り詰められました"
           : "応答を読み取れません",
-        応答: response.text.slice(0, 300),
+        応答: responseExcerptForLog(response.text),
       });
       return undefined;
     }

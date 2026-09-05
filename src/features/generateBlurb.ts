@@ -35,7 +35,12 @@ import {
 import { stripCodeFence } from "../core/synopsisValidation";
 import { withCancellableProgress } from "../views/progress";
 import { reportAIError } from "./reportAIError";
-import { logFailure, showLog, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  responseExcerptForLog,
+  showLog,
+  useLogFile,
+} from "../core/logger";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
@@ -47,8 +52,16 @@ import { askText, cancelItem, isCancelItem } from "../views/dialogs";
  */
 
 const SYNOPSIS_FILE = "synopsis.md";
-/** AIへ渡す冒頭本文の量。多く送っても紹介文は良くならず、料金だけ増える */
-const OPENING_EXCERPT_CHARS = 6000;
+/**
+ * 紹介文・キャッチコピーへ渡す冒頭本文の量。
+ * 多く送っても紹介文は良くならず、料金だけ増える。
+ *
+ * **プロット逆算の `PLOT_OPENING_EXCERPT_CHARS`（3,000字）とは別物である。**
+ * 以前はどちらも同じ名前を名乗り、値だけが違っていた
+ * （設計書6.77の第2段で改名）。紹介文は文体まで読者に見せる文章なので、
+ * 骨格だけで足りるプロットより長く採る。
+ */
+export const BLURB_OPENING_EXCERPT_CHARS = 6000;
 /** 紹介文の材料にする、各話あらすじの件数 */
 const SYNOPSES_FOR_BLURB = 30;
 
@@ -146,7 +159,7 @@ export async function generateWorkBlurb(
       理由: truncated
         ? "応答が出力上限で切り詰められました"
         : "応答を読み取れません",
-      応答: response.text.slice(0, 400),
+      応答: responseExcerptForLog(response.text),
     });
     vscode.window
       .showWarningMessage(
@@ -270,7 +283,7 @@ export async function generateCatchphrases(
     if (valid.length === 0) {
       logFailure("キャッチコピーの生成", {
         理由: "使える案がありません",
-        応答: response.text.slice(0, 400),
+        応答: responseExcerptForLog(response.text),
       });
       const retry = await vscode.window.showWarningMessage(
         `${CATCHPHRASE_MAX_CHARS}字以内の案が返りませんでした。`,
@@ -376,10 +389,10 @@ async function collectMaterial(
   // 冒頭から順に、上限まで詰める。紹介文は冒頭の雰囲気が要る
   let openingExcerpt = "";
   for (const episode of bodies) {
-    if (openingExcerpt.length >= OPENING_EXCERPT_CHARS) break;
+    if (openingExcerpt.length >= BLURB_OPENING_EXCERPT_CHARS) break;
     openingExcerpt += `${episode.body}\n\n`;
   }
-  openingExcerpt = openingExcerpt.slice(0, OPENING_EXCERPT_CHARS);
+  openingExcerpt = openingExcerpt.slice(0, BLURB_OPENING_EXCERPT_CHARS);
 
   let chapterSynopses: string[] = [];
   try {

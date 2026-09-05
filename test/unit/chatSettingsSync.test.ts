@@ -71,7 +71,10 @@ vi.mock("../../src/features/aiConnectivity", () => ({
 const failures = vi.hoisted(
   () => [] as Array<{ context: string; detail: Record<string, unknown> }>
 );
-vi.mock("../../src/core/logger", () => ({
+// **切り詰めは本物を使う**（`responseExcerptForLog`）。ここで写しを置くと、
+// 共有の字数を変えたときに、この試験だけ古い字数で通ってしまう
+vi.mock("../../src/core/logger", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/core/logger")>()),
   logFailure: (context: string, detail: Record<string, unknown>) => {
     failures.push({ context, detail });
   },

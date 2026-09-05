@@ -21,7 +21,13 @@ import { openGeneratedMarkdown } from "../views/openDocument";
 import { withCancellableProgress } from "../views/progress";
 import { reportAIError } from "./reportAIError";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
-import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  showLog,
+  useLogFile,
+} from "../core/logger";
 
 /**
  * 冒頭診断（P-24、設計書6.30）。
@@ -141,7 +147,7 @@ export async function checkOpening(
     // **応答の中身は捨てない。** 通知には出さなくても、ログには残す
     logFailure("冒頭診断", {
       理由: "応答を読み取れません",
-      応答: responseText.slice(0, 400),
+      応答: responseExcerptForLog(responseText),
     });
     const answer = await vscode.window.showWarningMessage(
       "冒頭診断の応答を読み取れませんでした。",

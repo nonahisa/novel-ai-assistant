@@ -33,8 +33,16 @@ export function useLogFile(workFolderPath: string): void {
   logFilePath = path.join(workFolderPath, ".aiwriter", "logs", "actions.log");
 }
 
-/** 1ファイルが際限なく育たないようにする上限 */
-const MAX_LOG_BYTES = 1_000_000;
+/**
+ * 動作の記録（`.aiwriter/logs/actions.log`）1ファイルの上限。
+ *
+ * **ログのバイト上限は3つある。値も違う**（設計書6.77の第2段で名前だけ揃えた）。
+ * `chatLog.ts` の `MAX_CHAT_LOG_BYTES`（相談の記録）と
+ * `usageLog.ts` の `MAX_USAGE_LOG_BYTES`（呼び出し量の表）がそれで、
+ * **用途が違うので値も違う**——寄せない。ここは1行が短い代わりに件数が多く、
+ * 直近が読めればよいので、いちばん小さい。
+ */
+const MAX_ACTION_LOG_BYTES = 1_000_000;
 
 function appendToFile(text: string): void {
   const target = logFilePath;
@@ -57,7 +65,7 @@ function appendToFile(text: string): void {
       const addition = new TextEncoder().encode(`${text}\n`);
       // 上限を超えたら古いほうから捨てる。直近が読めることを優先する
       const merged =
-        existing.byteLength + addition.byteLength > MAX_LOG_BYTES
+        existing.byteLength + addition.byteLength > MAX_ACTION_LOG_BYTES
           ? addition
           : concat(existing, addition);
       await vscode.workspace.fs.writeFile(uri, merged);
@@ -122,6 +130,31 @@ export function logLine(message: string): void {
  */
 export function logStep(message: string): void {
   logLine(message);
+}
+
+/**
+ * AIの応答をログに残すときの字数（設計書6.77の第2段）。
+ *
+ * **全文は残さない。** 読み取れなかった応答は数万字のこともあり、
+ * そのまま書くとログが1件で埋まって、ほかの失敗が見えなくなる。
+ * 原因の見当をつけるには先頭だけで足りる（形が違うのか、断り文句なのか、
+ * 途中で切れたのかは冒頭に出る）。
+ *
+ * **14の機能が同じ切り詰めを自分で書いていた**うち、5つが300字、
+ * 9つが400字と割れていた。少ないほうへ揃えると手がかりが減るので、
+ * 多いほう（最頻値）に合わせた。
+ */
+export const MAX_LOGGED_RESPONSE_CHARS = 400;
+
+/**
+ * AIの応答を、ログへ載せられる長さに切り詰める。
+ *
+ * **切り詰めた印（「…」など）は足さない。** ログに残る文字列が
+ * 「AIが返した本文そのもの」でなくなると、作者がそのまま検索したときに
+ * 見つからない。
+ */
+export function responseExcerptForLog(text: string): string {
+  return text.slice(0, MAX_LOGGED_RESPONSE_CHARS);
 }
 
 /** 失敗の詳細を、作者が読める形で残す */

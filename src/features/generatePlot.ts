@@ -29,7 +29,13 @@ import {
 import { confirmProviderReachable } from "./aiConnectivity";
 import { confirmFormatFit } from "./formatFitPrompt";
 import { withCancellableProgress } from "../views/progress";
-import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  showLog,
+  useLogFile,
+} from "../core/logger";
 import { openInDefaultEditor } from "../views/openDocument";
 
 /**
@@ -45,7 +51,15 @@ import { openInDefaultEditor } from "../views/openDocument";
  * 既に書かれている項目は「置き換える候補」として選ばせる。
  */
 
-const OPENING_EXCERPT_CHARS = 3_000;
+/**
+ * プロット逆算へ渡す冒頭本文の量。
+ *
+ * **紹介文の `BLURB_OPENING_EXCERPT_CHARS`（6,000字）とは別物である。**
+ * 以前はどちらも同じ名前を名乗り、値だけが違っていた
+ * （設計書6.77の第2段で改名）。プロットは「話がどう始まるか」の
+ * 骨格をつかめれば足りるので、紹介文より短い——文体を見せる必要が無い。
+ */
+export const PLOT_OPENING_EXCERPT_CHARS = 3_000;
 
 export async function generatePlot(
   work: WorkEntry,
@@ -159,7 +173,7 @@ export async function generatePlot(
   if (!parsed) {
     logFailure("プロット逆算", {
       理由: "応答を読み取れません",
-      応答: responseText.slice(0, 400),
+      応答: responseExcerptForLog(responseText),
     });
     vscode.window
       .showWarningMessage("応答を読み取れませんでした。", "ログを見る")
@@ -241,10 +255,10 @@ async function collectMaterial(
   const bodies = (await loadEpisodeBodies(scan.episodes)).bodies;
   let openingExcerpt = "";
   for (const episode of bodies) {
-    if (openingExcerpt.length >= OPENING_EXCERPT_CHARS) break;
+    if (openingExcerpt.length >= PLOT_OPENING_EXCERPT_CHARS) break;
     openingExcerpt += `${episode.body}\n\n`;
   }
-  openingExcerpt = openingExcerpt.slice(0, OPENING_EXCERPT_CHARS);
+  openingExcerpt = openingExcerpt.slice(0, PLOT_OPENING_EXCERPT_CHARS);
 
   const [characters, locations, world] = await Promise.all([
     new CharacterStore(work).loadAll(),
