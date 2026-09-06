@@ -69,7 +69,7 @@ export async function openWritingStatsPanel(
 
   const panel = vscode.window.createWebviewPanel(
     "novelai.writingStats",
-    `執筆量: ${work.title}`,
+    `執筆統計: ${work.title}`,
     vscode.ViewColumn.Active,
     { enableScripts: true, retainContextWhenHidden: true }
   );
@@ -184,7 +184,7 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
   const siteRecords = await readSiteRecords(work);
 
   return {
-    title: `${work.title} の執筆量`,
+    title: `${work.title} の執筆統計`,
     buckets,
     // 「今」に当たる棒を色分けするために、粒度ごとの現在のキーを渡す
     currentBucketKey: {

@@ -61,7 +61,7 @@ export async function openAllWorksWritingStatsPanel(
 
   const created = vscode.window.createWebviewPanel(
     "novelai.allWorksWritingStats",
-    "全作品の執筆量",
+    "全作品の執筆統計",
     vscode.ViewColumn.Active,
     { enableScripts: true, retainContextWhenHidden: true }
   );
@@ -145,7 +145,7 @@ async function buildAllWorksStatsPanelData(
   );
 
   return {
-    title: "全作品の執筆量",
+    title: "全作品の執筆統計",
     buckets,
     currentBucketKey: {
       daily: today,

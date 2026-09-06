@@ -610,6 +610,45 @@ describe("分類のツールチップ", () => {
   });
 });
 
+/**
+ * 名前は短く、補足はツールチップへ（作者の裁定、2026-09-06）。
+ *
+ * 「AIチューニング（測って設定を合わせる）」のように、名前のうしろへ
+ * 括弧で説明を足したものが増えていた。**ビューは幅が狭い**ので、
+ * 長い名前は途中で切れて、肝心の名前のほうが読めなくなる。
+ *
+ * **消すのではなく、置き場所を変える。** 補足は `note` に移し、
+ * ツールチップと、相談へ送る束（`featureGuide.ts`）の両方へ出す。
+ * `package.json` の `title` は変えない——コマンドパレットは名前だけで
+ * 探す場所なので、そこでは補足が付いていたほうが見つけやすい。
+ */
+describe("メニュー名は短く、補足はツールチップへ", () => {
+  test("操作の名前に括弧の補足を入れない", () => {
+    const withParen = allActions().filter((action) =>
+      action.label.includes("（")
+    );
+
+    expect(
+      withParen.map((action) => action.label),
+      "括弧の中身は note へ移す"
+    ).toEqual([]);
+  });
+
+  test("補足を持つ操作は、ツールチップにその補足が出る", () => {
+    const provider = new ActionListProvider(fakeRegistry(), memoryStore());
+    const withNote = allActions().filter((action) => action.note);
+
+    // 移し先が無いまま名前だけ短くすると、説明が消える
+    expect(withNote.length).toBeGreaterThan(0);
+    for (const action of withNote) {
+      const tooltip = provider.getTreeItem(actionNode(action.command)).tooltip;
+      const text =
+        typeof tooltip === "string" ? tooltip : (tooltip?.value ?? "");
+      expect(text, action.command).toContain(action.note);
+    }
+  });
+});
+
 describe("操作メニューの印の色", () => {
   const pkg = JSON.parse(readFileSync("package.json", "utf-8")) as {
     contributes: {
@@ -927,7 +966,9 @@ describe("相談の項目は、木に残して画面から隠す", () => {
     const action = chatPanelAction();
 
     expect(action, "木から消すと簡単ステップメニューが壊れる").toBeTruthy();
-    expect(action?.label).toBe("AIに相談する（大きく開く）");
+    // 補足（「大きく開く」）は note へ移した（2026-09-06）
+    expect(action?.label).toBe("AIに相談する");
+    expect(action?.note).toBe("大きく開く");
     // 隠すのは画面だけ。動く環境かどうかの判定には混ぜない
     expect(isItemVisibleInRuntime(action!, true)).toBe(true);
   });

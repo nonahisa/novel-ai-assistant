@@ -40,6 +40,18 @@ export interface ActionItem {
   /** 実行するコマンドID */
   command: string;
   label: string;
+  /**
+   * 名前のうしろに付いていた括弧の補足（作者の裁定、2026-09-06）。
+   *
+   * **ビューは幅が狭い。** 「AIチューニング（測って設定を合わせる）」の
+   * ように名前へ説明を足すと、途中で切れて肝心の名前のほうが読めない。
+   *
+   * **消すのではなく、置き場所を変える。** ここへ移した文は、
+   * ツールチップと、相談へ送る束（`featureGuide.ts`）の両方に出る。
+   * `package.json` の `title` は変えない——コマンドパレットは名前だけで
+   * 探す場所なので、そこでは補足が付いていたほうが見つけやすい。
+   */
+  note?: string;
   /** 一覧で label の右に薄字で出る補足 */
   description?: string;
   /** codicon の名前 */
@@ -222,7 +234,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.setupGithub",
-            label: "GitHubに置く（はじめて）",
+            label: "GitHubに置く",
+            note: "はじめて",
             icon: "repo-push",
             requiresWork: true,
             detail:
@@ -408,7 +421,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
         // 「AIに相談する」とだけ書いてあったので、押すと本文の領域に
         // 大きく開くことが読めなかった——`package.json` のコマンド名は
         // はじめから「AIに相談する（大きく開く）」で、こちらだけがずれていた
-        label: "AIに相談する（大きく開く）",
+        label: "AIに相談する",
+        note: "大きく開く",
         icon: "comment-discussion",
         // **詳細メニューには出さない**（作者の指定、2026-09-03。
         // 横のパネルの「メインに表示」ボタンが入口。簡単ステップメニューには残る）。
@@ -896,7 +910,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.readManuscriptAloud",
-            label: "原稿を読み上げる（音読推敲）",
+            label: "原稿を読み上げる",
+            note: "音読推敲",
             description: "AIを使わない",
             icon: "unmute",
             usesAI: false,
@@ -1085,7 +1100,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.exportPdf",
-            label: "PDF出力（印刷用）",
+            label: "PDF出力",
+            note: "印刷用",
             description: "AIを使わない",
             icon: "file-pdf",
             requiresWork: true,
@@ -1100,7 +1116,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.openEpubEditor",
-            label: "EPUBエディター（試作）",
+            label: "EPUBエディター",
+            note: "試作",
             description: "AIを使わない",
             icon: "book",
             requiresWork: true,
@@ -1116,7 +1133,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.exportEpub",
-            label: "EPUBを書き出す（試作）",
+            label: "EPUBを書き出す",
+            note: "試作",
             description: "AIを使わない",
             icon: "book",
             requiresWork: true,
@@ -1457,7 +1475,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.configureAnnouncement",
-            label: "告知の設定（ハッシュタグ・URL）",
+            label: "告知の設定",
+            note: "ハッシュタグ・URL",
             icon: "gear",
             requiresWork: true,
             detail:
@@ -1506,7 +1525,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.measureContext",
-            label: "AIチューニング（測って設定を合わせる）",
+            label: "AIチューニング",
+            note: "測って設定を合わせる",
             icon: "symbol-ruler",
             requiresWork: false,
             usesAI: true,
@@ -1556,7 +1576,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
                 {
                   kind: "action" as const,
                   command: "novelai.dev.toggleOllamaStream",
-                  label: "Ollamaのストリーミング受信を切り替える（実験）",
+                  label: "Ollamaのストリーミング受信を切り替える",
+                  note: "実験",
                   icon: "beaker",
                   requiresWork: false,
                   devOnly: true,
@@ -1582,7 +1603,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
             // **詳細メニューには出さない**（設定管理へ移した。設計書6.56.3）
             hiddenFromActionList: true,
             command: "novelai.runFullSetup",
-            label: "セットアップ（必要なものを入れる）",
+            label: "セットアップ",
+            note: "必要なものを入れる",
             icon: "checklist",
             requiresWork: false,
             detail:
@@ -1632,7 +1654,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
             // **詳細メニューには出さない**（設定管理へ移した。設計書6.56.3）
             hiddenFromActionList: true,
             command: "novelai.setupVectorSearch",
-            label: "意味検索（ベクトルDB）の準備",
+            label: "意味検索の準備",
+            note: "ベクトルDB",
             icon: "search-fuzzy",
             requiresWork: false,
             detail:
@@ -1690,7 +1713,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
       {
         kind: "action",
         command: "novelai.openManual",
-        label: "使い方（マニュアル）",
+        label: "使い方",
+        note: "マニュアル",
         icon: "book",
         requiresWork: false,
         detail:
@@ -2086,6 +2110,9 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
           ? ""
           : `**${REQUIRES_WORK_HINT}。** ` +
             "「作品一覧」の「フォルダから作品を追加」または「新規作品を作成」から登録してください。\n\n",
+        // **名前から外した補足は、ここで返す**（設計書6.17）。
+        // ビューの幅に収めるために短くしただけで、説明は捨てていない
+        action.note ? `**${action.note}**\n\n` : "",
         action.usesAI ? "**AIを使います**（クラウドのAIは実行のたびに課金されます）\n" : "",
         action.detail,
         this.countOf(action.counter) > 0

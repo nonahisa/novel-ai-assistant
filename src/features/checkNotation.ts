@@ -17,6 +17,8 @@ import {
   createOrganizationStore,
 } from "../core/abilityStore";
 import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
+import { describeCheckRunCounts } from "../core/checkRunCounts";
+import type { IncomingCount } from "../core/proposalBuckets";
 import { locateBody, type TypoCheckIssue } from "./checkTypos";
 import {
   NOTATION_ADVICE_EXCERPTS_PER_FORM,
@@ -466,18 +468,34 @@ async function loadProperNouns(work: WorkEntry): Promise<string[]> {
  * **0件のときこそ、理由が要る。** パネルが空のままだと、作者は
  * 壊れていると受け取る。実際に「表記ゆれが提案パネルに出ません」と
  * 報告があった（2026-08-21）。
+ *
+ * @param shown 提案パネルに実際に残った件数（設計書6.8）。
+ *   **検知が作った件数（`result.issues.length`）を言わない**——前に
+ *   適用済み・解消済みだったものまで数えると、パネルの見出しと食い違う。
+ *   引数で受けるのは、それを数えられるのがパネル側だけだからである
+ *   （既定値を置くと、渡し忘れが古い数え方として黙って残る）
  */
 export function describeNotationResult(
-  result: NotationCheckRunResult
+  result: NotationCheckRunResult,
+  shown: IncomingCount
 ): string {
   if (result.groupCount === 0) {
     return "表記ゆれは見つかりませんでした。";
   }
 
   if (result.issues.length > 0) {
+    const counted = describeCheckRunCounts({
+      shown: shown.remaining,
+      alreadyHandled: shown.handled,
+      // **無視の記録で落とした分は、ここへ入れない。** `rejected` は
+      // 「理由は操作ログ」と案内する枠だが、この分の次の手は
+      // 「指摘対象外を管理」から外すことなので、下で名指しする
+      rejected: 0,
+    });
     const parts = [
-      `${result.groupCount}組のうち${result.unifiedCount}組を揃えます。`,
-      `${result.issues.length}件の指摘を提案パネルに出しました。`,
+      `${result.groupCount}組のうち${result.unifiedCount}組を揃え、` +
+        "提案パネルに出しました。",
+      `${counted.join(" / ")}。`,
     ];
     if (result.dismissedCount > 0) {
       parts.push(`（無視した分 ${result.dismissedCount}件は除いています）`);

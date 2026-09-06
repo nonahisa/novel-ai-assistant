@@ -408,11 +408,15 @@ function extraGuideNames(title: string): string {
  * 1文字削るだけで240字ほど変わる。
  */
 function nameOnly(
-  action: { label: string; usesAI?: boolean },
+  action: { label: string; note?: string; usesAI?: boolean },
   indent: string
 ): string {
   const mark = action.usesAI ? "（AIを使う）" : "";
-  return `${indent}・${action.label}${mark}`;
+  // **画面から外した補足も、ここでは名前に戻す**（2026-09-06）。
+  // 相談はここに書いてある名前でしか操作を知らないので、落とすと
+  // 「AIチューニングって何」に答えられなくなる
+  const note = action.note ? `（${action.note}）` : "";
+  return `${indent}・${action.label}${note}${mark}`;
 }
 
 /**
@@ -423,7 +427,7 @@ function nameOnly(
  * 相談へ渡すためのものなので、全文が要る場面が無い。
  */
 function describeAction(
-  action: { label: string; detail: string; usesAI?: boolean },
+  action: { label: string; note?: string; detail: string; usesAI?: boolean },
   indent: string
 ): string {
   // 強調の記号は画面用なので落とす。AIへの指示と混ざると読みにくい。
@@ -431,7 +435,8 @@ function describeAction(
   const emphasis = "*".repeat(2);
   const detail = shorten(action.detail.split(emphasis).join(""));
   const mark = action.usesAI ? "（AIを使う）" : "";
-  return `${indent}  - ${action.label}${mark}: ${detail}`;
+  const note = action.note ? `（${action.note}）` : "";
+  return `${indent}  - ${action.label}${note}${mark}: ${detail}`;
 }
 
 /**

@@ -22,7 +22,10 @@ import { readFileSync } from "node:fs";
 interface Manifest {
   contributes: {
     commands: Array<{ command: string; title: string; icon?: string }>;
-    views: Record<string, Array<{ id: string; name: string; when?: string }>>;
+    views: Record<
+      string,
+      Array<{ id: string; name: string; when?: string; visibility?: string }>
+    >;
     menus: Record<
       string,
       Array<{ command: string; when?: string; group?: string }>
@@ -39,6 +42,14 @@ const SIDEBAR_VIEWS = [
   { id: "novelai.actions", solo: "actions", command: "novelai.soloActions" },
   { id: "novelai.chatView", solo: "chat", command: "novelai.soloChat" },
 ] as const;
+
+function view(id: string): { visibility?: string } {
+  const found = pkg.contributes.views["novelai"].find(
+    (entry) => entry.id === id
+  );
+  if (!found) throw new Error(`ビュー ${id} が package.json にありません`);
+  return found;
+}
 
 function viewWhen(id: string): string {
   const view = pkg.contributes.views["novelai"].find((entry) => entry.id === id);
@@ -192,6 +203,28 @@ describe("コマンドの登録", () => {
     }
     expect(source).toContain('"novelai.showAllViews"');
     expect(source).toContain("setSoloView(undefined)");
+  });
+
+  /*
+    **サイドバーの初回の高さ**（作者の裁定、2026-09-06）。
+
+    4つのビューが縦に並ぶので、いちばん下の「AIに相談」が開いたままだと
+    上の3つ——作品一覧・簡単ステップ・詳細メニュー——が押し縮められる。
+    相談は**パネルとしても大きく開ける**ので、ここだけ畳んで始める。
+
+    **覚えるのはVS Code側である。** 作者がいちど広げれば、以後はその
+    状態で開く（`visibility` は「まだ触られていないとき」の既定）。
+  */
+  test("初回は「AIに相談」だけ畳んで出す", () => {
+    expect(view("novelai.chatView").visibility).toBe("collapsed");
+  });
+
+  test("上の3つは畳まない（既定のまま開く）", () => {
+    // ここへ `collapsed` を足すと、開き方の分からない作者には
+    // 「メニューが消えた」ようにしか見えない
+    for (const id of ["novelai.works", "novelai.steps", "novelai.actions"]) {
+      expect(view(id).visibility, id).toBeUndefined();
+    }
   });
 
   test("閉じた状態を覚えない", () => {

@@ -4,6 +4,7 @@ import type { WorkRegistry } from "../core/workRegistry";
 import { currentMode } from "../core/actorContext";
 import type { WorkMode } from "../core/editorMode";
 import { canRunProcesses } from "../core/runtime";
+import { abbreviateTitle, isAbbreviated } from "../core/abbreviateTitle";
 import type { WorkFormatKey } from "../core/workFormat";
 import { readWorkFormat } from "../core/workFormatStore";
 import {
@@ -456,17 +457,33 @@ export function resolveSelectedWork(
   return works.find((work) => work.id === savedId);
 }
 
-/** 最上段に出す文言 */
+/**
+ * 最上段に出す文言。
+ *
+ * **題は省略する**（作者の裁定、2026-09-06。設計書6.70）。作品名は
+ * 作者が付けたものなので長さに上限が無く、この1行が幅を使い切ると、
+ * 下に並ぶ操作より先に読めない行ができる。作品一覧・QuickPick は
+ * 既に `abbreviateTitle` を通しているので、そちらに揃える。
+ *
+ * **切ったときは `fullTitle` を返す。** 呼ぶ側がホバーへ全文を出す
+ * ——省略は表示だけの話で、読めなくしてよいという話ではない。
+ */
 export function describeSelector(
   selected: WorkEntry | undefined,
   hasAnyWork: boolean
-): { label: string; description: string } {
+): { label: string; description: string; fullTitle?: string } {
   if (!hasAnyWork) {
     return { label: STEP_NO_WORK_LABEL, description: STEP_NO_WORK_HINT };
   }
   // 「選択作品：」の文言と、押して選び直す形は作者の指定（2026-08-28）
   if (selected) {
-    return { label: `選択作品：${selected.title}`, description: "" };
+    return {
+      label: `選択作品：${abbreviateTitle(selected.title)}`,
+      description: "",
+      ...(isAbbreviated(selected.title)
+        ? { fullTitle: selected.title }
+        : {}),
+    };
   }
   return { label: STEP_CHOOSE_WORK_LABEL, description: "" };
 }
@@ -761,8 +778,10 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
       works.length === 0
         ? "**まだ作品が登録されていません。**\n\n" +
           "「1. 作品登録」から登録すると、下の操作が使えるようになります。"
-        : "**下に並ぶ操作は、ここで選んだ作品にだけ効きます。**\n\n" +
-          "押すと、登録している作品から選び直せます。"
+        : // 切った題の全文はここに出す（切りっぱなしにしない）
+          (view.fullTitle ? `**${view.fullTitle}**\n\n` : "") +
+            "**下に並ぶ操作は、ここで選んだ作品にだけ効きます。**\n\n" +
+            "押すと、登録している作品から選び直せます。"
     );
     // 作品が無いときは押しても選ぶものが無い。押せなくして理由を description に出す
     if (works.length > 0) {

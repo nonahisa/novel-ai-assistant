@@ -458,3 +458,22 @@ describe("相談1回ぶんの組み立て", () => {
     expect(built.selected).not.toContain("執筆AI支援 → 原稿づくり");
   });
 });
+
+/**
+ * 名前を短くした操作の補足（作者の裁定、2026-09-06）。
+ *
+ * **相談は `ACTION_TREE` の名前を読む。** 括弧の補足を名前から落として
+ * ツールチップへ移したので、そのままだと**束からも消える**——作者が
+ * 「AIチューニングって何」と訊いたときに答える材料が無くなる。
+ */
+describe("短くした名前の補足も、相談へ送る束に入る", () => {
+  test("補足を持つ操作は、名前と補足の両方が束にある", () => {
+    const withNote = visibleActions().filter((action) => action.note);
+
+    expect(withNote.length, "補足を持つ操作が1件も無い").toBeGreaterThan(0);
+    for (const action of withNote) {
+      expect(bundleText, action.command).toContain(action.label);
+      expect(bundleText, action.command).toContain(action.note);
+    }
+  });
+});

@@ -148,7 +148,11 @@ function guideChapter(): string {
 
 function actionLine(action: ActionItem, noteLocation = true): string {
   const mark = action.usesAI ? "（AIを使う）" : "";
-  return `- ${action.label}${mark}${noteLocation ? whereToFind(action) : ""}: ${plain(action.detail)}`;
+  // **メニューの表示名から外した補足は、ここでは名前に戻す**（2026-09-06）。
+  // ビューは幅が狭いので短くしたが、マニュアルは幅で困らないうえ、
+  // 名前だけでは何の操作か分からないものがある（「使い方」「セットアップ」）
+  const note = action.note ? `（${action.note}）` : "";
+  return `- ${action.label}${note}${mark}${noteLocation ? whereToFind(action) : ""}: ${plain(action.detail)}`;
 }
 
 /**

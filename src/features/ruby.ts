@@ -7,7 +7,6 @@ import {
   describeSiteNotation,
   EMPHASIS_SITES,
   fromSiteNotation,
-  hasEmphasis,
   RUBY_STYLES,
   toSiteNotation,
   validateEmphasis,
@@ -15,6 +14,11 @@ import {
   type EmphasisSite,
   type RubyStyle,
 } from "../core/ruby";
+import {
+  postingCopyTargets,
+  type PostingCopyTarget,
+} from "../core/postingCopyTargets";
+import type { PostingSiteId } from "../models/posting";
 import { sourceForPostingCopy } from "../core/episodeCopy";
 import { stripMemoLines } from "../core/sceneMemo";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
@@ -141,12 +145,18 @@ export async function addRuby(): Promise<void> {
  * **原稿には触らない。** 貼り付ける先はサイトの投稿欄であって、
  * 手元の原稿を投稿サイト記法へ変えてしまうと、次に書くときに困る。
  */
-export async function copyForPosting(): Promise<void> {
+export async function copyForPosting(
+  /**
+   * 投稿状態の台帳に登録してある投稿先（設計書6.68.2）。
+   * **選択肢の並びを決めるためだけ**に使うので、読めなければ空でよい
+   */
+  registered: readonly PostingSiteId[] = []
+): Promise<void> {
   const editor = await requireMarkdown();
   if (!editor) return;
 
-  const style = await pickStyle();
-  if (!style) return;
+  const target = await pickPostingTarget(registered);
+  if (!target) return;
 
   const selection = editor.selection;
   // **シーンメモは投稿しない**（設計書6.40.2）。貼り付ける先は
@@ -160,24 +170,54 @@ export async function copyForPosting(): Promise<void> {
     )
   );
 
-  // **傍点が入っているときだけ、貼り付け先を訊く**（設計書6.12.4）。
-  // ルビはどのサイトでも同じ書き方で通るので、傍点が無いなら
-  // 訊いても答えが変わらない
-  let site: EmphasisSite = "kakuyomu";
-  if (style.id === "site" && hasEmphasis(source)) {
-    const picked = await pickEmphasisSite();
-    if (!picked) return;
-    site = picked;
-  }
+  /*
+    **傍点の有無で、訊かれる回数を変えない**（作者の裁定、2026-09-06）。
 
-  const converted = toSiteNotation(source, style.id, site);
+    以前は「傍点が入っているときだけ、貼り付け先を訊く」形だった。
+    訊いても答えが変わらないなら訊かない、という筋は通っていたが、
+    **同じ操作なのに原稿の中身によって手順が変わる**——作者からは
+    「なぜ今日は2回訊かれるのか」が分からない。貼り付け先を1度だけ
+    訊き、記法はそこから引く。
+  */
+  const converted = toSiteNotation(source, target.style, target.emphasis);
 
   await vscode.env.clipboard.writeText(converted);
   const scope = selection.isEmpty ? "本文全体" : "選んだ範囲";
   notifyDone(
-    `${scope}を${style.label}に変換して、クリップボードへ入れました。` +
-      "原稿はそのままです。"
+    `${scope}を${target.label}の書き方に変換して、` +
+      "クリップボードへ入れました。原稿はそのままです。"
   );
+}
+
+/**
+ * どこへ貼るかを訊く（設計書6.12.4）。
+ *
+ * **1段しか訊かない。** サイトを選べば記法も傍点の書き方も決まるので、
+ * 記法を先に訊く画面は要らない（`core/postingCopyTargets.ts`）。
+ */
+export async function pickPostingTarget(
+  registered: readonly PostingSiteId[]
+): Promise<PostingCopyTarget | undefined> {
+  const picked = await vscode.window.showQuickPick(
+    [
+      ...postingCopyTargets(registered).map((target) => ({
+        label: target.label,
+        // **上に来ている理由を、その場に出す。** 並びだけを変えると
+        // 「なぜこの順なのか」が作者に分からない
+        description: target.registered ? "投稿先に登録済み" : "",
+        detail: target.detail,
+        target,
+      })),
+      cancelItem(),
+    ],
+    {
+      title: "どこへ貼りますか",
+      placeHolder: "選んだ先の書き方に変換して、クリップボードへ入れます",
+      ignoreFocusOut: true,
+    }
+  );
+  if (!picked || isCancelItem(picked)) return undefined;
+  return "target" in picked ? picked.target : undefined;
 }
 
 /**

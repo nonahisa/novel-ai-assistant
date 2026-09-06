@@ -59,6 +59,11 @@ describe("相談パネルからの検知は、メニューと同じ入口を通�
     "checkProofread",
     "checkDeviations",
     "checkContradictions",
+    // 表記ゆれは 2026-09-06 に寄せた。**それまで寄せられなかったのは、
+    // コマンド側が0組のとき黙って終わっていたため**（相談側は
+    // 「見つかりませんでした」と言い切っていた）。コマンド側を
+    // `describeNotationResult` に揃えたので、写しが要らなくなった
+    "checkNotation",
   ] as const;
 
   for (const kind of DELEGATED) {
@@ -75,8 +80,46 @@ describe("相談パネルからの検知は、メニューと同じ入口を通�
     for (const kind of ["checkProofread", "checkDeviations", "checkContradictions"]) {
       expect(body, kind).not.toContain(`${kind}(work, aiRegistry`);
     }
+    // 表記ゆれも、相談側で走らせ直さない
+    expect(body).not.toContain("checkNotation(work)");
+    expect(body).not.toContain("describeNotationResult");
     // 件数の言い方も、写しを持たない
     expect(body).not.toContain("notifyRunCompletion");
+  });
+
+  /*
+    表記ゆれのコマンド（`novelai.checkNotation`）そのものの形。
+
+    **0組のときに黙って終わっていた**（作者の報告、2026-08-21。
+    「黙ると壊れていると受け取られる」）。さらに「指摘 N件」に
+    `result.issues.length` を使っており、0.35.1 でほかの検知へ入れた
+    「パネルに残る件数」の数え方が届いていなかった。
+  */
+  describe("表記ゆれのコマンドは、0組でも一言いう", () => {
+    /** `novelai.checkNotation` の登録の中身 */
+    function notationCommand(): string {
+      const start = source.indexOf('"novelai.checkNotation",');
+      expect(start, "checkNotation の登録が見つからない").toBeGreaterThan(-1);
+      // 次に来る宣言までを見る。`registerCommand(` を目印にすると、
+      // 間に挟まる別の処理（名前の付け替え）まで読み込んでしまう
+      const end = source.indexOf("const runRenameFlow", start);
+      return source.slice(start, end > start ? end : source.length);
+    }
+
+    test("0組で打ち切らない", () => {
+      // 「知らせるものが無い」として途中で返していた枝を残さない
+      expect(notationCommand()).not.toContain("result.groupCount === 0");
+    });
+
+    test("完了の知らせは相談側と同じ関数から作る", () => {
+      expect(notationCommand()).toContain("describeNotationResult(result, shown)");
+    });
+
+    test("件数はパネルに残った数で、検知が作った数ではない", () => {
+      const body = notationCommand();
+      expect(body).toContain('proposalPanel.showResults(work, result.issues, "表記ゆれ")');
+      expect(body).not.toContain("result.issues.length");
+    });
   });
 
   test("残る自前の道は「この話だけ」の誤字脱字で、通知は共通の関数を通す", () => {

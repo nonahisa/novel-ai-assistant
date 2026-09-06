@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { abbreviateTitle } from "../../src/core/abbreviateTitle";
 import { TreeItemCollapsibleState } from "vscode";
 import {
   STEP_CHOOSE_WORK_LABEL,
@@ -353,6 +354,48 @@ describe("作品が1つだけのとき", () => {
     expect(command?.command).toBe("novelai.checkTypos");
     // `resolveWork` が受ける形。これが渡らないと、押すたびに作品を訊かれる
     expect(command?.arguments?.[0]).toEqual({ type: "work", work: only });
+  });
+});
+
+/**
+ * 長い作品名の省略（作者の裁定、2026-09-06。設計書6.70）。
+ *
+ * 最上段は「選択作品：〈題〉」の1行で、**その下に並ぶ操作より前に
+ * 幅を使い切る**。題は作者が付けたものなので長さに上限が無く、
+ * 作品一覧・QuickPick では既に `abbreviateTitle` を通している。
+ *
+ * **省略するのは表示だけ**で、全文はホバーに必ず出す。
+ */
+describe("最上段の作品名が長いとき", () => {
+  const long = work(
+    "w1",
+    "ハイエルフ未亡人のお気楽資産運用～食っちゃ寝しているだけなのに、金融の女王と呼ばれてます～"
+  );
+  const provider = (): StepMenuProvider =>
+    new StepMenuProvider(fakeRegistry([long]), memoryWorkStore());
+
+  test("先頭20字までにして、続きがあることを示す", () => {
+    const label = provider().getTreeItem({ type: "selector" }).label;
+
+    expect(label).toBe(`選択作品：${abbreviateTitle(long.title)}`);
+    expect(String(label)).toContain("…");
+  });
+
+  test("全文はホバーに出す（省略で読めなくならない）", () => {
+    const tooltip = provider().getTreeItem({ type: "selector" }).tooltip;
+    const text = typeof tooltip === "string" ? tooltip : (tooltip?.value ?? "");
+
+    expect(text).toContain(long.title);
+  });
+
+  test("短い題はそのまま出す（むやみに切らない）", () => {
+    const short = work("w2", "作品A");
+    const item = new StepMenuProvider(
+      fakeRegistry([short]),
+      memoryWorkStore()
+    ).getTreeItem({ type: "selector" });
+
+    expect(item.label).toBe("選択作品：作品A");
   });
 });
 

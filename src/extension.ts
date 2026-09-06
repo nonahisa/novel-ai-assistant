@@ -297,10 +297,13 @@ import {
   ManuscriptEditorProvider,
   addMemoToOpenManuscript,
   insertMemoLineAbove,
+  isInsideWork,
   openManuscriptForReading,
   refreshManuscriptCounts,
   type ManuscriptEditorDeps,
 } from "./features/manuscriptEditor";
+import { PostingStore } from "./core/postingStore";
+import type { PostingSiteId } from "./models/posting";
 import { showEditHistory } from "./features/editHistoryPanel";
 import {
   reviewProposals,
@@ -1163,7 +1166,8 @@ export async function activate(
       // **ここで処理を書き直さない。** 二重に持つと、片方だけ直したときに
       // 「メニューからは動くのに相談からは動かない」という食い違いが出る。
       //
-      // 検知（誤字脱字・推敲・逸脱・矛盾）は 2026-09-06 にここへ寄せた。
+      // 検知（誤字脱字・推敲・逸脱・矛盾・表記ゆれ）は 2026-09-06 に
+      // ここへ寄せた。
       // それまでは相談側が結果の出し方まで自前で持っており、0.35.1 で
       // 入れた「指摘 N件＝パネルに残る件数」の数え方が届いていなかった
       // ——推敲とプロット逸脱は完了の知らせが出ず、矛盾はマージ・除外の
@@ -1178,25 +1182,7 @@ export async function activate(
 
       // 以下は、コマンドの側が受け取れない道だけが残る。
       // 未保存のまま読むと、画面と違う本文を検知してしまう
-      const label =
-        kind === "checkNotation" ? "表記ゆれの検知" : "誤字脱字の検知";
-      if (!(await saveDirtyDocumentsBeforeExtraction(work, label))) return;
-
-      // **表記ゆれだけは寄せていない。** コマンド側は0組のときに黙って
-      // 終わるが、相談からは「見つかりませんでした」と言い切る必要がある
-      // （2026-08-21の作者の報告。黙ると壊れていると受け取られる）。
-      // 寄せるならコマンド側を `describeNotationResult` に揃えてからになる
-      if (kind === "checkNotation") {
-        const result = await checkNotation(work);
-        if (!result || result.cancelled) return;
-        // 0組のまま確定したときは、選択画面が既に理由を伝えている
-        if (result.noGroupsChosen) return;
-        proposalPanel.showResults(work, result.issues, "表記ゆれ");
-        // **黙って終わらない。** 0件のときに理由を言わないと、作者は
-        // 壊れていると受け取る（2026-08-21、作者の報告）
-        void vscode.window.showInformationMessage(
-          describeNotationResult(result)
-        );
+      if (!(await saveDirtyDocumentsBeforeExtraction(work, "誤字脱字の検知"))) {
         return;
       }
 
@@ -3284,20 +3270,21 @@ export async function activate(
         // 触らない。ただし止める意思ではないので、まとめ実行は次へ進む
         if (result.noGroupsChosen) return CHECK_COMPLETED;
 
-        proposalPanel.showResults(work, result.issues, "表記ゆれ");
+        const shown = proposalPanel.showResults(work, result.issues, "表記ゆれ");
 
-        // 0組のときは知らせるものが無い（検知そのものは走り切っている）
-        if (result.groupCount === 0) return CHECK_COMPLETED;
-        const parts = [`${result.groupCount}組を検出`];
-        if (result.unifiedCount > 0) {
-          parts.push(`${result.unifiedCount}組を揃える`);
-        }
-        parts.push(`指摘 ${result.issues.length}件`);
-        if (result.dismissedCount > 0) {
-          parts.push(`無視済み ${result.dismissedCount}件を除外`);
-        }
+        /*
+          **0組でも黙らない**（作者の報告、2026-08-21。「黙ると壊れていると
+          受け取られる」）。ここは長く「知らせるものが無い」として打ち切って
+          おり、相談パネルからの道だけが言い切っていた——同じ機能で言うことが
+          違う状態だったので、**言い方の持ち主を `describeNotationResult` に
+          一本化した**（設計書6.8.16）。
+
+          件数は**提案パネルに残った数**を渡す。検知が作った数をそのまま
+          言うと、前に適用済み・解消済みだったものまで数えて、パネルの
+          見出しと食い違う（0.35.1でほかの検知に入れた数え方）。
+        */
         vscode.window.showInformationMessage(
-          `表記ゆれ検知が完了しました。${parts.join(" / ")}`
+          describeNotationResult(result, shown)
         );
         return CHECK_COMPLETED;
       }
@@ -4042,7 +4029,11 @@ export async function activate(
   context.subscriptions.push(
     registerCommand("novelai.addRuby", addRuby),
     registerCommand("novelai.addEmphasis", addEmphasis),
-    registerCommand("novelai.copyForPosting", copyForPosting),
+    // **貼り付け先は1度だけ訊く**（設計書6.12.4）。登録済みの投稿先を
+    // 先頭に並べたいので、台帳を読むのはここ（画面側は作品を知らない）
+    registerCommand("novelai.copyForPosting", async () => {
+      await copyForPosting(await registeredPostingSites(registry));
+    }),
     registerCommand("novelai.importRuby", importRuby)
   );
 
@@ -4669,10 +4660,13 @@ export type WorkRef = Pick<WorkNode, "type" | "work">;
  */
 const CHAT_RUN_COMMANDS: Partial<Record<ChatRunKind, string>> = {
   // 検知は 2026-09-06 にここへ寄せた（設計書6.8.16）。相談側に写しを置くと、
-  // 件数の数え方・完了の知らせが片方だけ古くなる。**「いま開いている話
-  // だけ」（checkTyposForFile）と表記ゆれは、寄せられない理由が `run` に
-  // 書いてある**
+  // 件数の数え方・完了の知らせが片方だけ古くなる。**寄せられないのは
+  // 「いま開いている話だけ」（checkTyposForFile）だけで、その理由は
+  // `run` に書いてある**
   checkTypos: "novelai.checkTypos",
+  // 表記ゆれは、コマンド側が0組で黙っていたので寄せられなかった。
+  // その口を `describeNotationResult` に揃えて寄せた（2026-09-06）
+  checkNotation: "novelai.checkNotation",
   checkProofread: "novelai.checkProofread",
   checkDeviations: "novelai.checkDeviations",
   checkContradictions: "novelai.checkContradictions",
@@ -4692,6 +4686,38 @@ const CHAT_RUN_COMMANDS: Partial<Record<ChatRunKind, string>> = {
   openSynopsisDocs: "novelai.openSynopsisDocs",
   generatePlot: "novelai.generatePlot",
 };
+
+/**
+ * いま開いている本文の作品に登録してある投稿先（設計書6.68.2）。
+ *
+ * **読めなくても止めない。** ここで要るのは選択肢の並びを決めるための
+ * 手がかりだけで、無くてもコピーはできる。台帳が壊れているときに
+ * 「投稿サイト用にコピー」まで使えなくなるほうが困る。
+ */
+async function registeredPostingSites(
+  registry: WorkRegistry
+): Promise<readonly PostingSiteId[]> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) return [];
+
+  const filePath = fromUri(editor.document.uri);
+  // 比べ方は原稿エディタと同じものを使う（前方一致では足りない）
+  const work = registry
+    .list()
+    .find((entry) => isInsideWork(entry.folderPath, filePath));
+  if (!work) return [];
+
+  try {
+    const ledger = await new PostingStore(work).load();
+    return ledger.sites.map((entry) => entry.site);
+  } catch (error) {
+    logFailure("投稿サイト用のコピー：投稿状態の台帳の読み込み", {
+      work: work.title,
+      error,
+    });
+    return [];
+  }
+}
 
 async function resolveWork(
   node: WorkRef | undefined,
