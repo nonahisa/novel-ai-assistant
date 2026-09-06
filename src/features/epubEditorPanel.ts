@@ -96,6 +96,15 @@ import {
   toCharacterEntry,
 } from "../core/epubCharacterPage";
 import { CharacterStore } from "../core/characterStore";
+import {
+  collectOrnamentCatalogue,
+  type OrnamentCatalogue,
+} from "../core/epubOrnamentFolder";
+import {
+  BUILTIN_ORNAMENTS,
+  unknownOrnamentIds,
+  type OrnamentDef,
+} from "../core/epubOrnaments";
 import { buildEpubEditorPanelHtml } from "../views/epubEditorPanelHtml";
 import { openInDefaultEditor } from "../views/openDocument";
 import { atomicWriteFile } from "../core/atomicWrite";
@@ -188,6 +197,14 @@ interface PreviewSource {
    * 映すには、パネルを開き直す（欄を触るたびに読み直さない）。
    */
   afterword: PreviewAfterword | null;
+  /**
+   * 飾りの図録（設計書6.65.17）。
+   *
+   * **開いたときに1度だけ集める**（本文・人物・あとがきと同じ扱い）。
+   * `設定/書籍/飾り/` へ .svg を足したら、パネルを開き直せば選べるようになる
+   * ——欄を触るたびにフォルダーを走査すると、題名を打つあいだ何度も読む。
+   */
+  ornaments: OrnamentCatalogue;
 }
 
 /** あとがきの原稿。組版は本文とまったく同じ経路を通る */
@@ -1208,6 +1225,10 @@ async function previewData(state: PanelState) {
       ".epub-page"
     ),
     pages: buildPages(state, vertical, baked, missingFaces),
+    // 飾りの選択肢と、取り込めなかった飾りの理由（設計書6.65.17）。
+    // **画面は飾りを1つも知らない**ので、選択肢はここから届ける
+    ornamentChoices: ornamentChoices(state),
+    ornamentNotice: ornamentNotice(state),
     characterNotice: characterNotice(state),
     compose: {
       front: composeState(state, "front", baked.front),
@@ -1220,6 +1241,94 @@ async function previewData(state: PanelState) {
     notice: state.source.notice,
     dirty: isDirty(state),
   };
+}
+
+/**
+ * プレビューで使う飾りの図録（設計書6.65.17）。
+ *
+ * **書き出しとまったく同じ図録**（開いたときに集めたもの）を、目次・中表紙・
+ * 奥付の断片へ渡す。ここで組み込みだけに倒すと、作品の飾りを選んだ本が
+ * 画面では飾りなしに見えて、書き出すと出る——「見た目どおり」が壊れる。
+ */
+function ornaments(state: PanelState): readonly OrnamentDef[] {
+  return state.source.ornaments.catalogue;
+}
+
+/**
+ * 飾りを選ぶ欄の中身（設計書6.65.17）。
+ *
+ * **図録の並びをそのまま出す**（組み込み → 作品の飾り → 共通）。出どころは
+ * 呼び名に添える——同じ名前の飾りが2つ見えたときに、どちらを選んでいるのか
+ * 分からなくなるのを防ぐ。
+ *
+ * **設計図に書かれている id が図録に無ければ、その行を足す。** 足さないと
+ * `<select>` がその値を持てず、次に保存したときに**作者が選んだ飾りが空へ
+ * 書き換わる**（book.json の読みで知らない id を落とさないのと同じ守り）。
+ */
+function ornamentChoices(
+  state: PanelState
+): Array<{ value: string; label: string }> {
+  const catalogue = state.source.ornaments.catalogue;
+  const choices = catalogue.map((item) => ({
+    value: item.id,
+    label:
+      item.source === "work"
+        ? `${item.label}（作品の飾り）`
+        : item.source === "shared"
+          ? `${item.label}（共通）`
+          : item.label,
+  }));
+
+  const config = state.current;
+  for (const id of unknownOrnamentIds(
+    [
+      config.tocOrnament,
+      config.colophonOrnament,
+      config.titlePageOrnament,
+    ],
+    catalogue
+  )) {
+    choices.push({ value: id, label: `${id}（見つかりません：本では飾りなし）` });
+  }
+
+  return choices;
+}
+
+/**
+ * 飾りについての注記（設計書6.65.17）。
+ *
+ * 取り込めなかった飾りの理由と、名前がぶつかって使われなかった飾りを出す。
+ * **黙って落とさない**——置いたのに選べない理由が作者に分からない。
+ */
+function ornamentNotice(state: PanelState): string {
+  const { rejected, shadowed, catalogue } = state.source.ornaments;
+  const lines = rejected.map(
+    (item) => `飾り「${item.id}.svg」は使えません：${item.reason}`
+  );
+  for (const id of shadowed) {
+    lines.push(
+      `飾り「${id}.svg」は、同じ名前の飾りが先にあるため使いません（組み込みの飾りは上書きできません）。`
+    );
+  }
+
+  const config = state.current;
+  const unknown = unknownOrnamentIds(
+    [config.tocOrnament, config.colophonOrnament, config.titlePageOrnament],
+    catalogue
+  );
+  if (unknown.length > 0) {
+    lines.push(
+      `設計図の飾り「${unknown.join(
+        "」「"
+      )}」が見つかりません（本では飾りなしになります）。`
+    );
+  }
+
+  // **ここではログへ書かない。** この関数はプレビューを組み直すたび
+  // （打鍵のたび）に呼ばれるので、同じ行がログを埋める。取り込めなかった
+  // 飾りは開いたときに1度（`collectOrnamentCatalogue`）、設計図の知らない
+  // id は書き出しのときに1度（`exportEpub`）記録している
+  return lines.join("\n");
 }
 
 /**
@@ -1699,7 +1808,7 @@ function buildPages(
       case "halfTitle":
         add({
           label: "タイトルページ",
-          html: buildTitlePageFragment(config),
+          html: buildTitlePageFragment(config, ornaments(state)),
           note: null,
           vertical,
         });
@@ -1725,7 +1834,7 @@ function buildPages(
       case "colophon":
         add({
           label: "奥付",
-          html: buildColophonFragment(config, vertical),
+          html: buildColophonFragment(config, vertical, ornaments(state)),
           note: null,
           vertical,
         });
@@ -1755,7 +1864,7 @@ function coverPage(
     return {
       label: "表紙",
       // 本へ入るのと同じ組み方（画像1枚を敷く断片）で見せる
-      html: buildCoverFragment(config, { href: baked.uri }),
+      html: buildCoverFragment(config, { href: baked.uri }, ornaments(state)),
       note: describeBakedPreview(baked.bakedAt),
       vertical,
     };
@@ -1774,7 +1883,7 @@ function coverPage(
   }
   return {
     label: "表紙",
-    html: buildCoverFragment(config, null),
+    html: buildCoverFragment(config, null, ornaments(state)),
     note:
       "表紙の画像が指定されていないので、題名だけの扉が表紙になります" +
       "（次のタイトルページと同じ組み方です）。",
@@ -1817,6 +1926,7 @@ function tocPage(
       {
         pattern: config.tocPattern,
         ornament: config.tocOrnament,
+        ornaments: ornaments(state),
         colophonHref: "#",
         vertical,
         // **登場人物一覧・あとがきの行は、書き出しと同じ条件で入れる**
@@ -2090,6 +2200,7 @@ function characterNotice(state: PanelState): string | null {
 async function collectSource(work: WorkEntry): Promise<PreviewSource> {
   const scan = await scanWork(work);
   const format = await readWorkFormat(work);
+  const ornaments = await collectOrnaments(work);
 
   if (scan.episodes.length === 0) {
     return {
@@ -2103,6 +2214,7 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
       // 本文がまだ無くても、人物一覧の欄は使える（設定資料は別に育つ）
       characters: await collectCharacters(work),
       afterword: await collectAfterword(work),
+      ornaments,
     };
   }
 
@@ -2147,9 +2259,27 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
     notice: first.notice,
     characters: await collectCharacters(work),
     afterword: await collectAfterword(work),
+    ornaments,
   };
   source.outline = collectOutline(work, source, chapters);
   return source;
+}
+
+/**
+ * 飾りの図録を集める（設計書6.65.17）。
+ *
+ * **読めなくても画面は開く。** 作品設定が読めないときは組み込みの飾りだけに
+ * なる——飾りが8種に減るより、本の設計図を編めないほうが困る（焼いた表紙の
+ * 確認と同じ判断）。
+ */
+async function collectOrnaments(work: WorkEntry): Promise<OrnamentCatalogue> {
+  try {
+    return await collectOrnamentCatalogue(await settingsDir(work));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logFailure("EPUBの飾りの読み込み", { 作品: work.title, 内容: message });
+    return { catalogue: [...BUILTIN_ORNAMENTS], rejected: [], shadowed: [] };
+  }
 }
 
 /**

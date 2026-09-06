@@ -164,6 +164,26 @@ function coverSection(
  * `name` は種類そのものではなく「欄の名前」である——口絵と扉絵は置ける場所
  * だけが違い、設定は同じなので、1つの欄（`image`）を使い回す。
  */
+/**
+ * 飾りを選ぶ欄（設計書6.65.17）。目次・中表紙・奥付が同じ形で使う。
+ *
+ * **選択肢はここに書かない。** 飾りは `設定/書籍/飾り/*.svg` と共通
+ * フォルダーから増えるので、中身は拡張機能側の図録から届く
+ * （`fillOrnamentChoices`）。ここへ組み込みの8種を書き写すと、外から
+ * 足した飾りが選べないうえ、図録と画面の2か所を直すことになる。
+ *
+ * 注記は2行。上は**いつも出す**置き場所の案内（飾りを増やせることに
+ * 気づけないと、機能が無いのと同じ）。下は取り込めなかった飾りの理由で、
+ * 何も無ければ空になる。
+ */
+function ornamentRow(id: string): string {
+  return [
+    `    <label><span>飾り</span><select id="${id}"></select></label>`,
+    '    <p class="note ornament-hint">設定/書籍/飾り/ に .svg を置くと選べます。</p>',
+    '    <p class="note error ornament-reject"></p>',
+  ].join("\n");
+}
+
 function pane(name: string, body: readonly string[]): string {
   return [`  <div class="pane" id="pane-${name}" hidden>`, ...body, "  </div>"].join(
     "\n"
@@ -501,6 +521,12 @@ ${pane("backCover", [
 ])}
 ${pane("halfTitle", [
   '    <p class="note">題名と作者名だけの面です。中身は「本の設定」の画面の書誌情報から組みます。</p>',
+  ornamentRow("titlePageOrnament"),
+  '    <label><span>飾りの位置</span><select id="titlePageOrnamentPlace">',
+  '      <option value="above">題名の上</option>',
+  '      <option value="below">題名の下</option>',
+  '      <option value="both">題名の上下</option>',
+  "    </select></label>",
 ])}
 ${pane("toc", [
   '    <label><span>並べ方</span><select id="tocPattern">',
@@ -513,11 +539,7 @@ ${pane("toc", [
   '      <option value="titleOnly">題だけ</option>',
   '      <option value="numberOnly">番号だけ</option>',
   "    </select></label>",
-  '    <label><span>飾り</span><select id="tocOrnament">',
-  '      <option value="none">なし</option>',
-  '      <option value="rule">罫線</option>',
-  '      <option value="center">中央飾り</option>',
-  "    </select></label>",
+  ornamentRow("tocOrnament"),
   '    <p class="note">この面を本から外すときは、右の並びでこの面を右クリックして「削除」を選んでください。</p>',
 ])}
 ${pane("characters", [
@@ -540,13 +562,7 @@ ${pane("afterword", [
   '    <p class="note">本文の後ろに1面として入ります。原稿は 設定/書籍/あとがき.md に書きます（まだ無ければ作ります）。書いていなければ、並びに置いてあっても面は出ません。</p>',
   '    <div class="cover-actions"><button id="openAfterword">あとがきを書く</button></div>',
 ])}
-${pane("colophon", [
-  '    <label><span>飾り</span><select id="colophonOrnament">',
-  '      <option value="none">なし</option>',
-  '      <option value="rule">罫線</option>',
-  '      <option value="center">中央飾り</option>',
-  "    </select></label>",
-])}
+${pane("colophon", [ornamentRow("colophonOrnament")])}
     </div>
 
     <div id="pages"></div>
@@ -597,7 +613,12 @@ function field(id) {
 }
 
 const TEXTS = ['bookTitle', 'author', 'illustrator', 'label'];
-const CHOICES = ['writingMode', 'tocPattern', 'tocEntryStyle', 'tocOrnament', 'colophonOrnament'];
+const CHOICES = [
+  'writingMode', 'tocPattern', 'tocEntryStyle',
+  'tocOrnament', 'colophonOrnament', 'titlePageOrnament', 'titlePageOrnamentPlace'
+];
+/** 飾りを選ぶ欄。選択肢は図録から届く（設計書6.65.17） */
+const ORNAMENT_FIELDS = ['tocOrnament', 'colophonOrnament', 'titlePageOrnament'];
 /*
  * 目次・人物紹介の「入れる」チェックは持たない（設計書6.65.15の段C）。
  * **並びに置いてあるかどうかが決める。** 設計図に残っている「入れるか」の
@@ -1220,6 +1241,44 @@ function fillOutline(list) {
   renderOutline();
 }
 
+/*
+ * 飾りの選択肢を、拡張機能から届いた図録で組み直す（設計書6.65.17）。
+ *
+ * **画面は飾りを1つも知らない。** 組み込みの8種も、作品の飾りも、
+ * 共通フォルダーの飾りも、同じ形で届く——ここへ写すと、飾りを増やした
+ * ときに直す場所が2か所になる。
+ *
+ * **選んでいた値は、選択肢に残っていれば守る。** プレビューのたびに
+ * 組み直すので、ここで選びが戻ると欄を触るたびに飾りが変わる。
+ * 図録に無い id も、拡張機能側が「見つかりません」の行として送ってくる
+ * ので、作者が書いた値を画面が黙って空へ落とすことはない。
+ */
+function fillOrnamentChoices(list) {
+  const items = list || [];
+  ORNAMENT_FIELDS.forEach(function (id) {
+    const select = field(id);
+    if (!select) return;
+    const kept = select.value;
+    select.textContent = '';
+    items.forEach(function (item) {
+      const option = document.createElement('option');
+      option.value = item.value;
+      option.textContent = item.label;
+      select.appendChild(option);
+    });
+    const found = items.some(function (item) { return item.value === kept; });
+    if (found) select.value = kept;
+  });
+}
+
+/** 取り込めなかった飾りの理由。無ければ空にする（欄ごとに同じものを出す） */
+function applyOrnamentNotice(text) {
+  const notes = document.querySelectorAll('.ornament-reject');
+  for (let index = 0; index < notes.length; index += 1) {
+    notes[index].textContent = text || '';
+  }
+}
+
 function applyWarnings(data) {
   field('placementWarnings').textContent =
     (data.placementWarnings || []).join('\\n');
@@ -1704,6 +1763,9 @@ window.addEventListener('message', function (event) {
     const data = message.data;
     field('title').textContent = data.title;
     field('filePath').textContent = data.filePath;
+    // **選択肢を先に入れる。** 空の select へ値を入れても選べない
+    fillOrnamentChoices(data.ornamentChoices);
+    applyOrnamentNotice(data.ornamentNotice);
     fillForm(data.config);
     fillOutline(data.outline);
     applyCompose(data);
@@ -1713,6 +1775,8 @@ window.addEventListener('message', function (event) {
     return;
   }
   if (message.type === 'preview') {
+    fillOrnamentChoices(message.data.ornamentChoices);
+    applyOrnamentNotice(message.data.ornamentNotice);
     fillOutline(message.data.outline);
     applyCompose(message.data);
     applyWarnings(message.data);

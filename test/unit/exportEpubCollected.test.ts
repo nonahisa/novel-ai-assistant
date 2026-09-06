@@ -347,7 +347,10 @@ const GOLDEN: Record<string, string> = {
     "deffc11a1af93d52016328e8a767600371603f8ce44870f618a4970f56544cb2",
   "OEBPS/style.css":
     // 0.36.2：目次の一覧の番号を出さない（.nav-list に list-style: none）
-    "6fa8c0e8a9e244ce649a873535ef0ca347f0211ff18094aba76c0d7eef0e4dd7",
+    // 0.37.2：飾りに二重罫を足した（.ornament-double-rule。設計書6.65.17）。
+    //   **CSSだけが変わり、面のXHTMLは1バイトも変わっていない**
+    //   ——飾りを選んでいない本の見た目は同じである
+    "5310b9fb9779724dc0f224121a727a146879aa9375b186c40e3c1069475dfa1a",
   "OEBPS/cover.xhtml":
     "57c976846884228c05723713693b3112cba591ce48021a884c7ad902cbdf15e5",
   "OEBPS/titlepage.xhtml":

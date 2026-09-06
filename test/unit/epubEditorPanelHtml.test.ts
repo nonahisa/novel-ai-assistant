@@ -370,6 +370,48 @@ describe("左の設定の欄", () => {
   });
 
   /**
+   * 飾りの図録（設計書6.65.17）。**画面は飾りを1つも知らない。**
+   *
+   * 組み込みの8種も、`設定/書籍/飾り/*.svg` も、共通フォルダーの飾りも、
+   * 同じ形で拡張機能側から届く。ここへ選択肢を書き写すと、外から足した
+   * 飾りが選べないうえ、図録と画面の2か所を直すことになる。
+   */
+  it("飾りの選択肢は空で、図録から組む", () => {
+    for (const id of [
+      "tocOrnament",
+      "colophonOrnament",
+      "titlePageOrnament",
+    ]) {
+      expect(html).toContain(`<select id="${id}"></select>`);
+    }
+    // 組み込みの飾りの id も呼び名も、画面には書かない
+    expect(html).not.toContain('value="rule"');
+    expect(html).not.toContain('value="center"');
+    expect(html).not.toContain("中央飾り");
+    expect(script).toContain("function fillOrnamentChoices");
+    expect(script).toContain("data.ornamentChoices");
+    expect(script).toContain("message.data.ornamentChoices");
+  });
+
+  it("中表紙に飾りと、その置き場所がある", () => {
+    expect(html).toContain('id="titlePageOrnament"');
+    expect(html).toContain('id="titlePageOrnamentPlace"');
+    // 置き場所は3つだけなので、こちらは画面に書いてよい
+    expect(html).toContain('value="above"');
+    expect(html).toContain('value="below"');
+    expect(html).toContain('value="both"');
+    // 送る欄に入っていないと、選んでも設計図へ入らない
+    expect(script).toContain("'titlePageOrnament'");
+    expect(script).toContain("'titlePageOrnamentPlace'");
+  });
+
+  it("飾りを増やせることと、取り込めなかった理由を出す場所がある", () => {
+    expect(html).toContain("設定/書籍/飾り/ に .svg を置くと選べます。");
+    expect(html).toContain('class="note error ornament-reject"');
+    expect(script).toContain("ornamentNotice");
+  });
+
+  /**
    * 目次の見出しの形（設計書6.65.15の1）。番号＋題／題だけ／番号だけの
    * 3択で、既定（`numberAndTitle`）はいままでどおりの見た目になる。
    */
@@ -582,7 +624,11 @@ describe("選んだ面のプレビュー", () => {
     expect(script).toContain("data.css");
     expect(script).not.toContain("nav-list");
     expect(script).not.toContain("colophon-list");
-    expect(script).not.toContain("ornament");
+    // 飾りの**中身**（罫線のCSSの印・SVG）は画面が持たない。選択肢の
+    // 一覧は図録から届くので、そこへ入れる口だけがある（設計書6.65.17）
+    expect(script).not.toContain("ornament-rule");
+    expect(script).not.toContain("ornament-center");
+    expect(script).not.toContain("<svg");
   });
 
   it("面の並びは拡張機能側が決める（画面は数も順も持たない）", () => {

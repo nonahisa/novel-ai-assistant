@@ -71,18 +71,32 @@ export const TOC_ENTRY_STYLES: readonly TocEntryStyle[] = [
 ];
 
 /**
- * 目次・奥付の飾り（設計書6.65.6）。
+ * 飾りの id（設計書6.65.17）。**決まった3つではなく、ただの文字列である。**
  *
- * **画像ファイルは増やさない。** `rule` はCSSの罫線、`center` は断片の
- * 中に書いたSVGである。外部ファイルにすると、OPFのmanifestへ載せ忘れた
- * ときに「本は開くが飾りだけ出ない」という分かりにくい壊れ方をする。
+ * 飾りは組み込みの8種のほかに、`設定/書籍/飾り/*.svg` と共通フォルダーから
+ * 増やせる（図録は `core/epubOrnaments.ts`）。`models` は `core` に依存
+ * できないので、**ここでは形（文字列）だけを決め、実在するかは見ない**。
+ *
+ * **知らない id を読みで落とさない。** 共通フォルダーを外した端末で
+ * book.json を開いただけで、作者が選んだ飾りが黙って「なし」に書き換わって
+ * しまう。描くときに図録を引いて、無ければ「なし」と同じ扱いにする
+ * （`buildOrnamentFragment`）——**値は消さない**、というほかの台帳と
+ * 同じ約束である。
  */
-export type BookOrnament = "none" | "rule" | "center";
+export type BookOrnamentId = string;
 
-export const BOOK_ORNAMENTS: readonly BookOrnament[] = [
-  "none",
-  "rule",
-  "center",
+/**
+ * 飾りを置く場所（設計書6.65.17）。中表紙の題名の上／下／上下。
+ *
+ * **既定は「下」。** 題名の下に飾りを敷くのが日本語の本でいちばん多く、
+ * 上だけに置くと、扉を開いた最初の行が飾りになって題名が下がる。
+ */
+export type BookOrnamentPlace = "above" | "below" | "both";
+
+export const BOOK_ORNAMENT_PLACES: readonly BookOrnamentPlace[] = [
+  "above",
+  "below",
+  "both",
 ];
 
 /**
@@ -377,10 +391,19 @@ export interface BookConfig {
   tocPattern: TocPattern;
   /** 目次の1行に出す見出しの形（設計書6.65.15）。既定は番号＋題 */
   tocEntryStyle: TocEntryStyle;
-  /** 目次ページの飾り */
-  tocOrnament: BookOrnament;
+  /** 目次ページの飾り。図録の id（`core/epubOrnaments.ts`） */
+  tocOrnament: BookOrnamentId;
   /** 奥付の飾り。目次とは別に選べる（片方だけ飾りたいことがある） */
-  colophonOrnament: BookOrnament;
+  colophonOrnament: BookOrnamentId;
+  /**
+   * 中表紙（扉）の飾り（設計書6.65.17）。既定は「なし」。
+   *
+   * **表紙が画像1枚の本では、題名を文字で読める面はここだけ**である
+   * （`buildTitlePageFragment` の説明を参照）。目次・奥付とは別に選べる。
+   */
+  titlePageOrnament: BookOrnamentId;
+  /** 中表紙の飾りを題名の上・下・上下のどこに置くか。既定は「下」 */
+  titlePageOrnamentPlace: BookOrnamentPlace;
   /**
    * 続いた空行を1つ減らすか（設計書6.65.2「改行が2つ並んでいたら1つに」）。
    *
@@ -791,6 +814,9 @@ export function defaultBookConfig(title: string): BookConfig {
     tocEntryStyle: "numberAndTitle",
     tocOrnament: "none",
     colophonOrnament: "none",
+    // 中表紙の飾りも既定は無し（既にある本の見た目を1文字も変えない）
+    titlePageOrnament: "none",
+    titlePageOrnamentPlace: "below",
     collapseBlankLines: true,
     coverImagePath: null,
     backCoverImagePath: null,
@@ -838,8 +864,17 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
   optionalBoolean(value.tocEnabled, "tocEnabled");
   optionalEnum(value.tocPattern, "tocPattern", TOC_PATTERNS);
   optionalEnum(value.tocEntryStyle, "tocEntryStyle", TOC_ENTRY_STYLES);
-  optionalEnum(value.tocOrnament, "tocOrnament", BOOK_ORNAMENTS);
-  optionalEnum(value.colophonOrnament, "colophonOrnament", BOOK_ORNAMENTS);
+  // **飾りの id は文字列として受け取る**（設計書6.65.17）。図録に無い id を
+  // ここで弾くと、共通フォルダーを外した端末で設計図そのものが読めなくなる
+  optionalString(value.tocOrnament, "tocOrnament");
+  optionalString(value.colophonOrnament, "colophonOrnament");
+  optionalString(value.titlePageOrnament, "titlePageOrnament");
+  // 置き場所は3つしかないので、いままでどおり知らない値を弾く
+  optionalEnum(
+    value.titlePageOrnamentPlace,
+    "titlePageOrnamentPlace",
+    BOOK_ORNAMENT_PLACES
+  );
   optionalBoolean(value.collapseBlankLines, "collapseBlankLines");
   optionalNullableString(value.coverImagePath, "coverImagePath");
   optionalNullableString(value.backCoverImagePath, "backCoverImagePath");
@@ -866,11 +901,18 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
     tocEntryStyle:
       (value.tocEntryStyle as TocEntryStyle | undefined) ??
       defaults.tocEntryStyle,
-    tocOrnament:
-      (value.tocOrnament as BookOrnament | undefined) ?? defaults.tocOrnament,
-    colophonOrnament:
-      (value.colophonOrnament as BookOrnament | undefined) ??
-      defaults.colophonOrnament,
+    tocOrnament: ornamentId(value.tocOrnament, defaults.tocOrnament),
+    colophonOrnament: ornamentId(
+      value.colophonOrnament,
+      defaults.colophonOrnament
+    ),
+    titlePageOrnament: ornamentId(
+      value.titlePageOrnament,
+      defaults.titlePageOrnament
+    ),
+    titlePageOrnamentPlace:
+      (value.titlePageOrnamentPlace as BookOrnamentPlace | undefined) ??
+      defaults.titlePageOrnamentPlace,
     collapseBlankLines:
       (value.collapseBlankLines as boolean | undefined) ??
       defaults.collapseBlankLines,
@@ -1206,6 +1248,18 @@ function coverColor(
     );
   }
   return value.toLowerCase();
+}
+
+/**
+ * 飾りの id（設計書6.65.17）。**空白だけは「書いていない」と同じに扱う。**
+ *
+ * 図録に実在するかは見ない（`models` は図録を知らない）。知らない id は
+ * そのまま持ち回り、描くときに「なし」へ倒す——作者が選んだ値を、
+ * 読み込みのついでに消さないための扱いである。
+ */
+function ornamentId(raw: unknown, fallback: BookOrnamentId): BookOrnamentId {
+  const value = ((raw as string | undefined) ?? "").trim();
+  return value || fallback;
 }
 
 /**

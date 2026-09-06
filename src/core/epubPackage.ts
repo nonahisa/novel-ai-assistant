@@ -7,10 +7,15 @@ import {
   resolveBookBlocks,
   type BookBlockType,
   type BookConfig,
-  type BookOrnament,
+  type BookOrnamentId,
   type TocEntryStyle,
   type TocPattern,
 } from "../models/book";
+import {
+  BUILTIN_ORNAMENTS,
+  buildOrnamentFragment,
+  type OrnamentDef,
+} from "./epubOrnaments";
 import {
   buildChapterFragment,
   buildChapterXhtml,
@@ -240,6 +245,15 @@ export interface EpubBook {
   /** 同梱する書体（設計書6.65.11）。無ければ第1段と同じ本になる */
   fonts?: EpubFonts;
   /**
+   * 飾りの図録（設計書6.65.17）。**省略すると組み込みの飾りだけ**になる。
+   *
+   * 外から足した飾りを使うには、呼び出し側が集めて渡す
+   * （`core/epubOrnamentFolder.ts` の `collectOrnamentCatalogue`）。
+   * ここでフォルダーを読みに行かないのは、挿絵・書体と同じ理由——
+   * 本を組む側はファイルを読まず、渡されたものだけで組む。
+   */
+  ornaments?: readonly OrnamentDef[];
+  /**
    * 面の並び（設計書6.65.15）。**省略すると設計図から既定の並びを組む。**
    *
    * 省略したときは口絵・扉絵・あとがきが出ない——どれも中身（画像・原稿）が
@@ -338,6 +352,9 @@ export function buildEpub(book: EpubBook): Uint8Array {
 
   const config = book.config;
   const vertical = config.writingMode === "vertical";
+  // 飾りの図録（設計書6.65.17）。**渡されなければ組み込みだけ**——
+  // ここはファイルを読みに行かない（挿絵・書体と同じ約束）
+  const ornaments = book.ornaments ?? BUILTIN_ORNAMENTS;
   const cover = book.cover
     ? {
         ...book.cover,
@@ -388,6 +405,7 @@ export function buildEpub(book: EpubBook): Uint8Array {
     plateImages: plates.images,
     // **中身の無いあとがきは面ごと出さない**（設計書6.65.15）
     afterword: afterwordOf(blocks),
+    ornaments,
   };
   const files: Zippable = {
     // **先頭・無圧縮。** ここを外すとリーダーが本と認識しない
@@ -408,13 +426,19 @@ export function buildEpub(book: EpubBook): Uint8Array {
   // **並びに無い面は、ファイルごと作らない**（設計書6.65.15）。読まれない
   // 面が本の中に残ると、目録との食い違いを epubcheck が咎める
   if (hasBlock(packaged, "cover")) {
-    files[`${ROOT}/${COVER_NAME}`] = encode(coverXhtml(config, cover, vertical));
+    files[`${ROOT}/${COVER_NAME}`] = encode(
+      coverXhtml(config, cover, vertical, ornaments)
+    );
   }
   if (hasBlock(packaged, "halfTitle")) {
-    files[`${ROOT}/${TITLEPAGE_NAME}`] = encode(titlePageXhtml(config, vertical));
+    files[`${ROOT}/${TITLEPAGE_NAME}`] = encode(
+      titlePageXhtml(config, vertical, ornaments)
+    );
   }
   if (hasBlock(packaged, "colophon")) {
-    files[`${ROOT}/${COLOPHON_NAME}`] = encode(colophonXhtml(config, vertical));
+    files[`${ROOT}/${COLOPHON_NAME}`] = encode(
+      colophonXhtml(config, vertical, ornaments)
+    );
   }
 
   if (characters.length > 0) {
@@ -766,6 +790,8 @@ interface PackagedBook {
   plateImages: readonly PackagedIllustration[];
   /** 本へ入るあとがき。中身が無ければ null */
   afterword: EpubAfterwordBlock | null;
+  /** 飾りの図録（設計書6.65.17）。目次・中表紙・奥付が同じものを引く */
+  ornaments: readonly OrnamentDef[];
 }
 
 /** その種類の面が並びにあるか */
@@ -1059,6 +1085,7 @@ function navXhtml(packaged: PackagedBook): string {
       {
         pattern: config.tocPattern,
         ornament: config.tocOrnament,
+        ornaments: packaged.ornaments,
         colophonHref: hasBlock(packaged, "colophon") ? COLOPHON_NAME : null,
         charactersHref:
           packaged.characters.length > 0 ? CHARACTERS_NAME : null,
@@ -1117,7 +1144,15 @@ export interface EpubTocEntry {
 
 export interface EpubTocOptions {
   pattern: TocPattern;
-  ornament: BookOrnament;
+  /** 飾りの id（図録の `ornaments` から引く。知らない id は「なし」扱い） */
+  ornament: BookOrnamentId;
+  /**
+   * 飾りの図録（設計書6.65.17）。**省略すると組み込みだけ**になる。
+   *
+   * 外から足した飾り（`設定/書籍/飾り/*.svg`・共通フォルダー）を使うには、
+   * 呼び出し側が集めて渡す（`core/epubOrnamentFolder.ts`）。
+   */
+  ornaments?: readonly OrnamentDef[];
   /** 末尾に置く奥付への行。null なら出さない */
   colophonHref?: string | null;
   /**
@@ -1199,7 +1234,8 @@ export function buildTocFragment(
   return [
     '<nav epub:type="toc" id="toc">',
     `<h1 class="nav-heading">目次${buildOrnamentFragment(
-      options.ornament
+      options.ornament,
+      options.ornaments ?? BUILTIN_ORNAMENTS
     )}</h1>`,
     `  <ol class="${listClass}">`,
     ...characters,
@@ -1278,30 +1314,6 @@ function groupedItems(
 }
 
 /**
- * 目次・奥付の飾り（設計書6.65.6）。
- *
- * **外部ファイルにしない。** 画像を1つ足すたびにOPFのmanifestへ載せる
- * 必要があり、載せ忘れると「本は開くが飾りだけ出ない」という気づきにくい
- * 壊れ方をする。罫線はCSS、中央飾りはここに書いたSVGで持つ。
- *
- * 縦組みでも横組みでも同じ向きで見えるよう、**中央飾りは左右対称の形**に
- * してある（横長の飾りは、縦組みの本で寝てしまう）。
- */
-export function buildOrnamentFragment(kind: BookOrnament): string {
-  if (kind === "rule") return '<span class="ornament ornament-rule"></span>';
-  if (kind === "center") {
-    return (
-      '<span class="ornament ornament-center">' +
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"' +
-      ' width="24" height="24" aria-hidden="true" role="presentation">' +
-      '<path d="M12 2 L16 12 L12 22 L8 12 Z" fill="currentColor" />' +
-      "</svg></span>"
-    );
-  }
-  return "";
-}
-
-/**
  * 表紙。
  *
  * 画像があれば1枚を敷き、無ければ題名・作者名の扉を組む。
@@ -1310,7 +1322,8 @@ export function buildOrnamentFragment(kind: BookOrnament): string {
 function coverXhtml(
   config: BookConfig,
   cover: PackagedCover | null,
-  vertical: boolean
+  vertical: boolean,
+  ornaments: readonly OrnamentDef[]
 ): string {
   return buildXhtmlDocument({
     title: config.title || "無題",
@@ -1318,7 +1331,8 @@ function coverXhtml(
     vertical,
     body: buildCoverFragment(
       config,
-      cover ? { href: cover.packagedName } : null
+      cover ? { href: cover.packagedName } : null,
+      ornaments
     ),
   });
 }
@@ -1331,9 +1345,10 @@ function coverXhtml(
  */
 export function buildCoverFragment(
   config: BookConfig,
-  image: { href: string } | null
+  image: { href: string } | null,
+  ornaments: readonly OrnamentDef[] = BUILTIN_ORNAMENTS
 ): string {
-  if (!image) return buildTitlePageFragment(config);
+  if (!image) return buildTitlePageFragment(config, ornaments);
   return [
     '<div class="cover-image">',
     `<img src="${escapeXml(image.href)}" alt="${escapeXml(
@@ -1417,20 +1432,44 @@ export function buildBackCoverFragment(image: { href: string }): string {
  * なる。書いていない項目が多くても面ごと省いたりはしない——面が出たり
  * 消えたりするほうが、作者にも読者にも分かりにくい。
  */
-function titlePageXhtml(config: BookConfig, vertical: boolean): string {
+function titlePageXhtml(
+  config: BookConfig,
+  vertical: boolean,
+  ornaments: readonly OrnamentDef[]
+): string {
   return buildXhtmlDocument({
     title: config.title || "無題",
     cssHref: CSS_NAME,
     vertical,
-    body: buildTitlePageFragment(config),
+    body: buildTitlePageFragment(config, ornaments),
   });
 }
 
-/** 題名・作者名・イラストレーター名・レーベル名を組んだ扉 */
-export function buildTitlePageFragment(config: BookConfig): string {
+/**
+ * 題名・作者名・イラストレーター名・レーベル名を組んだ扉。
+ *
+ * **飾りは題名のすぐ上・下に置く**（設計書6.65.17）。作者名やレーベル名の
+ * 下ではなく題名に添えるのは、扉で目が行くのが題名だからで、上下に置いた
+ * ときは題名だけが2本の飾りに挟まれる形になる。
+ *
+ * 飾りの断片は目次・奥付とまったく同じもの（`buildOrnamentFragment`）を
+ * 通す——面ごとに飾りの組み方を持つと、直したほうだけが本物になる。
+ */
+export function buildTitlePageFragment(
+  config: BookConfig,
+  ornaments: readonly OrnamentDef[] = BUILTIN_ORNAMENTS
+): string {
+  const fragment = buildOrnamentFragment(config.titlePageOrnament, ornaments);
+  const place = config.titlePageOrnamentPlace;
+  // 飾りが「なし」（あるいは図録に無い id）なら、上下どちらにも出さない
+  const above = fragment && place !== "below" ? [fragment] : [];
+  const below = fragment && place !== "above" ? [fragment] : [];
+
   return [
     '<div class="title-page">',
+    ...above,
     `<h1 class="book-title">${escapeXml(config.title || "無題")}</h1>`,
+    ...below,
     ...(config.author
       ? [`<p class="book-author">${escapeXml(config.author)}</p>`]
       : []),
@@ -1449,12 +1488,16 @@ export function buildTitlePageFragment(config: BookConfig): string {
 }
 
 /** 奥付 */
-function colophonXhtml(config: BookConfig, vertical: boolean): string {
+function colophonXhtml(
+  config: BookConfig,
+  vertical: boolean,
+  ornaments: readonly OrnamentDef[]
+): string {
   return buildXhtmlDocument({
     title: "奥付",
     cssHref: CSS_NAME,
     vertical,
-    body: buildColophonFragment(config, vertical),
+    body: buildColophonFragment(config, vertical, ornaments),
   });
 }
 
@@ -1466,7 +1509,8 @@ function colophonXhtml(config: BookConfig, vertical: boolean): string {
  */
 export function buildColophonFragment(
   config: BookConfig,
-  vertical = false
+  vertical = false,
+  ornaments: readonly OrnamentDef[] = BUILTIN_ORNAMENTS
 ): string {
   const rows = [
     ["題名", config.title || "無題"],
@@ -1478,7 +1522,8 @@ export function buildColophonFragment(
   return [
     '<div class="colophon">',
     `<h1 class="colophon-heading">奥付${buildOrnamentFragment(
-      config.colophonOrnament
+      config.colophonOrnament,
+      ornaments
     )}</h1>`,
     '  <dl class="colophon-list">',
     ...rows.flatMap(([label, value]) => [
@@ -1625,6 +1670,14 @@ export function buildEpubCss(
     ".ornament { display: block; margin-block-start: 0.6em; text-align: center; }",
     ".ornament-rule {",
     "  border-block-start: 1px solid currentColor;",
+    "  inline-size: 60%;",
+    "  margin-inline: auto;",
+    "}",
+    // 二重罫（設計書6.65.17）。**罫線と同じ幅・同じ引き方**にしてある
+    // ——太さだけを変えた別の飾りにすると、並べたときに揃わない。
+    // `double` は3pxより細いと1本に見えるリーダーがあるので3pxで引く
+    ".ornament-double-rule {",
+    "  border-block-start: 3px double currentColor;",
     "  inline-size: 60%;",
     "  margin-inline: auto;",
     "}",

@@ -56,6 +56,15 @@ import {
   type CoverSource,
 } from "../core/coverBake";
 import { randomUuid } from "../core/runtime";
+import {
+  collectOrnamentCatalogue,
+  type OrnamentCatalogue,
+} from "../core/epubOrnamentFolder";
+import {
+  BUILTIN_ORNAMENTS,
+  unknownOrnamentIds,
+  type OrnamentDef,
+} from "../core/epubOrnaments";
 import { revealFolder } from "../views/openDocument";
 import { logFailure } from "../core/logger";
 
@@ -298,6 +307,9 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     ? await collectCharacters(work, config.characterPage.showIcons, notices)
     : [];
   const fonts = await collectFonts(work, config.fonts, notices);
+  // 飾りの図録（設計書6.65.17）。**画面とまったく同じ集め方**を通す
+  // ——別々に集めると、画面で選べた飾りが本に入らないことが起きる
+  const ornaments = await collectOrnaments(work, settings, config, notices);
   // 面の並び（設計書6.65.15）。**中身を読めなかった面だけを外す**
   // ——口絵1枚のために本そのものが出ないほうが困る（挿絵と同じ流儀）
   const blocks = await collectBlocks({
@@ -318,6 +330,7 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       characters,
       fonts,
       blocks,
+      ornaments,
       // 本を見分ける唯一の札。書き出すたびに新しい本として扱われる
       identifier: `urn:uuid:${randomUuid()}`,
       modified: isoSeconds(new Date()),
@@ -701,6 +714,52 @@ async function collectFonts(
     body: await readFont(work, fonts.body, "本文用の書体", notices),
     heading: await readFont(work, fonts.heading, "見出し用の書体", notices),
   };
+}
+
+/**
+ * 飾りの図録を集める（設計書6.65.17）。**書体・挿絵と同じ流儀**である。
+ *
+ * **飾りのために本を止めない。** フォルダーが読めない・SVGが検査に落ちた・
+ * 設計図の id が図録に無い——どれも本は出し、何が入らなかったかを完了通知で
+ * 伝える。飾り1つのために本そのものが出ないほうが困る。
+ */
+async function collectOrnaments(
+  work: WorkEntry,
+  settings: string,
+  config: BookConfig,
+  notices: string[]
+): Promise<readonly OrnamentDef[]> {
+  let collected: OrnamentCatalogue;
+  try {
+    collected = await collectOrnamentCatalogue(settings);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logFailure("飾りの読み込み", { 作品: work.title, 内容: message });
+    notices.push(
+      "飾りのフォルダーを読めませんでした。組み込みの飾りだけで組んでいます。"
+    );
+    return BUILTIN_ORNAMENTS;
+  }
+
+  for (const item of collected.rejected) {
+    notices.push(`飾り「${item.id}.svg」は本に入れられません：${item.reason}`);
+  }
+
+  // **設計図に書いてあるのに図録に無い飾り**（共通フォルダーを外した、
+  // 作品の飾りを消した）。本では「なし」になるので、黙って出さない
+  const unknown = unknownOrnamentIds(
+    [config.tocOrnament, config.colophonOrnament, config.titlePageOrnament],
+    collected.catalogue
+  );
+  if (unknown.length > 0) {
+    const message = `設計図の飾り「${unknown.join(
+      "」「"
+    )}」が見つかりませんでした。その面は飾りなしで組んでいます。`;
+    logFailure("飾りの照合", { 作品: work.title, 内容: message });
+    notices.push(message);
+  }
+
+  return collected.catalogue;
 }
 
 async function readFont(

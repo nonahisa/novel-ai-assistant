@@ -18,6 +18,7 @@ import {
   defaultBookConfig,
   type BookConfig,
 } from "../../src/models/book";
+import { BUILTIN_ORNAMENTS } from "../../src/core/epubOrnaments";
 
 /**
  * EPUB3のZIP組み立て（設計書6.65.4の第1段）。
@@ -866,6 +867,123 @@ describe("目次と奥付の飾り（設計書6.65.6）", () => {
     expect(files["OEBPS/colophon.xhtml"]).not.toContain("ornament");
   });
 });
+
+/**
+ * 中表紙の飾りと、外から足した飾り（設計書6.65.17）。
+ *
+ * 中表紙は、表紙が画像1枚の本で**題名を文字で読める唯一の面**である。
+ * 目次・奥付と同じ飾りを、題名の上／下／上下に置けるようにした。
+ */
+describe("中表紙の飾りと外から足した飾り（設計書6.65.17）", () => {
+  test("既定では中表紙に飾りが出ない（いままでどおりの扉）", () => {
+    const files = open(buildEpub(book()));
+
+    expect(files["OEBPS/titlepage.xhtml"]).not.toContain("ornament");
+  });
+
+  test("「下」は題名のあと、「上」は題名の前に置く", () => {
+    const below = buildTitlePageFragment({
+      ...defaultBookConfig("氷の街"),
+      titlePageOrnament: "rule",
+      titlePageOrnamentPlace: "below",
+    });
+    const above = buildTitlePageFragment({
+      ...defaultBookConfig("氷の街"),
+      titlePageOrnament: "rule",
+      titlePageOrnamentPlace: "above",
+    });
+
+    expect(below.indexOf("ornament-rule")).toBeGreaterThan(
+      below.indexOf("book-title")
+    );
+    expect(above.indexOf("ornament-rule")).toBeLessThan(
+      above.indexOf("book-title")
+    );
+  });
+
+  test("「上下」は題名を挟む（飾りは2つ）", () => {
+    const both = buildTitlePageFragment({
+      ...defaultBookConfig("氷の街"),
+      titlePageOrnament: "rule",
+      titlePageOrnamentPlace: "both",
+    });
+
+    expect(both.match(/ornament-rule/g)).toHaveLength(2);
+  });
+
+  test("書き出した中表紙にも、同じ断片がそのまま入っている", () => {
+    const config = {
+      ...defaultBookConfig("氷の街"),
+      titlePageOrnament: "asterism",
+      titlePageOrnamentPlace: "both" as const,
+    };
+    const files = open(buildEpub({ ...book(), config }));
+
+    expect(files["OEBPS/titlepage.xhtml"]).toContain(
+      buildTitlePageFragment(config)
+    );
+    // 画像ファイルは増やさない（飾りは断片の中のSVG）
+    expect(Object.keys(files).filter((name) => name.endsWith(".svg"))).toEqual([]);
+  });
+
+  test("二重罫はCSSで引く", () => {
+    const files = open(buildEpub(withConfig({ tocOrnament: "double-rule" })));
+
+    expect(files["OEBPS/nav.xhtml"]).toContain("ornament-double-rule");
+    expect(files["OEBPS/style.css"]).toContain(".ornament-double-rule");
+  });
+
+  /**
+   * **知らない id で本を壊さない。** 共通フォルダーを外した端末で書き出す、
+   * 作品の飾りを消した——どちらも起こりうる。飾り1つのために本そのものが
+   * 出ないほうが困るので、「なし」と同じ扱いにする。
+   */
+  test("図録に無いidは「なし」と同じ（本は出る）", () => {
+    const files = open(
+      buildEpub(
+        withConfig({
+          tocOrnament: "うちの花",
+          colophonOrnament: "うちの花",
+          titlePageOrnament: "うちの花",
+        })
+      )
+    );
+
+    expect(files["OEBPS/nav.xhtml"]).not.toContain("ornament");
+    expect(files["OEBPS/colophon.xhtml"]).not.toContain("ornament");
+    expect(files["OEBPS/titlepage.xhtml"]).not.toContain("ornament");
+  });
+
+  test("図録を渡せば、外から足した飾りが本へ入る", () => {
+    const files = open(
+      buildEpubInput({
+        tocOrnament: "うちの花",
+        titlePageOrnament: "うちの花",
+      })
+    );
+
+    expect(files["OEBPS/nav.xhtml"]).toContain('<circle cx="12"');
+    expect(files["OEBPS/titlepage.xhtml"]).toContain('<circle cx="12"');
+    // 外から足した飾りも、罫線以外はすべて `ornament-center` の枠に入る
+    expect(files["OEBPS/nav.xhtml"]).toContain("ornament-center");
+  });
+});
+
+/** 作品の飾りを1つ足した図録で本を組む（上のテスト専用の材料） */
+function buildEpubInput(config: Partial<BookConfig>): Uint8Array {
+  return buildEpub({
+    ...withConfig(config),
+    ornaments: [
+      ...BUILTIN_ORNAMENTS,
+      {
+        id: "うちの花",
+        label: "うちの花",
+        svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" role="presentation"><circle cx="12" cy="12" r="5" fill="currentColor" /></svg>',
+        source: "work",
+      },
+    ],
+  });
+}
 
 describe("プレビューと書き出しは同じ断片を使う（設計書6.65.6）", () => {
   /**

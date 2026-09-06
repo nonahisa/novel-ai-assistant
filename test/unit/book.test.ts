@@ -48,6 +48,10 @@ describe("本の設計図の既定値", () => {
       tocEntryStyle: "numberAndTitle",
       tocOrnament: "none",
       colophonOrnament: "none",
+      // 中表紙の飾り（設計書6.65.17）。**既定は無し**なので、既にある本の
+      // 見た目は1文字も変わらない。置き場所の既定は「題名の下」
+      titlePageOrnament: "none",
+      titlePageOrnamentPlace: "below",
       coverLayout: defaultCoverLayout(),
       backCoverLayout: defaultBackCoverLayout(),
       // 挿絵とページ分割は、指定するまで空（設計書6.65.10）
@@ -153,17 +157,36 @@ describe("壊れた設計図は受け取らない", () => {
     expect(() => parseBookConfig({ writingMode: "たて" }, "氷の街")).toThrow();
   });
 
-  test("知らない目次のパターン・飾りは弾く", () => {
+  test("知らない目次のパターンは弾く", () => {
     // 綴じ方向と同じ扱い。読めない値を黙って既定へ倒すと、
     // 作者は「指定が効いていない」ことに気づけない
     expect(() => parseBookConfig({ tocPattern: "たて組み" }, "氷の街")).toThrow();
     expect(() =>
       parseBookConfig({ tocEntryStyle: "番号だけ" }, "氷の街")
     ).toThrow();
-    expect(() => parseBookConfig({ tocOrnament: "花" }, "氷の街")).toThrow();
+    // 飾りの置き場所は3つしかないので、こちらは弾いたままにする
     expect(() =>
-      parseBookConfig({ colophonOrnament: "けいせん" }, "氷の街")
+      parseBookConfig({ titlePageOrnamentPlace: "うえ" }, "氷の街")
     ).toThrow();
+  });
+
+  /**
+   * **飾りの id だけは弾かない**（設計書6.65.17。0.37.2で変えた）。
+   *
+   * 飾りは `設定/書籍/飾り/*.svg` と共通フォルダーから増やせるようになり、
+   * 「いま図録にある id」は端末と作品で変わる。ここで弾くと、共通フォルダー
+   * を外した端末で book.json そのものが読めなくなり、**作者が選んだ飾りが
+   * 読み込みのついでに消える**。知らない id は持ち回り、描くときだけ
+   * 「なし」へ倒す（`buildOrnamentFragment`）。
+   */
+  test("知らない飾りのidは弾かず、そのまま持ち回る", () => {
+    const config = parseBookConfig(
+      { tocOrnament: "花", colophonOrnament: "けいせん" },
+      "氷の街"
+    );
+
+    expect(config.tocOrnament).toBe("花");
+    expect(config.colophonOrnament).toBe("けいせん");
   });
 
   test("真偽値のところに文字列が入っていたら弾く", () => {

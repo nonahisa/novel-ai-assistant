@@ -58,6 +58,10 @@ interface PreviewPayload {
   outline: Array<{ kind: string; path?: string; label: string }>;
   placementWarnings: string[];
   characterNotice: string | null;
+  /** 飾りを選ぶ欄の中身（設計書6.65.17）。**画面は飾りを1つも知らない** */
+  ornamentChoices: Array<{ value: string; label: string }>;
+  /** 取り込めなかった飾りの理由。無ければ空 */
+  ornamentNotice: string;
   compose: Record<string, { baked: { note: string } | null }>;
   selectBlock?: number;
 }
@@ -298,6 +302,98 @@ describe("目次のプレビュー（設計書6.65.11）", () => {
 
     expect(page("目次").html).not.toContain("登場人物");
     expect(latest().pages.map((entry) => entry.label)).not.toContain("登場人物");
+  });
+});
+
+/**
+ * 飾りの図録（設計書6.65.17）。
+ *
+ * **画面へ選択肢を届けるのは拡張機能側**である。組み込みの8種も、
+ * `設定/書籍/飾り/*.svg` も、同じ形で届く——画面へ写すと、飾りを増やす
+ * たびに直す場所が2か所になる。
+ */
+describe("飾りの図録（設計書6.65.17）", () => {
+  const ORNAMENT =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="5" fill="currentColor"/></svg>';
+
+  beforeEach(() => {
+    put("本文/第1話.txt", "　朝が来た。");
+  });
+
+  test("組み込みの飾りが選択肢として届く", async () => {
+    await open();
+
+    const values = latest().ornamentChoices.map((item) => item.value);
+    expect(values).toContain("none");
+    expect(values).toContain("rule");
+    expect(values).toContain("double-rule");
+    expect(values).toContain("center");
+    expect(latest().ornamentNotice).toBe("");
+  });
+
+  test("作品の飾りは、出どころを添えて選択肢に並ぶ", async () => {
+    put("設定/書籍/飾り/うちの花.svg", ORNAMENT);
+
+    await open();
+
+    expect(latest().ornamentChoices).toContainEqual({
+      value: "うちの花",
+      label: "うちの花（作品の飾り）",
+    });
+  });
+
+  test("作品の飾りは、そのままプレビューの面へ出る", async () => {
+    put("設定/書籍/飾り/うちの花.svg", ORNAMENT);
+    writeBook({ title: "氷の街", tocOrnament: "うちの花" });
+
+    await open();
+
+    expect(page("目次").html).toContain("<circle");
+  });
+
+  /**
+   * **見つからない飾りも選択肢に残す。** 残さないと `<select>` がその値を
+   * 持てず、次に保存したときに作者が選んだ飾りが空へ書き換わる。
+   */
+  test("設計図の飾りが図録に無ければ、その行と理由を添える", async () => {
+    writeBook({ title: "氷の街", tocOrnament: "むかしの花" });
+
+    await open();
+
+    expect(latest().ornamentChoices).toContainEqual({
+      value: "むかしの花",
+      label: "むかしの花（見つかりません：本では飾りなし）",
+    });
+    expect(latest().ornamentNotice).toContain("むかしの花");
+    // 本では飾りなしになる（飾り1つで本を止めない）
+    expect(page("目次").html).not.toContain("ornament");
+  });
+
+  test("検査に落ちた飾りは、理由を画面へ出す", async () => {
+    put(
+      "設定/書籍/飾り/あぶない.svg",
+      '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+    );
+
+    await open();
+
+    expect(latest().ornamentChoices.map((item) => item.value)).not.toContain(
+      "あぶない"
+    );
+    expect(latest().ornamentNotice).toContain("あぶない");
+    expect(latest().ornamentNotice).toContain("script");
+  });
+
+  test("中表紙の飾りは、題名を挟んで出せる", async () => {
+    writeBook({
+      title: "氷の街",
+      titlePageOrnament: "rule",
+      titlePageOrnamentPlace: "both",
+    });
+
+    await open();
+
+    expect(page("タイトルページ").html.match(/ornament-rule/g)).toHaveLength(2);
   });
 });
 
