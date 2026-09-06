@@ -54,6 +54,7 @@ import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
 import { askText } from "../views/dialogs";
 import { logLine } from "../core/logger";
+import { readTextFile } from "../core/textFile";
 import type { TermHighlighter } from "../views/termHighlight";
 import type { TermKind } from "../core/termIndex";
 import type { WorkEntry, WorkStats } from "../models/types";
@@ -1030,6 +1031,15 @@ export class ManuscriptEditorProvider
     subscriptions.push(
       vscode.workspace.onDidChangeTextDocument((event) => {
         if (event.document.uri.toString() !== document.uri.toString()) return;
+        // **外からの変更は、送った事実をログに残す**（実機確認 A-20）。
+        // 画面が古いままという報告があり、こちらが送っていないのか、
+        // 画面が捨てているのかを切り分ける手がかりが無かった。
+        // 自分の applyEdit による変更は毎打鍵で起きるので残さない
+        if (!selfEditing && event.contentChanges.length > 0) {
+          logLine(
+            `原稿エディタ：${paths.basename(fromUri(document.uri))} が外で変わったので画面へ送り直します（${event.contentChanges.length}か所）`
+          );
+        }
         scheduleSend();
       }),
       new vscode.Disposable(() => {
@@ -1055,6 +1065,58 @@ export class ManuscriptEditorProvider
       })
     );
 
+    /**
+     * **このファイルそのものを見張る**（設計書6.25.7、実機確認 A-20）。
+     *
+     * 本文が外から書き換わったとき（ルビの適用・AIの反映・別の窓・
+     * Git の復元）、VS Code は開いている文書を読み直し、その変更が
+     * `onDidChangeTextDocument` で届いて画面へ送り直される——はずだが、
+     * **ワークスペースの外にある本文は、タブが裏に回っていると読み直されない**
+     * （本物の VS Code 1.90 で測った、2026-09-07。ワークスペースの中なら
+     * 裏でも読み直される）。ファイル1本ぶんの監視を張るだけで、VS Code は
+     * 外の本文も読み直すようになる（同じ実験で確認）。
+     *
+     * 監視の知らせそのものは使わない。読み直しは VS Code に任せ、
+     * こちらは少し待ってから「本当に読み直されたか」を見て、
+     * 読み直されていなければログに残す（原因を追う手がかり）。
+     */
+    try {
+      const filePath = fromUri(document.uri);
+      const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(
+          paths.toUri(paths.dirname(filePath)),
+          paths.basename(filePath)
+        )
+      );
+      let verifyTimer: ReturnType<typeof setTimeout> | undefined;
+      const scheduleVerify = () => {
+        if (verifyTimer) clearTimeout(verifyTimer);
+        verifyTimer = setTimeout(() => {
+          verifyTimer = undefined;
+          void this.verifyReloaded(document);
+        }, 1500);
+      };
+      watcher.onDidChange(scheduleVerify);
+      watcher.onDidCreate(scheduleVerify);
+      subscriptions.push(
+        watcher,
+        new vscode.Disposable(() => {
+          if (verifyTimer) clearTimeout(verifyTimer);
+        })
+      );
+    } catch {
+      // 監視を張れない環境（古い VS Code・試験の代役）では、これまでどおり
+      // VS Code の読み直しだけに頼る
+    }
+
+    // **表示に戻ったら送り直す。** 裏に回っているあいだに届いた変更を
+    // 画面が取りこぼしていても、見えた瞬間に文書の中身へ揃う
+    subscriptions.push(
+      panel.onDidChangeViewState((event) => {
+        if (event.webviewPanel.visible) void send();
+      })
+    );
+
     panel.onDidDispose(() => {
       for (const item of subscriptions) item.dispose();
     });
@@ -1066,7 +1128,16 @@ export class ManuscriptEditorProvider
      * 「改行すると空行が入る」が起きていた（2026-08-24、設計書6.25.2）。
      * 理由は `core/editQueue.ts` に書いてある。
      */
-    const queueEdit = createEditQueue((text) => this.applyEdit(document, text));
+    /** 自分の書き換えを文書へ当てている最中か（外からの変更と見分ける） */
+    let selfEditing = false;
+    const queueEdit = createEditQueue(async (text) => {
+      selfEditing = true;
+      try {
+        await this.applyEdit(document, text);
+      } finally {
+        selfEditing = false;
+      }
+    });
 
     panel.webview.onDidReceiveMessage(async (message: Incoming) => {
       switch (message.type) {
@@ -1365,6 +1436,29 @@ export class ManuscriptEditorProvider
   /**
    * 画面の本文を文書へ返す。**変わった1か所だけ**を当てる。
    */
+  /**
+   * 外で書き換わった本文を、VS Code が読み直したかを確かめる。
+   *
+   * 読み直されていなければ画面は古いままで、そこから書くと外の変更を
+   * 巻き戻しかねない（保存時の VS Code の照合で止まりはする）。直せは
+   * しないので、**ログに残して原因を追えるようにする。**
+   * 打ちかけ（未保存）の文書は VS Code が読み直さない決まりなので見ない。
+   */
+  private async verifyReloaded(document: vscode.TextDocument): Promise<void> {
+    if (document.isClosed || document.isDirty) return;
+    let disk: string;
+    try {
+      disk = (await readTextFile(fromUri(document.uri))).text;
+    } catch {
+      // 削除→作り直しの途中。作り直しの知らせで改めて確かめる
+      return;
+    }
+    if (disk === toLf(document.getText())) return;
+    logLine(
+      `原稿エディタ：${paths.basename(fromUri(document.uri))} が外で書き換えられましたが、VS Code が文書を読み直していません（画面が古いままの恐れ。閉じて開き直してください）`
+    );
+  }
+
   private async applyEdit(
     document: vscode.TextDocument,
     next: string
