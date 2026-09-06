@@ -188,6 +188,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.addEpisode": "allTypes",
   "novelai.deleteEpisodeFile": "allTypes",
   "novelai.convertToMarkdown": "allTypes",
+  // Word からの取り込みは、どのタイプの作品でも起こりうる（設計書6.85）
+  "novelai.convertDocxToMarkdown": "allTypes",
   "novelai.copySubtitle": "allTypes",
   // 番号を詰め直す操作は、番号で数えるタイプだけ
   "novelai.insertEpisodeBefore": "numbered",

@@ -756,6 +756,12 @@
         "icon": "$(markdown)"
       },
       {
+        "command": "novelai.convertDocxToMarkdown",
+        "title": "Word の原稿を .md にする（docx をまとめて変換）",
+        "category": "小説執筆",
+        "icon": "$(file-code)"
+      },
+      {
         "command": "novelai.openVertical",
         "title": "縦書きで開く",
         "category": "小説執筆",

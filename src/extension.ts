@@ -4122,6 +4122,28 @@ export async function activate(
     )
   );
 
+  // **作品の登録は要らない**（設計書6.85）。Word で書いた原稿は、たいてい
+  // まだ作品として登録していない。登録があるときだけ、既定のフォルダーを
+  // 決めるために作品を訊く
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.convertDocxToMarkdown",
+      async (node?: WorkNode) => {
+        const { convertDocxToMarkdown } = await import(
+          "./features/docxImport.js"
+        );
+        let work: WorkEntry | undefined;
+        if (registry.list().length > 0) {
+          work = await resolveWork(node, registry);
+          // 作品を選ばずに閉じたのなら、そこで終わる
+          if (!work) return;
+        }
+        await convertDocxToMarkdown(work);
+        if (work) treeProvider.refresh(work.id);
+      }
+    )
+  );
+
   context.subscriptions.push(
     registerCommand(
       "novelai.showEditHistory",
