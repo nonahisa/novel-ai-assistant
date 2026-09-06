@@ -117,7 +117,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-19",
     title: "履歴にも退避にも残らない本文の書き換えが起きた",
     commands: [],
-    count: 3,
+    count: 5,
   },
   {
     id: "A-18",
@@ -740,4 +740,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 847;
+export const PENDING_CHECK_TOTAL = 849;

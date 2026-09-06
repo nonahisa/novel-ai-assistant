@@ -232,6 +232,8 @@ export const PENDING_CHECK_ITEMS: Readonly<Record<string, readonly string[]>> = 
     "本文を書き換える経路のうち、編集履歴と退避を残さないものが無いか（`writeTextFilePreservingFormat` を通らない書き込みが無いか）",
     "推敲・校正まとめ実行の「適用」が、履歴を残さずに書く経路を持っていないか",
     "0.37.x で入った新しい機能（口述筆記モード・EPUB の飾り）が、本文へ触れていないか",
+    "`dictationClean.ts` が編集履歴を残すようにするか（残さない方針なら、その理由を設計書へ）",
+    "`manuscriptEditor.ts`・`applySettingsRuby.ts` が履歴を残さないのは意図どおりか（退避は通る）",
   ],
   "A-18": [
     "抽出をやり直したとき、既存レコードの「名前」と一致する別名が入らないか（`characterMerge.ts`／`characterUnify.ts` の歯止め）",
