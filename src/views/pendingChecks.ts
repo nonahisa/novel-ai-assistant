@@ -117,7 +117,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-18",
     title: "設定資料の人物が分裂している",
     commands: [],
-    count: 4,
+    count: 7,
   },
   {
     id: "B-1",
@@ -441,7 +441,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-44",
     title: "年表——話数順と時系列順",
     commands: ["novelai.openChronicle", "novelai.editTimeline"],
-    count: 5,
+    count: 3,
   },
   {
     id: "F-43",
@@ -734,4 +734,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 856;
+export const PENDING_CHECK_TOTAL = 857;
