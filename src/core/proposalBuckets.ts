@@ -69,6 +69,52 @@ export function mergeProposals<T extends ProposalLike>(
   return merged;
 }
 
+/** 今回届いた結果が、一覧でどう扱われたか */
+export interface IncomingCount {
+  /** 一覧に残った（まだ作者の手が要る）件数 */
+  remaining: number;
+  /** 既に適用・見送り・解消済みで、一覧に出ない件数 */
+  handled: number;
+}
+
+/**
+ * 今回届いた結果のうち、何件が一覧に残ったかを数える（設計書6.8）。
+ *
+ * **完了通知の「指摘 N件」は、ここが返す `remaining` を言う。**
+ * 検知が返した件数をそのまま言うと、前に適用済み・解消済みだったものまで
+ * 数えてしまい、パネルの見出し（`remainingIn`）と食い違う。実機で
+ * 「指摘 1件」と通知が出たのに一覧が空だった（2026-09-06、作者の報告）。
+ *
+ * **前の回の残りは数えない。** 見たいのは「今回の結果がどうなったか」で
+ * あって、パネル全体の残数ではない。
+ *
+ * @param merged `mergeProposals` を通したあとの、その分類の全件
+ * @param incoming 今回の検知が返したもの
+ */
+export function countIncoming(
+  merged: readonly ProposalLike[],
+  incoming: readonly ProposalLike[]
+): IncomingCount {
+  const statusById = new Map(merged.map((item) => [item.id, item.status]));
+  const seen = new Set<string>();
+  let remaining = 0;
+  let handled = 0;
+  for (const item of incoming) {
+    // 同じ印が二度届いても、一覧には1件しか並ばない
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    const status = statusById.get(item.id);
+    // 見つからないのは足し込む前の呼び方をされたとき。**残りとして数える**
+    // （数え落として「0件」と言うより、多めに言うほうが害が小さい）
+    if (status === undefined || isRemaining({ id: item.id, status })) {
+      remaining++;
+    } else {
+      handled++;
+    }
+  }
+  return { remaining, handled };
+}
+
 /** 分類の見出しに添える数（画面のタブに出す） */
 export interface CategorySummary {
   name: string;

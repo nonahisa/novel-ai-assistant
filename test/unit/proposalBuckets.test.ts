@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  countIncoming,
   describeBadgeTooltip,
   isRemaining,
   mergeProposals,
@@ -136,5 +137,82 @@ describe("タブの印の説明", () => {
         { name: "誤字脱字", remaining: 0, total: 5, active: true },
       ])
     ).toContain("未処理はありません");
+  });
+});
+
+/**
+ * 今回届いた結果のうち、何件が一覧に残ったか（設計書6.8）。
+ *
+ * **通知の「指摘 N件」は、ここで数えた `remaining` を言う。**
+ * 検知が返した件数をそのまま言うと、前に適用済み・解消済みだったものまで
+ * 数えてしまい、パネルの見出し（`remainingIn`）と食い違う。
+ */
+describe("届いた結果のうち、一覧に残った件数", () => {
+  test("初めて届いたものは、残りに数える", () => {
+    const incoming = [item("a"), item("b")];
+    const merged = mergeProposals([], incoming);
+
+    expect(countIncoming(merged, incoming)).toEqual({
+      remaining: 2,
+      handled: 0,
+    });
+  });
+
+  test("前に適用済みのものは、残りに数えない", () => {
+    const incoming = [item("a")];
+    const merged = mergeProposals([item("a", "applied")], incoming);
+
+    expect(countIncoming(merged, incoming)).toEqual({
+      remaining: 0,
+      handled: 1,
+    });
+  });
+
+  test("解消済み・見送り済みも、残りに数えない", () => {
+    const incoming = [item("a"), item("b")];
+    const merged = mergeProposals(
+      [item("a", "resolved"), item("b", "dismissed")],
+      incoming
+    );
+
+    expect(countIncoming(merged, incoming)).toEqual({
+      remaining: 0,
+      handled: 2,
+    });
+  });
+
+  /** 適用に失敗したものは、まだ片付いていないので残りに数える */
+  test("適用に失敗したものは、残りに数える", () => {
+    const incoming = [item("a")];
+    const merged = mergeProposals([item("a", "failed")], incoming);
+
+    expect(countIncoming(merged, incoming)).toEqual({
+      remaining: 1,
+      handled: 0,
+    });
+  });
+
+  test("同じ印が二度届いても、1件として数える", () => {
+    const incoming = [item("a"), item("a")];
+    const merged = mergeProposals([], incoming);
+
+    expect(countIncoming(merged, incoming)).toEqual({
+      remaining: 1,
+      handled: 0,
+    });
+  });
+
+  /**
+   * **前の回の残りは数えない。** ここで見たいのは「今回の結果が
+   * どうなったか」であって、パネル全体の残数ではない
+   */
+  test("今回届かなかったものは、数に入れない", () => {
+    const incoming = [item("b")];
+    const merged = mergeProposals([item("a")], incoming);
+
+    expect(countIncoming(merged, incoming)).toEqual({
+      remaining: 1,
+      handled: 0,
+    });
   });
 });

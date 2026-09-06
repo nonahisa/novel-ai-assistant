@@ -39,6 +39,7 @@ import {
 } from "../prompts/typoCheck";
 import {
   parseTypoCheckResult,
+  summarizeRejectReasons,
   validateTypoIssues,
   type AcceptedTypoIssue,
 } from "../core/typoCheckValidation";
@@ -96,6 +97,13 @@ export interface TypoCheckIssue extends AcceptedTypoIssue {
 export interface TypoCheckRunResult {
   issues: TypoCheckIssue[];
   rejectedCount: number;
+  /**
+   * 前回適用済みの直しと同じだったため落とした件数（設計書6.8）。
+   *
+   * **「除外」に混ぜない。** 混ぜると、作者が自分で当てた直しまで
+   * 「AIが本文と合わない指摘をした」と読めてしまう。通知でも別立てにする。
+   */
+  alreadyAppliedCount: number;
   failedChunks: number;
   /**
    * 送るはずだったチャンクの総数。
@@ -497,6 +505,13 @@ export async function checkTypos(
   }
 
   let rejectedCount = 0;
+  /**
+   * 前回適用済みの直しと同じだったため落とした数。
+   *
+   * **「除外」とは分けて数える**（設計書6.8）。これは作者が前に自分で
+   * 当てた直しであって、AIが外したのではない
+   */
+  let alreadyAppliedCount = 0;
   let failedChunks = 0;
   /** 時間切れで落ちた数。作者へ「待ち時間を測れます」と出すかの判断に使う */
   let timedOutChunks = 0;
@@ -542,7 +557,9 @@ export async function checkTypos(
 
         const cached = cache.get(chunk.hash, cacheKeyBase);
         if (cached) {
-          collectIssues(
+          // **キャッシュから戻した分も同じように数える。** 数えないと、
+          // 2回目の実行だけ「除外 0件」に見えて、1回目と食い違う
+          const tally = collectIssues(
             cached as TypoCheckResult,
             chunk,
             protectedNames,
@@ -551,6 +568,8 @@ export async function checkTypos(
             appliedFixKeys,
             issues
           );
+          rejectedCount += tally.rejected;
+          alreadyAppliedCount += tally.alreadyApplied;
           done++;
           continue;
         }
@@ -666,16 +685,17 @@ export async function checkTypos(
           if (!parsed) {
             failedChunks++;
           } else {
-            collectIssues(
+            const tally = collectIssues(
               parsed,
               chunk,
               protectedNames,
               keepWords,
               dismissed,
               appliedFixKeys,
-              issues,
-              (count) => (rejectedCount += count)
+              issues
             );
+            rejectedCount += tally.rejected;
+            alreadyAppliedCount += tally.alreadyApplied;
             await cache.set(chunk.hash, cacheKeyBase, parsed);
           }
         } catch (e) {
@@ -754,6 +774,7 @@ export async function checkTypos(
     return {
       issues,
       rejectedCount,
+      alreadyAppliedCount,
       failedChunks,
       totalChunks: chunks.length,
       timedOutChunks,
@@ -776,6 +797,7 @@ export async function checkTypos(
   return {
     issues,
     rejectedCount,
+    alreadyAppliedCount,
     failedChunks,
     totalChunks: chunks.length,
     timedOutChunks,
@@ -786,24 +808,52 @@ export async function checkTypos(
 }
 
 /**
+ * 1つのチャンクの応答から、何件を落としたか。
+ *
+ * **「除外」と「前回適用済み」を分けて数える**（設計書6.8）。
+ * 前者はAIの言い分が本文と合わなかったもので、作者に見せる意味が無い。
+ * 後者は**作者が前に自分で当てた直し**であり、意味が違う。
+ * 一緒くたに「除外」と言うと、通知だけを見て「AIがまた外した」と読める。
+ */
+export interface TypoCollectTally {
+  /** 検証で不採用になった、または行を元のファイルへ戻せなかったもの */
+  rejected: number;
+  /** 前回適用済みの直しと同じだったため落としたもの */
+  alreadyApplied: number;
+}
+
+/**
  * 検証を通った指摘のうち、無視済みでないもの・往復ループでないものだけを集める。
  *
  * `appliedFixKeys` は、直前に適用済みの「target→suggestion」の組。
  * 今回の指摘がその逆向き（suggestion→target）なら、AIが表記ゆれなどを
  * 誤字として往復で指摘し続けている可能性が高いため除外する。
+ *
+ * **落とした理由は、必ず操作ログへ残す**（設計書6.8）。落ちる道が3つ——
+ * 検証の不採用・行を戻せない・前回適用済み——あるのに、実機で
+ * 「指摘 1件」と出て一覧が空だったとき、**どれで落ちたのかを追えなかった**
+ * （2026-09-06、作者の報告）。通知には内訳を出さず、ここへ残す。
  */
-function collectIssues(
+export function collectIssues(
   result: TypoCheckResult,
   chunk: Chunk,
   protectedNames: string[],
   keepWords: KeepWord[],
   dismissed: Set<string>,
   appliedFixKeys: ReadonlySet<string>,
-  out: TypoCheckIssue[],
-  onRejected?: (count: number) => void
-): void {
+  out: TypoCheckIssue[]
+): TypoCollectTally {
   const validated = validateTypoIssues(result, chunk, protectedNames, keepWords);
+  const label = describeChunkFile(chunk.filePath, chunk);
   let rejectedCount = validated.rejected.length;
+  let alreadyApplied = 0;
+
+  if (validated.rejected.length > 0) {
+    logStep(
+      `${label}: 本文と合わないため除外 ${validated.rejected.length}件` +
+        `（${summarizeRejectReasons(validated.rejected)}）`
+    );
+  }
 
   for (const issue of validated.accepted) {
     // **どのファイルの何行目かを、ここで確定させる。** まとめたチャンクでは
@@ -811,7 +861,9 @@ function collectIssues(
     // 別の話のファイルの、まったく違う行を書き換える
     const at = locateChunkLine(chunk, issue.line);
     if (!at) {
-      // 戻せない行は捨てる。どこを直すのか決められない
+      // 戻せない行は捨てる。どこを直すのか決められない。
+      // **どの行だったかを残す。** まとめ方を疑うときの唯一の手掛かりになる
+      logStep(`${label}: 行番号 ${issue.line} を元のファイルへ戻せず除外`);
       rejectedCount++;
       continue;
     }
@@ -825,14 +877,18 @@ function collectIssues(
         appliedFixKey(fileName, located.suggestion, located.target)
       )
     ) {
-      rejectedCount++;
+      alreadyApplied++;
       continue;
     }
 
     out.push({ ...located, filePath: at.filePath, chunkHash: chunk.hash });
   }
 
-  onRejected?.(rejectedCount);
+  if (alreadyApplied > 0) {
+    logStep(`${label}: 前回適用済みの直しと同じため除外 ${alreadyApplied}件`);
+  }
+
+  return { rejected: rejectedCount, alreadyApplied };
 }
 
 /**

@@ -28,11 +28,13 @@ import { describeLock, normalizeFile } from "../models/fileLock";
 import { tryGitUserName } from "../core/gitAttribution";
 import { acceptProposal, rejectProposal } from "./reviewProposals";
 import {
+  countIncoming,
   describeBadgeTooltip,
   isRemaining,
   mergeProposals,
   summarizeCategories,
   type CategorySummary,
+  type IncomingCount,
   type WorkSummary,
 } from "../core/proposalBuckets";
 // **型だけを取る。** `AIRegistry` の実体は呼び出し側（extension.ts）が
@@ -691,7 +693,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       ) => Promise<{ ok: boolean; reason?: string }>;
       registerForeshadow?: RegisterForeshadow;
     }
-  ): void {
+  ): IncomingCount {
     // **表示中の作品の作業を、先に控えへ戻す。** 届いたのがどちらの作品でも通す
     this.stashCurrent();
 
@@ -705,6 +707,21 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     bucket.recordUpdates = mergeProposals(
       bucket.recordUpdates,
       contents.recordUpdates ?? []
+    );
+    // **今回届いたぶんが、一覧に何件残ったかを数える**（設計書6.8）。
+    // 完了通知はこの数を「指摘 N件」と言う。検知が返した件数をそのまま
+    // 言うと、前に適用済み・解消済みだったものまで数えて、パネルの
+    // 見出しと食い違う（2026-09-06、作者の報告）
+    const arrivedCount = [
+      countIncoming(bucket.items, contents.items ?? []),
+      countIncoming(bucket.contradictions, contents.contradictions ?? []),
+      countIncoming(bucket.recordUpdates, contents.recordUpdates ?? []),
+    ].reduce(
+      (sum, count) => ({
+        remaining: sum.remaining + count.remaining,
+        handled: sum.handled + count.handled,
+      }),
+      { remaining: 0, handled: 0 }
     );
     // 反映の手順は、いちばん新しく渡されたものを使う（古い閉包を握らない）
     if (contents.applyRecordUpdate) {
@@ -724,7 +741,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       this.activate(category);
       // パネルが開いていなければ前面に出す。開いていれば余計なフォーカス移動はしない
       void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
-      return;
+      return arrivedCount;
     }
 
     // **画面には触らない。** 切り替え口の一覧だけ作り直し、届いたことは通知で伝える
@@ -737,6 +754,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         (contents.contradictions?.length ?? 0) +
         (contents.recordUpdates?.length ?? 0)
     );
+    return arrivedCount;
   }
 
   /**
@@ -915,7 +933,13 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     void this.view?.webview.postMessage(message);
   }
 
-  /** `checkTypos` / `checkProofread` / `checkNotation` の結果を出す */
+  /**
+   * `checkTypos` / `checkProofread` / `checkNotation` の結果を出す。
+   *
+   * @returns 今回届いたぶんのうち、一覧に残った件数と、既に片付いていた件数。
+   * **完了通知はこれを使って「指摘 N件」と言う**（設計書6.8）——検知が
+   * 返した件数をそのまま言うと、パネルの見出しと食い違う
+   */
   showResults(
     work: WorkEntry,
     /**
@@ -929,7 +953,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       }
     >,
     category = "誤字脱字"
-  ): void {
+  ): IncomingCount {
     const items: ProposalViewItem[] = issues.map((issue, index) => ({
       id: `${issue.chunkHash}:${issue.line}:${index}`,
       filePath: issue.filePath,
@@ -946,7 +970,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       // 表記ゆれだけが持つ（設計書6.73）。あれば「AIに訊く」を出す
       notation: issue.notation,
     }));
-    this.replaceContents(work, category, { items });
+    return this.replaceContents(work, category, { items });
   }
 
   /**
@@ -965,7 +989,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
      * 作らないため（「見送る」が黙って素通りしていた失敗と同じ形）。
      */
     registerForeshadow?: RegisterForeshadow
-  ): void {
+  ): IncomingCount {
     const contradictions: ContradictionViewItem[] = issues.map((issue, index) => ({
       id: `c:${issue.chunkHash}:${issue.line}:${index}`,
       filePath: issue.filePath,
@@ -986,7 +1010,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       rightLabel: "本文では",
       openTarget: "settings",
     }));
-    this.replaceContents(work, "矛盾", { contradictions, registerForeshadow });
+    return this.replaceContents(work, "矛盾", {
+      contradictions,
+      registerForeshadow,
+    });
   }
 
   /**

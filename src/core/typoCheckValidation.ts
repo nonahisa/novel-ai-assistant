@@ -1,4 +1,5 @@
 import type { Chunk } from "./chunker";
+import { summarizeReasons } from "./checkRunCounts";
 import type { ExtractedTypoIssue, TypoCheckResult } from "../prompts/typoCheck";
 import { normalizeForComparison } from "./groundedEvidence";
 import { isPlaceholderText } from "./placeholderText";
@@ -66,6 +67,50 @@ export interface AcceptedTypoIssue {
 export interface TypoValidationResult {
   accepted: AcceptedTypoIssue[];
   rejected: RejectedTypoIssue[];
+}
+
+/**
+ * 不採用の理由を、作者が読める言葉にする。
+ *
+ * **操作ログは作者も読む。** 種別の名前（`target_not_in_original`）だけ
+ * 残しても、なぜ指摘が減ったのかは伝わらない。
+ * `Record` にしてあるのは、理由を足したときに書き忘れると型検査が
+ * 落ちるようにするためである。
+ */
+const REJECT_REASON_LABELS: Record<TypoRejectionReason, string> = {
+  invalid_shape: "形が違う",
+  out_of_range: "行番号が範囲外",
+  ungrounded: "本文に無い引用",
+  target_not_in_original: "対象が引用の中に無い",
+  protected_term: "固有名詞",
+  kept_word: "直さないと決めた語",
+  pronoun_change: "人称の入れ替え",
+  placeholder_suggestion: "中身の無い修正案",
+  no_change: "直しにならない",
+  punctuation_only: "末尾の句読点だけ",
+  script_only: "表記ゆれ",
+  archaic_form: "文語・旧字",
+  duplicates_context: "当てると本文が二重になる",
+  same_as_original: "修正案が原文のまま",
+  markdown_in_suggestion: "修正案にMarkdownの記号",
+  rewrites_span: "文の書き換え",
+};
+
+/**
+ * 不採用の内訳を1行にまとめる（設計書6.8）。
+ *
+ * **総数だけでは、消しすぎなのか本当に無いのかが分からない。**
+ * 誤字脱字は実データで64件中62件が素通りしたことがあり、
+ * 「何件除外した」だけを見ていると、そこが検証のせいなのか
+ * AIのせいなのか切り分けられない。多い順に並べる。
+ */
+export function summarizeRejectReasons(
+  rejected: readonly Pick<RejectedTypoIssue, "reason">[]
+): string {
+  return summarizeReasons(
+    rejected.map((entry) => entry.reason),
+    (reason) => REJECT_REASON_LABELS[reason as TypoRejectionReason] ?? reason
+  );
 }
 
 const VALID_CONFIDENCE = new Set(["high", "medium", "low"]);

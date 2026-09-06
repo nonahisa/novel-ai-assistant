@@ -112,6 +112,8 @@ import {
   responseExcerptForLog,
   useLogFile,
 } from "../core/logger";
+// 落とした理由の内訳は、通知ではなく操作ログへ残す（設計書6.8）
+import { summarizeReasons } from "../core/checkRunCounts";
 import { hashText } from "../core/textFile";
 
 /**
@@ -447,6 +449,12 @@ export async function checkContradictions(
    */
   const found: Array<{ issue: AcceptedContradiction; chunk: Chunk }> = [];
   let rejectedCount = 0;
+  /**
+   * 検証で落とした理由。**最後にまとめて操作ログへ出す**（設計書6.8）。
+   * 総数だけでは、指摘が少ないのが「本当に無い」のか「消しすぎ」なのか
+   * 切り分けられない
+   */
+  const rejectedReasons: string[] = [];
   const verifyRejected: Array<{ reason?: VerifyRejectReason }> = [];
   let verifyUndecided = 0;
   let failedChunks = 0;
@@ -560,6 +568,9 @@ export async function checkContradictions(
         function collect(raw: unknown, chunk: Chunk): void {
           const validated = validateContradictions(raw, chunk);
           rejectedCount += validated.rejected.length;
+          rejectedReasons.push(
+            ...validated.rejected.map((entry) => entry.reason)
+          );
           for (const issue of validated.accepted) {
             found.push({ issue, chunk });
           }
@@ -730,7 +741,12 @@ export async function checkContradictions(
               // そのまま使うと別の話のファイルの、まったく違う行を指す
               const at = locateChunkLine(entry.chunk, entry.issue.line);
               if (!at) {
-                // 戻せない行は捨てる。どこの話か決められない
+                // 戻せない行は捨てる。どこの話か決められない。
+                // **どの行だったかを残す**（設計書6.8）。まとめ方を疑うときの
+                // 唯一の手掛かりになる
+                logStep(
+                  `矛盾検知：行番号 ${entry.issue.line} を元のファイルへ戻せず除外`
+                );
                 rejectedCount++;
                 continue;
               }
@@ -767,6 +783,14 @@ export async function checkContradictions(
     どの経路でも「そこまで何チャンク見たか」が残る。
     分母は分け直しで増えた後の数（`chunksTotal`）。
   */
+  if (rejectedReasons.length > 0) {
+    // 種別の名前をそのまま出す（`core/contradictionValidation.ts` の
+    // `RejectedContradiction` に、それぞれの意味が書いてある）
+    logStep(
+      `矛盾検知：検証で除外 ${rejectedReasons.length}件` +
+        `（${summarizeReasons(rejectedReasons)}）`
+    );
+  }
   logStep(
     `矛盾検知を終了: ${chunksDone}/${chunksTotal}` +
       `（失敗 ${failedChunks}件 / 指摘 ${accepted.length}件` +

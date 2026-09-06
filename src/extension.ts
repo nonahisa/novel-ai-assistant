@@ -178,6 +178,9 @@ import {
   resolveTypoScope,
   type TypoCheckRunResult,
 } from "./features/checkTypos";
+// 完了通知の件数は、提案パネルの見出しと同じ数え方をする（設計書6.8）
+import { describeCheckRunCounts } from "./core/checkRunCounts";
+import type { IncomingCount } from "./core/proposalBuckets";
 import {
   checkNotation,
   describeNotationResult,
@@ -1256,12 +1259,13 @@ export async function activate(
           })
       );
       if (!result) return;
-      proposalPanel.showResults(work, result.issues);
+      const shown = proposalPanel.showResults(work, result.issues);
       reportTypoCheckResult(
         kind === "checkTyposForFile"
           ? `${path.basename(filePath ?? "")} の誤字脱字検知`
           : "誤字脱字検知",
-        result
+        result,
+        shown
       );
     },
     // 相談からの「AIで再読込」（設計書6.31.3）。
@@ -3282,10 +3286,11 @@ export async function activate(
         // 記録しないと、次回また同じ話が「前回から書いた分」に出る
         await recordCheck(work);
 
-        proposalPanel.showResults(work, result.issues);
+        const shown = proposalPanel.showResults(work, result.issues);
         reportTypoCheckResult(
           scope.kind === "changed" ? "誤字脱字検知（前回から書いた分）" : "誤字脱字検知",
-          result
+          result,
+          shown
         );
         return CHECK_COMPLETED;
       }
@@ -3692,9 +3697,18 @@ export async function activate(
         );
         if (!result || result.cancelled) return CHECK_CANCELLED;
 
-        proposalPanel.showResults(work, result.issues, "推敲");
+        const shown = proposalPanel.showResults(work, result.issues, "推敲");
 
-        const parts = [`指摘 ${result.issues.length}件`];
+        // **誤字脱字と同じ数え方にする**（設計書6.8）。前に適用済み・
+        // 解消済みだったものを「指摘」に数えると、パネルの見出しと食い違う。
+        // **捨てたぶんはここでは言わない**——推敲は「絞り込み」「語尾の
+        // 数え違い」と、より細かい内訳を下で出しており、総数を重ねると
+        // 同じものを二度数えたように見える
+        const parts = describeCheckRunCounts({
+          shown: shown.remaining,
+          alreadyHandled: shown.handled,
+          rejected: 0,
+        });
         if (result.overBudgetCount > 0) {
           // 黙って絞ると「これで全部」と受け取られる
           parts.push(`多すぎたぶん ${result.overBudgetCount}件を絞り込み`);
@@ -3774,11 +3788,19 @@ export async function activate(
         if (!result || result.cancelled) return CHECK_CANCELLED;
 
         // 矛盾が実は伏線だったときの逃げ道を添える（設計書6.35.4）
-        proposalPanel.showContradictions(work, result.issues, (source) =>
-          registerForeshadowFromContradiction(work, source)
+        const shown = proposalPanel.showContradictions(
+          work,
+          result.issues,
+          (source) => registerForeshadowFromContradiction(work, source)
         );
 
-        const parts = [`指摘 ${result.issues.length}件`];
+        // **誤字脱字と同じ数え方にする**（設計書6.8）。捨てたぶんは、
+        // すぐ下に元からある言い方（「本文と合わない指摘」）をそのまま使う
+        const parts = describeCheckRunCounts({
+          shown: shown.remaining,
+          alreadyHandled: shown.handled,
+          rejected: 0,
+        });
         if (result.rejectedCount > 0) {
           // 本文に無い箇所を「引用」してくることがある。黙って捨てない
           parts.push(`本文と合わない指摘 ${result.rejectedCount}件を除外`);
@@ -3830,8 +3852,12 @@ export async function activate(
         );
         if (!result) return;
 
-        proposalPanel.showResults(work, result.issues);
-        reportTypoCheckResult(`${node.episode.fileName} の誤字脱字検知`, result);
+        const shown = proposalPanel.showResults(work, result.issues);
+        reportTypoCheckResult(
+          `${node.episode.fileName} の誤字脱字検知`,
+          result,
+          shown
+        );
       }
     )
   );
@@ -4605,10 +4631,27 @@ function isAssignableFeature(value: unknown): value is AssignableFeature {
   );
 }
 
-/** 誤字脱字検知の結果を要約して通知する。作品全体・1話単位のどちらからも呼ぶ */
-function reportTypoCheckResult(label: string, result: TypoCheckRunResult): void {
-  const parts = [`指摘 ${result.issues.length}件`];
-  if (result.rejectedCount > 0) parts.push(`除外 ${result.rejectedCount}件`);
+/**
+ * 誤字脱字検知の結果を要約して通知する。作品全体・1話単位のどちらからも呼ぶ。
+ *
+ * **件数は提案パネルに出たものを言う**（設計書6.8）。検知が返した件数を
+ * そのまま言うと、前に適用済み・解消済みだったものまで数えてしまい、
+ * 通知が「指摘 1件」なのにパネルの見出しは「誤字脱字 0件」になる
+ * （2026-09-06、作者の実機報告）。
+ *
+ * @param shown `proposalPanel.showResults` が返した、一覧に残った件数
+ */
+function reportTypoCheckResult(
+  label: string,
+  result: TypoCheckRunResult,
+  shown: IncomingCount
+): void {
+  const parts = describeCheckRunCounts({
+    shown: shown.remaining,
+    // 本文へ当てる前に落としたぶんと、パネルで既に片付いていたぶんの両方
+    alreadyHandled: result.alreadyAppliedCount + shown.handled,
+    rejected: result.rejectedCount,
+  });
   notifyRunCompletion({
     headline: label,
     parts,

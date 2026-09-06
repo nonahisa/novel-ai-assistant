@@ -55,6 +55,8 @@ import {
   responseExcerptForLog,
   useLogFile,
 } from "../core/logger";
+// 落とした理由の内訳は、通知ではなく操作ログへ残す（設計書6.8）
+import { summarizeReasons } from "../core/checkRunCounts";
 import { KeepWordStore } from "../core/keepWordStore";
 import {
   buildStyleNote,
@@ -232,6 +234,11 @@ export async function checkProofread(
 
   const issues: ProofreadIssue[] = [];
   let rejectedCount = 0;
+  /**
+   * 検証で落とした理由。**最後にまとめて操作ログへ出す**（設計書6.8）。
+   * チャンクごとに出すと、19話ぶんで同じ行がログを埋める
+   */
+  const rejectedReasons: string[] = [];
   let overBudgetCount = 0;
   let monotonyDroppedCount = 0;
   let monotonyMergedCount = 0;
@@ -303,6 +310,9 @@ export async function checkProofread(
 
         const validated = validateProofreadIssues(raw, chunk, keepWords);
         rejectedCount += validated.rejected.length;
+        // **落とした理由を残す**（設計書6.8）。総数だけでは、指摘が少ないのが
+        // 「本当に無い」のか「検証で消しすぎ」なのか切り分けられない
+        rejectedReasons.push(...validated.rejected.map((entry) => entry.reason));
         overBudgetCount += validated.rejected.filter(
           (entry) => entry.reason === "over_budget"
         ).length;
@@ -319,6 +329,9 @@ export async function checkProofread(
           // 語尾単調の説明文（行範囲が入る）も、ここで組み上がる
           const located = locateProofreadIssue(chunk, issue);
           if (!located) {
+            // **どの行だったかを残す**（設計書6.8）。まとめ方を疑うときの
+            // 唯一の手掛かりになる
+            logStep(`推敲：行番号 ${issue.line} を元のファイルへ戻せず除外`);
             rejectedCount++;
             continue;
           }
@@ -414,6 +427,14 @@ export async function checkProofread(
 
   await cache.save();
 
+  if (rejectedReasons.length > 0) {
+    // 種別の名前をそのまま出す（`core/proofreadValidation.ts` の
+    // `RejectedProofreadIssue` に、それぞれの意味が書いてある）
+    logStep(
+      `推敲：検証で除外 ${rejectedReasons.length}件` +
+        `（${summarizeReasons(rejectedReasons)}）`
+    );
+  }
   if (monotonyDroppedCount > 0) {
     // **どれだけ数え違えていたかを残す。** この観点は実モデルでの当たり具合を
     // まだ測れていないので、記録が測る手掛かりになる
