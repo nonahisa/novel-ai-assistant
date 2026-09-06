@@ -522,6 +522,36 @@ function episodeNaming(): { digits: number; extension: string } {
 }
 
 /**
+ * いまアクティブなタブが原稿エディタなら、そこで開いている本文の場所
+ * （作者の実機報告、2026-09-06）。
+ *
+ * **原稿エディタは `TextEditor` を持たない。** WebView（カスタムエディタ）
+ * なので、`vscode.window.activeTextEditor` は undefined になる。これを
+ * 見ているだけのコマンドは、原稿エディタで本文を開いている作者に
+ * 「本文のファイルを開いてから実行してください」と言い返していた
+ * （「縦書きで開く」が、原稿エディタからは一度も使えなかった）。
+ *
+ * 読めない環境（古いVS Code・試験の代役）では undefined を返し、
+ * 呼び出し側はこれまでどおり `activeTextEditor` の道へ落ちる。
+ */
+export function activeManuscriptTabUri(): vscode.Uri | undefined {
+  try {
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    const input: unknown = tab?.input;
+    if (!(input instanceof vscode.TabInputCustom)) return undefined;
+    if (
+      input.viewType === MANUSCRIPT_EDITOR_VIEW_TYPE ||
+      input.viewType === MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+    ) {
+      return input.uri;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * いまアクティブなタブが原稿エディタなら、その入口のID。
  *
  * **開いていない原稿へ飛ぶときに、どちらの向きで開くかを決める。**

@@ -295,6 +295,7 @@ import {
   MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   MANUSCRIPT_EDITOR_VIEW_TYPE,
   ManuscriptEditorProvider,
+  activeManuscriptTabUri,
   addMemoToOpenManuscript,
   insertMemoLineAbove,
   isInsideWork,
@@ -825,7 +826,7 @@ export async function activate(
       }
     ),
     registerCommand("novelai.openVertical", async () => {
-      const uri = vscode.window.activeTextEditor?.document.uri;
+      const uri = activeManuscriptUri();
       if (!uri) {
         void vscode.window.showWarningMessage(
           "本文のファイルを開いてから実行してください。"
@@ -4559,6 +4560,25 @@ function findWorkForPath(
 }
 
 /**
+ * いま作者が見ている本文（作者の実機報告、2026-09-06）。
+ *
+ * **素のエディタと原稿エディタの、どちらで開いていても同じ答えを返す。**
+ * 原稿エディタはWebView（カスタムエディタ）なので `activeTextEditor` は
+ * undefined になり、これを直に見ているコマンドは、原稿エディタで書いている
+ * 作者に「本文のファイルを開いてから実行してください」と言い返していた
+ * （「縦書きで開く」が原稿エディタから一度も使えなかった）。
+ *
+ * **判定を1本にまとめてあるので、同じ形のコマンドを足すときはここを通す。**
+ * 順は素のエディタが先——タブが原稿エディタでも、作者がカーソルを置いて
+ * いるのは素のエディタ側、ということがある。
+ */
+function activeManuscriptUri(): vscode.Uri | undefined {
+  return (
+    vscode.window.activeTextEditor?.document.uri ?? activeManuscriptTabUri()
+  );
+}
+
+/**
  * 作品を持たない操作のログを、どの作品フォルダへ残すか。
  *
  * **作者に問いかけない。** AIチューニング（設計書6.49）のように作品を
@@ -4572,7 +4592,8 @@ function findWorkForPath(
  * 返し、これまでどおり出力パネルにだけ残す（無理に書き先を作らない）。
  */
 function logTargetWorkFolder(registry: WorkRegistry): string | undefined {
-  const uri = vscode.window.activeTextEditor?.document.uri;
+  // 原稿エディタで書いているときも、その作品のログへ残す
+  const uri = activeManuscriptUri();
   const opened = uri ? findWorkForPath(registry, fromUri(uri)) : undefined;
   if (opened) return opened.folderPath;
   const works = registry.list();

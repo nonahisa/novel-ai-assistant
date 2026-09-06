@@ -1271,10 +1271,32 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     remaining: number
   ): void {
     if (!this.view) return;
-    this.view.badge =
-      remaining > 0
-        ? { value: remaining, tooltip: describeBadgeTooltip(summaries) }
-        : undefined;
+    if (remaining > 0) {
+      this.view.badge = {
+        value: remaining,
+        tooltip: describeBadgeTooltip(summaries),
+      };
+      return;
+    }
+
+    /*
+      **消すときは、いったん0を置いてから外す**（作者の報告
+      「永久に消えない1」、2026-09-06）。
+
+      VS Code は、その面（`WebviewView`）へ**最後に書いた値と同じ**なら、
+      代入をタブまで伝えない。そして面は、パネルを切り替えて開き直すたびに
+      作り直され、**「前に何を書いたか」の記憶は空から始まる**——なのに
+      タブの数字は前のまま残っている。
+
+      この状態で「残り0件」を書くと、`undefined` は「前と同じ」と見なされて
+      握りつぶされ、タブの ❶ が二度と消えない。「一覧を空にする」を押しても
+      書く値はやはり `undefined` なので、作者からは永久に消えないものに見える。
+
+      0を挟めば、どちらの経路でも必ず「変わった」と伝わる。0と undefined は
+      同じ代入の中で続けて書くので、途中の0が画面に出ることはない。
+    */
+    this.view.badge = { value: 0, tooltip: describeBadgeTooltip(summaries) };
+    this.view.badge = undefined;
   }
 
   /**

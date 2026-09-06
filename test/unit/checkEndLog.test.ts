@@ -13,9 +13,16 @@ import { resolve } from "node:path";
  * 開始と終了を対にする決まりを、ここで機械に見張らせる。
  */
 describe("チャンクを回す検知は、開始と終了を対で残す", () => {
+  /**
+   * 推敲とプロット逸脱は、**開始しか残っていなかった**（実機確認 2026-09-06）。
+   * 「いつ・何チャンクを・何件で終えたか」が後から追えず、完走したのに
+   * 気づけず待ち続けたので、ここへ足した。
+   */
   const FEATURES: Array<{ file: string; label: string }> = [
     { file: "checkTypos.ts", label: "誤字脱字検知" },
     { file: "checkContradictions.ts", label: "矛盾検知" },
+    { file: "checkProofread.ts", label: "推敲" },
+    { file: "checkDeviations.ts", label: "プロット逸脱検知" },
   ];
 
   for (const { file, label } of FEATURES) {
@@ -49,6 +56,22 @@ describe("チャンクを回す検知は、開始と終了を対で残す", () =
       "utf8"
     );
     const end = source.slice(source.indexOf("`矛盾検知を終了"));
+    const line = end.slice(0, end.indexOf(");"));
+    expect(line).toContain("cancelled");
+    expect(line).toContain("fatalFailure");
+  });
+
+  /**
+   * 推敲も、中止と打ち切りで別々に抜ける道を持つ（`fatalFailure` で
+   * 残りのチャンクを試さない）。**どちらで終えたかが読めないと、
+   * 「指摘0件」が本当に0件なのか途中で諦めたのかを見分けられない。**
+   */
+  test("推敲の終了ログは、中止と打ち切りを書き分ける", () => {
+    const source = readFileSync(
+      resolve(__dirname, "../../src/features/checkProofread.ts"),
+      "utf8"
+    );
+    const end = source.slice(source.indexOf("`推敲を終了"));
     const line = end.slice(0, end.indexOf(");"));
     expect(line).toContain("cancelled");
     expect(line).toContain("fatalFailure");

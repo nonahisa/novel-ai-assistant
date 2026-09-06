@@ -246,6 +246,13 @@ export async function checkProofread(
   let cancelled = false;
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
   let fatalFailure = "";
+  /**
+   * 何チャンクまで見たか。**最後に「推敲を終了」の1行を残すのに要る**
+   * （誤字脱字・矛盾と同じ形。`test/unit/checkEndLog.test.ts`）。
+   * 分母は分け直しで増えるので、`chunks.length` とは別に持つ。
+   */
+  let chunksDone = 0;
+  let chunksTotal = chunks.length;
 
   // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）。
   // 関所（送信を1件ずつ）だけだと、機能どうしが交互に流れて
@@ -260,12 +267,10 @@ export async function checkProofread(
         controller.abort();
       });
 
-      let done = 0;
       // **切り詰められたら、まとめたぶんを話ごとに戻して試し直す。**
       // まとめると出力も増えるので、上限に当たる見込みが上がる。
       // 処理中に足すので、`for...of` ではなく番号で回す
       const queue = [...chunks];
-      let total = chunks.length;
       for (let cursor = 0; cursor < queue.length; cursor++) {
         const chunk = queue[cursor];
         if (token.isCancellationRequested) break;
@@ -284,7 +289,7 @@ export async function checkProofread(
             const retry = retryOnOverflow(chunk, asked.overflow);
             if (retry.kind === "split") {
               queue.splice(cursor + 1, 0, ...retry.parts);
-              total += retry.parts.length;
+              chunksTotal += retry.parts.length;
               logStep(`${chunk.hash}: ${retry.note}`);
             } else {
               // **黙って飛ばさない。** 理由を残して次のチャンクへ進む
@@ -295,17 +300,17 @@ export async function checkProofread(
             const parts = splitMergedChunk(chunk);
             if (parts.length > 1) {
               queue.splice(cursor + 1, 0, ...parts);
-              total += parts.length;
+              chunksTotal += parts.length;
             }
           }
         }
-        done++;
+        chunksDone++;
         progress.report({
-          message: `${done}/${total}`,
-          increment: 100 / total,
+          message: `${chunksDone}/${chunksTotal}`,
+          increment: 100 / chunksTotal,
         });
         // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-        options.onProgress?.(done, total);
+        options.onProgress?.(chunksDone, chunksTotal);
         if (raw === undefined) continue;
 
         const validated = validateProofreadIssues(raw, chunk, keepWords);
@@ -446,8 +451,33 @@ export async function checkProofread(
     logStep(`語尾単調：同じ連続の重複${monotonyMergedCount}件をまとめた`);
   }
 
+  const accepted = sortProofreadIssues(issues) as ProofreadIssue[];
+
+  /*
+    **開始したら、必ず終了の1行を残す**（実機確認 2026-09-06）。
+
+    これまでは「推敲を開始」のあと、検証の取り下げ行で途切れていた。
+    操作ログだけを見ると、終わったのか途中で落ちたのかが分からず、
+    完走しているのに作者が待ち続けた。誤字脱字・矛盾と同じ形にそろえる。
+
+    中止・打ち切りでもここへ来る——`withAiTurnProgress` は札を取れなければ
+    本体を走らせずに戻り、ループの `break` も関数の外へは抜けないため、
+    どの経路でも「そこまで何チャンク見たか」が残る。
+  */
+  logStep(
+    `推敲を終了: ${chunksDone}/${chunksTotal}` +
+      `（失敗 ${failedChunks}件 / 指摘 ${accepted.length}件` +
+      ` / 検証で除外 ${rejectedCount}件` +
+      (chunksTotal > chunks.length
+        ? ` / 入り切らず ${chunksTotal - chunks.length}回に分けた`
+        : "") +
+      (cancelled ? " / 中止された" : "") +
+      (fatalFailure ? " / 途中で打ち切った" : "") +
+      "）"
+  );
+
   return {
-    issues: sortProofreadIssues(issues) as ProofreadIssue[],
+    issues: accepted,
     rejectedCount,
     overBudgetCount,
     monotonyDroppedCount,

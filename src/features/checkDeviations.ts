@@ -325,6 +325,12 @@ export async function checkDeviations(
   let ungroundedCount = 0;
   let failedChunks = 0;
   let cancelled = false;
+  /**
+   * 何話まで見たか。**最後に「プロット逸脱検知を終了」の1行を残すのに要る**
+   * （誤字脱字・矛盾と同じ形。`test/unit/checkEndLog.test.ts`）。
+   * この検知はチャンクではなく話ごとに送るので、分母は `episodes.length`。
+   */
+  let episodesDone = 0;
 
   // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）。
   // 関所（送信を1件ずつ）だけだと、機能どうしが交互に流れて
@@ -342,19 +348,18 @@ export async function checkDeviations(
         controller.abort();
       });
 
-      let done = 0;
       for (const episode of episodes) {
         if (token.isCancellationRequested) break;
 
         const cached = cache.get(episode.hash, cacheKeyBase);
         const raw = cached ?? (await ask(episode));
-        done++;
+        episodesDone++;
         progress.report({
-          message: `${done}/${episodes.length}`,
+          message: `${episodesDone}/${episodes.length}`,
           increment: 100 / episodes.length,
         });
         // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-        options.onProgress?.(done, episodes.length);
+        options.onProgress?.(episodesDone, episodes.length);
         if (raw === undefined) continue;
 
         const validated = validateDeviations(raw, {
@@ -452,8 +457,29 @@ export async function checkDeviations(
 
   await cache.save();
 
+  const accepted = sortDeviations(issues) as DeviationIssue[];
+
+  /*
+    **開始したら、必ず終了の1行を残す**（実機確認 2026-09-06）。
+
+    これまでは「プロット逸脱検知を開始」のあとが残らず、操作ログだけを
+    見ると終わったのか途中で落ちたのかが分からなかった。実機確認では、
+    完走しているのに気づけず作者が待ち続けた。誤字脱字・矛盾と同じ形にそろえる。
+
+    中止でもここへ来る——`withAiTurnProgress` は札を取れなければ本体を
+    走らせずに戻り、ループの `break` も関数の外へは抜けないため、
+    どの経路でも「そこまで何話見たか」が残る。
+  */
+  logStep(
+    `プロット逸脱検知を終了: ${episodesDone}/${episodes.length}` +
+      `（失敗 ${failedChunks}件 / 指摘 ${accepted.length}件` +
+      ` / 検証で除外 ${rejectedCount}件` +
+      (cancelled ? " / 中止された" : "") +
+      "）"
+  );
+
   return {
-    issues: sortDeviations(issues) as DeviationIssue[],
+    issues: accepted,
     rejectedCount,
     ungroundedCount,
     failedChunks,
