@@ -792,6 +792,12 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.dictationClean",
+        "title": "口述で入れた文を整える",
+        "icon": "$(mic)",
+        "category": "小説執筆"
+      },
+      {
         "command": "novelai.postNewEpisode",
         "title": "新話を投稿する",
         "icon": "$(rocket)",
@@ -1689,6 +1695,12 @@
           "default": 0,
           "minimum": 0,
           "markdownDescription": "拡張機能がモデルを読み込むときに指定する文脈の長さ。**0 ならモデルの最大**まで使います。大きいほどメモリを使います。"
+        },
+        "novelai.epub.ornamentFolder": {
+          "type": "string",
+          "scope": "machine",
+          "default": "",
+          "markdownDescription": "EPUBの飾り（目次・中表紙・奥付）を追加で読み込むフォルダーの絶対パス。この中の `*.svg` が、すべての作品の「飾り」の選択肢に出ます。作品ごとに足すときは `設定/書籍/飾り/` に置いてください（そちらはGitで同期されます）。\n\n組み込みの飾りと同じ名前のファイルは使いません（組み込みは上書きできません）。取り込めないSVG（`<script>`・外部参照など）は理由を添えて外します。"
         },
         "novelai.chunkSizeMode": {
           "type": "string",

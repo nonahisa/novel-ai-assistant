@@ -683,6 +683,23 @@ export async function activate(
       const { convertOne } = await import("./features/markdownConvert.js");
       return convertOne(filePath);
     },
+    // 口述の整文（設計書6.83）。**繋ぐのはここだけ**——原稿エディタが
+    // 整文を直に読み込むと、あの画面がAIの登録簿を抱えることになる。
+    // **詳細メニューの操作と同じ関数を通す**（入口2つ・実体1つ）
+    dictationClean: async (document, range) => {
+      const { runDictationClean } = await import("./features/dictationClean.js");
+      await runDictationClean(
+        {
+          document,
+          range,
+          work: workOfPath(registry, fromUri(document.uri)),
+          // **原稿エディタからは「元に戻す」ボタンを出さない**——WebViewの
+          // パネルにはアクティブなテキストエディタが無く、undo が効かない
+          entry: "manuscriptEditor",
+        },
+        aiRegistry
+      );
+    },
     // シーンメモ（設計書6.40.4）。**繋ぐのはここだけ**——原稿エディタが
     // パネルを直に読み込むと、パネル側もこちらを読むので輪になる
     openSceneMemos: async (filePath) => {
@@ -4038,7 +4055,40 @@ export async function activate(
         await registeredPostingSites(activePostingCopyWork(registry))
       );
     }),
-    registerCommand("novelai.importRuby", importRuby)
+    registerCommand("novelai.importRuby", importRuby),
+    /*
+      口述で入れた文を整える（設計書6.83）。
+
+      **原稿エディタの「整える」と同じ関数を通す**（入口2つ・実体1つ）。
+      こちらは普通のエディタで使う入口なので、範囲は**選択**で決める
+      ——選んでいなければ、どこを整えるのか決めようがない。
+    */
+    registerCommand("novelai.dictationClean", async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        void vscode.window.showInformationMessage(
+          "整える本文を開いてから実行してください。"
+        );
+        return;
+      }
+      if (editor.selection.isEmpty) {
+        void vscode.window.showInformationMessage(
+          "口述で入れたところを選んでから実行してください。" +
+            "（原稿エディタなら、下段の「口述」→「整える」で範囲を選ばずに使えます）"
+        );
+        return;
+      }
+      const { runDictationClean } = await import("./features/dictationClean.js");
+      await runDictationClean(
+        {
+          document: editor.document,
+          range: editor.selection,
+          work: workOfPath(registry, fromUri(editor.document.uri)),
+          entry: "editor",
+        },
+        aiRegistry
+      );
+    })
   );
 
   // **入口を2つ持たせる**（設計書6.12.1）。ファイルを右クリックしたときは

@@ -589,6 +589,14 @@ type Incoming =
   | { type: "previewTerm"; id: string; kind: TermKind }
   | { type: "chat"; start: number; end: number }
   /**
+   * 口述で入れた範囲を、AIに整えてもらう（設計書6.83）。
+   *
+   * `from` は「口述」を押したときのカーソル、`to` は「整える」を押した
+   * ときのカーソル（開始より前なら文末）。**どちらもLF空間の位置**で、
+   * 文書の位置へ直すのはこちらの仕事である。
+   */
+  | { type: "dictationClean"; from: number; to: number }
+  /**
    * 書体を選ぶ。
    *
    * `installed` は**画面が測った**「この端末に入っている書体」。
@@ -715,6 +723,17 @@ export interface ManuscriptEditorDeps {
   markdownDeclined(): readonly string[];
   /** 断られたことを覚える */
   declineMarkdown(filePath: string): Promise<void>;
+  /**
+   * 口述で入れた範囲を整える（設計書6.83）。
+   *
+   * **繋ぐのは `extension.ts` だけ。** ここから整文の機能を直に読み込むと、
+   * 原稿エディタがAIの登録簿を抱えることになる（相談・シーンメモと同じ理由）。
+   * 省略できる形にしてあるのは、この画面が口述なしでも成り立つため。
+   */
+  dictationClean?: (
+    document: vscode.TextDocument,
+    range: vscode.Range
+  ) => Promise<void>;
   /**
    * シーンメモのパネルを横に開く（設計書6.40.4）。
    *
@@ -1131,6 +1150,23 @@ export class ManuscriptEditorProvider
                   document.positionAt(fromLfOffset(source, message.end))
                 )
               : undefined
+          );
+          break;
+        }
+
+        case "dictationClean": {
+          // 画面の位置はLF空間。文書の位置へ直してから範囲にする（相談と同じ）。
+          // **前後は入れ替えて受ける**——画面は「カーソルが開始より前なら
+          // 文末まで」に直して送るが、逆さの範囲がここまで来ても壊さない
+          const source = document.getText();
+          const head = Math.min(message.from, message.to);
+          const tail = Math.max(message.from, message.to);
+          await this.deps.dictationClean?.(
+            document,
+            new vscode.Range(
+              document.positionAt(fromLfOffset(source, head)),
+              document.positionAt(fromLfOffset(source, tail))
+            )
           );
           break;
         }

@@ -196,6 +196,11 @@ body.aloud #aloud { display: flex; }
    margin-left: auto にしておくと、この段へ左寄せの要素を足しても
    このボタンだけが右端に残る（並び順で決め打たない） */
 #latest { margin-left: auto; }
+/* 口述モード（設計書6.83）。**入っているあいだだけ「整える」「やめる」を出す**
+   ——押す前から並べても、何を整えるのかがまだ決まっていない */
+.dictate-on { display: none; }
+body.dictating .dictate-on { display: inline-block; }
+body.dictating #dictate { display: none; }
 #surface {
   flex: 1 1 auto;
   position: relative;
@@ -764,6 +769,10 @@ ruby > rt {
 <div id="bottom">
   <button id="prev" title="ひとつ前の話を開きます">← 前の話</button>
   <button id="next" title="次の話を開きます。最終話に本文があれば、次の話を作って開きます">次の話 →</button>
+  <div class="sep"></div>
+  <button id="dictate" title="OSの音声入力で書き取った文を、あとからAIに整えてもらいます。押してから音声入力を始めてください">口述</button>
+  <button id="dictateClean" class="dictate-on" title="口述を始めたところから、いまのカーソルまでをAIに整えてもらいます">整える</button>
+  <button id="dictateCancel" class="dictate-on" title="整えずに口述モードを抜けます。書き取った本文はそのまま残ります">やめる</button>
   <button id="latest" title="いちばん新しい話を開きます。白紙でなければ、次の話を作って開きます">最新話を書く</button>
 </div>
 
@@ -1046,6 +1055,111 @@ ruby > rt {
   });
   document.getElementById("next").addEventListener("click", function () {
     vscode.postMessage({ type: "openNeighbor", direction: "next" });
+  });
+
+  /* ── 口述筆記（設計書6.83） ───────────────── */
+  /*
+    **拡張機能はマイクに触らない。** 声を文字にするのはOSの音声入力
+    （Windows：Win+H／macOS：fnキー2回）で、OSは面へ文字を入れるだけである。
+    この画面がしているのは「どこから話し始めたか」を覚えることだけで、
+    モード中もこれまでどおり手で打てる。
+  */
+  /** 口述を始めた位置（記法の位置）。null なら口述モードに入っていない */
+  let dictationFrom = null;
+  /**
+   * ボタンを押す直前のカーソル位置。
+   *
+   * **組んで書く面では、押した瞬間に選択が外れている**（contenteditable の
+   * 選択は画面じゅうで1つしかない）。右クリックの品書き（composeMenuAt）と
+   * 同じ理由で、mousedown の時点で拾っておく。
+   */
+  let dictationCaretAtPress = null;
+
+  /** いまのカーソル位置（記法の位置）。読めなければ null */
+  function dictationCaretNow() {
+    if (composeOn) {
+      const at = composeSelectionNow();
+      return at ? at.start : null;
+    }
+    return write.selectionStart;
+  }
+
+  /** いまの面の本文。範囲の末尾を決めるのに使う */
+  function dictationTextNow() {
+    return composeOn ? composeTextNow() : write.value;
+  }
+
+  /** 押す前に拾った位置を優先する（組んで書く面では、押した後は読めない） */
+  function dictationCaretForPress() {
+    return dictationCaretAtPress !== null
+      ? dictationCaretAtPress
+      : dictationCaretNow();
+  }
+
+  /** 押したあとは本文へ戻す。1回ごとに手で選び直させない */
+  function dictationRefocus(at) {
+    dictationCaretAtPress = null;
+    if (composeOn) {
+      compose.focus();
+      if (typeof at === "number") composeRestoreCaret({ start: at, end: at });
+    } else {
+      write.focus();
+    }
+  }
+
+  const dictateButton = document.getElementById("dictate");
+  const dictateCleanButton = document.getElementById("dictateClean");
+  const dictateCancelButton = document.getElementById("dictateCancel");
+
+  dictateButton.addEventListener("mousedown", function () {
+    dictationCaretAtPress = dictationCaretNow();
+  });
+  dictateCleanButton.addEventListener("mousedown", function () {
+    dictationCaretAtPress = dictationCaretNow();
+  });
+
+  dictateButton.addEventListener("click", function () {
+    const at = dictationCaretForPress();
+    if (at === null) {
+      note.textContent =
+        "本文の中にカーソルを置いてから「口述」を押してください";
+      dictationCaretAtPress = null;
+      return;
+    }
+    dictationFrom = at;
+    document.body.classList.add("dictating");
+    note.textContent =
+      "OSの音声入力を始めてください（Windows：Win+H／macOS：fnキー2回）。" +
+      "話し終えたら「整える」を押します";
+    dictationRefocus(at);
+  });
+
+  dictateCancelButton.addEventListener("click", function () {
+    // **開始位置を捨てるだけ。** 書き取った本文には触らない
+    dictationFrom = null;
+    document.body.classList.remove("dictating");
+    note.textContent = "口述モードを終えました（本文はそのままです）";
+    dictationRefocus();
+  });
+
+  dictateCleanButton.addEventListener("click", function () {
+    if (dictationFrom === null) return;
+    const caret = dictationCaretForPress();
+    /*
+      **カーソルが開始より前なら、文末までを範囲にする。** 話している最中に
+      前のほうを直すことがあり、そのときカーソルは開始位置より手前にある
+      ——逆さの範囲をそのまま送ると、何も整えられないまま終わる。
+    */
+    const from = dictationFrom;
+    const to =
+      caret !== null && caret > from ? caret : dictationTextNow().length;
+    dictationFrom = null;
+    document.body.classList.remove("dictating");
+    note.textContent = "";
+    dictationRefocus();
+    // **範囲が足りているかを決めるのは拡張機能側**（入口が2つあるので、
+    // 境目の字数を画面にも持たせない）
+    vscode.postMessage({ type: "dictationClean", from: from, to: to });
   });
 
   document.getElementById("font").addEventListener("click", function () {

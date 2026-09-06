@@ -99,6 +99,7 @@ describe("プロンプト設計書の形", () => {
     ["P-32", "src/prompts/chatSettingsSync.ts", "CHAT_SETTINGS_SYNC_VERSION"],
     ["P-33", "src/prompts/notationAdvice.ts", "NOTATION_ADVICE_VERSION"],
     ["P-34", "src/prompts/chatterComment.ts", "CHATTER_COMMENT_VERSION"],
+    ["P-35", "src/prompts/dictationClean.ts", "DICTATION_CLEAN_VERSION"],
   ];
 
   test.each(IMPLEMENTED)(

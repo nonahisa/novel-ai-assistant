@@ -322,6 +322,9 @@ describe("AIの印", () => {
         "novelai.checkForeshadows",
         "novelai.checkForeshadowResolution",
         "novelai.checkOpening",
+        // 口述の整文（P-35、設計書6.83）。**声を文字にするのはOSの音声入力**
+        // だが、そのあと本文の形へ整えるところでAIを1回呼ぶ
+        "novelai.dictationClean",
         "novelai.extractSettings",
         "novelai.extractCharactersOnly",
         "novelai.extractLocationsOnly",

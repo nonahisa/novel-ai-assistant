@@ -228,6 +228,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.readManuscriptAloud": "allTypes",
   "novelai.addRuby": "allTypes",
   "novelai.addEmphasis": "allTypes",
+  // 口述の整文（設計書6.83）。声で書くことに、作品のタイプは関わらない
+  "novelai.dictationClean": "allTypes",
   "novelai.openSceneMemos": "allTypes",
   "novelai.addSceneMemo": "allTypes",
   "novelai.nextSceneMemo": "allTypes",
