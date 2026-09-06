@@ -121,9 +121,12 @@ describe("投稿サイト用のコピー", () => {
       path.join(__dirname, "..", "..", "src", "features", "manuscriptEditor.ts"),
       "utf8"
     );
-    const call = source.match(/const source = stripMemoLines\([\s\S]*?\);/);
+    // 0.37.4：シーンメモを落とすのは変換の側（convertForPosting）に移った。
+    // ここでは「全文を渡さず、頭書きを除いた本文を渡す」ことだけを見る
+    const call = source.match(/const source = sourceForPostingCopy\([\s\S]*?\);/);
 
     expect(call).not.toBeNull();
     expect(call?.[0]).toContain("sourceForPostingCopy(document.getText())");
+    expect(source).toContain("convertForPosting(source, target)");
   });
 });

@@ -578,9 +578,25 @@ body.notepv #compose, body.notepv #aloudmarks { display: none; }
 }
 /* 空行は、そのまま間隔として残す（noteは空行が1つの塊になる） */
 #notepv .note-empty { margin: 0 0 1.2em; min-height: 0.6em; }
+/* noteの見出しは2段しかない（大見出し＝## ・小見出し＝### ）。
+   貼るときも同じ段へ丸めるので（core/noteMarkdown.ts）、大きさも2つで足りる
+   ——3段目を残しておくと、いつか誰かが3段に見えるプレビューを作る */
 #notepv .note-h1 { font-size: 1.5em; font-weight: 700; margin: 1.6em 0 0.8em; }
 #notepv .note-h2 { font-size: 1.22em; font-weight: 700; margin: 1.5em 0 0.7em; }
-#notepv .note-h3 { font-size: 1.06em; font-weight: 700; margin: 1.4em 0 0.6em; }
+/* コード・画像の印・埋め込みの枠（設計書6.84）。620pxの幅に収める */
+#notepv .note-code {
+  white-space: pre-wrap; overflow-wrap: anywhere; font-family: Consolas, "Courier New", monospace;
+  font-size: 0.9em; background: #f4f4f4; padding: 0.8em 1em; margin: 1em 0; border-radius: 4px;
+}
+#notepv .note-image {
+  border: 1px dashed #b0b0b0; padding: 1em; margin: 1em 0; text-align: center; color: #666;
+}
+#notepv .note-embed {
+  border: 1px solid #d0d0d0; border-radius: 6px; padding: 0.8em 1em; margin: 1em 0;
+  background: #fafafa; overflow-wrap: anywhere;
+}
+#notepv .note-embed-label { display: block; font-size: 0.8em; color: #888; margin-top: 0.3em; }
+#notepv .note-link { color: #0a66c2; text-decoration: underline; cursor: default; }
 #notepv .note-quote {
   padding: 0.2em 0 0.2em 1em;
   border-left: 3px solid #d0d0d0;

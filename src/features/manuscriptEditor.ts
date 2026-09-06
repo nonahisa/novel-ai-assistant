@@ -43,17 +43,12 @@ import {
   pickCount,
 } from "../core/countSettings";
 import { countEpisodeChars } from "../core/episodeCharCount";
-import {
-  toSiteNotation,
-  validateEmphasis,
-  validateRuby,
-} from "../core/ruby";
+import { validateEmphasis, validateRuby } from "../core/ruby";
 import { sourceForPostingCopy } from "../core/episodeCopy";
-import {
-  MEMO_LINE_PREFIX,
-  memoColorVars,
-  stripMemoLines,
-} from "../core/sceneMemo";
+// 貼り付け先ごとの分岐は、入口ではなく変換の側に置く（設計書6.84）
+import { convertForPosting } from "../core/postingConvert";
+import { showPostingCopyNotice } from "./postingCopyNotice";
+import { MEMO_LINE_PREFIX, memoColorVars } from "../core/sceneMemo";
 import { READ_ALOUD_MEMO_TEXT, buildReadingPlan } from "../core/readAloud";
 import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
@@ -1783,22 +1778,34 @@ export class ManuscriptEditorProvider
     );
     if (!target) return;
 
-    // **シーンメモは投稿しない**（設計書6.40.2）。この画面ではメモを
-    // 消さずに見せているので、外へ出す唯一の口であるここで落とす。
-    //
-    // **頭書き（【タイトル】〜【本文】）も外す**（`sourceForPostingCopy`、
+    // **頭書き（【タイトル】〜【本文】）は外す**（`sourceForPostingCopy`、
     // 設計書6.12.1）。全文をそのまま渡していたので、投稿欄へ貼ると題名の
     // 行から二重に入っていた。**普通のエディタ側（`features/ruby.ts`）と
     // 同じ経路を通す**——切り方を写すと、片方だけが直る日が来る
-    const source = stripMemoLines(sourceForPostingCopy(document.getText()));
+    const source = sourceForPostingCopy(document.getText());
 
-    await vscode.env.clipboard.writeText(
-      toSiteNotation(source, target.style, target.emphasis)
-    );
-    notifyDone(
-      `本文全体を${target.label}の書き方に変換して、` +
-        "クリップボードへ入れました。原稿はそのままです。"
-    );
+    /*
+      **シーンメモを落とすのは変換の側**（`convertForPosting`、設計書6.84）。
+      この画面ではメモを消さずに見せているので、外へ出す唯一の口である
+      ここで落としていたが、**noteではコードの中の `//` を落としてはいけない**
+      ——記法を読み分けられるところでだけ落とす。
+
+      **貼り付け先ごとの分岐も、入口には書かない。** noteはMarkdownを
+      そのまま解釈するので記法の置き換えだけでは足りず、3つの入口が
+      別々に分岐を持つと、貼ったときの形が入口によって違うことになる。
+    */
+    const conversion = convertForPosting(source, target);
+
+    await vscode.env.clipboard.writeText(conversion.text);
+    await showPostingCopyNotice({
+      conversion,
+      sourcePath: fromUri(document.uri),
+      otherwise: () =>
+        notifyDone(
+          `本文全体を${target.label}の書き方に変換して、` +
+            "クリップボードへ入れました。原稿はそのままです。"
+        ),
+    });
   }
 }
 

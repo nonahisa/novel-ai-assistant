@@ -6,7 +6,6 @@ import { convertFolder, convertOne } from "./markdownConvert";
 import {
   describeSiteNotation,
   fromSiteNotation,
-  toSiteNotation,
   validateEmphasis,
   validateRuby,
 } from "../core/ruby";
@@ -16,7 +15,9 @@ import {
 } from "../core/postingCopyTargets";
 import type { PostingSiteId } from "../models/posting";
 import { sourceForPostingCopy } from "../core/episodeCopy";
-import { stripMemoLines } from "../core/sceneMemo";
+// 貼り付け先ごとの分岐は、入口ではなく変換の側に置く（設計書6.84）
+import { convertForPosting } from "../core/postingConvert";
+import { showPostingCopyNotice } from "./postingCopyNotice";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { notifyDone } from "../views/notify";
 
@@ -155,15 +156,14 @@ export async function copyForPosting(
   if (!target) return;
 
   const selection = editor.selection;
-  // **シーンメモは投稿しない**（設計書6.40.2）。貼り付ける先は
-  // サイトの投稿欄なので、ここを抜かすと作者の付箋が公開される。
   // 選択が無いときは、カクヨム形式の頭書きを外した本文だけを渡す
-  // （`sourceForPostingCopy`）——ヘッダーごと貼ると題名が二重に入る
-  const source = stripMemoLines(
-    sourceForPostingCopy(
-      editor.document.getText(),
-      selection.isEmpty ? undefined : editor.document.getText(selection)
-    )
+  // （`sourceForPostingCopy`）——ヘッダーごと貼ると題名が二重に入る。
+  // **シーンメモを落とすのは変換の側**（`convertForPosting`）
+  // ——noteではコードの中の `//` を落としてはいけないので、
+  // 記法を読み分けられるところでだけ落とす
+  const source = sourceForPostingCopy(
+    editor.document.getText(),
+    selection.isEmpty ? undefined : editor.document.getText(selection)
   );
 
   /*
@@ -175,14 +175,19 @@ export async function copyForPosting(
     「なぜ今日は2回訊かれるのか」が分からない。貼り付け先を1度だけ
     訊き、記法はそこから引く。
   */
-  const converted = toSiteNotation(source, target.style, target.emphasis);
+  const conversion = convertForPosting(source, target);
 
-  await vscode.env.clipboard.writeText(converted);
+  await vscode.env.clipboard.writeText(conversion.text);
   const scope = selection.isEmpty ? "本文全体" : "選んだ範囲";
-  notifyDone(
-    `${scope}を${target.label}の書き方に変換して、` +
-      "クリップボードへ入れました。原稿はそのままです。"
-  );
+  await showPostingCopyNotice({
+    conversion,
+    sourcePath: fromUri(editor.document.uri),
+    otherwise: () =>
+      notifyDone(
+        `${scope}を${target.label}の書き方に変換して、` +
+          "クリップボードへ入れました。原稿はそのままです。"
+      ),
+  });
 }
 
 /**

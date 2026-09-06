@@ -1,11 +1,9 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
-import {
-  bodyForPosting,
-  extractEpisodeParts,
-  nameWithSubtitle,
-} from "../core/episodeCopy";
+import { extractEpisodeParts, nameWithSubtitle } from "../core/episodeCopy";
+import { convertForPosting } from "../core/postingConvert";
+import { showPostingCopyNotice } from "./postingCopyNotice";
 import { readTextFile } from "../core/textFile";
 // 貼り付け先を訊く画面は1つにする（写すと、片方だけ選べる先が増える）
 import { pickPostingTarget } from "./ruby";
@@ -69,19 +67,26 @@ export async function copyBodyForPosting(
   const target = await pickPostingTarget(await registeredPostingSites(work));
   if (!target) return;
 
-  const text = bodyForPosting(parts.body, target.style, target.emphasis);
-  if (!text) {
+  // 貼り付け先ごとの分岐は変換の側にある（`convertForPosting`、設計書6.84）
+  // ——noteはMarkdownをそのまま解釈するので、記法の置き換えだけでは足りない
+  const conversion = convertForPosting(parts.body, target);
+  if (!conversion.text) {
     void vscode.window.showWarningMessage(
       `${episode.fileName} に本文が見つかりませんでした。`
     );
     return;
   }
 
-  await vscode.env.clipboard.writeText(text);
-  void vscode.window.showInformationMessage(
-    `本文（${text.length.toLocaleString("ja-JP")}字）を${target.label}の` +
-      "書き方でコピーしました。原稿はそのままです。"
-  );
+  await vscode.env.clipboard.writeText(conversion.text);
+  await showPostingCopyNotice({
+    conversion,
+    sourcePath: episode.filePath,
+    otherwise: () =>
+      void vscode.window.showInformationMessage(
+        `本文（${conversion.text.length.toLocaleString("ja-JP")}字）を` +
+          `${target.label}の書き方でコピーしました。原稿はそのままです。`
+      ),
+  });
 }
 
 /**

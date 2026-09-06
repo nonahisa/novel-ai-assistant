@@ -24,6 +24,16 @@ import { EMPHASIS_SITES, RUBY_STYLES, type EmphasisSite, type RubyStyle } from "
  */
 
 export interface PostingCopyTarget {
+  /**
+   * どのサイトか。**記法だけで決まる書き出し先（別記法・HTML）には無い。**
+   *
+   * 記法（`style`）では貼り付け先を見分けられない——noteは
+   * **Markdownをそのまま解釈する**ので、ルビの落とし方（`paren`）だけでは
+   * 済まず、貼る形そのものを整え直す（`core/postingConvert.ts`）。
+   * 「`paren` ならnote」と読むと、あとで同じ記法のサイトが増えたときに
+   * 別のサイトまでnoteの整えを通ることになる。
+   */
+  site?: PostingSiteId;
   /** 画面に出す名前。**サイト名で並べる**（記法の記号では選べない） */
   label: string;
   /** 選ぶ手がかり。ルビ・傍点がどう出るかを一言で */
@@ -81,6 +91,7 @@ export function postingCopyTargets(
   registered: readonly PostingSiteId[]
 ): PostingCopyTarget[] {
   const sites = POSTING_SITES.map((info) => ({
+    site: info.id,
     label: info.label,
     detail: detailFor(info.id),
     style: info.notation,
