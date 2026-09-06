@@ -50,6 +50,7 @@ import {
   describeNotationAdvice,
 } from "./notationAdvice";
 import type { NotationAdviceGroup } from "../prompts/notationAdvice";
+import { locateAppliedSuggestion } from "../core/proposalUndo";
 import { revealTextLocation } from "./revealLocation";
 import { openInDefaultEditor } from "../views/openDocument";
 
@@ -196,6 +197,15 @@ export interface ProposalViewItem {
    * どちらが動いているのかが画面の言葉で分かるようにする。
    */
   askingAdvice?: boolean;
+  /**
+   * 適用したとき、修正案が行の何文字目に入ったか（0始まり。設計書6.8.12）。
+   *
+   * **「戻す」で、同じ文が2度出てくる行を1つに決めるために要る。**
+   * 適用後の文脈で探しても2か所に当たることがあり、そのときの
+   * 最後の手がかりがこれである。適用したときにしか分からない値なので、
+   * 書き込みに成功した時点で控える。
+   */
+  appliedAt?: number;
 }
 
 /**
@@ -1834,6 +1844,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
 
     await revertIfOpen(item.filePath);
 
+    // **戻すときの手がかりとして、入れた場所を控える**（設計書6.8.12）。
+    // 同じ文がその行に2度あると、文脈だけでは戻す先が決まらない
+    item.appliedAt = absoluteTargetIndex;
     this.markStatus(id, "applied");
     // **同期される編集履歴にも残す**（設計書5.6）。
     // ai_actions.log は .gitignore で同期から外れているので、
@@ -1899,18 +1912,20 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     const lineIndex = item.line - 1;
     const lineText = lines[lineIndex];
 
-    // **修正案がその行に無ければ、既に別の文になっている。** 触らない
-    if (lineText === undefined || !lineText.includes(item.suggestion)) {
-      this.markStatus(
-        id,
-        "applied",
-        "この行はそのあと書き換えられているため、戻せませんでした。" +
-          "本文を直接お直しください。"
-      );
+    // **修正案の文字列だけで探さない**（実機で見つかった不具合、2026-09-06）。
+    // 修正案がありふれた語だと、同じ行の**指摘より前**にある関係のない箇所を
+    // 書き換えていた。適用側と同じ強さ——前後の文脈込み——で位置を決める
+    if (lineText === undefined) {
+      this.markStatus(id, "applied", describeUndoFailure("missing"));
+      return;
+    }
+    const located = locateAppliedSuggestion(lineText, item);
+    if (located.kind !== "found") {
+      this.markStatus(id, "applied", describeUndoFailure(located.kind));
       return;
     }
 
-    const at = lineText.indexOf(item.suggestion);
+    const at = located.at;
     lines[lineIndex] =
       lineText.slice(0, at) +
       item.target +
@@ -1929,7 +1944,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
 
     await revertIfOpen(item.filePath);
 
-    // **もう一度適用できる状態に戻す。** 戻したあとで考え直すこともある
+    // **もう一度適用できる状態に戻す。** 戻したあとで考え直すこともある。
+    // 適用の記録は、もう当てにならないので落とす
+    item.appliedAt = undefined;
     this.markStatus(id, "pending");
 
     await recordEdit(work, {
@@ -2452,6 +2469,30 @@ function describeWriteFailure(
       );
     default:
       return "適用に失敗しました。";
+  }
+}
+
+/**
+ * 「戻す」で位置が決まらなかったときの言葉（設計書6.8.12）。
+ *
+ * **理由ごとに、作者が次にすることが違う。** 書き換えられた行は手で直す
+ * しかないが、同じ文が2度ある行は「どちらか分からない」だけなので、
+ * そう伝える。
+ */
+function describeUndoFailure(kind: "missing" | "ambiguous" | "broken"): string {
+  switch (kind) {
+    case "ambiguous":
+      return (
+        "この行には同じ文が複数あり、どこを戻せばよいか決められませんでした。" +
+        "本文を直接お直しください。"
+      );
+    case "broken":
+      return "指摘の位置を特定できませんでした。";
+    default:
+      return (
+        "この行はそのあと書き換えられているため、戻せませんでした。" +
+        "本文を直接お直しください。"
+      );
   }
 }
 
