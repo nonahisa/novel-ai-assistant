@@ -441,7 +441,30 @@ describe("退避したあとに設計図が外で変わっていたら、復元�
 
     await open();
 
-    expect(asked.join("\n")).toContain("退避したあとに設計図が変わっています");
+    expect(asked.join("\n")).toContain("保存していない編集が残っています");
     expect(offered.at(-1)).toHaveLength(3);
+  });
+
+  test("基準が分からないときは、変わったと断言しない", async () => {
+    // **知らないことを、知っている風に言わない。** 旧形式の控えは基準を
+    // 持っていないだけで、設計図が本当に外で直されたのかは分かっていない。
+    // 「変わっています」と言い切ると、入ってもいない更新を探しに行かせる
+    put(draft, JSON.stringify({ title: "氷の街", author: "月島灯" }));
+    answer = undefined;
+
+    await open();
+
+    const message = asked.join("\n");
+    expect(message).toContain(
+      "いつの下書きか分からないため確認します" +
+        "（退避したあとに設計図が変わっている可能性があります）"
+    );
+    expect(message).not.toContain("退避したあとに設計図が変わっています");
+    // 訊き方（3択）は、食い違いが分かっているときと同じでよい
+    expect(offered.at(-1)).toEqual([
+      "今の設計図を使う（下書きは残す）",
+      "下書きで上書きする",
+      "捨てる",
+    ]);
   });
 });

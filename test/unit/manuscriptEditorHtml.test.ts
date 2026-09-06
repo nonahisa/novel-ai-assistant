@@ -136,10 +136,11 @@ describe("日本語入力を壊さない", () => {
     const run = new Function(
       "let lastSent = null;" +
         block +
-        "return { rememberSent, isOwnEcho, history: sentHistory, last: () => lastSent };"
+        "return { rememberSent, isOwnEcho, forgetSent, history: sentHistory, last: () => lastSent };"
     )() as {
       rememberSent: (text: string) => void;
       isOwnEcho: (text: string) => boolean;
+      forgetSent: () => void;
       history: string[];
       last: () => string | null;
     };
@@ -156,6 +157,45 @@ describe("日本語入力を壊さない", () => {
     expect(run.history.length).toBe(16);
     expect(run.isOwnEcho("語A")).toBe(false);
     expect(run.isOwnEcho("本文19")).toBe(true);
+  });
+
+  /**
+   * レビューの指摘（2026-09-06）：一致しても消費しないと、別の窓の取り消しや
+   * 過去の版への復元で**本当に外から同じ文へ戻された**ときまで「自分の返事」
+   * と見なし、画面を古いままにして次の1打鍵で外の変更を書き戻す
+   */
+  it("返事に当たった履歴は、その1件とそれより古いものを忘れる", () => {
+    const start = code.indexOf("const sentHistory = [];");
+    const end = code.indexOf("/** 変換中に外から届いた本文");
+    const block = code.slice(start, end);
+    const run = new Function(
+      "let lastSent = null;" +
+        block +
+        "return { rememberSent, isOwnEcho, forgetSent, history: sentHistory };"
+    )() as {
+      rememberSent: (text: string) => void;
+      isOwnEcho: (text: string) => boolean;
+      forgetSent: () => void;
+      history: string[];
+    };
+    run.rememberSent("T1");
+    run.rememberSent("T2");
+    run.rememberSent("T3");
+    // T2 の返事が届いた——T2 と、それより古い T1 は忘れる（T3 は残る）
+    expect(run.isOwnEcho("T2")).toBe(true);
+    expect(run.history).toEqual(["T3"]);
+    // 外から T1 へ戻された（別の窓の Ctrl+Z）——もう自分の返事ではない
+    expect(run.isOwnEcho("T1")).toBe(false);
+    // 外の本文を受け入れたら、残りも忘れる
+    run.forgetSent();
+    expect(run.isOwnEcho("T3")).toBe(false);
+  });
+
+  it("外からの本文を受け入れるときは、返事の照合をやり直す（forgetSent）", () => {
+    const take = code.slice(code.indexOf("function takeIncoming("));
+    expect(take.slice(0, 500)).toContain("forgetSent();");
+    const composeTake = code.slice(code.indexOf("function composeTakeIncoming("));
+    expect(composeTake.slice(0, 700)).toContain("forgetSent();");
   });
 
   it("変換中に届いた自分の返事は、待たせもしない（確定後に古い本文で戻さない）", () => {

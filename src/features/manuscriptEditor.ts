@@ -650,6 +650,15 @@ type Incoming =
 
 export interface ManuscriptEditorDeps {
   highlighter: TermHighlighter;
+  /**
+   * その本文が属する作品（登録簿で引く。設計書6.68.2）。
+   *
+   * **用語索引（`highlighter.indexFor`）で代用しない。** あちらは
+   * 設定資料を読めたときにしか作品を返さないので、**まだ資料を1件も
+   * 抽出していない作品では `undefined` になる**。作品を知りたいだけの
+   * ところであれを使うと、書き始めたばかりの作品でだけ挙動が変わる。
+   */
+  workOf(filePath: string): WorkEntry | undefined;
   /** 用語から設定資料を開く。extension.ts の登録と同じ道を通す */
   openSettings(work: WorkEntry, kind: TermKind, id: string): Promise<void>;
   /**
@@ -1724,11 +1733,17 @@ export class ManuscriptEditorProvider
       先に訊き、傍点が入っているときだけサイトを訊く2段だった。サイトが
       決まれば記法は決まるので、記法を訊く画面は要らない。
     */
-    const found = await this.deps.highlighter.indexFor(fromUri(document.uri));
+    /*
+      **作品は登録簿で引く**（`workOf`、設計書6.68.2）。用語索引
+      （`highlighter.indexFor`）は**設定資料が1件も無い作品では引けない**
+      ので、書き始めたばかりの作品では登録済みの投稿先が先頭に来なかった。
+      同じ操作の並びが作品によって変わるのは、作者からは不具合に見える。
+    */
+    const work = this.deps.workOf(fromUri(document.uri));
     const target = await pickPostingTarget(
-      // 作品が引けないことはある（設定資料を読めないときも `undefined`）。
+      // 作品が引けないことはある（登録していないファイルを開いたとき）。
       // そのときは並びが既定に戻るだけで、コピー自体はできる
-      await registeredPostingSites(found?.work)
+      await registeredPostingSites(work)
     );
     if (!target) return;
 

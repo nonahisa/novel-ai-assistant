@@ -862,7 +862,9 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.openSceneMemos",
-            label: "シーンメモを開く",
+            // **「横に」まで書く**（コマンドパレットの名前と同じ）。
+            // 開く場所が分かるので、原稿を隠されると思って避けられない
+            label: "シーンメモを横に開く",
             description: "AIを使わない",
             icon: "note",
             requiresWork: true,
@@ -1749,6 +1751,7 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
         kind: "action",
         command: "novelai.diagnoseWeb",
         label: "動作を診断",
+        note: "ブラウザ版の確認用",
         icon: "pulse",
         requiresWork: false,
         // **手元のVS Codeでは出さない**（作者の指定、2026-08-26）。

@@ -199,7 +199,7 @@ describe("台帳への書き込みを抑える", () => {
     );
 
     await provider.generate(params()); // 100.0
-    advance(5_000);
+    advance(30_000);
     elapsed = 2_400; // 125.0（差は25%）
     await provider.generate(params());
 
@@ -207,7 +207,7 @@ describe("台帳への書き込みを抑える", () => {
     expect(saved[1].tuning.outputTokensPerSecond).toBe(125);
   });
 
-  test("2割以上ちがっても、書いた直後（5秒未満）は書かない", async () => {
+  test("2割以上ちがっても、書いた直後（30秒未満）は書かない", async () => {
     // チャンクごとに応答の長さが違えば速度は簡単に2割振れる。変化だけを
     // 条件にすると毎回書くことになり、設定ファイルへの書き込みがチャンクの
     // 数だけ走る
@@ -222,7 +222,7 @@ describe("台帳への書き込みを抑える", () => {
     await provider.generate(params());
     expect(saved).toHaveLength(1);
 
-    advance(4_000); // 合わせて5秒
+    advance(29_000); // 合わせて30秒
     await provider.generate(params());
     expect(saved).toHaveLength(2);
   });

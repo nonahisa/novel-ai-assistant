@@ -99,8 +99,9 @@ export function buildTuningStatsMarkdown(
   );
 
   const sorted = sortBySpeed(entries);
-  // 印は1行だけ。同じ速さが並んだときは、先に来た行に付ける
-  const fastest = sorted[0]?.tuning.outputTokensPerSecond;
+  // 印は1行だけ。並べ替えたあとの先頭が実測なら、そこが最速である
+  // （推定は下へ回してあるので、先頭に来ることは無い）
+  const fastest = sorted.findIndex(isMeasuredSpeed);
 
   sorted.forEach((entry, index) => {
     lines.push(
@@ -108,10 +109,7 @@ export function buildTuningStatsMarkdown(
         [
           escapeCell(entry.providerLabel),
           escapeCell(entry.model),
-          speedCell(
-            entry.tuning.outputTokensPerSecond,
-            index === 0 && fastest !== undefined
-          ),
+          speedCell(entry.tuning.outputTokensPerSecond, index === fastest),
           speedSourceCell(entry.tuning.speedSource),
           formatMeasuredAt(entry.tuning.speedMeasuredAt),
           countCell(entry.tuning.contextWindow),
@@ -129,18 +127,40 @@ export function buildTuningStatsMarkdown(
 /**
  * 速い順。**速度の無い行は、まとめて末尾へ。**
  *
- * 速度の無い行どうしは、渡された順のままにする（並べ替える手がかりが
- * 無いのに順序を作ると、開くたびに入れ替わって見える）。
+ * **推定（`estimated`）は、実測の下へ回す。** 換算の係数は安全側
+ * （多め）に採ってあるので、推定は**構造的に速く出る**。数字の大小だけで
+ * 並べると、一度も測っていないモデルが先頭に立ち、速さを見に来た人が
+ * いちばん当てにならない行を最初に読むことになる。
+ *
+ * 同じ組の中では速い順。速度の無い行どうしは、渡された順のままにする
+ * （並べ替える手がかりが無いのに順序を作ると、開くたびに入れ替わって見える）。
  */
 function sortBySpeed(entries: readonly TuningStatsEntry[]): TuningStatsEntry[] {
   return [...entries].sort((a, b) => {
+    const rank = speedRank(a) - speedRank(b);
+    if (rank !== 0) return rank;
+
     const left = a.tuning.outputTokensPerSecond;
     const right = b.tuning.outputTokensPerSecond;
-    if (left === undefined && right === undefined) return 0;
-    if (left === undefined) return 1;
-    if (right === undefined) return -1;
+    if (left === undefined || right === undefined) return 0;
     return right - left;
   });
+}
+
+/** 並びの組。小さいほど上（実測 → 推定 → 速度が無い） */
+function speedRank(entry: TuningStatsEntry): number {
+  if (entry.tuning.outputTokensPerSecond === undefined) return 2;
+  return entry.tuning.speedSource === "estimated" ? 1 : 0;
+}
+
+/**
+ * 実際に測った速さか（◎ を付けてよい行か）。
+ *
+ * **出どころの分からない古い台帳（0.36.3まで）は実測として扱う。**
+ * 推定という区分ができる前の値なので、そこに入っているのは測った値である。
+ */
+function isMeasuredSpeed(entry: TuningStatsEntry): boolean {
+  return speedRank(entry) === 0;
 }
 
 function speedCell(

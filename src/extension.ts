@@ -642,6 +642,9 @@ export async function activate(
    */
   const manuscriptDeps = {
     highlighter,
+    // **作品は登録簿で引く**（設計書6.68.2）。用語索引は設定資料が
+    // 1件も無い作品では引けないので、作品を知りたいだけのところでは使わない
+    workOf: (filePath) => workOfPath(registry, filePath),
     openSettings: async (work, kind, id) => {
       const panel = await openSettingsPanel(context, work, aiRegistry, {
         beside: true,
@@ -4698,8 +4701,20 @@ function activePostingCopyWork(registry: WorkRegistry): WorkEntry | undefined {
   const editor = vscode.window.activeTextEditor;
   if (!editor) return undefined;
 
-  const filePath = fromUri(editor.document.uri);
-  // 比べ方は原稿エディタと同じものを使う（前方一致では足りない）
+  return workOfPath(registry, fromUri(editor.document.uri));
+}
+
+/**
+ * そのファイルが属する作品（登録簿で引く）。
+ *
+ * **引き方を1か所に置く。** 普通のエディタ（`activePostingCopyWork`）と
+ * 原稿エディタ（`ManuscriptEditorDeps.workOf`）が別々に引くと、同じ操作の
+ * 結果が画面によって変わる。比べ方は前方一致では足りない（`isInsideWork`）。
+ */
+function workOfPath(
+  registry: WorkRegistry,
+  filePath: string
+): WorkEntry | undefined {
   return registry
     .list()
     .find((entry) => isInsideWork(entry.folderPath, filePath));

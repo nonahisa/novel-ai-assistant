@@ -28,7 +28,7 @@ import type { WorkRegistry } from "../../src/core/workRegistry";
 
 interface PackageManifest {
   contributes: {
-    commands: Array<{ command: string }>;
+    commands: Array<{ command: string; title: string }>;
     menus: { commandPalette: Array<{ command: string; when: string }> };
   };
 }
@@ -646,6 +646,90 @@ describe("メニュー名は短く、補足はツールチップへ", () => {
         typeof tooltip === "string" ? tooltip : (tooltip?.value ?? "");
       expect(text, action.command).toContain(action.note);
     }
+  });
+});
+
+/**
+ * メニューの名前と、コマンドパレットの名前（`package.json` の `title`）。
+ *
+ * **同じ操作が2つの名前で呼ばれていると、作者は別物だと思う。** 実際、
+ * 「シーンメモを開く」と「シーンメモを横に開く」のように、片方だけ直して
+ * 食い違ったままの項目が溜まっていた。原則は
+ * **`label` ＋（`note` があれば `（note）`）＝ `title`**。
+ *
+ * **`title` は変えない。** コマンドパレットは名前だけで探す場所なので、
+ * 補足が付いていたほうが見つけやすい（`note` を作ったときの裁定）。
+ * 揃えるときは、メニュー側の `label`／`note` を直す。
+ */
+describe("メニュー名とコマンドパレットの名前", () => {
+  /** メニューに出る名前（補足を戻した形） */
+  function menuTitle(action: { label: string; note?: string }): string {
+    return action.note ? `${action.label}（${action.note}）` : action.label;
+  }
+
+  function titles(): Map<string, string> {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+    ) as PackageManifest;
+    return new Map(
+      manifest.contributes.commands.map((entry) => [entry.command, entry.title])
+    );
+  }
+
+  /**
+   * **揃えない項目と、その理由。**
+   *
+   * ほとんどは「小分類が文脈を持っているので、メニュー側は短くしてある」
+   * ——「作品管理 › 既存作追加 › フォルダから追加」の行に
+   * 「フォルダから作品を追加」と書くと、同じ語が2回出る。コマンド
+   * パレットには小分類が無いので、あちらは長いままでよい。
+   *
+   * **足すときは理由を書く。** 理由の書けないずれは、ただの直し忘れである。
+   */
+  const EXCEPTIONS: Record<string, string> = {
+    "novelai.setupGithub":
+      "「セットアップ」を避けた言い換え。小分類「GitHubで作品管理」の下なので、何のことかは文脈で分かる",
+    "novelai.gitSync": "小分類「GitHubで作品管理」の下。「GitHubと」は文脈で分かる",
+    "novelai.gitRestore": "小分類「GitHubで作品管理」の下。並びの短さを揃えている",
+    "novelai.createWorkWithPlot":
+      "小分類「新作開始」の下で「〜から開始」と揃えてある",
+    "novelai.createWorkFromManuscript":
+      "小分類「新作開始」の下で「〜から開始」と揃えてある",
+    "novelai.addWork": "小分類「既存作追加」の下で「〜から追加」と揃えてある",
+    "novelai.addWorkFromGithub":
+      "小分類「既存作追加」の下で「〜から追加」と揃えてある",
+    "novelai.extractSettings":
+      "小分類「資料抽出」の下。「設定資料を」は文脈で分かる",
+    "novelai.setupVectorSearch":
+      "括弧が名前の途中に入る形（「意味検索（ベクトルDB）の準備」）で、label＋（note）では表せない",
+    "novelai.generateSettingsDocs":
+      "括弧の中身（AIを使わない）は description に出している。note へ写すと画面に二重に出る",
+  };
+
+  test("label＋（note）が package.json の title と一致する", () => {
+    const title = titles();
+    const mismatched = allActions()
+      .filter((action) => !(action.command in EXCEPTIONS))
+      .filter((action) => menuTitle(action) !== title.get(action.command))
+      .map(
+        (action) =>
+          `${action.command}：メニュー「${menuTitle(action)}」／パレット「${title.get(action.command)}」`
+      );
+
+    expect(mismatched, "label か note を直して揃える（title は変えない）").toEqual(
+      []
+    );
+  });
+
+  test("例外表に、もう食い違っていない項目を残さない", () => {
+    // 揃えたのに例外へ残っていると、次にずれたとき素通りする
+    const title = titles();
+    const stale = Object.keys(EXCEPTIONS).filter((command) => {
+      const action = allActions().find((entry) => entry.command === command);
+      return !action || menuTitle(action) === title.get(command);
+    });
+
+    expect(stale, "揃った項目・消えた項目は例外表から外す").toEqual([]);
   });
 });
 

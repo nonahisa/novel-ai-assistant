@@ -4,7 +4,6 @@ import {
   extractEpisodeParts,
   sourceForPostingCopy,
   nameWithSubtitle,
-  needsEmphasisSite,
 } from "../../src/core/episodeCopy";
 import {
   formatChapterLabel,
@@ -107,29 +106,6 @@ describe("投稿サイト用の本文", () => {
       expect(bodyForPosting("{森|もり}と{{大事}}", "paren")).toBe(
         "森（もり）と大事"
       );
-    });
-
-    /**
-     * **訊いても答えが変わらないなら訊かない**（設計書5.7.3）。
-     * ルビはどのサイトでも同じ書き方で通るので、傍点が無ければ
-     * 貼り付け先を尋ねる意味がない（`features/ruby.ts` と同じ判断）。
-     */
-    describe("貼り付け先を訊くかどうか", () => {
-      test("投稿サイト記法で、傍点が入っているときだけ訊く", () => {
-        expect(needsEmphasisSite("これは{{大事}}だ", "site")).toBe(true);
-      });
-
-      test("傍点が無ければ訊かない", () => {
-        expect(needsEmphasisSite("{森|もり}を歩く", "site")).toBe(false);
-      });
-
-      test("記法が決まっているもの（別記法・HTML・括弧書き）は訊かない", () => {
-        for (const style of ["alphapolis-hash", "html", "paren"] as const) {
-          expect(needsEmphasisSite("これは{{大事}}だ", style), style).toBe(
-            false
-          );
-        }
-      });
     });
   });
 });

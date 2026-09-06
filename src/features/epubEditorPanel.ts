@@ -27,7 +27,12 @@ import {
   type BookConfig,
   type BookImageBlock,
 } from "../models/book";
-import { BookStore, BookStoreError, episodePathFor } from "../core/bookStore";
+import {
+  BookStore,
+  BookStoreError,
+  episodePathFor,
+  type DraftBase,
+} from "../core/bookStore";
 import { ChapterStore } from "../core/chapterStore";
 import type { Chapter } from "../models/chapter";
 import {
@@ -1067,7 +1072,12 @@ async function restoreStashedDraft(
   // **控えたときの設計図と、いま読んだ設計図を比べる**（設計書6.65.7）。
   // 閉じているあいだに外で直されていたら、訊き方を変える
   if (!store.draftBaseMatchesLoaded(stashed.base)) {
-    return await askAfterExternalChange(store, stashed.config, saved);
+    return await askAfterExternalChange(
+      store,
+      stashed.config,
+      saved,
+      stashed.base.kind
+    );
   }
 
   const restore = "復元する";
@@ -1096,18 +1106,30 @@ async function restoreStashedDraft(
  *
  * **控えを残す出口を用意する。** 「今の設計図を使う」は答えではあるが
  * 下書きを捨てる決心ではないので、控えは残して次に開いたときも訊く。
+ *
+ * **言い切れることだけを言う。** 0.35.5 までの控えは基準を持っていない
+ * （`DraftBase.kind === "unknown"`）ので、外で直されたかどうかは
+ * **分かっていない**。そこで「変わっています」と断言すると、入っても
+ * いない更新を作者に探しに行かせる。訊く3択は同じでよい——どちらの場合も
+ * 「復元すると今の設計図を捨てる」ことに変わりはない。
  */
 async function askAfterExternalChange(
   store: BookStore,
   draft: BookConfig,
-  saved: BookConfig
+  saved: BookConfig,
+  baseKind: DraftBase["kind"]
 ): Promise<BookConfig> {
   const keep = "今の設計図を使う（下書きは残す）";
   const overwrite = "下書きで上書きする";
   const discard = "捨てる";
+  const reason =
+    baseKind === "unknown"
+      ? "ただし、いつの下書きか分からないため確認します" +
+        "（退避したあとに設計図が変わっている可能性があります）。"
+      : "ただし、退避したあとに設計図が変わっています（別の窓や同期）。";
   const answer = await vscode.window.showWarningMessage(
     "前回のEPUBエディターに、保存していない編集が残っています。" +
-      "ただし、退避したあとに設計図が変わっています（別の窓や同期）。" +
+      reason +
       "復元すると今の設計図を捨てます。",
     { modal: true },
     keep,

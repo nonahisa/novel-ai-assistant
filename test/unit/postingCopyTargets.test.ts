@@ -222,7 +222,6 @@ describe("残る2つの入口も、同じ1段の訊き方を通る", () => {
       const body = entry.body();
       expect(body).not.toContain("pickEmphasisSite()");
       expect(body).not.toContain("hasEmphasis");
-      expect(body).not.toContain("needsEmphasisSite");
     });
 
     test(`${entry.name}：訊くのは貼り付け先だけ`, () => {
@@ -234,6 +233,30 @@ describe("残る2つの入口も、同じ1段の訊き方を通る", () => {
       expect(entry.body()).toContain("registeredPostingSites(");
     });
   }
+
+  /**
+   * **作品は登録簿で引く**（作者の裁定、2026-09-06）。
+   *
+   * 原稿エディタは用語索引（`highlighter.indexFor`）から作品を引いていた。
+   * あれは**設定資料が1件も無い作品では `undefined`** になるので、
+   * 書き始めたばかりの作品では登録済みの投稿先が先頭に来ない——
+   * 同じ操作なのに、作品によって並びが変わる。
+   */
+  test("原稿エディタは、作品を登録簿から引く（設定資料が無くても引ける）", () => {
+    const body = bodyOf(
+      "src/features/manuscriptEditor.ts",
+      "private async copyForPosting("
+    );
+
+    expect(body).toContain("this.deps.workOf(");
+    expect(body).not.toContain("indexFor(");
+
+    // 引き方の写しを作らない。`extension.ts` の「いま開いている本文の作品」
+    // （`activePostingCopyWork`）と同じ手を通す
+    const extension = readFileSync("src/extension.ts", "utf8");
+    expect(extension).toContain("workOf: (filePath) => workOfPath(");
+    expect(extension).toContain("function workOfPath(");
+  });
 
   test("使われなくなった2段目の画面は残さない", () => {
     // 呼ぶ人のいない入口を残すと、次に足す画面がそちらを写す

@@ -1,6 +1,5 @@
 import { parseEpisodeMetadata } from "./metadataParser";
 import {
-  hasEmphasis,
   toSiteNotation,
   type EmphasisSite,
   type RubyStyle,
@@ -91,24 +90,6 @@ export function bodyForPosting(
   return toSiteNotation(stripMemoLines(body), style, site)
     .replace(/^\n+/, "")
     .replace(/\n+$/, "");
-}
-
-/**
- * 貼り付け先のサイトを訊く必要があるか（設計書6.12.4）。
- *
- * **訊いても答えが変わらないなら訊かない**（5.7.3）。ルビはどのサイトでも
- * 同じ書き方で通るので、傍点が入っていなければ尋ねる意味がない。
- * 別記法・HTML・括弧書きは、傍点の出し方がその記法だけで決まる。
- *
- * この判断を1か所に置いてあるのは、**「投稿サイト用にコピー」の入口が
- * 3つある**（原稿エディタ・エディタの右クリック・作品一覧の話）ためで、
- * 書き写すと片方だけ訊かないままになる。
- */
-export function needsEmphasisSite(
-  body: string,
-  style: RubyStyle["id"]
-): boolean {
-  return style === "site" && hasEmphasis(stripMemoLines(body));
 }
 
 /**

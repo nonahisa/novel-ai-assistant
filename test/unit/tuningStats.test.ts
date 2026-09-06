@@ -186,6 +186,72 @@ describe("実測一覧の組み立て", () => {
       ]);
     });
 
+    /**
+     * **推定は、実測より速く出るようにできている。** 換算の係数は
+     * 安全側（多め）に採ってあるので、同じモデルでも推定のほうが大きな
+     * 数字になる。速い順にそのまま並べると、**一度も測っていないモデルが
+     * 先頭に立つ**——速さを見に来た人が、いちばん当てにならない行を最初に
+     * 読むことになる。
+     */
+    test("推定は、数字が大きくても実測の下へ回す", () => {
+      const markdown = buildTuningStatsMarkdown([
+        entry("Claude", "推定", {
+          outputTokensPerSecond: 90,
+          speedSource: "estimated",
+        }),
+        entry("Ollama", "測った", {
+          outputTokensPerSecond: 20,
+          speedSource: "tuning",
+        }),
+        entry("さくらのAI", "普段", {
+          outputTokensPerSecond: 10,
+          speedSource: "call",
+        }),
+        entry("LM Studio", "測っていない", {}),
+      ]);
+
+      expect(rows(markdown).map((cells) => cells[1])).toEqual([
+        "測った",
+        "普段",
+        "推定",
+        // 速度の無い行は、これまでどおりいちばん後ろ
+        "測っていない",
+      ]);
+    });
+
+    test("◎ 最速は実測の行にだけ付ける", () => {
+      // 推定しか無いときは、誰にも印を付けない。**測れば分かることを、
+      // 推定で決めてしまわない**
+      const onlyEstimated = buildTuningStatsMarkdown([
+        entry("Claude", "推定", {
+          outputTokensPerSecond: 90,
+          speedSource: "estimated",
+        }),
+        entry("ChatGPT", "推定2", {
+          outputTokensPerSecond: 50,
+          speedSource: "estimated",
+        }),
+      ]);
+
+      expect(onlyEstimated).not.toContain("最速");
+
+      // 実測が混じっていれば、その中のいちばん速い行に付く
+      const mixed = buildTuningStatsMarkdown([
+        entry("Claude", "推定", {
+          outputTokensPerSecond: 90,
+          speedSource: "estimated",
+        }),
+        entry("Ollama", "測った", {
+          outputTokensPerSecond: 20,
+          speedSource: "tuning",
+        }),
+      ]);
+      const table = rows(mixed);
+      expect(table[0][1]).toBe("測った");
+      expect(table[0][2]).toContain("◎ 最速");
+      expect(table[1][2]).not.toContain("最速");
+    });
+
     test("出どころの分からない古い台帳は「—」（当て推量で埋めない）", () => {
       const markdown = buildTuningStatsMarkdown([
         entry("Ollama", "gemma4:e4b", { outputTokensPerSecond: 12.3 }),

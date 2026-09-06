@@ -840,9 +840,24 @@ ruby > rt {
     sentHistory.unshift(text);
     if (sentHistory.length > 16) sentHistory.length = 16;
   }
-  /** 届いた本文が、最近自分が送ったものの返事か */
+  /**
+   * 届いた本文が、最近自分が送ったものの返事か。
+   *
+   * **当たったら、その1件とそれより古いものを忘れる**（レビューの指摘、
+   * 2026-09-06）。返事は送った順に届くので、当たった1件より古い返事は
+   * もう来ない。忘れないと、別の窓の取り消しや過去の版への復元で
+   * **本当に外から同じ文へ戻された**ときまで「自分の返事」と見なして
+   * 画面を古いままにし、次の1打鍵で外の変更を書き戻してしまう。
+   */
   function isOwnEcho(text) {
-    return sentHistory.indexOf(text) !== -1;
+    const at = sentHistory.indexOf(text);
+    if (at === -1) return false;
+    sentHistory.splice(at);
+    return true;
+  }
+  /** 外からの本文を受け入れたら、以後の返事の照合はやり直す */
+  function forgetSent() {
+    sentHistory.length = 0;
   }
   /** 変換中に外から届いた本文。確定してから片づける */
   let pending = null;
@@ -1192,6 +1207,7 @@ ruby > rt {
       return;
     }
     if (write.value === text) return;
+    forgetSent();
     replaceKeepingCaret(text);
   }
 
@@ -2707,6 +2723,7 @@ ruby > rt {
       return;
     }
     if (composeNormalizeNewlines(text) === composeDomToNotation(compose)) return;
+    forgetSent();
     write.value = text;
     composeApplyText(text);
   }
