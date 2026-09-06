@@ -12,6 +12,7 @@ import { boundaryHour } from "./writingProgress";
 import { readWorkFormat } from "../core/workFormatStore";
 import { episodeUnit } from "../core/episodeLabel";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
+import { notifyDone } from "../views/notify";
 
 /**
  * 作品ごとの目標を決める（設計書6.3.6）。
@@ -86,7 +87,7 @@ export async function setWorkGoals(work: WorkEntry): Promise<void> {
   }
   if (picked.action === "clearContest") {
     await save(work, { ...goals, contest: null });
-    vscode.window.showInformationMessage("応募先の情報を消しました。");
+    notifyDone("応募先の情報を消しました。");
     return;
   }
 

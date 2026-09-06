@@ -21,10 +21,11 @@ import {
   suggestRepositoryName,
   validateRepositoryUrl,
 } from "../core/gitSetup";
-import { logFailure, logStep, showLog } from "../core/logger";
+import { logFailure, logStep } from "../core/logger";
 import { redactUrlCredentials } from "../core/redactUrl";
 import { withProgress } from "../views/progress";
 import { askText , cancelItem } from "../views/dialogs";
+import { confirmRun, notifyDone, warnWithLog } from "../views/notify";
 
 /**
  * GitHub同期を始めるまでの案内。
@@ -205,7 +206,7 @@ async function guideGitInstall(): Promise<void> {
 
   if (answer === "コマンドをコピー") {
     await vscode.env.clipboard.writeText(command);
-    vscode.window.showInformationMessage(
+    notifyDone(
       "コピーしました。ターミナルに貼り付けて実行してください。" +
         "導入後はVS Codeを開き直すと認識されます。"
     );
@@ -229,14 +230,13 @@ async function startTracking(
       ? `「${target.label}」に履歴を作り、中の${target.works.length}作品をまとめて残します。\n`
       : "作品フォルダーに履歴を作り、今ある原稿を1つ目の記録として残します。\n";
 
-  const answer = await vscode.window.showInformationMessage(
+  const confirmed = await confirmRun(
     `${describeSyncTarget(target)} をGitで管理しますか？\n` +
       scope +
       "この時点ではまだ外部へ何も送りません。",
-    "始める",
-    "やめる"
+    "始める"
   );
-  if (answer !== "始める") return false;
+  if (!confirmed) return false;
 
   const initialized = await initRepository(target.folderPath, run);
   if (!initialized.ok) {
@@ -250,13 +250,12 @@ async function startTracking(
   }
 
   const count = await countTrackableFiles(target.folderPath, run);
-  const confirm = await vscode.window.showInformationMessage(
+  const recordConfirmed = await confirmRun(
     `${count} 件のファイルを1つ目の記録として残します。\n` +
       "（キャッシュなど、同期しない設定のものは除いています）",
-    "記録する",
-    "やめる"
+    "記録する"
   );
-  if (confirm !== "記録する") return false;
+  if (!recordConfirmed) return false;
 
   const committed = await commitAll(
     target.folderPath,
@@ -278,7 +277,7 @@ async function startTracking(
   }
 
   logStep(`Gitで管理を開始: ${target.label}（${count}件）`);
-  vscode.window.showInformationMessage(
+  notifyDone(
     `${target.label} をGitで管理し始めました。次はGitHubのリポジトリとつなげます。`
   );
   return true;
@@ -423,7 +422,7 @@ async function connectRemote(
     return false;
   }
   logStep(`送り先を登録: ${url.trim()}`);
-  vscode.window.showInformationMessage("送り先を登録しました。");
+  notifyDone("送り先を登録しました。");
   return true;
 }
 
@@ -584,16 +583,11 @@ function reportFailure(context: string, detail: string | undefined): void {
 
   // つながらないだけなのか、設定が違うのかで、作者が次にやることが変わる
   const translated = describeNetworkFailure(detail);
-  vscode.window
-    .showWarningMessage(
-      translated
-        ? `${context}に失敗しました。\n${translated}`
-        : `${context}に失敗しました。${detail ? `\n${detail.slice(0, 200)}` : ""}`,
-      "ログを見る"
-    )
-    .then((answer) => {
-      if (answer === "ログを見る") showLog();
-    });
+  void warnWithLog(
+    translated
+      ? `${context}に失敗しました。\n${translated}`
+      : `${context}に失敗しました。${detail ? `\n${detail.slice(0, 200)}` : ""}`
+  );
 }
 
 /** 現在のブランチ名を知りたい呼び出し元のために公開する */

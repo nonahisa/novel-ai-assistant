@@ -67,6 +67,7 @@ import {
   shouldSuggestMarkdown,
 } from "../core/markdownConversion";
 import { countSiteNotation } from "../core/ruby";
+import { notifyDone } from "../views/notify";
 
 /**
  * 原稿エディタ（設計書6.25）。
@@ -1683,7 +1684,7 @@ export class ManuscriptEditorProvider
     // このあと作者が書いて保存した回が「ファイル数が変わった」に当たり、
     // その分が「今日 +0字」になって消える
     await this.deps.rebaseline(work);
-    void vscode.window.showInformationMessage(`${fileName} を作りました。`);
+    notifyDone(`${fileName} を作りました。`);
     await this.openAsManuscript(filePath);
   }
 
@@ -1718,7 +1719,7 @@ export class ManuscriptEditorProvider
     await vscode.env.clipboard.writeText(
       toSiteNotation(source, style.id, site)
     );
-    void vscode.window.showInformationMessage(
+    notifyDone(
       `本文全体を${style.label}に変換して、クリップボードへ入れました。` +
         "原稿はそのままです。"
     );

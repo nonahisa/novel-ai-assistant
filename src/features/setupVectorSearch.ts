@@ -4,6 +4,7 @@ import { embeddingModelName, isVectorSearchEnabled } from "./vectorSearch";
 import { pullOllamaModel, shortenProgress } from "../core/packageInstall";
 import { withCancellableProgress } from "../views/progress";
 import { cancelItem } from "../views/dialogs";
+import { notifyDone } from "../views/notify";
 
 /**
  * 意味検索（ベクトルDB）のセットアップ案内。
@@ -68,7 +69,7 @@ export async function setupVectorSearch(): Promise<void> {
         await vscode.workspace
           .getConfiguration("novelai")
           .update("vectorSearch.enabled", true, vscode.ConfigurationTarget.Global);
-        vscode.window.showInformationMessage(
+        notifyDone(
           "意味検索を使えるようにしました。作品を選んで「検索用の索引を作る」を実行してください。"
         );
       },
@@ -88,7 +89,7 @@ export async function setupVectorSearch(): Promise<void> {
           !enabled,
           vscode.ConfigurationTarget.Global
         );
-      vscode.window.showInformationMessage(
+      notifyDone(
         enabled
           ? "意味検索を切りました。相談では語句一致で場面を探します。"
           : "意味検索を入にしました。作品を選んで「検索用の索引を作る」を実行してください。"

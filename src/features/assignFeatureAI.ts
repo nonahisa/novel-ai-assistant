@@ -8,6 +8,7 @@ import {
   type ProviderAndModelPick,
 } from "../ai/registry";
 import { cancelItem } from "../views/dialogs";
+import { notifyDone } from "../views/notify";
 
 /**
  * 機能ごとに使うAIを割り当てる（設計書6.28.7の1、7.1）。
@@ -29,7 +30,7 @@ export async function assignFeatureAI(registry: AIRegistry): Promise<void> {
 
   if (target === "default") {
     await registry.unassign(feature);
-    vscode.window.showInformationMessage(
+    notifyDone(
       `${ASSIGNABLE_FEATURE_LABELS[feature]} は、AI設定で選んだ既定のAIで実行するようにしました。`
     );
     return;
@@ -51,7 +52,7 @@ export async function assignFeatureAI(registry: AIRegistry): Promise<void> {
     );
   }
 
-  vscode.window.showInformationMessage(
+  notifyDone(
     `${ASSIGNABLE_FEATURE_LABELS[feature]} は ` +
       `${target.provider.displayName}（${target.model.displayName}）で実行するようにしました。` +
       (notes.length > 0 ? "\n" + notes.join("\n") : "")

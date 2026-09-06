@@ -79,6 +79,7 @@ import {
   readNarrativePerson,
 } from "../core/workStyle";
 import type { KeepWord } from "../models/keepWord";
+import { confirmRun, notifyDone } from "../views/notify";
 
 /**
  * 誤字脱字検知（P-09）のオーケストレーション。
@@ -491,12 +492,7 @@ export async function checkTypos(
       // 突き合わせられないと、料金の問い合わせに答えられない
       logStep(`誤字脱字検知：まとめ実行のため確認を省略\n${notice}`);
     } else {
-      const confirm = await vscode.window.showInformationMessage(
-        notice,
-        "実行",
-        "中止"
-      );
-      if (confirm !== "実行") return undefined;
+      if (!(await confirmRun(notice))) return undefined;
     }
   } else if (chunks.length > 0) {
     vscode.window.showInformationMessage(
@@ -768,7 +764,7 @@ export async function checkTypos(
   );
 
   if (cancelled) {
-    vscode.window.showInformationMessage(
+    notifyDone(
       "誤字脱字検知を中止しました。完了済みの処理は次回再利用されます。"
     );
     return {

@@ -39,12 +39,12 @@ import {
   logFailure,
   logStep,
   responseExcerptForLog,
-  showLog,
   useLogFile,
 } from "../core/logger";
 import { renameEpisodeFile } from "../core/episodeRename";
 import { confirmFormatFit } from "./formatFitPrompt";
 import { cancelItem, isCancelItem } from "../views/dialogs";
+import { confirmRun, notifyDone, warnWithLog } from "../views/notify";
 
 /**
  * 各話あらすじの生成（P-07）と、サブタイトルの提案・リネーム。
@@ -139,14 +139,12 @@ export async function generateSynopses(
   const costNotice = resolved.provider.isPaid
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
-  const confirm = await vscode.window.showInformationMessage(
+  const confirmed = await confirmRun(
     `${loaded.bodies.length} 話中 ${pending.length} 話のあらすじを作ります` +
       `（変わっていない ${loaded.bodies.length - pending.length} 話はスキップ）。\n` +
-      `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度${costNotice}`,
-    "実行",
-    "中止"
+      `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度${costNotice}`
   );
-  if (confirm !== "実行") return false;
+  if (!confirmed) return false;
 
   // 人物名は表記を揃えるために渡す。モブは名前が普通名詞になりがちで、
   // あらすじの文中に混ざると読みにくい
@@ -426,7 +424,7 @@ async function proposeSubtitles(
       logStep(
         `リネーム: ${episode.file.fileName} → ${path.basename(renamed)}`
       );
-      vscode.window.showInformationMessage(
+      notifyDone(
         `${episode.file.fileName} を ${path.basename(renamed)} に変えました。`
       );
     } catch (error) {
@@ -461,14 +459,7 @@ function reportResult(result: {
     .slice(0, 3)
     .map((failure) => `${failure.label}: ${failure.message}`)
     .join("\n");
-  vscode.window
-    .showWarningMessage(
-      `${head}\n失敗 ${result.failures.length} 話\n${shown}`,
-      "ログを見る"
-    )
-    .then((answer) => {
-      if (answer === "ログを見る") showLog();
-    });
+  void warnWithLog(`${head}\n失敗 ${result.failures.length} 話\n${shown}`);
 }
 
 function reportStoreError(error: unknown): void {

@@ -37,10 +37,10 @@ import {
   logFailure,
   logStep,
   responseExcerptForLog,
-  showLog,
   useLogFile,
 } from "../core/logger";
 import { openInDefaultEditor } from "../views/openDocument";
+import { notifyDone, warnWithLog } from "../views/notify";
 
 /**
  * プロット逆算生成（P-02）。既に書いた本文からプロットを組み立て直す。
@@ -175,11 +175,7 @@ export async function generatePlot(
           ? failure.message
           : String(failure);
     logFailure("プロット逆算", { 内容: message });
-    vscode.window
-      .showWarningMessage(`プロットを作れませんでした: ${message}`, "ログを見る")
-      .then((answer) => {
-        if (answer === "ログを見る") showLog();
-      });
+    void warnWithLog(`プロットを作れませんでした: ${message}`);
     return;
   }
   if (!responseText?.trim()) return;
@@ -190,11 +186,7 @@ export async function generatePlot(
       理由: "応答を読み取れません",
       応答: responseExcerptForLog(responseText),
     });
-    vscode.window
-      .showWarningMessage("応答を読み取れませんでした。", "ログを見る")
-      .then((answer) => {
-        if (answer === "ログを見る") showLog();
-      });
+    void warnWithLog("応答を読み取れませんでした。");
     return;
   }
 
@@ -350,7 +342,7 @@ async function applyPlot(
   }
 
   if (filled.length === 0 && replaced.length === 0) {
-    vscode.window.showInformationMessage("プロットは変更しませんでした。");
+    notifyDone("プロットは変更しませんでした。");
     return;
   }
 

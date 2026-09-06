@@ -39,6 +39,7 @@ import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { logFailure } from "../core/logger";
 import type { AIRegistry } from "../ai/registry";
 import { generateAnnouncement } from "./generateAnnouncement";
+import { notifyDone } from "../views/notify";
 
 /**
  * 投稿キット——「貼るだけ」の新話更新（設計書6.68）。
@@ -435,7 +436,7 @@ export async function configurePostingSites(
 
   const withNewSites = next;
   if (!(await save(store, work, withNewSites))) return { changed: false };
-  void vscode.window.showInformationMessage(
+  notifyDone(
     chosen.length === 0
       ? `${work.title} の投稿先をすべて外しました（記録は残っています）。`
       : `${work.title} の投稿先を ${postingSiteLabels(

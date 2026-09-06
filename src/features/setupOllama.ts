@@ -10,6 +10,7 @@ import { pullOllamaModel, shortenProgress } from "../core/packageInstall";
 import { RECOMMENDED_CHAT_MODEL } from "../core/requirements";
 import { runFullSetup } from "./setupWizard";
 import { withCancellableProgress, withProgress } from "../views/progress";
+import { notifyDone } from "../views/notify";
 
 /**
  * Ollamaを使える状態にするまでの案内（設計書6.16）。
@@ -111,7 +112,7 @@ export async function setupOllama(registry: AIRegistry): Promise<void> {
       connection = await provider.testConnection();
     } else if (action === "コマンドをコピー") {
       await vscode.env.clipboard.writeText(`ollama pull ${RECOMMENDED_MODEL}`);
-      vscode.window.showInformationMessage(
+      notifyDone(
         "コマンドをコピーしました。ターミナルに貼り付けて実行してください。"
       );
       return;

@@ -46,9 +46,9 @@ import {
   logFailure,
   logStep,
   responseExcerptForLog,
-  showLog,
   useLogFile,
 } from "../core/logger";
+import { warnWithLog } from "../views/notify";
 
 /**
  * 名前の点検（設計書6.37.5）。
@@ -458,11 +458,7 @@ async function suggestNames(
       理由: "応答を読み取れません",
       応答: responseExcerptForLog(responseText),
     });
-    const answer = await vscode.window.showWarningMessage(
-      "名前の候補を読み取れませんでした。",
-      "ログを見る"
-    );
-    if (answer === "ログを見る") showLog();
+    await warnWithLog("名前の候補を読み取れませんでした。");
   }
 
   const screened = screenNameCandidates(parsed, material.entries, {

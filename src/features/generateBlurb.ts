@@ -39,10 +39,10 @@ import { reportAIError } from "./reportAIError";
 import {
   logFailure,
   responseExcerptForLog,
-  showLog,
   useLogFile,
 } from "../core/logger";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
+import { confirmRun, warnWithLog } from "../views/notify";
 
 /**
  * 作品紹介文（P-06）とキャッチコピー3案（P-08）。
@@ -94,12 +94,10 @@ export async function generateWorkBlurb(
   const costNotice = resolved.provider.isPaid
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
-  const confirm = await vscode.window.showInformationMessage(
-    `作品紹介文を作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,
-    "実行",
-    "中止"
+  const confirmed = await confirmRun(
+    `作品紹介文を作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`
   );
-  if (confirm !== "実行") return;
+  if (!confirmed) return;
 
   // **応答の見込みに実測を使う**（設計書6.65.16の2、6.77の第2段）。
   // 紹介文は400字ほどだが、渡さないとOllamaの `num_ctx` が
@@ -167,18 +165,13 @@ export async function generateWorkBlurb(
         : "応答を読み取れません",
       応答: responseExcerptForLog(response.text),
     });
-    vscode.window
-      .showWarningMessage(
-        // **文言を自前で書かない**（0.33.9）。上限が実測から来ているときに
-        // 「設定を大きくして」と言うのは嘘で、作者は直らない操作を繰り返す
-        truncated
-          ? truncatedOutputAdvice(outputLimit)
-          : "応答を読み取れませんでした。",
-        "ログを見る"
-      )
-      .then((answer) => {
-        if (answer === "ログを見る") showLog();
-      });
+    void warnWithLog(
+      // **文言を自前で書かない**（0.33.9）。上限が実測から来ているときに
+      // 「設定を大きくして」と言うのは嘘で、作者は直らない操作を繰り返す
+      truncated
+        ? truncatedOutputAdvice(outputLimit)
+        : "応答を読み取れませんでした。"
+    );
     return;
   }
 
@@ -256,12 +249,10 @@ export async function generateCatchphrases(
   const costNotice = resolved.provider.isPaid
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
-  const confirm = await vscode.window.showInformationMessage(
-    `キャッチコピーを3案作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,
-    "実行",
-    "中止"
+  const confirmed = await confirmRun(
+    `キャッチコピーを3案作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`
   );
-  if (confirm !== "実行") return;
+  if (!confirmed) return;
 
   // 「別の案を出す」を選ぶたび、却下した案を渡して繰り返す
   for (;;) {

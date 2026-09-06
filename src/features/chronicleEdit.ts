@@ -23,6 +23,7 @@ import {
   validateTimeline,
 } from "../core/timelineEdit";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
+import { notifyDone } from "../views/notify";
 
 /**
  * 時期と系統を作る流れ（設計書6.39.3）。
@@ -677,7 +678,7 @@ async function save(
   }
 
   logStep(`時期・系統：${context.work.title} の timeline.json を保存しました`);
-  void vscode.window.showInformationMessage(message);
+  notifyDone(message);
 }
 
 function messageOf(error: unknown): string {

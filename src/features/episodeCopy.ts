@@ -15,6 +15,7 @@ import { cancelItem, isCancelItem } from "../views/dialogs";
 import { recordEdit } from "../core/actorContext";
 import { logFailure } from "../core/logger";
 import { formatChapterLabel, stripChapterLabel } from "../core/episodeLabel";
+import { notifyDone } from "../views/notify";
 
 /**
  * 話のサブタイトル・本文をコピーする／ファイル名にサブタイトルを付ける
@@ -38,7 +39,7 @@ export async function copySubtitle(episode: EpisodeFile): Promise<void> {
     return;
   }
   await vscode.env.clipboard.writeText(parts.subtitle);
-  void vscode.window.showInformationMessage(
+  notifyDone(
     `「${parts.subtitle}」をコピーしました。`
   );
 }
@@ -158,7 +159,7 @@ export async function renameWithSubtitle(
     file: episode.fileName,
     detail: next,
   });
-  void vscode.window.showInformationMessage(`${next} に変えました。`);
+  notifyDone(`${next} に変えました。`);
 }
 
 async function read(

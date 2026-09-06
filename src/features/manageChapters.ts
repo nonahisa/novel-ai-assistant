@@ -11,6 +11,7 @@ import { ChapterStore, ChapterStoreError } from "../core/chapterStore";
 import { episodePathFor } from "../core/bookStore";
 import { askText } from "../views/dialogs";
 import { logFailure } from "../core/logger";
+import { notifyDone } from "../views/notify";
 
 /**
  * 章立ての手動の管理（設計書6.66.2）。
@@ -57,7 +58,7 @@ export async function startChapterAt(
   );
   if (!saved) return false;
 
-  void vscode.window.showInformationMessage(
+  notifyDone(
     existing
       ? `章の名前を「${name}」に変えました。`
       : `「${episode.fileName}」から章「${name}」を始めました。`
@@ -100,9 +101,7 @@ export async function renameChapter(
   });
   if (!saved) return false;
 
-  void vscode.window.showInformationMessage(
-    `章の名前を「${name}」に変えました。`
-  );
+  notifyDone(`章の名前を「${name}」に変えました。`);
   return true;
 }
 
@@ -146,7 +145,7 @@ export async function removeChapter(
   });
   if (!saved) return false;
 
-  void vscode.window.showInformationMessage(
+  notifyDone(
     `章「${chapter.name}」を外しました。話はそのまま残っています。`
   );
   return true;

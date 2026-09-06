@@ -61,10 +61,10 @@ import {
   logFailure,
   logStep,
   responseExcerptForLog,
-  showLog,
   useLogFile,
 } from "../core/logger";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
+import { confirmRun, warnWithLog } from "../views/notify";
 
 /**
  * 更新告知文（P-30、設計書6.41）。
@@ -114,12 +114,10 @@ export async function generateAnnouncement(
   const costNotice = resolved.provider.isPaid
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
-  const confirm = await vscode.window.showInformationMessage(
-    `更新告知文を作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,
-    "実行",
-    "中止"
+  const confirmed = await confirmRun(
+    `更新告知文を作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`
   );
-  if (confirm !== "実行") return;
+  if (!confirmed) return;
 
   // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
   // 紹介文・前の話のあらすじ・前に出した告知は作品が育つほど伸びる。
@@ -214,11 +212,7 @@ export async function generateAnnouncement(
       理由: "応答を読み取れません",
       応答: responseExcerptForLog(response.text),
     });
-    vscode.window
-      .showWarningMessage("応答を読み取れませんでした。", "ログを見る")
-      .then((answer) => {
-        if (answer === "ログを見る") showLog();
-      });
+    void warnWithLog("応答を読み取れませんでした。");
     return;
   }
 

@@ -10,6 +10,7 @@ import type { WorkRegistry } from "../core/workRegistry";
 import { withProgress } from "../views/progress";
 import { askText } from "../views/dialogs";
 import { tryRegisterAsCollection } from "./addCollection";
+import { notifyDone } from "../views/notify";
 
 /**
  * GitHubにある作品を取り寄せて登録する（設計書5.5.11）。
@@ -138,7 +139,7 @@ export async function addWorkFromGithub(
   );
   if (!entry) return [];
 
-  vscode.window.showInformationMessage(
+  notifyDone(
     `「${entry.title}」を取り寄せて登録しました。`
   );
   return [entry];

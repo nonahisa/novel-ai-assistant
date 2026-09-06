@@ -46,13 +46,13 @@ import {
   logFailure,
   logStep,
   responseExcerptForLog,
-  showLog,
   useLogFile,
 } from "../core/logger";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 // **型だけを取る。** パネルの実体は呼び出し側（`extension.ts`）が作ったものを
 // 受け取るので、ここで束に取り込む必要がない（`checkForeshadows` と同じ）
 import type { ProposalPanel, RecordUpdateViewItem } from "./proposalPanel";
+import { confirmRun, notifyDone, warnWithLog } from "../views/notify";
 
 /**
  * 章立てのAIの提案（P-31、設計書6.66.4）。
@@ -245,13 +245,11 @@ export async function proposeChapters(
       : withSynopsis < material.episodes.length
         ? `\nあらすじのある話は ${withSynopsis}/${material.episodes.length} 件です。`
         : "";
-  const confirm = await vscode.window.showInformationMessage(
+  const confirmed = await confirmRun(
     `${work.title} の章立てを提案します（AIの呼び出しは1回）。\n` +
-      `モデル: ${resolved.model}${costNotice}${materialNotice}`,
-    "実行",
-    "中止"
+      `モデル: ${resolved.model}${costNotice}${materialNotice}`
   );
-  if (confirm !== "実行") return;
+  if (!confirmed) return;
 
   const info = await resolveModelInfoOrWarn({
     registry,
@@ -293,11 +291,7 @@ export async function proposeChapters(
       理由: "応答を読み取れません",
       応答: responseExcerptForLog(text),
     });
-    vscode.window
-      .showWarningMessage("応答を読み取れませんでした。", "ログを見る")
-      .then((answer) => {
-        if (answer === "ログを見る") showLog();
-      });
+    void warnWithLog("応答を読み取れませんでした。");
     return;
   }
 
@@ -379,13 +373,11 @@ export async function suggestChapterName(
   const costNotice = resolved.provider.isPaid
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
-  const confirm = await vscode.window.showInformationMessage(
+  const confirmed = await confirmRun(
     `章「${chapter.name}」の名前の案を出します（AIの呼び出しは1回）。\n` +
-      `対象は ${range.length}話。モデル: ${resolved.model}${costNotice}`,
-    "実行",
-    "中止"
+      `対象は ${range.length}話。モデル: ${resolved.model}${costNotice}`
   );
-  if (confirm !== "実行") return false;
+  if (!confirmed) return false;
 
   const info = await resolveModelInfoOrWarn({
     registry,
@@ -445,11 +437,7 @@ export async function suggestChapterName(
         応答: responseExcerptForLog(text),
       });
     }
-    vscode.window
-      .showWarningMessage("名前の案が得られませんでした。", "ログを見る")
-      .then((answer) => {
-        if (answer === "ログを見る") showLog();
-      });
+    void warnWithLog("名前の案が得られませんでした。");
     return false;
   }
 
@@ -501,7 +489,7 @@ export async function suggestChapterName(
     return false;
   }
 
-  vscode.window.showInformationMessage(
+  notifyDone(
     `章の名前を「${picked.name}」に変えました。`
   );
   return true;

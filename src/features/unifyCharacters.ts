@@ -7,6 +7,7 @@ import { findMergeCandidates, type MergeCandidate } from "../core/characterMerge
 import { unifyCharacters } from "../core/characterUnify";
 import { logFailure } from "../core/logger";
 import { cancelItem } from "../views/dialogs";
+import { confirmRun } from "../views/notify";
 
 /**
  * 同一人物として登録されてしまった組を、作者の確認のうえで1件にまとめる。
@@ -96,15 +97,14 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
 
   const { unified, retiredId } = unifyCharacters(keepPick.keep, keepPick.absorb);
 
-  const confirm = await vscode.window.showWarningMessage(
+  const confirmed = await confirmRun(
     `「${keepPick.absorb.name}」を「${unified.name}」にまとめます。\n` +
       `別名: ${unified.aliases.join("、") || "なし"}\n` +
       "まとめた側のファイルは削除せず、回復用の場所へ移します。\n" +
       "以後この人物は抽出で上書きされなくなります。",
-    "まとめる",
-    "中止"
+    "まとめる"
   );
-  if (confirm !== "まとめる") return;
+  if (!confirmed) return;
 
   // このプロジェクトは既存ファイルの上書きを行わない（atomicWrite の replaceGuarded は
   // 必ず失敗する）。そのため「残す側を退避 → 新しい内容を新規作成 → 取り下げ側を退避」

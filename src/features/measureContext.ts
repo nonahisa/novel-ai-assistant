@@ -28,7 +28,7 @@ import {
   type ProbeSides,
   type ProbeState,
 } from "../core/contextProbe";
-import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
+import { logFailure, logStep, useLogFile } from "../core/logger";
 import {
   buildOutputProbePrompt,
   countOutputLines,
@@ -51,6 +51,7 @@ import {
 import { withCancellableProgress } from "../views/progress";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { readChunkSettings } from "./chunkSettings";
+import { errorWithLog } from "../views/notify";
 
 /**
  * AIチューニング（設計書6.27.11・6.49）。
@@ -1148,15 +1149,10 @@ function reportModelLoadFailure(
     triedNumCtx !== undefined
       ? `num_ctx を ${triedNumCtx.toLocaleString("ja-JP")} で試しましたが、`
       : "";
-  void vscode.window
-    .showErrorMessage(
-      `${tried}モデルを読み込めませんでした。より小さいモデルをお試しください。\n` +
-        (error.detail ?? error.message).slice(0, ERROR_EXCERPT_CHARS),
-      "ログを見る"
-    )
-    .then((answer) => {
-      if (answer === "ログを見る") showLog();
-    });
+  void errorWithLog(
+    `${tried}モデルを読み込めませんでした。より小さいモデルをお試しください。\n` +
+      (error.detail ?? error.message).slice(0, ERROR_EXCERPT_CHARS)
+  );
 }
 
 /** 送ってから返るまでの秒数。ログに出すので、秒より細かくしない */
@@ -1287,14 +1283,7 @@ function reportFailure(error: unknown): void {
       詳細: error.detail,
       本文: error.message,
     });
-    void vscode.window
-      .showErrorMessage(
-        `${error.message}\n${recoveryForAIError(error)}`,
-        "ログを見る"
-      )
-      .then((answer) => {
-        if (answer === "ログを見る") showLog();
-      });
+    void errorWithLog(`${error.message}\n${recoveryForAIError(error)}`);
     return;
   }
 

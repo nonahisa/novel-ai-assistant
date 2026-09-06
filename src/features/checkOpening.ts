@@ -43,9 +43,9 @@ import {
   logFailure,
   logStep,
   responseExcerptForLog,
-  showLog,
   useLogFile,
 } from "../core/logger";
+import { warnWithLog } from "../views/notify";
 
 /**
  * 冒頭診断（P-24、設計書6.30）。
@@ -182,11 +182,7 @@ export async function checkOpening(
       理由: "応答を読み取れません",
       応答: responseExcerptForLog(responseText),
     });
-    const answer = await vscode.window.showWarningMessage(
-      "冒頭診断の応答を読み取れませんでした。",
-      "ログを見る"
-    );
-    if (answer === "ログを見る") showLog();
+    await warnWithLog("冒頭診断の応答を読み取れませんでした。");
     // 応答を読めなかったのも失敗である（次の検知は走らせる）
     return CHECK_FAILED;
   }

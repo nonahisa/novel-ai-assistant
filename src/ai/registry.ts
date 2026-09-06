@@ -18,6 +18,7 @@ import { probeGeneration } from "./generationProbe";
 import { logFailure, logStep, showLog } from "../core/logger";
 import { askText, cancelItem } from "../views/dialogs";
 import { canRunProcesses } from "../core/runtime";
+import { notifyDone } from "../views/notify";
 
 const KEY_PROVIDER = "novelai.ai.provider";
 const KEY_MODEL = "novelai.ai.model";
@@ -557,7 +558,7 @@ export async function runSetupWizard(
     );
   }
 
-  vscode.window.showInformationMessage(
+  notifyDone(
     `${provider.displayName} / ${m.displayName} を設定しました。${
       notes.length > 0 ? "\n" + notes.join("\n") : ""
     }`

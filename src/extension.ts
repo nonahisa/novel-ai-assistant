@@ -123,6 +123,7 @@ import {
   needsRedraw,
   needsRescan,
 } from "./core/countSettings";
+import { abbreviateTitle, isAbbreviated } from "./core/abbreviateTitle";
 // 以下6つはgit・外部プロセス起動が要る。動的importする（設計書5.8.5）
 // shareWithEditor, collectEditorProposals ← ./features/shareWithEditor
 // restoreFromHistory ← ./features/gitRestore
@@ -344,6 +345,7 @@ import {
 } from "./views/openDocument";
 import { GENERATED_DIR } from "./core/generatedFiles";
 import { formatDayTime } from "./core/timestampedFileName";
+import { notifyDone } from "./views/notify";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -2137,8 +2139,10 @@ export async function activate(
       const picked = await vscode.window.showQuickPick(
         [
           ...works.map((work) => ({
-            label: work.title,
+            // 長い作品名は省略し、全文は2行目（detail）に出す（2026-09-06）
+            label: abbreviateTitle(work.title),
             description: work.folderPath,
+            detail: isAbbreviated(work.title) ? work.title : undefined,
             work,
           })),
           // Escでも閉じられるが、それを知らない人には出口が無いように見える
@@ -2198,7 +2202,7 @@ export async function activate(
         );
         if (picked !== yes) return;
         await removeVectorIndex(work);
-        vscode.window.showInformationMessage("索引を削除しました。");
+        notifyDone("索引を削除しました。");
       }
     )
   );
@@ -3897,7 +3901,7 @@ export async function activate(
           return;
         }
         treeProvider.refresh(node.work.id);
-        vscode.window.showInformationMessage(
+        notifyDone(
           `${node.episode.fileName} を削除しました。`
         );
       }
@@ -4735,8 +4739,11 @@ async function resolveWork(
     const picked = await vscode.window.showQuickPick(
       [
         ...works.map((w) => ({
-          label: w.title,
+          label: abbreviateTitle(w.title),
           description: w.folderPath,
+          // 省略したときだけ全文を添える。短い題にまで2行目を足すと、
+          // 選ぶだけの窓が縦に伸びて読みにくくなる
+          detail: isAbbreviated(w.title) ? w.title : undefined,
           work: w,
         })),
         // Escでも閉じられるが、それを知らない人には出口が無いように見える
@@ -4750,9 +4757,14 @@ async function resolveWork(
   const notes = await Promise.all(works.map((work) => options.annotate!(work)));
   const items = works
     .map((work, index) => ({
-      label: work.title,
+      // **長い作品名は省略する**（作者の裁定、2026-09-06）。右に出る
+      // 「未反映3件」などの補足が、幅の外へ押し出されて読めなくなるため
+      label: abbreviateTitle(work.title),
       description: notes[index].note ?? "",
-      detail: work.folderPath,
+      // 全文は2行目に出す（省略していなければ、これまでどおり置き場だけ）
+      detail: isAbbreviated(work.title)
+        ? `${work.title}（${work.folderPath}）`
+        : work.folderPath,
       order: notes[index].order ?? 0,
       work,
     }))

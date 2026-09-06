@@ -15,6 +15,7 @@ import type { WorkRegistry } from "../core/workRegistry";
 import { askText, cancelItem } from "../views/dialogs";
 import { openInDefaultEditor } from "../views/openDocument";
 import { logFailure } from "../core/logger";
+import { notifyDone } from "../views/notify";
 
 /**
  * 作品ごとのメモの操作（設計書6.71）。
@@ -82,7 +83,7 @@ export async function removeWorkMemo(
     return false;
   }
 
-  void vscode.window.showInformationMessage(
+  notifyDone(
     `メモ「${memo.title}」を削除しました。`
   );
   return true;

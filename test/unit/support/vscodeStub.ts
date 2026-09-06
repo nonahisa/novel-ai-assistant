@@ -17,6 +17,15 @@ export type StubMessage = (
   ...items: unknown[]
 ) => Promise<string | undefined>;
 
+/**
+ * ステータスバーに出た「その場限りの完了」の記録（`views/notify.ts`）。
+ *
+ * **本物は数秒で消えるので、テストからは覗けない。** 出た文言と
+ * 消えるまでの長さをここへ積んでおき、テスト側が読む。
+ * 溜まったままだと前のテストの分を拾うので、各テストで空にする。
+ */
+export const statusBarMessages: Array<{ text: string; timeout?: number }> = [];
+
 export const window = {
   // 診断ログ。テストでは中身を読まないので、書き込めるだけでよい
   createOutputChannel: () => ({
@@ -24,6 +33,14 @@ export const window = {
     show() {},
     dispose() {},
   }),
+  /** 消える知らせ。本物と同じく、消し方（Disposable）を返す */
+  setStatusBarMessage: (
+    text: string,
+    timeout?: number
+  ): { dispose(): void } => {
+    statusBarMessages.push({ text, timeout });
+    return { dispose() {} };
+  },
   /**
    * 通知の3つ。**書き換えられる形で置く。**
    *

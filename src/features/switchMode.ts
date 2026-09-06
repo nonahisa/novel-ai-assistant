@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { currentMode } from "../core/actorContext";
 import { editorAllowedCommands, type WorkMode } from "../core/editorMode";
+import { notifyDone } from "../views/notify";
 
 /**
  * 作者モードと編集者モードを切り替える（設計書5.6.1）。
@@ -38,7 +39,7 @@ export async function switchMode(): Promise<void> {
     .getConfiguration("novelai")
     .update("mode", next, vscode.ConfigurationTarget.Global);
 
-  void vscode.window.showInformationMessage(
+  notifyDone(
     next === "editor"
       ? "編集者モードにしました。本文の校正・校閲だけを行えます。" +
           "戻すときは、同じ操作をもう一度選んでください。"

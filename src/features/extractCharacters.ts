@@ -81,6 +81,7 @@ import {
   SettingsExtractionAccumulator,
   type SettingsPersistResult,
 } from "./extractSettings";
+import { confirmRun, notifyDone } from "../views/notify";
 
 interface ExtractionFailure {
   chunk: Chunk;
@@ -463,15 +464,13 @@ export async function extractCharacters(
       buildKnownCharacterNames(loaded.characters, []),
       configuredMaxOutputTokens
     );
-    const confirm = await vscode.window.showInformationMessage(
+    const confirmed = await confirmRun(
       `${chunks.length} チャンク中 ${pending.length} 件を処理します` +
         `（処理済み ${chunks.length - pending.length} 件はスキップ）。\n` +
         `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度\n` +
-        costNotice,
-      "実行",
-      "中止"
+        costNotice
     );
-    if (confirm !== "実行") return false;
+    if (!confirmed) return false;
   }
 
   const extractedAll: Array<{
@@ -820,7 +819,7 @@ export async function extractCharacters(
   );
 
   if (cancelled) {
-    vscode.window.showInformationMessage(
+    notifyDone(
       "設定資料の抽出を中止しました。完了済みの処理は次回再利用されます。"
     );
     return false;
