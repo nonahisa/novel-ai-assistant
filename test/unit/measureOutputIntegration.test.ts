@@ -47,6 +47,10 @@ const state = vi.hoisted(() => ({
   calls: [] as GenerateParams[],
   /** 出力の測定として送られた回数 */
   outputRounds: 0,
+  /** 出力の測定の1回にかかったことにする時間（ミリ秒） */
+  outputMs: 0,
+  /** 止めた時計。送った回だけ `outputMs` のぶん進める */
+  clockMs: 1_700_000_000_000,
 }));
 
 const log = vi.hoisted(() => ({
@@ -81,6 +85,9 @@ vi.mock("../../src/ai/registry", () => ({
         const asked = /0001 から順に (\d+) 行/.exec(params.userPrompt)?.[1];
         if (asked !== undefined) {
           state.outputRounds += 1;
+          // **時計を進めるのはここだけ。** 速度の分母（所要時間）を
+          // 決め打ちにしたいので、送った回だけ決まった量を進める
+          state.clockMs += state.outputMs;
           const failure = state.outputErrors[state.outputRounds];
           if (failure) throw failure;
           const lines = Math.min(Number(asked), state.trueLimit);
@@ -192,6 +199,8 @@ beforeEach(() => {
   state.outputErrors = {};
   state.calls = [];
   state.outputRounds = 0;
+  state.outputMs = 0;
+  state.clockMs = 1_700_000_000_000;
   log.steps = [];
   log.failures = [];
 });
@@ -355,6 +364,101 @@ describe("手元のAIでは、読める長さのあとに書ける量も測る",
     const text = noticeText(showInformationMessage);
     expect(text).toContain("書けたのは");
     expect(text).not.toContain("まとめ送信の上限を");
+  });
+});
+
+/**
+ * **速度も測る**（作者の要望、2026-09-06
+ * 「速度が一番早いモデルがわかる統計の一覧が出ると嬉しい」）。
+ *
+ * 測るのは「書ける量」の測定のついでである——同じ呼び出しで、出力
+ * トークン数と所要時間の両方が手に入るので、**新しく1回も送らずに済む。**
+ * 採るのは**時間切れでない、いちばん長く書けた回**（`measuredOutputTokens`
+ * と同じ回）。時間切れの回は、書き切れていないので速度の分子が無い。
+ */
+describe("書ける量と一緒に、出力の速度を測る", () => {
+  /** 時計を止める。戻す手を返す */
+  function freezeClock(): () => void {
+    const spy = vi.spyOn(Date, "now").mockImplementation(() => state.clockMs);
+    return () => spy.mockRestore();
+  }
+
+  test("いちばん長く書けた回から、トークン/秒を出して台帳へ書く", async () => {
+    state.outputMs = 4000;
+    const values: Record<string, unknown> = {};
+    installSettings(values);
+    answerWith("そのままにする");
+    const restore = freezeClock();
+
+    try {
+      await measureContext(registry);
+    } finally {
+      restore();
+    }
+
+    const tuning = (values.modelTuning as Record<string, unknown>)[
+      "ollama/gemma4:12b"
+    ] as Record<string, unknown>;
+    const tokens = tuning.measuredOutputTokens as number;
+    expect(tokens).toBeGreaterThan(0);
+    // 4秒かかったことにしてあるので、速度は「トークン数 ÷ 4」
+    expect(tuning.outputTokensPerSecond).toBe(
+      Math.round((tokens / 4) * 10) / 10
+    );
+    /*
+      **最初の応答までの時間は入れない。** この測定は流し受信を断つので
+      （設計書6.63.1）、最初のトークンが返った時刻を知る手立てが無い。
+      分からないものを 0 や当て推量で埋めない
+    */
+    expect(tuning.firstTokenSeconds).toBeUndefined();
+  });
+
+  test("時間切れの回は、速度の元にしない", async () => {
+    // 時間切れは「その量は書けなかった」と数える回である。書き切って
+    // いないのだから、分子（書けたトークン数）が無い
+    state.outputErrors = { 1: new AIError("時間切れです。", "timeout") };
+    state.outputMs = 4000;
+    const values: Record<string, unknown> = {};
+    installSettings(values);
+    answerWith("そのままにする");
+    const restore = freezeClock();
+
+    try {
+      await measureContext(registry);
+    } finally {
+      restore();
+    }
+
+    const tuning = (values.modelTuning as Record<string, unknown>)[
+      "ollama/gemma4:12b"
+    ] as Record<string, unknown>;
+    expect(tuning.outputTokensPerSecond).toBe(
+      Math.round(((tuning.measuredOutputTokens as number) / 4) * 10) / 10
+    );
+  });
+
+  test("時間が測れなかったときは、速度を書かない（古い値も残さない）", async () => {
+    // 所要0ミリ秒は「無限に速い」ではなく「測れていない」である。
+    // 前回の速度が残っていると、新しい実測と食い違ったまま一覧に出る
+    state.outputMs = 0;
+    const values: Record<string, unknown> = {
+      modelTuning: { "ollama/gemma4:12b": { outputTokensPerSecond: 99.9 } },
+    };
+    installSettings(values);
+    answerWith("そのままにする");
+    const restore = freezeClock();
+
+    try {
+      await measureContext(registry);
+    } finally {
+      restore();
+    }
+
+    const tuning = (values.modelTuning as Record<string, unknown>)[
+      "ollama/gemma4:12b"
+    ] as Record<string, unknown>;
+    expect(tuning.measuredOutputTokens).toBeGreaterThan(0);
+    expect(tuning.outputTokensPerSecond).toBeUndefined();
   });
 });
 

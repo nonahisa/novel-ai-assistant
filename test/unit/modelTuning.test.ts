@@ -138,6 +138,55 @@ describe("台帳の読み取り", () => {
     expect(table.get("ollama/壊れ")).toEqual({ measuredOutputTokens: 6500 });
   });
 
+  /**
+   * **速度（作者の要望、2026-09-06）。**
+   *
+   * 「速度が一番早いモデルがわかる統計の一覧が出ると嬉しい」ため、測った
+   * 出力速度を台帳へ残す。ほかの欄と同じ検査（正の有限数だけ読む・
+   * 壊れた欄だけ捨てる）を通り、**無い台帳は従来どおり**に読める。
+   */
+  test("outputTokensPerSecond と firstTokenSeconds を読む", () => {
+    const table = parseModelTuning({
+      "ollama/gemma4:12b": {
+        measuredOutputTokens: 6500,
+        outputTokensPerSecond: 12.3,
+        firstTokenSeconds: 1.5,
+      },
+    });
+
+    expect(table.get("ollama/gemma4:12b")).toEqual({
+      measuredOutputTokens: 6500,
+      outputTokensPerSecond: 12.3,
+      firstTokenSeconds: 1.5,
+    });
+  });
+
+  test("速度が数でなければ、その欄だけ捨てる", () => {
+    // 「0トークン/秒」は測れていないのと同じで、速い順に並べるときに
+    // 「測っていない」と区別が付かなくなる
+    const table = parseModelTuning({
+      "ollama/a": { measuredOutputTokens: 6500, outputTokensPerSecond: "12.3" },
+      "ollama/b": { measuredOutputTokens: 6500, outputTokensPerSecond: 0 },
+      "ollama/c": { measuredOutputTokens: 6500, firstTokenSeconds: -1 },
+    });
+
+    for (const key of ["ollama/a", "ollama/b", "ollama/c"]) {
+      expect(table.get(key), key).toEqual({ measuredOutputTokens: 6500 });
+    }
+  });
+
+  test("速度の無い旧い台帳は、これまでどおり読める", () => {
+    const table = parseModelTuning({
+      "ollama/gemma4:12b": { contextWindow: 131072, timeoutSeconds: 300 },
+    });
+
+    expect(table.get("ollama/gemma4:12b")).toEqual({
+      contextWindow: 131072,
+      timeoutSeconds: 300,
+    });
+    expect(table.get("ollama/gemma4:12b")?.outputTokensPerSecond).toBeUndefined();
+  });
+
   test("印の無い旧い台帳は、これまでどおり読める", () => {
     const table = parseModelTuning({
       "ollama/gemma4:12b": { measuredOutputTokens: 6500, timeoutSeconds: 300 },

@@ -54,6 +54,31 @@ export interface ModelTuning {
    * 扱いのままにする（読み側の互換）。
    */
   readonly outputMeasureTimedOut?: boolean;
+  /**
+   * 出力の実測の速さ（トークン/秒。小数1桁）。
+   *
+   * 「書ける量」を測るとき、**時間切れでない、いちばん長く書けた回**の
+   * 「出力トークン数 ÷ 所要秒」を入れる（`features/measureContext.ts`）。
+   * 作者の要望「速度が一番早いモデルがわかる統計の一覧が出ると嬉しい」
+   * （2026-09-06）に応えるための欄で、一覧は `core/tuningStats.ts` が組む。
+   *
+   * **呼び出しの挙動は変えない。** 見せるためだけの参考値であり、
+   * 待ち時間や上限のように送り方を決める値ではない（同じ機械でも
+   * ほかの処理の負荷で変わる）。
+   *
+   * **無い台帳は従来どおり**——速度を測る前に取った値は、これまでと
+   * 同じ扱いのままにする（読み側の互換）。
+   */
+  readonly outputTokensPerSecond?: number;
+  /**
+   * 最初の応答が返るまでの秒数。
+   *
+   * **いまの測定では入らない。** 書ける量の測定は流し受信を断つので
+   * （設計書6.63.1）、最初のトークンが届いた時刻を知る手立てが無い。
+   * 分からないものを当て推量で埋めないので、取れる経路ができるまでは
+   * 空のままで、一覧では「—」と出る。
+   */
+  readonly firstTokenSeconds?: number;
   /** 測った時刻（ISO 8601）。古い測定だと分かるように残す */
   readonly measuredAt?: string;
 }
@@ -128,6 +153,10 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
     const timeoutSeconds = positiveNumber(entry.timeoutSeconds);
     const measuredChars = positiveNumber(entry.measuredChars);
     const measuredOutputTokens = positiveNumber(entry.measuredOutputTokens);
+    // **0は読まない。** 「0トークン/秒」は測れていないのと同じ意味に
+    // なるが、一覧では「測っていない」と区別が付かなくなる
+    const outputTokensPerSecond = positiveNumber(entry.outputTokensPerSecond);
+    const firstTokenSeconds = positiveNumber(entry.firstTokenSeconds);
     // **true のときだけ持つ。** 「印が無い」と「印が false」を分けても
     // 使い道が無いうえ、false を書き戻すと設定に意味の無い欄が並ぶ
     const outputMeasureTimedOut =
@@ -144,6 +173,8 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
       ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
       ...(measuredChars !== undefined ? { measuredChars } : {}),
       ...(measuredOutputTokens !== undefined ? { measuredOutputTokens } : {}),
+      ...(outputTokensPerSecond !== undefined ? { outputTokensPerSecond } : {}),
+      ...(firstTokenSeconds !== undefined ? { firstTokenSeconds } : {}),
       ...(outputMeasureTimedOut !== undefined ? { outputMeasureTimedOut } : {}),
       ...(measuredAt !== undefined ? { measuredAt } : {}),
     };
@@ -198,6 +229,16 @@ function readTuningTable(): Map<string, ModelTuning> {
   return parseModelTuning(
     vscode.workspace.getConfiguration(CONFIG_SECTION).get<unknown>(TUNING_SETTING)
   );
+}
+
+/**
+ * 台帳の**全部**。実測の一覧（`core/tuningStats.ts`）が使う。
+ *
+ * **解釈の仕方を持ち出させない。** 一覧側が設定を直接読むと
+ * `parseModelTuning` の写しがそこにでき、壊れた欄の扱いが2か所に散る。
+ */
+export function allModelTuning(): Map<string, ModelTuning> {
+  return readTuningTable();
 }
 
 /** そのモデルの調整値。**測っていなければ undefined**（従来の設定へ落とす） */

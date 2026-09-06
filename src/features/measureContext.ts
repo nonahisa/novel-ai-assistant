@@ -48,6 +48,7 @@ import {
   saveModelTuning,
   type ModelTuning,
 } from "../core/modelTuning";
+import { outputTokensPerSecond } from "../core/tuningStats";
 import { withCancellableProgress } from "../views/progress";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { readChunkSettings } from "./chunkSettings";
@@ -874,6 +875,15 @@ async function measureOutputLimit(
   let low = 0;
   /** その回にAIが実際に使った出力トークン数（応答に付いてくる実数） */
   let bestTokens: number | undefined;
+  /**
+   * その回にかかった時間（ミリ秒）。**速度の分母**になる。
+   *
+   * `bestTokens` と同じ回のものを持つ——別の回の時間と割ると、
+   * 何を測ったのか分からない数字になる。秒ではなくミリ秒で持つのは、
+   * 速い回が「0秒」に丸まって割れなくなるのを避けるため
+   * （ログに出す秒数は、これまでどおり丸めた値を使う）。
+   */
+  let bestElapsedMs: number | undefined;
   let rounds = 0;
   /** 中止・失敗で探索を打ち切ったか */
   let stopped = false;
@@ -962,6 +972,7 @@ async function measureOutputLimit(
             meta: { feature: CONTEXT_GUARD_EXEMPT_FEATURE },
             signal: controller.signal,
           });
+          const elapsedMs = Date.now() - sentAt;
           const seconds = elapsedSeconds(sentAt);
           const written = countOutputLines(response.text);
           const tokens = response.usage?.outputTokens;
@@ -976,6 +987,9 @@ async function measureOutputLimit(
           if (completed && round.current > low) {
             low = round.current;
             bestTokens = tokens;
+            // **速度も、この回のものを採る**（作者の要望、2026-09-06）。
+            // 時間切れの回は書き切れていないので分子が無く、ここへは来ない
+            bestElapsedMs = elapsedMs;
           }
         } catch (error) {
           const seconds = elapsedSeconds(sentAt);
@@ -1045,10 +1059,20 @@ async function measureOutputLimit(
     保存できる数字が無いので書かない。
   */
   let mergeCapMessage = "";
+  /*
+    **速度は、実測を保存する回に必ず書き直す**（作者の要望、2026-09-06）。
+
+    測れなかったとき（応答が出力トークン数を返さない・所要時間が0）は
+    `undefined` になり、その欄が落ちる。**古い速度を残さない**——新しい
+    実測と前回の速度が並ぶと、一覧では「このモデルはこの速さ」と読めて
+    しまう。分からないものは、分からないままにしておく。
+  */
+  const speed = outputTokensPerSecond(bestTokens, bestElapsedMs ?? 0);
   if (!stopped && bestTokens !== undefined) {
     try {
       await saveModelTuning(provider.id, model, {
         measuredOutputTokens: bestTokens,
+        outputTokensPerSecond: speed,
         // **時間切れが無かったなら、前の印を消す**（`undefined` を渡すと
         // その欄だけ落ちる）。測り直して素直に終わったのに、前回の印が
         // 残って上限が広がらないままになるのを防ぐ
@@ -1090,6 +1114,14 @@ async function measureOutputLimit(
     (timedOut
       ? "途中で時間切れになった回があるため、この値は1回の応答の上限としては" +
         "使いません（送る量の見立てにだけ使います）。"
+      : "") +
+    // **速度も一緒に見せる**（作者の要望、2026-09-06）。ここで出しておくと、
+    // 一覧を開かなくても「いま測ったモデルが速いのか」がその場で分かる
+    // 途中で終わったときは言わない（そこまでの回の速さであって、
+    // 台帳にも入っていない）
+    (!stopped && speed !== undefined
+      ? `出力の速さは 約 ${speed.toFixed(1)} トークン/秒でした` +
+        "（機械の負荷で変わるので目安です）。"
       : "") +
     // **保存できたときは、その結果（まとめ送信の上限）を言う。**
     // 保存できなかったとき（中止・失敗・台帳への書き込み失敗）は、

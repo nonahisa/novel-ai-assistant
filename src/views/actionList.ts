@@ -1518,6 +1518,19 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.showTuningStats",
+            label: "AIチューニングの実測一覧を表示",
+            icon: "graph",
+            requiresWork: false,
+            // **AIの印は付けない。** 測った値を並べるだけで、AIを呼ばない
+            // （有料AIでも料金は出ない）
+            detail:
+              "AIチューニングで測った値を、モデルごとに一覧にします。" +
+              "**出力の速い順に並べる**ので、どのモデルが速いかがひと目で分かります。" +
+              "測り直しはしません（AIを呼びません）。",
+          },
+          {
+            kind: "action",
             // **詳細メニューには出さない**（設定管理へ移した。設計書6.56.3）
             hiddenFromActionList: true,
             command: "novelai.selectOllamaExecutable",

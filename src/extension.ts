@@ -2572,6 +2572,15 @@ export async function activate(
   );
 
   context.subscriptions.push(
+    // AIチューニングの実測一覧（作者の要望、2026-09-06）。
+    // **測り直さない**ので、作品もAIの呼び出しも要らない
+    registerCommand("novelai.showTuningStats", async () => {
+      const { showTuningStats } = await import("./features/showTuningStats.js");
+      await showTuningStats(aiRegistry);
+    })
+  );
+
+  context.subscriptions.push(
     registerCommand("novelai.showLog", () => {
       showLog();
     })
