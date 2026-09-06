@@ -1020,8 +1020,13 @@ describe("画面の約束", () => {
   /** 自分の書き換えが返ってきたら触らない（カーソルと取り消し履歴を守る） */
   it("自分が送った本文が返ってきただけなら、組み直さない", () => {
     const take = code.slice(code.indexOf("function composeTakeIncoming("));
-    expect(take.slice(0, 500)).toContain("if (text === lastSent) return;");
-    expect(take.slice(0, 500)).toContain("if (composing)");
+    // 最後の1件ではなく、最近送ったもの全部を返事として扱う（打つ面と同じ）。
+    // **composing の判定より前**——変換中に溜めると、確定のあとに古い本文で
+    // 組み直して確定した語が消える（作者の報告、2026-09-06）
+    const head = take.slice(0, 600);
+    expect(head).toContain("if (isOwnEcho(text)) return;");
+    expect(head).toContain("if (composing)");
+    expect(head.indexOf("isOwnEcho(text)")).toBeLessThan(head.indexOf("if (composing)"));
   });
 
   it("変換中は本文を送らない", () => {

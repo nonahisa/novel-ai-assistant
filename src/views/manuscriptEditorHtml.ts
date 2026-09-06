@@ -820,6 +820,30 @@ ruby > rt {
    * それを入れ直すと、カーソルが飛び、変換中なら変換そのものが壊れる。
    */
   let lastSent = null;
+  /**
+   * 最近自分が送った本文（新しい順、最大16件）。
+   *
+   * **最後の1件だけでは足りなかった**（作者の報告、2026-09-06「変換時に
+   * 入力が消える。文字の下に点線が残る」）。拡張機能は文書の変更を
+   * 120ミリ秒まとめてから**その時点の文書**を送り返す。語Aを送ったあと、
+   * その返事が届く前に語Bを確定して送ると、lastSent はBなのに届くのはAで、
+   * 「外からの書き換え」と見なして打つ面をAへ戻していた——Bが消える。
+   * 変換中に届けば pending に溜まり、次の確定のあとに同じことが起きる
+   * （確定した語が消え、IMEの下線だけが残る）。
+   *
+   * 自分が送ったものは、**いくつか前のものでも**返事として扱う。
+   * 16件は「往復のあいだに確定できる語の数」よりずっと多い。
+   */
+  const sentHistory = [];
+  function rememberSent(text) {
+    lastSent = text;
+    sentHistory.unshift(text);
+    if (sentHistory.length > 16) sentHistory.length = 16;
+  }
+  /** 届いた本文が、最近自分が送ったものの返事か */
+  function isOwnEcho(text) {
+    return sentHistory.indexOf(text) !== -1;
+  }
   /** 変換中に外から届いた本文。確定してから片づける */
   let pending = null;
 
@@ -1141,7 +1165,7 @@ ruby > rt {
   function send() {
     if (write.value === current) return;
     current = write.value;
-    lastSent = current;
+    rememberSent(current);
     vscode.postMessage({ type: "edit", text: current });
     updateCount();
   }
@@ -1160,12 +1184,13 @@ ruby > rt {
    * 3. すでに同じ中身のとき
    */
   function takeIncoming(text) {
+    // 自分の書き換えの返事は、いつ届いても触らない（変換中なら溜めもしない）
+    if (isOwnEcho(text)) return;
     if (composing) {
       // 確定するまで覚えておく。**いま入れると変換が壊れる**
-      if (text !== lastSent && text !== write.value) pending = text;
+      if (text !== write.value) pending = text;
       return;
     }
-    if (text === lastSent) return;
     if (write.value === text) return;
     replaceKeepingCaret(text);
   }
@@ -2660,7 +2685,7 @@ ruby > rt {
     const text = composeDomToNotation(compose);
     if (text === current) return;
     current = text;
-    lastSent = text;
+    rememberSent(text);
     write.value = text;
     vscode.postMessage({ type: "edit", text: text });
     updateCount();
@@ -2673,12 +2698,14 @@ ruby > rt {
    * ブラウザの取り消し履歴（Ctrl+Z）まで壊れる。
    */
   function composeTakeIncoming(text) {
+    // 自分の書き換えの返事は、いつ届いても触らない（打つ面と同じ理由。
+    // 変換中に溜めると、確定のあとに古い本文で組み直して確定した語が消える）
+    if (isOwnEcho(text)) return;
     if (composing) {
       // 確定するまで覚えておく。**いま組み直すと変換が壊れる**
       composePending = text;
       return;
     }
-    if (text === lastSent) return;
     if (composeNormalizeNewlines(text) === composeDomToNotation(compose)) return;
     write.value = text;
     composeApplyText(text);
