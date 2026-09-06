@@ -693,7 +693,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-89",
     title: "校正をまとめて実行",
     commands: ["novelai.runProofreadingSuite"],
-    count: 8,
+    count: 2,
   },
   {
     id: "F-90",
@@ -720,6 +720,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 5,
   },
   {
+    id: "F-94",
+    title: "Word（.docx）の原稿を .md にする",
+    commands: ["novelai.convertDocxToMarkdown"],
+    count: 7,
+  },
+  {
     id: "",
     title: "LM Studio",
     commands: ["novelai.setupLmStudio", "novelai.setupAI", "novelai.testAI"],
@@ -740,4 +746,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 816;
+export const PENDING_CHECK_TOTAL = 817;
