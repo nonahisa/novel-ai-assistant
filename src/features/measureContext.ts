@@ -1073,6 +1073,20 @@ async function measureOutputLimit(
       await saveModelTuning(provider.id, model, {
         measuredOutputTokens: bestTokens,
         outputTokensPerSecond: speed,
+        /*
+          **出どころと日時も、速度と一緒に書き直す**（設計書6.65.14）。
+
+          速度は普段のAI呼び出しからも入る（`ai/meteredProvider.ts`）ので、
+          いま台帳にあるのが「普段の呼び出しで採れた推定値」であることが
+          ある。測り直した値へ入れ替えるときは札も入れ替えないと、
+          一覧が古い出どころを指したままになる。
+
+          測れなかったとき（`speed` が undefined）は札も日時も落とす
+          ——速度の無い行に「普段の呼び出し」とだけ残ると読めない
+        */
+        speedSource: speed !== undefined ? "tuning" : undefined,
+        speedMeasuredAt:
+          speed !== undefined ? new Date(Date.now()).toISOString() : undefined,
         // **時間切れが無かったなら、前の印を消す**（`undefined` を渡すと
         // その欄だけ落ちる）。測り直して素直に終わったのに、前回の印が
         // 残って上限が広がらないままになるのを防ぐ

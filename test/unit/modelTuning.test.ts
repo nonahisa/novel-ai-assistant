@@ -145,19 +145,21 @@ describe("台帳の読み取り", () => {
    * 出力速度を台帳へ残す。ほかの欄と同じ検査（正の有限数だけ読む・
    * 壊れた欄だけ捨てる）を通り、**無い台帳は従来どおり**に読める。
    */
-  test("outputTokensPerSecond と firstTokenSeconds を読む", () => {
+  test("速度と、その出どころ・日時を読む", () => {
     const table = parseModelTuning({
       "ollama/gemma4:12b": {
         measuredOutputTokens: 6500,
         outputTokensPerSecond: 12.3,
-        firstTokenSeconds: 1.5,
+        speedSource: "call",
+        speedMeasuredAt: "2026-09-06T01:00:00.000Z",
       },
     });
 
     expect(table.get("ollama/gemma4:12b")).toEqual({
       measuredOutputTokens: 6500,
       outputTokensPerSecond: 12.3,
-      firstTokenSeconds: 1.5,
+      speedSource: "call",
+      speedMeasuredAt: "2026-09-06T01:00:00.000Z",
     });
   });
 
@@ -167,12 +169,35 @@ describe("台帳の読み取り", () => {
     const table = parseModelTuning({
       "ollama/a": { measuredOutputTokens: 6500, outputTokensPerSecond: "12.3" },
       "ollama/b": { measuredOutputTokens: 6500, outputTokensPerSecond: 0 },
-      "ollama/c": { measuredOutputTokens: 6500, firstTokenSeconds: -1 },
+      "ollama/c": { measuredOutputTokens: 6500, outputTokensPerSecond: -1 },
     });
 
     for (const key of ["ollama/a", "ollama/b", "ollama/c"]) {
       expect(table.get(key), key).toEqual({ measuredOutputTokens: 6500 });
     }
+  });
+
+  test("知らない出どころは読まない（一覧の言葉に直せない）", () => {
+    const table = parseModelTuning({
+      "ollama/a": { measuredOutputTokens: 6500, speedSource: "なにか" },
+      "ollama/b": { measuredOutputTokens: 6500, speedMeasuredAt: "  " },
+    });
+
+    for (const key of ["ollama/a", "ollama/b"]) {
+      expect(table.get(key), key).toEqual({ measuredOutputTokens: 6500 });
+    }
+  });
+
+  test("0.36.3 が書いた firstTokenSeconds は、読み飛ばす", () => {
+    // 書き手が無い欄なので削った。**設定に残っていても落ちない**
+    // （`saveModelTuning` は知らない欄をそのまま残すので、消えはしない）
+    const table = parseModelTuning({
+      "ollama/gemma4:12b": { measuredOutputTokens: 6500, firstTokenSeconds: 1.5 },
+    });
+
+    expect(table.get("ollama/gemma4:12b")).toEqual({
+      measuredOutputTokens: 6500,
+    });
   });
 
   test("速度の無い旧い台帳は、これまでどおり読める", () => {

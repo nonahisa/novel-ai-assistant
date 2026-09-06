@@ -12,6 +12,48 @@ import { contextOverflow, skipsContextGuard } from "./contextGuard";
 import { resolveMaxOutputTokens } from "./outputLimit";
 import { logStep } from "../core/logger";
 import { AiQueueAbortError, acquireCall } from "../core/aiSequence";
+import { type SpeedSource, saveModelTuning } from "../core/modelTuning";
+import { outputTokensPerSecond } from "../core/tuningStats";
+import { TOKENS_PER_CHAR } from "../core/sizeBudget";
+
+/**
+ * これに満たない応答からは速さを採らない（トークン）。
+ *
+ * **立ち上がりの遅れが支配的になる。** 応答が返り始めるまでの待ちは
+ * 出力の長さに関係なく乗るので、数十トークンの応答で割ると「そのモデルの
+ * 書く速さ」ではなく「待たされた時間」を測ったことになる。
+ */
+const MIN_SPEED_SAMPLE_TOKENS = 64;
+
+/** これに満たない所要時間の回も採らない（ミリ秒）。理由は上と同じ */
+const MIN_SPEED_SAMPLE_MS = 1_000;
+
+/**
+ * 同じモデルの速度を書き直すまでの間隔（ミリ秒）。
+ *
+ * 台帳はVS Codeの**設定ファイル**なので、書けばディスクへ書き込みが走る。
+ * 呼び出しのたびに書くと、1つの機能を流すだけでチャンクの数だけ書くことに
+ * なる。値が落ち着いているあいだは、しばらく置いてから書き直せば足りる。
+ */
+const SPEED_WRITE_INTERVAL_MS = 60_000;
+
+/**
+ * 間隔を待たずに書き直す、値の変わりよう（割合）。
+ *
+ * **大きく変わったときは、すぐ映す。** モデルを載せ替えた・機械が重い、
+ * といった変化は作者が知りたい情報なので、60秒の間隔より優先する。
+ */
+const SPEED_WRITE_CHANGE_RATIO = 0.2;
+
+/**
+ * 値の変わりようで書き直すときの、最短の間隔（ミリ秒）。
+ *
+ * チャンクごとに応答の長さが違うと、速度は簡単に2割以上振れる。
+ * 変化だけを条件にすると「毎回書く」に近づき、設定ファイルへの書き込みが
+ * チャンクの数だけ走る。**大きく変わっても、直前に書いたばかりなら待つ**
+ * ——5秒あれば1チャンクぶんは流れるので、連続の書き込みは止まる。
+ */
+const SPEED_WRITE_CHANGE_MIN_INTERVAL_MS = 5_000;
 
 /**
  * AI呼び出しの送信量を記録するために、プロバイダを包む。
@@ -45,6 +87,13 @@ import { AiQueueAbortError, acquireCall } from "../core/aiSequence";
  * 理由は上の2つとまったく同じである。**全プロバイダ・全機能がここを
  * 通る**ので、1か所で1件ずつに絞れば、機能を足した人が並列に投げて
  * しまう経路が残らない。
+ *
+ * ## 出力の速さも、ここで採る（設計書6.65.14）
+ *
+ * 0.36.3 の速度は「書ける量の測定」からしか取れなかった。あれは
+ * **手元のAIだけを測る機能**なので、クラウド（Gemini・さくら・Claude・
+ * ChatGPT）の欄は永久に「—」のままだった。ここなら6つとも通る
+ * （作者の裁定、2026-09-06）。
  */
 export class MeteredProvider implements AIProvider {
   /** 元が実装しているときだけ生やす（上のコメントの理由） */
@@ -146,6 +195,9 @@ export class MeteredProvider implements AIProvider {
         elapsedMs: result.elapsedMs,
         truncated: result.truncated,
       });
+      // **うまくいった回からだけ速さを採る**（下のコメントに理由）。
+      // 台帳への書き込みは抑えてあるので、たいていは何もせずに戻る
+      await this.recordSpeed(params.model, result);
       return result;
     } catch (error) {
       this.record(params, {
@@ -240,6 +292,113 @@ export class MeteredProvider implements AIProvider {
       );
     }
     return limit;
+  }
+
+  /**
+   * 最後に台帳へ書いた速度。**モデル名で引く。**
+   *
+   * この包みはプロバイダ1つにつき1個だけ作られる（`AIRegistry.meter`）ので、
+   * 実際の鍵は `プロバイダID:モデル名` と同じになる。
+   *
+   * 覚えているのは書き込みを抑えるためだけで、**値は平均しない**
+   * （直近の実測をそのまま台帳へ入れる）。
+   */
+  private readonly lastSpeed = new Map<
+    string,
+    { at: number; tokensPerSecond: number }
+  >();
+
+  /** 台帳へ書けなかったことを言うのは、同じモデルで一度だけ */
+  private readonly loggedSpeedFailure = new Set<string>();
+
+  /**
+   * 応答から出力の速さを採って、台帳へ残す（設計書6.65.14）。
+   *
+   * **採れる回は限られる。** 短い応答・切り詰められた応答は、
+   * 「そのモデルが書く速さ」を表していない（上の2つの定数に理由）。
+   * 失敗と中止の回はそもそもここへ来ない（呼ぶのは成功したときだけ）。
+   *
+   * **記録に `meta` は要らない。** 送信量のログと違って、これは作品では
+   * なく**モデルの性質**なので、作品に属さない呼び出しから採ってもよい。
+   */
+  private async recordSpeed(
+    model: string,
+    result: GenerateResult
+  ): Promise<void> {
+    // 途中で切られた応答は「その速さで書き切れた」ことにならない
+    if (result.truncated) return;
+
+    const measured = result.usage?.outputTokens;
+    const useMeasured =
+      typeof measured === "number" && Number.isFinite(measured) && measured > 0;
+    /*
+      **申告が無ければ字数から見積もる。**
+
+      換算は `core/sizeBudget.ts` の係数を借りる（新しい係数を作らない。
+      同じ意味の数を2か所目に書くのが、これまでの食い違いの原因だった）。
+
+      思考モードの出力も足す。**あれも時間を使って書かれている**ので、
+      本文だけで割ると、考えてから答えるモデルほど遅く見えてしまう。
+    */
+    const tokens = useMeasured
+      ? measured
+      : Math.round(
+          (result.text.length + (result.thinking?.length ?? 0)) *
+            TOKENS_PER_CHAR
+        );
+    const source: SpeedSource = useMeasured ? "call" : "estimated";
+
+    if (tokens < MIN_SPEED_SAMPLE_TOKENS) return;
+    if (result.elapsedMs < MIN_SPEED_SAMPLE_MS) return;
+
+    // 式は一覧側と共用する（`core/tuningStats.ts`）。写すと片方だけ直る
+    const tokensPerSecond = outputTokensPerSecond(tokens, result.elapsedMs);
+    if (tokensPerSecond === undefined) return;
+
+    const now = Date.now();
+    if (!this.shouldWriteSpeed(model, now, tokensPerSecond)) return;
+
+    try {
+      await saveModelTuning(this.inner.id, model, {
+        outputTokensPerSecond: tokensPerSecond,
+        speedSource: source,
+        // 時計は `Date.now` の1か所から取る（試験で止められるように）
+        speedMeasuredAt: new Date(now).toISOString(),
+      });
+      // **書けたときだけ覚える。** 書けていないのに覚えると、次の回が
+      // 「もう書いた」と判断して台帳に速度が入らないままになる
+      this.lastSpeed.set(model, { at: now, tokensPerSecond });
+    } catch (error) {
+      // **速度が残せなかっただけで、AIの応答は返す**（見せるための参考値）。
+      // ただしエラーの本文は捨てない（CLAUDE.md 規則5）
+      if (this.loggedSpeedFailure.has(model)) return;
+      this.loggedSpeedFailure.add(model);
+      logStep(
+        `モデル「${model}」の出力速度を台帳へ保存できませんでした` +
+          `（${error instanceof Error ? error.message : String(error)}）。`
+      );
+    }
+  }
+
+  /**
+   * いま書くべきか。**書き込みを抑えるための判断**（設計書6.65.14）。
+   *
+   * 初めてなら書く。そうでなければ「前回から間隔が空いた」か
+   * 「値が大きく変わった」ときだけ書く。
+   */
+  private shouldWriteSpeed(
+    model: string,
+    now: number,
+    tokensPerSecond: number
+  ): boolean {
+    const previous = this.lastSpeed.get(model);
+    if (!previous) return true;
+    if (now - previous.at >= SPEED_WRITE_INTERVAL_MS) return true;
+    if (now - previous.at < SPEED_WRITE_CHANGE_MIN_INTERVAL_MS) return false;
+    const change =
+      Math.abs(tokensPerSecond - previous.tokensPerSecond) /
+      previous.tokensPerSecond;
+    return change >= SPEED_WRITE_CHANGE_RATIO;
   }
 
   /**

@@ -116,19 +116,16 @@ describe("実測一覧の組み立て", () => {
     ]);
 
     const cells = rows(markdown)[0];
-    // 最初の応答・文脈の実効長・読める長さ・書ける長さ・日時
-    expect(cells[3]).toBe("—");
-    expect(cells[4]).toBe("—");
-    expect(cells[5]).toBe("—");
-    expect(cells[6]).toBe("—");
-    expect(cells[7]).toBe("—");
+    // 出どころ・速度の日時・文脈の実効長・読める長さ・書ける長さ・日時
+    expect(cells.slice(3)).toEqual(["—", "—", "—", "—", "—", "—"]);
   });
 
   test("そろっていれば、単位を見出しに置いて数字だけを並べる", () => {
     const markdown = buildTuningStatsMarkdown([
       entry("Ollama", "gemma4:e4b", {
         outputTokensPerSecond: 12.3,
-        firstTokenSeconds: 1.5,
+        speedSource: "call",
+        speedMeasuredAt: "2026-09-06T01:00:00.000Z",
         contextWindow: 131072,
         measuredChars: 91000,
         measuredOutputTokens: 3072,
@@ -140,7 +137,8 @@ describe("実測一覧の組み立て", () => {
       "AI",
       "モデル",
       "出力速度（トークン/秒）",
-      "最初の応答（秒）",
+      "速度の出どころ",
+      "速度を測った日時",
       "文脈の実効長（トークン）",
       "読める長さ（字）",
       "書ける長さ（トークン）",
@@ -148,12 +146,53 @@ describe("実測一覧の組み立て", () => {
     ]);
     const cells = rows(markdown)[0];
     expect(cells[0]).toBe("Ollama");
-    expect(cells[3]).toBe("1.5");
-    expect(cells[4]).toBe("131,072");
-    expect(cells[5]).toBe("91,000");
-    expect(cells[6]).toBe("3,072");
+    expect(cells[3]).toBe("普段の呼び出し");
+    expect(cells[4]).toBe("2026-09-06 10:00");
+    expect(cells[5]).toBe("131,072");
+    expect(cells[6]).toBe("91,000");
+    expect(cells[7]).toBe("3,072");
     // 日本時間（UTC+9）。23:30Z は翌日の 8:30
-    expect(cells[7]).toBe("2026-09-06 08:30");
+    expect(cells[8]).toBe("2026-09-06 08:30");
+  });
+
+  /**
+   * **速度の出どころを列に出す**（作者の裁定、2026-09-06）。
+   *
+   * チューニングで測った値と、普段の呼び出しでたまたま採れた値と、
+   * 字数から換算した値は、**どれも同じ「トークン/秒」に見える**が
+   * 重みが違う。並べるだけだと、推定値が「最速」に立つことがある。
+   */
+  describe("速度の出どころ", () => {
+    test("3つの出どころを、それぞれの言葉で出す", () => {
+      const markdown = buildTuningStatsMarkdown([
+        entry("Ollama", "測った", {
+          outputTokensPerSecond: 30,
+          speedSource: "tuning",
+        }),
+        entry("さくらのAI", "普段", {
+          outputTokensPerSecond: 20,
+          speedSource: "call",
+        }),
+        entry("Claude", "推定", {
+          outputTokensPerSecond: 10,
+          speedSource: "estimated",
+        }),
+      ]);
+
+      expect(rows(markdown).map((cells) => cells[3])).toEqual([
+        "チューニング",
+        "普段の呼び出し",
+        "普段の呼び出し（推定）",
+      ]);
+    });
+
+    test("出どころの分からない古い台帳は「—」（当て推量で埋めない）", () => {
+      const markdown = buildTuningStatsMarkdown([
+        entry("Ollama", "gemma4:e4b", { outputTokensPerSecond: 12.3 }),
+      ]);
+
+      expect(rows(markdown)[0][3]).toBe("—");
+    });
   });
 
   test("時間切れ混じりの実測には、その印を残す", () => {
@@ -166,7 +205,7 @@ describe("実測一覧の組み立て", () => {
       }),
     ]);
 
-    expect(rows(markdown)[0][6]).toBe("3,072（時間切れあり）");
+    expect(rows(markdown)[0][7]).toBe("3,072（時間切れあり）");
   });
 
   test("冒頭に、速度の読み方を一文だけ置く", () => {
@@ -175,7 +214,8 @@ describe("実測一覧の組み立て", () => {
     ]);
 
     expect(markdown).toContain(
-      "速度は出力の実測（トークン/秒）です。同じモデルでも機械の負荷で変わるので目安です。"
+      "速度は出力の実測（トークン/秒）です。普段のAI呼び出しからも記録します。" +
+        "同じモデルでも機械の負荷で変わるので目安です。"
     );
   });
 

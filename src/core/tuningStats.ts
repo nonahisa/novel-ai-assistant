@@ -1,4 +1,4 @@
-import type { ModelTuning } from "./modelTuning";
+import type { ModelTuning, SpeedSource } from "./modelTuning";
 
 /**
  * AIチューニングの実測を、1枚の表にして見せる（作者の要望、2026-09-06
@@ -90,11 +90,12 @@ export function buildTuningStatsMarkdown(
   }
 
   lines.push(
-    "速度は出力の実測（トークン/秒）です。同じモデルでも機械の負荷で変わるので目安です。",
+    "速度は出力の実測（トークン/秒）です。普段のAI呼び出しからも記録します。" +
+      "同じモデルでも機械の負荷で変わるので目安です。",
     "",
-    "| AI | モデル | 出力速度（トークン/秒） | 最初の応答（秒） | " +
+    "| AI | モデル | 出力速度（トークン/秒） | 速度の出どころ | 速度を測った日時 | " +
       "文脈の実効長（トークン） | 読める長さ（字） | 書ける長さ（トークン） | 測った日時 |",
-    "|---|---|---|---|---|---|---|---|"
+    "|---|---|---|---|---|---|---|---|---|"
   );
 
   const sorted = sortBySpeed(entries);
@@ -111,7 +112,8 @@ export function buildTuningStatsMarkdown(
             entry.tuning.outputTokensPerSecond,
             index === 0 && fastest !== undefined
           ),
-          decimalCell(entry.tuning.firstTokenSeconds),
+          speedSourceCell(entry.tuning.speedSource),
+          formatMeasuredAt(entry.tuning.speedMeasuredAt),
           countCell(entry.tuning.contextWindow),
           countCell(entry.tuning.measuredChars),
           outputCell(entry.tuning),
@@ -160,12 +162,29 @@ function outputCell(tuning: ModelTuning): string {
   return tuning.outputMeasureTimedOut ? `${tokens}（時間切れあり）` : tokens;
 }
 
-function countCell(value: number | undefined): string {
-  return value === undefined ? UNKNOWN : value.toLocaleString("ja-JP");
+/**
+ * 速度の出どころ（設計書6.65.14）。
+ *
+ * **当て推量で埋めない。** 0.36.3 の台帳には出どころの欄が無いので、
+ * 速度が入っていても札は付かない。そこを「チューニング」と決め打ちすると、
+ * 実際には測っていないものを測ったことにしてしまう。
+ */
+function speedSourceCell(source: SpeedSource | undefined): string {
+  switch (source) {
+    case "tuning":
+      return "チューニング";
+    case "call":
+      return "普段の呼び出し";
+    case "estimated":
+      // 換算ぶんの誤差が乗っていることを、数字の隣で分かるようにする
+      return "普段の呼び出し（推定）";
+    default:
+      return UNKNOWN;
+  }
 }
 
-function decimalCell(value: number | undefined): string {
-  return value === undefined ? UNKNOWN : value.toFixed(1);
+function countCell(value: number | undefined): string {
+  return value === undefined ? UNKNOWN : value.toLocaleString("ja-JP");
 }
 
 /**

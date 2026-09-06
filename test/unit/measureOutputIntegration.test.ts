@@ -405,12 +405,9 @@ describe("書ける量と一緒に、出力の速度を測る", () => {
     expect(tuning.outputTokensPerSecond).toBe(
       Math.round((tokens / 4) * 10) / 10
     );
-    /*
-      **最初の応答までの時間は入れない。** この測定は流し受信を断つので
-      （設計書6.63.1）、最初のトークンが返った時刻を知る手立てが無い。
-      分からないものを 0 や当て推量で埋めない
-    */
-    expect(tuning.firstTokenSeconds).toBeUndefined();
+    // **出どころを残す**——一覧では「普段の呼び出し」から採った値と並ぶ
+    expect(tuning.speedSource).toBe("tuning");
+    expect(typeof tuning.speedMeasuredAt).toBe("string");
   });
 
   test("時間切れの回は、速度の元にしない", async () => {
@@ -442,7 +439,13 @@ describe("書ける量と一緒に、出力の速度を測る", () => {
     // 前回の速度が残っていると、新しい実測と食い違ったまま一覧に出る
     state.outputMs = 0;
     const values: Record<string, unknown> = {
-      modelTuning: { "ollama/gemma4:12b": { outputTokensPerSecond: 99.9 } },
+      modelTuning: {
+        "ollama/gemma4:12b": {
+          outputTokensPerSecond: 99.9,
+          speedSource: "call",
+          speedMeasuredAt: "2026-09-05T00:00:00.000Z",
+        },
+      },
     };
     installSettings(values);
     answerWith("そのままにする");
@@ -459,6 +462,10 @@ describe("書ける量と一緒に、出力の速度を測る", () => {
     ] as Record<string, unknown>;
     expect(tuning.measuredOutputTokens).toBeGreaterThan(0);
     expect(tuning.outputTokensPerSecond).toBeUndefined();
+    // **出どころと日時も道連れにする。** 速度が消えたのに「普段の
+    // 呼び出しで採った」という札だけ残ると、一覧が読めなくなる
+    expect(tuning.speedSource).toBeUndefined();
+    expect(tuning.speedMeasuredAt).toBeUndefined();
   });
 });
 
