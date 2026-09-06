@@ -15,6 +15,7 @@ import {
   type EmphasisSite,
   type RubyStyle,
 } from "../core/ruby";
+import { sourceForPostingCopy } from "../core/episodeCopy";
 import { stripMemoLines } from "../core/sceneMemo";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 
@@ -148,11 +149,14 @@ export async function copyForPosting(): Promise<void> {
 
   const selection = editor.selection;
   // **シーンメモは投稿しない**（設計書6.40.2）。貼り付ける先は
-  // サイトの投稿欄なので、ここを抜かすと作者の付箋が公開される
+  // サイトの投稿欄なので、ここを抜かすと作者の付箋が公開される。
+  // 選択が無いときは、カクヨム形式の頭書きを外した本文だけを渡す
+  // （`sourceForPostingCopy`）——ヘッダーごと貼ると題名が二重に入る
   const source = stripMemoLines(
-    selection.isEmpty
-      ? editor.document.getText()
-      : editor.document.getText(selection)
+    sourceForPostingCopy(
+      editor.document.getText(),
+      selection.isEmpty ? undefined : editor.document.getText(selection)
+    )
   );
 
   // **傍点が入っているときだけ、貼り付け先を訊く**（設計書6.12.4）。

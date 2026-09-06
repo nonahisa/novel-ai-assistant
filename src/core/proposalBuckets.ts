@@ -42,29 +42,110 @@ export function isRemaining(item: ProposalLike): boolean {
 }
 
 /**
+ * 「同じ指摘かどうか」を内容で見分けるための項目（設計書6.8）。
+ *
+ * **印（id）では見分けられない。** 誤字脱字の印は
+ * `チャンクのハッシュ:行:並び順` で作られており、同じ誤字でも本文の
+ * 並び順が揺れれば変わる。中身が同じかどうかは中身で見る。
+ *
+ * 矛盾や設定資料の更新のように、置き換える文字列を持たないものもある。
+ * **持っていないものには鍵を作らない**（`undefined` を返す）。
+ */
+export interface ProposalContent {
+  filePath?: string;
+  line?: number;
+  target?: string;
+  suggestion?: string;
+}
+
+/**
+ * 同じ指摘を見分ける鍵。ファイル・行・置き換える文字列・直し方が
+ * すべて同じなら、同じ指摘とみなす。
+ *
+ * @returns 鍵を作れないもの（矛盾・設定資料の更新）は `undefined`
+ */
+export function contentKeyOf(
+  item: ProposalLike & ProposalContent
+): string | undefined {
+  if (!item.filePath || item.target === undefined) return undefined;
+  // **区切り文字でつながない。** `target` には本文がそのまま入るので、
+  // どんな区切りを選んでも中身に現れうる（「A|B」と「A」＋「B」が同じ鍵に
+  // なる）。JSONにすれば境目が中身と混ざらない
+  return JSON.stringify([
+    item.filePath,
+    item.line ?? null,
+    item.target,
+    item.suggestion ?? "",
+  ]);
+}
+
+/**
  * 同じ分類の中へ、新しい結果を足す。
+ *
+ * ## 解消済みは、同じ指摘がまた届いたら未処理へ戻す
+ *
+ * 再チェックで本文から引用が消えていると `resolved`（作者が書き直して
+ * 片付いた）にする。ところが作者が本文を元へ戻して検知し直すと、**同じ
+ * 指摘がまた届くのに解消済みのままで、一覧に出なかった**（2026-09-06、
+ * 作者の裁定）。誤字が見えないまま残るので、届いたこと自体を
+ * 「本文が元へ戻った証拠」と読んで未処理へ戻す。
+ *
+ * **`applied`・`dismissed` は戻さない。** 適用も「今後直さない」も
+ * 作者が決めたことで、本文がどう動いても覆す筋合いがない。
  *
  * @param existing いま持っているもの（作者の判断が入っている）
  * @param incoming 今回の検知結果
  */
-export function mergeProposals<T extends ProposalLike>(
+export function mergeProposals<T extends ProposalLike & ProposalContent>(
   existing: readonly T[],
   incoming: readonly T[]
 ): T[] {
   const merged = [...existing];
   const positionById = new Map(merged.map((item, index) => [item.id, index]));
+  // 解消済みだけを鍵で引けるようにする。作者が決めたもの（適用済み・
+  // 見送り済み）は戻さないので、はじめから入れない
+  const resolvedByKey = new Map<string, number>();
+  merged.forEach((item, index) => {
+    if (item.status !== "resolved") return;
+    const key = contentKeyOf(item);
+    if (key === undefined || resolvedByKey.has(key)) return;
+    resolvedByKey.set(key, index);
+  });
+
+  /** 戻した先の印も入れ替える。古い印のままだと適用の当て先を見失う */
+  const revive = (at: number, item: T): void => {
+    merged[at] = item;
+    positionById.set(item.id, at);
+  };
 
   for (const item of incoming) {
     const at = positionById.get(item.id);
-    if (at === undefined) {
-      positionById.set(item.id, merged.length);
-      merged.push(item);
+    const key = contentKeyOf(item);
+    if (at !== undefined) {
+      // **作者が決めたものは触らない。** 適用済みを `pending` へ戻すと、
+      // 同じ直しをもう一度当てにいくことになる
+      if (merged[at].status === "pending") {
+        merged[at] = item;
+      } else if (merged[at].status === "resolved" && key !== undefined) {
+        // **鍵を作れるものだけ戻す。** 矛盾のように置き換える文字列を
+        // 持たないものは、届いたことが「本文が元へ戻った」証拠にならない
+        revive(at, item);
+        resolvedByKey.delete(key);
+      }
       continue;
     }
-    // **作者が決めたものは触らない。** 適用済みを `pending` へ戻すと、
-    // 同じ直しをもう一度当てにいくことになる
-    if (merged[at].status !== "pending") continue;
-    merged[at] = item;
+
+    // 印が変わっていても、同じ中身の解消済みがあれば、それが戻ってきたと読む。
+    // **1件につき1件だけ戻す**——届いた1件が2件へ増えないようにする
+    const resolvedAt = key === undefined ? undefined : resolvedByKey.get(key);
+    if (resolvedAt !== undefined && key !== undefined) {
+      revive(resolvedAt, item);
+      resolvedByKey.delete(key);
+      continue;
+    }
+
+    positionById.set(item.id, merged.length);
+    merged.push(item);
   }
   return merged;
 }

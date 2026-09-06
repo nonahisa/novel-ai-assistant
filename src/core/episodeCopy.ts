@@ -46,6 +46,28 @@ export function extractEpisodeParts(
 }
 
 /**
+ * 「投稿サイト用に変換してコピー」で、変換にかける元を決める（設計書6.12.1）。
+ *
+ * **選んでいないときは、ヘッダーを外した本文だけを渡す。** 以前は開いて
+ * いるファイルの全文を渡しており、カクヨム形式の頭書き（【タイトル】〜
+ * 【本文】）ごとクリップボードへ入っていた。それを投稿欄へ貼ると、題名の
+ * 行から二重に入る（2026-09-06、作者の裁定）。
+ *
+ * **選んであるときは手を入れない。** ヘッダーを含めて選ぶのも作者の意思で
+ * あり、選んだ範囲と貼られるものが食い違うほうが困る。
+ *
+ * @param selectedText 選択されている文字列。選択が無ければ渡さない
+ */
+export function sourceForPostingCopy(
+  fullText: string,
+  selectedText?: string
+): string {
+  if (selectedText !== undefined && selectedText !== "") return selectedText;
+  // ヘッダーの有無の判断は1か所に集める（写しを作らない）
+  return extractEpisodeParts(fullText, null).body;
+}
+
+/**
  * 本文を、投稿サイトへ貼れる形にする。
  *
  * いまのところ変換するのは**ルビだけ**。`{漢字|かんじ}` を

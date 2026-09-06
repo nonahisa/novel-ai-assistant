@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   bodyForPosting,
   extractEpisodeParts,
+  sourceForPostingCopy,
   nameWithSubtitle,
   needsEmphasisSite,
 } from "../../src/core/episodeCopy";
@@ -220,6 +221,33 @@ describe("投稿サイトの題から話数を落としてから足す", () => {
     const stripped = stripChapterLabel("転生", formatChapterLabel(episode));
     expect(nameWithSubtitle("episode_0015.txt", null, stripped)).toBe(
       "episode_0015_転生.txt"
+    );
+  });
+});
+
+/**
+ * 「投稿サイト用に変換してコピー」で、何を変換にかけるか（設計書6.12.1）。
+ *
+ * **選択していないときに、ヘッダーごとコピーしていた**（2026-09-06、
+ * 作者の裁定）。カクヨム形式のファイルは頭に【タイトル】〜【本文】が
+ * 付いており、それを投稿欄へ貼ると、題名の行から二重に入ってしまう。
+ */
+describe("コピーする元を決める", () => {
+  test("選んでいなければ、ヘッダーを外した本文だけ", () => {
+    const source = sourceForPostingCopy(WITH_HEADER);
+
+    expect(source).toBe("気がつくと{森|もり}の中だった。");
+    expect(source).not.toContain("【タイトル】");
+  });
+
+  test("ヘッダーが無ければ、これまでどおり全文", () => {
+    expect(sourceForPostingCopy("ただの本文。")).toBe("ただの本文。");
+  });
+
+  test("選んであれば、選んだ範囲だけ", () => {
+    // ヘッダーごと選ぶのは作者の意思。**選択には手を入れない**
+    expect(sourceForPostingCopy(WITH_HEADER, "【タイトル】\n転生")).toBe(
+      "【タイトル】\n転生"
     );
   });
 });

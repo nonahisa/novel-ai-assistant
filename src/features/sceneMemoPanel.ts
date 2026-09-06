@@ -8,6 +8,7 @@ import { episodeTitle, formatChapterLabel } from "../core/episodeLabel";
 import { logFailure, logLine } from "../core/logger";
 import {
   countMemosByTag,
+  MEMO_HINT,
   memoColorVars,
   memoTagClass,
   nearestMemo,
@@ -122,7 +123,7 @@ export async function jumpSceneMemo(
   if (collected.memos.length === 0) {
     void vscode.window.showInformationMessage(
       `「${work.title}」の本文にシーンメモはありません。` +
-        "本文の行頭に // と書くと付箋になります。"
+        `${MEMO_HINT}。`
     );
     return;
   }
@@ -557,7 +558,7 @@ class SceneMemoPanel {
         notice: this.notices.join(" "),
         emptyMessage:
           this.memos.length === 0
-            ? "この作品にシーンメモはありません。本文の行頭に // と書くと付箋になります（読者向けの出力とAIには渡りません）。"
+            ? `この作品にシーンメモはありません。${MEMO_HINT}（読者向けの出力とAIには渡りません）。`
             : "絞り込みに当てはまるメモがありません。",
         colors: colorsFor(),
       },

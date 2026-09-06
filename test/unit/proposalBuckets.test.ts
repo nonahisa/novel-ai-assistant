@@ -216,3 +216,98 @@ describe("届いた結果のうち、一覧に残った件数", () => {
     });
   });
 });
+
+/**
+ * 解消と判定したあとに、同じ指摘がまた届いたとき（設計書6.8）。
+ *
+ * 再チェックで本文から引用が消えていると `resolved` にするが、作者が
+ * 本文を元へ戻して検知し直すと、**同じ指摘がまた届く**。そのとき解消済みの
+ * ままにしておくと、誤字が一覧に出ないまま残る（2026-09-06、作者の裁定）。
+ *
+ * 突き合わせは印（id）ではなく**内容の鍵**で行う。印には本文の
+ * チャンクハッシュと並び順が入っており、本文が戻っても同じ値になるとは
+ * 限らないためである。
+ */
+describe("解消済みへ、同じ指摘がまた届いたとき", () => {
+  const typo = (id: string, status: string, suggestion = "直した形") => ({
+    id,
+    status,
+    filePath: "C:/works/ep001.md",
+    line: 12,
+    target: "誤字",
+    suggestion,
+  });
+
+  test("本文が元へ戻った証拠なので、未処理へ戻す", () => {
+    const merged = mergeProposals(
+      [typo("old:12:0", "resolved")],
+      [typo("new:12:0", "pending")]
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0].status).toBe("pending");
+    // 印も新しいものへ入れ替える（適用に使う本文のハッシュが古いと当たらない）
+    expect(merged[0].id).toBe("new:12:0");
+  });
+
+  /**
+   * **作者の意思は覆さない。** 適用も「今後直さない」も作者が決めたことで、
+   * 本文がどう動いても、こちらから未処理へ戻す筋合いはない。
+   *
+   * 戻さないだけで、**届いたものを握り潰しもしない**（印が違えば別の1件として
+   * 並ぶ）。ここで捨てにいくと、同じ行に同じ誤字が2か所あったときに
+   * 2件目まで消える。
+   */
+  test("適用済み・見送り済みは戻さない", () => {
+    const applied = mergeProposals(
+      [typo("old:12:0", "applied")],
+      [typo("new:12:0", "pending")]
+    );
+    expect(applied.find((i) => i.id === "old:12:0")?.status).toBe("applied");
+
+    const dismissed = mergeProposals(
+      [typo("old:12:0", "dismissed")],
+      [typo("new:12:0", "pending")]
+    );
+    expect(dismissed.find((i) => i.id === "old:12:0")?.status).toBe(
+      "dismissed"
+    );
+  });
+
+  test("戻したものは、今回届いた「指摘」として数える", () => {
+    const incoming = [typo("new:12:0", "pending")];
+    const merged = mergeProposals([typo("old:12:0", "resolved")], incoming);
+
+    expect(countIncoming(merged, incoming)).toEqual({
+      remaining: 1,
+      handled: 0,
+    });
+  });
+
+  test("直し方が違えば、別の指摘として足す", () => {
+    const merged = mergeProposals(
+      [typo("old:12:0", "resolved", "直した形")],
+      [typo("new:12:0", "pending", "別の直し方")]
+    );
+    expect(merged).toHaveLength(2);
+    expect(merged.map((i) => i.status)).toEqual(["resolved", "pending"]);
+  });
+
+  test("同じ鍵の解消済みが2件あっても、戻すのは1件だけ", () => {
+    // 同じ行の同じ指摘が二重に入っていても、届いた1件が2件へ増えない
+    const merged = mergeProposals(
+      [typo("old:12:0", "resolved"), typo("old:12:1", "resolved")],
+      [typo("new:12:0", "pending")]
+    );
+    expect(merged).toHaveLength(2);
+    expect(merged.map((i) => i.status)).toEqual(["pending", "resolved"]);
+  });
+
+  /**
+   * 矛盾や設定資料の更新は、置き換える文字列（target・suggestion）を
+   * 持たない。**鍵が作れないものは、これまでどおり印だけで突き合わせる**
+   */
+  test("鍵を作れないものは、解消済みのまま", () => {
+    const merged = mergeProposals([item("a", "resolved")], [item("a")]);
+    expect(merged.map((i) => i.status)).toEqual(["resolved"]);
+  });
+});

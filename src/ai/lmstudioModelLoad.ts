@@ -102,8 +102,12 @@ export async function planLmStudioModelLoad(
   // 読み込みも、こちらからは指示できない
   if (!canRunProcesses()) return { kind: "skipped", reason: "unavailable" };
 
-  const { decideLoadContextLength, isLocalEndpoint, isRecentlyConfirmed } =
-    await import("./lmstudioLauncher.js");
+  const {
+    decideLoadContextLength,
+    describeShortLoadedContext,
+    isLocalEndpoint,
+    isRecentlyConfirmed,
+  } = await import("./lmstudioLauncher.js");
   if (!isLocalEndpoint(lmstudioEndpoint())) {
     return { kind: "skipped", reason: "unavailable" };
   }
@@ -119,9 +123,10 @@ export async function planLmStudioModelLoad(
   // 読み込み済みかどうかも分からない。**分からないまま読み込ませない**
   if (!state) return { kind: "skipped", reason: "unknown_model" };
 
+  const loadLimit = configuredLoadLimit();
   const contextLength = decideLoadContextLength(
     state.maxContextLength,
-    configuredLoadLimit()
+    loadLimit
   );
 
   if (state.loaded) {
@@ -131,10 +136,14 @@ export async function planLmStudioModelLoad(
       state.loadedContextLength !== undefined &&
       state.loadedContextLength < contextLength
     ) {
+      // **数字の出どころまで言う。** 設定していない作者に「指定 262144」と
+      // 出ていた（2026-09-06、作者の指摘）
       logStep(
-        `LM Studio：読み込み済みの文脈 ${state.loadedContextLength} は` +
-          `指定 ${contextLength} より短い。` +
-          "LM Studio側で読み込み直すと長い本文を扱えます。"
+        describeShortLoadedContext(
+          state.loadedContextLength,
+          contextLength,
+          loadLimit
+        )
       );
     }
     confirmedLoadedAt.set(model, now);

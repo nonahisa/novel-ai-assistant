@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MEMO_TAG,
+  MEMO_HINT,
   MEMO_MARKER_COLOR,
   MEMO_TAG_COLORS,
   blankMemoLines,
@@ -462,5 +463,19 @@ describe("件数の印（6.40.5）", () => {
   it("混ざっていれば、合計も添える", () => {
     const memos = parseMemos("// TODO 一\n// TODO 二\n// 伏線 三", "a.txt");
     expect(memoBadgeText(memos)).toBe("TODO 2／メモ計 3");
+  });
+});
+
+/**
+ * 1件も無いときの案内（設計書6.40）。
+ *
+ * 「本文の行頭に // と書くと**行頭になります**」という、意味の通らない文が
+ * 出ていた（2026-09-06、作者の指摘）。**書き方を教える文なので、
+ * 何になるのかを正しく言う。**
+ */
+describe("メモが無いときの案内", () => {
+  it("// を書くと何になるのかを、正しく言う", () => {
+    expect(MEMO_HINT).toBe("本文の行頭に // と書くとメモになります");
+    expect(MEMO_HINT).not.toContain("行頭になります");
   });
 });
