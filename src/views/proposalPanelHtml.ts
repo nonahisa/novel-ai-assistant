@@ -103,12 +103,20 @@ body {
 #toolbar .running { color: var(--vscode-descriptionForeground); font-size: 12px; }
 #running:empty { display: none; }
 #toolbar label { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+/*
+  ボタンは押しやすい大きさにする（作者の指摘、2026-09-06）。
+
+  「適用／無視／今後直さない／再チェック／戻す」が小さく詰まっていて、
+  押し間違えやすかった。**押し間違いが原稿を書き換える**場所なので、
+  見た目より当てやすさを取る。
+*/
 button {
   background: var(--vscode-button-background);
   color: var(--vscode-button-foreground);
   border: none;
   border-radius: 2px;
-  padding: 3px 10px;
+  padding: 4px 10px;
+  min-height: 28px;
   cursor: pointer;
   font-size: inherit;
 }
@@ -210,7 +218,15 @@ body.show-low .issue.low { display: flex; }
   font-size: 12px;
 }
 .reason { color: var(--vscode-descriptionForeground); font-size: 12px; }
-.actions { display: flex; gap: 6px; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+/*
+  「今後直さない」だけ隣から離す（作者の指摘、2026-09-06）。
+
+  **取り消しにくい判断だから**である。押すとその語を今後どの話でも
+  指摘しなくなるので、「無視」の隣に同じ間隔で並んでいると、
+  1つ押し間違えただけで指摘が二度と出なくなる。
+*/
+.actions .keep-word { margin-inline-start: 16px; }
 .status-detail { font-size: 12px; color: var(--vscode-errorForeground); }
 /* 矛盾。置き換えではなく食い違いを並べる */
 .contradiction .quote {
@@ -673,7 +689,9 @@ function renderItem(item) {
           : '<button data-action="jump" data-id="' + item.id + '"' + disabled + '>本文を見る</button>') +
         '<button class="secondary" data-action="dismiss" data-id="' + item.id + '"' + disabled + '>無視</button>' +
         (canKeep(item)
-          ? '<button class="secondary" data-action="keepWord" data-id="' + item.id + '" title="この語を今後どの話でも指摘しません"' + disabled + '>今後直さない</button>'
+          // **隣から離して置く**（.keep-word）。取り消しにくい判断なので、
+          // 「無視」と同じ間隔で並べない
+          ? '<button class="secondary keep-word" data-action="keepWord" data-id="' + item.id + '" title="この語を今後どの話でも指摘しません"' + disabled + '>今後直さない</button>'
           : '') +
         // **どちらに揃えるかは、機械には決められない**（設計書6.73）。
         // 揺れの組の材料を持っている指摘（表記ゆれ）にだけ出す。

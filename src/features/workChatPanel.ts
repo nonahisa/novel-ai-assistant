@@ -179,6 +179,14 @@ type Incoming =
   /** 使い方のマニュアルを開く */
   | { type: "openManual" }
   /**
+   * 上に出ているAIの名前を押した（作者の指摘、2026-09-06）。
+   *
+   * リンクの色で出ているのに押しても何も起きなかった。行き先はAI設定で、
+   * **コマンドを呼ぶのは拡張機能側**である（画面から届いた文字列が
+   * そのままコマンド名になる道は作らない。「面を移る」と同じ流儀）。
+   */
+  | { type: "openAISettings" }
+  /**
    * 横の細いパネルから、本文の領域へ大きく開く（作者の指定、2026-09-03）。
    *
    * 詳細メニューから相談の項目を消したので、**ここが大きく開く入口**になる。
@@ -543,6 +551,12 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
     if (message.type === "openManual") {
       await openManual();
+      return;
+    }
+    if (message.type === "openAISettings") {
+      // 「AI設定」（`novelai.setupAI`）。**入口を増やすだけで、
+      // 中身は既にあるものをそのまま呼ぶ**——設定の道を2つ持たない
+      await vscode.commands.executeCommand("novelai.setupAI");
       return;
     }
     if (message.type === "showInMain") {

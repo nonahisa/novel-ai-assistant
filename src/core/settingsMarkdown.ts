@@ -569,9 +569,17 @@ export function describeConflictValues(conflict: RecordConflict): string {
  * あり、確定したかどうかが違うだけなので、読み方まで変えない。
  *
  *   黒髪（それ以前）→ 銀髪（第7話）
+ *
+ * **同じ話の同じ値は1件にまとめて見せる**（作者の指摘、2026-09-06）。
+ * 第1話の変化に、紹介・役割・性格が2回ずつ並んでいた。畳むのは**読むとき
+ * だけ**で、台帳の `changes` からは消さない（追記だけの原則。抽出のたびに
+ * 同じ値が積まれることはあっても、記録そのものは作者の資産である）。
+ *
+ * **同じ値でも話が違えば残す。** 「黒髪→銀髪→黒髪」は、戻ったという変化
+ * であり、畳むと物語の動きが消える。
  */
 export function describeChangeValues(changes: RecordChange[]): string {
-  return sortChanges(changes)
+  return foldSameChanges(sortChanges(changes))
     .map((change) => {
       const chapters =
         change.chapters.length > 0
@@ -581,6 +589,28 @@ export function describeChangeValues(changes: RecordChange[]): string {
     })
     // 全角の閉じ括弧が右に余白を持つので、矢印の前に空白は入れない
     .join("→ ");
+}
+
+/**
+ * 同じ話・同じ値の変化を1件にまとめる（表示のためだけの処理）。
+ *
+ * **並び順は変えない。** 畳むのは隣り合ったものだけでなく、同じ組み合わせ
+ * が離れて記録されていることもあるので、見た組み合わせを覚えておいて
+ * 2件目以降を落とす。
+ */
+function foldSameChanges(changes: RecordChange[]): RecordChange[] {
+  const seen = new Set<string>();
+  return changes.filter((change) => {
+    // 区切りは、値に現れない文字にする（「村の少女 1」という値と、
+    // 「村の少女」の第1話とを取り違えないため）。**NULはエスケープで書く**
+    // ——生の制御文字を置くと、gitやgrepがこのファイルをバイナリとして扱う
+    const key = `${change.value}\u0000${[...change.chapters]
+      .sort((left, right) => left - right)
+      .join(",")}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /** 並べ替え用。話数が無いものは、気づく前からあった値なので先に置く */

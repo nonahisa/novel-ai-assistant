@@ -312,10 +312,15 @@ export async function openEpubEditorPanel(
     return;
   }
 
+  // **前回、未保存のまま閉じられていたら聞く**（設計書6.65.6）。
+  // 画面の中の編集は、タブを閉じた瞬間に消える——WebViewには「閉じる前の
+  // 確認」を出す口が無いので、閉じたときに控えておいて、ここで戻す
+  const current = await restoreStashedDraft(store, saved);
+
   const source = await collectSource(work);
   // 指定のある話だけ、開いた時点で段落数を数えておく。**位置のずれを
   // 書き出して初めて知るのでは遅い**（設計書6.65.10）
-  const paragraphs = await countPlacedEpisodes(source, saved);
+  const paragraphs = await countPlacedEpisodes(source, current);
 
   const existing = openPanels.get(work.id);
   if (existing) {
@@ -323,7 +328,7 @@ export async function openEpubEditorPanel(
     // 本文をここで取り込む（画面の未保存の変更は捨てる）
     existing.store = store;
     existing.saved = saved;
-    existing.current = saved;
+    existing.current = current;
     existing.source = source;
     existing.paragraphs = paragraphs;
     existing.panel.reveal();
@@ -352,7 +357,7 @@ export async function openEpubEditorPanel(
     panel,
     work,
     store,
-    current: saved,
+    current,
     saved,
     source,
     paragraphs,
@@ -360,7 +365,13 @@ export async function openEpubEditorPanel(
 
   openPanels.set(work.id, state);
   context.subscriptions.push(panel);
-  panel.onDidDispose(() => openPanels.delete(work.id));
+  panel.onDidDispose(() => {
+    openPanels.delete(work.id);
+    // **閉じたあとで拾えるようにしておく**（設計書6.65.6）。
+    // 閉じる前に引き止められない以上、ここが最後の機会である。
+    // `void` で放すのは、`onDidDispose` が待ってくれないため
+    void stashOnClose(state);
+  });
 
   panel.webview.html = buildEpubEditorPanelHtml(
     createNonce(),
@@ -1018,6 +1029,53 @@ function describeAfterUnbake(state: PanelState, side: CoverSide): string {
     : "元イラストの指定も無いので、題名だけの扉が表紙になります。";
 }
 
+/**
+ * 閉じられた画面の未保存の編集を控える（設計書6.65.6）。
+ *
+ * **WebViewのタブには「閉じますか」を出せない。** VS Codeの
+ * `WebviewPanel` には閉じるのを引き止める口が無く、`onDidDispose` は
+ * 既に閉じたあとに来る。そこで、消える前の値をここで退避し、次に開いた
+ * ときに「復元しますか」を出す（`restoreStashedDraft`）。
+ *
+ * 未保存が無ければ何もしない——毎回控えを書くと、書き換えていない作品でも
+ * `.novelai-recovery` に古い下書きが残り続ける。
+ */
+async function stashOnClose(state: PanelState): Promise<void> {
+  if (!isDirty(state)) return;
+  await state.store.stashDraft(state.current);
+}
+
+/**
+ * 前回、未保存のまま閉じられていたら聞く（設計書6.65.6）。
+ *
+ * **黙って戻さない。** 外で book.json を直したあとに開いたとき、
+ * 古い下書きが勝手にかぶさると、直したはずの値が消えたように見える。
+ *
+ * 答えたら控えは捨てる。**Escで閉じたときだけ残す**——答えていないので、
+ * 次に開いたときにもう一度聞く。
+ */
+async function restoreStashedDraft(
+  store: BookStore,
+  saved: BookConfig
+): Promise<BookConfig> {
+  const draft = await store.readStashedDraft();
+  if (!draft) return saved;
+
+  const restore = "復元する";
+  const discard = "捨てる";
+  const answer = await vscode.window.showWarningMessage(
+    "前回のEPUBエディターに、保存していない編集が残っています。" +
+      "画面のタブを閉じたときの内容です。復元しますか？",
+    { modal: true },
+    restore,
+    discard
+  );
+  if (answer !== restore && answer !== discard) return saved;
+
+  await store.clearStashedDraft();
+  return answer === restore ? draft : saved;
+}
+
 /** 画面の値をファイルへ書く。書けたら true（呼び出し側はそこで続ける） */
 async function saveDraft(work: WorkEntry, state: PanelState): Promise<boolean> {
   try {
@@ -1027,6 +1085,9 @@ async function saveDraft(work: WorkEntry, state: PanelState): Promise<boolean> {
     return false;
   }
   state.saved = state.current;
+  // 保存できた時点で、閉じたときの控えは用済みである
+  // （残しておくと、次に開いたときに古い下書きを聞かれる）
+  await state.store.clearStashedDraft();
   state.panel.webview.postMessage({
     type: "preview",
     data: await previewData(state),

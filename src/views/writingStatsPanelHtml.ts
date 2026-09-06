@@ -203,8 +203,21 @@ function estimateLabelWidth(label) {
   return width;
 }
 
-function signed(value) {
-  return (value > 0 ? '+' : '') + formatCount(value);
+/**
+ * 執筆量の言い方（作者の指定、2026-09-06）。
+ *
+ * **減った日を「−12字」と出さない。** 推敲で削った日は「書かなかった日」
+ * ではないのに、負の数は「マイナス＝良くないこと」と読めてしまう。
+ * 記号ではなく言葉で「削った 12字」と言う。
+ *
+ * 中身は core/writingAmountText.ts の describeWrittenAmount と同じである
+ * （WebViewの中からは呼べないので、同じ言い方をここにも置く）。
+ * 食い違っていないことは writingStatsPanelHtml.test.ts が見張る。
+ * ここはテンプレート文字列の中なので、引用にバッククォートを使わない。
+ */
+function amount(value) {
+  if (value < 0) return '削った ' + formatCount(-value) + '字';
+  return (value > 0 ? '+' : '') + formatCount(value) + '字';
 }
 
 document.querySelectorAll('.tab').forEach((tab) => {
@@ -280,7 +293,7 @@ function renderCards() {
   const cards = [];
 
   cards.push(card(
-    '今日', signed(today.progress.written) + '字',
+    '今日', amount(today.progress.written),
     today.progress.goal > 0
       ? (today.progress.achieved
           ? '目標 ' + formatCount(today.progress.goal) + '字を達成'
@@ -290,7 +303,7 @@ function renderCards() {
   ));
 
   cards.push(card(
-    '今月', signed(month.progress.written) + '字',
+    '今月', amount(month.progress.written),
     month.progress.goal > 0
       ? (month.progress.achieved
           ? '目標 ' + formatCount(month.progress.goal) + '字を達成'
@@ -403,7 +416,7 @@ function renderChart() {
     parts.push(
       '<rect class="' + classes.join(' ') + '" x="' + x + '" y="' + y +
       '" width="' + barWidth + '" height="' + barHeight + '" rx="2">' +
-      '<title>' + escapeHtml(bucket.label + '  ' + signed(bucket.net) + '字') + '</title>' +
+      '<title>' + escapeHtml(bucket.label + '  ' + amount(bucket.net)) + '</title>' +
       '</rect>'
     );
     if (shownSet.has(index)) {
@@ -422,7 +435,7 @@ function renderChart() {
   const total = buckets.reduce((sum, bucket) => sum + bucket.net, 0);
   const active = buckets.reduce((sum, bucket) => sum + bucket.activeDays, 0);
   note.textContent =
-    GRANULARITY_LABELS[granularity] + 'の合計 ' + signed(total) + '字' +
+    GRANULARITY_LABELS[granularity] + 'の合計 ' + amount(total) +
     '（書いた日 ' + active + '日）。' + state.notice;
 }
 
@@ -440,7 +453,7 @@ function renderDevices() {
     state.devices
       .map((device) =>
         '<tr><td>' + escapeHtml(device.label) + '</td>' +
-        '<td class="num">' + signed(device.net) + '</td>' +
+        '<td class="num">' + amount(device.net) + '</td>' +
         '<td class="num">' + device.activeDays + '</td></tr>'
       )
       .join('') +

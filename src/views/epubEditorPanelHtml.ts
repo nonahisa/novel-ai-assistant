@@ -879,12 +879,16 @@ function renderScreen() {
  *
  * 画面を切り替える前に必ず通す。待ち合わせ（scheduleChange）のままだと、
  * **切り替えの拍子に打ちかけの1文字が落ちる**。
+ *
+ * **打ちかけが無ければ何も送らない**（作者の指摘、2026-09-06）。
+ * 見る面を切り替えただけで欄の値を送り返すと、欄と設計図のわずかな
+ * 差（色の書き方など）が「変更」として拾われ、**何も触っていないのに
+ * 「未保存の変更があります」**が出る。切り替えは状態の変更ではない。
  */
 function flushChange() {
-  if (sending) {
-    clearTimeout(sending);
-    sending = null;
-  }
+  if (!sending) return;
+  clearTimeout(sending);
+  sending = null;
   post('change', { config: readForm() });
 }
 

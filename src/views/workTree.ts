@@ -9,6 +9,7 @@ import {
   isCollectedFile,
 } from "../core/episodeLabel";
 import { workTypeContextValue } from "../core/workTypeVisibility";
+import { abbreviateTitle } from "../core/abbreviateTitle";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
 import { scanWork } from "../core/scanner";
@@ -241,8 +242,11 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
     if (node.type === "work") {
       const { work, stats } = node;
+      // **作品名は省略して出す**（作者の裁定、2026-09-06）。長い題は行の幅を
+      // 使い切り、右に添えた字数・同期の印が幅の外へ押し出されて読めなくなる。
+      // 全文はホバーに出しているので、確かめる場所は残っている
       const item = new vscode.TreeItem(
-        work.title,
+        abbreviateTitle(work.title),
         vscode.TreeItemCollapsibleState.Collapsed
       );
       // タイプを織り込む（設計書6.70.1）。右クリックの `when` はこれを見る

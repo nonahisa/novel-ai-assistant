@@ -283,6 +283,21 @@ describe("ブロックごとの編集画面（設計書6.65.15の段D）", () =>
     expect(select.slice(0, 200)).toContain("flushChange()");
   });
 
+  /**
+   * **切り替えただけでは何も送らない**（作者の指摘、2026-09-06）。
+   * 送ると、欄と設計図のわずかな差が「変更」として拾われ、何も触って
+   * いないのに「未保存の変更があります」が出る。
+   */
+  it("打ちかけが無ければ、切り替えでは何も送らない", () => {
+    const flush = script.slice(
+      script.indexOf("function flushChange"),
+      script.indexOf("function selectBlock")
+    );
+    expect(flush).toContain("if (!sending) return;");
+    // 打ちかけがあるときは、これまでどおり送る（1文字を落とさない）
+    expect(flush).toContain("post('change'");
+  });
+
   it("画面を切り替えても、欄を作り直さない（打った字が残る）", () => {
     // 欄を埋め直すのは、設計図を貰ったときだけ（`fillForm`）
     const render = script.slice(

@@ -11,7 +11,7 @@ import {
 } from "../models/book";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { hashBytes } from "./textFile";
-import { atomicWriteFile } from "./atomicWrite";
+import { atomicWriteFile, RECOVERY_DIRECTORY_NAME } from "./atomicWrite";
 
 /**
  * 本の設計図（`設定/書籍/book.json`）の読み書き（設計書6.65.6）。
@@ -25,12 +25,17 @@ import { atomicWriteFile } from "./atomicWrite";
  *   - 壊れたJSONは修復しない。読めないと言って止まる
  *   - エディタに未保存の変更があれば書き込まない
  *
- * ## 退避（`.novelai-recovery`）は無い
+ * ## 正規ファイルの世代退避は無い
  *
  * 書き込みは `atomicWriteFile` の**指定なし**（一時ファイル→置き換え）で
  * ある。人物のような世代退避は持たない代わりに、**照合で外部変更を
  * はじく**のと、`設定/` がGit管理下で「復元」から戻せることに頼る
  * （CLAUDE.mdの実装ルール2、`SettingsStore` と同じ形）。
+ *
+ * ただし**未保存の下書きだけは `.novelai-recovery` へ控える**
+ * （`stashDraft`）。WebViewのタブは閉じる前に引き止められないので、
+ * 閉じた瞬間に画面の編集が消えてしまうためである。控えは1つだけで、
+ * 正規の book.json には触れない。
  */
 
 export type BookStoreErrorKind =
@@ -191,6 +196,85 @@ export class BookStore {
         "modified_externally",
         target
       );
+    }
+  }
+
+  /**
+   * 未保存のまま閉じられた画面の控え（設計書6.65.6）。
+   *
+   * **WebViewのタブには「閉じる前の確認」を出せない**（VS Codeの
+   * `WebviewPanel` に、閉じるのを引き止める口が無い）。押した瞬間に
+   * 画面ごと消えるので、消える前にここへ置いておき、次に開いたときに
+   * 「復元／捨てる」を出す。
+   *
+   * **1つしか持たない**（世代を積まない）。ここに入るのは「まだ
+   * book.json になっていない下書き」であって、正規のファイルの控えでは
+   * ないので、いちばん新しいものだけが意味を持つ。
+   */
+  private async draftPath(): Promise<string> {
+    const target = await this.filePath();
+    return path.join(
+      path.dirname(target),
+      RECOVERY_DIRECTORY_NAME,
+      `${BOOK_FILE}.draft`
+    );
+  }
+
+  /**
+   * 未保存の下書きを退避する。**正規の book.json には触れない。**
+   *
+   * 失敗しても投げない——閉じる途中で呼ばれるので、ここで例外を出しても
+   * 作者に見せる画面がもう無い（控えが取れなかったことは、次に開いても
+   * 「復元しますか」が出ないことで分かる）。
+   */
+  async stashDraft(config: BookConfig): Promise<boolean> {
+    try {
+      const target = await this.draftPath();
+      await vscode.workspace.fs.createDirectory(
+        path.toUri(path.dirname(target))
+      );
+      await atomicWriteFile(
+        target,
+        new TextEncoder().encode(`${JSON.stringify(config, null, 2)}\n`)
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 退避してある下書き。無ければ null。
+   *
+   * **読めない控えは無かったことにする。** 下書きは作者が書いた資産では
+   * あるが、正規のファイルではない。ここで止めると、控えが壊れている
+   * だけでEPUBエディターが開けなくなる。
+   */
+  async readStashedDraft(): Promise<BookConfig | null> {
+    let bytes: Uint8Array;
+    try {
+      bytes = await vscode.workspace.fs.readFile(
+        path.toUri(await this.draftPath())
+      );
+    } catch {
+      return null;
+    }
+    try {
+      return parseBookConfig(
+        JSON.parse(new TextDecoder().decode(bytes)),
+        this.work.title
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  /** 退避を捨てる（復元しても、捨てると答えても、答えたら消す） */
+  async clearStashedDraft(): Promise<void> {
+    try {
+      await vscode.workspace.fs.delete(path.toUri(await this.draftPath()));
+    } catch {
+      // 無ければそれでよい。消せないことで画面を止めない
     }
   }
 

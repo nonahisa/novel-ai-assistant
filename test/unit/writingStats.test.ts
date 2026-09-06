@@ -26,6 +26,7 @@ import {
   totalsByLabel,
   weekStartKey,
 } from "../../src/core/writingStats";
+import { describeWrittenAmount } from "../../src/core/writingAmountText";
 import {
   describeStatusBarProgress,
   fileCountKeyFor,
@@ -856,6 +857,23 @@ describe("ステータスバーの表示", () => {
 
     expect(describeStatusBarProgress(summary)).toBe("今日 0字");
     expect(summary.streak).toBe(0);
+  });
+
+  /**
+   * **減った日を「−12字」と出さない**（作者の指定、2026-09-06）。
+   * 推敲で削った日は、書いていない日ではない。数字の前の記号ではなく
+   * 言葉で言う。
+   */
+  test("削った日は「削った 12字」と言う", () => {
+    const summary = summarize([day("2026-08-13", -12)], "2026-08-13");
+
+    expect(describeStatusBarProgress(summary)).toBe("今日 削った 12字");
+  });
+
+  test("字数の言い方は1か所で決める（画面もステータスバーも同じ）", () => {
+    expect(describeWrittenAmount(560)).toBe("+560字");
+    expect(describeWrittenAmount(-1234)).toBe("削った 1,234字");
+    expect(describeWrittenAmount(0)).toBe("0字");
   });
 
   test("今月の合計と書いた日数も持つ", () => {

@@ -19,6 +19,8 @@ import {
   type GoalProgress,
 } from "../core/writingStats";
 import { WritingStatsStore } from "../core/writingStatsStore";
+import { describeWrittenAmount } from "../core/writingAmountText";
+import { formatCount } from "../core/charCount";
 
 /**
  * 執筆量の記録係（設計書6.3）。
@@ -275,12 +277,21 @@ export function monthlyGoal(): number {
  *
  * **目標が未設定なら「今日 +560字」だけにする。** 目標を設定していない作者に
  * 「0/0」のような意味のない数字を見せない。
+ *
+ * **削った日は「今日 削った 12字」**（作者の指定、2026-09-06）。
+ * 言い方は `describeWrittenAmount` の1か所が持つ——執筆量パネルと
+ * 食い違うと、同じ日の同じ数字が2通りに読める。
  */
 export function describeStatusBarProgress(summary: WritingSummary): string {
   const { written, goal } = summary.todayProgress;
-  const value = written.toLocaleString("ja-JP");
-  if (goal <= 0) {
-    return written === 0 ? "今日 0字" : `今日 ${written > 0 ? "+" : ""}${value}字`;
+  if (goal <= 0) return `今日 ${describeWrittenAmount(written)}`;
+  // 目標があるときは達成度（12/1,000字）を出す。**ここでも負の数は出さない**
+  // ——目標に対してどれだけ書いたかを見る場所なので、削った日は
+  // 「削った」と言ってから、そのままの目標を添える
+  if (written < 0) {
+    return `今日 ${describeWrittenAmount(written)}（目標 ${formatCount(
+      goal
+    )}字）`;
   }
-  return `今日 ${value}/${goal.toLocaleString("ja-JP")}字`;
+  return `今日 ${formatCount(written)}/${formatCount(goal)}字`;
 }

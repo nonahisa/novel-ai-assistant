@@ -85,6 +85,16 @@ body {
   flex-wrap: wrap;
 }
 #context .what { color: var(--vscode-foreground); }
+/*
+  いま使っているAIの名前。**押すとAI設定が開く**（作者の指摘、2026-09-06）。
+  リンクの色で出ているのに押せなかったので、見た目どおりに押せるようにした。
+*/
+#context-provider {
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+}
+#context-provider:hover { text-decoration: underline; }
+/* 有料のときは警告の色を優先する（課金の注意は、リンクより先に伝える） */
 #context .paid { color: var(--vscode-editorWarning-foreground, #cca700); }
 #log { flex: 1; overflow-y: auto; padding: 10px; }
 .turn { margin-bottom: 14px; }
@@ -633,6 +643,18 @@ if (openManualEl) {
 }
 
 /*
+  上に出ているAIの名前を押したら、AI設定を開く（作者の指摘、2026-09-06）。
+
+  リンクの色で出ているのに押せなかった。**押せそうに見えるものは押せる**
+  ようにする。AIが分からないとき（名前が空）は、開く先が意味を持たないので
+  何もしない。コマンド名は拡張機能側が持つ（画面からコマンドを呼ばない）。
+*/
+document.getElementById('context-provider').addEventListener('click', () => {
+  if (!document.getElementById('context-provider').textContent) return;
+  vscode.postMessage({ type: 'openAISettings' });
+});
+
+/*
   面を移る。**コマンドを呼ぶのは拡張機能側**である（既存の口と同じ流儀）。
   webviewから直接コマンドを実行できる仕組みは作らない——画面から届いた
   文字列がそのままコマンド名になる余地を、どこにも残さないため。
@@ -698,6 +720,8 @@ window.addEventListener('message', (event) => {
       ? '／ ' + message.provider + (message.paid ? '（有料・送るたびに課金）' : '')
       : '';
     providerEl.className = message.paid ? 'paid' : '';
+    // AIが分からないときは押せる場所を出さない（開く先が意味を持たない）
+    providerEl.title = message.provider ? 'AI設定を開く' : '';
     // 起動できる機能は、届くたびに作り直す（機能が増減しても写しが残らない）
     quickRuns = message.quickRuns || [];
     renderQuickRuns();
