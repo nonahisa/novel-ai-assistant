@@ -9,6 +9,7 @@ import {
   X_WEIGHTED_LIMIT,
   xPostWithUrl,
   xWeightedLength,
+  splitXBodyLines,
 } from "../../src/core/announcement";
 import {
   X_POST_MAX_CHARS,
@@ -87,8 +88,52 @@ describe("X用の投稿の組み立て", () => {
         workUrl: "https://example.com/works/1",
       })
     ).toBe(
-      "第3話「灯を継ぐ」 更新しました\n本文です。\n#創作 #カクヨム\nhttps://example.com/works/1"
+      "第3話「灯を継ぐ」 更新しました\n\n本文です。\n\n#創作 #カクヨム\nhttps://example.com/works/1"
     );
+  });
+
+  test("本文は文ごとに改行し、題の次とURLの前に空行を置く（作者の要望、2026-09-06）", () => {
+    expect(
+      composeXPost({
+        body: "呪詛が消えた。しかし炎上は止まらない！　次は誰が狙われる？「まだ終わってない。」と彼は言った。",
+        episodeLabel: "第18話",
+        hashtags: [],
+        workUrl: "",
+      })
+    ).toBe(
+      [
+        "第18話 更新しました",
+        "",
+        "呪詛が消えた。",
+        "しかし炎上は止まらない！",
+        "次は誰が狙われる？",
+        "「まだ終わってない。」と彼は言った。",
+        "",
+        "{URL}",
+      ].join("\n")
+    );
+  });
+
+  test("上限を超えるときは、URLの前の空行 → 題の次の空行 → 文ごとの改行の順に減らす", () => {
+    // 日本語は1字が重み2、改行は1。題（18）＋目印（23）＋本文117字（234）＋
+    // 改行で、全部入れると 282、URLの前と題の次の空行を落とすと 280 に収まる
+    const sentences = [
+      "あ".repeat(28) + "。",
+      "あ".repeat(28) + "。",
+      "あ".repeat(28) + "。",
+      "あ".repeat(29) + "。",
+    ];
+    const body = sentences.join("");
+    const composed = composeXPost({ body, episodeLabel: "第1話", hashtags: [], workUrl: "" });
+    expect(composed).toBe(`第1話 更新しました\n${sentences.join("\n")}\n{URL}`);
+    expect(xWeightedLength(composed)).toBe(X_WEIGHTED_LIMIT);
+  });
+
+  test("全部落としても超えるなら、切り詰めずにそのまま返す", () => {
+    const body = "あ".repeat(160) + "。";
+    const composed = composeXPost({ body, episodeLabel: "第1話", hashtags: [], workUrl: "" });
+    expect(composed).toBe(`第1話 更新しました\n${body}\n{URL}`);
+    expect(xWeightedLength(composed)).toBeGreaterThan(X_WEIGHTED_LIMIT);
   });
 
   test("ハッシュタグが無ければ、その行ごと省く", () => {
@@ -100,7 +145,7 @@ describe("X用の投稿の組み立て", () => {
         hashtags: [],
         workUrl: "https://example.com/works/1",
       })
-    ).toBe("第3話 更新しました\n本文です。\nhttps://example.com/works/1");
+    ).toBe("第3話 更新しました\n\n本文です。\n\nhttps://example.com/works/1");
   });
 
   test("URLが空なら目印を残す", () => {
@@ -129,13 +174,13 @@ describe("貼り付ける直前のURLの差し込み", () => {
     // 貼り付け先（6.79.8）で決めたURLは、目印の場所へ入れる。
     // 末尾へ足すだけにすると、目印が残ったまま投稿されてしまう
     expect(xPostWithUrl(composed, "https://ncode.syosetu.com/n1234ab/")).toBe(
-      "第3話 更新しました\n本文です。\n#創作\nhttps://ncode.syosetu.com/n1234ab/"
+      "第3話 更新しました\n\n本文です。\n\n#創作\nhttps://ncode.syosetu.com/n1234ab/"
     );
   });
 
   test("URLが決まらなければ、目印の行ごと落とす", () => {
     // 「{URL}」がそのまま読者の目に触れないようにする（URL無しで文だけ貼る）
-    expect(xPostWithUrl(composed, "")).toBe("第3話 更新しました\n本文です。\n#創作");
+    expect(xPostWithUrl(composed, "")).toBe("第3話 更新しました\n\n本文です。\n\n#創作");
   });
 
   test("既にURLが入っている告知には、足さない", () => {
@@ -360,10 +405,24 @@ describe("告知文の書き出し", () => {
     expect(markdown).toContain("## 伏せたもの");
   });
 
-  test("X用はコード柵に入れる", () => {
-    // ハッシュタグの行は「#創作」で始まる。素で置くとMarkdownの見出しになり、
-    // 表示とコピーした形が食い違う
-    expect(markdown).toContain("```\n第3話「灯を継ぐ」 更新しました");
+  test("X用は引用（>）で置き、コード柵に入れない（作者の要望、2026-09-06「表示も折り返してね」）", () => {
+    // コード柵だとプレビューで折り返さず、横スクロールで読めなかった
+    expect(markdown).not.toContain("```");
+    expect(markdown).toContain("> 第3話「灯を継ぐ」 更新しました\n> 本文です。\n> #創作\n> {URL}");
+  });
+
+  test("引用の中の空行は「>」だけの行にする", () => {
+    const spaced = buildAnnouncementMarkdown({
+      workTitle: "図書塔の魔女",
+      episodeLabel: "第3話",
+      composedX: "第3話 更新しました\n\n本文です。\n\n{URL}",
+      weightedLength: 40,
+      activityReport: "活動報告。",
+      afterword: "後書き。",
+      spoilerCheck: null,
+      warnings: [],
+    });
+    expect(spaced).toContain("> 第3話 更新しました\n>\n> 本文です。\n>\n> {URL}");
   });
 
   test("注意は冒頭に出す", () => {

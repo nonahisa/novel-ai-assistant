@@ -429,7 +429,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-48",
     title: "更新告知文を作る",
     commands: ["novelai.generateAnnouncement", "novelai.configureAnnouncement"],
-    count: 7,
+    count: 8,
   },
   {
     id: "F-47",
@@ -740,4 +740,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 790;
+export const PENDING_CHECK_TOTAL = 791;
