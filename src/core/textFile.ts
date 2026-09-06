@@ -21,7 +21,13 @@ export type WriteTextFailureReason =
   | "encoding_error";
 
 export type WriteTextFileResult =
-  | { ok: true }
+  /**
+   * 書けた。`recoveryPath` は書き換える前の本文を退避した先
+   * （`.novelai-recovery` の中の `.bak`）。**「元に戻す」を出すのに要る**——
+   * この関数は「削除→作り直し」で書くため、VS Codeの取り消し履歴には
+   * 載らず Ctrl+Z では戻せない（設計書6.12.5）。
+   */
+  | { ok: true; recoveryPath?: string }
   | {
       ok: false;
       reason: WriteTextFailureReason;
@@ -256,7 +262,9 @@ export async function writeTextFilePreservingFormat(
   }
 
   await pruneManagedRecoveries(filePath);
-  return { ok: true };
+  // 退避先を呼び出し側へ返す。いま作ったものが最新なので、
+  // pruneManagedRecoveries（5世代まで残す）で消えることはない
+  return { ok: true, recoveryPath };
 }
 
 function describeError(error: unknown): string {

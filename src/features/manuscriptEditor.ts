@@ -552,6 +552,46 @@ export function activeManuscriptTabUri(): vscode.Uri | undefined {
 }
 
 /**
+ * 開いているタブのうち、本文を開いているもの（原稿エディタ・素のエディタ）。
+ * **各グループでアクティブなタブを先に並べる。**
+ *
+ * `activeManuscriptTabUri` は「いまアクティブなタブ」しか見ない。設定資料
+ * パネルの「ルビを追加」のように**WebView の中のボタンから呼ばれる**操作では、
+ * 押した時点でアクティブなのは必ずそのパネルなので、原稿エディタで本文を
+ * 開いていても一度も見つからなかった（実機、2026-09-06）。
+ * 全グループのタブから拾えば、隣のグループで開いている本文も分かる。
+ */
+export function openManuscriptTabUris(): vscode.Uri[] {
+  try {
+    const active: vscode.Uri[] = [];
+    const others: vscode.Uri[] = [];
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        const uri = manuscriptTabUri(tab.input);
+        if (!uri) continue;
+        (tab.isActive ? active : others).push(uri);
+      }
+    }
+    return [...active, ...others];
+  } catch {
+    // タブを読めない環境（古いVS Code・試験の代役）では「開いていない」扱い
+    return [];
+  }
+}
+
+function manuscriptTabUri(input: unknown): vscode.Uri | undefined {
+  if (input instanceof vscode.TabInputText) return input.uri;
+  if (
+    input instanceof vscode.TabInputCustom &&
+    (input.viewType === MANUSCRIPT_EDITOR_VIEW_TYPE ||
+      input.viewType === MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE)
+  ) {
+    return input.uri;
+  }
+  return undefined;
+}
+
+/**
  * いまアクティブなタブが原稿エディタなら、その入口のID。
  *
  * **開いていない原稿へ飛ぶときに、どちらの向きで開くかを決める。**

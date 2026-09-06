@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   applyRubyInsertions,
+  canRevertRuby,
+  countByTerm,
   describeRubyResults,
+  describeRubyTermTotals,
   planRubyInsertions,
+  splitSingleCharTerms,
   type RubyTerm,
 } from "../../src/core/settingsRuby";
 
@@ -17,7 +21,7 @@ import {
 
 const terms: RubyTerm[] = [
   { text: "薬師寺", reading: "やくしじ" },
-  { text: "焔", reading: "ほむら" },
+  { text: "焔火", reading: "ほむら" },
 ];
 
 function apply(text: string, scope: "first" | "all" = "all"): string {
@@ -30,12 +34,12 @@ describe("どこへ振るか", () => {
   });
 
   it("同じ話に何度も出てきたら、すべてに振れる", () => {
-    expect(apply("焔と焔。", "all")).toBe("{焔|ほむら}と{焔|ほむら}。");
+    expect(apply("焔火と焔火。", "all")).toBe("{焔火|ほむら}と{焔火|ほむら}。");
   });
 
   /** 出てくるたびに振ると読みにくい。投稿作品でよくある形 */
   it("最初の1回だけ、も選べる", () => {
-    expect(apply("焔と焔。", "first")).toBe("{焔|ほむら}と焔。");
+    expect(apply("焔火と焔火。", "first")).toBe("{焔火|ほむら}と焔火。");
   });
 
   it("読み仮名の無い語は振らない", () => {
@@ -88,8 +92,8 @@ describe("振ってはいけないところ", () => {
   });
 
   it("すでに振ってある箇所は飛ばし、まだの箇所には振る", () => {
-    expect(apply("{焔|ほむら}と焔。", "all")).toBe(
-      "{焔|ほむら}と{焔|ほむら}。"
+    expect(apply("{焔火|ほむら}と焔火。", "all")).toBe(
+      "{焔火|ほむら}と{焔火|ほむら}。"
     );
   });
 });
@@ -125,8 +129,8 @@ describe("名前が重なるとき", () => {
 describe("入れ方", () => {
   /** 前から入れると、入れたぶんだけ後ろの位置がずれる */
   it("複数入れても位置がずれない", () => {
-    expect(apply("焔と薬師寺と焔。", "all")).toBe(
-      "{焔|ほむら}と{薬師寺|やくしじ}と{焔|ほむら}。"
+    expect(apply("焔火と薬師寺と焔火。", "all")).toBe(
+      "{焔火|ほむら}と{薬師寺|やくしじ}と{焔火|ほむら}。"
     );
   });
 
@@ -175,5 +179,136 @@ describe("作者に見せる要約", () => {
 
   it("1件も無ければ、その旨を言う", () => {
     expect(describeRubyResults([], name)).toContain("見つかりませんでした");
+  });
+});
+
+/**
+ * 1文字の語は振らない（設計書6.12.5）。
+ *
+ * 実機で能力「因」（読み「いん」）が本文の「原因」に当たり、
+ * `原{因|いん}` と割れた（2026-09-06）。1文字はほかの語の一部に
+ * 当たりやすく、前後を見ずに機械で当てるには短すぎる。
+ */
+describe("1文字の語", () => {
+  it("「因」は「原因」に当たらない", () => {
+    const text = "その原因を探した。";
+    expect(
+      applyRubyInsertions(
+        text,
+        planRubyInsertions(text, [{ text: "因", reading: "いん" }], "all")
+      )
+    ).toBe(text);
+  });
+
+  /** 呼び出し側が外し忘れても、planRubyInsertions が二重に守る */
+  it("1文字だけで出てくるところにも振らない", () => {
+    const text = "因が残る。";
+    expect(planRubyInsertions(text, [{ text: "因", reading: "いん" }], "all"))
+      .toEqual([]);
+  });
+
+  it("splitSingleCharTerms が1文字だけを分ける", () => {
+    const split = splitSingleCharTerms([
+      { text: "因", reading: "いん" },
+      { text: "文佳", reading: "ふみか" },
+      { text: " 果 ", reading: "か" },
+    ]);
+
+    expect(split.usable.map((term) => term.text)).toEqual(["文佳"]);
+    expect(split.singleChar.map((term) => term.text)).toEqual(["因", " 果 "]);
+  });
+
+  /**
+   * サロゲートペア（「𠮟」）は `String.length` では2になる。
+   * コードポイントで数えないと、1文字の語をすり抜けさせてしまう
+   */
+  it("サロゲートペアの1文字も、1文字として外す", () => {
+    const split = splitSingleCharTerms([{ text: "𠮟", reading: "しか" }]);
+
+    expect(split.usable).toEqual([]);
+    expect(split.singleChar).toHaveLength(1);
+  });
+
+  /** 2文字の名前は主要人物に多い。外すと本来の目的が果たせない */
+  it("2文字の名前は外さない", () => {
+    const text = "文佳が来た。";
+    expect(
+      applyRubyInsertions(
+        text,
+        planRubyInsertions(text, [{ text: "文佳", reading: "ふみか" }], "all")
+      )
+    ).toBe("{文佳|ふみか}が来た。");
+  });
+});
+
+describe("語ごとの件数", () => {
+  const fumika: RubyTerm = { text: "文佳", reading: "ふみか" };
+  const okuhara: RubyTerm = { text: "奥原", reading: "おくはら" };
+
+  it("多い順に数える", () => {
+    const text = "文佳と奥原と文佳と文佳。";
+    const totals = countByTerm(planRubyInsertions(text, [fumika, okuhara], "all"));
+
+    expect(totals).toEqual([
+      { term: fumika, count: 3 },
+      { term: okuhara, count: 1 },
+    ]);
+  });
+
+  /** 同数のときに順が揺れると、同じ操作なのに確認画面の見た目が変わる */
+  it("同数なら語の順で並べる", () => {
+    const text = "奥原と文佳。";
+    const totals = countByTerm(planRubyInsertions(text, [fumika, okuhara], "all"));
+
+    expect(totals.map((entry) => entry.term.text)).toEqual(["奥原", "文佳"]);
+  });
+
+  it("全話を合算して、読み仮名付きで出す", () => {
+    const text = describeRubyTermTotals([
+      { filePath: "001.md", count: 3, byTerm: [{ term: fumika, count: 2 }, { term: okuhara, count: 1 }] },
+      { filePath: "002.md", count: 1, byTerm: [{ term: fumika, count: 1 }] },
+    ]);
+
+    expect(text).toContain("文佳（ふみか）：3件");
+    expect(text).toContain("奥原（おくはら）：1件");
+    // 多い順
+    expect(text.indexOf("文佳")).toBeLessThan(text.indexOf("奥原"));
+  });
+
+  it("語が多すぎるときは、上位だけ出して残りは数で言う", () => {
+    const results = [
+      {
+        filePath: "001.md",
+        count: 20,
+        byTerm: Array.from({ length: 20 }, (_, index) => ({
+          term: { text: `語${index}`, reading: `よみ${index}` },
+          count: 20 - index,
+        })),
+      },
+    ];
+
+    const text = describeRubyTermTotals(results);
+    expect(text.split("\n")).toHaveLength(13); // 12語＋「ほか」の行
+    expect(text).toContain("…ほか8語");
+  });
+
+  it("語ごとの件数が無ければ、空文字にする", () => {
+    expect(describeRubyTermTotals([{ filePath: "001.md", count: 0 }])).toBe("");
+  });
+});
+
+/**
+ * 戻せるのは、振った直後のままの本文だけ（設計書6.12.5）。
+ *
+ * 振ったあとに作者が書き足していたら、退避してある本文を書き戻すと
+ * その書き足しが消える。
+ */
+describe("戻せるかどうか", () => {
+  it("振った直後のままなら戻せる", () => {
+    expect(canRevertRuby({ hashAfter: "abc" }, "abc")).toBe(true);
+  });
+
+  it("振ったあとに変わっていたら戻さない", () => {
+    expect(canRevertRuby({ hashAfter: "abc" }, "def")).toBe(false);
   });
 });

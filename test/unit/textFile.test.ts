@@ -457,10 +457,39 @@ describe("本文形式を保持した保存", () => {
     }
   }
 
+  /**
+   * 退避先を成功時にも返す（設計書6.12.5）。
+   *
+   * この関数は「削除→作り直し」で書くので、VS Codeの取り消し履歴に載らず
+   * Ctrl+Z では戻せない。呼び出し側が「元に戻す」を出せるように、
+   * 書き換える前の本文を置いた場所を返す。
+   */
+  test("書けたら、書き換える前の本文の退避先を返す", async () => {
+    const originalBytes = utf8("灯\n澪\n");
+    const original = decodeBytes(originalBytes);
+    files.set(fileKey(path), originalBytes);
+
+    const result = await writeTextFilePreservingFormat(
+      path,
+      "灯\n翠\n",
+      original,
+      original.hash
+    );
+
+    expect(result.ok).toBe(true);
+    const recoveryPath = result.ok ? result.recoveryPath : undefined;
+    expect(recoveryPath).toBeDefined();
+    // 退避先が実在し、中身が書き換える前の本文と一致すること
+    expect(files.get(fileKey(recoveryPath!))).toEqual(originalBytes);
+    // 正規の場所には新しい本文が入っている
+    expect(new TextDecoder().decode(files.get(fileKey(path))!)).toBe("灯\n翠\n");
+  });
+
   function expectSaved(
     result: Awaited<ReturnType<typeof writeTextFilePreservingFormat>>
   ): void {
-    expect(result).toEqual({ ok: true });
+    // recoveryPath は毎回変わるので、成功したことだけを見る
+    expect(result).toMatchObject({ ok: true });
     // 退避（原稿→回復先）と配置（一時ファイル→原稿のパス）の2回、renameが呼ばれる
     expect(rename).toHaveBeenCalledTimes(2);
   }

@@ -77,10 +77,49 @@ function overlaps(
 }
 
 /**
+ * コードポイントで数えた文字数。
+ *
+ * `String.length` はサロゲートペア（「𠮟」など）を2と数えるので、
+ * それを「2文字の語」と誤って通してしまう。
+ */
+function charLength(text: string): number {
+  return [...text.trim()].length;
+}
+
+/**
+ * 1文字の語を、振る対象から外す（設計書6.12.5）。
+ *
+ * **1文字の語は、ほかの語の一部に当たりやすい。** 実機で能力「因」
+ * （読み「いん」）が本文の「原因」に当たり、`原{因|いん}` と割れた
+ * （2026-09-06）。前後の文脈を見ずに機械で当てている以上、
+ * 1文字は当たりが多すぎて使いものにならない。
+ *
+ * **2文字は外さない。** 「文佳」「奥原」のような2文字の名前は主要人物に
+ * 多く、外すと本来の目的（人名にルビを振る）が果たせない。名前の付け替え
+ * （6.37.3）が「2文字以下を一括の既定から外す」のとは判断が違う——
+ * あちらは名前そのものを書き換えるので、当たり損ねの被害が大きい。
+ */
+export function splitSingleCharTerms(terms: readonly RubyTerm[]): {
+  usable: RubyTerm[];
+  singleChar: RubyTerm[];
+} {
+  const usable: RubyTerm[] = [];
+  const singleChar: RubyTerm[] = [];
+  for (const term of terms) {
+    if (charLength(term.text) <= 1) singleChar.push(term);
+    else usable.push(term);
+  }
+  return { usable, singleChar };
+}
+
+/**
  * どこへ振るかを決める。**本文は書き換えない。**
  *
  * **長い名前を先に当てる。** 「ミナ」と「ミナモト」が両方あるとき、
  * 短いほうを先に取ると「ミナ」＋「モト」に割れる。
+ *
+ * **1文字の語はここでも飛ばす。** 呼び出し側が `splitSingleCharTerms` を
+ * 通し忘れても本文を割らないように、二重に守る。
  */
 export function planRubyInsertions(
   text: string,
@@ -88,7 +127,10 @@ export function planRubyInsertions(
   scope: RubyScope
 ): RubyInsertion[] {
   const usable = terms
-    .filter((term) => term.text.trim() && term.reading.trim())
+    .filter(
+      (term) =>
+        term.text.trim() && term.reading.trim() && charLength(term.text) > 1
+    )
     .sort((a, b) => b.text.length - a.text.length);
   if (usable.length === 0) return [];
 
@@ -146,6 +188,91 @@ export interface RubyFileResult {
   count: number;
   /** 振れなかった理由。あれば書き換えていない */
   skipped?: string;
+  /** どの語が何件入るか。確認画面で「何にルビが付くのか」を見せるために使う */
+  byTerm?: ReadonlyArray<{ term: RubyTerm; count: number }>;
+}
+
+/**
+ * 語ごとの件数を数える。
+ *
+ * 件数の多い順。同数のときは語の順（文字コード順）で並べる——
+ * **並び順が呼ぶたびに変わると、同じ操作なのに確認画面の見た目が変わる。**
+ */
+export function countByTerm(
+  insertions: readonly RubyInsertion[]
+): Array<{ term: RubyTerm; count: number }> {
+  const byText = new Map<string, { term: RubyTerm; count: number }>();
+  for (const insertion of insertions) {
+    const found = byText.get(insertion.term.text);
+    if (found) {
+      found.count += 1;
+    } else {
+      byText.set(insertion.term.text, { term: insertion.term, count: 1 });
+    }
+  }
+  return [...byText.values()].sort(compareTermTotals);
+}
+
+function compareTermTotals(
+  a: { term: RubyTerm; count: number },
+  b: { term: RubyTerm; count: number }
+): number {
+  if (b.count !== a.count) return b.count - a.count;
+  // localeCompare は環境の照合順に左右される。ここは見た目の安定だけが
+  // 目的なので、どこでも同じ結果になる素の比較で並べる
+  return a.term.text < b.term.text ? -1 : a.term.text > b.term.text ? 1 : 0;
+}
+
+/** 語ごとの件数を、確認画面に出す行数の上限 */
+const TERM_TOTAL_LINES = 12;
+
+/**
+ * 全話を合算した「語ごとの件数」。
+ *
+ * **合計だけでは、何にルビが付くのかが分からない。** 実機で「因」が
+ * 「原因」に当たった件は、語ごとの件数が出ていれば押す前に気づけた。
+ * 語数が多いと確認画面が読めなくなるので、上位だけを出して残りは数で示す。
+ */
+export function describeRubyTermTotals(
+  results: readonly RubyFileResult[]
+): string {
+  const byText = new Map<string, { term: RubyTerm; count: number }>();
+  for (const result of results) {
+    for (const entry of result.byTerm ?? []) {
+      const found = byText.get(entry.term.text);
+      if (found) {
+        found.count += entry.count;
+      } else {
+        byText.set(entry.term.text, { term: entry.term, count: entry.count });
+      }
+    }
+  }
+
+  const totals = [...byText.values()]
+    .filter((entry) => entry.count > 0)
+    .sort(compareTermTotals);
+  if (totals.length === 0) return "";
+
+  const lines = totals
+    .slice(0, TERM_TOTAL_LINES)
+    .map((entry) => `　${entry.term.text}（${entry.term.reading}）：${entry.count}件`);
+  if (totals.length > TERM_TOTAL_LINES) {
+    lines.push(`　…ほか${totals.length - TERM_TOTAL_LINES}語`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * 振ったあとの本文が、そのままかどうか。
+ *
+ * **戻せるのは、振った直後のままの本文だけである。** 振ったあとに作者が
+ * 書き足していたら、退避してある本文を書き戻すとその書き足しが消える。
+ */
+export function canRevertRuby(
+  entry: { hashAfter: string },
+  currentHash: string
+): boolean {
+  return entry.hashAfter === currentHash;
 }
 
 /**
