@@ -37,12 +37,12 @@ import {
   toLfOffset,
 } from "../core/eolSpace";
 import { createEditQueue } from "../core/editQueue";
-import { countChars } from "../core/charCount";
 import {
   currentCountMode,
   excludeRubyFromCount,
   pickCount,
 } from "../core/countSettings";
+import { countEpisodeChars } from "../core/episodeCharCount";
 import {
   hasEmphasis,
   toSiteNotation,
@@ -50,10 +50,7 @@ import {
   validateRuby,
   type EmphasisSite,
 } from "../core/ruby";
-import {
-  extractEpisodeParts,
-  sourceForPostingCopy,
-} from "../core/episodeCopy";
+import { sourceForPostingCopy } from "../core/episodeCopy";
 import {
   MEMO_LINE_PREFIX,
   memoColorVars,
@@ -482,22 +479,27 @@ export async function waitFor<T>(
 const markdownAsked = new Set<string>();
 
 /**
- * 画面へ出す字数。**数え方は他の画面と揃える**（純／総の設定、ルビを数えるか、
- * そして**頭書きを外すこと**）。ここだけ違う数字が出ると、
- * どちらが本当か分からなくなる。
+ * 画面へ出す字数。**数え方は作品一覧とまったく同じにする**（作者の裁定
+ * 2026-09-06）。ここだけ違う数字が出ると、どちらが本当か分からなくなる。
+ *
+ * 数え方（頭書きを外す・合本を話ごとに割る・ルビは `.md` のときだけ外す）は
+ * `core/episodeCharCount.ts` の1か所に集めてある——ここへ写しを作ると、
+ * 片方だけが直る日が来る。実際、頭書きで 5,529字 と 5,672字 に割れ、
+ * 合本では後書き・リアクションのぶんが約1万字ずれていた。
+ *
+ * @param ext 開いているファイルの拡張子（`.md` / `.txt`）。**設定だけで
+ *   決めない**——ルビの読みを外すのは Markdown のときだけである
  */
-export function countForDisplay(text: string): number {
-  // **頭書き（【タイトル】〜【本文】）は数えない**（作者の裁定 2026-09-06）。
-  // 作品一覧（`core/scanner.ts`）が本文だけを数えているので、そのままだと
-  // 同じ話に2つの字数が出る（実データで 5,529字 と 5,672字 に割れた）。
-  // 切り方は `episodeCopy.extractEpisodeParts` の1か所に集めてある——
-  // ここへ写しを作ると、片方だけが直る日が来る。
-  // 頭書きの無い原稿では全文がそのまま返るので、これまでの数字は変わらない
-  const body = extractEpisodeParts(text, null).body;
+export function countForDisplay(text: string, ext: string): number {
   return pickCount(
-    countChars(body, excludeRubyFromCount()),
+    countEpisodeChars(text, { ext, excludeRuby: excludeRubyFromCount() }),
     currentCountMode()
   );
+}
+
+/** 開いている原稿の拡張子（小文字・ドット付き）。数え方の判断に使う */
+function extensionOf(document: vscode.TextDocument): string {
+  return paths.extname(fromUri(document.uri)).toLowerCase();
 }
 
 /**
@@ -862,7 +864,7 @@ export class ManuscriptEditorProvider
         // （設計書6.42）。覚えていなければ画面が最初の声を選ぶ
         readAloudVoice: this.deps.readAloudVoice?.(),
       });
-      await this.sendCount(panel, text);
+      await this.sendCount(panel, text, document);
     };
 
     /**
@@ -999,7 +1001,7 @@ export class ManuscriptEditorProvider
           break;
 
         case "count":
-          await this.sendCount(panel, message.text);
+          await this.sendCount(panel, message.text, document);
           break;
 
         case "ruby":
@@ -1280,9 +1282,11 @@ export class ManuscriptEditorProvider
 
   private async sendCount(
     panel: vscode.WebviewPanel,
-    text: string
+    text: string,
+    // 画面から届く本文にはファイル名が付いていないので、開いている文書から取る
+    document: vscode.TextDocument
   ): Promise<void> {
-    const value = countForDisplay(text);
+    const value = countForDisplay(text, extensionOf(document));
     await panel.webview.postMessage({
       type: "count",
       // **下段の「このファイル」はこの数字を使う**（作者の指示、2026-08-29）。
@@ -1318,7 +1322,10 @@ export class ManuscriptEditorProvider
       await panel.webview.postMessage({
         type: "counts",
         workTotal: pickCount(stats.totals, currentCountMode()),
-        fileAtBase: countForDisplay(toLf(document.getText())),
+        fileAtBase: countForDisplay(
+          toLf(document.getText()),
+          extensionOf(document)
+        ),
         today,
       });
     } catch (error) {

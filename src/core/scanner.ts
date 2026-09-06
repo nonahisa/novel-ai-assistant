@@ -6,7 +6,8 @@ import {
   WorkEntry,
   WorkStats,
 } from "../models/types";
-import { addCounts, countChars, emptyCounts } from "./charCount";
+import { addCounts, emptyCounts } from "./charCount";
+import { countEpisodeChars, episodeBodyForCount } from "./episodeCharCount";
 import { parseEpisodeFileName } from "./episodeParser";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { parseEpisodeMetadata } from "./metadataParser";
@@ -78,12 +79,15 @@ export async function scanWork(work: WorkEntry): Promise<{
 
       hasConflictMarkers = containsConflictMarkers(text);
       if (!hasConflictMarkers) {
-        const body = collected
-          ? collected.map((episode) => episode.body).join("\n")
-          : parsedMeta.body;
+        // **数え方は `core/episodeCharCount.ts` の1か所に集めてある。**
+        // 原稿エディタの「このファイル ◯字」も同じ関数を通る（写しを作らない）。
+        // 既に読み解いたもの（合本の割り・頭書きの除去）を渡すのは、
+        // 走査が全ファイルを毎回読むので二度手間を避けるためである
+        const parsed = { collected, metaBody: parsedMeta.body };
+        const body = episodeBodyForCount(text, parsed);
         // ルビ記法はMarkdownのみ対象。
-        // **文字数にメモは入らない**（`countChars` が落とす。設計書6.40.2）
-        counts = countChars(body, ext === ".md" ? excludeRuby : false);
+        // **文字数にメモは入らない**（数える側が落とす。設計書6.40.2）
+        counts = countEpisodeChars(text, { ext, excludeRuby }, parsed);
         // **ここで数えるのは、既に読んだ本文をもう一度読まないため**である。
         // 一覧の印のためだけに、全話をもう一巡することになる
         memoBadge = memoBadgeText(parseMemos(body));

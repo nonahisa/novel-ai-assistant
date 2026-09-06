@@ -3,19 +3,18 @@ import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { countForDisplay } from "../../src/features/manuscriptEditor";
 import { countChars } from "../../src/core/charCount";
-import { extractEpisodeParts } from "../../src/core/episodeCopy";
+import { countEpisodeChars } from "../../src/core/episodeCharCount";
 
 /**
- * 原稿エディタの「このファイル ◯字」は、**本文だけを数える**
- * （作者の裁定 2026-09-06、設計書6.25）。
+ * 原稿エディタの「このファイル ◯字」は、**作品一覧とまったく同じ数え方**で
+ * 数える（作者の裁定 2026-09-06、設計書6.25）。
  *
  * 作品一覧の第1話が 5,529字、原稿エディタの下段が「このファイル 5,672字」
- * と食い違った。差はカクヨム形式の頭書き（【タイトル】〜【本文】）で、
- * **作品一覧は頭書きを外してから数えている**（`core/scanner.ts`）。
- * 同じファイルに2つの数字が出ると、どちらが本当か分からない。
+ * と食い違った。差はカクヨム形式の頭書き（【タイトル】〜【本文】）である。
+ * さらに**合本**（1ファイルに全話）では、作品一覧が話ごとに割って
+ * 後書き・リアクションを落とすため、実データで約1万字ずれていた。
  *
- * 頭書きの切り方は `core/episodeCopy.ts` の `extractEpisodeParts` に
- * 集めてある（写しを作らない）。
+ * 数え方は `core/episodeCharCount.ts` の1か所に集めてある（写しを作らない）。
  */
 const WITH_HEADER = [
   "【タイトル】",
@@ -33,26 +32,75 @@ const WITH_HEADER = [
 
 const WITHOUT_HEADER = ["気がつくと森の中だった。", "", "空は高い。"].join("\n");
 
+/** 全話が1ファイルに入った形。後書き・リアクションが混ざっている */
+const COLLECTED = [
+  "------------------------- エピソード1開始 -------------------------",
+  "【エピソードタイトル】",
+  "１話　転生",
+  "",
+  "【本文】",
+  "気がつくと森の中だった。",
+  "",
+  "【後書き】",
+  "読んでくれてありがとうございました。",
+  "",
+  "【リアクション】",
+  "いいね: 19件",
+  "",
+  "------------------------- エピソード2開始 -------------------------",
+  "【エピソードタイトル】",
+  "２話　再会",
+  "",
+  "【本文】",
+  "彼女は門の前に立っていた。",
+].join("\n");
+
+const WITH_RUBY = "{魔導書庫|まどうしょこ}へ向かう。";
+
 describe("原稿エディタの字数", () => {
-  test("頭書きのある原稿は、本文だけを数える（作品一覧と同じ数字）", () => {
-    const body = extractEpisodeParts(WITH_HEADER, null).body;
-    // 作品一覧（`core/scanner.ts`）が数えているのは、この本文である
-    expect(countForDisplay(WITH_HEADER)).toBe(countChars(body).net);
-    // 頭書きごと数えていた頃の数字とは、はっきり違う
-    expect(countForDisplay(WITH_HEADER)).toBeLessThan(
-      countChars(WITH_HEADER).net
+  test("合本は話ごとに割って数える（後書き・リアクションを足さない）", () => {
+    // 作品一覧（`core/scanner.ts`）が数えているのは、この数字である
+    expect(countForDisplay(COLLECTED, ".txt")).toBe(
+      countEpisodeChars(COLLECTED, { ext: ".txt", excludeRuby: true }).net
+    );
+    // まとめて数えていた頃の数字とは、はっきり違う
+    expect(countForDisplay(COLLECTED, ".txt")).toBeLessThan(
+      countChars(COLLECTED, false).net
+    );
+  });
+
+  test("頭書きのある単話は、本文だけを数える（作品一覧と同じ数字）", () => {
+    expect(countForDisplay(WITH_HEADER, ".txt")).toBe(
+      countChars("気がつくと森の中だった。", false).net
+    );
+    expect(countForDisplay(WITH_HEADER, ".txt")).toBeLessThan(
+      countChars(WITH_HEADER, false).net
     );
   });
 
   test("頭書きの無い原稿は、これまでどおり全部を数える", () => {
-    expect(countForDisplay(WITHOUT_HEADER)).toBe(
-      countChars(WITHOUT_HEADER).net
+    expect(countForDisplay(WITHOUT_HEADER, ".txt")).toBe(
+      countChars(WITHOUT_HEADER, false).net
     );
   });
 
   test("【本文】が無ければ頭書きとみなさない（【】を飾りに使う原稿を守る）", () => {
     const decorated = "【重要】と彼は言った。";
-    expect(countForDisplay(decorated)).toBe(countChars(decorated).net);
+    expect(countForDisplay(decorated, ".txt")).toBe(
+      countChars(decorated, false).net
+    );
+  });
+
+  test(".txt のルビ記法は外さない（作品一覧と同じ扱い）", () => {
+    expect(countForDisplay(WITH_RUBY, ".txt")).toBe(
+      countChars(WITH_RUBY, false).net
+    );
+  });
+
+  test(".md はルビの読みを外す", () => {
+    expect(countForDisplay(WITH_RUBY, ".md")).toBe(
+      countChars("魔導書庫へ向かう。", false).net
+    );
   });
 });
 
