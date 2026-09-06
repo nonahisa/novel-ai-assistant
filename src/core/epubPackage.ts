@@ -1597,7 +1597,12 @@ export function buildEpubCss(
     "  font-size: 1.5em;",
     "  margin-block-end: 2em;",
     "}",
-    ".nav-list { line-height: 2.4; }",
+    // 目次の番号は出さない（作者の報告、2026-09-06「縦書きの目次の表示が
+    // おかしい——箇条書きではないか」）。`ol` の既定の番号（1. 2. …）は
+    // リーダーが描く目印で、縦組みでは横倒しのまま行の外に置かれ、縦中横も
+    // 効かない（`::marker` には text-combine が当たらない）。行の文字には
+    // 「第◯話」が入っているので、番号は二重でもある。横組みでも同じ理由で出さない
+    ".nav-list { line-height: 2.4; list-style: none; padding-inline-start: 0; }",
     // 登場人物一覧（設計書6.65.11）。1人ぶんを続けて組み、間を空ける。
     // イラストは挿絵と同じく面からはみ出させない
     ".character { margin-block-end: 2.5em; }",

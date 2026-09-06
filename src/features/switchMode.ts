@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
 import { currentMode } from "../core/actorContext";
 import { editorAllowedCommands, type WorkMode } from "../core/editorMode";
-import { notifyDone } from "../views/notify";
 
 /**
  * 作者モードと編集者モードを切り替える（設計書5.6.1）。
@@ -39,7 +38,10 @@ export async function switchMode(): Promise<void> {
     .getConfiguration("novelai")
     .update("mode", next, vscode.ConfigurationTarget.Global);
 
-  notifyDone(
+  // **戻し方の案内つきなので通知に残す**（設計書6.81の規則3）。
+  // 編集者モードは使える操作が減るので、「どうやって戻すか」が読み切れ
+  // ないまま消えると、作者は戻す道を失ったように見える（2026-09-06に戻した）
+  void vscode.window.showInformationMessage(
     next === "editor"
       ? "編集者モードにしました。本文の校正・校閲だけを行えます。" +
           "戻すときは、同じ操作をもう一度選んでください。"

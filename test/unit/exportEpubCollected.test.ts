@@ -346,7 +346,8 @@ const GOLDEN: Record<string, string> = {
   "OEBPS/nav.xhtml":
     "deffc11a1af93d52016328e8a767600371603f8ce44870f618a4970f56544cb2",
   "OEBPS/style.css":
-    "efaf77984db779fde5d0c22caa9b52d11161de9a228c9ca8816066022ceb5bd9",
+    // 0.36.2：目次の一覧の番号を出さない（.nav-list に list-style: none）
+    "6fa8c0e8a9e244ce649a873535ef0ca347f0211ff18094aba76c0d7eef0e4dd7",
   "OEBPS/cover.xhtml":
     "57c976846884228c05723713693b3112cba591ce48021a884c7ad902cbdf15e5",
   "OEBPS/titlepage.xhtml":

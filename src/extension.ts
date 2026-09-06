@@ -1159,9 +1159,15 @@ export async function activate(
   // ことで、AIが返した文字列がコマンド名になる余地を無くしている
   const workChatPanel = new WorkChatPanel(registry, aiRegistry, {
     run: async (work, kind, filePath) => {
-      // 校正・校閲以外は、既にコマンドとして登録されているものへ渡す。
+      // 既にコマンドとして登録されているものへ渡す。
       // **ここで処理を書き直さない。** 二重に持つと、片方だけ直したときに
-      // 「メニューからは動くのに相談からは動かない」という食い違いが出る
+      // 「メニューからは動くのに相談からは動かない」という食い違いが出る。
+      //
+      // 検知（誤字脱字・推敲・逸脱・矛盾）は 2026-09-06 にここへ寄せた。
+      // それまでは相談側が結果の出し方まで自前で持っており、0.35.1 で
+      // 入れた「指摘 N件＝パネルに残る件数」の数え方が届いていなかった
+      // ——推敲とプロット逸脱は完了の知らせが出ず、矛盾はマージ・除外の
+      // 前の件数を「指摘 N件」と言っていた（設計書6.8.16）
       const command = CHAT_RUN_COMMANDS[kind];
       if (command) {
         // 作品を指定して呼ぶ。引数無しだと作品選択からやり直させてしまう
@@ -1170,71 +1176,16 @@ export async function activate(
         return;
       }
 
+      // 以下は、コマンドの側が受け取れない道だけが残る。
       // 未保存のまま読むと、画面と違う本文を検知してしまう
       const label =
-        kind === "checkNotation"
-          ? "表記ゆれの検知"
-          : kind === "checkContradictions"
-            ? "矛盾検知"
-            : kind === "checkProofread"
-              ? "推敲"
-              : kind === "checkDeviations"
-                ? "プロット逸脱の検知"
-            : "誤字脱字の検知";
+        kind === "checkNotation" ? "表記ゆれの検知" : "誤字脱字の検知";
       if (!(await saveDirtyDocumentsBeforeExtraction(work, label))) return;
 
-      if (kind === "checkDeviations") {
-        const result = await withPanelProgress(
-          work,
-          "プロット逸脱を検知",
-          (onProgress) => checkDeviations(work, aiRegistry, { onProgress }),
-          "話"
-        );
-        if (!result || result.cancelled) return;
-        proposalPanel.showDeviations(work, result.issues);
-        return;
-      }
-
-      if (kind === "checkProofread") {
-        const result = await withPanelProgress(work, "推敲", (onProgress) =>
-          checkProofread(work, aiRegistry, { onProgress })
-        );
-        if (!result || result.cancelled) return;
-        proposalPanel.showResults(work, result.issues, "推敲");
-        return;
-      }
-
-      if (kind === "checkContradictions") {
-        const result = await withPanelProgress(
-          work,
-          "矛盾を検知",
-          (onProgress, stage) =>
-            checkContradictions(work, aiRegistry, {
-              onProgress,
-              // 検証はAIを1件ずつ呼ぶので、別の札で件数を流す
-              onVerifyProgress: stage("検出した矛盾を検証", "件"),
-            })
-        );
-        if (!result || result.cancelled) return;
-        // 矛盾が実は伏線だったときの逃げ道を添える（設計書6.35.4）
-        proposalPanel.showContradictions(work, result.issues, (source) =>
-          registerForeshadowFromContradiction(work, source)
-        );
-        // 検証で消したことは、こちらの入口からでも伝える（設計書6.10.5）。
-        // **矛盾検知は入口が2つある。** 片方だけ直すと、同じ機能なのに
-        // 通知の言うことが食い違う（0.28.8で揃えた）
-        if (result.verifyNote || result.failedChunks > 0) {
-          const parts = [`指摘 ${result.issues.length}件`];
-          if (result.verifyNote) parts.push(result.verifyNote);
-          notifyRunCompletion({
-            headline: "矛盾検知",
-            parts,
-            failedCount: result.failedChunks,
-          });
-        }
-        return;
-      }
-
+      // **表記ゆれだけは寄せていない。** コマンド側は0組のときに黙って
+      // 終わるが、相談からは「見つかりませんでした」と言い切る必要がある
+      // （2026-08-21の作者の報告。黙ると壊れていると受け取られる）。
+      // 寄せるならコマンド側を `describeNotationResult` に揃えてからになる
       if (kind === "checkNotation") {
         const result = await checkNotation(work);
         if (!result || result.cancelled) return;
@@ -1249,6 +1200,11 @@ export async function activate(
         return;
       }
 
+      // **「いま開いている話だけ」の誤字脱字は、ここに残る。**
+      // コマンド（`novelai.checkTyposForFile`）は一覧の節点（`EpisodeNode`）
+      // を受け取るので、場所しか持っていない相談パネルからは呼べない。
+      // 通知だけは共通の `reportTypoCheckResult` を通す（件数の数え方を
+      // 写さないため）
       const result = await withPanelProgress(
         work,
         "誤字脱字を検知",
@@ -4703,6 +4659,14 @@ export type WorkRef = Pick<WorkNode, "type" | "work">;
  * という食い違いが出る。
  */
 const CHAT_RUN_COMMANDS: Partial<Record<ChatRunKind, string>> = {
+  // 検知は 2026-09-06 にここへ寄せた（設計書6.8.16）。相談側に写しを置くと、
+  // 件数の数え方・完了の知らせが片方だけ古くなる。**「いま開いている話
+  // だけ」（checkTyposForFile）と表記ゆれは、寄せられない理由が `run` に
+  // 書いてある**
+  checkTypos: "novelai.checkTypos",
+  checkProofread: "novelai.checkProofread",
+  checkDeviations: "novelai.checkDeviations",
+  checkContradictions: "novelai.checkContradictions",
   extractSettings: "novelai.extractSettings",
   extractCharacters: "novelai.extractCharactersOnly",
   extractLocations: "novelai.extractLocationsOnly",

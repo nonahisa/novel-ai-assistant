@@ -32,8 +32,9 @@ let toExtension: ((message: unknown) => void) | null = null;
 /** タブが閉じられたときに呼ばれるもの（画面を閉じる操作の再現） */
 let onDispose: (() => void) | null = null;
 const disk = new Map<string, Uint8Array>();
-/** 通知に出した選択肢と、返す答え */
+/** 通知に出した文言と、そのとき並べた選択肢と、返す答え */
 const asked: string[] = [];
+const offered: string[][] = [];
 let answer: string | undefined;
 
 let counter = 0;
@@ -145,6 +146,7 @@ beforeEach(() => {
   disk.clear();
   posted.length = 0;
   asked.length = 0;
+  offered.length = 0;
   answer = undefined;
   toExtension = null;
   onDispose = null;
@@ -163,6 +165,7 @@ beforeEach(() => {
     const choices = rest.filter(
       (item): item is string => typeof item === "string"
     );
+    offered.push(choices);
     return answer && choices.includes(answer) ? answer : undefined;
   }) as typeof window.showWarningMessage;
   put("本文/第1話.txt", "あ\n\nい");
@@ -304,6 +307,8 @@ describe("閉じたときの控えと、次に開いたときの復元", () => {
     await open();
 
     expect(asked.join("\n")).toContain("保存していない編集");
+    // 設計図が変わっていないので、訊くのは従来どおりの2択でよい
+    expect(offered.at(-1)).toEqual(["復元する", "捨てる"]);
     expect(shownConfig().author).toBe("月島灯");
     // 戻したものは、まだファイルに入っていない（未保存のままである）
     expect(latest().dirty).toBe(true);
@@ -346,5 +351,97 @@ describe("閉じたときの控えと、次に開いたときの復元", () => {
 
     expect(shownConfig().author).toBe("");
     expect(has(draft)).toBe(true);
+  });
+});
+
+/**
+ * 退避したあとに、外で設計図が直されていたとき（設計書6.65.7、2026-09-06）。
+ *
+ * **控えを取った時点と、いま読んだ設計図を比べる。** 比べないと、閉じて
+ * いるあいだに別の窓・GitHub同期・編集部から入った正しい更新が、古い
+ * 下書きの復元で黙って押し流される。保存の関所は「開いてから変わって
+ * いないか」しか見ないので、開き直したあとの復元は素通りしてしまう。
+ */
+describe("退避したあとに設計図が外で変わっていたら、復元を既定にしない", () => {
+  const draft = "設定/書籍/.novelai-recovery/book.json.draft";
+
+  /** 未保存のまま閉じ、そのあいだに外で設計図が直された状態を作る */
+  async function stashThenChangeOutside(): Promise<void> {
+    await open();
+    await send({
+      type: "change",
+      config: { ...formOf(shownConfig()), author: "月島灯" },
+    });
+    onDispose?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // 別の窓や同期から、正しい更新が入る
+    put("設定/書籍/book.json", JSON.stringify({ title: "氷の街", label: "○○文庫" }));
+
+    posted.length = 0;
+    toExtension = null;
+  }
+
+  test("3択で訊き、いちばん手前は「今の設計図を使う」", async () => {
+    await stashThenChangeOutside();
+    answer = undefined; // Escで閉じたときの形
+
+    await open();
+
+    expect(asked.join("\n")).toContain("退避したあとに設計図が変わっています");
+    expect(asked.join("\n")).toContain("復元すると今の設計図を捨てます");
+    expect(offered.at(-1)).toEqual([
+      "今の設計図を使う（下書きは残す）",
+      "下書きで上書きする",
+      "捨てる",
+    ]);
+  });
+
+  test("「今の設計図を使う」なら、外の更新が残り、下書きも残る", async () => {
+    await stashThenChangeOutside();
+    answer = "今の設計図を使う（下書きは残す）";
+
+    await open();
+
+    expect(shownConfig().label).toBe("○○文庫");
+    expect(shownConfig().author).toBe("");
+    expect(latest().dirty).toBe(false);
+    // **捨てない。** あとで見比べたくなるかもしれない
+    expect(has(draft)).toBe(true);
+  });
+
+  test("「下書きで上書きする」を選んだときだけ、古い下書きが載る", async () => {
+    await stashThenChangeOutside();
+    answer = "下書きで上書きする";
+
+    await open();
+
+    expect(shownConfig().author).toBe("月島灯");
+    // まだ書いていない（保存するかどうかは作者が決める）
+    expect(latest().dirty).toBe(true);
+    expect(has(draft)).toBe(false);
+  });
+
+  test("「捨てる」なら、外の更新のまま開いて控えを消す", async () => {
+    await stashThenChangeOutside();
+    answer = "捨てる";
+
+    await open();
+
+    expect(shownConfig().label).toBe("○○文庫");
+    expect(shownConfig().author).toBe("");
+    expect(has(draft)).toBe(false);
+  });
+
+  test("基準を持たない古い控え（0.35.5まで）も、食い違いとして訊く", async () => {
+    // 0.35.5 までは下書きの中身だけを書いていた。**どこから書き始めたか
+    // 分からない**ので、黙って戻さず訊く
+    put(draft, JSON.stringify({ title: "氷の街", author: "月島灯" }));
+    answer = undefined;
+
+    await open();
+
+    expect(asked.join("\n")).toContain("退避したあとに設計図が変わっています");
+    expect(offered.at(-1)).toHaveLength(3);
   });
 });

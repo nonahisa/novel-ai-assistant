@@ -53,7 +53,11 @@ export async function assignFeatureAI(registry: AIRegistry): Promise<void> {
     );
   }
 
-  notifyDone(
+  // **注意文を添えるときは通知に残す**（設計書6.81の規則3）。
+  // 「実行のたびに課金されます」「精度が下がる場合があります」は、この
+  // あと作者が何に気をつけるかの案内であって、その場限りの完了ではない。
+  // ステータスバーの6秒では読み切れない（2026-09-06に戻した）
+  void vscode.window.showInformationMessage(
     `${ASSIGNABLE_FEATURE_LABELS[feature]} は ` +
       `${target.provider.displayName}（${target.model.displayName}）で実行するようにしました。` +
       (notes.length > 0 ? "\n" + notes.join("\n") : "")

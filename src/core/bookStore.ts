@@ -35,7 +35,9 @@ import { atomicWriteFile, RECOVERY_DIRECTORY_NAME } from "./atomicWrite";
  * ただし**未保存の下書きだけは `.novelai-recovery` へ控える**
  * （`stashDraft`）。WebViewのタブは閉じる前に引き止められないので、
  * 閉じた瞬間に画面の編集が消えてしまうためである。控えは1つだけで、
- * 正規の book.json には触れない。
+ * 正規の book.json には触れない。**控えには「どの設計図から書き始めたか」
+ * （ハッシュ）も一緒に入れる**——退避したあとに外で直された設計図を、
+ * 古い下書きの復元で押し流さないため（設計書6.65.7）。
  */
 
 export type BookStoreErrorKind =
@@ -54,6 +56,28 @@ export class BookStoreError extends Error {
     super(message);
     this.name = "BookStoreError";
   }
+}
+
+/**
+ * 退避した下書きが、**どの設計図から書き始めたか**（設計書6.65.7）。
+ *
+ * 中身だけを控えると、退避したあとに外（別の窓・GitHub同期・編集部）で
+ * book.json が正しく直されていても気づけない。復元した瞬間に、その更新が
+ * 画面の古い値で押し流される——保存の関所（`assertSaveAllowed`）は
+ * 「開いてから変わっていないか」しか見ないので、**開き直したあとの復元は
+ * 素通りする**。
+ */
+export type DraftBase =
+  /** その中身から書き始めた */
+  | { kind: "hash"; hash: string }
+  /** 退避した時点では book.json が無かった（新しく作りかけていた） */
+  | { kind: "absent" }
+  /** 基準を控えていない（0.35.5 までの形式）。**分からないので疑う** */
+  | { kind: "unknown" };
+
+export interface StashedDraft {
+  config: BookConfig;
+  base: DraftBase;
 }
 
 export class BookStore {
@@ -233,9 +257,17 @@ export class BookStore {
       await vscode.workspace.fs.createDirectory(
         path.toUri(path.dirname(target))
       );
+      // **控えは `{ baseHash, draft }` の形で書く**（2026-09-06）。
+      // `baseHash` は退避した時点の book.json のハッシュで、null は
+      // 「そのときファイルが無かった」。読み込めていないときは項目ごと
+      // 落として「基準不明」にする（null と混ぜない）
+      const envelope = {
+        ...(this.loaded ? { baseHash: this.snapshot } : {}),
+        draft: config,
+      };
       await atomicWriteFile(
         target,
-        new TextEncoder().encode(`${JSON.stringify(config, null, 2)}\n`)
+        new TextEncoder().encode(`${JSON.stringify(envelope, null, 2)}\n`)
       );
       return true;
     } catch {
@@ -250,7 +282,7 @@ export class BookStore {
    * あるが、正規のファイルではない。ここで止めると、控えが壊れている
    * だけでEPUBエディターが開けなくなる。
    */
-  async readStashedDraft(): Promise<BookConfig | null> {
+  async readStashedDraft(): Promise<StashedDraft | null> {
     let bytes: Uint8Array;
     try {
       bytes = await vscode.workspace.fs.readFile(
@@ -260,13 +292,28 @@ export class BookStore {
       return null;
     }
     try {
-      return parseBookConfig(
-        JSON.parse(new TextDecoder().decode(bytes)),
-        this.work.title
-      );
+      const envelope = unwrapDraft(JSON.parse(new TextDecoder().decode(bytes)));
+      return {
+        config: parseBookConfig(envelope.draft, this.work.title),
+        base: envelope.base,
+      };
     } catch {
       return null;
     }
+  }
+
+  /**
+   * 控えの基準が、**いま読んだ設計図と同じか**（設計書6.65.7）。
+   *
+   * **基準が分からない控え（旧形式）は「違う」に倒す。** 分からないまま
+   * 黙って復元すると、外で入った更新を消したことに誰も気づけない。
+   * 訊いて答えてもらうほうが安い。
+   */
+  draftBaseMatchesLoaded(base: DraftBase): boolean {
+    if (!this.loaded) return false;
+    if (base.kind === "hash") return this.snapshot === base.hash;
+    if (base.kind === "absent") return this.snapshot === null;
+    return false;
   }
 
   /** 退避を捨てる（復元しても、捨てると答えても、答えたら消す） */
@@ -318,6 +365,31 @@ function externalChangeMessage(reason: string): string {
     "画面の内容で上書きしないよう保存を中止しました。" +
     "パネルを開き直してください。"
   );
+}
+
+/**
+ * 控えのファイルから、下書きと基準を取り出す。
+ *
+ * **旧形式（下書きの中身をそのまま書いていた 0.35.5 まで）も読める。**
+ * 控えは作者が書いた編集そのものなので、形が古いというだけで捨てない。
+ * ただし基準は分からないので `unknown` にして、復元の前に訊く側へ回す。
+ */
+function unwrapDraft(raw: unknown): { draft: unknown; base: DraftBase } {
+  if (typeof raw === "object" && raw !== null && "draft" in raw) {
+    const record = raw as { draft: unknown; baseHash?: unknown };
+    if (typeof record.baseHash === "string") {
+      return {
+        draft: record.draft,
+        base: { kind: "hash", hash: record.baseHash },
+      };
+    }
+    // null は「退避した時点でファイルが無かった」。項目ごと無ければ基準不明
+    if (record.baseHash === null) {
+      return { draft: record.draft, base: { kind: "absent" } };
+    }
+    return { draft: record.draft, base: { kind: "unknown" } };
+  }
+  return { draft: raw, base: { kind: "unknown" } };
 }
 
 function isFileNotFound(error: unknown): boolean {

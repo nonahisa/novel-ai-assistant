@@ -86,3 +86,50 @@ describe("その場限りの完了の行き先", () => {
     });
   }
 });
+
+/**
+ * 逆向きの見張り（2026-09-06）。**手順の案内は、6秒で消してはいけない。**
+ *
+ * 0.35.3〜0.35.5 で完了をステータスバーへ移したとき、規則3（あとで読み
+ * 返す価値のあるもの＝通知のまま）に当たるものが2件まぎれ込んでいた。
+ * どちらも「このあとどうするか」を書いてあり、読み切る前に消える。
+ *
+ * ここでも**文言は変えない**（作者が覚えている言葉を壊さない）。
+ */
+const KEPT_AS_NOTIFICATION: ReadonlyArray<{
+  label: string;
+  file: string;
+  /** その文言がまだ在ることの確認（消していないか） */
+  fragment: string;
+  /** 出している呼び出しを見分ける手がかり */
+  marker: string;
+}> = [
+  {
+    label: "機能別AI割当の注意文（課金・軽量モデル）",
+    file: "features/assignFeatureAI.ts",
+    fragment: "実行のたびに課金されます",
+    marker: "notes.join",
+  },
+  {
+    label: "モード切り替えの戻し方の案内",
+    file: "features/switchMode.ts",
+    fragment: "戻すときは、同じ操作をもう一度選んでください。",
+    marker: "戻すときは、同じ操作をもう一度選んでください。",
+  },
+];
+
+describe("次の操作の案内つきは通知のまま", () => {
+  for (const { label, file, fragment, marker } of KEPT_AS_NOTIFICATION) {
+    test(`${label} → 通知（${file}）`, () => {
+      const source = read(file);
+      expect(source).toContain(fragment);
+
+      expect(infoCalls(source).some((call) => call.includes(marker))).toBe(
+        true
+      );
+      expect(doneCalls(source).some((call) => call.includes(marker))).toBe(
+        false
+      );
+    });
+  }
+});

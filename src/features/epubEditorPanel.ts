@@ -1053,13 +1053,22 @@ async function stashOnClose(state: PanelState): Promise<void> {
  *
  * 答えたら控えは捨てる。**Escで閉じたときだけ残す**——答えていないので、
  * 次に開いたときにもう一度聞く。
+ *
+ * **退避したあとに設計図が外で変わっていたら訊き方を変える**
+ * （`askAfterExternalChange`、設計書6.65.7）。
  */
 async function restoreStashedDraft(
   store: BookStore,
   saved: BookConfig
 ): Promise<BookConfig> {
-  const draft = await store.readStashedDraft();
-  if (!draft) return saved;
+  const stashed = await store.readStashedDraft();
+  if (!stashed) return saved;
+
+  // **控えたときの設計図と、いま読んだ設計図を比べる**（設計書6.65.7）。
+  // 閉じているあいだに外で直されていたら、訊き方を変える
+  if (!store.draftBaseMatchesLoaded(stashed.base)) {
+    return await askAfterExternalChange(store, stashed.config, saved);
+  }
 
   const restore = "復元する";
   const discard = "捨てる";
@@ -1073,7 +1082,48 @@ async function restoreStashedDraft(
   if (answer !== restore && answer !== discard) return saved;
 
   await store.clearStashedDraft();
-  return answer === restore ? draft : saved;
+  return answer === restore ? stashed.config : saved;
+}
+
+/**
+ * 控えを取ったあとに設計図が外で変わっていたときの訊き方（設計書6.65.7）。
+ *
+ * **復元を既定にしない。** 下書きは「古い設計図＋画面の編集」なので、
+ * そのまま載せると、別の窓・GitHub同期・編集部から入った**正しい更新が
+ * 消える**。しかも保存の関所（`assertSaveAllowed`）は「開いてから変わって
+ * いないか」しか見ないため、開き直したあとの復元は素通りしてしまう——
+ * ここで止めなければ、誰も気づけない。
+ *
+ * **控えを残す出口を用意する。** 「今の設計図を使う」は答えではあるが
+ * 下書きを捨てる決心ではないので、控えは残して次に開いたときも訊く。
+ */
+async function askAfterExternalChange(
+  store: BookStore,
+  draft: BookConfig,
+  saved: BookConfig
+): Promise<BookConfig> {
+  const keep = "今の設計図を使う（下書きは残す）";
+  const overwrite = "下書きで上書きする";
+  const discard = "捨てる";
+  const answer = await vscode.window.showWarningMessage(
+    "前回のEPUBエディターに、保存していない編集が残っています。" +
+      "ただし、退避したあとに設計図が変わっています（別の窓や同期）。" +
+      "復元すると今の設計図を捨てます。",
+    { modal: true },
+    keep,
+    overwrite,
+    discard
+  );
+
+  // Escで閉じたときも「今の設計図」。**答えていないので控えは残す**
+  if (answer === overwrite) {
+    await store.clearStashedDraft();
+    return draft;
+  }
+  if (answer === discard) {
+    await store.clearStashedDraft();
+  }
+  return saved;
 }
 
 /** 画面の値をファイルへ書く。書けたら true（呼び出し側はそこで続ける） */

@@ -179,4 +179,95 @@ describe("本の設計図の読み書き", () => {
     expect(reopened.tocPattern).toBe("chapters");
     expect(reopened.tocOrnament).toBe("rule");
   });
+  /**
+   * 下書きの控えは「どの設計図から書き始めたか」も一緒に控える
+   * （設計書6.65.7、2026-09-06）。
+   *
+   * 控えの中身だけでは、**退避したあとに外で設計図が直されていても
+   * 気づけない**。復元したとたん、その正しい更新が画面の古い値で
+   * 押し流される——保存の関所は「直前に読んだものと同じか」しか見ないので、
+   * 開き直したあとの復元は素通りする。
+   */
+  describe("下書きの控えと、その基準", () => {
+    const draftPath = diskPath(
+      path.join(
+        work.folderPath,
+        "設定",
+        "書籍",
+        ".novelai-recovery",
+        "book.json.draft"
+      )
+    );
+
+    test("退避した時点の設計図のハッシュを一緒に控える", async () => {
+      disk.set(bookPath, utf8(JSON.stringify({ title: "氷の街" })));
+      const store = new BookStore(work);
+      const config = await store.load();
+
+      expect(await store.stashDraft({ ...config, author: "月島灯" })).toBe(true);
+
+      const stashed = await store.readStashedDraft();
+      expect(stashed?.config.author).toBe("月島灯");
+      // 読んだ中身から書き始めたので、基準は「いま読んだもの」と一致する
+      expect(stashed && store.draftBaseMatchesLoaded(stashed.base)).toBe(true);
+    });
+
+    test("退避したあとに外で設計図が変わっていたら、基準が食い違う", async () => {
+      disk.set(bookPath, utf8(JSON.stringify({ title: "氷の街" })));
+      const first = new BookStore(work);
+      const config = await first.load();
+      await first.stashDraft({ ...config, author: "月島灯" });
+
+      // 別の窓や同期で、正しい更新が入る
+      disk.set(
+        bookPath,
+        utf8(JSON.stringify({ title: "氷の街", label: "○○文庫" }))
+      );
+
+      const reopened = new BookStore(work);
+      await reopened.load();
+      const stashed = await reopened.readStashedDraft();
+      expect(stashed?.config.author).toBe("月島灯");
+      expect(stashed && reopened.draftBaseMatchesLoaded(stashed.base)).toBe(
+        false
+      );
+    });
+
+    test("ファイルが無いところから書き始めた控えは、無いままなら一致する", async () => {
+      const store = new BookStore(work);
+      const config = await store.load();
+      await store.stashDraft({ ...config, author: "月島灯" });
+
+      const reopened = new BookStore(work);
+      await reopened.load();
+      const stashed = await reopened.readStashedDraft();
+      expect(stashed && reopened.draftBaseMatchesLoaded(stashed.base)).toBe(
+        true
+      );
+    });
+
+    test("旧形式（中身だけ）の控えは、基準不明として食い違い扱い", async () => {
+      disk.set(bookPath, utf8(JSON.stringify({ title: "氷の街" })));
+      // 0.35.5 までの形。下書きの中身をそのまま書いていた
+      disk.set(
+        draftPath,
+        utf8(JSON.stringify({ title: "氷の街", author: "月島灯" }))
+      );
+
+      const store = new BookStore(work);
+      await store.load();
+      const stashed = await store.readStashedDraft();
+
+      // 中身は読めるが、どこから書き始めたかは分からない
+      expect(stashed?.config.author).toBe("月島灯");
+      expect(stashed && store.draftBaseMatchesLoaded(stashed.base)).toBe(false);
+    });
+
+    test("読めない控えは無かったことにする（画面は開ける）", async () => {
+      disk.set(draftPath, utf8("{ 壊れている"));
+      const store = new BookStore(work);
+      await store.load();
+      expect(await store.readStashedDraft()).toBeNull();
+    });
+  });
 });

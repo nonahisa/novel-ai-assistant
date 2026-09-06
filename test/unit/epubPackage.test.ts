@@ -931,6 +931,21 @@ describe("プレビュー用にCSSを閉じ込める", () => {
     expect(scoped).toContain(".epub-page ruby");
   });
 
+  /**
+   * 作者の報告（2026-09-06「縦書きの目次の表示がおかしい——箇条書きでは」）。
+   * `ol` の既定の番号はリーダーが描く目印で、縦組みでは横倒しのまま行の外に
+   * 置かれ、縦中横も効かない。行の文字に「第◯話」が入るので二重でもある
+   */
+  test("目次の一覧は、リーダーの番号（1. 2. …）を出さない", () => {
+    const css = buildEpubCss(true, {});
+    const navList = css.match(/\.nav-list \{[^}]*\}/)?.[0] ?? "";
+    expect(navList).toContain("list-style: none");
+    expect(navList).toContain("padding-inline-start: 0");
+    // 横組みの本でも同じ（番号が二重になるのは向きに関係ない）
+    const horizontal = buildEpubCss(false, {}).match(/\.nav-list \{[^}]*\}/)?.[0] ?? "";
+    expect(horizontal).toContain("list-style: none");
+  });
+
   test("@charset は落とす（画面のCSSには置けない）", () => {
     expect(scoped).not.toContain("@charset");
   });
