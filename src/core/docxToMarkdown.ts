@@ -99,7 +99,20 @@ export function docxToMarkdown(bytes: Uint8Array): DocxConversion {
     styles ? headingStyleIds(decoder.decode(styles)) : new Map()
   );
   scanXml(decoder.decode(document), builder);
-  return builder.finish();
+  const conversion = builder.finish();
+
+  /*
+    **1文字も取れなかったら断る。** 0字の .md を作って「変換しました」と
+    伝えると、作者はそれを信じて元の .docx を片づけてしまう。
+    いちばん多い原因はテキストボックス（本文ではなく図形の中の文字）で、
+    見た目には文章が並んでいるのに `w:p` の中には何も無い。
+  */
+  if (!conversion.markdown.trim()) {
+    throw new Error(
+      "本文の文字が取れませんでした。テキストボックスの中の文字は取り込めません。"
+    );
+  }
+  return conversion;
 }
 
 /**
@@ -112,6 +125,8 @@ export function docxToMarkdown(bytes: Uint8Array): DocxConversion {
  */
 export function headingStyleIds(stylesXml: string): Map<string, number> {
   const found = new Map<string, number>();
+  /** styleId → 継いでいる書式の styleId（`w:basedOn`） */
+  const basedOn = new Map<string, string>();
   let styleId: string | null = null;
 
   scanXml(stylesXml, {
@@ -120,11 +135,17 @@ export function headingStyleIds(stylesXml: string): Map<string, number> {
         styleId = attributes["w:styleId"] ?? null;
         return;
       }
+      if (!styleId) return;
       // `w:name` は `w:style` の直下にしか無い。ここを見ずに拾うと、
       // 番号書式など別の入れ物の名前まで見出しにしてしまう
-      if (name === "w:name" && styleId) {
+      if (name === "w:name") {
         const level = headingLevelOfName(attributes["w:val"] ?? "");
         if (level > 0) found.set(styleId, level);
+        return;
+      }
+      if (name === "w:basedOn") {
+        const base = attributes["w:val"];
+        if (base) basedOn.set(styleId, base);
       }
     },
     close(name) {
@@ -135,13 +156,28 @@ export function headingStyleIds(stylesXml: string): Map<string, number> {
     },
   });
 
+  /*
+    **継ぎ元を1段だけたどる。** 作者が「My Chapter」のような自前の書式を
+    作っても、`Heading1` を継いでいるなら見出しである。
+
+    何段もたどらないのは、深く継いだ書式ほど「見出しから作ったが、
+    見た目も役目も別物」になっている見込みが高いため。1段なら
+    「見出しに名前を付け直した」という、いちばん多い使い方に当たる。
+  */
+  for (const [id, base] of basedOn) {
+    if (found.has(id)) continue;
+    const level = found.get(base) ?? headingLevelOfName(base);
+    if (level > 0) found.set(id, level);
+  }
+
   return found;
 }
 
-/** 「heading 1」〜「heading 3」なら深さ、そうでなければ 0 */
+/** 「heading 1」〜「heading 9」なら深さ、そうでなければ 0 */
 function headingLevelOfName(value: string): number {
   // 空白の有無・大文字小文字は文書によって揺れる（「Heading1」も見た）
-  return HEADING_STYLES[value.toLowerCase().replace(/\s+/g, "")] ?? 0;
+  const matched = /^heading([1-9])$/.exec(value.toLowerCase().replace(/\s+/g, ""));
+  return matched ? Number(matched[1]) : 0;
 }
 
 /* ────────────────── XML の走査 ────────────────── */
@@ -329,6 +365,22 @@ function decodeEntities(text: string): string {
 
 /* ────────────────── 本文の組み立て ────────────────── */
 
+/**
+ * XML の空白だけを前後から落とす。
+ *
+ * **`String.prototype.trim()` は使えない。** JS の `trim()` は全角空白
+ * （U+3000）や U+00A0 まで落とすが、Word はそれらを「XMLの空白」とは
+ * 見なさないので、全角空白だけの `w:t` に `xml:space="preserve"` を
+ * 付けない。`trim()` で済ませると、**日本語の小説の全段落から字下げが
+ * 消える**（全角空白だけの run はまるごと消える）。
+ *
+ * 落としてよいのは、XML を読みやすく折り返した名残——半角空白・タブ・
+ * 改行だけである。
+ */
+function trimXmlSpace(text: string): string {
+  return text.replace(/^[ \t\r\n]+/, "").replace(/[ \t\r\n]+$/, "");
+}
+
 /** 段落の中の一片。傍点かどうかだけを分けて持つ */
 interface Piece {
   text: string;
@@ -357,17 +409,13 @@ const CELL_SEPARATOR = "　";
 const TAB_TEXT = "　";
 
 /**
- * 見出しにする段落スタイルと、その深さ。
+ * Markdown の `#` にする、いちばん深い見出し。
  *
- * **`word/styles.xml` が無いときの頼り**でもある（`w:pStyle` の値を
- * そのまま照らす）。英語版 Word の styleId は `Heading1` なので、
- * 書式表を読めなくてもここで拾える。
+ * これより深い見出し（`heading 4` 以降）は地の文にする——小説の原稿で
+ * `####` が並んでも読み手の助けにならないうえ、**落とさずに文字は残す**
+ * ので原稿は減らない。何段落そうしたかは `skipped` で伝える。
  */
-const HEADING_STYLES: Readonly<Record<string, number>> = {
-  heading1: 1,
-  heading2: 2,
-  heading3: 3,
-};
+const DEEPEST_HEADING = 3;
 
 /**
  * 中身を持ち込まない要素（画像・図形）。
@@ -375,20 +423,21 @@ const HEADING_STYLES: Readonly<Record<string, number>> = {
  * **中の文字ごと落とす。** 図形（`w:drawing`）の中にはテキストボックスが
  * あり得て、そこの説明文を本文へ混ぜると地の文の途中へ割り込む。
  */
-const DROPPED_ELEMENTS = new Set([
-  "w:drawing",
-  "w:pict",
-  "w:object",
-  /*
-    **同じ絵を2回数えないため**に、入れ替えの箱ごと落とす。
+const DROPPED_ELEMENTS = new Set(["w:drawing", "w:pict", "w:object"]);
 
-    Word は図形を `<mc:AlternateContent>` で包み、新しい形
-    （`mc:Choice` の中の `w:drawing`）と古い形（`mc:Fallback` の中の
-    `w:pict`）を**両方**書く。中だけを見ていると、1枚の絵が「画像 2件」に
-    なって作者へ届く。中身は本文ではないので、箱ごと落として1件と数える。
-  */
-  "mc:AlternateContent",
-]);
+/**
+ * 黙って落とす要素（**画像として数えない**）。
+ *
+ * Word は図形を `<mc:AlternateContent>` で包み、新しい形（`mc:Choice` の
+ * 中の `w:drawing`）と古い形（`mc:Fallback` の中の `w:pict`）を**両方**
+ * 書く。中だけを見ていると1枚の絵が「画像 2件」になるので、**古いほうの
+ * 箱だけを落とす**。
+ *
+ * **箱（`mc:AlternateContent`）ごと落としてはいけない。** `mc:Choice` に
+ * 入るのは図形だけではなく、新しい版の Word で書いた**本文**もここへ
+ * 入る。箱ごと落とすと、その本文が丸ごと消える。
+ */
+const IGNORED_ELEMENTS = new Set(["mc:Fallback"]);
 
 /** 走査を受けて Markdown を組み立てる */
 class DocumentBuilder implements XmlSink {
@@ -416,6 +465,8 @@ class DocumentBuilder implements XmlSink {
   private tableCount = 0;
   private footnotes = 0;
   private comments = 0;
+  /** `#` にせず地の文にした、深い見出し（`heading 4` 以降）の段落数 */
+  private deepHeadings = 0;
   /** 本文に `{` `}` `|` が居たか（記法の印と紛れる） */
   private notationClash = false;
 
@@ -436,6 +487,10 @@ class DocumentBuilder implements XmlSink {
       this.droppedDepth = this.stack.length;
       return;
     }
+    if (IGNORED_ELEMENTS.has(name)) {
+      this.droppedDepth = this.stack.length;
+      return;
+    }
 
     switch (name) {
       case "w:p":
@@ -448,9 +503,7 @@ class DocumentBuilder implements XmlSink {
           // **書式表を先に引く。** styleId は文書ごとに違う機械名でありうる
           // ので、名前（`Heading1`）で当たるほうは最後の頼りにする
           this.headingLevel =
-            this.headingStyles.get(styleId) ??
-            HEADING_STYLES[styleId.toLowerCase()] ??
-            0;
+            this.headingStyles.get(styleId) ?? headingLevelOfName(styleId);
         }
         break;
       case "w:r":
@@ -480,6 +533,14 @@ class DocumentBuilder implements XmlSink {
         };
         break;
       case "w:br":
+        // **改ページは何も足さない。** 紙の都合であって、原稿の改行では
+        // ない（章の変わり目に入れた改ページが空行になると、段落の切れ目
+        // が1つ増える）
+        if (attributes["w:type"] === "page") break;
+        this.append("\n", false);
+        break;
+      case "w:cr":
+        // `w:cr` は `w:br` と同じ改行。片方だけ見ていると改行が落ちる
         this.append("\n", false);
         break;
       case "w:tab":
@@ -540,7 +601,12 @@ class DocumentBuilder implements XmlSink {
       case "w:tc": {
         const table = this.currentTable();
         if (table) {
-          table.cells.push(table.cellLines.join(CELL_SEPARATOR));
+          // **セルの中の改行も区切りへ畳む。** 表は1行の文字にほどく
+          // ので、`w:br` の改行をそのまま残すと表の1行が途中で割れて、
+          // 次の行の頭が本文の途中のように見える
+          table.cells.push(
+            table.cellLines.join(CELL_SEPARATOR).replace(/\n/g, CELL_SEPARATOR)
+          );
           table.cellLines.splice(0);
         }
         break;
@@ -574,8 +640,17 @@ class DocumentBuilder implements XmlSink {
     if (this.pieces) this.flushParagraph();
 
     const lines = [...this.lines];
-    // 末尾の空段落は落とす。Word の文書はたいてい空の段落で終わる
-    while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+    /*
+      末尾の空段落は落とす。Word の文書はたいてい空の段落で終わる。
+
+      **中身が改行だけの段落も空とみなす**（`<w:p><w:br/></w:p>` で
+      終わる文書がある）。「空文字かどうか」だけで見ていると、この行が
+      残って末尾に空行が2つ並ぶ。全角空白だけの段落は**残す**——作者が
+      置いた字であって、飾りの空白ではない
+    */
+    while (lines.length > 0 && !trimXmlSpace(lines[lines.length - 1])) {
+      lines.pop();
+    }
 
     const skipped: string[] = [];
     if (this.images > 0) {
@@ -589,6 +664,9 @@ class DocumentBuilder implements XmlSink {
     }
     if (this.comments > 0) {
       skipped.push(`コメント ${this.comments}件（.md には入りません）`);
+    }
+    if (this.deepHeadings > 0) {
+      skipped.push(`見出し4以下は地の文にしました ${this.deepHeadings}段落`);
     }
     if (this.notationClash) {
       skipped.push(
@@ -619,7 +697,7 @@ class DocumentBuilder implements XmlSink {
     const capture = this.capture;
     this.capture = null;
     if (!capture) return;
-    const text = capture.preserve ? capture.text : capture.text.trim();
+    const text = capture.preserve ? capture.text : trimXmlSpace(capture.text);
     if (!text) return;
 
     // 記法の印と紛れる字は、**本文の文字のときだけ**数える
@@ -667,6 +745,13 @@ class DocumentBuilder implements XmlSink {
 
     const text = this.render(pieces);
     if (level > 0 && text) {
+      if (level > DEEPEST_HEADING) {
+        // **文字は落とさず、地の文にする。** 数えておいて、あとで
+        // 「そうした」と伝える（黙って格を下げたことにしない）
+        this.deepHeadings += 1;
+        this.emit(text);
+        return;
+      }
       this.emit(`${"#".repeat(level)} ${text}`);
       return;
     }

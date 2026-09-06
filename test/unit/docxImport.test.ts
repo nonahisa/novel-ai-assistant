@@ -311,3 +311,51 @@ describe("一括変換（設計書6.85）", () => {
     expect(warning).toContain("本文");
   });
 });
+
+describe("書き出しの失敗の扱い（設計書6.85）", () => {
+  test("置いたあとに確かめられなかったら、別名で作り直さない", async () => {
+    // `atomicWriteFile` の path_conflict には2つある。**まだ置いていない**
+    // （名前がぶつかった）ときだけ名前をずらしてよく、**置いたあとに
+    // 中身を確かめられなかった**ときにずらすと、同じ本文の .md が2つできる
+    put(path.join("本文", "第1話.docx"), docxOf("<w:p><w:r><w:t>本文</w:t></w:r></w:p>"));
+    const fs = workspace.fs as unknown as {
+      rename: (
+        from: { fsPath: string },
+        to: { fsPath: string },
+        options?: { overwrite?: boolean }
+      ) => Promise<void>;
+    };
+    const rename = fs.rename;
+    fs.rename = async (from, to, options) => {
+      await rename(from, to, options);
+      // 置いた直後に外のツールが書き換えた体にする
+      if (to.fsPath.endsWith(".md")) {
+        disk.set(to.fsPath, encoder.encode("外で書き換えられた"));
+      }
+    };
+
+    const done = await convertDocxToMarkdown(work);
+
+    expect(done).toBe(false);
+    // **同じ本文の .md を2つ作らない**
+    expect(manuscriptNames().filter((name) => name.endsWith(".md"))).toEqual([
+      "第1話.md",
+    ]);
+    expect(textOf("error")).toContain("第1話.docx");
+    expect(textOf("error")).toContain("確かめられませんでした");
+  });
+
+  test("変換できなかったものの一覧は、先頭3件＋ほかN件にする", async () => {
+    // 何十件も並べると通知が画面を覆う（落としたもの側と同じ揃え方）
+    put(path.join("本文", "第0話.docx"), docxOf("<w:p><w:r><w:t>読めた</w:t></w:r></w:p>"));
+    for (const index of [1, 2, 3, 4]) {
+      put(path.join("本文", `第${index}話.docx`), encoder.encode("これはZIPではない"));
+    }
+
+    await convertDocxToMarkdown(work);
+
+    const info = textOf("info");
+    expect(info).toContain("4件は変換できませんでした");
+    expect(info).toContain("ほか1件");
+  });
+});

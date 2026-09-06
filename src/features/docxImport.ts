@@ -258,17 +258,44 @@ async function createMarkdownFile(
       await atomicWriteFile(target, bytes, { mode: "create" });
       return target;
     } catch (error) {
+      if (!(error instanceof AtomicWriteFileError)) throw error;
+      /*
+        **名前をずらしてよいのは「まだ置いていない」ときだけ。**
+
+        `path_conflict` には2つある。名前がぶつかって1文字も書けなかった
+        （`not_saved`）ときは、別の名前で作り直すのが正しい。
+        いっぽう**置いたあとに中身を確かめられなかった**（`ambiguous`）
+        ときにずらすと、同じ本文の .md が2つできてしまう——作者は
+        どちらが本物か分からないまま、片方を書き足していく。
+      */
       if (
-        error instanceof AtomicWriteFileError &&
-        error.kind === "path_conflict"
+        error.kind === "path_conflict" &&
+        error.persistenceState === "not_saved"
       ) {
         continue;
       }
-      throw error;
+      throw new Error(
+        `「${target}」へ書き出しましたが、置いたあとの中身を確かめられませんでした` +
+          "（同じ本文の .md を2つ作らないため、別の名前では作り直していません）。" +
+          `ファイルを開いて中身をお確かめください：${error.message}`
+      );
     }
   }
   throw new Error(
     "同じ名前の .md が多すぎて、書き出す名前を決められませんでした。"
+  );
+}
+
+/**
+ * 一覧は**先頭3件まで**にして、残りは件数で言う。
+ *
+ * 何十件も変換したときに、全部並べると通知が画面を覆って、肝心の
+ * 「何件できたか」まで読んでもらえない。
+ */
+function summarize(items: readonly string[], separator: string): string {
+  return (
+    items.slice(0, 3).join(separator) +
+    (items.length > 3 ? ` ほか${items.length - 3}件` : "")
   );
 }
 
@@ -293,7 +320,7 @@ async function reportResult(
       return;
     }
     void vscode.window.showErrorMessage(
-      `1件も .md にできませんでした。${failed.join("、")}`
+      `1件も .md にできませんでした。${summarize(failed, "、")}`
     );
     return;
   }
@@ -318,14 +345,14 @@ async function reportResult(
     .filter((entry) => entry.skipped.length > 0)
     .map((entry) => `${entry.name}：${entry.skipped.join("、")}`);
   if (dropped.length > 0) {
-    // **全部は並べない。** 何十件も変換したときに、通知が画面を覆う
-    notes.push(
-      `入らなかったもの → ${dropped.slice(0, 3).join(" / ")}` +
-        (dropped.length > 3 ? ` ほか${dropped.length - 3}件` : "")
-    );
+    notes.push(`入らなかったもの → ${summarize(dropped, " / ")}`);
   }
   if (failed.length > 0) {
-    notes.push(`${failed.length}件は変換できませんでした：${failed.join("、")}`);
+    // **落としたもの側と同じ揃え方にする。** 片方だけ全部並べると、
+    // 失敗が多いときに限って通知が画面を覆う
+    notes.push(
+      `${failed.length}件は変換できませんでした：${summarize(failed, "、")}`
+    );
   }
   if (legacy > 0) {
     notes.push(

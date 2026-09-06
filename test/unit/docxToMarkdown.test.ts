@@ -332,3 +332,128 @@ describe("読めないファイル（設計書6.85）", () => {
     );
   });
 });
+
+describe("字下げと全角空白（設計書6.85）", () => {
+  test("段落頭の全角空白（字下げ）は残す", () => {
+    // Word は全角空白だけの w:t に xml:space="preserve" を付けない
+    // （XMLの空白ではないため）。JS の trim() は U+3000 も落とすので、
+    // そのまま使うと**日本語の小説の全段落から字下げが消える**
+    expect(markdownOf(`<w:p>${run("　春が来た")}</w:p>`)).toBe("　春が来た\n");
+  });
+
+  test("文中の全角空白も残す（「あ　い」が「あい」にならない）", () => {
+    expect(markdownOf(`<w:p>${run("あ　い")}</w:p>`)).toBe("あ　い\n");
+  });
+
+  test("全角空白だけの run も落とさない", () => {
+    expect(markdownOf(`<w:p>${run("　")}${run("あ")}</w:p>`)).toBe("　あ\n");
+  });
+
+  test("XMLの空白（半角空白・改行）だけは、印が無ければ落とす", () => {
+    // 折り返しの名残が本文へ混ざらないようにする（OOXML の決まり）
+    expect(markdownOf(`<w:p><w:r><w:t>\n  あ  \n</w:t></w:r></w:p>`)).toBe("あ\n");
+  });
+});
+
+describe("改行と改ページ（設計書6.85）", () => {
+  test("w:cr も改行にする", () => {
+    // w:br と w:cr は同じ「改行」。片方だけ見ていると改行が落ちる
+    expect(markdownOf(`<w:p>${run("上")}<w:cr/>${run("下")}</w:p>`)).toBe(
+      "上\n下\n"
+    );
+  });
+
+  test('改ページ（w:br w:type="page"）は改行を足さない', () => {
+    expect(
+      markdownOf(`<w:p>${run("前")}<w:br w:type="page"/>${run("後")}</w:p>`)
+    ).toBe("前後\n");
+  });
+
+  test("改行だけの段落で終わっても、末尾に空行を重ねない", () => {
+    expect(markdownOf(`<w:p>${run("本文")}</w:p><w:p><w:br/></w:p>`)).toBe(
+      "本文\n"
+    );
+  });
+});
+
+describe("入れ替えの箱（mc:AlternateContent。設計書6.85）", () => {
+  test("mc:Choice の本文は残す（箱ごと落とすと本文が消える）", () => {
+    const inner =
+      `<w:p>${run("前")}<mc:AlternateContent>` +
+      `<mc:Choice Requires="wps">${run("新しい形の本文")}</mc:Choice>` +
+      `<mc:Fallback>${run("古い形の本文")}</mc:Fallback>` +
+      `</mc:AlternateContent>${run("後")}</w:p>`;
+
+    expect(markdownOf(inner)).toBe("前新しい形の本文後\n");
+  });
+});
+
+describe("見出しの継承（設計書6.85）", () => {
+  test("w:basedOn を1段たどって見出しにする", () => {
+    // 作者が「My Chapter」のような自前の書式を作っても、Heading1 を
+    // 継いでいれば見出しである
+    const styles =
+      '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      '<w:style w:type="paragraph" w:styleId="MyChapter">' +
+      '<w:name w:val="My Chapter"/><w:basedOn w:val="Heading1"/></w:style>' +
+      '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style>' +
+      "</w:styles>";
+    const inner = `<w:p><w:pPr><w:pStyle w:val="MyChapter"/></w:pPr>${run("第一章")}</w:p>`;
+
+    expect(docxToMarkdown(docxWithStyles(body(inner), styles)).markdown).toBe(
+      "# 第一章\n"
+    );
+  });
+
+  test("見出しでない書式を継いでも、見出しにはしない", () => {
+    const styles =
+      '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      '<w:style w:type="paragraph" w:styleId="MyBody">' +
+      '<w:name w:val="My Body"/><w:basedOn w:val="Normal"/></w:style>' +
+      "</w:styles>";
+    const inner = `<w:p><w:pPr><w:pStyle w:val="MyBody"/></w:pPr>${run("地の文")}</w:p>`;
+
+    expect(docxToMarkdown(docxWithStyles(body(inner), styles)).markdown).toBe(
+      "地の文\n"
+    );
+  });
+
+  test("見出し4以下は地の文にして、そのことを伝える", () => {
+    const inner =
+      `<w:p><w:pPr><w:pStyle w:val="Heading4"/></w:pPr>${run("細かい見出し")}</w:p>` +
+      `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>${run("第一章")}</w:p>`;
+    const result = docxToMarkdown(docx(body(inner)));
+
+    expect(result.markdown).toBe("細かい見出し\n# 第一章\n");
+    expect(result.skipped.join("\n")).toContain(
+      "見出し4以下は地の文にしました 1段落"
+    );
+  });
+});
+
+describe("表の畳み方（設計書6.85）", () => {
+  test("セルの中の改行は全角空白に畳む（表の1行が割れない）", () => {
+    const table =
+      "<w:tbl><w:tr>" +
+      `<w:tc><w:p>${run("上")}<w:br/>${run("下")}</w:p></w:tc>` +
+      `<w:tc><w:p>${run("右")}</w:p></w:tc>` +
+      "</w:tr></w:tbl>";
+
+    expect(markdownOf(table)).toBe("上　下　右\n");
+  });
+});
+
+describe("本文が取れないとき（設計書6.85）", () => {
+  test("本文の文字が1つも取れなければ、空の .md を作らずに断る", () => {
+    // テキストボックスの中の文字しか無い文書。読めた気になって0字の
+    // .md を作ると、作者は「変換しました」を信じて元を消しかねない
+    const inner =
+      `<w:p><w:r><w:drawing><wps:txbx><w:txbxContent><w:p>${run(
+        "図の中"
+      )}</w:p></w:txbxContent></wps:txbx></w:drawing></w:r></w:p>`;
+
+    expect(() => docxToMarkdown(docx(body(inner)))).toThrow(
+      /テキストボックス/
+    );
+  });
+});
