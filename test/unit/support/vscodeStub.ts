@@ -9,7 +9,36 @@ export const workspace = {
   getConfiguration: () => ({
     get: <T>(_key: string, defaultValue: T): T => defaultValue,
   }),
+  /**
+   * 文書への当て込み。**既定は「入った」**——入らなかったときの道を
+   * 見るテストは false を返す形へ差し替える。
+   */
+  applyEdit: (async (_edit: unknown) => true) as (
+    edit: unknown
+  ) => Promise<boolean>,
 };
+
+/** 文書の改行コード（本物と同じ値。1がLF、2がCRLF） */
+export enum EndOfLine {
+  LF = 1,
+  CRLF = 2,
+}
+
+/**
+ * 文書の書き換えのまとめ。**何を入れようとしたかを覗ける形**にしてある
+ * ——改行コードを保ったまま当てているかは、入れる文字列を見ないと分からない。
+ */
+export class WorkspaceEdit {
+  readonly replacements: Array<{
+    uri: unknown;
+    range: unknown;
+    text: string;
+  }> = [];
+
+  replace(uri: unknown, range: unknown, text: string): void {
+    this.replacements.push({ uri, range, text });
+  }
+}
 
 /** 画面に出た知らせを覗くための形。テスト側で差し替えて使う */
 export type StubMessage = (

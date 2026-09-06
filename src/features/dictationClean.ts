@@ -25,6 +25,7 @@ import {
   collectWorkStyle,
   readNarrativePerson,
 } from "../core/workStyle";
+import { fromLfText, toLf } from "../core/eolSpace";
 import { KeepWordStore } from "../core/keepWordStore";
 import { blankMemoLines } from "../core/sceneMemo";
 import { reportAIError } from "./reportAIError";
@@ -95,7 +96,10 @@ export async function runDictationClean(
   const { document, range, work, entry } = request;
   if (work) useLogFile(work.folderPath);
 
-  const original = document.getText(range);
+  // **本文はLF空間で持ち回る**（`core/eolSpace.ts`）。CRLFの原稿では、
+  // 改行1つにつき1字ぶん長さがずれる——長さの比で「要約された・書き足された」
+  // を判定しているので、揃えずに送ると原稿の改行の数だけ判定が甘くなる
+  const original = toLf(document.getText(range));
   // **短すぎるものはAIを呼ばない**（有料AIなら課金だけが起きる）。
   // 境目はプロンプト側の定数で持つ（入口が2つあるので、写しを作らない）
   if (original.trim().length < DICTATION_MIN_CHARS) {
@@ -219,7 +223,13 @@ export async function runDictationClean(
   });
   if (!applied) return;
 
-  await announceApplied(original.length, checked.text.length, checked.notes, entry);
+  await announceApplied(
+    original.length,
+    checked.text.length,
+    checked.notes,
+    entry,
+    document.uri
+  );
 }
 
 /**
@@ -230,16 +240,21 @@ export async function runDictationClean(
  * 話しながら打てる）。違っていたら**触らない**——ずれた範囲を
  * 置き換えると、口述していない部分まで巻き込む。
  *
+ * **照合も書き込みもLF空間を基準にする**（`core/eolSpace.ts`）。整えた本文は
+ * LFしか持たないので、CRLFの原稿へそのまま入れると**その範囲だけ改行が
+ * `\n` 単独になる**（実装ルール1「改行コードを保持して書き戻す」に反する）。
+ *
  * 置き換えたら true。断ったとき・書き込めなかったときは false。
  */
 export async function applyDictationText(input: {
   document: vscode.TextDocument;
   range: vscode.Range;
-  /** AIへ送った時点の、その範囲の本文 */
+  /** AIへ送った時点の、その範囲の本文（LF空間） */
   sentText: string;
+  /** 整えた本文（LF空間。書き戻すときに文書の改行コードへ直す） */
   cleanedText: string;
 }): Promise<boolean> {
-  const now = input.document.getText(input.range);
+  const now = toLf(input.document.getText(input.range));
   if (now !== input.sentText) {
     void vscode.window.showWarningMessage(
       "本文が変わったので置き換えません。" +
@@ -249,7 +264,16 @@ export async function applyDictationText(input: {
   }
 
   const change = new vscode.WorkspaceEdit();
-  change.replace(input.document.uri, input.range, input.cleanedText);
+  change.replace(
+    input.document.uri,
+    input.range,
+    // 原稿エディタの `applyEdit` と同じ扱い（`computeDocumentEdit`）。
+    // **新しく作る改行は文書の宣言に従う**——既にある行には触らない
+    fromLfText(
+      input.cleanedText,
+      input.document.eol === vscode.EndOfLine.CRLF
+    )
+  );
   // **入れられたかを確かめる。** 照合を通っても書き込みそのものは失敗しうる
   // （文書が閉じられた・読み取り専用）。見ないまま完了を告げると、
   // 作者には「整えたのに何も変わらない」としか見えない
@@ -278,7 +302,9 @@ async function announceApplied(
   before: number,
   after: number,
   notes: readonly string[],
-  entry: "editor" | "manuscriptEditor"
+  entry: "editor" | "manuscriptEditor",
+  /** 整えた文書。**`undo` を撃つ前に、いま開いているものと突き合わせる** */
+  target: vscode.Uri
 ): Promise<void> {
   const shown = notes.slice(0, DICTATION_NOTES_SHOWN);
   const detail = shown.length > 0 ? `\n直した点：${shown.join(" / ")}` : "";
@@ -295,9 +321,20 @@ async function announceApplied(
     `${headline}${detail}`,
     "元に戻す"
   );
-  if (answer === "元に戻す") {
-    await vscode.commands.executeCommand("undo");
+  if (answer !== "元に戻す") return;
+
+  // **`undo` は「いま開いている文書」に効く。** この通知は消えないので、
+  // 押すまでに別のファイルへ移っていることがある——確かめずに撃つと、
+  // 整えた原稿ではなく**別の文書の編集が1つ戻る**（0.37.5で気づいた）
+  const active = vscode.window.activeTextEditor?.document.uri;
+  if (!active || active.toString() !== target.toString()) {
+    void vscode.window.showWarningMessage(
+      "いま開いているのは別の文書なので、元に戻しませんでした。" +
+        "元の文書を開いて Ctrl+Z を押してください。"
+    );
+    return;
   }
+  await vscode.commands.executeCommand("undo");
 }
 
 /**

@@ -1,10 +1,11 @@
 import { describe, expect, test } from "vitest";
 import {
-  bodyForPosting,
   extractEpisodeParts,
   sourceForPostingCopy,
   nameWithSubtitle,
 } from "../../src/core/episodeCopy";
+import { convertForPosting } from "../../src/core/postingConvert";
+import type { PostingCopyTarget } from "../../src/core/postingCopyTargets";
 import {
   formatChapterLabel,
   stripChapterLabel,
@@ -56,26 +57,49 @@ describe("サブタイトルと本文を取り出す", () => {
   });
 });
 
+/**
+ * 投稿サイト用の本文（設計書6.84）。
+ *
+ * **変換そのものは `convertForPosting` が1つだけ持つ**（0.37.5に寄せた）。
+ * ここに記法だけの変換を残しておくと、それを呼ぶ入口が「noteだけ整えない
+ * 経路」になる——実際に投稿キットがそうなっていた。
+ */
 describe("投稿サイト用の本文", () => {
+  /** 記法だけを見る貼り付け先。`site` を持たせない（noteの整えを通さない） */
+  function notation(
+    style: PostingCopyTarget["style"],
+    emphasis: PostingCopyTarget["emphasis"] = "kakuyomu"
+  ): PostingCopyTarget {
+    return { label: "試験", detail: "", style, emphasis, registered: false };
+  }
+
   test("ルビを投稿サイトの記法へ直す", () => {
     const parts = extractEpisodeParts(WITH_HEADER, null);
 
-    expect(bodyForPosting(parts.body, "site")).toContain("｜森《もり》");
+    expect(convertForPosting(parts.body, notation("site")).text).toContain(
+      "｜森《もり》"
+    );
   });
 
   test("HTMLでも出せる", () => {
-    expect(bodyForPosting("{森|もり}", "html")).toBe(
+    expect(convertForPosting("{森|もり}", notation("html")).text).toBe(
       "<ruby>森<rt>もり</rt></ruby>"
     );
   });
 
-  test("前後の空行を落とす", () => {
+  test("1話まるごとの経路では、前後の空行を落とす", () => {
     // **投稿欄の先頭に空行が入ると、1行目が空いた状態で公開される**
-    expect(bodyForPosting("\n\n本文。\n\n", "site")).toBe("本文。");
+    expect(
+      convertForPosting("\n\n本文。\n\n", notation("site"), {
+        trimEdges: true,
+      }).text
+    ).toBe("本文。");
   });
 
   test("ルビが無ければ、本文はそのまま", () => {
-    expect(bodyForPosting("ただの本文。", "site")).toBe("ただの本文。");
+    expect(convertForPosting("ただの本文。", notation("site")).text).toBe(
+      "ただの本文。"
+    );
   });
 
   /**
@@ -85,27 +109,21 @@ describe("投稿サイト用の本文", () => {
    */
   describe("傍点の貼り付け先", () => {
     test("なろう・アルファポリスはルビで代用する", () => {
-      expect(bodyForPosting("これは{{大事}}だ", "site", "narou")).toBe(
-        "これは｜大事《・・》だ"
-      );
+      expect(
+        convertForPosting("これは{{大事}}だ", notation("site", "narou")).text
+      ).toBe("これは｜大事《・・》だ");
     });
 
     test("カクヨム・ネオページは専用の記法", () => {
-      expect(bodyForPosting("これは{{大事}}だ", "site", "kakuyomu")).toBe(
-        "これは《《大事》》だ"
-      );
-    });
-
-    test("渡さなければ、これまでどおりカクヨムの書き方", () => {
-      expect(bodyForPosting("これは{{大事}}だ", "site")).toBe(
-        "これは《《大事》》だ"
-      );
+      expect(
+        convertForPosting("これは{{大事}}だ", notation("site", "kakuyomu")).text
+      ).toBe("これは《《大事》》だ");
     });
 
     test("noteへ貼る括弧書きでは、傍点の印だけを落とす", () => {
-      expect(bodyForPosting("{森|もり}と{{大事}}", "paren")).toBe(
-        "森（もり）と大事"
-      );
+      expect(
+        convertForPosting("{森|もり}と{{大事}}", notation("paren")).text
+      ).toBe("森（もり）と大事");
     });
   });
 });

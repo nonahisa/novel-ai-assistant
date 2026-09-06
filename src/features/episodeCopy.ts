@@ -69,7 +69,12 @@ export async function copyBodyForPosting(
 
   // 貼り付け先ごとの分岐は変換の側にある（`convertForPosting`、設計書6.84）
   // ——noteはMarkdownをそのまま解釈するので、記法の置き換えだけでは足りない
-  const conversion = convertForPosting(parts.body, target);
+  // **1話まるごとなので、前後の空行は落とす**（設計書6.84）。ヘッダーを
+  // 外した本文はその直後の空行から始まることが多く、そのまま貼ると
+  // 投稿欄の1行目が空いた状態で公開される
+  const conversion = convertForPosting(parts.body, target, {
+    trimEdges: true,
+  });
   if (!conversion.text) {
     void vscode.window.showWarningMessage(
       `${episode.fileName} に本文が見つかりませんでした。`

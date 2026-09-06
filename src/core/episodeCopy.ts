@@ -1,10 +1,4 @@
 import { parseEpisodeMetadata } from "./metadataParser";
-import {
-  toSiteNotation,
-  type EmphasisSite,
-  type RubyStyle,
-} from "./ruby";
-import { stripMemoLines } from "./sceneMemo";
 import { sanitizeFileName } from "./episodeParser";
 
 /**
@@ -66,31 +60,14 @@ export function sourceForPostingCopy(
   return extractEpisodeParts(fullText, null).body;
 }
 
-/**
- * 本文を、投稿サイトへ貼れる形にする。
+/*
+ * **本文を投稿サイトの形にする関数は、ここには無い**（0.37.5に移した）。
  *
- * いまのところ変換するのは**ルビだけ**。`{漢字|かんじ}` を
- * `｜漢字《かんじ》` などへ直す（6.12.1）。
- *
- * **前後の空行を落とす。** 投稿欄の先頭に空行が入ると、
- * サイトによっては1行目が空いた状態で公開される。
- *
- * **シーンメモは必ず落とす**（設計書6.40.2）。ここを抜かすと、
- * 作者の付箋がそのまま公開される。
- *
- * @param site 傍点の書き方だけがこれで変わる（6.12.4）。投稿キット（6.68）は
- *   貼り付け先のサイトから決めて渡す。**既定はカクヨム**——渡さない
- *   呼び出し（手で選んでコピーする経路）の見た目を変えないためである
+ * 貼り付け先ごとの変換は `core/postingConvert.ts` の `convertForPosting`
+ * が1つだけ持つ。noteは記法の置き換えでは足りず（Markdownをそのまま
+ * 解釈する）、ここに記法だけの変換を残しておくと、それを呼ぶ入口が
+ * noteだけ整えない経路になる——実際に投稿キットがそうなっていた。
  */
-export function bodyForPosting(
-  body: string,
-  style: RubyStyle["id"],
-  site: EmphasisSite = "kakuyomu"
-): string {
-  return toSiteNotation(stripMemoLines(body), style, site)
-    .replace(/^\n+/, "")
-    .replace(/\n+$/, "");
-}
 
 /**
  * サブタイトルを含んだファイル名を組み立てる。

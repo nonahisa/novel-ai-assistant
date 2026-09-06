@@ -362,7 +362,9 @@ button.primary {
 }
 #status { font-size: 12px; color: var(--vscode-descriptionForeground); }
 #status.error { color: var(--vscode-errorForeground); }
-.note { font-size: 12px; color: var(--vscode-descriptionForeground); line-height: 1.6; }
+/* 改行をそのまま出す。取り込めなかった飾りの理由は1件1行で届くので、
+   潰すと「a.svg は…b.svg は…」が1行に繋がって読めない */
+.note { font-size: 12px; color: var(--vscode-descriptionForeground); line-height: 1.6; white-space: pre-line; }
 .page-frame { margin-bottom: 18px; }
 .page-label { font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 4px; }
 .page-note { font-size: 12px; color: var(--vscode-descriptionForeground); margin-top: 4px; }

@@ -23,6 +23,20 @@ import { stripMemoLines } from "./sceneMemo";
  * VS Code APIには依存しない。
  */
 
+export interface PostingConversionOptions {
+  /**
+   * 前後の空行を落とすか（既定は落とさない）。
+   *
+   * **1話まるごとを渡す経路だけ真にする**（作品一覧の右クリック・投稿キット）。
+   * 投稿欄の先頭に空行が入ると、サイトによっては1行目が空いた状態で公開
+   * される——ヘッダーを外した本文は、その直後から空行で始まることが多い。
+   *
+   * **選んだ範囲を渡す経路では落とさない。** 作者が空けた行そのものが
+   * 選択の一部であり、選んだものと貼られるものが食い違うほうが困る。
+   */
+  trimEdges?: boolean;
+}
+
 export interface PostingConversion {
   /** クリップボードへ入れるもの */
   text: string;
@@ -36,31 +50,36 @@ export interface PostingConversion {
 /**
  * 本文を、選んだ貼り付け先の形にする。
  *
- * **シーンメモはここで落とす**（設計書6.40.2）。入口が3つあるので、
+ * **シーンメモはここで落とす**（設計書6.40.2）。入口が4つあるので、
  * 落とす場所を入口に置くと、いつか1つだけ抜ける。
  *
- * **前後の空行も落とす。** 投稿欄の先頭に空行が入ると、サイトによっては
- * 1行目が空いた状態で公開される。
+ * **前後の空行を落とすかは、呼ぶ側が決める**（`trimEdges`）。ここは記法の
+ * 変換であって、作者が空けた行を削る場所ではない——選んだ範囲をコピーする
+ * 経路では、その空行そのものが選択の一部である。1話まるごとを渡す経路だけ
+ * が、投稿欄の先頭を詰めたい。
  */
 export function convertForPosting(
   source: string,
-  target: PostingCopyTarget
+  target: PostingCopyTarget,
+  options: PostingConversionOptions = {}
 ): PostingConversion {
   if (target.site === "note") {
     // **メモを先に落とさない。** コードの中の `//` は付箋ではないので、
     // コードを読み分けられる `toNoteMarkdown` に任せる
+    // （`toNoteMarkdown` は本文欄へ貼る形なので、前後の空行は元から無い）
     const note = toNoteMarkdown(source);
     return { text: note.body, note };
   }
 
+  const text = toSiteNotation(
+    stripMemoLines(source),
+    target.style,
+    target.emphasis
+  );
   return {
-    text: toSiteNotation(
-      stripMemoLines(source),
-      target.style,
-      target.emphasis
-    )
-      .replace(/^\n+/, "")
-      .replace(/\n+$/, ""),
+    text: options.trimEdges
+      ? text.replace(/^\n+/, "").replace(/\n+$/, "")
+      : text,
   };
 }
 
@@ -96,5 +115,12 @@ export function noteCopyMessage(
   parts.push("目次は編集画面のスイッチで入れられます。");
   parts.push(...note.warnings);
 
-  return parts.join("");
+  // **文どうしを繋げない。** 注意（`NOTE_UNSUPPORTED`）は句点で終わって
+  // いないので、そのまま連ねると「…出ません（印は外れます）目次は…」と
+  // 1文に読めてしまう。句点を補い、空白で区切る
+  return parts
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .map((part) => (/[。！？]$/.test(part) ? part : `${part}。`))
+    .join(" ");
 }

@@ -26,7 +26,10 @@ import { PostingStore, PostingStoreError } from "../core/postingStore";
 import { episodePathFor } from "../core/bookStore";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
-import { bodyForPosting, extractEpisodeParts } from "../core/episodeCopy";
+import { extractEpisodeParts } from "../core/episodeCopy";
+// 貼り付け先ごとの分岐は、入口ではなく変換の側に置く（設計書6.84）
+import { convertForPosting } from "../core/postingConvert";
+import { postingCopyTargetFor } from "../core/postingCopyTargets";
 import {
   buildPostingEnvelope,
   supportsPasteHelper,
@@ -242,7 +245,13 @@ async function walkSite(input: {
   const entry = input.ledger.sites.find((site) => site.site === input.site);
   if (!entry) return "skip";
 
-  const body = bodyForPosting(input.body, info.notation, info.emphasis);
+  // **4つ目の入口も、同じ変換を通す**（設計書6.84）。記法だけを直して
+  // いたころは、noteへ貼る本文だけが整えられないままだった（見出しの段・
+  // 引用の空行・画像の目印が抜ける）——貼り付け先ごとの分岐は変換の側にある
+  // 1話まるごとを渡すので、前後の空行は落とす（`trimEdges`）
+  const body = convertForPosting(input.body, postingCopyTargetFor(input.site), {
+    trimEdges: true,
+  }).text;
   await vscode.env.clipboard.writeText(body);
 
   // **開くだけ。** ページの中身は読まないし、操作もしない（6.68.1）
@@ -330,7 +339,7 @@ async function walkSite(input: {
     if (picked.answer === "envelope") {
       /*
         **渡すのは、いま作ったものと同じ変換済みの本文**（6.79.3）。
-        封筒に包むだけで、サイトごとの記法変換は上の `bodyForPosting` が
+        封筒に包むだけで、サイトごとの変換は上の `convertForPosting` が
         通っている——ここで作り直すと、傍点の扱いが2か所に散る。
 
         **題名の欄にはサブタイトルを入れる。** 「サブタイトルをコピー」で

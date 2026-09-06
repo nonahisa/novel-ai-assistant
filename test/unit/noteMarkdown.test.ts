@@ -140,6 +140,26 @@ describe("画像", () => {
     expect(result.body).toContain("【画像：図（fig.png）】");
     expect(result.images).toHaveLength(1);
   });
+
+  /**
+   * **空白を含むパスは、Windowsではふつうに起きる**（`画像 001.png`、
+   * `My Pictures\…`）。読み取れないと画像だと気づけないまま
+   * `![猫](画像 001.png)` の行が本文へ出て、**どこに何を入れるつもりだったか
+   * が控えにも残らない**。
+   */
+  it("在り処に空白があっても、画像として読む", () => {
+    const result = toNoteMarkdown("![猫](画像 001.png)");
+    expect(result.body).toBe("【画像：猫（画像 001.png）】");
+    expect(result.images).toHaveLength(1);
+    expect(result.images[0].path).toBe("画像 001.png");
+  });
+
+  it("文の中でも、空白を含む在り処を読む", () => {
+    const result = toNoteMarkdown("これ→![図](図 と 表/fig 1.png)←です");
+    expect(result.body).toContain("【画像：図（fig 1.png）】");
+    expect(result.images).toHaveLength(1);
+    expect(result.images[0].path).toBe("図 と 表/fig 1.png");
+  });
 });
 
 describe("コードブロック", () => {
@@ -186,6 +206,18 @@ describe("そのまま通すもの", () => {
     const result = toNoteMarkdown(source);
     expect(result.body).toBe(source);
     expect(result.warnings).not.toContain(NOTE_UNSUPPORTED.inlineUrl);
+  });
+
+  /**
+   * **在り処に空白のあるリンクも、リンクとして読む。** 読めないと
+   * 題名を取り出すときに `[t](a b.html)` の記号がそのまま題として出るし、
+   * 「文の中のURL」の注意も出どころを誤る。
+   */
+  it("行き先に空白があってもリンクとして読む", () => {
+    const result = toNoteMarkdown("# [題名](資料 一覧.html)\n\n本文");
+    // 題名欄はプレーンテキスト。記法の記号は落とす
+    expect(result.title).toBe("題名");
+    expect(result.body).toBe("本文");
   });
 
   it("段落の空行はそのまま残す（noteは空行が段落の切れ目）", () => {

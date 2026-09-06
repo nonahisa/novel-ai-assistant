@@ -1162,20 +1162,43 @@ ruby > rt {
     if (dictationFrom === null) return;
     const caret = dictationCaretForPress();
     /*
-      **カーソルが開始より前なら、文末までを範囲にする。** 話している最中に
+      **カーソルが読めなければ中止する**（「口述」ボタンと同じ扱い）。
+      読めないまま文末までを範囲にすると、口述したところより後ろの本文まで
+      AIへ送って書き換えることになる。口述モードは抜けない——本文の中を
+      押し直して、もう一度「整える」を押せばよい。
+    */
+    if (caret === null) {
+      note.textContent =
+        "カーソルの位置が分かりません。本文の中を押してから「整える」を押してください";
+      dictationCaretAtPress = null;
+      return;
+    }
+    /*
+      **文末までのフォールバックは、巻き戻したときだけ。** 話している最中に
       前のほうを直すことがあり、そのときカーソルは開始位置より手前にある
       ——逆さの範囲をそのまま送ると、何も整えられないまま終わる。
     */
     const from = dictationFrom;
-    const to =
-      caret !== null && caret > from ? caret : dictationTextNow().length;
+    const text = dictationTextNow();
+    const to = caret > from ? caret : text.length;
     dictationFrom = null;
     document.body.classList.remove("dictating");
     note.textContent = "";
     dictationRefocus();
-    // **範囲が足りているかを決めるのは拡張機能側**（入口が2つあるので、
-    // 境目の字数を画面にも持たせない）
-    vscode.postMessage({ type: "dictationClean", from: from, to: to });
+    /*
+      **範囲の本文も一緒に送る。** 打鍵が文書へ届くのは少し遅れるので、
+      話し終えてすぐ押すと位置だけが先に着く——拡張機能側は文書の中身と
+      突き合わせ、違っていれば触らない。
+
+      **範囲が足りているかを決めるのは拡張機能側**（入口が2つあるので、
+      境目の字数を画面にも持たせない）。
+    */
+    vscode.postMessage({
+      type: "dictationClean",
+      from: from,
+      to: to,
+      text: text.slice(from, to)
+    });
   });
 
   document.getElementById("font").addEventListener("click", function () {

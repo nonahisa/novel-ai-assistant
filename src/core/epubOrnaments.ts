@@ -306,15 +306,53 @@ function refuse(tokens: readonly XmlToken[]): string | null {
       if (attributeName.startsWith("on")) {
         return `属性 ${attribute.name} は飾りに使えません（動く仕掛けは入れられません）。`;
       }
-      if (attributeName === "href" || attributeName === "xlink:href") {
+      // **綴りではなく名前の実体で見る。** `xlink:href` だけを名指しで
+      // 塞いでいたころは、同じ名前空間を別の接頭辞で宣言した
+      // `xl:href="http://…"` が素通りしていた（接頭辞は書く人が決められる）
+      if (localName(attribute.name) === "href") {
         if (!attribute.value.trim().startsWith("#")) {
           return `${attribute.name}「${attribute.value}」は飾りに使えません（同じ絵の中を指す # だけが使えます）。`;
         }
       }
+      const refusedUrl = refuseAttributeUrl(attribute);
+      if (refusedUrl) return refusedUrl;
     }
   }
 
   return null;
+}
+
+/**
+ * 外を指す `url(…)`。無ければ null。
+ *
+ * **`url(` の規則は1つだけにする**（0.37.5）。同じ絵の中を指す `#` は通し、
+ * それ以外は断る——`<style>` の中と属性値で違う規則にしていると、
+ * 「グラデーションの参照は書けるのに、`<style>` に書くと断られる」という
+ * 説明のつかない差になる。
+ *
+ * `url('#g')` `url( #g )` のような書き方も同じものとして見る。
+ */
+function externalUrlIn(text: string): string | null {
+  for (const match of text.matchAll(/url\(\s*([^)]*)\)?/gi)) {
+    const target = match[1].trim().replace(/^["']|["']$/g, "").trim();
+    if (target.startsWith("#")) continue;
+    return target;
+  }
+  return null;
+}
+
+/**
+ * 属性値の `url(…)`。
+ *
+ * `url(` を `<style>` の中でしか見ていなかったころは、
+ * `fill="url(http://…)"` や `style="filter:url(…)"` が素通りしていた
+ * ——飾りを開くたびに読者の端末が外へ通信する。入口は `fill`・`filter`・
+ * `mask`・`clip-path`・`marker-*` と多いので、**属性の名前では絞らずに
+ * 全部の値を見る**（名前で絞ると、いつか1つ増えたときに漏れる）。
+ */
+function refuseAttributeUrl(attribute: XmlAttr): string | null {
+  if (externalUrlIn(attribute.value) === null) return null;
+  return `${attribute.name}「${attribute.value}」は飾りに使えません（url( は同じ絵の中を指す # だけが使えます）。`;
 }
 
 /** `<style>` の中身。**外を読みに行く書き方だけ**を断る */
@@ -322,8 +360,9 @@ function refuseStyle(css: string): string | null {
   if (/@import/i.test(css)) {
     return "<style> の中の @import は使えません（外のCSSを読みに行くため）。";
   }
-  if (/url\(/i.test(css)) {
-    return "<style> の中の url( は使えません（外のファイルを読みに行くため）。";
+  const external = externalUrlIn(css);
+  if (external !== null) {
+    return `<style> の中の url(${external}) は使えません（同じ絵の中を指す # だけが使えます）。`;
   }
   return null;
 }
@@ -377,8 +416,10 @@ function openTag(token: XmlOpen, isRoot: boolean): string {
  * - `aria-hidden` と `role`：飾りは読み上げない（組み込みの飾りと揃える）
  * - `xmlns`：**無いとXHTMLの中で絵にならない**。名前空間が付いていない
  *   SVGはXHTMLの名前空間の要素として読まれ、リーダーは何も描かない
- * - `width`・`height`：無ければ `viewBox` の比から長辺24で割り出す。
- *   寸法の無いSVGは、リーダーによって面いっぱいに広がる
+ * - `width`・`height`：**素の数値でなければ** `viewBox` の比から長辺24で
+ *   割り出す。寸法の無いSVGはリーダーによって面いっぱいに広がるが、
+ *   `width="100%"` や `24px` も同じことが起きる——単位や割合を書いた飾りは
+ *   本文が1行も見えない面を作るので、割り出しへ倒す
  */
 function rootAttributes(token: XmlOpen): XmlAttr[] {
   const attrs = token.attrs.filter(
@@ -387,11 +428,16 @@ function rootAttributes(token: XmlOpen): XmlAttr[] {
   );
   const has = (name: string): boolean =>
     attrs.some((attribute) => attribute.name === name);
+  /** 単位も割合も付いていない、そのまま使える寸法か */
+  const isPlainSize = (name: string): boolean => {
+    const found = attrs.find((attribute) => attribute.name === name);
+    return found !== undefined && /^\s*\d+(?:\.\d+)?\s*$/.test(found.value);
+  };
 
   if (!has("xmlns")) {
     attrs.unshift({ name: "xmlns", value: "http://www.w3.org/2000/svg" });
   }
-  if (!has("width") || !has("height")) {
+  if (!isPlainSize("width") || !isPlainSize("height")) {
     const size = sizeFromViewBox(
       attrs.find((attribute) => attribute.name === "viewBox")?.value
     );
@@ -478,6 +524,13 @@ const NAME_PATTERN = /^[A-Za-z_:][\w.:-]*/;
 function scanXml(source: string): XmlScan {
   const tokens: XmlToken[] = [];
   const stack: string[] = [];
+  /**
+   * いま使ってよい名前空間の接頭辞。**`xml` だけは宣言なしで使える**
+   * （`xml:space` `xml:lang`。XMLの決まりで最初から結ばれている）。
+   */
+  let declared = new Set<string>(["xml"]);
+  /** 親の時点の集合。閉じ札で戻す（宣言は書いた要素の中でしか効かない） */
+  const declaredStack: Array<Set<string>> = [];
   let index = 0;
   let rootClosed = false;
 
@@ -545,6 +598,7 @@ function scanXml(source: string): XmlScan {
         return fail(`<${open}> が </${name}> で閉じられています`);
       }
       tokens.push({ kind: "close", name });
+      declared = declaredStack.pop() ?? declared;
       if (stack.length === 0) rootClosed = true;
       index = end + 1;
       continue;
@@ -553,15 +607,74 @@ function scanXml(source: string): XmlScan {
     const parsed = parseOpenTag(source, next);
     if (!parsed.ok) return fail(parsed.reason);
     if (rootClosed) return fail("いちばん外側の要素が2つあります");
+
+    // その札で宣言された接頭辞は、その札自身からもう使える
+    const here = new Set(declared);
+    for (const prefix of declaredPrefixes(parsed.token)) here.add(prefix);
+    const undeclared = undeclaredPrefix(parsed.token, here);
+    if (undeclared) {
+      return fail(
+        `名前空間 ${undeclared}: が宣言されていません` +
+          `（根の <svg> へ xmlns:${undeclared}="…" を足してください）`
+      );
+    }
+
     tokens.push(parsed.token);
-    if (!parsed.token.selfClosing) stack.push(parsed.token.name);
-    else if (stack.length === 0) rootClosed = true;
+    if (!parsed.token.selfClosing) {
+      stack.push(parsed.token.name);
+      declaredStack.push(declared);
+      declared = here;
+    } else if (stack.length === 0) rootClosed = true;
     index = parsed.end;
   }
 
   if (stack.length > 0) return fail(`<${stack[stack.length - 1]}> が閉じていません`);
   if (!rootClosed) return fail("要素が1つもありません");
   return { ok: true, tokens };
+}
+
+/** その札が新しく宣言する接頭辞（`xmlns:xl="…"` の `xl`） */
+function declaredPrefixes(token: XmlOpen): Set<string> {
+  const out = new Set<string>();
+  for (const attribute of token.attrs) {
+    if (!attribute.name.startsWith("xmlns:")) continue;
+    const prefix = attribute.name.slice("xmlns:".length);
+    if (prefix) out.add(prefix);
+  }
+  return out;
+}
+
+/** 名前に付いた接頭辞。付いていなければ null */
+function prefixOf(name: string): string | null {
+  const colon = name.indexOf(":");
+  return colon > 0 ? name.slice(0, colon) : null;
+}
+
+/**
+ * 宣言されていない接頭辞を使っている名前。無ければ null。
+ *
+ * **足さずに断る**（0.37.5の裁定）。`xlink` だけを知っていて根へ
+ * `xmlns:xlink` を補う手もあったが、それでは「どの接頭辞なら直して
+ * もらえるのか」が図録の中に隠れ、`xl:` で書いた同じ絵は断られる。
+ * 規則を1つにしておけば、断り文が直し方そのものになる——断って失うのは
+ * 飾り1つで、**本は開く**。
+ */
+function undeclaredPrefix(
+  token: XmlOpen,
+  declared: ReadonlySet<string>
+): string | null {
+  const elementPrefix = prefixOf(token.name);
+  if (elementPrefix && !declared.has(elementPrefix)) return elementPrefix;
+
+  for (const attribute of token.attrs) {
+    // 宣言そのもの（`xmlns` / `xmlns:…`）は接頭辞の使用ではない
+    if (attribute.name === "xmlns" || attribute.name.startsWith("xmlns:")) {
+      continue;
+    }
+    const prefix = prefixOf(attribute.name);
+    if (prefix && !declared.has(prefix)) return prefix;
+  }
+  return null;
 }
 
 /** DOCTYPE の終わり。内部サブセットの `]` をまたぐ */
@@ -636,6 +749,12 @@ function parseOpenTag(source: string, start: number): OpenTagScan {
     const raw = source.slice(index + 1, end);
     const bad = badEntity(raw);
     if (bad) return { ok: false, reason: bad };
+    // **同じ属性を2度書いた札は整形式ではない。** 通すと、断片を差し込んだ
+    // XHTMLごと開けなくなる（飾り1つで本が壊れる）。どちらの値が勝つかは
+    // 読み手次第なので、こちらで選ばずに断る
+    if (attrs.some((existing) => existing.name === attributeMatch[0])) {
+      return { ok: false, reason: `属性 ${attributeMatch[0]} が2つあります` };
+    }
     attrs.push({ name: attributeMatch[0], value: unescapeXml(raw) });
     index = end + 1;
   }
@@ -650,8 +769,14 @@ function parseOpenTag(source: string, start: number): OpenTagScan {
  * 未定義の実体は「開けないXHTML」を作る——飾り1つで本そのものが壊れる。
  */
 function badEntity(text: string): string | null {
-  for (const match of text.matchAll(/&([^;\s]*);?/g)) {
+  for (const match of text.matchAll(/&([^;\s]*)(;?)/g)) {
     const body = match[1];
+    // **`;` は省けない。** `A &amp B` を通していたころは、名前だけを見て
+    // 「XMLの5つ」と読んでいた——実際には `&` が生のまま残っており、
+    // XHTMLとして開けない断片になる
+    if (!match[2]) {
+      return `実体参照 &${body} が ; で終わっていません`;
+    }
     if (/^#(\d+|x[0-9a-fA-F]+)$/.test(body)) continue;
     if (["amp", "lt", "gt", "quot", "apos"].includes(body)) continue;
     return `使えない実体参照 &${body}; があります`;

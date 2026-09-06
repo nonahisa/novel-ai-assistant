@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { noteCopyMessage, type PostingConversion } from "../core/postingConvert";
+import { pathExists } from "../core/fileSystem";
 import { revealFolder } from "../views/openDocument";
 import { notifyDone } from "../views/notify";
 
@@ -33,7 +34,10 @@ export async function showPostingCopyNotice(input: {
 
   const copyTitle = "題名をコピー";
   const openImages = "画像のフォルダーを開く";
-  const imagePath = firstImagePath(input.sourcePath, note.images[0]?.path);
+  const imagePath = await firstImagePath(
+    input.sourcePath,
+    note.images[0]?.path
+  );
 
   const buttons: string[] = [];
   if (note.title) buttons.push(copyTitle);
@@ -57,17 +61,37 @@ export async function showPostingCopyNotice(input: {
   }
 }
 
+/** Windowsの絶対パス（`C:\…`）。**URLの仕組み（scheme）と見分ける** */
+const DRIVE_LETTER = /^[A-Za-z]:[\\/]/;
+
 /**
  * 本文に書いてある画像の在り処を、実際の場所へ。
  *
  * **外のURLは開かない。** 手元にファイルが無いので、開いても空振りする。
+ * ただし `C:\画像\cat.png` は**URLではない**——`C:` を仕組み（scheme）と
+ * 読んでいたころは、手元にある画像を「外のもの」として断っていた。
+ * ドライブレターを先に見分ける。
+ *
+ * **実在しないものは返さない。** 本文のパスが間違っている・画像をまだ
+ * 用意していないことはふつうにあり、そのときボタンを出しても空振りする
+ * ——押しても何も起きないボタンは、作者には壊れたようにしか見えない。
  */
-function firstImagePath(
+async function firstImagePath(
   sourcePath: string | undefined,
   written: string | undefined
-): string | undefined {
+): Promise<string | undefined> {
   if (!sourcePath || !written) return undefined;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(written)) return undefined;
-  if (path.isAbsolute(written)) return written;
-  return path.join(path.dirname(sourcePath), written);
+  if (!DRIVE_LETTER.test(written) && /^[a-z][a-z0-9+.-]*:/i.test(written)) {
+    return undefined;
+  }
+
+  const candidate = path.isAbsolute(written)
+    ? written
+    : path.join(path.dirname(sourcePath), written);
+  try {
+    return (await pathExists(candidate)) ? candidate : undefined;
+  } catch {
+    // 権限や一時的な障害で確かめられないだけなら、出口は残す
+    return candidate;
+  }
 }

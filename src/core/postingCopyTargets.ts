@@ -64,6 +64,26 @@ function detailFor(site: PostingSiteId): string {
   return emphasisDetail(info.emphasis);
 }
 
+/**
+ * サイト1つぶんの貼り付け先。
+ *
+ * **投稿キット（設計書6.68）は、選ばずにここから引く。** 投稿キットは
+ * どのサイトへ貼るかが既に決まっているが、貼り付け先の形（`site`・
+ * `style`・`emphasis`）は同じものが要る——組み立てを写すと、noteだけ
+ * 整えない4つ目の入口ができる。
+ */
+export function postingCopyTargetFor(site: PostingSiteId): PostingCopyTarget {
+  const info = postingSiteInfo(site);
+  return {
+    site: info.id,
+    label: info.label,
+    detail: detailFor(info.id),
+    style: info.notation,
+    emphasis: info.emphasis,
+    registered: false,
+  };
+}
+
 /** 記法だけで決まる書き出し先（サイトを選ぶ画面の、いちばん後ろ） */
 function styleTarget(id: RubyStyle["id"], label?: string): PostingCopyTarget {
   const style = RUBY_STYLES.find((entry) => entry.id === id);
@@ -91,11 +111,7 @@ export function postingCopyTargets(
   registered: readonly PostingSiteId[]
 ): PostingCopyTarget[] {
   const sites = POSTING_SITES.map((info) => ({
-    site: info.id,
-    label: info.label,
-    detail: detailFor(info.id),
-    style: info.notation,
-    emphasis: info.emphasis,
+    ...postingCopyTargetFor(info.id),
     registered: registered.includes(info.id),
   }));
 

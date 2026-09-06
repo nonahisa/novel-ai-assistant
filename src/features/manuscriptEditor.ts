@@ -589,8 +589,11 @@ type Incoming =
    * `from` は「口述」を押したときのカーソル、`to` は「整える」を押した
    * ときのカーソル（開始より前なら文末）。**どちらもLF空間の位置**で、
    * 文書の位置へ直すのはこちらの仕事である。
+   *
+   * `text` はその範囲の本文（LF空間）。**位置だけでは足りない**——画面の
+   * 打鍵が文書へ届く前に押されると、同じ位置が別の場所を指す。
    */
-  | { type: "dictationClean"; from: number; to: number }
+  | { type: "dictationClean"; from: number; to: number; text: string }
   /**
    * 書体を選ぶ。
    *
@@ -1156,13 +1159,21 @@ export class ManuscriptEditorProvider
           const source = document.getText();
           const head = Math.min(message.from, message.to);
           const tail = Math.max(message.from, message.to);
-          await this.deps.dictationClean?.(
-            document,
-            new vscode.Range(
-              document.positionAt(fromLfOffset(source, head)),
-              document.positionAt(fromLfOffset(source, tail))
-            )
+          const range = new vscode.Range(
+            document.positionAt(fromLfOffset(source, head)),
+            document.positionAt(fromLfOffset(source, tail))
           );
+          // **画面と文書が揃っているかを確かめてから渡す。** 打鍵が文書へ
+          // 届くのは少し遅れるので、話し終えてすぐ押すと位置だけが先に着く
+          // ——ずれた範囲を整えると、口述していないところまで書き換わる。
+          // 比べるのはLF空間（画面はCRLFを知らない）
+          if (toLf(document.getText(range)) !== message.text) {
+            void vscode.window.showWarningMessage(
+              "本文の反映を待っています。もう一度押してください。"
+            );
+            break;
+          }
+          await this.deps.dictationClean?.(document, range);
           break;
         }
       }

@@ -249,6 +249,81 @@ describe("取り込むSVGを検査して整える", () => {
     ).toBe(true);
   });
 
+  /**
+   * **整形式でないXMLは、断片にすると本ごと開けなくなる。** DOCTYPEを
+   * 落としたあとのXHTMLは厳密に読まれるので、ここで通したものが
+   * そのまま「本が開かない」になる（設計書6.65.17）。
+   */
+  test("同じ属性が2つある札は断る", () => {
+    expect(
+      reason('<svg xmlns="http://www.w3.org/2000/svg" fill="a" fill="b" />')
+    ).toContain("fill");
+  });
+
+  test("`;` の無い実体参照は断る", () => {
+    expect(
+      reason(
+        '<svg xmlns="http://www.w3.org/2000/svg"><text>A &amp B</text></svg>'
+      )
+    ).toContain("実体参照");
+    // 属性値の中も同じ（値だけ素通りする口を作らない）
+    expect(
+      reason('<svg xmlns="http://www.w3.org/2000/svg"><path d="&amp" /></svg>')
+    ).toContain("実体参照");
+  });
+
+  /**
+   * **未宣言の接頭辞は、足さずに断る**（0.37.5の裁定）。`xlink` だけを
+   * 特別扱いして根へ宣言を足すと、「どの接頭辞なら直してもらえるのか」が
+   * 図録の中に隠れる。断れば失うのは飾り1つで、本そのものは開く。
+   */
+  test("宣言されていない名前空間の接頭辞は断る", () => {
+    expect(
+      reason('<svg xmlns="http://www.w3.org/2000/svg"><zz:rect /></svg>')
+    ).toContain("zz");
+    expect(
+      reason('<svg xmlns="http://www.w3.org/2000/svg"><use xl:href="#a" /></svg>')
+    ).toContain("xl");
+    // 根で宣言してあれば通る（`xml:` は宣言なしでも使える）
+    expect(
+      sanitizeOrnamentSvg(
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xl="http://www.w3.org/1999/xlink" viewBox="0 0 24 24"><defs><path id="a" d="M0 0" /></defs><use xl:href="#a" xml:space="preserve" /></svg>'
+      ).ok
+    ).toBe(true);
+  });
+
+  /** 外部参照の遮断は、綴りではなく**名前の実体**で見る（`xl:href` の逃げ道） */
+  test("別の接頭辞で書いた href も断る", () => {
+    expect(
+      reason(
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xl="http://www.w3.org/1999/xlink"><use xl:href="other.svg#x" /></svg>'
+      )
+    ).toContain("href");
+  });
+
+  /**
+   * `url(` は `<style>` の中だけの話ではない。`fill`・`filter`・`mask`・
+   * `clip-path`・`marker-*` と入口が多いので、**属性は全部見る**。
+   */
+  test("属性値の url( は、# 始まり以外を断る", () => {
+    expect(
+      reason(
+        '<svg xmlns="http://www.w3.org/2000/svg"><rect fill="url(http://x/a.svg#g)" /></svg>'
+      )
+    ).toContain("url(");
+    expect(
+      reason(
+        '<svg xmlns="http://www.w3.org/2000/svg"><rect style="filter:url(&apos;https://x/f&apos;)" /></svg>'
+      )
+    ).toContain("url(");
+    // 同じ絵の中を指すものは通す（グラデーションの参照に要る）
+    expect(
+      sanitizeOrnamentSvg(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><defs><linearGradient id="g" /></defs><rect fill="url(#g)" width="24" height="24" /></svg>'
+      ).ok
+    ).toBe(true);
+  });
+
   test("style の中の @import と url( は断る", () => {
     expect(
       reason(
@@ -260,6 +335,15 @@ describe("取り込むSVGを検査して整える", () => {
         '<svg xmlns="http://www.w3.org/2000/svg"><style>.a { fill: url(http://x/a.svg#g); }</style></svg>'
       )
     ).toContain("url(");
+  });
+
+  /** **`url(` の規則は1つ。** 属性値で通るものは `<style>` でも通る */
+  test("style の中でも、# 始まりの url( は通す", () => {
+    expect(
+      sanitizeOrnamentSvg(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><defs><linearGradient id="g" /></defs><style>.a { fill: url(#g); }</style><rect class="a" width="24" height="24" /></svg>'
+      ).ok
+    ).toBe(true);
   });
 
   /* ---- 整える -------------------------------------------------------- */
@@ -295,6 +379,21 @@ describe("取り込むSVGを検査して整える", () => {
     if (!result.ok) return;
     expect(result.svg).toContain('width="24"');
     expect(result.svg).toContain('height="12"');
+  });
+
+  /**
+   * **`%` や単位つきの大きさは、割り出しへ倒す。** `width="100%"` の飾りは
+   * リーダーによって面いっぱいに広がり、本文が1行も見えない面ができる。
+   */
+  test("大きさが数値でなければ viewBox から割り出す", () => {
+    const result = sanitizeOrnamentSvg(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 24" width="100%" height="100%"><path d="M0 0" /></svg>'
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.svg).toContain('width="24"');
+    expect(result.svg).toContain('height="12"');
+    expect(result.svg).not.toContain("100%");
   });
 
   test("名前空間が無ければ足す（XHTMLの中で絵にならないため）", () => {

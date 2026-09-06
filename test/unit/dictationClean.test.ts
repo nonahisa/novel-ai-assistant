@@ -14,6 +14,8 @@ import {
   parseDictationCleanResult,
   validateDictationClean,
 } from "../../src/core/dictationCleanValidation";
+import { applyDictationText } from "../../src/features/dictationClean";
+import { EndOfLine, WorkspaceEdit, workspace } from "./support/vscodeStub";
 import { EXTRA_GUIDE, buildGuideBundles } from "../../src/features/featureGuide";
 import { allActions } from "../../src/views/actionList";
 import { COMMAND_FEATURES } from "../../src/core/workTypeVisibility";
@@ -244,6 +246,24 @@ describe("整えた本文を、本文へ入れてよいかの検証", () => {
  * **ずれた範囲を置き換えると、口述していない部分まで巻き込む。**
  */
 describe("本文への当て方", () => {
+  type ApplyInput = Parameters<typeof applyDictationText>[0];
+
+  /** 範囲は当て込みの記録を見るだけなので、中身は要らない */
+  const ANY_RANGE = {} as unknown as ApplyInput["range"];
+
+  /** 改行コードだけが違う、作り物の文書。`getText` は範囲を見ない */
+  function fakeDocument(text: string, eol: EndOfLine): ApplyInput["document"] {
+    return {
+      uri: { toString: () => "file:///a.txt" },
+      eol,
+      getText: () => text,
+    } as unknown as ApplyInput["document"];
+  }
+  const crlfDocument = (text: string): ApplyInput["document"] =>
+    fakeDocument(text, EndOfLine.CRLF);
+  const lfDocument = (text: string): ApplyInput["document"] =>
+    fakeDocument(text, EndOfLine.LF);
+
   test("照合と WorkspaceEdit を通している", () => {
     const source = readFileSync("src/features/dictationClean.ts", "utf8");
 
@@ -286,6 +306,115 @@ describe("本文への当て方", () => {
     expect(source).toContain('executeCommand("undo")');
   });
 
+  /**
+   * **改行コードを保つ**（実装ルール1）。整えた本文はLFしか持たないので、
+   * CRLFの原稿へそのまま入れると、その範囲だけ改行が `\n` 単独になる
+   * ——同じファイルの中で改行コードが混ざり、次の差分が丸ごと膨らむ。
+   */
+  test("CRLFの文書へは、CRLFへ直してから入れる", async () => {
+    const recorded: WorkspaceEdit[] = [];
+    const original = workspace.applyEdit;
+    workspace.applyEdit = async (edit) => {
+      recorded.push(edit as WorkspaceEdit);
+      return true;
+    };
+    try {
+      const applied = await applyDictationText({
+        document: crlfDocument("いちにち\r\nあるいた"),
+        range: ANY_RANGE,
+        // 送るのも照らし合わせるのもLF空間（画面と揃える）
+        sentText: "いちにち\nあるいた",
+        cleanedText: "一日、\n歩いた。",
+      });
+
+      expect(applied).toBe(true);
+      const inserted = recorded[0].replacements[0].text;
+      expect(inserted).toBe("一日、\r\n歩いた。");
+      // `\n` 単独が1つも混ざらないこと
+      expect(/(?:^|[^\r])\n/.test(inserted)).toBe(false);
+    } finally {
+      workspace.applyEdit = original;
+    }
+  });
+
+  test("LFの文書はそのまま（余計なCRを足さない）", async () => {
+    const recorded: WorkspaceEdit[] = [];
+    const original = workspace.applyEdit;
+    workspace.applyEdit = async (edit) => {
+      recorded.push(edit as WorkspaceEdit);
+      return true;
+    };
+    try {
+      await applyDictationText({
+        document: lfDocument("いちにち\nあるいた"),
+        range: ANY_RANGE,
+        sentText: "いちにち\nあるいた",
+        cleanedText: "一日、\n歩いた。",
+      });
+
+      expect(recorded[0].replacements[0].text).toBe("一日、\n歩いた。");
+    } finally {
+      workspace.applyEdit = original;
+    }
+  });
+
+  /** CRLFの文書でも、送った時点と同じかを見分けられること（LF空間で照合） */
+  test("CRLFの文書でも、変わっていなければ置き換える", async () => {
+    const original = workspace.applyEdit;
+    let applied = false;
+    workspace.applyEdit = async () => {
+      applied = true;
+      return true;
+    };
+    try {
+      const ok = await applyDictationText({
+        document: crlfDocument("いちにち\r\nあるいた"),
+        range: ANY_RANGE,
+        sentText: "いちにち\nあるいた",
+        cleanedText: "一日、歩いた。",
+      });
+
+      expect(ok).toBe(true);
+      expect(applied).toBe(true);
+    } finally {
+      workspace.applyEdit = original;
+    }
+  });
+
+  test("送った時点と違っていれば、書き込みまで行かない", async () => {
+    const original = workspace.applyEdit;
+    let applied = false;
+    workspace.applyEdit = async () => {
+      applied = true;
+      return true;
+    };
+    try {
+      const ok = await applyDictationText({
+        document: crlfDocument("いちにち\r\nはしった"),
+        range: ANY_RANGE,
+        sentText: "いちにち\nあるいた",
+        cleanedText: "一日、歩いた。",
+      });
+
+      expect(ok).toBe(false);
+      expect(applied).toBe(false);
+    } finally {
+      workspace.applyEdit = original;
+    }
+  });
+
+  /**
+   * **`undo` は「いま開いている文書」に効く。** 通知は消えずに残るので、
+   * 押すまでに別のファイルへ移っていることがある——確かめずに実行すると、
+   * 整えた原稿ではなく**別の文書の編集が1つ戻る**。
+   */
+  test("「元に戻す」は、同じ文書が開いているときだけ undo する", () => {
+    const source = readFileSync("src/features/dictationClean.ts", "utf8");
+
+    expect(source).toContain("vscode.window.activeTextEditor?.document.uri");
+    expect(source).toContain("元の文書を開いて Ctrl+Z");
+  });
+
   test("入口ごとに entry を渡している（写しの分岐を作らない）", () => {
     const extension = readFileSync("src/extension.ts", "utf8");
 
@@ -326,13 +455,43 @@ describe("口述モードの画面（原稿エディタ）", () => {
   });
 
   test("「整える」は開始位置から現在のカーソルまでを送る", () => {
-    expect(html).toContain(
-      'vscode.postMessage({ type: "dictationClean", from: from, to: to })'
+    expect(html).toContain('type: "dictationClean"');
+    // カーソルが**巻き戻っている**ときだけ、文末までを範囲にする
+    expect(html).toContain("caret > from ? caret : text.length");
+  });
+
+  /**
+   * **カーソルが読めないときは中止する**（「口述」ボタン側と同じ）。
+   * 読めないまま文末までを範囲にすると、口述していない後ろの本文まで
+   * AIへ送って書き換えることになる。
+   */
+  test("カーソルの位置が読めないときは、文末まで広げずに中止する", () => {
+    const clean = html.slice(
+      html.indexOf('dictateCleanButton.addEventListener("click"')
     );
-    // カーソルが開始より前なら、文末までを範囲にする
-    expect(html).toContain(
-      "caret !== null && caret > from ? caret : dictationTextNow().length"
+    const body = clean.slice(0, clean.indexOf("\n  });"));
+
+    expect(body).toContain("caret === null");
+    expect(body).toContain("カーソルの位置が分かりません");
+    // 中止の道が、そのまま送信へ落ちていないこと
+    expect(body.indexOf("caret === null")).toBeLessThan(
+      body.indexOf("postMessage")
     );
+    // 「読めなければ文末」の逃げ道を残さない
+    expect(body).not.toContain("caret !== null");
+  });
+
+  /**
+   * **画面の本文も一緒に送る。** 打鍵は少し遅れて文書へ届くので、話し
+   * 終えてすぐ押すと位置だけが先に着く——ずれた範囲を整えると、口述して
+   * いないところまで書き換わる。
+   */
+  test("範囲の本文も送り、拡張機能側が文書と突き合わせる", () => {
+    expect(html).toContain("text: text.slice(from, to)");
+
+    const editor = readFileSync("src/features/manuscriptEditor.ts", "utf8");
+    expect(editor).toContain("toLf(document.getText(range)) !== message.text");
+    expect(editor).toContain("本文の反映を待っています");
   });
 
   /**

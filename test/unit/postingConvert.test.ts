@@ -50,6 +50,18 @@ describe("貼り付け先ごとの変換", () => {
     expect(result.note).toBeUndefined();
   });
 
+  /**
+   * **前後の空行を、変換が勝手に落とさない**（0.37.5）。選んだ範囲を
+   * コピーする経路では、作者が空けた行そのものが選択の一部である
+   * ——落とすかどうかは、落としてきた入口（`bodyForPosting`）が決める。
+   */
+  it("投稿サイトでは、前後の空行をそのまま残す", () => {
+    const source = "\n\n本文。\n\n";
+    expect(convertForPosting(source, KAKUYOMU).text).toBe(
+      toSiteNotation(source, KAKUYOMU.style, KAKUYOMU.emphasis)
+    );
+  });
+
   /** シーンメモは作者の付箋。**どの貼り付け先でも公開しない**（設計書6.40.2） */
   it("シーンメモは、どちらの経路でも落ちる", () => {
     expect(convertForPosting("// 付箋\n本文", NOTE).text).toBe("本文");
@@ -113,6 +125,27 @@ describe("noteへコピーしたときの知らせ", () => {
     );
     expect(message).toContain("表はコピペでは入りません");
   });
+
+  /**
+   * **文どうしを繋げない。** 注意（`NOTE_UNSUPPORTED`）は句点で終わって
+   * いないので、そのまま連ねると「…出ません（印は外れます）目次は…」と
+   * 1文に見える。句点を補い、空白で区切る。
+   */
+  it("知らせは、句点と空白で区切って並べる", () => {
+    const message = noteCopyMessage(
+      {
+        ...base,
+        body: "本文",
+        warnings: ["斜体はnoteでは出ません（印は外れます）"],
+      },
+      10
+    );
+
+    expect(message).toContain("（印は外れます）。");
+    expect(message).toContain("。 ");
+    // 句点の直後に次の文が続く形を作らない
+    expect(message).not.toMatch(/。[^\s]/);
+  });
 });
 
 /**
@@ -142,21 +175,35 @@ describe("どの入口も、同じ変換を通る", () => {
     throw new Error(`${signature} の終わりが見つかりません`);
   }
 
+  /**
+   * `notice` は「コピーの知らせも同じ関数を通すか」。**投稿キットだけ false**
+   * ——あちらは通知ではなく選択画面で案内を出し続ける形なので、
+   * `showPostingCopyNotice`（押すと閉じる通知）は置けない。
+   */
   const entries = [
-    ["普通のエディタ", "src/features/ruby.ts", "export async function copyForPosting("],
+    [
+      "普通のエディタ",
+      "src/features/ruby.ts",
+      "export async function copyForPosting(",
+      true,
+    ],
     [
       "作品一覧の右クリック",
       "src/features/episodeCopy.ts",
       "export async function copyBodyForPosting(",
+      true,
     ],
     [
       "原稿エディタ",
       "src/features/manuscriptEditor.ts",
       "private async copyForPosting(",
+      true,
     ],
+    // 4つ目の入口（設計書6.68）。ここだけ別の変換を通していた
+    ["投稿キット", "src/features/postingKit.ts", "async function walkSite(", false],
   ] as const;
 
-  for (const [name, file, signature] of entries) {
+  for (const [name, file, signature, notice] of entries) {
     it(`${name}：貼り付け先ごとの分岐を自分で持たない`, () => {
       const body = bodyOf(file, signature);
       expect(body).toContain("convertForPosting(");
@@ -169,6 +216,8 @@ describe("どの入口も、同じ変換を通る", () => {
       // 記法を読み分けられる `convertForPosting` の側にしかない
       expect(bodyOf(file, signature)).not.toContain("stripMemoLines(");
     });
+
+    if (!notice) continue;
 
     it(`${name}：noteのときの知らせも、同じ関数を通る`, () => {
       // 入口ごとに文面を書くと、「画像は入りません」を言い忘れる口ができる
