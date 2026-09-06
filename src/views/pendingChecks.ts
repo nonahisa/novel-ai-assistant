@@ -114,6 +114,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 11,
   },
   {
+    id: "A-18",
+    title: "設定資料の人物が分裂している",
+    commands: [],
+    count: 4,
+  },
+  {
     id: "B-1",
     title: "ルビのプレビュー",
     commands: ["novelai.convertToMarkdown"],
@@ -441,7 +447,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-43",
     title: "人物相関図",
     commands: ["novelai.openRelationGraph", "novelai.openSettingsPanel"],
-    count: 9,
+    count: 2,
   },
   {
     id: "F-42",
@@ -519,7 +525,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-30",
     title: "伏線のAI検知",
     commands: ["novelai.checkForeshadows", "novelai.checkForeshadowResolution", "novelai.setForeshadowStatus"],
-    count: 8,
+    count: 7,
   },
   {
     id: "F-29",
@@ -728,4 +734,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 860;
+export const PENDING_CHECK_TOTAL = 856;
