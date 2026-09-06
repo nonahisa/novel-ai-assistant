@@ -20,6 +20,8 @@ import { readFileSync } from "node:fs";
 const posted: Array<{ category: string; items: unknown[] }> = [];
 const notified: string[] = [];
 const warned: string[] = [];
+/** ステータスバーへ出た「その場限りの完了」（`views/notify.ts`） */
+const statusBar: string[] = [];
 
 vi.mock("vscode", () => {
   const noop = () => undefined;
@@ -35,6 +37,17 @@ vi.mock("vscode", () => {
         return Promise.resolve(undefined);
       }),
       showErrorMessage: vi.fn(),
+      // 完了はステータスバーへ出る（通知センターへ積まない）
+      setStatusBarMessage: vi.fn((text: string) => {
+        statusBar.push(text);
+        return { dispose: noop };
+      }),
+      // 同じ文言が操作ログにも残る。中身はこのテストの関心ではない
+      createOutputChannel: () => ({
+        appendLine: noop,
+        show: noop,
+        dispose: noop,
+      }),
     },
     workspace: {
       getConfiguration: () => ({ get: (_k: string, d?: unknown) => d }),
@@ -137,6 +150,7 @@ function shownContradiction(): {
 beforeEach(() => {
   posted.length = 0;
   notified.length = 0;
+  statusBar.length = 0;
   warned.length = 0;
 });
 
@@ -226,7 +240,10 @@ describe("矛盾を伏線として登録する", () => {
     // 状態そのものは「無視」と同じ（＝片付いた）。**理由だけを分ける**
     expect(item.status).toBe("dismissed");
     expect(item.dismissReason).toBe("伏線として登録しました");
-    expect(notified.join("\n")).toContain("伏線として登録しました");
+    // **完了はステータスバーへ出す**（`views/notify.ts`）。読み捨ての報告を
+    // 通知センターへ積むと、返事を待っている確認カードが下へ押し出される
+    expect(statusBar.join("\n")).toContain("伏線として登録しました");
+    expect(notified.join("\n")).not.toContain("伏線として登録しました");
   });
 
   test("同じ矛盾を二度登録しない", async () => {

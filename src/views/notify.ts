@@ -17,6 +17,9 @@ import { logStep, showLog } from "../core/logger";
  * 1. **実行してよいかの確認** → モーダル（`confirmRun`）。
  *    ほかの通知に埋もれないし、答えるまで先へ進まない。
  *    モーダルは `Esc` で閉じられるので「中止」ボタンは置かない
+ *    （VS Codeがモーダルへ「キャンセル」を必ず付けるので、
+ *    出口が無くなることもない）。
+ *    **取り消しにくい操作は `kind: "warning"` で警告の顔にする**
  * 2. **その場限りの完了** → ステータスバー＋操作ログ（`notifyDone`）。
  *    「コピーした」「設定した」「中止した」「解消を確認した」「切り替えた」
  *    「登録した」のように、**件数・理由・保存先を伴わない**もの。
@@ -50,20 +53,44 @@ export function notifyDone(text: string): void {
 }
 
 /**
+ * 確認カードの顔つき。
+ *
+ * **取り消しにくい操作を、情報の顔で訊かない。** 人物をまとめる・
+ * GitHubへ送信する・履歴に記録するは、押したあとで戻すのが難しい。
+ * もともと `showWarningMessage` で出していたものが、0.35.3 で
+ * `confirmRun` へ移った拍子に情報アイコンになっていた（0.35.4で戻す）。
+ */
+export type ConfirmKind = "info" | "warning";
+
+export interface ConfirmOptions {
+  /** 既定は `"info"`。取り消しにくい操作だけ `"warning"` にする */
+  kind?: ConfirmKind;
+}
+
+/**
  * 実行してよいかを確かめる。**モーダルで出す。**
  *
  * 戻りは「押したかどうか」。`Esc` で閉じられたときは false になるので、
- * 呼び出し側に「中止」ボタンを足す必要はない。
+ * 呼び出し側に「中止」ボタンを足す必要はない。VS Codeはモーダルへ
+ * 「キャンセル」を必ず付けるため、押して閉じる道も残っている。
  */
 export async function confirmRun(
   message: string,
-  runLabel = "実行"
+  runLabel = "実行",
+  options: ConfirmOptions = {}
 ): Promise<boolean> {
-  const answer = await vscode.window.showInformationMessage(
-    message,
-    { modal: true },
-    runLabel
-  );
+  // 顔つきが違うだけで、訊き方（モーダル・ボタン1つ）は同じにする。
+  // 揃えておかないと、警告のときだけ操作の手順が変わって見える。
+  // **関数を変数へ取り出さずに呼ぶ**——`vscode.window` から外すと
+  // 受け手（this）が外れる実装があり得るため
+  const answer =
+    options.kind === "warning"
+      ? await vscode.window.showWarningMessage(message, { modal: true }, runLabel)
+      : await vscode.window.showInformationMessage(
+          message,
+          { modal: true },
+          runLabel
+        );
   return answer === runLabel;
 }
 

@@ -18,6 +18,7 @@ import {
 import { sourceForPostingCopy } from "../core/episodeCopy";
 import { stripMemoLines } from "../core/sceneMemo";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
+import { notifyDone } from "../views/notify";
 
 /**
  * ルビの操作（設計書6.12）。
@@ -173,7 +174,7 @@ export async function copyForPosting(): Promise<void> {
 
   await vscode.env.clipboard.writeText(converted);
   const scope = selection.isEmpty ? "本文全体" : "選んだ範囲";
-  void vscode.window.showInformationMessage(
+  notifyDone(
     `${scope}を${style.label}に変換して、クリップボードへ入れました。` +
       "原稿はそのままです。"
   );

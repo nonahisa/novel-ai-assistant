@@ -442,7 +442,9 @@ ${reason}` : ""}`,
     const confirmed = await confirmRun(
       `「${work.title}」のコミット ${status.ahead} 件を ${status.upstream} へ送信します。` +
         (companions ? `\n${companions}` : ""),
-      "送信する"
+      "送信する",
+      // **外（GitHub）へ出たものは引っ込められない**ので警告の顔で訊く（0.35.4）
+      { kind: "warning" }
     );
     if (!confirmed) return false;
 

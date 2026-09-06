@@ -158,3 +158,87 @@ describe("ログへの入口つきの警告", () => {
     }
   });
 });
+
+/**
+ * 取り消しにくい操作は、警告の顔で確かめる（0.35.4）。
+ *
+ * 0.35.3 で `confirmRun` へ移したとき、人物をまとめる・GitHubへ送信する
+ * ような**取り消しにくい操作まで情報アイコン**になった。もとは
+ * `showWarningMessage` で出しており、見た目で身構えられていた。
+ *
+ * モーダルには VS Code が「キャンセル」を必ず付けるので、
+ * 出口が無くなる心配は無い。
+ */
+describe("確認の顔つき", () => {
+  test("既定は情報の顔（showInformationMessage）", async () => {
+    const calls: unknown[][] = [];
+    const original = window.showInformationMessage;
+    window.showInformationMessage = async (message, ...items) => {
+      calls.push([message, ...items]);
+      return "実行";
+    };
+    try {
+      expect(await confirmRun("19話をAIで確認します。")).toBe(true);
+      expect(calls).toHaveLength(1);
+    } finally {
+      window.showInformationMessage = original;
+    }
+  });
+
+  test("kind: \"warning\" なら警告の顔（showWarningMessage）で出す", async () => {
+    const warnCalls: unknown[][] = [];
+    const infoCalls: unknown[][] = [];
+    const originalWarn = window.showWarningMessage;
+    const originalInfo = window.showInformationMessage;
+    window.showWarningMessage = async (message, ...items) => {
+      warnCalls.push([message, ...items]);
+      return "まとめる";
+    };
+    window.showInformationMessage = async (message, ...items) => {
+      infoCalls.push([message, ...items]);
+      return undefined;
+    };
+    try {
+      expect(
+        await confirmRun("2人をまとめます。", "まとめる", { kind: "warning" })
+      ).toBe(true);
+      expect(warnCalls).toEqual([
+        ["2人をまとめます。", { modal: true }, "まとめる"],
+      ]);
+      // 情報の顔では出さない（二重に出さない）
+      expect(infoCalls).toEqual([]);
+    } finally {
+      window.showWarningMessage = originalWarn;
+      window.showInformationMessage = originalInfo;
+    }
+  });
+
+  test("警告の顔でも、押さなければ false", async () => {
+    const original = window.showWarningMessage;
+    window.showWarningMessage = async () => undefined;
+    try {
+      expect(
+        await confirmRun("送信します。", "送信する", { kind: "warning" })
+      ).toBe(false);
+    } finally {
+      window.showWarningMessage = original;
+    }
+  });
+
+  test("kind: \"info\" を明示しても、情報の顔のまま", async () => {
+    const calls: unknown[][] = [];
+    const original = window.showInformationMessage;
+    window.showInformationMessage = async (message, ...items) => {
+      calls.push([message, ...items]);
+      return "実行";
+    };
+    try {
+      expect(await confirmRun("確かめます。", "実行", { kind: "info" })).toBe(
+        true
+      );
+      expect(calls).toHaveLength(1);
+    } finally {
+      window.showInformationMessage = original;
+    }
+  });
+});

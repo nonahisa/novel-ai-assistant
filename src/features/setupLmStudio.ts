@@ -17,6 +17,7 @@ import {
 import { canRunProcesses } from "../core/runtime";
 import { logStep } from "../core/logger";
 import { askText } from "../views/dialogs";
+import { notifyDone } from "../views/notify";
 import { withCancellableProgress, withProgress } from "../views/progress";
 
 /**
@@ -299,7 +300,5 @@ async function askContextWindow(provider: LmStudioProvider): Promise<void> {
   // 作品ごとではなく、この機械全体の設定にする。LM Studioの読み込み方は
   // 作品ではなく機械の側の事情で決まる
   await configuration.update("lmstudio.contextWindow", value, true);
-  vscode.window.showInformationMessage(
-    `コンテキスト長を ${value} にしました。`
-  );
+  notifyDone(`コンテキスト長を ${value} にしました。`);
 }

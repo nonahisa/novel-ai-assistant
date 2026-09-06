@@ -22,6 +22,8 @@ import { readFileSync } from "node:fs";
 const posted: Array<{ category: string; items: unknown[] }> = [];
 const notified: string[] = [];
 const warned: string[] = [];
+/** ステータスバーへ出た「その場限りの完了」（`views/notify.ts`） */
+const statusBar: string[] = [];
 
 vi.mock("vscode", () => {
   const noop = () => undefined;
@@ -37,6 +39,17 @@ vi.mock("vscode", () => {
         return Promise.resolve(undefined);
       }),
       showErrorMessage: vi.fn(),
+      // 完了はステータスバーへ出る（通知センターへ積まない）
+      setStatusBarMessage: vi.fn((text: string) => {
+        statusBar.push(text);
+        return { dispose: noop };
+      }),
+      // 同じ文言が操作ログにも残る。中身はこのテストの関心ではない
+      createOutputChannel: () => ({
+        appendLine: noop,
+        show: noop,
+        dispose: noop,
+      }),
     },
     workspace: {
       getConfiguration: () => ({ get: (_k: string, d?: unknown) => d }),
@@ -187,6 +200,7 @@ function contradictionsOf(panel: ProposalPanel): Array<{
 beforeEach(() => {
   posted.length = 0;
   notified.length = 0;
+  statusBar.length = 0;
   warned.length = 0;
   recheckCalls.length = 0;
   nextOutcome = { kind: "resolved", reason: "設定どおりの表記に直っています" };
@@ -276,6 +290,10 @@ describe("結果の反映", () => {
     expect(
       (latest().items[0] as { recheckNote?: string }).recheckNote
     ).toContain("解消を確認しました");
+    // **完了はステータスバーへ出す**（`views/notify.ts`）。件数も保存先も
+    // 伴わない読み捨ての報告なので、通知センターへは積まない
+    expect(statusBar.join("\n")).toContain("解消を確認しました");
+    expect(notified.join("\n")).not.toContain("解消を確認しました");
     // 残りの件数からも外れる
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((panel as any).view.badge).toBeUndefined();

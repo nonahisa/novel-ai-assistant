@@ -51,6 +51,10 @@ import {
   type EmphasisSite,
 } from "../core/ruby";
 import {
+  extractEpisodeParts,
+  sourceForPostingCopy,
+} from "../core/episodeCopy";
+import {
   MEMO_LINE_PREFIX,
   memoColorVars,
   stripMemoLines,
@@ -478,12 +482,20 @@ export async function waitFor<T>(
 const markdownAsked = new Set<string>();
 
 /**
- * 画面へ出す字数。**数え方は他の画面と揃える**（純／総の設定、ルビを数えるか）。
- * ここだけ違う数字が出ると、どちらが本当か分からなくなる。
+ * 画面へ出す字数。**数え方は他の画面と揃える**（純／総の設定、ルビを数えるか、
+ * そして**頭書きを外すこと**）。ここだけ違う数字が出ると、
+ * どちらが本当か分からなくなる。
  */
-function countFor(text: string): number {
+export function countForDisplay(text: string): number {
+  // **頭書き（【タイトル】〜【本文】）は数えない**（作者の裁定 2026-09-06）。
+  // 作品一覧（`core/scanner.ts`）が本文だけを数えているので、そのままだと
+  // 同じ話に2つの字数が出る（実データで 5,529字 と 5,672字 に割れた）。
+  // 切り方は `episodeCopy.extractEpisodeParts` の1か所に集めてある——
+  // ここへ写しを作ると、片方だけが直る日が来る。
+  // 頭書きの無い原稿では全文がそのまま返るので、これまでの数字は変わらない
+  const body = extractEpisodeParts(text, null).body;
   return pickCount(
-    countChars(text, excludeRubyFromCount()),
+    countChars(body, excludeRubyFromCount()),
     currentCountMode()
   );
 }
@@ -1270,7 +1282,7 @@ export class ManuscriptEditorProvider
     panel: vscode.WebviewPanel,
     text: string
   ): Promise<void> {
-    const value = countFor(text);
+    const value = countForDisplay(text);
     await panel.webview.postMessage({
       type: "count",
       // **下段の「このファイル」はこの数字を使う**（作者の指示、2026-08-29）。
@@ -1306,7 +1318,7 @@ export class ManuscriptEditorProvider
       await panel.webview.postMessage({
         type: "counts",
         workTotal: pickCount(stats.totals, currentCountMode()),
-        fileAtBase: countFor(toLf(document.getText())),
+        fileAtBase: countForDisplay(toLf(document.getText())),
         today,
       });
     } catch (error) {
@@ -1704,8 +1716,13 @@ export class ManuscriptEditorProvider
     if (!style) return;
 
     // **シーンメモは投稿しない**（設計書6.40.2）。この画面ではメモを
-    // 消さずに見せているので、外へ出す唯一の口であるここで落とす
-    const source = stripMemoLines(document.getText());
+    // 消さずに見せているので、外へ出す唯一の口であるここで落とす。
+    //
+    // **頭書き（【タイトル】〜【本文】）も外す**（`sourceForPostingCopy`、
+    // 設計書6.12.1）。全文をそのまま渡していたので、投稿欄へ貼ると題名の
+    // 行から二重に入っていた。**普通のエディタ側（`features/ruby.ts`）と
+    // 同じ経路を通す**——切り方を写すと、片方だけが直る日が来る
+    const source = stripMemoLines(sourceForPostingCopy(document.getText()));
 
     // **傍点が入っているときだけ、貼り付け先を訊く**（設計書6.12.4）。
     // ルビはどのサイトでも同じ書き方で通る

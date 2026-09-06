@@ -7,6 +7,7 @@ import {
   type AssignableFeature,
   type ProviderAndModelPick,
 } from "../ai/registry";
+import { TYPO_MODEL_ADVICE } from "../core/requirements";
 import { cancelItem } from "../views/dialogs";
 import { notifyDone } from "../views/notify";
 
@@ -77,6 +78,10 @@ async function pickFeature(
           description: assigned
             ? `割当: ${provider?.displayName ?? assigned.provider} / ${assigned.model}`
             : "既定のAIを使う",
+          // **モデルの大きさで結果が変わる機能だけ、その場で言う**
+          // （作者の裁定 2026-09-06）。全部の行に説明を付けると、
+          // 肝心の1行が埋もれる
+          detail: feature === "typo" ? TYPO_MODEL_ADVICE : undefined,
           feature,
         };
       }),

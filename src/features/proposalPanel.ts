@@ -55,6 +55,7 @@ import type { NotationAdviceGroup } from "../prompts/notationAdvice";
 import { locateAppliedSuggestion } from "../core/proposalUndo";
 import { revealTextLocation } from "./revealLocation";
 import { openInDefaultEditor } from "../views/openDocument";
+import { notifyDone } from "../views/notify";
 
 /**
  * 提案パネル（誤字脱字）。
@@ -1410,9 +1411,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       suggestion: describeContradiction(item),
     });
 
-    void vscode.window.showInformationMessage(
-      "伏線として登録しました（伏線の一覧で見られます）。"
-    );
+    notifyDone("伏線として登録しました（伏線の一覧で見られます）。");
   }
 
   /**
@@ -2193,7 +2192,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     target.status = "resolved";
     target.recheckNote = note;
     this.postItems();
-    void vscode.window.showInformationMessage(
+    notifyDone(
       `解消を確認しました（${target.fileName} ${target.line}行目）。` +
         "一覧から外します。"
     );

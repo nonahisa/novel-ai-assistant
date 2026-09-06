@@ -102,7 +102,10 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
       `別名: ${unified.aliases.join("、") || "なし"}\n` +
       "まとめた側のファイルは削除せず、回復用の場所へ移します。\n" +
       "以後この人物は抽出で上書きされなくなります。",
-    "まとめる"
+    "まとめる",
+    // **取り消しにくいので警告の顔で訊く**（0.35.4）。まとめた側のファイルは
+    // 回復用の場所へ移るだけとはいえ、戻すのは手作業になる
+    { kind: "warning" }
   );
   if (!confirmed) return;
 

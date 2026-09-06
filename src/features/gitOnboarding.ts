@@ -253,7 +253,9 @@ async function startTracking(
   const recordConfirmed = await confirmRun(
     `${count} 件のファイルを1つ目の記録として残します。\n` +
       "（キャッシュなど、同期しない設定のものは除いています）",
-    "記録する"
+    "記録する",
+    // **履歴に残したものは消さない**（設計書5.5）ので警告の顔で訊く（0.35.4）
+    { kind: "warning" }
   );
   if (!recordConfirmed) return false;
 
