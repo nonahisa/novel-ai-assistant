@@ -163,3 +163,94 @@ describe("「投稿サイト用に変換してコピー」は1段しか訊かな
     expect(copyForPosting()).toContain("pickPostingTarget(registered)");
   });
 });
+
+/**
+ * **入口は3つある**（設計書6.12.4）。普通のエディタ（`features/ruby.ts`）、
+ * 作品一覧の右クリック（`features/episodeCopy.ts`）、原稿エディタ
+ * （`features/manuscriptEditor.ts`）。**同じ操作なのに訊かれ方が違う**と、
+ * 作者からは別の機能に見える——0.36.5 では普通のエディタだけが1段だった。
+ */
+describe("残る2つの入口も、同じ1段の訊き方を通る", () => {
+  /**
+   * 関数の中身だけを切り出す。
+   *
+   * **波括弧を数えて閉じるところまでにする。** 「次の関数の手前まで」だと
+   * 関数のあいだにある説明文まで拾い、そこに書かれた語で判定が揺れる。
+   */
+  function bodyOf(file: string, signature: string): string {
+    const source = readFileSync(file, "utf8");
+    const start = source.indexOf(signature);
+    expect(start, `${signature} が ${file} にない`).toBeGreaterThan(-1);
+
+    const open = source.indexOf("{", source.indexOf(")", start));
+    let depth = 0;
+    for (let i = open; i < source.length; i += 1) {
+      if (source[i] === "{") depth += 1;
+      else if (source[i] === "}") {
+        depth -= 1;
+        if (depth === 0) return source.slice(open, i + 1);
+      }
+    }
+    throw new Error(`${signature} の終わりが見つかりません`);
+  }
+
+  const entries = [
+    {
+      name: "作品一覧の右クリック（本文を投稿サイト用にコピー）",
+      body: () =>
+        bodyOf(
+          "src/features/episodeCopy.ts",
+          "export async function copyBodyForPosting("
+        ),
+    },
+    {
+      name: "原稿エディタ（投稿サイト用にコピー）",
+      body: () =>
+        bodyOf(
+          "src/features/manuscriptEditor.ts",
+          "private async copyForPosting("
+        ),
+    },
+  ];
+
+  for (const entry of entries) {
+    test(`${entry.name}：記法を先に訊く画面を通らない`, () => {
+      expect(entry.body()).not.toContain("pickStyle()");
+    });
+
+    test(`${entry.name}：傍点の有無で訊く回数を変えない`, () => {
+      const body = entry.body();
+      expect(body).not.toContain("pickEmphasisSite()");
+      expect(body).not.toContain("hasEmphasis");
+      expect(body).not.toContain("needsEmphasisSite");
+    });
+
+    test(`${entry.name}：訊くのは貼り付け先だけ`, () => {
+      expect(entry.body()).toContain("pickPostingTarget(");
+    });
+
+    test(`${entry.name}：登録済みの投稿先を渡す（先頭に出すため）`, () => {
+      // 台帳を読む処理の写しを作らない（`features/postingCopyRegistered.ts`）
+      expect(entry.body()).toContain("registeredPostingSites(");
+    });
+  }
+
+  test("使われなくなった2段目の画面は残さない", () => {
+    // 呼ぶ人のいない入口を残すと、次に足す画面がそちらを写す
+    const ruby = readFileSync("src/features/ruby.ts", "utf8");
+    expect(ruby).not.toContain("export async function pickStyle(");
+    expect(ruby).not.toContain("export async function pickEmphasisSite(");
+  });
+
+  test("台帳を読む処理は1か所にまとめる（3入口で共有）", () => {
+    const shared = readFileSync(
+      "src/features/postingCopyRegistered.ts",
+      "utf8"
+    );
+    expect(shared).toContain("export async function registeredPostingSites(");
+
+    // extension.ts も自前で持たない（写しがあると片方だけ直る日が来る）
+    const extension = readFileSync("src/extension.ts", "utf8");
+    expect(extension).not.toContain("async function registeredPostingSites(");
+  });
+});

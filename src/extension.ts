@@ -302,8 +302,7 @@ import {
   refreshManuscriptCounts,
   type ManuscriptEditorDeps,
 } from "./features/manuscriptEditor";
-import { PostingStore } from "./core/postingStore";
-import type { PostingSiteId } from "./models/posting";
+import { registeredPostingSites } from "./features/postingCopyRegistered";
 import { showEditHistory } from "./features/editHistoryPanel";
 import {
   reviewProposals,
@@ -4030,9 +4029,11 @@ export async function activate(
     registerCommand("novelai.addRuby", addRuby),
     registerCommand("novelai.addEmphasis", addEmphasis),
     // **貼り付け先は1度だけ訊く**（設計書6.12.4）。登録済みの投稿先を
-    // 先頭に並べたいので、台帳を読むのはここ（画面側は作品を知らない）
+    // 先頭に並べたいが、画面側は作品を知らないので、どの作品かはここで引く
     registerCommand("novelai.copyForPosting", async () => {
-      await copyForPosting(await registeredPostingSites(registry));
+      await copyForPosting(
+        await registeredPostingSites(activePostingCopyWork(registry))
+      );
     }),
     registerCommand("novelai.importRuby", importRuby)
   );
@@ -4186,7 +4187,7 @@ export async function activate(
         ) {
           return;
         }
-        await copyBodyForPosting(node.episode);
+        await copyBodyForPosting(node.work, node.episode);
       }
     ),
     registerCommand(
@@ -4688,35 +4689,20 @@ const CHAT_RUN_COMMANDS: Partial<Record<ChatRunKind, string>> = {
 };
 
 /**
- * いま開いている本文の作品に登録してある投稿先（設計書6.68.2）。
+ * いま開いている本文の作品（設計書6.68.2）。
  *
- * **読めなくても止めない。** ここで要るのは選択肢の並びを決めるための
- * 手がかりだけで、無くてもコピーはできる。台帳が壊れているときに
- * 「投稿サイト用にコピー」まで使えなくなるほうが困る。
+ * 投稿先の台帳を読むのは `features/postingCopyRegistered.ts` に寄せてある——
+ * 入口が3つあるので、読み方と失敗の扱いを写さない。
  */
-async function registeredPostingSites(
-  registry: WorkRegistry
-): Promise<readonly PostingSiteId[]> {
+function activePostingCopyWork(registry: WorkRegistry): WorkEntry | undefined {
   const editor = vscode.window.activeTextEditor;
-  if (!editor) return [];
+  if (!editor) return undefined;
 
   const filePath = fromUri(editor.document.uri);
   // 比べ方は原稿エディタと同じものを使う（前方一致では足りない）
-  const work = registry
+  return registry
     .list()
     .find((entry) => isInsideWork(entry.folderPath, filePath));
-  if (!work) return [];
-
-  try {
-    const ledger = await new PostingStore(work).load();
-    return ledger.sites.map((entry) => entry.site);
-  } catch (error) {
-    logFailure("投稿サイト用のコピー：投稿状態の台帳の読み込み", {
-      work: work.title,
-      error,
-    });
-    return [];
-  }
 }
 
 async function resolveWork(

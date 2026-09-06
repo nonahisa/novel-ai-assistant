@@ -5,13 +5,11 @@ import {
   bodyForPosting,
   extractEpisodeParts,
   nameWithSubtitle,
-  needsEmphasisSite,
 } from "../core/episodeCopy";
 import { readTextFile } from "../core/textFile";
-import { RUBY_STYLES, type EmphasisSite, type RubyStyle } from "../core/ruby";
 // 貼り付け先を訊く画面は1つにする（写すと、片方だけ選べる先が増える）
-import { pickEmphasisSite } from "./ruby";
-import { cancelItem, isCancelItem } from "../views/dialogs";
+import { pickPostingTarget } from "./ruby";
+import { registeredPostingSites } from "./postingCopyRegistered";
 import { recordEdit } from "../core/actorContext";
 import { logFailure } from "../core/logger";
 import { formatChapterLabel, stripChapterLabel } from "../core/episodeLabel";
@@ -50,28 +48,28 @@ export async function copySubtitle(episode: EpisodeFile): Promise<void> {
  * **原稿には触らない。** 貼り付ける先はサイトの投稿欄であって、
  * 手元の原稿を投稿サイト記法へ変えてしまうと次に書くときに困る（6.12.1）。
  */
-export async function copyBodyForPosting(episode: EpisodeFile): Promise<void> {
+export async function copyBodyForPosting(
+  /** 登録してある投稿先を先頭に出すために要る（設計書6.68.2） */
+  work: WorkEntry,
+  episode: EpisodeFile
+): Promise<void> {
   const parts = await read(episode);
   if (!parts) return;
 
-  const style = await pickStyle();
-  if (!style) return;
-
   /*
-    **傍点が入っているときだけ、貼り付け先を訊く**（設計書6.12.4）。
+    **訊くのは貼り付け先だけ。1度だけ**（設計書6.12.4）。
 
-    ここは長らくカクヨム記法で固定されており、なろう・アルファポリスへ
-    貼ると `《《大事》》` がそのまま読者に見えていた（0.30.7で修正）。
-    ルビはどのサイトでも同じ書き方なので、傍点が無ければ訊かない。
+    以前は「どの形で書き出すか（記法）」を訊いてから、傍点が入っている
+    ときだけ「どのサイトへ貼るか」を訊く2段だった。1段目は記法を訊いて
+    おり、作者は自分の貼り付け先がどの記法に当たるのかを逆算させられて
+    いた。**サイトが決まれば記法は決まる**（`POSTING_SITES`）。
+    傍点の有無で訊く回数が変わるのも、作者からは「なぜ今日は2回訊かれる
+    のか」が分からない。
   */
-  let site: EmphasisSite = "kakuyomu";
-  if (needsEmphasisSite(parts.body, style.id)) {
-    const picked = await pickEmphasisSite();
-    if (!picked) return;
-    site = picked;
-  }
+  const target = await pickPostingTarget(await registeredPostingSites(work));
+  if (!target) return;
 
-  const text = bodyForPosting(parts.body, style.id, site);
+  const text = bodyForPosting(parts.body, target.style, target.emphasis);
   if (!text) {
     void vscode.window.showWarningMessage(
       `${episode.fileName} に本文が見つかりませんでした。`
@@ -81,8 +79,8 @@ export async function copyBodyForPosting(episode: EpisodeFile): Promise<void> {
 
   await vscode.env.clipboard.writeText(text);
   void vscode.window.showInformationMessage(
-    `本文（${text.length.toLocaleString("ja-JP")}字）を${style.label}で` +
-      "コピーしました。原稿はそのままです。"
+    `本文（${text.length.toLocaleString("ja-JP")}字）を${target.label}の` +
+      "書き方でコピーしました。原稿はそのままです。"
   );
 }
 
@@ -174,24 +172,4 @@ async function read(
     );
     return undefined;
   }
-}
-
-async function pickStyle(): Promise<RubyStyle | undefined> {
-  const picked = await vscode.window.showQuickPick(
-    [
-      ...RUBY_STYLES.map((style) => ({
-        label: style.label,
-        detail: style.detail,
-        style,
-      })),
-      cancelItem(),
-    ],
-    {
-      title: "どの形でコピーしますか",
-      placeHolder: "投稿する先に合わせて選んでください",
-      ignoreFocusOut: true,
-    }
-  );
-  if (!picked || isCancelItem(picked)) return undefined;
-  return "style" in picked ? picked.style : undefined;
 }

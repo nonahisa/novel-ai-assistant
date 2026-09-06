@@ -5,14 +5,10 @@ import { isPlainTextManuscript } from "../core/markdownConversion";
 import { convertFolder, convertOne } from "./markdownConvert";
 import {
   describeSiteNotation,
-  EMPHASIS_SITES,
   fromSiteNotation,
-  RUBY_STYLES,
   toSiteNotation,
   validateEmphasis,
   validateRuby,
-  type EmphasisSite,
-  type RubyStyle,
 } from "../core/ruby";
 import {
   postingCopyTargets,
@@ -263,32 +259,6 @@ export async function importRuby(): Promise<void> {
 }
 
 /**
- * 傍点の貼り付け先を訊く。
- *
- * **サイト名で選ばせる。** 記法で並べると、作者は自分の貼り付け先が
- * どちらなのかを記号から逆算することになる。
- */
-export async function pickEmphasisSite(): Promise<EmphasisSite | undefined> {
-  const picked = await vscode.window.showQuickPick(
-    [
-      ...EMPHASIS_SITES.map((entry) => ({
-        label: entry.label,
-        detail: entry.detail,
-        site: entry.id,
-      })),
-      cancelItem(),
-    ],
-    {
-      title: "傍点はどのサイトへ貼りますか",
-      placeHolder: "傍点の書き方だけがサイトで違います（ルビは同じです）",
-      ignoreFocusOut: true,
-    }
-  );
-  if (!picked || isCancelItem(picked)) return undefined;
-  return "site" in picked ? picked.site : undefined;
-}
-
-/**
  * 選んだ文字に傍点を付ける。
  *
  * **ルビと違い、選択が要る。** ルビは漢字の直後という手がかりがあるが、
@@ -316,24 +286,4 @@ export async function addEmphasis(): Promise<void> {
   await editor.edit((builder) => {
     builder.replace(range, `{{${base}}}`);
   });
-}
-
-export async function pickStyle(): Promise<RubyStyle | undefined> {
-  const picked = await vscode.window.showQuickPick(
-    [
-      ...RUBY_STYLES.map((style) => ({
-        label: style.label,
-        detail: style.detail,
-        style,
-      })),
-      cancelItem(),
-    ],
-    {
-      title: "どの形で書き出しますか",
-      placeHolder: "投稿する先に合わせて選んでください",
-      ignoreFocusOut: true,
-    }
-  );
-  if (!picked || isCancelItem(picked)) return undefined;
-  return "style" in picked ? picked.style : undefined;
 }

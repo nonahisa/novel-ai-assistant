@@ -44,11 +44,9 @@ import {
 } from "../core/countSettings";
 import { countEpisodeChars } from "../core/episodeCharCount";
 import {
-  hasEmphasis,
   toSiteNotation,
   validateEmphasis,
   validateRuby,
-  type EmphasisSite,
 } from "../core/ruby";
 import { sourceForPostingCopy } from "../core/episodeCopy";
 import {
@@ -57,7 +55,8 @@ import {
   stripMemoLines,
 } from "../core/sceneMemo";
 import { READ_ALOUD_MEMO_TEXT, buildReadingPlan } from "../core/readAloud";
-import { pickEmphasisSite, pickStyle } from "./ruby";
+import { pickPostingTarget } from "./ruby";
+import { registeredPostingSites } from "./postingCopyRegistered";
 import { askText } from "../views/dialogs";
 import { logLine } from "../core/logger";
 import type { TermHighlighter } from "../views/termHighlight";
@@ -1717,10 +1716,21 @@ export class ManuscriptEditorProvider
   }
 
   private async copyForPosting(document: vscode.TextDocument): Promise<void> {
-    // **訊き方は普通のエディタと同じものを使う**（`features/ruby.ts`）。
-    // 画面ごとに選択肢の言葉が違うと、同じ操作に見えなくなる
-    const style = await pickStyle();
-    if (!style) return;
+    /*
+      **訊き方は普通のエディタと同じものを使う**（`features/ruby.ts`）。
+      画面ごとに選択肢の言葉が違うと、同じ操作に見えなくなる。
+
+      **訊くのは貼り付け先だけ。1度だけ**（設計書6.12.4）。以前は記法を
+      先に訊き、傍点が入っているときだけサイトを訊く2段だった。サイトが
+      決まれば記法は決まるので、記法を訊く画面は要らない。
+    */
+    const found = await this.deps.highlighter.indexFor(fromUri(document.uri));
+    const target = await pickPostingTarget(
+      // 作品が引けないことはある（設定資料を読めないときも `undefined`）。
+      // そのときは並びが既定に戻るだけで、コピー自体はできる
+      await registeredPostingSites(found?.work)
+    );
+    if (!target) return;
 
     // **シーンメモは投稿しない**（設計書6.40.2）。この画面ではメモを
     // 消さずに見せているので、外へ出す唯一の口であるここで落とす。
@@ -1731,21 +1741,12 @@ export class ManuscriptEditorProvider
     // 同じ経路を通す**——切り方を写すと、片方だけが直る日が来る
     const source = stripMemoLines(sourceForPostingCopy(document.getText()));
 
-    // **傍点が入っているときだけ、貼り付け先を訊く**（設計書6.12.4）。
-    // ルビはどのサイトでも同じ書き方で通る
-    let site: EmphasisSite = "kakuyomu";
-    if (style.id === "site" && hasEmphasis(source)) {
-      const picked = await pickEmphasisSite();
-      if (!picked) return;
-      site = picked;
-    }
-
     await vscode.env.clipboard.writeText(
-      toSiteNotation(source, style.id, site)
+      toSiteNotation(source, target.style, target.emphasis)
     );
     notifyDone(
-      `本文全体を${style.label}に変換して、クリップボードへ入れました。` +
-        "原稿はそのままです。"
+      `本文全体を${target.label}の書き方に変換して、` +
+        "クリップボードへ入れました。原稿はそのままです。"
     );
   }
 }
