@@ -141,7 +141,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "B-3",
     title: "提案パネルが開くか",
     commands: ["novelai.reviewProposals"],
-    count: 20,
+    count: 10,
   },
   {
     id: "B-5",
@@ -537,7 +537,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-29",
     title: "伏線の台帳",
     commands: ["novelai.openForeshadows", "novelai.addForeshadow", "novelai.checkContradictions"],
-    count: 6,
+    count: 4,
   },
   {
     id: "F-28",
@@ -740,4 +740,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 831;
+export const PENDING_CHECK_TOTAL = 819;
