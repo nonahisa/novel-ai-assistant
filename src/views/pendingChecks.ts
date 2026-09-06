@@ -39,7 +39,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-4",
     title: ".txt → .md の変換",
     commands: ["novelai.convertToMarkdown"],
-    count: 5,
+    count: 2,
   },
   {
     id: "A-5",
@@ -75,7 +75,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-11",
     title: "矛盾検知のまとめ送信",
     commands: ["novelai.checkContradictions"],
-    count: 15,
+    count: 10,
   },
   {
     id: "A-12",
@@ -87,7 +87,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-13",
     title: "縦書きの原稿エディタ",
     commands: ["novelai.openVertical"],
-    count: 56,
+    count: 45,
   },
   {
     id: "A-14",
@@ -740,4 +740,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 849;
+export const PENDING_CHECK_TOTAL = 830;
