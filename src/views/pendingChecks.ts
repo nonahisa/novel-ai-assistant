@@ -465,7 +465,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-41",
     title: "名前の点検と付け替え",
     commands: ["novelai.checkNames", "novelai.renameCharacter", "novelai.applyRenameToRecords"],
-    count: 9,
+    count: 6,
   },
   {
     id: "F-40",
@@ -699,7 +699,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-90",
     title: "読者の反応の取り込みとメニュー分割",
     commands: ["novelai.recordReaderStats", "novelai.importReaderStats"],
-    count: 6,
+    count: 5,
   },
   {
     id: "F-91",
@@ -746,4 +746,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 817;
+export const PENDING_CHECK_TOTAL = 813;
