@@ -4,7 +4,7 @@
 
 > **※現在テスト中です。** 動作の確認（実機テスト）が済んでいない機能が含まれます。大切な原稿は、必ずバックアップ（GitHub同期など）を取ったうえでお使いください。
 
-このリポジトリの版：**0.41.0**（0.40.1〜0.40.9 を含む配布版）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.42.0**（Ollama の流し受信と思考の表示を配布版に）。Marketplace に出ている版はこれより遅れることがあります。
 
 - 原稿を書き換えるAIはいません。提案を適用するのは、いつもあなたです。
 - 手元AI（Ollama / LM Studio）なら無料で、原稿はパソコンの外へ出ません。
@@ -302,6 +302,7 @@ code --install-extension ".\novel-ai-assistant-$($v.TrimStart('v')).vsix" --forc
 | `novelai.ollama.endpoint` | `http://localhost:11434` | OllamaのURL |
 | `novelai.ollama.executablePath` | `""`（自動検出） | `ollama` 実行ファイルの場所 |
 | `novelai.ollama.numCtx` | `0`（自動） | AIへ渡すコンテキスト長。**指定しないと入力が切り捨てられます** |
+| `novelai.ollama.streaming` | `true` | Ollama の応答を流しながら受け取り、相談パネルに考えている中身を流す |
 | `novelai.ollama.timeoutSeconds` | `300` | Ollamaの1回の呼び出しのタイムアウト |
 | `novelai.lmstudio.endpoint` | `http://localhost:1234/v1` | LM StudioのローカルサーバーのURL |
 | `novelai.lmstudio.contextWindow` | `8192` | LM Studioのコンテキスト長。**読み込んだモデルに合わせてください** |

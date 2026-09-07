@@ -1,10 +1,11 @@
 /**
  * Ollamaの応答を**流しながら**受け取る（設計書6.63.1）。
  *
- * **これは開発ビルドでだけ動く実験である。** 配布物には
- * `__DEV_HELPERS__` が false に畳まれて枝ごと落ちる（`esbuild.js`）。
- * 作者がF5で確かめるためのもので、利用者へ出すのは
- * 「通信部品の待ち時間を明示する」ほう（`fetchTimeouts.ts`）である。
+ * **0.42.0 から配布版でも使う**（作者の指示「思考の流れをリリースに組み込んで」）。
+ * 0.41.0 までは開発ビルド限定の実験だった（`__DEV_HELPERS__` で枝ごと落としていた）。
+ * 実機で「考えています…」に思考が流れることを確かめたうえで、設定
+ * `novelai.ollama.streaming`（既定は入）で切れる形にして出す。
+ * 切ると、生成が終わってからまとめて受け取る道（`fetchTimeouts.ts`）に戻る。
  *
  * ## なぜ流すのか
  *
@@ -55,15 +56,44 @@ let overrideEnabled: boolean | undefined;
  * 違う挙動で悩む**ことになる。開発ホストを開き直せば必ず既定へ戻る、が
  * 実験の後始末として確実である。
  *
- * **設定（`novelai.*`）にはしない。** 配布物では枝ごと落ちるので、
- * 設定画面に「何もしない項目」が並ぶことになる。
+ * **0.42.0 からは設定 `novelai.ollama.streaming` が既定の入口**である
+ * （配布版に入ったので、設定画面の項目が「何もしない」ことはなくなった）。
  *
  * **既定を「使う」にしない理由**：単体テストは開発ビルドとして走るので、
  * 既定で有効にすると**テストが実験の側だけを通る**。実際に2件が
  * 通らなくなった（2026-09-02）——配布する道が検査されない状態は危うい。
  */
+/**
+ * 設定 `novelai.ollama.streaming` を読む口（0.42.0）。
+ *
+ * **このファイルは VS Code に依存しない**（純粋な部品として試験する）ので、
+ * 設定の読み方は `extension.ts` が起動時に差し込む。差し込まれていなければ
+ * （単体テスト・環境変数だけの起動）、これまでどおり環境変数を見る。
+ */
+let settingReader: (() => boolean | undefined) | undefined;
+
+export function setStreamingSettingReader(
+  reader: (() => boolean | undefined) | undefined
+): void {
+  settingReader = reader;
+}
+
+/** 環境変数の旗。**ブラウザ版には `process` が無い**ので、無ければ切 */
+function streamingFromEnvironment(): boolean {
+  return (
+    typeof process !== "undefined" &&
+    process.env?.NOVELAI_OLLAMA_STREAM === "1"
+  );
+}
+
+/**
+ * 流して受け取るか。優先順は「走らせたまま切り替えた分 → 設定 → 環境変数」。
+ *
+ * 設定の既定は入（`package.json`）。単体テストでは設定の読み口が無いので
+ * 既定は切のまま——**配布する2つの道（流す・まとめて）の両方が検査される**。
+ */
 export function streamingEnabled(): boolean {
-  return overrideEnabled ?? process.env.NOVELAI_OLLAMA_STREAM === "1";
+  return overrideEnabled ?? settingReader?.() ?? streamingFromEnvironment();
 }
 
 /**

@@ -121,7 +121,8 @@ export function isModelLoadFailure(detail: string): boolean {
 export function willStreamChat(
   params: Pick<GenerateParams, "disableStreaming">
 ): boolean {
-  return __DEV_HELPERS__ && streamingEnabled() && !params.disableStreaming;
+  // 0.42.0 から配布版でも通る（設定 `novelai.ollama.streaming`、既定は入）
+  return streamingEnabled() && !params.disableStreaming;
 }
 
 /**
@@ -499,12 +500,9 @@ export class OllamaProvider implements AIProvider {
     let res: ChatResponse;
     try {
       /*
-        **流して受け取る道は、開発ビルドでだけ通る**（設計書6.63.1）。
-
-        `__DEV_HELPERS__` は本番ビルドで false に畳まれ、esbuild が
-        この枝ごと落とす（`esbuild.js`）。作者がF5で確かめるための実験で、
-        利用者へ出すのは「通信部品の待ち時間を明示する」ほう
-        （`fetchTimeouts.ts`）である。
+        **流して受け取る道**（設計書6.63.1）。0.42.0 から配布版でも通る
+        （設定 `novelai.ollama.streaming`、既定は入）。切ると、生成が
+        終わってからまとめて受け取る道（`fetchTimeouts.ts`）へ戻る。
 
         **呼び出し側が断れる**（`disableStreaming`。2026-09-03）。流す道は
         断片が届くたびに待ち時間を数え直すので、**繰り返しに崩れて書き続ける

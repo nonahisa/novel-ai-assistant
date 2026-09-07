@@ -37,6 +37,7 @@ import {
 import { manuscriptViewTypeFor } from "./core/manuscriptViewTypes";
 import { nextEpisodeFileNameLike } from "./core/episodeRenumber";
 import { WorkFolderWatchers } from "./features/workFolderWatch";
+import { setStreamingSettingReader } from "./ai/ollamaStream";
 import { findLatestEpisode } from "./core/latestEpisode";
 import { scanWork } from "./core/scanner";
 import { SUPPORTED_EXTENSIONS, WorkEntry } from "./models/types";
@@ -1024,6 +1025,11 @@ export async function activate(
   // 起動直後にも数える。前回の抽出で溜まったままのことがある
   refreshActionBadges();
   registry.onDidChange(() => refreshActionBadges());
+  // **Ollama の流し受信の設定を、純粋な部品へ差し込む**（設計書6.63.1、0.42.0）。
+  // `ai/ollamaStream.ts` は VS Code に依存しないので、設定の読み方はここで渡す
+  setStreamingSettingReader(() =>
+    vscode.workspace.getConfiguration("novelai").get<boolean>("ollama.streaming")
+  );
   // **作品フォルダーの本文を見張り、外で変わったら一覧を数え直す**
   // （`features/workFolderWatch.ts`。保存のときだけでは、ルビの適用・
   // 同期・別のエディタでの書き換えが開き直すまで一覧に出なかった）

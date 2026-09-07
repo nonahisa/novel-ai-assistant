@@ -5,6 +5,7 @@ import {
   setStreamingOverride,
   streamingEnabled,
   takeCompleteLines,
+  setStreamingSettingReader,
 } from "../../src/ai/ollamaStream";
 
 /**
@@ -174,6 +175,44 @@ describe("実験の入切", () => {
     // **配布する道が検査されない状態にしない**（既定を入にすると、
     // 単体試験が実験の側だけを通る）
     delete process.env.NOVELAI_OLLAMA_STREAM;
+    expect(streamingEnabled()).toBe(false);
+  });
+});
+
+/**
+ * 0.42.0：配布版でも流し受信を使う（作者の指示「思考の流れをリリースに組み込んで」）。
+ * 設定 `novelai.ollama.streaming` の読み口は `extension.ts` が差し込む。
+ * 優先順は「走らせたまま切り替えた分 → 設定 → 環境変数」。
+ */
+describe("流し受信の入切の優先順（0.42.0）", () => {
+  afterEach(() => {
+    setStreamingOverride(undefined);
+    setStreamingSettingReader(undefined);
+    delete process.env.NOVELAI_OLLAMA_STREAM;
+  });
+
+  it("設定の読み口が無ければ、環境変数だけを見る（単体テストの既定は切）", () => {
+    expect(streamingEnabled()).toBe(false);
+    process.env.NOVELAI_OLLAMA_STREAM = "1";
+    expect(streamingEnabled()).toBe(true);
+  });
+
+  it("設定の読み口があれば、環境変数より設定を優先する", () => {
+    process.env.NOVELAI_OLLAMA_STREAM = "1";
+    setStreamingSettingReader(() => false);
+    expect(streamingEnabled()).toBe(false);
+    setStreamingSettingReader(() => true);
+    expect(streamingEnabled()).toBe(true);
+  });
+
+  it("設定が undefined を返すときは環境変数へ落ちる", () => {
+    setStreamingSettingReader(() => undefined);
+    expect(streamingEnabled()).toBe(false);
+  });
+
+  it("走らせたまま切り替えた分が、設定より優先される", () => {
+    setStreamingSettingReader(() => true);
+    setStreamingOverride(false);
     expect(streamingEnabled()).toBe(false);
   });
 });

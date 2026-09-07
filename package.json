@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを引き受けるVSCode拡張機能で、AIは提案するだけで原稿は書き換えません（無料の手元AIだけでも使えます）。※現在テスト中です。",
-  "version": "0.41.0",
+  "version": "0.42.0",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -1612,6 +1612,11 @@
           "default": 0,
           "minimum": 0,
           "markdownDescription": "AIへ渡すコンテキスト長（トークン）。**0で自動**（モデルの上限と16384の小さい方）。Ollamaは既定値が小さく、指定しないと入力が切り捨てられます。大きくするとメモリ消費が増えます。"
+        },
+        "novelai.ollama.streaming": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Ollama の応答を**流しながら**受け取り、相談パネルの「考えています…」に考えている中身を流します。切ると、生成が終わってからまとめて受け取ります（長い生成は通信の待ち時間で切られることがあります）。"
         },
         "novelai.ollama.timeoutSeconds": {
           "type": "number",
