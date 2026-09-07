@@ -979,15 +979,19 @@ export class SettingsPanel {
    * 読み仮名は入っている。
    */
   private async handleApplyRuby(): Promise<void> {
-    const { applySettingsRuby, collectRubyTerms } = await import(
-      "./applySettingsRuby.js"
-    );
-    const terms = collectRubyTerms([
-      ...this.characters,
-      ...this.abilities,
-      ...this.locations,
-      ...this.organizations,
+    const { applySettingsRuby, collectRubyTerms, pickRubyRecordKinds } =
+      await import("./applySettingsRuby.js");
+    // **どの種類の資料に振るかを先に選ばせる**（作者の裁定、2026-09-08）。
+    // 場所「教室」にまで {教室|きょうしつ} が付いた。読みが要るのは
+    // ほぼ人名なので、既定は人物だけにし、ほかは選べば入る
+    const chosen = await pickRubyRecordKinds([
+      { kind: "character", label: "人物", records: this.characters },
+      { kind: "ability", label: "能力", records: this.abilities },
+      { kind: "location", label: "場所", records: this.locations },
+      { kind: "organization", label: "組織", records: this.organizations },
     ]);
+    if (!chosen) return;
+    const terms = collectRubyTerms(chosen);
     await applySettingsRuby(this.work, terms);
   }
 

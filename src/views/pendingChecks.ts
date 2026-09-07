@@ -69,7 +69,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-10",
     title: "設定資料からルビを振る",
     commands: ["novelai.openSettingsPanel"],
-    count: 5,
+    count: 7,
   },
   {
     id: "A-11",
@@ -82,6 +82,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     title: "チャンクの大きさの設定",
     commands: ["novelai.openExtensionSettings"],
     count: 6,
+  },
+  {
+    id: "A-21",
+    title: "作品を登録すると、詳細メニューからグループが消える",
+    commands: ["novelai.addWork"],
+    count: 3,
   },
   {
     id: "A-20",
@@ -135,7 +141,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "B-2",
     title: "書庫の一括登録",
     commands: ["novelai.addWork"],
-    count: 6,
+    count: 3,
   },
   {
     id: "B-3",
@@ -147,7 +153,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "B-5",
     title: "はじめて開いたときのAI選択",
     commands: ["novelai.setupAI"],
-    count: 3,
+    count: 2,
   },
   {
     id: "C",
@@ -267,7 +273,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-17",
     title: "簡単ステップメニュー",
     commands: [],
-    count: 4,
+    count: 3,
   },
   {
     id: "F-53",
@@ -669,7 +675,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-88",
     title: "ステップメニューのバッジと投稿・告知の新機能",
     commands: ["novelai.showWritingStats", "novelai.generateAnnouncement"],
-    count: 12,
+    count: 9,
   },
   {
     id: "F-89",
@@ -734,4 +740,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 739;
+export const PENDING_CHECK_TOTAL = 736;

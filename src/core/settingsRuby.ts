@@ -68,6 +68,31 @@ function protectedRanges(text: string): Array<[number, number]> {
   return ranges;
 }
 
+/**
+ * すでにルビが振ってある語（ルビの土台の文字列）を集める。
+ *
+ * **「各話の最初の1回だけ」で、その話にもうルビがある語には振らない**
+ * （作者の裁定、2026-09-08）。0.40.5 までは既存のルビを飛ばして次の出現に
+ * 振っていたので、作者が手で振った `{文佳|ふみか}` と、こちらが振った
+ * ものが1話に2つ並んだ。「最初の1回」は「読者がその話で最初に見るとき」
+ * の意味なので、もう振ってあれば済んでいる。
+ *
+ * 傍点（`{{強調}}`）はルビではないので数えない。
+ */
+export function rubiedBases(text: string): Set<string> {
+  const bases = new Set<string>();
+  const patterns = [
+    /\{([^{}|\r\n]+)\|[^{}|\r\n]*\}/g,
+    /[|｜]([^|｜《》\r\n]+)《[^《》\r\n]*》/g,
+    /([一-鿿々]+)《[^《》\r\n]*》/g,
+    /#([^#\r\n]+?)__[^#\r\n]*?__#/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) bases.add(match[1]);
+  }
+  return bases;
+}
+
 function overlaps(
   start: number,
   end: number,
@@ -137,7 +162,8 @@ export function planRubyInsertions(
   const blocked = protectedRanges(text);
   const found: RubyInsertion[] = [];
   const taken: Array<[number, number]> = [];
-  const done = new Set<string>();
+  // 「最初の1回だけ」は、すでにルビのある語を済んだものとして扱う
+  const done = scope === "first" ? rubiedBases(text) : new Set<string>();
 
   for (const term of usable) {
     let from = 0;

@@ -1369,9 +1369,11 @@ describe("シーンメモの付箋", () => {
     }
   });
 
-  it("行頭以外の // は付箋にしない", () => {
+  it("行の途中の // は付箋にしない。字下げした // は付箋にする", () => {
     expect(api.memoIsLine("　彼は https://example.com を開いた。")).toBe(false);
-    expect(api.memoIsLine("　// 字下げのある行")).toBe(false);
+    // 字下げしていてもメモ（作者の裁定、2026-09-08。判定は core の
+    // MEMO_LINE_PATTERN 1本で、画面もそれをそのまま使う）
+    expect(api.memoIsLine("　// 字下げのある行")).toBe(true);
   });
 
   /**

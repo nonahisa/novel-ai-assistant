@@ -283,6 +283,57 @@ export function collectRubyTerms(
   return [...byText.values()];
 }
 
+/** ルビの対象にできる資料の種類（設定資料パネルの4種） */
+export interface RubyRecordGroup {
+  kind: "character" | "ability" | "location" | "organization";
+  label: string;
+  records: ReadonlyArray<{ name: string; reading: string | null }>;
+}
+
+/** 読み仮名の入っているレコードの数（選ぶ画面の説明に出す） */
+export function countReadable(
+  records: ReadonlyArray<{ name: string; reading: string | null }>
+): number {
+  return records.filter(
+    (record) =>
+      record.name?.trim() &&
+      record.reading?.trim() &&
+      record.name.trim() !== record.reading.trim()
+  ).length;
+}
+
+/**
+ * どの種類の資料の読み仮名を振るかを選ぶ（作者の裁定、2026-09-08）。
+ *
+ * **既定は人物だけ。** 読みが要るのはほぼ人名で、場所や能力にまで振ると
+ * 「教室」に {教室|きょうしつ} が付く（実機、2026-09-06）。ほかの種類は
+ * 選べば入る。取りやめか、1つも選ばなければ undefined。
+ */
+export async function pickRubyRecordKinds(
+  groups: readonly RubyRecordGroup[]
+): Promise<Array<{ name: string; reading: string | null }> | undefined> {
+  // `kind` は QuickPickItem が区切り線の種別として持っているので、名前を変える
+  // （同じ名前で違う型を重ねると、交差型が never になって項目を作れない）
+  type KindItem = vscode.QuickPickItem & { recordKind: RubyRecordGroup["kind"] };
+  const items: KindItem[] = groups.map((group) => ({
+    label: group.label,
+    description: `読み仮名のある名前 ${countReadable(group.records)}語`,
+    picked: group.kind === "character",
+    recordKind: group.kind,
+  }));
+  const chosen = await vscode.window.showQuickPick<KindItem>(items, {
+    canPickMany: true,
+    title: "どの資料の読み仮名を振りますか",
+    placeHolder: "複数選べます。人物だけが既定です",
+    ignoreFocusOut: true,
+  });
+  if (!chosen || chosen.length === 0) return undefined;
+  const kinds = new Set(chosen.map((item) => item.recordKind));
+  return groups
+    .filter((group) => kinds.has(group.kind))
+    .flatMap((group) => [...group.records]);
+}
+
 export async function applySettingsRuby(
   work: WorkEntry,
   terms: readonly RubyTerm[]

@@ -49,8 +49,12 @@ describe("付箋の記法（6.40.1）", () => {
    * 先頭の空白を許すと本文と見分けが付かなくなる。
    */
   it("先頭に空白があれば付箋ではない", () => {
-    expect(isMemoLine(" // 半角の字下げ")).toBe(false);
-    expect(isMemoLine("　// 全角の字下げ")).toBe(false);
+    // 字下げしていてもメモ（作者の裁定、2026-09-08。段落の頭に全角空白を
+    // 置く癖で書くと本文扱いになり、字数と投稿用コピーに混ざっていた）
+    expect(isMemoLine(" // 半角の字下げ")).toBe(true);
+    expect(isMemoLine("　// 全角の字下げ")).toBe(true);
+    expect(isMemoLine("	// タブの字下げ")).toBe(true);
+    expect(isMemoLine("　本文の途中の // はメモではない")).toBe(false);
   });
 
   /** URLと会話文を巻き込まない */
@@ -481,7 +485,9 @@ describe("件数の印（6.40.5）", () => {
  */
 describe("メモが無いときの案内", () => {
   it("// を書くと何になるのかを、正しく言う", () => {
-    expect(MEMO_HINT).toBe("本文の行頭に // と書くとメモになります");
+    expect(MEMO_HINT).toBe(
+      "本文の行頭に // と書くとメモになります（字下げしていても構いません）"
+    );
     expect(MEMO_HINT).not.toContain("行頭になります");
   });
 });
