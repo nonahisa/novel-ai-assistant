@@ -57,12 +57,15 @@ export async function openForeshadows(work: WorkEntry): Promise<void> {
       : buildForeshadowMarkdown(loaded.records);
 
   // どの画面で読むかは作者の割り当てに任せる（`openGeneratedMarkdown`）。
-  // 作品の伏線なので、作品の中へ置く（設計書6.17.7）
+  // 作品の伏線なので、作品の中へ置く（設計書6.17.7）。
+  //
+  // **押すたびに増やさない**（作者の実機報告、2026-09-06）。台帳が変わって
+  // いなければ同じ一覧になるので、今日すでに作った同じ中身の1枚を開き直す
   await openGeneratedMarkdown(
     FORESHADOW_LIST_TITLE,
     content,
     { preview: false },
-    { work }
+    { work, reuseSameDay: true }
   );
 }
 

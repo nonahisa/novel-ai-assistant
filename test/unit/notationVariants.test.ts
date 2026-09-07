@@ -220,3 +220,68 @@ describe("ひらがなとカタカナの入れ替え", () => {
     expect(switchKanaScript("ハルと")).toBeUndefined();
   });
 });
+
+/**
+ * **短いほうが長いほうに含まれる組は、長いほうへ畳む**
+ * （作者の実機報告、2026-09-06）。
+ *
+ * 「おばあさん」の一部を「オバアサン」に変えた本文を検知すると、
+ * **「ばあさん ↔ バアサン」（73回/2回）と「おばあさん ↔ オバアサン」
+ * （8回/2回）の2組**が並んだ。同じ書き換えなのに2行あるので、
+ * 作者にはどちらを選べばよいのか分からない。
+ *
+ * **消すのではなく、重なりを除いてから数え直す。** 短いほうが単独でも
+ * 使われている作品では、その分は本物の揺れである。
+ */
+describe("重なる組を畳む", () => {
+  const NOUNS = ["おばあさん", "ばあさん"];
+
+  test("短い組が長い組に呑まれるなら、長いほうだけを出す", () => {
+    const groups = detectNotationVariants(
+      [source("おばあさんが笑った。\nオバアサンが立った。")],
+      { properNouns: NOUNS }
+    );
+
+    expect(groups.map((entry) => entry.label)).toEqual([
+      "おばあさん ↔ オバアサン",
+    ]);
+  });
+
+  test("短い組が単独でも出ていれば、重ならない分だけを残す", () => {
+    const groups = detectNotationVariants(
+      [
+        source(
+          [
+            "おばあさんが笑った。",
+            "オバアサンが立った。",
+            "ばあさんが座った。",
+            "バアサンが寝た。",
+          ].join("\n")
+        ),
+      ],
+      { properNouns: NOUNS }
+    );
+
+    const short = group(groups, "ばあさん");
+    expect(short).toBeDefined();
+    // 「おばあさん」「オバアサン」の中の分は数えない
+    expect(
+      short?.forms.map((form) => [form.surface, form.occurrences.length])
+    ).toEqual([
+      ["ばあさん", 1],
+      ["バアサン", 1],
+    ]);
+    // 長いほうはそのまま残る
+    expect(group(groups, "おばあさん")).toBeDefined();
+  });
+
+  test("含み合わない組どうしは、どちらも残す", () => {
+    const groups = detectNotationVariants(
+      [source("ハルトが来た。はるとが去った。良い日だ。よい日だ。")],
+      { properNouns: ["ハルト"] }
+    );
+
+    expect(group(groups, "ハルト")).toBeDefined();
+    expect(group(groups, "良い")).toBeDefined();
+  });
+});

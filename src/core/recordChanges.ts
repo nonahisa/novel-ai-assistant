@@ -202,6 +202,18 @@ function sortedChapters(chapters: number[]): number[] {
 const UNCHANGING_FIELDS = new Set(["reading"]);
 
 /**
+ * その項目は作中で変わりうるか。
+ *
+ * **食い違いを畳む側（`isFoldableConflict`）だけでは足りない。**
+ * マージ側（`characterMerge.fillOrConflict`）が話数の違いを見て
+ * 直接 `changes` へ積んでいたため、畳む前に「変化」ができていた
+ * （実データで年表に「読み：たいし → たし」と出た）。判定はここ1か所に置く。
+ */
+export function isUnchangingField(field: string): boolean {
+  return UNCHANGING_FIELDS.has(field);
+}
+
+/**
  * その食い違いを、作者に聞かずに変化として畳んでよいか。
  *
  * **判断の分かれ目は「同じ話の中で矛盾しているか」である。**

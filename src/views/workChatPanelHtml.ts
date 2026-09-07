@@ -229,6 +229,30 @@ button.secondary {
 .edit .done { color: var(--vscode-testing-iconPassed, #4caf50); font-size: 12px; }
 .edit .failed { color: var(--vscode-errorForeground); font-size: 12px; }
 /*
+ * 「ほかにできること」——作業の提案を畳んでおく枠（作者の指摘、2026-09-08
+ * 「AIの相談の青枠部分は何を意図しているのかわかりにくいです。
+ * 求めていないので、頼まれてからやればいい気がします」）。
+ *
+ * 質問1つに対して、資料を書き換える提案とAIを回す提案が3つ並んでいた。
+ * **押す前に読める形にはなったが、そもそも出さないほうがよい。**
+ * 1行だけ置いて、作者が押したときに並べる。
+ *
+ * 見出しの1行は**ボタンだが、ボタンに見せない**。答えのすぐ下で
+ * 目立たせると、畳んだ意味が無くなる。
+ */
+.more { margin-top: 8px; }
+.more-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+.more-toggle:hover { text-decoration: underline; }
+/*
  * 本文の領域に大きく開いたとき。
  *
  * **画面いっぱいの幅で文章を流さない。** 横に長い行は目が戻る場所を
@@ -464,7 +488,7 @@ function appendOptions(turn, options) {
  * 中身を見ずに押せる作りにすると、作者は自分の文書に何が入るのか
  * 分からないまま同意することになる。
  */
-function appendEdit(turn, edit) {
+function appendEdit(host, edit) {
   const box = document.createElement('div');
   box.className = 'edit';
 
@@ -492,7 +516,7 @@ function appendEdit(turn, edit) {
   box.appendChild(row);
 
   box.dataset.editId = edit.id;
-  turn.appendChild(box);
+  host.appendChild(box);
 }
 
 /**
@@ -501,7 +525,7 @@ function appendEdit(turn, edit) {
  * **押すまで動かない。** AIを呼ぶ機能は料金がかかるので、
  * 押す前にそれが分かるようにする。
  */
-function appendRun(turn, run) {
+function appendRun(host, run) {
   const box = document.createElement('div');
   box.className = 'edit';
   box.dataset.editId = run.id;
@@ -522,7 +546,7 @@ function appendRun(turn, run) {
   });
   row.appendChild(button);
   box.appendChild(row);
-  turn.appendChild(box);
+  host.appendChild(box);
 }
 
 /**
@@ -532,7 +556,7 @@ function appendRun(turn, run) {
  * どんな留意点で読み直すのかを先に見せる。読み直した結果もそのまま
  * 保存されるわけではなく、設定資料の画面に項目ごとの提案として並ぶ。
  */
-function appendReload(turn, reload) {
+function appendReload(host, reload) {
   const box = document.createElement('div');
   box.className = 'edit';
   box.dataset.editId = reload.id;
@@ -567,6 +591,52 @@ function appendReload(turn, reload) {
   });
   row.appendChild(button);
   box.appendChild(row);
+  host.appendChild(box);
+}
+
+/**
+ * 作業の提案（書き込み・機能の起動・資料の読み直し）を**畳んで**置く。
+ *
+ * 作者の指摘（2026-09-08）「求めていないので、頼まれてからやればいい
+ * 気がします」。答えの下に、資料を書き換える提案とAIを回す提案が
+ * 3つ並んでいた。**出さないのではなく、1行にして押されるまで開かない。**
+ * 拡張機能側の staged の仕組み（何を提案するか・押したら何が起きるか）は
+ * そのままなので、押せば従来どおり動く。
+ *
+ * **「そこを見せて」（locate）はここへ入れない。** あれは作業ではなく
+ * 「その根拠を見せて」という参照であり、答えを読むための道具である。
+ */
+function appendStagedActions(turn, message) {
+  const adders = [];
+  if (message.edit) adders.push((host) => appendEdit(host, message.edit));
+  if (message.run) adders.push((host) => appendRun(host, message.run));
+  if (message.reload) adders.push((host) => appendReload(host, message.reload));
+  if (adders.length === 0) return;
+
+  const box = document.createElement('div');
+  box.className = 'more';
+
+  const body = document.createElement('div');
+  body.className = 'more-body';
+  body.hidden = true;
+  adders.forEach((add) => add(body));
+
+  const toggle = document.createElement('button');
+  toggle.className = 'more-toggle';
+  toggle.type = 'button';
+  const caption = (open) =>
+    'ほかにできること（' + adders.length + '件）を' + (open ? '隠す' : '見る');
+  toggle.textContent = caption(false);
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.addEventListener('click', () => {
+    body.hidden = !body.hidden;
+    toggle.textContent = caption(!body.hidden);
+    toggle.setAttribute('aria-expanded', body.hidden ? 'false' : 'true');
+    scrollToBottom();
+  });
+
+  box.appendChild(toggle);
+  box.appendChild(body);
   turn.appendChild(box);
 }
 
@@ -814,10 +884,9 @@ window.addEventListener('message', (event) => {
     exchanges++;
     updateApplyState();
     const turn = appendTurn('AI', message.reply, undefined, message.html);
+    // 参照（そこを見せて）はそのまま出し、作業の提案は畳んで置く
     if (message.locate) appendLocate(turn, message.locate);
-    if (message.edit) appendEdit(turn, message.edit);
-    if (message.run) appendRun(turn, message.run);
-    if (message.reload) appendReload(turn, message.reload);
+    appendStagedActions(turn, message);
     appendOptions(turn, message.options || []);
     scrollToBottom();
     return;

@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  findSameGeneratedFile,
   generatedFileName,
   generatedFileNameCandidates,
   generatedNamePrefix,
+  isSameGeneratedContent,
   pruneGeneratedFiles,
+  sameDayGeneratedNames,
   selectFilesToPrune,
   writeGeneratedFile,
   type GeneratedFileEntry,
@@ -310,5 +313,94 @@ describe("置き場への書き出しと片付け", () => {
     await expect(
       pruneGeneratedFiles("C:\\works\\無い作品\\.aiwriter\\generated", "使い方")
     ).resolves.toBe(0);
+  });
+
+  test("同じ日の同じ中身があれば、その場所を返す（新しく書かない）", async () => {
+    const content = "# 伏線の一覧\n\n未回収 3件";
+    const first = await writeGeneratedFile(DIRECTORY, "伏線の一覧", content, AT);
+
+    const found = await findSameGeneratedFile(
+      DIRECTORY,
+      "伏線の一覧",
+      content,
+      AT
+    );
+
+    expect(found).toBe(first);
+    // 探しただけで増えていない
+    expect(names()).toEqual(["伏線の一覧_2026-08-29_1430.md"]);
+  });
+
+  test("中身が変わっていれば、使い回さない", async () => {
+    await writeGeneratedFile(DIRECTORY, "伏線の一覧", "未回収 3件", AT);
+
+    await expect(
+      findSameGeneratedFile(DIRECTORY, "伏線の一覧", "未回収 4件", AT)
+    ).resolves.toBeUndefined();
+  });
+
+  test("置き場がまだ無くても、失敗にしない（比べる相手が無いだけ）", async () => {
+    await expect(
+      findSameGeneratedFile(
+        "C:\\works\\無い作品\\.aiwriter\\generated",
+        "伏線の一覧",
+        "本文"
+      )
+    ).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * **押すたびに増やさない**（作者の実機報告、2026-09-06）。
+ *
+ * 「伏線の一覧を開く」を3回押したら
+ * `伏線の一覧_2026-09-06_2225.md`・`_2227.md`・`_2229.md` が並び、
+ * タブも3つ開いた。**上書きしない設計は変えない**——代わりに、
+ * 同じ日の同じ中身が既にあるなら、書かずにそれを開く。
+ */
+describe("同じ中身なら作り直さない", () => {
+  test("見出しの日時だけが違う2枚は、同じ中身として扱う", () => {
+    expect(
+      isSameGeneratedContent(
+        "# 伏線の一覧\n\n2026-09-06 22:25 現在\n\n未回収 3件",
+        "# 伏線の一覧\n\n2026-09-06 22:29 現在\n\n未回収 3件"
+      )
+    ).toBe(true);
+  });
+
+  test("中身が変わっていれば、別のものとして扱う", () => {
+    expect(
+      isSameGeneratedContent(
+        "# 伏線の一覧\n\n未回収 3件",
+        "# 伏線の一覧\n\n未回収 4件"
+      )
+    ).toBe(false);
+  });
+
+  test("末尾の改行の違いでは、別のものにしない", () => {
+    expect(isSameGeneratedContent("本文\n", "本文")).toBe(true);
+  });
+
+  test("同じ日の・同じ種類のものだけを比べる相手にする", () => {
+    const names = [
+      "伏線の一覧_2026-08-29_1430.md",
+      "伏線の一覧_2026-08-29_1200.md",
+      "伏線の一覧_2026-08-28_1430.md",
+      "使い方_2026-08-29_1430.md",
+      "伏線の一覧メモ.md",
+    ];
+
+    // 新しい順（名前に時刻が入っているので、名前の降順で足りる）
+    expect(sameDayGeneratedNames(names, "伏線の一覧", AT)).toEqual([
+      "伏線の一覧_2026-08-29_1430.md",
+      "伏線の一覧_2026-08-29_1200.md",
+    ]);
+  });
+
+  test("作者が手で置いたファイルは相手にしない", () => {
+    // 掃除と同じ規則で見分ける（前置き＋日付と時刻の形）
+    expect(
+      sameDayGeneratedNames(["伏線の一覧_メモ.md"], "伏線の一覧", AT)
+    ).toEqual([]);
   });
 });

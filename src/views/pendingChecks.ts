@@ -87,7 +87,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-21",
     title: "作品を登録すると、詳細メニューからグループが消える",
     commands: ["novelai.addWork"],
-    count: 3,
+    count: 2,
   },
   {
     id: "A-20",
@@ -133,7 +133,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
   },
   {
     id: "A-18",
-    title: "設定資料の人物が分裂している",
+    title: "設定資料の人物が分裂している（2026-09-06 に実機で発覚。原稿ではなく資料が壊れる。0.40.9 で①〜⑤と読み仮名・空白・年表の空見出しを対応・要実機再確認：「設定資料を抽出」をやり直し、完了報告の「別名から外した／向きを直した」の件数と、「重複をまとめる」の候補の根拠「「三門」が両方にあります（姓の共有かもしれません）」を見る）",
     commands: [],
     count: 7,
   },
@@ -567,7 +567,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-23",
     title: "AI相談の大きい画面と使い方マニュアル",
     commands: ["novelai.openChatPanel", "novelai.openManual"],
-    count: 11,
+    count: 7,
   },
   {
     id: "F-22",
@@ -740,4 +740,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 733;
+export const PENDING_CHECK_TOTAL = 728;

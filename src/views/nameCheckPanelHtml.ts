@@ -117,6 +117,7 @@ button.primary {
 .place .where { color: var(--vscode-descriptionForeground); margin-right: 8px; }
 .place .hit { color: var(--vscode-charts-blue, #3794ff); font-weight: 600; }
 .candidates { margin-top: 8px; border-top: 1px dashed var(--vscode-panel-border); padding-top: 6px; }
+.candidates.flash { outline: 1px solid var(--vscode-focusBorder); }
 .candidate { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
 .candidate .meta { font-size: 12px; color: var(--vscode-descriptionForeground); flex: 1; }
 .dropped { font-size: 12px; color: var(--vscode-descriptionForeground); padding: 2px 0; }
@@ -245,8 +246,9 @@ function placesHtml(person) {
 }
 
 function candidatesHtml(person) {
+  const box = '<div class="candidates" id="candidates-' + escapeHtml(person.id) + '">';
   if (busyId === person.id) {
-    return '<div class="candidates"><div class="empty">候補を考えています…</div></div>';
+    return box + '<div class="empty">候補を考えています…</div></div>';
   }
   const found = candidates.get(person.id);
   if (!found) return '';
@@ -272,7 +274,7 @@ function candidatesHtml(person) {
     ? '<div class="empty">残った候補がありませんでした。もう一度出すか、系統を変えてください。</div>'
     : '';
 
-  return '<div class="candidates">' + kept + empty + dropped + '</div>';
+  return box + kept + empty + dropped + '</div>';
 }
 
 function renderPeople() {
@@ -370,6 +372,22 @@ function focusPerson(id) {
   return true;
 }
 
+/**
+ * 出した候補まで画面を送る（作者の実機報告、2026-09-06）。
+ *
+ * 「登場箇所」を開いたまま「候補を出す（AI）」を押すと、候補は
+ * **登場箇所の一覧の下**に付く。10件並んだ登場箇所の下では画面に現れず、
+ * 80秒待って何も起きないように見える（実機確認でも一度
+ * 「候補が出ない不具合」と読み違えた）。**出したものは、見える所へ運ぶ。**
+ */
+function focusCandidates(id) {
+  const target = document.getElementById('candidates-' + id);
+  if (!target) return;
+  target.scrollIntoView({ block: 'center' });
+  target.classList.add('flash');
+  setTimeout(() => { target.classList.remove('flash'); }, 1200);
+}
+
 function render() {
   if (!state) return;
   document.getElementById('title').textContent = state.title;
@@ -394,11 +412,14 @@ window.addEventListener('message', (event) => {
     candidates.set(message.data.characterId, message.data);
     busyId = null;
     renderPeople();
+    focusCandidates(message.data.characterId);
     return;
   }
   if (message.type === 'busy') {
     busyId = message.id;
     renderPeople();
+    // 待っている間も「考えています…」が見えていないと、待ちが止まって見える
+    focusCandidates(message.id);
   }
 });
 

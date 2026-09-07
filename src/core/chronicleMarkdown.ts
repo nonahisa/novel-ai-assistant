@@ -17,6 +17,14 @@ import {
 
 export const CHRONICLE_TITLE = "年表";
 
+/**
+ * 名前の付いていない段の見出し。
+ *
+ * 空の見出し（`## `）は、Markdownとしては見出しの体を成さず、
+ * 読んだ人には「何かが抜けている」ようにしか見えない。
+ */
+export const UNLABELED_SECTION_HEADING = "（時期なし）";
+
 /** 表の列。**画面の列と同じ並び**にする（見比べるものなので） */
 const COLUMNS = ["話数", "題", "登場", "出来事", "あらすじ"] as const;
 
@@ -63,8 +71,11 @@ export function chronicleToMarkdown(
 
   for (const section of sections) {
     // **段の見出しは、行が1つでも必ず出す。** IF編の話を本編と
-    // 見分けられなくなるのが、いちばん困る（設計書6.39.5）
-    lines.push(`## ${section.label}`, "");
+    // 見分けられなくなるのが、いちばん困る（設計書6.39.5）。
+    //
+    // 名前の無い段は「## 」だけの見出しになっていた（実機で発覚）。
+    // 話数順で書き出したときは段を分けないので、段に名前が無い
+    lines.push(`## ${section.label.trim() || UNLABELED_SECTION_HEADING}`, "");
     for (const group of groupByTimepoint(section.rows)) {
       if (group.label) lines.push(`### ${group.label}`, "");
       lines.push(...table(group.rows), "");

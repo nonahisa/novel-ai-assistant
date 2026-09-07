@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   describeNotationResult,
+  NOTATION_SCOPE_NOTE,
   readGroupSelection,
 } from "../../src/features/checkNotation";
 import type { NotationCheckRunResult } from "../../src/features/checkNotation";
@@ -173,5 +174,30 @@ describe("揃える組の選択", () => {
       kind: "picked",
       groups: ["良い/よい"],
     });
+  });
+});
+
+/**
+ * **拾える範囲を、実際より広く読ませない**（作者の実機報告、2026-09-06）。
+ *
+ * これまでの案内は「同じ語が2通り以上の書き方で本文に出ている場合だけを
+ * 対象にしています」で、作者には「どんな2通りでも拾う」と読めた。
+ * 実際に見ているのは、固有名詞の**ひらがな⇄カタカナの入れ替え**と、
+ * 決まった語の一覧だけである（「おばあさん／お婆さん」は拾えない）。
+ */
+describe("拾える範囲の断り", () => {
+  it("かなの入れ替えが対象だと書いてある", () => {
+    expect(NOTATION_SCOPE_NOTE).toContain("ひらがな・カタカナ");
+  });
+
+  it("漢字の開き閉じは対象外だと断っている", () => {
+    expect(NOTATION_SCOPE_NOTE).toContain("対象外");
+    // 実機で拾えなかった実例をそのまま示す。抽象的な断りより通じる
+    expect(NOTATION_SCOPE_NOTE).toContain("おばあさん");
+  });
+
+  it("1行に収まる長さである（QuickPickの見出しに入る）", () => {
+    expect(NOTATION_SCOPE_NOTE).not.toContain("\n");
+    expect(NOTATION_SCOPE_NOTE.length).toBeLessThan(80);
   });
 });

@@ -84,6 +84,21 @@ export interface NotationCheckRunResult {
   noGroupsChosen?: boolean;
 }
 
+/**
+ * 拾える範囲を1行で断る（作者の実機報告、2026-09-06）。
+ *
+ * これまでの案内は「同じ語が2通り以上の書き方で本文に出ている場合だけを
+ * 対象にしています」だった。**作者には「どんな2通りでも拾う」と読める。**
+ * 実際に見ているのは、固有名詞の**ひらがな⇄カタカナの入れ替えだけ**
+ * （`switchKanaScript`）と、決まった語の一覧（`KANA_KANJI_PAIRS`・
+ * `OKURIGANA_GROUPS`）である。「おばあさん／お婆さん」は登録済みの人物名でも
+ * 拾えない——仕様どおりだが、書いていなければ不具合に見える。
+ */
+export const NOTATION_SCOPE_NOTE =
+  "拾えるのは、同じ語のひらがな・カタカナの違いと、" +
+  "決まった語の漢字／かな・送り仮名です" +
+  "（「おばあさん／お婆さん」のような漢字の開き閉じ全般は対象外）。";
+
 export async function checkNotation(
   work: WorkEntry
 ): Promise<NotationCheckRunResult | undefined> {
@@ -154,8 +169,7 @@ export async function checkNotation(
 
   if (groups.length === 0) {
     vscode.window.showInformationMessage(
-      "表記ゆれは見つかりませんでした。" +
-        "（同じ語が2通り以上の書き方で本文に出ている場合だけを対象にしています）"
+      `表記ゆれは見つかりませんでした。${NOTATION_SCOPE_NOTE}`
     );
     return { issues: [], groupCount: 0, unifiedCount: 0, dismissedCount: 0, cancelled: false };
   }
@@ -274,7 +288,9 @@ async function pickGroups(
   }));
 
   const picked = await vscode.window.showQuickPick(items, {
-    title: `表記ゆれが ${groups.length} 組見つかりました`,
+    // **拾える範囲を、選ぶ前に見せる**（作者の実機報告、2026-09-06）。
+    // 「これで全部だ」と思われると、拾えていない揺れを見落とす
+    title: `表記ゆれが ${groups.length} 組見つかりました — ${NOTATION_SCOPE_NOTE}`,
     placeHolder: "揃えたい組を選んでください（複数選べます）",
     canPickMany: true,
     ignoreFocusOut: true,

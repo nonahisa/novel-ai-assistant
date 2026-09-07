@@ -39,6 +39,9 @@ import {
   parseResult,
   validateCharacterExtractResult,
   type CharacterRejectionReason,
+  type CharacterValidationResult,
+  type CorrectedRelationRecord,
+  type DroppedAliasRecord,
   type RejectedCharacterCandidate,
 } from "../core/characterExtractionValidation";
 import {
@@ -89,6 +92,29 @@ interface ExtractionFailure {
   kind?: AIError["kind"];
 }
 
+/**
+ * AIの読みをコードで検算して直した分（設計書6.18）。
+ *
+ * **件数を報告に出す。** 出さないと、資料が黙って変わったことになる。
+ */
+interface ValidationFixCounts {
+  /** 憑依・転生などで体を共有する相手の呼び名を、別名から落としたもの */
+  droppedSharedBodyAliases: DroppedAliasRecord[];
+  /** 敬称の途中で切れた別名（「母親さ」）として落としたもの */
+  droppedTruncatedAliases: DroppedAliasRecord[];
+  /** 向きが逆だった親族関係を直したもの */
+  correctedRelations: CorrectedRelationRecord[];
+}
+
+function collectValidationFixes(
+  target: ValidationFixCounts,
+  validated: CharacterValidationResult
+): void {
+  target.droppedSharedBodyAliases.push(...validated.droppedSharedBodyAliases);
+  target.droppedTruncatedAliases.push(...validated.droppedTruncatedAliases);
+  target.correctedRelations.push(...validated.correctedRelations);
+}
+
 interface ExtractionSummaryCounts {
   added: number;
   updated: number;
@@ -111,6 +137,8 @@ interface ExtractionSummaryCounts {
   unsavedConflicts: number;
   cacheWarnings: number;
   mergeCandidates: MergeCandidate[];
+  /** AIの読みをコードで検算して直した分 */
+  validationFixes: ValidationFixCounts;
   /** モブとして記録された人数。ネームドキャラと区別して示す */
   mobs: number;
   /** 既存人物への更新のうち、承認待ちに回した人数 */
@@ -478,6 +506,21 @@ export async function extractCharacters(
     chapters: number[];
   }> = [];
   const rejectedCandidates: RejectedCharacterCandidate[] = [];
+  /**
+   * AIの読みをコードで検算して直した分（設計書6.18）。
+   * **黙って書き換えたことにしない**ので、件数を完了報告に出す。
+   */
+  const validationFixes: ValidationFixCounts = {
+    droppedSharedBodyAliases: [],
+    droppedTruncatedAliases: [],
+    correctedRelations: [],
+  };
+  /**
+   * 既存レコードの名前・別名。切れた別名（「母親さ」）を弾く裏付けに使う。
+   * **ループの前に1回だけ作る**——チャンクごとに作り直すと、その回の抽出で
+   * 増えた名前まで裏付けに混ざり、同じ資料でも実行のたびに結果が変わる
+   */
+  const existingCharacterNames = buildKnownCharacterNames(loaded.characters, []);
   const failures: ExtractionFailure[] = [];
   let cacheWarnings = 0;
   let cancelled = false;
@@ -533,10 +576,12 @@ export async function extractCharacters(
           const cachedResult = cached as CharacterExtractResult;
           const validated = validateCharacterExtractResult(
             cachedResult,
-            chunk
+            chunk,
+            { knownNames: existingCharacterNames }
           );
           extractedAll.push(...validated.accepted);
           rejectedCandidates.push(...validated.rejected);
+          collectValidationFixes(validationFixes, validated);
           // キャッシュにも能力・場所が入っている。同じ応答を使い回す
           settings.collect(cachedResult, chunk);
           done++;
@@ -742,9 +787,12 @@ export async function extractCharacters(
                 "出力上限とモデル設定を確認してください。",
             });
           } else {
-            const validated = validateCharacterExtractResult(parsed, chunk);
+            const validated = validateCharacterExtractResult(parsed, chunk, {
+              knownNames: existingCharacterNames,
+            });
             extractedAll.push(...validated.accepted);
             rejectedCandidates.push(...validated.rejected);
+            collectValidationFixes(validationFixes, validated);
             settings.collect(parsed, chunk);
             await cache.set(chunk.hash, cacheKeyBase, parsed);
           }
@@ -852,6 +900,7 @@ export async function extractCharacters(
     unsavedConflicts: 0,
     cacheWarnings,
     mergeCandidates: merged?.mergeCandidates ?? [],
+    validationFixes,
     mobs: merged?.characters.filter((character) => character.isMob).length ?? 0,
     pendingUpdates: 0,
   };
@@ -1154,6 +1203,8 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
           counts.rejectedDistinct
         )}）`
       : "";
+  // AIの読みをコードで直した分。**黙って書き換えたことにしない**
+  const fixDetail = describeValidationFixes(counts.validationFixes);
   return (
     [
       `新規 ${counts.added}名（うちモブ ${counts.mobs}名）`,
@@ -1170,6 +1221,7 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
     rejectedDetail +
     candidateDetail +
     distinctDetail +
+    fixDetail +
     // 既存人物への変更は承認待ちに回る。件数を出さないと、
     // 作者は「更新0名」を見て何も増えなかったと思ってしまう
     (counts.pendingUpdates > 0
@@ -1232,6 +1284,58 @@ function describeSettingsResult(result: SettingsPersistResult): string {
   }
 
   return lines.length > 0 ? `\n${lines.join("\n")}` : "";
+}
+
+/**
+ * AIの読みをコードで検算して直した分を並べる。
+ *
+ * **件数だけでは足りない。** どの人物のどの呼び名を落としたのかを出さないと、
+ * 作者は「別名が減った」ことに気づけず、直しが正しかったのかも確かめられない。
+ */
+function describeValidationFixes(fixes: ValidationFixCounts): string {
+  const lines: string[] = [];
+
+  if (fixes.droppedSharedBodyAliases.length > 0) {
+    lines.push(
+      `体を共有する相手（憑依・転生など）の呼び名を別名から ${
+        fixes.droppedSharedBodyAliases.length
+      }件 外しました（${describeDroppedAliases(fixes.droppedSharedBodyAliases)}）`
+    );
+  }
+  if (fixes.droppedTruncatedAliases.length > 0) {
+    lines.push(
+      `途中で切れた別名を ${fixes.droppedTruncatedAliases.length}件 外しました（${
+        describeDroppedAliases(fixes.droppedTruncatedAliases)
+      }）`
+    );
+  }
+  if (fixes.correctedRelations.length > 0) {
+    const shown = fixes.correctedRelations
+      .slice(0, 3)
+      .map(
+        (entry) =>
+          `${entry.characterName} の「${entry.partner}」を「${entry.from}」から「${entry.to}」へ`
+      )
+      .join("、");
+    const rest =
+      fixes.correctedRelations.length > 3
+        ? ` ほか${fixes.correctedRelations.length - 3}件`
+        : "";
+    lines.push(
+      `関係の向きを ${fixes.correctedRelations.length}件 直しました（${shown}${rest}）`
+    );
+  }
+
+  return lines.length > 0 ? `\n${lines.join("\n")}` : "";
+}
+
+function describeDroppedAliases(dropped: DroppedAliasRecord[]): string {
+  const shown = dropped
+    .slice(0, 3)
+    .map((entry) => `${entry.characterName} の「${entry.alias}」`)
+    .join("、");
+  const rest = dropped.length > 3 ? ` ほか${dropped.length - 3}件` : "";
+  return shown + rest;
 }
 
 function describeMergeCandidates(candidates: MergeCandidate[]): string {
