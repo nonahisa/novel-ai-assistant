@@ -252,6 +252,8 @@ import {
 } from "./features/resumeWriting";
 import { askText, cancelItem } from "./views/dialogs";
 import { manageKeepWords } from "./features/manageKeepWords";
+import { AdvicePolicyStore } from "./core/advicePolicyStore";
+import { setAdvicePolicy } from "./features/advicePolicyDiagnosis";
 import {
   addForeshadowByHand,
   openForeshadows,
@@ -1180,6 +1182,10 @@ export async function activate(
   // 相談から標準機能を起動する口（作者の許可、2026-08-15）。
   // **コマンド名を組み立てて executeCommand を呼ばない。** 種別で分岐する
   // ことで、AIが返した文字列がコマンド名になる余地を無くしている
+  // 作者のタイプ別の助言方針（設計書6.86）。**`globalState` に置く**——
+  // 受容度や自信度は、GitHubで編集部と共有してよい情報ではない
+  const advicePolicies = new AdvicePolicyStore(context.globalState);
+
   const workChatPanel = new WorkChatPanel(registry, aiRegistry, {
     run: async (work, kind, filePath) => {
       // 既にコマンドとして登録されているものへ渡す。
@@ -1239,7 +1245,7 @@ export async function activate(
       const panel = await openSettingsPanel(context, work, aiRegistry);
       await panel.reloadRecordFromChat(kind, recordId, notes);
     },
-  });
+  }, advicePolicies);
   context.subscriptions.push(
     workChatPanel,
     vscode.window.registerWebviewViewProvider(WORK_CHAT_VIEW_ID, workChatPanel, {
@@ -3059,6 +3065,19 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         await manageKeepWords(work);
+      }
+    )
+  );
+
+  // 相談の助言方針（設計書6.86）。AIは呼ばない——答えるのは作者本人だけで、
+  // 会話ログからの推定はしない
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.setAdvicePolicy",
+      async (node?: WorkRef) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await setAdvicePolicy(work, advicePolicies);
       }
     )
   );

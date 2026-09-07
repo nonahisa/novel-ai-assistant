@@ -20,6 +20,19 @@ import { episodeLabel } from "../core/manuscriptSources";
 import { SYNOPSIS_FILE } from "../core/synopsisDoc";
 import { CharacterStore } from "../core/characterStore";
 import {
+  ADVICE_REDIAGNOSE_DAYS,
+  ADVICE_TYPES,
+  applyProfileSignals,
+  describeAdvicePolicy,
+  describeAdviceScoreMoves,
+  isDiagnosisStale,
+  resolveAdviceType,
+  type AdviceProfileSignals,
+} from "../core/advicePolicy";
+import type { AdvicePolicyStore } from "../core/advicePolicyStore";
+import { notifyDone } from "../views/notify";
+import { buildAdvicePolicyPrompt } from "../prompts/advicePolicy";
+import {
   buildExcerpt,
   classifyChatContext,
   describeChatContext,
@@ -374,12 +387,90 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   constructor(
     private readonly registry: WorkRegistry,
     private readonly ai: AIRegistry,
-    private readonly runner: ChatRunner
+    private readonly runner: ChatRunner,
+    /**
+     * 作者のタイプ別の助言方針（設計書6.86）。
+     *
+     * **省略できる。** 試験や、まだ診断していない作品では
+     * 何も足さず、これまでどおりの相談になる。
+     */
+    private readonly advicePolicies?: AdvicePolicyStore
   ) {
     this.lastEditor = vscode.window.activeTextEditor;
     this.selectionListener = this.ai.onDidChangeSelection(
       () => void this.postContext()
     );
+  }
+
+  /**
+   * 相談へ送るシステムプロンプト。
+   *
+   * 助言方針は**該当するタイプの文章だけ**を足す（全タイプを毎回送ると
+   * 数千字が積み上がり、しかも他のタイプの記述に引きずられる）。
+   * 診断していなければ、素のプロンプトをそのまま返す。
+   */
+  private buildSystemPrompt(work: WorkEntry | undefined): string {
+    if (!work || !this.advicePolicies) return WORK_CHAT_SYSTEM_PROMPT;
+
+    const profile = this.advicePolicies.get(work.id);
+    if (!profile) return WORK_CHAT_SYSTEM_PROMPT;
+
+    const now = new Date();
+    logStep(`相談: 助言方針 ${describeAdvicePolicy(profile)}`);
+    // 古い推定で助言がずれているとき、原因にたどり着く手掛かりを残す。
+    // **画面には出さない**——相談の邪魔をしてまで言うことではない
+    if (isDiagnosisStale(profile.updatedAt, now)) {
+      logStep(
+        `相談: 助言方針の診断から${ADVICE_REDIAGNOSE_DAYS}日を過ぎています`
+      );
+    }
+    return `${WORK_CHAT_SYSTEM_PROMPT}\n\n${buildAdvicePolicyPrompt(profile, now)}`;
+  }
+
+  /**
+   * 相談の答えから読み取った変化を、助言方針へ反映する（設計書6.86）。
+   *
+   * **送る直前に読んだ値ではなく、保存庫から読み直してから足す。**
+   * 相談は横のパネルと大きい画面の2つがあり、待っている間に
+   * もう一方が更新していることがある。
+   *
+   * 動かすのは点数だけで、タイプはコード側の判定に任せる。
+   */
+  private async updateAdvicePolicy(
+    work: WorkEntry | undefined,
+    signals: AdviceProfileSignals | undefined
+  ): Promise<void> {
+    if (!work || !signals || !this.advicePolicies) return;
+
+    const before = this.advicePolicies.get(work.id);
+    if (!before) return; // 診断していない作品では推定も持たない
+
+    const now = new Date();
+    const after = applyProfileSignals(before, signals, now);
+    if (after === before) return;
+
+    await this.advicePolicies.set(work.id, after);
+
+    // **何がどう動いたかを残す。** 受容度・自信度は出さない
+    // （作者に見せないと決めたものを、ログから漏らさない）
+    const moved = describeAdviceScoreMoves(before.scores, after.scores);
+    const beforeType = ADVICE_TYPES[resolveAdviceType(before.scores)].label;
+    const afterType = ADVICE_TYPES[resolveAdviceType(after.scores)].label;
+    const typeNote =
+      beforeType === afterType
+        ? `（${afterType}のまま）`
+        : `（${beforeType}→${afterType}）`;
+    if (moved.length > 0) {
+      logStep(`相談: 助言方針の推定を更新 ${moved.join("、")}${typeNote}`);
+    }
+
+    // **タイプが変わったら、その場で作者に見せる。** 黙って変えると、
+    // 助言の調子が変わった理由が作者に分からない
+    if (beforeType !== afterType) {
+      const message = `助言方針の推定が変わりました：${beforeType} → ${afterType}`;
+      notifyDone(message);
+      this.postAll({ type: "note", message });
+    }
   }
 
   /**
@@ -712,6 +803,12 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           (guide.selected.length > 0 ? ` / ${guide.selected.join("、")}` : "")
       );
 
+      // **助言の方針を、該当するタイプのぶんだけ足す**（設計書6.86）。
+      // 診断していない作品では何も足さない（これまでどおりの相談になる）。
+      // 足したことを必ず記録する——**方針が効いているかを作者が確かめる
+      // 唯一の手掛かり**で、答えの調子が変わった理由がここにしか無い
+      const systemPrompt = this.buildSystemPrompt(context?.work);
+
       // **上限と、その出どころを一度に取る。** 切り詰められたときの案内は
       // 出どころで変わる（実測が効いているのに「設定を大きくして」と言うのは
       // 嘘になる）。判定は `ai/outputLimit.ts` の1か所だけが持つ
@@ -724,7 +821,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         requestedFiles?: Array<{ path: string; content: string }>
       ) =>
         resolved.provider.generate({
-          systemPrompt: WORK_CHAT_SYSTEM_PROMPT,
+          systemPrompt,
           /*
             **考えている中身を画面へ流す**（設計書6.63.2）。
 
@@ -856,6 +953,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         options: answer.options,
         ...staged,
       });
+
+      // **答えを見せたあとに反映する。** 保存の失敗で相談の答えが
+      // 消えないよう、順番を先にしない（推定は次回に持ち越せる）
+      await this.updateAdvicePolicy(context?.work, answer.profileSignals);
     } catch (error) {
       const message =
         error instanceof AIError

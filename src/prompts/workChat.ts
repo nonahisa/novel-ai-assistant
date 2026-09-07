@@ -1,5 +1,9 @@
 import type { ChatContextKind } from "../core/chatContext";
 import { runnableFeatureList } from "../core/chatEdit";
+import {
+  parseProfileSignals,
+  type AdviceProfileSignals,
+} from "../core/advicePolicy";
 
 /**
  * P-21 いま開いている画面について相談する（相談パネル）
@@ -23,7 +27,10 @@ import { runnableFeatureList } from "../core/chatEdit";
 // 3.4: 使い方の資料を「全操作の目次＋関係しそうな説明だけ」に変えた。
 //      渡す形が変わったので、【使い方を聞かれたとき】の指示も書き換えた
 //      （説明の無い操作は、場所を答えてホバーとマニュアルへ案内させる）
-export const WORK_CHAT_VERSION = "3.4";
+// 3.5: 助言方針（P-36）の推定を少しずつ直すため、profileSignals を返させる
+//      （設計書6.86）。**指示は P-36 の共通段落にある**——方針を持たない
+//      作者には送られないので、相談の費用は増えない
+export const WORK_CHAT_VERSION = "3.5";
 
 /**
  * 起動できる機能の一覧。**実装（chatEdit.ts）から作る。**
@@ -167,7 +174,9 @@ ${RUNNABLE_LIST}
   提案として並び、作者が選んだものだけが反映されます
 
 【出力形式】JSONのみ。前置き・後書き・コードフェンスを含めないこと。
-{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "locate": {"path": "...", "text": "...", "label": "..."}, "reloadRecord": {"kind": "character", "name": "アジャーノ", "notes": "他の登場人物『殿下』の情報が混入しています。"}}`;
+{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "locate": {"path": "...", "text": "...", "label": "..."}, "reloadRecord": {"kind": "character", "name": "アジャーノ", "notes": "他の登場人物『殿下』の情報が混入しています。"}, "profileSignals": null}
+
+**profileSignals は、末尾に説明があるときだけ使ってください。** 説明が無ければ必ず null にしてください。`;
 
 export interface WorkChatTurn {
   role: "author" | "assistant";
@@ -332,6 +341,23 @@ export const WORK_CHAT_SCHEMA = {
       },
       required: ["kind", "name"],
     },
+    /*
+      助言方針の推定を直すための報告（P-36、設計書6.86）。
+
+      **中身は必須にしない。** ほかの項目と違い、これは
+      「読み取れたときだけ入れる」もので、空を強いると
+      AIが毎回どれかを埋めてしまう（点数が意味もなく動く）。
+    */
+    profileSignals: {
+      type: ["object", "null"],
+      properties: {
+        reader: { type: ["number", "null"] },
+        self: { type: ["number", "null"] },
+        taste: { type: ["number", "null"] },
+        acceptance: { type: ["string", "null"] },
+        confidence: { type: ["string", "null"] },
+      },
+    },
   },
   required: [
     "reply",
@@ -341,6 +367,7 @@ export const WORK_CHAT_SCHEMA = {
     "run",
     "locate",
     "reloadRecord",
+    "profileSignals",
   ],
 } as const;
 
@@ -360,6 +387,14 @@ export interface WorkChatAnswer {
    * 名前が実在するかは呼び出し側が照合する
    */
   reloadRecord: unknown;
+  /**
+   * 助言方針の推定を直すための報告（P-36、設計書6.86）。
+   *
+   * **ここで形を絞ってから返す。** ほかの項目と違って、これは
+   * そのまま点数の計算に入る。`"+1"` のような文字列や 3 のような値を
+   * 通すと、作者の方針が壊れたまま気づけない。
+   */
+  profileSignals: AdviceProfileSignals | undefined;
 }
 
 /**
@@ -392,6 +427,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
           run?: unknown;
           locate?: unknown;
           reloadRecord?: unknown;
+          profileSignals?: unknown;
         };
         return {
           reply: record.reply.trim(),
@@ -407,6 +443,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
           run: record.run,
           locate: record.locate,
           reloadRecord: record.reloadRecord,
+          profileSignals: parseProfileSignals(record.profileSignals),
         };
       }
     } catch {
@@ -422,6 +459,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
     run: undefined,
     locate: undefined,
     reloadRecord: undefined,
+    profileSignals: undefined,
   };
 }
 

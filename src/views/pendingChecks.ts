@@ -93,13 +93,13 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-13",
     title: "縦書きの原稿エディタ",
     commands: ["novelai.openVertical"],
-    count: 44,
+    count: 23,
   },
   {
     id: "A-14",
     title: "設定資料の名前の書き換え",
     commands: ["novelai.openSettingsPanel"],
-    count: 11,
+    count: 5,
   },
   {
     id: "A-15",
@@ -147,7 +147,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "B-3",
     title: "提案パネルが開くか",
     commands: ["novelai.reviewProposals"],
-    count: 8,
+    count: 7,
   },
   {
     id: "B-5",
@@ -183,7 +183,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-1",
     title: "ファイルの開き方",
     commands: ["novelai.createPlot"],
-    count: 4,
+    count: 3,
   },
   {
     id: "F-2",
@@ -249,7 +249,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-13",
     title: "1つにまとめられた人物を、別人に分ける",
     commands: ["novelai.openSettingsPanel"],
-    count: 19,
+    count: 6,
   },
   {
     id: "F-14",
@@ -279,7 +279,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-53",
     title: "F5限定：Ollamaの応答を流しながら受け取る実験",
     commands: ["novelai.dev.toggleOllamaStream"],
-    count: 5,
+    count: 3,
   },
   {
     id: "F-54",
@@ -552,12 +552,6 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 12,
   },
   {
-    id: "F-26",
-    title: "並べる面のカーソル追従と差分更新",
-    commands: ["novelai.openVertical"],
-    count: 7,
-  },
-  {
     id: "F-25",
     title: "PDF出力（印刷用）",
     commands: ["novelai.exportPdf"],
@@ -720,6 +714,12 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 7,
   },
   {
+    id: "F-95",
+    title: "相談の助言方針",
+    commands: ["novelai.setAdvicePolicy"],
+    count: 8,
+  },
+  {
     id: "",
     title: "LM Studio",
     commands: ["novelai.setupLmStudio", "novelai.setupAI", "novelai.testAI"],
@@ -740,4 +740,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 791;
+export const PENDING_CHECK_TOTAL = 748;

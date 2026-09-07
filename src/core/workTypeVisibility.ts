@@ -239,6 +239,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.openChat": "allTypes",
   "novelai.openChatPanel": "allTypes",
   "novelai.chooseChatWork": "allTypes",
+  "novelai.setAdvicePolicy": "allTypes",
   "novelai.chooseStepWork": "allTypes",
 
   // ── 執筆量・記録 ──
