@@ -408,7 +408,10 @@ describe("告知文の書き出し", () => {
   test("X用は引用（>）で置き、コード柵に入れない（作者の要望、2026-09-06「表示も折り返してね」）", () => {
     // コード柵だとプレビューで折り返さず、横スクロールで読めなかった
     expect(markdown).not.toContain("```");
-    expect(markdown).toContain("> 第3話「灯を継ぐ」 更新しました\n> 本文です。\n> #創作\n> {URL}");
+    // 行末の半角空白2つで、プレビューでも改行が見える（0.40.7。composedX には足さない）
+    expect(markdown).toContain(
+      "> 第3話「灯を継ぐ」 更新しました  \n> 本文です。  \n> #創作  \n> {URL}  "
+    );
   });
 
   test("引用の中の空行は「>」だけの行にする", () => {
@@ -422,7 +425,9 @@ describe("告知文の書き出し", () => {
       spoilerCheck: null,
       warnings: [],
     });
-    expect(spaced).toContain("> 第3話 更新しました\n>\n> 本文です。\n>\n> {URL}");
+    expect(spaced).toContain(
+      "> 第3話 更新しました  \n>\n> 本文です。  \n>\n> {URL}  "
+    );
   });
 
   test("注意は冒頭に出す", () => {

@@ -737,7 +737,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     entry.categories.set(category, bucket);
 
     // まだ何も出していないとき、または同じ作品なら、これまでどおり前面へ
-    if (!this.work || this.work.id === work.id) {
+    if (!this.work || this.keyOf(this.work) === this.keyOf(work)) {
       this.work = work;
       this.activate(category);
       // パネルが開いていなければ前面に出す。開いていれば余計なフォーカス移動はしない
@@ -779,7 +779,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     if (answer !== "表示する") return;
 
     // 答えるまでの間に、作者がその一覧を空にしていることがある
-    const entry = this.buckets.get(work.id);
+    const entry = this.buckets.get(this.keyOf(work));
     if (!entry?.categories.has(category)) return;
 
     this.stashCurrent();
@@ -789,20 +789,39 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   }
 
   /** その作品の置き場（無ければ作る）。題名はいちばん新しいものへ揃える */
+  /**
+   * 置き場のキー。**id ではなく作品フォルダー**で引く（0.40.7）。
+   *
+   * 同じ作品でも id が変わる経路がある（登録し直し・書庫の子作品）。
+   * id で引くと、設定資料の更新を出したあとの推敲が**別の作品の結果**と
+   * 見なされ、「表示する」の知らせだけ出て一覧もタブも印も変わらなかった
+   * （実機、2026-09-07）。フォルダーなら同じ作品は必ず同じ場所へ落ちる
+   */
+  private keyOf(work: WorkEntry): string {
+    const folder = path.normalizeForComparison(work.folderPath);
+    for (const [key, entry] of this.buckets) {
+      if (path.normalizeForComparison(entry.work.folderPath) === folder) {
+        return key;
+      }
+    }
+    // 初めて見る作品は id で置く（画面へ送る `workId` もこの値）
+    return work.id;
+  }
+
   private workBucketsOf(work: WorkEntry): WorkBuckets {
-    const found = this.buckets.get(work.id);
+    const found = this.buckets.get(this.keyOf(work));
     if (found) {
       found.work = work;
       return found;
     }
     const created: WorkBuckets = { work, categories: new Map() };
-    this.buckets.set(work.id, created);
+    this.buckets.set(this.keyOf(work), created);
     return created;
   }
 
   /** いま表示している作品の、分類ごとの置き場（まだ何も無ければ空） */
   private currentCategories(): Map<string, CategoryBucket> {
-    const entry = this.work ? this.buckets.get(this.work.id) : undefined;
+    const entry = this.work ? this.buckets.get(this.keyOf(this.work)) : undefined;
     return entry?.categories ?? new Map();
   }
 
@@ -815,7 +834,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   private stashCurrent(): void {
     const work = this.work;
     if (!work) return;
-    const entry = this.buckets.get(work.id);
+    const entry = this.buckets.get(this.keyOf(work));
     if (this.items.length === 0 &&
         this.contradictions.length === 0 &&
         this.recordUpdates.length === 0 &&
@@ -834,7 +853,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
 
   /** その分類を画面に出す（表示中の作品の中で） */
   private activate(category: string): void {
-    const entry = this.work ? this.buckets.get(this.work.id) : undefined;
+    const entry = this.work ? this.buckets.get(this.keyOf(this.work)) : undefined;
     const bucket = entry?.categories.get(category) ?? emptyBucket();
     this.category = category;
     // 作品を切り替えて戻ったとき、続きから見せるために覚えておく
@@ -855,7 +874,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * 付けるには、まずここで移ってもらう。
    */
   private switchWork(workId: string): void {
-    if (workId === this.work?.id) return;
+    if (this.work && workId === this.keyOf(this.work)) return;
     const entry = this.buckets.get(workId);
     if (!entry) return;
     this.stashCurrent();
@@ -907,7 +926,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       // **題名を出すのは、別の作品の結果を映しているときだけ。**
       // まだ何も出していないときや、同じ作品の検知では、何の数字かは
       // 見れば分かる——毎回題名が付くと、かえって読みにくい
-      workTitle: this.work && this.work.id !== work.id ? work.title : "",
+      workTitle:
+        this.work && this.keyOf(this.work) !== this.keyOf(work) ? work.title : "",
     });
   }
 
@@ -1247,10 +1267,11 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * 残したまま資料だけ直すと、本文と資料が食い違ったまま残る。
    * 数を出してから決めてもらう。
    */
-  remainingIn(workId: string, category: string): number {
+  remainingIn(work: WorkEntry, category: string): number {
+    const workId = this.keyOf(work);
     // 表示中の分は手元の配列から数える（`countByCategory` と同じ理由。
     // 1件を適用した直後は、まだ控えへ書き戻していない瞬間がある）
-    if (this.work?.id === workId && this.category === category) {
+    if (this.work && this.keyOf(this.work) === workId && this.category === category) {
       return [
         ...this.items,
         ...this.contradictions,
@@ -1310,10 +1331,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       id,
       title: entry.work.title,
       remaining:
-        id === this.work?.id
+        this.work !== undefined && id === this.keyOf(this.work)
           ? currentRemaining
           : countRemaining(entry.categories),
-      active: id === this.work?.id,
+      active: this.work !== undefined && id === this.keyOf(this.work),
     }));
   }
 
@@ -1334,7 +1355,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     const message: IssuesMessage = {
       type: "issues",
       workTitle: this.work?.title ?? "",
-      workId: this.work?.id ?? "",
+      workId: this.work ? this.keyOf(this.work) : "",
       category: this.category,
       items: updateMode
         ? this.recordUpdates
@@ -1612,7 +1633,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     );
     if (answer !== "空にする") return;
 
-    const entry = this.work ? this.buckets.get(this.work.id) : undefined;
+    const entry = this.work ? this.buckets.get(this.keyOf(this.work)) : undefined;
     entry?.categories.delete(this.category);
     this.items = [];
     this.contradictions = [];
@@ -1629,7 +1650,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
 
     // **空になった作品は、切り替え口から外す。** 選べるのに何も無い作品が
     // 並んでいると、押してみるまで空だと分からない
-    if (entry && this.work) this.buckets.delete(this.work.id);
+    if (entry && this.work) this.buckets.delete(this.keyOf(this.work));
     const other = [...this.buckets.values()][0];
     if (other) {
       this.work = other.work;

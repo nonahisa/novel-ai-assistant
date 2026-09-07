@@ -281,8 +281,10 @@ describe("語ごとの件数", () => {
       { filePath: "002.md", count: 1, byTerm: [{ term: fumika, count: 1 }] },
     ]);
 
-    expect(text).toContain("文佳（ふみか）：3件");
-    expect(text).toContain("奥原（おくはら）：1件");
+    // 件数を先に書く（作者の要望、2026-09-07「：〇件の位置をそろえて」。
+    // ダイアログの字は等幅ではないので、名前のうしろだと長さぶんずれる）
+    expect(text).toContain("3件　文佳（ふみか）");
+    expect(text).toContain("1件　奥原（おくはら）");
     // 多い順
     expect(text.indexOf("文佳")).toBeLessThan(text.indexOf("奥原"));
   });

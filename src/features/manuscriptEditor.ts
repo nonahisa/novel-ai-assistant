@@ -8,11 +8,12 @@ import * as paths from "../core/paths";
 import { fromUri } from "../core/paths";
 import { scanWork } from "../core/scanner";
 import { pathExists } from "../core/fileSystem";
-import { formatChapterNumber } from "../core/episodeParser";
+import { nextEpisodeFileNameLike } from "../core/episodeRenumber";
 import {
   isBlankEpisode,
   isBlankText,
   planLatestEpisode,
+  findLatestEpisode,
 } from "../core/latestEpisode";
 import { buildManuscriptEditorHtml } from "../views/manuscriptEditorHtml";
 import {
@@ -1795,8 +1796,14 @@ export class ManuscriptEditorProvider
           ? isBlankText(document.getText())
           : isBlankEpisode(episode),
       episodeNaming(),
+      // **既存の話の名前の流儀に揃える**（`episode_0001_題.md` の作品に
+      // `019.txt` を作らない。設定は話が1つも無いときの初期値）
       (chapter, rule) =>
-        `${formatChapterNumber(chapter, rule.digits)}${rule.extension}`
+        nextEpisodeFileNameLike({
+          latestFileName: findLatestEpisode(episodes)?.fileName ?? null,
+          number: chapter,
+          fallback: rule,
+        })
     );
 
     if (plan.kind === "open") {
@@ -1884,8 +1891,14 @@ export class ManuscriptEditorProvider
       episodes,
       () => false,
       episodeNaming(),
+      // **既存の話の名前の流儀に揃える**（`episode_0001_題.md` の作品に
+      // `019.txt` を作らない。設定は話が1つも無いときの初期値）
       (chapter, rule) =>
-        `${formatChapterNumber(chapter, rule.digits)}${rule.extension}`
+        nextEpisodeFileNameLike({
+          latestFileName: findLatestEpisode(episodes)?.fileName ?? null,
+          number: chapter,
+          fallback: rule,
+        })
     );
     if (plan.kind !== "create") return;
     await this.createAndOpen(found.work, manuscriptDir, plan.fileName);

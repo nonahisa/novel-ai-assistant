@@ -281,7 +281,10 @@ export function describeRubyTermTotals(
 
   const lines = totals
     .slice(0, TERM_TOTAL_LINES)
-    .map((entry) => `　${entry.term.text}（${entry.term.reading}）：${entry.count}件`);
+    // **件数を先に書く**（作者の要望、2026-09-07「：〇件の位置をそろえて」）。
+    // ダイアログの字は等幅ではないので、名前のうしろに置くと長さぶんずれる。
+    // 先頭に置けば揃う
+    .map((entry) => `　${entry.count}件　${entry.term.text}（${entry.term.reading}）`);
   if (totals.length > TERM_TOTAL_LINES) {
     lines.push(`　…ほか${totals.length - TERM_TOTAL_LINES}語`);
   }

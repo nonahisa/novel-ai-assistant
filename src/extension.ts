@@ -24,7 +24,6 @@ import {
   toManuscriptPages,
 } from "./core/charCount";
 import {
-  formatChapterNumber,
   nextChapterNumber,
   nextDatedName,
   nextUntitledName,
@@ -36,6 +35,8 @@ import {
   newEpisodeTemplate,
 } from "./core/episodeTemplate";
 import { manuscriptViewTypeFor } from "./core/manuscriptViewTypes";
+import { nextEpisodeFileNameLike } from "./core/episodeRenumber";
+import { findLatestEpisode } from "./core/latestEpisode";
 import { scanWork } from "./core/scanner";
 import { SUPPORTED_EXTENSIONS, WorkEntry } from "./models/types";
 import {
@@ -2496,7 +2497,12 @@ export async function activate(
                   "無題",
                   ext
                 )
-              : `${formatChapterNumber(next, digits)}${ext}`;
+              : // 既存の話の名前の流儀に揃える（実機確認 2026-09-07）
+                nextEpisodeFileNameLike({
+                  latestFileName: findLatestEpisode(episodes)?.fileName ?? null,
+                  number: next,
+                  fallback: { digits, extension: ext },
+                });
         const fileName = await askText({
           prompt:
             format === "sns"
@@ -3237,7 +3243,7 @@ export async function activate(
           memento: context.globalState,
           // 内訳は提案パネルの残り件数から数える（設計書6.37.3）。
           // 各機能の戻り値を覗くと、機能ごとに違う数え方を写すことになる
-          remainingIn: (category) => proposalPanel.remainingIn(work.id, category),
+          remainingIn: (category) => proposalPanel.remainingIn(work, category),
           // 確認に出す量の見積もり。**取れなくても確認は出す**ので、
           // ここで失敗しても呼び出し側は止まらない
           estimate: (checks) => collectSuiteEstimate(work, aiRegistry, checks),
@@ -3430,7 +3436,7 @@ export async function activate(
 
         // **本文が残っているうちに資料だけ直すと、両者が食い違う。**
         // 止めはしないが、数を出してから決めてもらう
-        const remaining = proposalPanel.remainingIn(work.id, "名前の付け替え");
+        const remaining = proposalPanel.remainingIn(work, "名前の付け替え");
         const answer = await vscode.window.showWarningMessage(
           `「${pending.oldName}」→「${pending.newName}」を資料にも反映します。`,
           {

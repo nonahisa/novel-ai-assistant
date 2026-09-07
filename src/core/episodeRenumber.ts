@@ -253,6 +253,41 @@ export function insertedEpisodeFileName(input: {
 }
 
 /**
+ * **次の話**のファイル名を、いちばん新しい話の名前の流儀で作る
+ * （実機確認 2026-09-07：既存が `episode_0001_題.md` なのに「最新話を書く」が
+ * `019.txt` を作った。設定の既定値に従うだけで、既存の名前を見ていなかった）。
+ *
+ * 流儀の読み方は `insertedEpisodeFileName` と同じ（`episodeNameStyleOf`）。
+ * 違うのは番号で、**隣の番号を引き継ぐのではなく、新しい番号を同じ桁数で入れる**
+ * （`episode_0018` → `episode_0019`）。サブタイトルは付けない（まだ無い）。
+ * 読めない名前しか無いときは、これまでどおり設定から作る。
+ */
+export function nextEpisodeFileNameLike(input: {
+  latestFileName: string | null;
+  number: number;
+  fallback: { digits: number; extension: string };
+}): string {
+  const style = input.latestFileName
+    ? episodeNameStyleOf(input.latestFileName)
+    : null;
+  if (!style) {
+    return `${String(input.number).padStart(input.fallback.digits, "0")}${input.fallback.extension}`;
+  }
+  // 数字の並びの**最後のひとかたまり**が話数（`episode_0018` の 0018）。
+  // 前に付いている文字（接頭辞）はそのまま残す
+  const digits = style.numberPart.match(/\d+(?!.*\d)/);
+  if (!digits) {
+    return `${String(input.number).padStart(input.fallback.digits, "0")}${style.ext}`;
+  }
+  const padded = String(input.number).padStart(digits[0].length, "0");
+  const numberPart =
+    style.numberPart.slice(0, digits.index) +
+    padded +
+    style.numberPart.slice((digits.index ?? 0) + digits[0].length);
+  return `${numberPart}${style.ext}`;
+}
+
+/**
  * 単話の話数を1つだけ持つ話か。
  *
  * 日付で名付けたもの（SNS記事）・プロローグや幕間・話数の範囲（合本）は

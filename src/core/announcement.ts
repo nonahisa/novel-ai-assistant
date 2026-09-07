@@ -424,7 +424,11 @@ export function buildAnnouncementMarkdown(
   // 「#創作」は「#」の直後に空白が無いので見出しにはならない。
   // コピーは通知の「X用をコピー」が composedX をそのまま渡す
   for (const line of input.composedX.split("\n")) {
-    lines.push(line ? `> ${line}` : ">");
+    // **行末の半角空白2つで、プレビューでも改行を見せる**（0.40.7）。Markdown は
+    // 引用の中の続く行を1段落にまとめるので、無いと3行が1行につながって出る。
+    // 空白を足すのはこの書き出しだけで、composedX（X用をコピーの中身）には
+    // 足さない——X の280字に数えられてしまう
+    lines.push(line ? `> ${line}  ` : ">");
   }
   lines.push("");
 
