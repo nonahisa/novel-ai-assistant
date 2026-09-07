@@ -26,6 +26,7 @@ import {
   type NotationAdviceGroup,
 } from "../prompts/notationAdvice";
 import { cancelItem } from "../views/dialogs";
+import { logStep, useLogFile } from "../core/logger";
 // 名前の付け替え（設計書6.37.3）も同じ文脈を使う。あちらは `core` にいて
 // 機能層を読めないので、実体は `core` へ移した。ここは既存の呼び出し口を保つ
 import { buildUniqueContext } from "../core/uniqueContext";
@@ -99,10 +100,55 @@ export const NOTATION_SCOPE_NOTE =
   "決まった語の漢字／かな・送り仮名です" +
   "（「おばあさん／お婆さん」のような漢字の開き閉じ全般は対象外）。";
 
+/**
+ * 走った量の控え。**終了ログを1か所で書くため**にある。
+ *
+ * 表記ゆれは途中で抜ける道が7つあり（本文が無い・競合で中止・組が0・
+ * Escで閉じた…）、そのすべてに終了ログを置くと、必ずどれかが漏れる。
+ */
+interface NotationTally {
+  /** 実際に見た本文の数 */
+  scanned: number;
+  /** 見るはずだった本文の数（競合で外したものも含む） */
+  total: number;
+  /** 競合マーカーがあって見られなかった話 */
+  conflicted: number;
+}
+
 export async function checkNotation(
   work: WorkEntry
 ): Promise<NotationCheckRunResult | undefined> {
+  useLogFile(work.folderPath);
+  // **AIを呼ばないので、モデル名もチャンク数も出ない。**
+  // それでも開始と終了を対で残す（ほかの検知と同じ読み方ができるように）
+  logStep(`表記ゆれ検知を開始: ${work.title}`);
+
+  const tally: NotationTally = { scanned: 0, total: 0, conflicted: 0 };
+  const result = await runNotationCheck(work, tally);
+
+  // **「失敗」は競合で見られなかった話**である（AIを呼ばないので通信の失敗は無い）。
+  // 終わったのか途中で抜けたのかを、ログだけで見分けられるようにする
+  logStep(
+    `表記ゆれ検知を終了: ${tally.scanned}/${tally.total}（失敗 ${tally.conflicted}件` +
+      ` / 指摘 ${result?.issues.length ?? 0}件` +
+      ` / 見つけた組 ${result?.groupCount ?? 0}組` +
+      ` / 揃える組 ${result?.unifiedCount ?? 0}組` +
+      (result?.dismissedCount ? ` / 今後直さないで除いた ${result.dismissedCount}件` : "") +
+      (result === undefined ? " / 取りやめ" : "") +
+      (result?.cancelled ? " / 中止された" : "") +
+      (result?.stoppedEarly ? " / 途中で閉じた" : "") +
+      "）"
+  );
+
+  return result;
+}
+
+async function runNotationCheck(
+  work: WorkEntry,
+  tally: NotationTally
+): Promise<NotationCheckRunResult | undefined> {
   const scan = await scanWork(work);
+  tally.total = scan.episodes.length;
   if (scan.episodes.length === 0) {
     vscode.window.showWarningMessage("本文ファイルが見つかりません。");
     return undefined;
@@ -115,8 +161,10 @@ export async function checkNotation(
     const file = await readTextFile(episode.filePath);
     if (file.hasConflictMarkers) {
       conflicted.push(episode.fileName);
+      tally.conflicted++;
       continue;
     }
+    tally.scanned++;
 
     // 合本は話ごとに分かれているが、表記ゆれは作品全体で数えるため
     // ここでは1つの本文として扱ってよい。ただし行番号の基準は

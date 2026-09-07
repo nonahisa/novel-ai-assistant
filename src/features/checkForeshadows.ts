@@ -277,6 +277,10 @@ export async function checkForeshadows(
   let cancelled = false;
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
   let fatalFailure = "";
+  // **終了ログでも使うので、進捗の輪の外に置く**（設計書6.77）。
+  // 中に閉じ込めると「何件中何件で終えたか」を書けない
+  let done = 0;
+  let total = 0;
 
   // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）。
   // 関所（送信を1件ずつ）だけだと、機能どうしが交互に流れて
@@ -296,9 +300,8 @@ export async function checkForeshadows(
       const queue = [...chunks];
       // **分母は、実際にAIへ送る件数**（作者の指摘、2026-09-06）。
       // 全件にすると、処理済みが多い実行で数字が動かず、止まって見える
-      let total = pending.length;
+      total = pending.length;
       const skippedChunks = chunks.length - pending.length;
-      let done = 0;
 
       for (let cursor = 0; cursor < queue.length; cursor++) {
         if (token.isCancellationRequested) break;
@@ -453,8 +456,11 @@ export async function checkForeshadows(
   await saveCache(cache);
 
   logStep(
-    `伏線の検知を終了: 候補 ${candidates.length}件 / 既存と重なり ${duplicateCount}件 / ` +
-      `本文と合わない ${rejectedCount}件 / 読めなかった ${failedChunks}件 / ` +
+    // **「n/N（失敗 m件）」から書き出す**（ほかの検知と同じ形）。
+    // 件数だけでは、何チャンク見終えたのかが読み取れなかった
+    `伏線の検知を終了: ${done}/${total}（失敗 ${failedChunks}件 / ` +
+      `候補 ${candidates.length}件 / 既存と重なり ${duplicateCount}件 / ` +
+      `本文と合わない ${rejectedCount}件 / ` +
       `本文を開けなかった話 ${unreadableEpisodes}件` +
       (cancelled ? " / 中止された" : "") +
       // **止めた理由を残す。** 「読めなかった1件」だけでは、残りを
@@ -462,6 +468,7 @@ export async function checkForeshadows(
       (fatalFailure
         ? ` / ${fatalFailure} のため残りは試していません`
         : "") +
+      "）" +
       // 却下の内訳。**数だけでは次の一手が決まらない**（設計書6.35.7）
       (rejectReasons.length > 0 ? `
   却下の内訳: ${describeRejectReasons(rejectReasons)}` : "")
@@ -703,6 +710,9 @@ export async function checkForeshadowResolution(
   let cancelled = false;
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
   let fatalFailure = "";
+  // 終了ログで使うので、進捗の輪の外に置く（検知側と同じ理由）
+  let done = 0;
+  let total = 0;
 
   // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）
   await withAiTurnProgress(
@@ -715,12 +725,11 @@ export async function checkForeshadowResolution(
         controller.abort();
       });
 
-      let done = 0;
       // **上限に入らなかったチャンクは、小さくして試し直す**（設計書6.27.10）。
       // 処理中に増えるので、`for...of` ではなく番号で回す
       const queue = [...targeted];
       // **分母は、実際にAIへ送る件数**（作者の指摘、2026-09-06）
-      let total = pending.length;
+      total = pending.length;
       const skippedChunks = targeted.length - pending.length;
       for (let cursor = 0; cursor < queue.length; cursor++) {
         if (token.isCancellationRequested) break;
@@ -863,8 +872,9 @@ export async function checkForeshadowResolution(
   await saveCache(cache);
 
   logStep(
-    `伏線の回収の確認を終了: 候補 ${proposals.length}件 / ` +
-      `本文と合わない ${rejectedCount}件 / 読めなかった ${failedChunks}件 / ` +
+    // 検知側と同じ形（n/N（失敗 m件）から書き出す）
+    `伏線の回収の確認を終了: ${done}/${total}（失敗 ${failedChunks}件 / ` +
+      `候補 ${proposals.length}件 / 本文と合わない ${rejectedCount}件 / ` +
       `本文を開けなかった話 ${unreadableEpisodes}件` +
       (cancelled ? " / 中止された" : "") +
       // **止めた理由を残す。** 「読めなかった1件」だけでは、残りを
@@ -872,6 +882,7 @@ export async function checkForeshadowResolution(
       (fatalFailure
         ? ` / ${fatalFailure} のため残りは試していません`
         : "") +
+      "）" +
       // 却下の内訳。**数だけでは次の一手が決まらない**（設計書6.35.7）
       (rejectReasons.length > 0 ? `
   却下の内訳: ${describeRejectReasons(rejectReasons)}` : "")

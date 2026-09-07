@@ -407,6 +407,9 @@ export async function checkEpisodePlotDesign(
   );
 
   await cache.save();
+
+  logEpisodePlotEnd("単話プロットの検査", base, findings.length, Boolean(cached));
+
   return { ...base, findings };
 }
 
@@ -606,12 +609,44 @@ export async function contrastEpisodePlot(
   );
 
   await cache.save();
+
+  logEpisodePlotEnd(
+    "単話プロットと本文の照合",
+    base,
+    findings.length,
+    Boolean(cached)
+  );
+
   return {
     ...base,
     findings,
     episodePath: episode.filePath,
     droppedChars,
   };
+}
+
+/**
+ * 終了ログ（設計書6.77）。**始めたら必ず終わりを残す。**
+ *
+ * 送るのは1回だけなので分母は常に1だが、ほかの検知と同じ
+ * 「n/N（失敗 m件 / 指摘 k件 …）」の形に揃える。
+ * **キャッシュで返したことも書く**——AIを呼ばずに終わった回は速すぎて、
+ * ログだけ見ると走っていないように見える。
+ */
+function logEpisodePlotEnd(
+  label: string,
+  base: EpisodePlotRunBase,
+  findings: number,
+  fromCache: boolean
+): void {
+  logStep(
+    `${label}を終了: ${base.cancelled ? 0 : 1}/1（失敗 ${
+      base.failed ? 1 : 0
+    }件 / 指摘 ${findings}件 / 本文と合わず落とした ${base.rejectedCount}件` +
+      (fromCache ? " / 前の結果を使い回した" : "") +
+      (base.cancelled ? " / 中止された" : "") +
+      "）"
+  );
 }
 
 // ── 共通の下ごしらえ ─────────────────────────────

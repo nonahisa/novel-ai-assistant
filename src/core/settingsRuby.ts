@@ -292,6 +292,63 @@ export function describeRubyTermTotals(
 }
 
 /**
+ * ルビを振る前の確認画面（設計書6.12.5）。
+ *
+ * **数はすべて `results` から数える。** 見出しの「6件」、話ごとの内訳、
+ * 語ごとの件数が別々の計算から出ていると、片方だけ直したときに黙って
+ * 食い違う。実機では目で足して確かめるしかなかった確認である
+ * （作者の指示、2026-09-08「機械にできるものはテストへ」）。
+ *
+ * 画面へ出すのは呼び出し側（`features/applySettingsRuby.ts`）。ここは
+ * 文字列を組むだけにして、VS Code に依存させない。
+ */
+export function buildRubyConfirm(options: {
+  results: readonly RubyFileResult[];
+  /** 読み仮名のある名前（使える語と、1文字なので外した語） */
+  terms: { usable: readonly RubyTerm[]; singleChar: readonly RubyTerm[] };
+  /** 「選んだ1話」「すべての話」など、どこへ振るか */
+  scopeLabel: string;
+  fileName: (filePath: string) => string;
+}): { title: string; detail: string } {
+  const { results, terms, scopeLabel, fileName } = options;
+  const total = results.reduce((sum, entry) => sum + entry.count, 0);
+
+  const detail = [
+    `読み仮名のある名前：${terms.usable.length}語`,
+    "",
+    describeRubyResults(results, fileName),
+  ];
+  // **何にルビが付くのかを、押す前に見せる。** 合計と話ごとの件数だけでは、
+  // 思っていない語に当たっていることに気づけない（実機で「因」が
+  // 「原因」に当たった、2026-09-06）
+  const byTerm = describeRubyTermTotals(results);
+  if (byTerm) {
+    detail.push("", "語ごとの件数", byTerm);
+  }
+  detail.push("", "すでにルビや傍点になっているところへは振りません。");
+  if (terms.singleChar.length > 0) {
+    detail.push(describeSingleCharTerms(terms.singleChar));
+  }
+  // **Ctrl+Z では戻らない。** 書き込みは「削除→作り直し」なので、
+  // VS Codeの取り消し履歴に載らない（設計書6.12.5）
+  detail.push(
+    "元の本文は退避します。振ったあとの通知の「元に戻す」で戻せます。"
+  );
+
+  return {
+    title: `${scopeLabel}に、${total}件のルビを振りますか？`,
+    detail: detail.join("\n"),
+  };
+}
+
+/** 外した1文字の語を、確認画面に1行で出す（多いと読めないので5語まで） */
+export function describeSingleCharTerms(terms: readonly RubyTerm[]): string {
+  const shown = terms.slice(0, 5).map((term) => term.text);
+  const rest = terms.length > shown.length ? "、…" : "";
+  return `1文字の語（${shown.join("、")}${rest}）は、ほかの語の一部に当たりやすいので対象外です。`;
+}
+
+/**
  * 振ったあとの本文が、そのままかどうか。
  *
  * **戻せるのは、振った直後のままの本文だけである。** 振ったあとに作者が

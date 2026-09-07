@@ -10,10 +10,10 @@ import {
 } from "../core/textFile";
 import {
   applyRubyInsertions,
+  buildRubyConfirm,
   canRevertRuby,
   countByTerm,
   describeRubyResults,
-  describeRubyTermTotals,
   planRubyInsertions,
   splitSingleCharTerms,
   type RubyFileResult,
@@ -199,41 +199,21 @@ async function confirm(
     return false;
   }
 
-  const byTerm = describeRubyTermTotals(results);
-  const detail = [
-    `読み仮名のある名前：${terms.usable.length}語`,
-    "",
-    describeRubyResults(results, (filePath) => path.basename(filePath)),
-  ];
-  // **何にルビが付くのかを、押す前に見せる。** 合計と話ごとの件数だけでは、
-  // 思っていない語に当たっていることに気づけない（実機で「因」が
-  // 「原因」に当たった、2026-09-06）
-  if (byTerm) {
-    detail.push("", "語ごとの件数", byTerm);
-  }
-  detail.push("", "すでにルビや傍点になっているところへは振りません。");
-  if (terms.singleChar.length > 0) {
-    detail.push(describeSingleCharTerms(terms.singleChar));
-  }
-  // **Ctrl+Z では戻らない。** 書き込みは「削除→作り直し」なので、
-  // VS Codeの取り消し履歴に載らない（設計書6.12.5）
-  detail.push(
-    "元の本文は退避します。振ったあとの通知の「元に戻す」で戻せます。"
-  );
+  // **文言を組むのは `core/settingsRuby.ts`。** 数（見出しの「N件」・話ごと・
+  // 語ごと）が同じ配列から出ていることを、単体テストで見張るためである
+  const { title, detail } = buildRubyConfirm({
+    results,
+    terms,
+    scopeLabel,
+    fileName: (filePath) => path.basename(filePath),
+  });
 
   const answer = await vscode.window.showWarningMessage(
-    `${scopeLabel}に、${total}件のルビを振りますか？`,
-    { modal: true, detail: detail.join("\n") },
+    title,
+    { modal: true, detail },
     "振る"
   );
   return answer === "振る";
-}
-
-/** 外した1文字の語を、確認画面に1行で出す（多いと読めないので5語まで） */
-function describeSingleCharTerms(terms: readonly RubyTerm[]): string {
-  const shown = terms.slice(0, 5).map((term) => term.text);
-  const rest = terms.length > shown.length ? "、…" : "";
-  return `1文字の語（${shown.join("、")}${rest}）は、ほかの語の一部に当たりやすいので対象外です。`;
 }
 
 /** どこまで振るかを先に訊く */

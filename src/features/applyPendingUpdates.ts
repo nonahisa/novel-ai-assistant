@@ -52,6 +52,29 @@ function isCreation(item: ReviewItem): boolean {
  * **AIが本文から読んだものと、作者がプロットへ書いたものは別物である。**
  * 同じ「紹介を変更」でも、承認するときの見方が変わる。
  */
+/** 確認文に名前を並べる上限。多いと読まずに押される */
+const CONFIRM_PREVIEW_LIMIT = 5;
+
+/**
+ * 「N人の設定に更新があります」の確認文（設計書6.8）。
+ *
+ * **数と並びを1つの配列から作る。** 前は「N人」と一覧と「ほかN人」を
+ * 別々に組んでおり、片方だけ直せば黙って食い違う形だった。
+ * 数の整合は目で数えるしかなかったので、純粋関数にして機械に確かめさせる。
+ */
+export function describePendingUpdatesConfirm(
+  entries: ReadonlyArray<{ name: string; change: string }>
+): string {
+  const shown = entries.slice(0, CONFIRM_PREVIEW_LIMIT);
+  const rest = entries.length - shown.length;
+
+  return (
+    `${entries.length} 人の設定に更新があります。\n` +
+    shown.map((entry) => `・${entry.name}: ${entry.change}`).join("\n") +
+    (rest > 0 ? `\n…ほか ${rest} 人` : "")
+  );
+}
+
 function describeChange(item: ReviewItem): string {
   const label = pendingSourceLabel(item.update.source);
   const summary = isCreation(item) ? "新規の人物" : summarizeDiff(item.diff);
@@ -253,12 +276,12 @@ export async function applyPendingCharacterUpdates(
   }
 
   const choice = await vscode.window.showInformationMessage(
-    `${items.length} 人の設定に更新があります。\n` +
-      items
-        .slice(0, 5)
-        .map((item) => `・${item.diff.name}: ${describeChange(item)}`)
-        .join("\n") +
-      (items.length > 5 ? `\n…ほか ${items.length - 5} 人` : ""),
+    describePendingUpdatesConfirm(
+      items.map((item) => ({
+        name: item.diff.name,
+        change: describeChange(item),
+      }))
+    ),
     { modal: true },
     "内容を確認",
     "すべて反映",

@@ -53,8 +53,11 @@ describe("分母は、実際にAIへ送る件数にする", () => {
   for (const file of FEATURES) {
     test(`${file} は、未処理の件数を分母に置く`, () => {
       const source = read(file);
-      // `let total = pending.length` / `let chunksTotal = pending.length`
-      expect(source).toMatch(/let (chunks)?[Tt]otal = pending\.length/);
+      // `let total = pending.length` / `let chunksTotal = pending.length`。
+      // 伏線は**終了ログでも件数を書く**ので、変数を進捗の輪の外で
+      // 宣言して中で入れ直す（`total = pending.length`）。宣言の形は
+      // 問わない——見たいのは「分母が pending.length であること」
+      expect(source).toMatch(/(let )?(chunks)?[Tt]otal = pending\.length/);
     });
 
     test(`${file} は、キャッシュ命中では分子を進めない`, () => {
