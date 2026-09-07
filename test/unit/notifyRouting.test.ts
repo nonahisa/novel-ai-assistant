@@ -133,3 +133,48 @@ describe("次の操作の案内つきは通知のまま", () => {
     });
   }
 });
+
+/**
+ * **確認は、トーストにボタンを載せて出さない**（設計書6.81。
+ * 作者の指摘、2026-09-06）。
+ *
+ * 「前回の検知のあとに書いた話はありません。」＋「作品全体を見る」の通知が
+ * 数秒で閉じ、**押したつもりが空クリックになった。** 実機確認でも一度、
+ * 実行されていないのを不具合と読み違えかけている。
+ *
+ * 完了の知らせ（「結果が届きました」）はこれまでどおりでよい。
+ * 直すのは**返事を待っているもの**だけである。
+ */
+describe("検知の入口の確認は、モーダルで訊く", () => {
+  /** `confirmRun` を通しているか（＝モーダル。`views/notify.ts`） */
+  function confirmCalls(source: string): string[] {
+    return callArguments(source, "confirmRun");
+  }
+
+  test("誤字脱字の対象範囲：話が無いときの「作品全体を見る」", () => {
+    const source = read("features/typoCheckScope.ts");
+    const fragment = "前回の検知のあとに書いた話はありません。";
+
+    // **文言は変えない**（作者が覚えている言葉を壊さない）
+    expect(source).toContain(fragment);
+    expect(
+      confirmCalls(source).some((call) => call.includes(fragment))
+    ).toBe(true);
+    // トーストにボタンを載せる形へ戻っていないこと
+    expect(infoCalls(source).some((call) => call.includes(fragment))).toBe(
+      false
+    );
+  });
+
+  test("単話プロットが無いときの案内は、もともとモーダル", () => {
+    // 同じ形（トーストにボタン）が他に無いことの見張り。ここは
+    // `{ modal: true }` を渡しているので、そのままでよい
+    const source = read("features/checkEpisodePlot.ts");
+    const call = infoCalls(source).find((entry) =>
+      entry.includes("単話プロットがまだ1つもありません。")
+    );
+
+    expect(call).toBeDefined();
+    expect(call).toContain("modal: true");
+  });
+});

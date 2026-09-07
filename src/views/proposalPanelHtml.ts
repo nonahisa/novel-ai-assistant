@@ -248,6 +248,24 @@ body.show-low .issue.low { display: flex; }
   color: var(--vscode-descriptionForeground);
   margin-top: 4px;
 }
+/*
+  **説明が長くても、ボタン列を枠の中に残す**（作者の指摘、2026-09-06）。
+
+  矛盾は「設定では／本文では」の対比に加えて4行の説明が付くので、
+  既定の高さの提案パネルでは1件だけでも
+  「本文を見る／設定資料を見る／無視／伏線として登録／再チェック」が
+  下へはみ出し、**初見では「ボタンが無い」に見えた。**
+
+  説明のほうを畳むのではなく（読まずに押されると困る）、説明の塊だけを
+  スクロールさせる。パネルの高さに対する割合で切るので、パネルを広げれば
+  そのぶん多く読める。ボタン列は塊の外にあるので、常に見えている。
+*/
+.contradiction .details {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+/* 縮まないと、上の塊に押し出されて結局はみ出す */
+.issue .actions { flex-shrink: 0; }
 .badge.cat { border-color: var(--vscode-focusBorder); }
 </style>
 </head>
@@ -307,10 +325,20 @@ function paintRunning() {
     違う作品の進みを送らずに捨てていたため、2作品目では進みが一切
     出なかった。作品名があれば、見えている件数と関係のない数だと分かる。
   */
+  /*
+    **飛ばした数を添える**（作者の指摘、2026-09-06）。分母はAIへ送る数だけに
+    したので、7チャンク中6件がキャッシュに当たった実行は「1/1」と出る。
+    そのままだと本文の量に対して分母が小さすぎ、一部しか見ていないように
+    読める。0のときは何も書かない（毎回「0件はスキップ」は邪魔なだけ）
+  */
+  const skippedText = runningState && runningState.skipped > 0
+    ? '（処理済み ' + runningState.skipped + '件はスキップ）'
+    : '';
   const text = runningState
     ? (runningState.workTitle ? '〈' + runningState.workTitle + '〉' : '') +
       runningState.label + 'しています… ' +
-      runningState.done + '/' + runningState.total + runningState.unit
+      runningState.done + '/' + runningState.total + runningState.unit +
+      skippedText
     : '';
 
   // 一覧が空のときは、いちばん目に入るところへ出す
@@ -541,6 +569,10 @@ function renderContradiction(item) {
       ? '<span class="reason">' + escapeHtml(item.dismissReason || '無視しました') + '</span>'
       : '') +
     '</div>' +
+    // **説明はひと塊にして、そこだけスクロールさせる。** 4行の説明で
+    // ボタン列が枠の下へ押し出され、「ボタンが無い」に見えていた
+    // （作者の指摘、2026-09-06）。畳まないのは、読まずに押されないため
+    '<div class="details">' +
     '<div class="quote">' + escapeHtml(item.excerpt) + '</div>' +
     '<div class="compare">' +
     '<div><span class="side">' + escapeHtml(item.leftLabel || '設定では') + '</span>' + escapeHtml(item.settingSays) + '</div>' +
@@ -548,6 +580,7 @@ function renderContradiction(item) {
     '</div>' +
     note +
     recheckNote +
+    '</div>' +
     (canAct
       ? '<div class="actions">' +
         // **飛び先に合った名前を出す。** 単話プロットの検査（P-27）は
@@ -746,6 +779,8 @@ window.addEventListener('message', (event) => {
       done: message.done || 0,
       total: message.total || 0,
       unit: message.unit || 'チャンク',
+      // 処理済みで飛ばした数。分母がそのぶん小さくなっている断り
+      skipped: message.skipped || 0,
       // 表示中の作品の検知なら空。別の作品なら題名が入る
       workTitle: message.workTitle || '',
     };

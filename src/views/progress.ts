@@ -101,8 +101,19 @@ type ProgressReporter = vscode.Progress<{
  * 検知の各機能はこれを**省略可能**で受け取り、`progress.report` を出す
  * ところで一緒に呼ぶ。**ステータスバーの表示は今までどおり残す**——
  * 片方へ寄せると、パネルを閉じている人が進み具合を見られなくなる。
+ *
+ * @param done これまでに**AIへ送り終えた**数
+ * @param total これから**AIへ送る**数。**キャッシュ済みは含めない**
+ *   （作者の指摘、2026-09-06）。「7チャンク中1件を処理します」と断った
+ *   直後に「1/7」と出て、実際に動くのは1件なので3分間ずっと数字が
+ *   変わらず、**止まったように見えていた**
+ * @param skipped 処理済みで飛ばした数。0のときは何も添えない
  */
-export type CheckProgress = (done: number, total: number) => void;
+export type CheckProgress = (
+  done: number,
+  total: number,
+  skipped?: number
+) => void;
 
 /**
  * ステータスバーに進捗を出す。中止ボタンは付かない。

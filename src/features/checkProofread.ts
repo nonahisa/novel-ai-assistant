@@ -247,12 +247,18 @@ export async function checkProofread(
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
   let fatalFailure = "";
   /**
-   * 何チャンクまで見たか。**最後に「推敲を終了」の1行を残すのに要る**
+   * 何チャンクまでAIへ送ったか。**最後に「推敲を終了」の1行を残すのに要る**
    * （誤字脱字・矛盾と同じ形。`test/unit/checkEndLog.test.ts`）。
-   * 分母は分け直しで増えるので、`chunks.length` とは別に持つ。
+   *
+   * **数えるのは送ったものだけである**（作者の指摘、2026-09-06）。
+   * キャッシュ命中まで分母に入れると、実際には1件しか動かない実行が
+   * 「1/7」のまま止まったように見える。分母は分け直しで増えるので、
+   * `pending.length` とは別に持つ。
    */
   let chunksDone = 0;
-  let chunksTotal = chunks.length;
+  let chunksTotal = pending.length;
+  /** 処理済みで飛ばした数。分母が小さくなっている断りとして画面へ添える */
+  const skippedChunks = chunks.length - pending.length;
 
   // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）。
   // 関所（送信を1件ずつ）だけだと、機能どうしが交互に流れて
@@ -304,13 +310,17 @@ export async function checkProofread(
             }
           }
         }
-        chunksDone++;
-        progress.report({
-          message: `${chunksDone}/${chunksTotal}`,
-          increment: 100 / chunksTotal,
-        });
-        // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-        options.onProgress?.(chunksDone, chunksTotal);
+        // **キャッシュ命中は数えない。** 進みが一気に飛んで待ち時間が
+        // 読めなくなるうえ、分子が分母（送る件数）を超える
+        if (cached === undefined) {
+          chunksDone++;
+          progress.report({
+            message: `${chunksDone}/${chunksTotal}`,
+            increment: 100 / Math.max(chunksTotal, 1),
+          });
+          // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+          options.onProgress?.(chunksDone, chunksTotal, skippedChunks);
+        }
         if (raw === undefined) continue;
 
         const validated = validateProofreadIssues(raw, chunk, keepWords);
@@ -468,8 +478,9 @@ export async function checkProofread(
     `推敲を終了: ${chunksDone}/${chunksTotal}` +
       `（失敗 ${failedChunks}件 / 指摘 ${accepted.length}件` +
       ` / 検証で除外 ${rejectedCount}件` +
-      (chunksTotal > chunks.length
-        ? ` / 入り切らず ${chunksTotal - chunks.length}回に分けた`
+      (skippedChunks > 0 ? ` / 処理済み ${skippedChunks}件はスキップ` : "") +
+      (chunksTotal > pending.length
+        ? ` / 入り切らず ${chunksTotal - pending.length}回に分けた`
         : "") +
       (cancelled ? " / 中止された" : "") +
       (fatalFailure ? " / 途中で打ち切った" : "") +

@@ -326,9 +326,10 @@ export async function checkDeviations(
   let failedChunks = 0;
   let cancelled = false;
   /**
-   * 何話まで見たか。**最後に「プロット逸脱検知を終了」の1行を残すのに要る**
-   * （誤字脱字・矛盾と同じ形。`test/unit/checkEndLog.test.ts`）。
-   * この検知はチャンクではなく話ごとに送るので、分母は `episodes.length`。
+   * 何話をAIへ送ったか。**最後に「プロット逸脱検知を終了」の1行を残すのに
+   * 要る**（誤字脱字・矛盾と同じ形。`test/unit/checkEndLog.test.ts`）。
+   * この検知はチャンクではなく話ごとに送るので、分母は `pending.length`
+   * （＝実際に送る話数。処理済みは含めない。作者の指摘、2026-09-06）。
    */
   let episodesDone = 0;
 
@@ -353,13 +354,22 @@ export async function checkDeviations(
 
         const cached = cache.get(episode.hash, cacheKeyBase);
         const raw = cached ?? (await ask(episode));
-        episodesDone++;
-        progress.report({
-          message: `${episodesDone}/${episodes.length}`,
-          increment: 100 / episodes.length,
-        });
-        // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-        options.onProgress?.(episodesDone, episodes.length);
+        // **キャッシュ命中は数えない**（作者の指摘、2026-09-06）。
+        // 分母を全話にすると、実際に送るのが1話でも「1/19」と出て、
+        // 数字が動かないまま数分待たされ、止まったように見える
+        if (cached === undefined) {
+          episodesDone++;
+          progress.report({
+            message: `${episodesDone}/${pending.length}`,
+            increment: 100 / Math.max(pending.length, 1),
+          });
+          // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+          options.onProgress?.(
+            episodesDone,
+            pending.length,
+            episodes.length - pending.length
+          );
+        }
         if (raw === undefined) continue;
 
         const validated = validateDeviations(raw, {
@@ -471,9 +481,12 @@ export async function checkDeviations(
     どの経路でも「そこまで何話見たか」が残る。
   */
   logStep(
-    `プロット逸脱検知を終了: ${episodesDone}/${episodes.length}` +
+    `プロット逸脱検知を終了: ${episodesDone}/${pending.length}` +
       `（失敗 ${failedChunks}件 / 指摘 ${accepted.length}件` +
       ` / 検証で除外 ${rejectedCount}件` +
+      (episodes.length > pending.length
+        ? ` / 処理済み ${episodes.length - pending.length}話はスキップ`
+        : "") +
       (cancelled ? " / 中止された" : "") +
       "）"
   );
@@ -511,9 +524,12 @@ async function loadPlot(
     // 要るのはこの検知だけなので、残りまで巻き添えで止めない。
     // 理由は最後のまとめへ一言として並べる
     if (suite.suiteConfirmed) {
+      // **「失敗」と言わせない**（作者の指摘、2026-09-06）。短い理由は
+      // 内訳の括弧へ、次の一手はまとめの末尾へ、と行き先を分けて渡す
       suite.noteMissing?.(
-        "プロット逸脱は、照らし合わせるプロットがまだ無いため実行しませんでした" +
-          "（「プロットをつくる」か「本文からプロットを起こす」で作ってください）。"
+        "プロット逸脱は、「プロットをつくる」か「本文からプロットを起こす」で" +
+          "プロットを作ってから実行してください。",
+        "プロットがまだ無いため"
       );
       return undefined;
     }

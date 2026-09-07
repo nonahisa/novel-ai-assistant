@@ -466,10 +466,16 @@ export async function checkContradictions(
    *
    * 最後に「矛盾検知を終了」の1行を残すのに要る（誤字脱字側と同じ形）。
    * 中止や失敗で抜けた回でも、抜けたところまでの数がそのまま残る。
-   * 分母は分け直しで増えるので、`chunks.length` とは別に持つ。
+   *
+   * **数えるのは、実際にAIへ送ったものだけである**（作者の指摘、
+   * 2026-09-06）。キャッシュ命中まで分母に入れると、実際には1件しか
+   * 動かない実行が「1/7」のまま止まったように見える。分母は分け直しで
+   * 増えるので、`pending.length` とは別に持つ。
    */
   let chunksDone = 0;
-  let chunksTotal = chunks.length;
+  let chunksTotal = pending.length;
+  /** 処理済みで飛ばした数。分母が小さくなっている断りとして画面へ添える */
+  const skippedChunks = chunks.length - pending.length;
   let processedChunks = 0;
 
   /**
@@ -504,13 +510,17 @@ export async function checkContradictions(
 
           const cached = cache.get(chunk.hash, keyWithPastScenes(cacheKeyBase, chunk));
           const raw = cached ?? (await ask(chunk, "settled"));
-          chunksDone++;
-          progress.report({
-            message: `${chunksDone}/${chunksTotal}`,
-            increment: 100 / chunksTotal,
-          });
-          // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-          options.onProgress?.(chunksDone, chunksTotal);
+          // **キャッシュ命中は数えない。** 進みが一気に飛んで待ち時間が
+          // 読めなくなるうえ、分子が分母（送る件数）を超える
+          if (cached === undefined) {
+            chunksDone++;
+            progress.report({
+              message: `${chunksDone}/${chunksTotal}`,
+              increment: 100 / Math.max(chunksTotal, 1),
+            });
+            // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+            options.onProgress?.(chunksDone, chunksTotal, skippedChunks);
+          }
 
           if (raw === RETRY_SMALLER) {
             const parts = splitMergedChunk(chunk);
@@ -795,8 +805,9 @@ export async function checkContradictions(
     `矛盾検知を終了: ${chunksDone}/${chunksTotal}` +
       `（失敗 ${failedChunks}件 / 指摘 ${accepted.length}件` +
       ` / 検証で取り下げ ${verifyRejected.length}件` +
-      (chunksTotal > chunks.length
-        ? ` / 入り切らず ${chunksTotal - chunks.length}回に分けた`
+      (skippedChunks > 0 ? ` / 処理済み ${skippedChunks}件はスキップ` : "") +
+      (chunksTotal > pending.length
+        ? ` / 入り切らず ${chunksTotal - pending.length}回に分けた`
         : "") +
       (cancelled ? " / 中止された" : "") +
       (fatalFailure ? " / 途中で打ち切った" : "") +
@@ -1028,9 +1039,11 @@ async function collectSettings(
     // （誤字脱字・伏線など）まで巻き添えで止まるのは筋が通らない。
     // 理由を持ち帰って、最後のまとめへ一言として並べる
     if (suite.suiteConfirmed) {
+      // **「失敗」と言わせない**（作者の指摘、2026-09-06）。短い理由は
+      // 内訳の括弧へ、次の一手はまとめの末尾へ、と行き先を分けて渡す
       suite.noteMissing?.(
-        "矛盾は、突き合わせる設定資料がまだ無いため実行しませんでした" +
-          "（先に「設定資料をまとめて抽出」を実行してください）。"
+        "矛盾は、先に「設定資料をまとめて抽出」を実行してください。",
+        "設定資料がまだ無いため"
       );
       return undefined;
     }

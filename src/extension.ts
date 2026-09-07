@@ -36,6 +36,7 @@ import {
 } from "./core/episodeTemplate";
 import { manuscriptViewTypeFor } from "./core/manuscriptViewTypes";
 import { nextEpisodeFileNameLike } from "./core/episodeRenumber";
+import { WorkFolderWatchers } from "./features/workFolderWatch";
 import { findLatestEpisode } from "./core/latestEpisode";
 import { scanWork } from "./core/scanner";
 import { SUPPORTED_EXTENSIONS, WorkEntry } from "./models/types";
@@ -269,7 +270,8 @@ import {
 } from "./features/checkForeshadows";
 // 校正のまとめ実行（設計書6.80）。各コマンドは終わり方を戻り値で伝える——
 // **止めた（cancelled）と失敗した（failed）は別物**で、残りを走らせるかが違う。
-// ここの7コマンドが返すのは中止と完走だけで、`CHECK_FAILED` を立てるのは
+// ここの7コマンドが返すのは中止・完走と、前提が足りずに走らせなかった
+// （`checkSkipped`）だけで、`CHECK_FAILED` を立てるのは
 // AIの失敗を自分で掴んでいる機能の側（`checkOpening.ts`）である
 import {
   collectSuiteEstimate,
@@ -279,7 +281,7 @@ import {
   CHECK_CANCELLED,
   CHECK_COMPLETED,
   PROOFREADING_SUITE_COMMAND,
-  checkFailed,
+  checkSkipped,
   isSuiteConfirmed,
   type CheckCommandOutcome,
   type CheckRunOptions,
@@ -1022,6 +1024,17 @@ export async function activate(
   // 起動直後にも数える。前回の抽出で溜まったままのことがある
   refreshActionBadges();
   registry.onDidChange(() => refreshActionBadges());
+  // **作品フォルダーの本文を見張り、外で変わったら一覧を数え直す**
+  // （`features/workFolderWatch.ts`。保存のときだけでは、ルビの適用・
+  // 同期・別のエディタでの書き換えが開き直すまで一覧に出なかった）
+  const folderWatchers = new WorkFolderWatchers((work) => {
+    treeProvider.refresh(work.id);
+  });
+  folderWatchers.sync(registry.list());
+  context.subscriptions.push(
+    folderWatchers,
+    registry.onDidChange(() => folderWatchers.sync(registry.list()))
+  );
 
   // 設定資料パネルからの保存を、本文の色分けと一覧へ届ける。
   // **パネルは長らくここを呼んでいなかった**ので、名前を変えても
@@ -1161,17 +1174,27 @@ export async function activate(
     work: WorkEntry,
     label: string,
     run: (
-      onProgress: (done: number, total: number) => void,
+      onProgress: (done: number, total: number, skipped?: number) => void,
       stage: (
         stageLabel: string,
         stageUnit: string
-      ) => (done: number, total: number) => void
+      ) => (done: number, total: number, skipped?: number) => void
     ) => Promise<T>,
     unit = "チャンク"
   ): Promise<T> {
+    // `skipped` は「処理済みで飛ばした数」。分母がAIへ送る数だけになった
+    // 代わりに、飛ばした件数を画面へ添える（作者の指摘、2026-09-06）
     const reporter =
-      (stageLabel: string, stageUnit: string) => (done: number, total: number) =>
-        proposalPanel.showRunning(work, stageLabel, done, total, stageUnit);
+      (stageLabel: string, stageUnit: string) =>
+      (done: number, total: number, skipped = 0) =>
+        proposalPanel.showRunning(
+          work,
+          stageLabel,
+          done,
+          total,
+          stageUnit,
+          skipped
+        );
     try {
       return await run(reporter(label, unit), reporter);
     } finally {
@@ -3499,6 +3522,7 @@ export async function activate(
 
         // プロットが無いときの理由を受ける口（矛盾検知と同じ形。設計書6.80）
         let missing = "";
+        let missingReason = "";
         const suiteConfirmed = isSuiteConfirmed(options);
         const result = await withPanelProgress(
           work,
@@ -3507,11 +3531,15 @@ export async function activate(
             checkDeviations(work, aiRegistry, {
               onProgress,
               suiteConfirmed,
-              noteMissing: (reason) => (missing = reason),
+              noteMissing: (note, reason) => {
+                missing = note;
+                missingReason = reason ?? "";
+              },
             }),
           "話"
         );
-        if (missing) return checkFailed(missing);
+        // **「飛ばした」であって「失敗」ではない**（作者の指摘、2026-09-06）
+        if (missing) return checkSkipped(missingReason, missing);
         if (!result || result.cancelled) return CHECK_CANCELLED;
 
         proposalPanel.showDeviations(work, result.issues);
@@ -3770,6 +3798,7 @@ export async function activate(
         // では警告のダイアログを出す場が無いので、理由を持ち帰って最後の
         // まとめへ並べる。この口を足すのはコマンドの側である
         let missing = "";
+        let missingReason = "";
         const suiteConfirmed = isSuiteConfirmed(options);
         const result = await withPanelProgress(
           work,
@@ -3780,12 +3809,16 @@ export async function activate(
               // 検証はAIを1件ずつ呼ぶので、別の札で件数を流す
               onVerifyProgress: stage("検出した矛盾を検証", "件"),
               suiteConfirmed,
-              noteMissing: (reason) => (missing = reason),
+              noteMissing: (note, reason) => {
+                missing = note;
+                missingReason = reason ?? "";
+              },
             })
         );
-        // **中止ではなく失敗にする。** 残りの検知はこの前提を要らないので、
-        // ここで列を止めると関係のない機能まで走らずに終わる
-        if (missing) return checkFailed(missing);
+        // **中止ではなく「飛ばした」にする。** 残りの検知はこの前提を
+        // 要らないので、ここで列を止めると関係のない機能まで走らずに終わる。
+        // 「失敗」とも言わない——壊れてはおらず、設定資料を足せば走る
+        if (missing) return checkSkipped(missingReason, missing);
         if (!result || result.cancelled) return CHECK_CANCELLED;
 
         // 矛盾が実は伏線だったときの逃げ道を添える（設計書6.35.4）

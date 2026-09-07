@@ -11,6 +11,7 @@ import {
   FORESHADOW_LIST_TITLE,
 } from "../core/foreshadowMarkdown";
 import type { Foreshadow, ForeshadowStatus } from "../models/foreshadow";
+import { foreshadowStatusChoices } from "../core/foreshadowStatusChoice";
 import { logFailure } from "../core/logger";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { openGeneratedMarkdown } from "../views/openDocument";
@@ -176,23 +177,16 @@ export async function setForeshadowStatus(work: WorkEntry): Promise<void> {
   if (!picked || isCancelItem(picked) || !("record" in picked)) return;
   const target = picked.record;
 
+  // **いまの状態を、選ぶ画面に出す**（作者の指摘、2026-09-06）。
+  // 並びといまの印は `core/foreshadowStatusChoice.ts` が決める
   const statusPick = await vscode.window.showQuickPick(
     [
-      {
-        label: "回収済みにする",
-        detail: "作中で説明・成就したもの",
-        status: "resolved" as ForeshadowStatus,
-      },
-      {
-        label: "意図して開けたまま（回収しない）",
-        detail: "回収を忘れたのではなく、開けたままにすると決めたもの",
-        status: "intentional" as ForeshadowStatus,
-      },
-      {
-        label: "未回収に戻す",
-        detail: "まだ回収していないものとして、一覧の上へ戻す",
-        status: "open" as ForeshadowStatus,
-      },
+      ...foreshadowStatusChoices(target.status).map((choice) => ({
+        label: choice.label,
+        description: choice.description,
+        detail: choice.detail,
+        status: choice.status,
+      })),
       cancelItem(),
     ],
     {

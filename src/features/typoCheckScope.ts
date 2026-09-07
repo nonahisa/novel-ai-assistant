@@ -10,6 +10,7 @@ import {
   type ScopeChoice,
 } from "../core/typoCheckScope";
 import { cancelItem, isCancelItem } from "../views/dialogs";
+import { confirmRun } from "../views/notify";
 import { atomicWriteFile } from "../core/atomicWrite";
 
 /**
@@ -103,11 +104,15 @@ export async function chooseScope(
     // **1件も無いときは、その旨を伝えて止める。**
     // 黙って全体を見ると、作者は「差分だけのはずが全部出た」と思う
     if (changed.length === 0 && candidates.length > 0) {
-      const answer = await vscode.window.showInformationMessage(
+      // **モーダルで訊く**（設計書6.81 / `views/notify.ts`）。トーストに
+      // ボタンを載せていたので、押す前に数秒で閉じてしまい、押したつもりの
+      // 空クリックになっていた（実機確認 2026-09-06）。これは完了の知らせ
+      // ではなく、走らせてよいかの**確認**なので、答えるまで待たせる
+      const runAll = await confirmRun(
         "前回の検知のあとに書いた話はありません。",
         "作品全体を見る"
       );
-      return answer === "作品全体を見る" ? { kind: "all" } : undefined;
+      return runAll ? { kind: "all" } : undefined;
     }
     return { kind: "all" };
   }

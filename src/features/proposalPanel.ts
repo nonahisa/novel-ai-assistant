@@ -419,6 +419,14 @@ type RunningMessage = {
   /** 数えている単位。話ごとに送る検知では「話」になる */
   unit: string;
   /**
+   * 処理済みで飛ばした数（作者の指摘、2026-09-06）。
+   *
+   * **分母はAIへ送る数だけにした**ので、7チャンクのうち6件がキャッシュに
+   * 当たった実行は「1/1」と出る。飛ばした数を添えないと、本文の量に対して
+   * 分母が小さすぎて「一部しか見ていないのでは」と読める。0なら添えない
+   */
+  skipped: number;
+  /**
    * どの作品の検知か。
    *
    * **書庫では、いま見ているのと別の作品を走らせられる**（作品Aの結果を
@@ -915,7 +923,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     label: string,
     done: number,
     total: number,
-    unit = "チャンク"
+    unit = "チャンク",
+    skipped = 0
   ): void {
     this.post({
       type: "running",
@@ -923,6 +932,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       done,
       total,
       unit,
+      skipped,
       // **題名を出すのは、別の作品の結果を映しているときだけ。**
       // まだ何も出していないときや、同じ作品の検知では、何の数字かは
       // 見れば分かる——毎回題名が付くと、かえって読みにくい
@@ -945,6 +955,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       done: 0,
       total: 0,
       unit: "",
+      skipped: 0,
       workTitle: "",
     });
   }

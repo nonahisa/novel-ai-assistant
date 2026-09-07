@@ -69,7 +69,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-10",
     title: "設定資料からルビを振る",
     commands: ["novelai.openSettingsPanel"],
-    count: 7,
+    count: 5,
   },
   {
     id: "A-11",
@@ -740,4 +740,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 735;
+export const PENDING_CHECK_TOTAL = 733;

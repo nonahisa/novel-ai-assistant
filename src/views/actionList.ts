@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { logFailure } from "../core/logger";
 import type { WorkRegistry } from "../core/workRegistry";
 import {
   describeBlocked,
@@ -2116,7 +2117,39 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     this._onDidChangeTreeData.fire();
   }
 
+  /**
+   * **1項目で例外が出ても、メニュー全体を欠けさせない**（実機確認 A-21）。
+   *
+   * まっさらな環境で作品を11件登録した直後、詳細メニューの4グループと
+   * ヘルプの3項目が消え、開き直すまで戻らなかった（2026-09-08）。
+   * 読むだけでは投げる箇所が見つからないので、項目ごとに捕まえて
+   * **どの項目が何で落ちたかをログに残し**、その項目は素の表示で出す。
+   * 次に起きたときは、ログが原因を指す。
+   */
   getTreeItem(node: ActionNode): vscode.TreeItem {
+    try {
+      return this.buildTreeItem(node);
+    } catch (error) {
+      logFailure("詳細メニューの項目", {
+        項目: nodeKey(node),
+        理由: error instanceof Error ? error.stack ?? error.message : String(error),
+      });
+      const label =
+        node.type === "group"
+          ? node.group.label
+          : node.type === "section"
+            ? node.section.label
+            : node.item.label;
+      return new vscode.TreeItem(
+        label,
+        node.type === "action"
+          ? vscode.TreeItemCollapsibleState.None
+          : vscode.TreeItemCollapsibleState.Collapsed
+      );
+    }
+  }
+
+  private buildTreeItem(node: ActionNode): vscode.TreeItem {
     if (node.type === "group" || node.type === "section") {
       const key = nodeKey(node);
       const label = node.type === "group" ? node.group.label : node.section.label;
@@ -2199,6 +2232,19 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
   }
 
   getChildren(node?: ActionNode): ActionNode[] {
+    try {
+      return this.listChildren(node);
+    } catch (error) {
+      // 分類の中身を作れなくても、分類そのものは残す（A-21。上と同じ理由）
+      logFailure("詳細メニューの中身", {
+        項目: node ? nodeKey(node) : "（最上位）",
+        理由: error instanceof Error ? error.stack ?? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  private listChildren(node?: ActionNode): ActionNode[] {
     const hasWork = this.registry.list().length > 0;
     // 写しの分類（テスト中）は開発ホストだけに出す（作者の指示、2026-08-29）
     const groups = visibleGroups(hasWork).filter(

@@ -294,7 +294,10 @@ export async function checkForeshadows(
       // まとめたチャンクが切り詰められたら、話ごとに分けて試し直す。
       // 処理中に増えるので `for...of` ではなく番号で回す（矛盾検知と同じ）
       const queue = [...chunks];
-      let total = queue.length;
+      // **分母は、実際にAIへ送る件数**（作者の指摘、2026-09-06）。
+      // 全件にすると、処理済みが多い実行で数字が動かず、止まって見える
+      let total = pending.length;
+      const skippedChunks = chunks.length - pending.length;
       let done = 0;
 
       for (let cursor = 0; cursor < queue.length; cursor++) {
@@ -304,13 +307,15 @@ export async function checkForeshadows(
 
         const cached = cache.get(chunk.hash, cacheKeyBase);
         const raw = cached ?? (await ask(chunk));
-        done++;
-        progress.report({
-          message: `${done}/${total}`,
-          increment: 100 / total,
-        });
-        // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-        options.onProgress?.(done, total);
+        if (cached === undefined) {
+          done++;
+          progress.report({
+            message: `${done}/${total}`,
+            increment: 100 / Math.max(total, 1),
+          });
+          // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+          options.onProgress?.(done, total, skippedChunks);
+        }
 
         if (raw === RETRY_SMALLER) {
           const parts = splitMergedChunk(chunk);
@@ -714,7 +719,9 @@ export async function checkForeshadowResolution(
       // **上限に入らなかったチャンクは、小さくして試し直す**（設計書6.27.10）。
       // 処理中に増えるので、`for...of` ではなく番号で回す
       const queue = [...targeted];
-      let total = queue.length;
+      // **分母は、実際にAIへ送る件数**（作者の指摘、2026-09-06）
+      let total = pending.length;
+      const skippedChunks = targeted.length - pending.length;
       for (let cursor = 0; cursor < queue.length; cursor++) {
         if (token.isCancellationRequested) break;
         if (fatalFailure) break;
@@ -722,13 +729,15 @@ export async function checkForeshadowResolution(
 
         const cached = cache.get(entry.chunk.hash, cacheKeyBase);
         const raw = cached ?? (await ask(entry.chunk, entry.targets));
-        done++;
-        progress.report({
-          message: `${done}/${total}`,
-          increment: 100 / total,
-        });
-        // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-        options.onProgress?.(done, total);
+        if (cached === undefined) {
+          done++;
+          progress.report({
+            message: `${done}/${total}`,
+            increment: 100 / Math.max(total, 1),
+          });
+          // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+          options.onProgress?.(done, total, skippedChunks);
+        }
         if (raw instanceof AIError) {
           const retry = retryOnOverflow(entry.chunk, raw);
           if (retry.kind === "split") {

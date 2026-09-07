@@ -181,9 +181,18 @@ export function parseStoredSelection(
  *   また止まる）
  * - `failed` … 走ろうとして失敗した（AIエラー・応答を読めない・保存できない）。
  *   **次へ進み**、内訳に「◯◯は失敗しました」と出す
+ * - `skipped` … 前提が足りなくて走らせなかった（プロットが無い・設定資料が
+ *   無い）。**次へ進み**、内訳に「◯◯は飛ばしました（◯◯がまだ無いため）」
+ *   と出す。**「失敗」とは別にする**——作者は「失敗しました」を見た時点で
+ *   不具合を疑い、原因を探しに行く（実機確認 2026-09-06）。壊れてはおらず、
+ *   足りないものを足せば走る、という違いが伝わらなければならない
  * - `completed` … 走り切った
  */
-export type CheckOutcomeKind = "completed" | "cancelled" | "failed";
+export type CheckOutcomeKind =
+  | "completed"
+  | "cancelled"
+  | "failed"
+  | "skipped";
 
 export interface CheckCommandOutcome {
   readonly kind: CheckOutcomeKind;
@@ -195,6 +204,13 @@ export interface CheckCommandOutcome {
    * 決める情報なので、黙って失敗にせず理由ごと持ち帰る。
    */
   readonly notes?: readonly string[];
+  /**
+   * 飛ばした短い理由（「プロットがまだ無いため」）。
+   *
+   * 内訳の括弧へそのまま入るので、**文末を作らない**（「〜ため」で切る）。
+   * くわしい次の一手は `notes` のほうへ書く。
+   */
+  readonly reason?: string;
 }
 
 /** 結果を出さずに終わった（まとめ実行はここで止まる） */
@@ -217,12 +233,37 @@ export function checkFailed(...notes: string[]): CheckCommandOutcome {
   return { kind: "failed", notes };
 }
 
+/**
+ * 前提が足りなくて走らせなかった。
+ *
+ * **`checkFailed` と分ける**（作者の指摘、2026-09-06）。プロットの無い
+ * 作品でまとめ実行を走らせると「プロット逸脱は失敗しました」と出ており、
+ * 作者はそこで不具合を疑って原因を探しに行った。**壊れていない**ことと、
+ * 足りないものを足せば走ることを、内訳の1行で伝える。
+ *
+ * @param reason 括弧に入る短い理由（「プロットがまだ無いため」）
+ * @param notes 次の一手（まとめの末尾へ並ぶ）
+ */
+export function checkSkipped(
+  reason: string,
+  ...notes: string[]
+): CheckCommandOutcome {
+  return { kind: "skipped", reason, notes };
+}
+
 /** コマンドが持ち帰った一言。持っていなければ空 */
 export function outcomeNotesOf(outcome: unknown): string[] {
   if (typeof outcome !== "object" || outcome === null) return [];
   const notes = (outcome as { notes?: unknown }).notes;
   if (!Array.isArray(notes)) return [];
   return notes.filter((note): note is string => typeof note === "string");
+}
+
+/** コマンドが持ち帰った、飛ばした短い理由。持っていなければ空 */
+export function outcomeReasonOf(outcome: unknown): string {
+  if (typeof outcome !== "object" || outcome === null) return "";
+  const reason = (outcome as { reason?: unknown }).reason;
+  return typeof reason === "string" ? reason : "";
 }
 
 /**
@@ -252,8 +293,11 @@ export interface SuiteFeatureContext {
    * **戻り値の型を増やさないための逃げ道である。** 各検知の戻り値は
    * それぞれ10項目近くあり、「前提が無い」ためだけに空の結果を組み立てると、
    * 呼び出し側が「走って0件だった」と読み違える。
+   *
+   * @param note まとめの末尾へ並ぶ、次の一手
+   * @param reason 内訳の括弧に入る短い理由（「プロットがまだ無いため」）
    */
-  readonly noteMissing?: (reason: string) => void;
+  readonly noteMissing?: (note: string, reason?: string) => void;
 }
 
 /**
@@ -277,8 +321,11 @@ export interface SuiteAwareOptions {
    *
    * 単独実行では作者へ警告のダイアログを出せばよいが、まとめ実行では
    * 出す場が無い。理由を持ち帰って、最後のまとめへ一言として並べる。
+   *
+   * @param note まとめの末尾へ並ぶ、次の一手
+   * @param reason 内訳の括弧に入る短い理由（「プロットがまだ無いため」）
    */
-  noteMissing?: (reason: string) => void;
+  noteMissing?: (note: string, reason?: string) => void;
 }
 
 /** まとめ実行が確認を済ませているか（コマンドの第2引数を読む） */
@@ -319,12 +366,24 @@ export interface SuiteEstimate {
   readonly isPaid: boolean;
 }
 
+/** 確認の文面が要るのは、名前とAIを使うかの2つだけ */
+export interface SuiteConfirmCheck {
+  readonly label: string;
+  readonly usesAI: boolean;
+}
+
 export interface SuiteConfirmInput {
   readonly workTitle: string;
-  /** 走らせる機能の名前（走る順） */
-  readonly labels: readonly string[];
-  /** そのうち、AIへ本文を送るものの数 */
-  readonly aiCheckCount: number;
+  /**
+   * 走らせる機能（走る順）。
+   *
+   * **名前の並びも「AIを使う数」も、この1つの配列から数える**（作者の指摘、
+   * 2026-09-06）。以前は名前の配列と件数を別々に受けており、
+   * 「走らせるもの：表記ゆれ・誤字脱字・推敲・プロット逸脱・矛盾」（5つ）の
+   * 直後に「選んだ4機能それぞれが…」と出て、**1つずれて見えていた**。
+   * 数え方が2つあるかぎり、文面をどう直してもまた食い違う。
+   */
+  readonly checks: readonly SuiteConfirmCheck[];
   /** 見積もり。取れなければ省く（量の話をしない） */
   readonly estimate?: SuiteEstimate;
 }
@@ -345,12 +404,12 @@ export interface SuiteConfirmInput {
 export function buildSuiteConfirm(
   input: SuiteConfirmInput
 ): { message: string; detail: string } | undefined {
-  if (input.aiCheckCount === 0) return undefined;
+  const labels = input.checks.map((check) => check.label);
+  const n = input.checks.filter((check) => check.usesAI).length;
+  if (n === 0) return undefined;
 
   const estimate = input.estimate;
-  const lines: string[] = [
-    `走らせるもの（この順）：${input.labels.join("・")}`,
-  ];
+  const lines: string[] = [`走らせるもの（この順）：${labels.join("・")}`];
 
   if (estimate) {
     lines.push(
@@ -362,13 +421,24 @@ export function buildSuiteConfirm(
   }
   lines.push("");
 
-  const n = input.aiCheckCount;
+  /**
+   * 何が本文を送るのかの言い方。
+   *
+   * **並べた名前の数と食い違わせない**（作者の指摘、2026-09-06）。
+   * 全部がAIを使うなら「選んだ3機能それぞれが」でよいが、AIを使わない
+   * 機能（表記ゆれ）が混ざると数が減るので、**減った理由を書く。**
+   */
+  const subject =
+    n === labels.length
+      ? `選んだ${n}機能それぞれが`
+      : `選んだ${labels.length}件のうち、AIを使う${n}機能が`;
+
   if (estimate) {
     const total = n * estimate.chunkCount;
     // **かけ算を見せる。** 「36チャンク」とだけ書くと、1機能ぶんだと
     // 読まれる。機能の数だけ本文を送り直すことが、ここでいちばん重い
     lines.push(
-      `選んだ${n}機能それぞれが本文をチャンクごとに送ります` +
+      `${subject}本文をチャンクごとに送ります` +
         `（最大 ${n}×${estimate.chunkCount}＝${total}チャンク。` +
         "処理済みのチャンクは飛ばします）。"
     );
@@ -384,7 +454,7 @@ export function buildSuiteConfirm(
   } else {
     // 見積もりが取れない（モデルの詳細を引けない）ときでも、確認そのものは
     // 出す。押した覚えのないまま走り始めるのがいちばん困る
-    lines.push(`選んだ${n}機能それぞれが、本文をAIへ送ります。`);
+    lines.push(`${subject}、本文をAIへ送ります。`);
     if (estimate === undefined) {
       lines.push("送る量は、実行時にモデルの大きさから決まります。");
     }
@@ -429,7 +499,9 @@ function withCommas(value: number): string {
 export function outcomeKindOf(outcome: unknown): CheckOutcomeKind {
   if (typeof outcome !== "object" || outcome === null) return "completed";
   const kind = (outcome as { kind?: unknown }).kind;
-  return kind === "cancelled" || kind === "failed" ? kind : "completed";
+  return kind === "cancelled" || kind === "failed" || kind === "skipped"
+    ? kind
+    : "completed";
 }
 
 /** 作者が止めた（＝残りも走らせない）か。**失敗はここに入らない** */
@@ -458,6 +530,15 @@ export interface SuiteStepResult {
    * その機能の成果として並べると、前の実行の残りを今回の結果と読ませる。
    */
   readonly failed?: boolean;
+  /**
+   * 前提が足りなくて走らせなかった（プロットが無い・設定資料が無い）。
+   *
+   * **`failed` と分ける。** 「失敗しました」と出すと、作者はそこで
+   * 不具合を疑って原因を探しに行く（実機確認 2026-09-06）。
+   */
+  readonly skipped?: boolean;
+  /** 飛ばした短い理由（「プロットがまだ無いため」）。括弧に入る */
+  readonly reason?: string;
   /**
    * まとめの末尾へ持ち越す一言（前提が無くて走れなかった理由など）。
    *
@@ -497,17 +578,24 @@ export function describeSuiteResult(summary: SuiteRunSummary): string {
         )}）。`
       : "校正をまとめて実行しました。";
 
-  const parts = summary.done.map((step) =>
-    step.failed
-      ? `${step.label}は失敗しました`
-      : step.count === undefined
-        ? `${step.label}（結果は別の文書に出しました）`
-        : `${step.label}${step.count}件`
-  );
+  const parts = summary.done.map((step) => {
+    // **「飛ばした」を「失敗」と言わない**（作者の指摘、2026-09-06）。
+    // プロットの無い作品で「プロット逸脱は失敗しました」と出ており、
+    // 作者はそこで不具合を疑った。壊れてはおらず、足りないものがあるだけ
+    if (step.skipped) {
+      return step.reason
+        ? `${step.label}は飛ばしました（${step.reason}）`
+        : `${step.label}は飛ばしました`;
+    }
+    if (step.failed) return `${step.label}は失敗しました`;
+    return step.count === undefined
+      ? `${step.label}（結果は別の文書に出しました）`
+      : `${step.label}${step.count}件`;
+  });
 
   // 件数を持つ機能が1つも無いときは、パネルの話をしない
   const counted = summary.done.filter(
-    (step) => !step.failed && step.count !== undefined
+    (step) => !step.failed && !step.skipped && step.count !== undefined
   );
   const total = counted.reduce((sum, step) => sum + (step.count ?? 0), 0);
   const tail =

@@ -537,16 +537,21 @@ export async function checkTypos(
       // 処理中に足すので、`for...of` ではなく番号で回す
       const queue = [...chunks];
       /**
-       * 進捗の分母。**未処理の件数ではなく、全チャンク数である。**
+       * 進捗の分母。**実際にAIへ送る件数である**（作者の指摘、2026-09-06）。
        *
-       * キャッシュ命中のチャンクも下で `done++` するので、分母を
-       * `pending.length` にすると分子が分母を超える（処理済みが9件・
-       * 未処理が2件の作品で「11/2」と出た）。0.28.13で送受信のログだけを
-       * `total` へ揃えたが、その `total` の初期値がここで未処理の件数の
-       * ままだった。分け直しで増える分（`total += …`）はどちらの数え方でも
-       * 同じように足す。
+       * 全チャンク数にしていたころは、「7チャンク中1件を処理します
+       * （処理済み6件はスキップ）」と断った直後に「1/7」と出て、
+       * 実際に動くのは1件なので**3分間ずっと数字が変わらなかった**——
+       * 作者からは止まったように見える。
+       *
+       * かつて `pending.length` にして「11/2」と分子が分母を超えたのは、
+       * **キャッシュ命中のチャンクでも `done++` していた**からである
+       * （0.28.13）。いまは送ったものだけを数えるので、この形で揃う。
+       * 分け直しで増える分（`total += …`）は、送るチャンクにしか起きない。
        */
-      let total = chunks.length;
+      let total = pending.length;
+      /** 処理済みで飛ばした数。分母が小さくなっている断りとして画面へ添える */
+      const skipped = chunks.length - pending.length;
       for (let cursor = 0; cursor < queue.length; cursor++) {
         const chunk = queue[cursor];
         if (token.isCancellationRequested) break;
@@ -566,7 +571,8 @@ export async function checkTypos(
           );
           rejectedCount += tally.rejected;
           alreadyAppliedCount += tally.alreadyApplied;
-          done++;
+          // **ここでは数えない。** 数えると分子が分母を超える（分母は
+          // 送る件数だけ）うえ、進みが一気に飛んで待ち時間が読めなくなる
           continue;
         }
 
@@ -576,7 +582,7 @@ export async function checkTypos(
           increment: 100 / Math.max(total, 1),
         });
         // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-        options.onProgress?.(done + 1, total);
+        options.onProgress?.(done + 1, total, skipped);
         logStep(`AIへ送信: ${done + 1}/${total} ${label}`);
         const startedAt = Date.now();
 
@@ -745,12 +751,16 @@ export async function checkTypos(
         done++;
       }
 
-      // 分母は送受信と同じ `total`。**`chunks.length` は分割の前の数**なので、
-      // 分割が起きた回は「9/7」のように分子が分母を超える（作者のログで発覚）
+      // 分母は送受信と同じ `total`（＝AIへ送る件数）。**`pending.length` は
+      // 分割の前の数**なので、分割が起きた回は分母のほうが大きくなる。
+      // 飛ばした件数も残す——ログだけを見て「1件しか見ていない」と
+      // 読まれないようにするため
       logStep(
         `誤字脱字検知を終了: ${done}/${total}（失敗 ${failedChunks}件${
-          total > chunks.length
-            ? ` / 入り切らず ${total - chunks.length}回に分けた`
+          skipped > 0 ? ` / 処理済み ${skipped}件はスキップ` : ""
+        }${
+          total > pending.length
+            ? ` / 入り切らず ${total - pending.length}回に分けた`
             : ""
         }${cancelled ? " / 中止された" : ""}）`
       );

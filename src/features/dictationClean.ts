@@ -26,6 +26,9 @@ import {
   readNarrativePerson,
 } from "../core/workStyle";
 import { fromLfText, toLf } from "../core/eolSpace";
+import { manualActor, recordEdit } from "../core/actorContext";
+import * as path from "../core/paths";
+import { fromUri } from "../core/paths";
 import { KeepWordStore } from "../core/keepWordStore";
 import { blankMemoLines } from "../core/sceneMemo";
 import { reportAIError } from "./reportAIError";
@@ -222,6 +225,20 @@ export async function runDictationClean(
     cleanedText: checked.text,
   });
   if (!applied) return;
+
+  // **同期される編集履歴に残す**（設計書5.6、実機確認 A-19）。本文をその場で
+  // 書き換える経路のうち、ここだけが履歴も退避も通っていなかった。退避は
+  // 要らない——文書は開いたままなので VS Code の取り消し（Ctrl+Z）が効き、
+  // 保存前ならファイルは変わっていない。だが「誰がいつ書き換えたか」は
+  // 残らないと、あとから経緯をたどれない
+  if (work) {
+    await recordEdit(work, {
+      actor: manualActor(),
+      action: "口述筆記の整文を反映した",
+      file: path.basename(fromUri(document.uri)),
+      detail: `${original.length}字 → ${checked.text.length}字`,
+    });
+  }
 
   await announceApplied(
     original.length,

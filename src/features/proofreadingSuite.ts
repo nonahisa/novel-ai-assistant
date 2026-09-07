@@ -10,6 +10,7 @@ import {
   describeSuiteResult,
   outcomeKindOf,
   outcomeNotesOf,
+  outcomeReasonOf,
   parseStoredSelection,
   serializeSelection,
   sortToRunOrder,
@@ -138,8 +139,9 @@ export async function runProofreadingSuite(
   const aiChecks = checks.filter((check) => check.usesAI);
   const confirm = buildSuiteConfirm({
     workTitle: work.title,
-    labels: checks.map((check) => check.label),
-    aiCheckCount: aiChecks.length,
+    // **名前もAIの数も、この1つの配列から数えさせる。** 別々に渡していた
+    // ころは、並べた名前（5つ）と「選んだ4機能」が食い違って見えていた
+    checks,
     estimate: aiChecks.length > 0 ? await deps.estimate?.(aiChecks) : undefined,
   });
   if (confirm) {
@@ -194,11 +196,21 @@ export async function runProofreadingSuite(
           stoppedAt = index;
           return;
         }
+        // **前提が足りなくて走らせなかったものは、失敗と呼ばない**
+        // （作者の指摘、2026-09-06）。プロットの無い作品で
+        // 「プロット逸脱は失敗しました」と出て、作者は不具合を疑った
+        if (kind === "skipped") {
+          done.push({
+            label: check.label,
+            skipped: true,
+            reason: outcomeReasonOf(outcome),
+            notes: outcomeNotesOf(outcome),
+          });
+          continue;
+        }
         // **失敗は次へ進む。** レート上限も解析の失敗も、次の機能では
         // 起きないことのほうが多い
         if (kind === "failed") {
-          // 前提が無くて走れなかった理由（設定資料が無い等）は持ち帰る。
-          // 確認を1回にした代わりに、機能ごとの警告を出す場が無くなった
           done.push({
             label: check.label,
             failed: true,
