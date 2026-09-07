@@ -113,6 +113,41 @@ export function isModelLoadFailure(detail: string): boolean {
 }
 
 /**
+ * この呼び出しは、流しながら受け取る道を通るか（設計書6.63.1）。
+ *
+ * **1か所で決める。** 以前は `generateInner` の中に式が直に書いてあり、
+ * 「流している最中かどうか」を思考の判定から見られなかった。
+ */
+export function willStreamChat(
+  params: Pick<GenerateParams, "disableStreaming">
+): boolean {
+  return __DEV_HELPERS__ && streamingEnabled() && !params.disableStreaming;
+}
+
+/**
+ * `think` に何を送るか。`undefined` なら**送らない**（モデルの既定に任せる）。
+ *
+ * **思考を流して見せられるときは、切らない**（作者の指摘、2026-09-07）。
+ * 相談パネルは思考を受け取る口（`onThinking`）を渡しながら
+ * `disableThinking: true` も送っており、Ollamaが `think: false` を受けて
+ * 思考を1文字も返さないため、**「考えています…」のまま67秒間なにも
+ * 流れなかった**。呼び出し側を直すのではなくここで決めるのは、
+ * **流せるかどうかを知っているのがここだけ**だからである
+ * （呼び出し側で `disableThinking: !canStream` と書くと、17か所ある
+ * 呼び出しのどれかで必ず食い違う）。
+ *
+ * **流せないときは従来どおり切る。** 配布版には流す道が無いので、
+ * ここを緩めると「見えない思考を待つぶんだけ遅くなる」だけになる。
+ */
+export function thinkOptionFor(
+  params: Pick<GenerateParams, "disableThinking" | "onThinking">,
+  streaming: boolean
+): false | undefined {
+  if (params.onThinking && streaming) return undefined;
+  return params.disableThinking ? false : undefined;
+}
+
+/**
  * 生成に使えるモデルか。**埋め込み用のモデルを一覧に出さない**
  * （作者の報告「bge-m3 が出るが選んでも使えない」2026-08-30）。
  *
@@ -453,8 +488,12 @@ export class OllamaProvider implements AIProvider {
       // Ollamaの構造化出力。スキーマを渡すとJSON形式を強制できる
       body.format = params.jsonSchema;
     }
-    if (params.disableThinking) {
-      body.think = false;
+    // **流すか切るかを、思考の判定より先に決める。** 同じ式を2回書くと、
+    // 片方だけ直したときに「流しているのに思考は切ったまま」へ戻る
+    const streaming = willStreamChat(params);
+    const think = thinkOptionFor(params, streaming);
+    if (think !== undefined) {
+      body.think = think;
     }
 
     let res: ChatResponse;
@@ -472,7 +511,7 @@ export class OllamaProvider implements AIProvider {
         モデルを永遠に待つ**。測定はそれでは終わらないので、絶対の締め切りの
         ある道（`fetchJson`）を通す。理由の詳しくは `ai/types.ts` にある。
       */
-      res = __DEV_HELPERS__ && streamingEnabled() && !params.disableStreaming
+      res = streaming
         ? await this.streamChat(
             body,
             this.requestTimeoutMs(params.model),

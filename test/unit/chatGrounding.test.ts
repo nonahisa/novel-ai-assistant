@@ -54,6 +54,37 @@ describe("相談では、禁じるのではなく区別させる", () => {
   });
 });
 
+/**
+ * **資料の矛盾を、作品の欠点として答えない**（作者の指摘、2026-09-07）。
+ *
+ * 実機では「文佳」の別名に「太志」が入った壊れた資料を渡され、AIは
+ * 「文佳と太志が同一人物として扱われているため分かりにくい」と、
+ * **資料の記録の問題を本文の話として**返した。資料は本文からAIが作った
+ * ものなので、間違っていることがある。
+ */
+describe("資料の矛盾は、資料の話として断る", () => {
+  test("作品の欠点として述べないよう釘を刺している", () => {
+    expect(WORK_CHAT_SYSTEM_PROMPT).toContain("食い違っている");
+    expect(WORK_CHAT_SYSTEM_PROMPT).toContain("作品の欠点");
+    // 断ったあとの手を示す（読み直しの提案）
+    expect(WORK_CHAT_SYSTEM_PROMPT).toContain("reloadRecord");
+  });
+});
+
+/**
+ * **書き込む中身に、助言を混ぜない**（作者の指摘、2026-09-07）。
+ *
+ * 「テーマの明確化」を押したら、`設定/plot.md` の「## テーマ」へ
+ * 「〜を追加することで、わかりやすくなります」という助言の文まで入った。
+ * content はそのまま作者のファイルへ書き込まれる。
+ */
+describe("書き込みの content は項目の中身だけ", () => {
+  test("助言を入れないよう指示している", () => {
+    expect(WORK_CHAT_SYSTEM_PROMPT).toContain("助言は reply に書いて");
+    expect(WORK_CHAT_SYSTEM_PROMPT).toMatch(/content はその項目の中身だけ/);
+  });
+});
+
 describe("抽出は厳しいままにする", () => {
   test("本文に無いことを書かせない指示は残す", () => {
     // 抽出結果は設定資料として**保存され**、後の判断の土台になる。
@@ -67,7 +98,7 @@ describe("抽出は厳しいままにする", () => {
 describe("版", () => {
   test("プロンプトを変えたら版も上がっている", () => {
     // 版を止めたままだと、古い応答がキャッシュから返る
-    expect(WORK_CHAT_VERSION).toBe("3.5");
+    expect(WORK_CHAT_VERSION).toBe("3.6");
     expect(SETTINGS_CHAT_VERSION).toBe("3.0");
   });
 });

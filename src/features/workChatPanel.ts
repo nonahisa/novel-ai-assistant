@@ -16,6 +16,11 @@ import {
   truncatedOutputAdvice,
 } from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
+import { pathExists } from "../core/fileSystem";
+import {
+  episodeNumberFromHint,
+  resolveEpisodeByNumber,
+} from "../core/locateEpisode";
 import { episodeLabel } from "../core/manuscriptSources";
 import { SYNOPSIS_FILE } from "../core/synopsisDoc";
 import { CharacterStore } from "../core/characterStore";
@@ -30,7 +35,7 @@ import {
   type AdviceProfileSignals,
 } from "../core/advicePolicy";
 import type { AdvicePolicyStore } from "../core/advicePolicyStore";
-import { notifyDone } from "../views/notify";
+import { confirmRun, notifyDone } from "../views/notify";
 import { buildAdvicePolicyPrompt } from "../prompts/advicePolicy";
 import {
   buildExcerpt,
@@ -47,6 +52,7 @@ import {
   type WorkChatTurn,
 } from "../prompts/workChat";
 import {
+  describeChatEditDestination,
   describeChatEditRejection,
   parseChatEdit,
   parseChatLocate,
@@ -1225,9 +1231,30 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       return;
     }
 
-    const target = staged.locate.path
-      ? path.resolve(staged.work.folderPath, staged.locate.path)
-      : staged.fallbackPath;
+    /*
+      **開く前に、そのファイルが本当にあるかを確かめる**（作者の指摘、
+      2026-09-07）。AIは `episode.4.txt` を指したが、作品にあるのは
+      `episode_0004.md` だった。そのまま開こうとしたため、画面には
+      URLエンコードされた生のエラーが出ている。**引用文は照合するのに、
+      ファイルの実在は見ていなかった。**
+    */
+    const target = await this.resolveLocateTarget(staged);
+    if (!target) {
+      const named = staged.locate.path ?? "";
+      logFailure("相談の「そこを見せて」：指されたファイルが無い", {
+        指定: named,
+        作品: staged.work.title,
+      });
+      this.postAll({
+        type: "locateFailed",
+        id,
+        // **生のエラー文は出さない。** 作者が読むのは「無い」という事実だけで、
+        // `cannot open file:///c%3A/…` は原因の手掛かりにもならない
+        message:
+          `AI が指したファイル（${named || "指定なし"}）は、この作品にありません。`,
+      });
+      return;
+    }
 
     try {
       const document = await vscode.workspace.openTextDocument(
@@ -1276,12 +1303,73 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         message: `${path.basename(target)} の ${found.line + 1}行目を開きました。`,
       });
     } catch (error) {
+      // **生のエラー文は画面に出さない**（作者の指摘、2026-09-07）。
+      // 実機に出たのは `cannot open file:///c%3A/Users/…` というURLエンコード
+      // された一文で、作者には読めず、次に何をすればよいかも分からない。
+      // 中身はログへ残す（開発側はそこで追える）
       const message = error instanceof Error ? error.message : String(error);
+      logFailure("相談の「そこを見せて」：開けなかった", {
+        場所: target,
+        内容: message,
+      });
       this.postAll({
         type: "locateFailed",
         id,
-        message: `開けませんでした: ${message}`,
+        message:
+          `${path.basename(target)} を開けませんでした。` +
+          "ファイルが移動・改名されているかもしれません。",
       });
+    }
+  }
+
+  /**
+   * 「そこを見せて」で開くファイルを決める。無ければ `undefined`。
+   *
+   * 1. 指されたパスが実在すれば、それを開く
+   * 2. 無ければ**話数から引き当てる**（`episode.4.txt` → 第4話 →
+   *    `episode_0004.md`）。AIはファイル名を覚えていないが、話数はたいてい
+   *    合っている
+   * 3. 引き当てられなければ開かない。**近そうなファイルで代用しない**——
+   *    別の話を開いて「ここです」と言うのは、開けないより悪い
+   */
+  private async resolveLocateTarget(staged: {
+    locate: ChatLocate;
+    work: WorkEntry;
+    fallbackPath: string;
+  }): Promise<string | undefined> {
+    // パスの指定が無ければ、いま開いているファイルの中の話である
+    if (!staged.locate.path) return staged.fallbackPath;
+
+    const requested = path.resolve(staged.work.folderPath, staged.locate.path);
+    try {
+      if (await pathExists(requested)) return requested;
+    } catch (error) {
+      // 実在を確かめられないだけなら、引き当てへ進む（開けるかは次で分かる）
+      logFailure("相談の「そこを見せて」：実在を確かめられなかった", {
+        指定: staged.locate.path,
+        理由: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    const chapter = episodeNumberFromHint(staged.locate.path);
+    if (chapter === undefined) return undefined;
+
+    try {
+      const { episodes } = await scanWork(staged.work);
+      const found = resolveEpisodeByNumber(episodes, chapter);
+      if (!found) return undefined;
+      // **引き当てたことは残す。** 画面には出さない（作者にとっては
+      // 「そこが開いた」だけでよい）が、外したときに追えないと直せない
+      logStep(
+        `相談: 指されたファイル「${staged.locate.path}」は無いので、` +
+          `第${chapter}話（${found.fileName}）を開きました`
+      );
+      return found.filePath;
+    } catch (error) {
+      logFailure("相談の「そこを見せて」：作品を走査できなかった", {
+        理由: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
     }
   }
 
@@ -1335,16 +1423,45 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       return;
     }
 
+    /*
+      **書く前にもう一度、何がどこへ入るかを見せて確かめる**（作者の指摘、
+      2026-09-07）。
+
+      実機では「テーマの明確化」というボタンを押しただけで、`設定/plot.md`
+      の「## テーマ」へ**助言の文まで混ざった段落**が入った。作者の作品
+      ファイルへ書く操作としては、ボタン1つは軽すぎる。**中身を添える**のは、
+      パネルに並んでいる中身を読まないまま押せてしまうためである。
+    */
+    const where = describeChatEditDestination(staged.edit.target);
+    const ok = await confirmRun(
+      `${where.file} の「${where.item}」を書き換えます。\n\n` +
+        `これから入る内容：\n${previewForConfirm(staged.edit.content)}`,
+      "書き込む",
+      // 作者の文書を置き換える操作なので、警告の顔で出す
+      { kind: "warning" }
+    );
+    if (!ok) {
+      // **提案は捨てない。** 中身を読んで考え直しただけかもしれないので、
+      // ボタンは押せる状態に戻す
+      this.postAll({ type: "editCancelled", id });
+      return;
+    }
+
     try {
-      const where = await applyChatEdit(staged.work, staged.edit);
+      const written = await applyChatEdit(staged.work, staged.edit);
       this.pendingEdits.delete(id);
       this.postAll({
         type: "editApplied",
         id,
-        message: `${staged.edit.label.replace(/に書き込む$/, "")}に書き込みました（${where}）`,
+        message: `${written} の「${where.item}」を書き換えました。`,
       });
       // 対話でプロットを埋めている最中なら、次の項目を尋ねる
-      await this.advancePlotInterview(String(staged.edit.target));
+      // **target はオブジェクト。** `String()` すると "[object Object]" になり
+      // `plotFocus.target`（"plot.theme"）と永久に一致せず、対話でプロットを
+      // 埋めている最中に書き込んでも次の項目を尋ねなかった（0.40.5 で修正）
+      if (staged.edit.target.kind === "plot") {
+        await this.advancePlotInterview(`plot.${staged.edit.target.section}`);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logFailure("相談からの書き込み", { 内容: message });
@@ -1976,6 +2093,22 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       const retrieval = describeRetrieval(found);
       this.postAll({ type: "searched", summary: retrieval });
 
+      /*
+        **どの資料・どの話を見たのかを、名前で残す**（作者の指摘、
+        2026-09-07）。画面に出るのは「設定資料4件・本文5件を参照」という
+        件数だけで、**壊れた資料（同じ人物の3レコード）を読んで答えたことに、
+        誰も気づけなかった。** 画面は変えない——会話の邪魔になるうえ、
+        件数で足りることのほうが多い。追う必要が出たときのために、
+        ログには名前を置く。
+      */
+      logStep(
+        `相談: ${retrieval}（` +
+          found
+            .map((candidate) => `${candidate.item.source}・${candidate.item.label}`)
+            .join("、") +
+          "）"
+      );
+
       return {
         reference: [
           "【質問に近い場面】（出どころを添えています。" +
@@ -2185,6 +2318,21 @@ interface ResolvedContext {
   truncated: boolean;
   fromSelection: boolean;
   reference: string[];
+}
+
+/** 確認のモーダルに添える中身の上限。長い提案でも押す前に読み切れる長さ */
+const CONFIRM_PREVIEW_CHARS = 300;
+
+/**
+ * 書き込む中身を、確認のモーダルに載る長さへ切り詰める。
+ *
+ * **切ったことを隠さない。** 切った印が無いと、作者は「これで全部だ」と
+ * 思って押す。
+ */
+function previewForConfirm(content: string): string {
+  return content.length > CONFIRM_PREVIEW_CHARS
+    ? `${content.slice(0, CONFIRM_PREVIEW_CHARS)}…`
+    : content;
 }
 
 /**

@@ -150,6 +150,17 @@ body {
   color: var(--vscode-descriptionForeground);
   font-variant-numeric: tabular-nums;
 }
+/*
+  **番号の枠を記号に流用しない**（作者の指摘、2026-09-07）。
+
+  「↻」「▶」を .num（番号の枠）に入れていたため、幅の決まった小さな枠に
+  押し込まれて**「ひ」のように潰れて見えた**。記号は幅を決めず、
+  数字揃え（tabular-nums）も掛けない。
+*/
+.option .mark {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+}
 #thinking { padding: 0 10px 10px; color: var(--vscode-descriptionForeground); font-size: 12px; }
 #composer { border-top: 1px solid var(--vscode-panel-border); padding: 8px 10px; }
 /* この画面の入力欄は相談の入力だけ。増えたらここへ足す */
@@ -471,7 +482,7 @@ function appendEdit(turn, edit) {
   row.className = 'options';
   const apply = document.createElement('button');
   apply.className = 'option';
-  apply.innerHTML = '<span class="num">✓</span><span>' + escapeHtml(edit.label) + '</span>';
+  apply.innerHTML = '<span class="mark">✓</span><span>' + escapeHtml(edit.label) + '</span>';
   apply.addEventListener('click', () => {
     if (busy) return;
     apply.disabled = true;
@@ -500,7 +511,7 @@ function appendRun(turn, run) {
   const button = document.createElement('button');
   button.className = 'option';
   button.innerHTML =
-    '<span class="num">▶</span><span>' +
+    '<span class="mark">▶</span><span>' +
     escapeHtml(run.label) +
     (run.usesAI ? '（AIを使います）' : '（AIを使いません）') +
     '</span>';
@@ -545,7 +556,8 @@ function appendReload(turn, reload) {
   const button = document.createElement('button');
   button.className = 'option';
   button.innerHTML =
-    '<span class="num">↻</span><span>' +
+    // 「↻」は作者の環境で潰れて見えた。**漢字は必ず描ける**
+    '<span class="mark">再</span><span>' +
     escapeHtml(reload.label) +
     '（AIを使います）</span>';
   button.addEventListener('click', () => {
@@ -569,7 +581,7 @@ function appendLocate(turn, locate) {
   const button = document.createElement('button');
   button.className = 'option';
   button.innerHTML =
-    '<span class="num">◎</span><span>' + escapeHtml(locate.label) + '</span>';
+    '<span class="mark">◎</span><span>' + escapeHtml(locate.label) + '</span>';
   button.addEventListener('click', () => {
     vscode.postMessage({ type: 'locate', id: locate.id });
   });
@@ -843,6 +855,15 @@ window.addEventListener('message', (event) => {
   if (message.type === 'editFailed') {
     markEdit(message.id, message.message, false);
     scrollToBottom();
+    return;
+  }
+  // 確認で「キャンセル」を選んだとき。**提案は消さず、押せる状態へ戻す**
+  // （中身を読んで考え直しただけかもしれない）
+  if (message.type === 'editCancelled') {
+    const box = document.querySelector('[data-edit-id="' + message.id + '"]');
+    if (box) {
+      box.querySelectorAll('button').forEach((el) => { el.disabled = false; });
+    }
     return;
   }
   if (message.type === 'runDone') {
