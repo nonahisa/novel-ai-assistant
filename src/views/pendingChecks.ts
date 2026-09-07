@@ -297,7 +297,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-58",
     title: "登場人物一覧と書体",
     commands: ["novelai.openEpubEditor"],
-    count: 8,
+    count: 7,
   },
   {
     id: "F-59",
@@ -309,67 +309,67 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-60",
     title: "章立て",
     commands: ["novelai.startChapter"],
-    count: 8,
+    count: 4,
   },
   {
     id: "F-61",
     title: "話の挿入と削除",
     commands: ["novelai.insertEpisodeBefore", "novelai.removeEpisodeAndRenumber"],
-    count: 10,
+    count: 4,
   },
   {
     id: "F-62",
     title: "EPUBの3つの直し",
     commands: ["novelai.openEpubEditor"],
-    count: 6,
+    count: 2,
   },
   {
     id: "F-63",
     title: "未チューニングの安全既定",
     commands: ["novelai.measureContext"],
-    count: 4,
+    count: 3,
   },
   {
     id: "F-64",
     title: "EPUBのブロック（段B）",
     commands: ["novelai.openEpubEditor"],
-    count: 6,
+    count: 2,
   },
   {
     id: "F-65",
     title: "EPUBのブロック式画面（段C→段D）",
     commands: ["novelai.openEpubEditor"],
-    count: 5,
+    count: 2,
   },
   {
     id: "F-66",
     title: "章立てのAI提案",
     commands: ["novelai.proposeChapters"],
-    count: 10,
+    count: 4,
   },
   {
     id: "F-67",
     title: "投稿キット",
     commands: ["novelai.postNewEpisode", "novelai.configurePostingSites"],
-    count: 7,
+    count: 5,
   },
   {
     id: "F-68",
     title: "note風エディタ",
     commands: ["novelai.openVertical"],
-    count: 4,
+    count: 2,
   },
   {
     id: "F-69",
     title: "作品タイプと表示絞り込み",
     commands: ["novelai.setPlotBasics"],
-    count: 5,
+    count: 1,
   },
   {
     id: "F-70",
     title: "作品メモと移管",
     commands: ["novelai.addWorkMemo"],
-    count: 6,
+    count: 2,
   },
   {
     id: "F-71",
@@ -381,7 +381,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-72",
     title: "plotから資料への差分反映",
     commands: ["novelai.openPlotMode"],
-    count: 6,
+    count: 1,
   },
   {
     id: "F-73",
@@ -710,4 +710,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 524;
+export const PENDING_CHECK_TOTAL = 478;
