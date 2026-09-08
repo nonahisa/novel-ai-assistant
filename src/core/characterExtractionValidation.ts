@@ -1,4 +1,6 @@
 import type { Chunk } from "./chunker";
+import { PRONOUN_WORDS } from "./genericPersonWords";
+import { stripHonorific } from "./nameHonorific";
 import { chaptersForCandidate, isGroundedInChunk } from "./groundedEvidence";
 import type {
   CharacterExtractResult,
@@ -8,6 +10,8 @@ import type {
 export type CharacterRejectionReason =
   | "invalid_shape"
   | "invalid_name"
+  /** 名前が代名詞だけ（「僕」「あんた」）。誰を指しているのか決められない */
+  | "pronoun_name"
   | "non_person"
   | "collective"
   | "ungrounded";
@@ -136,34 +140,12 @@ export function isMeaningfulValue(value: string | null | undefined): boolean {
   return !ABSENCE_NEGATION_PATTERN.test(text);
 }
 const COLLECTIVE_SUFFIX_PATTERN = /(?:たち|一同|一行|一団|人々|一族)$/u;
-const PRONOUNS = new Set([
-  "私",
-  "わたし",
-  "わたくし",
-  "僕",
-  "ぼく",
-  "俺",
-  "おれ",
-  "あたし",
-  "あたい",
-  "自分",
-  "我",
-  "我輩",
-  "吾輩",
-  "わし",
-  "儂",
-  "余",
-  "拙者",
-  "小生",
-  "あなた",
-  "君",
-  "お前",
-  "彼",
-  "彼女",
-  "彼ら",
-  "彼女ら",
-  "我々",
-]);
+/**
+ * 代名詞。一覧は `core/genericPersonWords.ts` が1か所で持つ（設計書6.5.9）。
+ * 「重複をまとめる」の側も同じ一覧を見るので、写しを作らない。
+ */
+const PRONOUNS = new Set(PRONOUN_WORDS);
+
 const GENERIC_ROLES = new Set([
   "先生",
   "教師",
@@ -253,6 +235,14 @@ export function validateCharacterExtractResult(
     const character = normalizeExtractedCharacter(raw);
     if (!isValidName(character.name)) {
       rejected.push({ name: character.name, reason: "invalid_name" });
+      continue;
+    }
+    // 代名詞だけの名前は、誰を指しているのか決められない（設計書6.5.9）。
+    // **プロンプトで禁じても返ってくる**——qwen3:8b でも gemma4:26b でも
+    // 「僕」という人物レコードが作られた（実機確認A-18の2026-09-08）ので、
+    // コードで弾く。捨てた件数と理由は完了報告に出す（黙って捨てない）
+    if (isPronounName(character.name)) {
+      rejected.push({ name: character.name, reason: "pronoun_name" });
       continue;
     }
     // 「兵士たち」のような集団名詞はモブとして残す。
@@ -709,7 +699,6 @@ function isValidName(name: string): boolean {
     name.length > 0 &&
     name.length <= MAX_NAME_LENGTH &&
     !PLACEHOLDER_NAME_PATTERN.test(name) &&
-    !PRONOUNS.has(name) &&
     !SENTENCE_PUNCTUATION.test(name) &&
     !WRAPPING_PUNCTUATION.test(name) &&
     !SENTENCE_LIKE_NAME_PATTERN.test(name)
@@ -719,9 +708,29 @@ function isValidName(name: string): boolean {
 function isValidAlias(alias: string): boolean {
   return (
     isValidName(alias) &&
+    // 代名詞の判定は isValidName から分けた（除外の理由を分けるため）。
+    // 別名の側でも同じように弾く——「僕」を別名に持つと、それだけで
+    // 別レコードどうしが「同じ呼び名を持つ」ことになる（設計書6.5.9）
+    !isPronounName(alias) &&
     !GENERIC_ROLES.has(alias) &&
     !isCollectiveName(alias)
   );
+}
+
+/**
+ * 名前が代名詞そのものか（設計書6.5.9）。
+ *
+ * 空白を落とし、敬称を1つ外してから照合する。書かれたままの形でしか
+ * 見ないと、「 僕 」のような形がすり抜ける。
+ *
+ * **家族関係語（「お母さん」「おばあさん」）は、ここでは弾かない。**
+ * 作中でその呼び方しかされない登場人物がいる——この作品の実データでも
+ * 「おばあさん」は関係25件を持つ主要人物で、弾くと資料からその人が消える。
+ * 「母」「父」のような語だけの形は、これまでどおり GENERIC_ROLES が弾く。
+ */
+function isPronounName(name: string): boolean {
+  const bare = name.replace(/[\s　]/gu, "");
+  return PRONOUNS.has(bare) || PRONOUNS.has(stripHonorific(bare));
 }
 
 function isCollectiveName(name: string): boolean {

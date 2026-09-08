@@ -324,14 +324,44 @@ ${knownWorld}
 }
 
 /**
+ * 配列の上限（2026-09-08に足した。実機確認A-18）。
+ *
+ * **上限が無いと、モデルは同じ語を書き続けて止まらない。** 実測では
+ * 18話のうち3話が、3回試して3回とも約304秒で落ちた。中を流して見ると
+ * `{"by":"僕","term":"文佳ちゃん"}` を延々と繰り返していた。
+ * Ollamaへは `num_predict` を送らない方針（設計書6.58.2）なので、
+ * 止めるものが要求のタイムアウト（既定180秒）しか無い。
+ * 原稿は壊れないが、待たされたうえにそのチャンクを取りこぼす。
+ *
+ * **数は「実データで出うる数より少し多い」ところに置く。** 1チャンクは
+ * 数千字で、そこに現れる1人ぶんの呼び方が20を超えることはまず無い。
+ * 足りなくても次のチャンクで拾い直せるが、上限が無いと止まらない。
+ */
+const MAX_ALIASES = 20;
+const MAX_ADDRESS_TERMS = 20;
+/** 関係だけ多めなのは、1人が場面ごとに何人とも結び付くため */
+const MAX_RELATIONS = 30;
+/** 能力の使い手。別名と同じ数でよい */
+const MAX_USER_NAMES = 20;
+const MAX_RULES = 20;
+/** 1チャンクから取れる、種別ごとのレコードの数 */
+const MAX_ENTRIES = 40;
+
+/**
  * Ollamaの構造化出力に渡すJSONスキーマ。
  * これを指定すると形式が強制され、パース失敗がほぼ無くなる。
+ *
+ * ## 変更履歴（スキーマだけ。プロンプト文は `CHARACTER_EXTRACT_VERSION`）
+ * - 2026-09-08: すべての配列に `maxItems` を入れた（繰り返しで止まらなくなるため）。
+ *   **版は上げない**——プロンプトの文言は変わっておらず、上げるとキャッシュが
+ *   全部無効になって作品全体を再処理させることになる
  */
 export const CHARACTER_EXTRACT_SCHEMA = {
   type: "object",
   properties: {
     characters: {
       type: "array",
+      maxItems: MAX_ENTRIES,
       items: {
         type: "object",
         properties: {
@@ -340,7 +370,11 @@ export const CHARACTER_EXTRACT_SCHEMA = {
             type: "string",
             enum: ["person", "group", "location", "unknown"],
           },
-          aliases: { type: "array", items: { type: "string" } },
+          aliases: {
+            type: "array",
+            items: { type: "string" },
+            maxItems: MAX_ALIASES,
+          },
           isMob: { type: "boolean" },
           reading: { type: ["string", "null"] },
           summary: { type: ["string", "null"], maxLength: SUMMARY_MAX_CHARS },
@@ -353,6 +387,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           defaultSecondPerson: { type: ["string", "null"] },
           addressTerms: {
             type: "array",
+            maxItems: MAX_ADDRESS_TERMS,
             items: {
               type: "object",
               properties: {
@@ -367,6 +402,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           },
           relations: {
             type: "array",
+            maxItems: MAX_RELATIONS,
             items: {
               type: "object",
               properties: {
@@ -403,18 +439,27 @@ export const CHARACTER_EXTRACT_SCHEMA = {
     },
     abilities: {
       type: "array",
+      maxItems: MAX_ENTRIES,
       items: {
         type: "object",
         properties: {
           name: { type: "string" },
-          aliases: { type: "array", items: { type: "string" } },
+          aliases: {
+            type: "array",
+            items: { type: "string" },
+            maxItems: MAX_ALIASES,
+          },
           reading: { type: ["string", "null"] },
           summary: { type: ["string", "null"], maxLength: SUMMARY_MAX_CHARS },
           category: { type: ["string", "null"] },
           description: { type: ["string", "null"] },
           cost: { type: ["string", "null"] },
           limitation: { type: ["string", "null"] },
-          userNames: { type: "array", items: { type: "string" } },
+          userNames: {
+            type: "array",
+            items: { type: "string" },
+            maxItems: MAX_USER_NAMES,
+          },
           evidence: { type: "string", minLength: 1 },
         },
         required: ["name", "summary", "description", "evidence"],
@@ -422,11 +467,16 @@ export const CHARACTER_EXTRACT_SCHEMA = {
     },
     organizations: {
       type: "array",
+      maxItems: MAX_ENTRIES,
       items: {
         type: "object",
         properties: {
           name: { type: "string" },
-          aliases: { type: "array", items: { type: "string" } },
+          aliases: {
+            type: "array",
+            items: { type: "string" },
+            maxItems: MAX_ALIASES,
+          },
           reading: { type: ["string", "null"] },
           summary: { type: ["string", "null"], maxLength: SUMMARY_MAX_CHARS },
           parent: { type: ["string", "null"] },
@@ -439,11 +489,16 @@ export const CHARACTER_EXTRACT_SCHEMA = {
     },
     locations: {
       type: "array",
+      maxItems: MAX_ENTRIES,
       items: {
         type: "object",
         properties: {
           name: { type: "string" },
-          aliases: { type: "array", items: { type: "string" } },
+          aliases: {
+            type: "array",
+            items: { type: "string" },
+            maxItems: MAX_ALIASES,
+          },
           reading: { type: ["string", "null"] },
           summary: { type: ["string", "null"], maxLength: SUMMARY_MAX_CHARS },
           region: { type: ["string", "null"] },
@@ -455,6 +510,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
     },
     worldview: {
       type: "array",
+      maxItems: MAX_ENTRIES,
       items: {
         type: "object",
         properties: {
@@ -484,7 +540,11 @@ export const CHARACTER_EXTRACT_SCHEMA = {
         // required に入れるのは、省略されると総称が永久に埋まらないため。
         abilityTerm: { type: ["string", "null"] },
         description: { type: ["string", "null"] },
-        rules: { type: "array", items: { type: "string" } },
+        rules: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: MAX_RULES,
+        },
       },
       required: ["abilityTerm"],
     },

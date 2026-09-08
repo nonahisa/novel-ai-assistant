@@ -25,6 +25,11 @@ export function toOpenAIJsonSchema(schema: unknown): unknown {
   const source = schema as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(source)) {
+    // **配列の件数制約は送らない。** strictモードが受け付けない語で、
+    // 入っているとスキーマごと400で拒否される。maxItems は手元のモデルが
+    // 同じ語を書き続けるのを止めるためのもの（設計書6.5.9）で、
+    // 落としても抽出の中身は変わらない
+    if (key === "maxItems" || key === "minItems") continue;
     out[key] = toOpenAIJsonSchema(value);
   }
 

@@ -537,6 +537,7 @@ function toModelInfo(m: ClaudeModel): ModelInfo {
  * 「非対応」として記録された。その記録が残っていると、直したあとも
  * スキーマ無し・思考ONのまま呼び続けることになる（実データで発生）。
  *
+ * v5 は、配列の件数制約（maxItems）を送らないようにしたため（2026-09-08）。
  * v4 は、拒否の原因がモデルではなく**こちらのスキーマ**だったため。
  * 「必須でない項目が多すぎる」で弾かれていたのを直したので、
  * 「JSONスキーマ非対応」という記録は誤りになった。
@@ -545,7 +546,7 @@ function toModelInfo(m: ClaudeModel): ModelInfo {
  * 上げないと、直す前の判定が残って新しいスキーマを試さない。
  */
 function supportKey(model: string): string {
-  return `novelai.claude.support.v4.${model}`;
+  return `novelai.claude.support.v5.${model}`;
 }
 
 /**
@@ -653,7 +654,7 @@ function describeCapabilities(caps: ClaudeModelCapabilities | null): string[] {
  * Claudeの構造化出力は
  *   - すべてのobjectに additionalProperties: false が必要
  *   - type: ["string", "null"] のような配列形式は anyOf で書く
- *   - **minLength / maxLength は受け付けない**
+ *   - **minLength / maxLength は受け付けない**（件数の maxItems も送らない）
  * という制約がある。Ollama側のスキーマ定義は変更したくないので
  * （プロンプトversionが変わるとキャッシュが全部無効になる）、
  * 送信直前にここで変換する。
@@ -680,7 +681,18 @@ export function toClaudeJsonSchema(schema: unknown): unknown {
       // ["string", "null"] → anyOf: [{type:"string"}, {type:"null"}]
       continue;
     }
-    if (key === "minLength" || key === "maxLength") continue;
+    // 件数の制約（maxItems）も送らない。文字数と同じく非対応とみられ、
+    // 試すとその400が他の指定への濡れ衣になる。maxItems は手元のモデルが
+    // 同じ語を書き続けるのを止めるためのもの（設計書6.5.9）で、
+    // 落としても抽出の中身は変わらない
+    if (
+      key === "minLength" ||
+      key === "maxLength" ||
+      key === "minItems" ||
+      key === "maxItems"
+    ) {
+      continue;
+    }
     out[key] = toClaudeJsonSchema(value);
   }
 

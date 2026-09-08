@@ -15,6 +15,7 @@ import {
   HONORIFIC_SUFFIXES,
   stripHonorific,
 } from "./nameHonorific";
+import { KINSHIP_WORDS, PRONOUN_WORDS } from "./genericPersonWords";
 import {
   hasChange,
   recordChangeChapters,
@@ -145,6 +146,8 @@ export interface MergeCandidate {
 const WEAK_FAMILY_NAME_NOTE = "姓の共有かもしれません";
 /** 別名に相手の名前が入っているだけかもしれないときに添える一言 */
 const WEAK_ALIAS_NOTE = "別名に相手の名前が混ざっただけかもしれません";
+/** 代名詞・家族関係語のように、誰にでも使う呼び方で並んだときに添える一言 */
+const WEAK_GENERIC_WORD_NOTE = "誰にでも使う呼び方です。別人かもしれません";
 
 /** 手掛かりの種類を表す短い文 */
 const MERGE_REASON_LABELS: Record<MergeCandidate["reason"], string> = {
@@ -1107,6 +1110,29 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
         continue;
       }
 
+      // 主たる名前どうしが同じで、それが誰にでも使う呼び方だった組。
+      //
+      // **上の網（`isGenericAppellation`）で根拠から外した分の受け皿である。**
+      // 外しっぱなしにすると、実データで「お母さん」が4件へ割れていたような
+      // **本当の重複を直す手立てが無くなる**（別名の一致では拾えず、
+      // 長さが同じなので suffix・name_part にも掛からない）。
+      // 根拠としては弱いので、確信度を落として断りを添える
+      if (
+        isGenericAppellation(a.name) &&
+        normalizeName(a.name) &&
+        normalizeName(a.name) === normalizeName(b.name)
+      ) {
+        candidates.push({
+          names: [a.name, b.name],
+          ids: [a.id, b.id],
+          reason: "same_name",
+          matchedName: a.name,
+          confidence: "weak",
+          weakNote: WEAK_GENERIC_WORD_NOTE,
+        });
+        continue;
+      }
+
       // 敬称を外すと、もう一方のフルネームの姓になる組（設計書6.5.9）。
       // 「密倉さん」が「密倉文佳」とは別レコードとして立ってしまう形で、
       // 呼び名が重ならないので same_name にも掛からず、実データでは
@@ -1373,8 +1399,8 @@ function stripPolitePrefix(name: string): string {
  * これを見落としていたため、AIが関連を正しく記録していたにもかかわらず、
  * 「リン」と「リンセップ・アウクト」が別人のまま残っていた（実データで確認）。
  *
- * ただし「姫」「殿下」のような肩書きだけの呼称は、
- * 別人どうしでも一致してしまうため除く。
+ * ただし「姫」「殿下」のような肩書きだけの呼称、代名詞、家族関係語は、
+ * 別人どうしでも一致してしまうため除く（`isGenericAppellation`）。
  */
 export function buildAppellationIndex(
   characters: Character[]
@@ -1385,15 +1411,22 @@ export function buildAppellationIndex(
     const names = [character.name, ...character.aliases].filter((name) =>
       name.trim()
     );
+    // 宛先の照合には、網を掛ける前の呼び名を使う。掛けたあとの形で照合すると、
+    // 「お母さん」というレコードへ宛てた呼称がどこにも結び付かなくなる
     const ownKeys = new Set(names.map(normalizeName));
-    const collected = new Set(names);
+    // **網は名前と別名にも掛ける**（設計書6.5.9、実機確認A-18の2026-09-08）。
+    // 掛かっていたのは呼称（addressTerms）だけで、別名に入り込んだ「僕」
+    // 「あんた」「お嬢様」がそのまま「ほぼ確実に同一人物」の根拠になっていた
+    const collected = new Set(
+      names.filter((name) => !isGenericAppellation(name))
+    );
 
     // 誰のレコードに書かれていても、宛先がこの人物なら呼称として扱う
     for (const speaker of characters) {
       for (const term of speaker.addressTerms) {
         if (!ownKeys.has(normalizeName(term.targetName))) continue;
         for (const form of term.forms) {
-          if (isTitleOnly(form.term)) continue;
+          if (isGenericAppellation(form.term)) continue;
           collected.add(form.term);
         }
       }
@@ -1405,24 +1438,51 @@ export function buildAppellationIndex(
 }
 
 /**
- * 肩書き・敬称だけの呼称か。
- * 「姫」「王女殿下」は別の王女とも一致してしまうので同一人物判定に使わない。
+ * 誰にでも使える呼び方か。**同一人物の根拠にしない**（設計書6.5.9）。
+ *
+ * 3種類ある。
+ *  - 肩書き・敬称だけ（「姫」「王女殿下」）……別の王女とも一致する
+ *  - 代名詞（「僕」「あんた」）……話者が変われば別人を指す
+ *  - 家族関係語（「お母さん」「ばあさん」）……同じ家の中で複数の人が持つ
+ *
+ * 代名詞と家族関係語は、実データで「ほぼ確実に同一人物」の根拠になっていた
+ * （「密倉 文佳／三門太志＝僕」「太志／フミカ＝あんた」。どれも別人。
+ * 実機確認A-18の2026-09-08）。
  */
-function isTitleOnly(term: string): boolean {
+function isGenericAppellation(term: string): boolean {
   // normalizeName は敬称を落とすので「王女殿下」→「王女」になる
   const normalized = normalizeName(term);
   if (!normalized) return true;
   // 「姫」「殿下」のように敬称そのもの1語だけの呼び方
   if (HONORIFIC_SUFFIX_SOURCE.includes(normalized)) return true;
-  return TITLE_WORDS.has(normalized);
+  return TITLE_WORDS.has(normalized) || GENERIC_APPELLATIONS.has(normalized);
 }
 
-/** 肩書きだけで人を特定できない語。別の王女とも一致してしまう */
-const TITLE_WORDS = new Set([
+/**
+ * 肩書きだけで人を特定できない語。別の王女とも一致してしまう。
+ *
+ * **書くときは作中の言い方のままでよい。** 照合は敬称を落とした形で
+ * 行うので、一覧側も同じ形へ通してから持つ（下の `TITLE_WORDS`）。
+ * 通す前は「お嬢様」「奥様」が書かれたまま入っており、照合の側は
+ * 「お嬢」「奥」を見ていたので**一度も効いていなかった**
+ * （実機確認A-18の2026-09-08）。あとから足す語が同じ罠を踏まないよう、
+ * 揃えるのは一覧の側ではなく機械にやらせる。
+ */
+const TITLE_WORD_SOURCE = [
   "王女", "王子", "王", "女王", "国王", "皇帝", "皇后", "王妃",
   "姫君", "師匠", "隊長", "副隊長", "団長", "会長",
   "社長", "部長", "課長", "店長", "旦那", "奥様", "お嬢様",
-]);
+];
+
+const TITLE_WORDS = new Set(TITLE_WORD_SOURCE.map(normalizeName));
+
+/**
+ * 代名詞と家族関係語（`core/genericPersonWords.ts`）。
+ * こちらも照合と同じ形へ通してから持つ（理由は `TITLE_WORD_SOURCE` と同じ）。
+ */
+const GENERIC_APPELLATIONS = new Set(
+  [...PRONOUN_WORDS, ...KINSHIP_WORDS].map(normalizeName)
+);
 
 /** 2人の呼称の総当たりを、短い方・長い方の順で返す */
 function appellationPairs(a: Character, b: Character): Array<[string, string]> {

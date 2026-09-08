@@ -145,6 +145,41 @@ describe("登場人物抽出の品質ゲート", () => {
       .toEqual(expect.arrayContaining(["name", "entityType", "evidence"]));
   });
 
+  test("配列に上限を入れて、同じ語を書き続けるのを止める", () => {
+    // 実測：18話のうち3話が、3回試して3回とも約304秒で落ちた。
+    // {"by":"僕","term":"文佳ちゃん"} を延々と繰り返していた（実機確認A-18）。
+    // Ollamaへは num_predict を送らない方針なので、止めるものが
+    // 要求のタイムアウトしか無い。原稿は壊れないがチャンクを取りこぼす
+    const character = CHARACTER_EXTRACT_SCHEMA.properties.characters.items;
+    expect(character.properties.aliases.maxItems).toBeGreaterThan(0);
+    expect(character.properties.addressTerms.maxItems).toBeGreaterThan(0);
+    expect(character.properties.relations.maxItems).toBeGreaterThan(0);
+
+    // **配列を1つでも見落とすと、そこで同じことが起きる。**
+    // 数を決め打ちせず、スキーマの中の配列すべてを走査する
+    const missing: string[] = [];
+    const walk = (node: unknown, path: string): void => {
+      if (!node || typeof node !== "object") return;
+      const record = node as Record<string, unknown>;
+      if (record.type === "array" && record.maxItems === undefined) {
+        missing.push(path);
+      }
+      for (const [key, value] of Object.entries(record)) {
+        if (key === "enum" || key === "required") continue;
+        walk(value, `${path}.${key}`);
+      }
+    };
+    walk(CHARACTER_EXTRACT_SCHEMA, "schema");
+
+    expect(missing).toEqual([]);
+  });
+
+  test("上限を足してもプロンプトの版は上げない", () => {
+    // 版を上げるとキャッシュが全部無効になり、作品全体を再処理させる。
+    // スキーマの上限はプロンプトの文言を変えていないので、上げる理由が無い
+    expect(CHARACTER_EXTRACT_VERSION).toBe("5.3");
+  });
+
   test("関係を必須にして、名前や外見から分からない結びつきを残せるようにする", () => {
     // 憑依・入れ替わり・変装は、名前も外見も相手のものになる。
     // relations に書けなければ、その情報はどこにも残らない。

@@ -249,7 +249,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-16",
     title: "Markdownが既定の画面で開くか",
     commands: ["novelai.applyPendingUpdates", "novelai.exportImeDictionary", "novelai.runFullSetup", "novelai.diagnoseWeb"],
-    count: 1,
+    count: 4,
   },
   {
     id: "F-17",
@@ -405,7 +405,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-49",
     title: "読み上げ（音読推敲）",
     commands: ["novelai.readManuscriptAloud"],
-    count: 4,
+    count: 5,
   },
   {
     id: "F-48",
@@ -483,7 +483,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-35",
     title: "原稿エディタの一新——文字数・前後の話・記録の細分化ほか",
     commands: ["novelai.openVertical", "novelai.resumeWriting"],
-    count: 6,
+    count: 7,
   },
   {
     id: "F-34",
@@ -549,7 +549,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-23",
     title: "AI相談の大きい画面と使い方マニュアル",
     commands: ["novelai.openChatPanel", "novelai.openManual"],
-    count: 3,
+    count: 4,
   },
   {
     id: "F-22",
@@ -698,4 +698,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 406;
+export const PENDING_CHECK_TOTAL = 412;

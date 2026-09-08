@@ -28,7 +28,7 @@ describe("AI登場人物抽出結果の検証", () => {
     "person" | "group" | "location" | "unknown" | undefined,
     CharacterRejectionReason,
   ]>([
-    ["僕", undefined, "invalid_name"],
+    ["僕", undefined, "pronoun_name"],
     ["先生", undefined, "non_person"],
     ["王都アルバ", "location", "non_person"],
     ["警官", undefined, "non_person"],
@@ -43,6 +43,52 @@ describe("AI登場人物抽出結果の検証", () => {
 
     expect(result.rejected).toEqual([{ name, reason }]);
     expect(result.accepted).toEqual([]);
+  });
+
+  test.each([["僕"], ["あんた"], ["お前"], ["彼女"], ["　僕 "], ["君"]])(
+    "代名詞だけの名前 %s を弾く",
+    (name) => {
+      // プロンプトで禁じても返ってくる（qwen3:8b でも gemma4:26b でも
+      // 「僕」という人物が作られた。実機確認A-18）。
+      // 空白と敬称を落としてから照合するので、書かれ方の揺れも拾う
+      const line = `${name.trim()}は静かに帰宅した`;
+      const result = validate(
+        { characters: [{ name, evidence: line }] },
+        { ...chunk, text: line }
+      );
+
+      expect(result.rejected).toEqual([
+        { name: name.trim(), reason: "pronoun_name" },
+      ]);
+      expect(result.accepted).toEqual([]);
+    }
+  );
+
+  test.each([["おばあさん"], ["お母さん"], ["三門の母"]])(
+    "家族関係語の呼び名 %s は弾かない（その呼び方しかされない人物がいる）",
+    (name) => {
+      // この作品の実データでは「おばあさん」が関係25件を持つ主要人物である。
+      // 弾くと、抽出のたびにその人物が資料から消える
+      const line = `${name}が縁側で笑った`;
+      const result = validate(
+        { characters: [{ name, evidence: line }] },
+        { ...chunk, text: line }
+      );
+
+      expect(result.rejected).toEqual([]);
+      expect(result.accepted).toHaveLength(1);
+    }
+  );
+
+  test("代名詞は別名からも落とす", () => {
+    // 別名に「僕」が入ると、それだけで別レコードどうしが
+    // 「同じ呼び名を持つ」ことになる（設計書6.5.9）
+    const line = "灯は静かに帰宅した";
+    const result = validate({
+      characters: [{ name: "灯", aliases: ["僕", "あかり"], evidence: line }],
+    });
+
+    expect(result.accepted[0].data.aliases).toEqual(["あかり"]);
   });
 
   test.each([["兵士たち"], ["村人ら"], ["旅人一行"]])(

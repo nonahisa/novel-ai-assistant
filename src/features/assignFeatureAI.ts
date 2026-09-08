@@ -7,7 +7,7 @@ import {
   type AssignableFeature,
   type ProviderAndModelPick,
 } from "../ai/registry";
-import { TYPO_MODEL_ADVICE } from "../core/requirements";
+import { EXTRACT_MODEL_ADVICE, TYPO_MODEL_ADVICE } from "../core/requirements";
 import { cancelItem } from "../views/dialogs";
 import { notifyDone } from "../views/notify";
 
@@ -64,6 +64,18 @@ export async function assignFeatureAI(registry: AIRegistry): Promise<void> {
   );
 }
 
+/**
+ * モデルの大きさで結果が変わる機能と、その一言。
+ *
+ * **全部の行に説明を付けない**（作者の裁定 2026-09-06）。付けると、
+ * 肝心の行が埋もれる。ここに無い機能は説明なしで並ぶ。
+ */
+const MODEL_SIZE_ADVICE: Partial<Record<AssignableFeature, string>> = {
+  typo: TYPO_MODEL_ADVICE,
+  // 抽出は、モデルを替えるだけで人物の分裂が止まった（実機確認A-18）
+  extract: EXTRACT_MODEL_ADVICE,
+};
+
 /** どの機能の割当を変えるか。いまの割当を各行に出す */
 async function pickFeature(
   registry: AIRegistry
@@ -85,7 +97,7 @@ async function pickFeature(
           // **モデルの大きさで結果が変わる機能だけ、その場で言う**
           // （作者の裁定 2026-09-06）。全部の行に説明を付けると、
           // 肝心の1行が埋もれる
-          detail: feature === "typo" ? TYPO_MODEL_ADVICE : undefined,
+          detail: MODEL_SIZE_ADVICE[feature],
           feature,
         };
       }),
