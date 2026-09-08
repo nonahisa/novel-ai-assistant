@@ -1,5 +1,8 @@
 import type { Chunk } from "./chunker";
-import { PRONOUN_WORDS } from "./genericPersonWords";
+import {
+  DESCRIPTIVE_ROLE_WORDS,
+  PRONOUN_WORDS,
+} from "./genericPersonWords";
 import { stripHonorific } from "./nameHonorific";
 import { chaptersForCandidate, isGroundedInChunk } from "./groundedEvidence";
 import type {
@@ -12,6 +15,11 @@ export type CharacterRejectionReason =
   | "invalid_name"
   /** 名前が代名詞だけ（「僕」「あんた」）。誰を指しているのか決められない */
   | "pronoun_name"
+  /**
+   * 呼び名ではなく説明（「主人公」「密倉の母親」）。
+   * AIがその場で作った言い方で、本文の誰もそう呼んでいない
+   */
+  | "descriptive_name"
   | "non_person"
   | "collective"
   | "ungrounded";
@@ -78,14 +86,22 @@ const WRAPPING_PUNCTUATION =
 // 助詞だけでは「こはる」のような名前も巻き込むため、文末の活用形まで限定する。
 const SENTENCE_LIKE_NAME_PATTERN =
   /[はがをにへでとも][^、。！？!?\r\n]{1,20}(?:った|いた|した|された|ていた|ている|している|なかった|だった|でした|ました|ません)$/u;
+/**
+ * 名前の代わりに置かれる穴埋め語。
+ *
+ * **「主人公」はここから外した**（0.43.4）。同じ形の「密倉の母親」
+ * 「語り手」と揃えて `descriptive_name` で弾く——理由が分かれていると、
+ * 完了報告で「説明的な名前が何件返ってきたか」が読めない。
+ */
 const PLACEHOLDER_NAME_PATTERN =
-  /^(null|undefined|不明|なし|誰か|n\/?a|none|[（(]?主[）)]?|主人公)$/i;
+  /^(null|undefined|不明|なし|誰か|n\/?a|none|[（(]?主[）)]?)$/i;
 
 /**
  * それ自体が「値が無い」ことしか言っていない語。
  *
- * 名前用の `PLACEHOLDER_NAME_PATTERN` は使い回せない。あちらは「主人公」
- * 「誰か」を含むが、これらは役割の値としては正しい（role: "主人公"）。
+ * 名前用の `PLACEHOLDER_NAME_PATTERN`・`DESCRIPTIVE_ROLE_WORDS` は使い回せない。
+ * あちらは「誰か」「主人公」を弾くが、これらは役割の値としては正しい
+ * （role: "主人公"）。
  */
 const EMPTY_VALUE_PATTERN =
   /^[（(]?(?:null|undefined|n\/?a|none|なし|無し|不明|未詳|記述なし|記載なし|描写なし|該当なし|特になし|読み取れない|判断できない|見当たらない|[-—―ー・?？])[）)]?$/i;
@@ -145,6 +161,11 @@ const COLLECTIVE_SUFFIX_PATTERN = /(?:たち|一同|一行|一団|人々|一族)
  * 「重複をまとめる」の側も同じ一覧を見るので、写しを作らない。
  */
 const PRONOUNS = new Set(PRONOUN_WORDS);
+/**
+ * 説明的な役割語・家族関係語。一覧は同じく `genericPersonWords.ts` が持つ。
+ * 家族関係語は**単独では弾かない**——「〇〇の△△」の△△を見るためだけに使う。
+ */
+const DESCRIPTIVE_ROLES = new Set(DESCRIPTIVE_ROLE_WORDS);
 
 const GENERIC_ROLES = new Set([
   "先生",
@@ -243,6 +264,14 @@ export function validateCharacterExtractResult(
     // コードで弾く。捨てた件数と理由は完了報告に出す（黙って捨てない）
     if (isPronounName(character.name)) {
       rejected.push({ name: character.name, reason: "pronoun_name" });
+      continue;
+    }
+    // 説明的な名前（「主人公」「密倉の母親」）は、AIがその場で作った言い方で、
+    // 本文の誰もそう呼んでいない（設計書6.5.9）。プロンプトは
+    // 「仮の名前や説明的な名前を発明してレコードを作らない」と禁じているが
+    // gemma4:26b でも返ってきた。**代名詞と同じく、理由付きで除外して報告に出す**
+    if (isDescriptiveName(character.name)) {
+      rejected.push({ name: character.name, reason: "descriptive_name" });
       continue;
     }
     // 「兵士たち」のような集団名詞はモブとして残す。
@@ -712,6 +741,9 @@ function isValidAlias(alias: string): boolean {
     // 別名の側でも同じように弾く——「僕」を別名に持つと、それだけで
     // 別レコードどうしが「同じ呼び名を持つ」ことになる（設計書6.5.9）
     !isPronounName(alias) &&
+    // 説明的な名前も別名から落とす。「主人公」が別名に入ると、
+    // それだけで別レコードどうしが「同じ呼び名を持つ」ことになる
+    !isDescriptiveName(alias) &&
     !GENERIC_ROLES.has(alias) &&
     !isCollectiveName(alias)
   );
@@ -731,6 +763,32 @@ function isValidAlias(alias: string): boolean {
 function isPronounName(name: string): boolean {
   const bare = name.replace(/[\s　]/gu, "");
   return PRONOUNS.has(bare) || PRONOUNS.has(stripHonorific(bare));
+}
+
+/**
+ * 名前が「呼び名」ではなく「物語上の役割」か（設計書6.5.9）。
+ *
+ * 弾くのは役割語そのもの（「主人公」「語り手」「ヒロイン」）だけ。
+ * **本文の誰もその語では呼んでいない**のに、モデルはレコードを作る
+ * （gemma4:26b でも起きた。実機確認A-18）。プロンプトで禁じても返るので、
+ * コードで弾く。
+ *
+ * **「密倉の母親」「三門の母」のような「〇〇の関係語」の形は弾かない**
+ * （作者の裁定、2026-09-08「「〇〇の母」は必要です」）。名前を持たない
+ * 人物の唯一の呼び名になりうる。実在のレコードと重なるときは
+ * 「重複をまとめる」の候補に出るので、作者が画面で片づける。
+ * 「おばあさん」「お母さん」のような関係語だけの形も同じ理由で残す
+ * （`isPronounName` の注記）。「母親」「母」のように役職語でもある形は、
+ * これまでどおり `GENERIC_ROLES` が `non_person` として弾く。
+ *
+ * **書かれたままの形と、敬称を1つ外した形の両方で見る。**
+ * 「主人公」は `stripHonorific` が「公」を敬称とみなして「主人」に
+ * してしまい、一覧に無い形になる。
+ */
+function isDescriptiveName(name: string): boolean {
+  const bare = normalizeSpacingOnly(name);
+  if (!bare) return false;
+  return DESCRIPTIVE_ROLES.has(bare) || DESCRIPTIVE_ROLES.has(stripHonorific(bare));
 }
 
 function isCollectiveName(name: string): boolean {

@@ -64,6 +64,55 @@ describe("AI登場人物抽出結果の検証", () => {
     }
   );
 
+  test.each([
+    ["主人公"],
+    ["ヒロイン"],
+    ["語り手"],
+    ["　主人公 "],
+  ])("説明的な名前 %s を弾く", (name) => {
+    // 呼び名ではなく説明である。プロンプトで禁じても返ってくる
+    // （gemma4:26b で「主人公」「密倉の母親」が作られた。実機確認A-18）
+    const line = `${name.trim()}が縁側で笑った`;
+    const result = validate(
+      { characters: [{ name, evidence: line }] },
+      { ...chunk, text: line }
+    );
+
+    expect(result.rejected).toEqual([
+      { name: name.trim(), reason: "descriptive_name" },
+    ]);
+    expect(result.accepted).toEqual([]);
+  });
+
+  test.each([["母親"], ["母"], ["父親"]])(
+    "関係語だけの %s は従来どおり non_person で弾く（理由を変えない）",
+    (name) => {
+      const line = `${name}が縁側で笑った`;
+      const result = validate(
+        { characters: [{ name, evidence: line }] },
+        { ...chunk, text: line }
+      );
+
+      expect(result.rejected).toEqual([{ name, reason: "non_person" }]);
+    }
+  );
+
+  test.each([["三門の母"], ["密倉の母親"], ["隣のお姉さん"], ["木ノ下ミカ"]])(
+    "「〇〇の母」のような呼び方 %s は残す（作者の裁定）",
+    (name) => {
+      // 名前を持たない人物の唯一の呼び名になりうる（2026-09-08「「〇〇の母」は必要です」）。
+      // 実在のレコードと重なれば「重複をまとめる」の候補に出るので、作者が画面で片づける
+      const line = `${name}が縁側で笑った`;
+      const result = validate(
+        { characters: [{ name, evidence: line }] },
+        { ...chunk, text: line }
+      );
+
+      expect(result.rejected).toEqual([]);
+      expect(result.accepted).toHaveLength(1);
+    }
+  );
+
   test.each([["おばあさん"], ["お母さん"], ["三門の母"]])(
     "家族関係語の呼び名 %s は弾かない（その呼び方しかされない人物がいる）",
     (name) => {
@@ -86,6 +135,23 @@ describe("AI登場人物抽出結果の検証", () => {
     const line = "灯は静かに帰宅した";
     const result = validate({
       characters: [{ name: "灯", aliases: ["僕", "あかり"], evidence: line }],
+    });
+
+    expect(result.accepted[0].data.aliases).toEqual(["あかり"]);
+  });
+
+  test("説明的な名前も別名から落とす", () => {
+    // 別名に「主人公」が入ると、それだけで別レコードどうしが
+    // 「同じ呼び名を持つ」ことになり、統合の根拠にされてしまう
+    const line = "灯は静かに帰宅した";
+    const result = validate({
+      characters: [
+        {
+          name: "灯",
+          aliases: ["主人公", "あかり"],
+          evidence: line,
+        },
+      ],
     });
 
     expect(result.accepted[0].data.aliases).toEqual(["あかり"]);

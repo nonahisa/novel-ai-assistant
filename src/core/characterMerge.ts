@@ -7,7 +7,7 @@ import {
 } from "../models/character";
 import { ExtractedCharacter } from "../prompts/characterExtract";
 import { clampSummary } from "./summaryLimit";
-import { fillReading } from "./reading";
+import { fillReading, toDictionaryReading } from "./reading";
 import { normalizeGender } from "./gender";
 import { isMeaningfulValue } from "./characterExtractionValidation";
 import {
@@ -110,6 +110,7 @@ export interface MergeCandidate {
    * suffix: 一方が他方の言い方を含む（「近所のおばあさん」と「ばあさん」）
    * name_part: 姓名を繋げた名前と、名だけの名前（「密倉文佳」と「文佳」）
    * honorific_family_name: 敬称を外すと、もう一方の姓（「密倉さん」と「密倉文佳」）
+   * reading_match: かなの呼び名が、もう一方の読み仮名と重なる（「フミカ」と「密倉文佳」）
    * ambiguous: 統合先が複数あって決められなかった
    * same_name: 同じ呼称なのに別レコードになっている
    */
@@ -118,17 +119,24 @@ export interface MergeCandidate {
     | "suffix"
     | "name_part"
     | "honorific_family_name"
+    | "reading_match"
     | "ambiguous"
     | "same_name";
   /**
-   * 一致した呼び名（same_name と honorific_family_name のときだけ）。
+   * 一致した呼び名（same_name・honorific_family_name・reading_match のときだけ）。
    * honorific_family_name では、敬称を外した形＝姓が入る。
+   * reading_match では、読みと重なったかなの呼び名が入る。
    *
    * **名指しで出すためにある。** 理由が「同じ呼び名が両方に登録されています」
    * だけだと、作者はどの呼び名で並んだのか分からず、姓の共有なのか
    * 同一人物なのかを判断できない（実データで20組中およそ半分が別人だった）。
    */
   matchedName?: string;
+  /**
+   * 突き合わせた読み仮名（reading_match のときだけ）。
+   * 「何と何が重なったのか」を作者へそのまま見せるために持つ。
+   */
+  matchedReading?: string;
   /**
    * どれくらい確からしいか。
    * 姓の共有や別名の汚染で並んだかもしれない組は "weak" にする。
@@ -156,6 +164,7 @@ const MERGE_REASON_LABELS: Record<MergeCandidate["reason"], string> = {
   suffix: "一方が他方の呼び方を含んでいます",
   name_part: "姓名と、名だけの呼び方とみられます",
   honorific_family_name: "敬称を外すと、もう一方の姓と同じです",
+  reading_match: "読み仮名と同じ音です",
   ambiguous: "統合先を決められませんでした",
 };
 
@@ -171,6 +180,15 @@ export function describeMergeCandidate(candidate: MergeCandidate): string {
   // 判断の材料（何を外して何と比べたか）をそのまま出す
   if (candidate.reason === "honorific_family_name" && candidate.matchedName) {
     return `敬称を外すと「${candidate.matchedName}」＝「${candidate.names[1]}」の姓です`;
+  }
+  // 読みで並んだ組も、突き合わせたものを全部見せる。
+  // 「同じ音です」だけでは、同音の別人なのか表記違いなのか判断できない
+  if (candidate.reason === "reading_match" && candidate.matchedName) {
+    const reading = candidate.matchedReading
+      ? `（${candidate.matchedReading}）`
+      : "";
+    const base = `「${candidate.matchedName}」が「${candidate.names[1]}」の読み仮名${reading}と重なります`;
+    return candidate.weakNote ? `${base}（${candidate.weakNote}）` : base;
   }
   const base =
     candidate.reason === "same_name" && candidate.matchedName
@@ -1152,6 +1170,24 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
         continue;
       }
 
+      // かなで書かれた呼び名が、もう一方の読み仮名と重なる組（設計書6.5.9）。
+      // 実データで第4話だけ「フミカ」と書かれ、「密倉文佳」（読み「みくらふみか」）
+      // とは**別名が漢字ばかりで突き合わせる道が無く**、候補にすら出なかった。
+      // 読みは `fillReading` がひらがなで持つので、かなの側を揃えれば比べられる
+      const reading = readingMatchPair(a, b, appellations);
+      if (reading) {
+        candidates.push({
+          names: [reading.kana.name, reading.owner.name],
+          ids: [reading.kana.id, reading.owner.id],
+          reason: "reading_match",
+          matchedName: reading.matchedName,
+          matchedReading: reading.reading,
+          confidence: reading.confidence,
+          ...(reading.weakNote ? { weakNote: reading.weakNote } : {}),
+        });
+        continue;
+      }
+
       const pairs = appellationPairs(a, b);
 
       if (pairs.some(([left, right]) => isAbbreviationOf(left, right))) {
@@ -1208,6 +1244,95 @@ function honorificFamilyNamePair(
 
     if (countFamilyNameOwners(characters, family) !== 1) continue;
     return { short, full, family };
+  }
+  return undefined;
+}
+
+/** かな（カタカナ・ひらがな）と長音符だけでできた語 */
+const KANA_ONLY = /^[ぁ-ゖァ-ヶー]+$/u;
+/** これより短いかなは、誰の読みにも一致してしまう（「ア」「ふ」） */
+const MIN_KANA_APPELLATION_LENGTH = 2;
+
+/**
+ * かなで書かれた呼び名が、もう一方の読み仮名と重なる組か（設計書6.5.9）。
+ *
+ * 実データで第4話だけ「フミカ」と書かれ、単独レコードとして残った。
+ * 「密倉文佳」側の別名は漢字ばかりで、**呼び名どうしを比べる限り
+ * 突き合わせる道が無い**——読み（みくらふみか）だけが両者を繋ぐ。
+ *
+ * **自動では寄せない。** 同じ読みの名は別人でも起きる
+ * （`honorific_family_name` と同じ考え）。姓の側で一致した組は、
+ * 家族の可能性が高いのでさらに確信度を落とす。
+ *
+ * **読みを持ち出すのは、名前どうしを直接比べられないときだけ。**
+ * 両方がかなだけの名前なら、部分の重なりは省略形（`abbreviation`）や
+ * 後ろの重なり（`suffix`）が名前そのもので見る。そちらを覆い隠すと、
+ * 「ギルドマスター」と「マスター」が「読み仮名と同じ音です」になる。
+ */
+function readingMatchPair(
+  a: Character,
+  b: Character,
+  appellations: ReadonlyMap<string, string[]>
+):
+  | {
+      kana: Character;
+      owner: Character;
+      matchedName: string;
+      reading: string;
+      confidence: "medium" | "weak";
+      weakNote?: string;
+    }
+  | undefined {
+  const directions: Array<[Character, Character]> = [
+    [a, b],
+    [b, a],
+  ];
+  for (const [kana, owner] of directions) {
+    const reading = toDictionaryReading(owner.reading ?? "");
+    if (!reading) continue;
+    // もう一方もかなだけの名前なら、**部分の重なりは名前そのもので比べられる**。
+    // 読みを持ち出すと「マスター」と「ギルドマスター」が
+    // 「読み仮名と同じ音です」になり、省略形という本当の手掛かりを覆い隠す。
+    // 音が丸ごと同じ組（「フミカ」と「ふみか」）だけは、
+    // カタカナとひらがなをまたいで比べる判定が他に無いので拾う
+    const ownerIsKana = KANA_ONLY.test(normalizeSpacing(owner.name));
+
+    for (const appellation of appellations.get(kana.id) ?? []) {
+      const bare = stripHonorific(normalizeSpacing(appellation));
+      if (bare.length < MIN_KANA_APPELLATION_LENGTH) continue;
+      if (!KANA_ONLY.test(bare)) continue;
+      // 「お母さん」「あんた」は誰にでも使う。読みと重なっても根拠にならない
+      if (isGenericAppellation(bare)) continue;
+      const sound = toDictionaryReading(bare);
+      if (!sound) continue;
+
+      // 完全一致と「名」の部分の一致は同じ強さで見る。
+      // 「みくらふみか」の末尾が「ふみか」なら、姓を省いた呼び方とみてよい
+      if (
+        sound === reading ||
+        (!ownerIsKana && reading.endsWith(sound) && reading.length > sound.length)
+      ) {
+        return {
+          kana,
+          owner,
+          matchedName: appellation,
+          reading,
+          confidence: "medium",
+        };
+      }
+      if (ownerIsKana) continue;
+      // 読みの頭で一致した組は姓の側。「ミクラ」は母や兄でもありうる
+      if (reading.startsWith(sound) && reading.length > sound.length) {
+        return {
+          kana,
+          owner,
+          matchedName: appellation,
+          reading,
+          confidence: "weak",
+          weakNote: WEAK_FAMILY_NAME_NOTE,
+        };
+      }
+    }
   }
   return undefined;
 }

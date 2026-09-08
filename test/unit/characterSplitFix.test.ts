@@ -658,6 +658,74 @@ describe("⑨敬称違いを機械で寄せる（0.42.2）", () => {
     expect(candidates).toEqual([]);
   });
 
+  test("かなの呼び名は、読み仮名の「名」の部分と突き合わせて候補にする", () => {
+    // 第4話だけ「フミカ」と書かれ、単独レコードとして残った（実機確認A-18）。
+    // 「密倉文佳」側の別名は漢字ばかりで、呼び名どうしでは繋がらない
+    const candidates = findMergeCandidates([
+      character("char_020", "フミカ"),
+      character("char_005", "密倉文佳", { reading: "みくらふみか" }),
+    ]);
+
+    expect(candidates).toHaveLength(1);
+    const candidate = candidates[0];
+    expect(candidate.reason).toBe("reading_match");
+    expect(candidate.names).toEqual(["フミカ", "密倉文佳"]);
+    expect(candidate.ids).toEqual(["char_020", "char_005"]);
+    expect(candidate.matchedName).toBe("フミカ");
+    expect(candidate.matchedReading).toBe("みくらふみか");
+    expect(candidate.confidence).toBe("medium");
+    expect(describeMergeCandidate(candidate)).toBe(
+      "「フミカ」が「密倉文佳」の読み仮名（みくらふみか）と重なります"
+    );
+  });
+
+  test("読みの頭で一致した組は姓の共有かもしれないと断る", () => {
+    const candidates = findMergeCandidates([
+      character("char_021", "ミクラ"),
+      character("char_005", "密倉文佳", { reading: "みくらふみか" }),
+    ]);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].reason).toBe("reading_match");
+    expect(candidates[0].confidence).toBe("weak");
+    expect(describeMergeCandidate(candidates[0])).toBe(
+      "「ミクラ」が「密倉文佳」の読み仮名（みくらふみか）と重なります（姓の共有かもしれません）"
+    );
+  });
+
+  test("読み仮名が無ければ突き合わせられないので候補にしない", () => {
+    // 読みは推測しない。無いものを埋めて並べると、別人を結ぶ根拠になる
+    const candidates = findMergeCandidates([
+      character("char_020", "フミカ"),
+      character("char_005", "密倉文佳"),
+    ]);
+
+    expect(candidates).toEqual([]);
+  });
+
+  test("かな1文字は、誰の読みにも一致するので対象にしない", () => {
+    const candidates = findMergeCandidates([
+      character("char_022", "ア"),
+      character("char_023", "アオイ", { reading: "あおい" }),
+    ]);
+
+    expect(candidates).toEqual([]);
+  });
+
+  test("かな表記どうしの組でも、候補は1件しか出ない", () => {
+    // 「文佳（ふみか）」と「フミカ」。二重に並べると、
+    // 同じ組を2回まとめようとして2件目が必ず失敗する
+    const candidates = findMergeCandidates([
+      character("char_024", "文佳", { reading: "ふみか" }),
+      character("char_020", "フミカ"),
+    ]);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].reason).toBe("reading_match");
+    expect(candidates[0].names).toEqual(["フミカ", "文佳"]);
+    expect(candidates[0].confidence).toBe("medium");
+  });
+
   test("呼びかけ語は敬称を外さないので、姓の候補にならない", () => {
     // 「おじいさま」を「おじい」まで削ると、「おじい◯◯」という
     // 本文に無い姓で人物を結びはじめる

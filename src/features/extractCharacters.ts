@@ -1701,6 +1701,7 @@ function describeRejectedCandidates(
     invalid_shape: "形式不正",
     invalid_name: "人物名不正",
     pronoun_name: "代名詞の名前",
+    descriptive_name: "説明的な名前",
     non_person: "人物以外",
     collective: "集団",
     ungrounded: "本文根拠なし",
