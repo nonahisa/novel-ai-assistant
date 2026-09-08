@@ -5,7 +5,7 @@ import { scanWork } from "../core/scanner";
 import { readTextFile, writeTextFilePreservingFormat } from "../core/textFile";
 import { readWorkFormat } from "../core/workFormatStore";
 import { episodeTitle, formatChapterLabel } from "../core/episodeLabel";
-import { logFailure, logLine } from "../core/logger";
+import { logFailure, logLine, useLogFile } from "../core/logger";
 import {
   countMemosByTag,
   MEMO_HINT,
@@ -456,6 +456,8 @@ class SceneMemoPanel {
       content.hash
     );
     if (!result.ok) {
+      // 作品のログファイルへ残す（49 の指摘、2026-09-08）
+      useLogFile(this.work.folderPath);
       logLine(
         `シーンメモ：${filePath} の ${line}行目を消せませんでした（${result.reason}）。`
       );

@@ -11,7 +11,7 @@ import {
   protectRecords,
   type ProtectableRecord,
 } from "../core/protectExternalEdits";
-import { logLine } from "../core/logger";
+import { logLine, useLogFile } from "../core/logger";
 
 /**
  * 拡張機能の外で直された設定資料に、「人が確定させた」印を付ける。
@@ -66,6 +66,8 @@ export async function protectExternalEdits(work: WorkEntry): Promise<void> {
     await locationStore.saveAll(locations.records);
     await organizationStore.saveAll(organizations.records);
 
+    // 作品のログファイルへ残す（49 の指摘、2026-09-08。書き先を向けないと出力チャンネル止まり）
+    useLogFile(work.folderPath);
     logLine(
       `外部で直された設定資料を守った: ${work.title} / ` +
         `${result.protectedRecords.length}件`

@@ -46,7 +46,7 @@ import {
   type RecheckItem,
   type RecheckOutcome,
 } from "./recheckProposal";
-import { logFailure, logLine } from "../core/logger";
+import { logFailure, logLine, useLogFile } from "../core/logger";
 import {
   askNotationAdvice,
   describeNotationAdvice,
@@ -1679,6 +1679,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     if (!item) {
       // **押しても何も起きない、を黙って起こさない**（作者の報告、2026-08-29）。
       // 一覧の描き直しと押した瞬間がすれ違うと、ここへ来ることがある
+      // 作品のログファイルへ残す（49 の指摘、2026-09-08）
+      if (this.work) useLogFile(this.work.folderPath);
       logLine(`提案パネル：飛び先の指摘が見つかりませんでした（id: ${id}）。`);
       return;
     }
