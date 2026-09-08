@@ -63,7 +63,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-9",
     title: "傍点と、MD化での記法の取り込み",
     commands: ["novelai.convertToMarkdown", "novelai.openVertical"],
-    count: 5,
+    count: 4,
   },
   {
     id: "A-10",
@@ -99,7 +99,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-13",
     title: "縦書きの原稿エディタ",
     commands: ["novelai.openVertical"],
-    count: 22,
+    count: 21,
   },
   {
     id: "A-14",
@@ -117,7 +117,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-16",
     title: "紹介の80字と、変化の関与度",
     commands: ["novelai.openSettingsPanel", "novelai.extractSettings"],
-    count: 8,
+    count: 6,
   },
   {
     id: "A-19",
@@ -249,7 +249,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-16",
     title: "Markdownが既定の画面で開くか",
     commands: ["novelai.applyPendingUpdates", "novelai.exportImeDictionary", "novelai.runFullSetup", "novelai.diagnoseWeb"],
-    count: 4,
+    count: 3,
   },
   {
     id: "F-17",
@@ -267,13 +267,13 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-54",
     title: "EPUB書き出し（試作）",
     commands: ["novelai.exportEpub"],
-    count: 4,
+    count: 2,
   },
   {
     id: "F-55",
     title: "EPUBエディター（試作）",
     commands: ["novelai.openEpubEditor"],
-    count: 3,
+    count: 2,
   },
   {
     id: "F-56",
@@ -405,7 +405,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-49",
     title: "読み上げ（音読推敲）",
     commands: ["novelai.readManuscriptAloud"],
-    count: 5,
+    count: 4,
   },
   {
     id: "F-48",
@@ -483,13 +483,13 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-35",
     title: "原稿エディタの一新——文字数・前後の話・記録の細分化ほか",
     commands: ["novelai.openVertical", "novelai.resumeWriting"],
-    count: 7,
+    count: 5,
   },
   {
     id: "F-34",
     title: ".txtのルビ・傍点の表示と色ズレ対策",
     commands: ["novelai.openVertical", "novelai.exportPdf"],
-    count: 6,
+    count: 5,
   },
   {
     id: "F-33",
@@ -698,4 +698,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 412;
+export const PENDING_CHECK_TOTAL = 400;
