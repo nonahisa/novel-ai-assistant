@@ -116,6 +116,15 @@ import { PendingUpdateStore } from "./core/pendingUpdates";
 // 作品を選ぶ場面で「未処理の提案が何件あるか」を出すために使う。
 // 提案パネル（features/proposalPanel）が既に読んでいるので、束は増えない
 import { ProposalStore } from "./core/proposalStore";
+// 作品を選ぶ場面の補足（文言と並び順）。**文言そのものを試験から見たい**
+// ので、VS Code に依存しない側へ出してある
+import {
+  divergenceNote,
+  imeDictionaryNote,
+  pendingProposalNote,
+  pushWaitingNote,
+  sortByPickOrder,
+} from "./core/workPickNotes";
 // gitコマンドが要る。動的importする（設計書5.8.5）
 import { tryRegisterAsCollection } from "./features/addCollection";
 import {
@@ -216,7 +225,10 @@ import {
   pickEpisodePlotTarget,
   type EpisodePlotCheckRef,
 } from "./features/checkEpisodePlot";
-import { episodePlotChapterOfPath } from "./core/episodePlotDoc";
+import {
+  episodePlotChapterOfPath,
+  episodePlotCompletionParts,
+} from "./core/episodePlotDoc";
 import { checkOpening } from "./features/checkOpening";
 // 名前の点検と付け替え（設計書6.37）
 import {
@@ -812,15 +824,7 @@ export async function activate(
                 // 作品ごとには決まらない。合わせる相手も置き場なので、
                 // ここは `ahead`／`behind`（置き場ぜんぶ）で見るのが正しい。
                 // 同じ置き場の作品に同じ補足が並ぶのは、それが事実だから
-                if (status.ahead > 0 && status.behind > 0) {
-                  return {
-                    note:
-                      `分かれています（送信待ち ${status.ahead}件・` +
-                      `受け取り ${status.behind}件）`,
-                    order: 1,
-                  };
-                }
-                return { note: "分かれていません", order: 0 };
+                return divergenceNote(status);
               }
             : undefined,
         });
@@ -2388,26 +2392,7 @@ export async function activate(
                 const status = trackedSyncStatus(candidate.id);
                 if (!status) return {};
                 // 受け取り側と同じ理由で、その作品ぶんの数を主に出す
-                if (status.aheadHere > 0) {
-                  return {
-                    note:
-                      `送信待ち ${status.aheadHere}件` +
-                      (status.ahead !== status.aheadHere
-                        ? `（置き場ぜんぶでは ${status.ahead}件）`
-                        : ""),
-                    order: status.aheadHere,
-                  };
-                }
-                // **送信は置き場が単位で、1つ送ると同じ置き場の作品は
-                // まとめて出ていく**（設計書5.7.9）。この作品ぶんが0でも
-                // 送信そのものは動くので、「ありません」で終わらせない
-                if (status.ahead > 0) {
-                  return {
-                    note: `この作品ぶんはありません（置き場ぜんぶでは送信待ち ${status.ahead}件）`,
-                    order: 0,
-                  };
-                }
-                return { note: "送信するものはありません", order: 0 };
+                return pushWaitingNote(status);
               }
             : undefined,
         });
@@ -2669,18 +2654,7 @@ export async function activate(
               const freshness = await checkDictionaryFreshness(
                 workPaths(candidate, config).settings
               );
-              if (freshness.stale) {
-                return { note: "設定資料が辞書より新しい", order: 1 };
-              }
-              // 一度も書き出していない作品は「古い」と言わない（催促にならない
-              // ため、印でも数えていない）。ただし**この場面では判断材料になる**
-              // ので、書き出し済みかどうかは伝える。並び順は上げない
-              return {
-                note: freshness.exported
-                  ? "書き出し済み"
-                  : "まだ書き出していない",
-                order: 0,
-              };
+              return imeDictionaryNote(freshness);
             } catch {
               // 読めない作品は無印で返す。補足が出ないだけで実害はない
               return {};
@@ -3648,16 +3622,13 @@ export async function activate(
           result.plotPath,
           result.findings
         );
-        const parts = [`指摘 ${result.findings.length}件`];
-        if (result.rejectedCount > 0) {
-          parts.push(
-            `捨てた ${result.rejectedCount}件（${result.rejectSummary}）`
-          );
-        }
-        if (result.blanks.length > 0) {
-          // 空の節があると、見られる観点が減る。**黙って減らさない**
-          parts.push(`まだ書かれていない節：${result.blanks.join("・")}`);
-        }
+        // 空の節があると、見られる観点が減る。**黙って減らさない**
+        const parts = episodePlotCompletionParts({
+          findings: result.findings.length,
+          rejectedCount: result.rejectedCount,
+          rejectSummary: result.rejectSummary,
+          blanks: result.blanks,
+        });
         notifyRunCompletion({
           headline: `${result.chapterLabel}の単話プロットの検査`,
           parts,
@@ -3693,16 +3664,13 @@ export async function activate(
         result.episodePath,
         result.findings
       );
-      const parts = [`指摘 ${result.findings.length}件`];
-      if (result.rejectedCount > 0) {
-        parts.push(
-          `捨てた ${result.rejectedCount}件（${result.rejectSummary}）`
-        );
-      }
-      if (result.droppedChars > 0) {
-        // **切った後ろは見ていない。** 0件を「食い違いなし」と読ませない
-        parts.push(`長さの上限で ${result.droppedChars}字を送っていません`);
-      }
+      // **切った後ろは見ていない。** 0件を「食い違いなし」と読ませない
+      const parts = episodePlotCompletionParts({
+        findings: result.findings.length,
+        rejectedCount: result.rejectedCount,
+        rejectSummary: result.rejectSummary,
+        droppedChars: result.droppedChars,
+      });
       notifyRunCompletion({
         headline: `${result.chapterLabel}の本文と単話プロットの照合`,
         parts,
@@ -4237,10 +4205,7 @@ export async function activate(
             } catch {
               // 読めない作品は0件として扱う。補足が出ないだけで実害はない
             }
-            return {
-              note: count > 0 ? `未処理の提案 ${count}件` : "未処理なし",
-              order: count,
-            };
+            return pendingProposalNote(count);
           },
         });
         if (!work) return;
@@ -4912,8 +4877,9 @@ async function resolveWork(
   }
 
   const notes = await Promise.all(works.map((work) => options.annotate!(work)));
-  const items = works
-    .map((work, index) => ({
+  // 溜まっている作品を上に出す。作者はたいていそれを選びたい
+  const items = sortByPickOrder(
+    works.map((work, index) => ({
       // **長い作品名は省略する**（作者の裁定、2026-09-06）。右に出る
       // 「未反映3件」などの補足が、幅の外へ押し出されて読めなくなるため
       label: abbreviateTitle(work.title),
@@ -4925,8 +4891,7 @@ async function resolveWork(
       order: notes[index].order ?? 0,
       work,
     }))
-    // 溜まっている作品を上に出す。作者はたいていそれを選びたい
-    .sort((left, right) => right.order - left.order);
+  );
 
   const picked = await vscode.window.showQuickPick(
     [...items, cancelItem()],

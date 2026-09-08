@@ -29,6 +29,8 @@ import { cancelItem, isCancelItem } from "../views/dialogs";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
 import {
+  describeEpisodePlotContrastConfirm,
+  describeEpisodePlotDesignConfirm,
   isEpisodePlotWritten,
   parseEpisodePlot,
   type EpisodePlotDoc,
@@ -315,20 +317,13 @@ export async function checkEpisodePlotDesign(
       `${chapterLabel}の単話プロットを検査します。`,
       {
         modal: true,
-        detail: [
-          `展開の箇条書き ${doc.items.length}件を送ります（本文は送りません）。`,
-          "",
-          "プロットは書き換えません。 気になるところを並べるだけで、",
-          "直し方は書かせません（直すかどうかは作者が決めます）。",
-          doc.blanks.length > 0
-            ? `\nまだ書かれていない節があります：${doc.blanks.join("・")}`
-            : "",
-          resolved.provider.isPaid
-            ? `\n${resolved.provider.displayName} は1回ぶん課金されます。`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
+        detail: describeEpisodePlotDesignConfirm({
+          items: doc.items.length,
+          blanks: doc.blanks,
+          paidProvider: resolved.provider.isPaid
+            ? resolved.provider.displayName
+            : undefined,
+        }),
       },
       "実行"
     );
@@ -524,20 +519,14 @@ export async function contrastEpisodePlot(
       `${chapterLabel}の本文と、単話プロットを照らし合わせます。`,
       {
         modal: true,
-        detail: [
-          `本文 ${body.length}字と、展開の箇条書き ${items.length}件を送ります。`,
-          droppedChars > 0
-            ? `この話は長いため、後ろの ${droppedChars}字は送りません。`
-            : "",
-          "",
-          "本文もプロットも書き換えません。 食い違いを並べるだけで、",
-          "箇条書きのほうが古いこともあります。",
-          resolved.provider.isPaid
-            ? `\n${resolved.provider.displayName} は1回ぶん課金されます。`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
+        detail: describeEpisodePlotContrastConfirm({
+          bodyLength: body.length,
+          items: items.length,
+          droppedChars,
+          paidProvider: resolved.provider.isPaid
+            ? resolved.provider.displayName
+            : undefined,
+        }),
       },
       "実行"
     );

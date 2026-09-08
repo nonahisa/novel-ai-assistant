@@ -111,7 +111,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-15",
     title: "作品をすべて同期",
     commands: ["novelai.syncAllWorks"],
-    count: 9,
+    count: 3,
   },
   {
     id: "A-16",
@@ -165,7 +165,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "",
     title: "まとめて1つの置き場にする",
     commands: ["novelai.setupGithub"],
-    count: 7,
+    count: 1,
   },
   {
     id: "D",
@@ -249,7 +249,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-15",
     title: "作品選択の残件数",
     commands: ["novelai.unifyCharacters"],
-    count: 5,
+    count: 1,
   },
   {
     id: "F-16",
@@ -387,7 +387,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-73",
     title: "単話プロットのAI判定",
     commands: ["novelai.checkEpisodePlot"],
-    count: 7,
+    count: 2,
   },
   {
     id: "F-52",
@@ -417,7 +417,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-48",
     title: "更新告知文を作る",
     commands: ["novelai.generateAnnouncement", "novelai.configureAnnouncement"],
-    count: 5,
+    count: 3,
   },
   {
     id: "F-47",
@@ -549,7 +549,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-24",
     title: "機能ごとにAIを割り当てる",
     commands: ["novelai.assignFeatureAI"],
-    count: 8,
+    count: 3,
   },
   {
     id: "F-23",
@@ -579,7 +579,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-74",
     title: "サイトごとの作品情報とランキング記録",
     commands: ["novelai.configurePostingSites", "novelai.recordRanking", "novelai.showWritingStats"],
-    count: 7,
+    count: 2,
   },
   {
     id: "F-75",
@@ -687,7 +687,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-95",
     title: "相談の助言方針",
     commands: ["novelai.setAdvicePolicy"],
-    count: 8,
+    count: 2,
   },
   {
     id: "",
@@ -710,4 +710,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 478;
+export const PENDING_CHECK_TOTAL = 439;

@@ -5,8 +5,11 @@ import {
   ADVICE_STATE_FRESH_DAYS,
   ADVICE_TYPES,
   adviceLevel,
+  advicePolicyLogLines,
   applyProfileSignals,
   appendAdviceHistory,
+  describeAdvicePolicyUpdate,
+  describeAdviceTypeChange,
   isDiagnosisStale,
   isStateFresh,
   parseProfileSignals,
@@ -336,6 +339,64 @@ describe("相談からの推定で点数を動かす", () => {
     });
     const after = applyProfileSignals(before, { reader: 1 }, now);
     expect(after.updatedAt).toBe("2026-08-01T00:00:00.000Z");
+  });
+});
+
+describe("操作ログに残す行", () => {
+  test("診断していれば、タイプを1行残す（実機確認リスト F-95 の代わり）", () => {
+    const lines = advicePolicyLogLines(profile({ scores: scores(6, 0, 0) }), now);
+    expect(lines).toEqual(["相談: 助言方針 読者最適型"]);
+  });
+
+  /** 「方針を消す」のあとも、診断前も、ここを通る */
+  test("診断していなければ、1行も残さない（実機確認リスト F-95 の代わり）", () => {
+    expect(advicePolicyLogLines(undefined, now)).toEqual([]);
+  });
+
+  test("診断から30日を過ぎたら、その手掛かりも残す（実機確認リスト F-95 の代わり）", () => {
+    const lines = advicePolicyLogLines(
+      profile({ scores: scores(6, 0, 0), updatedAt: "2026-07-01T00:00:00.000Z" }),
+      now
+    );
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain("日を過ぎています");
+  });
+
+  test("推定で動いた軸を、小数1桁で残す（実機確認リスト F-95 の代わり）", () => {
+    const before = profile({ scores: scores(3.5, 3, 3) });
+    const after = applyProfileSignals(before, { reader: 1 }, now);
+    expect(describeAdvicePolicyUpdate(before, after)).toBe(
+      "相談: 助言方針の推定を更新 読者志向 3.5→4.0（均衡模索型のまま）"
+    );
+  });
+
+  /** 受容度・自信度は、画面に出さないと決めたもの。ログからも漏らさない */
+  test("受容度・自信度の値はログに出ない（実機確認リスト F-95 の代わり）", () => {
+    const before = profile({ scores: scores(3, 3, 3) });
+    const after = applyProfileSignals(
+      before,
+      { reader: 1, receptivity: "low", confidence: "high" },
+      now
+    );
+    const line = describeAdvicePolicyUpdate(before, after) ?? "";
+    expect(line).not.toContain("受容");
+    expect(line).not.toContain("自信");
+    expect(line).not.toContain("low");
+    expect(line).not.toContain("high");
+  });
+
+  test("動いた軸が無ければ、何も書かない（実機確認リスト F-95 の代わり）", () => {
+    const before = profile({ scores: scores(3, 3, 3) });
+    expect(describeAdvicePolicyUpdate(before, before)).toBeUndefined();
+  });
+
+  test("タイプが変わったときだけ、作者へ知らせる（実機確認リスト F-95 の代わり）", () => {
+    const before = profile({ scores: scores(1.5, 3, 0) });
+    const after = applyProfileSignals(before, { reader: 1 }, now);
+    expect(describeAdviceTypeChange(before, after)).toBe(
+      "助言方針の推定が変わりました：内省表現型 → 対話表現型"
+    );
+    expect(describeAdviceTypeChange(before, before)).toBeUndefined();
   });
 });
 

@@ -15,9 +15,10 @@ import {
   afterCommit,
   describeOutcomes,
   describePlan,
+  describeSyncSkips,
   describeTargetWorks,
   planSyncAll,
-  SKIP_REASON_TEXT,
+  syncCommitMessage,
   type SyncTargetOutcome,
   type SyncTargetPlan,
   type SyncTargetState,
@@ -81,7 +82,7 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
   const doing = actionablePlans(plans);
   if (doing.length === 0) {
     void vscode.window.showInformationMessage(
-      `同期するものはありませんでした。${describeSkips(plans)}`
+      `同期するものはありませんでした。${describeSyncSkips(plans)}`
     );
     return;
   }
@@ -172,29 +173,11 @@ async function confirm(
           ? `${sending}か所はGitHubへ送信します。\n`
           : "GitHubへは送信しません（送り先が未設定です）。\n") +
         "記録の説明は、日付から自動で付けます。" +
-        describeSkips(all),
+        describeSyncSkips(all),
     },
     "同期する"
   );
   return answer === "同期する";
-}
-
-/** 飛ばしたものの理由をまとめる */
-function describeSkips(plans: readonly SyncTargetPlan[]): string {
-  const skipped = plans.filter(
-    (plan) => plan.skip && !plan.commit && !plan.pull && !plan.push
-  );
-  const notable = skipped.filter((plan) => plan.skip !== "nothing");
-  if (notable.length === 0) return "";
-  const detail = notable
-    .map(
-      (plan) =>
-        `・${describeTargetWorks(plan.target)}：${
-          SKIP_REASON_TEXT[plan.skip ?? "nothing"]
-        }`
-    )
-    .join("\n");
-  return `\n\n次は同期しません。\n${detail}`;
 }
 
 /**
@@ -225,7 +208,7 @@ async function runPlan(
         "記録する人の名前が未設定です。「GitHubと同期」から一度設定してください。";
       return outcome;
     }
-    const message = `${stamp()} の執筆（${plan.target.trackable}件）`;
+    const message = syncCommitMessage(plan.target.trackable, new Date());
     const next = afterCommit(await commitAll(cwd, message, run));
     if (next.stop) {
       outcome.error = next.error;
@@ -290,7 +273,7 @@ async function report(
   plans: readonly SyncTargetPlan[]
 ): Promise<void> {
   const failed = outcomes.filter((one) => one.error);
-  const summary = describeOutcomes(outcomes) + describeSkips(plans);
+  const summary = describeOutcomes(outcomes) + describeSyncSkips(plans);
 
   if (failed.length === 0) {
     void vscode.window.showInformationMessage(summary);
@@ -319,13 +302,4 @@ async function report(
       work ? { type: "work", work } : undefined
     );
   }
-}
-
-function stamp(): string {
-  const now = new Date();
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return (
-    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
-    `${pad(now.getHours())}:${pad(now.getMinutes())}`
-  );
 }

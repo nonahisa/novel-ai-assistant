@@ -1163,3 +1163,46 @@ describe("開発ビルドでだけ出す操作（ストリーミング実験）"
     expect(commands).toContain("novelai.dev.toggleOllamaStream");
   });
 });
+
+/**
+ * 更新告知文の置き場所（実機確認リスト F-48）。
+ *
+ * **「告知の設定」は広報支援に無い。** 0.29.7 で「拡張機能の設定」→
+ * 「作品ごとの設定」へ集約した（設計書6.56）。項目文のほうが古い。
+ */
+describe("更新告知文の置き場所", () => {
+  /** 分類→小分類の中に並ぶコマンド */
+  function itemsIn(groupLabel: string, sectionLabel: string): string[] {
+    const group = ACTION_TREE.find((entry) => entry.label === groupLabel);
+    const section = group?.entries.find(
+      (entry) => entry.kind === "section" && entry.label === sectionLabel
+    );
+    return section?.kind === "section"
+      ? section.items.map((item) => item.command)
+      : [];
+  }
+
+  test("「執筆AI支援 → 広報支援」に「更新告知文を作る」が並ぶ（実機確認リスト F-48 の代わり）", () => {
+    expect(itemsIn("執筆AI支援", "広報支援")).toContain(
+      "novelai.generateAnnouncement"
+    );
+  });
+
+  test("「告知の設定」は「拡張機能の設定 → 作品ごとの設定」にある（実機確認リスト F-48 の代わり）", () => {
+    expect(itemsIn("拡張機能の設定", "作品ごとの設定")).toContain(
+      "novelai.configureAnnouncement"
+    );
+    // 広報支援からは外してある（同じものを2か所に置かない）
+    expect(itemsIn("執筆AI支援", "広報支援")).not.toContain(
+      "novelai.configureAnnouncement"
+    );
+  });
+
+  /** 訊いて保存するだけなので、印を付けると料金が出るように見える */
+  test("「告知の設定」にはAIの印を付けない（実機確認リスト F-48 の代わり）", () => {
+    const item = allActions().find(
+      (action) => action.command === "novelai.configureAnnouncement"
+    );
+    expect(item?.usesAI).toBeFalsy();
+  });
+});

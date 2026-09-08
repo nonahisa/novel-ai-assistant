@@ -720,3 +720,63 @@ export function describeAdviceScoreMoves(
       `${ADVICE_AXIS_LABELS[axis]} ${before[axis].toFixed(1)}→${after[axis].toFixed(1)}`,
   );
 }
+
+/**
+ * 相談を始めるときに操作ログへ残す行。
+ *
+ * **診断していなければ、1行も出さない。** 方針を渡していないのだから、
+ * 出すと「効いている」と読み違える（「方針を消す」のあともここへ来る）。
+ *
+ * 古い推定で助言がずれているときの手掛かりも添える。**画面には出さない**
+ * ——相談の邪魔をしてまで言うことではない。
+ */
+export function advicePolicyLogLines(
+  profile: AdviceProfile | undefined,
+  now: Date,
+): string[] {
+  if (!profile) return [];
+  const lines = [`相談: 助言方針 ${describeAdvicePolicy(profile)}`];
+  if (isDiagnosisStale(profile.updatedAt, now)) {
+    lines.push(`相談: 助言方針の診断から${ADVICE_REDIAGNOSE_DAYS}日を過ぎています`);
+  }
+  return lines;
+}
+
+/**
+ * 推定で点数が動いたときの、操作ログの1行。
+ *
+ * **何がどう動いたかを残す。** 受容度・自信度は出さない
+ * （作者に見せないと決めたものを、ログから漏らさない）。
+ *
+ * 動いた軸が1つも無ければ `undefined`——同じものを書き戻さない。
+ */
+export function describeAdvicePolicyUpdate(
+  before: AdviceProfile,
+  after: AdviceProfile,
+): string | undefined {
+  const moved = describeAdviceScoreMoves(before.scores, after.scores);
+  if (moved.length === 0) return undefined;
+  const beforeType = ADVICE_TYPES[resolveAdviceType(before.scores)].label;
+  const afterType = ADVICE_TYPES[resolveAdviceType(after.scores)].label;
+  const typeNote =
+    beforeType === afterType
+      ? `（${afterType}のまま）`
+      : `（${beforeType}→${afterType}）`;
+  return `相談: 助言方針の推定を更新 ${moved.join("、")}${typeNote}`;
+}
+
+/**
+ * タイプが変わったことを、作者へ知らせる一言。
+ *
+ * **黙って変えない。** 助言の調子が変わった理由が作者に分からなくなる。
+ * 変わっていなければ `undefined`。
+ */
+export function describeAdviceTypeChange(
+  before: AdviceProfile,
+  after: AdviceProfile,
+): string | undefined {
+  const beforeType = ADVICE_TYPES[resolveAdviceType(before.scores)].label;
+  const afterType = ADVICE_TYPES[resolveAdviceType(after.scores)].label;
+  if (beforeType === afterType) return undefined;
+  return `助言方針の推定が変わりました：${beforeType} → ${afterType}`;
+}

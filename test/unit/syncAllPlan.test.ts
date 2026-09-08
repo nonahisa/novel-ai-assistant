@@ -4,9 +4,11 @@ import {
   afterCommit,
   describeOutcomes,
   describePlan,
+  describeSyncSkips,
   describeTargetWorks,
   planSyncAll,
   planSyncTarget,
+  syncCommitMessage,
   type SyncTargetState,
 } from "../../src/core/syncAllPlan";
 import type { GitSyncStatus } from "../../src/core/git";
@@ -178,6 +180,51 @@ describe("何が起きるかを書く", () => {
     expect(text).toContain("書庫");
     expect(text).toContain("作品A");
     expect(text).toContain("作品B");
+  });
+});
+
+describe("次は同期しないもの", () => {
+  test("Gitで管理していない置き場を、理由付きで並べる（実機確認リスト A-15 の代わり）", () => {
+    const text = describeSyncSkips(
+      planSyncAll([
+        state({ trackable: 2 }),
+        state({
+          label: "手書きの作品",
+          works: [work("w9", "手書きの作品", "C:/手書きの作品")],
+          status: { kind: "not_a_repo" },
+        }),
+      ])
+    );
+    expect(text).toContain("次は同期しません。");
+    expect(text).toContain("・手書きの作品：Gitで管理していません");
+  });
+
+  test("競合が残っている置き場も、理由付きで出す（実機確認リスト A-15 の代わり）", () => {
+    const text = describeSyncSkips(
+      planSyncAll([
+        state({ trackable: 5, status: tracked({ unmerged: 1, behind: 1 }) }),
+      ])
+    );
+    expect(text).toContain("・作品A：競合が解決していません");
+  });
+
+  /** 「同期は取れています」は、作者が直すところが無いので書かない */
+  test("やることが無いだけの置き場は、並べない（実機確認リスト A-15 の代わり）", () => {
+    expect(describeSyncSkips(planSyncAll([state(), state()]))).toBe("");
+  });
+});
+
+describe("記録に付ける説明", () => {
+  test("「2026-08-24 20:30 の執筆（3件）」の形（実機確認リスト A-15 の代わり）", () => {
+    expect(syncCommitMessage(3, new Date(2026, 7, 24, 20, 30))).toBe(
+      "2026-08-24 20:30 の執筆（3件）"
+    );
+  });
+
+  test("月・日・時・分は2桁に揃える（実機確認リスト A-15 の代わり）", () => {
+    expect(syncCommitMessage(1, new Date(2026, 0, 5, 9, 7))).toBe(
+      "2026-01-05 09:07 の執筆（1件）"
+    );
   });
 });
 

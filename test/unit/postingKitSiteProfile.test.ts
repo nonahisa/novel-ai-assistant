@@ -165,3 +165,168 @@ describe("サイトごとの作品IDの入力案内", () => {
     }
   });
 });
+
+/**
+ * 作品情報を訊く流れ（実機確認リスト F-74）。
+ *
+ * **全部が任意で、Escは「ここまでで終える」。** 答えられない質問を
+ * 必須にすると、設定そのものを最後まで通せなくなる。
+ */
+describe("作品情報を訊く流れ", () => {
+  /** 出た問いの題を、出た順に並べたもの */
+  let asked2: string[] = [];
+  /** 入力欄の答え。undefined を返した時点で Esc の扱いになる */
+  let answers: Array<string | undefined> = [];
+  let quickPicks: Array<Array<Record<string, unknown>>> = [];
+
+  beforeEach(() => {
+    disk.clear();
+    asked2 = [];
+    answers = [];
+    quickPicks = [];
+    disk.set(
+      ledgerPath,
+      utf8(
+        JSON.stringify({
+          schemaVersion: "1",
+          sites: [],
+          siteProfiles: [],
+          posts: [],
+          rankings: [],
+        })
+      )
+    );
+
+    let round = 0;
+    let answered = 0;
+    Object.assign(window, {
+      showInformationMessage: async () => undefined,
+      showWarningMessage: async () => undefined,
+      showErrorMessage: async () => undefined,
+      showQuickPick: async (items: Array<Record<string, unknown>>) => {
+        round += 1;
+        quickPicks.push(items);
+        // 1回目：出すサイト（複数選択）→なろうだけ
+        if (round === 1) {
+          return items.filter((item) =>
+            String(item.label ?? "").includes("小説家になろう")
+          );
+        }
+        // 2回目：作品情報も入れるか→入れる
+        if (round === 2) return items.find((item) => "detailed" in item);
+        return undefined;
+      },
+      showInputBox: async (options: { title?: string; value?: string }) => {
+        const title = options.title ?? "";
+        asked2.push(title);
+        if (title.includes("新規エピソード投稿ページ")) {
+          return newEpisodeUrl["小説家になろう"];
+        }
+        const value = answers[answered++];
+        // 用意した答えが尽きたら、初期値をそのまま確定した体にする
+        return value === undefined && answered > answers.length
+          ? (options.value ?? "")
+          : value;
+      },
+    });
+  });
+
+  test("サイトを選んだあと、作品ID・作品ページURL・ジャンルの順に訊く（実機確認リスト F-74 の代わり）", async () => {
+    answers = ["n1234ab", "https://ncode.syosetu.com/n1234ab/", "ハイファンタジー"];
+
+    await configurePostingSites(work);
+
+    expect(asked2).toEqual([
+      "小説家になろう の新規エピソード投稿ページ",
+      "小説家になろう での作品ID",
+      "小説家になろう の作品ページのURL",
+      "小説家になろう でのジャンル",
+    ]);
+    // 「作品情報も入れるか」は、入れないほうを先頭に置く
+    expect(String(quickPicks[1][0].label)).toContain("作品情報は入れずに終える");
+
+    const ledger = JSON.parse(
+      new TextDecoder().decode(disk.get(ledgerPath) as Uint8Array)
+    );
+    expect(ledger.siteProfiles).toEqual([
+      {
+        site: "narou",
+        workId: "n1234ab",
+        workUrl: "https://ncode.syosetu.com/n1234ab/",
+        genre: "ハイファンタジー",
+      },
+    ]);
+  });
+
+  test("2問目でEscすると、ここまでで終える（サイトは残る）（実機確認リスト F-74 の代わり）", async () => {
+    // 作品IDは答え、作品ページURLで Esc
+    answers = ["n1234ab", undefined];
+
+    await configurePostingSites(work);
+
+    const ledger = JSON.parse(
+      new TextDecoder().decode(disk.get(ledgerPath) as Uint8Array)
+    );
+    // **選んだサイト自体は残る**（必須の答えを、任意の質問の巻き添えにしない）
+    expect(ledger.sites).toHaveLength(1);
+    expect(ledger.sites[0].site).toBe("narou");
+    // 途中で終えたサイトの作品情報は、まだ書かない
+    expect(ledger.siteProfiles ?? []).toEqual([]);
+    // ジャンルまで進んでいない
+    expect(asked2).not.toContain("小説家になろう でのジャンル");
+  });
+
+  test("外して再登録しても、作品情報が初期値に出る（実機確認リスト F-74 の代わり）", async () => {
+    // すでに作品情報を入れてあり、サイトの登録だけを外した状態
+    disk.set(
+      ledgerPath,
+      utf8(
+        JSON.stringify({
+          schemaVersion: "1",
+          sites: [],
+          siteProfiles: [
+            {
+              site: "narou",
+              workId: "n9999zz",
+              workUrl: "https://ncode.syosetu.com/n9999zz/",
+              genre: "恋愛",
+            },
+          ],
+          posts: [],
+          rankings: [],
+        })
+      )
+    );
+
+    const initial: Array<string | undefined> = [];
+    let round = 0;
+    Object.assign(window, {
+      showQuickPick: async (items: Array<Record<string, unknown>>) => {
+        round += 1;
+        if (round === 1) {
+          return items.filter((item) =>
+            String(item.label ?? "").includes("小説家になろう")
+          );
+        }
+        if (round === 2) return items.find((item) => "detailed" in item);
+        return undefined;
+      },
+      showInputBox: async (options: { title?: string; value?: string }) => {
+        const title = options.title ?? "";
+        if (title.includes("新規エピソード投稿ページ")) {
+          return newEpisodeUrl["小説家になろう"];
+        }
+        initial.push(options.value);
+        return options.value ?? "";
+      },
+    });
+
+    await configurePostingSites(work);
+
+    expect(initial).toEqual([
+      "n9999zz",
+      "https://ncode.syosetu.com/n9999zz/",
+      "恋愛",
+    ]);
+  });
+});

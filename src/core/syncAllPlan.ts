@@ -211,6 +211,49 @@ export function describeTargetWorks(target: SyncTargetState): string {
     .join("、")}）`;
 }
 
+/**
+ * 飛ばしたものの理由をまとめる（確認と報告の末尾に添える行）。
+ *
+ * **「同期は取れています」は書かない。** それは飛ばした理由ではなく、
+ * 何もすることが無かったというだけで、作者が直すところが無い。
+ *
+ * `syncAllWorks` の中に置いていたが、**出す文言そのものを試験から
+ * 見たい**ので、VS Code に依存しない側へ移した。
+ */
+export function describeSyncSkips(plans: readonly SyncTargetPlan[]): string {
+  const skipped = plans.filter(
+    (plan) => plan.skip && !plan.commit && !plan.pull && !plan.push
+  );
+  const notable = skipped.filter((plan) => plan.skip !== "nothing");
+  if (notable.length === 0) return "";
+  const detail = notable
+    .map(
+      (plan) =>
+        `・${describeTargetWorks(plan.target)}：${
+          SKIP_REASON_TEXT[plan.skip ?? "nothing"]
+        }`
+    )
+    .join("\n");
+  return `\n\n次は同期しません。\n${detail}`;
+}
+
+/**
+ * 記録（コミット）に付ける説明。「2026-08-24 20:30 の執筆（3件）」。
+ *
+ * **AIには書かせない**（設計書5.5.1）。記録のたびにAIを呼ぶと、料金が
+ * 執筆の回数に比例してかかる。日付と件数だけで十分に目印になる。
+ *
+ * 「作品をすべて同期」と「変更を記録する」で同じ形にする——**写しを
+ * 2つ持つと、片方だけ直したときに履歴の見た目が食い違う。**
+ */
+export function syncCommitMessage(count: number, now: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const stamp =
+    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
+    `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  return `${stamp} の執筆（${count}件）`;
+}
+
 /** 済んだあとの報告に使う結果 */
 export interface SyncTargetOutcome {
   plan: SyncTargetPlan;

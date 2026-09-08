@@ -23,6 +23,8 @@ import {
   ANNOUNCEMENT_COPY_LABELS,
   buildAnnouncementMarkdown,
   composeXPost,
+  describeConflictedEpisodes,
+  orderAnnounceEpisodes,
   remainingCopyChoices,
   URL_PLACEHOLDER,
   validateAnnouncement,
@@ -570,28 +572,12 @@ async function pickEpisode(
     return undefined;
   }
 
-  // **黙って消さない。** 競合中のファイルは一覧に出ないので、いま公開した話が
-  // 競合していると、作者が気づかないまま1つ前の話が既定として選ばれる
-  // （告知したい話と、告知される話が食い違う）
-  if (loaded.conflicted.length > 0) {
-    const names = loaded.conflicted.slice(0, 3).join("、");
-    vscode.window.showWarningMessage(
-      `未解決の競合があるため、${loaded.conflicted.length}件の話は一覧に出ません` +
-        `（${names}${loaded.conflicted.length > 3 ? " ほか" : ""}）。` +
-        "競合を解決してから実行してください。"
-    );
-  }
+  // **黙って消さない**（文言と並びは `core/announcement.ts`）
+  const conflictNote = describeConflictedEpisodes(loaded.conflicted);
+  if (conflictNote) vscode.window.showWarningMessage(conflictNote);
 
   const format = await readWorkFormat(work);
-  // **新しい話が上。** 告知を作るのはたいてい今しがた公開した話なので、
-  // 先頭（＝話数が最大のもの）が既定の選択になるように並べる。
-  // 話数が読めないものは順番を決められないので、末尾へ回す
-  const ordered = [...loaded.bodies].sort((a, b) => {
-    if (a.chapter === null && b.chapter === null) return 0;
-    if (a.chapter === null) return 1;
-    if (b.chapter === null) return -1;
-    return b.chapter - a.chapter;
-  });
+  const ordered = orderAnnounceEpisodes(loaded.bodies);
 
   const answer = await vscode.window.showQuickPick(
     [

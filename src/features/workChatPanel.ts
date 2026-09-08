@@ -25,13 +25,10 @@ import { episodeLabel } from "../core/manuscriptSources";
 import { SYNOPSIS_FILE } from "../core/synopsisDoc";
 import { CharacterStore } from "../core/characterStore";
 import {
-  ADVICE_REDIAGNOSE_DAYS,
-  ADVICE_TYPES,
+  advicePolicyLogLines,
   applyProfileSignals,
-  describeAdvicePolicy,
-  describeAdviceScoreMoves,
-  isDiagnosisStale,
-  resolveAdviceType,
+  describeAdvicePolicyUpdate,
+  describeAdviceTypeChange,
   type AdviceProfileSignals,
 } from "../core/advicePolicy";
 import type { AdvicePolicyStore } from "../core/advicePolicyStore";
@@ -422,14 +419,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     if (!profile) return WORK_CHAT_SYSTEM_PROMPT;
 
     const now = new Date();
-    logStep(`相談: 助言方針 ${describeAdvicePolicy(profile)}`);
-    // 古い推定で助言がずれているとき、原因にたどり着く手掛かりを残す。
-    // **画面には出さない**——相談の邪魔をしてまで言うことではない
-    if (isDiagnosisStale(profile.updatedAt, now)) {
-      logStep(
-        `相談: 助言方針の診断から${ADVICE_REDIAGNOSE_DAYS}日を過ぎています`
-      );
-    }
+    // 何を残すかは `core/advicePolicy.ts` が決める（文言を試験から見るため）
+    for (const line of advicePolicyLogLines(profile, now)) logStep(line);
     return `${WORK_CHAT_SYSTEM_PROMPT}\n\n${buildAdvicePolicyPrompt(profile, now)}`;
   }
 
@@ -459,21 +450,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
     // **何がどう動いたかを残す。** 受容度・自信度は出さない
     // （作者に見せないと決めたものを、ログから漏らさない）
-    const moved = describeAdviceScoreMoves(before.scores, after.scores);
-    const beforeType = ADVICE_TYPES[resolveAdviceType(before.scores)].label;
-    const afterType = ADVICE_TYPES[resolveAdviceType(after.scores)].label;
-    const typeNote =
-      beforeType === afterType
-        ? `（${afterType}のまま）`
-        : `（${beforeType}→${afterType}）`;
-    if (moved.length > 0) {
-      logStep(`相談: 助言方針の推定を更新 ${moved.join("、")}${typeNote}`);
-    }
+    const updated = describeAdvicePolicyUpdate(before, after);
+    if (updated) logStep(updated);
 
     // **タイプが変わったら、その場で作者に見せる。** 黙って変えると、
     // 助言の調子が変わった理由が作者に分からない
-    if (beforeType !== afterType) {
-      const message = `助言方針の推定が変わりました：${beforeType} → ${afterType}`;
+    const message = describeAdviceTypeChange(before, after);
+    if (message) {
       notifyDone(message);
       this.postAll({ type: "note", message });
     }

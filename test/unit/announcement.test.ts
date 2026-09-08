@@ -3,6 +3,8 @@ import {
   announceEpisodeLabel,
   buildAnnouncementMarkdown,
   composeXPost,
+  describeConflictedEpisodes,
+  orderAnnounceEpisodes,
   remainingCopyChoices,
   validateAnnouncement,
   X_URL_WEIGHT,
@@ -365,6 +367,59 @@ describe("話の見出し", () => {
         file: { ...file, fileName: "設定メモ.txt" },
       })
     ).toBe("設定メモ");
+  });
+});
+
+describe("告知を作る話の一覧", () => {
+  test("新しい話が上に来る（既定が最新話になる）（実機確認リスト F-48 の代わり）", () => {
+    const ordered = orderAnnounceEpisodes([
+      { chapter: 1 },
+      { chapter: 18 },
+      { chapter: 7 },
+    ]);
+    expect(ordered.map((one) => one.chapter)).toEqual([18, 7, 1]);
+  });
+
+  /** 前後を決められないものを上へ混ぜると、既定の話が入れ替わる */
+  test("話数が読めない話は末尾へ回す（実機確認リスト F-48 の代わり）", () => {
+    const ordered = orderAnnounceEpisodes([
+      { chapter: null },
+      { chapter: 2 },
+      { chapter: null },
+      { chapter: 5 },
+    ]);
+    expect(ordered.map((one) => one.chapter)).toEqual([5, 2, null, null]);
+  });
+
+  test("元の並びは壊さない（実機確認リスト F-48 の代わり）", () => {
+    const source = [{ chapter: 1 }, { chapter: 3 }];
+    orderAnnounceEpisodes(source);
+    expect(source.map((one) => one.chapter)).toEqual([1, 3]);
+  });
+});
+
+describe("競合している話", () => {
+  test("一覧に出ない話を、名前を挙げて断る（実機確認リスト F-48 の代わり）", () => {
+    expect(describeConflictedEpisodes(["001.txt", "002.txt"])).toBe(
+      "未解決の競合があるため、2件の話は一覧に出ません（001.txt、002.txt）。" +
+        "競合を解決してから実行してください。"
+    );
+  });
+
+  test("4件以上あれば「ほか」で畳む（実機確認リスト F-48 の代わり）", () => {
+    const text = describeConflictedEpisodes([
+      "001.txt",
+      "002.txt",
+      "003.txt",
+      "004.txt",
+    ]);
+    expect(text).toContain("4件の話は一覧に出ません");
+    expect(text).toContain(" ほか）");
+    expect(text).not.toContain("004.txt");
+  });
+
+  test("競合が無ければ、何も言わない（実機確認リスト F-48 の代わり）", () => {
+    expect(describeConflictedEpisodes([])).toBeUndefined();
   });
 });
 

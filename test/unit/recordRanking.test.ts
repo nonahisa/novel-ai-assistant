@@ -275,3 +275,68 @@ describe("ランキングを記録する", () => {
     expect(disk.get(ledgerPath)).toEqual(before);
   });
 });
+
+/**
+ * 訊く順（実機確認リスト F-74）。
+ *
+ * 「サイト → 種別 → 順位 → メモ」。日時は書き留めた時刻を自動で入れる
+ * （順位が出た時刻は、作者にも分からないことがある）。
+ */
+describe("訊く順", () => {
+  test("サイト → 種別 → 順位 → メモ の順に訊いて、記録する（実機確認リスト F-74 の代わり）", async () => {
+    writeLedger({
+      schemaVersion: "1",
+      sites: [
+        { site: "narou", newEpisodeUrl: narouUrl },
+        { site: "kakuyomu", newEpisodeUrl: kakuyomuUrl },
+      ],
+      rankings: [
+        {
+          site: "narou",
+          recordedAt: "2026-09-01T00:00:00.000Z",
+          board: "日間",
+          rank: 30,
+        },
+      ],
+    });
+
+    /** 出た問いの題を、種類ごとに印を付けて並べる */
+    const order: string[] = [];
+    let picked = 0;
+    let typed = 0;
+    const inputs = ["7", "はじめて1桁に入った"];
+    Object.assign(window, {
+      showQuickPick: async (items: PickItem[], options?: { title?: string }) => {
+        order.push(`選ぶ: ${options?.title ?? ""}`);
+        picked += 1;
+        // 1回目：サイト、2回目：種別
+        return picked === 1
+          ? items.find((item) => item.site === "narou")
+          : items.find((item) => item.board === "日間");
+      },
+      showInputBox: async (options?: { title?: string }) => {
+        order.push(`打つ: ${options?.title ?? ""}`);
+        return inputs[typed++];
+      },
+    });
+
+    const result = await recordRanking(work);
+
+    expect(result.changed).toBe(true);
+    expect(order).toHaveLength(4);
+    expect(order[0]).toContain("選ぶ:");
+    expect(order[1]).toContain("選ぶ:");
+    expect(order[2]).toContain("打つ:");
+    expect(order[3]).toContain("打つ:");
+    // 3問目は順位、4問目はメモ
+    expect(order[2]).toContain("順位");
+    expect(order[3]).toContain("メモ");
+
+    const saved = readLedger();
+    const added = saved.rankings[saved.rankings.length - 1];
+    expect(added.rank).toBe(7);
+    expect(added.note).toBe("はじめて1桁に入った");
+    // 書き留めた時刻が自動で入る
+    expect(typeof added.recordedAt).toBe("string");
+  });
+});

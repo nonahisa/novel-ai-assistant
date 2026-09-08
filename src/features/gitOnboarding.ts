@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { SyncTarget } from "../core/syncTarget";
-import { describeSyncTarget } from "../core/syncTarget";
+import { describeIncludedWorks, describeSyncTarget } from "../core/syncTarget";
+import { syncCommitMessage } from "../core/syncAllPlan";
 import { runGit, type GitCommandRunner, type GitSyncStatus } from "../core/git";
 import {
   addRemote,
@@ -120,7 +121,7 @@ export async function recordChanges(
     if (!(await askCommitIdentity(target, run))) return false;
   }
 
-  const defaultMessage = `${formatStamp(new Date())} の執筆（${count}件）`;
+  const defaultMessage = syncCommitMessage(count, new Date());
   const message = await askText({
     title: "この記録に付ける説明",
     value: defaultMessage,
@@ -150,15 +151,6 @@ export async function recordChanges(
     `${count} 件の変更を記録しました。`
   );
   return true;
-}
-
-/** 履歴の説明に使う日時。ログと同じく端末の時刻で書く */
-function formatStamp(now: Date): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return (
-    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
-    `${pad(now.getHours())}:${pad(now.getMinutes())}`
-  );
 }
 
 /** 「次の一手」を実行する。進んだら true */
@@ -546,13 +538,9 @@ async function firstPush(
     redactUrlCredentials(remote.stdout.trim()) ||
     "（送り先が取得できませんでした）";
 
-  // **何作品ぶんが出ていくのかを、送る前に言う。**
-  // 1つの置き場に複数の作品が入っているのが既定の形なので（設計書5.7.9）、
-  // 作品名を1つだけ出すと「これだけが送られる」と読めてしまう
-  const scope =
-    target.works.length > 1
-      ? `\n入っている作品: ${target.works.map((entry) => entry.title).join("・")}`
-      : "";
+  // **何作品ぶんが出ていくのかを、送る前に言う**（文言は `syncTarget.ts`）
+  const included = describeIncludedWorks(target);
+  const scope = included ? `\n${included}` : "";
 
   const confirm = await vscode.window.showWarningMessage(
     `${describeSyncTarget(target)} をGitHubへ送ります。\n\n` +

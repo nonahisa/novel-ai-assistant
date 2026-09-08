@@ -127,6 +127,48 @@ export function announceEpisodeLabel(
   return title ? `${head}「${title}」` : head;
 }
 
+/**
+ * 告知を作る話の並び（設計書6.41）。
+ *
+ * **新しい話が上。** 告知を作るのはたいてい今しがた公開した話なので、
+ * 先頭（＝話数が最大のもの）が既定の選択になるように並べる。
+ * **話数が読めないものは末尾へ回す**——前後を決められないので、
+ * 上へ混ぜると既定の話がそちらへ入れ替わる。
+ *
+ * 元の配列は壊さない。
+ */
+export function orderAnnounceEpisodes<T extends { chapter: number | null }>(
+  episodes: readonly T[]
+): T[] {
+  return [...episodes].sort((left, right) => {
+    if (left.chapter === null && right.chapter === null) return 0;
+    if (left.chapter === null) return 1;
+    if (right.chapter === null) return -1;
+    return right.chapter - left.chapter;
+  });
+}
+
+/**
+ * 競合中で一覧に出せない話の断り（設計書5.5.3）。
+ *
+ * **黙って消さない。** 競合中のファイルは一覧に出ないので、いま公開した
+ * 話が競合していると、作者が気づかないまま1つ前の話が既定として選ばれる
+ * （告知したい話と、告知される話が食い違う）。
+ *
+ * 名前は3件まで。無ければ `undefined`。
+ */
+export function describeConflictedEpisodes(
+  fileNames: readonly string[]
+): string | undefined {
+  if (fileNames.length === 0) return undefined;
+  const names = fileNames.slice(0, 3).join("、");
+  return (
+    `未解決の競合があるため、${fileNames.length}件の話は一覧に出ません` +
+    `（${names}${fileNames.length > 3 ? " ほか" : ""}）。` +
+    "競合を解決してから実行してください。"
+  );
+}
+
 export interface XPostParts {
   /** AIが書いた本文（定型句・ハッシュタグ・URLを含まない） */
   body: string;

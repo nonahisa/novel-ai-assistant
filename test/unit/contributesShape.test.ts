@@ -130,3 +130,33 @@ describe("コマンドは、宣言と実体が揃っている", () => {
     expect(declared.length).toBe(new Set(declared).size);
   });
 });
+
+/**
+ * ファイルを右クリックしたときに出るもの（実機確認リスト F-73 の代わり）。
+ *
+ * **出す条件はここにしか書けない。** 単話プロットの右クリックに
+ * 「単話プロットを検査」を出し、本文のファイルには出さない、という
+ * 決まりは `when` の1行が全部を担っている。
+ */
+describe("ファイルの右クリックに出すもの", () => {
+  const menus = manifest.contributes.menus as Record<
+    string,
+    Array<{ command: string; when?: string; group?: string }>
+  >;
+
+  test("「単話プロットを検査」は、単話プロットの置き場の .md にだけ出す", () => {
+    const entries = [
+      ...(menus["explorer/context"] ?? []),
+      ...(menus["editor/context"] ?? []),
+      ...(menus["editor/title/context"] ?? []),
+    ].filter((entry) => entry.command === "novelai.checkEpisodePlot");
+
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
+      // 置き場（episode-plots）まで見る。名前だけで決めると、本文の
+      // 「第3話.md」にも出てしまう
+      expect(entry.when).toContain("episode-plots$");
+      expect(entry.when).toContain("resourceExtname == .md");
+    }
+  });
+});
