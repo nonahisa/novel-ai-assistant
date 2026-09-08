@@ -555,3 +555,119 @@ describe("⑧年表の空の見出し", () => {
     expect(markdown).toContain("## （時期なし）");
   });
 });
+
+describe("⑨敬称違いを機械で寄せる（0.42.2）", () => {
+  /**
+   * 実機確認A-18の「新しい問題」。まっさらからの抽出で、AIは aliases を
+   * ほぼ返さない（qwen3:8b・gemma4:e4b で実測）。スキーマの required も
+   * 説明文もプロンプトの規則も効かなかったので、コードで結ぶ。
+   */
+
+  test("「文佳ちゃん」は「密倉文佳」へ寄り、別名に足される", () => {
+    const result = mergeExtractedCharacters(
+      [character("char_005", "密倉文佳", { aliases: ["文佳"] })],
+      [{ data: { name: "文佳ちゃん" }, chapters: [3] }]
+    );
+
+    // レコードは増えない
+    expect(result.characters).toHaveLength(1);
+    expect(result.characters[0].aliases).toContain("文佳ちゃん");
+    // 登場話数も本人へ付く
+    expect(result.characters[0].appearedChapters).toContain(3);
+  });
+
+  test("寄せた分は黙らず、件数と中身を返す", () => {
+    const result = mergeExtractedCharacters(
+      [character("char_005", "密倉文佳", { aliases: ["文佳"] })],
+      [{ data: { name: "文佳ちゃん" }, chapters: [3] }]
+    );
+
+    expect(result.honorificMerges).toEqual([
+      { characterName: "密倉文佳", incomingName: "文佳ちゃん" },
+    ]);
+  });
+
+  test("敬称の違いでないときは、寄せたことにしない", () => {
+    const result = mergeExtractedCharacters(
+      [character("char_005", "密倉文佳", { aliases: ["文佳"] })],
+      [{ data: { name: "文佳" }, chapters: [3] }]
+    );
+
+    expect(result.honorificMerges).toEqual([]);
+  });
+
+  test("作者が別人と決めた呼び名なら寄らない", () => {
+    const result = mergeExtractedCharacters(
+      [
+        character("char_005", "密倉文佳", {
+          aliases: ["文佳"],
+          distinctFrom: [
+            { id: null, name: "文佳ちゃん" },
+          ],
+        }),
+      ],
+      [{ data: { name: "文佳ちゃん" }, chapters: [3] }]
+    );
+
+    // 作者の判断はAIの読みより強い。別レコードのまま残す
+    expect(result.characters).toHaveLength(2);
+    expect(result.characters[0].aliases).toEqual(["文佳"]);
+    expect(result.honorificMerges).toEqual([]);
+  });
+
+  test("「密倉さん」は姓の一致どまり。候補に上げるが自動では寄せない", () => {
+    const result = mergeExtractedCharacters(
+      [character("char_005", "密倉文佳", { aliases: ["文佳"] })],
+      [{ data: { name: "密倉さん" }, chapters: [4] }]
+    );
+
+    // 姓の一致は別人でもありうるので、寄せずにレコードは残す
+    expect(result.characters).toHaveLength(2);
+    expect(result.honorificMerges).toEqual([]);
+
+    const candidate = result.mergeCandidates.find(
+      (item) => item.reason === "honorific_family_name"
+    );
+    expect(candidate?.names).toEqual(["密倉さん", "密倉文佳"]);
+    expect(candidate?.confidence).toBe("medium");
+    expect(describeMergeCandidate(candidate!)).toBe(
+      "敬称を外すと「密倉」＝「密倉文佳」の姓です"
+    );
+  });
+
+  test("その姓を持つレコードが2件以上なら候補にしない（家族）", () => {
+    const candidates = findMergeCandidates([
+      character("char_010", "三門くん"),
+      character("char_001", "三門太志"),
+      character("char_003", "三門圭織"),
+    ]);
+
+    expect(
+      candidates.filter((item) => item.reason === "honorific_family_name")
+    ).toEqual([]);
+  });
+
+  test("作者が別人と決めた組は、姓の候補にも出さない", () => {
+    const candidates = findMergeCandidates([
+      character("char_010", "密倉さん", {
+        distinctFrom: [{ id: "char_005", name: "密倉文佳" }],
+      }),
+      character("char_005", "密倉文佳"),
+    ]);
+
+    expect(candidates).toEqual([]);
+  });
+
+  test("呼びかけ語は敬称を外さないので、姓の候補にならない", () => {
+    // 「おじいさま」を「おじい」まで削ると、「おじい◯◯」という
+    // 本文に無い姓で人物を結びはじめる
+    const candidates = findMergeCandidates([
+      character("char_011", "おじいさま"),
+      character("char_012", "おじい太郎"),
+    ]);
+
+    expect(
+      candidates.filter((item) => item.reason === "honorific_family_name")
+    ).toEqual([]);
+  });
+});

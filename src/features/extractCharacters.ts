@@ -131,6 +131,12 @@ interface ExtractionSummaryCounts {
    * 作者は「更新0名」を抽出の失敗と読んでしまう。
    */
   rejectedDistinct: MergeResult["rejectedDistinct"];
+  /**
+   * 敬称違いの呼び方を、新規レコードにせず既存の人物へ寄せた分（設計書6.5.9）。
+   * AIは敬称違いを別名として返さないので、寄せているのはコード側である。
+   * 出さないと、作者からは「何も増えなかった」としか見えない。
+   */
+  honorificMerges: MergeResult["honorificMerges"];
   failedChunks: number;
   saved: number;
   ambiguous: number;
@@ -894,6 +900,7 @@ export async function extractCharacters(
     conflicts: merged?.conflicts.length ?? 0,
     folded: merged?.folded.length ?? 0,
     rejectedDistinct: merged?.rejectedDistinct ?? [],
+    honorificMerges: merged?.honorificMerges ?? [],
     failedChunks: failures.length,
     saved: 0,
     ambiguous: 0,
@@ -1203,6 +1210,14 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
           counts.rejectedDistinct
         )}）`
       : "";
+  // 敬称違いはAIが別名として返さないので、寄せているのはコードである
+  // （設計書6.5.9）。**黙って寄せたことにしない**
+  const honorificDetail =
+    counts.honorificMerges.length > 0
+      ? `\n敬称違いを既存の人物へ寄せた ${
+          counts.honorificMerges.length
+        }件（${describeHonorificMerges(counts.honorificMerges)}）`
+      : "";
   // AIの読みをコードで直した分。**黙って書き換えたことにしない**
   const fixDetail = describeValidationFixes(counts.validationFixes);
   return (
@@ -1221,6 +1236,7 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
     rejectedDetail +
     candidateDetail +
     distinctDetail +
+    honorificDetail +
     fixDetail +
     // 既存人物への変更は承認待ちに回る。件数を出さないと、
     // 作者は「更新0名」を見て何も増えなかったと思ってしまう
@@ -1363,6 +1379,23 @@ function describeDistinctRejections(
     .join("、");
   const rest =
     rejections.length > 3 ? ` ほか${rejections.length - 3}件` : "";
+  return shown + rest;
+}
+
+/**
+ * 敬称違いで寄せた分を、作者が確かめられる形で並べる。
+ *
+ * 件数だけだと、どの人物にどの呼び方が足されたのかが分からず、
+ * 寄せ方が正しかったのか（別人を吸ってはいないか）を見直せない。
+ */
+function describeHonorificMerges(
+  merges: MergeResult["honorificMerges"]
+): string {
+  const shown = merges
+    .slice(0, 3)
+    .map((entry) => `${entry.characterName} に「${entry.incomingName}」`)
+    .join("、");
+  const rest = merges.length > 3 ? ` ほか${merges.length - 3}件` : "";
   return shown + rest;
 }
 
