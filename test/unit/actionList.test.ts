@@ -1206,3 +1206,50 @@ describe("更新告知文の置き場所", () => {
     expect(item?.usesAI).toBeFalsy();
   });
 });
+
+/**
+ * 「テスト中」の分類は、F5（開発ホスト）でしか出さない
+ * （作者の指示、2026-08-29。実機確認リスト F-35）。
+ *
+ * 中身は実機確認リストから機械的に作った写しである。**ストアから入れた
+ * 読者に見せても、押せるものが増えるだけで意味がない。**
+ * `extension.ts` が `ExtensionMode.Development` かどうかを渡す。
+ */
+describe("「テスト中」を出すかどうか", () => {
+  const labelsOf = (showTesting: boolean): string[] =>
+    new ActionListProvider(
+      fakeRegistry(),
+      memoryStore(),
+      undefined,
+      showTesting
+    )
+      .getChildren()
+      .map((node) => (node.type === "group" ? node.group.label : ""));
+
+  test("F5では出る（実機確認リスト F-35 の代わり）", () => {
+    expect(labelsOf(true)).toContain("テスト中");
+  });
+
+  test("ストア版では出ない（実機確認リスト F-35 の代わり）", () => {
+    expect(labelsOf(false)).not.toContain("テスト中");
+  });
+
+  test("消えるのは「テスト中」だけで、ほかの分類は残る（実機確認リスト F-35 の代わり）", () => {
+    // 判定を間違えると、まともな分類まで巻き添えで消える
+    const store = labelsOf(false);
+    for (const label of ["執筆データ", "作品管理", "執筆AI支援", "ヘルプ"]) {
+      expect(store, label).toContain(label);
+    }
+    expect(store).toHaveLength(labelsOf(true).length - 1);
+  });
+
+  test("開発ホストかどうかで決めている（実機確認リスト F-35 の代わり）", () => {
+    // 既定は true なので、渡し忘れるとストア版にも出てしまう
+    const source = readFileSync(
+      new URL("../../src/extension.ts", import.meta.url),
+      "utf8"
+    );
+
+    expect(source).toContain("vscode.ExtensionMode.Development");
+  });
+});

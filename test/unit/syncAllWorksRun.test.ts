@@ -172,3 +172,54 @@ describe("作品をすべて同期", () => {
     expect(refreshedAll).toBe(1);
   });
 });
+
+/**
+ * 分岐で止まったときの報告（実機確認リスト A-17）。
+ *
+ * **行き止まりにしない**（設計書5.5.16）。まとめて同期したうちの1つが
+ * 分岐で止まったら、その報告からそのまま「分かれた分を合わせる」へ行ける。
+ */
+describe("分岐で止まった置き場があるとき", () => {
+  /** 記録も送信もできるが、`pull` だけ早送りできない置き場 */
+  const divergedRepo: GitCommandRunner = async (args, cwd, timeout) => {
+    if (args[0] === "pull") {
+      calls.push(args);
+      return { code: 1, stdout: "", stderr: "not possible to fast-forward" };
+    }
+    return busyRepo(args, cwd, timeout);
+  };
+
+  /** 報告に添えられたボタン */
+  let buttons: string[] = [];
+
+  beforeEach(() => {
+    buttons = [];
+    Object.assign(window, {
+      showWarningMessage: async (message: string, ...rest: unknown[]) => {
+        const detail = rest.find(
+          (item): item is { detail?: string } =>
+            typeof item === "object" && item !== null && "detail" in item
+        )?.detail;
+        shown.push(detail ? `${message}\n${detail}` : message);
+        buttons = rest.filter(
+          (item): item is string => typeof item === "string"
+        );
+        return undefined;
+      },
+    });
+  });
+
+  test("報告に「分かれた分を合わせる」が並ぶ（実機確認リスト A-17 の代わり）", async () => {
+    await syncAllWorks({ registry, monitor, run: divergedRepo });
+
+    expect(buttons).toContain("分かれた分を合わせる");
+    // ログを見る道も残す（原因が別のときのため）
+    expect(buttons).toContain("ログを表示");
+  });
+
+  test("止まった理由も、その置き場の名前と一緒に出す（実機確認リスト A-17 の代わり）", async () => {
+    await syncAllWorks({ registry, monitor, run: divergedRepo });
+
+    expect(shown.join("\n")).toContain("分かれた分を合わせる");
+  });
+});

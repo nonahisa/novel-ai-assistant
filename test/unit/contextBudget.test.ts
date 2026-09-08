@@ -1,10 +1,32 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+
+/**
+ * 送信量の記録（`usage.md`）への書き込みを覗く。
+ *
+ * **本物は作品フォルダーへ書く。** ここで見たいのは「関所で止めた回にも
+ * 1行残るか」なので、書き込み先ではなく**呼ばれたかどうか**を控える。
+ */
+const usageCalls = vi.hoisted(
+  () => [] as Array<[string, Record<string, unknown>]>
+);
+vi.mock("../../src/core/usageLog", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  appendUsageLog: (folder: string, entry: Record<string, unknown>) => {
+    usageCalls.push([folder, entry]);
+  },
+}));
+
 import {
   MIN_CHUNK_CHARS,
   TOKENS_PER_CHAR,
   planChunkBudget,
   type Chunk,
+  type ChunkBudget,
 } from "../../src/core/chunker";
+import {
+  describeChunkSettings,
+  type ChunkSettings,
+} from "../../src/features/chunkSettings";
 import {
   CONTEXT_GUARD_EXEMPT_FEATURE,
   OUTPUT_RESERVE_TOKENS,
@@ -665,5 +687,129 @@ describe("参照資料の上限は、モデルの大きさに合わせる", () =
 
   test("上限そのものは超えない", () => {
     expect(worldviewMaxChars(10_000_000)).toBe(WORLDVIEW_MAX_CHARS);
+  });
+});
+
+/**
+ * 進捗とログに出す、チャンクの内訳（設計書6.27.10、実機確認リスト F-46）。
+ *
+ * **何を差し引いたかまで書く。** 設定に20,000字と書いたのに18,000字で
+ * 動いていると、作者からは「設定が効いていない」ようにしか見えない。
+ *
+ * 進捗の帯が画面に出ること自体は実機に残る。ここで見るのは中身である。
+ */
+describe("1チャンクの内訳の書き方", () => {
+  /** 差し引きのある、いちばん普通の形 */
+  function settings(
+    budget?: { chunkChars: number; reason: ChunkBudget["reason"]; overheadChars: number }
+  ): ChunkSettings {
+    return {
+      mode: "auto",
+      chunk: { chars: 18000, from: "model" },
+      mergeChars: 0,
+      ...(budget ? { budget } : {}),
+    };
+  }
+
+  test("字数と、その根拠を書く（実機確認リスト F-46 の代わり）", () => {
+    expect(describeChunkSettings(settings())).toContain(
+      "1チャンク 18000字（モデルのコンテキスト長から）"
+    );
+  });
+
+  test("指示と資料で何字を引いたかを書く（実機確認リスト F-46 の代わり）", () => {
+    const text = describeChunkSettings(
+      settings({ chunkChars: 18000, reason: "requested", overheadChars: 12000 })
+    );
+
+    expect(text).toContain("指示と資料 12000字を差し引き");
+  });
+
+  test("固定費に押されて縮めたときは、そう書く（実機確認リスト F-46 の代わり）", () => {
+    const text = describeChunkSettings(
+      settings({
+        chunkChars: 18000,
+        reason: "shrunk_to_fit",
+        overheadChars: 12000,
+      })
+    );
+
+    expect(text).toContain("（入るように縮めた）");
+  });
+
+  test("縮めても入らないときは、下限で送ると断る（実機確認リスト F-46 の代わり）", () => {
+    // **黙って送らない。** 入らない見込みであることを先に言う
+    const text = describeChunkSettings(
+      settings({ chunkChars: 2000, reason: "minimum", overheadChars: 30000 })
+    );
+
+    expect(text).toContain("縮めても入り切らない見込み");
+    expect(text).toContain("下限で送ります");
+  });
+
+  test("差し引く材料が無ければ、その部分は書かない（実機確認リスト F-46 の代わり）", () => {
+    // 131,072のモデルでは溢れないので、差し引きの話そのものが要らない
+    expect(describeChunkSettings(settings())).not.toContain("差し引き");
+  });
+
+  test("まとめ送信をするときは、その字数も並べる（実機確認リスト F-46 の代わり）", () => {
+    const text = describeChunkSettings({
+      ...settings(),
+      mergeChars: 40000,
+    });
+
+    expect(text).toContain("まとめ送信 40000字");
+  });
+});
+
+/**
+ * 関所で止めた回も、送信量の記録に1行残す（実機確認リスト F-46）。
+ *
+ * **記録に何も出ないと、作者からは「押したのに何も起きなかった」としか
+ * 見えない。** 送っていないので所要時間は0で残す。
+ */
+describe("関所で止めた回の記録", () => {
+  test("送らなかった回も usage へ書く（実機確認リスト F-46 の代わり）", async () => {
+    usageCalls.length = 0;
+
+    const wrapped = new MeteredProvider({
+      id: "ollama",
+      displayName: "Ollama（ローカル）",
+      isPaid: false,
+      isConfigured: async () => true,
+      testConnection: async () => ({ ok: true, message: "" }),
+      listModels: async () => [],
+      generate: async (): Promise<GenerateResult> => ({
+        text: "{}",
+        truncated: false,
+        elapsedMs: 1,
+      }),
+      getModel: async (id: string): Promise<ModelInfo | undefined> => ({
+        id,
+        displayName: id,
+        contextWindow: 8192,
+        parameterSize: null,
+        capabilities: [],
+        tier: "standard",
+      }),
+    });
+
+    await expect(
+      wrapped.generate({
+        systemPrompt: "あ".repeat(1000),
+        userPrompt: "い".repeat(40000),
+        model: "gemma4:e4b",
+        temperature: 0,
+        meta: { feature: "矛盾検知", workFolder: "C:/作品" },
+      })
+    ).rejects.toMatchObject({ kind: "context_overflow" });
+
+    expect(usageCalls).toHaveLength(1);
+    expect(usageCalls[0][0]).toBe("C:/作品");
+    expect(usageCalls[0][1].feature).toBe("矛盾検知");
+    // 何があったかも残す（「押したのに何も起きない」を作らない）
+    expect(usageCalls[0][1].error).toBeTruthy();
+    // 送っていないので、所要時間はAIの遅さとして数えない
+    expect(usageCalls[0][1].elapsedMs).toBe(0);
   });
 });

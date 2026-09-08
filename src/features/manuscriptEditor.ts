@@ -203,6 +203,44 @@ export function refreshManuscriptCounts(filePath: string): void {
   openManuscripts.get(manuscriptLedgerKey(filePath))?.refreshCounts();
 }
 
+/** 「← 前の話」「次の話 →」を押したときに、次に何をするか */
+export type NeighborStep =
+  /** その添字の話を開く */
+  | { kind: "open"; index: number }
+  /** 開かずに、この文言だけを伝える */
+  | { kind: "notice"; message: string }
+  /** 次の話数を作って開く */
+  | { kind: "create" };
+
+/**
+ * 前後の話をどうするかを決める（設計書6.25.5）。
+ *
+ * **端に来たときの文言まで、ここが持つ。** 「最初の話です。」と
+ * 「最新話です。」は押した結果そのものなので、画面を開かずに確かめられる
+ * 形にしておく。ファイルを開く・作るのは呼び出し側の仕事である。
+ *
+ * @param currentIsBlank いま開いている本文が白紙か。**保存前の中身で見る**
+ *   （打ちかけを白紙と数えない）。最終話のときだけ効く
+ */
+export function planNeighborStep(input: {
+  /** いまの話の添字（0始まり） */
+  at: number;
+  /** 話の総数 */
+  count: number;
+  direction: "prev" | "next";
+  currentIsBlank: boolean;
+}): NeighborStep {
+  if (input.direction === "prev") {
+    if (input.at === 0) return { kind: "notice", message: "最初の話です。" };
+    return { kind: "open", index: input.at - 1 };
+  }
+  if (input.at < input.count - 1) return { kind: "open", index: input.at + 1 };
+  // 最終話。白紙なら作らない（「最新話を書く」と同じ考え方。
+  // 押すたびに空のファイルが増えるのを避ける）
+  if (input.currentIsBlank) return { kind: "notice", message: "最新話です。" };
+  return { kind: "create" };
+}
+
 /**
  * カーソル行の**上**に、空の付箋の行を挿す（設計書6.40.3）。
  *
@@ -1862,23 +1900,20 @@ export class ManuscriptEditorProvider
       return;
     }
 
-    if (direction === "prev") {
-      if (at === 0) {
-        void vscode.window.showInformationMessage("最初の話です。");
-        return;
-      }
-      await this.openAsManuscript(episodes[at - 1].filePath);
+    // ここから先は最終話のとき、**保存前の中身で白紙かを見る**
+    // （打ちかけを白紙にしない）
+    const step = planNeighborStep({
+      at,
+      count: episodes.length,
+      direction,
+      currentIsBlank: isBlankText(document.getText()),
+    });
+    if (step.kind === "notice") {
+      void vscode.window.showInformationMessage(step.message);
       return;
     }
-
-    if (at < episodes.length - 1) {
-      await this.openAsManuscript(episodes[at + 1].filePath);
-      return;
-    }
-
-    // ここから先は最終話。**保存前の中身で白紙かを見る**（打ちかけを白紙にしない）
-    if (isBlankText(document.getText())) {
-      void vscode.window.showInformationMessage("最新話です。");
+    if (step.kind === "open") {
+      await this.openAsManuscript(episodes[step.index].filePath);
       return;
     }
 
@@ -2088,7 +2123,7 @@ function readAppearance(orientation: ManuscriptOrientation): {
  * `settings.json` へ直接 `10` と書けばその値が届く。範囲の外の `rate` は、
  * 環境によっては**声が一言も出ない**（黙って失敗する）ので、ここで畳む。
  */
-function clampReadAloudRate(value: number): number {
+export function clampReadAloudRate(value: number): number {
   if (!Number.isFinite(value)) return 1;
   return Math.min(2, Math.max(0.5, value));
 }

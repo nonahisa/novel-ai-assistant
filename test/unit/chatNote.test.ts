@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
+import { readFileSync } from "node:fs";
 import {
+  CHAT_NOTE_DIR,
+  CHAT_NOTE_NAME_TRIES,
   buildChatNoteMarkdown,
   chatNoteFileNameCandidates,
   type ChatNoteTurn,
@@ -98,5 +101,49 @@ describe("保存先の名前", () => {
 
     expect(names[0]).toBe("相談 2026-01-05 0903.md");
     expect(names[1]).toBe("相談 2026-01-05 090307.md");
+  });
+});
+
+/**
+ * 保存先と、既存のメモの扱い（実機確認リスト F-23）。
+ *
+ * **置き場は作品の `設定/相談メモ/`。** GitHubへ同期される場所である
+ * ——読み返すためのものなので、開発用の記録（`.aiwriter/logs/chat.md`）とは
+ * 扱いを分ける。
+ *
+ * **既存ファイルは上書きしない。** `atomicWriteFile` の新規作成だけを使い、
+ * 名前がぶつかったら別名にする（`atomicWrite.ts` の置換は必ず失敗する設計で、
+ * それ以前に作者のメモを消してよい理由がない）。
+ */
+describe("相談メモの置き場と、上書きしない作り", () => {
+  test("`設定/` の下の「相談メモ」へ置く（実機確認リスト F-23 の代わり）", () => {
+    expect(CHAT_NOTE_DIR).toBe("相談メモ");
+
+    const source = readFileSync("src/features/workChatPanel.ts", "utf-8");
+    expect(source).toContain("CHAT_NOTE_DIR");
+  });
+
+  test("同じ分に2回押しても、別名になる（実機確認リスト F-23 の代わり）", () => {
+    // 分までの名前がぶつかったら、秒つきへ降りる
+    const names = chatNoteFileNameCandidates(AT, 2);
+
+    expect(names[0]).not.toBe(names[1]);
+  });
+
+  test("書き込みは新規作成だけを使う（実機確認リスト F-23 の代わり）", () => {
+    // ここが `replace` だと、作者のメモを消す道が開く
+    const source = readFileSync("src/features/workChatPanel.ts", "utf-8");
+    const at = source.indexOf("const markdown = buildChatNoteMarkdown");
+    expect(at).toBeGreaterThan(0);
+
+    expect(source.slice(at, at + 400)).toContain('mode: "create"');
+  });
+
+  test("試す名前が尽きない数だけ用意してある（実機確認リスト F-23 の代わり）", () => {
+    // 候補が尽きると、保存そのものができなくなる
+    expect(CHAT_NOTE_NAME_TRIES).toBeGreaterThan(2);
+    expect(chatNoteFileNameCandidates(AT, CHAT_NOTE_NAME_TRIES)).toHaveLength(
+      CHAT_NOTE_NAME_TRIES
+    );
   });
 });

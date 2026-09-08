@@ -395,12 +395,12 @@ export class GitSyncMonitor implements vscode.Disposable {
     if (result.failure.kind === "diverged") {
       // **行き止まりにしない**（設計書5.5.16）。同じファイルが両方で
       // 書き換えられていなければ、そのまま合わせられる
+      const notice = describeDivergedPull(work.title);
       const answer = await vscode.window.showWarningMessage(
-        `「${work.title}」は、この環境と別の環境の両方で変更が進んでいます。` +
-          "取り込みは中止しました。",
-        "分かれた分を合わせる"
+        notice.message,
+        notice.action
       );
-      if (answer === "分かれた分を合わせる") {
+      if (answer === notice.action) {
         await vscode.commands.executeCommand("novelai.resolveDivergence", {
           type: "work",
           work,
@@ -536,6 +536,25 @@ ${reason}`
 export function isWarning(status: GitSyncStatus): boolean {
   if (status.kind !== "tracked") return false;
   return status.behind > 0 || status.ahead > 0 || status.unmerged > 0;
+}
+
+/**
+ * 取り込みが分岐で止まったときの知らせ（設計書5.5.16）。
+ *
+ * **行き止まりにしない。** 止まったその場から「分かれた分を合わせる」へ
+ * 行けることが要件なので、押せる先を文言と一緒にここへ置き、
+ * 画面を開かずに確かめられるようにしてある。
+ */
+export function describeDivergedPull(title: string): {
+  message: string;
+  action: string;
+} {
+  return {
+    message:
+      `「${title}」は、この環境と別の環境の両方で変更が進んでいます。` +
+      "取り込みは中止しました。",
+    action: "分かれた分を合わせる",
+  };
 }
 
 function sumTracked(

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { readFileSync } from "node:fs";
 import { abbreviateTitle } from "../../src/core/abbreviateTitle";
 import { TreeItemCollapsibleState } from "vscode";
 import {
@@ -742,5 +743,41 @@ describe("ビューの見出しに出す作品名", () => {
 
   test("登録済みだが未選択なら、最上段と同じ文言で促す", () => {
     expect(stepViewDescription(undefined, true)).toBe(STEP_CHOOSE_WORK_LABEL);
+  });
+});
+
+/**
+ * ビューの名前（作者の指定、2026-08-29。実機確認リスト F-35）。
+ *
+ * 「操作メニュー」を「詳細メニュー」へ、新しく作ったほうを
+ * 「簡単ステップメニュー」へ改名した。**名前は `package.json` に文字列で
+ * 書く**ので、片方だけ直すと、案内の文と画面の見出しが食い違う。
+ */
+describe("左に並ぶビューの名前", () => {
+  const views = (
+    JSON.parse(
+      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+    ) as {
+      contributes: {
+        views: Record<string, Array<{ id: string; name: string }>>;
+      };
+    }
+  ).contributes.views["novelai"];
+
+  test("段階のビューは「簡単ステップメニュー」（実機確認リスト F-35 の代わり）", () => {
+    expect(views.find((view) => view.id === "novelai.steps")?.name).toBe(
+      "簡単ステップメニュー"
+    );
+  });
+
+  test("木のビューは「詳細メニュー」（実機確認リスト F-35 の代わり）", () => {
+    expect(views.find((view) => view.id === "novelai.actions")?.name).toBe(
+      "詳細メニュー"
+    );
+  });
+
+  test("最下段は番号なしの「ヘルプ」（実機確認リスト F-35 の代わり）", () => {
+    // どの段階からでも寄る場所なので、番号を振らない
+    expect(STEP_MENU.at(-1)?.label).toBe("ヘルプ");
   });
 });

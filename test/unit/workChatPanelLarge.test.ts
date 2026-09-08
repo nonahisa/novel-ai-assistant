@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { readFileSync } from "node:fs";
 import { buildWorkChatPanelHtml } from "../../src/views/workChatPanelHtml";
 
 /**
@@ -325,4 +326,64 @@ describe("暗黙のグローバルを作らない", () => {
       );
     });
   }
+});
+
+/**
+ * 本文の右クリックからは、これまでどおり横のパネルで開く
+ * （実機確認リスト F-23）。
+ *
+ * **範囲を選んで聞くときは、本文が見えている必要がある。**
+ * 大きい画面は編集領域に開くので、選んだ本文が隠れてしまう。
+ * 入口を取り違えると、選択を使う相談ができなくなる。
+ */
+describe("本文の右クリックから開く相談", () => {
+  const manifest = JSON.parse(
+    readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+  ) as {
+    contributes: {
+      menus: Record<string, Array<{ command: string; when?: string }>>;
+      commands: Array<{ command: string; title: string }>;
+    };
+  };
+
+  test("並ぶのは横のパネルのほうだけ（実機確認リスト F-23 の代わり）", () => {
+    const commands = manifest.contributes.menus["editor/context"].map(
+      (entry) => entry.command
+    );
+
+    expect(commands).toContain("novelai.openChat");
+    expect(commands).not.toContain("novelai.openChatPanel");
+  });
+
+  test("本文（.txt / .md）のときだけ出す（実機確認リスト F-23 の代わり）", () => {
+    const entry = manifest.contributes.menus["editor/context"].find(
+      (one) => one.command === "novelai.openChat"
+    );
+
+    expect(entry?.when).toContain(".txt");
+    expect(entry?.when).toContain(".md");
+  });
+
+  test("2つの入口は、名前で見分けられる（実機確認リスト F-23 の代わり）", () => {
+    // どちらも「AIに相談する」だと、どちらが大きく開くのか分からない
+    const titles = new Map(
+      manifest.contributes.commands.map((one) => [one.command, one.title])
+    );
+
+    expect(titles.get("novelai.openChat")).toBe("AIに相談する");
+    expect(titles.get("novelai.openChatPanel")).toContain("大きく開く");
+  });
+
+  test("横のパネルは、視点を移すだけで大きい画面を作らない（実機確認リスト F-23 の代わり）", () => {
+    const source = readFileSync(
+      new URL("../../src/extension.ts", import.meta.url),
+      "utf8"
+    );
+    const at = source.indexOf('registerCommand("novelai.openChat"');
+    expect(at).toBeGreaterThan(0);
+    const body = source.slice(at, source.indexOf("}),", at));
+
+    expect(body).toContain(".focus");
+    expect(body).not.toContain("openLargePanel");
+  });
 });

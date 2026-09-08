@@ -273,3 +273,44 @@ describe("生成文書の開き方", () => {
     expect(openTextDocument).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * その場で作って見せる3つの読み物（実機確認リスト F-16）。
+ *
+ * 作者の報告（2026-08-27）で直したとき、**同じ形が4か所に残っていた**。
+ * 上の走査（`language: "markdown"` を使っていない／`openTextDocument(Uri)`
+ * を使っていない）は「悪い書き方が無い」ことしか見ない。**その3つが
+ * 本当に助けを通っているか**は、名指しで見ないと分からない。
+ *
+ * 通した先の `openGeneratedMarkdown` が `vscode.open` を呼ぶことは
+ * 上の「生成文書の開き方」が見ている。`vscode.open` は作者の
+ * `workbench.editorAssociations` に従うので、**既定の画面で開く**。
+ * 実際に画面が出ることは実機に残る。
+ */
+describe("その場で作る読み物の開き方", () => {
+  const ENTRIES: Array<[string, string, string]> = [
+    [
+      "IME辞書の取り込み手順",
+      "src/features/exportImeDictionary.ts",
+      "IME辞書の取り込み手順",
+    ],
+    [
+      "セットアップの「何が要るのかを読む」",
+      "src/features/setupWizard.ts",
+      "セットアップで入れるもの",
+    ],
+    ["ブラウザ版の動作の診断", "src/features/diagnoseWeb.ts", "動作の診断"],
+  ];
+
+  for (const [name, file, title] of ENTRIES) {
+    it(`${name}が、既定の画面で開く道を通る（実機確認リスト F-16 の代わり）`, () => {
+      const text = readFileSync(file, "utf-8");
+
+      expect(text).toContain("openGeneratedMarkdown");
+      expect(text).toContain(`"${title}"`);
+      // 画面を横取りする道が混ざっていないこと（既定を「テキスト
+      // エディター」に戻した作者に、勝手なプレビューを出さない）
+      expect(text).not.toContain("markdown.showPreview");
+    });
+  }
+});

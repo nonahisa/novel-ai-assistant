@@ -10,7 +10,8 @@ import {
   missingIgnoreRules,
 } from "../../src/core/workRegistry";
 import { isGitAvailable, runGit } from "../../src/core/git";
-import { canFetch } from "../../src/features/gitSync";
+import { canFetch, describeDivergedPull } from "../../src/features/gitSync";
+import { ACTION_TREE } from "../../src/views/actionList";
 
 const encode = (text: string) => new TextEncoder().encode(text);
 
@@ -250,4 +251,57 @@ describe("実際のgitでの確認（キャッシュの同期切り替え）", (
     },
     60_000
   );
+});
+
+/**
+ * 取り込みが分岐で止まったときの知らせ（設計書5.5.16、実機確認リスト A-17）。
+ *
+ * **行き止まりにしない。** 「取り込めませんでした」だけで終わると、
+ * プログラマでない作者にはそこから先が無い。止まったその場に
+ * 「分かれた分を合わせる」を出す。
+ *
+ * 通知が実際に画面へ出ることは実機に残る。ここで見るのは**押せる先が
+ * 添えてあるか**である。
+ */
+describe("分岐で取り込めなかったときの知らせ", () => {
+  test("作品名と、止めたことを伝える（実機確認リスト A-17 の代わり）", () => {
+    const notice = describeDivergedPull("いじめられっ子");
+
+    expect(notice.message).toContain("いじめられっ子");
+    expect(notice.message).toContain("両方で変更が進んでいます");
+    expect(notice.message).toContain("取り込みは中止しました");
+  });
+
+  test("その場から次の手へ行けるボタンが付く（実機確認リスト A-17 の代わり）", () => {
+    expect(describeDivergedPull("いじめられっ子").action).toBe(
+      "分かれた分を合わせる"
+    );
+  });
+});
+
+/**
+ * 「分かれた分を合わせる」が、どこから押せるか（実機確認リスト A-17）。
+ *
+ * 入口は3つある——詳細メニューの「作品管理 → GitHubで作品管理」、
+ * 「同期」が分岐で止まったときの知らせ、「作品をすべて同期」の報告。
+ * **どれか1つでも欠けると、分岐したときの行き止まりが戻ってくる。**
+ * 階層をたどって実際に押せることは実機に残る。
+ */
+describe("「分かれた分を合わせる」の入口", () => {
+  test("詳細メニューの「GitHubで作品管理」に並ぶ（実機確認リスト A-17 の代わり）", () => {
+    const group = ACTION_TREE.find((one) => one.label === "作品管理");
+    const section = group?.entries.find(
+      (entry) => entry.kind === "section" && entry.label.includes("GitHub")
+    );
+    if (!section || section.kind !== "section") {
+      throw new Error("「GitHubで作品管理」の小分類がありません");
+    }
+
+    const item = section.items.find(
+      (one) => one.command === "novelai.resolveDivergence"
+    );
+    expect(item?.label).toBe("分かれた分を合わせる");
+    // 作品を選ばなくても押せる（分岐したかどうかを、こちらで調べる）
+    expect(item?.requiresWork).toBe(false);
+  });
 });

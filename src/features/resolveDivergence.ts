@@ -172,6 +172,34 @@ async function reportAuthoredConflicts(
   logStep(`分岐：作者のものが衝突（${label}／${preview.authored.length}件）`);
 }
 
+/**
+ * 押す前に見せる文面を組む。
+ *
+ * **画面から切り離してある**——出るかどうかは実機でしか見られないが、
+ * 「取り込む件数」「こちらに残る件数」が本当に入っているかは、
+ * ここだけを呼べば機械で確かめられる。
+ */
+export function describeDivergenceConfirm(input: {
+  label: string;
+  behind: number;
+  ahead: number;
+  autoWritten: number;
+}): { message: string; detail: string } {
+  const folding =
+    input.autoWritten > 0
+      ? `\n・食い違う${input.autoWritten}件（自動で書かれるもの）は、この端末の側を残します`
+      : "";
+  return {
+    message: `${input.label} の分かれた分を合わせます。`,
+    detail:
+      `・GitHubの側にある${input.behind}件を取り込みます\n` +
+      `・こちらの${input.ahead}件はそのまま残ります${folding}\n` +
+      "・合わせる前に、未記録の変更を記録します\n" +
+      "・戻せるように、退避の枝を作ります\n\n" +
+      "GitHubへは送信しません。送信は「同期」から改めて行ってください。",
+  };
+}
+
 /** 押す前に、何が起きるかを見せる */
 async function confirm(
   label: string,
@@ -179,21 +207,15 @@ async function confirm(
   ahead: number,
   preview: MergePreview
 ): Promise<boolean> {
-  const folding =
-    preview.autoWritten.length > 0
-      ? `\n・食い違う${preview.autoWritten.length}件（自動で書かれるもの）は、この端末の側を残します`
-      : "";
+  const text = describeDivergenceConfirm({
+    label,
+    behind,
+    ahead,
+    autoWritten: preview.autoWritten.length,
+  });
   const answer = await vscode.window.showInformationMessage(
-    `${label} の分かれた分を合わせます。`,
-    {
-      modal: true,
-      detail:
-        `・GitHubの側にある${behind}件を取り込みます\n` +
-        `・こちらの${ahead}件はそのまま残ります${folding}\n` +
-        "・合わせる前に、未記録の変更を記録します\n" +
-        "・戻せるように、退避の枝を作ります\n\n" +
-        "GitHubへは送信しません。送信は「同期」から改めて行ってください。",
-    },
+    text.message,
+    { modal: true, detail: text.detail },
     "合わせる"
   );
   return answer === "合わせる";

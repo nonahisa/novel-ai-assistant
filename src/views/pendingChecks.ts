@@ -57,7 +57,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "A-8",
     title: "書庫へまとめ直す",
     commands: ["novelai.mergeIntoLibrary"],
-    count: 6,
+    count: 1,
   },
   {
     id: "A-9",
@@ -120,12 +120,6 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     count: 8,
   },
   {
-    id: "A-17",
-    title: "分かれた分を合わせる",
-    commands: ["novelai.resolveDivergence"],
-    count: 4,
-  },
-  {
     id: "A-19",
     title: "履歴にも退避にも残らない本文の書き換えが起きた",
     commands: [],
@@ -153,7 +147,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "B-5",
     title: "はじめて開いたときのAI選択",
     commands: ["novelai.setupAI"],
-    count: 2,
+    count: 1,
   },
   {
     id: "C",
@@ -255,7 +249,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-16",
     title: "Markdownが既定の画面で開くか",
     commands: ["novelai.applyPendingUpdates", "novelai.exportImeDictionary", "novelai.runFullSetup", "novelai.diagnoseWeb"],
-    count: 4,
+    count: 1,
   },
   {
     id: "F-17",
@@ -345,7 +339,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-66",
     title: "章立てのAI提案",
     commands: ["novelai.proposeChapters"],
-    count: 4,
+    count: 3,
   },
   {
     id: "F-67",
@@ -411,7 +405,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-49",
     title: "読み上げ（音読推敲）",
     commands: ["novelai.readManuscriptAloud"],
-    count: 11,
+    count: 4,
   },
   {
     id: "F-48",
@@ -429,7 +423,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-46",
     title: "本文を溢れさせない——関所と固定費の実測",
     commands: ["novelai.checkTypos", "novelai.checkContradictions", "novelai.extractSettings"],
-    count: 5,
+    count: 3,
   },
   {
     id: "F-45",
@@ -489,7 +483,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-35",
     title: "原稿エディタの一新——文字数・前後の話・記録の細分化ほか",
     commands: ["novelai.openVertical", "novelai.resumeWriting"],
-    count: 9,
+    count: 6,
   },
   {
     id: "F-34",
@@ -555,7 +549,7 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-23",
     title: "AI相談の大きい画面と使い方マニュアル",
     commands: ["novelai.openChatPanel", "novelai.openManual"],
-    count: 7,
+    count: 3,
   },
   {
     id: "F-22",
@@ -585,12 +579,6 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
     id: "F-75",
     title: "EPUBブロックの保留",
     commands: ["novelai.openEpubEditor"],
-    count: 3,
-  },
-  {
-    id: "F-76",
-    title: "EPUB書き出しメニューの一本化",
-    commands: ["novelai.exportEpub", "novelai.openEpubEditor"],
     count: 3,
   },
   {
@@ -710,4 +698,4 @@ export const PENDING_CHECKS: readonly PendingCheckSection[] = [
 ];
 
 /** 残っている項目の総数 */
-export const PENDING_CHECK_TOTAL = 439;
+export const PENDING_CHECK_TOTAL = 406;

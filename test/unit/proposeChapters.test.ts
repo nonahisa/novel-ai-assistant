@@ -5,6 +5,7 @@ import { ChapterStore } from "../../src/core/chapterStore";
 import type { WorkEntry } from "../../src/models/types";
 import {
   ChapterProposalApplier,
+  describeChapterMaterial,
   describeChapterProposal,
 } from "../../src/features/proposeChapters";
 
@@ -238,5 +239,37 @@ describe("提案パネルに出す1件の文言", () => {
   test("理由が空なら、その行を出さない（空の行を並べない）", () => {
     const lines = describeChapterProposal({ label: "第1話", reason: "" });
     expect(lines).toHaveLength(1);
+  });
+});
+
+/**
+ * 実行前の確認に添える、材料の断り書き（設計書6.66.4、実機確認リスト F-66）。
+ *
+ * **押す前に、材料が薄いことを言う。** あらすじが1件も無ければ
+ * サブタイトルだけで区切ることになり、精度は落ちる。
+ * 確認の画面が出ること自体は実機に残る。
+ */
+describe("実行前の確認に出す材料の断り", () => {
+  test("あらすじが1件も無ければ、サブタイトルだけになると言う（実機確認リスト F-66 の代わり）", () => {
+    const notice = describeChapterMaterial(0, 19);
+
+    expect(notice).toContain("各話あらすじがまだありません");
+    expect(notice).toContain("サブタイトルだけを材料にする");
+    expect(notice).toContain("精度は落ちます");
+  });
+
+  test("一部にしか無ければ、件数を出す（実機確認リスト F-66 の代わり）", () => {
+    expect(describeChapterMaterial(7, 19)).toContain(
+      "あらすじのある話は 7/19 件です"
+    );
+  });
+
+  test("全部そろっていれば、何も言わない（実機確認リスト F-66 の代わり）", () => {
+    // 毎回出すと読み飛ばされ、薄いときの注意まで効かなくなる
+    expect(describeChapterMaterial(19, 19)).toBe("");
+  });
+
+  test("話が1つも無いときも、薄い側として扱う（実機確認リスト F-66 の代わり）", () => {
+    expect(describeChapterMaterial(0, 0)).toContain("各話あらすじがまだありません");
   });
 });

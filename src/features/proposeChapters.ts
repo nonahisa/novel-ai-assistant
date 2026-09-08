@@ -196,6 +196,26 @@ export function describeChapterProposal(input: {
 }
 
 /**
+ * 実行前の確認に添える、材料の断り書き（設計書6.66.4）。
+ *
+ * **材料が薄いことは、押す前に言う。** あらすじが無くてもサブタイトル
+ * だけで動くが、区切りの精度は落ちる。**全部そろっているときは何も
+ * 言わない**——毎回出ると読み飛ばされ、薄いときの注意も効かなくなる。
+ */
+export function describeChapterMaterial(
+  withSynopsis: number,
+  total: number
+): string {
+  if (withSynopsis === 0) {
+    return "\n各話あらすじがまだありません。サブタイトルだけを材料にするため、区切りの精度は落ちます。";
+  }
+  if (withSynopsis < total) {
+    return `\nあらすじのある話は ${withSynopsis}/${total} 件です。`;
+  }
+  return "";
+}
+
+/**
  * 章立てをAIに提案させる（作品の右クリック・詳細メニュー）。
  *
  * 材料は**話のサブタイトルと各話あらすじだけ**。本文は送らない。
@@ -237,14 +257,10 @@ export async function proposeChapters(
   const costNotice = resolved.provider.isPaid
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
-  // **材料が薄いことは、押す前に言う**（設計書6.66.4）。あらすじが無くても
-  // サブタイトルだけで動くが、区切りの精度は落ちる
-  const materialNotice =
-    withSynopsis === 0
-      ? "\n各話あらすじがまだありません。サブタイトルだけを材料にするため、区切りの精度は落ちます。"
-      : withSynopsis < material.episodes.length
-        ? `\nあらすじのある話は ${withSynopsis}/${material.episodes.length} 件です。`
-        : "";
+  const materialNotice = describeChapterMaterial(
+    withSynopsis,
+    material.episodes.length
+  );
   const confirmed = await confirmRun(
     `${work.title} の章立てを提案します（AIの呼び出しは1回）。\n` +
       `モデル: ${resolved.model}${costNotice}${materialNotice}`
