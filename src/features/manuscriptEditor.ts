@@ -54,7 +54,7 @@ import { READ_ALOUD_MEMO_TEXT, buildReadingPlan } from "../core/readAloud";
 import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
 import { askText } from "../views/dialogs";
-import { logLine } from "../core/logger";
+import { logLine, useLogFile } from "../core/logger";
 import { readTextFile } from "../core/textFile";
 import type { TermHighlighter } from "../views/termHighlight";
 import type { TermKind } from "../core/termIndex";
@@ -1075,7 +1075,8 @@ export class ManuscriptEditorProvider
         // 画面が捨てているのかを切り分ける手がかりが無かった。
         // 自分の applyEdit による変更は毎打鍵で起きるので残さない
         if (!selfEditing && event.contentChanges.length > 0) {
-          logLine(
+          void this.logForDocument(
+            document,
             `原稿エディタ：${paths.basename(fromUri(document.uri))} が外で変わったので画面へ送り直します（${event.contentChanges.length}か所）`
           );
         }
@@ -1263,7 +1264,7 @@ export class ManuscriptEditorProvider
           break;
 
         case "log":
-          logLine(`原稿エディタ：${message.text}`);
+          await this.logForDocument(document, `原稿エディタ：${message.text}`);
           break;
 
         case "addMemo":
@@ -1493,9 +1494,33 @@ export class ManuscriptEditorProvider
       return;
     }
     if (disk === toLf(document.getText())) return;
-    logLine(
+    await this.logForDocument(
+      document,
       `原稿エディタ：${paths.basename(fromUri(document.uri))} が外で書き換えられましたが、VS Code が文書を読み直していません（画面が古いままの恐れ。閉じて開き直してください）`
     );
+  }
+
+  /**
+   * 原稿エディタのログを、**その原稿の作品の `actions.log` へ**残す
+   * （49 の指摘、2026-09-08：この画面は `useLogFile` を一度も呼んでおらず、
+   * 「変換中の本文を捨てた」「外で変わった」の手がかりが出力チャンネルにしか
+   * 出ていなかった——出力チャンネルは VS Code を閉じると消える）。
+   *
+   * 書き先は呼ぶたびに引き直す。ほかの機能が別の作品のログへ向け直して
+   * いることがあるためで、覚えておくと別の作品のファイルへ書く。
+   * 作品が引けなければ、これまでどおり出力チャンネルだけに出る。
+   */
+  private async logForDocument(
+    document: vscode.TextDocument,
+    text: string
+  ): Promise<void> {
+    try {
+      const found = await this.deps.highlighter.indexFor(fromUri(document.uri));
+      if (found) useLogFile(found.work.folderPath);
+    } catch {
+      // 作品を引けなくてもログは出す
+    }
+    logLine(text);
   }
 
   private async applyEdit(

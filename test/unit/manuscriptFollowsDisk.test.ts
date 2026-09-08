@@ -46,6 +46,19 @@ describe("原稿エディタが外の変更に追いつく", () => {
     expect(code).toMatch(/selfEditing = true;[\s\S]*?await this\.applyEdit\(document, text\);[\s\S]*?selfEditing = false;/);
   });
 
+  /**
+   * 原稿エディタのログは、その作品の actions.log へ残す（49 の指摘、2026-09-08。
+   * useLogFile を呼ばないと出力チャンネルにしか出ず、VS Code を閉じると消える）。
+   */
+  test("原稿エディタのログは、作品のログファイルへ向ける", () => {
+    expect(source).toContain("private async logForDocument(");
+    expect(source).toContain("if (found) useLogFile(found.work.folderPath);");
+    // 画面からの log・外からの変更・読み直しの確認の3経路が通る
+    expect(source).toContain("case \"log\":");
+    expect(source).toContain("await this.logForDocument(");
+    expect(source.split("this.logForDocument(").length - 1).toBeGreaterThanOrEqual(3);
+  });
+
   test("読み直されなかったときはログに残す", () => {
     expect(source).toContain("private async verifyReloaded(");
     expect(source).toContain("VS Code が文書を読み直していません");
