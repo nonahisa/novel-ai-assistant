@@ -1029,6 +1029,23 @@ describe("画面の約束", () => {
     expect(head.indexOf("isOwnEcho(text)")).toBeLessThan(head.indexOf("if (composing)"));
   });
 
+  /**
+   * 変換を確定した直後に、変換中に溜めた**古い本文**で面を組み直さない
+   * （実機確認 2026-09-08、0.43.1）。作者の報告「変換を確定するとカーソルが
+   * 語の途中に残る」——溜めた本文は確定した語を含まないので、それで
+   * 組み直すと語が一度消え、カーソルは古い本文の中へ落ちる。
+   * 打つ面の flushPending と同じく、打った内容を優先する。
+   */
+  it("確定の直後に、変換中に溜めた古い本文で組み直さない", () => {
+    const code = html.slice(html.indexOf("<script"));
+    const start = code.indexOf('compose.addEventListener("compositionend"');
+    const block = code.slice(start, code.indexOf("composeScheduleHighlight();", start));
+    expect(start).toBeGreaterThan(0);
+    expect(block).toContain("composeSend();");
+    expect(block).not.toContain("composeTakeIncoming(waiting)");
+    expect(block).toContain("いま打った本文を優先しました");
+  });
+
   it("変換中は本文を送らない", () => {
     expect(code).toContain('compose.addEventListener("compositionstart"');
     expect(code).toContain('compose.addEventListener("compositionend"');

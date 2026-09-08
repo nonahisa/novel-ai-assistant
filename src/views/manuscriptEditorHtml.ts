@@ -2956,7 +2956,26 @@ ruby > rt {
       composeSend();
       const waiting = composePending;
       composePending = null;
-      if (waiting !== null) composeTakeIncoming(waiting);
+      /*
+        **打った内容のほうを優先する**（打つ面の flushPending と同じ決まり。
+        実機確認 2026-09-08「変換を確定するとカーソルが語の途中に残る」）。
+        変換中に溜めた本文は、いま確定した語を含まない**古い本文**である。
+        それで面を組み直すと、確定した語が画面から一度消え、カーソルは
+        古い本文の中へ落ちる（次の返事で語は戻るが、カーソルは戻らない）。
+        いま送った本文の返事がすぐ届いて画面と文書を揃えるので、
+        溜めた分は捨ててよい。捨てたことは記録に残す（外からの書き換えが
+        本当にあった場合の手がかり）。
+      */
+      if (waiting !== null) {
+        if (composeNormalizeNewlines(waiting) !== composeDomToNotation(compose)) {
+          vscode.postMessage({
+            type: "log",
+            text:
+              "組んで書く：変換中に届いた本文（" + waiting.length + "字）は、" +
+              "確定した語を含まないので使わず、いま打った本文を優先しました",
+          });
+        }
+      }
       composeScheduleHighlight();
       // 変換で確定した行が付箋になったかもしれない（設計書6.40.3）
       composeRepaintMemos();
