@@ -76,7 +76,12 @@ import {
   type ExcerptSource,
   type MentionExcerpt,
 } from "../core/mentionExcerpts";
-import { resolveMaxOutputTokens } from "../ai/outputLimit";
+import {
+  resolveOutputLimitForSend,
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+  truncatedOutputAdvice,
+} from "../ai/outputLimit";
 import { loadExcerptSources } from "../core/manuscriptSources";
 import { expandNameVariants } from "../core/termIndex";
 import { evidencePhrases } from "../core/groundedEvidence";
@@ -974,15 +979,19 @@ export class SettingsPanel {
    * 読み仮名は入っている。
    */
   private async handleApplyRuby(): Promise<void> {
-    const { applySettingsRuby, collectRubyTerms } = await import(
-      "./applySettingsRuby.js"
-    );
-    const terms = collectRubyTerms([
-      ...this.characters,
-      ...this.abilities,
-      ...this.locations,
-      ...this.organizations,
+    const { applySettingsRuby, collectRubyTerms, pickRubyRecordKinds } =
+      await import("./applySettingsRuby.js");
+    // **どの種類の資料に振るかを先に選ばせる**（作者の裁定、2026-09-08）。
+    // 場所「教室」にまで {教室|きょうしつ} が付いた。読みが要るのは
+    // ほぼ人名なので、既定は人物だけにし、ほかは選べば入る
+    const chosen = await pickRubyRecordKinds([
+      { kind: "character", label: "人物", records: this.characters },
+      { kind: "ability", label: "能力", records: this.abilities },
+      { kind: "location", label: "場所", records: this.locations },
+      { kind: "organization", label: "組織", records: this.organizations },
     ]);
+    if (!chosen) return;
+    const terms = collectRubyTerms(chosen);
     await applySettingsRuby(this.work, terms);
   }
 
@@ -1651,7 +1660,7 @@ export class SettingsPanel {
           `・「${record.name}」の別名から ${moved} が外れます\n` +
           `・紹介・役割・性格・登場話・変化の記録は「${record.name}」に残ります（移しません）\n` +
           "・この2人は別人だと覚えるので、次の抽出でまとめ直されません\n" +
-          `・書き換える前に「${record.name}」の控えを取ります（あとから戻せます）\n\n` +
+          `・書き換える前に「${record.name}」の控えを取ります（設定/characters/.novelai-recovery に残ります。あとから戻せます）\n\n` +
           "新しい人物の中身は空です。「設定資料を抽出」をもう一度実行すると本文から入ります。" +
           "前と同じAI・同じモデルなら、AIは呼ばれません。",
       },
@@ -1841,6 +1850,17 @@ export class SettingsPanel {
         }),
         model: resolved.model,
         temperature: 0.2,
+        // **本体（設定の取り込み）と同じ2欄を渡す**（設計書6.77の第2段）。
+        // 下ごしらえだけ設定値のままだと、相談1回のうち片方だけが
+        // 実測に従うという、外から見えない食い違いになる
+        maxOutputTokens: resolveOutputTokensForSend(
+          resolved.provider.id,
+          resolved.model
+        ),
+        plannedOutputTokens: resolveOutputTokensForPlanning(
+          resolved.provider.id,
+          resolved.model
+        ),
         jsonSchema: SEARCH_TERMS_SCHEMA,
         disableThinking: true,
         // 相談1回につき、これがもう1回ぶんの呼び出しになる（P-22）。
@@ -1958,7 +1978,25 @@ export class SettingsPanel {
     // ＋固定12,000字」で必要量を出していたが、固定費は指示・資料の改訂で
     // 育つので、見込みは必ず追い越される。組み上がったプロンプトの実測から
     // 決める道（`contextSizeForPrompt`）へ揃え、出力の見込みだけを渡す。
-    const maxOutputTokens = resolveMaxOutputTokens();
+    //
+    // **その見込みと、実際に送る上限は別物である**（設計書6.77の第2段）。
+    // 以前はここが `resolveMaxOutputTokens()` をそのまま使っており、台帳に
+    // 実測が付いても値は設定値のまま古びていた。決め方は `ai/outputLimit.ts`
+    // の1か所だけが持つ
+    //
+    // **出どころごと受け取る。** 切り詰められたときの直し方は、上限が
+    // 設定から来たのか実測から来たのかで変わる（`truncatedOutputAdvice`）。
+    // 実測で頭打ちなのに「設定を大きくして」と言うと、作者は直らない操作を
+    // 繰り返すことになる
+    const outputLimit = resolveOutputLimitForSend(
+      resolved.provider.id,
+      resolved.model
+    );
+    const maxOutputTokens = outputLimit.tokens;
+    const plannedOutputTokens = resolveOutputTokensForPlanning(
+      resolved.provider.id,
+      resolved.model
+    );
 
     this.setBusy(true, progressLabel);
     try {
@@ -1976,6 +2014,7 @@ export class SettingsPanel {
             temperature: jsonSchema ? 0.3 : 0.5,
 
             maxOutputTokens,
+            plannedOutputTokens,
             jsonSchema,
             disableThinking: true,
             signal: controller.signal,
@@ -1992,8 +2031,9 @@ export class SettingsPanel {
       if (result.truncated) {
         this.post({
           type: "error",
-          message:
-            "AIの応答が出力上限で切り詰められました。観点を絞って、もう一度試してください。",
+          // 文言は `ai/outputLimit.ts` が持つ（判定の置き場を2つにしない）。
+          // ここで足すのは、この画面でできる絞り方だけ
+          message: `${truncatedOutputAdvice(outputLimit)}観点を絞ると通ることがあります。`,
         });
         return undefined;
       }

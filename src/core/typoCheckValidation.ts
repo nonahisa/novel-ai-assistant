@@ -1,4 +1,5 @@
 import type { Chunk } from "./chunker";
+import { summarizeReasons } from "./checkRunCounts";
 import type { ExtractedTypoIssue, TypoCheckResult } from "../prompts/typoCheck";
 import { normalizeForComparison } from "./groundedEvidence";
 import { isPlaceholderText } from "./placeholderText";
@@ -54,11 +55,62 @@ export interface AcceptedTypoIssue {
   suggestion: string;
   reason: string;
   confidence: "high" | "medium" | "low";
+  /**
+   * こちらで置き換える範囲を1字広げたか（`checkParticleRange`）。
+   *
+   * **AIの言い分をそのまま採らなかった、と分かるようにする。**
+   * 作者が見る `reason` にも「（範囲を1字広げました）」と出す。
+   */
+  rangeExtended?: boolean;
 }
 
 export interface TypoValidationResult {
   accepted: AcceptedTypoIssue[];
   rejected: RejectedTypoIssue[];
+}
+
+/**
+ * 不採用の理由を、作者が読める言葉にする。
+ *
+ * **操作ログは作者も読む。** 種別の名前（`target_not_in_original`）だけ
+ * 残しても、なぜ指摘が減ったのかは伝わらない。
+ * `Record` にしてあるのは、理由を足したときに書き忘れると型検査が
+ * 落ちるようにするためである。
+ */
+const REJECT_REASON_LABELS: Record<TypoRejectionReason, string> = {
+  invalid_shape: "形が違う",
+  out_of_range: "行番号が範囲外",
+  ungrounded: "本文に無い引用",
+  target_not_in_original: "対象が引用の中に無い",
+  protected_term: "固有名詞",
+  kept_word: "直さないと決めた語",
+  pronoun_change: "人称の入れ替え",
+  placeholder_suggestion: "中身の無い修正案",
+  no_change: "直しにならない",
+  punctuation_only: "末尾の句読点だけ",
+  script_only: "表記ゆれ",
+  archaic_form: "文語・旧字",
+  duplicates_context: "当てると本文が二重になる",
+  same_as_original: "修正案が原文のまま",
+  markdown_in_suggestion: "修正案にMarkdownの記号",
+  rewrites_span: "文の書き換え",
+};
+
+/**
+ * 不採用の内訳を1行にまとめる（設計書6.8）。
+ *
+ * **総数だけでは、消しすぎなのか本当に無いのかが分からない。**
+ * 誤字脱字は実データで64件中62件が素通りしたことがあり、
+ * 「何件除外した」だけを見ていると、そこが検証のせいなのか
+ * AIのせいなのか切り分けられない。多い順に並べる。
+ */
+export function summarizeRejectReasons(
+  rejected: readonly Pick<RejectedTypoIssue, "reason">[]
+): string {
+  return summarizeReasons(
+    rejected.map((entry) => entry.reason),
+    (reason) => REJECT_REASON_LABELS[reason as TypoRejectionReason] ?? reason
+  );
 }
 
 const VALID_CONFIDENCE = new Set(["high", "medium", "low"]);
@@ -215,13 +267,41 @@ export function validateTypoIssues(
       continue;
     }
 
+    // **AIが「誤っている助詞」を範囲に含めず、挿入として返してくる。**
+    // 本文「すでの僕」に target「すで」→ suggestion「すでに」。当てると
+    // 「すでにの僕」になる（作者の実機で1件）。プロンプトでも指示したが、
+    // 指示に従わないモデルのためにここでも手当てする。
+    // **これ以降の検査は、伸ばした後の範囲で行う**
+    let target = issue.target;
+    let original = issue.original;
+    let rangeExtended = false;
+    const range = checkParticleRange(
+      lineTextOf(chunk, issue.line) ?? issue.original,
+      issue.original,
+      issue.target,
+      issue.suggestion
+    );
+    if (range.kind === "already-correct") {
+      // 本文はすでに正しい。当てても同じ助詞が続くだけで、直しにならない
+      rejected.push({
+        line: issue.line,
+        target: issue.target,
+        reason: "no_change",
+      });
+      continue;
+    }
+    if (range.kind === "extend") {
+      target = range.target;
+      original = range.original;
+      rangeExtended = true;
+    }
+
     // **同じ語を「修正案」として返してくる。**
     // 作者の10作品で測ったところ、通った62件のうち**25件がこれだった**
     // （「保険」→「保険」、「跨いだ」→「跨いだ」）。押しても何も起きないのに、
     // 作者は1件ずつ見て消さなければならない（2026-08-17）
     if (
-      normalizeForComparison(issue.target) ===
-      normalizeForComparison(issue.suggestion)
+      normalizeForComparison(target) === normalizeForComparison(issue.suggestion)
     ) {
       rejected.push({
         line: issue.line,
@@ -243,10 +323,9 @@ export function validateTypoIssues(
     // **原文が対象そのものの場合は除く。** 脱字の直しは対象へ文字を足す
     // ので、そのときは修正案が対象を含むのが正しい
     if (
-      normalizeForComparison(issue.original) !==
-        normalizeForComparison(issue.target) &&
+      normalizeForComparison(original) !== normalizeForComparison(target) &&
       normalizeForComparison(issue.suggestion).includes(
-        normalizeForComparison(issue.original)
+        normalizeForComparison(original)
       )
     ) {
       rejected.push({
@@ -276,7 +355,7 @@ export function validateTypoIssues(
     // **実データ147件で測って決めた**（2026-08-21）。ここまでの検査を
     // 通った80件のうち、伸びは75件が+3以内。そこから +7 / +12 / +18 /
     // +23 / +26 と飛び、**その5件すべてが本文を壊した。**
-    if (issue.suggestion.length - issue.target.length > MAX_SUGGESTION_GROWTH) {
+    if (issue.suggestion.length - target.length > MAX_SUGGESTION_GROWTH) {
       rejected.push({
         line: issue.line,
         target: issue.target,
@@ -293,9 +372,9 @@ export function validateTypoIssues(
     // いることがあり、それだけを見ると重なりを見つけられない
     if (
       wouldDuplicateContext(
-        lineTextOf(chunk, issue.line) ?? issue.original,
-        issue.original,
-        issue.target,
+        lineTextOf(chunk, issue.line) ?? original,
+        original,
+        target,
         issue.suggestion
       )
     ) {
@@ -310,7 +389,7 @@ export function validateTypoIssues(
     // **末尾の句読点を足すだけの指摘は誤字ではない。**
     // 台詞の終わりに「。」を足す提案が返るが、日本語の小説では
     // **台詞の末尾に句点を打たない**のが普通である
-    if (onlyTrailingPunctuation(issue.target, issue.suggestion)) {
+    if (onlyTrailingPunctuation(target, issue.suggestion)) {
       rejected.push({
         line: issue.line,
         target: issue.target,
@@ -322,7 +401,7 @@ export function validateTypoIssues(
     // **読みが同じで書き方だけ違うものは、表記ゆれであって誤字ではない。**
     // プロンプトで「表記ゆれは別機能で扱う」と断っているのに返ってくる
     // （「ハメになった」→「はめになった」、「2回転」→「二回転」）
-    if (onlyScriptDifference(issue.target, issue.suggestion)) {
+    if (onlyScriptDifference(target, issue.suggestion)) {
       rejected.push({
         line: issue.line,
         target: issue.target,
@@ -335,7 +414,7 @@ export function validateTypoIssues(
     // 作者の作品に、戦前の文語体で書かれた自分史がある。そこで
     // 「然し」→「しかし」「聯隊」→「連隊」「与へて呉れた」→「与えてくれた」
     // が返った。**どれも正しい日本語で、直せば元の文書が壊れる**
-    if (isArchaicForm(issue.target)) {
+    if (isArchaicForm(target)) {
       rejected.push({
         line: issue.line,
         target: issue.target,
@@ -359,17 +438,113 @@ export function validateTypoIssues(
 
     accepted.push({
       line: issue.line,
-      original: issue.original,
-      target: issue.target,
+      original,
+      target,
       suggestion: issue.suggestion,
-      reason: issue.reason,
+      // **範囲を広げたことを作者に見せる。** 黙って直すと、画面の
+      // 「対象」がAIの言い分と違っている理由が分からない
+      reason: rangeExtended
+        ? `${issue.reason}（範囲を1字広げました）`
+        : issue.reason,
       confidence: VALID_CONFIDENCE.has(issue.confidence)
         ? (issue.confidence as "high" | "medium" | "low")
         : "low",
+      ...(rangeExtended ? { rangeExtended: true } : {}),
     });
   }
 
   return { accepted, rejected };
+}
+
+/**
+ * 1文字の助詞。**この一覧に無いものは見ない**（「へ」「も」まで入れて9つ）。
+ *
+ * 実測の道具（`test/live/typoAcrossWorks.test.ts`）でも同じ一覧を使う。
+ * 写しを作ると、片方だけ直したときに測定と製品がずれる。
+ */
+export const PARTICLE_CHARS = new Set([
+  "の",
+  "に",
+  "は",
+  "が",
+  "を",
+  "と",
+  "で",
+  "へ",
+  "も",
+]);
+
+/**
+ * 助詞1文字ぶんの範囲ずれの判定（設計書6.8）。
+ *
+ * `keep` はそのまま、`already-correct` は当てても意味が無い（弾く）、
+ * `extend` は置き換える範囲を1字広げて採る。
+ */
+export type ParticleRangeCheck =
+  | { kind: "keep" }
+  | { kind: "already-correct" }
+  | { kind: "extend"; target: string; original: string };
+
+/**
+ * AIが「誤っている助詞」を範囲に含めずに返してきたときの手当て。
+ *
+ * **プロンプトが効かないモデルのための保険である。** 実機で1件出た。
+ *
+ * ```
+ * 本文:   すでの僕の理性は     （「すでに」の誤変換）
+ * target:     すで
+ * suggestion: すでに           ← 「の」を範囲に含めていない（挿入になる）
+ * ↓ 当てると
+ *         すでにの僕の理性は
+ * ```
+ *
+ * `suggestion` が `target` で始まり、余りが助詞1文字で、本文で `target` の
+ * 直後の1文字も助詞なら、AIは**置き換えのつもりで挿入を返している**とみる。
+ *
+ * - 直後の助詞が余りと**同じ**なら、本文はすでに正しい（当てると同じ字が続くだけ）
+ * - **違う**なら、その1字を `target` に含める（「すで」→「すでの」）
+ *
+ * **`suggestion` が `target` で終わる型（前に助詞を足す）は扱わない。**
+ * 実測に例が無く、直し方も一意に決まらないためである。
+ */
+export function checkParticleRange(
+  /** 本文のその行。取れなければ呼び出し側が抜粋で代用する */
+  lineText: string,
+  /** AIが渡した抜粋 */
+  original: string,
+  target: string,
+  suggestion: string
+): ParticleRangeCheck {
+  if (!suggestion.startsWith(target) || suggestion === target) {
+    return { kind: "keep" };
+  }
+  const extra = suggestion.slice(target.length);
+  if (extra.length !== 1 || !PARTICLE_CHARS.has(extra)) return { kind: "keep" };
+
+  // **適用処理と同じ順で位置を決める**（`wouldDuplicateContext` と同じ理由）
+  const originalAt = lineText.indexOf(original);
+  const targetInOriginal = original.indexOf(target);
+  if (originalAt < 0 || targetInOriginal < 0) return { kind: "keep" };
+
+  const next = lineText[originalAt + targetInOriginal + target.length];
+  if (!next || !PARTICLE_CHARS.has(next)) return { kind: "keep" };
+  if (next === extra) return { kind: "already-correct" };
+
+  const extendedTarget = target + next;
+  // **抜粋が target のところで切れていることがある。** そのままだと
+  // 伸ばした target が抜粋からはみ出し、適用側が位置を決められない。
+  // 抜粋も同じ1字だけ伸ばす（本文から読んだ字なので、実在は確かめてある）
+  // **`endsWith` では足りない。** 抜粋の中に target が2度あると、
+  // 見ている場所（最初の1つ）と抜粋の終わりが別の場所になり、
+  // 本文に無い抜粋を組み立ててしまう
+  const targetEndsOriginal =
+    targetInOriginal + target.length === original.length;
+  const extendedOriginal = targetEndsOriginal ? original + next : original;
+  // 伸ばした結果が、いま見ている場所と違うところを指すなら手を出さない
+  if (extendedOriginal.indexOf(extendedTarget) !== targetInOriginal) {
+    return { kind: "keep" };
+  }
+  return { kind: "extend", target: extendedTarget, original: extendedOriginal };
 }
 
 /**

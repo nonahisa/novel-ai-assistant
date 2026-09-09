@@ -100,6 +100,39 @@ describe("弾く指摘", () => {
     expect(result.rejected[0].reason).toBe("excerpt_not_found");
   });
 
+  test("過去の場面の抜粋から写した引用も弾く（設計書6.74）", () => {
+    // 抜粋（前の話の本文）を渡すようになったので、**そちらから写した文**を
+    // 「本文にこうある」と言ってくる道が増えた。指摘の位置は対象本文の
+    // 行で示すものなので、対象本文に無い引用は既存の流儀どおり捨てる
+    //（プロンプト側でも excerpt は対象本文から写すよう指示している）
+    const result = validateContradictions(
+      { contradictions: [item({ excerpt: "第3話では左腕を負傷していた" })] },
+      chunk
+    );
+
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected[0].reason).toBe("excerpt_not_found");
+  });
+
+  test("根拠が抜粋側にあっても、引用が対象本文にあれば通す", () => {
+    // 抜粋を根拠にした指摘は settingSays に出典と逐語引用が入る。
+    // **そこは照合しない**——照合するのは、位置を決めるための引用だけ
+    const result = validateContradictions(
+      {
+        contradictions: [
+          item({
+            settingSays: "第3話では「左腕の傷」と書かれている",
+            textSays: "右腕の傷になっている",
+          }),
+        ],
+      },
+      chunk
+    );
+
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].settingSays).toContain("第3話");
+  });
+
   test("チャンクの外の行を弾く", () => {
     const result = validateContradictions(
       { contradictions: [item({ line: 999 })] },

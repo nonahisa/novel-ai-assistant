@@ -1,14 +1,15 @@
 import type { CharCounts } from "../models/types";
 import { stripMemoLines } from "./sceneMemo";
+// **記法の定義は `core/ruby.ts` の1つだけにする**（設計書6.2）。
+// ここに同じ名前の写しがあり、そちらは傍点 `{{強調}}` を知らなかったため、
+// 印の4字（`{{` と `}}`）が本文として数えられていた（2026-09-08に実機で判明。
+// 傍点を1つ入れるたびに作品の字数が4字ずつ増えていた）。
+// **`ruby.ts` は何も import していない**ので、循環にはならない
+import { stripRuby } from "./ruby";
 
-/**
- * Markdownルビ記法 {漢字|かんじ} からルビ部分を取り除く。
- * ルビは本文の文字数に含めないのが投稿サイトの一般的な扱いのため。
- * 例: "{魔導書庫|まどうしょこ}へ向かう" -> "魔導書庫へ向かう"
- */
-export function stripRuby(text: string): string {
-  return text.replace(/\{([^{}|]+)\|[^{}|]*\}/g, "$1");
-}
+// 既存の呼び出し口（`charCount` から取っていた側）を保つための再輸出。
+// **写しではなく、`ruby.ts` の実体そのものを渡す**
+export { stripRuby };
 
 /**
  * 文字数を計測する。

@@ -7,9 +7,13 @@ import {
 } from "../ai/ollamaLauncher";
 import { AIRegistry, runSetupWizard } from "../ai/registry";
 import { pullOllamaModel, shortenProgress } from "../core/packageInstall";
-import { RECOMMENDED_CHAT_MODEL } from "../core/requirements";
+import {
+  RECOMMENDED_CHAT_MODEL,
+  TYPO_MODEL_ADVICE,
+} from "../core/requirements";
 import { runFullSetup } from "./setupWizard";
 import { withCancellableProgress, withProgress } from "../views/progress";
+import { notifyDone } from "../views/notify";
 
 /**
  * Ollamaを使える状態にするまでの案内（設計書6.16）。
@@ -86,7 +90,10 @@ export async function setupOllama(registry: AIRegistry): Promise<void> {
     const get = "取得する";
     const action = await vscode.window.showInformationMessage(
       "Ollamaは動いていますが、モデルが1つもありません。" +
-        `まずは ${RECOMMENDED_MODEL} をお勧めします（日本語が扱え、長い本文も読めます。約9.6GB）。`,
+        `まずは ${RECOMMENDED_MODEL} をお勧めします（日本語が扱え、長い本文も読めます。約9.6GB）。` +
+        // **これから選ぶ人に、先に言っておく**（作者の裁定 2026-09-06）。
+        // 入れたあとで「誤字脱字が効かない」と気づくと、取り直しになる
+        `\n${TYPO_MODEL_ADVICE}`,
       get,
       "コマンドをコピー",
       "閉じる"
@@ -111,7 +118,7 @@ export async function setupOllama(registry: AIRegistry): Promise<void> {
       connection = await provider.testConnection();
     } else if (action === "コマンドをコピー") {
       await vscode.env.clipboard.writeText(`ollama pull ${RECOMMENDED_MODEL}`);
-      vscode.window.showInformationMessage(
+      notifyDone(
         "コマンドをコピーしました。ターミナルに貼り付けて実行してください。"
       );
       return;

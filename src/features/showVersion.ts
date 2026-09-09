@@ -3,6 +3,7 @@ import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
 import { AIRegistry } from "../ai/registry";
 import { isVectorSearchEnabled } from "./vectorSearch";
+import { notifyDone } from "../views/notify";
 
 /**
  * 拡張機能の版と、いまの環境を出す。
@@ -86,7 +87,7 @@ export async function showVersion(
 
   if (picked === copy) {
     await vscode.env.clipboard.writeText(report);
-    vscode.window.showInformationMessage(
+    notifyDone(
       "コピーしました。不具合を伝えるときに貼り付けてください。"
     );
     return;

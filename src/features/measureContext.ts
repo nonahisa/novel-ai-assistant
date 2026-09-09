@@ -4,8 +4,15 @@ import {
   ensureConfigured,
   type AssignableFeature,
 } from "../ai/registry";
-import { AIError, recoveryForAIError, type ProviderId } from "../ai/types";
+import {
+  AIError,
+  recoveryForAIError,
+  type AIProvider,
+  type ProviderId,
+} from "../ai/types";
 import { CONTEXT_GUARD_EXEMPT_FEATURE } from "../ai/contextGuard";
+import { isLocalProvider } from "../ai/otherLocalAi";
+import { resolveMaxOutputTokens } from "../ai/outputLimit";
 import { contextSizeForPrompt, TOKENS_PER_CHAR } from "../core/chunker";
 import {
   buildProbePrompt,
@@ -21,7 +28,17 @@ import {
   type ProbeSides,
   type ProbeState,
 } from "../core/contextProbe";
-import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
+import { logFailure, logStep, useLogFile } from "../core/logger";
+import {
+  buildOutputProbePrompt,
+  countOutputLines,
+  describeOutputProbeResult,
+  nextOutputProbeSize,
+  startOutputProbeState,
+  MAX_OUTPUT_LINES,
+  OUTPUT_PROBE_SYSTEM_PROMPT,
+  type OutputProbeState,
+} from "../core/outputProbe";
 import {
   MAX_TIMEOUT_SECONDS,
   modelTuning,
@@ -31,8 +48,11 @@ import {
   saveModelTuning,
   type ModelTuning,
 } from "../core/modelTuning";
+import { outputTokensPerSecond } from "../core/tuningStats";
 import { withCancellableProgress } from "../views/progress";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
+import { readChunkSettings } from "./chunkSettings";
+import { errorWithLog } from "../views/notify";
 
 /**
  * AIチューニング（設計書6.27.11・6.49）。
@@ -67,6 +87,15 @@ import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 const PROBE_OUTPUT_TOKENS = 128;
 
 /**
+ * モデルのコンテキスト長が取れないときに、まとめ送信の上限を導く計算へ
+ * 渡す既定値（設計書6.65.14の2）。
+ *
+ * `ai/ollamaProvider.ts` の `UNKNOWN_CONTEXT_WINDOW` と同じ考え方
+ * ——取れないときは、これまでの既定と同じ値に倒す。
+ */
+const FALLBACK_CONTEXT_WINDOW = 8192;
+
+/**
  * 申告値がどれだけ小さくても、ここまでは試す。
  *
  * 256Kトークン相当（約180,000字）。**申告値で頭打ちにしない**——
@@ -88,6 +117,22 @@ const MIN_CEILING_TOKENS = 256 * 1024;
  * **待ち時間のほうは6つとも書く。** こちらはどのAIでも取りようがなく、
  * 実際に切れているのはローカルの小さいモデルとクラウドの両方である。
  */
+/**
+ * 申告の文脈長が**当て推量**であるプロバイダ（設計書6.62.1）。
+ *
+ * ここは作者が設定（`novelai.sakura.contextWindow` など）に書いた値を
+ * そのまま返してくるだけなので、**申告より長く読めるかもしれない**。
+ * だから 256K までは試す。
+ *
+ * **ほかは信じる。** Ollama は `/api/show`、LM Studio は読み込み済み
+ * モデル、Gemini・Claude は API から取れる**実測に基づく値**である。
+ * 超えて送っても必ず弾かれるので、いちばん大きい1回を捨てるだけになる。
+ */
+const GUESSED_CONTEXT_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
+  "sakura",
+  "openai",
+]);
+
 const CONTEXT_TUNABLE_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
   "sakura",
   "lmstudio",
@@ -305,7 +350,12 @@ async function runMeasurement(
 
   const modelInfo = await registry.resolveModelInfo(feature);
   const declaredTokens = modelInfo?.contextWindow;
-  const ceilingChars = ceilingCharsFor(declaredTokens);
+  // **申告が実測に基づく相手は、そこを超えて試さない**（設計書6.62.1）。
+  // 当て推量なのは、作者が設定に書く さくら・ChatGPT だけである
+  const ceilingChars = ceilingCharsFor(
+    declaredTokens,
+    !GUESSED_CONTEXT_PROVIDERS.has(resolved.provider.id)
+  );
 
   const estimateTokens = estimateProbeTokens(ceilingChars);
   const ok = await confirmPaidUsage(resolved.provider, {
@@ -519,11 +569,27 @@ async function runMeasurement(
               model: resolved.model,
               // 書き写すだけなので、揺らす理由がまったく無い
               temperature: 0,
-              maxOutputTokens: PROBE_OUTPUT_TOKENS,
+              // **見込みであって、上限ではない**（設計書6.77の第2段）。
+              // 128は「合言葉2つ＋前置きが収まる」ための確保であって、
+              // 「そこまでしか書くな」ではない。上限として送ると、前置きの
+              // 長い機種で末尾の合言葉が落ち、**読めていたのに「読めなかった」**
+              // と判定する——下の `PROBE_OUTPUT_TOKENS` のコメントが恐れて
+              // いるのは、まさにこれである
+              plannedOutputTokens: PROBE_OUTPUT_TOKENS,
               // **その回に要るぶんだけ。** 申告値に固定すると、確保した
               // KVキャッシュがVRAMから溢れて黙ってCPUへ落ちる（6.53.2）
               numCtx,
               disableThinking: true,
+              /*
+                **流し受信は使わない**（設計書6.63.1。2026-09-03）。
+
+                測っているのは**配布物が通る道**の性能である。開発ビルドで
+                だけ通る実験の道で測った値を、台帳（`core/modelTuning.ts`）
+                の待ち時間として書くのは筋が通らない。加えて流す道は断片ごとに
+                待ちを数え直すので、時間切れを「入らない」と数えるこの測定の
+                前提（絶対の締め切りがあること）が崩れる。
+              */
+              disableStreaming: true,
               // 作品に属さない呼び出しなので workFolder は付けない
               // （どこかの作品の送信量に混ぜると、その作品の数字が狂う）。
               //
@@ -708,7 +774,7 @@ async function runMeasurement(
   // **数え方を隠さない。** エラーを「入らない」と読み替えた回があるなら、
   // 何回そうしたかを結果に添える（黙って読み替えると、作者は
   // 「全部きれいに測れた」と受け取る）
-  const summary =
+  const inputSummary =
     describeProbeResult({ low, sides, ceilingChars }) +
     (longestResponseSeconds > 0
       ? `いちばん時間がかかった回は ${longestResponseSeconds} 秒でした。`
@@ -727,9 +793,38 @@ async function runMeasurement(
     // 結果は変わるので、これが無いと作者は「なぜこの結果か」を追えない
     describeProbeNumCtx(largestNumCtxUsed);
   logStep(
-    `読める長さの測定を終了: ${rounds}回 / ${summary}` +
+    `読める長さの測定を終了: ${rounds}回 / ${inputSummary}` +
       (cancelled ? "（中止したため、途中までの結果です）" : "")
   );
+
+  /*
+    **続けて「書ける量」を測る**（設計書6.61・6.65.14）。
+
+    手元のAIには出力上限を訊く口が無い（Ollamaの `/api/show` にも
+    LM Studio にもその項目は無い）ので、測るしかない。クラウドは申告値を
+    APIから取れるうえ出力トークンは単価が高いので、**測らないし、
+    測っていないことを黙って混ぜもしない**（何も言わない）。
+
+    読める長さが測れたときだけ続ける。中止・失敗のあとに新しい呼び出しを
+    足すのは、作者の「やめる」に反する。
+
+    **測り終えたら台帳へ保存し、まとめ送信の上限へ繋ぐ**（6.65.14）。
+    「参考値の報告だけ」（6.61）では繋ぎようが無く、「チューニングの意味が
+    ないように思う」という指摘を受けた（作者の指摘、2026-09-03）。
+    詳しくは `measureOutputLimit` の中にある。
+  */
+  const outputSummary =
+    !cancelled && low > 0 && isLocalProvider(resolved.provider.id)
+      ? await measureOutputLimit(
+          resolved.provider,
+          resolved.model,
+          // まとめ送信の上限を導くのに要る、このモデルのコンテキスト長。
+          // 取れないときは、これまでの既定（`ollamaProvider.ts` の
+          // `UNKNOWN_CONTEXT_WINDOW`）と同じ値に倒す
+          declaredTokens ?? FALLBACK_CONTEXT_WINDOW
+        )
+      : "";
+  const summary = inputSummary + outputSummary;
 
   const applied = await offerToSave({
     providerId: resolved.provider.id,
@@ -742,6 +837,312 @@ async function runMeasurement(
   // 反映したなら、戻す相手がもう無い（見立てた秒数で上書きされている）。
   // 反映しなかったときは後始末を残したままにして、外側の `finally` に任せる
   if (applied) cleanup.restoreTimeout = undefined;
+}
+
+/**
+ * **1回の応答でどれだけ書けるか**を測る（設計書6.61・6.65.14）。
+ *
+ * 組み立てと数え方と言葉は `core/outputProbe.ts` にあり、ここは入力側と
+ * 同じく「送る・数える・作者へ見せる」だけを持つ。**測り終えたら、台帳
+ * （`core/modelTuning.ts`）へ実測の出力トークン数を保存し、まとめ送信の
+ * 上限（`features/chunkSettings.ts`）へ繋ぐところまでを持つ**（6.65.14）。
+ *
+ * @returns 結果の一文。測れなかったときは空文字（**入力側の結果には
+ * 触らない**——ここで何が起きても、読める長さの報告は出す）
+ */
+async function measureOutputLimit(
+  provider: AIProvider,
+  model: string,
+  /** まとめ送信の上限を導くのに要る、このモデルのコンテキスト長（設計書6.65.14の2） */
+  contextWindow: number
+): Promise<string> {
+  const maxOutputTokens = resolveMaxOutputTokens();
+  /*
+    頼める行数の上限。
+
+    1行（"0001" ＋ 改行）はおよそ2〜4トークンなので、設定の出力上限を
+    2で割る。**「設定ぶんは頼める」側へ倒している**——3や4で割ると、
+    設定どおり書けるモデルでも頼む前から頭打ちになり、「上限まで書き切った」
+    としか分からない。多めに頼みすぎたぶんは、書き切れずに探索が縮めるだけで
+    済むので、少なく頼むより害が小さい。
+  */
+  const ceilingLines = Math.min(
+    MAX_OUTPUT_LINES,
+    Math.ceil(maxOutputTokens / 2)
+  );
+
+  /** 最後まで書けた最大の行数 */
+  let low = 0;
+  /** その回にAIが実際に使った出力トークン数（応答に付いてくる実数） */
+  let bestTokens: number | undefined;
+  /**
+   * その回にかかった時間（ミリ秒）。**速度の分母**になる。
+   *
+   * `bestTokens` と同じ回のものを持つ——別の回の時間と割ると、
+   * 何を測ったのか分からない数字になる。秒ではなくミリ秒で持つのは、
+   * 速い回が「0秒」に丸まって割れなくなるのを避けるため
+   * （ログに出す秒数は、これまでどおり丸めた値を使う）。
+   */
+  let bestElapsedMs: number | undefined;
+  let rounds = 0;
+  /** 中止・失敗で探索を打ち切ったか */
+  let stopped = false;
+  /**
+   * 時間切れの回が1度でもあったか（設計書6.77の第2段）。
+   *
+   * 時間切れは下で「その量は書けなかった」と数えるので、**遅いだけの
+   * モデルでは、実際には書けるのに小さい実測が出る。** その値を
+   * 実送信のハード上限にすると「測っただけで以後すべての応答が切られる」
+   * ので、台帳へ印を残して上限としては使わせない
+   * （`ai/outputLimit.ts` の `resolveOutputLimitForSend`）。
+   */
+  let timedOut = false;
+
+  logStep(
+    `書ける量の測定を開始: 上限 ${ceilingLines} 行 / ` +
+      `出力上限の設定 ${maxOutputTokens} トークン`
+  );
+
+  await withCancellableProgress(
+    "AIチューニング：1回に書ける量を測っています",
+    async (progress, token) => {
+      const controller = new AbortController();
+      token.onCancellationRequested(() => controller.abort());
+
+      let state: OutputProbeState | undefined =
+        startOutputProbeState(ceilingLines);
+      while (state) {
+        // 回と回の間で押されたときは、次を送らずに抜ける（入力側と同じ）
+        if (token.isCancellationRequested) {
+          stopped = true;
+          return;
+        }
+        const round: OutputProbeState = state;
+        rounds += 1;
+        progress.report({
+          message:
+            `${round.current.toLocaleString("ja-JP")} 行を頼んでいます` +
+            `（${rounds}回目）…`,
+        });
+
+        const sentAt = Date.now();
+        /** その回に頼んだ量を書き切れたか */
+        let completed = false;
+        try {
+          const response = await provider.generate({
+            systemPrompt: OUTPUT_PROBE_SYSTEM_PROMPT,
+            userPrompt: buildOutputProbePrompt(round.current),
+            model,
+            // 番号を数えるだけなので、揺らす理由がまったく無い
+            temperature: 0,
+            // **測っているのがこの上限である。** ここを削ると、
+            // プロバイダの既定値を測ることになる
+            maxOutputTokens,
+            /*
+              **設定値を超えて書けても測定の役には立たない**（設計書6.65.14の4）。
+              普段の生成では出力上限を掛けない方針（`ai/ollamaProvider.ts`）を
+              ここでだけ外す——25分かかった回（設定16,384に対し20,337トークン）
+              が10分以上縮む。見るのは `ai/ollamaProvider.ts` だけでよい。
+            */
+            capOutputTokens: true,
+            /*
+              **`num_ctx` は渡さない。** 入力側は「その回に送る長さ」が
+              測る対象そのものなので計算して渡すが、こちらは送る指示が
+              数行しかない。渡さなければプロバイダが送る長さから決め、
+              作者の指定（6.58）とも揃う。出力の見込みは
+              `maxOutputTokens` のほうで伝わる。
+            */
+            disableThinking: true,
+            /*
+              **流し受信は使わない**（作者の報告「F5でAIチューニングが
+              終わりません」2026-09-03。設計書6.63.1）。
+
+              **この呼び出しが、根治すべき当のものである。** 頼むのは数千行の
+              列挙なので、モデルが繰り返しに崩れて延々と書き続けることがある。
+              流す道は断片が届くたびに待ち時間を数え直すので、**その回は
+              永遠に時間切れにならず、測定そのものが終わらない。**
+
+              下の `catch` は時間切れを「その量は書けない」と数えて探索を
+              進める設計になっており、**絶対の締め切りがあることを前提に
+              している。** 前提を満たす道（`fetchJson`）で送る。
+            */
+            disableStreaming: true,
+            // 作品に属さない呼び出しなので workFolder は付けない。
+            // 機能名は関所側の定数から取る（入力側と同じ理由）
+            meta: { feature: CONTEXT_GUARD_EXEMPT_FEATURE },
+            signal: controller.signal,
+          });
+          const elapsedMs = Date.now() - sentAt;
+          const seconds = elapsedSeconds(sentAt);
+          const written = countOutputLines(response.text);
+          const tokens = response.usage?.outputTokens;
+          completed = written >= round.current;
+          logStep(
+            `書ける量の測定：${round.current}行 → ` +
+              (completed ? "書き切った" : `${written}行で止まった`) +
+              `（${seconds}秒` +
+              (tokens !== undefined ? ` / 出力${tokens}トークン` : "") +
+              "）"
+          );
+          if (completed && round.current > low) {
+            low = round.current;
+            bestTokens = tokens;
+            // **速度も、この回のものを採る**（作者の要望、2026-09-06）。
+            // 時間切れの回は書き切れていないので分子が無く、ここへは来ない
+            bestElapsedMs = elapsedMs;
+          }
+        } catch (error) {
+          const seconds = elapsedSeconds(sentAt);
+          if (error instanceof AIError && error.kind === "aborted") {
+            stopped = true;
+            return;
+          }
+          if (error instanceof AIError && error.kind === "timeout") {
+            // **時間切れも「その量は書けない」である。** 待っても返って
+            // こない長さは、作者にとって書けないのと変わらない。
+            // ここで探索を止めると、書ける量が分からないまま終わる
+            logStep(
+              `書ける量の測定：${round.current}行 → ${seconds}秒で時間切れ。` +
+                "書き切れなかったものとして数えます。"
+            );
+            completed = false;
+            // **数え方を台帳にも残す。** この結果は上限として使わせない
+            timedOut = true;
+          } else {
+            /*
+              **出力の測定だけを打ち切る。** 入力の結果は既に手にあり、
+              こちらの失敗で捨ててよいものではない（作者にとっては
+              「読める長さも測れなかった」に見えてしまう）。
+
+              通知は出さず、ログにだけ残す——測定の主目的は果たせており、
+              ここでエラーを重ねると本来の結果が読み飛ばされる
+              （規則5「エラーの本文を捨てない」ので、ログには必ず残す）。
+            */
+            logFailure("書ける量の測定", {
+              種別: error instanceof AIError ? error.kind : undefined,
+              行数: round.current,
+              詳細: error instanceof AIError ? error.detail : undefined,
+              本文: error instanceof Error ? error.message : String(error),
+            });
+            stopped = true;
+            return;
+          }
+        }
+        state = nextOutputProbeSize(round, completed);
+      }
+    }
+  );
+
+  /*
+    **途中でやめたときに「1行も書けなかった」と言わない。**
+
+    `describeOutputProbeResult` は 0行を「AIの設定か接続の側に原因が
+    ある」と読む。それは**最後まで探索して0行だった**ときの意味であって、
+    中止や別の失敗で測れなかったことを指してはいけない。
+  */
+  if (stopped && low <= 0) {
+    logStep(`書ける量の測定を終了: ${rounds}回 / 測り切れませんでした。`);
+    return "";
+  }
+
+  /*
+    **測り終えたら、台帳へ保存する**（設計書6.65.14の1）。
+
+    6.61では「参考値の報告だけ」で、台帳へは書いていなかった。それでは
+    まとめ送信の上限へ繋ぎようが無く、「チューニングの意味がないように
+    思う」という指摘を受けた（作者の指摘、2026-09-03）。
+
+    **中止・失敗で打ち切ったとき（`stopped`）は書かない。** 途中までの
+    `low` は「そこまでは確かめられた」であって「これが上限」ではないので、
+    古い実測（あれば）のほうが信頼できる。`bestTokens` が無いとき
+    （完走したのに応答が出力トークン数を返さなかった、など）も、
+    保存できる数字が無いので書かない。
+  */
+  let mergeCapMessage = "";
+  /*
+    **速度は、実測を保存する回に必ず書き直す**（作者の要望、2026-09-06）。
+
+    測れなかったとき（応答が出力トークン数を返さない・所要時間が0）は
+    `undefined` になり、その欄が落ちる。**古い速度を残さない**——新しい
+    実測と前回の速度が並ぶと、一覧では「このモデルはこの速さ」と読めて
+    しまう。分からないものは、分からないままにしておく。
+  */
+  const speed = outputTokensPerSecond(bestTokens, bestElapsedMs ?? 0);
+  if (!stopped && bestTokens !== undefined) {
+    try {
+      await saveModelTuning(provider.id, model, {
+        measuredOutputTokens: bestTokens,
+        outputTokensPerSecond: speed,
+        /*
+          **出どころと日時も、速度と一緒に書き直す**（設計書6.65.14）。
+
+          速度は普段のAI呼び出しからも入る（`ai/meteredProvider.ts`）ので、
+          いま台帳にあるのが「普段の呼び出しで採れた推定値」であることが
+          ある。測り直した値へ入れ替えるときは札も入れ替えないと、
+          一覧が古い出どころを指したままになる。
+
+          測れなかったとき（`speed` が undefined）は札も日時も落とす
+          ——速度の無い行に「普段の呼び出し」とだけ残ると読めない
+        */
+        speedSource: speed !== undefined ? "tuning" : undefined,
+        speedMeasuredAt:
+          speed !== undefined ? new Date(Date.now()).toISOString() : undefined,
+        // **時間切れが無かったなら、前の印を消す**（`undefined` を渡すと
+        // その欄だけ落ちる）。測り直して素直に終わったのに、前回の印が
+        // 残って上限が広がらないままになるのを防ぐ
+        outputMeasureTimedOut: timedOut ? true : undefined,
+      });
+      // **保存した直後の台帳を読み直す。** まとめ送信の上限がどう変わったかは
+      // `chunkSettings.ts`（唯一の決め手）に訊かないと分からない——ここで
+      // 独自に計算すると、決め方が2か所に散る（設計書6.58.3と同じ理由）
+      const settings = readChunkSettings(contextWindow, undefined, {
+        providerId: provider.id,
+        model,
+      });
+      mergeCapMessage =
+        settings.mergeCharsBeforeOutputCap !== undefined
+          ? `この結果から、まとめ送信の上限を` +
+            `${settings.mergeChars.toLocaleString("ja-JP")}字にしました。`
+          : `上限はそのまま（${settings.mergeChars.toLocaleString("ja-JP")}字）です。`;
+    } catch (error) {
+      // **書けなくても測定そのものは落とさない**（`raiseTimeout` と同じ方針）。
+      // エラーの本文は捨てない（CLAUDE.md 規則5）
+      logStep(
+        "書ける量の測定：台帳へ保存できませんでした" +
+          `（${error instanceof Error ? error.message : String(error)}）。`
+      );
+    }
+  }
+
+  // **途中で終わったことは、ログだけでなく通知にも出す。** 探索を
+  // 打ち切った値は「そこまでは書けた」であって「ここが上限」ではない
+  const summary =
+    describeOutputProbeResult({
+      lines: low,
+      tokens: bestTokens,
+      reachedCeiling: low >= ceilingLines,
+    }) +
+    (stopped ? "（測定が途中で終わったため、そこまでの結果です）" : "") +
+    // **数え方を隠さない**（入力側で「エラーを入らないと数えた回数」を
+    // 出しているのと同じ）。時間切れ混じりの値は、送る上限には使わない
+    (timedOut
+      ? "途中で時間切れになった回があるため、この値は1回の応答の上限としては" +
+        "使いません（送る量の見立てにだけ使います）。"
+      : "") +
+    // **速度も一緒に見せる**（作者の要望、2026-09-06）。ここで出しておくと、
+    // 一覧を開かなくても「いま測ったモデルが速いのか」がその場で分かる
+    // 途中で終わったときは言わない（そこまでの回の速さであって、
+    // 台帳にも入っていない）
+    (!stopped && speed !== undefined
+      ? `出力の速さは 約 ${speed.toFixed(1)} トークン/秒でした` +
+        "（機械の負荷で変わるので目安です）。"
+      : "") +
+    // **保存できたときは、その結果（まとめ送信の上限）を言う。**
+    // 保存できなかったとき（中止・失敗・台帳への書き込み失敗）は、
+    // これまでどおり「参考値だけ」であることを伝える
+    (mergeCapMessage || "書ける量は今回の参考値で、設定には入れません。");
+  logStep(`書ける量の測定を終了: ${rounds}回 / ${summary}`);
+  return summary;
 }
 
 /**
@@ -794,15 +1195,10 @@ function reportModelLoadFailure(
     triedNumCtx !== undefined
       ? `num_ctx を ${triedNumCtx.toLocaleString("ja-JP")} で試しましたが、`
       : "";
-  void vscode.window
-    .showErrorMessage(
-      `${tried}モデルを読み込めませんでした。より小さいモデルをお試しください。\n` +
-        (error.detail ?? error.message).slice(0, ERROR_EXCERPT_CHARS),
-      "ログを見る"
-    )
-    .then((answer) => {
-      if (answer === "ログを見る") showLog();
-    });
+  void errorWithLog(
+    `${tried}モデルを読み込めませんでした。より小さいモデルをお試しください。\n` +
+      (error.detail ?? error.message).slice(0, ERROR_EXCERPT_CHARS)
+  );
 }
 
 /** 送ってから返るまでの秒数。ログに出すので、秒より細かくしない */
@@ -822,8 +1218,27 @@ function elapsedSeconds(sentAt: number): number {
  * 返したいので、指示と応答の分を含めたまま返すと、上限のあたりで
  * 詰め物が申告値をわずかに超えてしまう。
  */
-function ceilingCharsFor(declaredTokens: number | undefined): number {
-  const tokens = Math.max(declaredTokens ?? 0, MIN_CEILING_TOKENS);
+function ceilingCharsFor(
+  declaredTokens: number | undefined,
+  /**
+   * 申告値を信じてよいか（設計書6.62.1）。
+   *
+   * **申告が実測に基づくなら、それを超えて試さない。** LM Studio は
+   * 読み込み済みモデルの文脈長を返すので、そこを超える長さは**必ず
+   * 弾かれる**——作者のログ（2026-09-01）では、申告 131,072 のモデルへ
+   * 261,770トークン相当を送り、「関所で止まった」で1回を捨てていた。
+   * しかも 6.59 で公称値へ跳ぶようにしたぶん、**捨てるのはいちばん
+   * 大きい回**になる。
+   *
+   * 逆に、さくらの申告値は**作者が設定に書いた当て推量**なので、
+   * そこで止めると「申告以上に読めるか」を永久に確かめられない。
+   * だから信じてよい相手だけを分ける。
+   */
+  trustDeclared: boolean
+): number {
+  const tokens = trustDeclared
+    ? (declaredTokens ?? MIN_CEILING_TOKENS)
+    : Math.max(declaredTokens ?? 0, MIN_CEILING_TOKENS);
   const usableTokens = tokens - PROBE_OUTPUT_TOKENS;
   const chars = Math.floor(usableTokens / TOKENS_PER_CHAR) - probeOverheadChars();
   return Math.max(MIN_PROBE_CHARS, chars);
@@ -914,14 +1329,7 @@ function reportFailure(error: unknown): void {
       詳細: error.detail,
       本文: error.message,
     });
-    void vscode.window
-      .showErrorMessage(
-        `${error.message}\n${recoveryForAIError(error)}`,
-        "ログを見る"
-      )
-      .then((answer) => {
-        if (answer === "ログを見る") showLog();
-      });
+    void errorWithLog(`${error.message}\n${recoveryForAIError(error)}`);
     return;
   }
 

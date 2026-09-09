@@ -1,6 +1,7 @@
 import type { WorldItem } from "../models/world";
 import { Bm25Index } from "./bm25";
 import { describeWorldItem } from "./settingsSummary";
+import { referenceBudgetChars } from "./sizeBudget";
 
 /**
  * 矛盾検知へ渡す世界観を、上限の範囲で選ぶ（設計書6.27.6の「穴2」）。
@@ -47,9 +48,13 @@ const WORLDVIEW_CONTEXT_RATIO = 0.25;
  * **本文と関係の薄い項目から**である（`selectWorldview` の並べ方）。
  */
 export function worldviewMaxChars(contextWindow: number | undefined): number {
-  if (!contextWindow || contextWindow <= 0) return WORLDVIEW_MAX_CHARS;
-  const fromModel = Math.floor(contextWindow * WORLDVIEW_CONTEXT_RATIO * 0.7);
-  return Math.min(WORLDVIEW_MAX_CHARS, fromModel);
+  // 式は `sizeBudget` に寄せ、**比率と頭打ちはここに残す**（設計書6.77）
+  // ——どれだけまわしてよいかは、この用途の判断だから
+  return referenceBudgetChars(
+    contextWindow,
+    WORLDVIEW_CONTEXT_RATIO,
+    WORLDVIEW_MAX_CHARS
+  );
 }
 
 /** 項目と項目の区切り。従来の組み立て（`join("\n\n")`）と同じにする */

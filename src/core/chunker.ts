@@ -1,5 +1,6 @@
 import { hashText } from "./textFile";
 import { blankMemoLines } from "./sceneMemo";
+import { CHARS_PER_TOKEN, TOKENS_PER_CHAR } from "./sizeBudget";
 
 /**
  * チャンクに含まれる話の内訳。
@@ -123,14 +124,13 @@ export interface ChunkOptions {
 }
 
 /**
- * 日本語1文字あたりのトークン数（安全側）。
+ * 字↔トークンの換算。**定義は `core/sizeBudget.ts` にある**（設計書6.77）。
  *
- * **換算はこの1つだけにする。** 以前は `decideChunkSize` が
- * 「0.7字/トークン」を、`decideContextSize` が「1/0.7 トークン/字」を
- * 別々に書いていた。片方だけ直すと、チャンクの大きさと確保する
- * コンテキスト長が別の前提で決まる（設計書6.27.10）。
+ * ここから再exportしているのは、`TOKENS_PER_CHAR` を `chunker` から取って
+ * いる呼び出し側（関所・コンテキストの実測・測定機能）を書き換えずに済ませる
+ * ためである。**新しく書くものは `sizeBudget` から直接取る。**
  */
-export const TOKENS_PER_CHAR = 1 / 0.7;
+export { TOKENS_PER_CHAR };
 
 /**
  * これ以上は小さくしないチャンクの字数。
@@ -143,6 +143,41 @@ export const MIN_CHUNK_CHARS = 1500;
 
 /** チャンクの字数の上限。大きすぎると1回の失敗で失うものが大きい */
 const MAX_CHUNK_CHARS = 20000;
+
+/**
+ * 未チューニング時の、自動モードのチャンク上限（設計書6.65.16の1）。
+ *
+ * 従来の既定は「モデルの申告値を信じて自動的に広げる」で、131kを名乗る
+ * 小型モデルでも初回から20,000字を送っていた。非力なマシンでは
+ * **KVキャッシュが膨れて時間切れの温床**になる（作者の依頼、2026-09-03
+ * 「プロンプト全体と本文が受け入れ可能で、非力なマシンのローカルLLMでも
+ * 動く程度に」）。チューニング台帳に読める量の実測（`measuredChars`）が
+ * 無いモデルだけ、ここで安全側に抑える——プロンプト固定費＋本文6,000字＋
+ * 応答見込みなら num_ctx は1万数千トークンに収まり、8GB級＋4Bモデルでも
+ * 1回1〜3分で回る見込みである。実測すればこの天井が20,000字まで一気に
+ * 広がる（狙いどおり「チューニングで速くなった」が体感できる）。
+ */
+export const UNTUNED_CHUNK_CHARS = 6000;
+
+/**
+ * 自動モードのチャンク字数を、未チューニングなら安全側に抑える
+ * （設計書6.65.16の1）。
+ *
+ * **手動モードはここを通らない。** 作者が字数を指定しているなら、
+ * 未チューニングでもそのまま尊重する——`readChunkSettings` が
+ * 自動モードのときだけこの関数を呼ぶ。
+ *
+ * @param resolvedChars 自動モードで決まった字数（`resolveChunkChars` の結果）
+ * @param measuredReadChars 台帳（`core/modelTuning.ts`）に入っている、
+ *   読める量の実測字数（`ModelTuning.measuredChars`）。無ければ undefined
+ */
+export function capUntunedChunkChars(
+  resolvedChars: number,
+  measuredReadChars: number | undefined
+): number {
+  if (measuredReadChars !== undefined) return resolvedChars;
+  return Math.min(resolvedChars, UNTUNED_CHUNK_CHARS);
+}
 
 /**
  * モデルのコンテキスト長からチャンクサイズを決める。
@@ -158,7 +193,7 @@ const MAX_CHUNK_CHARS = 20000;
 export function decideChunkSize(contextWindow: number): number {
   // 入力本文に割り当てる割合。残りはプロンプト・参照設定・出力に使う
   const usableTokens = Math.floor(contextWindow * 0.35);
-  const chars = Math.floor(usableTokens * 0.7);
+  const chars = Math.floor(usableTokens * CHARS_PER_TOKEN);
   // 極端な値を避けるため上下限を設ける
   return Math.max(MIN_CHUNK_CHARS, Math.min(chars, MAX_CHUNK_CHARS));
 }
@@ -201,7 +236,7 @@ export function planChunkBudget(options: {
   const forBody = options.contextWindow - overheadTokens - options.outputTokens;
   // 見積りは外れることがあるので1割の余裕を持たせる（`contextSizeForPrompt` と同じ）
   const usableTokens = Math.floor(forBody / 1.1);
-  const fits = Math.floor(usableTokens * 0.7);
+  const fits = Math.floor(usableTokens * CHARS_PER_TOKEN);
 
   if (fits >= options.requestedChars) {
     return { chunkChars: options.requestedChars, reason: "requested" };
@@ -298,6 +333,69 @@ export function resolveMergeChars(options: {
 }
 
 /**
+ * 応答率＝**入力1字あたり、応答が何トークンになるか**（設計書6.65.14の2）。
+ *
+ * 20,000字の抽出から6,000トークン級のJSONが返る実測感覚を、初期値
+ * 0.3として置いた。**字とトークンをまたぐ換算はここに含まない**——
+ * `TOKENS_PER_CHAR`（入力側の字→トークン換算）とは別物であり、
+ * 混ぜて使うと二重に換算してしまう。**経験則の初期値**なので、
+ * 実測が積み上がったら見直す——書ける量の測定を「参考値の報告だけ」
+ * （6.61）から台帳への保存へ進める際、この比率が未検証のまま黙って
+ * 設定を変えると、まとめ送信が急に縮んで「なぜか遅くなった」が起きる
+ * ため、二段構えにした。この定数を分けたのが、まさにその二段目である。
+ */
+export const OUTPUT_RESPONSE_RATIO = 0.3;
+
+/**
+ * 応答率の見積もりが外れても、なお余裕を持たせるための掛け目。
+ *
+ * 根拠が実測1件しか無い比率（`OUTPUT_RESPONSE_RATIO`）を、そのまま
+ * 上限へ使わない。多めに削っておけば、比率が外れていた場合の害は
+ * 「まとめ送信が少し細かくなる」で済む（呼び出し回数が増えるだけで、
+ * 応答が切れて丸ごと捨てられるよりずっと軽い）。
+ */
+export const OUTPUT_SAFETY_MARGIN = 0.8;
+
+/**
+ * 書ける量（実測の出力トークン数）から、まとめ送信の上限をさらに絞る
+ * （設計書6.65.14の2）。
+ *
+ * `min(従来の上限, 書ける量トークン × 安全率0.8 ÷ 応答率0.3)`。
+ * **字とトークンをまたぐ換算（`TOKENS_PER_CHAR`）はこの式に含まない**
+ * ——応答率0.3が「入力1字あたり応答0.3トークン」という定義そのもの
+ * なので、そこへさらに字/トークンの換算を掛けると二重に換算してしまう。
+ *
+ * まとめ送信でこの字数を超えて詰めても、応答が出力上限で切れて
+ * **そのまとめ全体が解析できずに捨てられる**だけである。台帳に実測が
+ * 無いモデルでは、これまでどおり `mergeChars` をそのまま返す
+ * （測っていないモデルの挙動は変えない）。
+ *
+ * **`mergeChars <= 0` は絞らない。** 0は「まとめない」という設定の意味を
+ * 持つ特別な値であって、上限の字数ではない。
+ *
+ * @param mergeChars 絞る前の、まとめ送信の上限（字）
+ * @param measuredOutputTokens 台帳（`core/modelTuning.ts`）に入っている
+ *   実測の出力トークン数。無ければ undefined
+ */
+export function capMergeCharsByOutputTokens(
+  mergeChars: number,
+  measuredOutputTokens: number | undefined
+): number {
+  if (mergeChars <= 0) return mergeChars;
+  if (
+    measuredOutputTokens === undefined ||
+    !Number.isFinite(measuredOutputTokens) ||
+    measuredOutputTokens <= 0
+  ) {
+    return mergeChars;
+  }
+  const cap = Math.floor(
+    (measuredOutputTokens * OUTPUT_SAFETY_MARGIN) / OUTPUT_RESPONSE_RATIO
+  );
+  return Math.min(mergeChars, cap);
+}
+
+/**
  * 実際に送るプロンプトから、確保するコンテキスト長を決める。
  *
  * **本来は呼び出し側が `numCtx` を渡すべきで、これはその受け皿である。**
@@ -371,6 +469,17 @@ const DEFAULT_OPTIONS: ChunkOptions = {
  * AIに「何行目」を言わせ、その値で本文の位置を決めるので、行が減ると
  * **別の行を書き換える**ことになる。行数が変わらなければ `startLine` も
  * 指摘の行番号も、元の本文と一致したままである。
+ *
+ * ## 中身の無い本文からは、チャンクを1つも作らない
+ *
+ * 送っても何も指摘できないものを送っても、呼び出しが1回無駄になるだけである。
+ * それだけなら実害は小さいが、**空のチャンクは行番号の対応を壊す**
+ * ——まとめたとき（`mergeAdjacentChunks`）に区切りが入らず、内訳の開始位置が
+ * 前の内訳と重なって、指摘が別のファイルの行だと判定される。
+ *
+ * 空になる道は「メモ行だけで末尾に改行が無い話」（ここで全部消える）と
+ * 「0バイトの話ファイル」の2つ。呼び出し側には `.trim()` の関所がある機能と
+ * 無い機能があるので、**通り道であるここで塞ぐ。**
  */
 export function splitIntoChunks(
   filePath: string,
@@ -384,6 +493,9 @@ export function splitIntoChunks(
     throw new Error("maxChars は1以上の整数にしてください。");
   }
   const normalized = blankMemoLines(text.replace(/\r\n?/g, "\n"));
+  // **空白しか残らなかったら、1つも返さない。** 中身の無いチャンクは
+  // AIへ送っても何も返らないうえ、まとめたときに位置の対応を壊す
+  if (!normalized.trim()) return [];
 
   const wholeSegment = (text: string, startLine: number): ChunkSegment[] => [
     { filePath, chapterStart, chapterEnd, start: 0, end: text.length, startLine },
@@ -477,6 +589,16 @@ export function mergeAdjacentChunks(
   };
 
   for (const chunk of chunks) {
+    // **本文が空のチャンクは、束に入れずに捨てる。** 空の本文からは何も
+    // 抽出・指摘できないので、送っても失うものが無い。一方、束に入れると
+    // `joinChunks` が区切りを入れられず（入れる判断を「ここまでの本文が
+    // あるか」で決めている）、**内訳の開始位置が前の内訳と重なる**
+    // ——`locateChunkLine` は前から見るので、指摘が空のほうのファイルの
+    // 行だと判定され、行番号を戻せずに黙って捨てられる。
+    //
+    // **`flush()` はしない。** ここで束を切ると、空の話が1つ挟まっただけで
+    // 前後がまとまらなくなる（合本ではそれが何度も起きる）。素通しにする
+    if (chunk.text.trim() === "") continue;
     // 分割された断片は、そのファイルだけで完結させる
     if (!isWholeFile(chunk)) {
       flush();

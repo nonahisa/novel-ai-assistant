@@ -6,6 +6,7 @@ import {
   AIError,
   isFatalProviderFailure,
   recoveryForAIError,
+  type ModelInfo,
 } from "../ai/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
@@ -14,14 +15,20 @@ import {
   withLineNumbers,
   mergeAdjacentChunks,
   splitMergedChunk,
-  locateChunkLine,
   type Chunk,
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
-import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
+import {
+  describeChunkSettings,
+  readChunkSettings,
+  resolveModelInfoOrWarn,
+} from "./chunkSettings";
 import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
-import { OUTPUT_RESERVE_TOKENS } from "../ai/contextGuard";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { blankMemoLines } from "../core/sceneMemo";
 import type { KeepWord } from "../models/keepWord";
 import {
@@ -32,14 +39,24 @@ import {
   PROOFREAD_VERSION,
 } from "../prompts/proofread";
 import {
+  locateProofreadIssue,
   parseProofreadResult,
   sortProofreadIssues,
   validateProofreadIssues,
   type AcceptedProofreadIssue,
 } from "../core/proofreadValidation";
-import { withCancellableProgress, type CheckProgress } from "../views/progress";
+import { type CheckProgress } from "../views/progress";
+import type { SuiteAwareOptions } from "../core/proofreadingSuite";
+import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
-import { logFailure, logStep, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  useLogFile,
+} from "../core/logger";
+// 落とした理由の内訳は、通知ではなく操作ログへ残す（設計書6.8）
+import { summarizeReasons } from "../core/checkRunCounts";
 import { KeepWordStore } from "../core/keepWordStore";
 import {
   buildStyleNote,
@@ -73,11 +90,27 @@ export interface ProofreadRunResult {
   rejectedCount: number;
   /** 上限で切ったぶん（作者へ「絞りました」と伝えるため） */
   overBudgetCount: number;
+  /**
+   * 語尾単調で、数え直したら4連続に届かなかったぶん（作者の報告、2026-09-04）。
+   *
+   * **黙って捨てない。** AIが数え違えているという事実は、この機能の
+   * 当たり具合を測るときの手掛かりになる
+   */
+  monotonyDroppedCount: number;
+  /**
+   * 語尾単調で、**同じ連続を指していたのでまとめたぶん**
+   * （作者の報告、2026-09-05）。
+   *
+   * AIは同じ並びを別々の指摘として何枚も返してくる。錨をコードの数えた
+   * 連続へ付け替えると重なりが見えるので、1枚に畳む。
+   * **黙って減らさない**——作者には「同じ場所の話が何件あったか」を伝える
+   */
+  monotonyMergedCount: number;
   failedChunks: number;
   cancelled: boolean;
 }
 
-export interface CheckProofreadOptions {
+export interface CheckProofreadOptions extends SuiteAwareOptions {
   /** 話を絞る。指定しなければ作品全体 */
   filePaths?: string[];
   /**
@@ -97,7 +130,34 @@ export async function checkProofread(
   const resolved = await ensureConfigured(registry, "proofread");
   if (!resolved) return undefined;
 
-  const prepared = await collectChunks(work, registry, options);
+  // **モデル情報はここで1回だけ引く**（設計書6.27.10）。以前はチャンクを
+  // 作る側が引き、取れないときは黙って `?? 8192` へ落ちていた——131,072の
+  // モデルでもチャンクが1,500字になり、キャッシュが全滅して呼び出し回数が
+  // 十数倍になる。作者には「急に遅くなった」としか見えない
+  const info = await resolveModelInfoOrWarn({
+    registry,
+    feature: "proofread",
+    provider: resolved.provider,
+    model: resolved.model,
+    actionLabel: "推敲",
+  });
+  if (!info) return undefined;
+
+  // **応答の見込みに実測を使う**（設計書6.65.16の2）
+  const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model
+  );
+  // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
+  // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
+  // 半分になり、長い応答が途中で切れる
+  const sendOutputTokens = resolveOutputTokensForSend(
+    outputTuning.providerId,
+    outputTuning.model
+  );
+
+  const prepared = await collectChunks(work, info, options, outputTuning);
   if (!prepared) return undefined;
   const { chunks, narrativeStyle, keepWords, styleNote } = prepared;
   if (chunks.length === 0) {
@@ -127,35 +187,41 @@ export async function checkProofread(
       (sum, chunk) => sum + issueBudget(chunk.text.length),
       0
     );
-    const confirm = await vscode.window.showInformationMessage(
-      `${work.title} の推敲を行います。`,
-      {
-        modal: true,
-        detail: [
-          `${chunks.length}チャンク中 ${pending.length}件を処理します` +
-            `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
-          // **まとめ方を変えると、キャッシュが総入れ替えになる。** 何も
-          // 変えていないのに全件が対象になると、作者は不具合だと思う
-          pending.length === chunks.length && chunks.length > 1
-            ? "（前回から本文の分け方が変わっているため、今回はすべて送り直します）"
-            : "",
-          "",
-          "見るのは6つだけです（冗長・同語反復・係り受け・長すぎる文・" +
-            "読みに詰まる漢字・語尾の単調さ）。",
-          "語彙や文体、描写の増減には触れません。",
-          `指摘は多くても ${maxIssues}件までに絞ります（1000字あたり3件）。`,
-          "",
-          "本文は書き換えません。 指摘を1件ずつ確認して適用します。",
-          resolved.provider.isPaid
-            ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      },
-      "実行"
-    );
-    if (confirm !== "実行") return undefined;
+    const detail = [
+      `${chunks.length}チャンク中 ${pending.length}件を処理します` +
+        `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
+      // **まとめ方を変えると、キャッシュが総入れ替えになる。** 何も
+      // 変えていないのに全件が対象になると、作者は不具合だと思う
+      pending.length === chunks.length && chunks.length > 1
+        ? "（前回から本文の分け方が変わっているため、今回はすべて送り直します）"
+        : "",
+      "",
+      "見るのは6つだけです（冗長・同語反復・係り受け・長すぎる文・" +
+        "読みに詰まる漢字・語尾の単調さ）。",
+      "語彙や文体、描写の増減には触れません。",
+      `指摘は多くても ${maxIssues}件までに絞ります（1000字あたり3件）。`,
+      "",
+      "本文は書き換えません。 指摘を1件ずつ確認して適用します。",
+      resolved.provider.isPaid
+        ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    if (options.suiteConfirmed) {
+      // まとめ実行が先に1回だけ確認している（設計書6.80）。
+      // **飛ばした中身はログへ残す**——絞り込みの上限や課金の断りは、
+      // この確認の中にしか書かれていない
+      logStep(`推敲：まとめ実行のため確認を省略\n${detail}`);
+    } else {
+      const confirm = await vscode.window.showInformationMessage(
+        `${work.title} の推敲を行います。`,
+        { modal: true, detail },
+        "実行"
+      );
+      if (confirm !== "実行") return undefined;
+    }
   }
 
   logStep(
@@ -168,179 +234,265 @@ export async function checkProofread(
 
   const issues: ProofreadIssue[] = [];
   let rejectedCount = 0;
+  /**
+   * 検証で落とした理由。**最後にまとめて操作ログへ出す**（設計書6.8）。
+   * チャンクごとに出すと、19話ぶんで同じ行がログを埋める
+   */
+  const rejectedReasons: string[] = [];
   let overBudgetCount = 0;
+  let monotonyDroppedCount = 0;
+  let monotonyMergedCount = 0;
   let failedChunks = 0;
   let cancelled = false;
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
   let fatalFailure = "";
+  /**
+   * 何チャンクまでAIへ送ったか。**最後に「推敲を終了」の1行を残すのに要る**
+   * （誤字脱字・矛盾と同じ形。`test/unit/checkEndLog.test.ts`）。
+   *
+   * **数えるのは送ったものだけである**（作者の指摘、2026-09-06）。
+   * キャッシュ命中まで分母に入れると、実際には1件しか動かない実行が
+   * 「1/7」のまま止まったように見える。分母は分け直しで増えるので、
+   * `pending.length` とは別に持つ。
+   */
+  let chunksDone = 0;
+  let chunksTotal = pending.length;
+  /** 処理済みで飛ばした数。分母が小さくなっている断りとして画面へ添える */
+  const skippedChunks = chunks.length - pending.length;
 
-  await withCancellableProgress("推敲しています", async (progress, token) => {
-    const controller = new AbortController();
-    token.onCancellationRequested(() => {
-      cancelled = true;
-      controller.abort();
-    });
-
-    let done = 0;
-    // **切り詰められたら、まとめたぶんを話ごとに戻して試し直す。**
-    // まとめると出力も増えるので、上限に当たる見込みが上がる。
-    // 処理中に足すので、`for...of` ではなく番号で回す
-    const queue = [...chunks];
-    let total = chunks.length;
-    for (let cursor = 0; cursor < queue.length; cursor++) {
-      const chunk = queue[cursor];
-      if (token.isCancellationRequested) break;
-      if (fatalFailure) break;
-
-      const cached = cache.get(chunk.hash, cacheKeyBase);
-      let raw: unknown | undefined;
-      if (cached !== undefined) {
-        raw = cached;
-      } else {
-        const asked = await ask(chunk);
-        if (asked.ok) {
-          raw = asked.value;
-        } else if (asked.overflow) {
-          // 上限に入らなかった。まとめたぶんを戻す→半分に割る→諦める
-          const retry = retryOnOverflow(chunk, asked.overflow);
-          if (retry.kind === "split") {
-            queue.splice(cursor + 1, 0, ...retry.parts);
-            total += retry.parts.length;
-            logStep(`${chunk.hash}: ${retry.note}`);
-          } else {
-            // **黙って飛ばさない。** 理由を残して次のチャンクへ進む
-            failedChunks++;
-            logFailure("推敲", { チャンク: chunk.hash, 理由: retry.note });
-          }
-        } else if (asked.truncated) {
-          const parts = splitMergedChunk(chunk);
-          if (parts.length > 1) {
-            queue.splice(cursor + 1, 0, ...parts);
-            total += parts.length;
-          }
-        }
-      }
-      done++;
-      progress.report({
-        message: `${done}/${total}`,
-        increment: 100 / total,
+  // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）。
+  // 関所（送信を1件ずつ）だけだと、機能どうしが交互に流れて
+  // モデルの読み込み直しが往復する
+  await withAiTurnProgress(
+    "推敲しています",
+    { label: "推敲", onCancelled: () => (cancelled = true) },
+    async (progress, token) => {
+      const controller = new AbortController();
+      token.onCancellationRequested(() => {
+        cancelled = true;
+        controller.abort();
       });
-      // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-      options.onProgress?.(done, total);
-      if (raw === undefined) continue;
 
-      const validated = validateProofreadIssues(raw, chunk, keepWords);
-      rejectedCount += validated.rejected.length;
-      overBudgetCount += validated.rejected.filter(
-        (entry) => entry.reason === "over_budget"
-      ).length;
-      for (const issue of validated.accepted) {
-        // **どのファイルの何行目かを、ここで確定させる。** まとめたチャンクでは
-        // AIが返す行番号がまとめた本文の通し番号になっており、そのまま使うと
-        // 別の話のファイルの、まったく違う行を書き換える
-        const at = locateChunkLine(chunk, issue.line);
-        if (!at) {
-          rejectedCount++;
-          continue;
+      // **切り詰められたら、まとめたぶんを話ごとに戻して試し直す。**
+      // まとめると出力も増えるので、上限に当たる見込みが上がる。
+      // 処理中に足すので、`for...of` ではなく番号で回す
+      const queue = [...chunks];
+      for (let cursor = 0; cursor < queue.length; cursor++) {
+        const chunk = queue[cursor];
+        if (token.isCancellationRequested) break;
+        if (fatalFailure) break;
+
+        const cached = cache.get(chunk.hash, cacheKeyBase);
+        let raw: unknown | undefined;
+        if (cached !== undefined) {
+          raw = cached;
+        } else {
+          const asked = await ask(chunk);
+          if (asked.ok) {
+            raw = asked.value;
+          } else if (asked.overflow) {
+            // 上限に入らなかった。まとめたぶんを戻す→半分に割る→諦める
+            const retry = retryOnOverflow(chunk, asked.overflow);
+            if (retry.kind === "split") {
+              queue.splice(cursor + 1, 0, ...retry.parts);
+              chunksTotal += retry.parts.length;
+              logStep(`${chunk.hash}: ${retry.note}`);
+            } else {
+              // **黙って飛ばさない。** 理由を残して次のチャンクへ進む
+              failedChunks++;
+              logFailure("推敲", { チャンク: chunk.hash, 理由: retry.note });
+            }
+          } else if (asked.truncated) {
+            const parts = splitMergedChunk(chunk);
+            if (parts.length > 1) {
+              queue.splice(cursor + 1, 0, ...parts);
+              chunksTotal += parts.length;
+            }
+          }
         }
-        issues.push({
-          ...issue,
-          line: at.line,
-          filePath: at.filePath,
-          chunkHash: chunk.hash,
-        });
+        // **キャッシュ命中は数えない。** 進みが一気に飛んで待ち時間が
+        // 読めなくなるうえ、分子が分母（送る件数）を超える
+        if (cached === undefined) {
+          chunksDone++;
+          progress.report({
+            message: `${chunksDone}/${chunksTotal}`,
+            increment: 100 / Math.max(chunksTotal, 1),
+          });
+          // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+          options.onProgress?.(chunksDone, chunksTotal, skippedChunks);
+        }
+        if (raw === undefined) continue;
+
+        const validated = validateProofreadIssues(raw, chunk, keepWords);
+        rejectedCount += validated.rejected.length;
+        // **落とした理由を残す**（設計書6.8）。総数だけでは、指摘が少ないのが
+        // 「本当に無い」のか「検証で消しすぎ」なのか切り分けられない
+        rejectedReasons.push(...validated.rejected.map((entry) => entry.reason));
+        overBudgetCount += validated.rejected.filter(
+          (entry) => entry.reason === "over_budget"
+        ).length;
+        monotonyDroppedCount += validated.rejected.filter(
+          (entry) => entry.reason === "not_monotonous"
+        ).length;
+        monotonyMergedCount += validated.rejected.filter(
+          (entry) => entry.reason === "monotony_duplicate"
+        ).length;
+        for (const issue of validated.accepted) {
+          // **どのファイルの何行目かを、ここで確定させる。** まとめたチャンクでは
+          // AIが返す行番号がまとめた本文の通し番号になっており、そのまま使うと
+          // 別の話のファイルの、まったく違う行を書き換える。
+          // 語尾単調の説明文（行範囲が入る）も、ここで組み上がる
+          const located = locateProofreadIssue(chunk, issue);
+          if (!located) {
+            // **どの行だったかを残す**（設計書6.8）。まとめ方を疑うときの
+            // 唯一の手掛かりになる
+            logStep(`推敲：行番号 ${issue.line} を元のファイルへ戻せず除外`);
+            rejectedCount++;
+            continue;
+          }
+          issues.push({ ...located, chunkHash: chunk.hash });
+        }
       }
-    }
 
-    /**
-     * 応答。切り詰められたとき、または**上限に入らなかったとき**だけ、
-     * 小さくして試し直す（設計書6.27.10）
-     */
-    type AskResult =
-      | { ok: true; value: unknown }
-      | { ok: false; truncated: boolean; overflow?: AIError };
+      /**
+       * 応答。切り詰められたとき、または**上限に入らなかったとき**だけ、
+       * 小さくして試し直す（設計書6.27.10）
+       */
+      type AskResult =
+        | { ok: true; value: unknown }
+        | { ok: false; truncated: boolean; overflow?: AIError };
 
-    async function ask(chunk: Chunk): Promise<AskResult> {
-      try {
-        const bodyWithLines = withLineNumbers(chunk);
-        const userPrompt = buildProofreadPrompt({
-          chunkTextWithLineNumbers: bodyWithLines,
-          narrativeStyle,
-          styleNote,
-          maxIssues: issueBudget(chunk.text.length),
-        });
+      async function ask(chunk: Chunk): Promise<AskResult> {
+        try {
+          const bodyWithLines = withLineNumbers(chunk);
+          const userPrompt = buildProofreadPrompt({
+            chunkTextWithLineNumbers: bodyWithLines,
+            narrativeStyle,
+            styleNote,
+            maxIssues: issueBudget(chunk.text.length),
+          });
 
-        const response = await provider.generate({
-          systemPrompt: PROOFREAD_SYSTEM_PROMPT,
-          userPrompt,
-          model,
-          // 言い回しの提案なので、事実の突き合わせより少しだけ揺らす
-          temperature: 0.2,
-          jsonSchema: PROOFREAD_SCHEMA as unknown as object,
-          disableThinking: true,
-          signal: controller.signal,
-          meta: {
-            feature: "proofread",
-            workFolder: work.folderPath,
-            parts: measureParts(userPrompt, {
-              本文: bodyWithLines.length,
-              作法: styleNote.length,
-            }),
-          },
-        });
+          const response = await provider.generate({
+            systemPrompt: PROOFREAD_SYSTEM_PROMPT,
+            userPrompt,
+            model,
+            // 言い回しの提案なので、事実の突き合わせより少しだけ揺らす
+            temperature: 0.2,
+            maxOutputTokens: sendOutputTokens,
+            plannedOutputTokens,
+            jsonSchema: PROOFREAD_SCHEMA as unknown as object,
+            disableThinking: true,
+            signal: controller.signal,
+            meta: {
+              feature: "proofread",
+              workFolder: work.folderPath,
+              parts: measureParts(userPrompt, {
+                本文: bodyWithLines.length,
+                作法: styleNote.length,
+              }),
+            },
+          });
 
-        const parsed = parseProofreadResult(response.text);
-        if (!parsed) {
-          // **切り詰められたのなら、まとめたせいかもしれない。**
-          // 話ごとに戻せば通る見込みがある（捨てるより試すほうがよい）
-          if (!response.truncated) failedChunks++;
+          const parsed = parseProofreadResult(response.text);
+          if (!parsed) {
+            // **切り詰められたのなら、まとめたせいかもしれない。**
+            // 話ごとに戻せば通る見込みがある（捨てるより試すほうがよい）
+            if (!response.truncated) failedChunks++;
+            logFailure("推敲", {
+              チャンク: chunk.hash,
+              理由: response.truncated
+                ? "応答が上限で切り詰められました"
+                : "応答を読み取れません",
+              応答: responseExcerptForLog(response.text),
+            });
+            return { ok: false, truncated: response.truncated === true };
+          }
+          await cache.set(chunk.hash, cacheKeyBase, parsed);
+          return { ok: true, value: parsed };
+        } catch (error) {
+          if (error instanceof AIError && error.kind === "aborted") {
+            return { ok: false, truncated: false };
+          }
+          // **入らなかったときは、失敗として数える前に分け直しへ回す**。
+          // そのまま数えると、そのチャンクは一度も推敲されないまま終わる
+          if (isContextOverflow(error)) {
+            return { ok: false, truncated: false, overflow: error };
+          }
+          // **同じ失敗を積まない。** 環境側の失敗はどのチャンクでも同じに
+          // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
+          if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
+            fatalFailure = `${error.message} ${recoveryForAIError(error)}`.trim();
+            logStep(`残りのチャンクは試しません: ${fatalFailure}`);
+          }
+          failedChunks++;
           logFailure("推敲", {
             チャンク: chunk.hash,
-            理由: response.truncated
-              ? "応答が上限で切り詰められました"
-              : "応答を読み取れません",
-            応答: response.text.slice(0, 300),
+            詳細:
+              error instanceof AIError
+                ? `${error.message} ${recoveryForAIError(error)}`
+                : error instanceof Error
+                  ? error.message
+                  : String(error),
           });
-          return { ok: false, truncated: response.truncated === true };
-        }
-        await cache.set(chunk.hash, cacheKeyBase, parsed);
-        return { ok: true, value: parsed };
-      } catch (error) {
-        if (error instanceof AIError && error.kind === "aborted") {
           return { ok: false, truncated: false };
         }
-        // **入らなかったときは、失敗として数える前に分け直しへ回す**。
-        // そのまま数えると、そのチャンクは一度も推敲されないまま終わる
-        if (isContextOverflow(error)) {
-          return { ok: false, truncated: false, overflow: error };
-        }
-        // **同じ失敗を積まない。** 環境側の失敗はどのチャンクでも同じに
-        // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
-        if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
-          fatalFailure = `${error.message} ${recoveryForAIError(error)}`.trim();
-          logStep(`残りのチャンクは試しません: ${fatalFailure}`);
-        }
-        failedChunks++;
-        logFailure("推敲", {
-          チャンク: chunk.hash,
-          詳細:
-            error instanceof AIError
-              ? `${error.message} ${recoveryForAIError(error)}`
-              : error instanceof Error
-                ? error.message
-                : String(error),
-        });
-        return { ok: false, truncated: false };
       }
     }
-  });
+  );
 
   await cache.save();
 
+  if (rejectedReasons.length > 0) {
+    // 種別の名前をそのまま出す（`core/proofreadValidation.ts` の
+    // `RejectedProofreadIssue` に、それぞれの意味が書いてある）
+    logStep(
+      `推敲：検証で除外 ${rejectedReasons.length}件` +
+        `（${summarizeReasons(rejectedReasons)}）`
+    );
+  }
+  if (monotonyDroppedCount > 0) {
+    // **どれだけ数え違えていたかを残す。** この観点は実モデルでの当たり具合を
+    // まだ測れていないので、記録が測る手掛かりになる
+    logStep(
+      `語尾単調：数え直して4連続未満だったため${monotonyDroppedCount}件除外`
+    );
+  }
+  if (monotonyMergedCount > 0) {
+    logStep(`語尾単調：同じ連続の重複${monotonyMergedCount}件をまとめた`);
+  }
+
+  const accepted = sortProofreadIssues(issues) as ProofreadIssue[];
+
+  /*
+    **開始したら、必ず終了の1行を残す**（実機確認 2026-09-06）。
+
+    これまでは「推敲を開始」のあと、検証の取り下げ行で途切れていた。
+    操作ログだけを見ると、終わったのか途中で落ちたのかが分からず、
+    完走しているのに作者が待ち続けた。誤字脱字・矛盾と同じ形にそろえる。
+
+    中止・打ち切りでもここへ来る——`withAiTurnProgress` は札を取れなければ
+    本体を走らせずに戻り、ループの `break` も関数の外へは抜けないため、
+    どの経路でも「そこまで何チャンク見たか」が残る。
+  */
+  logStep(
+    `推敲を終了: ${chunksDone}/${chunksTotal}` +
+      `（失敗 ${failedChunks}件 / 指摘 ${accepted.length}件` +
+      ` / 検証で除外 ${rejectedCount}件` +
+      (skippedChunks > 0 ? ` / 処理済み ${skippedChunks}件はスキップ` : "") +
+      (chunksTotal > pending.length
+        ? ` / 入り切らず ${chunksTotal - pending.length}回に分けた`
+        : "") +
+      (cancelled ? " / 中止された" : "") +
+      (fatalFailure ? " / 途中で打ち切った" : "") +
+      "）"
+  );
+
   return {
-    issues: sortProofreadIssues(issues) as ProofreadIssue[],
+    issues: accepted,
     rejectedCount,
     overBudgetCount,
+    monotonyDroppedCount,
+    monotonyMergedCount,
     failedChunks,
     cancelled,
   };
@@ -357,8 +509,11 @@ export async function checkProofread(
  */
 async function collectChunks(
   work: WorkEntry,
-  registry: AIRegistry,
-  options: CheckProofreadOptions
+  /** 呼び出し側が引いたモデル情報。**ここでは引き直さない**（1回だけ引く） */
+  info: ModelInfo,
+  options: CheckProofreadOptions,
+  /** 未チューニングの安全既定・書ける量の絞り込み用（設計書6.65.16） */
+  outputTuning: { providerId: string; model: string }
 ): Promise<
   | {
       chunks: Chunk[];
@@ -435,13 +590,19 @@ async function collectChunks(
       maxIssues: 0,
     }).length;
 
-  const info = await registry.resolveModelInfo("proofread");
   // **設定を見るようにした**（設計書6.23）。以前はここだけ設定を無視して
   // いつも自動で決めており、作者が字数を指定しても効かなかった
-  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192, {
-    overheadChars,
-    outputTokens: OUTPUT_RESERVE_TOKENS,
-  });
+  const chunkSettings = readChunkSettings(
+    info.contextWindow,
+    {
+      overheadChars,
+      outputTokens: resolveOutputTokensForPlanning(
+        outputTuning.providerId,
+        outputTuning.model
+      ),
+    },
+    outputTuning
+  );
   const maxChars = chunkSettings.chunk.chars;
 
   const chunks: Chunk[] = [];

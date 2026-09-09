@@ -36,8 +36,16 @@ import { formatLogTime, redactSecrets } from "./logger";
  * 置き場所は `.aiwriter/logs/usage.md`。**Git除外済み**（5.5節）。
  */
 
-/** 1ファイルの上限。超えたら古いほうから捨て、直近が読めることを優先する */
-const MAX_LOG_BYTES = 2_000_000;
+/**
+ * 呼び出し量の表1ファイルの上限。超えたら古いほうから捨て、直近が読めることを優先する。
+ *
+ * **ログのバイト上限は3つある。値も違う**（設計書6.77の第2段で名前だけ揃えた）。
+ * `logger.ts` の `MAX_ACTION_LOG_BYTES`（動作の記録）と
+ * `chatLog.ts` の `MAX_CHAT_LOG_BYTES`（相談の記録）がそれで、
+ * **用途が違うので値も違う**——寄せない。ここは1行が短い代わりに、
+ * 抽出1回で39行が一度に並ぶ。比べるには過去のぶんが要るので広く取る。
+ */
+const MAX_USAGE_LOG_BYTES = 2_000_000;
 
 export interface UsageLogEntry {
   /** どの機能の呼び出しか。`chunkCache` の feature 名と揃える */
@@ -145,7 +153,7 @@ export function appendUsageLog(workFolder: string, entry: UsageLogEntry): void {
       // 上限を超えたら、見出しを作り直して直近のぶんだけ残す。
       // 途中で切ると表の途中から始まって読めなくなる
       const merged =
-        existing.byteLength + addition.byteLength > MAX_LOG_BYTES
+        existing.byteLength + addition.byteLength > MAX_USAGE_LOG_BYTES
           ? new Uint8Array([
               ...new TextEncoder().encode(usageLogHeader(workFolder)),
               ...addition,

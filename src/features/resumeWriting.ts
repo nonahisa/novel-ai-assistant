@@ -106,7 +106,30 @@ export async function resumeWriting(
  * **既にあるものは上書きしない。** 書きかけのプロットを雛形で潰しては、
  * この機能の目的そのものを裏切ることになる。
  */
-export async function createEpisodePlot(work: WorkEntry): Promise<void> {
+export async function createEpisodePlot(
+  work: WorkEntry,
+  /**
+   * どの話か。**決まっているなら訊かない**——プロットモードの一覧
+   * （設計書6.4.8）は行ごとに押すので、そこから何話かをもう一度
+   * 選ばせるのは同じことを2度聞くことになる。
+   */
+  chapter?: number,
+  /**
+   * どこへ開くか。プロットモード（6.4.8）は**左の面へ**出す
+   * ——押したのはパネル（右）なので、既定のままだとパネルの上に重なる。
+   */
+  showOptions?: vscode.TextDocumentShowOptions
+): Promise<void> {
+  const picked =
+    chapter === undefined ? await pickEpisodeChapter(work) : chapter;
+  if (picked === undefined) return;
+  await createEpisodePlotFile(work, picked, showOptions);
+}
+
+/** どの話の単話プロットを作るかを選ばせる。選ばれなければ undefined */
+async function pickEpisodeChapter(
+  work: WorkEntry
+): Promise<number | undefined> {
   const { episodes } = await scanWork(work);
   const format = await readWorkFormat(work);
 
@@ -147,19 +170,32 @@ export async function createEpisodePlot(work: WorkEntry): Promise<void> {
       ignoreFocusOut: true,
     }
   );
-  if (!picked || isCancelItem(picked) || !("chapter" in picked)) return;
+  if (!picked || isCancelItem(picked) || !("chapter" in picked)) return undefined;
+  return picked.chapter;
+}
 
+/**
+ * 雛形を作って開く。**既にあるものは上書きしない**（設計書6.36.2）。
+ *
+ * 選ぶところと分けてあるのは、プロットモードの一覧（6.4.8）が
+ * 話数を決めたうえで呼ぶためである。**書き込みの道は1本のまま**。
+ */
+async function createEpisodePlotFile(
+  work: WorkEntry,
+  chapter: number,
+  showOptions?: vscode.TextDocumentShowOptions
+): Promise<void> {
   const config = await readWorkConfig(work);
   const directory = path.join(
     workPaths(work, config).settings,
     EPISODE_PLOTS_DIR
   );
-  const filePath = path.join(directory, episodePlotFileName(picked.chapter));
+  const filePath = path.join(directory, episodePlotFileName(chapter));
 
   if (await pathExists(filePath)) {
-    await openInDefaultEditor(filePath);
+    await openInDefaultEditor(filePath, showOptions);
     void vscode.window.showInformationMessage(
-      `第${picked.chapter}話の単話プロットは既にあります。そのまま開きました。`
+      `第${chapter}話の単話プロットは既にあります。そのまま開きました。`
     );
     return;
   }
@@ -170,7 +206,7 @@ export async function createEpisodePlot(work: WorkEntry): Promise<void> {
     // ここへ来る時点で既存は除いてあるが、その間に作られていたら失敗させる
     await atomicWriteFile(
       filePath,
-      new TextEncoder().encode(buildEpisodePlotTemplate(picked.chapter)),
+      new TextEncoder().encode(buildEpisodePlotTemplate(chapter)),
       { mode: "create" }
     );
   } catch (error) {
@@ -185,9 +221,9 @@ export async function createEpisodePlot(work: WorkEntry): Promise<void> {
     return;
   }
 
-  await openInDefaultEditor(filePath);
+  await openInDefaultEditor(filePath, showOptions);
   void vscode.window.showInformationMessage(
-    `第${picked.chapter}話の単話プロットを作りました。視点・目標・展開を書いてください（AIは書きません）。`
+    `第${chapter}話の単話プロットを作りました。視点・目標・展開を書いてください（AIは書きません）。`
   );
 }
 

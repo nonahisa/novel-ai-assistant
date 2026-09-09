@@ -1,5 +1,5 @@
 import { ACTION_TREE, visibleEntries, type ActionItem } from "../views/actionList";
-import { STEP_MENU } from "../views/stepMenu";
+import { STEP_MENU, STEP_REFERENCED_COMMANDS } from "../views/stepMenu";
 import { canRunProcesses } from "../core/runtime";
 import { EXTRA_GUIDE } from "./featureGuide";
 import { openGeneratedMarkdown } from "../views/openDocument";
@@ -87,10 +87,10 @@ function stepChapter(): string {
       }
       if (entry.kind === "section") {
         lines.push(`- ${entry.label}`);
-        for (const item of entry.items) lines.push(`  ${actionLine(item)}`);
+        for (const item of entry.items) lines.push(`  ${actionLine(item, false)}`);
         continue;
       }
-      lines.push(actionLine(entry));
+      lines.push(actionLine(entry, false));
     }
     lines.push("");
   }
@@ -104,6 +104,7 @@ function actionChapter(allowsProcesses: boolean): string {
     "## 操作の一覧",
     "",
     "詳細メニュー（左の一覧）に並んでいるものと同じ順です。",
+    "一部の操作はメニューに出さず、設定管理や簡単ステップメニューから使います（その旨を添えてあります）。",
     "",
   ];
 
@@ -145,10 +146,59 @@ function guideChapter(): string {
   return ["## 画面と考え方", "", body].join("\n");
 }
 
-function actionLine(action: ActionItem): string {
+function actionLine(action: ActionItem, noteLocation = true): string {
   const mark = action.usesAI ? "（AIを使う）" : "";
-  return `- ${action.label}${mark}: ${plain(action.detail)}`;
+  // **メニューの表示名から外した補足は、ここでは名前に戻す**（2026-09-06）。
+  // ビューは幅が狭いので短くしたが、マニュアルは幅で困らないうえ、
+  // 名前だけでは何の操作か分からないものがある（「使い方」「セットアップ」）
+  const note = action.note ? `（${action.note}）` : "";
+  return `- ${action.label}${note}${mark}${noteLocation ? whereToFind(action) : ""}: ${plain(action.detail)}`;
 }
+
+/**
+ * 詳細メニューに**出ない**操作には、実際の入口を添える（設計書6.56.3）。
+ *
+ * マニュアルは冒頭で「詳細メニューに並んでいるものと同じ順です」と言う。
+ * 0.29.8 で一部の操作を画面から隠したので、そのまま載せると**メニューに
+ * 無いものを「ある」と書く**ことになる（作者の指示「マニュアル更新も
+ * お願いします」2026-09-02）。
+ *
+ * **どこにあるかは、手で書かずに導く。** 簡単ステップメニューが参照して
+ * いるか（`STEP_REFERENCED_COMMANDS`）で見分けられる——参照されていれば
+ * そちらから、いなければ設定管理の説明のリンクから使う操作である。
+ * 手で書くと、置き場所を変えたときにマニュアルだけが古いままになる。
+ */
+function whereToFind(action: ActionItem): string {
+  if (!action.hiddenFromActionList) return "";
+  const special = SPECIAL_ENTRANCES[action.command];
+  if (special) return special;
+  return STEP_REFERENCED_COMMANDS.includes(action.command)
+    ? "（簡単ステップメニューから）"
+    : "（設定管理の説明のリンクから）";
+}
+
+/**
+ * 導き方では当てられない入口（作者の指定、2026-09-03）。
+ *
+ * `whereToFind` は「簡単ステップメニューが参照しているか」で入口を当てる。
+ * ふつうはそれで足りるが、**相談の画面だけは入口がメニューの外にある**——
+ * 横の細いパネル（本文の右クリックから開く）の「メインに表示」ボタンが、
+ * 大きく開くいちばん近い道である。導きに任せると「簡単ステップメニューから」
+ * とだけ書き、その道が案内から消える。
+ *
+ * **例外はここへ集める。** 説明文（`detail`）へ書き足す手もあるが、
+ * detail はメニューのホバーとAIへ渡す説明にも出るので、
+ * マニュアルの都合の一文が3か所に散らばることになる。
+ */
+const SPECIAL_ENTRANCES: Readonly<Record<string, string>> = {
+  "novelai.openChatPanel":
+    "（横の「AIに相談」パネルの「メインに表示」ボタンから。" +
+    "簡単ステップメニューにもあります）",
+  // 入口をエディターの中へ一本化した（作者の指定、2026-09-04）。
+  // 導き方（簡単ステップメニューにあるか）では当てられない場所にある
+  "novelai.exportEpub":
+    "（EPUBエディターの中の「EPUBを書き出す」ボタンから）",
+};
 
 /**
  * 説明文から、画面用の強調の印を落とす。

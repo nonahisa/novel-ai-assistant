@@ -1,4 +1,4 @@
-import { ACTION_TREE, visibleEntries } from "../views/actionList";
+import { ACTION_TREE, visibleEntries, type ActionItem } from "../views/actionList";
 import { canRunProcesses } from "../core/runtime";
 import {
   selectGuideBundles,
@@ -60,6 +60,14 @@ import {
  * ここに書くのは「メニューの項目では説明できないこと」に限る。
  * 個々の操作の説明を書き足すと、`ACTION_TREE` との二重管理になる。
  *
+ * 【メニューに出ないボタンと振る舞い】は、**パネルの中のボタン**（相談・提案・
+ * EPUBエディター・執筆統計）と、**作者が押さないのに働くもの**（独り言・
+ * 順番待ち）を置く場所である。どれも `ACTION_TREE` に項目が無く、
+ * 目次を歩いても名前が出てこない——**名前が無いものを、AIは「ありません」と
+ * 答える。** そこで、この節の名前だけは目次にも並べる（`extraGuideNames`）。
+ * 名前と場所は「- 名前（場所）: 説明」の形で書くこと。切り出しがこの形に
+ * 頼っている。
+ *
  * **作者向けのマニュアル（`openManual.ts`）もここを使う。** AIへ渡す説明と
  * 作者が読む説明で、書いてあることが違ってはいけない。文面を2か所に持つと、
  * 片方だけ直したときに「AIの言うことと、マニュアルの記述が違う」ことになる。
@@ -67,12 +75,44 @@ import {
 export const EXTRA_GUIDE = `
 【画面】
 - 作品一覧（左）: 登録した作品と話数。話を右クリックすると「この話の誤字脱字を検知」「ファイルを削除」が出る
-- 簡単ステップメニュー（左）: 作品づくりの流れ（1.作品登録→2.新作構想→3.作品執筆→4.自己校正→5.投稿脱稿→6.編集部校正・校閲→7.電子出版等）に沿って主な操作を並べたメニュー。最下段に「ヘルプ」がある。最上段で選んだ作品にだけ効く。全操作は詳細メニューにある
+- 簡単ステップメニュー（左）: 作品づくりの流れ（1.作品登録→2.新作構想→3.作品執筆→4.自己校正→5.投稿脱稿→6.編集部校正・校閲→7.電子出版等）に沿って主な操作を並べたメニュー。最下段に「ヘルプ」がある。最上段で選んだ作品にだけ効く。ほとんどの操作は詳細メニューにもある
+- 設定管理（詳細メニュー →「拡張機能の設定」→「設定管理を開く」）: 文字数の数え方や待ち時間などの設定。セットアップ・意味検索の準備・機能ごとのAI割り当て・作者と編集者の切り替えは、該当する設定の説明の下のリンクから実行する
 - 詳細メニュー（左）: 下に並ぶ操作の一覧。分類→小分類→操作の3階層
 - AIに相談（左）: この画面。開いているファイルについて日本語で相談できる
 - 設定資料（エディター領域）: 登場人物・能力・組織・場所・世界観を見て、書き換えたり、AIに相談したりする画面
 - 提案（下段）: 誤字脱字・表記ゆれの指摘が並ぶ。1件ずつ「適用」「無視」を選ぶ
 - 本文やMarkdownを右クリックすると「設定情報を表示」「AIに相談する」が出る
+
+【メニューに出ないボタンと振る舞い】
+- 相談を資料へ反映（相談パネル）: いまの会話から、作者が決めた人物の設定を拾って承認待ちへ積む。AIに相談パネル（横の細いパネル・大きい画面のどちらにもある）の入力欄の下のボタン。承認するまで資料は変わりません。会話を積んだ作品にだけ反映できます
+- AIに訊く（提案パネルの表記ゆれ）: どちらの表記に揃えるとよいかを、理由つきで指摘の下に出す。提案パネルの表記ゆれの指摘1件ずつに付くボタン。本文は書き換えません
+- EPUBエディターの右の並び: 本に入る面（表紙・目次・話・奥付など）を、ドラッグで並べ替え、右クリックで挿入・削除・保留にする。保留にした面はプレビューでは見られますが、本には入りません。書き出しのボタンもエディターの中にあります
+- 貼り込み係へ渡す形でコピー（新話を投稿する）: 変換済みの本文を、相棒のブラウザ拡張「貼り込み係」が投稿画面の欄へ流し込める形でコピーする。「新話を投稿する」の案内の中から選ぶ。カクヨムとアルファポリスにしか出ません。送信は必ず作者が押します
+- Xへ貼り付ける（更新告知文）: 告知文と作品一覧のURLを入れた状態で、Xの投稿画面を開く。「更新告知文を作る」の結果の画面にあるボタン。投稿ボタンは作者が押します
+- サイトの記録（執筆統計パネル）: 投稿サイトごとの作品情報と、書き留めたランキングの履歴を並べる。小説家になろうには「分析（Narou.fun）を開く」リンクも出る。順位は手入力で、投稿サイトへ自動でアクセスすることはありません
+- AIの独り言の感想（相談パネル）: 保存した本文を読んで、AIがたまに一言だけ感想を言う。無料の手元のAIのときだけ、ほかに言うことが無いときだけ出る。設定「novelai.chatter.enabled」を切ると止まります
+- AI機能の順番待ち: AIを使う操作を2つ以上動かすと「（先客の名前）の完了を待っています…」と出て、順番に処理される。同時には走らせません。中止ボタンで列から抜けられます
+
+【口述筆記】
+- 声を文字にするのは、この拡張機能ではなくOSの音声入力です。Windowsは Win+H、macOSは fnキーを2回押すと始まります。文字は、いまカーソルのある欄へそのまま入ります
+- 拡張機能はマイクに触りません（WebViewは録音できず、ブラウザの音声認識APIもVS Codeでは動かないためです）
+- 原稿エディタの下段に「口述」ボタンがあります。押すとカーソルの位置を覚え、「整える」「やめる」に変わります。口述モード中もこれまでどおり手で打てます
+- 「整える」を押すと、口述を始めたところから今のカーソルまでをAIが本文の形に直します（句読点と改行、同音異義の誤変換、文頭の「えーと」のような言いよどみ）。言葉は足しません・削りません・言い換えません
+- 普通のエディターでは「口述で入れた文を整える」（詳細メニュー → 原稿づくり）を使います。整える範囲は選んだところです
+- 整えたあとは Ctrl+Z で元に戻せます。整えている間に本文が変わっていたときは、置き換えずに知らせます
+- 音声認識そのもの（whisperなど）を拡張機能に載せることは、いまはしていません
+
+【noteへ貼る】
+- 「投稿サイト用に変換してコピー」で貼り付け先に note を選ぶと、noteのエディタが読める形に整えてコピーします。noteの本文欄へそのまま貼れば、見出し・太字・取り消し線・リンク・区切り線・箇条書き・番号付き・コードブロック・引用として出ます
+- 題名（記事タイトル）はコピペでは入りません。本文の先頭に「# 題名」と書いてあれば題名として取り分け、コピーのあとの知らせから「題名をコピー」で持ち替えられます。noteの題名欄へ貼ってください
+- 目次はコピペでは入りません。noteの編集画面のスイッチで入れます
+- 画像はコピペでは入りません。本文の ![説明](ファイル) は「【画像：説明（ファイル名）】」の行に置き換わるので、その位置へnoteの編集画面からアップロードしてください。知らせの「画像のフォルダーを開く」から置き場所を開けます
+- 見出しはnoteでは2段（大見出し・小見出し）です。「#」は大見出しへ、「####」以降は小見出しへ丸めます
+- URLは、前後を空けて1行に1つだけ置くと埋め込みカードになります。文の中に書いたURLや、続けて並べたURLは埋め込みになりません（貼ったあと、URLの行末でEnterを押すと展開されます）
+- 引用（> ）の中に空行は置けません。全角スペースだけの行に置き換えます
+- 表はコピペでは入りません。noteの編集画面へスプレッドシートからコピーして貼ってください
+- ルビは括弧書き（漢字（かんじ））になり、傍点と斜体は印が外れて文字だけ残ります（noteにその記法が無いため）
+- 原稿エディタの「note風」プレビューで、貼ったときの見た目を先に見られます
 
 【ファイルの置き場所】
 - 本文: 作品フォルダーの直下、または「本文」フォルダー
@@ -123,10 +163,78 @@ export function buildFeatureIndex(): string {
     }
   }
 
-  return [lines.join("\n"), "", extraGuideSection("この拡張機能の考え方")].join(
-    "\n"
-  );
+  return [
+    lines.join("\n"),
+    "",
+    // メニューに無いもの（パネルの中のボタン・黙って働く振る舞い）も、
+    // 名前だけは毎回渡す。ここが抜けると「そんな機能はありません」になる
+    extraGuideNames("メニューに出ないボタンと振る舞い"),
+    "",
+    extraGuideSection("この拡張機能の考え方"),
+  ].join("\n");
 }
+
+/** 小分類を、束としてだけ割るときの1つぶん */
+interface GuideBundleSplit {
+  /** 割った先の名前（`執筆AI支援 → 伏線・矛盾` の後半にあたる） */
+  readonly label: string;
+  /** ここへ入れる操作のコマンドID */
+  readonly commands: readonly string[];
+}
+
+/**
+ * 小分類を、**束としてだけ**割る表（設計書6.19.4）。
+ *
+ * ## メニューは変えない
+ *
+ * 割るのは相談へ渡す説明の単位だけで、詳細メニュー（`ACTION_TREE`）の
+ * 並びには手を付けない。**メニューの並びは作者の手順そのもの**であり、
+ * AIへ送る量の都合で動かしてよいものではない。0.33.8で「その他支援」を
+ * 割ったときは分類ごと割ったが、今回は**画面はそのままで束だけ割る**。
+ *
+ * ## 先頭が受け皿である
+ *
+ * 表に載せなかった操作は、**先頭の束へ残る。** こうしておくと、あとから
+ * 操作を足した人が表への追記を忘れても、どの束からも消えることはない
+ * （名前が束から消えると、AIはその機能の説明を渡してもらえなくなる）。
+ * 漏れが無いことは `featureGuide.test.ts` が `ACTION_TREE` と突き合わせて見る。
+ */
+const GUIDE_BUNDLE_SPLITS: Record<string, readonly GuideBundleSplit[]> = {
+  /*
+    「校正・校閲」は1,285字あり、上限1,500まで200字ほどしか残っていなかった
+    （作者の裁定、2026-09-05）。割る線は「文の直し」と「話の整合」のあいだ
+    である——前者は1文ずつの言い回しを見る作業、後者は話をまたいだ辻褄を
+    見る作業で、作者が知りたいときの場面が違う。質問もどちらかに寄るので、
+    片方だけを渡せば送る量が半分になる。
+  */
+  "校正・校閲": [
+    {
+      // 受け皿。校閲ロック・編集部の提案など、表に載せていない操作も残る
+      label: "校正",
+      commands: [
+        "novelai.runProofreadingSuite",
+        "novelai.checkTypos",
+        "novelai.manageKeepWords",
+        "novelai.checkNotation",
+        "novelai.checkProofread",
+        "novelai.checkOpening",
+      ],
+    },
+    {
+      label: "伏線・矛盾",
+      commands: [
+        "novelai.checkDeviations",
+        "novelai.checkEpisodePlot",
+        "novelai.checkContradictions",
+        "novelai.checkForeshadows",
+        "novelai.checkForeshadowResolution",
+        "novelai.openForeshadows",
+        "novelai.addForeshadow",
+        "novelai.setForeshadowStatus",
+      ],
+    },
+  ],
+};
 
 /**
  * 説明を、小分類ごとの束に切る。
@@ -136,6 +244,7 @@ export function buildFeatureIndex(): string {
  * （表記ゆれ・推敲は同じ小分類にある）。1操作ずつに切ると関連が切れ、
  * 分類ごとに切ると1束が大きくなりすぎる。
  *
+ * 大きく育った小分類は `GUIDE_BUNDLE_SPLITS` でさらに割る（画面は変えない）。
  * 分類の直下にある操作は、その分類の名前だけの束にする。
  */
 export function buildGuideBundles(): GuideBundle[] {
@@ -162,17 +271,21 @@ export function buildGuideBundles(): GuideBundle[] {
       if (entry.kind !== "section") continue;
       const items = visibleEntries(entry.items, allowsProcesses);
       if (items.length === 0) continue;
-      // 画面の階層をそのまま名前にする。作者が見ている道順と
-      // 記録に残る名前が違うと、後から追えない
-      const label = `${group.label} → ${entry.label}`;
-      bundles.push({
-        key: `section:${group.label}/${entry.label}`,
-        label,
-        text: [
-          `■ ${label}`,
-          ...items.map((item) => describeAction(item, "")),
-        ].join("\n"),
-      });
+
+      for (const part of splitSectionItems(entry.label, items)) {
+        // 画面の階層をそのまま名前にする。作者が見ている道順と
+        // 記録に残る名前が違うと、後から追えない
+        // （束だけ割った小分類は、割った先の名前で並ぶ）
+        const label = `${group.label} → ${part.label}`;
+        bundles.push({
+          key: `section:${group.label}/${part.label}`,
+          label,
+          text: [
+            `■ ${label}`,
+            ...part.items.map((item) => describeAction(item, "")),
+          ].join("\n"),
+        });
+      }
     }
   }
 
@@ -182,6 +295,29 @@ export function buildGuideBundles(): GuideBundle[] {
     key: "screen",
     label: "画面",
     text: extraGuideSection("画面"),
+  });
+  // 目次には名前しか出せないので、説明はここで受け持つ。
+  // 「どこにあるか」を知りたい質問（「保留ってどこ？」）はここに当たる
+  bundles.push({
+    key: "hidden",
+    label: "メニューに出ないボタンと振る舞い",
+    text: extraGuideSection("メニューに出ないボタンと振る舞い"),
+  });
+  // 口述筆記（設計書6.83）は、**操作の説明では答えきれない**——作者が
+  // 知りたいのは「どうやって声で書くか」（OS側の始め方）であって、
+  // メニューの項目の説明ではない
+  bundles.push({
+    key: "dictation",
+    label: "口述筆記",
+    text: extraGuideSection("口述筆記"),
+  });
+  // noteへ貼る（設計書6.84）は、**操作の説明では答えきれない**——作者が
+  // 知りたいのは「貼ったらどうなるか」（何が入らず、何を手で入れるか）で
+  // あって、メニューの項目の説明ではない
+  bundles.push({
+    key: "note",
+    label: "noteへ貼る",
+    text: extraGuideSection("noteへ貼る"),
   });
   bundles.push({
     key: "files",
@@ -229,6 +365,42 @@ export function buildFeatureGuideForQuestion(input: {
 }
 
 /**
+ * 小分類の操作を、束の単位へ割る。
+ *
+ * 表（`GUIDE_BUNDLE_SPLITS`）に無い小分類はそのまま1つで返すので、
+ * **割っていない小分類の振る舞いは変わらない。**
+ *
+ * 並びは画面の順のまま保つ。表に書いた順ではない——作者が見ている順と
+ * 説明の順が違うと、「上から3つ目」のような答え方ができなくなる。
+ */
+function splitSectionItems(
+  sectionLabel: string,
+  items: readonly ActionItem[]
+): { label: string; items: ActionItem[] }[] {
+  const splits = GUIDE_BUNDLE_SPLITS[sectionLabel];
+  if (!splits || splits.length === 0) {
+    return [{ label: sectionLabel, items: [...items] }];
+  }
+
+  // どの操作をどこへ入れるか。**先頭は受け皿**なので、表に無いものは
+  // ここへ落ちる（0番目を既定にしておけば、書き漏らしで消えない）
+  const indexOf = new Map<string, number>();
+  splits.forEach((split, position) => {
+    for (const command of split.commands) indexOf.set(command, position);
+  });
+
+  const buckets = splits.map((split) => ({
+    label: split.label,
+    items: [] as ActionItem[],
+  }));
+  for (const item of items) {
+    buckets[indexOf.get(item.command) ?? 0].items.push(item);
+  }
+  // 画面に1つも出ない束（環境で全部隠れた場合）は作らない
+  return buckets.filter((bucket) => bucket.items.length > 0);
+}
+
+/**
  * `EXTRA_GUIDE` から【…】の節を1つ取り出す。
  *
  * 目次（考え方）と束（画面・置き場所）で使い分けるが、**文面は1か所に
@@ -247,6 +419,25 @@ function extraGuideSection(title: string): string {
 }
 
 /**
+ * `EXTRA_GUIDE` の節から、**名前だけ**を取り出して目次の形にする。
+ *
+ * 「- 名前（場所）: 説明」の、コロンの前だけを残す。**名前の写しを
+ * 目次側に持たない**——2か所に書くと、片方だけ直したときに気づけない
+ * （この決まりは `extraGuideSection` と同じ理由）。
+ */
+function extraGuideNames(title: string): string {
+  const section = extraGuideSection(title);
+  if (!section) return "";
+
+  const lines = section.split("\n");
+  const names = lines
+    .filter((line) => line.startsWith("- "))
+    // 説明の中にコロンが現れても、名前は最初のコロンまでで決まる
+    .map((line) => `・${line.slice(2).split(": ")[0]}`);
+  return [lines[0], ...names].join("\n");
+}
+
+/**
  * 目次の1行。名前と、AIを使うかの印だけ。
  *
  * 印は「・」1文字にする。説明の側（`describeAction`）は「  - 名前: 説明」
@@ -254,11 +445,15 @@ function extraGuideSection(title: string): string {
  * 1文字削るだけで240字ほど変わる。
  */
 function nameOnly(
-  action: { label: string; usesAI?: boolean },
+  action: { label: string; note?: string; usesAI?: boolean },
   indent: string
 ): string {
   const mark = action.usesAI ? "（AIを使う）" : "";
-  return `${indent}・${action.label}${mark}`;
+  // **画面から外した補足も、ここでは名前に戻す**（2026-09-06）。
+  // 相談はここに書いてある名前でしか操作を知らないので、落とすと
+  // 「AIチューニングって何」に答えられなくなる
+  const note = action.note ? `（${action.note}）` : "";
+  return `${indent}・${action.label}${note}${mark}`;
 }
 
 /**
@@ -269,7 +464,7 @@ function nameOnly(
  * 相談へ渡すためのものなので、全文が要る場面が無い。
  */
 function describeAction(
-  action: { label: string; detail: string; usesAI?: boolean },
+  action: { label: string; note?: string; detail: string; usesAI?: boolean },
   indent: string
 ): string {
   // 強調の記号は画面用なので落とす。AIへの指示と混ざると読みにくい。
@@ -277,7 +472,8 @@ function describeAction(
   const emphasis = "*".repeat(2);
   const detail = shorten(action.detail.split(emphasis).join(""));
   const mark = action.usesAI ? "（AIを使う）" : "";
-  return `${indent}  - ${action.label}${mark}: ${detail}`;
+  const note = action.note ? `（${action.note}）` : "";
+  return `${indent}  - ${action.label}${note}${mark}: ${detail}`;
 }
 
 /**

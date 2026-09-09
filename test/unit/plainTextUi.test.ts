@@ -24,6 +24,8 @@ import type { CharacterDiff } from "../../src/core/characterDiff";
 const MARKDOWN_ALLOWED = new Set([
   // .md を書き出す
   "src/core/settingsMarkdown.ts",
+  // 提供先別の設定資料を .md として組む（設計書6.75）
+  "src/core/settingsExportProfiles.ts",
   "src/core/chatLog.ts",
   "src/core/usageLog.ts",
   "src/core/plotTemplate.ts",
@@ -58,6 +60,7 @@ const MARKDOWN_ALLOWED = new Set([
   "src/prompts/proofread.ts",
   "src/prompts/workChat.ts",
   "src/prompts/settingsEnrich.ts",
+  "src/prompts/chapterPropose.ts",
   // 記録ファイル（人が読む前提のログ）
   "src/core/logger.ts",
   // 診断の結果をMarkdownの文書として開く（作者がそのまま貼れるように）

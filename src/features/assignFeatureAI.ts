@@ -7,7 +7,9 @@ import {
   type AssignableFeature,
   type ProviderAndModelPick,
 } from "../ai/registry";
+import { EXTRACT_MODEL_ADVICE, TYPO_MODEL_ADVICE } from "../core/requirements";
 import { cancelItem } from "../views/dialogs";
+import { notifyDone } from "../views/notify";
 
 /**
  * 機能ごとに使うAIを割り当てる（設計書6.28.7の1、7.1）。
@@ -29,7 +31,7 @@ export async function assignFeatureAI(registry: AIRegistry): Promise<void> {
 
   if (target === "default") {
     await registry.unassign(feature);
-    vscode.window.showInformationMessage(
+    notifyDone(
       `${ASSIGNABLE_FEATURE_LABELS[feature]} は、AI設定で選んだ既定のAIで実行するようにしました。`
     );
     return;
@@ -51,12 +53,28 @@ export async function assignFeatureAI(registry: AIRegistry): Promise<void> {
     );
   }
 
-  vscode.window.showInformationMessage(
+  // **注意文を添えるときは通知に残す**（設計書6.81の規則3）。
+  // 「実行のたびに課金されます」「精度が下がる場合があります」は、この
+  // あと作者が何に気をつけるかの案内であって、その場限りの完了ではない。
+  // ステータスバーの6秒では読み切れない（2026-09-06に戻した）
+  void vscode.window.showInformationMessage(
     `${ASSIGNABLE_FEATURE_LABELS[feature]} は ` +
       `${target.provider.displayName}（${target.model.displayName}）で実行するようにしました。` +
       (notes.length > 0 ? "\n" + notes.join("\n") : "")
   );
 }
+
+/**
+ * モデルの大きさで結果が変わる機能と、その一言。
+ *
+ * **全部の行に説明を付けない**（作者の裁定 2026-09-06）。付けると、
+ * 肝心の行が埋もれる。ここに無い機能は説明なしで並ぶ。
+ */
+const MODEL_SIZE_ADVICE: Partial<Record<AssignableFeature, string>> = {
+  typo: TYPO_MODEL_ADVICE,
+  // 抽出は、モデルを替えるだけで人物の分裂が止まった（実機確認A-18）
+  extract: EXTRACT_MODEL_ADVICE,
+};
 
 /** どの機能の割当を変えるか。いまの割当を各行に出す */
 async function pickFeature(
@@ -76,6 +94,10 @@ async function pickFeature(
           description: assigned
             ? `割当: ${provider?.displayName ?? assigned.provider} / ${assigned.model}`
             : "既定のAIを使う",
+          // **モデルの大きさで結果が変わる機能だけ、その場で言う**
+          // （作者の裁定 2026-09-06）。全部の行に説明を付けると、
+          // 肝心の1行が埋もれる
+          detail: MODEL_SIZE_ADVICE[feature],
           feature,
         };
       }),

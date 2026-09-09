@@ -1,4 +1,8 @@
-import type { ChapterSynopsis, ChapterSynopsisSet } from "../models/synopsis";
+import {
+  synopsisKey,
+  type ChapterSynopsis,
+  type ChapterSynopsisSet,
+} from "../models/synopsis";
 import { stripChapterLabel } from "./episodeLabel";
 
 /**
@@ -12,6 +16,22 @@ import { stripChapterLabel } from "./episodeLabel";
  * 直したいときは設定資料パネルか JSON を直す。
  */
 
+/**
+ * 文書へ挟む章の印1つ（設計書6.66.4の3）。
+ *
+ * **どのあらすじの直前に置くか**を `startKey`（`synopsisKey` の形）で持つ。
+ * 話数やファイル名をここで組み立て直すと、あらすじ側の話の見分け方
+ * （リネームに強い形）とずれる。印を作るのは `core/synopsisChapters.ts`。
+ */
+export interface SynopsisChapterMark {
+  /** 章の名前（台帳のまま。ここでは飾らない） */
+  name: string;
+  /** この章が始まる話。`synopsisKey(fileName, chapter)` の形 */
+  startKey: string;
+  /** 見出しに添える範囲（「第3話〜第5話・3話」）。空なら添えない */
+  range: string;
+}
+
 export interface SynopsisMarkdownOptions {
   workTitle: string;
   /**
@@ -24,6 +44,11 @@ export interface SynopsisMarkdownOptions {
   headingLevel?: 1 | 2;
   /** 文書の見出し（`# 作品名 各話あらすじ`）を付けるか。既定は付ける */
   includeTitle?: boolean;
+  /**
+   * 挟む章の印（設計書6.66.4の3）。**空なら章の見出しは1つも出ない**
+   * ——章立ての台帳を持たない作品は、いままでどおりの文書になる。
+   */
+  chapters?: readonly SynopsisChapterMark[];
 }
 
 export function buildSynopsisListMarkdown(
@@ -31,7 +56,18 @@ export function buildSynopsisListMarkdown(
   options: SynopsisMarkdownOptions
 ): string {
   const includeTitle = options.includeTitle ?? true;
-  const episodeHeading = "#".repeat((options.headingLevel ?? 1) + 1);
+  const marks = options.chapters ?? [];
+  const baseLevel = options.headingLevel ?? 1;
+  const chapterHeading = "#".repeat(baseLevel + 1);
+  // **章があるときは、話を1段深くする。** 章と話が同じ深さだと、
+  // 章の下に話が入っているように読めない（目次の階層も壊れる）
+  const episodeHeading = "#".repeat(baseLevel + (marks.length > 0 ? 2 : 1));
+  // 章の印は「その章が始まる話」を指す。同じ話を指す印が2つあることは
+  // 無い（台帳が重複を許さない）ので、最初の1つだけを覚える
+  const markByKey = new Map<string, SynopsisChapterMark>();
+  for (const mark of marks) {
+    if (!markByKey.has(mark.startKey)) markByKey.set(mark.startKey, mark);
+  }
   const lines: string[] = includeTitle
     ? [`# ${options.workTitle} 各話あらすじ`, ""]
     : [];
@@ -51,6 +87,10 @@ export function buildSynopsisListMarkdown(
   );
 
   for (const episode of set.episodes) {
+    const mark = markByKey.get(synopsisKey(episode.fileName, episode.chapter));
+    if (mark) {
+      lines.push(`${chapterHeading} ${chapterHeadingFor(mark)}`, "");
+    }
     lines.push(`${episodeHeading} ${headingFor(episode)}`, "");
     lines.push(episode.synopsis, "");
 
@@ -67,6 +107,11 @@ export function buildSynopsisListMarkdown(
   }
 
   return lines.join("\n");
+}
+
+/** 章の見出し。範囲が読めない章は、名前だけを出す（数を捏造しない） */
+function chapterHeadingFor(mark: SynopsisChapterMark): string {
+  return mark.range ? `${mark.name}（${mark.range}）` : mark.name;
 }
 
 function headingFor(episode: ChapterSynopsis): string {

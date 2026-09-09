@@ -74,6 +74,22 @@ export function buildSyncTarget(
   };
 }
 
+/**
+ * はじめての送信の確認に添える「入っている作品」の行。
+ *
+ * **何作品ぶんが出ていくのかを、送る前に言う。** 1つの置き場に複数の作品が
+ * 入っているのが既定の形なので（設計書5.7.9）、作品名を1つだけ出すと
+ * 「これだけが送られる」と読めてしまう。
+ *
+ * 1作品しか入っていなければ `undefined`——余計な行を足さない。
+ */
+export function describeIncludedWorks(target: SyncTarget): string | undefined {
+  if (target.works.length <= 1) return undefined;
+  return `入っている作品: ${target.works
+    .map((entry) => entry.title)
+    .join("・")}`;
+}
+
 /** 「HisasNovels（3作品）」のような短い言い方 */
 export function describeSyncTarget(target: SyncTarget): string {
   if (target.works.length <= 1) return target.label;

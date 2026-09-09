@@ -8,6 +8,7 @@ import {
   PROOFREAD_SYSTEM_PROMPT,
 } from "../../src/prompts/proofread";
 import {
+  locateProofreadIssue,
   parseProofreadResult,
   validateProofreadIssues,
 } from "../../src/core/proofreadValidation";
@@ -123,7 +124,11 @@ describe.skipIf(!ROOT)(
                 (byReject.get(entry.reason) ?? 0) + 1
               );
             }
-            for (const item of validated.accepted) {
+            for (const accepted of validated.accepted) {
+              // **製品と同じ道を通す**（設計書6.30.4）。語尾単調の説明文は
+              // 行がファイルの番号に直ってから組まれる
+              const item = locateProofreadIssue(chunk, accepted);
+              if (!item) continue;
               byReason.set(item.reason, (byReason.get(item.reason) ?? 0) + 1);
               if (item.suggestion) withFix++;
               samples.push(

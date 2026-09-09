@@ -22,6 +22,8 @@ import { readFileSync } from "node:fs";
 const posted: Array<{ category: string; items: unknown[] }> = [];
 const notified: string[] = [];
 const warned: string[] = [];
+/** ステータスバーへ出た「その場限りの完了」（`views/notify.ts`） */
+const statusBar: string[] = [];
 
 vi.mock("vscode", () => {
   const noop = () => undefined;
@@ -37,6 +39,17 @@ vi.mock("vscode", () => {
         return Promise.resolve(undefined);
       }),
       showErrorMessage: vi.fn(),
+      // 完了はステータスバーへ出る（通知センターへ積まない）
+      setStatusBarMessage: vi.fn((text: string) => {
+        statusBar.push(text);
+        return { dispose: noop };
+      }),
+      // 同じ文言が操作ログにも残る。中身はこのテストの関心ではない
+      createOutputChannel: () => ({
+        appendLine: noop,
+        show: noop,
+        dispose: noop,
+      }),
     },
     workspace: {
       getConfiguration: () => ({ get: (_k: string, d?: unknown) => d }),
@@ -124,13 +137,24 @@ function latest() {
   return posted[posted.length - 1];
 }
 
+/**
+ * 再チェックが、どの機能キーで割当を引いたか（設計書6.28.7の1）。
+ *
+ * 誤字脱字を無料AIに割り当てた作者が、誤字の再チェックだけ矛盾検知の
+ * （有料の）AIで動いては驚く。
+ */
+const resolvedFeatures: string[] = [];
+
 /** AIは設定済みで、無料のもの（有料の確認ダイアログを挟まない） */
 function fakeRegistry() {
   return {
-    resolve: () => ({
-      provider: { isPaid: false, generate: vi.fn() },
-      model: "gemma4:e4b",
-    }),
+    resolve: (feature: string) => {
+      resolvedFeatures.push(feature);
+      return {
+        provider: { isPaid: false, generate: vi.fn() },
+        model: "gemma4:e4b",
+      };
+    },
   };
 }
 
@@ -187,9 +211,49 @@ function contradictionsOf(panel: ProposalPanel): Array<{
 beforeEach(() => {
   posted.length = 0;
   notified.length = 0;
+  statusBar.length = 0;
   warned.length = 0;
   recheckCalls.length = 0;
+  resolvedFeatures.length = 0;
   nextOutcome = { kind: "resolved", reason: "設定どおりの表記に直っています" };
+});
+
+/**
+ * 再チェックは、いま見ている分類の割当で動く（実機確認リスト F-24）。
+ *
+ * プロンプトは分類共通の1本だが、**割当はいま見ている指摘の分類に従う。**
+ */
+describe("再チェックが引く割当", () => {
+  test("誤字脱字の指摘では、誤字脱字の割当を引く（実機確認リスト F-24 の代わり）", async () => {
+    const panel = panelWithView();
+    panel.showResults(work, [
+      {
+        filePath: "C:/小説/いじめられっ子/本文/003.txt",
+        chunkHash: "h9",
+        line: 2,
+        original: "　プリム様は振り返らなかった。",
+        target: "プリム様",
+        suggestion: "プラム様",
+        reason: "設定資料の表記",
+        confidence: "high",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any,
+    ]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const id = (panel as any).items[0].id as string;
+    await pressRecheck(panel, id);
+
+    expect(resolvedFeatures).toEqual(["typo"]);
+  });
+
+  test("矛盾の指摘では、矛盾検知の割当を引く（実機確認リスト F-24 の代わり）", async () => {
+    const panel = panelWithView();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    panel.showContradictions(work, [contradiction as any]);
+    await pressRecheck(panel, contradictionsOf(panel)[0].id);
+
+    expect(resolvedFeatures).toEqual(["contradiction"]);
+  });
 });
 
 describe("矛盾にも再チェックを出す", () => {
@@ -205,6 +269,62 @@ describe("矛盾にも再チェックを出す", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     panel.showDeviations(work, [deviation as any]);
     expect(latest().items[0]).toMatchObject({ canRecheck: true });
+  });
+});
+
+/**
+ * 単話プロットのAI判定の出し方（設計書6.36.3）。実機確認リスト F-73。
+ *
+ * **適用の口を持たせない。** どちらが正しいかは作者にしか決められない
+ * （箇条書きのほうが古いこともある）。
+ */
+describe("単話プロットの判定を出す", () => {
+  const plotPath = "C:/小説/いじめられっ子/設定/episode-plots/第3話.md";
+  const episodePath = "C:/小説/いじめられっ子/本文/003.txt";
+
+  test("設計の検査は「単話プロット」に出て、単話プロットを開く口だけを持つ（実機確認リスト F-73 の代わり）", () => {
+    const panel = panelWithView();
+    panel.showEpisodePlotFindings(work, plotPath, [
+      { item: "・主人公が家を出る", line: 5, kind: "停滞", reason: "同じ場面が続きます" },
+    ]);
+
+    expect(latest().category).toBe("単話プロット");
+    expect(latest().items[0]).toMatchObject({
+      jumpLabel: "単話プロットを開く",
+      // 本文を見ていないので、本文へ飛ぶ口は持たない
+      openTarget: "none",
+      allowRecheck: false,
+    });
+    // 修正案が無い＝「適用」を出しようがない
+    expect(latest().items[0]).not.toHaveProperty("suggestion");
+  });
+
+  test("本文との照合は「単話プロットと本文」に出て、両方への口を持つ（実機確認リスト F-73 の代わり）", () => {
+    const panel = panelWithView();
+    panel.showEpisodePlotContrast(work, plotPath, episodePath, [
+      {
+        kind: "起きていない",
+        plotItem: "・主人公が家を出る",
+        plotLine: 5,
+        excerpt: null,
+        line: null,
+        reason: "本文には見当たりません",
+      },
+    ]);
+
+    expect(latest().category).toBe("単話プロットと本文");
+    expect(latest().items[0]).toMatchObject({
+      leftLabel: "箇条書きでは",
+      rightLabel: "この話では",
+      openTarget: "file",
+      openPath: plotPath,
+      openLabel: "単話プロットを開く",
+      allowRecheck: false,
+      // 本文に無い指摘は話の頭へ飛ばす（飛び先が無いままにしない）
+      line: 1,
+      note: "本文には見当たりません（飛び先は話の先頭です）",
+    });
+    expect(latest().items[0]).not.toHaveProperty("suggestion");
   });
 });
 
@@ -276,6 +396,10 @@ describe("結果の反映", () => {
     expect(
       (latest().items[0] as { recheckNote?: string }).recheckNote
     ).toContain("解消を確認しました");
+    // **完了はステータスバーへ出す**（`views/notify.ts`）。件数も保存先も
+    // 伴わない読み捨ての報告なので、通知センターへは積まない
+    expect(statusBar.join("\n")).toContain("解消を確認しました");
+    expect(notified.join("\n")).not.toContain("解消を確認しました");
     // 残りの件数からも外れる
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((panel as any).view.badge).toBeUndefined();

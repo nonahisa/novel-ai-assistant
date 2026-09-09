@@ -240,4 +240,77 @@ describe("生成文書の開き方", () => {
 
     expect(executeCommand.mock.calls[0]?.[2]).toEqual({ preview: false });
   });
+
+  /**
+   * `vscode-userdata:` スキームの置き場も、実体のあるOSのパスへ書く。
+   *
+   * 拡張機能開発ホストでは `globalStorageUri` がこのスキームで渡ってくる。
+   * `fromUri` の一般規則（`file:` 以外はURIの文字列）に任せると
+   * `mkdir "C:\vscode-userdata:..."` になって落ち、生成文書がすべて
+   * 無題文書へ落ちていた（実機で発見、2026-09-05）。`setGeneratedStorageRoot`
+   * が `fsPath` を使う分岐を通ることを確かめる
+   */
+  it("`vscode-userdata` のUriを渡すと、fsPath配下（実パス）へ書く", async () => {
+    const UD_ROOT = "C:\\userdata\\generated";
+    setGeneratedStorageRoot(
+      Uri.from({ scheme: "vscode-userdata", path: UD_ROOT }) as never
+    );
+
+    await openGeneratedMarkdown("使い方", "# 使い方\n");
+
+    // 開いた先が、`vscode-userdata:` の文字列表現
+    // （`vscode-userdata:C:\userdata\generated\...`）ではなく、
+    // `fsPath` の指す実パス（`…\generated\…`）配下になっていることを見る。
+    // 直す前は `path.fromUri` が `root.toString()` を返し、
+    // `mkdir "C:\vscode-userdata:..."` になって書けず、無題文書へ落ちていた
+    const call = executeCommand.mock.calls[0];
+    expect(call?.[0]).toBe("vscode.open");
+    const opened = call?.[1] as { fsPath: string };
+    expect(opened.fsPath.toLowerCase().startsWith(UD_ROOT.toLowerCase())).toBe(
+      true
+    );
+    expect(opened.fsPath).toContain("使い方_");
+    expect(openTextDocument).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * その場で作って見せる3つの読み物（実機確認リスト F-16）。
+ *
+ * 作者の報告（2026-08-27）で直したとき、**同じ形が4か所に残っていた**。
+ * 上の走査（`language: "markdown"` を使っていない／`openTextDocument(Uri)`
+ * を使っていない）は「悪い書き方が無い」ことしか見ない。**その3つが
+ * 本当に助けを通っているか**は、名指しで見ないと分からない。
+ *
+ * 通した先の `openGeneratedMarkdown` が `vscode.open` を呼ぶことは
+ * 上の「生成文書の開き方」が見ている。`vscode.open` は作者の
+ * `workbench.editorAssociations` に従うので、**既定の画面で開く**。
+ * 実際に画面が出ることは実機に残る。
+ */
+describe("その場で作る読み物の開き方", () => {
+  const ENTRIES: Array<[string, string, string]> = [
+    [
+      "IME辞書の取り込み手順",
+      "src/features/exportImeDictionary.ts",
+      "IME辞書の取り込み手順",
+    ],
+    [
+      "セットアップの「何が要るのかを読む」",
+      "src/features/setupWizard.ts",
+      "セットアップで入れるもの",
+    ],
+    ["ブラウザ版の動作の診断", "src/features/diagnoseWeb.ts", "動作の診断"],
+  ];
+
+  for (const [name, file, title] of ENTRIES) {
+    it(`${name}が、既定の画面で開く道を通る（実機確認リスト F-16 の代わり）`, () => {
+      const text = readFileSync(file, "utf-8");
+
+      expect(text).toContain("openGeneratedMarkdown");
+      expect(text).toContain(`"${title}"`);
+      // 画面を横取りする道が混ざっていないこと（既定を「テキスト
+      // エディター」に戻した作者に、勝手なプレビューを出さない）
+      expect(text).not.toContain("markdown.showPreview");
+    });
+  }
 });

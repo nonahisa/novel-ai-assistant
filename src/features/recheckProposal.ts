@@ -1,4 +1,8 @@
 import { AIError, type AIProvider } from "../ai/types";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { isPlaceholderText } from "../core/placeholderText";
 import { findTextRange } from "../core/textLocate";
 import {
@@ -223,8 +227,14 @@ function extractJson(text: string): Record<string, unknown> | undefined {
 }
 
 export interface RecheckRequest {
-  /** 送信量の記録まで含んだプロバイダ（`AIRegistry.resolve()` の戻り） */
-  provider: Pick<AIProvider, "generate">;
+  /**
+   * 送信量の記録まで含んだプロバイダ（`AIRegistry.resolve()` の戻り）。
+   *
+   * **`id` も要る。** 出力上限は「プロバイダ＋モデル」の組で台帳を引く
+   * （`ai/outputLimit.ts`）。モデル名だけでは、Ollama と LM Studio が
+   * 同じ名前を持てるため別物の実測を拾う
+   */
+  provider: Pick<AIProvider, "generate" | "id">;
   model: string;
   /** 送信量の記録先。無ければ記録されない */
   workFolder?: string;
@@ -276,6 +286,16 @@ export async function recheckProposal(
       model: request.model,
       // 判断であって創作ではない。揺らす理由がない
       temperature: 0.0,
+      // **見込みと実上限を分けて渡す**（設計書6.77の第2段）。1件につき
+      // 1回呼ぶので、渡さないと押した回数だけ設定値ぶんの席を確保する
+      maxOutputTokens: resolveOutputTokensForSend(
+        request.provider.id,
+        request.model
+      ),
+      plannedOutputTokens: resolveOutputTokensForPlanning(
+        request.provider.id,
+        request.model
+      ),
       jsonSchema: RECHECK_SCHEMA as unknown as object,
       disableThinking: true,
       signal: request.signal,

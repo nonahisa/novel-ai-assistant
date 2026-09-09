@@ -4,6 +4,8 @@ import {
   findMergeCandidates,
 } from "../../src/core/characterMerge";
 import { emptyCharacter, type Character } from "../../src/models/character";
+import { readFileSync } from "node:fs";
+import * as nodePath from "node:path";
 
 /**
  * 呼称は「呼ぶ側」のレコードに入る。
@@ -132,6 +134,55 @@ describe("同一人物の候補検出", () => {
     expect(findMergeCandidates(characters)).toEqual([]);
   });
 
+  test.each([
+    ["お嬢様"],
+    ["奥様"],
+    ["王女殿下"],
+  ])("肩書きだけの呼び方 %s は、呼称の索引に入れない", (title) => {
+    // 一覧は書かれたままの形（「お嬢様」）で持ち、照合の側は敬称を落とした形
+    // （「お嬢」）で見ていたため、この2語は一度も効いていなかった（実機確認A-18）
+    const characters = [
+      emptyCharacter("char_001", "文佳"),
+      speaker("char_002", "太志", [{ target: "文佳", terms: [title] }]),
+    ];
+
+    expect(buildAppellationIndex(characters).get("char_001")).toEqual(["文佳"]);
+  });
+
+  test.each([
+    ["僕"],
+    ["私"],
+    ["あんた"],
+    ["お嬢様"],
+    ["お母さん"],
+    ["母"],
+  ])("別名に入った %s を、同一人物の根拠にしない", (word) => {
+    // 実データ：「密倉 文佳／三門太志＝僕」「太志／フミカ＝あんた」
+    // 「フミカ／斉藤＝お嬢様」。どれも別人なのに strong で並んでいた
+    const characters = [
+      { ...emptyCharacter("char_001", "密倉 文佳"), aliases: [word] },
+      { ...emptyCharacter("char_002", "三門太志"), aliases: [word] },
+    ];
+
+    expect(findMergeCandidates(characters)).toEqual([]);
+  });
+
+  test("誰にでも使う呼び方でも、名前そのものが同じなら候補には出す", () => {
+    // 実データで「お母さん」が4件に割れていた。根拠から外しただけだと、
+    // 本当の重複を直す手立てが無くなる。確信度を落として断りを添える
+    const characters = [
+      emptyCharacter("char_001", "お母さん"),
+      emptyCharacter("char_002", "お母さん"),
+    ];
+
+    const candidates = findMergeCandidates(characters);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].reason).toBe("same_name");
+    expect(candidates[0].confidence).toBe("weak");
+    expect(candidates[0].weakNote).toContain("誰にでも使う");
+  });
+
   test("無関係な2人は候補にしない", () => {
     const characters = [
       emptyCharacter("char_001", "ホンゴー"),
@@ -139,5 +190,31 @@ describe("同一人物の候補検出", () => {
     ];
 
     expect(findMergeCandidates(characters)).toEqual([]);
+  });
+});
+
+/**
+ * 代名詞と家族関係語の一覧は `core/genericPersonWords.ts` が1か所で持つ。
+ *
+ * 写しを作ると、片方にだけ語を足したときに
+ * 「抽出では弾くのに、統合候補では根拠になる」という食い違いが起きる
+ * （実機確認A-18で、実際に片方だけ手当てされていた）。
+ */
+describe("誰にでも使う呼び方の一覧", () => {
+  const read = (relative: string): string =>
+    readFileSync(
+      nodePath.join(__dirname, "..", "..", "src", relative),
+      "utf8"
+    );
+
+  test("抽出の検算と、統合候補の両方が同じ一覧を読む", () => {
+    const merge = read("core/characterMerge.ts");
+    const validation = read("core/characterExtractionValidation.ts");
+
+    expect(merge).toContain('from "./genericPersonWords"');
+    expect(validation).toContain('from "./genericPersonWords"');
+    // 写しを作らない
+    expect(merge).not.toContain('"あんた"');
+    expect(validation).not.toContain('"あんた"');
   });
 });

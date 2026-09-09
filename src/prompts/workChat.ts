@@ -1,5 +1,9 @@
 import type { ChatContextKind } from "../core/chatContext";
 import { runnableFeatureList } from "../core/chatEdit";
+import {
+  parseProfileSignals,
+  type AdviceProfileSignals,
+} from "../core/advicePolicy";
 
 /**
  * P-21 いま開いている画面について相談する（相談パネル）
@@ -23,7 +27,19 @@ import { runnableFeatureList } from "../core/chatEdit";
 // 3.4: 使い方の資料を「全操作の目次＋関係しそうな説明だけ」に変えた。
 //      渡す形が変わったので、【使い方を聞かれたとき】の指示も書き換えた
 //      （説明の無い操作は、場所を答えてホバーとマニュアルへ案内させる）
-export const WORK_CHAT_VERSION = "3.4";
+// 3.5: 助言方針（P-36）の推定を少しずつ直すため、profileSignals を返させる
+//      （設計書6.86）。**指示は P-36 の共通段落にある**——方針を持たない
+//      作者には送られないので、相談の費用は増えない
+// 3.6: 実機の相談で見つかった2件（2026-09-07）。①資料どうしが食い違っているとき、
+//      それを作品の欠点として答えていた（「文佳」の別名に「太志」が入った資料を
+//      そのまま作品の話にした）。②書き込みの content に助言の文が混ざり、
+//      plot.md の「テーマ」へ「〜を追加するとわかりやすくなります」が入った
+// 3.7: 作者の指摘（2026-09-08）。①「わかりにくいですか？」という**見立てを
+//      求める問い**に、選択肢3つと作業の提案3つが返り、「論理が飛躍している」
+//      と言われた。判断を求められたら見立てだけを返させる。
+//      ②同じ返答の中で、reply は「明確に描かれています」なのに reloadRecord の
+//      留意点は「不十分に描写されている」と正反対だった。結論と食い違わせない
+export const WORK_CHAT_VERSION = "3.7";
 
 /**
  * 起動できる機能の一覧。**実装（chatEdit.ts）から作る。**
@@ -47,6 +63,12 @@ export const WORK_CHAT_SYSTEM_PROMPT = `あなたは日本語の小説執筆を�
    読み取れることを述べてください。作者が求めているのは正解ではなく、
    考える手掛かりです。「分かりません」の一言は、いちばん役に立ちません。
 6. 作者はプロの書き手です。基礎的な説明を長々と述べないこと。
+7. **渡された設定資料どうしが食い違っているとき**（同じ人物が複数の記録にいる、
+   別人の名前が別名に入っている、など）は、**それを作品の欠点や本文の問題として
+   述べないこと。** 「設定資料が食い違っています：〇〇と△△」と reply で断り、
+   reloadRecord で読み直しを勧めてください。
+   **本文の描写の問題と、資料の記録の問題を混ぜないこと。**
+   資料は本文からAIが作ったものなので、間違っていることがあります。
 
 【助言の土台にする、作者の創作観】
 作者は「読まれ方」を5つの段階で考えます：
@@ -73,6 +95,15 @@ export const WORK_CHAT_SYSTEM_PROMPT = `あなたは日本語の小説執筆を�
   項目名は、押しても何を頼んだことになるのか分からず、会話が進みません。
   必ず**作者が言いそうな一文**（「〜してほしい」「〜を見せて」）にすること。
 - 会話を終えてよい場面では options を空配列にしてよい。
+- **見立てを求められたら、見立てだけを返すこと。** 作者が「〜ですか？」
+  「〜は伝わっていますか」「どう思う？」のように**判断・見立てを求めている**
+  ときは、reply に見立てとその根拠だけを書き、**options は空配列**にし、
+  edit・run・reloadRecord も付けないこと。**頼まれていない作業を勧めない。**
+  作者が聞いたのは「どう読めるか」であって、直す手順ではありません。
+  run や edit を付けてよいのは、**作業を頼まれたとき**（「〜して」
+  「〜を作って」「〜を直して」）だけです。
+  見立てを述べたうえで直し方まで並べると、答えと選択肢が噛み合わず、
+  作者には話が飛んだように見えます（実機で「論理が飛躍している」と指摘された）。
 - **options に入れた文を reply の中で繰り返さないこと。** 画面では reply の下に
   options がボタンとして並ぶため、両方に書くと**同じ文が二度表示される**。
   reply には「なぜその選択肢なのか」「どこが分からないか」だけを書き、
@@ -97,6 +128,11 @@ needFiles にそのパスを入れてください（作品フォルダからの�
   - "blurb"（作品紹介文） / "catchphrase"（キャッチコピー）
   - "episode.7" のように話数を添えた各話あらすじ
 - content はその項目に入る**完成した内容**にすること（差分や指示ではなく、そのまま置き換わる文章）。
+- **content はその項目の中身だけ**にすること。「〜するとよい」「〜を追加すると
+  わかりやすくなります」のような**助言・提案・作者への呼びかけを入れないこと。**
+  content はそのまま作者のファイルへ書き込まれます。たとえば「テーマ」に
+  書き込むなら、入ってよいのは**テーマそのもの**だけです。
+  **助言は reply に書いてください。**
 - **小説の本文（原稿）は書き換えられません。** 本文の直しを求められたら、
   edit を使わず reply で「本文は誤字脱字の指摘から直してください」と伝えてください。
 - 書き込みの提案が無いときは edit を省いてください。
@@ -161,13 +197,20 @@ ${RUNNABLE_LIST}
 - notes には作者の訴えを短くまとめて書くこと
   （例:「他の登場人物『殿下』の情報が混入しています。」）。
   読み直すAIへの申し送りになるので、**何が混ざっているか**を具体的に書くこと
+- **作者が資料の誤りを訴えたときだけ**付けること。あなたが本文の描写の
+  不足を感じただけでは付けないこと
+- **notes は reply の結論と食い違わせないこと。** reply で「明確に
+  描かれています」と答えながら、notes に「不十分に描写されている」と書くような、
+  同じ返答の中で正反対のことを言う形にしないこと
 - 設定資料の誤りの話でないときは reloadRecord を付けないこと。
   本文やプロットの相談、資料の内容についての質問には要りません
 - **あなたが資料を書き換えるのではありません。** 読み直した結果は項目ごとの
   提案として並び、作者が選んだものだけが反映されます
 
 【出力形式】JSONのみ。前置き・後書き・コードフェンスを含めないこと。
-{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "locate": {"path": "...", "text": "...", "label": "..."}, "reloadRecord": {"kind": "character", "name": "アジャーノ", "notes": "他の登場人物『殿下』の情報が混入しています。"}}`;
+{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "locate": {"path": "...", "text": "...", "label": "..."}, "reloadRecord": {"kind": "character", "name": "アジャーノ", "notes": "他の登場人物『殿下』の情報が混入しています。"}, "profileSignals": null}
+
+**profileSignals は、末尾に説明があるときだけ使ってください。** 説明が無ければ必ず null にしてください。`;
 
 export interface WorkChatTurn {
   role: "author" | "assistant";
@@ -332,6 +375,23 @@ export const WORK_CHAT_SCHEMA = {
       },
       required: ["kind", "name"],
     },
+    /*
+      助言方針の推定を直すための報告（P-36、設計書6.86）。
+
+      **中身は必須にしない。** ほかの項目と違い、これは
+      「読み取れたときだけ入れる」もので、空を強いると
+      AIが毎回どれかを埋めてしまう（点数が意味もなく動く）。
+    */
+    profileSignals: {
+      type: ["object", "null"],
+      properties: {
+        reader: { type: ["number", "null"] },
+        self: { type: ["number", "null"] },
+        taste: { type: ["number", "null"] },
+        acceptance: { type: ["string", "null"] },
+        confidence: { type: ["string", "null"] },
+      },
+    },
   },
   required: [
     "reply",
@@ -341,6 +401,7 @@ export const WORK_CHAT_SCHEMA = {
     "run",
     "locate",
     "reloadRecord",
+    "profileSignals",
   ],
 } as const;
 
@@ -360,6 +421,14 @@ export interface WorkChatAnswer {
    * 名前が実在するかは呼び出し側が照合する
    */
   reloadRecord: unknown;
+  /**
+   * 助言方針の推定を直すための報告（P-36、設計書6.86）。
+   *
+   * **ここで形を絞ってから返す。** ほかの項目と違って、これは
+   * そのまま点数の計算に入る。`"+1"` のような文字列や 3 のような値を
+   * 通すと、作者の方針が壊れたまま気づけない。
+   */
+  profileSignals: AdviceProfileSignals | undefined;
 }
 
 /**
@@ -392,6 +461,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
           run?: unknown;
           locate?: unknown;
           reloadRecord?: unknown;
+          profileSignals?: unknown;
         };
         return {
           reply: record.reply.trim(),
@@ -407,6 +477,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
           run: record.run,
           locate: record.locate,
           reloadRecord: record.reloadRecord,
+          profileSignals: parseProfileSignals(record.profileSignals),
         };
       }
     } catch {
@@ -422,6 +493,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
     run: undefined,
     locate: undefined,
     reloadRecord: undefined,
+    profileSignals: undefined,
   };
 }
 

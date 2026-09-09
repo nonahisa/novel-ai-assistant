@@ -2,6 +2,10 @@ import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError } from "../ai/types";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
 import { loadEpisodeBodies } from "../core/episodeBodies";
 import { readPlotText } from "../core/plotFile";
@@ -19,9 +23,29 @@ import {
 } from "../prompts/openingCheck";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import { withCancellableProgress } from "../views/progress";
+/*
+  まとめ実行（設計書6.80）へ、終わり方を伝えるための印。
+
+  **「止めた」と「失敗した」を分ける。** 作者の中止・確認での取りやめ・
+  前提不足は `CHECK_CANCELLED`（残りも走らせない）、AIの失敗と応答の
+  読み取り失敗は `CHECK_FAILED`（次の検知へ進む）。冒頭診断だけは結果が
+  文書として開くため、ほかの検知と違って「件数」で終わりを判断できない。
+*/
+import {
+  CHECK_CANCELLED,
+  CHECK_COMPLETED,
+  CHECK_FAILED,
+  type CheckCommandOutcome,
+} from "../core/proofreadingSuite";
 import { reportAIError } from "./reportAIError";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
-import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  useLogFile,
+} from "../core/logger";
+import { warnWithLog } from "../views/notify";
 
 /**
  * 冒頭診断（P-24、設計書6.30）。
@@ -53,15 +77,15 @@ const INTENTIONAL_MARKER = "意図的";
 export async function checkOpening(
   work: WorkEntry,
   registry: AIRegistry
-): Promise<void> {
+): Promise<CheckCommandOutcome> {
   useLogFile(work.folderPath);
 
   // 冒頭診断は「生成系」の割当に従う（あらすじ・紹介文と同じ扱い）
   const resolved = await ensureConfigured(registry, "generate");
-  if (!resolved) return;
+  if (!resolved) return CHECK_CANCELLED;
 
   const material = await collectOpening(work);
-  if (!material) return;
+  if (!material) return CHECK_CANCELLED;
 
   // **繋がるかを、費用の確認より先に確かめる**（設計書6.51）。
   // 繋がらないと分かっているのに料金の話をしても意味がない。
@@ -75,7 +99,7 @@ export async function checkOpening(
       resolved.model
     ))
   ) {
-    return;
+    return CHECK_CANCELLED;
   }
 
   const ok = await confirmPaidUsage(resolved.provider, {
@@ -86,7 +110,7 @@ export async function checkOpening(
       `送るのは第1話の冒頭 ${material.openingText.length}字だけです。\n` +
       "本文は書き換えません。",
   });
-  if (!ok) return;
+  if (!ok) return CHECK_CANCELLED;
 
   let responseText: string | undefined;
   let failure: unknown;
@@ -111,6 +135,17 @@ export async function checkOpening(
         // 判定と根拠を出すだけなので、揺らす理由が無い。
         // 0にしないのは、同じ言い回しが6要素に並ぶのを避けるため
         temperature: 0.2,
+        // **応答の見込みと実上限を分けて渡す**（設計書6.77の第2段）。
+        // 渡さないと、関所もOllamaの `num_ctx` も設定値（既定16,384）で
+        // 動く——6要素の判定と根拠なので、実際にはその何分の一も使わない
+        maxOutputTokens: resolveOutputTokensForSend(
+          resolved.provider.id,
+          resolved.model
+        ),
+        plannedOutputTokens: resolveOutputTokensForPlanning(
+          resolved.provider.id,
+          resolved.model
+        ),
         jsonSchema: OPENING_CHECK_SCHEMA as unknown as object,
         disableThinking: true,
         // **numCtx は渡さない。** 送るのは冒頭3,000字だけなので、
@@ -130,25 +165,26 @@ export async function checkOpening(
 
   if (failure) {
     // 中止は失敗ではない。作者が自分で止めたことを警告で知らせ直さない
-    if (failure instanceof AIError && failure.kind === "aborted") return;
+    if (failure instanceof AIError && failure.kind === "aborted") {
+      return CHECK_CANCELLED;
+    }
     reportAIError("冒頭診断", failure);
-    return;
+    // **AIの失敗は「止めた」ではない**（設計書6.80）。まとめ実行は次の検知へ
+    // 進んでよい——レート上限も接続の失敗も、次の機能では起きないことがある
+    return CHECK_FAILED;
   }
-  if (responseText === undefined) return;
+  if (responseText === undefined) return CHECK_CANCELLED;
 
   const result = parseOpeningCheck(responseText);
   if (!result) {
     // **応答の中身は捨てない。** 通知には出さなくても、ログには残す
     logFailure("冒頭診断", {
       理由: "応答を読み取れません",
-      応答: responseText.slice(0, 400),
+      応答: responseExcerptForLog(responseText),
     });
-    const answer = await vscode.window.showWarningMessage(
-      "冒頭診断の応答を読み取れませんでした。",
-      "ログを見る"
-    );
-    if (answer === "ログを見る") showLog();
-    return;
+    await warnWithLog("冒頭診断の応答を読み取れませんでした。");
+    // 応答を読めなかったのも失敗である（次の検知は走らせる）
+    return CHECK_FAILED;
   }
 
   // **ファイル名には作品名を入れない。** 置き場が作品ごとに分かれており
@@ -164,6 +200,7 @@ export async function checkOpening(
     undefined,
     { work }
   );
+  return CHECK_COMPLETED;
 }
 
 interface OpeningMaterial {

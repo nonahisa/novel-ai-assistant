@@ -103,12 +103,20 @@ body {
 #toolbar .running { color: var(--vscode-descriptionForeground); font-size: 12px; }
 #running:empty { display: none; }
 #toolbar label { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+/*
+  ボタンは押しやすい大きさにする（作者の指摘、2026-09-06）。
+
+  「適用／無視／今後直さない／再チェック／戻す」が小さく詰まっていて、
+  押し間違えやすかった。**押し間違いが原稿を書き換える**場所なので、
+  見た目より当てやすさを取る。
+*/
 button {
   background: var(--vscode-button-background);
   color: var(--vscode-button-foreground);
   border: none;
   border-radius: 2px;
-  padding: 3px 10px;
+  padding: 4px 10px;
+  min-height: 28px;
   cursor: pointer;
   font-size: inherit;
 }
@@ -152,6 +160,15 @@ body.show-low .issue.low { display: flex; }
   font-size: 12px;
   color: var(--vscode-descriptionForeground);
   border-left: 2px solid var(--vscode-focusBorder);
+  padding-left: 8px;
+}
+/* AIに訊いた答え（設計書6.73）。**再チェックの結果とは分ける**——
+   あちらは「直ったか」で、こちらは「どちらに揃えるとよいか」の助言である。
+   どちらも不具合ではないので赤で出さない */
+.advice-note {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  border-left: 2px solid var(--vscode-textLink-foreground);
   padding-left: 8px;
 }
 .issue-head {
@@ -201,7 +218,15 @@ body.show-low .issue.low { display: flex; }
   font-size: 12px;
 }
 .reason { color: var(--vscode-descriptionForeground); font-size: 12px; }
-.actions { display: flex; gap: 6px; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+/*
+  「今後直さない」だけ隣から離す（作者の指摘、2026-09-06）。
+
+  **取り消しにくい判断だから**である。押すとその語を今後どの話でも
+  指摘しなくなるので、「無視」の隣に同じ間隔で並んでいると、
+  1つ押し間違えただけで指摘が二度と出なくなる。
+*/
+.actions .keep-word { margin-inline-start: 16px; }
 .status-detail { font-size: 12px; color: var(--vscode-errorForeground); }
 /* 矛盾。置き換えではなく食い違いを並べる */
 .contradiction .quote {
@@ -223,6 +248,24 @@ body.show-low .issue.low { display: flex; }
   color: var(--vscode-descriptionForeground);
   margin-top: 4px;
 }
+/*
+  **説明が長くても、ボタン列を枠の中に残す**（作者の指摘、2026-09-06）。
+
+  矛盾は「設定では／本文では」の対比に加えて4行の説明が付くので、
+  既定の高さの提案パネルでは1件だけでも
+  「本文を見る／設定資料を見る／無視／伏線として登録／再チェック」が
+  下へはみ出し、**初見では「ボタンが無い」に見えた。**
+
+  説明のほうを畳むのではなく（読まずに押されると困る）、説明の塊だけを
+  スクロールさせる。パネルの高さに対する割合で切るので、パネルを広げれば
+  そのぶん多く読める。ボタン列は塊の外にあるので、常に見えている。
+*/
+.contradiction .details {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+/* 縮まないと、上の塊に押し出されて結局はみ出す */
+.issue .actions { flex-shrink: 0; }
 .badge.cat { border-color: var(--vscode-focusBorder); }
 </style>
 </head>
@@ -237,7 +280,14 @@ body.show-low .issue.low { display: flex; }
   <button class="secondary" id="clear" title="この分類の一覧を空にします（本文は書き換わりません）">一覧を空にする</button>
   <button class="secondary" id="applyAll" title="確信度が「高」「中」で、修正案のあるものだけが対象です">まとめて適用</button>
 </div>
-<div id="empty">まだ検知結果がありません。「誤字脱字を検知」または「表記ゆれを検知」を実行してください。</div>
+<!--
+  **分類の名前を書かない。** この案内は誤字脱字・表記ゆれ・推敲・矛盾・
+  プロット逸脱…どのタブでも同じものが出る。以前は「誤字脱字を検知」「表記ゆれを
+  検知」の2つだけを挙げていたため、矛盾検知を走らせた直後に0件だった作者へ
+  「別の機能を実行してください」と言っているように読めた（実機確認 2026-09-05）。
+  分類ごとの対応表を持つと、分類が増えるたびに更新漏れが起きるので持たない。
+-->
+<div id="empty">まだ検知結果がありません。この分類の検知を実行すると、ここに指摘が並びます。</div>
 <div id="list"></div>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
@@ -275,10 +325,20 @@ function paintRunning() {
     違う作品の進みを送らずに捨てていたため、2作品目では進みが一切
     出なかった。作品名があれば、見えている件数と関係のない数だと分かる。
   */
+  /*
+    **飛ばした数を添える**（作者の指摘、2026-09-06）。分母はAIへ送る数だけに
+    したので、7チャンク中6件がキャッシュに当たった実行は「1/1」と出る。
+    そのままだと本文の量に対して分母が小さすぎ、一部しか見ていないように
+    読める。0のときは何も書かない（毎回「0件はスキップ」は邪魔なだけ）
+  */
+  const skippedText = runningState && runningState.skipped > 0
+    ? '（処理済み ' + runningState.skipped + '件はスキップ）'
+    : '';
   const text = runningState
     ? (runningState.workTitle ? '〈' + runningState.workTitle + '〉' : '') +
       runningState.label + 'しています… ' +
-      runningState.done + '/' + runningState.total + runningState.unit
+      runningState.done + '/' + runningState.total + runningState.unit +
+      skippedText
     : '';
 
   // 一覧が空のときは、いちばん目に入るところへ出す
@@ -509,6 +569,10 @@ function renderContradiction(item) {
       ? '<span class="reason">' + escapeHtml(item.dismissReason || '無視しました') + '</span>'
       : '') +
     '</div>' +
+    // **説明はひと塊にして、そこだけスクロールさせる。** 4行の説明で
+    // ボタン列が枠の下へ押し出され、「ボタンが無い」に見えていた
+    // （作者の指摘、2026-09-06）。畳まないのは、読まずに押されないため
+    '<div class="details">' +
     '<div class="quote">' + escapeHtml(item.excerpt) + '</div>' +
     '<div class="compare">' +
     '<div><span class="side">' + escapeHtml(item.leftLabel || '設定では') + '</span>' + escapeHtml(item.settingSays) + '</div>' +
@@ -516,10 +580,16 @@ function renderContradiction(item) {
     '</div>' +
     note +
     recheckNote +
+    '</div>' +
     (canAct
       ? '<div class="actions">' +
-        '<button data-action="jump" data-id="' + item.id + '"' + disabled + '>本文を見る</button>' +
-        '<button class="secondary" data-action="openSettings" data-id="' + item.id + '"' + disabled + '>' + (item.openTarget === 'plot' ? 'プロットを見る' : '設定資料を見る') + '</button>' +
+        // **飛び先に合った名前を出す。** 単話プロットの検査（P-27）は
+        // 本文を見ていないので、押すと開くのは単話プロットである
+        '<button data-action="jump" data-id="' + item.id + '"' + disabled + '>' + escapeHtml(item.jumpLabel || '本文を見る') + '</button>' +
+        // 照らす相手が無い指摘（P-27）では、このボタンごと出さない
+        (item.openTarget === 'none'
+          ? ''
+          : '<button class="secondary" data-action="openSettings" data-id="' + item.id + '"' + disabled + '>' + escapeHtml(item.openLabel || (item.openTarget === 'plot' ? 'プロットを見る' : '設定資料を見る')) + '</button>') +
         '<button class="secondary" data-action="dismiss" data-id="' + item.id + '"' + disabled + '>無視</button>' +
         // **矛盾ではなく伏線だった、という道**（設計書6.35.4）。
         // 矛盾検知は「意図した違和感」も食い違いとして拾うので、
@@ -604,9 +674,13 @@ function renderItem(item) {
   const recheckNote = item.recheckNote
     ? '<div class="recheck-note">' + escapeHtml(item.recheckNote) + '</div>'
     : '';
-  // **再チェック中はこの行の操作を全部止める。** AIの答えは数秒〜数十秒
-  // かかる。その間に「適用」を押されると、確かめている最中の本文が変わる
-  const disabled = item.busy ? ' disabled' : '';
+  // AIに訊いた答え（設計書6.73）。**助言であって、本文には何もしていない**
+  const adviceNote = item.adviceNote
+    ? '<div class="advice-note">' + escapeHtml(item.adviceNote) + '</div>'
+    : '';
+  // **AIに問い合わせている間も、この行の操作を全部止める。** 答えを待つ間に
+  // 「適用」を押されると、どちらに揃えるかを訊いている最中の本文が変わる
+  const disabled = (item.busy || item.askingAdvice) ? ' disabled' : '';
 
   // 「冗長」の一語だけでは、何と何の話なのか分からない。説明を添える
   const explain = [item.reason, item.detail].filter(Boolean).join('：');
@@ -640,6 +714,7 @@ function renderItem(item) {
     body +
     statusDetail +
     recheckNote +
+    adviceNote +
     (canAct
       ? '<div class="actions">' +
         (hasFix
@@ -647,7 +722,16 @@ function renderItem(item) {
           : '<button data-action="jump" data-id="' + item.id + '"' + disabled + '>本文を見る</button>') +
         '<button class="secondary" data-action="dismiss" data-id="' + item.id + '"' + disabled + '>無視</button>' +
         (canKeep(item)
-          ? '<button class="secondary" data-action="keepWord" data-id="' + item.id + '" title="この語を今後どの話でも指摘しません"' + disabled + '>今後直さない</button>'
+          // **隣から離して置く**（.keep-word）。取り消しにくい判断なので、
+          // 「無視」と同じ間隔で並べない
+          ? '<button class="secondary keep-word" data-action="keepWord" data-id="' + item.id + '" title="この語を今後どの話でも指摘しません"' + disabled + '>今後直さない</button>'
+          : '') +
+        // **どちらに揃えるかは、機械には決められない**（設計書6.73）。
+        // 揺れの組の材料を持っている指摘（表記ゆれ）にだけ出す。
+        // 答えは下に出るだけで、本文は書き換わらない
+        (item.notation
+          ? '<button class="secondary" data-action="askNotation" data-id="' + item.id + '" title="どちらの表記に揃えるとよいかをAIに訊きます（本文は書き換わりません）"' + disabled + '>' +
+            (item.askingAdvice ? 'AIに問い合わせ中…' : 'AIに訊く') + '</button>'
           : '') +
         // **本文を手で書き直したあと、解消したかを確かめる**（作者の依頼）。
         // 修正案の有無を問わず出す——誤字脱字でも「そうじゃない」直し方を
@@ -695,6 +779,8 @@ window.addEventListener('message', (event) => {
       done: message.done || 0,
       total: message.total || 0,
       unit: message.unit || 'チャンク',
+      // 処理済みで飛ばした数。分母がそのぶん小さくなっている断り
+      skipped: message.skipped || 0,
       // 表示中の作品の検知なら空。別の作品なら題名が入る
       workTitle: message.workTitle || '',
     };

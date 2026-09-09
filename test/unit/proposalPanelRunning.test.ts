@@ -121,10 +121,29 @@ describe("進み具合を送る", () => {
         done: 3,
         total: 12,
         unit: "チャンク",
+        // 飛ばした件数（既定は0）。分母がAIへ送る数だけになった断り
+        skipped: 0,
         // いま見ている作品の検知なので、題名は要らない
         workTitle: "",
       },
     ]);
+  });
+
+  /**
+   * **飛ばした件数を添える**（作者の指摘、2026-09-06）。分母を
+   * 「実際に送る件数」にしたので、7チャンク中6件がキャッシュに当たった
+   * 実行は「1/1」と出る。飛ばした数が無いと、本文の量に対して分母が
+   * 小さすぎ、一部しか見ていないように読める。
+   */
+  test("処理済みで飛ばした件数を添えられる", () => {
+    const panel = panelWithView();
+    panel.showRunning(work, "誤字脱字を検知", 1, 1, "チャンク", 6);
+
+    expect(runningPosts()[0]).toMatchObject({
+      done: 1,
+      total: 1,
+      skipped: 6,
+    });
   });
 
   /** 話ごとに送る検知（プロット逸脱）は、チャンクではなく話を数えている */
@@ -158,6 +177,7 @@ describe("進み具合を送る", () => {
         done: 1,
         total: 5,
         unit: "チャンク",
+        skipped: 0,
         workTitle: "別の作品",
       },
     ]);
@@ -224,9 +244,41 @@ describe("画面の出し分け", () => {
     expect(html).toContain("'しています… '");
   });
 
+  /**
+   * 分母は「実際にAIへ送る件数」なので、飛ばした数を添えないと
+   * 一部しか見ていないように読める（作者の指摘、2026-09-06）。
+   * 0件のときは何も書かない——毎回「0件はスキップ」は邪魔なだけである。
+   */
+  test("飛ばした件数を添える道がある（0のときは書かない）", () => {
+    expect(html).toContain("runningState.skipped > 0");
+    expect(html).toContain("'（処理済み '");
+    expect(html).toContain("skipped: message.skipped || 0");
+  });
+
   test("別の作品なら、題名を頭に付ける", () => {
     // 「〈別の作品〉誤字脱字を検知しています… 1/5チャンク」
     expect(html).toContain("runningState.workTitle");
+  });
+
+  /**
+   * 0件のときの案内は、どの分類でも同じものが出る（実機確認 2026-09-05）。
+   *
+   * 以前は「誤字脱字を検知」「表記ゆれを検知」の2つだけを挙げていたため、
+   * 矛盾検知を走らせて0件だった作者に、別の機能を勧めているように読めた。
+   */
+  test("0件の案内に、特定の分類の名前を書かない", () => {
+    const empty = html.slice(html.indexOf('<div id="empty">'));
+    const line = empty.slice(0, empty.indexOf("</div>"));
+    for (const name of [
+      "誤字脱字を検知",
+      "表記ゆれを検知",
+      "推敲",
+      "矛盾を検知",
+      "プロット逸脱",
+    ]) {
+      expect(line, name).not.toContain(name);
+    }
+    expect(line).toContain("この分類の検知");
   });
 
   /** 一覧が空のときは中央、出ているときは見出しの横（読む場所を奪わない） */

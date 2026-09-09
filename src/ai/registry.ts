@@ -18,6 +18,9 @@ import { probeGeneration } from "./generationProbe";
 import { logFailure, logStep, showLog } from "../core/logger";
 import { askText, cancelItem } from "../views/dialogs";
 import { canRunProcesses } from "../core/runtime";
+import { allModelTuning, modelTuningKey } from "../core/modelTuning";
+import { modelPickDetail } from "../core/tuningStats";
+import { notifyDone } from "../views/notify";
 
 const KEY_PROVIDER = "novelai.ai.provider";
 const KEY_MODEL = "novelai.ai.model";
@@ -459,6 +462,14 @@ export async function pickProviderAndModel(
     light: "軽量",
   };
 
+  /*
+    **測ってある速さを、選ぶ場で見せる**（作者の要望、2026-09-06）。
+
+    台帳はここで一度だけ読む——`modelTuning()` をモデルの数だけ呼ぶと、
+    そのたびに設定を読んで解釈し直すことになる。
+  */
+  const tuningTable = allModelTuning();
+
   const modelPick = await vscode.window.showQuickPick(
     [
       ...models.map((m) => ({
@@ -470,10 +481,11 @@ export async function pickProviderAndModel(
         ]
           .filter(Boolean)
           .join(" / "),
-        detail:
-          m.capabilities.length > 0
-            ? `対応: ${m.capabilities.join(", ")}`
-            : undefined,
+        detail: modelPickDetail(
+          m.capabilities,
+          tuningTable.get(modelTuningKey(providerPick.providerId, m.id))
+            ?.outputTokensPerSecond
+        ),
         model: m,
       })),
       cancelItem(),
@@ -557,7 +569,7 @@ export async function runSetupWizard(
     );
   }
 
-  vscode.window.showInformationMessage(
+  notifyDone(
     `${provider.displayName} / ${m.displayName} を設定しました。${
       notes.length > 0 ? "\n" + notes.join("\n") : ""
     }`

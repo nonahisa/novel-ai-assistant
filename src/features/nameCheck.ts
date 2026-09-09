@@ -22,6 +22,10 @@ import { isBlankPlotSection, parsePlotMarkdown } from "../core/plotDoc";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError } from "../ai/types";
 import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
+import {
   buildNameSuggestPrompt,
   NAME_ORIGINS,
   NAME_SUGGEST_COUNT,
@@ -38,7 +42,13 @@ import { reportAIError } from "./reportAIError";
 import { cancelItem } from "../views/dialogs";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { revealTextLocation, type RevealInManuscript } from "./revealLocation";
-import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  useLogFile,
+} from "../core/logger";
+import { warnWithLog } from "../views/notify";
 
 /**
  * 名前の点検（設計書6.37.5）。
@@ -403,6 +413,16 @@ async function suggestNames(
           model: resolved.model,
           // 候補は広く出させる。当たり外れは作者が選ぶ（P-29）
           temperature: 0.8,
+          // **見込みと実上限を分けて渡す**（設計書6.77の第2段）。名前の候補は
+          // 短いが、渡さないと設定値（既定16,384）ぶんの席を毎回確保する
+          maxOutputTokens: resolveOutputTokensForSend(
+            resolved.provider.id,
+            resolved.model
+          ),
+          plannedOutputTokens: resolveOutputTokensForPlanning(
+            resolved.provider.id,
+            resolved.model
+          ),
           jsonSchema: NAME_SUGGEST_SCHEMA as unknown as object,
           disableThinking: true,
           meta: { feature: "name_suggest", workFolder: work.folderPath },
@@ -420,8 +440,12 @@ async function suggestNames(
   );
 
   if (failure || responseText === undefined) {
+    const cancelled = failure instanceof AIError && failure.kind === "aborted";
+    // **終わり方をログに残す。** 候補が出ないまま画面が静かになるので、
+    // 中止したのか落ちたのかがログだけで分かるようにする
+    logNameSuggestEnd({ failed: !cancelled, cancelled, kept: 0, dropped: 0 });
     // 中止は失敗ではない。作者が自分で止めたことを警告で知らせ直さない
-    if (!(failure instanceof AIError && failure.kind === "aborted")) {
+    if (!cancelled) {
       reportAIError("名前の候補づくり", failure);
     }
     void panel.webview.postMessage({
@@ -436,13 +460,9 @@ async function suggestNames(
     // **応答の中身は捨てない。** 通知に出さなくても、ログには残す
     logFailure("名前の候補", {
       理由: "応答を読み取れません",
-      応答: responseText.slice(0, 400),
+      応答: responseExcerptForLog(responseText),
     });
-    const answer = await vscode.window.showWarningMessage(
-      "名前の候補を読み取れませんでした。",
-      "ログを見る"
-    );
-    if (answer === "ログを見る") showLog();
+    await warnWithLog("名前の候補を読み取れませんでした。");
   }
 
   const screened = screenNameCandidates(parsed, material.entries, {
@@ -461,6 +481,13 @@ async function suggestNames(
     },
   });
 
+  logNameSuggestEnd({
+    failed: false,
+    cancelled: false,
+    kept: screened.kept.length,
+    dropped: screened.dropped.length,
+  });
+
   if (screened.dropped.length > 0) {
     // 黙って減らさない。何件が何で落ちたのかは画面にも出るが、
     // 通知でも一度伝える（画面の下のほうにあると気づかれない）
@@ -469,6 +496,27 @@ async function suggestNames(
         "既にある名前と響きが重なるため落としました（理由は画面に出ています）。"
     );
   }
+}
+
+/**
+ * 終了ログ（設計書6.77）。**開始したら必ず終わりを残す。**
+ *
+ * AIへの問い合わせは1回だけなので分母は常に1だが、ほかの検知と同じ
+ * 「n/N（失敗 m件 …）」の形に揃える——ログを読む側が形を覚え直さずに済む。
+ */
+function logNameSuggestEnd(counts: {
+  failed: boolean;
+  cancelled: boolean;
+  kept: number;
+  dropped: number;
+}): void {
+  logStep(
+    `名前の候補を終了: ${counts.cancelled ? 0 : 1}/1（失敗 ${
+      counts.failed ? 1 : 0
+    }件 / 候補 ${counts.kept}件 / 響きが重なって落とした ${counts.dropped}件` +
+      (counts.cancelled ? " / 中止された" : "") +
+      "）"
+  );
 }
 
 /** 系統を選ばせる。「指定なし」は既存の名前からAIに1つ推定させる */

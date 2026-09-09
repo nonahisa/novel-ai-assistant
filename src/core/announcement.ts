@@ -127,6 +127,48 @@ export function announceEpisodeLabel(
   return title ? `${head}「${title}」` : head;
 }
 
+/**
+ * 告知を作る話の並び（設計書6.41）。
+ *
+ * **新しい話が上。** 告知を作るのはたいてい今しがた公開した話なので、
+ * 先頭（＝話数が最大のもの）が既定の選択になるように並べる。
+ * **話数が読めないものは末尾へ回す**——前後を決められないので、
+ * 上へ混ぜると既定の話がそちらへ入れ替わる。
+ *
+ * 元の配列は壊さない。
+ */
+export function orderAnnounceEpisodes<T extends { chapter: number | null }>(
+  episodes: readonly T[]
+): T[] {
+  return [...episodes].sort((left, right) => {
+    if (left.chapter === null && right.chapter === null) return 0;
+    if (left.chapter === null) return 1;
+    if (right.chapter === null) return -1;
+    return right.chapter - left.chapter;
+  });
+}
+
+/**
+ * 競合中で一覧に出せない話の断り（設計書5.5.3）。
+ *
+ * **黙って消さない。** 競合中のファイルは一覧に出ないので、いま公開した
+ * 話が競合していると、作者が気づかないまま1つ前の話が既定として選ばれる
+ * （告知したい話と、告知される話が食い違う）。
+ *
+ * 名前は3件まで。無ければ `undefined`。
+ */
+export function describeConflictedEpisodes(
+  fileNames: readonly string[]
+): string | undefined {
+  if (fileNames.length === 0) return undefined;
+  const names = fileNames.slice(0, 3).join("、");
+  return (
+    `未解決の競合があるため、${fileNames.length}件の話は一覧に出ません` +
+    `（${names}${fileNames.length > 3 ? " ほか" : ""}）。` +
+    "競合を解決してから実行してください。"
+  );
+}
+
 export interface XPostParts {
   /** AIが書いた本文（定型句・ハッシュタグ・URLを含まない） */
   body: string;
@@ -139,17 +181,127 @@ export interface XPostParts {
 }
 
 /**
- * X用の投稿を組み立てる。
+ * 本文を文ごとの行に分ける（作者の要望、2026-09-06「改行があったほうが
+ * 読みやすいです」）。
  *
- * **定型句・ハッシュタグ・URLはコード側で付ける。** AIに書かせると
- * 話数を取り違えたり、存在しないURLを作ったりする。
+ * 句点・感嘆符・疑問符のあとで改行する。**閉じ括弧や引用符が続くときは
+ * 切らない**（「…。」の中で切ると、鉤括弧が行頭に来る）。
  */
-export function composeXPost(parts: XPostParts): string {
-  const lines = [`${parts.episodeLabel} 更新しました`, parts.body];
+export function splitXBodyLines(body: string): string[] {
+  const lines: string[] = [];
+  let current = "";
+  const characters = [...body.replace(/\r\n?/g, "\n")];
+  for (let index = 0; index < characters.length; index += 1) {
+    const character = characters[index];
+    if (character === "\n") {
+      if (current.trim()) lines.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += character;
+    if (!"。！？!?".includes(character)) continue;
+    const next = characters[index + 1];
+    if (next === undefined) continue;
+    if ("。！？!?」』）】〕〉》\"’\n".includes(next)) continue;
+    lines.push(current.trim());
+    current = "";
+  }
+  if (current.trim()) lines.push(current.trim());
+  return lines;
+}
+
+/** 空行の置き方（上限に近いとき、読みやすさが残る順に減らす） */
+export type XPostSpacing = {
+  /** 題の次に空行を置く */
+  afterTitle: boolean;
+  /** 本文を文ごとに改行する */
+  perSentence: boolean;
+  /** ハッシュタグ・URLの前に空行を置く */
+  beforeUrl: boolean;
+};
+
+const FULL_SPACING: XPostSpacing = {
+  afterTitle: true,
+  perSentence: true,
+  beforeUrl: true,
+};
+
+/**
+ * 上限に収まるまで空行を減らす順。**読みやすさが残る順に落とす**
+ * （作者の要望、2026-09-06。「{URL} の前 → 題の次 → 文ごと」）。
+ */
+const SPACING_FALLBACKS: readonly XPostSpacing[] = [
+  FULL_SPACING,
+  { ...FULL_SPACING, beforeUrl: false },
+  { ...FULL_SPACING, beforeUrl: false, afterTitle: false },
+  { afterTitle: false, perSentence: false, beforeUrl: false },
+];
+
+function composeXPostWith(parts: XPostParts, spacing: XPostSpacing): string {
+  const lines = [`${parts.episodeLabel} 更新しました`];
+  if (spacing.afterTitle) lines.push("");
+  const body = parts.body.replace(/\r\n?/g, "\n").trim();
+  lines.push(...(spacing.perSentence ? splitXBodyLines(body) : [body]));
+  if (spacing.beforeUrl) lines.push("");
   // ハッシュタグを設定していない作者の投稿に、空行を残さない
   if (parts.hashtags.length > 0) lines.push(parts.hashtags.join(" "));
   lines.push(parts.workUrl || URL_PLACEHOLDER);
   return lines.join("\n");
+}
+
+/**
+ * X用の投稿を組み立てる。
+ *
+ * **定型句・ハッシュタグ・URLはコード側で付ける。** AIに書かせると
+ * 話数を取り違えたり、存在しないURLを作ったりする。
+ *
+ * **改行を入れる**（作者の要望、2026-09-06「改行があったほうが読みやすい」）。
+ * 題の次に空行、本文は文ごとに改行、ハッシュタグ・URLの前に空行。
+ * 改行も1字として数えるので、**上限を超えるときは空行から順に減らす**
+ * （`SPACING_FALLBACKS`）。全部落としても超えるなら、そのまま返して
+ * 検査（`validateAnnouncement`）の注意に任せる——切り詰めはしない。
+ */
+export function composeXPost(parts: XPostParts): string {
+  let composed = "";
+  for (const spacing of SPACING_FALLBACKS) {
+    composed = composeXPostWith(parts, spacing);
+    if (xWeightedLength(composed) <= X_WEIGHTED_LIMIT) break;
+  }
+  return composed;
+}
+
+/**
+ * 貼り付ける直前に、決まったURLを告知文へ入れる（設計書6.79.8）。
+ *
+ * 告知文の末尾には、作者が設定したURLか目印（`{URL}`）が入っている
+ * （`composeXPost`）。SNSへ貼るときには**そのURLが決まっている**ので、
+ * 目印を差し替える。
+ *
+ * **末尾へ足すだけにしない。** 目印が残ったまま投稿されるか、URLが2つ
+ * 並ぶかのどちらかになる。**URLが決まらなければ目印の行ごと落とす**
+ * ——「{URL}」という文字列が読者の目に触れるほうが、URLが無いことより悪い。
+ *
+ * **ここでは字数を数え直さない**（設計書6.79.8）。Xの重み付き字数の検査は
+ * `validateAnnouncement` が既に済ませており、貼り付けの経路で数え方を
+ * もう1つ作ると、同じ投稿に2つの基準ができる。
+ *
+ * @param url 決まったURL。空文字は「URL無しで文だけ貼る」という答え
+ */
+export function xPostWithUrl(composedX: string, url: string): string {
+  const link = url.trim();
+  if (composedX.includes(URL_PLACEHOLDER)) {
+    if (!link) {
+      // 目印だけの行を落とす（本文の中に混ざっている目印は差し替えに任せる）
+      return composedX
+        .split("\n")
+        .filter((line) => line.trim() !== URL_PLACEHOLDER)
+        .join("\n")
+        .replace(/\n+$/u, "");
+    }
+    return composedX.split(URL_PLACEHOLDER).join(link);
+  }
+  // 目印が無い＝作者が設定したURLが既に入っている。重ねて足さない
+  return composedX;
 }
 
 /**
@@ -307,9 +459,20 @@ export function buildAnnouncementMarkdown(
     `## X（旧Twitter）用（${input.weightedLength}/${X_WEIGHTED_LIMIT}）`,
     ""
   );
-  // **ここだけコード柵で囲む。** ハッシュタグの行は「#創作」で始まるので、
-  // 素で置くとMarkdownの見出しとして表示され、コピーした形と見た目が食い違う
-  lines.push("```", input.composedX, "```", "");
+  // **引用（>）で置く**（作者の要望、2026-09-06「表示も折り返してね」）。
+  // 0.40.2 まではコード柵で囲んでいたが、Markdown のプレビューでは
+  // 折り返さず横スクロールになり、画面の幅を超えた分が読めなかった。
+  // 引用なら折り返し、空行も「>」だけの行で保てる。ハッシュタグの
+  // 「#創作」は「#」の直後に空白が無いので見出しにはならない。
+  // コピーは通知の「X用をコピー」が composedX をそのまま渡す
+  for (const line of input.composedX.split("\n")) {
+    // **行末の半角空白2つで、プレビューでも改行を見せる**（0.40.7）。Markdown は
+    // 引用の中の続く行を1段落にまとめるので、無いと3行が1行につながって出る。
+    // 空白を足すのはこの書き出しだけで、composedX（X用をコピーの中身）には
+    // 足さない——X の280字に数えられてしまう
+    lines.push(line ? `> ${line}  ` : ">");
+  }
+  lines.push("");
 
   lines.push("## 活動報告・近況ノート用", "", input.activityReport, "");
   lines.push("## 後書き用", "", input.afterword, "");

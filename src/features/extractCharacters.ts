@@ -21,6 +21,7 @@ import {
   segmentsOf,
   splitIntoChunks,
   Chunk,
+  MIN_CHUNK_CHARS,
 } from "../core/chunker";
 // 分け直しの手順は1か所に置く（設計書6.27.10）。ここに写しを持つと、
 // 逃げ道を直したときに片方だけが古いままになる
@@ -38,6 +39,9 @@ import {
   parseResult,
   validateCharacterExtractResult,
   type CharacterRejectionReason,
+  type CharacterValidationResult,
+  type CorrectedRelationRecord,
+  type DroppedAliasRecord,
   type RejectedCharacterCandidate,
 } from "../core/characterExtractionValidation";
 import {
@@ -48,7 +52,7 @@ import {
   ExtractedCharacter,
   buildCharacterExtractPrompt,
 } from "../prompts/characterExtract";
-import { withCancellableProgress } from "../views/progress";
+import { withAiTurnProgress } from "./aiTurn";
 import {
   logFailure,
   logLine,
@@ -58,13 +62,17 @@ import {
 } from "../core/logger";
 import { writeExtractedIndex } from "../core/extractedIndexStore";
 import { readEpisodeContents } from "./extractionFreshness";
-import { resolveMaxOutputTokens } from "../ai/outputLimit";
+import {
+  resolveMaxOutputTokens,
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { PendingUpdateStore } from "../core/pendingUpdates";
 import { applyPendingCharacterUpdates } from "./applyPendingUpdates";
 import type { ProposalPanel } from "./proposalPanel";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
-import { readChunkSettings } from "./chunkSettings";
+import { readChunkSettings, resolveModelInfoOrWarn } from "./chunkSettings";
 import {
   AbilitySystemStore,
   createAbilityStore,
@@ -76,11 +84,35 @@ import {
   SettingsExtractionAccumulator,
   type SettingsPersistResult,
 } from "./extractSettings";
+import { confirmRun, notifyDone } from "../views/notify";
 
 interface ExtractionFailure {
   chunk: Chunk;
   message: string;
   kind?: AIError["kind"];
+}
+
+/**
+ * AIの読みをコードで検算して直した分（設計書6.18）。
+ *
+ * **件数を報告に出す。** 出さないと、資料が黙って変わったことになる。
+ */
+interface ValidationFixCounts {
+  /** 憑依・転生などで体を共有する相手の呼び名を、別名から落としたもの */
+  droppedSharedBodyAliases: DroppedAliasRecord[];
+  /** 敬称の途中で切れた別名（「母親さ」）として落としたもの */
+  droppedTruncatedAliases: DroppedAliasRecord[];
+  /** 向きが逆だった親族関係を直したもの */
+  correctedRelations: CorrectedRelationRecord[];
+}
+
+function collectValidationFixes(
+  target: ValidationFixCounts,
+  validated: CharacterValidationResult
+): void {
+  target.droppedSharedBodyAliases.push(...validated.droppedSharedBodyAliases);
+  target.droppedTruncatedAliases.push(...validated.droppedTruncatedAliases);
+  target.correctedRelations.push(...validated.correctedRelations);
 }
 
 interface ExtractionSummaryCounts {
@@ -99,12 +131,20 @@ interface ExtractionSummaryCounts {
    * 作者は「更新0名」を抽出の失敗と読んでしまう。
    */
   rejectedDistinct: MergeResult["rejectedDistinct"];
+  /**
+   * 敬称違いの呼び方を、新規レコードにせず既存の人物へ寄せた分（設計書6.5.9）。
+   * AIは敬称違いを別名として返さないので、寄せているのはコード側である。
+   * 出さないと、作者からは「何も増えなかった」としか見えない。
+   */
+  honorificMerges: MergeResult["honorificMerges"];
   failedChunks: number;
   saved: number;
   ambiguous: number;
   unsavedConflicts: number;
   cacheWarnings: number;
   mergeCandidates: MergeCandidate[];
+  /** AIの読みをコードで検算して直した分 */
+  validationFixes: ValidationFixCounts;
   /** モブとして記録された人数。ネームドキャラと区別して示す */
   mobs: number;
   /** 既存人物への更新のうち、承認待ちに回した人数 */
@@ -207,40 +247,32 @@ export async function extractCharacters(
   // モデル情報はチャンクサイズを決めるのに使う。
   // 取得できないまま既定値で進むと、本来より細かく分割され、
   // ハッシュが変わって既存のキャッシュが全て無駄になる。
-  // そのため取れない場合は、先に疎通を回復させてから取り直す。
-  let modelInfo = await registry.resolveModelInfo("extract");
-  if (!modelInfo) {
-    // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
-    // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）。
-    // ここは「モデル情報が取れない」＝サーバーが止まっている経路そのものである
-    if (
-      !(await confirmProviderReachable(
-        resolved.provider,
-        "設定資料の抽出",
-        resolved.model
-      ))
-    ) {
-      return false;
-    }
-    modelInfo = await registry.resolveModelInfo("extract");
-  }
-  if (!modelInfo) {
-    const action = await vscode.window.showWarningMessage(
-      `モデル「${resolved.model}」の情報を取得できませんでした。` +
-        "このまま実行すると本文の分割単位が変わり、" +
-        "これまでの処理済みキャッシュが使えなくなります。" +
-        "モデルを選び直してから、もう一度実行してください。",
-      "AIの設定を開く",
-      "中止"
-    );
-    if (action === "AIの設定を開く") {
-      await vscode.commands.executeCommand("novelai.setupAI");
-    }
-    return false;
-  }
+  // **手順は1か所にある**（`chunkSettings.ts`。設計書6.27.10）
+  const modelInfo = await resolveModelInfoOrWarn({
+    registry,
+    feature: "extract",
+    provider: resolved.provider,
+    model: resolved.model,
+    actionLabel: "設定資料の抽出",
+  });
+  if (!modelInfo) return false;
 
   const contextWindow = modelInfo.contextWindow;
-  const maxOutputTokens = resolveMaxOutputTokens();
+  // **応答の見込みに実測を使う**（設計書6.65.16の2）。台帳に書ける量の
+  // 実測があればそれ、無ければ既定の見込み（8,192）を上限とする
+  const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model
+  );
+  // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
+  // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
+  // 半分になる。抽出のJSONは途中で切れると解析できず、**そのチャンクが
+  // 丸ごと捨てられる**（呼び出し1回ぶんが無駄になる）
+  const sendOutputTokens = resolveOutputTokensForSend(
+    outputTuning.providerId,
+    outputTuning.model
+  );
 
   // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
   // 抽出の指示はいちばん重く、P-04a v5.1 で約11,000字ある。ここを固定の
@@ -260,10 +292,14 @@ export async function extractCharacters(
     }).length;
 
   // 大きさの決め方は1か所へ集めてある（設計書6.23）
-  const chunkSettings = readChunkSettings(contextWindow, {
-    overheadChars,
-    outputTokens: maxOutputTokens,
-  });
+  const chunkSettings = readChunkSettings(
+    contextWindow,
+    {
+      overheadChars,
+      outputTokens: plannedOutputTokens,
+    },
+    outputTuning
+  );
   const chunkChars = chunkSettings.chunk.chars;
 
   // 実際に使うコンテキスト長。**本文以外の量を見込まない**（設計書6.27.10）。
@@ -322,10 +358,18 @@ export async function extractCharacters(
       // 実データ（219話・70万字）では、6,000字でまとめると174回になり、
       // 分ける前の41回から4倍以上に増えてしまう。話数はまとめても
       // 内訳（segments）に残るので、元の大きさまで詰め直してよい。
-      // ただし作者が「まとめない」を選んでいるときは、その指定に従う
+      //
+      // **詰め直す先は `mergeChars` である**（設計書6.23）。自動のときは
+      // `resolveMergeChars` がチャンクの大きさまで詰めるので、上の
+      // 「元の大きさまで詰め直す」はそのまま成り立つ。一方で作者が
+      // 「文字数を指定する」を選んでいるときは、`chunkChars` を渡すと
+      // **合本だけが Merge Chunk Chars の指定を無視する**ことになる
+      // ——ばらのファイルの作品（下の `mergeAdjacentChunks`）では効くのに、
+      // 合本では効かない、という理由の無い違いになる。作者の指定に従う。
+      // 「まとめない」（0）を選んでいるときは、まとめないまま送る
       rawChunks.push(
         ...(mergeChars > 0
-          ? mergeAdjacentChunks(perEpisode, { maxChars: chunkChars })
+          ? mergeAdjacentChunks(perEpisode, { maxChars: mergeChars })
           : perEpisode)
       );
       continue;
@@ -454,15 +498,13 @@ export async function extractCharacters(
       buildKnownCharacterNames(loaded.characters, []),
       configuredMaxOutputTokens
     );
-    const confirm = await vscode.window.showInformationMessage(
+    const confirmed = await confirmRun(
       `${chunks.length} チャンク中 ${pending.length} 件を処理します` +
         `（処理済み ${chunks.length - pending.length} 件はスキップ）。\n` +
         `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度\n` +
-        costNotice,
-      "実行",
-      "中止"
+        costNotice
     );
-    if (confirm !== "実行") return false;
+    if (!confirmed) return false;
   }
 
   const extractedAll: Array<{
@@ -470,6 +512,21 @@ export async function extractCharacters(
     chapters: number[];
   }> = [];
   const rejectedCandidates: RejectedCharacterCandidate[] = [];
+  /**
+   * AIの読みをコードで検算して直した分（設計書6.18）。
+   * **黙って書き換えたことにしない**ので、件数を完了報告に出す。
+   */
+  const validationFixes: ValidationFixCounts = {
+    droppedSharedBodyAliases: [],
+    droppedTruncatedAliases: [],
+    correctedRelations: [],
+  };
+  /**
+   * 既存レコードの名前・別名。切れた別名（「母親さ」）を弾く裏付けに使う。
+   * **ループの前に1回だけ作る**——チャンクごとに作り直すと、その回の抽出で
+   * 増えた名前まで裏付けに混ざり、同じ資料でも実行のたびに結果が変わる
+   */
+  const existingCharacterNames = buildKnownCharacterNames(loaded.characters, []);
   const failures: ExtractionFailure[] = [];
   let cacheWarnings = 0;
   let cancelled = false;
@@ -494,8 +551,12 @@ export async function extractCharacters(
     abilitySystem.autoGenerated ? null : abilitySystem.abilityTerm
   );
 
-  await withCancellableProgress(
+  // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）。
+  // 関所（送信を1件ずつ）だけだと、機能どうしが交互に流れて
+  // モデルの読み込み直しが往復する
+  await withAiTurnProgress(
     "設定資料を抽出しています",
+    { label: "設定資料の抽出", onCancelled: () => (cancelled = true) },
     async (progress, token) => {
       const controller = new AbortController();
       token.onCancellationRequested(() => {
@@ -521,10 +582,12 @@ export async function extractCharacters(
           const cachedResult = cached as CharacterExtractResult;
           const validated = validateCharacterExtractResult(
             cachedResult,
-            chunk
+            chunk,
+            { knownNames: existingCharacterNames }
           );
           extractedAll.push(...validated.accepted);
           rejectedCandidates.push(...validated.rejected);
+          collectValidationFixes(validationFixes, validated);
           // キャッシュにも能力・場所が入っている。同じ応答を使い回す
           settings.collect(cachedResult, chunk);
           done++;
@@ -578,7 +641,8 @@ export async function extractCharacters(
             model: resolved.model,
             temperature: 0.2,
 
-            maxOutputTokens,
+            maxOutputTokens: sendOutputTokens,
+            plannedOutputTokens,
             jsonSchema: CHARACTER_EXTRACT_SCHEMA as unknown as object,
             disableThinking: true,
             signal: controller.signal,
@@ -648,19 +712,44 @@ export async function extractCharacters(
             // この呼び出しぶんがまるごと無駄になる（実データで39件中33件）。
             //   1. まとめたものなら、元の話ごとに戻す
             //   2. 1話でも入り切らないなら、半分に割る
-            const split = splitForRetry(chunk);
+            // **底は `MIN_CHUNK_CHARS`（1,500字）。** 既定の1,000字だと、
+            // 「割りすぎると文の途中で切れて誤検出のもとになる」という
+            // `chunkRetry.ts` の底と食い違う（同じ本文が、通った道によって
+            // 違う細かさまで割られる）
+            const split = splitForRetry(chunk, MIN_CHUNK_CHARS);
             if (split && split.length > 1) {
-              queue.push(...split);
+              // **いま処理中の位置の直後へ挿す。** 末尾へ回してはいけない。
+              // 抽出は既知の名前（`buildKnownCharacterNames`）を積みながら
+              // 進むので、後回しにするとその話だけ**渡される既知名が変わる**
+              // ——キャッシュの中身が「分け直しが起きたかどうか」に依存し、
+              // 同じ本文・同じモデルでも回ごとに違う結果が残る
+              queue.splice(position + 1, 0, ...split);
               // **同じ大きさの残りも、先に割っておく。**
               // 1件ずつ失敗を繰り返すと、その回数だけ呼び出しが無駄になる
               // （実データでは39チャンク中33件が同じ理由で失敗した）
               const tooBig = chunk.text.length;
               let presplit = 0;
-              for (let rest = position + 1; rest < queue.length; rest++) {
-                if (queue[rest].text.length < tooBig) continue;
-                // ここも切り詰められた本人と同じ手順で分ける。
+              // いま挿した断片は既に割ってあるので、その後ろから見る
+              for (
+                let rest = position + 1 + split.length;
+                rest < queue.length;
+                rest++
+              ) {
+                if (
+                  !shouldPresplitChunk({
+                    chunkChars: queue[rest].text.length,
+                    tooBigChars: tooBig,
+                    // **キャッシュを先に引く。** 命中しているものを割ると、
+                    // その命中を捨てたうえ二度と当たらない鍵を作る
+                    cached:
+                      cache.get(queue[rest].hash, cacheKeyBase) !== undefined,
+                  })
+                ) {
+                  continue;
+                }
+                // ここも切り詰められた本人と同じ手順・同じ底で分ける。
                 // 半分に割るだけだと、まとめたものの内訳が消える
-                const smaller = splitForRetry(queue[rest]);
+                const smaller = splitForRetry(queue[rest], MIN_CHUNK_CHARS);
                 if (!smaller || smaller.length <= 1) continue;
                 queue.splice(rest, 1, ...smaller);
                 presplit++;
@@ -704,9 +793,12 @@ export async function extractCharacters(
                 "出力上限とモデル設定を確認してください。",
             });
           } else {
-            const validated = validateCharacterExtractResult(parsed, chunk);
+            const validated = validateCharacterExtractResult(parsed, chunk, {
+              knownNames: existingCharacterNames,
+            });
             extractedAll.push(...validated.accepted);
             rejectedCandidates.push(...validated.rejected);
+            collectValidationFixes(validationFixes, validated);
             settings.collect(parsed, chunk);
             await cache.set(chunk.hash, cacheKeyBase, parsed);
           }
@@ -725,7 +817,9 @@ export async function extractCharacters(
           if (isContextOverflow(e)) {
             const retry = retryOnOverflow(chunk, e);
             if (retry.kind === "split") {
-              queue.push(...retry.parts);
+              // 切り詰められたときと同じく、**いま処理中の位置の直後へ挿す**
+              // （末尾へ回すと、その話だけ渡される既知名が変わる）
+              queue.splice(position + 1, 0, ...retry.parts);
               logStep(`${describeChunk(chunk)}: ${retry.note}`);
               done++;
               continue;
@@ -779,7 +873,7 @@ export async function extractCharacters(
   );
 
   if (cancelled) {
-    vscode.window.showInformationMessage(
+    notifyDone(
       "設定資料の抽出を中止しました。完了済みの処理は次回再利用されます。"
     );
     return false;
@@ -806,12 +900,14 @@ export async function extractCharacters(
     conflicts: merged?.conflicts.length ?? 0,
     folded: merged?.folded.length ?? 0,
     rejectedDistinct: merged?.rejectedDistinct ?? [],
+    honorificMerges: merged?.honorificMerges ?? [],
     failedChunks: failures.length,
     saved: 0,
     ambiguous: 0,
     unsavedConflicts: 0,
     cacheWarnings,
     mergeCandidates: merged?.mergeCandidates ?? [],
+    validationFixes,
     mobs: merged?.characters.filter((character) => character.isMob).length ?? 0,
     pendingUpdates: 0,
   };
@@ -1114,6 +1210,16 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
           counts.rejectedDistinct
         )}）`
       : "";
+  // 敬称違いはAIが別名として返さないので、寄せているのはコードである
+  // （設計書6.5.9）。**黙って寄せたことにしない**
+  const honorificDetail =
+    counts.honorificMerges.length > 0
+      ? `\n敬称違いを既存の人物へ寄せた ${
+          counts.honorificMerges.length
+        }件（${describeHonorificMerges(counts.honorificMerges)}）`
+      : "";
+  // AIの読みをコードで直した分。**黙って書き換えたことにしない**
+  const fixDetail = describeValidationFixes(counts.validationFixes);
   return (
     [
       `新規 ${counts.added}名（うちモブ ${counts.mobs}名）`,
@@ -1130,6 +1236,8 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
     rejectedDetail +
     candidateDetail +
     distinctDetail +
+    honorificDetail +
+    fixDetail +
     // 既存人物への変更は承認待ちに回る。件数を出さないと、
     // 作者は「更新0名」を見て何も増えなかったと思ってしまう
     (counts.pendingUpdates > 0
@@ -1194,6 +1302,58 @@ function describeSettingsResult(result: SettingsPersistResult): string {
   return lines.length > 0 ? `\n${lines.join("\n")}` : "";
 }
 
+/**
+ * AIの読みをコードで検算して直した分を並べる。
+ *
+ * **件数だけでは足りない。** どの人物のどの呼び名を落としたのかを出さないと、
+ * 作者は「別名が減った」ことに気づけず、直しが正しかったのかも確かめられない。
+ */
+function describeValidationFixes(fixes: ValidationFixCounts): string {
+  const lines: string[] = [];
+
+  if (fixes.droppedSharedBodyAliases.length > 0) {
+    lines.push(
+      `体を共有する相手（憑依・転生など）の呼び名を別名から ${
+        fixes.droppedSharedBodyAliases.length
+      }件 外しました（${describeDroppedAliases(fixes.droppedSharedBodyAliases)}）`
+    );
+  }
+  if (fixes.droppedTruncatedAliases.length > 0) {
+    lines.push(
+      `途中で切れた別名を ${fixes.droppedTruncatedAliases.length}件 外しました（${
+        describeDroppedAliases(fixes.droppedTruncatedAliases)
+      }）`
+    );
+  }
+  if (fixes.correctedRelations.length > 0) {
+    const shown = fixes.correctedRelations
+      .slice(0, 3)
+      .map(
+        (entry) =>
+          `${entry.characterName} の「${entry.partner}」を「${entry.from}」から「${entry.to}」へ`
+      )
+      .join("、");
+    const rest =
+      fixes.correctedRelations.length > 3
+        ? ` ほか${fixes.correctedRelations.length - 3}件`
+        : "";
+    lines.push(
+      `関係の向きを ${fixes.correctedRelations.length}件 直しました（${shown}${rest}）`
+    );
+  }
+
+  return lines.length > 0 ? `\n${lines.join("\n")}` : "";
+}
+
+function describeDroppedAliases(dropped: DroppedAliasRecord[]): string {
+  const shown = dropped
+    .slice(0, 3)
+    .map((entry) => `${entry.characterName} の「${entry.alias}」`)
+    .join("、");
+  const rest = dropped.length > 3 ? ` ほか${dropped.length - 3}件` : "";
+  return shown + rest;
+}
+
 function describeMergeCandidates(candidates: MergeCandidate[]): string {
   const shown = candidates
     .slice(0, 5)
@@ -1219,6 +1379,23 @@ function describeDistinctRejections(
     .join("、");
   const rest =
     rejections.length > 3 ? ` ほか${rejections.length - 3}件` : "";
+  return shown + rest;
+}
+
+/**
+ * 敬称違いで寄せた分を、作者が確かめられる形で並べる。
+ *
+ * 件数だけだと、どの人物にどの呼び方が足されたのかが分からず、
+ * 寄せ方が正しかったのか（別人を吸ってはいないか）を見直せない。
+ */
+function describeHonorificMerges(
+  merges: MergeResult["honorificMerges"]
+): string {
+  const shown = merges
+    .slice(0, 3)
+    .map((entry) => `${entry.characterName} に「${entry.incomingName}」`)
+    .join("、");
+  const rest = merges.length > 3 ? ` ほか${merges.length - 3}件` : "";
   return shown + rest;
 }
 
@@ -1488,12 +1665,43 @@ export function selectChangedCharacters(
   return characters.filter((character) => changed.has(character.id));
 }
 
+/**
+ * 出力上限で切り詰められたあと、**まだ送っていないチャンクを先回りで
+ * 分け直すか**を決める（判断だけで、副作用は持たない）。
+ *
+ * 切り詰められた本人と同じ大きさのものは、送っても同じ理由で失敗する
+ * 見込みが高い。1件ずつ失敗を繰り返すと、その回数だけ呼び出しが無駄になる
+ * （実データでは39チャンク中33件が同じ理由で失敗した）。
+ *
+ * **キャッシュに答えがあるものは分けない。** 分けると `wholeFile:false` の
+ * 別のチャンクになり、ハッシュも変わる。つまり
+ *
+ *   - いま持っている命中を捨てる（そのチャンクをもう一度AIへ送ることになる）
+ *   - **二度と当たらない鍵**を作る（次回はまた元の大きさで切り直されるため、
+ *     分け直した断片のハッシュは残っても使われない）
+ *
+ * の2つが同時に起きる。そもそも送らないチャンクなので、失敗もしない。
+ */
+export function shouldPresplitChunk(options: {
+  /** これから送るチャンクの字数 */
+  chunkChars: number;
+  /** 切り詰められたチャンクの字数 */
+  tooBigChars: number;
+  /** そのチャンクの答えがキャッシュにあるか */
+  cached: boolean;
+}): boolean {
+  if (options.cached) return false;
+  return options.chunkChars >= options.tooBigChars;
+}
+
 function describeRejectedCandidates(
   rejected: RejectedCharacterCandidate[]
 ): string {
   const labels: Record<CharacterRejectionReason, string> = {
     invalid_shape: "形式不正",
     invalid_name: "人物名不正",
+    pronoun_name: "代名詞の名前",
+    descriptive_name: "説明的な名前",
     non_person: "人物以外",
     collective: "集団",
     ungrounded: "本文根拠なし",

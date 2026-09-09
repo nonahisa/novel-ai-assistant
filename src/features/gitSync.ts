@@ -34,6 +34,7 @@ import {
   recordChanges,
   runSetupStep,
 } from "./gitOnboarding";
+import { confirmRun, notifyDone } from "../views/notify";
 
 /**
  * 取りに行ける作品か。
@@ -354,7 +355,7 @@ export class GitSyncMonitor implements vscode.Disposable {
     );
     if (answer === "設定の直し方をコピー") {
       await vscode.env.clipboard.writeText("git config core.autocrlf false");
-      void vscode.window.showInformationMessage(
+      notifyDone(
         "コマンドをクリップボードへ入れました。" +
           "作品のフォルダーでターミナルを開いて貼り付けてください。"
       );
@@ -394,12 +395,12 @@ export class GitSyncMonitor implements vscode.Disposable {
     if (result.failure.kind === "diverged") {
       // **行き止まりにしない**（設計書5.5.16）。同じファイルが両方で
       // 書き換えられていなければ、そのまま合わせられる
+      const notice = describeDivergedPull(work.title);
       const answer = await vscode.window.showWarningMessage(
-        `「${work.title}」は、この環境と別の環境の両方で変更が進んでいます。` +
-          "取り込みは中止しました。",
-        "分かれた分を合わせる"
+        notice.message,
+        notice.action
       );
-      if (answer === "分かれた分を合わせる") {
+      if (answer === notice.action) {
         await vscode.commands.executeCommand("novelai.resolveDivergence", {
           type: "work",
           work,
@@ -438,13 +439,14 @@ ${reason}` : ""}`,
       buildSyncTarget(status.root, this.registry.list()),
       work
     );
-    const confirm = await vscode.window.showInformationMessage(
+    const confirmed = await confirmRun(
       `「${work.title}」のコミット ${status.ahead} 件を ${status.upstream} へ送信します。` +
         (companions ? `\n${companions}` : ""),
       "送信する",
-      "中止"
+      // **外（GitHub）へ出たものは引っ込められない**ので警告の顔で訊く（0.35.4）
+      { kind: "warning" }
     );
-    if (confirm !== "送信する") return false;
+    if (!confirmed) return false;
 
     const result = await withProgress("この環境の変更を送信しています…", () =>
       push(work.folderPath, this.options.run)
@@ -534,6 +536,25 @@ ${reason}`
 export function isWarning(status: GitSyncStatus): boolean {
   if (status.kind !== "tracked") return false;
   return status.behind > 0 || status.ahead > 0 || status.unmerged > 0;
+}
+
+/**
+ * 取り込みが分岐で止まったときの知らせ（設計書5.5.16）。
+ *
+ * **行き止まりにしない。** 止まったその場から「分かれた分を合わせる」へ
+ * 行けることが要件なので、押せる先を文言と一緒にここへ置き、
+ * 画面を開かずに確かめられるようにしてある。
+ */
+export function describeDivergedPull(title: string): {
+  message: string;
+  action: string;
+} {
+  return {
+    message:
+      `「${title}」は、この環境と別の環境の両方で変更が進んでいます。` +
+      "取り込みは中止しました。",
+    action: "分かれた分を合わせる",
+  };
 }
 
 function sumTracked(

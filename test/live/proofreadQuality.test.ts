@@ -8,6 +8,7 @@ import {
   PROOFREAD_SYSTEM_PROMPT,
 } from "../../src/prompts/proofread";
 import {
+  locateProofreadIssue,
   parseProofreadResult,
   validateProofreadIssues,
 } from "../../src/core/proofreadValidation";
@@ -100,7 +101,12 @@ describe.skipIf(WORK === undefined)(
               if (entry.reason === "over_budget") overBudget++;
             }
             for (const item of validated.accepted) {
-              kept.push({ file: fileName, item });
+              // **製品と同じ道を通す**（設計書6.30.4）。語尾単調の説明文は
+              // 行がファイルの番号に直ってから組まれるので、ここを飛ばすと
+              // 理由が空のまま並ぶ
+              const located = locateProofreadIssue(chunk, item);
+              if (!located) continue;
+              kept.push({ file: fileName, item: located });
             }
           }
         }

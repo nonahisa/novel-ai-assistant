@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
-  describeChatEditTarget,
+  describeChatEditButton,
+  describeChatEditDestination,
   parseChatEdit,
   parseChatRun,
   sanitizeRequestedPaths,
@@ -17,7 +18,38 @@ describe("書き込み先の解釈", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.edit.target).toEqual({ kind: "plot", section: "theme" });
-    expect(result.edit.label).toBe("プロットの「テーマ」に書き込む");
+    // **見出しは「どのファイルのどこ」を名乗る**（作者の指摘、2026-09-07）。
+    // 「テーマの明確化」というAIの言葉のままでは、押すと plot.md が
+    // 書き換わることが読み取れなかった
+    expect(result.edit.label).toBe("設定/plot.md の「テーマ」を書き換える");
+  });
+
+  test("AIのラベルは補足として括弧で添える（信じて見出しにはしない）", () => {
+    const result = parseChatEdit({
+      target: "plot.theme",
+      content: "テーマそのもの",
+      label: "テーマの明確化",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.edit.label).toBe(
+      "設定/plot.md の「テーマ」を書き換える（テーマの明確化）"
+    );
+  });
+
+  test("書き込み先を、ファイルと項目名で言える", () => {
+    // 確認のモーダルの題に使う。作者の作品ファイルへ書く操作なので、
+    // どこが変わるかが押す前に読めること
+    expect(describeChatEditDestination({ kind: "plot", section: "theme" })).toEqual(
+      { file: "設定/plot.md", item: "テーマ" }
+    );
+    expect(describeChatEditDestination({ kind: "blurb" }).file).toBe(
+      "設定/synopsis.md"
+    );
+    expect(
+      describeChatEditDestination({ kind: "episodeSynopsis", chapter: 4 })
+    ).toEqual({ file: "設定/chapter_synopses.json", item: "第4話のあらすじ" });
   });
 
   test("紹介文とキャッチコピーを指せる", () => {
@@ -75,13 +107,15 @@ describe("書き込み先の解釈", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.edit.label).toBe("第3話のあらすじに書き込む");
+    expect(result.edit.label).toBe(
+      "設定/chapter_synopses.json の「第3話のあらすじ」を書き換える"
+    );
   });
 
-  test("説明はどの書き込み先でも作れる", () => {
-    expect(describeChatEditTarget({ kind: "blurb" })).toContain("作品紹介文");
+  test("見出しはどの書き込み先でも作れる", () => {
+    expect(describeChatEditButton({ kind: "blurb" })).toContain("作品紹介文");
     expect(
-      describeChatEditTarget({ kind: "plot", section: "logline" })
+      describeChatEditButton({ kind: "plot", section: "logline" })
     ).toContain("ログライン");
   });
 });

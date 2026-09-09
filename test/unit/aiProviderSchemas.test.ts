@@ -72,6 +72,23 @@ describe("OpenAI向けスキーマ変換", () => {
     expect(role).toEqual({ type: ["string", "null"] });
   });
 
+  test("配列の件数制約は送らない", () => {
+    // strictモードは maxItems / minItems を受け付けず、
+    // 入っているとスキーマごと400で拒否される。
+    // 上限は手元のモデルの繰り返しを止めるためのもの（設計書6.5.9）で、
+    // 落としても抽出の中身は変わらない
+    const converted = JSON.stringify(
+      toOpenAIJsonSchema({
+        type: "object",
+        properties: {
+          aliases: { type: "array", items: { type: "string" }, maxItems: 20 },
+        },
+      })
+    );
+
+    expect(converted).not.toContain("maxItems");
+  });
+
   test("実際の抽出スキーマを変換できる", () => {
     const converted = toOpenAIJsonSchema(CHARACTER_EXTRACT_SCHEMA) as Record<
       string,
@@ -100,6 +117,18 @@ describe("Gemini向けスキーマ変換", () => {
     >;
 
     expect(converted).toEqual({ type: "STRING", nullable: true });
+  });
+
+  test("配列の件数制約はそのまま残す", () => {
+    // GeminiのOpenAPIスキーマは maxItems を受け付ける。
+    // 落とすと、繰り返しを止める備えがクラウド側だけ効かなくなる
+    const converted = toGeminiSchema({
+      type: "array",
+      items: { type: "string" },
+      maxItems: 20,
+    }) as Record<string, unknown>;
+
+    expect(converted.maxItems).toBe(20);
   });
 
   test("additionalProperties を落とす", () => {
@@ -387,6 +416,20 @@ describe("Claudeの要求不正の扱い", () => {
     expect(
       (converted.properties as Record<string, { anyOf: unknown }>).reading.anyOf
     ).toEqual([{ type: "string" }, { type: "null" }]);
+  });
+
+  test("配列の件数制約も最初から送らない", () => {
+    // 文字数の制約と同じ扱い。試すと、その400が他の指定への濡れ衣になる
+    const converted = JSON.stringify(
+      toClaudeJsonSchema({
+        type: "object",
+        properties: {
+          aliases: { type: "array", items: { type: "string" }, maxItems: 20 },
+        },
+      })
+    );
+
+    expect(converted).not.toContain("maxItems");
   });
 
   test("文字数の制約は最初から送らない", () => {

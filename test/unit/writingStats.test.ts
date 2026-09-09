@@ -26,6 +26,7 @@ import {
   totalsByLabel,
   weekStartKey,
 } from "../../src/core/writingStats";
+import { describeWrittenAmount } from "../../src/core/writingAmountText";
 import {
   describeStatusBarProgress,
   fileCountKeyFor,
@@ -858,6 +859,23 @@ describe("ステータスバーの表示", () => {
     expect(summary.streak).toBe(0);
   });
 
+  /**
+   * **減った日を「−12字」と出さない**（作者の指定、2026-09-06）。
+   * 推敲で削った日は、書いていない日ではない。数字の前の記号ではなく
+   * 言葉で言う。
+   */
+  test("削った日は「削った 12字」と言う", () => {
+    const summary = summarize([day("2026-08-13", -12)], "2026-08-13");
+
+    expect(describeStatusBarProgress(summary)).toBe("今日 削った 12字");
+  });
+
+  test("字数の言い方は1か所で決める（画面もステータスバーも同じ）", () => {
+    expect(describeWrittenAmount(560)).toBe("+560字");
+    expect(describeWrittenAmount(-1234)).toBe("削った 1,234字");
+    expect(describeWrittenAmount(0)).toBe("0字");
+  });
+
   test("今月の合計と書いた日数も持つ", () => {
     const summary = summarize(
       [day("2026-08-01", 100), day("2026-08-13", 560), day("2026-07-31", 999)],
@@ -978,8 +996,11 @@ describe("空の話を作ったら基準を置き直す配線", () => {
   });
 
   test("新規作品（本文から）の第1話", () => {
+    // 引数が増えて折り返しても見つけられるよう、呼び出しの範囲で見る
+    // （作品タイプを渡すようになった。設計書6.70）
     const source = readFileSync("src/extension.ts", "utf8");
-    expect(source).toContain("createFirstEpisodeFile(entry, (work) =>");
+    const call = source.slice(source.indexOf("createFirstEpisodeFile("));
+    expect(call.slice(0, 200)).toContain("progress.rebaseline(work)");
   });
 });
 

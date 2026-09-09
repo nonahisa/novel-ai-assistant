@@ -353,6 +353,25 @@ async function collectIssues(
 }
 
 /**
+ * 「N件、Mファイルで見つけました」の確認文（設計書6.37.3）。
+ *
+ * **ファイル数も、渡された指摘から数える。** 別々に持ち回ると、片方だけが
+ * 古くなっても目で数えるまで気づけない（実機で数えていた確認である）。
+ */
+export function describeRenameScope(
+  issues: ReadonlyArray<{ filePath: string }>,
+  oldName: string,
+  newName: string
+): string {
+  const files = new Set(issues.map((issue) => issue.filePath));
+
+  return (
+    `「${oldName}」→「${newName}」の置き換えを ${issues.length}件、` +
+    `${files.size}ファイルで見つけました。`
+  );
+}
+
+/**
  * 件数と対象ファイル数を見せてから進む（設計書6.37.3）。
  *
  * **取り消し方を必ず添える。** 何十話ぶんを書き換える操作なので、
@@ -373,8 +392,7 @@ async function confirmScope(
   }
 
   const answer = await vscode.window.showWarningMessage(
-    `「${oldName}」→「${newName}」の置き換えを ${scanned.issues.length}件、` +
-      `${scanned.fileCount}ファイルで見つけました。`,
+    describeRenameScope(scanned.issues, oldName, newName),
     {
       modal: true,
       detail:

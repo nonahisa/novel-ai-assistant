@@ -361,6 +361,40 @@ describe("表示", () => {
     ).toBe("黒髪（第1〜3話）→ 銀髪（第7話）");
   });
 
+  /**
+   * 同じ話の同じ値が2件並んでいた（作者の指摘、2026-09-06）。
+   * 第1話の「変化」に、紹介・役割・性格がそれぞれ2回ずつ出ていた。
+   *
+   * **台帳の `changes` は消さない**（追記だけの原則）。読むときに畳む。
+   */
+  test("同じ話・同じ値が並んでいたら、1件として見せる", () => {
+    expect(
+      describeChangeValues([
+        change("summary", "村の少女", [1]),
+        change("summary", "村の少女", [1]),
+      ])
+    ).toBe("村の少女（第1話）");
+  });
+
+  test("値が違えば、どちらも残す", () => {
+    expect(
+      describeChangeValues([
+        change("role", "案内役", [1]),
+        change("role", "相棒", [1]),
+      ])
+    ).toBe("案内役（第1話）→ 相棒（第1話）");
+  });
+
+  test("同じ値でも話が違えば残す（戻った、という変化である）", () => {
+    expect(
+      describeChangeValues([
+        change("appearance", "黒髪", [1]),
+        change("appearance", "銀髪", [4]),
+        change("appearance", "黒髪", [9]),
+      ])
+    ).toBe("黒髪（第1話）→ 銀髪（第4話）→ 黒髪（第9話）");
+  });
+
   test("話数の無い値は「それ以前」と書く", () => {
     expect(
       describeChangeValues([

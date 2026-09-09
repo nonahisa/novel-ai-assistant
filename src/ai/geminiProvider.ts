@@ -14,6 +14,7 @@ import { fetchJson } from "./httpClient";
 import { toGeminiSchema } from "./jsonSchema";
 import { forgetSecret, logLine, registerSecret } from "../core/logger";
 import { resolveTimeoutMs } from "../core/modelTuning";
+import { customEndpointNotice } from "../core/endpointNotice";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
 import { buildAttemptPlan, type OptionAttempt } from "./optionFallback";
 
@@ -157,7 +158,9 @@ export class GeminiProvider implements ApiKeyProvider {
       }
       return {
         ok: true,
-        message: `Geminiに接続しました（モデル ${models.length} 件）`,
+        message:
+          `Geminiに接続しました（モデル ${models.length} 件）` +
+          customEndpointNotice(this.endpoint, DEFAULT_ENDPOINT),
         modelCount: models.length,
       };
     } catch (error) {
@@ -303,8 +306,10 @@ export class GeminiProvider implements ApiKeyProvider {
     // 対応している機能まで永久に使わなくなる（Claudeで実際に起きた）
     const stored = this.supportFor(params.model);
 
+    // **呼び出し側の見込みを尊重する**（設計書6.77の第2段）。渡されない
+    // 呼び出しはこれまでどおり設定値。丸め（モデルの申告上限）は最後に掛ける
     const maxOutputTokens = clampToModelLimit(
-      resolveMaxOutputTokens(),
+      params.maxOutputTokens ?? resolveMaxOutputTokens(),
       this.modelCache.get(params.model)?.maxOutputTokens
     );
 

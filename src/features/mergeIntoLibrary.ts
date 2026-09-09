@@ -37,7 +37,7 @@ import { withCancellableProgress } from "../views/progress";
  */
 
 /** 1件の結果 */
-interface MergeOutcome {
+export interface MergeOutcome {
   /** どの作品か。**題名では引かない**（同じ題名の作品がありうる） */
   workId: string;
   title: string;
@@ -223,7 +223,14 @@ async function runMerge(plans: readonly MergePlan[]): Promise<MergeOutcome[]> {
   return outcomes;
 }
 
-async function mergeOne(
+/**
+ * 1作品ぶんを写す。
+ *
+ * **外へ出してあるのは、ここだけを試せるようにするため。** 文字コードと
+ * 改行が元のまま写るか、途中で取りやめたときに元が無事かは、
+ * `mergeIntoLibrary` 全体（フォルダー選択の画面を通る）からは確かめられない。
+ */
+export async function mergeOne(
   plan: MergePlan,
   token: vscode.CancellationToken
 ): Promise<MergeOutcome> {
@@ -324,7 +331,7 @@ async function collectFiles(root: string): Promise<string[]> {
  * **写せたものだけ**を移す。失敗した作品は元の登録のまま残す
  * ——そこで登録を外すと、作者は作品を見失う。
  */
-async function reregister(
+export async function reregister(
   registry: WorkRegistry,
   outcomes: readonly MergeOutcome[],
   plans: readonly MergePlan[]

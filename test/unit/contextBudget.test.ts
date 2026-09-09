@@ -1,10 +1,32 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+
+/**
+ * 送信量の記録（`usage.md`）への書き込みを覗く。
+ *
+ * **本物は作品フォルダーへ書く。** ここで見たいのは「関所で止めた回にも
+ * 1行残るか」なので、書き込み先ではなく**呼ばれたかどうか**を控える。
+ */
+const usageCalls = vi.hoisted(
+  () => [] as Array<[string, Record<string, unknown>]>
+);
+vi.mock("../../src/core/usageLog", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  appendUsageLog: (folder: string, entry: Record<string, unknown>) => {
+    usageCalls.push([folder, entry]);
+  },
+}));
+
 import {
   MIN_CHUNK_CHARS,
   TOKENS_PER_CHAR,
   planChunkBudget,
   type Chunk,
+  type ChunkBudget,
 } from "../../src/core/chunker";
+import {
+  describeChunkSettings,
+  type ChunkSettings,
+} from "../../src/features/chunkSettings";
 import {
   CONTEXT_GUARD_EXEMPT_FEATURE,
   OUTPUT_RESERVE_TOKENS,
@@ -26,6 +48,7 @@ import {
   WORLDVIEW_MAX_CHARS,
   worldviewMaxChars,
 } from "../../src/core/worldviewSelect";
+import { workspace } from "./support/vscodeStub";
 
 /**
  * 本文を溢れさせない仕組みの検査（設計書6.27.10）。
@@ -298,6 +321,58 @@ describe("包みが関所を通す", () => {
     expect(called).toBe(1);
   });
 
+  /**
+   * **既定の見込みは設定値（16,384）である**（0.32.11、設計書6.77の第2段）。
+   *
+   * 以前はここが `OUTPUT_RESERVE_TOKENS`（8,192）だった。関所が8,192で
+   * 判断し、実際には設定値の16,384が送られていたので、**関所を通ったのに
+   * 上限を超える**という逆向きの食い違いが残っていた。見込みと実送信を
+   * 同じ式（`params.maxOutputTokens ?? resolveMaxOutputTokens()`）に揃えた。
+   */
+  test("出力の見込みが渡されなければ、設定値（16,384）で数える", async () => {
+    let called = 0;
+    // 入力＋8,192なら入るが、入力＋16,384では超える大きさにする
+    const inputTokens = tokensFor(1000 + 20000);
+    const wrapped = new MeteredProvider(
+      provider({
+        contextWindow: inputTokens + OUTPUT_RESERVE_TOKENS + 1000,
+        onGenerate: () => called++,
+      })
+    );
+
+    await expect(wrapped.generate(params(20000))).rejects.toMatchObject({
+      kind: "context_overflow",
+    });
+    expect(called).toBe(0);
+  });
+
+  test("作者が設定を小さくすれば、関所の見込みもそれに従う", async () => {
+    // 新しい定数を置いたのではなく、**実送信と同じ設定**を読んでいることの
+    // 裏取り。定数を置き換えただけなら、設定を変えても結果は変わらない
+    let called = 0;
+    const inputTokens = tokensFor(1000 + 20000);
+    const wrapped = new MeteredProvider(
+      provider({
+        contextWindow: inputTokens + OUTPUT_RESERVE_TOKENS + 1000,
+        onGenerate: () => called++,
+      })
+    );
+
+    const original = workspace.getConfiguration;
+    workspace.getConfiguration = (() => ({
+      get: <T>(key: string, defaultValue: T): T =>
+        (key === "maxOutputTokens" ? 2000 : defaultValue) as T,
+    })) as typeof workspace.getConfiguration;
+    try {
+      await wrapped.generate(params(20000));
+    } finally {
+      // 作り物はテストファイル間で共有される。戻さないと後続へ漏れる
+      workspace.getConfiguration = original;
+    }
+
+    expect(called).toBe(1);
+  });
+
   test("出力の見込みが渡されれば、その分も数える", async () => {
     let called = 0;
     // 入力だけなら入るが、出力の見込みを足すと超える大きさにする
@@ -307,13 +382,140 @@ describe("包みが関所を通す", () => {
       provider({ contextWindow, onGenerate: () => called++ })
     );
 
-    await wrapped.generate(params(20000));
+    // 渡された値が小さければ、既定（設定値16,384）ではなくそちらで判断する
+    await wrapped.generate({ ...params(20000), maxOutputTokens: 8192 });
     expect(called).toBe(1);
 
     await expect(
       wrapped.generate({ ...params(20000), maxOutputTokens: 32768 })
     ).rejects.toMatchObject({ kind: "context_overflow" });
     expect(called).toBe(1);
+  });
+
+  /**
+   * 見る順番は **実上限 → 見込み → 設定値**（設計書6.77の第2段）。
+   *
+   * 実上限が分かっているならそれが実際に送られる量なので、それで判断する。
+   * 無ければ場所の確保に使う見込みを採り、どちらも無ければ実送信の既定
+   * （設定値）に揃える。
+   */
+  test("実上限が渡されていれば、見込みより実上限で数える", async () => {
+    let called = 0;
+    const inputTokens = tokensFor(1000 + 20000);
+    const wrapped = new MeteredProvider(
+      provider({
+        contextWindow: inputTokens + OUTPUT_RESERVE_TOKENS + 1000,
+        onGenerate: () => called++,
+      })
+    );
+
+    // 見込みは入る大きさだが、実際に送られるのは入らない大きさ
+    await expect(
+      wrapped.generate({
+        ...params(20000),
+        maxOutputTokens: 32768,
+        plannedOutputTokens: 4096,
+      })
+    ).rejects.toMatchObject({ kind: "context_overflow" });
+    expect(called).toBe(0);
+  });
+
+  test("実上限が無ければ、見込みで数える", async () => {
+    let called = 0;
+    const inputTokens = tokensFor(1000 + 20000);
+    const wrapped = new MeteredProvider(
+      provider({
+        contextWindow: inputTokens + OUTPUT_RESERVE_TOKENS + 1000,
+        onGenerate: () => called++,
+      })
+    );
+
+    // 見込みが無ければ設定値（16,384）で数えて断るところを、
+    // 見込み（4,096）が渡されているので通る
+    await wrapped.generate({ ...params(20000), plannedOutputTokens: 4096 });
+    expect(called).toBe(1);
+  });
+
+  /**
+   * **上限を掛けないプロバイダでは、見込みのほうで数える**（設計書6.77の
+   * 第2段。`AIProvider.capsOutput`）。
+   *
+   * 向きが逆なのには理由がある。**実際に場所を食うものが違う。**
+   * クラウドは渡した上限をそのまま送るので、上限ぶんの席を空けておく
+   * 必要がある。Ollamaは上限を送らない（設計書6.58.2）代わりに
+   * `num_ctx` を見込みぶんだけ確保するので、**実際に消費されるのは
+   * 見込みのほう**である。ここを実上限で見ると、32kのモデルで
+   * 「確保は足りているのに関所が断る」ことになる。
+   *
+   * **プロバイダIDでは分岐しない。** LM Studio のようにOllama互換の口を
+   * 持つものがあり、名前は当てにならない。
+   */
+  describe("上限を掛けないプロバイダ（設計書6.77）", () => {
+    /** 32kのモデル相当。見込み8,192なら入るが、実上限16,384では入らない */
+    const inputTokens = tokensFor(1000 + 20000);
+    const contextWindow = inputTokens + OUTPUT_RESERVE_TOKENS + 1000;
+
+    function sized(options: {
+      capsOutput?: boolean;
+      onGenerate: () => void;
+    }): AIProvider {
+      const base = provider({ contextWindow, onGenerate: options.onGenerate });
+      return options.capsOutput === undefined
+        ? base
+        : { ...base, capsOutput: options.capsOutput };
+    }
+
+    const both = {
+      maxOutputTokens: 16384,
+      plannedOutputTokens: OUTPUT_RESERVE_TOKENS,
+    };
+
+    test("上限を掛けないプロバイダは、見込みで数えるので通る", async () => {
+      let called = 0;
+      const wrapped = new MeteredProvider(
+        sized({ capsOutput: false, onGenerate: () => called++ })
+      );
+
+      await wrapped.generate({ ...params(20000), ...both });
+      expect(called).toBe(1);
+    });
+
+    test("上限を掛けるプロバイダは、実上限で数えるので断る", async () => {
+      let called = 0;
+      const wrapped = new MeteredProvider(
+        sized({ capsOutput: true, onGenerate: () => called++ })
+      );
+
+      await expect(
+        wrapped.generate({ ...params(20000), ...both })
+      ).rejects.toMatchObject({ kind: "context_overflow" });
+      expect(called).toBe(0);
+    });
+
+    test("印を持たないプロバイダは、上限を掛ける側として扱う", async () => {
+      // **安全側に倒す。** 印の付け忘れで「実際より小さく見積もって送る」
+      // ほうへ倒れると、黙って切り捨てられる経路が復活する
+      let called = 0;
+      const wrapped = new MeteredProvider(sized({ onGenerate: () => called++ }));
+
+      await expect(
+        wrapped.generate({ ...params(20000), ...both })
+      ).rejects.toMatchObject({ kind: "context_overflow" });
+      expect(called).toBe(0);
+    });
+
+    test("上限を掛けないプロバイダでも、見込みが無ければ実上限で数える", async () => {
+      // 見込みを渡してこない呼び出し（独り言など）まで甘くはしない
+      let called = 0;
+      const wrapped = new MeteredProvider(
+        sized({ capsOutput: false, onGenerate: () => called++ })
+      );
+
+      await expect(
+        wrapped.generate({ ...params(20000), maxOutputTokens: 16384 })
+      ).rejects.toMatchObject({ kind: "context_overflow" });
+      expect(called).toBe(0);
+    });
   });
 
   describe("素通りする例外は1つだけ（設計書6.27.11）", () => {
@@ -485,5 +687,129 @@ describe("参照資料の上限は、モデルの大きさに合わせる", () =
 
   test("上限そのものは超えない", () => {
     expect(worldviewMaxChars(10_000_000)).toBe(WORLDVIEW_MAX_CHARS);
+  });
+});
+
+/**
+ * 進捗とログに出す、チャンクの内訳（設計書6.27.10、実機確認リスト F-46）。
+ *
+ * **何を差し引いたかまで書く。** 設定に20,000字と書いたのに18,000字で
+ * 動いていると、作者からは「設定が効いていない」ようにしか見えない。
+ *
+ * 進捗の帯が画面に出ること自体は実機に残る。ここで見るのは中身である。
+ */
+describe("1チャンクの内訳の書き方", () => {
+  /** 差し引きのある、いちばん普通の形 */
+  function settings(
+    budget?: { chunkChars: number; reason: ChunkBudget["reason"]; overheadChars: number }
+  ): ChunkSettings {
+    return {
+      mode: "auto",
+      chunk: { chars: 18000, from: "model" },
+      mergeChars: 0,
+      ...(budget ? { budget } : {}),
+    };
+  }
+
+  test("字数と、その根拠を書く（実機確認リスト F-46 の代わり）", () => {
+    expect(describeChunkSettings(settings())).toContain(
+      "1チャンク 18000字（モデルのコンテキスト長から）"
+    );
+  });
+
+  test("指示と資料で何字を引いたかを書く（実機確認リスト F-46 の代わり）", () => {
+    const text = describeChunkSettings(
+      settings({ chunkChars: 18000, reason: "requested", overheadChars: 12000 })
+    );
+
+    expect(text).toContain("指示と資料 12000字を差し引き");
+  });
+
+  test("固定費に押されて縮めたときは、そう書く（実機確認リスト F-46 の代わり）", () => {
+    const text = describeChunkSettings(
+      settings({
+        chunkChars: 18000,
+        reason: "shrunk_to_fit",
+        overheadChars: 12000,
+      })
+    );
+
+    expect(text).toContain("（入るように縮めた）");
+  });
+
+  test("縮めても入らないときは、下限で送ると断る（実機確認リスト F-46 の代わり）", () => {
+    // **黙って送らない。** 入らない見込みであることを先に言う
+    const text = describeChunkSettings(
+      settings({ chunkChars: 2000, reason: "minimum", overheadChars: 30000 })
+    );
+
+    expect(text).toContain("縮めても入り切らない見込み");
+    expect(text).toContain("下限で送ります");
+  });
+
+  test("差し引く材料が無ければ、その部分は書かない（実機確認リスト F-46 の代わり）", () => {
+    // 131,072のモデルでは溢れないので、差し引きの話そのものが要らない
+    expect(describeChunkSettings(settings())).not.toContain("差し引き");
+  });
+
+  test("まとめ送信をするときは、その字数も並べる（実機確認リスト F-46 の代わり）", () => {
+    const text = describeChunkSettings({
+      ...settings(),
+      mergeChars: 40000,
+    });
+
+    expect(text).toContain("まとめ送信 40000字");
+  });
+});
+
+/**
+ * 関所で止めた回も、送信量の記録に1行残す（実機確認リスト F-46）。
+ *
+ * **記録に何も出ないと、作者からは「押したのに何も起きなかった」としか
+ * 見えない。** 送っていないので所要時間は0で残す。
+ */
+describe("関所で止めた回の記録", () => {
+  test("送らなかった回も usage へ書く（実機確認リスト F-46 の代わり）", async () => {
+    usageCalls.length = 0;
+
+    const wrapped = new MeteredProvider({
+      id: "ollama",
+      displayName: "Ollama（ローカル）",
+      isPaid: false,
+      isConfigured: async () => true,
+      testConnection: async () => ({ ok: true, message: "" }),
+      listModels: async () => [],
+      generate: async (): Promise<GenerateResult> => ({
+        text: "{}",
+        truncated: false,
+        elapsedMs: 1,
+      }),
+      getModel: async (id: string): Promise<ModelInfo | undefined> => ({
+        id,
+        displayName: id,
+        contextWindow: 8192,
+        parameterSize: null,
+        capabilities: [],
+        tier: "standard",
+      }),
+    });
+
+    await expect(
+      wrapped.generate({
+        systemPrompt: "あ".repeat(1000),
+        userPrompt: "い".repeat(40000),
+        model: "gemma4:e4b",
+        temperature: 0,
+        meta: { feature: "矛盾検知", workFolder: "C:/作品" },
+      })
+    ).rejects.toMatchObject({ kind: "context_overflow" });
+
+    expect(usageCalls).toHaveLength(1);
+    expect(usageCalls[0][0]).toBe("C:/作品");
+    expect(usageCalls[0][1].feature).toBe("矛盾検知");
+    // 何があったかも残す（「押したのに何も起きない」を作らない）
+    expect(usageCalls[0][1].error).toBeTruthy();
+    // 送っていないので、所要時間はAIの遅さとして数えない
+    expect(usageCalls[0][1].elapsedMs).toBe(0);
   });
 });

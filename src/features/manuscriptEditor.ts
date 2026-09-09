@@ -8,22 +8,28 @@ import * as paths from "../core/paths";
 import { fromUri } from "../core/paths";
 import { scanWork } from "../core/scanner";
 import { pathExists } from "../core/fileSystem";
-import { formatChapterNumber } from "../core/episodeParser";
+import { nextEpisodeFileNameLike } from "../core/episodeRenumber";
 import {
   isBlankEpisode,
   isBlankText,
   planLatestEpisode,
+  findLatestEpisode,
 } from "../core/latestEpisode";
 import { buildManuscriptEditorHtml } from "../views/manuscriptEditorHtml";
 import {
   MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   MANUSCRIPT_EDITOR_VIEW_TYPE,
+  manuscriptViewTypeFor,
 } from "../core/manuscriptViewTypes";
+import type { WorkFormatKey } from "../core/workFormat";
 import {
   collectTermSpans,
   notationModeFor,
   renderTermMarks,
 } from "../core/manuscriptRender";
+import { isNoteStyleTarget } from "../core/noteStyle";
+import { renderNotePreview } from "../core/notePreview";
+import { readWorkFormat } from "../core/workFormatStore";
 import { TERM_COLORS } from "../core/termColors";
 import {
   computeDocumentEdit,
@@ -32,28 +38,24 @@ import {
   toLfOffset,
 } from "../core/eolSpace";
 import { createEditQueue } from "../core/editQueue";
-import { countChars } from "../core/charCount";
 import {
   currentCountMode,
   excludeRubyFromCount,
   pickCount,
 } from "../core/countSettings";
-import {
-  hasEmphasis,
-  toSiteNotation,
-  validateEmphasis,
-  validateRuby,
-  type EmphasisSite,
-} from "../core/ruby";
-import {
-  MEMO_LINE_PREFIX,
-  memoColorVars,
-  stripMemoLines,
-} from "../core/sceneMemo";
+import { countEpisodeChars } from "../core/episodeCharCount";
+import { validateEmphasis, validateRuby } from "../core/ruby";
+import { sourceForPostingCopy } from "../core/episodeCopy";
+// 貼り付け先ごとの分岐は、入口ではなく変換の側に置く（設計書6.84）
+import { convertForPosting } from "../core/postingConvert";
+import { showPostingCopyNotice } from "./postingCopyNotice";
+import { MEMO_LINE_PREFIX, memoColorVars } from "../core/sceneMemo";
 import { READ_ALOUD_MEMO_TEXT, buildReadingPlan } from "../core/readAloud";
-import { pickEmphasisSite, pickStyle } from "./ruby";
+import { pickPostingTarget } from "./ruby";
+import { registeredPostingSites } from "./postingCopyRegistered";
 import { askText } from "../views/dialogs";
-import { logLine } from "../core/logger";
+import { logLine, useLogFile } from "../core/logger";
+import { readTextFile } from "../core/textFile";
 import type { TermHighlighter } from "../views/termHighlight";
 import type { TermKind } from "../core/termIndex";
 import type { WorkEntry, WorkStats } from "../models/types";
@@ -62,6 +64,7 @@ import {
   shouldSuggestMarkdown,
 } from "../core/markdownConversion";
 import { countSiteNotation } from "../core/ruby";
+import { notifyDone } from "../views/notify";
 
 /**
  * 原稿エディタ（設計書6.25）。
@@ -200,6 +203,44 @@ export function refreshManuscriptCounts(filePath: string): void {
   openManuscripts.get(manuscriptLedgerKey(filePath))?.refreshCounts();
 }
 
+/** 「← 前の話」「次の話 →」を押したときに、次に何をするか */
+export type NeighborStep =
+  /** その添字の話を開く */
+  | { kind: "open"; index: number }
+  /** 開かずに、この文言だけを伝える */
+  | { kind: "notice"; message: string }
+  /** 次の話数を作って開く */
+  | { kind: "create" };
+
+/**
+ * 前後の話をどうするかを決める（設計書6.25.5）。
+ *
+ * **端に来たときの文言まで、ここが持つ。** 「最初の話です。」と
+ * 「最新話です。」は押した結果そのものなので、画面を開かずに確かめられる
+ * 形にしておく。ファイルを開く・作るのは呼び出し側の仕事である。
+ *
+ * @param currentIsBlank いま開いている本文が白紙か。**保存前の中身で見る**
+ *   （打ちかけを白紙と数えない）。最終話のときだけ効く
+ */
+export function planNeighborStep(input: {
+  /** いまの話の添字（0始まり） */
+  at: number;
+  /** 話の総数 */
+  count: number;
+  direction: "prev" | "next";
+  currentIsBlank: boolean;
+}): NeighborStep {
+  if (input.direction === "prev") {
+    if (input.at === 0) return { kind: "notice", message: "最初の話です。" };
+    return { kind: "open", index: input.at - 1 };
+  }
+  if (input.at < input.count - 1) return { kind: "open", index: input.at + 1 };
+  // 最終話。白紙なら作らない（「最新話を書く」と同じ考え方。
+  // 押すたびに空のファイルが増えるのを避ける）
+  if (input.currentIsBlank) return { kind: "notice", message: "最新話です。" };
+  return { kind: "create" };
+}
+
 /**
  * カーソル行の**上**に、空の付箋の行を挿す（設計書6.40.3）。
  *
@@ -273,7 +314,8 @@ export async function addMemoToOpenManuscript(): Promise<boolean> {
  * 2. 素のエディタで開いている本文（.txt / .md）
  * 3. その作品の最後の話（何も開いていないときの受け皿）
  *
- * 開くのは**横書きの入口**（作品一覧から本文を開いたときと同じ既定）。
+ * 開くのは**タイプに合わせた入口**（作品一覧から本文を開いたときと同じ既定。
+ * 小説は横書き、脚本は縦書き。設計書6.70）。
  *
  * **読み始めはしない。** 声の一覧は非同期に揃うので、開いた瞬間に読ませると
  * 声が無いまま始めることになる。押していないのに声が出るのも驚く。
@@ -298,7 +340,9 @@ export async function openManuscriptForReading(work: WorkEntry): Promise<void> {
   await vscode.commands.executeCommand(
     "vscode.openWith",
     paths.toUri(filePath),
-    MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+    // 向きの既定はタイプが決める（設計書6.70。脚本だけ縦書き）。
+    // **ここで別の決め方をしない**——作品一覧から開いたときと同じ入口にする
+    manuscriptViewTypeFor(await formatOf(work))
   );
   // **台帳に載るまで待つ**（`revealLine` と同じ事情。開いた直後はまだ載らない）
   const opened = await waitFor(() => openManuscripts.get(key));
@@ -469,14 +513,27 @@ export async function waitFor<T>(
 const markdownAsked = new Set<string>();
 
 /**
- * 画面へ出す字数。**数え方は他の画面と揃える**（純／総の設定、ルビを数えるか）。
- * ここだけ違う数字が出ると、どちらが本当か分からなくなる。
+ * 画面へ出す字数。**数え方は作品一覧とまったく同じにする**（作者の裁定
+ * 2026-09-06）。ここだけ違う数字が出ると、どちらが本当か分からなくなる。
+ *
+ * 数え方（頭書きを外す・合本を話ごとに割る・ルビは `.md` のときだけ外す）は
+ * `core/episodeCharCount.ts` の1か所に集めてある——ここへ写しを作ると、
+ * 片方だけが直る日が来る。実際、頭書きで 5,529字 と 5,672字 に割れ、
+ * 合本では後書き・リアクションのぶんが約1万字ずれていた。
+ *
+ * @param ext 開いているファイルの拡張子（`.md` / `.txt`）。**設定だけで
+ *   決めない**——ルビの読みを外すのは Markdown のときだけである
  */
-function countFor(text: string): number {
+export function countForDisplay(text: string, ext: string): number {
   return pickCount(
-    countChars(text, excludeRubyFromCount()),
+    countEpisodeChars(text, { ext, excludeRuby: excludeRubyFromCount() }),
     currentCountMode()
   );
+}
+
+/** 開いている原稿の拡張子（小文字・ドット付き）。数え方の判断に使う */
+function extensionOf(document: vscode.TextDocument): string {
+  return paths.extname(fromUri(document.uri)).toLowerCase();
 }
 
 /**
@@ -505,6 +562,76 @@ function episodeNaming(): { digits: number; extension: string } {
 }
 
 /**
+ * いまアクティブなタブが原稿エディタなら、そこで開いている本文の場所
+ * （作者の実機報告、2026-09-06）。
+ *
+ * **原稿エディタは `TextEditor` を持たない。** WebView（カスタムエディタ）
+ * なので、`vscode.window.activeTextEditor` は undefined になる。これを
+ * 見ているだけのコマンドは、原稿エディタで本文を開いている作者に
+ * 「本文のファイルを開いてから実行してください」と言い返していた
+ * （「縦書きで開く」が、原稿エディタからは一度も使えなかった）。
+ *
+ * 読めない環境（古いVS Code・試験の代役）では undefined を返し、
+ * 呼び出し側はこれまでどおり `activeTextEditor` の道へ落ちる。
+ */
+export function activeManuscriptTabUri(): vscode.Uri | undefined {
+  try {
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    const input: unknown = tab?.input;
+    if (!(input instanceof vscode.TabInputCustom)) return undefined;
+    if (
+      input.viewType === MANUSCRIPT_EDITOR_VIEW_TYPE ||
+      input.viewType === MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+    ) {
+      return input.uri;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 開いているタブのうち、本文を開いているもの（原稿エディタ・素のエディタ）。
+ * **各グループでアクティブなタブを先に並べる。**
+ *
+ * `activeManuscriptTabUri` は「いまアクティブなタブ」しか見ない。設定資料
+ * パネルの「ルビを追加」のように**WebView の中のボタンから呼ばれる**操作では、
+ * 押した時点でアクティブなのは必ずそのパネルなので、原稿エディタで本文を
+ * 開いていても一度も見つからなかった（実機、2026-09-06）。
+ * 全グループのタブから拾えば、隣のグループで開いている本文も分かる。
+ */
+export function openManuscriptTabUris(): vscode.Uri[] {
+  try {
+    const active: vscode.Uri[] = [];
+    const others: vscode.Uri[] = [];
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        const uri = manuscriptTabUri(tab.input);
+        if (!uri) continue;
+        (tab.isActive ? active : others).push(uri);
+      }
+    }
+    return [...active, ...others];
+  } catch {
+    // タブを読めない環境（古いVS Code・試験の代役）では「開いていない」扱い
+    return [];
+  }
+}
+
+function manuscriptTabUri(input: unknown): vscode.Uri | undefined {
+  if (input instanceof vscode.TabInputText) return input.uri;
+  if (
+    input instanceof vscode.TabInputCustom &&
+    (input.viewType === MANUSCRIPT_EDITOR_VIEW_TYPE ||
+      input.viewType === MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE)
+  ) {
+    return input.uri;
+  }
+  return undefined;
+}
+
+/**
  * いまアクティブなタブが原稿エディタなら、その入口のID。
  *
  * **開いていない原稿へ飛ぶときに、どちらの向きで開くかを決める。**
@@ -525,6 +652,20 @@ function activeManuscriptViewType(): string | undefined {
   } catch {
     // タブの種類を読めない環境（古いVS Code・試験の代役）では、
     // 「原稿エディタではない」として素のエディタへ譲る
+    return undefined;
+  }
+}
+
+/**
+ * その作品のタイプ（設計書6.70）。**読めなければ undefined。**
+ *
+ * プロットが無い・壊れている作品でも、開けなくなってはいけない。
+ * そのときは「決めていない」と同じ扱いで、これまでどおり横書きになる。
+ */
+async function formatOf(work: WorkEntry): Promise<WorkFormatKey | undefined> {
+  try {
+    return await readWorkFormat(work);
+  } catch {
     return undefined;
   }
 }
@@ -552,6 +693,17 @@ type Incoming =
    */
   | { type: "previewTerm"; id: string; kind: TermKind }
   | { type: "chat"; start: number; end: number }
+  /**
+   * 口述で入れた範囲を、AIに整えてもらう（設計書6.83）。
+   *
+   * `from` は「口述」を押したときのカーソル、`to` は「整える」を押した
+   * ときのカーソル（開始より前なら文末）。**どちらもLF空間の位置**で、
+   * 文書の位置へ直すのはこちらの仕事である。
+   *
+   * `text` はその範囲の本文（LF空間）。**位置だけでは足りない**——画面の
+   * 打鍵が文書へ届く前に押されると、同じ位置が別の場所を指す。
+   */
+  | { type: "dictationClean"; from: number; to: number; text: string }
   /**
    * 書体を選ぶ。
    *
@@ -602,10 +754,27 @@ type Incoming =
   /** 読んでいる文の行に、シーンメモの印を置く */
   | { type: "readingMark"; line: number }
   /** 選ばれた声を覚える（端末ごと。作品には書かない） */
-  | { type: "readingVoice"; name: string };
+  | { type: "readingVoice"; name: string }
+  /**
+   * 「noteに貼ったときの見た目」の面を開いた・閉じた（設計書6.69）。
+   *
+   * **開いているあいだだけ組む。** 本文ぜんたいをHTMLへ組んで送る道は
+   * 0.25.2で一度やめている（打つたびに千の段落を組んでいた）。
+   * SNS記事は短いとはいえ、閉じている面のために組む理由は無い。
+   */
+  | { type: "notePreview"; on: boolean };
 
 export interface ManuscriptEditorDeps {
   highlighter: TermHighlighter;
+  /**
+   * その本文が属する作品（登録簿で引く。設計書6.68.2）。
+   *
+   * **用語索引（`highlighter.indexFor`）で代用しない。** あちらは
+   * 設定資料を読めたときにしか作品を返さないので、**まだ資料を1件も
+   * 抽出していない作品では `undefined` になる**。作品を知りたいだけの
+   * ところであれを使うと、書き始めたばかりの作品でだけ挙動が変わる。
+   */
+  workOf(filePath: string): WorkEntry | undefined;
   /** 用語から設定資料を開く。extension.ts の登録と同じ道を通す */
   openSettings(work: WorkEntry, kind: TermKind, id: string): Promise<void>;
   /**
@@ -663,6 +832,17 @@ export interface ManuscriptEditorDeps {
   /** 断られたことを覚える */
   declineMarkdown(filePath: string): Promise<void>;
   /**
+   * 口述で入れた範囲を整える（設計書6.83）。
+   *
+   * **繋ぐのは `extension.ts` だけ。** ここから整文の機能を直に読み込むと、
+   * 原稿エディタがAIの登録簿を抱えることになる（相談・シーンメモと同じ理由）。
+   * 省略できる形にしてあるのは、この画面が口述なしでも成り立つため。
+   */
+  dictationClean?: (
+    document: vscode.TextDocument,
+    range: vscode.Range
+  ) => Promise<void>;
+  /**
    * シーンメモのパネルを横に開く（設計書6.40.4）。
    *
    * **繋ぐのは `extension.ts` だけ。** ここからパネルを直に読み込むと、
@@ -706,15 +886,43 @@ export class ManuscriptEditorProvider
     private readonly viewType: string = MANUSCRIPT_EDITOR_VIEW_TYPE
   ) {}
 
+  /**
+   * 開いた本文の作品タイプ（設計書6.70）。**引けなければ undefined。**
+   *
+   * 作品を探す道は、用語索引と同じもの（`indexFor`）を通す。**別の探し方を
+   * 増やさない**——同じファイルに対して「色が付く作品」と「組み方を決める
+   * 作品」が食い違うと、原因の分からない見た目の違いになる。
+   */
+  private async formatOfDocument(
+    document: vscode.TextDocument
+  ): Promise<WorkFormatKey | undefined> {
+    try {
+      const found = await this.deps.highlighter.indexFor(fromUri(document.uri));
+      return found ? await formatOf(found.work) : undefined;
+    } catch {
+      // 索引を作れない作品（設定資料が壊れている等）でも、原稿は開ける
+      return undefined;
+    }
+  }
+
   async resolveCustomTextEditor(
     document: vscode.TextDocument,
     panel: vscode.WebviewPanel,
     _token: vscode.CancellationToken
   ): Promise<void> {
     panel.webview.options = { enableScripts: true };
+    /*
+      **作品タイプは、画面を組み立てる前に決める**（設計書6.70）。脚本は
+      柱・ト書き・セリフを組み分けるので、あとから知らせる形にすると
+      開いた直後だけ小説の組み方で出て、1拍おいて組み直ることになる。
+
+      引けなければ undefined＝これまでどおりの画面（タイプを決めていない
+      作品でも、作品の外のファイルでも、開けなくなってはいけない）。
+    */
     panel.webview.html = buildManuscriptEditorHtml(
       createNonce(),
-      panel.webview.cspSource
+      panel.webview.cspSource,
+      await this.formatOfDocument(document)
     );
 
     /**
@@ -729,6 +937,13 @@ export class ManuscriptEditorProvider
      */
     const notation = notationModeFor(fromUri(document.uri));
 
+    /**
+     * 「noteに貼ったときの見た目」の面が開いているか（設計書6.69）。
+     *
+     * 画面から届く知らせで切り替わる。**閉じているあいだは組まない。**
+     */
+    let notePreviewWanted = false;
+
     const send = async (): Promise<void> => {
       // **画面へはLF区切りで渡す**（core/eolSpace.ts）。textareaは値を
       // LFへ正規化するので、CRLFのまま渡すと本文・用語の位置・組んで書く面の
@@ -738,9 +953,26 @@ export class ManuscriptEditorProvider
         fromUri(document.uri)
       );
       const index = found?.index;
+      /*
+        **この原稿はSNS記事か**（設計書6.69）。形式の在り処はプロットの
+        「形式」の節ひとつ（`core/workFormatStore.ts`。読んだ結果は
+        向こうが覚えているので、打つたびにファイルを読むことにはならない）。
+        作品を引けなければ `undefined` を渡し、判定はファイル名へ落ちる。
+      */
+      const format = found ? await readWorkFormat(found.work) : undefined;
+      const noteLike = isNoteStyleTarget(fromUri(document.uri), format);
       await panel.webview.postMessage({
         type: "update",
         text,
+        // note風の組版と、切り替えボタンの出し入れ（設計書6.69）
+        noteLike,
+        /*
+          「noteに貼ったときの見た目」。**開いているあいだだけ組む**
+          （閉じている面のために本文ぜんたいを組む理由が無い）。
+        */
+        ...(noteLike && notePreviewWanted
+          ? { notePreview: renderNotePreview(text) }
+          : {}),
         // **組んで書く面も、この記法で組む**（画面側に写しを持たせない）
         notation,
         /*
@@ -767,7 +999,7 @@ export class ManuscriptEditorProvider
         // （設計書6.42）。覚えていなければ画面が最初の声を選ぶ
         readAloudVoice: this.deps.readAloudVoice?.(),
       });
-      await this.sendCount(panel, text);
+      await this.sendCount(panel, text, document);
     };
 
     /**
@@ -838,6 +1070,16 @@ export class ManuscriptEditorProvider
     subscriptions.push(
       vscode.workspace.onDidChangeTextDocument((event) => {
         if (event.document.uri.toString() !== document.uri.toString()) return;
+        // **外からの変更は、送った事実をログに残す**（実機確認 A-20）。
+        // 画面が古いままという報告があり、こちらが送っていないのか、
+        // 画面が捨てているのかを切り分ける手がかりが無かった。
+        // 自分の applyEdit による変更は毎打鍵で起きるので残さない
+        if (!selfEditing && event.contentChanges.length > 0) {
+          void this.logForDocument(
+            document,
+            `原稿エディタ：${paths.basename(fromUri(document.uri))} が外で変わったので画面へ送り直します（${event.contentChanges.length}か所）`
+          );
+        }
         scheduleSend();
       }),
       new vscode.Disposable(() => {
@@ -863,6 +1105,58 @@ export class ManuscriptEditorProvider
       })
     );
 
+    /**
+     * **このファイルそのものを見張る**（設計書6.25.7、実機確認 A-20）。
+     *
+     * 本文が外から書き換わったとき（ルビの適用・AIの反映・別の窓・
+     * Git の復元）、VS Code は開いている文書を読み直し、その変更が
+     * `onDidChangeTextDocument` で届いて画面へ送り直される——はずだが、
+     * **ワークスペースの外にある本文は、タブが裏に回っていると読み直されない**
+     * （本物の VS Code 1.90 で測った、2026-09-07。ワークスペースの中なら
+     * 裏でも読み直される）。ファイル1本ぶんの監視を張るだけで、VS Code は
+     * 外の本文も読み直すようになる（同じ実験で確認）。
+     *
+     * 監視の知らせそのものは使わない。読み直しは VS Code に任せ、
+     * こちらは少し待ってから「本当に読み直されたか」を見て、
+     * 読み直されていなければログに残す（原因を追う手がかり）。
+     */
+    try {
+      const filePath = fromUri(document.uri);
+      const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(
+          paths.toUri(paths.dirname(filePath)),
+          paths.basename(filePath)
+        )
+      );
+      let verifyTimer: ReturnType<typeof setTimeout> | undefined;
+      const scheduleVerify = () => {
+        if (verifyTimer) clearTimeout(verifyTimer);
+        verifyTimer = setTimeout(() => {
+          verifyTimer = undefined;
+          void this.verifyReloaded(document);
+        }, 1500);
+      };
+      watcher.onDidChange(scheduleVerify);
+      watcher.onDidCreate(scheduleVerify);
+      subscriptions.push(
+        watcher,
+        new vscode.Disposable(() => {
+          if (verifyTimer) clearTimeout(verifyTimer);
+        })
+      );
+    } catch {
+      // 監視を張れない環境（古い VS Code・試験の代役）では、これまでどおり
+      // VS Code の読み直しだけに頼る
+    }
+
+    // **表示に戻ったら送り直す。** 裏に回っているあいだに届いた変更を
+    // 画面が取りこぼしていても、見えた瞬間に文書の中身へ揃う
+    subscriptions.push(
+      panel.onDidChangeViewState((event) => {
+        if (event.webviewPanel.visible) void send();
+      })
+    );
+
     panel.onDidDispose(() => {
       for (const item of subscriptions) item.dispose();
     });
@@ -874,7 +1168,16 @@ export class ManuscriptEditorProvider
      * 「改行すると空行が入る」が起きていた（2026-08-24、設計書6.25.2）。
      * 理由は `core/editQueue.ts` に書いてある。
      */
-    const queueEdit = createEditQueue((text) => this.applyEdit(document, text));
+    /** 自分の書き換えを文書へ当てている最中か（外からの変更と見分ける） */
+    let selfEditing = false;
+    const queueEdit = createEditQueue(async (text) => {
+      selfEditing = true;
+      try {
+        await this.applyEdit(document, text);
+      } finally {
+        selfEditing = false;
+      }
+    });
 
     panel.webview.onDidReceiveMessage(async (message: Incoming) => {
       switch (message.type) {
@@ -904,7 +1207,7 @@ export class ManuscriptEditorProvider
           break;
 
         case "count":
-          await this.sendCount(panel, message.text);
+          await this.sendCount(panel, message.text, document);
           break;
 
         case "ruby":
@@ -961,7 +1264,7 @@ export class ManuscriptEditorProvider
           break;
 
         case "log":
-          logLine(`原稿エディタ：${message.text}`);
+          await this.logForDocument(document, `原稿エディタ：${message.text}`);
           break;
 
         case "addMemo":
@@ -1000,6 +1303,12 @@ export class ManuscriptEditorProvider
           await this.deps.saveReadAloudVoice?.(message.name);
           break;
 
+        case "notePreview":
+          // **開いたその場で組んで返す**（次に打つまで空のままにしない）
+          notePreviewWanted = message.on;
+          if (notePreviewWanted) await send();
+          break;
+
         case "caret": {
           // **覚えるのはこちら。** 画面はファイルの場所を知らない
           if (message.line > 0) {
@@ -1021,6 +1330,31 @@ export class ManuscriptEditorProvider
                 )
               : undefined
           );
+          break;
+        }
+
+        case "dictationClean": {
+          // 画面の位置はLF空間。文書の位置へ直してから範囲にする（相談と同じ）。
+          // **前後は入れ替えて受ける**——画面は「カーソルが開始より前なら
+          // 文末まで」に直して送るが、逆さの範囲がここまで来ても壊さない
+          const source = document.getText();
+          const head = Math.min(message.from, message.to);
+          const tail = Math.max(message.from, message.to);
+          const range = new vscode.Range(
+            document.positionAt(fromLfOffset(source, head)),
+            document.positionAt(fromLfOffset(source, tail))
+          );
+          // **画面と文書が揃っているかを確かめてから渡す。** 打鍵が文書へ
+          // 届くのは少し遅れるので、話し終えてすぐ押すと位置だけが先に着く
+          // ——ずれた範囲を整えると、口述していないところまで書き換わる。
+          // 比べるのはLF空間（画面はCRLFを知らない）
+          if (toLf(document.getText(range)) !== message.text) {
+            void vscode.window.showWarningMessage(
+              "本文の反映を待っています。もう一度押してください。"
+            );
+            break;
+          }
+          await this.deps.dictationClean?.(document, range);
           break;
         }
       }
@@ -1066,10 +1400,13 @@ export class ManuscriptEditorProvider
       `原稿エディタ：${filePath} は台帳にありません（鍵: ${key}）。開き直します。`
     );
 
+    // **いま開いている向きが最優先**（縦書きで書いている人の画面を横にしない）。
+    // 開いていなければ、その作品のタイプに合わせた入口で開く（設計書6.70）
+    const episodeWork = await this.registeredEpisodeWork(filePath);
     const viewType =
       activeManuscriptViewType() ??
-      ((await this.isRegisteredEpisode(filePath))
-        ? MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+      (episodeWork
+        ? manuscriptViewTypeFor(await formatOf(episodeWork))
         : undefined);
     if (!viewType) {
       logLine(
@@ -1102,23 +1439,29 @@ export class ManuscriptEditorProvider
   }
 
   /**
-   * その原稿が、登録された作品の「話」か。
+   * その原稿が、登録された作品の「話」なら、その作品。
    *
    * **開く画面を決めるのは中身であって、拡張機能の都合ではない。**
-   * 本文（話）なら横書きの原稿エディタ、それ以外（プロット・設定資料）は
+   * 本文（話）なら原稿エディタ、それ以外（プロット・設定資料）は
    * 素のエディタ、という切り分けを、作品一覧と同じ基準で行う。
+   *
+   * **作品まで返す。** 開く向きの既定はタイプで決まる（設計書6.70）ので、
+   * 「話かどうか」だけでは足りない。
    *
    * 走査は、その原稿を原稿エディタで開いていないときにしか通らない
    * （開いていれば台帳で当たる）ので、飛ぶたびに走ることはない。
    */
-  private async isRegisteredEpisode(filePath: string): Promise<boolean> {
+  private async registeredEpisodeWork(
+    filePath: string
+  ): Promise<WorkEntry | undefined> {
     try {
       const found = await this.deps.highlighter.indexFor(filePath);
-      if (!found) return false;
+      if (!found) return undefined;
       const { episodes } = await scanWork(found.work);
-      return episodes.some((episode) =>
+      const isEpisode = episodes.some((episode) =>
         samePath(episode.filePath, filePath)
       );
+      return isEpisode ? found.work : undefined;
     } catch (error) {
       // **走査に失敗しても、飛べなくならない。** 素のエディタへ譲る
       logLine(
@@ -1126,13 +1469,60 @@ export class ManuscriptEditorProvider
           error instanceof Error ? error.message : String(error)
         }）。`
       );
-      return false;
+      return undefined;
     }
   }
 
   /**
    * 画面の本文を文書へ返す。**変わった1か所だけ**を当てる。
    */
+  /**
+   * 外で書き換わった本文を、VS Code が読み直したかを確かめる。
+   *
+   * 読み直されていなければ画面は古いままで、そこから書くと外の変更を
+   * 巻き戻しかねない（保存時の VS Code の照合で止まりはする）。直せは
+   * しないので、**ログに残して原因を追えるようにする。**
+   * 打ちかけ（未保存）の文書は VS Code が読み直さない決まりなので見ない。
+   */
+  private async verifyReloaded(document: vscode.TextDocument): Promise<void> {
+    if (document.isClosed || document.isDirty) return;
+    let disk: string;
+    try {
+      disk = (await readTextFile(fromUri(document.uri))).text;
+    } catch {
+      // 削除→作り直しの途中。作り直しの知らせで改めて確かめる
+      return;
+    }
+    if (disk === toLf(document.getText())) return;
+    await this.logForDocument(
+      document,
+      `原稿エディタ：${paths.basename(fromUri(document.uri))} が外で書き換えられましたが、VS Code が文書を読み直していません（画面が古いままの恐れ。閉じて開き直してください）`
+    );
+  }
+
+  /**
+   * 原稿エディタのログを、**その原稿の作品の `actions.log` へ**残す
+   * （49 の指摘、2026-09-08：この画面は `useLogFile` を一度も呼んでおらず、
+   * 「変換中の本文を捨てた」「外で変わった」の手がかりが出力チャンネルにしか
+   * 出ていなかった——出力チャンネルは VS Code を閉じると消える）。
+   *
+   * 書き先は呼ぶたびに引き直す。ほかの機能が別の作品のログへ向け直して
+   * いることがあるためで、覚えておくと別の作品のファイルへ書く。
+   * 作品が引けなければ、これまでどおり出力チャンネルだけに出る。
+   */
+  private async logForDocument(
+    document: vscode.TextDocument,
+    text: string
+  ): Promise<void> {
+    try {
+      const found = await this.deps.highlighter.indexFor(fromUri(document.uri));
+      if (found) useLogFile(found.work.folderPath);
+    } catch {
+      // 作品を引けなくてもログは出す
+    }
+    logLine(text);
+  }
+
   private async applyEdit(
     document: vscode.TextDocument,
     next: string
@@ -1170,9 +1560,11 @@ export class ManuscriptEditorProvider
 
   private async sendCount(
     panel: vscode.WebviewPanel,
-    text: string
+    text: string,
+    // 画面から届く本文にはファイル名が付いていないので、開いている文書から取る
+    document: vscode.TextDocument
   ): Promise<void> {
-    const value = countFor(text);
+    const value = countForDisplay(text, extensionOf(document));
     await panel.webview.postMessage({
       type: "count",
       // **下段の「このファイル」はこの数字を使う**（作者の指示、2026-08-29）。
@@ -1208,7 +1600,10 @@ export class ManuscriptEditorProvider
       await panel.webview.postMessage({
         type: "counts",
         workTotal: pickCount(stats.totals, currentCountMode()),
-        fileAtBase: countFor(toLf(document.getText())),
+        fileAtBase: countForDisplay(
+          toLf(document.getText()),
+          extensionOf(document)
+        ),
         today,
       });
     } catch (error) {
@@ -1318,7 +1713,7 @@ export class ManuscriptEditorProvider
           detail:
             "テキスト（.txt）は投稿サイトから持ってきた形をそのまま保つため、" +
             "対象外にしています。\n\n" +
-            "詳細メニューの「執筆AI支援 → その他支援 → 本文を .md にする」で" +
+            "詳細メニューの「執筆AI支援 → 原稿づくり → 本文を .md にする」で" +
             "変えられます（中身は1文字も変わりません）。",
         }
       );
@@ -1464,8 +1859,14 @@ export class ManuscriptEditorProvider
           ? isBlankText(document.getText())
           : isBlankEpisode(episode),
       episodeNaming(),
+      // **既存の話の名前の流儀に揃える**（`episode_0001_題.md` の作品に
+      // `019.txt` を作らない。設定は話が1つも無いときの初期値）
       (chapter, rule) =>
-        `${formatChapterNumber(chapter, rule.digits)}${rule.extension}`
+        nextEpisodeFileNameLike({
+          latestFileName: findLatestEpisode(episodes)?.fileName ?? null,
+          number: chapter,
+          fallback: rule,
+        })
     );
 
     if (plan.kind === "open") {
@@ -1524,23 +1925,20 @@ export class ManuscriptEditorProvider
       return;
     }
 
-    if (direction === "prev") {
-      if (at === 0) {
-        void vscode.window.showInformationMessage("最初の話です。");
-        return;
-      }
-      await this.openAsManuscript(episodes[at - 1].filePath);
+    // ここから先は最終話のとき、**保存前の中身で白紙かを見る**
+    // （打ちかけを白紙にしない）
+    const step = planNeighborStep({
+      at,
+      count: episodes.length,
+      direction,
+      currentIsBlank: isBlankText(document.getText()),
+    });
+    if (step.kind === "notice") {
+      void vscode.window.showInformationMessage(step.message);
       return;
     }
-
-    if (at < episodes.length - 1) {
-      await this.openAsManuscript(episodes[at + 1].filePath);
-      return;
-    }
-
-    // ここから先は最終話。**保存前の中身で白紙かを見る**（打ちかけを白紙にしない）
-    if (isBlankText(document.getText())) {
-      void vscode.window.showInformationMessage("最新話です。");
+    if (step.kind === "open") {
+      await this.openAsManuscript(episodes[step.index].filePath);
       return;
     }
 
@@ -1553,8 +1951,14 @@ export class ManuscriptEditorProvider
       episodes,
       () => false,
       episodeNaming(),
+      // **既存の話の名前の流儀に揃える**（`episode_0001_題.md` の作品に
+      // `019.txt` を作らない。設定は話が1つも無いときの初期値）
       (chapter, rule) =>
-        `${formatChapterNumber(chapter, rule.digits)}${rule.extension}`
+        nextEpisodeFileNameLike({
+          latestFileName: findLatestEpisode(episodes)?.fileName ?? null,
+          number: chapter,
+          fallback: rule,
+        })
     );
     if (plan.kind !== "create") return;
     await this.createAndOpen(found.work, manuscriptDir, plan.fileName);
@@ -1586,7 +1990,7 @@ export class ManuscriptEditorProvider
     // このあと作者が書いて保存した回が「ファイル数が変わった」に当たり、
     // その分が「今日 +0字」になって消える
     await this.deps.rebaseline(work);
-    void vscode.window.showInformationMessage(`${fileName} を作りました。`);
+    notifyDone(`${fileName} を作りました。`);
     await this.openAsManuscript(filePath);
   }
 
@@ -1600,31 +2004,56 @@ export class ManuscriptEditorProvider
   }
 
   private async copyForPosting(document: vscode.TextDocument): Promise<void> {
-    // **訊き方は普通のエディタと同じものを使う**（`features/ruby.ts`）。
-    // 画面ごとに選択肢の言葉が違うと、同じ操作に見えなくなる
-    const style = await pickStyle();
-    if (!style) return;
+    /*
+      **訊き方は普通のエディタと同じものを使う**（`features/ruby.ts`）。
+      画面ごとに選択肢の言葉が違うと、同じ操作に見えなくなる。
 
-    // **シーンメモは投稿しない**（設計書6.40.2）。この画面ではメモを
-    // 消さずに見せているので、外へ出す唯一の口であるここで落とす
-    const source = stripMemoLines(document.getText());
-
-    // **傍点が入っているときだけ、貼り付け先を訊く**（設計書6.12.4）。
-    // ルビはどのサイトでも同じ書き方で通る
-    let site: EmphasisSite = "kakuyomu";
-    if (style.id === "site" && hasEmphasis(source)) {
-      const picked = await pickEmphasisSite();
-      if (!picked) return;
-      site = picked;
-    }
-
-    await vscode.env.clipboard.writeText(
-      toSiteNotation(source, style.id, site)
+      **訊くのは貼り付け先だけ。1度だけ**（設計書6.12.4）。以前は記法を
+      先に訊き、傍点が入っているときだけサイトを訊く2段だった。サイトが
+      決まれば記法は決まるので、記法を訊く画面は要らない。
+    */
+    /*
+      **作品は登録簿で引く**（`workOf`、設計書6.68.2）。用語索引
+      （`highlighter.indexFor`）は**設定資料が1件も無い作品では引けない**
+      ので、書き始めたばかりの作品では登録済みの投稿先が先頭に来なかった。
+      同じ操作の並びが作品によって変わるのは、作者からは不具合に見える。
+    */
+    const work = this.deps.workOf(fromUri(document.uri));
+    const target = await pickPostingTarget(
+      // 作品が引けないことはある（登録していないファイルを開いたとき）。
+      // そのときは並びが既定に戻るだけで、コピー自体はできる
+      await registeredPostingSites(work)
     );
-    void vscode.window.showInformationMessage(
-      `本文全体を${style.label}に変換して、クリップボードへ入れました。` +
-        "原稿はそのままです。"
-    );
+    if (!target) return;
+
+    // **頭書き（【タイトル】〜【本文】）は外す**（`sourceForPostingCopy`、
+    // 設計書6.12.1）。全文をそのまま渡していたので、投稿欄へ貼ると題名の
+    // 行から二重に入っていた。**普通のエディタ側（`features/ruby.ts`）と
+    // 同じ経路を通す**——切り方を写すと、片方だけが直る日が来る
+    const source = sourceForPostingCopy(document.getText());
+
+    /*
+      **シーンメモを落とすのは変換の側**（`convertForPosting`、設計書6.84）。
+      この画面ではメモを消さずに見せているので、外へ出す唯一の口である
+      ここで落としていたが、**noteではコードの中の `//` を落としてはいけない**
+      ——記法を読み分けられるところでだけ落とす。
+
+      **貼り付け先ごとの分岐も、入口には書かない。** noteはMarkdownを
+      そのまま解釈するので記法の置き換えだけでは足りず、3つの入口が
+      別々に分岐を持つと、貼ったときの形が入口によって違うことになる。
+    */
+    const conversion = convertForPosting(source, target);
+
+    await vscode.env.clipboard.writeText(conversion.text);
+    await showPostingCopyNotice({
+      conversion,
+      sourcePath: fromUri(document.uri),
+      otherwise: () =>
+        notifyDone(
+          `本文全体を${target.label}の書き方に変換して、` +
+            "クリップボードへ入れました。原稿はそのままです。"
+        ),
+    });
   }
 }
 
@@ -1719,7 +2148,7 @@ function readAppearance(orientation: ManuscriptOrientation): {
  * `settings.json` へ直接 `10` と書けばその値が届く。範囲の外の `rate` は、
  * 環境によっては**声が一言も出ない**（黙って失敗する）ので、ここで畳む。
  */
-function clampReadAloudRate(value: number): number {
+export function clampReadAloudRate(value: number): number {
   if (!Number.isFinite(value)) return 1;
   return Math.min(2, Math.max(0.5, value));
 }

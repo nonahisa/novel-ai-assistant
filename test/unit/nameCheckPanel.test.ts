@@ -159,4 +159,27 @@ describe("点検画面のHTML", () => {
   test("何も書き換わらないことを画面に書く", () => {
     expect(HTML).toContain("更新");
   });
+
+  /**
+   * **出したものは、見える所へ運ぶ**（作者の実機報告、2026-09-06）。
+   *
+   * 「登場箇所」を開いたまま「候補を出す（AI）」を押すと、候補は
+   * 登場箇所の一覧の**下**に付く。10件並んだ下では画面に現れず、
+   * 80秒待って何も起きないように見える（実機確認でも一度
+   * 「候補が出ない不具合」と読み違えた）。
+   */
+  test("候補の枠に、飛び先の名前を付けている", () => {
+    expect(HTML).toContain("id=\"candidates-'");
+  });
+
+  test("候補が返ったら、その位置へ画面を送る", () => {
+    expect(HTML).toContain("function focusCandidates(id)");
+    expect(HTML).toContain("target.scrollIntoView({ block: 'center' })");
+    expect(HTML).toContain("focusCandidates(message.data.characterId);");
+  });
+
+  test("考えている間も、その位置を見せる", () => {
+    // 待ちの表示が画面外だと、押しても何も起きないように見える
+    expect(HTML).toContain("focusCandidates(message.id);");
+  });
 });

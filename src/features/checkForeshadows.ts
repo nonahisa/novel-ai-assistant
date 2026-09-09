@@ -8,7 +8,10 @@ import {
   isFatalProviderFailure,
   recoveryForAIError,
 } from "../ai/types";
-import { OUTPUT_RESERVE_TOKENS } from "../ai/contextGuard";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import {
@@ -20,7 +23,11 @@ import {
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
-import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
+import {
+  describeChunkSettings,
+  readChunkSettings,
+  resolveModelInfoOrWarn,
+} from "./chunkSettings";
 import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
 import { formatChapterLabel } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
@@ -53,9 +60,16 @@ import {
   type AcceptedForeshadowResolution,
   type KnownForeshadow,
 } from "../core/foreshadowValidation";
-import { withCancellableProgress, type CheckProgress } from "../views/progress";
+import { type CheckProgress } from "../views/progress";
+import type { SuiteAwareOptions } from "../core/proofreadingSuite";
+import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
-import { logFailure, logStep, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  useLogFile,
+} from "../core/logger";
 import type { ProposalPanel, RecordUpdateViewItem } from "./proposalPanel";
 
 /**
@@ -105,7 +119,7 @@ export interface ForeshadowResolveRunResult {
 
 // ── 配置の検知（P-25）─────────────────────────────
 
-export interface CheckForeshadowsOptions {
+export interface CheckForeshadowsOptions extends SuiteAwareOptions {
   /**
    * 進み具合の届け先（作者の報告、2026-08-29）。
    * 提案パネルへ出すために使う。渡されなければ何もしない
@@ -126,7 +140,18 @@ export async function checkForeshadows(
   const ledger = await loadLedger(work);
   if (!ledger) return undefined;
 
-  const info = await registry.resolveModelInfo("foreshadow");
+  // **取れなければ止める**（設計書6.27.10）。以前はここで `?? 8192` へ
+  // 黙って落ちており、131,072のモデルでもチャンクが1,500字になって
+  // キャッシュが全滅し、呼び出し回数が十数倍になっていた
+  const info = await resolveModelInfoOrWarn({
+    registry,
+    feature: "foreshadow",
+    provider: resolved.provider,
+    model: resolved.model,
+    actionLabel: "伏線の検知",
+  });
+  if (!info) return undefined;
+
   // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
   // 台帳が育つと「既に登録済みの見出し」が伸びる。伸びた分だけ本文を
   // 痩せさせないと、上限を超えて本文の後半が黙って捨てられる
@@ -141,11 +166,19 @@ export async function checkForeshadows(
         // 実際に送るときと同じ絞り方（`known.slice(-60)`）で測る
         .slice(-60),
     }).length;
-  // コンテキスト長が取れないモデルでは、他の検知と同じ既定へ落とす
-  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192, {
-    overheadChars: detectOverheadChars,
-    outputTokens: OUTPUT_RESERVE_TOKENS,
-  });
+  // **応答の見込みに実測を使う**（設計書6.65.16の2）
+  const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
+  const chunkSettings = readChunkSettings(
+    info.contextWindow,
+    {
+      overheadChars: detectOverheadChars,
+      outputTokens: resolveOutputTokensForPlanning(
+        outputTuning.providerId,
+        outputTuning.model
+      ),
+    },
+    outputTuning
+  );
   const { chunks, chapterLabelByFile, unreadableEpisodes } = await collectChunks(
     work,
     chunkSettings
@@ -181,27 +214,32 @@ export async function checkForeshadows(
     ) {
       return undefined;
     }
-    const confirm = await vscode.window.showInformationMessage(
-      `${work.title} の伏線を検知します。`,
-      {
-        modal: true,
-        detail: [
-          `${chunks.length}チャンク中 ${pending.length}件を処理します` +
-            `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
-          `既に登録されている伏線: ${ledger.records.length}件`,
-          "",
-          "台帳へは何も自動で入りません。 候補を「提案」パネルへ並べますので、",
-          "登録するものを1件ずつ選んでください。",
-          resolved.provider.isPaid
-            ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      },
-      "実行"
-    );
-    if (confirm !== "実行") return undefined;
+    const detail = [
+      `${chunks.length}チャンク中 ${pending.length}件を処理します` +
+        `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
+      `既に登録されている伏線: ${ledger.records.length}件`,
+      "",
+      "台帳へは何も自動で入りません。 候補を「提案」パネルへ並べますので、",
+      "登録するものを1件ずつ選んでください。",
+      resolved.provider.isPaid
+        ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    if (options.suiteConfirmed) {
+      // まとめ実行が先に1回だけ確認している（設計書6.80）。
+      // **飛ばした中身はログへ残す**（既に登録済みの件数と課金の断り）
+      logStep(`伏線の検知：まとめ実行のため確認を省略\n${detail}`);
+    } else {
+      const confirm = await vscode.window.showInformationMessage(
+        `${work.title} の伏線を検知します。`,
+        { modal: true, detail },
+        "実行"
+      );
+      if (confirm !== "実行") return undefined;
+    }
   }
 
   logStep(
@@ -212,6 +250,18 @@ export async function checkForeshadows(
 
   const provider = resolved.provider;
   const model = resolved.model;
+  // num_ctx の確保にも同じ見込みを使う（設計書6.65.16の2）
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model
+  );
+  // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
+  // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
+  // 半分になり、長い応答が途中で切れる
+  const sendOutputTokens = resolveOutputTokensForSend(
+    outputTuning.providerId,
+    outputTuning.model
+  );
   // **既に台帳にあるものは出さない**（設計書6.35.2）。処理しながら
   // 増やしていくので、同じ候補が隣のチャンクから二度出ることもなくなる
   const known: KnownForeshadow[] = ledger.records.map((record) => ({
@@ -227,9 +277,17 @@ export async function checkForeshadows(
   let cancelled = false;
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
   let fatalFailure = "";
+  // **終了ログでも使うので、進捗の輪の外に置く**（設計書6.77）。
+  // 中に閉じ込めると「何件中何件で終えたか」を書けない
+  let done = 0;
+  let total = 0;
 
-  await withCancellableProgress(
+  // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）。
+  // 関所（送信を1件ずつ）だけだと、機能どうしが交互に流れて
+  // モデルの読み込み直しが往復する
+  await withAiTurnProgress(
     "伏線になりそうな記述を探しています",
+    { label: "伏線の検知", onCancelled: () => (cancelled = true) },
     async (progress, token) => {
       const controller = new AbortController();
       token.onCancellationRequested(() => {
@@ -240,8 +298,10 @@ export async function checkForeshadows(
       // まとめたチャンクが切り詰められたら、話ごとに分けて試し直す。
       // 処理中に増えるので `for...of` ではなく番号で回す（矛盾検知と同じ）
       const queue = [...chunks];
-      let total = queue.length;
-      let done = 0;
+      // **分母は、実際にAIへ送る件数**（作者の指摘、2026-09-06）。
+      // 全件にすると、処理済みが多い実行で数字が動かず、止まって見える
+      total = pending.length;
+      const skippedChunks = chunks.length - pending.length;
 
       for (let cursor = 0; cursor < queue.length; cursor++) {
         if (token.isCancellationRequested) break;
@@ -250,13 +310,15 @@ export async function checkForeshadows(
 
         const cached = cache.get(chunk.hash, cacheKeyBase);
         const raw = cached ?? (await ask(chunk));
-        done++;
-        progress.report({
-          message: `${done}/${total}`,
-          increment: 100 / total,
-        });
-        // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-        options.onProgress?.(done, total);
+        if (cached === undefined) {
+          done++;
+          progress.report({
+            message: `${done}/${total}`,
+            increment: 100 / Math.max(total, 1),
+          });
+          // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+          options.onProgress?.(done, total, skippedChunks);
+        }
 
         if (raw === RETRY_SMALLER) {
           const parts = splitMergedChunk(chunk);
@@ -332,6 +394,8 @@ export async function checkForeshadows(
             model,
             // 取り出すだけの仕事なので揺らさない
             temperature: 0.0,
+            maxOutputTokens: sendOutputTokens,
+            plannedOutputTokens,
             jsonSchema: FORESHADOW_DETECT_SCHEMA as unknown as object,
             disableThinking: true,
             signal: controller.signal,
@@ -359,7 +423,7 @@ export async function checkForeshadows(
             logFailure("伏線の検知", {
               チャンク: chunk.hash,
               理由: "応答を読み取れません",
-              応答: response.text.slice(0, 300),
+              応答: responseExcerptForLog(response.text),
             });
             return undefined;
           }
@@ -392,8 +456,11 @@ export async function checkForeshadows(
   await saveCache(cache);
 
   logStep(
-    `伏線の検知を終了: 候補 ${candidates.length}件 / 既存と重なり ${duplicateCount}件 / ` +
-      `本文と合わない ${rejectedCount}件 / 読めなかった ${failedChunks}件 / ` +
+    // **「n/N（失敗 m件）」から書き出す**（ほかの検知と同じ形）。
+    // 件数だけでは、何チャンク見終えたのかが読み取れなかった
+    `伏線の検知を終了: ${done}/${total}（失敗 ${failedChunks}件 / ` +
+      `候補 ${candidates.length}件 / 既存と重なり ${duplicateCount}件 / ` +
+      `本文と合わない ${rejectedCount}件 / ` +
       `本文を開けなかった話 ${unreadableEpisodes}件` +
       (cancelled ? " / 中止された" : "") +
       // **止めた理由を残す。** 「読めなかった1件」だけでは、残りを
@@ -401,6 +468,7 @@ export async function checkForeshadows(
       (fatalFailure
         ? ` / ${fatalFailure} のため残りは試していません`
         : "") +
+      "）" +
       // 却下の内訳。**数だけでは次の一手が決まらない**（設計書6.35.7）
       (rejectReasons.length > 0 ? `
   却下の内訳: ${describeRejectReasons(rejectReasons)}` : "")
@@ -508,7 +576,16 @@ export async function checkForeshadowResolution(
   const resolved = await ensureConfigured(registry, "foreshadow");
   if (!resolved) return undefined;
 
-  const info = await registry.resolveModelInfo("foreshadow");
+  // 検知と同じく、取れなければ止める（黙って 8,192 へ落ちない）
+  const info = await resolveModelInfoOrWarn({
+    registry,
+    feature: "foreshadow",
+    provider: resolved.provider,
+    model: resolved.model,
+    actionLabel: "伏線の回収の確認",
+  });
+  if (!info) return undefined;
+
   // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
   // 未回収の伏線は1件も減らないまま増えることがあり、ここがいちばん育つ。
   // 実際に渡すのは話数で絞った分だけなので、**全件で測るのは安全側**である
@@ -519,10 +596,19 @@ export async function checkForeshadowResolution(
       chunkText: "",
       foreshadows: open.map(toBrief),
     }).length;
-  const chunkSettings = readChunkSettings(info?.contextWindow ?? 8192, {
-    overheadChars: resolveOverheadChars,
-    outputTokens: OUTPUT_RESERVE_TOKENS,
-  });
+  // **応答の見込みに実測を使う**（設計書6.65.16の2）
+  const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
+  const chunkSettings = readChunkSettings(
+    info.contextWindow,
+    {
+      overheadChars: resolveOverheadChars,
+      outputTokens: resolveOutputTokensForPlanning(
+        outputTuning.providerId,
+        outputTuning.model
+      ),
+    },
+    outputTuning
+  );
   // **話をまたいでまとめない。** 「張った話より後か」を話数で決めるので、
   // 前後の話が1つの塊になっていると、その判断ができなくなる
   const { chunks, chapterLabelByFile, unreadableEpisodes } = await collectChunks(
@@ -604,6 +690,16 @@ export async function checkForeshadowResolution(
 
   const provider = resolved.provider;
   const model = resolved.model;
+  // num_ctx の確保にも同じ見込みを使う（設計書6.65.16の2）
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model
+  );
+  // 確保と上限は別物（設計書6.77の第2段。検知側と同じ理由）
+  const sendOutputTokens = resolveOutputTokensForSend(
+    outputTuning.providerId,
+    outputTuning.model
+  );
   const byId = new Map(open.map((record) => [record.id, record]));
 
   const proposals: ForeshadowResolutionProposal[] = [];
@@ -614,9 +710,14 @@ export async function checkForeshadowResolution(
   let cancelled = false;
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
   let fatalFailure = "";
+  // 終了ログで使うので、進捗の輪の外に置く（検知側と同じ理由）
+  let done = 0;
+  let total = 0;
 
-  await withCancellableProgress(
+  // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）
+  await withAiTurnProgress(
     "伏線が回収されたかを見ています",
+    { label: "伏線の回収の確認", onCancelled: () => (cancelled = true) },
     async (progress, token) => {
       const controller = new AbortController();
       token.onCancellationRequested(() => {
@@ -624,11 +725,12 @@ export async function checkForeshadowResolution(
         controller.abort();
       });
 
-      let done = 0;
       // **上限に入らなかったチャンクは、小さくして試し直す**（設計書6.27.10）。
       // 処理中に増えるので、`for...of` ではなく番号で回す
       const queue = [...targeted];
-      let total = queue.length;
+      // **分母は、実際にAIへ送る件数**（作者の指摘、2026-09-06）
+      total = pending.length;
+      const skippedChunks = targeted.length - pending.length;
       for (let cursor = 0; cursor < queue.length; cursor++) {
         if (token.isCancellationRequested) break;
         if (fatalFailure) break;
@@ -636,13 +738,15 @@ export async function checkForeshadowResolution(
 
         const cached = cache.get(entry.chunk.hash, cacheKeyBase);
         const raw = cached ?? (await ask(entry.chunk, entry.targets));
-        done++;
-        progress.report({
-          message: `${done}/${total}`,
-          increment: 100 / total,
-        });
-        // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-        options.onProgress?.(done, total);
+        if (cached === undefined) {
+          done++;
+          progress.report({
+            message: `${done}/${total}`,
+            increment: 100 / Math.max(total, 1),
+          });
+          // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+          options.onProgress?.(done, total, skippedChunks);
+        }
         if (raw instanceof AIError) {
           const retry = retryOnOverflow(entry.chunk, raw);
           if (retry.kind === "split") {
@@ -703,6 +807,8 @@ export async function checkForeshadowResolution(
             userPrompt,
             model,
             temperature: 0.0,
+            maxOutputTokens: sendOutputTokens,
+            plannedOutputTokens,
             jsonSchema: FORESHADOW_RESOLVE_SCHEMA as unknown as object,
             disableThinking: true,
             signal: controller.signal,
@@ -733,7 +839,7 @@ export async function checkForeshadowResolution(
             logFailure("伏線の回収の確認", {
               チャンク: chunk.hash,
               理由: "応答を読み取れません",
-              応答: response.text.slice(0, 300),
+              応答: responseExcerptForLog(response.text),
             });
             return undefined;
           }
@@ -766,8 +872,9 @@ export async function checkForeshadowResolution(
   await saveCache(cache);
 
   logStep(
-    `伏線の回収の確認を終了: 候補 ${proposals.length}件 / ` +
-      `本文と合わない ${rejectedCount}件 / 読めなかった ${failedChunks}件 / ` +
+    // 検知側と同じ形（n/N（失敗 m件）から書き出す）
+    `伏線の回収の確認を終了: ${done}/${total}（失敗 ${failedChunks}件 / ` +
+      `候補 ${proposals.length}件 / 本文と合わない ${rejectedCount}件 / ` +
       `本文を開けなかった話 ${unreadableEpisodes}件` +
       (cancelled ? " / 中止された" : "") +
       // **止めた理由を残す。** 「読めなかった1件」だけでは、残りを
@@ -775,6 +882,7 @@ export async function checkForeshadowResolution(
       (fatalFailure
         ? ` / ${fatalFailure} のため残りは試していません`
         : "") +
+      "）" +
       // 却下の内訳。**数だけでは次の一手が決まらない**（設計書6.35.7）
       (rejectReasons.length > 0 ? `
   却下の内訳: ${describeRejectReasons(rejectReasons)}` : "")

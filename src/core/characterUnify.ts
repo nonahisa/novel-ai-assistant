@@ -1,6 +1,10 @@
 import type { Character } from "../models/character";
 import { mergeChangeLists, mergeConflicts } from "../models/jsonValidation";
-import { normalizeName } from "./characterMerge";
+import {
+  dedupeRelations,
+  normalizeName,
+  normalizeSpacing,
+} from "./characterMerge";
 
 /**
  * 同一人物として登録されてしまった2件を1件にまとめる。
@@ -21,18 +25,44 @@ export interface UnifyResult {
   retiredId: string;
 }
 
-export function unifyCharacters(keep: Character, absorb: Character): UnifyResult {
+export function unifyCharacters(
+  keep: Character,
+  absorb: Character,
+  /**
+   * まとめる2人以外の、いま存在するレコード。
+   *
+   * **そこに載っている「名前」は別名にしない**（設計書6.5.9）。
+   * 別人の名前が別名に残ると、次の「重複をまとめる」でその別人との組が
+   * 候補に並び、まとめるたびに別人が引き寄せられる（実データで12件）。
+   */
+  others: readonly Character[] = []
+): UnifyResult {
   if (keep.id === absorb.id) {
     throw new Error("同じ人物どうしはまとめられません。");
   }
 
-  const aliases = new Set([...keep.aliases, absorb.name, ...absorb.aliases]);
-  aliases.delete(keep.name);
+  const blocked = new Set(
+    others
+      .filter(
+        (character) => character.id !== keep.id && character.id !== absorb.id
+      )
+      .map((character) => normalizeSpacing(character.name))
+  );
+  const keepKey = normalizeSpacing(keep.name);
+  const aliases: string[] = [];
+  const seen = new Set<string>();
+  for (const alias of [...keep.aliases, absorb.name, ...absorb.aliases]) {
+    const key = normalizeSpacing(alias);
+    // 「密倉文佳」と「密倉 文佳」を、別の呼び名として2つ残さない
+    if (!key || key === keepKey || seen.has(key) || blocked.has(key)) continue;
+    seen.add(key);
+    aliases.push(alias);
+  }
 
   return {
     unified: {
       ...keep,
-      aliases: [...aliases].filter((alias) => alias.trim()),
+      aliases,
       // 別人の記録（設計書6.5.8）は両方から引き継ぐ。吸収される側の分を
       // 落とすと、「アジャーノは別人」という作者の判断がまとめる操作1回で
       // 消え、次の抽出で別名が戻る。ただし**互いを指す記録は消す**——
@@ -63,19 +93,16 @@ export function unifyCharacters(keep: Character, absorb: Character): UnifyResult
       addressTerms: [
         ...keep.addressTerms,
         ...absorb.addressTerms.map((term) =>
-          term.targetName === absorb.name
+          // 空白の有無だけが違う書き方も、同じ相手として付け替える
+          normalizeSpacing(term.targetName) === normalizeSpacing(absorb.name)
             ? { ...term, targetName: keep.name }
             : term
         ),
       ],
-      relations: dedupeBy(
-        [...keep.relations, ...absorb.relations],
-        // 区切りにNULを使うのは、名前にも関係にも現れない文字だから。
-        // ソースには生のNULを置かずエスケープで書く。生のまま置くと、
-        // gitやgrepがこのファイルをバイナリとみなして差分を見せてくれない
-        // （実際にそうなっていた）
-        (relation) => `${relation.name}\u0000${relation.relation}`
-      ),
+      // 同じ相手との重複はここでもまとめる（設計書6.5.9）。
+      // まとめる操作は2人ぶんの関係を足すので、重複がいちばん出やすい。
+      // 名前の揺れ（「ばあさん」「おばあさん」）も1つに寄せる
+      relations: dedupeRelations([...keep.relations, ...absorb.relations]),
       abilities: dedupeBy(
         [...keep.abilities, ...absorb.abilities],
         (ability) => ability.name

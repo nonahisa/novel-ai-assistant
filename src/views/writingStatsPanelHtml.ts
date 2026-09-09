@@ -132,6 +132,20 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
 .mini { position: relative; height: 8px; background: var(--vscode-panel-border); border-radius: 4px; min-width: 60px; }
 .mini > span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--vscode-charts-blue, #3794ff); }
 .note { color: var(--vscode-descriptionForeground); font-size: 12px; margin: 12px 0; line-height: 1.6; }
+/* サイトの記録（設計書6.68.5）。作品情報の1行と、その下に順位の履歴 */
+.site { margin-bottom: 18px; }
+.site-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
+.site-name { font-weight: 600; }
+.site-meta { font-size: 12px; color: var(--vscode-descriptionForeground); }
+.site-latest { font-size: 12px; }
+/* 順位の表と読者の反応の表を見分けるための小見出し（設計書6.79.7） */
+.site-sub { font-size: 12px; color: var(--vscode-descriptionForeground); margin: 10px 0 2px; }
+a, .link {
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  text-decoration: none;
+}
+a:hover, .link:hover { text-decoration: underline; }
 .empty { padding: 24px 0; color: var(--vscode-descriptionForeground); line-height: 1.7; }
 .conflicted { color: var(--vscode-editorWarning-foreground, #cca700); }
 </style>
@@ -152,6 +166,7 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
     <div class="chart-wrap"><svg id="chart" width="100%" height="240"></svg></div>
     <div class="note" id="chart-note"></div>
     <div id="devices"></div>
+    <div id="site-records"></div>
   </section>
   ${hasEpisodesTab ? `<section class="page" id="page-episodes">
     <div class="cards" id="episode-cards"></div>
@@ -188,8 +203,21 @@ function estimateLabelWidth(label) {
   return width;
 }
 
-function signed(value) {
-  return (value > 0 ? '+' : '') + formatCount(value);
+/**
+ * 執筆量の言い方（作者の指定、2026-09-06）。
+ *
+ * **減った日を「−12字」と出さない。** 推敲で削った日は「書かなかった日」
+ * ではないのに、負の数は「マイナス＝良くないこと」と読めてしまう。
+ * 記号ではなく言葉で「削った 12字」と言う。
+ *
+ * 中身は core/writingAmountText.ts の describeWrittenAmount と同じである
+ * （WebViewの中からは呼べないので、同じ言い方をここにも置く）。
+ * 食い違っていないことは writingStatsPanelHtml.test.ts が見張る。
+ * ここはテンプレート文字列の中なので、引用にバッククォートを使わない。
+ */
+function amount(value) {
+  if (value < 0) return '削った ' + formatCount(-value) + '字';
+  return (value > 0 ? '+' : '') + formatCount(value) + '字';
 }
 
 document.querySelectorAll('.tab').forEach((tab) => {
@@ -265,7 +293,7 @@ function renderCards() {
   const cards = [];
 
   cards.push(card(
-    '今日', signed(today.progress.written) + '字',
+    '今日', amount(today.progress.written),
     today.progress.goal > 0
       ? (today.progress.achieved
           ? '目標 ' + formatCount(today.progress.goal) + '字を達成'
@@ -275,7 +303,7 @@ function renderCards() {
   ));
 
   cards.push(card(
-    '今月', signed(month.progress.written) + '字',
+    '今月', amount(month.progress.written),
     month.progress.goal > 0
       ? (month.progress.achieved
           ? '目標 ' + formatCount(month.progress.goal) + '字を達成'
@@ -388,7 +416,7 @@ function renderChart() {
     parts.push(
       '<rect class="' + classes.join(' ') + '" x="' + x + '" y="' + y +
       '" width="' + barWidth + '" height="' + barHeight + '" rx="2">' +
-      '<title>' + escapeHtml(bucket.label + '  ' + signed(bucket.net) + '字') + '</title>' +
+      '<title>' + escapeHtml(bucket.label + '  ' + amount(bucket.net)) + '</title>' +
       '</rect>'
     );
     if (shownSet.has(index)) {
@@ -407,7 +435,7 @@ function renderChart() {
   const total = buckets.reduce((sum, bucket) => sum + bucket.net, 0);
   const active = buckets.reduce((sum, bucket) => sum + bucket.activeDays, 0);
   note.textContent =
-    GRANULARITY_LABELS[granularity] + 'の合計 ' + signed(total) + '字' +
+    GRANULARITY_LABELS[granularity] + 'の合計 ' + amount(total) +
     '（書いた日 ' + active + '日）。' + state.notice;
 }
 
@@ -425,11 +453,185 @@ function renderDevices() {
     state.devices
       .map((device) =>
         '<tr><td>' + escapeHtml(device.label) + '</td>' +
-        '<td class="num">' + signed(device.net) + '</td>' +
+        '<td class="num">' + amount(device.net) + '</td>' +
         '<td class="num">' + device.activeDays + '</td></tr>'
       )
       .join('') +
     '</tbody></table>';
+}
+
+/**
+ * サイトの記録（設計書6.68.5）。
+ *
+ * **1件も無ければ、節ごと出さない。** 空の見出しと空の表が増えるだけで、
+ * 執筆量を見にきた人の邪魔になる。
+ *
+ * 作品ページは**拡張機能側へ頼んで開く**（openExternal）。画面の中から
+ * 直接どこかへ繋ぐことはしない。
+ */
+function renderSiteRecords() {
+  const host = document.getElementById('site-records');
+  if (!host) return;
+  const records = (state && state.siteRecords) || [];
+  /*
+    **台帳を読めなかったことは、画面で言う**（設計書6.79.7、0.33.9）。
+    以前はログへ残すだけだったので、作者からは「サイトの記録」が理由も
+    分からず消えたようにしか見えなかった。ほかの統計は従来どおり出す。
+  */
+  const failure = (state && state.siteRecordsError) || '';
+  const failureNote = failure
+    ? '<div class="note">サイトの記録を読めませんでした：' +
+      escapeHtml(failure) + '</div>'
+    : '';
+  if (records.length === 0) {
+    host.innerHTML = failureNote
+      ? '<h3>サイトの記録</h3>' + failureNote
+      : '';
+    return;
+  }
+
+  const blocks = records.map((record) => {
+    const meta = [];
+    if (record.workId) meta.push('作品ID ' + escapeHtml(record.workId));
+    if (record.genre) meta.push('ジャンル ' + escapeHtml(record.genre));
+    if (!record.registered) meta.push('いまは投稿先から外しています');
+    if (record.note) meta.push(escapeHtml(record.note));
+
+    const head = ['<div class="site-name">' + escapeHtml(record.label) + '</div>'];
+    if (meta.length > 0) {
+      head.push('<div class="site-meta">' + meta.join(' ／ ') + '</div>');
+    }
+    const links = [];
+    if (record.workUrl) {
+      links.push(
+        '<span class="link" data-url="' + escapeHtml(record.workUrl) +
+        '">作品ページを開く</span>'
+      );
+    }
+    /*
+      なろうの分析リンク（設計書6.79.7）。**なろうの行にしか入らない。**
+      なろうは規約でAPI以外の自動収集を禁じているので、こちらから読みに
+      いく代わりに、公認データの分析サイトへ作者が飛べるようにする。
+      ——開くのは作者のブラウザで、この拡張機能はHTTPを発しない。
+    */
+    if (record.analysisUrl) {
+      links.push(
+        '<span class="link" data-url="' + escapeHtml(record.analysisUrl) +
+        '">分析（Narou.fun）を開く</span>'
+      );
+    }
+    if (links.length > 0) {
+      head.push('<div class="site-meta">' + links.join(' ／ ') + '</div>');
+    }
+    if (record.latest) {
+      head.push(
+        '<div class="site-latest">最新 ' + escapeHtml(record.latest.board) + ' ' +
+        formatCount(record.latest.rank) + '位' +
+        '（' + escapeHtml(formatWhen(record.latest.recordedAt)) + '）</div>'
+      );
+    }
+    /*
+      読者の反応（設計書6.79.7）。**あるものだけが並んだ文字列**が届く
+      （どの欄が読めたかの判断は core 側が持つ）。
+    */
+    if (record.readerLatest) {
+      head.push(
+        '<div class="site-latest">最新の反応 ' +
+        escapeHtml(record.readerLatest.metrics) +
+        '（' + escapeHtml(record.readerLatest.scope) + '・' +
+        escapeHtml(record.readerLatest.period) + '　' +
+        escapeHtml(formatWhen(record.readerLatest.readAt)) + '）</div>'
+      );
+    }
+
+    const rows = record.history.map((row) =>
+      '<tr><td>' + escapeHtml(formatWhen(row.recordedAt)) + '</td>' +
+      '<td>' + escapeHtml(row.board) + '</td>' +
+      '<td class="num">' + formatCount(row.rank) + '</td>' +
+      '<td>' + escapeHtml(row.note || '') + '</td></tr>'
+    );
+    const table = rows.length > 0
+      ? '<table><thead><tr><th>日時</th><th>種別</th><th class="num">順位</th>' +
+        '<th>メモ</th></tr></thead><tbody>' + rows.join('') + '</tbody></table>'
+      : '';
+
+    const readerTable = renderReaderStatsTable(record.readerHistory || []);
+
+    return '<div class="site"><div class="site-head">' + head.join('') + '</div>' +
+      table + readerTable + '</div>';
+  });
+
+  const note = siteRecordsNote(records);
+  host.innerHTML =
+    '<h3>サイトの記録</h3>' + failureNote + blocks.join('') +
+    // 言うことが無ければ、空の但し書きを置かない（作品情報だけの作品）
+    (note ? '<div class="note">' + note + '</div>' : '');
+
+  host.querySelectorAll('[data-url]').forEach((el) => {
+    el.addEventListener('click', () => {
+      vscode.postMessage({ type: 'openExternal', url: el.dataset.url });
+    });
+  });
+}
+
+/**
+ * 読者の反応の表（設計書6.79.7）。
+ *
+ * **見出しを付ける。** 順位の表と2つ並ぶので、どちらの数字なのかが
+ * 列名だけでは分からない。
+ *
+ * **メモの列も出す**（0.33.9のレビュー）。手入力でも封筒でもメモは台帳に
+ * 入るのに、ここに列が無かったので、書いたのに二度と読めない欄になっていた
+ * （順位の表と同じ形にする）。
+ */
+function renderReaderStatsTable(rows) {
+  const body = (rows || []).map((row) =>
+    '<tr><td>' + escapeHtml(formatWhen(row.readAt)) + '</td>' +
+    '<td>' + escapeHtml(row.scope) + '</td>' +
+    '<td>' + escapeHtml(row.period) + '</td>' +
+    '<td>' + escapeHtml(row.metrics) + '</td>' +
+    '<td>' + escapeHtml(row.source) + '</td>' +
+    '<td>' + escapeHtml(row.note || '') + '</td></tr>'
+  );
+  if (body.length === 0) return '';
+  return '<div class="site-sub">読者の反応</div>' +
+    '<table><thead><tr><th>日時</th><th>範囲</th><th>粒度</th>' +
+    '<th>反応</th><th>出どころ</th><th>メモ</th></tr></thead><tbody>' +
+    body.join('') + '</tbody></table>';
+}
+
+/**
+ * 表の下の注記。**あるものについてだけ言う**（0.33.9のレビュー）。
+ *
+ * 順位を1件も記録していない作品でも「順位は…」で始まっていたので、反応だけを
+ * 記録している作者には身に覚えのない説明になっていた。どの但し書きも
+ * 「サイトから自動で取ってこない」ことを言うためにある（6.68.1の線）。
+ */
+function siteRecordsNote(records) {
+  const notes = [];
+  if (records.some((record) => (record.history || []).length > 0)) {
+    notes.push('順位は「ランキングを記録する」で書き足した値です。' +
+      'サイトから自動で取ってくることはありません。');
+  }
+  if (records.some((record) => (record.readerHistory || []).length > 0)) {
+    notes.push('読者の反応は、手入力か、ご自身で開いた管理画面から' +
+      '貼り付けたものだけです。');
+  }
+  // 分析リンクも「開くだけ」であることを、その場で言う（6.79.7）
+  if (records.some((record) => record.analysisUrl)) {
+    notes.push('分析（Narou.fun）はブラウザで開くだけで、' +
+      '中身を読み取ることもしません。');
+  }
+  return notes.join('');
+}
+
+/** 記録した日時。読めない値はそのまま出す（作者が手で書いたかもしれない） */
+function formatWhen(value) {
+  const when = new Date(value);
+  if (Number.isNaN(when.getTime())) return String(value);
+  const pad = (number) => String(number).padStart(2, '0');
+  return when.getFullYear() + '/' + pad(when.getMonth() + 1) + '/' +
+    pad(when.getDate()) + ' ' + pad(when.getHours()) + ':' + pad(when.getMinutes());
 }
 
 function renderEpisodes() {
@@ -497,6 +699,7 @@ window.addEventListener('message', (event) => {
   renderCards();
   renderChart();
   renderDevices();
+  renderSiteRecords();
   renderEpisodes();
 });
 

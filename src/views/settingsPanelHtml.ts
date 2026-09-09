@@ -525,6 +525,9 @@ button.danger:hover {
     status: document.getElementById("status"),
     toggle: document.getElementById("sidebar-toggle"),
     reopen: document.getElementById("reopen"),
+    // **一覧の下の「ルビを追加」**（設計書6.12.5）。ここへ入れ忘れていたため、
+    // ボタンとスタイルはあるのに押しても何も起きなかった（実機確認 2026-09-06）
+    applyRuby: document.getElementById("apply-ruby"),
   };
 
   /**
@@ -546,6 +549,12 @@ button.danger:hover {
   el.toggle.addEventListener("click", function () { setCollapsed(true); });
   el.reopen.addEventListener("click", function () { setCollapsed(false); });
   setCollapsed(Boolean((vscode.getState() || {}).collapsed));
+
+  // **資料ぜんぶに効く操作なので、選んでいる1件には触らない**（設計書6.12.5）。
+  // 対象の話を選ぶ画面は、拡張側の applySettingsRuby が出す
+  el.applyRuby.addEventListener("click", function () {
+    vscode.postMessage({ type: "applyRuby" });
+  });
 
   function setStatus(text, isError) {
     el.status.textContent = text || "";

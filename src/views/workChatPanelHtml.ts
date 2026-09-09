@@ -20,6 +20,13 @@
  *
  * `large` のときだけツールバー（作品を選ぶ・会話をメモに保存・できること）を
  * 出す。横の狭いパネルに同じものを置くと、肝心の会話が押し出される。
+ *
+ * ## 面の行き来（作者の指定、2026-09-03）
+ *
+ * 詳細メニューから相談の項目を消したので、**画面の中で行き来できないと
+ * 大きく開く道が無くなる**。入力欄の下に、いま居ない側へ移るボタンを
+ * 1つだけ出す（横なら「メインに表示」、大きい画面なら「サブに戻す」）。
+ * 両方に両方を出すと、どちらが今の面なのか読めなくなる。
  */
 /**
  * 大きく開いたときだけ出すツールバー。
@@ -78,6 +85,16 @@ body {
   flex-wrap: wrap;
 }
 #context .what { color: var(--vscode-foreground); }
+/*
+  いま使っているAIの名前。**押すとAI設定が開く**（作者の指摘、2026-09-06）。
+  リンクの色で出ているのに押せなかったので、見た目どおりに押せるようにした。
+*/
+#context-provider {
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+}
+#context-provider:hover { text-decoration: underline; }
+/* 有料のときは警告の色を優先する（課金の注意は、リンクより先に伝える） */
 #context .paid { color: var(--vscode-editorWarning-foreground, #cca700); }
 #log { flex: 1; overflow-y: auto; padding: 10px; }
 .turn { margin-bottom: 14px; }
@@ -133,6 +150,17 @@ body {
   color: var(--vscode-descriptionForeground);
   font-variant-numeric: tabular-nums;
 }
+/*
+  **番号の枠を記号に流用しない**（作者の指摘、2026-09-07）。
+
+  「↻」「▶」を .num（番号の枠）に入れていたため、幅の決まった小さな枠に
+  押し込まれて**「ひ」のように潰れて見えた**。記号は幅を決めず、
+  数字揃え（tabular-nums）も掛けない。
+*/
+.option .mark {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+}
 #thinking { padding: 0 10px 10px; color: var(--vscode-descriptionForeground); font-size: 12px; }
 #composer { border-top: 1px solid var(--vscode-panel-border); padding: 8px 10px; }
 /* この画面の入力欄は相談の入力だけ。増えたらここへ足す */
@@ -155,6 +183,8 @@ textarea:focus { outline: 1px solid var(--vscode-focusBorder); }
   gap: 6px;
   align-items: center;
   margin-top: 6px;
+  /* 横の細いパネルではボタンが収まらない。折り返して全部見せる */
+  flex-wrap: wrap;
 }
 #composer .hint {
   flex: 1;
@@ -198,6 +228,30 @@ button.secondary {
 }
 .edit .done { color: var(--vscode-testing-iconPassed, #4caf50); font-size: 12px; }
 .edit .failed { color: var(--vscode-errorForeground); font-size: 12px; }
+/*
+ * 「ほかにできること」——作業の提案を畳んでおく枠（作者の指摘、2026-09-08
+ * 「AIの相談の青枠部分は何を意図しているのかわかりにくいです。
+ * 求めていないので、頼まれてからやればいい気がします」）。
+ *
+ * 質問1つに対して、資料を書き換える提案とAIを回す提案が3つ並んでいた。
+ * **押す前に読める形にはなったが、そもそも出さないほうがよい。**
+ * 1行だけ置いて、作者が押したときに並べる。
+ *
+ * 見出しの1行は**ボタンだが、ボタンに見せない**。答えのすぐ下で
+ * 目立たせると、畳んだ意味が無くなる。
+ */
+.more { margin-top: 8px; }
+.more-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+.more-toggle:hover { text-decoration: underline; }
 /*
  * 本文の領域に大きく開いたとき。
  *
@@ -253,6 +307,12 @@ ${large ? TOOLBAR_HTML : ""}
 <div id="composer">
   <textarea id="input" placeholder="聞きたいことを書いてください（Ctrl+Enterで送信）"></textarea>
   <div class="row">
+    ${
+      large
+        ? `<button class="action secondary" id="to-sub">サブに戻す</button>`
+        : `<button class="action secondary" id="to-main">メインに表示</button>`
+    }
+    <button class="action secondary" id="apply-settings" disabled>相談を資料へ反映</button>
     <span class="hint" id="hint"></span>
     <button class="action secondary" id="clear">最初から</button>
     <button class="action" id="send">送る</button>
@@ -266,18 +326,38 @@ const inputEl = document.getElementById('input');
 const sendEl = document.getElementById('send');
 const clearEl = document.getElementById('clear');
 const thinkingEl = document.getElementById('thinking');
+/** 流れてきた思考。答えが出たら捨てる */
+let thought = '';
+/** 画面に出す思考の長さ。長すぎると入力欄まで押し下げる */
+const THOUGHT_TAIL = 120;
 const hintEl = document.getElementById('hint');
 // ツールバーは大きく開いたときにしか無い。**必ず有無を確かめてから使う**
 const chooseWorkEl = document.getElementById('choose-work');
 const saveNoteEl = document.getElementById('save-note');
 const openManualEl = document.getElementById('open-manual');
 const quickRunListEl = document.getElementById('quickrun-list');
+// 面を移るボタンは、いま居ない側のぶんが1つだけ在る。
+// **どちらの面でも同じ書き方で扱う**ので、片方は必ず null になる
+const toMainEl = document.getElementById('to-main');
+const toSubEl = document.getElementById('to-sub');
+// 「相談を資料へ反映」（設計書6.72）。**両方の面に置く**——
+// 横のパネルで相談を終えたときに、大きく開き直させない
+const applyToSettingsEl = document.getElementById('apply-settings');
 
 /** 直前の返事に付いていた選択肢。番号入力で選べるようにする */
 let currentOptions = [];
 /** 「できること」に並べる機能。拡張機能側から届く */
 let quickRuns = [];
 let busy = false;
+/**
+ * これまでに返ってきた答えの数（設計書6.72）。
+ *
+ * **1往復も無い会話は資料へ反映できない。** 押せてしまうと、AIを呼んで
+ * 「何も見つかりませんでした」と返るだけの空振りになる。
+ */
+let exchanges = 0;
+/** 資料へ反映している最中か。**返事が来るまで二度押しさせない** */
+let applying = false;
 
 function escapeHtml(text) {
   return String(text)
@@ -291,9 +371,31 @@ function setBusy(value) {
   busy = value;
   thinkingEl.hidden = !value;
   sendEl.disabled = value;
+  /*
+    **答えを待っている間は、面を移らせない。**
+
+    会話そのものは拡張機能側が1つだけ持っているので失われないが、
+    横へ戻すほうはこの画面を閉じる。返事が届く前に閉じると、
+    まだ履歴に積まれていない今の質問だけが、移った先に出ない。
+  */
+  if (toMainEl) toMainEl.disabled = value;
+  if (toSubEl) toSubEl.disabled = value;
+  updateApplyState();
   document.querySelectorAll('.option').forEach((el) => {
     el.disabled = value;
   });
+}
+
+/**
+ * 「相談を資料へ反映」が押せるかを決める。
+ *
+ * 押せるのは**答えが1つ以上あって、いま何も走っていないとき**だけ。
+ * 3つの条件を1か所で見るのは、押せる・押せないの判断が散らばると
+ * 「考え中なのに押せる」ような取りこぼしが必ず出るためである。
+ */
+function updateApplyState() {
+  if (!applyToSettingsEl) return;
+  applyToSettingsEl.disabled = busy || applying || exchanges === 0;
 }
 
 /**
@@ -308,6 +410,9 @@ function resetLog() {
   logEl.appendChild(emptyEl);
   emptyEl.hidden = false;
   currentOptions = [];
+  // 会話が消えたのだから、資料へ反映するものも無くなる
+  exchanges = 0;
+  updateApplyState();
   updateHint();
 }
 
@@ -383,7 +488,7 @@ function appendOptions(turn, options) {
  * 中身を見ずに押せる作りにすると、作者は自分の文書に何が入るのか
  * 分からないまま同意することになる。
  */
-function appendEdit(turn, edit) {
+function appendEdit(host, edit) {
   const box = document.createElement('div');
   box.className = 'edit';
 
@@ -401,7 +506,7 @@ function appendEdit(turn, edit) {
   row.className = 'options';
   const apply = document.createElement('button');
   apply.className = 'option';
-  apply.innerHTML = '<span class="num">✓</span><span>' + escapeHtml(edit.label) + '</span>';
+  apply.innerHTML = '<span class="mark">✓</span><span>' + escapeHtml(edit.label) + '</span>';
   apply.addEventListener('click', () => {
     if (busy) return;
     apply.disabled = true;
@@ -411,7 +516,7 @@ function appendEdit(turn, edit) {
   box.appendChild(row);
 
   box.dataset.editId = edit.id;
-  turn.appendChild(box);
+  host.appendChild(box);
 }
 
 /**
@@ -420,7 +525,7 @@ function appendEdit(turn, edit) {
  * **押すまで動かない。** AIを呼ぶ機能は料金がかかるので、
  * 押す前にそれが分かるようにする。
  */
-function appendRun(turn, run) {
+function appendRun(host, run) {
   const box = document.createElement('div');
   box.className = 'edit';
   box.dataset.editId = run.id;
@@ -430,7 +535,7 @@ function appendRun(turn, run) {
   const button = document.createElement('button');
   button.className = 'option';
   button.innerHTML =
-    '<span class="num">▶</span><span>' +
+    '<span class="mark">▶</span><span>' +
     escapeHtml(run.label) +
     (run.usesAI ? '（AIを使います）' : '（AIを使いません）') +
     '</span>';
@@ -441,7 +546,7 @@ function appendRun(turn, run) {
   });
   row.appendChild(button);
   box.appendChild(row);
-  turn.appendChild(box);
+  host.appendChild(box);
 }
 
 /**
@@ -451,7 +556,7 @@ function appendRun(turn, run) {
  * どんな留意点で読み直すのかを先に見せる。読み直した結果もそのまま
  * 保存されるわけではなく、設定資料の画面に項目ごとの提案として並ぶ。
  */
-function appendReload(turn, reload) {
+function appendReload(host, reload) {
   const box = document.createElement('div');
   box.className = 'edit';
   box.dataset.editId = reload.id;
@@ -475,7 +580,8 @@ function appendReload(turn, reload) {
   const button = document.createElement('button');
   button.className = 'option';
   button.innerHTML =
-    '<span class="num">↻</span><span>' +
+    // 「↻」は作者の環境で潰れて見えた。**漢字は必ず描ける**
+    '<span class="mark">再</span><span>' +
     escapeHtml(reload.label) +
     '（AIを使います）</span>';
   button.addEventListener('click', () => {
@@ -485,6 +591,52 @@ function appendReload(turn, reload) {
   });
   row.appendChild(button);
   box.appendChild(row);
+  host.appendChild(box);
+}
+
+/**
+ * 作業の提案（書き込み・機能の起動・資料の読み直し）を**畳んで**置く。
+ *
+ * 作者の指摘（2026-09-08）「求めていないので、頼まれてからやればいい
+ * 気がします」。答えの下に、資料を書き換える提案とAIを回す提案が
+ * 3つ並んでいた。**出さないのではなく、1行にして押されるまで開かない。**
+ * 拡張機能側の staged の仕組み（何を提案するか・押したら何が起きるか）は
+ * そのままなので、押せば従来どおり動く。
+ *
+ * **「そこを見せて」（locate）はここへ入れない。** あれは作業ではなく
+ * 「その根拠を見せて」という参照であり、答えを読むための道具である。
+ */
+function appendStagedActions(turn, message) {
+  const adders = [];
+  if (message.edit) adders.push((host) => appendEdit(host, message.edit));
+  if (message.run) adders.push((host) => appendRun(host, message.run));
+  if (message.reload) adders.push((host) => appendReload(host, message.reload));
+  if (adders.length === 0) return;
+
+  const box = document.createElement('div');
+  box.className = 'more';
+
+  const body = document.createElement('div');
+  body.className = 'more-body';
+  body.hidden = true;
+  adders.forEach((add) => add(body));
+
+  const toggle = document.createElement('button');
+  toggle.className = 'more-toggle';
+  toggle.type = 'button';
+  const caption = (open) =>
+    'ほかにできること（' + adders.length + '件）を' + (open ? '隠す' : '見る');
+  toggle.textContent = caption(false);
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.addEventListener('click', () => {
+    body.hidden = !body.hidden;
+    toggle.textContent = caption(!body.hidden);
+    toggle.setAttribute('aria-expanded', body.hidden ? 'false' : 'true');
+    scrollToBottom();
+  });
+
+  box.appendChild(toggle);
+  box.appendChild(body);
   turn.appendChild(box);
 }
 
@@ -499,7 +651,7 @@ function appendLocate(turn, locate) {
   const button = document.createElement('button');
   button.className = 'option';
   button.innerHTML =
-    '<span class="num">◎</span><span>' + escapeHtml(locate.label) + '</span>';
+    '<span class="mark">◎</span><span>' + escapeHtml(locate.label) + '</span>';
   button.addEventListener('click', () => {
     vscode.postMessage({ type: 'locate', id: locate.id });
   });
@@ -572,6 +724,52 @@ if (openManualEl) {
   });
 }
 
+/*
+  上に出ているAIの名前を押したら、AI設定を開く（作者の指摘、2026-09-06）。
+
+  リンクの色で出ているのに押せなかった。**押せそうに見えるものは押せる**
+  ようにする。AIが分からないとき（名前が空）は、開く先が意味を持たないので
+  何もしない。コマンド名は拡張機能側が持つ（画面からコマンドを呼ばない）。
+*/
+document.getElementById('context-provider').addEventListener('click', () => {
+  if (!document.getElementById('context-provider').textContent) return;
+  vscode.postMessage({ type: 'openAISettings' });
+});
+
+/*
+  面を移る。**コマンドを呼ぶのは拡張機能側**である（既存の口と同じ流儀）。
+  webviewから直接コマンドを実行できる仕組みは作らない——画面から届いた
+  文字列がそのままコマンド名になる余地を、どこにも残さないため。
+*/
+if (toMainEl) {
+  toMainEl.addEventListener('click', () => {
+    if (busy) return;
+    vscode.postMessage({ type: 'showInMain' });
+  });
+}
+if (toSubEl) {
+  toSubEl.addEventListener('click', () => {
+    if (busy) return;
+    vscode.postMessage({ type: 'showInSub' });
+  });
+}
+
+/*
+  相談で決まったことを、設定資料の更新案として積む（設計書6.72）。
+
+  **押しても資料は変わらない。** 積まれるのは承認待ちで、反映するかは
+  「更新分を反映」で作者が決める。ここで伝えられるのはそこまでなので、
+  結果の知らせは拡張機能側の通知に任せる。
+*/
+if (applyToSettingsEl) {
+  applyToSettingsEl.addEventListener('click', () => {
+    if (busy || applying || exchanges === 0) return;
+    applying = true;
+    updateApplyState();
+    vscode.postMessage({ type: 'applyToSettings' });
+  });
+}
+
 inputEl.addEventListener('keydown', (event) => {
   // Ctrl+Enter で送る。Enterだけだと改行が打てない
   if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
@@ -604,6 +802,8 @@ window.addEventListener('message', (event) => {
       ? '／ ' + message.provider + (message.paid ? '（有料・送るたびに課金）' : '')
       : '';
     providerEl.className = message.paid ? 'paid' : '';
+    // AIが分からないときは押せる場所を出さない（開く先が意味を持たない）
+    providerEl.title = message.provider ? 'AI設定を開く' : '';
     // 起動できる機能は、届くたびに作り直す（機能が増減しても写しが残らない）
     quickRuns = message.quickRuns || [];
     renderQuickRuns();
@@ -618,8 +818,11 @@ window.addEventListener('message', (event) => {
         appendTurn('あなた', turn.text, 'author');
       } else {
         appendTurn('AI', turn.text, undefined, turn.html);
+        // 後から開いた画面でも「相談を資料へ反映」を押せるようにする
+        exchanges++;
       }
     });
+    updateApplyState();
     scrollToBottom();
     return;
   }
@@ -656,14 +859,34 @@ window.addEventListener('message', (event) => {
     thinkingEl.textContent = message.summary + '。考えています…';
     return;
   }
+  if (message.type === 'thought') {
+    /*
+      **AIが考えている中身を流す**（設計書6.63.2）。
+
+      大きく開いた画面で長い相談をすると、答えが返るまで何も起きない
+      時間が続く。少なくとも「動いている」ことと「何を考えているか」は
+      見せられる。
+
+      **末尾を見せる。** 思考は長くなるので、頭から出すとすぐ画面外へ
+      流れ、動いていることが分からなくなる。
+      **答えそのものは流さない**——書きかけを読むと、作者が途中の判断で
+      動いてしまう。
+    */
+    thought += message.delta || '';
+    thinkingEl.textContent = '考えています… ' + thought.slice(-THOUGHT_TAIL);
+    return;
+  }
   if (message.type === 'answer') {
     setBusy(false);
+    thought = '';
     thinkingEl.textContent = '考えています…';
+    // 1往復できたので、資料へ反映できる会話になった
+    exchanges++;
+    updateApplyState();
     const turn = appendTurn('AI', message.reply, undefined, message.html);
+    // 参照（そこを見せて）はそのまま出し、作業の提案は畳んで置く
     if (message.locate) appendLocate(turn, message.locate);
-    if (message.edit) appendEdit(turn, message.edit);
-    if (message.run) appendRun(turn, message.run);
-    if (message.reload) appendReload(turn, message.reload);
+    appendStagedActions(turn, message);
     appendOptions(turn, message.options || []);
     scrollToBottom();
     return;
@@ -677,6 +900,12 @@ window.addEventListener('message', (event) => {
       appendOptions(turn, message.options);
     }
     scrollToBottom();
+    return;
+  }
+  if (message.type === 'applyToSettingsDone') {
+    // 成否にかかわらず、押せる状態へ戻す。結果は通知と note が伝える
+    applying = false;
+    updateApplyState();
     return;
   }
   if (message.type === 'note') {
@@ -695,6 +924,15 @@ window.addEventListener('message', (event) => {
   if (message.type === 'editFailed') {
     markEdit(message.id, message.message, false);
     scrollToBottom();
+    return;
+  }
+  // 確認で「キャンセル」を選んだとき。**提案は消さず、押せる状態へ戻す**
+  // （中身を読んで考え直しただけかもしれない）
+  if (message.type === 'editCancelled') {
+    const box = document.querySelector('[data-edit-id="' + message.id + '"]');
+    if (box) {
+      box.querySelectorAll('button').forEach((el) => { el.disabled = false; });
+    }
     return;
   }
   if (message.type === 'runDone') {

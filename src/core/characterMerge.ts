@@ -7,9 +7,15 @@ import {
 } from "../models/character";
 import { ExtractedCharacter } from "../prompts/characterExtract";
 import { clampSummary } from "./summaryLimit";
-import { fillReading } from "./reading";
+import { fillReading, toDictionaryReading } from "./reading";
 import { normalizeGender } from "./gender";
 import { isMeaningfulValue } from "./characterExtractionValidation";
+import {
+  HONORIFIC_SUFFIX_SOURCE,
+  HONORIFIC_SUFFIXES,
+  stripHonorific,
+} from "./nameHonorific";
+import { KINSHIP_WORDS, PRONOUN_WORDS } from "./genericPersonWords";
 import {
   hasChange,
   recordChangeChapters,
@@ -18,6 +24,7 @@ import {
 import {
   chaptersOfValue,
   foldCharacterConflicts,
+  isUnchangingField,
   latestValueOfField,
   overlaps,
   recordValue,
@@ -64,6 +71,20 @@ export interface MergeResult {
     /** その候補が出てきた話数 */
     chapters: number[];
   }>;
+  /**
+   * 敬称違いの呼び方を、新しいレコードにせず既存の人物へ寄せたもの
+   * （設計書6.5.9）。
+   *
+   * **AIは敬称違いを aliases に返さない**（実測。スキーマの required も
+   * 説明文もプロンプトの規則も効かなかった）。寄せているのはコード側なので、
+   * **黙って寄せたことにしない**ために件数と中身を返す。
+   */
+  honorificMerges: Array<{
+    /** 寄せ先になった既存レコードの名前 */
+    characterName: string;
+    /** 抽出が書いてきた、敬称の付いた呼び方 */
+    incomingName: string;
+  }>;
   /** 同一人物かもしれない組。自動では統合せず、作者の判断に委ねる */
   mergeCandidates: MergeCandidate[];
 }
@@ -88,6 +109,8 @@ export interface MergeCandidate {
    * abbreviation: 省略形とみられる（「ギルマス」と「ギルドマスター」）
    * suffix: 一方が他方の言い方を含む（「近所のおばあさん」と「ばあさん」）
    * name_part: 姓名を繋げた名前と、名だけの名前（「密倉文佳」と「文佳」）
+   * honorific_family_name: 敬称を外すと、もう一方の姓（「密倉さん」と「密倉文佳」）
+   * reading_match: かなの呼び名が、もう一方の読み仮名と重なる（「フミカ」と「密倉文佳」）
    * ambiguous: 統合先が複数あって決められなかった
    * same_name: 同じ呼称なのに別レコードになっている
    */
@@ -95,8 +118,83 @@ export interface MergeCandidate {
     | "abbreviation"
     | "suffix"
     | "name_part"
+    | "honorific_family_name"
+    | "reading_match"
     | "ambiguous"
     | "same_name";
+  /**
+   * 一致した呼び名（same_name・honorific_family_name・reading_match のときだけ）。
+   * honorific_family_name では、敬称を外した形＝姓が入る。
+   * reading_match では、読みと重なったかなの呼び名が入る。
+   *
+   * **名指しで出すためにある。** 理由が「同じ呼び名が両方に登録されています」
+   * だけだと、作者はどの呼び名で並んだのか分からず、姓の共有なのか
+   * 同一人物なのかを判断できない（実データで20組中およそ半分が別人だった）。
+   */
+  matchedName?: string;
+  /**
+   * 突き合わせた読み仮名（reading_match のときだけ）。
+   * 「何と何が重なったのか」を作者へそのまま見せるために持つ。
+   */
+  matchedReading?: string;
+  /**
+   * どれくらい確からしいか。
+   * 姓の共有や別名の汚染で並んだかもしれない組は "weak" にする。
+   *
+   * "medium" は敬称を外した姓の一致（honorific_family_name）。
+   * 同じ姓を持つレコードが1件しか無いことを確かめてあるので "weak" よりは
+   * 確からしいが、**姓の一致は別人でも起きる**ので "strong" にはしない。
+   */
+  confidence?: "strong" | "medium" | "weak";
+  /** "weak" にした理由。画面ではそのまま添える */
+  weakNote?: string;
+}
+
+/** 姓の共有かもしれないときに添える一言 */
+const WEAK_FAMILY_NAME_NOTE = "姓の共有かもしれません";
+/** 別名に相手の名前が入っているだけかもしれないときに添える一言 */
+const WEAK_ALIAS_NOTE = "別名に相手の名前が混ざっただけかもしれません";
+/** 代名詞・家族関係語のように、誰にでも使う呼び方で並んだときに添える一言 */
+const WEAK_GENERIC_WORD_NOTE = "誰にでも使う呼び方です。別人かもしれません";
+
+/** 手掛かりの種類を表す短い文 */
+const MERGE_REASON_LABELS: Record<MergeCandidate["reason"], string> = {
+  same_name: "同じ呼び名が両方に登録されています",
+  abbreviation: "省略形とみられます",
+  suffix: "一方が他方の呼び方を含んでいます",
+  name_part: "姓名と、名だけの呼び方とみられます",
+  honorific_family_name: "敬称を外すと、もう一方の姓と同じです",
+  reading_match: "読み仮名と同じ音です",
+  ambiguous: "統合先を決められませんでした",
+};
+
+/**
+ * 候補の理由を、作者が読んで判断できる文にする。
+ *
+ * **一致した呼び名を名指しする。** 「「三門」が両方にあります」と出れば、
+ * 作者は姓の共有だと一目で分かって断れる（設計書6.5.9）。
+ */
+export function describeMergeCandidate(candidate: MergeCandidate): string {
+  // 姓のどこが一致したのかを、外した敬称ごと見せる。
+  // 「密倉さん」と「密倉文佳」が同じ人かは作者にしか分からないので、
+  // 判断の材料（何を外して何と比べたか）をそのまま出す
+  if (candidate.reason === "honorific_family_name" && candidate.matchedName) {
+    return `敬称を外すと「${candidate.matchedName}」＝「${candidate.names[1]}」の姓です`;
+  }
+  // 読みで並んだ組も、突き合わせたものを全部見せる。
+  // 「同じ音です」だけでは、同音の別人なのか表記違いなのか判断できない
+  if (candidate.reason === "reading_match" && candidate.matchedName) {
+    const reading = candidate.matchedReading
+      ? `（${candidate.matchedReading}）`
+      : "";
+    const base = `「${candidate.matchedName}」が「${candidate.names[1]}」の読み仮名${reading}と重なります`;
+    return candidate.weakNote ? `${base}（${candidate.weakNote}）` : base;
+  }
+  const base =
+    candidate.reason === "same_name" && candidate.matchedName
+      ? `「${candidate.matchedName}」が両方にあります`
+      : MERGE_REASON_LABELS[candidate.reason];
+  return candidate.weakNote ? `${base}（${candidate.weakNote}）` : base;
 }
 
 export function mergeExtractedCharacters(
@@ -110,6 +208,7 @@ export function mergeExtractedCharacters(
   const changedIds = new Set<string>();
   const conflicts: MergeResult["conflicts"] = [];
   const rejectedDistinct: MergeResult["rejectedDistinct"] = [];
+  const honorificMerges: MergeResult["honorificMerges"] = [];
   /** 統合先を決められず新規にした組。作者の判断へ回す */
   const ambiguousPairs: Array<{
     names: [string, string];
@@ -125,7 +224,13 @@ export function mergeExtractedCharacters(
 
     if (!match) {
       const c = emptyCharacter(nextCharacterId(result), ex.name.trim());
-      applyExtracted(c, ex, item.chapters, conflicts);
+      applyExtracted(
+        c,
+        ex,
+        item.chapters,
+        conflicts,
+        otherRecordNames(result, c)
+      );
       result.push(c);
       added.push(c.name);
       changedIds.add(c.id);
@@ -176,6 +281,12 @@ export function mergeExtractedCharacters(
       continue;
     }
 
+    // 敬称の違いだけで既存レコードへ寄せた分を数える（設計書6.5.9）。
+    // **AIは敬称違いを aliases に返さない**ので、寄せているのはコードである。
+    // 報告に出さないと、作者からは「新しい人物が増えなかった」としか見えない
+    const honorificMerge = describeHonorificMerge(match, ex.name);
+    if (honorificMerge) honorificMerges.push(honorificMerge);
+
     // 作者が確定させた人物はAIで書き換えない。
     // 登場話数の追記だけ行う。
     if (!match.autoGenerated) {
@@ -191,7 +302,13 @@ export function mergeExtractedCharacters(
       continue;
     }
 
-    const changed = applyExtracted(match, ex, item.chapters, conflicts);
+    const changed = applyExtracted(
+      match,
+      ex,
+      item.chapters,
+      conflicts,
+      otherRecordNames(result, match)
+    );
     if (changed) {
       if (!updated.includes(match.name)) updated.push(match.name);
       changedIds.add(match.id);
@@ -239,6 +356,7 @@ export function mergeExtractedCharacters(
     ),
     folded,
     rejectedDistinct,
+    honorificMerges,
     mergeCandidates: [
       ...ambiguousPairs.map((pair) => ({
         ...pair,
@@ -250,6 +368,51 @@ export function mergeExtractedCharacters(
 }
 
 /**
+ * その人物以外のレコードの「名前」を、空白を落とした形で集める。
+ *
+ * 別名として取り込んでよいかの歯止めに使う。**名前だけを見る**——
+ * 別名まで見ると、家族が共有する姓や肩書きで正しい呼び名まで落ちる。
+ */
+function otherRecordNames(
+  characters: readonly Character[],
+  self: Character
+): Set<string> {
+  const names = new Set<string>();
+  for (const character of characters) {
+    if (character.id === self.id) continue;
+    const key = normalizeSpacing(character.name);
+    if (key) names.add(key);
+  }
+  return names;
+}
+
+/**
+ * 抽出の名前が、敬称の違いだけで既存レコードと一致したか（設計書6.5.9）。
+ *
+ * 書かれたままの形（空白だけ落とす）では一致しないのに、敬称を外すと
+ * 一致する場合に限る。当てはまらなければ undefined。
+ *
+ * **寄せる判定そのものはここでは行わない。** 寄せ先を決めるのは
+ * `findCharacter`（`normalizeName` が敬称を吸収する）であり、
+ * ここはその結果が敬称違いだったかを見分けて報告へ回すだけである。
+ * 判定を二重に持つと、片方だけ直したときに件数と実態がずれる。
+ */
+function describeHonorificMerge(
+  match: Character,
+  incomingName: string | undefined
+): MergeResult["honorificMerges"][number] | undefined {
+  const raw = incomingName?.trim();
+  if (!raw) return undefined;
+  const incoming = normalizeSpacing(raw);
+  const known = [match.name, ...match.aliases].map(normalizeSpacing);
+  // 既にその形で登録されているなら、敬称の違いで寄せたわけではない
+  if (known.includes(incoming)) return undefined;
+  const stripped = stripHonorific(incoming);
+  if (!known.some((name) => stripHonorific(name) === stripped)) return undefined;
+  return { characterName: match.name, incomingName: raw };
+}
+
+/**
  * 抽出結果を1人分のレコードへ反映する。
  * 既存の値を消さないことを原則とし、食い違いは conflicts に記録する。
  */
@@ -257,7 +420,12 @@ function applyExtracted(
   target: Character,
   ex: ExtractedCharacter,
   chapters: number[],
-  conflicts: MergeResult["conflicts"]
+  conflicts: MergeResult["conflicts"],
+  /**
+   * ほかの既存レコードの名前（空白を落とした形）。
+   * **そこに載っている名前は別名として取り込まない**（設計書6.5.9）。
+   */
+  otherRecordNames: ReadonlySet<string> = new Set()
 ): boolean {
   let changed = false;
   const validChapters = chapters.filter(Number.isFinite);
@@ -276,11 +444,19 @@ function applyExtracted(
     ...(incomingName ? [incomingName] : []),
     ...(ex.aliases ?? []).filter((a): a is string => Boolean(a)),
   ]);
+  const ownKey = normalizeSpacing(target.name);
+  const existingKeys = new Set([...aliases].map(normalizeSpacing));
   for (const a of incoming) {
-    if (a !== target.name && !aliases.has(a)) {
-      aliases.add(a);
-      changed = true;
-    }
+    const key = normalizeSpacing(a);
+    // **ほかのレコードの「名前」は別名にしない。**
+    // 別人の名前が別名に入ると、その2人は「同じ呼び名を持つ」ことになり、
+    // 「重複をまとめる」に別人どうしの組が並ぶ（実データで12件）。
+    if (otherRecordNames.has(key)) continue;
+    // 「密倉文佳」と「密倉 文佳」を別の呼び名として増やさない（設計書6.5.9）
+    if (key === ownKey || existingKeys.has(key)) continue;
+    aliases.add(a);
+    existingKeys.add(key);
+    changed = true;
   }
   target.aliases = [...aliases];
 
@@ -353,16 +529,23 @@ function applyExtracted(
     if (mergeAddressTerm(target, at, validChapters)) changed = true;
   }
 
-  // 関係
-  for (const rel of ex.relations ?? []) {
-    if (!rel.name || !rel.relation) continue;
-    const exists = target.relations.some(
-      (r) => r.name === rel.name && r.relation === rel.relation
-    );
-    if (!exists) {
-      target.relations.push({ name: rel.name, relation: rel.relation });
-      changed = true;
-    }
+  // 関係。**同じ相手のぶんはまとめる**（設計書6.5.9）。
+  // 話ごとに積むだけだと、124件のうち50件が同じ相手の重複になっていた
+  // （三門太志は23件で相手は12人。「ばあさん」「おばあさん」だけで6件）。
+  // 一覧が読めなくなるうえ、AIへ渡す資料も水増しされる
+  const incomingRelations = (ex.relations ?? []).filter(
+    (rel) => rel.name && rel.relation
+  );
+  const mergedRelations = dedupeRelations([
+    ...target.relations,
+    ...incomingRelations.map((rel) => ({
+      name: rel.name,
+      relation: rel.relation,
+    })),
+  ]);
+  if (!sameRelations(target.relations, mergedRelations)) {
+    target.relations = mergedRelations;
+    changed = true;
   }
 
   if (!target.evidence && ex.evidence) {
@@ -375,6 +558,57 @@ function applyExtracted(
   if (target.appearedChapters.length !== before) changed = true;
 
   return changed;
+}
+
+/**
+ * 同じ相手との関係を1つにまとめる（設計書6.5.9）。
+ *
+ * **相手の名前は揺れる。** 「ばあさん」「おばあさん」「お婆さん」は同じ人で、
+ * 話ごとの抽出はそのときの言い方をそのまま返す。敬称と丁寧の「お」を
+ * 落とした形で揃えて数える。
+ *
+ * **関係の文字列が違えば両方残す。** 「憑依している」と「同一人物（転生後）」は
+ * 同時には成り立たないが、まとめてしまうと**矛盾に気づけなくなる**。
+ * 片方を捨てるのはコードの仕事ではない。
+ *
+ * 表示に使う名前は**先に出てきた形**を残す。作者が読むのは資料なので、
+ * こちらで正規化した形（「ばあ」）を書き込んではいけない。
+ */
+export function dedupeRelations(
+  relations: ReadonlyArray<{ name: string; relation: string }>
+): Array<{ name: string; relation: string }> {
+  const seen = new Set<string>();
+  const result: Array<{ name: string; relation: string }> = [];
+  for (const relation of relations) {
+    const name = relation.name.trim();
+    const value = relation.relation.trim();
+    if (!name || !value) continue;
+    // 区切りにNULを使うのは、名前にも関係にも現れない文字だから。
+    // ソースには生のNULを置かずエスケープで書く（生のまま置くと
+    // gitやgrepがこのファイルをバイナリとみなす）
+    const key = `${relationTargetKey(name)}\u0000${value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({ name, relation: value });
+  }
+  return result;
+}
+
+/** 関係の相手を数えるときの鍵。敬称と丁寧の「お」を落とす */
+function relationTargetKey(name: string): string {
+  return stripPolitePrefix(normalizeName(name));
+}
+
+/** 関係の一覧が同じ中身か。無駄な保存を避けるために見る */
+function sameRelations(
+  left: ReadonlyArray<{ name: string; relation: string }>,
+  right: ReadonlyArray<{ name: string; relation: string }>
+): boolean {
+  if (left.length !== right.length) return false;
+  return left.every(
+    (item, index) =>
+      item.name === right[index].name && item.relation === right[index].relation
+  );
 }
 
 /**
@@ -475,18 +709,25 @@ function fillOrConflict(
   // 空欄と同じ扱いにする。そのまま入れると設定資料へ載ってしまう
   if (!isMeaningfulValue(value)) return false;
 
+  // **読み仮名は作中で変わらない**（CLAUDE.md 実装ルール2）。
+  // 違う読みが出たらAIの読み違いなので、「作中の変化」として畳まず、
+  // 必ず作者の判断（`conflicts`）へ回す。畳んでいた頃は、年表に
+  // 「読み：たいし → たし」という起きていない変化が並んでいた（実データ）
+  const foldable = !isUnchangingField(field);
+
   const current = target[field];
   if (!current) {
     target[field] = value;
     // **空欄を埋めるときにも話数を残す。** 残さないと、次に違う値が来たときに
-    // 「作中で変わった」のか「同じ話で矛盾した」のかを見分けられない
-    recordValue(target.changes, field, value, chapters);
+    // 「作中で変わった」のか「同じ話で矛盾した」のかを見分けられない。
+    // 変わらない項目では、そもそも変化として並べないので残さない
+    if (foldable) recordValue(target.changes, field, value, chapters);
     return true;
   }
 
   // 既に履歴にある値。話数を足し、いちばん後ろの話の値を今の値にする。
   // 作者が確定させた変化を食い違いへ戻さないのも、この経路である
-  if (hasChange(target.changes, field, value)) {
+  if (foldable && hasChange(target.changes, field, value)) {
     const noted = recordChangeChapters(target.changes, field, value, chapters);
     return adoptLatest(target, field) || noted;
   }
@@ -495,23 +736,33 @@ function fillOrConflict(
     // 履歴に無い（この項目より前に作られたデータ）。ここで話数が分かるので残す
     const recorded = target.conflicts.find((c) => c.field === field);
     if (recorded) return recordObservation(recorded, value, chapters);
+    // 変わらない項目は変化として並べないので、履歴も作らない
+    if (!foldable) return false;
     return recordValue(target.changes, field, value, chapters);
   }
 
   // 短い記述が長い記述に含まれる場合は、詳細な方を採用する。
-  // これは変化ではないので履歴を増やさず、同じ記録を書き換える
-  if (value.includes(current)) {
+  // これは変化ではないので履歴を増やさず、同じ記録を書き換える。
+  //
+  // **読み仮名では使わない。** 「ふみか」と「みっくらふみか」はどちらかが
+  // 読み違いで、詳しく書き直したものではない。作者に選ばせる
+  if (foldable && value.includes(current)) {
     target[field] = value;
     refineValue(target.changes, field, current, value, chapters);
     return true;
   }
-  if (current.includes(value)) return false;
+  if (foldable && current.includes(value)) return false;
 
   // ここから先は本当に違う値。話数が重ならなければ作中の変化として扱う。
   // **両方の話数が分かっているときだけ。** 片方でも分からないと前後を
   // 決められず、作者が手で書いた値をAIの読みで押し流しかねない
   const currentChapters = chaptersOfValue(target.changes, field, current);
-  if (currentChapters?.length && chapters.length && !overlaps(currentChapters, chapters)) {
+  if (
+    foldable &&
+    currentChapters?.length &&
+    chapters.length &&
+    !overlaps(currentChapters, chapters)
+  ) {
     recordValue(target.changes, field, value, chapters);
     adoptLatest(target, field);
     return true;
@@ -838,6 +1089,7 @@ const MAX_LENGTH_RATIO = 2.5;
 export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
   const candidates: MergeCandidate[] = [];
   const appellations = buildAppellationIndex(characters);
+  const sharedCounts = countSharedAppellations(characters, appellations);
 
   for (let i = 0; i < characters.length; i++) {
     for (let j = i + 1; j < characters.length; j++) {
@@ -849,17 +1101,90 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
       // 分けたのに「重複しています」と言われ続けるのは、直っていないのと同じ
       if (isDeclaredDistinct(a, b)) continue;
 
-      // 別レコードなのに呼称が重なっている＝ほぼ確実に同一人物。
-      // 統合先が決まらず新規になった場合などに起きるので、最優先で伝える。
-      const keys = new Set(
-        (appellations.get(a.id) ?? []).map(normalizeName)
+      // 別レコードなのに呼称が重なっている。
+      //
+      // **「ほぼ確実に同一人物」とは決め打ちできない**（実データで崩れた）。
+      // 姓を共有する家族（「三門」を4人が持つ）と、別名の汚染
+      // （文佳の別名に別人の「太志」が入る）で、候補20組の半分が別人だった。
+      // 一致した呼び名を名指しし、姓や汚染の疑いがあれば確信度を落とす。
+      const keys = new Map(
+        (appellations.get(a.id) ?? []).map((name) => [normalizeName(name), name])
       );
+      const matched = (appellations.get(b.id) ?? []).find((name) =>
+        keys.has(normalizeName(name))
+      );
+      if (matched !== undefined) {
+        // 表示は a 側の書き方に寄せる。同じ呼び名の表記ゆれを2つ並べない
+        const shown = keys.get(normalizeName(matched)) ?? matched;
+        const weakNote = weakSameNameNote(shown, a, b, sharedCounts);
+        candidates.push({
+          names: [a.name, b.name],
+          ids: [a.id, b.id],
+          reason: "same_name",
+          matchedName: shown,
+          confidence: weakNote ? "weak" : "strong",
+          ...(weakNote ? { weakNote } : {}),
+        });
+        continue;
+      }
+
+      // 主たる名前どうしが同じで、それが誰にでも使う呼び方だった組。
+      //
+      // **上の網（`isGenericAppellation`）で根拠から外した分の受け皿である。**
+      // 外しっぱなしにすると、実データで「お母さん」が4件へ割れていたような
+      // **本当の重複を直す手立てが無くなる**（別名の一致では拾えず、
+      // 長さが同じなので suffix・name_part にも掛からない）。
+      // 根拠としては弱いので、確信度を落として断りを添える
       if (
-        (appellations.get(b.id) ?? []).some((name) =>
-          keys.has(normalizeName(name))
-        )
+        isGenericAppellation(a.name) &&
+        normalizeName(a.name) &&
+        normalizeName(a.name) === normalizeName(b.name)
       ) {
-        candidates.push({ names: [a.name, b.name], ids: [a.id, b.id], reason: "same_name" });
+        candidates.push({
+          names: [a.name, b.name],
+          ids: [a.id, b.id],
+          reason: "same_name",
+          matchedName: a.name,
+          confidence: "weak",
+          weakNote: WEAK_GENERIC_WORD_NOTE,
+        });
+        continue;
+      }
+
+      // 敬称を外すと、もう一方のフルネームの姓になる組（設計書6.5.9）。
+      // 「密倉さん」が「密倉文佳」とは別レコードとして立ってしまう形で、
+      // 呼び名が重ならないので same_name にも掛からず、実データでは
+      // 「重複をまとめる」の一覧にすら出てこなかった。
+      //
+      // **自動では寄せない。** 姓は家族で共有されるので、
+      // 「密倉さん」が母や兄である可能性が残る
+      const family = honorificFamilyNamePair(a, b, characters);
+      if (family) {
+        candidates.push({
+          names: [family.short.name, family.full.name],
+          ids: [family.short.id, family.full.id],
+          reason: "honorific_family_name",
+          matchedName: family.family,
+          confidence: "medium",
+        });
+        continue;
+      }
+
+      // かなで書かれた呼び名が、もう一方の読み仮名と重なる組（設計書6.5.9）。
+      // 実データで第4話だけ「フミカ」と書かれ、「密倉文佳」（読み「みくらふみか」）
+      // とは**別名が漢字ばかりで突き合わせる道が無く**、候補にすら出なかった。
+      // 読みは `fillReading` がひらがなで持つので、かなの側を揃えれば比べられる
+      const reading = readingMatchPair(a, b, appellations);
+      if (reading) {
+        candidates.push({
+          names: [reading.kana.name, reading.owner.name],
+          ids: [reading.kana.id, reading.owner.id],
+          reason: "reading_match",
+          matchedName: reading.matchedName,
+          matchedReading: reading.reading,
+          confidence: reading.confidence,
+          ...(reading.weakNote ? { weakNote: reading.weakNote } : {}),
+        });
         continue;
       }
 
@@ -881,6 +1206,231 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
     }
   }
   return candidates;
+}
+
+/**
+ * 一方の名前から敬称を外すと、もう一方のフルネームの姓になる組か
+ * （設計書6.5.9）。当てはまれば、敬称の付いた側・フルネームの側・姓を返す。
+ *
+ * **その姓を持つレコードが2人以上いれば、候補にもしない。** 家族である
+ * 可能性が高く（実データでは「三門」を4人が持っていた）、並べたところで
+ * 作者はどれと結べばよいか決められない。誤った統合を誘うだけになる。
+ */
+function honorificFamilyNamePair(
+  a: Character,
+  b: Character,
+  characters: readonly Character[]
+): { short: Character; full: Character; family: string } | undefined {
+  const directions: Array<[Character, Character]> = [
+    [a, b],
+    [b, a],
+  ];
+  for (const [short, full] of directions) {
+    const called = normalizeSpacing(short.name);
+    const family = stripHonorific(called);
+    // 敬称が付いていること。付いていない組は name_part 側が見る
+    if (family === called) continue;
+    // 1字の姓は「子」「田」のような字で無関係な組が並ぶ。
+    // 4字以上は姓ではなく、名まで含んだ呼び方とみるほうが確からしい
+    if (family.length < 2 || family.length > MAX_FAMILY_NAME_LENGTH) continue;
+
+    const fullName = normalizeSpacing(full.name);
+    if (fullName.length <= family.length) continue;
+    if (!fullName.startsWith(family)) continue;
+    const given = fullName.slice(family.length);
+    // 姓も名も漢字であること。カタカナ名の省略は isAbbreviationOf が見るし、
+    // ひらがなだけの語（「おばあ」「ちゃん」）を姓とみなさないためでもある
+    if (!HAS_KANJI.test(family) || !HAS_KANJI.test(given)) continue;
+
+    if (countFamilyNameOwners(characters, family) !== 1) continue;
+    return { short, full, family };
+  }
+  return undefined;
+}
+
+/** かな（カタカナ・ひらがな）と長音符だけでできた語 */
+const KANA_ONLY = /^[ぁ-ゖァ-ヶー]+$/u;
+/** これより短いかなは、誰の読みにも一致してしまう（「ア」「ふ」） */
+const MIN_KANA_APPELLATION_LENGTH = 2;
+
+/**
+ * かなで書かれた呼び名が、もう一方の読み仮名と重なる組か（設計書6.5.9）。
+ *
+ * 実データで第4話だけ「フミカ」と書かれ、単独レコードとして残った。
+ * 「密倉文佳」側の別名は漢字ばかりで、**呼び名どうしを比べる限り
+ * 突き合わせる道が無い**——読み（みくらふみか）だけが両者を繋ぐ。
+ *
+ * **自動では寄せない。** 同じ読みの名は別人でも起きる
+ * （`honorific_family_name` と同じ考え）。姓の側で一致した組は、
+ * 家族の可能性が高いのでさらに確信度を落とす。
+ *
+ * **読みを持ち出すのは、名前どうしを直接比べられないときだけ。**
+ * 両方がかなだけの名前なら、部分の重なりは省略形（`abbreviation`）や
+ * 後ろの重なり（`suffix`）が名前そのもので見る。そちらを覆い隠すと、
+ * 「ギルドマスター」と「マスター」が「読み仮名と同じ音です」になる。
+ */
+function readingMatchPair(
+  a: Character,
+  b: Character,
+  appellations: ReadonlyMap<string, string[]>
+):
+  | {
+      kana: Character;
+      owner: Character;
+      matchedName: string;
+      reading: string;
+      confidence: "medium" | "weak";
+      weakNote?: string;
+    }
+  | undefined {
+  const directions: Array<[Character, Character]> = [
+    [a, b],
+    [b, a],
+  ];
+  for (const [kana, owner] of directions) {
+    const reading = toDictionaryReading(owner.reading ?? "");
+    if (!reading) continue;
+    // もう一方もかなだけの名前なら、**部分の重なりは名前そのもので比べられる**。
+    // 読みを持ち出すと「マスター」と「ギルドマスター」が
+    // 「読み仮名と同じ音です」になり、省略形という本当の手掛かりを覆い隠す。
+    // 音が丸ごと同じ組（「フミカ」と「ふみか」）だけは、
+    // カタカナとひらがなをまたいで比べる判定が他に無いので拾う
+    const ownerIsKana = KANA_ONLY.test(normalizeSpacing(owner.name));
+
+    for (const appellation of appellations.get(kana.id) ?? []) {
+      const bare = stripHonorific(normalizeSpacing(appellation));
+      if (bare.length < MIN_KANA_APPELLATION_LENGTH) continue;
+      if (!KANA_ONLY.test(bare)) continue;
+      // 「お母さん」「あんた」は誰にでも使う。読みと重なっても根拠にならない
+      if (isGenericAppellation(bare)) continue;
+      const sound = toDictionaryReading(bare);
+      if (!sound) continue;
+
+      // 完全一致と「名」の部分の一致は同じ強さで見る。
+      // 「みくらふみか」の末尾が「ふみか」なら、姓を省いた呼び方とみてよい
+      if (
+        sound === reading ||
+        (!ownerIsKana && reading.endsWith(sound) && reading.length > sound.length)
+      ) {
+        return {
+          kana,
+          owner,
+          matchedName: appellation,
+          reading,
+          confidence: "medium",
+        };
+      }
+      if (ownerIsKana) continue;
+      // 読みの頭で一致した組は姓の側。「ミクラ」は母や兄でもありうる
+      if (reading.startsWith(sound) && reading.length > sound.length) {
+        return {
+          kana,
+          owner,
+          matchedName: appellation,
+          reading,
+          confidence: "weak",
+          weakNote: WEAK_FAMILY_NAME_NOTE,
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * その姓を名乗るレコードが何件あるか（姓＋名の形のものだけ）。
+ *
+ * 「密倉さん」のように**姓に敬称が付いただけ**のレコードは数えない。
+ * 数えると、寄せ先を探している当のレコード自身が2件目になってしまい、
+ * 候補が永久に出なくなる。
+ */
+function countFamilyNameOwners(
+  characters: readonly Character[],
+  family: string
+): number {
+  let count = 0;
+  for (const character of characters) {
+    const name = normalizeSpacing(character.name);
+    if (name.length <= family.length || !name.startsWith(family)) continue;
+    if (stripHonorific(name) === family) continue;
+    count++;
+  }
+  return count;
+}
+
+/**
+ * 呼び名ごとに、それを持つレコードが何件あるかを数える。
+ *
+ * **姓は複数人が持つ。** 「三門」を三門太志・三門・三門の母・圭織の4人が、
+ * 「密倉さん」を3人が持っていた（実データ）。同一人物の証拠として弱い印になる。
+ */
+function countSharedAppellations(
+  characters: readonly Character[],
+  appellations: Map<string, string[]>
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const character of characters) {
+    const keys = new Set(
+      (appellations.get(character.id) ?? []).map(normalizeName)
+    );
+    for (const key of keys) {
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/** 姓とみなせる件数。これ以上のレコードが同じ呼び名を持てば家名を疑う */
+const SHARED_APPELLATION_LIMIT = 3;
+
+/**
+ * 呼び名が一致しただけの組を、どこまで信じてよいか。
+ *
+ * 弱いと判断したら理由の文言を返す。強ければ undefined。
+ *
+ * **姓かどうかは「前に付いているか」で見る。** 件数だけで数えると、
+ * 「密倉文佳／文佳／密倉 文佳」のように**同じ人物が3件に割れているとき**まで
+ * 姓扱いになり、いちばん直したい候補が弱くなる。「三門」は「三門太志」の
+ * 頭に付くが、「文佳」は「密倉文佳」の後ろに付く。
+ */
+function weakSameNameNote(
+  matched: string,
+  a: Character,
+  b: Character,
+  sharedCounts: Map<string, number>
+): string | undefined {
+  const key = normalizeName(matched);
+  const nameA = normalizeName(a.name);
+  const nameB = normalizeName(b.name);
+
+  // 両方のフルネームの頭が、その呼び名で揃っている（＝姓でしか繋がっていない）
+  const prefixOfBoth =
+    nameA.startsWith(key) &&
+    nameB.startsWith(key) &&
+    (nameA.length > key.length || nameB.length > key.length);
+  if (prefixOfBoth) return WEAK_FAMILY_NAME_NOTE;
+
+  // 3件以上が持っており、かつ誰かの名前の頭に付いている
+  if ((sharedCounts.get(key) ?? 0) >= SHARED_APPELLATION_LIMIT) {
+    const usedAsPrefix = [a, b].some((character) =>
+      [character.name, ...character.aliases].some((name) => {
+        const normalized = normalizeName(name);
+        return normalized.startsWith(key) && normalized.length > key.length;
+      })
+    );
+    if (usedAsPrefix) return WEAK_FAMILY_NAME_NOTE;
+  }
+
+  // 一致したのが相手のレコードの名前そのもので、しかも2人の名前が
+  // 姓名の関係にない。**別名に別人の名前が混ざった形**である（設計書6.5.9）。
+  // 「密倉文佳」と「文佳」のように名前どうしが繋がっている組は、
+  // 正しい重複なのでここには落ちない
+  const equalsWholeName = key === nameA || key === nameB;
+  const namesRelated =
+    nameA.endsWith(nameB) || nameB.endsWith(nameA) || nameA === nameB;
+  if (equalsWholeName && !namesRelated) return WEAK_ALIAS_NOTE;
+
+  return undefined;
 }
 
 /**
@@ -974,8 +1524,8 @@ function stripPolitePrefix(name: string): string {
  * これを見落としていたため、AIが関連を正しく記録していたにもかかわらず、
  * 「リン」と「リンセップ・アウクト」が別人のまま残っていた（実データで確認）。
  *
- * ただし「姫」「殿下」のような肩書きだけの呼称は、
- * 別人どうしでも一致してしまうため除く。
+ * ただし「姫」「殿下」のような肩書きだけの呼称、代名詞、家族関係語は、
+ * 別人どうしでも一致してしまうため除く（`isGenericAppellation`）。
  */
 export function buildAppellationIndex(
   characters: Character[]
@@ -986,15 +1536,22 @@ export function buildAppellationIndex(
     const names = [character.name, ...character.aliases].filter((name) =>
       name.trim()
     );
+    // 宛先の照合には、網を掛ける前の呼び名を使う。掛けたあとの形で照合すると、
+    // 「お母さん」というレコードへ宛てた呼称がどこにも結び付かなくなる
     const ownKeys = new Set(names.map(normalizeName));
-    const collected = new Set(names);
+    // **網は名前と別名にも掛ける**（設計書6.5.9、実機確認A-18の2026-09-08）。
+    // 掛かっていたのは呼称（addressTerms）だけで、別名に入り込んだ「僕」
+    // 「あんた」「お嬢様」がそのまま「ほぼ確実に同一人物」の根拠になっていた
+    const collected = new Set(
+      names.filter((name) => !isGenericAppellation(name))
+    );
 
     // 誰のレコードに書かれていても、宛先がこの人物なら呼称として扱う
     for (const speaker of characters) {
       for (const term of speaker.addressTerms) {
         if (!ownKeys.has(normalizeName(term.targetName))) continue;
         for (const form of term.forms) {
-          if (isTitleOnly(form.term)) continue;
+          if (isGenericAppellation(form.term)) continue;
           collected.add(form.term);
         }
       }
@@ -1006,24 +1563,51 @@ export function buildAppellationIndex(
 }
 
 /**
- * 肩書き・敬称だけの呼称か。
- * 「姫」「王女殿下」は別の王女とも一致してしまうので同一人物判定に使わない。
+ * 誰にでも使える呼び方か。**同一人物の根拠にしない**（設計書6.5.9）。
+ *
+ * 3種類ある。
+ *  - 肩書き・敬称だけ（「姫」「王女殿下」）……別の王女とも一致する
+ *  - 代名詞（「僕」「あんた」）……話者が変われば別人を指す
+ *  - 家族関係語（「お母さん」「ばあさん」）……同じ家の中で複数の人が持つ
+ *
+ * 代名詞と家族関係語は、実データで「ほぼ確実に同一人物」の根拠になっていた
+ * （「密倉 文佳／三門太志＝僕」「太志／フミカ＝あんた」。どれも別人。
+ * 実機確認A-18の2026-09-08）。
  */
-function isTitleOnly(term: string): boolean {
+function isGenericAppellation(term: string): boolean {
   // normalizeName は敬称を落とすので「王女殿下」→「王女」になる
   const normalized = normalizeName(term);
   if (!normalized) return true;
   // 「姫」「殿下」のように敬称そのもの1語だけの呼び方
   if (HONORIFIC_SUFFIX_SOURCE.includes(normalized)) return true;
-  return TITLE_WORDS.has(normalized);
+  return TITLE_WORDS.has(normalized) || GENERIC_APPELLATIONS.has(normalized);
 }
 
-/** 肩書きだけで人を特定できない語。別の王女とも一致してしまう */
-const TITLE_WORDS = new Set([
+/**
+ * 肩書きだけで人を特定できない語。別の王女とも一致してしまう。
+ *
+ * **書くときは作中の言い方のままでよい。** 照合は敬称を落とした形で
+ * 行うので、一覧側も同じ形へ通してから持つ（下の `TITLE_WORDS`）。
+ * 通す前は「お嬢様」「奥様」が書かれたまま入っており、照合の側は
+ * 「お嬢」「奥」を見ていたので**一度も効いていなかった**
+ * （実機確認A-18の2026-09-08）。あとから足す語が同じ罠を踏まないよう、
+ * 揃えるのは一覧の側ではなく機械にやらせる。
+ */
+const TITLE_WORD_SOURCE = [
   "王女", "王子", "王", "女王", "国王", "皇帝", "皇后", "王妃",
   "姫君", "師匠", "隊長", "副隊長", "団長", "会長",
   "社長", "部長", "課長", "店長", "旦那", "奥様", "お嬢様",
-]);
+];
+
+const TITLE_WORDS = new Set(TITLE_WORD_SOURCE.map(normalizeName));
+
+/**
+ * 代名詞と家族関係語（`core/genericPersonWords.ts`）。
+ * こちらも照合と同じ形へ通してから持つ（理由は `TITLE_WORD_SOURCE` と同じ）。
+ */
+const GENERIC_APPELLATIONS = new Set(
+  [...PRONOUN_WORDS, ...KINSHIP_WORDS].map(normalizeName)
+);
 
 /** 2人の呼称の総当たりを、短い方・長い方の順で返す */
 function appellationPairs(a: Character, b: Character): Array<[string, string]> {
@@ -1065,77 +1649,27 @@ function splitNameParts(name: string): string[] {
     .filter(Boolean);
 }
 
-// 同一人物判定でだけ使う。呼称の使い分け自体は addressTerms 側の
-// 管理対象なので、name/aliases に保存する文字列はこの敬称を残したままにする
-// 「先生」は敬称として名前に付く（「マイナ先生」＝「マイナ」）。
-// 「先生」単独は GENERIC_ROLES 側で人物名から除外されるため、
-// ここに入れても役職語だけのレコードを拾うことはない。
 /**
- * 名前の後ろに付く敬称。同一人物判定でのみ使い、
- * name / aliases に保存する文字列からは取り除かない
- * （呼び分けそのものが addressTerms の管理対象であるため）。
+ * 空白だけを落とした形（設計書6.5.9）。
  *
- * 「殿下」と「妃殿下」のように一方が他方の末尾になる組があるため、
- * 照合は長い敬称から行う（HONORIFIC_SUFFIXES を参照）。
- * 並び順に依存しないよう、定義はここでは自由に足してよい。
- */
-const HONORIFIC_SUFFIX_SOURCE = [
-  // 一般
-  "さん",
-  "くん",
-  "君",
-  "ちゃん",
-  "ちゃま",
-  "様",
-  "さま",
-  "殿",
-  "氏",
-  "女史",
-  // 立場・職能
-  "先輩",
-  "先生",
-  "師",
-  "卿",
-  "翁",
-  // 王侯貴族・聖職
-  "陛下",
-  "妃殿下",
-  "殿下",
-  "閣下",
-  "猊下",
-  "聖下",
-  "姫",
-  "公",
-  // 爵位。「ヴォイド・コンストラクタ男爵」と「ヴォイド・コンストラクタ」を
-  // 別人扱いしないため。**「夫人」付きも落とす**
-  // （「ジェクティ・コンストラクタ男爵夫人」＝「ジェクティ・コンストラクタ」）
-  "大公爵夫人",
-  "公爵夫人",
-  "侯爵夫人",
-  "伯爵夫人",
-  "子爵夫人",
-  "男爵夫人",
-  "大公爵",
-  "公爵",
-  "侯爵",
-  "伯爵",
-  "子爵",
-  "男爵",
-];
-
-/**
- * 長い敬称から順に照合する。
+ * 「密倉文佳」と「密倉 文佳」を同じ名前として比べるためにある。
+ * **敬称は落とさない。** 落とすと「文佳ちゃん」が「文佳」と同じになり、
+ * 正しい別名まで取り込めなくなる。`normalizeName` との違いはそこにある。
  *
- * 「エレナ妃殿下」は「殿下」でも末尾一致するため、
- * 短い方を先に試すと「エレナ妃」が残ってしまう。
+ * **保存する名前はこの形にしない。** 作者の書き方をそのまま残す。
  */
-const HONORIFIC_SUFFIXES = [...HONORIFIC_SUFFIX_SOURCE].sort(
-  (a, b) => b.length - a.length
-);
+export function normalizeSpacing(s: string): string {
+  return s.replace(/[\s　]/gu, "");
+}
 
 /**
  * 表記ゆれを吸収する。全角空白・記号の違いで別人扱いしないため。
  * 敬称の有無も同様の理由で吸収する（「シル」と「シルさん」を別人扱いしない）。
+ *
+ * **`stripHonorific` より緩い。** こちらは「おばあさん」を「おばあ」まで削る。
+ * 呼び名を数える鍵（`dedupeRelations`）では、「おばあさん」と「ばあさま」を
+ * 同じ相手として畳みたいので、そこまで削る必要がある。
+ * 資料に残る名前を組み立てる場面では、`stripHonorific` のほうを使う。
  */
 export function normalizeName(s: string): string {
   const base = s

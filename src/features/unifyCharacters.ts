@@ -3,10 +3,14 @@ import * as vscode from "vscode";
 import { WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
 import { CharacterStore, CharacterStoreError } from "../core/characterStore";
-import { findMergeCandidates, type MergeCandidate } from "../core/characterMerge";
+import {
+  describeMergeCandidate,
+  findMergeCandidates,
+} from "../core/characterMerge";
 import { unifyCharacters } from "../core/characterUnify";
 import { logFailure } from "../core/logger";
 import { cancelItem } from "../views/dialogs";
+import { confirmRun } from "../views/notify";
 
 /**
  * 同一人物として登録されてしまった組を、作者の確認のうえで1件にまとめる。
@@ -14,14 +18,6 @@ import { cancelItem } from "../views/dialogs";
  * 自動では統合しない。別人をまとめると作者のデータを壊すことになり、
  * 取り消しも難しいため、どれをまとめるか・どちらの名前を残すかは必ず作者が決める。
  */
-
-const REASON_LABELS: Record<MergeCandidate["reason"], string> = {
-  same_name: "同じ呼び名が両方に登録されています",
-  abbreviation: "省略形とみられます",
-  suffix: "一方が他方の呼び方を含んでいます",
-  name_part: "姓名と、名だけの呼び方とみられます",
-  ambiguous: "統合先を決められませんでした",
-};
 
 export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
   const store = new CharacterStore(work);
@@ -59,7 +55,10 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
           candidate.names[0] === candidate.names[1]
             ? `${candidate.names[0]}（${candidate.ids[0]}） ＋ ${candidate.names[1]}（${candidate.ids[1]}）`
             : `${candidate.names[0]} ＋ ${candidate.names[1]}`,
-        description: REASON_LABELS[candidate.reason],
+        // **何が一致したのかを名指しで出す**（設計書6.5.9）。
+        // 「同じ呼び名が両方に登録されています」だけでは、姓の共有なのか
+        // 同一人物なのかを作者が見分けられなかった
+        description: describeMergeCandidate(candidate),
         candidate,
       })),
       // Escでも閉じられるが、それを知らない人には出口が無いように見える
@@ -94,17 +93,24 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
   );
   if (!keepPick || !("keep" in keepPick)) return;
 
-  const { unified, retiredId } = unifyCharacters(keepPick.keep, keepPick.absorb);
+  // ほかのレコードの名前を渡す。別人の名前を別名として引き継がないため
+  const { unified, retiredId } = unifyCharacters(
+    keepPick.keep,
+    keepPick.absorb,
+    loaded.characters
+  );
 
-  const confirm = await vscode.window.showWarningMessage(
+  const confirmed = await confirmRun(
     `「${keepPick.absorb.name}」を「${unified.name}」にまとめます。\n` +
       `別名: ${unified.aliases.join("、") || "なし"}\n` +
       "まとめた側のファイルは削除せず、回復用の場所へ移します。\n" +
       "以後この人物は抽出で上書きされなくなります。",
     "まとめる",
-    "中止"
+    // **取り消しにくいので警告の顔で訊く**（0.35.4）。まとめた側のファイルは
+    // 回復用の場所へ移るだけとはいえ、戻すのは手作業になる
+    { kind: "warning" }
   );
-  if (confirm !== "まとめる") return;
+  if (!confirmed) return;
 
   // このプロジェクトは既存ファイルの上書きを行わない（atomicWrite の replaceGuarded は
   // 必ず失敗する）。そのため「残す側を退避 → 新しい内容を新規作成 → 取り下げ側を退避」

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   contextSizeForPrompt,
+  locateChunkLine,
   mergeAdjacentChunks,
   segmentsOf,
   splitChunkInHalf,
@@ -95,6 +96,100 @@ describe("短い話をまとめる", () => {
     const chunks = [episode(1, "あ"), episode(2, "い")];
 
     expect(mergeAdjacentChunks(chunks, { maxChars: 0 })).toHaveLength(2);
+  });
+});
+
+/**
+ * **本文が空のチャンクは、行番号の対応を壊す。**
+ *
+ * まとめるとき、区切り（空行）を入れるかどうかを「ここまでの本文があるか」で
+ * 決めていた。そのため束の先頭が空文字だと区切りが入らず、**内訳2つの開始位置が
+ * どちらも0**になる。`locateChunkLine` は前から見るので、まとめた本文の1行目が
+ * 空のほうのファイルの行だと判定され、誤字脱字の指摘が
+ * 「位置を特定できませんでした」で黙って捨てられる。
+ *
+ * 空のチャンクが生まれる道は3つある。
+ *   (a) メモ行だけで末尾に改行の無い話（`blankMemoLines` で全部消える）
+ *   (b) 0バイトの話ファイル（推敲・矛盾には `.trim()` の関所が無い）
+ *   (c) 合本の中の空の話
+ *
+ * 送っても何も指摘できないものは、そもそも作らない・束ねない。
+ */
+describe("本文が空のチャンクは作らない", () => {
+  test("メモ行だけの話は、チャンクを1つも返さない", () => {
+    // 末尾に改行が無いので、メモを空行にすると本文が丸ごと消える（道(a)）
+    expect(
+      splitIntoChunks("memo.txt", "// あとで直す", 1, 1, { maxChars: 8000 })
+    ).toEqual([]);
+  });
+
+  test("0バイトの話も、チャンクを1つも返さない", () => {
+    // 道(b)。推敲・矛盾検知には本文の空判定が無く、ここまで届く
+    expect(splitIntoChunks("empty.txt", "", 2, 2, { maxChars: 8000 })).toEqual(
+      []
+    );
+  });
+
+  test("空白と改行だけでも、チャンクを1つも返さない", () => {
+    expect(
+      splitIntoChunks("blank.txt", "\n\n 　\n", 3, 3, { maxChars: 8000 })
+    ).toEqual([]);
+  });
+});
+
+describe("本文が空のチャンクは束ねない", () => {
+  /** 合本の中の空の話（道(c)）。手で組み立てないと、もう作れない */
+  function emptyChunk(filePath: string, chapter: number): Chunk {
+    return {
+      filePath,
+      index: 0,
+      text: "",
+      startLine: 0,
+      chapterStart: chapter,
+      chapterEnd: chapter,
+      hash: `empty-${chapter}`,
+      segments: [
+        {
+          filePath,
+          chapterStart: chapter,
+          chapterEnd: chapter,
+          start: 0,
+          end: 0,
+          startLine: 0,
+        },
+      ],
+      wholeFile: true,
+    };
+  }
+
+  test("先頭が空でも、1行目は本文のあるファイルを指す", () => {
+    const merged = mergeAdjacentChunks(
+      [emptyChunk("empty.txt", 1), episode(2, "一行目\n二行目")],
+      { maxChars: 1000 }
+    );
+
+    // 空の1件は捨てるので、束ねる相手がいなくなり1件だけが残る
+    expect(merged).toHaveLength(1);
+    expect(locateChunkLine(merged[0], 1)).toEqual({
+      filePath: "episode_0002.txt",
+      line: 1,
+    });
+  });
+
+  test("あいだに空が挟まっても、前後は1つに束ねられる", () => {
+    // 空で束が切れる（flushする）と、まとめる意味が無くなる。素通しにする
+    const merged = mergeAdjacentChunks(
+      [
+        episode(1, "第一話の本文"),
+        emptyChunk("empty.txt", 2),
+        episode(3, "第三話の本文"),
+      ],
+      { maxChars: 1000 }
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(segmentsOf(merged[0]).map((s) => s.chapterStart)).toEqual([1, 3]);
+    expect(merged[0].text).toBe("第一話の本文\n\n第三話の本文");
   });
 });
 

@@ -18,6 +18,23 @@ import { logLine } from "./logger";
  * 手で直せて、要らなければ丸ごと消せば測る前の状態へ戻る。
  */
 
+/**
+ * 出力の速さが、どこから来た値か（設計書6.65.14）。
+ *
+ * **同じ「トークン/秒」でも重みが違う。** 一覧に並べるだけだと、
+ * 字数から換算しただけの推定値が「最速」の座に着くことがある。
+ *
+ * - `tuning`……「書ける量の測定」で測った値（`features/measureContext.ts`）
+ * - `call`……普段のAI呼び出しで採れた値。応答の `usage` が出力トークン数を
+ *   返したもの（`ai/meteredProvider.ts` の関所）
+ * - `estimated`……同じく普段の呼び出しだが、`usage` が無いので**出力の
+ *   字数から換算**したもの。換算の係数ぶんの誤差が乗る
+ */
+export type SpeedSource = "tuning" | "call" | "estimated";
+
+/** 一覧・保存の両方が同じ値だけを扱うための一覧（読み込みの検査に使う） */
+const SPEED_SOURCES: readonly SpeedSource[] = ["tuning", "call", "estimated"];
+
 /** 1モデルぶんの調整値。**どれも省略できる**（測れたものだけ入る） */
 export interface ModelTuning {
   /** 実効のコンテキスト長（トークン）。測って分かった値 */
@@ -26,6 +43,70 @@ export interface ModelTuning {
   readonly timeoutSeconds?: number;
   /** 先頭と末尾の合言葉が両方返った、最大の字数 */
   readonly measuredChars?: number;
+  /**
+   * 1回の応答で書けた、実測の出力トークン数（設計書6.65.14の1）。
+   *
+   * **読める長さ（`measuredChars`）と違い、確認なしで自動的に保存される**
+   * ——まとめ送信の上限を絞るためだけに使う参考値で、`contextWindow` や
+   * `timeoutSeconds` のように呼び出しの挙動そのものを変える設定ではない。
+   * 台帳へ繋いだ理由は設計書6.65.14（作者の指摘「設定に入れないのは
+   * なぜでしょうか？　チューニングの意味がないように思う」）。
+   */
+  readonly measuredOutputTokens?: number;
+  /**
+   * その測定に**時間切れの回が混じっていた**か（設計書6.77の第2段）。
+   *
+   * `measureOutputLimit` は時間切れを「その量は書けない」と数える。
+   * 待っても返らない長さは作者にとって書けないのと同じ、という判断だが、
+   * **「書けない」の証拠としては弱い**——遅いだけのモデルでは、実際には
+   * 書けるのに数百トークンで探索が終わる。
+   *
+   * 0.32.11から実測が**実送信のハード上限**になったので、この弱い値を
+   * そのまま上限にすると「測っただけで以後すべての応答が切られ、設定を
+   * 上げても直らない」状態が作れてしまう。だから印を残し、
+   * **上限としては使わない**（見込みや まとめ送信の絞り込みでは使う。
+   * あちらは小さく見るぶんには安全側である）。
+   *
+   * **無い台帳は従来どおり**——印が付く前に測った値は、これまでと同じ
+   * 扱いのままにする（読み側の互換）。
+   */
+  readonly outputMeasureTimedOut?: boolean;
+  /**
+   * 出力の実測の速さ（トークン/秒。小数1桁）。
+   *
+   * **書き手は2つある**（設計書6.65.14。作者の裁定、2026-09-06）。
+   *
+   * 1. 「書ける量」の測定（`features/measureContext.ts`）——時間切れでない、
+   *    いちばん長く書けた回の「出力トークン数 ÷ 所要秒」
+   * 2. **普段のAI呼び出し**（`ai/meteredProvider.ts` の関所）——毎回の応答から
+   *    同じ式で採る
+   *
+   * 1つ目だけだったとき、あれは**手元のAIしか測らない**機能なので、
+   * クラウド（Gemini・さくら・Claude・ChatGPT）は永久に「—」のままだった。
+   * 関所は全プロバイダ・全機能が通るので、そこで採れば6つとも埋まる。
+   *
+   * **平均しない。値は直近の実測をそのまま入れる。** 同じ機械でもほかの
+   * 処理の負荷で変わるものなので、均した数より「いつの値か」
+   * （`speedMeasuredAt`）が分かるほうが読める。
+   *
+   * **呼び出しの挙動は変えない。** 見せるためだけの参考値であり、
+   * 待ち時間や上限のように送り方を決める値ではない。
+   *
+   * **無い台帳は従来どおり**——速度を測る前に取った値は、これまでと
+   * 同じ扱いのままにする（読み側の互換）。
+   */
+  readonly outputTokensPerSecond?: number;
+  /** その速度がどこから来たか。**推定値を実測と並べない**ための札 */
+  readonly speedSource?: SpeedSource;
+  /**
+   * 速度を採った時刻（ISO 8601）。
+   *
+   * **`measuredAt` と混ぜない。** あちらはチューニング（読める長さ・
+   * 書ける長さ）を測った時刻で、速度は普段の呼び出しからも更新される
+   * ため、いつの値かが別々に動く。1つの欄にすると、測っていない項目まで
+   * 新しく測ったように見える。
+   */
+  readonly speedMeasuredAt?: string;
   /** 測った時刻（ISO 8601）。古い測定だと分かるように残す */
   readonly measuredAt?: string;
 }
@@ -99,10 +180,27 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
     const contextWindow = positiveNumber(entry.contextWindow);
     const timeoutSeconds = positiveNumber(entry.timeoutSeconds);
     const measuredChars = positiveNumber(entry.measuredChars);
-    const measuredAt =
-      typeof entry.measuredAt === "string" && entry.measuredAt.trim().length > 0
-        ? entry.measuredAt
-        : undefined;
+    const measuredOutputTokens = positiveNumber(entry.measuredOutputTokens);
+    // **0は読まない。** 「0トークン/秒」は測れていないのと同じ意味に
+    // なるが、一覧では「測っていない」と区別が付かなくなる
+    const outputTokensPerSecond = positiveNumber(entry.outputTokensPerSecond);
+    // **知らない出どころは読まない。** 一覧は決まった3つしか言葉へ
+    // 直せないので、読んでしまうと生の値が表に出る
+    const speedSource = SPEED_SOURCES.find((id) => id === entry.speedSource);
+    const speedMeasuredAt = nonEmptyText(entry.speedMeasuredAt);
+    /*
+      0.36.3 の `firstTokenSeconds` は**欄ごと削った**。流し受信を断つ
+      測定では最初のトークンの時刻を知る手立てが無く、普段の呼び出しの
+      関所でも所要時間しか手に入らない——**書き手のいない欄**だった。
+
+      ここで読まないだけで、設定に残っている値は消えない
+      （`saveModelTuning` は知らない欄をそのまま残す）。
+    */
+    // **true のときだけ持つ。** 「印が無い」と「印が false」を分けても
+    // 使い道が無いうえ、false を書き戻すと設定に意味の無い欄が並ぶ
+    const outputMeasureTimedOut =
+      entry.outputMeasureTimedOut === true ? true : undefined;
+    const measuredAt = nonEmptyText(entry.measuredAt);
 
     const tuning: ModelTuning = {
       // **持っている欄だけを置く。** `undefined` を常に置くと、書き戻した
@@ -110,6 +208,11 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
       ...(contextWindow !== undefined ? { contextWindow } : {}),
       ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
       ...(measuredChars !== undefined ? { measuredChars } : {}),
+      ...(measuredOutputTokens !== undefined ? { measuredOutputTokens } : {}),
+      ...(outputTokensPerSecond !== undefined ? { outputTokensPerSecond } : {}),
+      ...(speedSource !== undefined ? { speedSource } : {}),
+      ...(speedMeasuredAt !== undefined ? { speedMeasuredAt } : {}),
+      ...(outputMeasureTimedOut !== undefined ? { outputMeasureTimedOut } : {}),
       ...(measuredAt !== undefined ? { measuredAt } : {}),
     };
     // 何も読めなかった項目は、持っていても引く値が無い
@@ -128,6 +231,13 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
  */
 function positiveNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
+}
+
+/** 中身のある文字列のときだけ返す。空白だけの時刻は「無い」と同じ */
+function nonEmptyText(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0
     ? value
     : undefined;
 }
@@ -163,6 +273,16 @@ function readTuningTable(): Map<string, ModelTuning> {
   return parseModelTuning(
     vscode.workspace.getConfiguration(CONFIG_SECTION).get<unknown>(TUNING_SETTING)
   );
+}
+
+/**
+ * 台帳の**全部**。実測の一覧（`core/tuningStats.ts`）が使う。
+ *
+ * **解釈の仕方を持ち出させない。** 一覧側が設定を直接読むと
+ * `parseModelTuning` の写しがそこにでき、壊れた欄の扱いが2か所に散る。
+ */
+export function allModelTuning(): Map<string, ModelTuning> {
+  return readTuningTable();
 }
 
 /** そのモデルの調整値。**測っていなければ undefined**（従来の設定へ落とす） */
@@ -261,6 +381,64 @@ export function resolveTimeoutSeconds(
   return Number.isFinite(configured) && configured > 0
     ? configured
     : fallbackSeconds;
+}
+
+/**
+ * コンテキスト長の決め方。プロバイダごとに違うのは、この3つだけである。
+ *
+ * `resolveContextWindow` へ渡す。**値をここに書かない**——既定も設定名も
+ * プロバイダ側の事情なので、持つのはプロバイダのファイルである。
+ */
+export interface ContextWindowSource {
+  /** プロバイダごとの設定名（`novelai.` を除く） */
+  readonly settingKey: string;
+  /** 設定も台帳も無い／使えないときの既定 */
+  readonly fallback: number;
+  /**
+   * これ未満の設定値は使わない（`package.json` の `minimum` と揃える）。
+   * **0なら「正の数ならなんでも」**——LM Studioは読み込んだ長さに
+   * 合わせる予備なので、小さい値も作者の意図として尊重する。
+   */
+  readonly minimum: number;
+}
+
+/**
+ * そのモデルが読める長さ（トークン）。
+ * **台帳（AIチューニング）→ プロバイダごとの設定 → 既定** の順で決める。
+ *
+ * ## 台帳を見るのは、申告しないプロバイダだけ
+ *
+ * ChatGPT・LM Studio・さくらのAIは、モデル一覧APIがコンテキスト長を
+ * 返さない。だから「測って台帳へ書く」（設計書6.49）が要る。
+ *
+ * **Ollama・Gemini・ClaudeはAPIが申告するので、台帳を見ない。**
+ * 申告のほうが正しく、モデルが差し替わればその場で新しい値になる。
+ * ここへ台帳を挟むと、**古い実測が正しい申告を静かに上書きする**
+ * ——モデルを入れ替えたのに前のモデルの長さで分割し続ける、という
+ * 気づきようのない壊れ方になる。台帳は「申告できないプロバイダの
+ * 実測の置き場」であって、全プロバイダ共通の上書き機構ではない。
+ *
+ * ## 3社が同じ順番を別々に書いていた
+ *
+ * 読み順・下限・落とし先が3か所に写されており、片方だけ直すと
+ * 「ChatGPTでは効くのにさくらでは効かない」が静かに生まれる
+ * （待ち時間の `resolveTimeoutSeconds` と同じ理由。設計書6.77の第2段）。
+ */
+export function resolveContextWindow(
+  providerId: string,
+  model: string,
+  source: ContextWindowSource
+): number {
+  const tuned = tunedContextWindow(providerId, model);
+  if (tuned !== undefined) return tuned;
+  const configured = vscode.workspace
+    .getConfiguration(CONFIG_SECTION)
+    .get<number>(source.settingKey, source.fallback);
+  return Number.isFinite(configured) &&
+    configured > 0 &&
+    configured >= source.minimum
+    ? configured
+    : source.fallback;
 }
 
 /** `resolveTimeoutSeconds` のミリ秒版。プロバイダはこちらを使う */

@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { SyncTarget } from "../core/syncTarget";
-import { describeSyncTarget } from "../core/syncTarget";
+import { describeIncludedWorks, describeSyncTarget } from "../core/syncTarget";
+import { syncCommitMessage } from "../core/syncAllPlan";
 import { runGit, type GitCommandRunner, type GitSyncStatus } from "../core/git";
 import {
   addRemote,
@@ -21,9 +22,11 @@ import {
   suggestRepositoryName,
   validateRepositoryUrl,
 } from "../core/gitSetup";
-import { logFailure, logStep, showLog } from "../core/logger";
+import { logFailure, logStep } from "../core/logger";
+import { redactUrlCredentials } from "../core/redactUrl";
 import { withProgress } from "../views/progress";
 import { askText , cancelItem } from "../views/dialogs";
+import { confirmRun, notifyDone, warnWithLog } from "../views/notify";
 
 /**
  * GitHub同期を始めるまでの案内。
@@ -118,7 +121,7 @@ export async function recordChanges(
     if (!(await askCommitIdentity(target, run))) return false;
   }
 
-  const defaultMessage = `${formatStamp(new Date())} の執筆（${count}件）`;
+  const defaultMessage = syncCommitMessage(count, new Date());
   const message = await askText({
     title: "この記録に付ける説明",
     value: defaultMessage,
@@ -148,15 +151,6 @@ export async function recordChanges(
     `${count} 件の変更を記録しました。`
   );
   return true;
-}
-
-/** 履歴の説明に使う日時。ログと同じく端末の時刻で書く */
-function formatStamp(now: Date): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return (
-    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
-    `${pad(now.getHours())}:${pad(now.getMinutes())}`
-  );
 }
 
 /** 「次の一手」を実行する。進んだら true */
@@ -204,7 +198,7 @@ async function guideGitInstall(): Promise<void> {
 
   if (answer === "コマンドをコピー") {
     await vscode.env.clipboard.writeText(command);
-    vscode.window.showInformationMessage(
+    notifyDone(
       "コピーしました。ターミナルに貼り付けて実行してください。" +
         "導入後はVS Codeを開き直すと認識されます。"
     );
@@ -228,14 +222,13 @@ async function startTracking(
       ? `「${target.label}」に履歴を作り、中の${target.works.length}作品をまとめて残します。\n`
       : "作品フォルダーに履歴を作り、今ある原稿を1つ目の記録として残します。\n";
 
-  const answer = await vscode.window.showInformationMessage(
+  const confirmed = await confirmRun(
     `${describeSyncTarget(target)} をGitで管理しますか？\n` +
       scope +
       "この時点ではまだ外部へ何も送りません。",
-    "始める",
-    "やめる"
+    "始める"
   );
-  if (answer !== "始める") return false;
+  if (!confirmed) return false;
 
   const initialized = await initRepository(target.folderPath, run);
   if (!initialized.ok) {
@@ -249,13 +242,14 @@ async function startTracking(
   }
 
   const count = await countTrackableFiles(target.folderPath, run);
-  const confirm = await vscode.window.showInformationMessage(
+  const recordConfirmed = await confirmRun(
     `${count} 件のファイルを1つ目の記録として残します。\n` +
       "（キャッシュなど、同期しない設定のものは除いています）",
     "記録する",
-    "やめる"
+    // **履歴に残したものは消さない**（設計書5.5）ので警告の顔で訊く（0.35.4）
+    { kind: "warning" }
   );
-  if (confirm !== "記録する") return false;
+  if (!recordConfirmed) return false;
 
   const committed = await commitAll(
     target.folderPath,
@@ -277,7 +271,7 @@ async function startTracking(
   }
 
   logStep(`Gitで管理を開始: ${target.label}（${count}件）`);
-  vscode.window.showInformationMessage(
+  notifyDone(
     `${target.label} をGitで管理し始めました。次はGitHubのリポジトリとつなげます。`
   );
   return true;
@@ -422,7 +416,7 @@ async function connectRemote(
     return false;
   }
   logStep(`送り先を登録: ${url.trim()}`);
-  vscode.window.showInformationMessage("送り先を登録しました。");
+  notifyDone("送り先を登録しました。");
   return true;
 }
 
@@ -538,15 +532,15 @@ async function firstPush(
     target.folderPath,
     15_000
   );
-  const remoteUrl = remote.stdout.trim() || "（送り先が取得できませんでした）";
+  // 古い作品フォルダーには、URLに鍵を埋め込んだ送り先が残っていることがある
+  // （いまは登録時に断っている）。**画面にもログにも鍵を出さない**
+  const remoteUrl =
+    redactUrlCredentials(remote.stdout.trim()) ||
+    "（送り先が取得できませんでした）";
 
-  // **何作品ぶんが出ていくのかを、送る前に言う。**
-  // 1つの置き場に複数の作品が入っているのが既定の形なので（設計書5.7.9）、
-  // 作品名を1つだけ出すと「これだけが送られる」と読めてしまう
-  const scope =
-    target.works.length > 1
-      ? `\n入っている作品: ${target.works.map((entry) => entry.title).join("・")}`
-      : "";
+  // **何作品ぶんが出ていくのかを、送る前に言う**（文言は `syncTarget.ts`）
+  const included = describeIncludedWorks(target);
+  const scope = included ? `\n${included}` : "";
 
   const confirm = await vscode.window.showWarningMessage(
     `${describeSyncTarget(target)} をGitHubへ送ります。\n\n` +
@@ -579,16 +573,11 @@ function reportFailure(context: string, detail: string | undefined): void {
 
   // つながらないだけなのか、設定が違うのかで、作者が次にやることが変わる
   const translated = describeNetworkFailure(detail);
-  vscode.window
-    .showWarningMessage(
-      translated
-        ? `${context}に失敗しました。\n${translated}`
-        : `${context}に失敗しました。${detail ? `\n${detail.slice(0, 200)}` : ""}`,
-      "ログを見る"
-    )
-    .then((answer) => {
-      if (answer === "ログを見る") showLog();
-    });
+  void warnWithLog(
+    translated
+      ? `${context}に失敗しました。\n${translated}`
+      : `${context}に失敗しました。${detail ? `\n${detail.slice(0, 200)}` : ""}`
+  );
 }
 
 /** 現在のブランチ名を知りたい呼び出し元のために公開する */

@@ -87,8 +87,13 @@ function isRealDate(value: string): boolean {
   );
 }
 
-/** 全角数字を半角に変換 */
-function toHalfWidthDigits(s: string): string {
+/**
+ * 全角数字を半角に変換。
+ *
+ * **`episodeLabel.ts` からも使う。** 章ラベルと題の数字が全角・半角で
+ * 食い違っていても同じ話数として見分けるため（設計書6.65.15）。
+ */
+export function toHalfWidthDigits(s: string): string {
   return s.replace(/[０-９]/g, (c) =>
     String.fromCharCode(c.charCodeAt(0) - 0xfee0)
   );
@@ -292,6 +297,33 @@ export function nextDatedName(
     if (seq > max) max = seq;
   }
   return `${todayKey}_${max + 1}`;
+}
+
+/**
+ * 題名だけで並べるタイプ（創作メモ集）の、次のファイル名（設計書6.70）。
+ *
+ * メモに番号は要らないが、**作るたびに題名を考えさせるのも違う。**
+ * 「無題」を出しておいて、書きながら名前を付け替えられるようにする。
+ * 同じ名前が既にあれば連番を足す——2つ目を作るたびに
+ * 「同じ名前のファイルがすでに存在します」で止まっては、書き留められない。
+ *
+ * **拡張子は見ない。** 「無題.txt」があるのに「無題.md」を勧めると、
+ * 同じ題のメモが2つ並ぶ。
+ */
+export function nextUntitledName(
+  existingFileNames: readonly string[],
+  base: string,
+  extension: string
+): string {
+  const used = new Set(
+    existingFileNames.map((name) =>
+      path.basename(name, path.extname(name)).trim()
+    )
+  );
+  if (!used.has(base)) return `${base}${extension}`;
+  for (let n = 2; ; n += 1) {
+    if (!used.has(`${base}${n}`)) return `${base}${n}${extension}`;
+  }
 }
 
 /** 話数をゼロ埋めしたファイル名の基底部分にする */

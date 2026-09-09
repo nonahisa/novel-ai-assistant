@@ -9,10 +9,31 @@ import type { WorkRegistry } from "../core/workRegistry";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { AIRegistry } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
+import {
+  resolveOutputLimitForSend,
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+  truncatedOutputAdvice,
+} from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
+import { pathExists } from "../core/fileSystem";
+import {
+  episodeNumberFromHint,
+  resolveEpisodeByNumber,
+} from "../core/locateEpisode";
 import { episodeLabel } from "../core/manuscriptSources";
 import { SYNOPSIS_FILE } from "../core/synopsisDoc";
 import { CharacterStore } from "../core/characterStore";
+import {
+  advicePolicyLogLines,
+  applyProfileSignals,
+  describeAdvicePolicyUpdate,
+  describeAdviceTypeChange,
+  type AdviceProfileSignals,
+} from "../core/advicePolicy";
+import type { AdvicePolicyStore } from "../core/advicePolicyStore";
+import { confirmRun, notifyDone } from "../views/notify";
+import { buildAdvicePolicyPrompt } from "../prompts/advicePolicy";
 import {
   buildExcerpt,
   classifyChatContext,
@@ -28,6 +49,7 @@ import {
   type WorkChatTurn,
 } from "../prompts/workChat";
 import {
+  describeChatEditDestination,
   describeChatEditRejection,
   parseChatEdit,
   parseChatLocate,
@@ -62,6 +84,10 @@ import type { Chatter } from "../core/chatter";
 import { detectRunIntent } from "../core/chatIntent";
 import { findTextRange } from "../core/textLocate";
 import { applyChatEdit } from "./applyChatEdit";
+import {
+  applyChatToSettings,
+  type ChatSettingsSyncResult,
+} from "./chatSettingsSync";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { buildFeatureGuideForQuestion } from "./featureGuide";
 import {
@@ -159,8 +185,37 @@ type Incoming =
   | { type: "quickRun"; kind: string }
   /** 会話をMarkdownのメモとして残す */
   | { type: "saveNote" }
+  /**
+   * 相談で決まったことを、設定資料の更新案として積む（設計書6.72）。
+   *
+   * **資料はここでは変わらない。** 積むのは承認待ちだけで、反映は
+   * これまでどおり「更新分を反映」を作者が押したときである。
+   */
+  | { type: "applyToSettings" }
   /** 使い方のマニュアルを開く */
-  | { type: "openManual" };
+  | { type: "openManual" }
+  /**
+   * 上に出ているAIの名前を押した（作者の指摘、2026-09-06）。
+   *
+   * リンクの色で出ているのに押しても何も起きなかった。行き先はAI設定で、
+   * **コマンドを呼ぶのは拡張機能側**である（画面から届いた文字列が
+   * そのままコマンド名になる道は作らない。「面を移る」と同じ流儀）。
+   */
+  | { type: "openAISettings" }
+  /**
+   * 横の細いパネルから、本文の領域へ大きく開く（作者の指定、2026-09-03）。
+   *
+   * 詳細メニューから相談の項目を消したので、**ここが大きく開く入口**になる。
+   * 横のパネルはドックされたビューなので、そのまま残る。
+   */
+  | { type: "showInMain" }
+  /**
+   * 大きい画面から、横の細いパネルへ戻す。
+   *
+   * 「戻す」なので**大きい画面は残さない**。両方に同じ会話が並んだまま
+   * 場所だけ増えると、どちらを見ればよいのか分からなくなる。
+   */
+  | { type: "showInSub" };
 
 /**
  * 標準機能を起動する口。
@@ -259,6 +314,30 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    */
   private paidConfirmedFor: string | undefined;
 
+  /**
+   * 資料への反映が走っている最中か（設計書6.72）。
+   *
+   * **画面が2つある**ので、画面側でボタンを止めるだけでは足りない。
+   * 二重に走ると、同じ会話から同じ更新案を二度積むことになる。
+   */
+  private applyingToSettings = false;
+
+  /**
+   * いま持っている会話が、どの作品についてのものか（設計書6.72）。
+   *
+   * **会話は「最初から」でしか消えない。** 作品を選び直しても、別の作品の
+   * ファイルを開いても残る。ところが資料への反映とメモの保存は、作品を
+   * `resolveContext()` から、会話を `this.history` から取っていた——
+   * **作品Aの相談で決めたことが、作品Bの承認待ちや `設定/相談メモ/` へ
+   * 入る**余地があった（0.32.6のレビュー）。設定資料はGitで同期されるので、
+   * 混ざったものは他の端末にも広がる。
+   *
+   * `retrievalWorkId` と同じ流儀で、会話を積むときに一緒に覚えておく。
+   * **どの作品にも属さない相談（作品の外のファイル）では上書きしない**——
+   * 一度どこかの作品に結び付いた会話は、そのままにしておく。
+   */
+  private historyWorkId: string | undefined;
+
   /** 検索の材料。作品が変わるまで使い回す（毎回読み直すと重い） */
   private retrieval: RetrievalContext | undefined;
   private retrievalWorkId: string | undefined;
@@ -311,12 +390,76 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   constructor(
     private readonly registry: WorkRegistry,
     private readonly ai: AIRegistry,
-    private readonly runner: ChatRunner
+    private readonly runner: ChatRunner,
+    /**
+     * 作者のタイプ別の助言方針（設計書6.86）。
+     *
+     * **省略できる。** 試験や、まだ診断していない作品では
+     * 何も足さず、これまでどおりの相談になる。
+     */
+    private readonly advicePolicies?: AdvicePolicyStore
   ) {
     this.lastEditor = vscode.window.activeTextEditor;
     this.selectionListener = this.ai.onDidChangeSelection(
       () => void this.postContext()
     );
+  }
+
+  /**
+   * 相談へ送るシステムプロンプト。
+   *
+   * 助言方針は**該当するタイプの文章だけ**を足す（全タイプを毎回送ると
+   * 数千字が積み上がり、しかも他のタイプの記述に引きずられる）。
+   * 診断していなければ、素のプロンプトをそのまま返す。
+   */
+  private buildSystemPrompt(work: WorkEntry | undefined): string {
+    if (!work || !this.advicePolicies) return WORK_CHAT_SYSTEM_PROMPT;
+
+    const profile = this.advicePolicies.get(work.id);
+    if (!profile) return WORK_CHAT_SYSTEM_PROMPT;
+
+    const now = new Date();
+    // 何を残すかは `core/advicePolicy.ts` が決める（文言を試験から見るため）
+    for (const line of advicePolicyLogLines(profile, now)) logStep(line);
+    return `${WORK_CHAT_SYSTEM_PROMPT}\n\n${buildAdvicePolicyPrompt(profile, now)}`;
+  }
+
+  /**
+   * 相談の答えから読み取った変化を、助言方針へ反映する（設計書6.86）。
+   *
+   * **送る直前に読んだ値ではなく、保存庫から読み直してから足す。**
+   * 相談は横のパネルと大きい画面の2つがあり、待っている間に
+   * もう一方が更新していることがある。
+   *
+   * 動かすのは点数だけで、タイプはコード側の判定に任せる。
+   */
+  private async updateAdvicePolicy(
+    work: WorkEntry | undefined,
+    signals: AdviceProfileSignals | undefined
+  ): Promise<void> {
+    if (!work || !signals || !this.advicePolicies) return;
+
+    const before = this.advicePolicies.get(work.id);
+    if (!before) return; // 診断していない作品では推定も持たない
+
+    const now = new Date();
+    const after = applyProfileSignals(before, signals, now);
+    if (after === before) return;
+
+    await this.advicePolicies.set(work.id, after);
+
+    // **何がどう動いたかを残す。** 受容度・自信度は出さない
+    // （作者に見せないと決めたものを、ログから漏らさない）
+    const updated = describeAdvicePolicyUpdate(before, after);
+    if (updated) logStep(updated);
+
+    // **タイプが変わったら、その場で作者に見せる。** 黙って変えると、
+    // 助言の調子が変わった理由が作者に分からない
+    const message = describeAdviceTypeChange(before, after);
+    if (message) {
+      notifyDone(message);
+      this.postAll({ type: "note", message });
+    }
   }
 
   /**
@@ -456,6 +599,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
     if (message.type === "clear") {
       this.history = [];
+      // 会話が消えたら、どの作品のものかも忘れる（次の相談は白紙から）
+      this.historyWorkId = undefined;
       // 会話をやり直すなら、料金の確認も取り直す
       this.paidConfirmedFor = undefined;
       // もう片方の画面にも、消えたことを伝える
@@ -480,8 +625,35 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       await this.saveNote();
       return;
     }
+    if (message.type === "applyToSettings") {
+      await this.applyToSettings();
+      return;
+    }
     if (message.type === "openManual") {
       await openManual();
+      return;
+    }
+    if (message.type === "openAISettings") {
+      // 「AI設定」（`novelai.setupAI`）。**入口を増やすだけで、
+      // 中身は既にあるものをそのまま呼ぶ**——設定の道を2つ持たない
+      await vscode.commands.executeCommand("novelai.setupAI");
+      return;
+    }
+    if (message.type === "showInMain") {
+      /*
+        **コマンドを通す。** `openLargePanel()` を直に呼んでも開けるが、
+        コマンド側は開く前に「いま開いている本文」を覚えさせている。
+        直に呼ぶと、その一手間だけが抜けた別経路が増える。
+      */
+      await vscode.commands.executeCommand("novelai.openChatPanel");
+      return;
+    }
+    if (message.type === "showInSub") {
+      // 先に横のパネルを出す。閉じてから開くと、行き先が無い一瞬ができる
+      await vscode.commands.executeCommand("novelai.openChat");
+      // 「戻す」なので大きい画面は畳む。押せるのは大きい画面だけなので、
+      // 送り元がその画面であることは決まっている
+      this.panel?.dispose();
       return;
     }
     if (message.type === "applyEdit") {
@@ -620,11 +792,38 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           (guide.selected.length > 0 ? ` / ${guide.selected.join("、")}` : "")
       );
 
+      // **助言の方針を、該当するタイプのぶんだけ足す**（設計書6.86）。
+      // 診断していない作品では何も足さない（これまでどおりの相談になる）。
+      // 足したことを必ず記録する——**方針が効いているかを作者が確かめる
+      // 唯一の手掛かり**で、答えの調子が変わった理由がここにしか無い
+      const systemPrompt = this.buildSystemPrompt(context?.work);
+
+      // **上限と、その出どころを一度に取る。** 切り詰められたときの案内は
+      // 出どころで変わる（実測が効いているのに「設定を大きくして」と言うのは
+      // 嘘になる）。判定は `ai/outputLimit.ts` の1か所だけが持つ
+      const outputLimit = resolveOutputLimitForSend(
+        resolved.provider.id,
+        resolved.model
+      );
+
       const call = (
         requestedFiles?: Array<{ path: string; content: string }>
       ) =>
         resolved.provider.generate({
-          systemPrompt: WORK_CHAT_SYSTEM_PROMPT,
+          systemPrompt,
+          /*
+            **考えている中身を画面へ流す**（設計書6.63.2）。
+
+            大きく開いた画面で長い相談をすると、答えが返るまで何も
+            起きない時間が続く。思考を流せば、少なくとも「動いている」
+            ことと「何を考えているか」が見える。
+
+            **流して受け取る道でしか呼ばれない**（いまは開発ビルド限定）。
+            まとめて受け取る形では、応答が全部そろってから届くので
+            流す余地が無い——呼ばれなければ、画面はこれまでどおり
+            「考えています…」のままである。
+          */
+          onThinking: (delta) => this.postAll({ type: "thought", delta }),
           // 作品の外のファイルについての相談は、どの作品にも属さないので
           // 記録しない（`workFolder` が無ければ記録されない）
           meta: { feature: "work_chat", workFolder: context?.work.folderPath },
@@ -645,6 +844,14 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           model: resolved.model,
           // 相談は考えを広げる場なので、抽出よりは揺らす
           temperature: 0.7,
+          // **上限と見込みは別物**（設計書6.77の第2段）。上限は実測が
+          // あればそこまで、無ければ設定値。見込みはOllamaの `num_ctx` の
+          // 確保に使う値で、上限として送ってはいけない
+          maxOutputTokens: outputLimit.tokens,
+          plannedOutputTokens: resolveOutputTokensForPlanning(
+            resolved.provider.id,
+            resolved.model
+          ),
           jsonSchema: WORK_CHAT_SCHEMA as unknown as object,
           disableThinking: true,
         });
@@ -669,7 +876,14 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       }
 
       if (!answer.reply) {
-        this.postError("返事が空でした。もう一度お試しください。");
+        // **切り詰めは、切り詰めとして伝える**（設計書6.77の第2段。
+        // あらすじ生成と同じ文言）。「返事が空でした」だけだと、作者からは
+        // 出力上限が足りないのかAIの気まぐれなのか区別が付かない
+        this.postError(
+          result.truncated
+            ? truncatedOutputAdvice(outputLimit)
+            : "返事が空でした。もう一度お試しください。"
+        );
         return;
       }
 
@@ -677,6 +891,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         { role: "author", text: question },
         { role: "assistant", text: answer.reply }
       );
+      // **積むのと同じ場所で、どの作品の会話かを覚える。** 別のところで
+      // 更新すると、会話と記録がずれる余地が生まれる（設計書6.72）
+      if (context) this.historyWorkId = context.work.id;
 
       // 提案は先に解釈しておく。**記録には解釈後のものを残す。**
       // AIが返した生の値を残しても、実際に押せる形になったかが分からない
@@ -725,6 +942,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         options: answer.options,
         ...staged,
       });
+
+      // **答えを見せたあとに反映する。** 保存の失敗で相談の答えが
+      // 消えないよう、順番を先にしない（推定は次回に持ち越せる）
+      await this.updateAdvicePolicy(context?.work, answer.profileSignals);
     } catch (error) {
       const message =
         error instanceof AIError
@@ -993,9 +1214,30 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       return;
     }
 
-    const target = staged.locate.path
-      ? path.resolve(staged.work.folderPath, staged.locate.path)
-      : staged.fallbackPath;
+    /*
+      **開く前に、そのファイルが本当にあるかを確かめる**（作者の指摘、
+      2026-09-07）。AIは `episode.4.txt` を指したが、作品にあるのは
+      `episode_0004.md` だった。そのまま開こうとしたため、画面には
+      URLエンコードされた生のエラーが出ている。**引用文は照合するのに、
+      ファイルの実在は見ていなかった。**
+    */
+    const target = await this.resolveLocateTarget(staged);
+    if (!target) {
+      const named = staged.locate.path ?? "";
+      logFailure("相談の「そこを見せて」：指されたファイルが無い", {
+        指定: named,
+        作品: staged.work.title,
+      });
+      this.postAll({
+        type: "locateFailed",
+        id,
+        // **生のエラー文は出さない。** 作者が読むのは「無い」という事実だけで、
+        // `cannot open file:///c%3A/…` は原因の手掛かりにもならない
+        message:
+          `AI が指したファイル（${named || "指定なし"}）は、この作品にありません。`,
+      });
+      return;
+    }
 
     try {
       const document = await vscode.workspace.openTextDocument(
@@ -1044,12 +1286,73 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         message: `${path.basename(target)} の ${found.line + 1}行目を開きました。`,
       });
     } catch (error) {
+      // **生のエラー文は画面に出さない**（作者の指摘、2026-09-07）。
+      // 実機に出たのは `cannot open file:///c%3A/Users/…` というURLエンコード
+      // された一文で、作者には読めず、次に何をすればよいかも分からない。
+      // 中身はログへ残す（開発側はそこで追える）
       const message = error instanceof Error ? error.message : String(error);
+      logFailure("相談の「そこを見せて」：開けなかった", {
+        場所: target,
+        内容: message,
+      });
       this.postAll({
         type: "locateFailed",
         id,
-        message: `開けませんでした: ${message}`,
+        message:
+          `${path.basename(target)} を開けませんでした。` +
+          "ファイルが移動・改名されているかもしれません。",
       });
+    }
+  }
+
+  /**
+   * 「そこを見せて」で開くファイルを決める。無ければ `undefined`。
+   *
+   * 1. 指されたパスが実在すれば、それを開く
+   * 2. 無ければ**話数から引き当てる**（`episode.4.txt` → 第4話 →
+   *    `episode_0004.md`）。AIはファイル名を覚えていないが、話数はたいてい
+   *    合っている
+   * 3. 引き当てられなければ開かない。**近そうなファイルで代用しない**——
+   *    別の話を開いて「ここです」と言うのは、開けないより悪い
+   */
+  private async resolveLocateTarget(staged: {
+    locate: ChatLocate;
+    work: WorkEntry;
+    fallbackPath: string;
+  }): Promise<string | undefined> {
+    // パスの指定が無ければ、いま開いているファイルの中の話である
+    if (!staged.locate.path) return staged.fallbackPath;
+
+    const requested = path.resolve(staged.work.folderPath, staged.locate.path);
+    try {
+      if (await pathExists(requested)) return requested;
+    } catch (error) {
+      // 実在を確かめられないだけなら、引き当てへ進む（開けるかは次で分かる）
+      logFailure("相談の「そこを見せて」：実在を確かめられなかった", {
+        指定: staged.locate.path,
+        理由: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    const chapter = episodeNumberFromHint(staged.locate.path);
+    if (chapter === undefined) return undefined;
+
+    try {
+      const { episodes } = await scanWork(staged.work);
+      const found = resolveEpisodeByNumber(episodes, chapter);
+      if (!found) return undefined;
+      // **引き当てたことは残す。** 画面には出さない（作者にとっては
+      // 「そこが開いた」だけでよい）が、外したときに追えないと直せない
+      logStep(
+        `相談: 指されたファイル「${staged.locate.path}」は無いので、` +
+          `第${chapter}話（${found.fileName}）を開きました`
+      );
+      return found.filePath;
+    } catch (error) {
+      logFailure("相談の「そこを見せて」：作品を走査できなかった", {
+        理由: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
     }
   }
 
@@ -1103,16 +1406,45 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       return;
     }
 
+    /*
+      **書く前にもう一度、何がどこへ入るかを見せて確かめる**（作者の指摘、
+      2026-09-07）。
+
+      実機では「テーマの明確化」というボタンを押しただけで、`設定/plot.md`
+      の「## テーマ」へ**助言の文まで混ざった段落**が入った。作者の作品
+      ファイルへ書く操作としては、ボタン1つは軽すぎる。**中身を添える**のは、
+      パネルに並んでいる中身を読まないまま押せてしまうためである。
+    */
+    const where = describeChatEditDestination(staged.edit.target);
+    const ok = await confirmRun(
+      `${where.file} の「${where.item}」を書き換えます。\n\n` +
+        `これから入る内容：\n${previewForConfirm(staged.edit.content)}`,
+      "書き込む",
+      // 作者の文書を置き換える操作なので、警告の顔で出す
+      { kind: "warning" }
+    );
+    if (!ok) {
+      // **提案は捨てない。** 中身を読んで考え直しただけかもしれないので、
+      // ボタンは押せる状態に戻す
+      this.postAll({ type: "editCancelled", id });
+      return;
+    }
+
     try {
-      const where = await applyChatEdit(staged.work, staged.edit);
+      const written = await applyChatEdit(staged.work, staged.edit);
       this.pendingEdits.delete(id);
       this.postAll({
         type: "editApplied",
         id,
-        message: `${staged.edit.label.replace(/に書き込む$/, "")}に書き込みました（${where}）`,
+        message: `${written} の「${where.item}」を書き換えました。`,
       });
       // 対話でプロットを埋めている最中なら、次の項目を尋ねる
-      await this.advancePlotInterview(String(staged.edit.target));
+      // **target はオブジェクト。** `String()` すると "[object Object]" になり
+      // `plotFocus.target`（"plot.theme"）と永久に一致せず、対話でプロットを
+      // 埋めている最中に書き込んでも次の項目を尋ねなかった（0.40.5 で修正）
+      if (staged.edit.target.kind === "plot") {
+        await this.advancePlotInterview(`plot.${staged.edit.target.section}`);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logFailure("相談からの書き込み", { 内容: message });
@@ -1292,6 +1624,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       );
       return;
     }
+    // **別の作品の `設定/` へメモを書かない。** 同期されるので、
+    // 混ざったものは他の端末にも広がる
+    if (!this.isHistoryAbout(context.work, "保存")) return;
 
     try {
       const work = context.work;
@@ -1332,6 +1667,101 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       logFailure("相談メモの保存", { 内容: message });
       this.postError(`保存できませんでした: ${message}`);
     }
+  }
+
+  /**
+   * 相談で決まったことを、設定資料の更新案として積む（設計書6.72）。
+   *
+   * **ここでは資料を書き換えない。** 積むのは承認待ちで、台帳へ入るのは
+   * 作者が「更新分を反映」で承認したときである（抽出・プロット反映と
+   * まったく同じ道）。
+   *
+   * 中身は `features/chatSettingsSync.ts` が持つ。パネル側の仕事は
+   * **どの作品の、どの会話について押されたか**を渡すことだけである。
+   */
+  private async applyToSettings(): Promise<void> {
+    // 押している最中にもう一度押されたら、走らせない。画面側でもボタンを
+    // 止めているが、**2つの画面から同時に押せる**ので、こちらでも見る。
+    //
+    // **黙って戻らない。** もう片方の画面はボタンを押せない状態にして
+    // 返事を待っているので、何も返さないとそのまま固まる（0.32.6のレビュー）
+    if (this.applyingToSettings) {
+      this.postAll({
+        type: "note",
+        message: "資料への反映を実行中です。終わるまでお待ちください。",
+      });
+      this.postAll({ type: "applyToSettingsDone" });
+      return;
+    }
+
+    if (this.history.length === 0) {
+      this.postAll({ type: "note", message: "まだ会話がありません。" });
+      this.postAll({ type: "applyToSettingsDone" });
+      return;
+    }
+
+    const context = await this.resolveContext();
+    if (!context) {
+      this.postError(
+        "作品のファイルを開くか、「相談する作品を選ぶ」で作品を決めてください。"
+      );
+      this.postAll({ type: "applyToSettingsDone" });
+      return;
+    }
+    // **別の作品の承認待ちへ積まない**（設計書6.72）
+    if (!this.isHistoryAbout(context.work, "反映")) {
+      this.postAll({ type: "applyToSettingsDone" });
+      return;
+    }
+
+    this.applyingToSettings = true;
+    try {
+      const result = await applyChatToSettings(context.work, this.history, {
+        ai: this.ai,
+      });
+      // 通知は反映の側が出す。ここには**会話の場に残る一行**を置く
+      // （通知は消えるので、何をしたのかが会話から追えなくなる）
+      this.postAll({ type: "note", message: describeChatSync(result) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logFailure("相談から資料への反映", { 内容: message });
+      this.postError(`資料へ反映できませんでした: ${message}`);
+    } finally {
+      this.applyingToSettings = false;
+      this.postAll({ type: "applyToSettingsDone" });
+    }
+  }
+
+  /**
+   * いま持っている会話が、この作品についてのものか（設計書6.72）。
+   *
+   * **違うなら、書き出す前に止める。** 資料への反映も相談メモの保存も、
+   * 作品を「いま開いているもの」から、会話を「覚えているもの」から取る。
+   * 会話は作品を切り替えても残るので、**押した瞬間の作品へ、別の作品の
+   * 相談が流れ込む**（0.32.6のレビュー）。設定資料もメモもGitで同期される
+   * ため、混ざったものは他の端末にも広がる。
+   *
+   * **黙って止めない。** どの作品の会話なのかを名指しで伝えないと、
+   * 作者は何を直せばよいのか分からない（「最初から」を押すか、その作品を
+   * 開き直すか、のどちらかである）。
+   *
+   * どの作品にも結び付いていない会話（作品の外のファイルについての相談）は
+   * 通す。混ざる相手が無く、止めても作者にできることが無い。
+   */
+  private isHistoryAbout(work: WorkEntry, action: string): boolean {
+    if (!this.historyWorkId || this.historyWorkId === work.id) return true;
+
+    const owner = this.registry
+      .list()
+      .find((entry) => entry.id === this.historyWorkId);
+    this.postAll({
+      type: "note",
+      message:
+        `この会話は「${owner?.title ?? "別の作品"}」についてのものです。` +
+        `その作品を開いてから${action}してください` +
+        `（この作品の相談として始めるなら「最初から」を押してください）。`,
+    });
+    return false;
   }
 
   /**
@@ -1646,6 +2076,22 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       const retrieval = describeRetrieval(found);
       this.postAll({ type: "searched", summary: retrieval });
 
+      /*
+        **どの資料・どの話を見たのかを、名前で残す**（作者の指摘、
+        2026-09-07）。画面に出るのは「設定資料4件・本文5件を参照」という
+        件数だけで、**壊れた資料（同じ人物の3レコード）を読んで答えたことに、
+        誰も気づけなかった。** 画面は変えない——会話の邪魔になるうえ、
+        件数で足りることのほうが多い。追う必要が出たときのために、
+        ログには名前を置く。
+      */
+      logStep(
+        `相談: ${retrieval}（` +
+          found
+            .map((candidate) => `${candidate.item.source}・${candidate.item.label}`)
+            .join("、") +
+          "）"
+      );
+
       return {
         reference: [
           "【質問に近い場面】（出どころを添えています。" +
@@ -1692,6 +2138,17 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         userPrompt: buildSearchTermsPrompt({ question, knownTerms: names }),
         model: resolved.model,
         temperature: 0.2,
+        // **相談の本体と同じ2欄を渡す**（設計書6.77の第2段）。ここは相談1回に
+        // 付随してもう1回呼ぶ道なので、本体だけに配ると**相談1回のうち半分は
+        // 設定値のまま**という、外から見えない食い違いが残る
+        maxOutputTokens: resolveOutputTokensForSend(
+          resolved.provider.id,
+          resolved.model
+        ),
+        plannedOutputTokens: resolveOutputTokensForPlanning(
+          resolved.provider.id,
+          resolved.model
+        ),
         jsonSchema: SEARCH_TERMS_SCHEMA,
         disableThinking: true,
         meta: { feature: "search_terms", workFolder: work.folderPath },
@@ -1846,6 +2303,21 @@ interface ResolvedContext {
   reference: string[];
 }
 
+/** 確認のモーダルに添える中身の上限。長い提案でも押す前に読み切れる長さ */
+const CONFIRM_PREVIEW_CHARS = 300;
+
+/**
+ * 書き込む中身を、確認のモーダルに載る長さへ切り詰める。
+ *
+ * **切ったことを隠さない。** 切った印が無いと、作者は「これで全部だ」と
+ * 思って押す。
+ */
+function previewForConfirm(content: string): string {
+  return content.length > CONFIRM_PREVIEW_CHARS
+    ? `${content.slice(0, CONFIRM_PREVIEW_CHARS)}…`
+    : content;
+}
+
 /**
  * 押されるのを待っている提案を、記録用の短い行にする。
  *
@@ -1873,6 +2345,25 @@ function describeStagedProposals(staged: {
     );
   }
   return out;
+}
+
+/**
+ * 資料への反映の結果を、会話の場に残す一行にする（設計書6.72）。
+ *
+ * **通知は消えるが、会話は残る。** 何件積んだのかが会話から追えないと、
+ * あとで承認待ちを開いたときに「これはどの相談から来たのか」が分からない。
+ */
+function describeChatSync(result: ChatSettingsSyncResult): string {
+  if (result.unchanged) return "この相談は反映済みです。";
+  if (result.failed) return "資料への反映は行いませんでした。";
+
+  const total = result.staged + result.creations.length;
+  if (total === 0) return "相談から反映できる決定は見つかりませんでした。";
+  return (
+    `相談から人物${total}件の更新案を積みました` +
+    `（新規${result.creations.length}件・更新${result.staged}件）。` +
+    "「更新分を反映」で確認できます。"
+  );
 }
 
 /**

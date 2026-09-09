@@ -5,7 +5,11 @@ import * as path from "./paths";
 import * as vscode from "vscode";
 
 export const RECOVERY_GENERATIONS_PER_FILE = 5;
-const RECOVERY_DIRECTORY_NAME = ".novelai-recovery";
+/**
+ * 回復先の名前。**写しを作らない**ため、ここから配る
+ * （`bookStore` の未保存の控えも同じ場所へ置く）。
+ */
+export const RECOVERY_DIRECTORY_NAME = ".novelai-recovery";
 let recoverySequence = 0;
 
 export type AtomicWriteFileOptions =

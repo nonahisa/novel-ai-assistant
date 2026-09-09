@@ -18,6 +18,14 @@ import {
   describeOrganization,
   describeWorldItem,
 } from "./settingsSummary";
+import { splitPassages } from "./passages";
+
+/**
+ * 切り方は葉の部品（`passages.ts`）へ移した。**ここからも今までどおり
+ * 使える形で出し直す**——呼び出し側を一斉に書き換えると、写し間違いが
+ * 「片方だけ切り方が違う」という気づきにくい形で残る。
+ */
+export { PASSAGE_CHARS, PASSAGE_OVERLAP, splitPassages } from "./passages";
 
 /**
  * 検索の対象になる材料を、出どころ付きで集める。
@@ -60,11 +68,6 @@ export interface CorpusResult {
   conflicted: string[];
 }
 
-/** 本文を切る単位。相談パネルの抜粋窓（400字）に合わせる */
-export const PASSAGE_CHARS = 400;
-/** 隣の場面と重ねる量。場面の切れ目で文脈が消えるのを防ぐ */
-export const PASSAGE_OVERLAP = 100;
-
 export async function buildRetrievalCorpus(
   work: WorkEntry
 ): Promise<CorpusResult> {
@@ -81,48 +84,6 @@ export async function buildRetrievalCorpus(
   items.push(...(await collectSynopses(work)));
 
   return { items, conflicted: manuscript.conflicted };
-}
-
-/**
- * 本文を検索単位へ切る。
- *
- * **行の切れ目に合わせる。** 小説は1行が短いので、行の途中で切ると
- * 台詞が半分になって読めなくなる。
- */
-export function splitPassages(
-  text: string,
-  size = PASSAGE_CHARS,
-  overlap = PASSAGE_OVERLAP
-): string[] {
-  const lines = text.split(/\r?\n/);
-  const passages: string[] = [];
-  let buffer: string[] = [];
-  let length = 0;
-
-  const flush = (): void => {
-    const body = buffer.join("\n").trim();
-    if (body) passages.push(body);
-    // 重なりぶんを次へ持ち越す
-    const carry: string[] = [];
-    let carryLength = 0;
-    for (let i = buffer.length - 1; i >= 0 && carryLength < overlap; i--) {
-      carry.unshift(buffer[i]);
-      carryLength += buffer[i].length + 1;
-    }
-    buffer = carry;
-    length = carryLength;
-  };
-
-  for (const line of lines) {
-    buffer.push(line);
-    length += line.length + 1;
-    if (length >= size) flush();
-  }
-  const rest = buffer.join("\n").trim();
-  // 最後の塊は、持ち越しだけで中身が無いことがある
-  if (rest && !passages.includes(rest)) passages.push(rest);
-
-  return passages;
 }
 
 async function collectSettings(work: WorkEntry): Promise<RetrievalItem[]> {

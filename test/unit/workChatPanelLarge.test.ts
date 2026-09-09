@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { readFileSync } from "node:fs";
 import { buildWorkChatPanelHtml } from "../../src/views/workChatPanelHtml";
 
 /**
@@ -116,6 +117,127 @@ describe("2つの画面で同じ会話を見る", () => {
   });
 });
 
+/**
+ * 面の行き来（作者の指定、2026-09-03）。
+ *
+ * 詳細メニューから相談の項目を消したので、**画面の中で行き来できないと
+ * 大きく開く道が無くなる**。横の細いパネルには「メインに表示」、
+ * 大きい画面には「サブに戻す」を出す。
+ *
+ * **両方に両方を出さない。** いま見ている面へ移るボタンが並んでいると、
+ * どちらが今の面なのか分からなくなる。
+ */
+describe("メインとサブを行き来する", () => {
+  /** 入力欄の下の並び（「最初から」「送る」が入っている行）を取り出す */
+  function composerRow(html: string): string {
+    const found = html.match(
+      /<div id="composer">[\s\S]*?<div class="row">([\s\S]*?)<\/div>/
+    );
+    expect(found, "入力欄の下の並びが見つからない").toBeTruthy();
+    return found![1];
+  }
+
+  test("横のパネルには「メインに表示」だけを出す", () => {
+    expect(SIDEBAR).toContain('id="to-main"');
+    expect(SIDEBAR).toContain("メインに表示");
+    expect(SIDEBAR).not.toContain('id="to-sub"');
+    expect(SIDEBAR).not.toContain("サブに戻す");
+  });
+
+  test("大きい画面には「サブに戻す」だけを出す", () => {
+    expect(LARGE).toContain('id="to-sub"');
+    expect(LARGE).toContain("サブに戻す");
+    expect(LARGE).not.toContain('id="to-main"');
+    expect(LARGE).not.toContain("メインに表示");
+  });
+
+  test("「最初から」「送る」と同じ並びの、左側に置く", () => {
+    for (const [name, html, id] of [
+      ["横のパネル", SIDEBAR, "to-main"],
+      ["大きい画面", LARGE, "to-sub"],
+    ] as const) {
+      const row = composerRow(html);
+
+      expect(row, `${name}：同じ並びに入っていない`).toContain(`id="${id}"`);
+      expect(row.indexOf(`id="${id}"`), `${name}：「最初から」より右にある`)
+        .toBeLessThan(row.indexOf('id="clear"'));
+      expect(row.indexOf(`id="${id}"`), `${name}：「送る」より右にある`)
+        .toBeLessThan(row.indexOf('id="send"'));
+    }
+  });
+
+  test("押すと拡張機能側へ渡す（webviewからコマンドを呼ばない）", () => {
+    // 面の切り替えはコマンドの実行なので、拡張機能側の仕事である
+    expect(script(SIDEBAR)).toContain("type: 'showInMain'");
+    expect(script(LARGE)).toContain("type: 'showInSub'");
+  });
+
+  test("相手の面のボタンが無くても落ちない", () => {
+    // ツールバーと同じ理由。有無を確かめずに触ると画面が真っ白になる
+    for (const html of [SIDEBAR, LARGE]) {
+      const code = script(html);
+      expect(code).toContain("if (toMainEl)");
+      expect(code).toContain("if (toSubEl)");
+    }
+  });
+
+  test("考えている間は押せない", () => {
+    // 答えを待っている最中に面を畳むと、届いた答えの行き先が変わる
+    for (const html of [SIDEBAR, LARGE]) {
+      const code = script(html);
+      const at = code.indexOf("function setBusy");
+      const body = code.slice(at, at + 500);
+
+      expect(body).toContain("toMainEl");
+      expect(body).toContain("toSubEl");
+    }
+  });
+});
+
+/**
+ * 相談を資料へ反映する（設計書6.72）。
+ *
+ * **入口はこのボタンだけ**である（コマンドは作らない）。横のパネルで
+ * 相談を終えたときに大きく開き直させないため、両方の面に出す。
+ */
+describe("相談を資料へ反映するボタン", () => {
+  for (const [name, html] of [
+    ["大きい画面", LARGE],
+    ["横のパネル", SIDEBAR],
+  ] as const) {
+    test(`${name}に出る`, () => {
+      expect(html).toContain('id="apply-settings"');
+      expect(html).toContain("相談を資料へ反映");
+    });
+
+    test(`${name}：会話が無いうちは押せない`, () => {
+      // 1往復も無い会話を送っても、AIを呼んで空振りするだけ
+      expect(html).toContain('id="apply-settings" disabled');
+      const code = script(html);
+      expect(code).toContain("exchanges === 0");
+    });
+
+    test(`${name}：押すと拡張機能側へ渡す`, () => {
+      expect(script(html)).toContain("type: 'applyToSettings'");
+    });
+
+    test(`${name}：走っている間は二度押せない`, () => {
+      const code = script(html);
+      const at = code.indexOf("function updateApplyState");
+      const body = code.slice(at, at + 300);
+
+      expect(body).toContain("busy || applying || exchanges === 0");
+      // 終わったら押せる状態へ戻す（戻し忘れると二度と押せない）
+      expect(code).toContain("message.type === 'applyToSettingsDone'");
+    });
+
+    test(`${name}：ボタンが無くても落ちない`, () => {
+      // ツールバーと同じ理由。有無を確かめずに触ると画面が真っ白になる
+      expect(script(html)).toContain("if (applyToSettingsEl)");
+    });
+  }
+});
+
 describe("「できること」から機能を起動する", () => {
   test("押すと拡張機能側へ渡る", () => {
     expect(script(LARGE)).toContain("type: 'quickRun'");
@@ -204,4 +326,64 @@ describe("暗黙のグローバルを作らない", () => {
       );
     });
   }
+});
+
+/**
+ * 本文の右クリックからは、これまでどおり横のパネルで開く
+ * （実機確認リスト F-23）。
+ *
+ * **範囲を選んで聞くときは、本文が見えている必要がある。**
+ * 大きい画面は編集領域に開くので、選んだ本文が隠れてしまう。
+ * 入口を取り違えると、選択を使う相談ができなくなる。
+ */
+describe("本文の右クリックから開く相談", () => {
+  const manifest = JSON.parse(
+    readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+  ) as {
+    contributes: {
+      menus: Record<string, Array<{ command: string; when?: string }>>;
+      commands: Array<{ command: string; title: string }>;
+    };
+  };
+
+  test("並ぶのは横のパネルのほうだけ（実機確認リスト F-23 の代わり）", () => {
+    const commands = manifest.contributes.menus["editor/context"].map(
+      (entry) => entry.command
+    );
+
+    expect(commands).toContain("novelai.openChat");
+    expect(commands).not.toContain("novelai.openChatPanel");
+  });
+
+  test("本文（.txt / .md）のときだけ出す（実機確認リスト F-23 の代わり）", () => {
+    const entry = manifest.contributes.menus["editor/context"].find(
+      (one) => one.command === "novelai.openChat"
+    );
+
+    expect(entry?.when).toContain(".txt");
+    expect(entry?.when).toContain(".md");
+  });
+
+  test("2つの入口は、名前で見分けられる（実機確認リスト F-23 の代わり）", () => {
+    // どちらも「AIに相談する」だと、どちらが大きく開くのか分からない
+    const titles = new Map(
+      manifest.contributes.commands.map((one) => [one.command, one.title])
+    );
+
+    expect(titles.get("novelai.openChat")).toBe("AIに相談する");
+    expect(titles.get("novelai.openChatPanel")).toContain("大きく開く");
+  });
+
+  test("横のパネルは、視点を移すだけで大きい画面を作らない（実機確認リスト F-23 の代わり）", () => {
+    const source = readFileSync(
+      new URL("../../src/extension.ts", import.meta.url),
+      "utf8"
+    );
+    const at = source.indexOf('registerCommand("novelai.openChat"');
+    expect(at).toBeGreaterThan(0);
+    const body = source.slice(at, source.indexOf("}),", at));
+
+    expect(body).toContain(".focus");
+    expect(body).not.toContain("openLargePanel");
+  });
 });

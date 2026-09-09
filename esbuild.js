@@ -24,6 +24,19 @@ const BROWSER_EXTERNAL_BUILTINS = [
   "node:path",
   "node:child_process",
   "child_process",
+  /*
+    **`undici` はNodeにしか無い**（設計書6.63）。
+
+    `ai/fetchTimeouts.ts` が `canRunProcesses()` で確かめてから動的に
+    読み込むが、**esbuild は動的 import も束ねようとする**ので、ここで
+    外さないとブラウザ版のビルドが `node:stream` を解決できずに落ちる
+    （実際に落ちた。CLAUDE.md 規則7）。
+
+    外に出せば、ブラウザでは読み込みが実行時に失敗し、
+    `fetchTimeouts.ts` の try/catch が受けて「渡さない」に倒れる。
+    ブラウザの `fetch` にはそもそもこの待ち時間の制限が無いので実害は無い。
+  */
+  "undici",
 ];
 
 /**

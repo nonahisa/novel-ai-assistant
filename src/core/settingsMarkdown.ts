@@ -35,8 +35,14 @@ const SPOILER_ORDER: Record<string, number> = {
   author_only: 2,
 };
 
-/** 指定した公開範囲に含めてよいか */
-function isVisible(
+/**
+ * 指定した公開範囲に含めてよいか。
+ *
+ * 提供先別の書き出し（`settingsExportProfiles.ts`、設計書6.75）も同じ
+ * 判断を要る。**写しを作らない**——片方だけ直すと「編集部向けには出ないのに
+ * 全部入りには出る」といったずれが、画面を見比べるまで分からない。
+ */
+export function isVisibleAtSpoilerLevel(
   level: string,
   limit: SettingsMarkdownOptions["spoilerLevel"]
 ): boolean {
@@ -56,7 +62,7 @@ export function buildAbilityMarkdown(
   options: SettingsMarkdownOptions
 ): string {
   const visible = abilities.filter((ability) =>
-    isVisible(ability.spoilerLevel, options.spoilerLevel)
+    isVisibleAtSpoilerLevel(ability.spoilerLevel, options.spoilerLevel)
   );
   const term = system.abilityTerm || "能力";
   const lines: string[] = [`# ${options.workTitle} ${term}一覧`, ""];
@@ -133,8 +139,10 @@ function describeAbility(ability: Ability, term: string): string[] {
  * 掘り下げは本文からの解釈であり、根拠の逐語照合ができない。
  * 事実と同じ体裁で並べると、作者が読み返したときに
  * どこまでが本文に書いてあることなのか分からなくなる。
+ *
+ * 提供先別の書き出し（6.75）も同じ体裁で並べるので公開している。
  */
-function aiNoteLines(notes: AiNote[]): string[] {
+export function aiNoteLines(notes: AiNote[]): string[] {
   if (notes.length === 0) return [];
 
   const lines: string[] = ["", "**AIによる掘り下げ**（作者が承認したもの。本文からの解釈を含みます）", ""];
@@ -161,7 +169,7 @@ export function buildOrganizationMarkdown(
   options: SettingsMarkdownOptions
 ): string {
   const visible = organizations.filter((organization) =>
-    isVisible(organization.spoilerLevel, options.spoilerLevel)
+    isVisibleAtSpoilerLevel(organization.spoilerLevel, options.spoilerLevel)
   );
   const lines: string[] = [`# ${options.workTitle} 組織一覧`, ""];
 
@@ -253,7 +261,7 @@ export function buildWorldMarkdown(
   options: SettingsMarkdownOptions
 ): string {
   const visible = items.filter((item) =>
-    isVisible(item.spoilerLevel, options.spoilerLevel)
+    isVisibleAtSpoilerLevel(item.spoilerLevel, options.spoilerLevel)
   );
   const lines: string[] = [`# ${options.workTitle} 世界観`, ""];
 
@@ -303,7 +311,7 @@ export function buildLocationMarkdown(
   options: SettingsMarkdownOptions
 ): string {
   const visible = locations.filter((location) =>
-    isVisible(location.spoilerLevel, options.spoilerLevel)
+    isVisibleAtSpoilerLevel(location.spoilerLevel, options.spoilerLevel)
   );
   const lines: string[] = [`# ${options.workTitle} 場所一覧`, ""];
 
@@ -357,7 +365,7 @@ export function buildCharacterMarkdown(
   options: SettingsMarkdownOptions
 ): string {
   const visible = characters.filter((character) =>
-    isVisible(character.spoilerLevel, options.spoilerLevel)
+    isVisibleAtSpoilerLevel(character.spoilerLevel, options.spoilerLevel)
   );
   const named = visible.filter((character) => !character.isMob);
   const mobs = visible.filter((character) => character.isMob);
@@ -561,9 +569,17 @@ export function describeConflictValues(conflict: RecordConflict): string {
  * あり、確定したかどうかが違うだけなので、読み方まで変えない。
  *
  *   黒髪（それ以前）→ 銀髪（第7話）
+ *
+ * **同じ話の同じ値は1件にまとめて見せる**（作者の指摘、2026-09-06）。
+ * 第1話の変化に、紹介・役割・性格が2回ずつ並んでいた。畳むのは**読むとき
+ * だけ**で、台帳の `changes` からは消さない（追記だけの原則。抽出のたびに
+ * 同じ値が積まれることはあっても、記録そのものは作者の資産である）。
+ *
+ * **同じ値でも話が違えば残す。** 「黒髪→銀髪→黒髪」は、戻ったという変化
+ * であり、畳むと物語の動きが消える。
  */
 export function describeChangeValues(changes: RecordChange[]): string {
-  return sortChanges(changes)
+  return foldSameChanges(sortChanges(changes))
     .map((change) => {
       const chapters =
         change.chapters.length > 0
@@ -573,6 +589,28 @@ export function describeChangeValues(changes: RecordChange[]): string {
     })
     // 全角の閉じ括弧が右に余白を持つので、矢印の前に空白は入れない
     .join("→ ");
+}
+
+/**
+ * 同じ話・同じ値の変化を1件にまとめる（表示のためだけの処理）。
+ *
+ * **並び順は変えない。** 畳むのは隣り合ったものだけでなく、同じ組み合わせ
+ * が離れて記録されていることもあるので、見た組み合わせを覚えておいて
+ * 2件目以降を落とす。
+ */
+function foldSameChanges(changes: RecordChange[]): RecordChange[] {
+  const seen = new Set<string>();
+  return changes.filter((change) => {
+    // 区切りは、値に現れない文字にする（「村の少女 1」という値と、
+    // 「村の少女」の第1話とを取り違えないため）。**NULはエスケープで書く**
+    // ——生の制御文字を置くと、gitやgrepがこのファイルをバイナリとして扱う
+    const key = `${change.value}\u0000${[...change.chapters]
+      .sort((left, right) => left - right)
+      .join(",")}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /** 並べ替え用。話数が無いものは、気づく前からあった値なので先に置く */
@@ -609,7 +647,8 @@ function formatRange(start: number, end: number): string {
   return `${start}〜${end}`;
 }
 
-function formatPeriod(
+/** 呼称が使われていた期間。提供先別の書き出し（6.75）も同じ書き方をする */
+export function formatPeriod(
   firstChapter: number | null,
   lastChapter: number | null
 ): string {

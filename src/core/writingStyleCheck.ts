@@ -177,6 +177,9 @@ function findMissingSpaceAfterMark(
   lineNumber: number
 ): AcceptedTypoIssue[] {
   const findings: AcceptedTypoIssue[] = [];
+  // **閉じ括弧類・句読点・リーダー類が続くときはアキ不要**（日本語組版の
+  // 作法どおり。「！》」に「1マス空けて」と出た——作者の指摘、2026-09-04。
+  // 漏れていたのは 》 など「」』）以外の閉じ）
   const noSpaceNeededAfter = new Set([
     "　",
     " ",
@@ -184,10 +187,30 @@ function findMissingSpaceAfterMark(
     "』",
     "）",
     ")",
+    "》",
+    "〉",
+    "】",
+    "〕",
+    "｝",
+    "}",
+    "］",
+    "]",
+    "”",
+    "’",
     "！",
     "？",
     "!",
     "?",
+    "、",
+    "。",
+    "，",
+    "．",
+    ",",
+    ".",
+    "…",
+    "‥",
+    "―",
+    "—",
   ]);
   for (let i = 0; i < line.length; i++) {
     const mark = line[i];

@@ -13,7 +13,17 @@ import { SUMMARY_MAX_CHARS } from "../core/summaryLimit";
  * プロンプトを変更したら version を上げること。
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
-export const CHARACTER_EXTRACT_VERSION = "5.1";
+/**
+ * 変更履歴（要点だけ。詳しくはプロンプト設計書 P-04a）
+ * - 5.2: 体を共有していても人格が別なら別人、と抽出ルールへ明記した。
+ *   憑依・転生の相手を aliases へ混ぜていたため（実機確認A-18）
+ */
+// 5.3: 新しく見つけた人物の別の呼び方を aliases に入れる規則を足した。
+//      それまでは「既知の人物と照合して同一なら aliases に」としか無く、
+//      まっさらからの抽出（既知の名前が無い）では 46人全員の aliases が空だった
+//      （実機 2026-09-08。qwen3:8b・gemma4:e4b とも、required や説明文では直らず、
+//      規則の不在が原因）
+export const CHARACTER_EXTRACT_VERSION = "5.3";
 
 export const BASE_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 
@@ -116,6 +126,19 @@ ${knownWorld}
 - 同一人物が別の呼称で登場する場合（本名／通称／あだ名／役職）、既知の登場人物と
   照合し、同一と判断できる場合は既知の名前を name とし、別呼称を aliases に入れること。
   判断できない場合は新規人物として扱うこと。
+- **新しく見つけた人物でも、この本文の中で複数の呼び方があれば、name にいちばん正式な
+  呼び方（フルネーム）を置き、それ以外の呼び方（姓だけ・名だけ・敬称つき・あだ名・役職）を
+  すべて aliases に入れること。** 既知の人物でなくても同じである。
+  例：本文に「三門太志」「太志」「三門くん」が出るなら、name: "三門太志"、
+  aliases: ["太志", "三門くん"]。**aliases を空にしてよいのは、呼び方が本当に1つしか無いときだけ**である。
+  同じく、その人物が相手を呼ぶ言い方は addressTerms に入れること（【呼称の抽出ルール】）。
+- **体を共有していても人格が別なら、別の人物として扱うこと。**
+  憑依・入れ替わり・転生・成り代わり・変装・偽名がこれに当たる。
+  **相手の名前・呼び名を aliases に入れてはならない。** それぞれを別のレコードにし、
+  2人の結びつきは relations に書くこと（【関係の抽出ルール】4番）。
+  例：太志が文佳の身体に憑依している場合、
+  「太志」と「文佳」は別のレコードであり、文佳の aliases に「太志」を入れてはならない。
+  relations に name: "文佳", relation: "憑依している" と書くのが正しい。
 - summary には、その人物が何者かが一目で分かる紹介を**${SUMMARY_MAX_CHARS}字以内**で書くこと。
   一覧で名前の下に並べる短い説明なので、役割と立場が分かれば十分である。
   例：「冒険者ギルドの生活保護課ケースワーカー。転移者で制度の考案者。」
@@ -301,14 +324,44 @@ ${knownWorld}
 }
 
 /**
+ * 配列の上限（2026-09-08に足した。実機確認A-18）。
+ *
+ * **上限が無いと、モデルは同じ語を書き続けて止まらない。** 実測では
+ * 18話のうち3話が、3回試して3回とも約304秒で落ちた。中を流して見ると
+ * `{"by":"僕","term":"文佳ちゃん"}` を延々と繰り返していた。
+ * Ollamaへは `num_predict` を送らない方針（設計書6.58.2）なので、
+ * 止めるものが要求のタイムアウト（既定180秒）しか無い。
+ * 原稿は壊れないが、待たされたうえにそのチャンクを取りこぼす。
+ *
+ * **数は「実データで出うる数より少し多い」ところに置く。** 1チャンクは
+ * 数千字で、そこに現れる1人ぶんの呼び方が20を超えることはまず無い。
+ * 足りなくても次のチャンクで拾い直せるが、上限が無いと止まらない。
+ */
+const MAX_ALIASES = 20;
+const MAX_ADDRESS_TERMS = 20;
+/** 関係だけ多めなのは、1人が場面ごとに何人とも結び付くため */
+const MAX_RELATIONS = 30;
+/** 能力の使い手。別名と同じ数でよい */
+const MAX_USER_NAMES = 20;
+const MAX_RULES = 20;
+/** 1チャンクから取れる、種別ごとのレコードの数 */
+const MAX_ENTRIES = 40;
+
+/**
  * Ollamaの構造化出力に渡すJSONスキーマ。
  * これを指定すると形式が強制され、パース失敗がほぼ無くなる。
+ *
+ * ## 変更履歴（スキーマだけ。プロンプト文は `CHARACTER_EXTRACT_VERSION`）
+ * - 2026-09-08: すべての配列に `maxItems` を入れた（繰り返しで止まらなくなるため）。
+ *   **版は上げない**——プロンプトの文言は変わっておらず、上げるとキャッシュが
+ *   全部無効になって作品全体を再処理させることになる
  */
 export const CHARACTER_EXTRACT_SCHEMA = {
   type: "object",
   properties: {
     characters: {
       type: "array",
+      maxItems: MAX_ENTRIES,
       items: {
         type: "object",
         properties: {
@@ -317,7 +370,11 @@ export const CHARACTER_EXTRACT_SCHEMA = {
             type: "string",
             enum: ["person", "group", "location", "unknown"],
           },
-          aliases: { type: "array", items: { type: "string" } },
+          aliases: {
+            type: "array",
+            items: { type: "string" },
+            maxItems: MAX_ALIASES,
+          },
           isMob: { type: "boolean" },
           reading: { type: ["string", "null"] },
           summary: { type: ["string", "null"], maxLength: SUMMARY_MAX_CHARS },
@@ -330,6 +387,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           defaultSecondPerson: { type: ["string", "null"] },
           addressTerms: {
             type: "array",
+            maxItems: MAX_ADDRESS_TERMS,
             items: {
               type: "object",
               properties: {
@@ -344,6 +402,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           },
           relations: {
             type: "array",
+            maxItems: MAX_RELATIONS,
             items: {
               type: "object",
               properties: {
@@ -380,18 +439,27 @@ export const CHARACTER_EXTRACT_SCHEMA = {
     },
     abilities: {
       type: "array",
+      maxItems: MAX_ENTRIES,
       items: {
         type: "object",
         properties: {
           name: { type: "string" },
-          aliases: { type: "array", items: { type: "string" } },
+          aliases: {
+            type: "array",
+            items: { type: "string" },
+            maxItems: MAX_ALIASES,
+          },
           reading: { type: ["string", "null"] },
           summary: { type: ["string", "null"], maxLength: SUMMARY_MAX_CHARS },
           category: { type: ["string", "null"] },
           description: { type: ["string", "null"] },
           cost: { type: ["string", "null"] },
           limitation: { type: ["string", "null"] },
-          userNames: { type: "array", items: { type: "string" } },
+          userNames: {
+            type: "array",
+            items: { type: "string" },
+            maxItems: MAX_USER_NAMES,
+          },
           evidence: { type: "string", minLength: 1 },
         },
         required: ["name", "summary", "description", "evidence"],
@@ -399,11 +467,16 @@ export const CHARACTER_EXTRACT_SCHEMA = {
     },
     organizations: {
       type: "array",
+      maxItems: MAX_ENTRIES,
       items: {
         type: "object",
         properties: {
           name: { type: "string" },
-          aliases: { type: "array", items: { type: "string" } },
+          aliases: {
+            type: "array",
+            items: { type: "string" },
+            maxItems: MAX_ALIASES,
+          },
           reading: { type: ["string", "null"] },
           summary: { type: ["string", "null"], maxLength: SUMMARY_MAX_CHARS },
           parent: { type: ["string", "null"] },
@@ -416,11 +489,16 @@ export const CHARACTER_EXTRACT_SCHEMA = {
     },
     locations: {
       type: "array",
+      maxItems: MAX_ENTRIES,
       items: {
         type: "object",
         properties: {
           name: { type: "string" },
-          aliases: { type: "array", items: { type: "string" } },
+          aliases: {
+            type: "array",
+            items: { type: "string" },
+            maxItems: MAX_ALIASES,
+          },
           reading: { type: ["string", "null"] },
           summary: { type: ["string", "null"], maxLength: SUMMARY_MAX_CHARS },
           region: { type: ["string", "null"] },
@@ -432,6 +510,7 @@ export const CHARACTER_EXTRACT_SCHEMA = {
     },
     worldview: {
       type: "array",
+      maxItems: MAX_ENTRIES,
       items: {
         type: "object",
         properties: {
@@ -461,7 +540,11 @@ export const CHARACTER_EXTRACT_SCHEMA = {
         // required に入れるのは、省略されると総称が永久に埋まらないため。
         abilityTerm: { type: ["string", "null"] },
         description: { type: ["string", "null"] },
-        rules: { type: "array", items: { type: "string" } },
+        rules: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: MAX_RULES,
+        },
       },
       required: ["abilityTerm"],
     },

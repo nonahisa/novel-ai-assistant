@@ -9,7 +9,51 @@ export const workspace = {
   getConfiguration: () => ({
     get: <T>(_key: string, defaultValue: T): T => defaultValue,
   }),
+  /**
+   * 文書への当て込み。**既定は「入った」**——入らなかったときの道を
+   * 見るテストは false を返す形へ差し替える。
+   */
+  applyEdit: (async (_edit: unknown) => true) as (
+    edit: unknown
+  ) => Promise<boolean>,
 };
+
+/** 文書の改行コード（本物と同じ値。1がLF、2がCRLF） */
+export enum EndOfLine {
+  LF = 1,
+  CRLF = 2,
+}
+
+/**
+ * 文書の書き換えのまとめ。**何を入れようとしたかを覗ける形**にしてある
+ * ——改行コードを保ったまま当てているかは、入れる文字列を見ないと分からない。
+ */
+export class WorkspaceEdit {
+  readonly replacements: Array<{
+    uri: unknown;
+    range: unknown;
+    text: string;
+  }> = [];
+
+  replace(uri: unknown, range: unknown, text: string): void {
+    this.replacements.push({ uri, range, text });
+  }
+}
+
+/** 画面に出た知らせを覗くための形。テスト側で差し替えて使う */
+export type StubMessage = (
+  message: string,
+  ...items: unknown[]
+) => Promise<string | undefined>;
+
+/**
+ * ステータスバーに出た「その場限りの完了」の記録（`views/notify.ts`）。
+ *
+ * **本物は数秒で消えるので、テストからは覗けない。** 出た文言と
+ * 消えるまでの長さをここへ積んでおき、テスト側が読む。
+ * 溜まったままだと前のテストの分を拾うので、各テストで空にする。
+ */
+export const statusBarMessages: Array<{ text: string; timeout?: number }> = [];
 
 export const window = {
   // 診断ログ。テストでは中身を読まないので、書き込めるだけでよい
@@ -18,6 +62,44 @@ export const window = {
     show() {},
     dispose() {},
   }),
+  /** 消える知らせ。本物と同じく、消し方（Disposable）を返す */
+  setStatusBarMessage: (
+    text: string,
+    timeout?: number
+  ): { dispose(): void } => {
+    statusBarMessages.push({ text, timeout });
+    return { dispose() {} };
+  },
+  /**
+   * 通知の3つ。**書き換えられる形で置く。**
+   *
+   * 既定は「出しただけで、作者は何も押さなかった」——完了通知の文言を
+   * 見張るテストは、これを差し替えて中身を受け取る。
+   */
+  showInformationMessage: (async () => undefined) as StubMessage,
+  showWarningMessage: (async () => undefined) as StubMessage,
+  showErrorMessage: (async () => undefined) as StubMessage,
+  /**
+   * 入力欄（`views/dialogs.ts` の `askText` が通す唯一の窓口）。
+   *
+   * 既定は「入力欄の初期値をそのまま確定した」体にする——`askText` は
+   * 呼び出し側が渡した `value` をそのまま返せば、既定のファイル名で
+   * 進むテストが書ける。取りやめを試すテストは `undefined` へ差し替える。
+   */
+  showInputBox: (async (options?: { value?: string }) =>
+    options?.value) as (options?: {
+    value?: string;
+    [key: string]: unknown;
+  }) => Promise<string | undefined>,
+  /**
+   * WebViewパネル。**既定は作らずに断る。**
+   *
+   * パネルを開くテストは、受け取った postMessage を覗ける作り物へ
+   * 差し替える（差し替え忘れに気づけるよう、既定は例外にしてある）。
+   */
+  createWebviewPanel: ((..._args: unknown[]): unknown => {
+    throw new Error("createWebviewPanel はテスト側で差し替えてください。");
+  }) as (...args: unknown[]) => unknown,
   // 進捗の中止ボタン。テストでは押さないので、作られるだけでよい
   createStatusBarItem: () => ({
     text: "",
@@ -32,8 +114,44 @@ export const window = {
   onDidChangeActiveTextEditor: (_listener: unknown) => ({
     dispose() {},
   }),
+  /**
+   * 該当箇所に掛ける色。**作られるだけでよい**——本文の見た目は実機でしか
+   * 確かめられないので、ここでは相談パネルなどが組み立てられれば足りる。
+   */
+  createTextEditorDecorationType: (_options?: unknown) => ({
+    key: "stub-decoration",
+    dispose() {},
+  }),
+  /** いま開いている本文。**既定は「開いていない」** */
+  activeTextEditor: undefined as unknown,
 };
 export const commands = {};
+
+/**
+ * 外の世界へ出る2つの道（クリップボードと、ブラウザで開くこと）。
+ *
+ * 投稿キット（設計書6.68）が使う外向きの道はこの2つだけで、**サイトへ
+ * HTTPを発する道は本物にも無い**。テストからは「何をコピーしたか」
+ * 「どこを開いたか」を覗く。
+ */
+export const env = {
+  clipboard: {
+    /** 直近にコピーした文字列。テストはここを読む */
+    text: "",
+    async writeText(value: string): Promise<void> {
+      env.clipboard.text = value;
+    },
+    async readText(): Promise<string> {
+      return env.clipboard.text;
+    },
+  },
+  /** 開いたURL。**開いただけ**で、中身は読まない（本物も同じ） */
+  opened: [] as string[],
+  openExternal: async (uri: { toString(): string }): Promise<boolean> => {
+    env.opened.push(uri.toString());
+    return true;
+  },
+};
 
 export const authentication = {
   getSession: async (
@@ -51,6 +169,13 @@ export enum ProgressLocation {
 export enum StatusBarAlignment {
   Left = 1,
   Right = 2,
+}
+
+/** パネルを開く位置。値は本物のVS Codeに合わせる */
+export enum ViewColumn {
+  Active = -1,
+  Beside = -2,
+  One = 1,
 }
 
 /** 設定の書き込み先。値は本物のVS Codeに合わせる */
@@ -152,12 +277,42 @@ class StubUri {
     readonly authority: string,
     readonly path: string,
     readonly fsPath: string,
-    readonly text: string
+    readonly text: string,
+    /** 問い合わせ（`?` の後ろ）。**本物と同じく復号した形で持つ** */
+    readonly query: string = ""
   ) {}
 
   toString(): string {
     return this.text;
   }
+}
+
+/**
+ * 問い合わせ部分を復号する（本物の `vscode.Uri.parse` の再現）。
+ *
+ * **本物は `?` の後ろを percent-decode して持つ。** そのため
+ * `text=%23創作` のように包んだ「#」が生の `#` へ戻り、そこから先が
+ * 断片（fragment）として切り離される——`encodeURIComponent` で守った
+ * つもりの投稿文が、ハッシュタグの手前で切れる（設計書6.79.8）。
+ *
+ * ここを素通しにしていたころは、`openExternal` へ Uri を渡す不具合が
+ * テストでは一度も再現しなかった。**スタブが本物より親切だと、実機でしか
+ * 出ない壊れ方を作ってしまう。**
+ */
+function decodeUriQuery(value: string): { query: string; text: string } {
+  const start = value.indexOf("?");
+  if (start < 0) return { query: "", text: value };
+  const end = value.indexOf("#", start);
+  const raw = end < 0 ? value.slice(start + 1) : value.slice(start + 1, end);
+  let query: string;
+  try {
+    query = decodeURIComponent(raw);
+  } catch {
+    // 壊れた％列は本物も直さない（読めないものを推測で埋めない）
+    query = raw;
+  }
+  const tail = end < 0 ? "" : value.slice(end);
+  return { query, text: `${value.slice(0, start + 1)}${query}${tail}` };
 }
 
 export const Uri = {
@@ -179,15 +334,32 @@ export const Uri = {
    * **本物に近づけてある。** 以前は道の部分に文字列まるごとを入れていたが、
    * それではブラウザ版のURI（`vscode-vfs://github/...`）を扱う処理を
    * 確かめられない（`authority` が undefined になって黙って壊れる）。
+   *
+   * **問い合わせ（`?` の後ろ）も本物と同じく復号する**（`decodeUriQuery`）。
    */
   parse: (value: string) => {
     const match = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^/?#]*)([^?#]*)/.exec(value);
+    const decoded = decodeUriQuery(value);
     if (!match) {
       const scheme = value.split(":")[0] ?? "";
-      return new StubUri(scheme, "", value, value, value);
+      return new StubUri(
+        scheme,
+        "",
+        value,
+        value,
+        decoded.text,
+        decoded.query
+      );
     }
     const body = match[3] || "/";
-    return new StubUri(match[1], match[2], body, body, value);
+    return new StubUri(
+      match[1],
+      match[2],
+      body,
+      body,
+      decoded.text,
+      decoded.query
+    );
   },
 };
 

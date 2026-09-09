@@ -16,7 +16,10 @@
 // 1.3: あとで判明する事実と両立しない記述を、逆向きに探す（6.10.4）
 // 1.4: 世界観に字数の上限を置いた（6.27.6の穴2）。上限内なら送る内容は
 //      これまでと同一だが、超える作品では中身が変わるので版を分ける
-export const CONTRADICTION_CHECK_VERSION = "1.4";
+// 1.5: 過去の関連場面の抜粋を渡せるようにした（6.74）。**渡さないときの
+//      文面は1文字も変えていない**が、渡した回の答えは変わるので版を上げる
+//      （版はキャッシュの鍵に入っており、この版で一度だけ全件が処理し直しになる）
+export const CONTRADICTION_CHECK_VERSION = "1.5";
 
 export const CONTRADICTION_CHECK_SYSTEM_PROMPT = `あなたは日本語の小説の設定矛盾だけを検出する編集アシスタントです。
 
@@ -86,6 +89,47 @@ export interface ContradictionCheckInput {
    * **両立するか**」を見る。
    */
   futureFacts?: string;
+  /**
+   * **過去の関連場面の抜粋**（設計書6.74）。空なら欄ごと出さない。
+   *
+   * 中身は**前の話の本文の写し**であって、設定資料ではない。
+   * 出典（第N話）が添えてある（`core/pastSceneSelect.ts`）。
+   */
+  pastScenes?: string;
+}
+
+/**
+ * 過去の場面の抜粋（設計書6.74）。
+ *
+ * **設定資料と混ぜて見せない。** 設定資料はAIが本文から作ったもので、
+ * 古いことも誤っていることもある。抜粋は本文そのものなので、
+ * **食い違ったときに「どちらが新しいか」で決めさせてはいけない。**
+ * 決めるのは作者であり、AIの仕事は並べて見せることである。
+ *
+ * **引用の使い分けを明示する。** `excerpt` はコード側で対象本文に
+ * 実在するかを照合しており（`contradictionValidation.ts`）、抜粋から
+ * 写した文を入れると**その指摘は丸ごと捨てられる。**
+ */
+function pastSceneSection(input: ContradictionCheckInput): string {
+  const scenes = input.pastScenes?.trim();
+  if (!scenes) return "";
+
+  return `
+【過去の場面の抜粋】（${input.chapterLabel} より前の話の本文です）
+${scenes}
+
+【抜粋の扱い】
+- 抜粋は**過去の話の本文そのものの写し**です（設定資料ではありません）。
+- **設定資料と抜粋が食い違う場合、話数の順で新しいほうが正とは限りません。**
+  どちらが正しいかを決めず、矛盾として挙げてください。
+- 抜粋を根拠に挙げるときは、settingSays に出典（第N話）を書き、
+  抜粋からの**逐語引用**を添えてください。
+- 下の【判断の注意】でいう「示されている設定」には、**この抜粋も含みます。**
+  抜粋に書かれている事柄との食い違いは、指摘してかまいません。
+- **excerpt には、対象本文（${input.chapterLabel}）から写した文だけ**を
+  入れてください。抜粋から写した文を excerpt に入れると、その指摘は
+  対象本文に見当たらないものとして捨てられます。
+`;
 }
 
 /**
@@ -144,7 +188,7 @@ ${orNone(input.worldviewSummary)}
 
 【これまでの経緯】（時系列の整合性確認用）
 ${orNone(input.previousSynopses)}
-${futureSection(input)}
+${futureSection(input)}${pastSceneSection(input)}
 
 【検証項目】
 ${items}

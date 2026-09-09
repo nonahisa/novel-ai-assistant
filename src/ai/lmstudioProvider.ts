@@ -11,8 +11,14 @@ import {
 import { fetchJson } from "./httpClient";
 import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
+import { withAiWork } from "../core/aiActivity";
 import { logLine } from "../core/logger";
-import { resolveTimeoutMs, tunedContextWindow } from "../core/modelTuning";
+import {
+  resolveContextWindow,
+  resolveTimeoutMs,
+  type ContextWindowSource,
+} from "../core/modelTuning";
+import { customEndpointNotice } from "../core/endpointNotice";
 import { parseParameterSize } from "./sakuraProvider";
 import {
   asContextOverflowError,
@@ -68,6 +74,25 @@ import {
  */
 export const DEFAULT_ENDPOINT = "http://localhost:1234/v1";
 const LABEL = "LM Studio";
+
+/**
+ * コンテキスト長の決め方（設計書6.77の第2段）。
+ *
+ * **AIチューニングの台帳を先に見る**（設計書6.49）。測って分かった値の
+ * ほうが、手で書いた当て推量より確かである。
+ *
+ * **下限を置かない**（`minimum: 0`）。この設定は「LM Studioが読み込んだ
+ * 長さを読み取れない古い版のための予備」なので、作者が2,048と書いたなら
+ * そのとおり読み込んだということである。ChatGPT・さくらのように
+ * 1,024未満を捨てると、小さく読み込んだモデルで黙って切り捨てが起きる。
+ *
+ * export しているのは、3社ぶんの読み順を試験が突き合わせるため。
+ */
+export const LMSTUDIO_CONTEXT_WINDOW: ContextWindowSource = {
+  settingKey: "lmstudio.contextWindow",
+  fallback: 8192,
+  minimum: 0,
+};
 
 /**
  * LM Studioの接続先。末尾の `/` は落とす。
@@ -169,22 +194,14 @@ export class LmStudioProvider implements AIProvider {
   }
 
   /**
-   * 作者が申告したコンテキスト長。
+   * 作者が申告したコンテキスト長。台帳（AIチューニング）→ 設定 → 既定 の順。
    *
-   * **AIチューニングの台帳を先に見る**（設計書6.49）。測って分かった値の
-   * ほうが、手で書いた当て推量より確かである。
-   *
-   * **ただし「いま読み込まれている長さ」には勝たせない**（呼び出し側を参照）。
+   * **「いま読み込まれている長さ」には勝たせない**（呼び出し側を参照）。
    * LM Studioは読み込むときに長さを指定するので、8192で読み込んだモデルへ
    * 「測ったら131072だった」を当てると、そのぶん黙って切り捨てられる。
    */
   private contextWindowFor(model: string): number {
-    const tuned = tunedContextWindow(this.id, model);
-    if (tuned !== undefined) return tuned;
-    const configured = vscode.workspace
-      .getConfiguration("novelai")
-      .get<number>("lmstudio.contextWindow", 8192);
-    return Number.isFinite(configured) && configured > 0 ? configured : 8192;
+    return resolveContextWindow(this.id, model, LMSTUDIO_CONTEXT_WINDOW);
   }
 
   /**
@@ -231,7 +248,9 @@ export class LmStudioProvider implements AIProvider {
       }
       return {
         ok: true,
-        message: `LM Studioに接続しました（モデル ${models.length} 件）`,
+        message:
+          `LM Studioに接続しました（モデル ${models.length} 件）` +
+          customEndpointNotice(lmstudioEndpoint(), DEFAULT_ENDPOINT),
         modelCount: models.length,
       };
     } catch (error) {
@@ -410,7 +429,23 @@ export class LmStudioProvider implements AIProvider {
     return info;
   }
 
+  /**
+   * 独り言（`core/chatter.ts`）が「いま話しかけてよいか」を見るので、
+   * 依頼のあいだは仕事中の印を立てる（`ollamaProvider.ts` と同じ形）。
+   *
+   * **手元のAIは、どれも立てる。** 以前はOllamaにだけ入れており、
+   * 「独り言は無料の手元AIでしか動かないので他は要らない」と書いてあったが、
+   * **LM Studioはまさにその手元の無料AIである**（0.18.0で足したときに
+   * 見落とした）。印が無いと、抽出の最中に独り言が割り込み、30秒の
+   * 締め切りで必ず時間切れになる。
+   */
   async generate(params: GenerateParams): Promise<GenerateResult> {
+    return withAiWork(() => this.generateInner(params));
+  }
+
+  private async generateInner(
+    params: GenerateParams
+  ): Promise<GenerateResult> {
     const started = Date.now();
 
     const body: Record<string, unknown> = {
@@ -420,7 +455,9 @@ export class LmStudioProvider implements AIProvider {
         { role: "user", content: params.userPrompt },
       ],
       temperature: params.temperature,
-      max_tokens: resolveMaxOutputTokens(),
+      // **呼び出し側の見込みを尊重する**（設計書6.77の第2段）。
+      // 渡されない呼び出しはこれまでどおり設定値で送る
+      max_tokens: params.maxOutputTokens ?? resolveMaxOutputTokens(),
       stream: false,
     };
 

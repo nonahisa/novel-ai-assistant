@@ -1020,8 +1020,30 @@ describe("画面の約束", () => {
   /** 自分の書き換えが返ってきたら触らない（カーソルと取り消し履歴を守る） */
   it("自分が送った本文が返ってきただけなら、組み直さない", () => {
     const take = code.slice(code.indexOf("function composeTakeIncoming("));
-    expect(take.slice(0, 500)).toContain("if (text === lastSent) return;");
-    expect(take.slice(0, 500)).toContain("if (composing)");
+    // 最後の1件ではなく、最近送ったもの全部を返事として扱う（打つ面と同じ）。
+    // **composing の判定より前**——変換中に溜めると、確定のあとに古い本文で
+    // 組み直して確定した語が消える（作者の報告、2026-09-06）
+    const head = take.slice(0, 600);
+    expect(head).toContain("if (isOwnEcho(text)) return;");
+    expect(head).toContain("if (composing)");
+    expect(head.indexOf("isOwnEcho(text)")).toBeLessThan(head.indexOf("if (composing)"));
+  });
+
+  /**
+   * 変換を確定した直後に、変換中に溜めた**古い本文**で面を組み直さない
+   * （実機確認 2026-09-08、0.43.1）。作者の報告「変換を確定するとカーソルが
+   * 語の途中に残る」——溜めた本文は確定した語を含まないので、それで
+   * 組み直すと語が一度消え、カーソルは古い本文の中へ落ちる。
+   * 打つ面の flushPending と同じく、打った内容を優先する。
+   */
+  it("確定の直後に、変換中に溜めた古い本文で組み直さない", () => {
+    const code = html.slice(html.indexOf("<script"));
+    const start = code.indexOf('compose.addEventListener("compositionend"');
+    const block = code.slice(start, code.indexOf("composeScheduleHighlight();", start));
+    expect(start).toBeGreaterThan(0);
+    expect(block).toContain("composeSend();");
+    expect(block).not.toContain("composeTakeIncoming(waiting)");
+    expect(block).toContain("いま打った本文を優先しました");
   });
 
   it("変換中は本文を送らない", () => {
@@ -1364,9 +1386,11 @@ describe("シーンメモの付箋", () => {
     }
   });
 
-  it("行頭以外の // は付箋にしない", () => {
+  it("行の途中の // は付箋にしない。字下げした // は付箋にする", () => {
     expect(api.memoIsLine("　彼は https://example.com を開いた。")).toBe(false);
-    expect(api.memoIsLine("　// 字下げのある行")).toBe(false);
+    // 字下げしていてもメモ（作者の裁定、2026-09-08。判定は core の
+    // MEMO_LINE_PATTERN 1本で、画面もそれをそのまま使う）
+    expect(api.memoIsLine("　// 字下げのある行")).toBe(true);
   });
 
   /**
@@ -1386,5 +1410,93 @@ describe("シーンメモの付箋", () => {
     // 打たれたら呼ばれる
     const input = code.slice(code.indexOf('compose.addEventListener("input"'));
     expect(input.slice(0, 500)).toContain("composeRepaintMemos();");
+  });
+});
+
+/**
+ * 脚本の行の組み方（設計書6.70）。
+ *
+ * **判定は core/scriptLines.ts の1か所**にあり、画面側へはその規則が
+ * そのまま埋め込まれる（写しを置くと、画面と紙で組み方が食い違う）。
+ * 印は class だけで、DOMの形は変えない——組んで書く面でノードを増やすと、
+ * 直列化（DOM→記法）が1文字ずれて**本文が壊れる**。
+ */
+describe("脚本の行（組んで書く面）", () => {
+  /** 脚本の作品として組んだ画面 */
+  const scriptHtml = buildManuscriptEditorHtml(
+    "NONCE123",
+    "vscode-resource:",
+    "script"
+  );
+  const scriptCode = scriptHtml.slice(scriptHtml.indexOf("<script"));
+  const scriptSource = scriptCode.slice(
+    scriptCode.indexOf("/* compose:start */"),
+    scriptCode.indexOf("/* compose:end */")
+  );
+  const scriptApi = new Function(
+    scriptSource +
+      "\nreturn { composeBuildLine, composeBuildFragment," +
+      " composeDomToNotation, composeLineClass };"
+  )() as {
+    composeBuildLine(line: string, doc: unknown, mode?: Mode): FakeNode;
+    composeBuildFragment(value: string, doc: unknown, mode?: Mode): FakeNode;
+    composeDomToNotation(root: FakeNode): string;
+    composeLineClass(line: string): string;
+  };
+
+  function classOf(line: string): string {
+    const node = scriptApi.composeBuildLine(line, fakeDoc);
+    return (node.attributes ?? {}).class ?? "";
+  }
+
+  it("柱・ト書き・セリフに、それぞれの印が付く", () => {
+    expect(classOf("○駅前・夜")).toBe("line script-hashira");
+    expect(classOf("　太郎、ドアを開ける。")).toBe("line script-togaki");
+    expect(classOf("太郎「行こう」")).toBe("line script-serifu");
+  });
+
+  it("どれにも当たらない行には、印を付けない", () => {
+    expect(classOf("太郎は駅へ向かった。")).toBe("line");
+    expect(classOf("")).toBe("line");
+  });
+
+  /** 付箋（シーンメモ）と重なっても、両方の印が残る */
+  it("付箋の印と一緒に付く", () => {
+    expect(classOf("//「銀の時計」を出す")).toBe("line memo script-serifu");
+  });
+
+  /** **印を付けても、本文は1文字も変わらない**（往復が一致する） */
+  it("記法→DOM→記法 は、脚本でも一致する", () => {
+    const body = ["○駅前・夜", "", "　{太郎|たろう}、ドアを開ける。", "太郎「行こう」"].join(
+      "\n"
+    );
+    expect(
+      scriptApi.composeDomToNotation(
+        scriptApi.composeBuildFragment(body, fakeDoc)
+      )
+    ).toBe(body);
+  });
+
+  /**
+   * 打った瞬間に当て直す（付箋と同じ道に乗せる）。行の種別は打つほど
+   * 変わる（`○` を足した瞬間に柱になる）ので、組み立てのときだけでは足りない。
+   */
+  it("打たれたら、種別の印も当て直す", () => {
+    const repaint = scriptCode.slice(
+      scriptCode.indexOf("function composeRepaintMemos(")
+    );
+    expect(repaint.slice(0, 600)).toContain("composeLineClass(");
+  });
+
+  /** 脚本でない作品の画面は、これまでと変わらない */
+  it("脚本以外では、印が付かない", () => {
+    const node = api.composeBuildLine("○駅前・夜", fakeDoc);
+    expect((node.attributes ?? {}).class ?? "").toBe("line");
+  });
+
+  it("脚本以外の画面は、タイプを渡さないときと1バイトも変わらない", () => {
+    expect(
+      buildManuscriptEditorHtml("NONCE123", "vscode-resource:", "long")
+    ).toBe(html);
   });
 });

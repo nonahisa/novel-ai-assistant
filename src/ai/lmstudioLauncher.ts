@@ -422,6 +422,37 @@ export function decideLoadContextLength(
 }
 
 /**
+ * 読み込み済みの文脈が、こちらの狙う長さより短いときの知らせ。
+ *
+ * **「指定」と言えるのは、作者が設定したときだけ。** 設定の既定は0で、
+ * そのときの狙う長さは**モデル情報から読んだ最大**である。それを「指定」と
+ * 呼ぶと、作者は覚えのない数字を突きつけられることになる（2026-09-06、
+ * 作者の指摘：「262144なんて指定していない」）。値の出どころで言い方を分ける。
+ *
+ * @param contextLength `decideLoadContextLength` が決めた、狙っている長さ
+ * @param configuredLimit 設定値（`novelai.lmstudio.loadContextLength`。0は未設定）
+ */
+export function describeShortLoadedContext(
+  loadedContextLength: number,
+  contextLength: number,
+  configuredLimit: number
+): string {
+  // 設定がモデルの最大を超えていたときは、狙っている長さは最大のほう
+  // （`decideLoadContextLength` が小さいほうを採る）。設定値を言うと合わない
+  const fromSetting =
+    Number.isFinite(configuredLimit) &&
+    configuredLimit > 0 &&
+    Math.floor(configuredLimit) === contextLength;
+  const source = fromSetting
+    ? `設定した長さ ${contextLength}`
+    : `モデル情報の上限 ${contextLength}`;
+  return (
+    `LM Studio：読み込み済みの文脈 ${loadedContextLength} は、${source} より短い。` +
+    "LM Studio側で読み込み直すと長い本文を扱えます。"
+  );
+}
+
+/**
  * これ以上は短くしない長さ。
  *
  * 8192 は LM Studio 側の既定と同じくらいで、ここまで下げても載らないなら

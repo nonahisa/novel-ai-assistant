@@ -10,18 +10,35 @@ import {
   workPaths,
 } from "./core/workRegistry";
 import { checkDictionaryFreshness } from "./core/imeDictionaryStatus";
-import { WorkTreeProvider, WorkNode, EpisodeNode } from "./views/workTree";
+import {
+  WorkTreeProvider,
+  WorkNode,
+  EpisodeNode,
+  ChapterNode,
+  MemoFolderNode,
+  MemoFileNode,
+} from "./views/workTree";
 import {
   countChars,
   formatCount,
   toManuscriptPages,
 } from "./core/charCount";
 import {
-  formatChapterNumber,
   nextChapterNumber,
   nextDatedName,
+  nextUntitledName,
   parseEpisodeFileName,
 } from "./core/episodeParser";
+// 新しい話の中身と、開く向き。どちらもタイプで変わる（設計書6.70）
+import {
+  newEpisodeExtension,
+  newEpisodeTemplate,
+} from "./core/episodeTemplate";
+import { manuscriptViewTypeFor } from "./core/manuscriptViewTypes";
+import { nextEpisodeFileNameLike } from "./core/episodeRenumber";
+import { WorkFolderWatchers } from "./features/workFolderWatch";
+import { setStreamingSettingReader } from "./ai/ollamaStream";
+import { findLatestEpisode } from "./core/latestEpisode";
 import { scanWork } from "./core/scanner";
 import { SUPPORTED_EXTENSIONS, WorkEntry } from "./models/types";
 import {
@@ -37,11 +54,14 @@ import {
 // Node専用（node:child_process / node:path）。選ぶ操作の中で動的importする（設計書5.8.5）
 import {
   chooseWorkStartMode,
+  chooseWorkType,
   createFirstEpisodeFile,
   openPlotFile,
+  skipsStartModeQuestion,
   type WorkStartMode,
 } from "./features/startWork";
 import { generateSettingsDocs } from "./features/generateSettingsDocs";
+import { exportSettingsForAudience } from "./features/exportSettingsForAudience";
 import { generateSynopses } from "./features/generateSynopses";
 import {
   generateCatchphrases,
@@ -76,6 +96,8 @@ import type { ChatRunKind } from "./core/chatEdit";
 import { applyPendingCharacterUpdates } from "./features/applyPendingUpdates";
 import { exportImeDictionary } from "./features/exportImeDictionary";
 import { exportPdf } from "./features/exportPdf";
+import { exportEpub } from "./features/exportEpub";
+import { openEpubEditorPanel } from "./features/epubEditorPanel";
 import { manageCustomFields } from "./features/manageCustomFields";
 import { TermHighlighter } from "./views/termHighlight";
 import { ActionListProvider, nodeKey } from "./views/actionList";
@@ -84,11 +106,25 @@ import {
   stepNodeKey,
   stepViewDescription,
 } from "./views/stepMenu";
+import {
+  FOCUS_CHAT_KEY,
+  SOLO_VIEW_KEY,
+  resetViewVisibility,
+} from "./views/viewVisibility";
 import { ActionDecorationProvider } from "./views/actionDecorations";
 import { PendingUpdateStore } from "./core/pendingUpdates";
 // 作品を選ぶ場面で「未処理の提案が何件あるか」を出すために使う。
 // 提案パネル（features/proposalPanel）が既に読んでいるので、束は増えない
 import { ProposalStore } from "./core/proposalStore";
+// 作品を選ぶ場面の補足（文言と並び順）。**文言そのものを試験から見たい**
+// ので、VS Code に依存しない側へ出してある
+import {
+  divergenceNote,
+  imeDictionaryNote,
+  pendingProposalNote,
+  pushWaitingNote,
+  sortByPickOrder,
+} from "./core/workPickNotes";
 // gitコマンドが要る。動的importする（設計書5.8.5）
 import { tryRegisterAsCollection } from "./features/addCollection";
 import {
@@ -99,6 +135,7 @@ import {
   needsRedraw,
   needsRescan,
 } from "./core/countSettings";
+import { abbreviateTitle, isAbbreviated } from "./core/abbreviateTitle";
 // 以下6つはgit・外部プロセス起動が要る。動的importする（設計書5.8.5）
 // shareWithEditor, collectEditorProposals ← ./features/shareWithEditor
 // restoreFromHistory ← ./features/gitRestore
@@ -149,24 +186,49 @@ import {
 // CONFLICT_SCHEME・ConflictContentProvider・resolveWorkConflicts も
 // core/git.ts 経由。競合はgit操作でしか起きないので、動的importする
 import type { ConflictContentProvider as ConflictContentProviderType } from "./features/resolveConflicts";
-import { checkTypos, type TypoCheckRunResult } from "./features/checkTypos";
+import {
+  checkTypos,
+  resolveTypoScope,
+  type TypoCheckRunResult,
+} from "./features/checkTypos";
+// 完了通知の件数は、提案パネルの見出しと同じ数え方をする（設計書6.8）
+import { describeCheckRunCounts } from "./core/checkRunCounts";
+import type { IncomingCount } from "./core/proposalBuckets";
 import {
   checkNotation,
   describeNotationResult,
 } from "./features/checkNotation";
 import { generatePlot } from "./features/generatePlot";
+// プロットモードの画面（設計書6.4.8）。plot.md は左の普通のエディタで書く
+import { openPlotMode, refreshPlotMode } from "./features/plotModePanel";
+import { syncPlotCharacters } from "./features/plotCharacterSync";
 import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
 import { ChatterService } from "./features/chatterService";
+import { requestChatterComment } from "./features/chatterComment";
 import { setPlotBasics } from "./features/setPlotBasics";
 import {
   invalidateWorkFormat,
   readWorkFormat,
 } from "./core/workFormatStore";
+import type { WorkFormatKey } from "./core/workFormat";
+// 作品タイプの在り処はプロットの `## 形式` ひとつ（設計書6.70）
+import { writePlotSections } from "./core/plotFile";
 import { statsDayKey } from "./core/writingStats";
 import { setWorkGoals } from "./features/setWorkGoals";
 import { checkContradictions } from "./features/checkContradictions";
 import { checkProofread } from "./features/checkProofread";
 import { checkDeviations } from "./features/checkDeviations";
+// 単話プロットのAI判定2種（P-27・P-28。設計書6.36.3）
+import {
+  checkEpisodePlotDesign,
+  contrastEpisodePlot,
+  pickEpisodePlotTarget,
+  type EpisodePlotCheckRef,
+} from "./features/checkEpisodePlot";
+import {
+  episodePlotChapterOfPath,
+  episodePlotCompletionParts,
+} from "./core/episodePlotDoc";
 import { checkOpening } from "./features/checkOpening";
 // 名前の点検と付け替え（設計書6.37）
 import {
@@ -205,6 +267,8 @@ import {
 } from "./features/resumeWriting";
 import { askText, cancelItem } from "./views/dialogs";
 import { manageKeepWords } from "./features/manageKeepWords";
+import { AdvicePolicyStore } from "./core/advicePolicyStore";
+import { setAdvicePolicy } from "./features/advicePolicyDiagnosis";
 import {
   addForeshadowByHand,
   openForeshadows,
@@ -217,6 +281,24 @@ import {
   showForeshadowCandidates,
   showForeshadowResolutions,
 } from "./features/checkForeshadows";
+// 校正のまとめ実行（設計書6.80）。各コマンドは終わり方を戻り値で伝える——
+// **止めた（cancelled）と失敗した（failed）は別物**で、残りを走らせるかが違う。
+// ここの7コマンドが返すのは中止・完走と、前提が足りずに走らせなかった
+// （`checkSkipped`）だけで、`CHECK_FAILED` を立てるのは
+// AIの失敗を自分で掴んでいる機能の側（`checkOpening.ts`）である
+import {
+  collectSuiteEstimate,
+  runProofreadingSuite,
+} from "./features/proofreadingSuite";
+import {
+  CHECK_CANCELLED,
+  CHECK_COMPLETED,
+  PROOFREADING_SUITE_COMMAND,
+  checkSkipped,
+  isSuiteConfirmed,
+  type CheckCommandOutcome,
+  type CheckRunOptions,
+} from "./core/proofreadingSuite";
 import {
   extendMarkdownItWithRuby,
   type MarkdownItLike,
@@ -231,12 +313,15 @@ import {
   MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   MANUSCRIPT_EDITOR_VIEW_TYPE,
   ManuscriptEditorProvider,
+  activeManuscriptTabUri,
   addMemoToOpenManuscript,
   insertMemoLineAbove,
+  isInsideWork,
   openManuscriptForReading,
   refreshManuscriptCounts,
   type ManuscriptEditorDeps,
 } from "./features/manuscriptEditor";
+import { registeredPostingSites } from "./features/postingCopyRegistered";
 import { showEditHistory } from "./features/editHistoryPanel";
 import {
   reviewProposals,
@@ -249,8 +334,31 @@ import {
   copySubtitle,
   renameWithSubtitle,
 } from "./features/episodeCopy";
+import {
+  removeChapter,
+  renameChapter,
+  startChapterAt,
+} from "./features/manageChapters";
+import {
+  addWorkMemo,
+  removeWorkMemo,
+  transferMemo,
+} from "./features/manageWorkMemos";
+import {
+  configurePostingSites,
+  postNewEpisode,
+  recordRanking,
+} from "./features/postingKit";
+import {
+  importReaderStats,
+  recordReaderStats,
+} from "./features/readerStats";
+import {
+  proposeChapters,
+  suggestChapterName,
+} from "./features/proposeChapters";
 import { countUnextractedEpisodes } from "./features/extractionFreshness";
-import { chooseScope, recordCheck } from "./features/typoCheckScope";
+import { recordCheck } from "./features/typoCheckScope";
 import { switchMode } from "./features/switchMode";
 import {
   revealFolder,
@@ -258,6 +366,7 @@ import {
 } from "./views/openDocument";
 import { GENERATED_DIR } from "./core/generatedFiles";
 import { formatDayTime } from "./core/timestampedFileName";
+import { notifyDone } from "./views/notify";
 
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
@@ -320,6 +429,26 @@ function isFromEarlierSession(iso: string): boolean {
   return Number.isNaN(at) || at < SESSION_STARTED_AT;
 }
 
+/**
+ * 校正のコマンドで、未保存の本文を保存してから走らせる（設計書6.80）。
+ *
+ * **保存できなかったのも「中止」として返す。** 作者が「中止」を選んだのと
+ * 原因は違うが、**次の検知でも同じ理由でまた止まる**——保存できない文書は
+ * そこに残ったままである。「失敗（`CHECK_FAILED`）は次へ進む」のは、
+ * 次では起きないかもしれない失敗（AIのレート上限・応答の解析）に対する
+ * 扱いであって、前提が欠けたままの状態には当てはまらない。
+ *
+ * @returns 保存できたら `undefined`。走らせられないときは、そのまま
+ *   返してよい戻り値
+ */
+async function saveBeforeCheck(
+  work: WorkEntry,
+  actionLabel: string
+): Promise<CheckCommandOutcome | undefined> {
+  const saved = await saveDirtyDocumentsBeforeExtraction(work, actionLabel);
+  return saved ? undefined : CHECK_CANCELLED;
+}
+
 export async function activate(
   context: vscode.ExtensionContext
 ): Promise<{ extendMarkdownIt<T extends MarkdownItLike>(md: T): T }> {
@@ -370,6 +499,23 @@ export async function activate(
    */
   setGeneratedStorageRoot(
     vscode.Uri.joinPath(context.globalStorageUri, GENERATED_DIR)
+  );
+
+  /*
+    **左のビューを、素の状態から始める**（作者の報告、2026-09-03
+    「再起動したとき、詳細メニューの下に『AIに相談』が無いことがある」）。
+
+    ビューの出し入れを決めている印（`novelai.focusChat`・`novelai.soloView`）を
+    持っているのはVS Code側で、拡張機能ではない。**拡張機能ホストだけが
+    再起動したとき、前の印はそのまま残る**——`soloView = 'actions'` が
+    残っていれば、相談のビューだけ消えた状態で立ち上がる。理由は
+    `viewVisibility.ts` にある。
+
+    **ビューを前面に出したりはしない。** サイドバーを開けば見出しが在る、
+    という状態に戻すだけである。
+  */
+  await resetViewVisibility((key, value) =>
+    vscode.commands.executeCommand("setContext", key, value)
   );
 
   const registry = new WorkRegistry(context);
@@ -515,6 +661,9 @@ export async function activate(
    */
   const manuscriptDeps = {
     highlighter,
+    // **作品は登録簿で引く**（設計書6.68.2）。用語索引は設定資料が
+    // 1件も無い作品では引けないので、作品を知りたいだけのところでは使わない
+    workOf: (filePath) => workOfPath(registry, filePath),
     openSettings: async (work, kind, id) => {
       const panel = await openSettingsPanel(context, work, aiRegistry, {
         beside: true,
@@ -552,6 +701,23 @@ export async function activate(
     convertToMarkdown: async (filePath) => {
       const { convertOne } = await import("./features/markdownConvert.js");
       return convertOne(filePath);
+    },
+    // 口述の整文（設計書6.83）。**繋ぐのはここだけ**——原稿エディタが
+    // 整文を直に読み込むと、あの画面がAIの登録簿を抱えることになる。
+    // **詳細メニューの操作と同じ関数を通す**（入口2つ・実体1つ）
+    dictationClean: async (document, range) => {
+      const { runDictationClean } = await import("./features/dictationClean.js");
+      await runDictationClean(
+        {
+          document,
+          range,
+          work: workOfPath(registry, fromUri(document.uri)),
+          // **原稿エディタからは「元に戻す」ボタンを出さない**——WebViewの
+          // パネルにはアクティブなテキストエディタが無く、undo が効かない
+          entry: "manuscriptEditor",
+        },
+        aiRegistry
+      );
     },
     // シーンメモ（設計書6.40.4）。**繋ぐのはここだけ**——原稿エディタが
     // パネルを直に読み込むと、パネル側もこちらを読むので輪になる
@@ -627,6 +793,10 @@ export async function activate(
       "./dev/reflectOperationLog.js"
     );
     context.subscriptions.push(registerReflectOperationLog(context));
+    // Ollamaを流して受け取る実験の入切（設計書6.63.1）。
+    // **押した分は保存しない**——ウィンドウを閉じれば配布と同じ道へ戻る
+    const { registerStreamToggle } = await import("./dev/streamToggle.js");
+    context.subscriptions.push(registerStreamToggle(context));
   }
 
   context.subscriptions.push(
@@ -654,15 +824,7 @@ export async function activate(
                 // 作品ごとには決まらない。合わせる相手も置き場なので、
                 // ここは `ahead`／`behind`（置き場ぜんぶ）で見るのが正しい。
                 // 同じ置き場の作品に同じ補足が並ぶのは、それが事実だから
-                if (status.ahead > 0 && status.behind > 0) {
-                  return {
-                    note:
-                      `分かれています（送信待ち ${status.ahead}件・` +
-                      `受け取り ${status.behind}件）`,
-                    order: 1,
-                  };
-                }
-                return { note: "分かれていません", order: 0 };
+                return divergenceNote(status);
               }
             : undefined,
         });
@@ -674,7 +836,7 @@ export async function activate(
       }
     ),
     registerCommand("novelai.openVertical", async () => {
-      const uri = vscode.window.activeTextEditor?.document.uri;
+      const uri = activeManuscriptUri();
       if (!uri) {
         void vscode.window.showWarningMessage(
           "本文のファイルを開いてから実行してください。"
@@ -738,11 +900,15 @@ export async function activate(
   context.subscriptions.push(treeView);
 
   // 操作の末尾に出す印（「AI」と未反映の件数）。
-  // 件数は全作品を合わせて数える。作品を選ばずにメニューを見るため、
-  // 「どこかに溜まっている」ことが分かればよい
-  const actionDecorations = new ActionDecorationProvider(async (counter) => {
+  // 詳細メニューの件数は全作品を合わせて数える。作品を選ばずにメニューを見るため、
+  // 「どこかに溜まっている」ことが分かればよい。
+  // **簡単ステップメニューは作品を1つ渡してくる**（最上段で選ぶ画面なので、
+  // 合算を出すと選択作品の件数に見える。作者の実機報告、2026-09-05）
+  const actionDecorations = new ActionDecorationProvider(async (counter, workId) => {
     let total = 0;
-    for (const work of registry.list()) {
+    for (const work of workId === undefined
+      ? registry.list()
+      : registry.list().filter((entry) => entry.id === workId)) {
       try {
         if (counter === "pendingUpdates") {
           total += await new PendingUpdateStore(work).count();
@@ -815,7 +981,8 @@ export async function activate(
       get: () => context.globalState.get<string[]>(STEP_GROUPS_KEY, []),
       set: (groups) => void context.globalState.update(STEP_GROUPS_KEY, groups),
     },
-    (counter) => actionDecorations.countOf(counter)
+    // **選んだ作品だけを数える**（設計書6.29）。詳細メニューの合算とは別
+    (counter, workId) => actionDecorations.countOfWork(workId, counter)
   );
   const stepView = vscode.window.createTreeView("novelai.steps", {
     treeDataProvider: stepProvider,
@@ -846,17 +1013,38 @@ export async function activate(
   );
   context.subscriptions.push(stepView);
 
-  /** 未反映の件数を数え直す。抽出・反映のあとに呼ぶ */
+  /** 未反映の件数を数え直す。抽出・反映のあと、作品を選び直したあとに呼ぶ */
   const refreshActionBadges = (): void => {
     void actionDecorations.refresh().then(() => {
       actionProvider.refresh();
       // 同じ操作が2つのメニューに出るので、両方を引き直す
       stepProvider.refresh();
     });
+    // 簡単ステップメニューは選んだ作品だけを数えるので、別に数え直す
+    // （合算からその作品ぶんは割り出せない）
+    void actionDecorations
+      .refreshWork(stepProvider.selectedWork()?.id)
+      .then(() => stepProvider.refresh());
   };
   // 起動直後にも数える。前回の抽出で溜まったままのことがある
   refreshActionBadges();
   registry.onDidChange(() => refreshActionBadges());
+  // **Ollama の流し受信の設定を、純粋な部品へ差し込む**（設計書6.63.1、0.42.0）。
+  // `ai/ollamaStream.ts` は VS Code に依存しないので、設定の読み方はここで渡す
+  setStreamingSettingReader(() =>
+    vscode.workspace.getConfiguration("novelai").get<boolean>("ollama.streaming")
+  );
+  // **作品フォルダーの本文を見張り、外で変わったら一覧を数え直す**
+  // （`features/workFolderWatch.ts`。保存のときだけでは、ルビの適用・
+  // 同期・別のエディタでの書き換えが開き直すまで一覧に出なかった）
+  const folderWatchers = new WorkFolderWatchers((work) => {
+    treeProvider.refresh(work.id);
+  });
+  folderWatchers.sync(registry.list());
+  context.subscriptions.push(
+    folderWatchers,
+    registry.onDidChange(() => folderWatchers.sync(registry.list()))
+  );
 
   // 設定資料パネルからの保存を、本文の色分けと一覧へ届ける。
   // **パネルは長らくここを呼んでいなかった**ので、名前を変えても
@@ -996,17 +1184,27 @@ export async function activate(
     work: WorkEntry,
     label: string,
     run: (
-      onProgress: (done: number, total: number) => void,
+      onProgress: (done: number, total: number, skipped?: number) => void,
       stage: (
         stageLabel: string,
         stageUnit: string
-      ) => (done: number, total: number) => void
+      ) => (done: number, total: number, skipped?: number) => void
     ) => Promise<T>,
     unit = "チャンク"
   ): Promise<T> {
+    // `skipped` は「処理済みで飛ばした数」。分母がAIへ送る数だけになった
+    // 代わりに、飛ばした件数を画面へ添える（作者の指摘、2026-09-06）
     const reporter =
-      (stageLabel: string, stageUnit: string) => (done: number, total: number) =>
-        proposalPanel.showRunning(work, stageLabel, done, total, stageUnit);
+      (stageLabel: string, stageUnit: string) =>
+      (done: number, total: number, skipped = 0) =>
+        proposalPanel.showRunning(
+          work,
+          stageLabel,
+          done,
+          total,
+          stageUnit,
+          skipped
+        );
     try {
       return await run(reporter(label, unit), reporter);
     } finally {
@@ -1018,11 +1216,22 @@ export async function activate(
   // 相談から標準機能を起動する口（作者の許可、2026-08-15）。
   // **コマンド名を組み立てて executeCommand を呼ばない。** 種別で分岐する
   // ことで、AIが返した文字列がコマンド名になる余地を無くしている
+  // 作者のタイプ別の助言方針（設計書6.86）。**`globalState` に置く**——
+  // 受容度や自信度は、GitHubで編集部と共有してよい情報ではない
+  const advicePolicies = new AdvicePolicyStore(context.globalState);
+
   const workChatPanel = new WorkChatPanel(registry, aiRegistry, {
     run: async (work, kind, filePath) => {
-      // 校正・校閲以外は、既にコマンドとして登録されているものへ渡す。
+      // 既にコマンドとして登録されているものへ渡す。
       // **ここで処理を書き直さない。** 二重に持つと、片方だけ直したときに
-      // 「メニューからは動くのに相談からは動かない」という食い違いが出る
+      // 「メニューからは動くのに相談からは動かない」という食い違いが出る。
+      //
+      // 検知（誤字脱字・推敲・逸脱・矛盾・表記ゆれ）は 2026-09-06 に
+      // ここへ寄せた。
+      // それまでは相談側が結果の出し方まで自前で持っており、0.35.1 で
+      // 入れた「指摘 N件＝パネルに残る件数」の数え方が届いていなかった
+      // ——推敲とプロット逸脱は完了の知らせが出ず、矛盾はマージ・除外の
+      // 前の件数を「指摘 N件」と言っていた（設計書6.8.16）
       const command = CHAT_RUN_COMMANDS[kind];
       if (command) {
         // 作品を指定して呼ぶ。引数無しだと作品選択からやり直させてしまう
@@ -1031,83 +1240,17 @@ export async function activate(
         return;
       }
 
+      // 以下は、コマンドの側が受け取れない道だけが残る。
       // 未保存のまま読むと、画面と違う本文を検知してしまう
-      const label =
-        kind === "checkNotation"
-          ? "表記ゆれの検知"
-          : kind === "checkContradictions"
-            ? "矛盾検知"
-            : kind === "checkProofread"
-              ? "推敲"
-              : kind === "checkDeviations"
-                ? "プロット逸脱の検知"
-            : "誤字脱字の検知";
-      if (!(await saveDirtyDocumentsBeforeExtraction(work, label))) return;
-
-      if (kind === "checkDeviations") {
-        const result = await withPanelProgress(
-          work,
-          "プロット逸脱を検知",
-          (onProgress) => checkDeviations(work, aiRegistry, { onProgress }),
-          "話"
-        );
-        if (!result || result.cancelled) return;
-        proposalPanel.showDeviations(work, result.issues);
+      if (!(await saveDirtyDocumentsBeforeExtraction(work, "誤字脱字の検知"))) {
         return;
       }
 
-      if (kind === "checkProofread") {
-        const result = await withPanelProgress(work, "推敲", (onProgress) =>
-          checkProofread(work, aiRegistry, { onProgress })
-        );
-        if (!result || result.cancelled) return;
-        proposalPanel.showResults(work, result.issues, "推敲");
-        return;
-      }
-
-      if (kind === "checkContradictions") {
-        const result = await withPanelProgress(
-          work,
-          "矛盾を検知",
-          (onProgress, stage) =>
-            checkContradictions(work, aiRegistry, {
-              onProgress,
-              // 検証はAIを1件ずつ呼ぶので、別の札で件数を流す
-              onVerifyProgress: stage("検出した矛盾を検証", "件"),
-            })
-        );
-        if (!result || result.cancelled) return;
-        // 矛盾が実は伏線だったときの逃げ道を添える（設計書6.35.4）
-        proposalPanel.showContradictions(work, result.issues, (source) =>
-          registerForeshadowFromContradiction(work, source)
-        );
-        // 検証で消したことは、こちらの入口からでも伝える（設計書6.10.5）。
-        // **矛盾検知は入口が2つある。** 片方だけ直すと、同じ機能なのに
-        // 通知の言うことが食い違う（0.28.8で揃えた）
-        if (result.verifyNote || result.failedChunks > 0) {
-          const parts = [`指摘 ${result.issues.length}件`];
-          if (result.verifyNote) parts.push(result.verifyNote);
-          notifyRunCompletion({
-            headline: "矛盾検知",
-            parts,
-            failedCount: result.failedChunks,
-          });
-        }
-        return;
-      }
-
-      if (kind === "checkNotation") {
-        const result = await checkNotation(work);
-        if (!result || result.cancelled) return;
-        proposalPanel.showResults(work, result.issues, "表記ゆれ");
-        // **黙って終わらない。** 0件のときに理由を言わないと、作者は
-        // 壊れていると受け取る（2026-08-21、作者の報告）
-        void vscode.window.showInformationMessage(
-          describeNotationResult(result)
-        );
-        return;
-      }
-
+      // **「いま開いている話だけ」の誤字脱字は、ここに残る。**
+      // コマンド（`novelai.checkTyposForFile`）は一覧の節点（`EpisodeNode`）
+      // を受け取るので、場所しか持っていない相談パネルからは呼べない。
+      // 通知だけは共通の `reportTypoCheckResult` を通す（件数の数え方を
+      // 写さないため）
       const result = await withPanelProgress(
         work,
         "誤字脱字を検知",
@@ -1120,12 +1263,13 @@ export async function activate(
           })
       );
       if (!result) return;
-      proposalPanel.showResults(work, result.issues);
+      const shown = proposalPanel.showResults(work, result.issues);
       reportTypoCheckResult(
         kind === "checkTyposForFile"
           ? `${path.basename(filePath ?? "")} の誤字脱字検知`
           : "誤字脱字検知",
-        result
+        result,
+        shown
       );
     },
     // 相談からの「AIで再読込」（設計書6.31.3）。
@@ -1135,7 +1279,7 @@ export async function activate(
       const panel = await openSettingsPanel(context, work, aiRegistry);
       await panel.reloadRecordFromChat(kind, recordId, notes);
     },
-  });
+  }, advicePolicies);
   context.subscriptions.push(
     workChatPanel,
     vscode.window.registerWebviewViewProvider(WORK_CHAT_VIEW_ID, workChatPanel, {
@@ -1188,11 +1332,9 @@ export async function activate(
    * 「作品一覧とメニューを出す」ボタンが出る。
    */
   async function setChatFocus(on: boolean): Promise<void> {
-    await vscode.commands.executeCommand(
-      "setContext",
-      "novelai.focusChat",
-      on
-    );
+    // 印の名前は `viewVisibility.ts` が持つ。写しを作ると、
+    // 起動時に戻すつもりの印と別のものを立ててしまう
+    await vscode.commands.executeCommand("setContext", FOCUS_CHAT_KEY, on);
   }
 
   /**
@@ -1214,13 +1356,13 @@ export async function activate(
    * **覚えない（globalState へ書かない）。** 閉じた状態のまま再起動すると、
    * 出し方を知らない作者には拡張機能が壊れたようにしか見えない。
    * 起動のたびに全部出るほうが、閉じ込め事故より安い。
+   *
+   * **覚えないだけでは足りなかった**（作者の報告、2026-09-03）。印を持つのは
+   * VS Code側なので、拡張機能ホストだけが再起動すると前の印が残る。
+   * 起動時に `resetViewVisibility` で入れ直している。
    */
   async function setSoloView(view: string | undefined): Promise<void> {
-    await vscode.commands.executeCommand(
-      "setContext",
-      "novelai.soloView",
-      view
-    );
+    await vscode.commands.executeCommand("setContext", SOLO_VIEW_KEY, view);
   }
 
   // ─── AIの独り言（設計書6.21） ───
@@ -1251,6 +1393,15 @@ export async function activate(
       pendingUpdates: actionDecorations.countOf("pendingUpdates"),
       mergeCandidates: actionDecorations.countOf("mergeCandidates"),
     }),
+    // **本文を読んだ感想**（設計書6.21.4）。相談パネルへ出るものなので、
+    // 割当も相談（`chat`）に相乗りする。有料かどうかは向こうでも見る
+    requestComment: (work, manuscriptPath, signal) =>
+      requestChatterComment(
+        work,
+        manuscriptPath,
+        () => aiRegistry.resolve("chat"),
+        signal
+      ),
   });
   chatter.start();
   context.subscriptions.push(chatter);
@@ -1389,6 +1540,13 @@ export async function activate(
       // 直したのに一覧が「第3話」のままでは、直った気がしない
       if (path.basename(document.fileName).toLowerCase() === "plot.md") {
         invalidateWorkFormat();
+        // 簡単ステップメニューも、タイプで絞ったものを並べ直す（設計書6.70.1）。
+        // 忘れると、タイプを変えたのに前のタイプの並びが残る
+        stepProvider.invalidateFormats();
+        // 「主要登場人物」に書き足した人を、設定資料の更新案として積む
+        // （設計書6.4.9）。**台帳へは書かない**——承認待ちに積むだけで、
+        // 反映は作者が「更新分を反映」で承認したときに起きる
+        void syncPlotCharactersOnSave(fromUri(document.uri));
       }
       treeProvider.refresh();
       // 「直前にどの環境で書いていたか」を残す（設計書5.5.2）。
@@ -1400,6 +1558,9 @@ export async function activate(
       // 付箋を書き足したり消したりしたのは、保存で初めてディスクに残る。
       // **開いているパネルだけ**が読み直す（設計書6.40.4）
       void refreshSceneMemos(fromUri(document.uri));
+      // プロットと単話プロットの保存で、プロットモードの目次と印を
+      // 作り直す（設計書6.4.8。開き直さなくても追いつくようにする）
+      void refreshPlotMode(fromUri(document.uri));
     })
   );
   updateStatusBar();
@@ -1425,6 +1586,26 @@ export async function activate(
     refreshManuscriptCounts(filePath);
     await refreshWritingStatsPanel(work, deviceId);
     await refreshAllWorksWritingStatsPanel(registry, deviceId);
+  }
+
+  /**
+   * 保存された plot.md の「主要登場人物」を、更新案として積む（設計書6.4.9）。
+   *
+   * **前回と同じ内容なら何もしないし、何も言わない。** 保存のたびに同じ
+   * 提案が積まれる画面にしない。失敗しても保存の流れを止めない
+   * （書いている手を、資料の都合で止めない）。
+   */
+  async function syncPlotCharactersOnSave(filePath: string): Promise<void> {
+    const work = findWorkForPath(registry, filePath);
+    if (!work) return;
+    try {
+      await syncPlotCharacters(work);
+    } catch (error) {
+      logFailure("プロットからの人物反映に失敗", {
+        作品: work.title,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /** 保存された本文が属する作品に、この環境の編集記録を残す */
@@ -1592,9 +1773,21 @@ export async function activate(
     });
     if (!title) return;
 
-    // 始め方はフォルダーを作る前に訊く。作ったあとで取り消されると、
-    // 中身の無い作品フォルダーだけが残る
-    const startMode = mode ?? (await chooseWorkStartMode(title.trim()));
+    // **タイプも始め方も、フォルダーを作る前に訊く。** 作ったあとで
+    // 取り消されると、中身の無い作品フォルダーだけが残る
+    const workType = await chooseWorkType(title.trim());
+    if (!workType) return;
+    const format =
+      workType === "unset" ? undefined : (workType.key as WorkFormatKey);
+
+    /*
+      **創作メモ集には「始め方」を訊かない**（設計書6.70）。プロットの
+      無いタイプなので選びようがなく、選ばせても書くのはメモである。
+      訊かずに最初のメモ（無題.md）を開く。
+    */
+    const startMode = skipsStartModeQuestion(format)
+      ? "manuscript"
+      : (mode ?? (await chooseWorkStartMode(title.trim())));
     if (!startMode) return;
 
     const folderPath = path.join(parentPath, title.trim());
@@ -1612,6 +1805,29 @@ export async function activate(
     const entry = await registry.add(folderPath, title.trim());
     if (!entry) return;
 
+    /*
+      **タイプの在り処はプロットの `## 形式` ひとつ**（設計書6.4.5・6.70）。
+
+      `.aiwriter/config.json` にも持たせると二重管理になり、作者が
+      プロットを書き換えたときにどちらが本当か分からなくなる。
+      「本文から書き始める」を選んだ作品でも、タイプを決めたなら
+      そのためだけに `設定/plot.md` を作る（決めなければ作らない）。
+      **書くのは「形式」の節だけ**——`updatePlotMarkdown` は頼まれた節しか
+      書かないので、創作メモ集にプロットの見出し一式が並ぶことはない。
+    */
+    if (workType !== "unset") {
+      try {
+        await writePlotSections(entry, { format: workType.label });
+        invalidateWorkFormat(entry.id);
+      } catch (e) {
+        // タイプを書けなくても作品は作れている。**作業を止めない**
+        vscode.window.showWarningMessage(
+          `作品タイプをプロットへ書けませんでした（${String(e)}）。` +
+            "「形式とジャンルを決める」からやり直せます。"
+        );
+      }
+    }
+
     treeProvider.refresh();
     if (startMode === "plot") {
       await openPlotFile(entry);
@@ -1619,7 +1835,11 @@ export async function activate(
     } else {
       // 空の第1話を作ったら、執筆量の基準を置き直す（設計書6.3.2）。
       // **置き直さないと、作者が書いて最初に保存した分が消える**
-      await createFirstEpisodeFile(entry, (work) => progress.rebaseline(work));
+      await createFirstEpisodeFile(
+        entry,
+        (work) => progress.rebaseline(work),
+        format
+      );
     }
   }
 
@@ -1651,6 +1871,16 @@ export async function activate(
         await openPlotFile(work);
       }
     ),
+    // プロットモード（設計書6.4.8）。**左に plot.md、右に作業パネル**。
+    // パネルは読むだけ＋既存の操作の呼び出しだけで、書き込みの道は増やさない
+    registerCommand(
+      "novelai.openPlotMode",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await openPlotMode(context, work);
+      }
+    ),
     // 対話でプロットを埋める（設計書6.4.7）。**AIに筋書きを作らせず、
     // まだ書かれていない項目を1つずつ尋ねて引き出す**
     registerCommand(
@@ -1667,6 +1897,17 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         await setPlotBasics(work);
+        /*
+          **ここが「作品タイプを後から変える」入口である**（設計書6.70）。
+
+          書き換えたのはプロットのファイルそのものなので、保存の合図
+          （`onDidSaveTextDocument`）は流れてこない。覚えている形式を
+          捨てないと、一覧の見出しも右クリックもステップも前のタイプの
+          ままで、**変えたのに何も起きていないように見える。**
+        */
+        invalidateWorkFormat(work.id);
+        treeProvider.refresh(work.id);
+        stepProvider.invalidateFormats(work.id);
       }
     ),
     registerCommand(
@@ -1900,8 +2141,10 @@ export async function activate(
       const picked = await vscode.window.showQuickPick(
         [
           ...works.map((work) => ({
-            label: work.title,
+            // 長い作品名は省略し、全文は2行目（detail）に出す（2026-09-06）
+            label: abbreviateTitle(work.title),
             description: work.folderPath,
+            detail: isAbbreviated(work.title) ? work.title : undefined,
             work,
           })),
           // Escでも閉じられるが、それを知らない人には出口が無いように見える
@@ -1911,6 +2154,9 @@ export async function activate(
       );
       if (!picked || !("work" in picked)) return;
       stepProvider.selectWork(picked.work.id);
+      // **末尾の件数は選んだ作品のもの**なので、切り替えたら数え直す
+      // （そうしないと、前の作品の件数が並んだままになる）
+      refreshActionBadges();
     })
   );
 
@@ -1958,7 +2204,7 @@ export async function activate(
         );
         if (picked !== yes) return;
         await removeVectorIndex(work);
-        vscode.window.showInformationMessage("索引を削除しました。");
+        notifyDone("索引を削除しました。");
       }
     )
   );
@@ -2146,26 +2392,7 @@ export async function activate(
                 const status = trackedSyncStatus(candidate.id);
                 if (!status) return {};
                 // 受け取り側と同じ理由で、その作品ぶんの数を主に出す
-                if (status.aheadHere > 0) {
-                  return {
-                    note:
-                      `送信待ち ${status.aheadHere}件` +
-                      (status.ahead !== status.aheadHere
-                        ? `（置き場ぜんぶでは ${status.ahead}件）`
-                        : ""),
-                    order: status.aheadHere,
-                  };
-                }
-                // **送信は置き場が単位で、1つ送ると同じ置き場の作品は
-                // まとめて出ていく**（設計書5.7.9）。この作品ぶんが0でも
-                // 送信そのものは動くので、「ありません」で終わらせない
-                if (status.ahead > 0) {
-                  return {
-                    note: `この作品ぶんはありません（置き場ぜんぶでは送信待ち ${status.ahead}件）`,
-                    order: 0,
-                  };
-                }
-                return { note: "送信するものはありません", order: 0 };
+                return pushWaitingNote(status);
               }
             : undefined,
         });
@@ -2267,18 +2494,36 @@ export async function activate(
 
         const cfg = vscode.workspace.getConfiguration("novelai");
         const digits = cfg.get<number>("episodeNumberDigits", 3);
-        const ext = cfg.get<string>("episodeFileExtension", ".txt");
+        const configuredExt = cfg.get<string>("episodeFileExtension", ".txt");
 
         // SNS記事は投稿日で管理する（設計書6.4.6）。**同じ日に何本でも書ける**ので、
-        // 今日の日付が埋まっていれば `_2`, `_3` と番号を足す
+        // 今日の日付が埋まっていれば `_2`, `_3` と番号を足す。
+        // 創作メモ集は題名で並ぶ（設計書6.70）ので「無題」から始める
         const format = await readWorkFormat(work);
+        // メモだけは `.md`（設計書6.70。設定は「原稿をどの形で書くか」の話）
+        const ext = newEpisodeExtension(format, configuredExt);
         const defaultName =
           format === "sns"
             ? `${nextDatedName(parsed, statsDayKey(new Date(), boundaryHour()))}${ext}`
-            : `${formatChapterNumber(next, digits)}${ext}`;
+            : format === "memo"
+              ? nextUntitledName(
+                  episodes.map((e) => e.fileName),
+                  "無題",
+                  ext
+                )
+              : // 既存の話の名前の流儀に揃える（実機確認 2026-09-07）
+                nextEpisodeFileNameLike({
+                  latestFileName: findLatestEpisode(episodes)?.fileName ?? null,
+                  number: next,
+                  fallback: { digits, extension: ext },
+                });
         const fileName = await askText({
           prompt:
-            format === "sns" ? "新規投稿ファイルの名前" : "新規話数ファイルの名前",
+            format === "sns"
+              ? "新規投稿ファイルの名前"
+              : format === "memo"
+                ? "新規メモの名前（題名がそのままファイル名になります）"
+                : "新規話数ファイルの名前",
           value: defaultName,
           valueSelection: [0, defaultName.length - ext.length],
           validateInput: (v) => {
@@ -2304,7 +2549,8 @@ export async function activate(
 
         await vscode.workspace.fs.writeFile(
           path.toUri(filePath),
-          new TextEncoder().encode("")
+          // 脚本だけは柱・ト書き・セリフの雛形から始める（設計書6.70）
+          new TextEncoder().encode(newEpisodeTemplate(format))
         );
 
         treeProvider.refresh(work.id);
@@ -2312,12 +2558,12 @@ export async function activate(
         // 変わった回は数えない」ので、置き直さないと、このあと作者が書いて
         // 保存した回がその決まりに当たり「今日 +0字」になって消える
         await progress.rebaseline(work);
-        // **本文は原稿エディタ（横書き）で開く**（作者の指定、2026-08-29。
-        // 作品一覧のクリックと同じ既定に揃える）
+        // **本文は原稿エディタで開く**（作者の指定、2026-08-29。作品一覧の
+        // クリックと同じ既定に揃える）。向きはタイプで決まる（脚本は縦書き）
         await vscode.commands.executeCommand(
           "vscode.openWith",
           path.toUri(filePath),
-          MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+          manuscriptViewTypeFor(format)
         );
       }
     )
@@ -2354,6 +2600,15 @@ export async function activate(
         // 作者が後から追えるよう、作品フォルダの `actions.log` にも残す
         logTargetWorkFolder(registry)
       );
+    })
+  );
+
+  context.subscriptions.push(
+    // AIチューニングの実測一覧（作者の要望、2026-09-06）。
+    // **測り直さない**ので、作品もAIの呼び出しも要らない
+    registerCommand("novelai.showTuningStats", async () => {
+      const { showTuningStats } = await import("./features/showTuningStats.js");
+      await showTuningStats(aiRegistry);
     })
   );
 
@@ -2399,18 +2654,7 @@ export async function activate(
               const freshness = await checkDictionaryFreshness(
                 workPaths(candidate, config).settings
               );
-              if (freshness.stale) {
-                return { note: "設定資料が辞書より新しい", order: 1 };
-              }
-              // 一度も書き出していない作品は「古い」と言わない（催促にならない
-              // ため、印でも数えていない）。ただし**この場面では判断材料になる**
-              // ので、書き出し済みかどうかは伝える。並び順は上げない
-              return {
-                note: freshness.exported
-                  ? "書き出し済み"
-                  : "まだ書き出していない",
-                order: 0,
-              };
+              return imeDictionaryNote(freshness);
             } catch {
               // 読めない作品は無印で返す。補足が出ないだけで実害はない
               return {};
@@ -2441,6 +2685,30 @@ export async function activate(
       });
       if (!work) return;
       await exportPdf(work);
+    })
+  );
+
+  context.subscriptions.push(
+    registerCommand("novelai.exportEpub", async (node?: WorkRef) => {
+      // **`canRunProcesses()` で止めない。** PDF出力は外のブラウザを
+      // 起こすので手元のVS Codeが要るが、こちらは作品フォルダへ
+      // ファイルを1つ書くだけで、ブラウザ版でも成立する
+      const work = await resolveWork(node, registry, {
+        title: "EPUBにする作品を選択",
+      });
+      if (!work) return;
+      await exportEpub(work);
+    })
+  );
+
+  context.subscriptions.push(
+    registerCommand("novelai.openEpubEditor", async (node?: WorkRef) => {
+      // 書き出しと同じく、外のアプリを起こさないのでブラウザ版でも開ける
+      const work = await resolveWork(node, registry, {
+        title: "EPUBエディターで開く作品を選択",
+      });
+      if (!work) return;
+      await openEpubEditorPanel(context, work);
     })
   );
 
@@ -2648,6 +2916,18 @@ export async function activate(
     )
   );
 
+  // 提供先を選んだ書き出し（設計書6.75）。全部入りとは別のファイルを作る
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.exportSettingsForAudience",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await exportSettingsForAudience(work);
+      }
+    )
+  );
+
   // 種別ごとの書き出し。JSONを1種類だけ直したときに、
   // その一覧だけを作り直せるようにする
   for (const [command, kind] of [
@@ -2798,6 +3078,19 @@ export async function activate(
     )
   );
 
+  // 相談の助言方針（設計書6.86）。AIは呼ばない——答えるのは作者本人だけで、
+  // 会話ログからの推定はしない
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.setAdvicePolicy",
+      async (node?: WorkRef) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await setAdvicePolicy(work, advicePolicies);
+      }
+    )
+  );
+
   // 伏線追跡（設計書6.35）。台帳と一覧・手で足す口・矛盾からの転送に加え、
   // 配置と回収の自動検知（P-25/P-26）。**検知は何も自動で保存しない**
   context.subscriptions.push(
@@ -2836,21 +3129,22 @@ export async function activate(
   context.subscriptions.push(
     registerCommand(
       "novelai.checkForeshadows",
-      async (node?: WorkNode) => {
+      async (node?: WorkNode, options?: CheckRunOptions) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文から伏線を拾ってしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "伏線の検知"))) {
-          return;
-        }
+        const unsaved = await saveBeforeCheck(work, "伏線の検知");
+        if (unsaved) return unsaved;
 
+        const suiteConfirmed = isSuiteConfirmed(options);
         const result = await withPanelProgress(
           work,
           "伏線を検知",
-          (onProgress) => checkForeshadows(work, aiRegistry, { onProgress })
+          (onProgress) =>
+            checkForeshadows(work, aiRegistry, { onProgress, suiteConfirmed })
         );
-        if (!result || result.cancelled) return;
+        if (!result || result.cancelled) return CHECK_CANCELLED;
 
         showForeshadowCandidates(proposalPanel, work, result.candidates);
 
@@ -2880,6 +3174,7 @@ export async function activate(
               ? "台帳へはまだ入れていません。 「提案」パネルで登録するものを選んでください。"
               : "",
         });
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -2934,22 +3229,49 @@ export async function activate(
     )
   );
 
+  /*
+    校正のまとめ実行（設計書6.80）。
+
+    **ここでは処理を持たない。** 走らせるのは既にあるコマンドで、確認・
+    見積もり・札・通知は各機能のものをそのまま通す。まとめ側が持つのは
+    「どれを・どの順で」と「終わったあとの内訳」だけである。
+  */
+  context.subscriptions.push(
+    registerCommand(
+      PROOFREADING_SUITE_COMMAND,
+      async (node?: WorkRef) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await runProofreadingSuite(work, {
+          memento: context.globalState,
+          // 内訳は提案パネルの残り件数から数える（設計書6.37.3）。
+          // 各機能の戻り値を覗くと、機能ごとに違う数え方を写すことになる
+          remainingIn: (category) => proposalPanel.remainingIn(work, category),
+          // 確認に出す量の見積もり。**取れなくても確認は出す**ので、
+          // ここで失敗しても呼び出し側は止まらない
+          estimate: (checks) => collectSuiteEstimate(work, aiRegistry, checks),
+        });
+      }
+    )
+  );
+
   context.subscriptions.push(
     registerCommand(
       "novelai.checkTypos",
-      async (node?: WorkNode) => {
+      async (node?: WorkNode, options?: CheckRunOptions) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を検知してしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "誤字脱字の検知")))
-          return;
+        const unsaved = await saveBeforeCheck(work, "誤字脱字の検知");
+        if (unsaved) return unsaved;
 
         // **前回から書いた分だけに絞れる**（設計書6.8.7）。
         // 聞く意味があるときだけ聞く（一度も検知していない・全部が対象・
         // 1件も無い、のいずれでも聞かない）
-        const scope = await chooseScope(work);
-        if (!scope) return;
+        const suiteConfirmed = isSuiteConfirmed(options);
+        const scope = await resolveTypoScope(work, { suiteConfirmed });
+        if (!scope) return CHECK_CANCELLED;
 
         const result = await withPanelProgress(
           work,
@@ -2958,19 +3280,22 @@ export async function activate(
             checkTypos(work, aiRegistry, {
               filePaths: scope.filePaths,
               onProgress,
+              suiteConfirmed,
             })
         );
-        if (!result) return;
+        if (!result) return CHECK_CANCELLED;
 
         // **絞って見たときも「検知した」と記録する。**
         // 記録しないと、次回また同じ話が「前回から書いた分」に出る
         await recordCheck(work);
 
-        proposalPanel.showResults(work, result.issues);
+        const shown = proposalPanel.showResults(work, result.issues);
         reportTypoCheckResult(
           scope.kind === "changed" ? "誤字脱字検知（前回から書いた分）" : "誤字脱字検知",
-          result
+          result,
+          shown
         );
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -2980,29 +3305,36 @@ export async function activate(
       "novelai.checkNotation",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を数えてしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "表記ゆれの検知")))
-          return;
+        const unsaved = await saveBeforeCheck(work, "表記ゆれの検知");
+        if (unsaved) return unsaved;
 
         const result = await checkNotation(work);
-        if (!result || result.cancelled) return;
+        if (!result || result.cancelled) return CHECK_CANCELLED;
+        // **0組のまま確定は「今回は揃えない」**（作者の実機報告、2026-09-05）。
+        // 選択画面が既に理由を伝えているので知らせを重ねず、提案パネルも
+        // 触らない。ただし止める意思ではないので、まとめ実行は次へ進む
+        if (result.noGroupsChosen) return CHECK_COMPLETED;
 
-        proposalPanel.showResults(work, result.issues, "表記ゆれ");
+        const shown = proposalPanel.showResults(work, result.issues, "表記ゆれ");
 
-        if (result.groupCount === 0) return;
-        const parts = [`${result.groupCount}組を検出`];
-        if (result.unifiedCount > 0) {
-          parts.push(`${result.unifiedCount}組を揃える`);
-        }
-        parts.push(`指摘 ${result.issues.length}件`);
-        if (result.dismissedCount > 0) {
-          parts.push(`無視済み ${result.dismissedCount}件を除外`);
-        }
+        /*
+          **0組でも黙らない**（作者の報告、2026-08-21。「黙ると壊れていると
+          受け取られる」）。ここは長く「知らせるものが無い」として打ち切って
+          おり、相談パネルからの道だけが言い切っていた——同じ機能で言うことが
+          違う状態だったので、**言い方の持ち主を `describeNotationResult` に
+          一本化した**（設計書6.8.16）。
+
+          件数は**提案パネルに残った数**を渡す。検知が作った数をそのまま
+          言うと、前に適用済み・解消済みだったものまで数えて、パネルの
+          見出しと食い違う（0.35.1でほかの検知に入れた数え方）。
+        */
         vscode.window.showInformationMessage(
-          `表記ゆれ検知が完了しました。${parts.join(" / ")}`
+          describeNotationResult(result, shown)
         );
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -3107,7 +3439,7 @@ export async function activate(
 
         // **本文が残っているうちに資料だけ直すと、両者が食い違う。**
         // 止めはしないが、数を出してから決めてもらう
-        const remaining = proposalPanel.remainingIn(work.id, "名前の付け替え");
+        const remaining = proposalPanel.remainingIn(work, "名前の付け替え");
         const answer = await vscode.window.showWarningMessage(
           `「${pending.oldName}」→「${pending.newName}」を資料にも反映します。`,
           {
@@ -3160,24 +3492,35 @@ export async function activate(
   context.subscriptions.push(
     registerCommand(
       "novelai.checkDeviations",
-      async (node?: WorkNode) => {
+      async (node?: WorkNode, options?: CheckRunOptions) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を照らしてしまう
-        if (
-          !(await saveDirtyDocumentsBeforeExtraction(work, "プロット逸脱の検知"))
-        ) {
-          return;
-        }
+        const unsaved = await saveBeforeCheck(work, "プロット逸脱の検知");
+        if (unsaved) return unsaved;
 
+        // プロットが無いときの理由を受ける口（矛盾検知と同じ形。設計書6.80）
+        let missing = "";
+        let missingReason = "";
+        const suiteConfirmed = isSuiteConfirmed(options);
         const result = await withPanelProgress(
           work,
           "プロット逸脱を検知",
-          (onProgress) => checkDeviations(work, aiRegistry, { onProgress }),
+          (onProgress) =>
+            checkDeviations(work, aiRegistry, {
+              onProgress,
+              suiteConfirmed,
+              noteMissing: (note, reason) => {
+                missing = note;
+                missingReason = reason ?? "";
+              },
+            }),
           "話"
         );
-        if (!result || result.cancelled) return;
+        // **「飛ばした」であって「失敗」ではない**（作者の指摘、2026-09-06）
+        if (missing) return checkSkipped(missingReason, missing);
+        if (!result || result.cancelled) return CHECK_CANCELLED;
 
         proposalPanel.showDeviations(work, result.issues);
 
@@ -3196,6 +3539,10 @@ export async function activate(
         if (result.unreadableEpisodes > 0) {
           parts.push(`読めなかった話 ${result.unreadableEpisodes}件（ログ参照）`);
         }
+        // **プロットを切ったことも黙らない**（設計書6.77の第2段）。
+        // 末尾を落として問うたのに、作者からは「そこには指摘が無かった」と
+        // 見える。検知の中で**一度だけ**組み立てた案内をそのまま出す
+        if (result.plotTrimmedNote) parts.push(result.plotTrimmedNote);
         notifyRunCompletion({
           headline: "プロット逸脱の検知",
           parts,
@@ -3205,31 +3552,179 @@ export async function activate(
               ? "本文は書き換えていません。 プロットのほうが古いこともあります。"
               : "",
         });
+        return CHECK_COMPLETED;
       }
     )
+  );
+
+  /**
+   * 単話プロットのAI判定2種（P-27・P-28、設計書6.36.3）。
+   *
+   * **入口は1つにまとめる。** どの話の、どちらの判定かは
+   * `pickEpisodePlotTarget` が決める——プロットモードの一覧から来たときは
+   * 両方分かっているので訊き返さず、単話プロットを開いた状態の右クリック
+   * からはファイル名で話数が分かる。
+   */
+  context.subscriptions.push(
+    registerCommand("novelai.checkEpisodePlot", async (arg?: unknown) => {
+      const ref = asEpisodePlotRef(arg);
+      // 開いているファイルが単話プロットなら、その話数を使う
+      // （右クリック・コマンドパレットのどちらから来ても同じ）
+      const uri =
+        arg instanceof vscode.Uri
+          ? arg
+          : vscode.window.activeTextEditor?.document.uri;
+      const openedPath = uri ? fromUri(uri) : undefined;
+      const openedChapter = openedPath
+        ? episodePlotChapterOfPath(openedPath)
+        : null;
+
+      const work =
+        ref?.work ??
+        (openedPath ? findWorkForPath(registry, openedPath) : undefined) ??
+        (await resolveWork(
+          arg instanceof vscode.Uri ? undefined : (arg as WorkRef | undefined),
+          registry
+        ));
+      if (!work) return;
+
+      const target = ref
+        ? { chapter: ref.chapter, check: ref.check }
+        : await pickEpisodePlotTarget(work, {
+            ...(openedChapter === null ? {} : { chapter: openedChapter }),
+          });
+      if (!target) return;
+
+      if (target.check === "design") {
+        // **本文は読まないが、単話プロットは読む。** 書きかけのまま
+        // 走らせると、画面と違う箇条書きを送ることになる
+        if (
+          !(await saveDirtyDocumentsBeforeExtraction(
+            work,
+            "単話プロットの検査"
+          ))
+        ) {
+          return;
+        }
+        const result = await withPanelProgress(
+          work,
+          "単話プロットを検査",
+          (onProgress) =>
+            checkEpisodePlotDesign(work, target.chapter, aiRegistry, {
+              onProgress,
+            }),
+          "件"
+        );
+        if (!result || result.cancelled) return;
+
+        proposalPanel.showEpisodePlotFindings(
+          work,
+          result.plotPath,
+          result.findings
+        );
+        // 空の節があると、見られる観点が減る。**黙って減らさない**
+        const parts = episodePlotCompletionParts({
+          findings: result.findings.length,
+          rejectedCount: result.rejectedCount,
+          rejectSummary: result.rejectSummary,
+          blanks: result.blanks,
+        });
+        notifyRunCompletion({
+          headline: `${result.chapterLabel}の単話プロットの検査`,
+          parts,
+          failedCount: result.failed ? 1 : 0,
+          tail:
+            result.findings.length > 0
+              ? "プロットは書き換えていません。 直すかどうかは作者が決めます。"
+              : "",
+        });
+        return;
+      }
+
+      if (
+        !(await saveDirtyDocumentsBeforeExtraction(
+          work,
+          "単話プロットと本文の照合"
+        ))
+      ) {
+        return;
+      }
+      const result = await withPanelProgress(
+        work,
+        "本文と単話プロットを照合",
+        (onProgress) =>
+          contrastEpisodePlot(work, target.chapter, aiRegistry, { onProgress }),
+        "件"
+      );
+      if (!result || result.cancelled) return;
+
+      proposalPanel.showEpisodePlotContrast(
+        work,
+        result.plotPath,
+        result.episodePath,
+        result.findings
+      );
+      // **切った後ろは見ていない。** 0件を「食い違いなし」と読ませない
+      const parts = episodePlotCompletionParts({
+        findings: result.findings.length,
+        rejectedCount: result.rejectedCount,
+        rejectSummary: result.rejectSummary,
+        droppedChars: result.droppedChars,
+      });
+      notifyRunCompletion({
+        headline: `${result.chapterLabel}の本文と単話プロットの照合`,
+        parts,
+        failedCount: result.failed ? 1 : 0,
+        tail:
+          result.findings.length > 0
+            ? "本文もプロットも書き換えていません。 箇条書きのほうが古いこともあります。"
+            : "",
+      });
+    })
   );
 
   context.subscriptions.push(
     registerCommand(
       "novelai.checkProofread",
-      async (node?: WorkNode) => {
+      async (node?: WorkNode, options?: CheckRunOptions) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を推敲してしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "推敲"))) return;
+        const unsaved = await saveBeforeCheck(work, "推敲");
+        if (unsaved) return unsaved;
 
+        const suiteConfirmed = isSuiteConfirmed(options);
         const result = await withPanelProgress(work, "推敲", (onProgress) =>
-          checkProofread(work, aiRegistry, { onProgress })
+          checkProofread(work, aiRegistry, { onProgress, suiteConfirmed })
         );
-        if (!result || result.cancelled) return;
+        if (!result || result.cancelled) return CHECK_CANCELLED;
 
-        proposalPanel.showResults(work, result.issues, "推敲");
+        const shown = proposalPanel.showResults(work, result.issues, "推敲");
 
-        const parts = [`指摘 ${result.issues.length}件`];
+        // **誤字脱字と同じ数え方にする**（設計書6.8）。前に適用済み・
+        // 解消済みだったものを「指摘」に数えると、パネルの見出しと食い違う。
+        // **捨てたぶんはここでは言わない**——推敲は「絞り込み」「語尾の
+        // 数え違い」と、より細かい内訳を下で出しており、総数を重ねると
+        // 同じものを二度数えたように見える
+        const parts = describeCheckRunCounts({
+          shown: shown.remaining,
+          alreadyHandled: shown.handled,
+          rejected: 0,
+        });
         if (result.overBudgetCount > 0) {
           // 黙って絞ると「これで全部」と受け取られる
           parts.push(`多すぎたぶん ${result.overBudgetCount}件を絞り込み`);
+        }
+        if (result.monotonyDroppedCount > 0) {
+          // AIの「〜た。が5連続」を数え直して外したぶん（2026-09-04）
+          parts.push(`語尾の数え違い ${result.monotonyDroppedCount}件を除外`);
+        }
+        if (result.monotonyMergedCount > 0) {
+          // 同じ並びに何枚も出ていたぶん（2026-09-05）。黙って減らさない
+          parts.push(
+            `語尾単調：同じ連続の重複${result.monotonyMergedCount}件をまとめた`
+          );
         }
         if (result.failedChunks > 0) {
           parts.push(`読み取れなかった ${result.failedChunks}件`);
@@ -3239,6 +3734,7 @@ export async function activate(
           parts,
           failedCount: result.failedChunks,
         });
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -3248,14 +3744,15 @@ export async function activate(
       "novelai.checkOpening",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う冒頭を診断してしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "冒頭診断"))) return;
+        const unsaved = await saveBeforeCheck(work, "冒頭診断");
+        if (unsaved) return unsaved;
 
         // **完了の通知を出さない。** 結果そのものが文書として開くので、
         // 「できました」を重ねると画面の手前に確認が1枚増えるだけになる
-        await checkOpening(work, aiRegistry);
+        return await checkOpening(work, aiRegistry);
       }
     )
   );
@@ -3263,13 +3760,20 @@ export async function activate(
   context.subscriptions.push(
     registerCommand(
       "novelai.checkContradictions",
-      async (node?: WorkNode) => {
+      async (node?: WorkNode, options?: CheckRunOptions) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を突き合わせてしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "矛盾検知"))) return;
+        const unsaved = await saveBeforeCheck(work, "矛盾検知");
+        if (unsaved) return unsaved;
 
+        // **前提が無くて走れなかった理由を受ける**（設計書6.80）。まとめ実行
+        // では警告のダイアログを出す場が無いので、理由を持ち帰って最後の
+        // まとめへ並べる。この口を足すのはコマンドの側である
+        let missing = "";
+        let missingReason = "";
+        const suiteConfirmed = isSuiteConfirmed(options);
         const result = await withPanelProgress(
           work,
           "矛盾を検知",
@@ -3278,16 +3782,33 @@ export async function activate(
               onProgress,
               // 検証はAIを1件ずつ呼ぶので、別の札で件数を流す
               onVerifyProgress: stage("検出した矛盾を検証", "件"),
+              suiteConfirmed,
+              noteMissing: (note, reason) => {
+                missing = note;
+                missingReason = reason ?? "";
+              },
             })
         );
-        if (!result || result.cancelled) return;
+        // **中止ではなく「飛ばした」にする。** 残りの検知はこの前提を
+        // 要らないので、ここで列を止めると関係のない機能まで走らずに終わる。
+        // 「失敗」とも言わない——壊れてはおらず、設定資料を足せば走る
+        if (missing) return checkSkipped(missingReason, missing);
+        if (!result || result.cancelled) return CHECK_CANCELLED;
 
         // 矛盾が実は伏線だったときの逃げ道を添える（設計書6.35.4）
-        proposalPanel.showContradictions(work, result.issues, (source) =>
-          registerForeshadowFromContradiction(work, source)
+        const shown = proposalPanel.showContradictions(
+          work,
+          result.issues,
+          (source) => registerForeshadowFromContradiction(work, source)
         );
 
-        const parts = [`指摘 ${result.issues.length}件`];
+        // **誤字脱字と同じ数え方にする**（設計書6.8）。捨てたぶんは、
+        // すぐ下に元からある言い方（「本文と合わない指摘」）をそのまま使う
+        const parts = describeCheckRunCounts({
+          shown: shown.remaining,
+          alreadyHandled: shown.handled,
+          rejected: 0,
+        });
         if (result.rejectedCount > 0) {
           // 本文に無い箇所を「引用」してくることがある。黙って捨てない
           parts.push(`本文と合わない指摘 ${result.rejectedCount}件を除外`);
@@ -3312,6 +3833,7 @@ export async function activate(
               ? "本文は書き換えていません。 設定と本文のどちらを直すかは作者が決めてください。"
               : "",
         });
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -3338,8 +3860,12 @@ export async function activate(
         );
         if (!result) return;
 
-        proposalPanel.showResults(work, result.issues);
-        reportTypoCheckResult(`${node.episode.fileName} の誤字脱字検知`, result);
+        const shown = proposalPanel.showResults(work, result.issues);
+        reportTypoCheckResult(
+          `${node.episode.fileName} の誤字脱字検知`,
+          result,
+          shown
+        );
       }
     )
   );
@@ -3379,7 +3905,7 @@ export async function activate(
           return;
         }
         treeProvider.refresh(node.work.id);
-        vscode.window.showInformationMessage(
+        notifyDone(
           `${node.episode.fileName} を削除しました。`
         );
       }
@@ -3555,8 +4081,47 @@ export async function activate(
   context.subscriptions.push(
     registerCommand("novelai.addRuby", addRuby),
     registerCommand("novelai.addEmphasis", addEmphasis),
-    registerCommand("novelai.copyForPosting", copyForPosting),
-    registerCommand("novelai.importRuby", importRuby)
+    // **貼り付け先は1度だけ訊く**（設計書6.12.4）。登録済みの投稿先を
+    // 先頭に並べたいが、画面側は作品を知らないので、どの作品かはここで引く
+    registerCommand("novelai.copyForPosting", async () => {
+      await copyForPosting(
+        await registeredPostingSites(activePostingCopyWork(registry))
+      );
+    }),
+    registerCommand("novelai.importRuby", importRuby),
+    /*
+      口述で入れた文を整える（設計書6.83）。
+
+      **原稿エディタの「整える」と同じ関数を通す**（入口2つ・実体1つ）。
+      こちらは普通のエディタで使う入口なので、範囲は**選択**で決める
+      ——選んでいなければ、どこを整えるのか決めようがない。
+    */
+    registerCommand("novelai.dictationClean", async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        void vscode.window.showInformationMessage(
+          "整える本文を開いてから実行してください。"
+        );
+        return;
+      }
+      if (editor.selection.isEmpty) {
+        void vscode.window.showInformationMessage(
+          "口述で入れたところを選んでから実行してください。" +
+            "（原稿エディタなら、下段の「口述」→「整える」で範囲を選ばずに使えます）"
+        );
+        return;
+      }
+      const { runDictationClean } = await import("./features/dictationClean.js");
+      await runDictationClean(
+        {
+          document: editor.document,
+          range: editor.selection,
+          work: workOfPath(registry, fromUri(editor.document.uri)),
+          entry: "editor",
+        },
+        aiRegistry
+      );
+    })
   );
 
   // **入口を2つ持たせる**（設計書6.12.1）。ファイルを右クリックしたときは
@@ -3590,6 +4155,28 @@ export async function activate(
     )
   );
 
+  // **作品の登録は要らない**（設計書6.85）。Word で書いた原稿は、たいてい
+  // まだ作品として登録していない。登録があるときだけ、既定のフォルダーを
+  // 決めるために作品を訊く
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.convertDocxToMarkdown",
+      async (node?: WorkNode) => {
+        const { convertDocxToMarkdown } = await import(
+          "./features/docxImport.js"
+        );
+        let work: WorkEntry | undefined;
+        if (registry.list().length > 0) {
+          work = await resolveWork(node, registry);
+          // 作品を選ばずに閉じたのなら、そこで終わる
+          if (!work) return;
+        }
+        await convertDocxToMarkdown(work);
+        if (work) treeProvider.refresh(work.id);
+      }
+    )
+  );
+
   context.subscriptions.push(
     registerCommand(
       "novelai.showEditHistory",
@@ -3618,10 +4205,7 @@ export async function activate(
             } catch {
               // 読めない作品は0件として扱う。補足が出ないだけで実害はない
             }
-            return {
-              note: count > 0 ? `未処理の提案 ${count}件` : "未処理なし",
-              order: count,
-            };
+            return pendingProposalNote(count);
           },
         });
         if (!work) return;
@@ -3708,7 +4292,7 @@ export async function activate(
         ) {
           return;
         }
-        await copyBodyForPosting(node.episode);
+        await copyBodyForPosting(node.work, node.episode);
       }
     ),
     registerCommand(
@@ -3717,6 +4301,218 @@ export async function activate(
         if (!node) return;
         await renameWithSubtitle(node.work, node.episode);
         treeProvider.refresh(node.work.id);
+      }
+    )
+  );
+
+  /*
+    投稿キット（設計書6.68）。**投稿サイトへは書き込まない**——変換と
+    コピー、投稿ページを開くこと、記録だけを機械が引き受ける。
+
+    入口は2つある。作品から始めると**未投稿のいちばん古い話**、話から
+    始めるとその話。どちらも未保存の本文を先に保存させる
+    （画面と違う本文を投稿欄へ渡さないため。`copyBodyForPosting` と同じ）。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.postNewEpisode", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      if (!(await saveDirtyDocumentsBeforeExtraction(work, "投稿の準備"))) return;
+      const result = await postNewEpisode(work, aiRegistry);
+      // 未投稿の印が変わるので、記録したときだけ一覧を作り直す
+      if (result.changed) treeProvider.refresh(work.id);
+    }),
+    registerCommand("novelai.postThisEpisode", async (node?: EpisodeNode) => {
+      if (!node) return;
+      if (!(await saveDirtyDocumentsBeforeExtraction(node.work, "投稿の準備"))) {
+        return;
+      }
+      const result = await postNewEpisode(node.work, aiRegistry, node.episode);
+      if (result.changed) treeProvider.refresh(node.work.id);
+    }),
+    registerCommand(
+      "novelai.configurePostingSites",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        // **AIは呼ばない。** サイト・URL・作品情報・基準線を決めるだけ
+        const result = await configurePostingSites(work);
+        if (!result.changed) return;
+        treeProvider.refresh(work.id);
+        // 作品情報は執筆量パネルの「サイトの記録」に出る。開いたままの
+        // パネルが古い値を映し続けないよう、その場で作り直す
+        await refreshWritingStatsPanel(work, deviceId);
+      }
+    ),
+    /*
+      ランキングの記録（設計書6.68.5）。**サイトへは取りにいかない**——
+      作者が画面で見た順位を台帳へ書き足すだけである。
+
+      一覧は作り直さない。未投稿の印は順位では変わらず、記録のたびに
+      作品一覧を組み直しても見た目は同じである。
+
+      **執筆量パネルは作り直す。** 記録した順位が出るのはそこなので、
+      開いたままだと「記録しました」と言われた順位が画面に無い。
+    */
+    registerCommand("novelai.recordRanking", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      const result = await recordRanking(work);
+      if (result.changed) await refreshWritingStatsPanel(work, deviceId);
+    }),
+    /*
+      読者の反応（設計書6.79.7）。**順位と同じ扱い**——サイトへは取りに
+      いかず、作者が打った値か、作者が自分で開いた管理画面から貼り込み係が
+      作った封筒を受けるだけである。
+
+      記録が出るのは執筆量パネルなので、そちらを作り直す（一覧は変わらない）。
+    */
+    registerCommand("novelai.importReaderStats", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      const result = await importReaderStats(work);
+      if (result.changed) await refreshWritingStatsPanel(work, deviceId);
+    }),
+    registerCommand("novelai.recordReaderStats", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      const result = await recordReaderStats(work);
+      if (result.changed) await refreshWritingStatsPanel(work, deviceId);
+    })
+  );
+
+  /*
+    作品ごとのメモ（設計書6.71）。
+
+    **触るのはメモのファイルだけ。** 原稿にも台帳にも書き込まない。
+    移管は「移した元」と「移した先」の両方の一覧を作り直す
+    ——片方だけだと、移したメモが2つの作品に見えたままになる。
+  */
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.addWorkMemo",
+      async (node?: WorkRef | MemoFolderNode | MemoFileNode) => {
+        // メモの枝からも足せる。そちらは作品が分かっているので訊かない
+        const work =
+          node && (node.type === "memoFolder" || node.type === "memoFile")
+            ? node.work
+            : await resolveWork(node, registry);
+        if (!work) return;
+        if (await addWorkMemo(work)) treeProvider.refresh(work.id);
+      }
+    ),
+    registerCommand("novelai.removeWorkMemo", async (node?: MemoFileNode) => {
+      if (!node) return;
+      if (await removeWorkMemo(node.work, node.memo)) {
+        treeProvider.refresh(node.work.id);
+      }
+    }),
+    registerCommand(
+      "novelai.transferMemoToWork",
+      async (node?: EpisodeNode) => {
+        if (!node) return;
+        const moved = await transferMemo(node.work, node.episode, registry);
+        if (!moved) return;
+        treeProvider.refresh(moved.fromWorkId);
+        treeProvider.refresh(moved.toWorkId);
+      }
+    )
+  );
+
+  /*
+    章立て（設計書6.66.2）。**木のノードが引数に要る**ので、
+    コマンドパレットには出さない（`package.json` の commandPalette）。
+    台帳が変わったときだけ作品一覧を作り直す。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.startChapter", async (node?: EpisodeNode) => {
+      if (!node) return;
+      if (await startChapterAt(node.work, node.episode)) {
+        treeProvider.refresh(node.work.id);
+      }
+    }),
+    registerCommand("novelai.renameChapter", async (node?: ChapterNode) => {
+      if (!node) return;
+      if (await renameChapter(node.work, node.chapter)) {
+        treeProvider.refresh(node.work.id);
+      }
+    }),
+    registerCommand("novelai.removeChapter", async (node?: ChapterNode) => {
+      if (!node) return;
+      if (await removeChapter(node.work, node.chapter)) {
+        treeProvider.refresh(node.work.id);
+      }
+    })
+  );
+
+  /*
+    章立てのAIの提案（P-31、設計書6.66.4）。
+
+    **提案は台帳へ直接入らない。** 章分けの提案は提案パネルに並び、
+    作者が承認した1件ずつが `ChapterStore` へ入る——入った時点で
+    作品一覧を作り直す（折りたたみは台帳から作られるため）。
+
+    章名の提案だけは、章ノードが引数に要るのでコマンドパレットに出さない。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.proposeChapters", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await proposeChapters(work, aiRegistry, proposalPanel, {
+        onChaptersChanged: () => treeProvider.refresh(work.id),
+      });
+    }),
+    registerCommand(
+      "novelai.suggestChapterName",
+      async (node?: ChapterNode) => {
+        if (!node) return;
+        if (await suggestChapterName(node.work, node.chapter, aiRegistry)) {
+          treeProvider.refresh(node.work.id);
+        }
+      }
+    )
+  );
+
+  /*
+    話の挿入と削除（設計書6.67）。**木のノードが引数に要る**ので、
+    コマンドパレットには出さない（`package.json` の commandPalette）。
+
+    実装は `node:child_process`（`core/git.ts`）を静的importしているため、
+    ここでは動的import（`await import(...)`）を通す
+    （`novelai.gitSync` などと同じ約束、設計書5.8.5）。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.insertEpisodeBefore", async (node?: EpisodeNode) => {
+      if (!node) return;
+      const episodes = await treeProvider.getEpisodes(node.work);
+      const { insertEpisodeBefore } = await import("./features/insertEpisode.js");
+      const result = await insertEpisodeBefore(node.work, node.episode, episodes);
+      if (result.changed) treeProvider.refresh(node.work.id);
+      if (result.newFilePath) {
+        // 新規作成した回は「保存でファイル数が変わった回」に当たるため、
+        // 執筆量の基準を置き直す（`novelai.addEpisode` と同じ理由、設計書6.3.2）
+        await progress.rebaseline(node.work);
+        await vscode.commands.executeCommand(
+          "vscode.openWith",
+          path.toUri(result.newFilePath),
+          MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+        );
+      }
+    }),
+    registerCommand(
+      "novelai.removeEpisodeAndRenumber",
+      async (node?: EpisodeNode) => {
+        if (!node) return;
+        const episodes = await treeProvider.getEpisodes(node.work);
+        const { removeEpisodeAndRenumber } = await import(
+          "./features/removeEpisode.js"
+        );
+        const result = await removeEpisodeAndRenumber(
+          node.work,
+          node.episode,
+          episodes
+        );
+        if (result.changed) treeProvider.refresh(node.work.id);
       }
     )
   );
@@ -3755,6 +4551,23 @@ export function deactivate(): void {
 }
 
 /**
+ * プロットモードの一覧から渡された引数か（設計書6.36.3）。
+ *
+ * **形を確かめてから使う。** 右クリック（`Uri`）・詳細メニュー（`WorkRef`）・
+ * コマンドパレット（引数なし）と同じ口を通るので、名前だけで信じない。
+ */
+function asEpisodePlotRef(arg: unknown): EpisodePlotCheckRef | undefined {
+  if (typeof arg !== "object" || arg === null) return undefined;
+  const candidate = arg as Partial<EpisodePlotCheckRef>;
+  if (candidate.type !== "episodePlot") return undefined;
+  if (!candidate.work || typeof candidate.chapter !== "number") return undefined;
+  if (candidate.check !== "design" && candidate.check !== "contrast") {
+    return undefined;
+  }
+  return candidate as EpisodePlotCheckRef;
+}
+
+/**
  * そのファイルが属する作品を探す。
  * 深い作品フォルダを先に見て、入れ子の場合は内側を選ぶ。
  */
@@ -3776,6 +4589,25 @@ function findWorkForPath(
 }
 
 /**
+ * いま作者が見ている本文（作者の実機報告、2026-09-06）。
+ *
+ * **素のエディタと原稿エディタの、どちらで開いていても同じ答えを返す。**
+ * 原稿エディタはWebView（カスタムエディタ）なので `activeTextEditor` は
+ * undefined になり、これを直に見ているコマンドは、原稿エディタで書いている
+ * 作者に「本文のファイルを開いてから実行してください」と言い返していた
+ * （「縦書きで開く」が原稿エディタから一度も使えなかった）。
+ *
+ * **判定を1本にまとめてあるので、同じ形のコマンドを足すときはここを通す。**
+ * 順は素のエディタが先——タブが原稿エディタでも、作者がカーソルを置いて
+ * いるのは素のエディタ側、ということがある。
+ */
+function activeManuscriptUri(): vscode.Uri | undefined {
+  return (
+    vscode.window.activeTextEditor?.document.uri ?? activeManuscriptTabUri()
+  );
+}
+
+/**
  * 作品を持たない操作のログを、どの作品フォルダへ残すか。
  *
  * **作者に問いかけない。** AIチューニング（設計書6.49）のように作品を
@@ -3789,7 +4621,8 @@ function findWorkForPath(
  * 返し、これまでどおり出力パネルにだけ残す（無理に書き先を作らない）。
  */
 function logTargetWorkFolder(registry: WorkRegistry): string | undefined {
-  const uri = vscode.window.activeTextEditor?.document.uri;
+  // 原稿エディタで書いているときも、その作品のログへ残す
+  const uri = activeManuscriptUri();
   const opened = uri ? findWorkForPath(registry, fromUri(uri)) : undefined;
   if (opened) return opened.folderPath;
   const works = registry.list();
@@ -3884,10 +4717,27 @@ function isAssignableFeature(value: unknown): value is AssignableFeature {
   );
 }
 
-/** 誤字脱字検知の結果を要約して通知する。作品全体・1話単位のどちらからも呼ぶ */
-function reportTypoCheckResult(label: string, result: TypoCheckRunResult): void {
-  const parts = [`指摘 ${result.issues.length}件`];
-  if (result.rejectedCount > 0) parts.push(`除外 ${result.rejectedCount}件`);
+/**
+ * 誤字脱字検知の結果を要約して通知する。作品全体・1話単位のどちらからも呼ぶ。
+ *
+ * **件数は提案パネルに出たものを言う**（設計書6.8）。検知が返した件数を
+ * そのまま言うと、前に適用済み・解消済みだったものまで数えてしまい、
+ * 通知が「指摘 1件」なのにパネルの見出しは「誤字脱字 0件」になる
+ * （2026-09-06、作者の実機報告）。
+ *
+ * @param shown `proposalPanel.showResults` が返した、一覧に残った件数
+ */
+function reportTypoCheckResult(
+  label: string,
+  result: TypoCheckRunResult,
+  shown: IncomingCount
+): void {
+  const parts = describeCheckRunCounts({
+    shown: shown.remaining,
+    // 本文へ当てる前に落としたぶんと、パネルで既に片付いていたぶんの両方
+    alreadyHandled: result.alreadyAppliedCount + shown.handled,
+    rejected: result.rejectedCount,
+  });
   notifyRunCompletion({
     headline: label,
     parts,
@@ -3935,6 +4785,17 @@ export type WorkRef = Pick<WorkNode, "type" | "work">;
  * という食い違いが出る。
  */
 const CHAT_RUN_COMMANDS: Partial<Record<ChatRunKind, string>> = {
+  // 検知は 2026-09-06 にここへ寄せた（設計書6.8.16）。相談側に写しを置くと、
+  // 件数の数え方・完了の知らせが片方だけ古くなる。**寄せられないのは
+  // 「いま開いている話だけ」（checkTyposForFile）だけで、その理由は
+  // `run` に書いてある**
+  checkTypos: "novelai.checkTypos",
+  // 表記ゆれは、コマンド側が0組で黙っていたので寄せられなかった。
+  // その口を `describeNotationResult` に揃えて寄せた（2026-09-06）
+  checkNotation: "novelai.checkNotation",
+  checkProofread: "novelai.checkProofread",
+  checkDeviations: "novelai.checkDeviations",
+  checkContradictions: "novelai.checkContradictions",
   extractSettings: "novelai.extractSettings",
   extractCharacters: "novelai.extractCharactersOnly",
   extractLocations: "novelai.extractLocationsOnly",
@@ -3951,6 +4812,35 @@ const CHAT_RUN_COMMANDS: Partial<Record<ChatRunKind, string>> = {
   openSynopsisDocs: "novelai.openSynopsisDocs",
   generatePlot: "novelai.generatePlot",
 };
+
+/**
+ * いま開いている本文の作品（設計書6.68.2）。
+ *
+ * 投稿先の台帳を読むのは `features/postingCopyRegistered.ts` に寄せてある——
+ * 入口が3つあるので、読み方と失敗の扱いを写さない。
+ */
+function activePostingCopyWork(registry: WorkRegistry): WorkEntry | undefined {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) return undefined;
+
+  return workOfPath(registry, fromUri(editor.document.uri));
+}
+
+/**
+ * そのファイルが属する作品（登録簿で引く）。
+ *
+ * **引き方を1か所に置く。** 普通のエディタ（`activePostingCopyWork`）と
+ * 原稿エディタ（`ManuscriptEditorDeps.workOf`）が別々に引くと、同じ操作の
+ * 結果が画面によって変わる。比べ方は前方一致では足りない（`isInsideWork`）。
+ */
+function workOfPath(
+  registry: WorkRegistry,
+  filePath: string
+): WorkEntry | undefined {
+  return registry
+    .list()
+    .find((entry) => isInsideWork(entry.folderPath, filePath));
+}
 
 async function resolveWork(
   node: WorkRef | undefined,
@@ -3971,8 +4861,11 @@ async function resolveWork(
     const picked = await vscode.window.showQuickPick(
       [
         ...works.map((w) => ({
-          label: w.title,
+          label: abbreviateTitle(w.title),
           description: w.folderPath,
+          // 省略したときだけ全文を添える。短い題にまで2行目を足すと、
+          // 選ぶだけの窓が縦に伸びて読みにくくなる
+          detail: isAbbreviated(w.title) ? w.title : undefined,
           work: w,
         })),
         // Escでも閉じられるが、それを知らない人には出口が無いように見える
@@ -3984,16 +4877,21 @@ async function resolveWork(
   }
 
   const notes = await Promise.all(works.map((work) => options.annotate!(work)));
-  const items = works
-    .map((work, index) => ({
-      label: work.title,
+  // 溜まっている作品を上に出す。作者はたいていそれを選びたい
+  const items = sortByPickOrder(
+    works.map((work, index) => ({
+      // **長い作品名は省略する**（作者の裁定、2026-09-06）。右に出る
+      // 「未反映3件」などの補足が、幅の外へ押し出されて読めなくなるため
+      label: abbreviateTitle(work.title),
       description: notes[index].note ?? "",
-      detail: work.folderPath,
+      // 全文は2行目に出す（省略していなければ、これまでどおり置き場だけ）
+      detail: isAbbreviated(work.title)
+        ? `${work.title}（${work.folderPath}）`
+        : work.folderPath,
       order: notes[index].order ?? 0,
       work,
     }))
-    // 溜まっている作品を上に出す。作者はたいていそれを選びたい
-    .sort((left, right) => right.order - left.order);
+  );
 
   const picked = await vscode.window.showQuickPick(
     [...items, cancelItem()],

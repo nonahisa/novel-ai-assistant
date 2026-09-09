@@ -1,8 +1,17 @@
 import * as vscode from "vscode";
 import { WorkEntry } from "../models/types";
-import type { Character } from "../models/character";
+import {
+  emptyCharacter,
+  nextCharacterId,
+  type Character,
+} from "../models/character";
+import { findCharactersByAppellation } from "../core/plotCharacterSync";
 import { CharacterStore, CharacterStoreError } from "../core/characterStore";
-import { PendingUpdateStore, type PendingUpdate } from "../core/pendingUpdates";
+import {
+  PendingUpdateStore,
+  pendingSourceLabel,
+  type PendingUpdate,
+} from "../core/pendingUpdates";
 import {
   diffCharacter,
   diffLinesForPanel,
@@ -27,8 +36,77 @@ import type { ProposalPanel } from "./proposalPanel";
 
 interface ReviewItem {
   update: PendingUpdate;
-  current: Character;
+  /** 更新前のレコード。**新規案には無い**（まだ台帳に居ない） */
+  current: Character | undefined;
   diff: CharacterDiff;
+}
+
+/** その案が「新しく作る」ものか（設計書6.4.9） */
+function isCreation(item: ReviewItem): boolean {
+  return item.update.kind === "creation";
+}
+
+/**
+ * 何が変わるかの要約に、出どころを添える（設計書6.4.9）。
+ *
+ * **AIが本文から読んだものと、作者がプロットへ書いたものは別物である。**
+ * 同じ「紹介を変更」でも、承認するときの見方が変わる。
+ */
+/** 確認文に名前を並べる上限。多いと読まずに押される */
+const CONFIRM_PREVIEW_LIMIT = 5;
+
+/**
+ * 「N人の設定に更新があります」の確認文（設計書6.8）。
+ *
+ * **数と並びを1つの配列から作る。** 前は「N人」と一覧と「ほかN人」を
+ * 別々に組んでおり、片方だけ直せば黙って食い違う形だった。
+ * 数の整合は目で数えるしかなかったので、純粋関数にして機械に確かめさせる。
+ */
+export function describePendingUpdatesConfirm(
+  entries: ReadonlyArray<{ name: string; change: string }>
+): string {
+  const shown = entries.slice(0, CONFIRM_PREVIEW_LIMIT);
+  const rest = entries.length - shown.length;
+
+  return (
+    `${entries.length} 人の設定に更新があります。\n` +
+    shown.map((entry) => `・${entry.name}: ${entry.change}`).join("\n") +
+    (rest > 0 ? `\n…ほか ${rest} 人` : "")
+  );
+}
+
+function describeChange(item: ReviewItem): string {
+  const label = pendingSourceLabel(item.update.source);
+  const summary = isCreation(item) ? "新規の人物" : summarizeDiff(item.diff);
+  return label ? `${label}：${summary}` : summary;
+}
+
+/**
+ * 承認された1件を台帳へ入れる。
+ *
+ * **新規案のIDは、ここで採る。** 積んだ時点の番号を使うと、承認までの
+ * あいだに別の操作（抽出・分割）が同じ番号を使っていることがある。
+ * `known` には台帳の全員とこの操作で作ったぶんを入れておき、続けて
+ * 承認したときに同じ番号を二度使わないようにする。
+ *
+ * **`save` を直に呼ばない。** `saveOrUpdate` は既知のIDなら退避つきの
+ * 書き換え、未知なら新規作成へ振り分ける（`atomicWrite` の約束）。
+ */
+async function applyItem(
+  item: ReviewItem,
+  characterStore: CharacterStore,
+  known: Character[]
+): Promise<void> {
+  if (!isCreation(item)) {
+    await characterStore.saveOrUpdate(item.update.character);
+    return;
+  }
+  const created: Character = {
+    ...item.update.character,
+    id: nextCharacterId(known),
+  };
+  await characterStore.saveOrUpdate(created);
+  known.push(created);
 }
 
 export async function applyPendingCharacterUpdates(
@@ -71,10 +149,37 @@ export async function applyPendingCharacterUpdates(
   const customFields = await new CustomFieldStore(work).loadFields();
 
   const byId = new Map(loaded.characters.map((c) => [c.id, c]));
+  // 新規案の採番に使う。**承認するたびに増やす**（続けて承認したときに
+  // 同じ番号を二度使わないため）
+  const known: Character[] = [...loaded.characters];
   const items: ReviewItem[] = [];
   const orphaned: PendingUpdate[] = [];
 
   for (const update of pending.updates) {
+    // **新規案は、居ないことの判定より先に分ける**（設計書6.4.9）。
+    // 台帳に居ないのが当たり前なので、更新案の規則（居なければ片付ける）を
+    // そのまま当てると、確認される前に必ず消える
+    if (update.kind === "creation") {
+      // 積んだあとに同じ名前の人物が資料へ増えていたら、作らない。
+      // 二重に作ると、次の抽出で「同じかもしれません」と言われ続ける
+      if (findCharactersByAppellation(loaded.characters, update.character.name).length > 0) {
+        orphaned.push(update);
+        continue;
+      }
+      items.push({
+        update,
+        current: undefined,
+        // 何が入るのかを、更新案と同じ並びで見せる。
+        // 比べる相手は空のレコード（すべてが「追加」になる）
+        diff: diffCharacter(
+          emptyCharacter(update.character.id, ""),
+          update.character,
+          customFields
+        ),
+      });
+      continue;
+    }
+
     const current = byId.get(update.character.id);
     if (!current) {
       // 対象が消えている（まとめた・削除した）。反映しても復活させるだけ
@@ -121,7 +226,7 @@ export async function applyPendingCharacterUpdates(
             diff: diffChars(before, after),
           };
         }),
-        source: summarizeDiff(item.diff),
+        source: describeChange(item),
         status: "pending" as const,
       })),
       async (id) => {
@@ -129,7 +234,8 @@ export async function applyPendingCharacterUpdates(
         if (!target) return { ok: false, reason: "対象が見つかりません。" };
         try {
           // 既存ファイルは上書きできないので saveOrUpdate を通す
-          await characterStore.saveOrUpdate(target.update.character);
+          // （新規案はここでIDを採る。`applyItem` を参照）
+          await applyItem(target, characterStore, known);
           await pendingStore.discard(target.update.filePath);
           return { ok: true };
         } catch (error) {
@@ -170,12 +276,12 @@ export async function applyPendingCharacterUpdates(
   }
 
   const choice = await vscode.window.showInformationMessage(
-    `${items.length} 人の設定に更新があります。\n` +
-      items
-        .slice(0, 5)
-        .map((item) => `・${item.diff.name}: ${summarizeDiff(item.diff)}`)
-        .join("\n") +
-      (items.length > 5 ? `\n…ほか ${items.length - 5} 人` : ""),
+    describePendingUpdatesConfirm(
+      items.map((item) => ({
+        name: item.diff.name,
+        change: describeChange(item),
+      }))
+    ),
     { modal: true },
     "内容を確認",
     "すべて反映",
@@ -194,7 +300,7 @@ export async function applyPendingCharacterUpdates(
     const picked = await vscode.window.showQuickPick(
       items.map((item) => ({
         label: item.diff.name,
-        description: summarizeDiff(item.diff),
+        description: describeChange(item),
         picked: true,
         item,
       })),
@@ -210,13 +316,15 @@ export async function applyPendingCharacterUpdates(
     return;
   }
 
-  await applyAll(targets, characterStore, pendingStore);
+  await applyAll(targets, characterStore, pendingStore, known);
 }
 
 async function applyAll(
   targets: ReviewItem[],
   characterStore: CharacterStore,
-  pendingStore: PendingUpdateStore
+  pendingStore: PendingUpdateStore,
+  /** 採番に使う顔ぶれ。作ったぶんはここへ足される */
+  known: Character[]
 ): Promise<void> {
   const applied: string[] = [];
   const failed: Array<{ name: string; message: string }> = [];
@@ -229,7 +337,7 @@ async function applyAll(
           message: `${index + 1}/${targets.length} ${target.diff.name}`,
         });
         try {
-          await characterStore.saveOrUpdate(target.update.character);
+          await applyItem(target, characterStore, known);
           await pendingStore.discard(target.update.filePath);
           applied.push(target.diff.name);
         } catch (error) {
@@ -285,7 +393,15 @@ async function showDiffDocument(
     "この内容はまだ保存されていません。",
     "確認したら「重複をまとめる」の隣の「更新分を反映」から実行してください。",
     "",
-    ...items.map((item) => formatDiff(item.diff)),
+    // 出どころは名前の見出しの直後に置く（設計書6.4.9）。
+    // どこから来た提案かは、中身より先に知りたい
+    ...items.map((item) => {
+      const label = pendingSourceLabel(item.update.source);
+      const body = formatDiff(item.diff);
+      if (!label) return body;
+      const [heading, ...rest] = body.split("\n");
+      return [heading, "", `出どころ: ${label}`, ...rest].join("\n");
+    }),
   ].join("\n");
 
   // **どの画面で読むかは作者が決める。** 前は開いた直後に

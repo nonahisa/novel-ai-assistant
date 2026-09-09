@@ -3,6 +3,7 @@ import {
   buildFeatureGuideForQuestion,
   buildFeatureIndex,
   buildGuideBundles,
+  EXTRA_GUIDE,
 } from "../../src/features/featureGuide";
 import { ACTION_TREE } from "../../src/views/actionList";
 
@@ -40,6 +41,17 @@ function visibleActions() {
   // **画面に出ない操作は、案内にも入れない**（`browserOnly`）。
   // 試験は手元で走るので、ブラウザ版だけの操作は外れる
   return allActions().filter((action) => !action.browserOnly);
+}
+
+/** `EXTRA_GUIDE` から【…】の節を1つ取り出す（製品側と同じ切り方） */
+function extraSection(title: string): string {
+  const lines = EXTRA_GUIDE.split("\n");
+  const start = lines.indexOf(`【${title}】`);
+  expect(start, `節が無い: ${title}`).toBeGreaterThanOrEqual(0);
+
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => line.startsWith("【"));
+  return (end === -1 ? rest : rest.slice(0, end)).join("\n").trim();
 }
 
 describe("使い方の説明（目次と束）", () => {
@@ -121,6 +133,63 @@ describe("使い方の説明（目次と束）", () => {
     }
   });
 
+  test("メニューに出ないボタンと振る舞いが、名前で目次に載る", () => {
+    /*
+      パネルの中のボタン（相談・提案・EPUBエディター・執筆統計）と、
+      作者が押さないのに働くもの（独り言・順番待ち）は `ACTION_TREE` に
+      無い。**目次に名前が無ければ、AIは「そんな機能はありません」と
+      答える**——操作の漏れとまったく同じ害である。
+
+      名前は `EXTRA_GUIDE` の節から機械的に切り出しているので、
+      節へ足したものは自動で目次に載る。ここではその切り出しが
+      効いていることを見る。
+    */
+    const section = extraSection("メニューに出ないボタンと振る舞い");
+    const names = section
+      .split("\n")
+      .filter((line) => line.startsWith("- "))
+      .map((line) => line.slice(2).split(": ")[0]);
+
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) {
+      expect(index, `目次: ${name}`).toContain(`・${name}`);
+      expect(bundleText, `束: ${name}`).toContain(name);
+    }
+  });
+
+  test("0.30〜0.33で足したものが、案内から消えていない", () => {
+    // 上の検査は「節にあるものが目次へ回る」ことしか見ない。
+    // **節から丸ごと消えたときに気づけない**ので、名前を名指しで置く
+    for (const name of [
+      "相談を資料へ反映",
+      "AIに訊く",
+      "EPUBエディターの右の並び",
+      "貼り込み係へ渡す形でコピー",
+      "Xへ貼り付ける",
+      "サイトの記録",
+      "AIの独り言の感想",
+      "AI機能の順番待ち",
+    ]) {
+      expect(index, `目次: ${name}`).toContain(name);
+      expect(bundleText, `束: ${name}`).toContain(name);
+    }
+  });
+
+  test("メニューに出ないボタンにも、しないことの断りを残す", () => {
+    // 「本文は書き換えません」「送信は作者が押します」が落ちると、
+    // AIが逆を答えかねない（説明の短縮と同じ理由）
+    for (const note of [
+      "承認するまで資料は変わりません",
+      "本文は書き換えません",
+      "本には入りません",
+      "送信は必ず作者が押します",
+      "投稿ボタンは作者が押します",
+      "自動でアクセスすることはありません",
+    ]) {
+      expect(bundleText, note).toContain(note);
+    }
+  });
+
   test("ファイルの置き場所を含む", () => {
     expect(bundleText).toContain("設定/plot.md");
     expect(bundleText).toContain("設定/synopsis.md");
@@ -166,7 +235,7 @@ describe("使い方の説明（目次と束）", () => {
 });
 
 describe("相談へ渡す目次", () => {
-  test("目次は1,750字未満", () => {
+  test("目次は1,800字未満", () => {
     /*
       毎回送るのはこれと【この拡張機能の考え方】だけなので、ここが伸びると
       節約の意味が薄れる。**超えたら、まず説明が混ざっていないかを疑うこと。**
@@ -178,8 +247,48 @@ describe("相談へ渡す目次", () => {
 
       1,700→1,750：更新告知（P-30）で操作が2つ増えた（約39字）。
       こちらも名前だけである。
+
+      1,750→1,800：ストリーミング実験の入切（設計書6.63.1）で1つ増えた
+      （名前だけで約30字）。**この1件は開発ビルドにしか無い**——本番ビルドでは
+      `__DEV_HELPERS__` が false に畳まれて項目ごと落ちるので、
+      作者へ実際に送られる目次は1,740字ほどのままである。試験は開発ビルドとして
+      走るため、ここで測っているのは**多いほう**の値になる。
+
+      1,800→1,850：EPUBエディター（設計書6.65.6）で1つ増えた（名前だけで
+      約15字）。説明は混ざっていない。
+
+      1,850→1,900：プロットモードの画面（設計書6.4.8）で1つ増えた
+      （名前だけで約12字）。説明は混ざっていない。
+
+      1,900→1,950：提供先別の設定資料の書き出し（設計書6.75）で1つ増えた
+      （名前だけで約20字）。説明は混ざっていない。
+
+      1,950→2,100：メニューに出ないボタンと振る舞い（0.30〜0.33で入った8件）
+      の**名前だけ**を目次へ足した（約160字）。パネルの中のボタンは
+      `ACTION_TREE` に項目が無く、目次に名前が無いとAIが「そんな機能は
+      ありません」と答える——操作の漏れと同じ害なので、操作と同じ扱いにした。
+      説明は束（`hidden`）の側にあり、目次には混ざっていない。
+
+      **0.33.8で「その他支援」を「原稿づくり」「投稿・書き出し」へ割った。**
+      小分類の見出しが1行増えるので、目次は約9字だけ伸びて2,096字になった
+      （操作は1つも増えていない）。上限は上げていないが、**残りは4字**である
+      ——次に操作を1つ足せばここが落ちる。**目次は全操作の名前を持つのが
+      役目なので、束のように割って減らすことができない。** 落ちたときは
+      「説明が混ざっていないか」だけ確かめて、名前が増えただけなら上限を
+      上げてよい（この一覧の書き方で理由を残すこと）。
+
+      2,100→2,200：読者の反応の取り込み（設計書6.79.7）で操作が2つ増えた
+      （「読者の反応を貼り付けて取り込む」「読者の反応を手入力する」の
+      **名前だけ**で約34字）。説明は混ざっていない。
+
+      2,200→2,600：**作者の裁定で上げた（2026-09-05）。** 前回2,200へ
+      上げた時点で残りが100字を切っており、操作を数個足すたびに上限を
+      触ることになっていた。**目次は全操作の名前を持つのが役目なので、
+      束のように割って減らすことができない**——名前が1つ欠ければ、AIは
+      「その機能はありません」と嘘を答える。落ちたときに確かめるのは
+      これまでどおり「説明が混ざっていないか」だけである。
     */
-    expect(index.length).toBeLessThan(1750);
+    expect(index.length).toBeLessThan(2600);
   });
 
   test("原稿を勝手に書き換えない、という断りは必ず入る", () => {
@@ -197,6 +306,95 @@ describe("説明の束", () => {
 
     expect(
       tooLong.map((bundle) => `${bundle.label}: ${bundle.text.length}字`)
+    ).toEqual([]);
+  });
+
+  /*
+    **上限に張りつく束を作らない**（0.33.8）。
+
+    「執筆AI支援 → その他支援」は20項目まで育ち、**1,499字で上限1,500の
+    1字下**になっていた。次に操作を1つ足せば落ちる状態で、そこで上限を
+    上げれば「送る量が機能数に比例する」行き止まり（6.27）へ戻る。
+    **上限を上げるのではなく、小分類そのものを割った。**
+
+    割った線は「原稿を書き、整える」操作と「書き上がったものを外へ出す」
+    操作のあいだである。どちらも作者が別の場面で使う——書いている最中と、
+    投稿・出版の段——ので、詳細メニューの見た目としても筋が通る。
+  */
+  test("「その他支援」は、原稿づくりと投稿・書き出しに割ってある", () => {
+    const labels = bundles.map((bundle) => bundle.label);
+
+    expect(labels).toContain("執筆AI支援 → 原稿づくり");
+    expect(labels).toContain("執筆AI支援 → 投稿・書き出し");
+    expect(labels.some((label) => label.includes("その他支援"))).toBe(false);
+  });
+
+  /*
+    **1,000→1,100（0.33.9）。** 読者の反応の取り込み（設計書6.79.7）で
+    「投稿・書き出し」に操作が2つ増え、束が1,071字になった。増えたのは
+    操作2つぶんの名前と説明で、**説明を削って収めることはしなかった**
+    ——「サイトへ通信しない」の断りは、この機能でいちばん落としてはいけない
+    1文である（束に残るのは1文目と「〜ません」の文だけ）。
+
+    ここで上げてよいと判断したのは、**硬い上限（1,500）まで余裕がある**
+    ためで、次に操作を足すときは上げずに**小分類を割ること**（0.33.8で
+    「その他支援」を割ったのと同じ手順）。上げ続ければ、送る量が機能数に
+    比例する行き止まり（6.27）へ戻る。
+  */
+  /*
+    **「校正・校閲」を「校正」と「伏線・矛盾」へ割った**（0.33.10、
+    作者の裁定 2026-09-05）。1,285字あり、上限1,500まで200字ほどしか
+    残っていなかった。**メニューの並びは変えていない**——割ったのは
+    相談へ渡す束だけで、詳細メニューの見た目は今までどおりである
+    （並びは別のところで決まっており、勝手に動かすと作者の手順が変わる）。
+
+    割った線は「文の直し」と「話の整合」のあいだである。作者が見るものが
+    違う——前者は1文ずつの言い回し、後者は話をまたいだ辻褄——ので、
+    質問もどちらかに寄る。
+  */
+  test("「校正・校閲」は、校正と伏線・矛盾に割ってある", () => {
+    const labels = bundles.map((bundle) => bundle.label);
+
+    expect(labels).toContain("執筆AI支援 → 校正");
+    expect(labels).toContain("執筆AI支援 → 伏線・矛盾");
+    expect(labels.some((label) => label.includes("校正・校閲"))).toBe(false);
+  });
+
+  test("割った先が、それぞれの持ち場の操作を持つ", () => {
+    const find = (label: string) =>
+      bundles.find((bundle) => bundle.label === label)?.text ?? "";
+
+    const proofread = find("執筆AI支援 → 校正");
+    const consistency = find("執筆AI支援 → 伏線・矛盾");
+
+    // 文の直し
+    expect(proofread).toContain("誤字脱字を検知");
+    expect(proofread).toContain("表記ゆれを検知");
+    expect(proofread).toContain("推敲する");
+    // 表に載せていない操作は、割る前と同じ側（校正）に残る
+    expect(proofread).toContain("編集部からの提案を見る");
+
+    // 話の整合
+    expect(consistency).toContain("矛盾を検知");
+    expect(consistency).toContain("プロットからの逸脱を検知");
+    expect(consistency).toContain("伏線を検知する");
+    expect(consistency).toContain("伏線の回収を確かめる");
+    expect(consistency).toContain("単話プロットを検査");
+  });
+
+  test("割った2つの束は、どちらも1,100字未満（足す余地を残す）", () => {
+    // **上限ぎりぎりに割り直しても意味が無い。** 割った直後から
+    // 1字下に戻るなら、次の1操作でまた同じ作業になる
+    const split = bundles.filter(
+      (bundle) =>
+        bundle.label === "執筆AI支援 → 原稿づくり" ||
+        bundle.label === "執筆AI支援 → 投稿・書き出し"
+    );
+
+    expect(
+      split
+        .filter((bundle) => bundle.text.length >= 1100)
+        .map((bundle) => `${bundle.label}: ${bundle.text.length}字`)
     ).toEqual([]);
   });
 
@@ -220,7 +418,8 @@ describe("相談1回ぶんの組み立て", () => {
 
     expect(built.reason).toBe("none");
     expect(built.selected).toEqual([]);
-    expect(built.text.length).toBeLessThan(1800);
+    // 上限は目次と同じ（渡しているものが目次そのものなので、揃えておく）
+    expect(built.text.length).toBeLessThan(2600);
   });
 
   test("機能名で聞かれたら、その小分類の説明を足す", () => {
@@ -228,10 +427,53 @@ describe("相談1回ぶんの組み立て", () => {
       question: "誤字脱字はどこ？",
     });
 
-    expect(built.selected.some((label) => label.includes("校正・校閲"))).toBe(
-      true
-    );
+    // 束は「校正」と「伏線・矛盾」に割ってある（0.33.10）。誤字脱字は前者
+    expect(built.selected).toContain("執筆AI支援 → 校正");
     // 目次は落とさない。説明のある操作だけが全部だと読まれては困る
     expect(built.text).toContain("表記ゆれを検知");
+  });
+
+  /*
+    **割った2つの束が、互いに紛れないこと**（0.33.8）。
+
+    束選び（`core/guideSelect.ts`）は文字2つ組みの一致で選ぶので、
+    見出しの名前そのものも当たりの材料になる。**割った結果、どちらの
+    質問でも両方が返るようでは割った意味が無い**（送る量が減らない）。
+  */
+  test("ルビの質問では、原稿づくりが先に来る", () => {
+    const built = buildFeatureGuideForQuestion({ question: "ルビを振りたい" });
+
+    // **「投稿・書き出し」が一緒に来るのは誤爆ではない。** あちらにも
+    // 「投稿サイトのルビを取り込む」が実在する。見てほしいのはどちらが
+    // 先かで、当たりの多い束が先に来ていれば、上限で削られるのは後ろになる
+    expect(built.selected[0]).toBe("執筆AI支援 → 原稿づくり");
+  });
+
+  test("投稿の質問では、投稿・書き出しだけが選ばれる", () => {
+    const built = buildFeatureGuideForQuestion({
+      question: "新話を投稿するにはどうしますか",
+    });
+
+    expect(built.selected).toContain("執筆AI支援 → 投稿・書き出し");
+    expect(built.selected).not.toContain("執筆AI支援 → 原稿づくり");
+  });
+});
+
+/**
+ * 名前を短くした操作の補足（作者の裁定、2026-09-06）。
+ *
+ * **相談は `ACTION_TREE` の名前を読む。** 括弧の補足を名前から落として
+ * ツールチップへ移したので、そのままだと**束からも消える**——作者が
+ * 「AIチューニングって何」と訊いたときに答える材料が無くなる。
+ */
+describe("短くした名前の補足も、相談へ送る束に入る", () => {
+  test("補足を持つ操作は、名前と補足の両方が束にある", () => {
+    const withNote = visibleActions().filter((action) => action.note);
+
+    expect(withNote.length, "補足を持つ操作が1件も無い").toBeGreaterThan(0);
+    for (const action of withNote) {
+      expect(bundleText, action.command).toContain(action.label);
+      expect(bundleText, action.command).toContain(action.note);
+    }
   });
 });

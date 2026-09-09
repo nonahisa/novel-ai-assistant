@@ -1,4 +1,23 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+/**
+ * 記録は覗ける形にする。
+ *
+ * 独り言は**黙るのが既定**なので、見送った一言がどこにも残らないと
+ * 「なぜ何も言わないのか」を後から確かめようがない（設計書6.21.4）。
+ */
+const failures = vi.hoisted(
+  () => [] as Array<{ context: string; detail: Record<string, unknown> }>
+);
+vi.mock("../../src/core/logger", () => ({
+  logFailure: (context: string, detail: Record<string, unknown>) => {
+    failures.push({ context, detail });
+  },
+  logStep: () => undefined,
+  logLine: () => undefined,
+  useLogFile: () => undefined,
+}));
+
 import {
   ChatterService,
   QUIET_GAP_MS,
@@ -6,6 +25,11 @@ import {
 } from "../../src/features/chatterService";
 import { IDLE_THRESHOLD_MS, type Chatter } from "../../src/core/chatter";
 import { beginAiWork, resetAiActivity } from "../../src/core/aiActivity";
+import {
+  acquireCall,
+  acquireRun,
+  resetAiSequence,
+} from "../../src/core/aiSequence";
 import type { WorkEntry } from "../../src/models/types";
 import { workspace } from "./support/vscodeStub";
 
@@ -40,6 +64,9 @@ function deps(overrides: Partial<ChatterDeps> = {}): ChatterDeps & {
     // どの試験でも抽出の申し出が混ざって「何を確かめたか」がぼやける
     unextractedEpisodes: async () => 0,
     counts: () => ({ pendingUpdates: 0, mergeCandidates: 0 }),
+    // **既定では感想を取りに行けないことにする。** ここで文面を返すと、
+    // 既存の試験に「AIの感想」が混ざって、何を確かめたのかがぼやける
+    requestComment: async () => undefined,
     ...overrides,
   };
 }
@@ -52,7 +79,11 @@ function idle(service: ChatterService): void {
     Date.now() - IDLE_THRESHOLD_MS - 1;
 }
 
-beforeEach(() => resetAiActivity());
+beforeEach(() => {
+  resetAiActivity();
+  resetAiSequence();
+  failures.length = 0;
+});
 afterEach(() => {
   workspace.getConfiguration = originalGetConfiguration;
 });
@@ -332,5 +363,311 @@ describe("まだ取り込んでいない話の申し出", () => {
     await service.tick();
 
     expect(calls).toBe(1);
+  });
+});
+
+/**
+ * 本文を読んで言う一言（設計書6.21.4、P-34）。
+ *
+ * **AIを呼ぶのは「言ってよい」と決まってからだけである。** 黙る回にも
+ * 呼びに行くと、10分ごとの様子見のたびに手元のAIを無駄に走らせる。
+ * そして**失敗は画面に出さない**——独り言のエラー表示ほど邪魔なものはない。
+ */
+describe("本文の感想", () => {
+  /** 感想以外に言うことが無い状態。祝いも申し出も出ない */
+  function quiet(overrides: Partial<ChatterDeps> = {}) {
+    return deps({
+      summary: async () => ({ today: "2026-09-05", written: 100, streak: 0 }),
+      ...overrides,
+    });
+  }
+
+  /** 言えることを1つずつ吐き出させて、感想の番まで進める */
+  async function tickUntilComment(service: ChatterService): Promise<void> {
+    for (let round = 0; round < 5; round++) {
+      idle(service);
+      (service as unknown as { lastSpokeAt: number }).lastSpokeAt = 0;
+      await service.tick();
+    }
+  }
+
+  test("取りに行けたら、その文面を出す", async () => {
+    const d = quiet({
+      requestComment: async () => "戦闘の緊張感が伝わってきます。",
+    });
+    const service = new ChatterService(d);
+
+    await tickUntilComment(service);
+
+    expect(d.posted.map((c) => c.text)).toContain(
+      "戦闘の緊張感が伝わってきます。"
+    );
+  });
+
+  test("読ませるのは、直近に保存した本文", async () => {
+    const asked: string[] = [];
+    const service = new ChatterService(
+      quiet({
+        requestComment: async (_work, manuscriptPath) => {
+          asked.push(manuscriptPath);
+          return "静かな幕切れですね。";
+        },
+      })
+    );
+
+    await tickUntilComment(service);
+
+    expect(asked).toEqual(["C:\\novels\\work\\001.txt"]);
+  });
+
+  test("有料のAIでは取りに行かない", async () => {
+    // **頼まれていない発言で課金しない。** 感想でも例外にしない
+    let calls = 0;
+    const d = quiet({
+      resolveAi: () => ({ paid: true }),
+      requestComment: async () => {
+        calls++;
+        return "面白いですね。";
+      },
+    });
+    const service = new ChatterService(d);
+
+    await tickUntilComment(service);
+
+    expect(calls).toBe(0);
+    expect(d.posted).toHaveLength(0);
+  });
+
+  test("AIが仕事中なら取りに行かない", async () => {
+    let calls = 0;
+    const d = quiet({
+      requestComment: async () => {
+        calls++;
+        return "面白いですね。";
+      },
+    });
+    const service = new ChatterService(d);
+    beginAiWork();
+
+    await tickUntilComment(service);
+
+    expect(calls).toBe(0);
+    expect(d.posted).toHaveLength(0);
+  });
+
+  test("失敗しても、画面には何も出さない", async () => {
+    const d = quiet({
+      requestComment: async () => {
+        throw new Error("繋がりません");
+      },
+    });
+    const service = new ChatterService(d);
+
+    await expect(tickUntilComment(service)).resolves.toBeUndefined();
+    expect(d.posted.map((c) => c.kind)).not.toContain("manuscriptComment");
+  });
+
+  test("読めない答えは出さない", async () => {
+    // 60字を超える答え・指示語のなぞりは、独り言として使えない
+    const d = quiet({ requestComment: async () => "あ".repeat(61) });
+    const service = new ChatterService(d);
+
+    await tickUntilComment(service);
+
+    expect(d.posted.map((c) => c.kind)).not.toContain("manuscriptComment");
+  });
+
+  /**
+   * **黙る（ログのみ）の「ログ」を実装する**（設計書6.21.4、0.32.6のレビュー）。
+   *
+   * 検査で落ちた一言はどこにも残っていなかったので、「AIが黙っている」のか
+   * 「言おうとしたが検査で落ちた」のかを、作者も開発側も区別できなかった。
+   * **画面には出さない**（頼まれていない発言の失敗を知らせるのが、
+   * 独り言のいちばん邪魔な出方である）が、記録には必ず残す。
+   */
+  test("検査で落とした一言は、画面に出さずに記録へ残す", async () => {
+    const d = quiet({ requestComment: async () => "あ".repeat(61) });
+    const service = new ChatterService(d);
+
+    await tickUntilComment(service);
+
+    const logged = failures.find((entry) =>
+      entry.context.includes("独り言の感想")
+    );
+    expect(logged, "見送った一言が記録に残っていない").toBeTruthy();
+    // **答えの中身を残す。** 何を言おうとして落ちたのかが分からないと、
+    // 検査が厳しすぎるのかAIの答えが悪いのかを切り分けられない
+    expect(String(logged!.detail["答え"])).toContain("あ");
+    expect(logged!.detail["作品"]).toBe("作品");
+  });
+
+  test("言えた回は、見送りとして記録しない", async () => {
+    const d = quiet({ requestComment: async () => "静かな幕切れですね。" });
+    const service = new ChatterService(d);
+
+    await tickUntilComment(service);
+
+    expect(failures.filter((e) => e.context.includes("独り言の感想"))).toEqual(
+      []
+    );
+  });
+
+  /** 取りに行けなかった回（undefined）は、答えが無いので記録しない */
+  test("そもそも答えが返らなかった回は、見送りとして記録しない", async () => {
+    const d = quiet({ requestComment: async () => undefined });
+    const service = new ChatterService(d);
+
+    await tickUntilComment(service);
+
+    expect(failures.filter((e) => e.context.includes("独り言の感想"))).toEqual(
+      []
+    );
+  });
+
+  /**
+   * **鍵は、言えたときに消費する**（0.33.0のレビュー）。
+   *
+   * 以前は取りに行く前に「言った」ことにしていたので、**一度でも
+   * 時間切れになると、その話についての一言は二度と出なかった。**
+   * 独り言は30秒しか待たない（`COMMENT_TIMEOUT_MS`）ので、一括処理と
+   * 重なれば必ず時間切れになる——つまり「必ず失われる」経路があった。
+   *
+   * かといって無制限に聞き直すと、繋がらないAIへ1分ごとに聞き続ける
+   * （それが「取りに行く前に言ったことにする」の守ろうとしたもの）。
+   * **その日2回まで**にして、両方を立てる。
+   */
+  test("失敗しても2回までは取りに行き、それ以上は諦める", async () => {
+    let calls = 0;
+    const service = new ChatterService(
+      quiet({
+        requestComment: async () => {
+          calls++;
+          throw new Error("繋がりません");
+        },
+      })
+    );
+
+    await tickUntilComment(service);
+
+    expect(calls).toBe(2);
+  });
+
+  test("1回目が失敗しても、2回目に言えたらその文面を出す", async () => {
+    let calls = 0;
+    const d = quiet({
+      requestComment: async () => {
+        calls++;
+        if (calls === 1) throw new Error("時間切れです");
+        return "静かな幕切れですね。";
+      },
+    });
+    const service = new ChatterService(d);
+
+    await tickUntilComment(service);
+
+    expect(d.posted.map((c) => c.text)).toContain("静かな幕切れですね。");
+  });
+
+  test("言えた回の鍵は消費する（同じ話へ言い直さない）", async () => {
+    let calls = 0;
+    const service = new ChatterService(
+      quiet({
+        requestComment: async () => {
+          calls++;
+          return "静かな幕切れですね。";
+        },
+      })
+    );
+
+    await tickUntilComment(service);
+
+    expect(calls).toBe(1);
+  });
+
+  test("検査で見送った回は鍵を消費する（聞き直しても同じ答えが返る）", async () => {
+    // AIは答えられている。中身が独り言に向かないだけなので、
+    // もう一度訊いても同じ答えが返りやすい
+    let calls = 0;
+    const service = new ChatterService(
+      quiet({
+        requestComment: async () => {
+          calls++;
+          return "あ".repeat(61);
+        },
+      })
+    );
+
+    await tickUntilComment(service);
+
+    expect(calls).toBe(1);
+  });
+
+  /**
+   * **列が混んでいるときは、そもそも取りに行かない**（設計書6.76・6.21.4）。
+   *
+   * 0.32.9のキューで、送信は全体で1件ずつになった。独り言が列の後ろへ
+   * 並ぶと、30秒の締め切りは**待っているあいだに切れる**——AIは1文字も
+   * 書いていないのに時間切れになる。鍵は消費しないので、空いた頃に
+   * また判断すればよい。
+   */
+  test("一括処理が札を持っているあいだは取りに行かない", async () => {
+    let calls = 0;
+    const d = quiet({
+      requestComment: async () => {
+        calls++;
+        return "静かな幕切れですね。";
+      },
+    });
+    const service = new ChatterService(d);
+    const release = await acquireRun("誤字脱字の検知");
+
+    await tickUntilComment(service);
+    expect(calls).toBe(0);
+
+    // 空いたら取りに行く。**鍵は消費されていない**
+    release();
+    idle(service);
+    (service as unknown as { lastSpokeAt: number }).lastSpokeAt = 0;
+    await service.tick();
+
+    expect(calls).toBe(1);
+  });
+
+  test("送信の順番待ちがあるあいだは取りに行かない", async () => {
+    let calls = 0;
+    const d = quiet({
+      requestComment: async () => {
+        calls++;
+        return "静かな幕切れですね。";
+      },
+    });
+    const service = new ChatterService(d);
+    // 1件が送信中で、もう1件が順番待ち——独り言は3番目になる
+    const release = await acquireCall();
+    const waiting = acquireCall().catch(() => undefined);
+
+    await tickUntilComment(service);
+
+    expect(calls).toBe(0);
+    release();
+    await waiting;
+  });
+
+  test("ほかに言うことがあるうちは取りに行かない", async () => {
+    let calls = 0;
+    const d = quiet({
+      counts: () => ({ pendingUpdates: 3, mergeCandidates: 0 }),
+      requestComment: async () => {
+        calls++;
+        return "面白いですね。";
+      },
+    });
+    const service = new ChatterService(d);
+    idle(service);
+
+    await service.tick();
+
+    expect(calls).toBe(0);
+    expect(d.posted[0].kind).toBe("pendingUpdates");
   });
 });

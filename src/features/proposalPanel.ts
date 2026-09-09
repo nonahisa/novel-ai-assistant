@@ -28,11 +28,13 @@ import { describeLock, normalizeFile } from "../models/fileLock";
 import { tryGitUserName } from "../core/gitAttribution";
 import { acceptProposal, rejectProposal } from "./reviewProposals";
 import {
+  countIncoming,
   describeBadgeTooltip,
   isRemaining,
   mergeProposals,
   summarizeCategories,
   type CategorySummary,
+  type IncomingCount,
   type WorkSummary,
 } from "../core/proposalBuckets";
 // **型だけを取る。** `AIRegistry` の実体は呼び出し側（extension.ts）が
@@ -44,8 +46,16 @@ import {
   type RecheckItem,
   type RecheckOutcome,
 } from "./recheckProposal";
-import { logFailure, logLine } from "../core/logger";
+import { logFailure, logLine, useLogFile } from "../core/logger";
+import {
+  askNotationAdvice,
+  describeNotationAdvice,
+} from "./notationAdvice";
+import type { NotationAdviceGroup } from "../prompts/notationAdvice";
+import { locateAppliedSuggestion } from "../core/proposalUndo";
 import { revealTextLocation } from "./revealLocation";
+import { openInDefaultEditor } from "../views/openDocument";
+import { notifyDone } from "../views/notify";
 
 /**
  * 提案パネル（誤字脱字）。
@@ -61,6 +71,16 @@ import { revealTextLocation } from "./revealLocation";
  */
 
 export const PROPOSALS_VIEW_ID = "novelai.proposalsView";
+
+/**
+ * 単話プロットの判定の分類名（設計書6.36.3）。
+ *
+ * **2つに分ける。** 分類は差し替えなので、同じ名前に載せると
+ * 「本文と照合」を掛けた瞬間に「設計を検査」の結果が消える。
+ * 見る場面も違う（書く前／書いたあと）。
+ */
+export const EPISODE_PLOT_CATEGORY = "単話プロット";
+export const EPISODE_PLOT_CONTRAST_CATEGORY = "単話プロットと本文";
 
 /**
  * 画面へ送る直前に、違うところと「再チェックできるか」を添える。
@@ -97,7 +117,8 @@ function forView(item: ProposalViewItem): ProposalViewItem {
 function contradictionForView(
   item: ContradictionViewItem
 ): ContradictionViewItem {
-  return { ...item, canRecheck: true };
+  // **出さないと決めた指摘だけを外す**（単話プロットの判定。設計書6.36.3）
+  return { ...item, canRecheck: item.allowRecheck !== false };
 }
 
 export interface ProposalViewItem {
@@ -160,6 +181,34 @@ export interface ProposalViewItem {
    * 提案の側にも書き戻す必要がある（設計書5.6）。
    */
   proposalId?: string;
+  /**
+   * どの表記ゆれの組から出た指摘か（設計書6.73）。
+   *
+   * **表記ゆれの指摘だけが持つ。** 「AIに訊く」を出すかどうかも、AIへ
+   * 渡す材料も、これ1つで決まる——分類名で分岐すると、材料の無い指摘に
+   * ボタンだけ出る形（押しても何も起きない口）が作れてしまう。
+   */
+  notation?: NotationAdviceGroup;
+  /**
+   * AIの答え（P-33）。**指摘の下に出すだけで、本文には何もしない。**
+   * 訊けなかったときは、その理由がここへ入る（指摘は残す）。
+   */
+  adviceNote?: string;
+  /**
+   * AIへ問い合わせている最中か。**押した手応えを返し、二度押しを止める。**
+   * 再チェックの `busy` とは分ける——同じ行で走る別の問いなので、
+   * どちらが動いているのかが画面の言葉で分かるようにする。
+   */
+  askingAdvice?: boolean;
+  /**
+   * 適用したとき、修正案が行の何文字目に入ったか（0始まり。設計書6.8.12）。
+   *
+   * **「戻す」で、同じ文が2度出てくる行を1つに決めるために要る。**
+   * 適用後の文脈で探しても2か所に当たることがあり、そのときの
+   * 最後の手がかりがこれである。適用したときにしか分からない値なので、
+   * 書き込みに成功した時点で控える。
+   */
+  appliedAt?: number;
 }
 
 /**
@@ -228,8 +277,33 @@ export interface ContradictionViewItem {
    */
   leftLabel: string;
   rightLabel: string;
-  /** 「設定資料を見る」の代わりに何を開くか */
-  openTarget: "settings" | "plot";
+  /**
+   * 「設定資料を見る」の代わりに何を開くか。
+   *
+   * `"file"` は `openPath` のファイルを開く（単話プロット。設計書6.36.3）。
+   * `"none"` はボタンごと出さない——**押しても何も起きない口を作らない。**
+   */
+  openTarget: "settings" | "plot" | "file" | "none";
+  /** `openTarget` が `"file"` のときに開くファイル */
+  openPath?: string;
+  /** 相手側を開くボタンの言葉。無ければ `openTarget` から決める */
+  openLabel?: string;
+  /**
+   * 「本文を見る」の代わりに出す言葉。
+   *
+   * 単話プロットの検査（P-27）は本文を見ていないので、飛ぶ先は
+   * 単話プロットそのものである。**「本文を見る」と書いてプロットが
+   * 開いては、押した作者が戸惑う。**
+   */
+  jumpLabel?: string;
+  /**
+   * 「再チェック」を出してよいか（**既定は出す**）。
+   *
+   * 単話プロットの判定（6.36.3）では出さない。再チェックは本文だけを
+   * 読み直して問うので、**物差し（箇条書き）が渡らない**——確かめた
+   * ことにならないのに、確かめたように見える。
+   */
+  allowRecheck?: boolean;
 }
 
 /**
@@ -345,6 +419,14 @@ type RunningMessage = {
   /** 数えている単位。話ごとに送る検知では「話」になる */
   unit: string;
   /**
+   * 処理済みで飛ばした数（作者の指摘、2026-09-06）。
+   *
+   * **分母はAIへ送る数だけにした**ので、7チャンクのうち6件がキャッシュに
+   * 当たった実行は「1/1」と出る。飛ばした数を添えないと、本文の量に対して
+   * 分母が小さすぎて「一部しか見ていないのでは」と読める。0なら添えない
+   */
+  skipped: number;
+  /**
    * どの作品の検知か。
    *
    * **書庫では、いま見ているのと別の作品を走らせられる**（作品Aの結果を
@@ -399,6 +481,8 @@ type IncomingMessage =
   | { type: "openSettings"; id: string }
   /** その食い違いは矛盾ではなく伏線だった（設計書6.35.4） */
   | { type: "registerForeshadow"; id: string }
+  /** どちらの表記に揃えるかをAIに訊く（設計書6.73） */
+  | { type: "askNotation"; id: string }
   /** 作者が本文を手で書き直したあと、その指摘が解消したかを確かめる */
   | { type: "recheck"; id: string }
   | { type: "applyAll" }
@@ -618,7 +702,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       ) => Promise<{ ok: boolean; reason?: string }>;
       registerForeshadow?: RegisterForeshadow;
     }
-  ): void {
+  ): IncomingCount {
     // **表示中の作品の作業を、先に控えへ戻す。** 届いたのがどちらの作品でも通す
     this.stashCurrent();
 
@@ -633,6 +717,21 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       bucket.recordUpdates,
       contents.recordUpdates ?? []
     );
+    // **今回届いたぶんが、一覧に何件残ったかを数える**（設計書6.8）。
+    // 完了通知はこの数を「指摘 N件」と言う。検知が返した件数をそのまま
+    // 言うと、前に適用済み・解消済みだったものまで数えて、パネルの
+    // 見出しと食い違う（2026-09-06、作者の報告）
+    const arrivedCount = [
+      countIncoming(bucket.items, contents.items ?? []),
+      countIncoming(bucket.contradictions, contents.contradictions ?? []),
+      countIncoming(bucket.recordUpdates, contents.recordUpdates ?? []),
+    ].reduce(
+      (sum, count) => ({
+        remaining: sum.remaining + count.remaining,
+        handled: sum.handled + count.handled,
+      }),
+      { remaining: 0, handled: 0 }
+    );
     // 反映の手順は、いちばん新しく渡されたものを使う（古い閉包を握らない）
     if (contents.applyRecordUpdate) {
       bucket.applyRecordUpdate = contents.applyRecordUpdate;
@@ -646,12 +745,12 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     entry.categories.set(category, bucket);
 
     // まだ何も出していないとき、または同じ作品なら、これまでどおり前面へ
-    if (!this.work || this.work.id === work.id) {
+    if (!this.work || this.keyOf(this.work) === this.keyOf(work)) {
       this.work = work;
       this.activate(category);
       // パネルが開いていなければ前面に出す。開いていれば余計なフォーカス移動はしない
       void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
-      return;
+      return arrivedCount;
     }
 
     // **画面には触らない。** 切り替え口の一覧だけ作り直し、届いたことは通知で伝える
@@ -664,6 +763,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         (contents.contradictions?.length ?? 0) +
         (contents.recordUpdates?.length ?? 0)
     );
+    return arrivedCount;
   }
 
   /**
@@ -687,7 +787,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     if (answer !== "表示する") return;
 
     // 答えるまでの間に、作者がその一覧を空にしていることがある
-    const entry = this.buckets.get(work.id);
+    const entry = this.buckets.get(this.keyOf(work));
     if (!entry?.categories.has(category)) return;
 
     this.stashCurrent();
@@ -697,20 +797,39 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   }
 
   /** その作品の置き場（無ければ作る）。題名はいちばん新しいものへ揃える */
+  /**
+   * 置き場のキー。**id ではなく作品フォルダー**で引く（0.40.7）。
+   *
+   * 同じ作品でも id が変わる経路がある（登録し直し・書庫の子作品）。
+   * id で引くと、設定資料の更新を出したあとの推敲が**別の作品の結果**と
+   * 見なされ、「表示する」の知らせだけ出て一覧もタブも印も変わらなかった
+   * （実機、2026-09-07）。フォルダーなら同じ作品は必ず同じ場所へ落ちる
+   */
+  private keyOf(work: WorkEntry): string {
+    const folder = path.normalizeForComparison(work.folderPath);
+    for (const [key, entry] of this.buckets) {
+      if (path.normalizeForComparison(entry.work.folderPath) === folder) {
+        return key;
+      }
+    }
+    // 初めて見る作品は id で置く（画面へ送る `workId` もこの値）
+    return work.id;
+  }
+
   private workBucketsOf(work: WorkEntry): WorkBuckets {
-    const found = this.buckets.get(work.id);
+    const found = this.buckets.get(this.keyOf(work));
     if (found) {
       found.work = work;
       return found;
     }
     const created: WorkBuckets = { work, categories: new Map() };
-    this.buckets.set(work.id, created);
+    this.buckets.set(this.keyOf(work), created);
     return created;
   }
 
   /** いま表示している作品の、分類ごとの置き場（まだ何も無ければ空） */
   private currentCategories(): Map<string, CategoryBucket> {
-    const entry = this.work ? this.buckets.get(this.work.id) : undefined;
+    const entry = this.work ? this.buckets.get(this.keyOf(this.work)) : undefined;
     return entry?.categories ?? new Map();
   }
 
@@ -723,7 +842,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   private stashCurrent(): void {
     const work = this.work;
     if (!work) return;
-    const entry = this.buckets.get(work.id);
+    const entry = this.buckets.get(this.keyOf(work));
     if (this.items.length === 0 &&
         this.contradictions.length === 0 &&
         this.recordUpdates.length === 0 &&
@@ -742,7 +861,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
 
   /** その分類を画面に出す（表示中の作品の中で） */
   private activate(category: string): void {
-    const entry = this.work ? this.buckets.get(this.work.id) : undefined;
+    const entry = this.work ? this.buckets.get(this.keyOf(this.work)) : undefined;
     const bucket = entry?.categories.get(category) ?? emptyBucket();
     this.category = category;
     // 作品を切り替えて戻ったとき、続きから見せるために覚えておく
@@ -763,7 +882,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * 付けるには、まずここで移ってもらう。
    */
   private switchWork(workId: string): void {
-    if (workId === this.work?.id) return;
+    if (this.work && workId === this.keyOf(this.work)) return;
     const entry = this.buckets.get(workId);
     if (!entry) return;
     this.stashCurrent();
@@ -804,7 +923,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     label: string,
     done: number,
     total: number,
-    unit = "チャンク"
+    unit = "チャンク",
+    skipped = 0
   ): void {
     this.post({
       type: "running",
@@ -812,10 +932,12 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       done,
       total,
       unit,
+      skipped,
       // **題名を出すのは、別の作品の結果を映しているときだけ。**
       // まだ何も出していないときや、同じ作品の検知では、何の数字かは
       // 見れば分かる——毎回題名が付くと、かえって読みにくい
-      workTitle: this.work && this.work.id !== work.id ? work.title : "",
+      workTitle:
+        this.work && this.keyOf(this.work) !== this.keyOf(work) ? work.title : "",
     });
   }
 
@@ -833,6 +955,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       done: 0,
       total: 0,
       unit: "",
+      skipped: 0,
       workTitle: "",
     });
   }
@@ -842,13 +965,27 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     void this.view?.webview.postMessage(message);
   }
 
-  /** `checkTypos` / `checkProofread` / `checkNotation` の結果を出す */
+  /**
+   * `checkTypos` / `checkProofread` / `checkNotation` の結果を出す。
+   *
+   * @returns 今回届いたぶんのうち、一覧に残った件数と、既に片付いていた件数。
+   * **完了通知はこれを使って「指摘 N件」と言う**（設計書6.8）——検知が
+   * 返した件数をそのまま言うと、パネルの見出しと食い違う
+   */
   showResults(
     work: WorkEntry,
-    /** 推敲は `explanation`（なぜ読みにくいか）を持つ。誤字脱字は持たない */
-    issues: Array<TypoCheckIssue & { explanation?: string }>,
+    /**
+     * 推敲は `explanation`（なぜ読みにくいか）を持つ。誤字脱字は持たない。
+     * 表記ゆれは `notation`（どの組から出たか。設計書6.73）を持つ
+     */
+    issues: Array<
+      TypoCheckIssue & {
+        explanation?: string;
+        notation?: NotationAdviceGroup;
+      }
+    >,
     category = "誤字脱字"
-  ): void {
+  ): IncomingCount {
     const items: ProposalViewItem[] = issues.map((issue, index) => ({
       id: `${issue.chunkHash}:${issue.line}:${index}`,
       filePath: issue.filePath,
@@ -862,8 +999,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       detail: proposalDetail(issue),
       confidence: issue.confidence,
       status: "pending",
+      // 表記ゆれだけが持つ（設計書6.73）。あれば「AIに訊く」を出す
+      notation: issue.notation,
     }));
-    this.replaceContents(work, category, { items });
+    return this.replaceContents(work, category, { items });
   }
 
   /**
@@ -882,7 +1021,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
      * 作らないため（「見送る」が黙って素通りしていた失敗と同じ形）。
      */
     registerForeshadow?: RegisterForeshadow
-  ): void {
+  ): IncomingCount {
     const contradictions: ContradictionViewItem[] = issues.map((issue, index) => ({
       id: `c:${issue.chunkHash}:${issue.line}:${index}`,
       filePath: issue.filePath,
@@ -903,7 +1042,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       rightLabel: "本文では",
       openTarget: "settings",
     }));
-    this.replaceContents(work, "矛盾", { contradictions, registerForeshadow });
+    return this.replaceContents(work, "矛盾", {
+      contradictions,
+      registerForeshadow,
+    });
   }
 
   /**
@@ -935,6 +1077,103 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       openTarget: "plot",
     }));
     this.replaceContents(work, "プロット逸脱", { contradictions });
+  }
+
+  /**
+   * 単話プロットの検査（P-27）の結果を出す（設計書6.36.3）。
+   *
+   * **適用の口も、修正案も無い。** 単話プロットは作者が書くもので、
+   * AIに直させない（6.36.2）。飛ぶ先は本文ではなく**単話プロットの
+   * その行**なので、押すボタンの名前もそちらに揃える。
+   */
+  showEpisodePlotFindings(
+    work: WorkEntry,
+    plotPath: string,
+    findings: ReadonlyArray<{
+      item: string;
+      line: number;
+      kind: string;
+      reason: string;
+    }>
+  ): void {
+    const contradictions: ContradictionViewItem[] = findings.map(
+      (finding, index) => ({
+        id: `ep:${finding.line}:${index}`,
+        filePath: plotPath,
+        fileName: path.basename(plotPath),
+        // 本文のチャンクではないので、指紋は持たない
+        chunkHash: "",
+        line: finding.line,
+        excerpt: finding.item,
+        category: finding.kind,
+        settingSays: finding.kind,
+        textSays: finding.reason,
+        note: "",
+        // **AIの見立てに強弱を付けさせていない。** 付けさせると、
+        // その値ごと信じることになる（種別だけで足りる指摘である）
+        confidence: "medium",
+        status: "pending",
+        leftLabel: "見立て",
+        rightLabel: "理由",
+        jumpLabel: "単話プロットを開く",
+        openTarget: "none",
+        allowRecheck: false,
+      })
+    );
+    this.replaceContents(work, EPISODE_PLOT_CATEGORY, { contradictions });
+  }
+
+  /**
+   * 単話プロットと本文の照合（P-28）の結果を出す（設計書6.36.3）。
+   *
+   * **プロット逸脱の隣の形。** どちらが正しいかは作者にしか決められない
+   * （**箇条書きのほうが古いこともある**）ので、適用の口を持たせず、
+   * 「本文を見る」と「単話プロットを開く」の2つだけを出す。
+   */
+  showEpisodePlotContrast(
+    work: WorkEntry,
+    plotPath: string,
+    episodePath: string,
+    findings: ReadonlyArray<{
+      kind: string;
+      plotItem: string | null;
+      plotLine: number | null;
+      excerpt: string | null;
+      line: number | null;
+      reason: string;
+    }>
+  ): void {
+    const contradictions: ContradictionViewItem[] = findings.map(
+      (finding, index) => ({
+        id: `ec:${finding.line ?? finding.plotLine ?? 0}:${index}`,
+        filePath: episodePath,
+        fileName: path.basename(episodePath),
+        chunkHash: "",
+        // 本文を指していない指摘（起きていない）は、話の頭へ飛ばす
+        line: finding.line ?? 1,
+        // **引用が無いときは、箇条書きのほうを見出しに出す。**
+        // 空欄を出すと、何の指摘なのか分からない
+        excerpt: finding.excerpt ?? finding.plotItem ?? "",
+        category: finding.kind,
+        settingSays: finding.plotItem ?? "（該当する項目はありません）",
+        textSays: finding.reason,
+        note:
+          finding.excerpt === null
+            ? "本文には見当たりません（飛び先は話の先頭です）"
+            : "",
+        confidence: "medium",
+        status: "pending",
+        leftLabel: "箇条書きでは",
+        rightLabel: "この話では",
+        openTarget: "file",
+        openPath: plotPath,
+        openLabel: "単話プロットを開く",
+        allowRecheck: false,
+      })
+    );
+    this.replaceContents(work, EPISODE_PLOT_CONTRAST_CATEGORY, {
+      contradictions,
+    });
   }
 
   /**
@@ -1039,10 +1278,11 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * 残したまま資料だけ直すと、本文と資料が食い違ったまま残る。
    * 数を出してから決めてもらう。
    */
-  remainingIn(workId: string, category: string): number {
+  remainingIn(work: WorkEntry, category: string): number {
+    const workId = this.keyOf(work);
     // 表示中の分は手元の配列から数える（`countByCategory` と同じ理由。
     // 1件を適用した直後は、まだ控えへ書き戻していない瞬間がある）
-    if (this.work?.id === workId && this.category === category) {
+    if (this.work && this.keyOf(this.work) === workId && this.category === category) {
       return [
         ...this.items,
         ...this.contradictions,
@@ -1063,10 +1303,32 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     remaining: number
   ): void {
     if (!this.view) return;
-    this.view.badge =
-      remaining > 0
-        ? { value: remaining, tooltip: describeBadgeTooltip(summaries) }
-        : undefined;
+    if (remaining > 0) {
+      this.view.badge = {
+        value: remaining,
+        tooltip: describeBadgeTooltip(summaries),
+      };
+      return;
+    }
+
+    /*
+      **消すときは、いったん0を置いてから外す**（作者の報告
+      「永久に消えない1」、2026-09-06）。
+
+      VS Code は、その面（`WebviewView`）へ**最後に書いた値と同じ**なら、
+      代入をタブまで伝えない。そして面は、パネルを切り替えて開き直すたびに
+      作り直され、**「前に何を書いたか」の記憶は空から始まる**——なのに
+      タブの数字は前のまま残っている。
+
+      この状態で「残り0件」を書くと、`undefined` は「前と同じ」と見なされて
+      握りつぶされ、タブの ❶ が二度と消えない。「一覧を空にする」を押しても
+      書く値はやはり `undefined` なので、作者からは永久に消えないものに見える。
+
+      0を挟めば、どちらの経路でも必ず「変わった」と伝わる。0と undefined は
+      同じ代入の中で続けて書くので、途中の0が画面に出ることはない。
+    */
+    this.view.badge = { value: 0, tooltip: describeBadgeTooltip(summaries) };
+    this.view.badge = undefined;
   }
 
   /**
@@ -1080,10 +1342,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       id,
       title: entry.work.title,
       remaining:
-        id === this.work?.id
+        this.work !== undefined && id === this.keyOf(this.work)
           ? currentRemaining
           : countRemaining(entry.categories),
-      active: id === this.work?.id,
+      active: this.work !== undefined && id === this.keyOf(this.work),
     }));
   }
 
@@ -1104,7 +1366,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     const message: IssuesMessage = {
       type: "issues",
       workTitle: this.work?.title ?? "",
-      workId: this.work?.id ?? "",
+      workId: this.work ? this.keyOf(this.work) : "",
       category: this.category,
       items: updateMode
         ? this.recordUpdates
@@ -1203,19 +1465,98 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       suggestion: describeContradiction(item),
     });
 
-    void vscode.window.showInformationMessage(
-      "伏線として登録しました（伏線の一覧で見られます）。"
-    );
+    notifyDone("伏線として登録しました（伏線の一覧で見られます）。");
+  }
+
+  /**
+   * どちらの表記に揃えるかをAIに訊く（P-33、設計書6.73）。
+   *
+   * **答えは指摘の下に出すだけで、本文には何もしない。** 揃えるかどうかも、
+   * どう直すかも作者が決める（同じ行の「適用」「今後直さない」がそのまま使える）。
+   *
+   * **訊けなかったことを、黙って終わらせない。** 押したのに無反応だと
+   * 「壊れている」としか見えないので、理由をその指摘の下へ書く。
+   * ただし作者が自分で断ったとき（有料の確認・未設定・繋がらない）は
+   * 何も書かない——ダイアログで既に伝わっており、断ったのに失敗したように見える。
+   *
+   * **答えは、待ち終えてから引き直したほうへ書く**（0.32.6のレビュー）。
+   * 数十秒待つあいだに同じ分類の検知がもう一度走ると、`replaceContents` が
+   * まだ手を付けていない指摘を新しい中身へ置き換え、`this.items` ごと
+   * 差し替わる。掴んだままの参照へ書くと、答えは捨てられた側に付いて
+   * 画面には何も出ない。**idは決定的**なので引き直せる。
+   */
+  private async askNotationFor(id: string): Promise<void> {
+    const item = this.items.find((entry) => entry.id === id);
+    if (!item || !this.work) return;
+    // 材料が無ければ口も出していない（押しても何も起きない道を作らない）
+    if (!item.notation) return;
+    // 二重に押されても、1回だけ走らせる
+    if (item.askingAdvice) return;
+    const work = this.work;
+    const group = item.notation;
+
+    item.askingAdvice = true;
+    this.postItems();
+    try {
+      const outcome = await askNotationAdvice({
+        work,
+        registry: this.ai,
+        group,
+      });
+      if (outcome.kind === "cancelled") return;
+
+      // ここから先は、いま画面に出ているほうへ書く（上の注釈）
+      const current = this.items.find((entry) => entry.id === id);
+      // 差し替えのあとに消えていることもある（作者が見送った等）。
+      // 行き先が無いなら、書かずに終える——無い相手を作り直さない
+      if (!current) return;
+
+      if (outcome.kind === "failed") {
+        current.adviceNote = outcome.reason;
+        return;
+      }
+
+      current.adviceNote = describeNotationAdvice(outcome.advice);
+      // **何を訊いて何が返ったかを残す**（「伏線として登録」と同じ流儀）。
+      // 本文は書き換えていないので、適用とは別の印で記録する
+      await appendAiActionLog(work, {
+        category: "typo",
+        action: "asked",
+        file: current.fileName,
+        line: current.line,
+        target: group.label,
+        suggestion: current.adviceNote,
+      });
+    } finally {
+      // **必ず戻す。** 途中で失敗しても、押せないままの行を残さない。
+      // 掴んだままの参照と、引き直したほうの**両方**を下ろす——差し替えで
+      // 新しく来た指摘は `askingAdvice` を持たないが、差し替えが
+      // 起きなかったときは同じ物なので、二度書いても害はない
+      item.askingAdvice = false;
+      const current = this.items.find((entry) => entry.id === id);
+      if (current) current.askingAdvice = false;
+      this.postItems();
+    }
   }
 
   /**
    * 照らした相手側を開く。**本文だけを直す道を示さないため。**
    *
-   * 矛盾なら設定資料、プロット逸脱ならプロット。
+   * 矛盾なら設定資料、プロット逸脱ならプロット、単話プロットの照合なら
+   * その話の単話プロット（設計書6.36.3）。
    */
   private async openSettingsFor(id: string): Promise<void> {
     const item = this.contradictions.find((entry) => entry.id === id);
     if (!item || !this.work) return;
+
+    if (item.openTarget === "none") return;
+    if (item.openTarget === "file") {
+      // **ファイルを直に開く。** 単話プロットには「開くコマンド」が無く、
+      // どの話かはこの指摘だけが知っている
+      if (item.openPath) await openInDefaultEditor(item.openPath);
+      return;
+    }
+
     const ref = { type: "work", work: this.work };
     await vscode.commands.executeCommand(
       item.openTarget === "plot"
@@ -1247,6 +1588,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         return;
       case "registerForeshadow":
         await this.registerForeshadowFor(message.id);
+        return;
+      case "askNotation":
+        await this.askNotationFor(message.id);
         return;
       case "recheck":
         await this.recheckIssue(message.id);
@@ -1300,7 +1644,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     );
     if (answer !== "空にする") return;
 
-    const entry = this.work ? this.buckets.get(this.work.id) : undefined;
+    const entry = this.work ? this.buckets.get(this.keyOf(this.work)) : undefined;
     entry?.categories.delete(this.category);
     this.items = [];
     this.contradictions = [];
@@ -1317,7 +1661,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
 
     // **空になった作品は、切り替え口から外す。** 選べるのに何も無い作品が
     // 並んでいると、押してみるまで空だと分からない
-    if (entry && this.work) this.buckets.delete(this.work.id);
+    if (entry && this.work) this.buckets.delete(this.keyOf(this.work));
     const other = [...this.buckets.values()][0];
     if (other) {
       this.work = other.work;
@@ -1335,6 +1679,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     if (!item) {
       // **押しても何も起きない、を黙って起こさない**（作者の報告、2026-08-29）。
       // 一覧の描き直しと押した瞬間がすれ違うと、ここへ来ることがある
+      // 作品のログファイルへ残す（49 の指摘、2026-09-08）
+      if (this.work) useLogFile(this.work.folderPath);
       logLine(`提案パネル：飛び先の指摘が見つかりませんでした（id: ${id}）。`);
       return;
     }
@@ -1580,6 +1926,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
 
     await revertIfOpen(item.filePath);
 
+    // **戻すときの手がかりとして、入れた場所を控える**（設計書6.8.12）。
+    // 同じ文がその行に2度あると、文脈だけでは戻す先が決まらない
+    item.appliedAt = absoluteTargetIndex;
     this.markStatus(id, "applied");
     // **同期される編集履歴にも残す**（設計書5.6）。
     // ai_actions.log は .gitignore で同期から外れているので、
@@ -1645,18 +1994,20 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     const lineIndex = item.line - 1;
     const lineText = lines[lineIndex];
 
-    // **修正案がその行に無ければ、既に別の文になっている。** 触らない
-    if (lineText === undefined || !lineText.includes(item.suggestion)) {
-      this.markStatus(
-        id,
-        "applied",
-        "この行はそのあと書き換えられているため、戻せませんでした。" +
-          "本文を直接お直しください。"
-      );
+    // **修正案の文字列だけで探さない**（実機で見つかった不具合、2026-09-06）。
+    // 修正案がありふれた語だと、同じ行の**指摘より前**にある関係のない箇所を
+    // 書き換えていた。適用側と同じ強さ——前後の文脈込み——で位置を決める
+    if (lineText === undefined) {
+      this.markStatus(id, "applied", describeUndoFailure("missing"));
+      return;
+    }
+    const located = locateAppliedSuggestion(lineText, item);
+    if (located.kind !== "found") {
+      this.markStatus(id, "applied", describeUndoFailure(located.kind));
       return;
     }
 
-    const at = lineText.indexOf(item.suggestion);
+    const at = located.at;
     lines[lineIndex] =
       lineText.slice(0, at) +
       item.target +
@@ -1675,7 +2026,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
 
     await revertIfOpen(item.filePath);
 
-    // **もう一度適用できる状態に戻す。** 戻したあとで考え直すこともある
+    // **もう一度適用できる状態に戻す。** 戻したあとで考え直すこともある。
+    // 適用の記録は、もう当てにならないので落とす
+    item.appliedAt = undefined;
     this.markStatus(id, "pending");
 
     await recordEdit(work, {
@@ -1895,7 +2248,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     target.status = "resolved";
     target.recheckNote = note;
     this.postItems();
-    void vscode.window.showInformationMessage(
+    notifyDone(
       `解消を確認しました（${target.fileName} ${target.line}行目）。` +
         "一覧から外します。"
     );
@@ -2198,6 +2551,30 @@ function describeWriteFailure(
       );
     default:
       return "適用に失敗しました。";
+  }
+}
+
+/**
+ * 「戻す」で位置が決まらなかったときの言葉（設計書6.8.12）。
+ *
+ * **理由ごとに、作者が次にすることが違う。** 書き換えられた行は手で直す
+ * しかないが、同じ文が2度ある行は「どちらか分からない」だけなので、
+ * そう伝える。
+ */
+function describeUndoFailure(kind: "missing" | "ambiguous" | "broken"): string {
+  switch (kind) {
+    case "ambiguous":
+      return (
+        "この行には同じ文が複数あり、どこを戻せばよいか決められませんでした。" +
+        "本文を直接お直しください。"
+      );
+    case "broken":
+      return "指摘の位置を特定できませんでした。";
+    default:
+      return (
+        "この行はそのあと書き換えられているため、戻せませんでした。" +
+        "本文を直接お直しください。"
+      );
   }
 }
 

@@ -197,6 +197,22 @@ describe("リポジトリURLの検査", () => {
       expect(validateRepositoryUrl(url)).toBeTruthy();
     }
   );
+
+  test.each([
+    "https://ghp_1234567890abcdefghij@github.com/nonahisa/novel.git",
+    "https://nonahisa:secretpassword@github.com/nonahisa/novel.git",
+  ])("%s は断る（URLに鍵を書かせない）", (url) => {
+    // 埋め込まれた鍵は `.git/config` に平文で残り、ログにも出る。
+    // 認証はOSの保管場所（Git Credential Manager）に任せる
+    expect(validateRepositoryUrl(url)).toContain("トークン");
+  });
+
+  test("http:// は断る（原稿を平文で送らせない）", () => {
+    const message = validateRepositoryUrl("http://github.com/nonahisa/novel.git");
+
+    expect(message).toBeTruthy();
+    expect(message).toContain("https");
+  });
 });
 
 describe("リポジトリ名の候補", () => {

@@ -2,6 +2,11 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
+import {
+  resolveOutputLimitForSend,
+  resolveOutputTokensForPlanning,
+  truncatedOutputAdvice,
+} from "../ai/outputLimit";
 import { confirmProviderReachable } from "./aiConnectivity";
 
 import { scanWork } from "../core/scanner";
@@ -14,6 +19,7 @@ import {
   type SynopsisDoc,
 } from "../core/synopsisDoc";
 import { buildSynopsisListMarkdown } from "../core/synopsisMarkdown";
+import { loadSynopsisChapterMarks } from "../core/synopsisChapters";
 import { buildEmotionCurveMarkdown } from "../core/emotionCurve";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { atomicWriteFile, createManagedRecoveryPath } from "../core/atomicWrite";
@@ -30,8 +36,13 @@ import {
 import { stripCodeFence } from "../core/synopsisValidation";
 import { withCancellableProgress } from "../views/progress";
 import { reportAIError } from "./reportAIError";
-import { logFailure, showLog, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  responseExcerptForLog,
+  useLogFile,
+} from "../core/logger";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
+import { confirmRun, warnWithLog } from "../views/notify";
 
 /**
  * 作品紹介文（P-06）とキャッチコピー3案（P-08）。
@@ -42,8 +53,16 @@ import { askText, cancelItem, isCancelItem } from "../views/dialogs";
  */
 
 const SYNOPSIS_FILE = "synopsis.md";
-/** AIへ渡す冒頭本文の量。多く送っても紹介文は良くならず、料金だけ増える */
-const OPENING_EXCERPT_CHARS = 6000;
+/**
+ * 紹介文・キャッチコピーへ渡す冒頭本文の量。
+ * 多く送っても紹介文は良くならず、料金だけ増える。
+ *
+ * **プロット逆算の `PLOT_OPENING_EXCERPT_CHARS`（3,000字）とは別物である。**
+ * 以前はどちらも同じ名前を名乗り、値だけが違っていた
+ * （設計書6.77の第2段で改名）。紹介文は文体まで読者に見せる文章なので、
+ * 骨格だけで足りるプロットより長く採る。
+ */
+export const BLURB_OPENING_EXCERPT_CHARS = 6000;
 /** 紹介文の材料にする、各話あらすじの件数 */
 const SYNOPSES_FOR_BLURB = 30;
 
@@ -75,12 +94,30 @@ export async function generateWorkBlurb(
   const costNotice = resolved.provider.isPaid
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
-  const confirm = await vscode.window.showInformationMessage(
-    `作品紹介文を作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,
-    "実行",
-    "中止"
+  const confirmed = await confirmRun(
+    `作品紹介文を作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`
   );
-  if (confirm !== "実行") return;
+  if (!confirmed) return;
+
+  // **応答の見込みに実測を使う**（設計書6.65.16の2、6.77の第2段）。
+  // 紹介文は400字ほどだが、渡さないとOllamaの `num_ctx` が
+  // 既定の8,192で確保される
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    resolved.provider.id,
+    resolved.model
+  );
+  // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
+  // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
+  // 半分になり、長い応答が途中で切れる
+  //
+  // **上限は出どころごと受け取る**（キャッチコピー側と同じ、0.33.9）。
+  // 切り詰められたときの直し方は、上限が設定から来たのか実測から来たのかで
+  // 変わる（実測で頭打ちなのに「設定を大きくして」と言うのは嘘になる）
+  const outputLimit = resolveOutputLimitForSend(
+    resolved.provider.id,
+    resolved.model
+  );
+  const sendOutputTokens = outputLimit.tokens;
 
   const response = await withCancellableProgress(
     "作品紹介文を作っています",
@@ -101,6 +138,8 @@ export async function generateWorkBlurb(
           model: resolved.model,
           // 紹介文は読ませる文章なので、抽出より少し揺らす
           temperature: 0.5,
+          maxOutputTokens: sendOutputTokens,
+          plannedOutputTokens,
           jsonSchema: BLURB_SCHEMA as unknown as object,
           disableThinking: true,
           signal: controller.signal,
@@ -116,15 +155,23 @@ export async function generateWorkBlurb(
 
   const parsed = parseBlurbResponse(response.text);
   if (!parsed) {
+    // **切り詰めは、切り詰めとして伝える**（設計書6.77の第2段。あらすじ生成と
+    // 同じ文言）。「読み取れませんでした」だけだと、作者からは上限が足りない
+    // のかAIの気まぐれなのか区別が付かない
+    const truncated = response.truncated === true;
     logFailure("作品紹介文の生成", {
-      理由: "応答を読み取れません",
-      応答: response.text.slice(0, 400),
+      理由: truncated
+        ? "応答が出力上限で切り詰められました"
+        : "応答を読み取れません",
+      応答: responseExcerptForLog(response.text),
     });
-    vscode.window
-      .showWarningMessage("応答を読み取れませんでした。", "ログを見る")
-      .then((answer) => {
-        if (answer === "ログを見る") showLog();
-      });
+    void warnWithLog(
+      // **文言を自前で書かない**（0.33.9）。上限が実測から来ているときに
+      // 「設定を大きくして」と言うのは嘘で、作者は直らない操作を繰り返す
+      truncated
+        ? truncatedOutputAdvice(outputLimit)
+        : "応答を読み取れませんでした。"
+    );
     return;
   }
 
@@ -182,16 +229,30 @@ export async function generateCatchphrases(
     return;
   }
 
+  // **紹介文と同じ2欄を渡す**（設計書6.77の第2段）。案が3つ返るだけなので
+  // 応答は短いが、渡さないと関所とOllamaの `num_ctx` が設定値（既定16,384）で
+  // 動き、ループを回すたびにその席を確保することになる
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    resolved.provider.id,
+    resolved.model
+  );
+  // **上限は出どころごと受け取る**（設計書6.77の第2段、0.33.9のレビュー）。
+  // 切り詰められたときの直し方は、上限が設定から来たのか実測から来たのかで
+  // 変わる（実測で頭打ちなのに「設定を大きくして」と言うのは嘘になる）
+  const outputLimit = resolveOutputLimitForSend(
+    resolved.provider.id,
+    resolved.model
+  );
+  const sendOutputTokens = outputLimit.tokens;
+
   const history = new CatchphraseHistory(work);
   const costNotice = resolved.provider.isPaid
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
-  const confirm = await vscode.window.showInformationMessage(
-    `キャッチコピーを3案作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,
-    "実行",
-    "中止"
+  const confirmed = await confirmRun(
+    `キャッチコピーを3案作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`
   );
-  if (confirm !== "実行") return;
+  if (!confirmed) return;
 
   // 「別の案を出す」を選ぶたび、却下した案を渡して繰り返す
   for (;;) {
@@ -215,6 +276,8 @@ export async function generateCatchphrases(
             model: resolved.model,
             // 案を出させるので、いちばん揺らす
             temperature: 0.9,
+            maxOutputTokens: sendOutputTokens,
+            plannedOutputTokens,
             meta: { feature: "catchphrase", workFolder: work.folderPath },
             jsonSchema: CATCHPHRASE_SCHEMA as unknown as object,
             disableThinking: true,
@@ -235,12 +298,22 @@ export async function generateCatchphrases(
         candidate.text.length <= CATCHPHRASE_MAX_CHARS
     );
     if (valid.length === 0) {
+      /*
+        **切り詰めは、切り詰めとして伝える**（紹介文と同じ扱い、0.33.9）。
+        「案が返りませんでした」だけだと、作者からは上限が足りないのか
+        AIの気まぐれなのか区別が付かず、同じ操作を繰り返すことになる。
+      */
+      const truncated = response.truncated === true;
       logFailure("キャッチコピーの生成", {
-        理由: "使える案がありません",
-        応答: response.text.slice(0, 400),
+        理由: truncated
+          ? "応答が出力上限で切り詰められました"
+          : "使える案がありません",
+        応答: responseExcerptForLog(response.text),
       });
       const retry = await vscode.window.showWarningMessage(
-        `${CATCHPHRASE_MAX_CHARS}字以内の案が返りませんでした。`,
+        truncated
+          ? truncatedOutputAdvice(outputLimit)
+          : `${CATCHPHRASE_MAX_CHARS}字以内の案が返りませんでした。`,
         "もう一度",
         "やめる"
       );
@@ -343,10 +416,10 @@ async function collectMaterial(
   // 冒頭から順に、上限まで詰める。紹介文は冒頭の雰囲気が要る
   let openingExcerpt = "";
   for (const episode of bodies) {
-    if (openingExcerpt.length >= OPENING_EXCERPT_CHARS) break;
+    if (openingExcerpt.length >= BLURB_OPENING_EXCERPT_CHARS) break;
     openingExcerpt += `${episode.body}\n\n`;
   }
-  openingExcerpt = openingExcerpt.slice(0, OPENING_EXCERPT_CHARS);
+  openingExcerpt = openingExcerpt.slice(0, BLURB_OPENING_EXCERPT_CHARS);
 
   let chapterSynopses: string[] = [];
   try {
@@ -411,6 +484,9 @@ async function buildEpisodeSection(
       workTitle,
       headingLevel: 2,
       includeTitle: false,
+      // 章立ての台帳がある作品は、章ごとに見出しを挟む（設計書6.66.4の3）。
+      // 台帳が無ければ印は空で、いままでどおりの一覧になる
+      chapters: await loadSynopsisChapterMarks(work, set),
     }),
     emotion: buildEmotionCurveMarkdown(set.episodes),
   };

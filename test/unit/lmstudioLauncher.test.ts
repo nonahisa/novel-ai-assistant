@@ -26,6 +26,7 @@ import {
   cliCandidates,
   contextLengthRetrySteps,
   decideLoadContextLength,
+  describeShortLoadedContext,
   describeLoadFailure,
   describeStartFailure,
   isInsufficientResources,
@@ -709,5 +710,38 @@ describe("lms を起こすときの環境変数", () => {
     expect(spawnMock.mock.calls[0][2].env).not.toHaveProperty(
       "ELECTRON_RUN_AS_NODE"
     );
+  });
+});
+
+/**
+ * 読み込み済みの文脈が短いときの知らせ。
+ *
+ * **「指定」と言ってよいのは、作者が設定したときだけ。** 設定は既定の0
+ * （＝モデルの最大まで使う）なのに「指定 262144 より短い」と出ており、
+ * 覚えのない数字を突きつけられる形になっていた（2026-09-06、作者の指摘）。
+ */
+describe("読み込み済みの文脈が短いときの知らせ", () => {
+  test("設定が0なら、出どころはモデル情報だと言う", () => {
+    const text = describeShortLoadedContext(131072, 262144, 0);
+
+    expect(text).toContain("モデル情報の上限 262144");
+    expect(text).not.toContain("指定");
+    // どうすればよいかは、これまでどおり添える
+    expect(text).toContain("読み込み直す");
+  });
+
+  test("作者が設定していれば、設定した長さだと言う", () => {
+    const text = describeShortLoadedContext(8192, 32768, 32768);
+
+    expect(text).toContain("設定した長さ 32768");
+    expect(text).not.toContain("モデル情報");
+  });
+
+  test("設定がモデルの最大を超えていたら、モデル情報の上限だと言う", () => {
+    // 実際に読み込ませようとしている長さはモデルの最大である
+    // （`decideLoadContextLength` が小さいほうを採る）
+    const text = describeShortLoadedContext(8192, 131072, 262144);
+
+    expect(text).toContain("モデル情報の上限 131072");
   });
 });

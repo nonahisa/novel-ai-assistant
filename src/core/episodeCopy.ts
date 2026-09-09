@@ -1,6 +1,4 @@
 import { parseEpisodeMetadata } from "./metadataParser";
-import { toSiteNotation, type RubyStyle } from "./ruby";
-import { stripMemoLines } from "./sceneMemo";
 import { sanitizeFileName } from "./episodeParser";
 
 /**
@@ -41,22 +39,35 @@ export function extractEpisodeParts(
 }
 
 /**
- * 本文を、投稿サイトへ貼れる形にする。
+ * 「投稿サイト用に変換してコピー」で、変換にかける元を決める（設計書6.12.1）。
  *
- * いまのところ変換するのは**ルビだけ**。`{漢字|かんじ}` を
- * `｜漢字《かんじ》` などへ直す（6.12.1）。
+ * **選んでいないときは、ヘッダーを外した本文だけを渡す。** 以前は開いて
+ * いるファイルの全文を渡しており、カクヨム形式の頭書き（【タイトル】〜
+ * 【本文】）ごとクリップボードへ入っていた。それを投稿欄へ貼ると、題名の
+ * 行から二重に入る（2026-09-06、作者の裁定）。
  *
- * **前後の空行を落とす。** 投稿欄の先頭に空行が入ると、
- * サイトによっては1行目が空いた状態で公開される。
+ * **選んであるときは手を入れない。** ヘッダーを含めて選ぶのも作者の意思で
+ * あり、選んだ範囲と貼られるものが食い違うほうが困る。
  *
- * **シーンメモは必ず落とす**（設計書6.40.2）。ここを抜かすと、
- * 作者の付箋がそのまま公開される。
+ * @param selectedText 選択されている文字列。選択が無ければ渡さない
  */
-export function bodyForPosting(body: string, style: RubyStyle["id"]): string {
-  return toSiteNotation(stripMemoLines(body), style)
-    .replace(/^\n+/, "")
-    .replace(/\n+$/, "");
+export function sourceForPostingCopy(
+  fullText: string,
+  selectedText?: string
+): string {
+  if (selectedText !== undefined && selectedText !== "") return selectedText;
+  // ヘッダーの有無の判断は1か所に集める（写しを作らない）
+  return extractEpisodeParts(fullText, null).body;
 }
+
+/*
+ * **本文を投稿サイトの形にする関数は、ここには無い**（0.37.5に移した）。
+ *
+ * 貼り付け先ごとの変換は `core/postingConvert.ts` の `convertForPosting`
+ * が1つだけ持つ。noteは記法の置き換えでは足りず（Markdownをそのまま
+ * 解釈する）、ここに記法だけの変換を残しておくと、それを呼ぶ入口が
+ * noteだけ整えない経路になる——実際に投稿キットがそうなっていた。
+ */
 
 /**
  * サブタイトルを含んだファイル名を組み立てる。

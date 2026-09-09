@@ -4,6 +4,10 @@ import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { AIError, recoveryForAIError } from "../ai/types";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
 import {
   episodeBodyLabel,
@@ -30,11 +34,17 @@ import {
   type SubtitleSuggestion,
 } from "../prompts/synopsis";
 import { CharacterStore } from "../core/characterStore";
-import { withCancellableProgress } from "../views/progress";
-import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
+import { withAiTurnProgress } from "./aiTurn";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  useLogFile,
+} from "../core/logger";
 import { renameEpisodeFile } from "../core/episodeRename";
 import { confirmFormatFit } from "./formatFitPrompt";
 import { cancelItem, isCancelItem } from "../views/dialogs";
+import { confirmRun, notifyDone, warnWithLog } from "../views/notify";
 
 /**
  * 各話あらすじの生成（P-07）と、サブタイトルの提案・リネーム。
@@ -129,20 +139,33 @@ export async function generateSynopses(
   const costNotice = resolved.provider.isPaid
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
-  const confirm = await vscode.window.showInformationMessage(
+  const confirmed = await confirmRun(
     `${loaded.bodies.length} 話中 ${pending.length} 話のあらすじを作ります` +
       `（変わっていない ${loaded.bodies.length - pending.length} 話はスキップ）。\n` +
-      `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度${costNotice}`,
-    "実行",
-    "中止"
+      `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度${costNotice}`
   );
-  if (confirm !== "実行") return false;
+  if (!confirmed) return false;
 
   // 人物名は表記を揃えるために渡す。モブは名前が普通名詞になりがちで、
   // あらすじの文中に混ざると読みにくい
   const characterNames = (await new CharacterStore(work).loadAll()).characters
     .filter((character) => !character.isMob)
     .map((character) => character.name);
+
+  // **応答の見込みに実測を使う**（設計書6.65.16の2、6.77の第2段）。
+  // あらすじは1話ぶんで短いが、渡さないとOllamaの `num_ctx` が
+  // 既定の8,192で確保される
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    resolved.provider.id,
+    resolved.model
+  );
+  // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
+  // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
+  // 半分になり、長い応答が途中で切れる
+  const sendOutputTokens = resolveOutputTokensForSend(
+    resolved.provider.id,
+    resolved.model
+  );
 
   const failures: Array<{ label: string; message: string }> = [];
   const subtitleCandidates: Array<{
@@ -152,8 +175,12 @@ export async function generateSynopses(
   let done = 0;
   let cancelled = false;
 
-  await withCancellableProgress(
+  // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）。
+  // 話の数だけAIを呼ぶので、ほかの一括処理と交互に流すと
+  // モデルの読み込み直しが往復する
+  await withAiTurnProgress(
     "あらすじを作っています",
+    { label: "各話あらすじの生成", onCancelled: () => (cancelled = true) },
     async (progress, token) => {
       for (const episode of pending) {
         if (token.isCancellationRequested) {
@@ -183,6 +210,8 @@ export async function generateSynopses(
             model: resolved.model,
             // あらすじは事実を並べるだけなので、揺らす必要がない
             temperature: 0.3,
+            maxOutputTokens: sendOutputTokens,
+            plannedOutputTokens,
             jsonSchema: SYNOPSIS_SCHEMA as unknown as object,
             disableThinking: true,
             signal: controller.signal,
@@ -199,7 +228,7 @@ export async function generateSynopses(
             });
             logFailure(`あらすじ生成（${episodeBodyLabel(episode)}）`, {
               理由: "応答を読み取れません",
-              応答: response.text.slice(0, 400),
+              応答: responseExcerptForLog(response.text),
             });
             continue;
           }
@@ -395,7 +424,7 @@ async function proposeSubtitles(
       logStep(
         `リネーム: ${episode.file.fileName} → ${path.basename(renamed)}`
       );
-      vscode.window.showInformationMessage(
+      notifyDone(
         `${episode.file.fileName} を ${path.basename(renamed)} に変えました。`
       );
     } catch (error) {
@@ -430,14 +459,7 @@ function reportResult(result: {
     .slice(0, 3)
     .map((failure) => `${failure.label}: ${failure.message}`)
     .join("\n");
-  vscode.window
-    .showWarningMessage(
-      `${head}\n失敗 ${result.failures.length} 話\n${shown}`,
-      "ログを見る"
-    )
-    .then((answer) => {
-      if (answer === "ログを見る") showLog();
-    });
+  void warnWithLog(`${head}\n失敗 ${result.failures.length} 話\n${shown}`);
 }
 
 function reportStoreError(error: unknown): void {

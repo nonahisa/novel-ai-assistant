@@ -31,8 +31,16 @@ import { formatLogTime, redactSecrets } from "./logger";
  * 作者がログを貼って助けを求めることを考えると、万一の被害が大きい。
  */
 
-/** 1ファイルの上限。超えたら古いほうから捨て、直近が読めることを優先する */
-const MAX_LOG_BYTES = 2_000_000;
+/**
+ * 相談の記録1ファイルの上限。超えたら古いほうから捨て、直近が読めることを優先する。
+ *
+ * **ログのバイト上限は3つある。値も違う**（設計書6.77の第2段で名前だけ揃えた）。
+ * `logger.ts` の `MAX_ACTION_LOG_BYTES`（動作の記録）と
+ * `usageLog.ts` の `MAX_USAGE_LOG_BYTES`（呼び出し量の表）がそれで、
+ * **用途が違うので値も違う**——寄せない。ここは1件が長い（やり取りの本文が
+ * まるごと入る）ので、動作の記録より大きく取ってある。
+ */
+const MAX_CHAT_LOG_BYTES = 2_000_000;
 
 /** 渡した場面の見出しに添える本文の長さ。全文を載せると読めなくなる */
 const MATERIAL_HEAD_CHARS = 60;
@@ -122,7 +130,7 @@ export function appendChatLog(work: WorkEntry, entry: ChatLogEntry): void {
       }
       const addition = new TextEncoder().encode(text);
       const merged =
-        existing.byteLength + addition.byteLength > MAX_LOG_BYTES
+        existing.byteLength + addition.byteLength > MAX_CHAT_LOG_BYTES
           ? new Uint8Array([
               ...new TextEncoder().encode(header(work)),
               ...addition,

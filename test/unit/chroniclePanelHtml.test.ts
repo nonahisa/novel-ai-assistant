@@ -16,6 +16,48 @@ const script = (() => {
   return found[1];
 })();
 
+/**
+ * WebView のスクリプトから関数を1つ取り出す（提案パネルの検査と同じ手）。
+ *
+ * 中括弧の対応を数えて切り出す。行数で切ると、関数が育ったときに
+ * 黙って途中で切れる。
+ */
+function extractFunction(source: string, name: string): string {
+  const head = source.indexOf("function " + name + "(");
+  expect(head, name + " が見つからない").toBeGreaterThanOrEqual(0);
+  let depth = 0;
+  let started = false;
+  for (let index = head; index < source.length; index++) {
+    if (source[index] === "{") {
+      depth++;
+      started = true;
+    } else if (source[index] === "}") {
+      depth--;
+      if (started && depth === 0) return source.slice(head, index + 1);
+    }
+  }
+  throw new Error(name + " の終わりが見つからない");
+}
+
+interface RowForRender {
+  filePath: string;
+  chapterLabel: string;
+  title: string;
+  timepoint: string;
+  appeared: Array<{ id: string; name: string }>;
+  events: Array<{ kindLabel: string; characterId: string; text: string }>;
+  synopsis: string;
+}
+
+/** 画面が使っている行の組み立てを、そのまま呼べる形にして返す */
+const renderRow = new Function(
+  [
+    extractFunction(script, "escapeHtml"),
+    extractFunction(script, "renderRow"),
+    "return renderRow;",
+  ].join("\n")
+)() as (row: RowForRender) => string;
+
 describe("年表のHTML", () => {
   it("スクリプトとスタイルにnonceが入っている", () => {
     expect(html).toContain('<style nonce="NONCE123">');
@@ -98,6 +140,33 @@ describe("画面は描くだけ", () => {
     expect(script).toContain('post("openEpisode"');
     expect(script).toContain('post("export"');
     expect(script).toContain('post("edit"');
+  });
+
+  /**
+   * 話の行は、見出しも題も同じボタンの中にある（2026-09-05に実機で発見）。
+   *
+   * 題をボタンの外へ出していたため、作者が題を押すと
+   * `closest("[data-file]")` が空振りし、拡張機能へ何も届かなかった。
+   * **文字列を探すだけの検査では通ってしまう**ので、画面と同じ関数を
+   * 実際に走らせて、押した先に本文の場所が付いているかを見る。
+   */
+  it("話数も題も、本文の場所を持つ1つのボタンの中にある", () => {
+    const html = renderRow({
+      filePath: "C:/works/ijime/第1話 気がついたら幽霊に.txt",
+      chapterLabel: "第1話",
+      title: "気がついたら幽霊に",
+      timepoint: "",
+      appeared: [],
+      events: [],
+      synopsis: "",
+    });
+
+    const button = html.match(/<button[^>]*data-file="([^"]*)"[^>]*>([\s\S]*?)<\/button>/);
+    expect(button, "本文の場所を持つボタンが無い").not.toBeNull();
+    expect(button?.[1]).toBe("C:/works/ijime/第1話 気がついたら幽霊に.txt");
+    // 見出しも題も、同じボタンの中（＝どちらを押しても本文へ飛べる）
+    expect(button?.[2]).toContain("第1話");
+    expect(button?.[2]).toContain("気がついたら幽霊に");
   });
 
   it("作者の文字列は、必ずエスケープを通す", () => {

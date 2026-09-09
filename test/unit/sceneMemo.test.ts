@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MEMO_TAG,
+  MEMO_HINT,
   MEMO_MARKER_COLOR,
   MEMO_TAG_COLORS,
   blankMemoLines,
@@ -23,7 +24,7 @@ import {
 import { sceneMemoToMarkdown } from "../../src/core/sceneMemoMarkdown";
 import { countChars, countManuscriptLines } from "../../src/core/charCount";
 import { splitIntoChunks, withLineNumbers } from "../../src/core/chunker";
-import { bodyForPosting } from "../../src/core/episodeCopy";
+import { convertForPosting } from "../../src/core/postingConvert";
 import { buildPrintHtml } from "../../src/core/printHtml";
 import { renderTermMarks } from "../../src/core/manuscriptRender";
 import { hideMemoLinesInMarkdown } from "../../src/core/markdownItRuby";
@@ -48,8 +49,12 @@ describe("付箋の記法（6.40.1）", () => {
    * 先頭の空白を許すと本文と見分けが付かなくなる。
    */
   it("先頭に空白があれば付箋ではない", () => {
-    expect(isMemoLine(" // 半角の字下げ")).toBe(false);
-    expect(isMemoLine("　// 全角の字下げ")).toBe(false);
+    // 字下げしていてもメモ（作者の裁定、2026-09-08。段落の頭に全角空白を
+    // 置く癖で書くと本文扱いになり、字数と投稿用コピーに混ざっていた）
+    expect(isMemoLine(" // 半角の字下げ")).toBe(true);
+    expect(isMemoLine("　// 全角の字下げ")).toBe(true);
+    expect(isMemoLine("	// タブの字下げ")).toBe(true);
+    expect(isMemoLine("　本文の途中の // はメモではない")).toBe(false);
   });
 
   /** URLと会話文を巻き込まない */
@@ -181,7 +186,13 @@ describe("読者向けの出力とAIから消す（6.40.2）", () => {
   });
 
   it("投稿用にコピー：メモは投稿されない", () => {
-    const posted = bodyForPosting(BODY_WITH_MEMO, "site");
+    const posted = convertForPosting(BODY_WITH_MEMO, {
+      label: "試験",
+      detail: "",
+      style: "site",
+      emphasis: "kakuyomu",
+      registered: false,
+    }).text;
     expect(posted).not.toContain("TODO");
     expect(posted).toContain("港を見下ろしていた");
   });
@@ -462,5 +473,21 @@ describe("件数の印（6.40.5）", () => {
   it("混ざっていれば、合計も添える", () => {
     const memos = parseMemos("// TODO 一\n// TODO 二\n// 伏線 三", "a.txt");
     expect(memoBadgeText(memos)).toBe("TODO 2／メモ計 3");
+  });
+});
+
+/**
+ * 1件も無いときの案内（設計書6.40）。
+ *
+ * 「本文の行頭に // と書くと**行頭になります**」という、意味の通らない文が
+ * 出ていた（2026-09-06、作者の指摘）。**書き方を教える文なので、
+ * 何になるのかを正しく言う。**
+ */
+describe("メモが無いときの案内", () => {
+  it("// を書くと何になるのかを、正しく言う", () => {
+    expect(MEMO_HINT).toBe(
+      "本文の行頭に // と書くとメモになります（字下げしていても構いません）"
+    );
+    expect(MEMO_HINT).not.toContain("行頭になります");
   });
 });

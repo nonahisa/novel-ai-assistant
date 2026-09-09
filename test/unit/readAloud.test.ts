@@ -1,4 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import {
+  MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
+  clampReadAloudRate,
+} from "../../src/features/manuscriptEditor";
+import { manuscriptViewTypeFor } from "../../src/core/manuscriptViewTypes";
+import { allActions } from "../../src/views/actionList";
 import {
   READ_ALOUD_MEMO_TEXT,
   buildReadingPlan,
@@ -252,3 +259,101 @@ describe("声に渡す文字列", () => {
   なっていた。「ここから」は往復を待たずに飛ぶ必要があって画面側は消せない
   ので、こちらを消してある（`src/core/readAloud.ts` の注記を参照）。
 */
+
+/**
+ * 読み上げの速さの既定（設計書6.42、実機確認リスト F-49）。
+ *
+ * 列の「速さ」は、開いた時点で**設定の値**から始まる。設定に 2 と
+ * 書いてあれば、列の既定も 2 になる。
+ *
+ * **範囲の外の値は畳む。** `package.json` の `minimum`/`maximum` は案内で
+ * あって強制ではなく、`settings.json` へ直接 `10` と書けばその値が届く。
+ * 範囲外の `rate` は、環境によっては**声が一言も出ない**（黙って失敗する）。
+ */
+describe("列に渡す速さの既定", () => {
+  it("設定の値を、そのまま列の既定にする（実機確認リスト F-49 の代わり）", () => {
+    expect(clampReadAloudRate(2)).toBe(2);
+    expect(clampReadAloudRate(0.5)).toBe(0.5);
+    expect(clampReadAloudRate(1)).toBe(1);
+  });
+
+  it("速すぎる指定は、上限まで畳む（実機確認リスト F-49 の代わり）", () => {
+    // 畳まないと、声が一言も出ない環境がある
+    expect(clampReadAloudRate(10)).toBe(2);
+  });
+
+  it("遅すぎる指定は、下限まで畳む（実機確認リスト F-49 の代わり）", () => {
+    expect(clampReadAloudRate(0.1)).toBe(0.5);
+  });
+
+  it("数でない値が届いても、標準の速さへ戻す（実機確認リスト F-49 の代わり）", () => {
+    expect(clampReadAloudRate(Number.NaN)).toBe(1);
+  });
+
+  it("畳む範囲が、設定の定義と合っている（実機確認リスト F-49 の代わり）", () => {
+    // 片方だけ動かすと、案内と実際の動きが食い違う
+    const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
+      contributes: {
+        configuration: {
+          properties: Record<
+            string,
+            { default?: number; minimum?: number; maximum?: number }
+          >;
+        };
+      };
+    };
+    const defined =
+      manifest.contributes.configuration.properties[
+        "novelai.manuscriptEditor.readAloudRate"
+      ];
+
+    expect(defined.minimum).toBe(clampReadAloudRate(-1));
+    expect(defined.maximum).toBe(clampReadAloudRate(99));
+    expect(defined.default).toBe(clampReadAloudRate(Number.NaN));
+  });
+});
+
+/**
+ * 詳細メニューからの入口（設計書6.42、実機確認リスト F-49）。
+ *
+ * **押しても勝手に読み始めない。** 列を出すだけにしてある——
+ * 押した瞬間に声が出ると、周りに人がいる場所では取り返しがつかない。
+ * 列が実際に画面へ出ることは実機に残る。
+ */
+describe("「原稿を読み上げる（音読推敲）」の入口", () => {
+  const entry = () => {
+    const found = allActions().find(
+      (item) => item.command === "novelai.readManuscriptAloud"
+    );
+    if (!found) throw new Error("読み上げの操作が詳細メニューにありません");
+    return found;
+  };
+
+  it("詳細メニューに、AIを使わない操作として並ぶ（実機確認リスト F-49 の代わり）", () => {
+    expect(entry().label).toBe("原稿を読み上げる");
+    expect(entry().note).toBe("音読推敲");
+    // OSの声で読むので、料金はかからないし原稿も外へ出ない
+    expect(entry().usesAI).toBe(false);
+  });
+
+  it("小説では、横書きの入口で開く（実機確認リスト F-49 の代わり）", () => {
+    // 縦書きで開くのは脚本だけ（設計書6.70）。作品一覧から開いたときと同じ
+    expect(manuscriptViewTypeFor(undefined)).toBe(
+      MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+    );
+    expect(manuscriptViewTypeFor("novel")).toBe(
+      MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+    );
+  });
+
+  it("押した作品の原稿を開く（書庫でも取り違えない）（実機確認リスト F-49 の代わり）", () => {
+    // 開く先は、押された作品から選ぶ（`pickReadAloudTarget(work)`）。
+    // ここが「いま開いているファイル」だけだと、書庫で別の作品を選んでも
+    // 前の作品の原稿が読まれる
+    const source = readFileSync("src/features/manuscriptEditor.ts", "utf-8");
+    const at = source.indexOf("export async function openManuscriptForReading");
+    expect(at).toBeGreaterThan(0);
+
+    expect(source.slice(at, at + 300)).toContain("pickReadAloudTarget(work)");
+  });
+});

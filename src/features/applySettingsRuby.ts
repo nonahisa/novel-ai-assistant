@@ -4,18 +4,25 @@ import { fromUri } from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
 import {
+  decodeBytes,
   readTextFile,
   writeTextFilePreservingFormat,
 } from "../core/textFile";
 import {
   applyRubyInsertions,
+  buildRubyConfirm,
+  canRevertRuby,
+  countByTerm,
   describeRubyResults,
   planRubyInsertions,
+  splitSingleCharTerms,
   type RubyFileResult,
   type RubyScope,
   type RubyTerm,
 } from "../core/settingsRuby";
+import { manualActor, recordEdit } from "../core/actorContext";
 import { episodeTitle, formatChapterLabel } from "../core/episodeLabel";
+import { openManuscriptTabUris } from "./manuscriptEditor";
 import { logFailure, logStep } from "../core/logger";
 import { withCancellableProgress } from "../views/progress";
 import { cancelItem, isCancelItem } from "../views/dialogs";
@@ -69,14 +76,23 @@ async function pickScope(
     return undefined;
   }
 
-  const active = vscode.window.activeTextEditor;
-  const activePath = active ? fromUri(active.document.uri) : undefined;
-  const openOne = markdown.find(
-    (episode) =>
-      activePath &&
-      path.normalizeForComparison(episode.filePath) ===
-        path.normalizeForComparison(activePath)
-  );
+  // **押した時点でアクティブなのは設定資料パネルである。** このボタンは
+  // パネルの中にあるので、`activeTextEditor` だけを見ると「いま開いている話」は
+  // 一度も出ない（実機、2026-09-06）。開いているタブ全部から本文を探す
+  const candidates = [
+    vscode.window.activeTextEditor?.document.uri,
+    ...openManuscriptTabUris(),
+  ]
+    .filter((uri): uri is vscode.Uri => uri !== undefined)
+    .map((uri) => path.normalizeForComparison(fromUri(uri)));
+  const openOne = candidates
+    .map((candidate) =>
+      markdown.find(
+        (episode) =>
+          path.normalizeForComparison(episode.filePath) === candidate
+      )
+    )
+    .find((episode) => episode !== undefined);
 
   const items: Array<
     vscode.QuickPickItem & { choice?: "all" | "open" | "pick" }
@@ -109,7 +125,7 @@ async function pickScope(
     title: "どこにルビを振りますか",
     placeHolder: openOne
       ? undefined
-      : "いま開いている話は、この作品の本文ではありません",
+      : "本文を開いていれば「いま開いている話」も選べます",
     ignoreFocusOut: true,
   });
   if (!picked || isCancelItem(picked) || !picked.choice) return undefined;
@@ -160,7 +176,7 @@ async function pickScope(
  */
 async function confirm(
   results: readonly RubyFileResult[],
-  termCount: number,
+  terms: { usable: readonly RubyTerm[]; singleChar: readonly RubyTerm[] },
   scopeLabel: string
 ): Promise<boolean> {
   const total = results.reduce((sum, entry) => sum + entry.count, 0);
@@ -174,25 +190,27 @@ async function confirm(
           "",
           "・すでにルビが振ってあるところには、重ねて振りません",
           "・読み仮名の入っていないレコードは対象外です",
+          ...(terms.singleChar.length > 0
+            ? ["・1文字の語は、ほかの語の一部に当たるので対象外です"]
+            : []),
         ].join("\n"),
       }
     );
     return false;
   }
 
+  // **文言を組むのは `core/settingsRuby.ts`。** 数（見出しの「N件」・話ごと・
+  // 語ごと）が同じ配列から出ていることを、単体テストで見張るためである
+  const { title, detail } = buildRubyConfirm({
+    results,
+    terms,
+    scopeLabel,
+    fileName: (filePath) => path.basename(filePath),
+  });
+
   const answer = await vscode.window.showWarningMessage(
-    `${scopeLabel}に、${total}件のルビを振りますか？`,
-    {
-      modal: true,
-      detail: [
-        `読み仮名のある名前：${termCount}語`,
-        "",
-        describeRubyResults(results, (filePath) => path.basename(filePath)),
-        "",
-        "すでにルビや傍点になっているところへは振りません。",
-        "取り消したくなったら、ファイルを開いて Ctrl+Z で戻せます。",
-      ].join("\n"),
-    },
+    title,
+    { modal: true, detail },
     "振る"
   );
   return answer === "振る";
@@ -245,6 +263,57 @@ export function collectRubyTerms(
   return [...byText.values()];
 }
 
+/** ルビの対象にできる資料の種類（設定資料パネルの4種） */
+export interface RubyRecordGroup {
+  kind: "character" | "ability" | "location" | "organization";
+  label: string;
+  records: ReadonlyArray<{ name: string; reading: string | null }>;
+}
+
+/** 読み仮名の入っているレコードの数（選ぶ画面の説明に出す） */
+export function countReadable(
+  records: ReadonlyArray<{ name: string; reading: string | null }>
+): number {
+  return records.filter(
+    (record) =>
+      record.name?.trim() &&
+      record.reading?.trim() &&
+      record.name.trim() !== record.reading.trim()
+  ).length;
+}
+
+/**
+ * どの種類の資料の読み仮名を振るかを選ぶ（作者の裁定、2026-09-08）。
+ *
+ * **既定は人物だけ。** 読みが要るのはほぼ人名で、場所や能力にまで振ると
+ * 「教室」に {教室|きょうしつ} が付く（実機、2026-09-06）。ほかの種類は
+ * 選べば入る。取りやめか、1つも選ばなければ undefined。
+ */
+export async function pickRubyRecordKinds(
+  groups: readonly RubyRecordGroup[]
+): Promise<Array<{ name: string; reading: string | null }> | undefined> {
+  // `kind` は QuickPickItem が区切り線の種別として持っているので、名前を変える
+  // （同じ名前で違う型を重ねると、交差型が never になって項目を作れない）
+  type KindItem = vscode.QuickPickItem & { recordKind: RubyRecordGroup["kind"] };
+  const items: KindItem[] = groups.map((group) => ({
+    label: group.label,
+    description: `読み仮名のある名前 ${countReadable(group.records)}語`,
+    picked: group.kind === "character",
+    recordKind: group.kind,
+  }));
+  const chosen = await vscode.window.showQuickPick<KindItem>(items, {
+    canPickMany: true,
+    title: "どの資料の読み仮名を振りますか",
+    placeHolder: "複数選べます。人物だけが既定です",
+    ignoreFocusOut: true,
+  });
+  if (!chosen || chosen.length === 0) return undefined;
+  const kinds = new Set(chosen.map((item) => item.recordKind));
+  return groups
+    .filter((group) => kinds.has(group.kind))
+    .flatMap((group) => [...group.records]);
+}
+
 export async function applySettingsRuby(
   work: WorkEntry,
   terms: readonly RubyTerm[]
@@ -267,14 +336,20 @@ export async function applySettingsRuby(
   const scope = await pickRubyScope();
   if (!scope) return false;
 
+  // **1文字の語は、ここで外す。** 「因」が「原因」に当たるような当たり方を
+  // するので、数える段階から対象にしない（設計書6.12.5）
+  const { usable, singleChar } = splitSingleCharTerms(terms);
+
   // **どこへ何件入るかを、先に数える。** 本文はまだ書き換えない
   const results: RubyFileResult[] = [];
   for (const filePath of target.files) {
     try {
       const content = await readTextFile(filePath);
+      const insertions = planRubyInsertions(content.text, usable, scope);
       results.push({
         filePath,
-        count: planRubyInsertions(content.text, terms, scope).length,
+        count: insertions.length,
+        byTerm: countByTerm(insertions),
       });
     } catch (error) {
       results.push({
@@ -285,9 +360,24 @@ export async function applySettingsRuby(
     }
   }
 
-  if (!(await confirm(results, terms.length, target.label))) return false;
+  if (!(await confirm(results, { usable, singleChar }, target.label))) {
+    return false;
+  }
 
-  return writeAll(results, terms, scope);
+  return writeAll(work, results, usable, scope);
+}
+
+/**
+ * 振ったあとの1話。**「元に戻す」に必要なものだけを控える。**
+ *
+ * `recoveryPath` は書き換える前の本文の退避先、`hashAfter` は振った直後の
+ * 本文のハッシュ。戻す前に本文が変わっていないかを、これで確かめる。
+ */
+interface AppliedRuby {
+  filePath: string;
+  count: number;
+  recoveryPath?: string;
+  hashAfter?: string;
 }
 
 /**
@@ -300,11 +390,12 @@ export async function applySettingsRuby(
  * 実際に入った数を出す。
  */
 async function writeAll(
+  work: WorkEntry,
   results: readonly RubyFileResult[],
   terms: readonly RubyTerm[],
   scope: RubyScope
 ): Promise<boolean> {
-  const done: RubyFileResult[] = [];
+  const done: AppliedRuby[] = [];
   const failed: RubyFileResult[] = [];
   const targets = results.filter((entry) => entry.count > 0);
 
@@ -328,7 +419,32 @@ async function writeAll(
           current.hash
         );
         if (result.ok) {
-          done.push({ filePath: entry.filePath, count: insertions.length });
+          // 戻すときのために、退避先と「振った直後の姿」を控える。
+          // 読み直しに失敗しても振ったこと自体は成功なので、
+          // hashAfter を欠いたまま記録する（その話は戻せない）
+          let hashAfter: string | undefined;
+          try {
+            hashAfter = (await readTextFile(entry.filePath)).hash;
+          } catch {
+            hashAfter = undefined;
+          }
+          done.push({
+            filePath: entry.filePath,
+            count: insertions.length,
+            recoveryPath: result.recoveryPath,
+            hashAfter,
+          });
+          // **同期される編集履歴にも残す**（設計書5.6）。
+          // 本文をまとめて書き換える操作なので、いつ誰が振ったかが
+          // 残っていないと、あとから経緯をたどれない
+          await recordEdit(work, {
+            actor: manualActor(),
+            action: "設定資料からルビを振った",
+            file: path.basename(entry.filePath),
+            detail: `${insertions.length}件（${
+              scope === "first" ? "各話の最初の1回だけ" : "出てくるところすべて"
+            }）`,
+          });
         } else {
           failed.push({
             ...entry,
@@ -356,22 +472,142 @@ async function writeAll(
         詳細: entry.skipped ?? "（理由なし）",
       });
     }
-    await vscode.window.showWarningMessage(
+    const answer = await vscode.window.showWarningMessage(
       `${done.length}話に${total}件のルビを振りました。${failed.length}話は振れませんでした。`,
       {
         modal: true,
         detail: describeRubyResults(failed, (filePath) =>
           path.basename(filePath)
         ),
-      }
+      },
+      // 振れた話だけでも戻せるようにする。ここで出さないと、
+      // 一部が失敗した回だけ戻す手段が無くなる
+      ...(done.length > 0 ? ["元に戻す"] : [])
     );
+    if (answer === "元に戻す") await revertRubyApplication(work, done);
     return done.length > 0;
   }
 
-  void vscode.window.showInformationMessage(
-    `${done.length}話に、${total}件のルビを振りました。`
-  );
+  // **通知の答えを待たない。** ここで待つと、押されなかった場合に
+  // 通知が消えるまで呼び出し元が止まる
+  void vscode.window
+    .showInformationMessage(
+      `${done.length}話に、${total}件のルビを振りました。`,
+      "元に戻す"
+    )
+    .then((answer) =>
+      answer === "元に戻す" ? revertRubyApplication(work, done) : undefined
+    );
   return done.length > 0;
+}
+
+/**
+ * 振ったルビを、退避してある本文から書き戻す（設計書6.12.5）。
+ *
+ * **Ctrl+Z では戻せない。** `writeTextFilePreservingFormat` は
+ * 「削除→作り直し」で書くので、VS Codeの取り消し履歴に載らない。
+ * 退避（`.novelai-recovery` の `.bak`）は前からあったが、名前がハッシュなので
+ * 作者には見つけられなかった（実機で判明、2026-09-06）。
+ *
+ * **振ったあとに書き足された話は戻さない。** 退避した本文で上書きすると、
+ * その書き足しが消える。ハッシュで確かめて、違っていれば飛ばす。
+ */
+async function revertRubyApplication(
+  work: WorkEntry,
+  applied: readonly AppliedRuby[]
+): Promise<void> {
+  const reverted: AppliedRuby[] = [];
+  const skipped: Array<{ filePath: string; reason: string }> = [];
+
+  await withCancellableProgress("ルビを戻しています…", async (progress, token) => {
+    let index = 0;
+    for (const entry of applied) {
+      if (token.isCancellationRequested) break;
+      progress.report({
+        message: `${path.basename(entry.filePath)}（${++index}/${applied.length}）`,
+      });
+
+      try {
+        if (!entry.recoveryPath || !entry.hashAfter) {
+          skipped.push({
+            filePath: entry.filePath,
+            reason: "退避した本文の場所が分かりません",
+          });
+          continue;
+        }
+
+        const current = await readTextFile(entry.filePath);
+        if (!canRevertRuby({ hashAfter: entry.hashAfter }, current.hash)) {
+          skipped.push({
+            filePath: entry.filePath,
+            reason: "振ったあとに本文が変わっています",
+          });
+          continue;
+        }
+
+        const bytes = await vscode.workspace.fs.readFile(
+          path.toUri(entry.recoveryPath)
+        );
+        // 書き戻しも原稿を守る手順を通す。これでルビ入りの版も退避される
+        const result = await writeTextFilePreservingFormat(
+          entry.filePath,
+          decodeBytes(bytes).text,
+          current,
+          current.hash
+        );
+        if (!result.ok) {
+          skipped.push({
+            filePath: entry.filePath,
+            reason: describeFailure(result.reason),
+          });
+          continue;
+        }
+
+        reverted.push(entry);
+        await recordEdit(work, {
+          actor: manualActor(),
+          action: "設定資料のルビを戻した",
+          file: path.basename(entry.filePath),
+          detail: `${entry.count}件`,
+        });
+      } catch (error) {
+        skipped.push({
+          filePath: entry.filePath,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  });
+
+  if (reverted.length === 0 && skipped.length === 0) return; // 中止された
+
+  const total = reverted.reduce((sum, entry) => sum + entry.count, 0);
+  if (reverted.length > 0) {
+    logStep(`設定資料のルビを戻した: ${reverted.length}話・${total}件`);
+  }
+
+  if (skipped.length > 0) {
+    for (const entry of skipped) {
+      logFailure("設定資料のルビを戻す", {
+        ファイル: path.basename(entry.filePath),
+        詳細: entry.reason,
+      });
+    }
+    await vscode.window.showWarningMessage(
+      `${reverted.length}話のルビを戻しました。${skipped.length}話は戻せませんでした。`,
+      {
+        modal: true,
+        detail: skipped
+          .map((entry) => `　${path.basename(entry.filePath)}：${entry.reason}`)
+          .join("\n"),
+      }
+    );
+    return;
+  }
+
+  void vscode.window.showInformationMessage(
+    `${reverted.length}話のルビを戻しました。`
+  );
 }
 
 function describeFailure(reason: string): string {

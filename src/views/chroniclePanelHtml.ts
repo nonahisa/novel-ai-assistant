@@ -116,7 +116,9 @@ td.who, td.what { width: 22%; }
   font: inherit;
 }
 .link:hover { text-decoration: underline; }
-.chapter { white-space: nowrap; }
+/* 題まで1つのボタンに入れたので、折り返しは許す。
+   折らせたくないのは見出し（「第1話」）だけである */
+.chapter .label { white-space: nowrap; }
 .title { color: var(--vscode-descriptionForeground); }
 .event { display: block; margin-bottom: 2px; }
 .tag {
@@ -249,9 +251,16 @@ function renderCharacters() {
 }
 
 function renderRow(row) {
+  // **題までボタンの中へ入れる。** 作者は「第1話 気がついたら幽霊に」を
+  // ひとつづきのリンクとして押す。題をボタンの外（兄弟の span）に置くと、
+  // 題を押したときだけ closest("[data-file]") が空振りし、拡張機能へ何も
+  // 届かないまま終わる——通知もログも出ないので、追いようがない
+  // （実機で発見、2026-09-05）
   const chapter = '<button class="link chapter" data-file="' +
-    escapeHtml(row.filePath) + '">' + escapeHtml(row.chapterLabel) + "</button>" +
-    (row.title ? ' <span class="title">' + escapeHtml(row.title) + "</span>" : "");
+    escapeHtml(row.filePath) + '"><span class="label">' +
+    escapeHtml(row.chapterLabel) + "</span>" +
+    (row.title ? ' <span class="title">' + escapeHtml(row.title) + "</span>" : "") +
+    "</button>";
 
   const who = row.appeared.map(function (entry) {
     return '<button class="link" data-character="' + escapeHtml(entry.id) + '">' +

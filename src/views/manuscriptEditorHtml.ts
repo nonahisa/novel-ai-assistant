@@ -40,6 +40,12 @@
 import { MANUSCRIPT_FONTS } from "../core/manuscriptFonts";
 import { NOTATION_RULES } from "../core/manuscriptRender";
 import { MEMO_LINE_PATTERN, MEMO_TAG_CLASS_MAP } from "../core/sceneMemo";
+import {
+  SCRIPT_LINE_CLASSES,
+  SCRIPT_LINE_CSS,
+  SCRIPT_LINE_RULES,
+} from "../core/scriptLines";
+import type { WorkFormatKey } from "../core/workFormat";
 
 /**
  * 測る書体の名前。
@@ -56,8 +62,28 @@ const PROBE_FONT_NAMES = MANUSCRIPT_FONTS.map((font) => font.probe).filter(
 
 export function buildManuscriptEditorHtml(
   nonce: string,
-  cspSource: string
+  cspSource: string,
+  /**
+   * この原稿の作品タイプ（設計書6.70）。**脚本だけ組み方が変わる**
+   * （柱・ト書き・セリフ）。
+   *
+   * 省略できるようにしてあるのは、タイプを決めていない作品
+   * （プロットに `## 形式` が無い）と、作品を引けなかったときのためで、
+   * そのときはこれまでどおりの画面になる。**脚本以外では、出来上がる
+   * HTMLが1バイトも変わらない**（test/unit/composeFace.test.ts が見張る）。
+   */
+  format?: WorkFormatKey
 ): string {
+  /** 脚本の作品か。埋め込む規則と組み方の指定は、これで決まる */
+  const isScript = format === "script";
+  /**
+   * 脚本の組み方（設計書6.70）。**値は `core/scriptLines.ts` の1か所**
+   * から借りる（PDFも同じ文字列を埋め込む。写しを置かない）。
+   *
+   * 脚本でなければ空文字＝**規則が1つも増えない**。行頭の改行ごと
+   * 空にしてあるので、脚本以外のHTMLは以前と1文字も変わらない。
+   */
+  const scriptCss = isScript ? `\n${SCRIPT_LINE_CSS}` : "";
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -170,6 +196,11 @@ body.aloud #aloud { display: flex; }
    margin-left: auto にしておくと、この段へ左寄せの要素を足しても
    このボタンだけが右端に残る（並び順で決め打たない） */
 #latest { margin-left: auto; }
+/* 口述モード（設計書6.83）。**入っているあいだだけ「整える」「やめる」を出す**
+   ——押す前から並べても、何を整えるのかがまだ決まっていない */
+.dictate-on { display: none; }
+body.dictating .dictate-on { display: inline-block; }
+body.dictating #dictate { display: none; }
 #surface {
   flex: 1 1 auto;
   position: relative;
@@ -399,7 +430,7 @@ body.vertical #compose .memo::before {
 #compose .memo-foreshadow::before {
   background: var(--novelai-memo-foreshadow, #1a5fb4);
 }
-#compose .memo-idea::before { background: var(--novelai-memo-idea, #1c7c3c); }
+#compose .memo-idea::before { background: var(--novelai-memo-idea, #1c7c3c); }${scriptCss}
 /* **かたまり（ルビ・傍点）は編集不可**（設計書6.34.2）。中の文字を直接
    直せないので、消すときは1単位で消える。選んだときに1文字のように
    振る舞わせるため、余計な余白は付けない */
@@ -481,6 +512,125 @@ body.vertical #compose .ellipsis {
 ::highlight(novelai-reading) {
   background-color: rgba(64, 160, 255, 0.28);
 }
+
+/* ── SNS記事のnote風（設計書6.69） ─────────────────
+   **ここから下は、すべて body.note / body.notepv の中に閉じ込める。**
+   小説の原稿の見え方を1pxも変えないための決まりで、
+   test/unit/manuscriptEditorNote.test.ts が規則の見出しを見張っている。
+
+   ## 編集面は、テーマに馴染ませたまま「組み方」だけをnoteに寄せる
+   紙面を白く塗らないのは、**重ね敷きの色が全部テーマ由来**だからである
+   （用語の文字色・シーンメモの蛍光ペン・読み上げの塗りは、
+   features/manuscriptEditor.ts の colorsFor() が明暗を見て選んでいる）。
+   暗いテーマのまま紙面だけ白くすると、暗い地に合わせて選ばれた
+   明るい文字色が白地に載って読めなくなる。それに、ここは作者が一日じゅう
+   打つ面である。**noteの読み味のうち、字の並び方（幅・行間・書体）だけを
+   借りる。** 白い紙面が要る場面は、下のプレビュー面が受け持つ。
+
+   ## 縦書きには当てない
+   noteは横書きの読み物で、縦書きに620pxの段を作っても行が短くなるだけ */
+body.note:not(.vertical) #write,
+body.note:not(.vertical) #marks,
+body.note:not(.vertical) #compose,
+body.note:not(.vertical) #aloudmarks {
+  /* **4枚まとめて同じ padding にする。** 1枚でも折り返し幅が違うと、
+     重ねた色が本文と無関係な場所へ浮く（0.22.24で直した不具合の再発） */
+  padding-left: max(28px, calc((100% - 620px) / 2));
+  padding-right: max(28px, calc((100% - 620px) / 2));
+  line-height: 1.8;
+  /* noteの本文はゴシック。作者が書体を選んでいれば、そちらを立てる */
+  font-family: var(--novelai-font, "Hiragino Kaku Gothic ProN", "Yu Gothic",
+    "YuGothic", "Meiryo", sans-serif);
+}
+
+/* ── note風プレビュー（「貼ったときの見た目」） ─────────
+   **ここは書く面ではなく、確かめる面である。** だから紙面はテーマに
+   合わせず、noteの読み味（明るい地に濃い字）で固定する。重ね敷きの層は
+   載らないので、色が読めなくなる心配もない */
+#notepv {
+  position: absolute;
+  inset: 0;
+  display: none;
+  overflow: auto;
+  padding: 32px 28px 64px;
+  background: #ffffff;
+  color: #333333;
+  font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "YuGothic",
+    "Meiryo", sans-serif;
+  /* 字の大きさだけは道具箱の ＋／ー に従う（押して何も起きないと壊れて見える） */
+  font-size: var(--novelai-size, 16px);
+  line-height: 1.8;
+}
+body.notepv #notepv { display: block; }
+/* **ほかの面は描かせない。** 二重に見えるうえ、重ね敷きは位置を測り続ける */
+body.notepv #write, body.notepv #marks,
+body.notepv #compose, body.notepv #aloudmarks { display: none; }
+#notepv .note-page {
+  max-width: 620px;
+  margin: 0 auto;
+  /* 注意の印を左のガターへ置くための基準 */
+  position: relative;
+}
+#notepv p, #notepv h1, #notepv h2, #notepv h3,
+#notepv ul, #notepv ol, #notepv blockquote {
+  position: relative;
+  margin: 0 0 1.2em;
+}
+/* 空行は、そのまま間隔として残す（noteは空行が1つの塊になる） */
+#notepv .note-empty { margin: 0 0 1.2em; min-height: 0.6em; }
+/* noteの見出しは2段しかない（大見出し＝## ・小見出し＝### ）。
+   貼るときも同じ段へ丸めるので（core/noteMarkdown.ts）、大きさも2つで足りる
+   ——3段目を残しておくと、いつか誰かが3段に見えるプレビューを作る */
+#notepv .note-h1 { font-size: 1.5em; font-weight: 700; margin: 1.6em 0 0.8em; }
+#notepv .note-h2 { font-size: 1.22em; font-weight: 700; margin: 1.5em 0 0.7em; }
+/* コード・画像の印・埋め込みの枠（設計書6.84）。620pxの幅に収める */
+#notepv .note-code {
+  white-space: pre-wrap; overflow-wrap: anywhere; font-family: Consolas, "Courier New", monospace;
+  font-size: 0.9em; background: #f4f4f4; padding: 0.8em 1em; margin: 1em 0; border-radius: 4px;
+}
+#notepv .note-image {
+  border: 1px dashed #b0b0b0; padding: 1em; margin: 1em 0; text-align: center; color: #666;
+}
+#notepv .note-embed {
+  border: 1px solid #d0d0d0; border-radius: 6px; padding: 0.8em 1em; margin: 1em 0;
+  background: #fafafa; overflow-wrap: anywhere;
+}
+#notepv .note-embed-label { display: block; font-size: 0.8em; color: #888; margin-top: 0.3em; }
+#notepv .note-link { color: #0a66c2; text-decoration: underline; cursor: default; }
+#notepv .note-quote {
+  padding: 0.2em 0 0.2em 1em;
+  border-left: 3px solid #d0d0d0;
+  color: #555555;
+}
+#notepv .note-hr {
+  border: none;
+  border-top: 1px solid #dcdcdc;
+  margin: 2em 0;
+}
+#notepv .note-list { padding-left: 1.5em; }
+#notepv .note-item { margin: 0 0 0.4em; }
+/* **リンクは下線だけ。** 押しても開かない（飛び先そのものを持たせていない） */
+#notepv .note-link { text-decoration: underline; }
+/* noteに無い記法の印（設計書6.69）。
+   **うるさくしない。** 行の左のガターへ小さく置き、理由はホバーで出す
+   ——書いている手を止めるほどの知らせではない */
+#notepv .note-warn {
+  position: absolute;
+  left: -1.4em;
+  color: #c07000;
+  font-size: 0.8em;
+  opacity: 0.75;
+  cursor: help;
+  user-select: none;
+}
+/* リストの項目と引用の中では、印がガターからはみ出さないよう内側に寄せる */
+#notepv .note-item .note-warn { left: -1.2em; }
+
+/* 道具箱のnote用のボタンは、SNS記事のときだけ出す
+   （小説の道具箱にボタンを増やさない） */
+.note-only { display: none; }
+body.notelike button.note-only { display: inline-block; }
+body.notelike .sep.note-only { display: block; }
 
 /* ── ルビ ─────────────────────────── */
 /* 組んで書く面は、本物の ruby 要素を組む（#compose ruby[data-src]） */
@@ -592,6 +742,9 @@ ruby > rt {
   <div class="sep"></div>
   <button id="copy" title="投稿サイトの記法に直してコピーします">投稿用にコピー</button>
   <button id="aloudToggle" title="読み上げの操作を出し入れします。耳で聞くと、目では気づかないリズムの悪さや誤字が見つかります">読み上げ</button>
+  <div class="sep note-only"></div>
+  <button id="noteStyle" class="note-only" title="noteの読み味に近い組版（幅・行間・書体）で表示します。もう一度押すと、いつもの表示に戻ります">note風</button>
+  <button id="notePv" class="note-only" title="noteに貼ったときの見た目を出します。noteに無い記法には印が付きます">貼り付け後</button>
   <div class="sep"></div>
   <button id="font" title="本文の書体を選びます">書体</button>
   <button id="smaller" title="文字を小さく">ー</button>
@@ -626,11 +779,16 @@ ruby > rt {
   <div id="marks" aria-hidden="true"></div>
   <textarea id="write" spellcheck="false" wrap="soft"></textarea>
   <div id="compose" spellcheck="false"></div>
+  <div id="notepv"></div>
 </div>
 
 <div id="bottom">
   <button id="prev" title="ひとつ前の話を開きます">← 前の話</button>
   <button id="next" title="次の話を開きます。最終話に本文があれば、次の話を作って開きます">次の話 →</button>
+  <div class="sep"></div>
+  <button id="dictate" title="OSの音声入力で書き取った文を、あとからAIに整えてもらいます。押してから音声入力を始めてください">口述</button>
+  <button id="dictateClean" class="dictate-on" title="口述を始めたところから、いまのカーソルまでをAIに整えてもらいます">整える</button>
+  <button id="dictateCancel" class="dictate-on" title="整えずに口述モードを抜けます。書き取った本文はそのまま残ります">やめる</button>
   <button id="latest" title="いちばん新しい話を開きます。白紙でなければ、次の話を作って開きます">最新話を書く</button>
 </div>
 
@@ -671,6 +829,11 @@ ruby > rt {
   const dirButton = document.getElementById("dir");
   /** 組んで書く（実験。設計書6.34） */
   const compose = document.getElementById("compose");
+  /* ── SNS記事のnote風（設計書6.69） ── */
+  const noteStyleButton = document.getElementById("noteStyle");
+  const notePvButton = document.getElementById("notePv");
+  /** 「noteに貼ったときの見た目」の面 */
+  const notepv = document.getElementById("notepv");
 
   /** いま画面が持っている本文。拡張機能から来たものと比べるために持つ */
   let current = "";
@@ -682,6 +845,45 @@ ruby > rt {
    * それを入れ直すと、カーソルが飛び、変換中なら変換そのものが壊れる。
    */
   let lastSent = null;
+  /**
+   * 最近自分が送った本文（新しい順、最大16件）。
+   *
+   * **最後の1件だけでは足りなかった**（作者の報告、2026-09-06「変換時に
+   * 入力が消える。文字の下に点線が残る」）。拡張機能は文書の変更を
+   * 120ミリ秒まとめてから**その時点の文書**を送り返す。語Aを送ったあと、
+   * その返事が届く前に語Bを確定して送ると、lastSent はBなのに届くのはAで、
+   * 「外からの書き換え」と見なして打つ面をAへ戻していた——Bが消える。
+   * 変換中に届けば pending に溜まり、次の確定のあとに同じことが起きる
+   * （確定した語が消え、IMEの下線だけが残る）。
+   *
+   * 自分が送ったものは、**いくつか前のものでも**返事として扱う。
+   * 16件は「往復のあいだに確定できる語の数」よりずっと多い。
+   */
+  const sentHistory = [];
+  function rememberSent(text) {
+    lastSent = text;
+    sentHistory.unshift(text);
+    if (sentHistory.length > 16) sentHistory.length = 16;
+  }
+  /**
+   * 届いた本文が、最近自分が送ったものの返事か。
+   *
+   * **当たったら、その1件とそれより古いものを忘れる**（レビューの指摘、
+   * 2026-09-06）。返事は送った順に届くので、当たった1件より古い返事は
+   * もう来ない。忘れないと、別の窓の取り消しや過去の版への復元で
+   * **本当に外から同じ文へ戻された**ときまで「自分の返事」と見なして
+   * 画面を古いままにし、次の1打鍵で外の変更を書き戻してしまう。
+   */
+  function isOwnEcho(text) {
+    const at = sentHistory.indexOf(text);
+    if (at === -1) return false;
+    sentHistory.splice(at);
+    return true;
+  }
+  /** 外からの本文を受け入れたら、以後の返事の照合はやり直す */
+  function forgetSent() {
+    sentHistory.length = 0;
+  }
   /** 変換中に外から届いた本文。確定してから片づける */
   let pending = null;
 
@@ -758,16 +960,58 @@ ruby > rt {
   let composeWanted = saved.compose !== false;
   let size = saved.size || 16;
 
+  /**
+   * この原稿はSNS記事か（設計書6.69）。**決めるのは拡張機能側**
+   * ——作品の形式（プロットの「形式」の節）を知っているのは向こうである。
+   */
+  let noteLike = false;
+  /**
+   * note風の組版で見せるか。
+   *
+   * **SNS記事では既定で入れる**（作者の依頼、2026-09-04）。押せばいつもの
+   * 表示へ戻り、その原稿ではそれを覚える。小説の原稿では noteLike が false
+   * なので、この値が何であっても効かない。
+   */
+  let noteStyle = saved.noteStyle !== false;
+  /**
+   * 「貼ったときの見た目」の面を開いているか。
+   *
+   * **覚えない。** 開き直したときは書く面から始めたい（確かめる面は、
+   * 確かめたいときに開くもの）。
+   */
+  let notePv = false;
+
   function remember() {
     // **まだ開いていないだけの状態を、閉じたことにしない**（composeWanted）。
     // 消した面（reading・split）は書かない——古い state に残っていても読まない
-    vscode.setState({ vertical, size, compose: composeOn || composeWanted });
+    vscode.setState({ vertical, size, compose: composeOn || composeWanted,
+      noteStyle: noteStyle });
   }
 
   function paint() {
     // 設定がまだ届いていない間は縦書きとして見せる（body の初期値と揃える）
     document.body.classList.toggle("vertical", vertical !== false);
     document.body.classList.toggle("compose", composeOn);
+    /* ── SNS記事のnote風（設計書6.69） ──
+       **小説の原稿では noteLike が false なので、どの札も付かない。**
+       ボタンそのものも出ない（.note-only） */
+    document.body.classList.toggle("notelike", noteLike);
+    document.body.classList.toggle("note", noteLike && noteStyle);
+    document.body.classList.toggle("notepv", noteLike && notePv);
+    noteStyleButton.classList.toggle("on", noteLike && noteStyle);
+    notePvButton.classList.toggle("on", noteLike && notePv);
+    /*
+      **縦書きでは、組版のボタンは押せなくして理由を出す**
+      （消さない。core/processAvailability.ts と同じ考え方）。noteは横書きの
+      読み物なので、縦書きに620pxの段を作っても行が短くなるだけである。
+      押しても何も起きないボタンは、壊れているようにしか見えない。
+    */
+    noteStyleButton.disabled = vertical !== false;
+    noteStyleButton.title =
+      vertical !== false
+        ? "note風の組版は横書きのときだけ効きます（noteは横書きの読み物です）"
+        : "noteの読み味に近い組版（幅・行間・書体）で表示します。" +
+          "もう一度押すと、いつもの表示に戻ります";
     document.documentElement.style.setProperty("--novelai-size", size + "px");
     // **大きさも向きもここで変わる。** どちらも折り返し幅を変えるので、
     // 重ねた色の枠を測り直す（実機の報告、2026-08-28）
@@ -791,6 +1035,28 @@ ruby > rt {
     remember();
   });
 
+  /* ── SNS記事のnote風の切り替え（設計書6.69） ──
+     **既存の切り替えと同じ流儀**（帯のボタン1つ、押されている間は .on）。
+     note風は見せ方だけの話なので、本文には一切触らない */
+  noteStyleButton.addEventListener("click", function () {
+    noteStyle = !noteStyle;
+    // 折り返し幅が変わる。重ねた色の枠を測り直す（向き・大きさと同じ理由）
+    paint();
+    remember();
+  });
+
+  notePvButton.addEventListener("click", function () {
+    notePv = !notePv;
+    /*
+      **開いているあいだだけ組ませる。** 本文ぜんたいをHTMLへ組むのは、
+      0.25.2で一度やめた道である（打つたびに千の段落を組んでいた）。
+      閉じているときは、拡張機能側にも作らせない。
+    */
+    vscode.postMessage({ type: "notePreview", on: notePv });
+    // 面を出し入れすると、打つ面の折り返し幅が変わる（枠を測り直す）
+    paint();
+  });
+
   document.getElementById("latest").addEventListener("click", function () {
     vscode.postMessage({ type: "openLatest" });
   });
@@ -805,6 +1071,134 @@ ruby > rt {
   });
   document.getElementById("next").addEventListener("click", function () {
     vscode.postMessage({ type: "openNeighbor", direction: "next" });
+  });
+
+  /* ── 口述筆記（設計書6.83） ───────────────── */
+  /*
+    **拡張機能はマイクに触らない。** 声を文字にするのはOSの音声入力
+    （Windows：Win+H／macOS：fnキー2回）で、OSは面へ文字を入れるだけである。
+    この画面がしているのは「どこから話し始めたか」を覚えることだけで、
+    モード中もこれまでどおり手で打てる。
+  */
+  /** 口述を始めた位置（記法の位置）。null なら口述モードに入っていない */
+  let dictationFrom = null;
+  /**
+   * ボタンを押す直前のカーソル位置。
+   *
+   * **組んで書く面では、押した瞬間に選択が外れている**（contenteditable の
+   * 選択は画面じゅうで1つしかない）。右クリックの品書き（composeMenuAt）と
+   * 同じ理由で、mousedown の時点で拾っておく。
+   */
+  let dictationCaretAtPress = null;
+
+  /** いまのカーソル位置（記法の位置）。読めなければ null */
+  function dictationCaretNow() {
+    if (composeOn) {
+      const at = composeSelectionNow();
+      return at ? at.start : null;
+    }
+    return write.selectionStart;
+  }
+
+  /** いまの面の本文。範囲の末尾を決めるのに使う */
+  function dictationTextNow() {
+    return composeOn ? composeTextNow() : write.value;
+  }
+
+  /** 押す前に拾った位置を優先する（組んで書く面では、押した後は読めない） */
+  function dictationCaretForPress() {
+    return dictationCaretAtPress !== null
+      ? dictationCaretAtPress
+      : dictationCaretNow();
+  }
+
+  /** 押したあとは本文へ戻す。1回ごとに手で選び直させない */
+  function dictationRefocus(at) {
+    dictationCaretAtPress = null;
+    if (composeOn) {
+      compose.focus();
+      if (typeof at === "number") composeRestoreCaret({ start: at, end: at });
+    } else {
+      write.focus();
+    }
+  }
+
+  const dictateButton = document.getElementById("dictate");
+  const dictateCleanButton = document.getElementById("dictateClean");
+  const dictateCancelButton = document.getElementById("dictateCancel");
+
+  dictateButton.addEventListener("mousedown", function () {
+    dictationCaretAtPress = dictationCaretNow();
+  });
+  dictateCleanButton.addEventListener("mousedown", function () {
+    dictationCaretAtPress = dictationCaretNow();
+  });
+
+  dictateButton.addEventListener("click", function () {
+    const at = dictationCaretForPress();
+    if (at === null) {
+      note.textContent =
+        "本文の中にカーソルを置いてから「口述」を押してください";
+      dictationCaretAtPress = null;
+      return;
+    }
+    dictationFrom = at;
+    document.body.classList.add("dictating");
+    note.textContent =
+      "OSの音声入力を始めてください（Windows：Win+H／macOS：fnキー2回）。" +
+      "話し終えたら「整える」を押します";
+    dictationRefocus(at);
+  });
+
+  dictateCancelButton.addEventListener("click", function () {
+    // **開始位置を捨てるだけ。** 書き取った本文には触らない
+    dictationFrom = null;
+    document.body.classList.remove("dictating");
+    note.textContent = "口述モードを終えました（本文はそのままです）";
+    dictationRefocus();
+  });
+
+  dictateCleanButton.addEventListener("click", function () {
+    if (dictationFrom === null) return;
+    const caret = dictationCaretForPress();
+    /*
+      **カーソルが読めなければ中止する**（「口述」ボタンと同じ扱い）。
+      読めないまま文末までを範囲にすると、口述したところより後ろの本文まで
+      AIへ送って書き換えることになる。口述モードは抜けない——本文の中を
+      押し直して、もう一度「整える」を押せばよい。
+    */
+    if (caret === null) {
+      note.textContent =
+        "カーソルの位置が分かりません。本文の中を押してから「整える」を押してください";
+      dictationCaretAtPress = null;
+      return;
+    }
+    /*
+      **文末までのフォールバックは、巻き戻したときだけ。** 話している最中に
+      前のほうを直すことがあり、そのときカーソルは開始位置より手前にある
+      ——逆さの範囲をそのまま送ると、何も整えられないまま終わる。
+    */
+    const from = dictationFrom;
+    const text = dictationTextNow();
+    const to = caret > from ? caret : text.length;
+    dictationFrom = null;
+    document.body.classList.remove("dictating");
+    note.textContent = "";
+    dictationRefocus();
+    /*
+      **範囲の本文も一緒に送る。** 打鍵が文書へ届くのは少し遅れるので、
+      話し終えてすぐ押すと位置だけが先に着く——拡張機能側は文書の中身と
+      突き合わせ、違っていれば触らない。
+
+      **範囲が足りているかを決めるのは拡張機能側**（入口が2つあるので、
+      境目の字数を画面にも持たせない）。
+    */
+    vscode.postMessage({
+      type: "dictationClean",
+      from: from,
+      to: to,
+      text: text.slice(from, to)
+    });
   });
 
   document.getElementById("font").addEventListener("click", function () {
@@ -939,7 +1333,7 @@ ruby > rt {
   function send() {
     if (write.value === current) return;
     current = write.value;
-    lastSent = current;
+    rememberSent(current);
     vscode.postMessage({ type: "edit", text: current });
     updateCount();
   }
@@ -958,13 +1352,15 @@ ruby > rt {
    * 3. すでに同じ中身のとき
    */
   function takeIncoming(text) {
+    // 自分の書き換えの返事は、いつ届いても触らない（変換中なら溜めもしない）
+    if (isOwnEcho(text)) return;
     if (composing) {
       // 確定するまで覚えておく。**いま入れると変換が壊れる**
-      if (text !== lastSent && text !== write.value) pending = text;
+      if (text !== write.value) pending = text;
       return;
     }
-    if (text === lastSent) return;
     if (write.value === text) return;
+    forgetSent();
     replaceKeepingCaret(text);
   }
 
@@ -1582,6 +1978,22 @@ ruby > rt {
         }
       }
       document.body.classList.toggle("plain", message.hasTerms === false);
+      /* ── SNS記事のnote風（設計書6.69） ── */
+      if (typeof message.noteLike === "boolean" && message.noteLike !== noteLike) {
+        noteLike = message.noteLike;
+        // SNS記事でなくなったら、確かめる面は閉じる（開いたままにしない）
+        if (!noteLike) notePv = false;
+        paint();
+      }
+      if (typeof message.notePreview === "string") {
+        /*
+          **紙面の入れ物は画面側で被せる。** 中身（かたまりの並び）を
+          組むのは core/notePreview.ts で、そちらは「noteに貼ったときの
+          見た目」だけを知っていればよい。
+        */
+        notepv.innerHTML =
+          '<div class="note-page">' + message.notePreview + "</div>";
+      }
       /* ── 読み上げ（設計書6.42） ── */
       if (typeof message.readAloudRate === "number") {
         aloudApplyRate(message.readAloudRate);
@@ -1707,6 +2119,48 @@ ruby > rt {
 
   /** タグとして読む語の長さの上限（core/sceneMemo.ts と同じ理由・同じ値） */
   const MEMO_TAG_MAX = 12;
+
+  /**
+   * 脚本の行の見分け方（設計書6.70）。
+   *
+   * **定義は core/scriptLines.ts の1つだけ。** 記法・シーンメモと同じで、
+   * ここへはその規則がそのまま埋め込まれる（画面と紙で組み方が
+   * 食い違わないようにするため）。
+   *
+   * **脚本でない作品では、規則は空**である。判定の道は残るが、
+   * どの行にも当たらないので印は付かない。
+   */
+  const SCRIPT_LINE_RULES = ${JSON.stringify(isScript ? SCRIPT_LINE_RULES : [])};
+  const SCRIPT_LINE_CLASSES = ${JSON.stringify(SCRIPT_LINE_CLASSES)};
+
+  /** 行ごとに作り直さない（打つたびに全行を見るので、行数ぶん効く） */
+  const SCRIPT_LINE_MATCHERS = SCRIPT_LINE_RULES.map(function (rule) {
+    return { cls: SCRIPT_LINE_CLASSES[rule.kind], re: new RegExp(rule.pattern) };
+  });
+
+  /** その行に付ける種別の印。当たらなければ空文字 */
+  function scriptLineClass(line) {
+    for (const matcher of SCRIPT_LINE_MATCHERS) {
+      if (matcher.re.test(line)) return matcher.cls;
+    }
+    return "";
+  }
+
+  /**
+   * 行の入れ物に付ける class。
+   *
+   * **組み立て（composeBuildLine）と当て直し（composeRepaintMemos）で
+   * 同じものを使う。** 別々に組み立てると、打った瞬間に片方の印だけが
+   * 消える（付箋を打ったら脚本の印が落ちる、という形で必ず出る）。
+   */
+  function composeLineClass(line) {
+    let names = "line";
+    const memo = memoClassFor(line);
+    if (memo) names += " " + memo;
+    const script = scriptLineClass(line);
+    if (script) names += " " + script;
+    return names;
+  }
 
   /** その行が付箋か。**行の先頭だけを見る**（途中の // はURL・会話文） */
   function memoIsLine(line) {
@@ -1946,10 +2400,9 @@ ruby > rt {
    */
   function composeBuildLine(line, doc, mode) {
     const p = doc.createElement("p");
-    // 付箋の行は、見た目だけを変える（設計書6.40.3）。
-    // **かたまりにはしない**——中身は普通に打てて、印を消せば本文へ戻る
-    const memo = memoClassFor(line);
-    p.setAttribute("class", memo ? "line " + memo : "line");
+    // 付箋の行（設計書6.40.3）と脚本の行（設計書6.70）は、**見た目だけ**を
+    // 変える。**かたまりにはしない**——中身は普通に打てて、印を消せば本文へ戻る
+    p.setAttribute("class", composeLineClass(line));
     const parts = composeParts(line, mode);
     if (parts.length === 0) {
       // 空行。高さを保つための詰め物（読む面の br と同じ役目）
@@ -2401,7 +2854,7 @@ ruby > rt {
     const text = composeDomToNotation(compose);
     if (text === current) return;
     current = text;
-    lastSent = text;
+    rememberSent(text);
     write.value = text;
     vscode.postMessage({ type: "edit", text: text });
     updateCount();
@@ -2414,13 +2867,16 @@ ruby > rt {
    * ブラウザの取り消し履歴（Ctrl+Z）まで壊れる。
    */
   function composeTakeIncoming(text) {
+    // 自分の書き換えの返事は、いつ届いても触らない（打つ面と同じ理由。
+    // 変換中に溜めると、確定のあとに古い本文で組み直して確定した語が消える）
+    if (isOwnEcho(text)) return;
     if (composing) {
       // 確定するまで覚えておく。**いま組み直すと変換が壊れる**
       composePending = text;
       return;
     }
-    if (text === lastSent) return;
     if (composeNormalizeNewlines(text) === composeDomToNotation(compose)) return;
+    forgetSent();
     write.value = text;
     composeApplyText(text);
   }
@@ -2464,7 +2920,12 @@ ruby > rt {
   });
 
   /**
-   * 行の付箋らしさを付け直す（設計書6.40.3）。
+   * 行の付箋らしさ（設計書6.40.3）と、脚本の行の種別（設計書6.70）を
+   * 付け直す。
+   *
+   * **脚本の種別も、打つほど変わる**（行頭に柱の記号を足した瞬間に柱になり、
+   * 役名を書いた瞬間にセリフになる）。付箋とまったく同じ事情なので、
+   * 道を分けずにここへ乗せる。
    *
    * **class 属性しか触らない。** ノードを足したり消したりすると
    * DOM→記法の直列化がずれる（＝本文が壊れる）。見た目だけを変える。
@@ -2481,8 +2942,7 @@ ruby > rt {
     for (const element of lines) {
       // 行の入れ物だけを見る（ルビの中の要素は行ではない）
       if (element.parentNode !== compose) continue;
-      const memo = memoClassFor(element.textContent || "");
-      element.setAttribute("class", memo ? "line " + memo : "line");
+      element.setAttribute("class", composeLineClass(element.textContent || ""));
     }
   }
 
@@ -2496,7 +2956,26 @@ ruby > rt {
       composeSend();
       const waiting = composePending;
       composePending = null;
-      if (waiting !== null) composeTakeIncoming(waiting);
+      /*
+        **打った内容のほうを優先する**（打つ面の flushPending と同じ決まり。
+        実機確認 2026-09-08「変換を確定するとカーソルが語の途中に残る」）。
+        変換中に溜めた本文は、いま確定した語を含まない**古い本文**である。
+        それで面を組み直すと、確定した語が画面から一度消え、カーソルは
+        古い本文の中へ落ちる（次の返事で語は戻るが、カーソルは戻らない）。
+        いま送った本文の返事がすぐ届いて画面と文書を揃えるので、
+        溜めた分は捨ててよい。捨てたことは記録に残す（外からの書き換えが
+        本当にあった場合の手がかり）。
+      */
+      if (waiting !== null) {
+        if (composeNormalizeNewlines(waiting) !== composeDomToNotation(compose)) {
+          vscode.postMessage({
+            type: "log",
+            text:
+              "組んで書く：変換中に届いた本文（" + waiting.length + "字）は、" +
+              "確定した語を含まないので使わず、いま打った本文を優先しました",
+          });
+        }
+      }
       composeScheduleHighlight();
       // 変換で確定した行が付箋になったかもしれない（設計書6.40.3）
       composeRepaintMemos();

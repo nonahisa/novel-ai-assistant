@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { ConfigurationTarget, workspace } from "vscode";
 import {
+  allModelTuning,
   resolveTimeoutMs,
   resolveTimeoutSeconds,
   saveModelTuning,
@@ -276,5 +277,37 @@ describe("6つのプロバイダが台帳を通る", () => {
     for (const id of providers) {
       expect(properties[`novelai.${timeoutSettingKey(id)}`], id).toBeDefined();
     }
+  });
+});
+
+/**
+ * 一覧（`core/tuningStats.ts`）は台帳の**全部**を読む。
+ *
+ * 引く側（`modelTuning`）は鍵1つぶんしか返さないので、モデルの数だけ
+ * 設定を読み直すことになる。読み取りの口をここへ1つ足して、
+ * **解釈の仕方（`parseModelTuning`）を一覧側へ写さない。**
+ */
+describe("台帳を丸ごと読む", () => {
+  test("設定にある項目を、解釈したうえで全部返す", () => {
+    withSettings({
+      modelTuning: {
+        "ollama/gemma4:e4b": { outputTokensPerSecond: 12.3 },
+        "sakura/gpt-oss-120b": { contextWindow: 131072 },
+        "ollama/壊れ": { contextWindow: 0 },
+      },
+    });
+
+    const table = allModelTuning();
+
+    expect([...table.keys()].sort()).toEqual(
+      ["ollama/gemma4:e4b", "sakura/gpt-oss-120b"].sort()
+    );
+    expect(table.get("ollama/gemma4:e4b")?.outputTokensPerSecond).toBe(12.3);
+  });
+
+  test("台帳が無ければ空", () => {
+    withSettings({});
+
+    expect(allModelTuning().size).toBe(0);
   });
 });

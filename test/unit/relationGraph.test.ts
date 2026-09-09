@@ -6,10 +6,13 @@ import {
 } from "../../src/models/character";
 import {
   buildRelationGraph,
+  countUnresolved,
   egoGraph,
   filterRelationGraph,
   isolatedNodes,
+  restrictUnresolved,
   UNRESOLVED_ID_PREFIX,
+  type RelationGraph,
 } from "../../src/core/relationGraph";
 
 /**
@@ -424,5 +427,127 @@ describe("絞り込み", () => {
       showIsolated: true,
     });
     expect(result.graph.nodes).toEqual([]);
+  });
+});
+
+describe("注記の件数（設計書6.38.5）", () => {
+  /**
+   * 灯 — 月島 の鎖。月島だけが「ハナ」（同名が2人いて決められない）を呼ぶ。
+   *
+   * 灯を中心にして1次までを出すと、点線の「ハナ」は2次なので図に出ない。
+   */
+  function ambiguousAtSecondRing(): Character[] {
+    return [
+      character("char_001", "灯", {
+        relations: [{ name: "月島", relation: "師匠" }],
+      }),
+      character("char_002", "月島", {
+        relations: [{ name: "ハナ", relation: "友人" }],
+      }),
+      character("char_003", "花村", { aliases: ["ハナ"] }),
+      character("char_004", "華岡", { aliases: ["ハナ"] }),
+    ];
+  }
+
+  /** 画面（`relationGraphPanel`）が個人中心図を組み立てる手順と同じ形にする */
+  function ego(characters: Character[], centerId: string): RelationGraph {
+    const filtered = filterRelationGraph(buildRelationGraph(characters), {
+      showIsolated: true,
+    });
+    const graph = egoGraph(filtered.graph, centerId);
+    const visible = new Set(graph.nodes.map((node) => node.id));
+    return {
+      nodes: graph.nodes,
+      edges: graph.edges,
+      unresolved: restrictUnresolved(filtered.graph, visible),
+    };
+  }
+
+  test("全体図では、内訳が全体を超えない", () => {
+    const graph = buildRelationGraph(ambiguousAtSecondRing());
+    const counts = countUnresolved(graph);
+
+    expect(counts).toEqual({ unresolvedCount: 1, ambiguousCount: 1 });
+  });
+
+  test("個人中心図で、点線を出していない相手は内訳にも入らない", () => {
+    // 「6人のうち8人」と、内訳が全体を超える注記が出ていた。呼んだ側
+    // （月島）が図に居るだけで一覧に残り、点線の出ていない相手まで
+    // 内訳に数えていたため
+    const graph = ego(ambiguousAtSecondRing(), "char_001");
+
+    expect(graph.nodes.map((node) => node.id)).toEqual([
+      "char_001",
+      "char_002",
+    ]);
+    const counts = countUnresolved(graph);
+    expect(counts).toEqual({ unresolvedCount: 0, ambiguousCount: 0 });
+    expect(counts.ambiguousCount).toBeLessThanOrEqual(counts.unresolvedCount);
+  });
+
+  test("個人中心図に点線が出ていれば、その分は内訳に入る", () => {
+    // 絞り込んだ結果を黙って0にしてしまわないこと。中心の相手なら残る
+    const graph = ego(
+      [
+        character("char_001", "灯", {
+          relations: [
+            { name: "ハナ", relation: "友人" },
+            { name: "居ない人", relation: "隣人" },
+          ],
+        }),
+        character("char_003", "花村", { aliases: ["ハナ"] }),
+        character("char_004", "華岡", { aliases: ["ハナ"] }),
+      ],
+      "char_001"
+    );
+
+    // 点線は「ハナ」と「居ない人」の2人。うち同名で決められないのは1人
+    expect(countUnresolved(graph)).toEqual({
+      unresolvedCount: 2,
+      ambiguousCount: 1,
+    });
+  });
+
+  test("一覧を絞るときは、呼んだ側だけでなく相手も見る", () => {
+    // 直った経路のうち「一覧の絞り込み」だけを取り出して見る。ここが
+    // 呼んだ側（fromId）だけを見ると、点線の出ていない相手が残る
+    const filtered = filterRelationGraph(
+      buildRelationGraph(ambiguousAtSecondRing()),
+      { showIsolated: true }
+    );
+    // 月島（呼んだ側）は図に居るが、点線の「ハナ」は1次までに入らない
+    const visible = new Set(["char_001", "char_002"]);
+
+    expect(restrictUnresolved(filtered.graph, visible)).toEqual([]);
+  });
+
+  test("一覧に残っていても、点線が出ていない相手は数えない", () => {
+    // 直った経路のうち「数え方」だけを取り出して見る。一覧の絞り込みが
+    // 甘くても、注記の内訳が全体を超えないことをここで担保する
+    const graph: RelationGraph = {
+      nodes: [
+        {
+          id: "char_001",
+          name: "灯",
+          affiliation: null,
+          chapterCount: 1,
+          provisional: false,
+        },
+      ],
+      edges: [],
+      unresolved: [
+        {
+          fromId: "char_001",
+          targetName: "ハナ",
+          kind: "relation",
+          reason: "ambiguous",
+        },
+      ],
+    };
+
+    expect(countUnresolved(graph)).toEqual({
+      unresolvedCount: 0,
+      ambiguousCount: 0,
+    });
   });
 });

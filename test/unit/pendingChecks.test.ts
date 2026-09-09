@@ -45,8 +45,19 @@ describe("確認リストから作った一覧", () => {
   });
 
   test("指している操作は、すべて実在する", () => {
-    // 文書に書いたコマンドIDを打ち間違えると、**何も出ない**まま気づけない
-    const known = new Set(allActions().map((action) => action.command));
+    // 文書に書いたコマンドIDを打ち間違える・改名し忘れると、**何も出ない**まま
+    // 気づけない。判定は package.json の登録コマンドと突き合わせる——
+    // 詳細メニュー（ACTION_TREE）だけを見ていたが、章立て（F-60）のように
+    // **右クリック専用でメニューに無いコマンド**が初めて現れた（0.29.25）。
+    // メニューから辿れないこと自体は「辿れない節」の勘定（0.29.16）が
+    // 名前つきで数えるので、ここでは「実在するか」だけを見る
+    const manifest = JSON.parse(
+      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+    ) as { contributes: { commands: Array<{ command: string }> } };
+    const known = new Set(
+      manifest.contributes.commands.map((entry) => entry.command)
+    );
+    // 開発ビルド限定のコマンド（devOnly）は package.json に載るので追加不要
 
     for (const section of PENDING_CHECKS) {
       for (const command of section.commands) {
@@ -202,11 +213,72 @@ describe("「テスト中」の組み立て", () => {
 
   test("操作から辿れない節を、数えられる", () => {
     // 環境が要るもの・見るだけのものは押す操作が無い。**黙って落とさない**
-    const orphans = unreachableSections(PENDING_CHECKS);
+    const orphans = unreachableSections(PENDING_CHECKS, ACTION_TREE);
     const counted = orphans.reduce((sum, section) => sum + section.count, 0);
+    const known = new Set(allActions().map((action) => action.command));
 
     expect(counted).toBeLessThan(PENDING_CHECK_TOTAL);
-    for (const section of orphans) expect(section.commands).toEqual([]);
+    // **押せる操作を1つも持たない節だけ**が辿れない側に来る
+    // （押す操作が無い節と、メニューに無い操作を指している節）
+    for (const section of orphans) {
+      expect(section.commands.filter((command) => known.has(command))).toEqual(
+        []
+      );
+    }
+  });
+
+  /**
+   * **本番ビルドで、行も説明も出ないまま総数にだけ残るのを防ぐ**
+   * （作者の裁定、2026-09-03）。
+   *
+   * 開発ビルド限定の操作（`devOnly`）は、本番ビルドでは木から枝ごと落ちる。
+   * 「テスト中」は木を歩いてコマンドが一致した項目だけを写すので、
+   * **その節を指す行は生まれない**。総数には入ったままなので、
+   * 説明でも触れないと**その分が黙って消える**。
+   */
+  test("木に無いコマンドしか指していない節は、辿れない側へ回す", () => {
+    const tree = [
+      {
+        kind: "group" as const,
+        label: "作品管理",
+        icon: "book",
+        entries: [
+          {
+            kind: "action" as const,
+            command: "novelai.syncAllWorks",
+            label: "作品をすべて同期",
+            icon: "sync",
+            requiresWork: false,
+            detail: "",
+          },
+        ],
+      },
+    ];
+    const pending = [
+      {
+        id: "A-15",
+        title: "作品をすべて同期",
+        commands: ["novelai.syncAllWorks"],
+        count: 2,
+      },
+      {
+        // 本番ビルドでは落ちている操作を指す節
+        id: "F-53",
+        title: "流しながら受け取る実験",
+        commands: ["novelai.dev.toggleOllamaStream"],
+        count: 5,
+      },
+    ];
+
+    expect(unreachableSections(pending, tree).map((section) => section.id)).toEqual(
+      ["F-53"]
+    );
+
+    const group = buildPendingCheckGroup(tree, pending);
+    // 総数には入れたまま、辿れない側の説明へ回す
+    expect(group?.tooltip).toContain("残り7件");
+    expect(group?.tooltip).toContain("5件は、ここからは辿れません");
+    expect(group?.tooltip).toContain("F-53");
   });
 });
 

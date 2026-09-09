@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { logFailure } from "../core/logger";
 import type { WorkRegistry } from "../core/workRegistry";
 import {
   describeBlocked,
@@ -40,6 +41,18 @@ export interface ActionItem {
   /** 実行するコマンドID */
   command: string;
   label: string;
+  /**
+   * 名前のうしろに付いていた括弧の補足（作者の裁定、2026-09-06）。
+   *
+   * **ビューは幅が狭い。** 「AIチューニング（測って設定を合わせる）」の
+   * ように名前へ説明を足すと、途中で切れて肝心の名前のほうが読めない。
+   *
+   * **消すのではなく、置き場所を変える。** ここへ移した文は、
+   * ツールチップと、相談へ送る束（`featureGuide.ts`）の両方に出る。
+   * `package.json` の `title` は変えない——コマンドパレットは名前だけで
+   * 探す場所なので、そこでは補足が付いていたほうが見つけやすい。
+   */
+  note?: string;
   /** 一覧で label の右に薄字で出る補足 */
   description?: string;
   /** codicon の名前 */
@@ -222,7 +235,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.setupGithub",
-            label: "GitHubに置く（はじめて）",
+            label: "GitHubに置く",
+            note: "はじめて",
             icon: "repo-push",
             requiresWork: true,
             detail:
@@ -408,8 +422,13 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
         // 「AIに相談する」とだけ書いてあったので、押すと本文の領域に
         // 大きく開くことが読めなかった——`package.json` のコマンド名は
         // はじめから「AIに相談する（大きく開く）」で、こちらだけがずれていた
-        label: "AIに相談する（大きく開く）",
+        label: "AIに相談する",
+        note: "大きく開く",
         icon: "comment-discussion",
+        // **詳細メニューには出さない**（作者の指定、2026-09-03。
+        // 横のパネルの「メインに表示」ボタンが入口。簡単ステップメニューには残る）。
+        // **消さずに隠す**——`stepMenu.ts` がこの項目をコマンドIDで引いている
+        hiddenFromActionList: true,
         // 作品のファイルを開いていないと材料が無く、
         // 「作品のファイルを開いてください」としか答えられない
         requiresWork: true,
@@ -426,27 +445,30 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           "**本文の右クリックからは、横の小さいパネルでも聞けます**" +
           "（範囲を選んで聞くときは、そちらのほうが本文が隠れません）。",
       },
+      // 「横のパネルへ移動」の項目はここにも「…」メニューにも**置かない**
+      // （作者の指定、2026-09-03「使い道がありません」。0.29.8で足したものの
+      // 取り消し）。横の細いパネル（novelai.openChat）自体は残る——
+      // 入口は**本文の右クリックだけ**。範囲を選んで聞く使い方はそちらで足りる
+      // 相談の助言方針（設計書6.86）。相談の近くに置く——ここを決めると
+      // 変わるのは相談の答え方だけで、単独では何も起きない
       {
         kind: "action",
-        command: "novelai.openChat",
-        label: "横のパネルへ移動",
-        icon: "layout-sidebar-left",
+        command: "novelai.setAdvicePolicy",
+        label: "相談の助言方針を決める",
+        note: "診断",
+        icon: "person",
         requiresWork: true,
-        usesAI: true,
-        // **大きい画面と両方を残す**（作者の指定、2026-08-28）。
-        // 範囲を選んで聞くときは本文が見えている必要があり、
-        // 大きい画面では隠れてしまう
-        //
-        // **「開く」ではなく「移動」と書く**（作者の報告、2026-08-31）。
-        // このパネルは左に出しっぱなしなので、押しても**もう開いている**
-        // ことがほとんどで、「クリックしても動作しません」と見えていた。
-        // していることは「そこへ行く」であって「開く」ではない
+        // 質問に答えるだけ。AIは呼ばない（会話ログからの推定はしない）
+        usesAI: false,
         detail:
-          "同じ相談を、左の細いパネルで行います（**既に開いているときは、" +
-          "そこへ移動するだけです**）。" +
-          "**範囲を選んでから聞くと、そこについての相談として扱います。**" +
-          "本文を見ながら聞きたいときは、こちらを使ってください。" +
-          "会話は大きい画面と共通なので、どちらで聞いても続きから話せます。",
+          "9つの質問で、**読者志向・自己投影度・嗜好志向**の3つを測り、" +
+          "11のタイプのどれかを決めます。" +
+          "決めたあとは、**AIに相談したときの助言の入り方が変わります**" +
+          "（同じ助言でも、作者によって刺さり方も地雷も違うため）。" +
+          "ここで決めるのは**出発点**で、その後は相談での発言から少しずつ推定で動きます" +
+          "（変わったときはお知らせします）。" +
+          "**答えは作者の手元にだけ残り、GitHubには送りません。**" +
+          "いつでもやり直せますし、消せば素の状態に戻ります。",
       },
       {
         kind: "action",
@@ -468,6 +490,21 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           "設定/plot.md を開きます。まだ無ければ、書き出しを用意して作ります。" +
           "**見出しも順番も自由に決められます**（決まった欄を埋める形ではありません）。" +
           "書きかけのプロットがあれば、そのまま開くだけです。",
+      },
+      // **プロットを書く場（設計書6.4.8）。** 「つくる」の次に置く——
+      // 作ったプロットを育てるときは、たいていこちらから入る
+      {
+        kind: "action",
+        command: "novelai.openPlotMode",
+        label: "プロットモードを開く",
+        description: "AIを使わない",
+        icon: "book",
+        requiresWork: true,
+        detail:
+          "左に 設定/plot.md、右に作業パネルを並べます。" +
+          "パネルには**節の目次**（押すとその行へ移ります）・まだ立てていない見出しの候補・" +
+          "話の並び（単話プロットの有無・文字数・章名・各話あらすじの冒頭）が出ます。" +
+          "**プロットを書くのは左のエディタです**（欄に写して埋める形ではありません）。",
       },
       {
         kind: "action",
@@ -501,6 +538,23 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
         label: "校正・校閲",
         icon: "search-fuzzy",
         items: [
+          // **分類の先頭に置く**（設計書6.80）。1つずつ押して回るのが
+          // ここでの常なので、まとめて走らせる入口を最初に見せる
+          {
+            kind: "action",
+            command: "novelai.runProofreadingSuite",
+            label: "校正をまとめて実行",
+            icon: "checklist",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "この分類の検知を、選んだものだけ順に走らせます" +
+              "（表記ゆれ・誤字脱字・推敲・冒頭診断・プロット逸脱・矛盾・伏線）。" +
+              "**走らせるものは毎回選べます**（前回の選択を覚えています）。" +
+              "**順番は軽いものから重いものへ固定**で、選んだ順ではありません。" +
+              "結果はいつもどおり下段の「提案」パネルに溜まり、" +
+              "**本文は書き換えません。**途中で中止すると、残りは走りません。",
+          },
           {
             kind: "action",
             command: "novelai.checkTypos",
@@ -581,6 +635,24 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "先にプロットを書いておいてください（「プロットをつくる」または" +
               "「本文からプロットを起こす」）。" +
               "**伏線や人物の掘り下げは逸脱として扱いません。**",
+          },
+          // 単話プロットの判定は、作品全体の逸脱の隣に置く（設計書6.36.3）。
+          // 物差しが「作品全体のプロット」か「その話の箇条書き」かの違いで、
+          // 作者が見るのは同じ場面である
+          {
+            kind: "action",
+            command: "novelai.checkEpisodePlot",
+            label: "単話プロットを検査",
+            icon: "check-all",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "その話の単話プロット（視点・目標・展開）を見て、" +
+              "**目標に向かっていない展開**や**停滞・重複**を指摘します。" +
+              "本文を書いたあとなら、**箇条書きと本文の食い違い**も調べられます" +
+              "（どちらを掛けるかは実行時に選びます）。" +
+              "**本文もプロットも書き換えません。直し方も書かせません。**" +
+              "先に「単話プロットを作る」で展開を書いておいてください。",
           },
           {
             kind: "action",
@@ -740,12 +812,28 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
         ],
       },
+      /*
+        **「その他支援」を2つに割った**（0.33.8、設計書6.17）。
+
+        きっかけは相談へ渡す説明の束である。小分類ひとまとまりがそのまま
+        1つの束になるので（`features/featureGuide.ts`）、20項目まで育った
+        「その他支援」は1,499字——上限1,500の**1字下**だった。次の1操作で
+        落ちる状態で、そこで上限を上げれば「送る量が機能数に比例する」
+        行き止まり（設計書6.27）へ戻る。**上限ではなく小分類を割った。**
+
+        **線は、作者が押す場面で引いた。** 原稿を書き、整えている最中に
+        押す操作（ここ）と、書き上がったものを外へ出す操作（下の
+        「投稿・書き出し」）は、同じ日でも違う時間に押す。「その他」に
+        積んでいたのは分ける理由が無かったからではなく、**分ける手が
+        入っていなかっただけ**である。
+
+        **並び順は変えていない。** 割っただけなので、作者が覚えている
+        上下の関係はそのまま残る。
+      */
       {
         kind: "section",
-        label: "その他支援",
-        icon: "export",
-        // 分類と操作の両方に出しても、その間の小分類に無いと辿れない（6.17.1）
-        counter: "staleImeDictionary",
+        label: "原稿づくり",
+        icon: "edit",
         items: [
           // **書き始めの2つを先頭に置く**（設計書6.36.4）。ここは
           // 「最新話を書く」への導線（縦書きで開く）と同じ小分類で、
@@ -775,12 +863,30 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "**筋書きはAIに作らせません。** 書くのは作者です。" +
               "**既にあるものは上書きしません。** そのまま開きます。",
           },
+          // **構成を組み立てる操作なので、書き始めの並びに置く**（設計書6.66.4）。
+          // 原稿の誤りを探す「校正・校閲」でも、読者に見せる文章を作る
+          // 「広報支援」でもなく、作者が作品の形を決めるための操作である
+          {
+            kind: "action",
+            command: "novelai.proposeChapters",
+            label: "章立てをAIに提案させる",
+            icon: "list-tree",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "話のサブタイトルと各話あらすじから、「どこで章に区切るか」と" +
+              "「その章の名前」の案を出します。**本文は送りません。**" +
+              "案は提案パネルに並び、**承認した章だけ**が章立てに入ります" +
+              "（原稿は書き換わりません）。",
+          },
           // **書き始めの並びに置く**（設計書6.40.4）。前回の付箋を見ながら
           // 続きを書くための画面で、資料生成や新作開始の仲間ではない
           {
             kind: "action",
             command: "novelai.openSceneMemos",
-            label: "シーンメモを開く",
+            // **「横に」まで書く**（コマンドパレットの名前と同じ）。
+            // 開く場所が分かるので、原稿を隠されると思って避けられない
+            label: "シーンメモを横に開く",
             description: "AIを使わない",
             icon: "note",
             requiresWork: true,
@@ -806,6 +912,25 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "（文字コードも改行もそのまま。戻すときは名前を .txt に戻すだけです）。" +
               "この作品の本文をまとめて変えるか、開いている1件だけかを選べます。",
           },
+          // **Word で書いてきた作者の入口**（設計書6.85）。.txt のMD化の
+          // 隣に置く——やりたいことは同じ「原稿をこの拡張機能で扱える形に
+          // する」であり、元の形が違うだけである
+          {
+            kind: "action",
+            command: "novelai.convertDocxToMarkdown",
+            label: "Word の原稿を .md にする",
+            note: "docx をまとめて変換",
+            description: "AIを使わない",
+            icon: "file-code",
+            // 作品の外にある .docx も変換できる（登録前の原稿がふつう）
+            requiresWork: false,
+            detail:
+              "フォルダーの中の Word 文書（.docx）を、まとめて .md にします。" +
+              "**ルビは {漢字|かんじ}、傍点は {{強調}} として持ち帰ります。**" +
+              "元の .docx はそのまま残り、同じ名前の .md があるときも上書きしません。" +
+              "画像・表・脚注・コメントは .md に入りません（件数はお知らせします）。" +
+              "古い形式の .doc は変換できないので、Word で .docx として保存し直してください。",
+          },
           // **VS Code の Markdown 編集画面では、こちらの機能が効かない**
           // （設計書6.25）。用語の色分けもルビの表示も出ないので、
           // 読み書きする面そのものを用意した。ルビの手前に置く
@@ -828,7 +953,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.readManuscriptAloud",
-            label: "原稿を読み上げる（音読推敲）",
+            label: "原稿を読み上げる",
+            note: "音読推敲",
             description: "AIを使わない",
             icon: "unmute",
             usesAI: false,
@@ -839,6 +965,25 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "読んでいる文を光らせながら進み、引っかかったところは" +
               "「引っかかった」でシーンメモを残せます（そこで一時停止します）。" +
               "**原稿はメモの1行以外、何も書き換えません。**",
+          },
+          // **声で書いた分を、本文の形へ直す**（設計書6.83）。読み上げの
+          // 隣に置く——どちらも原稿エディタの中の機能で、耳と口で書くための
+          // 道具である（資料生成や新作開始の仲間ではない）
+          {
+            kind: "action",
+            command: "novelai.dictationClean",
+            // 開いているファイルに対して働くので、作品の登録は要らない
+            requiresWork: false,
+            label: "口述で入れた文を整える",
+            icon: "mic",
+            usesAI: true,
+            detail:
+              "**声を文字にするのはOSの音声入力です**（Windows：Win+H／macOS：fnキー2回）。" +
+              "この操作は、そうして入った文に句読点と改行を入れ、" +
+              "同音異義の誤変換を直し、文頭の「えーと」のような言いよどみを取ります。" +
+              "**言葉は足しません・削りません・言い換えません。**" +
+              "**選んだところ**が対象です（原稿エディタなら、下段の「口述」→「整える」で選ばずに使えます）。" +
+              "整えたあとは Ctrl+Z で元に戻せます。",
           },
           {
             kind: "action",
@@ -867,6 +1012,25 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "（どこを強調するかは、機械には決められません）。" +
               "Markdown（.md）のファイルだけで使えます。",
           },
+        ],
+      },
+      /*
+        **書き上がったものを外へ出す操作**（0.33.8）。投稿・印刷・電子書籍・
+        設定資料の受け渡し・IME辞書。上の「原稿づくり」から割った片割れで、
+        並び順は割る前のままである。
+
+        **投稿サイトのルビを取り込む**だけは向きが逆（外から入れる）が、
+        投稿サイトとのやり取りという場面は同じなので、こちらへ置く。
+      */
+      {
+        kind: "section",
+        label: "投稿・書き出し",
+        icon: "export",
+        // 分類と操作の両方に出しても、その間の小分類に無いと辿れない（6.17.1）。
+        // **印は「IME辞書を出力」が入っているこちらへ付ける**——割ったときに
+        // 置き去りにすると、閉じたままの小分類で古びていることに気づけない
+        counter: "staleImeDictionary",
+        items: [
           {
             kind: "action",
             command: "novelai.copyForPosting",
@@ -880,6 +1044,84 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "**傍点が入っているときだけ、貼り付け先を訊きます**" +
               "（傍点はサイトによって書き方が違うためです）。" +
               "**原稿は書き換えません。**",
+          },
+          // **投稿の入口は「投稿サイト用にコピー」の隣に置く**（設計書6.68）。
+          // 1話ぶんの貼り付け作業を、変換・コピー・ページを開く・記録まで
+          // ひと続きにしたもの——同じ場面で使う操作なので、隣に並べる
+          {
+            kind: "action",
+            command: "novelai.postNewEpisode",
+            label: "新話を投稿する",
+            description: "AIを使わない",
+            icon: "rocket",
+            requiresWork: true,
+            detail:
+              "未投稿の話を見つけて、サイトごとに**本文を変換してコピー→投稿ページを開く→" +
+              "記録する**まで案内します（なろう・カクヨム・アルファポリス・note）。" +
+              "案内の中から「**貼り込み係へ渡す形でコピー**」も選べます" +
+              "（ブラウザ拡張が投稿画面の欄を埋めます。送信はご自身で）。" +
+              "**投稿そのものは作者が行います。** この拡張機能が投稿サイトへ" +
+              "書き込むことはありません（自動投稿は規約で禁じられています）。" +
+              "**原稿は書き換えません。**",
+          },
+          {
+            kind: "action",
+            command: "novelai.configurePostingSites",
+            label: "投稿サイトの設定",
+            description: "AIを使わない",
+            icon: "settings-gear",
+            requiresWork: true,
+            detail:
+              "この作品を出すサイトの追加・投稿ページのURLの変更・外す、と" +
+              "「どの話まで投稿済みか」の引き直しができます。" +
+              "サイトごとの作品ID・作品ページのURL・ジャンルも入れられます" +
+              "（どれも空のままで構いません）。" +
+              "**サイトを外しても、これまでの投稿の記録は消えません。**",
+          },
+          // **設定の隣に置く**（設計書6.68.5）。作品情報を入れる画面と、
+          // そこで見た順位を書き足す操作は、同じ場面で使う
+          {
+            kind: "action",
+            command: "novelai.recordRanking",
+            label: "ランキングを記録する",
+            description: "AIを使わない",
+            icon: "graph",
+            requiresWork: true,
+            detail:
+              "投稿サイトで見た順位を書き留めます（サイト→種別→順位の3つを訊きます）。" +
+              "**サイトから自動で取ってくることはありません**" +
+              "——記録するのは、作者が画面で見た値だけです。" +
+              "履歴は執筆量パネルの「サイトの記録」で見られます。",
+          },
+          // **順位の隣に置く**（設計書6.79.7）。どちらも「投稿したあとに
+          // サイトで見た数字を書き留める」操作で、使う場面が同じである
+          {
+            kind: "action",
+            command: "novelai.importReaderStats",
+            label: "読者の反応を貼り付けて取り込む",
+            description: "AIを使わない",
+            icon: "clippy",
+            requiresWork: true,
+            // 「〜ません」の断りは、相談へ渡す束にも残る（`featureGuide` の
+            // `shorten`）。**しないことの断りは、言い切りの文で書く**
+            detail:
+              "貼り込み係（ブラウザ拡張）が管理画面から読んだPV・評価などを、" +
+              "クリップボード経由で台帳へ書き足します。" +
+              "**この拡張機能が投稿サイトへ通信することはありません。**" +
+              "対応はカクヨムとアルファポリスだけです（ほかは手入力のみ）。",
+          },
+          {
+            kind: "action",
+            command: "novelai.recordReaderStats",
+            label: "読者の反応を手入力する",
+            description: "AIを使わない",
+            icon: "heart",
+            requiresWork: true,
+            detail:
+              "サイトで見たPV・評価・いいねなどを書き留めます" +
+              "（サイト→範囲→粒度→数値の順に訊きます）。" +
+              "**サイトから自動で取ってくることはありません。**" +
+              "読めた数字だけで結構です。履歴は執筆量パネルの「サイトの記録」に出ます。",
           },
           {
             kind: "action",
@@ -906,8 +1148,22 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.exportSettingsForAudience",
+            label: "提供先を選んで設定資料を書き出す",
+            description: "AIを使わない",
+            icon: "mail",
+            requiresWork: true,
+            detail:
+              "渡す相手に合わせて、出す項目を絞った設定資料を1つのファイルに" +
+              "書き出します（編集部向け／イラスト・デザイン発注向け／" +
+              "あらすじ・設定の紹介向け）。「第N話までの情報だけ」も選べます。" +
+              "含めた項目と含めなかった項目はファイルの冒頭に書きます。AIは呼びません。",
+          },
+          {
+            kind: "action",
             command: "novelai.exportPdf",
-            label: "PDF出力（印刷用）",
+            label: "PDF出力",
+            note: "印刷用",
             description: "AIを使わない",
             icon: "file-pdf",
             requiresWork: true,
@@ -915,6 +1171,49 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "本文を印刷用に組版してブラウザで開きます。" +
               "ブラウザの印刷で「PDFに保存」を選ぶとPDFになります。" +
               "縦書き（文庫・A5）と横書き（A4）が選べ、ルビ・傍点も組みます。" +
+              "**原稿は書き換えません。** AIは呼びません。",
+          },
+          // **エディターが上、書き出しが下**（作者の指定、2026-09-04）。
+          // 「本を編んでから出す」という作業の順に合わせる
+          {
+            kind: "action",
+            command: "novelai.openEpubEditor",
+            label: "EPUBエディター",
+            note: "試作",
+            description: "AIを使わない",
+            icon: "book",
+            requiresWork: true,
+            detail:
+              "本の見た目を確かめながら、書誌情報・組み方・目次・奥付・表紙・挿絵・登場人物一覧・書体を決めます。" +
+              "左の欄を変えると、右のプレビューが**書き出しと同じ組版で**追従します。" +
+              "表紙と裏表紙は、元イラストに題名や作者名を重ねて焼けます" +
+              "（焼いた画像が次の書き出しから本に入ります）。" +
+              "挿絵とページ分割は段落を選んで置きます。" +
+              "決めた内容は `設定/書籍/book.json` へ保存し、そのまま書き出せます。" +
+              "**原稿は書き換えません。** AIは呼びません。",
+          },
+          {
+            kind: "action",
+            command: "novelai.exportEpub",
+            label: "EPUBを書き出す",
+            note: "試作",
+            description: "AIを使わない",
+            icon: "book",
+            requiresWork: true,
+            // **エディター内の書き出しボタンに一本化**（作者の指定、
+            // 2026-09-04）。コマンド自体はエディターから使うので木には残す
+            hiddenFromActionList: true,
+            detail:
+              "本文をEPUB3の電子書籍に組んで `.aiwriter/exports/` へ書き出します" +
+              "（Kindle・honto などのリーダーで開けます）。" +
+              "縦書き・横書き、ルビ・傍点、目次、奥付を組みます。" +
+              // 「まだ土台の段階です」と書いていたら、相談の束選びが
+              // 「この段落は…」という本文の相談に当たってしまった
+              // （二文字組みの「の段」で拾われる）。言い回しで避ける
+              "表紙と裏表紙（題名を重ねて焼いた画像も使えます）、" +
+              "話の途中の挿絵とページ分割、登場人物一覧、同梱する書体まで入ります。" +
+              "書誌情報や挿絵の位置は `設定/書籍/book.json` に書きます" +
+              "（EPUBエディターで編めます。無ければ作品名で組みます）。" +
               "**原稿は書き換えません。** AIは呼びません。",
           },
           {
@@ -1123,6 +1422,19 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.addWorkMemo",
+            label: "メモを追加",
+            icon: "note",
+            requiresWork: true,
+            detail:
+              "この作品のためのメモを1つ作ります（`設定/メモ/題名.md`）。" +
+              "**話数・文字数・あらすじ・投稿・校正のどれにも入りません。** " +
+              "作ったメモは作品一覧の「メモ」の枝に並び、そこから開けます。" +
+              "創作メモ集で育てたメモは、そのメモの右クリックから" +
+              "「このメモを作品へ移管」で移せます。",
+          },
+          {
+            kind: "action",
             command: "novelai.applyRenameToRecords",
             label: "名前の付け替えを資料にも反映",
             icon: "references",
@@ -1225,7 +1537,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.configureAnnouncement",
-            label: "告知の設定（ハッシュタグ・URL）",
+            label: "告知の設定",
+            note: "ハッシュタグ・URL",
             icon: "gear",
             requiresWork: true,
             detail:
@@ -1274,7 +1587,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.measureContext",
-            label: "AIチューニング（測って設定を合わせる）",
+            label: "AIチューニング",
+            note: "測って設定を合わせる",
             icon: "symbol-ruler",
             requiresWork: false,
             usesAI: true,
@@ -1283,6 +1597,19 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
               "**測った値は、いま選んでいるモデルの設定として覚えます**" +
               "——モデルを切り替えれば、そのモデルの値に変わります。" +
               "有料AIでは実行前に見込みを出します。",
+          },
+          {
+            kind: "action",
+            command: "novelai.showTuningStats",
+            label: "AIチューニングの実測一覧を表示",
+            icon: "graph",
+            requiresWork: false,
+            // **AIの印は付けない。** 測った値を並べるだけで、AIを呼ばない
+            // （有料AIでも料金は出ない）
+            detail:
+              "AIチューニングで測った値を、モデルごとに一覧にします。" +
+              "**出力の速い順に並べる**ので、どのモデルが速いかがひと目で分かります。" +
+              "測り直しはしません（AIを呼びません）。",
           },
           {
             kind: "action",
@@ -1295,6 +1622,36 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
             detail:
               "Ollamaを自動で見つけられない場合に、ollama.exe の場所を指定します。",
           },
+          /*
+            **開発ビルドでだけ並べる**（作者の依頼、2026-09-03）。
+
+            `devOnly` は「配布物には定義ごと入らない」印なので、項目そのものを
+            `__DEV_HELPERS__` の枝の中に置く。本番ビルドでは条件が false に
+            畳まれ、**この配列に1件も入らない**——押しても何も起きない
+            ボタンが残らない（コマンドの実体も `src/dev/` ごと落ちる）。
+
+            入切の実体は `src/dev/streamToggle.ts`。実験の入口が
+            `.vscode/launch.json` の環境変数しか無く、試すまでが遠すぎた。
+          */
+          ...(__DEV_HELPERS__
+            ? [
+                {
+                  kind: "action" as const,
+                  command: "novelai.dev.toggleOllamaStream",
+                  label: "Ollamaのストリーミング受信を切り替える",
+                  note: "実験",
+                  icon: "beaker",
+                  requiresWork: false,
+                  devOnly: true,
+                  detail:
+                    "**開発ホスト（F5）限定の切り替えです**（設計書6.63.1）。" +
+                    "配布版では設定 `novelai.ollama.streaming`（既定は入）で切り替えます。" +
+                    "**ここでの切り替えはこのウィンドウの間だけで、保存しません**" +
+                    "——開き直すと設定の値へ戻ります。" +
+                    "効いているかは、ログに「流して受信」が出るかで分かります。",
+                },
+              ]
+            : []),
         ],
       },
       {
@@ -1307,7 +1664,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
             // **詳細メニューには出さない**（設定管理へ移した。設計書6.56.3）
             hiddenFromActionList: true,
             command: "novelai.runFullSetup",
-            label: "セットアップ（必要なものを入れる）",
+            label: "セットアップ",
+            note: "必要なものを入れる",
             icon: "checklist",
             requiresWork: false,
             detail:
@@ -1357,7 +1715,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
             // **詳細メニューには出さない**（設定管理へ移した。設計書6.56.3）
             hiddenFromActionList: true,
             command: "novelai.setupVectorSearch",
-            label: "意味検索（ベクトルDB）の準備",
+            label: "意味検索の準備",
+            note: "ベクトルDB",
             icon: "search-fuzzy",
             requiresWork: false,
             detail:
@@ -1415,7 +1774,8 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
       {
         kind: "action",
         command: "novelai.openManual",
-        label: "使い方（マニュアル）",
+        label: "使い方",
+        note: "マニュアル",
         icon: "book",
         requiresWork: false,
         detail:
@@ -1450,6 +1810,7 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
         kind: "action",
         command: "novelai.diagnoseWeb",
         label: "動作を診断",
+        note: "ブラウザ版の確認用",
         icon: "pulse",
         requiresWork: false,
         // **手元のVS Codeでは出さない**（作者の指定、2026-08-26）。
@@ -1755,7 +2116,39 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     this._onDidChangeTreeData.fire();
   }
 
+  /**
+   * **1項目で例外が出ても、メニュー全体を欠けさせない**（実機確認 A-21）。
+   *
+   * まっさらな環境で作品を11件登録した直後、詳細メニューの4グループと
+   * ヘルプの3項目が消え、開き直すまで戻らなかった（2026-09-08）。
+   * 読むだけでは投げる箇所が見つからないので、項目ごとに捕まえて
+   * **どの項目が何で落ちたかをログに残し**、その項目は素の表示で出す。
+   * 次に起きたときは、ログが原因を指す。
+   */
   getTreeItem(node: ActionNode): vscode.TreeItem {
+    try {
+      return this.buildTreeItem(node);
+    } catch (error) {
+      logFailure("詳細メニューの項目", {
+        項目: nodeKey(node),
+        理由: error instanceof Error ? error.stack ?? error.message : String(error),
+      });
+      const label =
+        node.type === "group"
+          ? node.group.label
+          : node.type === "section"
+            ? node.section.label
+            : node.item.label;
+      return new vscode.TreeItem(
+        label,
+        node.type === "action"
+          ? vscode.TreeItemCollapsibleState.None
+          : vscode.TreeItemCollapsibleState.Collapsed
+      );
+    }
+  }
+
+  private buildTreeItem(node: ActionNode): vscode.TreeItem {
     if (node.type === "group" || node.type === "section") {
       const key = nodeKey(node);
       const label = node.type === "group" ? node.group.label : node.section.label;
@@ -1769,7 +2162,15 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       item.contextValue = node.type === "group" ? "actionGroup" : "actionSection";
       // **ここに出せないものを黙って落とさない**（「テスト中」で使う）
       const groupTooltip = node.type === "group" ? node.group.tooltip : undefined;
-      if (groupTooltip) item.tooltip = new vscode.MarkdownString(groupTooltip);
+      // **tooltip は必ず設定する。** 未設定のまま resourceUri だけを付けると、
+      // VS Code は resourceUri のパスを既定のツールチップとして表示する。
+      // 目印の鍵は encodeURIComponent 済みなので、
+      // 「%E8%B3%87%E6%96%99…」という読めない文字列が画面に漏れていた
+      // （作者の実機報告、2026-09-05）。説明を持たない分類・小分類には、
+      // せめて表示名を入れておく
+      item.tooltip = groupTooltip
+        ? new vscode.MarkdownString(groupTooltip)
+        : label;
       item.iconPath = new vscode.ThemeIcon(icon);
       // 件数の印（FileDecorationProvider）を出すための目印
       item.resourceUri = actionResourceUri(node);
@@ -1803,6 +2204,9 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
           ? ""
           : `**${REQUIRES_WORK_HINT}。** ` +
             "「作品一覧」の「フォルダから作品を追加」または「新規作品を作成」から登録してください。\n\n",
+        // **名前から外した補足は、ここで返す**（設計書6.17）。
+        // ビューの幅に収めるために短くしただけで、説明は捨てていない
+        action.note ? `**${action.note}**\n\n` : "",
         action.usesAI ? "**AIを使います**（クラウドのAIは実行のたびに課金されます）\n" : "",
         action.detail,
         this.countOf(action.counter) > 0
@@ -1827,6 +2231,19 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
   }
 
   getChildren(node?: ActionNode): ActionNode[] {
+    try {
+      return this.listChildren(node);
+    } catch (error) {
+      // 分類の中身を作れなくても、分類そのものは残す（A-21。上と同じ理由）
+      logFailure("詳細メニューの中身", {
+        項目: node ? nodeKey(node) : "（最上位）",
+        理由: error instanceof Error ? error.stack ?? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  private listChildren(node?: ActionNode): ActionNode[] {
     const hasWork = this.registry.list().length > 0;
     // 写しの分類（テスト中）は開発ホストだけに出す（作者の指示、2026-08-29）
     const groups = visibleGroups(hasWork).filter(
@@ -1860,6 +2277,28 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
 /** 印を付けるための架空のURI。実在するファイルは指さない */
 export const ACTION_SCHEME = "novelai-action";
 
+/**
+ * 簡単ステップメニュー用の鍵の頭。
+ *
+ * 詳細メニューの鍵は区画が1つ（`/操作名`）なので、頭を1つ足すだけで
+ * 衝突しなくなる。`nodeKey` が返すのは分類名・「分類/小分類」・コマンドIDで、
+ * どれもこの語そのものにはならない。
+ */
+const WORK_SCOPE_PREFIX = "work";
+
+/**
+ * 印の宛先。**どの範囲の件数を出すかが、鍵で決まる。**
+ *
+ * 詳細メニューは作品を選ばずに見るので**全作品合計**を出し、
+ * 簡単ステップメニューは最上段で作品を選ぶ画面なので
+ * **選んだ作品だけ**を出す（設計書6.29）。同じ鍵を使うと同じ数字が出て、
+ * 選択作品の件数に見えてしまう（作者の実機報告、2026-09-05）。
+ */
+export type ActionDecorationTarget =
+  | { scope: "all"; key: string }
+  /** `workId` が undefined なのは、作品をまだ選んでいないとき */
+  | { scope: "work"; key: string; workId: string | undefined };
+
 export function actionResourceUri(node: ActionNode): vscode.Uri {
   return vscode.Uri.from({
     scheme: ACTION_SCHEME,
@@ -1868,11 +2307,53 @@ export function actionResourceUri(node: ActionNode): vscode.Uri {
   });
 }
 
-/** URIから元の鍵へ戻す */
-export function actionKeyFromUri(uri: vscode.Uri): string | undefined {
+/**
+ * 簡単ステップメニュー用の目印。**作品IDを鍵に混ぜる。**
+ *
+ * 作品を選んでいないときはIDを入れない。件数は出さないが、
+ * 「AI」の印は作品に関わらないので、目印そのものは付ける。
+ */
+export function stepActionResourceUri(
+  node: ActionNode,
+  workId: string | undefined
+): vscode.Uri {
+  const key = encodeURIComponent(nodeKey(node));
+  return vscode.Uri.from({
+    scheme: ACTION_SCHEME,
+    path:
+      workId === undefined
+        ? `/${WORK_SCOPE_PREFIX}/${key}`
+        : `/${WORK_SCOPE_PREFIX}/${encodeURIComponent(workId)}/${key}`,
+  });
+}
+
+/** URIから元の鍵と、件数の範囲へ戻す */
+export function actionTargetFromUri(
+  uri: vscode.Uri
+): ActionDecorationTarget | undefined {
   if (uri.scheme !== ACTION_SCHEME) return undefined;
+  // 鍵は encodeURIComponent 済みなので、区画の中に `/` は現れない
+  const parts = uri.path.replace(/^\//, "").split("/");
   try {
-    return decodeURIComponent(uri.path.replace(/^\//, ""));
+    if (parts[0] === WORK_SCOPE_PREFIX) {
+      if (parts.length === 2) {
+        return {
+          scope: "work",
+          key: decodeURIComponent(parts[1]),
+          workId: undefined,
+        };
+      }
+      if (parts.length === 3) {
+        return {
+          scope: "work",
+          key: decodeURIComponent(parts[2]),
+          workId: decodeURIComponent(parts[1]),
+        };
+      }
+      return undefined;
+    }
+    if (parts.length !== 1) return undefined;
+    return { scope: "all", key: decodeURIComponent(parts[0]) };
   } catch {
     return undefined;
   }

@@ -92,7 +92,9 @@ function pickAnswer(rest: unknown[]): string | undefined {
   return wanted;
 }
 
-const { resolveDivergence } = await import("../../src/features/resolveDivergence");
+const { resolveDivergence, describeDivergenceConfirm } = await import(
+  "../../src/features/resolveDivergence"
+);
 
 let root: string;
 let remote: string;
@@ -177,7 +179,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("分かれた分を合わせる", () => {
+// 本物のgitを子プロセスで何度も起動するため、全体実行の並列負荷では1本が
+// 6秒台まで伸びることがある（既定5秒を際どく超え、落ちるテストが毎回入れ替わる）。
+// 単独実行では1.6秒程度。処理の遅さではなく起動の重さなので、待ちだけ伸ばす
+describe("分かれた分を合わせる", { timeout: 30_000 }, () => {
   test("衝突しなければ、そのまま合わせる", async () => {
     // 別のPCで新しい話を書き、こちらでは別の話を直した
     pushFromOtherMachine([["短編/本文/第2話.txt", "つづき。\n"]]);
@@ -322,5 +327,77 @@ describe("分かれた分を合わせる", () => {
 
     expect(status()).toContain("ahead");
     expect(shown.join("\n")).toContain("送信");
+  });
+});
+
+/**
+ * 押す前に見せる中身（実機確認リスト A-17）。
+ *
+ * **確認の画面が出ること自体は実機に残る。** ここで見るのは、出たときに
+ * 「何件取り込んで、何件がこちらに残るのか」が本当に書いてあるかである。
+ * 数字が入っていないと、作者は押してよいか判断できない。
+ */
+describe("合わせる前の確認に出す中身", () => {
+  test("取り込む件数と、こちらに残る件数が入る（実機確認リスト A-17 の代わり）", () => {
+    const text = describeDivergenceConfirm({
+      label: "いじめられっ子",
+      behind: 3,
+      ahead: 2,
+      autoWritten: 0,
+    });
+
+    expect(text.message).toContain("いじめられっ子");
+    expect(text.detail).toContain("GitHubの側にある3件を取り込みます");
+    expect(text.detail).toContain("こちらの2件はそのまま残ります");
+  });
+
+  test("自動で書かれるものを畳むときは、その件数も出す（実機確認リスト A-17 の代わり）", () => {
+    // **黙って片方へ寄せない。** 何件をこちらの側で残すのかを先に言う
+    const text = describeDivergenceConfirm({
+      label: "いじめられっ子",
+      behind: 1,
+      ahead: 1,
+      autoWritten: 4,
+    });
+
+    expect(text.detail).toContain("食い違う4件（自動で書かれるもの）");
+  });
+
+  test("畳むものが無ければ、その行を出さない（実機確認リスト A-17 の代わり）", () => {
+    const text = describeDivergenceConfirm({
+      label: "いじめられっ子",
+      behind: 1,
+      ahead: 1,
+      autoWritten: 0,
+    });
+
+    expect(text.detail).not.toContain("自動で書かれるもの");
+  });
+
+  test("送信しないことと、退避の枝を作ることも書く（実機確認リスト A-17 の代わり）", () => {
+    const text = describeDivergenceConfirm({
+      label: "いじめられっ子",
+      behind: 1,
+      ahead: 1,
+      autoWritten: 0,
+    });
+
+    expect(text.detail).toContain("退避の枝");
+    expect(text.detail).toContain("GitHubへは送信しません");
+  });
+});
+
+// 本物のgitを起動するので、上の describe と同じだけ待つ
+describe("本物のリポジトリでも、その数字が出る", { timeout: 30_000 }, () => {
+  test("実際に分かれた件数が確認に出る（実機確認リスト A-17 の代わり）", async () => {
+    // 作り物の入力ではなく、**gitが数えた ahead / behind** がそのまま
+    // 文面へ届いているかを見る
+    pushFromOtherMachine([["短編/本文/第2話.txt", "つづき。\n"]]);
+    commitHere([["短編/本文/第1話.txt", "こちら。\n"]], "こちらで加筆");
+
+    await resolveDivergence(deps());
+
+    expect(shown.join("\n")).toContain("GitHubの側にある1件を取り込みます");
+    expect(shown.join("\n")).toContain("こちらの1件はそのまま残ります");
   });
 });

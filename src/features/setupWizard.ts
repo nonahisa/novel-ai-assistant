@@ -34,6 +34,7 @@ import {
 import { withCancellableProgress, withProgress } from "../views/progress";
 import { logFailure, logStep } from "../core/logger";
 import { cancelItem } from "../views/dialogs";
+import { notifyDone } from "../views/notify";
 
 /**
  * 「これを入れれば使えるようになる」を1か所にまとめた案内（設計書6.16）。
@@ -314,7 +315,7 @@ async function installEntries(
       });
     }
     if (outcome.kind === "cancelled") {
-      vscode.window.showInformationMessage(
+      notifyDone(
         `${entry.requirement.label} の導入を取りやめました。`
       );
       break;
@@ -388,7 +389,7 @@ async function guideManualInstall(
 
   if (answer === "コマンドをコピー" && steps.command) {
     await vscode.env.clipboard.writeText(steps.command);
-    void vscode.window.showInformationMessage(
+    notifyDone(
       "コマンドをクリップボードへ入れました。ターミナルへ貼り付けて実行してください。"
     );
   } else if (answer === "配布ページを開く") {

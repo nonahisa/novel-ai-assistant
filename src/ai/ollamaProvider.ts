@@ -11,12 +11,19 @@ import {
 import { countByteFallback, decodeByteFallback } from "../core/byteFallback";
 import { contextSizeForPrompt } from "../core/chunker";
 import { describeFetchFailure, isFetchTimeout } from "./httpClient";
+import {
+  applyStreamLine,
+  emptyStreamedChat,
+  streamingEnabled,
+  takeCompleteLines,
+} from "./ollamaStream";
 // 出力の見込みは**関所と同じ値**を使う（設計書6.27.10）。ここだけ別の値を
 // 持つと「関所は通ったのに num_ctx が足りない」という食い違いになる
 import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
 import { logLine } from "../core/logger";
 import { withAiWork } from "../core/aiActivity";
 import { resolveTimeoutMs } from "../core/modelTuning";
+import { customEndpointNotice } from "../core/endpointNotice";
 
 const DEFAULT_ENDPOINT = "http://localhost:11434";
 
@@ -45,6 +52,29 @@ export function configuredNumCtx(): number | undefined {
     .getConfiguration("novelai")
     .get<number>("ollama.numCtx", 0);
   return configured > 0 ? configured : undefined;
+}
+
+/**
+ * このモデルの実効の上限（設計書6.58.4）。
+ *
+ * **作者が `num_ctx` を決めているなら、それがこのモデルの上限である。**
+ * 申告値をそのまま配ると、**送る直前の関所が見ている上限と、実際に送る
+ * `num_ctx` が食い違う**——関所は申告の262,144と比べて「入る」と言うのに、
+ * Ollamaへは指定の8,192で送るので、**入力が黙って切り捨てられる**
+ * （0.22.14で塞いだのと同じ穴）。
+ *
+ * ここで1つにしておけば、**関所・チャンクの分割・送信の3つが揃う**。
+ *
+ * **指定のほうが大きいときは、申告値を超えない。** モデルが読めない量を
+ * 「読める」と扱っても、切り捨てられるだけである。
+ */
+export function effectiveContextWindow(
+  declared: number,
+  configured: number | undefined
+): number {
+  if (configured === undefined || !Number.isFinite(configured)) return declared;
+  if (configured <= 0) return declared;
+  return Math.min(declared, configured);
 }
 
 interface TagsResponse {
@@ -80,6 +110,42 @@ export function isModelLoadFailure(detail: string): boolean {
     /unable to load model/i,
     /requires more system memory/i,
   ].some((pattern) => pattern.test(detail));
+}
+
+/**
+ * この呼び出しは、流しながら受け取る道を通るか（設計書6.63.1）。
+ *
+ * **1か所で決める。** 以前は `generateInner` の中に式が直に書いてあり、
+ * 「流している最中かどうか」を思考の判定から見られなかった。
+ */
+export function willStreamChat(
+  params: Pick<GenerateParams, "disableStreaming">
+): boolean {
+  // 0.42.0 から配布版でも通る（設定 `novelai.ollama.streaming`、既定は入）
+  return streamingEnabled() && !params.disableStreaming;
+}
+
+/**
+ * `think` に何を送るか。`undefined` なら**送らない**（モデルの既定に任せる）。
+ *
+ * **思考を流して見せられるときは、切らない**（作者の指摘、2026-09-07）。
+ * 相談パネルは思考を受け取る口（`onThinking`）を渡しながら
+ * `disableThinking: true` も送っており、Ollamaが `think: false` を受けて
+ * 思考を1文字も返さないため、**「考えています…」のまま67秒間なにも
+ * 流れなかった**。呼び出し側を直すのではなくここで決めるのは、
+ * **流せるかどうかを知っているのがここだけ**だからである
+ * （呼び出し側で `disableThinking: !canStream` と書くと、17か所ある
+ * 呼び出しのどれかで必ず食い違う）。
+ *
+ * **流せないときは従来どおり切る。** 配布版には流す道が無いので、
+ * ここを緩めると「見えない思考を待つぶんだけ遅くなる」だけになる。
+ */
+export function thinkOptionFor(
+  params: Pick<GenerateParams, "disableThinking" | "onThinking">,
+  streaming: boolean
+): false | undefined {
+  if (params.onThinking && streaming) return undefined;
+  return params.disableThinking ? false : undefined;
 }
 
 /**
@@ -152,6 +218,12 @@ export class OllamaProvider implements AIProvider {
   readonly displayName = "Ollama（ローカル）";
   /** 自分の機械で動かすので課金は無い */
   readonly isPaid = false;
+  /**
+   * **出力に上限を掛けない**（設計書6.58.2）。`num_predict` を送らず、
+   * `num_ctx` を見込みぶんだけ確保する——だから関所も、実上限ではなく
+   * 見込みで場所を数える（設計書6.77の第2段）。
+   */
+  readonly capsOutput = false;
 
   /** モデル詳細のキャッシュ。/api/show は毎回呼ぶと重いため */
   private modelCache = new Map<string, ModelInfo>();
@@ -193,7 +265,9 @@ export class OllamaProvider implements AIProvider {
       }
       return {
         ok: true,
-        message: `Ollamaに接続しました（モデル ${count} 件）`,
+        message:
+          `Ollamaに接続しました（モデル ${count} 件）` +
+          customEndpointNotice(this.endpoint, DEFAULT_ENDPOINT),
         modelCount: count,
       };
     } catch (e) {
@@ -272,7 +346,20 @@ export class OllamaProvider implements AIProvider {
     return {
       id: name,
       displayName: name,
-      contextWindow,
+      /*
+        **作者が `num_ctx` を決めているなら、それがこのモデルの上限である**
+        （設計書6.58.4）。
+
+        申告値をそのまま返すと、**送る直前の関所が見ている上限と、実際に
+        送る `num_ctx` が食い違う**。関所（`meteredProvider`）は申告値
+        （たとえば262,144）と比べて「入る」と判断するのに、Ollamaへは
+        作者の指定（たとえば8,192）で送るので、**入力が黙って切り捨てられる**
+        ——0.22.14 で塞いだのと同じ穴である。
+
+        チャンクの大きさもここから決まるので、絞れば送る量ごと縮む。
+        **上限を1つにすれば、関所・分割・送信の3つが自動的に揃う。**
+      */
+      contextWindow: effectiveContextWindow(contextWindow, configuredNumCtx()),
       parameterSize,
       capabilities: res.capabilities ?? [],
       tier: inferTier(parameterSize, "ollama"),
@@ -295,8 +382,9 @@ export class OllamaProvider implements AIProvider {
    * 独り言（`core/chatter.ts`）が「いま話しかけてよいか」を見るので、
    * 依頼のあいだは仕事中の印を立てる。
    *
-   * **Ollamaにだけ入れている。** 独り言は無料のローカルAIでしか動かさない
-   * （有料のAIで勝手に課金しないため）ので、他のプロバイダでは要らない。
+   * **手元のAIには、どれも入れる**（`lmstudioProvider.ts` にも同じものがある）。
+   * 独り言は無料のローカルAIでしか動かさない（有料のAIで勝手に課金しない
+   * ため）ので、クラウドの4つでは要らない。
    */
   async generate(params: GenerateParams): Promise<GenerateResult> {
     return withAiWork(() => this.generateInner(params));
@@ -324,7 +412,22 @@ export class OllamaProvider implements AIProvider {
       configuredNumCtx() ??
       contextSizeForPrompt({
         promptChars: params.systemPrompt.length + params.userPrompt.length,
-        outputTokens: params.maxOutputTokens ?? OUTPUT_RESERVE_TOKENS,
+        /*
+          **見込み → 実上限 → 既定**の順で読む（設計書6.77の第2段）。
+
+          確保に使うのは `plannedOutputTokens`（`min(設定, 実測 ?? 8,192)`）
+          である。実上限（`maxOutputTokens`）のほうは、測っていないモデルでは
+          設定値そのもの（既定16,384）なので、こちらで確保すると `num_ctx` が
+          倍近くに育ち、非力な機械のメモリを食う——6.58.2で避けた副作用が
+          そのまま戻る。
+
+          実上限へ落ちるのは、見込みを渡してこない呼び出し（独り言の200など）
+          のためである。どちらも無ければ従来どおり `OUTPUT_RESERVE_TOKENS`。
+        */
+        outputTokens:
+          params.plannedOutputTokens ??
+          params.maxOutputTokens ??
+          OUTPUT_RESERVE_TOKENS,
         contextWindow:
           (await this.getModel(params.model))?.contextWindow ??
           UNKNOWN_CONTEXT_WINDOW,
@@ -340,6 +443,38 @@ export class OllamaProvider implements AIProvider {
       }字）`
     );
 
+    const options: Record<string, unknown> = {
+      temperature: params.temperature,
+      /*
+        **`num_predict` は送らない。出力に上限を掛けない**
+        （作者の判断、2026-09-01。設計書6.58.2）。
+
+        ほかの5つのプロバイダは `novelai.maxOutputTokens` を送信時の
+        上限として渡すが、**Ollamaにだけは渡さない**。これは書き忘れでは
+        なく、設定の説明にも「Ollamaへは送りません」と書いてある。
+
+        **上限を掛けると、長い応答が途中で切れる。** 抽出の応答はJSONで、
+        途中で切れると解析できず**そのチャンクは丸ごと捨てられる**
+        （呼び出し1回ぶんが無駄になる）。手元のOllamaは呼ぶだけなら
+        無料なので、クラウドのように「切ってでも節約する」理由が無い。
+
+        `maxOutputTokens` は**確保するコンテキスト長の計算にだけ**使う
+        （上の `numCtx`）。応答用に空けておく分であって、上限ではない。
+
+        **測定だけは例外**（設計書6.65.14の4）。「書ける量」の測定
+        （`features/measureContext.ts` の `measureOutputLimit`）は、
+        設定値を超えて書けても測定の役には立たないうえ、繰り返しに崩れた
+        モデルを待ち続ける害のほうが大きい。呼び出し側が
+        `capOutputTokens: true` を立てたときだけ、下で `num_predict` を足す。
+      */
+      // これを指定しないとOllamaは既定の短いコンテキストで動き、
+      // 入力が黙って切り捨てられる。長文処理では必須。
+      num_ctx: numCtx,
+    };
+    if (params.capOutputTokens && params.maxOutputTokens !== undefined) {
+      options.num_predict = params.maxOutputTokens;
+    }
+
     const body: Record<string, unknown> = {
       model: params.model,
       stream: false,
@@ -347,46 +482,46 @@ export class OllamaProvider implements AIProvider {
         { role: "system", content: params.systemPrompt },
         { role: "user", content: params.userPrompt },
       ],
-      options: {
-        temperature: params.temperature,
-        /*
-          **`num_predict` は送らない。出力に上限を掛けない**
-          （作者の判断、2026-09-01。設計書6.58.2）。
-
-          ほかの5つのプロバイダは `novelai.maxOutputTokens` を送信時の
-          上限として渡すが、**Ollamaにだけは渡さない**。これは書き忘れでは
-          なく、設定の説明にも「Ollamaへは送りません」と書いてある。
-
-          **上限を掛けると、長い応答が途中で切れる。** 抽出の応答はJSONで、
-          途中で切れると解析できず**そのチャンクは丸ごと捨てられる**
-          （呼び出し1回ぶんが無駄になる）。手元のOllamaは呼ぶだけなら
-          無料なので、クラウドのように「切ってでも節約する」理由が無い。
-
-          `maxOutputTokens` は**確保するコンテキスト長の計算にだけ**使う
-          （上の `numCtx`）。応答用に空けておく分であって、上限ではない。
-        */
-        // これを指定しないとOllamaは既定の短いコンテキストで動き、
-        // 入力が黙って切り捨てられる。長文処理では必須。
-        num_ctx: numCtx,
-      },
+      options,
     };
 
     if (params.jsonSchema) {
       // Ollamaの構造化出力。スキーマを渡すとJSON形式を強制できる
       body.format = params.jsonSchema;
     }
-    if (params.disableThinking) {
-      body.think = false;
+    // **流すか切るかを、思考の判定より先に決める。** 同じ式を2回書くと、
+    // 片方だけ直したときに「流しているのに思考は切ったまま」へ戻る
+    const streaming = willStreamChat(params);
+    const think = thinkOptionFor(params, streaming);
+    if (think !== undefined) {
+      body.think = think;
     }
 
     let res: ChatResponse;
     try {
-      res = await this.fetchJson<ChatResponse>(
-        "/api/chat",
-        body,
-        this.requestTimeoutMs(params.model),
-        params.signal
-      );
+      /*
+        **流して受け取る道**（設計書6.63.1）。0.42.0 から配布版でも通る
+        （設定 `novelai.ollama.streaming`、既定は入）。切ると、生成が
+        終わってからまとめて受け取る道（`fetchTimeouts.ts`）へ戻る。
+
+        **呼び出し側が断れる**（`disableStreaming`。2026-09-03）。流す道は
+        断片が届くたびに待ち時間を数え直すので、**繰り返しに崩れて書き続ける
+        モデルを永遠に待つ**。測定はそれでは終わらないので、絶対の締め切りの
+        ある道（`fetchJson`）を通す。理由の詳しくは `ai/types.ts` にある。
+      */
+      res = streaming
+        ? await this.streamChat(
+            body,
+            this.requestTimeoutMs(params.model),
+            params.signal,
+            params.onThinking
+          )
+        : await this.fetchJson<ChatResponse>(
+            "/api/chat",
+            body,
+            this.requestTimeoutMs(params.model),
+            params.signal
+          );
     } catch (e) {
       if (e instanceof AIError) throw e;
       throw new AIError(String(e), "unknown");
@@ -434,6 +569,129 @@ export class OllamaProvider implements AIProvider {
       truncated: res.done_reason === "length",
       elapsedMs: Date.now() - started,
     };
+  }
+
+  /**
+   * `/api/chat` を**流しながら**受け取る（設計書6.63.1。開発ビルド限定）。
+   *
+   * 受け取った断片を `ollamaStream.ts` が組み立て、`stream:false` の
+   * 応答と同じ形（`ChatResponse`）にして返す。**呼ぶ側は違いを知らない。**
+   *
+   * **待ち時間の扱いが変わる。** ヘッダーは即座に届くので「ヘッダー待ち」の
+   * 上限には当たらない。代わりに、**最後の断片が届いてからの間**を
+   * こちらの待ち時間で見る——生成が続いている限り断片が流れてくるので、
+   * 止まったときだけ切れる。
+   */
+  private async streamChat(
+    body: Record<string, unknown>,
+    timeoutMs: number,
+    externalSignal?: AbortSignal,
+    /** 思考が届くたびに呼ぶ。相談パネルが画面へ流す（設計書6.63.2） */
+    onThinking?: (delta: string) => void
+  ): Promise<ChatResponse> {
+    const controller = new AbortController();
+    let abortSource: "caller" | "timeout" | undefined;
+    const abort = (source: "caller" | "timeout") => {
+      if (abortSource !== undefined) return;
+      abortSource = source;
+      controller.abort();
+    };
+    // **断片が届くたびに数え直す。** 全体の上限にすると、長い生成が
+    // まっとうに進んでいても途中で切ってしまう
+    let timer = setTimeout(() => abort("timeout"), timeoutMs);
+    const bump = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => abort("timeout"), timeoutMs);
+    };
+    const onExternalAbort = () => abort("caller");
+    if (externalSignal?.aborted) onExternalAbort();
+    else externalSignal?.addEventListener("abort", onExternalAbort);
+
+    const started = Date.now();
+    try {
+      const response = await fetch(`${this.endpoint}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, stream: true }),
+        signal: controller.signal,
+      });
+      if (!response.ok || !response.body) {
+        throw new AIError(
+          `Ollamaがエラーを返しました (HTTP ${response.status})。`,
+          "bad_response"
+        );
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const state = emptyStreamedChat();
+      let buffer = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bump();
+        buffer += decoder.decode(value, { stream: true });
+        const { lines, rest } = takeCompleteLines(buffer);
+        buffer = rest;
+        for (const line of lines) {
+          const before = state.thinking ?? "";
+          applyStreamLine(state, line);
+          // **増えた分だけを渡す。** 全文を毎回渡すと、受け取る側が
+          // 差分を計算する羽目になり、同じ理屈が2か所に散る
+          const after = state.thinking ?? "";
+          if (onThinking && after.length > before.length) {
+            onThinking(after.slice(before.length));
+          }
+        }
+      }
+      /*
+        **最後に取り込み器を空にする**（設計書6.63.1）。
+
+        `decode(value, { stream: true })` は、**多バイト文字の途中で切れた
+        バイトを内部に溜めて次へ持ち越す**。日本語は1文字3バイトなので、
+        断片の境目が文字の途中に落ちるのはむしろ普通である。
+        持ち越しの仕組みがあるおかげでそこは壊れないが、
+        **最後に空にしないと、溜まったままの分が消える。**
+
+        引数なしの `decode()` が、その持ち越しを吐き出す。
+      */
+      buffer += decoder.decode();
+      // 最後の断片（改行で終わっていない場合）も取り込む
+      applyStreamLine(state, buffer);
+
+      logLine(
+        `Ollama：流して受信（${Math.round((Date.now() - started) / 1000)}秒 / ` +
+          `${state.content.length}字 / 出力 ${state.evalCount ?? "不明"}トークン）`
+      );
+
+      return {
+        message: { content: state.content },
+        done_reason: state.truncated ? "length" : "stop",
+        error: state.error,
+        eval_count: state.evalCount,
+        prompt_eval_count: state.promptEvalCount,
+      } as ChatResponse;
+    } catch (error) {
+      if (error instanceof AIError) throw error;
+      const err = error as Error;
+      if (err.name === "AbortError") {
+        if (abortSource === "caller") {
+          throw new AIError("処理が中止されました。", "aborted");
+        }
+        throw new AIError(
+          `Ollamaの応答がタイムアウトしました（${Math.round(timeoutMs / 1000)}秒）。`,
+          "timeout"
+        );
+      }
+      throw new AIError(
+        "Ollamaに接続できません。",
+        "not_running",
+        describeFetchFailure(error)
+      );
+    } finally {
+      clearTimeout(timer);
+      externalSignal?.removeEventListener("abort", onExternalAbort);
+    }
   }
 
   private async fetchJson<T>(

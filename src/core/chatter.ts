@@ -36,6 +36,8 @@ const MILESTONES = [1_000, 3_000, 5_000, 10_000, 20_000, 30_000] as const;
 export const IDLE_THRESHOLD_MS = 20 * 1_000;
 
 export type ChatterKind =
+  /** 本文を読んだAIの感想（設計書6.21.4）。文面はAIから受け取る */
+  | "manuscriptComment"
   /** その日の字数が節目を超えた */
   | "milestone"
   /** その日の目標を達成した */
@@ -85,12 +87,36 @@ export interface Chatter {
 }
 
 /**
+ * 本文の感想を取りに行く印（設計書6.21.4）。
+ *
+ * **文面をまだ持たない。** 何を言うかは本文を読ませないと決まらず、
+ * ここでAIを呼ぶわけにはいかない（この判断はVSCodeにもAIにも
+ * 依存させない——うるささを試験で確かめるため）。
+ *
+ * 種別を `ChatterKind` の外に置いているのは、受け取る側が
+ * 「文面のある発言」と取り違えないようにするためである
+ * （型で分かれていれば、`text` を読もうとした時点で気づく）。
+ */
+export interface ChatterCommentRequest {
+  /** 同じことを言わないための鍵。話ごとに1日1回 */
+  key: string;
+  kind: "commentRequest";
+  /** 読ませる本文。直近に保存した話 */
+  manuscriptPath: string;
+}
+
+/** 独り言の決定。文面を持つものと、これから取りに行くもの */
+export type ChatterDecision = Chatter | ChatterCommentRequest;
+
+/**
  * いま言うことを1つだけ決める。無ければ黙る。
  *
  * **1回に1つしか返さない。** まとめて3つ出すと、
  * それは独り言ではなくお知らせの一覧になる。
  */
-export function decideChatter(state: ChatterState): Chatter | undefined {
+export function decideChatter(
+  state: ChatterState
+): ChatterDecision | undefined {
   for (const candidate of candidates(state)) {
     if (!state.saidToday.has(candidate.key)) return candidate;
   }
@@ -103,8 +129,8 @@ export function decideChatter(state: ChatterState): Chatter | undefined {
  * 祝いを先に置くのは、**手伝いの申し出より嬉しいから**である。
  * 目標を達成した直後に「抽出やっておきましょうか？」と言われては興が削がれる。
  */
-function candidates(state: ChatterState): Chatter[] {
-  const out: Chatter[] = [];
+function candidates(state: ChatterState): ChatterDecision[] {
+  const out: ChatterDecision[] = [];
 
   // ── 祝う（書いている最中でも割り込んでよい。手を止めさせないため）
   if (state.dailyGoal > 0 && state.writtenToday >= state.dailyGoal) {
@@ -177,6 +203,23 @@ function candidates(state: ChatterState): Chatter[] {
       kind: "idleTypos",
       text: "書き終えたところ、誤字脱字じゃないですか？　いま開いている話だけ見ておきましょうか。",
       run: { kind: "checkTyposForFile", label: "この話の誤字脱字を見る" },
+    });
+  }
+
+  // ── 本文を読んだ感想（設計書6.21.4）。**いちばん最後に置く。**
+  //
+  // 祝いも申し出も、記録や件数に基づく**確かな発言**である。AIの感想は
+  // 本文の読み取りしだいで外れることがあるので、確かなものを差し置いて
+  // 出さない。ここまでで言うことが尽きた回にだけ、読みに行く。
+  //
+  // 条件は誤字脱字の申し出と揃える（保存した本文があり、その日に書いている）。
+  // 開いただけの話に「盛り上がってきましたね」は的外れになる。
+  if (state.openManuscriptPath && state.writtenToday > 0) {
+    out.push({
+      // 鍵に話を含める。別の話を書いたなら、その話については言ってよい
+      key: `manuscriptComment:${state.openManuscriptPath}`,
+      kind: "commentRequest",
+      manuscriptPath: state.openManuscriptPath,
     });
   }
 

@@ -84,12 +84,60 @@ export function parseChatEdit(
   const target = parseTarget(targetText);
   if (!target) return { ok: false, reason: "unknown_target" };
 
-  const label =
-    typeof raw.label === "string" && raw.label.trim()
-      ? raw.label.trim()
-      : describeChatEditTarget(target);
+  /*
+    **見出しはAIの言葉を信じない**（作者の指摘、2026-09-07）。
+
+    実機では「テーマの明確化」というAIの `label` のままボタンが出ており、
+    押すと `設定/plot.md` の「テーマ」が書き換わった。**どのファイルの
+    どこが変わるのかが、押す前に読み取れない。** 書き込み先はこちらが
+    知っているのだから、こちらが名乗る。AIの言葉は補足として括弧で添える
+    （何のつもりの提案かは、それはそれで手掛かりになる）。
+  */
+  const note = typeof raw.label === "string" ? raw.label.trim() : "";
+  const label = describeChatEditButton(target, note);
 
   return { ok: true, edit: { target, content, label } };
+}
+
+/**
+ * 書き込み先を「ファイルと項目名」で言う。
+ *
+ * 作者の作品ファイルへ書く操作なので、**押す前にどこが変わるかが
+ * 一目で分かる形にする。**
+ */
+export function describeChatEditDestination(target: ChatEditTarget): {
+  /** 作品フォルダーからの位置。作者が普段見ている呼び方に合わせる */
+  file: string;
+  /** その中のどこか */
+  item: string;
+} {
+  switch (target.kind) {
+    case "plot":
+      return {
+        file: "設定/plot.md",
+        item: PLOT_LABELS.get(target.section) ?? target.section,
+      };
+    case "blurb":
+      return { file: "設定/synopsis.md", item: "作品紹介文" };
+    case "catchphrase":
+      return { file: "設定/synopsis.md", item: "キャッチコピー" };
+    case "episodeSynopsis":
+      return {
+        file: "設定/chapter_synopses.json",
+        item: `第${target.chapter}話のあらすじ`,
+      };
+  }
+}
+
+/** ボタンの見出し。`note` はAIが付けた説明（あれば括弧で添える） */
+export function describeChatEditButton(
+  target: ChatEditTarget,
+  note = ""
+): string {
+  const where = describeChatEditDestination(target);
+  const head = `${where.file} の「${where.item}」を書き換える`;
+  // AIの言葉をそのまま繰り返すだけなら添えない（同じ文が二度出る）
+  return note && note !== head ? `${head}（${note}）` : head;
 }
 
 function parseTarget(text: string): ChatEditTarget | undefined {
@@ -110,19 +158,6 @@ function parseTarget(text: string): ChatEditTarget | undefined {
   }
 
   return undefined;
-}
-
-export function describeChatEditTarget(target: ChatEditTarget): string {
-  switch (target.kind) {
-    case "plot":
-      return `プロットの「${PLOT_LABELS.get(target.section) ?? target.section}」に書き込む`;
-    case "blurb":
-      return "作品紹介文に書き込む";
-    case "catchphrase":
-      return "キャッチコピーに書き込む";
-    case "episodeSynopsis":
-      return `第${target.chapter}話のあらすじに書き込む`;
-  }
 }
 
 export function describeChatEditRejection(reason: ChatEditRejection): string {

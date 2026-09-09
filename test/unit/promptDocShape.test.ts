@@ -89,7 +89,18 @@ describe("プロンプト設計書の形", () => {
     ["P-22", "src/prompts/searchTerms.ts", "SEARCH_TERMS_VERSION"],
     ["P-23", "src/prompts/recheck.ts", "RECHECK_VERSION"],
     ["P-24", "src/prompts/openingCheck.ts", "OPENING_CHECK_VERSION"],
+    ["P-25", "src/prompts/foreshadowDetect.ts", "FORESHADOW_DETECT_VERSION"],
+    ["P-26", "src/prompts/foreshadowResolve.ts", "FORESHADOW_RESOLVE_VERSION"],
+    ["P-27", "src/prompts/episodePlotCheck.ts", "EPISODE_PLOT_CHECK_VERSION"],
+    ["P-28", "src/prompts/episodePlotContrast.ts", "EPISODE_PLOT_CONTRAST_VERSION"],
     ["P-29", "src/prompts/nameSuggest.ts", "NAME_SUGGEST_VERSION"],
+    ["P-30", "src/prompts/announce.ts", "ANNOUNCE_VERSION"],
+    ["P-31", "src/prompts/chapterPropose.ts", "CHAPTER_PROPOSE_VERSION"],
+    ["P-32", "src/prompts/chatSettingsSync.ts", "CHAT_SETTINGS_SYNC_VERSION"],
+    ["P-33", "src/prompts/notationAdvice.ts", "NOTATION_ADVICE_VERSION"],
+    ["P-34", "src/prompts/chatterComment.ts", "CHATTER_COMMENT_VERSION"],
+    ["P-35", "src/prompts/dictationClean.ts", "DICTATION_CLEAN_VERSION"],
+    ["P-36", "src/prompts/advicePolicy.ts", "ADVICE_POLICY_VERSION"],
   ];
 
   test.each(IMPLEMENTED)(

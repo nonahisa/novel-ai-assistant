@@ -9,7 +9,9 @@ import {
   disabledHint,
   explainDisabled,
   isActionEnabled,
+  isItemShownInActionList,
   isItemVisibleInRuntime,
+  shownEntries,
   visibleEntries,
   REQUIRES_WORK_HINT,
   restoreExpandedGroups,
@@ -25,7 +27,10 @@ import { ActionDecorationProvider } from "../../src/views/actionDecorations";
 import type { WorkRegistry } from "../../src/core/workRegistry";
 
 interface PackageManifest {
-  contributes: { commands: Array<{ command: string }> };
+  contributes: {
+    commands: Array<{ command: string; title: string }>;
+    menus: { commandPalette: Array<{ command: string; when: string }> };
+  };
 }
 
 /** 作品が1件ある体にする。分類の中身が空にならないようにするだけ */
@@ -301,15 +306,25 @@ describe("AIの印", () => {
     expect(aiCommands).toEqual(
       [
         "novelai.plotInterview",
+        // 校正のまとめ実行（設計書6.80）。**走らせるのは既存の検知**なので、
+        // 選び方によってはAIを1度も呼ばない。それでも印は要る——既定の
+        // 4つには誤字脱字・推敲・矛盾が入っており、料金が出るためである
+        "novelai.runProofreadingSuite",
         "novelai.checkTypos",
         "novelai.checkProofread",
         "novelai.checkContradictions",
         "novelai.checkDeviations",
+        // 単話プロットの検査・本文との照合（P-27・P-28。設計書6.36.3）。
+        // **入口は1つ。** どちらを掛けるかは実行時に選ぶ
+        "novelai.checkEpisodePlot",
         // 伏線の検知（配置・回収。設計書6.35.2・6.35.3）。
         // **一覧を開く・手で追加・状態を変えるは、AIを呼ばないので入らない**
         "novelai.checkForeshadows",
         "novelai.checkForeshadowResolution",
         "novelai.checkOpening",
+        // 口述の整文（P-35、設計書6.83）。**声を文字にするのはOSの音声入力**
+        // だが、そのあと本文の形へ整えるところでAIを1回呼ぶ
+        "novelai.dictationClean",
         "novelai.extractSettings",
         "novelai.extractCharactersOnly",
         "novelai.extractLocationsOnly",
@@ -323,13 +338,16 @@ describe("AIの印", () => {
         "novelai.generatePlot",
         "novelai.generateSynopses",
         "novelai.generateWorkBlurb",
-        // 相談は2つの入口を持つ（本文の領域に大きく開く／横の細いパネル）。
-        // **どちらもAIを呼ぶ**ので、両方に印が要る
-        "novelai.openChat",
+        // 相談のメニューの入口は「大きく開く」だけ（横の細いパネルは
+        // 本文の右クリックのみ。0.29.23で項目を消した——作者の指定）
         "novelai.openChatPanel",
         // 読める長さの測定（設計書6.27.11）。作品の本文は送らないが、
         // **AIを何度も呼ぶ**ので有料AIでは料金が出る。印は要る
         "novelai.measureContext",
+        // 章立ての提案（P-31、設計書6.66.4）。**手で章を作る操作
+        // （ここから章を始める・名前を変える・外す）は詳細メニューに無い**
+        // ——作品一覧の右クリックだけで、AIも呼ばない
+        "novelai.proposeChapters",
       ].sort()
     );
   });
@@ -449,6 +467,26 @@ describe("件数の印", () => {
     ).toBeUndefined();
   });
 
+  test("詳細メニューは全作品を合わせて数える", async () => {
+    // **作品を選ばずに見るメニュー**なので、「どこかに溜まっている」ことが
+    // 分かればよい（設計書6.17）。簡単ステップメニューが選択中の作品だけを
+    // 数えるようになっても（2026-09-05）、こちらは合算のままにする
+    const provider = new ActionDecorationProvider(async (_counter, workId) =>
+      workId === undefined ? 26 : 2
+    );
+    await provider.refresh();
+
+    expect(
+      provider.provideFileDecoration(
+        actionResourceUri(actionNode("novelai.unifyCharacters"))
+      )?.badge
+    ).toBe("26");
+    expect(
+      provider.provideFileDecoration(actionResourceUri(groupNode("資料管理")))
+        ?.badge
+    ).toBe("26");
+  });
+
   test("数えられなくてもメニューは出す", async () => {
     // 設定JSONが壊れていても、操作そのものは押せるべき
     const provider = new ActionDecorationProvider(async () => {
@@ -539,6 +577,165 @@ describe("開閉を覚える", () => {
   });
 });
 
+describe("分類のツールチップ", () => {
+  /**
+   * **tooltip を設定しないと、resourceUri のパスがそのまま出る。**
+   *
+   * 件数の印を出すために分類・小分類にも `resourceUri` を付けているが、
+   * VS Code は tooltip を持たない項目に resourceUri のパスを既定の
+   * ツールチップとして表示する。鍵は `encodeURIComponent` 済みなので、
+   * 「%E8%B3%87%E6%96%99...」という読めない文字列が画面に漏れた
+   * （作者の実機報告、2026-09-05）。
+   */
+  const tooltipTextOf = (node: ActionNode): string => {
+    const provider = new ActionListProvider(fakeRegistry(), memoryStore());
+    const tooltip = provider.getTreeItem(node).tooltip;
+    if (tooltip === undefined) throw new Error("ツールチップがありません");
+    return typeof tooltip === "string" ? tooltip : tooltip.value;
+  };
+
+  test("説明の無い分類・小分類にも、表示名のツールチップが付く", () => {
+    for (const group of ACTION_TREE) {
+      const groupText = tooltipTextOf(groupNode(group.label));
+      // 説明を持つ分類はそれを出し、持たない分類は表示名を出す
+      expect(groupText).toBe(group.tooltip ?? group.label);
+      expect(groupText).not.toContain("%");
+
+      for (const entry of group.entries) {
+        if (entry.kind !== "section") continue;
+        const sectionText = tooltipTextOf(
+          sectionNode(group.label, entry.label)
+        );
+        expect(sectionText).toBe(entry.label);
+        expect(sectionText).not.toContain("%");
+      }
+    }
+  });
+});
+
+/**
+ * 名前は短く、補足はツールチップへ（作者の裁定、2026-09-06）。
+ *
+ * 「AIチューニング（測って設定を合わせる）」のように、名前のうしろへ
+ * 括弧で説明を足したものが増えていた。**ビューは幅が狭い**ので、
+ * 長い名前は途中で切れて、肝心の名前のほうが読めなくなる。
+ *
+ * **消すのではなく、置き場所を変える。** 補足は `note` に移し、
+ * ツールチップと、相談へ送る束（`featureGuide.ts`）の両方へ出す。
+ * `package.json` の `title` は変えない——コマンドパレットは名前だけで
+ * 探す場所なので、そこでは補足が付いていたほうが見つけやすい。
+ */
+describe("メニュー名は短く、補足はツールチップへ", () => {
+  test("操作の名前に括弧の補足を入れない", () => {
+    const withParen = allActions().filter((action) =>
+      action.label.includes("（")
+    );
+
+    expect(
+      withParen.map((action) => action.label),
+      "括弧の中身は note へ移す"
+    ).toEqual([]);
+  });
+
+  test("補足を持つ操作は、ツールチップにその補足が出る", () => {
+    const provider = new ActionListProvider(fakeRegistry(), memoryStore());
+    const withNote = allActions().filter((action) => action.note);
+
+    // 移し先が無いまま名前だけ短くすると、説明が消える
+    expect(withNote.length).toBeGreaterThan(0);
+    for (const action of withNote) {
+      const tooltip = provider.getTreeItem(actionNode(action.command)).tooltip;
+      const text =
+        typeof tooltip === "string" ? tooltip : (tooltip?.value ?? "");
+      expect(text, action.command).toContain(action.note);
+    }
+  });
+});
+
+/**
+ * メニューの名前と、コマンドパレットの名前（`package.json` の `title`）。
+ *
+ * **同じ操作が2つの名前で呼ばれていると、作者は別物だと思う。** 実際、
+ * 「シーンメモを開く」と「シーンメモを横に開く」のように、片方だけ直して
+ * 食い違ったままの項目が溜まっていた。原則は
+ * **`label` ＋（`note` があれば `（note）`）＝ `title`**。
+ *
+ * **`title` は変えない。** コマンドパレットは名前だけで探す場所なので、
+ * 補足が付いていたほうが見つけやすい（`note` を作ったときの裁定）。
+ * 揃えるときは、メニュー側の `label`／`note` を直す。
+ */
+describe("メニュー名とコマンドパレットの名前", () => {
+  /** メニューに出る名前（補足を戻した形） */
+  function menuTitle(action: { label: string; note?: string }): string {
+    return action.note ? `${action.label}（${action.note}）` : action.label;
+  }
+
+  function titles(): Map<string, string> {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+    ) as PackageManifest;
+    return new Map(
+      manifest.contributes.commands.map((entry) => [entry.command, entry.title])
+    );
+  }
+
+  /**
+   * **揃えない項目と、その理由。**
+   *
+   * ほとんどは「小分類が文脈を持っているので、メニュー側は短くしてある」
+   * ——「作品管理 › 既存作追加 › フォルダから追加」の行に
+   * 「フォルダから作品を追加」と書くと、同じ語が2回出る。コマンド
+   * パレットには小分類が無いので、あちらは長いままでよい。
+   *
+   * **足すときは理由を書く。** 理由の書けないずれは、ただの直し忘れである。
+   */
+  const EXCEPTIONS: Record<string, string> = {
+    "novelai.setupGithub":
+      "「セットアップ」を避けた言い換え。小分類「GitHubで作品管理」の下なので、何のことかは文脈で分かる",
+    "novelai.gitSync": "小分類「GitHubで作品管理」の下。「GitHubと」は文脈で分かる",
+    "novelai.gitRestore": "小分類「GitHubで作品管理」の下。並びの短さを揃えている",
+    "novelai.createWorkWithPlot":
+      "小分類「新作開始」の下で「〜から開始」と揃えてある",
+    "novelai.createWorkFromManuscript":
+      "小分類「新作開始」の下で「〜から開始」と揃えてある",
+    "novelai.addWork": "小分類「既存作追加」の下で「〜から追加」と揃えてある",
+    "novelai.addWorkFromGithub":
+      "小分類「既存作追加」の下で「〜から追加」と揃えてある",
+    "novelai.extractSettings":
+      "小分類「資料抽出」の下。「設定資料を」は文脈で分かる",
+    "novelai.setupVectorSearch":
+      "括弧が名前の途中に入る形（「意味検索（ベクトルDB）の準備」）で、label＋（note）では表せない",
+    "novelai.generateSettingsDocs":
+      "括弧の中身（AIを使わない）は description に出している。note へ写すと画面に二重に出る",
+  };
+
+  test("label＋（note）が package.json の title と一致する", () => {
+    const title = titles();
+    const mismatched = allActions()
+      .filter((action) => !(action.command in EXCEPTIONS))
+      .filter((action) => menuTitle(action) !== title.get(action.command))
+      .map(
+        (action) =>
+          `${action.command}：メニュー「${menuTitle(action)}」／パレット「${title.get(action.command)}」`
+      );
+
+    expect(mismatched, "label か note を直して揃える（title は変えない）").toEqual(
+      []
+    );
+  });
+
+  test("例外表に、もう食い違っていない項目を残さない", () => {
+    // 揃えたのに例外へ残っていると、次にずれたとき素通りする
+    const title = titles();
+    const stale = Object.keys(EXCEPTIONS).filter((command) => {
+      const action = allActions().find((entry) => entry.command === command);
+      return !action || menuTitle(action) === title.get(command);
+    });
+
+    expect(stale, "揃った項目・消えた項目は例外表から外す").toEqual([]);
+  });
+});
+
 describe("操作メニューの印の色", () => {
   const pkg = JSON.parse(readFileSync("package.json", "utf-8")) as {
     contributes: {
@@ -605,7 +802,10 @@ describe("校正・校閲の並び", () => {
     // 毎日通るのは上のほう。相手のいる作業を上に置くと、そこを通り抜ける
     const commands = proofreadingSection().items.map((item) => item.command);
 
-    expect(commands[0]).toBe("novelai.checkTypos");
+    // 先頭はまとめ実行（設計書6.80）。1つずつ押して回る分類なので、
+    // まとめて走らせる入口を最初に見せる
+    expect(commands[0]).toBe("novelai.runProofreadingSuite");
+    expect(commands[1]).toBe("novelai.checkTypos");
     expect(commands).toContain("novelai.checkProofread");
     // 校閲ロックより前に、検知の類がすべて並んでいる
     const lockAt = commands.indexOf("novelai.toggleReviewLock");
@@ -619,6 +819,157 @@ describe("校正・校閲の並び", () => {
       expect(commands.indexOf(command), command).toBeLessThan(lockAt);
     }
   });
+});
+
+/**
+ * 投稿キット（設計書6.68）。
+ *
+ * **入口は2つとも同じ小分類に置く。** 「新話を投稿する」と、その設定
+ * （サイト・URL・投稿済みの基準線）が離れていると、URLを直したいときに
+ * どこを探せばよいのか分からない。
+ */
+describe("投稿キットの入口", () => {
+  function otherSupport() {
+    // 0.33.8で「その他支援」を2つに割った（下の describe に理由）。
+    // 投稿まわりは「投稿・書き出し」の側に揃っている
+    for (const group of ACTION_TREE) {
+      for (const entry of group.entries) {
+        if (entry.kind === "section" && entry.label === "投稿・書き出し") {
+          return entry;
+        }
+      }
+    }
+    throw new Error("「投稿・書き出し」が見つかりません");
+  }
+
+  test("「新話を投稿する」と「投稿サイトの設定」が同じ小分類に並ぶ", () => {
+    const commands = otherSupport().items.map((item) => item.command);
+
+    expect(commands).toContain("novelai.postNewEpisode");
+    expect(commands).toContain("novelai.configurePostingSites");
+    // 投稿サイト用のコピーの隣（同じ場面で使う操作をばらけさせない）
+    expect(commands.indexOf("novelai.configurePostingSites")).toBe(
+      commands.indexOf("novelai.postNewEpisode") + 1
+    );
+  });
+
+  /**
+   * ランキングの記録（設計書6.68.5）。**設定の隣に置く。**
+   * サイトごとの作品情報を入れる画面（設定）と、そこで見た順位を書き足す
+   * 操作は、同じ「投稿サイトとのやり取り」の場面で使う。
+   */
+  test("「ランキングを記録する」が、投稿サイトの設定の隣に並ぶ", () => {
+    const commands = otherSupport().items.map((item) => item.command);
+
+    expect(commands.indexOf("novelai.recordRanking")).toBe(
+      commands.indexOf("novelai.configurePostingSites") + 1
+    );
+  });
+
+  /** **AIは呼ばない。** 呼ぶのは最後の更新告知（別の操作）だけである */
+  test("どちらにもAIの印を付けない", () => {
+    for (const command of [
+      "novelai.postNewEpisode",
+      "novelai.configurePostingSites",
+      "novelai.recordRanking",
+    ]) {
+      const action = allActions().find((entry) => entry.command === command);
+      expect(action?.usesAI, command).toBeFalsy();
+    }
+  });
+});
+
+/**
+ * 「その他支援」を2つに割った（0.33.8、設計書6.17）。
+ *
+ * **きっかけは相談へ渡す説明の束である。** 小分類ひとまとまりが1つの束に
+ * なるので（`features/featureGuide.ts`）、20項目まで育った「その他支援」は
+ * 1,499字——上限1,500の1字下だった。上限を上げれば「送る量が機能数に
+ * 比例する」行き止まり（設計書6.27）へ戻るので、**小分類そのものを割った。**
+ *
+ * **線は、作者が使う場面で引いた。** 原稿を書き、整えている最中に押す操作と、
+ * 書き上がったものを外へ出す（投稿・印刷・電子書籍・資料の受け渡し）操作は、
+ * 同じ日でも違う時間に押す。「その他」という名前で1つに積んでいたのは、
+ * 分ける理由が無かったからではなく、**分ける手が入っていなかっただけ**である。
+ */
+describe("原稿づくりと投稿・書き出し", () => {
+  function writingSupport() {
+    for (const group of ACTION_TREE) {
+      for (const entry of group.entries) {
+        if (entry.kind === "section" && entry.label === "原稿づくり") {
+          return entry;
+        }
+      }
+    }
+    throw new Error("「原稿づくり」が見つかりません");
+  }
+
+  test("「その他支援」はもう無い", () => {
+    const sections = ACTION_TREE.flatMap((group) =>
+      group.entries.filter((entry) => entry.kind === "section")
+    );
+
+    expect(sections.map((section) => section.label)).not.toContain("その他支援");
+  });
+
+  test("原稿づくりには、書く・整える操作だけが並ぶ", () => {
+    const commands = writingSupport().items.map((item) => item.command);
+
+    // **書き始めの2つを先頭に置く**（設計書6.36.4）。割ってもここは動かさない
+    expect(commands[0]).toBe("novelai.resumeWriting");
+    expect(commands[1]).toBe("novelai.createEpisodePlot");
+    // 整える側（ルビ・傍点）まで、同じ小分類に残す
+    expect(commands).toContain("novelai.addRuby");
+    expect(commands).toContain("novelai.addEmphasis");
+    // 外へ出す操作は入れない
+    expect(commands).not.toContain("novelai.copyForPosting");
+    expect(commands).not.toContain("novelai.exportEpub");
+  });
+
+  test("投稿・書き出しには、外へ出す操作だけが並ぶ", () => {
+    const commands = otherSupportCommands();
+
+    // 投稿サイト用の変換が先頭。ここから「出す」場面に変わる
+    expect(commands[0]).toBe("novelai.copyForPosting");
+    for (const command of [
+      "novelai.exportPdf",
+      "novelai.exportEpub",
+      "novelai.generateSettingsDocs",
+      "novelai.exportImeDictionary",
+    ]) {
+      expect(commands, command).toContain(command);
+    }
+    expect(commands).not.toContain("novelai.addRuby");
+  });
+
+  /**
+   * IME辞書が古いままだと、抽出した語が変換に出ない（6.17.1）。
+   * **印は、その操作が入っている小分類に付ける。** 割ったときに置き去りに
+   * すると、閉じたままの小分類の中で古びていることに気づけない。
+   */
+  test("IME辞書の印は、投稿・書き出しの側に付く", () => {
+    const section = ACTION_TREE.flatMap((group) =>
+      group.entries.filter(
+        (entry) => entry.kind === "section" && entry.label === "投稿・書き出し"
+      )
+    )[0];
+
+    expect(section?.kind === "section" ? section.counter : undefined).toBe(
+      "staleImeDictionary"
+    );
+    expect(writingSupport().counter).toBeUndefined();
+  });
+
+  function otherSupportCommands(): string[] {
+    for (const group of ACTION_TREE) {
+      for (const entry of group.entries) {
+        if (entry.kind === "section" && entry.label === "投稿・書き出し") {
+          return entry.items.map((item) => item.command);
+        }
+      }
+    }
+    throw new Error("「投稿・書き出し」が見つかりません");
+  }
 });
 
 describe("ブラウザ版でだけ出す操作", () => {
@@ -679,5 +1030,226 @@ describe("ブラウザ版でだけ出す操作", () => {
     const commands = allActions().map((action) => action.command);
 
     expect(commands).toContain("novelai.diagnoseWeb");
+  });
+});
+
+/**
+ * 相談の入口を、相談の画面そのものへ移した（作者の指定、2026-09-03）。
+ *
+ * 横の細いパネルの「メインに表示」ボタンが入口になったので、詳細メニューの
+ * 項目は要らなくなった。**ただし木からは消さない**——簡単ステップメニューが
+ * コマンドIDでこの項目を引いており（`stepMenu.ts`）、消すと見出しと説明を
+ * 失う。0.29.9 で作った `hiddenFromActionList`（設計書6.56.3）で、
+ * 実体を残したまま画面にだけ出さない。
+ */
+describe("相談の項目は、木に残して画面から隠す", () => {
+  function chatPanelAction() {
+    return allActions().find(
+      (action) => action.command === "novelai.openChatPanel"
+    );
+  }
+
+  test("木には残る（簡単ステップメニューが参照している）", () => {
+    const action = chatPanelAction();
+
+    expect(action, "木から消すと簡単ステップメニューが壊れる").toBeTruthy();
+    // 補足（「大きく開く」）は note へ移した（2026-09-06）
+    expect(action?.label).toBe("AIに相談する");
+    expect(action?.note).toBe("大きく開く");
+    // 隠すのは画面だけ。動く環境かどうかの判定には混ぜない
+    expect(isItemVisibleInRuntime(action!, true)).toBe(true);
+  });
+
+  test("詳細メニューの画面には出さない", () => {
+    const action = chatPanelAction();
+
+    expect(action?.hiddenFromActionList).toBe(true);
+    expect(isItemShownInActionList(action!, true)).toBe(false);
+  });
+
+  test("「執筆AI支援」を描画すると、この項目だけが落ちる", () => {
+    const group = ACTION_TREE.find((entry) => entry.label === "執筆AI支援");
+    const has = (entries: readonly { kind: string }[]) =>
+      entries.some(
+        (entry) =>
+          entry.kind === "action" &&
+          (entry as { command: string }).command === "novelai.openChatPanel"
+      );
+
+    // 画面（getChildren）が使うのは shownEntries のほう
+    expect(has(shownEntries(group!.entries, true))).toBe(false);
+    // AIへ渡す機能の一覧・実機確認リストが使うほうには残る
+    expect(has(visibleEntries(group!.entries, true))).toBe(true);
+    // 見出しごと畳まれてはいない（ほかの操作が残っている）
+    expect(shownEntries(group!.entries, true).length).toBeGreaterThan(0);
+  });
+
+  /**
+   * 「EPUBへ書き出す」の入口を、エディターの中へ一本化した
+   * （作者の指定、2026-09-04）。書き出しボタンはEPUBエディターの中に
+   * 既にあり、外にも同じ入口があると「どちらから出すのが正しいのか」が
+   * 分からない。**コマンド自体は残す**（エディターから呼ぶため）。
+   */
+  test("EPUBの書き出しは、木に残したまま画面から隠す", () => {
+    const action = allActions().find(
+      (entry) => entry.command === "novelai.exportEpub"
+    );
+
+    expect(action, "木から消すとエディターの説明の出どころが無くなる").toBeTruthy();
+    expect(action?.hiddenFromActionList).toBe(true);
+    expect(isItemShownInActionList(action!, true)).toBe(false);
+    // 隠すのは画面だけ。動く環境かどうかの判定には混ぜない
+    expect(isItemVisibleInRuntime(action!, true)).toBe(true);
+  });
+
+  /**
+   * **コマンドパレットも塞ぐ**（0.32.0のレビュー）。詳細メニューからだけ
+   * 消しても、Ctrl+Shift+P で「EPUBを書き出す（試作）」が出てきては
+   * 「どちらから出すのが正しいのか」が分からないままである。
+   */
+  test("EPUBの書き出しは、コマンドパレットにも出さない", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+    ) as PackageManifest;
+    const hidden = manifest.contributes.menus.commandPalette
+      .filter((entry) => entry.when === "false")
+      .map((entry) => entry.command);
+
+    expect(hidden).toContain("novelai.exportEpub");
+  });
+
+  test("「相談する作品を選ぶ」はそのまま出す", () => {
+    const chooseWork = allActions().find(
+      (action) => action.command === "novelai.chooseChatWork"
+    );
+
+    expect(chooseWork, "相談する作品を選ぶが見当たらない").toBeTruthy();
+    expect(chooseWork?.hiddenFromActionList).toBeFalsy();
+  });
+});
+
+describe("開発ビルドでだけ出す操作（ストリーミング実験）", () => {
+  /**
+   * F5限定の実験（設計書6.63.1）を、押して入切できるようにした
+   * （作者の依頼、2026-09-03）。環境変数 `NOVELAI_OLLAMA_STREAM=1` を
+   * `.vscode/launch.json` へ書く道しか無く、試すまでが遠すぎた。
+   *
+   * **`browserOnly` とは扱いが違う。** あちらは定義を残して出さないだけだが、
+   * こちらは**本番ビルドでは定義ごと落ちる**（`__DEV_HELPERS__` の枝の中で
+   * 展開している）。試験は開発ビルドとして走るので、ここでは在ることを見る。
+   */
+  function toggle() {
+    return allActions().find(
+      (action) => action.command === "novelai.dev.toggleOllamaStream"
+    );
+  }
+
+  test("AIの小分類に、開発用の印つきで並ぶ", () => {
+    const item = toggle();
+
+    expect(item?.devOnly).toBe(true);
+    // 環境で消す印（browserOnly）とは別物。手元でもブラウザ版でも出す
+    expect(isItemVisibleInRuntime(item!, true)).toBe(true);
+  });
+
+  test("置き場所は「拡張機能の設定」→「AI」", () => {
+    const group = ACTION_TREE.find((entry) => entry.label === "拡張機能の設定");
+    const ai = group?.entries.find(
+      (entry) => entry.kind === "section" && entry.label === "AI"
+    );
+    const commands =
+      ai?.kind === "section" ? ai.items.map((item) => item.command) : [];
+
+    expect(commands).toContain("novelai.dev.toggleOllamaStream");
+  });
+});
+
+/**
+ * 更新告知文の置き場所（実機確認リスト F-48）。
+ *
+ * **「告知の設定」は広報支援に無い。** 0.29.7 で「拡張機能の設定」→
+ * 「作品ごとの設定」へ集約した（設計書6.56）。項目文のほうが古い。
+ */
+describe("更新告知文の置き場所", () => {
+  /** 分類→小分類の中に並ぶコマンド */
+  function itemsIn(groupLabel: string, sectionLabel: string): string[] {
+    const group = ACTION_TREE.find((entry) => entry.label === groupLabel);
+    const section = group?.entries.find(
+      (entry) => entry.kind === "section" && entry.label === sectionLabel
+    );
+    return section?.kind === "section"
+      ? section.items.map((item) => item.command)
+      : [];
+  }
+
+  test("「執筆AI支援 → 広報支援」に「更新告知文を作る」が並ぶ（実機確認リスト F-48 の代わり）", () => {
+    expect(itemsIn("執筆AI支援", "広報支援")).toContain(
+      "novelai.generateAnnouncement"
+    );
+  });
+
+  test("「告知の設定」は「拡張機能の設定 → 作品ごとの設定」にある（実機確認リスト F-48 の代わり）", () => {
+    expect(itemsIn("拡張機能の設定", "作品ごとの設定")).toContain(
+      "novelai.configureAnnouncement"
+    );
+    // 広報支援からは外してある（同じものを2か所に置かない）
+    expect(itemsIn("執筆AI支援", "広報支援")).not.toContain(
+      "novelai.configureAnnouncement"
+    );
+  });
+
+  /** 訊いて保存するだけなので、印を付けると料金が出るように見える */
+  test("「告知の設定」にはAIの印を付けない（実機確認リスト F-48 の代わり）", () => {
+    const item = allActions().find(
+      (action) => action.command === "novelai.configureAnnouncement"
+    );
+    expect(item?.usesAI).toBeFalsy();
+  });
+});
+
+/**
+ * 「テスト中」の分類は、F5（開発ホスト）でしか出さない
+ * （作者の指示、2026-08-29。実機確認リスト F-35）。
+ *
+ * 中身は実機確認リストから機械的に作った写しである。**ストアから入れた
+ * 読者に見せても、押せるものが増えるだけで意味がない。**
+ * `extension.ts` が `ExtensionMode.Development` かどうかを渡す。
+ */
+describe("「テスト中」を出すかどうか", () => {
+  const labelsOf = (showTesting: boolean): string[] =>
+    new ActionListProvider(
+      fakeRegistry(),
+      memoryStore(),
+      undefined,
+      showTesting
+    )
+      .getChildren()
+      .map((node) => (node.type === "group" ? node.group.label : ""));
+
+  test("F5では出る（実機確認リスト F-35 の代わり）", () => {
+    expect(labelsOf(true)).toContain("テスト中");
+  });
+
+  test("ストア版では出ない（実機確認リスト F-35 の代わり）", () => {
+    expect(labelsOf(false)).not.toContain("テスト中");
+  });
+
+  test("消えるのは「テスト中」だけで、ほかの分類は残る（実機確認リスト F-35 の代わり）", () => {
+    // 判定を間違えると、まともな分類まで巻き添えで消える
+    const store = labelsOf(false);
+    for (const label of ["執筆データ", "作品管理", "執筆AI支援", "ヘルプ"]) {
+      expect(store, label).toContain(label);
+    }
+    expect(store).toHaveLength(labelsOf(true).length - 1);
+  });
+
+  test("開発ホストかどうかで決めている（実機確認リスト F-35 の代わり）", () => {
+    // 既定は true なので、渡し忘れるとストア版にも出てしまう
+    const source = readFileSync(
+      new URL("../../src/extension.ts", import.meta.url),
+      "utf8"
+    );
+
+    expect(source).toContain("vscode.ExtensionMode.Development");
   });
 });

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { buildManuscriptEditorHtml } from "../../src/views/manuscriptEditorHtml";
 import { MEMO_MARKER_COLOR } from "../../src/core/sceneMemo";
+import {
+  SCRIPT_LINE_CLASSES,
+  SCRIPT_LINE_CSS,
+  SCRIPT_LINE_RULES,
+} from "../../src/core/scriptLines";
 
 /**
  * 原稿エディタの画面（設計書6.25）。
@@ -111,8 +116,94 @@ describe("日本語入力を壊さない", () => {
   });
 
   it("自分が送った本文が返ってきただけなら、触らない", () => {
-    expect(code).toContain("lastSent");
-    expect(code).toContain("if (text === lastSent) return;");
+    // 最後の1件（lastSent）ではなく、最近送ったもの全部を返事として扱う
+    expect(code).toContain("if (isOwnEcho(text)) return;");
+    expect(code).toContain("rememberSent(current);");
+  });
+
+  /**
+   * 作者の報告（2026-09-06「変換時に入力が消える。文字の下に点線が残る」）。
+   * 拡張機能は120ミリ秒まとめて「その時点の文書」を送り返すので、語Aの返事が
+   * 語Bを送ったあとに届くことがある。Aを「外からの書き換え」と見なすと、
+   * 打っている面をAへ戻して**Bが消える**。
+   */
+  it("いくつか前に送った本文の返事も、自分のものとして見分ける", () => {
+    const start = code.indexOf("const sentHistory = [];");
+    const end = code.indexOf("/** 変換中に外から届いた本文");
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const block = code.slice(start, end);
+    const run = new Function(
+      "let lastSent = null;" +
+        block +
+        "return { rememberSent, isOwnEcho, forgetSent, history: sentHistory, last: () => lastSent };"
+    )() as {
+      rememberSent: (text: string) => void;
+      isOwnEcho: (text: string) => boolean;
+      forgetSent: () => void;
+      history: string[];
+      last: () => string | null;
+    };
+    run.rememberSent("語A");
+    run.rememberSent("語A語B");
+    // lastSent は語Bなのに、届くのは語Aの返事——これを外からの書き換えにしない
+    expect(run.last()).toBe("語A語B");
+    expect(run.isOwnEcho("語A")).toBe(true);
+    expect(run.isOwnEcho("語A語B")).toBe(true);
+    // 本当に外から来たものは見分ける
+    expect(run.isOwnEcho("別の窓で直した本文")).toBe(false);
+    // 覚えるのは16件まで（古いものから忘れる）
+    for (let i = 0; i < 20; i++) run.rememberSent(`本文${i}`);
+    expect(run.history.length).toBe(16);
+    expect(run.isOwnEcho("語A")).toBe(false);
+    expect(run.isOwnEcho("本文19")).toBe(true);
+  });
+
+  /**
+   * レビューの指摘（2026-09-06）：一致しても消費しないと、別の窓の取り消しや
+   * 過去の版への復元で**本当に外から同じ文へ戻された**ときまで「自分の返事」
+   * と見なし、画面を古いままにして次の1打鍵で外の変更を書き戻す
+   */
+  it("返事に当たった履歴は、その1件とそれより古いものを忘れる", () => {
+    const start = code.indexOf("const sentHistory = [];");
+    const end = code.indexOf("/** 変換中に外から届いた本文");
+    const block = code.slice(start, end);
+    const run = new Function(
+      "let lastSent = null;" +
+        block +
+        "return { rememberSent, isOwnEcho, forgetSent, history: sentHistory };"
+    )() as {
+      rememberSent: (text: string) => void;
+      isOwnEcho: (text: string) => boolean;
+      forgetSent: () => void;
+      history: string[];
+    };
+    run.rememberSent("T1");
+    run.rememberSent("T2");
+    run.rememberSent("T3");
+    // T2 の返事が届いた——T2 と、それより古い T1 は忘れる（T3 は残る）
+    expect(run.isOwnEcho("T2")).toBe(true);
+    expect(run.history).toEqual(["T3"]);
+    // 外から T1 へ戻された（別の窓の Ctrl+Z）——もう自分の返事ではない
+    expect(run.isOwnEcho("T1")).toBe(false);
+    // 外の本文を受け入れたら、残りも忘れる
+    run.forgetSent();
+    expect(run.isOwnEcho("T3")).toBe(false);
+  });
+
+  it("外からの本文を受け入れるときは、返事の照合をやり直す（forgetSent）", () => {
+    const take = code.slice(code.indexOf("function takeIncoming("));
+    expect(take.slice(0, 500)).toContain("forgetSent();");
+    const composeTake = code.slice(code.indexOf("function composeTakeIncoming("));
+    expect(composeTake.slice(0, 700)).toContain("forgetSent();");
+  });
+
+  it("変換中に届いた自分の返事は、待たせもしない（確定後に古い本文で戻さない）", () => {
+    const take = code.slice(code.indexOf("function takeIncoming("));
+    const head = take.slice(0, 400);
+    // 返事の見分けが composing の判定より前にある
+    expect(head.indexOf("isOwnEcho(text)")).toBeGreaterThan(0);
+    expect(head.indexOf("isOwnEcho(text)")).toBeLessThan(head.indexOf("if (composing)"));
   });
 
   it("変換が確定したら、待たせていた書き換えを片づける", () => {
@@ -861,5 +952,37 @@ describe("画面のJSの書き方", () => {
     const found = html.match(/<script nonce="NONCE123">([\s\S]*?)<\/script>/);
     expect(found, "スクリプトが見つからない").toBeTruthy();
     expect(found![1].includes("`")).toBe(false);
+  });
+});
+
+/**
+ * 脚本の組み方（設計書6.70）。
+ *
+ * **組み方の指定は core/scriptLines.ts の1か所**にあり、画面と紙
+ * （PDF。core/printHtml.ts）が同じ文字列を埋め込む。
+ */
+describe("脚本の組み方", () => {
+  const script = buildManuscriptEditorHtml(
+    "NONCE123",
+    "vscode-resource:",
+    "script"
+  );
+
+  it("脚本のときだけ、行の組み方の指定が入る", () => {
+    expect(script).toContain(SCRIPT_LINE_CSS);
+    expect(html).not.toContain(SCRIPT_LINE_CSS);
+  });
+
+  /** 判定の規則も写しではなく、そのまま埋め込まれている */
+  it("行の見分け方も、写しではなく埋め込まれている", () => {
+    expect(script).toContain(JSON.stringify(SCRIPT_LINE_RULES));
+    expect(script).toContain(JSON.stringify(SCRIPT_LINE_CLASSES));
+  });
+
+  /** タイプを渡さない画面（これまでの呼び方）は、脚本以外と同じ */
+  it("脚本以外では、これまでと同じ画面", () => {
+    expect(buildManuscriptEditorHtml("NONCE123", "vscode-resource:", "memo")).toBe(
+      html
+    );
   });
 });

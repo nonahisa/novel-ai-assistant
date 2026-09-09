@@ -1,8 +1,8 @@
 {
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
-  "description": "「設定が前の話と食い違っていないか不安」「誤字脱字の見直しがつらい」「AIに原稿を触られたくない」——小説を書く人の困りごとを引き受けるVSCode拡張機能です。本文から設定資料を自動で作り、矛盾や誤字脱字を調べ、執筆量を記録します。AIは提案するだけで、原稿は書き換えません。無料の手元AI（Ollama / LM Studio）だけでも使え、その場合、原稿はパソコンの外へ出ません。",
-  "version": "0.29.10",
+  "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを引き受けるVSCode拡張機能で、AIは提案するだけで原稿は書き換えません（無料の手元AIだけでも使えます）。※現在テスト中です。",
+  "version": "0.44.0",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -36,6 +36,22 @@
   "activationEvents": [],
   "main": "./dist/extension.js",
   "browser": "./dist/browser-extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "信頼していないフォルダーでは、AIの接続先・実行ファイルと、作者／編集者の切り替えの設定を読みません（お使いのパソコンの設定のほうを使います）。原稿の表示や文字数はそのまま使えます。",
+      "restrictedConfigurations": [
+        "novelai.mode",
+        "novelai.ollama.endpoint",
+        "novelai.ollama.executablePath",
+        "novelai.lmstudio.endpoint",
+        "novelai.lmstudio.cliPath",
+        "novelai.openai.endpoint",
+        "novelai.gemini.endpoint",
+        "novelai.sakura.endpoint"
+      ]
+    }
+  },
   "contributes": {
     "customEditors": [
       {
@@ -145,6 +161,12 @@
         "icon": "$(list-tree)"
       },
       {
+        "command": "novelai.openPlotMode",
+        "title": "プロットモードを開く",
+        "category": "小説執筆",
+        "icon": "$(book)"
+      },
+      {
         "command": "novelai.setPlotBasics",
         "title": "形式とジャンルを決める",
         "category": "小説執筆",
@@ -167,6 +189,12 @@
         "title": "AIに相談する（大きく開く）",
         "category": "小説執筆",
         "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "novelai.setAdvicePolicy",
+        "title": "相談の助言方針を決める（診断）",
+        "category": "小説執筆",
+        "icon": "$(person)"
       },
       {
         "command": "novelai.openManual",
@@ -268,10 +296,32 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.showTuningStats",
+        "title": "AIチューニングの実測一覧を表示",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.dev.toggleOllamaStream",
+        "title": "Ollamaのストリーミング受信を切り替える（実験）",
+        "category": "小説執筆"
+      },
+      {
         "command": "novelai.exportPdf",
         "title": "PDF出力（印刷用）",
         "category": "小説執筆",
         "icon": "$(file-pdf)"
+      },
+      {
+        "command": "novelai.exportEpub",
+        "title": "EPUBを書き出す（試作）",
+        "category": "小説執筆",
+        "icon": "$(book)"
+      },
+      {
+        "command": "novelai.openEpubEditor",
+        "title": "EPUBエディター（試作）",
+        "category": "小説執筆",
+        "icon": "$(book)"
       },
       {
         "command": "novelai.exportImeDictionary",
@@ -370,6 +420,12 @@
         "icon": "$(globe)"
       },
       {
+        "command": "novelai.runProofreadingSuite",
+        "title": "校正をまとめて実行",
+        "category": "小説執筆",
+        "icon": "$(checklist)"
+      },
+      {
         "command": "novelai.checkTypos",
         "title": "誤字脱字を検知",
         "category": "小説執筆",
@@ -448,6 +504,12 @@
         "icon": "$(checklist)"
       },
       {
+        "command": "novelai.checkEpisodePlot",
+        "title": "単話プロットを検査",
+        "category": "小説執筆",
+        "icon": "$(check-all)"
+      },
+      {
         "command": "novelai.checkNotation",
         "title": "表記ゆれを検知",
         "category": "小説執筆",
@@ -524,6 +586,12 @@
         "title": "設定資料集を出力（AIを使わない）",
         "category": "小説執筆",
         "icon": "$(sync)"
+      },
+      {
+        "command": "novelai.exportSettingsForAudience",
+        "title": "提供先を選んで設定資料を書き出す",
+        "category": "小説執筆",
+        "icon": "$(mail)"
       },
       {
         "command": "novelai.gitSync",
@@ -694,6 +762,12 @@
         "icon": "$(markdown)"
       },
       {
+        "command": "novelai.convertDocxToMarkdown",
+        "title": "Word の原稿を .md にする（docx をまとめて変換）",
+        "category": "小説執筆",
+        "icon": "$(file-code)"
+      },
+      {
         "command": "novelai.openVertical",
         "title": "縦書きで開く",
         "category": "小説執筆",
@@ -727,6 +801,48 @@
         "command": "novelai.importRuby",
         "title": "投稿サイトのルビを取り込む",
         "icon": "$(arrow-down)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.dictationClean",
+        "title": "口述で入れた文を整える",
+        "icon": "$(mic)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.postNewEpisode",
+        "title": "新話を投稿する",
+        "icon": "$(rocket)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.postThisEpisode",
+        "title": "この話を投稿する",
+        "icon": "$(rocket)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.configurePostingSites",
+        "title": "投稿サイトの設定",
+        "icon": "$(settings-gear)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.recordRanking",
+        "title": "ランキングを記録する",
+        "icon": "$(graph)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.importReaderStats",
+        "title": "読者の反応を貼り付けて取り込む",
+        "icon": "$(clippy)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.recordReaderStats",
+        "title": "読者の反応を手入力する",
+        "icon": "$(heart)",
         "category": "小説執筆"
       },
       {
@@ -805,6 +921,66 @@
         "command": "novelai.renameWithSubtitle",
         "title": "ファイル名にサブタイトルを付ける",
         "icon": "$(edit)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.addWorkMemo",
+        "title": "メモを追加",
+        "icon": "$(note)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.removeWorkMemo",
+        "title": "メモを削除（ごみ箱へ）",
+        "icon": "$(trash)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.transferMemoToWork",
+        "title": "このメモを作品へ移管",
+        "icon": "$(arrow-right)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.startChapter",
+        "title": "ここから章を始める",
+        "icon": "$(folder)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.renameChapter",
+        "title": "章の名前を変える",
+        "icon": "$(edit)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.removeChapter",
+        "title": "章を外す",
+        "icon": "$(close)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.proposeChapters",
+        "title": "章立てをAIに提案させる",
+        "icon": "$(list-tree)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.suggestChapterName",
+        "title": "この章の名前の案を出す",
+        "icon": "$(sparkle)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.insertEpisodeBefore",
+        "title": "この話の前に挿入",
+        "icon": "$(add)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.removeEpisodeAndRenumber",
+        "title": "この話を削除（話数を詰める）",
+        "icon": "$(trash)",
         "category": "小説執筆"
       },
       {
@@ -905,88 +1081,170 @@
           "group": "1_solo@1"
         }
       ],
-      "editor/title": [
-        {
-          "command": "novelai.openChat",
-          "title": "横のパネルへ移動",
-          "when": "activeWebviewPanelId == novelai.chatPanel",
-          "group": "1_chat@1"
-        }
-      ],
       "view/item/context": [
         {
           "command": "novelai.addEpisode",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
           "group": "inline"
         },
         {
           "command": "novelai.showWritingStats",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
           "group": "1_stats@2"
         },
         {
+          "command": "novelai.openPlotMode",
+          "when": "view == novelai.works && viewItem =~ /^work-(novel|script|unset)$/",
+          "group": "1_stats@1"
+        },
+        {
           "command": "novelai.openSettingsPanel",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-(novel|script|unset)$/",
           "group": "1_stats@3"
         },
         {
           "command": "novelai.extractSettings",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-(novel|script|unset)$/",
           "group": "1_stats@4"
         },
         {
           "command": "novelai.generateSynopses",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-(novel|script|unset)$/",
           "group": "1_stats@5"
         },
         {
+          "command": "novelai.proposeChapters",
+          "when": "view == novelai.works && viewItem =~ /^work-(novel|script|unset)$/",
+          "group": "1_stats@6"
+        },
+        {
+          "command": "novelai.postNewEpisode",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
+          "group": "1_stats@7"
+        },
+        {
+          "command": "novelai.configurePostingSites",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
+          "group": "1_stats@8"
+        },
+        {
+          "command": "novelai.recordRanking",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
+          "group": "1_stats@9"
+        },
+        {
+          "command": "novelai.importReaderStats",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
+          "group": "1_stats@10"
+        },
+        {
+          "command": "novelai.recordReaderStats",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
+          "group": "1_stats@11"
+        },
+        {
+          "command": "novelai.addWorkMemo",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
+          "group": "1_stats@12"
+        },
+        {
           "command": "novelai.gitSync",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
           "group": "2_open@1"
         },
         {
           "command": "novelai.openWorkFolder",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
           "group": "2_open@2"
         },
         {
           "command": "novelai.removeWork",
-          "when": "view == novelai.works && viewItem == work",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
           "group": "9_danger"
         },
         {
           "command": "novelai.checkTyposForFile",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "1_actions@1"
         },
         {
           "command": "novelai.splitCollectedFile",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-(novel|script|unset)$/",
           "group": "1_actions@2"
         },
         {
           "command": "novelai.convertToMarkdown",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "1_actions@3"
         },
         {
+          "command": "novelai.postThisEpisode",
+          "when": "view == novelai.works && viewItem =~ /^episode-/",
+          "group": "2_copy@0"
+        },
+        {
           "command": "novelai.copySubtitle",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "2_copy@1"
         },
         {
           "command": "novelai.copyBodyForPosting",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "2_copy@2"
         },
         {
           "command": "novelai.renameWithSubtitle",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-(novel|script|unset)$/",
           "group": "2_copy@3"
         },
         {
+          "command": "novelai.startChapter",
+          "when": "view == novelai.works && viewItem =~ /^episode-(novel|script|unset)$/",
+          "group": "3_chapter@1"
+        },
+        {
+          "command": "novelai.insertEpisodeBefore",
+          "when": "view == novelai.works && viewItem =~ /^episode-(novel|script|unset)$/",
+          "group": "4_renumber@1"
+        },
+        {
+          "command": "novelai.removeEpisodeAndRenumber",
+          "when": "view == novelai.works && viewItem =~ /^episode-(novel|script|unset)$/",
+          "group": "4_renumber@2"
+        },
+        {
           "command": "novelai.deleteEpisodeFile",
-          "when": "view == novelai.works && viewItem == episode",
+          "when": "view == novelai.works && viewItem =~ /^episode-/",
+          "group": "9_danger"
+        },
+        {
+          "command": "novelai.renameChapter",
+          "when": "view == novelai.works && viewItem =~ /^chapter-(novel|script|unset)$/",
+          "group": "3_chapter@1"
+        },
+        {
+          "command": "novelai.suggestChapterName",
+          "when": "view == novelai.works && viewItem =~ /^chapter-(novel|script|unset)$/",
+          "group": "3_chapter@2"
+        },
+        {
+          "command": "novelai.removeChapter",
+          "when": "view == novelai.works && viewItem =~ /^chapter-(novel|script|unset)$/",
+          "group": "9_danger"
+        },
+        {
+          "command": "novelai.transferMemoToWork",
+          "when": "view == novelai.works && viewItem =~ /^episode-memo$/",
+          "group": "1_actions@4"
+        },
+        {
+          "command": "novelai.addWorkMemo",
+          "when": "view == novelai.works && viewItem =~ /^memoFolder-/",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "novelai.removeWorkMemo",
+          "when": "view == novelai.works && viewItem =~ /^memoFile-/",
           "group": "9_danger"
         }
       ],
@@ -1020,9 +1278,18 @@
           "command": "novelai.copyForPosting",
           "when": "resourceExtname == .md",
           "group": "1_novelai_ruby"
+        },
+        {
+          "command": "novelai.checkEpisodePlot",
+          "when": "resourceDirname =~ /episode-plots$/ && resourceExtname == .md",
+          "group": "1_novelai_ruby"
         }
       ],
       "commandPalette": [
+        {
+          "command": "novelai.dev.toggleOllamaStream",
+          "when": "false"
+        },
         {
           "command": "novelai.soloWorks",
           "when": "false"
@@ -1053,6 +1320,50 @@
         },
         {
           "command": "novelai.deleteEpisodeFile",
+          "when": "false"
+        },
+        {
+          "command": "novelai.addWorkMemo",
+          "when": "false"
+        },
+        {
+          "command": "novelai.removeWorkMemo",
+          "when": "false"
+        },
+        {
+          "command": "novelai.transferMemoToWork",
+          "when": "false"
+        },
+        {
+          "command": "novelai.startChapter",
+          "when": "false"
+        },
+        {
+          "command": "novelai.renameChapter",
+          "when": "false"
+        },
+        {
+          "command": "novelai.removeChapter",
+          "when": "false"
+        },
+        {
+          "command": "novelai.suggestChapterName",
+          "when": "false"
+        },
+        {
+          "command": "novelai.postThisEpisode",
+          "when": "false"
+        },
+        {
+          "command": "novelai.exportEpub",
+          "when": "false"
+        },
+        {
+          "command": "novelai.insertEpisodeBefore",
+          "when": "false"
+        },
+        {
+          "command": "novelai.removeEpisodeAndRenumber",
           "when": "false"
         },
         {
@@ -1088,7 +1399,31 @@
           "when": "true"
         },
         {
+          "command": "novelai.postNewEpisode",
+          "when": "true"
+        },
+        {
+          "command": "novelai.configurePostingSites",
+          "when": "true"
+        },
+        {
+          "command": "novelai.recordRanking",
+          "when": "true"
+        },
+        {
+          "command": "novelai.importReaderStats",
+          "when": "true"
+        },
+        {
+          "command": "novelai.recordReaderStats",
+          "when": "true"
+        },
+        {
           "command": "novelai.generateSettingsDocs",
+          "when": "true"
+        },
+        {
+          "command": "novelai.exportSettingsForAudience",
           "when": "true"
         },
         {
@@ -1186,9 +1521,9 @@
         },
         "novelai.manuscriptEditor.readAloudRate": {
           "type": "number",
-          "default": 1.0,
+          "default": 1,
           "minimum": 0.5,
-          "maximum": 2.0,
+          "maximum": 2,
           "description": "読み上げの速さ。1が標準です（原稿の画面の「読み上げ」の列でも、その場だけ変えられます）。"
         },
         "novelai.logs.retentionDays": {
@@ -1262,11 +1597,13 @@
         },
         "novelai.ollama.endpoint": {
           "type": "string",
+          "scope": "machine",
           "default": "http://localhost:11434",
           "markdownDescription": "OllamaのエンドポイントURL\n\n[Ollamaのセットアップ…](command:novelai.setupOllama)"
         },
         "novelai.ollama.executablePath": {
           "type": "string",
+          "scope": "machine",
           "default": "",
           "markdownDescription": "`ollama` 実行ファイルの場所。**空なら自動検出**します（PATHと既定のインストール先を探索）。拡張機能からOllamaを起動するときにだけ使います。自動検出に失敗する場合のみ指定してください。\n\n[ファイルを選択…](command:novelai.selectOllamaExecutable)"
         },
@@ -1276,11 +1613,16 @@
           "minimum": 0,
           "markdownDescription": "AIへ渡すコンテキスト長（トークン）。**0で自動**（モデルの上限と16384の小さい方）。Ollamaは既定値が小さく、指定しないと入力が切り捨てられます。大きくするとメモリ消費が増えます。"
         },
+        "novelai.ollama.streaming": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Ollama の応答を**流しながら**受け取り、相談パネルの「考えています…」に考えている中身を流します。切ると、生成が終わってからまとめて受け取ります（長い生成は通信の待ち時間で切られることがあります）。"
+        },
         "novelai.ollama.timeoutSeconds": {
           "type": "number",
-          "default": 180,
+          "default": 300,
           "minimum": 10,
-          "description": "1回のAI呼び出しのタイムアウト（秒）。大きいモデルでは延ばしてください。"
+          "description": "1回のAI呼び出しのタイムアウト（秒）。非力なマシンのCPU実行でも1回を切らないよう既定を300秒にしています。大きいモデルではさらに延ばしてください。"
         },
         "novelai.modelTuning": {
           "type": "object",
@@ -1313,6 +1655,7 @@
         },
         "novelai.openai.endpoint": {
           "type": "string",
+          "scope": "machine",
           "default": "https://api.openai.com/v1",
           "description": "ChatGPT（OpenAI API）のエンドポイントURL。互換サービスを使う場合のみ変更してください。"
         },
@@ -1330,6 +1673,7 @@
         },
         "novelai.gemini.endpoint": {
           "type": "string",
+          "scope": "machine",
           "default": "https://generativelanguage.googleapis.com/v1beta",
           "description": "GeminiのエンドポイントURL。通常は変更不要です。"
         },
@@ -1341,6 +1685,7 @@
         },
         "novelai.lmstudio.endpoint": {
           "type": "string",
+          "scope": "machine",
           "default": "http://localhost:1234/v1",
           "markdownDescription": "LM StudioのローカルサーバーのURL。LM Studioの「Developer」画面でサーバーを開始したときに表示される値に合わせます。通常は変更不要です。\n\n[LM Studioのセットアップ…](command:novelai.setupLmStudio)"
         },
@@ -1352,12 +1697,13 @@
         },
         "novelai.lmstudio.timeoutSeconds": {
           "type": "number",
-          "default": 180,
+          "default": 300,
           "minimum": 10,
-          "description": "LM Studioの1回の呼び出しのタイムアウト（秒）。手元のPCで動かすため、大きなモデルでは長めに必要です。"
+          "description": "LM Studioの1回の呼び出しのタイムアウト（秒）。手元のPCで動かすため、非力なマシンのCPU実行でも1回を切らないよう既定を300秒にしています。大きなモデルではさらに長めに必要です。"
         },
         "novelai.lmstudio.cliPath": {
           "type": "string",
+          "scope": "machine",
           "default": "",
           "markdownDescription": "LM Studio のコマンド（lms）の場所。空なら `~/.lmstudio/bin` と PATH を探します。"
         },
@@ -1366,6 +1712,12 @@
           "default": 0,
           "minimum": 0,
           "markdownDescription": "拡張機能がモデルを読み込むときに指定する文脈の長さ。**0 ならモデルの最大**まで使います。大きいほどメモリを使います。"
+        },
+        "novelai.epub.ornamentFolder": {
+          "type": "string",
+          "scope": "machine",
+          "default": "",
+          "markdownDescription": "EPUBの飾り（目次・中表紙・奥付）を追加で読み込むフォルダーの絶対パス。この中の `*.svg` が、すべての作品の「飾り」の選択肢に出ます。作品ごとに足すときは `設定/書籍/飾り/` に置いてください（そちらはGitで同期されます）。\n\n組み込みの飾りと同じ名前のファイルは使いません（組み込みは上書きできません）。取り込めないSVG（`<script>`・外部参照など）は理由を添えて外します。"
         },
         "novelai.chunkSizeMode": {
           "type": "string",
@@ -1429,6 +1781,7 @@
         },
         "novelai.sakura.endpoint": {
           "type": "string",
+          "scope": "machine",
           "default": "https://api.ai.sakura.ad.jp/v1",
           "description": "さくらのAI EngineのAPIの宛先。OpenAI互換の口を使います。通常は変える必要がありません。"
         },
@@ -1446,6 +1799,7 @@
         },
         "novelai.mode": {
           "type": "string",
+          "scope": "machine",
           "enum": [
             "author",
             "editor"
@@ -1459,9 +1813,7 @@
         }
       }
     },
-    "markdown": {
-      "markdownItPlugins": true
-    },
+    "markdown.markdownItPlugins": true,
     "colors": [
       {
         "id": "novelai.pendingBadge",
@@ -1502,6 +1854,7 @@
     "prepackage:vsix": "npm run check:release",
     "package:vsix": "node scripts/packageVsix.mjs",
     "verify:vsix": "node scripts/verifyVsix.mjs",
+    "release:github": "node scripts/releaseGithub.mjs",
     "build:icon": "node scripts/buildIcon.mjs",
     "publish:marketplace": "node scripts/publishMarketplace.mjs"
   },
@@ -1518,8 +1871,10 @@
   },
   "dependencies": {
     "diff": "^8.0.4",
+    "fflate": "^0.8.3",
     "iconv-lite": "^0.7.3",
-    "path-browserify": "^1.0.1"
+    "path-browserify": "^1.0.1",
+    "undici": "^7.29.0"
   },
   "allowScripts": {
     "esbuild@0.24.2": true

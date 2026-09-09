@@ -1,9 +1,11 @@
 import { describe, expect, test } from "vitest";
 import {
-  bodyForPosting,
   extractEpisodeParts,
+  sourceForPostingCopy,
   nameWithSubtitle,
 } from "../../src/core/episodeCopy";
+import { convertForPosting } from "../../src/core/postingConvert";
+import type { PostingCopyTarget } from "../../src/core/postingCopyTargets";
 import {
   formatChapterLabel,
   stripChapterLabel,
@@ -55,26 +57,74 @@ describe("サブタイトルと本文を取り出す", () => {
   });
 });
 
+/**
+ * 投稿サイト用の本文（設計書6.84）。
+ *
+ * **変換そのものは `convertForPosting` が1つだけ持つ**（0.37.5に寄せた）。
+ * ここに記法だけの変換を残しておくと、それを呼ぶ入口が「noteだけ整えない
+ * 経路」になる——実際に投稿キットがそうなっていた。
+ */
 describe("投稿サイト用の本文", () => {
+  /** 記法だけを見る貼り付け先。`site` を持たせない（noteの整えを通さない） */
+  function notation(
+    style: PostingCopyTarget["style"],
+    emphasis: PostingCopyTarget["emphasis"] = "kakuyomu"
+  ): PostingCopyTarget {
+    return { label: "試験", detail: "", style, emphasis, registered: false };
+  }
+
   test("ルビを投稿サイトの記法へ直す", () => {
     const parts = extractEpisodeParts(WITH_HEADER, null);
 
-    expect(bodyForPosting(parts.body, "site")).toContain("｜森《もり》");
+    expect(convertForPosting(parts.body, notation("site")).text).toContain(
+      "｜森《もり》"
+    );
   });
 
   test("HTMLでも出せる", () => {
-    expect(bodyForPosting("{森|もり}", "html")).toBe(
+    expect(convertForPosting("{森|もり}", notation("html")).text).toBe(
       "<ruby>森<rt>もり</rt></ruby>"
     );
   });
 
-  test("前後の空行を落とす", () => {
+  test("1話まるごとの経路では、前後の空行を落とす", () => {
     // **投稿欄の先頭に空行が入ると、1行目が空いた状態で公開される**
-    expect(bodyForPosting("\n\n本文。\n\n", "site")).toBe("本文。");
+    expect(
+      convertForPosting("\n\n本文。\n\n", notation("site"), {
+        trimEdges: true,
+      }).text
+    ).toBe("本文。");
   });
 
   test("ルビが無ければ、本文はそのまま", () => {
-    expect(bodyForPosting("ただの本文。", "site")).toBe("ただの本文。");
+    expect(convertForPosting("ただの本文。", notation("site")).text).toBe(
+      "ただの本文。"
+    );
+  });
+
+  /**
+   * **傍点はサイトによって書き方が違う**（設計書6.12.4）。
+   * なろう・アルファポリスへ貼る本文にカクヨムの `《《…》》` が出ると、
+   * 読者の目の前に記号が並ぶ。
+   */
+  describe("傍点の貼り付け先", () => {
+    test("なろう・アルファポリスはルビで代用する", () => {
+      expect(
+        convertForPosting("これは{{大事}}だ", notation("site", "narou")).text
+      ).toBe("これは｜大事《・・》だ");
+    });
+
+    test("カクヨム・ネオページは専用の記法", () => {
+      expect(
+        convertForPosting("これは{{大事}}だ", notation("site", "kakuyomu")).text
+      ).toBe("これは《《大事》》だ");
+    });
+
+    test("noteへ貼る括弧書きでは、傍点の印だけを落とす", () => {
+      expect(
+        convertForPosting("{森|もり}と{{大事}}", notation("paren")).text
+      ).toBe("森（もり）と大事");
+    });
   });
 });
 
@@ -165,6 +215,33 @@ describe("投稿サイトの題から話数を落としてから足す", () => {
     const stripped = stripChapterLabel("転生", formatChapterLabel(episode));
     expect(nameWithSubtitle("episode_0015.txt", null, stripped)).toBe(
       "episode_0015_転生.txt"
+    );
+  });
+});
+
+/**
+ * 「投稿サイト用に変換してコピー」で、何を変換にかけるか（設計書6.12.1）。
+ *
+ * **選択していないときに、ヘッダーごとコピーしていた**（2026-09-06、
+ * 作者の裁定）。カクヨム形式のファイルは頭に【タイトル】〜【本文】が
+ * 付いており、それを投稿欄へ貼ると、題名の行から二重に入ってしまう。
+ */
+describe("コピーする元を決める", () => {
+  test("選んでいなければ、ヘッダーを外した本文だけ", () => {
+    const source = sourceForPostingCopy(WITH_HEADER);
+
+    expect(source).toBe("気がつくと{森|もり}の中だった。");
+    expect(source).not.toContain("【タイトル】");
+  });
+
+  test("ヘッダーが無ければ、これまでどおり全文", () => {
+    expect(sourceForPostingCopy("ただの本文。")).toBe("ただの本文。");
+  });
+
+  test("選んであれば、選んだ範囲だけ", () => {
+    // ヘッダーごと選ぶのは作者の意思。**選択には手を入れない**
+    expect(sourceForPostingCopy(WITH_HEADER, "【タイトル】\n転生")).toBe(
+      "【タイトル】\n転生"
     );
   });
 });

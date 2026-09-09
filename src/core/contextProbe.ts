@@ -306,11 +306,27 @@ export function nextProbeSize(
       : Math.min(state.high, state.current);
 
   if (high === undefined) {
-    // まだ一度も落ちていない。倍にして伸ばす
-    const doubled = Math.min(low * 2, state.ceilingChars);
+    /*
+      **まだ一度も落ちていない。次は公称値まで一気に跳ぶ**（設計書6.59。
+      作者の提案「小さな数字からはじめるのではなく、公称値から始めることは
+      できるでしょうか？」2026-09-01）。
+
+      以前は倍々に伸ばしていた（4,000 → 8,000 → …）。申告どおり読める
+      モデルでは、**上限に届くまでに6回も無駄に送っていた**——作者の実測では
+      4,000から128,000まで全部「両方」で、7回目にようやく上限へ着いた。
+
+      **1回目だけは小さいまま残す。** ここを飛ばして最初から公称値を送ると、
+      失敗したときに「長すぎた」のか「鍵が違う・残高が無い・繋がらない」のかを
+      **見分けられない**（`countErrorAsTooLong` は「一度でも通ったこと」を
+      条件にしている）。小さい1回は、その確認を兼ねている。
+
+      跳んで落ちたら、あとは二分探索が間を詰める。**悪いほうへ転んでも
+      回数はほぼ変わらず、良いほうへ転べば5回減る。**
+    */
+    const next = state.ceilingChars;
     // 上限に届いていれば、これ以上は測れない（測れる範囲では全部読めた）
-    if (doubled <= low) return undefined;
-    return { ceilingChars: state.ceilingChars, low, high, current: doubled };
+    if (next <= low) return undefined;
+    return { ceilingChars: state.ceilingChars, low, high, current: next };
   }
 
   // 幅が十分に狭まったら終わり。これ以上は呼び出し回数に見合わない

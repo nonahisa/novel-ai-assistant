@@ -24,7 +24,11 @@ import {
 } from "../core/chunker";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
-import { describeChunkSettings, readChunkSettings } from "./chunkSettings";
+import {
+  describeChunkSettings,
+  readChunkSettings,
+  resolveModelInfoOrWarn,
+} from "./chunkSettings";
 import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
 import {
   TYPO_CHECK_SCHEMA,
@@ -35,6 +39,7 @@ import {
 } from "../prompts/typoCheck";
 import {
   parseTypoCheckResult,
+  summarizeRejectReasons,
   validateTypoIssues,
   type AcceptedTypoIssue,
 } from "../core/typoCheckValidation";
@@ -51,9 +56,17 @@ import {
   createLocationStore,
   createOrganizationStore,
 } from "../core/abilityStore";
-import { withCancellableProgress, type CheckProgress } from "../views/progress";
+import { type CheckProgress } from "../views/progress";
+import type { SuiteAwareOptions } from "../core/proofreadingSuite";
+import type { ScopeChoice } from "../core/typoCheckScope";
+import { chooseScope } from "./typoCheckScope";
+import { withAiTurnProgress } from "./aiTurn";
 import { logFailure, logStep, useLogFile } from "../core/logger";
-import { resolveMaxOutputTokens } from "../ai/outputLimit";
+import {
+  resolveMaxOutputTokens,
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import {
   rateLimitWaitMs,
   describeRateLimitGiveUp,
@@ -66,6 +79,7 @@ import {
   readNarrativePerson,
 } from "../core/workStyle";
 import type { KeepWord } from "../models/keepWord";
+import { confirmRun, notifyDone } from "../views/notify";
 
 /**
  * 誤字脱字検知（P-09）のオーケストレーション。
@@ -84,6 +98,13 @@ export interface TypoCheckIssue extends AcceptedTypoIssue {
 export interface TypoCheckRunResult {
   issues: TypoCheckIssue[];
   rejectedCount: number;
+  /**
+   * 前回適用済みの直しと同じだったため落とした件数（設計書6.8）。
+   *
+   * **「除外」に混ぜない。** 混ぜると、作者が自分で当てた直しまで
+   * 「AIが本文と合わない指摘をした」と読めてしまう。通知でも別立てにする。
+   */
+  alreadyAppliedCount: number;
   failedChunks: number;
   /**
    * 送るはずだったチャンクの総数。
@@ -144,7 +165,7 @@ interface SplitSource {
  */
 const DICTIONARY_LIMIT = 200;
 
-export interface CheckTyposOptions {
+export interface CheckTyposOptions extends SuiteAwareOptions {
   /**
    * 対象を絞り込むファイルパス。指定すると、そのファイルだけを検知する
    * （作品一覧で1話を右クリックしたときなど）。省略すると作品全体が対象。
@@ -159,6 +180,35 @@ export interface CheckTyposOptions {
   onProgress?: CheckProgress;
 }
 
+/**
+ * 対象範囲（「前回から書いた分だけ」か「全体」か）を決める。
+ *
+ * **まとめ実行では聞かない**（設計書6.80）。量と料金の確認を1枚へまとめた
+ * のに、そのあと誤字脱字だけが選択画面を出すと、**作者はボタン1回で
+ * 放置できない**——まとめ実行の目的そのものが果たせなくなる。
+ *
+ * 飛ばすときは**「全体」を選んだことにする。** 処理済みのチャンクは
+ * キャッシュが飛ばすので送る量はほとんど変わらず、逆に「書いた分だけ」を
+ * 勝手に選ぶと、まだ一度も見ていない話が黙って対象から外れる。
+ *
+ * @returns 取りやめなら undefined（呼び出し側は検知へ進まない）
+ */
+export async function resolveTypoScope(
+  work: WorkEntry,
+  options: Pick<CheckTyposOptions, "suiteConfirmed"> = {}
+): Promise<ScopeChoice | undefined> {
+  if (!options.suiteConfirmed) return chooseScope(work);
+
+  // **飛ばした判断はログへ残す**（確認を省略したときと同じ扱い）。
+  // 残さないと、あとから「なぜ全話ぶん走ったのか」を追えない
+  useLogFile(work.folderPath);
+  logStep(
+    "誤字脱字検知：まとめ実行のため対象は全体" +
+      "（「前回から書いた分だけ」は聞かず、処理済みはキャッシュで飛ばします）"
+  );
+  return { kind: "all" };
+}
+
 export async function checkTypos(
   work: WorkEntry,
   registry: AIRegistry,
@@ -167,40 +217,33 @@ export async function checkTypos(
   const resolved = await ensureConfigured(registry, "typo");
   if (!resolved) return undefined;
 
-  let modelInfo = await registry.resolveModelInfo("typo");
-  if (!modelInfo) {
-    // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
-    // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）。
-    // ここは「モデル情報が取れない」＝サーバーが止まっている経路そのもので、
-    // 渡さないとJITが短い文脈で載せてしまう
-    if (
-      !(await confirmProviderReachable(
-        resolved.provider,
-        "誤字脱字の検知",
-        resolved.model
-      ))
-    ) {
-      return undefined;
-    }
-    modelInfo = await registry.resolveModelInfo("typo");
-  }
-  if (!modelInfo) {
-    const action = await vscode.window.showWarningMessage(
-      `モデル「${resolved.model}」の情報を取得できませんでした。` +
-        "このまま実行すると本文の分割単位が変わり、" +
-        "これまでの処理済みキャッシュが使えなくなります。" +
-        "モデルを選び直してから、もう一度実行してください。",
-      "AIの設定を開く",
-      "中止"
-    );
-    if (action === "AIの設定を開く") {
-      await vscode.commands.executeCommand("novelai.setupAI");
-    }
-    return undefined;
-  }
+  // モデル情報はチャンクの字数を決めるのに使う。取れないまま既定値で進むと
+  // 分割単位が変わり、キャッシュが全滅する。**手順は1か所にある**（6.27.10）
+  const modelInfo = await resolveModelInfoOrWarn({
+    registry,
+    feature: "typo",
+    provider: resolved.provider,
+    model: resolved.model,
+    actionLabel: "誤字脱字の検知",
+  });
+  if (!modelInfo) return undefined;
 
   const contextWindow = modelInfo.contextWindow;
-  const maxOutputTokens = resolveMaxOutputTokens();
+  // **応答の見込みに実測を使う**（設計書6.65.16の2）。台帳に書ける量の
+  // 実測があればそれ、無ければ既定の見込み（8,192）を上限とする
+  const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
+  const plannedOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model
+  );
+  // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
+  // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
+  // 半分になり、長い応答が途中で切れる——抽出のJSONは切れると解析できず、
+  // そのチャンクが丸ごと捨てられる
+  const sendOutputTokens = resolveOutputTokensForSend(
+    outputTuning.providerId,
+    outputTuning.model
+  );
 
   // 実際に使うコンテキスト長。**本文以外の量を見込まない**（設計書6.27.10）。
   // 以前は「本文＋固定12,000字」で計算しており、固定費（指示・辞書・作法）が
@@ -332,10 +375,14 @@ export async function checkTypos(
     }).length;
 
   // 大きさの決め方は1か所へ集めてある（設計書6.23）。固定費を差し引いてから決める
-  const chunkSettings = readChunkSettings(contextWindow, {
-    overheadChars,
-    outputTokens: maxOutputTokens,
-  });
+  const chunkSettings = readChunkSettings(
+    contextWindow,
+    {
+      overheadChars,
+      outputTokens: plannedOutputTokens,
+    },
+    outputTuning
+  );
   const chunkChars = chunkSettings.chunk.chars;
 
   const tasks: FileChunkTask[] = sources.map((source) => ({
@@ -433,16 +480,20 @@ export async function checkTypos(
       pending.length === chunks.length && chunks.length > 1
         ? "\n（前回から本文の分け方が変わっているため、今回はすべて送り直します）"
         : "";
-    const confirm = await vscode.window.showInformationMessage(
+    const notice =
       `${chunks.length} チャンク中 ${pending.length} 件を処理します` +
-        `（処理済み ${chunks.length - pending.length} 件はスキップ）。\n` +
-        `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度\n` +
-        costNotice +
-        allPending,
-      "実行",
-      "中止"
-    );
-    if (confirm !== "実行") return undefined;
+      `（処理済み ${chunks.length - pending.length} 件はスキップ）。\n` +
+      `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度\n` +
+      costNotice +
+      allPending;
+    if (options.suiteConfirmed) {
+      // まとめ実行が先に1回だけ確認している（設計書6.80）。
+      // **飛ばした中身は捨てずにログへ残す**——あとから件数と見積もりを
+      // 突き合わせられないと、料金の問い合わせに答えられない
+      logStep(`誤字脱字検知：まとめ実行のため確認を省略\n${notice}`);
+    } else {
+      if (!(await confirmRun(notice))) return undefined;
+    }
   } else if (chunks.length > 0) {
     vscode.window.showInformationMessage(
       "AIでの検知はすべてのチャンクが処理済みです。キャッシュから結果を再表示します。"
@@ -450,6 +501,13 @@ export async function checkTypos(
   }
 
   let rejectedCount = 0;
+  /**
+   * 前回適用済みの直しと同じだったため落とした数。
+   *
+   * **「除外」とは分けて数える**（設計書6.8）。これは作者が前に自分で
+   * 当てた直しであって、AIが外したのではない
+   */
+  let alreadyAppliedCount = 0;
   let failedChunks = 0;
   /** 時間切れで落ちた数。作者へ「待ち時間を測れます」と出すかの判断に使う */
   let timedOutChunks = 0;
@@ -459,236 +517,270 @@ export async function checkTypos(
   const rateLimit: RateLimitWaitState = { waits: 0, totalWaitedMs: 0 };
   let rateLimitGaveUp = false;
 
-  await withCancellableProgress("誤字脱字を検知しています", async (progress, token) => {
-    const controller = new AbortController();
-    token.onCancellationRequested(() => {
-      cancelled = true;
-      controller.abort();
-    });
-
-    let done = 0;
-    // **切り詰められたら、まとめたぶんを話ごとに戻して試し直す。**
-    // まとめると出力も増えるので、上限に当たる見込みが上がる。
-    // 捨てるとその話は丸ごと検査されないまま終わる（抽出で実際に起きた）。
-    // 処理中に足すので、`for...of` ではなく番号で回す
-    const queue = [...chunks];
-    let total = pending.length;
-    for (let cursor = 0; cursor < queue.length; cursor++) {
-      const chunk = queue[cursor];
-      if (token.isCancellationRequested) break;
-
-      const cached = cache.get(chunk.hash, cacheKeyBase);
-      if (cached) {
-        collectIssues(
-          cached as TypoCheckResult,
-          chunk,
-          protectedNames,
-          keepWords,
-          dismissed,
-          appliedFixKeys,
-          issues
-        );
-        done++;
-        continue;
-      }
-
-      const label = describeChunkFile(chunk.filePath, chunk);
-      progress.report({
-        message: `${done + 1}/${total}  ${label}`,
-        increment: 100 / Math.max(total, 1),
-      });
-      // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-      options.onProgress?.(done + 1, total);
-      logStep(`AIへ送信: ${done + 1}/${total} ${label}`);
-      const startedAt = Date.now();
-
-      const bodyWithLines = withLineNumbers(chunk);
-      // **「直さない語」は辞書へ混ぜない。** 固有名詞を先に並べて
-      // 200語で切っていたため、固有名詞が多い作品では
-      // **作者が名指しで守った語が1つも届かなかった**（2026-08-21）。
-      // 作法の枠（styleNote）へ独立して出す
-      const dictionary = protectedNames.slice(0, DICTIONARY_LIMIT);
-      const userPrompt = buildTypoCheckPrompt({
-        chunkTextWithLineNumbers: bodyWithLines,
-        properNounDictionary: dictionary,
-        styleNote,
+  // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）。
+  // 関所（送信を1件ずつ）だけだと、誤字脱字と矛盾検知が交互に流れて
+  // モデルの読み込み直しが往復する
+  await withAiTurnProgress(
+    "誤字脱字を検知しています",
+    { label: "誤字脱字の検知", onCancelled: () => (cancelled = true) },
+    async (progress, token) => {
+      const controller = new AbortController();
+      token.onCancellationRequested(() => {
+        cancelled = true;
+        controller.abort();
       });
 
-      const callAI = () =>
-        resolved.provider.generate({
-          systemPrompt: TYPO_CHECK_SYSTEM_PROMPT,
-          userPrompt,
-          model: resolved.model,
-          temperature: 0.0,
+      let done = 0;
+      // **切り詰められたら、まとめたぶんを話ごとに戻して試し直す。**
+      // まとめると出力も増えるので、上限に当たる見込みが上がる。
+      // 捨てるとその話は丸ごと検査されないまま終わる（抽出で実際に起きた）。
+      // 処理中に足すので、`for...of` ではなく番号で回す
+      const queue = [...chunks];
+      /**
+       * 進捗の分母。**実際にAIへ送る件数である**（作者の指摘、2026-09-06）。
+       *
+       * 全チャンク数にしていたころは、「7チャンク中1件を処理します
+       * （処理済み6件はスキップ）」と断った直後に「1/7」と出て、
+       * 実際に動くのは1件なので**3分間ずっと数字が変わらなかった**——
+       * 作者からは止まったように見える。
+       *
+       * かつて `pending.length` にして「11/2」と分子が分母を超えたのは、
+       * **キャッシュ命中のチャンクでも `done++` していた**からである
+       * （0.28.13）。いまは送ったものだけを数えるので、この形で揃う。
+       * 分け直しで増える分（`total += …`）は、送るチャンクにしか起きない。
+       */
+      let total = pending.length;
+      /** 処理済みで飛ばした数。分母が小さくなっている断りとして画面へ添える */
+      const skipped = chunks.length - pending.length;
+      for (let cursor = 0; cursor < queue.length; cursor++) {
+        const chunk = queue[cursor];
+        if (token.isCancellationRequested) break;
 
-          maxOutputTokens,
-          jsonSchema: TYPO_CHECK_SCHEMA as unknown as object,
-          disableThinking: true,
-          signal: controller.signal,
-          meta: {
-            feature: "typo_check",
-            workFolder: work.folderPath,
-            parts: measureParts(userPrompt, {
-              本文: bodyWithLines.length,
-              辞書: dictionary.join("").length,
-              作法: styleNote?.length ?? 0,
-            }),
-          },
-        });
-
-      try {
-        let res: Awaited<ReturnType<typeof callAI>> | undefined;
-        for (;;) {
-          try {
-            res = await callAI();
-            break;
-          } catch (error) {
-            const waitMs = rateLimitWaitMs(error, rateLimit);
-            if (waitMs === undefined) {
-              if (
-                error instanceof AIError &&
-                error.kind === "rate_limited" &&
-                rateLimit.waits > 0
-              ) {
-                rateLimitGaveUp = true;
-              }
-              throw error;
-            }
-            rateLimit.waits++;
-            rateLimit.totalWaitedMs += waitMs;
-            progress.report({
-              message:
-                `${done + 1}/${total}  ` +
-                `レート上限のため ${Math.ceil(waitMs / 1000)} 秒待っています` +
-                `（${rateLimit.waits}回目 / 合計 ${Math.round(
-                  rateLimit.totalWaitedMs / 1000
-                )} 秒）`,
-            });
-            if (!(await delay(waitMs, token))) {
-              throw new AIError("処理が中止されました。", "aborted");
-            }
-          }
-        }
-
-        consecutiveConnectivityFailures = 0;
-        // **分母は `total` を使う。** 送る側（上）と同じ値でなければ、
-        // 同じ実行の中で分母が食い違う。`total` は入り切らなかったチャンクを
-        // 分割して送り直すたびに増えるので、`pending.length` は途中で古くなる
-        // （実際のログに「AIへ送信: 4/9」と「応答を受信: 4/7」が並んでいた。
-        // 作者のログ、2026-08-30）。0.28.13
-        logStep(
-          `応答を受信: ${done + 1}/${total} ${label} ` +
-            `（${Math.round((Date.now() - startedAt) / 1000)}秒）`
-        );
-
-        if (res.truncated || !res.text.trim()) {
-          // まとめたせいで入り切らなかったのなら、元の大きさなら通る見込みが
-          // ある。**捨てるより試すほうがよい**（部分的なJSONは解析できない）
-          const parts = splitMergedChunk(chunk);
-          if (parts.length > 1) {
-            queue.splice(cursor + 1, 0, ...parts);
-            total += parts.length;
-            logStep(
-              `切り詰められたため ${parts.length} 話に分けて試し直します: ${label}`
-            );
-          } else {
-            failedChunks++;
-          }
-          done++;
-          continue;
-        }
-
-        const parsed = parseTypoCheckResult(res.text);
-        if (!parsed) {
-          failedChunks++;
-        } else {
-          collectIssues(
-            parsed,
+        const cached = cache.get(chunk.hash, cacheKeyBase);
+        if (cached) {
+          // **キャッシュから戻した分も同じように数える。** 数えないと、
+          // 2回目の実行だけ「除外 0件」に見えて、1回目と食い違う
+          const tally = collectIssues(
+            cached as TypoCheckResult,
             chunk,
             protectedNames,
             keepWords,
             dismissed,
             appliedFixKeys,
-            issues,
-            (count) => (rejectedCount += count)
+            issues
           );
-          await cache.set(chunk.hash, cacheKeyBase, parsed);
-        }
-      } catch (e) {
-        if (
-          e instanceof AIError &&
-          e.kind === "aborted" &&
-          (cancelled || token.isCancellationRequested)
-        ) {
-          break;
-        }
-        // **入らなかったなら、小さくして試し直す**（設計書6.27.10）。
-        // 切り詰められたときと同じ道だが、こちらは送る前に分かっている
-        if (isContextOverflow(e)) {
-          const retry = retryOnOverflow(chunk, e);
-          if (retry.kind === "split") {
-            queue.splice(cursor + 1, 0, ...retry.parts);
-            total += retry.parts.length;
-            logStep(`${label}: ${retry.note}`);
-          } else {
-            // 下限まで割っても入らない。**黙って飛ばさず、理由を残す**
-            failedChunks++;
-            logFailure("誤字脱字検知", {
-              チャンク: label,
-              理由: retry.note,
-            });
-          }
-          done++;
+          rejectedCount += tally.rejected;
+          alreadyAppliedCount += tally.alreadyApplied;
+          // **ここでは数えない。** 数えると分子が分母を超える（分母は
+          // 送る件数だけ）うえ、進みが一気に飛んで待ち時間が読めなくなる
           continue;
         }
-        logTypoFailure(chunk, e, {
-          provider: resolved.provider.displayName,
-          model: resolved.model,
+
+        const label = describeChunkFile(chunk.filePath, chunk);
+        progress.report({
+          message: `${done + 1}/${total}  ${label}`,
+          increment: 100 / Math.max(total, 1),
         });
-        failedChunks++;
-        // **時間切れだけは別に数える。** 直し方が「待ち時間を延ばす」で
-        // はっきりしており、ほかの失敗と束ねると案内が出せない
-        if (e instanceof AIError && e.kind === "timeout") timedOutChunks++;
-        if (e instanceof AIError && isFatalProviderFailure(e.kind)) {
-          done++;
-          break;
-        }
-        if (e instanceof AIError && isConnectivityFailure(e.kind)) {
-          consecutiveConnectivityFailures++;
-          if (consecutiveConnectivityFailures >= CONNECTIVITY_FAILURE_LIMIT) {
-            connectivityLost = true;
+        // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+        options.onProgress?.(done + 1, total, skipped);
+        logStep(`AIへ送信: ${done + 1}/${total} ${label}`);
+        const startedAt = Date.now();
+
+        const bodyWithLines = withLineNumbers(chunk);
+        // **「直さない語」は辞書へ混ぜない。** 固有名詞を先に並べて
+        // 200語で切っていたため、固有名詞が多い作品では
+        // **作者が名指しで守った語が1つも届かなかった**（2026-08-21）。
+        // 作法の枠（styleNote）へ独立して出す
+        const dictionary = protectedNames.slice(0, DICTIONARY_LIMIT);
+        const userPrompt = buildTypoCheckPrompt({
+          chunkTextWithLineNumbers: bodyWithLines,
+          properNounDictionary: dictionary,
+          styleNote,
+        });
+
+        const callAI = () =>
+          resolved.provider.generate({
+            systemPrompt: TYPO_CHECK_SYSTEM_PROMPT,
+            userPrompt,
+            model: resolved.model,
+            temperature: 0.0,
+
+            maxOutputTokens: sendOutputTokens,
+            plannedOutputTokens,
+            jsonSchema: TYPO_CHECK_SCHEMA as unknown as object,
+            disableThinking: true,
+            signal: controller.signal,
+            meta: {
+              feature: "typo_check",
+              workFolder: work.folderPath,
+              parts: measureParts(userPrompt, {
+                本文: bodyWithLines.length,
+                辞書: dictionary.join("").length,
+                作法: styleNote?.length ?? 0,
+              }),
+            },
+          });
+
+        try {
+          let res: Awaited<ReturnType<typeof callAI>> | undefined;
+          for (;;) {
+            try {
+              res = await callAI();
+              break;
+            } catch (error) {
+              const waitMs = rateLimitWaitMs(error, rateLimit);
+              if (waitMs === undefined) {
+                if (
+                  error instanceof AIError &&
+                  error.kind === "rate_limited" &&
+                  rateLimit.waits > 0
+                ) {
+                  rateLimitGaveUp = true;
+                }
+                throw error;
+              }
+              rateLimit.waits++;
+              rateLimit.totalWaitedMs += waitMs;
+              progress.report({
+                message:
+                  `${done + 1}/${total}  ` +
+                  `レート上限のため ${Math.ceil(waitMs / 1000)} 秒待っています` +
+                  `（${rateLimit.waits}回目 / 合計 ${Math.round(
+                    rateLimit.totalWaitedMs / 1000
+                  )} 秒）`,
+              });
+              if (!(await delay(waitMs, token))) {
+                throw new AIError("処理が中止されました。", "aborted");
+              }
+            }
+          }
+
+          consecutiveConnectivityFailures = 0;
+          // **分母は `total` を使う。** 送る側（上）と同じ値でなければ、
+          // 同じ実行の中で分母が食い違う。`total` は入り切らなかったチャンクを
+          // 分割して送り直すたびに増えるので、`pending.length` は途中で古くなる
+          // （実際のログに「AIへ送信: 4/9」と「応答を受信: 4/7」が並んでいた。
+          // 作者のログ、2026-08-30）。0.28.13
+          logStep(
+            `応答を受信: ${done + 1}/${total} ${label} ` +
+              `（${Math.round((Date.now() - startedAt) / 1000)}秒）`
+          );
+
+          if (res.truncated || !res.text.trim()) {
+            // まとめたせいで入り切らなかったのなら、元の大きさなら通る見込みが
+            // ある。**捨てるより試すほうがよい**（部分的なJSONは解析できない）
+            const parts = splitMergedChunk(chunk);
+            if (parts.length > 1) {
+              queue.splice(cursor + 1, 0, ...parts);
+              total += parts.length;
+              logStep(
+                `切り詰められたため ${parts.length} 話に分けて試し直します: ${label}`
+              );
+            } else {
+              failedChunks++;
+            }
+            done++;
+            continue;
+          }
+
+          const parsed = parseTypoCheckResult(res.text);
+          if (!parsed) {
+            failedChunks++;
+          } else {
+            const tally = collectIssues(
+              parsed,
+              chunk,
+              protectedNames,
+              keepWords,
+              dismissed,
+              appliedFixKeys,
+              issues
+            );
+            rejectedCount += tally.rejected;
+            alreadyAppliedCount += tally.alreadyApplied;
+            await cache.set(chunk.hash, cacheKeyBase, parsed);
+          }
+        } catch (e) {
+          if (
+            e instanceof AIError &&
+            e.kind === "aborted" &&
+            (cancelled || token.isCancellationRequested)
+          ) {
+            break;
+          }
+          // **入らなかったなら、小さくして試し直す**（設計書6.27.10）。
+          // 切り詰められたときと同じ道だが、こちらは送る前に分かっている
+          if (isContextOverflow(e)) {
+            const retry = retryOnOverflow(chunk, e);
+            if (retry.kind === "split") {
+              queue.splice(cursor + 1, 0, ...retry.parts);
+              total += retry.parts.length;
+              logStep(`${label}: ${retry.note}`);
+            } else {
+              // 下限まで割っても入らない。**黙って飛ばさず、理由を残す**
+              failedChunks++;
+              logFailure("誤字脱字検知", {
+                チャンク: label,
+                理由: retry.note,
+              });
+            }
+            done++;
+            continue;
+          }
+          logTypoFailure(chunk, e, {
+            provider: resolved.provider.displayName,
+            model: resolved.model,
+          });
+          failedChunks++;
+          // **時間切れだけは別に数える。** 直し方が「待ち時間を延ばす」で
+          // はっきりしており、ほかの失敗と束ねると案内が出せない
+          if (e instanceof AIError && e.kind === "timeout") timedOutChunks++;
+          if (e instanceof AIError && isFatalProviderFailure(e.kind)) {
             done++;
             break;
           }
+          if (e instanceof AIError && isConnectivityFailure(e.kind)) {
+            consecutiveConnectivityFailures++;
+            if (consecutiveConnectivityFailures >= CONNECTIVITY_FAILURE_LIMIT) {
+              connectivityLost = true;
+              done++;
+              break;
+            }
+          }
         }
+        done++;
       }
-      done++;
-    }
 
-    // 分母は送受信と同じ `total`。**`chunks.length` は分割の前の数**なので、
-    // 分割が起きた回は「9/7」のように分子が分母を超える（作者のログで発覚）
-    logStep(
-      `誤字脱字検知を終了: ${done}/${total}（失敗 ${failedChunks}件${
-        total > chunks.length
-          ? ` / 入り切らず ${total - chunks.length}回に分けた`
-          : ""
-      }${cancelled ? " / 中止された" : ""}）`
-    );
+      // 分母は送受信と同じ `total`（＝AIへ送る件数）。**`pending.length` は
+      // 分割の前の数**なので、分割が起きた回は分母のほうが大きくなる。
+      // 飛ばした件数も残す——ログだけを見て「1件しか見ていない」と
+      // 読まれないようにするため
+      logStep(
+        `誤字脱字検知を終了: ${done}/${total}（失敗 ${failedChunks}件${
+          skipped > 0 ? ` / 処理済み ${skipped}件はスキップ` : ""
+        }${
+          total > pending.length
+            ? ` / 入り切らず ${total - pending.length}回に分けた`
+            : ""
+        }${cancelled ? " / 中止された" : ""}）`
+      );
 
-    try {
-      await cache.save();
-    } catch {
-      // キャッシュは再生成できるので、検知結果はそのまま返す
+      try {
+        await cache.save();
+      } catch {
+        // キャッシュは再生成できるので、検知結果はそのまま返す
+      }
     }
-  });
+  );
 
   if (cancelled) {
-    vscode.window.showInformationMessage(
+    notifyDone(
       "誤字脱字検知を中止しました。完了済みの処理は次回再利用されます。"
     );
     return {
       issues,
       rejectedCount,
+      alreadyAppliedCount,
       failedChunks,
       totalChunks: chunks.length,
       timedOutChunks,
@@ -711,6 +803,7 @@ export async function checkTypos(
   return {
     issues,
     rejectedCount,
+    alreadyAppliedCount,
     failedChunks,
     totalChunks: chunks.length,
     timedOutChunks,
@@ -721,24 +814,52 @@ export async function checkTypos(
 }
 
 /**
+ * 1つのチャンクの応答から、何件を落としたか。
+ *
+ * **「除外」と「前回適用済み」を分けて数える**（設計書6.8）。
+ * 前者はAIの言い分が本文と合わなかったもので、作者に見せる意味が無い。
+ * 後者は**作者が前に自分で当てた直し**であり、意味が違う。
+ * 一緒くたに「除外」と言うと、通知だけを見て「AIがまた外した」と読める。
+ */
+export interface TypoCollectTally {
+  /** 検証で不採用になった、または行を元のファイルへ戻せなかったもの */
+  rejected: number;
+  /** 前回適用済みの直しと同じだったため落としたもの */
+  alreadyApplied: number;
+}
+
+/**
  * 検証を通った指摘のうち、無視済みでないもの・往復ループでないものだけを集める。
  *
  * `appliedFixKeys` は、直前に適用済みの「target→suggestion」の組。
  * 今回の指摘がその逆向き（suggestion→target）なら、AIが表記ゆれなどを
  * 誤字として往復で指摘し続けている可能性が高いため除外する。
+ *
+ * **落とした理由は、必ず操作ログへ残す**（設計書6.8）。落ちる道が3つ——
+ * 検証の不採用・行を戻せない・前回適用済み——あるのに、実機で
+ * 「指摘 1件」と出て一覧が空だったとき、**どれで落ちたのかを追えなかった**
+ * （2026-09-06、作者の報告）。通知には内訳を出さず、ここへ残す。
  */
-function collectIssues(
+export function collectIssues(
   result: TypoCheckResult,
   chunk: Chunk,
   protectedNames: string[],
   keepWords: KeepWord[],
   dismissed: Set<string>,
   appliedFixKeys: ReadonlySet<string>,
-  out: TypoCheckIssue[],
-  onRejected?: (count: number) => void
-): void {
+  out: TypoCheckIssue[]
+): TypoCollectTally {
   const validated = validateTypoIssues(result, chunk, protectedNames, keepWords);
+  const label = describeChunkFile(chunk.filePath, chunk);
   let rejectedCount = validated.rejected.length;
+  let alreadyApplied = 0;
+
+  if (validated.rejected.length > 0) {
+    logStep(
+      `${label}: 本文と合わないため除外 ${validated.rejected.length}件` +
+        `（${summarizeRejectReasons(validated.rejected)}）`
+    );
+  }
 
   for (const issue of validated.accepted) {
     // **どのファイルの何行目かを、ここで確定させる。** まとめたチャンクでは
@@ -746,7 +867,9 @@ function collectIssues(
     // 別の話のファイルの、まったく違う行を書き換える
     const at = locateChunkLine(chunk, issue.line);
     if (!at) {
-      // 戻せない行は捨てる。どこを直すのか決められない
+      // 戻せない行は捨てる。どこを直すのか決められない。
+      // **どの行だったかを残す。** まとめ方を疑うときの唯一の手掛かりになる
+      logStep(`${label}: 行番号 ${issue.line} を元のファイルへ戻せず除外`);
       rejectedCount++;
       continue;
     }
@@ -760,14 +883,18 @@ function collectIssues(
         appliedFixKey(fileName, located.suggestion, located.target)
       )
     ) {
-      rejectedCount++;
+      alreadyApplied++;
       continue;
     }
 
     out.push({ ...located, filePath: at.filePath, chunkHash: chunk.hash });
   }
 
-  onRejected?.(rejectedCount);
+  if (alreadyApplied > 0) {
+    logStep(`${label}: 前回適用済みの直しと同じため除外 ${alreadyApplied}件`);
+  }
+
+  return { rejected: rejectedCount, alreadyApplied };
 }
 
 /**

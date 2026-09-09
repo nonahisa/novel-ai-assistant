@@ -17,8 +17,16 @@ import {
   createOrganizationStore,
 } from "../core/abilityStore";
 import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
+import { describeCheckRunCounts } from "../core/checkRunCounts";
+import type { IncomingCount } from "../core/proposalBuckets";
 import { locateBody, type TypoCheckIssue } from "./checkTypos";
+import {
+  NOTATION_ADVICE_EXCERPTS_PER_FORM,
+  NOTATION_ADVICE_EXCERPT_MAX_CHARS,
+  type NotationAdviceGroup,
+} from "../prompts/notationAdvice";
 import { cancelItem } from "../views/dialogs";
+import { logStep, useLogFile } from "../core/logger";
 // 名前の付け替え（設計書6.37.3）も同じ文脈を使う。あちらは `core` にいて
 // 機能層を読めないので、実体は `core` へ移した。ここは既存の呼び出し口を保つ
 import { buildUniqueContext } from "../core/uniqueContext";
@@ -41,8 +49,20 @@ export { buildUniqueContext };
  * 処理を新しく作らない（CLAUDE.mdの「4か所目の同じ失敗」を避ける）。
  */
 
+/**
+ * 表記ゆれの指摘。
+ *
+ * 誤字脱字と同じ形（`TypoCheckIssue`）に、**その指摘がどの組から出たか**を
+ * 添えたもの（設計書6.73）。提案パネルの「AIに訊く」が、この材料を
+ * そのままP-33へ渡す。**添えられていない指摘もありうる**ので任意にしてある
+ * （材料が無ければ、パネルは口ごと出さない）。
+ */
+export type NotationCheckIssue = TypoCheckIssue & {
+  notation?: NotationAdviceGroup;
+};
+
 export interface NotationCheckRunResult {
-  issues: TypoCheckIssue[];
+  issues: NotationCheckIssue[];
   /** 見つかった組の数 */
   groupCount: number;
   /** 作者が「揃える」を選んだ組の数 */
@@ -54,12 +74,81 @@ export interface NotationCheckRunResult {
   selectedCount?: number;
   /** 組ごとの選択を途中で閉じたか */
   stoppedEarly?: boolean;
+  /**
+   * 揃える組を**1つも選ばずに確定した**（作者の実機報告、2026-09-05）。
+   *
+   * **`cancelled` と分ける。** 「今回は揃えない」と決めただけであって、
+   * 校正のまとめ実行（設計書6.80）を止める意思ではない。ここを一緒に
+   * していたため、まとめ実行が表記ゆれの次から**何も走らずに終わって**
+   * いた（しかも1件目なので通知も出なかった）。
+   */
+  noGroupsChosen?: boolean;
+}
+
+/**
+ * 拾える範囲を1行で断る（作者の実機報告、2026-09-06）。
+ *
+ * これまでの案内は「同じ語が2通り以上の書き方で本文に出ている場合だけを
+ * 対象にしています」だった。**作者には「どんな2通りでも拾う」と読める。**
+ * 実際に見ているのは、固有名詞の**ひらがな⇄カタカナの入れ替えだけ**
+ * （`switchKanaScript`）と、決まった語の一覧（`KANA_KANJI_PAIRS`・
+ * `OKURIGANA_GROUPS`）である。「おばあさん／お婆さん」は登録済みの人物名でも
+ * 拾えない——仕様どおりだが、書いていなければ不具合に見える。
+ */
+export const NOTATION_SCOPE_NOTE =
+  "拾えるのは、同じ語のひらがな・カタカナの違いと、" +
+  "決まった語の漢字／かな・送り仮名です" +
+  "（「おばあさん／お婆さん」のような漢字の開き閉じ全般は対象外）。";
+
+/**
+ * 走った量の控え。**終了ログを1か所で書くため**にある。
+ *
+ * 表記ゆれは途中で抜ける道が7つあり（本文が無い・競合で中止・組が0・
+ * Escで閉じた…）、そのすべてに終了ログを置くと、必ずどれかが漏れる。
+ */
+interface NotationTally {
+  /** 実際に見た本文の数 */
+  scanned: number;
+  /** 見るはずだった本文の数（競合で外したものも含む） */
+  total: number;
+  /** 競合マーカーがあって見られなかった話 */
+  conflicted: number;
 }
 
 export async function checkNotation(
   work: WorkEntry
 ): Promise<NotationCheckRunResult | undefined> {
+  useLogFile(work.folderPath);
+  // **AIを呼ばないので、モデル名もチャンク数も出ない。**
+  // それでも開始と終了を対で残す（ほかの検知と同じ読み方ができるように）
+  logStep(`表記ゆれ検知を開始: ${work.title}`);
+
+  const tally: NotationTally = { scanned: 0, total: 0, conflicted: 0 };
+  const result = await runNotationCheck(work, tally);
+
+  // **「失敗」は競合で見られなかった話**である（AIを呼ばないので通信の失敗は無い）。
+  // 終わったのか途中で抜けたのかを、ログだけで見分けられるようにする
+  logStep(
+    `表記ゆれ検知を終了: ${tally.scanned}/${tally.total}（失敗 ${tally.conflicted}件` +
+      ` / 指摘 ${result?.issues.length ?? 0}件` +
+      ` / 見つけた組 ${result?.groupCount ?? 0}組` +
+      ` / 揃える組 ${result?.unifiedCount ?? 0}組` +
+      (result?.dismissedCount ? ` / 今後直さないで除いた ${result.dismissedCount}件` : "") +
+      (result === undefined ? " / 取りやめ" : "") +
+      (result?.cancelled ? " / 中止された" : "") +
+      (result?.stoppedEarly ? " / 途中で閉じた" : "") +
+      "）"
+  );
+
+  return result;
+}
+
+async function runNotationCheck(
+  work: WorkEntry,
+  tally: NotationTally
+): Promise<NotationCheckRunResult | undefined> {
   const scan = await scanWork(work);
+  tally.total = scan.episodes.length;
   if (scan.episodes.length === 0) {
     vscode.window.showWarningMessage("本文ファイルが見つかりません。");
     return undefined;
@@ -72,8 +161,10 @@ export async function checkNotation(
     const file = await readTextFile(episode.filePath);
     if (file.hasConflictMarkers) {
       conflicted.push(episode.fileName);
+      tally.conflicted++;
       continue;
     }
+    tally.scanned++;
 
     // 合本は話ごとに分かれているが、表記ゆれは作品全体で数えるため
     // ここでは1つの本文として扱ってよい。ただし行番号の基準は
@@ -126,16 +217,29 @@ export async function checkNotation(
 
   if (groups.length === 0) {
     vscode.window.showInformationMessage(
-      "表記ゆれは見つかりませんでした。" +
-        "（同じ語が2通り以上の書き方で本文に出ている場合だけを対象にしています）"
+      `表記ゆれは見つかりませんでした。${NOTATION_SCOPE_NOTE}`
     );
     return { issues: [], groupCount: 0, unifiedCount: 0, dismissedCount: 0, cancelled: false };
   }
 
-  const picked = await pickGroups(groups);
-  if (!picked) {
+  const selection = readGroupSelection(await pickGroups(groups));
+  if (selection.kind === "cancelled") {
     return { issues: [], groupCount: groups.length, unifiedCount: 0, dismissedCount: 0, cancelled: true };
   }
+  if (selection.kind === "none") {
+    // **0組のまま確定は「今回は揃えない」。** 止める意思ではないので、
+    // まとめ実行（設計書6.80）は次の検知へ進んでよい
+    return {
+      issues: [],
+      groupCount: groups.length,
+      unifiedCount: 0,
+      dismissedCount: 0,
+      cancelled: false,
+      selectedCount: 0,
+      noGroupsChosen: true,
+    };
+  }
+  const picked = selection.groups;
 
   // **14組あれば14回聞かれる。** 1回で決められる道を用意する（6.8.9）
   const mode =
@@ -151,7 +255,7 @@ export async function checkNotation(
   }
 
   const dismissed = await new TypoDismissedHistory(work).load();
-  const issues: TypoCheckIssue[] = [];
+  const issues: NotationCheckIssue[] = [];
   let unifiedCount = 0;
   let dismissedCount = 0;
   /** 途中で閉じたか。0件だったときに理由を伝えるために持つ */
@@ -169,10 +273,12 @@ export async function checkNotation(
     if (keep === null) continue;
 
     unifiedCount++;
+    // **組ごとに1度だけ組み立てる。** 同じ材料を出現の数だけ作り直さない
+    const material = notationMaterial(group);
     for (const form of group.forms) {
       if (form.surface === keep) continue;
       for (const occurrence of form.occurrences) {
-        const issue = buildIssue(group, occurrence, form.surface, keep);
+        const issue = buildIssue(group, occurrence, form.surface, keep, material);
         if (dismissed.has(dismissKey(issue.filePath, issue))) {
           dismissedCount++;
           continue;
@@ -193,6 +299,29 @@ export async function checkNotation(
   };
 }
 
+/**
+ * 揃える組の選択の答えを読む（作者の実機報告、2026-09-05）。
+ *
+ * **「0組のまま確定」と「閉じた」は別物である。** どちらも
+ * `undefined` に潰していたため、まとめ実行（設計書6.80）が
+ * 「作者が止めた」と読んで残りの校正を走らせなかった。
+ *
+ * - 何も選ばずに確定（空配列）→ **今回は揃えない。** 校正は続けてよい
+ * - Escで閉じた（undefined）→ **止める意思。** 残りも走らせない
+ */
+export type GroupSelection<T> =
+  | { readonly kind: "picked"; readonly groups: readonly T[] }
+  | { readonly kind: "none" }
+  | { readonly kind: "cancelled" };
+
+export function readGroupSelection<T>(
+  picked: readonly T[] | undefined
+): GroupSelection<T> {
+  if (picked === undefined) return { kind: "cancelled" };
+  if (picked.length === 0) return { kind: "none" };
+  return { kind: "picked", groups: picked };
+}
+
 /** 揃えたい組を選ばせる。既定では何も選ばない（勝手に直さない） */
 async function pickGroups(
   groups: NotationVariantGroup[]
@@ -207,7 +336,9 @@ async function pickGroups(
   }));
 
   const picked = await vscode.window.showQuickPick(items, {
-    title: `表記ゆれが ${groups.length} 組見つかりました`,
+    // **拾える範囲を、選ぶ前に見せる**（作者の実機報告、2026-09-06）。
+    // 「これで全部だ」と思われると、拾えていない揺れを見落とす
+    title: `表記ゆれが ${groups.length} 組見つかりました — ${NOTATION_SCOPE_NOTE}`,
     placeHolder: "揃えたい組を選んでください（複数選べます）",
     canPickMany: true,
     ignoreFocusOut: true,
@@ -215,11 +346,13 @@ async function pickGroups(
   if (!picked) return undefined;
   if (picked.length === 0) {
     // **黙って終わらない。** 押したのに何も起きないと、
-    // 作者は壊れていると受け取る（2026-08-21、作者の報告）
+    // 作者は壊れていると受け取る（2026-08-21、作者の報告）。
+    // **空配列のまま返す**——「今回は揃えない」であって中止ではないので、
+    // ここで undefined に潰さない（`readGroupSelection`）
     void vscode.window.showInformationMessage(
       "揃える組が1つも選ばれていません。左端の四角を押して選んでください。"
     );
-    return undefined;
+    return [];
   }
   return picked.map((item) => item.group);
 }
@@ -316,12 +449,38 @@ function exampleOf(group: NotationVariantGroup): string {
   return `${name} ${first.line}行目: ${first.lineText.trim().slice(0, 60)}`;
 }
 
+/**
+ * 「AIに訊く」へ渡す材料を組み立てる（設計書6.73）。
+ *
+ * **数と出現例の両方を渡す。** 数だけでは「多いほうに揃える」しか言えず、
+ * それはAIに訊くまでもない。出現例があれば、会話文だけ別の書き方をして
+ * いる（＝わざと揺らしている）ことも読み取れる。
+ *
+ * 本文そのものは送らない。**渡すのはこの組に関わる行だけ**である。
+ */
+function notationMaterial(group: NotationVariantGroup): NotationAdviceGroup {
+  return {
+    label: group.label,
+    forms: group.forms.map((form) => ({
+      surface: form.surface,
+      count: form.occurrences.length,
+      excerpts: form.occurrences
+        .slice(0, NOTATION_ADVICE_EXCERPTS_PER_FORM)
+        .map((occurrence) =>
+          occurrence.lineText.trim().slice(0, NOTATION_ADVICE_EXCERPT_MAX_CHARS)
+        )
+        .filter(Boolean),
+    })),
+  };
+}
+
 function buildIssue(
   group: NotationVariantGroup,
   occurrence: { filePath: string; line: number; lineText: string; column: number },
   from: string,
-  to: string
-): TypoCheckIssue {
+  to: string,
+  material: NotationAdviceGroup
+): NotationCheckIssue {
   const context = buildUniqueContext(
     occurrence.lineText,
     occurrence.column,
@@ -343,6 +502,9 @@ function buildIssue(
     // 揃える方針は作者が選んでいるが、語の切れ目の判定は機械なので
     // 断定はしない。既定で隠れる low にはせず medium にする
     confidence: "medium",
+    // **どの組から出た指摘かを添える**（設計書6.73）。作者が「AIに訊く」を
+    // 押したとき、これが無ければ何を訊けばよいか分からない
+    notation: material,
   };
 }
 
@@ -370,18 +532,34 @@ async function loadProperNouns(work: WorkEntry): Promise<string[]> {
  * **0件のときこそ、理由が要る。** パネルが空のままだと、作者は
  * 壊れていると受け取る。実際に「表記ゆれが提案パネルに出ません」と
  * 報告があった（2026-08-21）。
+ *
+ * @param shown 提案パネルに実際に残った件数（設計書6.8）。
+ *   **検知が作った件数（`result.issues.length`）を言わない**——前に
+ *   適用済み・解消済みだったものまで数えると、パネルの見出しと食い違う。
+ *   引数で受けるのは、それを数えられるのがパネル側だけだからである
+ *   （既定値を置くと、渡し忘れが古い数え方として黙って残る）
  */
 export function describeNotationResult(
-  result: NotationCheckRunResult
+  result: NotationCheckRunResult,
+  shown: IncomingCount
 ): string {
   if (result.groupCount === 0) {
     return "表記ゆれは見つかりませんでした。";
   }
 
   if (result.issues.length > 0) {
+    const counted = describeCheckRunCounts({
+      shown: shown.remaining,
+      alreadyHandled: shown.handled,
+      // **無視の記録で落とした分は、ここへ入れない。** `rejected` は
+      // 「理由は操作ログ」と案内する枠だが、この分の次の手は
+      // 「指摘対象外を管理」から外すことなので、下で名指しする
+      rejected: 0,
+    });
     const parts = [
-      `${result.groupCount}組のうち${result.unifiedCount}組を揃えます。`,
-      `${result.issues.length}件の指摘を提案パネルに出しました。`,
+      `${result.groupCount}組のうち${result.unifiedCount}組を揃え、` +
+        "提案パネルに出しました。",
+      `${counted.join(" / ")}。`,
     ];
     if (result.dismissedCount > 0) {
       parts.push(`（無視した分 ${result.dismissedCount}件は除いています）`);

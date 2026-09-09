@@ -4,15 +4,22 @@ import type { WorkRegistry } from "../core/workRegistry";
 import { currentMode } from "../core/actorContext";
 import type { WorkMode } from "../core/editorMode";
 import { canRunProcesses } from "../core/runtime";
+import { abbreviateTitle, isAbbreviated } from "../core/abbreviateTitle";
+import type { WorkFormatKey } from "../core/workFormat";
+import { readWorkFormat } from "../core/workFormatStore";
 import {
-  actionResourceUri,
+  isCommandVisibleForColumn,
+  workTypeColumn,
+  type WorkTypeColumn,
+} from "../core/workTypeVisibility";
+import {
   allActions,
   disabledHint,
   explainDisabled,
   isActionEnabled,
+  stepActionResourceUri,
   REQUIRES_WORK_HINT,
   type ActionCounter,
-  type ActionCounts,
   type ActionItem,
   type GroupStateStore,
 } from "./actionList";
@@ -105,6 +112,8 @@ const STEP_DEFS: readonly StepDef[] = [
     entries: [
       "novelai.createWorkWithPlot",
       "novelai.createPlot",
+      // プロットを書く場（設計書6.4.8）。目次と話の見取り図を横に並べる
+      "novelai.openPlotMode",
       "novelai.plotInterview",
       "novelai.setPlotBasics",
       "novelai.generatePlot",
@@ -133,7 +142,7 @@ const STEP_DEFS: readonly StepDef[] = [
           "novelai.openSceneMemos",
           "novelai.createWorkFromManuscript",
           "novelai.openVertical",
-          // 大きく開くほう。**横のパネルは詳細メニューと本文の右クリックにある**
+          // 大きく開くほう。**横のパネルは本文の右クリックだけにある**（0.29.23）
           "novelai.openChatPanel",
           "novelai.showWritingStats",
           // 書いたものを別の軸（作中の時間）で見直す画面（設計書6.39）
@@ -175,6 +184,8 @@ const STEP_DEFS: readonly StepDef[] = [
       "書いた本文を、人に見せる前に自分で見直す段階です。" +
       "本文は勝手に書き換わりません。指摘を1件ずつ見て決めます。",
     entries: [
+      // まとめて走らせる入口を先頭に置く（設計書6.80）
+      "novelai.runProofreadingSuite",
       "novelai.checkTypos",
       "novelai.manageKeepWords",
       "novelai.checkNotation",
@@ -232,17 +243,14 @@ const STEP_DEFS: readonly StepDef[] = [
     icon: "package",
     detail:
       "書き上げた作品を、紙や電子書籍の形にして出す段階です。" +
-      "いまはPDF（印刷用）まで作れます。",
-    entries: [
-      "novelai.exportPdf",
-      {
-        kind: "placeholder",
-        label: "EPUB出力（予定）",
-        icon: "book",
-        detail:
-          "電子書籍（EPUB等）への書き出しを予定しています。まだ使えません。",
-      },
-    ],
+      "PDF（印刷用）とEPUB（電子書籍）が作れます。" +
+      "本の見た目はEPUBエディターで確かめながら決められます。",
+    // **「EPUB出力（予定）」の枠は外した**（作者の指定、2026-09-03）。
+    // 設計書6.65が実装できたので、枠ではなく実物を載せる
+    // **「EPUBへ書き出す」はここに置かない**（作者の指定、2026-09-04）。
+    // 書き出しボタンはEPUBエディターの中にあり、外にも同じ入口があると
+    // 「どちらから出すのが正しいのか」が分からない
+    entries: ["novelai.exportPdf", "novelai.openEpubEditor"],
   },
   {
     // **番号を付けない**（作者の指定、2026-08-29）。流れの中の一段階ではなく、
@@ -337,6 +345,49 @@ export function resolveSteps(
   return { steps, missing };
 }
 
+/**
+ * 選んだ作品のタイプに合う段だけを残す（設計書6.70.1）。
+ *
+ * **判断は表（`core/workTypeVisibility.ts`）に任せる。** ここで
+ * 「メモ集なら伏線は出さない」と書き始めると、右クリック側の判断と
+ * 二重になり、片方だけ直したときに食い違う。
+ *
+ * 中身が全部消えた小分類は見出しごと畳み、entries が空になった段は
+ * 段ごと出さない（詳細メニューの `shownEntries` と同じ考え方——
+ * 開いても何も無い行は、片づけたつもりで分かりにくくしているだけ）。
+ *
+ * @param column タイプの列。**undefined なら絞らない**
+ *   （タイプを決めていない作品と、作品を選んでいないとき）
+ */
+export function filterSteps(
+  steps: readonly Step[],
+  column: WorkTypeColumn | undefined
+): Step[] {
+  if (!column) return [...steps];
+
+  const visible = (command: string): boolean =>
+    isCommandVisibleForColumn(command, column);
+
+  const filtered: Step[] = [];
+  for (const step of steps) {
+    const entries: Step["entries"] = [];
+    for (const entry of step.entries) {
+      if (entry.kind === "action") {
+        if (visible(entry.command)) entries.push(entry);
+        continue;
+      }
+      if (entry.kind === "placeholder") {
+        entries.push(entry);
+        continue;
+      }
+      const items = entry.items.filter((item) => visible(item.command));
+      if (items.length > 0) entries.push({ ...entry, items });
+    }
+    if (entries.length > 0) filtered.push({ ...step, entries });
+  }
+  return filtered;
+}
+
 /** 定義が参照しているコマンドIDをすべて挙げる（テストで実在を確かめる） */
 function referencedCommands(defs: readonly StepDef[]): string[] {
   const commands: string[] = [];
@@ -406,17 +457,33 @@ export function resolveSelectedWork(
   return works.find((work) => work.id === savedId);
 }
 
-/** 最上段に出す文言 */
+/**
+ * 最上段に出す文言。
+ *
+ * **題は省略する**（作者の裁定、2026-09-06。設計書6.70）。作品名は
+ * 作者が付けたものなので長さに上限が無く、この1行が幅を使い切ると、
+ * 下に並ぶ操作より先に読めない行ができる。作品一覧・QuickPick は
+ * 既に `abbreviateTitle` を通しているので、そちらに揃える。
+ *
+ * **切ったときは `fullTitle` を返す。** 呼ぶ側がホバーへ全文を出す
+ * ——省略は表示だけの話で、読めなくしてよいという話ではない。
+ */
 export function describeSelector(
   selected: WorkEntry | undefined,
   hasAnyWork: boolean
-): { label: string; description: string } {
+): { label: string; description: string; fullTitle?: string } {
   if (!hasAnyWork) {
     return { label: STEP_NO_WORK_LABEL, description: STEP_NO_WORK_HINT };
   }
   // 「選択作品：」の文言と、押して選び直す形は作者の指定（2026-08-28）
   if (selected) {
-    return { label: `選択作品：${selected.title}`, description: "" };
+    return {
+      label: `選択作品：${abbreviateTitle(selected.title)}`,
+      description: "",
+      ...(isAbbreviated(selected.title)
+        ? { fullTitle: selected.title }
+        : {}),
+    };
   }
   return { label: STEP_CHOOSE_WORK_LABEL, description: "" };
 }
@@ -520,6 +587,19 @@ export interface StepWorkStore {
   set(id: string | undefined): void;
 }
 
+/**
+ * 件数を答える口。**作品を渡す。**
+ *
+ * 詳細メニューの `ActionCounts` とは分ける。あちらは作品を選ばずに見るので
+ * 全作品合計でよいが、こちらは最上段で作品を選ぶ画面なので、
+ * 選んだ作品の件数でなければ意味が食い違う（作者の実機報告、2026-09-05。
+ * 選択作品は重複0なのに「24」と出ていた）。
+ */
+export type StepActionCounts = (
+  counter: ActionCounter,
+  workId: string
+) => number;
+
 export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
     StepNode | undefined | void
@@ -534,15 +614,69 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
    */
   private readonly expanded: Set<string>;
 
+  /**
+   * 作品ごとのタイプ（設計書6.70.1）。
+   *
+   * **描画は同期なので、読めた結果をここへ置く。** まだ読んでいない
+   * あいだは絞らない（全部出す）ので、遅れて絞り込まれることはあっても、
+   * 出るはずの操作が最初から見えない状態にはならない。
+   */
+  private readonly formats = new Map<string, WorkFormatKey | undefined>();
+
   constructor(
     private readonly registry: WorkRegistry,
     private readonly workStore?: StepWorkStore,
     private readonly groupStore?: GroupStateStore,
-    private readonly counts?: ActionCounts
+    private readonly counts?: StepActionCounts,
+    /**
+     * 作品のタイプを読む口。試験で差し替えるために関数で受け取る
+     * （プロットを読む処理そのものは `workFormatStore` の1か所だけ）。
+     */
+    private readonly loadFormat: (
+      work: WorkEntry
+    ) => Promise<WorkFormatKey | undefined> = readWorkFormat
   ) {
     this.expanded = restoreExpandedSteps(groupStore?.get() ?? []);
     // 作品が増減すると、最上段の表示も押せる操作も変わる
     registry.onDidChange(() => this._onDidChangeTreeData.fire());
+  }
+
+  /**
+   * 選んでいる作品のタイプを読み込む。読めたら表示を作り直す。
+   *
+   * **描画の途中では待てない**（`getTreeItem` も `getChildren` も同期の
+   * 形で答える）ので、読み込みは背後で走らせ、結果が出てから並べ直す。
+   * 作品を選び直したときと、ツリーを描くときに呼ぶ。
+   */
+  async loadSelectedFormat(): Promise<void> {
+    const work = this.selectedWork();
+    if (!work || this.formats.has(work.id)) return;
+    let format: WorkFormatKey | undefined;
+    try {
+      format = await this.loadFormat(work);
+    } catch {
+      // 読めなければ「決めていない」と同じ扱い。絞らずに全部出す
+      format = undefined;
+    }
+    this.formats.set(work.id, format);
+    this._onDidChangeTreeData.fire();
+  }
+
+  /**
+   * いま並べる段。**作品を選んでいなければ絞らない。**
+   *
+   * 何に効くか決まっていないのに項目を消すと、初めて使う人には
+   * 「入れたのに機能が足りない」に見える。
+   */
+  visibleSteps(): readonly Step[] {
+    const work = this.selectedWork();
+    if (!work) return STEP_MENU;
+    if (!this.formats.has(work.id)) {
+      // まだ読んでいない。背後で読ませて、いまは全部出す
+      void this.loadSelectedFormat();
+      return STEP_MENU;
+    }
+    return filterSteps(STEP_MENU, workTypeColumn(this.formats.get(work.id)));
   }
 
   /** 画面で開閉したときに呼ぶ。次回起動時もこの状態で開く */
@@ -571,6 +705,21 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
     this.refresh();
   }
 
+  /**
+   * 覚えたタイプを捨てる。**プロットの `## 形式` が書き換わったときに呼ぶ。**
+   *
+   * 呼ばないと、タイプを変えたのにステップの並びが前のままになる
+   * （作品一覧が `invalidateWorkFormat` で読み直すのと同じ理由）。
+   */
+  invalidateFormats(workId?: string): void {
+    if (workId) {
+      this.formats.delete(workId);
+    } else {
+      this.formats.clear();
+    }
+    this.refresh();
+  }
+
   refresh(): void {
     this._onDidChangeTreeData.fire();
   }
@@ -590,7 +739,7 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
       // 押す前に見えるようにする
       return [
         { type: "selector" },
-        ...STEP_MENU.map((step) => ({ type: "step" as const, step })),
+        ...this.visibleSteps().map((step) => ({ type: "step" as const, step })),
       ];
     }
     if (node.type === "step") {
@@ -629,8 +778,10 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
       works.length === 0
         ? "**まだ作品が登録されていません。**\n\n" +
           "「1. 作品登録」から登録すると、下の操作が使えるようになります。"
-        : "**下に並ぶ操作は、ここで選んだ作品にだけ効きます。**\n\n" +
-          "押すと、登録している作品から選び直せます。"
+        : // 切った題の全文はここに出す（切りっぱなしにしない）
+          (view.fullTitle ? `**${view.fullTitle}**\n\n` : "") +
+            "**下に並ぶ操作は、ここで選んだ作品にだけ効きます。**\n\n" +
+            "押すと、登録している作品から選び直せます。"
     );
     // 作品が無いときは押しても選ぶものが無い。押せなくして理由を description に出す
     if (works.length > 0) {
@@ -716,8 +867,13 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
         count > 0 ? `\n\n未反映: ${count} 件` : "",
       ].join("")
     );
-    // 「AI」と件数の印は、詳細メニューと同じ目印で出す（新しい仕組みは作らない）
-    item.resourceUri = actionResourceUri({ type: "action", item: action });
+    // 「AI」と件数の印は、詳細メニューと同じ仕組みで出す（新しい仕組みは作らない）。
+    // ただし**目印には選んだ作品を混ぜる**——同じ鍵にすると、詳細メニュー用の
+    // 全作品合計がそのまま出る（作者の実機報告、2026-09-05）
+    item.resourceUri = stepActionResourceUri(
+      { type: "action", item: action },
+      selected?.id
+    );
 
     if (enabled) {
       item.command = {
@@ -734,7 +890,11 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
   }
 
   private countOf(counter: ActionCounter | undefined): number {
-    return counter && this.counts ? this.counts(counter) : 0;
+    if (!counter || !this.counts) return 0;
+    // **作品を選んでいないときは数えない**（設計書6.29）。
+    // どの作品の数字か分からないものを出すと、選択中の作品の件数に見える
+    const work = this.selectedWork();
+    return work ? this.counts(counter, work.id) : 0;
   }
 
   /** 段階・小分類を閉じたままでも、溜まっていることが分かるようにする */

@@ -116,7 +116,120 @@ export function detectNotationVariants(
   ];
 
   // 揺れの大きい（出現数の多い）組から見せる。作者は上から片付けられる
-  return groups.sort((left, right) => total(right) - total(left));
+  return foldSubsumedGroups(groups).sort(
+    (left, right) => total(right) - total(left)
+  );
+}
+
+/**
+ * 短いほうが長いほうに含まれる組を、長いほうへ畳む（作者の実機報告、2026-09-06）。
+ *
+ * 「おばあさん」の一部を「オバアサン」に変えた本文を検知すると、
+ * **「ばあさん ↔ バアサン」（73回/2回）と「おばあさん ↔ オバアサン」（8回/2回）が
+ * 別々の組として並んだ。** 同じ書き換えなのに2行あるので、作者には
+ * 「どちらを選べばよいのか」が分からない。
+ *
+ * **消すのではなく、重なりを除いてから数え直す。** 「ばあさん」が
+ * 「おばあさん」と関係なく単独で出ている作品もあり、その分は本物の揺れ
+ * である。長いほうの出現と位置が重なる分だけを短いほうから引き、
+ * 残りが揺れ（2表記以上）でなくなったときだけ組ごと落とす。
+ */
+export function foldSubsumedGroups(
+  groups: readonly NotationVariantGroup[]
+): NotationVariantGroup[] {
+  const result: NotationVariantGroup[] = [];
+
+  for (const group of groups) {
+    const covering = groups.filter(
+      (other) => other !== group && subsumes(other, group)
+    );
+    if (covering.length === 0) {
+      result.push(group);
+      continue;
+    }
+
+    const covered = coveredRanges(covering);
+    const forms = group.forms
+      .map((form) => ({
+        surface: form.surface,
+        occurrences: form.occurrences.filter(
+          (occurrence) => !isCovered(covered, occurrence, form.surface.length)
+        ),
+      }))
+      .filter((form) => form.occurrences.length > 0)
+      .sort((left, right) => right.occurrences.length - left.occurrences.length);
+
+    // 重なりを除くと1表記しか残らない＝この組の揺れは長いほうで説明できる
+    if (forms.length < 2) continue;
+
+    result.push({
+      ...group,
+      label: forms.map((form) => form.surface).join(" ↔ "),
+      forms,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * `outer` の表記が `inner` の表記をすべて呑み込んでいるか。
+ *
+ * 「どちらの表記も、相手のどれかに真に含まれている」ことを求める。
+ * 片方だけが含まれる組（「良い ↔ よい」と「つよい ↔ ツヨイ」のような形）は
+ * 別の揺れなので畳まない。
+ */
+function subsumes(
+  outer: NotationVariantGroup,
+  inner: NotationVariantGroup
+): boolean {
+  return inner.forms.every((form) =>
+    outer.forms.some(
+      (other) =>
+        other.surface.length > form.surface.length &&
+        other.surface.includes(form.surface)
+    )
+  );
+}
+
+/**
+ * 「どのファイルの何行目か」の鍵。
+ *
+ * **区切りは `\u0000` とエスケープで書く**——生のNULを置くと、gitとgrepが
+ * このファイルをバイナリ扱いし、差分も検索も効かなくなる
+ * (`test/unit/sourceHygiene.test.ts` が止める)。ファイル名に現れない字なので、
+ * 行番号との境目が混ざらない。
+ */
+function lineKey(occurrence: NotationOccurrence): string {
+  return `${occurrence.filePath}\u0000${occurrence.line}`;
+}
+
+/** 長いほうの組が占めている場所（ファイル・行・列の範囲） */
+function coveredRanges(
+  groups: readonly NotationVariantGroup[]
+): Map<string, Array<[number, number]>> {
+  const ranges = new Map<string, Array<[number, number]>>();
+  for (const group of groups) {
+    for (const form of group.forms) {
+      for (const occurrence of form.occurrences) {
+        const key = lineKey(occurrence);
+        const list = ranges.get(key) ?? [];
+        list.push([occurrence.column, occurrence.column + form.surface.length]);
+        ranges.set(key, list);
+      }
+    }
+  }
+  return ranges;
+}
+
+function isCovered(
+  ranges: Map<string, Array<[number, number]>>,
+  occurrence: NotationOccurrence,
+  length: number
+): boolean {
+  const list = ranges.get(lineKey(occurrence));
+  if (!list) return false;
+  return overlaps(list, occurrence.column, length);
 }
 
 function total(group: NotationVariantGroup): number {

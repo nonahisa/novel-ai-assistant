@@ -49,6 +49,18 @@ vi.mock("vscode", async (importOriginal) => {
 /** 走査が返す話（この作品の本文フォルダーにあるもの） */
 let episodes: Array<{ filePath: string }> = [];
 
+/**
+ * その作品のタイプ（設計書6.70）。**開く向きの既定はここで決まる。**
+ * プロットを実際に読ませたいわけではないので、読み取りだけ差し替える。
+ */
+let workFormat: WorkFormatKey | undefined;
+
+vi.mock("../../src/core/workFormatStore", () => ({
+  readWorkFormat: async () => workFormat,
+  invalidateWorkFormat: () => undefined,
+  matchWorkFormat: () => undefined,
+}));
+
 vi.mock("../../src/core/scanner", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
@@ -71,8 +83,12 @@ import {
   waitFor,
   type ManuscriptEditorDeps,
 } from "../../src/features/manuscriptEditor";
-import { MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE } from "../../src/core/manuscriptViewTypes";
+import {
+  MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
+  MANUSCRIPT_EDITOR_VIEW_TYPE,
+} from "../../src/core/manuscriptViewTypes";
 import type { WorkEntry } from "../../src/models/types";
+import type { WorkFormatKey } from "../../src/core/workFormat";
 
 const work: WorkEntry = {
   id: "w1",
@@ -99,6 +115,7 @@ const episodePath = "C:/小説/いじめられっ子/本文/2.md";
 beforeEach(() => {
   executed.length = 0;
   belongsToWork = true;
+  workFormat = undefined;
   episodes = [{ filePath: episodePath }];
 });
 
@@ -137,6 +154,22 @@ describe("開いていないときの受け皿", () => {
     expect(executed).toHaveLength(1);
     expect(executed[0].command).toBe("vscode.openWith");
     expect(executed[0].args[1]).toBe(MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE);
+  });
+
+  /**
+   * 脚本は縦書きが既定（設計書6.70）。
+   *
+   * **向きの決め方をここで増やさない。** 作品一覧のクリックと同じ
+   * `manuscriptViewTypeFor` に決めさせる。形式が読めない作品は
+   * これまでどおり横書きのままである（上のテスト）。
+   */
+  test("脚本の話は、縦書きの原稿エディタで開く", async () => {
+    workFormat = "script";
+
+    await makeProvider().revealLine(episodePath, 40);
+
+    expect(executed).toHaveLength(1);
+    expect(executed[0].args[1]).toBe(MANUSCRIPT_EDITOR_VIEW_TYPE);
   });
 
   /** プロット・設定資料は、これまでどおり素のエディタで開く */

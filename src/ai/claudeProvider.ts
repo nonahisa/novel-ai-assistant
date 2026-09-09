@@ -261,7 +261,11 @@ export class ClaudeProvider implements ApiKeyProvider {
     // モデルごとの対応状況を見て、送ってよいパラメータだけを組み立てる。
     // 未対応のパラメータを送るとモデルによっては400で弾かれるため。
     const raw = await this.rawCapabilities(params.model, params.signal);
-    const maxTokens = await this.resolveMaxTokens(params.model, params.signal);
+    const maxTokens = await this.resolveMaxTokens(
+      params.model,
+      params.maxOutputTokens,
+      params.signal
+    );
     throwIfAborted(params.signal);
 
     // モデルの申告する対応状況だけでは足りない。実際に400で拒否される項目が
@@ -416,11 +420,24 @@ export class ClaudeProvider implements ApiKeyProvider {
     };
   }
 
-  /** 出力トークンの上限。設定値とモデル上限の小さい方 */
-  private async resolveMaxTokens(model: string, signal?: AbortSignal): Promise<number> {
+  /**
+   * 出力トークンの上限。**呼び出し側の見込みを尊重し**、モデル上限で丸める。
+   *
+   * `requested` は `GenerateParams.maxOutputTokens`（設計書6.77の第2段）。
+   * 以前はこれを見ずに常に設定値を送っていたため、同じ欄がOllamaでだけ
+   * 効くという状態だった。渡されなければ従来どおり設定値を使う。
+   */
+  private async resolveMaxTokens(
+    model: string,
+    requested: number | undefined,
+    signal?: AbortSignal
+  ): Promise<number> {
     throwIfAborted(signal);
     const raw = await this.rawModel(model, signal);
-    return clampToModelLimit(resolveMaxOutputTokens(), raw?.max_tokens ?? 8192);
+    return clampToModelLimit(
+      requested ?? resolveMaxOutputTokens(),
+      raw?.max_tokens ?? 8192
+    );
   }
 
   private rawModelCache = new Map<string, ClaudeModel>();
@@ -520,6 +537,7 @@ function toModelInfo(m: ClaudeModel): ModelInfo {
  * 「非対応」として記録された。その記録が残っていると、直したあとも
  * スキーマ無し・思考ONのまま呼び続けることになる（実データで発生）。
  *
+ * v5 は、配列の件数制約（maxItems）を送らないようにしたため（2026-09-08）。
  * v4 は、拒否の原因がモデルではなく**こちらのスキーマ**だったため。
  * 「必須でない項目が多すぎる」で弾かれていたのを直したので、
  * 「JSONスキーマ非対応」という記録は誤りになった。
@@ -528,7 +546,7 @@ function toModelInfo(m: ClaudeModel): ModelInfo {
  * 上げないと、直す前の判定が残って新しいスキーマを試さない。
  */
 function supportKey(model: string): string {
-  return `novelai.claude.support.v4.${model}`;
+  return `novelai.claude.support.v5.${model}`;
 }
 
 /**
@@ -636,7 +654,7 @@ function describeCapabilities(caps: ClaudeModelCapabilities | null): string[] {
  * Claudeの構造化出力は
  *   - すべてのobjectに additionalProperties: false が必要
  *   - type: ["string", "null"] のような配列形式は anyOf で書く
- *   - **minLength / maxLength は受け付けない**
+ *   - **minLength / maxLength は受け付けない**（件数の maxItems も送らない）
  * という制約がある。Ollama側のスキーマ定義は変更したくないので
  * （プロンプトversionが変わるとキャッシュが全部無効になる）、
  * 送信直前にここで変換する。
@@ -663,7 +681,18 @@ export function toClaudeJsonSchema(schema: unknown): unknown {
       // ["string", "null"] → anyOf: [{type:"string"}, {type:"null"}]
       continue;
     }
-    if (key === "minLength" || key === "maxLength") continue;
+    // 件数の制約（maxItems）も送らない。文字数と同じく非対応とみられ、
+    // 試すとその400が他の指定への濡れ衣になる。maxItems は手元のモデルが
+    // 同じ語を書き続けるのを止めるためのもの（設計書6.5.9）で、
+    // 落としても抽出の中身は変わらない
+    if (
+      key === "minLength" ||
+      key === "maxLength" ||
+      key === "minItems" ||
+      key === "maxItems"
+    ) {
+      continue;
+    }
     out[key] = toClaudeJsonSchema(value);
   }
 

@@ -168,3 +168,82 @@ describe("手伝いを申し出る", () => {
     ).toBeUndefined();
   });
 });
+
+/**
+ * 本文を読んで言う一言（設計書6.21.4、P-34）。
+ *
+ * ここが返すのは**文面ではなく「取りに行く」印**である。文面はAIに
+ * 読ませないと決まらないので、`chatter.ts` は「言ってよいか」までを決める。
+ */
+describe("本文の感想", () => {
+  const wrote = {
+    openManuscriptPath: "C:/works/001.txt",
+    writtenToday: 500,
+    idleMs: idle,
+  };
+
+  test("ほかに言うことが無いときだけ取りに行く", () => {
+    // **祝いも申し出も、データに基づく確かな発言である。**
+    // AIの感想は当たり外れがあるので、確かなものを差し置いて出さない
+    expect(decideChatter(state({ ...wrote, pendingUpdates: 1 }))?.kind).toBe(
+      "pendingUpdates"
+    );
+    expect(decideChatter(state(wrote))?.kind).toBe("idleTypos");
+
+    const last = decideChatter(
+      state({ ...wrote, saidToday: new Set(["idleTypos"]) })
+    );
+    expect(last?.kind).toBe("commentRequest");
+  });
+
+  test("印には、読ませる本文が入っている", () => {
+    const result = decideChatter(
+      state({ ...wrote, saidToday: new Set(["idleTypos"]) })
+    );
+
+    expect(result).toMatchObject({
+      kind: "commentRequest",
+      manuscriptPath: "C:/works/001.txt",
+    });
+  });
+
+  test("同じ話については1日1回まで", () => {
+    // 鍵に話を含める。別の話を保存したら、その話については言ってよい
+    const first = decideChatter(
+      state({ ...wrote, saidToday: new Set(["idleTypos"]) })
+    );
+    const said = new Set(["idleTypos", first!.key]);
+
+    expect(decideChatter(state({ ...wrote, saidToday: said }))).toBeUndefined();
+    expect(
+      decideChatter(
+        state({
+          ...wrote,
+          openManuscriptPath: "C:/works/002.txt",
+          saidToday: said,
+        })
+      )?.kind
+    ).toBe("commentRequest");
+  });
+
+  test("書いている最中は取りに行かない", () => {
+    // 手が止まっていないところへ感想を差し込むのは、ただの割り込みである
+    expect(
+      decideChatter(
+        state({ ...wrote, idleMs: 0, saidToday: new Set(["idleTypos"]) })
+      )
+    ).toBeUndefined();
+  });
+
+  test("保存した本文が分からなければ取りに行かない", () => {
+    expect(
+      decideChatter(
+        state({
+          writtenToday: 500,
+          idleMs: idle,
+          saidToday: new Set(["idleTypos"]),
+        })
+      )
+    ).toBeUndefined();
+  });
+});

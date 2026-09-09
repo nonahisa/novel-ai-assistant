@@ -38,6 +38,9 @@ export async function switchMode(): Promise<void> {
     .getConfiguration("novelai")
     .update("mode", next, vscode.ConfigurationTarget.Global);
 
+  // **戻し方の案内つきなので通知に残す**（設計書6.81の規則3）。
+  // 編集者モードは使える操作が減るので、「どうやって戻すか」が読み切れ
+  // ないまま消えると、作者は戻す道を失ったように見える（2026-09-06に戻した）
   void vscode.window.showInformationMessage(
     next === "editor"
       ? "編集者モードにしました。本文の校正・校閲だけを行えます。" +

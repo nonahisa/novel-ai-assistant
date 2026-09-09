@@ -2,6 +2,10 @@ import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
+import {
+  resolveOutputTokensForPlanning,
+  resolveOutputTokensForSend,
+} from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
 import { loadEpisodeBodies } from "../core/episodeBodies";
 import { SynopsisStore } from "../core/synopsisStore";
@@ -29,8 +33,14 @@ import {
 import { confirmProviderReachable } from "./aiConnectivity";
 import { confirmFormatFit } from "./formatFitPrompt";
 import { withCancellableProgress } from "../views/progress";
-import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  useLogFile,
+} from "../core/logger";
 import { openInDefaultEditor } from "../views/openDocument";
+import { notifyDone, warnWithLog } from "../views/notify";
 
 /**
  * プロット逆算生成（P-02）。既に書いた本文からプロットを組み立て直す。
@@ -45,7 +55,15 @@ import { openInDefaultEditor } from "../views/openDocument";
  * 既に書かれている項目は「置き換える候補」として選ばせる。
  */
 
-const OPENING_EXCERPT_CHARS = 3_000;
+/**
+ * プロット逆算へ渡す冒頭本文の量。
+ *
+ * **紹介文の `BLURB_OPENING_EXCERPT_CHARS`（6,000字）とは別物である。**
+ * 以前はどちらも同じ名前を名乗り、値だけが違っていた
+ * （設計書6.77の第2段で改名）。プロットは「話がどう始まるか」の
+ * 骨格をつかめれば足りるので、紹介文より短い——文体を見せる必要が無い。
+ */
+export const PLOT_OPENING_EXCERPT_CHARS = 3_000;
 
 export async function generatePlot(
   work: WorkEntry,
@@ -125,6 +143,17 @@ export async function generatePlot(
           model: resolved.model,
           // 事実の再構成なので揺らす必要がない。ただし言い回しは要るので0にはしない
           temperature: 0.3,
+          // **見込みと実上限を分けて渡す**（設計書6.77の第2段）。プロットは
+          // 全節ぶん返るので応答が長い——見込みをそのまま上限にすると、
+          // 測っていないモデルで途中から切れて丸ごと捨てることになる
+          maxOutputTokens: resolveOutputTokensForSend(
+            resolved.provider.id,
+            resolved.model
+          ),
+          plannedOutputTokens: resolveOutputTokensForPlanning(
+            resolved.provider.id,
+            resolved.model
+          ),
           jsonSchema: PLOT_REVERSE_SCHEMA as unknown as object,
           disableThinking: true,
           meta: { feature: "plot_reverse", workFolder: work.folderPath },
@@ -146,11 +175,7 @@ export async function generatePlot(
           ? failure.message
           : String(failure);
     logFailure("プロット逆算", { 内容: message });
-    vscode.window
-      .showWarningMessage(`プロットを作れませんでした: ${message}`, "ログを見る")
-      .then((answer) => {
-        if (answer === "ログを見る") showLog();
-      });
+    void warnWithLog(`プロットを作れませんでした: ${message}`);
     return;
   }
   if (!responseText?.trim()) return;
@@ -159,13 +184,9 @@ export async function generatePlot(
   if (!parsed) {
     logFailure("プロット逆算", {
       理由: "応答を読み取れません",
-      応答: responseText.slice(0, 400),
+      応答: responseExcerptForLog(responseText),
     });
-    vscode.window
-      .showWarningMessage("応答を読み取れませんでした。", "ログを見る")
-      .then((answer) => {
-        if (answer === "ログを見る") showLog();
-      });
+    void warnWithLog("応答を読み取れませんでした。");
     return;
   }
 
@@ -241,10 +262,10 @@ async function collectMaterial(
   const bodies = (await loadEpisodeBodies(scan.episodes)).bodies;
   let openingExcerpt = "";
   for (const episode of bodies) {
-    if (openingExcerpt.length >= OPENING_EXCERPT_CHARS) break;
+    if (openingExcerpt.length >= PLOT_OPENING_EXCERPT_CHARS) break;
     openingExcerpt += `${episode.body}\n\n`;
   }
-  openingExcerpt = openingExcerpt.slice(0, OPENING_EXCERPT_CHARS);
+  openingExcerpt = openingExcerpt.slice(0, PLOT_OPENING_EXCERPT_CHARS);
 
   const [characters, locations, world] = await Promise.all([
     new CharacterStore(work).loadAll(),
@@ -321,7 +342,7 @@ async function applyPlot(
   }
 
   if (filled.length === 0 && replaced.length === 0) {
-    vscode.window.showInformationMessage("プロットは変更しませんでした。");
+    notifyDone("プロットは変更しませんでした。");
     return;
   }
 

@@ -3,6 +3,7 @@ import * as path from "../core/paths";
 import { canRunProcesses } from "../core/runtime";
 import { logFailure, logLine } from "../core/logger";
 import {
+  findSameGeneratedFile,
   GENERATED_DIR,
   pruneGeneratedFiles,
   sanitizeNamePart,
@@ -52,7 +53,14 @@ export async function openInDefaultEditor(
 let generatedStorageRoot: string | undefined;
 
 export function setGeneratedStorageRoot(root: vscode.Uri): void {
-  generatedStorageRoot = path.fromUri(root);
+  // **`vscode-userdata:` は手元の実体があるので OS のパスへ倒す。**
+  // 拡張機能開発ホストでは `globalStorageUri` がこの仕組みで渡ってくる。
+  // `fromUri` の一般規則（`file:` 以外は URI の文字列）に任せると
+  // `mkdir "C:\vscode-userdata:"` になって落ち、生成文書がすべて
+  // 無題文書へ落ちていた（実機で発見、2026-09-05）。ブラウザ版の
+  // `vscode-vfs:` などは実体が無いので、これまでどおり文字列のまま
+  generatedStorageRoot =
+    root.scheme === "vscode-userdata" ? root.fsPath : path.fromUri(root);
 }
 
 /**
@@ -92,17 +100,35 @@ export function setGeneratedStorageRoot(root: vscode.Uri): void {
  * @param displayName タブに出る名前。**ファイル名の前置き（種類）にもなる**
  *   ので、作品名のような一回ごとに変わる語を混ぜない（置き場が作品ごとに
  *   分かれているので、そもそも要らない）
- * @param location 作品が分かるなら渡す。渡さないと保管庫へ置く
+ * @param location 作品が分かるなら渡す。渡さないと保管庫へ置く。
+ *   `reuseSameDay` を立てると、**同じ日に作った同じ中身の1枚があれば
+ *   書かずにそれを開く**（作者の実機報告、2026-09-06。「伏線の一覧を開く」を
+ *   押すたびにファイルとタブが増えた）。一度きりの結果（診断・告知文）では
+ *   立てない——同じ中身でも「いつ出したか」が意味を持つ
  */
 export async function openGeneratedMarkdown(
   displayName: string,
   content: string,
   options?: vscode.TextDocumentShowOptions,
-  location?: { work?: WorkEntry }
+  location?: { work?: WorkEntry; reuseSameDay?: boolean }
 ): Promise<void> {
   const directory = generatedDirectoryFor(location?.work);
   if (directory) {
     try {
+      // 同じ紙が今日すでにあるなら、増やさずにそれを開く。
+      // **既存ファイルは上書きしない**という設計はそのままである
+      if (location?.reuseSameDay) {
+        const found = await findSameGeneratedFile(
+          directory,
+          displayName,
+          content
+        );
+        if (found) {
+          await openInDefaultEditor(found, options);
+          return;
+        }
+      }
+
       const target = await writeGeneratedFile(directory, displayName, content);
       await pruneGeneratedFilesQuietly(directory, displayName);
       await openInDefaultEditor(target, options);

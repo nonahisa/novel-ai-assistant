@@ -7,6 +7,7 @@ import { lmstudioEndpoint } from "../ai/lmstudioProvider";
 import { prepareLmStudioModel } from "../ai/registry";
 import { canRunProcesses } from "../core/runtime";
 import { withProgress } from "../views/progress";
+import { notifyDone } from "../views/notify";
 
 /**
  * AIへの疎通確認と、手元で動くAI（Ollama・LM Studio）の起動導線。
@@ -170,7 +171,7 @@ export async function startLmStudioWithProgress(): Promise<boolean> {
   );
 
   if (outcome.ok) {
-    vscode.window.showInformationMessage("LM Studioのサーバーを起動しました。");
+    notifyDone("LM Studioのサーバーを起動しました。");
     return true;
   }
 
@@ -210,7 +211,7 @@ export async function startOllamaWithProgress(): Promise<boolean> {
   );
 
   if (outcome.ok) {
-    vscode.window.showInformationMessage("Ollamaを起動しました。");
+    notifyDone("Ollamaを起動しました。");
     return true;
   }
 

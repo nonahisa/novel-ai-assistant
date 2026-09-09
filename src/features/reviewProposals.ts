@@ -14,6 +14,7 @@ import {
 } from "../core/textFile";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import type { ProposalPanel, ProposalViewItem } from "./proposalPanel";
+import { notifyDone } from "../views/notify";
 
 /**
  * 編集部からの提案を、作者が見て決める（設計書5.6）。
@@ -130,7 +131,7 @@ export async function toggleReviewLock(work: WorkEntry): Promise<void> {
         ? `${current.holder} が押さえていたものを外しました`
         : "",
     });
-    void vscode.window.showInformationMessage(
+    notifyDone(
       `${path.basename(relative)} のロックを外しました。`
     );
     return;

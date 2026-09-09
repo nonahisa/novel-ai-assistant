@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { atomicWriteFile } from "./atomicWrite";
 import * as path from "./paths";
 import {
+  formatDayStamp,
   TIMESTAMPED_NAME_TRIES,
   timestampedFileNameCandidates,
 } from "./timestampedFileName";
@@ -167,6 +168,98 @@ export async function writeGeneratedFile(
     }
   }
   throw new Error("生成した文書の保存先の名前を決められませんでした。");
+}
+
+/**
+ * 同じ日に作った同じ中身の生成文書があれば、その置き場所を返す。
+ *
+ * 作者の実機報告（2026-09-06）：「伏線の一覧を開く」を押すたびに
+ * `伏線の一覧_2026-09-06_2225.md`・`_2227.md`・`_2229.md` と増え、
+ * タブも3つ並んだ。**上書きしない設計は変えない**——代わりに、
+ * 中身が同じなら書かずに既存の1枚を開く。押しても増えない。
+ *
+ * **読めなかったファイルは「違うもの」として飛ばす。** ここで投げると、
+ * 読み物が開けなくなる（比べるのは、開くためのついでの仕事である）。
+ */
+export async function findSameGeneratedFile(
+  directory: string,
+  kind: string,
+  content: string,
+  at: Date = new Date()
+): Promise<string | undefined> {
+  let listed: [string, vscode.FileType][];
+  try {
+    listed = await vscode.workspace.fs.readDirectory(path.toUri(directory));
+  } catch {
+    // 置き場がまだ無い＝比べる相手も無い
+    return undefined;
+  }
+
+  const names = sameDayGeneratedNames(
+    listed
+      .filter(([, type]) => type === vscode.FileType.File)
+      .map(([name]) => name),
+    kind,
+    at
+  );
+
+  for (const name of names) {
+    const target = path.join(directory, name);
+    try {
+      const bytes = await vscode.workspace.fs.readFile(path.toUri(target));
+      if (isSameGeneratedContent(new TextDecoder().decode(bytes), content)) {
+        return target;
+      }
+    } catch {
+      // 読めないものは比べられない。新しく書く側へ倒す
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 見出しの日時を取り除いてから比べるための正規化。
+ *
+ * 生成文書の多くは冒頭に「2026-09-08 22:29 現在」のような時刻を書く。
+ * **そこだけが違う2枚は、作者にとっては同じ紙である。** 日時を落として
+ * から比べないと、押すたびに「中身が違う」と判定して増え続ける。
+ *
+ * 日付や時刻が本文に出てくる文書（伏線の引用など）まで落ちるが、
+ * ここでの用途は**同じ日に作り直したものどうしの照合**なので、
+ * 落としすぎて困る場面は無い（落とした結果が一致するなら、
+ * 残りの中身は同じである）。
+ */
+const TIMESTAMP_IN_TEXT =
+  /\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?(?:[\s_]*\d{1,2}[:：時]\d{2}分?)?/g;
+
+export function normalizeGeneratedContent(content: string): string {
+  return content
+    .replace(/\r\n/g, "\n")
+    .replace(TIMESTAMP_IN_TEXT, "")
+    .trimEnd();
+}
+
+/** 見出しの日時を除いて、同じ中身か */
+export function isSameGeneratedContent(left: string, right: string): boolean {
+  return normalizeGeneratedContent(left) === normalizeGeneratedContent(right);
+}
+
+/**
+ * 同じ日に作られた、同じ種類の生成文書の名前を新しい順に返す。
+ *
+ * **「同じ日」に限る。** 昨日の一覧と中身が同じでも、作者が今日の日付で
+ * 見たいことはある。日をまたいだら新しく作る（古いものは掃除が消す）。
+ */
+export function sameDayGeneratedNames(
+  names: readonly string[],
+  kind: string,
+  at: Date
+): string[] {
+  const prefix = `${generatedNamePrefix(kind)}${formatDayStamp(at)}`;
+  return names
+    .filter((name) => isGeneratedName(name, generatedNamePrefix(kind)))
+    .filter((name) => name.startsWith(prefix))
+    .sort((left, right) => right.localeCompare(left));
 }
 
 /**
