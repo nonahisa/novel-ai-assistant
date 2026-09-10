@@ -1,13 +1,17 @@
 import { describe, expect, test } from "vitest";
 import {
   buildDictionary,
+  buildDictionaryPickItems,
   encodeDictionary,
   formatDictionary,
   splitByEncodable,
+  summarizeForComment,
+  type DictionaryEntry,
 } from "../../src/core/imeDictionary";
 import { emptyCharacter, type Character } from "../../src/models/character";
 import { emptyLocation, type Location } from "../../src/models/location";
 import { emptyAbility, type Ability } from "../../src/models/ability";
+import { emptyOrganization } from "../../src/models/organization";
 import { emptyWorldItem } from "../../src/models/world";
 
 function character(
@@ -40,9 +44,24 @@ describe("IME辞書の組み立て", () => {
     });
 
     expect(result.entries).toEqual([
-      { reading: "うぇるふぇあ", surface: "ウェルフェア", partOfSpeech: "地名" },
-      { reading: "しんじゅつ", surface: "シンジュツ", partOfSpeech: "名詞" },
-      { reading: "ほんごー", surface: "ホンゴー", partOfSpeech: "人名" },
+      {
+        reading: "うぇるふぇあ",
+        surface: "ウェルフェア",
+        partOfSpeech: "地名",
+        kind: "location",
+      },
+      {
+        reading: "しんじゅつ",
+        surface: "シンジュツ",
+        partOfSpeech: "名詞",
+        kind: "ability",
+      },
+      {
+        reading: "ほんごー",
+        surface: "ホンゴー",
+        partOfSpeech: "人名",
+        kind: "character",
+      },
     ]);
   });
 
@@ -69,6 +88,7 @@ describe("IME辞書の組み立て", () => {
       reading: "つきしまあかり",
       surface: "月島灯",
       partOfSpeech: "人名",
+      kind: "character",
     });
   });
 
@@ -93,7 +113,12 @@ describe("IME辞書の組み立て", () => {
     });
 
     expect(result.entries).toEqual([
-      { reading: "つきしまあかり", surface: "月島灯", partOfSpeech: "人名" },
+      {
+        reading: "つきしまあかり",
+        surface: "月島灯",
+        partOfSpeech: "人名",
+        kind: "character",
+      },
     ]);
     expect(result.missingReading).toEqual([]);
   });
@@ -126,7 +151,12 @@ describe("IME辞書の組み立て", () => {
     });
 
     expect(result.entries).toEqual([
-      { reading: "せいもん", surface: "セイモン", partOfSpeech: "名詞" },
+      {
+        reading: "せいもん",
+        surface: "セイモン",
+        partOfSpeech: "名詞",
+        kind: "term",
+      },
     ]);
   });
 
@@ -148,7 +178,12 @@ describe("IME辞書の組み立て", () => {
     });
 
     expect(result.entries).toEqual([
-      { reading: "しんじゅつ", surface: "神威術", partOfSpeech: "名詞" },
+      {
+        reading: "しんじゅつ",
+        surface: "神威術",
+        partOfSpeech: "名詞",
+        kind: "term",
+      },
     ]);
     expect(result.missingReading).toEqual([]);
   });
@@ -185,7 +220,12 @@ describe("IME辞書の組み立て", () => {
     });
 
     expect(result.entries).toEqual([
-      { reading: "しんじゅつ", surface: "神術", partOfSpeech: "名詞" },
+      {
+        reading: "しんじゅつ",
+        surface: "神術",
+        partOfSpeech: "名詞",
+        kind: "term",
+      },
     ]);
   });
 
@@ -237,8 +277,13 @@ describe("IME辞書の組み立て", () => {
 });
 
 describe("辞書ファイルの書式", () => {
-  const entries = [
-    { reading: "ほんごー", surface: "ホンゴー", partOfSpeech: "人名" },
+  const entries: DictionaryEntry[] = [
+    {
+      reading: "ほんごー",
+      surface: "ホンゴー",
+      partOfSpeech: "人名",
+      kind: "character",
+    },
   ];
 
   test("Microsoft IMEは3列", () => {
@@ -295,9 +340,19 @@ describe("文字コードで表せない語の選り分け", () => {
    * そのまま書き出すと化けた辞書ができあがり、
    * 作者には「登録したのに変な語が出る」としか見えない。
    */
-  const ok = { reading: "ほんごー", surface: "ホンゴー", partOfSpeech: "人名" };
+  const ok: DictionaryEntry = {
+    reading: "ほんごー",
+    surface: "ホンゴー",
+    partOfSpeech: "人名",
+    kind: "character",
+  };
   // 「𠮷」（つちよし）はサロゲートペアでShift_JISに無い。人名では現実的に起きる
-  const lost = { reading: "よしの", surface: "𠮷野", partOfSpeech: "人名" };
+  const lost: DictionaryEntry = {
+    reading: "よしの",
+    surface: "𠮷野",
+    partOfSpeech: "人名",
+    kind: "character",
+  };
 
   test("Shift_JISで表せない語は書き出さず、名前を返す", () => {
     const result = splitByEncodable([ok, lost], "shift_jis");
@@ -309,10 +364,25 @@ describe("文字コードで表せない語の選り分け", () => {
   test("小説でよく使う記号はShift_JISでも通る", () => {
     // 「――」「｜《》」「……」が落ちるなら記号辞書の設計を変える必要がある。
     // 実測では通ったので、その事実を固定しておく
-    const symbols = [
-      { reading: "だっしゅ", surface: "――", partOfSpeech: "短縮よみ" },
-      { reading: "るび", surface: "｜《》", partOfSpeech: "短縮よみ" },
-      { reading: "さんてん", surface: "……", partOfSpeech: "短縮よみ" },
+    const symbols: DictionaryEntry[] = [
+      {
+        reading: "だっしゅ",
+        surface: "――",
+        partOfSpeech: "短縮よみ",
+        kind: "term",
+      },
+      {
+        reading: "るび",
+        surface: "｜《》",
+        partOfSpeech: "短縮よみ",
+        kind: "term",
+      },
+      {
+        reading: "さんてん",
+        surface: "……",
+        partOfSpeech: "短縮よみ",
+        kind: "term",
+      },
     ];
 
     const result = splitByEncodable(symbols, "shift_jis");
@@ -324,5 +394,202 @@ describe("文字コードで表せない語の選り分け", () => {
   test("UTF-8・UTF-16では何も落とさない", () => {
     expect(splitByEncodable([ok, lost], "utf8").unencodable).toEqual([]);
     expect(splitByEncodable([ok, lost], "utf16le").unencodable).toEqual([]);
+  });
+});
+
+describe("コメントに入れる解説", () => {
+  test("タブと改行は空白へ畳む", () => {
+    // 辞書ファイルはタブ区切り・CRLF区切り。残すとその1行が壊れ、
+    // 作者からは「登録したはずの語だけ変換に出ない」としか見えない
+    expect(summarizeForComment("聖なる\t言葉。\r\n王都で使う")).toBe(
+      "聖なる 言葉。 王都で使う"
+    );
+  });
+
+  test("30字を超えたら切って「…」を付ける", () => {
+    // IMEの辞書ツールのコメント列は狭い。長い紹介を丸ごと入れても読めない
+    expect(summarizeForComment("あ".repeat(30))).toBe("あ".repeat(30));
+    expect(summarizeForComment("あ".repeat(31))).toBe(`${"あ".repeat(30)}…`);
+  });
+
+  test("サロゲートペアを割らない", () => {
+    // 「𠮷」のような字を途中で切ると、壊れた文字がコメントに残る
+    const text = "𠮷".repeat(31);
+    expect(summarizeForComment(text)).toBe(`${"𠮷".repeat(30)}…`);
+  });
+
+  test("空や未設定なら空文字", () => {
+    expect(summarizeForComment(null)).toBe("");
+    expect(summarizeForComment("   ")).toBe("");
+  });
+});
+
+describe("解説つきのコメント", () => {
+  function withNote() {
+    return buildDictionary({
+      characters: [
+        character("char_001", "ホンゴー", {
+          summary: "主人公。転生した少女",
+          aliases: ["ホンゴ"],
+        }),
+      ],
+      abilities: [],
+      locations: [],
+    });
+  }
+
+  test("Google日本語入力の4列目は「作品名：解説」", () => {
+    // 作品名だけだと、何百と並んだ造語のどれが何だったのか分からない
+    const result = withNote();
+    const line = formatDictionary(result.entries, "google", "テスト作品");
+
+    expect(line).toContain("ほんごー\tホンゴー\t人名\tテスト作品：主人公。転生した少女\r\n");
+  });
+
+  test("解説が無ければ作品名だけを入れる", () => {
+    // 「テスト作品：」と尻切れにしない
+    const entries: DictionaryEntry[] = [
+      {
+        reading: "ほんごー",
+        surface: "ホンゴー",
+        partOfSpeech: "人名",
+        kind: "character",
+      },
+    ];
+
+    expect(formatDictionary(entries, "google", "テスト作品")).toBe(
+      "ほんごー\tホンゴー\t人名\tテスト作品\r\n"
+    );
+  });
+
+  test("解説があってもMicrosoft IMEとATOKは3列のまま", () => {
+    // 4列目を持てるか確かめられていない。当てずっぽうで足すと
+    // 取り込みが丸ごと失敗しかねない
+    const result = withNote();
+
+    expect(formatDictionary(result.entries, "msime", "テスト作品")).toBe(
+      "ほんご\tホンゴ\t人名\r\nほんごー\tホンゴー\t人名\r\n"
+    );
+    expect(formatDictionary(result.entries, "atok", "テスト作品")).toBe(
+      "ほんご\tホンゴ\t人名\r\nほんごー\tホンゴー\t人名\r\n"
+    );
+  });
+
+  test("別名にも本体と同じ解説が付く", () => {
+    // 一覧で「ホンゴ」だけ見せられても、誰のことか分からない
+    const result = withNote();
+
+    expect(
+      result.entries.find((entry) => entry.surface === "ホンゴ")?.note
+    ).toBe("主人公。転生した少女");
+  });
+
+  test("人物の紹介が無ければ役割を使う", () => {
+    const result = build({
+      characters: [character("char_001", "ホンゴー", { role: "主人公" })],
+    });
+
+    expect(result.entries[0].note).toBe("主人公");
+  });
+
+  test("場所・組織・能力・世界観は紹介、無ければ説明を使う", () => {
+    const result = buildDictionary({
+      characters: [],
+      abilities: [
+        { ...emptyAbility("abil_001", "シンジュツ"), description: "神の術" },
+      ],
+      locations: [
+        { ...emptyLocation("loc_001", "ウェルフェア"), summary: "王都" },
+      ],
+      organizations: [
+        {
+          ...emptyOrganization("org_001", "アウクトケ"),
+          summary: "名門の家",
+          description: "こちらは使わない",
+        },
+      ],
+      worldItems: [
+        {
+          ...emptyWorldItem("world_001", "セイモン"),
+          category: "term",
+          description: "詠唱に使う言葉",
+        },
+      ],
+    });
+
+    const noteOf = (surface: string) =>
+      result.entries.find((entry) => entry.surface === surface)?.note;
+
+    expect(noteOf("シンジュツ")).toBe("神の術");
+    expect(noteOf("ウェルフェア")).toBe("王都");
+    // 紹介があるときは説明より紹介を優先する（短くまとめてあるため）
+    expect(noteOf("アウクトケ")).toBe("名門の家");
+    expect(noteOf("セイモン")).toBe("詠唱に使う言葉");
+  });
+});
+
+describe("辞書に入れる語を選ぶ一覧", () => {
+  function sample() {
+    return buildDictionary({
+      characters: [character("char_001", "ホンゴー", { summary: "主人公" })],
+      abilities: [{ ...emptyAbility("abil_001", "シンジュツ") }],
+      locations: [{ ...emptyLocation("loc_001", "ウェルフェア") }],
+    });
+  }
+
+  test("種類ごとに区切り線を挟む", () => {
+    // 品詞では組織も能力も造語も「名詞」に畳まれていて、作者が見分けられない
+    const items = buildDictionaryPickItems(sample().entries);
+
+    expect(
+      items.map((item) => (item.separator ? `--${item.label}--` : item.label))
+    ).toEqual([
+      "--人物--",
+      "ホンゴー",
+      "--場所--",
+      "ウェルフェア",
+      "--能力--",
+      "シンジュツ",
+    ]);
+  });
+
+  test("既定はすべて選択済み", () => {
+    // 数百件を毎回選び直させると使われなくなる。
+    // この一覧は「ふるいにかける」ためではなく「要らないものを外す」ためにある
+    const items = buildDictionaryPickItems(sample().entries);
+
+    expect(
+      items.filter((item) => !item.separator).every((item) => item.picked)
+    ).toBe(true);
+  });
+
+  test("前回外した語は外れた状態で出す", () => {
+    const items = buildDictionaryPickItems(sample().entries, ["ウェルフェア"]);
+    const picked = new Map(
+      items
+        .filter((item) => !item.separator)
+        .map((item) => [item.label, item.picked])
+    );
+
+    expect(picked.get("ウェルフェア")).toBe(false);
+    expect(picked.get("ホンゴー")).toBe(true);
+    expect(picked.get("シンジュツ")).toBe(true);
+  });
+
+  test("読みと解説を項目に添える", () => {
+    const items = buildDictionaryPickItems(sample().entries);
+    const honngo = items.find((item) => item.label === "ホンゴー");
+
+    expect(honngo?.description).toBe("ほんごー");
+    expect(honngo?.detail).toBe("主人公");
+  });
+
+  test("語の無い種類は区切り線を出さない", () => {
+    // 空の「組織」だけが並ぶと、抽出できていないのか不具合なのか分からない
+    const items = buildDictionaryPickItems(sample().entries);
+
+    expect(
+      items.some((item) => item.separator && item.label === "組織")
+    ).toBe(false);
   });
 });

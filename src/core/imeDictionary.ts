@@ -17,6 +17,37 @@ import { deriveReading, toDictionaryReading } from "./reading";
 
 export type ImeDialect = "msime" | "google" | "atok";
 
+/**
+ * 語の出どころの種類。
+ *
+ * 品詞（人名・地名・名詞）とは別に持つ。品詞はIMEの都合で畳まれており
+ * （組織も能力も造語も「名詞」）、**作者が一覧で見分けるには足りない。**
+ */
+export type DictionaryKind =
+  | "character"
+  | "location"
+  | "organization"
+  | "ability"
+  | "term";
+
+/** 一覧の区切り線に出す名前 */
+export const DICTIONARY_KIND_LABELS: Record<DictionaryKind, string> = {
+  character: "人物",
+  location: "場所",
+  organization: "組織",
+  ability: "能力",
+  term: "用語",
+};
+
+/** 一覧に並べる順。設定資料パネルと同じ並びにして、探す場所を揃える */
+export const DICTIONARY_KIND_ORDER: readonly DictionaryKind[] = [
+  "character",
+  "location",
+  "organization",
+  "ability",
+  "term",
+];
+
 /** 辞書1行 */
 export interface DictionaryEntry {
   /** ひらがなの読み */
@@ -25,6 +56,13 @@ export interface DictionaryEntry {
   surface: string;
   /** 品詞 */
   partOfSpeech: string;
+  /** 語の出どころ。一覧の区切りに使う */
+  kind: DictionaryKind;
+  /**
+   * 短い解説。一覧の説明と、コメント欄を持てる形式の4列目に出す。
+   * 元のレコードに書くものが無ければ入らない（空文字は持たない）
+   */
+  note?: string;
 }
 
 export interface DictionaryBuildInput {
@@ -48,6 +86,37 @@ export interface DictionaryBuildResult {
  */
 const MIN_SURFACE_LENGTH = 2;
 
+/**
+ * コメントに入れる解説の長さ。
+ *
+ * 紹介（`SUMMARY_MAX_CHARS` = 80字）をそのまま入れない。辞書のコメント欄は
+ * IMEの辞書ツールの狭い列に出るもので、長い文はどのIMEでも読めない。
+ * ここで要るのは「どの語だったか思い出せる手がかり」だけなので短く切る。
+ * 一覧の説明欄（QuickPickの `detail`）でも同じ理由で読みやすい。
+ */
+export const COMMENT_MAX_CHARS = 30;
+
+/**
+ * 解説をコメント欄へ入れられる形に整える。
+ *
+ * **タブと改行を必ず落とす。** 辞書ファイルはタブ区切り・CRLF区切りなので、
+ * 元の紹介文に混じっていると**その1行が壊れて取り込みで弾かれる。**
+ * 作者から見れば「登録したはずの語だけ出てこない」という分かりにくい形になる。
+ */
+export function summarizeForComment(text: string | null | undefined): string {
+  if (!text) return "";
+  // タブ・改行を含む空白の連なりを、ひと続きの空白1つに畳む。
+  // 取り除くのではなく空白へ替えるのは、改行で区切られた文が
+  // 「見えた廊下奥に」のようにくっついて読めなくなるため
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (!flat) return "";
+
+  // サロゲートペア（「𠮷」のような字）を割らないよう、コードポイントで数える
+  const characters = [...flat];
+  if (characters.length <= COMMENT_MAX_CHARS) return flat;
+  return `${characters.slice(0, COMMENT_MAX_CHARS).join("")}…`;
+}
+
 export function buildDictionary(
   input: DictionaryBuildInput
 ): DictionaryBuildResult {
@@ -58,7 +127,9 @@ export function buildDictionary(
   const add = (
     surface: string,
     reading: string | null,
-    partOfSpeech: string
+    partOfSpeech: string,
+    kind: DictionaryKind,
+    note: string
   ) => {
     const text = surface.trim();
     if (text.length < MIN_SURFACE_LENGTH) return;
@@ -78,32 +149,57 @@ export function buildDictionary(
     const key = `${resolved}\t${text}`;
     if (seen.has(key)) return;
     seen.add(key);
-    entries.push({ reading: resolved, surface: text, partOfSpeech });
+    entries.push({
+      reading: resolved,
+      surface: text,
+      partOfSpeech,
+      kind,
+      // 空文字は持たない。持つと4列目が「作品名：」と尻切れになる
+      ...(note ? { note } : {}),
+    });
   };
 
   for (const character of input.characters) {
     // モブは数が多く、地の文の普通名詞と重なりやすいので辞書に入れない
     if (character.isMob) continue;
-    add(character.name, character.reading, "人名");
-    // 別名は名前の読みを流用できない。カタカナなら作れる
-    for (const alias of character.aliases) add(alias, null, "人名");
+    // 紹介が無ければ役割（「主人公」等）で代える。
+    // どちらも無い人物は解説なしで出す（無理に本文から作らない）
+    const note = summarizeForComment(character.summary ?? character.role);
+    add(character.name, character.reading, "人名", "character", note);
+    // 別名は名前の読みを流用できない。カタカナなら作れる。
+    // 解説は本体と同じものを付ける——別名だけ手がかりが無いと、
+    // 一覧で「リン」だけ見せられても誰のことか分からない
+    for (const alias of character.aliases) {
+      add(alias, null, "人名", "character", note);
+    }
   }
 
   for (const location of input.locations) {
-    add(location.name, location.reading, "地名");
-    for (const alias of location.aliases) add(alias, null, "地名");
+    const note = summarizeForComment(location.summary ?? location.description);
+    add(location.name, location.reading, "地名", "location", note);
+    for (const alias of location.aliases) {
+      add(alias, null, "地名", "location", note);
+    }
   }
 
   // 組織名は固有名詞だが、IMEに「組織名」という品詞は無い。
   // 人名でも地名でもないので名詞にする
   for (const organization of input.organizations ?? []) {
-    add(organization.name, organization.reading, "名詞");
-    for (const alias of organization.aliases) add(alias, null, "名詞");
+    const note = summarizeForComment(
+      organization.summary ?? organization.description
+    );
+    add(organization.name, organization.reading, "名詞", "organization", note);
+    for (const alias of organization.aliases) {
+      add(alias, null, "名詞", "organization", note);
+    }
   }
 
   for (const ability of input.abilities) {
-    add(ability.name, ability.reading, "名詞");
-    for (const alias of ability.aliases) add(alias, null, "名詞");
+    const note = summarizeForComment(ability.summary ?? ability.description);
+    add(ability.name, ability.reading, "名詞", "ability", note);
+    for (const alias of ability.aliases) {
+      add(alias, null, "名詞", "ability", note);
+    }
   }
 
   // 世界観は**「固有の用語」だけ**を入れる。
@@ -117,9 +213,11 @@ export function buildDictionary(
   // 作品の造語こそ変換に出てこないので、そこが抜けているのは痛かった。
   for (const item of input.worldItems ?? []) {
     if (item.category !== "term") continue;
-    add(item.name, item.reading, "名詞");
+    // 世界観には紹介の項目が無く、`description` がその項目の中身そのもの
+    const note = summarizeForComment(item.description);
+    add(item.name, item.reading, "名詞", "term", note);
     // 別名は名前の読みを流用できない。カタカナなら作れる
-    for (const alias of item.aliases) add(alias, null, "名詞");
+    for (const alias of item.aliases) add(alias, null, "名詞", "term", note);
   }
 
   entries.sort(
@@ -210,7 +308,12 @@ export const DICTIONARY_FORMATS: Record<ImeDialect, DictionaryFormat> = {
  * 辞書ファイルの中身を組み立てる。
  *
  * どちらもタブ区切りだが、Google日本語入力は4列目にコメントを持てる。
- * どの作品から来た語なのかを残しておくと、あとで見分けられる。
+ * ここに**作品名と短い解説**を入れる（作者の依頼、2026-09-10）。
+ * 作品名だけだと、IMEの辞書ツールに何百と並んだ造語のうち
+ * どれが何だったのか、作者自身にも分からなくなる。
+ *
+ * MS-IMEとATOKは3列のまま。コメント欄を持てるか確かめられていないので、
+ * 当てずっぽうで4列目を足すと取り込みが丸ごと失敗しかねない。
  */
 export function formatDictionary(
   entries: DictionaryEntry[],
@@ -221,11 +324,89 @@ export function formatDictionary(
   const lines = entries.map((entry) => {
     const partOfSpeech = map?.[entry.partOfSpeech] ?? entry.partOfSpeech;
     const columns = [entry.reading, entry.surface, partOfSpeech];
-    if (dialect === "google") columns.push(workTitle);
+    if (dialect === "google") {
+      columns.push(entry.note ? `${workTitle}：${entry.note}` : workTitle);
+    }
     return columns.join("\t");
   });
   // 末尾に改行を入れないと、最後の1行が取り込まれないIMEがある
   return lines.length > 0 ? `${lines.join("\r\n")}\r\n` : "";
+}
+
+/**
+ * 前回外した語の控えの鍵（`globalState`）。**作品ごとに分ける。**
+ *
+ * 「この語は辞書に要らない」という判断は作品の中身に紐づく。
+ * 作品をまたいで共通にすると、別の作品で同じ表記の語が黙って落ちる。
+ */
+export const IME_EXCLUDED_KEY_PREFIX = "novelai.imeDictionary.excluded.";
+
+export function imeExcludedKey(workId: string): string {
+  return `${IME_EXCLUDED_KEY_PREFIX}${workId}`;
+}
+
+/**
+ * 一覧に出す項目。**VS Codeの型に寄せない**（`core` はUIを知らない）。
+ * 呼び出し側が `vscode.QuickPickItem` へ移し替える。
+ */
+export interface DictionaryPickItem {
+  /** 種類の区切り線か。true のときは `label` だけを使う */
+  separator: boolean;
+  /** 区切り線なら種類名、語なら表記 */
+  label: string;
+  /** 語の読み */
+  description?: string;
+  /** 短い解説 */
+  detail?: string;
+  /** 既定でチェックが入っているか */
+  picked: boolean;
+  /** 語の項目のときだけ入る。選ばれた語を書き出しへ渡すのに使う */
+  entry?: DictionaryEntry;
+}
+
+/**
+ * 辞書に入れる語を選ぶ一覧を組む（作者の依頼、2026-09-10）。
+ *
+ * **既定は全部選択にする。** 6.13.2のとおり「入れる価値がある語かどうか」は
+ * すでに読みの有無で絞り込まれており、ここまで来た語は基本的に入れてよい。
+ * 既定を空にすると、数百件を毎回選び直すことになって使われなくなる。
+ * この一覧は「ふるいにかける」ためではなく「**要らないものを外す**」ためにある。
+ *
+ * 種類ごとに区切るのは、品詞（人名・地名・名詞）では組織・能力・造語が
+ * すべて「名詞」に畳まれていて、作者が見分けられないため。
+ */
+export function buildDictionaryPickItems(
+  entries: DictionaryEntry[],
+  excluded: readonly string[] = []
+): DictionaryPickItem[] {
+  const dropped = new Set(excluded);
+  const items: DictionaryPickItem[] = [];
+
+  for (const kind of DICTIONARY_KIND_ORDER) {
+    const group = entries.filter((entry) => entry.kind === kind);
+    // 中身の無い見出しは出さない。空の「組織」だけが並ぶと、
+    // 抽出できていないのか表示の不具合なのか分からない
+    if (group.length === 0) continue;
+
+    items.push({
+      separator: true,
+      label: DICTIONARY_KIND_LABELS[kind],
+      picked: false,
+    });
+    for (const entry of group) {
+      items.push({
+        separator: false,
+        label: entry.surface,
+        description: entry.reading,
+        detail: entry.note || undefined,
+        // 前回外した語だけチェックを外して出す
+        picked: !dropped.has(entry.surface),
+        entry,
+      });
+    }
+  }
+
+  return items;
 }
 
 /**

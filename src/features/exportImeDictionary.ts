@@ -14,12 +14,20 @@ import { atomicWriteFile } from "../core/atomicWrite";
 import {
   DICTIONARY_FORMATS,
   buildDictionary,
+  buildDictionaryPickItems,
   encodeDictionary,
   formatDictionary,
+  imeExcludedKey,
   splitByEncodable,
+  type DictionaryEntry,
   type DictionaryFormat,
   type ImeDialect,
 } from "../core/imeDictionary";
+
+/** 語を選ぶ一覧の項目。区切り線には `entry` が入らない */
+interface WordPickItem extends vscode.QuickPickItem {
+  entry?: DictionaryEntry;
+}
 
 /**
  * 抽出済みの設定からIMEのユーザー辞書を書き出す。
@@ -27,8 +35,14 @@ import {
  * 作品固有の固有名詞は変換で出てこないため、毎回打ち直すことになる。
  * 形式はIMEによって違うので、実行のたびに作者が選ぶ。
  * 設定に固定しないのは、複数のIMEを併用することがあるため。
+ *
+ * `state` は前回外した語の控え置き場（`context.globalState`）。
+ * **無くても書き出しは動く**（毎回すべて選ばれた状態で出る）。
  */
-export async function exportImeDictionary(work: WorkEntry): Promise<void> {
+export async function exportImeDictionary(
+  work: WorkEntry,
+  state?: vscode.Memento
+): Promise<void> {
   const loadedCharacters = await new CharacterStore(work).loadAll();
   const loadedAbilities = await createAbilityStore(work).loadAll();
   const loadedLocations = await createLocationStore(work).loadAll();
@@ -66,7 +80,71 @@ export async function exportImeDictionary(work: WorkEntry): Promise<void> {
     return;
   }
 
-  const picked = await vscode.window.showQuickPick(
+  /**
+   * どの語を辞書へ入れるかを先に選んでもらう（作者の依頼、2026-09-10）。
+   *
+   * 形式より先に置くのは、**選び終わってからでないと書き出す語数が
+   * 決まらない**ため。形式の画面は「N 語を書き出します」と件数を名乗るので、
+   * 順序が逆だと、そこに出る数と実際に書き出される数がずれる。
+   */
+  const excluded = state?.get<string[]>(imeExcludedKey(work.id)) ?? [];
+  const wordItems: WordPickItem[] = buildDictionaryPickItems(
+    built.entries,
+    excluded
+  ).map((item) =>
+    item.separator
+      ? { label: item.label, kind: vscode.QuickPickItemKind.Separator }
+      : {
+          label: item.label,
+          description: item.description,
+          detail: item.detail,
+          picked: item.picked,
+          entry: item.entry,
+        }
+  );
+
+  const pickedWords = await vscode.window.showQuickPick(wordItems, {
+    title: `${work.title}の辞書に入れる語（${built.entries.length}件）`,
+    placeHolder: "外したい語のチェックを外してください",
+    canPickMany: true,
+    ignoreFocusOut: true,
+  });
+  // Escで閉じたときは何も言わずに終える（作者が取りやめた）
+  if (!pickedWords) return;
+
+  const chosen = pickedWords
+    .map((item) => item.entry)
+    .filter((entry): entry is DictionaryEntry => entry !== undefined);
+  if (chosen.length === 0) {
+    // 空のファイルを置くと「書き出した」ように見えて、
+    // 取り込んでも何も増えない理由が分からなくなる
+    vscode.window.showInformationMessage(
+      "1語も選ばれていないので書き出しませんでした。"
+    );
+    return;
+  }
+
+  /**
+   * 外した語を作品ごとに覚えておく。
+   *
+   * 実データでは辞書に入る語が数百件になる。毎回同じ語のチェックを
+   * 外し直させるなら、この一覧は使われなくなる。
+   * 覚えるのは**外した語**のほうで、選んだ語ではない——そうしておけば
+   * 設定資料を増やしたとき、新しい語は既定で入る。
+   */
+  if (state) {
+    const kept = new Set(chosen.map((entry) => entry.surface));
+    const nextExcluded = [
+      ...new Set(
+        built.entries
+          .map((entry) => entry.surface)
+          .filter((surface) => !kept.has(surface))
+      ),
+    ];
+    await state.update(imeExcludedKey(work.id), nextExcluded);
+  }
+
+  const pickedFormats = await vscode.window.showQuickPick(
     Object.values(DICTIONARY_FORMATS).map((format) => ({
       label: format.label,
       description: format.fileName,
@@ -77,12 +155,12 @@ export async function exportImeDictionary(work: WorkEntry): Promise<void> {
       dialect: format.dialect,
     })),
     {
-      title: `${built.entries.length} 語を書き出します。形式を選んでください`,
+      title: `${chosen.length} 語を書き出します。形式を選んでください`,
       canPickMany: true,
       ignoreFocusOut: true,
     }
   );
-  if (!picked || picked.length === 0) return;
+  if (!pickedFormats || pickedFormats.length === 0) return;
 
   const config = await readWorkConfig(work);
   const settingsDir = workPaths(work, config).settings;
@@ -91,14 +169,11 @@ export async function exportImeDictionary(work: WorkEntry): Promise<void> {
   const written: string[] = [];
   /** 文字コードの都合で入れられなかった語。形式ごとに違うのでまとめて集める */
   const dropped = new Map<string, string[]>();
-  for (const entry of picked) {
+  for (const entry of pickedFormats) {
     const format = DICTIONARY_FORMATS[entry.dialect as ImeDialect];
     // Shift_JISに無い文字を含む語は、化けさせるくらいなら入れない。
     // 何が入らなかったかは後で作者に伝える
-    const { usable, unencodable } = splitByEncodable(
-      built.entries,
-      format.encoding
-    );
+    const { usable, unencodable } = splitByEncodable(chosen, format.encoding);
     if (unencodable.length > 0) dropped.set(format.label, unencodable);
 
     const body = formatDictionary(usable, format.dialect, work.title);
@@ -151,7 +226,7 @@ export async function exportImeDictionary(work: WorkEntry): Promise<void> {
     .join("");
 
   const action = await vscode.window.showInformationMessage(
-    `${built.entries.length} 語の辞書を書き出しました（${written.join("、")}）。` +
+    `${chosen.length} 語の辞書を書き出しました（${written.join("、")}）。` +
       `${missingNote}${droppedNote}\n取り込み手順は各IMEの辞書ツールから行ってください。`,
     "フォルダーを開く",
     "取り込み手順を見る"
@@ -163,7 +238,9 @@ export async function exportImeDictionary(work: WorkEntry): Promise<void> {
     // 手順を見ながらIMEの辞書ツールを操作するので、読める形で開く
     await openGeneratedMarkdown(
       "IME辞書の取り込み手順",
-      buildHowToDocument(picked.map((entry) => entry.dialect as ImeDialect))
+      buildHowToDocument(
+        pickedFormats.map((entry) => entry.dialect as ImeDialect)
+      )
     );
   }
 }
