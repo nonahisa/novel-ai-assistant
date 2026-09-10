@@ -986,3 +986,48 @@ describe("脚本の組み方", () => {
     );
   });
 });
+
+/**
+ * 縦書きを、マウスのホイールで送る（設計書6.25.4）。
+ *
+ * 縦書きは行が右から左へ並ぶので、送るのは scrollLeft である。
+ * ホイールの縦回転（deltaY）は scrollTop にしか渡らないため、
+ * 回しても何も起きなかった（作者の報告、2026-09-10）。
+ */
+describe("縦書きのホイール", () => {
+  it("面にwheelのリスナーが付いている", () => {
+    expect(html).toMatch(/face\.addEventListener\(\s+"wheel",/);
+    // 付ける先は、すでに scrollLeft を動かしている2つの面
+    expect(html).toContain("attachVerticalWheel(write);");
+    expect(html).toContain("attachVerticalWheel(compose);");
+  });
+
+  it("縦回転を、横の送り（scrollLeft）へ写す", () => {
+    // vertical-rl の巻き始めは右端（0）で、読み進むほど負へ進む
+    expect(html).toContain(
+      "face.scrollLeft -= event.deltaY * wheelStep(face, event.deltaMode);"
+    );
+  });
+
+  it("行単位・画面単位の目盛りを、ピクセルに直す", () => {
+    expect(html).toContain("function wheelStep(face, mode) {");
+    expect(html).toContain("if (mode === 1) {");
+    expect(html).toContain("if (mode === 2) return Math.max(face.clientWidth");
+  });
+
+  it("横書きと、修飾キー付きと、横なぞりは既定にまかせる", () => {
+    expect(html).toContain("if (vertical === false) return;");
+    expect(html).toContain(
+      "if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {"
+    );
+    expect(html).toContain(
+      "if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;"
+    );
+  });
+
+  /** 既定を止めるのは、横の送りに変えたときだけ */
+  it("passive:false で登録し、変換したときだけ止める", () => {
+    expect(html).toContain("{ passive: false }");
+    expect(html).toContain("event.preventDefault();");
+  });
+});

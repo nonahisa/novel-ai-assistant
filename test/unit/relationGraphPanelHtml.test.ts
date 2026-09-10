@@ -135,3 +135,52 @@ describe("用語の色", () => {
     expect(html).toContain("stroke: var(--novelai-organization);");
   });
 });
+
+/**
+ * 図の大きさ（設計書6.38.4）。
+ *
+ * 設定資料の隣に開くと横幅が半分しか無く、図が小さいまま出ていた
+ * （作者の報告、2026-09-10）。**見え方は実機でしか分からない**ので、
+ * ここで見るのは「幅だけに合わせる指定に戻っていないか」だけ。
+ */
+describe("図を、画面ぎりぎりまで大きく出す", () => {
+  it("幅と高さの両方に収める指定になっている", () => {
+    // 縦横比を保ったまま、幅と高さの小さいほうに合わせる
+    expect(html).toContain('preserveAspectRatio="xMidYMid meet"');
+    const rule = html.slice(html.indexOf("svg {"), html.indexOf("svg {") + 400);
+    expect(rule).toContain("width: 100%;");
+    expect(rule).toContain("height: 100%;");
+    expect(rule).toContain("max-height: 100%;");
+    // 横幅にだけ合わせていた頃の指定が残っていないこと
+    expect(html).not.toContain("height: auto;");
+  });
+
+  it("図の入れ物が、余りを詰めて中央へ置く", () => {
+    expect(html).toContain("#canvas { flex: 1; min-width: 0; overflow: auto;");
+    expect(html).toContain("padding: 8px; display: flex; }");
+  });
+});
+
+describe("脇を畳んで、図を広くする", () => {
+  it("畳むボタンがある", () => {
+    expect(html).toContain('id="wide"');
+    expect(html).toContain("図を広く");
+    expect(html).toContain("絞り込みと詳細を出す");
+  });
+
+  it("畳むと、左の絞り込みと右の詳細が消える", () => {
+    expect(script).toContain("el.filters.hidden = sidesHidden;");
+    expect(script).toContain("el.side.hidden = sidesHidden && !sideTemporary;");
+  });
+
+  /** 開き直しても保つ（WebViewのstate） */
+  it("畳んだことを覚える", () => {
+    expect(script).toContain("vscode.setState({ sidesHidden: sidesHidden });");
+    expect(script).toContain("vscode.getState()");
+  });
+
+  /** 畳んでいても、線を押したら中身は見せる */
+  it("線を押したときは、詳細を仮に出す", () => {
+    expect(script).toContain("sideTemporary = true;");
+  });
+});

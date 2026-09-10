@@ -103,7 +103,10 @@ button.on {
   overflow-y: auto;
   border-right: 1px solid var(--vscode-panel-border);
 }
-#canvas { flex: 1; min-width: 0; overflow: auto; padding: 8px; }
+/* 図は、余った幅と高さの真ん中へ置く（設計書6.38.4）。
+   中央寄せは justify-content ではなく子の margin:auto で行う——はみ出したとき、
+   justify-content:center だと左と上へあふれた分がスクロールで届かなくなる */
+#canvas { flex: 1; min-width: 0; overflow: auto; padding: 8px; display: flex; }
 #side {
   width: 280px;
   min-width: 220px;
@@ -132,6 +135,7 @@ button.on {
 }
 .sub { font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 4px; line-height: 1.5; }
 .empty {
+  margin: auto;
   padding: 32px 16px;
   color: var(--vscode-descriptionForeground);
   line-height: 1.8;
@@ -165,7 +169,21 @@ footer {
   color: var(--vscode-descriptionForeground);
   min-height: 26px;
 }
-svg { display: block; width: 100%; height: auto; }
+/* 幅と高さの、小さいほうに合わせて目一杯まで広げる（設計書6.38.4）。
+   height:auto は横幅にだけ合わせるので、設定資料の隣に開いたときのように
+   横が狭い窓では、縦が余っているのに図が小さいままだった。
+   縦横比は preserveAspectRatio="xMidYMid meet" が保つ */
+svg {
+  display: block;
+  margin: auto;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  /* これより小さいと名前が読めない。下回ったときだけ #canvas のスクロールが効く */
+  min-width: 280px;
+  min-height: 280px;
+}
 /* 図の中の見た目。書き出したSVGにも同じ規則を写すので、
    目印として class の頭を g- で揃えてある（script の svgCss を参照） */
 .g-node-circle { fill: var(--novelai-character); }
@@ -199,6 +217,7 @@ svg { display: block; width: 100%; height: auto; }
   <button id="ring2" title="1次の相手のさらに先（2次）も薄く出します">2次も出す</button>
   <button id="openRecord" title="中心の人物の設定資料を開きます">設定資料を開く</button>
   <button id="export" title="いま見えている図をSVGファイルとして書き出します">SVGを書き出す</button>
+  <button id="wide" title="左の絞り込みと右の詳細を畳んで、図を画面いっぱいに出します">図を広く</button>
 </header>
 <div id="layout">
   <aside id="filters">
@@ -228,7 +247,7 @@ svg { display: block; width: 100%; height: auto; }
   </aside>
   <main id="canvas">
     <div class="empty" id="empty"></div>
-    <svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg>
+    <svg id="graph" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>
   </main>
   <aside id="side"></aside>
 </div>
@@ -243,6 +262,15 @@ let data = null;
 let selectedEdge = null;
 /** 所属の絞り込みを組み直すかの判断に使う（毎回作り直すと選択が飛ぶ） */
 let renderedAffiliations = "";
+/**
+ * 脇（左の絞り込み・右の詳細）を畳んでいるか（設計書6.38.4）。
+ *
+ * 設定資料の隣に開くと横幅が半分しか無い。畳めば図がその分だけ広がる。
+ * 開き直しても保つよう、WebViewの state に控える。
+ */
+let sidesHidden = false;
+/** 畳んでいるあいだに線を押したので、右の詳細だけを仮に出している */
+let sideTemporary = false;
 
 const el = {
   title: document.getElementById("title"),
@@ -251,6 +279,8 @@ const el = {
   ring2: document.getElementById("ring2"),
   openRecord: document.getElementById("openRecord"),
   exportSvg: document.getElementById("export"),
+  wide: document.getElementById("wide"),
+  filters: document.getElementById("filters"),
   minChapters: document.getElementById("minChapters"),
   minChaptersValue: document.getElementById("minChaptersValue"),
   kindRelation: document.getElementById("kindRelation"),
@@ -289,6 +319,22 @@ function sendFilter() {
     },
   });
 }
+
+/** 畳んでいるかを画面へ反映する。詳細は、線を選んでいるあいだだけ仮に出す */
+function applySides() {
+  el.filters.hidden = sidesHidden;
+  el.side.hidden = sidesHidden && !sideTemporary;
+  el.wide.textContent = sidesHidden ? "絞り込みと詳細を出す" : "図を広く";
+  el.wide.classList.toggle("on", sidesHidden);
+}
+
+el.wide.addEventListener("click", function () {
+  sidesHidden = !sidesHidden;
+  // 手で開き直したときは、仮出しの記憶を持ち越さない
+  sideTemporary = false;
+  vscode.setState({ sidesHidden: sidesHidden });
+  applySides();
+});
 
 el.toAll.addEventListener("click", function () { post("all"); });
 el.back.addEventListener("click", function () { post("back"); });
@@ -378,6 +424,7 @@ function render() {
   // 関係が無いのか読めていないのかが作者に区別できない
   if (data.warning) notes.push(data.warning);
   el.notice.textContent = notes.join(" ");
+  applySides();
 }
 
 function renderFilters() {
@@ -530,6 +577,11 @@ function renderGraph() {
     withTitle(hit, edgeTitle(edge));
     hit.addEventListener("click", function () {
       selectedEdge = { a: edge.a, b: edge.b };
+      // 畳んでいても、押したからには中身が見たいはず。閉じれば元の広さへ戻る
+      if (sidesHidden) {
+        sideTemporary = true;
+        applySides();
+      }
       renderGraph();
       renderSide();
     });
@@ -664,6 +716,8 @@ function renderSide() {
       close.textContent = "選択を外す";
       close.addEventListener("click", function () {
         selectedEdge = null;
+        sideTemporary = false;
+        applySides();
         renderGraph();
         renderSide();
       });
@@ -806,10 +860,16 @@ window.addEventListener("message", function (event) {
     data = message.data;
     if (selectedEdge && !findEdge(selectedEdge.a, selectedEdge.b)) {
       selectedEdge = null;
+      sideTemporary = false;
     }
     render();
   }
 });
+
+// 前回の畳み方を戻す。図の中身は拡張機能から届くが、脇の畳み方は画面側の好み
+const savedState = vscode.getState();
+if (savedState && savedState.sidesHidden === true) sidesHidden = true;
+applySides();
 
 // HTMLを流し込んだ直後は受け手がまだ居ない。準備ができたと伝えてから送ってもらう
 post("ready");

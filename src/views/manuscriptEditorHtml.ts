@@ -1291,6 +1291,76 @@ ruby > rt {
 
   write.addEventListener("scroll", syncMarksScroll);
 
+  /* ── 縦書きを、ホイールで送る（設計書6.25.4） ─────────────
+
+     縦書き（vertical-rl）では行が右から左へ並ぶので、読み進める向きは
+     この要素の scrollLeft である。ところがブラウザはホイールの縦回転を
+     scrollTop にしか渡さず、縦書きの面は縦に溢れていないため、
+     **回しても何も起きなかった**（作者の報告、2026-09-10）。
+
+     ここで縦回転を横の送りへ写す。付ける先は、すでに scrollLeft を
+     動かしている面そのもの（打つ面と組んで書く面）——重ね敷き
+     （#marks・#aloudmarks）は pointer-events:none で、転がすのは
+     打つ面の scroll の知らせ（syncMarksScroll）なので、触らなくてよい。
+  */
+
+  /**
+   * ホイールの1目盛りが何ピクセルか。
+   *
+   * deltaMode は環境によって画素・行・画面のどれでも来る。行単位のときに
+   * 生の値（3など）を足すと、1目盛りで3ピクセルしか動かない。
+   */
+  function wheelStep(face, mode) {
+    if (mode === 1) {
+      const styles = getComputedStyle(face);
+      // 行送りは、縦書きでは「行の幅」にあたる（line-height がそのまま効く）
+      const line = parseFloat(styles.lineHeight);
+      if (line > 0) return line;
+      // line-height が normal だと数で取れない。文字の大きさから見積もる
+      const font = parseFloat(styles.fontSize);
+      return font > 0 ? font * 1.9 : 30;
+    }
+    // 画面単位。縦書きの「1画面」は幅のぶん（少し重ねて、読む場所を見失わせない）
+    if (mode === 2) return Math.max(face.clientWidth - 40, 40);
+    return 1;
+  }
+
+  /**
+   * 縦書きのとき、ホイールの縦回転をその面の横の送りへ写す。
+   *
+   * **scrollLeft の符号。** vertical-rl の巻き始めは右端で、そこが 0。
+   * 読み進むほど左、つまり**負**へ進む（CSSOM View の決めごとで、
+   * Chromium も85から従う。VS Code の WebView はこれより新しい）。
+   * だから「手前へ回す＝読み進める」は scrollLeft を**減らす**。
+   * 端はブラウザが止めるので、こちらで挟み込まない。
+   */
+  function attachVerticalWheel(face) {
+    face.addEventListener(
+      "wheel",
+      function (event) {
+        // 横書きは何もしない。上下に溢れているので、既定のままで送れる
+        if (vertical === false) return;
+        // 修飾キー付きは既定にまかせる——Shiftは横送り、Ctrlはズーム。
+        // ここで奪うと、拡大したいのに行が飛ぶ
+        if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {
+          return;
+        }
+        // 横回転が主（トラックパッドの横なぞり）のときも既定のまま。
+        // それはもともと行送りとして効いている
+        if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+        if (!event.deltaY) return;
+        face.scrollLeft -= event.deltaY * wheelStep(face, event.deltaMode);
+        // **横の送りに変えたときだけ止める。** 上で抜けた分は既定へ渡す
+        event.preventDefault();
+      },
+      // 既定を止めるので、勝手に受け身（passive）扱いにさせない
+      { passive: false }
+    );
+  }
+
+  attachVerticalWheel(write);
+  attachVerticalWheel(compose);
+
   /*
     **止まったところで、もう一度写す。** scroll の知らせは間引かれることが
     あり（慣性のある動き・ホイールの連打）、最後の1回を取りこぼすと目印だけが
