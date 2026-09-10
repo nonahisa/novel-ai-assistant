@@ -203,12 +203,11 @@ describe("簡単ステップメニューの構成", () => {
   });
 
   test("環境によって出ない操作は並べない", () => {
-    // **ブラウザ版だけの操作（`browserOnly`）と開発用の道具（`devOnly`）は
-    // 置かない。** 出したり消したりが要る項目を流れの中に混ぜると、
+    // **ブラウザ版だけの操作（`browserOnly`）は置かない。** 出したり
+    // 消したりが要る項目を流れの中に混ぜると、
     // 「1つ足りない」ことに作者が気づけない
     for (const action of stepActions()) {
       expect(action.browserOnly, action.command).toBeFalsy();
-      expect(action.devOnly, action.command).toBeFalsy();
     }
   });
 

@@ -52,20 +52,15 @@ describe("平らな鍵でしか読まれないもの", () => {
  *
  * - **宣言だけあって実体が無い**と、コマンドパレットから押せるのに
  *   「command not found」で落ちる
- * - **実体だけあって宣言が無い**と、コマンドパレットに出ない（開発用の
- *   道具は、それでよい。メニューの「テスト中」から押す）
+ * - **実体だけあって宣言が無い**と、コマンドパレットに出ない
  */
 describe("コマンドは、宣言と実体が揃っている", () => {
   /** 実体を持つコマンドID。書き方が3通りあるので、3通りとも読む */
   function registeredCommands(): Set<string> {
     const found = new Set<string>();
-    const sources = [
-      "src/extension.ts",
-      "src/views/progress.ts",
-      "src/dev/checkRunner.ts",
-      "src/dev/reflectOperationLog.ts",
-      "src/dev/streamToggle.ts",
-    ].map((file) => readFileSync(file, "utf8"));
+    const sources = ["src/extension.ts", "src/views/progress.ts"].map((file) =>
+      readFileSync(file, "utf8")
+    );
     const all = sources.join("\n");
 
     // ① そのまま書いてある：registerCommand("novelai.xxx", …)
@@ -109,15 +104,15 @@ describe("コマンドは、宣言と実体が揃っている", () => {
     expect(orphans).toEqual([]);
   });
 
-  test("コマンドパレットに出したくないものだけが、宣言を持たない", () => {
+  test("宣言を持たない実体は無い", () => {
+    // 0.45.0 まで、開発ビルド限定の道具だけが宣言を持たなかった。
+    // 道具ごと撤去したので、**例外はもう1件も無い**（設計書6.26）
     const declared = new Set(
       manifest.contributes.commands.map((entry) => entry.command)
     );
-    // 開発ビルド限定の道具（本番では枝ごと落ちる）。**作者の画面には出さない**
-    const devOnly = new Set(["novelai.runChecks", "novelai.reflectOperationLog"]);
 
     const undeclared = [...registered].filter(
-      (command) => !declared.has(command) && !devOnly.has(command)
+      (command) => !declared.has(command)
     );
 
     expect(undeclared).toEqual([]);

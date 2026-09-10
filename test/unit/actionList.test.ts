@@ -102,9 +102,8 @@ describe("操作メニューの構成", () => {
       "資料管理",
       "拡張機能の設定",
       "ヘルプ",
-      // **最下段に「テスト中」**（作者の指定、2026-08-26）。
-      // 中身は確認リストから自動生成する。残りが尽きれば自然に消える
-      "テスト中",
+      // 0.45.0 までは最下段に「テスト中」（実機確認リストからの写し）が
+      // 並んでいた。F5の道具ごと撤去した（作者の指示、2026-09-10）
     ]);
   });
 
@@ -1128,39 +1127,17 @@ describe("相談の項目は、木に残して画面から隠す", () => {
   });
 });
 
-describe("開発ビルドでだけ出す操作（ストリーミング実験）", () => {
-  /**
-   * F5限定の実験（設計書6.63.1）を、押して入切できるようにした
-   * （作者の依頼、2026-09-03）。環境変数 `NOVELAI_OLLAMA_STREAM=1` を
-   * `.vscode/launch.json` へ書く道しか無く、試すまでが遠すぎた。
-   *
-   * **`browserOnly` とは扱いが違う。** あちらは定義を残して出さないだけだが、
-   * こちらは**本番ビルドでは定義ごと落ちる**（`__DEV_HELPERS__` の枝の中で
-   * 展開している）。試験は開発ビルドとして走るので、ここでは在ることを見る。
-   */
-  function toggle() {
-    return allActions().find(
-      (action) => action.command === "novelai.dev.toggleOllamaStream"
-    );
-  }
-
-  test("AIの小分類に、開発用の印つきで並ぶ", () => {
-    const item = toggle();
-
-    expect(item?.devOnly).toBe(true);
-    // 環境で消す印（browserOnly）とは別物。手元でもブラウザ版でも出す
-    expect(isItemVisibleInRuntime(item!, true)).toBe(true);
-  });
-
-  test("置き場所は「拡張機能の設定」→「AI」", () => {
-    const group = ACTION_TREE.find((entry) => entry.label === "拡張機能の設定");
-    const ai = group?.entries.find(
-      (entry) => entry.kind === "section" && entry.label === "AI"
-    );
-    const commands =
-      ai?.kind === "section" ? ai.items.map((item) => item.command) : [];
-
-    expect(commands).toContain("novelai.dev.toggleOllamaStream");
+/**
+ * 開発ビルド限定だった「Ollamaのストリーミング受信を切り替える」は
+ * 0.45.0 で撤去した（設定 `novelai.ollama.streaming` に置き換わったため）。
+ * **押しても何も起きないボタンを残さない**ことは、下の
+ * 「並べた操作はすべてpackage.jsonに登録されている」が見張る。
+ */
+describe("撤去した開発用の操作", () => {
+  test("メニューに `novelai.dev.*` は1件も残っていない", () => {
+    expect(
+      allActions().filter((action) => action.command.startsWith("novelai.dev."))
+    ).toEqual([]);
   });
 });
 
@@ -1208,48 +1185,19 @@ describe("更新告知文の置き場所", () => {
 });
 
 /**
- * 「テスト中」の分類は、F5（開発ホスト）でしか出さない
- * （作者の指示、2026-08-29。実機確認リスト F-35）。
- *
- * 中身は実機確認リストから機械的に作った写しである。**ストアから入れた
- * 読者に見せても、押せるものが増えるだけで意味がない。**
- * `extension.ts` が `ExtensionMode.Development` かどうかを渡す。
+ * 「テスト中」の分類（実機確認リストからの写し）は 0.45.0 で撤去した
+ * （作者の指示、2026-09-10）。**どの環境でも同じ分類が並ぶ**——
+ * 出し分けが消えたので、開発ホストかどうかを渡す引数も無くなった。
  */
-describe("「テスト中」を出すかどうか", () => {
-  const labelsOf = (showTesting: boolean): string[] =>
-    new ActionListProvider(
-      fakeRegistry(),
-      memoryStore(),
-      undefined,
-      showTesting
-    )
+describe("分類の出し分けは環境で変わらない", () => {
+  test("F5でもストア版でも、同じ分類が並ぶ", () => {
+    const labels = new ActionListProvider(fakeRegistry(), memoryStore())
       .getChildren()
       .map((node) => (node.type === "group" ? node.group.label : ""));
 
-  test("F5では出る（実機確認リスト F-35 の代わり）", () => {
-    expect(labelsOf(true)).toContain("テスト中");
-  });
-
-  test("ストア版では出ない（実機確認リスト F-35 の代わり）", () => {
-    expect(labelsOf(false)).not.toContain("テスト中");
-  });
-
-  test("消えるのは「テスト中」だけで、ほかの分類は残る（実機確認リスト F-35 の代わり）", () => {
-    // 判定を間違えると、まともな分類まで巻き添えで消える
-    const store = labelsOf(false);
+    expect(labels).not.toContain("テスト中");
     for (const label of ["執筆データ", "作品管理", "執筆AI支援", "ヘルプ"]) {
-      expect(store, label).toContain(label);
+      expect(labels, label).toContain(label);
     }
-    expect(store).toHaveLength(labelsOf(true).length - 1);
-  });
-
-  test("開発ホストかどうかで決めている（実機確認リスト F-35 の代わり）", () => {
-    // 既定は true なので、渡し忘れるとストア版にも出てしまう
-    const source = readFileSync(
-      new URL("../../src/extension.ts", import.meta.url),
-      "utf8"
-    );
-
-    expect(source).toContain("vscode.ExtensionMode.Development");
   });
 });

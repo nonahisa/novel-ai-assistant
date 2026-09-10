@@ -149,7 +149,7 @@ export function buildFeatureIndex(): string {
   // 説明が無い（またはその逆の）操作ができる
   const allowsProcesses = canRunProcesses();
 
-  for (const group of ACTION_TREE.filter((entry) => !entry.generated)) {
+  for (const group of ACTION_TREE) {
     lines.push(`■ ${group.label}`);
     for (const entry of visibleEntries(group.entries, allowsProcesses)) {
       if (entry.kind === "action") {
@@ -251,8 +251,7 @@ export function buildGuideBundles(): GuideBundle[] {
   const allowsProcesses = canRunProcesses();
   const bundles: GuideBundle[] = [];
 
-  // 写しの分類（「テスト中」）は案内に入れない。同じ機能を2回案内することになる
-  for (const group of ACTION_TREE.filter((entry) => !entry.generated)) {
+  for (const group of ACTION_TREE) {
     const entries = visibleEntries(group.entries, allowsProcesses);
 
     const direct = entries.filter((entry) => entry.kind === "action");

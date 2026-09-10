@@ -55,7 +55,7 @@ describe("メニューから作る（手で書き写さない）", () => {
   });
 
   test("詳細メニューの分類が、すべて章になる", () => {
-    for (const group of ACTION_TREE.filter((entry) => !entry.generated)) {
+    for (const group of ACTION_TREE) {
       expect(MANUAL, group.label).toContain(`### ${group.label}`);
     }
   });
@@ -68,9 +68,7 @@ describe("メニューから作る（手で書き写さない）", () => {
     // マニュアルにも出さない——**画面に無い操作を案内しない**という、
     // AIへ渡す一覧（featureGuide）と同じ規則である
     const shown = visibleEntries(
-      ACTION_TREE.filter((group) => !group.generated).flatMap(
-        (group) => group.entries
-      ),
+      ACTION_TREE.flatMap((group) => group.entries),
       canRunProcesses()
     ).flatMap((entry) =>
       entry.kind === "section"
@@ -94,7 +92,7 @@ describe("メニューから作る（手で書き写さない）", () => {
 
     for (const action of hidden) {
       expect(
-        action.browserOnly || action.devOnly,
+        action.browserOnly,
         `${action.command} が理由なく落ちている`
       ).toBeTruthy();
     }

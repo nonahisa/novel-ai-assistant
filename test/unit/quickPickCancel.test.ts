@@ -132,9 +132,10 @@ describe("選択画面には閉じる道を出す", () => {
   it("走査する対象がある", () => {
     // 拾い方を間違えて0件を通す、を防ぐ
     expect(sites.length).toBeGreaterThan(20);
-    // createQuickPick は少ない（いまは実機確認メニューの2画面だけ）。
-    // 増減したら、切り出しの区切りが正しく働いているかも見直す
-    expect(created.length).toBeGreaterThanOrEqual(2);
+    // `createQuickPick` は 0.45.0 で1件も無くなった（使っていたのは
+    // 実機確認メニューの2画面だけで、道具ごと撤去した。設計書6.26）。
+    // **拾い方は残す**——新しく使ったときに、下の検査が黙って素通りしない
+    expect(created.length).toBe(0);
   });
 
   it("すべての選択画面に「取りやめる」がある", () => {

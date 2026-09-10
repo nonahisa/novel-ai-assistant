@@ -46,18 +46,9 @@ export const FORBIDDEN_CONTENT_PATTERNS = [
   /C:\\Users\\/i,
   /Documents\\/i,
   /_test_extract/i,
-  // **開発用の道具は配布物に入れない**（作者の指定、2026-08-26）。
-  // 本番ビルドでは `__DEV_HELPERS__` が false に畳まれて枝ごと落ちるが、
-  // **畳み忘れれば黙って入る**ので、出口でも見張る。
-  // ASCIIの名前で見る——日本語は逃がされた形になるため（0.13.0で踏んだ）
-  /novelai[.]runChecks/,
-  /checkRunner/,
-  // F5の操作ログ（作者の依頼、2026-08-27）。作者がどの機能をいつ触ったかという
-  // 個人の作業記録に繋がるので、道具ごと配布物へ出さない
-  /novelai[.]reflectOperationLog/,
-  /operationLog/,
-  // 確認リストの項目の文章。**作者の作品名が入る**ので配布物へ出さない
-  /PENDING_CHECK_ITEMS/,
+  // 0.45.0 まで、開発ビルド限定の道具（実機確認を回す・操作ログ・確認リストの
+  // 項目文）が配布物へ紛れないよう、名前でも見張っていた。**道具ごと
+  // 撤去したので、見張る対象そのものが無くなった**（設計書6.26）
 ];
 
 export async function deriveReleaseMetadata(repositoryRoot) {

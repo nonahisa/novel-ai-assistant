@@ -158,9 +158,8 @@ export const FEATURE_COLUMNS: Record<WorkFeature, readonly WorkTypeColumn[]> = {
 /**
  * コマンドごとの機能分類。
  *
- * **`package.json` に登録した全コマンドを載せる**（開発ビルド専用の
- * `novelai.dev.*` を除く）。載せ忘れは全タイプで出続けるので、
- * テストが漏れを知らせる。
+ * **`package.json` に登録した全コマンドを載せる。** 載せ忘れは
+ * 全タイプで出続けるので、テストが漏れを知らせる。
  */
 export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   // ── 作品の登録・管理。作るときは、まだタイプが無い ──

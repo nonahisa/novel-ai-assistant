@@ -108,8 +108,7 @@ function actionChapter(allowsProcesses: boolean): string {
     "",
   ];
 
-  // 写しの分類（「テスト中」）は載せない。同じ操作が2度出てくる
-  for (const group of ACTION_TREE.filter((entry) => !entry.generated)) {
+  for (const group of ACTION_TREE) {
     lines.push(`### ${group.label}`, "");
     for (const entry of visibleEntries(group.entries, allowsProcesses)) {
       if (entry.kind === "action") {

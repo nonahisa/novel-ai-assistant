@@ -28,8 +28,7 @@ const bundleText = bundles.map((bundle) => bundle.text).join("\n");
 const index = buildFeatureIndex();
 
 function allActions() {
-  // 写しの分類（「テスト中」）は案内に入れない。中身は元の操作の写しである
-  return ACTION_TREE.filter((group) => !group.generated).flatMap((group) =>
+  return ACTION_TREE.flatMap((group) =>
     group.entries.flatMap((entry) =>
       entry.kind === "section" ? entry.items : [entry]
     )
@@ -97,7 +96,7 @@ describe("使い方の説明（目次と束）", () => {
     // 並びが画面と違うと「どこにあるか」を答えられない。
     // 束は分類ごとに（分類直下 → 小分類の順で）積んであるので、
     // 各分類が最初に現れる位置が、画面の並びと同じ順になる
-    const groups = ACTION_TREE.filter((group) => !group.generated);
+    const groups = ACTION_TREE;
     const positions = groups.map((group) =>
       bundles.findIndex(
         (bundle) =>
@@ -249,10 +248,8 @@ describe("相談へ渡す目次", () => {
       こちらも名前だけである。
 
       1,750→1,800：ストリーミング実験の入切（設計書6.63.1）で1つ増えた
-      （名前だけで約30字）。**この1件は開発ビルドにしか無い**——本番ビルドでは
-      `__DEV_HELPERS__` が false に畳まれて項目ごと落ちるので、
-      作者へ実際に送られる目次は1,740字ほどのままである。試験は開発ビルドとして
-      走るため、ここで測っているのは**多いほう**の値になる。
+      （名前だけで約30字）。**この1件は 0.45.0 で撤去した**——配布版の設定
+      `novelai.ollama.streaming` に置き換わったため、目次から約30字消えた。
 
       1,800→1,850：EPUBエディター（設計書6.65.6）で1つ増えた（名前だけで
       約15字）。説明は混ざっていない。

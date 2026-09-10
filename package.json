@@ -301,11 +301,6 @@
         "category": "小説執筆"
       },
       {
-        "command": "novelai.dev.toggleOllamaStream",
-        "title": "Ollamaのストリーミング受信を切り替える（実験）",
-        "category": "小説執筆"
-      },
-      {
         "command": "novelai.exportPdf",
         "title": "PDF出力（印刷用）",
         "category": "小説執筆",
@@ -1287,10 +1282,6 @@
       ],
       "commandPalette": [
         {
-          "command": "novelai.dev.toggleOllamaStream",
-          "when": "false"
-        },
-        {
           "command": "novelai.soloWorks",
           "when": "false"
         },
@@ -1839,7 +1830,6 @@
     "vscode:prepublish": "npm run build",
     "build": "node esbuild.js --production",
     "build:dev": "node esbuild.js",
-    "checks:menu": "node scripts/pendingChecks.mjs",
     "watch": "node esbuild.js --watch",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",

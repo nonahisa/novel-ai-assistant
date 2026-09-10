@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "vitest";
 import { thinkOptionFor, willStreamChat } from "../../src/ai/ollamaProvider";
-import { setStreamingOverride } from "../../src/ai/ollamaStream";
+import { setStreamingSettingReader } from "../../src/ai/ollamaStream";
 
 /**
  * **思考を流す口を渡しているときは、思考を切らない**（作者の指摘、
@@ -14,8 +14,8 @@ import { setStreamingOverride } from "../../src/ai/ollamaStream";
  */
 describe("Ollamaへ think:false を送るか", () => {
   afterEach(() => {
-    // **必ず戻す。** 残ると、あとに走る試験が実験の側だけを通ってしまう
-    setStreamingOverride(undefined);
+    // **必ず戻す。** 残ると、あとに走る試験が流す側だけを通ってしまう
+    setStreamingSettingReader(undefined);
   });
 
   test("思考を流して受け取れるときは、送らない（＝思考が有効になる）", () => {
@@ -43,23 +43,23 @@ describe("Ollamaへ think:false を送るか", () => {
 
 describe("流して受け取る道を通るか", () => {
   afterEach(() => {
-    setStreamingOverride(undefined);
+    setStreamingSettingReader(undefined);
     delete process.env.NOVELAI_OLLAMA_STREAM;
   });
 
-  test("実験が入なら通る", () => {
-    setStreamingOverride(true);
+  test("設定が入なら通る", () => {
+    setStreamingSettingReader(() => true);
     expect(willStreamChat({})).toBe(true);
   });
 
   test("呼び出し側が断れば通らない（測定は配布と同じ道で行う）", () => {
-    setStreamingOverride(true);
+    setStreamingSettingReader(() => true);
     expect(willStreamChat({ disableStreaming: true })).toBe(false);
   });
 
-  test("既定（実験が切）では通らない", () => {
+  test("既定（設定が切）では通らない", () => {
     delete process.env.NOVELAI_OLLAMA_STREAM;
-    setStreamingOverride(false);
+    setStreamingSettingReader(() => false);
     expect(willStreamChat({})).toBe(false);
   });
 });

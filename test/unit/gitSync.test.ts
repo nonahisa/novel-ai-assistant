@@ -12,8 +12,10 @@ import {
 import { isGitAvailable, runGit, type GitSyncStatus } from "../../src/core/git";
 import {
   canFetch,
+  describeDirtyPull,
   describeStatus,
   describeSyncBadge,
+  RECORD_THEN_PULL,
 } from "../../src/features/gitSync";
 import { ACTION_TREE } from "../../src/views/actionList";
 
@@ -405,5 +407,36 @@ describe("「分かれた分を合わせる」の入口", () => {
     expect(item?.label).toBe("分かれた分を合わせる");
     // 作品を選ばなくても押せる（分岐したかどうかを、こちらで調べる）
     expect(item?.requiresWork).toBe(false);
+  });
+});
+
+/**
+ * 単独の「取り込む」が未記録の変更で止まったとき、その場で記録して
+ * 続けられること（設計書5.5.18。作者の指摘「もう少し手軽にできないですか」
+ * 2026-09-10）。
+ *
+ * **「すべて同期」は前から記録 → 取り込み → 送信の順で動いており、
+ * 単独の「取り込む」だけが行き止まりだった。** 画面は出せないので、
+ * 知らせの文だけを純粋関数として確かめる。
+ */
+describe("未記録の変更があるときの取り込み", () => {
+  test("止めた理由と、押せるボタンの名前が文に入る", () => {
+    const text = describeDirtyPull("ある作品");
+
+    expect(text).toContain("「ある作品」");
+    // なぜ止めたか。**理由が無いと、作者には故障に見える**
+    expect(text).toContain("書きかけの原稿を巻き込まないため");
+    // ボタンの名前は文と揃える（違うと、どれを押すのか分からない）
+    expect(text).toContain(RECORD_THEN_PULL);
+  });
+
+  test("記録は手元に残るだけで、外へは出ないと伝える", () => {
+    // **「記録」を「送信」と読み違えると、書きかけが公開されると思って押せない**
+    expect(describeDirtyPull("ある作品")).toContain("GitHubへは送りません");
+  });
+
+  test("ボタンの名前は「記録してから取り込む」", () => {
+    // 文言はこの定数だけが持つ（画面と文で写しを作らない）
+    expect(RECORD_THEN_PULL).toBe("記録してから取り込む");
   });
 });

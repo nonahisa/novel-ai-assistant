@@ -14,8 +14,6 @@ import {
   PROCESSES_BLOCKED_HINT,
 } from "../core/processAvailability";
 import { canRunProcesses } from "../core/runtime";
-import { buildPendingCheckGroup } from "./pendingCheckMenu";
-import { PENDING_CHECKS } from "./pendingChecks";
 
 /**
  * 操作メニュー。
@@ -85,13 +83,6 @@ export interface ActionItem {
    */
   browserOnly?: boolean;
   /**
-   * 開発ビルドでだけ出す操作か（実機確認を回す道具）。
-   *
-   * **配布物には定義ごと入らない。** 本番ビルドでは `__DEV_HELPERS__` が
-   * false に畳まれ、この項目を並べている枝ごと落ちる。
-   */
-  devOnly?: boolean;
-  /**
    * 詳細メニューには並べないが、**実体はここに置いたままにする**操作か
    * （設計書6.56.3）。
    *
@@ -133,16 +124,8 @@ export interface ActionGroup {
   entries: Array<ActionItem | ActionSection>;
   /** 分類を閉じたままでも気づけるよう、中身の件数をここにも出す */
   counter?: ActionCounter;
-  /** ホバーで出す説明。組み立てた分類で「ここに出せないもの」を伝えるのに使う */
+  /** ホバーで出す説明。分類そのものの但し書きを添えるのに使う */
   tooltip?: string;
-  /**
-   * 他の分類から機械的に組み立てた分類か（「テスト中」）。
-   *
-   * **中身は写しである。** 同じコマンドが2か所に並ぶので、
-   * 「全操作」を数えるところ（`allActions`）とAIへ渡す機能の一覧では飛ばす。
-   * 飛ばさないと、コマンドIDが重複し、AIは同じ機能を2回案内する。
-   */
-  generated?: boolean;
 }
 
 /**
@@ -151,7 +134,7 @@ export interface ActionGroup {
  * 「AIを使う」ものには usesAI を立てる。文言ではなく印で示すのは、
  * 一覧を眺めたときに料金の発生する操作だけが浮き上がるようにするため。
  */
-const BASE_ACTION_TREE: readonly ActionGroup[] = [
+export const ACTION_TREE: readonly ActionGroup[] = [
   {
     kind: "group",
     label: "執筆データ",
@@ -1622,36 +1605,9 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
             detail:
               "Ollamaを自動で見つけられない場合に、ollama.exe の場所を指定します。",
           },
-          /*
-            **開発ビルドでだけ並べる**（作者の依頼、2026-09-03）。
-
-            `devOnly` は「配布物には定義ごと入らない」印なので、項目そのものを
-            `__DEV_HELPERS__` の枝の中に置く。本番ビルドでは条件が false に
-            畳まれ、**この配列に1件も入らない**——押しても何も起きない
-            ボタンが残らない（コマンドの実体も `src/dev/` ごと落ちる）。
-
-            入切の実体は `src/dev/streamToggle.ts`。実験の入口が
-            `.vscode/launch.json` の環境変数しか無く、試すまでが遠すぎた。
-          */
-          ...(__DEV_HELPERS__
-            ? [
-                {
-                  kind: "action" as const,
-                  command: "novelai.dev.toggleOllamaStream",
-                  label: "Ollamaのストリーミング受信を切り替える",
-                  note: "実験",
-                  icon: "beaker",
-                  requiresWork: false,
-                  devOnly: true,
-                  detail:
-                    "**開発ホスト（F5）限定の切り替えです**（設計書6.63.1）。" +
-                    "配布版では設定 `novelai.ollama.streaming`（既定は入）で切り替えます。" +
-                    "**ここでの切り替えはこのウィンドウの間だけで、保存しません**" +
-                    "——開き直すと設定の値へ戻ります。" +
-                    "効いているかは、ログに「流して受信」が出るかで分かります。",
-                },
-              ]
-            : []),
+          // 流し受信の入切は、0.43.x で配布版の設定
+          // `novelai.ollama.streaming` になった。開発ビルド限定の
+          // 切り替えボタンは 0.45.0 で撤去（設計書6.63.1）
         ],
       },
       {
@@ -1840,22 +1796,9 @@ const BASE_ACTION_TREE: readonly ActionGroup[] = [
   },
 ];
 
-/**
- * 画面に出す操作メニュー。**土台に「テスト中」を足したもの**。
- *
- * 作者の依頼（2026-08-26）：「操作メニューの最下段に『テスト中』を新設し、
- * その下に操作メニューと同じメニュー構造でテストが終わっていない機能を
- * 並べてください」。
- *
- * **中身は `docs/実機確認リスト.md` から自動生成する**（`pendingChecks.ts`）。
- * 文書を手で写すと必ず片方が古くなる。
- *
- * 残りが1件も無くなれば、この分類は自然に消える。
- */
-export const ACTION_TREE: readonly ActionGroup[] = (() => {
-  const testing = buildPendingCheckGroup(BASE_ACTION_TREE, PENDING_CHECKS);
-  return testing ? [...BASE_ACTION_TREE, testing] : BASE_ACTION_TREE;
-})();
+// 0.45.0 まで、この下に「テスト中」の分類を機械的に足していた
+// （`docs/実機確認リスト.md` から作った写し）。統合テストと機械の確認が
+// 育ち、F5の道具ごと撤去した（作者の指示、2026-09-10。設計書6.26）。
 
 // 「設定情報を表示」（novelai.showSettingsForTerm）はここに置かない。
 // 本文にカーソルを置いた状態で実行する操作なので、操作メニューから押しても
@@ -2016,8 +1959,7 @@ export function explainDisabled(
 
 /** 木の中の操作をすべて取り出す（テストと整合性の確認用） */
 export function allActions(): ActionItem[] {
-  // **写しの分類（「テスト中」）は数えない。** 同じコマンドが2度出てくる
-  return ACTION_TREE.filter((group) => !group.generated).flatMap((group) =>
+  return ACTION_TREE.flatMap((group) =>
     group.entries.flatMap((entry) =>
       entry.kind === "section" ? entry.items : [entry]
     )
@@ -2082,15 +2024,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
   constructor(
     private readonly registry: WorkRegistry,
     private readonly store?: GroupStateStore,
-    private readonly counts?: ActionCounts,
-    /**
-     * 「テスト中」の分類を出すか（作者の指示、2026-08-29）。
-     *
-     * **F5（開発ホスト）のときだけ真。** ストアから入れた読者に
-     * 開発用の確認一覧を見せても、押せるものが増えるだけで意味がない。
-     * extension.ts が `ExtensionMode.Development` を渡す。
-     */
-    private readonly showTesting: boolean = true
+    private readonly counts?: ActionCounts
   ) {
     this.expanded = restoreExpandedGroups(store?.get() ?? []);
     // 最初の作品を登録した時点で、作品向けの操作を出せるようになる
@@ -2245,10 +2179,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
 
   private listChildren(node?: ActionNode): ActionNode[] {
     const hasWork = this.registry.list().length > 0;
-    // 写しの分類（テスト中）は開発ホストだけに出す（作者の指示、2026-08-29）
-    const groups = visibleGroups(hasWork).filter(
-      (group) => !group.generated || this.showTesting
-    );
+    const groups = visibleGroups(hasWork);
 
     if (!node) {
       return groups.map((group) => ({ type: "group" as const, group }));

@@ -18,7 +18,12 @@ import {
   type GitSyncStatus,
 } from "../core/git";
 import { readDivergenceConflicts } from "../core/divergenceScan";
-import { describeNetworkFailure } from "../core/gitSetup";
+import {
+  commitAll,
+  countTrackableFiles,
+  describeNetworkFailure,
+  hasCommitIdentity,
+} from "../core/gitSetup";
 import { logFailure, logStep, showLog } from "../core/logger";
 import { buildSyncTarget, describeCompanions } from "../core/syncTarget";
 import { withProgress } from "../views/progress";
@@ -50,6 +55,34 @@ import { confirmRun, notifyDone } from "../views/notify";
  * `no_upstream`（`push -u` がまだ）は取りに行ってよい。
  * リモート自体はあるので、他の環境の分を取得できる。
  */
+/** 「記録してから取り込む」のボタン文言。文と揃えるため、ここだけが持つ */
+export const RECORD_THEN_PULL = "記録してから取り込む";
+
+/**
+ * 未記録の変更があって取り込めなかったときの知らせ（設計書5.5.18）。
+ *
+ * **止めているのは、書きかけを巻き込まないため**である。取り込みは
+ * 作業中のファイルを別の環境の版で上書きしうるので、gitは未記録の
+ * 変更があると先へ進まない。ここまでは今までどおり。
+ *
+ * **その場で記録できるようにする**（作者の指摘「もう少し手軽に
+ * できないですか」2026-09-10）。記録は**手元に残るだけで、外へは出ない**
+ * ——送信は別の操作なので、押しても書きかけがGitHubへ上がることはない。
+ * 「すべて同期」は前から同じ順（記録 → 取り込み → 送信）で動いており、
+ * **単独の「取り込む」だけが行き止まりになっていた。**
+ *
+ * 文だけを純粋関数にしてあるのは、画面を出さずに言い回しを試験できるように
+ * するためである（`gitSync.test.ts`）。
+ */
+export function describeDirtyPull(title: string): string {
+  return (
+    `「${title}」に未記録の変更があるため取り込みませんでした。` +
+    "書きかけの原稿を巻き込まないためです。" +
+    `「${RECORD_THEN_PULL}」を押すと、いまの状態を手元の履歴へ残してから` +
+    "取り込みます（記録はこの端末に残るだけで、GitHubへは送りません）。"
+  );
+}
+
 export function canFetch(status: GitSyncStatus): boolean {
   return (
     status.kind === "tracked" ||
@@ -474,8 +507,15 @@ export class GitSyncMonitor implements vscode.Disposable {
   /** 一度伝えた作品。**取り込むたびに出すと、消せない表示になる** */
   private readonly autoCrlfWarned = new Set<string>();
 
-  /** 取り込む（作者の操作が起点） */
-  async pull(work: WorkEntry): Promise<boolean> {
+  /**
+   * 取り込む（作者の操作が起点）。
+   *
+   * @param afterRecording 未記録の変更を記録したあとの呼び直しか。
+   *   **記録 → 取り込みの往復は1回まで**にする。記録しても `dirty` が
+   *   消えないとき（`.gitignore` で追えないもの、権限で書けないもの）に、
+   *   同じ問いを延々と出さないためである。
+   */
+  async pull(work: WorkEntry, afterRecording = false): Promise<boolean> {
     // **取り込みで改行が書き換わりうることを、先に伝える**（設計書5.5.1）
     await this.warnAutoCrlfOnce(work);
 
@@ -502,12 +542,24 @@ export class GitSyncMonitor implements vscode.Disposable {
     }
 
     if (result.failure.kind === "dirty") {
-      vscode.window.showWarningMessage(
-        `「${work.title}」に未コミットの変更があるため取り込みませんでした。` +
-          "書きかけの原稿を巻き込まないためです。" +
-          "変更をコミットするか元に戻してから、もう一度実行してください。"
+      // 記録したのにまだ未記録が残るなら、押しても同じ結果になる。
+      // **同じ問いを二度出さない**——理由を添えて終わる
+      if (afterRecording) {
+        vscode.window.showWarningMessage(
+          `「${work.title}」に未記録の変更が残っているため取り込めませんでした。` +
+            "変更を元に戻すか、内容を確かめてから、もう一度実行してください。"
+        );
+        return false;
+      }
+      const answer = await vscode.window.showWarningMessage(
+        describeDirtyPull(work.title),
+        RECORD_THEN_PULL,
+        "閉じる"
       );
-      return false;
+      if (answer !== RECORD_THEN_PULL) return false;
+      if (!(await this.recordBeforePull(work))) return false;
+      // 記録できた。**もう一度だけ**取り込みへ行く
+      return await this.pull(work, true);
     }
 
     if (result.failure.kind === "diverged") {
@@ -531,6 +583,49 @@ ${reason}` : ""}`,
     );
     if (action === "ログを表示") showLog();
     return false;
+  }
+
+  /**
+   * 取り込む前に、いまの状態を手元の履歴へ残す（設計書5.5.18）。
+   *
+   * **手順は `resolveDivergence.ts` の `foldDivergence` と同じ**にする。
+   * あちらも「合わせる前の自動保存」として同じことをしており、
+   * 二通りのやり方があると、片方だけ直したときに食い違う。
+   *
+   * @returns 記録できて、取り込みへ進んでよいか
+   */
+  private async recordBeforePull(work: WorkEntry): Promise<boolean> {
+    const run = this.options.run ?? runGit;
+    const root = work.folderPath;
+
+    // **名前が無いと git commit は必ず失敗する。** 初めてGitを使う作者が
+    // 必ずここで詰まるので、先に確かめて次の一手を示す
+    if (!(await hasCommitIdentity(root, run))) {
+      vscode.window.showWarningMessage(
+        "記録する人の名前が未設定です。" +
+          "「GitHubと同期」の案内から一度設定してください。"
+      );
+      return false;
+    }
+
+    const pending = await countTrackableFiles(root, run);
+    const committed = await withProgress("未記録の変更を記録しています…", () =>
+      commitAll(root, `取り込む前の自動保存（${pending}件）`, run)
+    );
+    if (!committed.ok) {
+      logFailure("取り込む前の記録に失敗", {
+        作品: work.title,
+        詳細: committed.detail ?? "",
+      });
+      const action = await vscode.window.showErrorMessage(
+        `「${work.title}」の変更を記録できませんでした。`,
+        "ログを表示",
+        "閉じる"
+      );
+      if (action === "ログを表示") showLog();
+      return false;
+    }
+    return true;
   }
 
   /**

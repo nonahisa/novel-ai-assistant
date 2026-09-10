@@ -453,41 +453,19 @@ export async function activate(
   context: vscode.ExtensionContext
 ): Promise<{ extendMarkdownIt<T extends MarkdownItLike>(md: T): T }> {
   /**
-   * F5の開発ホストで、押した操作を記録する（作者の依頼、2026-08-27）。
+   * コマンド登録の入口。**登録の口を1つにまとめておく。**
    *
-   * **本番の束には1バイトも入らない。** 本番ビルドでは `__DEV_HELPERS__` が
-   * `false` に畳まれ、この枝ごと（中の動的importも）落ちる。残るのは
-   * `logOperation` が `undefined` のままの変数だけで、下の包みは素通りになる。
-   *
-   * 記録は node:fs で書く。ブラウザの開発ビルド（vscode.dev）には fs が無いので
-   * 記録しない——F5の「拡張機能開発ホスト」は常にデスクトップなので実害はない。
-   */
-  let logOperation: ((command: string) => void) | undefined;
-  if (__DEV_HELPERS__ && canRunProcesses()) {
-    const dev = await import("./dev/operationLog.js");
-    dev.initOperationLog(context.extensionPath);
-    logOperation = dev.logOperation;
-  }
-
-  /**
-   * コマンド登録の包み。**登録の入口を1か所にまとめて、押された事実を残す。**
-   *
-   * 個々のハンドラへ記録を書き足す形にすると、80か所のうち書き忘れたものだけが
-   * 静かに記録されなくなる（しかも気づけない）。入口で包めば、
-   * **新しく足したコマンドも自動で記録の対象になる。**
-   *
-   * 残すのは「実行した事実」だけで、通ったかどうかは残さない
-   * （判断は作者がする。`src/dev/checkRunner.ts`）。
+   * 0.45.0 まではここで押した操作を記録していた（F5の開発ホスト限定。
+   * 実機確認の道具ごと撤去した。設計書6.26）。包みそのものは残す——
+   * 登録が1か所であることに検査が拠っており（`contributesShape.test.ts` は
+   * この関数へ渡すコマンドIDを読んで、宣言と突き合わせる）、
+   * 80か所を素の `vscode.commands.registerCommand` へ散らす理由も無い。
    */
   const registerCommand: typeof vscode.commands.registerCommand = (
     command,
     callback,
     thisArg
-  ) =>
-    vscode.commands.registerCommand(command, (...args: unknown[]) => {
-      logOperation?.(command);
-      return callback.apply(thisArg, args);
-    });
+  ) => vscode.commands.registerCommand(command, callback, thisArg);
 
   /**
    * 作品に属さない生成文書（使い方・診断・セットアップの内訳・IME辞書の
@@ -801,23 +779,6 @@ export async function activate(
     )
   );
 
-  // **開発用の道具は、配布物に入れない**（作者の指定、2026-08-26）。
-  // 本番ビルドでは `__DEV_HELPERS__` が false に畳まれ、この枝ごと落ちる
-  // （中の動的importも消えるので、`src/dev/` は束に入らない）
-  if (__DEV_HELPERS__) {
-    const { registerCheckRunner } = await import("./dev/checkRunner.js");
-    context.subscriptions.push(registerCheckRunner(context));
-    // 操作ログを確認リストへ書き戻す道具。**合否の印には触らない**
-    const { registerReflectOperationLog } = await import(
-      "./dev/reflectOperationLog.js"
-    );
-    context.subscriptions.push(registerReflectOperationLog(context));
-    // Ollamaを流して受け取る実験の入切（設計書6.63.1）。
-    // **押した分は保存しない**——ウィンドウを閉じれば配布と同じ道へ戻る
-    const { registerStreamToggle } = await import("./dev/streamToggle.js");
-    context.subscriptions.push(registerStreamToggle(context));
-  }
-
   context.subscriptions.push(
     registerCommand("novelai.syncAllWorks", async () => {
       const { syncAllWorks } = await import("./features/syncAllWorks.js");
@@ -974,9 +935,7 @@ export async function activate(
       get: () => context.globalState.get<string[]>(ACTION_GROUPS_KEY, []),
       set: (groups) => void context.globalState.update(ACTION_GROUPS_KEY, groups),
     },
-    (counter) => actionDecorations.countOf(counter),
-    // 「テスト中」はF5（開発ホスト）だけに出す（作者の指示、2026-08-29）
-    context.extensionMode === vscode.ExtensionMode.Development
+    (counter) => actionDecorations.countOf(counter)
   );
   const actionView = vscode.window.createTreeView("novelai.actions", {
     treeDataProvider: actionProvider,

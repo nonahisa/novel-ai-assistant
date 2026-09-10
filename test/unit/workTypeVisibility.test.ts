@@ -44,15 +44,12 @@ const manifest = JSON.parse(
 ) as PackageManifest;
 
 /**
- * 表から外してよいコマンド。
+ * 表から外してよいコマンド。**いまは1件も無い。**
  *
- * - `novelai.dev.*` は開発ビルドだけの道具（`devOnly`）。配布物には
- *   定義ごと入らないので、タイプで出し分ける対象にならない
- *
- * **「テスト中」の分類は除外しない。** 中身は他の分類の写しなので、
- * コマンドIDとしては既に表に載っている。
+ * 0.45.0 まで、開発ビルドだけの道具（`novelai.dev.*`）を除いていた。
+ * 道具ごと撤去したので、**全コマンドが表に載る**（設計書6.26）。
  */
-const OUT_OF_TABLE = [/^novelai\.dev\./];
+const OUT_OF_TABLE: RegExp[] = [];
 
 function inTable(command: string): boolean {
   return !OUT_OF_TABLE.some((pattern) => pattern.test(command));

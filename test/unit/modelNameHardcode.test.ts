@@ -33,12 +33,9 @@ const MODEL_FAMILY =
  *
  * - `core/requirements.ts`：薦めるモデルの唯一の定義
  * - `ai/*Provider.ts`：既定モデルの候補や、プロバイダ固有の言い回し
- * - `dev/`：実機確認の項目（配布物に入らない）
  */
 const ALLOWED = [
   "core/requirements.ts",
-  "dev/pendingCheckItems.ts",
-  "views/pendingChecks.ts",
   // 「gemma4:e4b と gemma4:12b で5回測った」という**過去の事実**を、
   // 逸脱検知が効かない断り書きの根拠として示している（設計書6.10.2）。
   // 動きを決めていない——設定でも既定値でもないので、新しいモデルが
