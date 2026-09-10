@@ -102,6 +102,8 @@ interface ValidationFixCounts {
   droppedSharedBodyAliases: DroppedAliasRecord[];
   /** 敬称の途中で切れた別名（「母親さ」）として落としたもの */
   droppedTruncatedAliases: DroppedAliasRecord[];
+  /** 自分の身内を指す別名（息子のレコードの「三門の母」）として落としたもの */
+  droppedRelativeAliases: DroppedAliasRecord[];
   /** 向きが逆だった親族関係を直したもの */
   correctedRelations: CorrectedRelationRecord[];
 }
@@ -112,6 +114,7 @@ function collectValidationFixes(
 ): void {
   target.droppedSharedBodyAliases.push(...validated.droppedSharedBodyAliases);
   target.droppedTruncatedAliases.push(...validated.droppedTruncatedAliases);
+  target.droppedRelativeAliases.push(...validated.droppedRelativeAliases);
   target.correctedRelations.push(...validated.correctedRelations);
 }
 
@@ -519,6 +522,7 @@ export async function extractCharacters(
   const validationFixes: ValidationFixCounts = {
     droppedSharedBodyAliases: [],
     droppedTruncatedAliases: [],
+    droppedRelativeAliases: [],
     correctedRelations: [],
   };
   /**
@@ -1322,6 +1326,13 @@ function describeValidationFixes(fixes: ValidationFixCounts): string {
     lines.push(
       `途中で切れた別名を ${fixes.droppedTruncatedAliases.length}件 外しました（${
         describeDroppedAliases(fixes.droppedTruncatedAliases)
+      }）`
+    );
+  }
+  if (fixes.droppedRelativeAliases.length > 0) {
+    lines.push(
+      `自分の身内を指す別名を ${fixes.droppedRelativeAliases.length}件 外しました（${
+        describeDroppedAliases(fixes.droppedRelativeAliases)
       }）`
     );
   }

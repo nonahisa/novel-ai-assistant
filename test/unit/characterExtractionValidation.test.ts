@@ -157,6 +157,97 @@ describe("AI登場人物抽出結果の検証", () => {
     expect(result.accepted[0].data.aliases).toEqual(["あかり"]);
   });
 
+  test("自分の身内を指す別名を落とす", () => {
+    // 実データで、息子のレコードに母親の呼び名が別名として入った
+    // （gemma4:26b、2026-09-10）。あとで「三門の母」から引くと息子に当たる。
+    // **〇〇が自分の名前に含まれるときだけ**落とす——「密倉の母」は
+    // 誰の別名なのかが形からは決められないので残す（設計書6.5.9）
+    const line = "三門太志と密倉の母が並んでいた";
+    const result = validate(
+      {
+        characters: [
+          {
+            name: "三門太志",
+            aliases: [
+              "三門くん",
+              "三門の母",
+              "母さん",
+              "太志の母",
+              "密倉の母",
+              "あかり",
+            ],
+            evidence: line,
+          },
+        ],
+      },
+      { ...chunk, text: line }
+    );
+
+    expect(result.accepted[0].data.aliases).toEqual([
+      "三門くん",
+      "母さん",
+      "密倉の母",
+      "あかり",
+    ]);
+    // 黙って捨てず、完了報告に出せる形で残す
+    expect(result.droppedRelativeAliases).toEqual([
+      { characterName: "三門太志", alias: "三門の母" },
+      { characterName: "三門太志", alias: "太志の母" },
+    ]);
+  });
+
+  test("母親のレコードの「三門の母」は別名として残す", () => {
+    // 同じ呼び名でも、付いている先が違えば正しい別名である
+    const line = "圭織は三門の母として知られていた";
+    const result = validate(
+      {
+        characters: [
+          { name: "圭織", aliases: ["三門の母"], evidence: line },
+        ],
+      },
+      { ...chunk, text: line }
+    );
+
+    expect(result.accepted[0].data.aliases).toEqual(["三門の母"]);
+    expect(result.droppedRelativeAliases).toEqual([]);
+  });
+
+  test("「ノ」の入った名前でも「の」で切って身内の別名を落とす", () => {
+    // 区切りはひらがなの「の」だけ。「ノ」は名前の一部（木ノ下）
+    const line = "木ノ下と木ノ下の妹が来た";
+    const result = validate(
+      {
+        characters: [
+          { name: "木ノ下", aliases: ["木ノ下の妹"], evidence: line },
+        ],
+      },
+      { ...chunk, text: line }
+    );
+
+    expect(result.accepted[0].data.aliases).toEqual([]);
+    expect(result.droppedRelativeAliases).toEqual([
+      { characterName: "木ノ下", alias: "木ノ下の妹" },
+    ]);
+  });
+
+  test("名前自体が「〇〇の関係語」のレコードでは、同じ形の別名を落とさない", () => {
+    // 「三門の母」というレコードは作者の裁定で残している（設計書6.5.9）。
+    // その人物の別名「三門の母親」は本人の言い換えでありうるのに、
+    // 〇〇が必ず自分の名前に含まれてしまうので、この形は見送る
+    const line = "三門の母は三門の母親として紹介された";
+    const result = validate(
+      {
+        characters: [
+          { name: "三門の母", aliases: ["三門の母親"], evidence: line },
+        ],
+      },
+      { ...chunk, text: line }
+    );
+
+    expect(result.accepted[0].data.aliases).toEqual(["三門の母親"]);
+    expect(result.droppedRelativeAliases).toEqual([]);
+  });
+
   test.each([["兵士たち"], ["村人ら"], ["旅人一行"]])(
     "集団名詞 %s を消さずモブとして残す",
     (name) => {

@@ -1,6 +1,7 @@
 import type { Chunk } from "./chunker";
 import {
   DESCRIPTIVE_ROLE_WORDS,
+  KINSHIP_WORDS,
   PRONOUN_WORDS,
 } from "./genericPersonWords";
 import { stripHonorific } from "./nameHonorific";
@@ -65,6 +66,11 @@ export interface CharacterValidationResult {
   droppedSharedBodyAliases: DroppedAliasRecord[];
   /** 敬称の途中で切れた別名として落としたもの（「母親さ」） */
   droppedTruncatedAliases: DroppedAliasRecord[];
+  /**
+   * 自分の身内を指す別名として落としたもの（息子のレコードの「三門の母」）。
+   * AIが本人の別名として返してくるので、コードで検算する。
+   */
+  droppedRelativeAliases: DroppedAliasRecord[];
   /** 向きが逆だった親族関係を直したもの（相手「お母さん」に「息子」） */
   correctedRelations: CorrectedRelationRecord[];
 }
@@ -166,6 +172,11 @@ const PRONOUNS = new Set(PRONOUN_WORDS);
  * 家族関係語は**単独では弾かない**——「〇〇の△△」の△△を見るためだけに使う。
  */
 const DESCRIPTIVE_ROLES = new Set(DESCRIPTIVE_ROLE_WORDS);
+/**
+ * 家族関係語。**単独では弾かない**——「〇〇の△△」の△△を見るためだけに使う
+ * （`isOwnRelativeAlias`）。一覧は `genericPersonWords.ts` が1か所で持つ。
+ */
+const KINSHIP = new Set(KINSHIP_WORDS);
 
 const GENERIC_ROLES = new Set([
   "先生",
@@ -216,6 +227,7 @@ export function validateCharacterExtractResult(
   const rejected: RejectedCharacterCandidate[] = [];
   const droppedSharedBodyAliases: DroppedAliasRecord[] = [];
   const droppedTruncatedAliases: DroppedAliasRecord[] = [];
+  const droppedRelativeAliases: DroppedAliasRecord[] = [];
   const correctedRelations: CorrectedRelationRecord[] = [];
   const rawCharacters: unknown = result.characters;
 
@@ -225,6 +237,7 @@ export function validateCharacterExtractResult(
       rejected: [{ name: null, reason: "invalid_shape" }],
       droppedSharedBodyAliases,
       droppedTruncatedAliases,
+      droppedRelativeAliases,
       correctedRelations,
     };
   }
@@ -294,6 +307,15 @@ export function validateCharacterExtractResult(
       continue;
     }
 
+    // 自分の身内を指す別名は `normalizeExtractedCharacter` が既に落としている。
+    // あちらは純粋な正規化で記録を持てないので、**生の別名と突き合わせて
+    // ここで拾う**——落とした分は黙って捨てず、完了報告に出す
+    for (const alias of cleanStringArray(raw.aliases)) {
+      if (alias === character.name) continue;
+      if (!isOwnRelativeAlias(alias, character.name)) continue;
+      droppedRelativeAliases.push({ characterName: character.name, alias });
+    }
+
     survived.push(character);
     groundingNames.set(character, [
       character.name,
@@ -336,6 +358,7 @@ export function validateCharacterExtractResult(
     rejected,
     droppedSharedBodyAliases,
     droppedTruncatedAliases,
+    droppedRelativeAliases,
     correctedRelations,
   };
 }
@@ -630,7 +653,7 @@ export function normalizeExtractedCharacter(
   const character: ExtractedCharacter = {
     name,
     aliases: cleanStringArray(raw.aliases).filter(
-      (alias) => alias !== name && isValidAlias(alias)
+      (alias) => alias !== name && isValidAlias(alias, name)
     ),
   };
 
@@ -734,9 +757,18 @@ function isValidName(name: string): boolean {
   );
 }
 
-function isValidAlias(alias: string): boolean {
+/**
+ * その文字列を、この人物（`ownerName`）の別名として持ってよいか。
+ *
+ * **レコードの名前を受け取る。** 別名が正しいかどうかは、形だけでは
+ * 決まらないものがある——「三門の母」は母親のレコードなら正しい別名だが、
+ * 息子（三門太志）のレコードに付いていたら別人の呼び名である。
+ */
+function isValidAlias(alias: string, ownerName: string): boolean {
   return (
     isValidName(alias) &&
+    // 自分の身内を指す呼び名は、本人の別名ではない（設計書6.5.9）
+    !isOwnRelativeAlias(alias, ownerName) &&
     // 代名詞の判定は isValidName から分けた（除外の理由を分けるため）。
     // 別名の側でも同じように弾く——「僕」を別名に持つと、それだけで
     // 別レコードどうしが「同じ呼び名を持つ」ことになる（設計書6.5.9）
@@ -789,6 +821,55 @@ function isDescriptiveName(name: string): boolean {
   const bare = normalizeSpacingOnly(name);
   if (!bare) return false;
   return DESCRIPTIVE_ROLES.has(bare) || DESCRIPTIVE_ROLES.has(stripHonorific(bare));
+}
+
+/**
+ * その別名は、**その人物自身の身内**を指しているか（設計書6.5.9）。
+ *
+ * 実データで、息子のレコードに母親の呼び名が別名として入った
+ * （`三門太志 〔三門くん・三門の母・母さん・三門さん・太志くん〕`。
+ * gemma4:26b で本編18話、2026-09-10）。マージのせいではなく、
+ * **AIが本人の別名として返してくる**。放っておくと「三門の母」から
+ * 引いたときに息子に当たる。
+ *
+ * 弾くのは「〇〇の△△」の形で、△△が家族関係語、かつ**〇〇がその人物
+ * 自身の名前に含まれる**ときだけ。「密倉の母」（三門太志のレコード）は
+ * 落とさない——〇〇が自分の名前に無いので、誰の別名なのかは形からは
+ * 決められない。「母さん」のような関係語だけの別名も落とさない
+ * （母親自身のレコードに付く正しい別名でもある）。
+ */
+function isOwnRelativeAlias(alias: string, ownerName: string): boolean {
+  const owner = normalizeForCompare(ownerName);
+  if (!owner) return false;
+  // レコードの名前そのものが「〇〇の△△」のとき（「三門の母」という人物。
+  // 作者の裁定で残している形）は見送る。同じ形の別名（「三門の母親」）は
+  // 本人の言い換えでありうるのに、〇〇が必ず自分の名前に含まれてしまう
+  if (splitRelativeName(ownerName) !== null) return false;
+
+  const parts = splitRelativeName(alias);
+  return parts !== null && owner.includes(parts.holder);
+}
+
+/**
+ * 「〇〇の△△」を分ける。当てはまらなければ null。
+ *
+ * **区切りはひらがなの「の」だけ。** 「ノ」は「木ノ下」のように名前に使う。
+ * 「の」が複数あるときは**最後の「の」で切る**——△△を最短に取ると
+ * 「三門の家の母」は〇〇が「三門の家」になって名前と一致せず、落ちない。
+ * 判断できないものは落とさない側へ倒す。
+ */
+function splitRelativeName(
+  name: string
+): { holder: string; kinship: string } | null {
+  const bare = normalizeSpacingOnly(name);
+  const at = bare.lastIndexOf("の");
+  if (at <= 0 || at === bare.length - 1) return null;
+  const kinship = bare.slice(at + 1);
+  if (!KINSHIP.has(kinship)) return null;
+  // 〇〇にも敬称が付く（「三門くんの母」）。名前と突き合わせる側なので、
+  // 名前と同じ正規化を通してから返す
+  const holder = normalizeForCompare(bare.slice(0, at));
+  return holder ? { holder, kinship } : null;
 }
 
 function isCollectiveName(name: string): boolean {
