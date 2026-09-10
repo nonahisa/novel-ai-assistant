@@ -294,3 +294,39 @@ function trimBlankEdges(lines: string[]): string[] {
   while (end > start && lines[end - 1].trim() === "") end--;
   return lines.slice(start, end);
 }
+
+/**
+ * プロットの先頭にある題（`# 〈作品名〉`）だけを書き換える（設計書6.1.1）。
+ *
+ * **元の題と一致するときしか触らない。** ここはテンプレートが置いた行だが、
+ * 作者が自分の言葉へ書き換えていることがある（「# 第一部・構想メモ」など）。
+ * 登録名を変えたついでにその行を上書きすると、**作者が書いた見出しが
+ * 黙って消える。** 違っていれば触らず、変えなかったことを知らせる。
+ *
+ * **改行は元のまま返す。** 区切りごと捕まえて分けるので、CRLFの作品で
+ * 1行を直したときに全行が差分になることがない。
+ */
+export function renamePlotHeading(
+  text: string,
+  oldTitle: string,
+  newTitle: string
+): { text: string; changed: boolean } {
+  const parts = text.split(/(\r\n|\n|\r)/);
+  const wanted = oldTitle.trim();
+
+  for (let i = 0; i < parts.length; i += 2) {
+    // 題は `#` 1つ。`##` は作者が並べた節なので、題と読み違えない
+    const heading = /^#(?!#)[ \t]+(.*)$/.exec(parts[i]);
+    if (!heading) continue;
+
+    // **最初の `# ` 見出しだけを見る。** ここで必ず抜けるので、
+    // 本文の途中に出てくる `# …` は候補にならない
+    if (wanted.length === 0 || heading[1].trim() !== wanted) {
+      return { text, changed: false };
+    }
+    parts[i] = `# ${newTitle}`;
+    return { text: parts.join(""), changed: true };
+  }
+
+  return { text, changed: false };
+}

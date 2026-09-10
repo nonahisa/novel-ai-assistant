@@ -207,6 +207,21 @@ export const ACTION_TREE: readonly ActionGroup[] = [
     label: "作品管理",
     icon: "repo",
     entries: [
+      // **小分類には入れない。** 置き場（GitHub）でも始め方でもなく、
+      // 登録済みの作品そのものを直す操作なので、分類の直下に置く。
+      // 右クリック（作品を右クリック →「作品名を変更」）と同じ操作
+      {
+        kind: "action",
+        command: "novelai.renameWork",
+        label: "作品名を変更",
+        icon: "edit",
+        requiresWork: true,
+        detail:
+          "作品の呼び名を変えます。一覧の表示名・`.aiwriter/config.json` の題・" +
+          "プロットの先頭の見出しを、まとめて揃えます。" +
+          "**フォルダー名は変えません**（GitHubの置き場や登録がつながらなくなるためです）。" +
+          "プロットの見出しをご自分で書き換えていた場合は、そこは触りません。",
+      },
       {
         kind: "section",
         label: "GitHubで作品管理",

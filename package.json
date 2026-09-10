@@ -150,6 +150,11 @@
         "icon": "$(new-folder)"
       },
       {
+        "command": "novelai.renameWork",
+        "title": "作品名を変更",
+        "category": "小説執筆"
+      },
+      {
         "command": "novelai.removeWork",
         "title": "作品の登録を解除",
         "category": "小説執筆"
@@ -1151,6 +1156,11 @@
           "command": "novelai.openWorkFolder",
           "when": "view == novelai.works && viewItem =~ /^work-/",
           "group": "2_open@2"
+        },
+        {
+          "command": "novelai.renameWork",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
+          "group": "2_open@3"
         },
         {
           "command": "novelai.removeWork",

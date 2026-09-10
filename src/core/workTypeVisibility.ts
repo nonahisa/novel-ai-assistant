@@ -168,6 +168,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.createWorkWithPlot": "allTypes",
   "novelai.createWorkFromManuscript": "allTypes",
   "novelai.addWorkFromGithub": "allTypes",
+  // 呼び名を変えるだけの操作。中身が何であっても要る（設計書6.1.1）
+  "novelai.renameWork": "allTypes",
   "novelai.removeWork": "allTypes",
   "novelai.openWorkFolder": "allTypes",
   "novelai.refresh": "allTypes",

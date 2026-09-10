@@ -162,6 +162,29 @@ export class WorkRegistry {
     return entry;
   }
 
+  /**
+   * 作品の題を変える（設計書6.1.1）。
+   *
+   * **フォルダーは動かさない。** 置き場所が変わるとGitHubの同期先も
+   * 登録も書庫の並びも切れる。ここで変えるのは呼び名だけである。
+   *
+   * `save` を通すので `onDidChange` が飛び、作品一覧とステータスバーが
+   * 追随する（登録・解除と同じ流儀）。
+   */
+  async rename(id: string, title: string): Promise<WorkEntry | undefined> {
+    const works = this.context.globalState.get<WorkEntry[]>(STORAGE_KEY, []);
+    const target = works.find((w) => w.id === id);
+    if (!target) return undefined;
+
+    const trimmed = title.trim();
+    // 空にはできない（一覧から名前が消える）。変わっていなければ書かない
+    if (trimmed.length === 0 || trimmed === target.title) return target;
+
+    const renamed: WorkEntry = { ...target, title: trimmed };
+    await this.save(works.map((w) => (w.id === id ? renamed : w)));
+    return renamed;
+  }
+
   /** 登録を解除する（フォルダ本体は削除しない） */
   async remove(id: string): Promise<void> {
     const works = this.context.globalState.get<WorkEntry[]>(STORAGE_KEY, []);

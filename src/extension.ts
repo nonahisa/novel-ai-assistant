@@ -94,6 +94,7 @@ import { findMergeCandidates } from "./core/characterMerge";
 import { CharacterStore } from "./core/characterStore";
 import type { ChatRunKind } from "./core/chatEdit";
 import { applyPendingCharacterUpdates } from "./features/applyPendingUpdates";
+import { renameWork } from "./features/renameWork";
 import { exportImeDictionary } from "./features/exportImeDictionary";
 import { exportPdf } from "./features/exportPdf";
 import { exportEpub } from "./features/exportEpub";
@@ -2214,6 +2215,17 @@ export async function activate(
   );
 
   context.subscriptions.push(
+    registerCommand("novelai.renameWork", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry, {
+        title: "名前を変える作品を選択",
+      });
+      if (!work) return;
+      // 一覧の更新は `registry.onDidChange` が受け持つ（登録・解除と同じ）
+      await renameWork(registry, work);
+    })
+  );
+
+  context.subscriptions.push(
     registerCommand(
       "novelai.removeWork",
       async (node?: WorkNode) => {
@@ -2649,7 +2661,8 @@ export async function activate(
           },
         });
         if (!work) return;
-        await exportImeDictionary(work);
+        // 保管庫を渡すと、作者が外した語を覚えて次からも外したままにする
+        await exportImeDictionary(work, context.globalState);
         // 書き出したので「辞書が古い」の印を消す。
         // 残ったままだと、押しても消えない印を作者が気にし続けることになる
         refreshActionBadges();
