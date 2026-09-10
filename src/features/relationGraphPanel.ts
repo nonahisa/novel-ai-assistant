@@ -6,7 +6,7 @@ import { atomicWriteFile } from "../core/atomicWrite";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { timestampedFileNameCandidates } from "../core/timestampedFileName";
 import { revealFolder } from "../views/openDocument";
-import { logFailure, logStep } from "../core/logger";
+import { logFailure, logStep, useLogFile } from "../core/logger";
 import { buildRelationGraphPanelHtml } from "../views/relationGraphPanelHtml";
 import {
   buildRelationGraph,
@@ -323,6 +323,9 @@ class RelationGraphPanel {
     await atomicWriteFile(target, new TextEncoder().encode(svg), {
       mode: "create",
     });
+    // 記録の書き先を作品の actions.log へ向けてから残す（0.45.0。
+    // `logStep` は出力チャンネルにしか出ず、閉じると消えていた）
+    useLogFile(this.work.folderPath);
     logStep(`人物相関図：${target} へ書き出しました`);
 
     const action = await vscode.window.showInformationMessage(
