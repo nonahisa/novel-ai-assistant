@@ -35,8 +35,11 @@ interface PanelInnards {
   detailOf(kind: string, id: string): unknown;
   refreshFromDisk(): Promise<void>;
   post(message: unknown): void;
-  /** 記録（logStep）に作品名を出すので、代役にも持たせる */
-  work: { id: string; title: string };
+  /**
+   * 記録（logStep）に作品名を出し、**書き先もこの作品のログへ向ける**ので
+   * （0.45.0）、代役にもフォルダーまで持たせる
+   */
+  work: { id: string; title: string; folderPath: string };
   /** 画面が動き出したか（`whenReady` が見ている） */
   ready: boolean;
   readyWaiters: Array<() => void>;
@@ -67,7 +70,7 @@ function panelWith(options: {
 
   const panel = Object.create(SettingsPanel.prototype) as SettingsPanel;
   const inner = panel as unknown as PanelInnards;
-  inner.work = { id: "w-1", title: "灯の塔" };
+  inner.work = { id: "w-1", title: "灯の塔", folderPath: "C:" + String.fromCharCode(92) + "works" + String.fromCharCode(92) + "tower" };
   inner.ready = options.ready !== false;
   inner.readyWaiters = [];
   inner.detailOf = (kind: string, id: string) =>

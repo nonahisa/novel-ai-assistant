@@ -11,7 +11,7 @@ import {
   type CommitEntry,
   type RestorePlan,
 } from "../core/gitHistory";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import { withProgress } from "../views/progress";
 import { cancelItem } from "../views/dialogs";
 
@@ -94,6 +94,8 @@ export async function restoreFromHistory(work: WorkEntry): Promise<void> {
       )
     );
     if (!saved.ok) {
+      // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+      useLogFile(work.folderPath);
       logFailure("復元前の自動保存", {
         作品: work.title,
         詳細: saved.detail ?? "",
@@ -116,6 +118,7 @@ export async function restoreFromHistory(work: WorkEntry): Promise<void> {
     restoreToCommit(work.folderPath, picked.id, plan)
   );
   if (!restored.ok) {
+    useLogFile(work.folderPath);
     logFailure("過去の版への復元", {
       作品: work.title,
       版: picked.shortId,
@@ -135,6 +138,7 @@ export async function restoreFromHistory(work: WorkEntry): Promise<void> {
     runGit
   );
   if (!recorded.ok) {
+    useLogFile(work.folderPath);
     logFailure("復元内容の記録", {
       作品: work.title,
       詳細: recorded.detail ?? "",

@@ -66,7 +66,7 @@ import {
   type OrnamentDef,
 } from "../core/epubOrnaments";
 import { revealFolder } from "../views/openDocument";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 
 /**
  * 本文からEPUB3の電子書籍を組んで書き出す（設計書6.65.4の第1段）。
@@ -108,6 +108,9 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     config = await readBookConfig(work);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // **記録の直前に書き先を向ける**（0.43.3 と同じ）。向けないと
+    // 出力チャンネル止まりで、VS Code を閉じると消える
+    useLogFile(work.folderPath);
     logFailure("本の設計図の読み込み", { 作品: work.title, 内容: message });
     await vscode.window.showErrorMessage(
       `設定/${BOOK_DIR}/${BOOK_FILE} を読めませんでした。${message}` +
@@ -158,6 +161,7 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     chapterLedger = (await new ChapterStore(work).load()).chapters;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(work.folderPath);
     logFailure("EPUBの章立て", { 作品: work.title, 内容: message });
     notices.push(
       `章立ての台帳を読めなかったので、目次は話数の並びで束ねました（${message}）`
@@ -175,6 +179,7 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       file = await readTextFile(episode.filePath);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      useLogFile(work.folderPath);
       logFailure("EPUBの組み立て", {
         ファイル: episode.fileName,
         内容: message,
@@ -337,6 +342,7 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(work.folderPath);
     logFailure("EPUBの組み立て", { 作品: work.title, 内容: message });
     await vscode.window.showErrorMessage(`本を組めませんでした。${message}`);
     return;
@@ -347,6 +353,7 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     target = await writeExport(work, epub);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(work.folderPath);
     logFailure("EPUBの書き出し", { 作品: work.title, 内容: message });
     await vscode.window.showErrorMessage(
       `EPUBを保存できませんでした。${message}`
@@ -393,6 +400,7 @@ async function reportCoverFailure(
   const field = side === "back" ? "backCoverImagePath" : "coverImagePath";
   const message = error instanceof Error ? error.message : String(error);
 
+  useLogFile(work.folderPath);
   logFailure("表紙画像の読み込み", {
     作品: work.title,
     面: label,
@@ -562,6 +570,7 @@ async function readAfterword(
       return null;
     }
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(work.folderPath);
     logFailure("あとがきの読み込み", { 作品: work.title, 内容: message });
     notices.push(`${where} を読めませんでした。あとがきの面は入れていません。`);
     return null;
@@ -603,6 +612,7 @@ async function collectCharacters(
     loaded = await new CharacterStore(work).loadAll();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(work.folderPath);
     logFailure("登場人物一覧の読み込み", { 作品: work.title, 内容: message });
     notices.push(
       `登場人物の設定を読めませんでした（${message}）。登場人物一覧は入れていません。`
@@ -683,6 +693,7 @@ async function readCharacterIcon(
     return data;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(work.folderPath);
     logFailure("人物イラストの読み込み", {
       作品: work.title,
       場所: iconPath,
@@ -734,6 +745,7 @@ async function collectOrnaments(
     collected = await collectOrnamentCatalogue(settings);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(work.folderPath);
     logFailure("飾りの読み込み", { 作品: work.title, 内容: message });
     notices.push(
       "飾りのフォルダーを読めませんでした。組み込みの飾りだけで組んでいます。"
@@ -755,6 +767,7 @@ async function collectOrnaments(
     const message = `設計図の飾り「${unknown.join(
       "」「"
     )}」が見つかりませんでした。その面は飾りなしで組んでいます。`;
+    useLogFile(work.folderPath);
     logFailure("飾りの照合", { 作品: work.title, 内容: message });
     notices.push(message);
   }
@@ -789,6 +802,7 @@ async function readFont(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(work.folderPath);
     logFailure("書体の読み込み", {
       作品: work.title,
       場所: relativePath,
@@ -863,6 +877,7 @@ async function readWorkImage(input: {
     return data;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(input.work.folderPath);
     logFailure("画像の読み込み", {
       作品: input.work.title,
       種類: input.label,

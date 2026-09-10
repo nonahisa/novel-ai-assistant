@@ -39,7 +39,7 @@ import { formatChapterLabel } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import type { AIRegistry } from "../ai/registry";
 import { generateAnnouncement } from "./generateAnnouncement";
 import { notifyDone } from "../views/notify";
@@ -90,6 +90,9 @@ export async function postNewEpisode(
   registry: AIRegistry,
   episode?: EpisodeFile
 ): Promise<PostingKitResult> {
+  // **この先の記録は、その作品のログファイルへ残す**（0.43.3 と同じ）。
+  // 本文を読む処理は話しか受け取らないので、入口で向ける
+  useLogFile(work.folderPath);
   const store = new PostingStore(work);
   let ledger = await load(store, work);
   if (!ledger) return { changed: false };
@@ -1022,6 +1025,7 @@ async function report(
   error: unknown
 ): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
+  useLogFile(work.folderPath);
   logFailure(what, {
     作品: work.title,
     種類: error instanceof PostingStoreError ? error.kind : "unknown",

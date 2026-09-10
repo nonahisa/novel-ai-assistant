@@ -1,5 +1,5 @@
 import type { AIProvider } from "../ai/types";
-import { logStep } from "../core/logger";
+import { logStep, useLogFile } from "../core/logger";
 import { readTextFile } from "../core/textFile";
 import type { WorkEntry } from "../models/types";
 import {
@@ -49,6 +49,8 @@ export async function requestChatterComment(
   // **どの版・どのモデルで訊いたかを残す**（ほかのAI機能と同じ流儀）。
   // 独り言は画面に何も出さずに黙ることがあるので、記録が無いと
   // 「呼んだのか、そもそも呼ばなかったのか」すら分からない
+  // 作品のログファイルへ残す（向けないと出力チャンネル止まり）
+  useLogFile(work.folderPath);
   logStep(
     `独り言の感想: v${CHATTER_COMMENT_VERSION} / ${resolved.model}` +
       ` / 本文${excerpt.length}字`

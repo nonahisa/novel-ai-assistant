@@ -26,7 +26,12 @@ import {
   type SyncTargetPlan,
   type SyncTargetState,
 } from "../core/syncAllPlan";
-import { logFailure, logStep, showLog } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  showLog,
+  useLogFile,
+} from "../core/logger";
 import { withCancellableProgress } from "../views/progress";
 import type { GitSyncMonitorLike } from "./gitSyncStub";
 
@@ -241,6 +246,15 @@ async function runPlan(
   const cwd = plan.target.folderPath;
   const run = deps.run ?? runGit;
   const name = describeTargetWorks(plan.target);
+  /*
+    **記録は、その置き場の作品のログファイルへ残す**（0.45.0）。向けないと
+    出力チャンネル止まりで、VS Code を閉じると消える。
+
+    1つの置き場に複数の作品が入る（設計書5.7.9）ので、代表として先頭の
+    作品へ書く。登録済みの作品が無い置き場では向けない（書き先が無い）。
+  */
+  const logWork = plan.target.works[0];
+  if (logWork) useLogFile(logWork.folderPath);
 
   if (plan.commit) {
     // **名前とメールアドレスが無いと、gitはコミットを作れない。**

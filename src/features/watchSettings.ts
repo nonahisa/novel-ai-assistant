@@ -9,7 +9,7 @@ import {
   isWatchedSettingsFile,
   kindOfSettingsFile,
 } from "../core/externalChanges";
-import { logStep } from "../core/logger";
+import { logStep, useLogFile } from "../core/logger";
 
 /**
  * 設定資料が外部で書き換えられたことに気づく。
@@ -177,6 +177,9 @@ export class SettingsWatcher implements vscode.Disposable {
     // 止める前に予約された分が、止めている最中に鳴ることがある
     if (this.isMuted(work)) return;
 
+    // **記録の直前に書き先を向ける**（0.43.3 と同じ）。向けないと
+    // 出力チャンネル止まりで、VS Code を閉じると消える
+    useLogFile(work.folderPath);
     logStep(
       `設定資料が外部で変更された: ${work.title} / ${files.length}件 ` +
         `（${files.map((file) => path.basename(file)).join("、")}）`
@@ -194,7 +197,15 @@ export class SettingsWatcher implements vscode.Disposable {
 /** 外部変更の知らせに添える操作 */
 export interface ExternalChangeActions {
   review: () => Promise<void>;
-  reload: () => void;
+  /**
+   * 画面を読み直すだけ（取り込みも印付けもしない）。
+   *
+   * **開いている設定資料パネルの読み直しも含む**（0.45.0）。ファイルを
+   * 読み直す処理なので `Promise` を返すが、**待たない**——知らせの
+   * 待ち行列を先へ進めるほうが作者にとって大事で、読み直しは
+   * それぞれの画面の中で完結する
+   */
+  reload: () => void | Promise<void>;
   /**
    * この変更を「人が確定させたもの」として守る。
    *
@@ -244,8 +255,8 @@ export async function notifyExternalChange(
       // **「すべてあとで」は、待ち行列ごと片づける**（作者の指示、2026-09-10）。
       // ただし読み直しだけは各作品ぶん行う——画面が古いままだと、
       // 作者は「あとで」を押しただけで見えているものが嘘になる
-      for (const rest of queue.splice(0)) rest.actions.reload();
-      next.actions.reload();
+      for (const rest of queue.splice(0)) void rest.actions.reload();
+      void next.actions.reload();
     }
   } finally {
     showing = false;
@@ -304,7 +315,7 @@ async function showOneNotice(
     return false;
   }
   if (answer === "読み込み直すだけ") {
-    notice.actions.reload();
+    void notice.actions.reload();
     return false;
   }
   return answer === "すべてあとで";

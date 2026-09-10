@@ -10,7 +10,7 @@ import {
 import { ChapterStore, ChapterStoreError } from "../core/chapterStore";
 import { episodePathFor } from "../core/bookStore";
 import { askText } from "../views/dialogs";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import { notifyDone } from "../views/notify";
 
 /**
@@ -205,6 +205,8 @@ async function report(
   error: unknown
 ): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
+  // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+  useLogFile(work.folderPath);
   logFailure(what, {
     作品: work.title,
     種類: error instanceof ChapterStoreError ? error.kind : "unknown",

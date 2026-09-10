@@ -19,7 +19,7 @@ import {
   replacedDirectories,
   SHARED_FILES,
 } from "../core/editingRepo";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import { withProgress } from "../views/progress";
 import { askText } from "../views/dialogs";
 import { isEditorMode } from "../core/actorContext";
@@ -161,6 +161,8 @@ export async function shareWithEditor(work: WorkEntry): Promise<void> {
   });
 
   if (!result.ok) {
+    // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+    useLogFile(work.folderPath);
     logFailure("編集部へ渡す", { 作品: work.title, 詳細: result.detail });
     const action = await vscode.window.showErrorMessage(
       `編集部へ渡せませんでした: ${result.detail}`,

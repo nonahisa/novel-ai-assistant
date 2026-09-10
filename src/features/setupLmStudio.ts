@@ -15,6 +15,9 @@ import {
   shortenProgress,
 } from "../core/packageInstall";
 import { canRunProcesses } from "../core/runtime";
+// ログの書き先：作品が定まらない
+// LM Studio を入れて起こすまでの案内で、**作品を選ぶ前**に通る。
+// 書き先にできる `.aiwriter` が無いので、記録は出力チャンネルだけに出す。
 import { logStep } from "../core/logger";
 import { askText } from "../views/dialogs";
 import { notifyDone } from "../views/notify";

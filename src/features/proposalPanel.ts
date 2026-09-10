@@ -631,13 +631,23 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * パネルは原稿エディタの都合（どの向きで開くか・画面が動き出したか）を
    * 知らなくてよいので、判断ごと外へ出してある。
    */
+  /**
+   * @param loadPending 開いたときに、溜まっている承認待ちを読み込む口
+   *   （0.45.0）。**パネルは置き場所を知らない**ので、外から渡してもらう。
+   *   押して初めて出る作りだったころ、ツリーの印が「未反映の更新 37件」と
+   *   言っているのにパネルは「まだ検知結果がありません」と出ており、
+   *   印を見て開いた作者には消えたように読めた（実機、2026-09-11）
+   */
   constructor(
     private readonly ai?: AIRegistry,
     private readonly onCountsChanged?: () => void,
     private readonly revealInManuscript?: (
       filePath: string,
       line: number
-    ) => Promise<boolean>
+    ) => Promise<boolean>,
+    private readonly loadPending?: (
+      panel: ProposalPanel
+    ) => void | Promise<void>
   ) {}
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -656,6 +666,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     });
     // 開いたときに、既にある結果（先に検知が終わっていた場合）を反映する
     this.postItems();
+    // **溜まっている承認待ちも読む**（0.45.0）。**待たない**——
+    // 作品の数だけディスクを読むので、待つと画面が出るまで固まる
+    void this.loadPending?.(this);
   }
 
   /**
@@ -701,7 +714,12 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         id: string
       ) => Promise<{ ok: boolean; reason?: string }>;
       registerForeshadow?: RegisterForeshadow;
-    }
+    },
+    /**
+     * `quiet` なら、前面化も「届きました」の知らせも出さない（0.45.0）。
+     * **置き場へ入れて描き直すところまでは同じ**——出し方だけが違う
+     */
+    options: { quiet?: boolean } = {}
   ): IncomingCount {
     // **表示中の作品の作業を、先に控えへ戻す。** 届いたのがどちらの作品でも通す
     this.stashCurrent();
@@ -749,12 +767,16 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       this.work = work;
       this.activate(category);
       // パネルが開いていなければ前面に出す。開いていれば余計なフォーカス移動はしない
-      void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
+      if (!options.quiet) {
+        void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
+      }
       return arrivedCount;
     }
 
     // **画面には触らない。** 切り替え口の一覧だけ作り直し、届いたことは通知で伝える
     this.postItems();
+    // 開いたときの読み込みでは、届いたことを知らせない（作者は押していない）
+    if (options.quiet) return arrivedCount;
     // **答えを待たない。** 待つと、検知を終えた側の処理が作者の返事まで止まる
     void this.offerToShow(
       work,
@@ -1212,13 +1234,25 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
      * 伏線の候補・回収の候補も「1件ずつ承認して保存する」点は設定資料の
      * 更新と同じなので、描画と適用の道をそのまま使い、見出しだけを変える。
      */
-    category = "設定資料の更新"
+    category: string | undefined = "設定資料の更新",
+    /**
+     * `quiet` なら**画面を前へ出さず、知らせも出さない**（0.45.0）。
+     * 開いたときに溜まっている分を読み込む経路のためにある——作者が自分で
+     * 開いた場面で前面化や「届きました」を出すと、押していない操作の
+     * 結果に見える
+     */
+    options: { quiet?: boolean } = {}
   ): void {
-    this.replaceContents(work, category, {
-      recordUpdates: items,
-      applyRecordUpdate: apply,
-      dismissRecordUpdate: dismiss,
-    });
+    this.replaceContents(
+      work,
+      category ?? "設定資料の更新",
+      {
+        recordUpdates: items,
+        applyRecordUpdate: apply,
+        dismissRecordUpdate: dismiss,
+      },
+      options
+    );
   }
 
   /**
@@ -1698,7 +1732,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       item.filePath,
       item.line,
       this.revealInManuscript,
-      "提案パネル"
+      "提案パネル",
+      this.work
     );
   }
 

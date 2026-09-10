@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
-import { logStep } from "../core/logger";
+import { logStep, useLogFile } from "../core/logger";
+import type { WorkEntry } from "../models/types";
 
 /**
  * 本文の「その行」を示す（設計書6.37.4）。
@@ -36,8 +37,20 @@ export async function revealTextLocation(
   line: number,
   revealInManuscript?: RevealInManuscript,
   /** 記録に残すときの呼び名。どの画面から飛んだのかが分かるようにする */
-  source = "提案パネル"
+  source = "提案パネル",
+  /**
+   * 飛び先の作品。**渡されたら、その作品のログファイルへ残す**（0.45.0）。
+   *
+   * ファイルの場所だけでは作品を引けない（登録簿を持っていないため）ので、
+   * 呼ぶ側から渡してもらう。渡されなければ出力チャンネルだけに出る——
+   * その場合、VS Code を閉じると「押しても何も起きなかった」の手がかりが消える。
+   */
+  work?: WorkEntry
 ): Promise<void> {
+  // **記録の直前に書き先を向ける**（0.43.3 と同じ）。ほかの機能が別の作品へ
+  // 向け直していることがあるので、覚えずに毎回向ける
+  if (work) useLogFile(work.folderPath);
+
   /*
     **降りた枝は、どれも1行残す**（`manuscriptEditor.ts` の `revealLine` と
     同じ考え方）。年表から話を押しても何も起きず、通知もログも1行も無くて

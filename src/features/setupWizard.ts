@@ -32,6 +32,10 @@ import {
   type InstallOutcome,
 } from "../core/packageInstall";
 import { withCancellableProgress, withProgress } from "../views/progress";
+// ログの書き先：作品が定まらない
+// AIの環境を整える案内で、**この時点ではまだ作品を選んでいない**
+// （Ollama や LM Studio を入れる操作そのもの）。書き先にできる
+// `.aiwriter` が無いので、記録は出力チャンネルだけに出す。
 import { logFailure, logStep } from "../core/logger";
 import { cancelItem } from "../views/dialogs";
 import { notifyDone } from "../views/notify";

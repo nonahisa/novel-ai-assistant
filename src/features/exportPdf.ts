@@ -20,7 +20,7 @@ import { notationModeFor } from "../core/manuscriptRender";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import { revealFolder } from "../views/openDocument";
 import { openInDefaultApp } from "../core/openExternalFile";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 
 /**
  * 本文を印刷用に組んで、ブラウザで開く（PDF出力）。
@@ -70,6 +70,8 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
       file = await readTextFile(episode.filePath);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+      useLogFile(work.folderPath);
       logFailure("印刷用HTMLの組み立て", {
         ファイル: episode.fileName,
         内容: message,
@@ -134,6 +136,7 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
     target = await writeExport(work, html);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(work.folderPath);
     logFailure("印刷用HTMLの書き出し", { 作品: work.title, 内容: message });
     await vscode.window.showErrorMessage(
       `印刷用のファイルを保存できませんでした。${message}`
@@ -156,6 +159,7 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
   // 「ブラウザで開きました」と告げており、VS Codeがエラーダイアログを
   // 出しているのに成功したことになっていた（作者の報告、2026-08-30）
   if (!opened) {
+    useLogFile(work.folderPath);
     logFailure("印刷用HTMLをブラウザで開く", { 作品: work.title, 場所: target });
     const action = await vscode.window.showWarningMessage(
       "印刷用のファイルは作りましたが、ブラウザを開けませんでした。" +

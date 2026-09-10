@@ -22,7 +22,7 @@ import {
   suggestRepositoryName,
   validateRepositoryUrl,
 } from "../core/gitSetup";
-import { logFailure, logStep } from "../core/logger";
+import { logFailure, logStep, useLogFile } from "../core/logger";
 import { redactUrlCredentials } from "../core/redactUrl";
 import { withProgress } from "../views/progress";
 import { askText , cancelItem } from "../views/dialogs";
@@ -109,6 +109,7 @@ export async function recordChanges(
   target: SyncTarget,
   run: GitCommandRunner = runGit
 ): Promise<boolean> {
+  useTargetLog(target);
   const count = await countTrackableFiles(target.folderPath, run);
   if (count === 0) {
     vscode.window.showInformationMessage(
@@ -153,12 +154,26 @@ export async function recordChanges(
   return true;
 }
 
+/**
+ * 記録の書き先を、その置き場の作品のログへ向ける（0.45.0）。
+ *
+ * **同期の相手は「置き場」であって作品ではない。** 1つのリポジトリに
+ * 複数の作品が入るので（設計書5.7.9）、代表として先頭の作品のログへ書く。
+ * **まだ作品が登録されていない置き場では向けない**——書き先が無いので、
+ * その分は出力チャンネルだけに出す（設定の途中にしか起きない）。
+ */
+function useTargetLog(target: SyncTarget): void {
+  const work = target.works[0];
+  if (work) useLogFile(work.folderPath);
+}
+
 /** 「次の一手」を実行する。進んだら true */
 export async function runSetupStep(
   target: SyncTarget,
   status: GitSyncStatus,
   run: GitCommandRunner = runGit
 ): Promise<boolean> {
+  useTargetLog(target);
   switch (status.kind) {
     case "git_missing":
       await guideGitInstall();

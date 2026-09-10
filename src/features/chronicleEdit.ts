@@ -12,7 +12,7 @@ import { TimelineStore } from "../core/timelineStore";
 import { scanWork } from "../core/scanner";
 import { formatChapterLabel } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
-import { logFailure, logStep } from "../core/logger";
+import { logFailure, logStep, useLogFile } from "../core/logger";
 import {
   addLine,
   addTimepoint,
@@ -45,6 +45,9 @@ interface EditContext {
 }
 
 export async function editTimeline(work: WorkEntry): Promise<void> {
+  // この処理の記録は、その作品のログファイルへ残す
+  // （0.43.3 と同じ。向けないと出力チャンネル止まり）
+  useLogFile(work.folderPath);
   const store = new TimelineStore(work);
 
   let timeline: Timeline;
@@ -656,6 +659,9 @@ async function save(
   timeline: Timeline,
   message: string
 ): Promise<void> {
+  // 年表の編集は画面から何度も呼ばれる。**そのたびに向け直す**
+  // ——別の作品を開いていると、書き先が前の作品のままになる
+  useLogFile(context.work.folderPath);
   let validated: Timeline;
   try {
     validated = validateTimeline(timeline);

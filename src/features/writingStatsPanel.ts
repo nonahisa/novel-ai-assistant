@@ -26,7 +26,7 @@ import {
   type PostingSiteRecord,
 } from "../core/postingSiteRecords";
 import { PostingStore } from "../core/postingStore";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import { episodeUnit } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import { manuscriptViewTypeFor } from "../core/manuscriptViewTypes";
@@ -279,6 +279,8 @@ export async function readSiteRecords(
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
+    // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+    useLogFile(work.folderPath);
     logFailure("執筆量パネルのサイトの記録の読み込み", {
       作品: work.title,
       内容: detail,

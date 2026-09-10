@@ -17,6 +17,8 @@
  */
 
 /** 志向の3軸 */
+import { localDateKey } from "./localDate";
+
 export type AdviceAxis = "reader" | "self" | "taste";
 
 /** 各軸の段階 */
@@ -494,11 +496,18 @@ export function isDiagnosisStale(updatedAt: string, now: Date): boolean {
   return now.getTime() - at > ADVICE_REDIAGNOSE_DAYS * 24 * 60 * 60 * 1000;
 }
 
-/** 診断した日（YYYY-MM-DD）。読めなければ undefined */
+/**
+ * 診断した日（YYYY-MM-DD）。読めなければ undefined。
+ *
+ * **作者の時計の日付にする。** 以前は UTC の日付だったので、日本では
+ * 朝9時より前に診断した日が前日と表示された。**貯めているのは
+ * `updatedAt`（時刻つきのISO文字列）だけ**で、この日付を鍵に何かを
+ * 引いているところは無いので、揃え直しても過去の記録とは混ざらない。
+ */
 export function adviceDiagnosisDate(updatedAt: string): string | undefined {
   const at = new Date(updatedAt);
   if (Number.isNaN(at.getTime())) return undefined;
-  return at.toISOString().slice(0, 10);
+  return localDateKey(at);
 }
 
 /**

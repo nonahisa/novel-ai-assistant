@@ -7,7 +7,12 @@ import {
   resolveOutputTokensForSend,
 } from "../ai/outputLimit";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
-import { logFailure, logStep, responseExcerptForLog } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  useLogFile,
+} from "../core/logger";
 import {
   parseNotationAdvice,
   type NotationAdvice,
@@ -119,6 +124,9 @@ export async function askNotationAdvice(
   });
   if (!ok) return { kind: "cancelled" };
 
+  // **記録の直前に書き先を向ける**（0.43.3 と同じ）。向けないと
+  // 出力チャンネル止まりで、VS Code を閉じると消える
+  useLogFile(request.work.folderPath);
   logStep(
     `表記ゆれの問い合わせ: ${request.work.title} / ${group.label} / ` +
       `${resolved.provider.displayName} / ${resolved.model} / v${NOTATION_ADVICE_VERSION}`
@@ -166,6 +174,7 @@ export async function askNotationAdvice(
       return { kind: "cancelled" };
     }
     // **本文は捨てない。** 通知には出さなくても、ログには残す（CLAUDE.md 規則5）
+    useLogFile(request.work.folderPath);
     logFailure(ACTION_LABEL, {
       組: group.label,
       詳細: error instanceof Error ? error.message : String(error),
@@ -178,6 +187,7 @@ export async function askNotationAdvice(
     group.forms.map((form) => form.surface)
   );
   if (!advice) {
+    useLogFile(request.work.folderPath);
     logFailure(ACTION_LABEL, {
       組: group.label,
       理由: "答えを読み取れません（選択肢に無い表記か、形が違う）",

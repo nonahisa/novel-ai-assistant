@@ -1,5 +1,5 @@
 import { PostingStore } from "../core/postingStore";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import type { PostingSiteId } from "../models/posting";
 import type { WorkEntry } from "../models/types";
 
@@ -27,6 +27,8 @@ export async function registeredPostingSites(
     // **読めなくても止めない。** ここで要るのは並びを決める手がかりだけで、
     // 無くてもコピーはできる。台帳が壊れているときに「投稿サイト用に
     // コピー」まで使えなくなるほうが困る
+    // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+    useLogFile(work.folderPath);
     logFailure("投稿サイト用のコピー：投稿状態の台帳の読み込み", {
       work: work.title,
       error,

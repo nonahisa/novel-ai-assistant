@@ -10,7 +10,7 @@ import {
   validateNewField,
   type CustomFieldDefinition,
 } from "../models/customField";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
@@ -36,6 +36,8 @@ export async function manageCustomFields(work: WorkEntry): Promise<void> {
       error instanceof CustomFieldStoreError
         ? error.message
         : `項目の定義を読めませんでした: ${errorMessage(error)}`;
+    // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+    useLogFile(work.folderPath);
     logFailure("customFields.load", { work: work.title, message });
     void vscode.window.showErrorMessage(
       `${message} ファイルを直してから、もう一度お試しください。`
@@ -60,6 +62,7 @@ export async function manageCustomFields(work: WorkEntry): Promise<void> {
       error instanceof CustomFieldStoreError
         ? error.message
         : `項目を保存できませんでした: ${errorMessage(error)}`;
+    useLogFile(work.folderPath);
     logFailure("customFields.save", { work: work.title, message });
     void vscode.window.showErrorMessage(message);
     return;

@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { AIWRITER_DIR, type WorkEntry } from "../models/types";
 import { atomicWriteFile } from "../core/atomicWrite";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 
 /**
  * 「前に反映したのと同じか」を覚えておく覚え書き。
@@ -68,6 +68,8 @@ export async function writeSyncDigest(
     // 機械の覚え書きなので上書きしてよい（作者の原稿ではない）
     await atomicWriteFile(target, new TextEncoder().encode(body));
   } catch (error) {
+    // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+    useLogFile(work.folderPath);
     logFailure(`${label}の覚え書きを保存できませんでした`, {
       作品: work.title,
       詳細: error instanceof Error ? error.message : String(error),

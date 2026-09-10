@@ -24,7 +24,7 @@ import {
 } from "../core/countSettings";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { pathExists } from "../core/fileSystem";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import { openGeneratedMarkdown, openInDefaultEditor } from "../views/openDocument";
 import {
@@ -211,6 +211,8 @@ async function createEpisodePlotFile(
     );
   } catch (error) {
     const detail = messageOf(error);
+    // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+    useLogFile(work.folderPath);
     logFailure("単話プロットの作成に失敗", {
       置き場: filePath,
       詳細: detail,

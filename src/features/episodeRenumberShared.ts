@@ -8,6 +8,10 @@ import {
   type GitCommandRunner,
   type GitSyncStatus,
 } from "../core/git";
+// ログの書き先：呼ぶ側が向ける
+// 話数の付け替えのうち **git に関わる部分だけ**を持つ。受け取るのは
+// リポジトリの根で、作品は分からない（1つの置き場に複数の作品が入る）。
+// 呼ぶ側（episodeLedgers）が useLogFile で作品のログへ向けてから使う。
 import { logFailure } from "../core/logger";
 import type {
   EpisodeRename,

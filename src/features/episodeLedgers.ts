@@ -31,7 +31,7 @@ import {
 } from "../core/episodeRenumber";
 import { PostingStore, PostingStoreError } from "../core/postingStore";
 import { normalizeEpisodePath } from "../models/chapter";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 
 /**
  * 話数を指している台帳を、付け替えと同じ操作の中で追従させる（設計書6.67.3）。
@@ -137,6 +137,9 @@ export async function followEpisodeLedgers(
   done: readonly EpisodeRename[],
   removed?: RemovedEpisode
 ): Promise<LedgerFollowSummary> {
+  // **この先の記録は、その作品のログファイルへ残す**（0.43.3 と同じ）。
+  // 失敗をまとめる `messageOf` は作品を受け取らないので、入口で向ける
+  useLogFile(work.folderPath);
   const summary = emptyLedgerFollowSummary();
   const toRelative = (filePath: string) => episodePathFor(work.folderPath, filePath);
   const moves = relativeMoves(done, toRelative);

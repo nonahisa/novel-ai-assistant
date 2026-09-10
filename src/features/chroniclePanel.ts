@@ -10,7 +10,7 @@ import { SynopsisStore } from "../core/synopsisStore";
 import { TimelineStore } from "../core/timelineStore";
 import { scanWork } from "../core/scanner";
 import { readWorkFormat } from "../core/workFormatStore";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import {
   buildChronicle,
   chronicleCharacters,
@@ -234,6 +234,9 @@ class ChroniclePanel {
       return await new TimelineStore(this.work).load();
     } catch (error) {
       this.timelineError = messageOf(error);
+      // **記録の直前に書き先を向ける**（0.43.3 と同じ）。向けないと
+      // 出力チャンネル止まりで、VS Code を閉じると消える
+      useLogFile(this.work.folderPath);
       logFailure("年表", {
         作品: this.work.title,
         内容: this.timelineError,
@@ -266,7 +269,8 @@ class ChroniclePanel {
             message.filePath,
             1,
             this.deps.revealInManuscript,
-            "年表"
+            "年表",
+            this.work
           );
           return;
         case "edit":
@@ -280,6 +284,7 @@ class ChroniclePanel {
       }
     } catch (error) {
       const detail = messageOf(error);
+      useLogFile(this.work.folderPath);
       logFailure("年表", { 作品: this.work.title, 内容: detail });
       void vscode.window.showErrorMessage(`年表でエラーが起きました。${detail}`);
     }

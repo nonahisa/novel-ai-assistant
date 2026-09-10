@@ -9,7 +9,7 @@ import { readTextFile } from "../core/textFile";
 import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
 import { recordEdit } from "../core/actorContext";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import { formatChapterLabel, stripChapterLabel } from "../core/episodeLabel";
 import { notifyDone } from "../views/notify";
 
@@ -154,6 +154,8 @@ export async function renameWithSubtitle(
         error instanceof Error ? error.message : String(error)
       }`
     );
+    // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+    useLogFile(work.folderPath);
     logFailure("サブタイトルを付けた改名に失敗", {
       ファイル: episode.fileName,
       新しい名前: next,

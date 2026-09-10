@@ -23,7 +23,7 @@ import {
 import { manualActor, recordEdit } from "../core/actorContext";
 import { episodeTitle, formatChapterLabel } from "../core/episodeLabel";
 import { openManuscriptTabUris } from "./manuscriptEditor";
-import { logFailure, logStep } from "../core/logger";
+import { logFailure, logStep, useLogFile } from "../core/logger";
 import { withCancellableProgress } from "../views/progress";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 
@@ -460,6 +460,8 @@ async function writeAll(
     }
   });
 
+  // 作品のログファイルへ残す（0.43.3 と同じ。向けないと出力チャンネル止まり）
+  useLogFile(work.folderPath);
   const total = done.reduce((sum, entry) => sum + entry.count, 0);
   if (done.length > 0) {
     logStep(`設定資料からルビを振った: ${done.length}話・${total}件`);
@@ -581,6 +583,7 @@ async function revertRubyApplication(
 
   if (reverted.length === 0 && skipped.length === 0) return; // 中止された
 
+  useLogFile(work.folderPath);
   const total = reverted.reduce((sum, entry) => sum + entry.count, 0);
   if (reverted.length > 0) {
     logStep(`設定資料のルビを戻した: ${reverted.length}話・${total}件`);

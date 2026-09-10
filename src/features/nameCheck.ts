@@ -124,7 +124,8 @@ export async function openNameCheckPanel(
         parsed.filePath,
         parsed.line,
         deps.revealInManuscript,
-        "名前の点検"
+        "名前の点検",
+        work
       );
       return;
     }

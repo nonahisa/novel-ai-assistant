@@ -28,7 +28,7 @@ import {
 } from "../core/nameRename";
 import type { TypoCheckIssue } from "./checkTypos";
 import { askText, cancelItem } from "../views/dialogs";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 
 /**
  * 名前の付け替え（設計書6.37.3）。
@@ -431,6 +431,9 @@ export async function applyRenameToRecords(
   work: WorkEntry,
   pending: PendingRename
 ): Promise<RenameRecordsResult> {
+  // **この先の記録は、その作品のログファイルへ残す**（0.43.3 と同じ）。
+  // 失敗をまとめる `messageOf` は作品を受け取らないので、入口で向ける
+  useLogFile(work.folderPath);
   const result: RenameRecordsResult = {
     characterUpdated: false,
     settingsUpdated: 0,

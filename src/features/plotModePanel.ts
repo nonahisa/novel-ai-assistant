@@ -26,7 +26,7 @@ import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { EPISODE_PLOTS_DIR, episodePlotFileName } from "../core/resumeSheet";
 import { currentCountMode, pickCount } from "../core/countSettings";
 import { episodeUnit } from "../core/episodeLabel";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import { buildPlotModePanelHtml } from "../views/plotModePanelHtml";
 import { openInDefaultEditor } from "../views/openDocument";
 import { allActions } from "../views/actionList";
@@ -248,6 +248,8 @@ class PlotModePanel {
       }
     } catch (error) {
       const detail = messageOf(error);
+      // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+      useLogFile(this.work.folderPath);
       logFailure("プロットモード", { 作品: this.work.title, 内容: detail });
       void vscode.window.showErrorMessage(
         `プロットモードでエラーが起きました。${detail}`

@@ -23,7 +23,12 @@ import {
   buildPlotCharacterUpdates,
   type PlotCharacterSkip,
 } from "../core/plotCharacterSync";
-import { logFailure, logStep, responseExcerptForLog } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  responseExcerptForLog,
+  useLogFile,
+} from "../core/logger";
 import {
   buildChatSettingsSyncPrompt,
   parseChatSettingsSync,
@@ -117,6 +122,10 @@ export async function applyChatToSettings(
   turns: readonly WorkChatTurn[],
   deps: ChatSettingsSyncDeps
 ): Promise<ChatSettingsSyncResult> {
+  // この処理の記録は、その作品のログファイルへ残す
+  // （0.43.3 と同じ。向けないと出力チャンネル止まり）
+  useLogFile(work.folderPath);
+
   /*
     **押した時点の会話を写し取って、以降はこれだけを見る**（0.32.6のレビュー）。
 

@@ -9,7 +9,7 @@ import {
 } from "../core/splitCollected";
 import { encodeForNewFile, readTextFile } from "../core/textFile";
 import { atomicWriteFile, createManagedRecoveryPath } from "../core/atomicWrite";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import { recordEdit } from "../core/actorContext";
 
 /**
@@ -81,6 +81,8 @@ export async function splitCollectedFile(
       "分けたものを繋ぎ直しても元に戻らないため、中止しました。" +
         "原稿には触れていません。この形のファイルに対応できていない可能性があります。"
     );
+    // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+    useLogFile(work.folderPath);
     logFailure("合本の分割を中止", {
       ファイル: path.basename(filePath),
       理由: "繋ぎ直しても元に戻らない",
@@ -114,6 +116,7 @@ export async function splitCollectedFile(
         error instanceof Error ? error.message : String(error)
       } 元のファイルはそのままです。`
     );
+    useLogFile(work.folderPath);
     logFailure("合本の分割に失敗", {
       ファイル: path.basename(filePath),
       作成済み: created.join("、"),
@@ -137,6 +140,7 @@ export async function splitCollectedFile(
         "このままだと同じ本文を二重に数えます。 " +
         `${path.basename(filePath)} を手で移動してください。`
     );
+    useLogFile(work.folderPath);
     logFailure("合本の退避に失敗", {
       ファイル: path.basename(filePath),
       詳細: error instanceof Error ? error.message : String(error),

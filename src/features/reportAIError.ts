@@ -1,6 +1,10 @@
 import * as vscode from "vscode";
 import { AIError, recoveryForAIError, type ProviderId } from "../ai/types";
 import { noteOtherLocalAiRunning } from "../ai/otherLocalAi";
+// ログの書き先：呼ぶ側が向ける
+// AIの失敗を伝える共通の口で、**どの作品の操作かはここには届かない**
+// （呼ぶのは冒頭診断・紹介文・名前の候補など）。呼ぶ側が
+// useLogFile で作品のログへ向けてから使う。
 import { logFailure } from "../core/logger";
 
 /**

@@ -8,7 +8,7 @@ import {
   findMergeCandidates,
 } from "../core/characterMerge";
 import { unifyCharacters } from "../core/characterUnify";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import { cancelItem } from "../views/dialogs";
 import { confirmRun } from "../views/notify";
 
@@ -20,6 +20,9 @@ import { confirmRun } from "../views/notify";
  */
 
 export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
+  // **この先の記録は、その作品のログファイルへ残す**（0.43.3 と同じ）。
+  // 失敗をまとめる `reportFailure` は作品を受け取らないので、入口で向ける
+  useLogFile(work.folderPath);
   const store = new CharacterStore(work);
   const loaded = await store.loadAll();
 

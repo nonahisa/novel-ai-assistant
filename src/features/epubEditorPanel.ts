@@ -109,7 +109,7 @@ import { buildEpubEditorPanelHtml } from "../views/epubEditorPanelHtml";
 import { openInDefaultEditor } from "../views/openDocument";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { exportEpub } from "./exportEpub";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 
 /**
  * EPUBエディター（設計書6.65.6。第2段）。
@@ -904,6 +904,9 @@ async function sendImageData(
       dataUrl = await readImageDataUrl(state.work.folderPath, relative);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // **記録の直前に書き先を向ける**（0.43.3 と同じ）。向けないと
+      // 出力チャンネル止まりで、VS Code を閉じると消える
+      useLogFile(state.work.folderPath);
       logFailure("表紙の元イラストの読み込み", {
         作品: state.work.title,
         場所: relative,
@@ -935,6 +938,7 @@ async function bakeCover(
     target = (await saveBakedCover(settings, side, dataUrl)).filePath;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(state.work.folderPath);
     logFailure("表紙の合成", {
       作品: state.work.title,
       面: label,
@@ -993,6 +997,7 @@ async function removeBakedCover(
     removed = await deleteBakedCover(await settingsDir(state.work), side);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(state.work.folderPath);
     logFailure("焼いた表紙の削除", {
       作品: state.work.title,
       面: label,
@@ -1423,6 +1428,7 @@ async function bakedCovers(
     settings = await settingsDir(state.work);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(state.work.folderPath);
     logFailure("焼いた表紙の確認", { 作品: state.work.title, 内容: message });
     return { front: null, back: null };
   }
@@ -2277,6 +2283,7 @@ async function collectOrnaments(work: WorkEntry): Promise<OrnamentCatalogue> {
     return await collectOrnamentCatalogue(await settingsDir(work));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(work.folderPath);
     logFailure("EPUBの飾りの読み込み", { 作品: work.title, 内容: message });
     return { catalogue: [...BUILTIN_ORNAMENTS], rejected: [], shadowed: [] };
   }
@@ -2293,6 +2300,7 @@ async function loadChapterLedger(work: WorkEntry): Promise<Chapter[]> {
     return (await new ChapterStore(work).load()).chapters;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(work.folderPath);
     logFailure("EPUBエディターの章立て", { 作品: work.title, 内容: message });
     return [];
   }
@@ -2445,6 +2453,7 @@ async function reportAfterwordFailure(
   error: unknown
 ): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
+  useLogFile(work.folderPath);
   logFailure("あとがきの原稿を開く", { 作品: work.title, 内容: message });
   panel.webview.postMessage({
     type: "status",
@@ -2473,6 +2482,7 @@ async function collectCharacters(
     characters = (await new CharacterStore(work).loadAll()).characters;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    useLogFile(work.folderPath);
     logFailure("EPUBエディターの登場人物一覧", {
       作品: work.title,
       内容: message,
@@ -2527,6 +2537,7 @@ async function readFirstChapter(
       conflicted = file.hasConflictMarkers;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      useLogFile(workFolder);
       logFailure("EPUBエディターのプレビュー", {
         ファイル: episode.fileName,
         内容: message,
@@ -2633,6 +2644,7 @@ async function reportLoadFailure(
   error: unknown
 ): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
+  useLogFile(work.folderPath);
   logFailure("本の設計図の読み込み", { 作品: work.title, 内容: message });
   await vscode.window.showErrorMessage(message);
 }
@@ -2643,6 +2655,7 @@ async function reportSaveFailure(
   error: unknown
 ): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
+  useLogFile(work.folderPath);
   logFailure("本の設計図の保存", {
     作品: work.title,
     種類: error instanceof BookStoreError ? error.kind : "unknown",

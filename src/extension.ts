@@ -93,7 +93,10 @@ import { unifyCharacterRecords } from "./features/unifyCharacters";
 import { findMergeCandidates } from "./core/characterMerge";
 import { CharacterStore } from "./core/characterStore";
 import type { ChatRunKind } from "./core/chatEdit";
-import { applyPendingCharacterUpdates } from "./features/applyPendingUpdates";
+import {
+  applyPendingCharacterUpdates,
+  primePendingRecordUpdates,
+} from "./features/applyPendingUpdates";
 import { renameWork } from "./features/renameWork";
 import { exportImeDictionary } from "./features/exportImeDictionary";
 import { exportPdf } from "./features/exportPdf";
@@ -156,7 +159,7 @@ import {
   withProgress,
 } from "./views/progress";
 import { pathExists } from "./core/fileSystem";
-import { disposeLog, logFailure, showLog } from "./core/logger";
+import { disposeLog, logFailure, showLog, useLogFile } from "./core/logger";
 import { probeGeneration } from "./ai/generationProbe";
 import {
   SettingsWatcher,
@@ -589,6 +592,26 @@ export async function activate(
     });
   }
 
+  /**
+   * 外で変わった資料を、画面へ映し直す（設計書5.4.9）。
+   *
+   * **読み直しの経路を1本にする。** 以前は知らせの3つのボタンが
+   * それぞれ「索引を捨てる」「作品一覧を数え直す」を書いており、
+   * **開いたままの設定資料パネルだけが誰からも読み直されていなかった**
+   * （実機、2026-09-11）。外から人物を1人足しても消しても、タブは
+   * 「登場人物(22)」のまま——「読み込み直すだけ」を押しても変わらず、
+   * 窓ごと開き直すまで古い写しを見せ続けていた。
+   *
+   * 映す先が増えたときに書き忘れる形だったので、ここへ集める。
+   * **同期（`gitSync`）の取り込みからも同じものを呼ぶ。**
+   */
+  const reloadAfterExternalChange = async (work: WorkEntry): Promise<void> => {
+    highlighter.invalidate();
+    treeProvider.refresh(work.id);
+    // 開いていなければ何もしない（勝手に画面を開かない）
+    await findOpenSettingsPanel(work.id)?.refreshFromDisk();
+  };
+
   const settingsWatcher = new SettingsWatcher(
     registry,
     selfWrites,
@@ -596,22 +619,19 @@ export async function activate(
       void notifyExternalChange(work, files, {
         // 中身を見て取り込むかを決める。勝手に確定させない
         review: async () => {
+          // まだ開いていなければ `openSettingsPanel` が読み込む。
+          // **開いていれば reveal するだけ**なので、読み直しはこの後で行う
           await openSettingsPanel(context, work, aiRegistry);
-          highlighter.invalidate();
-          treeProvider.refresh(work.id);
+          await reloadAfterExternalChange(work);
         },
         // **編集部の直しをAIから守る**（設計書5.5）。
         // GitHub経由の編集は拡張機能の画面を通らないので、
         // 印を付けないと次の抽出で上書きされる
         protect: async () => {
           await protectExternalEdits(work);
-          highlighter.invalidate();
-          treeProvider.refresh(work.id);
+          await reloadAfterExternalChange(work);
         },
-        reload: () => {
-          highlighter.invalidate();
-          treeProvider.refresh(work.id);
-        },
+        reload: () => reloadAfterExternalChange(work),
       });
     }
   );
@@ -1145,7 +1165,25 @@ export async function activate(
   const proposalPanel = new ProposalPanel(
     aiRegistry,
     refreshActionBadges,
-    (filePath, line) => manuscriptProvider.revealLine(filePath, line)
+    (filePath, line) => manuscriptProvider.revealLine(filePath, line),
+    // 開いたときに、溜まっている承認待ちを読み込む（0.45.0）。
+    // **登録している作品ぶん見る**——ツリーの印は全作品の合計なので、
+    // 表示中の1作品だけ読むと、印と噛み合わないままになる
+    async (panel) => {
+      for (const work of registry.list()) {
+        try {
+          await primePendingRecordUpdates(work, panel);
+        } catch (error) {
+          // 1つの作品が読めなくても、ほかの作品の分は出す。
+          // 開いただけの場面なので、ダイアログは出さず記録に残す
+          useLogFile(work.folderPath);
+          logFailure("承認待ちの読み込みに失敗", {
+            作品: work.title,
+            詳細: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
   );
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(PROPOSALS_VIEW_ID, proposalPanel, {
@@ -2310,8 +2348,10 @@ export async function activate(
   // 古い文字数・古いハイライトを見せ続けないようにする（設計書5.5.8）
   context.subscriptions.push(
     gitSync.onDidChangeFiles(({ work }) => {
-      treeProvider.refresh(work.id);
-      highlighter.invalidate();
+      // **開いている設定資料パネルも読み直す**（0.45.0）。取り込みの最中は
+      // 外部変更の知らせを止めている（設計書5.5.18）ので、ここで読み直さないと
+      // 受け取った資料が画面に出ないまま、古い写しを見せ続ける
+      void reloadAfterExternalChange(work);
       // 取り込んだ分は「この環境で書いた量」ではない。
       // 数えると同じ文章を2台ぶん数えることになるので、基準だけ置き直す
       void progress.rebaseline(work).then(() => updateStatusBar());

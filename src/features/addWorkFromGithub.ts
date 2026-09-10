@@ -5,6 +5,10 @@ import { isGitAvailable } from "../core/git";
 import { cloneRepository, cloneWithGh, folderNameFromUrl } from "../core/gitClone";
 import { ghAvailable, validateRepositoryUrl } from "../core/gitSetup";
 import { pathExists } from "../core/fileSystem";
+// ログの書き先：作品が定まらない
+// **取り寄せに失敗したときの記録**で、まだ作品のフォルダーが無い
+// （あっても中身が揃っていない）。書き先にできる `.aiwriter` が無いので、
+// 記録は出力チャンネルだけに出す。
 import { logFailure } from "../core/logger";
 import type { WorkRegistry } from "../core/workRegistry";
 import { withProgress } from "../views/progress";

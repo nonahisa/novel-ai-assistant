@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
-import { logFailure, logStep } from "../core/logger";
+import { logFailure, logStep, useLogFile } from "../core/logger";
 import { renamePlotHeading } from "../core/plotDoc";
 import { plotPath } from "../core/plotFile";
 import {
@@ -71,6 +71,9 @@ export async function renameWork(
     notifyDone(message);
   } else {
     // 断りが付くものは消えると困る。通知に出したうえでログにも残す
+    // **記録の直前に書き先を向ける**（0.43.3 と同じ）。向けないと
+    // 出力チャンネル止まりで、VS Code を閉じると消える
+    useLogFile(work.folderPath);
     logStep(`${message}${notes.join("")}`);
     void vscode.window.showInformationMessage(`${message}${notes.join("")}`);
   }
@@ -94,6 +97,7 @@ async function updateConfigTitle(
     await writeWorkConfig(work, { ...config, workTitle: newTitle });
     return [];
   } catch (error) {
+    useLogFile(work.folderPath);
     logFailure("作品名の変更（作品の設定ファイル）", {
       作品: work.title,
       理由: describeError(error),
@@ -120,6 +124,7 @@ async function updatePlotTitle(
     target = await plotPath(work);
   } catch (error) {
     // 設定ファイルが読めないときはここも通らない。②で既に断っている
+    useLogFile(work.folderPath);
     logFailure("作品名の変更（プロットの場所）", {
       作品: newTitle,
       理由: describeError(error),
@@ -150,6 +155,7 @@ async function updatePlotTitle(
       `プロットの見出しは書き換えられませんでした（${describeWriteFailure(result)}）。`,
     ];
   } catch (error) {
+    useLogFile(work.folderPath);
     logFailure("作品名の変更（プロットの見出し）", {
       作品: newTitle,
       理由: describeError(error),

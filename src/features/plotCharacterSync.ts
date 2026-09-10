@@ -11,7 +11,7 @@ import {
   plotCharactersDigest,
   type PlotCharacterSkip,
 } from "../core/plotCharacterSync";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import { readSyncDigest, writeSyncDigest } from "./syncDigest";
 
 /**
@@ -117,6 +117,8 @@ export async function syncPlotCharacters(
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
+      // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+      useLogFile(work.folderPath);
       logFailure("プロットから人物の更新案を積めませんでした", {
         作品: work.title,
         詳細: detail,

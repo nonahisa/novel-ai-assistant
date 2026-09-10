@@ -139,7 +139,8 @@ export async function jumpSceneMemo(
     target.filePath,
     target.line,
     deps.revealInManuscript,
-    SCENE_MEMO_KIND
+    SCENE_MEMO_KIND,
+    work
   );
 }
 
@@ -405,7 +406,8 @@ class SceneMemoPanel {
       filePath,
       line,
       this.deps.revealInManuscript,
-      SCENE_MEMO_KIND
+      SCENE_MEMO_KIND,
+      this.work
     );
   }
 

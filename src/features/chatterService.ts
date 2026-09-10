@@ -9,7 +9,7 @@ import {
   type ChatterState,
 } from "../core/chatter";
 import { validateChatterComment } from "../core/chatterCommentValidation";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import { SUPPORTED_EXTENSIONS, type WorkEntry } from "../models/types";
 import { dailyGoal } from "./writingProgress";
 
@@ -228,6 +228,8 @@ export class ChatterService implements vscode.Disposable {
       this.lastSpokeAt = Date.now();
       this.deps.post(decision, work, this.currentPath);
     } catch (error) {
+      // 作品のログファイルへ残す（向けないと出力チャンネル止まり）
+      useLogFile(work.folderPath);
       // 独り言のために執筆を止めない。黙って諦め、ログにだけ残す
       logFailure("独り言", {
         作品: work.title,
@@ -282,6 +284,8 @@ export class ChatterService implements vscode.Disposable {
       if (attempts >= MAX_COMMENT_ATTEMPTS) this.markSaid(saidKey, request.key);
     };
 
+    // この先の記録は、その作品のログファイルへ残す
+    useLogFile(work.folderPath);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), COMMENT_TIMEOUT_MS);
     try {

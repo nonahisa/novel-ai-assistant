@@ -1,7 +1,7 @@
 import * as path from "../core/paths";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import type { WorkRegistry } from "../core/workRegistry";
 import {
   scanCollection,
@@ -176,6 +176,8 @@ async function registerAll(
         }
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
+        // その作品のログへ残す（向けないと出力チャンネル止まり）
+        useLogFile(work.folderPath);
         logFailure("書庫からの登録", { 作品: work.title, 詳細: detail });
         failed.push(work.title);
         firstReason ??= detail;

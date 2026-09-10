@@ -23,7 +23,7 @@ import {
 } from "../core/readerStatsEnvelope";
 import { formatReaderStatsMetrics } from "../core/postingSiteRecords";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import { configurePostingSites } from "./postingKit";
 
 /**
@@ -393,6 +393,8 @@ async function report(
   error: unknown
 ): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
+  // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+  useLogFile(work.folderPath);
   logFailure(what, {
     作品: work.title,
     種類: error instanceof PostingStoreError ? error.kind : "unknown",

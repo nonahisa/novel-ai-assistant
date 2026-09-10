@@ -6,7 +6,7 @@ import type {
   FileCountMap,
   WritingMeasurement,
 } from "../models/writingStats";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import {
   currentStreak,
   fileCountKey,
@@ -113,6 +113,8 @@ export class WritingProgressTracker {
       // 記録が変わったので、次にステータスバーが必要としたときに読み直す
       this.cache.delete(work.id);
     } catch (error) {
+      // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+      useLogFile(work.folderPath);
       logFailure("執筆量の記録に失敗", {
         作品: work.title,
         詳細: error instanceof Error ? error.message : String(error),
@@ -133,6 +135,7 @@ export class WritingProgressTracker {
       await this.store(work).rebaseline(toMeasurement(work, scan));
       this.cache.delete(work.id);
     } catch (error) {
+      useLogFile(work.folderPath);
       logFailure("執筆量の基準の置き直しに失敗", {
         作品: work.title,
         詳細: error instanceof Error ? error.message : String(error),

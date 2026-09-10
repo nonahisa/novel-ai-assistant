@@ -12,7 +12,7 @@ import {
 } from "../core/foreshadowMarkdown";
 import type { Foreshadow, ForeshadowStatus } from "../models/foreshadow";
 import { foreshadowStatusChoices } from "../core/foreshadowStatusChoice";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import type { ForeshadowFromContradiction } from "./proposalPanel";
@@ -124,6 +124,8 @@ export async function addForeshadowByHand(work: WorkEntry): Promise<void> {
     );
   } catch (error) {
     const detail = messageOf(error);
+    // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+    useLogFile(work.folderPath);
     logFailure("伏線の登録に失敗", { 伏線: label.trim(), 詳細: detail });
     void vscode.window.showErrorMessage(`伏線を登録できませんでした：${detail}`);
   }
@@ -237,6 +239,7 @@ export async function setForeshadowStatus(work: WorkEntry): Promise<void> {
     );
   } catch (error) {
     const detail = messageOf(error);
+    useLogFile(work.folderPath);
     logFailure("伏線の状態の変更に失敗", {
       伏線: target.label,
       詳細: detail,
@@ -326,6 +329,7 @@ export async function registerForeshadowFromContradiction(
     return { ok: true };
   } catch (error) {
     const detail = messageOf(error);
+    useLogFile(work.folderPath);
     logFailure("矛盾からの伏線登録に失敗", {
       伏線: source.label,
       詳細: detail,

@@ -24,7 +24,7 @@ import { SYNOPSIS_FILE } from "../core/synopsisDoc";
 import { emptySynopsisSet } from "../models/synopsis";
 import { refreshSynopsisDoc } from "./generateBlurb";
 import { buildSchemaFiles, SCHEMA_DIR } from "../core/settingsSchema";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 
 /**
  * 設定資料のMarkdownを生成する。
@@ -242,6 +242,9 @@ export async function generateSettingsDocs(
 
   // 他のツール・AIが設定資料を読み書きするための定義を置く。
   // 資料を作るたびに書き直すので、字数上限などを変えても古びない
+  // **この先の記録は、その作品のログファイルへ残す**（0.43.3 と同じ）。
+  // 書き出しの中は場所しか受け取らないので、呼ぶ手前で向ける
+  useLogFile(work.folderPath);
   await writeSchemaFiles(settingsDir, work.title);
 
   const written: string[] = [];

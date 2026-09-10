@@ -10,7 +10,7 @@ import {
   shouldSkip,
   type MergePlan,
 } from "../core/libraryMerge";
-import { logFailure, logStep } from "../core/logger";
+import { logFailure, logStep, useLogFile } from "../core/logger";
 import { pickFolder } from "./pickFolder";
 import { withCancellableProgress } from "../views/progress";
 
@@ -276,10 +276,15 @@ export async function mergeOne(
       }
     }
 
+    // **記録の直前に書き先を向ける**（0.43.3 と同じ）。向けないと
+    // 出力チャンネル止まりで、VS Code を閉じると消える。
+    // **写す前の場所へ書く**——移した先はまだ登録されていない
+    useLogFile(plan.work.folderPath);
     logStep(`書庫へまとめた: ${title} → ${plan.destination}（${files.length}件）`);
     return { workId, title, ok: true, destination: plan.destination };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
+    useLogFile(plan.work.folderPath);
     logFailure("書庫へまとめる", { 作品: title, 詳細: detail });
     return { workId, title, ok: false, detail };
   }
@@ -349,6 +354,7 @@ export async function reregister(
       // 途中で失敗したときに作品が一覧から消える
       await registry.remove(work.id);
     } catch (error) {
+      useLogFile(work.folderPath);
       logFailure("書庫へまとめたあとの登録", {
         作品: work.title,
         詳細: error instanceof Error ? error.message : String(error),

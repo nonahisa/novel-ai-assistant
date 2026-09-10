@@ -24,7 +24,12 @@ import {
   describeNetworkFailure,
   hasCommitIdentity,
 } from "../core/gitSetup";
-import { logFailure, logStep, showLog } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  showLog,
+  useLogFile,
+} from "../core/logger";
 import { buildSyncTarget, describeCompanions } from "../core/syncTarget";
 import { withProgress } from "../views/progress";
 
@@ -266,6 +271,9 @@ export class GitSyncMonitor implements vscode.Disposable {
       if (!result.ok) {
         // オフラインでの執筆は普通にあるので、失敗しても通知しない。
         // ただし黙って消すと原因にたどり着けないためログには残す
+        // **記録の直前に書き先を向ける**（0.43.3 と同じ）。向けないと
+        // 出力チャンネル止まりで、VS Code を閉じると消える
+        useLogFile(work.folderPath);
         logFailure("Gitのfetchに失敗", {
           作品: work.title,
           詳細: result.detail ?? "（詳細なし）",
@@ -485,6 +493,7 @@ export class GitSyncMonitor implements vscode.Disposable {
     }
     if (!rewritesLineEndings(setting)) return;
 
+    useLogFile(work.folderPath);
     logFailure("取り込みで改行が変わる可能性", {
       作品: work.title,
       設定: `core.autocrlf=${setting}`,
@@ -569,6 +578,7 @@ export class GitSyncMonitor implements vscode.Disposable {
       return await this.foldDiverged(work);
     }
 
+    useLogFile(work.folderPath);
     logFailure("Gitの取り込みに失敗", {
       作品: work.title,
       詳細: result.failure.detail,
@@ -613,6 +623,7 @@ ${reason}` : ""}`,
       commitAll(root, `取り込む前の自動保存（${pending}件）`, run)
     );
     if (!committed.ok) {
+      useLogFile(work.folderPath);
       logFailure("取り込む前の記録に失敗", {
         作品: work.title,
         詳細: committed.detail ?? "",
@@ -661,6 +672,7 @@ ${reason}` : ""}`,
     }
 
     if (!result.ok) {
+      useLogFile(work.folderPath);
       logFailure("分岐を合わせられなかった", {
         作品: work.title,
         詳細: result.reason,
@@ -676,6 +688,7 @@ ${reason}` : ""}`,
 
     this.notified.delete(work.id);
     await this.refresh(work, { fetch: false, notify: false });
+    useLogFile(work.folderPath);
     logStep(
       `同期の中で分岐を合わせた（${label}／取り込み ${result.incoming}件` +
         `／設定資料 ${result.settingsAutoResolved.length}件` +
@@ -722,6 +735,7 @@ ${reason}` : ""}`,
       return true;
     }
 
+    useLogFile(work.folderPath);
     logFailure("Gitの送信に失敗", {
       作品: work.title,
       詳細: result.detail ?? "（詳細なし）",

@@ -13,7 +13,7 @@ import {
 } from "../ai/ollamaEmbedding";
 import { EmbeddingError, type EmbeddingProvider } from "../ai/embeddingProvider";
 import { withCancellableProgress } from "../views/progress";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 
 /**
  * 検索の入口。相談パネル・設定資料パネル・（今後の）矛盾検知から呼ぶ。
@@ -94,6 +94,8 @@ export async function prepareRetrieval(
       index.retainOnly(corpus.items.map((item) => item.hash));
       await index.save(work);
     } catch (error) {
+      // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+      useLogFile(work.folderPath);
       logFailure("索引の自動更新に失敗（そのままの索引で続行）", {
         件数: missing.length,
         理由: error instanceof Error ? error.message : String(error),
@@ -269,6 +271,7 @@ export async function buildVectorIndex(
             built += await embedBatch(index, batch, provider);
           } catch (error) {
             // 1回の失敗で全部を捨てない。残りを続け、最後にまとめて報告する
+            useLogFile(work.folderPath);
             logFailure("索引づくりの一部が失敗", {
               位置: `${i + 1}件目から${batch.length}件`,
               理由: error instanceof Error ? error.message : String(error),

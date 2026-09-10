@@ -133,7 +133,7 @@ import {
 import { buildSettingsPanelHtml } from "../views/settingsPanelHtml";
 import { renderMarkdownLite } from "../core/markdownLite";
 import { withCancellableProgress } from "../views/progress";
-import { logFailure, logStep } from "../core/logger";
+import { logFailure, logStep, useLogFile } from "../core/logger";
 import { appendChatLog, summarizeMaterials } from "../core/chatLog";
 import * as path from "../core/paths";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
@@ -152,6 +152,29 @@ import { SynopsisStore } from "../core/synopsisStore";
  * 抽出結果と同じ扱いで自動保存すると、
  * どこまでが本文に書いてあることなのか分からなくなるため。
  */
+
+/**
+ * 読み込めなかった設定ファイルの知らせ。
+ *
+ * **壊れたJSONは勝手に直さない**（実装ルール2）。何が読めていないかだけ伝える。
+ * `parseCharacter` は `id` の形（`char_数字`）まで見るので、作者が手で
+ * 足したファイルの `id` が `char_991_だれそれ` のような形だと、ここへ回る。
+ * **黙って消えているのではなく、この文で伝えている**——ただし
+ * **パネルが読み直されなければ出ない**ので、外部変更の読み直しと対で意味を持つ
+ * （2026-09-11、実機で「何のお知らせも出ない」と報告された）。
+ *
+ * **画面から切り離して試験できるように、文言はここだけが持つ。**
+ */
+export function describeSettingsLoadErrors(
+  errors: ReadonlyArray<{ file: string }>
+): string {
+  if (errors.length === 0) return "";
+  return (
+    `読み込めない設定ファイルが ${errors.length} 件あります（` +
+    `${errors.map((error) => error.file).join("、")}）。` +
+    "その項目は一覧に出ていません。"
+  );
+}
 
 /** パネルが扱う設定レコード。種別が増えるたびに union を書き足さないための別名 */
 type SettingsRecord = Character | Ability | Organization | Location | WorldItem;
@@ -452,6 +475,9 @@ export class SettingsPanel {
       detail = this.detailOf(kind, id);
     }
     if (!detail) {
+      // **記録の直前に書き先を向ける**（0.43.3 と同じ）。ほかの機能が
+      // 別の作品へ向け直していることがあるので、覚えずに毎回向ける
+      useLogFile(this.work.folderPath);
       logStep(
         `設定資料パネル：用語（${kind}/${id}）が資料に見つかりませんでした`
       );
@@ -467,6 +493,7 @@ export class SettingsPanel {
     // **送ったことを記録する**（作者の報告、2026-08-28「用語上で右クリック
     // したとき、パネルの説明は切り替わりません」）。ここまで来ていれば
     // 疑うのは画面側、来ていなければ経路の手前と、切り分けられる
+    useLogFile(this.work.folderPath);
     logStep(
       `設定資料パネル：${this.work.title} の ${kind}/${id} を画面へ送りました`
     );
@@ -543,6 +570,7 @@ export class SettingsPanel {
     if (this.ready) return Promise.resolve();
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
+        useLogFile(this.work.folderPath);
         logStep(
           `設定資料パネル：画面の準備（ready）を${timeoutMs}ミリ秒待ちきれず、` +
             "そのまま送りました"
@@ -569,6 +597,13 @@ export class SettingsPanel {
    * **開いたままのパネルは、自分では気づかない。** 重複をまとめると
    * レコードが減るのに、画面には消えたはずの人物が残り続けていた
    * （実機で発覚、2026-08-15）。古い一覧から選ぶと「見つかりません」になる。
+   *
+   * **見ている場所は保つ。** 送るのは `init` で、画面側の `init` は
+   * 一覧（`groups`）を入れ替えて描き直すだけである——選んでいる種類
+   * （`activeKind`）・選択中の id（`selected`）・絞り込みの語・右側に
+   * 出している詳細には触らない。読み直しのたびに人物タブが先頭へ戻ると、
+   * 外の変更を映すたびに作者の手が止まる。
+   * **保てないのは一覧のスクロール位置だけ**（行を作り直すため）。
    */
   async refreshFromDisk(): Promise<void> {
     await this.loadAll();
@@ -624,11 +659,7 @@ export class SettingsPanel {
   }
 
   private notice(): string {
-    if (this.loadErrors.length === 0) return "";
-    // 壊れたJSONは勝手に直さない。何が読めていないかだけ伝える
-    return `読み込めない設定ファイルが ${this.loadErrors.length} 件あります（${this.loadErrors
-      .map((error) => error.file)
-      .join("、")}）。その項目は一覧に出ていません。`;
+    return describeSettingsLoadErrors(this.loadErrors);
   }
 
   /**
@@ -1276,6 +1307,7 @@ export class SettingsPanel {
     if (dropped > 0) {
       // 画面には件数しか出さないので、内訳はログへ残す。
       // 残さないと、照合が厳しすぎるのかAIが外しているのか分からない
+      useLogFile(this.work.folderPath);
       logFailure("再読込ではじいた記述のうち、採らなかったもの", {
         本文と照合できず: parsed.dropped.ungrounded,
         設定資料に無い項目: parsed.dropped.unknownField,
@@ -1819,6 +1851,7 @@ export class SettingsPanel {
         text: candidate.item.text,
       }));
     } catch (error) {
+      useLogFile(this.work.folderPath);
       logFailure("設定資料パネルの検索に失敗（従来のやり方で続行）", {
         理由: error instanceof Error ? error.message : String(error),
       });
@@ -1870,6 +1903,7 @@ export class SettingsPanel {
       this.lastSearchTerms = parseSearchTerms(result.text);
       return this.lastSearchTerms;
     } catch (error) {
+      useLogFile(this.work.folderPath);
       logFailure("検索語の作成に失敗（質問文のまま検索）", {
         理由: error instanceof Error ? error.message : String(error),
       });

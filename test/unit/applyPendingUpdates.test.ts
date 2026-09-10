@@ -57,7 +57,11 @@ vi.mock("../../src/views/openDocument", () => ({
   openGeneratedMarkdown: vi.fn(async () => undefined),
 }));
 
-vi.mock("../../src/core/logger", () => ({ logFailure: vi.fn() }));
+// 記録の書き先を向ける口も代役に要る（0.45.0 で features 全体へ広げた）
+vi.mock("../../src/core/logger", () => ({
+  logFailure: vi.fn(),
+  useLogFile: vi.fn(),
+}));
 
 const { applyPendingCharacterUpdates } = await import(
   "../../src/features/applyPendingUpdates"

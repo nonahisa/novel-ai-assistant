@@ -18,7 +18,7 @@ import {
   type ConflictParseResult,
 } from "../core/conflictFile";
 import { countChars, formatCount } from "../core/charCount";
-import { logFailure, showLog } from "../core/logger";
+import { logFailure, showLog, useLogFile } from "../core/logger";
 import { lastAuthorOf } from "../core/git";
 import { cancelItem } from "../views/dialogs";
 import { openInDefaultEditor } from "../views/openDocument";
@@ -187,6 +187,9 @@ export async function resolveWorkConflicts(
   work: WorkEntry,
   options: ResolveConflictsOptions
 ): Promise<void> {
+  // **この先の記録は、その作品のログファイルへ残す**（0.43.3 と同じ）。
+  // 1件ずつの処理は置き場（`ConflictScope`）しか受け取らないので、入口で向ける
+  useLogFile(work.folderPath);
   const files = await findConflictedFiles(work, options.run);
   if (files.length === 0) {
     vscode.window.showInformationMessage(

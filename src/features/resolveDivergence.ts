@@ -10,7 +10,7 @@ import {
   type GitCommandRunner,
 } from "../core/git";
 import { commitAll, countTrackableFiles, hasCommitIdentity } from "../core/gitSetup";
-import { buildSyncTarget } from "../core/syncTarget";
+import { buildSyncTarget, worksInside } from "../core/syncTarget";
 import {
   describeMergePreview,
   mergeTreeArgs,
@@ -26,7 +26,12 @@ import {
   unexpectedChanges,
 } from "../core/mergeGuard";
 import { sha256Bytes } from "../core/hash";
-import { logFailure, logStep, showLog } from "../core/logger";
+import {
+  logFailure,
+  logStep,
+  showLog,
+  useLogFile,
+} from "../core/logger";
 import { withCancellableProgress } from "../views/progress";
 import type { WalkConflictsResult } from "./resolveConflicts";
 
@@ -84,6 +89,21 @@ export interface ResolveDivergenceDeps {
 /** 指紋を取る対象。**作者が書くもの**だけを見る */
 const WATCHED_EXTENSIONS = [".txt", ".md", ".json", ".jsonl"];
 
+/**
+ * 記録の書き先を、その置き場の作品のログへ向ける（0.45.0）。
+ *
+ * **合わせる相手は「置き場」であって作品ではない。** 1つのリポジトリに
+ * 複数の作品が入る（設計書5.7.9）ので、代表として先頭の作品のログへ書く。
+ * 登録済みの作品が無い置き場では向けない（書き先が無い）。
+ *
+ * この先で呼ぶ `reportFold` は置き場しか受け取らないが、ここを通ったあとの
+ * 書き先をそのまま使うので、向け直す必要はない。
+ */
+function useRootLog(deps: ResolveDivergenceDeps, root: string): void {
+  const work = worksInside(deps.registry.list(), root)[0];
+  if (work) useLogFile(work.folderPath);
+}
+
 /** 合わせる相手の置き場 */
 export interface FoldTarget {
   root: string;
@@ -139,6 +159,7 @@ export async function resolveDivergence(
   if (!target) return;
 
   const { root, label } = target;
+  useRootLog(deps, root);
 
   const outcome = await withCancellableProgress(
     "分かれた分を調べています…",
@@ -304,6 +325,7 @@ export async function foldDivergence(
 ): Promise<FoldOutcome> {
   const run = deps.run ?? runGit;
   const { root, label, upstream } = target;
+  useRootLog(deps, root);
   const report = (message: string) => options.progress?.report({ message });
 
   report("退避の枝を作っています…");

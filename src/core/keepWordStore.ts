@@ -11,6 +11,7 @@ import {
   type KeepWordSet,
 } from "../models/keepWord";
 import { atomicWriteFile, createManagedRecoveryPath } from "./atomicWrite";
+import { localDateKey } from "./localDate";
 
 /**
  * 「直さない語」の保存先。
@@ -94,8 +95,9 @@ export class KeepWordStore {
     set.words.push({
       word: body,
       note,
-      // 時刻は要らない。作者が見直すのは「いつ頃足したか」だけである
-      addedAt: new Date().toISOString().slice(0, 10),
+      // 時刻は要らない。作者が見直すのは「いつ頃足したか」だけである。
+      // **UTCの日付にしない**——日本では朝9時前に押すと前日になる
+      addedAt: localDateKey(),
     });
     await this.save(set);
     return true;

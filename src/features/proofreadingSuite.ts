@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { withProgress } from "../views/progress";
-import { logFailure } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
 import {
   PROOFREADING_CHECKS,
   PROOFREADING_SUITE_SELECTION_KEY,
@@ -182,6 +182,8 @@ export async function runProofreadingSuite(
         } catch (error) {
           // **例外で内訳ごと失わない。** ここで抜けると、それまでに走った
           // 機能の結果も作者へ伝わらないまま終わる
+          // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+          useLogFile(work.folderPath);
           logFailure("校正のまとめ実行", {
             機能: check.label,
             詳細: error instanceof Error ? error.message : String(error),

@@ -33,7 +33,15 @@ export function logLineDate(line: string): string | undefined {
   return undefined;
 }
 
-/** `todayKey` から `days` 日前の日付。これより古い行を消す */
+/**
+ * `todayKey` から `days` 日前の日付。これより古い行を消す。
+ *
+ * **ここの `toISOString` は時差の影響を受けない**（`localDateKey` へ寄せない）。
+ * 受け取るのも返すのも `YYYY-MM-DD` の文字列で、UTCの真夜中を起点に
+ * 日数を引いてUTCで書き戻すため、往復で必ず打ち消し合う。今日の日付そのものは
+ * `pruneAllLogs` が `statsDayKey`（ローカル時刻）で作っており、
+ * 比べる相手のログ行も `formatLogTime`（ローカル時刻）で書かれている。
+ */
 export function cutoffDate(todayKey: string, days: number): string {
   const at = Date.parse(`${todayKey}T00:00:00Z`) - days * 86_400_000;
   return new Date(at).toISOString().slice(0, 10);
