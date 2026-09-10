@@ -62,7 +62,15 @@ export function mergeTreeArgs(ours: string, theirs: string): string[] {
  * | `.aiwriter/history/`・提案・ロック | **畳めない** | **追記型**（5.6）。片方を残すと、もう片方の環境で書かれた記録が消える |
  * | `.aiwriter/pending-characters/` | 畳める | **AIの提案で、まだ資料になっていない。** 再抽出で作り直せる（5.5.18） |
  * | `.aiwriter/extracted.json` | **畳めない** | 抽出済みの話の記録。正しくは両方の和集合で、片方を残すと再抽出が走る |
+ * | `設定/_schema/` | 畳める | AI向けのスキーマ。次の生成で作り直される（`settingsConflictRule.ts` と同じ判断。0.45.1） |
+ * | `設定/{abilities,characters,locations,organizations,world}.md` | 畳める | 設定資料集の書き出し先。次の書き出しで作り直される（0.45.1）。**名指しの5つだけ**——`synopsis.md` のようなあらすじは作者が手で直す |
  * | 原稿・設定資料 | **畳めない** | 作者のもの |
+ *
+ * **作者の手元で本物の分岐が起きて、生成物を20件のうち11件も1件ずつ選ばされた**
+ * （2026-09-11、49 の実測）。`_schema/` と設定資料集の `.md` がここに無く、
+ * 「本文」として作者への問いに回っていた。**`.md` は名指しで足す**——
+ * `設定/` 直下の `.md` を一律に畳めるとすると、作者が手で直す `synopsis.md`
+ * の書き直しが黙って片側へ寄る。
  *
  * **`pending-characters/` は 0.45.0 で畳める側へ移した**（設計書5.5.18）。
  * 承認前の提案なので作者の手はまだ入っておらず、片側を残しても抽出を
@@ -78,7 +86,11 @@ export function isAutoWrittenPath(filePath: string): boolean {
     /(^|\/)\.aiwriter\/stats\//.test(normalized) ||
     /(^|\/)\.aiwriter\/cache\//.test(normalized) ||
     /(^|\/)\.aiwriter\/pending-characters\//.test(normalized) ||
-    /(^|\/)\.aiwriter\/config\.json$/.test(normalized)
+    /(^|\/)\.aiwriter\/config\.json$/.test(normalized) ||
+    // 設定資料の生成物（0.45.1）。設定フォルダーの名前は変えられるので
+    // フォルダー名では縛らず、生成物の側の名前で見る
+    /(^|\/)_schema\//.test(normalized) ||
+    /(^|\/)(abilities|characters|locations|organizations|world)\.md$/.test(normalized)
   );
 }
 

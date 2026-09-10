@@ -138,6 +138,22 @@ describe("自動で書かれるファイルの見分け", () => {
     expect(isAutoWrittenPath("短編/設定/characters/char_001_太志.json")).toBe(false);
   });
 
+  test("設定資料の生成物（_schema と設定資料集の .md）は畳める（0.45.1）", () => {
+    // 作者の手元で本物の分岐が起きたとき、20件のうち11件がこれらで、
+    // 1件ずつ見比べさせられた（2026-09-11）。次の生成で作り直されるもの
+    expect(isAutoWrittenPath("いじめられっ子/設定/_schema/README.md")).toBe(true);
+    expect(isAutoWrittenPath("いじめられっ子/設定/_schema/character.schema.json")).toBe(true);
+    for (const name of ["abilities", "characters", "locations", "organizations", "world"]) {
+      expect(isAutoWrittenPath(`いじめられっ子/設定/${name}.md`)).toBe(true);
+    }
+  });
+
+  test("あらすじなど、作者が手で直す .md は名指しの5つに入れない", () => {
+    expect(isAutoWrittenPath("いじめられっ子/設定/synopsis.md")).toBe(false);
+    expect(isAutoWrittenPath("いじめられっ子/設定/plot.md")).toBe(false);
+    expect(isAutoWrittenPath("いじめられっ子/設定/synopses.md")).toBe(false);
+  });
+
   test("Windowsの区切りでも同じに見る", () => {
     expect(
       isAutoWrittenPath(`短編${BS}.aiwriter${BS}stats${BS}pc.json`)
