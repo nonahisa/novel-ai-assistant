@@ -10,6 +10,8 @@ import {
 } from "../core/git";
 import { commitAll, countTrackableFiles, hasCommitIdentity } from "../core/gitSetup";
 import { buildSyncTarget } from "../core/syncTarget";
+import { readDivergenceConflicts } from "../core/divergenceScan";
+import { foldDivergence } from "./resolveDivergence";
 import {
   actionablePlans,
   afterCommit,
@@ -19,6 +21,7 @@ import {
   describeTargetWorks,
   planSyncAll,
   syncCommitMessage,
+  type FoldSummary,
   type SyncTargetOutcome,
   type SyncTargetPlan,
   type SyncTargetState,
@@ -61,6 +64,19 @@ export interface SyncAllDeps {
   /** 済んだあとに状態表示を作り直すためだけに使う */
   monitor: GitSyncMonitorLike;
   run?: GitCommandRunner;
+  /**
+   * 取り込みのあいだ、設定資料の見張りを止める（設計書5.5.18）。
+   *
+   * gitが書いたファイルも外部変更として拾うため、止めないと
+   * 置き場の数だけ「拡張機能の外で変更されました」が出る
+   */
+  pauseSettingsWatch?: () => () => void;
+  /**
+   * ファイル更新の知らせをためて、最後に1回だけ出す（設計書5.5.18）。
+   *
+   * 返ってきた関数を呼ぶと、まとめて出す
+   */
+  batchFileNotices?: () => () => Promise<void>;
 }
 
 export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
@@ -89,26 +105,41 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
 
   if (!(await confirm(doing, plans))) return;
 
-  const outcomes = await withCancellableProgress(
-    "作品を同期しています…",
-    async (progress, token) => {
-      const done: SyncTargetOutcome[] = [];
-      for (const [index, plan] of doing.entries()) {
-        if (token.isCancellationRequested) break;
-        progress.report({
-          message: `${describeTargetWorks(plan.target)}（${index + 1}/${
-            doing.length
-          }）`,
-        });
-        done.push(await runPlan(deps, plan));
+  // **同期の最中は、設定資料の見張りとファイル更新の知らせを黙らせる**
+  // （設計書5.5.18）。gitの書き込みで置き場の数だけ問いが並ぶのを防ぐ
+  const resumeWatch = deps.pauseSettingsWatch?.();
+  const flushNotices = deps.batchFileNotices?.();
+
+  let outcomes: SyncTargetOutcome[] | undefined;
+  try {
+    outcomes = await withCancellableProgress(
+      "作品を同期しています…",
+      async (progress, token) => {
+        const done: SyncTargetOutcome[] = [];
+        for (const [index, plan] of doing.entries()) {
+          if (token.isCancellationRequested) break;
+          progress.report({
+            message: `${describeTargetWorks(plan.target)}（${index + 1}/${
+              doing.length
+            }）`,
+          });
+          done.push(await runPlan(deps, plan, progress));
+        }
+        return done;
       }
-      return done;
-    }
-  );
-  if (!outcomes) return;
+    );
+  } finally {
+    resumeWatch?.();
+  }
+  if (!outcomes) {
+    await flushNotices?.();
+    return;
+  }
 
   // 状態表示を作り直す。押したのに件数が古いままだと、通ったのか分からない
   await deps.monitor.refreshAll({ fetch: false });
+  // ためた「N件のファイルが更新されました」を、ここで1回だけ出す
+  await flushNotices?.();
 
   await report(outcomes, plans);
 }
@@ -127,7 +158,17 @@ async function collectStates(
     if (token.isCancellationRequested) break;
     progress.report({ message: work.title });
 
-    const status = await readSyncStatus(work.folderPath, deps.run);
+    let status = await readSyncStatus(work.folderPath, deps.run);
+    // **分かれているなら、同じ箇所の衝突の件数まで数える**（設計書5.5.18）。
+    // 確認の画面で「選ぶことになるのか」が分かるようにするため
+    if (status.kind === "tracked" && status.ahead > 0 && status.behind > 0) {
+      const conflicts = await readDivergenceConflicts(
+        status.root,
+        status.upstream,
+        deps.run ?? runGit
+      );
+      if (conflicts) status = { ...status, conflicts };
+    }
     // リポジトリの根が分かるなら、そこを置き場にする。
     // **同じ根の作品を二度処理しない**
     const root = "root" in status && status.root ? status.root : work.folderPath;
@@ -188,7 +229,8 @@ async function confirm(
  */
 async function runPlan(
   deps: SyncAllDeps,
-  plan: SyncTargetPlan
+  plan: SyncTargetPlan,
+  progress?: { report(value: { message?: string }): void }
 ): Promise<SyncTargetOutcome> {
   const outcome: SyncTargetOutcome = {
     plan,
@@ -228,16 +270,39 @@ async function runPlan(
   if (plan.pull) {
     const result = await pullFastForward(cwd, deps.run);
     if (!result.ok) {
-      outcome.error = describePullFailure(result.failure.kind);
-      outcome.diverged = result.failure.kind === "diverged";
-      logFailure("すべて同期：取り込みに失敗", {
-        置き場: name,
-        詳細: outcome.error,
-      });
-      return outcome;
+      // **分かれていても、ここで合わせにいく**（設計書5.5.18）。
+      // 「『分かれた分を合わせる』でお試しください」と案内するだけでは、
+      // 作者にとってそこが行き止まりだった
+      if (result.failure.kind === "diverged") {
+        const folded = await foldHere(deps, plan, progress);
+        if (!folded.ok) {
+          outcome.error = folded.reason;
+          outcome.diverged = true;
+          logFailure("すべて同期：分かれた分を合わせられなかった", {
+            置き場: name,
+            詳細: outcome.error,
+          });
+          return outcome;
+        }
+        outcome.pulled = true;
+        outcome.folded = folded.summary;
+        logStep(
+          `すべて同期：分かれた分を合わせた（${name}／取り込み ${folded.summary.incoming}件` +
+            `／設定資料 ${folded.summary.settings}件` +
+            `／作者が選んだ ${folded.summary.manuscripts}件）`
+        );
+      } else {
+        outcome.error = describePullFailure(result.failure.kind);
+        logFailure("すべて同期：取り込みに失敗", {
+          置き場: name,
+          詳細: outcome.error,
+        });
+        return outcome;
+      }
+    } else {
+      outcome.pulled = true;
+      logStep(`すべて同期：取り込み（${name}）`);
     }
-    outcome.pulled = true;
-    logStep(`すべて同期：取り込み（${name}）`);
   }
 
   if (plan.push) {
@@ -254,15 +319,49 @@ async function runPlan(
   return outcome;
 }
 
-function describePullFailure(kind: "dirty" | "diverged" | "failed"): string {
+/**
+ * 分かれた分を、この場で合わせる（設計書5.5.18）。
+ *
+ * **送信の手順はそのまま続く。** 合わせたぶんも `ahead` に載るので、
+ * 続けて送信すれば1回の「すべて同期」で片が付く。
+ */
+async function foldHere(
+  deps: SyncAllDeps,
+  plan: SyncTargetPlan,
+  progress?: { report(value: { message?: string }): void }
+): Promise<
+  { ok: true; summary: FoldSummary } | { ok: false; reason: string }
+> {
+  const status = await readSyncStatus(plan.target.folderPath, deps.run);
+  if (status.kind !== "tracked") {
+    return { ok: false, reason: "同期の状態を読めませんでした。" };
+  }
+
+  const result = await foldDivergence(
+    { registry: deps.registry, run: deps.run },
+    {
+      root: status.root,
+      label: describeTargetWorks(plan.target),
+      upstream: status.upstream,
+    },
+    { progress }
+  );
+  if (!result.ok) return { ok: false, reason: result.reason };
+
+  return {
+    ok: true,
+    summary: {
+      incoming: result.incoming,
+      settings: result.settingsAutoResolved.length,
+      manuscripts: result.manuscriptConflicts.length,
+      backup: result.backup,
+    },
+  };
+}
+
+function describePullFailure(kind: "dirty" | "failed"): string {
   if (kind === "dirty") {
     return "未記録の変更が残っているため取り込みませんでした。";
-  }
-  if (kind === "diverged") {
-    return (
-      "この環境と別の環境の両方で変更が進んでいます。" +
-      "取り込みませんでした。「分かれた分を合わせる」でお試しください。"
-    );
   }
   return "取り込めませんでした。";
 }

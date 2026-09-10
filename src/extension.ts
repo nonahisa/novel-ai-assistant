@@ -600,6 +600,16 @@ export async function activate(
   setWriteObserver((filePath) => selfWrites.markWriting(filePath));
   context.subscriptions.push({ dispose: () => setWriteObserver(undefined) });
 
+  // 競合の見比べは、同期の中からも呼ばれる（設計書5.5.18）。
+  // **登録した置き場は1つ**なので、経路を問わず同じものを使う
+  if (conflictProvider) {
+    const resolveConflicts = await import("./features/resolveConflicts.js");
+    resolveConflicts.useConflictProvider(conflictProvider);
+    context.subscriptions.push({
+      dispose: () => resolveConflicts.useConflictProvider(undefined),
+    });
+  }
+
   const settingsWatcher = new SettingsWatcher(
     registry,
     selfWrites,
@@ -627,6 +637,15 @@ export async function activate(
     }
   );
   context.subscriptions.push(settingsWatcher);
+
+  // **取り込みのあいだは見張りを止める**（設計書5.5.18）。
+  // gitが書いたファイルも外部変更として拾うため、止めないと
+  // 同期のたびに「拡張機能の外で変更されました」が出る
+  // （作者の指摘、2026-09-10）
+  gitSync.setSettingsPause?.((work) => settingsWatcher.pause(work));
+  context.subscriptions.push({
+    dispose: () => gitSync.setSettingsPause?.(undefined),
+  });
 
   // ステータスバーの進捗に添える中止ボタン用（コマンドパレットには出さない）
   context.subscriptions.push(registerProgressCancelCommand());
@@ -802,7 +821,16 @@ export async function activate(
   context.subscriptions.push(
     registerCommand("novelai.syncAllWorks", async () => {
       const { syncAllWorks } = await import("./features/syncAllWorks.js");
-      await syncAllWorks({ registry, monitor: gitSync });
+      // 同期の最中は、設定資料の見張りとファイル更新の知らせをまとめる
+      // （設計書5.5.18）。ブラウザ版の代役は溜め込みを持たないので、
+      // そのときは今までどおり素通しになる
+      const batch = gitSync.beginBatchedFileNotices?.bind(gitSync);
+      await syncAllWorks({
+        registry,
+        monitor: gitSync,
+        pauseSettingsWatch: () => settingsWatcher.pause(),
+        batchFileNotices: batch,
+      });
     }),
     // 別のPCとこちらの両方で書くと分岐する（設計書5.5.16）。
     // これまでは「Gitのクライアントで解決してください」で行き止まりだった

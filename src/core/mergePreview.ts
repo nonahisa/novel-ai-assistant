@@ -60,9 +60,15 @@ export function mergeTreeArgs(ours: string, theirs: string): string[] {
  * | `.aiwriter/cache/` | 畳める | 作り直せる |
  * | `.aiwriter/config.json` | 畳める | 作品名と置き場の名前。食い違うのは登録した時刻ぐらいである |
  * | `.aiwriter/history/`・提案・ロック | **畳めない** | **追記型**（5.6）。片方を残すと、もう片方の環境で書かれた記録が消える |
- * | `.aiwriter/pending-characters/` | **畳めない** | AIの提案だが、作者が承認する前のものである |
+ * | `.aiwriter/pending-characters/` | 畳める | **AIの提案で、まだ資料になっていない。** 再抽出で作り直せる（5.5.18） |
  * | `.aiwriter/extracted.json` | **畳めない** | 抽出済みの話の記録。正しくは両方の和集合で、片方を残すと再抽出が走る |
  * | 原稿・設定資料 | **畳めない** | 作者のもの |
+ *
+ * **`pending-characters/` は 0.45.0 で畳める側へ移した**（設計書5.5.18）。
+ * 承認前の提案なので作者の手はまだ入っておらず、片側を残しても抽出を
+ * やり直せば同じものが出てくる。ここを作者への問いに数えていたため、
+ * 「同期のたびに解決を求められるのに、中身は自分が書いたものではない」
+ * という状態になっていた。
  */
 export function isAutoWrittenPath(filePath: string): boolean {
   // Windowsの区切り（\）を / に揃える。符号で書くのは、正規表現の中の
@@ -71,6 +77,7 @@ export function isAutoWrittenPath(filePath: string): boolean {
   return (
     /(^|\/)\.aiwriter\/stats\//.test(normalized) ||
     /(^|\/)\.aiwriter\/cache\//.test(normalized) ||
+    /(^|\/)\.aiwriter\/pending-characters\//.test(normalized) ||
     /(^|\/)\.aiwriter\/config\.json$/.test(normalized)
   );
 }

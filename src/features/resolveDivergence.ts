@@ -6,17 +6,19 @@ import {
   fetchRemote,
   readSyncStatus,
   runGit,
+  showStage,
   type GitCommandRunner,
 } from "../core/git";
 import { commitAll, countTrackableFiles, hasCommitIdentity } from "../core/gitSetup";
 import { buildSyncTarget } from "../core/syncTarget";
 import {
-  canFoldAutomatically,
   describeMergePreview,
   mergeTreeArgs,
   parseMergeTree,
   type MergePreview,
 } from "../core/mergePreview";
+import { classifyConflicts } from "../core/divergenceScan";
+import { decideSettingsConflict } from "../core/settingsConflictRule";
 import {
   containsConflictMarkers,
   describeGuardFailure,
@@ -26,11 +28,16 @@ import {
 import { sha256Bytes } from "../core/hash";
 import { logFailure, logStep, showLog } from "../core/logger";
 import { withCancellableProgress } from "../views/progress";
+import type { WalkConflictsResult } from "./resolveConflicts";
 
 /**
- * 分岐したときに、畳めるものは畳む（設計書5.5.16）。
+ * 分岐したときに、畳めるものは畳む（設計書5.5.16／5.5.18）。
  *
  * 作者の指示（2026-08-26）：「重なっていないなら、マージは自動で行ってください」。
+ * 作者の指示（2026-09-10）：「設定資料ファイルは作者が書き換えた部分が変わって
+ * いなければ、時系列的に新しいほうに自動で合わせてください。本文も同じ個所の
+ * 衝突がなければ、自動で合流させる」「別れた分をあわせるは何のためにある
+ * 処理ですか？もう少し手軽にできないですか」。
  *
  * ## これまでは行き止まりだった
  *
@@ -39,13 +46,21 @@ import { withCancellableProgress } from "../views/progress";
  * 「Gitのクライアントで見比べてから解決してください」としか言えなかった。
  * **プログラマでない作者に、それは手渡せる道ではない。**
  *
- * ## 判定は名前ではなく、gitが畳めるかで行う
+ * 5.5.16で「分かれた分を合わせる」を足したが、**作者のものが1件でも衝突したら
+ * 畳まない**という決まりのため、実際の置き場では毎回そこで止まっていた。
+ * 作者の言葉では「競合がぜんぜん消えません」。**安全側の設計が、そのまま
+ * 行き止まりになっていた。**
  *
- * 作者の置き場で実際に起きた分岐では、**重なった6件のうち5件は中身まで同じ**
- * （両方の環境で同じ原稿を取り込んだ）で、衝突したのは自動生成の1件だけだった。
- * **名前の重なりで見ていたら、畳める分岐が行き止まりになっていた。**
+ * ## いまの決まり（5.5.18）
  *
- * ## 畳む前後で守ること
+ * 1. **自動生成物** → この端末の側を残す（作り直せるもの）
+ * 2. **設定資料のJSON** → `core/settingsConflictRule.ts` の規則で決める
+ *    （作者が書いた部分が同じなら、時系列で新しいほうへ）
+ * 3. **決まらなかった設定資料と、本文** → 作者に1件ずつ選んでもらう。
+ *    **同じ箇所を両方で書き換えたものだけ**がここに来る（別の箇所は
+ *    gitが合流済み）
+ *
+ * ## 畳む前後で守ること（5.5.16から変えない）
  *
  * 1. **未記録の変更を先に記録する**（汚れているとマージを始められない）
  * 2. **退避の枝を作る**（確定したあとに戻したくなることがある）
@@ -54,7 +69,9 @@ import { withCancellableProgress } from "../views/progress";
  *    変わっていないか**（`core.autocrlf` が効く経路。目では気づけない）
  * 5. 1つでも落ちたら `merge --abort` で戻す
  *
- * **送信はしない。** 外へ出る操作は作者の操作のままにする（5.5.1）。
+ * **送信はこの関数からはしない。** 同期の中から呼ばれたときは、合流のあとに
+ * 呼び出し側が送信の手順へ進む（5.5.1の「外へ出る操作は作者の操作を起点に」は
+ * 同期のボタンが起点になっているので守られている）。
  */
 
 export interface ResolveDivergenceDeps {
@@ -66,6 +83,52 @@ export interface ResolveDivergenceDeps {
 
 /** 指紋を取る対象。**作者が書くもの**だけを見る */
 const WATCHED_EXTENSIONS = [".txt", ".md", ".json", ".jsonl"];
+
+/** 合わせる相手の置き場 */
+export interface FoldTarget {
+  root: string;
+  label: string;
+  upstream: string;
+}
+
+/** 規則で決めた1件 */
+export interface SettingsResolution {
+  file: string;
+  side: "ours" | "theirs";
+  reason: string;
+}
+
+export type FoldOutcome =
+  | {
+      ok: true;
+      /** 退避の枝の名前 */
+      backup: string;
+      /** 取り込んだファイル数 */
+      incoming: number;
+      /** 規則で揃えた設定資料 */
+      settingsAutoResolved: SettingsResolution[];
+      /** 作者が1件ずつ選んだファイル */
+      manuscriptConflicts: string[];
+    }
+  | { ok: false; reason: string; authored?: string[] };
+
+/**
+ * 作者が1件ずつ選ぶところ。
+ *
+ * **差し替えられる形にしてある。** 本物のgitで規則の分岐を確かめるには、
+ * 画面を出さずに答えを決められる必要がある（試験でしか使わない）。
+ */
+export type ConflictWalker = (input: {
+  root: string;
+  label: string;
+  files: string[];
+  run: GitCommandRunner;
+}) => Promise<WalkConflictsResult>;
+
+export interface FoldOptions {
+  progress?: { report(value: { message?: string }): void };
+  walk?: ConflictWalker;
+}
 
 export async function resolveDivergence(
   deps: ResolveDivergenceDeps,
@@ -119,15 +182,22 @@ export async function resolveDivergence(
     return;
   }
 
-  // **作者のものが1件でも衝突していたら、機械は決めない**（設計書5.5.4）
-  if (!canFoldAutomatically(preview)) {
-    await reportAuthoredConflicts(label, preview);
-    return;
-  }
-
+  // **作者のものが衝突していても、もう行き止まりにしない**（設計書5.5.18）。
+  // 何が起きるかを先に見せ、押されたら1件ずつ選んでもらう
   if (!(await confirm(label, status.behind, status.ahead, preview))) return;
 
-  await fold(deps, { root, label, upstream: status.upstream }, preview, run);
+  const result = await withCancellableProgress(
+    "分かれた分を合わせています…",
+    async (progress) =>
+      foldDivergence(
+        deps,
+        { root, label, upstream: status.upstream },
+        { progress }
+      )
+  );
+  if (!result) return;
+
+  await reportFold(deps, label, result, { sending: false });
 }
 
 /** どの置き場を畳むか。作品が指定されなければ、登録の先頭から根をたどる */
@@ -148,54 +218,50 @@ async function pickTarget(
   return { root, label: buildSyncTarget(root, works).label };
 }
 
-/** 作者のものが衝突しているときは、何が衝突したかを見せて手を引く */
-async function reportAuthoredConflicts(
-  label: string,
-  preview: MergePreview
-): Promise<void> {
-  const listed = preview.authored.slice(0, 8).join("\n");
-  const more =
-    preview.authored.length > 8 ? `\nほか${preview.authored.length - 8}件` : "";
-  const action = await vscode.window.showWarningMessage(
-    `${label} は、同じファイルが両方で書き換えられています。`,
-    {
-      modal: true,
-      detail:
-        `${listed}${more}\n\n` +
-        "どちらを残すかは、書いたご本人にしか分かりません。" +
-        "こちらでは合わせません。" +
-        "Gitのクライアントか「競合を解決する」で、1つずつお選びください。",
-    },
-    "ログを表示"
-  );
-  if (action === "ログを表示") showLog();
-  logStep(`分岐：作者のものが衝突（${label}／${preview.authored.length}件）`);
-}
-
 /**
  * 押す前に見せる文面を組む。
  *
  * **画面から切り離してある**——出るかどうかは実機でしか見られないが、
- * 「取り込む件数」「こちらに残る件数」が本当に入っているかは、
- * ここだけを呼べば機械で確かめられる。
+ * 「取り込む件数」「こちらに残る件数」「作者が選ぶ件数」が本当に入って
+ * いるかは、ここだけを呼べば機械で確かめられる。
  */
 export function describeDivergenceConfirm(input: {
   label: string;
   behind: number;
   ahead: number;
   autoWritten: number;
+  /** 規則で揃える見込みの設定資料の件数 */
+  settings?: number;
+  /** 作者が1件ずつ選ぶことになる本文の件数 */
+  manuscripts?: number;
 }): { message: string; detail: string } {
-  const folding =
-    input.autoWritten > 0
-      ? `\n・食い違う${input.autoWritten}件（自動で書かれるもの）は、この端末の側を残します`
-      : "";
+  const lines = [
+    `・GitHubの側にある${input.behind}件を取り込みます`,
+    `・こちらの${input.ahead}件はそのまま残ります`,
+  ];
+  if (input.autoWritten > 0) {
+    lines.push(
+      `・食い違う${input.autoWritten}件（自動で書かれるもの）は、この端末の側を残します`
+    );
+  }
+  if (input.settings && input.settings > 0) {
+    lines.push(
+      `・食い違う設定資料${input.settings}件は、` +
+        "作者が書いた部分が同じなら新しいほうへ揃えます"
+    );
+  }
+  if (input.manuscripts && input.manuscripts > 0) {
+    lines.push(
+      `・同じ箇所を両方で書き換えた本文${input.manuscripts}件は、1件ずつお選びいただきます`
+    );
+  }
+  lines.push("・合わせる前に、未記録の変更を記録します");
+  lines.push("・戻せるように、退避の枝を作ります");
+
   return {
     message: `${input.label} の分かれた分を合わせます。`,
     detail:
-      `・GitHubの側にある${input.behind}件を取り込みます\n` +
-      `・こちらの${input.ahead}件はそのまま残ります${folding}\n` +
-      "・合わせる前に、未記録の変更を記録します\n" +
-      "・戻せるように、退避の枝を作ります\n\n" +
+      `${lines.join("\n")}\n\n` +
       "GitHubへは送信しません。送信は「同期」から改めて行ってください。",
   };
 }
@@ -207,11 +273,14 @@ async function confirm(
   ahead: number,
   preview: MergePreview
 ): Promise<boolean> {
+  const classified = classifyConflicts(preview.conflicts);
   const text = describeDivergenceConfirm({
     label,
     behind,
     ahead,
-    autoWritten: preview.autoWritten.length,
+    autoWritten: classified.autoWritten.length,
+    settings: classified.settings.length,
+    manuscripts: classified.manuscripts.length,
   });
   const answer = await vscode.window.showInformationMessage(
     text.message,
@@ -221,130 +290,310 @@ async function confirm(
   return answer === "合わせる";
 }
 
-/** 実際に畳む。**検査に1つでも落ちたら戻す** */
-async function fold(
+/**
+ * 実際に畳む。**検査に1つでも落ちたら戻す**
+ *
+ * **画面の確認は挟まない。** 同期の流れの中から呼ぶためである
+ * （作者の指示、2026-09-10：「もう少し手軽にできないですか」）。
+ * 作者に選んでもらうところ（`walk`）だけは、性質上どうしても画面が要る。
+ */
+export async function foldDivergence(
   deps: ResolveDivergenceDeps,
-  target: { root: string; label: string; upstream: string },
-  preview: MergePreview,
-  run: GitCommandRunner
-): Promise<void> {
+  target: FoldTarget,
+  options: FoldOptions = {}
+): Promise<FoldOutcome> {
+  const run = deps.run ?? runGit;
   const { root, label, upstream } = target;
+  const report = (message: string) => options.progress?.report({ message });
 
-  const result = await withCancellableProgress(
-    "分かれた分を合わせています…",
-    async (progress) => {
-      progress.report({ message: "退避の枝を作っています…" });
-      const backup = backupBranchName();
-      const branched = await run(["branch", backup], root, 15_000);
-      if (branched.code !== 0) {
-        return {
-          ok: false as const,
-          reason: `退避の枝を作れませんでした: ${branched.stderr.trim()}`,
-        };
-      }
+  report("退避の枝を作っています…");
+  const backup = backupBranchName();
+  const branched = await run(["branch", backup], root, 15_000);
+  if (branched.code !== 0) {
+    return {
+      ok: false,
+      reason: `退避の枝を作れませんでした: ${branched.stderr.trim()}`,
+    };
+  }
 
-      progress.report({ message: "未記録の変更を記録しています…" });
-      const pending = await countTrackableFiles(root, run);
-      if (pending > 0) {
-        if (!(await hasCommitIdentity(root, run))) {
-          return {
-            ok: false as const,
-            reason:
-              "記録する人の名前が未設定です。「GitHubと同期」から一度設定してください。",
-          };
-        }
-        const committed = await commitAll(
-          root,
-          `合わせる前の自動保存（${pending}件）`,
-          run
-        );
-        if (!committed.ok) {
-          return {
-            ok: false as const,
-            reason: `記録できませんでした: ${committed.detail ?? ""}`,
-          };
-        }
-      }
-
-      progress.report({ message: "原稿の指紋を控えています…" });
-      const before = await fingerprints(root, run);
-
-      progress.report({ message: "合わせています…" });
-      // **確定させずに畳む。** 検査に落ちたときに戻せるようにするため
-      const merged = await run(
-        ["merge", "--no-commit", "--no-ff", upstream],
-        root,
-        120_000
-      );
-
-      // 規則で戻したファイル。**触ってよい側に数える**——
-      // gitが書き戻すときに改行の自動変換が入るため、中身が同じでも
-      // バイトは変わりうる（実際に試験で捕まえた）
-      const resolved: string[] = [];
-      const unresolved = await unmergedFiles(root, run);
-      if (unresolved.length > 0) {
-        // 調べたときと同じ顔ぶれなら、規則で畳む。
-        // **1件でも作者のものが混ざっていたら、そこでやめる**
-        const authored = unresolved.filter(
-          (file) => !preview.autoWritten.includes(file)
-        );
-        if (authored.length > 0) {
-          await run(["merge", "--abort"], root, 15_000);
-          return {
-            ok: false as const,
-            reason:
-              "調べたときには無かった食い違いが出たため、元に戻しました：" +
-              authored.slice(0, 3).join("、"),
-          };
-        }
-        for (const file of unresolved) {
-          await run(["checkout", "--ours", "--", file], root, 15_000);
-          await run(["add", "--", file], root, 15_000);
-          resolved.push(file);
-        }
-      } else if (merged.code !== 0) {
-        await run(["merge", "--abort"], root, 15_000);
-        return {
-          ok: false as const,
-          reason: `合わせられませんでした: ${(merged.stderr || merged.stdout).trim()}`,
-        };
-      }
-
-      progress.report({ message: "取り込んだ中身を確かめています…" });
-      const incoming = await stagedFiles(root, run);
-      const markers = await filesWithMarkers(root, incoming);
-      const after = await fingerprints(root, run);
-      const guard = guardResult(
-        markers,
-        unexpectedChanges(before, after, [...incoming, ...resolved])
-      );
-
-      if (!guard.ok) {
-        await run(["merge", "--abort"], root, 15_000);
-        return {
-          ok: false as const,
-          reason:
-            "合わせた中身が検査に通らなかったため、元に戻しました。\n" +
-            describeGuardFailure(guard),
-        };
-      }
-
-      progress.report({ message: "記録しています…" });
-      const committed = await run(["commit", "--no-edit"], root, 60_000);
-      if (committed.code !== 0) {
-        return {
-          ok: false as const,
-          reason: `合わせた分を記録できませんでした: ${(
-            committed.stderr || committed.stdout
-          ).trim()}`,
-        };
-      }
-
-      return { ok: true as const, backup, incoming: incoming.length };
+  report("未記録の変更を記録しています…");
+  const pending = await countTrackableFiles(root, run);
+  if (pending > 0) {
+    if (!(await hasCommitIdentity(root, run))) {
+      return {
+        ok: false,
+        reason:
+          "記録する人の名前が未設定です。「GitHubと同期」から一度設定してください。",
+      };
     }
-  );
-  if (!result) return;
+    const committed = await commitAll(
+      root,
+      `合わせる前の自動保存（${pending}件）`,
+      run
+    );
+    if (!committed.ok) {
+      return {
+        ok: false,
+        reason: `記録できませんでした: ${committed.detail ?? ""}`,
+      };
+    }
+  }
 
+  report("原稿の指紋を控えています…");
+  const before = await fingerprints(root, run);
+
+  report("合わせています…");
+  // **確定させずに畳む。** 検査に落ちたときに戻せるようにするため
+  const merged = await run(
+    ["merge", "--no-commit", "--no-ff", upstream],
+    root,
+    120_000
+  );
+
+  // 規則で戻したファイル。**触ってよい側に数える**——
+  // gitが書き戻すときに改行の自動変換が入るため、中身が同じでも
+  // バイトは変わりうる（実際に試験で捕まえた）
+  const resolved: string[] = [];
+  const settingsAutoResolved: SettingsResolution[] = [];
+  let manuscriptConflicts: string[] = [];
+
+  const unresolved = await unmergedFiles(root, run);
+  if (unresolved.length === 0 && merged.code !== 0) {
+    await run(["merge", "--abort"], root, 15_000);
+    return {
+      ok: false,
+      reason: `合わせられませんでした: ${(merged.stderr || merged.stdout).trim()}`,
+    };
+  }
+
+  if (unresolved.length > 0) {
+    report("食い違いを片づけています…");
+    const classified = classifyConflicts(unresolved);
+
+    // 1. 自動で書かれるもの。**作り直せるので、この端末の側を残す**
+    for (const file of classified.autoWritten) {
+      if (!(await keepSide(root, file, "ours", run))) {
+        return await abort(root, run, `${file} を確定できませんでした`);
+      }
+      resolved.push(file);
+    }
+
+    // 2. 設定資料のJSON。規則で決める（設計書5.5.18）
+    const undecided: string[] = [];
+    for (const file of classified.settings) {
+      const decision = await decideForFile(root, file, run);
+      if (decision.side === "conflict") {
+        undecided.push(file);
+        continue;
+      }
+      if (!(await keepSide(root, file, decision.side, run))) {
+        return await abort(root, run, `${file} を確定できませんでした`);
+      }
+      resolved.push(file);
+      settingsAutoResolved.push({
+        file,
+        side: decision.side,
+        reason: decision.reason,
+      });
+      // **黙って片方へ寄せたことにしない。** どちらを採ったかを1行ずつ残す
+      logStep(
+        `設定資料の衝突：${file} → ` +
+          `${decision.side === "ours" ? "こちら" : "別環境"}（${decision.reason}）`
+      );
+    }
+
+    // 3. 残りは作者が選ぶ。**同じ箇所を両方で書き換えたものだけ**が来る
+    const forAuthor = [...undecided, ...classified.manuscripts];
+    if (forAuthor.length > 0) {
+      const walk = options.walk ?? defaultWalk;
+      let walked: WalkConflictsResult;
+      try {
+        walked = await walk({ root, label, files: forAuthor, run });
+      } catch (error) {
+        return await abort(
+          root,
+          run,
+          `見比べの途中で問題が起きました: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+      if (walked.aborted) {
+        await run(["merge", "--abort"], root, 15_000);
+        return {
+          ok: false,
+          reason: describeAuthoredStop(forAuthor),
+          authored: forAuthor,
+        };
+      }
+      resolved.push(...walked.resolved);
+      manuscriptConflicts = [...walked.resolved];
+    }
+
+    // 選び終わっても未解決が残っているなら、こちらの読み違いである。
+    // **中途半端に確定した状態で記録しない**
+    const left = await unmergedFiles(root, run);
+    if (left.length > 0) {
+      return await abort(
+        root,
+        run,
+        `まだ解決できていないファイルが残っています：${left.slice(0, 3).join("、")}`
+      );
+    }
+  }
+
+  report("取り込んだ中身を確かめています…");
+  const incoming = await stagedFiles(root, run);
+  const markers = await filesWithMarkers(root, incoming);
+  const after = await fingerprints(root, run);
+  const guard = guardResult(
+    markers,
+    unexpectedChanges(before, after, [...incoming, ...resolved])
+  );
+
+  if (!guard.ok) {
+    await run(["merge", "--abort"], root, 15_000);
+    return {
+      ok: false,
+      reason:
+        "合わせた中身が検査に通らなかったため、元に戻しました。\n" +
+        describeGuardFailure(guard),
+    };
+  }
+
+  report("記録しています…");
+  const committed = await run(["commit", "--no-edit"], root, 60_000);
+  if (committed.code !== 0) {
+    return {
+      ok: false,
+      reason: `合わせた分を記録できませんでした: ${(
+        committed.stderr || committed.stdout
+      ).trim()}`,
+    };
+  }
+
+  await deps.monitor?.refreshAll({ fetch: false });
+  return {
+    ok: true,
+    backup,
+    incoming: incoming.length,
+    settingsAutoResolved,
+    manuscriptConflicts,
+  };
+}
+
+/** 既定の見比べ。**画面が要るので、使うときだけ読み込む** */
+const defaultWalk: ConflictWalker = async ({ root, label, files, run }) => {
+  const { walkConflicts } = await import("./resolveConflicts.js");
+  return walkConflicts(
+    { id: root, title: label, folderPath: root },
+    files,
+    { run }
+  );
+};
+
+/** 索引の3つの版を読んで、どちらを残すか決める */
+async function decideForFile(
+  root: string,
+  file: string,
+  run: GitCommandRunner
+): Promise<{ side: "ours" | "theirs" | "conflict"; reason: string }> {
+  const base = await showStage(root, file, 1, run);
+  const ours = await showStage(root, file, 2, run);
+  const theirs = await showStage(root, file, 3, run);
+  if (ours === undefined || theirs === undefined) {
+    // 片方にしか無い（追加と削除がぶつかった）。**中身を比べられない**
+    return {
+      side: "conflict",
+      reason: "片方の版がありません",
+    };
+  }
+  return decideSettingsConflict({ base, ours, theirs });
+}
+
+/** 選んだ側で確定させる */
+async function keepSide(
+  root: string,
+  file: string,
+  side: "ours" | "theirs",
+  run: GitCommandRunner
+): Promise<boolean> {
+  const checkout = await run(
+    ["checkout", `--${side}`, "--", file],
+    root,
+    15_000
+  );
+  if (checkout.code !== 0) return false;
+  const added = await run(["add", "--", file], root, 15_000);
+  return added.code === 0;
+}
+
+/** 途中でやめる。**原稿を元へ戻してから理由を返す** */
+async function abort(
+  root: string,
+  run: GitCommandRunner,
+  reason: string
+): Promise<FoldOutcome> {
+  await run(["merge", "--abort"], root, 15_000);
+  return { ok: false, reason: `${reason}。元に戻しました。` };
+}
+
+/**
+ * 作者が選ばずにやめたときの知らせ。
+ *
+ * **次にどうすれば続きへ行けるかまで書く。** 「戻しました」だけだと、
+ * 作者は同じところへ戻ってくる道を持たない。
+ */
+export function describeAuthoredStop(files: readonly string[]): string {
+  const listed = files.slice(0, 5).map((file) => baseNameOf(file));
+  const more = files.length > 5 ? `、ほか${files.length - 5}件` : "";
+  return (
+    `本文と設定資料の ${files.length} 件が、同じ箇所で衝突しています` +
+    `（${listed.join("、")}${more}）。` +
+    "選ばれなかったので、元の状態へ戻しました。" +
+    "もう一度同期すると、続きから選べます。"
+  );
+}
+
+/**
+ * 合わせた結果の知らせ（設計書5.5.18）。
+ *
+ * 作者の指摘（2026-09-10）：「競合解決があるかないかわからない。件数が出ない」。
+ * **何件をどう片づけたかを、必ず数字で出す。**
+ */
+export function describeFoldSuccess(
+  label: string,
+  result: Extract<FoldOutcome, { ok: true }>,
+  options: { sending: boolean } = { sending: false }
+): string {
+  const parts = [`取り込み ${result.incoming}件`];
+  if (result.settingsAutoResolved.length > 0) {
+    const theirs = result.settingsAutoResolved.filter(
+      (one) => one.side === "theirs"
+    ).length;
+    const ours = result.settingsAutoResolved.length - theirs;
+    parts.push(
+      `設定資料 ${result.settingsAutoResolved.length}件は新しいほうに揃えました` +
+        `（別環境 ${theirs}件・こちら ${ours}件）`
+    );
+  }
+  if (result.manuscriptConflicts.length > 0) {
+    parts.push(`本文など ${result.manuscriptConflicts.length}件はお選びいただきました`);
+  }
+  return (
+    `${label} で別の環境の変更を合わせました（${parts.join("／")}）。` +
+    `戻したいときは枝「${result.backup}」から戻せます。` +
+    (options.sending ? "続けて送信します。" : "GitHubへ出すには「同期」で送信してください。")
+  );
+}
+
+/** 済んだあとの知らせ（「分かれた分を合わせる」から呼ぶとき） */
+async function reportFold(
+  deps: ResolveDivergenceDeps,
+  label: string,
+  result: FoldOutcome,
+  options: { sending: boolean }
+): Promise<void> {
   if (!result.ok) {
     logFailure("分岐を合わせられなかった", { 置き場: label, 詳細: result.reason });
     const action = await vscode.window.showErrorMessage(
@@ -356,12 +605,14 @@ async function fold(
     return;
   }
 
-  logStep(`分岐を合わせた（${label}／取り込み ${result.incoming}件）`);
+  logStep(
+    `分岐を合わせた（${label}／取り込み ${result.incoming}件` +
+      `／設定資料 ${result.settingsAutoResolved.length}件` +
+      `／作者が選んだ ${result.manuscriptConflicts.length}件）`
+  );
   await deps.monitor?.refreshAll({ fetch: false });
   void vscode.window.showInformationMessage(
-    `${label} の分かれた分を合わせました（${result.incoming}件を取り込みました）。` +
-      `戻したいときは枝「${result.backup}」から戻せます。` +
-      "GitHubへ出すには「同期」で送信してください。"
+    describeFoldSuccess(label, result, options)
   );
 }
 
@@ -371,7 +622,7 @@ function backupBranchName(): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   return (
     `backup/${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
-    `-${pad(now.getHours())}${pad(now.getMinutes())}-合わせる前`
+    `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}-合わせる前`
   );
 }
 
@@ -386,7 +637,9 @@ async function unmergedFiles(
     15_000
   );
   if (result.code !== 0) return [];
-  return [...new Set(result.stdout.split("\0").filter((name) => name !== ""))];
+  return [
+    ...new Set(result.stdout.split("\u0000").filter((name) => name !== "")),
+  ];
 }
 
 /** 畳んだ結果として入ったファイル */
@@ -400,7 +653,7 @@ async function stagedFiles(
     30_000
   );
   if (result.code !== 0) return [];
-  return result.stdout.split("\0").filter((name) => name !== "");
+  return result.stdout.split("\u0000").filter((name) => name !== "");
 }
 
 /**
@@ -415,7 +668,7 @@ async function fingerprints(
 ): Promise<Map<string, string>> {
   const listed = await run(["ls-files", "-z"], root, 30_000);
   const files = listed.stdout
-    .split("\0")
+    .split("\u0000")
     .filter((name) => name !== "")
     .filter((name) =>
       WATCHED_EXTENSIONS.some((extension) =>
@@ -454,3 +707,10 @@ async function readBytes(filePath: string): Promise<Uint8Array | undefined> {
     return undefined;
   }
 }
+
+/** ファイル名だけを取り出す。**gitは常に `/` 区切りで返す** */
+function baseNameOf(filePath: string): string {
+  const parts = filePath.split("/");
+  return parts[parts.length - 1] || filePath;
+}
+

@@ -118,12 +118,19 @@ describe("自動で書かれるファイルの見分け", () => {
     expect(isAutoWrittenPath("短編/.aiwriter/proposals/p1.jsonl")).toBe(false);
   });
 
-  test("承認待ちと抽出済みの記録も畳めない", () => {
-    // 前者は作者が承認する前のもの、後者は正しくは両方の和集合である
-    expect(isAutoWrittenPath("短編/.aiwriter/pending-characters/char_001.json")).toBe(
-      false
-    );
+  test("抽出済みの記録は畳めない", () => {
+    // 正しくは両方の和集合で、片方を残すと再抽出が走る
     expect(isAutoWrittenPath("短編/.aiwriter/extracted.json")).toBe(false);
+  });
+
+  test("承認待ちの提案は畳める（0.45.0）", () => {
+    // **AIの提案で、まだ資料になっていない**（設計書5.5.18）。
+    // 作者の手は入っていないので、再抽出で同じものが出てくる。
+    // ここを作者への問いに数えていたため、同期のたびに
+    // 「自分が書いたものではないもの」の解決を求められていた
+    expect(
+      isAutoWrittenPath("短編/.aiwriter/pending-characters/char_001.json")
+    ).toBe(true);
   });
 
   test("原稿と設定資料は畳めない", () => {

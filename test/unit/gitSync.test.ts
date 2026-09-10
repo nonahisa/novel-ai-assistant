@@ -9,8 +9,12 @@ import {
   lastCacheDirective,
   missingIgnoreRules,
 } from "../../src/core/workRegistry";
-import { isGitAvailable, runGit } from "../../src/core/git";
-import { canFetch, describeDivergedPull } from "../../src/features/gitSync";
+import { isGitAvailable, runGit, type GitSyncStatus } from "../../src/core/git";
+import {
+  canFetch,
+  describeStatus,
+  describeSyncBadge,
+} from "../../src/features/gitSync";
 import { ACTION_TREE } from "../../src/views/actionList";
 
 const encode = (text: string) => new TextEncoder().encode(text);
@@ -254,28 +258,126 @@ describe("実際のgitでの確認（キャッシュの同期切り替え）", (
 });
 
 /**
- * 取り込みが分岐で止まったときの知らせ（設計書5.5.16、実機確認リスト A-17）。
+ * 分かれていることと、その件数の出し方（設計書5.5.18）。
  *
- * **行き止まりにしない。** 「取り込めませんでした」だけで終わると、
- * プログラマでない作者にはそこから先が無い。止まったその場に
- * 「分かれた分を合わせる」を出す。
+ * 作者の指摘（2026-09-10）：「競合解決があるかないかわからない。件数が出ない」。
  *
- * 通知が実際に画面へ出ることは実機に残る。ここで見るのは**押せる先が
- * 添えてあるか**である。
+ * **分かれているのと、解決が要るのは別のことである。** 分かれていても、
+ * 同じ箇所が重なっていなければ同期がそのまま合わせる。だから
+ * 「何件ぶつかっているか」まで出ないと、身構えるべきか分からない。
+ *
+ * 0.45.0 より前は `describeDivergedPull` が「取り込みは中止しました。
+ * 『分かれた分を合わせる』でお試しください」と案内するだけだった。
+ * **いまは同期の中で合わせにいく**ので、その知らせは無くなっている。
  */
-describe("分岐で取り込めなかったときの知らせ", () => {
-  test("作品名と、止めたことを伝える（実機確認リスト A-17 の代わり）", () => {
-    const notice = describeDivergedPull("いじめられっ子");
-
-    expect(notice.message).toContain("いじめられっ子");
-    expect(notice.message).toContain("両方で変更が進んでいます");
-    expect(notice.message).toContain("取り込みは中止しました");
+describe("分かれているときの状態の文", () => {
+  /** 分かれている置き場の、追跡できている状態 */
+  const diverged = (conflicts?: {
+    settings: string[];
+    manuscripts: string[];
+    autoWritten: string[];
+  }): GitSyncStatus => ({
+    kind: "tracked",
+    root: "C:/書庫",
+    branch: "main",
+    upstream: "origin/main",
+    behind: 3,
+    ahead: 2,
+    behindHere: 3,
+    aheadHere: 2,
+    dirty: 0,
+    dirtyHere: 0,
+    unmerged: 0,
+    conflicts,
   });
 
-  test("その場から次の手へ行けるボタンが付く（実機確認リスト A-17 の代わり）", () => {
-    expect(describeDivergedPull("いじめられっ子").action).toBe(
-      "分かれた分を合わせる"
+  test("取り込みと送信の件数が、分かれていると分かる形で出る", () => {
+    const text = describeStatus(
+      diverged({ settings: [], manuscripts: [], autoWritten: [] })
     );
+
+    expect(text).toContain("分かれています");
+    expect(text).toContain("取り込み 3件");
+    expect(text).toContain("送信 2件");
+  });
+
+  test("同じ箇所の衝突が無ければ、自動で合わせられると書く", () => {
+    // **ここが出ないと、作者は身構えたまま同期を避ける**
+    const text = describeStatus(
+      diverged({ settings: [], manuscripts: [], autoWritten: ["a/.aiwriter/stats/pc.json"] })
+    );
+
+    expect(text).toContain("同じ箇所の衝突はありません");
+    expect(text).toContain("同期で自動で合わせられます");
+  });
+
+  test("衝突があれば、設定資料と本文に分けて件数を出す", () => {
+    const text = describeStatus(
+      diverged({
+        settings: ["短編/設定/characters/char_001_太志.json"],
+        manuscripts: ["短編/本文/第1話.txt", "短編/本文/第2話.txt"],
+        autoWritten: [],
+      })
+    );
+
+    expect(text).toContain("同じ箇所の衝突 3件");
+    expect(text).toContain("設定資料 1");
+    expect(text).toContain("本文 2");
+  });
+
+  test("数えられなかったことは、数えられなかったと書く", () => {
+    // 古いgitでは `merge-tree --write-tree` が無い。**0件と嘘をつかない**
+    expect(describeStatus(diverged(undefined))).toContain(
+      "同じ箇所の衝突は調べられませんでした"
+    );
+  });
+
+  test("分かれていなければ、これまでどおりの書き方をする", () => {
+    const behindOnly: GitSyncStatus = { ...diverged(), ahead: 0, aheadHere: 0 };
+
+    const text = describeStatus(behindOnly);
+    expect(text).toContain("未取得 3件");
+    expect(text).not.toContain("分かれています");
+  });
+});
+
+/** 一覧の行に出す印（設計書5.5.18） */
+describe("分かれている作品の印", () => {
+  const base = {
+    kind: "tracked" as const,
+    root: "C:/書庫",
+    branch: "main",
+    upstream: "origin/main",
+    behind: 1,
+    ahead: 1,
+    behindHere: 1,
+    aheadHere: 1,
+    dirty: 0,
+    dirtyHere: 0,
+    unmerged: 0,
+  };
+
+  test("衝突が無ければ「分岐」とだけ出す", () => {
+    expect(
+      describeSyncBadge({
+        ...base,
+        conflicts: { settings: [], manuscripts: [], autoWritten: [] },
+      })
+    ).toContain("分岐");
+  });
+
+  test("作者が選ぶものがあれば、その件数を出す", () => {
+    // **押す前に、選ぶことになると分かるようにする**
+    expect(
+      describeSyncBadge({
+        ...base,
+        conflicts: {
+          settings: ["短編/設定/characters/char_001_太志.json"],
+          manuscripts: ["短編/本文/第1話.txt"],
+          autoWritten: [],
+        },
+      })
+    ).toContain("分岐・要選択2");
   });
 });
 

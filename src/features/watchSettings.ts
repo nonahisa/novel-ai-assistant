@@ -29,6 +29,18 @@ import { logStep } from "../core/logger";
 /** 書き込みが落ち着くまで待つ時間。AIは連続して何件も書く */
 const SETTLE_MS = 1500;
 
+/**
+ * 見張りを再開したあと、まだ捨て続ける時間（設計書5.5.18）。
+ *
+ * **ファイル監視の知らせは、書き込みより遅れて届く。** 取り込みが終わった
+ * 直後に再開すると、gitが書いたぶんの知らせがそのあと届いて「外部で
+ * 変更されました」になる。`SETTLE_MS` に余裕を足した長さだけ捨てる。
+ */
+const IGNORE_AFTER_RESUME_MS = 3000;
+
+/** 作品を問わず止めるときの鍵 */
+const ALL_WORKS = "*";
+
 export class SettingsWatcher implements vscode.Disposable {
   private readonly watchers = new Map<string, vscode.FileSystemWatcher>();
   private readonly changed = new Set<string>();
@@ -92,11 +104,65 @@ export class SettingsWatcher implements vscode.Disposable {
     return watcher;
   }
 
+  /**
+   * 見張りを止める（設計書5.5.18）。返ってきた関数を呼ぶと再開する。
+   *
+   * 作者の指摘（2026-09-10）：「同期時、設定資料の変更で再読み込みを
+   * ポップアップさせていませんか？」。
+   *
+   * **gitが書いたファイルは、拡張機能自身の書き込みとして除けない**
+   * （`SelfWriteTracker` は書き込み口を通ったものしか知らない）。
+   * 取り込んでいる間だけ黙らせるのが、いちばん確かである。
+   *
+   * **止めている間に来た変更は捨てる。** 溜めて後から出しても、
+   * 作者にとっては同じ「同期のあとに出てくる問い」になる。
+   *
+   * @param work 省略すると全作品を止める（置き場ぜんぶを取り込むとき）
+   */
+  pause(work?: WorkEntry): () => void {
+    const key = work?.id ?? ALL_WORKS;
+    this.pauseDepth.set(key, (this.pauseDepth.get(key) ?? 0) + 1);
+
+    let released = false;
+    return () => {
+      // 二度呼ばれても、止めた回数を余計に減らさない
+      if (released) return;
+      released = true;
+      const left = (this.pauseDepth.get(key) ?? 1) - 1;
+      if (left > 0) {
+        this.pauseDepth.set(key, left);
+        return;
+      }
+      this.pauseDepth.delete(key);
+      this.ignoreUntil.set(key, Date.now() + IGNORE_AFTER_RESUME_MS);
+    };
+  }
+
+  /** 止めている回数（入れ子で呼ばれうる） */
+  private readonly pauseDepth = new Map<string, number>();
+  /** 再開したあと、まだ捨て続ける期限 */
+  private readonly ignoreUntil = new Map<string, number>();
+
+  /** いま黙っているか */
+  private isMuted(work: WorkEntry): boolean {
+    for (const key of [work.id, ALL_WORKS]) {
+      if ((this.pauseDepth.get(key) ?? 0) > 0) return true;
+      const until = this.ignoreUntil.get(key);
+      if (until !== undefined) {
+        if (Date.now() < until) return true;
+        this.ignoreUntil.delete(key);
+      }
+    }
+    return false;
+  }
+
   private record(work: WorkEntry, filePath: string): void {
     if (!isWatchedSettingsFile(filePath)) return;
     if (!kindOfSettingsFile(filePath)) return;
     // 拡張機能自身の保存で鳴っただけなら何もしない
     if (this.selfWrites.isSelfWrite(filePath)) return;
+    // 同期の取り込みの最中は、gitの書き込みなので知らせない（設計書5.5.18）
+    if (this.isMuted(work)) return;
 
     this.changed.add(filePath);
     if (this.settleTimer) clearTimeout(this.settleTimer);
@@ -108,6 +174,8 @@ export class SettingsWatcher implements vscode.Disposable {
     this.changed.clear();
     this.selfWrites.prune();
     if (files.length === 0) return;
+    // 止める前に予約された分が、止めている最中に鳴ることがある
+    if (this.isMuted(work)) return;
 
     logStep(
       `設定資料が外部で変更された: ${work.title} / ${files.length}件 ` +
@@ -123,6 +191,35 @@ export class SettingsWatcher implements vscode.Disposable {
   }
 }
 
+/** 外部変更の知らせに添える操作 */
+export interface ExternalChangeActions {
+  review: () => Promise<void>;
+  reload: () => void;
+  /**
+   * この変更を「人が確定させたもの」として守る。
+   *
+   * **編集部はGitHub経由で直すので、拡張機能の画面を通らない。**
+   * 印を付けないと、次の抽出でAIが上書きしてしまう（設計書5.5）。
+   */
+  protect: () => Promise<void>;
+}
+
+interface PendingNotice {
+  work: WorkEntry;
+  files: string[];
+  actions: ExternalChangeActions;
+}
+
+/**
+ * 待っている知らせ。
+ *
+ * **1件ずつ順に出す**（設計書5.5.18）。同時に複数の作品で変更が起きると、
+ * VS Code は通知を積み上げる。読まずに閉じる癖がつくうえ、
+ * **返事を待っている問いが下へ押し出される**（`views/notify.ts` と同じ問題）。
+ */
+const queue: PendingNotice[] = [];
+let showing = false;
+
 /**
  * 外部の変更を作者へ知らせる。
  *
@@ -132,42 +229,83 @@ export class SettingsWatcher implements vscode.Disposable {
 export async function notifyExternalChange(
   work: WorkEntry,
   files: string[],
-  actions: {
-    review: () => Promise<void>;
-    reload: () => void;
-    /**
-     * この変更を「人が確定させたもの」として守る。
-     *
-     * **編集部はGitHub経由で直すので、拡張機能の画面を通らない。**
-     * 印を付けないと、次の抽出でAIが上書きしてしまう（設計書5.5）。
-     */
-    protect: () => Promise<void>;
-  }
+  actions: ExternalChangeActions
 ): Promise<void> {
+  queue.push({ work, files, actions });
+  if (showing) return;
+
+  showing = true;
+  try {
+    while (queue.length > 0) {
+      const next = queue.shift();
+      if (!next) break;
+      const dismissAll = await showOneNotice(next, queue.length > 0);
+      if (!dismissAll) continue;
+      // **「すべてあとで」は、待ち行列ごと片づける**（作者の指示、2026-09-10）。
+      // ただし読み直しだけは各作品ぶん行う——画面が古いままだと、
+      // 作者は「あとで」を押しただけで見えているものが嘘になる
+      for (const rest of queue.splice(0)) rest.actions.reload();
+      next.actions.reload();
+    }
+  } finally {
+    showing = false;
+  }
+}
+
+/** 待っている知らせを捨てる（試験の後片づけ用） */
+export function clearExternalChangeQueue(): void {
+  queue.length = 0;
+  showing = false;
+}
+
+/** 知らせの文面。**画面から切り離して試験できるようにする** */
+export function describeExternalChange(
+  work: WorkEntry,
+  files: readonly string[]
+): string {
   const names = files
     .slice(0, 3)
     .map((file) => path.basename(file))
     .join("、");
   const rest = files.length > 3 ? ` ほか${files.length - 3}件` : "";
-
-  const answer = await vscode.window.showInformationMessage(
+  return (
     `「${work.title}」の設定資料が拡張機能の外で変更されました（${names}${rest}）。` +
-      "内容を確認しますか？（「この変更を守る」を押すと、今後AIで上書きしません）",
-    "変更を確認",
-    "この変更を守る",
-    "読み込み直すだけ",
-    "閉じる"
+    "内容を確認しますか？（「この変更を守る」を押すと、今後AIで上書きしません）"
+  );
+}
+
+/**
+ * 知らせに並べるボタン。
+ *
+ * **待っているものがあるときだけ「すべてあとで」を足す。**
+ * 1件しか無いときに出しても意味が違って読める。
+ */
+export function externalChangeButtons(hasMore: boolean): string[] {
+  const buttons = ["変更を確認", "この変更を守る", "読み込み直すだけ", "閉じる"];
+  return hasMore ? [...buttons, "すべてあとで"] : buttons;
+}
+
+/** 1件ぶん出す。**「すべてあとで」が押されたら true** */
+async function showOneNotice(
+  notice: PendingNotice,
+  hasMore: boolean
+): Promise<boolean> {
+  const answer = await vscode.window.showInformationMessage(
+    describeExternalChange(notice.work, notice.files),
+    ...externalChangeButtons(hasMore)
   );
 
   if (answer === "変更を確認") {
-    await actions.review();
-    return;
+    await notice.actions.review();
+    return false;
   }
   if (answer === "この変更を守る") {
-    await actions.protect();
-    return;
+    await notice.actions.protect();
+    return false;
   }
   if (answer === "読み込み直すだけ") {
-    actions.reload();
+    notice.actions.reload();
+    return false;
   }
+  return answer === "すべてあとで";
 }

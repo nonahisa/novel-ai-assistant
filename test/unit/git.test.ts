@@ -206,8 +206,22 @@ describe("同期状態の判定", () => {
       "rev-list --left-right --count": { stdout: "3\t2\n" },
     });
 
+    // **両方が0でないので、これは分かれている置き場である**（設計書5.5.18）。
+    // 0.45.0 から、分かれていることも行に出す——作者の指摘
+    // 「競合解決があるかないかわからない」に、印の側でも答えるため
     expect(describeSyncBadge(await readSyncStatus("/work", run))).toBe(
-      "送信待ち2・受け取り3"
+      "送信待ち2・受け取り3・分岐"
+    );
+  });
+
+  test("片方しか無ければ、分岐の印は出さない", async () => {
+    const run = fakeGit({
+      ...TRACKED_BASE,
+      "rev-list --left-right --count": { stdout: "3\t0\n" },
+    });
+
+    expect(describeSyncBadge(await readSyncStatus("/work", run))).toBe(
+      "受け取り3"
     );
   });
 
@@ -423,7 +437,24 @@ describe("状態の説明文", () => {
     expect(describeStatus({ kind: "not_a_repo" })).not.toContain("取り込");
   });
 
-  test("未取得と未送信を両方伝える", () => {
+  test("片方だけなら、未取得・未送信の言い方をする", () => {
+    const text = describeStatus({
+      kind: "tracked",
+      root: "/work",
+      branch: "main",
+      upstream: "origin/main",
+      behind: 3,
+      ahead: 0,
+      dirty: 0,
+      unmerged: 0,
+    });
+
+    expect(text).toContain("未取得 3件");
+  });
+
+  test("両方あるなら、分かれていると書く（設計書5.5.18）", () => {
+    // **「未取得3 / 未送信2」では、分かれていることが読み取れなかった**
+    // （作者の指摘、2026-09-10：「競合解決があるかないかわからない」）
     const text = describeStatus({
       kind: "tracked",
       root: "/work",
@@ -433,10 +464,11 @@ describe("状態の説明文", () => {
       ahead: 2,
       dirty: 0,
       unmerged: 0,
+      conflicts: { settings: [], manuscripts: [], autoWritten: [] },
     });
 
-    expect(text).toContain("未取得 3件");
-    expect(text).toContain("未送信 2件");
+    expect(text).toContain("分かれています：取り込み 3件・送信 2件");
+    expect(text).toContain("同期で自動で合わせられます");
   });
 });
 

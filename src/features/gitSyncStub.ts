@@ -22,6 +22,17 @@ export interface GitSyncMonitorLike extends vscode.Disposable {
   ): Promise<GitSyncStatus>;
   pull(work: WorkEntry): Promise<boolean>;
   push(work: WorkEntry): Promise<boolean>;
+  /**
+   * 取り込みのあいだ、設定資料の見張りを止める仕掛けを渡す（設計書5.5.18）。
+   *
+   * **代役は持たない。** ブラウザ版にはgitの書き込み自体が無いので、
+   * 黙らせる相手がいない
+   */
+  setSettingsPause?(
+    pause: ((work?: WorkEntry) => () => void) | undefined
+  ): void;
+  /** ファイル更新の知らせを、終わるまでためる（設計書5.5.18） */
+  beginBatchedFileNotices?(): () => Promise<void>;
 }
 
 /**

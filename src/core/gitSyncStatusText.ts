@@ -1,4 +1,5 @@
-import type { GitSyncStatus } from "./git";
+import type { DivergenceConflicts, GitSyncStatus } from "./git";
+import { authoredConflictCount } from "./divergenceScan";
 
 /**
  * 同期状態を、ツリーの右側に出す短い印にする（設計書5.5.1）。
@@ -50,6 +51,11 @@ export function describeSyncBadge(
         pending("記録待ち", status.dirtyHere),
         pending("送信待ち", status.aheadHere),
         pending("受け取り", status.behindHere),
+        // **分かれていることは、行に出す**（作者の指摘、2026-09-10：
+        // 「競合解決があるかないかわからない。件数が出ない」）。
+        // 置き場ぜんぶの性質なので同じ置き場の作品には同じ印が並ぶが、
+        // それは事実である（5.7.9と同じ扱い）
+        divergenceBadge(status),
       ]);
     default:
       // gitを使っていない作品には何も出さない（設計書5.5.1）
@@ -88,6 +94,7 @@ export function describeSyncTooltip(
         status.unmerged > 0
           ? `- **未解決の競合が ${status.unmerged} 件あります**（先に解決してください）`
           : undefined,
+        divergenceLine(status) ? `- ${divergenceLine(status)}` : undefined,
         line("記録待ち", status.dirtyHere, "書いたまま、まだ履歴に残していない"),
         line("送信待ち", status.aheadHere, "記録したが、まだGitHubへ出していない"),
         line(
@@ -103,6 +110,52 @@ export function describeSyncTooltip(
     default:
       return [];
   }
+}
+
+/**
+ * 分かれていることを1行で書く（設計書5.5.18）。
+ *
+ * 作者の指摘（2026-09-10）：「競合解決があるかないかわからない。件数が出ない」。
+ *
+ * **分かれているのと、解決が要るのは別のことである。** 分かれていても
+ * 同じ箇所が重なっていなければ、同期がそのまま合わせる。だから
+ * **「何件ぶつかっているか」まで書かないと、身構えるべきか分からない。**
+ *
+ * 分かれていないときは `undefined`（何も出さない）。
+ */
+export function divergenceLine(
+  status: GitSyncStatus | undefined
+): string | undefined {
+  if (!status || status.kind !== "tracked") return undefined;
+  if (status.ahead === 0 || status.behind === 0) return undefined;
+  return (
+    `分かれています：取り込み ${status.behind}件・送信 ${status.ahead}件／` +
+    describeConflictCounts(status.conflicts)
+  );
+}
+
+/** 同じ箇所の衝突の件数。**調べられなかったことも、そう書く** */
+export function describeConflictCounts(
+  conflicts: DivergenceConflicts | undefined
+): string {
+  if (!conflicts) return "同じ箇所の衝突は調べられませんでした";
+  const total = authoredConflictCount(conflicts);
+  if (total === 0) return "同じ箇所の衝突はありません（同期で自動で合わせられます）";
+  return (
+    `同じ箇所の衝突 ${total}件` +
+    `（設定資料 ${conflicts.settings.length}・本文 ${conflicts.manuscripts.length}）`
+  );
+}
+
+/** 一覧の行に出す短い印。**衝突が無いなら「分岐」だけ** */
+function divergenceBadge(status: {
+  ahead: number;
+  behind: number;
+  conflicts?: DivergenceConflicts;
+}): string | undefined {
+  if (status.ahead === 0 || status.behind === 0) return undefined;
+  const total = authoredConflictCount(status.conflicts);
+  return total > 0 ? `分岐・要選択${total}` : "分岐";
 }
 
 /** その作品に、まだ済んでいないことがあるか。並べ替えや印の色に使う */

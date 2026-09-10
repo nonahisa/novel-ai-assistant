@@ -80,6 +80,25 @@ export const runGit: GitCommandRunner = (args, cwd, timeoutMs) =>
   });
 
 /**
+ * 分かれているとき、同じ箇所で衝突しているファイル（設計書5.5.18）。
+ *
+ * **`readSyncStatus` は埋めない。** 数えるには `merge-tree` を走らせる必要が
+ * あり、一覧を描くたびに全作品ぶん動かすと重い。分かれている置き場だけを
+ * 見張り側（`GitSyncMonitor`）が数えて添える。
+ *
+ * 誰が決めることになるかで分けてある——**「競合解決があるかないか
+ * わからない」**（作者、2026-09-10）に答えるための数字だからである。
+ */
+export interface DivergenceConflicts {
+  /** 設定資料のJSON。規則で決まることが多い（`settingsConflictRule.ts`） */
+  settings: string[];
+  /** 本文。**同じ箇所を両方で書いたものだけ**がここに来る */
+  manuscripts: string[];
+  /** 拡張機能が自動で書くもの。この端末の側を残す */
+  autoWritten: string[];
+}
+
+/**
  * 同期状態。
  *
  * 「まだ判断できない」と「問題がある」を型で分けている。
@@ -139,6 +158,14 @@ export type GitSyncStatus =
       dirtyHere: number;
       /** Gitがマージ未解決としているファイル数 */
       unmerged: number;
+      /**
+       * 分かれているとき、同じ箇所で衝突するファイル（設計書5.5.18）。
+       *
+       * **`readSyncStatus` は埋めない**（`merge-tree` を走らせる必要があり、
+       * 一覧の描き直しごとに全作品ぶん動かすと重い）。分かれている置き場に
+       * ついてだけ、見張り側が数えて添える。
+       */
+      conflicts?: DivergenceConflicts;
     }
   /** 実行はできたが失敗した。理由はログへ回す */
   | { kind: "failed"; detail: string };

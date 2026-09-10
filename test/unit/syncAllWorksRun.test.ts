@@ -174,26 +174,27 @@ describe("作品をすべて同期", () => {
 });
 
 /**
- * 分岐で止まったときの報告（実機確認リスト A-17）。
+ * 分かれていたときの流れ（設計書5.5.18、実機確認リスト A-17）。
  *
- * **行き止まりにしない**（設計書5.5.16）。まとめて同期したうちの1つが
- * 分岐で止まったら、その報告からそのまま「分かれた分を合わせる」へ行ける。
+ * 0.45.0 より前は、報告に「『分かれた分を合わせる』でお試しください」と
+ * 出すだけだった。**作者にとって、そこが行き止まりだった**——
+ * 「競合がぜんぜん消えません」。**いまは同期の中で合わせにいく。**
  */
-describe("分岐で止まった置き場があるとき", () => {
+describe("分かれている置き場があるとき", () => {
   /** 記録も送信もできるが、`pull` だけ早送りできない置き場 */
   const divergedRepo: GitCommandRunner = async (args, cwd, timeout) => {
     if (args[0] === "pull") {
       calls.push(args);
       return { code: 1, stdout: "", stderr: "not possible to fast-forward" };
     }
+    if (args[0] === "merge" || args[0] === "branch") {
+      calls.push(args);
+      return { code: 0, stdout: "", stderr: "" };
+    }
     return busyRepo(args, cwd, timeout);
   };
 
-  /** 報告に添えられたボタン */
-  let buttons: string[] = [];
-
   beforeEach(() => {
-    buttons = [];
     Object.assign(window, {
       showWarningMessage: async (message: string, ...rest: unknown[]) => {
         const detail = rest.find(
@@ -201,25 +202,44 @@ describe("分岐で止まった置き場があるとき", () => {
             typeof item === "object" && item !== null && "detail" in item
         )?.detail;
         shown.push(detail ? `${message}\n${detail}` : message);
-        buttons = rest.filter(
-          (item): item is string => typeof item === "string"
-        );
         return undefined;
       },
     });
   });
 
-  test("報告に「分かれた分を合わせる」が並ぶ（実機確認リスト A-17 の代わり）", async () => {
+  test("その場で合わせにいく（設計書5.5.18）", async () => {
     await syncAllWorks({ registry, monitor, run: divergedRepo });
 
-    expect(buttons).toContain("分かれた分を合わせる");
-    // ログを見る道も残す（原因が別のときのため）
-    expect(buttons).toContain("ログを表示");
+    // 退避の枝を作ってから、確定させずに畳む
+    expect(calls.some((args) => args[0] === "branch")).toBe(true);
+    expect(
+      calls.some(
+        (args) => args[0] === "merge" && args.includes("--no-commit")
+      )
+    ).toBe(true);
   });
 
-  test("止まった理由も、その置き場の名前と一緒に出す（実機確認リスト A-17 の代わり）", async () => {
+  test("合わせたあとも、送信まで進む（設計書5.5.18）", async () => {
+    // **同期の流れを途中で止めない。** 合わせただけで終わると、
+    // 作者はもう一度同じボタンを押すことになる
     await syncAllWorks({ registry, monitor, run: divergedRepo });
 
-    expect(shown.join("\n")).toContain("分かれた分を合わせる");
+    const order = calls
+      .map((args) => args[0])
+      .filter((name) => name === "commit" || name === "pull" || name === "push");
+    expect(order[order.length - 1]).toBe("push");
+  });
+
+  test("報告に、合わせた件数が出る（作者の指摘「件数が出ない」）", async () => {
+    await syncAllWorks({ registry, monitor, run: divergedRepo });
+
+    expect(shown.join("\n")).toContain("別の環境の変更を 1か所で合わせました");
+  });
+
+  test("押す前の確認に、分かれていることが出る", async () => {
+    await syncAllWorks({ registry, monitor, run: divergedRepo });
+
+    const confirms = shown.filter((text) => text.includes("か所を同期します"));
+    expect(confirms[0]).toContain("分かれています");
   });
 });

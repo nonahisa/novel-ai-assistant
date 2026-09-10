@@ -1,5 +1,6 @@
 import type { GitSyncStatus } from "./git";
 import type { WorkEntry } from "../models/types";
+import { divergenceLine } from "./gitSyncStatusText";
 
 /**
  * 「作品をすべて同期する」で、置き場ごとに何をするかを決める（設計書5.5.14）。
@@ -155,8 +156,11 @@ export function describePlan(plan: SyncTargetPlan): string {
   if (plan.commit) parts.push(`記録 ${plan.target.trackable}件`);
   if (plan.pull) {
     const status = plan.target.status;
+    // **分かれているなら、そう書く**（設計書5.5.18）。押す前に、
+    // 選ぶことになるのかどうかが分かるようにする
+    const diverged = divergenceLine(status);
     parts.push(
-      `取り込み ${status.kind === "tracked" ? status.behind : 0}件`
+      diverged ?? `取り込み ${status.kind === "tracked" ? status.behind : 0}件`
     );
   }
   if (plan.push) {
@@ -270,6 +274,25 @@ export interface SyncTargetOutcome {
    * という壊れ方をさせない（設計書5.5.16）
    */
   diverged?: boolean;
+  /**
+   * 分かれた分を、その場で合わせた結果（設計書5.5.18）。
+   *
+   * **件数を持つ。** 作者の指摘（2026-09-10）：「競合解決があるかないか
+   * わからない。件数が出ない」。報告に出すのはこれである
+   */
+  folded?: FoldSummary;
+}
+
+/** 合流の結果を、報告に出せる形にしたもの */
+export interface FoldSummary {
+  /** 取り込んだファイル数 */
+  incoming: number;
+  /** 規則で新しいほうへ揃えた設定資料の件数 */
+  settings: number;
+  /** 作者が1件ずつ選んだ件数 */
+  manuscripts: number;
+  /** 戻すための枝 */
+  backup: string;
 }
 
 /**
@@ -291,5 +314,40 @@ export function describeOutcomes(outcomes: readonly SyncTargetOutcome[]): string
   if (parts.length === 0 && failed === 0) return "同期するものはありませんでした。";
 
   const head = parts.length > 0 ? `${parts.join("・")}を済ませました。` : "";
-  return failed > 0 ? `${head}${failed}か所は最後まで通りませんでした。` : head;
+  const tail =
+    failed > 0 ? `${failed}か所は最後まで通りませんでした。` : "";
+  return `${head}${tail}${describeFolds(outcomes)}`;
+}
+
+/**
+ * 合わせた分を、件数つきで書き添える（設計書5.5.18）。
+ *
+ * 作者の指摘（2026-09-10）：「競合解決があるかないかわからない。件数が出ない」。
+ * **黙って片方へ寄せたことにしない。** 何件をどう片づけたかを必ず出す。
+ */
+export function describeFolds(
+  outcomes: readonly SyncTargetOutcome[]
+): string {
+  const folded = outcomes.filter(
+    (one): one is SyncTargetOutcome & { folded: FoldSummary } =>
+      one.folded !== undefined
+  );
+  if (folded.length === 0) return "";
+
+  const settings = folded.reduce((sum, one) => sum + one.folded.settings, 0);
+  const manuscripts = folded.reduce(
+    (sum, one) => sum + one.folded.manuscripts,
+    0
+  );
+  const detail: string[] = [];
+  if (settings > 0) detail.push(`設定資料 ${settings}件は新しいほうに揃えました`);
+  if (manuscripts > 0) {
+    detail.push(`本文など ${manuscripts}件はお選びいただきました`);
+  }
+  if (detail.length === 0) detail.push("同じ箇所の衝突はありませんでした");
+
+  return (
+    `\n別の環境の変更を ${folded.length}か所で合わせました` +
+    `（${detail.join("／")}）。`
+  );
 }

@@ -12,11 +12,14 @@ import {
   rewritesLineEndings,
   push,
   readSyncStatus,
+  runGit,
+  type DivergenceConflicts,
   type GitCommandRunner,
   type GitSyncStatus,
 } from "../core/git";
+import { readDivergenceConflicts } from "../core/divergenceScan";
 import { describeNetworkFailure } from "../core/gitSetup";
-import { logFailure, showLog } from "../core/logger";
+import { logFailure, logStep, showLog } from "../core/logger";
 import { buildSyncTarget, describeCompanions } from "../core/syncTarget";
 import { withProgress } from "../views/progress";
 
@@ -27,6 +30,7 @@ export {
   describeSyncBadge,
   describeSyncTooltip,
 } from "../core/gitSyncStatusText";
+import { divergenceLine } from "../core/gitSyncStatusText";
 import { cancelItem } from "../views/dialogs";
 import {
   canRecordChanges,
@@ -83,6 +87,23 @@ export interface GitSyncOptions {
   run?: GitCommandRunner;
 }
 
+/**
+ * 設定資料の見張りを、取り込みのあいだ止める（設計書5.5.18）。
+ *
+ * 作者の指摘（2026-09-10）：「同期時、設定資料の変更で再読み込みを
+ * ポップアップさせていませんか？」。**gitが書いたファイルも外部変更として
+ * 拾ってしまう**ので、取り込むたびに「拡張機能の外で変更されました」が出る。
+ * 誰が書いたかは監視の側からは分からないので、**こちらが書いている間だけ
+ * 黙らせる**。返ってくる関数を呼ぶと再開する。
+ */
+export type SettingsWatchPause = (work?: WorkEntry) => () => void;
+
+/** まとめた「ファイルが更新されました」の1件ぶん */
+export interface FileChangeNotice {
+  work: WorkEntry;
+  files: string[];
+}
+
 export class GitSyncMonitor implements vscode.Disposable {
   private readonly statuses = new Map<string, GitSyncStatus>();
   private readonly lastFetchAt = new Map<string, number>();
@@ -97,6 +118,28 @@ export class GitSyncMonitor implements vscode.Disposable {
     work: WorkEntry;
     files: string[];
   }>();
+
+  /**
+   * 分かれている置き場の、机上の衝突判定の控え。
+   *
+   * **一覧を描くたびに `merge-tree` を走らせない。** 書庫では1つの置き場に
+   * 11作品が入っており、作品ごとに走らせると描き直しが目に見えて遅くなる
+   * （5.5.17で同じ失敗をしている）。ahead/behind と上流が変わるまで使い回す。
+   */
+  private readonly conflictCache = new Map<
+    string,
+    { key: string; conflicts?: DivergenceConflicts }
+  >();
+
+  /** 取り込みのあいだ、設定資料の見張りを止める仕掛け（設計書5.5.18） */
+  private settingsPause: SettingsWatchPause | undefined;
+
+  /**
+   * すべて同期のあいだ、ファイル更新の知らせをためる場所。
+   *
+   * **置き場ごとに出すと、11作品ぶん同じ問いが並ぶ。** ためて最後に1回出す
+   */
+  private fileNotices: FileChangeNotice[] | undefined;
 
   /** 状態が変わったとき。ツリーの作り直しに使う */
   readonly onDidChange = this.changed.event;
@@ -199,6 +242,10 @@ export class GitSyncMonitor implements vscode.Disposable {
       status = await readSyncStatus(work.folderPath, this.options.run);
     }
 
+    // **分かれているなら、同じ箇所の衝突が何件あるかまで数える**（設計書5.5.18）。
+    // 「分かれています」だけでは、身構えるべきか作者に分からない
+    status = await this.withConflicts(status);
+
     this.statuses.set(work.id, status);
     this.updateStatusBar();
     this.changed.fire();
@@ -206,6 +253,61 @@ export class GitSyncMonitor implements vscode.Disposable {
     await this.detectGitFileChanges(work, status);
     if (options.notify) await this.notifyIfBehind(work, status);
     return status;
+  }
+
+  /**
+   * 分かれている置き場に、同じ箇所の衝突の件数を添える（設計書5.5.18）。
+   *
+   * **`merge-tree` はローカルだけで完結する**ので、ネットワークには出ない。
+   * 落ちたら黙って件数無しにする——これは表示のための数字であって、
+   * 取れないことは同期を止める理由にならない（古いgitには `--write-tree` が無い）。
+   */
+  private async withConflicts(status: GitSyncStatus): Promise<GitSyncStatus> {
+    if (status.kind !== "tracked") return status;
+    if (status.ahead === 0 || status.behind === 0) {
+      this.conflictCache.delete(status.root);
+      return status;
+    }
+
+    const key = `${status.upstream}|${status.ahead}|${status.behind}`;
+    const cached = this.conflictCache.get(status.root);
+    if (cached?.key === key) {
+      return cached.conflicts
+        ? { ...status, conflicts: cached.conflicts }
+        : status;
+    }
+
+    const conflicts = await readDivergenceConflicts(
+      status.root,
+      status.upstream,
+      this.options.run ?? runGit
+    );
+    this.conflictCache.set(status.root, { key, conflicts });
+    return conflicts ? { ...status, conflicts } : status;
+  }
+
+  /**
+   * 設定資料の見張りを止める仕掛けを受け取る（設計書5.5.18）。
+   *
+   * **組み立ての順番の都合で、あとから渡す。** 見張りは登録簿より後に
+   * 作られるので、この見張り役の作成時にはまだ存在しない。
+   */
+  setSettingsPause(pause: SettingsWatchPause | undefined): void {
+    this.settingsPause = pause;
+  }
+
+  /**
+   * ファイル更新の知らせを、終わるまでためる（設計書5.5.18）。
+   *
+   * 返ってきた関数を呼ぶと、**まとめて1回だけ**出す。
+   */
+  beginBatchedFileNotices(): () => Promise<void> {
+    this.fileNotices = [];
+    return async () => {
+      const batch = this.fileNotices ?? [];
+      this.fileNotices = undefined;
+      await showBatchedFileChanges(batch);
+    };
   }
 
   /**
@@ -254,6 +356,13 @@ export class GitSyncMonitor implements vscode.Disposable {
     work: WorkEntry,
     files: string[]
   ): Promise<void> {
+    // **すべて同期の最中は、置き場ごとに出さない**（設計書5.5.18）。
+    // 11作品ぶん同じ問いが並ぶと、読まずに閉じる癖がつく
+    if (this.fileNotices) {
+      this.fileNotices.push({ work, files });
+      return;
+    }
+
     // 1〜2件なら本人が今取り込んだ直後で分かっているので黙っている。
     // まとめて入れ替わったときだけ、資料の作り直しを勧める
     if (files.length < FILE_CHANGE_NOTICE_THRESHOLD) return;
@@ -370,9 +479,18 @@ export class GitSyncMonitor implements vscode.Disposable {
     // **取り込みで改行が書き換わりうることを、先に伝える**（設計書5.5.1）
     await this.warnAutoCrlfOnce(work);
 
-    const result = await withProgress("別の環境の変更を取り込んでいます…", () =>
-      pullFastForward(work.folderPath, this.options.run)
-    );
+    // **取り込みのあいだ、設定資料の見張りを止める**（設計書5.5.18）。
+    // gitが書いたファイルも外部変更として拾うので、止めないと
+    // 取り込むたびに「拡張機能の外で変更されました」が出る
+    const resume = this.settingsPause?.(work);
+    let result: Awaited<ReturnType<typeof pullFastForward>>;
+    try {
+      result = await withProgress("別の環境の変更を取り込んでいます…", () =>
+        pullFastForward(work.folderPath, this.options.run)
+      );
+    } finally {
+      resume?.();
+    }
 
     if (result.ok) {
       this.notified.delete(work.id);
@@ -393,20 +511,10 @@ export class GitSyncMonitor implements vscode.Disposable {
     }
 
     if (result.failure.kind === "diverged") {
-      // **行き止まりにしない**（設計書5.5.16）。同じファイルが両方で
-      // 書き換えられていなければ、そのまま合わせられる
-      const notice = describeDivergedPull(work.title);
-      const answer = await vscode.window.showWarningMessage(
-        notice.message,
-        notice.action
-      );
-      if (answer === notice.action) {
-        await vscode.commands.executeCommand("novelai.resolveDivergence", {
-          type: "work",
-          work,
-        });
-      }
-      return false;
+      // **知らせて終わりにしない**（設計書5.5.18）。作者の言葉では
+      // 「競合がぜんぜん消えません」——別のコマンドへ案内するだけでは、
+      // そこが行き止まりになっていた。**その場で合わせにいく**
+      return await this.foldDiverged(work);
     }
 
     logFailure("Gitの取り込みに失敗", {
@@ -423,6 +531,66 @@ ${reason}` : ""}`,
     );
     if (action === "ログを表示") showLog();
     return false;
+  }
+
+  /**
+   * 分かれた分を、その場で合わせる（設計書5.5.18）。
+   *
+   * **確認は挟まない。** 取り込みのボタンを押した時点で「別の環境の分を
+   * 入れる」という意思は示されており、そこからもう一度問うと
+   * 「もう少し手軽にできないですか」（作者、2026-09-10）に答えられない。
+   * 戻せるように退避の枝は今までどおり作る。
+   */
+  private async foldDiverged(work: WorkEntry): Promise<boolean> {
+    const status = await readSyncStatus(work.folderPath, this.options.run);
+    if (status.kind !== "tracked") return false;
+    const label = buildSyncTarget(status.root, this.registry.list()).label;
+
+    const { foldDivergence, describeFoldSuccess } = await import(
+      "./resolveDivergence.js"
+    );
+    const resume = this.settingsPause?.();
+    let result: Awaited<ReturnType<typeof foldDivergence>>;
+    try {
+      result = await withProgress(
+        "別の環境の変更を合わせています…",
+        (progress) =>
+          foldDivergence(
+            { registry: this.registry, run: this.options.run },
+            { root: status.root, label, upstream: status.upstream },
+            { progress }
+          )
+      );
+    } finally {
+      resume?.();
+    }
+
+    if (!result.ok) {
+      logFailure("分岐を合わせられなかった", {
+        作品: work.title,
+        詳細: result.reason,
+      });
+      const action = await vscode.window.showWarningMessage(
+        `「${work.title}」の分かれた分を合わせられませんでした。`,
+        { modal: true, detail: `${result.reason}\n\n原稿は元のままです。` },
+        "ログを表示"
+      );
+      if (action === "ログを表示") showLog();
+      return false;
+    }
+
+    this.notified.delete(work.id);
+    await this.refresh(work, { fetch: false, notify: false });
+    logStep(
+      `同期の中で分岐を合わせた（${label}／取り込み ${result.incoming}件` +
+        `／設定資料 ${result.settingsAutoResolved.length}件` +
+        `／作者が選んだ ${result.manuscriptConflicts.length}件）`
+    );
+    // **件数を必ず出す**（作者の指摘：「件数が出ない」）
+    vscode.window.showInformationMessage(
+      describeFoldSuccess(`「${work.title}」`, result, { sending: false })
+    );
+    return true;
   }
 
   /** 送信する（作者の操作が起点） */
@@ -539,22 +707,78 @@ export function isWarning(status: GitSyncStatus): boolean {
 }
 
 /**
- * 取り込みが分岐で止まったときの知らせ（設計書5.5.16）。
+ * まとめて入れ替わったファイルの知らせ（設計書5.5.18）。
  *
- * **行き止まりにしない。** 止まったその場から「分かれた分を合わせる」へ
- * 行けることが要件なので、押せる先を文言と一緒にここへ置き、
- * 画面を開かずに確かめられるようにしてある。
+ * **すべて同期のときは、置き場ごとに出さない。** 書庫では11作品ぶん同じ問いが
+ * 並び、読まずに閉じる癖がつく。**最後に1回、合計で出す。**
+ *
+ * 出すほどでもない件数（しきい値未満）なら `undefined`。
  */
-export function describeDivergedPull(title: string): {
-  message: string;
-  action: string;
-} {
-  return {
-    message:
-      `「${title}」は、この環境と別の環境の両方で変更が進んでいます。` +
-      "取り込みは中止しました。",
-    action: "分かれた分を合わせる",
-  };
+export function describeBatchedFileChanges(
+  entries: readonly FileChangeNotice[]
+): string | undefined {
+  const byWork = new Map<string, { title: string; count: number }>();
+  for (const entry of entries) {
+    const found = byWork.get(entry.work.id);
+    if (found) found.count += entry.files.length;
+    else byWork.set(entry.work.id, { title: entry.work.title, count: entry.files.length });
+  }
+
+  const total = [...byWork.values()].reduce((sum, one) => sum + one.count, 0);
+  if (total < FILE_CHANGE_NOTICE_THRESHOLD) return undefined;
+
+  if (byWork.size === 1) {
+    const only = [...byWork.values()][0];
+    return (
+      `「${only.title}」で ${only.count} 件のファイルが更新されました。` +
+      "設定資料の抽出をやり直すと、増えた内容を取り込めます。"
+    );
+  }
+  return (
+    `${byWork.size}作品で本文が更新されました（合計 ${total}件）。` +
+    "設定資料の抽出をやり直すと、増えた内容を取り込めます。"
+  );
+}
+
+/** まとめた知らせを出し、押されたら抽出へ渡す */
+async function showBatchedFileChanges(
+  entries: readonly FileChangeNotice[]
+): Promise<void> {
+  const message = describeBatchedFileChanges(entries);
+  if (!message) return;
+
+  const action = await vscode.window.showInformationMessage(
+    message,
+    "設定資料を抽出",
+    // **「すべてあとで」を置く**（作者の指示、2026-09-10）。
+    // 1つずつ閉じさせない
+    "すべてあとで"
+  );
+  if (action !== "設定資料を抽出") return;
+
+  const works = [
+    ...new Map(entries.map((one) => [one.work.id, one.work])).values(),
+  ];
+  const work = works.length === 1 ? works[0] : await pickWork(works);
+  if (!work) return;
+  await vscode.commands.executeCommand("novelai.extractSettings", {
+    type: "work",
+    work,
+  });
+}
+
+/** 更新のあった作品から1つ選ばせる。**取りやめる道を必ず置く**（6.17.2） */
+async function pickWork(
+  works: readonly WorkEntry[]
+): Promise<WorkEntry | undefined> {
+  const items: Array<vscode.QuickPickItem & { work: WorkEntry }> = works.map(
+    (work) => ({ label: work.title, work })
+  );
+  const picked = await vscode.window.showQuickPick(
+    [...items, cancelItem()],
+    { title: "設定資料を抽出する作品", placeHolder: "作品を選んでください" }
+  );
+  return picked && "work" in picked ? picked.work : undefined;
 }
 
 function sumTracked(
@@ -571,8 +795,13 @@ function sumTracked(
 function describeForTooltip(work: WorkEntry, status: GitSyncStatus): string {
   if (status.kind !== "tracked") return `- ${work.title}`;
   const parts: string[] = [];
-  if (status.behind > 0) parts.push(`別の環境の変更が未取得 ${status.behind}件`);
-  if (status.ahead > 0) parts.push(`この環境の変更が未送信 ${status.ahead}件`);
+  // 分かれているときは件数の並びではなく、そう読める文にする（設計書5.5.18）
+  const diverged = divergenceLine(status);
+  if (diverged) parts.push(diverged);
+  else {
+    if (status.behind > 0) parts.push(`別の環境の変更が未取得 ${status.behind}件`);
+    if (status.ahead > 0) parts.push(`この環境の変更が未送信 ${status.ahead}件`);
+  }
   if (status.unmerged > 0) parts.push(`未解決の競合 ${status.unmerged}件`);
   return `- **${work.title}**（${status.branch}）: ${parts.join(" / ")}`;
 }
@@ -599,8 +828,15 @@ export function describeStatus(status: GitSyncStatus): string {
       return `ブランチ「${status.branch}」はまだ送信していません。「はじめて送信する」から送れます。`;
     case "tracked": {
       const parts: string[] = [];
-      if (status.behind > 0) parts.push(`未取得 ${status.behind}件`);
-      if (status.ahead > 0) parts.push(`未送信 ${status.ahead}件`);
+      // **分かれているときは、そう書く**（設計書5.5.18）。
+      // 「未取得3 / 未送信2」だけでは、分かれていることも、
+      // 解決が要るかどうかも読み取れなかった（作者の指摘、2026-09-10）
+      const diverged = divergenceLine(status);
+      if (diverged) parts.push(diverged);
+      else {
+        if (status.behind > 0) parts.push(`未取得 ${status.behind}件`);
+        if (status.ahead > 0) parts.push(`未送信 ${status.ahead}件`);
+      }
       if (status.unmerged > 0) parts.push(`未解決の競合 ${status.unmerged}件`);
       if (status.dirty > 0) parts.push(`未コミットの変更 ${status.dirty}件`);
       if (parts.length === 0) return `${status.branch}: 同期が取れています。`;
@@ -643,11 +879,15 @@ export async function showGitSyncActions(
 
   if (status.kind === "tracked") {
     if (status.behind > 0) {
+      const diverged = divergenceLine(status);
       items.push({
         label: "$(cloud-download) 取り込む",
-        description: `別の環境の変更 ${status.behind}件`,
-        detail:
-          "未コミットの変更があるときは実行しません（書きかけの原稿を守るため）。",
+        description: diverged ?? `別の環境の変更 ${status.behind}件`,
+        detail: diverged
+          ? // **分かれていても、押せば合わせにいく**（設計書5.5.18）
+            "分かれた分もここで合わせます。戻せるように退避の枝を作ります。" +
+            "未コミットの変更があるときは、先に記録します。"
+          : "未コミットの変更があるときは実行しません（書きかけの原稿を守るため）。",
         action: "pull",
       });
     }
