@@ -213,7 +213,8 @@ svg {
 <header>
   <h1 id="title">人物相関図</h1>
   <button id="toAll" title="作品全体の相関図に戻ります">全体図へ</button>
-  <button id="back" title="ひとつ前に見ていた人物へ戻ります">戻る</button>
+  <button id="back" title="ひとつ前に見ていた人物へ戻ります（マウスの戻るボタンでも同じ）">戻る</button>
+  <button id="forward" title="「戻る」で戻ったぶんを進みます（マウスの進むボタンでも同じ）">進む</button>
   <button id="ring2" title="1次の相手のさらに先（2次）も薄く出します">2次も出す</button>
   <button id="openRecord" title="中心の人物の設定資料を開きます">設定資料を開く</button>
   <button id="export" title="いま見えている図をSVGファイルとして書き出します">SVGを書き出す</button>
@@ -276,6 +277,7 @@ const el = {
   title: document.getElementById("title"),
   toAll: document.getElementById("toAll"),
   back: document.getElementById("back"),
+  forward: document.getElementById("forward"),
   ring2: document.getElementById("ring2"),
   openRecord: document.getElementById("openRecord"),
   exportSvg: document.getElementById("export"),
@@ -338,6 +340,27 @@ el.wide.addEventListener("click", function () {
 
 el.toAll.addEventListener("click", function () { post("all"); });
 el.back.addEventListener("click", function () { post("back"); });
+el.forward.addEventListener("click", function () { post("forward"); });
+
+/*
+  マウスの戻る・進むボタン（作者の依頼、2026-09-10）。
+
+  WebView の中では VS Code 本体の割り当てが効かないので、この画面で受けて
+  中心の履歴に結ぶ。画面のボタンと**同じ用件を送るだけ**——行き先を決めて
+  いるのは拡張機能側で、押せるかどうかも向こうが返す（canGoBack /
+  canGoForward）。
+
+  **mouseup だけで扱う。** Chromium は同じ押下で auxclick も出すので、
+  両方に付けると1回押しただけで2つぶん動く。
+*/
+document.addEventListener("mouseup", function (event) {
+  if (event.button !== 3 && event.button !== 4) return;
+  event.preventDefault();
+  // 行き先が無いときは送らない（拡張機能側でも弾くが、往復を増やさない）
+  const button = event.button === 3 ? el.back : el.forward;
+  if (button.disabled) return;
+  post(event.button === 3 ? "back" : "forward");
+});
 el.ring2.addEventListener("click", function () { post("toggleSecondRing"); });
 el.openRecord.addEventListener("click", function () { post("openRecord"); });
 el.exportSvg.addEventListener("click", function () { exportSvg(); });
@@ -392,6 +415,7 @@ function render() {
   el.title.textContent = data.title;
   el.toAll.disabled = data.mode !== "ego";
   el.back.disabled = !data.canGoBack;
+  el.forward.disabled = !data.canGoForward;
   el.ring2.disabled = data.mode !== "ego";
   el.ring2.classList.toggle("on", Boolean(data.showSecondRing));
   el.ring2.textContent = data.showSecondRing ? "2次を隠す" : "2次も出す";

@@ -184,3 +184,36 @@ describe("脇を畳んで、図を広くする", () => {
     expect(script).toContain("sideTemporary = true;");
   });
 });
+
+/**
+ * 中心の履歴（設計書6.38.3）と、マウスの戻る・進むボタン
+ * （作者の依頼、2026-09-10）。
+ *
+ * WebView の中では VS Code 本体の割り当てが効かないので、この画面が受ける。
+ * **行き先を決めるのは拡張機能側**なので、画面は用件を送るだけである。
+ */
+describe("戻る・進む", () => {
+  it("進むボタンを、戻るの隣に置く", () => {
+    expect(html).toContain('id="forward"');
+    expect(html).toContain(">進む<");
+  });
+
+  it("行き先が無ければ押せない", () => {
+    expect(script).toContain("el.back.disabled = !data.canGoBack;");
+    expect(script).toContain("el.forward.disabled = !data.canGoForward;");
+  });
+
+  it("マウスの戻る・進むボタンを、履歴に結ぶ", () => {
+    const at = script.indexOf('document.addEventListener("mouseup"');
+    expect(at).toBeGreaterThan(0);
+    const handler = script.slice(at, at + 500);
+    expect(handler).toContain("event.button !== 3 && event.button !== 4");
+    expect(handler).toContain("event.preventDefault()");
+    expect(handler).toContain('post(event.button === 3 ? "back" : "forward")');
+  });
+
+  /** 同じ押下で両方来るので、片方だけで扱う（1回押して2つ動かさない） */
+  it("auxclick には付けない", () => {
+    expect(script).not.toContain('addEventListener("auxclick"');
+  });
+});

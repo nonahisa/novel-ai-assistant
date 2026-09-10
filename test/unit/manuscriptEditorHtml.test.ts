@@ -586,8 +586,36 @@ describe("前の話・次の話", () => {
   });
 
   it("どちらへ移るかを添えて送る", () => {
-    expect(code).toContain('type: "openNeighbor", direction: "prev"');
-    expect(code).toContain('type: "openNeighbor", direction: "next"');
+    expect(code).toContain('openNeighbor("prev")');
+    expect(code).toContain('openNeighbor("next")');
+    expect(code).toContain('type: "openNeighbor"');
+  });
+
+  /**
+   * 合本（1ファイルに全話）では、どの話に居るかがカーソルの位置でしか
+   * 分からない（設計書6.25.5）。**行を添えないと、拡張機能側は
+   * ファイルの前後にしか動けない。**
+   */
+  it("カーソルの行を添えて送る（合本の中で話を切り替えるため）", () => {
+    const send = code.slice(code.indexOf("function openNeighbor(direction)"));
+    expect(send.slice(0, 300)).toContain("line: caretLine()");
+  });
+
+  /**
+   * マウスの戻る・進むボタン（作者の依頼、2026-09-10）。
+   *
+   * WebView の中では VS Code 本体の割り当てが効かないので、この画面で
+   * 受ける。**`auxclick` には付けない**——同じ押下で両方来るため、
+   * 1回押すと2話ぶん動く。
+   */
+  it("マウスの戻る・進むボタンを、前の話・次の話に結ぶ", () => {
+    const at = code.indexOf('document.addEventListener("mouseup"');
+    expect(at).toBeGreaterThan(0);
+    const handler = code.slice(at, at + 500);
+    expect(handler).toContain("event.button !== 3 && event.button !== 4");
+    expect(handler).toContain("event.preventDefault()");
+    expect(handler).toContain('event.button === 3 ? "prev" : "next"');
+    expect(code).not.toContain('addEventListener("auxclick"');
   });
 
   /** 「最新話を書く」は右端のまま（作者の依頼、2026-08-28） */

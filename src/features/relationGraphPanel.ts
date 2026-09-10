@@ -86,6 +86,66 @@ export async function refreshRelationGraph(workId: string): Promise<void> {
   await openPanels.get(workId)?.refresh();
 }
 
+/**
+ * 中心を切り替えた履歴（設計書6.38.3）。
+ *
+ * **ブラウザの戻る・進むと同じ持ち方にする。** どちらも末尾がいちばん
+ * 近い行き先で、`back` を1つ取れば `forward` へ1つ積まれる。
+ */
+export interface CenterHistory {
+  /** 「戻る」で辿れる中心（末尾が直前） */
+  back: string[];
+  /** 「進む」で辿れる中心（末尾が直後）。戻ったぶんだけ積まれる */
+  forward: string[];
+}
+
+export const EMPTY_CENTER_HISTORY: CenterHistory = { back: [], forward: [] };
+
+/**
+ * 中心を新しく選んだときの履歴。
+ *
+ * **進む先は捨てる。** 戻ってから別の人物を押したら、それは新しい枝で
+ * あって、元いた先へ「進む」道は残らない（ブラウザと同じ）。
+ * 同じ人物を押し直したときは何も動かさない——履歴に同じ名前が並ぶと、
+ * 「戻る」を押しても図が変わらない回ができる。
+ */
+export function pushCenterHistory(
+  history: CenterHistory,
+  current: string | null,
+  next: string
+): CenterHistory {
+  if (current === null || current === next) return history;
+  return { back: [...history.back, current], forward: [] };
+}
+
+/**
+ * 「戻る」「進む」を1つ辿る。行き先が無ければ null（何もしない）。
+ *
+ * 中心が決まっていない（全体図を出したまま）ときは、いまの中心を
+ * 反対側へ積まない——積むと、無い場所へ進めることになる。
+ */
+export function stepCenterHistory(
+  history: CenterHistory,
+  current: string | null,
+  direction: "back" | "forward"
+): { history: CenterHistory; center: string } | null {
+  const from = direction === "back" ? history.back : history.forward;
+  if (from.length === 0) return null;
+
+  const center = from[from.length - 1];
+  const rest = from.slice(0, -1);
+  const other = direction === "back" ? history.forward : history.back;
+  const to = current === null ? other : [...other, current];
+
+  return {
+    center,
+    history:
+      direction === "back"
+        ? { back: rest, forward: to }
+        : { back: to, forward: rest },
+  };
+}
+
 /** 画面へ送る絞り込み。画面から返ってくる形でもある */
 interface FilterView {
   minChapters: number;
@@ -105,8 +165,8 @@ class RelationGraphPanel {
 
   private mode: "all" | "ego" = "all";
   private centerId: string | null = null;
-  /** 中心を切り替えた履歴（「戻る」で辿る） */
-  private history: string[] = [];
+  /** 中心を切り替えた履歴（「戻る」「進む」で辿る） */
+  private history: CenterHistory = EMPTY_CENTER_HISTORY;
   private showSecondRing = false;
 
   private minChapters = 0;
@@ -201,10 +261,16 @@ class RelationGraphPanel {
           this.setCenter(message.id);
           this.post();
           return;
-        case "back": {
-          const previous = this.history.pop();
-          if (previous === undefined) return;
-          this.centerId = previous;
+        case "back":
+        case "forward": {
+          const step = stepCenterHistory(
+            this.history,
+            this.centerId,
+            message.type
+          );
+          if (!step) return;
+          this.history = step.history;
+          this.centerId = step.center;
           this.mode = "ego";
           this.post();
           return;
@@ -232,7 +298,7 @@ class RelationGraphPanel {
   }
 
   private setCenter(id: string): void {
-    if (this.centerId && this.centerId !== id) this.history.push(this.centerId);
+    this.history = pushCenterHistory(this.history, this.centerId, id);
     this.centerId = id;
     this.mode = "ego";
   }
@@ -351,7 +417,8 @@ class RelationGraphPanel {
       layout,
       centerId: this.mode === "ego" ? this.centerId : null,
       centerName,
-      canGoBack: this.history.length > 0,
+      canGoBack: this.history.back.length > 0,
+      canGoForward: this.history.forward.length > 0,
       canOpenRecord,
       showSecondRing: this.showSecondRing,
       filter: {
@@ -433,6 +500,7 @@ interface GraphView {
   centerId: string | null;
   centerName: string | null;
   canGoBack: boolean;
+  canGoForward: boolean;
   canOpenRecord: boolean;
   showSecondRing: boolean;
   filter: FilterView;
@@ -450,6 +518,7 @@ type PanelMessage =
   | { type: "filter"; filter: FilterView }
   | { type: "center"; id: string }
   | { type: "back" }
+  | { type: "forward" }
   | { type: "all" }
   | { type: "toggleSecondRing" }
   | { type: "openRecord" }

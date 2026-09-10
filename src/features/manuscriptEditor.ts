@@ -44,6 +44,10 @@ import {
   pickCount,
 } from "../core/countSettings";
 import { countEpisodeChars } from "../core/episodeCharCount";
+import {
+  collectedEpisodeStarts,
+  planCollectedStep,
+} from "../core/collectedFile";
 import { validateEmphasis, validateRuby } from "../core/ruby";
 import { sourceForPostingCopy } from "../core/episodeCopy";
 // 貼り付け先ごとの分岐は、入口ではなく変換の側に置く（設計書6.84）
@@ -720,7 +724,17 @@ type Incoming =
    * **どの話かを決めるのはこちら。** 画面はファイルの並びを知らない
    * （走査の結果を持っているのは拡張機能側である）。
    */
-  | { type: "openNeighbor"; direction: "prev" | "next" }
+  | {
+      type: "openNeighbor";
+      direction: "prev" | "next";
+      /**
+       * カーソルの行（1始まり。読めなければ0）。
+       *
+       * **合本のときだけ効く。** 1ファイルに全話が入っているときは、
+       * どの話に居るかがカーソルの位置でしか分からない（設計書6.25.5）。
+       */
+      line?: number;
+    }
   /**
    * 画面側で起きたことを記録する（設計書6.34）。
    *
@@ -1256,7 +1270,11 @@ export class ManuscriptEditorProvider
           break;
 
         case "openNeighbor":
-          await this.openNeighborEpisode(document, message.direction);
+          await this.openNeighborEpisode(
+            document,
+            message.direction,
+            message.line ?? 0
+          );
           break;
 
         case "pickFont":
@@ -1899,12 +1917,38 @@ export class ManuscriptEditorProvider
    *
    * 白紙のときに作らないのは「最新話を書く」と同じ考え方である
    * （押すたびに空のファイルが増えるのを避ける。設計書6.25.5）。
+   *
+   * **合本（1ファイルに全話）を開いているあいだは、ファイルではなく
+   * 話を切り替える**（作者の指示、2026-09-10）。ファイル単位で動かすと、
+   * 全話が1つしか無いので「最初の話です。」としか言えない。
+   *
+   * @param caretLine 画面のカーソル行（1始まり。読めなければ0）。
+   *   合本のときだけ使う——どの話に居るかは位置でしか分からない
    */
   private async openNeighborEpisode(
     document: vscode.TextDocument,
-    direction: "prev" | "next"
+    direction: "prev" | "next",
+    caretLine = 0
   ): Promise<void> {
     const current = fromUri(document.uri);
+
+    /*
+      合本の中を先に見る。**走査より前に見る**のは、合本は作品の中で
+      1ファイルにしか当たらず、ファイルの並びを調べても答えが出ないため。
+      端（最初の話で「前へ」・最後の話で「次へ」）に来たときだけ、
+      これまでどおりファイルの前後へ出る。
+    */
+    const starts = collectedEpisodeStarts(document.getText());
+    if (starts.length >= 2) {
+      const step = planCollectedStep({ starts, caretLine, direction });
+      if (step.kind === "reveal") {
+        // 開き直さない（同じファイルなので、行を示すだけでよい）
+        const open = openManuscripts.get(manuscriptLedgerKey(document.uri));
+        open?.revealLine(step.line);
+        return;
+      }
+    }
+
     const found = await this.deps.highlighter.indexFor(current);
     if (!found) {
       void vscode.window.showInformationMessage(

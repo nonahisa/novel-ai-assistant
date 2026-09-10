@@ -1066,11 +1066,42 @@ ruby > rt {
     **どの話なのかを決めるのは拡張機能側**——画面はファイルの並びを
     知らない（走査の結果を持っているのは向こうである）。
   */
+  /*
+    **カーソルの行を添える。** 合本（1ファイルに全話）を開いていると、
+    いま何話目に居るかは位置でしか分からない（設計書6.25.5）。
+    合本でなければ拡張機能側が黙って捨てる。
+  */
+  function openNeighbor(direction) {
+    vscode.postMessage({
+      type: "openNeighbor",
+      direction: direction,
+      line: caretLine(),
+    });
+  }
   document.getElementById("prev").addEventListener("click", function () {
-    vscode.postMessage({ type: "openNeighbor", direction: "prev" });
+    openNeighbor("prev");
   });
   document.getElementById("next").addEventListener("click", function () {
-    vscode.postMessage({ type: "openNeighbor", direction: "next" });
+    openNeighbor("next");
+  });
+
+  /*
+    マウスの戻る・進むボタン（作者の依頼、2026-09-10）。
+
+    WebView の中では VS Code 本体の割り当て（エディタの行き来）が効かない
+    ので、この画面で受けて**前の話・次の話**に結ぶ。
+
+    **mouseup だけで扱う。** Chromium は同じ押下で auxclick も出すので、
+    両方に付けると1回押しただけで2話ぶん動く。mouseup を選んだのは、
+    auxclick が「非主ボタンのクリック」として来るのに対し、こちらは
+    どのボタンが押されたかを button で直に見られ、既定の動き
+    （履歴の行き来）もここで止められるためである。
+  */
+  document.addEventListener("mouseup", function (event) {
+    if (event.button !== 3 && event.button !== 4) return;
+    // 入れ子の枠へ「戻る」が伝わらないよう、既定の動きは止める
+    event.preventDefault();
+    openNeighbor(event.button === 3 ? "prev" : "next");
   });
 
   /* ── 口述筆記（設計書6.83） ───────────────── */
