@@ -14,6 +14,8 @@ import { parseEpisodeFileName } from "../core/episodeParser";
 import type { TypoCheckIssue } from "./checkTypos";
 import type { AcceptedContradiction as ContradictionIssue } from "../core/contradictionValidation";
 import type { DeviationIssue } from "./checkDeviations";
+// 分類名（タブ）の定義は core が持つ。写しを作らない（設計書6.88）
+import { FACT_CONTRADICTION_CATEGORY } from "../core/factContradiction";
 import { buildProposalPanelHtml } from "../views/proposalPanelHtml";
 import { diffChars, type DiffSegment } from "../core/inlineDiff";
 import { KeepWordStore } from "../core/keepWordStore";
@@ -1097,6 +1099,61 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     return this.replaceContents(work, "矛盾", {
       contradictions,
       registerForeshadow,
+    });
+  }
+
+  /**
+   * 矛盾検知（事実の照合。設計書6.88）の結果を差し替えて表示する。
+   *
+   * **P-12 の「矛盾」とは別のタブに出す。** 作者の裁定で両方を
+   * しばらく並行させる（6.88.9）ので、同じタブへ混ぜると
+   * どちらの道が何を見つけたのかを見比べられない。
+   *
+   * 矛盾と同じく**適用の口を持たせない。** どちらが正しいかは作者に
+   * しか決められない。「伏線として登録」も付けない——この道の候補は
+   * 機械が挙げた食い違いで、**後の展開への示唆ではない**。
+   */
+  showFactContradictions(
+    work: WorkEntry,
+    issues: ReadonlyArray<{
+      filePath: string;
+      line: number;
+      chunkHash: string;
+      excerpt: string;
+      category: string;
+      settingSays: string;
+      textSays: string;
+      note: string;
+      confidence: "high" | "medium" | "low";
+    }>
+  ): IncomingCount {
+    const contradictions: ContradictionViewItem[] = issues.map(
+      (issue, index) => ({
+        id: `f:${issue.chunkHash}:${issue.line}:${index}`,
+        filePath: issue.filePath,
+        fileName: path.basename(issue.filePath),
+        chunkHash: issue.chunkHash,
+        line: issue.line,
+        excerpt: issue.excerpt,
+        category: issue.category,
+        settingSays: issue.settingSays,
+        textSays: issue.textSays,
+        note: issue.note,
+        confidence: issue.confidence,
+        status: "pending",
+        // **「前」「あと」で並べる。** 突き合わせているのは設定資料と本文では
+        // なく、**本文から抜いた2つの事実**である（片方が資料のこともある）。
+        // 「設定では」と書くと、作者は資料のほうを疑いに行ってしまう
+        leftLabel: "前では",
+        rightLabel: "あとでは",
+        openTarget: "settings",
+        // **再チェックは出さない。** あちらは本文だけを読み直して問うので、
+        // 機械が組んだ物差し（事実の列）が渡らない——確かめたことにならない
+        allowRecheck: false,
+      })
+    );
+    return this.replaceContents(work, FACT_CONTRADICTION_CATEGORY, {
+      contradictions,
     });
   }
 

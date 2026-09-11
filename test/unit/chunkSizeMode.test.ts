@@ -499,13 +499,31 @@ describe("実機確認 A-12：既定と、4機能が同じ設定を通ること"
       "src/features/checkProofread.ts",
       "src/features/checkContradictions.ts",
       "src/features/extractCharacters.ts",
+      // 事実の照合による矛盾検知（設計書6.88の第4段）。P-12 と同じ割り方を
+      // する必要があるので、同じ共通の口を通す
+      "src/features/checkFactContradictions.ts",
     ];
-    const missing = files.filter(
-      (file) =>
-        !fs
-          .readFileSync(path.join(process.cwd(), file), "utf8")
-          .includes("readChunkSettings(")
+    /*
+      **共通の口（`collectManuscriptChunks`）を通るのも合格とする。**
+
+      本文の割り方は矛盾検知と事実の照合で同じでなければならない（別々に
+      切ると、両方の結果を見比べるという並行運用の前提が崩れる）ので、
+      `features/manuscriptChunks.ts` へ切り出した。そこが
+      `readChunkSettings` を呼んでいることは、下の1件で見る。
+    */
+    const shared = fs.readFileSync(
+      path.join(process.cwd(), "src/features/manuscriptChunks.ts"),
+      "utf8"
     );
+    expect(shared).toContain("readChunkSettings(");
+
+    const missing = files.filter((file) => {
+      const source = fs.readFileSync(path.join(process.cwd(), file), "utf8");
+      return (
+        !source.includes("readChunkSettings(") &&
+        !source.includes("collectManuscriptChunks(")
+      );
+    });
     expect(missing).toEqual([]);
   });
 });

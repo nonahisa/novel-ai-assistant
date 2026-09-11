@@ -226,6 +226,7 @@ const GUIDE_BUNDLE_SPLITS: Record<string, readonly GuideBundleSplit[]> = {
         "novelai.checkDeviations",
         "novelai.checkEpisodePlot",
         "novelai.checkContradictions",
+        "novelai.checkFactContradictions",
         "novelai.checkForeshadows",
         "novelai.checkForeshadowResolution",
         "novelai.openForeshadows",

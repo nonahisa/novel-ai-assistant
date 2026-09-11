@@ -312,6 +312,10 @@ describe("AIの印", () => {
         "novelai.checkTypos",
         "novelai.checkProofread",
         "novelai.checkContradictions",
+        // 矛盾検知のもう1つの道（設計書6.88）。抽出はローカルの小さい
+        // モデルで足りるが、**候補の判定は矛盾検知の割当**で呼ぶので
+        // 有料AIでは料金が出る。印は要る
+        "novelai.checkFactContradictions",
         "novelai.checkDeviations",
         // 単話プロットの検査・本文との照合（P-27・P-28。設計書6.36.3）。
         // **入口は1つ。** どちらを掛けるかは実行時に選ぶ

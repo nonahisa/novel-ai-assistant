@@ -45,6 +45,16 @@ export type AssignableFeature =
   | "typo" // 誤字脱字
   | "proofread" // 推敲
   | "contradiction" // 矛盾検知（指摘の検証・再チェックも含む）
+  /*
+    場面の事実の抽出（P-37。設計書6.88.9）。
+
+    **矛盾検知と分けてあるのは、要る地力が違うから**である。抽出は
+    「本文に書いてあることを項目に分けて返す」定型のJSON化で、ローカルの
+    小さいモデルでも足りる。一方、絞り込まれた候補2か所を見て
+    「矛盾か／意図的な変化か／誤検知か」を決める工程は地力が要るので、
+    そちらは `contradiction` の割当をそのまま使う（キーを増やさない）。
+  */
+  | "factExtract"
   | "deviation" // プロットからの逸脱
   | "foreshadow" // 伏線の検知（配置と回収。どちらも同じ台帳を見る）
   | "generate" // あらすじ・紹介文・キャッチコピー・更新告知・プロット逆算・冒頭診断・感情曲線
@@ -59,6 +69,7 @@ export const ASSIGNABLE_FEATURE_LABELS: Record<AssignableFeature, string> = {
   typo: "誤字脱字",
   proofread: "推敲",
   contradiction: "矛盾検知",
+  factExtract: "場面の事実の抽出",
   deviation: "プロットからの逸脱",
   foreshadow: "伏線の検知",
   generate: "あらすじ・紹介文・キャッチコピーなど",
@@ -71,6 +82,7 @@ export const ASSIGNABLE_FEATURES: AssignableFeature[] = [
   "typo",
   "proofread",
   "contradiction",
+  "factExtract",
   "deviation",
   "foreshadow",
   "generate",

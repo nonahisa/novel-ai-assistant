@@ -220,6 +220,8 @@ import { writePlotSections } from "./core/plotFile";
 import { statsDayKey } from "./core/writingStats";
 import { setWorkGoals } from "./features/setWorkGoals";
 import { checkContradictions } from "./features/checkContradictions";
+// 矛盾検知のもう1つの道（設計書6.88）。P-12 としばらく並行させる
+import { checkFactContradictions } from "./features/checkFactContradictions";
 import { checkProofread } from "./features/checkProofread";
 import { checkDeviations } from "./features/checkDeviations";
 // 単話プロットのAI判定2種（P-27・P-28。設計書6.36.3）
@@ -3871,6 +3873,80 @@ export async function activate(
           tail:
             result.issues.length > 0
               ? "本文は書き換えていません。 設定と本文のどちらを直すかは作者が決めてください。"
+              : "",
+        });
+        return CHECK_COMPLETED;
+      }
+    )
+  );
+
+  /*
+    矛盾検知（事実の照合。設計書6.88の第4段）。
+
+    **「矛盾を検知」（P-12）とは別のコマンドにする。** 作者の裁定で
+    しばらく並行させるので、片方を押したときにもう片方が動くと
+    見比べられない。結果の置き場（提案パネルの分類）も別である。
+  */
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.checkFactContradictions",
+      async (node?: WorkNode, options?: CheckRunOptions) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return CHECK_CANCELLED;
+
+        // 未保存のまま読むと、画面と違う本文から事実を抜いてしまう
+        const unsaved = await saveBeforeCheck(work, "矛盾検知（事実の照合）");
+        if (unsaved) return unsaved;
+
+        const result = await withPanelProgress(
+          work,
+          "本文から事実を取り出し",
+          (onProgress, stage) =>
+            checkFactContradictions(work, aiRegistry, {
+              onProgress,
+              // 判定はAIを1件ずつ呼ぶので、別の札で件数を流す
+              onVerifyProgress: stage("見つかった候補を確かめ", "件"),
+              suiteConfirmed: isSuiteConfirmed(options),
+            })
+        );
+        if (!result || result.cancelled) return CHECK_CANCELLED;
+
+        const shown = proposalPanel.showFactContradictions(work, result.issues);
+
+        const parts = describeCheckRunCounts({
+          shown: shown.remaining,
+          alreadyHandled: shown.handled,
+          rejected: 0,
+        });
+        // **どの工程で減ったのかを黙らない**（設計書6.88.1）。この道は
+        // 抽出→検算→機械照合→判定の4工程があり、内訳が無いと
+        // 「何も出ない」の原因をどこに探せばよいか分からない
+        parts.push(`本文から取り出した事実 ${result.acceptedFacts}件`);
+        if (result.rejectedFacts > 0) {
+          parts.push(
+            `読み取れなかった事実 ${result.rejectedFacts}件（${result.rejectionNote}）`
+          );
+        }
+        parts.push(
+          result.candidateCount > 0
+            ? `機械が挙げた候補 ${result.candidateCount}件（${result.candidateNote}）`
+            : "機械が挙げた候補 0件"
+        );
+        if (result.verifyNote) parts.push(result.verifyNote);
+        if (result.failedChunks > 0) {
+          parts.push(`読み取れなかった ${result.failedChunks}件`);
+        }
+        // **本文を開けなかった話は黙らない。** その話だけ対象から抜けている
+        if (result.unreadableEpisodes > 0) {
+          parts.push(`読めなかった話 ${result.unreadableEpisodes}件（ログ参照）`);
+        }
+        notifyRunCompletion({
+          headline: "矛盾検知（事実の照合）",
+          parts,
+          failedCount: result.failedChunks,
+          tail:
+            result.issues.length > 0
+              ? "本文は書き換えていません。 どちらを直すかは作者が決めてください。"
               : "",
         });
         return CHECK_COMPLETED;

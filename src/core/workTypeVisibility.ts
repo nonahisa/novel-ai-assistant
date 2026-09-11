@@ -270,6 +270,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   // 単話プロットそのものが物語向けの道具である
   "novelai.checkEpisodePlot": "story",
   "novelai.checkContradictions": "story",
+  // 事実の照合による矛盾検知（設計書6.88）。P-12 としばらく並行させる
+  "novelai.checkFactContradictions": "story",
   "novelai.checkForeshadows": "story",
   "novelai.checkForeshadowResolution": "story",
   "novelai.openForeshadows": "story",

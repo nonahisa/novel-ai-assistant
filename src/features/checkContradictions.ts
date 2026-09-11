@@ -1,28 +1,23 @@
 import * as vscode from "vscode";
-import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import {
   AIError,
   isFatalProviderFailure,
   recoveryForAIError,
-  type ModelInfo,
 } from "../ai/types";
 import {
   resolveOutputTokensForPlanning,
   resolveOutputTokensForSend,
 } from "../ai/outputLimit";
-import { scanWork } from "../core/scanner";
-import { readTextFile } from "../core/textFile";
 import {
   describeChunkScope,
   locateChunkLine,
-  mergeAdjacentChunks,
-  splitIntoChunks,
   splitMergedChunk,
   withLineNumbers,
   type Chunk,
 } from "../core/chunker";
+import { linesAround } from "../core/factContradiction";
 import { ChunkCache, type CacheKeyBase } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
 import {
@@ -30,12 +25,8 @@ import {
   capabilityProfile,
   describeCapability,
 } from "../ai/capability";
-import {
-  describeChunkSettings,
-  readChunkSettings,
-  resolveModelInfoOrWarn,
-  type ChunkFixedCost,
-} from "./chunkSettings";
+import { resolveModelInfoOrWarn } from "./chunkSettings";
+import { collectManuscriptChunks } from "./manuscriptChunks";
 import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
 import { factsRevealedAfter } from "../core/settingsAsOf";
 import {
@@ -62,8 +53,6 @@ import {
   PastSceneIndex,
 } from "../core/pastSceneSelect";
 import { loadExcerptSources } from "../core/manuscriptSources";
-import { formatChapterLabel } from "../core/episodeLabel";
-import { readWorkFormat } from "../core/workFormatStore";
 import {
   buildContradictionCheckPrompt,
   CONTRADICTION_CATEGORIES,
@@ -275,17 +264,14 @@ export async function checkContradictions(
     outputTuning.providerId,
     outputTuning.model
   );
-  const tasks = await collectChunks(
+  const tasks = await collectManuscriptChunks({
     work,
     info,
     options,
-    {
-      overheadChars,
-      outputTokens: plannedOutputTokens,
-    },
-    outputTuning
-  );
-  if (!tasks) return undefined;
+    fixedCost: { overheadChars, outputTokens: plannedOutputTokens },
+    outputTuning,
+    logLabel: "矛盾検知",
+  });
   const { chunks, chapterLabelByFile, chunkNote, unreadableEpisodes } = tasks;
   if (chunks.length === 0) {
     vscode.window.showWarningMessage("検知できる本文がありませんでした。");
@@ -900,16 +886,15 @@ export async function checkContradictions(
   }
 }
 
-/** 該当行の前後を、行番号付きで切り出す */
+/**
+ * 該当行の前後を、行番号付きで切り出す。
+ *
+ * **切り出しそのものは `core/factContradiction.ts` に置いてある。**
+ * 事実の照合（6.88の第4段）はチャンクではなくファイルから同じものを
+ * 切り出すので、番号の振り方が2か所で食い違うと、片方だけ1行ずれる。
+ */
 function excerptAround(chunk: Chunk, line: number, around = 6): string {
-  const lines = chunk.text.split("\n");
-  const target = line - chunk.startLine - 1;
-  const from = Math.max(0, target - around);
-  const to = Math.min(lines.length, target + around + 1);
-  return lines
-    .slice(from, to)
-    .map((text, index) => `${chunk.startLine + from + index + 1}: ${text}`)
-    .join("\n");
+  return linesAround(chunk.text, line, around, chunk.startLine + 1);
 }
 
 /** 検証で分かったことを、もとの補足へ足す */
@@ -1140,101 +1125,4 @@ async function collectPastScenes(
     });
     return undefined;
   }
-}
-
-/** 本文をチャンクに分ける。誤字脱字検知と同じ手順 */
-async function collectChunks(
-  work: WorkEntry,
-  /** 呼び出し側が引いたモデル情報。**ここでは引き直さない**（下のコメント） */
-  info: ModelInfo,
-  options: CheckContradictionsOptions,
-  fixedCost: ChunkFixedCost,
-  /** 未チューニングの安全既定・書ける量の絞り込み用（設計書6.65.16） */
-  outputTuning: { providerId: string; model: string }
-): Promise<
-  | {
-      chunks: Chunk[];
-      chapterLabelByFile: Map<string, string>;
-      /** 何を根拠に大きさを決めたか。ログに残す（設計書6.23） */
-      chunkNote: string;
-      /**
-       * 読めなかった話の数。
-       *
-       * **黙って落とさない。** その話だけ検知の対象から抜けるのに、
-       * 作者には「その話には何も無い」と見える。
-       */
-      unreadableEpisodes: number;
-    }
-  | undefined
-> {
-  const scan = await scanWork(work);
-  const format = await readWorkFormat(work);
-  const targets = options.filePaths
-    ? scan.episodes.filter((episode) =>
-        options.filePaths!.some(
-          (filePath) =>
-            path.resolve(filePath).toLowerCase() ===
-            path.resolve(episode.filePath).toLowerCase()
-        )
-      )
-    : scan.episodes;
-
-  // **固定費を差し引いてから本文の割当を決める**（設計書6.27.10）。
-  // コンテキスト長が取れないときは、ここまで来ない
-  // （`resolveModelInfoOrWarn` が理由を出して止めている）
-  const chunkSettings = readChunkSettings(
-    info.contextWindow,
-    fixedCost,
-    outputTuning
-  );
-  const maxChars = chunkSettings.chunk.chars;
-
-  const chunks: Chunk[] = [];
-  const chapterLabelByFile = new Map<string, string>();
-  let unreadableEpisodes = 0;
-
-  for (const episode of targets) {
-    if (episode.hasConflictMarkers) continue;
-    let text: string;
-    try {
-      text = (await readTextFile(episode.filePath)).text;
-    } catch (error) {
-      // **記録して数える。** 黙って落とすと、その話は検知の対象から
-      // 抜けたのに、作者には「何も無かった」と見える
-      unreadableEpisodes++;
-      logFailure("矛盾検知：本文の読み込み", {
-        ファイル: episode.filePath,
-        詳細: error instanceof Error ? error.message : String(error),
-      });
-      continue;
-    }
-
-    const label = formatChapterLabel(episode, format) || episode.fileName;
-    for (const chunk of splitIntoChunks(
-      episode.filePath,
-      text,
-      episode.chapterStart,
-      episode.chapterEnd,
-      { maxChars }
-    )) {
-      chunks.push(chunk);
-    }
-    chapterLabelByFile.set(episode.filePath, label);
-  }
-
-  // **1話ずつ送ると、指示のほうが本文より大きい**（設計書6.23）。
-  // 矛盾検知は設定資料も一緒に送るので、1回あたりの指示はさらに重い。
-  // 隣どうしをまとめて呼び出し回数を減らす。返ってきた行番号は
-  // `locateChunkLine` で元のファイルへ戻す
-  const merged =
-    chunkSettings.mergeChars > 0
-      ? mergeAdjacentChunks(chunks, { maxChars: chunkSettings.mergeChars })
-      : chunks;
-
-  return {
-    chunks: merged,
-    chapterLabelByFile,
-    chunkNote: describeChunkSettings(chunkSettings),
-    unreadableEpisodes,
-  };
 }
