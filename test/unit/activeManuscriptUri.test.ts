@@ -15,6 +15,13 @@ import { resolve } from "node:path";
  * 原稿エディタはWebView（カスタムエディタ）なので `TextEditor` を持たず、
  * ここは undefined になる。タブの種類（`TabInputCustom`）から辿れば
  * 開いている本文の場所が分かる。
+ *
+ * **同じことが VS Code 1.131 の新しいMarkdown編集画面でも起きた**
+ * （hybrid Markdown editor。実機、2026-09-12）。エクスプローラーから
+ * `.md` を開くとこの画面になり、やはり `TextEditor` を持たないので
+ * 「縦書きで開く」が断られた。viewType は VS Code の都合で変わりうるので
+ * 名前で当てにいかず、「本文のファイルをカスタムエディタで開いている」
+ * ことだけを見る。
  */
 
 /**
@@ -61,8 +68,14 @@ import {
   MANUSCRIPT_EDITOR_VIEW_TYPE,
   activeManuscriptTabUri,
 } from "../../src/features/manuscriptEditor";
+import { manuscriptNotOpenMessage } from "../../src/features/manuscriptTab";
 
 const manuscript = { fsPath: "C:/小説/いじめられっ子/本文/002.md" };
+const plainText = { fsPath: "C:/小説/いじめられっ子/本文/003.txt" };
+const settings = { fsPath: "C:/小説/いじめられっ子/設定/人物/002.json" };
+
+/** VS Code 1.131 の新しいMarkdown編集画面。IDは当てにしない */
+const HYBRID_VIEW_TYPE = "vscode.markdown.editor";
 
 beforeEach(() => {
   stub.activeTabInput = undefined;
@@ -88,9 +101,31 @@ describe("原稿エディタで開いている本文", () => {
     expect(activeManuscriptTabUri()).toBe(manuscript);
   });
 
-  test("別のカスタムエディタなら、引き受けない", () => {
+  test("VS Code のMarkdown編集画面（hybrid）で開いていても、場所が取れる", () => {
+    // エクスプローラーから開くとこの画面になる（VS Code 1.131〜）。
+    // 開き直すだけの操作に、TextEditor は要らない
     stub.activeTabInput = new stub.FakeTabInputCustom(
       manuscript,
+      HYBRID_VIEW_TYPE
+    );
+
+    expect(activeManuscriptTabUri()).toBe(manuscript);
+  });
+
+  test("原稿エディタでない未知の入口でも、.txt なら引き受ける", () => {
+    // viewType の名前では判定しない。見るのは「本文のファイルか」だけ
+    stub.activeTabInput = new stub.FakeTabInputCustom(
+      plainText,
+      "some.other.editor"
+    );
+
+    expect(activeManuscriptTabUri()).toBe(plainText);
+  });
+
+  test("本文でないファイルのカスタムタブなら、引き受けない", () => {
+    // 設定資料のJSONを別のエディタで開いているだけ。本文ではない
+    stub.activeTabInput = new stub.FakeTabInputCustom(
+      settings,
       "some.other.editor"
     );
 
@@ -141,5 +176,50 @@ describe("縦書きで開く", () => {
 
     expect(body).toContain("activeTextEditor");
     expect(body).toContain("activeManuscriptTabUri()");
+  });
+
+  test("断り文句は共通の関数から出す", () => {
+    // 文言の写しが増えると、直した側だけが案内を出すようになる
+    expect(source).not.toContain("本文のファイルを開いてから実行してください。");
+    expect(source).toContain("warnManuscriptNotOpen()");
+  });
+});
+
+/**
+ * **断る言い方を、状況で分ける**（実機、2026-09-12）。
+ *
+ * ルビ・傍点は `editor.edit` で本文へ入れるので `TextEditor` が要る。
+ * hybridの画面からは当て先が無く断るしかないが、本文を開いている作者に
+ * 「本文を開いてから」と言うと、打つ手が無くなる。
+ */
+describe("本文が見つからないときの文言", () => {
+  test("何も開いていなければ、これまでどおり", () => {
+    stub.activeTabInput = undefined;
+
+    expect(manuscriptNotOpenMessage()).toBe(
+      "本文のファイルを開いてから実行してください。"
+    );
+  });
+
+  test("hybridの画面なら、次にすることを言う", () => {
+    stub.activeTabInput = new stub.FakeTabInputCustom(
+      manuscript,
+      HYBRID_VIEW_TYPE
+    );
+
+    expect(manuscriptNotOpenMessage()).toContain("Markdown 画面");
+    expect(manuscriptNotOpenMessage()).toContain("作品一覧から開き直す");
+  });
+
+  test("原稿エディタのタブは、この案内の対象ではない", () => {
+    // 自前の画面なので「開き直してください」は的外れになる
+    stub.activeTabInput = new stub.FakeTabInputCustom(
+      manuscript,
+      MANUSCRIPT_EDITOR_VIEW_TYPE
+    );
+
+    expect(manuscriptNotOpenMessage()).toBe(
+      "本文のファイルを開いてから実行してください。"
+    );
   });
 });

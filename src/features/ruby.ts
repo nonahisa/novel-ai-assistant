@@ -20,6 +20,8 @@ import { convertForPosting } from "../core/postingConvert";
 import { showPostingCopyNotice } from "./postingCopyNotice";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { notifyDone } from "../views/notify";
+// 「本文が見つからない」ときの文言は1か所に置く（`extension.ts` と共用）
+import { warnManuscriptNotOpen } from "./manuscriptTab";
 
 /**
  * ルビの操作（設計書6.12）。
@@ -42,9 +44,19 @@ import { notifyDone } from "../views/notify";
 async function requireMarkdown(): Promise<vscode.TextEditor | undefined> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    void vscode.window.showWarningMessage(
-      "本文のファイルを開いてから実行してください。"
-    );
+    /*
+      **ここは `TextEditor` が要る。** ルビ・傍点は `editor.edit` を通して
+      作者自身の編集として本文へ入れる（だからCtrl+Zで戻せる）。
+      VS Code 1.131 の新しいMarkdown編集画面（hybrid Markdown editor）は
+      `TextEditor` を持たないので、当て先が無く、ここで断るしかない
+      ——ファイルへ直接書けば、画面が抱えている未保存の内容と食い違う。
+
+      断るのは変えないが、**言い方は変える。** 本文を開いている作者に
+      「本文を開いてから」と言うと打つ手が無くなるので、状況で文言を分ける
+      （`manuscriptNotOpenMessage`）。開くだけの操作（縦書き・横書き・
+      組んで書く）はこの制限を受けない。
+    */
+    warnManuscriptNotOpen();
     return undefined;
   }
 

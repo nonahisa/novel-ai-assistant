@@ -566,34 +566,14 @@ function episodeNaming(): { digits: number; extension: string } {
 }
 
 /**
- * いまアクティブなタブが原稿エディタなら、そこで開いている本文の場所
- * （作者の実機報告、2026-09-06）。
+ * いまアクティブなタブで開いている本文の場所（作者の実機報告、2026-09-06）。
  *
- * **原稿エディタは `TextEditor` を持たない。** WebView（カスタムエディタ）
- * なので、`vscode.window.activeTextEditor` は undefined になる。これを
- * 見ているだけのコマンドは、原稿エディタで本文を開いている作者に
- * 「本文のファイルを開いてから実行してください」と言い返していた
- * （「縦書きで開く」が、原稿エディタからは一度も使えなかった）。
- *
- * 読めない環境（古いVS Code・試験の代役）では undefined を返し、
- * 呼び出し側はこれまでどおり `activeTextEditor` の道へ落ちる。
+ * **中身は `manuscriptTab.ts` にある。** VS Code 1.131 の新しいMarkdown編集画面
+ * （hybrid Markdown editor）でも同じ判定が要るようになり、ルビ側
+ * （`features/ruby.ts`）からも使うことになったため切り出した。ここからの
+ * 再輸出は、これまでの読み口（`features/manuscriptEditor`）を残すためのもの。
  */
-export function activeManuscriptTabUri(): vscode.Uri | undefined {
-  try {
-    const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
-    const input: unknown = tab?.input;
-    if (!(input instanceof vscode.TabInputCustom)) return undefined;
-    if (
-      input.viewType === MANUSCRIPT_EDITOR_VIEW_TYPE ||
-      input.viewType === MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
-    ) {
-      return input.uri;
-    }
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
+export { activeManuscriptTabUri } from "./manuscriptTab";
 
 /**
  * 開いているタブのうち、本文を開いているもの（原稿エディタ・素のエディタ）。

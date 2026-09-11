@@ -327,6 +327,8 @@ import {
   refreshManuscriptCounts,
   type ManuscriptEditorDeps,
 } from "./features/manuscriptEditor";
+// 「本文が見つからない」ときの文言は1か所に置く（`features/ruby.ts` と共用）
+import { warnManuscriptNotOpen } from "./features/manuscriptTab";
 import { registeredPostingSites } from "./features/postingCopyRegistered";
 import { showEditHistory } from "./features/editHistoryPanel";
 import {
@@ -850,9 +852,7 @@ export async function activate(
     registerCommand("novelai.openVertical", async () => {
       const uri = activeManuscriptUri();
       if (!uri) {
-        void vscode.window.showWarningMessage(
-          "本文のファイルを開いてから実行してください。"
-        );
+        warnManuscriptNotOpen();
         return;
       }
       await vscode.commands.executeCommand(
@@ -4712,6 +4712,11 @@ function findWorkForPath(
  * undefined になり、これを直に見ているコマンドは、原稿エディタで書いている
  * 作者に「本文のファイルを開いてから実行してください」と言い返していた
  * （「縦書きで開く」が原稿エディタから一度も使えなかった）。
+ *
+ * **VS Code 1.131 の新しいMarkdown編集画面（hybrid Markdown editor）も同じ。**
+ * あちらも `TextEditor` を持たないので、エクスプローラーから `.md` を開いた
+ * 作者が「縦書きで開く」を押すと、同じ断り文句で止まっていた
+ * （実機、2026-09-12）。開き直すだけの操作に、場所以上のものは要らない。
  *
  * **判定を1本にまとめてあるので、同じ形のコマンドを足すときはここを通す。**
  * 順は素のエディタが先——タブが原稿エディタでも、作者がカーソルを置いて
