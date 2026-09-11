@@ -66,6 +66,29 @@ export const BLURB_OPENING_EXCERPT_CHARS = 6000;
 /** 紹介文の材料にする、各話あらすじの件数 */
 const SYNOPSES_FOR_BLURB = 30;
 
+/**
+ * 実行前の確認の文面（0.45.3）。
+ *
+ * **各話あらすじが1件も無ければ、その旨を添える。** 実機で測ったところ
+ * （2026-09-11、F-21）、冒頭2話だけ・あらすじ0件で作った紹介文は
+ * 「幽霊のまま復讐する話」になり、この作品の中心（文佳への転生）に
+ * 一言も触れなかった。あらすじ18件を渡すと転生も動機も入った。
+ * 材料が無くても作れるが、**核を外したものが出る**。止めはしない——
+ * 短い作品では冒頭だけで足りることもある。先に作るかは作者が決める。
+ */
+export function blurbConfirmMessage(input: {
+  model: string;
+  costNotice: string;
+  synopsisCount: number;
+}): string {
+  const hint =
+    input.synopsisCount === 0
+      ? "\n各話あらすじがまだありません。無くても作れますが、本筋を外した紹介文になることがあります。" +
+        "先に「各話あらすじを生成」を済ませてから作るのがおすすめです。"
+      : "";
+  return `作品紹介文を作ります（AIの呼び出しは1回）。\nモデル: ${input.model}${input.costNotice}${hint}`;
+}
+
 export async function generateWorkBlurb(
   work: WorkEntry,
   registry: AIRegistry
@@ -95,7 +118,11 @@ export async function generateWorkBlurb(
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
   const confirmed = await confirmRun(
-    `作品紹介文を作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`
+    blurbConfirmMessage({
+      model: resolved.model,
+      costNotice,
+      synopsisCount: material.chapterSynopses.length,
+    })
   );
   if (!confirmed) return;
 
