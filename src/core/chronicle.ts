@@ -176,12 +176,15 @@ export interface ChronicleOptions {
 /**
  * 人物の項目名を、作者が読める言葉にする。
  *
- * **ここにしか無い表である。** `characterDiff.ts` にも似た一覧があるが、
- * あちらは「値の取り出し方」と組で持っており、項目のキーから引けない。
+ * **キーから引ける表はここにしか無い。** `characterDiff.ts` にも似た一覧が
+ * あるが、あちらは「値の取り出し方」と組で持っており、項目のキーから引けない。
  * 知らないキー（作者が足した項目）はそのまま出す——推測で言い換えると、
  * 作者が付けた名前と画面の言葉が食い違う。
+ *
+ * **年表の外からも使う**（`core/factsFromRecords.ts`。0.46.1）。写しを作ると、
+ * 同じ項目が年表では「外見」、矛盾の候補では「appearance」と出る。
  */
-const FIELD_LABELS: Record<string, string> = {
+export const CHARACTER_FIELD_LABELS: Record<string, string> = {
   name: "名前",
   summary: "紹介",
   gender: "性別",
@@ -517,7 +520,7 @@ function addChangeEvents(place: Place, character: Character): void {
     const ordered = [...changes].sort(
       (left, right) => earliest(left.chapters) - earliest(right.chapters)
     );
-    const label = FIELD_LABELS[field] ?? field;
+    const label = CHARACTER_FIELD_LABELS[field] ?? field;
 
     ordered.forEach((change, index) => {
       const chapter = change.chapters.length > 0 ? earliest(change.chapters) : null;

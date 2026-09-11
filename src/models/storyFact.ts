@@ -91,16 +91,46 @@ export interface StoryFact {
   topic: string | null;
 }
 
+/** 組が変わる出来事の種類（6.88.5） */
+export const IDENTITY_TRANSITION_KINDS = [
+  "possession",
+  "switch",
+  "reincarnation",
+  "ghost",
+  "swap",
+] as const;
+export type IdentityTransitionKind = (typeof IDENTITY_TRANSITION_KINDS)[number];
+
 /**
- * 肉体・人格・身分の組が変わる出来事（6.88.5。第2段で本格的に使う）。
+ * 肉体・人格・身分の組が変わる出来事（6.88.5）。
  *
- * 第1段では「死亡後の登場」を候補から外すためだけに使う——
- * 幽霊・転生・憑依の記録があるなら、死んだあとに出てくるのは矛盾ではない。
+ * 第1段では「死亡後の登場」を候補から外すためだけに使っていた（`subject` と
+ * `kind` と `at` だけで足りた）。第2段では**組の変化が正当かどうか**を
+ * これで決めるので、遷移の中身——どの体で、どの人格からどの人格へ移ったか——
+ * を持てるようにした。
+ *
+ * **`subject` は残す。** 第1段の「死亡後の登場」はこれを鍵に照合しており、
+ * 遷移の中身を足したついでに鍵を変えると、幽霊・転生の除外が黙って効かなく
+ * なる。`subject` は「誰の遷移か」＝前に出てくる側の人格である。
+ *
+ * `body`・`toPersona` は**分かる範囲で書く**。書かれていない項目で照合を
+ * 厳しくすると、抽出が項目を落とした作品で遷移が効かなくなり、
+ * 正当な憑依が矛盾として出る（`core/contradictionMatch.ts` の
+ * `findIdentityDrift` は、記録の無い項目を「問わない」側に倒している）。
  */
 export interface IdentityTransition {
+  /** 誰の遷移か。前に出てくる側の人格の id。**第1段からの照合鍵** */
   subject: string;
-  kind: "possession" | "switch" | "reincarnation" | "ghost" | "swap";
+  kind: IdentityTransitionKind;
   at: FactPosition;
+  /** どの肉体で起きたか。読めなければ省略（推測で埋めない） */
+  body?: string;
+  /** それまで前に出ていた人格。いなければ（転生・幽霊など）null */
+  fromPersona?: string | null;
+  /** 遷移のあとに前へ出る人格。省略時は `subject` と同じとみなす */
+  toPersona?: string;
+  /** 遷移のあとの社会的な身分。変わらない／読めなければ null */
+  identity?: string | null;
 }
 
 /** `parseStoryFact` が返す失敗。例外にしないのは、1件の不良で抽出全体を捨てないため */
@@ -144,7 +174,7 @@ export function parseStoryFact(raw: unknown): StoryFact | StoryFactError {
       predicate: entry.predicate as string,
       value: entry.value as string,
       kind: entry.kind as FactKind,
-      storyTime: parseStoryTime(entry.storyTime),
+      storyTime: parseRelativeTimeValue(entry.storyTime, "fact.storyTime"),
       modality: entry.modality as FactModality,
       pov: (entry.pov as string | null | undefined) ?? null,
       speaker: (entry.speaker as string | null | undefined) ?? null,
@@ -177,16 +207,40 @@ function parseLineRange(value: unknown): [number, number] {
   return [range[0] as number, range[1] as number];
 }
 
-function parseStoryTime(value: unknown): RelativeTime | null {
+/**
+ * 相対時期の検証。**事実からも遷移からも同じものを読む**ので、
+ * 置き場所の名前（`path`）だけを差し替えられるようにしてある。
+ */
+export function parseRelativeTimeValue(
+  value: unknown,
+  path: string
+): RelativeTime | null {
   if (value === undefined || value === null) return null;
-  const time = objectValue(value, "fact.storyTime");
+  const time = objectValue(value, path);
   // 起点より前は負になるので、`optionalNullableNumber` は使えない（負を弾く）
-  if (!Number.isSafeInteger(time.day)) invalid("fact.storyTime.day");
+  if (!Number.isSafeInteger(time.day)) invalid(`${path}.day`);
   if (time.part !== undefined && time.part !== null) {
-    optionalEnum(time.part, "fact.storyTime.part", TIME_PARTS);
+    optionalEnum(time.part, `${path}.part`, TIME_PARTS);
   }
   return {
     day: time.day as number,
     part: (time.part as TimePart | null | undefined) ?? null,
+  };
+}
+
+/**
+ * 事実・遷移の置き場所の検証。
+ *
+ * 行が書かれていなければ 0 とする。**話の先頭に寄せるだけで、
+ * 並びも照合も崩さない**（時期と話数で先に比べるため）。
+ */
+export function parseFactPosition(value: unknown, path: string): FactPosition {
+  const position = objectValue(value, path);
+  optionalNullableNumber(position.chapter, `${path}.chapter`);
+  optionalNullableNumber(position.line, `${path}.line`);
+  return {
+    storyTime: parseRelativeTimeValue(position.storyTime, `${path}.storyTime`),
+    chapter: (position.chapter as number | null | undefined) ?? null,
+    line: (position.line as number | null | undefined) ?? 0,
   };
 }

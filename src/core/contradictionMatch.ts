@@ -1,3 +1,7 @@
+import {
+  transitionToPersona,
+  type SceneIdentity,
+} from "../models/identity";
 import type {
   FactModality,
   FactPosition,
@@ -71,8 +75,10 @@ export interface TravelTime {
 
 export interface MatchInput {
   facts: readonly StoryFact[];
-  /** 6.88.5（第2段）。第1段では「死亡後の登場」を外すためだけに使う */
+  /** 6.88.5。「死亡後の登場」の除外と、組の変化が正当かの判断に使う */
   transitions?: readonly IdentityTransition[];
+  /** 場面ごとの肉体・人格・身分の組（6.88.5。第2段） */
+  scenes?: readonly SceneIdentity[];
   travelTimes?: readonly TravelTime[];
 }
 
@@ -97,6 +103,10 @@ const WHEREABOUTS = "所在";
 
 /** 死亡イベントの項目名 */
 const DEATH = "死亡";
+
+/** 同一性の食い違いを出すときの項目名（作者が読む言葉） */
+const PERSONA = "人格";
+const IDENTITY = "身分";
 
 /** 死んだあとに出てきても矛盾にならない遷移（6.88.5） */
 const REVIVAL_KINDS: ReadonlyArray<IdentityTransition["kind"]> = [
@@ -125,6 +135,7 @@ export function findContradictionCandidates(
     ...findPostDeathAppearances(input.facts, input.transitions ?? []),
     ...findKnowledgeViolations(input.facts),
     ...findTravelImpossibilities(input.facts, input.travelTimes ?? []),
+    ...findIdentityDrift(input.scenes ?? [], input.transitions ?? []),
   ];
 
   const seen = new Set<string>();
@@ -387,6 +398,92 @@ export function findTravelImpossibilities(
 }
 
 /**
+ * 遷移の記録が無いのに、同じ体で人格（や身分）が変わっている（6.88.5）。
+ *
+ * **憑依・多重人格・転生・入れ替わりを正当な遷移として表すのが、この照合の
+ * 狙いである。** 体と人格を1つのidで持っているかぎり「文佳の体で太志の口調」
+ * は必ず矛盾に見え、逆に人格の入れ替わりを全部許すと**入れ替わったまま
+ * 元に戻っていない**書き落としが拾えない。遷移を鍵にすると両方が立つ。
+ *
+ * **記録の無い項目では厳しくしない。** 遷移に `body` が書かれていなければ
+ * 体は問わない——抽出が項目を落とした作品で、正当な憑依が矛盾として出る
+ * ほうが害が大きい（迷ったら出さない）。
+ */
+export function findIdentityDrift(
+  scenes: readonly SceneIdentity[],
+  transitions: readonly IdentityTransition[] = []
+): ContradictionCandidate[] {
+  const groups = new Map<string, SceneIdentity[]>();
+  for (const scene of orderScenes(scenes)) {
+    const bucket = groups.get(scene.triple.bodyId);
+    if (bucket) bucket.push(scene);
+    else groups.set(scene.triple.bodyId, [scene]);
+  }
+
+  const candidates: ContradictionCandidate[] = [];
+  // 同じ入力なら同じ並びで返す（報告の順が入力の偶然で変わらないように）
+  for (const body of [...groups.keys()].sort()) {
+    const list = groups.get(body) ?? [];
+    for (let i = 1; i < list.length; i += 1) {
+      const before = list[i - 1];
+      const after = list[i];
+      const from = scenePosition(before);
+      const to = scenePosition(after);
+
+      if (before.triple.personaId !== after.triple.personaId) {
+        const excused = transitions.some(
+          (transition) =>
+            coversBody(transition, body) &&
+            within(transition.at, from, to) &&
+            transitionToPersona(transition) === after.triple.personaId
+        );
+        if (excused) continue;
+        candidates.push(
+          driftCandidate({
+            body,
+            predicate: PERSONA,
+            noun: "人格",
+            before: before.triple.personaId,
+            after: after.triple.personaId,
+            left: before.source,
+            right: after.source,
+            from,
+            to,
+          })
+        );
+        // **人格が変わっていれば、身分の違いはその結果である。**
+        // 両方出すと、作者は同じ1か所を二度直しに行くことになる
+        continue;
+      }
+
+      if (before.triple.identityId !== after.triple.identityId) {
+        const excused = transitions.some(
+          (transition) =>
+            coversBody(transition, body) &&
+            within(transition.at, from, to) &&
+            transition.identity === after.triple.identityId
+        );
+        if (excused) continue;
+        candidates.push(
+          driftCandidate({
+            body,
+            predicate: IDENTITY,
+            noun: "身分",
+            before: before.triple.identityId,
+            after: after.triple.identityId,
+            left: before.source,
+            right: after.source,
+            from,
+            to,
+          })
+        );
+      }
+    }
+  }
+  return candidates;
+}
+
+/**
  * 容認リスト（6.88.8）の鍵。
  *
  * 値は昇順に並べてから混ぜる。**どちらを左に置いたかで指紋が変わると、
@@ -455,6 +552,101 @@ function buildCandidate(draft: CandidateDraft): ContradictionCandidate {
       ? `${draft.reason}。同じ日で前後が読めない`
       : draft.reason,
   };
+}
+
+interface DriftDraft {
+  body: string;
+  predicate: string;
+  /** 理由の文に入る言葉（「人格」「身分」） */
+  noun: string;
+  before: string;
+  after: string;
+  left: string;
+  right: string;
+  from: FactPosition;
+  to: FactPosition;
+}
+
+function driftCandidate(draft: DriftDraft): ContradictionCandidate {
+  return buildCandidate({
+    // 体の状態が場面のあいだで変わっているので「状態」に入れる。
+    // 「設定」に入れると、作者は人物の資料を直しに行ってしまう
+    type: "状態",
+    subject: draft.body,
+    predicate: draft.predicate,
+    values: [draft.before, draft.after],
+    left: draft.left,
+    right: draft.right,
+    // 場面の組は地の文から読むもの（誰かの台詞ではない）ので narration 相当
+    confidence: confidenceFromModality("narration"),
+    unknownOrder: isFactOrderUnknown(draft.from, draft.to),
+    reason:
+      `${formatPosition(draft.from)}から${formatPosition(draft.to)}のあいだ、` +
+      `遷移の記録が無いのに、同じ体で${draft.noun}が` +
+      `〈${draft.before}〉から〈${draft.after}〉へ変わっている`,
+  });
+}
+
+/**
+ * 場面を時期順に並べる。
+ *
+ * **事実の並べ方をそのまま使う**（`orderFacts`）。時期が `null` の場面を
+ * 本文の順で挟み込む仕掛け（6.88.4）は、場面でも同じものが要る——
+ * ここで別に書くと、事実の並びと場面の並びが静かに食い違う。
+ */
+function orderScenes(scenes: readonly SceneIdentity[]): SceneIdentity[] {
+  const byId = new Map<string, SceneIdentity>();
+  const facts: StoryFact[] = scenes.map((scene, index) => {
+    const id = `scene:${index}`;
+    byId.set(id, scene);
+    return {
+      id,
+      chapter: scene.chapter,
+      lineRange: scene.lineRange,
+      subject: scene.triple.bodyId,
+      predicate: PERSONA,
+      value: scene.triple.personaId,
+      kind: "state",
+      storyTime: scene.storyTime,
+      modality: "narration",
+      pov: null,
+      speaker: null,
+      topic: null,
+    };
+  });
+
+  const ordered: SceneIdentity[] = [];
+  for (const fact of orderFacts(facts)) {
+    const scene = byId.get(fact.id);
+    if (scene) ordered.push(scene);
+  }
+  return ordered;
+}
+
+function scenePosition(scene: SceneIdentity): FactPosition {
+  return {
+    storyTime: scene.storyTime,
+    chapter: scene.chapter,
+    line: scene.lineRange[0],
+  };
+}
+
+/**
+ * その遷移は、この体のことか。
+ *
+ * **体が書かれていなければ「問わない」。** 分からない項目で照合を厳しく
+ * すると、抽出が体を落とした作品で正当な憑依が矛盾として出る。
+ */
+function coversBody(transition: IdentityTransition, body: string): boolean {
+  return transition.body === undefined || transition.body === body;
+}
+
+/**
+ * 2つの場面のあいだに置かれた遷移か。**両端を含める**——遷移は場面の中で
+ * 描かれるので、場面の先頭行と同じ位置に記録されることがある。
+ */
+function within(at: FactPosition, from: FactPosition, to: FactPosition): boolean {
+  return compareFactPosition(from, at) <= 0 && compareFactPosition(at, to) <= 0;
 }
 
 function conflictType(
