@@ -491,7 +491,16 @@ type IncomingMessage =
   /** 別の作品へ切り替える（適用・見送りは表示中の作品にしか効かないため） */
   | { type: "switchWork"; workId: string }
   /** いま見ている分類を空にする */
-  | { type: "clearCategory" };
+  | { type: "clearCategory" }
+  /**
+   * 画面の script が読み込み終わった（設計書6.11.9）。
+   *
+   * **面は作者の知らないところで組み直される**（窓の大きさを変える、
+   * 下段のタブを行き来する）。組み直しの直後に送ったものは、script が
+   * まだ無いので誰も受け取らない。**読み込めた側から声をかけてもらい、
+   * そこで送り直す。**
+   */
+  | { type: "ready" };
 
 /**
  * 1つの分類が持つもの。
@@ -765,6 +774,27 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     // まだ何も出していないとき、または同じ作品なら、これまでどおり前面へ
     if (!this.work || this.keyOf(this.work) === this.keyOf(work)) {
       this.work = work;
+      /*
+        **静かに届いたものは、作者が見ている分類を奪わない**（0.45.2）。
+
+        開いたときの読み込み（`primePendingRecordUpdates`）は作者が押した
+        操作ではない。推敲を1件ずつ見ている最中に「設定資料の更新」へ
+        画面が移ると、どこまで見たか分からなくなる。**別の作品の結果が
+        届いても画面は奪わない**のと同じ考え方を、同じ作品の中にも通す。
+
+        ただし**まだ何も出していないときは、そのまま出す**——溜まっている
+        承認待ちを開いた瞬間に見せるのが 0.45.0 の狙いで、ここを塞ぐと
+        「まだ検知結果がありません」に戻ってしまう。
+      */
+      const showing =
+        this.items.length > 0 ||
+        this.contradictions.length > 0 ||
+        this.recordUpdates.length > 0;
+      if (options.quiet && showing && this.category !== category) {
+        // タブの件数は増やす（届いたことは分かるようにする）
+        this.postItems();
+        return arrivedCount;
+      }
       this.activate(category);
       // パネルが開いていなければ前面に出す。開いていれば余計なフォーカス移動はしない
       if (!options.quiet) {
@@ -1640,6 +1670,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         return;
       case "clearCategory":
         await this.clearCurrentCategory();
+        return;
+      case "ready":
+        // 組み直された面へ、いまの中身を送り直す（設計書6.11.9）
+        this.postItems();
         return;
     }
   }
