@@ -101,6 +101,7 @@ describe("プロンプト設計書の形", () => {
     ["P-34", "src/prompts/chatterComment.ts", "CHATTER_COMMENT_VERSION"],
     ["P-35", "src/prompts/dictationClean.ts", "DICTATION_CLEAN_VERSION"],
     ["P-36", "src/prompts/advicePolicy.ts", "ADVICE_POLICY_VERSION"],
+    ["P-37", "src/prompts/storyFactExtract.ts", "STORY_FACT_EXTRACT_VERSION"],
   ];
 
   test.each(IMPLEMENTED)(
