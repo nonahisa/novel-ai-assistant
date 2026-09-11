@@ -1,4 +1,8 @@
 import { execFile } from "node:child_process";
+// 同じ場所かの判定は `locationCompare` が持つ。**写しを作らない**——
+// 以前は「編集部へ渡す」側に別の判定があり、片方だけが大文字小文字を
+// そろえていた（`locationCompare.ts` の冒頭に経緯がある）
+import { isSameLocation } from "./locationCompare";
 
 /**
  * gitコマンドの薄い層。
@@ -340,18 +344,6 @@ async function readWorkingTree(
     ...counted,
     dirtyHere: here.code === 0 ? parseStatusPorcelain(here.stdout).dirty : counted.dirty,
   };
-}
-
-/** 同じ場所を指しているか。Windowsでは大文字小文字を同じものとして見る */
-function isSameLocation(left: string, right: string): boolean {
-  // 区切りの円記号を / に揃え、末尾の / を落とす。
-  // 正規表現の中の円記号は読みにくいので符号（u005C）で書く
-  const normalize = (value: string) =>
-    value
-      .replace(/[\u005C]/g, "/")
-      .replace(/[/]+$/, "")
-      .toLowerCase();
-  return normalize(left) === normalize(right);
 }
 
 /**

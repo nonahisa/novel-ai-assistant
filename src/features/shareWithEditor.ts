@@ -19,6 +19,8 @@ import {
   replacedDirectories,
   SHARED_FILES,
 } from "../core/editingRepo";
+import { isNestedLocation } from "../core/locationCompare";
+import { RECOVERY_DIRECTORY_NAME } from "../core/atomicWrite";
 import { logFailure, useLogFile } from "../core/logger";
 import { withProgress } from "../views/progress";
 import { askText } from "../views/dialogs";
@@ -220,12 +222,11 @@ async function chooseDestination(work: WorkEntry): Promise<string | undefined> {
 
   const destination = path.join(parent[0].fsPath, name.trim());
 
-  // 作品フォルダーの中へ置くと、書庫のリポジトリに入れ子で入ってしまう
-  const normalizedWork = path.normalize(work.folderPath);
-  const inside = path
-    .normalize(destination)
-    .startsWith(normalizedWork + path.separatorFor(normalizedWork));
-  if (inside) {
+  // 作品フォルダーの中へ置くと、書庫のリポジトリに入れ子で入ってしまう。
+  // **判定は `isNestedLocation` に任せる**——以前はここで独自に比べており、
+  // 大文字小文字の違いを見ていなかった（置き場は作者がダイアログで選ぶので、
+  // 登録時の `work.folderPath` と綴りだけが違う道になりうる）
+  if (isNestedLocation(destination, work.folderPath)) {
     void vscode.window.showErrorMessage(
       "作品フォルダーの中には置けません。リポジトリが入れ子になり、" +
         "書庫の側へ巻き込まれます。別の場所を選んでください。"
@@ -240,8 +241,11 @@ async function chooseDestination(work: WorkEntry): Promise<string | undefined> {
  *
  * **本文と設定は消してから写す。** 作品側で消した話が編集用に残り続けると、
  * 編集部は無い話を校閲することになる。
+ *
+ * 外へ出してあるのは試験のため（`shareWithEditor.test.ts`）。渡すかどうかの
+ * 確認は `shareWithEditor` が持つので、外の呼び出し口としては使わない。
  */
-async function copyForEditor(
+export async function copyForEditor(
   paths: ReturnType<typeof workPaths>,
   destination: string,
   manuscriptDir: string | undefined,
@@ -273,6 +277,7 @@ async function copyForEditor(
       path.toUri(target),
       { overwrite: true }
     );
+    await removeRecoveryDirectories(target);
   }
 
   for (const relative of SHARED_FILES) {
@@ -295,6 +300,44 @@ async function copyForEditor(
     path.join(destination, PROPOSAL_RELATIVE),
     await readTextIfAny(path.join(paths.root, PROPOSAL_RELATIVE))
   );
+}
+
+/**
+ * 写した中から、回復用の退避（`.novelai-recovery`）を消す。
+ *
+ * **写す前に除けない。** `vscode.workspace.fs.copy` はフォルダーをまるごと
+ * 写す口しか持たず、除外を渡せない。1件ずつ写す形に書き直すと本文の写しが
+ * 遅くなるうえ、写し漏れの道が増える。**写してから消す。**
+ *
+ * 退避は元のファイルと同じ階層に作られる（`atomicWrite.ts` の
+ * `recoveryDirectoryFor`）。本文の下にも設定の下にもでき、深さが決まらない
+ * ので、写した先をたどって名前で消す。
+ *
+ * 渡す先は編集部の手元である。**直す前の版が5世代ぶん一緒に行くと、
+ * 編集部はどれが今の原稿か分からない**（`.gitignore` があるのでgitには
+ * 乗らないが、フォルダーごと手渡すと付いていく）。
+ */
+async function removeRecoveryDirectories(target: string): Promise<void> {
+  let entries: Array<[string, vscode.FileType]>;
+  try {
+    entries = await vscode.workspace.fs.readDirectory(path.toUri(target));
+  } catch {
+    // 読めないのは、そもそも写せていないということ。写しの失敗は
+    // 呼び出し側（copy）が投げるので、ここでは黙って戻る
+    return;
+  }
+  for (const [name, type] of entries) {
+    if (type !== vscode.FileType.Directory) continue;
+    const child = path.join(target, name);
+    if (name === RECOVERY_DIRECTORY_NAME) {
+      await vscode.workspace.fs.delete(path.toUri(child), {
+        recursive: true,
+        useTrash: false,
+      });
+      continue;
+    }
+    await removeRecoveryDirectories(child);
+  }
 }
 
 /** 提案ファイルへ、相手の行だけを足す */
