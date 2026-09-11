@@ -467,3 +467,45 @@ describe("プロバイダの設定を、機能ごとに読まない", () => {
     }
   );
 });
+
+/**
+ * 実機確認 A-12（チャンクの大きさ）の「機械で確かめられる分」（2026-09-11、49 の依頼）。
+ *
+ * ①既定は「モデルによって可変」で、選べるのは2つ
+ * ②誤字脱字・推敲・矛盾・人物抽出の4機能とも、同じ設定（`readChunkSettings`）を通る
+ *
+ * 送信回数（③）は実測の話なので、ここでは見ない。
+ */
+describe("実機確認 A-12：既定と、4機能が同じ設定を通ること", () => {
+  it("設定の既定は「モデルによって可変」で、選べるのは2つ", () => {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8")
+    ) as {
+      contributes: {
+        configuration: {
+          properties: Record<string, { default?: unknown; enum?: unknown[] }>;
+        };
+      };
+    };
+    const entry = pkg.contributes.configuration.properties["novelai.chunkSizeMode"];
+    expect(entry).toBeDefined();
+    expect(entry?.default).toBe("モデルによって可変");
+    expect(entry?.enum).toHaveLength(2);
+  });
+
+  it("誤字脱字・推敲・矛盾・人物抽出は、どれも readChunkSettings を通る", () => {
+    const files = [
+      "src/features/checkTypos.ts",
+      "src/features/checkProofread.ts",
+      "src/features/checkContradictions.ts",
+      "src/features/extractCharacters.ts",
+    ];
+    const missing = files.filter(
+      (file) =>
+        !fs
+          .readFileSync(path.join(process.cwd(), file), "utf8")
+          .includes("readChunkSettings(")
+    );
+    expect(missing).toEqual([]);
+  });
+});
