@@ -37,12 +37,13 @@ import {
   type ChunkFixedCost,
 } from "./chunkSettings";
 import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
+import { factsRevealedAfter } from "../core/settingsAsOf";
 import {
-  factsRevealedAfter,
-  hasAppearedBy,
-  isEmptyAfterRollback,
-  recordAsOf,
-} from "../core/settingsAsOf";
+  buildContradictionTermIndex,
+  createContradictionMaterial,
+  CHARACTER_AS_OF_FIELDS,
+  type RelevantSettings,
+} from "../core/contradictionMaterial";
 import { CharacterStore } from "../core/characterStore";
 import {
   createAbilityStore,
@@ -51,18 +52,8 @@ import {
   createWorldStore,
 } from "../core/abilityStore";
 import { SynopsisStore } from "../core/synopsisStore";
-import {
-  TermIndex,
-  expandNameVariants,
-  type TermEntry,
-} from "../core/termIndex";
-import {
-  describeCharacter,
-  describeLocation,
-  describeWorldItem,
-  settingsFingerprint,
-} from "../core/settingsSummary";
-import { selectWorldview, worldviewMaxChars } from "../core/worldviewSelect";
+import { settingsFingerprint } from "../core/settingsSummary";
+import { worldviewMaxChars } from "../core/worldviewSelect";
 import {
   anyPastSceneReachable,
   buildPastScenes,
@@ -138,23 +129,6 @@ import { hashText } from "../core/textFile";
  * 切り詰められたチャンクが黙って捨てられる。
  */
 const RETRY_SMALLER = Symbol("retry-smaller");
-
-/**
- * 話数で巻き戻す項目（設計書6.10.3）。
- *
- * **名前と読みは巻き戻さない。** 作中で変わるものではないし、
- * 消すと誰の話か分からなくなる。
- */
-const CHARACTER_AS_OF_FIELDS = [
-  "summary",
-  "role",
-  "personality",
-  "appearance",
-  "gender",
-  "affiliation",
-];
-
-const LOCATION_AS_OF_FIELDS = ["summary", "region", "description"];
 
 /** 項目の名前を、作者に読める言葉にする */
 const FIELD_LABELS: Record<string, string> = {
@@ -966,36 +940,14 @@ interface SettingsMaterial {
   fingerprint: string;
   /**
    * 参照資料に見込む字数（世界観）。チャンクの大きさを決めるのに使う。
-   *
-   * **上限そのものではなく、上限と全文の小さいほう**を返す。世界観が
-   * 3項目しかない作品で30,000字を確保すると、本文が要らないほど痩せる。
+   * 中身は `core/contradictionMaterial.ts`。
    */
   referenceBudgetChars: number;
   /**
    * @param chapter その本文が何話か。**その時点で分かっていることだけ**を返す
    */
-  relevantFor(
-    text: string,
-    chapter: number | null
-  ): {
-    characters: string;
-    locations: string;
-    /** そのチャンクへ載せる世界観。上限内なら全項目（設計書6.27.6） */
-    worldview: string;
-    hasAnything: boolean;
-  };
-  /**
-   * その本文に出てくる、索引にある語（設計書6.74）。
-   *
-   * **種別で絞らない。** いま索引に載っているのは人物と場所だが、能力名・
-   * 組織名も過去の場面を引く語としては同じように役に立つ（本体の裁定、
-   * 0.32.6）。索引へ足せばそのまま検索語になるよう、ここでは
-   * `TermKind` を見ずに全部返す。
-   *
-   * **本文に現れた表記そのもの**を返す（正式名称ではない）。過去の場面は
-   * 語句一致で引くので、本文が「灯くん」としか書いていないのに正式名称の
-   * 「月島 灯」で引くと当たらない。
-   */
+  relevantFor(text: string, chapter: number | null): RelevantSettings;
+  /** その本文に出てくる、索引にある語（設計書6.74） */
   namesIn(text: string): string[];
   /**
    * その本文より**あと**で判明する事実（設計書6.10.4）。
@@ -1068,32 +1020,22 @@ async function collectSettings(
     return undefined;
   }
 
-  // 本文に出てくるものを探すための索引。用語ハイライトと同じ作り
-  const entries: TermEntry[] = [];
-  for (const character of people) {
-    for (const text of expandNameVariants([character.name, ...character.aliases])) {
-      entries.push({
-        text,
-        kind: "character",
-        id: character.id,
-        canonicalName: character.name,
-      });
-    }
-  }
-  for (const place of places) {
-    for (const text of [place.name, ...place.aliases]) {
-      entries.push({
-        text,
-        kind: "location",
-        id: place.id,
-        canonicalName: place.name,
-      });
-    }
-  }
-  const index = new TermIndex(entries);
+  // 本文に出てくるものを探すための索引。用語ハイライトと同じ作り。
+  // **組み方は core に置いてある**——ここと試す側で別々に組むと、別名の
+  // 広げ方が食い違って「テストでは当たるのに実機では当たらない」が起きる
+  const index = buildContradictionTermIndex({ people, places });
+
+  // **材料の組み立ては core の純粋関数へ出した**（設計書6.10.3）。
+  // features の中に閉じていた頃は、外から一度も測れなかった
+  const material = createContradictionMaterial({
+    people,
+    places,
+    worldItems,
+    index,
+    worldviewMax,
+  });
 
   const characterById = new Map(people.map((item) => [item.id, item]));
-  const locationById = new Map(places.map((item) => [item.id, item]));
   const abilitySystem = abilities.records;
 
   // 設定が変われば同じ本文でも答えが変わる。**更新時刻ではなく中身**で見る
@@ -1116,77 +1058,14 @@ async function collectSettings(
   // 別々に鍵を作っていた頃、区切りがずれて**読みが一度も当たらなかった**
   const knownAt = buildKnownAtIndex(people);
 
-  // 世界観の全文（上限に掛ける前）の長さ。チャンクの大きさを決めるときに、
-  // 「上限いっぱい確保する」のではなく実際に必要な分だけ引くために測る
-  const worldviewWholeChars = worldItems
-    .map((item) => describeWorldItem(item).length)
-    .reduce((sum, length) => sum + length + 2, 0);
-
   return {
     characterCount: people.length,
     locationCount: places.length,
     worldCount: worldItems.length,
     fingerprint,
-    referenceBudgetChars: Math.min(worldviewMax, worldviewWholeChars),
-    relevantFor(text, chapter) {
-      const seenCharacters = new Set<string>();
-      const seenLocations = new Set<string>();
-      for (const match of index.find(text)) {
-        if (match.entry.kind === "character") seenCharacters.add(match.entry.id);
-        if (match.entry.kind === "location") seenLocations.add(match.entry.id);
-      }
-
-      // **その話の時点で分かっていることだけを渡す**（設計書6.10.3）。
-      // 資料は作品全体から作られているので、そのまま渡すと
-      // **あとの話で明かされる事実**と食い違って見える
-      const characterText = [...seenCharacters]
-        .map((id) => characterById.get(id))
-        .filter((item) => item !== undefined)
-        .filter((item) => hasAppearedBy(item.appearedChapters, chapter))
-        .map((item) => recordAsOf(item, CHARACTER_AS_OF_FIELDS, chapter))
-        .filter((item) => !isEmptyAfterRollback(item, CHARACTER_AS_OF_FIELDS))
-        .map((item) => describeCharacter(item, []))
-        .join("\n\n");
-      const locationText = [...seenLocations]
-        .map((id) => locationById.get(id))
-        .filter((item) => item !== undefined)
-        .filter((item) => hasAppearedBy(item.appearedChapters, chapter))
-        .map((item) => recordAsOf(item, LOCATION_AS_OF_FIELDS, chapter))
-        .filter((item) => !isEmptyAfterRollback(item, LOCATION_AS_OF_FIELDS))
-        .map((item) => describeLocation(item))
-        .join("\n\n");
-
-      return {
-        characters: characterText,
-        locations: locationText,
-        // **世界観にも上限を置く**（設計書6.27.6の穴2）。上限内なら
-        // 全項目が元の並び順で入るので、いまの作品では従来と同じ文字列になる
-        worldview: selectWorldview({
-          items: worldItems,
-          chunkText: text,
-          chapter,
-          // **上限はモデルによって変わる**（設計書6.27.10）。固定30,000字だと
-          // 小さいモデルでは資料だけで上限を使い切る
-          maxChars: worldviewMax,
-        }),
-        // 世界観は誰が出ていても効くので、それだけでも材料になる。
-        // 上限で絞っても1件は必ず残るので、項目があるかどうかで見てよい
-        hasAnything: Boolean(
-          characterText || locationText || worldItems.length > 0
-        ),
-      };
-    },
-    namesIn(text) {
-      const names: string[] = [];
-      for (const match of index.find(text)) {
-        const term = match.entry.text.trim();
-        if (!term || names.includes(term)) continue;
-        names.push(term);
-      }
-      // **件数は切らない。** どれを検索語に使うかは選抜側の判断で、
-      // ここは「本文に出た名前」をそのまま渡す役目（`pastSceneSelect`）
-      return names;
-    },
+    referenceBudgetChars: material.referenceBudgetChars,
+    relevantFor: (text, chapter) => material.relevantFor(text, chapter),
+    namesIn: (text) => material.namesIn(text),
     futureFactsFor(text, chapter) {
       if (chapter === null) return "";
       const lines: string[] = [];
