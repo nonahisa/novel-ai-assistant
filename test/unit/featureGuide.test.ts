@@ -407,16 +407,69 @@ describe("説明の束", () => {
 });
 
 describe("相談1回ぶんの組み立て", () => {
-  test("本文の相談では、目次だけを渡す", () => {
-    // 作品の相談に使い方の説明は要らない。ここが節約の本体である
-    const built = buildFeatureGuideForQuestion({
-      question: "この段落は冗長ですか",
-    });
+  /*
+    **作品の相談10問。** 1問だけでは、当たり判定が緩んでも気づけなかった
+    ——実測（2026-09-11）では、この10問のうち**8問**に2,057〜3,047字の
+    機能説明が付いていた。ひどいものは「主人公の動機が弱い気がします。
+    どう思いますか」の**「す。」1組み**だけで9束が選ばれていた。
 
-    expect(built.reason).toBe("none");
-    expect(built.selected).toEqual([]);
-    // 上限は目次と同じ（渡しているものが目次そのものなので、揃えておく）
-    expect(built.text.length).toBeLessThan(2600);
+    ここは作者が作品の中身を相談する言い回しを並べてある。**どれも
+    機能の使い方を訊いていない**ので、説明は1つも付いてはいけない。
+  */
+  const WORK_QUESTIONS = [
+    "この段落は冗長ですか",
+    "文佳の性格はぶれていませんか",
+    "読者はここで飽きると思いますか",
+    "太志と文佳の関係は分かりやすく書けていますか",
+    "タイトルはこれでいいと思う？",
+    "この場面の描写、もっと良くできますか",
+    "この話のテーマは読者に伝わっていますか？",
+    "次の話をどう書き出すか迷っています",
+    "第5話の展開が急すぎませんか",
+    "主人公の動機が弱い気がします。どう思いますか",
+  ];
+
+  test("本文の相談では、目次だけを渡す（10問）", () => {
+    // 作品の相談に使い方の説明は要らない。ここが節約の本体である
+    const withGuide = WORK_QUESTIONS.map((question) => ({
+      question,
+      built: buildFeatureGuideForQuestion({ question }),
+    })).filter((entry) => entry.built.selected.length > 0);
+
+    expect(
+      withGuide.map(
+        (entry) => `${entry.question} → ${entry.built.selected.join("、")}`
+      )
+    ).toEqual([]);
+
+    for (const question of WORK_QUESTIONS) {
+      const built = buildFeatureGuideForQuestion({ question });
+      expect(built.reason, question).toBe("none");
+      // 上限は目次と同じ（渡しているものが目次そのものなので、揃えておく）
+      expect(built.text.length, question).toBeLessThan(2600);
+    }
+  });
+
+  /*
+    **緩さを締めたぶん、使い方の質問が落ちていないこと。** 片側だけを
+    測ると、「何も選ばない」実装が満点になる。機能の名前は漢字か英字で
+    できているので、2組み以上が当たる（「誤字」「字脱」「脱字」）。
+  */
+  test("使い方の質問では、説明が付く（5問）", () => {
+    const usageQuestions = [
+      "誤字脱字はどこから？",
+      "表記ゆれの検知ってどうやる",
+      "EPUBに書き出すには",
+      "設定資料を抽出したい",
+      "GitHubと同期する方法",
+    ];
+
+    const missed = usageQuestions.filter(
+      (question) =>
+        buildFeatureGuideForQuestion({ question }).selected.length === 0
+    );
+
+    expect(missed).toEqual([]);
   });
 
   test("機能名で聞かれたら、その小分類の説明を足す", () => {
@@ -437,12 +490,19 @@ describe("相談1回ぶんの組み立て", () => {
     見出しの名前そのものも当たりの材料になる。**割った結果、どちらの
     質問でも両方が返るようでは割った意味が無い**（送る量が減らない）。
   */
-  test("ルビの質問では、原稿づくりが先に来る", () => {
-    const built = buildFeatureGuideForQuestion({ question: "ルビを振りたい" });
+  test("原稿づくりの質問では、原稿づくりが先に来る", () => {
+    /*
+      **以前は「ルビを振りたい」で見ていた**（0.33.8）。当たりの材料を
+      漢字と英字だけに絞った（2026-09-11）ので、カタカナの名前だけでできた
+      質問はどの束にも当たらなくなった——ルビの名前は目次に載っており、
+      AIが「そんな機能はない」と答える心配は残らないが、**説明は付かない**。
+      ここで見たいのは「割った束が互いに紛れないこと」なので、漢字の
+      名前を持つ操作（縦書きで開く）で同じことを確かめる。
+    */
+    const built = buildFeatureGuideForQuestion({
+      question: "縦書きで原稿を開きたい",
+    });
 
-    // **「投稿・書き出し」が一緒に来るのは誤爆ではない。** あちらにも
-    // 「投稿サイトのルビを取り込む」が実在する。見てほしいのはどちらが
-    // 先かで、当たりの多い束が先に来ていれば、上限で削られるのは後ろになる
     expect(built.selected[0]).toBe("執筆AI支援 → 原稿づくり");
   });
 

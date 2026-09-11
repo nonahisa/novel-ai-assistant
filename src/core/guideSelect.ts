@@ -53,6 +53,15 @@ export interface GuideSelection {
 const DEFAULT_BUDGET = 3000;
 
 /**
+ * 束を採るのに要る当たりの数。
+ *
+ * 1個で採っていたため、点が同じ束がメニュー順に上限まで詰め込まれていた
+ * （作品の相談に3,000字近い説明が付いた）。機能名は2文字より長いので、
+ * 本当に機能を指している質問は2組み以上当たる（「誤字」「字脱」「脱字」）。
+ */
+const MIN_HITS = 2;
+
+/**
  * 質問に関係しそうな束を選ぶ。
  *
  * 直前の作者の発言も材料にする。「それはどこ？」のような追い質問は、
@@ -74,7 +83,7 @@ export function selectGuideBundles(input: {
   const grams = new Set<string>();
   for (const source of sources) {
     for (const gram of bigrams(source)) {
-      if (isKanaOnly(gram)) continue;
+      if (!isEvidenceGram(gram)) continue;
       grams.add(gram);
     }
   }
@@ -84,7 +93,10 @@ export function selectGuideBundles(input: {
       bundle,
       score: countHits(bundle.text, grams),
     }))
-    .filter((entry) => entry.score > 0);
+    // **1個では偶然と区別できない。** 束はどれも数百字あるので、
+    // 当たりが1つなら「その話題の説明がある」根拠にならない
+    // （実データでは「描写」1個で校正の説明が付いていた）
+    .filter((entry) => entry.score >= MIN_HITS);
 
   if (scored.length > 0) {
     // 点の高い順。同点は元の並び（メニュー順）のまま——`sort` は安定なので、
@@ -103,14 +115,27 @@ export function selectGuideBundles(input: {
 }
 
 /**
- * ひらがなだけの組みか。
+ * その2文字組みを「当たりの証拠」として使ってよいか。
  *
- * 「はど」「ます」「です」のような助詞・活用は、**どの束にも当たる**ので
- * 絞り込みにならない。機能の名前は漢字・カタカナ・英字でできている
- * （誤字脱字・ルビ・プロット・PDF）ので、落としても取りこぼさない。
+ * 採るのは**漢字だけの組み**（「誤字」「表記」「同期」「抽出」）と、
+ * **英字だけの組み**（「EP」「PU」「UB」＝EPUB、「PD」「DF」＝PDF）だけ。
+ *
+ * ## なぜここまで絞るか（2026-09-11）
+ *
+ * 以前はひらがなだけの組みを捨てていたが、**句読点を含む組み**（「す。」
+ * 「、も」「か？」）と**かなを混ぜた組み**（「の場」「面の」「は読」
+ * 「の話」）が残っていた。これらは日本語のどんな文にも入るので、説明の
+ * 本文には必ず当たる。実データ10問で測ると、作品の相談8問に2,057〜3,047字
+ * の機能説明が付き、ひどいものは**「す。」の1組みだけ**で9束が選ばれていた
+ * （2026-09-11の測定）。**助詞・活用語尾・約物は、話題の証拠にならない。**
+ *
+ * カタカナも落とす。「タイトルはこれでいいと思う？」のような作品の相談が
+ * 「タイ」「イト」「トル」で説明を引き寄せてしまい、漢字だけにしないと
+ * 10問すべてを目次だけにできなかった（同じ測定）。**カタカナの名前
+ * （ルビ・プロットなど）は目次に載っているので、名前そのものは失わない。**
  */
-function isKanaOnly(gram: string): boolean {
-  return /^[ぁ-ゟー]+$/.test(gram);
+function isEvidenceGram(gram: string): boolean {
+  return /^\p{Script=Han}{2}$/u.test(gram) || /^[A-Za-z]{2}$/.test(gram);
 }
 
 /** 質問側の組みのうち、束の中に現れるものの数 */

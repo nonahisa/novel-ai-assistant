@@ -27,6 +27,9 @@ const BUNDLES: GuideBundle[] = [
     text: [
       "■ 執筆AI支援 → 原稿づくり",
       "  - ルビを振る: 漢字にルビを振ります。",
+      // **漢字の名前の操作を1つ置いてある。** 当たりの材料は漢字と英字
+      // だけなので、カタカナの名前（ルビ）しか無い束は選びようがない
+      "  - 縦書きで開く: 本文を縦書きの画面で開き直します。",
       "  - 迷ったとき: どうすればいいか案内します。",
     ].join("\n"),
   },
@@ -107,6 +110,58 @@ describe("使い方の説明を選ぶ", () => {
     expect(result.selected).toEqual([]);
   });
 
+  test("句読点や記号を含む組みでは当たったことにしない", () => {
+    /*
+      **実データでいちばんひどかった当たり方**（2026-09-11の測定）。
+      「す。」の1組みだけで9束（約3,000字）が選ばれていた。句読点は
+      説明の本文に必ず出てくるので、話題の証拠にならない。
+    */
+    const result = selectGuideBundles({
+      question: "主人公の動機が弱い気がします。どう思いますか",
+      bundles: BUNDLES,
+    });
+
+    expect(result.selected).toEqual([]);
+    expect(result.reason).toBe("none");
+  });
+
+  test("漢字とかなが混ざった組みでも当たったことにしない", () => {
+    // 「の場」「面の」のような組みは、助詞を挟むどんな文にも入る。
+    // 「場面」「描写」だけが残り、それぞれ1個なので採らない
+    const result = selectGuideBundles({
+      question: "この場面の描写、もっと良くできますか",
+      bundles: BUNDLES,
+    });
+
+    expect(result.selected).toEqual([]);
+    expect(result.reason).toBe("none");
+  });
+
+  test("当たりが1個の束は採らない", () => {
+    /*
+      束はどれも数百字あるので、2文字が1組み当たるのは偶然と区別できない。
+      「本文」は「登場人物を抽出」の説明にも出てくるが、それだけで
+      資料抽出の説明を送る理由にはならない。
+    */
+    const result = selectGuideBundles({
+      question: "この本文をどう思いますか",
+      bundles: BUNDLES,
+    });
+
+    expect(result.selected).toEqual([]);
+    expect(result.reason).toBe("none");
+  });
+
+  test("英字の機能名（EPUB）は当たりの材料に残す", () => {
+    // 漢字だけに絞ると EPUB・PDF・IME が拾えなくなる。英字の組みは残す
+    const result = selectGuideBundles({
+      question: "EPUBに書き出すには",
+      bundles: BUNDLES,
+    });
+
+    expect(result.selected.map((bundle) => bundle.key)).toEqual(["posting"]);
+  });
+
   test("上限を超えて渡さない", () => {
     const budget = BUNDLES[0].text.length + 5;
     const result = selectGuideBundles({
@@ -123,7 +178,7 @@ describe("使い方の説明を選ぶ", () => {
     // 「それはどこ？」だけでは何の話か分からない。話題は前の発言が持っている
     const result = selectGuideBundles({
       question: "それはどこ？",
-      recentAuthorTurns: ["ルビを振りたい"],
+      recentAuthorTurns: ["縦書きで本文を開きたい"],
       bundles: BUNDLES,
     });
 
@@ -147,7 +202,7 @@ describe("使い方の説明を選ぶ", () => {
     expect(posting.selected.map((bundle) => bundle.key)).toEqual(["posting"]);
 
     const writing = selectGuideBundles({
-      question: "ルビを振りたい",
+      question: "縦書きで本文を開きたい",
       bundles: BUNDLES,
     });
     expect(writing.selected.map((bundle) => bundle.key)).toEqual(["writing"]);
@@ -157,7 +212,7 @@ describe("使い方の説明を選ぶ", () => {
     // 予算に収まらないときに削られるのは後ろなので、順序が意味を持つ。
     // 「資料抽出」はメニュー順では最後だが、当たりが多いので先に来る
     const result = selectGuideBundles({
-      question: "登場人物を抽出したいのと、誤字が気になる",
+      question: "本文から登場人物を抽出したいのと、誤字脱字が気になる",
       bundles: BUNDLES,
     });
 

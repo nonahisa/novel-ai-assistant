@@ -24,6 +24,7 @@ import {
 import { episodeLabel } from "../core/manuscriptSources";
 import { SYNOPSIS_FILE } from "../core/synopsisDoc";
 import { CharacterStore } from "../core/characterStore";
+import { measureParts } from "../core/usageLog";
 import {
   advicePolicyLogLines,
   applyProfileSignals,
@@ -165,6 +166,17 @@ const HIGHLIGHT_MS = 8_000;
 const OVERVIEW_EPISODE_LIMIT = 40;
 /** 全体像に載せる紹介文・プロットの上限 */
 const OVERVIEW_FILE_CHARS = 2_000;
+
+/*
+  **材料の見出しは定数で持つ。**
+
+  `reference` は種類の違う材料（全体像・登場人物名）が1つの配列に入って
+  いる。送信量の内訳（`usage.md`）を取るときに、どれがどれかを見出しで
+  見分けるので、**組み立てる側と数える側で同じ文字列を使う**。
+  片方だけ直すと、内訳が黙って0字になる。
+*/
+const OVERVIEW_HEADING = "【作品の全体像】";
+const CHARACTER_NAMES_HEADING = "登場人物: ";
 
 type Incoming =
   | { type: "ready" }
@@ -806,10 +818,47 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         resolved.model
       );
 
+      /*
+        **送った量の内訳を残す**（設計書6.27の測り方に合わせる）。
+
+        相談だけ内訳が無く、`usage.md` には「1回23,812字」としか
+        残らなかった（2026-09-11）。何が重いのか——抜粋か、全体像か、
+        使い方の説明か——が分からないと、**どれを削るかを決められない。**
+        誤字脱字検知（`checkTypos.ts`）と同じ形で、渡した部品の長さを測る。
+
+        `reference` は全体像と人物名が1つの配列に入っているので、
+        見出しで分ける（上の定数）。
+      */
+      const referenceChars = (heading: string): number =>
+        (context?.reference ?? [])
+          .filter((block) => block.startsWith(heading))
+          .reduce((sum, block) => sum + block.length, 0);
+      // 助言方針はシステムプロンプト側に足している。診断していない作品では
+      // 素のプロンプトなので0になる
+      const policyChars = Math.max(
+        0,
+        systemPrompt.length - WORK_CHAT_SYSTEM_PROMPT.length
+      );
+
       const call = (
         requestedFiles?: Array<{ path: string; content: string }>
-      ) =>
-        resolved.provider.generate({
+      ) => {
+        const userPrompt = buildWorkChatPrompt({
+          workTitle: context?.work.title ?? "（作品を特定できません）",
+          contextKind: context?.kind ?? "outside",
+          contextLabel: context?.label ?? "作品のファイル以外",
+          excerpt: context?.excerpt ?? "",
+          excerptTruncated: context?.truncated ?? false,
+          fromSelection: context?.fromSelection ?? false,
+          reference: [...(context?.reference ?? []), ...found.reference],
+          requestedFiles,
+          plotFocus: this.plotFocus,
+          history: this.history.slice(-HISTORY_TURNS),
+          question,
+          featureGuide: guide.text,
+        });
+
+        return resolved.provider.generate({
           systemPrompt,
           /*
             **考えている中身を画面へ流す**（設計書6.63.2）。
@@ -826,21 +875,29 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           onThinking: (delta) => this.postAll({ type: "thought", delta }),
           // 作品の外のファイルについての相談は、どの作品にも属さないので
           // 記録しない（`workFolder` が無ければ記録されない）
-          meta: { feature: "work_chat", workFolder: context?.work.folderPath },
-          userPrompt: buildWorkChatPrompt({
-            workTitle: context?.work.title ?? "（作品を特定できません）",
-            contextKind: context?.kind ?? "outside",
-            contextLabel: context?.label ?? "作品のファイル以外",
-            excerpt: context?.excerpt ?? "",
-            excerptTruncated: context?.truncated ?? false,
-            fromSelection: context?.fromSelection ?? false,
-            reference: [...(context?.reference ?? []), ...found.reference],
-            requestedFiles,
-            plotFocus: this.plotFocus,
-            history: this.history.slice(-HISTORY_TURNS),
-            question,
-            featureGuide: guide.text,
-          }),
+          meta: {
+            feature: "work_chat",
+            workFolder: context?.work.folderPath,
+            parts: {
+              ...measureParts(userPrompt, {
+                抜粋: context?.excerpt.length ?? 0,
+                全体像: referenceChars(OVERVIEW_HEADING),
+                近い場面: found.reference.reduce(
+                  (sum, block) => sum + block.length,
+                  0
+                ),
+                履歴: this.history
+                  .slice(-HISTORY_TURNS)
+                  .reduce((sum, turn) => sum + turn.text.length, 0),
+                目次と説明: guide.text.length,
+                人物名: referenceChars(CHARACTER_NAMES_HEADING),
+              }),
+              // **方針だけは userPrompt の外**（システムプロンプト側）。
+              // 引き算で出す「指示」を狂わせないよう、測ったあとに足す
+              ...(policyChars > 0 ? { 方針: policyChars } : {}),
+            },
+          },
+          userPrompt,
           model: resolved.model,
           // 相談は考えを広げる場なので、抽出よりは揺らす
           temperature: 0.7,
@@ -855,6 +912,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           jsonSchema: WORK_CHAT_SCHEMA as unknown as object,
           disableThinking: true,
         });
+      };
 
       let result = await call();
       let answer = parseWorkChatAnswer(result.text);
@@ -2196,7 +2254,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           .filter((character) => !character.isMob)
           .map((character) => character.name);
         if (names.length > 0) {
-          blocks.push(`登場人物: ${names.slice(0, 60).join("、")}`);
+          blocks.push(
+            `${CHARACTER_NAMES_HEADING}${names.slice(0, 60).join("、")}`
+          );
         }
       } catch {
         // 設定資料が無い作品もある。名前が無いだけで相談はできる
@@ -2257,7 +2317,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
 
     if (lines.length === 0) return undefined;
-    return `【作品の全体像】\n${lines.join("\n")}`;
+    return `${OVERVIEW_HEADING}\n${lines.join("\n")}`;
   }
 
   private async readSettingsFile(
