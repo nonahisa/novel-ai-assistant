@@ -8,6 +8,7 @@ import {
   headCommit,
   describeAutoCrlfRisk,
   pullFastForward,
+  pullFastForwardAutostash,
   readAutoCrlf,
   rewritesLineEndings,
   push,
@@ -86,6 +87,76 @@ export function describeDirtyPull(title: string): string {
     `「${RECORD_THEN_PULL}」を押すと、いまの状態を手元の履歴へ残してから` +
     "取り込みます（記録はこの端末に残るだけで、GitHubへは送りません）。"
   );
+}
+
+/**
+ * 記録の前に早送りを試した結果（設計書5.5.18）。
+ *
+ * 画面に出す文言は呼び出し側が決める。**ここは「何が起きたか」だけを返す**
+ * ——知らせ方（ステータスバーか、止めて問うか）は場面で変わるためである。
+ */
+export type PreRecordPull =
+  /** 早送りで取り込めた。分岐は生まれていない */
+  | { kind: "pulled"; behind: number }
+  /** 取り込めたが、退避した書きかけを戻すときに食い違った */
+  | { kind: "conflicted" }
+  /** 早送りを試したが通らなかった。従来の道（記録 → 取り込み）へ落とす */
+  | { kind: "fast_forward_failed"; detail: string }
+  /** 既に分かれている。記録してもしなくても合流になる */
+  | { kind: "diverged"; behind: number; ahead: number }
+  /** 遅れていない、または追跡していない。することが無い */
+  | { kind: "skipped" };
+
+/**
+ * 未記録の変更を記録する**前に**、早送りで取り込めるなら取り込む。
+ *
+ * **分岐は、遅れている側が先にコミットした瞬間に生まれる。**
+ * 「取り込む前の自動保存」を先に走らせると、21件遅れていただけの置き場が
+ * その1件で「25件先・21件遅れ」になり、合流で衝突を1件ずつ選ぶことになる
+ * （2026-09-11、作者のノートPC）。**早送りできるうちに取り込めば、
+ * 分岐そのものが生まれない。**
+ *
+ * `status` は呼び出し側が渡す。ahead/behind は fetch のあとでないと
+ * 当てにならないので、**取りに行くかどうかの判断は呼び出し側に置き**、
+ * 同じ操作の中で二度 fetch しないようにしている。
+ *
+ * **「すべて同期」（`syncAllWorks.ts`）も記録 → 取り込みの順で動いており、
+ * 同じ穴がある。** そちらも同じ関数を呼ぶ（`syncAllWorks.ts` の `runPlan`。写しを作らない）。
+ */
+export async function pullBeforeRecording(
+  root: string,
+  status: GitSyncStatus,
+  run: GitCommandRunner
+): Promise<PreRecordPull> {
+  if (status.kind !== "tracked" || status.behind === 0) {
+    return { kind: "skipped" };
+  }
+  // 既に分かれているなら、早送りは必ず失敗する。試すだけ回線を使う
+  if (status.ahead > 0) {
+    return { kind: "diverged", behind: status.behind, ahead: status.ahead };
+  }
+
+  const result = await pullFastForwardAutostash(root, run);
+  if (result.ok) return { kind: "pulled", behind: status.behind };
+
+  // **退避した書きかけを戻すときに食い違うと、本文に競合マーカーが残る。**
+  // そのまま従来の道（記録 → 取り込み）へ落とすと、`git add -A` が
+  // マーカーごと記録してしまう（CLAUDE.md「作者の原稿を壊さない」）。
+  // ここで見分けて、呼び出し側に手を止めさせる
+  const after = await readSyncStatus(root, run);
+  if (after.kind === "tracked" && after.unmerged > 0) {
+    return { kind: "conflicted" };
+  }
+
+  return {
+    kind: "fast_forward_failed",
+    detail:
+      result.failure.kind === "failed"
+        ? result.failure.detail
+        : result.failure.kind === "diverged"
+          ? "早送りできませんでした（取り込む間に分かれました）"
+          : "未記録の変更があります",
+  };
 }
 
 export function canFetch(status: GitSyncStatus): boolean {
@@ -429,21 +500,36 @@ export class GitSyncMonitor implements vscode.Disposable {
   private shouldAutoFetch(work: WorkEntry): boolean {
     const config = vscode.workspace.getConfiguration("novelai");
     if (!config.get<boolean>("git.autoFetch", true)) return false;
+    return !this.fetchedRecently(work);
+  }
 
-    const configured = config.get<number>(
-      "git.autoFetchIntervalMinutes",
-      DEFAULT_AUTO_FETCH_INTERVAL_MINUTES
-    );
+  /**
+   * 直前のfetchがまだ新しいか。
+   *
+   * **`shouldAutoFetch` の裏返しではない。** あちらは設定で自動fetchを
+   * 切っていると false を返すが、切っていることと「たった今取りに行った」
+   * ことは別である。取りに行くかどうかの判断（作者の操作が起点の場面）は
+   * 設定に関わらず、この「新しさ」だけで決める。
+   */
+  private fetchedRecently(work: WorkEntry): boolean {
+    const last = this.lastFetchAt.get(work.id);
+    if (last === undefined) return false;
+    return Date.now() - last < this.autoFetchIntervalMinutes() * 60_000;
+  }
+
+  /** 自動fetchの最小間隔（分）。設定の誤りは既定値へ丸める */
+  private autoFetchIntervalMinutes(): number {
+    const configured = vscode.workspace
+      .getConfiguration("novelai")
+      .get<number>(
+        "git.autoFetchIntervalMinutes",
+        DEFAULT_AUTO_FETCH_INTERVAL_MINUTES
+      );
     // 0や負値を渡されても毎回取りに行かせない。
     // 設定の誤りで回線を叩き続ける状態を作らないため
-    const minutes =
-      Number.isFinite(configured) && configured >= 1
-        ? configured
-        : DEFAULT_AUTO_FETCH_INTERVAL_MINUTES;
-
-    const last = this.lastFetchAt.get(work.id);
-    if (last === undefined) return true;
-    return Date.now() - last >= minutes * 60_000;
+    return Number.isFinite(configured) && configured >= 1
+      ? configured
+      : DEFAULT_AUTO_FETCH_INTERVAL_MINUTES;
   }
 
   /**
@@ -602,11 +688,22 @@ ${reason}` : ""}`,
    * あちらも「合わせる前の自動保存」として同じことをしており、
    * 二通りのやり方があると、片方だけ直したときに食い違う。
    *
+   * **ただし「記録の前に早送りで取り込む」判断は、こちらにしか要らない。**
+   * `foldDivergence` は ahead も behind も立っている置き場でしか呼ばれず
+   * （`resolveDivergence` は分かれていなければ「同期でそのまま取り込めます」と
+   * 返し、`foldDiverged` は取り込みが `diverged` で止まったときだけ呼ぶ）、
+   * その時点で分岐は既にある。早送りできる場面が無いので、写しは作らない。
+   *
    * @returns 記録できて、取り込みへ進んでよいか
    */
   private async recordBeforePull(work: WorkEntry): Promise<boolean> {
     const run = this.options.run ?? runGit;
     const root = work.folderPath;
+
+    // **記録より先に、早送りできるうちに取り込む**（設計書5.5.18）。
+    // 名前の確認より前に置くのは、ここで引き返す場面でも遅れは解消して
+    // おきたいためである（記録できなくても、取り込みは作者の得になる）
+    if (!(await this.fastForwardBeforeRecording(work, run))) return false;
 
     // **名前が無いと git commit は必ず失敗する。** 初めてGitを使う作者が
     // 必ずここで詰まるので、先に確かめて次の一手を示す
@@ -637,6 +734,121 @@ ${reason}` : ""}`,
       return false;
     }
     return true;
+  }
+
+  /**
+   * 記録の前に、早送りで取り込めるなら取り込む（設計書5.5.18）。
+   *
+   * **作者への確認は挟まない。** 「取り込む」を押した時点で意思は示されて
+   * おり、ここは同じ操作の途中の一手である。知らせもモーダルにしない
+   * ——押した本人が見ているので、ステータスバーで足りる。
+   *
+   * @returns 記録へ進んでよいか
+   */
+  private async fastForwardBeforeRecording(
+    work: WorkEntry,
+    run: GitCommandRunner
+  ): Promise<boolean> {
+    const status = await this.statusBeforeRecording(work);
+
+    // **gitが書いたファイルも外部変更として拾う**ので、書いている間は
+    // 設定資料の見張りを止める（取り込み本体と同じ理由。設計書5.5.18）
+    const resume = this.settingsPause?.(work);
+    let result: PreRecordPull;
+    try {
+      result = await withProgress("GitHubの分を先に取り込んでいます…", () =>
+        pullBeforeRecording(work.folderPath, status, run)
+      );
+    } finally {
+      resume?.();
+    }
+
+    switch (result.kind) {
+      case "pulled":
+        // pullはfetchも済ませている。直後にもう一度取りに行かせない
+        this.lastFetchAt.set(work.id, Date.now());
+        this.notified.delete(work.id);
+        useLogFile(work.folderPath);
+        logStep(
+          `記録の前に早送りで取り込んだ（${work.title}／${result.behind}件）`
+        );
+        vscode.window.setStatusBarMessage(
+          `GitHub の ${result.behind}件を先に取り込みました`,
+          5000
+        );
+        return true;
+
+      case "conflicted":
+        // 取り込みは済んでいるが、書きかけを戻すときに食い違った。
+        // **ここで記録へ進ませない**——競合マーカーごとコミットしてしまう
+        useLogFile(work.folderPath);
+        logFailure("記録の前の早送りで、書きかけと食い違った", {
+          作品: work.title,
+        });
+        if (
+          (await vscode.window.showWarningMessage(
+            `「${work.title}」にGitHubの分を取り込みましたが、書きかけと同じ箇所が食い違いました。`,
+            {
+              modal: true,
+              detail:
+                "書きかけはgitの退避（stash）に残してあります。" +
+                "食い違いを直してから、もう一度「取り込む」を押してください。",
+            },
+            "ログを表示"
+          )) === "ログを表示"
+        ) {
+          showLog();
+        }
+        return false;
+
+      case "fast_forward_failed":
+        // 早送りできなかっただけ。**従来の道（記録 → 取り込み）へ落ちる**
+        useLogFile(work.folderPath);
+        logFailure("記録の前の早送りに失敗", {
+          作品: work.title,
+          詳細: result.detail,
+        });
+        return true;
+
+      case "diverged":
+        // **記録する前に、合流になると伝える**（設計書5.5.18）。
+        // ここへ来るのはこの操作で一度きりなので、重ねて出ることはない
+        vscode.window.setStatusBarMessage(
+          `GitHub に ${result.behind}件、こちらに ${result.ahead}件。取り込むと合流になります`,
+          5000
+        );
+        return true;
+
+      case "skipped":
+        return true;
+    }
+  }
+
+  /**
+   * 早送りできるかを決めるための状態。
+   *
+   * **ahead/behind は、リモートを取りに行ったあとでないと当てにならない。**
+   * 直前の自動fetchがまだ新しければその控えを使い、古ければ**1度だけ**
+   * 取りに行く（同じ操作の中で二度fetchしない）。
+   *
+   * 取りに行けなくても止めない——手元が知っている範囲で判断する。
+   * 古い控えで「遅れていない」と読めば従来どおりに進むだけで、
+   * いまより悪くはならない。
+   */
+  private async statusBeforeRecording(work: WorkEntry): Promise<GitSyncStatus> {
+    const cached = this.statuses.get(work.id);
+    if (cached && this.fetchedRecently(work)) return cached;
+
+    const fetched = await fetchRemote(work.folderPath, this.options.run);
+    this.lastFetchAt.set(work.id, Date.now());
+    if (!fetched.ok) {
+      useLogFile(work.folderPath);
+      logFailure("記録の前のfetchに失敗", {
+        作品: work.title,
+        詳細: fetched.detail ?? "（詳細なし）",
+      });
+    }
+    return await readSyncStatus(work.folderPath, this.options.run);
   }
 
   /**
@@ -692,6 +904,7 @@ ${reason}` : ""}`,
     logStep(
       `同期の中で分岐を合わせた（${label}／取り込み ${result.incoming}件` +
         `／設定資料 ${result.settingsAutoResolved.length}件` +
+        `／一括で新しいほう ${result.settingsBulkResolved}件` +
         `／作者が選んだ ${result.manuscriptConflicts.length}件）`
     );
     // **件数を必ず出す**（作者の指摘：「件数が出ない」）

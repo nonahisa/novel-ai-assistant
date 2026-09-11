@@ -2,10 +2,15 @@ import { describe, expect, test } from "vitest";
 import {
   canFoldAutomatically,
   describeMergePreview,
+  isAppendOnlyPath,
   isAutoWrittenPath,
   mergeTreeArgs,
   parseMergeTree,
 } from "../../src/core/mergePreview";
+import {
+  authoredConflictCount,
+  classifyConflicts,
+} from "../../src/core/divergenceScan";
 import {
   containsConflictMarkers,
   describeGuardFailure,
@@ -112,8 +117,9 @@ describe("自動で書かれるファイルの見分け", () => {
     expect(isAutoWrittenPath("短編/.aiwriter/config.json")).toBe(true);
   });
 
-  test("追記型の記録は畳めない", () => {
-    // 片方を残すと、もう片方の環境で書かれた記録が消える（設計書5.6）
+  test("追記型の記録は「この端末の側を残す」ほうには入れない", () => {
+    // 片方を残すと、もう片方の環境で書かれた記録が消える（設計書5.6）。
+    // 畳み方が違う（両方の行を残す）ので、`isAppendOnlyPath` が受け持つ
     expect(isAutoWrittenPath("短編/.aiwriter/history/edits.jsonl")).toBe(false);
     expect(isAutoWrittenPath("短編/.aiwriter/proposals/p1.jsonl")).toBe(false);
   });
@@ -158,6 +164,57 @@ describe("自動で書かれるファイルの見分け", () => {
     expect(
       isAutoWrittenPath(`短編${BS}.aiwriter${BS}stats${BS}pc.json`)
     ).toBe(true);
+  });
+});
+
+/**
+ * 追記型の見分け（2026-09-11）。
+ *
+ * 作者の手元で13作品ぶんの分岐が起き、履歴・提案・ロックが
+ * 1件ずつの見比べに混ざって抜けられなくなった。**どちらを残すかを
+ * 訊かれても、答えは「両方」しか無い。**
+ */
+describe("追記型の見分け", () => {
+  test("履歴・提案・ロックの3つが追記型である", () => {
+    expect(isAppendOnlyPath("短編/.aiwriter/history/edits.jsonl")).toBe(true);
+    expect(isAppendOnlyPath("短編/.aiwriter/proposals/proposals.jsonl")).toBe(
+      true
+    );
+    expect(isAppendOnlyPath("短編/.aiwriter/locks/locks.jsonl")).toBe(true);
+  });
+
+  test("設定資料と、自動で書かれるものは追記型ではない", () => {
+    // ここを広く取ると、追記型でないものまで行ごと混ざる
+    expect(isAppendOnlyPath("短編/設定/characters/x.json")).toBe(false);
+    expect(isAppendOnlyPath("短編/.aiwriter/stats/x.json")).toBe(false);
+  });
+
+  test("Windowsの区切りでも同じに見る", () => {
+    expect(
+      isAppendOnlyPath(`短編${BS}.aiwriter${BS}history${BS}edits.jsonl`)
+    ).toBe(true);
+  });
+});
+
+describe("衝突の振り分け", () => {
+  test("追記型は、作者が1件ずつ選ぶ件数に数えない", () => {
+    // **両方の行を残すだけなので、作者は何も選ばない**
+    const classified = classifyConflicts([
+      "短編/.aiwriter/stats/pc.json",
+      "短編/.aiwriter/history/edits.jsonl",
+      "短編/.aiwriter/proposals/proposals.jsonl",
+      "短編/設定/characters/char_001.json",
+      "短編/本文/第1話.txt",
+    ]);
+
+    expect(classified.appendOnly).toEqual([
+      "短編/.aiwriter/history/edits.jsonl",
+      "短編/.aiwriter/proposals/proposals.jsonl",
+    ]);
+    expect(classified.settings).toEqual(["短編/設定/characters/char_001.json"]);
+    expect(classified.manuscripts).toEqual(["短編/本文/第1話.txt"]);
+    // 設定資料1件＋本文1件だけ。追記型の2件は入らない
+    expect(authoredConflictCount(classified)).toBe(2);
   });
 });
 

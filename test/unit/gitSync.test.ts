@@ -9,12 +9,19 @@ import {
   lastCacheDirective,
   missingIgnoreRules,
 } from "../../src/core/workRegistry";
-import { isGitAvailable, runGit, type GitSyncStatus } from "../../src/core/git";
+import {
+  isGitAvailable,
+  runGit,
+  type GitCommandResult,
+  type GitCommandRunner,
+  type GitSyncStatus,
+} from "../../src/core/git";
 import {
   canFetch,
   describeDirtyPull,
   describeStatus,
   describeSyncBadge,
+  pullBeforeRecording,
   RECORD_THEN_PULL,
 } from "../../src/features/gitSync";
 import { ACTION_TREE } from "../../src/views/actionList";
@@ -278,6 +285,7 @@ describe("分かれているときの状態の文", () => {
     settings: string[];
     manuscripts: string[];
     autoWritten: string[];
+    appendOnly: string[];
   }): GitSyncStatus => ({
     kind: "tracked",
     root: "C:/書庫",
@@ -295,7 +303,7 @@ describe("分かれているときの状態の文", () => {
 
   test("取り込みと送信の件数が、分かれていると分かる形で出る", () => {
     const text = describeStatus(
-      diverged({ settings: [], manuscripts: [], autoWritten: [] })
+      diverged({ settings: [], manuscripts: [], autoWritten: [], appendOnly: [] })
     );
 
     expect(text).toContain("分かれています");
@@ -306,7 +314,7 @@ describe("分かれているときの状態の文", () => {
   test("同じ箇所の衝突が無ければ、自動で合わせられると書く", () => {
     // **ここが出ないと、作者は身構えたまま同期を避ける**
     const text = describeStatus(
-      diverged({ settings: [], manuscripts: [], autoWritten: ["a/.aiwriter/stats/pc.json"] })
+      diverged({ settings: [], manuscripts: [], autoWritten: ["a/.aiwriter/stats/pc.json"], appendOnly: [] })
     );
 
     expect(text).toContain("同じ箇所の衝突はありません");
@@ -319,6 +327,7 @@ describe("分かれているときの状態の文", () => {
         settings: ["短編/設定/characters/char_001_太志.json"],
         manuscripts: ["短編/本文/第1話.txt", "短編/本文/第2話.txt"],
         autoWritten: [],
+        appendOnly: [],
       })
     );
 
@@ -363,7 +372,7 @@ describe("分かれている作品の印", () => {
     expect(
       describeSyncBadge({
         ...base,
-        conflicts: { settings: [], manuscripts: [], autoWritten: [] },
+        conflicts: { settings: [], manuscripts: [], autoWritten: [], appendOnly: [] },
       })
     ).toContain("分岐");
   });
@@ -377,6 +386,7 @@ describe("分かれている作品の印", () => {
           settings: ["短編/設定/characters/char_001_太志.json"],
           manuscripts: ["短編/本文/第1話.txt"],
           autoWritten: [],
+          appendOnly: [],
         },
       })
     ).toContain("分岐・要選択2");
@@ -438,5 +448,138 @@ describe("未記録の変更があるときの取り込み", () => {
   test("ボタンの名前は「記録してから取り込む」", () => {
     // 文言はこの定数だけが持つ（画面と文で写しを作らない）
     expect(RECORD_THEN_PULL).toBe("記録してから取り込む");
+  });
+});
+
+/**
+ * 記録の前に、早送りできるうちに取り込む（設計書5.5.18）。
+ *
+ * **分岐は、遅れている側が先にコミットした瞬間に生まれる。**
+ * 2026-09-11、作者のノートPCは GitHub より21件遅れたまま「取り込む前の
+ * 自動保存」を通し、その1件で「25件先・21件遅れ」になった。合流で衝突を
+ * 1件ずつ選ばされ、抜けられなくなっている。
+ *
+ * **記録より先に早送りで取り込めば、分岐そのものが生まれない。**
+ */
+describe("記録の前の早送り", () => {
+  /** 応答を並べておく偽git。**何を呼んだかも覚える**（試したかを見るため） */
+  function fakeGit(responses: Record<string, Partial<GitCommandResult>>): {
+    run: GitCommandRunner;
+    calls: string[];
+  } {
+    const calls: string[] = [];
+    const run: GitCommandRunner = async (args) => {
+      calls.push(args.join(" "));
+      const key = args.join(" ");
+      const matched =
+        responses[key] ??
+        Object.entries(responses).find(([prefix]) =>
+          key.startsWith(prefix)
+        )?.[1];
+      return {
+        code: matched?.code ?? 0,
+        stdout: matched?.stdout ?? "",
+        stderr: matched?.stderr ?? "",
+      };
+    };
+    return { run, calls };
+  }
+
+  /** 21件遅れていて、書きかけもある状態（今夜のノートPC） */
+  const behindOnly: GitSyncStatus = {
+    kind: "tracked",
+    root: "/work",
+    branch: "main",
+    upstream: "origin/main",
+    behind: 21,
+    ahead: 0,
+    behindHere: 21,
+    aheadHere: 0,
+    dirty: 3,
+    dirtyHere: 3,
+    unmerged: 0,
+  };
+
+  /** 失敗のあとに状態を読む先。**食い違いは残っていない** */
+  const TRACKED_AFTER = {
+    "rev-parse --is-inside-work-tree": { stdout: "true\n" },
+    "rev-parse --show-toplevel": { stdout: "/work\n" },
+    remote: { stdout: "origin\n" },
+    "symbolic-ref --quiet --short HEAD": { stdout: "main\n" },
+    "rev-parse --abbrev-ref --symbolic-full-name @{upstream}": {
+      stdout: "origin/main\n",
+    },
+    "rev-list --left-right --count": { stdout: "21\t0\n" },
+    "status --porcelain": { stdout: " M 本文/019.txt\n" },
+  };
+
+  test("遅れているだけなら、記録の前に早送りで取り込む", async () => {
+    const git = fakeGit({});
+
+    const result = await pullBeforeRecording("/work", behindOnly, git.run);
+
+    expect(result).toEqual({ kind: "pulled", behind: 21 });
+    // 書きかけは退避して取り込む。**未記録の変更で止めない**
+    expect(git.calls).toEqual(["pull --ff-only --autostash"]);
+  });
+
+  test("早送りが通らなければ、従来の道（記録 → 取り込み）へ落ちる", async () => {
+    const git = fakeGit({
+      ...TRACKED_AFTER,
+      "pull --ff-only --autostash": {
+        code: 1,
+        stderr: "fatal: unable to access 'https://github.com/...'\n",
+      },
+    });
+
+    const result = await pullBeforeRecording("/work", behindOnly, git.run);
+
+    // **握りつぶさない。** 理由はログへ残せるよう返す
+    expect(result.kind).toBe("fast_forward_failed");
+    if (result.kind !== "fast_forward_failed") throw new Error("形が違う");
+    expect(result.detail).toContain("unable to access");
+  });
+
+  test("退避を戻すときに食い違ったら、記録へ進ませない", async () => {
+    // ここで従来の道へ落とすと、`git add -A` が競合マーカーごと記録する
+    const git = fakeGit({
+      ...TRACKED_AFTER,
+      "pull --ff-only --autostash": {
+        code: 1,
+        stderr: "Applying autostash resulted in conflicts.\n",
+      },
+      "status --porcelain": { stdout: "UU 本文/019.txt\n" },
+    });
+
+    const result = await pullBeforeRecording("/work", behindOnly, git.run);
+
+    expect(result).toEqual({ kind: "conflicted" });
+  });
+
+  test("既に分かれていれば、早送りを試さない", async () => {
+    const git = fakeGit({});
+
+    const result = await pullBeforeRecording(
+      "/work",
+      { ...behindOnly, ahead: 25, aheadHere: 25 },
+      git.run
+    );
+
+    expect(result).toEqual({ kind: "diverged", behind: 21, ahead: 25 });
+    // 必ず失敗すると分かっている操作で、回線を使わない
+    expect(git.calls).toEqual([]);
+  });
+
+  test("遅れていなければ、何もしない", async () => {
+    const git = fakeGit({});
+
+    const result = await pullBeforeRecording(
+      "/work",
+      { ...behindOnly, behind: 0, behindHere: 0 },
+      git.run
+    );
+
+    expect(result).toEqual({ kind: "skipped" });
+    expect(git.calls).toEqual([]);
   });
 });

@@ -281,6 +281,14 @@ export interface SyncTargetOutcome {
    * わからない。件数が出ない」。報告に出すのはこれである
    */
   folded?: FoldSummary;
+  /**
+   * 記録より**先に**早送りで取り込んだ件数（設計書5.5.18）。
+   *
+   * **黙ってやらない。** 作者が押したのは「同期」であって、順番までは
+   * 見えない。ここで先に取り込んだからこそ分岐が生まれなかった、という
+   * ことが報告で分かるようにする
+   */
+  preRecordPulled?: number;
 }
 
 /** 合流の結果を、報告に出せる形にしたもの */
@@ -316,7 +324,36 @@ export function describeOutcomes(outcomes: readonly SyncTargetOutcome[]): string
   const head = parts.length > 0 ? `${parts.join("・")}を済ませました。` : "";
   const tail =
     failed > 0 ? `${failed}か所は最後まで通りませんでした。` : "";
-  return `${head}${tail}${describeFolds(outcomes)}`;
+  return `${head}${tail}${describePreRecordPulls(outcomes)}${describeFolds(
+    outcomes
+  )}`;
+}
+
+/**
+ * 記録より先に取り込んだ置き場を書き添える（設計書5.5.18）。
+ *
+ * **分岐は、遅れている側が先にコミットした瞬間に生まれる。** 遅れたまま
+ * 記録すると、21件遅れていただけの置き場が「25件先・21件遅れ」になって
+ * 抜けられなくなる（2026-09-11、作者のノートPC）。先に取り込めば分岐は
+ * 生まれないが、**何も出さないと「なぜか競合しなくなった」で終わる**ので、
+ * どこで何件を先に入れたかを残す。
+ */
+export function describePreRecordPulls(
+  outcomes: readonly SyncTargetOutcome[]
+): string {
+  const early = outcomes.filter(
+    (one): one is SyncTargetOutcome & { preRecordPulled: number } =>
+      one.preRecordPulled !== undefined && one.preRecordPulled > 0
+  );
+  if (early.length === 0) return "";
+
+  const detail = early
+    .map(
+      (one) =>
+        `${describeTargetWorks(one.plan.target)}（${one.preRecordPulled}件）`
+    )
+    .join("、");
+  return `\n記録より先に、GitHubの分を取り込みました：${detail}。`;
 }
 
 /**

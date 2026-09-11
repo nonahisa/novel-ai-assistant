@@ -4,11 +4,13 @@ import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import {
   fetchRemote,
+  keepSideOfConflict,
   readSyncStatus,
   runGit,
   showStage,
   type GitCommandRunner,
 } from "../core/git";
+import { mergeProposalJsonl } from "../core/editingRepo";
 import { commitAll, countTrackableFiles, hasCommitIdentity } from "../core/gitSetup";
 import { buildSyncTarget, worksInside } from "../core/syncTarget";
 import {
@@ -59,6 +61,8 @@ import type { WalkConflictsResult } from "./resolveConflicts";
  * ## いまの決まり（5.5.18）
  *
  * 1. **自動生成物** → この端末の側を残す（作り直せるもの）
+ * 1'. **追記型**（履歴・提案・ロック） → **両方の行を残す**。
+ *    行が混ざっただけなので、どちらかを選ぶ必要が無い（`core/editHistory.ts`）
  * 2. **設定資料のJSON** → `core/settingsConflictRule.ts` の規則で決める
  *    （作者が書いた部分が同じなら、時系列で新しいほうへ）
  * 3. **決まらなかった設定資料と、本文** → 作者に1件ずつ選んでもらう。
@@ -127,6 +131,13 @@ export type FoldOutcome =
       incoming: number;
       /** 規則で揃えた設定資料 */
       settingsAutoResolved: SettingsResolution[];
+      /**
+       * 見比べの入口で「全部、新しいほうを採る」を押して片づいた設定資料の件数。
+       *
+       * **作者が1件ずつ選んだ分と混ぜない**（2026-09-11）。混ぜると、
+       * 13件を一括で寄せただけなのに「お選びいただきました」と知らせてしまう
+       */
+      settingsBulkResolved: number;
       /** 作者が1件ずつ選んだファイル */
       manuscriptConflicts: string[];
     }
@@ -251,6 +262,8 @@ export function describeDivergenceConfirm(input: {
   behind: number;
   ahead: number;
   autoWritten: number;
+  /** 追記型（履歴・提案・ロック）の件数。**両方の行を残す** */
+  appendOnly?: number;
   /** 規則で揃える見込みの設定資料の件数 */
   settings?: number;
   /** 作者が1件ずつ選ぶことになる本文の件数 */
@@ -263,6 +276,11 @@ export function describeDivergenceConfirm(input: {
   if (input.autoWritten > 0) {
     lines.push(
       `・食い違う${input.autoWritten}件（自動で書かれるもの）は、この端末の側を残します`
+    );
+  }
+  if (input.appendOnly && input.appendOnly > 0) {
+    lines.push(
+      `・追記型${input.appendOnly}件（履歴・提案・ロック）は、両方の行を残します`
     );
   }
   if (input.settings && input.settings > 0) {
@@ -300,6 +318,7 @@ async function confirm(
     behind,
     ahead,
     autoWritten: classified.autoWritten.length,
+    appendOnly: classified.appendOnly.length,
     settings: classified.settings.length,
     manuscripts: classified.manuscripts.length,
   });
@@ -378,6 +397,7 @@ export async function foldDivergence(
   const resolved: string[] = [];
   const settingsAutoResolved: SettingsResolution[] = [];
   let manuscriptConflicts: string[] = [];
+  let settingsBulkResolved = 0;
 
   const unresolved = await unmergedFiles(root, run);
   if (unresolved.length === 0 && merged.code !== 0) {
@@ -394,10 +414,25 @@ export async function foldDivergence(
 
     // 1. 自動で書かれるもの。**作り直せるので、この端末の側を残す**
     for (const file of classified.autoWritten) {
-      if (!(await keepSide(root, file, "ours", run))) {
+      if (!(await keepSideOfConflict(root, file, "ours", run))) {
         return await abort(root, run, `${file} を確定できませんでした`);
       }
       resolved.push(file);
+    }
+
+    // 1'. 追記型（履歴・提案・ロック）。**どちらも捨てず、両方の行を残す**。
+    // 片側を残すと、もう片方の環境で書かれた記録がそこで消える
+    // （`core/editHistory.ts`）。作者に訊いても答えは「両方」しか無い
+    for (const file of classified.appendOnly) {
+      if (!(await mergeAppendOnly(root, file, run))) {
+        return await abort(root, run, `${file} の行を混ぜられませんでした`);
+      }
+      resolved.push(file);
+    }
+    if (classified.appendOnly.length > 0) {
+      logStep(
+        `追記型の記録 ${classified.appendOnly.length}件は、両方の行を残しました`
+      );
     }
 
     // 2. 設定資料のJSON。規則で決める（設計書5.5.18）
@@ -408,7 +443,7 @@ export async function foldDivergence(
         undecided.push(file);
         continue;
       }
-      if (!(await keepSide(root, file, decision.side, run))) {
+      if (!(await keepSideOfConflict(root, file, decision.side, run))) {
         return await abort(root, run, `${file} を確定できませんでした`);
       }
       resolved.push(file);
@@ -448,8 +483,11 @@ export async function foldDivergence(
           authored: forAuthor,
         };
       }
-      resolved.push(...walked.resolved);
+      // 検査の白紙は「触ってよい側」なので、**一括で寄せた分もここへ足す**。
+      // 落とすと、gitが書き戻したときの改行の違いだけで検査が落ちる
+      resolved.push(...walked.resolved, ...walked.bulkResolved);
       manuscriptConflicts = [...walked.resolved];
+      settingsBulkResolved = walked.bulkResolved.length;
     }
 
     // 選び終わっても未解決が残っているなら、こちらの読み違いである。
@@ -500,6 +538,7 @@ export async function foldDivergence(
     backup,
     incoming: incoming.length,
     settingsAutoResolved,
+    settingsBulkResolved,
     manuscriptConflicts,
   };
 }
@@ -533,19 +572,47 @@ async function decideForFile(
   return decideSettingsConflict({ base, ours, theirs });
 }
 
-/** 選んだ側で確定させる */
-async function keepSide(
+/**
+ * 追記型の記録を、**両方の行を残す形**で確定させる。
+ *
+ * 1行1件の追記しかしないので、分岐で起きるのは「行が混ざった」だけである
+ * （`core/editHistory.ts`）。混ぜるのは `mergeProposalJsonl`——提案を混ぜる
+ * のに既に使っている純粋関数で、同じ行は `lineKey` で1つに畳み、gitが
+ * 残した競合マーカーの行は落とす。**写しを作らずに、そちらへ任せる。**
+ *
+ * ここだけは `atomicWriteFile` を通さない。索引から書き戻すのではなく
+ * **その場で組んだ中身を置く**ので、gitに任せる経路が無い。相手は
+ * `.aiwriter/` の下の機械の記録であって原稿ではないため、
+ * `writeTextFilePreservingFormat`（退避→新規作成）の対象でもない。
+ * 巻き戻したいときは、この関数の外側の `merge --abort` と退避の枝が効く。
+ */
+async function mergeAppendOnly(
   root: string,
   file: string,
-  side: "ours" | "theirs",
   run: GitCommandRunner
 ): Promise<boolean> {
-  const checkout = await run(
-    ["checkout", `--${side}`, "--", file],
-    root,
-    15_000
-  );
-  if (checkout.code !== 0) return false;
+  const ours = await showStage(root, file, 2, run);
+  const theirs = await showStage(root, file, 3, run);
+  // 片方にしか無い（追加と削除がぶつかった）。**消さずに、ある側を残す**
+  const text =
+    ours !== undefined && theirs !== undefined
+      ? mergeProposalJsonl(ours, theirs).text
+      : ours ?? theirs;
+  if (text === undefined) return false;
+
+  try {
+    await vscode.workspace.fs.writeFile(
+      paths.toUri(paths.join(root, file)),
+      new TextEncoder().encode(text)
+    );
+  } catch (error) {
+    logFailure("追記型の記録を混ぜられなかった", {
+      ファイル: file,
+      詳細: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+
   const added = await run(["add", "--", file], root, 15_000);
   return added.code === 0;
 }
@@ -582,6 +649,10 @@ export function describeAuthoredStop(files: readonly string[]): string {
  *
  * 作者の指摘（2026-09-10）：「競合解決があるかないかわからない。件数が出ない」。
  * **何件をどう片づけたかを、必ず数字で出す。**
+ *
+ * **一括で寄せた分と、1件ずつ選んだ分は分けて言う**（2026-09-11）。
+ * 13件を「全部、新しいほうを採る」で片づけたのに
+ * 「お選びいただきました」と出ていた。**やっていないことを、やったと言わない。**
  */
 export function describeFoldSuccess(
   label: string,
@@ -598,6 +669,9 @@ export function describeFoldSuccess(
       `設定資料 ${result.settingsAutoResolved.length}件は新しいほうに揃えました` +
         `（別環境 ${theirs}件・こちら ${ours}件）`
     );
+  }
+  if (result.settingsBulkResolved > 0) {
+    parts.push(`設定資料 ${result.settingsBulkResolved}件は、まとめて新しいほうを採りました`);
   }
   if (result.manuscriptConflicts.length > 0) {
     parts.push(`本文など ${result.manuscriptConflicts.length}件はお選びいただきました`);
@@ -630,6 +704,7 @@ async function reportFold(
   logStep(
     `分岐を合わせた（${label}／取り込み ${result.incoming}件` +
       `／設定資料 ${result.settingsAutoResolved.length}件` +
+      `／一括で新しいほう ${result.settingsBulkResolved}件` +
       `／作者が選んだ ${result.manuscriptConflicts.length}件）`
   );
   await deps.monitor?.refreshAll({ fetch: false });

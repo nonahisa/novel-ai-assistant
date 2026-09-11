@@ -21,6 +21,11 @@ const shown: string[] = [];
 vi.mock("vscode", () => {
   const readFile = async (uri: { fsPath: string }) =>
     new Uint8Array(fs.readFileSync(uri.fsPath));
+  // 追記型の記録を混ぜた結果は、索引からではなく**その場で組んで**置く
+  const writeFile = async (uri: { fsPath: string }, bytes: Uint8Array) => {
+    fs.mkdirSync(nodePath.dirname(uri.fsPath), { recursive: true });
+    fs.writeFileSync(uri.fsPath, bytes);
+  };
   return {
     window: {
       showInformationMessage: (message: string, ...rest: unknown[]) => {
@@ -51,7 +56,7 @@ vi.mock("vscode", () => {
       }),
     },
     workspace: {
-      fs: { readFile },
+      fs: { readFile, writeFile },
       getConfiguration: () => ({ get: () => undefined }),
     },
     commands: { registerCommand: () => ({ dispose() {} }), executeCommand: () => {} },
@@ -92,8 +97,12 @@ function pickAnswer(rest: unknown[]): string | undefined {
   return wanted;
 }
 
-const { resolveDivergence, describeDivergenceConfirm, foldDivergence } =
-  await import("../../src/features/resolveDivergence");
+const {
+  resolveDivergence,
+  describeDivergenceConfirm,
+  describeFoldSuccess,
+  foldDivergence,
+} = await import("../../src/features/resolveDivergence");
 type ConflictWalker = Parameters<
   typeof foldDivergence
 >[2] extends { walk?: infer W } | undefined
@@ -140,8 +149,11 @@ function setUp(): void {
   git(root, "config", "user.email", "author@example.com");
 }
 
-/** 別のPCで書いた分を、GitHub役へ入れる */
-function pushFromOtherMachine(changes: Array<[string, string]>): void {
+/** 別のPCで書いた分を、GitHub役へ入れる。`removals` は向こうで消したもの */
+function pushFromOtherMachine(
+  changes: Array<[string, string]>,
+  removals: string[] = []
+): void {
   const other = fs.mkdtempSync(nodePath.join(os.tmpdir(), "novelai-other-"));
   git(other, "-c", "core.autocrlf=false", "clone", "-q", remote, "clone");
   const clone = nodePath.join(other, "clone");
@@ -149,6 +161,7 @@ function pushFromOtherMachine(changes: Array<[string, string]>): void {
   git(clone, "config", "user.name", "作者");
   git(clone, "config", "user.email", "author@example.com");
   for (const [file, body] of changes) write(clone, file, body);
+  for (const file of removals) fs.rmSync(nodePath.join(clone, file));
   git(clone, "add", "-A");
   git(clone, "commit", "-qm", "別のPCで書いた");
   git(clone, "push", "-q", "origin", "main");
@@ -370,6 +383,20 @@ describe("合わせる前の確認に出す中身", () => {
     expect(text.detail).toContain("食い違う4件（自動で書かれるもの）");
   });
 
+  test("追記型は、両方の行を残すと書く（実機確認リスト A-17 の代わり）", () => {
+    // **「どちらかを選ばされる」と読ませない。** 訊かれないことを先に言う
+    const text = describeDivergenceConfirm({
+      label: "いじめられっ子",
+      behind: 1,
+      ahead: 1,
+      autoWritten: 0,
+      appendOnly: 3,
+    });
+
+    expect(text.detail).toContain("追記型3件（履歴・提案・ロック）");
+    expect(text.detail).toContain("両方の行を残します");
+  });
+
   test("畳むものが無ければ、その行を出さない（実機確認リスト A-17 の代わり）", () => {
     const text = describeDivergenceConfirm({
       label: "いじめられっ子",
@@ -454,11 +481,15 @@ describe("設定資料と本文の自動合流", { timeout: 30_000 }, () => {
       git(cwd, "checkout", "--ours", "--", file);
       git(cwd, "add", "--", file);
     }
-    return { resolved: [...files], aborted: false };
+    return { resolved: [...files], bulkResolved: [], aborted: false };
   };
 
   /** 作者が途中でやめる */
-  const やめる: ConflictWalker = async () => ({ resolved: [], aborted: true });
+  const やめる: ConflictWalker = async () => ({
+    resolved: [],
+    bulkResolved: [],
+    aborted: true,
+  });
 
   test("作者が書いた部分が同じなら、更新時刻の新しいほうへ揃える", async () => {
     分岐を作る(
@@ -565,7 +596,7 @@ describe("設定資料と本文の自動合流", { timeout: 30_000 }, () => {
     let 呼ばれた = false;
     const result = await 合わせる(async () => {
       呼ばれた = true;
-      return { resolved: [], aborted: true };
+      return { resolved: [], bulkResolved: [], aborted: true };
     });
 
     expect(呼ばれた).toBe(false);
@@ -576,6 +607,69 @@ describe("設定資料と本文の自動合流", { timeout: 30_000 }, () => {
     );
     expect(本文).toContain("一行目（むこう）");
     expect(本文).toContain("五行目（こちら）");
+  });
+
+  /**
+   * 追記型（履歴・提案・ロック）は、作者に訊かずに両方の行を残す（2026-09-11）。
+   *
+   * 作者の手元で13作品ぶんの分岐が起き、これらが1件ずつの見比べに混ざって
+   * 抜けられなくなった。**どちらを残すかを訊かれても、答えは「両方」しか無い**
+   * （`core/editHistory.ts`）。
+   */
+  test("追記型の記録がぶつかったら、両方の行を残して確定する", async () => {
+    const 履歴 = "短編/.aiwriter/history/edits.jsonl";
+    const もと = '{"time":"2026-09-01T00:00:00.000Z","action":"土台"}\n';
+    分岐を作る(
+      [[履歴, もと]],
+      [[履歴, もと + '{"time":"2026-09-05T00:00:00.000Z","action":"むこうで直した"}\n']],
+      [[履歴, もと + '{"time":"2026-09-03T00:00:00.000Z","action":"こちらで直した"}\n']]
+    );
+
+    // **選ばせる関数は呼ばれてはならない**
+    let 呼ばれた = false;
+    const result = await 合わせる(async () => {
+      呼ばれた = true;
+      return { resolved: [], bulkResolved: [], aborted: true };
+    });
+
+    expect(呼ばれた).toBe(false);
+    expect(result.ok).toBe(true);
+    const 中身 = fs.readFileSync(nodePath.join(root, 履歴), "utf8");
+    expect(中身).toContain("むこうで直した");
+    expect(中身).toContain("こちらで直した");
+    // 土台の1行は両側にあるが、**同じ行は1つに畳む**
+    expect(中身.trim().split("\n")).toHaveLength(3);
+    // 競合マーカーは持ち込まない
+    expect(中身).not.toContain("<<<<<<<");
+    expect(status()).not.toContain("behind");
+    expect(git(root, "status", "--porcelain").trim()).toBe("");
+  });
+
+  test("追記型の片方の版が無ければ、ある側の行を残す", async () => {
+    // 追加と削除がぶつかった形。**消さずに、残っている側を採る**
+    const ロック = "短編/.aiwriter/locks/locks.jsonl";
+    const もと = '{"file":"第1話.txt","by":"編集部"}\n';
+    commitHere([[ロック, もと]], "土台");
+    git(root, "push", "-q", "origin", "main");
+    pushFromOtherMachine([], [ロック]);
+    commitHere(
+      [[ロック, もと + '{"file":"第2話.txt","by":"編集部"}\n']],
+      "こちらで足した"
+    );
+    git(root, "fetch", "-q");
+
+    let 呼ばれた = false;
+    const result = await 合わせる(async () => {
+      呼ばれた = true;
+      return { resolved: [], bulkResolved: [], aborted: true };
+    });
+
+    expect(呼ばれた).toBe(false);
+    expect(result.ok).toBe(true);
+    const 中身 = fs.readFileSync(nodePath.join(root, ロック), "utf8");
+    expect(中身).toContain("第1話.txt");
+    expect(中身).toContain("第2話.txt");
+    expect(status()).not.toContain("behind");
   });
 
   test("承認待ちの提案がぶつかったら、この端末の側を残す", async () => {
@@ -590,7 +684,7 @@ describe("設定資料と本文の自動合流", { timeout: 30_000 }, () => {
     let 呼ばれた = false;
     const result = await 合わせる(async () => {
       呼ばれた = true;
-      return { resolved: [], aborted: true };
+      return { resolved: [], bulkResolved: [], aborted: true };
     });
 
     expect(呼ばれた).toBe(false);
@@ -613,5 +707,80 @@ describe("本物のリポジトリでも、その数字が出る", { timeout: 30
 
     expect(shown.join("\n")).toContain("GitHubの側にある1件を取り込みます");
     expect(shown.join("\n")).toContain("こちらの1件はそのまま残ります");
+  });
+});
+
+/**
+ * 済んだあとの知らせ（2026-09-11）。
+ *
+ * 作者が13件を「全部、新しいほうを採る」で片づけたのに、
+ * 「本文など13件はお選びいただきました」と出ていた。
+ * **やっていないことを、やったと言わない。** 画面を出さずに文面だけ確かめる。
+ */
+describe("合わせた結果の知らせ", () => {
+  function 結果(input: {
+    bulk?: number;
+    picked?: string[];
+    auto?: Array<"ours" | "theirs">;
+  }) {
+    return {
+      ok: true as const,
+      backup: "backup/2026-09-11-101112-合わせる前",
+      incoming: 4,
+      settingsAutoResolved: (input.auto ?? []).map((side, index) => ({
+        file: `短編/設定/characters/char_00${index + 1}.json`,
+        side,
+        reason: "作者の書いた部分が同じ",
+      })),
+      settingsBulkResolved: input.bulk ?? 0,
+      manuscriptConflicts: input.picked ?? [],
+    };
+  }
+
+  test("一括だけなら、選んだとは言わない", () => {
+    const text = describeFoldSuccess("短編", 結果({ bulk: 13 }));
+
+    expect(text).toContain("設定資料 13件は、まとめて新しいほうを採りました");
+    expect(text).not.toContain("お選びいただきました");
+  });
+
+  test("手選びだけなら、これまでどおり", () => {
+    const text = describeFoldSuccess(
+      "短編",
+      結果({ picked: ["短編/本文/第1話.txt", "短編/本文/第2話.txt"] })
+    );
+
+    expect(text).toContain("本文など 2件はお選びいただきました");
+    expect(text).not.toContain("新しいほうを採りました");
+  });
+
+  test("両方あれば、両方を別々に数える", () => {
+    const text = describeFoldSuccess(
+      "短編",
+      結果({ bulk: 13, picked: ["短編/本文/第1話.txt"] })
+    );
+
+    expect(text).toContain("設定資料 13件は、まとめて新しいほうを採りました");
+    expect(text).toContain("本文など 1件はお選びいただきました");
+  });
+
+  test("どちらも無ければ、取り込みの件数だけ", () => {
+    const text = describeFoldSuccess("短編", 結果({}));
+
+    expect(text).toContain("取り込み 4件");
+    expect(text).not.toContain("新しいほうを採りました");
+    expect(text).not.toContain("お選びいただきました");
+  });
+
+  test("規則で揃えた分とは、別の言い方で並べる", () => {
+    // 規則（`settingsConflictRule`）で決めた分と、入口で一括に寄せた分は
+    // **別の経路**である。同じ数え方に畳むと、どちらが起きたのか分からない
+    const text = describeFoldSuccess(
+      "短編",
+      結果({ auto: ["theirs", "ours"], bulk: 13 })
+    );
+
+    expect(text).toContain("設定資料 2件は新しいほうに揃えました（別環境 1件・こちら 1件）");
+    expect(text).toContain("設定資料 13件は、まとめて新しいほうを採りました");
   });
 });

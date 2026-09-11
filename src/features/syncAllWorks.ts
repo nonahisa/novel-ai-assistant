@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import {
+  fetchRemote,
   pullFastForward,
   push,
   readSyncStatus,
@@ -11,6 +12,7 @@ import {
 import { commitAll, countTrackableFiles, hasCommitIdentity } from "../core/gitSetup";
 import { buildSyncTarget } from "../core/syncTarget";
 import { readDivergenceConflicts } from "../core/divergenceScan";
+import { canFetch, pullBeforeRecording } from "./gitSync";
 import { foldDivergence } from "./resolveDivergence";
 import {
   actionablePlans,
@@ -164,6 +166,30 @@ async function collectStates(
     progress.report({ message: work.title });
 
     let status = await readSyncStatus(work.folderPath, deps.run);
+    // リポジトリの根が分かるなら、そこを置き場にする。
+    // **同じ根の作品を二度処理しない**
+    const root = "root" in status && status.root ? status.root : work.folderPath;
+    const key = root.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    // **遅れの件数は、リモートを取りに行ったあとでないと当てにならない**
+    // （設計書5.5.18）。記録より先に早送りできるかどうかがこの数で決まる
+    // ため、ここで読み直す。**fetchは置き場ごとに1回だけ**——作品ごとに
+    // 走らせると、書庫では作品の数だけ回線を使う。
+    // 取りに行けなくても止めない。手元が知っている範囲で進めるだけで、
+    // いまより悪くはならない
+    if (canFetch(status)) {
+      const fetched = await fetchRemote(root, deps.run);
+      if (!fetched.ok) {
+        logFailure("すべて同期：状態を調べる前のfetchに失敗", {
+          置き場: root,
+          詳細: fetched.detail ?? "（詳細なし）",
+        });
+      }
+      status = await readSyncStatus(root, deps.run);
+    }
+
     // **分かれているなら、同じ箇所の衝突の件数まで数える**（設計書5.5.18）。
     // 確認の画面で「選ぶことになるのか」が分かるようにするため
     if (status.kind === "tracked" && status.ahead > 0 && status.behind > 0) {
@@ -174,12 +200,6 @@ async function collectStates(
       );
       if (conflicts) status = { ...status, conflicts };
     }
-    // リポジトリの根が分かるなら、そこを置き場にする。
-    // **同じ根の作品を二度処理しない**
-    const root = "root" in status && status.root ? status.root : work.folderPath;
-    const key = root.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
 
     const target = buildSyncTarget(root, deps.registry.list());
     // 記録される件数は、置き場の根で数える
@@ -229,8 +249,12 @@ async function confirm(
 /**
  * 1つの置き場を同期する。
  *
- * **記録 → 取り込み → 送信の順に行う。** 途中で止まったら、そこで打ち切って
- * 理由を返す（続けても同じ理由で止まるため）。
+ * **早送りで取り込める分を先に入れてから、記録 → 取り込み → 送信の順に
+ * 行う**（設計書5.5.18）。遅れているだけの置き場を先に記録すると、
+ * その1件で分岐が生まれてしまうためである。
+ *
+ * 途中で止まったら、そこで打ち切って理由を返す（続けても同じ理由で
+ * 止まるため）。**止めるのはその置き場だけで、他の置き場は続ける。**
  */
 async function runPlan(
   deps: SyncAllDeps,
@@ -255,6 +279,38 @@ async function runPlan(
   */
   const logWork = plan.target.works[0];
   if (logWork) useLogFile(logWork.folderPath);
+
+  // **記録より先に、早送りできるうちに取り込む**（設計書5.5.18）。
+  // 遅れたまま記録すると、その1件で分岐が生まれる。単独の「同期」と
+  // 同じ関数を呼ぶ（`gitSync.ts` の `pullBeforeRecording`。写しを作らない）
+  const early = await pullBeforeRecording(cwd, plan.target.status, run);
+  if (early.kind === "conflicted") {
+    // 取り込みは済んでいるが、退避した書きかけを戻すときに食い違った。
+    // **この置き場は、記録も取り込みも進めない**——`git add -A` が
+    // 競合マーカーごと記録してしまう。他の置き場はそのまま続ける
+    outcome.pulled = true;
+    outcome.error =
+      "GitHubの分を取り込みましたが、書きかけと同じ箇所が食い違ったので止めました。" +
+      "書きかけはgitの退避（stash）に残っています。" +
+      "食い違いを直してから、もう一度同期してください。";
+    logFailure("すべて同期：記録の前の早送りで、書きかけと食い違った", {
+      置き場: name,
+    });
+    return outcome;
+  }
+  if (early.kind === "pulled") {
+    outcome.pulled = true;
+    outcome.preRecordPulled = early.behind;
+    logStep(`すべて同期：記録の前に早送りで取り込んだ（${name}／${early.behind}件）`);
+  }
+  if (early.kind === "fast_forward_failed") {
+    // 早送りできなかっただけ。**従来の道（記録 → 取り込み）へ落とす**
+    logFailure("すべて同期：記録の前の早送りに失敗", {
+      置き場: name,
+      詳細: early.detail,
+    });
+  }
+  // `diverged`・`skipped` は、これまでどおり記録から始める
 
   if (plan.commit) {
     // **名前とメールアドレスが無いと、gitはコミットを作れない。**
@@ -281,7 +337,9 @@ async function runPlan(
     );
   }
 
-  if (plan.pull) {
+  // 先に早送りで取り込んだなら、遅れはもう無い。ここでもう一度 pull を
+  // 走らせると、同じ置き場で二度回線を使うだけになる
+  if (plan.pull && early.kind !== "pulled") {
     const result = await pullFastForward(cwd, deps.run);
     if (!result.ok) {
       // **分かれていても、ここで合わせにいく**（設計書5.5.18）。
@@ -366,7 +424,8 @@ async function foldHere(
     ok: true,
     summary: {
       incoming: result.incoming,
-      settings: result.settingsAutoResolved.length,
+      // 規則で揃えた分と、作者が「全部、新しいほうを採る」で寄せた分の両方（0.47.0）
+      settings: result.settingsAutoResolved.length + result.settingsBulkResolved,
       manuscripts: result.manuscriptConflicts.length,
       backup: result.backup,
     },

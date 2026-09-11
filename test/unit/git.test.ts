@@ -12,6 +12,7 @@ import {
   parseStatusPorcelain,
   isAutoWrittenLine,
   pullFastForward,
+  pullFastForwardAutostash,
   readSyncStatus,
   runGit,
   unmergedPaths,
@@ -430,6 +431,26 @@ describe("取り込みの安全確認", () => {
     expect(executed).toContain("pull --ff-only");
     expect(executed.join("\n")).not.toContain("--no-ff");
   });
+
+  test("退避つきの早送りは、書きかけがあっても止めない", async () => {
+    // **記録より先に取り込めば、分岐そのものが生まれない**（2026-09-11）。
+    // 未記録の変更で先に止めないこと、rebaseで作者の記録を作り直さないこと
+    const executed: string[] = [];
+    const base = fakeGit({
+      ...TRACKED_BASE,
+      "status --porcelain": { stdout: " M 本文/019.txt\n" },
+    });
+    const run: GitCommandRunner = async (args, cwd, timeout) => {
+      executed.push(args.join(" "));
+      return base(args, cwd, timeout);
+    };
+
+    const result = await pullFastForwardAutostash("/work", run);
+
+    expect(result).toEqual({ ok: true });
+    expect(executed).toEqual(["pull --ff-only --autostash"]);
+    expect(executed.join("\n")).not.toContain("--rebase");
+  });
 });
 
 describe("状態の説明文", () => {
@@ -464,7 +485,7 @@ describe("状態の説明文", () => {
       ahead: 2,
       dirty: 0,
       unmerged: 0,
-      conflicts: { settings: [], manuscripts: [], autoWritten: [] },
+      conflicts: { settings: [], manuscripts: [], autoWritten: [], appendOnly: [] },
     });
 
     expect(text).toContain("分かれています：取り込み 3件・送信 2件");

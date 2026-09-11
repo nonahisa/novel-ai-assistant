@@ -100,6 +100,8 @@ export interface DivergenceConflicts {
   manuscripts: string[];
   /** 拡張機能が自動で書くもの。この端末の側を残す */
   autoWritten: string[];
+  /** 追記型。両方の行を残して畳む（履歴・提案・ロック） */
+  appendOnly: string[];
 }
 
 /**
@@ -409,6 +411,48 @@ export async function pullFastForward(
 }
 
 /**
+ * 書きかけを抱えたまま、**早送りだけで**取り込む（設計書5.5.18）。
+ *
+ * **分岐は、遅れている側が先にコミットした瞬間に生まれる。** 21件遅れた
+ * 手元で「取り込む前の自動保存」をすると、その1件で ahead が立ち、
+ * 早送りで済むはずだった取り込みが合流になる（2026-09-11、作者のノートPCが
+ * 25件先・21件遅れになり、衝突を1件ずつ選ばされて抜けられなくなった）。
+ * **早送りできるうちに取り込めば、分岐そのものが生まれない。**
+ *
+ * そのため `pullFastForward` と違い、**未コミットの変更があっても止めない。**
+ * `--autostash` は、書きかけをgitがいったん退避し、取り込んだあとで戻す
+ * 指定である。早送りは手元の履歴を動かさないので、作者のコミットは
+ * 1つも書き換わらない。戻しに失敗した場合もgitは退避（stash）を残すため、
+ * 書きかけが消えることはない（**呼び出し側は、戻しが食い違ったまま
+ * 記録へ進まないこと**——競合マーカーごとコミットしてしまう）。
+ *
+ * **`--rebase` は使わない。** 作者のコミットを作り直すことになり、
+ * 「履歴は消さない」（設計書5.5.4）に反する。
+ */
+export async function pullFastForwardAutostash(
+  cwd: string,
+  run: GitCommandRunner = runGit
+): Promise<{ ok: true } | { ok: false; failure: PullFailure }> {
+  const result = await run(
+    ["pull", "--ff-only", "--autostash"],
+    cwd,
+    FETCH_TIMEOUT_MS
+  );
+  if (result.code === 0) return { ok: true };
+
+  // 失敗の読み分けは `pullFastForward` と揃える。
+  // 早送りできない＝分かれている、が最も多い
+  const after = await readSyncStatus(cwd, run);
+  if (after.kind === "tracked" && after.ahead > 0 && after.behind > 0) {
+    return { ok: false, failure: { kind: "diverged" } };
+  }
+  return {
+    ok: false,
+    failure: { kind: "failed", detail: describeFailure(result) },
+  };
+}
+
+/**
  * gitがマージ未解決としているファイル（リポジトリ相対）。
  *
  * 本文に競合マーカーが残っているだけの状態とは区別する。
@@ -456,6 +500,24 @@ export async function checkoutSide(
   const add = await run(["add", "--", relativePath], cwd, LOCAL_TIMEOUT_MS);
   if (add.code !== 0) return { ok: false, detail: describeFailure(add) };
   return { ok: true };
+}
+
+/**
+ * 選んだ側で確定できたかどうかだけを返す。
+ *
+ * **合流の途中から呼ぶ側のための形である。** 落ちたらファイル単位で
+ * 知らせるのではなく `merge --abort` でまとめて戻すので、理由の文字列は
+ * 使い道が無い。**写しを作らないため、中身は `checkoutSide` に任せる**
+ * ——合流（`features/resolveDivergence.ts`）と1件ずつの見比べ
+ * （`features/resolveConflicts.ts`）の両方がここを通る。
+ */
+export async function keepSideOfConflict(
+  cwd: string,
+  relativePath: string,
+  side: "ours" | "theirs",
+  run: GitCommandRunner = runGit
+): Promise<boolean> {
+  return (await checkoutSide(cwd, relativePath, side, run)).ok;
 }
 
 /** 索引の特定の版を取り出す。1=共通の祖先 / 2=この環境 / 3=別環境 */

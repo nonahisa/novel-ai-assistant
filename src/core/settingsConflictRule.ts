@@ -129,6 +129,35 @@ export function decideSettingsConflict(input: {
   };
 }
 
+/**
+ * 中身を見比べずに、**更新時刻の新しいほう**を採る。
+ *
+ * `decideSettingsConflict` は作者が書いた部分を突き合わせてから決めるので、
+ * そこが両側で違うと「決めない」に落ちる。**それが正しい既定である**が、
+ * 13作品ぶんの分岐が来ると1件ずつの見比べから抜けられない
+ * （作者の実測、2026-09-11）。こちらは作者が画面で
+ * 「全部、新しいほうを採る」と決めたときだけ通る道であり、
+ * **決めるのは機械ではなく作者である。**
+ *
+ * 読めないJSONでもここでは止めない。押した作者の意図は「まとめて片づける」
+ * なので、**書き換えずにこの端末の側を残す**——`decideSettingsConflict` が
+ * 作者へ回すのとは、置かれている場面が違う。
+ */
+export function decideByUpdatedAt(
+  ours: string,
+  theirs: string
+): SettingsConflictDecision {
+  const oursRecord = parseRecord(ours);
+  const theirsRecord = parseRecord(theirs);
+  if (!oursRecord || !theirsRecord) {
+    return {
+      side: "ours",
+      reason: "JSONとして読めないため、この端末の側を残しました",
+    };
+  }
+  return byUpdatedAt(oursRecord, theirsRecord);
+}
+
 /** 更新時刻の新しいほう。取れないときは、この端末の側を残す */
 function byUpdatedAt(
   ours: Record<string, unknown>,

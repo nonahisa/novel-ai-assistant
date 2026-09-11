@@ -59,7 +59,7 @@ export function mergeTreeArgs(ours: string, theirs: string): string[] {
  * | `.aiwriter/stats/` | 畳める | 端末ごとのファイル。読み込むときに合算する（5.5.6） |
  * | `.aiwriter/cache/` | 畳める | 作り直せる |
  * | `.aiwriter/config.json` | 畳める | 作品名と置き場の名前。食い違うのは登録した時刻ぐらいである |
- * | `.aiwriter/history/`・提案・ロック | **畳めない** | **追記型**（5.6）。片方を残すと、もう片方の環境で書かれた記録が消える |
+ * | `.aiwriter/history/`・提案・ロック | **両方の行を残す** | 追記型なので、両方の行を残せば正しい記録になる（`editHistory.ts`）。見分けるのは `isAppendOnlyPath` |
  * | `.aiwriter/pending-characters/` | 畳める | **AIの提案で、まだ資料になっていない。** 再抽出で作り直せる（5.5.18） |
  * | `.aiwriter/extracted.json` | **畳めない** | 抽出済みの話の記録。正しくは両方の和集合で、片方を残すと再抽出が走る |
  * | `設定/_schema/` | 畳める | AI向けのスキーマ。次の生成で作り直される（`settingsConflictRule.ts` と同じ判断。0.45.1） |
@@ -91,6 +91,36 @@ export function isAutoWrittenPath(filePath: string): boolean {
     // フォルダー名では縛らず、生成物の側の名前で見る
     /(^|\/)_schema\//.test(normalized) ||
     /(^|\/)(abilities|characters|locations|organizations|world)\.md$/.test(normalized)
+  );
+}
+
+/**
+ * 追記型の記録か。**畳むときは、どちらも捨てずに両方の行を残す。**
+ *
+ * `isAutoWrittenPath` と分けてあるのは、**片側を残すのではなく混ぜる**
+ * からである。1行1件の追記しかしない決まりなので、分岐で起きるのは
+ * 「行が混ざった」だけであり、**両方を残せば正しい記録になる**
+ * （`editHistory.ts` の冒頭にそう書いてある）。片側を残すと、もう片方の
+ * 環境で書かれた記録がそこで消える。
+ *
+ * **作者への問いに回してはならない。** 作者の手元で13作品ぶんの分岐が
+ * 起き、これらが1件ずつの見比べに混ざって抜けられなくなった（2026-09-11）。
+ * どちらを残すかを訊かれても、答えは「両方」しか無い。
+ *
+ * 混ぜるのは `editingRepo.ts` の `mergeProposalJsonl`（`lineKey` で同じ行を
+ * 1つに畳む純粋関数）。実際に走らせるのは `features/resolveDivergence.ts`。
+ *
+ * **名指しの3つだけにする。** `.aiwriter/` の下の `.jsonl` を一律に混ぜると、
+ * あとから追記型でない台帳が増えたときに黙って混ざる。
+ */
+export function isAppendOnlyPath(filePath: string): boolean {
+  // Windowsの区切り（\）を / に揃える。符号で書くのは、正規表現の中の
+  // 円記号が読みにくいためである
+  const normalized = filePath.replace(/[\u005C]/g, "/");
+  return (
+    /(^|\/)\.aiwriter\/history\/edits\.jsonl$/.test(normalized) ||
+    /(^|\/)\.aiwriter\/proposals\/proposals\.jsonl$/.test(normalized) ||
+    /(^|\/)\.aiwriter\/locks\/locks\.jsonl$/.test(normalized)
   );
 }
 

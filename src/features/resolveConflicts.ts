@@ -6,10 +6,15 @@ import { encodeForNewFile, readTextFile } from "../core/textFile";
 import { atomicWriteFile } from "../core/atomicWrite";
 import {
   checkoutSide,
+  keepSideOfConflict,
   showStage,
   unmergedPaths,
   type GitCommandRunner,
 } from "../core/git";
+import {
+  decideByUpdatedAt,
+  isSettingsJsonPath,
+} from "../core/settingsConflictRule";
 import {
   describeConflict,
   parseConflicts,
@@ -18,7 +23,7 @@ import {
   type ConflictParseResult,
 } from "../core/conflictFile";
 import { countChars, formatCount } from "../core/charCount";
-import { logFailure, showLog, useLogFile } from "../core/logger";
+import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 import { lastAuthorOf } from "../core/git";
 import { cancelItem } from "../views/dialogs";
 import { openInDefaultEditor } from "../views/openDocument";
@@ -467,11 +472,24 @@ async function openFile(filePath: string): Promise<void> {
 
 /** 順に見比べた結果 */
 export interface WalkConflictsResult {
-  /** 作者が版を決めたファイル */
+  /**
+   * 作者が**1件ずつ見比べて選んだ**ファイル。
+   *
+   * **一括で寄せたものはここに入れない。** 混ぜると、済んだあとの知らせが
+   * 13件まとめて押した分まで「お選びいただきました」と言ってしまう
+   * （作者の実測、2026-09-11）。実態と違う言い方は、次に同じ画面へ来たときに
+   * 「自分が何を選んだのか」を思い出せなくする
+   */
   resolved: string[];
+  /** 「全部、新しいほうを採る」で確定したファイル */
+  bulkResolved: string[];
   /** 途中でやめたか。**やめたら呼び出し側が `merge --abort` で全部戻す** */
   aborted: boolean;
 }
+
+/** 入口のボタン。**押された文字で分けるので、定数を1か所に置く** */
+const KEEP_ALL_NEWEST = "全部、新しいほうを採る";
+const ONE_BY_ONE = "1件ずつ選ぶ";
 
 /**
  * 未解決のファイルを、**1件ずつ順に**選ばせる（設計書5.5.18）。
@@ -483,6 +501,15 @@ export interface WalkConflictsResult {
  * 合流の途中から呼ぶので、**選び終わるまで抜けない**。抜けた（やめた）ときは
  * `aborted` を立てて返し、呼び出し側がマージごと元へ戻す。
  * 中途半端に確定したファイルだけが残る状態を作らないためである。
+ *
+ * ## 「全部、新しいほうを採る」を先に出す（2026-09-11）
+ *
+ * 13作品ぶんの分岐が来たとき、**道が「1件ずつ選ぶ」しか無いと抜けられない**
+ * （作者の実測。「全部最新を優先する選択肢をまず提示し、操作をシンプルに
+ * してください」）。ただし**一括で寄せるのは設定資料のJSONだけ**にする——
+ * 設定資料の大半はAIの抽出結果で、捨てた側は抽出をやり直せば戻る
+ * （`core/settingsConflictRule.ts`）。**原稿は一括で寄せない。**
+ * 作者の原稿を壊さないことが最優先の決まりであり、戻す手立ても無い。
  */
 export async function walkConflicts(
   scope: ConflictScope,
@@ -490,7 +517,8 @@ export async function walkConflicts(
   options: WalkConflictsOptions = {}
 ): Promise<WalkConflictsResult> {
   const resolved: string[] = [];
-  if (files.length === 0) return { resolved, aborted: false };
+  const bulkResolved: string[] = [];
+  if (files.length === 0) return { resolved, bulkResolved, aborted: false };
 
   const provider = options.provider ?? registeredProvider;
   if (!provider) {
@@ -499,17 +527,42 @@ export async function walkConflicts(
     await vscode.window.showWarningMessage(
       "見比べの画面を用意できませんでした。合わせるのを取りやめます。"
     );
-    return { resolved, aborted: true };
+    return { resolved, bulkResolved, aborted: true };
   }
 
+  const settingsFiles = files.filter((file) => isSettingsJsonPath(file));
+  // 一括で片づけられるものが無ければ、そのボタンは出さない。
+  // **押しても何も減らないボタンは、迷わせるだけである**
+  const buttons =
+    settingsFiles.length > 0 ? [KEEP_ALL_NEWEST, ONE_BY_ONE] : [ONE_BY_ONE];
   const start = await vscode.window.showInformationMessage(
     describeWalkStart(files),
     { modal: true, detail: describeWalkStartDetail(files) },
-    "1件ずつ選ぶ"
+    ...buttons
   );
-  if (start !== "1件ずつ選ぶ") return { resolved, aborted: true };
+  if (start !== KEEP_ALL_NEWEST && start !== ONE_BY_ONE) {
+    return { resolved, bulkResolved, aborted: true };
+  }
 
-  for (const [index, relative] of files.entries()) {
+  let toReview: readonly string[] = files;
+  if (start === KEEP_ALL_NEWEST) {
+    // 決められなかったものは捨てずに見比べへ回す。**まとめて片づける道が、
+    // 決められないものを黙って捨てる道になってはならない**
+    const undecided: string[] = [];
+    for (const file of settingsFiles) {
+      // 一括で寄せた分は `bulkResolved` へ。**作者は選んでいない**ので、
+      // 1件ずつ選んだ `resolved` とは分けたまま呼び出し側へ渡す
+      if (await keepNewestSide(scope, file, options.run)) bulkResolved.push(file);
+      else undecided.push(file);
+    }
+    toReview = [
+      ...undecided,
+      ...files.filter((file) => !isSettingsJsonPath(file)),
+    ];
+    if (toReview.length === 0) return { resolved, bulkResolved, aborted: false };
+  }
+
+  for (const [index, relative] of toReview.entries()) {
     const file = await buildConflictedFile(scope, relative, options.run);
     const outcome = await reviewConflict(scope, file, {
       run: options.run,
@@ -521,10 +574,10 @@ export async function walkConflicts(
       sides: file.sides,
       quiet: true,
     });
-    if (outcome !== "resolved") return { resolved, aborted: true };
+    if (outcome !== "resolved") return { resolved, bulkResolved, aborted: true };
     resolved.push(relative);
 
-    const remaining = files.length - index - 1;
+    const remaining = toReview.length - index - 1;
     if (remaining === 0) break;
     const next = await vscode.window.showInformationMessage(
       `${path.basename(relative)} を確定しました。`,
@@ -537,26 +590,113 @@ export async function walkConflicts(
       },
       "次へ"
     );
-    if (next !== "次へ") return { resolved, aborted: true };
+    if (next !== "次へ") return { resolved, bulkResolved, aborted: true };
   }
 
-  return { resolved, aborted: false };
+  return { resolved, bulkResolved, aborted: false };
+}
+
+/**
+ * 設定資料の1件を、**更新時刻の新しいほう**で確定させる。
+ *
+ * **確定できたときだけ true。** 片方の版が無い（追加と削除がぶつかった）
+ * ものや、書き戻せなかったものは false を返し、呼び出し側が1件ずつの
+ * 見比べへ回す。
+ */
+async function keepNewestSide(
+  scope: ConflictScope,
+  relativePath: string,
+  run: GitCommandRunner | undefined
+): Promise<boolean> {
+  const ours = await showStage(scope.folderPath, relativePath, 2, run);
+  const theirs = await showStage(scope.folderPath, relativePath, 3, run);
+  if (ours === undefined || theirs === undefined) return false;
+
+  const decision = decideByUpdatedAt(ours, theirs);
+  if (decision.side === "conflict") return false;
+  if (!(await keepSideOfConflict(scope.folderPath, relativePath, decision.side, run))) {
+    logFailure("設定資料をまとめて確定できなかった", {
+      ファイル: relativePath,
+      理由: decision.reason,
+    });
+    return false;
+  }
+
+  // **黙って片方へ寄せたことにしない。** どちらを採ったかを1行ずつ残す
+  logStep(
+    `設定資料をまとめて確定：${relativePath} → ` +
+      `${decision.side === "ours" ? "こちら" : "別環境"}（${decision.reason}）`
+  );
+  return true;
 }
 
 /** 見比べを始める前に出す一言。**画面から切り離して試験できるようにする** */
 export function describeWalkStart(files: readonly string[]): string {
-  return `同じ箇所を両方で書き換えたファイルが ${files.length} 件あります。`;
+  const settings = files.filter((file) => isSettingsJsonPath(file)).length;
+  return (
+    `同じ箇所を両方で書き換えたものが ${files.length}件あります` +
+    `（設定資料 ${settings}件・原稿 ${files.length - settings}件）。`
+  );
 }
 
+/**
+ * 中身の内訳。**ファイル名を並べない。**
+ *
+ * 13作品ぶんの分岐では、名前を8件並べても「どの作品がどれだけ残っているか」
+ * が分からない（作者の実測、2026-09-11）。作者が見たいのは
+ * **どの作品で何件か**なので、置き場の先頭のフォルダー名で束ねて数える。
+ */
 export function describeWalkStartDetail(files: readonly string[]): string {
-  const listed = files.slice(0, 8).map((file) => path.basename(file));
-  const more = files.length > 8 ? `\nほか${files.length - 8}件` : "";
-  return (
-    `${listed.join("\n")}${more}\n\n` +
-    "どちらを残すかは、書いたご本人にしか分かりません。" +
-    "1件ずつ両方を並べますので、お選びください。\n" +
-    "途中でやめると、合わせるのをやめて元の状態へ戻します。"
+  const groups = groupByWork(files);
+  const lines = groups.map(
+    (group) =>
+      `${group.name}：設定資料 ${group.settings}件／原稿 ${group.manuscripts}件`
   );
+  const settings = groups.reduce((sum, group) => sum + group.settings, 0);
+
+  const guidance =
+    settings > 0
+      ? `設定資料は「${KEEP_ALL_NEWEST}」で一度に片づきます。` +
+        "原稿だけ1件ずつ見ていただきます。"
+      : "どちらを残すかは、書いたご本人にしか分かりません。" +
+        "1件ずつ両方を並べますので、お選びください。";
+
+  return [
+    lines.join("\n"),
+    "",
+    guidance,
+    "途中でやめると、合わせるのをやめて元の状態へ戻します。",
+    "気に入らなければ、合わせる前の退避の枝から丸ごと戻せます。",
+  ].join("\n");
+}
+
+/** 作品ごとの件数 */
+interface WorkConflictCount {
+  name: string;
+  settings: number;
+  manuscripts: number;
+}
+
+/**
+ * 先頭のフォルダー名で束ねる。
+ *
+ * 書庫では置き場の直下に作品フォルダーが並ぶ（設計書5.7.9）ので、
+ * 先頭の区切りまでが作品の名前になる。区切りが無いものは置き場の直下に
+ * あるファイルなので、まとめて1つの束にする。
+ */
+function groupByWork(files: readonly string[]): WorkConflictCount[] {
+  const groups = new Map<string, WorkConflictCount>();
+  for (const file of files) {
+    // gitは `/` 区切りで返すが、呼び出し側が組んだ道が混ざることもある
+    const normalized = file.split(path.sep).join("/");
+    const cut = normalized.indexOf("/");
+    const name = cut > 0 ? normalized.slice(0, cut) : "（置き場の直下）";
+    const group = groups.get(name) ?? { name, settings: 0, manuscripts: 0 };
+    if (isSettingsJsonPath(file)) group.settings++;
+    else group.manuscripts++;
+    groups.set(name, group);
+  }
+  return [...groups.values()];
 }
 
 /** 未解決の1件を、見比べられる形に組む */

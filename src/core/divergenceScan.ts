@@ -1,4 +1,9 @@
-import { isAutoWrittenPath, mergeTreeArgs, parseMergeTree } from "./mergePreview";
+import {
+  isAppendOnlyPath,
+  isAutoWrittenPath,
+  mergeTreeArgs,
+  parseMergeTree,
+} from "./mergePreview";
 import { isSettingsJsonPath } from "./settingsConflictRule";
 import type { DivergenceConflicts, GitCommandRunner } from "./git";
 
@@ -10,12 +15,13 @@ import type { DivergenceConflicts, GitCommandRunner } from "./git";
  * `git merge-tree --write-tree` は作業ツリーにもブランチにも触らずに、
  * 畳んだ結果を算出する。**ローカルだけで完結するので速く、押す前に出せる。**
  *
- * 衝突を3つに分けて数えるのは、**作者が次に何をすることになるか**が
+ * 衝突を分けて数えるのは、**作者が次に何をすることになるか**が
  * 種類で変わるからである。
  *
  * | 種類 | 誰が決めるか |
  * |---|---|
  * | 自動で書かれるもの | 機械（この端末の側を残す） |
+ * | 追記型（履歴・提案・ロック） | 機械（**どちらも捨てず、両方の行を残す**） |
  * | 設定資料のJSON | 機械（`settingsConflictRule.ts` の規則）。決まらなければ作者 |
  * | 本文 | 作者（1件ずつ見比べて選ぶ） |
  */
@@ -29,10 +35,15 @@ export function classifyConflicts(
 ): DivergenceConflicts {
   const autoWritten = conflicts.filter(isAutoWrittenPath);
   const rest = conflicts.filter((file) => !isAutoWrittenPath(file));
+  // 追記型は、片側を残すのではなく**両方の行を残して混ぜる**ので、
+  // 自動で書かれるものとは別に数える（`mergePreview.ts`）
+  const appendOnly = rest.filter(isAppendOnlyPath);
+  const authored = rest.filter((file) => !isAppendOnlyPath(file));
   return {
     autoWritten,
-    settings: rest.filter(isSettingsJsonPath),
-    manuscripts: rest.filter((file) => !isSettingsJsonPath(file)),
+    appendOnly,
+    settings: authored.filter(isSettingsJsonPath),
+    manuscripts: authored.filter((file) => !isSettingsJsonPath(file)),
   };
 }
 
@@ -57,7 +68,11 @@ export async function readDivergenceConflicts(
   return classifyConflicts(preview.conflicts);
 }
 
-/** 作者が1件ずつ選ぶことになる件数。0なら同期の中で自動で合わせられる */
+/**
+ * 作者が1件ずつ選ぶことになる件数。0なら同期の中で自動で合わせられる。
+ *
+ * **追記型は数えない。** 両方の行を残すだけなので、作者は何も選ばない。
+ */
 export function authoredConflictCount(
   conflicts: DivergenceConflicts | undefined
 ): number {

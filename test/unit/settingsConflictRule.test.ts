@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  decideByUpdatedAt,
   decideSettingsConflict,
   isSettingsJsonPath,
 } from "../../src/core/settingsConflictRule";
@@ -288,5 +289,48 @@ describe("1件1ファイルではない台帳", () => {
     });
 
     expect(decision.side).toBe("theirs");
+  });
+});
+
+/**
+ * 「全部、新しいほうを採る」の中身（2026-09-11）。
+ *
+ * 作者の言葉：「全部最新を優先する選択肢をまず提示し、操作をシンプルに
+ * してください」。13作品ぶんの分岐を1件ずつ選ばされて抜けられなくなった。
+ * **決めるのは機械ではなく、そのボタンを押した作者である。**
+ */
+describe("更新時刻だけで決める", () => {
+  test("この端末の側が新しければ、こちらを採る", () => {
+    const decision = decideByUpdatedAt(
+      人物({ summary: "こちら", updatedAt: "2026-09-05T00:00:00.000Z" }),
+      人物({ summary: "むこう", updatedAt: "2026-09-03T00:00:00.000Z" })
+    );
+
+    expect(decision.side).toBe("ours");
+  });
+
+  test("別の環境の側が新しければ、そちらを採る", () => {
+    // **作者メモが両側で違っていても採る。** `decideSettingsConflict` と
+    // 違って、ここは作者が「まとめて片づける」と決めたあとの道である
+    const decision = decideByUpdatedAt(
+      人物({
+        authorNotes: "こちらのメモ",
+        updatedAt: "2026-09-03T00:00:00.000Z",
+      }),
+      人物({
+        authorNotes: "むこうのメモ",
+        updatedAt: "2026-09-05T00:00:00.000Z",
+      })
+    );
+
+    expect(decision.side).toBe("theirs");
+  });
+
+  test("JSONとして読めなければ、この端末の側を残す", () => {
+    // **壊れたJSONを勝手に直さない**（CLAUDE.md）
+    const decision = decideByUpdatedAt("{壊れている", 人物({}));
+
+    expect(decision.side).toBe("ours");
+    expect(decision.reason).toContain("読めない");
   });
 });

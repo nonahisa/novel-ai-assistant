@@ -243,3 +243,148 @@ describe("分かれている置き場があるとき", () => {
     expect(confirms[0]).toContain("分かれています");
   });
 });
+
+/**
+ * 遅れているだけの置き場を、記録より先に取り込む（設計書5.5.18）。
+ *
+ * **分岐は、遅れている側が先にコミットした瞬間に生まれる。** 21件遅れた
+ * ままの置き場が「取り込む前の自動保存」を通り、「25件先・21件遅れ」に
+ * なって抜けられなくなった（2026-09-11、作者のノートPC）。単独の「同期」
+ * には入った直しを、「作品をすべて同期」でも同じ関数で入れる。
+ */
+describe("記録の前の早送り", () => {
+  /** 2件遅れているが、こちらは先へ進んでいない置き場 */
+  const behindOnlyRepo: GitCommandRunner = async (args, cwd, timeout) => {
+    if (args[0] === "rev-list") {
+      calls.push(args);
+      return { code: 0, stdout: "2\t0", stderr: "" };
+    }
+    return busyRepo(args, cwd, timeout);
+  };
+
+  test("記録より先に、早送りで取り込む", async () => {
+    await syncAllWorks({ registry, monitor, run: behindOnlyRepo });
+
+    const order = calls
+      .map((args) => args[0])
+      .filter((name) => name === "commit" || name === "pull" || name === "push");
+    // **取り込みが記録より前にある。** 逆だと、その1件で分岐が生まれる
+    expect(order).toEqual(["pull", "commit", "push"]);
+    // 書きかけを巻き込まないよう、退避つきの早送りで取り込む
+    const pulls = calls.filter((args) => args[0] === "pull");
+    expect(pulls).toHaveLength(1);
+    expect(pulls[0]).toContain("--ff-only");
+    expect(pulls[0]).toContain("--autostash");
+  });
+
+  test("報告に、先に取り込んだ置き場と件数が出る", async () => {
+    await syncAllWorks({ registry, monitor, run: behindOnlyRepo });
+
+    expect(shown.join("\n")).toContain("記録より先に、GitHubの分を取り込みました");
+    expect(shown.join("\n")).toContain("（2件）");
+  });
+
+  test("分かれている置き場では、早送りを試さない（従来どおり記録から）", async () => {
+    // busyRepo は 1件先・1件遅れ。早送りは必ず失敗するので、回線を使わない
+    await syncAllWorks({ registry, monitor, run: busyRepo });
+
+    const order = calls
+      .map((args) => args[0])
+      .filter((name) => name === "commit" || name === "pull" || name === "push");
+    expect(order).toEqual(["commit", "pull", "push"]);
+    expect(calls.some((args) => args.includes("--autostash"))).toBe(false);
+  });
+});
+
+/**
+ * 退避した書きかけを戻すときに食い違ったら、その置き場だけ止める。
+ *
+ * 取り込み自体は済んでおり、本文には競合マーカーが残っている。そのまま
+ * 記録へ進むと `git add -A` がマーカーごと履歴へ入れてしまう
+ * （CLAUDE.md「作者の原稿を壊さない」）。**他の置き場は続ける。**
+ */
+describe("早送りで書きかけと食い違ったとき", () => {
+  const libraries: WorkEntry[] = [
+    { id: "wa", title: "こじれた作品", folderPath: "C:/書庫A" },
+    { id: "wb", title: "無事な作品", folderPath: "C:/書庫B" },
+  ] as WorkEntry[];
+  const twoRegistry = { list: () => libraries } as unknown as WorkRegistry;
+
+  /** 書庫Aで退避の戻しが食い違ったあとか（gitがマージ未解決として残す） */
+  let conflictedInA = false;
+
+  const twoLibraries: GitCommandRunner = async (args, cwd) => {
+    const inA = cwd.includes("書庫A");
+    const root = inA ? "C:/書庫A" : "C:/書庫B";
+    const joined = args.join(" ");
+    calls.push([inA ? "A" : "B", ...args]);
+    const ok = (stdout: string) => ({ code: 0, stdout, stderr: "" });
+
+    if (args[0] === "--version") return ok("git version 2.55");
+    if (joined === "rev-parse --is-inside-work-tree") return ok("true");
+    if (joined === "rev-parse --show-toplevel") return ok(root);
+    if (joined === "status --porcelain --untracked-files=all") {
+      return ok(" M 本文/001.txt\n");
+    }
+    if (args[0] === "status") {
+      return ok(inA && conflictedInA ? "UU 本文/001.txt\n" : "");
+    }
+    if (joined === "remote") return ok("origin");
+    if (args[0] === "symbolic-ref") return ok("main");
+    if (joined.startsWith("rev-parse --abbrev-ref")) return ok("origin/main");
+    // どちらも2件遅れているだけ。早送りできる形
+    if (args[0] === "rev-list") return ok("2\t0");
+    if (args[0] === "config") return ok("作者");
+    if (args[0] === "diff") return { code: 1, stdout: "", stderr: "" };
+    if (args[0] === "pull") {
+      if (!inA) return ok("");
+      // 取り込めたが、退避した書きかけを戻すときに食い違った
+      conflictedInA = true;
+      return {
+        code: 1,
+        stdout: "",
+        stderr: "could not restore untracked files from stash",
+      };
+    }
+    return ok("");
+  };
+
+  beforeEach(() => {
+    conflictedInA = false;
+    Object.assign(window, {
+      showWarningMessage: async (message: string, ...rest: unknown[]) => {
+        const detail = rest.find(
+          (item): item is { detail?: string } =>
+            typeof item === "object" && item !== null && "detail" in item
+        )?.detail;
+        shown.push(detail ? `${message}\n${detail}` : message);
+        return undefined;
+      },
+    });
+  });
+
+  test("食い違った置き場は、記録も送信もしない", async () => {
+    await syncAllWorks({ registry: twoRegistry, monitor, run: twoLibraries });
+
+    const inA = calls.filter((args) => args[0] === "A").map((args) => args[1]);
+    expect(inA).not.toContain("commit");
+    expect(inA).not.toContain("push");
+  });
+
+  test("他の置き場は続ける", async () => {
+    await syncAllWorks({ registry: twoRegistry, monitor, run: twoLibraries });
+
+    const inB = calls.filter((args) => args[0] === "B").map((args) => args[1]);
+    expect(inB).toContain("commit");
+    expect(inB).toContain("push");
+  });
+
+  test("報告に、止めた理由と退避の在り処が出る", async () => {
+    await syncAllWorks({ registry: twoRegistry, monitor, run: twoLibraries });
+
+    const text = shown.join("\n");
+    expect(text).toContain("こじれた作品");
+    expect(text).toContain("書きかけと同じ箇所が食い違ったので止めました");
+    expect(text).toContain("退避（stash）に残っています");
+  });
+});
