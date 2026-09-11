@@ -20,6 +20,14 @@ import type { ChapterSynopsis } from "../models/synopsis";
 
 /** 文字のグラフに使う縦棒。低いほうから高いほうへ */
 const BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+/**
+ * 目盛りの印と軸線。**棒と同じ「ブロック文字」の仲間から選ぶ**（0.45.5）。
+ * 以前は `|` と `·` で、ブロック文字が全角で出るフォント（Consolas・
+ * Courier New・既定の monospace）では目盛りが棒の半分の幅になり、
+ * 1話＝1文字の対応が崩れていた（実機確認、8フォントで実測）。
+ */
+const AXIS_TICK = "▏";
+const AXIS_LINE = "▁";
 
 export interface EmotionPoint {
   chapter: number | null;
@@ -92,10 +100,18 @@ function buildTextChart(points: EmotionPoint[]): string[] {
   const intensity = drawSeries(points.map((point) => point.intensity));
   const valence = drawSeries(points.map((point) => point.valence), true);
 
+  // **見出しは棒の上の行に置き、棒の行は行頭から始める**（0.45.5）。
+  // 以前は「盛り上がり 」「明暗       」と空白で詰めて3行を揃えていたが、
+  // 全角が半角2つぶんでないフォント（Consolas・Yu Gothic・Meiryo）では
+  // 開始位置がずれ、どの山が何話か読めなくなった（8フォントで実測、
+  // 揃うのは MS Gothic だけだった）。詰め物を無くせばフォントに依らない
   return [
-    `盛り上がり ${intensity.bars}  (${intensity.range})`,
-    `明暗       ${valence.bars}  (${valence.range})`,
-    `           ${buildAxis(points)}`,
+    `盛り上がり (${intensity.range})`,
+    intensity.bars,
+    `明暗 (${valence.range})`,
+    valence.bars,
+    `目盛り（${AXIS_TICK}＝最初・最後・5話ごと）`,
+    buildAxis(points),
   ];
 }
 
@@ -131,8 +147,10 @@ function drawSeries(
 function buildAxis(points: EmotionPoint[]): string {
   return points
     .map((point, index) => {
-      if (index === 0 || index === points.length - 1) return "|";
-      return point.chapter !== null && point.chapter % 5 === 0 ? "|" : "·";
+      if (index === 0 || index === points.length - 1) return AXIS_TICK;
+      return point.chapter !== null && point.chapter % 5 === 0
+        ? AXIS_TICK
+        : AXIS_LINE;
     })
     .join("");
 }

@@ -104,19 +104,34 @@ describe("感情曲線の組み立て", () => {
 
   test("1話＝1文字で、目盛りと本数が揃う", () => {
     // ずれると、どの山が何話なのか読み取れなくなる。
-    // 見出しの幅は全角・半角が混ざるので、データ部分の文字数で確かめる
+    // 見出しは棒の上の行に置き、棒の行・目盛りの行は行頭から始まる（0.45.5）
     const markdown = buildEmotionCurveMarkdown(episodes);
     const lines = markdown.split("\n");
-    // 縦棒の並びだけを数える（行末には実際の幅を書いている）
     const barsOf = (line: string) => (line.match(/[▁▂▃▄▅▆▇█]/gu) ?? []).length;
 
-    const intensity = lines.find((line) => line.startsWith("盛り上がり"))!;
-    const valence = lines.find((line) => line.startsWith("明暗"))!;
-    const axis = lines[lines.indexOf(valence) + 1];
+    const intensity = lines[lines.findIndex((line) => line.startsWith("盛り上がり")) + 1];
+    const valence = lines[lines.findIndex((line) => line.startsWith("明暗")) + 1];
+    const axis = lines[lines.findIndex((line) => line.startsWith("目盛り")) + 1];
 
     expect(barsOf(intensity)).toBe(episodes.length);
     expect(barsOf(valence)).toBe(episodes.length);
-    expect([...axis.trim()].length).toBe(episodes.length);
+    expect([...axis].length).toBe(episodes.length);
+  });
+
+  test("棒と目盛りは同じ文字の仲間で、行頭に詰め物が無い（フォントに依らず揃う）", () => {
+    // 以前は目盛りが「|」「·」で、ブロック文字が全角で出るフォントでは
+    // 棒の半分の幅になっていた。行頭の空白詰めも全角の幅に依存していた
+    const markdown = buildEmotionCurveMarkdown(episodes);
+    const lines = markdown.split("\n");
+    const intensity = lines[lines.findIndex((line) => line.startsWith("盛り上がり")) + 1];
+    const axis = lines[lines.findIndex((line) => line.startsWith("目盛り")) + 1];
+
+    expect(intensity).toMatch(/^[▁▂▃▄▅▆▇█]+$/u);
+    // 目盛りはブロック文字の仲間（U+2580〜U+259F）だけで組む
+    expect(axis).toMatch(/^[▀-▟]+$/u);
+    expect(axis.startsWith("▏")).toBe(true);
+    expect(axis.endsWith("▏")).toBe(true);
+    expect(markdown).not.toMatch(/^盛り上がり\s+[▁▂▃▄▅▆▇█]/mu);
   });
 
   test("引き伸ばした幅を明記する（0〜10の中での高さと誤解させない）", () => {
@@ -132,27 +147,12 @@ describe("感情曲線の組み立て", () => {
       episode(2, emotion({ intensity: 5, valence: 0 })),
     ];
     const markdown = buildEmotionCurveMarkdown(flat);
+    const lines = markdown.split("\n");
+    const bars = lines[lines.findIndex((line) => line.startsWith("盛り上がり")) + 1];
 
     expect(markdown).toContain("（一定）");
     // 同じ縦棒が並ぶ（山があるように見えない）
-    expect(markdown).toMatch(/盛り上がり (.)\1/u);
-  });
-
-  test("見出しの表示幅を揃える（等幅で縦に並ぶ）", () => {
-    // 全角は2桁、半角は1桁として数える
-    const width = (text: string) =>
-      [...text].reduce(
-        (sum, char) => sum + (/[　-鿿＀-￯]/.test(char) ? 2 : 1),
-        0
-      );
-    const markdown = buildEmotionCurveMarkdown(episodes);
-    const lines = markdown.split("\n");
-    const prefixOf = (line: string) => width(line.match(/^\S*\s+/u)![0]);
-
-    const intensity = lines.find((line) => line.startsWith("盛り上がり"))!;
-    const valence = lines.find((line) => line.startsWith("明暗"))!;
-
-    expect(prefixOf(intensity)).toBe(prefixOf(valence));
+    expect(bars).toMatch(/^(.)\1$/u);
   });
 });
 
