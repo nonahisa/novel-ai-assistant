@@ -9,8 +9,8 @@ import {
   shouldAskScope,
   type ScopeChoice,
 } from "../core/typoCheckScope";
-import { cancelItem, isCancelItem } from "../views/dialogs";
-import { confirmRun } from "../views/notify";
+import { cancelItem } from "../views/dialogs";
+import { confirmRun, pickWithMemory } from "../views/notify";
 import { atomicWriteFile } from "../core/atomicWrite";
 
 /**
@@ -117,32 +117,32 @@ export async function chooseScope(
     return { kind: "all" };
   }
 
-  const picked = await vscode.window.showQuickPick(
-    [
+  // **「以降はこの選択で進む」は右上のピンで入れる**（`pickWithMemory`）。
+  // 覚えるのは「changed」か「all」かだけで、対象のファイルは毎回数え直す
+  const picked = await pickWithMemory<"changed" | "all">({
+    items: [
       {
         label: `$(diff) 前回から書いた分だけ（${changed.length}話）`,
         detail:
           "前回の検知のあとに書いた話だけを見ます。一覧が短くなり、待ち時間も減ります。",
         // `kind` は QuickPickItem が区切り線に使う予約名。別名にする
-        scope: "changed" as const,
+        value: "changed",
       },
       {
         label: `$(book) 作品全体（${candidates.length}話）`,
         detail:
           "すべての話を見ます。AIは呼び直しません（変わっていない話は前の結果を使います）。",
-        scope: "all" as const,
+        value: "all",
       },
       cancelItem(),
     ],
-    {
-      title: "どこまで見ますか",
-      placeHolder: describeScope(candidates.length, changed.length),
-      ignoreFocusOut: true,
-    }
-  );
-  if (!picked || isCancelItem(picked)) return undefined;
+    title: "どこまで見ますか",
+    placeHolder: describeScope(candidates.length, changed.length),
+    remember: { id: "scope.typoCheck" },
+  });
+  if (!picked) return undefined;
 
-  return "scope" in picked && picked.scope === "changed"
+  return picked === "changed"
     ? { kind: "changed", filePaths: changed }
     : { kind: "all" };
 }

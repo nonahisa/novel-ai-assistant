@@ -194,6 +194,7 @@ export async function applyChatToSettings(
   // 相談は話し相手、こちらは拾い出しで、仕事が違う（設計書7.1.1）
   const ok = await confirmPaidUsage(resolved.provider, {
     actionLabel: "相談を資料へ反映",
+    remember: { id: "ai.paid.chatSettingsSync" },
     model: resolved.model,
     calls: 1,
     detail:

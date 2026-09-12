@@ -82,7 +82,7 @@ import {
   SettingsExtractionAccumulator,
   type SettingsPersistResult,
 } from "./extractSettings";
-import { confirmRun, notifyDone } from "../views/notify";
+import { confirmRun, notifyDone, suggestAction } from "../views/notify";
 
 interface ExtractionFailure {
   chunk: Chunk;
@@ -363,15 +363,18 @@ export async function extractCharacters(
       : rawChunks;
 
   if (conflicted.length > 0) {
-    const proceed = await vscode.window.showWarningMessage(
-      `未解決の競合が ${conflicted.length} 件あります（${conflicted
-        .slice(0, 3)
-        .join(", ")}${conflicted.length > 3 ? " ほか" : ""}）。` +
+    const proceed = await suggestAction({
+      message:
+        `未解決の競合が ${conflicted.length} 件あります（${conflicted
+          .slice(0, 3)
+          .join(", ")}${conflicted.length > 3 ? " ほか" : ""}）。` +
         "これらのファイルは処理対象から除外されます。",
-      "除外して続行",
-      "中止"
-    );
-    if (proceed !== "除外して続行") return false;
+      runLabel: "除外して続行",
+      laterLabel: "中止",
+      kind: "warning",
+      remember: { id: "conflict.skip.extractCharacters" },
+    });
+    if (proceed !== "run") return false;
   }
 
   if (chunks.length === 0) {
@@ -471,7 +474,9 @@ export async function extractCharacters(
       `${chunks.length} チャンク中 ${pending.length} 件を処理します` +
         `（処理済み ${chunks.length - pending.length} 件はスキップ）。\n` +
         `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度\n` +
-        costNotice
+        costNotice,
+      "実行",
+      { remember: { id: "ai.run.extractCharacters" } }
     );
     if (!confirmed) return false;
   }

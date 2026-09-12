@@ -122,7 +122,9 @@ export async function generateWorkBlurb(
       model: resolved.model,
       costNotice,
       synopsisCount: material.chapterSynopses.length,
-    })
+    }),
+    "実行",
+    { remember: { id: "ai.run.generateBlurb" } }
   );
   if (!confirmed) return;
 
@@ -277,7 +279,9 @@ export async function generateCatchphrases(
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
   const confirmed = await confirmRun(
-    `キャッチコピーを3案作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`
+    `キャッチコピーを3案作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,
+    "実行",
+    { remember: { id: "ai.run.generateCatchphrase" } }
   );
   if (!confirmed) return;
 

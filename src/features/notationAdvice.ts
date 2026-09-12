@@ -116,6 +116,7 @@ export async function askNotationAdvice(
   */
   const ok = await confirmPaidUsage(resolved.provider, {
     actionLabel: ACTION_LABEL,
+    remember: { id: "ai.paid.notationAdvice" },
     model: resolved.model,
     calls: 1,
     detail:

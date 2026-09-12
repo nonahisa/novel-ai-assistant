@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを引き受けるVSCode拡張機能で、AIは提案するだけで原稿は書き換えません（無料の手元AIだけでも使えます）。※現在テスト中です。",
-  "version": "0.47.10",
+  "version": "0.48.0",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -48,7 +48,8 @@
         "novelai.lmstudio.cliPath",
         "novelai.openai.endpoint",
         "novelai.gemini.endpoint",
-        "novelai.sakura.endpoint"
+        "novelai.sakura.endpoint",
+        "novelai.confirm.remembered"
       ]
     }
   },
@@ -688,6 +689,12 @@
         "title": "設定管理を開く",
         "category": "小説執筆",
         "icon": "$(settings)"
+      },
+      {
+        "command": "novelai.manageConfirmSkips",
+        "title": "訊かないことにした確認を見直す",
+        "category": "小説執筆",
+        "icon": "$(question)"
       },
       {
         "command": "novelai.generateCharacterDocs",
@@ -1484,6 +1491,10 @@
           "when": "true"
         },
         {
+          "command": "novelai.manageConfirmSkips",
+          "when": "true"
+        },
+        {
           "command": "novelai.generateCharacterDocs",
           "when": "true"
         },
@@ -1504,6 +1515,12 @@
     "configuration": {
       "title": "小説AI執筆補助",
       "properties": {
+        "novelai.confirm.remembered": {
+          "type": "object",
+          "default": {},
+          "scope": "machine",
+          "markdownDescription": "「以降は訊かない」にした確認と、そのときの答えです。見直しは詳細メニュー → 拡張機能の設定 → 「訊かないことにした確認を見直す」から行えます（ここで直接消すこともできます）。\n\n**GitHubへの送信・まとめて同期・人物の統合・削除のような、取り返しのつかない操作は覚えません。**"
+        },
         "novelai.countMode": {
           "type": "string",
           "enum": [

@@ -81,7 +81,7 @@ import {
   readNarrativePerson,
 } from "../core/workStyle";
 import type { KeepWord } from "../models/keepWord";
-import { confirmRun, notifyDone } from "../views/notify";
+import { confirmRun, notifyDone, suggestAction } from "../views/notify";
 
 /**
  * 誤字脱字検知（P-09）のオーケストレーション。
@@ -278,15 +278,18 @@ export async function checkTypos(
   }
 
   if (conflicted.length > 0) {
-    const proceed = await vscode.window.showWarningMessage(
-      `未解決の競合が ${conflicted.length} 件あります（${conflicted
-        .slice(0, 3)
-        .join(", ")}${conflicted.length > 3 ? " ほか" : ""}）。` +
+    const proceed = await suggestAction({
+      message:
+        `未解決の競合が ${conflicted.length} 件あります（${conflicted
+          .slice(0, 3)
+          .join(", ")}${conflicted.length > 3 ? " ほか" : ""}）。` +
         "これらのファイルは処理対象から除外されます。",
-      "除外して続行",
-      "中止"
-    );
-    if (proceed !== "除外して続行") return undefined;
+      runLabel: "除外して続行",
+      laterLabel: "中止",
+      kind: "warning",
+      remember: { id: "conflict.skip.checkTypos" },
+    });
+    if (proceed !== "run") return undefined;
   }
 
   if (sources.length === 0) {
@@ -448,7 +451,10 @@ export async function checkTypos(
       // 突き合わせられないと、料金の問い合わせに答えられない
       logStep(`誤字脱字検知：まとめ実行のため確認を省略\n${notice}`);
     } else {
-      if (!(await confirmRun(notice))) return undefined;
+      const confirmed = await confirmRun(notice, "実行", {
+        remember: { id: "ai.run.checkTypos" },
+      });
+      if (!confirmed) return undefined;
     }
   } else if (chunks.length > 0) {
     vscode.window.showInformationMessage(

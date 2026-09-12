@@ -40,7 +40,7 @@ import {
   useLogFile,
 } from "../core/logger";
 import { openInDefaultEditor } from "../views/openDocument";
-import { notifyDone, warnWithLog } from "../views/notify";
+import { confirmRun, notifyDone, warnWithLog } from "../views/notify";
 
 /**
  * プロット逆算生成（P-02）。既に書いた本文からプロットを組み立て直す。
@@ -84,10 +84,10 @@ export async function generatePlot(
 
   const current = await readPlot(work);
 
-  const confirm = await vscode.window.showInformationMessage(
+  const confirmed = await confirmRun(
     `${work.title} のプロットを、書いた本文から組み立て直します。`,
+    "実行",
     {
-      modal: true,
       detail: [
         `材料: 各話あらすじ ${material.chapterSynopses.length}話ぶん / ` +
           `登場人物 ${material.characterNames.length}人 / 冒頭 ${material.openingExcerpt.length}字`,
@@ -100,10 +100,10 @@ export async function generatePlot(
       ]
         .filter(Boolean)
         .join("\n"),
-    },
-    "実行"
+      remember: { id: "ai.run.generatePlot" },
+    }
   );
-  if (confirm !== "実行") return;
+  if (!confirmed) return;
 
   // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
   // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）

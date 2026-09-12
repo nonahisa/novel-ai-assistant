@@ -25,6 +25,7 @@ import {
   type NotationAdviceGroup,
 } from "../prompts/notationAdvice";
 import { cancelItem } from "../views/dialogs";
+import { pickWithMemory, suggestAction } from "../views/notify";
 import { logStep, useLogFile } from "../core/logger";
 // 名前の付け替え（設計書6.37.3）も同じ文脈を使う。あちらは `core` にいて
 // 機能層を読めないので、実体は `core` へ移した。ここは既存の呼び出し口を保つ
@@ -184,15 +185,18 @@ async function runNotationCheck(
   }
 
   if (conflicted.length > 0) {
-    const proceed = await vscode.window.showWarningMessage(
-      `未解決の競合が ${conflicted.length} 件あります（${conflicted
-        .slice(0, 3)
-        .join(", ")}${conflicted.length > 3 ? " ほか" : ""}）。` +
+    const proceed = await suggestAction({
+      message:
+        `未解決の競合が ${conflicted.length} 件あります（${conflicted
+          .slice(0, 3)
+          .join(", ")}${conflicted.length > 3 ? " ほか" : ""}）。` +
         "これらのファイルは対象から外れます。",
-      "除外して続行",
-      "中止"
-    );
-    if (proceed !== "除外して続行") return undefined;
+      runLabel: "除外して続行",
+      laterLabel: "中止",
+      kind: "warning",
+      remember: { id: "conflict.skip.checkNotation" },
+    });
+    if (proceed !== "run") return undefined;
   }
 
   if (sources.length === 0) {
@@ -362,28 +366,26 @@ type DecisionMode = "majority" | "each";
 async function pickDecisionMode(
   count: number
 ): Promise<DecisionMode | undefined> {
-  const picked = await vscode.window.showQuickPick(
-    [
+  // **「以降はこの選択で進む」は右上のピンで入れる**（`pickWithMemory`）。
+  // 選択肢を2倍にすると、どれを押せばよいかが読めなくなる
+  return pickWithMemory<DecisionMode>({
+    items: [
       {
         label: "$(check-all) 多い方の表記に揃える",
         detail: `${count}組すべてを、本文に多く出ているほうへ揃えます。1回で決まります`,
-        mode: "majority" as const,
+        value: "majority",
       },
       {
         label: "$(list-ordered) 1組ずつ選ぶ",
         detail: `${count}回聞かれます。少ないほうへ揃えたい組があるときはこちら`,
-        mode: "each" as const,
+        value: "each",
       },
       cancelItem(),
     ],
-    {
-      title: `${count}組を選びました — どう決めますか`,
-      placeHolder: "自動では書き換えません。指摘を作るだけです",
-      ignoreFocusOut: true,
-    }
-  );
-  if (!picked || !("mode" in picked)) return undefined;
-  return picked.mode;
+    title: `${count}組を選びました — どう決めますか`,
+    placeHolder: "自動では書き換えません。指摘を作るだけです",
+    remember: { id: "decision.notationVariants" },
+  });
 }
 
 /** 出現の多い表記。`forms` は多い順に並んでいる */

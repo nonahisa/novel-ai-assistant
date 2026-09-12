@@ -263,7 +263,9 @@ export async function proposeChapters(
   );
   const confirmed = await confirmRun(
     `${work.title} の章立てを提案します（AIの呼び出しは1回）。\n` +
-      `モデル: ${resolved.model}${costNotice}${materialNotice}`
+      `モデル: ${resolved.model}${costNotice}${materialNotice}`,
+    "実行",
+    { remember: { id: "ai.run.proposeChapters" } }
   );
   if (!confirmed) return;
 
@@ -391,7 +393,9 @@ export async function suggestChapterName(
     : "";
   const confirmed = await confirmRun(
     `章「${chapter.name}」の名前の案を出します（AIの呼び出しは1回）。\n` +
-      `対象は ${range.length}話。モデル: ${resolved.model}${costNotice}`
+      `対象は ${range.length}話。モデル: ${resolved.model}${costNotice}`,
+    "実行",
+    { remember: { id: "ai.run.proposeChapterName" } }
   );
   if (!confirmed) return false;
 

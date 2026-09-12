@@ -2291,6 +2291,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     if (resolved.provider.isPaid && this.paidConfirmedFor !== paidKey) {
       const ok = await confirmPaidUsage(resolved.provider, {
         actionLabel: "指摘の再チェック",
+        remember: { id: "ai.paid.proposalPanel" },
         model: resolved.model,
         calls: 1,
         detail:

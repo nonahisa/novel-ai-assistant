@@ -69,6 +69,7 @@ import { withCancellableProgress, type CheckProgress } from "../views/progress";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurn } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { confirmRun } from "../views/notify";
 import {
   logFailure,
   logStep,
@@ -303,12 +304,12 @@ export async function checkFactContradictions(
       // **飛ばした中身はログへ残す**
       logStep(`矛盾検知（事実の照合）：まとめ実行のため確認を省略\n${detail}`);
     } else {
-      const confirm = await vscode.window.showInformationMessage(
+      const confirmed = await confirmRun(
         `${work.title} の事実を取り出して照合します。`,
-        { modal: true, detail },
-        "実行"
+        "実行",
+        { detail, remember: { id: "ai.run.checkFactContradictions" } }
       );
-      if (confirm !== "実行") return undefined;
+      if (!confirmed) return undefined;
     }
   }
 

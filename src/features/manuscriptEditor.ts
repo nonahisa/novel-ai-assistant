@@ -82,7 +82,7 @@ import {
 } from "../core/markdownConversion";
 import { auditEol, describeEolMismatch } from "../core/eolAudit";
 import { countSiteNotation } from "../core/ruby";
-import { notifyDone } from "../views/notify";
+import { notifyDone, suggestAction } from "../views/notify";
 
 /**
  * 原稿エディタ（設計書6.25）。
@@ -1746,18 +1746,17 @@ export class ManuscriptEditorProvider
     }
     markdownAsked.add(paths.normalizeForComparison(filePath));
 
-    const convert = ".mdにする";
-    const later = "今はしない";
-    const picked = await vscode.window.showInformationMessage(
-      describeMarkdownSuggestion(counts),
-      convert,
-      later
-    );
-    if (picked === later) {
+    const picked = await suggestAction({
+      message: describeMarkdownSuggestion(counts),
+      runLabel: ".mdにする",
+      laterLabel: "今はしない",
+      remember: { id: "suggest.markdownConversion" },
+    });
+    if (picked === "later") {
       await this.deps.declineMarkdown(filePath);
       return;
     }
-    if (picked !== convert) return;
+    if (picked !== "run") return;
 
     /*
       **先に保存する。** 変換はディスク上のファイルの名前を変えるので、
@@ -1854,19 +1853,18 @@ export class ManuscriptEditorProvider
         paths.normalizeForComparison(entry.filePath) !== key
     ).length;
 
-    const unify = "作品ごと揃える";
-    const later = "今はしない";
-    const picked = await vscode.window.showInformationMessage(
-      describeEolMismatch({
+    const picked = await suggestAction({
+      message: describeEolMismatch({
         eol: mine.eol,
         hasMixedEol: mine.hasMixedEol,
         majority: audit.majority,
         majorityCount,
       }),
-      unify,
-      later
-    );
-    if (picked !== unify) return;
+      runLabel: "作品ごと揃える",
+      laterLabel: "今はしない",
+      remember: { id: "suggest.eolUnify" },
+    });
+    if (picked !== "run") return;
 
     // **作品を指定して呼ぶ。** 引数無しだと作品選択からやり直させてしまう
     await vscode.commands.executeCommand("novelai.unifyEol", {

@@ -58,6 +58,11 @@ const properties = manifest.contributes.configuration.properties;
  * 表示の好み・字数目標・待ち時間などは、作品ごとに変えられてよい。
  */
 const MACHINE_SCOPED_KEYS = [
+  // **共有された書庫から、確認を黙って外せてはいけない**（0.48.0）。
+  // 「以降は訊かない」の覚え書きがワークスペースから書けると、
+  // 編集部と共有するリポジトリの `.vscode/settings.json` に
+  // `ai.paid.*` を仕込むだけで、**有料AIの料金確認が素通りする**。
+  "novelai.confirm.remembered",
   "novelai.gemini.endpoint",
   "novelai.lmstudio.cliPath",
   "novelai.lmstudio.endpoint",

@@ -7,7 +7,7 @@ import { lmstudioEndpoint } from "../ai/lmstudioProvider";
 import { prepareLmStudioModel } from "../ai/registry";
 import { canRunProcesses } from "../core/runtime";
 import { withProgress } from "../views/progress";
-import { notifyDone } from "../views/notify";
+import { confirmRun, notifyDone } from "../views/notify";
 
 /**
  * AIへの疎通確認と、手元で動くAI（Ollama・LM Studio）の起動導線。
@@ -255,6 +255,11 @@ export async function confirmPaidUsage(
     calls?: number;
     /** 追加の説明。処理の大きさが分かるもの */
     detail?: string;
+    /**
+     * 「以降は訊かない」を出すときの覚え書きの id
+     * （`core/confirmMemory.ts`。渡さなければ訊き方は今までどおり）
+     */
+    remember?: { id: string };
   }
 ): Promise<boolean> {
   if (!provider.isPaid) return true;
@@ -275,10 +280,10 @@ export async function confirmPaidUsage(
     "実際の金額はモデル・実使用量・各社の現行料金によって変わります。"
   );
 
-  const answer = await vscode.window.showInformationMessage(
-    `${options.actionLabel}を実行しますか`,
-    { modal: true, detail: lines.join("\n") },
-    "実行"
-  );
-  return answer === "実行";
+  // **訊き方は `confirmRun` に寄せる。** 「以降は訊かない」の出し方を
+  // 2か所に書くと、片方だけ直したときに振る舞いが割れる
+  return confirmRun(`${options.actionLabel}を実行しますか`, "実行", {
+    detail: lines.join("\n"),
+    remember: options.remember,
+  });
 }

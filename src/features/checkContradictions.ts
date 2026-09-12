@@ -95,6 +95,7 @@ import {
 // 落とした理由の内訳は、通知ではなく操作ログへ残す（設計書6.8）
 import { summarizeReasons } from "../core/checkRunCounts";
 import { hashText } from "../core/textFile";
+import { confirmRun } from "../views/notify";
 
 /**
  * 矛盾検知（P-12、設計書6.10.1）。
@@ -382,12 +383,12 @@ export async function checkContradictions(
       // 足したことは、この確認の中にしか書かれていない
       logStep(`矛盾検知：まとめ実行のため確認を省略\n${detail}`);
     } else {
-      const confirm = await vscode.window.showInformationMessage(
+      const confirmed = await confirmRun(
         `${work.title} の矛盾を検知します。`,
-        { modal: true, detail },
-        "実行"
+        "実行",
+        { detail, remember: { id: "ai.run.checkContradictions" } }
       );
-      if (confirm !== "実行") return undefined;
+      if (!confirmed) return undefined;
     }
   }
 

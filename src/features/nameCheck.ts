@@ -374,6 +374,7 @@ async function suggestNames(
 
   const ok = await confirmPaidUsage(resolved.provider, {
     actionLabel: "名前の候補",
+    remember: { id: "ai.paid.nameCheck" },
     model: resolved.model,
     calls: 1,
     detail:

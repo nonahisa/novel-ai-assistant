@@ -132,7 +132,9 @@ export async function runDictationClean(
   const confirmed = await confirmRun(
     `口述で入れた${original.length}字を整えます（AIの呼び出しは1回）。\n` +
       `モデル: ${resolved.model}${costNotice}\n` +
-      "整えたあとは Ctrl+Z で元に戻せます。"
+      "整えたあとは Ctrl+Z で元に戻せます。",
+    "実行",
+    { remember: { id: "ai.run.dictationClean" } }
   );
   if (!confirmed) return;
 

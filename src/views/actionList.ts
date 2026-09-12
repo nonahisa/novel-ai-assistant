@@ -1516,6 +1516,15 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           "この拡張機能の設定だけを絞り込んで表示します。",
       },
       {
+        kind: "action",
+        command: "novelai.manageConfirmSkips",
+        label: "訊かないことにした確認を見直す",
+        icon: "question",
+        requiresWork: false,
+        detail:
+          "「以降は訊かない」にした確認を、また訊くように戻します。",
+      },
+      {
         /*
           **一度決めれば、しばらく変えないもの**をここへ集める（設計書6.56）。
 

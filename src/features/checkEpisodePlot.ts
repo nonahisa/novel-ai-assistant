@@ -63,6 +63,7 @@ import {
   resolveModelInfoOrWarn,
 } from "./chunkSettings";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { confirmRun } from "../views/notify";
 import { withCancellableProgress, type CheckProgress } from "../views/progress";
 import {
   logFailure,
@@ -313,10 +314,10 @@ export async function checkEpisodePlotDesign(
     ) {
       return undefined;
     }
-    const confirm = await vscode.window.showInformationMessage(
+    const confirmed = await confirmRun(
       `${chapterLabel}の単話プロットを検査します。`,
+      "実行",
       {
-        modal: true,
         detail: describeEpisodePlotDesignConfirm({
           items: doc.items.length,
           blanks: doc.blanks,
@@ -324,10 +325,10 @@ export async function checkEpisodePlotDesign(
             ? resolved.provider.displayName
             : undefined,
         }),
-      },
-      "実行"
+        remember: { id: "ai.run.checkEpisodePlotDesign" },
+      }
     );
-    if (confirm !== "実行") return undefined;
+    if (!confirmed) return undefined;
   }
 
   logStep(
@@ -515,10 +516,10 @@ export async function contrastEpisodePlot(
     ) {
       return undefined;
     }
-    const confirm = await vscode.window.showInformationMessage(
+    const confirmed = await confirmRun(
       `${chapterLabel}の本文と、単話プロットを照らし合わせます。`,
+      "実行",
       {
-        modal: true,
         detail: describeEpisodePlotContrastConfirm({
           bodyLength: body.length,
           items: items.length,
@@ -527,10 +528,10 @@ export async function contrastEpisodePlot(
             ? resolved.provider.displayName
             : undefined,
         }),
-      },
-      "実行"
+        remember: { id: "ai.run.checkEpisodePlotContrast" },
+      }
     );
-    if (confirm !== "実行") return undefined;
+    if (!confirmed) return undefined;
   }
 
   logStep(

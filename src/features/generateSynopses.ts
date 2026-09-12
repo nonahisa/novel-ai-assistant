@@ -142,7 +142,9 @@ export async function generateSynopses(
   const confirmed = await confirmRun(
     `${loaded.bodies.length} 話中 ${pending.length} 話のあらすじを作ります` +
       `（変わっていない ${loaded.bodies.length - pending.length} 話はスキップ）。\n` +
-      `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度${costNotice}`
+      `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度${costNotice}`,
+    "実行",
+    { remember: { id: "ai.run.generateSynopses" } }
   );
   if (!confirmed) return false;
 

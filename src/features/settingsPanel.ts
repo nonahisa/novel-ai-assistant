@@ -1999,6 +1999,7 @@ export class SettingsPanel {
     if (resolved.provider.isPaid && this.paidConfirmedFor !== paidKey) {
       const ok = await confirmPaidUsage(resolved.provider, {
         actionLabel: progressLabel,
+        remember: { id: "ai.paid.settingsPanel" },
         model: resolved.model,
         detail:
           "この画面でAIを呼ぶたびに課金されます。\n" +

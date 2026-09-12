@@ -64,6 +64,7 @@ import { type CheckProgress } from "../views/progress";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { confirmRun } from "../views/notify";
 import {
   logFailure,
   logStep,
@@ -233,12 +234,12 @@ export async function checkForeshadows(
       // **飛ばした中身はログへ残す**（既に登録済みの件数と課金の断り）
       logStep(`伏線の検知：まとめ実行のため確認を省略\n${detail}`);
     } else {
-      const confirm = await vscode.window.showInformationMessage(
+      const confirmed = await confirmRun(
         `${work.title} の伏線を検知します。`,
-        { modal: true, detail },
-        "実行"
+        "実行",
+        { detail, remember: { id: "ai.run.checkForeshadows" } }
       );
-      if (confirm !== "実行") return undefined;
+      if (!confirmed) return undefined;
     }
   }
 
@@ -659,10 +660,10 @@ export async function checkForeshadowResolution(
     ) {
       return undefined;
     }
-    const confirm = await vscode.window.showInformationMessage(
+    const confirmed = await confirmRun(
       `${work.title} の伏線の回収を確かめます。`,
+      "実行",
       {
-        modal: true,
         detail: [
           `未回収の伏線 ${open.length}件を、${targeted.length}か所の本文と` +
             `照らします（うち ${pending.length}件を処理。` +
@@ -676,10 +677,10 @@ export async function checkForeshadowResolution(
         ]
           .filter(Boolean)
           .join("\n"),
-      },
-      "実行"
+        remember: { id: "ai.run.checkForeshadowResolutions" },
+      }
     );
-    if (confirm !== "実行") return undefined;
+    if (!confirmed) return undefined;
   }
 
   logStep(

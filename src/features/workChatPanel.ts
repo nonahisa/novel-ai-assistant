@@ -759,6 +759,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     if (resolved.provider.isPaid && this.paidConfirmedFor !== paidKey) {
       const ok = await confirmPaidUsage(resolved.provider, {
         actionLabel: "AIへの相談",
+        remember: { id: "ai.paid.workChat" },
         model: resolved.model,
         detail:
           "送信するたびに1回ずつ課金されます。\n" +

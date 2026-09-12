@@ -4,7 +4,7 @@
 
 > **※現在テスト中です。** 動作の確認（実機テスト）が済んでいない機能が含まれます。大切な原稿は、必ずバックアップ（GitHub同期など）を取ったうえでお使いください。
 
-このリポジトリの版：**0.47.10**（配布版は 0.47.5）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.48.0**（配布版は 0.47.5）。Marketplace に出ている版はこれより遅れることがあります。
 
 - 原稿を書き換えるAIはいません。提案を適用するのは、いつもあなたです。
 - 手元AI（Ollama / LM Studio）なら無料で、原稿はパソコンの外へ出ません。
@@ -338,6 +338,8 @@ code --install-extension ".\novel-ai-assistant-$($v.TrimStart('v')).vsix" --forc
 | `novelai.logs.retentionDays` | `7` | ログに残す日数（`0`で消さない） |
 
 `novelai.modelTuning` は「AIが実際に読める長さを測る」が書き込む台帳です（手で書く項目ではありません）。`novelai.claude.maxOutputTokens` は旧設定で、`novelai.maxOutputTokens` に置き換わりました。
+
+`novelai.confirm.remembered` は、確認の画面で「以降は訊かない」を押したときに書き込まれる控えです。戻すときは詳細メニューの「訊かないことにした確認を見直す」から選ぶか、ここを空（`{}`）にしてください。
 
 ---
 

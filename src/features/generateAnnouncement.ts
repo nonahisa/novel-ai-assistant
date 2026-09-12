@@ -117,7 +117,9 @@ export async function generateAnnouncement(
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
   const confirmed = await confirmRun(
-    `更新告知文を作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`
+    `更新告知文を作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,
+    "実行",
+    { remember: { id: "ai.run.generateAnnouncement" } }
   );
   if (!confirmed) return;
 

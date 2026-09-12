@@ -46,6 +46,7 @@ import { type CheckProgress } from "../views/progress";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { confirmRun } from "../views/notify";
 import { confirmFormatFit } from "./formatFitPrompt";
 import {
   logFailure,
@@ -290,12 +291,12 @@ export async function checkDeviations(
       // という実測に基づく断りは、この確認の中にしか書かれていない
       logStep(`プロット逸脱検知：まとめ実行のため確認を省略\n${detail}`);
     } else {
-      const confirm = await vscode.window.showInformationMessage(
+      const confirmed = await confirmRun(
         `${work.title} のプロット逸脱を検知します。`,
-        { modal: true, detail },
-        "実行"
+        "実行",
+        { detail, remember: { id: "ai.run.checkDeviations" } }
       );
-      if (confirm !== "実行") return undefined;
+      if (!confirmed) return undefined;
     }
   }
 

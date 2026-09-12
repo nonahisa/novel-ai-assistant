@@ -125,21 +125,55 @@ function collectCreatedSites(): Site[] {
   return sites;
 }
 
+/**
+ * `pickWithMemory`（`views/notify.ts`）を呼ぶところ。
+ *
+ * 中身は `createQuickPick` だが、**項目は呼び出し側が渡す。**
+ * 閉じる道があるかどうかも呼び出し側にしか書けないので、
+ * 呼び出しの本体を見て `cancelItem()` を数える。
+ */
+function collectMemoryPickSites(): Site[] {
+  const sites: Site[] = [];
+  for (const file of sources("src")) {
+    // 定義そのもの（notify.ts）は呼び出しではない
+    if (file.endsWith("src/views/notify.ts")) continue;
+    const lines = readFileSync(file, "utf-8").split("\n");
+    lines.forEach((line, index) => {
+      if (!/pickWithMemory[<(]/.test(line)) return;
+      if (isCommentLine(line)) return;
+      const body = callText(lines, index);
+      sites.push({
+        file,
+        line: index + 1,
+        hasCancel: /cancelItem\(/.test(body),
+        // 覚える選択画面に複数選択は無い（1つ選んで、それを覚える）
+        multi: false,
+      });
+    });
+  }
+  return sites;
+}
+
 describe("選択画面には閉じる道を出す", () => {
   const sites = collectSites();
   const created = collectCreatedSites();
+  const memoryPicks = collectMemoryPickSites();
 
   it("走査する対象がある", () => {
     // 拾い方を間違えて0件を通す、を防ぐ
     expect(sites.length).toBeGreaterThan(20);
-    // `createQuickPick` は 0.45.0 で1件も無くなった（使っていたのは
-    // 実機確認メニューの2画面だけで、道具ごと撤去した。設計書6.26）。
-    // **拾い方は残す**——新しく使ったときに、下の検査が黙って素通りしない
-    expect(created.length).toBe(0);
+    // `createQuickPick` を直に使うのは `pickWithMemory`（`views/notify.ts`）
+    // **だけ**である（0.48.0。「以降はこの選択で進む」を右上のボタンで
+    // 出すために要る）。ここが増えたら、その画面にも閉じる道があるか
+    // 一度考えること
+    expect(created.map((site) => site.file)).toEqual(["src/views/notify.ts"]);
+    expect(memoryPicks.length).toBeGreaterThan(0);
   });
 
   it("すべての選択画面に「取りやめる」がある", () => {
-    const missing = [...sites, ...created]
+    // `pickWithMemory` の中身（notify.ts）は項目を持たないので、
+    // 代わりに**呼び出し側**が閉じる道を渡しているかを見る
+    const missing = [...sites, ...memoryPicks]
       .filter((site) => !site.hasCancel && !site.multi)
       .map((site) => `${site.file}:${site.line}`);
     expect(missing).toEqual([]);

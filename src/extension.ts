@@ -273,6 +273,7 @@ import {
 } from "./features/resumeWriting";
 import { askText, cancelItem } from "./views/dialogs";
 import { manageKeepWords } from "./features/manageKeepWords";
+import { manageConfirmSkips } from "./features/manageConfirmSkips";
 import { AdvicePolicyStore } from "./core/advicePolicyStore";
 import { setAdvicePolicy } from "./features/advicePolicyDiagnosis";
 import {
@@ -2270,6 +2271,13 @@ export async function activate(
         "workbench.action.openSettings",
         `@ext:${context.extension.id}`
       );
+    })
+  );
+
+  context.subscriptions.push(
+    registerCommand("novelai.manageConfirmSkips", async () => {
+      // 作品に紐づかない（覚え書きは環境ごとの設定）ので、作品は取らない
+      await manageConfirmSkips();
     })
   );
 

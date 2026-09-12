@@ -62,6 +62,7 @@ import {
 // 落とした理由の内訳は、通知ではなく操作ログへ残す（設計書6.8）
 import { summarizeReasons } from "../core/checkRunCounts";
 import { KeepWordStore } from "../core/keepWordStore";
+import { confirmRun } from "../views/notify";
 import {
   buildStyleNote,
   collectWorkStyle,
@@ -219,12 +220,12 @@ export async function checkProofread(
       // この確認の中にしか書かれていない
       logStep(`推敲：まとめ実行のため確認を省略\n${detail}`);
     } else {
-      const confirm = await vscode.window.showInformationMessage(
+      const confirmed = await confirmRun(
         `${work.title} の推敲を行います。`,
-        { modal: true, detail },
-        "実行"
+        "実行",
+        { detail, remember: { id: "ai.run.checkProofread" } }
       );
-      if (confirm !== "実行") return undefined;
+      if (!confirmed) return undefined;
     }
   }
 

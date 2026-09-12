@@ -360,6 +360,7 @@ async function runMeasurement(
   const estimateTokens = estimateProbeTokens(ceilingChars);
   const ok = await confirmPaidUsage(resolved.provider, {
     actionLabel: "AIチューニング",
+    remember: { id: "ai.paid.measureContext" },
     model: resolved.model,
     detail:
       `最大で約 ${ceilingChars.toLocaleString("ja-JP")} 字まで、` +

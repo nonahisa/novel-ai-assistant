@@ -28,6 +28,7 @@ import {
 } from "../core/nameRename";
 import type { TypoCheckIssue } from "./checkTypos";
 import { askText, cancelItem } from "../views/dialogs";
+import { suggestAction } from "../views/notify";
 import { logFailure, useLogFile } from "../core/logger";
 
 /**
@@ -338,15 +339,18 @@ async function collectIssues(
   }
 
   if (conflicted.length > 0) {
-    const proceed = await vscode.window.showWarningMessage(
-      `未解決の競合が ${conflicted.length} 件あります（${conflicted
-        .slice(0, 3)
-        .join(", ")}${conflicted.length > 3 ? " ほか" : ""}）。` +
+    const proceed = await suggestAction({
+      message:
+        `未解決の競合が ${conflicted.length} 件あります（${conflicted
+          .slice(0, 3)
+          .join(", ")}${conflicted.length > 3 ? " ほか" : ""}）。` +
         "これらのファイルは対象から外れます。",
-      "除外して続行",
-      "中止"
-    );
-    if (proceed !== "除外して続行") return undefined;
+      runLabel: "除外して続行",
+      laterLabel: "中止",
+      kind: "warning",
+      remember: { id: "conflict.skip.nameRename" },
+    });
+    if (proceed !== "run") return undefined;
   }
 
   return { issues, fileCount: files.size, conflicted };
