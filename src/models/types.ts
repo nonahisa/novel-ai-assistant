@@ -10,6 +10,15 @@ export interface WorkEntry {
   registeredAt: string;
 }
 
+/**
+ * 改行コード。
+ *
+ * **定義をここに置くのは、`models` が `core` を引けないため**である
+ * （依存の向きは views/features → core → models）。`core/textFile.ts` は
+ * ここから輸入して再輸出しているので、**値の並びを2か所に書かない。**
+ */
+export type Eol = "\n" | "\r\n" | "\r";
+
 /** 本文ファイル1件の情報 */
 export interface EpisodeFile {
   /** 絶対パス */
@@ -70,6 +79,20 @@ export interface EpisodeFile {
    * `EpisodeFile`（試験の材料）が壊れないようにするためである。
    */
   memoBadge?: string;
+  /**
+   * このファイルの改行コード（設計書5.4.2）。**読めなかったときは null。**
+   *
+   * 走査は全ファイルを読むので、ここで一緒に持つ。作品ぜんたいの
+   * 改行コードを見るために、もう一度読み直す理由は無い。
+   */
+  eol?: Eol | null;
+  /**
+   * 1つのファイルの中で CRLF と LF（か CR）が混ざっているか。
+   *
+   * `memoBadge` と同じく**省略できる形にしてある**——走査を通らずに
+   * 組み立てた `EpisodeFile`（試験の材料）が壊れないようにするためである。
+   */
+  hasMixedEol?: boolean;
 }
 
 export type EpisodeKind = "本編" | "プロローグ" | "エピローグ" | "幕間" | "不明";

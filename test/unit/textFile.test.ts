@@ -176,6 +176,135 @@ describe("本文形式を保持した保存", () => {
     expect(savedBytes).toEqual(utf8("甲\r\n乙改\n丙\r丁"));
   });
 
+  /**
+   * 改行コードを揃える（設計書5.4.2、`features/eolUnify.ts`）。
+   *
+   * **既定では、`eol` に別の値を渡しても改行は変わらない。** 変わらなかった
+   * ところは元のバイトをそのまま置く決まりで、改行のバイトもそこに含まれる。
+   * 「揃える」操作だけが `rewriteEol` を立てて通る。
+   */
+  describe("改行コードだけを揃える", () => {
+    test("既定では、渡したeolでは改行が変わらない", async () => {
+      // **この決まりを当てにして「揃える」を書くと、黙って何も起きない。**
+      // 実際にそう書きかけたので、振る舞いをここで固定する
+      const originalBytes = utf8("灯\r\n澪\r\n");
+      const original = decodeBytes(originalBytes);
+      files.set(fileKey(path), originalBytes);
+
+      const result = await writeTextFilePreservingFormat(
+        path,
+        original.text,
+        { ...original, eol: "\n" },
+        original.hash
+      );
+
+      expectSaved(result);
+      expect(files.get(fileKey(path))).toEqual(originalBytes);
+    });
+
+    test("rewriteEolを立てると、本文はそのままで改行だけが変わる", async () => {
+      const originalBytes = utf8("灯\r\n澪\r\n");
+      const original = decodeBytes(originalBytes);
+      files.set(fileKey(path), originalBytes);
+
+      const result = await writeTextFilePreservingFormat(
+        path,
+        original.text,
+        { ...original, eol: "\n" },
+        original.hash,
+        { rewriteEol: true }
+      );
+
+      expectSaved(result);
+      expect(files.get(fileKey(path))).toEqual(utf8("灯\n澪\n"));
+      // **本文は1文字も変わらない**（読み直した本文が元と同じ）
+      expect(decodeBytes(files.get(fileKey(path))!).text).toBe(original.text);
+    });
+
+    test("Shift_JISのまま、改行だけを揃える", async () => {
+      // iconv は Buffer を返す。比較のためにUint8Arrayへ揃える
+      const originalBytes = new Uint8Array(shiftJis("灯\r\n澪\r\n"));
+      const original = decodeBytes(originalBytes);
+      files.set(fileKey(path), originalBytes);
+
+      const result = await writeTextFilePreservingFormat(
+        path,
+        original.text,
+        { ...original, eol: "\n" },
+        original.hash,
+        { rewriteEol: true }
+      );
+
+      expectSaved(result);
+      expect(files.get(fileKey(path))).toEqual(
+        new Uint8Array(shiftJis("灯\n澪\n"))
+      );
+    });
+
+    test("非正規のCP932バイトも、そのまま残る", async () => {
+      // 全文を変換し直すと、同じ文字へ復号される別の符号へ正規化されて
+      // しまう。**改行以外のバイトには触らない**ことを固定する
+      const special = new Uint8Array([0xee, 0xe0]);
+      const originalBytes = new Uint8Array([
+        ...special,
+        0x0d,
+        0x0a,
+        ...shiftJis("末尾"),
+        0x0d,
+        0x0a,
+      ]);
+      const original = decodeBytes(originalBytes);
+      files.set(fileKey(path), originalBytes);
+
+      const result = await writeTextFilePreservingFormat(
+        path,
+        original.text,
+        { ...original, eol: "\n" },
+        original.hash,
+        { rewriteEol: true }
+      );
+
+      expectSaved(result);
+      expect(files.get(fileKey(path))).toEqual(
+        new Uint8Array([...special, 0x0a, ...shiftJis("末尾"), 0x0a])
+      );
+    });
+
+    test("BOMは残り、末尾改行の無さも保たれる", async () => {
+      const originalBytes = bom(utf8("灯\r\n澪"));
+      const original = decodeBytes(originalBytes);
+      files.set(fileKey(path), originalBytes);
+
+      const result = await writeTextFilePreservingFormat(
+        path,
+        original.text,
+        { ...original, eol: "\n" },
+        original.hash,
+        { rewriteEol: true }
+      );
+
+      expectSaved(result);
+      expect(files.get(fileKey(path))).toEqual(bom(utf8("灯\n澪")));
+    });
+
+    test("混ざった改行も、まとめて揃う", async () => {
+      const originalBytes = utf8("甲\r\n乙\n丙\r丁");
+      const original = decodeBytes(originalBytes);
+      files.set(fileKey(path), originalBytes);
+
+      const result = await writeTextFilePreservingFormat(
+        path,
+        original.text,
+        { ...original, eol: "\r\n" },
+        original.hash,
+        { rewriteEol: true }
+      );
+
+      expectSaved(result);
+      expect(files.get(fileKey(path))).toEqual(utf8("甲\r\n乙\r\n丙\r\n丁"));
+    });
+  });
+
   test.each([
     ["NEC選定IBM拡張文字", [0xee, 0xe0]],
     ["NEC特殊文字", [0x87, 0x90]],
@@ -567,3 +696,28 @@ describe("別ファイルへ書き出すときの符号化", () => {
     expect(bytes).toBeUndefined();
   });
 });
+
+/**
+ * 1ファイルの中で改行コードが混ざっているか（設計書5.4.2）。
+ *
+ * **`eol` だけでは分からない。** あちらは「最初に見つかった改行」なので、
+ * 途中から別の改行になっていても CRLF のファイルに見える。
+ */
+describe("改行の混在の検出", () => {
+  test("CRLFだけなら混在ではない", () => {
+    expect(decodeBytes(utf8("灯\r\n澪\r\n")).hasMixedEol).toBe(false);
+  });
+
+  test("LFだけなら混在ではない", () => {
+    expect(decodeBytes(utf8("灯\n澪\n")).hasMixedEol).toBe(false);
+  });
+
+  test("CRLFと裸のLFが両方あれば混在", () => {
+    const content = decodeBytes(utf8("灯\r\n澪\n"));
+
+    expect(content.hasMixedEol).toBe(true);
+    // **eol の決め方は変えていない**（最初に見つかったもの）
+    expect(content.eol).toBe("\r\n");
+  });
+});
+

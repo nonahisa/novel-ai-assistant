@@ -189,6 +189,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.addEpisode": "allTypes",
   "novelai.deleteEpisodeFile": "allTypes",
   "novelai.convertToMarkdown": "allTypes",
+  // 改行コードの食い違いは、作品のタイプと関係なく起きる（設計書5.4.2）
+  "novelai.unifyEol": "allTypes",
   // Word からの取り込みは、どのタイプの作品でも起こりうる（設計書6.85）
   "novelai.convertDocxToMarkdown": "allTypes",
   "novelai.copySubtitle": "allTypes",

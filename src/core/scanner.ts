@@ -15,6 +15,8 @@ import { isConflictSideFile } from "./conflictFile";
 import { parseCollectedFile, type CollectedEpisode } from "./collectedFile";
 import { memoBadgeText, parseMemos } from "./sceneMemo";
 import { pathExists } from "./fileSystem";
+import { detectEol } from "./eolAudit";
+import type { Eol } from "../models/types";
 
 /**
  * 作品の本文ファイルを走査し、話数解析と文字数計測を行う。
@@ -46,6 +48,13 @@ export async function scanWork(work: WorkEntry): Promise<{
 
     let counts = emptyCounts();
     let hasConflictMarkers = false;
+    /**
+     * 改行コード（設計書5.4.2）。**読めなければ null のまま。**
+     * ここで一緒に見ておけば、作品ぜんたいの改行を調べるために
+     * 全話をもう一度読み直さずに済む
+     */
+    let eol: Eol | null = null;
+    let hasMixedEol = false;
     let collected: CollectedEpisode[] | null = null;
     /** 残っているシーンメモの印（設計書6.40.5）。無ければ空文字 */
     let memoBadge = "";
@@ -60,6 +69,9 @@ export async function scanWork(work: WorkEntry): Promise<{
         path.toUri(filePath)
       );
       const text = decodeText(bytes);
+      // **改行の判定は正規化前の本文で行う**（`decodeText` は改行を
+      // そのまま残す）。LFへ揃えたあとでは、もう見分けられない
+      ({ eol, hasMixedEol } = detectEol(text));
 
       // 投稿サイトのDLファイルはメタデータヘッダーを持つことがある。
       // ヘッダーを含めると投稿サイト上の文字数と一致しなくなるため、
@@ -129,6 +141,8 @@ export async function scanWork(work: WorkEntry): Promise<{
       hasConflictMarkers,
       collectedCount: collected ? collected.length : null,
       memoBadge,
+      eol,
+      hasMixedEol,
     });
   }
 

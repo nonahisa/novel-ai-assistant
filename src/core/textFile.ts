@@ -10,9 +10,13 @@ import {
   createManagedRecoveryPath,
   pruneManagedRecoveries,
 } from "./atomicWrite";
+import { detectEol } from "./eolAudit";
+import type { Eol } from "../models/types";
 
 export type Encoding = "utf8" | "utf8-bom" | "shift_jis";
-export type Eol = "\n" | "\r\n" | "\r";
+// 改行コードの型は `models` に置いてある（走査の結果も持つため）。
+// ここからは、これまでどおりの名前で再輸出する
+export type { Eol };
 export type WriteTextFailureReason =
   | "modified_externally"
   | "path_conflict"
@@ -54,6 +58,14 @@ export interface TextFileContent {
   hash: string;
   /** Gitの競合マーカーが含まれているか */
   hasConflictMarkers: boolean;
+  /**
+   * 1つのファイルの中で CRLF と LF（か CR）が混ざっているか（設計書5.4.2）。
+   *
+   * **`eol` だけでは分からない。** あちらは「最初に見つかった改行」なので、
+   * 途中から別の改行になっていても CRLF のファイルに見える。混ざったまま
+   * 外のツールで開くと、行の位置がずれる。
+   */
+  hasMixedEol: boolean;
 }
 
 /** 競合マーカーの検出パターン */
@@ -70,11 +82,9 @@ export function decodeBytes(bytes: Uint8Array): TextFileContent {
   const hash = hashBytes(bytes);
   const { raw, encoding } = decodeWithDetection(bytes);
 
-  const eol: Eol = raw.includes("\r\n")
-    ? "\r\n"
-    : raw.includes("\r")
-      ? "\r"
-      : "\n";
+  // **`eol` の決め方は変えない**（多いほうではなく、最初に見つかったもの）。
+  // ここを変えると、これまで書き戻してきた形が黙って変わる
+  const { eol, hasMixedEol } = detectEol(raw);
 
   const text = raw.replace(/\r\n?/g, "\n");
   const hasTrailingNewline = text.endsWith("\n");
@@ -86,6 +96,7 @@ export function decodeBytes(bytes: Uint8Array): TextFileContent {
     hasTrailingNewline,
     hash,
     hasConflictMarkers: CONFLICT_PATTERN.test(text),
+    hasMixedEol,
   };
 }
 
@@ -128,6 +139,22 @@ function decodeWithDetection(bytes: Uint8Array): {
   }
 }
 
+export interface WriteTextFileOptions {
+  /**
+   * **書かなかった行の改行コードまで、`original.eol` に揃え直す。**
+   *
+   * 既定（`false`）は、これまでどおり**変わらなかったところの元バイトを
+   * そのまま置く**——1文字直しただけで全行が変更扱いになるのを防ぐための
+   * 決まりで（設計書5.4.2）、そこには改行のバイトも含まれる。つまり
+   * **本文が同じなら、`eol` に別の値を渡しても1バイトも変わらない。**
+   *
+   * 「改行コードを揃える」（`features/eolUnify.ts`）だけは、変えたいものが
+   * その改行そのものなので、ここを `true` にして通る。**本文の文字は
+   * 1文字も変わらない**（改行以外のバイトは元のまま置く）。
+   */
+  rewriteEol?: boolean;
+}
+
 /**
  * 読み込み時と同じ形式で書き戻す。
  *
@@ -139,7 +166,8 @@ export async function writeTextFilePreservingFormat(
   filePath: string,
   newText: string,
   original: Pick<TextFileContent, "encoding" | "eol" | "hasTrailingNewline">,
-  expectedHash: string
+  expectedHash: string,
+  options: WriteTextFileOptions = {}
 ): Promise<WriteTextFileResult> {
   const uri = path.toUri(filePath);
 
@@ -180,7 +208,8 @@ export async function writeTextFilePreservingFormat(
     current,
     out,
     original.encoding,
-    original.eol
+    original.eol,
+    options.rewriteEol === true
   );
   if (!bytes) {
     return { ok: false, reason: "encoding_error" };
@@ -280,17 +309,26 @@ interface EncodedToken {
  * 編集されていない文字の元バイト列を再利用する。
  * CP932には同じ文字へ復号される複数の符号があるため、全文再エンコードでは
  * 無変更箇所まで別バイトへ正規化されてしまう。
+ *
+ * @param rewriteEol 変わらなかった改行も `preferredEol` へ置き直すか。
+ *   **既定は false**——改行のバイトも「変わらなかったところ」なので、
+ *   そのまま置く（1文字直しただけで全行が変更扱いになるのを防ぐ）。
  */
 function encodePreservingUnchangedBytes(
   originalBytes: Uint8Array,
   normalizedText: string,
   encoding: Encoding,
-  preferredEol: Eol
+  preferredEol: Eol,
+  rewriteEol = false
 ): Uint8Array | undefined {
   const tokenized = tokenizeOriginalBytes(originalBytes, encoding);
-  if (tokenized.text === normalizedText) {
+  if (tokenized.text === normalizedText && !rewriteEol) {
     return originalBytes.slice();
   }
+
+  /** 変わらなかった1文字ぶんのバイト。改行だけは目標の形へ置き直せる */
+  const keep = (token: EncodedToken): Uint8Array =>
+    rewriteEol && token.text === "\n" ? eolBytes(preferredEol) : token.bytes;
 
   const desiredTokens = Array.from(normalizedText);
   const changes = diffArrays(
@@ -314,13 +352,20 @@ function encodePreservingUnchangedBytes(
     const count = change.value.length;
     if (!change.removed) {
       for (let index = 0; index < count; index += 1) {
-        output.push(tokenized.tokens[originalIndex + index].bytes);
+        output.push(keep(tokenized.tokens[originalIndex + index]));
       }
     }
     originalIndex += count;
   }
 
   return concatenateBytes(tokenized.prefix, output);
+}
+
+/** 改行コードのバイト列。UTF-8でもShift_JISでも同じ（ASCIIの範囲） */
+function eolBytes(eol: Eol): Uint8Array {
+  if (eol === "\r\n") return new Uint8Array([0x0d, 0x0a]);
+  if (eol === "\r") return new Uint8Array([0x0d]);
+  return new Uint8Array([0x0a]);
 }
 
 function tokenizeOriginalBytes(

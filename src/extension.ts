@@ -715,6 +715,8 @@ export async function activate(
     },
     // 下段の字数（作者の指示、2026-08-29）。**走査は一覧のキャッシュを借りる**
     workStats: (work) => treeProvider.getStats(work),
+    // 改行コードの案内（設計書5.4.2）も、走査は一覧の結果を借りる
+    workEpisodes: (work) => treeProvider.getEpisodes(work),
     todayFileCount: (work, filePath) => progress.todayFileCount(work, filePath),
     // 空の話を作った直後に基準を置き直す（設計書6.3.2）。
     // **置き直さないと、そのあと書いた分が「今日 +0字」になって消える**
@@ -4286,6 +4288,17 @@ export async function activate(
         treeProvider.refresh(work.id);
       }
     )
+  );
+
+  // **改行コードは、作者が押したときだけ揃える**（設計書5.4.2）。
+  // 保持が原則なので、同期にも保存にも自動の変換は足していない
+  context.subscriptions.push(
+    registerCommand("novelai.unifyEol", async (node?: WorkRef) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      const { unifyEol } = await import("./features/eolUnify.js");
+      await unifyEol(work);
+    })
   );
 
   // **作品の登録は要らない**（設計書6.85）。Word で書いた原稿は、たいてい

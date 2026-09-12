@@ -67,11 +67,12 @@ import { logLine, useLogFile } from "../core/logger";
 import { readTextFile } from "../core/textFile";
 import type { TermHighlighter } from "../views/termHighlight";
 import type { TermKind } from "../core/termIndex";
-import type { WorkEntry, WorkStats } from "../models/types";
+import type { EpisodeFile, WorkEntry, WorkStats } from "../models/types";
 import {
   describeMarkdownSuggestion,
   shouldSuggestMarkdown,
 } from "../core/markdownConversion";
+import { auditEol, describeEolMismatch } from "../core/eolAudit";
 import { countSiteNotation } from "../core/ruby";
 import { notifyDone } from "../views/notify";
 
@@ -522,6 +523,17 @@ export async function waitFor<T>(
 const markdownAsked = new Set<string>();
 
 /**
+ * 改行コードを**もう調べた**ファイル（この起動中だけ覚える）。
+ *
+ * **「出した」ではなく「調べた」を覚える。** 揃っていたファイルにも印を
+ * 付けておかないと、開き直すたびに作品の全話を見に行くことになる。
+ *
+ * **断りは残さない。** 揃えるかどうかはそのときの都合で決まる話なので、
+ * VS Code を開き直せばまた1度だけ出る（`markdownAsked` と同じ考え方）。
+ */
+const eolNoticeChecked = new Set<string>();
+
+/**
  * 画面へ出す字数。**数え方は作品一覧とまったく同じにする**（作者の裁定
  * 2026-09-06）。ここだけ違う数字が出ると、どちらが本当か分からなくなる。
  *
@@ -800,6 +812,13 @@ export interface ManuscriptEditorDeps {
    * 呼ばないが、それでも4万字の作品を独立に読み直す理由は無い。
    */
   workStats(work: WorkEntry): Promise<WorkStats>;
+  /**
+   * 作品の本文ファイル一覧（改行コードの案内に使う。設計書5.4.2）。
+   *
+   * **`workStats` と同じく、作品一覧の走査結果を借りる。** 開くたびに
+   * 全話を読み直すと、19話の作品で1回開くごとに19ファイル読むことになる。
+   */
+  workEpisodes(work: WorkEntry): Promise<EpisodeFile[]>;
   /**
    * この原稿で今日書いた純文字数（設計書6.3）。
    * 記録を止めている作者には `undefined` が返る（0と書かない）。
@@ -1199,6 +1218,9 @@ export class ManuscriptEditorProvider
           void this.sendFootCounts(panel, document);
           // 読み仮名の入った .txt なら、MD化を勧める（作者の指示、2026-08-29）
           void this.suggestMarkdown(document);
+          // 改行コードが作品の多数派と違うなら、1度だけ知らせる
+          // （作者の依頼、2026-09-12。設計書5.4.2）
+          void this.noticeEolMismatch(document);
           break;
 
         case "edit":
@@ -1687,6 +1709,84 @@ export class ManuscriptEditorProvider
 
     // 変換すると元のファイルは消える（名前が変わる）。同じ入口で開き直す
     await this.openAsManuscript(converted);
+  }
+
+  /**
+   * 改行コードが作品の多数派と違ったら、1度だけ知らせる
+   * （作者の依頼、2026-09-12。設計書5.4.2）。
+   *
+   * **こちらからは変えない。** 出すのは案内と「作品ごと揃える」の入口だけで、
+   * 実際に書き換えるのは作者が押したときである（保持が原則）。
+   *
+   * **同じファイルには、この起動中は1度だけ**（`eolNoticeShown`）。
+   * 開き直すたびに出すと、案内そのものが読まれなくなる。
+   */
+  private async noticeEolMismatch(
+    document: vscode.TextDocument
+  ): Promise<void> {
+    const filePath = fromUri(document.uri);
+    const key = paths.normalizeForComparison(filePath);
+    if (eolNoticeChecked.has(key)) return;
+
+    // **作品に属さない原稿では出さない。** 比べる相手（多数派）が無い
+    const work = this.deps.workOf(filePath);
+    if (!work) return;
+
+    // **調べる前に印を付ける。** 揃っていたファイルにも印が残るので、
+    // 開き直すたびに全話を読み直すことがなくなる
+    eolNoticeChecked.add(key);
+
+    let entries;
+    try {
+      const episodes = await this.deps.workEpisodes(work);
+      entries = episodes.map((episode) => ({
+        filePath: episode.filePath,
+        eol: episode.eol ?? null,
+        hasMixedEol: episode.hasMixedEol ?? false,
+      }));
+    } catch {
+      // 走査できなくても、書くほうは止めない
+      return;
+    }
+
+    const mine = entries.find(
+      (entry) => paths.normalizeForComparison(entry.filePath) === key
+    );
+    if (!mine || mine.eol === null) return;
+
+    const audit = auditEol(entries);
+    if (audit.majority === null) return;
+    const differs = audit.differing.some(
+      (differing) => paths.normalizeForComparison(differing) === key
+    );
+    if (!differs) return;
+
+    const majorityCount = entries.filter(
+      (entry) =>
+        !entry.hasMixedEol &&
+        entry.eol === audit.majority &&
+        paths.normalizeForComparison(entry.filePath) !== key
+    ).length;
+
+    const unify = "作品ごと揃える";
+    const later = "今はしない";
+    const picked = await vscode.window.showInformationMessage(
+      describeEolMismatch({
+        eol: mine.eol,
+        hasMixedEol: mine.hasMixedEol,
+        majority: audit.majority,
+        majorityCount,
+      }),
+      unify,
+      later
+    );
+    if (picked !== unify) return;
+
+    // **作品を指定して呼ぶ。** 引数無しだと作品選択からやり直させてしまう
+    await vscode.commands.executeCommand("novelai.unifyEol", {
+      type: "work" as const,
+      work,
+    });
   }
 
   /**
