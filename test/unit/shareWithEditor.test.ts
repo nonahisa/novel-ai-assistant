@@ -235,4 +235,65 @@ describe("copyForEditor", () => {
     expect(merged).toContain('"id":"a"');
     expect(merged).toContain('"id":"b"');
   });
+
+  /**
+   * フォルダーの中身を「道 → バイト列」の控えにする。
+   *
+   * **バイトで見る。** 文字として読み直すと、文字コードや改行の違いが
+   * 消えてしまい、「そのまま写った」を確かめたことにならない。
+   */
+  const snapshot = async (dir: string): Promise<Map<string, string>> => {
+    const out = new Map<string, string>();
+    const walk = async (current: string, prefix: string): Promise<void> => {
+      const entries = await fsp.readdir(current, { withFileTypes: true });
+      for (const entry of entries) {
+        const relative = prefix ? nodePath.join(prefix, entry.name) : entry.name;
+        const full = nodePath.join(current, entry.name);
+        if (entry.isDirectory()) await walk(full, relative);
+        else out.set(relative, (await fsp.readFile(full)).toString("base64"));
+      }
+    };
+    await walk(dir, "");
+    return out;
+  };
+
+  test("**元の作品フォルダーは、写したあとも1バイトも変わらない**", async () => {
+    // 写す側であって、書かれる側ではない。ここが崩れると、
+    // 編集部へ渡しただけで手元の原稿が変わることになる
+    await put(nodePath.join("本文", "001.txt"), "　雪が降っていた。\r\n");
+    await put(nodePath.join("設定", "characters", "chr_001.json"), '{"name":"氷"}');
+    await put(nodePath.join("設定", "plot.md"), "# プロット\n");
+    // 退避とキャッシュも置く。**写しからは消えるが、元からは消えない**
+    await put(
+      nodePath.join("本文", RECOVERY_DIRECTORY_NAME, "001.txt.1"),
+      "ふるい"
+    );
+    await put(nodePath.join(".aiwriter", "cache", "chunks.json"), "{}");
+
+    const before = await snapshot(root);
+    await share();
+    const after = await snapshot(root);
+
+    expect([...after.keys()].sort()).toEqual([...before.keys()].sort());
+    for (const [relative, bytes] of before) {
+      expect(after.get(relative), relative).toBe(bytes);
+    }
+    // 控えが空だと、何も比べずに通ってしまう
+    expect(before.size).toBeGreaterThan(3);
+  });
+
+  test("**本文と設定は、改行コードごとそのまま写る**", async () => {
+    // CRLF の作品を渡して、編集部の手元で LF に化けると、
+    // 差分が全行になって「どこを直したのか」が読めなくなる
+    const crlf = "　一行目。\r\n　二行目。\r\n";
+    const lf = "# プロット\n- 第1話\n";
+    await put(nodePath.join("本文", "001.txt"), crlf);
+    await put(nodePath.join("設定", "plot.md"), lf);
+
+    await share();
+
+    expect(await readCopied(nodePath.join("本文", "001.txt"))).toBe(crlf);
+    expect(await readCopied(nodePath.join("設定", "plot.md"))).toBe(lf);
+  });
+
 });
