@@ -780,3 +780,45 @@ describe("左に並ぶビューの名前", () => {
     expect(STEP_MENU.at(-1)?.label).toBe("ヘルプ");
   });
 });
+
+/**
+ * ステップ4に「伏線を手で追加」が並ぶこと（実機確認 F-29）。
+ *
+ * **詳細メニューにしか無かった**（作者の裁定で 0.48.2 に足した）。
+ * 伏線は検知で拾うより、書いた本人が「これは伏線」と足すほうが入口として自然で、
+ * ステップから入った人には「登録はAI任せ」に見えていた。
+ *
+ * ステップメニューは操作の実体を持たず、コマンドIDで詳細メニューを指す
+ * （写し禁止）。そのIDが並びから外れたら、ここで気づく。
+ */
+function commandsOf(step: (typeof STEP_MENU)[number] | undefined): string[] {
+  return (step?.entries ?? [])
+    .map((entry) => (entry as { command?: string }).command)
+    .filter((id): id is string => typeof id === "string");
+}
+
+describe("ステップ4の伏線の入口（実機確認 F-29）", () => {
+  const step4 = STEP_MENU.find((entry) => entry.label === "4. 自己校正");
+
+  test("「伏線を手で追加」が並ぶ", () => {
+    expect(step4).toBeDefined();
+    expect(commandsOf(step4)).toContain("novelai.addForeshadow");
+  });
+
+  test("**伏線の3つが、検知 → 一覧 → 手で追加 → 状態の順で並ぶ**", () => {
+    // 並びが崩れると、作者は「足す」より先に「状態を変える」を踏む
+    const ids = commandsOf(step4);
+    const at = (id: string) => ids.indexOf(id);
+
+    expect(at("novelai.checkForeshadows")).toBeGreaterThan(-1);
+    expect(at("novelai.openForeshadows")).toBeGreaterThan(
+      at("novelai.checkForeshadows")
+    );
+    expect(at("novelai.addForeshadow")).toBeGreaterThan(
+      at("novelai.openForeshadows")
+    );
+    expect(at("novelai.setForeshadowStatus")).toBeGreaterThan(
+      at("novelai.addForeshadow")
+    );
+  });
+});
