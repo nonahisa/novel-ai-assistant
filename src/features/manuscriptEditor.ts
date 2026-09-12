@@ -255,6 +255,24 @@ export function refreshManuscriptCounts(filePath: string): void {
   openManuscripts.get(manuscriptLedgerKey(filePath))?.refreshCounts();
 }
 
+/**
+ * 名前が変わる原稿の見た目を、**新しい名前のほうへ持って行く**
+ * （0.51.5。0.47.9 の積み残し⑦。設計書6.25.5）。
+ *
+ * `.txt` を `.md` にすると、**ファイルの名前が変わる**。見た目（縦横・
+ * 大きさ・組んで書く）は原稿ごとに画面が覚えている値なので、名前が変われば
+ * 覚えていた値の宛先も変わり、**開き直したときに設定の既定へ戻る**。
+ * 中身は同じ原稿なのに縦書きが横書きになるので、作者から見れば壊れている。
+ *
+ * **名前を変える前に呼ぶ。** 変えたあとでは、元の名前の画面はもう閉じている。
+ * 開いていなければ何もしない（覚えている値が無いので、持って行くものも無い）。
+ */
+export function carryAppearanceToRenamed(from: string, to: string): void {
+  const now = openManuscripts.get(manuscriptLedgerKey(from))?.appearance();
+  if (!now) return;
+  pendingAppearance.set(manuscriptLedgerKey(to), now);
+}
+
 /** 「← 前の話」「次の話 →」を押したときに、次に何をするか */
 export type NeighborStep =
   /** その添字の話を開く */
