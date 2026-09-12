@@ -203,6 +203,16 @@ const openManuscripts = new Map<
      * 知らせてくるまでは `undefined`**（開いた直後の一瞬だけ）。
      */
     appearance(): ManuscriptAppearance | undefined;
+    /**
+     * 前の話から持って来た見た目を、**この画面へ直に当てる**（設計書6.25.5）。
+     *
+     * 開くときの見た目は `pendingAppearance` に置き、画面側が立ち上がりに
+     * 1回だけ取り出す。**既に生きている画面は取りに来ない**——`openWith` は
+     * そのタブを前に出すだけだからである。タブが開いているかどうかで
+     * 引き継ぎが効いたり効かなかったりすると、作者には壊れて見える
+     * （2026-09-12、9巡目に実機で確認）。
+     */
+    applyAppearance(next: ManuscriptAppearance): void;
   }
 >();
 
@@ -1116,6 +1126,11 @@ export class ManuscriptEditorProvider
     const showReadingNow = (): void => {
       void panel.webview.postMessage({ type: "showReading" });
     };
+    /** 前の話から持って来た見た目。画面が動き出す前に頼まれたら覚えておく */
+    let pendingApply: ManuscriptAppearance | undefined;
+    const applyAppearanceNow = (next: ManuscriptAppearance): void => {
+      void panel.webview.postMessage({ type: "applyAppearance", appearance: next });
+    };
     const key = manuscriptLedgerKey(document.uri);
     const entry = {
       panel,
@@ -1138,6 +1153,14 @@ export class ManuscriptEditorProvider
       },
       document,
       appearance: (): ManuscriptAppearance | undefined => appearanceNow,
+      applyAppearance: (next: ManuscriptAppearance): void => {
+        // **`revealLine` と同じで、`ready` を待ってから送る**
+        if (!webviewReady) {
+          pendingApply = next;
+          return;
+        }
+        applyAppearanceNow(next);
+      },
     };
     openManuscripts.set(key, entry);
     panel.onDidDispose(() => {
@@ -1297,6 +1320,12 @@ export class ManuscriptEditorProvider
             const line = pendingReveal;
             pendingReveal = undefined;
             revealLineNow(line);
+          }
+          // 待ってもらっていた「前の話の見た目を当てる」を、ここで出す
+          if (pendingApply) {
+            const next = pendingApply;
+            pendingApply = undefined;
+            applyAppearanceNow(next);
           }
           // 開くのと同時に頼まれていた「読み上げの列」を、ここで出す
           if (pendingReading) {
@@ -2317,14 +2346,22 @@ export class ManuscriptEditorProvider
     if (!now) return;
     const to = manuscriptLedgerKey(toFilePath);
     /*
-      **既に開いている原稿には置かない。** そのときの `openWith` は
-      そのタブを前に出すだけで、新しい画面は立ち上がらない＝誰も
-      取りに来ない。置いたままにすると、**ずっとあとでその原稿を
-      開いたときに、いつのものとも知れない見た目が当たる**
-      （取り出しが1回きりなのと同じ理由）。前に出たタブは、自分が
-      覚えている見た目のままで、それはいま画面に映っているものである。
+      **既に開いている原稿には、置かずに直に当てる。** そのときの
+      `openWith` はそのタブを前に出すだけで、新しい画面は立ち上がらない
+      ＝置いても誰も取りに来ない（取り出しは立ち上がりの1回きり）。
+
+      **0.50.3 まではここで素通りしていた。** そのため、いちど開いた
+      タブへ移ると縦横・大きさ・面が引き継がれず、作者から見ると
+      「効いたり効かなかったりする」状態だった（2026-09-12、9巡目に
+      実機で確認——0018 を縦書きにして「次の話 →」を押すと、既に
+      開いていた 9901 が横書きで出た）。生きている画面には送る口
+      （`applyAppearance`）があるので、置き去りにせずそちらへ渡す。
     */
-    if (openManuscripts.has(to)) return;
+    const live = openManuscripts.get(to);
+    if (live) {
+      live.applyAppearance(now);
+      return;
+    }
     pendingAppearance.set(to, now);
   }
 
