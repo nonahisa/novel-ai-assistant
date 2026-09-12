@@ -106,6 +106,37 @@ describe("漢字ひらき・語尾単調（1.5で追加）", () => {
     expect(result.accepted[0].suggestion).toBe("いわゆる");
   });
 
+  /*
+    **漢字ひらきで修正案が空でも、落とさない**（作者の裁定、2026-09-12）。
+
+    一度「修正案が空で、常用漢字表に無い字も無いなら落とす」を入れたが取り下げた。
+    作者の指摘「『然し』はひらいたほうが良い」で、その規則が正しい指摘まで
+    落とすことが分かったためである（「然」は常用漢字なので消えてしまう）。
+
+    空で返るのはモデルがプロンプトの約束（ひらがなに直した形を書く）を
+    守っていないということで、検算で間引く話ではない。
+  */
+  test("漢字ひらきは、修正案が空でも落とさない", () => {
+    const result = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 11,
+            original: "然し彼は歩き続けた。",
+            suggestion: "",
+            reason: "漢字ひらき",
+            explanation: "「然し（しかし）」で読みが詰まります",
+            confidence: "high",
+          },
+        ],
+      },
+      chunkOf("然し彼は歩き続けた。")
+    );
+
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toHaveLength(1);
+  });
+
   test("語尾単調は、修正案が空のまま通る", () => {
     // **どの文をどう変えるかは文体そのもの**なので、作者が決める
     const result = validateProofreadIssues(
@@ -626,14 +657,18 @@ describe("漢字ひらきへの常用漢字表の注記", () => {
     chapterEnd: 1,
   } as never;
 
-  function acceptedOf(original: string, explanation: string) {
+  function acceptedOf(
+    original: string,
+    explanation: string,
+    suggestion = ""
+  ) {
     return validateProofreadIssues(
       {
         issues: [
           {
             line: 1,
             original,
-            suggestion: "",
+            suggestion,
             reason: "漢字ひらき",
             explanation,
             confidence: "high",
@@ -655,9 +690,13 @@ describe("漢字ひらきへの常用漢字表の注記", () => {
   });
 
   test("表の字だけなら、注記は付かない", () => {
+    // **修正案を渡す。** 空のまま表の字だけだと、作者に渡すものが1つも
+    // 無いので指摘ごと落ちる（下の「渡すものが1つも無い」の節）。
+    // ここで見たいのは注記が付かないことなので、落ちない形で確かめる
     const accepted = acceptedOf(
       "然し彼は歩き続けた。",
-      "「然し（しかし）」で読みが詰まります"
+      "「然し（しかし）」で読みが詰まります",
+      "しかし彼は歩き続けた。"
     );
     expect(accepted).toHaveLength(1);
     expect(accepted[0].explanation).not.toContain("常用漢字表");
