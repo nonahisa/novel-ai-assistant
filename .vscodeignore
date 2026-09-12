@@ -1,5 +1,6 @@
 .vscode/**
 .vscode-test/**
+.vscode-test-web/**
 .worktrees/**
 .github/**
 .superpowers/**
@@ -19,6 +20,10 @@ node_modules/**
 out/**
 coverage/**
 release/**
+# ブラウザ版の実動テストの束（`npm run test:web`）。`dist/` に置くのは
+# `@vscode/test-web` がリポジトリの根の下しか配れないためで、
+# **配布物には入れない**（許可リスト `scripts/releaseSupport.mjs` も弾く）
+dist/web-tests.js
 tsconfig.json
 tsconfig.test.json
 esbuild.js

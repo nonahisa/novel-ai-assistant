@@ -94,7 +94,13 @@ export class SettingsWatcher implements vscode.Disposable {
     }
 
     const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(settingsDir, "**/*.json")
+      // **文字列を直に渡さない。** `RelativePattern` は文字列を受けると
+      // 中で `Uri.file()` を呼ぶので、ブラウザ版では
+      // `file:///vscode-test-web%3A//mount/設定` という無い場所を見張り、
+      // 外部の書き換えに気づけなくなる（`npm run test:web` のコンソールに
+      // 出ていた。設計書5.8.13、CLAUDE.md 規則7）。
+      // `workFolderWatch.ts` と `manuscriptEditor.ts` も `toUri` を通している
+      new vscode.RelativePattern(path.toUri(settingsDir), "**/*.json")
     );
     const handle = (uri: vscode.Uri) => this.record(work, fromUri(uri));
     watcher.onDidChange(handle);

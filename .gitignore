@@ -6,6 +6,8 @@ coverage/
 .env.*
 !.env.example
 .vscode-test/
+# ブラウザのVS Code（`npm run test:web` が取り寄せる。数十MB）
+.vscode-test-web/
 release/
 # 検証用の使い捨てスクリプト（アンダースコア始まり）
 _test_*

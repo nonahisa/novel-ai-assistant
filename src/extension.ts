@@ -1686,7 +1686,18 @@ export async function activate(
    * 見分け方も、登録後の集計も同じでよい。分けて書くと、片方だけ直る
    * （実際、登録後の集計を囲む修正は片方にしか入っていなかった）。
    */
-  async function registerFolderAsWork(folderPath: string): Promise<void> {
+  async function registerFolderAsWork(
+    folderPath: string,
+    /**
+     * 作品名。渡されなければ作者に入力してもらう。
+     *
+     * **ブラウザ版の実動テスト（`npm run test:web`）が通るための口**
+     * （設計書5.8.13）。入力画面は誰も押せないので、テストからは名前を
+     * 添えて呼ぶ。作者が押したときは `undefined` のままで、これまでと
+     * 同じ画面が出る
+     */
+    givenTitle?: string
+  ): Promise<WorkEntry | undefined> {
     // **書庫かもしれない。** 中に作品フォルダーが並んでいたら、
     // まとめて登録する（設計書5.7）。作品そのものならこれまで通り進む
     const collection = await tryRegisterAsCollection(registry, folderPath);
@@ -1695,17 +1706,19 @@ export async function activate(
         treeProvider.refresh();
         highlighter.invalidate();
       }
-      return;
+      return undefined;
     }
 
     const defaultTitle = path.basename(folderPath);
-    const title = await askText({
-      prompt: "作品名を入力してください",
-      value: defaultTitle,
-      validateInput: (v) =>
-        v.trim().length === 0 ? "作品名を入力してください" : null,
-    });
-    if (title === undefined) return;
+    const title =
+      givenTitle ??
+      (await askText({
+        prompt: "作品名を入力してください",
+        value: defaultTitle,
+        validateInput: (v) =>
+          v.trim().length === 0 ? "作品名を入力してください" : null,
+      }));
+    if (title === undefined) return undefined;
 
     let entry: WorkEntry | undefined;
     try {
@@ -1715,9 +1728,9 @@ export async function activate(
       await vscode.window.showErrorMessage(
         `作品フォルダを登録できませんでした。登録状態は変更されていません。\n${detail}`
       );
-      return;
+      return undefined;
     }
-    if (!entry) return;
+    if (!entry) return undefined;
 
     // **登録はもう済んでいる。** ここから先（文字数の集計）で失敗しても、
     // 一覧の更新まで巻き添えにしない。以前は `scanWork` を囲っておらず、
@@ -1741,17 +1754,21 @@ export async function activate(
     }
     treeProvider.refresh();
     highlighter.invalidate();
+    return entry;
   }
 
   context.subscriptions.push(
-    registerCommand("novelai.addWork", async () => {
-      // ブラウザ版では、開いているフォルダーから選ぶ（設計書5.8.8）
-      const folderPath = await pickFolder(
-        "作品フォルダを選択",
-        "この作品フォルダを登録"
-      );
-      if (!folderPath) return;
-      await registerFolderAsWork(folderPath);
+    registerCommand("novelai.addWork", async (argument?: unknown) => {
+      // **場所と作品名を引数で渡せる**（設計書5.8.13）。ブラウザ版の実動テスト
+      // （`npm run test:web`）は画面を押せないので、選択画面と入力画面を
+      // 飛ばす道が要る。作者が押したときは引数が無く、これまで通り画面が出る
+      const given = parseAddWorkArgument(argument);
+      const folderPath =
+        given?.folderPath ??
+        (await pickFolder("作品フォルダを選択", "この作品フォルダを登録"));
+      if (!folderPath) return undefined;
+      // 登録できた作品を返す。呼んだ側（テスト）が結果を確かめられる
+      return await registerFolderAsWork(folderPath, given?.title);
     })
   );
 
@@ -4664,6 +4681,31 @@ export function deactivate(): void {
   // 後片付けは context.subscriptions に任せる。
   // ログだけは遅延生成でsubscriptionsに載っていないので個別に閉じる
   disposeLog();
+}
+
+/**
+ * 「作品を追加」に渡された、場所と作品名（設計書5.8.13）。
+ *
+ * **ブラウザ版の実動テストのための口である。** `npm run test:web` は
+ * ブラウザのVS Codeを立ち上げて拡張機能を動かすが、選択画面や入力画面を
+ * 押す手が無い。そこでコマンドに引数を渡せるようにして、その2つを飛ばす。
+ *
+ * **形を確かめてから使う。** このコマンドは詳細メニュー・コマンドパレット・
+ * 右クリックからも呼ばれ、そこでは別のもの（`Uri` など）が渡ってくる。
+ * 欄が揃っていないものは「引数なし」と同じに扱い、これまでの画面を出す。
+ */
+function parseAddWorkArgument(
+  arg: unknown
+): { folderPath: string; title?: string } | undefined {
+  if (typeof arg !== "object" || arg === null) return undefined;
+  const candidate = arg as { folderPath?: unknown; title?: unknown };
+  if (typeof candidate.folderPath !== "string") return undefined;
+  if (candidate.folderPath.trim().length === 0) return undefined;
+  const title =
+    typeof candidate.title === "string" && candidate.title.trim().length > 0
+      ? candidate.title.trim()
+      : undefined;
+  return { folderPath: candidate.folderPath, title };
 }
 
 /**

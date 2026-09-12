@@ -231,16 +231,28 @@ export function untitledMarkdownUri(
   const base = sanitizeNamePart(displayName);
   let name = `${base}.md`;
   for (let n = 2; taken.includes(name); n += 1) name = `${base}-${n}.md`;
+  // **`/` から始める。** 相対の道（`untitled:動作の診断.md`）は、
+  // ブラウザのVS Codeでは**開いているフォルダーからの相対**として
+  // 解かれ、`vscode-test-web:動作の診断.md` という仕組みの無い場所を
+  // 指して落ちる（`npm run test:web` が捕まえた。設計書5.8.13）。
+  // 手元のVS Codeでは、タブの名前はどちらでも道の末尾（`動作の診断.md`）。
+  //
   // **`paths.toUri()` は使わない。** あれは実在する場所を指すためのもので、
   // ここで欲しいのは保存先を持たない `untitled:` である
-  return vscode.Uri.from({ scheme: "untitled", path: name });
+  return vscode.Uri.from({ scheme: "untitled", path: `/${name}` });
 }
 
-/** いま開いている、保存されていない文書の名前 */
+/**
+ * いま開いている、保存されていない文書の名前。
+ *
+ * **先頭の `/` を落として返す。** `untitledMarkdownUri` はこれを
+ * 「使われている名前」として突き合わせるので、形を揃えないと
+ * 番号を振って避ける仕掛けが働かない（前の内容と混ざる）
+ */
 function openUntitledNames(): string[] {
   return vscode.workspace.textDocuments
     .filter((document) => document.uri.scheme === "untitled")
-    .map((document) => document.uri.path);
+    .map((document) => document.uri.path.replace(/^\//, ""));
 }
 
 /**

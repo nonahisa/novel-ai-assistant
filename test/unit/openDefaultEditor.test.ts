@@ -143,7 +143,14 @@ describe("その場で作るMarkdownの名前", () => {
   it("`.md` で終わる untitled のURIになる", () => {
     const uri = untitledMarkdownUri("反映待ちの更新", []);
     expect(uri.scheme).toBe("untitled");
-    expect(uri.path).toBe("反映待ちの更新.md");
+    expect(uri.path).toBe("/反映待ちの更新.md");
+  });
+
+  it("道は `/` から始まる", () => {
+    // **相対の道はブラウザのVS Codeで開けない。** 開いているフォルダーからの
+    // 相対として解かれ、`vscode-test-web:動作の診断.md` という仕組みの無い
+    // 場所を指して落ちる（`npm run test:web` が捕まえた。設計書5.8.13）
+    expect(untitledMarkdownUri("動作の診断", []).path.startsWith("/")).toBe(true);
   });
 
   it("同じ名前が開いていたら、番号を振って避ける", () => {
@@ -151,17 +158,17 @@ describe("その場で作るMarkdownの名前", () => {
     // そこへ中身を差し込むことになる（前回の内容と混ざる）
     const taken = ["反映待ちの更新.md", "反映待ちの更新-2.md"];
     expect(untitledMarkdownUri("反映待ちの更新", taken).path).toBe(
-      "反映待ちの更新-3.md"
+      "/反映待ちの更新-3.md"
     );
   });
 
   it("URIの区切りと混ざる文字を落とす", () => {
-    expect(untitledMarkdownUri("A/B:C?D#E", []).path).toBe("ABCDE.md");
+    expect(untitledMarkdownUri("A/B:C?D#E", []).path).toBe("/ABCDE.md");
   });
 
   it("名前が空になっても、拡張子は残る", () => {
     // 表示名は呼び出し側が決めるが、万一空でも `.md` を失わない
-    expect(untitledMarkdownUri("///", []).path).toBe("無題.md");
+    expect(untitledMarkdownUri("///", []).path).toBe("/無題.md");
   });
 });
 
