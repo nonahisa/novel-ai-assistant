@@ -95,17 +95,19 @@ describe("XMLとして閉じている", () => {
 /**
  * 半角の縦中横（設計書6.65.15の2）。
  *
- * 縦書きの本文・見出しで、半角の数字・「!」「?」の1〜3文字の連続を
- * `<span class="tcy">` で包む。4文字以上は従来どおり横倒しのまま。
+ * 縦書きの本文・見出しで、半角の数字・「!」「?」の1〜2文字の連続を
+ * `<span class="tcy">` で包む。3文字以上は従来どおり横倒しのまま
+ * （作者の指定、2026-09-12）。
  */
 describe("半角の縦中横", () => {
-  test("1〜3文字の数字・!・?は tcy で包む", () => {
+  test("1〜2文字の数字・!・?は tcy で包む", () => {
+    expect(applyTateChuYoko("5")).toBe('<span class="tcy">5</span>');
     expect(applyTateChuYoko("12")).toBe('<span class="tcy">12</span>');
     expect(applyTateChuYoko("!?")).toBe('<span class="tcy">!?</span>');
-    expect(applyTateChuYoko("100")).toBe('<span class="tcy">100</span>');
   });
 
-  test("4文字以上は包まない（横倒しのまま）", () => {
+  test("3文字以上は包まない（横倒しのまま）", () => {
+    expect(applyTateChuYoko("123")).toBe("123");
     expect(applyTateChuYoko("2026")).toBe("2026");
   });
 

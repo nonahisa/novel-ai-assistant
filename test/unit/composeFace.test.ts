@@ -316,6 +316,27 @@ describe("記法→DOM→記法 が完全に一致する", () => {
     DASH_BAR + "{彼女|かのじょ}は、",
     DASH_BAR + "\n" + DASH_EM,
     "…" + DASH_BAR + "…",
+    /*
+      縦中横の半角数字も素の span で包む（作者の依頼、2026-09-12）。
+      **包むのは1〜2文字だけ**なので、包む・包まないの境目（2文字と3文字）と、
+      ルビ・三点リーダ・行頭行末との並びを揃えて確かめる。**ここが崩れると、
+      数字を含む行を開いて打っただけで本文が書き換わる。**
+    */
+    "3",
+    "12",
+    "123",
+    "3月5日",
+    "2026年",
+    "12月",
+    "F5",
+    "A-13",
+    "第1話",
+    "1\n2",
+    "1{漢字|かんじ}2",
+    "{{強調}}12",
+    "…12…",
+    "あ1い22う333え",
+    "　2026年3月5日、12時。",
   ];
 
   it("すべての場合で、1文字も変わらない", () => {
@@ -407,8 +428,10 @@ describe("投稿サイトの記法でも、記法→DOM→記法 が完全に一
     "　あ",
     "あ  い",
     "あ\tい",
-    // 三点リーダとの混在（素の span になる経路）
+    // 三点リーダ・縦中横との混在（どちらも素の span になる経路）
     "…｜漢字《かんじ》…",
+    "3月12日、｜第一話《だいいちわ》",
+    "2026年は123日",
     "そう……と彼女《かのじょ》は言った",
     "《《ただ》》……",
     // 実データに近い形（カクヨム）
@@ -734,6 +757,50 @@ describe("組み立てたDOMの形", () => {
     ]);
   });
 
+  /**
+   * 縦中横の半角数字（作者の依頼、2026-09-12
+   * 「半角数字1、2文字は縦書き時縦中横にしてほしい。3文字以降は現行通り」）。
+   *
+   * **まとまりごと1つの span に入れる**（三点リーダのように1文字ずつには
+   * しない）。text-combine-upright は span の中身をまとめて1文字ぶんへ
+   * 収める指定なので、1文字ずつ包むと「12」が縦に2つ並ぶ。
+   */
+  it("半角数字1〜2文字は、まとまりごと素の span（tcy）", () => {
+    const line = build("あ12い").childNodes[0];
+    expect(line.childNodes).toHaveLength(3);
+
+    const tcy = line.childNodes[1];
+    expect(tcy.nodeName).toBe("SPAN");
+    expect(tcy.getAttribute?.("class")).toBe("tcy");
+    // かたまりの印は付けない（三点リーダ・ダッシュと同じ。中の字は直せる）
+    expect(tcy.getAttribute?.("contenteditable")).toBeNull();
+    expect(tcy.getAttribute?.("data-src")).toBeNull();
+    expect(tcy.childNodes).toHaveLength(1);
+    expect(tcy.childNodes[0].nodeValue).toBe("12");
+  });
+
+  it("3文字以上と型番は包まない（現行どおり横倒し）", () => {
+    for (const value of ["2026年", "F5", "A-13"]) {
+      const line = build(value).childNodes[0];
+      // 平文のテキストノード1つだけ。span は作らない
+      expect(line.childNodes, value).toHaveLength(1);
+      expect(line.childNodes[0].nodeValue, value).toBe(value);
+    }
+  });
+
+  it("縦中横も平文として数える（かたまりは1つも作らない）", () => {
+    const atoms = api.composeAtoms(build("3月12日"));
+    expect(atoms.filter((atom) => atom.kind === "chunk")).toEqual([]);
+    expect(
+      atoms.map((atom) => [atom.kind, atom.text, atom.start, atom.end])
+    ).toEqual([
+      ["text", "3", 0, 1],
+      ["text", "月", 1, 2],
+      ["text", "12", 2, 4],
+      ["text", "日", 4, 5],
+    ]);
+  });
+
   it("かたまりは data-src をそのまま出す（中の字ではなく記法）", () => {
     // 中の字を書き換えても、記法（data-src）のほうが本文になる
     const line = element("p", [
@@ -870,6 +937,10 @@ describe("記法の位置とDOMの位置", () => {
       "あ……い",
       "…{漢字|かんじ}…",
       "あ…\n…い",
+      // 縦中横も印だけ（かたまりではない）。2文字の run の**途中**にも
+      // カーソルは置ける——「12」の間で打てなければ、数字を直せない
+      "　3月12日、第1話。",
+      "1{漢字|かんじ}22",
     ]) {
       const atoms = api.composeAtoms(build(sample));
       for (let offset = 0; offset <= sample.length; offset++) {
@@ -1155,13 +1226,26 @@ describe("画面の約束", () => {
   });
 
   /**
+   * 縦中横（作者の依頼、2026-09-12）。
+   *
+   * **縦書きのときだけ効かせる。** 印の span は横書きでも付くが、
+   * text-combine-upright は縦組みでしか効かないので見た目は変わらない
+   * （向きを切り替えるたびに面を組み直さなくてよい）。
+   */
+  it("縦中横は、縦書きのときだけ効く", () => {
+    expect(html).toContain("body.vertical .tcy { text-combine-upright: all; }");
+    // 横書きにも当たる規則を置かない（付いている印は見えないままでよい）
+    expect(html).not.toContain("#compose .tcy { text-combine-upright");
+  });
+
+  /**
    * 素の span にした代わりの手当て（0.24.13）。
    *
    * span の中で打つと、回した書式が打った字へ伝染する。打つ直前に
    * カーソルを span の外へ逃がす。**変換中（IME）は触らない**——変換の
    * 途中で選択を動かすと、日本語入力の側が持つ位置とずれて変換が壊れる。
    */
-  it("三点リーダ・ダッシュの中で打つ前に、カーソルを外へ出す", () => {
+  it("三点リーダ・ダッシュ・縦中横の中で打つ前に、カーソルを外へ出す", () => {
     expect(code).toContain("function composeEscapeEllipsis(");
     expect(code).toContain("function composeEllipsisAncestor(");
 
@@ -1170,11 +1254,15 @@ describe("画面の約束", () => {
       出しているので、中で打つと掛けた書体を受け継ぐ問題も同じである。
       印を1種類しか見ていないと、ダッシュの中で打った字だけが化ける。
     */
+    /*
+      **縦中横の印にも効かせる**（作者の依頼、2026-09-12）。「12」の span の
+      中で「3」を打つと、3文字が1文字ぶんの幅へ詰め込まれて読めなくなる。
+    */
     const ancestor = code.slice(
       code.indexOf("function composeEllipsisAncestor(")
     );
-    expect(ancestor.slice(0, 600)).toContain(
-      'name === "ellipsis" || name === "dash"'
+    expect(ancestor.slice(0, 700)).toContain(
+      'name === "ellipsis" || name === "dash" || name === "tcy"'
     );
 
     const escape = code.slice(code.indexOf("function composeEscapeEllipsis("));

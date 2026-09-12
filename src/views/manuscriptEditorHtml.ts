@@ -40,6 +40,7 @@
 import { MANUSCRIPT_FONTS } from "../core/manuscriptFonts";
 import { NOTATION_RULES } from "../core/manuscriptRender";
 import { MEMO_LINE_PATTERN, MEMO_TAG_CLASS_MAP } from "../core/sceneMemo";
+import { TCY_RUN_PATTERN } from "../core/tateChuYoko";
 import {
   SCRIPT_LINE_CLASSES,
   SCRIPT_LINE_CSS,
@@ -487,6 +488,17 @@ body.vertical #compose .ellipsis {
   font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN",
     "MS Mincho", serif;
 }
+/* **半角数字の縦中横**（作者の依頼、2026-09-12
+   「半角数字1、2文字は縦書き時縦中横にしてほしい。3文字以降は現行通り」）。
+
+   縦書きは text-orientation: mixed で組んでいるので、半角のまとまりは
+   横に寝る。1〜2文字の数字は、寝かせずに1文字ぶんの幅へ立てる。
+   どこを立てるかは core/tateChuYoko.ts が決める（3文字以上と型番は外れる）。
+
+   **横書きには何も当たらない。** 印の span は横書きのときにも付くが、
+   text-combine-upright は縦組みでしか効かないので見た目は変わらない
+   （面の向きを切り替えるたびに組み直さなくてよい）。 */
+body.vertical .tcy { text-combine-upright: all; }
 /* 圏点は読み物と同じ出し方（em.emph と同じ指定を分け合う） */
 #compose .emphasis {
   font-style: normal;
@@ -2218,6 +2230,15 @@ ruby > rt {
   const MEMO_LINE_RE = new RegExp(${JSON.stringify(MEMO_LINE_PATTERN)});
   const MEMO_TAG_CLASSES = ${JSON.stringify(MEMO_TAG_CLASS_MAP)};
 
+  /**
+   * 縦中横にする半角数字の見つけ方（作者の依頼、2026-09-12）。
+   *
+   * **定義は core/tateChuYoko.ts の1つだけ。** 記法・シーンメモと同じで、
+   * ここへはその規則がそのまま埋め込まれる（写しを置くと、表記ゆれ検知が
+   * 「半角1文字」と数えるものと、この面が立てるものが食い違う）。
+   */
+  const TCY_RUN_PATTERN = ${JSON.stringify(TCY_RUN_PATTERN)};
+
   /** タグとして読む語の長さの上限（core/sceneMemo.ts と同じ理由・同じ値） */
   const MEMO_TAG_MAX = 12;
 
@@ -2474,10 +2495,74 @@ ruby > rt {
     return span;
   }
 
-  /** 平文を段落へ入れる。**三点リーダとダッシュは、揃えるための印で包む** */
+  /**
+   * 縦中横にする半角数字の位置（core/tateChuYoko.ts の tcyRuns と同じ規則）。
+   *
+   * 規則そのものは TCY_RUN_PATTERN で届く。ここがやるのは、当たった
+   * 場所を並べることだけである。
+   */
+  function composeTcyRuns(value) {
+    const runs = [];
+    if (!value) return runs;
+    const re = new RegExp(TCY_RUN_PATTERN, "g");
+    for (;;) {
+      const match = re.exec(value);
+      if (match === null) break;
+      runs.push({ start: match.index, end: match.index + match[0].length });
+    }
+    return runs;
+  }
+
+  /**
+   * 縦中横の印（作者の依頼、2026-09-12
+   * 「半角数字1、2文字は縦書き時縦中横にしてほしい。3文字以降は現行通り」）。
+   *
+   * 縦書きは text-orientation: mixed なので、半角数字のまとまりは横に寝る。
+   * 1〜2文字なら CSS の text-combine-upright で1文字ぶんの幅へ立てられる。
+   * **横書きのときは何も当たらない**ので、印が付いていても見た目は変わらない。
+   *
+   * 三点リーダ・ダッシュと同じく、**data-src を持たない素の span** にする。
+   * 直列化は「知らない要素は中の文字を拾う」経路を通るので、中の数字が
+   * そのまま本文へ戻る（かたまりにすると縦書きで隙間が出るうえ、
+   * 中の字を直せなくなる）。
+   *
+   * **まとまりごと1つの span に入れる**（三点リーダのように1文字ずつには
+   * しない）。text-combine-upright は「span の中身をまとめて1文字ぶんに
+   * 収める」指定なので、1文字ずつ包むと「12」が縦に2つ並んでしまう。
+   */
+  function composeBuildTcy(doc, run) {
+    const span = doc.createElement("span");
+    span.setAttribute("class", "tcy");
+    span.appendChild(doc.createTextNode(run));
+    return span;
+  }
+
+  /**
+   * 平文を段落へ入れる。
+   *
+   * **三点リーダ・ダッシュ・半角数字（縦中横）は、揃えるための印で包む。**
+   * どれも素の span で、直列化では中の文字がそのまま拾われる。
+   */
   function composeAppendText(parent, value, doc) {
+    const runs = composeTcyRuns(value);
+    let next = 0;
     let last = 0;
     for (let i = 0; i < value.length; i++) {
+      // 縦中横は1文字ではなく run（1〜2文字）なので、始まりの位置で包む
+      if (next < runs.length && runs[next].start === i) {
+        const run = runs[next];
+        next++;
+        if (i > last) {
+          parent.appendChild(doc.createTextNode(value.slice(last, i)));
+        }
+        parent.appendChild(
+          composeBuildTcy(doc, value.slice(run.start, run.end))
+        );
+        last = run.end;
+        // 次の回で run の直後から見る（for の i++ と合わせて run.end になる）
+        i = run.end - 1;
+        continue;
+      }
       const char = value[i];
       const isEllipsis = char === "…";
       const isDash = DASH_CHARS.indexOf(char) >= 0;
@@ -3086,16 +3171,21 @@ ruby > rt {
   /**
    * カーソルが**字を揃えるための印**の中にいるなら、その印を返す。
    *
-   * 印は2種類ある——三点リーダ（span.ellipsis）とダッシュ（span.dash）。
-   * **どちらも素の span なので、中へカーソルが入る**（かたまりにすると
-   * 縦書きで隙間が出るため、そうしてある）。逃がす扱いは同じでよい。
+   * 印は3種類ある——三点リーダ（span.ellipsis）・ダッシュ（span.dash）・
+   * 縦中横の半角数字（span.tcy）。**どれも素の span なので、中へカーソルが
+   * 入る**（かたまりにすると縦書きで隙間が出るうえ、中の字を直せなくなる）。
+   * 逃がす扱いは3つとも同じでよい。
+   *
+   * **縦中横は特に効く。** 「12」の span の中で「3」を打つと、
+   * 3文字が1文字ぶんの幅へ詰め込まれて読めなくなる（打った本文は
+   * 正しいままで、面を組み直せば「123」は横倒しに戻る）。
    */
   function composeEllipsisAncestor(node) {
     let at = node;
     while (at && at !== compose) {
       const name =
         at.nodeType === 1 && at.getAttribute ? at.getAttribute("class") : null;
-      if (name === "ellipsis" || name === "dash") return at;
+      if (name === "ellipsis" || name === "dash" || name === "tcy") return at;
       at = at.parentNode;
     }
     return null;

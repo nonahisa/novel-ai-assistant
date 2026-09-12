@@ -1,4 +1,5 @@
 import { OKURIGANA_GROUPS } from "./okuriganaVariants";
+import { tcyRuns } from "./tateChuYoko";
 /**
  * 表記ゆれ検知（P-13）の判定部分。
  *
@@ -43,7 +44,7 @@ export interface NotationVariantForm {
 
 export interface NotationVariantGroup {
   /** 何を手掛かりに見つけた組か */
-  kind: "proper_noun" | "kana_kanji" | "okurigana";
+  kind: "proper_noun" | "kana_kanji" | "okurigana" | "digit_width";
   /** 組を一意に識別するキー。無視の記録に使う */
   key: string;
   /** 画面に出す見出し（例:「良い ↔ よい」） */
@@ -104,6 +105,10 @@ export interface DetectNotationOptions {
  * **2つ以上の表記が実際に本文へ出ている組だけを返す。** 片方しか
  * 使われていなければ、それは揺れていない。この条件だけで誤検出の
  * 大半が落ちる（たまたま拾った1件が単独で報告されることがなくなる）。
+ *
+ * **例外は半角数字の組（`digit_width`）だけ**である。あちらは「揺れを
+ * 揃える」のではなく「半角のままなら全角にするよう促す」ためにあるので、
+ * 全角が1度も出ていなくても組を返す（理由は `detectDigitWidthVariants`）。
  */
 export function detectNotationVariants(
   sources: NotationSource[],
@@ -113,6 +118,7 @@ export function detectNotationVariants(
     ...detectProperNounVariants(sources, options.properNouns),
     ...detectKanaKanjiVariants(sources),
     ...detectOkuriganaVariants(sources),
+    ...detectDigitWidthVariants(sources),
   ];
 
   // 揺れの大きい（出現数の多い）組から見せる。作者は上から片付けられる
@@ -345,6 +351,103 @@ function detectOkuriganaVariants(
   }
 
   return groups;
+}
+
+/** 全角の数字。半角の `0`〜`9` と同じ並びで持つ */
+const FULLWIDTH_DIGITS = "０１２３４５６７８９";
+
+/**
+ * 単独の半角数字を、全角へ揃えるよう促す（作者の依頼、2026-09-12
+ * 「表記揺れで、半角1文字の数字は全角にするよう促したほうが良いかも」）。
+ *
+ * 縦書きで半角の数字1文字は**横に寝る**。原稿エディタは1〜2文字を縦中横で
+ * 立てるが（`tateChuYoko.ts`）、それは画面の見た目の手当てであって、
+ * 投稿サイトやEPUBの組み方まで面倒は見られない。**全角で書いてあれば、
+ * どこへ出しても寝ない。**
+ *
+ * ## 原則の例外：全角側が0件でも組を返す
+ *
+ * ほかの組は「2つ以上の表記が実際に本文へ出ている」ことを条件にしている。
+ * ここだけは**全角の出現が0件でも返す**——作者の依頼は「揺れているものを
+ * 揃える」ではなく「半角のままなら全角にするよう促す」ことだからである。
+ * 一度も全角を使っていない原稿こそ、いちばん促す値打ちがある。
+ * ただし**半角が1件も無ければ出さない**（直すものが無い）。
+ *
+ * ## 数字ごとに組を分ける
+ *
+ * 0〜9をまとめて1組にすると作者の手数は減るが、**揃える処理は
+ * 「surface を suggestion へ置き換える」作り**である
+ * （`features/checkNotation.ts` の `buildIssue` と提案パネルの適用）。
+ * まとめると置換先が数字ごとに違ってしまい、その作りに載らない。
+ * 数字ごとに分ければ、実績のある適用経路をそのまま使える。
+ *
+ * ## 拾う範囲は縦中横と同じ規則
+ *
+ * **判定は `tateChuYoko.ts` の1つだけ**を使い、そのうち1文字の run に絞る。
+ * 2文字以上（「12」「2026」）は促さない——縦中横で立つものを直させるのは
+ * 余計なお世話で、作者の指定（「3文字以降は現行通り」）にも合わない。
+ * 型番（「F5」「A-13」）が外れるのも、あちらの規則をそのまま引き継ぐ。
+ */
+function detectDigitWidthVariants(
+  sources: NotationSource[]
+): NotationVariantGroup[] {
+  const groups: NotationVariantGroup[] = [];
+
+  for (let digit = 0; digit <= 9; digit++) {
+    const half = String(digit);
+    const full = FULLWIDTH_DIGITS[digit];
+
+    const halfOccurrences = findSingleDigitOccurrences(sources, half);
+    if (halfOccurrences.length === 0) continue;
+
+    groups.push({
+      kind: "digit_width",
+      key: `digit_width:${half}`,
+      label: `半角の数字1文字（${half}）↔ 全角（${full}）`,
+      // **全角を先頭に置く。** `forms` の先頭は「揃える先の既定」であり
+      // （まとめて決めるときはここが選ばれる）、この組は全角へ促すために
+      // ある。出現数の多い順に並べる決まりは、どちらへ揃えるか機械では
+      // 決められない組のためのものなので、ここでは当てはまらない
+      forms: [
+        { surface: full, occurrences: findOccurrences(sources, full) },
+        { surface: half, occurrences: halfOccurrences },
+      ],
+    });
+  }
+
+  return groups;
+}
+
+/**
+ * 単独の半角数字が出てくる場所。
+ *
+ * `findOccurrences` を使えないのは、あちらが**ただの部分一致**だからである
+ * （「2026」の中の「2」まで拾ってしまう）。縦中横と同じ規則で run を取り、
+ * 長さ1のものだけを数える。
+ */
+function findSingleDigitOccurrences(
+  sources: NotationSource[],
+  digit: string
+): NotationOccurrence[] {
+  const found: NotationOccurrence[] = [];
+
+  for (const source of sources) {
+    const lines = source.body.split("\n");
+    lines.forEach((lineText, index) => {
+      for (const run of tcyRuns(lineText)) {
+        if (run.end - run.start !== 1) continue;
+        if (lineText[run.start] !== digit) continue;
+        found.push({
+          filePath: source.filePath,
+          line: source.startLine + index,
+          lineText,
+          column: run.start,
+        });
+      }
+    });
+  }
+
+  return found;
 }
 
 /** 出現のあった表記だけを、多い順に返す */

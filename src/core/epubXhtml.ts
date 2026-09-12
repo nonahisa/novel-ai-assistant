@@ -81,11 +81,11 @@ const FORBIDDEN_CONTROL_CHARS = buildForbiddenControlChars();
 /**
  * 半角の縦中横（設計書6.65.15の2）。
  *
- * 縦書きの本で、半角の数字・「!」「?」が1〜3文字だけ連続していたら
+ * 縦書きの本で、半角の数字・「!」「?」が1〜2文字だけ連続していたら
  * `<span class="tcy">` で包む。CSS側（`epubPackage.ts` の `buildEpubCss`）
  * が `text-combine-upright: all` を当て、縦の行の中で横向きに寝かせず
- * 1文字ぶんの幅へ収める。**4文字以上は従来どおり横倒しのまま**——3文字を
- * 超えると1文字ぶんに収まらず、かえって読みにくくなる。
+ * 1文字ぶんの幅へ収める。**3文字以上は従来どおり横倒しのまま**——作者の
+ * 指定（2026-09-12）。3文字は1文字ぶんの幅に収まらず読みにくい。
  *
  * **`escapeXml` のあとの、エスケープ済みの文字列に対して行う。** 逃がす前の
  * 生の文字列に対してだと、`&`（`&amp;`になる文字そのもの）を巻き込んで
@@ -100,7 +100,7 @@ export function applyTateChuYoko(escaped: string): string {
   return escaped.replace(
     /[0-9!?]+/g,
     (run: string, offset: number, whole: string) => {
-      if (run.length > 3) return run;
+      if (run.length > 2) return run;
       const before = offset > 0 ? whole[offset - 1] : "";
       if (before === "&" || before === "#") return run;
       return `<span class="tcy">${run}</span>`;
