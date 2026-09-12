@@ -1,4 +1,9 @@
 import type { EpisodeFile } from "../models/types";
+import {
+  collectedEpisodeIndexAt,
+  collectedEpisodeStarts,
+  parseCollectedFile,
+} from "./collectedFile";
 import { toHalfWidthDigits } from "./episodeParser";
 import type { WorkFormatKey } from "./workFormat";
 
@@ -340,4 +345,53 @@ export function collectedChapterLabel(
 ): string {
   if (!source.insideCollected || source.chapterStart === null) return fileLabel;
   return episodeUnit(format).label(source.chapterStart);
+}
+
+/** 行番号から、その行が属する話の見出しを引く */
+export interface CollectedLabelIndex {
+  /** その行（1始まり）に付ける見出し。合本でなければファイル単位の見出し */
+  labelAt(line: number): string;
+}
+
+/**
+ * 合本の中の「行 → その話の見出し」を引けるようにする（設計書6.40.4）。
+ *
+ * シーンメモは本文の行に置かれるので、**ファイル単位の見出しでは足りない。**
+ * 合本ではそれが「第1〜219話」という範囲表記になり、どの話のメモなのかが
+ * 分からなかった（2026-09-12）。
+ *
+ * **いま居る話の決め方は `collectedEpisodeIndexAt` に任せる。** 原稿エディタの
+ * 「次の話」や投稿用コピーと同じ1か所を通す——写しを作ると、画面で見えている
+ * 話とメモに付く見出しが食い違う日が来る。
+ *
+ * **1件ずつではなく索引にして返す。** 合本は70万字あることがあり、メモの数だけ
+ * 全文を解析し直すと、保存のたびに待たされる。
+ *
+ * @param fileLabel 合本でないとき・話数が読めないときに使う、ファイル単位の見出し
+ */
+export function collectedLabelIndex(
+  rawText: string,
+  fileLabel: string,
+  format?: WorkFormatKey
+): CollectedLabelIndex {
+  const starts = collectedEpisodeStarts(rawText);
+  const episodes = starts.length > 0 ? parseCollectedFile(rawText) : null;
+  if (!episodes) return { labelAt: () => fileLabel };
+
+  // 並び（`order`）から作中の話数を引く。合本の中では別物である
+  const chapterOf = new Map<number, number | null>(
+    episodes.map((episode) => [episode.order, episode.chapter])
+  );
+
+  return {
+    labelAt(line) {
+      const at = collectedEpisodeIndexAt(starts, line);
+      const chapter = chapterOf.get(starts[at].order) ?? null;
+      return collectedChapterLabel(
+        { insideCollected: true, chapterStart: chapter },
+        fileLabel,
+        format
+      );
+    },
+  };
 }

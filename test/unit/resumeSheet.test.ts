@@ -4,6 +4,7 @@ import {
   buildResumeSheet,
   episodePlotFileName,
   RESUME_TAIL_LIMIT,
+  tailOfEpisodeFile,
   tailParagraphs,
   type ResumeSheetInput,
 } from "../../src/core/resumeSheet";
@@ -277,5 +278,67 @@ describe("単話プロットの雛形", () => {
     expect(episodePlotFileName(19)).toBe("第19話.md");
     // ゼロ埋めしない（見出しの「第7話」と揃える）
     expect(episodePlotFileName(7)).toBe("第7話.md");
+  });
+});
+
+describe("前回どこまで書いたか（設計書6.36.1）", () => {
+  const collected = [
+    "------------------------- エピソード1開始 -------------------------",
+    "【エピソードタイトル】",
+    "1話　出会い",
+    "",
+    "【本文】",
+    "一話の本文。",
+    "",
+    "【後書き】",
+    "一話のあとがき。",
+    "",
+    "------------------------- エピソード2開始 -------------------------",
+    "【エピソードタイトル】",
+    "2話　別れ",
+    "",
+    "【本文】",
+    "二話の本文。",
+    "最後の行。",
+    "",
+    "【後書き】",
+    "読んでくださってありがとうございます。",
+    "",
+    "【リアクション】",
+    "いいね: 19件",
+  ].join("\n");
+
+  test("合本では、最後の話の本文だけを出す", () => {
+    // ファイルの物理的な末尾は後書き・リアクションなので、生の全文を
+    // 渡すと「前回書いたもの」に作者の物語でない文章が出る（2026-09-12）
+    const tail = tailOfEpisodeFile("C:/work/全話.txt", collected, {
+      chapterStart: 1,
+      chapterEnd: 2,
+    });
+
+    expect(tail).toBe("二話の本文。\n最後の行。");
+    expect(tail).not.toContain("ありがとうございます");
+    expect(tail).not.toContain("いいね");
+    expect(tail).not.toContain("エピソード");
+    expect(tail).not.toContain("一話の本文");
+  });
+
+  test("合本でなければ、これまでどおり本文の末尾を出す", () => {
+    const tail = tailOfEpisodeFile(
+      "C:/work/001.txt",
+      "前の段落。\n\n最後の段落。",
+      { chapterStart: 1, chapterEnd: 1 }
+    );
+
+    expect(tail).toBe("前の段落。\n\n最後の段落。");
+  });
+
+  test("本文が1文字も無ければ空を返す", () => {
+    const tail = tailOfEpisodeFile("C:/work/001.txt", "   \n\n", {
+      chapterStart: null,
+      chapterEnd: null,
+    });
+
+    expect(tail).toBe("");
   });
 });

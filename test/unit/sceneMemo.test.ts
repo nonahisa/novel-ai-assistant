@@ -20,6 +20,7 @@ import {
   removeMemoLine,
   sortMemos,
   stripMemoLines,
+  type SceneMemo,
 } from "../../src/core/sceneMemo";
 import { sceneMemoToMarkdown } from "../../src/core/sceneMemoMarkdown";
 import { countChars, countManuscriptLines } from "../../src/core/charCount";
@@ -407,8 +408,9 @@ describe("済みにする（6.40.4）", () => {
 });
 
 describe("Markdownで書き出す（6.40.4）", () => {
-  const placeOf = (filePath: string): { label: string; title: string } => ({
-    label: `第${filePath.slice(0, 2).replace(/^0/, "")}話`,
+  // 合本では同じファイルでも行によって話が変わるので、メモ1件を受け取る
+  const placeOf = (memo: SceneMemo): { label: string; title: string } => ({
+    label: `第${memo.filePath.slice(0, 2).replace(/^0/, "")}話`,
     title: "",
   });
 

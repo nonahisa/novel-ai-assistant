@@ -14,6 +14,11 @@
  * 持つ feature 側へ記法を混ぜない。
  */
 
+import {
+  episodeBodySources,
+  type EpisodeChapterRange,
+} from "./episodeChunks";
+
 /** 最新話の見出しに出すもの。数え方は呼び出し側の設定に従う */
 export interface ResumeLatestEpisode {
   /** 「第19話」など。話数が読めないファイルではファイル名を入れる */
@@ -324,6 +329,31 @@ function nextStepsSection(): string[] {
     "- 単話プロットを作る／開く：操作メニューの「単話プロットを作る」。",
     "",
   ];
+}
+
+/**
+ * 1ファイルから「前回どこまで書いたか」を切り出す（設計書6.36.1）。
+ *
+ * **生の全文を渡してはいけない。** 合本ではファイルの物理的な末尾が
+ * 最後の話の【後書き】や【リアクション】なので、「前回書いたもの」に
+ * 作者の物語でない文章が出る（2026-09-12）。投稿サイト形式の単話でも、
+ * 頭書きや後書きが末尾に来ることがある。
+ *
+ * 本文の取り出しは `episodeBodySources` に任せる——合本なら話ごと、
+ * そうでなければ頭書きを外した本文が1本返る。**そこから最後の1本**を取る。
+ *
+ * 本文が1つも取れなければ、生の文章から切り出す（頭書きしか無いファイルでも
+ * 何かを見せるほうが、黙って空にするよりましである）。
+ */
+export function tailOfEpisodeFile(
+  filePath: string,
+  rawText: string,
+  episode: EpisodeChapterRange,
+  limit = RESUME_TAIL_LIMIT
+): string {
+  const sources = episodeBodySources(filePath, rawText, episode);
+  const last = sources[sources.length - 1];
+  return tailParagraphs(last ? last.body : rawText, limit);
 }
 
 /**

@@ -4,7 +4,12 @@ import type { EpisodeFile, WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile, writeTextFilePreservingFormat } from "../core/textFile";
 import { readWorkFormat } from "../core/workFormatStore";
-import { episodeTitle, formatChapterLabel } from "../core/episodeLabel";
+import {
+  collectedLabelIndex,
+  episodeTitle,
+  formatChapterLabel,
+  isCollectedFile,
+} from "../core/episodeLabel";
 import { logFailure, logLine, useLogFile } from "../core/logger";
 import {
   countMemosByTag,
@@ -153,6 +158,13 @@ interface CollectedMemos {
   order: string[];
   /** 読めなかった話。**黙って落とさない** */
   notices: string[];
+  /**
+   * 合本ファイルの中身（道 → 生の本文）。**合本のときだけ入れる。**
+   *
+   * メモの行からその話の見出しを引くのに要る。ばらのファイルでは
+   * ファイル単位の見出しで足りるので、抱えない——合本は70万字ある。
+   */
+  collectedTexts: Map<string, string>;
 }
 
 async function collectMemos(work: WorkEntry): Promise<CollectedMemos> {
@@ -160,6 +172,7 @@ async function collectMemos(work: WorkEntry): Promise<CollectedMemos> {
   const memos: SceneMemo[] = [];
   const notices: string[] = [];
   const order: string[] = [];
+  const collectedTexts = new Map<string, string>();
 
   for (const episode of scan.episodes) {
     order.push(episode.filePath);
@@ -171,6 +184,12 @@ async function collectMemos(work: WorkEntry): Promise<CollectedMemos> {
     try {
       const content = await readTextFile(episode.filePath);
       memos.push(...parseMemos(content.text, episode.filePath));
+      if (isCollectedFile(episode.collectedCount)) {
+        collectedTexts.set(
+          paths.normalizeForComparison(episode.filePath),
+          content.text
+        );
+      }
     } catch (error) {
       // **数えて残す。** 黙って落とすと、その話のメモが無いことにされる
       notices.push(`${episode.fileName} を読めませんでした。`);
@@ -181,7 +200,13 @@ async function collectMemos(work: WorkEntry): Promise<CollectedMemos> {
     }
   }
 
-  return { memos: sortMemos(memos, order), files: scan.episodes, order, notices };
+  return {
+    memos: sortMemos(memos, order),
+    files: scan.episodes,
+    order,
+    notices,
+    collectedTexts,
+  };
 }
 
 /**
@@ -235,6 +260,13 @@ class SceneMemoPanel {
   private order: string[] = [];
   private notices: string[] = [];
   private chapterLabels = new Map<string, { label: string; title: string }>();
+  /**
+   * 合本の中のメモだけ、1件ずつの見出しを持つ（`memoKey` を鍵にする）。
+   *
+   * ファイル単位の見出しは合本では「第1〜219話」という範囲表記になり、
+   * どの話のメモか分からなかった（2026-09-12）。
+   */
+  private memoLabels = new Map<string, { label: string; title: string }>();
 
   /** いま開いている話。カーソルの知らせで動く */
   private currentFile: string | null = null;
@@ -323,7 +355,7 @@ class SceneMemoPanel {
       this.files = collected.files;
       this.order = collected.order;
       this.notices = collected.notices;
-      await this.loadLabels();
+      await this.loadLabels(collected.collectedTexts);
       // 消えた付箋を光らせたままにしない
       if (!this.memos.some((memo) => memoKey(memo) === this.activeKey)) {
         this.activeKey = "";
@@ -338,16 +370,40 @@ class SceneMemoPanel {
     }
   }
 
-  /** 話の呼び名。**作品の形式に従う**（SNS記事は「投稿3」になる） */
-  private async loadLabels(): Promise<void> {
+  /**
+   * 話の呼び名。**作品の形式に従う**（SNS記事は「投稿3」になる）。
+   *
+   * **合本の中のメモは、行からその話の見出しを引く**（設計書6.40.4）。
+   * ファイル単位の見出しを使い回すと、全メモに範囲表記（「第1〜219話」）が
+   * 付いて、どの話のメモか分からない。題は付けない——合本のファイルが持つ
+   * 題は**その話の題ではない**ので、「第2話　全話まとめ」と並んでしまう。
+   *
+   * @param collectedTexts 合本ファイルの中身（`collectMemos` が読んだもの）。
+   *   ここで作り終えたら手放す——70万字を抱え続けない
+   */
+  private async loadLabels(collectedTexts: Map<string, string>): Promise<void> {
     const format = await readWorkFormat(this.work);
     this.chapterLabels = new Map();
+    this.memoLabels = new Map();
     for (const file of this.files) {
+      const key = paths.normalizeForComparison(file.filePath);
       const label = formatChapterLabel(file, format) || file.fileName;
-      this.chapterLabels.set(paths.normalizeForComparison(file.filePath), {
+      this.chapterLabels.set(key, {
         label,
         title: episodeTitle(file, label) ?? "",
       });
+
+      const text = collectedTexts.get(key);
+      if (text === undefined) continue;
+      // 索引は1ファイルにつき1度だけ作る（メモの数だけ解析し直さない）
+      const index = collectedLabelIndex(text, label, format);
+      for (const memo of this.memos) {
+        if (paths.normalizeForComparison(memo.filePath) !== key) continue;
+        this.memoLabels.set(memoKey(memo), {
+          label: index.labelAt(memo.line),
+          title: "",
+        });
+      }
     }
   }
 
@@ -484,17 +540,24 @@ class SceneMemoPanel {
         workTitle: this.work.title,
         memos: this.visibleMemos(),
         totalCount: this.memos.length,
-        placeOf: (filePath) => this.labelOf(filePath),
+        placeOf: (memo) => this.labelOf(memo),
       }),
       { preview: false },
       { work: this.work }
     );
   }
 
-  private labelOf(filePath: string): { label: string; title: string } {
+  /**
+   * そのメモを置く場所の呼び名。
+   *
+   * **メモ1件ずつを鍵にする。** 合本では同じファイルの中でも話が変わるので、
+   * ファイル単位では引けない。
+   */
+  private labelOf(memo: SceneMemo): { label: string; title: string } {
     return (
-      this.chapterLabels.get(paths.normalizeForComparison(filePath)) ?? {
-        label: paths.basename(filePath),
+      this.memoLabels.get(memoKey(memo)) ??
+      this.chapterLabels.get(paths.normalizeForComparison(memo.filePath)) ?? {
+        label: paths.basename(memo.filePath),
         title: "",
       }
     );
@@ -573,7 +636,7 @@ class SceneMemoPanel {
     memo: SceneMemo,
     currentKey: string | null
   ): Record<string, unknown> {
-    const where = this.labelOf(memo.filePath);
+    const where = this.labelOf(memo);
     const isCurrent =
       currentKey !== null &&
       paths.normalizeForComparison(memo.filePath) === currentKey;

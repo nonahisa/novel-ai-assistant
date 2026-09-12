@@ -655,7 +655,14 @@ function renderEpisodes() {
     table.innerHTML = '<div class="empty">本文ファイルがありません。</div>';
     return;
   }
-  table.innerHTML =
+  // **数字の出どころを黙って変えない。** 合本（1ファイルに複数話）は
+  // 中の全話の合計なので平均・中央値から外してあり、そのことをその場で断る
+  const collectedNote = summary.collectedFiles > 0
+    ? '<div class="note">合本の ' + summary.collectedFiles +
+      '件は、1話ぶんの長さではないため平均・中央値・長短の印から外しています' +
+      '（合計字数には入っています）。</div>'
+    : '';
+  table.innerHTML = collectedNote +
     '<table><thead><tr>' +
     '<th>話</th><th>タイトル</th><th class="num">純文字数</th><th class="num">原稿用紙</th>' +
     '<th class="num">平均比</th><th>長さ</th></tr></thead><tbody>' +

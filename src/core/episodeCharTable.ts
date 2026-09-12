@@ -53,6 +53,13 @@ export interface EpisodeCountSummary {
   countedFiles: number;
   /** 競合で数えられなかった話数 */
   conflictedFiles: number;
+  /**
+   * 平均・中央値・偏りから外した合本の件数。
+   *
+   * 0でなければ、画面は「合本の◯件は平均に入れていません」と断ること。
+   * 数字の出どころを黙って変えない。
+   */
+  collectedFiles: number;
   totalNet: number;
   totalPages: number;
   averageNet: number;
@@ -93,7 +100,19 @@ export function buildEpisodeCountTable(
   const { format, perEpisodeGoal } = options;
   const counted = episodes.filter((episode) => !episode.hasConflictMarkers);
   const totalNet = counted.reduce((sum, episode) => sum + episode.counts.net, 0);
-  const average = counted.length > 0 ? totalNet / counted.length : 0;
+
+  // **合本は平均の母集団に入れない**（設計書6.3）。合本の `net` は中の全話の
+  // 合計なので、1行として混ぜると平均が跳ね上がり、普通の話が軒並み
+  // 「短い」と判定される（2026-09-12）。合計字数は作品ぜんたいの値なので、
+  // そちらからは外さない——「この作品は何字あるか」から中身は消せない
+  const population = counted.filter(
+    (episode) => !isCollectedFile(episode.collectedCount)
+  );
+  const average =
+    population.length > 0
+      ? population.reduce((sum, episode) => sum + episode.counts.net, 0) /
+        population.length
+      : 0;
 
   // **目標を決めていれば目標が基準。** 作者が「1話3,000字」と決めているのに
   // 平均と比べても、全部が短い作品では「どれも平均どおり」としか出ない
@@ -102,13 +121,18 @@ export function buildEpisodeCountTable(
   const basisChars = goal ?? average;
 
   // 目標が基準なら、話数が少なくても印を付けてよい。
-  // 平均は少数だと当てにならないが、**目標は1話目から決まっている**
+  // 平均は少数だと当てにならないが、**目標は1話目から決まっている**。
+  // **合本しかない作品では、何も言わない**——比べる相手が1件も無い
   const flagsEnabled =
-    basisChars > 0 && (goal !== null || counted.length >= MIN_FILES_FOR_FLAGS);
+    basisChars > 0 &&
+    population.length > 0 &&
+    (goal !== null || population.length >= MIN_FILES_FOR_FLAGS);
 
   const rows: EpisodeCountRow[] = episodes.map((episode) => {
     const chapterLabel = formatChapterLabel(episode, format);
     const ratio = basisChars > 0 ? episode.counts.net / basisChars : 0;
+    // 合本の行には長短を言わない。中の全話の合計は1話ぶんの長さではない
+    const collected = isCollectedFile(episode.collectedCount);
     return {
       filePath: episode.filePath,
       fileName: episode.fileName,
@@ -119,22 +143,24 @@ export function buildEpisodeCountTable(
       pages: toManuscriptPages(episode.counts.manuscriptLines),
       ratio,
       flag:
-        episode.hasConflictMarkers || !flagsEnabled
+        episode.hasConflictMarkers || collected || !flagsEnabled
           ? null
           : ratio < SHORT_RATIO
             ? "short"
             : ratio > LONG_RATIO
               ? "long"
               : null,
-      collectedCount: isCollectedFile(episode.collectedCount)
-        ? episode.collectedCount
-        : null,
+      collectedCount: collected ? episode.collectedCount : null,
       conflicted: episode.hasConflictMarkers,
     };
   });
 
   const countedRows = rows.filter((row) => !row.conflicted);
-  const sorted = [...countedRows].sort((left, right) => left.net - right.net);
+  // 中央値と「いちばん長い／短い話」も、平均と同じ母集団から出す。
+  // 73万字の合本を「いちばん長い話」と呼んでも、作者の役に立たない
+  const sorted = countedRows
+    .filter((row) => row.collectedCount === null)
+    .sort((left, right) => left.net - right.net);
 
   return {
     rows,
@@ -143,6 +169,7 @@ export function buildEpisodeCountTable(
       basisChars: Math.round(basisChars),
       countedFiles: countedRows.length,
       conflictedFiles: rows.length - countedRows.length,
+      collectedFiles: countedRows.length - sorted.length,
       totalNet,
       // 枚数は行数を合算してから換算する。ファイルごとに切り上げると
       // 端数が積み上がって実際より多くなる（設計書6.3.1）
@@ -160,8 +187,9 @@ export function buildEpisodeCountTable(
 /**
  * 中央値。
  *
- * 平均と併せて出すのは、**1つの長い合本ファイルがあると平均が跳ね上がる**
- * ためである。19話のうち1話だけ73万字なら、平均は誰の実感とも合わない。
+ * 平均と併せて出すのは、**極端に長い話・短い話があると平均が動く**ためである。
+ * 合本そのものは母集団から外してあるが（上の `population`）、
+ * ばらのファイルでも1話だけ長いことはある。
  */
 function median(sortedValues: number[]): number {
   if (sortedValues.length === 0) return 0;

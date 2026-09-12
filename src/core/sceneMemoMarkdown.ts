@@ -26,8 +26,13 @@ export interface SceneMemoMarkdownInput {
   memos: readonly SceneMemo[];
   /** 作品ぜんたいの件数（絞り込んで減っていることを断るために出す） */
   totalCount: number;
-  /** その話の呼び名を引く。引けなければファイル名などを返すこと */
-  placeOf(filePath: string): SceneMemoPlace;
+  /**
+   * その話の呼び名を引く。引けなければファイル名などを返すこと。
+   *
+   * **メモ1件を渡す。** 合本（1ファイルに複数話）では、同じファイルの中でも
+   * 行によって話が変わるので、ファイル名だけでは引けない。
+   */
+  placeOf(memo: SceneMemo): SceneMemoPlace;
 }
 
 export function sceneMemoToMarkdown(input: SceneMemoMarkdownInput): string {
@@ -49,7 +54,7 @@ export function sceneMemoToMarkdown(input: SceneMemoMarkdownInput): string {
 
   let section = "";
   for (const memo of input.memos) {
-    const place = input.placeOf(memo.filePath);
+    const place = input.placeOf(memo);
     const heading = [place.label, place.title].filter(Boolean).join(" ");
     if (heading !== section) {
       section = heading;

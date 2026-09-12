@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   bookHeading,
   collectedChapterLabel,
+  collectedLabelIndex,
   episodeGroupLabel,
   isCollectedFile,
 } from "../../src/core/episodeLabel";
@@ -179,5 +180,95 @@ describe("合本の中の1話の見出し（collectedChapterLabel）", () => {
         "ファイル名.txt"
       )
     ).toBe("ファイル名.txt");
+  });
+});
+
+describe("合本の中の行から、その話の見出しを引く（設計書6.40.4）", () => {
+  /** 3話入りの合本。行番号は1始まりで、本文は 6・16・26 行目から始まる */
+  const collected = [
+    "------------------------- エピソード1開始 -------------------------",
+    "【エピソードタイトル】",
+    "1話　出会い",
+    "",
+    "【本文】",
+    "一話の本文。",
+    "",
+    "【後書き】",
+    "一話のあとがき。",
+    "",
+    "------------------------- エピソード2開始 -------------------------",
+    "【エピソードタイトル】",
+    "2話　別れ",
+    "",
+    "【本文】",
+    "二話の本文。",
+    "",
+    "【リアクション】",
+    "いいね: 3件",
+    "",
+    "------------------------- エピソード3開始 -------------------------",
+    "【エピソードタイトル】",
+    "3話　再会",
+    "",
+    "【本文】",
+    "三話の本文。",
+  ].join("\n");
+
+  it("2話目の行には2話目の見出しが付く", () => {
+    // ファイル単位の見出し（「第1〜3話」）を全メモに使い回していたので、
+    // どの話のメモか分からなかった（2026-09-12）
+    const index = collectedLabelIndex(collected, "全話.txt");
+
+    expect(index.labelAt(16)).toBe("第2話");
+    expect(index.labelAt(17)).toBe("第2話");
+    expect(index.labelAt(6)).toBe("第1話");
+    expect(index.labelAt(26)).toBe("第3話");
+  });
+
+  it("頭書きの中（本文より前）は、その話の中として扱う", () => {
+    // 区切り行と【本文】のあいだは、次の話ではなくその話の入口である
+    const index = collectedLabelIndex(collected, "全話.txt");
+
+    expect(index.labelAt(1)).toBe("第1話");
+    expect(index.labelAt(12)).toBe("第1話");
+  });
+
+  it("作品の数え方を通す", () => {
+    expect(collectedLabelIndex(collected, "全話.txt", "sns").labelAt(16)).toBe(
+      "投稿2"
+    );
+    expect(collectedLabelIndex(collected, "全話.txt", "memo").labelAt(16)).toBe(
+      "メモ2"
+    );
+  });
+
+  it("合本でなければ、ファイル単位の見出しをそのまま使う", () => {
+    const index = collectedLabelIndex("ただの本文。\n続き。", "第5話 再会");
+
+    expect(index.labelAt(1)).toBe("第5話 再会");
+    expect(index.labelAt(2)).toBe("第5話 再会");
+  });
+
+  it("話数が読み取れない話は、ファイル単位の見出しに落とす", () => {
+    // 並び順を話数として出さない（`collectedChapterLabel` と同じ線）
+    const noNumber = [
+      "------- エピソード1開始 -------",
+      "【エピソードタイトル】",
+      "プロローグ",
+      "",
+      "【本文】",
+      "本文。",
+      "",
+      "------- エピソード2開始 -------",
+      "【エピソードタイトル】",
+      "2話　出会い",
+      "",
+      "【本文】",
+      "本文。",
+    ].join("\n");
+    const index = collectedLabelIndex(noNumber, "全話.txt");
+
+    expect(index.labelAt(6)).toBe("全話.txt");
+    expect(index.labelAt(13)).toBe("第2話");
   });
 });

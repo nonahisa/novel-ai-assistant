@@ -5,6 +5,7 @@ import { scanWork } from "../core/scanner";
 import { findLatestEpisode } from "../core/latestEpisode";
 import { readTextFile } from "../core/textFile";
 import {
+  collectedLabelIndex,
   episodeTitle,
   episodeUnit,
   formatChapterLabel,
@@ -34,7 +35,7 @@ import {
   episodePlotFileName,
   RESUME_SHEET_KIND,
   RESUME_SYNOPSIS_COUNT,
-  tailParagraphs,
+  tailOfEpisodeFile,
   type ResumeEpisodePlot,
   type ResumeForeshadow,
   type ResumeMemo,
@@ -256,6 +257,10 @@ function labelOf(
  * ことに意味があるが、読むだけで19話・4万字なら一瞬である。
  *
  * **読めない話があっても1枚は出す。** 断り書きを足して先へ進む。
+ *
+ * **合本では、メモの行からその話の見出しを引く。** ファイル単位の見出しを
+ * 使い回すと、全メモに「第1〜219話」が付いて、どの話のメモか分からない
+ * （2026-09-12。シーンメモのパネルも同じ直し方をしている）。
  */
 async function loadOpenMemos(
   episodes: readonly EpisodeFile[],
@@ -268,9 +273,15 @@ async function loadOpenMemos(
     if (episode.hasConflictMarkers) continue;
     try {
       const content = await readTextFile(episode.filePath);
+      // 索引は1ファイルにつき1度だけ作る（合本は70万字になりうる）
+      const labels = collectedLabelIndex(
+        content.text,
+        labelOf(episode, format),
+        format
+      );
       for (const memo of parseMemos(content.text, episode.filePath)) {
         memos.push({
-          label: labelOf(episode, format),
+          label: labels.labelAt(memo.line),
           line: memo.line,
           tag: memo.tag,
           text: memo.text,
@@ -290,6 +301,9 @@ async function loadOpenMemos(
  *
  * **読めなくても1枚は出す。** 末尾が無いだけで、あらすじも伏線も
  * 見られなくなるほうが困る。
+ *
+ * 本文の選び方は `tailOfEpisodeFile` が持つ（合本なら最後の話、
+ * そうでなければ頭書きを外した本文）。ここは読むだけにする。
  */
 async function readTail(
   latest: EpisodeFile,
@@ -306,7 +320,7 @@ async function readTail(
 
   try {
     const content = await readTextFile(latest.filePath);
-    return tailParagraphs(content.text);
+    return tailOfEpisodeFile(latest.filePath, content.text, latest);
   } catch (error) {
     notices.push(`${latest.fileName} を読めませんでした：${messageOf(error)}`);
     return "";
