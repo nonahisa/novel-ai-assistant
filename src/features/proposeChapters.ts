@@ -8,12 +8,26 @@ import {
 } from "../models/chapter";
 import { ChapterStore, ChapterStoreError } from "../core/chapterStore";
 import { episodePathFor } from "../core/bookStore";
-import { groupEpisodesByChapter } from "../core/chapterGrouping";
+import {
+  groupEpisodesByChapter,
+  type ChapterGroup,
+} from "../core/chapterGrouping";
 import { scanWork } from "../core/scanner";
 import { readWorkFormat } from "../core/workFormatStore";
-import { formatChapterLabel } from "../core/episodeLabel";
+import type { WorkFormatKey } from "../core/workFormat";
+import {
+  collectedChapterLabel,
+  formatChapterLabel,
+  isCollectedFile,
+  MIN_COLLECTED_EPISODES,
+} from "../core/episodeLabel";
+import {
+  parseCollectedFile,
+  type CollectedEpisode,
+} from "../core/collectedFile";
+import { readTextFile } from "../core/textFile";
 import { SynopsisStore } from "../core/synopsisStore";
-import { findSynopsis } from "../models/synopsis";
+import { findSynopsis, type ChapterSynopsisSet } from "../models/synopsis";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import type { AIProvider } from "../ai/types";
 import {
@@ -78,6 +92,18 @@ const NAME_SUGGESTION_LIMIT = 3;
 
 /** 提案パネルに出すときの分類名 */
 export const CHAPTER_PROPOSAL_CATEGORY = "章立て";
+
+/**
+ * 合本の途中を章の始まりに指されたときの断り（設計書6.66.4）。
+ *
+ * **章が指せるのはファイルである**（`Chapter.startEpisodePath`）。合本の
+ * 中の話は材料には並ぶが、2話目以降を始まりにしても「合本ごと」の意味に
+ * しかならない。**黙って合本の先頭へずらさない**——作者が指したのと違う
+ * ところに章名が付くのは、入らないより悪い。
+ */
+export const INSIDE_COLLECTED_REASON =
+  "合本の途中には章の区切りを置けません。" +
+  "「合本を話ごとに分ける」で分割してから、もう一度お試しください。";
 
 export interface ProposeChaptersOptions {
   /**
@@ -182,8 +208,14 @@ export function describeChapterProposal(input: {
   reason: string;
   /** 既にその話から始まる章があれば、その名前 */
   existingName?: string;
+  /** 合本の途中を指しているか（承認しても入らない） */
+  insideCollected?: boolean;
 }): string[] {
   const lines = [`${input.label}から始まります`];
+  if (input.insideCollected) {
+    // **押す前に言う。** 押してから断られるより、先に道筋が分かるほうがよい
+    lines.push(INSIDE_COLLECTED_REASON);
+  }
   if (input.existingName) {
     // **黙って書き換わるように見せない。** 承認すると改名になることを、
     // 押す前に伝える
@@ -531,7 +563,7 @@ function showChapterProposals(
   const applier = new ChapterProposalApplier(material.store, material.set);
   const byId = new Map<
     string,
-    { name: string; startEpisodePath: string }
+    { name: string; startEpisodePath: string; insideCollected: boolean }
   >();
 
   const items: RecordUpdateViewItem[] = candidates.map((candidate) => {
@@ -540,6 +572,10 @@ function showChapterProposals(
       work.folderPath,
       episode.filePath
     );
+    // 合本の中の話も材料に入るので、**合本の途中を指した案が出うる**。
+    // パスは合本ファイルを指すだけなので、そのまま入れると「合本ごと」に
+    // なってしまう（設計書6.66.4）
+    const insideCollected = !material.startableAt(candidate.startEpisode);
     /*
       **名前もidに入れる。** パネルは同じidの提案を1つに畳み、作者が
       既に手を付けたもの（承認・見送り）は新しい結果で置き換えない
@@ -549,7 +585,7 @@ function showChapterProposals(
       同じ案をもう一度出したときは、これまでどおり1つに畳まれる。
     */
     const id = `ch:${candidate.startEpisode}:${candidate.name}`;
-    byId.set(id, { name: candidate.name, startEpisodePath });
+    byId.set(id, { name: candidate.name, startEpisodePath, insideCollected });
 
     return {
       id,
@@ -559,6 +595,7 @@ function showChapterProposals(
         reason: candidate.reason,
         existingName: findChapterStartingAt(applier.chapters, startEpisodePath)
           ?.name,
+        insideCollected,
       }),
       source: episode.fileName,
       status: "pending" as const,
@@ -572,6 +609,11 @@ function showChapterProposals(
     async (id) => {
       const entry = byId.get(id);
       if (!entry) return { ok: false, reason: "対象が見つかりません。" };
+      // **合本の途中は黙って入れない。** ここで入れると、章の始まりが
+      // 合本ファイルの先頭（＝別の話）へずれる。ほかの提案は通す
+      if (entry.insideCollected) {
+        return { ok: false, reason: INSIDE_COLLECTED_REASON };
+      }
       const result = await applier.apply(entry);
       // 一覧の折りたたみは台帳から作られるので、入ったらすぐ作り直す
       if (result.ok) options.onChaptersChanged?.();
@@ -596,6 +638,200 @@ interface ChapterMaterial {
   labelOf(number: number): string;
   /** その章に入る話の話数 */
   rangeOf(chapter: Chapter): Set<number>;
+  /**
+   * その話数を章の始まりにできるか（設計書6.66.4）。
+   *
+   * **合本の途中の話は始まりにできない。** 章が指すのはファイルのパス
+   * （`Chapter.startEpisodePath`）なので、合本の2話目を指定しても
+   * 「合本ごと」の意味にしかならない。
+   */
+  startableAt(number: number): boolean;
+}
+
+/** 材料を組むときの、1ファイルぶんの入力 */
+export interface ChapterMaterialFile {
+  file: EpisodeFile;
+  /**
+   * 合本なら中の話。合本でなければ、または読めなければ null。
+   *
+   * null のときは**これまでどおり1ファイル＝1話**として材料に入る。
+   */
+  collected: CollectedEpisode[] | null;
+}
+
+/** 組み上がった材料（AIへ渡すぶんと、提案を読み解く手掛かり） */
+export interface ChapterMaterialEntries {
+  episodes: ChapterProposeEpisode[];
+  /** 話数から原稿ファイルへ。合本の中の話は、どれも合本ファイルを指す */
+  files: Map<number, EpisodeFile>;
+  labels: Map<number, string>;
+  /** 話数から「章の始まりにできるか」へ。入っていない話数は置ける扱い */
+  startable: Map<number, boolean>;
+}
+
+/**
+ * AIへ渡す話の一覧を組む（設計書6.66.4）。
+ *
+ * **合本は中の話を1話ずつ並べる。** ファイル単位で回していたころは、
+ * 219話入りの合本から `chapterStart`（＝いちばん若い話数）の1件しか
+ * 材料に入らず、**218話ぶんのサブタイトルとあらすじが消えていた**
+ * （2026-09-12）。区切りの判断はこの一覧の上でしか行えないので、
+ * 材料に無い話には章の区切りを提案しようがない。
+ *
+ * VS Code API に触らない純粋な組み立てにしてある（合本の本文を読むのは
+ * 呼び出し側の `readMaterialFiles`）。
+ */
+export function buildChapterMaterialEntries(input: {
+  files: readonly ChapterMaterialFile[];
+  synopses?: ChapterSynopsisSet;
+  format?: WorkFormatKey;
+}): ChapterMaterialEntries {
+  const files = new Map<number, EpisodeFile>();
+  const labels = new Map<number, string>();
+  const startable = new Map<number, boolean>();
+  const episodes: ChapterProposeEpisode[] = [];
+
+  const put = (
+    file: EpisodeFile,
+    number: number,
+    label: string,
+    subtitle: string,
+    canStart: boolean
+  ): void => {
+    // 同じ話数のファイルが2つあることがある（合本と単話が並ぶなど）。
+    // **先に見つかったほうを使う**——番号は1つの話しか指せない
+    if (files.has(number)) return;
+    files.set(number, file);
+    labels.set(number, label);
+    startable.set(number, canStart);
+    episodes.push({
+      number,
+      label,
+      subtitle,
+      // あらすじの台帳は、話数が読めていれば**話数だけ**で引ける
+      // （`models/synopsis.ts` の `synopsisKey`）。合本の中の話も、
+      // 合本ファイルの名前と話数で同じ1件に当たる
+      synopsis: input.synopses
+        ? (findSynopsis(input.synopses, file.fileName, number)?.synopsis ?? "")
+        : "",
+    });
+  };
+
+  for (const entry of input.files) {
+    const { file } = entry;
+    const fileLabel =
+      formatChapterLabel(file, input.format) ||
+      `第${file.chapterStart ?? 0}話`;
+
+    if (entry.collected && entry.collected.length >= MIN_COLLECTED_EPISODES) {
+      for (const inner of entry.collected) {
+        if (inner.chapter === null) continue;
+        put(
+          file,
+          inner.chapter,
+          collectedChapterLabel(
+            { insideCollected: true, chapterStart: inner.chapter },
+            fileLabel,
+            input.format
+          ),
+          (inner.title ?? "").trim(),
+          // **章の始まりにできるのは、合本の先頭の話だけ。**
+          // `chapterStart` は走査が入れた「中でいちばん若い話数」
+          file.chapterStart === inner.chapter
+        );
+      }
+      continue;
+    }
+
+    const number = file.chapterStart;
+    if (number === null) continue;
+    put(
+      file,
+      number,
+      fileLabel,
+      (file.metaTitle ?? file.subtitle ?? "").trim(),
+      true
+    );
+  }
+
+  // **話数の順に並べて渡す。** 区切りの判断がこの並びに乗る
+  episodes.sort((left, right) => left.number - right.number);
+
+  return { episodes, files, labels, startable };
+}
+
+/**
+ * 章ごとの「入る話の話数」を組む（`rangeOf` の元。設計書6.66.4）。
+ *
+ * **合本は中の話をまとめてその章に入れる。** 束ねを作る
+ * `groupEpisodesByChapter` は**ファイル単位**なので、合本からは
+ * `chapterStart` の1件しか数えられない。章名の提案（`suggestChapterName`）は
+ * ここで集めた話を材料にするので、**作品まるごとが1つの合本だと、
+ * ほぼ材料なしで章名を考えることになる**。
+ *
+ * 割り当ては材料（`buildChapterMaterialEntries`）から引く。走査結果を
+ * もう一度読み解くと、材料に並ぶ話と範囲に入る話が別々の規則で決まり、
+ * 片方にしか居ない話ができる。
+ *
+ * 章の境目が合本の途中に来ることは無い（`startable` が偽の話は提案の適用を
+ * 断る）ので、**合本の全話は、その合本が属する章に入る**でよい。
+ */
+export function buildChapterRanges(
+  groups: readonly ChapterGroup[],
+  entries: Pick<ChapterMaterialEntries, "files">
+): Map<string, Set<number>> {
+  // 原稿ファイル → そこに入る話数。合本なら中の話がすべて並ぶ
+  const numbersByFile = new Map<string, number[]>();
+  for (const [number, file] of entries.files) {
+    const list = numbersByFile.get(file.filePath);
+    if (list) list.push(number);
+    else numbersByFile.set(file.filePath, [number]);
+  }
+
+  const rangeByStart = new Map<string, Set<number>>();
+  for (const group of groups) {
+    const range = new Set<number>();
+    for (const episode of group.episodes) {
+      for (const number of numbersByFile.get(episode.filePath) ?? []) {
+        range.add(number);
+      }
+    }
+    rangeByStart.set(group.chapter.startEpisodePath, range);
+  }
+  return rangeByStart;
+}
+
+/**
+ * 材料に使うファイルを読む。**合本のときだけ本文を読む。**
+ *
+ * 走査（`scanWork`）は本文を返さないので、中の話を並べるにはもう一度
+ * 読む必要がある。単話ファイルは読まない——章立ての材料は
+ * サブタイトルとあらすじだけで、本文は要らない。
+ *
+ * 読めなければ、これまでどおり**1ファイル＝1話**として扱う（提案が
+ * 粗くなるだけで、操作そのものは止めない）。
+ */
+async function readMaterialFiles(
+  scanned: readonly EpisodeFile[]
+): Promise<ChapterMaterialFile[]> {
+  const files: ChapterMaterialFile[] = [];
+  for (const file of scanned) {
+    if (!isCollectedFile(file.collectedCount)) {
+      files.push({ file, collected: null });
+      continue;
+    }
+    try {
+      const { text } = await readTextFile(file.filePath);
+      files.push({ file, collected: parseCollectedFile(text) });
+    } catch (error) {
+      logFailure("章立ての材料：合本を読めなかった", {
+        ファイル: file.fileName,
+        内容: describeError(error),
+      });
+      files.push({ file, collected: null });
+    }
+  }
+  return files;
 }
 
 /**
@@ -631,50 +867,23 @@ async function collectMaterial(
     synopses = undefined;
   }
 
-  const files = new Map<number, EpisodeFile>();
-  const labels = new Map<number, string>();
-  const episodes: ChapterProposeEpisode[] = [];
-  for (const episode of scan.episodes) {
-    const number = episode.chapterStart;
-    if (number === null) continue;
-    // 同じ話数のファイルが2つあることがある（合本と単話が並ぶなど）。
-    // **先に見つかったほうを使う**——番号は1つの話しか指せない
-    if (files.has(number)) continue;
-
-    files.set(number, episode);
-    const label = formatChapterLabel(episode, format) || `第${number}話`;
-    labels.set(number, label);
-    episodes.push({
-      number,
-      label,
-      subtitle: (episode.metaTitle ?? episode.subtitle ?? "").trim(),
-      synopsis: synopses
-        ? (findSynopsis(synopses, episode.fileName, number)?.synopsis ?? "")
-        : "",
-    });
-  }
-  // **話数の順に並べて渡す。** 区切りの判断がこの並びに乗る
-  episodes.sort((left, right) => left.number - right.number);
+  const entries = buildChapterMaterialEntries({
+    files: await readMaterialFiles(scan.episodes),
+    synopses,
+    format,
+  });
+  const { episodes, files, labels, startable } = entries;
 
   const grouping = groupEpisodesByChapter(
     scan.episodes,
     set.chapters,
     work.folderPath
   );
-  const rangeByStart = new Map<string, Set<number>>();
-  for (const group of grouping.groups) {
-    rangeByStart.set(
-      group.chapter.startEpisodePath,
-      new Set(
-        group.episodes
-          .map((episode) => episode.chapterStart)
-          .filter((number): number is number => number !== null)
-      )
-    );
-  }
+  const rangeByStart = buildChapterRanges(grouping.groups, entries);
 
   return {
     episodes,
+    startableAt: (number) => startable.get(number) !== false,
     current: set.chapters.map((chapter) => ({
       name: chapter.name,
       // 開始の話が見つからない章もそのまま渡す（黙って消さない）。

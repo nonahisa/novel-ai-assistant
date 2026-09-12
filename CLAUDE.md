@@ -112,6 +112,7 @@ src/
 │  【どこでも動かす土台】手元のVS Codeとブラウザ版の両方で動かすための部品（設計書5.8）
 │  ├─ runtime.ts         いまブラウザか。外部プロセスを起動できるか
 │  ├─ paths.ts           場所の扱い。**`path` の代わりにこれを使う**
+│  ├─ pathText.ts        paths.ts の純粋な部分（vscode 不要）。既定は paths のまま。core の純粋な部品だけが直に指す
 │  ├─ hash.ts            SHA-1/256。ブラウザには node:crypto が無いので自前
 │  ├─ processAvailability.ts ブラウザで使えない操作と、その理由
 │  ├─ gitAttribution.ts  誰が編集したか（git.ts を巻き込まずに取る）

@@ -198,6 +198,10 @@ const STEP_DEFS: readonly StepDef[] = [
       "novelai.checkForeshadows",
       "novelai.checkForeshadowResolution",
       "novelai.openForeshadows",
+      // **手で足す入口も置く**（作者の裁定、2026-09-12）。伏線は検知で拾うより
+      // 書いた本人が「これは伏線」と足すのが入口として自然で、詳細メニューにしか
+      // 無いと、ステップから入った人には「登録は AI 任せ」に見える
+      "novelai.addForeshadow",
       "novelai.setForeshadowStatus",
     ],
   },

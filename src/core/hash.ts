@@ -179,3 +179,21 @@ export function sha256Text(text: string): string {
 export function sha1Text(text: string): string {
   return sha1Bytes(encoder.encode(text));
 }
+
+/**
+ * 内容のハッシュ。**原稿を守るための照合**（読み込んだ時と書き戻す直前を
+ * 突き合わせる）と、チャンクのキャッシュの鍵に使う。
+ *
+ * 置き場はもともと `textFile.ts` だった。あちらは `vscode` を import して
+ * いるので、**`hashText` を1つ借りているだけの `chunker.ts` まで
+ * `vscode` 依存になり、そこを通る検算の系がぜんぶ外から呼べなくなっていた**
+ * （設計書6.87.3）。中身は SHA-256 そのものなので、ここが本来の置き場である。
+ * `textFile.ts` からは再輸出しているため、呼び出し側は変えなくてよい。
+ */
+export function hashBytes(bytes: Uint8Array): string {
+  return sha256Bytes(bytes);
+}
+
+export function hashText(text: string): string {
+  return sha256Text(text);
+}

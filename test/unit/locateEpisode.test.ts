@@ -66,3 +66,53 @@ describe("話数から本物のファイルを探す", () => {
     expect(resolveEpisodeByNumber(duplicated, 4)).toBe(undefined);
   });
 });
+
+/**
+ * 合本（1ファイルに全話）は、**ファイル名に話数が無い**ことがある
+ * （`全話.txt`）。ファイル名からしか読んでいなかったころは、
+ * 何話を指されても当たらなかった（2026-09-12）。
+ *
+ * 走査（`scanWork`）は中の各話のタイトルから話数を読んでいるので、
+ * その値があればそちらを先に使う。
+ */
+describe("走査の話数があれば、そちらで当てる（合本）", () => {
+  test("ファイル名に話数が無い合本でも、中の話に当たる", () => {
+    const episodes = [
+      { fileName: "全話.txt", chapterStart: 1, chapterEnd: 219 },
+    ];
+    expect(resolveEpisodeByNumber(episodes, 137)?.fileName).toBe("全話.txt");
+    expect(resolveEpisodeByNumber(episodes, 1)?.fileName).toBe("全話.txt");
+    expect(resolveEpisodeByNumber(episodes, 219)?.fileName).toBe("全話.txt");
+  });
+
+  test("範囲の外は当てない", () => {
+    const episodes = [
+      { fileName: "全話.txt", chapterStart: 1, chapterEnd: 219 },
+    ];
+    expect(resolveEpisodeByNumber(episodes, 220)).toBe(undefined);
+  });
+
+  test("終わりが無ければ、始まりの1話だけを受け持つ", () => {
+    const episodes = [{ fileName: "無題.txt", chapterStart: 5, chapterEnd: null }];
+    expect(resolveEpisodeByNumber(episodes, 5)?.fileName).toBe("無題.txt");
+    expect(resolveEpisodeByNumber(episodes, 6)).toBe(undefined);
+  });
+
+  test("走査の値が無い要素は、これまでどおりファイル名から読む", () => {
+    const episodes = [
+      { fileName: "episode_0004.md", chapterStart: null, chapterEnd: null },
+      { fileName: "プロローグ.txt" },
+    ];
+    expect(resolveEpisodeByNumber(episodes, 4)?.fileName).toBe(
+      "episode_0004.md"
+    );
+  });
+
+  test("合本と単話が同じ話数を受け持つなら返さない（既存の約束）", () => {
+    const episodes = [
+      { fileName: "全話.txt", chapterStart: 1, chapterEnd: 219 },
+      { fileName: "episode_0137.md" },
+    ];
+    expect(resolveEpisodeByNumber(episodes, 137)).toBe(undefined);
+  });
+});

@@ -5,7 +5,7 @@ import type { Organization } from "../models/organization";
 import type { CustomFieldDefinition } from "../models/customField";
 import { WORLD_CATEGORY_LABELS, type WorldItem } from "../models/world";
 import { describeChangeValues, formatChapters } from "./settingsMarkdown";
-import { hashText } from "./textFile";
+import { hashText } from "./hash";
 import { changesOfField } from "./recordChanges";
 import {
   describeInvolvement,

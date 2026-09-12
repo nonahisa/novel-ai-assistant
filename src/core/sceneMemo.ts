@@ -1,4 +1,7 @@
-import * as paths from "./paths";
+// 使うのは場所を比べるための正規化だけで、`Uri` は作らない。
+// `paths` ごと取り込むと `vscode` が付いてくるので、純粋な側を直に指す
+// （設計書6.87.3）
+import * as paths from "./pathText";
 
 /**
  * シーンメモ——本文の中に置く付箋（設計書6.40）。

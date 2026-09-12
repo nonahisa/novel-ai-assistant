@@ -42,20 +42,51 @@ export function episodeNumberFromHint(hint: string): number | undefined {
  * （旧版を残している、拡張子違いがある）で、どちらを指しているかは
  * こちらには決められない。
  *
- * 話数は `parseEpisodeFileName` で読み直す。走査結果の型に縛られないよう、
- * 必要なのは `fileName` だけにしてある（試験も呼び出しも軽くなる）。
+ * **走査（`scanWork`）が読み取った話数があれば、そちらを先に使う。**
+ * 合本（1ファイルに全話）のファイル名には範囲が書かれていないことが
+ * あり（`全話.txt`）、ファイル名だけを見ていると**何話を指されても
+ * 当たらなかった**（2026-09-12）。走査は中の各話のタイトルから話数を
+ * 読んでいるので、そこに答えがある。
+ *
+ * 走査の値を持たない相手（試験の材料や、名前だけを並べた一覧）のために、
+ * `parseEpisodeFileName` で読み直す道は退避先として残してある。
  */
-export function resolveEpisodeByNumber<T extends { fileName: string }>(
-  episodes: readonly T[],
-  chapter: number
-): T | undefined {
+export function resolveEpisodeByNumber<
+  T extends {
+    fileName: string;
+    chapterStart?: number | null;
+    chapterEnd?: number | null;
+  },
+>(episodes: readonly T[], chapter: number): T | undefined {
   const matched = episodes.filter((episode) => {
-    const parsed = parseEpisodeFileName(episode.fileName);
-    if (parsed.chapterStart === null) return false;
-    const end = parsed.chapterEnd ?? parsed.chapterStart;
-    return chapter >= parsed.chapterStart && chapter <= end;
+    const range = rangeOf(episode);
+    if (range === null) return false;
+    return chapter >= range.start && chapter <= range.end;
   });
   return matched.length === 1 ? matched[0] : undefined;
+}
+
+/** その話が受け持つ話数の範囲。読み取れなければ null */
+function rangeOf(episode: {
+  fileName: string;
+  chapterStart?: number | null;
+  chapterEnd?: number | null;
+}): { start: number; end: number } | null {
+  if (typeof episode.chapterStart === "number") {
+    return {
+      start: episode.chapterStart,
+      end:
+        typeof episode.chapterEnd === "number"
+          ? episode.chapterEnd
+          : episode.chapterStart,
+    };
+  }
+  const parsed = parseEpisodeFileName(episode.fileName);
+  if (parsed.chapterStart === null) return null;
+  return {
+    start: parsed.chapterStart,
+    end: parsed.chapterEnd ?? parsed.chapterStart,
+  };
 }
 
 /**

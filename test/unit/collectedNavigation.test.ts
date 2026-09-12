@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  collectedEpisodeLineOf,
   collectedEpisodeStarts,
   planCollectedStep,
 } from "../../src/core/collectedFile";
@@ -142,5 +143,63 @@ describe("合本の中で、前後の話へ移る", () => {
     expect(
       planCollectedStep({ starts: [], caretLine: 3, direction: "next" })
     ).toEqual({ kind: "leave" });
+  });
+});
+
+/**
+ * 相談の「そこを見せて」が合本に当たったときの飛び先（設計書6.25.5）。
+ *
+ * **`order`（ファイル内の並び）と `chapter`（作中の話数）は別物。**
+ * プロローグが1番目に入っている合本では、2番目が「1話」になる。
+ * 並び順で飛ぶと、指された話とは違う話を開いて「ここです」と言うことになる。
+ */
+describe("合本の中の、その話数の先頭行", () => {
+  test("話数で引ける（`collectedEpisodeStarts` と同じ行を指す）", () => {
+    expect(collectedEpisodeLineOf(sample, 1)).toBe(9);
+    expect(collectedEpisodeLineOf(sample, 2)).toBe(19);
+    expect(collectedEpisodeLineOf(sample, 3)).toBe(26);
+  });
+
+  test("並び順ではなく話数で引く（プロローグが先頭にある合本）", () => {
+    const text = [
+      "----- エピソード1開始 -----", // 1
+      "【エピソードタイトル】", // 2
+      "プロローグ", // 3
+      "【本文】", // 4
+      "　まだ何も始まっていない。", // 5
+      "----- エピソード2開始 -----", // 6
+      "【エピソードタイトル】", // 7
+      "１話　転生", // 8
+      "【本文】", // 9
+      "　ここが1話の頭。", // 10
+    ].join("\n");
+
+    // 並び順で引いていたら5行目（プロローグ）を指してしまう
+    expect(collectedEpisodeLineOf(text, 1)).toBe(10);
+  });
+
+  test("中に無い話数なら返さない（ファイルを開くだけに倒す）", () => {
+    expect(collectedEpisodeLineOf(sample, 99)).toBe(undefined);
+  });
+
+  test("合本でなければ返さない", () => {
+    expect(collectedEpisodeLineOf("　ただの本文。", 1)).toBe(undefined);
+  });
+
+  test("同じ話数が2つあれば返さない（どちらを指すか決められない）", () => {
+    const text = [
+      "----- エピソード1開始 -----",
+      "【エピソードタイトル】",
+      "１話　転生",
+      "【本文】",
+      "　古い版。",
+      "----- エピソード2開始 -----",
+      "【エピソードタイトル】",
+      "１話　転生（改稿）",
+      "【本文】",
+      "　新しい版。",
+    ].join("\n");
+
+    expect(collectedEpisodeLineOf(text, 1)).toBe(undefined);
   });
 });

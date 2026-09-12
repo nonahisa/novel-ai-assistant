@@ -1,4 +1,7 @@
-import * as path from "./paths";
+// `paths` ではなく、その `vscode` が要らない部分を直に指す。
+// **ここはファイル名を割るだけで `Uri` を作らない**ので、外から
+// 呼べる側に置いておきたい（設計書6.87.3）
+import * as path from "./pathText";
 import type { EpisodeKind } from "../models/types";
 
 export interface ParsedFileName {

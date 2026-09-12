@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { fromUri } from "./paths";
 import * as path from "./paths";
-import { sha256Bytes, sha256Text } from "./hash";
+import { hashBytes } from "./hash";
 import iconv = require("iconv-lite");
 import { diffArrays } from "diff";
 import {
@@ -483,13 +483,14 @@ function concatenateBytes(
   return result;
 }
 
-export function hashBytes(bytes: Uint8Array): string {
-  return sha256Bytes(bytes);
-}
-
-export function hashText(text: string): string {
-  return sha256Text(text);
-}
+/**
+ * 内容のハッシュは `hash.ts` へ移した（設計書6.87.3）。
+ *
+ * **ここに置いたままだと、`hashText` を1つ借りるだけの `chunker.ts` が
+ * `vscode` 依存になる。** 呼び出し側（`textFile.hashText` と書いている
+ * 箇所）は変えなくてよいように、ここから再輸出する。
+ */
+export { hashBytes, hashText } from "./hash";
 
 /** 現在ディスク上にあるファイルのハッシュを取得する */
 export async function currentFileHash(

@@ -20,6 +20,7 @@ import {
   invalid,
   objectValue,
   optionalBoolean,
+  optionalNullableNumber,
   optionalObjectArray,
   optionalString,
   requireNonEmptyString,
@@ -313,7 +314,45 @@ export interface PostingRecord {
    * 省略できる（既にある台帳を読めなくしないため。無い＝実投稿）。
    */
   importedBaseline?: boolean;
+  /**
+   * 合本（1ファイルに複数話）の中の**1話だけ**を指す記録のときの話数。
+   *
+   * **ファイルまるごとの記録には入らない**（合本でないファイル、基準線、
+   * そしてこの欄ができる前の記録）。欄が無い記録は「そのファイルの全話を
+   * 投稿済み」と読む——以前は合本でも全話ぶんの本文をコピーしていたので、
+   * その読みが当時の事実と合う。
+   */
+  chapter?: number;
+  /**
+   * 話数が読めない話（「プロローグ」など）の代用。ファイル内の並び順
+   * （1始まり。`CollectedEpisode.order`）で、`chapter` が無いときだけ入る。
+   *
+   * **並び順を話数の欄に入れない。** プロローグのある合本では1つずれるので、
+   * 「3番目」と「第3話」が同じ記録になってはいけない。
+   */
+  order?: number;
 }
+
+/**
+ * 投稿の記録が指す先（設計書6.68.2）。**ファイルか、合本の中の1話か。**
+ *
+ * 合本でないファイルは、これまでどおり相対パスの文字列だけで指せる
+ * （`PostingEpisodeTargetLike`）。既にある台帳の記録と同じ鍵になる。
+ */
+export interface PostingEpisodeTarget {
+  /** 作品フォルダからの相対パス */
+  episodePath: string;
+  /**
+   * 合本の中の話数。**読めなければ `null`** にして `order` で代用する
+   * （並び順を話数として名乗らせない）。省略＝ファイルまるごと。
+   */
+  chapter?: number | null;
+  /** 合本の中の並び順（1始まり）。`chapter` が `null` のときに使う */
+  order?: number;
+}
+
+/** 文字列は「ファイルまるごと」を指す（合本でないファイルの呼び方） */
+export type PostingEpisodeTargetLike = string | PostingEpisodeTarget;
 
 export interface PostingLedger {
   schemaVersion: string;
@@ -505,6 +544,15 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
       const site = requireSiteId(entry.site, `${entryPath}.site`);
       requireNonEmptyString(entry.postedAt, `${entryPath}.postedAt`);
       optionalBoolean(entry.importedBaseline, `${entryPath}.importedBaseline`);
+      /*
+        合本の中の1話を指す記録（設計書6.68.2）。**壊れた値は直さずに
+        止める**——3.5話や -1話が入ると、引く鍵が静かにずれる。
+        欄が無い記録は「そのファイルの全話を投稿済み」と読む（`isPosted`）。
+      */
+      optionalNullableNumber(entry.chapter, `${entryPath}.chapter`);
+      optionalNullableNumber(entry.order, `${entryPath}.order`);
+      const chapter = typeof entry.chapter === "number" ? entry.chapter : null;
+      const order = typeof entry.order === "number" ? entry.order : null;
       return {
         episodePath: normalizeEpisodePath(entry.episodePath as string),
         site,
@@ -512,6 +560,12 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
         // **無い印は書き足さない。** `false` を入れると、既存の台帳を
         // 読んで書き戻すだけで中身が増える
         ...(entry.importedBaseline === true ? { importedBaseline: true } : {}),
+        // 話数と並び順も同じ。**話数が読めた記録に並び順は持ち歩かない**
+        ...(chapter !== null
+          ? { chapter }
+          : order !== null
+            ? { order }
+            : {}),
       };
     }) ?? [];
 
@@ -817,15 +871,64 @@ export function withSites(
   return { ...ledger, sites: next };
 }
 
+/**
+ * 記録を引く鍵（設計書6.68.2）。**「投稿済みか」も「投稿済みにする」も
+ * ここを通す**——判定と記録で鍵の作り方が分かれると、書いたのに引けない
+ * 記録ができる。
+ *
+ * **ファイルまるごとの鍵は相対パスそのもの。** 合本でないファイルの鍵は
+ * この機能より前と1文字も変わらないので、既にある台帳がそのまま引ける。
+ *
+ * 合本の中の1話は、話数（読めなければ並び順）を足した鍵になる。区切りに
+ * 使う `\u0000` は、ファイル名にもパスにも現れない。
+ */
+export function postingEpisodeKey(target: PostingEpisodeTargetLike): string {
+  const wanted = toTarget(target);
+  const path = normalizeEpisodePath(wanted.episodePath);
+  if (typeof wanted.chapter === "number") return `${path}\u0000話${wanted.chapter}`;
+  if (typeof wanted.order === "number") return `${path}\u0000番目${wanted.order}`;
+  return path;
+}
+
+/** 文字列で指されたら「ファイルまるごと」 */
+function toTarget(target: PostingEpisodeTargetLike): PostingEpisodeTarget {
+  return typeof target === "string" ? { episodePath: target } : target;
+}
+
+/**
+ * 記録に残す話の指し方。**ファイルまるごとの記録には欄を足さない**
+ * （`importedBaseline` と同じで、読んで書き戻すだけで中身が増えないように）。
+ */
+function episodeRefFields(
+  target: PostingEpisodeTarget
+): { chapter?: number } | { order?: number } {
+  if (typeof target.chapter === "number") return { chapter: target.chapter };
+  if (typeof target.order === "number") return { order: target.order };
+  return {};
+}
+
+/**
+ * その話を、そのサイトへ出したか。
+ *
+ * 見るのは2つ——**その話そのものの記録**と、**ファイルまるごとの記録**。
+ * 後者はこの欄ができる前の記録（と基準線）で、そのころは合本でも全話ぶんの
+ * 本文をコピーして投稿していたので「全話を投稿済み」と読む。
+ *
+ * 逆は成り立たない。合本の第3話だけ出した記録は、**ファイルまるごとを
+ * 投稿済みにはしない**（まだ出していない話が残っている）。
+ */
 export function isPosted(
   ledger: PostingLedger,
-  episodePath: string,
+  target: PostingEpisodeTargetLike,
   site: PostingSiteId
 ): boolean {
-  const wanted = normalizeEpisodePath(episodePath);
-  return ledger.posts.some(
-    (post) => post.site === site && post.episodePath === wanted
-  );
+  const key = postingEpisodeKey(target);
+  const filePath = normalizeEpisodePath(toTarget(target).episodePath);
+  return ledger.posts.some((post) => {
+    if (post.site !== site) return false;
+    const postKey = postingEpisodeKey(post);
+    return postKey === key || postKey === filePath;
+  });
 }
 
 /**
@@ -837,17 +940,30 @@ export function isPosted(
  */
 export function withPost(
   ledger: PostingLedger,
-  episodePath: string,
+  target: PostingEpisodeTargetLike,
   site: PostingSiteId,
   postedAt: string
 ): PostingLedger {
-  const wanted = normalizeEpisodePath(episodePath);
+  const wanted = toTarget(target);
+  const key = postingEpisodeKey(wanted);
+  /*
+    **同じ鍵の記録だけを置き換える。** 合本の第3話を出し直しても、
+    第4話の記録や、ファイルまるごとの古い記録には触らない。
+  */
   const kept = ledger.posts.filter(
-    (post) => !(post.site === site && post.episodePath === wanted)
+    (post) => !(post.site === site && postingEpisodeKey(post) === key)
   );
   return {
     ...ledger,
-    posts: [...kept, { episodePath: wanted, site, postedAt }],
+    posts: [
+      ...kept,
+      {
+        episodePath: normalizeEpisodePath(wanted.episodePath),
+        site,
+        postedAt,
+        ...episodeRefFields(wanted),
+      },
+    ],
   };
 }
 
@@ -896,11 +1012,11 @@ export function withBaselinePosts(
  */
 export function unpostedSites(
   ledger: PostingLedger,
-  episodePath: string
+  target: PostingEpisodeTargetLike
 ): PostingSiteId[] {
   return ledger.sites
     .map((entry) => entry.site)
-    .filter((site) => !isPosted(ledger, episodePath, site))
+    .filter((site) => !isPosted(ledger, target, site))
     // 画面に出す順を `POSTING_SITES` に揃える（`postingSiteLabels` と同じ理由）
     .sort(
       (left, right) =>

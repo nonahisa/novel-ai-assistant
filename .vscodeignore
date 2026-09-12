@@ -24,6 +24,9 @@ release/**
 # `@vscode/test-web` がリポジトリの根の下しか配れないためで、
 # **配布物には入れない**（許可リスト `scripts/releaseSupport.mjs` も弾く）
 dist/web-tests.js
+# 外から呼ぶ束（`npm run bundle:core`。設計書6.87.3）。束ねられることを
+# 確かめるための副産物で、**拡張機能そのものは使わない**ので配布物には入れない
+dist/core-bundle.mjs
 tsconfig.json
 tsconfig.test.json
 esbuild.js

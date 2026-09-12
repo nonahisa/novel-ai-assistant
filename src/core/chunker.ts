@@ -1,4 +1,4 @@
-import { hashText } from "./textFile";
+import { hashText } from "./hash";
 import { blankMemoLines } from "./sceneMemo";
 import { CHARS_PER_TOKEN, TOKENS_PER_CHAR } from "./sizeBudget";
 

@@ -4,7 +4,7 @@ import { readPlotText } from "../core/plotFile";
 import { describeProgress, nextQuestion } from "../core/plotInterview";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
-import type { WorkEntry } from "../models/types";
+import type { EpisodeFile, WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { AIRegistry } from "../ai/registry";
@@ -21,6 +21,9 @@ import {
   episodeNumberFromHint,
   resolveEpisodeByNumber,
 } from "../core/locateEpisode";
+import { collectedEpisodeLineOf } from "../core/collectedFile";
+import { isCollectedFile } from "../core/episodeLabel";
+import { readTextFile } from "../core/textFile";
 import { episodeLabel } from "../core/manuscriptSources";
 import { SYNOPSIS_FILE } from "../core/synopsisDoc";
 import { CharacterStore } from "../core/characterStore";
@@ -1280,8 +1283,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       URLエンコードされた生のエラーが出ている。**引用文は照合するのに、
       ファイルの実在は見ていなかった。**
     */
-    const target = await this.resolveLocateTarget(staged);
-    if (!target) {
+    const resolved = await this.resolveLocateTarget(staged);
+    if (!resolved) {
       const named = staged.locate.path ?? "";
       logFailure("相談の「そこを見せて」：指されたファイルが無い", {
         指定: named,
@@ -1297,6 +1300,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
       return;
     }
+    const target = resolved.filePath;
 
     try {
       const document = await vscode.workspace.openTextDocument(
@@ -1308,11 +1312,31 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         preserveFocus: true,
       });
 
+      /*
+        **合本は、開いただけでは着いたことにならない。** 219話が1ファイルに
+        入っているので、先頭が映ったままでは作者は目的の話を探すことになる
+        （設計書6.25.5）。引き当てた話の本文の先頭へ寄せてから、引用文の
+        照合へ進む（引用が見つかればそちらが優先される）。
+      */
+      if (resolved.line !== undefined) {
+        const at = new vscode.Range(
+          resolved.line - 1,
+          0,
+          resolved.line - 1,
+          0
+        );
+        editor.selection = new vscode.Selection(at.start, at.start);
+        editor.revealRange(at, vscode.TextEditorRevealType.InCenter);
+      }
+
       if (!staged.locate.text) {
         this.postAll({
           type: "locateDone",
           id,
-          message: `${path.basename(target)} を開きました。`,
+          message:
+            resolved.line !== undefined
+              ? `${path.basename(target)} の ${resolved.line}行目を開きました。`
+              : `${path.basename(target)} を開きました。`,
         });
         return;
       }
@@ -1373,18 +1397,21 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    *    合っている
    * 3. 引き当てられなければ開かない。**近そうなファイルで代用しない**——
    *    別の話を開いて「ここです」と言うのは、開けないより悪い
+   *
+   * 引き当てたのが合本（1ファイルに全話）なら、**その話の先頭行**まで
+   * 返す。ファイルを開くだけでは、219話の先頭が映るだけになる。
    */
   private async resolveLocateTarget(staged: {
     locate: ChatLocate;
     work: WorkEntry;
     fallbackPath: string;
-  }): Promise<string | undefined> {
+  }): Promise<{ filePath: string; line?: number } | undefined> {
     // パスの指定が無ければ、いま開いているファイルの中の話である
-    if (!staged.locate.path) return staged.fallbackPath;
+    if (!staged.locate.path) return { filePath: staged.fallbackPath };
 
     const requested = path.resolve(staged.work.folderPath, staged.locate.path);
     try {
-      if (await pathExists(requested)) return requested;
+      if (await pathExists(requested)) return { filePath: requested };
     } catch (error) {
       // 実在を確かめられないだけなら、引き当てへ進む（開けるかは次で分かる）
       logFailure("相談の「そこを見せて」：実在を確かめられなかった", {
@@ -1400,15 +1427,39 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       const { episodes } = await scanWork(staged.work);
       const found = resolveEpisodeByNumber(episodes, chapter);
       if (!found) return undefined;
+      const line = await this.collectedLineOf(found, chapter);
       // **引き当てたことは残す。** 画面には出さない（作者にとっては
       // 「そこが開いた」だけでよい）が、外したときに追えないと直せない
       logStep(
         `相談: 指されたファイル「${staged.locate.path}」は無いので、` +
-          `第${chapter}話（${found.fileName}）を開きました`
+          `第${chapter}話（${found.fileName}${line !== undefined ? ` の${line}行目` : ""}）を開きました`
       );
-      return found.filePath;
+      return { filePath: found.filePath, line };
     } catch (error) {
       logFailure("相談の「そこを見せて」：作品を走査できなかった", {
+        理由: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
+  }
+
+  /**
+   * 引き当てたのが合本なら、その話の本文の先頭行（1始まり）。
+   *
+   * 合本でなければ、読めなければ、話数が中で見つからなければ undefined。
+   * **開けること自体は妨げない**——行が分からないだけで、ファイルは開く。
+   */
+  private async collectedLineOf(
+    episode: EpisodeFile,
+    chapter: number
+  ): Promise<number | undefined> {
+    if (!isCollectedFile(episode.collectedCount)) return undefined;
+    try {
+      const { text } = await readTextFile(episode.filePath);
+      return collectedEpisodeLineOf(text, chapter);
+    } catch (error) {
+      logFailure("相談の「そこを見せて」：合本を読めなかった", {
+        場所: episode.fileName,
         理由: error instanceof Error ? error.message : String(error),
       });
       return undefined;

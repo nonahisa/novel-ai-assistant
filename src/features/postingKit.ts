@@ -18,6 +18,7 @@ import {
   withRanking,
   withSiteProfile,
   withSites,
+  type PostingEpisodeTarget,
   type PostingLedger,
   type PostingSiteEntry,
   type PostingSiteId,
@@ -35,7 +36,11 @@ import {
   supportsPasteHelper,
 } from "../core/postingEnvelope";
 import { hasEmphasis } from "../core/ruby";
-import { formatChapterLabel } from "../core/episodeLabel";
+// 合本の中の話の呼び方は1か所に置く（作品ごとの数え方を通す）
+import {
+  collectedChapterLabel,
+  formatChapterLabel,
+} from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
 // 合本かどうかの判断と、話の選ばせ方は1か所に置く（写しを作らない）
@@ -140,13 +145,24 @@ export async function postNewEpisode(
     return { changed };
   }
 
-  const episodePath = relativePathOf(target);
-  const label = episodeLabelOf(target, format);
-
   const parts = await readEpisode(target, format);
   if (!parts) return { changed };
 
-  let sites = unpostedSites(ledger, episodePath);
+  /*
+    **台帳は話単位で引く**（設計書6.68.2）。合本（1ファイルに全話）からは
+    1話だけをコピーして出すので、ファイル単位のままだと第3話を出した時点で
+    そのファイル全体が投稿済みになり、第4話が出せなくなっていた。
+    合本でないファイルは話数を付けない＝これまでと同じ鍵のままである。
+  */
+  const postTarget: PostingEpisodeTarget = {
+    episodePath: relativePathOf(target),
+    ...(parts.collected
+      ? { chapter: parts.collected.chapter, order: parts.collected.order }
+      : {}),
+  };
+  const label = postingLabelOf(target, parts.collected, format);
+
+  let sites = unpostedSites(ledger, postTarget);
   if (sites.length === 0) {
     // 話を名指しで選んだときだけ、ここへ来る（自動選択では未投稿しか選ばない）
     const again = await vscode.window.showWarningMessage(
@@ -186,7 +202,7 @@ export async function postNewEpisode(
 
     // **1サイトごとに書く**（まとめて最後に書かない）。途中で閉じても、
     // そこまで出したことは残る。台帳の保存はハッシュ照合つき
-    const next = withPost(ledger, episodePath, site, new Date().toISOString());
+    const next = withPost(ledger, postTarget, site, new Date().toISOString());
     if (!(await save(store, work, next))) {
       // 別の端末から同期が降りてきた等。ここで止める——読み直さずに
       // 続けると、こちらの古い手持ちで次のサイトぶんも上書きしてしまう
@@ -899,6 +915,29 @@ function episodeLabelOf(
   return formatChapterLabel(episode, format) || episode.fileName;
 }
 
+/**
+ * 案内に出す呼び名。**合本から選んだ話は、その話の呼び名にする**
+ * （設計書6.12.1）。ファイル単位の呼び名のままだと、「第3話を出しますか」
+ * と訊くべきところで合本のファイル名が出て、どの話の話なのか分からない。
+ *
+ * 数え方は作品の形式を通す（`collectedChapterLabel`）——SNS記事なら
+ * 「3本目」になる。話数が読めない話は**並び順で呼ぶ**。並び順を話数として
+ * 名乗らせると、プロローグのある合本で別の話の話数になる。
+ */
+function postingLabelOf(
+  episode: EpisodeFile,
+  collected: { chapter: number | null; order: number } | undefined,
+  format: WorkFormatKey | undefined
+): string {
+  const fileLabel = episodeLabelOf(episode, format);
+  if (!collected) return fileLabel;
+  return collectedChapterLabel(
+    { insideCollected: true, chapterStart: collected.chapter },
+    `${fileLabel}の${collected.order}番目`,
+    format
+  );
+}
+
 /** 何をしたかを1回でまとめて伝える（黙って終わらない） */
 async function reportResult(input: {
   label: string;
@@ -965,7 +1004,18 @@ async function offerAnnouncement(
 async function readEpisode(
   episode: EpisodeFile,
   format: WorkFormatKey | undefined
-): Promise<{ subtitle: string | null; body: string } | undefined> {
+): Promise<
+  | {
+      subtitle: string | null;
+      body: string;
+      /**
+       * 合本から選んだ話の指し方（台帳の鍵と案内の見出しに使う）。
+       * 合本でなければ入らない＝ファイルまるごとを指す
+       */
+      collected?: { chapter: number | null; order: number };
+    }
+  | undefined
+> {
   let file;
   try {
     file = await readTextFile(episode.filePath);
@@ -996,7 +1046,13 @@ async function readEpisode(
   const picked = await pickCollectedEpisode(file.text, format);
   if (picked === undefined) return undefined;
   const found = picked
-    ? { subtitle: picked.title ?? parts.subtitle, body: picked.body }
+    ? {
+        subtitle: picked.title ?? parts.subtitle,
+        body: picked.body,
+        // **どの話を選んだかを呼び出し側へ渡す。** 台帳の鍵も案内の見出しも
+        // ここで決まった1話を指す（ファイルではなく）
+        collected: { chapter: picked.chapter, order: picked.order },
+      }
     : parts;
 
   if (!found.body.trim()) {

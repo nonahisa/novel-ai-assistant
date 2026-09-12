@@ -275,6 +275,34 @@ function findBodyLabelLine(
   return null;
 }
 
+/**
+ * 合本の中の、その話数の本文の先頭行（1始まり）。分からなければ undefined。
+ *
+ * 相談の「そこを見せて」が合本に当たったときに使う（設計書6.25.5）。
+ * **`order`（ファイル内の並び）と `chapter`（作中の話数）は別物**なので、
+ * `parseCollectedFile` の読み取った話数から `order` を引き、`order` から
+ * 行を引く。
+ *
+ * **同じ話数が2つあれば返さない。** どちらを指しているかは決められず、
+ * 片方へ飛んで「ここです」と言うのは、飛ばないより悪い
+ * （`locateEpisode.ts` の引き当てと同じ考え方）。
+ */
+export function collectedEpisodeLineOf(
+  rawText: string,
+  chapter: number
+): number | undefined {
+  const episodes = parseCollectedFile(rawText);
+  if (!episodes) return undefined;
+
+  const matched = episodes.filter((episode) => episode.chapter === chapter);
+  if (matched.length !== 1) return undefined;
+
+  const start = collectedEpisodeStarts(rawText).find(
+    (entry) => entry.order === matched[0].order
+  );
+  return start?.line;
+}
+
 /** 合本の中で前後の話へ移るときに、次に何をするか */
 export type CollectedStep =
   /** 同じファイルの中で、この行（1始まり）へ飛ぶ */
