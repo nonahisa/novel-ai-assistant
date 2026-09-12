@@ -123,9 +123,17 @@ export function describeEolAudit(audit: EolAudit): string {
     : head;
 }
 
-/** 目標の改行コードの呼び名。画面と報告で同じ言葉を使う */
-export function eolLabel(eol: "\n" | "\r\n"): string {
-  return eol === "\r\n" ? "CRLF" : "LF";
+/**
+ * 改行コードの呼び名。画面と報告で同じ言葉を使う。
+ *
+ * **`CR` も言える**（0.50.6）。揃え**先**は LF と CRLF の2つだけだが、
+ * 揃え**元**には古い Mac の CR が来ることがあり、編集履歴の
+ * 「◯◯ → LF」に出すのに要る。
+ */
+export function eolLabel(eol: Eol): string {
+  if (eol === "\r\n") return "CRLF";
+  if (eol === "\r") return "CR";
+  return "LF";
 }
 
 /**
