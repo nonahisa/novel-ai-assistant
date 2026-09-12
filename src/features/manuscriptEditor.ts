@@ -414,12 +414,36 @@ export async function openManuscriptForReading(work: WorkEntry): Promise<void> {
     // **ここで別の決め方をしない**——作品一覧から開いたときと同じ入口にする
     manuscriptViewTypeFor(await formatOf(work))
   );
-  // **台帳に載るまで待つ**（`revealLine` と同じ事情。開いた直後はまだ載らない）
-  const opened = await waitFor(() => openManuscripts.get(key));
+  /*
+    **台帳に載るまで待つ**（`revealLine` と同じ事情。開いた直後はまだ載らない）。
+
+    **ここは長めに待つ**（0.51.7。作者の報告、2026-09-08）。既定の1.5秒は、
+    その原稿をこの起動ではじめて開くとき——画面の組み立てと本文の読み込みが
+    同時に走るとき——に足りないことがある。`openWith` は既に返っているので、
+    **作者の目にはもう原稿が開いて見えている。** 足りないのは読み上げの列だけ
+    なので、数秒待つほうが「押しても何も起きない」より良い。
+  */
+  const opened = await waitFor(
+    () => openManuscripts.get(key),
+    READ_ALOUD_LEDGER_WAIT_MS
+  );
   if (!opened) {
-    // **黙って終わらない。** 押しても何も起きなかったときの手がかりを残す
+    /*
+      **画面に出す**（0.51.7。作者の依頼、2026-09-08
+      「空振りしたときは、ログではなく画面に出してください。
+      『押しても何も起きない』は作者がいちばん困る形です」）。
+
+      それまではログ1行だけだった。作者から見ると完全に沈黙する——
+      作品を選んだのに何も開かず、知らせも出ない。
+      **次にできることまで書く。** 読み上げは原稿エディタの中にもあるので、
+      そちらから押せば同じことができる。
+    */
     logLine(
       `読み上げ：${filePath} を開けなかったため、読み上げの列を出せませんでした。`
+    );
+    void vscode.window.showWarningMessage(
+      `「${paths.basename(filePath)}」の読み上げを始められませんでした。` +
+        "作品一覧からこの話を開いて、上のバーの「読み上げ」を押してください。"
     );
     return;
   }
@@ -542,6 +566,15 @@ export async function removeMemoLineInOpenManuscript(
   }
   return { kind: "removed" };
 }
+
+/**
+ * 読み上げのために開くときの、待つ上限（0.51.7）。
+ *
+ * **既定より長くする。** その原稿をこの起動ではじめて開くときは、
+ * 画面の組み立てと本文の読み込みが同時に走るので1.5秒では足りないことがある。
+ * ここで諦めると、作者には「押しても何も起きない」ように見える。
+ */
+const READ_ALOUD_LEDGER_WAIT_MS = 5000;
 
 /** 台帳に載るのを待つ上限。これを過ぎたら「開けなかった」とみなす */
 const LEDGER_WAIT_MS = 1500;
