@@ -1786,8 +1786,24 @@ export const ACTION_TREE: readonly ActionGroup[] = [
     label: "ヘルプ",
     icon: "question",
     entries: [
-      // **一番上に置く。** 何ができるのかが分からない状態でヘルプを開く人が
-      // 最初に見るものである（ログを読みたい人は目的があって来る）
+      /*
+        **いちばん上は診断。** はじめて開いた人が知りたいのは
+        「全部の機能」ではなく「自分は何から始めればよいか」である
+        （設計書6.90）。マニュアルは、その次に読むものでよい。
+      */
+      {
+        kind: "action",
+        command: "novelai.runWriterDiagnosis",
+        label: "作家のタイプ診断",
+        note: "はじめの案内",
+        icon: "compass",
+        requiresWork: false,
+        detail:
+          "5問お答えいただくと、あなたの書き方に合わせて次にすることを案内します。" +
+          "いまある原稿の取り込み方・書き始め方・直し方・出し方を、" +
+          "なぜそれを勧めるのかを添えて出します。AIは使いません。",
+      },
+      // **マニュアルはその次。** 何ができるのかを一望したい人が来る
       {
         kind: "action",
         command: "novelai.openManual",

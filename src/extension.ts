@@ -277,6 +277,8 @@ import { askText, cancelItem } from "./views/dialogs";
 import { manageKeepWords } from "./features/manageKeepWords";
 import { manageConfirmSkips } from "./features/manageConfirmSkips";
 import { AdvicePolicyStore } from "./core/advicePolicyStore";
+import { WriterProfileStore } from "./core/writerProfileStore";
+import { ADVICE_TYPES, resolveAdviceType } from "./core/advicePolicy";
 import { setAdvicePolicy } from "./features/advicePolicyDiagnosis";
 import {
   addForeshadowByHand,
@@ -1282,6 +1284,9 @@ export async function activate(
   // 作者のタイプ別の助言方針（設計書6.86）。**`globalState` に置く**——
   // 受容度や自信度は、GitHubで編集部と共有してよい情報ではない
   const advicePolicies = new AdvicePolicyStore(context.globalState);
+  // 作家のタイプ診断（設計書6.90）。**作者ごとに1つ**——段取りや出し先は
+  // 作品を変えても大きくは変わらない癖なので、作品ごとに聞き直さない
+  const writerProfiles = new WriterProfileStore(context.globalState);
 
   const workChatPanel = new WorkChatPanel(registry, aiRegistry, {
     run: async (work, kind, filePath) => {
@@ -3179,6 +3184,43 @@ export async function activate(
     )
   );
 
+  /*
+    作家のタイプ診断と、はじめの案内（設計書6.90。作者の依頼 2026-09-13）。
+
+    **6.86 とは別の診断である。** あちらは人柄（AIの言い方を変える）、
+    こちらはやり方（はじめに案内する操作を変える）。AIは呼ばない——
+    はじめて使う日に、AIの準備ができていなくても最後まで通れるようにしてある。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.runWriterDiagnosis", async () => {
+      const { runWriterDiagnosis } = await import(
+        "./features/writerDiagnosis.js"
+      );
+      await runWriterDiagnosis(writerDiagnosisDeps());
+    })
+  );
+
+  /**
+   * 診断の画面へ渡すもの。**押せない案内を並べないため**に、
+   * 作品があるかと、いまの助言方針を見せる
+   */
+  function writerDiagnosisDeps() {
+    return {
+      profiles: writerProfiles,
+      hasWork: () => registry.list().length > 0,
+      advicePolicy: () => {
+        // 作品が1つだけなら、その方針を紙に添える。複数あるときは
+        // どれの話か決められないので添えない（間違ったものを見せない）
+        const works = registry.list();
+        if (works.length !== 1) return undefined;
+        const profile = advicePolicies.get(works[0].id);
+        if (!profile) return undefined;
+        const info = ADVICE_TYPES[resolveAdviceType(profile.scores)];
+        return { label: info.label, summary: info.summary };
+      },
+    };
+  }
+
   // 相談の助言方針（設計書6.86）。AIは呼ばない——答えるのは作者本人だけで、
   // 会話ログからの推定はしない
   context.subscriptions.push(
@@ -4730,9 +4772,29 @@ export async function activate(
   // fetchは取得のみなので、途中で終わってもローカルには何も起きない
   void gitSync.refreshAll({ fetch: true });
 
-  // **はじめて開いたときだけ、使うAIを選んでもらう**（作者の指示、2026-08-19）。
-  // await しないのは、選び終わるまで拡張機能の初期化が止まるのを避けるため
-  void offerFirstRunSetupInVsCode(context, aiRegistry);
+  /*
+    **はじめて開いたときの声かけは、2つを続けて出す**（設計書6.90.3）。
+
+      1. 作家のタイプ診断（作者の依頼、2026-09-13「使用開始時に…」）
+      2. 使うAIを選ぶ（作者の指示、2026-08-19）
+
+    **診断を先にする。** 何をしたいかが決まる前にAIを選ばせても、
+    何のために要るのかが分からない。診断の案内は**AIを使わない**ので、
+    「いまある原稿を取り込む」「編集・校閲で使う」だけなら最後まで通る。
+
+    **同時に2つ出さない。** 通知が2枚並ぶと、どちらに答えたのか分からなくなる。
+    診断の声かけが片付いてから、AIの声かけを出す。
+
+    どちらも await しないのは、選び終わるまで拡張機能の初期化が
+    止まるのを避けるためである。
+  */
+  void (async () => {
+    const { offerWriterDiagnosis } = await import(
+      "./features/writerDiagnosis.js"
+    );
+    await offerWriterDiagnosis(writerDiagnosisDeps());
+    await offerFirstRunSetupInVsCode(context, aiRegistry);
+  })();
 
   // **VS Code 標準のMarkdownプレビューへ差し込む**（設計書6.12）。
   // 独自のプレビュー画面を作らないのは、作者が既に使っている

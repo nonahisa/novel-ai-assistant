@@ -103,6 +103,16 @@ describe("画面に出る詳細メニュー（道順を書く人はここを読�
     ]);
   });
 
+  test("**「ヘルプ」の一番上は「作家のタイプ診断」**（設計書6.90）", () => {
+    // はじめて開いた人が知りたいのは「全部の機能」ではなく
+    // 「自分は何から始めればよいか」である。マニュアルはその次
+    const group = ACTION_TREE.find((g) => g.label === "ヘルプ");
+    const labels = shownEntries(group!.entries, true).map((e) => e.label);
+
+    expect(labels[0]).toBe("作家のタイプ診断");
+    expect(labels[1]).toBe("使い方");
+  });
+
   test("「ヘルプ」に「動作を診断」は出ない（ブラウザ版だけ）", () => {
     const group = ACTION_TREE.find((g) => g.label === "ヘルプ");
     const labels = shownEntries(group!.entries, true).map((e) => e.label);
