@@ -26,6 +26,10 @@ export const DEFAULT_MODE: WorkMode = "author";
  * **許すものを並べる**（禁じるものを並べない）。機能を足したときに、
  * うっかり編集部へ開いてしまうことがないようにする。
  * 新しいコマンドは、**明示的に足すまで編集者には見えない。**
+ *
+ * **ここへ並べるIDは `package.json` に実在するものだけ。** ただの文字列なので
+ * 綴り違いは型検査を素通りし、押しても何も起きないまま気づかれない
+ * （実際に3つ紛れていた）。`test/unit/editorMode.test.ts` が突き合わせる。
  */
 const EDITOR_ALLOWED = new Set<string>([
   // 本文の校正・校閲。**これが編集部の仕事である**
@@ -36,12 +40,14 @@ const EDITOR_ALLOWED = new Set<string>([
   "novelai.manageKeepWords",
 
   // 原稿を受け取り、直したものを返すために要る
-  "novelai.syncWork",
+  // 1作品だけ見る編集部は作品ごとの同期で足りる（`syncAllWorks` は開かない）
+  "novelai.gitSync",
   "novelai.resolveConflicts",
+  // 編集部と作者の両方が触ったあとは、ここを通らないと合流できない
+  "novelai.resolveDivergence",
   "novelai.addWorkFromGithub",
 
   // 読むために要る
-  "novelai.showWordCount",
   "novelai.openSettingsPanel",
   "novelai.showEditHistory",
 
@@ -55,7 +61,7 @@ const EDITOR_ALLOWED = new Set<string>([
   // 困ったときのために残す
   "novelai.openExtensionSettings",
   "novelai.showVersion",
-  "novelai.openLog",
+  "novelai.showLog",
 ]);
 
 /** そのコマンドは、いまのモードで使えるか */

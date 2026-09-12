@@ -198,7 +198,7 @@ describe("編集者モードで使える操作", () => {
   });
 
   test("原稿の受け渡しに要るものは開く", () => {
-    for (const command of ["novelai.syncWork", "novelai.resolveConflicts"]) {
+    for (const command of ["novelai.gitSync", "novelai.resolveConflicts"]) {
       expect(isCommandAllowed(command, "editor")).toBe(true);
     }
   });

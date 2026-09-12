@@ -1,5 +1,13 @@
 # Change Log
 
+## 0.47.3 - 2026-09-12
+
+### 編集者モードで「同期」が押せなかった——許可一覧の3つのIDが実在しない名前だった
+
+- `src/core/editorMode.ts` の `EDITOR_ALLOWED` に、`package.json` のどこにも無いコマンドID（`novelai.syncWork`・`novelai.openLog`・`novelai.showWordCount`）が並んでおり、**編集部が直した原稿を返せなかった**（実機、2026-09-11）。実在する `novelai.gitSync`・`novelai.showLog` に直し、該当の無い `showWordCount`（文字数は作品一覧に出るもので操作ではない）は消した
+- `novelai.resolveDivergence`（分かれた分を合わせる）を足した。編集部と作者の両方が触ったあとの同期は、ここを通らないと合流できない
+- **許可一覧の全IDが `package.json` に実在することをテストで見張る**（`test/unit/editorMode.test.ts`）。ただの文字列なので綴り違いは型検査を素通りし、半年気づかれなかった
+
 ## 0.47.2 - 2026-09-12
 
 ### VS Code の新しい Markdown 画面（hybrid）で本文を開いていても、「縦書きで開く」が通る
