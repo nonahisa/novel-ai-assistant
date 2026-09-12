@@ -73,6 +73,31 @@ const MACHINE_SCOPED_KEYS = [
   "novelai.sakura.endpoint",
 ];
 
+/**
+ * 「以降は訊かない」の覚え書きが、設定画面に出ること（実機確認 F-96）。
+ *
+ * **解除の道がここしかない場面がある。** 見直しのコマンドを知らない作者でも、
+ * 「設定管理を開く」から中身を読んで消せる必要がある。
+ * 説明が空だと、何のための設定か分からないまま並ぶ。
+ */
+describe("「以降は訊かない」の設定が、設定画面に出る（実機確認 F-96）", () => {
+  const key = "novelai.confirm.remembered";
+
+  test("宣言されていて、型と既定がある", () => {
+    expect(properties[key]).toBeDefined();
+    expect(properties[key].type).toBe("object");
+    expect(properties[key].default).toEqual({});
+  });
+
+  test("**説明が入っていて、見直しの道を書いてある**", () => {
+    const text =
+      properties[key].markdownDescription ?? properties[key].description ?? "";
+
+    expect(text.length).toBeGreaterThan(40);
+    expect(text).toContain("訊かないことにした確認を見直す");
+  });
+});
+
 describe("接続先・実行ファイルの設定スコープ", () => {
   test.each(MACHINE_SCOPED_KEYS)(
     "%s はワークスペースから上書きできない（machine）",
