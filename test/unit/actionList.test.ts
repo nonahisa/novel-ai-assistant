@@ -831,6 +831,47 @@ describe("校正・校閲の並び", () => {
  * （サイト・URL・投稿済みの基準線）が離れていると、URLを直したいときに
  * どこを探せばよいのか分からない。
  */
+/**
+ * 告知まわりの入口（実機確認 F-48）。
+ *
+ * **2つは別の分類にある。** リストの項目文は「広報支援に両方が出るか」と
+ * 書いていたが、**「告知の設定」は 2026-09-05 に「作品ごとの設定」へ移してある**
+ * （設計書6.56。一度決めればしばらく変えないものを、そこへ集める方針）。
+ * 項目文のほうが古かった。
+ *
+ * どちらの位置も、動かしたら気づけるようにここで固定する。
+ */
+describe("告知の入口の場所（実機確認 F-48）", () => {
+  /** その操作が、どの分類・小分類に居るか */
+  function placeOf(command: string): { group: string; section: string } {
+    for (const group of ACTION_TREE) {
+      for (const entry of group.entries) {
+        if (entry.kind !== "section") continue;
+        if (entry.items.some((item) => item.command === command)) {
+          return { group: group.label, section: entry.label };
+        }
+      }
+    }
+    throw new Error(`操作「${command}」がどの小分類にもありません`);
+  }
+
+  test("「更新告知文を作る」は 執筆AI支援 → 広報支援", () => {
+    expect(placeOf("novelai.generateAnnouncement")).toEqual({
+      group: "執筆AI支援",
+      section: "広報支援",
+    });
+  });
+
+  test("**「告知の設定」は 拡張機能の設定 → 作品ごとの設定**（広報支援ではない）", () => {
+    // 一度決めればしばらく変えないものを集めた先（設計書6.56）。
+    // 広報支援へ戻すなら、リストの項目文とこのテストの両方を直すこと
+    expect(placeOf("novelai.configureAnnouncement")).toEqual({
+      group: "拡張機能の設定",
+      section: "作品ごとの設定",
+    });
+  });
+});
+
 describe("投稿キットの入口", () => {
   function otherSupport() {
     // 0.33.8で「その他支援」を2つに割った（下の describe に理由）。
