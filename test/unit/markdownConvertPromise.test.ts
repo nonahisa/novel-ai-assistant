@@ -26,6 +26,8 @@ const FILES = [
   "src/features/markdownConvert.ts",
   "src/views/actionList.ts",
   "src/features/ruby.ts",
+  // 0.51.8 で5か所目が見つかった（`.txt` でルビを押したときの断り）
+  "src/features/manuscriptEditor.ts",
 ];
 
 /** 案内の文言だけを見る（注釈は除く） */
@@ -42,9 +44,18 @@ describe("MD化の案内", () => {
     // 言ってよいのは「字そのものは変えない」までで、
     // 記法は直る（そこが変わることを隠さない）
     for (const file of FILES) {
-      expect(messagesOf(file), file).not.toContain("中身は1文字も変えません");
-      expect(messagesOf(file), file).not.toContain("中身は1文字も変えず");
-      expect(messagesOf(file), file).not.toContain("中身は変えず");
+      // **言い回しの揺れも見る。** 0.51.6 で「変えません」の形だけを
+      // 見張ったせいで、「中身は1文字も**変わりません**」と書いてある
+      // 5か所目を見落とした（0.51.8 で見つけた）
+      for (const phrase of [
+        "中身は1文字も変えません",
+        "中身は1文字も変えず",
+        "中身は変えず",
+        "中身は1文字も変わりません",
+        "中身は変わりません",
+      ]) {
+        expect(messagesOf(file), `${file} / ${phrase}`).not.toContain(phrase);
+      }
     }
   });
 
