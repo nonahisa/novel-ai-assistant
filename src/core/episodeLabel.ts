@@ -321,3 +321,23 @@ export function isCollectedFile(
 ): boolean {
   return (collectedCount ?? 0) >= MIN_COLLECTED_EPISODES;
 }
+
+/**
+ * 合本の中の1話に付ける見出し（設計書6.70）。
+ *
+ * **作品の数え方を通す。** 逸脱検知は合本の中だけ `第◯話` と直に書いて
+ * いたので、SNS記事（「◯本目」）や創作メモ集（「メモ◯」）の作品でも
+ * 合本のときだけ「第◯話」になっていた（2026-09-12 に気づいた）。
+ * ファイル単位の見出しは `formatChapterLabel` が同じ口を通っているので、
+ * **同じ作品の中で数え方が2つある**状態だった。
+ *
+ * @param fileLabel 話数が読めなかったときに使う、ファイル単位の見出し
+ */
+export function collectedChapterLabel(
+  source: { insideCollected: boolean; chapterStart: number | null },
+  fileLabel: string,
+  format?: WorkFormatKey
+): string {
+  if (!source.insideCollected || source.chapterStart === null) return fileLabel;
+  return episodeUnit(format).label(source.chapterStart);
+}

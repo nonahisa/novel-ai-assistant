@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   bookHeading,
+  collectedChapterLabel,
   episodeGroupLabel,
   isCollectedFile,
 } from "../../src/core/episodeLabel";
@@ -141,5 +142,42 @@ describe("isCollectedFile", () => {
     expect(isCollectedFile(null)).toBe(false);
     expect(isCollectedFile(undefined)).toBe(false);
     expect(isCollectedFile(0)).toBe(false);
+  });
+});
+
+describe("合本の中の1話の見出し（collectedChapterLabel）", () => {
+  const inside = { insideCollected: true, chapterStart: 3 };
+
+  it("小説では「第3話」", () => {
+    expect(collectedChapterLabel(inside, "ファイル名.txt")).toBe("第3話");
+    expect(collectedChapterLabel(inside, "ファイル名.txt", "novel")).toBe(
+      "第3話"
+    );
+  });
+
+  it("**SNS記事と創作メモ集は、作品の数え方に従う**", () => {
+    // ここを「第◯話」と直に書いていたため、合本の中だけ数え方が
+    // 変わっていた（2026-09-12）。ファイル単位の見出しは前から通っている
+    expect(collectedChapterLabel(inside, "ファイル名.txt", "sns")).toBe(
+      "投稿3"
+    );
+    expect(collectedChapterLabel(inside, "ファイル名.txt", "memo")).toBe(
+      "メモ3"
+    );
+  });
+
+  it("合本の外・話数が読めないときは、ファイル単位の見出しを使う", () => {
+    expect(
+      collectedChapterLabel(
+        { insideCollected: false, chapterStart: 3 },
+        "第3話 題名"
+      )
+    ).toBe("第3話 題名");
+    expect(
+      collectedChapterLabel(
+        { insideCollected: true, chapterStart: null },
+        "ファイル名.txt"
+      )
+    ).toBe("ファイル名.txt");
   });
 });

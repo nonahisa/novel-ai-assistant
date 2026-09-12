@@ -21,7 +21,10 @@ import { SynopsisStore } from "../core/synopsisStore";
 import { referenceBudgetChars } from "../core/sizeBudget";
 import { readPlotText } from "../core/plotFile";
 import { isBlankPlotSection, parsePlotMarkdown } from "../core/plotDoc";
-import { formatChapterLabel } from "../core/episodeLabel";
+import {
+  collectedChapterLabel,
+  formatChapterLabel,
+} from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import {
   buildDeviationCheckPrompt,
@@ -617,10 +620,10 @@ async function collectEpisodes(
       if (!body.trim()) continue;
       out.push({
         filePath: source.filePath,
-        label:
-          source.insideCollected && source.chapterStart !== null
-            ? `第${source.chapterStart}話`
-            : fileLabel,
+        // **見出しの決め方は `core/episodeLabel.ts` の1か所だけ**
+        // （ここに「第◯話」と直に書いていたので、SNS記事・創作メモ集の
+        // 作品でも合本の中だけが「第◯話」になっていた）
+        label: collectedChapterLabel(source, fileLabel, format),
         chapter: source.chapterStart,
         text: body,
         hash: hashText(body),
