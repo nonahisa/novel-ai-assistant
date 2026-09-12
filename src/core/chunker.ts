@@ -811,6 +811,39 @@ export function locateChunkLine(
   chunk: Chunk,
   line: number
 ): ChunkLineLocation | undefined {
+  const found = locateInChunk(chunk, line);
+  if (!found) return undefined;
+  return { filePath: found.segment.filePath, line: found.line };
+}
+
+/**
+ * `withLineNumbers` が振った行番号が、どの話の中を指しているかを返す。
+ *
+ * **話数はファイル単位では引けない。** 合本（全話が1ファイル）は走査では
+ * 1件の話になり、`chapterStart` は中の最小（ふつう1）である。ファイルの
+ * 場所から話数を引くと、**どの行を指した指摘も全部「第1話」になる**
+ * （作者の報告、2026-09-12）。内訳には話ごとの話数が入っているので、
+ * 行の位置から内訳を引き直す。
+ *
+ * 範囲の外を指していれば `undefined` を返す。
+ */
+export function segmentAtLine(
+  chunk: Chunk,
+  line: number
+): ChunkSegment | undefined {
+  return locateInChunk(chunk, line)?.segment;
+}
+
+/**
+ * 行番号から、内訳と元ファイルの行を**一度に**引く。
+ *
+ * 話数（内訳）と行は同じ突き合わせから決まるので、2つに分けて書くと
+ * 片方だけが直されて静かに食い違う。探すのはここ1か所にする。
+ */
+function locateInChunk(
+  chunk: Chunk,
+  line: number
+): { segment: ChunkSegment; line: number } | undefined {
   if (!Number.isInteger(line) || line < 1) return undefined;
   const segments = segmentsOf(chunk);
 
@@ -819,7 +852,7 @@ export function locateChunkLine(
     const lineCount = chunk.text.split("\n").length;
     const first = chunk.startLine + 1;
     if (line < first || line > chunk.startLine + lineCount) return undefined;
-    return { filePath: segments[0].filePath, line };
+    return { segment: segments[0], line };
   }
 
   const lineCount = chunk.text.split("\n").length;
@@ -836,7 +869,7 @@ export function locateChunkLine(
     );
     if (target < firstLine || target > lastLine) continue;
     return {
-      filePath: segment.filePath,
+      segment,
       line: target - firstLine + segment.startLine + 1,
     };
   }

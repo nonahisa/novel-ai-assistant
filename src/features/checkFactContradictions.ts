@@ -15,6 +15,7 @@ import {
 import {
   describeChunkScope,
   locateChunkLine,
+  segmentAtLine,
   splitMergedChunk,
   withLineNumbers,
   type Chunk,
@@ -452,9 +453,14 @@ export async function checkFactContradictions(
                 continue;
               }
               const end = locateChunkLine(chunk, fact.lineRange[1]);
-              // 話数もファイルから引き直す（まとめたチャンクでは1つ目の話に
-              // なっている）。読めなければ null のまま——推測で埋めない
-              const chapter = chapterByFile.get(at.filePath) ?? null;
+              // **話数はチャンクの内訳から引く。** ファイル単位で引くと、
+              // 合本（全話が1ファイル）では走査が返す先頭の話数になり、
+              // どの話の事実も全部「第1話」になる。内訳が無いときだけ
+              // ファイルへ退く。読めなければ null のまま——推測で埋めない
+              const chapter =
+                segmentAtLine(chunk, fact.lineRange[0])?.chapterStart ??
+                chapterByFile.get(at.filePath) ??
+                null;
               facts.push({
                 ...fact,
                 chapter,

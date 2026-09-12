@@ -9,6 +9,7 @@ import {
 import { scanWork } from "../core/scanner";
 import { readTextFile, hashText } from "../core/textFile";
 import { blankMemoLines } from "../core/sceneMemo";
+import { episodeBodySources, shiftLines } from "../core/episodeChunks";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
 import {
@@ -385,6 +386,10 @@ export async function checkDeviations(
         for (const item of validated.accepted) {
           issues.push({
             ...item,
+            // **元ファイルの行へ戻す。** 合本の中の話と、頭書きのある
+            // ファイルは、送った本文の1行目がファイルの先頭ではない。
+            // ずらさないと「該当箇所へ移動」が別の話の行を指す
+            ...shiftLines(item, episode.lineOffset),
             filePath: episode.filePath,
             chunkHash: episode.hash,
           });
@@ -563,6 +568,13 @@ interface Episode {
   chapter: number | null;
   text: string;
   hash: string;
+  /**
+   * この本文が、元ファイルの何行目から始まるか（0始まり）。
+   *
+   * **合本は話ごとに送る**ので、AIへ振る行番号は話の中での通し番号になる。
+   * 指摘を作者へ出すときに元ファイルの行へ戻す足がかりとして持つ。
+   */
+  lineOffset: number;
 }
 
 async function collectEpisodes(
@@ -595,15 +607,26 @@ async function collectEpisodes(
       });
       continue;
     }
-    // **長い話は切る。** 切ったことは指摘の行番号から分かる
-    const body = text.slice(0, MAX_CHAPTER_CHARS);
-    out.push({
-      filePath: episode.filePath,
-      label: formatChapterLabel(episode, format) || episode.fileName,
-      chapter: episode.chapterStart,
-      text: body,
-      hash: hashText(body),
-    });
+    const fileLabel = formatChapterLabel(episode, format) || episode.fileName;
+    // **合本は話ごとに送る**（`core/episodeChunks.ts`）。1つの塊にすると、
+    // 全部が「第1話」の逸脱になるうえ、上限（`MAX_CHAPTER_CHARS`）で
+    // 切ったあとの先頭だけしか見ないことになる
+    for (const source of episodeBodySources(episode.filePath, text, episode)) {
+      // **長い話は切る。** 切ったことは指摘の行番号から分かる
+      const body = source.body.slice(0, MAX_CHAPTER_CHARS);
+      if (!body.trim()) continue;
+      out.push({
+        filePath: source.filePath,
+        label:
+          source.insideCollected && source.chapterStart !== null
+            ? `第${source.chapterStart}話`
+            : fileLabel,
+        chapter: source.chapterStart,
+        text: body,
+        hash: hashText(body),
+        lineOffset: source.lineOffset,
+      });
+    }
   }
   return { episodes: out, unreadableEpisodes };
 }

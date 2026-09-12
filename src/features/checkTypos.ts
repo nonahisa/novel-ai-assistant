@@ -11,17 +11,19 @@ import {
 import { confirmProviderReachable } from "./aiConnectivity";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
-import { parseEpisodeMetadata } from "../core/metadataParser";
-import { parseCollectedFile } from "../core/collectedFile";
 import { blankMemoLines } from "../core/sceneMemo";
 import {
-  splitIntoChunks,
   withLineNumbers,
   mergeAdjacentChunks,
   splitMergedChunk,
   locateChunkLine,
   Chunk,
 } from "../core/chunker";
+import {
+  chunksOfSources,
+  episodeBodySources,
+  type EpisodeBodySource,
+} from "../core/episodeChunks";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
 import {
@@ -136,26 +138,17 @@ export interface TypoCheckRunResult {
   cancelled: boolean;
 }
 
-interface FileChunkTask {
-  filePath: string;
-  chunks: Chunk[];
-}
-
 /**
  * まだ切っていない本文の1まとまり（1ファイル、または合本の中の1話）。
  *
  * **切るのは、固定費（指示・辞書・作法）を測ったあと**（設計書6.27.10）。
  * 読むのと切るのを1つのループでやっていたので、字数を決めるのに必要な
  * 材料（辞書・作法）がまだ手元に無い時点で切っていた。
+ *
+ * 中身は `core/episodeChunks.ts` の `EpisodeBodySource` そのもの
+ * （合本の分け方を写しで持たないため、型ごと共有する）。
  */
-interface SplitSource {
-  filePath: string;
-  body: string;
-  chapterStart: number | null;
-  chapterEnd: number | null;
-  /** この本文が、元ファイルの何行目から始まるか（0始まり） */
-  lineOffset: number;
-}
+type SplitSource = EpisodeBodySource;
 
 /**
  * 辞書へ載せる固有名詞の件数。
@@ -279,35 +272,9 @@ export async function checkTypos(
 
     // 全話が1ファイルに入っている形（合本）は、話ごとに分けて送る。
     // まとめて1つの塊にすると、指摘の行番号がファイル全体の行番号と
-    // ずれてしまう（後書き・リアクションが本文に混ざる問題も同じ理由）
-    const collected = parseCollectedFile(file.text);
-    if (collected) {
-      let searchFrom = 0;
-      for (const episode of collected) {
-        if (!episode.body.trim()) continue;
-        const located = locateBody(file.text, episode.body, searchFrom);
-        searchFrom = located.nextSearchIndex;
-        sources.push({
-          filePath: ep.filePath,
-          body: episode.body,
-          chapterStart: episode.chapter,
-          chapterEnd: episode.chapter,
-          lineOffset: located.line,
-        });
-      }
-      continue;
-    }
-
-    const meta = parseEpisodeMetadata(file.text);
-    if (!meta.body.trim()) continue;
-    const located = locateBody(file.text, meta.body, 0);
-    sources.push({
-      filePath: ep.filePath,
-      body: meta.body,
-      chapterStart: ep.chapterStart,
-      chapterEnd: ep.chapterEnd,
-      lineOffset: located.line,
-    });
+    // ずれてしまう（後書き・リアクションが本文に混ざる問題も同じ理由）。
+    // **分け方は `core/episodeChunks.ts` に1つだけ置いてある**
+    sources.push(...episodeBodySources(ep.filePath, file.text, ep));
   }
 
   if (conflicted.length > 0) {
@@ -385,20 +352,6 @@ export async function checkTypos(
   );
   const chunkChars = chunkSettings.chunk.chars;
 
-  const tasks: FileChunkTask[] = sources.map((source) => ({
-    filePath: source.filePath,
-    chunks: splitIntoChunks(
-      source.filePath,
-      source.body,
-      source.chapterStart,
-      source.chapterEnd,
-      { maxChars: chunkChars }
-    ).map((chunk) => ({
-      ...chunk,
-      startLine: chunk.startLine + source.lineOffset,
-    })),
-  }));
-
   // **1話ずつ送ると、指示のほうが本文より大きい。** 1話2,000字の作品で
   // 指示が約5,600字。19話なら19回ぶん同じ指示を送り直していた
   // （2026-08-21、作者の指摘）。隣どうしをまとめて呼び出し回数を減らす。
@@ -406,13 +359,16 @@ export async function checkTypos(
   // **行番号は `locateChunkLine` で元のファイルへ戻す。** まとめた本文の
   // 通し番号のまま使うと、2話目以降の指摘が1話目の別の行を書き換える。
   const mergeChars = chunkSettings.mergeChars;
+  // 合本の中の話は `chunksOfSources` が詰め直す。ファイルをまたぐまとめは
+  // ここで行う（二重に詰めない）
+  const perSource = chunksOfSources(sources, {
+    maxChars: chunkChars,
+    mergeChars,
+  });
   const chunks =
     mergeChars > 0
-      ? mergeAdjacentChunks(
-          tasks.flatMap((task) => task.chunks),
-          { maxChars: mergeChars }
-        )
-      : tasks.flatMap((task) => task.chunks);
+      ? mergeAdjacentChunks(perSource, { maxChars: mergeChars })
+      : perSource;
   if (chunks.length === 0) {
     vscode.window.showWarningMessage("処理できる本文がありません。");
     return undefined;
@@ -895,26 +851,6 @@ export function collectIssues(
   }
 
   return { rejected: rejectedCount, alreadyApplied };
-}
-
-/**
- * ヘッダーを除いた本文が、元ファイルの何行目から始まるかを求める。
- *
- * `splitIntoChunks` が返す `startLine` は渡した本文の中での行番号であり、
- * メタデータヘッダーを剥がした分だけ実ファイルとずれる。
- * このずれを直さないと、AIが返す行番号が本文の実際の行と一致せず、
- * 「該当箇所へ移動」や「適用」が誤った行を指してしまう。
- */
-export function locateBody(
-  rawText: string,
-  body: string,
-  fromIndex: number
-): { line: number; nextSearchIndex: number } {
-  const normalized = rawText.replace(/\r\n?/g, "\n");
-  const index = normalized.indexOf(body, fromIndex);
-  if (index === -1) return { line: 0, nextSearchIndex: fromIndex };
-  const line = normalized.slice(0, index).split("\n").length - 1;
-  return { line, nextSearchIndex: index + body.length };
 }
 
 function describeChunkFile(filePath: string, chunk: Chunk): string {

@@ -14,15 +14,13 @@ import {
 import { confirmProviderReachable } from "./aiConnectivity";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
-import { parseEpisodeMetadata } from "../core/metadataParser";
-import { parseCollectedFile } from "../core/collectedFile";
 import {
   mergeAdjacentChunks,
   segmentsOf,
-  splitIntoChunks,
   Chunk,
   MIN_CHUNK_CHARS,
 } from "../core/chunker";
+import { chunksOfEpisodeFile } from "../core/episodeChunks";
 // 分け直しの手順は1か所に置く（設計書6.27.10）。ここに写しを持つと、
 // 逃げ道を直したときに片方だけが古いままになる
 import { isContextOverflow, retryOnOverflow, splitForRetry } from "./chunkRetry";
@@ -339,57 +337,23 @@ export async function extractCharacters(
     }
     // 全話が1ファイルに入っている形（合本）は、話ごとに分けて送る。
     // まとめて1つの塊にすると、抽出したものに登場話数が1つも付かない。
-    // 後書き・リアクションも本文として送ってしまう
-    const collected = parseCollectedFile(file.text);
-    if (collected) {
-      const perEpisode: Chunk[] = [];
-      for (const episode of collected) {
-        if (!episode.body.trim()) continue;
-        perEpisode.push(
-          ...splitIntoChunks(
-            ep.filePath,
-            episode.body,
-            episode.chapter,
-            episode.chapter,
-            { maxChars: chunkChars }
-          )
-        );
-      }
-      // **話ごとに分けたぶん、送る単位まで小さくしない。**
-      // 合本の中の話はもともと1つのファイルの続きで、分けたのは
-      // 話数を付けるためであって、呼び出しを増やすためではない。
-      // 実データ（219話・70万字）では、6,000字でまとめると174回になり、
-      // 分ける前の41回から4倍以上に増えてしまう。話数はまとめても
-      // 内訳（segments）に残るので、元の大きさまで詰め直してよい。
-      //
-      // **詰め直す先は `mergeChars` である**（設計書6.23）。自動のときは
-      // `resolveMergeChars` がチャンクの大きさまで詰めるので、上の
-      // 「元の大きさまで詰め直す」はそのまま成り立つ。一方で作者が
-      // 「文字数を指定する」を選んでいるときは、`chunkChars` を渡すと
-      // **合本だけが Merge Chunk Chars の指定を無視する**ことになる
-      // ——ばらのファイルの作品（下の `mergeAdjacentChunks`）では効くのに、
-      // 合本では効かない、という理由の無い違いになる。作者の指定に従う。
-      // 「まとめない」（0）を選んでいるときは、まとめないまま送る
-      rawChunks.push(
-        ...(mergeChars > 0
-          ? mergeAdjacentChunks(perEpisode, { maxChars: mergeChars })
-          : perEpisode)
-      );
-      continue;
-    }
-
-    const meta = parseEpisodeMetadata(file.text);
-    const body = meta.body;
-    if (!body.trim()) continue;
-
+    // 後書き・リアクションも本文として送ってしまう。
+    //
+    // **切り方は `core/episodeChunks.ts` に1つだけ置いてある。** ここに
+    // 書いてあった手当てを写しで持っていた機能（誤字脱字）と、持って
+    // いなかった機能（伏線・推敲・矛盾）が分かれていた（2026-09-12）。
+    //
+    // `mergeChars` をそのまま渡すのは、**合本だけが Merge Chunk Chars の
+    // 指定を無視する**のを避けるためである（設計書6.23）。合本の中の話は
+    // もともと1つのファイルの続きで、分けたのは話数を付けるためであって
+    // 呼び出しを増やすためではない——実データ（219話・70万字）では
+    // 6,000字でまとめると174回になり、分ける前の41回から4倍以上に増えた。
+    // 「まとめない」（0）を選んでいるときは、まとめないまま送る
     rawChunks.push(
-      ...splitIntoChunks(
-        ep.filePath,
-        body,
-        ep.chapterStart,
-        ep.chapterEnd,
-        { maxChars: chunkChars }
-      )
+      ...chunksOfEpisodeFile(ep.filePath, file.text, ep, {
+        maxChars: chunkChars,
+        mergeChars,
+      })
     );
   }
 

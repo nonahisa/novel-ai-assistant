@@ -3,8 +3,7 @@ import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
-import { parseEpisodeMetadata } from "../core/metadataParser";
-import { parseCollectedFile } from "../core/collectedFile";
+import { episodeBodySources } from "../core/episodeChunks";
 import {
   detectNotationVariants,
   type NotationSource,
@@ -19,7 +18,7 @@ import {
 import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
 import { describeCheckRunCounts } from "../core/checkRunCounts";
 import type { IncomingCount } from "../core/proposalBuckets";
-import { locateBody, type TypoCheckIssue } from "./checkTypos";
+import { type TypoCheckIssue } from "./checkTypos";
 import {
   NOTATION_ADVICE_EXCERPTS_PER_FORM,
   NOTATION_ADVICE_EXCERPT_MAX_CHARS,
@@ -168,31 +167,20 @@ async function runNotationCheck(
 
     // 合本は話ごとに分かれているが、表記ゆれは作品全体で数えるため
     // ここでは1つの本文として扱ってよい。ただし行番号の基準は
-    // 元ファイルに合わせる必要がある（ヘッダーの行数だけずれる）
-    const collected = parseCollectedFile(file.text);
-    if (collected) {
-      let searchFrom = 0;
-      for (const inner of collected) {
-        if (!inner.body.trim()) continue;
-        const located = locateBody(file.text, inner.body, searchFrom);
-        searchFrom = located.nextSearchIndex;
-        sources.push({
-          filePath: episode.filePath,
-          body: inner.body,
-          startLine: located.line + 1,
-        });
-      }
-      continue;
+    // 元ファイルに合わせる必要がある（ヘッダーの行数だけずれる）。
+    // **分け方は `core/episodeChunks.ts` に1つだけ置いてある**
+    for (const source of episodeBodySources(
+      episode.filePath,
+      file.text,
+      episode
+    )) {
+      sources.push({
+        filePath: source.filePath,
+        body: source.body,
+        // 表示・照合に使う行番号は1始まり
+        startLine: source.lineOffset + 1,
+      });
     }
-
-    const meta = parseEpisodeMetadata(file.text);
-    if (!meta.body.trim()) continue;
-    const located = locateBody(file.text, meta.body, 0);
-    sources.push({
-      filePath: episode.filePath,
-      body: meta.body,
-      startLine: located.line + 1,
-    });
   }
 
   if (conflicted.length > 0) {

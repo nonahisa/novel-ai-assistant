@@ -8,6 +8,7 @@ import {
   validateForeshadowResolutions,
 } from "../../src/core/foreshadowValidation";
 import type { Chunk } from "../../src/core/chunker";
+import { chunksOfEpisodeFile } from "../../src/core/episodeChunks";
 
 /**
  * 伏線の検知（P-25 / P-26）の検証（設計書6.35.2・6.35.3）。
@@ -62,6 +63,37 @@ const merged: Chunk = {
     },
   ],
 };
+
+/** 全話が1ファイルに入った形（合本）。区切り行は `collectedFile.test.ts` と同じ */
+const COLLECTED_SAMPLE = [
+  "【タイトル】",
+  "見本の作品",
+  "",
+  "------------------------- エピソード1開始 -------------------------",
+  "【エピソードタイトル】",
+  "１話　出会い",
+  "",
+  "【本文】",
+  "",
+  "　一話目の合言葉は青い封筒である。",
+  "",
+  "------------------------- エピソード2開始 -------------------------",
+  "【エピソードタイトル】",
+  "２話　再会",
+  "",
+  "【本文】",
+  "",
+  "　二話目の合言葉は赤い切符である。",
+  "",
+  "------------------------- エピソード3開始 -------------------------",
+  "【エピソードタイトル】",
+  "３話　別離",
+  "",
+  "【本文】",
+  "",
+  "　三話目の合言葉は銀の懐中時計である。",
+  "",
+].join("\r\n");
 
 function candidate(overrides: Record<string, unknown> = {}) {
   return {
@@ -391,6 +423,26 @@ describe("引用の位置", () => {
   test("空の引用は通さない", () => {
     // 正規化で空になる引用は、どんな本文にも「含まれる」ことになってしまう
     expect(locateQuoteInChunk(chunk, "　 ")).toBeUndefined();
+  });
+
+  test("合本でも、3話目の引用は第3話になる", () => {
+    // **合本を丸ごと切ると、全チャンクの話数が先頭の話数になる**
+    // （作者の報告、2026-09-12「すべて1話と認識されている」）。
+    // 話ごとに切る共通の口（`chunksOfEpisodeFile`）を通す
+    const chunks = chunksOfEpisodeFile(
+      "C:/works/all.txt",
+      COLLECTED_SAMPLE,
+      { chapterStart: 1, chapterEnd: 3 },
+      { maxChars: 8000, mergeChars: 8000 }
+    );
+
+    expect(chunks).toHaveLength(1);
+    expect(
+      locateQuoteInChunk(chunks[0], "三話目の合言葉は銀の懐中時計である。")
+    ).toEqual({ filePath: "C:/works/all.txt", chapter: 3 });
+    expect(
+      locateQuoteInChunk(chunks[0], "一話目の合言葉は青い封筒である。")
+    ).toEqual({ filePath: "C:/works/all.txt", chapter: 1 });
   });
 });
 

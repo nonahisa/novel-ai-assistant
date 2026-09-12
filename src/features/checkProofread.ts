@@ -11,12 +11,16 @@ import {
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import {
-  splitIntoChunks,
   withLineNumbers,
   mergeAdjacentChunks,
   splitMergedChunk,
   type Chunk,
 } from "../core/chunker";
+import {
+  chunksOfSources,
+  episodeBodySources,
+  type EpisodeBodySource,
+} from "../core/episodeChunks";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
 import {
@@ -538,12 +542,7 @@ async function collectChunks(
     : scan.episodes;
 
   // **切る前の本文をいったん溜める**（設計書6.27.10）
-  const sources: Array<{
-    filePath: string;
-    text: string;
-    chapterStart: number | null;
-    chapterEnd: number | null;
-  }> = [];
+  const sources: EpisodeBodySource[] = [];
 
   for (const episode of targets) {
     // 競合マーカーのあるファイルはAI処理をブロックする
@@ -554,12 +553,9 @@ async function collectChunks(
     } catch {
       continue;
     }
-    sources.push({
-      filePath: episode.filePath,
-      text,
-      chapterStart: episode.chapterStart,
-      chapterEnd: episode.chapterEnd,
-    });
+    // **合本は話ごとに分ける**（`core/episodeChunks.ts`）。丸ごと1つに
+    // すると、全チャンクの話数が先頭の話数になる
+    sources.push(...episodeBodySources(episode.filePath, text, episode));
   }
 
   const narrativeStyle = await readNarrativePerson(work);
@@ -573,7 +569,7 @@ async function collectChunks(
     collectWorkStyle({
       // 全話を繋いで見る。1話だけでは一人称も文語かも決められない。
       // **シーンメモは落とす**（`splitIntoChunks` が本文から消すのと同じ）
-      bodyText: sources.map((source) => blankMemoLines(source.text)).join("\n"),
+      bodyText: sources.map((source) => blankMemoLines(source.body)).join("\n"),
       narrativePerson: narrativeStyle,
       keepWords: keepWords.map((entry) => entry.word),
     })
@@ -605,18 +601,11 @@ async function collectChunks(
   );
   const maxChars = chunkSettings.chunk.chars;
 
-  const chunks: Chunk[] = [];
-  for (const source of sources) {
-    for (const chunk of splitIntoChunks(
-      source.filePath,
-      source.text,
-      source.chapterStart,
-      source.chapterEnd,
-      { maxChars }
-    )) {
-      chunks.push(chunk);
-    }
-  }
+  // 合本の中の話だけは、ここで元の大きさまで詰め直す（写しは作らない）
+  const chunks: Chunk[] = chunksOfSources(sources, {
+    maxChars,
+    mergeChars: chunkSettings.mergeChars,
+  });
 
   logStep(`推敲のチャンク: ${describeChunkSettings(chunkSettings)}`);
 

@@ -26,6 +26,24 @@ const state = vi.hoisted(() => ({
   /** 判定の応答（JSON文字列） */
   verifyResponse: "",
   logged: [] as string[],
+  /** 走査が返す話。合本の試験では1件で全話を指す */
+  episodes: [] as Array<{
+    filePath: string;
+    fileName: string;
+    chapterStart: number | null;
+    chapterEnd: number | null;
+  }>,
+  /** 読み込みが返す本文 */
+  source: "",
+  /**
+   * 抽出の応答を、送られた本文から組み立てる指定。
+   *
+   * **行番号をテスト側で決め打ちしない。** 合本は話ごとに切られ、
+   * さらにまとめ直されることがあるので、どの番号が振られるかは
+   * 切り方で変わる。決め打ちすると、番号がずれた本物の壊れ方を
+   * テストが隠してしまう。送られた本文（行番号つき）から語を探す。
+   */
+  extractNeedles: null as Array<{ needle: string; value: string }> | null,
 }));
 
 vi.mock("../../src/ai/registry", () => ({
@@ -45,14 +63,36 @@ vi.mock("../../src/ai/registry", () => ({
         }) {
           const name = request.meta?.feature ?? "";
           state.sent.push({ feature: name, userPrompt: request.userPrompt });
-          return {
-            text:
-              name === "fact_contradiction_verify"
-                ? state.verifyResponse
-                : state.extractResponse,
-            truncated: false,
-            elapsedMs: 1,
-          };
+          let text = state.extractResponse;
+          if (name === "fact_contradiction_verify") {
+            text = state.verifyResponse;
+          } else if (state.extractNeedles) {
+            // 送られた本文（行番号つき）から、語を含む行を探して事実にする。
+            // 含まれていないチャンクでは0行目になり、検算が弾く
+            const lines = request.userPrompt.split("\n");
+            text = JSON.stringify({
+              facts: state.extractNeedles.map((item) => {
+                const found = lines.find(
+                  (line) => /^\d+: /.test(line) && line.includes(item.needle)
+                );
+                const number = found ? parseInt(found.split(":")[0], 10) : 0;
+                return {
+                  line_start: number,
+                  line_end: number,
+                  subject: "文佳",
+                  predicate: "髪の色",
+                  value: item.value,
+                  kind: "static",
+                  story_time: null,
+                  modality: "narration",
+                  pov: null,
+                  speaker: null,
+                  topic: null,
+                };
+              }),
+            });
+          }
+          return { text, truncated: false, elapsedMs: 1 };
         },
       },
       model: "test-model",
@@ -61,24 +101,74 @@ vi.mock("../../src/ai/registry", () => ({
 }));
 
 vi.mock("../../src/core/scanner", () => ({
-  scanWork: vi.fn(async () => ({
-    episodes: [
-      {
-        filePath: "C:/works/w/003.txt",
-        fileName: "003.txt",
-        chapterStart: 3,
-        chapterEnd: 3,
-      },
-    ],
-  })),
+  scanWork: vi.fn(async () => ({ episodes: state.episodes })),
 }));
 
 /** 3行の本文。1行目に銀髪、3行目に黒髪（＝機械が食い違いを見つける形） */
 const SOURCE = ["銀髪が揺れた。", "彼女は歩いた。", "黒髪が揺れた。"].join("\n");
 
+/** ばらのファイル1本。これまでどおりの並び */
+const PLAIN_EPISODES = [
+  {
+    filePath: "C:/works/w/003.txt",
+    fileName: "003.txt",
+    chapterStart: 3,
+    chapterEnd: 3,
+  },
+];
+
+/**
+ * 合本（全話が1ファイル）。走査では**1件の話**になり、
+ * `chapterStart` は中の最小（＝1）になる。
+ *
+ * 区切り行の形は `collectedFile.test.ts` と同じ（なろうのDLファイル）。
+ * 1話目に銀髪、3話目に黒髪を置いて、話をまたぐ食い違いを作る。
+ */
+const COLLECTED = [
+  "【タイトル】",
+  "見本の作品",
+  "",
+  "【あらすじ】",
+  "　試すための短い話。",
+  "",
+  "------------------------- エピソード1開始 -------------------------",
+  "【エピソードタイトル】",
+  "１話　出会い",
+  "",
+  "【本文】",
+  "",
+  "　銀髪が揺れた。",
+  "",
+  "------------------------- エピソード2開始 -------------------------",
+  "【エピソードタイトル】",
+  "２話　再会",
+  "",
+  "【本文】",
+  "",
+  "　彼女は歩いた。",
+  "",
+  "------------------------- エピソード3開始 -------------------------",
+  "【エピソードタイトル】",
+  "３話　別離",
+  "",
+  "【本文】",
+  "",
+  "　黒髪が揺れた。",
+  "",
+].join("\r\n");
+
+const COLLECTED_EPISODES = [
+  {
+    filePath: "C:/works/w/all.txt",
+    fileName: "all.txt",
+    chapterStart: 1,
+    chapterEnd: 3,
+  },
+];
+
 vi.mock("../../src/core/textFile", () => ({
   readTextFile: vi.fn(async () => ({
-    text: SOURCE,
+    text: state.source,
     hasConflictMarkers: false,
   })),
   hashText: (text: string) => `hash-${text.length}`,
@@ -166,6 +256,9 @@ beforeEach(() => {
   state.features = [];
   state.sent = [];
   state.logged = [];
+  state.episodes = PLAIN_EPISODES;
+  state.source = SOURCE;
+  state.extractNeedles = null;
   state.extractResponse = TWO_FACTS;
   state.verifyResponse = JSON.stringify({
     verdict: "採用",
@@ -338,5 +431,49 @@ describe("端から端まで", () => {
     await checkFactContradictions(work, registry());
 
     expect(state.logged.join("\n")).toContain("矛盾検知（事実の照合）を終了");
+  });
+});
+
+/**
+ * 合本（全話が1ファイル）。
+ *
+ * **話数はファイル単位では引けない。** 走査は合本を1件の話として返すので、
+ * ファイルの場所から引くと全部が先頭の話（第1話）になる。指摘の場所が
+ * 全件「第1話」になって、作者は直しに行く先を間違える（作者の報告、
+ * 2026-09-12）。話数はチャンクの内訳（`ChunkSegment.chapterStart`）から引く。
+ */
+describe("合本（全話が1ファイル）", () => {
+  beforeEach(() => {
+    state.episodes = COLLECTED_EPISODES;
+    state.source = COLLECTED;
+    state.extractNeedles = [
+      { needle: "銀髪が揺れた", value: "銀髪" },
+      { needle: "黒髪が揺れた", value: "黒髪" },
+    ];
+  });
+
+  test("第3話の本文から取った事実は、第3話になる", async () => {
+    const result = await checkFactContradictions(work, registry());
+
+    expect(result?.acceptedFacts).toBe(2);
+    expect(result?.issues).toHaveLength(1);
+
+    const issue = result!.issues[0];
+    // 前側は1話目の銀髪、後側は3話目の黒髪
+    expect(issue.settingSays).toContain("第1話");
+    expect(issue.settingSays).toContain("銀髪");
+    expect(issue.textSays).toContain("第3話");
+    expect(issue.textSays).toContain("黒髪");
+  });
+
+  test("飛び先は、合本の中の正しい行を指す", async () => {
+    const result = await checkFactContradictions(work, registry());
+
+    const issue = result!.issues[0];
+    expect(issue.filePath).toBe("C:/works/w/all.txt");
+    // 引用は本文の行そのもの（字下げは落とす。行番号を戻し損ねると別の行が出る）
+    expect(issue.excerpt).toBe("黒髪が揺れた。");
+    const lines = COLLECTED.replace(/\r\n?/g, "\n").split("\n");
+    expect(lines[issue.line - 1]).toBe("　黒髪が揺れた。");
   });
 });

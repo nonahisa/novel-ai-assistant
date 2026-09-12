@@ -17,10 +17,10 @@ import { readTextFile } from "../core/textFile";
 import {
   describeChunkScope,
   mergeAdjacentChunks,
-  splitIntoChunks,
   splitMergedChunk,
   type Chunk,
 } from "../core/chunker";
+import { chunksOfEpisodeFile } from "../core/episodeChunks";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
 import {
@@ -1065,12 +1065,18 @@ async function collectChunks(
     }
     if (!text.trim()) continue;
 
-    for (const chunk of splitIntoChunks(
+    // **合本は話ごとに切る**（`core/episodeChunks.ts`）。丸ごと切ると
+    // 全チャンクの話数が先頭の話数になり、候補が全部「第1話で張られた」に
+    // なる（作者の報告、2026-09-12）。回収の確認ではまとめない指定が来るので、
+    // そのときは合本の中もまとめない（0を渡す）
+    for (const chunk of chunksOfEpisodeFile(
       episode.filePath,
       text,
-      episode.chapterStart,
-      episode.chapterEnd,
-      { maxChars: chunkSettings.chunk.chars }
+      episode,
+      {
+        maxChars: chunkSettings.chunk.chars,
+        mergeChars: options.merge === false ? 0 : chunkSettings.mergeChars,
+      }
     )) {
       chunks.push(chunk);
     }

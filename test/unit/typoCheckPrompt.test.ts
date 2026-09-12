@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { withLineNumbers, type Chunk } from "../../src/core/chunker";
 import { buildTypoCheckPrompt } from "../../src/prompts/typoCheck";
-import { locateBody } from "../../src/features/checkTypos";
+import { locateBody } from "../../src/core/episodeChunks";
 
 function makeChunk(text: string, startLine: number): Chunk {
   return {

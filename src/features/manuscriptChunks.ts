@@ -7,11 +7,8 @@ import type { WorkEntry } from "../models/types";
 import type { ModelInfo } from "../ai/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
-import {
-  mergeAdjacentChunks,
-  splitIntoChunks,
-  type Chunk,
-} from "../core/chunker";
+import { mergeAdjacentChunks, type Chunk } from "../core/chunker";
+import { chunksOfEpisodeFile } from "../core/episodeChunks";
 import { formatChapterLabel } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import { logFailure } from "../core/logger";
@@ -118,13 +115,12 @@ export async function collectManuscriptChunks(params: {
     }
 
     const label = formatChapterLabel(episode, format) || episode.fileName;
-    for (const chunk of splitIntoChunks(
-      episode.filePath,
-      text,
-      episode.chapterStart,
-      episode.chapterEnd,
-      { maxChars }
-    )) {
+    // **合本は話ごとに切る**（`core/episodeChunks.ts`）。丸ごと切ると
+    // 全チャンクの話数が先頭の話数になり、矛盾の指摘が全部「第1話」になる
+    for (const chunk of chunksOfEpisodeFile(episode.filePath, text, episode, {
+      maxChars,
+      mergeChars: chunkSettings.mergeChars,
+    })) {
       chunks.push(chunk);
     }
     chapterLabelByFile.set(episode.filePath, label);
