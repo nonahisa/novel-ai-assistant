@@ -48,7 +48,12 @@ import {
   collectedEpisodeStarts,
   planCollectedStep,
 } from "../core/collectedFile";
-import { validateEmphasis, validateRuby } from "../core/ruby";
+import {
+  findRubyAt,
+  rubyEditReplacement,
+  validateEmphasis,
+  validateRuby,
+} from "../core/ruby";
 import { sourceForPostingCopy } from "../core/episodeCopy";
 // 貼り付け先ごとの分岐は、入口ではなく変換の側に置く（設計書6.84）
 import { convertForPosting } from "../core/postingConvert";
@@ -1735,7 +1740,34 @@ export class ManuscriptEditorProvider
     let end = fromLfOffset(original, message.end);
     let base = message.text;
 
-    if (start === end) {
+    /*
+      **すでにルビがあるところで「ルビを振る」は、編集である**（設計書6.34.2）。
+      作者の報告（2026-09-12）：「ルビがあるところを選択してルビを打とうとすると、
+      重ねられませんと出ます。ユーザーがその操作をするときは編集したいんだと
+      思います」。どの記法を指しているかの判定は `findRubyAt` の1か所に置く。
+
+      **編集にするのは、選択が記法の内側に収まっているときだけ。**
+      `あ{漢字|かんじ}い` を丸ごと選んだときに編集にすると「あ」「い」が
+      黙って落ちるし、新規に振ると記法が入れ子になる。どちらも原稿を壊すので、
+      はみ出す選択は何もせずに断る。
+    */
+    const nearby =
+      kind === "ruby" ? findRubyAt(original, start, end) : undefined;
+    if (nearby && !nearby.contained) {
+      void vscode.window.showInformationMessage(
+        "ルビの上には重ねられません。ルビを1つだけ選ぶと読みを直せます。"
+      );
+      return;
+    }
+    const editing = nearby;
+    if (editing) {
+      start = editing.start;
+      end = editing.end;
+      // 照合（下の「今もその文字か」）は記法まるごとで行う
+      base = original.slice(editing.start, editing.end);
+    }
+
+    if (!editing && start === end) {
       if (kind === "emphasis") {
         void vscode.window.showInformationMessage(
           "傍点を付ける文字を選んでから実行してください。"
@@ -1757,7 +1789,23 @@ export class ManuscriptEditorProvider
     }
 
     let inserted: string;
-    if (kind === "ruby") {
+    if (editing) {
+      const reading = await askText({
+        title: `「${editing.base}」の読みを直す`,
+        prompt: "空にして確定すると、ルビを外します",
+        // いまの読みを入れておく。直したいのは多くの場合1文字である
+        value: editing.reading,
+        placeHolder: "よみがな",
+        // **空だけは通す**（ルビを外す道）。それ以外の検算は今までどおり
+        validateInput: (value) =>
+          value.trim()
+            ? (validateRuby(editing.base, value) ?? undefined)
+            : undefined,
+      });
+      // Esc（undefined）は何もしない。空文字は「外す」なので通す
+      if (reading === undefined) return;
+      inserted = rubyEditReplacement(editing.base, reading);
+    } else if (kind === "ruby") {
       const reading = await askText({
         title: `「${base}」の読み`,
         prompt: "ひらがな・カタカナで入力してください",

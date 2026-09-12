@@ -5,7 +5,9 @@ import { isPlainTextManuscript } from "../core/markdownConversion";
 import { convertFolder, convertOne } from "./markdownConvert";
 import {
   describeSiteNotation,
+  findRubyAt,
   fromSiteNotation,
+  rubyEditReplacement,
   validateEmphasis,
   validateRuby,
 } from "../core/ruby";
@@ -114,6 +116,58 @@ export async function addRuby(): Promise<void> {
 
   const document = editor.document;
   let range: vscode.Range = editor.selection;
+
+  /*
+    **すでにルビがあるところで押されたら、重ねるのではなく直す**
+    （設計書6.34.2）。判定は `findRubyAt` の1か所で、組んで書く面と同じ。
+    記法は行をまたがないので、選択が1行に収まっているときだけ見る。
+
+    **編集にするのは、選択が記法の内側に収まっているときだけ。**
+    はみ出して選ぶと、編集にすれば選んだ平文が黙って落ち、新規に振れば
+    記法が入れ子になる。どちらも原稿を壊すので、そこは何もせずに断る。
+  */
+  const nearby =
+    range.start.line === range.end.line
+      ? findRubyAt(
+          document.lineAt(range.start.line).text,
+          range.start.character,
+          range.end.character
+        )
+      : undefined;
+  if (nearby && !nearby.contained) {
+    void vscode.window.showInformationMessage(
+      "ルビの上には重ねられません。ルビを1つだけ選ぶと読みを直せます。"
+    );
+    return;
+  }
+  const editing = nearby;
+  if (editing) {
+    const target = new vscode.Range(
+      range.start.line,
+      editing.start,
+      range.start.line,
+      editing.end
+    );
+    const reading = await askText({
+      title: `「${editing.base}」の読みを直す`,
+      prompt: "空にして確定すると、ルビを外します",
+      // いまの読みを入れておく。直したいのは多くの場合1文字である
+      value: editing.reading,
+      placeHolder: "よみがな",
+      // **空だけは通す**（ルビを外す道）。それ以外の検算は今までどおり
+      validateInput: (value) =>
+        value.trim()
+          ? (validateRuby(editing.base, value) ?? undefined)
+          : undefined,
+    });
+    // Esc（undefined）は何もしない。空文字は「外す」なので通す
+    if (reading === undefined) return;
+    await editor.edit((builder) => {
+      builder.replace(target, rubyEditReplacement(editing.base, reading));
+    });
+    return;
+  }
+
   if (range.isEmpty) {
     const line = document.lineAt(range.start.line).text;
     const before = line.slice(0, range.start.character);

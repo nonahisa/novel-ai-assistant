@@ -3,8 +3,10 @@ import {
   countSiteNotation,
   describeSiteNotation,
   findRuby,
+  findRubyAt,
   fromSiteNotation,
   hasEmphasis,
+  rubyEditReplacement,
   rubyToHtml,
   RUBY_STYLES,
   stripRuby,
@@ -362,5 +364,118 @@ describe("括弧書き（noteへ貼る形）", () => {
    */
   test("「どの形で書き出しますか」の一覧には出さない", () => {
     expect(RUBY_STYLES.map((style) => style.id)).not.toContain("paren");
+  });
+});
+
+/**
+ * すでに振ってあるルビを直す（作者の報告、2026-09-12）。
+ *
+ * 「ルビがあるところを選択してルビを打とうとすると、重ねられませんと
+ * 出ます。ユーザーがその操作をするときは編集したいんだと思います」。
+ *
+ * **どの記法を指しているかの判定は、ここ1か所だけ**にする。組んで書く面・
+ * 打つ面・素のエディタの3つが同じ答えを使う。
+ */
+describe("その場所のルビを見つける", () => {
+  const text = "彼は{魔導書庫|まどうしょこ}へ向かった。";
+  // 記法は5文字目から始まり、`}` の次は18
+  const from = text.indexOf("{");
+  const to = text.indexOf("}") + 1;
+
+  test("選択が記法の内側なら当たる", () => {
+    const found = findRubyAt(text, from + 2, from + 4);
+    expect(found).toEqual({
+      start: from,
+      end: to,
+      base: "魔導書庫",
+      reading: "まどうしょこ",
+      contained: true,
+    });
+  });
+
+  test("選択が記法の一部にかかっていれば当たる", () => {
+    // 手前の平文から記法の途中まで。作者は「その語を選んだ」つもりでいる。
+    // **当たりはするが、内側ではない**（呼ぶ側はここで断る）
+    const found = findRubyAt(text, 1, from + 3);
+    expect(found?.start).toBe(from);
+    expect(found?.contained).toBe(false);
+  });
+
+  test("記法まるごとの選択でも当たる", () => {
+    const found = findRubyAt(text, from, to);
+    expect(found?.reading).toBe("まどうしょこ");
+    expect(found?.contained).toBe(true);
+  });
+
+  test("空の選択（カーソル）が記法の中なら当たる", () => {
+    const found = findRubyAt(text, from + 3, from + 3);
+    expect(found?.base).toBe("魔導書庫");
+    expect(found?.contained).toBe(true);
+  });
+
+  /** 記法の直後にカーソルを置くのが、いちばん自然な指し方である */
+  test("空の選択が記法の直後でも当たる", () => {
+    const found = findRubyAt(text, to, to);
+    expect(found?.base).toBe("魔導書庫");
+    expect(found?.contained).toBe(true);
+  });
+
+  test("2つの記法にまたがる範囲は返さない", () => {
+    const two = "{朝|あさ}と{夜|よる}";
+    expect(findRubyAt(two, 1, two.length - 1)).toBeUndefined();
+  });
+
+  test("ルビが無ければ返さない", () => {
+    expect(findRubyAt("ただの本文。", 1, 3)).toBeUndefined();
+  });
+
+  /** 傍点の編集は足していない（作者の依頼はルビ） */
+  test("傍点には当たらない", () => {
+    const emphasis = "これは{{大事}}だ";
+    expect(findRubyAt(emphasis, 4, 8)).toBeUndefined();
+  });
+});
+
+/**
+ * 編集にしてよいのは、選択が記法の内側に収まっているときだけ
+ * （作者の報告、2026-09-12）。
+ *
+ * `あ{漢字|かんじ}い` を丸ごと選んで「ルビを振る」と、編集にすれば
+ * 「あ」「い」が黙って落ち、新規に振れば記法が入れ子になる。**どちらも
+ * 原稿を壊す**ので、`contained` が false のときは呼ぶ側が断る。
+ */
+describe("選択が記法の内側に収まっているか", () => {
+  const text = "あ{漢字|かんじ}い";
+  const from = text.indexOf("{");
+  const to = text.indexOf("}") + 1;
+
+  test("記法の内側の選択は収まっている", () => {
+    expect(findRubyAt(text, from + 1, from + 3)?.contained).toBe(true);
+  });
+
+  test("記法まるごとの選択も収まっている", () => {
+    expect(findRubyAt(text, from, to)?.contained).toBe(true);
+  });
+
+  test("前後の平文まで選ぶと、収まっていない", () => {
+    expect(findRubyAt(text, 0, text.length)?.contained).toBe(false);
+  });
+});
+
+describe("直したあとの記法", () => {
+  test("読みを入れ替える", () => {
+    expect(rubyEditReplacement("魔導書庫", "まどうしょこ")).toBe(
+      "{魔導書庫|まどうしょこ}"
+    );
+  });
+
+  test("前後の空白は落とす", () => {
+    expect(rubyEditReplacement("朝", " あさ ")).toBe("{朝|あさ}");
+  });
+
+  /** 空にして確定したら、記法だけを外して本文の字は残す */
+  test("空ならルビを外す", () => {
+    expect(rubyEditReplacement("朝", "")).toBe("朝");
+    expect(rubyEditReplacement("朝", "   ")).toBe("朝");
   });
 });

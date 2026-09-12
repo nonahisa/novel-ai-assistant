@@ -2840,12 +2840,29 @@ ruby > rt {
    * 三点リーダは**かたまりではない**（素の span で、平文として数えられる）
    * ので、ここには当たらない。「そう……」に傍点、のような使い方は通る。
    */
-  function composeSelectionHasChunk(atoms, start, end) {
+  function composeSelectionChunks(atoms, start, end) {
+    const found = [];
     for (const atom of atoms) {
       if (atom.kind !== "chunk") continue;
-      if (atom.start < end && atom.end > start) return true;
+      if (atom.start < end && atom.end > start) found.push(atom);
     }
-    return false;
+    return found;
+  }
+
+  function composeSelectionHasChunk(atoms, start, end) {
+    return composeSelectionChunks(atoms, start, end).length > 0;
+  }
+
+  /**
+   * そのかたまりがルビか（傍点か）。
+   *
+   * **組んだ要素の種類で見る。** ルビは ruby 要素、傍点は
+   * class="emphasis" の span で組んである（composeBuildLine）。
+   * 記法の文字列から見分けると、.md（中括弧）と .txt（投稿サイトの記法）で
+   * 判定を2つ持つことになる。
+   */
+  function composeChunkIsRuby(atom) {
+    return !!atom && !!atom.node && atom.node.nodeName === "RUBY";
   }
 
   /**
@@ -3620,9 +3637,19 @@ ruby > rt {
       return;
     }
     const atoms = composeCurrentAtoms();
-    if (composeSelectionHasChunk(atoms, at.start, at.end)) {
+    const chunks = composeSelectionChunks(atoms, at.start, at.end);
+    /*
+      **ルビ1つだけに重なっているなら、断らずに頼む**（設計書6.34.2）。
+      拡張機能側が記法を探して「読みを直す」画面を出す。位置はいまと同じ
+      ——かたまりの範囲へ広げる必要はない（向こうが記法の端まで見つける）。
+      傍点と、2つ以上にまたがる範囲は、どう直したいのかが決められない。
+    */
+    const editable =
+      kind === "ruby" && chunks.length === 1 && composeChunkIsRuby(chunks[0]);
+    if (chunks.length > 0 && !editable) {
       note.textContent =
-        "ルビや傍点の上には重ねられません。いったん外してから振り直してください";
+        "傍点の上や、複数のルビにまたがる範囲には重ねられません。" +
+        "ルビを1つだけ選ぶと読みを直せます";
       return;
     }
     // **位置を数えたのと同じものから本文を作る**（切り出す先がずれない）

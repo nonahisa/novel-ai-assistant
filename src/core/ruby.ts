@@ -164,6 +164,100 @@ export const RUBY_STYLES: RubyStyle[] = [
   },
 ];
 
+/**
+ * 傍点とルビを1つの規則で見る。**傍点を先に置く**——`{{強調}}` はルビの
+ * 規則にも当たるので、後回しにすると `{強調}` というルビに読めてしまう
+ * （`manuscriptRender.ts` の `NOTATION_PATTERN` と同じ並びの理由）。
+ *
+ * 捕獲は［1=傍点の中身, 2=親文字, 3=読み］。
+ */
+const NOTATION_EITHER = new RegExp(
+  `${EMPHASIS_INTERNAL.source}|${INTERNAL.source}`,
+  "g"
+);
+
+/** その場所にあるルビ（記法そのものの範囲と中身） */
+export interface RubyAt {
+  /** `{` の位置 */
+  start: number;
+  /** `}` の次の位置 */
+  end: number;
+  base: string;
+  reading: string;
+  /**
+   * 選択がこの記法の内側に収まっているか（両端を含む）。
+   *
+   * **はみ出す選択を編集にすると、選んだ平文が黙って消える。**
+   * `あ{漢字|かんじ}い` を丸ごと選んで「ルビを振る」と、記法だけが
+   * 書き換わって「あ」「い」は無かったことになる。かといって新規に
+   * すると記法が入れ子になる。**呼ぶ側は、これが false なら断る。**
+   */
+  contained: boolean;
+}
+
+/**
+ * その範囲に重なっているルビを1つ返す（設計書6.34.2）。
+ *
+ * **すでにルビが振ってある語を選んで「ルビを振る」を押す作者は、
+ * 重ねたいのではなく直したい。** 断るのではなく、いまの読みを入れた
+ * 入力欄を出すために、どの記法を指しているかをここで決める。
+ *
+ * - 空の選択（カーソルだけ）は、記法の**内側と両端**を当たりとする
+ *   ——記法の直後にカーソルを置くのが、いちばん自然な指し方である
+ * - **2つ以上に重なるときは返さない。** どちらを直したいのかが決められない
+ * - 傍点（`{{強調}}`）は対象外。作者の依頼はルビの編集である
+ *
+ * **重なっただけでは編集にしない。** 記法からはみ出す選択は `contained`
+ * が false で返る。そのまま編集にすると、選んだ平文（`あ{漢字|かんじ}い`
+ * の「あ」「い」）が黙って消えるためで、呼ぶ側はそこで断る。返す値を
+ * undefined にしないのは、**断る文言を出すのに「重なっている」ことを
+ * 知る必要がある**から（新規として振ると記法が入れ子になる）。
+ *
+ * 判定はここ1か所に置く。組んで書く面・打つ面・素のエディタの3つが
+ * 同じ答えを使う（写しを置けば、片方だけが直る日が来る）。
+ */
+export function findRubyAt(
+  text: string,
+  start: number,
+  end: number
+): RubyAt | undefined {
+  const from = Math.min(start, end);
+  const to = Math.max(start, end);
+  let found: RubyAt | undefined;
+  NOTATION_EITHER.lastIndex = 0;
+  for (const match of text.matchAll(NOTATION_EITHER)) {
+    // 傍点に当たったぶんは飛ばす（親文字の捕獲が無い）
+    if (match[2] === undefined) continue;
+    const at = match.index ?? 0;
+    const stop = at + match[0].length;
+    const touches =
+      from === to ? at <= from && from <= stop : at < to && stop > from;
+    if (!touches) continue;
+    if (found) return undefined;
+    found = {
+      start: at,
+      end: stop,
+      base: match[2],
+      reading: match[3] ?? "",
+      // 空の選択が端にあるとき（`at` の直前・`stop` の直後）も内側と数える
+      contained: at <= from && to <= stop,
+    };
+  }
+  return found;
+}
+
+/**
+ * ルビを直したあとの文字列。
+ *
+ * **読みを空にして確定したら、ルビを外す**（親文字だけを残す）。
+ * 「ルビを消す」という別の操作を覚えなくてよいし、記法だけが消えて
+ * 本文の字は残るので、取り消しの見当もつきやすい。
+ */
+export function rubyEditReplacement(base: string, reading: string): string {
+  const trimmed = reading.trim();
+  return trimmed ? `{${base}|${trimmed}}` : base;
+}
+
 /** ルビの中身を1件ずつ取り出す */
 export function findRuby(text: string): Array<{ base: string; reading: string }> {
   const found: Array<{ base: string; reading: string }> = [];

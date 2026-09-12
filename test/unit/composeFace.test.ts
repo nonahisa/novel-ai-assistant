@@ -5,6 +5,8 @@ import {
   NOTATION_RULES,
   SITE_NOTATION_PATTERN,
 } from "../../src/core/manuscriptRender";
+// 面が送る位置が、拡張機能側の判定に当たるかを同じ本文で確かめる
+import { findRubyAt } from "../../src/core/ruby";
 import {
   MEMO_LINE_PATTERN,
   MEMO_TAG_CLASS_MAP,
@@ -153,6 +155,12 @@ interface ComposeApi {
     start: number,
     end: number
   ): boolean;
+  composeSelectionChunks(
+    atoms: ComposeAtom[],
+    start: number,
+    end: number
+  ): ComposeAtom[];
+  composeChunkIsRuby(atom: ComposeAtom): boolean;
   pickMenuTerm(
     clickOffset: number | null,
     selection: { start: number; end: number } | null,
@@ -176,7 +184,8 @@ const api = new Function(
     "\nreturn { composeParts, composePartsToNotation, composeNormalizeText," +
     " composeNormalizeNewlines, composeBuildLine, composeBuildFragment," +
     " composeAtoms, composeDomToNotation, composeOffsetToPoint," +
-    " composePointToOffset, composeSelectionHasChunk, pickMenuTerm," +
+    " composePointToOffset, composeSelectionHasChunk, composeSelectionChunks," +
+    " composeChunkIsRuby, pickMenuTerm," +
     " memoIsLine, memoPartsOf, memoClassFor };"
 )() as ComposeApi;
 
@@ -989,6 +998,55 @@ describe("記法の位置とDOMの位置", () => {
     expect(api.composeSelectionHasChunk(atoms, 1, 1)).toBe(false);
   });
 
+  /**
+   * すでにあるルビの上で「ルビ」を押したときは、断らずに拡張機能へ頼む
+   * （設計書6.34.2。作者の報告、2026-09-12）。
+   *
+   * **ここで確かめたいのは、面が送る位置が拡張機能側で記法に当たるか**
+   * である。面は記法テキストの上の位置を送り、拡張機能は `findRubyAt` で
+   * 記法の端を探す。2つの部品の境目がずれていないことを、同じ本文で見る。
+   */
+  it("ルビのかたまりは見分けられ、送る位置が記法に当たる", () => {
+    const line = "あ{漢字|かんじ}い";
+    const atoms = api.composeAtoms(build(line));
+    const chunks = api.composeSelectionChunks(atoms, 2, 4);
+    expect(chunks).toHaveLength(1);
+    expect(api.composeChunkIsRuby(chunks[0])).toBe(true);
+
+    // 面が送るのは、この位置（かたまりの範囲へは広げない）
+    let text = "";
+    for (const atom of atoms) text += atom.text;
+    expect(text).toBe(line);
+    const found = findRubyAt(text, 2, 4);
+    expect(found).toEqual({
+      start: chunks[0].start,
+      end: chunks[0].end,
+      base: "漢字",
+      reading: "かんじ",
+      contained: true,
+    });
+
+    /*
+      **面は「ルビ1つに重なるなら送る」ままでよい。**
+      前後の平文まで選んだときも面は送るが、拡張機能側が `contained` で
+      見て断る（断る判断を1か所に寄せてある）。ここはその境目の確かめ。
+    */
+    expect(api.composeSelectionChunks(atoms, 0, line.length)).toHaveLength(1);
+    expect(findRubyAt(text, 0, line.length)?.contained).toBe(false);
+  });
+
+  it("傍点のかたまりはルビと見分けられる（編集の対象にしない）", () => {
+    const atoms = api.composeAtoms(build("あ{{大事}}い"));
+    const chunks = api.composeSelectionChunks(atoms, 1, 3);
+    expect(chunks).toHaveLength(1);
+    expect(api.composeChunkIsRuby(chunks[0])).toBe(false);
+  });
+
+  it("2つのルビにまたがる範囲は、かたまりが2つ返る", () => {
+    const atoms = api.composeAtoms(build("{朝|あさ}と{夜|よる}"));
+    expect(api.composeSelectionChunks(atoms, 0, 20)).toHaveLength(2);
+  });
+
   it("三点リーダは妨げにしない（かたまりではないので当たらない）", () => {
     // 「そう……」に傍点、のような使い方を塞がないため（0.24.12）。
     // 三点リーダは見た目のための印で、記法（ルビ・傍点）ではない
@@ -1140,13 +1198,19 @@ describe("画面の約束", () => {
     expect(code).toContain("fillTip(span.name, span.kind, span.summary)");
   });
 
-  /** ルビの上にルビを重ねると、記法が入れ子になって壊れる */
-  it("かたまりの上には、ルビ・傍点を重ねない", () => {
+  /**
+   * ルビの上にルビを重ねると、記法が入れ子になって壊れる。
+   *
+   * **ただし、ルビ1つだけに重なるときは断らない**（0.47.7）。作者が
+   * そうするのは重ねたいからではなく直したいからで、拡張機能側が
+   * 「読みを直す」画面を出す（設計書6.34.2）。
+   */
+  it("傍点・複数のかたまりの上には重ねず、ルビ1つなら頼む", () => {
     const ask = code.slice(code.indexOf("function composeAskNotation("));
-    expect(ask.slice(0, 800)).toContain("composeSelectionHasChunk(");
-    expect(ask.slice(0, 800)).toContain(
-      "ルビや傍点の上には重ねられません"
-    );
+    const head = ask.slice(0, 1200);
+    expect(head).toContain("composeSelectionChunks(");
+    expect(head).toContain("composeChunkIsRuby(");
+    expect(head).toContain("傍点の上や、複数のルビにまたがる範囲には重ねられません");
   });
 
   /**
