@@ -326,7 +326,7 @@ export async function convertToMarkdown(work: WorkEntry): Promise<boolean> {
     vscode.QuickPickItem & { choice?: "folder" | "one" }
   >([...items, cancelItem()], {
     title: "本文を .md にする",
-    placeHolder: "中身は変えず、名前だけを .md に変えます",
+    placeHolder: "名前を .md に変え、ルビ・傍点の書き方を直します",
     ignoreFocusOut: true,
   });
   if (!picked || isCancelItem(picked) || !picked.choice) return false;
@@ -343,8 +343,16 @@ export async function convertToMarkdown(work: WorkEntry): Promise<boolean> {
     {
       modal: true,
       detail: [
-        "中身は1文字も変えません。文字コードも改行もそのままです。",
-        "戻したくなったら、名前を .txt に戻すだけで元どおりです。",
+        // **できない約束をしない**（0.51.6。作者の実機報告 2026-09-08）。
+        // ここは以前「中身は1文字も変えません」「名前を .txt に戻すだけで
+        // 元どおりです」と言っていたが、**どちらも事実と違う**——
+        // 0.16.0 から、投稿サイトの書き方のルビ・傍点を直すようになっている
+        // （設計書6.12.4）。名前を戻しても記法は戻らない。
+        // **作者の原稿についての約束**なので、実際の動きに合わせる。
+        "名前を .md に変えます。文字コードと改行はそのままです。",
+        "本文に投稿サイトの書き方のルビ・傍点（｜漢字《かんじ》・《《強調》》）が" +
+          "あれば、この拡張機能の書き方へ直します（字そのものは変えません）。",
+        "直す前の本文は、同じ場所の .novelai-recovery に控えが残ります。",
         "",
         "同じ名前の .md がすでにあるものは、上書きせずに飛ばします。",
       ].join("\n"),
