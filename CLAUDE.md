@@ -62,6 +62,7 @@
 | `docs/設計書.md` | 冒頭の `version` 行 | 同上 |
 | `docs/進捗と引継ぎ.md` | 「いまの状態」の表 | 同上 |
 | **`docs/プロンプト設計書.md`** | 冒頭の `version` 行と**「（対象：…）」の行** | **`promptDocShape.test.ts`**（別のテスト） |
+| **`src/mcp/version.ts`** | `SERVER_VERSION`（MCP サーバーが名乗る版。0.49.0〜） | **`mcpVersion.test.ts`** |
 
 **プロンプト設計書は忘れやすい。** 見張っているのが `showVersion.test.ts` ではなく別のテストなので、ほかの4つを直して安心していると落ちる（2026-08-27に実際に落ちた）。`npm run check` は両方を走らせる。
 

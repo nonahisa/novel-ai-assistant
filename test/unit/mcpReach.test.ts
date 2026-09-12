@@ -7,8 +7,11 @@ import {
   walkStaticImports,
 } from "./support/importGraph";
 // 起点の一覧は `scripts/coreEntries.mjs` が持つ。**束ねる側
-// （`scripts/bundleCore.mjs`）と同じものを見る**ため、ここへは写さない
-import { allEntryFiles } from "../../scripts/coreEntries.mjs";
+// （`scripts/bundleCore.mjs`）と同じものを見る**ため、ここへは写さない。
+// たどる側だけは MCP サーバーの入口（`src/mcp/server.ts`）も足す
+// ——束ねる側は入口を読み込んで確かめる作りなので、読み込むと
+// stdio を掴んで待ち始めるあのファイルは渡せない
+import { reachEntryFiles } from "../../scripts/coreEntries.mjs";
 
 /**
  * 外から呼ぶ束（MCP サーバー）に、`vscode` が混ざっていないか（設計書6.87.3）。
@@ -37,7 +40,7 @@ import { allEntryFiles } from "../../scripts/coreEntries.mjs";
 const ALLOWED = new Map<string, string>();
 
 describe("外から呼ぶ束に `vscode` が混ざっていないか", () => {
-  const entries: string[] = allEntryFiles(SRC);
+  const entries: string[] = reachEntryFiles(SRC);
 
   test("起点のファイルがすべて実在する", () => {
     // 名前を書き間違えると、走査が静かに空振りする

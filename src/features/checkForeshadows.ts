@@ -1,3 +1,4 @@
+import { targetsFor, toBrief } from "../core/foreshadowTargets";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
@@ -47,7 +48,6 @@ import {
   FORESHADOW_RESOLVE_SCHEMA,
   FORESHADOW_RESOLVE_SYSTEM_PROMPT,
   FORESHADOW_RESOLVE_VERSION,
-  type OpenForeshadowBrief,
 } from "../prompts/foreshadowResolve";
 import {
   openForeshadowsFingerprint,
@@ -997,26 +997,7 @@ async function loadLedger(
  * 前後を決められないのに落とすと、話数の読めないファイルで
  * 回収が一度も見つからなくなる。
  */
-function targetsFor(
-  open: readonly Foreshadow[],
-  chunk: Chunk
-): Foreshadow[] {
-  return open.filter((record) => {
-    if (record.plantedChapter === null) return true;
-    if (chunk.chapterStart === null) return true;
-    return chunk.chapterStart >= record.plantedChapter;
-  });
-}
-
-function toBrief(record: Foreshadow): OpenForeshadowBrief {
-  return {
-    id: record.id,
-    label: record.label,
-    note: record.note,
-    plantedQuote: record.plantedQuote,
-    plantedChapter: record.plantedChapter,
-  };
-}
+// `targetsFor`・`toBrief` は core/foreshadowTargets.ts（拡張機能と MCP で共有）
 
 interface CollectedChunks {
   chunks: Chunk[];

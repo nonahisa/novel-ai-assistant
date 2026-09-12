@@ -71,11 +71,37 @@ async function main() {
     logLevel: "info",
   });
 
+  /**
+   * 外から呼ぶ束（MCPサーバー。設計書6.87.8）。
+   *
+   * **拡張機能と同時に作り直す。** 別の手順にすると忘れ、**古い束を
+   * 使い回して「直したはずの不具合が再現する」**（6.87.6 の4）。
+   *
+   * `external: []`——SDKごと1ファイルに束ねる。ここで何かを外へ出すと、
+   * `node dist/mcp-server.mjs` が読み込んだ瞬間に解決できずに落ちる。
+   * `vscode` が混ざっていればここで気づける（`test/unit/mcpReach.test.ts`
+   * が静的importからも見ているので、二重に見張っている）。
+   *
+   * **配布物には入れない**（`.vscodeignore`）。拡張機能そのものは使わない。
+   */
+  const mcp = await esbuild.context({
+    entryPoints: ["src/mcp/server.ts"],
+    bundle: true,
+    format: "esm",
+    minify: production,
+    sourcemap: !production,
+    sourcesContent: false,
+    platform: "node",
+    outfile: "dist/mcp-server.mjs",
+    external: [],
+    logLevel: "info",
+  });
+
   if (watch) {
-    await Promise.all([desktop.watch(), browser.watch()]);
+    await Promise.all([desktop.watch(), browser.watch(), mcp.watch()]);
   } else {
-    await Promise.all([desktop.rebuild(), browser.rebuild()]);
-    await Promise.all([desktop.dispose(), browser.dispose()]);
+    await Promise.all([desktop.rebuild(), browser.rebuild(), mcp.rebuild()]);
+    await Promise.all([desktop.dispose(), browser.dispose(), mcp.dispose()]);
   }
 }
 

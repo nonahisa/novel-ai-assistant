@@ -27,6 +27,13 @@ dist/web-tests.js
 # 外から呼ぶ束（`npm run bundle:core`。設計書6.87.3）。束ねられることを
 # 確かめるための副産物で、**拡張機能そのものは使わない**ので配布物には入れない
 dist/core-bundle.mjs
+# MCPサーバーの束（設計書6.87.8）。Claude Code から呼ぶためのもので、
+# **拡張機能は読み込まない**。入れると配布物が1.5MB増えるだけで、
+# 出口の許可リスト（`scripts/releaseSupport.mjs`）も弾く
+dist/mcp-server.mjs
+# MCPサーバーの登録（このリポジトリを Claude Code で開いたときだけ使う）。
+# 作者の機械の外へ配るものではない
+.mcp.json
 tsconfig.json
 tsconfig.test.json
 esbuild.js

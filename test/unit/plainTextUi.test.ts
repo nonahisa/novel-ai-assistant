@@ -70,6 +70,17 @@ const MARKDOWN_ALLOWED = new Set([
   "src/core/chatNote.ts",
   // 使い方のマニュアルをMarkdownの文書として開く
   "src/features/openManual.ts",
+  /*
+    MCPサーバーのツールの説明文（設計書6.87.8）。
+
+    **読む相手は VS Code の画面ではなく、繋いだAIである。** プロンプトと
+    同じで、強調はそのまま「ここは外せない」という指示として効く
+    （`runner` を省略できないこと、検算を通していない結果は製品の結果では
+    ないこと——どちらも黙って外されると困る）。`src/prompts/*.ts` を
+    許しているのと同じ理由。
+  */
+  "src/mcp/server.ts",
+  "src/mcp/tools/ollama.ts",
 ]);
 
 function collectSources(dir: string, out: string[] = []): string[] {
