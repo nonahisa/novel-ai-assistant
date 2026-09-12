@@ -33,7 +33,7 @@ export async function setAdvicePolicy(
   const existing = store.get(work.id);
 
   if (existing) {
-    const action = await chooseAction(work, existing);
+    const action = await chooseAction(work, existing, !!store.getDefault());
     if (!action) return;
     if (action === "show") {
       await showResult(work, existing, "いまの助言方針");
@@ -46,7 +46,7 @@ export async function setAdvicePolicy(
   }
 
   // 「全部やり直す」と、まだ一度も答えていない場合
-  const answers = await askQuestions(existing?.answers);
+  const answers = await askAdviceQuestions(existing?.answers);
   if (!answers) return;
 
   const scores = scoreAnswers(answers);
@@ -71,7 +71,8 @@ type PolicyAction = "redo" | "show" | "clear";
 
 async function chooseAction(
   work: WorkEntry,
-  profile: AdviceProfile
+  profile: AdviceProfile,
+  hasDefault: boolean
 ): Promise<PolicyAction | undefined> {
   const type = ADVICE_TYPES[resolveAdviceType(profile.scores)];
 
@@ -91,7 +92,10 @@ async function chooseAction(
       },
       {
         label: "$(trash) 方針を消す",
-        detail: "相談は素の状態に戻ります（作品や設定資料には影響しません）",
+        // **行き先を正しく言う**（0.51.1）。既定があるときは素ではなくそこへ戻る
+        detail: hasDefault
+          ? "この作品だけの方針を外します。診断で答えた既定に戻ります"
+          : "相談は素の状態に戻ります（作品や設定資料には影響しません）",
         action: "clear" as const,
       },
       cancelItem(),
@@ -112,9 +116,13 @@ async function chooseAction(
  *
  * **Esc で取りやめたら、何も保存しない。** 途中まで答えた分を残すと、
  * 次に開いたときに「前回の答え」として半端な値が出てくる。
+ *
+ * **使用開始時の診断（6.90）からも呼ぶ**ので外へ出してある。写しを作ると、
+ * 聞き方（前回の答えの印・やめる道・焦点が外れても消えないこと）が
+ * 2か所に分かれ、片方だけ直る日が来る。
  */
-async function askQuestions(
-  previous: number[] | undefined
+export async function askAdviceQuestions(
+  previous?: number[]
 ): Promise<number[] | undefined> {
   const answers: number[] = [];
 
@@ -154,9 +162,13 @@ async function clearPolicy(
     "相談の助言方針を消しますか。",
     {
       modal: true,
+      // **行き先を正しく言う**（0.51.1）。作者ごとの既定（使用開始時の診断で
+      // 答えたもの）があるときは、素ではなくそこへ戻る
       detail:
-        "以後、相談は素の状態に戻ります（タイプ別の方針を渡しません）。\n" +
-        "これまでの変化の記録も一緒に消えます。\n" +
+        (store.getDefault()
+          ? "以後、この作品の相談は、診断で答えた既定の方針に戻ります。\n"
+          : "以後、相談は素の状態に戻ります（タイプ別の方針を渡しません）。\n") +
+        "この作品でのこれまでの変化の記録も一緒に消えます。\n" +
         "作品のファイルや設定資料には影響しません。もう一度診断すれば作り直せます。",
     },
     "消す"

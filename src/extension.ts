@@ -278,7 +278,7 @@ import { manageKeepWords } from "./features/manageKeepWords";
 import { manageConfirmSkips } from "./features/manageConfirmSkips";
 import { AdvicePolicyStore } from "./core/advicePolicyStore";
 import { WriterProfileStore } from "./core/writerProfileStore";
-import { ADVICE_TYPES, resolveAdviceType } from "./core/advicePolicy";
+import type { AdviceProfile } from "./core/advicePolicy";
 import { setAdvicePolicy } from "./features/advicePolicyDiagnosis";
 import {
   addForeshadowByHand,
@@ -3208,15 +3208,14 @@ export async function activate(
     return {
       profiles: writerProfiles,
       hasWork: () => registry.list().length > 0,
-      advicePolicy: () => {
-        // 作品が1つだけなら、その方針を紙に添える。複数あるときは
-        // どれの話か決められないので添えない（間違ったものを見せない）
-        const works = registry.list();
-        if (works.length !== 1) return undefined;
-        const profile = advicePolicies.get(works[0].id);
-        if (!profile) return undefined;
-        const info = ADVICE_TYPES[resolveAdviceType(profile.scores)];
-        return { label: info.label, summary: info.summary };
+      /*
+        **9問の答えは、作者ごとの既定へ置く**（設計書6.90.2）。
+        使用開始時にはまだ作品が1つも無いので、作品ごとの置き場には書けない。
+        作品ができたら相談がここから始まる（`getEffective`）。
+      */
+      adviceDefault: {
+        get: () => advicePolicies.getDefault(),
+        set: (profile: AdviceProfile) => advicePolicies.setDefault(profile),
       },
     };
   }

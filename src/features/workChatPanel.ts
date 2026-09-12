@@ -430,7 +430,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   private buildSystemPrompt(work: WorkEntry | undefined): string {
     if (!work || !this.advicePolicies) return WORK_CHAT_SYSTEM_PROMPT;
 
-    const profile = this.advicePolicies.get(work.id);
+    // **作品に無ければ、作者の既定を使う**（0.51.1。設計書6.90.2）。
+    // 使用開始時の診断で答えた9問は、まだ作品が無いところで答えるので
+    // 作者ごとに置いてある。ここで拾わないと、はじめの1作で効かない
+    const profile = this.advicePolicies.getEffective(work.id);
     if (!profile) return WORK_CHAT_SYSTEM_PROMPT;
 
     const now = new Date();
@@ -454,8 +457,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   ): Promise<void> {
     if (!work || !signals || !this.advicePolicies) return;
 
-    const before = this.advicePolicies.get(work.id);
-    if (!before) return; // 診断していない作品では推定も持たない
+    // **既定から始まった作品でも、推定は効かせる。** ここで書き写され、
+    // 以後その作品が自分の値として持つ（作者の既定は動かない）
+    const before = this.advicePolicies.getEffective(work.id);
+    if (!before) return; // どこにも方針が無ければ推定も持たない
 
     const now = new Date();
     const after = applyProfileSignals(before, signals, now);
