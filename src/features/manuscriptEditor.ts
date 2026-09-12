@@ -27,6 +27,14 @@ import {
   notationModeFor,
   renderTermMarks,
 } from "../core/manuscriptRender";
+import {
+  resolveInitialAppearance,
+  takeCarriedAppearance,
+} from "../core/manuscriptAppearance";
+import type {
+  ManuscriptAppearance,
+  SavedAppearance,
+} from "../core/manuscriptAppearance";
 import { isNoteStyleTarget } from "../core/noteStyle";
 import { renderNotePreview } from "../core/notePreview";
 import { readWorkFormat } from "../core/workFormatStore";
@@ -183,8 +191,27 @@ const openManuscripts = new Map<
      * （まだ保存していない）本文が勝った瞬間に消える。
      */
     document: vscode.TextDocument;
+    /**
+     * この画面がいま使っている見た目（設計書6.25.5）。
+     *
+     * 前後の話へ移るときに、そのまま次の画面へ持って行く。**画面が
+     * 知らせてくるまでは `undefined`**（開いた直後の一瞬だけ）。
+     */
+    appearance(): ManuscriptAppearance | undefined;
   }
 >();
+
+/**
+ * 次に開く原稿へ持って行く見た目（設計書6.25.5）。
+ *
+ * 「← 前の話」「次の話 →」で移るときに、**次に開くファイルの場所を
+ * キーにして**置く。開いた画面が `ready` のときに1回だけ取り出す。
+ *
+ * **`openManuscripts` と同じで、provider ごとではなくここ1つに集める。**
+ * 縦書きと横書きで `ManuscriptEditorProvider` の実体は2つあり、片方だけが
+ * 持つと入口をまたいだときに取りこぼす。
+ */
+const pendingAppearance = new Map<string, ManuscriptAppearance>();
 
 /**
  * 原稿エディタで最後にカーソルがあった場所（設計書6.40.4）。
@@ -680,7 +707,17 @@ export type ManuscriptOrientation =
 
 /** 画面から届く用件 */
 type Incoming =
-  | { type: "ready" }
+  | {
+      type: "ready";
+      /**
+       * 画面が覚えていた見た目（設計書6.25.5）。
+       *
+       * **開くときの向き・大きさ・面を決めるのはこちら。** 覚えていた値・
+       * 前の話から持って来た値・入口で決まった向き・設定の既定を突き合わせる
+       * 規則が2か所にあると、片方だけが直る日が来る。
+       */
+      saved?: SavedAppearance;
+    }
   | { type: "edit"; text: string }
   | { type: "count"; text: string }
   | { type: "ruby"; text: string; start: number; end: number }
@@ -713,6 +750,14 @@ type Incoming =
    * 読み替えると、選べるものが消える）
    */
   | { type: "pickFont"; installed?: string[] }
+  /**
+   * 見た目が変わった（設計書6.25.5）。
+   *
+   * 向き・大きさ・面を変えるたびに届く（画面が覚える `remember()` と
+   * 同じ場所から出る）。**前後の話へ移ったときに、同じ見た目で開くため**に
+   * 持っておく。書体は設定から読むので、ここには入らない。
+   */
+  | { type: "appearance"; vertical: boolean; size: number; compose: boolean }
   /** 最新話を書く（設計書6.25.5） */
   | { type: "openLatest" }
   /**
@@ -962,6 +1007,20 @@ export class ManuscriptEditorProvider
      */
     let notePreviewWanted = false;
 
+    /**
+     * 画面がいま使っている見た目（設計書6.25.5）。
+     *
+     * 変わるたびに画面から届く。前後の話へ移るときに持って行く。
+     */
+    let appearanceNow: ManuscriptAppearance | undefined;
+    /**
+     * 最初の `update` に添える、この原稿を開くときの見た目。
+     *
+     * **添えるのは1回だけ。** 送るたびに添えると、作者がそのあと変えた
+     * 大きさや向きを、打鍵のたびに送り返す値が押し戻してしまう。
+     */
+    let initialAppearance: ManuscriptAppearance | undefined;
+
     const send = async (): Promise<void> => {
       // **画面へはLF区切りで渡す**（core/eolSpace.ts）。textareaは値を
       // LFへ正規化するので、CRLFのまま渡すと本文・用語の位置・組んで書く面の
@@ -1012,11 +1071,17 @@ export class ManuscriptEditorProvider
         // 「文字の色分け説明は不要です」）。色の意味は設定資料パネルの
         // タブが同じ色で示す
         colors: colorsFor(),
-        ...readAppearance(this.orientation),
+        ...readAppearance(),
+        // **開くときの見た目は、こちらが決めて渡す**（設計書6.25.5）。
+        // 前の話から持って来た値・入口の向き・設定の既定を突き合わせるのは
+        // core/manuscriptAppearance.ts の仕事で、画面は受け取って当てるだけ
+        ...(initialAppearance ? { initialAppearance } : {}),
         // 読み上げの声は設定ではなく**端末の覚え**なので、deps から取る
         // （設計書6.42）。覚えていなければ画面が最初の声を選ぶ
         readAloudVoice: this.deps.readAloudVoice?.(),
       });
+      // 添えるのは最初の1回だけ（送り直すたびに当て直させない）
+      initialAppearance = undefined;
       await this.sendCount(panel, text, document);
     };
 
@@ -1058,6 +1123,7 @@ export class ManuscriptEditorProvider
         void this.sendFootCounts(panel, document);
       },
       document,
+      appearance: (): ManuscriptAppearance | undefined => appearanceNow,
     };
     openManuscripts.set(key, entry);
     panel.onDidDispose(() => {
@@ -1200,6 +1266,16 @@ export class ManuscriptEditorProvider
     panel.webview.onDidReceiveMessage(async (message: Incoming) => {
       switch (message.type) {
         case "ready":
+          /*
+            **開くときの見た目は、最初の update に添えて渡す**（設計書6.25.5）。
+            画面が覚えていた値（message.saved）はここで初めて届く。
+            前の話から持って来た値は**1回きり**で、取り出したら消える。
+          */
+          initialAppearance = resolveInitialAppearance({
+            saved: message.saved,
+            carry: takeCarriedAppearance(pendingAppearance, key),
+            ...readOrientation(this.orientation),
+          });
           await send();
           webviewReady = true;
           // 開くのを待ってもらっていた「この行を示す」を、ここで出す
@@ -1286,6 +1362,16 @@ export class ManuscriptEditorProvider
 
         case "pickFont":
           await pickFont(message.installed);
+          break;
+
+        case "appearance":
+          // 前後の話へ移るときに、この値をそのまま次の画面へ持って行く
+          // （設計書6.25.5）。覚えるのは画面の側で、こちらは写しを持つだけ
+          appearanceNow = {
+            vertical: message.vertical,
+            size: message.size,
+            compose: message.compose,
+          };
           break;
 
         case "log":
@@ -2022,11 +2108,17 @@ export class ManuscriptEditorProvider
         );
         return;
       }
-      await this.openAsManuscript(plan.episode.filePath);
+      // **いま見ている見た目のまま開く**（設計書6.25.5）
+      await this.openAsManuscript(plan.episode.filePath, document);
       return;
     }
 
-    await this.createAndOpen(found.work, manuscriptDir, plan.fileName);
+    await this.createAndOpen(
+      found.work,
+      manuscriptDir,
+      plan.fileName,
+      document
+    );
   }
 
   /**
@@ -2110,7 +2202,10 @@ export class ManuscriptEditorProvider
       return;
     }
     if (step.kind === "open") {
-      await this.openAsManuscript(episodes[step.index].filePath);
+      // **いま見ている見た目のまま開く**（作者の依頼、2026-09-12。
+      // 設計書6.25.5）。話を行き来するたびに縦横や大きさが戻ると、
+      // 移るたびに指定し直すことになる
+      await this.openAsManuscript(episodes[step.index].filePath, document);
       return;
     }
 
@@ -2133,7 +2228,12 @@ export class ManuscriptEditorProvider
         })
     );
     if (plan.kind !== "create") return;
-    await this.createAndOpen(found.work, manuscriptDir, plan.fileName);
+    await this.createAndOpen(
+      found.work,
+      manuscriptDir,
+      plan.fileName,
+      document
+    );
   }
 
   /**
@@ -2145,12 +2245,14 @@ export class ManuscriptEditorProvider
   private async createAndOpen(
     work: WorkEntry,
     manuscriptDir: string,
-    fileName: string
+    fileName: string,
+    /** ここから移ってきた原稿。見た目を引き継ぐために要る（設計書6.25.5） */
+    from?: vscode.TextDocument
   ): Promise<void> {
     const filePath = paths.join(manuscriptDir, fileName);
     if (await pathExists(filePath)) {
       // 走査の取りこぼしなど。**上書きしない**
-      await this.openAsManuscript(filePath);
+      await this.openAsManuscript(filePath, from);
       return;
     }
     await vscode.workspace.fs.writeFile(
@@ -2163,16 +2265,55 @@ export class ManuscriptEditorProvider
     // その分が「今日 +0字」になって消える
     await this.deps.rebaseline(work);
     notifyDone(`${fileName} を作りました。`);
-    await this.openAsManuscript(filePath);
+    await this.openAsManuscript(filePath, from);
   }
 
-  /** 同じ向きの原稿エディタで開く */
-  private async openAsManuscript(filePath: string): Promise<void> {
+  /**
+   * 同じ向きの原稿エディタで開く。
+   *
+   * @param from ここから移ってきた原稿。渡すと、その画面の見た目
+   *   （縦横・大きさ・組んで書く）を次の画面へ引き継ぐ（設計書6.25.5）
+   */
+  private async openAsManuscript(
+    filePath: string,
+    from?: vscode.TextDocument
+  ): Promise<void> {
+    if (from) this.carryAppearance(from, filePath);
     await vscode.commands.executeCommand(
       "vscode.openWith",
       paths.toUri(filePath),
       this.viewType
     );
+  }
+
+  /**
+   * いま見ている画面の見た目を、次に開く原稿へ持たせる（設計書6.25.5）。
+   *
+   * **置くだけで、当てるのは開いた画面の側**（`ready` のときに1回だけ
+   * 取り出す）。開く前に当てる先の画面はまだ無い。
+   *
+   * 画面がまだ見た目を知らせていなければ何も置かない——そのときは、
+   * これまでどおり覚えていた値と設定の既定で開く。
+   */
+  private carryAppearance(
+    from: vscode.TextDocument,
+    toFilePath: string
+  ): void {
+    const now = openManuscripts
+      .get(manuscriptLedgerKey(from.uri))
+      ?.appearance();
+    if (!now) return;
+    const to = manuscriptLedgerKey(toFilePath);
+    /*
+      **既に開いている原稿には置かない。** そのときの `openWith` は
+      そのタブを前に出すだけで、新しい画面は立ち上がらない＝誰も
+      取りに来ない。置いたままにすると、**ずっとあとでその原稿を
+      開いたときに、いつのものとも知れない見た目が当たる**
+      （取り出しが1回きりなのと同じ理由）。前に出たタブは、自分が
+      覚えている見た目のままで、それはいま画面に映っているものである。
+    */
+    if (openManuscripts.has(to)) return;
+    pendingAppearance.set(to, now);
   }
 
   private async copyForPosting(document: vscode.TextDocument): Promise<void> {
@@ -2282,19 +2423,39 @@ async function pickFont(installed?: string[]): Promise<void> {
   );
 }
 
-function readAppearance(orientation: ManuscriptOrientation): {
-  verticalDefault: boolean;
-  /**
-   * 向きを決め打つか。
-   *
-   * **「原稿（横書）」で開いたなら、その原稿が縦を覚えていても横で開く。**
-   * 選んで開いたのに前の向きが勝つと、選んだ意味が無い。
-   * 開いたあとに切り替えれば、そちらを覚える（これまでどおり）。
-   */
-  forceVertical?: boolean;
+/**
+ * 送るたびに添える見た目の設定。
+ *
+ * **書体をここで読むから、前の話へ移っても同じ書体で出る。** 書体は作品
+ * ごとでも原稿ごとでもなく**作者ごとの好み**として設定に置いてあり
+ * （`pickFont`）、どの画面も開くときにここから読む。設定が変わったときは
+ * `onDidChangeConfiguration` で開いている画面へ送り直す。
+ */
+function readAppearance(): {
   fontFamily: string;
   /** 読み上げの速さの既定（設計書6.42）。列で変えたぶんは書き戻さない */
   readAloudRate: number;
+} {
+  const config = vscode.workspace.getConfiguration("novelai");
+  return {
+    fontFamily: config.get<string>("manuscriptEditor.fontFamily", "").trim(),
+    readAloudRate: clampReadAloudRate(
+      config.get<number>("manuscriptEditor.readAloudRate", 1)
+    ),
+  };
+}
+
+/**
+ * 入口と設定が決める向き（開くときに1度だけ使う。設計書6.25.5）。
+ *
+ * `forceVertical` は**向きを決め打つ**という意味である。「原稿（横書）」で
+ * 開いたなら、その原稿が縦を覚えていても、前の話から縦を持って来ていても
+ * 横で開く。選んで開いたのに別の向きが勝つと、選んだ意味が無い。
+ * 開いたあとに切り替えれば、そちらを覚える（これまでどおり）。
+ */
+function readOrientation(orientation: ManuscriptOrientation): {
+  verticalDefault: boolean;
+  forceVertical?: boolean;
 } {
   const config = vscode.workspace.getConfiguration("novelai");
   return {
@@ -2303,10 +2464,6 @@ function readAppearance(orientation: ManuscriptOrientation): {
         ? false
         : config.get<boolean>("manuscriptEditor.vertical", true),
     ...(orientation === "horizontal" ? { forceVertical: false } : {}),
-    fontFamily: config.get<string>("manuscriptEditor.fontFamily", "").trim(),
-    readAloudRate: clampReadAloudRate(
-      config.get<number>("manuscriptEditor.readAloudRate", 1)
-    ),
   };
 }
 

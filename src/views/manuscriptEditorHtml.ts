@@ -940,11 +940,23 @@ ruby > rt {
   /** 測る書体。**一覧は core/manuscriptFonts.ts が持つ**（写さない） */
   const PROBE_FONTS = ${JSON.stringify(PROBE_FONT_NAMES)};
 
-  /** 入口で決められた向きを、もう当てたか（当てるのは開いた1回だけ） */
-  let forcedOnce = false;
+  /**
+   * 開くときの見た目を、もう当てたか（当てるのは開いた1回だけ）。
+   *
+   * **2回目以降の update で当て直さない。** 本文が届くたびに当てると、
+   * そのあと作者が変えた向きや大きさを打鍵のたびに押し戻す。
+   */
+  let appearanceApplied = false;
 
   const saved = vscode.getState() || {};
-  /** はじめの向きは設定から。**一度切り替えたら、その原稿ではそれを覚える** */
+  /**
+   * はじめの向き。
+   *
+   * **決めるのは拡張機能側**（設計書6.25.5。覚えていた値・前の話から
+   * 持って来た値・入口の向き・設定の既定を突き合わせる）。ここに入れて
+   * おくのは、最初の update が届くまでの見せ方を、覚えていた値へ寄せる
+   * ため——届けば当たる。
+   */
   let vertical = saved.vertical;
   /*
     **「読む」面と「並べる」面は消した**（0.25.2）。
@@ -996,8 +1008,24 @@ ruby > rt {
   function remember() {
     // **まだ開いていないだけの状態を、閉じたことにしない**（composeWanted）。
     // 消した面（reading・split）は書かない——古い state に残っていても読まない
-    vscode.setState({ vertical, size, compose: composeOn || composeWanted,
+    // 名前は composeState（compose は組んで書く面の要素。隠さない）
+    const composeState = composeOn || composeWanted;
+    vscode.setState({ vertical, size, compose: composeState,
       noteStyle: noteStyle });
+    /*
+      **拡張機能にも知らせる**（作者の依頼、2026-09-12。設計書6.25.5）。
+      「← 前の話」「次の話 →」は新しい画面を開くので、覚えた state は
+      引き継がれない。次の話を開くときに同じ見た目で出すため、向こうに
+      最新の値を持たせておく。**見た目が変わる場所は、どれも remember を
+      通る**ので、ここ1か所から出せば取りこぼさない。
+    */
+    vscode.postMessage({
+      type: "appearance",
+      // まだ設定が届いていない間の undefined を、そのまま送らない
+      vertical: vertical !== false,
+      size: size,
+      compose: composeState,
+    });
   }
 
   function paint() {
@@ -2023,6 +2051,25 @@ ruby > rt {
   window.addEventListener("message", function (event) {
     const message = event.data;
     if (message.type === "update") {
+      /*
+        **開くときの見た目を当てる**（設計書6.25.5）。
+        向き・大きさ・面の決め方は拡張機能側（core/manuscriptAppearance.ts）
+        にあり、ここは決まった結果を当てるだけ——規則の写しを持たない。
+
+        **組んで書くを開く前に当てる**（下の composeWanted）。あとに置くと、
+        引き継いだ面の指定が1拍遅れて効き、開いた直後に面が入れ替わる。
+      */
+      if (message.initialAppearance && !appearanceApplied) {
+        appearanceApplied = true;
+        vertical = message.initialAppearance.vertical;
+        size = message.initialAppearance.size;
+        // 組んで書くは本文が届いてから開く決まりなので、望みだけ立てる
+        composeWanted = message.initialAppearance.compose;
+        paint();
+        // **当てた見た目は、この原稿の覚えにする**（前の話から引き継いだ
+        // ときも、以後はその原稿が覚えている値として扱う）
+        remember();
+      }
       current = message.text;
       /*
         **記法は、組み立てるより先に受け取る**（設計書6.12）。
@@ -2062,19 +2109,6 @@ ruby > rt {
         */
         termsForText = message.text;
         composeScheduleHighlight();
-      }
-      if (typeof message.forceVertical === "boolean" && !forcedOnce) {
-        // **「原稿（横書）」で開いたなら、その原稿が縦を覚えていても横で開く。**
-        // 選んで開いたのに前の向きが勝つと、選んだ意味が無い。
-        // 効かせるのは開いた1回だけで、そのあと切り替えればそちらを覚える
-        forcedOnce = true;
-        vertical = message.forceVertical;
-        remember();
-        paint();
-      } else if (typeof vertical !== "boolean") {
-        // まだ切り替えたことがない原稿。設定の向きで開く
-        vertical = message.verticalDefault !== false;
-        paint();
       }
       if (message.fontFamily) {
         document.documentElement.style.setProperty(
@@ -4359,7 +4393,13 @@ ruby > rt {
   });
 
   paint();
-  vscode.postMessage({ type: "ready" });
+  /*
+    **覚えていた見た目を添えて名乗る**（設計書6.25.5）。開くときの向き・
+    大きさ・面を決めるのは拡張機能側で、こちらは決まった結果
+    （initialAppearance）を受け取って当てる。前の話から持って来た値・
+    入口で決まった向き・設定の既定を突き合わせる規則を、画面に写さない。
+  */
+  vscode.postMessage({ type: "ready", saved: saved });
 })();
 </script>
 </body>

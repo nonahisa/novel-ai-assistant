@@ -1344,7 +1344,10 @@ describe("画面の約束", () => {
   });
 
   it("面の状態を覚える", () => {
-    expect(code).toContain("compose: composeOn || composeWanted");
+    // 0.47.9で、同じ値を拡張機能へも知らせるようになった（見た目の
+    // 引き継ぎ。設計書6.25.5）ので、式そのものは名前を持つ
+    expect(code).toContain("const composeState = composeOn || composeWanted;");
+    expect(code).toContain("compose: composeState");
   });
 
   /**
