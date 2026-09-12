@@ -248,16 +248,21 @@ export const WRITER_SITUATION_LABELS: Record<WriterSituation, string> = {
   editing: "編集・校閲で使う",
 };
 
+/*
+  **札は、文の中に置いても二重にならない形にする。**
+  「直すのは『1話ごとに直す』」「設定は『設定はメモに』」と読めてしまったので、
+  札のほうから主語を外した（2026-09-13、見本を出して気づいた）。
+*/
 export const WRITER_REVISE_LABELS: Record<WriterReviseTiming, string> = {
-  inline: "書きながら直す",
-  per_episode: "1話ごとに直す",
-  after_all: "書き終えてから直す",
+  inline: "書きながら",
+  per_episode: "1話ごと",
+  after_all: "書き終えてから",
 };
 
 export const WRITER_MATERIAL_LABELS: Record<WriterMaterialHabit, string> = {
-  in_head: "設定は頭の中",
-  memo: "設定はメモに",
-  documented: "設定は資料に",
+  in_head: "頭の中",
+  memo: "メモに書いている",
+  documented: "資料にまとめている",
 };
 
 export const WRITER_OUTLET_LABELS: Record<WriterOutlet, string> = {
@@ -297,10 +302,12 @@ export function buildWriterStyle(
 
 /** スタイルを1行で言う。結果の画面と操作ログで同じ言い方を使う */
 export function describeWriterStyle(style: WriterStyle): string {
+  // **1行で並べるときは主語を戻す。** 札だけを並べると、
+  // 「メモに書いている」が何の話なのか分からない
   return [
     WRITER_PLAN_TYPES[style.plan].label,
-    WRITER_REVISE_LABELS[style.revise],
-    WRITER_MATERIAL_LABELS[style.material],
+    `直すのは${WRITER_REVISE_LABELS[style.revise]}`,
+    `設定は${WRITER_MATERIAL_LABELS[style.material]}`,
     WRITER_OUTLET_LABELS[style.outlet],
   ].join("／");
 }
