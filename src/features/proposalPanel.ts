@@ -49,13 +49,15 @@ import {
   type RecheckItem,
   type RecheckOutcome,
 } from "./recheckProposal";
-import { logFailure, logLine, useLogFile } from "../core/logger";
+import { logFailure, logLine, logStep, useLogFile } from "../core/logger";
 import {
   askNotationAdvice,
   describeNotationAdvice,
 } from "./notationAdvice";
 import type { NotationAdviceGroup } from "../prompts/notationAdvice";
 import { locateAppliedSuggestion } from "../core/proposalUndo";
+// 飛び先の行は、指摘が持つ行番号ではなく引用から決め直す（設計書6.11）
+import { relocateQuote } from "../core/relocateQuote";
 import { revealTextLocation } from "./revealLocation";
 import { openInDefaultEditor } from "../views/openDocument";
 import { notifyDone } from "../views/notify";
@@ -1856,9 +1858,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
 
   private async jumpTo(id: string): Promise<void> {
     // 矛盾も同じ「その行へ飛ぶ」を使う。**両方から探す**
+    const proposal = this.items.find((entry) => entry.id === id);
+    const contradiction = this.contradictions.find((entry) => entry.id === id);
     const item: { filePath: string; line: number } | undefined =
-      this.items.find((entry) => entry.id === id) ??
-      this.contradictions.find((entry) => entry.id === id);
+      proposal ?? contradiction;
     if (!item) {
       // **押しても何も起きない、を黙って起こさない**（作者の報告、2026-08-29）。
       // 一覧の描き直しと押した瞬間がすれ違うと、ここへ来ることがある
@@ -1879,11 +1882,59 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     */
     await revealTextLocation(
       item.filePath,
-      item.line,
+      // **行番号は、1件当てた瞬間に古くなる**（作者の報告、2026-09-12）。
+      // 飛ぶ直前に、いまの本文から引用を探し直す
+      await this.lineToReveal(
+        item.filePath,
+        item.line,
+        // 引用の在り処は種類で違う（推敲・誤字脱字は `original`、矛盾は
+        // `excerpt`）。どちらも「本文に実在する逐語引用」である
+        proposal?.original ?? contradiction?.excerpt ?? ""
+      ),
       this.revealInManuscript,
       "提案パネル",
       this.work
     );
+  }
+
+  /**
+   * 飛び先の行を決める（設計書6.11）。
+   *
+   * **引用が見つからなくても飛べなくならない。** 記録された行へ落として
+   * ログに1行残す——黙って落とすと「押しても違う所へ行く」の手がかりが消える。
+   *
+   * @param recordedLine 検知したときの行番号（1始まり）
+   * @param quote 本文に実在するはずの引用。空なら探さない
+   */
+  private async lineToReveal(
+    filePath: string,
+    recordedLine: number,
+    quote: string
+  ): Promise<number> {
+    // 引用を持たない指摘（プロット逸脱の一部など）は、これまでどおり
+    if (!quote.trim()) return recordedLine;
+
+    // **記録の直前に書き先を向ける**（`revealLocation.ts` と同じ）。ほかの
+    // 機能が別の作品へ向け直していることがあるので、覚えずに毎回向ける
+    if (this.work) useLogFile(this.work.folderPath);
+
+    try {
+      // **生の `fs` を使わない。** 文字コードと改行の判定を通さないと、
+      // Shift_JIS の原稿で行がずれる（CLAUDE.md 規則1・7）
+      const file = await readTextFile(filePath);
+      const found = relocateQuote(file.text, quote, recordedLine);
+      if (found !== undefined) return found;
+      logStep(
+        `提案パネル：引用が見つからないので、記録された行へ飛びました（${filePath} ${recordedLine}行目）。`
+      );
+    } catch (error) {
+      logStep(
+        `提案パネル：本文を読めなかったので、記録された行へ飛びました（${filePath} ${recordedLine}行目：${
+          error instanceof Error ? error.message : String(error)
+        }）。`
+      );
+    }
+    return recordedLine;
   }
 
   /**

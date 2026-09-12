@@ -42,6 +42,7 @@ import { reportAIError } from "./reportAIError";
 import { cancelItem } from "../views/dialogs";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { revealTextLocation, type RevealInManuscript } from "./revealLocation";
+import { relocateQuote } from "../core/relocateQuote";
 import {
   logFailure,
   logStep,
@@ -111,6 +112,7 @@ export async function openNameCheckPanel(
       reading?: string;
       filePath?: string;
       line?: number;
+      quote?: string;
     };
 
     if (parsed.type === "ready" || parsed.type === "refresh") {
@@ -120,9 +122,20 @@ export async function openNameCheckPanel(
       return;
     }
     if (parsed.type === "jump" && parsed.filePath && parsed.line) {
+      /*
+        **行番号は、数えたときのものである。** 本文を1か所直すと、そこから
+        先の行がずれる（作者の報告、2026-09-12。推敲で同じことが起きた）。
+        飛ぶ直前に、いまの本文から引用を探し直す。見つからなければ
+        数えたときの行へ落とす（`relocateQuote` が undefined を返す）。
+      */
+      const line = await relocatedLine(
+        parsed.filePath,
+        parsed.quote,
+        parsed.line
+      );
       await revealTextLocation(
         parsed.filePath,
-        parsed.line,
+        line,
         deps.revealInManuscript,
         "名前の点検",
         work
@@ -614,4 +627,32 @@ function createNonce(): string {
     value += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return value;
+}
+
+/**
+ * 引用から、いまの本文の行を割り出す。
+ *
+ * **見つからなければ、数えたときの行をそのまま返す。** 黙って飛ばないより、
+ * ずれていてもその辺りへ飛ぶほうが作者の手が止まらない（`proposalPanel.ts`
+ * の `lineToReveal` と同じ考え）。
+ */
+async function relocatedLine(
+  filePath: string,
+  quote: string | undefined,
+  fallback: number
+): Promise<number> {
+  if (!quote) return fallback;
+  try {
+    const file = await readTextFile(filePath);
+    const found = relocateQuote(file.text, quote, fallback);
+    if (found !== undefined) return found;
+    logStep(
+      `名前の点検：引用が見つからないので、数えたときの行（${fallback}）へ飛びました。`
+    );
+  } catch {
+    logStep(
+      `名前の点検：本文を読めないので、数えたときの行（${fallback}）へ飛びました。`
+    );
+  }
+  return fallback;
 }
