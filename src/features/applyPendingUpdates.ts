@@ -299,7 +299,8 @@ function showInPanel(
             `${target.diff.name}：${dropped} 件を落として反映しました。`
           );
         }
-        return { ok: true };
+        // まとめて適用の完了の知らせが、合計を出せるように返す
+        return { ok: true, dropped };
       } catch (error) {
         const message =
           error instanceof CharacterStoreError

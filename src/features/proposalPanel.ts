@@ -484,6 +484,32 @@ type IssuesMessage = {
   works: WorkSummary[];
 };
 
+/**
+ * レコードごとの「落とす葉の鍵」（設計書6.32）。
+ *
+ * **まとめて適用のときに、画面から届く。** 1件ずつの「反映する」は
+ * `apply` の `dropKeys` で1レコード分だけを運ぶが、まとめて適用は
+ * 画面に出ている全レコードぶんを一度に運ぶ必要がある。
+ */
+interface RecordDropKeys {
+  id: string;
+  dropKeys: string[];
+}
+
+/**
+ * 更新を1件反映した結果。
+ *
+ * `dropped` は**実際に落とした葉の数**。鍵の数ではない——作者が付けた印が
+ * レコード側に見つからないこともあるので、数えるのは保存する側である。
+ * **黙って落としたことにしない**（CLAUDE.md 規則2）ために、
+ * まとめて適用の完了の知らせへも出す。
+ */
+interface RecordApplyOutcome {
+  ok: boolean;
+  reason?: string;
+  dropped?: number;
+}
+
 type IncomingMessage =
   | { type: "jump"; id: string }
   /**
@@ -504,7 +530,13 @@ type IncomingMessage =
   | { type: "askNotation"; id: string }
   /** 作者が本文を手で書き直したあと、その指摘が解消したかを確かめる */
   | { type: "recheck"; id: string }
-  | { type: "applyAll" }
+  /**
+   * まとめて適用する。
+   *
+   * **`drops` を欠かさない。** 添えなかったころ、作者が ✕ を付けたあと
+   * まとめて押すと印が効かず、落としたはずの値が黙って入った（0.50.1）
+   */
+  | { type: "applyAll"; drops?: RecordDropKeys[] }
   /** 別の分類へ切り替える */
   | { type: "selectCategory"; category: string }
   /** 別の作品へ切り替える（適用・見送りは表示中の作品にしか効かないため） */
@@ -535,7 +567,7 @@ interface CategoryBucket {
     id: string,
     /** 作者が ✕ を付けた葉の鍵（設計書6.32） */
     dropKeys?: string[]
-  ) => Promise<{ ok: boolean; reason?: string }>;
+  ) => Promise<RecordApplyOutcome>;
   /**
    * 更新を見送る処理（承認待ちから片付ける）。**apply と必ず対にする。**
    * これが無かったころ、「見送る」は押しても黙って何も起きなかった
@@ -612,10 +644,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   private recordUpdates: RecordUpdateViewItem[] = [];
   /** 更新を反映する処理。呼び出し側から渡してもらう */
   private applyRecordUpdate:
-    | ((
-        id: string,
-        dropKeys?: string[]
-      ) => Promise<{ ok: boolean; reason?: string }>)
+    | ((id: string, dropKeys?: string[]) => Promise<RecordApplyOutcome>)
     | undefined;
   /** 更新を見送る処理（承認待ちから片付ける）。apply と対 */
   private dismissRecordUpdate:
@@ -745,7 +774,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       applyRecordUpdate?: (
         id: string,
         dropKeys?: string[]
-      ) => Promise<{ ok: boolean; reason?: string }>;
+      ) => Promise<RecordApplyOutcome>;
       dismissRecordUpdate?: (
         id: string
       ) => Promise<{ ok: boolean; reason?: string }>;
@@ -1340,7 +1369,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       id: string,
       /** 作者が ✕ を付けた葉の鍵（設計書6.32） */
       dropKeys?: string[]
-    ) => Promise<{ ok: boolean; reason?: string }>,
+    ) => Promise<RecordApplyOutcome>,
     /** 見送る（承認待ちから片付ける）。渡さないと「見送る」は押せても効かない */
     dismiss: (id: string) => Promise<{ ok: boolean; reason?: string }>,
     /**
@@ -1746,7 +1775,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         await this.recheckIssue(message.id);
         return;
       case "applyAll":
-        await this.applyVisible();
+        await this.applyVisible(message.drops);
         return;
       case "selectCategory":
         this.switchTo(message.category);
@@ -1861,12 +1890,15 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * 表示中（無視・失敗以外）の指摘のうち、high/medium confidence のものだけを
    * まとめて適用する。既定では画面に出さず、作者が確認ダイアログを経てから呼ぶ。
    */
-  private async applyVisible(): Promise<void> {
+  private async applyVisible(
+    /** 画面で ✕ を付けた葉（レコードごと。設計書6.32） */
+    drops?: readonly RecordDropKeys[]
+  ): Promise<void> {
     // **設定資料の更新も「まとめて」の対象である。**
     // ここを見ていなかったため、更新の一覧で押しても何も起きなかった
     // （2026-08-19、作者が実機で発見）
     if (this.recordUpdates.length > 0) {
-      await this.applyAllRecordUpdates();
+      await this.applyAllRecordUpdates(drops);
       return;
     }
 
@@ -1939,8 +1971,17 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     );
   }
 
-  /** 設定資料の更新をまとめて反映する */
-  private async applyAllRecordUpdates(): Promise<void> {
+  /**
+   * 設定資料の更新をまとめて反映する。
+   *
+   * **1件ずつの「反映する」と同じく、✕ の印を見る**（0.50.1）。
+   * 見ていなかったころ、作者が印を付けたあとまとめて押すと、
+   * 落としたはずの値が黙って入った（CLAUDE.md 規則2に反する）。
+   */
+  private async applyAllRecordUpdates(
+    /** 画面で ✕ を付けた葉（レコードごと。設計書6.32） */
+    drops?: readonly RecordDropKeys[]
+  ): Promise<void> {
     const targets = this.recordUpdates.filter(
       (entry) => entry.status === "pending" || entry.status === "failed"
     );
@@ -1968,15 +2009,54 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     );
     if (confirm !== label) return;
 
+    // **落とした件数を数えながら反映する。** 鍵の数ではなく、
+    // 保存の直前に実際に落ちた数を積む（レコード側に見つからない鍵もある）
+    let dropped = 0;
     for (const target of targets) {
-      await this.applyIssue(target.id);
+      const keys = drops?.find((entry) => entry.id === target.id)?.dropKeys;
+      const outcome = await this.applyRecordUpdateById(target.id, keys);
+      dropped += outcome.dropped;
     }
     const applied = this.recordUpdates.filter(
       (entry) => entry.status === "applied"
     ).length;
+    // **黙って落としたことにしない**（CLAUDE.md 規則2）。
+    // 1件ずつのときと同じ「◯ 件を落と…」の形で添える
     void vscode.window.showInformationMessage(
-      `${applied}件を${conjugate(label, "しました")}。`
+      `${applied}件を${conjugate(label, "しました")}` +
+        (dropped > 0 ? `（${dropped} 件を落としました）` : "") +
+        "。"
     );
+  }
+
+  /**
+   * 設定資料の更新を1件反映する。
+   *
+   * **1件ずつの「反映する」もまとめて適用も、ここを通す。** 別々に書いて
+   * いたころ、まとめて適用だけが ✕ の印を素通りさせていた（0.50.1）。
+   *
+   * `handled` は「設定資料の更新として扱った」の意味。本文の指摘は
+   * ここでは扱わないので、`applyIssue` が続きを引き受ける。
+   */
+  private async applyRecordUpdateById(
+    id: string,
+    dropKeys?: string[]
+  ): Promise<{ handled: boolean; dropped: number }> {
+    const update = this.recordUpdates.find((entry) => entry.id === id);
+    if (!update || !this.applyRecordUpdate) {
+      return { handled: false, dropped: 0 };
+    }
+    if (update.status === "applied") return { handled: true, dropped: 0 };
+
+    const outcome = await this.applyRecordUpdate(id, dropKeys);
+    this.markStatus(
+      id,
+      outcome.ok ? "applied" : "failed",
+      outcome.ok ? undefined : outcome.reason
+    );
+    // 承認待ちが1件減ったので、メニューの印を数え直してもらう
+    if (outcome.ok) this.onCountsChanged?.();
+    return { handled: true, dropped: outcome.dropped ?? 0 };
   }
 
   private async applyIssue(
@@ -1984,25 +2064,13 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     /**
      * 設定資料の更新で、作者が ✕ を付けた葉の鍵（設計書6.32）。
      *
-     * **まとめて適用（`applyAllRecordUpdates`）からは渡らない。**
-     * 印は画面の中にしかなく、1件ずつの「反映する」でだけ効く
+     * **まとめて適用のときも渡る**（0.50.1）。画面がレコードごとの鍵を
+     * 添えて送り、`applyAllRecordUpdates` が取り出して同じ道へ流す
      */
     dropKeys?: string[]
   ): Promise<void> {
     // 設定資料の更新は、本文ではなくレコードを書き換える
-    const update = this.recordUpdates.find((entry) => entry.id === id);
-    if (update && this.applyRecordUpdate) {
-      if (update.status === "applied") return;
-      const outcome = await this.applyRecordUpdate(id, dropKeys);
-      this.markStatus(
-        id,
-        outcome.ok ? "applied" : "failed",
-        outcome.ok ? undefined : outcome.reason
-      );
-      // 承認待ちが1件減ったので、メニューの印を数え直してもらう
-      if (outcome.ok) this.onCountsChanged?.();
-      return;
-    }
+    if ((await this.applyRecordUpdateById(id, dropKeys)).handled) return;
 
     const item = this.items.find((i) => i.id === id);
     if (!item || !this.work) return;

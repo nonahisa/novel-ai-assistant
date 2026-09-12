@@ -409,11 +409,30 @@ showLowEl.addEventListener('change', () => {
   document.body.classList.toggle('show-low', showLowEl.checked);
 });
 applyAllEl.addEventListener('click', () => {
-  vscode.postMessage({ type: 'applyAll' });
+  vscode.postMessage(applyAllMessage());
 });
+
 clearEl.addEventListener('click', () => {
   vscode.postMessage({ type: 'clearCategory' });
 });
+
+/**
+ * 「まとめて適用」で送る中身（設計書6.32）。
+ *
+ * **✕ の印は、まとめて押したときも効かせる。** 印を見ていたのは1件ずつの
+ * 「反映する」だけで、まとめて押すと作者が落としたはずの値が黙って
+ * 入っていた（0.50.1 で修正）。レコードごとに、落とす鍵を添える。
+ *
+ * **印の無いレコードは添えない。** ✕ を一度押して戻すと空の集合が残るので、
+ * そのまま送ると受け側が「印がある」と読み違える形になる。
+ */
+function applyAllMessage() {
+  const drops = [];
+  droppedEntries.forEach(function (set, id) {
+    if (set.size > 0) drops.push({ id: id, dropKeys: Array.from(set) });
+  });
+  return { type: 'applyAll', drops: drops };
+}
 
 /**
  * 分類のタブを並べる。
@@ -498,6 +517,7 @@ function render(workTitle, items) {
   // ✕ を押したときに、同じものを描き直すために控える
   lastItems = items;
   lastWorkTitle = workTitle;
+  forgetDropsOf(items);
   // 案内を出すか、進み具合を出すかは1か所で決める（両方が同じ場所を使う）
   paintRunning();
   listEl.innerHTML = items.map(renderItem).join('');
@@ -520,6 +540,24 @@ function render(workTitle, items) {
       }
       vscode.postMessage({ type: el.dataset.action, id: el.dataset.id });
     });
+  });
+}
+
+/**
+ * 済んだレコードの ✕ の印を片付ける（設計書6.32）。
+ *
+ * **レコードidは承認待ちのファイルパスである。** 印を持ち続けると、
+ * 同じパスで次の承認待ちができたときに、前に付けた印が残ったまま描かれる
+ * ——作者は何も押していないのに、値が落ちて見える。
+ *
+ * **失敗（failed）は残す。** まだ片付いておらず、押し直すときに
+ * 印を付け直させるのは筋が違う。
+ */
+function forgetDropsOf(items) {
+  items.forEach(function (item) {
+    if (item.status === 'applied' || item.status === 'dismissed') {
+      droppedEntries.delete(item.id);
+    }
   });
 }
 
@@ -615,12 +653,25 @@ function renderEntries(item, part) {
  * 反映を押せるか。
  *
  * **足される値を全部落としたら押せなくする。** 何も足さない反映は、
- * 見送るのと同じである。葉に分かれない項目しか無い更新は、今までどおり。
+ * 見送るのと同じである。
+ *
+ * **ただし、葉に分かれない変更まで道連れにしない**（0.50.1）。更新案は
+ * 「呼称の追加＋登場話の追記」のように、葉に分かれる項目と分かれない項目を
+ * 併せ持つことが多い。呼称を全部 ✕ にしただけで押せなくなると、
+ * 登場話の追記まで見送るしかなくなる。押せなくするのは、
+ * **その更新案の変更が葉だけで、その葉が全部 ✕ になったとき**に限る。
  */
 function canApplyRecordUpdate(item) {
+  const parts = item.changeParts || [];
+  // 葉に分かれない変更が1つでも残っていれば、入るものがある
+  const hasPlainChange = parts.length === 0 || parts.some(function (part) {
+    return !part.entries || part.entries.length === 0;
+  });
+  if (hasPlainChange) return true;
+
   const added = [];
-  (item.changeParts || []).forEach(function (part) {
-    (part.entries || []).forEach(function (entry) {
+  parts.forEach(function (part) {
+    part.entries.forEach(function (entry) {
       if (entry.state === 'added') added.push(entry.key);
     });
   });

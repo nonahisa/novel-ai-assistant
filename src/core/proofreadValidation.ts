@@ -2,6 +2,7 @@ import { locateChunkLine, segmentsOf, type Chunk } from "./chunker";
 import { normalizeForComparison } from "./groundedEvidence";
 import { isPlaceholderText } from "./placeholderText";
 import { nonJouyouKanjiIn } from "./jouyouKanji";
+import { opensOnyomiCompound } from "./onyomiReading";
 import { isKeptWord, type KeepWord } from "../models/keepWord";
 import {
   issueBudget,
@@ -75,6 +76,14 @@ export interface RejectedProofreadIssue {
     | "kept_word"
     /** 「同語反復」の札だが、台詞の中＝人物の話し方である */
     | "dialogue_voice"
+    /**
+     * 「漢字ひらき」の札だが、**音読みをつないだだけの熟語**をひらこうとしている。
+     *
+     * 音読みで普通に読める熟語をかなにしても読みやすくならない
+     * （作者の報告、2026-09-12。「基礎学力」→「きそがくりょく」）。
+     * むしろ読めなくなる。
+     */
+    | "onyomi_compound"
     /** 説明が、禁じた観点（語彙・文体など）を語っている */
     | "forbidden_aspect";
 }
@@ -718,6 +727,14 @@ export function validateProofreadIssues(
     // 届けない。** 4連続がチャンクのどこにも無ければ、それは語尾の指摘ではない
     if (reason === "語尾単調" && monotonousRuns().length === 0) {
       rejected.push({ raw: item, reason: "not_monotonous" });
+      continue;
+    }
+    // **音読みで普通に読める熟語は、かなにしても読みやすくならない**
+    // （作者の報告、2026-09-12）。「基礎学力」→「きそがくりょく」は
+    // むしろ読めない。**本当にひらくべき語（出来る・所謂・然し）は
+    // 音読みをつないだ形と一致しない**ので、ここで分けられる
+    if (reason === "漢字ひらき" && opensOnyomiCompound(original, suggestion)) {
+      rejected.push({ raw: item, reason: "onyomi_compound" });
       continue;
     }
     // **札ではなく中身を見る。** 語彙や文体の話が、許した札を着て入ってくる。
