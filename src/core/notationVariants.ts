@@ -95,6 +95,28 @@ export const KANA_KANJI_PAIRS: readonly KanaKanjiPair[] = [
   { kanji: "尚", kana: "なお", exclude: ["なおさら", "なおも"] },
 ];
 
+/**
+ * この文に、**ひらくよう勧めている語**（`KANA_KANJI_PAIRS` の漢字側）が
+ * 入っているか。
+ *
+ * 推敲の音読みの関門（`onyomiReading.ts`）が使う。関門は「音読みを
+ * つないだだけの熟語をひらこうとしていないか」で落とすが、**当て字にも
+ * 音読みで一致するものがある**——丁（チョウ）＋度（ド）＝ちょうど、
+ * 沢（タク）＋山（サン）＝たくさん、是（ゼ）＋非（ヒ）＝ぜひ。
+ * これらは常用漢字表に無い使い方なので、本当はひらくよう勧めたい。
+ *
+ * **例外の一覧を新しく作らない**（作者の裁定、2026-09-12）。この一覧は
+ * 既に「ひらくことを勧める語」として作者が決めたものなので、そのまま
+ * 例外として使う。二重管理にならず、足すときも1か所で済む。
+ *
+ * なお表記ゆれの検知そのものは**漢字とかなの両方が本文にあるとき**しか
+ * 出ない（揺れを見る仕組みだから）。漢字で通している箇所は表記ゆれから
+ * 届かないので、推敲の側で落としてはいけない。
+ */
+export function suggestsOpeningKanji(text: string): boolean {
+  return KANA_KANJI_PAIRS.some((pair) => text.includes(pair.kanji));
+}
+
 export interface DetectNotationOptions {
   /** 登録済みの固有名詞（人物・場所・能力・組織の name + aliases） */
   properNouns: string[];

@@ -3805,26 +3805,36 @@ export async function activate(
 
         // **誤字脱字と同じ数え方にする**（設計書6.8）。前に適用済み・
         // 解消済みだったものを「指摘」に数えると、パネルの見出しと食い違う。
-        // **捨てたぶんはここでは言わない**——推敲は「絞り込み」「語尾の
-        // 数え違い」と、より細かい内訳を下で出しており、総数を重ねると
-        // 同じものを二度数えたように見える
         const parts = describeCheckRunCounts({
           shown: shown.remaining,
           alreadyHandled: shown.handled,
           rejected: 0,
         });
+        /*
+          **落とした総数を1行だけ出す**（作者の裁定、2026-09-12）。
+
+          以前はここで黙っていた——下に「絞り込み」「語尾の数え違い」と
+          細かい内訳が並ぶので、総数を重ねると二度数えたように見えたためである。
+          だが黙ると、**製品が何件捨てたのかを作者が知る手立てが無い**
+          （操作ログには出ているが、そこまで見に行かない）。
+          総数を先に出し、下の3行は「うち」を付けて**内数だと分かる**ようにした。
+          理由の内訳までは出さない（作者の裁定。調べたいときは操作ログにある）。
+        */
+        if (result.rejectedCount > 0) {
+          parts.push(`AIの指摘のうち ${result.rejectedCount}件を落とした`);
+        }
         if (result.overBudgetCount > 0) {
           // 黙って絞ると「これで全部」と受け取られる
-          parts.push(`多すぎたぶん ${result.overBudgetCount}件を絞り込み`);
+          parts.push(`うち多すぎたぶん ${result.overBudgetCount}件を絞り込み`);
         }
         if (result.monotonyDroppedCount > 0) {
           // AIの「〜た。が5連続」を数え直して外したぶん（2026-09-04）
-          parts.push(`語尾の数え違い ${result.monotonyDroppedCount}件を除外`);
+          parts.push(`うち語尾の数え違い ${result.monotonyDroppedCount}件`);
         }
         if (result.monotonyMergedCount > 0) {
           // 同じ並びに何枚も出ていたぶん（2026-09-05）。黙って減らさない
           parts.push(
-            `語尾単調：同じ連続の重複${result.monotonyMergedCount}件をまとめた`
+            `うち語尾単調の同じ連続 ${result.monotonyMergedCount}件をまとめた`
           );
         }
         if (result.failedChunks > 0) {

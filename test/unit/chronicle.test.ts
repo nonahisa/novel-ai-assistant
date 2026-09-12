@@ -297,6 +297,75 @@ describe("年表の組み立て", () => {
     ]);
   });
 
+  it("**同じ話で同じ項目が2回変わったら、矢印のある側だけ出す**", () => {
+    /*
+      作者の報告（2026-09-05）：第1話の「変化」に同じ文言（紹介・役割・性格）が
+      2回ずつ並ぶ。畳まないと「紹介：A」と「紹介：A → B」が続き、A が2回出る。
+      作者の裁定（2026-09-12）：同じ話の中で同値なら畳む。
+      **A を捨てるのではなく、矢印のある側を残す**ので値は失われない。
+    */
+    const rows = build(EPISODES, [
+      character("char_001", "太志", {
+        changes: [
+          {
+            field: "summary",
+            value: "熱中症で死んだ少年の幽霊",
+            chapters: [2],
+            timepointId: null,
+            note: null,
+            evidence: null,
+            source: "author",
+          },
+          {
+            field: "summary",
+            value: "死んだ学生の霊で、母親を守ろうとする",
+            chapters: [2],
+            timepointId: null,
+            note: null,
+            evidence: null,
+            source: "author",
+          },
+        ],
+      }),
+    ]);
+
+    expect(rows[1].events.map((event) => event.text)).toEqual([
+      "紹介：熱中症で死んだ少年の幽霊 → 死んだ学生の霊で、母親を守ろうとする",
+    ]);
+  });
+
+  it("話をまたぐ変化は畳まない（別の行に出るので重ならない）", () => {
+    const rows = build(EPISODES, [
+      character("char_001", "太志", {
+        changes: [
+          {
+            field: "appearance",
+            value: "黒髪",
+            chapters: [2],
+            timepointId: null,
+            note: null,
+            evidence: null,
+            source: "author",
+          },
+          {
+            field: "appearance",
+            value: "銀髪",
+            chapters: [3],
+            timepointId: null,
+            note: null,
+            evidence: null,
+            source: "author",
+          },
+        ],
+      }),
+    ]);
+
+    expect(rows[1].events.map((event) => event.text)).toEqual(["外見：黒髪"]);
+    expect(rows[2].events.map((event) => event.text)).toEqual([
+      "外見：黒髪 → 銀髪",
+    ]);
+  });
+
   it("回収していない伏線は、回収の行を作らない", () => {
     // 「意図して開けたまま」に話数が残っていても、閉じたようには見せない
     const rows = build(EPISODES, [], null, [

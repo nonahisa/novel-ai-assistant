@@ -527,6 +527,28 @@ function addChangeEvents(place: Place, character: Character): void {
       const row = place(chapter);
       if (!row) return;
       const before = index > 0 ? ordered[index - 1].value : null;
+
+      /*
+        **同じ話の中で、次の変化がこの値を「元の値」として出すなら、
+        この行は出さない**（作者の裁定、2026-09-12）。
+
+        1つの話に同じ項目の変化が2つ入ると、
+        「紹介：A」と「紹介：A → B」が続けて並び、**A が2回出る**。
+        作者の報告（2026-09-05）：第1話の「変化」に同じ文言（紹介・役割・
+        性格）が2回ずつ並ぶ。話をまたぐ変化は、前の行が別の行にあるので
+        重ならない——**同じ行に落ちるときだけ**畳む。
+
+        A を捨てるのではなく、**矢印のある側だけを残す**（A → B）。
+        どちらも残せば値は失われず、読む側には1回しか出ない。
+      */
+      const next = ordered[index + 1];
+      if (next && next.value !== change.value) {
+        const nextChapter =
+          next.chapters.length > 0 ? earliest(next.chapters) : null;
+        // **次の行が本当に並ぶことを確かめる。** 絞り込みで落ちる行の
+        // ために消すと、値がどこにも出なくなる
+        if (nextChapter === chapter && place(nextChapter)) return;
+      }
       row.events.push({
         kind: "change",
         characterId: character.id,

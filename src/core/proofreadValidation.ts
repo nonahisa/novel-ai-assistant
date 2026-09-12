@@ -3,6 +3,7 @@ import { normalizeForComparison } from "./groundedEvidence";
 import { isPlaceholderText } from "./placeholderText";
 import { nonJouyouKanjiIn } from "./jouyouKanji";
 import { opensOnyomiCompound } from "./onyomiReading";
+import { suggestsOpeningKanji } from "./notationVariants";
 import { isKeptWord, type KeepWord } from "../models/keepWord";
 import {
   issueBudget,
@@ -733,7 +734,19 @@ export function validateProofreadIssues(
     // （作者の報告、2026-09-12）。「基礎学力」→「きそがくりょく」は
     // むしろ読めない。**本当にひらくべき語（出来る・所謂・然し）は
     // 音読みをつないだ形と一致しない**ので、ここで分けられる
-    if (reason === "漢字ひらき" && opensOnyomiCompound(original, suggestion)) {
+    /*
+      **ひらくよう勧めている語は、関門にかけない**（作者の裁定、2026-09-12）。
+      当て字には音読みで一致するものがある——丁度・沢山・素敵・是非・
+      大丈夫・折角。どれも常用漢字表に無い使い方なので、ひらくよう
+      勧めたい語である。表記ゆれの側は**漢字とかなの両方が本文にある
+      ときしか出ない**ので、漢字で通している箇所はここで落とすと
+      どこからも届かなくなる（9巡目に測って分かった）。
+    */
+    if (
+      reason === "漢字ひらき" &&
+      !suggestsOpeningKanji(original) &&
+      opensOnyomiCompound(original, suggestion)
+    ) {
       rejected.push({ raw: item, reason: "onyomi_compound" });
       continue;
     }
