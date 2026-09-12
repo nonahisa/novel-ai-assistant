@@ -180,6 +180,8 @@ import {
 import { NullGitSyncMonitor, type GitSyncMonitorLike } from "./features/gitSyncStub";
 import { canRunProcesses } from "./core/runtime";
 import { describeProcessesBlocked } from "./core/processAvailability";
+import { exclusiveLabelOf } from "./core/exclusiveCommands";
+import { beginCommand, endCommand } from "./core/runningCommands";
 // nextSetupStep, runSetupStep も core/git.ts 経由。動的importする
 
 import { resolveDeviceId } from "./core/device";
@@ -462,6 +464,14 @@ export async function activate(
   context: vscode.ExtensionContext
 ): Promise<{ extendMarkdownIt<T extends MarkdownItLike>(md: T): T }> {
   /**
+   * いま走っている操作（設計書6.17.4の末尾）。
+   *
+   * **`activate` のスコープに置く。** 拡張機能ホストが再読み込みされれば
+   * 箱ごと作り直されるので、解けないまま残ることがない。
+   */
+  const runningCommands = new Set<string>();
+
+  /**
    * コマンド登録の入口。**登録の口を1つにまとめておく。**
    *
    * 0.45.0 まではここで押した操作を記録していた（F5の開発ホスト限定。
@@ -469,12 +479,34 @@ export async function activate(
    * 登録が1か所であることに検査が拠っており（`contributesShape.test.ts` は
    * この関数へ渡すコマンドIDを読んで、宣言と突き合わせる）、
    * 80か所を素の `vscode.commands.registerCommand` へ散らす理由も無い。
+   *
+   * 0.49.3 から、**同じ操作の2本目をここで断る**（作者の報告 2026-09-12
+   * 「すべて同期を2回押してしまうことがあったが、複数立ちあがった」）。
+   * 対象は `exclusiveCommands.ts` に並べてあり、画面を開くだけのものは
+   * 入っていない。**断りはモーダルにしない**——作者は誤って2回押しただけで、
+   * 手を止めさせる場面ではない。
    */
   const registerCommand: typeof vscode.commands.registerCommand = (
     command,
     callback,
     thisArg
-  ) => vscode.commands.registerCommand(command, callback, thisArg);
+  ) =>
+    vscode.commands.registerCommand(command, async (...args: unknown[]) => {
+      if (!beginCommand(runningCommands, command)) {
+        const label = exclusiveLabelOf(command) ?? command;
+        vscode.window.showInformationMessage(
+          `「${label}」はいま動いています。終わるまでお待ちください。`
+        );
+        return undefined;
+      }
+      try {
+        return await callback.apply(thisArg, args);
+      } finally {
+        // **失敗しても、途中で止めても必ず解く。** 解き忘れると、その操作が
+        // 二度と押せなくなる（重複起動より重い壊れ方）
+        endCommand(runningCommands, command);
+      }
+    });
 
   /**
    * 作品に属さない生成文書（使い方・診断・セットアップの内訳・IME辞書の
