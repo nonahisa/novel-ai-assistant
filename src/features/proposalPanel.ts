@@ -18,6 +18,7 @@ import type { DeviationIssue } from "./checkDeviations";
 import { FACT_CONTRADICTION_CATEGORY } from "../core/factContradiction";
 import { buildProposalPanelHtml } from "../views/proposalPanelHtml";
 import { diffChars, type DiffSegment } from "../core/inlineDiff";
+import type { DiffEntry } from "../core/characterDiff";
 import { KeepWordStore } from "../core/keepWordStore";
 import { validateKeepWord } from "../models/keepWord";
 import { explainProofreadReason } from "../core/proofreadValidation";
@@ -368,6 +369,15 @@ export interface RecordChangePart {
   after: string;
   /** 違うところ。`before` を `after` にするための区間の並び */
   diff: DiffSegment[];
+  /**
+   * 1つずつ落とせる値（作者の依頼、2026-09-12）。
+   *
+   * **名前の並ぶ3項目（呼称・関係・別名）だけが持つ。** 「中神隼人→
+   * ハヤブサ先生・先生・センパイ」のうち1つだけが違うとき、レコードごと
+   * 見送るか間違ったまま反映するかの二択になっていた。
+   * 無ければ、更新案の側はこれまでどおり塗り分けて出す。
+   */
+  entries?: DiffEntry[];
 }
 
 export interface RecordUpdateViewItem {
@@ -476,7 +486,14 @@ type IssuesMessage = {
 
 type IncomingMessage =
   | { type: "jump"; id: string }
-  | { type: "apply"; id: string }
+  /**
+   * 反映する。
+   *
+   * `dropKeys` は、設定資料の更新で作者が ✕ を付けた葉の鍵
+   * （設計書6.32）。**承認待ちのファイルは書き換えず**、保存の直前に
+   * メモリの上で落とす。
+   */
+  | { type: "apply"; id: string; dropKeys?: string[] }
   | { type: "undo"; id: string }
   | { type: "dismiss"; id: string }
   | { type: "keepWord"; id: string }
@@ -514,7 +531,11 @@ interface CategoryBucket {
   items: ProposalViewItem[];
   contradictions: ContradictionViewItem[];
   recordUpdates: RecordUpdateViewItem[];
-  applyRecordUpdate?: (id: string) => Promise<{ ok: boolean; reason?: string }>;
+  applyRecordUpdate?: (
+    id: string,
+    /** 作者が ✕ を付けた葉の鍵（設計書6.32） */
+    dropKeys?: string[]
+  ) => Promise<{ ok: boolean; reason?: string }>;
   /**
    * 更新を見送る処理（承認待ちから片付ける）。**apply と必ず対にする。**
    * これが無かったころ、「見送る」は押しても黙って何も起きなかった
@@ -591,7 +612,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   private recordUpdates: RecordUpdateViewItem[] = [];
   /** 更新を反映する処理。呼び出し側から渡してもらう */
   private applyRecordUpdate:
-    | ((id: string) => Promise<{ ok: boolean; reason?: string }>)
+    | ((
+        id: string,
+        dropKeys?: string[]
+      ) => Promise<{ ok: boolean; reason?: string }>)
     | undefined;
   /** 更新を見送る処理（承認待ちから片付ける）。apply と対 */
   private dismissRecordUpdate:
@@ -719,7 +743,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       contradictions?: ContradictionViewItem[];
       recordUpdates?: RecordUpdateViewItem[];
       applyRecordUpdate?: (
-        id: string
+        id: string,
+        dropKeys?: string[]
       ) => Promise<{ ok: boolean; reason?: string }>;
       dismissRecordUpdate?: (
         id: string
@@ -1311,7 +1336,11 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   showRecordUpdates(
     work: WorkEntry,
     items: RecordUpdateViewItem[],
-    apply: (id: string) => Promise<{ ok: boolean; reason?: string }>,
+    apply: (
+      id: string,
+      /** 作者が ✕ を付けた葉の鍵（設計書6.32） */
+      dropKeys?: string[]
+    ) => Promise<{ ok: boolean; reason?: string }>,
     /** 見送る（承認待ちから片付ける）。渡さないと「見送る」は押せても効かない */
     dismiss: (id: string) => Promise<{ ok: boolean; reason?: string }>,
     /**
@@ -1693,7 +1722,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         await this.jumpTo(message.id);
         return;
       case "apply":
-        await this.applyIssue(message.id);
+        await this.applyIssue(message.id, message.dropKeys);
         return;
       case "undo":
         await this.undoIssue(message.id);
@@ -1950,12 +1979,21 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     );
   }
 
-  private async applyIssue(id: string): Promise<void> {
+  private async applyIssue(
+    id: string,
+    /**
+     * 設定資料の更新で、作者が ✕ を付けた葉の鍵（設計書6.32）。
+     *
+     * **まとめて適用（`applyAllRecordUpdates`）からは渡らない。**
+     * 印は画面の中にしかなく、1件ずつの「反映する」でだけ効く
+     */
+    dropKeys?: string[]
+  ): Promise<void> {
     // 設定資料の更新は、本文ではなくレコードを書き換える
     const update = this.recordUpdates.find((entry) => entry.id === id);
     if (update && this.applyRecordUpdate) {
       if (update.status === "applied") return;
-      const outcome = await this.applyRecordUpdate(id);
+      const outcome = await this.applyRecordUpdate(id, dropKeys);
       this.markStatus(
         id,
         outcome.ok ? "applied" : "failed",

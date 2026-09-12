@@ -217,6 +217,47 @@ body.show-low .issue.low { display: flex; }
   color: var(--vscode-descriptionForeground);
   font-size: 12px;
 }
+/*
+  更新案の中の1つずつ（作者の依頼、2026-09-12）。
+
+  「呼称にハヤブサ先生があり、これが間違いです。この画面でここだけ
+  消したりできないでしょうか？」——1つだけ落とせるよう、葉ごとに枠を付ける。
+  **足される値にだけ ✕ を出す**ので、そこだけ色を変えて見分けられるようにする。
+*/
+.entries { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px 0 4px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+}
+.entry.added {
+  background-color: var(--vscode-diffEditor-insertedTextBackground, rgba(76, 175, 80, 0.28));
+}
+.entry.removed {
+  background-color: var(--vscode-diffEditor-removedTextBackground, rgba(255, 90, 90, 0.28));
+  text-decoration: line-through;
+}
+/* 落とす印。押した葉は入らない——見れば分かるよう、薄くして線を引く */
+.entry.dropped {
+  background: none;
+  border-color: var(--vscode-panel-border);
+  color: var(--vscode-descriptionForeground);
+  text-decoration: line-through;
+}
+.entry button.drop {
+  padding: 0 4px;
+  min-height: 0;
+  line-height: 1.4;
+  font-size: 11px;
+  background: none;
+  border: none;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+}
+.entry button.drop:hover { color: var(--vscode-foreground); }
 .reason { color: var(--vscode-descriptionForeground); font-size: 12px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 /*
@@ -316,6 +357,17 @@ let runningState = null;
 const emptyDefault = emptyEl.textContent;
 /** 直近に描いた件数。進み具合をどちらへ出すかの判断に使う */
 let lastItemCount = 0;
+/**
+ * 落とす印の付いた葉（作者の依頼、2026-09-12）。レコードidごとの鍵の集合。
+ *
+ * **画面の中だけの話である。** 押した時点では何も書き換えず、
+ * 「反映する」を押したときに鍵の一覧を添えて送る。
+ * 描き直しで消えないよう、一覧の外に持つ。
+ */
+const droppedEntries = new Map();
+/** 直近に描いた一覧。✕ を押したときに、同じものを描き直すために持つ */
+let lastItems = [];
+let lastWorkTitle = '';
 
 function paintRunning() {
   /*
@@ -443,15 +495,53 @@ function render(workTitle, items) {
   );
   countEl.textContent = remaining.length + '件';
   lastItemCount = items.length;
+  // ✕ を押したときに、同じものを描き直すために控える
+  lastItems = items;
+  lastWorkTitle = workTitle;
   // 案内を出すか、進み具合を出すかは1か所で決める（両方が同じ場所を使う）
   paintRunning();
   listEl.innerHTML = items.map(renderItem).join('');
 
   listEl.querySelectorAll('[data-action]').forEach((el) => {
     el.addEventListener('click', () => {
+      // **葉の ✕ は、まだ何も決めていない。** 送らずに印を付け替えるだけ
+      if (el.dataset.action === 'dropEntry') {
+        toggleDrop(el.dataset.id, el.dataset.key);
+        return;
+      }
+      // 反映のときだけ、落とす印の付いた鍵を添える（設計書6.32）
+      if (el.dataset.action === 'apply') {
+        vscode.postMessage({
+          type: 'apply',
+          id: el.dataset.id,
+          dropKeys: Array.from(dropSetOf(el.dataset.id)),
+        });
+        return;
+      }
       vscode.postMessage({ type: el.dataset.action, id: el.dataset.id });
     });
   });
+}
+
+/** そのレコードで落とす印の付いた鍵の集合。無ければ作る */
+function dropSetOf(id) {
+  let set = droppedEntries.get(id);
+  if (!set) {
+    set = new Set();
+    droppedEntries.set(id, set);
+  }
+  return set;
+}
+
+/** ✕ を押した／もう一度押した。画面の中だけで塗り替える */
+function toggleDrop(id, key) {
+  const set = dropSetOf(id);
+  if (set.has(key)) {
+    set.delete(key);
+  } else {
+    set.add(key);
+  }
+  render(lastWorkTitle, lastItems);
 }
 
 /**
@@ -484,16 +574,59 @@ function renderRecordChanges(item) {
   // **設定資料は矢印で1行に並べない。** 紹介文は本文の直しより長く、
   // 横に繋ぐと折り返して読めなくなる。上下に並べて、頭に何かを書く
   return item.changeParts.map(function (part) {
+    // 名前の並ぶ項目（呼称・関係・別名）は、1つずつ落とせる形で出す
+    const updated = (part.entries && part.entries.length > 0)
+      ? renderEntries(item, part)
+      : '<span class="to">' + diffSide(part.diff, 'to', part.after) + '</span>';
     return '<div class="change">' +
       '<div class="reason">' + escapeHtml(part.label) + '</div>' +
       '<div class="diff">' +
       '<div><span class="side">現在</span>' +
       '<span class="from">' + diffSide(part.diff, 'from', part.before) + '</span></div>' +
-      '<div><span class="side">更新案</span>' +
-      '<span class="to">' + diffSide(part.diff, 'to', part.after) + '</span></div>' +
+      '<div><span class="side">更新案</span>' + updated + '</div>' +
       '</div>' +
       '</div>';
   }).join('');
+}
+
+/**
+ * 更新案を、落とせる葉の並びとして出す（作者の依頼、2026-09-12）。
+ *
+ * **✕ を出すのは「足される値」だけ。** 消える値を引き止める仕掛けは
+ * 別の話なので、ここでは作らない（押せるのに何も起きないボタンにしない）。
+ */
+function renderEntries(item, part) {
+  const dropped = dropSetOf(item.id);
+  return '<span class="entries">' + part.entries.map(function (entry) {
+    const classes = ['entry', entry.state];
+    if (dropped.has(entry.key)) classes.push('dropped');
+    return '<span class="' + classes.join(' ') + '">' +
+      escapeHtml(entry.text) +
+      (entry.state === 'added'
+        ? '<button class="drop" data-action="dropEntry" data-id="' +
+          escapeHtml(item.id) + '" data-key="' + escapeHtml(entry.key) +
+          '" title="この値は入れない">✕</button>'
+        : '') +
+      '</span>';
+  }).join('') + '</span>';
+}
+
+/**
+ * 反映を押せるか。
+ *
+ * **足される値を全部落としたら押せなくする。** 何も足さない反映は、
+ * 見送るのと同じである。葉に分かれない項目しか無い更新は、今までどおり。
+ */
+function canApplyRecordUpdate(item) {
+  const added = [];
+  (item.changeParts || []).forEach(function (part) {
+    (part.entries || []).forEach(function (entry) {
+      if (entry.state === 'added') added.push(entry.key);
+    });
+  });
+  if (added.length === 0) return true;
+  const dropped = dropSetOf(item.id);
+  return added.some(function (key) { return !dropped.has(key); });
 }
 
 /**
@@ -527,7 +660,10 @@ function renderRecordUpdate(item) {
         // **押した結果が何になるかで呼び名が変わる**（設計書6.35.2）。
         // 設定資料は「反映する」だが、伏線の候補は「登録」、
         // 回収の候補は「回収済みにする」である
-        '<button data-action="apply" data-id="' + item.id + '">' +
+        // 足される値を全部落としたら押せなくする（何も足さない反映は、
+        // 見送ると同じ）。押せないだけで、見送る道は残す
+        '<button data-action="apply" data-id="' + item.id + '"' +
+        (canApplyRecordUpdate(item) ? '' : ' disabled') + '>' +
         escapeHtml(item.applyLabel || '反映する') + '</button>' +
         '<button class="secondary" data-action="dismiss" data-id="' + item.id + '">見送る</button>' +
         '</div>'

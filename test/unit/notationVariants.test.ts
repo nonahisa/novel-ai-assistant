@@ -6,6 +6,11 @@ import {
   type NotationSource,
 } from "../../src/core/notationVariants";
 import { buildUniqueContext } from "../../src/features/checkNotation";
+import {
+  DIGIT_WIDTH_FULL,
+  DIGIT_WIDTH_HALF,
+  digitWidthReplacement,
+} from "../../src/core/digitWidth";
 
 function source(body: string, startLine = 1, filePath = "C:\\work\\001.txt"): NotationSource {
   return { filePath, body, startLine };
@@ -287,30 +292,45 @@ describe("重なる組を畳む", () => {
 });
 
 /**
- * 半角の数字1文字を全角へ促す（作者の依頼、2026-09-12）。
+ * 半角の数字を全角へ促す（作者の依頼、2026-09-12）。
  *
  * ほかの組と違って、**全角が1度も出ていなくても組を返す**。「揺れている
  * ものを揃える」のではなく「半角のままなら全角にするよう促す」ためである。
+ *
+ * **0〜9をまとめて1組にする**（作者の指示、2026-09-12
+ * 「1〜9の数字の指摘はまとめてかまいません」）。
  */
-describe("半角の数字1文字を全角へ促す", () => {
-  /** その数字の組（半角・全角のどちらの表記でも引ける） */
-  function digitGroup(
-    groups: ReturnType<typeof detectNotationVariants>,
-    half: string
-  ) {
-    return groups.find((entry) => entry.key === `digit_width:${half}`);
+describe("半角の数字を全角へ促す", () => {
+  /** 数字の組は1つだけ */
+  function digitGroup(groups: ReturnType<typeof detectNotationVariants>) {
+    return groups.find((entry) => entry.kind === "digit_width");
   }
 
-  test("単独の半角数字が3件あれば、3つの組が出る", () => {
+  test("数字が何種類出ていても、組は1つにまとめる", () => {
     const groups = detectNotationVariants([source("3月5日に2人で")], {
       properNouns: [],
     });
 
     const digits = groups.filter((entry) => entry.kind === "digit_width");
-    expect(digits.map((entry) => entry.key).sort()).toEqual([
-      "digit_width:2",
-      "digit_width:3",
-      "digit_width:5",
+    expect(digits).toHaveLength(1);
+    expect(digits[0].key).toBe("digit_width");
+    expect(digits[0].forms.map((form) => form.surface).sort()).toEqual([
+      "2",
+      "3",
+      "5",
+    ]);
+  });
+
+  test("0 も同じ組に入れる（1つだけ別の組に残さない）", () => {
+    const groups = detectNotationVariants([source("0時に集合。3人来た。")], {
+      properNouns: [],
+    });
+
+    const digits = groups.filter((entry) => entry.kind === "digit_width");
+    expect(digits).toHaveLength(1);
+    expect(digits[0].forms.map((form) => form.surface).sort()).toEqual([
+      "0",
+      "3",
     ]);
   });
 
@@ -319,13 +339,12 @@ describe("半角の数字1文字を全角へ促す", () => {
       properNouns: [],
     });
 
-    const found = digitGroup(groups, "3");
+    const found = digitGroup(groups);
     expect(found).toBeDefined();
-    expect(found?.label).toBe("半角の数字1文字（3）↔ 全角（３）");
-    // **先頭が揃える先の既定。** まとめて決めたときに全角が選ばれる
-    expect(found?.forms.map((form) => form.surface)).toEqual(["３", "3"]);
-    expect(found?.forms[0].occurrences).toHaveLength(0);
-    expect(found?.forms[1].occurrences).toHaveLength(1);
+    expect(found?.label).toBe("半角の数字（0〜9）↔ 全角");
+    // 出ていない表記は並べない（全角の form は作らない）
+    expect(found?.forms.map((form) => form.surface)).toEqual(["3"]);
+    expect(found?.forms[0].occurrences).toHaveLength(1);
   });
 
   test("2文字以上の並びは促さない（縦中横で立つ）", () => {
@@ -352,18 +371,20 @@ describe("半角の数字1文字を全角へ促す", () => {
     expect(groups.filter((entry) => entry.kind === "digit_width")).toEqual([]);
   });
 
-  test("半角と全角が混ざっていれば、1組に両方の出現が入る", () => {
+  test("半角と全角が混ざっていれば、1組に両方の form が入る", () => {
     const groups = detectNotationVariants(
-      [source("3月に来た。\n３月に帰った。\n３日だけ居た。")],
+      [source("3月に来た。\n３月に帰った。\n５日だけ居た。")],
       { properNouns: [] }
     );
 
-    const found = digitGroup(groups, "3");
+    const found = digitGroup(groups);
     expect(
       found?.forms.map((form) => [form.surface, form.occurrences.length])
     ).toEqual([
-      ["３", 2],
+      // 直す対象（半角）を先に並べる
       ["3", 1],
+      ["３", 1],
+      ["５", 1],
     ]);
   });
 
@@ -372,7 +393,7 @@ describe("半角の数字1文字を全角へ促す", () => {
       properNouns: [],
     });
 
-    const half = digitGroup(groups, "5")?.forms.find(
+    const half = digitGroup(groups)?.forms.find(
       (form) => form.surface === "5"
     );
     expect(half?.occurrences).toHaveLength(1);
@@ -382,35 +403,103 @@ describe("半角の数字1文字を全角へ促す", () => {
 
   /**
    * 揃える適用（`proposalPanel.ts`）は、行の中から `original` を探し、
-   * その中の `target` を `suggestion` へ置き換える。**その1か所だけが
-   * 変わること**を、適用と同じ手順で確かめる（本文を書き換える処理は
-   * 増やさない決まりなので、既存の経路に載るかどうかが要）。
+   * その中の `target` を `suggestion` へ置き換える。**1組の中で出現ごとに
+   * 置換先が違っても、その1か所だけが変わること**を、適用と同じ手順で
+   * 確かめる（本文を書き換える処理は増やさない決まりなので、既存の
+   * 経路に載るかどうかが要）。
    */
-  test("揃えると、その1か所だけが全角になる", () => {
-    const lineText = "　3月5日に2人で";
+  test("全角へ揃えると、数字ごとに正しい全角へ変わり、元から全角の箇所は動かない", () => {
+    const lineText = "　3月5日に２人で";
     const groups = detectNotationVariants([source(lineText)], {
       properNouns: [],
     });
+    const found = digitGroup(groups);
+    expect(found).toBeDefined();
 
-    const occurrence = digitGroup(groups, "5")?.forms.find(
-      (form) => form.surface === "5"
-    )?.occurrences[0];
-    expect(occurrence).toBeDefined();
+    // 「全角に揃える」を選んだときの、出現ごとの置換先
+    const planned = found!.forms.flatMap((form) => {
+      const to = digitWidthReplacement(form.surface, DIGIT_WIDTH_FULL);
+      if (to === undefined) return [];
+      return form.occurrences.map((occurrence) => ({
+        from: form.surface,
+        to,
+        column: occurrence.column,
+      }));
+    });
 
-    // 提案パネルへ渡るのと同じ材料を組み立てる
-    const original = buildUniqueContext(lineText, occurrence!.column, 1);
-    const target = "5";
-    const suggestion = "５";
+    // 元から全角の「２」は候補に出ない（直すものが無い）
+    expect(planned.map((plan) => [plan.from, plan.to])).toEqual([
+      ["3", "３"],
+      ["5", "５"],
+    ]);
 
     // 適用と同じ手順（行の中から original を探し、その中の target を置換）
-    const originalIndexInLine = lineText.indexOf(original);
-    const targetIndexInOriginal = original.indexOf(target);
-    expect(originalIndexInLine).toBeGreaterThanOrEqual(0);
-    expect(targetIndexInOriginal).toBeGreaterThanOrEqual(0);
-    const at = originalIndexInLine + targetIndexInOriginal;
-    const applied =
-      lineText.slice(0, at) + suggestion + lineText.slice(at + target.length);
+    const applied = planned.map((plan) => {
+      const original = buildUniqueContext(lineText, plan.column, 1);
+      const at = lineText.indexOf(original) + original.indexOf(plan.from);
+      return (
+        lineText.slice(0, at) + plan.to + lineText.slice(at + plan.from.length)
+      );
+    });
 
-    expect(applied).toBe("　3月５日に2人で");
+    expect(applied).toEqual(["　３月5日に２人で", "　3月５日に２人で"]);
+  });
+
+  test("半角に揃えるときは、全角の出現だけが対象になる", () => {
+    const groups = detectNotationVariants([source("3月と５日")], {
+      properNouns: [],
+    });
+
+    const planned = digitGroup(groups)!.forms.flatMap((form) => {
+      const to = digitWidthReplacement(form.surface, DIGIT_WIDTH_HALF);
+      return to === undefined ? [] : [[form.surface, to]];
+    });
+
+    expect(planned).toEqual([["５", "5"]]);
+  });
+});
+
+describe("全角側も、単独の1文字だけを拾う（0.49.4 の検収）", () => {
+  /**
+   * 半角側は縦中横の規則で1文字の並びだけに絞っているのに、
+   * 全角側だけ素の部分一致だった。「半角に揃える」を選んだときに、
+   * 年号の途中の1文字が候補に並ぶ。
+   */
+  function digitGroup(body: string) {
+    const groups = detectNotationVariants(
+      [{ filePath: "C:/w/001.txt", body, startLine: 1 }],
+      { properNouns: [] }
+    );
+    return groups.find((group) => group.kind === "digit_width");
+  }
+
+  test("**全角の連番の中の1文字は拾わない**", () => {
+    // 「２０２６年に3人」——半角の3は拾い、全角の２０２６は拾わない
+    const group = digitGroup("２０２６年に3人が来た。");
+
+    expect(group).toBeDefined();
+    const surfaces = group!.forms.map((form) => form.surface);
+    expect(surfaces).toContain("3");
+    expect(surfaces).not.toContain("２");
+    expect(surfaces).not.toContain("０");
+    expect(surfaces).not.toContain("６");
+  });
+
+  test("単独の全角数字は拾う", () => {
+    const group = digitGroup("３月に5人が来た。");
+
+    expect(group).toBeDefined();
+    const surfaces = group!.forms.map((form) => form.surface);
+    expect(surfaces).toContain("5");
+    expect(surfaces).toContain("３");
+  });
+
+  test("全角の型番（Ａ１）も拾わない", () => {
+    const group = digitGroup("型番はＡ１で、7個ある。");
+
+    expect(group).toBeDefined();
+    const surfaces = group!.forms.map((form) => form.surface);
+    expect(surfaces).toContain("7");
+    expect(surfaces).not.toContain("１");
   });
 });

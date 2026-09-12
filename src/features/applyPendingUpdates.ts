@@ -20,6 +20,7 @@ import {
   type CharacterDiff,
 } from "../core/characterDiff";
 import { diffChars } from "../core/inlineDiff";
+import { dropDiffEntries } from "../core/dropDiffEntries";
 import { CustomFieldStore } from "../core/customFieldStore";
 import { logFailure, useLogFile } from "../core/logger";
 import { openGeneratedMarkdown } from "../views/openDocument";
@@ -95,14 +96,22 @@ function describeChange(item: ReviewItem): string {
 async function applyItem(
   item: ReviewItem,
   characterStore: CharacterStore,
-  known: Character[]
+  known: Character[],
+  /**
+   * 実際に書き込むレコード。
+   *
+   * 既定は更新案そのままだが、作者が画面で葉に ✕ を付けた場合は
+   * その分を落としたものが渡る（設計書6.32）。**承認待ちのファイルは
+   * 触らない**ので、落とした形はここへ引数で来る。
+   */
+  character: Character = item.update.character
 ): Promise<void> {
   if (!isCreation(item)) {
-    await characterStore.saveOrUpdate(item.update.character);
+    await characterStore.saveOrUpdate(character);
     return;
   }
   const created: Character = {
-    ...item.update.character,
+    ...character,
     id: nextCharacterId(known),
   };
   await characterStore.saveOrUpdate(created);
@@ -242,6 +251,8 @@ export function recordUpdateViewItems(
         before,
         after,
         diff: diffChars(before, after),
+        // 呼称・関係・別名は、1つずつ落とせる形でも渡す（設計書6.32）
+        entries: change.entries,
       };
     }),
     source: describeChange(item),
@@ -267,14 +278,27 @@ function showInPanel(
   panel.showRecordUpdates(
     work,
     recordUpdateViewItems(review),
-    async (id) => {
+    async (id, dropKeys) => {
       const target = find(id);
       if (!target) return { ok: false, reason: "対象が見つかりません。" };
       try {
+        // **作者が ✕ を付けた葉は、保存の直前に落とす**（設計書6.32）。
+        // 承認待ちのファイルは書き換えない——印はその1回の反映にだけ効く
+        const { character, dropped } = dropDiffEntries(
+          target.update.character,
+          dropKeys ?? []
+        );
         // 既存ファイルは上書きできないので saveOrUpdate を通す
         // （新規案はここでIDを採る。`applyItem` を参照）
-        await applyItem(target, review.characterStore, review.known);
+        await applyItem(target, review.characterStore, review.known, character);
         await review.pendingStore.discard(target.update.filePath);
+        // **黙って落としたことにしない**（CLAUDE.md 規則2）。
+        // 何件が入らなかったのかを、その場で伝える
+        if (dropped > 0) {
+          void vscode.window.showInformationMessage(
+            `${target.diff.name}：${dropped} 件を落として反映しました。`
+          );
+        }
         return { ok: true };
       } catch (error) {
         const message =

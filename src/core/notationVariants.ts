@@ -1,5 +1,6 @@
 import { OKURIGANA_GROUPS } from "./okuriganaVariants";
 import { tcyRuns } from "./tateChuYoko";
+import { FULLWIDTH_DIGITS } from "./digitWidth";
 /**
  * 表記ゆれ検知（P-13）の判定部分。
  *
@@ -353,9 +354,6 @@ function detectOkuriganaVariants(
   return groups;
 }
 
-/** 全角の数字。半角の `0`〜`9` と同じ並びで持つ */
-const FULLWIDTH_DIGITS = "０１２３４５６７８９";
-
 /**
  * 単独の半角数字を、全角へ揃えるよう促す（作者の依頼、2026-09-12
  * 「表記揺れで、半角1文字の数字は全角にするよう促したほうが良いかも」）。
@@ -373,13 +371,22 @@ const FULLWIDTH_DIGITS = "０１２３４５６７８９";
  * 一度も全角を使っていない原稿こそ、いちばん促す値打ちがある。
  * ただし**半角が1件も無ければ出さない**（直すものが無い）。
  *
- * ## 数字ごとに組を分ける
+ * ## 0〜9をまとめて1組にする（作者の指示、2026-09-12）
  *
- * 0〜9をまとめて1組にすると作者の手数は減るが、**揃える処理は
- * 「surface を suggestion へ置き換える」作り**である
- * （`features/checkNotation.ts` の `buildIssue` と提案パネルの適用）。
- * まとめると置換先が数字ごとに違ってしまい、その作りに載らない。
- * 数字ごとに分ければ、実績のある適用経路をそのまま使える。
+ * 「1〜9の数字の指摘はまとめてかまいません」。0.48.0 では数字ごとに
+ * 組を分けており、**最大10組が一覧に並んでいた**。
+ *
+ * **`0` も同じ組に入れる。** 作者の言葉は「1〜9」だが、`0` だけを外すと
+ * `0` が単独の組として残り、まとめた意味が無くなる。
+ *
+ * 分けていた理由は「揃える先を1つ選ばせる」ためだったが、指摘の組み立て
+ * （`features/checkNotation.ts`）は**出現1件ごとに置換先を決められる**。
+ * 決め打ちだったのは選ばせ方のほうなので、そちらを「幅で選ぶ」形に変えた。
+ *
+ * **無視の記録（「今後直さない」）は、この変更では失われない。**
+ * 鍵は組の `key` ではなく「ファイル名・行・対象・置換先」で作られている
+ * （`core/typoIssueHistory.ts` の `dismissKey`）。`3` → `３` の記録は、
+ * 組がまとまったあとも同じ鍵になる。
  *
  * ## 拾う範囲は縦中横と同じ規則
  *
@@ -391,31 +398,35 @@ const FULLWIDTH_DIGITS = "０１２３４５６７８９";
 function detectDigitWidthVariants(
   sources: NotationSource[]
 ): NotationVariantGroup[] {
-  const groups: NotationVariantGroup[] = [];
+  // **直す対象（半角）を先に、数字の昇順で並べる。** ほかの組のように
+  // 「出現の多い順（先頭が揃える先の既定）」にはしない——この組の揃える先は
+  // 表記ではなく幅で選ぶので（`checkNotation.ts` の `pickTargetForm`）、
+  // 並び順が既定を決めることはない
+  const halfForms: NotationVariantForm[] = [];
+  const fullForms: NotationVariantForm[] = [];
 
   for (let digit = 0; digit <= 9; digit++) {
     const half = String(digit);
-    const full = FULLWIDTH_DIGITS[digit];
-
-    const halfOccurrences = findSingleDigitOccurrences(sources, half);
-    if (halfOccurrences.length === 0) continue;
-
-    groups.push({
-      kind: "digit_width",
-      key: `digit_width:${half}`,
-      label: `半角の数字1文字（${half}）↔ 全角（${full}）`,
-      // **全角を先頭に置く。** `forms` の先頭は「揃える先の既定」であり
-      // （まとめて決めるときはここが選ばれる）、この組は全角へ促すために
-      // ある。出現数の多い順に並べる決まりは、どちらへ揃えるか機械では
-      // 決められない組のためのものなので、ここでは当てはまらない
-      forms: [
-        { surface: full, occurrences: findOccurrences(sources, full) },
-        { surface: half, occurrences: halfOccurrences },
-      ],
-    });
+    const occurrences = findSingleDigitOccurrences(sources, half);
+    if (occurrences.length > 0) halfForms.push({ surface: half, occurrences });
   }
 
-  return groups;
+  // 半角が1件も無ければ、促すものが無い
+  if (halfForms.length === 0) return [];
+
+  for (const full of FULLWIDTH_DIGITS) {
+    const occurrences = findSingleFullWidthOccurrences(sources, full);
+    if (occurrences.length > 0) fullForms.push({ surface: full, occurrences });
+  }
+
+  return [
+    {
+      kind: "digit_width",
+      key: "digit_width",
+      label: "半角の数字（0〜9）↔ 全角",
+      forms: [...halfForms, ...fullForms],
+    },
+  ];
 }
 
 /**
@@ -442,6 +453,46 @@ function findSingleDigitOccurrences(
           line: source.startLine + index,
           lineText,
           column: run.start,
+        });
+      }
+    });
+  }
+
+  return found;
+}
+
+/**
+ * **単独の全角数字**だけを拾う（半角側と同じ線）。
+ *
+ * `findOccurrences` は**ただの部分一致**なので、「２０２６年」の中の
+ * 「２」まで拾ってしまう。半角側は縦中横の規則（`tcyRuns`）で
+ * 1文字の並びだけに絞っているのに、全角側だけ素通しでは食い違う
+ * ——「半角に揃える」を選んだときに、年号の途中の1文字が候補に並ぶ
+ * （0.49.4 の検収で見つけた）。
+ *
+ * 単独とみなさないのは、**前後が数字・英字のとき**である。
+ * 全角と半角のどちらの数字・英字も見る（「２0」「Ａ１」のような混ざった形）。
+ */
+function findSingleFullWidthOccurrences(
+  sources: NotationSource[],
+  digit: string
+): NotationOccurrence[] {
+  const neighbour = /[0-9A-Za-z\uff10-\uff19\uff21-\uff3a\uff41-\uff5a]/u;
+  const found: NotationOccurrence[] = [];
+
+  for (const source of sources) {
+    const lines = source.body.split(String.fromCharCode(10));
+    lines.forEach((lineText, index) => {
+      for (let at = 0; at < lineText.length; at++) {
+        if (lineText[at] !== digit) continue;
+        const before = at > 0 ? lineText[at - 1] : "";
+        const after = at + 1 < lineText.length ? lineText[at + 1] : "";
+        if (neighbour.test(before) || neighbour.test(after)) continue;
+        found.push({
+          filePath: source.filePath,
+          line: source.startLine + index,
+          lineText,
+          column: at,
         });
       }
     });
