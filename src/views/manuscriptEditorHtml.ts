@@ -1298,7 +1298,12 @@ ruby > rt {
     askEmphasis();
   });
   document.getElementById("copy").addEventListener("click", function () {
-    vscode.postMessage({ type: "copyForPosting" });
+    /*
+      **カーソルの行を添える。** 合本（1ファイルに全話）を開いていると、
+      どの話をコピーするのかは位置でしか分からない（設計書6.12.1）。
+      合本でなければ拡張機能側が黙って捨てる。
+    */
+    vscode.postMessage({ type: "copyForPosting", line: caretLine() });
   });
 
   /** 選んでいる文字。組んで書く面では選択範囲、書く面では textarea の選択 */
@@ -1817,7 +1822,9 @@ ruby > rt {
     add("傍点を付ける", askEmphasis, hasSelection);
     rule();
     add("投稿サイト用にコピー", function () {
-      vscode.postMessage({ type: "copyForPosting" });
+      // **品書きから使う行を渡す。** 組んで書く面では、押した瞬間には
+      // 選択が外れている（設計書6.12.1）
+      vscode.postMessage({ type: "copyForPosting", line: menuCaretLine() });
     });
     add("選んだところをAIに相談", function () {
       // 組んで書く面では、品書きを開いた時点の選択を使う。

@@ -126,7 +126,11 @@ describe("投稿サイト用のコピー", () => {
     const call = source.match(/const source = sourceForPostingCopy\([\s\S]*?\);/);
 
     expect(call).not.toBeNull();
-    expect(call?.[0]).toContain("sourceForPostingCopy(document.getText())");
+    expect(call?.[0]).toContain("document.getText()");
+    // 0.48.1：合本なら、カーソルの居る1話だけを渡す（設計書6.12.1）。
+    // **この画面は選択を渡す道が無い**ので、手で1話ぶんを選ぶ逃げ道も無い
+    expect(call?.[0]).toContain("collected?.body");
+    expect(source).toContain("collectedEpisodeAt(document.getText(), caretLine)");
     expect(source).toContain("convertForPosting(source, target)");
   });
 });

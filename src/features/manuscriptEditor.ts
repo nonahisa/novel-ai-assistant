@@ -62,7 +62,12 @@ import {
   validateEmphasis,
   validateRuby,
 } from "../core/ruby";
-import { sourceForPostingCopy } from "../core/episodeCopy";
+import {
+  collectedEpisodeAt,
+  sourceForPostingCopy,
+} from "../core/episodeCopy";
+// 合本の見出しの作り方は1か所に置く（写しを作らない）
+import { collectedEpisodeLabel } from "./pickCollectedEpisode";
 // 貼り付け先ごとの分岐は、入口ではなく変換の側に置く（設計書6.84）
 import { convertForPosting } from "../core/postingConvert";
 import { showPostingCopyNotice } from "./postingCopyNotice";
@@ -722,7 +727,16 @@ type Incoming =
   | { type: "count"; text: string }
   | { type: "ruby"; text: string; start: number; end: number }
   | { type: "emphasis"; text: string; start: number; end: number }
-  | { type: "copyForPosting" }
+  | {
+      type: "copyForPosting";
+      /**
+       * カーソルの行（1始まり。読めなければ0）。
+       *
+       * **合本のときだけ効く。** 1ファイルに全話が入っていると、どの話を
+       * コピーするのかがカーソルの位置でしか分からない（設計書6.12.1）。
+       */
+      line?: number;
+    }
   | { type: "openTerm"; id: string; kind: TermKind }
   /**
    * 右クリックの時点で、**開いている**資料パネルへ該当項目を出す
@@ -1316,7 +1330,7 @@ export class ManuscriptEditorProvider
           break;
 
         case "copyForPosting":
-          await this.copyForPosting(document);
+          await this.copyForPosting(document, message.line ?? 0);
           break;
 
         case "openTerm": {
@@ -2314,7 +2328,16 @@ export class ManuscriptEditorProvider
     pendingAppearance.set(to, now);
   }
 
-  private async copyForPosting(document: vscode.TextDocument): Promise<void> {
+  /**
+   * 投稿サイト用に変換してコピー（設計書6.12.1）。
+   *
+   * @param caretLine 画面のカーソル行（1始まり。読めなければ0）。
+   *   **合本のときだけ使う**——どの話をコピーするのかは位置でしか分からない
+   */
+  private async copyForPosting(
+    document: vscode.TextDocument,
+    caretLine = 0
+  ): Promise<void> {
     /*
       **訊き方は普通のエディタと同じものを使う**（`features/ruby.ts`）。
       画面ごとに選択肢の言葉が違うと、同じ操作に見えなくなる。
@@ -2337,11 +2360,24 @@ export class ManuscriptEditorProvider
     );
     if (!target) return;
 
+    /*
+      **合本（1ファイルに全話）なら、カーソルの居る話だけ**（設計書6.12.1）。
+      この画面には選択を渡す道が無いので、全話が区切り行と頭書きごと
+      クリップボードへ入っていた——手で1話ぶんを選ぶ逃げ道も無かった。
+      いま居る話の決め方は「← 前の話」「次の話 →」と同じ規則を通る
+      （`collectedEpisodeAt` → `collectedEpisodeIndexAt`）。
+    */
+    const collected = collectedEpisodeAt(document.getText(), caretLine);
+
     // **頭書き（【タイトル】〜【本文】）は外す**（`sourceForPostingCopy`、
     // 設計書6.12.1）。全文をそのまま渡していたので、投稿欄へ貼ると題名の
     // 行から二重に入っていた。**普通のエディタ側（`features/ruby.ts`）と
     // 同じ経路を通す**——切り方を写すと、片方だけが直る日が来る
-    const source = sourceForPostingCopy(document.getText());
+    const source = sourceForPostingCopy(
+      document.getText(),
+      undefined,
+      collected?.body
+    );
 
     /*
       **シーンメモを落とすのは変換の側**（`convertForPosting`、設計書6.84）。
@@ -2356,12 +2392,24 @@ export class ManuscriptEditorProvider
     const conversion = convertForPosting(source, target);
 
     await vscode.env.clipboard.writeText(conversion.text);
+    /*
+      **何をコピーしたかを出す**（設計書6.12.1）。合本は取り違えに
+      その場で気づけるよう、話が分かる言い方にする。**合本でないときの
+      文言は変えない**——覚えている言葉を一緒に変えない。
+    */
+    const scope = collected
+      ? `${collectedEpisodeLabel(
+          collected,
+          // 作品が引けないことはある。そのときは既定の数え方になるだけ
+          work ? await readWorkFormat(work) : undefined
+        )}（${conversion.text.length.toLocaleString("ja-JP")}字）`
+      : "本文全体";
     await showPostingCopyNotice({
       conversion,
       sourcePath: fromUri(document.uri),
       otherwise: () =>
         notifyDone(
-          `本文全体を${target.label}の書き方に変換して、` +
+          `${scope}を${target.label}の書き方に変換して、` +
             "クリップボードへ入れました。原稿はそのままです。"
         ),
     });

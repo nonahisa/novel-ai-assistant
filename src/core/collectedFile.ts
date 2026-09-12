@@ -283,17 +283,41 @@ export type CollectedStep =
   | { kind: "leave" };
 
 /**
- * 合本の中で「← 前の話」「次の話 →」を押したときの行き先を決める。
+ * いま居る話は何番目か（`starts` の添字）。
  *
- * **いま居る話は「カーソル行以下でいちばん後ろの先頭行」で決める。**
- * 話の途中から「前の話」を押したときに、いまの話の頭ではなく前の話へ
- * 行くのは作者の指定である（頭へ戻りたいときはスクロールで足りる）。
+ * **「カーソル行以下でいちばん後ろの先頭行」で決める。** 話の途中から
+ * 「前の話」を押したときに、いまの話の頭ではなく前の話へ行くのは作者の
+ * 指定である（頭へ戻りたいときはスクロールで足りる）。
  *
  * カーソルが1話目の頭書き（区切り行と【本文】のあいだ）に居ることがある。
  * そこは1話目の中なので、**先頭行より前でも1話目とみなす**。
  *
+ * **前後の話への移動（`planCollectedStep`）と、合本から1話を取り出す
+ * 投稿用コピー（`core/episodeCopy.ts`）が、この1か所を共に使う**
+ * （設計書6.12.1）。写しを作ると、「次の話」で見えている話と
+ * コピーされる話が食い違う日が来る。
+ *
  * @param caretLine カーソルの行（1始まり）。読めなければ0でよい——
  *   その場合は1話目の頭に居るものとして扱う
+ */
+export function collectedEpisodeIndexAt(
+  starts: readonly CollectedEpisodeStart[],
+  caretLine: number
+): number {
+  const caret = caretLine > 0 ? caretLine : 1;
+  let at = 0;
+  for (let index = 0; index < starts.length; index++) {
+    if (starts[index].line <= caret) at = index;
+  }
+  return at;
+}
+
+/**
+ * 合本の中で「← 前の話」「次の話 →」を押したときの行き先を決める。
+ *
+ * いま居る話の決め方は `collectedEpisodeIndexAt` が持つ。
+ *
+ * @param caretLine カーソルの行（1始まり）。読めなければ0でよい
  */
 export function planCollectedStep(input: {
   starts: CollectedEpisodeStart[];
@@ -303,11 +327,7 @@ export function planCollectedStep(input: {
   const { starts, direction } = input;
   if (starts.length < 2) return { kind: "leave" };
 
-  const caret = input.caretLine > 0 ? input.caretLine : 1;
-  let at = 0;
-  for (let index = 0; index < starts.length; index++) {
-    if (starts[index].line <= caret) at = index;
-  }
+  const at = collectedEpisodeIndexAt(starts, input.caretLine);
 
   const target = direction === "next" ? at + 1 : at - 1;
   if (target < 0 || target >= starts.length) return { kind: "leave" };

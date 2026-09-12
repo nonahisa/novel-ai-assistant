@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  collectedEpisodeAt,
   extractEpisodeParts,
   sourceForPostingCopy,
   nameWithSubtitle,
@@ -243,5 +244,134 @@ describe("コピーする元を決める", () => {
     expect(sourceForPostingCopy(WITH_HEADER, "【タイトル】\n転生")).toBe(
       "【タイトル】\n転生"
     );
+  });
+});
+
+/**
+ * 合本（1ファイルに全話）のときに、1話ぶんだけコピーする（設計書6.12.1）。
+ *
+ * **全話が、区切り行と頭書きごとクリップボードへ入っていた**（2026-09-12、
+ * 作者の問いから見つけた）。`parseEpisodeMetadata` は区切り行が2本以上ある
+ * ファイルを**わざと**素通しする（半端に切ると文字数が混ざるため）ので、
+ * `extractEpisodeParts` が生の全文を「本文」として返していた。
+ */
+const COLLECTED_LINES = [
+  "【タイトル】",
+  "湖畔の物語",
+  "",
+  "------------------------- エピソード1開始 -------------------------",
+  "【エピソードタイトル】",
+  "１話　転生",
+  "",
+  "【本文】",
+  "",
+  "　気がつくと森の中だった。",
+  "",
+  "【後書き】",
+  "　読んでくださりありがとうございます。",
+  "",
+  "------------------------- エピソード2開始 -------------------------",
+  "【エピソードタイトル】",
+  "２話　湖畔の誓い",
+  "",
+  "【本文】",
+  "",
+  "　湖のほとりで誓いを立てた。",
+  "",
+  "【リアクション】",
+  "いいね: 24件",
+  "",
+  "------------------------- エピソード3開始 -------------------------",
+  "【エピソードタイトル】",
+  "３話　別れ",
+  "",
+  "【本文】",
+  "",
+  "　朝の駅で手を振った。",
+  "",
+];
+/** **改行は CRLF で試す。** 投稿サイトのダウンロードはこの形で降ってくる */
+const COLLECTED = COLLECTED_LINES.join("\r\n");
+
+/** その一行が何行目か（1始まり）。行番号を数え間違えないように引く */
+function lineOf(text: string): number {
+  const at = COLLECTED_LINES.indexOf(text);
+  if (at < 0) throw new Error(`見本に「${text}」がありません`);
+  return at + 1;
+}
+
+describe("合本は1話ぶんだけコピーする", () => {
+  /** 入口がやるのと同じ手順（1話を決める → 変換にかける元にする） */
+  function copySource(caretLine: number): string {
+    return sourceForPostingCopy(
+      COLLECTED,
+      undefined,
+      collectedEpisodeAt(COLLECTED, caretLine)?.body
+    );
+  }
+
+  test("カーソルのある話だけを渡す（区切り行と頭書きを含めない）", () => {
+    const source = copySource(lineOf("　湖のほとりで誓いを立てた。"));
+
+    expect(source).toBe("　湖のほとりで誓いを立てた。");
+    expect(source).not.toContain("エピソード2開始");
+    expect(source).not.toContain("【エピソードタイトル】");
+    expect(source).not.toContain("【後書き】");
+    expect(source).not.toContain("【リアクション】");
+  });
+
+  test("カーソルが1話目の頭書きに居ても、1話目が返る", () => {
+    // 区切り行と【本文】のあいだ。**そこは1話目の中である**
+    expect(copySource(lineOf("１話　転生"))).toBe("　気がつくと森の中だった。");
+    // 読めなかったとき（0）も1話目の頭に居るものとして扱う
+    expect(copySource(0)).toBe("　気がつくと森の中だった。");
+  });
+
+  test("サブタイトルは合本の中の題から取る", () => {
+    const found = collectedEpisodeAt(
+      COLLECTED,
+      lineOf("　湖のほとりで誓いを立てた。")
+    );
+
+    expect(found?.chapter).toBe(2);
+    expect(found?.title).toBe("湖畔の誓い");
+  });
+
+  test("合本でなければ undefined（これまでどおりの道へ落ちる）", () => {
+    expect(collectedEpisodeAt(WITH_HEADER, 1)).toBeUndefined();
+    expect(collectedEpisodeAt("ただの本文。", 1)).toBeUndefined();
+    // **1話ぶんに区切り行が付いているだけのファイルは合本ではない**
+    // （`MIN_COLLECTED_EPISODES`。全ファイルに印が付いた失敗がある）
+    expect(
+      collectedEpisodeAt(
+        [
+          "------------------------- エピソード1開始 -------------------------",
+          "【本文】",
+          "　一話きり。",
+        ].join("\n"),
+        1
+      )
+    ).toBeUndefined();
+  });
+
+  test("合本でないファイルの渡し方は、いままでと同じ", () => {
+    // **ここが変わったら退行である。** 3つ目の引数を渡さなければ以前のまま
+    expect(sourceForPostingCopy(WITH_HEADER, undefined, undefined)).toBe(
+      "気がつくと{森|もり}の中だった。"
+    );
+    expect(sourceForPostingCopy("ただの本文。", undefined, undefined)).toBe(
+      "ただの本文。"
+    );
+  });
+
+  test("選んであれば、合本でも選んだ範囲がそのまま返る", () => {
+    // 範囲を選んだのは作者の意思。**話の切れ目より選択が優先**
+    expect(
+      sourceForPostingCopy(
+        COLLECTED,
+        "選んだところ",
+        collectedEpisodeAt(COLLECTED, lineOf("　朝の駅で手を振った。"))?.body
+      )
+    ).toBe("選んだところ");
   });
 });

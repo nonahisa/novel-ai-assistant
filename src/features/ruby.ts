@@ -16,7 +16,13 @@ import {
   type PostingCopyTarget,
 } from "../core/postingCopyTargets";
 import type { PostingSiteId } from "../models/posting";
-import { sourceForPostingCopy } from "../core/episodeCopy";
+import {
+  collectedEpisodeAt,
+  sourceForPostingCopy,
+} from "../core/episodeCopy";
+// 合本の見出しの作り方は1か所に置く（写しを作らない）
+import { collectedEpisodeLabel } from "./pickCollectedEpisode";
+import type { WorkFormatKey } from "../core/workFormat";
 // 貼り付け先ごとの分岐は、入口ではなく変換の側に置く（設計書6.84）
 import { convertForPosting } from "../core/postingConvert";
 import { showPostingCopyNotice } from "./postingCopyNotice";
@@ -213,7 +219,9 @@ export async function copyForPosting(
    * 投稿状態の台帳に登録してある投稿先（設計書6.68.2）。
    * **選択肢の並びを決めるためだけ**に使うので、読めなければ空でよい
    */
-  registered: readonly PostingSiteId[] = []
+  registered: readonly PostingSiteId[] = [],
+  /** 見出しの数え方（「第◯話」「◯本目」）。引けなければ渡さない */
+  format?: WorkFormatKey
 ): Promise<void> {
   const editor = await requireMarkdown();
   if (!editor) return;
@@ -222,6 +230,19 @@ export async function copyForPosting(
   if (!target) return;
 
   const selection = editor.selection;
+  /*
+    **合本（1ファイルに全話）なら、カーソルの居る話だけを渡す**
+    （設計書6.12.1）。以前は全話が区切り行と頭書きごと入っていた。
+    いま居る話の決め方は、原稿エディタの「前の話・次の話」と同じ
+    規則を通る（`collectedEpisodeAt`）。
+
+    **選んであるときは、いままでどおり選択が優先。** 範囲を選んだのは
+    作者の意思であり、話の切れ目より強い。
+  */
+  const collected = selection.isEmpty
+    ? collectedEpisodeAt(editor.document.getText(), selection.active.line + 1)
+    : undefined;
+
   // 選択が無いときは、カクヨム形式の頭書きを外した本文だけを渡す
   // （`sourceForPostingCopy`）——ヘッダーごと貼ると題名が二重に入る。
   // **シーンメモを落とすのは変換の側**（`convertForPosting`）
@@ -229,7 +250,8 @@ export async function copyForPosting(
   // 記法を読み分けられるところでだけ落とす
   const source = sourceForPostingCopy(
     editor.document.getText(),
-    selection.isEmpty ? undefined : editor.document.getText(selection)
+    selection.isEmpty ? undefined : editor.document.getText(selection),
+    collected?.body
   );
 
   /*
@@ -244,7 +266,16 @@ export async function copyForPosting(
   const conversion = convertForPosting(source, target);
 
   await vscode.env.clipboard.writeText(conversion.text);
-  const scope = selection.isEmpty ? "本文全体" : "選んだ範囲";
+  // **何をコピーしたかを出す**（設計書6.12.1）。合本は取り違えに
+  // その場で気づけるよう、話が分かる言い方にする。**それ以外の文言は
+  // 変えない**——覚えている言葉を一緒に変えない
+  const scope = !selection.isEmpty
+    ? "選んだ範囲"
+    : collected
+      ? `${collectedEpisodeLabel(collected, format)}（${conversion.text.length.toLocaleString(
+          "ja-JP"
+        )}字）`
+      : "本文全体";
   await showPostingCopyNotice({
     conversion,
     sourcePath: fromUri(editor.document.uri),

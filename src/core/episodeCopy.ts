@@ -1,5 +1,11 @@
 import { parseEpisodeMetadata } from "./metadataParser";
 import { sanitizeFileName } from "./episodeParser";
+import {
+  collectedEpisodeIndexAt,
+  collectedEpisodeStarts,
+  parseCollectedFile,
+  type CollectedEpisode,
+} from "./collectedFile";
 
 /**
  * 話のサブタイトルと本文を取り出して、投稿に使える形で渡す（設計書6.2.3）。
@@ -39,6 +45,39 @@ export function extractEpisodeParts(
 }
 
 /**
+ * 合本（1ファイルに全話）から、カーソルの居る1話を取り出す（設計書6.12.1）。
+ *
+ * **合本かどうかの判断を、入口ごとに写さないための口である。** 投稿用の
+ * コピーには入口が4つあり（原稿エディタ・普通のエディタ・作品一覧・
+ * 投稿キット）、そのどれもが `extractEpisodeParts` を通していた。
+ * ところが `parseEpisodeMetadata` は区切り行が2本以上あるファイルを
+ * **わざと**素通しする（半端に切ると文字数が混ざるため）ので、
+ * 「ヘッダーが無い＝全体が本文」と読まれ、**全話が区切り行と頭書きごと**
+ * クリップボードへ入っていた（2026-09-12、作者の問いから見つけた）。
+ *
+ * いま居る話の決め方は、前後の話への移動（`planCollectedStep`）と
+ * **同じ1か所**（`collectedEpisodeIndexAt`）を使う。
+ *
+ * 合本でなければ undefined を返す。呼び出し側はこれまでどおりでよい。
+ *
+ * @param caretLine カーソルの行（1始まり）。読めなければ0——1話目とみなす
+ */
+export function collectedEpisodeAt(
+  rawText: string,
+  caretLine: number
+): CollectedEpisode | undefined {
+  // 2話に満たないものは合本と呼ばない（`collectedEpisodeStarts` が空を返す）
+  const starts = collectedEpisodeStarts(rawText);
+  if (starts.length === 0) return undefined;
+
+  // 区切りの読み方は `findSeparators` の1か所なので、並び順は一致する
+  const episodes = parseCollectedFile(rawText);
+  if (!episodes) return undefined;
+
+  return episodes[collectedEpisodeIndexAt(starts, caretLine)];
+}
+
+/**
  * 「投稿サイト用に変換してコピー」で、変換にかける元を決める（設計書6.12.1）。
  *
  * **選んでいないときは、ヘッダーを外した本文だけを渡す。** 以前は開いて
@@ -50,12 +89,16 @@ export function extractEpisodeParts(
  * あり、選んだ範囲と貼られるものが食い違うほうが困る。
  *
  * @param selectedText 選択されている文字列。選択が無ければ渡さない
+ * @param collectedBody 合本から取り出した1話の本文（`collectedEpisodeAt`）。
+ *   合本でなければ渡さない——**渡されなければ振る舞いは以前のまま**
  */
 export function sourceForPostingCopy(
   fullText: string,
-  selectedText?: string
+  selectedText?: string,
+  collectedBody?: string
 ): string {
   if (selectedText !== undefined && selectedText !== "") return selectedText;
+  if (collectedBody !== undefined) return collectedBody;
   // ヘッダーの有無の判断は1か所に集める（写しを作らない）
   return extractEpisodeParts(fullText, null).body;
 }

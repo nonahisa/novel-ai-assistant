@@ -4227,8 +4227,12 @@ export async function activate(
     // **貼り付け先は1度だけ訊く**（設計書6.12.4）。登録済みの投稿先を
     // 先頭に並べたいが、画面側は作品を知らないので、どの作品かはここで引く
     registerCommand("novelai.copyForPosting", async () => {
+      const work = activePostingCopyWork(registry);
       await copyForPosting(
-        await registeredPostingSites(activePostingCopyWork(registry))
+        await registeredPostingSites(work),
+        // 合本の1話をコピーしたときの見出しに使う（「第3話」「3本目」）。
+        // 作品が引けないことはある——そのときは既定の数え方になるだけ
+        work ? await readWorkFormat(work) : undefined
       );
     }),
     registerCommand("novelai.importRuby", importRuby),

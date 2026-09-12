@@ -8,6 +8,12 @@ import { readTextFile } from "../core/textFile";
 // 貼り付け先を訊く画面は1つにする（写すと、片方だけ選べる先が増える）
 import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
+// 合本かどうかの判断と、話の選ばせ方は1か所に置く（写しを作らない）
+import {
+  collectedEpisodeLabel,
+  pickCollectedEpisode,
+} from "./pickCollectedEpisode";
+import { readWorkFormat } from "../core/workFormatStore";
 import { recordEdit } from "../core/actorContext";
 import { logFailure, useLogFile } from "../core/logger";
 import { formatChapterLabel, stripChapterLabel } from "../core/episodeLabel";
@@ -55,6 +61,20 @@ export async function copyBodyForPosting(
   if (!parts) return;
 
   /*
+    **合本（1ファイルに全話）なら、どの話かを訊く**（設計書6.12.1）。
+
+    この入口はファイルを名指しするだけで、カーソルが無い——どの話に
+    用があるのかを知る手立てが無い。訊かずに1話目にすると、押した人には
+    取り違えたことが分からない。以前は**全話が区切り行と頭書きごと**
+    クリップボードへ入っていた（2026-09-12）。
+  */
+  const format = await readWorkFormat(work);
+  const picked = await pickCollectedEpisode(parts.text, format);
+  // **取りやめたら何もしない**（`null` は「合本ではない」で、別物）
+  if (picked === undefined) return;
+  const body = picked ? picked.body : parts.body;
+
+  /*
     **訊くのは貼り付け先だけ。1度だけ**（設計書6.12.4）。
 
     以前は「どの形で書き出すか（記法）」を訊いてから、傍点が入っている
@@ -72,7 +92,7 @@ export async function copyBodyForPosting(
   // **1話まるごとなので、前後の空行は落とす**（設計書6.84）。ヘッダーを
   // 外した本文はその直後の空行から始まることが多く、そのまま貼ると
   // 投稿欄の1行目が空いた状態で公開される
-  const conversion = convertForPosting(parts.body, target, {
+  const conversion = convertForPosting(body, target, {
     trimEdges: true,
   });
   if (!conversion.text) {
@@ -83,12 +103,18 @@ export async function copyBodyForPosting(
   }
 
   await vscode.env.clipboard.writeText(conversion.text);
+  /*
+    **何をコピーしたかを出す**（設計書6.12.1）。合本は話を選ばせるので、
+    取り違えにその場で気づけるよう、話が分かる言い方にする。
+    **合本でないときの文言は変えない**——覚えている言葉を一緒に変えない。
+  */
+  const what = picked ? collectedEpisodeLabel(picked, format) : "本文";
   await showPostingCopyNotice({
     conversion,
     sourcePath: episode.filePath,
     otherwise: () =>
       void vscode.window.showInformationMessage(
-        `本文（${conversion.text.length.toLocaleString("ja-JP")}字）を` +
+        `${what}（${conversion.text.length.toLocaleString("ja-JP")}字）を` +
           `${target.label}の書き方でコピーしました。原稿はそのままです。`
       ),
   });
@@ -174,10 +200,14 @@ export async function renameWithSubtitle(
 
 async function read(
   episode: EpisodeFile
-): Promise<{ subtitle: string | null; body: string } | undefined> {
+): Promise<
+  // `text`（生の全文）は、合本から1話を取り出すために要る（設計書6.12.1）
+  { subtitle: string | null; body: string; text: string } | undefined
+> {
   try {
     const file = await readTextFile(episode.filePath);
-    return extractEpisodeParts(file.text, episode.subtitle);
+    const parts = extractEpisodeParts(file.text, episode.subtitle);
+    return { ...parts, text: file.text };
   } catch {
     void vscode.window.showErrorMessage(
       `${episode.fileName} を読み込めませんでした。`

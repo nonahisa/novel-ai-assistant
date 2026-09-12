@@ -38,6 +38,8 @@ import { hasEmphasis } from "../core/ruby";
 import { formatChapterLabel } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
+// 合本かどうかの判断と、話の選ばせ方は1か所に置く（写しを作らない）
+import { pickCollectedEpisode } from "./pickCollectedEpisode";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { logFailure, useLogFile } from "../core/logger";
 import type { AIRegistry } from "../ai/registry";
@@ -141,7 +143,7 @@ export async function postNewEpisode(
   const episodePath = relativePathOf(target);
   const label = episodeLabelOf(target, format);
 
-  const parts = await readEpisode(target);
+  const parts = await readEpisode(target, format);
   if (!parts) return { changed };
 
   let sites = unpostedSites(ledger, episodePath);
@@ -954,9 +956,15 @@ async function offerAnnouncement(
  *
  * **競合マーカーのある話は断る**（実装ルール1）。マーカーごと投稿欄へ
  * 貼られては取り返しがつかない。
+ *
+ * **合本（1ファイルに全話）なら、どの話を出すかを訊く**（設計書6.12.1）。
+ * 以前は全話を区切り行と頭書きごと渡したうえで「投稿済み」を記録して
+ * いた。**取りやめたときは undefined を返す**——呼び出し側はそこで止まる
+ * ので、1話も出していないのに記録が残ることはない。
  */
 async function readEpisode(
-  episode: EpisodeFile
+  episode: EpisodeFile,
+  format: WorkFormatKey | undefined
 ): Promise<{ subtitle: string | null; body: string } | undefined> {
   let file;
   try {
@@ -983,13 +991,21 @@ async function readEpisode(
   }
 
   const parts = extractEpisodeParts(file.text, episode.subtitle);
-  if (!parts.body.trim()) {
+
+  // 合本なら1話ぶんに絞る。`null` は「合本ではない」、`undefined` は取りやめ
+  const picked = await pickCollectedEpisode(file.text, format);
+  if (picked === undefined) return undefined;
+  const found = picked
+    ? { subtitle: picked.title ?? parts.subtitle, body: picked.body }
+    : parts;
+
+  if (!found.body.trim()) {
     void vscode.window.showWarningMessage(
       `${episode.fileName} に本文が見つかりませんでした。`
     );
     return undefined;
   }
-  return parts;
+  return found;
 }
 
 async function load(
