@@ -34,7 +34,7 @@ export type AdviceLevel = ThreeAxisLevel;
 export interface AdviceScores {
   /** X 読者志向（0〜6） */
   reader: number;
-  /** Y 自己投影度（0〜6） */
+  /** Y 自分志向（0〜6） */
   self: number;
   /** Z 嗜好志向（0〜6） */
   taste: number;
@@ -56,7 +56,7 @@ export type AdviceTypeId =
 /** 軸の呼び名（画面と記録で共用する。写しを作らない） */
 export const ADVICE_AXIS_LABELS: Record<AdviceAxis, string> = {
   reader: "読者志向",
-  self: "自己投影度",
+  self: "自分志向",
   taste: "嗜好志向",
 };
 

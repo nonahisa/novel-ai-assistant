@@ -127,7 +127,7 @@ describe("はじめての診断", () => {
     const text = shown[0];
     expect(text).toContain("いじめられっ子：助言方針を決めました——目的模索型");
     expect(text).toContain("読者志向：0（低）");
-    expect(text).toContain("自己投影度：0（低）");
+    expect(text).toContain("自分志向：0（低）");
     expect(text).toContain("嗜好志向：0（低）");
   });
 
@@ -198,7 +198,7 @@ describe("もう一度押したとき", () => {
     expect(text).toContain("いまの助言方針");
     // 動いた軸は「診断 → 現在」の形で、動いていない軸はいまの値だけ
     expect(text).toContain("読者志向：診断 4 → 現在 4.5（中）");
-    expect(text).toContain("自己投影度：3（中）");
+    expect(text).toContain("自分志向：3（中）");
     expect(text).toContain("これまでの変化");
     expect(text).toContain("2026-08-01 目的模索型（診断）");
   });

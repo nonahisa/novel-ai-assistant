@@ -165,7 +165,7 @@ describe("はじめの案内の紙", () => {
       advicePolicy: policyOf(TASTE_READER),
     });
 
-    for (const axis of ["読者志向", "自己投影度", "嗜好志向"]) {
+    for (const axis of ["読者志向", "自分志向", "嗜好志向"]) {
       expect(guide, axis).toContain(axis);
     }
     // 目盛りと、両端に何があるか
