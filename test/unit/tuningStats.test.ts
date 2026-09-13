@@ -117,7 +117,9 @@ describe("実測一覧の組み立て", () => {
 
     const cells = rows(markdown)[0];
     // 出どころ・速度の日時・文脈の実効長・読める長さ・書ける長さ・日時
-    expect(cells.slice(3)).toEqual(["—", "—", "—", "—", "—", "—"]);
+    expect(cells.slice(3, 9)).toEqual(["—", "—", "—", "—", "—", "—"]);
+    // 字/トークンは普段の呼び出しから埋まるので、次に何をすれば出るかを書く
+    expect(cells[9]).toBe("—（次の呼び出しから記録）");
   });
 
   test("そろっていれば、単位を見出しに置いて数字だけを並べる", () => {
@@ -130,6 +132,8 @@ describe("実測一覧の組み立て", () => {
         measuredChars: 91000,
         measuredOutputTokens: 3072,
         measuredAt: "2026-09-05T23:30:00.000Z",
+        charsPerToken: 1.461,
+        charsPerTokenSamples: 12,
       }),
     ]);
 
@@ -143,6 +147,7 @@ describe("実測一覧の組み立て", () => {
       "読める長さ（字）",
       "書ける長さ（トークン）",
       "測った日時",
+      "字/トークン（実測）",
     ]);
     const cells = rows(markdown)[0];
     expect(cells[0]).toBe("Ollama");
@@ -153,6 +158,37 @@ describe("実測一覧の組み立て", () => {
     expect(cells[7]).toBe("3,072");
     // 日本時間（UTC+9）。23:30Z は翌日の 8:30
     expect(cells[8]).toBe("2026-09-06 08:30");
+    // **実際に見積もりへ使う値まで書く**（設計書6.77）。台帳の数字だけ
+    // 出すと、「1.461と出ているのにチャンクが増えない」の理由が読めない
+    expect(cells[9]).toBe("1.461（12回。余白を取って 1.315 で見積もり）");
+  });
+
+  /**
+   * 字/トークンの実測（設計書6.77）。
+   *
+   * **数字が変わったのに、なぜ変わったかが読めないのがいちばん困る。**
+   * 使っているのか・使っていないのか、使っていないならなぜかを欄に書く。
+   */
+  describe("字/トークンの実測", () => {
+    test("件数が足りないうちは、まだ使わないと書く", () => {
+      const markdown = buildTuningStatsMarkdown([
+        entry("Ollama", "gemma4:e4b", {
+          charsPerToken: 1.461,
+          charsPerTokenSamples: 3,
+        }),
+      ]);
+      expect(rows(markdown)[0][9]).toBe("1.461（3回。5回に満たないため 0.7 で見積もります）");
+    });
+
+    test("実測が低いモデルは、これまでどおり0.7のままと書く", () => {
+      const markdown = buildTuningStatsMarkdown([
+        entry("Ollama", "gemma4:e4b", {
+          charsPerToken: 0.6,
+          charsPerTokenSamples: 20,
+        }),
+      ]);
+      expect(rows(markdown)[0][9]).toBe("0.600（20回。低いため 0.7 のまま）");
+    });
   });
 
   /**

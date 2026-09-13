@@ -1,4 +1,7 @@
-import { TOKENS_PER_CHAR } from "../core/chunker";
+import {
+  resolveTokensPerChar,
+  type CharsPerTokenMeasurement,
+} from "../core/sizeBudget";
 import { AIError } from "./types";
 
 /**
@@ -77,6 +80,15 @@ export interface ContextFitInput {
    * できなくなる。
    */
   contextWindow: number | undefined;
+  /**
+   * 字/トークンの実測（`core/modelTuning.ts` の台帳）。
+   *
+   * **チャンクを決めた係数と同じものを渡す。** 関所だけが当て推量の
+   * ままだと、実測にもとづいて組んだプロンプトを関所が「入らない」と
+   * 断ることになる（この関所が見ているのは同じ見積りである）。
+   * 渡さなければ従来どおり 0.7 で見積もる。
+   */
+  measured?: CharsPerTokenMeasurement;
 }
 
 export interface ContextFitResult {
@@ -89,8 +101,9 @@ export interface ContextFitResult {
 /** 入るかどうかを見積もる。判断だけで、副作用は持たない */
 export function checkContextFit(input: ContextFitInput): ContextFitResult {
   const needTokens =
-    Math.ceil((input.systemChars + input.userChars) * TOKENS_PER_CHAR) +
-    input.outputTokens;
+    Math.ceil(
+      (input.systemChars + input.userChars) * resolveTokensPerChar(input.measured)
+    ) + input.outputTokens;
 
   const limit = input.contextWindow;
   if (limit === undefined || !Number.isFinite(limit) || limit <= 0) {

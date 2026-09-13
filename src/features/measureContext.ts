@@ -49,6 +49,12 @@ import {
   type ModelTuning,
 } from "../core/modelTuning";
 import { outputTokensPerSecond } from "../core/tuningStats";
+import {
+  measuresOutput,
+  TUNING_SCOPE_CHOICES,
+  type TuningScope,
+} from "../core/tuningScope";
+import { cancelItem } from "../views/dialogs";
 import { withCancellableProgress } from "../views/progress";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { readChunkSettings } from "./chunkSettings";
@@ -265,6 +271,39 @@ interface TuningCleanup {
 }
 
 /**
+ * 何を測るかを訊く（設計書6.27.11。作者の依頼、2026-09-13）。
+ *
+ * **押したらすぐ始める形をやめた。** 読める長さは数分、書ける長さは
+ * 遅いモデルで1時間以上かかるのに、これまでは続けて測るしか無かった。
+ * どちらを測るかは作者にしか決められないので、ここで訊く。
+ *
+ * **訊くのは入口（コマンド）の仕事にしておく。** `measureContext` の側は
+ * 渡された範囲を測るだけにして、呼び出し（時間切れの通知から来る経路や
+ * 検査）が勝手に画面を出さないようにする。
+ *
+ * @returns 選ばれた範囲。取りやめたら undefined
+ */
+export async function askTuningScope(): Promise<TuningScope | undefined> {
+  const picked = await vscode.window.showQuickPick(
+    [
+      ...TUNING_SCOPE_CHOICES.map((choice) => ({
+        label: choice.label,
+        detail: choice.detail,
+        scope: choice.scope,
+      })),
+      cancelItem("取りやめる"),
+    ],
+    {
+      title: "AIチューニング：何を測りますか",
+      placeHolder: "測るものを選んでください",
+      ignoreFocusOut: true,
+    }
+  );
+  if (!picked || !("scope" in picked)) return undefined;
+  return picked.scope;
+}
+
+/**
  * AIチューニングの入口。
  *
  * **後始末のためだけの殻である。** 中身は `runMeasurement` にあり、
@@ -286,14 +325,23 @@ export async function measureContext(
    * 決めるために作者へ問いかけはしない——測るのはモデルの性質であって、
    * どの作品を選んでも結果は同じなので、訊く理由が無い。
    */
-  workFolderPath?: string
+  workFolderPath?: string,
+  /**
+   * 何を測るか（設計書6.27.11）。
+   *
+   * **既定は「両方」——これまでの動きである。** 範囲を選ばせるのは入口
+   * （`askTuningScope`）の仕事で、ここは渡されたぶんを測るだけにしてある。
+   * 省略したときに画面を出すと、時間切れの通知から呼ばれた経路や検査が
+   * 勝手に選択画面を開くことになる。
+   */
+  scope: TuningScope = "both"
 ): Promise<void> {
   // **ここで先に決める。** 中で失敗しても、その失敗がファイルに残る
   if (workFolderPath) useLogFile(workFolderPath);
 
   const cleanup: TuningCleanup = {};
   try {
-    await runMeasurement(registry, feature, cleanup);
+    await runMeasurement(registry, feature, cleanup, scope);
   } catch (error) {
     // 測定そのものの失敗は `runMeasurement` が中で捌く。ここへ来るのは
     // 通知や設定の書き込みが投げたとき——黙って消さず、ログと通知へ出す
@@ -318,7 +366,9 @@ async function runMeasurement(
    */
   feature: AssignableFeature | "default",
   /** 延ばした待ち時間を戻す手を、外側（`measureContext`）へ預ける入れ物 */
-  cleanup: TuningCleanup
+  cleanup: TuningCleanup,
+  /** 何を測るか。「両方」のときの道筋は、これまでと同じである */
+  scope: TuningScope
 ): Promise<void> {
   const resolved = await ensureConfigured(registry, feature);
   if (!resolved) return;
@@ -350,6 +400,19 @@ async function runMeasurement(
 
   const modelInfo = await registry.resolveModelInfo(feature);
   const declaredTokens = modelInfo?.contextWindow;
+
+  /*
+    **書ける長さだけを測るときは、ここで分かれる**（作者の依頼、2026-09-13）。
+
+    読める長さの測定にも、その結果を反映するかの確認にも入らない。
+    測っていないものの数字を混ぜたダイアログは、作者には「勝手に何かを
+    書き換えられた」としか読めない。
+  */
+  if (scope === "output") {
+    await runOutputOnly(resolved.provider, resolved.model, declaredTokens);
+    return;
+  }
+
   // **申告が実測に基づく相手は、そこを超えて試さない**（設計書6.62.1）。
   // 当て推量なのは、作者が設定に書く さくら・ChatGPT だけである
   const ceilingChars = ceilingCharsFor(
@@ -580,6 +643,23 @@ async function runMeasurement(
               // **その回に要るぶんだけ。** 申告値に固定すると、確保した
               // KVキャッシュがVRAMから溢れて黙ってCPUへ落ちる（6.53.2）
               numCtx,
+              /*
+                **思考は必ず切る。外すと測定が壊れる**（実機、2026-09-13。
+                qwen3:8b・詰め物4,000字）。
+
+                - 思考を切らず出力を128に絞ると、考えごと488字で枠を使い切り
+                  **答えは空**（`done_reason=length`）。「読めなかった」と
+                  誤判定して探索が下へ降りる
+                - 思考だけ切れば、出力9トークンで**両方正解**
+                - 出力の枠だけ広げて思考を残すと、考えごと750字のあと
+                  指示文をオウム返しした
+
+                手元のAIでは出力に上限を掛けない（`ai/ollamaProvider.ts` は
+                `capOutputTokens` のときだけ `num_predict` を送る）ので、
+                上の128は確保の見込みにしか効かない。**効くのはこの一行**で、
+                CLAUDE.md 規則6「`think: false` で思考モードを無効化する」
+                そのものである。
+              */
               disableThinking: true,
               /*
                 **流し受信は使わない**（設計書6.63.1。2026-09-03）。
@@ -815,7 +895,11 @@ async function runMeasurement(
     詳しくは `measureOutputLimit` の中にある。
   */
   const outputSummary =
-    !cancelled && low > 0 && isLocalProvider(resolved.provider.id)
+    // 「読める長さだけ」を選んだときは、ここへ来ない（作者の依頼、2026-09-13）
+    measuresOutput(scope) &&
+    !cancelled &&
+    low > 0 &&
+    isLocalProvider(resolved.provider.id)
       ? await measureOutputLimit(
           resolved.provider,
           resolved.model,
@@ -842,6 +926,54 @@ async function runMeasurement(
   // 反映したなら、戻す相手がもう無い（見立てた秒数で上書きされている）。
   // 反映しなかったときは後始末を残したままにして、外側の `finally` に任せる
   if (applied) cleanup.restoreTimeout = undefined;
+}
+
+/**
+ * 「書ける長さだけ測る」を選んだときの道（作者の依頼、2026-09-13）。
+ *
+ * **測り方そのものは `measureOutputLimit` のままで、前後だけを変える。**
+ * 読める長さの測定を通らないので、その結果に触れる言葉も出さない。
+ * 台帳へ書くのは出力側の欄だけ（`measureOutputLimit` の中）なので、
+ * 前に測った読める長さ・待ち時間はそのまま残る。
+ *
+ * **費用の確認はしない。** 対象は手元のAIだけで、どれだけ回しても
+ * 料金が出ないため（下でそれ以外を断っている）。
+ */
+async function runOutputOnly(
+  provider: AIProvider,
+  model: string,
+  /** このモデルの申告の文脈長。取れないときは undefined */
+  declaredTokens: number | undefined
+): Promise<void> {
+  /*
+    **クラウドAIでは測らない**（設計書6.61）。申告値をAPIから取れるうえ、
+    出力トークンは単価が高い。「両方」のときは黙って飛ばしているが、
+    こちらは作者が名指しで選んだのだから、飛ばした理由を言う。
+  */
+  if (!isLocalProvider(provider.id)) {
+    logStep(
+      `書ける量の測定：${provider.displayName} は手元のAIではないので測りません。`
+    );
+    void vscode.window.showInformationMessage(
+      "書ける長さを測れるのは、手元のAI（Ollama・LM Studio）だけです。" +
+        `いま選んでいるのは ${provider.displayName} なので、測りませんでした。`
+    );
+    return;
+  }
+
+  const summary = await measureOutputLimit(
+    provider,
+    model,
+    // 取れないときは、これまでの既定（`ollamaProvider.ts` の
+    // `UNKNOWN_CONTEXT_WINDOW`）と同じ値に倒す
+    declaredTokens ?? FALLBACK_CONTEXT_WINDOW
+  );
+  // 中止・失敗のときは空が返る（理由はログにある）。数字の無い結果を
+  // それらしく見せない
+  void vscode.window.showInformationMessage(
+    summary ||
+      "書ける長さは測れませんでした（途中で終わったか、AIが応えませんでした）。"
+  );
 }
 
 /**
@@ -956,6 +1088,16 @@ async function measureOutputLimit(
               数行しかない。渡さなければプロバイダが送る長さから決め、
               作者の指定（6.58）とも揃う。出力の見込みは
               `maxOutputTokens` のほうで伝わる。
+            */
+            /*
+              **こちらも思考を切る**（入力側と同じ判断。2026-09-13に確かめ直した）。
+
+              理由は入力側とは別である。ここでは `capOutputTokens: true` で
+              `num_predict` を実際に送っているので、**思考ぶんもその枠から
+              引かれる。** 切らないと「何行書けたか」ではなく「考えごとの
+              あと何行書けたか」を測ることになり、モデルの気分で測る対象が
+              変わる。数えているのは番号の行数（`countOutputLines`）なので、
+              思考を残しても得るものが無い。
             */
             disableThinking: true,
             /*

@@ -1,4 +1,9 @@
 import type { ModelTuning, SpeedSource } from "./modelTuning";
+import {
+  CHARS_PER_TOKEN,
+  MIN_CHARS_PER_TOKEN_SAMPLES,
+  resolveCharsPerToken,
+} from "./sizeBudget";
 
 /**
  * AIチューニングの実測を、1枚の表にして見せる（作者の要望、2026-09-06
@@ -93,9 +98,14 @@ export function buildTuningStatsMarkdown(
     "速度は出力の実測（トークン/秒）です。普段のAI呼び出しからも記録します。" +
       "同じモデルでも機械の負荷で変わるので目安です。",
     "",
+    "字/トークンも普段の呼び出しから記録します（送った字数 ÷ 応答が申告した" +
+      "入力トークン数の、これまでの最小値）。この値が入ると本文の分割が" +
+      "変わるので、実際にいくつで見積もっているかを欄の中に併記します。",
+    "",
     "| AI | モデル | 出力速度（トークン/秒） | 速度の出どころ | 速度を測った日時 | " +
-      "文脈の実効長（トークン） | 読める長さ（字） | 書ける長さ（トークン） | 測った日時 |",
-    "|---|---|---|---|---|---|---|---|---|"
+      "文脈の実効長（トークン） | 読める長さ（字） | 書ける長さ（トークン） | 測った日時 | " +
+      "字/トークン（実測） |",
+    "|---|---|---|---|---|---|---|---|---|---|"
   );
 
   const sorted = sortBySpeed(entries);
@@ -116,6 +126,7 @@ export function buildTuningStatsMarkdown(
           readCell(entry.tuning),
           outputCell(entry.tuning),
           formatMeasuredAt(entry.tuning.measuredAt),
+          charsPerTokenCell(entry.tuning),
         ].join(" | ") +
         " |"
     );
@@ -216,6 +227,35 @@ function speedSourceCell(source: SpeedSource | undefined): string {
     default:
       return UNKNOWN;
   }
+}
+
+/**
+ * 字/トークンの実測（設計書6.77）。
+ *
+ * **実際に見積もりへ使う値まで書く。** 台帳の値をそのまま出すだけだと、
+ * 「1.461と出ているのにチャンクが増えない」（件数が足りない・余白を
+ * 掛けた・0.7を下回って据え置いた）の理由が読めない。**数字が変わったのに
+ * なぜ変わったかが読めないのが、いちばん困る。**
+ */
+function charsPerTokenCell(tuning: ModelTuning): string {
+  const measured = tuning.charsPerToken;
+  if (measured === undefined) return `${UNKNOWN}（次の呼び出しから記録）`;
+
+  const samples = tuning.charsPerTokenSamples ?? 0;
+  const used = resolveCharsPerToken(tuning);
+  const count = `${samples.toLocaleString("ja-JP")}回`;
+  if (samples < MIN_CHARS_PER_TOKEN_SAMPLES) {
+    return (
+      `${measured.toFixed(3)}（${count}。` +
+      `${MIN_CHARS_PER_TOKEN_SAMPLES}回に満たないため ` +
+      `${CHARS_PER_TOKEN} で見積もります）`
+    );
+  }
+  if (used === CHARS_PER_TOKEN) {
+    // 実測のほうが悪いモデル。**これまでより不利にしない**ので据え置き
+    return `${measured.toFixed(3)}（${count}。低いため ${CHARS_PER_TOKEN} のまま）`;
+  }
+  return `${measured.toFixed(3)}（${count}。余白を取って ${used.toFixed(3)} で見積もり）`;
 }
 
 function countCell(value: number | undefined): string {

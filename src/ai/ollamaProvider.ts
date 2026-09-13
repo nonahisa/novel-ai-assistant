@@ -22,7 +22,7 @@ import {
 import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
 import { logLine } from "../core/logger";
 import { withAiWork } from "../core/aiActivity";
-import { resolveTimeoutMs } from "../core/modelTuning";
+import { modelTuning, resolveTimeoutMs } from "../core/modelTuning";
 import { customEndpointNotice } from "../core/endpointNotice";
 
 const DEFAULT_ENDPOINT = "http://localhost:11434";
@@ -431,6 +431,11 @@ export class OllamaProvider implements AIProvider {
         contextWindow:
           (await this.getModel(params.model))?.contextWindow ??
           UNKNOWN_CONTEXT_WINDOW,
+        // **チャンクを決めたのと同じ台帳を見る**（設計書6.77）。確保する
+        // 長さだけ当て推量のままだと、実測で組んだプロンプトに対して
+        // num_ctx が倍近く育ち、非力な機械のメモリを食う。
+        // 実測が無ければ `resolveTokensPerChar` が従来の 0.7 を返す
+        measured: modelTuning(this.id, params.model),
       });
 
     // **どの長さで確保したかを残す。** これが記録に無かったせいで、

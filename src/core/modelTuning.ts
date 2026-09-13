@@ -120,6 +120,37 @@ export interface ModelTuning {
   /** その速度がどこから来たか。**推定値を実測と並べない**ための札 */
   readonly speedSource?: SpeedSource;
   /**
+   * 実測の字/トークン（小数3桁。設計書6.77）。
+   *
+   * **速度（`outputTokensPerSecond`）とまったく同じ流儀**である——普段の
+   * 呼び出しから自動で採り、確認なしで保存する参考値で、呼び出しの挙動を
+   * 決める設定（`contextWindow`・`timeoutSeconds`）ではない。
+   *
+   * 製品はこれまで、字↔トークンを当て推量（0.7字/トークン）で見ていた。
+   * 作者の送信量の記録437件で突き合わせると、**実測はその倍**
+   * （全体1.461、いちばん悪いモデルでも1.277）だった。見積りが小さすぎると、
+   * 入るのに入らないと判断して本文を細かく切ることになる。
+   *
+   * **平均しない。これまでの最小値を覚える。** 内容によって変わる値なので
+   * （指示やJSONが多い回は大きく、地の文だけの回は小さい）、平均を採ると
+   * 本文を多く送る回——まさに見積りが要る回——で甘くなる。最小値なら
+   * 単純で、外れ値に強く、必ず安全側に倒れる。
+   *
+   * **無い台帳は従来どおり**——実測が入るまでは 0.7 のまま動く
+   * （読み側の互換。`outputTokensPerSecond` と同じ）。
+   */
+  readonly charsPerToken?: number;
+  /**
+   * 上の値を、何回ぶんから採ったか。**少ないうちは信じない**
+   * （`core/sizeBudget.ts` の `MIN_CHARS_PER_TOKEN_SAMPLES`）。
+   *
+   * **台帳へ実際に書いた回の数であって、呼び出し回数そのものではない。**
+   * 設定ファイルへの書き込みを抑えるため、書くのは「しきい値に達するまで」と
+   * 「最小値が下がったとき」だけにしてある（`ai/meteredProvider.ts`）。
+   * 少なめに出るぶんには、信じ始めるのが遅れるだけで安全側である。
+   */
+  readonly charsPerTokenSamples?: number;
+  /**
    * 速度を採った時刻（ISO 8601）。
    *
    * **`measuredAt` と混ぜない。** あちらはチューニング（読める長さ・
@@ -209,6 +240,10 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
     // 直せないので、読んでしまうと生の値が表に出る
     const speedSource = SPEED_SOURCES.find((id) => id === entry.speedSource);
     const speedMeasuredAt = nonEmptyText(entry.speedMeasuredAt);
+    // **0は読まない**（速度と同じ理由）。「0字/トークン」は測れていないのと
+    // 同じ意味だが、そのまま読むと換算が無限大になる
+    const charsPerToken = positiveNumber(entry.charsPerToken);
+    const charsPerTokenSamples = positiveNumber(entry.charsPerTokenSamples);
     /*
       0.36.3 の `firstTokenSeconds` は**欄ごと削った**。流し受信を断つ
       測定では最初のトークンの時刻を知る手立てが無く、普段の呼び出しの
@@ -233,6 +268,8 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
       ...(outputTokensPerSecond !== undefined ? { outputTokensPerSecond } : {}),
       ...(speedSource !== undefined ? { speedSource } : {}),
       ...(speedMeasuredAt !== undefined ? { speedMeasuredAt } : {}),
+      ...(charsPerToken !== undefined ? { charsPerToken } : {}),
+      ...(charsPerTokenSamples !== undefined ? { charsPerTokenSamples } : {}),
       ...(outputMeasureTimedOut !== undefined ? { outputMeasureTimedOut } : {}),
       ...(measuredAt !== undefined ? { measuredAt } : {}),
     };
@@ -488,11 +525,61 @@ export function resolveTimeoutMs(
  * 残る欄が1つも無くなったら、その鍵ごと落とす——中身の無い鍵が設定に
  * 並ぶと、作者には「測ったのに何も入っていない」と読める。
  */
+/**
+ * 台帳への書き込みを、順番に1つずつ通す（作者の実機、2026-09-13）。
+ *
+ * ## 何が起きたか
+ *
+ * `ollama/qwen3.8:latest` の測定結果（`measuredChars: 76815`）が、
+ * **保存を確認したあとで台帳から消えた。** ほかの7件は残っていた。
+ *
+ * 書き込みは「全体を読む → その1件を差し替える → 全体を書き戻す」で、
+ * **読んだときと同じ中身がまだそこにあるかを確かめていなかった。**
+ * 書き手は複数ある——測定の終わり（`offerToSave`）、普段の呼び出しごとの
+ * 速度（`recordSpeed`）、同じく字/トークン（`recordCharsPerToken`）。
+ * 読む瞬間と書く瞬間のあいだに別の書き込みが挟まれば、**挟まれたほうが
+ * まるごと消える。**
+ *
+ * ## ほかの台帳は、みな守りを持っている
+ *
+ * 人物・設定資料・章立て・本の設計図は、読み込み時のハッシュ照合や
+ * `assertSaveAllowed` を持つ（CLAUDE.mdの実装ルール2）。
+ * **モデルの調整値だけが素通しだった。**
+ *
+ * ## 直し方は2段
+ *
+ * 1. **順番に通す**（この待ち行列）。同じ拡張機能ホストの中での競合を塞ぐ。
+ *    手本は `core/logger.ts` の `writeQueue`
+ * 2. **書く直前に読み直す**（`saveModelTuning` の中）。待っているあいだに
+ *    外から変わっていることがある——作者が手で直す、別の窓、同期
+ */
+let tuningWriteQueue: Promise<void> = Promise.resolve();
+
 export async function saveModelTuning(
   providerId: string,
   model: string,
   tuning: ModelTuning
 ): Promise<void> {
+  // **並んでから触る。** 読む→直す→書くのあいだに、別の書き込みを
+  // 挟ませない（挟まると、挟まれたほうの鍵がまるごと消える）
+  const done = tuningWriteQueue.then(() =>
+    writeModelTuning(providerId, model, tuning)
+  );
+  // 1つ失敗しても、次を止めない。列そのものは常に進める
+  tuningWriteQueue = done.catch(() => undefined);
+  return done;
+}
+
+async function writeModelTuning(
+  providerId: string,
+  model: string,
+  tuning: ModelTuning
+): Promise<void> {
+  /*
+    **待ってから、もう一度読む。** 列に並んでいるあいだに設定が
+    変わっていることがある（作者が手で直す・別の窓・同期）。
+    並ぶ前に読んだ表で書き戻すと、そのあいだの変更を巻き戻す。
+  */
   const configuration = vscode.workspace.getConfiguration(CONFIG_SECTION);
   const table = asRecord(configuration.get<unknown>(TUNING_SETTING));
 
@@ -524,6 +611,33 @@ export async function saveModelTuning(
       ? vscode.ConfigurationTarget.Workspace
       : vscode.ConfigurationTarget.Global
   );
+
+  /*
+    **入ったかを確かめる。** 列に並べても、外から同時に書かれることは
+    まだありうる（別の窓、同期、作者の手）。黙って諦めない
+    （CLAUDE.md「エラーは握りつぶさない」）。
+
+    **例外は投げない。** 測定の結果を作者へ見せる流れを、台帳の都合で
+    止めない——見せるものは既に手元にあり、台帳はその控えである。
+  */
+  const saved = asRecord(
+    asRecord(
+      vscode.workspace
+        .getConfiguration(CONFIG_SECTION)
+        .get<unknown>(TUNING_SETTING)
+    )[key]
+  );
+  const missing = Object.entries(tuning)
+    .filter(([name, value]) =>
+      value === undefined ? name in saved : saved[name] !== value
+    )
+    .map(([name]) => name);
+  if (missing.length > 0) {
+    logLine(
+      `モデルの調整値：${key} の ${missing.join("・")} が書けませんでした` +
+        "（別の窓か同期が同時に書いた可能性があります）。"
+    );
+  }
 }
 
 /** 素の物なら浅い写しを、そうでなければ空の物を返す（元は書き換えない） */

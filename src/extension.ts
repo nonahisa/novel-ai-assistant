@@ -2697,14 +2697,22 @@ export async function activate(
     // 割当先（設計書6.28.9）を測らないと、測ったAIと切れたAIが別物になる。
     // コマンドパレットからは引数なしで来るので、そのときは既定を測る
     registerCommand("novelai.measureContext", async (feature?: unknown) => {
-      const { measureContext } = await import("./features/measureContext.js");
+      const { askTuningScope, measureContext } = await import(
+        "./features/measureContext.js"
+      );
+      // **何を測るかを先に訊く**（作者の依頼、2026-09-13）。読める長さは
+      // 数分だが、書ける長さは遅いモデルで1時間以上かかる。押した瞬間に
+      // 両方始まる形だと、数分で済ませたい作者が1時間付き合わされる
+      const scope = await askTuningScope();
+      if (!scope) return;
       await measureContext(
         aiRegistry,
         isAssignableFeature(feature) ? feature : "default",
         // **測定に作品は要らないが、ログの置き場所には要る**（設計書6.53）。
         // 出力パネルはVS Codeを閉じると消えるので、点滅や時間切れの原因を
         // 作者が後から追えるよう、作品フォルダの `actions.log` にも残す
-        logTargetWorkFolder(registry)
+        logTargetWorkFolder(registry),
+        scope
       );
     })
   );

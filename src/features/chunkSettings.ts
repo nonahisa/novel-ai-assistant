@@ -168,15 +168,18 @@ export function readChunkSettings(
   const config = vscode.workspace.getConfiguration("novelai");
   const mode = parseChunkSizeMode(config.get<string>("chunkSizeMode"));
 
+  const tuning = outputTuning
+    ? modelTuning(outputTuning.providerId, outputTuning.model)
+    : undefined;
+
   const requested = resolveChunkChars({
     mode,
     configured: config.get<number>("chunkChars"),
     contextWindow,
+    // **字/トークンの実測**（設計書6.77）。無ければ当て推量（0.7）のまま
+    // なので、渡していない呼び出し側の字数は変わらない
+    measured: tuning,
   });
-
-  const tuning = outputTuning
-    ? modelTuning(outputTuning.providerId, outputTuning.model)
-    : undefined;
 
   // **未チューニングの安全既定**（設計書6.65.16の1）。自動モードだけが
   // 対象——手動で字数を指定しているなら、未チューニングでも作者の指定を
@@ -199,6 +202,9 @@ export function readChunkSettings(
           overheadChars: fixedCost.overheadChars,
           outputTokens: fixedCost.outputTokens,
           requestedChars: requestedAfterSafetyCap.chars,
+          // 上の `resolveChunkChars` と同じ係数で差し引く。片方だけ実測に
+          // すると、決めた字数を自分で削り直すことになる
+          measured: tuning,
         }),
         overheadChars: fixedCost.overheadChars,
       }
