@@ -1795,7 +1795,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
       {
         kind: "action",
         command: "novelai.runWriterDiagnosis",
-        label: "作家のタイプ診断",
+        label: "作家タイプ診断",
         note: "はじめの案内",
         icon: "compass",
         requiresWork: false,

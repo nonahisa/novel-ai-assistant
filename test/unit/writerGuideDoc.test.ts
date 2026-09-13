@@ -3,8 +3,10 @@ import {
   buildWriterGuide,
   WRITER_GUIDE_TITLE,
 } from "../../src/core/writerGuideDoc";
+import { ADVICE_TYPES } from "../../src/core/advicePolicy";
 import {
   buildWriterStyle,
+  WRITER_PLAN_TYPES,
   tutorialAdvice,
   tutorialGoals,
   WRITER_QUESTIONS,
@@ -88,7 +90,7 @@ describe("はじめの案内の紙", () => {
         const guide = guideFor(styleOf({ situation }), hasWork);
         expect(guide, situation).toContain("AIが原稿を書き換えることはありません");
         expect(guide, situation).toContain("文字コードも改行も変えず");
-        expect(guide, situation).toContain("作家のタイプ診断");
+        expect(guide, situation).toContain("作家タイプ診断");
       }
     }
   });
@@ -109,6 +111,45 @@ describe("はじめの案内の紙", () => {
     });
     expect(withPolicy).toContain("相談のときの言い方");
     expect(withPolicy).toContain("均衡模索型");
+  });
+
+  test("**最後に、ほかのタイプの一覧が載る**（作者の指定、2026-09-13）", () => {
+    const guide = guideFor(styleOf(), false);
+    expect(guide).toContain("## ほかのタイプ");
+    // 段取りの3つは名前も説明も載る
+    for (const info of Object.values(WRITER_PLAN_TYPES)) {
+      expect(guide, info.label).toContain(info.label);
+      expect(guide, info.label).toContain(info.summary);
+    }
+    // 11タイプも載る
+    for (const info of Object.values(ADVICE_TYPES)) {
+      expect(guide, info.label).toContain(info.label);
+    }
+  });
+
+  test("**いまの自分に印が付く**（隣と見比べられる）", () => {
+    const style = styleOf({ plan: "improviser" });
+    const goal = tutorialGoals(style, false)[0];
+    const guide = buildWriterGuide({
+      style,
+      goal,
+      advice: tutorialAdvice(style, goal.goal),
+      advicePolicy: { label: "均衡模索型", summary: "方向づけの相談が効きます。" },
+    });
+
+    expect(guide).toContain("**即興派****← いまのあなた**");
+    expect(guide).toContain("**均衡模索型****← いまのあなた**");
+    // 印は1つずつ（ほかのタイプには付かない）
+    expect(guide.split("← いまのあなた").length - 1).toBe(2);
+  });
+
+  test("9問に答えていなければ、そう書いたうえで一覧は出す", () => {
+    const guide = guideFor(styleOf(), false);
+    expect(guide).toContain("まだ9問には答えていません");
+    // 答えていないのに「あなたは◯◯型です」とは言わない
+    expect(guide).not.toContain("相談のときの言い方");
+    // それでも一覧は読める
+    expect(guide).toContain("### 相談のときの言い分け");
   });
 
   test("紙は作品フォルダーへ入らないと、紙自身が断っている", () => {

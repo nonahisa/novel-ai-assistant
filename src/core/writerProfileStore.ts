@@ -2,7 +2,7 @@ import type * as vscode from "vscode";
 import { buildWriterStyle, type WriterStyle } from "./writerStyle";
 
 /**
- * 作家のタイプ診断の保存先（設計書6.90）。
+ * 作家タイプ診断の保存先（設計書6.90）。
  *
  * **作者ごとに1つ。作品ごとではない。** 段取り・直す時期・設定の持ち方・
  * 出し先は、作品を変えても大きくは変わらない癖である。作品ごとに持つと、

@@ -31,7 +31,7 @@ import {
 import { askAdviceQuestions } from "./advicePolicyDiagnosis";
 
 /**
- * 作家のタイプ診断と、はじめの案内（設計書6.90）。
+ * 作家タイプ診断と、はじめの案内（設計書6.90）。
  *
  * ## 順番を守る
  *
@@ -81,7 +81,7 @@ export async function runWriterDiagnosis(
     }
     if (action === "clear") {
       await deps.profiles.clear();
-      logStep("作家のタイプ診断：答えを消した");
+      logStep("作家タイプ診断：答えを消した");
       void vscode.window.showInformationMessage(
         "診断の答えを消しました。案内は出なくなります（作品や設定資料には影響しません）。"
       );
@@ -94,7 +94,7 @@ export async function runWriterDiagnosis(
 
   await deps.profiles.set(style);
   await deps.profiles.setWelcomeState("done");
-  logStep(`作家のタイプ診断：${describeWriterStyle(style)}`);
+  logStep(`作家タイプ診断：${describeWriterStyle(style)}`);
 
   // **6.86 の9問も、ここで聞く**（作者の指摘、2026-09-13
   // 「診断に11タイプは入ってないということですか？」）。
@@ -137,7 +137,7 @@ async function askAdvicePart(deps: WriterDiagnosisDeps): Promise<boolean> {
       cancelItem(),
     ],
     {
-      title: "作家のタイプ診断（ここまで5問）",
+      title: "作家タイプ診断（ここまで5問）",
       placeHolder: "AIの言い方も、あなたに合わせますか",
       ignoreFocusOut: true,
     }
@@ -163,7 +163,7 @@ async function askAdvicePart(deps: WriterDiagnosisDeps): Promise<boolean> {
   };
   await deps.adviceDefault.set(appendAdviceHistory(existing, fresh, "diagnosis"));
   logStep(
-    `作家のタイプ診断：相談の助言方針は` +
+    `作家タイプ診断：相談の助言方針は` +
       `${ADVICE_TYPES[resolveAdviceType(scores)].label}`
   );
   return true;
@@ -195,7 +195,7 @@ async function chooseAction(
       cancelItem(),
     ],
     {
-      title: "作家のタイプ診断",
+      title: "作家タイプ診断",
       placeHolder: `いまは「${plan.label}」として案内しています（${describeWriterStyle(style)}）`,
       ignoreFocusOut: true,
     }
@@ -228,7 +228,7 @@ async function askStyle(
         cancelItem(),
       ],
       {
-        title: `作家のタイプ診断（${index + 1}/${WRITER_QUESTIONS.length}）`,
+        title: `作家タイプ診断（${index + 1}/${WRITER_QUESTIONS.length}）`,
         placeHolder: question.text,
         ignoreFocusOut: true,
       }
@@ -269,7 +269,13 @@ async function runTutorial(
       { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true }
     );
 
-    const step = await askStep(goal, advice.steps, advice.later);
+    const step = await askStep(goal, advice.steps, [
+      ...advice.later,
+      // **出さないと決めたものも、決めたと分かるように出す**（0.52.0）
+      ...(advice.withheld ?? []).map(
+        (line) => `いまは出していません：${line}`
+      ),
+    ]);
     if (step === "back") continue;
     if (!step) return;
 

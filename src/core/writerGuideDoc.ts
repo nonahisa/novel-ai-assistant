@@ -1,3 +1,4 @@
+import { ADVICE_TYPES } from "./advicePolicy";
 import {
   diagnosisNarrative,
   describeWriterStyle,
@@ -91,6 +92,18 @@ export function buildWriterGuide(input: {
     }
   }
 
+  /*
+    **「できない」と「いま出さない」を分ける**（0.52.0）。
+    執筆統計を「できないこと」に並べると、使えないものとして伝わる。
+    実際は開けるので、**出さないと決めた理由のほうを書く**。
+  */
+  if (advice.withheld && advice.withheld.length > 0) {
+    parts.push("", "## いまは出していないもの", "");
+    for (const line of advice.withheld) {
+      parts.push(`- ${line}`);
+    }
+  }
+
   parts.push(
     "",
     "---",
@@ -101,9 +114,62 @@ export function buildWriterGuide(input: {
       "適用するのはあなたです",
     "- **原稿はただのテキスト／Markdown ファイルのままです。** " +
       "文字コードも改行も変えず、他のエディタからも今までどおり開けます",
-    "- 案内が合わないと感じたら、**「作家のタイプ診断」から答え直せます**" +
+    "- 案内が合わないと感じたら、**「作家タイプ診断」から答え直せます**" +
       `（いまの答えは「${WRITER_PLAN_TYPES[style.plan].label}」ほか）`
   );
 
+  parts.push(...otherTypes(style, input.advicePolicy?.label));
+
   return parts.join("\n");
+}
+
+/**
+ * **ほかのタイプも並べる**（作者の指定、2026-09-13
+ * 「説明文ですが、最後に他のタイプの一覧を出してください」）。
+ *
+ * **自分のぶんだけ見せられても、当たっているのか分からない。** 隣に何が
+ * あるかを読めば、作者は「こちらのほうが近い」と気づける。診断は決めつけでは
+ * なく出発点なので（6.86.5）、**そこから動かす手掛かり**を渡しておく。
+ *
+ * **紙のいちばん後ろに置く。** 先に読ませるのは、その人に効く話のほうである。
+ */
+function otherTypes(
+  style: WriterStyle,
+  adviceLabel: string | undefined
+): string[] {
+  const mark = (own: boolean): string => (own ? "**← いまのあなた**" : "");
+
+  const lines = [
+    "",
+    "---",
+    "",
+    "## ほかのタイプ",
+    "",
+    "当たっていないと感じたら、答え直してください。**診断は決めつけではなく、出発点です。**",
+    "",
+    "### 書き始める前に、どこまで決めるか（5問で決まります）",
+    "",
+  ];
+
+  for (const [id, info] of Object.entries(WRITER_PLAN_TYPES)) {
+    lines.push(`- **${info.label}**${mark(id === style.plan)}　${info.summary}`);
+  }
+
+  lines.push(
+    "",
+    "### 相談のときの言い分け（9問で決まる11タイプ）",
+    "",
+    adviceLabel
+      ? "AIへの相談は、このタイプ向けの言い方だけを渡します（全部は送りません）。"
+      : "**まだ9問には答えていません。** 「作家タイプ診断」から続けて答えられます。",
+    ""
+  );
+
+  for (const info of Object.values(ADVICE_TYPES)) {
+    lines.push(
+      `- **${info.label}**${mark(info.label === adviceLabel)}　${info.summary}`
+    );
+  }
+
+  return lines;
 }

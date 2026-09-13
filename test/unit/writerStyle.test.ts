@@ -14,7 +14,7 @@ import {
 } from "../../src/core/writerStyle";
 
 /**
- * 作家のタイプ診断と、はじめの案内（設計書6.90）。
+ * 作家タイプ診断と、はじめの案内（設計書6.90）。
  *
  * ここで守るのは3つ。
  *
@@ -232,6 +232,72 @@ describe("はじめの案内", () => {
     expect(tutorialAdvice(perEpisode, "polish").steps[0].command).toBe(
       "novelai.checkTypos"
     );
+  });
+
+  test("**手が止まっている人の行き先が、必ず1つある**（作者の指摘、2026-09-13）", () => {
+    // 「スランプを脱出したい作家に対する支援を選択肢から感じられませんでした」。
+    // 作品があってもなくても、書き進める手掛かりへ行ける道を残す
+    for (const style of allStyles()) {
+      if (style.situation === "editing") continue;
+      const withWork = tutorialGoals(style, true).map((entry) => entry.goal);
+      expect(withWork, describeWriterStyle(style)).toContain("unstick");
+    }
+  });
+
+  test("書き出せない人にも、始める前から行き先がある", () => {
+    const style = buildWriterStyle({
+      situation: "starting",
+      plan: "hybrid",
+      revise: "inline",
+      material: "in_head",
+      outlet: "undecided",
+    });
+    if (!style) throw new Error("組み立てられない");
+
+    const goals = tutorialGoals(style, false).map((entry) => entry.goal);
+    expect(goals).toContain("unstick");
+  });
+
+  test("**新しく決めさせない**（書けないときに、いちばん重い仕事を勧めない）", () => {
+    const style = buildWriterStyle({
+      situation: "have_files",
+      plan: "hybrid",
+      revise: "per_episode",
+      material: "memo",
+      outlet: "serial",
+    });
+    if (!style) throw new Error("組み立てられない");
+
+    const advice = tutorialAdvice(style, "unstick");
+    // いま在るものを見返す口が先に来る
+    expect(advice.steps[0].command).toBe("novelai.resumeWriting");
+    expect(advice.steps[1].command).toBe("novelai.readManuscriptAloud");
+    // 作品ぜんぶのプロットを立て直させない
+    const commands = advice.steps.map((step) => step.command);
+    expect(commands).not.toContain("novelai.createPlot");
+    expect(commands).not.toContain("novelai.generatePlot");
+  });
+
+  test("**執筆統計は、押せる形で出さない**（書けていない日が並ぶ画面である）", () => {
+    for (const style of allStyles()) {
+      const advice = tutorialAdvice(style, "unstick");
+      const commands = advice.steps.map((step) => step.command);
+      expect(commands, describeWriterStyle(style)).not.toContain(
+        "novelai.showWritingStats"
+      );
+    }
+  });
+
+  test("**こちらから「スランプ」と言わない**（品定めにしない）", () => {
+    // 6.86.2 で自信度を本人に見せないと決めたのと同じ理由。
+    // 札を貼ると、作者はそれを自分の状態の診断として受け取る
+    for (const style of allStyles()) {
+      const advice = tutorialAdvice(style, "unstick");
+      const text = [advice.advice, ...advice.later].join("\n");
+      for (const word of ["スランプ", "行き詰ま", "不調"]) {
+        expect(text.includes(word), word).toBe(false);
+      }
+    }
   });
 
   test("目的はすべて `tutorialAdvice` が受けられる（取りこぼしが無い）", () => {
