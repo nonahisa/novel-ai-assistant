@@ -309,6 +309,7 @@ describe("AIの印", () => {
         // 選び方によってはAIを1度も呼ばない。それでも印は要る——既定の
         // 4つには誤字脱字・推敲・矛盾が入っており、料金が出るためである
         "novelai.runProofreadingSuite",
+        "novelai.runReaderTargetDiagnosis",
         "novelai.checkTypos",
         "novelai.checkProofread",
         "novelai.checkContradictions",

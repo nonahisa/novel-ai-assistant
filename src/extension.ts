@@ -3891,6 +3891,29 @@ export async function activate(
     )
   );
 
+  /*
+    ターゲット読者診断（設計書6.91。作者の依頼、2026-09-13）。
+
+    **作家タイプ診断（6.90）と対になる。** あちらは作者ごと・AIなし、
+    こちらは**作品ごと**で、宣言（9問・AIなし）と実像（本文から読む・
+    AIを使う）の2階建てである。作品を選ばせるので、作品一覧の節点からも
+    詳細メニューからも入れる。
+  */
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.runReaderTargetDiagnosis",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+
+        const { runReaderTargetDiagnosis } = await import(
+          "./features/readerTargetDiagnosis.js"
+        );
+        await runReaderTargetDiagnosis(work, aiRegistry);
+      }
+    )
+  );
+
   context.subscriptions.push(
     registerCommand(
       "novelai.checkOpening",

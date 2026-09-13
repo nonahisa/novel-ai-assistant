@@ -356,6 +356,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.openExtensionSettings": "allTypes",
   "novelai.manageConfirmSkips": "allTypes",
   "novelai.setupVectorSearch": "allTypes",
+  "novelai.runReaderTargetDiagnosis": "allTypes",
   "novelai.buildVectorIndex": "allTypes",
   "novelai.clearVectorIndex": "allTypes",
 

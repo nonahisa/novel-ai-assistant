@@ -37,6 +37,7 @@ const OVERWRITE_ALLOWED: Record<string, string> = {
   "bookStore.ts": "assertSaveAllowed を持つ（未保存の下書きだけ別に控える）",
   "chapterStore.ts": "assertSaveAllowed を持つ（未保存の編集も断る）",
   "postingStore.ts": "読み込み時の控えと突き合わせる",
+  "readerTargetStore.ts": "assertSaveAllowed を持つ（未保存の編集も断る）",
 
   // 作り直せる（消えても作者の書いたものは失われない）
   "chunkCache.ts": "処理済みチャンクの控え。再実行で作り直せる",
@@ -96,12 +97,13 @@ describe("設定と台帳を書く経路", () => {
     }
   });
 
-  test("ハッシュ照合を持つと書いた4つは、本当に持っている", () => {
+  test("ハッシュ照合を持つと書いた5つは、本当に持っている", () => {
     for (const name of [
       "settingsStore.ts",
       "bookStore.ts",
       "chapterStore.ts",
       "postingStore.ts",
+      "readerTargetStore.ts",
     ]) {
       const source = readFileSync(resolve(CORE, name), "utf8");
       expect(source, name).toContain("hashBytes");

@@ -619,6 +619,24 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "続きを読みたくなる引きがあるかを診断します。" +
               "WEB小説は冒頭で読み続けるかが決まります。本文は書き換えません。",
           },
+          // ターゲット読者診断は、冒頭診断の隣に置く（設計書6.91）。
+          // どちらも**読者にどう見えるか**を見る道具で、作者が見るのは
+          // 同じ場所（冒頭）である
+          {
+            kind: "action",
+            command: "novelai.runReaderTargetDiagnosis",
+            label: "ターゲット読者診断",
+            icon: "person",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "**この作品が誰に向いているか**を、2つの側から出します。" +
+              "いくつかお答えいただく「向けているつもり」（AIは使いません）と、" +
+              "冒頭とプロットをAIが読む「書けているもの」です。" +
+              "**値打ちはその差にあります。**" +
+              "3つの軸（読み慣れ・読む姿勢・求めるもの）で11通りに分かれます。" +
+              "作品ごとに持てます。本文は書き換えません。",
+          },
           {
             kind: "action",
             command: "novelai.checkDeviations",
