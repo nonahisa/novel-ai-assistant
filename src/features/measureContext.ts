@@ -6,6 +6,7 @@ import {
 } from "../ai/registry";
 import {
   AIError,
+  isFatalProviderFailure,
   recoveryForAIError,
   type AIProvider,
   type ProviderId,
@@ -180,7 +181,7 @@ type RoundOutcome =
 /**
  * その回のエラーを「入らなかった」と数えてよいか。
  *
- * **一度でも短い長さで「両方」が返っていることが条件である。**
+ * **一度でも短い長さで通っていることが条件である。**
  * 通ったことがあるなら、接続も鍵も残高も生きていると分かっている。
  * そこから長くしていって落ちたなら、原因は長さのほうである
  * （設計書6.27.11「切り捨てはクラウドならエラーで『入らない』と数える」）。
@@ -189,24 +190,124 @@ type RoundOutcome =
  * 緩めると、鍵の間違いや残高不足を「入らない」と誤魔化して、
  * 「実効の上限は0字です」のような無意味な結果を出してしまう。
  *
- * 作者が止めたとき（`aborted`）は、当然ながら数えない。
+ * **数えてよい種別は `bad_response` と `unknown` の2つだけ**
+ * （作者の依頼、2026-09-13）。理由は2つある。
  *
- * **時間切れ（`timeout`）も数えない**（作者の依頼、2026-09-13）。
- * 時間切れが言っているのは「待っているあいだに返らなかった」であって、
- * 「入らなかった」ではない——**遅いのか長すぎるのかが区別できていない。**
- * 数えてしまうと、遅いだけのモデルで実効の上限が実際より短く出る。
- * 待ち時間を延ばして測り直す道（`doubledTimeoutSeconds`）が先にあり、
- * それでも切れたときは**探索を打ち切って、そこまでの結果で終える**
- * （`runMeasurement` の中。「測れなかった」を「読めなかった」と言い換えない）。
+ * - **この2つだけが「長すぎて断られた」の実績を持つ。** さくらの
+ *   gpt-oss-120b は上限超えを400で返しており、それが `bad_response` として
+ *   ここへ落ちていた。`context_overflow` に分けられるようになったのは
+ *   2026-08-30以降で、**古い経路や別のプロバイダでは今もここへ落ちうる**
+ * - **ほかの種別は、長さについて何も言っていない。** 残高切れ
+ *   （`insufficient_credit`）も鍵の失効（`authentication_failed`）も
+ *   分あたりの上限（`rate_limited`）もモデルが載らない
+ *   （`model_load_failed`）も、長さとは無関係に起きる。数えると、
+ *   **原因の違う失敗が「実効の上限」という数字に化ける**——実機の
+ *   Gemini は6回の `rate_limited` を数えられ、1,024k トークンを申告して
+ *   いるのに 186,434字で頭打ちになった（2026-09-13）
+ *
+ * 時間切れ（`timeout`）・作者の取り消し（`aborted`）・分あたりの上限は、
+ * それぞれ専用の道が `runMeasurement` にある（待ち時間を延ばす／即座に
+ * 抜ける／60秒待って測り直す）。ここへ落ちてくる前に捌かれるが、
+ * **万一すり抜けても数えないよう、この関数でも断っておく。**
  */
 export function countErrorAsTooLong(
   hadSuccessBelow: boolean,
   error: unknown
 ): boolean {
   if (!(error instanceof AIError)) return false;
-  if (error.kind === "aborted") return false;
-  if (error.kind === "timeout") return false;
+  if (error.kind !== "bad_response" && error.kind !== "unknown") return false;
   return hadSuccessBelow;
+}
+
+/**
+ * 探索を打ち切った理由（作者の依頼、2026-09-13）。
+ *
+ * **`timeout` 専用の入れ物を一般化したものである。** 0.61.0 で時間切れ
+ * だけを別扱いにしたが、打ち切る理由はそれだけではなかった（分あたりの
+ * 上限・残高切れ・鍵の失効）。理由を足すたびに入れ物の形が変わるのを
+ * 避けるため、最初から名前付きの理由として持つ。
+ */
+export type ProbeStopReason = "timeout" | "rate_limited" | "fatal";
+
+/** 探索を打ち切ったときの、その回の字数と理由 */
+export interface ProbeStop {
+  /** 打ち切ることになった回の字数 */
+  chars: number;
+  reason: ProbeStopReason;
+  /** 時間切れのときに待った秒数 */
+  seconds?: number;
+  /** そのほかの止まり方のときの、エラーの本文（そのまま作者へ見せる） */
+  detail?: string;
+}
+
+/**
+ * 打ち切ったことと、その理由を作者へ伝える一文。
+ *
+ * **どの理由でも「読めなかった」とは言わない**（作者の依頼、2026-09-13）。
+ * 分かったのは「測れなかった」だけである。ここを黙る、あるいは「読めない」
+ * と言い換えると、作者には「このモデルはここまでしか読めない」と映り、
+ * 待ち時間を延ばす・しばらく待つ・残高を足す、といった打つ手が見えなくなる。
+ */
+export function describeProbeStop(stop: ProbeStop | undefined): string {
+  if (stop === undefined) return "";
+  const chars = stop.chars.toLocaleString("ja-JP");
+  switch (stop.reason) {
+    case "timeout":
+      return (
+        `${chars} 字で時間切れになりました（待ち時間 ${stop.seconds} 秒）。` +
+        "これより長い長さは測れていません。実際にはもっと読める可能性があります。"
+      );
+    case "rate_limited":
+      return (
+        `${chars} 字で、AIの分あたりの上限に当たりました。` +
+        "これより長い長さは測れていません。" +
+        "しばらく待ってから測り直すと、もっと長く読めることがあります。"
+      );
+    case "fatal":
+      return (
+        `${chars} 字で「${stop.detail ?? "理由の分からない失敗"}」が返り、` +
+        "そこで測定を止めました。これより長い長さは測れていません。"
+      );
+  }
+}
+
+/**
+ * 分あたりの上限に当たったときに待つ秒数（作者の依頼、2026-09-13）。
+ *
+ * **待つのは1回だけ、この長さだけ。** 無料枠の窓が分単位とは限らないので、
+ * 粘っても伸びる保証が無い——粘るほど有料AIでは払う額が増える。
+ * `httpClient` の再試行には手を入れない（測定の中だけで待つ）。
+ */
+const RATE_LIMIT_WAIT_SECONDS = 60;
+
+/**
+ * 待つあいだ、作者の取り消しを見に行く間隔（ミリ秒）。
+ *
+ * **60秒を1回で待たない。** まとめて待つと、作者が中止を押しても
+ * 最大60秒は何も起きない——止まらないように見える。
+ */
+const RATE_LIMIT_POLL_MS = 500;
+
+/**
+ * 取り消しを見ながら待つ。最後まで待てたら true、取り消されたら false。
+ *
+ * **`onCancellationRequested` ではなく、刻んで見に行く。** 購読を張る形は
+ * 解除の後始末が要り、待ちの途中で例外が出たときに取りこぼす。ここは
+ * 「待つあいだ取り消しに気づく」だけが要件なので、短い眠りを繰り返して
+ * そのたびに旗を見るほうが素直である。
+ */
+async function waitWatchingCancel(
+  seconds: number,
+  token: vscode.CancellationToken
+): Promise<boolean> {
+  let remainingMs = Math.max(0, seconds) * 1000;
+  while (remainingMs > 0) {
+    if (token.isCancellationRequested) return false;
+    const step = Math.min(RATE_LIMIT_POLL_MS, remainingMs);
+    await new Promise<void>((resolve) => setTimeout(resolve, step));
+    remainingMs -= step;
+  }
+  return !token.isCancellationRequested;
 }
 
 /**
@@ -606,15 +707,14 @@ async function runMeasurement(
   /** 測定の途中で待ち時間を延ばしたなら、その秒数。延ばしたのは1回だけ */
   let raisedTimeoutSeconds: number | undefined;
   /**
-   * 時間切れで探索を**打ち切った**ときの、その回の字数と待った秒数
-   * （作者の依頼、2026-09-13）。
+   * 探索を**打ち切った**ときの、その回の字数と理由（作者の依頼、2026-09-13）。
    *
-   * **時間切れは「入らなかった」ではない。** 延ばして測り直しても切れた
-   * なら、それ以上の長さは**測れていない**だけであって、読めないと決まった
-   * わけではない。そこで探索をやめ、ここまでの `low` を生かして終える。
-   * 何字で切れたのかは、結果の文面で必ず言う。
+   * **どの理由も「入らなかった」ではない。** 時間切れも、分あたりの上限も、
+   * 残高切れも、それ以上の長さが**測れていない**だけであって、読めないと
+   * 決まったわけではない。そこで探索をやめ、ここまでの `low` を生かして
+   * 終える。何字でどう止まったのかは、結果の文面で必ず言う。
    */
-  let timeoutStop: { chars: number; seconds: number } | undefined;
+  let probeStop: ProbeStop | undefined;
   /**
    * 延ばす前に台帳へ入っていた待ち時間。**`undefined` は「欄が無かった」。**
    *
@@ -729,6 +829,14 @@ async function runMeasurement(
         let outcome: RoundOutcome | undefined;
         /** その回にかかった秒数。ログと、待ち時間の見立てに使う */
         let seconds = 0;
+        /**
+         * この長さについて、分あたりの上限で1回測り直したか。
+         *
+         * **長さごとに数え直す。** 上限の窓は時間で流れるので、別の長さで
+         * 当たったことを理由にこの長さを諦める筋が無い。逆に同じ長さで
+         * 2回当たったら、そこは待っても抜けないと見て打ち切る。
+         */
+        let rateLimitRetried = false;
 
         // **同じ長さを2回送ることがある。** 時間切れになった回だけ、
         // 待ち時間を倍にして測り直す（作者の依頼、2026-08-30）。
@@ -978,12 +1086,107 @@ async function runMeasurement(
                 「これより長い長さは測れていない」と作者へ言う。
                 **「測れなかった」を「読めなかった」と言い換えない。**
               */
-              timeoutStop = { chars: size, seconds: waited };
+              probeStop = { chars: size, reason: "timeout", seconds: waited };
               logStep(
                 `読める長さの測定：${size}字 → ${seconds}秒で時間切れ` +
                   `（待ち時間 ${waited} 秒）。これより長い長さは測れないので、` +
                   "ここで探索を打ち切ります（「入らない」とは数えません）。"
               );
+              return;
+            }
+
+            /*
+              **分あたりの上限は、待てば回復する**（作者の依頼、2026-09-13）。
+
+              実機の Gemini（`gemini-flash-lite-latest`、無料枠）は6回
+              `rate_limited` を返し、それが全部「入らなかった」と数えられて
+              いた。申告は 1,024k トークンなのに、実効の上限は 186,434字で
+              固定された——**測っていたのは長さではなく無料枠の窓である。**
+
+              **その長さについて1回だけ**待って測り直す。粘らないのは、
+              無料枠の窓が分単位とは限らず、待つほど結果が良くなる保証が
+              無いからである（`RATE_LIMIT_WAIT_SECONDS`）。
+            */
+            if (error instanceof AIError && error.kind === "rate_limited") {
+              if (!rateLimitRetried) {
+                rateLimitRetried = true;
+                logStep(
+                  `読める長さの測定：${size}字 → 分あたりの上限に当たりました。` +
+                    `${RATE_LIMIT_WAIT_SECONDS}秒待って、同じ長さをもう一度だけ測ります。`
+                );
+                progress.report({
+                  message:
+                    "分あたりの上限に当たりました。" +
+                    `${RATE_LIMIT_WAIT_SECONDS}秒待って測り直します…`,
+                });
+                // **待っているあいだも中止を効かせる。** 効かないと、
+                // 押しても1分間なにも起きないように見える
+                if (!(await waitWatchingCancel(RATE_LIMIT_WAIT_SECONDS, token))) {
+                  cancelled = true;
+                  return;
+                }
+                continue;
+              }
+
+              /*
+                待っても同じだった。**ここで探索をやめる。**
+
+                「入らない」と数えて続けると、無料枠の窓の広さを
+                「このモデルが読める長さ」として台帳へ書くことになる。
+                ここまでの `low` は生かし、測れていないことを文面で言う。
+              */
+              if (low > 0) {
+                probeStop = { chars: size, reason: "rate_limited" };
+                logStep(
+                  `読める長さの測定：${size}字 → 待ってもまた分あたりの上限でした。` +
+                    "ここで探索を打ち切ります（「入らない」とは数えません）。"
+                );
+                return;
+              }
+              // 一度も通っていないなら出せる結果が無い。素直に失敗として報せる
+              failure = error;
+              return;
+            }
+
+            /*
+              **待っても直らない失敗は、そこで正しく報告する**（作者の依頼、
+              2026-09-13）。
+
+              鍵の失効・権限・残高切れ・止まっている——どれも**長さについて
+              何も言っていない。** 「入らなかった」と数えると、原因の違う
+              失敗が「実効の上限」という数字に化ける。かといって
+              `reportFailure` で丸ごと失敗にもしない：短い長さで通っている
+              以上、そこまでの `low` は確かに測れた値である。
+
+              `rate_limited` は上で捌いた（待てば回復する唯一の相手）。
+              `model_load_failed` も上で捌いている——`num_ctx` をその回の
+              長さに合わせている今、下で通ったあとの読み込み失敗は
+              **長さのせい**だと言い切れる唯一の場面だからである。
+            */
+            if (
+              error instanceof AIError &&
+              (isFatalProviderFailure(error.kind) ||
+                error.kind === "not_running" ||
+                // **モデルが消えたのも同じ扱いにする。** `isFatalProviderFailure`
+                // には入っていないが、測定の途中でモデルが見つからなくなるのは
+                // 長さの話ではない。ここへ入れないと `reportFailure` へ落ち、
+                // **そこまで確かに測れた `low` を捨てる**ことになる
+                error.kind === "model_not_found")
+            ) {
+              const detail = (error.detail ?? error.message).slice(
+                0,
+                ERROR_EXCERPT_CHARS
+              );
+              if (low > 0) {
+                probeStop = { chars: size, reason: "fatal", detail };
+                logStep(
+                  `読める長さの測定：${size}字 → ${error.kind} が返りました。` +
+                    "長さとは関係の無い失敗なので、ここで探索を打ち切ります" +
+                    `（「入らない」とは数えません。${detail}）`
+                );
+                return;
+              }
+              failure = error;
               return;
             }
 
@@ -1111,15 +1314,12 @@ async function runMeasurement(
       **打ち切ったことと、その理由を必ず出す**（作者の依頼、2026-09-13）。
 
       ここを黙ると、作者には「このモデルはここまでしか読めない」と読める。
-      実際に分かったのは「この待ち時間では返ってこなかった」だけである。
+      実際に分かったのは「この止まり方では先を測れなかった」だけである。
       **「測れなかった」を「読めなかった」と言い換えない**——待ち時間を
-      延ばすか、速いモデルにすれば、もっと長く読める見込みがある。
+      延ばす・しばらく待つ・残高を足す、といった打つ手が残っている。
+      文面は理由ごとに分ける（`describeProbeStop`）。
     */
-    (timeoutStop !== undefined
-      ? `${timeoutStop.chars.toLocaleString("ja-JP")} 字で時間切れになりました` +
-        `（待ち時間 ${timeoutStop.seconds} 秒）。` +
-        "これより長い長さは測れていません。実際にはもっと読める可能性があります。"
-      : "") +
+    describeProbeStop(probeStop) +
     ratioSummary +
     (longestResponseSeconds > 0
       ? `いちばん時間がかかった回は ${longestResponseSeconds} 秒でした。`

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { window, workspace } from "./support/vscodeStub";
 import type { AIRegistry } from "../../src/ai/registry";
 import { AIError } from "../../src/ai/types";
@@ -39,6 +39,43 @@ const state = vi.hoisted(() => ({
   /** その回に効いていた待ち時間（秒）。延ばしたぶんが届いたかを見る */
   timeoutSecondsSeen: [] as number[],
   calls: [] as GenerateParams[],
+
+  /*
+    **長さと関係の無い失敗を作る口**（作者の依頼、2026-09-13）。
+
+    実機の Gemini は、ある長さから先で無料枠の分あたりの上限に当たり続けた。
+    「この字数を超えたらこの種別で落ちる」という形にしておけば、
+    残高切れ・鍵の失効も同じ仕掛けで作れる。
+  */
+  /** この種別で落とす。undefined なら落とさない */
+  failKind: undefined as
+    | "rate_limited"
+    | "insufficient_credit"
+    | "model_not_found"
+    | undefined,
+  /** この字数を超えた回から落とす */
+  failAboveChars: undefined as number | undefined,
+  /** あと何回落とすか。使い切ったら素直に返す */
+  failTimes: Number.POSITIVE_INFINITY,
+  /** 実際に落とした回数。**6回積み上がっていないこと**を見るために要る */
+  failCount: 0,
+
+  /** 作者が中止を押したか。待っている途中で押せるかを見る */
+  cancelled: false,
+  /** 待ちの刻みが何回回ったか。丸ごと60秒待っていないかを見る */
+  waitTicks: 0,
+  /** この刻み数まで待ったら、作者が中止を押したことにする */
+  cancelAtTick: undefined as number | undefined,
+  /** 進捗に出した文。待っている理由が作者に見えているかを見る */
+  progress: [] as string[],
+  /**
+   * このモデルが申告する文脈長。
+   *
+   * **実機の Gemini は 1,024k トークンを申告していた。** 申告が大きいほど
+   * 天井も遠くなるので、「窓に当たって止まった字数」と「天井」を
+   * はっきり分けたい場面で要る。
+   */
+  declaredTokens: 262_144,
 }));
 
 vi.mock("../../src/core/logger", () => ({
@@ -76,6 +113,27 @@ vi.mock("../../src/ai/registry", () => ({
         ) {
           state.timeoutTimes -= 1;
           throw new AIError("時間切れです。", "timeout");
+        }
+        // **長さと関係の無い失敗。** 長さで引き金を引いているのは、
+        // 実機がそう見えた（ある長さから先で必ず当たる）ためであって、
+        // 失敗そのものが長さのせいだという意味ではない
+        if (
+          state.failKind !== undefined &&
+          state.failAboveChars !== undefined &&
+          promptChars > state.failAboveChars &&
+          state.failTimes > 0
+        ) {
+          state.failTimes -= 1;
+          state.failCount += 1;
+          throw new AIError(
+            state.failKind === "rate_limited"
+              ? "レート上限です。"
+              : "残高が足りません。",
+            state.failKind,
+            state.failKind === "rate_limited"
+              ? "429 RESOURCE_EXHAUSTED"
+              : "credit balance is too low"
+          );
         }
         // **切られたぶんは、入力トークン数にそのまま出る。**
         // これがこの測り方の前提そのものである
@@ -124,8 +182,19 @@ vi.mock("../../src/views/progress", () => ({
       ) => Promise<unknown>
     ) =>
       task(
-        { report: () => {} },
-        { isCancellationRequested: false, onCancellationRequested: () => {} }
+        {
+          report: (value: unknown) => {
+            state.progress.push(String((value as { message?: string }).message));
+          },
+        },
+        {
+          // **押した瞬間に立つ旗として持つ。** 固定の false だと、
+          // 「待っている途中で中止できるか」を確かめる術が無くなる
+          get isCancellationRequested(): boolean {
+            return state.cancelled;
+          },
+          onCancellationRequested: () => {},
+        }
       )
   ),
 }));
@@ -133,7 +202,7 @@ vi.mock("../../src/views/progress", () => ({
 import { measureContext } from "../../src/features/measureContext";
 
 const registry = {
-  resolveModelInfo: async () => ({ contextWindow: 262144 }),
+  resolveModelInfo: async () => ({ contextWindow: state.declaredTokens }),
 } as unknown as AIRegistry;
 
 function installSettings(values: Record<string, unknown>): void {
@@ -168,6 +237,8 @@ async function measure(options?: {
 }): Promise<{
   tuning: Record<string, unknown>;
   notice: string;
+  /** 作者が読んだ「失敗しました」の文。出ていなければ空 */
+  error: string;
 }> {
   const values: Record<string, unknown> = options?.before
     ? { modelTuning: { "ollama/gemma4:12b": { ...options.before } } }
@@ -176,10 +247,13 @@ async function measure(options?: {
   const showInformationMessage = vi.fn(
     async () => options?.answer ?? "設定に反映"
   );
+  // **失敗として報せたかも見る。** 「結果は出せたのに失敗と言った」
+  // 「失敗なのに結果らしきものを見せた」のどちらも起こしてはいけない
+  const showErrorMessage = vi.fn(async () => undefined);
   Object.assign(window, {
     showInformationMessage,
     showWarningMessage: vi.fn(async () => undefined),
-    showErrorMessage: vi.fn(async () => undefined),
+    showErrorMessage,
   });
 
   // 「読める長さだけ」を選んだ道。書ける長さは別の話なので巻き込まない
@@ -190,6 +264,7 @@ async function measure(options?: {
     notice: showInformationMessage.mock.calls
       .map((call) => call.map(String).join(" / "))
       .join("\n"),
+    error: showErrorMessage.mock.calls.map((call) => String(call[0])).join("\n"),
   };
 }
 
@@ -203,6 +278,40 @@ beforeEach(() => {
   state.timeoutTimes = Number.POSITIVE_INFINITY;
   state.timeoutSecondsSeen = [];
   state.calls = [];
+  state.failKind = undefined;
+  state.failAboveChars = undefined;
+  state.failTimes = Number.POSITIVE_INFINITY;
+  state.failCount = 0;
+  state.cancelled = false;
+  state.waitTicks = 0;
+  state.cancelAtTick = undefined;
+  state.progress = [];
+  state.declaredTokens = 262_144;
+
+  /*
+    **待ちは刻みの回数で見る。** 分あたりの上限に当たったあとの60秒を
+    本当に待つと、検査が1回につき1分かかる。眠りの中身は測る対象では
+    ないので、刻みが回ったことだけを数えて素通りさせる。
+
+    ここで数えているおかげで、**丸ごと待っていないこと**（＝中止が
+    途中で効くこと）も確かめられる。
+  */
+  vi.stubGlobal("setTimeout", ((handler: () => void): number => {
+    state.waitTicks += 1;
+    if (
+      state.cancelAtTick !== undefined &&
+      state.waitTicks >= state.cancelAtTick
+    ) {
+      // 作者が待っている途中で中止を押した、という場面を作る
+      state.cancelled = true;
+    }
+    handler();
+    return 0;
+  }) as unknown as typeof setTimeout);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("入力トークン数で測る", () => {
@@ -409,5 +518,210 @@ describe("測定のあいだの待ち時間", () => {
       modelTuning: { "ollama/gemma4:12b": { timeoutSeconds: 1200 } },
     });
     expect(resolveTimeoutSeconds("ollama", "gemma4:12b")).toBe(600);
+  });
+});
+
+/**
+ * **分あたりの上限（`rate_limited`）の扱い**（実機、2026-09-13夜）。
+ *
+ * `gemini/gemini-flash-lite-latest` は「途中で**6回**、AIがエラーを返した
+ * ため、その長さは入らないものとして数えました」と報告し、1,024k トークンを
+ * 申告しているのに実効の上限が 186,434字（約135,000トークン）で止まった。
+ * **測っていたのはモデルの長さではなく、無料枠の分あたりの窓である。**
+ *
+ * 直し方は2つ。**数えない**ことと、**待って1回だけ測り直す**ことである。
+ */
+describe("分あたりの上限に当たったとき", () => {
+  /** 実機と同じ字数。ここを超えると無料枠の窓に当たる、という筋 */
+  const GEMINI_WALL = 186_434;
+
+  test("待てば通るなら、1回測り直して測定は続く", async () => {
+    state.limitChars = 1_000_000;
+    state.failKind = "rate_limited";
+    state.failAboveChars = 20_000;
+    // 1回だけ当たる＝待てば抜ける窓。ここで打ち切ってはいけない
+    state.failTimes = 1;
+
+    const { tuning, notice } = await measure();
+
+    // 測り直しが通ったのだから、打ち切りの文は出ない
+    expect(notice).not.toContain("分あたりの上限");
+    // 20,000字の壁を越えて先まで測れている
+    expect(tuning.measuredChars as number).toBeGreaterThan(20_000);
+    // **「入らない」とは数えない**（ここが化けの元だった）
+    expect(notice).not.toContain("入らないものとして数えました");
+  });
+
+  test("待つあいだ、何をしているかを進捗に出す", async () => {
+    state.limitChars = 1_000_000;
+    state.failKind = "rate_limited";
+    state.failAboveChars = 20_000;
+    state.failTimes = 1;
+
+    await measure();
+
+    // 1分止まって見えるので、理由を言わないと「固まった」と受け取られる
+    expect(state.progress.join("\n")).toContain(
+      "分あたりの上限に当たりました。60秒待って測り直します"
+    );
+  });
+
+  test("**測り直してもまた上限なら、そこで打ち切る**", async () => {
+    state.limitChars = 1_000_000;
+    state.failKind = "rate_limited";
+    state.failAboveChars = 20_000;
+    // 何度当たっても抜けない（無料枠を使い切っている場面）
+    state.failTimes = Number.POSITIVE_INFINITY;
+
+    const { tuning, notice, error } = await measure();
+
+    expect(notice).toContain("分あたりの上限に当たりました");
+    expect(notice).toContain("これより長い長さは測れていません");
+    expect(notice).toContain("しばらく待ってから測り直す");
+    // **そこまでの `low` は捨てない。** 測れたぶんは測れたのである
+    expect(tuning.measuredChars as number).toBeGreaterThan(0);
+    expect(tuning.measuredChars as number).toBeLessThanOrEqual(20_000);
+    // 結果は出せるのだから、丸ごと失敗にはしない
+    expect(error).toBe("");
+  });
+
+  test("同じ長さで2回までしか粘らない（窓が分単位とは限らない）", async () => {
+    state.limitChars = 1_000_000;
+    state.failKind = "rate_limited";
+    state.failAboveChars = 20_000;
+    state.failTimes = Number.POSITIVE_INFINITY;
+
+    await measure();
+
+    // 1回目＋測り直しの1回。3回目を送るのは「粘り」であって測定ではない
+    expect(state.failCount).toBe(2);
+  });
+
+  test("**実機の再現：6回積み上がって上限が固定されない**", async () => {
+    /*
+      0.61.0 までは、当たるたびに「入らない」と数えて探索を続けたので、
+      二分探索が窓の手前（186,434字）へ収束し、それが**実効の上限**として
+      台帳に入った。いまは2回目で打ち切り、測れていないことを言う。
+    */
+    // 実機と同じく、申告は 1,024k トークン。**窓は天井のはるか手前にある**
+    state.declaredTokens = 1_024 * 1_024;
+    state.limitChars = 10_000_000;
+    state.failKind = "rate_limited";
+    state.failAboveChars = GEMINI_WALL;
+    state.failTimes = Number.POSITIVE_INFINITY;
+
+    const { tuning, notice } = await measure();
+
+    // 6回も当たらない（数えて詰めにいっていない証拠）
+    expect(state.failCount).toBeLessThanOrEqual(2);
+    // **窓の字数を「このモデルの上限」として名乗らない**
+    expect(notice).not.toContain("入らないものとして数えました");
+    expect(notice).toContain("これより長い長さは測れていません");
+    // 窓の手前で止まったこと自体は変わらない。**変わったのは名乗り方である**
+    expect(tuning.measuredChars as number).toBeLessThanOrEqual(GEMINI_WALL);
+    // 天井まで測れていないのだから、天井の印も立たない
+    expect(tuning.contextHitCeiling).toBe(false);
+  });
+
+  test("待っている途中で中止できる", async () => {
+    state.limitChars = 1_000_000;
+    state.failKind = "rate_limited";
+    state.failAboveChars = 20_000;
+    state.failTimes = Number.POSITIVE_INFINITY;
+    // 待ちの刻みが3つ回ったところで、作者が中止を押す
+    state.cancelAtTick = 3;
+
+    await measure();
+
+    // **60秒を丸ごと待たない。** まとめて待つ作りだと、押しても
+    // 1分間なにも起きないように見える（刻みは0.5秒なので満了は120）
+    expect(state.waitTicks).toBeLessThan(120);
+    expect(state.waitTicks).toBeGreaterThan(0);
+    // 中止したのだから、測り直しは送られていない
+    expect(state.failCount).toBe(1);
+  });
+});
+
+/**
+ * **残高切れ・鍵の失効は、長さについて何も言っていない**
+ * （作者の依頼、2026-09-13）。
+ *
+ * 0.61.0 までは `aborted` と `timeout` 以外を全部「入らなかった」と
+ * 数えていたので、**残高が尽きた瞬間の字数が「実効の上限」になった。**
+ * いまは探索を打ち切り、そこまでの `low` を生かして、止まった理由を言う。
+ */
+describe("待っても直らない失敗に当たったとき", () => {
+  test("実効の上限を切り下げず、そこまでの結果を残す", async () => {
+    state.limitChars = 1_000_000;
+    state.failKind = "insufficient_credit";
+    state.failAboveChars = 20_000;
+
+    const { tuning, notice, error } = await measure();
+
+    // **測れたぶんは捨てない**（短い長さでは確かに通っている）
+    expect(tuning.measuredChars as number).toBeGreaterThan(0);
+    expect(tuning.measuredChars as number).toBeLessThanOrEqual(20_000);
+    // 結果を出せるのだから、丸ごと失敗にはしない
+    expect(error).toBe("");
+    // **「入らない」とは数えない**——残高と長さは無関係である
+    expect(notice).not.toContain("入らないものとして数えました");
+  });
+
+  test("止まった理由を、AIの本文のまま見せる", async () => {
+    state.limitChars = 1_000_000;
+    state.failKind = "insufficient_credit";
+    state.failAboveChars = 20_000;
+
+    const { notice } = await measure();
+
+    // 直し方の手がかりは向こうの言葉にしかない（CLAUDE.md 規則5）
+    expect(notice).toContain("credit balance is too low");
+    expect(notice).toContain("そこで測定を止めました");
+    expect(notice).toContain("これより長い長さは測れていません");
+  });
+
+  test("**「読めない」とは言わない**（分かったのは測れなかったことだけ）", async () => {
+    state.limitChars = 1_000_000;
+    state.failKind = "insufficient_credit";
+    state.failAboveChars = 20_000;
+
+    const { notice } = await measure();
+
+    expect(notice).not.toContain("読めません");
+    expect(notice).not.toContain("読めなかった");
+  });
+
+  test("一度も通っていなければ、素直に失敗として報せる", async () => {
+    // いちばん短い回から落ちる＝出せる結果が無い。
+    // ここで「実効の上限は0字です」と言うのがいちばん悪い
+    state.failKind = "insufficient_credit";
+    state.failAboveChars = 0;
+
+    const { notice, error } = await measure();
+
+    expect(error).toContain("残高が足りません");
+    expect(notice).toBe("");
+  });
+
+  /*
+    **モデルが消えたときも、測れたぶんは捨てない。**
+
+    `model_not_found` は `isFatalProviderFailure` に入っていないので、
+    打ち切りの分岐へ明示的に足してある。足さないと `reportFailure` へ落ち、
+    **短い長さで確かに通っていた結果まで消える**——測定の途中でモデルが
+    外れるのは稀だが、起きたときに失うものが大きい。
+  */
+  test("モデルが消えても、そこまでの結果を残す", async () => {
+    state.limitChars = 1_000_000;
+    state.failKind = "model_not_found";
+    state.failAboveChars = 20_000;
+
+    const { tuning, notice, error } = await measure();
+
+    expect(tuning.measuredChars as number).toBeGreaterThan(0);
+    expect(tuning.measuredChars as number).toBeLessThanOrEqual(20_000);
+    expect(error).toBe("");
+    expect(notice).not.toContain("入らないものとして数えました");
+    expect(notice).toContain("これより長い長さは測れていません");
   });
 });

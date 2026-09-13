@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   countErrorAsTooLong,
+  describeProbeStop,
   doubledTimeoutSeconds,
   estimateProbeTokens,
 } from "../../src/features/measureContext";
@@ -52,11 +53,79 @@ describe("エラーを「入らなかった」と数えてよいか", () => {
     expect(countErrorAsTooLong(true, new Error("何かが壊れた"))).toBe(false);
   });
 
-  test("種別を問わず数える（種別の当て推量をしない）", () => {
-    // どの種別で返すかはAI側の都合で変わる。通ったあとに落ちたという
-    // 事実のほうを信じる（CLAUDE.md 規則5「エラー文から原因を当てにいかない」）
-    for (const kind of ["bad_response", "rate_limited", "unknown"] as const) {
-      expect(countErrorAsTooLong(true, new AIError("失敗", kind))).toBe(true);
+  /**
+   * **12種別すべてを表に並べる**（作者の依頼、2026-09-13）。
+   *
+   * 0.61.0 までは「`aborted` と `timeout` 以外は全部数える」という書き方
+   * だったので、**新しい種別が増えるたびに黙って「入らない」側へ入った。**
+   * 実機の Gemini は `rate_limited` を6回数えられ、1,024k トークンを申告して
+   * いるのに実効の上限が 186,434字で固定された——測っていたのは長さではなく
+   * 無料枠の窓である。
+   *
+   * この表は `Record<AIError["kind"], boolean>` なので、**種別が増えたら
+   * 型検査が落ちる。** 追加した人が、ここで扱いを決めることになる。
+   */
+  const BY_KIND: Record<AIError["kind"], boolean> = {
+    // 「長すぎて断られた」の実績があるのはこの2つだけ。さくらの
+    // gpt-oss-120b は上限超えを400で返し、`bad_response` に落ちていた
+    bad_response: true,
+    unknown: true,
+    // ここから下は、どれも**長さについて何も言っていない**
+    not_running: false,
+    model_not_found: false,
+    timeout: false,
+    authentication_failed: false,
+    permission_denied: false,
+    insufficient_credit: false,
+    model_load_failed: false,
+    context_overflow: false,
+    rate_limited: false,
+    aborted: false,
+  };
+
+  test("数えてよいのは bad_response と unknown だけ（12種別を表で見る）", () => {
+    // 数が変わったら、表の側も見直したというしるしになる
+    expect(Object.keys(BY_KIND)).toHaveLength(12);
+
+    for (const [kind, expected] of Object.entries(BY_KIND)) {
+      expect(
+        countErrorAsTooLong(true, new AIError("失敗", kind as AIError["kind"])),
+        kind
+      ).toBe(expected);
+    }
+  });
+
+  test("一度も通っていなければ、どの種別でも数えない", () => {
+    for (const kind of Object.keys(BY_KIND)) {
+      expect(
+        countErrorAsTooLong(false, new AIError("失敗", kind as AIError["kind"])),
+        kind
+      ).toBe(false);
+    }
+  });
+
+  /**
+   * **分あたりの上限を数えない**（実機、2026-09-13）。
+   *
+   * 待てば回復するものを「このモデルはここまでしか読めない」という記録に
+   * 化けさせてはいけない。回復を試みる道は `runMeasurement` の中にある。
+   */
+  test("分あたりの上限は数えない（待てば回復するものを上限にしない）", () => {
+    const limited = new AIError("レート上限です。", "rate_limited");
+
+    expect(countErrorAsTooLong(true, limited)).toBe(false);
+  });
+
+  test("残高切れ・鍵の失効も数えない（長さとは関係が無い）", () => {
+    for (const kind of [
+      "insufficient_credit",
+      "authentication_failed",
+      "permission_denied",
+      "not_running",
+    ] as const) {
+      expect(countErrorAsTooLong(true, new AIError("失敗", kind)), kind).toBe(
+        false
+      );
     }
   });
 
@@ -168,5 +237,73 @@ describe("送信量の見込み", () => {
     expect(estimateProbeTokens(ceiling)).toBe(
       probeCharsToTokens(worstCaseProbeChars(ceiling) + ceiling)
     );
+  });
+});
+
+/**
+ * 探索を打ち切ったときの文面（作者の依頼、2026-09-13）。
+ *
+ * **打ち切る理由が増えたので、入れ物を一般化した。** 0.61.0 は時間切れ
+ * 専用の形（`timeoutStop`）で持っていたが、分あたりの上限・残高切れ・
+ * 鍵の失効でも打ち切るようになり、理由ごとに言うことが違う。
+ *
+ * **どの理由でも「読めなかった」とは言わない。** 分かったのは
+ * 「測れなかった」だけで、打つ手（待ち時間を延ばす・しばらく待つ・
+ * 残高を足す）はまだ残っている。
+ */
+describe("打ち切った理由の文面", () => {
+  test("打ち切っていなければ何も言わない", () => {
+    expect(describeProbeStop(undefined)).toBe("");
+  });
+
+  test("時間切れの文は、これまでと同じ", () => {
+    // 0.61.0 で作者が読んだ文である。理由が増えても、ここは動かさない
+    const text = describeProbeStop({
+      chars: 186_434,
+      reason: "timeout",
+      seconds: 1200,
+    });
+
+    expect(text).toContain("186,434 字で時間切れになりました");
+    expect(text).toContain("待ち時間 1200 秒");
+    expect(text).toContain("もっと読める可能性があります");
+  });
+
+  test("分あたりの上限は、「待てば伸びるかもしれない」と言う", () => {
+    const text = describeProbeStop({ chars: 186_434, reason: "rate_limited" });
+
+    expect(text).toContain("分あたりの上限");
+    expect(text).toContain("これより長い長さは測れていません");
+    expect(text).toContain("しばらく待ってから測り直す");
+  });
+
+  test("そのほかの止まり方は、返ってきた本文をそのまま見せる", () => {
+    // **エラーの本文を捨てない**（CLAUDE.md 規則5）。残高切れなのか鍵なのかは
+    // 向こうの言葉にしか書いていない
+    const text = describeProbeStop({
+      chars: 32_000,
+      reason: "fatal",
+      detail: "credit balance is too low",
+    });
+
+    expect(text).toContain("32,000 字で「credit balance is too low」が返り");
+    expect(text).toContain("そこで測定を止めました");
+    expect(text).toContain("これより長い長さは測れていません");
+  });
+
+  test("**どの理由でも「読めない」とは言わない**", () => {
+    const texts = [
+      describeProbeStop({ chars: 100, reason: "timeout", seconds: 60 }),
+      describeProbeStop({ chars: 100, reason: "rate_limited" }),
+      describeProbeStop({ chars: 100, reason: "fatal", detail: "残高不足" }),
+    ];
+
+    for (const text of texts) {
+      // 分かったのは「測れなかった」だけである。言い換えない
+      expect(text, text).not.toContain("読めません");
+      expect(text, text).not.toContain("読めない");
+      expect(text, text).not.toContain("読めませんでした");
+      expect(text, text).toContain("測れていません");
+    }
   });
 });
