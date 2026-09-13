@@ -13,7 +13,7 @@ import {
 import { CONTEXT_GUARD_EXEMPT_FEATURE } from "../ai/contextGuard";
 import { isLocalProvider } from "../ai/otherLocalAi";
 import { resolveMaxOutputTokens } from "../ai/outputLimit";
-import { contextSizeForPrompt, TOKENS_PER_CHAR } from "../core/chunker";
+import { contextSizeForPrompt } from "../core/chunker";
 import {
   buildProbePrompt,
   charsPerTokenFromProbe,
@@ -22,8 +22,10 @@ import {
   judgeProbeGrowth,
   makeProbeWords,
   nextProbeSize,
+  probeCharsPerToken,
   probeCharsToTokens,
   probeOverheadChars,
+  probeTokensPerChar,
   readProbeTokens,
   startProbeState,
   worstCaseProbeChars,
@@ -33,7 +35,11 @@ import {
   type ProbeState,
   type ProbeTokenReading,
 } from "../core/contextProbe";
-import { mergeCharsPerToken } from "../core/sizeBudget";
+import {
+  CHARS_PER_TOKEN,
+  mergeCharsPerToken,
+  type CharsPerTokenMeasurement,
+} from "../core/sizeBudget";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import {
   buildOutputProbePrompt,
@@ -266,8 +272,22 @@ export function numCtxForProbe(
  * **少なく見せる側へは倒さない。** 見せた額より多く請求されるのが
  * いちばん悪い（記録82で同じ判断をしている）。
  */
-export function estimateProbeTokens(ceilingChars: number): number {
-  return probeCharsToTokens(worstCaseProbeChars(ceilingChars) + ceilingChars);
+export function estimateProbeTokens(
+  ceilingChars: number,
+  /**
+   * 字/トークンの実測（台帳）。
+   *
+   * **台帳へ書く値と同じ換算で数える**（`probeCharsToTokens`＝安全側）。
+   * 天井の換算（`probeCharsPerToken`）で数えると、実際に送るトークン数より
+   * 小さい数字を見せることになる——作者はこの数字を見て有料AIで「やる／
+   * やめる」を決めるので、少なく見せる側へは倒さない。
+   */
+  measured?: CharsPerTokenMeasurement
+): number {
+  return probeCharsToTokens(
+    worstCaseProbeChars(ceilingChars) + ceilingChars,
+    measured
+  );
 }
 
 /** ログと通知に載せる、エラー本文の長さ */
@@ -428,14 +448,26 @@ async function runMeasurement(
     return;
   }
 
+  /*
+    **天井は、このモデルの実測の換算で置く**（設計書6.77）。
+
+    0.7という当て推量で字へ直していた頃、天井は窓の半分あたりに落ちて
+    いた（実機、2026-09-13。qwen3:8b で56%、gemma4:12b で50%）。
+    測り足りないことは「これ以上は試していません」としか表に出ないので、
+    ここでは**測りすぎる側へ倒す**（`probeCharsPerToken`）。
+  */
+  const measuredBefore = modelTuning(resolved.provider.id, resolved.model);
   // **申告が実測に基づく相手は、そこを超えて試さない**（設計書6.62.1）。
   // 当て推量なのは、作者が設定に書く さくら・ChatGPT だけである
   const ceilingChars = ceilingCharsFor(
     declaredTokens,
-    !GUESSED_CONTEXT_PROVIDERS.has(resolved.provider.id)
+    !GUESSED_CONTEXT_PROVIDERS.has(resolved.provider.id),
+    measuredBefore
   );
 
-  const estimateTokens = estimateProbeTokens(ceilingChars);
+  // **見込みは安全側の換算で数える。** 有料AIでは、この数字がそのまま
+  // 作者の「やる／やめる」の判断材料になる（少なく見せる側へ倒さない）
+  const estimateTokens = estimateProbeTokens(ceilingChars, measuredBefore);
   const ok = await confirmPaidUsage(resolved.provider, {
     actionLabel: "AIチューニング",
     remember: { id: "ai.paid.measureContext" },
@@ -452,10 +484,24 @@ async function runMeasurement(
   // 台帳の鍵。ログにも通知にも出す——**どのモデルの話かを取り違えさせない**
   const tuningKey = modelTuningKey(resolved.provider.id, resolved.model);
 
+  /*
+    **なぜこの天井になったのかを、ログだけで追えるようにする。**
+
+    実測の換算を使った回と使っていない回では、同じモデル・同じ申告値でも
+    天井が倍近く違う。断りが無いと、実機のログを後から読んだときに
+    「前回と数字が違う」以上のことが分からない。
+
+    実測が 0.7 を下回って据え置いたときは**断りを書かない**——使ったのは
+    従来と同じ 0.7 なのだから、「実測を使用」と名乗るのは嘘になる。
+  */
+  const probeRatio = probeCharsPerToken(measuredBefore);
   logStep(
     `読める長さの測定を開始: ${resolved.provider.displayName} / ` +
       `${tuningKey} / 申告 ${declaredTokens ?? "不明"} トークン / ` +
-      `測れる上限 ${ceilingChars} 字`
+      `測れる上限 ${ceilingChars} 字` +
+      (probeRatio === CHARS_PER_TOKEN
+        ? ""
+        : `（字/トークンの実測 ${probeRatio} を使用）`)
   );
 
   /**
@@ -967,6 +1013,16 @@ async function runMeasurement(
     fittingReadings
   );
 
+  /*
+    **台帳へ書く値と、画面に出す値は、ここで読み直した台帳から換算する。**
+
+    上の保存でこの回の実測が入っているので、読み直せば
+    `decideChunkSize` / `planChunkBudget` が後で読むのと同じ値になる。
+    行き（字→トークンで台帳へ書く）と帰り（トークン→字でチャンクを
+    決める）で換算が違うと、二重にずれる（`probeCharsToTokens`）。
+  */
+  const measuredAfter = modelTuning(resolved.provider.id, resolved.model);
+
   // **数え方を隠さない。** エラーを「入らない」と読み替えた回があるなら、
   // 何回そうしたかを結果に添える（黙って読み替えると、作者は
   // 「全部きれいに測れた」と受け取る）
@@ -977,6 +1033,9 @@ async function runMeasurement(
       ceilingChars,
       measuredBy,
       wordCopyFailedChars,
+      // **確認ダイアログと同じ換算で出す。** 違えると、1つの文面に
+      // 同じ「読める長さ」の数字が2つ並ぶ
+      measured: measuredAfter,
     }) +
     ratioSummary +
     (longestResponseSeconds > 0
@@ -1047,6 +1106,8 @@ async function runMeasurement(
     // **何で測ったかを台帳へ残す**（作者の依頼、2026-09-13）。合言葉で
     // 測った値は気まぐれに落ちうるので、一覧でそれと分かるようにする
     measuredBy,
+    // **台帳の `contextWindow` は、チャンクを決める側と同じ換算で書く**
+    measured: measuredAfter,
   });
   // 反映したなら、戻す相手がもう無い（見立てた秒数で上書きされている）。
   // 反映しなかったときは後始末を残したままにして、外側の `finally` に任せる
@@ -1549,7 +1610,7 @@ function elapsedSeconds(sentAt: number): number {
  * 返したいので、指示と応答の分を含めたまま返すと、上限のあたりで
  * 詰め物が申告値をわずかに超えてしまう。
  */
-function ceilingCharsFor(
+export function ceilingCharsFor(
   declaredTokens: number | undefined,
   /**
    * 申告値を信じてよいか（設計書6.62.1）。
@@ -1565,13 +1626,28 @@ function ceilingCharsFor(
    * そこで止めると「申告以上に読めるか」を永久に確かめられない。
    * だから信じてよい相手だけを分ける。
    */
-  trustDeclared: boolean
+  trustDeclared: boolean,
+  /**
+   * 字/トークンの実測（台帳）。
+   *
+   * **天井は気前のよい換算で置く**（`probeCharsPerToken`）。0.7という
+   * 当て推量で字へ直していた頃、実測1.2〜1.4のモデルでは**天井が窓の
+   * 半分あたり**に落ちていた——qwen3:8b（窓40,960）で28,405字＝約23,000
+   * トークン、gemma4:12b（窓262,144）で183,234字＝約132,000トークン。
+   * どちらも「天井まで伸びが止まらなかった」と出たが、その天井が窓の
+   * 半分だったのだから、測れていない。
+   *
+   * 渡されなければ従来どおり 0.7 で置く（1字も変わらない）。
+   */
+  measured?: CharsPerTokenMeasurement
 ): number {
   const tokens = trustDeclared
     ? (declaredTokens ?? MIN_CEILING_TOKENS)
     : Math.max(declaredTokens ?? 0, MIN_CEILING_TOKENS);
   const usableTokens = tokens - PROBE_OUTPUT_TOKENS;
-  const chars = Math.floor(usableTokens / TOKENS_PER_CHAR) - probeOverheadChars();
+  const chars =
+    Math.floor(usableTokens / probeTokensPerChar(measured)) -
+    probeOverheadChars();
   return Math.max(MIN_PROBE_CHARS, chars);
 }
 
@@ -1604,6 +1680,15 @@ async function offerToSave(input: {
   longestResponseSeconds: number;
   /** 何で測ったか。**合言葉で測った値には印を残す**（作者の依頼、2026-09-13） */
   measuredBy: ProbeMeasureMethod;
+  /**
+   * 字/トークンの実測（台帳）。
+   *
+   * **台帳へ書く `contextWindow` を、これで字→トークンへ直す。**
+   * この欄を読むのは `decideChunkSize` / `planChunkBudget` で、あちらは
+   * `resolveCharsPerToken` で字へ戻す。片方だけ実測にすると、行きと帰りで
+   * 換算が違って二重にずれる（`probeCharsToTokens`）。
+   */
+  measured?: CharsPerTokenMeasurement;
 }): Promise<boolean> {
   const prefix = input.cancelled ? "（途中で中止しました）" : "";
 
@@ -1615,7 +1700,7 @@ async function offerToSave(input: {
   }
 
   const key = modelTuningKey(input.providerId, input.model);
-  const tokens = probeCharsToTokens(input.low);
+  const tokens = probeCharsToTokens(input.low, input.measured);
   const timeoutSeconds = recommendTimeoutSeconds(input.longestResponseSeconds);
   // 上限を書いてよいのは、申告値を取れないプロバイダだけ
   const writesContext = CONTEXT_TUNABLE_PROVIDERS.has(input.providerId);

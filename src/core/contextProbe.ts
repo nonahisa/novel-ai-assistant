@@ -1,5 +1,9 @@
-import { TOKENS_PER_CHAR } from "./chunker";
-import { roundCharsPerToken } from "./sizeBudget";
+import {
+  CHARS_PER_TOKEN,
+  resolveTokensPerChar,
+  roundCharsPerToken,
+  type CharsPerTokenMeasurement,
+} from "./sizeBudget";
 
 /**
  * AIが実際に読める長さを測る（設計書6.27.11）。
@@ -686,9 +690,75 @@ export function nextProbeSize(
   return { ceilingChars: state.ceilingChars, low, high, current: mid };
 }
 
-/** 字数を、そのモデルに要るトークン数へ直す */
-export function probeCharsToTokens(chars: number): number {
-  return Math.round(chars * TOKENS_PER_CHAR);
+/**
+ * 測定の**天井**に使う字/トークン（設計書6.77）。
+ *
+ * **`resolveCharsPerToken` とは逆の判断でできている。** あちらは
+ * チャンクの大きさを決めるための安全側の関数で、(a) 5件貯まるまで実測を
+ * 使わない (b) 0.9 の余白を掛ける、の2つが入っている。天井では、その
+ * 2つがどちらも逆に働く。
+ *
+ * - **測りすぎても壊れない。** 窓に入らない長さを送れば、AIは黙って
+ *   切り捨て、入力トークン数の伸びが止まる——それは新しい測り方が
+ *   **正しく「限界」と読む信号**である。1回ぶん余計に送るだけで済む
+ * - **測り足りないと、何も起きていないように見える。** 天井に当たって
+ *   終わり、作者には「これ以上は試していません」としか出ない。窓の
+ *   半分で打ち切った結果は、モデルの限界ではなく換算の当て推量である
+ *
+ * だから**1件目から実測を使い、余白も掛けない。** 守るのは1つだけ
+ * ——`CHARS_PER_TOKEN`（0.7）を下回らせない。実測のほうが辛いモデルでも、
+ * これまでより不利にはしない（`resolveCharsPerToken` と同じ約束）。
+ *
+ * **渡されなければ、いまと1バイトも同じ値を返す。**
+ */
+export function probeCharsPerToken(
+  measured?: CharsPerTokenMeasurement
+): number {
+  const value = measured?.charsPerToken;
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return CHARS_PER_TOKEN;
+  }
+  const samples = measured?.charsPerTokenSamples ?? 0;
+  // **1件からでも使う**（上の理由）。ただし「欄はあるが回数が0」は、
+  // 測っていないのと同じなので使わない
+  if (!Number.isFinite(samples) || samples < 1) return CHARS_PER_TOKEN;
+  return Math.max(CHARS_PER_TOKEN, value);
+}
+
+/**
+ * `probeCharsPerToken` の逆数。字数からトークン数へ直す側が使う。
+ *
+ * **逆数をここで作る。** 使う側が `1 / probeCharsPerToken(...)` と
+ * 書き始めると写しが増えるうえ、実測が無いときの丸めが従来の
+ * `chars / TOKENS_PER_CHAR` とずれる（`sizeBudget.ts` の
+ * `resolveTokensPerChar` を置いたのと同じ理由）。
+ */
+export function probeTokensPerChar(
+  measured?: CharsPerTokenMeasurement
+): number {
+  return 1 / probeCharsPerToken(measured);
+}
+
+/**
+ * 字数を、そのモデルに要るトークン数へ直す。
+ *
+ * **こちらは安全側（`resolveCharsPerToken`）で数える。** 使い道が
+ * 天井とは違うからである。
+ *
+ * - 台帳へ書く `contextWindow`……これを読むのは `decideChunkSize` /
+ *   `planChunkBudget` で、あちらは `resolveCharsPerToken` で字へ戻す。
+ *   **行きと帰りで同じ換算を使わないと二重にずれる**
+ * - 作者へ見せる「約N トークン」……有料AIではそのまま金額になるので、
+ *   実際に送る量より小さく出してはいけない
+ *
+ * **渡されなければ、いまと1バイトも同じ値を返す**（`resolveTokensPerChar`
+ * は実測が無ければ `TOKENS_PER_CHAR` そのものを返す）。
+ */
+export function probeCharsToTokens(
+  chars: number,
+  measured?: CharsPerTokenMeasurement
+): number {
+  return Math.round(chars * resolveTokensPerChar(measured));
 }
 
 /**
@@ -748,6 +818,14 @@ export function describeProbeResult(input: {
    * いたと分かっている回なので、ここで縮めない（作者の裁定、2026-09-13）。
    */
   wordCopyFailedChars?: number;
+  /**
+   * 字/トークンの実測（台帳）。**トークン数の表示だけに使う。**
+   *
+   * **台帳へ書く値と同じ換算で出す**（`probeCharsToTokens`）。ここと
+   * `offerToSave` の確認ダイアログは1つの文面に並ぶので、換算が違うと
+   * 同じ「読める長さ」に2つの数字が並ぶ。渡されなければ従来と同じ値。
+   */
+  measured?: CharsPerTokenMeasurement;
 }): string {
   const byTokens = input.measuredBy === "tokens";
 
@@ -761,7 +839,7 @@ export function describeProbeResult(input: {
           "原因がありそうです。";
   }
 
-  const tokens = probeCharsToTokens(input.low);
+  const tokens = probeCharsToTokens(input.low, input.measured);
   const lines = [
     `実効の上限は約 ${input.low.toLocaleString("ja-JP")} 字` +
       `（約 ${tokens.toLocaleString("ja-JP")} トークン）です。`,
