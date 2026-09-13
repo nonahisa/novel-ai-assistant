@@ -66,8 +66,20 @@ export class WriterProfileStore {
     await this.state.update(WRITER_PROFILE_KEY, profile);
   }
 
+  /**
+   * 答えを消す。**はじめての声かけの記憶も、一緒に消す**（0.52.3）。
+   *
+   * 答えを捨てたのなら、その人は「まだ診断していない人」である。
+   * 声かけの記憶だけ「済み」で残ると、**二度と最初から試せない**——
+   * 実機で初回の流れを確かめたい作者が、そこで詰まる
+   * （作者の報告、2026-09-13「テストのためタイプ診断をやり直したい
+   * のですが、方法がよくわかりません」）。
+   *
+   * 声かけそのものを止めたい人は、声かけの「出さない」を押せばよい。
+   */
   async clear(): Promise<void> {
     await this.state.update(WRITER_PROFILE_KEY, undefined);
+    await this.state.update(WRITER_WELCOME_KEY, undefined);
   }
 
   /** はじめの声かけを、もう出してよいか */

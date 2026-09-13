@@ -1811,7 +1811,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         icon: "compass",
         requiresWork: false,
         detail:
-          "5問お答えいただくと、あなたの書き方に合わせて次にすることを案内します。" +
+          "いくつかお答えいただくと、あなたの書き方に合わせて次にすることを案内します。" +
           "いまある原稿の取り込み方・書き始め方・直し方・出し方を、" +
           "なぜそれを勧めるのかを添えて出します。AIは使いません。",
       },

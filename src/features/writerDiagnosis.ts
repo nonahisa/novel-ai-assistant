@@ -83,7 +83,8 @@ export async function runWriterDiagnosis(
       await deps.profiles.clear();
       logStep("作家タイプ診断：答えを消した");
       void vscode.window.showInformationMessage(
-        "診断の答えを消しました。案内は出なくなります（作品や設定資料には影響しません）。"
+        "診断の答えを消しました（作品や設定資料には影響しません）。" +
+          "次にこの画面を開き直したとき、はじめての声かけがもう一度出ます。"
       );
       return;
     }
@@ -183,13 +184,15 @@ async function chooseAction(
         action: "guide" as const,
       },
       {
-        label: "$(refresh) 5問を答え直す",
+        label: "$(refresh) 答え直す",
         detail: "前回の答えに印が付きます。書き方が変わったときに",
         action: "redo" as const,
       },
       {
         label: "$(trash) 答えを消す",
-        detail: "案内が出なくなります（作品や設定資料には影響しません）",
+        detail:
+          "はじめて使うときの状態に戻します。開き直すと、また声をかけます" +
+          "（作品や設定資料には影響しません）",
         action: "clear" as const,
       },
       cancelItem(),
@@ -360,6 +363,11 @@ async function askStep(
  * **モーダルにしない。** 作者が原稿を開いた瞬間に前をふさぐと、
  * 「何か始まった」という印象だけが残る。通知で、断る道を並べて出す。
  *
+ * **押す前に数を約束しない**（0.52.3。作者の指摘、2026-09-13）。
+ * 以前は「5問」と言って押させていたが、そのあと9問を出す。止められるとは
+ * いえ、**押した時点の約束と違う**。数を言うのは、答え終わって区切りに
+ * 来たとき（「ここまで5問」）でよい——そこは事実の報告である。
+ *
  * **「あとで」は1回だけ許す。** 2回目に「あとで」を選んだら、もう出さない
  * ——3回目以降は、ただ邪魔になる。
  */
@@ -370,12 +378,12 @@ export async function offerWriterDiagnosis(
   const state = deps.profiles.welcomeState();
   if (state === "done") return;
 
-  const START = "診断する（5問）";
+  const START = "診断する";
   const LATER = "あとで";
   const NEVER = "出さない";
   const picked = await vscode.window.showInformationMessage(
-    "はじめまして。5問お答えいただくと、あなたの書き方に合わせて" +
-      "次にすることを案内します（AIは使いません）。",
+    "はじめまして。いくつかお答えいただくと、あなたの書き方に合わせて" +
+      "次にすることを案内します（AIは使いません。途中でやめられます）。",
     START,
     LATER,
     NEVER
