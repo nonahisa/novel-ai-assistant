@@ -113,7 +113,7 @@ export function buildTuningStatsMarkdown(
           speedSourceCell(entry.tuning.speedSource),
           formatMeasuredAt(entry.tuning.speedMeasuredAt),
           countCell(entry.tuning.contextWindow),
-          countCell(entry.tuning.measuredChars),
+          readCell(entry.tuning),
           outputCell(entry.tuning),
           formatMeasuredAt(entry.tuning.measuredAt),
         ].join(" | ") +
@@ -176,6 +176,21 @@ function speedCell(
 }
 
 /** 書ける長さ。**時間切れ混じりの実測には印を残す**（設計書6.77の第2段） */
+/**
+ * 読める長さ（作者の指摘、2026-09-13）。
+ *
+ * **天井まで通った行は、実測ではなく下限値である。** 同じ列に混ぜたままだと
+ * 「これ以上は試していない」ことが読めず、小さいモデルのほうが多く読める
+ * ように見える。印を付けて分ける。
+ */
+function readCell(tuning: ModelTuning): string {
+  const chars = countCell(tuning.measuredChars);
+  if (tuning.measuredChars === undefined) return chars;
+  return tuning.contextHitCeiling
+    ? `${chars}（これ以上は試していません）`
+    : chars;
+}
+
 function outputCell(tuning: ModelTuning): string {
   const tokens = countCell(tuning.measuredOutputTokens);
   if (tuning.measuredOutputTokens === undefined) return tokens;

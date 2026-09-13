@@ -832,6 +832,10 @@ async function runMeasurement(
     model: resolved.model,
     summary,
     low,
+    // **天井まで通ったかを一緒に渡す**（作者の指摘、2026-09-13）。
+    // 二分探索がここまで全部通してしまったときの値は、モデルの限界では
+    // なく検査の限界である。一覧でそれと分かるように印を残す
+    ceilingChars,
     cancelled,
     longestResponseSeconds,
   });
@@ -1265,6 +1269,11 @@ async function offerToSave(input: {
   model: string;
   summary: string;
   low: number;
+  /**
+   * 測れる上限（天井）。**通った最大の字数がここまで届いていたら、
+   * それは検査の限界であって、モデルの限界ではない。**
+   */
+  ceilingChars: number;
   cancelled: boolean;
   longestResponseSeconds: number;
 }): Promise<boolean> {
@@ -1307,6 +1316,9 @@ async function offerToSave(input: {
     ...(writesContext ? { contextWindow: tokens } : {}),
     timeoutSeconds,
     measuredChars: input.low,
+    // **天井まで通ったときだけ印を残す。** 付けないときは項目ごと
+    // 持たない（無い台帳＝これまでどおり、を壊さない）
+    ...(input.low >= input.ceilingChars ? { contextHitCeiling: true } : {}),
     measuredAt: new Date().toISOString(),
   };
   await saveModelTuning(input.providerId, input.model, tuning);
