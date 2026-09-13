@@ -43,8 +43,8 @@ describe("本の設計図の既定値", () => {
       coverImagePath: null,
       backCoverImagePath: null,
       // **既定は「いままでどおりの見た目」**（設計書6.65.6）。
-      // 目次は本文と同じ流れの一覧、飾りは無し
-      tocPattern: "vertical",
+      // 目次は一覧（向きは選ばない＝本に従う）、飾りは無し
+      tocPattern: "list",
       tocEntryStyle: "numberAndTitle",
       tocOrnament: "none",
       colophonOrnament: "none",

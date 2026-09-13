@@ -36,10 +36,14 @@ import {
   type EpubIllustration,
 } from "../core/epubPackage";
 import {
-  characterIconPath,
   selectBookCharacters,
   toCharacterEntry,
 } from "../core/epubCharacterPage";
+import {
+  buildCharacterIconIndex,
+  resolveCharacterIconPath,
+} from "../core/characterIconLookup";
+import { collectMaterialImages } from "./materialImages";
 import { CharacterStore } from "../core/characterStore";
 import {
   countParagraphs,
@@ -641,9 +645,19 @@ async function collectCharacters(
   /** 読んだ人物イラスト。同じ絵を2人で使うことは無いが、読み直しは避ける */
   const icons = new Map<string, Uint8Array | null>();
 
+  /**
+   * 素材置き場の索引（作者の指定、2026-09-13）。**添えるときだけ作る**
+   * ——イラストを出さない本のためにフォルダーを掘っても意味が無い。
+   */
+  const iconIndex = showIcons
+    ? buildCharacterIconIndex(await collectMaterialImages(work.folderPath))
+    : new Map<string, string>();
+
   for (const character of selected) {
     const entry = toCharacterEntry(character);
-    const iconPath = showIcons ? characterIconPath(character.icon) : null;
+    const iconPath = showIcons
+      ? resolveCharacterIconPath(character, iconIndex)
+      : null;
     // **イラストが読めなくても、その人を落とさない。** 名前だけ載せる
     const data = iconPath
       ? await readCharacterIcon(work, icons, iconPath, notices)

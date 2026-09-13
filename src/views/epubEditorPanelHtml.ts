@@ -40,6 +40,16 @@
  * （題名の引用符で画面が壊れるのを防ぐ。ほかのパネルと同じ）。
  */
 
+import {
+  PAGE_ALIGN_UNSET_LABEL,
+  PAGE_LAYOUT_BLOCK_TYPES,
+  PAGE_ORIENTATION_OPTIONS,
+  pageAlignLabels,
+  pageOrientationAffectsWholePage,
+  type PageLayoutBlockType,
+  type PageTextAxis,
+} from "../models/book";
+
 /** 合成できる要素と、その値をどの欄から取るか（設計書6.65.8） */
 const COVER_ELEMENTS: ReadonlyArray<{ key: string; label: string }> = [
   { key: "title", label: "題名" },
@@ -125,6 +135,28 @@ function frameBackgroundRow(side: string): string {
 }
 
 /**
+ * 画像を入れる2つのボタン（作者の依頼、2026-09-13）。
+ *
+ * **表紙・裏表紙・口絵・扉絵の4つとも、この1つの形から出す。** それまで
+ * 画像を指す道は相対パスを手で打つことだけで、しかも表紙は文字欄・口絵は
+ * 入力ダイアログと、面によって入口が違った。口を4か所に分けない。
+ *
+ * **手で打つ道は残す**（上の文字欄）。場所を覚えている作者にはそちらが速い。
+ *
+ * 押したあとの仕事（ファイルを選ぶ・`素材/` へ写す・相対パスにする）は
+ * 全部拡張機能側にある。画面が作品フォルダの場所を組み立てると、
+ * ブラウザ版で別の場所を指す（CLAUDE.md 実装ルール7）。
+ */
+function imagePickRow(name: string): string {
+  return [
+    '    <div class="cover-actions">',
+    `      <button id="${name}-pick-import">画像を取り込む…</button>`,
+    `      <button id="${name}-pick-choose">入っている画像から選ぶ…</button>`,
+    "    </div>",
+  ].join("\n");
+}
+
+/**
  * 表紙・裏表紙1面ぶんの欄（設計書6.65.8）。
  *
  * **元イラストが無いときは、合成の塊ごと畳んで理由を出す**（`hidden`）。
@@ -140,6 +172,7 @@ function coverSection(
 ): string {
   return [
     `    <label><span>元イラストの場所（作品フォルダからの相対パス）</span><input id="${pathFieldId}" type="text"></label>`,
+    imagePickRow(side),
     `    <p class="note" id="${side}-bake-note"></p>`,
     // **焼いた画像の話は、合成の欄の外に置く。** 元イラストの指定を
     // 消しても焼いた画像は残り（本にも入り）、そのとき合成の欄は畳まれる。
@@ -182,6 +215,71 @@ function ornamentRow(id: string): string {
     '    <p class="note ornament-hint">設定/書籍/飾り/ に .svg を置くと選べます。</p>',
     '    <p class="note error ornament-reject"></p>',
   ].join("\n");
+}
+
+/**
+ * 面の中の文字の体裁を選ぶ1行（作者の依頼、2026-09-13）。
+ *
+ * **5つの面を1つの形から出す。** 写すと、寄せの呼び名や欄の並びが面ごとに
+ * ずれていく（表紙の `coverElementRow` と同じ作り方）。
+ *
+ * 縦横は**チェックではなく3択**である。チェックだと「本に従う」（何も
+ * 選んでいない）を表せず、本の綴じ方向を変えたときに面だけ取り残される。
+ *
+ * **5面とも同じ欄を出す**（作者の指摘、2026-09-13）。目次だけは以前、
+ * 向きを「並べ方」の欄が兼ねていたので、ここでは出さずに注記で逃げて
+ * いた——同じことを2か所で決められる形だったので、並べ方から向きの
+ * 意味を外し、欄をここへ一本化した。
+ *
+ * 寄せの呼び名（「上寄せ」か「右寄せ」か）は**縦横で入れ替わる**ので、
+ * ここでは横書きのものを置いておき、画面のスクリプトが向きに合わせて
+ * 書き換える（`refreshLayoutLabels`）。呼び名の出どころは `models/book.ts`
+ * の1か所だけである。
+ */
+function pageLayoutRow(type: PageLayoutBlockType): string {
+  const id = `layout-${type}`;
+  const orientation =
+    `      <label><span>文字の向き</span><select id="${id}-vertical">${options(
+      PAGE_ORIENTATION_OPTIONS
+    )}</select></label>`;
+
+  return [
+    '    <div class="layout-row">',
+    orientation,
+    alignField(id, "block"),
+    alignField(id, "inline"),
+    "    </div>",
+  ].join("\n");
+}
+
+/** 寄せの欄1つ。**「既定のまま」を先頭に置く**（選ばなければ従来どおり） */
+function alignField(id: string, axis: PageTextAxis): string {
+  const labels = pageAlignLabels(axis, false);
+  const choices =
+    `<option value="">${PAGE_ALIGN_UNSET_LABEL}</option>` +
+    options(labels.options);
+  return (
+    `      <label><span id="${id}-${axis}Label">${labels.axis}</span>` +
+    `<select id="${id}-${axis}">${choices}</select></label>`
+  );
+}
+
+/**
+ * 寄せの呼び名の表（縦書き・横書きの両方）。
+ *
+ * 画面のスクリプトは `models` を読み込めない（文字列として埋め込む JS で
+ * ある）ので、**組み立てのときに表ごと渡す**。ここで呼び名を書き写すと、
+ * 縦横の入れ替えを2か所で持つことになる。
+ */
+function alignLabelTable(): string {
+  const forMode = (vertical: boolean) => ({
+    block: pageAlignLabels("block", vertical),
+    inline: pageAlignLabels("inline", vertical),
+  });
+  return JSON.stringify({
+    horizontal: forMode(false),
+    vertical: forMode(true),
+  });
 }
 
 function pane(name: string, body: readonly string[]): string {
@@ -369,12 +467,49 @@ button.primary {
 .page-label { font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 4px; }
 .page-note { font-size: 12px; color: var(--vscode-descriptionForeground); margin-top: 4px; }
 /* 面そのもの。中の体裁は本のCSS（#book-style）が決める */
+/*
+  面のプレビューの枠（作者の指摘、2026-09-13
+  「Epubの画面比率ですが、最初のイメージと縦と横とが逆です」）。
+
+  それまでは「幅いっぱい・高さ320px」の横長のスクロール窓で、
+  表紙の枠（横1：縦1.4の縦長）と同じ画面の中で向きが食い違っていた。
+
+  **これはページではなく、端末の画面である。** 書き出しているのは
+  リフロー型のEPUBなので、ページの区切りは読む端末が決める（こちらは
+  rendition:layout も viewport も出していない）。1ページを描いて
+  見せると、そこで切れると約束したことになる。
+  形だけを端末に合わせ、中身はスクロールで読む。
+
+  向きは --screen-ratio が持つ（縦向き 1/1.4、横向き 1.4/1）。
+  縦向きを既定にするのは、表紙の枠と揃えるためである。
+*/
 .epub-page {
   border: 1px solid var(--vscode-panel-border);
   background: var(--vscode-editor-background);
-  block-size: 320px;
+  inline-size: min(340px, 100%);
+  aspect-ratio: var(--screen-ratio, 1 / 1.4);
   overflow: auto;
   padding: 16px;
+  box-sizing: border-box;
+}
+.epub-page.landscape {
+  --screen-ratio: 1.4 / 1;
+  inline-size: min(480px, 100%);
+}
+/*
+  合成の面（表紙・裏表紙）は、端末の画面ではなく**絵そのもの**を見せる。
+  焼いた絵の比率（横1：縦1.4）をそのまま出す
+*/
+.epub-page.cover-sheet {
+  aspect-ratio: auto;
+  overflow: visible;
+}
+#screenBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
 }
 .cover-placeholder {
   display: flex;
@@ -413,6 +548,14 @@ button.primary {
   background: var(--vscode-input-background);
 }
 .cover-actions { margin-top: 10px; }
+/*
+  面の中の文字の体裁（作者の依頼、2026-09-13）。向きと2つの寄せを横に並べる
+  ——縦に積むと、面ごとの設定の欄が3行ぶん伸びて本文の欄まで押し下がる。
+  狭い画面では折り返す（潰して読めなくなるより良い）
+*/
+.layout-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.layout-row label { flex: 1 1 8em; min-width: 0; }
+.layout-row .note { flex: 1 1 100%; margin: 6px 0 0; }
 /* 話と章の一覧（設計書6.65.15の段C）。章の行は読み取り専用である */
 #episodeList {
   max-block-size: 220px;
@@ -529,11 +672,13 @@ ${pane("halfTitle", [
   '      <option value="below">題名の下</option>',
   '      <option value="both">題名の上下</option>',
   "    </select></label>",
+  pageLayoutRow("halfTitle"),
 ])}
 ${pane("toc", [
+  // **並べ方は2択**（作者の指摘、2026-09-13）。向きは下の「文字の向き」が
+  // 持つので、ここに向きの言葉は出さない
   '    <label><span>並べ方</span><select id="tocPattern">',
-  '      <option value="vertical">一覧（本文と同じ流れ）</option>',
-  '      <option value="horizontal">一覧（目次だけ横組み）</option>',
+  '      <option value="list">一覧</option>',
   '      <option value="chapters">章ごとに区切る</option>',
   "    </select></label>",
   '    <label><span>見出しの形</span><select id="tocEntryStyle">',
@@ -542,15 +687,25 @@ ${pane("toc", [
   '      <option value="numberOnly">番号だけ</option>',
   "    </select></label>",
   ornamentRow("tocOrnament"),
+  pageLayoutRow("toc"),
   '    <p class="note">この面を本から外すときは、右の並びでこの面を右クリックして「削除」を選んでください。</p>',
 ])}
 ${pane("characters", [
   '    <label class="check"><input id="characterPageIcons" type="checkbox"><span>人物イラストを添える</span></label>',
+  // 名前のルビ（作者の指定、2026-09-13）。既定は「すべてに付ける」で、
+  // いままでの本の見た目を変えない
+  '    <label><span>名前のルビ</span><select id="characterRubyMode">',
+  '      <option value="all">すべてに付ける</option>',
+  '      <option value="kanjiOnly">漢字を含む名前だけに付ける</option>',
+  '      <option value="none">付けない</option>',
+  "    </select></label>",
   '    <p class="note">載るのは「登場済み・モブでない・公開」の人物の、名前と紹介文だけです。並びは設定資料の順になります。</p>',
   '    <p class="note" id="characterNotice"></p>',
+  pageLayoutRow("characters"),
 ])}
 ${pane("image", [
   '    <label><span>画像の場所（作品フォルダからの相対パス）</span><input id="blockImagePath" type="text"></label>',
+  imagePickRow("block"),
   '    <label><span>解説文（省略できます）</span><input id="blockCaption" type="text"></label>',
   '    <p class="note">1枚で1つの面になります（本文の組み方には入りません）。扉絵は何枚でも、好きな位置に挿せます。</p>',
 ])}
@@ -563,9 +718,25 @@ ${pane("body", [
 ${pane("afterword", [
   '    <p class="note">本文の後ろに1面として入ります。原稿は 設定/書籍/あとがき.md に書きます（まだ無ければ作ります）。書いていなければ、並びに置いてあっても面は出ません。</p>',
   '    <div class="cover-actions"><button id="openAfterword">あとがきを書く</button></div>',
+  pageLayoutRow("afterword"),
 ])}
-${pane("colophon", [ornamentRow("colophonOrnament")])}
+${pane("colophon", [ornamentRow("colophonOrnament"), pageLayoutRow("colophon")])}
     </div>
+
+    <!--
+      **画面の向きを切り替えられるようにする**（作者の質問、2026-09-13
+      「閲覧端末実機では横向きにした場合と縦向きとで、表示はどう変わるのでしょうか？」）。
+
+      答えは「組み直される」である。リフロー型なので、回すたびに1画面へ
+      入る量が変わり、ページ数も変わる。ここで形を変えて見せるのは、
+      その組み直しを手元で確かめられるようにするためである。
+    -->
+    <div id="screenBar">
+      <span class="note">画面の向き</span>
+      <label class="check"><input type="radio" name="screen" id="screenPortrait" value="portrait" checked><span>縦向き</span></label>
+      <label class="check"><input type="radio" name="screen" id="screenLandscape" value="landscape"><span>横向き</span></label>
+    </div>
+    <p class="note">端末の画面の形です。<strong>ページの区切りは端末が決めます</strong>——文字の大きさや向きを変えると組み直され、ページ数も変わります（リフロー型のEPUB）。横向きでは、見開き2ページで出す読み手も多くあります。</p>
 
     <div id="pages"></div>
     </div>
@@ -629,6 +800,23 @@ const ORNAMENT_FIELDS = ['tocOrnament', 'colophonOrnament', 'titlePageOrnament']
  */
 const CHECKS = ['collapseBlankLines'];
 const PATHS = ['coverImagePath', 'backCoverImagePath'];
+/*
+ * 面の中の文字の体裁（作者の依頼、2026-09-13）。
+ *
+ * 面の一覧も、寄せの呼び名も**拡張機能側が持つ**（models/book.ts）。
+ * 呼び名は縦書きと横書きで入れ替わるので、両方の表を受け取っておき、
+ * いまの向きに合わせて選択肢の字だけを書き換える。
+ */
+const LAYOUT_FACES = ${JSON.stringify(PAGE_LAYOUT_BLOCK_TYPES)};
+/**
+ * 選んだ向きが**面ぜんぶ**に効く面。目次だけがここに入らない——目次で
+ * 選んだ向きが変えるのは中の一覧だけで、面そのものは本の綴じ方向のまま
+ * である（寄せの呼び名は面の向きで決まるので、この違いが要る）。
+ */
+const LAYOUT_PAGE_ORIENTATION_FACES = ${JSON.stringify(
+    PAGE_LAYOUT_BLOCK_TYPES.filter(pageOrientationAffectsWholePage)
+  )};
+const ALIGN_LABELS = ${alignLabelTable()};
 /** 書体の2枠。欄の中身は作品フォルダからの相対パス（空なら同梱しない） */
 const FONT_FIELDS = { fontBody: 'body', fontHeading: 'heading' };
 
@@ -726,6 +914,92 @@ function readLayout(side) {
   return layout;
 }
 
+/* ---- 面の中の文字の体裁（作者の依頼、2026-09-13） ------------------- */
+
+function layoutFieldId(type, part) {
+  return 'layout-' + type + '-' + part;
+}
+
+/** 選んだ向きが面ぜんぶに効く面か（目次だけが false） */
+function orientationAffectsWholePage(type) {
+  return LAYOUT_PAGE_ORIENTATION_FACES.indexOf(type) >= 0;
+}
+
+/**
+ * その面が縦書きになるか。**寄せの呼び名を決めるのに要る。**
+ *
+ * 「本に従う」（空）なら本の綴じ方向。目次はいつも本の綴じ方向に従う
+ * ——目次で選んだ向きが変えるのは中の一覧だけで、寄せが効く面そのもの
+ * （見出しを含む枠）の向きは本のままだからである。
+ */
+function layoutVerticalOf(type) {
+  if (orientationAffectsWholePage(type)) {
+    const orientation = field(layoutFieldId(type, 'vertical')).value;
+    if (orientation === 'vertical') return true;
+    if (orientation === 'horizontal') return false;
+  }
+  return field('writingMode').value === 'vertical';
+}
+
+/**
+ * 寄せの呼び名を、いまの向きに合わせて書き換える。
+ *
+ * **縦書きでは上下と左右が入れ替わる。** 縦組みの面で「上下の寄せ」と
+ * 出したままにすると、作者は毎回逆を選ぶことになる。値（start/center/end）
+ * は動かさないので、書き換えても選んだものは変わらない。
+ */
+function refreshLayoutLabels() {
+  LAYOUT_FACES.forEach(function (type) {
+    const labels = ALIGN_LABELS[layoutVerticalOf(type) ? 'vertical' : 'horizontal'];
+    ['block', 'inline'].forEach(function (axis) {
+      const box = field(layoutFieldId(type, axis));
+      const head = field(layoutFieldId(type, axis + 'Label'));
+      if (!box || !head) return;
+      head.textContent = labels[axis].axis;
+      labels[axis].options.forEach(function (choice) {
+        const option = box.querySelector('option[value="' + choice.value + '"]');
+        if (option) option.textContent = choice.label;
+      });
+    });
+  });
+}
+
+function fillPageLayouts(layouts) {
+  const source = layouts || {};
+  LAYOUT_FACES.forEach(function (type) {
+    const layout = source[type] || {};
+    let orientation = '';
+    if (layout.vertical === true) orientation = 'vertical';
+    if (layout.vertical === false) orientation = 'horizontal';
+    field(layoutFieldId(type, 'vertical')).value = orientation;
+    field(layoutFieldId(type, 'block')).value = layout.block || '';
+    field(layoutFieldId(type, 'inline')).value = layout.inline || '';
+  });
+  refreshLayoutLabels();
+}
+
+/**
+ * 選んだ体裁を読む。**選んでいない面は、項目ごと送らない。**
+ *
+ * 空の入れ物を送ると、何も選んでいない本の
+ * 設計図に空の入れ物が書かれてしまう（保留の印と同じ約束）。
+ */
+function readPageLayouts() {
+  const out = {};
+  LAYOUT_FACES.forEach(function (type) {
+    const layout = {};
+    const orientation = field(layoutFieldId(type, 'vertical')).value;
+    if (orientation === 'vertical') layout.vertical = true;
+    if (orientation === 'horizontal') layout.vertical = false;
+    const block = field(layoutFieldId(type, 'block')).value;
+    if (block) layout.block = block;
+    const inline = field(layoutFieldId(type, 'inline')).value;
+    if (inline) layout.inline = inline;
+    if (Object.keys(layout).length > 0) out[type] = layout;
+  });
+  return out;
+}
+
 /** 枠の余白の色を読む。欄が見つからない・空なら既定（黒）にする */
 function frameBackgroundOf(side) {
   const value = readLayout(side).frameBackground;
@@ -747,6 +1021,14 @@ let selected = 0;
 let currentScreen = 'block';
 /** 「この後ろに挿入」に出せる種類。判断も呼び名も拡張機能側が持つ */
 let insertTypes = [];
+/**
+ * プレビューの画面の向き（portrait か landscape）。
+ *
+ * **本の設定ではない。** 見る側の都合なので本の台帳へは書かない
+ * （端末の向きは読者が決めるもので、作者が決めるものではない）。
+ */
+let screenOrientation = 'portrait';
+
 /** 最後に届いた面（プレビュー）。選び直しでは貰い直さずに出し分ける */
 let pages = [];
 
@@ -1312,6 +1594,8 @@ function fillForm(config) {
   PATHS.forEach(function (id) { field(id).value = config[id] || ''; });
   const characterPage = config.characterPage || {};
   field('characterPageIcons').checked = characterPage.showIcons === true;
+  // 書いていなければ「すべてに付ける」（既定）。台帳に項目が無い本も多い
+  field('characterRubyMode').value = characterPage.rubyMode || 'all';
   const fonts = config.fonts || {};
   Object.keys(FONT_FIELDS).forEach(function (id) {
     field(id).value = fonts[FONT_FIELDS[id]] || '';
@@ -1319,6 +1603,9 @@ function fillForm(config) {
   SIDES.forEach(function (side) {
     fillLayout(side, config[LAYOUT_KEYS[side]]);
   });
+  // **綴じ方向を入れたあとに呼ぶ。** 寄せの呼び名は向きで入れ替わるので、
+  // 先に呼ぶと横書きの呼び名のまま縦組みの本が開く
+  fillPageLayouts(config.pageLayouts);
 }
 
 function readForm() {
@@ -1336,7 +1623,11 @@ function readForm() {
   });
   // **「入れるか」は送らない**（設計書6.65.15の段C）。並びが正なので、
   // 送ると作者が手で書いた「入れるか」の値を塗り替えてしまう
-  config.characterPage = { showIcons: field('characterPageIcons').checked };
+  config.characterPage = {
+    showIcons: field('characterPageIcons').checked,
+    // 既定（すべてに付ける）を送っても、拡張機能側が項目ごと落とす
+    rubyMode: field('characterRubyMode').value
+  };
   // 書体は空欄なら null（同梱しない）。**空文字を送らない**——
   // 拡張機能側の検証は「書いてあるが読めない場所」として叱ってしまう
   const fonts = {};
@@ -1348,6 +1639,9 @@ function readForm() {
   SIDES.forEach(function (side) {
     config[LAYOUT_KEYS[side]] = readLayout(side);
   });
+  // 面の中の文字の体裁（作者の依頼、2026-09-13）。**選んでいなければ空**で、
+  // 拡張機能側が項目ごと落とす（本の台帳に空の入れ物を書かない）
+  config.pageLayouts = readPageLayouts();
   // **場所を書く前の挿絵は、設計図へ載せない。** 絵の無い挿絵は
   // 受け取ってもらえないので、書き終わるまで欄の中だけで待たせる
   config.illustrations = illustrations
@@ -1384,9 +1678,11 @@ function scheduleChange() {
 TEXTS.concat(PATHS).concat(Object.keys(FONT_FIELDS)).forEach(function (id) {
   field(id).addEventListener('input', scheduleChange);
 });
-CHOICES.concat(CHECKS).concat(['characterPageIcons']).forEach(function (id) {
-  field(id).addEventListener('change', scheduleChange);
-});
+CHOICES.concat(CHECKS)
+  .concat(['characterPageIcons', 'characterRubyMode'])
+  .forEach(function (id) {
+    field(id).addEventListener('change', scheduleChange);
+  });
 SIDES.forEach(function (side) {
   ELEMENTS.forEach(function (key) {
     ['visible', 'anchor', 'size', 'color', 'colorPick', 'vertical']
@@ -1401,6 +1697,68 @@ SIDES.forEach(function (side) {
 });
 ['blockImagePath', 'blockCaption'].forEach(function (id) {
   field(id).addEventListener('change', sendBlockEdit);
+});
+
+/*
+  面の中の文字の体裁（作者の依頼、2026-09-13）。
+
+  **向きを変えたら、寄せの呼び名も入れ替える。** 縦組みでは「上下の寄せ」が
+  「左右の寄せ」になるので、書き換えないと作者は逆を選ぶ。綴じ方向
+  （本の設定）を変えたときも同じなので、そちらにも足しておく。
+*/
+LAYOUT_FACES.forEach(function (type) {
+  ['vertical', 'block', 'inline'].forEach(function (part) {
+    const box = field(layoutFieldId(type, part));
+    if (!box) return;
+    box.addEventListener('change', function () {
+      refreshLayoutLabels();
+      scheduleChange();
+    });
+  });
+});
+field('writingMode').addEventListener('change', refreshLayoutLabels);
+
+/*
+  画像の投入口と選択画面（作者の依頼、2026-09-13）。
+
+  **打ちかけを先に送る（flushChange）。** 待ち合わせの途中で選び始めると、
+  選び終わったあとに古い欄の値が届き、**入れたばかりの場所を打ち消す。**
+
+  どの面のことかは target で伝える。口絵・扉絵は同じ欄を使い回すので、
+  いま選んでいる行（index）も一緒に渡す。
+*/
+function pickImage(target, mode) {
+  flushChange();
+  post('pickImage', {
+    target: target,
+    mode: mode,
+    index: selected,
+    config: readForm()
+  });
+}
+
+[['front', 'cover'], ['back', 'backCover'], ['block', 'block']]
+  .forEach(function (pair) {
+    field(pair[0] + '-pick-import').addEventListener('click', function () {
+      pickImage(pair[1], 'import');
+    });
+    field(pair[0] + '-pick-choose').addEventListener('click', function () {
+      pickImage(pair[1], 'choose');
+    });
+  });
+
+/*
+  画面の向きの切り替え（作者の質問、2026-09-13）。
+
+  **拡張機能へは送らない。** 見る側の都合であって本の設定ではないので、
+  本の台帳は触らない。面を描き直すだけで済む。
+*/
+['screenPortrait', 'screenLandscape'].forEach(function (id) {
+  field(id).addEventListener('change', function (event) {
+    if (!event.target.checked) return;
+    screenOrientation = event.target.value;
+    renderPages();
+  });
 });
 
 /*
@@ -1710,7 +2068,11 @@ function renderPages() {
     frame.appendChild(caption);
 
     const sheet = document.createElement('div');
-    sheet.className = 'epub-page ' + (page.vertical ? 'vertical' : 'horizontal');
+    sheet.className = 'epub-page '
+      + (page.vertical ? 'vertical' : 'horizontal')
+      + (screenOrientation === 'landscape' ? ' landscape' : '')
+      // 合成の面は絵そのものなので、端末の画面の形に押し込めない
+      + (page.compose ? ' cover-sheet' : '');
     if (page.compose) {
       const canvas = document.createElement('canvas');
       canvas.id = 'canvas-' + page.compose;
@@ -1802,6 +2164,18 @@ window.addEventListener('message', function (event) {
       return;
     }
     loadImage(side, message.dataUrl, true);
+    return;
+  }
+  if (message.type === 'imagePicked') {
+    /*
+      選んだ画像の場所を、文字欄へ書き戻す（作者の依頼、2026-09-13）。
+
+      **設計図は拡張機能側で既に直っている**ので、ここから送り返さない
+      （送り返すと、同じ値で往復するだけになる）。口絵・扉絵の欄は
+      面を出し直すときに blocks から入るので、ここへは来ない。
+    */
+    const target = field(message.field);
+    if (target) target.value = message.imagePath || '';
     return;
   }
   if (message.type === 'status') {

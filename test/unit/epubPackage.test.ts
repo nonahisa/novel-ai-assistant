@@ -740,8 +740,16 @@ describe("目次の配置パターン（設計書6.65.6）", () => {
     expect(nav).not.toContain("toc-group");
   });
 
-  test("横組みの一覧は、目次だけ横組みにする", () => {
-    const files = open(buildEpub(withConfig({ tocPattern: "horizontal" })));
+  /**
+   * 向きは「並べ方」ではなく**面ごとの体裁**が持つ（作者の指摘、
+   * 2026-09-13）。描き方はいままでと同じ `toc-horizontal` である。
+   */
+  test("目次だけ横組みにすると、一覧が横組みになる", () => {
+    const files = open(
+      buildEpub(
+        withConfig({ tocPattern: "list", pageLayouts: { toc: { vertical: false } } })
+      )
+    );
 
     expect(files["OEBPS/nav.xhtml"]).toContain('class="nav-list toc-horizontal"');
     // 見た目を決めるのはCSS。断片の目印とCSSが揃っていないと効かない

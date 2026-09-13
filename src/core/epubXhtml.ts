@@ -163,6 +163,14 @@ export interface EpubBodyOptions {
    * 効く。横書きの本で寝かせると、かえって読みにくくなる。
    */
   vertical?: boolean;
+  /**
+   * `<section>` へ足すクラス（作者の依頼、2026-09-13）。
+   *
+   * あとがきの面に体裁（縦横・寄せ）を当てるための手がかりである。
+   * **本文の話には付けない**——省略時は、いままでとまったく同じ
+   * `<section class="chapter">` が出る。
+   */
+  sectionClass?: string;
 }
 
 /** 位置指定の種類。知らせの言い方をここで分ける */
@@ -214,9 +222,11 @@ export function buildChapterPlacement(
   const vertical = options.vertical ?? false;
   const heading = chapter.heading.trim();
   const body = renderBody(chapter.body, chapter.notation, options);
+  // 面の体裁を当てる手がかり（あとがきだけ。省略時はいままでどおり）
+  const sectionClass = (options.sectionClass ?? "").trim();
   return {
     html: [
-      '<section class="chapter">',
+      `<section class="chapter${sectionClass ? ` ${sectionClass}` : ""}">`,
       ...(heading
         ? [
             `<h2 class="chapter-heading">${escapeDisplayText(
@@ -397,6 +407,18 @@ export interface EpubDocumentInput {
   language?: string;
   /** `<body>` の中身。呼び出し側が逃がし済みであること */
   body: string;
+  /**
+   * `<html>` へ足すクラス（作者の依頼、2026-09-13）。
+   *
+   * **上下の寄せに要る。** 「下寄せ」は面の高さが決まっていないと働かない
+   * （文字の分しか高さの無い箱の中では、上も下も同じ場所である）。そこで
+   * CSS は `html.page-colophon, html.page-colophon body { block-size: 100% }`
+   * のように**その面の文書だけ**へ高さを与える。`html` へ素で書くと本文の
+   * 面まで高さが固定され、長い話が切れるリーダーが出る。
+   *
+   * 省略時は、いままでとまったく同じ `<html …>` が出る。
+   */
+  pageClass?: string;
 }
 
 /**
@@ -409,11 +431,14 @@ export interface EpubDocumentInput {
 export function buildXhtmlDocument(input: EpubDocumentInput): string {
   const language = input.language ?? "ja";
   const bodyClass = input.vertical ? "vertical" : "horizontal";
+  // 面ごとの体裁を当てる手がかり。**書いていなければ属性ごと出さない**
+  const pageClass = (input.pageClass ?? "").trim();
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     "<!DOCTYPE html>",
     '<html xmlns="http://www.w3.org/1999/xhtml"' +
       ' xmlns:epub="http://www.idpf.org/2007/ops"' +
+      (pageClass ? ` class="${escapeXml(pageClass)}"` : "") +
       ` xml:lang="${escapeXml(language)}" lang="${escapeXml(language)}">`,
     "<head>",
     '<meta charset="utf-8" />',
