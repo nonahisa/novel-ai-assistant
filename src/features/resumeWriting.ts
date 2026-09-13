@@ -2,6 +2,10 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
+import { readPlotText } from "../core/plotFile";
+import { isBlankPlotSection, parsePlotMarkdown } from "../core/plotDoc";
+import { ChapterStore } from "../core/chapterStore";
+import { groupEpisodesByChapter } from "../core/chapterGrouping";
 import { findLatestEpisode } from "../core/latestEpisode";
 import { readTextFile } from "../core/textFile";
 import {
@@ -36,9 +40,11 @@ import {
   RESUME_SHEET_KIND,
   RESUME_SYNOPSIS_COUNT,
   tailOfEpisodeFile,
+  type ResumeChapter,
   type ResumeEpisodePlot,
   type ResumeForeshadow,
   type ResumeMemo,
+  type ResumeOverview,
   type ResumeSynopsis,
   type ResumeTodayGoal,
 } from "../core/resumeSheet";
@@ -74,6 +80,7 @@ export async function resumeWriting(
 
   const sheet = buildResumeSheet({
     workTitle: work.title,
+    overview: await loadOverview(work, episodes, chapter, notices),
     latest: latest
       ? {
           label: labelOf(latest, format),
@@ -228,6 +235,103 @@ async function createEpisodePlotFile(
   void vscode.window.showInformationMessage(
     `第${chapter}話の単話プロットを作りました。視点・目標・展開を書いてください（AIは書きません）。`
   );
+}
+
+/**
+ * 作品の大きな流れを集める（設計書6.36.1）。
+ *
+ * **AIを呼ばない。** 材料はどれも既に作品の中にある——プロットの
+ * 「あらすじ」節、章立ての台帳、走査の結果。
+ *
+ * **読めなくても止めない。** 大きな流れは「あると助かる」ものであって、
+ * 無いと再開できないものではない。読めなかったら断りを1行残して先へ進む
+ * （この1枚のほかの節と同じ扱い）。
+ */
+async function loadOverview(
+  work: WorkEntry,
+  episodes: readonly EpisodeFile[],
+  latestChapter: number | null,
+  notices: string[]
+): Promise<ResumeOverview> {
+  return {
+    plotOutline: plotOutlineOf(await readPlotText(work)),
+    chapters: await loadChapterRows(work, episodes, latestChapter, notices),
+    totalEpisodes: episodes.length,
+    latestChapter,
+  };
+}
+
+/** プロットの「あらすじ」節だけを取る（ほかの節は大きな流れではない） */
+function plotOutlineOf(text: string): string {
+  const outline = parsePlotMarkdown(text).sections.outline ?? "";
+  return isBlankPlotSection(outline) ? "" : outline.trim();
+}
+
+/**
+ * 章の並びと、いまどの章にいるか。
+ *
+ * **章立てが無い作品では空を返す**（この作品には章という区切りが無い、
+ * というのが事実であって、欠けているわけではない）。
+ */
+async function loadChapterRows(
+  work: WorkEntry,
+  episodes: readonly EpisodeFile[],
+  latestChapter: number | null,
+  notices: string[]
+): Promise<ResumeChapter[]> {
+  let chapters;
+  try {
+    chapters = (await new ChapterStore(work).load()).chapters;
+  } catch (error) {
+    notices.push(`章立てを読めませんでした：${messageOf(error)}`);
+    return [];
+  }
+  if (chapters.length === 0) return [];
+
+  const { ungrouped, groups } = groupEpisodesByChapter(
+    episodes,
+    chapters,
+    work.folderPath
+  );
+
+  const rows = groups.map((group) =>
+    chapterRow(group.chapter.name, group.episodes, latestChapter)
+  );
+  // **章の前に置かれた話も数に入れる。** 落とすと、章ごとの合計と
+  // 「いま何話まで」が食い違い、どちらが正しいのか読む側に分からない
+  if (ungrouped.length > 0) {
+    rows.unshift(chapterRow("（章の前）", ungrouped, latestChapter));
+  }
+  return rows;
+}
+
+function chapterRow(
+  name: string,
+  episodes: readonly EpisodeFile[],
+  latestChapter: number | null
+): ResumeChapter {
+  const starts = episodes
+    .map((episode) => episode.chapterStart)
+    .filter((value): value is number => typeof value === "number");
+  const ends = episodes
+    .map((episode) => episode.chapterEnd ?? episode.chapterStart)
+    .filter((value): value is number => typeof value === "number");
+  const from = starts.length > 0 ? Math.min(...starts) : null;
+  const to = ends.length > 0 ? Math.max(...ends) : null;
+  return {
+    name,
+    episodeCount: episodes.length,
+    from,
+    to,
+    // **いま書いている話が入っているか。** 端も含める（章の最後の話を
+    // 書いているときに「いまここ」が消えると、居場所が分からなくなる）
+    current:
+      latestChapter !== null &&
+      from !== null &&
+      to !== null &&
+      latestChapter >= from &&
+      latestChapter <= to,
+  };
 }
 
 /** その話の話数。合本なら最後の話数を見る。読めなければ null */

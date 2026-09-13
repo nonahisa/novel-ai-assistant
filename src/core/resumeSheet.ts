@@ -90,8 +90,48 @@ export interface ResumeTodayGoal {
   remaining: number;
 }
 
+/**
+ * 作品の大きな流れ（設計書6.36.1。作者の指摘、2026-09-13
+ * 「直近の数話はわかりますが、大きな流れがわかりません。
+ * コンパクトにまとめて提示できないでしょうか？」）。
+ *
+ * **話ごとのあらすじを全部並べない。** 200話の作品では1枚に収まらず、
+ * 「大きな流れ」を読むのに端から端まで目を通すことになる。
+ * 出すのは**3つだけ**——作品ぜんぶのあらすじ、章の並び、いまの位置。
+ *
+ * **AIを呼ばない。** 材料はどれも既に作品の中にある
+ * （プロットの「あらすじ」節・`設定/章立て.json`・走査の結果）。
+ */
+export interface ResumeOverview {
+  /** プロットの「あらすじ」節。書かれていなければ空 */
+  plotOutline: string;
+  /** 章の並び。章立てが無ければ空 */
+  chapters: readonly ResumeChapter[];
+  /** 走査で見つかった話の数（合本は中の話を数える） */
+  totalEpisodes: number;
+  /** いま書けている最新話の番号。読めなければ null */
+  latestChapter: number | null;
+}
+
+export interface ResumeChapter {
+  name: string;
+  /** 章に入っている話の数 */
+  episodeCount: number;
+  /** 章の最初と最後の話数。読めなければ null */
+  from: number | null;
+  to: number | null;
+  /** いま書いている話が、この章に入っているか */
+  current: boolean;
+}
+
 export interface ResumeSheetInput {
   workTitle: string;
+  /**
+   * 作品の大きな流れ。**省略できる形にしてある**のは、
+   * この1枚を組み立てる試験の材料を全部書き直さずに済ませるためである
+   * （`openMemos` と同じ事情）。
+   */
+  overview?: ResumeOverview;
   /** 最新話。本文が1つも無ければ null */
   latest: ResumeLatestEpisode | null;
   /** 前話までのあらすじ（話数の早い順） */
@@ -155,6 +195,16 @@ export function buildResumeSheet(input: ResumeSheetInput): string {
     lines.push(goalLine(input.todayGoal), "");
   }
 
+  /*
+    **大きな流れを、いちばん上に置く**（作者の指摘、2026-09-13）。
+
+    書き出す前に思い出したいのは、まず「作品がどこへ向かっていて、
+    自分がいまどのあたりにいるか」である。直近の数話から読み始めると、
+    手前の細部から入ることになって、全体が見えないまま書き始める。
+
+    **今日の1行（目標）の下、前回どこまでの上**に置く。
+  */
+  lines.push(...overviewSection(input.overview));
   lines.push(...latestSection(input.latest));
   lines.push(...synopsisSection(input.synopses));
   lines.push(...foreshadowSection(input.openForeshadows));
@@ -449,4 +499,67 @@ export function buildEpisodePlotTemplate(chapter: number): string {
     "- ",
     "",
   ].join("\n");
+}
+
+/**
+ * 作品の大きな流れ（1枚の冒頭）。
+ *
+ * **材料が1つも無ければ、節ごと出さない。** 見出しだけが並ぶと、
+ * 「ここには何も無い」ではなく「壊れている」ように見える。
+ *
+ * **無いものは、無いと言って次の手を添える。** プロットのあらすじが
+ * 空なら「書くと、ここに出ます」、章立てが無ければ「章立て提案」を指す
+ * ——空欄を黙って置くより、埋め方が分かるほうがよい。
+ */
+export function overviewSection(overview: ResumeOverview | undefined): string[] {
+  if (!overview) return [];
+
+  const lines = ["## 作品の大きな流れ", ""];
+
+  if (overview.plotOutline.trim()) {
+    lines.push(overview.plotOutline.trim(), "");
+  } else {
+    lines.push(
+      "プロットの「あらすじ」がまだ空です。書いておくと、ここに出ます" +
+        "（設定/plot.md）。",
+      ""
+    );
+  }
+
+  lines.push(...chapterTable(overview));
+  lines.push(positionLine(overview), "");
+  return lines;
+}
+
+/** 章の並び。章立てが無ければ、作り方を1行だけ添える */
+function chapterTable(overview: ResumeOverview): string[] {
+  if (overview.chapters.length === 0) {
+    return [
+      "章立てはまだありません。話がたまってきたら、" +
+        "「章立てを提案してもらう」で区切りの候補を出せます。",
+      "",
+    ];
+  }
+
+  const rows = overview.chapters.map((chapter) => {
+    const range =
+      chapter.from === null
+        ? "—"
+        : chapter.to === null || chapter.to === chapter.from
+          ? `第${chapter.from}話`
+          : `第${chapter.from}〜${chapter.to}話`;
+    const here = chapter.current ? "**← いまここ**" : "";
+    return `| ${chapter.name} | ${range} | ${chapter.episodeCount}話 | ${here} |`;
+  });
+
+  return ["| 章 | 範囲 | 話数 | |", "|---|---|---|---|", ...rows, ""];
+}
+
+/** いまの位置を1行で。**書けている量を責めない言い方にする** */
+function positionLine(overview: ResumeOverview): string {
+  const total = overview.totalEpisodes.toLocaleString("ja-JP");
+  if (overview.latestChapter === null) {
+    return `いまは${total}話ぶん書けています。`;
+  }
+  return `いまは第${overview.latestChapter}話まで書けています（${total}話）。`;
 }
