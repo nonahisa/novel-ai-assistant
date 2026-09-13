@@ -701,10 +701,11 @@ export async function activate(
         event.selections[0].active
       );
       if (!found) return;
-      await findOpenSettingsPanel(found.work.id)?.showRecord(
-        found.entry.kind,
-        found.entry.id
-      );
+      const panel = findOpenSettingsPanel(found.work.id);
+      if (!panel) return;
+      // **本文から開いたのだから、その話に出る人どうしに絞る**（設計書6.92）
+      panel.setChapterContext(chapterOfPath(fromUri(event.textEditor.document.uri)));
+      await panel.showRecord(found.entry.kind, found.entry.id);
     })
   );
 
@@ -722,10 +723,13 @@ export async function activate(
     // **作品は登録簿で引く**（設計書6.68.2）。用語索引は設定資料が
     // 1件も無い作品では引けないので、作品を知りたいだけのところでは使わない
     workOf: (filePath) => workOfPath(registry, filePath),
-    openSettings: async (work, kind, id) => {
+    openSettings: async (work, kind, id, from) => {
       const panel = await openSettingsPanel(context, work, aiRegistry, {
         beside: true,
       });
+      // **呼び合いは、その話に出る人どうしだけにする**（設計書6.92）。
+      // 話数は原稿のファイル名から読む（数え方は episodeParser の1本だけ）
+      if (from) panel.setChapterContext(chapterOfPath(from.filePath));
       // **用語から開くときは、一覧を畳んで出す**（作者の依頼、2026-08-28）。
       // 本文の隣に並ぶ狭い幅を一覧に取られると、肝心の資料が読めない
       await panel.showRecord(kind, id, { collapseList: true });
@@ -734,8 +738,11 @@ export async function activate(
     // （作者の指示、2026-08-28）。開いていなければ何もしない——
     // 右クリックのたびに新しいパネルが開いては、作者の画面を奪う。
     // 一覧の畳みも触らない（作者が開けた一覧と喧嘩しないため）
-    previewTerm: async (work, kind, id) => {
-      await findOpenSettingsPanel(work.id)?.showRecord(kind, id);
+    previewTerm: async (work, kind, id, from) => {
+      const panel = findOpenSettingsPanel(work.id);
+      if (!panel) return;
+      if (from) panel.setChapterContext(chapterOfPath(from.filePath));
+      await panel.showRecord(kind, id);
     },
     openChat: async (document, range) => {
       // 相談パネルは普通のエディタから本文を受け取る。
@@ -936,6 +943,8 @@ export async function activate(
           { beside: true }
         );
         // 本文の用語からの入口。原稿エディタの右クリックと同じ扱いにする
+        // （呼び合いの絞り込みも同じ。設計書6.92）
+        panel.setChapterContext(chapterOfPath(fromUri(editor.document.uri)));
         await panel.showRecord(found.entry.kind, found.entry.id, {
           collapseList: true,
         });
@@ -5185,6 +5194,21 @@ function workOfPath(
   return registry
     .list()
     .find((entry) => isInsideWork(entry.folderPath, filePath));
+}
+
+/**
+ * いま開いている本文の話数（設計書6.92）。
+ *
+ * **数え方を増やさない。** ファイル名の解釈は `episodeParser.ts` の
+ * `parseEpisodeFileName` が持っており、合本・日付名・範囲（第3〜4話）の
+ * 扱いもそこで決まっている。ここで正規表現を書くと、一覧や統計と
+ * 食い違う話数が資料の絞り込みにだけ出る。
+ *
+ * 範囲のある話は先頭（`chapterStart`）で見る。日付で名付けた記事は
+ * 話数を持たないので `null` になり、絞り込みは掛からない。
+ */
+function chapterOfPath(filePath: string): number | null {
+  return parseEpisodeFileName(path.basename(filePath)).chapterStart;
 }
 
 async function resolveWork(

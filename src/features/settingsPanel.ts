@@ -63,6 +63,13 @@ import type {
   RecordConflict,
 } from "../models/jsonValidation";
 import {
+  buildAddressListView,
+  buildCharacterAddressView,
+  type AddressListView,
+  type AddressScope,
+  type CharacterAddressView,
+} from "../core/addressPairsView";
+import {
   buildAbilityListItems,
   buildCharacterListItems,
   buildLocationListItems,
@@ -268,6 +275,12 @@ interface DetailView {
    * 分けても同じ人が2件になるだけで、作者の役に立たない。
    */
   separable?: string[];
+  /**
+   * 呼び合い（設計書6.92）。**人物のときだけ入る。**
+   *
+   * 1組も無ければ入れない（節ごと出さない）。
+   */
+  addresses?: CharacterAddressView;
   /** html は整形済み。画面側でそのまま挿入する */
   aiNotes: Array<AiNote & { html: string }>;
 }
@@ -375,7 +388,17 @@ export class SettingsPanel {
   /** 直近の相談で使った検索語。ログに残して、外した場面の原因を追えるようにする */
   private lastSearchTerms: string[] = [];
   /** 作品全体の資料（紹介文・キャッチコピー・各話あらすじ）。読むだけ */
-  private workInfo: WorkInfoView = { blurb: "", catchphrase: "", episodes: [] };
+  private workInfo: WorkInfoDoc = { blurb: "", catchphrase: "", episodes: [] };
+  /**
+   * いま開いている本文の話数（設計書6.92）。本文から開いていなければ null。
+   *
+   * **話数の求め方は増やさない。** `episodeParser.ts` がファイル名から
+   * 読んだものを `extension.ts` が渡してくる。ここで数え直すと、
+   * 合本や日付名の扱いが一覧・統計と食い違う。
+   */
+  private manuscriptChapter: number | null = null;
+  /** 作者が呼び合いの絞りを外したか。話数が変わったら戻す */
+  private showAllAddresses = false;
   /** 選択中のレコードごとのやり取り。保存はしない */
   private readonly chatHistory = new Map<string, ChatTurn[]>();
   /** 有料のAIについて確認を取り終えたモデル名。切り替えたら取り直す */
@@ -653,13 +676,59 @@ export class SettingsPanel {
     this.post({
       type: "init",
       groups: this.groups(),
-      workInfo: this.workInfo,
+      workInfo: this.workInfoView(),
       notice: this.notice(),
     });
   }
 
   private notice(): string {
     return describeSettingsLoadErrors(this.loadErrors);
+  }
+
+  /**
+   * 画面へ送る作品情報。**呼び合いは送る直前に組む**（設計書6.92）。
+   *
+   * 呼び合いの材料は人物レコードで、ディスクから読んだ文書ではない。
+   * `loadWorkInfo` の結果に混ぜて持つと、絞りを切り替えるたびに
+   * 紹介文とあらすじまで読み直すことになる。
+   */
+  private workInfoView(): WorkInfoView {
+    return {
+      ...this.workInfo,
+      addresses: buildAddressListView(this.characters, this.addressScope()),
+    };
+  }
+
+  private addressScope(): AddressScope {
+    return {
+      chapter: this.manuscriptChapter,
+      showAll: this.showAllAddresses,
+    };
+  }
+
+  /**
+   * いま開いている本文の話数を伝える（設計書6.92。作者の依頼、2026-09-13）。
+   *
+   * **本文から資料を開いた経路だけが呼ぶ。** メニューから開いたときは
+   * 話数が無く、これまでどおり全部出る。
+   *
+   * **話が変われば絞りを掛け直す。** 「全部を見る」を押したのは
+   * その話を書いていたときの判断なので、別の話へ移ったら持ち越さない。
+   * 同じ話のあいだは作者の選択を保つ（用語を押すたびに絞り直されると、
+   * 全部を見る操作が効かないように見える）。
+   */
+  setChapterContext(chapter: number | null): void {
+    if (chapter === this.manuscriptChapter) return;
+    this.manuscriptChapter = chapter;
+    this.showAllAddresses = false;
+    // 一覧（作品情報タブ）も新しい話で組み直す。詳細はこの直後の
+    // showRecord が送るので、ここでは送らない
+    this.post({
+      type: "init",
+      groups: this.groups(),
+      workInfo: this.workInfoView(),
+      notice: this.notice(),
+    });
   }
 
   /**
@@ -673,8 +742,8 @@ export class SettingsPanel {
    * 「各話あらすじを生成」が真実の在り処を持っている。ここで書き換えられると、
    * どちらが正しいのか分からなくなる。
    */
-  private async loadWorkInfo(): Promise<WorkInfoView> {
-    const info: WorkInfoView = { blurb: "", catchphrase: "", episodes: [] };
+  private async loadWorkInfo(): Promise<WorkInfoDoc> {
+    const info: WorkInfoDoc = { blurb: "", catchphrase: "", episodes: [] };
 
     try {
       const config = await readWorkConfig(this.work);
@@ -786,6 +855,12 @@ export class SettingsPanel {
           field("exportNote", "資料用の補足", character.exportNote, true),
         ],
         separable: separableAliases(character),
+        // 呼び合い（設計書6.92）。1組も無ければ undefined が返り、節ごと出ない
+        addresses: buildCharacterAddressView(
+          this.characters,
+          id,
+          this.addressScope()
+        ),
         aiNotes: withRenderedNotes(character.aiNotes),
       };
     }
@@ -933,7 +1008,7 @@ export class SettingsPanel {
           this.post({
             type: "init",
             groups: this.groups(),
-            workInfo: this.workInfo,
+            workInfo: this.workInfoView(),
             notice: this.notice(),
           });
           return;
@@ -975,6 +1050,9 @@ export class SettingsPanel {
           return;
         case "relationGraph":
           await this.handleRelationGraph(message.id);
+          return;
+        case "addressScope":
+          this.handleAddressScope(message);
           return;
       }
     } catch (error) {
@@ -1033,6 +1111,28 @@ export class SettingsPanel {
       return;
     }
     this.post({ type: "detail", detail });
+  }
+
+  /**
+   * 呼び合いの絞りを切り替える（設計書6.92）。
+   *
+   * **画面には何も判断させない。** 絞り込みも文言もこちら（`addressPairsView`）
+   * が持ち、画面は受け取ったものを並べるだけにしてある。WebViewのスクリプトは
+   * 単体テストから触れないので、判断をそちらへ置くと確かめる手段が無くなる。
+   *
+   * 開いている1件も一緒に送り直す。一覧だけ切り替わって人物詳細の節が
+   * 前のままだと、同じ画面に別の絞りの結果が並ぶ。
+   */
+  private handleAddressScope(message: AddressScopeMessage): void {
+    this.showAllAddresses = message.all;
+    this.post({
+      type: "addresses",
+      workInfo: this.workInfoView(),
+      detail:
+        message.kind && message.id
+          ? this.detailOf(message.kind, message.id)
+          : undefined,
+    });
   }
 
   /**
@@ -1156,7 +1256,7 @@ export class SettingsPanel {
       type: "saved",
       detail,
       groups: this.groups(),
-      workInfo: this.workInfo,
+      workInfo: this.workInfoView(),
       notice,
     });
   }
@@ -1636,7 +1736,7 @@ export class SettingsPanel {
       // 消したものは開けない。詳細は空にして一覧へ戻す
       detail: undefined,
       groups: this.groups(),
-      workInfo: this.workInfo,
+      workInfo: this.workInfoView(),
       notice: `「${record.name}」を取り下げました。実体は ${path.basename(
         recoveryPath
       )} として回復用の場所に残っています。`,
@@ -2356,6 +2456,21 @@ interface ApplyProposalMessage {
   values: Record<string, string>;
 }
 
+/**
+ * 呼び合いの絞りの切り替え（設計書6.92）。
+ *
+ * 開いている1件を添えるのは、**パネルが選択を覚えていない**ためである。
+ * 覚えさせる形にもできるが、選択の在り処を2つにすると
+ * ずれたときに直す場所が増える（画面が知っているものを渡させる）。
+ */
+interface AddressScopeMessage {
+  type: "addressScope";
+  /** 話数での絞りを外すか */
+  all: boolean;
+  kind?: SettingsKind;
+  id?: string;
+}
+
 interface PlaceMisattributedMessage {
   type: "placeMisattributed";
   /** はじいた記述の位置。中身は拡張機能側の控えから引く */
@@ -2368,6 +2483,7 @@ type PanelMessage =
   | { type: "enrich"; kind: SettingsKind; id: string; notes?: string }
   | ApplyProposalMessage
   | PlaceMisattributedMessage
+  | AddressScopeMessage
   | { type: "select"; kind: SettingsKind; id: string }
   | {
       type: "save";
@@ -2404,12 +2520,26 @@ interface ApproveNoteMessage {
 }
 
 /**
- * 作品全体の資料。人物などのレコードとは違い、読むだけの区画。
+ * 作品全体の資料のうち、`設定/` の文書から読むもの。
+ *
+ * **呼び合いを混ぜない。** あちらの材料は人物レコードで、絞りを
+ * 切り替えるたびに組み直す。文書の読み込みと寿命が違うので分けてある。
  */
-export interface WorkInfoView {
+interface WorkInfoDoc {
   blurb: string;
   catchphrase: string;
   episodes: Array<{ label: string; synopsis: string }>;
+}
+
+/**
+ * 作品全体の資料。人物などのレコードとは違い、読むだけの区画。
+ *
+ * **呼び合いの一覧もここに置く**（設計書6.92）。誰が誰をどう呼ぶかは
+ * 1件のレコードのものではなく作品ぜんたいにかかる資料で、しかも
+ * 読むだけである——作品情報タブの性格とそのまま重なる。
+ */
+export interface WorkInfoView extends WorkInfoDoc {
+  addresses: AddressListView;
 }
 
 type OutgoingMessage =
@@ -2420,6 +2550,18 @@ type OutgoingMessage =
       notice: string;
     }
   | { type: "detail"; detail: DetailView }
+  /**
+   * 呼び合いの絞りを切り替えた結果（設計書6.92）。
+   *
+   * `init` では足りない。あちらは一覧とタブを描き直すだけで詳細に触らず、
+   * 触るようにすると、外の変更を映すたびに開いている1件が作り直される。
+   */
+  | {
+      type: "addresses";
+      workInfo: WorkInfoView;
+      /** 開いている1件。人物以外・未選択なら無い */
+      detail: DetailView | undefined;
+    }
   | {
       type: "focus";
       kind: SettingsKind;

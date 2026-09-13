@@ -906,13 +906,29 @@ export interface ManuscriptEditorDeps {
    * ところであれを使うと、書き始めたばかりの作品でだけ挙動が変わる。
    */
   workOf(filePath: string): WorkEntry | undefined;
-  /** 用語から設定資料を開く。extension.ts の登録と同じ道を通す */
-  openSettings(work: WorkEntry, kind: TermKind, id: string): Promise<void>;
+  /**
+   * 用語から設定資料を開く。extension.ts の登録と同じ道を通す。
+   *
+   * `from` はいま開いている本文。**話数を数え直さずに渡す**（設計書6.92）。
+   * 資料の側で「その話に出る人どうし」だけに絞るのに使う。話数の解釈は
+   * `episodeParser.ts` の1本に寄せてあるので、ここではファイルの場所だけ渡す。
+   */
+  openSettings(
+    work: WorkEntry,
+    kind: TermKind,
+    id: string,
+    from?: { filePath: string }
+  ): Promise<void>;
   /**
    * **開いている**資料パネルへ該当項目を出す（無ければ何もしない）。
    * 右クリックのたびに新しいパネルを開いては、作者の画面を奪ってしまう。
    */
-  previewTerm(work: WorkEntry, kind: TermKind, id: string): Promise<void>;
+  previewTerm(
+    work: WorkEntry,
+    kind: TermKind,
+    id: string,
+    from?: { filePath: string }
+  ): Promise<void>;
   /**
    * 選んだところをAIに相談する。
    *
@@ -1427,7 +1443,9 @@ export class ManuscriptEditorProvider
             );
             return;
           }
-          await this.deps.openSettings(found.work, message.kind, message.id);
+          await this.deps.openSettings(found.work, message.kind, message.id, {
+            filePath: fromUri(document.uri),
+          });
           break;
         }
 
@@ -1438,7 +1456,9 @@ export class ManuscriptEditorProvider
             fromUri(document.uri)
           );
           if (!found) return;
-          await this.deps.previewTerm(found.work, message.kind, message.id);
+          await this.deps.previewTerm(found.work, message.kind, message.id, {
+            filePath: fromUri(document.uri),
+          });
           break;
         }
 

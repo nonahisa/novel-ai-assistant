@@ -283,6 +283,31 @@ button.chip.on {
 }
 .readonly { font-size: 12px; opacity: 0.85; margin-bottom: 6px; }
 .readonly .k { opacity: 0.7; margin-right: 6px; }
+/*
+  呼び合い（設計書6.92）。
+  行が何十と並ぶので、区切りの見出しは本文より控えめにする
+*/
+.address-group { font-size: 11px; opacity: 0.7; margin: 10px 0 4px; }
+.address-line { margin-bottom: 4px; }
+/* 要確認の理由。人物名の前に置いて、何が疑わしいのかを先に読ませる */
+.address-line .issue {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  margin-right: 6px;
+}
+/* 畳んだ要確認の見出し。件数を出したまま畳む（モブの区画と同じ考え方） */
+.address-fold {
+  font-size: 12px;
+  margin: 12px 0 4px;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.85;
+}
+.address-fold:hover { text-decoration: underline; }
 button.action {
   background: var(--vscode-button-background);
   color: var(--vscode-button-foreground);
@@ -573,13 +598,35 @@ button.danger:hover {
     { id: "blurb", name: "作品紹介文" },
     { id: "catchphrase", name: "キャッチコピー" },
     { id: "episodes", name: "各話あらすじ" },
+    /*
+      呼び合い（設計書6.92）。**作品情報に置く。**
+
+      誰が誰をどう呼ぶかは1件のレコードのものではなく作品ぜんたいに
+      かかる資料で、しかも読むだけである。種別タブ（人物・能力…）の
+      並びへ足すと、レコードでないものが一覧に混ざる。
+    */
+    { id: "addresses", name: "呼び合い" },
   ];
+
+  /** 呼び合いの一覧。拡張機能側で組んだものをそのまま並べる */
+  function addressView() {
+    return workInfo.addresses || {
+      summary: "",
+      usable: [],
+      needsCheckLabel: "",
+      needsCheck: [],
+      needsCheckHint: "",
+      emptyNote: "",
+      toggle: { label: "", all: false },
+    };
+  }
 
   function workItemCount() {
     let n = 0;
     if (workInfo.blurb) n++;
     if (workInfo.catchphrase) n++;
     if ((workInfo.episodes || []).length > 0) n++;
+    if (addressView().usable.length > 0) n++;
     return n;
   }
 
@@ -801,6 +848,15 @@ button.danger:hover {
     if (id === "catchphrase") {
       return workInfo.catchphrase || "まだありません";
     }
+    if (id === "addresses") {
+      const view = addressView();
+      // 要確認しか無いときも「まだありません」とは言わない。
+      // 畳んだ中に材料があることに気づけなくなる
+      if (view.usable.length > 0) return view.usable.length + "組";
+      return view.needsCheck.length > 0
+        ? "要確認 " + view.needsCheck.length + "件"
+        : "まだありません";
+    }
     const count = (workInfo.episodes || []).length;
     return count > 0 ? count + "話ぶん" : "まだありません";
   }
@@ -812,6 +868,84 @@ button.danger:hover {
    * 真実の在り処を持っている。ここで書き換えられると、
    * どちらが正しいのか分からなくなる。
    */
+  /**
+   * 呼び合いの1行（設計書6.92）。
+   *
+   * **textContent で入れる。** 人物名は作者が自由に付けられるので
+   * 「<」や「&」が入りうる。innerHTML で入れると、そこだけが画面を壊す
+   * 抜け道になる（ここでHTMLを組む理由も無い）。
+   */
+  function addressRow(line) {
+    const row = document.createElement("div");
+    row.className = "readonly address-line";
+    if (line.issue) {
+      const issue = document.createElement("span");
+      issue.className = "issue";
+      issue.textContent = line.issue;
+      row.appendChild(issue);
+    }
+    row.appendChild(document.createTextNode(line.text));
+    return row;
+  }
+
+  /** 小さな断り書き（絞り込みの断り・要確認の読み方） */
+  function addressNote(text) {
+    const note = document.createElement("div");
+    note.className = "address-group";
+    note.textContent = text;
+    return note;
+  }
+
+  /**
+   * 話での絞りを切り替える札（作者の依頼、2026-09-13）。
+   *
+   * 開いている1件を添えて送る。一覧だけ切り替わって人物詳細の節が
+   * 前のままだと、同じ画面に別の絞りの結果が並ぶ。
+   */
+  function addressToggle(toggle, target) {
+    if (!toggle || !toggle.label) return null;
+    const row = document.createElement("div");
+    row.className = "row";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "action secondary";
+    button.textContent = toggle.label;
+    button.addEventListener("click", function () {
+      const payload = { all: toggle.all };
+      if (target) {
+        payload.kind = target.kind;
+        payload.id = target.id;
+      }
+      post("addressScope", payload);
+    });
+    row.appendChild(button);
+    return row;
+  }
+
+  /**
+   * 要確認は畳んで出す（作者の裁定、2026-09-13）。
+   *
+   * **黙って捨てない。** 実データでは31組のうち18組が要確認で、
+   * 混ぜて並べると3行に2行が意味を成さない。かといって捨てると、
+   * 抽出が壊れていることに気づく機会まで消える。
+   */
+  let addressChecksOpen = false;
+  function addressChecks(view, box) {
+    if (!view.needsCheckLabel) return;
+    const head = document.createElement("div");
+    head.className = "address-fold";
+    head.textContent =
+      (addressChecksOpen ? "▼ " : "▶ ") + view.needsCheckLabel;
+    head.addEventListener("click", function () {
+      addressChecksOpen = !addressChecksOpen;
+      renderDetail();
+    });
+    box.appendChild(head);
+    if (!addressChecksOpen) return;
+    if (view.needsCheckHint) box.appendChild(addressNote(view.needsCheckHint));
+    for (const line of view.needsCheck) box.appendChild(addressRow(line));
+  }
+
   function renderWorkDetail() {
     el.detail.replaceChildren(el.reopen);
 
@@ -830,6 +964,28 @@ button.danger:hover {
 
     const body = document.createElement("div");
     body.className = "work-body";
+
+    if (item.id === "addresses") {
+      const view = addressView();
+      const summary = document.createElement("div");
+      summary.className = "readonly";
+      summary.textContent = view.summary;
+      body.appendChild(summary);
+
+      const toggleRow = addressToggle(view.toggle, null);
+      if (toggleRow) body.appendChild(toggleRow);
+
+      if (view.emptyNote) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = view.emptyNote;
+        body.appendChild(empty);
+      }
+      for (const line of view.usable) body.appendChild(addressRow(line));
+      addressChecks(view, body);
+      el.detail.appendChild(body);
+      return;
+    }
 
     if (item.id === "episodes") {
       const episodes = workInfo.episodes || [];
@@ -932,6 +1088,45 @@ button.danger:hover {
       });
       graphRow.appendChild(graphButton);
       el.detail.appendChild(graphRow);
+    }
+
+    /*
+      ── 呼び合い（設計書6.92、作者の依頼 2026-09-13）
+
+      **編集欄より上に置く。** これは「参考」ではなく、会話を書きながら
+      見るものである。誰が誰をどう呼ぶかを確かめたいのは台詞を打つ手前で、
+      そのたびに10以上の入力欄を越えてスクロールさせない。
+      登場話・一人称（読み取り専用）と相関図の直後——「この人を書くために
+      毎回見るもの」が並ぶ場所の末尾に入れてある。
+
+      **1組も無ければ節ごと出ない**（addresses 自体が来ない）。
+      見出しだけが並ぶと壊れて見える。
+    */
+    if (detail.addresses) {
+      const view = detail.addresses;
+      el.detail.appendChild(heading("呼び合い"));
+      if (view.notice) el.detail.appendChild(addressNote(view.notice));
+      const toggleRow = addressToggle(view.toggle, {
+        kind: detail.kind,
+        id: detail.id,
+      });
+      if (toggleRow) el.detail.appendChild(toggleRow);
+
+      if (view.calls.length > 0) {
+        el.detail.appendChild(addressNote("この人 → 相手"));
+        for (const line of view.calls) el.detail.appendChild(addressRow(line));
+      }
+      if (view.calledBy.length > 0) {
+        el.detail.appendChild(addressNote("相手 → この人"));
+        for (const line of view.calledBy) {
+          el.detail.appendChild(addressRow(line));
+        }
+      }
+      // 要確認はここには並べない。呼ぶ側に何十件も付いていることがあり、
+      // 使える組が押し流される。どこで見られるかだけ書く
+      if (view.needsCheckNote) {
+        el.detail.appendChild(addressNote(view.needsCheckNote));
+      }
     }
 
     // ── 作者による書き換え
@@ -1673,6 +1868,19 @@ button.danger:hover {
         break;
       case "detail":
         detail = message.detail;
+        renderDetail();
+        break;
+      /*
+        呼び合いの絞りを切り替えた結果（設計書6.92）。
+
+        一覧（作品情報）と、開いている1件の節を**一緒に**入れ替える。
+        片方だけだと、同じ画面に別の絞りの結果が並ぶ。
+      */
+      case "addresses":
+        if (message.workInfo) workInfo = message.workInfo;
+        if (message.detail) detail = message.detail;
+        renderTabs();
+        renderList();
         renderDetail();
         break;
       case "focus":
