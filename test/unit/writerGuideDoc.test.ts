@@ -3,7 +3,12 @@ import {
   buildWriterGuide,
   WRITER_GUIDE_TITLE,
 } from "../../src/core/writerGuideDoc";
-import { ADVICE_TYPES } from "../../src/core/advicePolicy";
+import {
+  ADVICE_TYPES,
+  resolveAdviceType,
+  scoreAnswers,
+  type AdviceProfile,
+} from "../../src/core/advicePolicy";
 import {
   buildWriterStyle,
   WRITER_PLAN_TYPES,
@@ -32,6 +37,23 @@ function styleOf(overrides: Partial<Record<string, string>> = {}): WriterStyle {
   if (!style) throw new Error("組み立てられない");
   return style;
 }
+
+/**
+ * 助言方針を組む。**点数ごと渡す**（0.52.1）——紙は3軸の目盛りを出すので、
+ * 名前と説明だけでは足りない。
+ */
+function policyOf(answers: number[]): AdviceProfile {
+  const scores = scoreAnswers(answers);
+  return {
+    scores,
+    baseScores: scores,
+    answers,
+    updatedAt: "2026-09-13T10:00:00.000Z",
+  };
+}
+
+/** 嗜好志向が高く、読者志向が中（＝共感共有型） */
+const TASTE_READER = [1, 2, 1, 0, 1, 1, 2, 1, 2];
 
 function guideFor(style: WriterStyle, hasWork: boolean): string {
   const goal = tutorialGoals(style, hasWork)[0];
@@ -101,16 +123,84 @@ describe("はじめの案内の紙", () => {
     const advice = tutorialAdvice(style, goal.goal);
 
     const without = buildWriterGuide({ style, goal, advice });
-    expect(without).not.toContain("相談のときの言い方");
+    // 答えていないタイプを名乗らせない
+    expect(without).not.toContain("このタイプだと、何が変わりますか");
 
     const withPolicy = buildWriterGuide({
       style,
       goal,
       advice,
-      advicePolicy: { label: "均衡模索型", summary: "方向づけの相談が効きます。" },
+      advicePolicy: policyOf(TASTE_READER),
     });
-    expect(withPolicy).toContain("相談のときの言い方");
-    expect(withPolicy).toContain("均衡模索型");
+    const label = ADVICE_TYPES[resolveAdviceType(scoreAnswers(TASTE_READER))].label;
+    expect(withPolicy).toContain(`## あなたは **${label}**`);
+    expect(withPolicy).toContain("このタイプだと、何が変わりますか");
+  });
+
+  test("**タイプが、いちばん上に来る**（作者の指摘、2026-09-13）", () => {
+    // 「タイプ診断なのに、スタイルが一番上に来ています」。
+    // 名乗っているのはタイプ診断なので、最初に目に入るのは名前である
+    const style = styleOf();
+    const goal = tutorialGoals(style, false)[0];
+    const guide = buildWriterGuide({
+      style,
+      goal,
+      advice: tutorialAdvice(style, goal.goal),
+      advicePolicy: policyOf(TASTE_READER),
+    });
+
+    const type = guide.indexOf("## あなたは");
+    const how = guide.indexOf("## 書き方");
+    expect(type).toBeGreaterThan(0);
+    expect(how).toBeGreaterThan(type);
+  });
+
+  test("**3つの軸を、目盛りで出す**（名前だけでは当たっているか分からない）", () => {
+    const style = styleOf();
+    const goal = tutorialGoals(style, false)[0];
+    const guide = buildWriterGuide({
+      style,
+      goal,
+      advice: tutorialAdvice(style, goal.goal),
+      advicePolicy: policyOf(TASTE_READER),
+    });
+
+    for (const axis of ["読者志向", "自己投影度", "嗜好志向"]) {
+      expect(guide, axis).toContain(axis);
+    }
+    // 目盛りと、両端に何があるか
+    expect(guide).toContain("●");
+    expect(guide).toContain("←→");
+    // **上下に良し悪しを付けない**と、紙自身が断っている
+    expect(guide).toContain("上下に良し悪しはありません");
+  });
+
+  test("**なぜその名前になったかを書く**（主軸と副軸）", () => {
+    const style = styleOf();
+    const goal = tutorialGoals(style, false)[0];
+    const guide = buildWriterGuide({
+      style,
+      goal,
+      advice: tutorialAdvice(style, goal.goal),
+      advicePolicy: policyOf(TASTE_READER),
+    });
+
+    expect(guide).toContain("この名前は、**嗜好志向**（主）と **読者志向**（副）");
+  });
+
+  test("3軸がそろっているときは、どれかを主とは呼ばない", () => {
+    // 全中（均衡模索型）。名前は軸の強弱から来ていない
+    const style = styleOf();
+    const goal = tutorialGoals(style, false)[0];
+    const guide = buildWriterGuide({
+      style,
+      goal,
+      advice: tutorialAdvice(style, goal.goal),
+      advicePolicy: policyOf([1, 1, 1, 1, 1, 1, 1, 1, 1]),
+    });
+
+    expect(guide).toContain("同じ帯にそろっている");
+    expect(guide).not.toContain("（主）");
   });
 
   test("**最後に、ほかのタイプの一覧が載る**（作者の指定、2026-09-13）", () => {
@@ -134,11 +224,12 @@ describe("はじめの案内の紙", () => {
       style,
       goal,
       advice: tutorialAdvice(style, goal.goal),
-      advicePolicy: { label: "均衡模索型", summary: "方向づけの相談が効きます。" },
+      advicePolicy: policyOf(TASTE_READER),
     });
 
+    const label = ADVICE_TYPES[resolveAdviceType(scoreAnswers(TASTE_READER))].label;
     expect(guide).toContain("**即興派****← いまのあなた**");
-    expect(guide).toContain("**均衡模索型****← いまのあなた**");
+    expect(guide).toContain(`**${label}****← いまのあなた**`);
     // 印は1つずつ（ほかのタイプには付かない）
     expect(guide.split("← いまのあなた").length - 1).toBe(2);
   });

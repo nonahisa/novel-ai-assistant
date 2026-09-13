@@ -415,19 +415,45 @@ export function scoreAnswers(answers: readonly number[]): AdviceScores {
  * 3軸すべて低・すべて中は、主軸を選んでも意味がない（差が無いから
  * 選ばれただけの軸を主軸と呼ぶことになる）ので、先に別扱いにする。
  */
-export function resolveAdviceType(scores: AdviceScores): AdviceTypeId {
+/**
+ * 名前を決めた軸（0.52.1）。
+ *
+ * **診断の紙が「なぜその名前になったか」を出すのに要る**——名前だけでは、
+ * 当たっているかを作者が確かめようがない。判定は `resolveAdviceType` と
+ * **同じ計算をここ1か所でする**（写しを作ると、片方だけ直る日が来る）。
+ *
+ * 3軸が同じ帯にあるとき（全低・全中）は、どれか一つを主とは呼ばない。
+ * そのときの名前は「目的模索型」「均衡模索型」で、**軸の強弱から来ていない**。
+ */
+export interface AdviceAxesPick {
+  main?: AdviceAxis;
+  sub?: AdviceAxis;
+}
+
+export function adviceAxesOf(scores: AdviceScores): AdviceAxesPick {
   const levels = AXIS_ORDER.map((axis) => adviceLevel(scores[axis]));
-  if (levels.every((level) => level === "low")) return "seeking_purpose";
-  if (levels.every((level) => level === "mid")) return "balanced";
+  if (levels.every((level) => level === "low")) return {};
+  if (levels.every((level) => level === "mid")) return {};
 
   // (段階, 点数) が最大のものを主軸にする。同点なら AXIS_ORDER の先のもの
   const ranked = [...AXIS_ORDER].sort((a, b) => compareAxis(scores, b, a));
-  const main = ranked[0];
-  // 副軸は「残りのうち段階が中以上」で最大のもの。無ければ「なし」
-  const sub = ranked
-    .slice(1)
-    .find((axis) => adviceLevel(scores[axis]) !== "low");
+  return {
+    main: ranked[0],
+    // 副軸は「残りのうち段階が中以上」で最大のもの。無ければ「なし」
+    sub: ranked
+      .slice(1)
+      .find((axis) => adviceLevel(scores[axis]) !== "low"),
+  };
+}
 
+export function resolveAdviceType(scores: AdviceScores): AdviceTypeId {
+  const { main, sub } = adviceAxesOf(scores);
+  if (!main) {
+    const levels = AXIS_ORDER.map((axis) => adviceLevel(scores[axis]));
+    return levels.every((level) => level === "low")
+      ? "seeking_purpose"
+      : "balanced";
+  }
   return TYPE_TABLE[`${main}:${sub ?? "none"}`];
 }
 

@@ -399,16 +399,16 @@ export function describeWriterDiagnosis(style: WriterStyle): string {
 }
 
 /**
- * 作者ごとの既定から、11タイプの名前と説明を引く。
+ * 作者ごとの既定を、そのまま紙へ渡す。
  *
  * **決めていなければ何も返さない。** 決めていない人に「あなたは◯◯型です」
  * と出すと、答えていないものを見せることになる。
+ *
+ * **点数ごと渡す**（0.52.1）。名前と説明だけに削ると、紙の側で3軸の
+ * 目盛りを出せない——タイプ診断の紙で、いちばん見たいのはそこである。
  */
 function describeAdviceDefault(
   deps: WriterDiagnosisDeps
-): { label: string; summary: string } | undefined {
-  const profile = deps.adviceDefault.get();
-  if (!profile) return undefined;
-  const info = ADVICE_TYPES[resolveAdviceType(profile.scores)];
-  return { label: info.label, summary: info.summary };
+): AdviceProfile | undefined {
+  return deps.adviceDefault.get();
 }
