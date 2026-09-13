@@ -223,6 +223,25 @@ export function roundCharsPerToken(value: number): number {
 }
 
 /**
+ * すでに覚えている実測と、新しく採れた値から、**覚え直す値**を決める。
+ *
+ * **平均しない。これまでの最小値を覚える**（作者の裁定）。内容によって
+ * 変わる値なので——指示やJSONが多い回は大きく、地の文だけの回は小さい
+ * ——平均を採ると、本文を多く送る回（まさに見積りが要る回）で甘くなる。
+ * 最小値なら単純で、外れ値に強く、必ず安全側へ倒れる。
+ *
+ * **ここに1つだけ置く。** 書き手は2つある（普段の呼び出しの関所
+ * `ai/meteredProvider.ts` と、読める長さの測定 `features/measureContext.ts`）。
+ * 片方に書いて片方が写すと、「最小値を覚える」という約束が静かに割れる。
+ */
+export function mergeCharsPerToken(
+  previous: number | undefined,
+  sample: number
+): number {
+  return previous === undefined ? sample : Math.min(previous, sample);
+}
+
+/**
  * 「モデルの上限の◯%」と「固定の頭打ち◯字」の小さいほうを取る
  * （設計書6.77の第1段）。
  *

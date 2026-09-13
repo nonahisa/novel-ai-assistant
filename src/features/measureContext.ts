@@ -16,18 +16,24 @@ import { resolveMaxOutputTokens } from "../ai/outputLimit";
 import { contextSizeForPrompt, TOKENS_PER_CHAR } from "../core/chunker";
 import {
   buildProbePrompt,
+  charsPerTokenFromProbe,
   describeProbeResult,
   judgeProbeAnswer,
+  judgeProbeGrowth,
   makeProbeWords,
   nextProbeSize,
   probeCharsToTokens,
   probeOverheadChars,
+  readProbeTokens,
   startProbeState,
   worstCaseProbeChars,
   MIN_PROBE_CHARS,
+  type ProbeMeasureMethod,
   type ProbeSides,
   type ProbeState,
+  type ProbeTokenReading,
 } from "../core/contextProbe";
+import { mergeCharsPerToken } from "../core/sizeBudget";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import {
   buildOutputProbePrompt,
@@ -145,8 +151,17 @@ const CONTEXT_TUNABLE_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
   "openai",
 ]);
 
-/** 1回ぶんの結果。ログの1行になる */
+/**
+ * 1回ぶんの結果。ログの1行になる。
+ *
+ * **前の4つは合言葉で測ったときの言葉**で、入力トークン数で測れたときは
+ * 「伸びた／伸びない」になる（作者の裁定、2026-09-13）。言葉を分けてある
+ * のは、ログを後から読む作者が**どちらで測った回か**を一目で分けられる
+ * ようにするためである。
+ */
 type RoundOutcome =
+  | "伸びた"
+  | "伸びない"
   | "両方"
   | "先頭のみ"
   | "末尾のみ"
@@ -473,7 +488,30 @@ async function runMeasurement(
   );
 
   const sides: ProbeSides = { headDropped: false, tailDropped: false };
-  /** 両方返った最大の字数 */
+  /**
+   * 採用した入力トークン数の読み取り。**長さの判定はここで行う**
+   * （作者の裁定、2026-09-13。設計書6.27.11）。
+   */
+  const readings: ProbeTokenReading[] = [];
+  /**
+   * そのうち「全部届いた」と判定できた回。
+   *
+   * **字/トークンの傾きは、ここからしか採らない。** 切られた回を混ぜると
+   * 傾きが寝て、実際より大きい（＝危ない側の）換算が出る。
+   */
+  const fittingReadings: ProbeTokenReading[] = [];
+  /** 入力トークン数で判定できた回数 */
+  let tokenRounds = 0;
+  /** 入力トークン数を使えず、合言葉へ落ちた回数 */
+  let wordRounds = 0;
+  /**
+   * 本文は届いていたのに合言葉を書き写せなかった、いちばん長い字数。
+   *
+   * **参考として結果に添えるだけ。** ここで長さを縮めない——縮めたら、
+   * 合言葉で測っていた頃と同じ間違いをくり返すことになる。
+   */
+  let wordCopyFailedChars: number | undefined;
+  /** 全部届いたと判定できた最大の字数 */
   let low = 0;
   let rounds = 0;
   /** エラーを「入らなかった」と数えた回数。作者へも件数で伝える */
@@ -684,13 +722,61 @@ async function runMeasurement(
             // **返ってきた＝モデルは載った。** 合言葉を写せたかとは別である
             everLoaded = true;
             const judged = judgeProbeAnswer(response.text, headWord, tailWord);
-            outcome = judged.head
-              ? judged.tail
-                ? "両方"
-                : "先頭のみ"
-              : judged.tail
-                ? "末尾のみ"
-                : "無し";
+
+            /*
+              **長さの判定は、入力トークン数の伸びで行う**（作者の裁定、
+              2026-09-13。設計書6.27.11）。
+
+              合言葉は「言うことを聞くか」しか測れず、実機では長さと
+              関係なく気まぐれに落ちた。入力トークン数なら、切り捨ては
+              数字にそのまま出る——**モデルの協力が要らない。**
+
+              トークン数を返さないAI・設定はあるので、そのときだけ
+              これまでどおり合言葉へ落とす（下の `else`）。
+            */
+            const promptChars =
+              prompt.systemPrompt.length + prompt.userPrompt.length;
+            const read = readProbeTokens({
+              promptChars,
+              usage: response.usage,
+              readings,
+            });
+
+            if (read.kind === "採用") {
+              tokenRounds += 1;
+              const growth = judgeProbeGrowth(read.reading, readings);
+              readings.push(read.reading);
+              if (growth.grew) fittingReadings.push(read.reading);
+              outcome = growth.grew ? "伸びた" : "伸びない";
+              logStep(
+                `読める長さの測定：${size}字 → 入力トークン ` +
+                  `${read.reading.inputTokens}（${growth.note}）`
+              );
+              // **合言葉は参考にとどめる。** 本文が届いていたことは
+              // トークン数で分かっているので、写せなかったからといって
+              // 「読めなかった」とは数えない
+              if (growth.grew && !(judged.head && judged.tail)) {
+                wordCopyFailedChars = Math.max(wordCopyFailedChars ?? 0, size);
+                logStep(
+                  `読める長さの測定：${size}字 → 本文は届いていましたが、` +
+                    "合言葉は書き写せませんでした（長さの判定には使いません）"
+                );
+              }
+            } else {
+              wordRounds += 1;
+              logStep(
+                `読める長さの測定：${size}字 → 入力トークン数を使えません` +
+                  `（${read.reason}）。合言葉で判定します`
+              );
+              outcome = judged.head
+                ? judged.tail
+                  ? "両方"
+                  : "先頭のみ"
+                : judged.tail
+                  ? "末尾のみ"
+                  : "無し";
+            }
+
             // 応答が上限で切れると、合言葉が答えの中から落ちる。
             // 「読めていない」と取り違えないよう、記録に残す
             if (response.truncated) {
@@ -818,16 +904,20 @@ async function runMeasurement(
         logStep(`読める長さの測定：${size}字 → ${outcome}（${seconds}秒）`);
 
         // 片方だけ返った回は、どちら側が切られるかの証拠になる。
-        // **1回でも出れば記録する**（毎回出るとは限らない）
+        // **1回でも出れば記録する**（毎回出るとは限らない）。
+        //
+        // **合言葉で測った回にしか立たない。** 入力トークン数で測った回の
+        // 「写せなかった」は切り捨ての証拠ではないので、ここへ混ぜると
+        // 切られてもいない側を「切り落とされます」と言うことになる
         if (outcome === "先頭のみ") sides.tailDropped = true;
         if (outcome === "末尾のみ") sides.headDropped = true;
 
-        const bothReturned = outcome === "両方";
-        if (bothReturned) {
+        const fitted = outcome === "伸びた" || outcome === "両方";
+        if (fitted) {
           low = Math.max(low, size);
           longestResponseSeconds = Math.max(longestResponseSeconds, seconds);
         }
-        state = nextProbeSize(round, bothReturned);
+        state = nextProbeSize(round, fitted);
       }
     }
   );
@@ -852,11 +942,43 @@ async function runMeasurement(
     return;
   }
 
+  /*
+    **どちらで測ったかを決める**（作者の依頼、2026-09-13）。
+
+    1回でも合言葉へ落ちたなら「合言葉で測った」と名乗る。**混ざった
+    測定を「トークンで測った」と言い切らない**——合言葉で判定した回が
+    `low` や `high` を動かしていれば、その結果は気まぐれに落ちうる値を
+    含んでいる。強いほうへ寄せて名乗ると、台帳の印が嘘になる。
+  */
+  const measuredBy: ProbeMeasureMethod =
+    tokenRounds > 0 && wordRounds === 0 ? "tokens" : "words";
+
+  /*
+    **同じ測定から、実測の字/トークンも採る**（設計書6.77。作者の依頼、
+    2026-09-13）。伸びの傾き＝送った字数 ÷ 増えた入力トークン数が、
+    そのモデルの換算そのものである。**1回の測定で2つ取れる。**
+
+    書き先は普段の呼び出しと同じ欄（`charsPerToken`）で、**写しは作らない。**
+    最小値を覚える約束（`mergeCharsPerToken`）もそのまま守る。
+  */
+  const ratioSummary = await saveMeasuredCharsPerToken(
+    resolved.provider.id,
+    resolved.model,
+    fittingReadings
+  );
+
   // **数え方を隠さない。** エラーを「入らない」と読み替えた回があるなら、
   // 何回そうしたかを結果に添える（黙って読み替えると、作者は
   // 「全部きれいに測れた」と受け取る）
   const inputSummary =
-    describeProbeResult({ low, sides, ceilingChars }) +
+    describeProbeResult({
+      low,
+      sides,
+      ceilingChars,
+      measuredBy,
+      wordCopyFailedChars,
+    }) +
+    ratioSummary +
     (longestResponseSeconds > 0
       ? `いちばん時間がかかった回は ${longestResponseSeconds} 秒でした。`
       : "") +
@@ -922,6 +1044,9 @@ async function runMeasurement(
     ceilingChars,
     cancelled,
     longestResponseSeconds,
+    // **何で測ったかを台帳へ残す**（作者の依頼、2026-09-13）。合言葉で
+    // 測った値は気まぐれに落ちうるので、一覧でそれと分かるようにする
+    measuredBy,
   });
   // 反映したなら、戻す相手がもう無い（見立てた秒数で上書きされている）。
   // 反映しなかったときは後始末を残したままにして、外側の `finally` に任せる
@@ -1293,6 +1418,65 @@ async function measureOutputLimit(
 }
 
 /**
+ * 測定から採れた**実測の字/トークン**を台帳へ残す（設計書6.77）。
+ *
+ * **普段の呼び出しの関所（`ai/meteredProvider.ts`）とまったく同じ扱い**に
+ * する——確認を訊かず自動で保存し、最小値を覚え、件数を1つ増やす。
+ * 欄も同じ `charsPerToken` で、**写しは作らない。**
+ *
+ * 確認を訊かないのは、これが `contextWindow` や `timeoutSeconds` のような
+ * 「押したときだけ書く」設定ではないからである（普段の呼び出しからも
+ * 勝手に入る参考値で、そちらと食い違わせる理由が無い）。
+ *
+ * **途中で中止したときも採ってよい。** 「書ける量」の実測（`low`）は探索の
+ * 答えなので、打ち切ると意味の無い値になるが、こちらは**1回ごとの応答から
+ * 直に採れる**——探索が最後まで行ったかどうかと関係が無い。普段の呼び出しの
+ * 関所が毎回採っているのと、同じ性質の値である。
+ *
+ * **書けなくても測定は落とさない。** ただしエラーの本文は捨てない
+ * （CLAUDE.md 規則5。`raiseTimeout` と同じ方針）。
+ *
+ * @param fittingReadings 「全部届いた」と判定できた回だけ
+ * @returns 結果に添える一文。採れなかった・書けなかったときは空文字
+ */
+async function saveMeasuredCharsPerToken(
+  providerId: ProviderId,
+  model: string,
+  fittingReadings: readonly ProbeTokenReading[]
+): Promise<string> {
+  const sample = charsPerTokenFromProbe(fittingReadings);
+  if (sample === undefined) return "";
+
+  const current = modelTuning(providerId, model);
+  const next = mergeCharsPerToken(current?.charsPerToken, sample);
+  const samples = (current?.charsPerTokenSamples ?? 0) + 1;
+  try {
+    await saveModelTuning(providerId, model, {
+      charsPerToken: next,
+      charsPerTokenSamples: samples,
+    });
+  } catch (error) {
+    logStep(
+      "読める長さの測定：字/トークンを台帳へ保存できませんでした" +
+        `（${error instanceof Error ? error.message : String(error)}）。`
+    );
+    return "";
+  }
+
+  logStep(
+    `読める長さの測定：字/トークンの実測 ${sample} を採りました` +
+      `（台帳は ${next}／${samples}回ぶん）。`
+  );
+  // **採った値と、覚えた値の両方を出す。** 最小値を覚える決まりなので、
+  // 今回の実測より小さい値が台帳に残ることがある——数字が食い違って
+  // 見えるところは、必ず理由ごと見せる
+  return next === sample
+    ? `この測定から、字/トークンの実測を ${sample} として覚えました。`
+    : `この測定の字/トークンは ${sample} でしたが、これまでの最小値 ` +
+        `${next} のほうを覚えています。`;
+}
+
+/**
  * 結果に添える「どの `num_ctx` で測ったか」の一文。
  *
  * **同じモデルでも確保量が違えば結果は変わる。** これが無いと、作者は
@@ -1418,6 +1602,8 @@ async function offerToSave(input: {
   ceilingChars: number;
   cancelled: boolean;
   longestResponseSeconds: number;
+  /** 何で測ったか。**合言葉で測った値には印を残す**（作者の依頼、2026-09-13） */
+  measuredBy: ProbeMeasureMethod;
 }): Promise<boolean> {
   const prefix = input.cancelled ? "（途中で中止しました）" : "";
 
@@ -1461,6 +1647,10 @@ async function offerToSave(input: {
     // **天井まで通ったときだけ印を残す。** 付けないときは項目ごと
     // 持たない（無い台帳＝これまでどおり、を壊さない）
     ...(input.low >= input.ceilingChars ? { contextHitCeiling: true } : {}),
+    // **測り方は、どちらでも書く。** 天井の印と違って「印が無い＝強い
+    // ほう」ではない——古い台帳（この欄が入る前）と、今回トークンで
+    // 測った値を、一覧が取り違えないようにする
+    contextMeasuredBy: input.measuredBy,
     measuredAt: new Date().toISOString(),
   };
   await saveModelTuning(input.providerId, input.model, tuning);

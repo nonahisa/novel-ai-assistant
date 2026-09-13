@@ -1,5 +1,9 @@
 import * as vscode from "vscode";
 import { logLine } from "./logger";
+// **型だけを借りる。** 実体は引き込まない（`import type` は消える）ので、
+// 台帳が測定の仕組みを抱え込むことにはならない。それでも写しは作らない
+// ——「tokens か words か」の定義は `core/contextProbe.ts` の1つだけ
+import type { ProbeMeasureMethod } from "./contextProbe";
 
 /**
  * AIチューニング——**モデルごと**の上限と待ち時間の台帳（設計書6.49）。
@@ -35,6 +39,9 @@ export type SpeedSource = "tuning" | "call" | "estimated";
 /** 一覧・保存の両方が同じ値だけを扱うための一覧（読み込みの検査に使う） */
 const SPEED_SOURCES: readonly SpeedSource[] = ["tuning", "call", "estimated"];
 
+/** 読める長さの測り方。読み込みの検査に使う（`SPEED_SOURCES` と同じ役目） */
+const MEASURE_METHODS: readonly ProbeMeasureMethod[] = ["tokens", "words"];
+
 /** 1モデルぶんの調整値。**どれも省略できる**（測れたものだけ入る） */
 export interface ModelTuning {
   /** 実効のコンテキスト長（トークン）。測って分かった値 */
@@ -64,6 +71,20 @@ export interface ModelTuning {
    * 同じ扱いのままにする（読み側の互換。`outputMeasureTimedOut` と同じ）。
    */
   readonly contextHitCeiling?: boolean;
+  /**
+   * 読める長さを**何で測ったか**（作者の依頼、2026-09-13）。
+   *
+   * - `tokens`……AIが申告した**入力トークン数の伸び**。どこまで届いたかを
+   *   直に見ているので、モデルの協力が要らない
+   * - `words`……**合言葉**。トークン数を返さないAI・設定のための道で、
+   *   実機では**長さと関係なく気まぐれに落ちた**（2,750字で通り4,000字で
+   *   落ち、8,000字で通り30,000字で落ちた）。`contextHitCeiling` と
+   *   同じく、そういう値だと分かるように印を残す
+   *
+   * **無い台帳は従来どおり**——印が付く前に測った値は、これまでと同じ
+   * 扱いのままにする（読み側の互換。`contextHitCeiling` と同じ）。
+   */
+  readonly contextMeasuredBy?: ProbeMeasureMethod;
   /**
    * 1回の応答で書けた、実測の出力トークン数（設計書6.65.14の1）。
    *
@@ -256,6 +277,20 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
     // 使い道が無いうえ、false を書き戻すと設定に意味の無い欄が並ぶ
     const outputMeasureTimedOut =
       entry.outputMeasureTimedOut === true ? true : undefined;
+    /*
+      **0.58.0 では、書いているのに読んでいなかった。**
+
+      `features/measureContext.ts` の `offerToSave` は天井の印を書いて
+      いたのに、ここで読み落としていたため、一覧（`core/tuningStats.ts`）
+      には一度も出なかった。書き手と読み手が揃って初めて印になる。
+    */
+    const contextHitCeiling =
+      entry.contextHitCeiling === true ? true : undefined;
+    // **知らない測り方は読まない**（`speedSource` と同じ理由）。一覧は
+    // 決まった2つしか言葉へ直せないので、読むと生の値が表に出る
+    const contextMeasuredBy = MEASURE_METHODS.find(
+      (method) => method === entry.contextMeasuredBy
+    );
     const measuredAt = nonEmptyText(entry.measuredAt);
 
     const tuning: ModelTuning = {
@@ -271,6 +306,8 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
       ...(charsPerToken !== undefined ? { charsPerToken } : {}),
       ...(charsPerTokenSamples !== undefined ? { charsPerTokenSamples } : {}),
       ...(outputMeasureTimedOut !== undefined ? { outputMeasureTimedOut } : {}),
+      ...(contextHitCeiling !== undefined ? { contextHitCeiling } : {}),
+      ...(contextMeasuredBy !== undefined ? { contextMeasuredBy } : {}),
       ...(measuredAt !== undefined ? { measuredAt } : {}),
     };
     // 何も読めなかった項目は、持っていても引く値が無い

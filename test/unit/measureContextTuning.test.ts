@@ -46,8 +46,8 @@ vi.mock("../../src/ai/registry", () => ({
           }
           // **合言葉をそのまま返す。** 判定（`judgeProbeAnswer`）を通したいので、
           // 送られた指示から読み取って書き写す——実際のAIと同じ振る舞いにする
-          const head = /最初の合言葉は『(.+?)』/.exec(params.userPrompt)?.[1] ?? "";
-          const tail = /最後の合言葉は『(.+?)』/.exec(params.userPrompt)?.[1] ?? "";
+          const head = /ひとつ目の合言葉は『(.+?)』/.exec(params.userPrompt)?.[1] ?? "";
+          const tail = /ふたつ目の合言葉は『(.+?)』/.exec(params.userPrompt)?.[1] ?? "";
           return {
             text: `${head} ${tail}`,
             usage: { inputTokens: 0, outputTokens: 0 },

@@ -40,7 +40,13 @@ import {
 //      と言われた。判断を求められたら見立てだけを返させる。
 //      ②同じ返答の中で、reply は「明確に描かれています」なのに reloadRecord の
 //      留意点は「不十分に描写されている」と正反対だった。結論と食い違わせない
-export const WORK_CHAT_VERSION = "3.8";
+// 3.9: 創作の相談では、末尾の操作の目次（2,293字）と【この拡張機能の使い方を
+//      聞かれたとき】の節（506字）を渡さない（作者の指定、2026-09-13
+//      「不要な記事の内容まで一括で乗っていそうな気配を感じています」）。
+//      話題の見分けは `core/chatTopic.ts`。目次を渡さない回は、代わりに
+//      「操作のことでしたら、もう一度そう言ってお尋ねください」と聞き返させる
+//      （`features/featureGuide.ts` の NO_INDEX_NOTICE）
+export const WORK_CHAT_VERSION = "3.9";
 
 /**
  * 起動できる機能の一覧。**実装（chatEdit.ts）から作る。**
@@ -49,7 +55,13 @@ export const WORK_CHAT_VERSION = "3.8";
  */
 const RUNNABLE_LIST = runnableFeatureList();
 
-export const WORK_CHAT_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
+/**
+ * システムの指示の前半（【作業を頼まれたとき】まで）。
+ *
+ * **丸ごと1つの定数にしない**（2026-09-13）。使い方の節だけを、渡す回と
+ * 渡さない回で出し分けるためである（`buildWorkChatSystemPrompt`）。
+ */
+const SYSTEM_PROMPT_HEAD = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 作者が今開いている画面（本文・プロット・設定資料など）について相談を受けます。
 
 【絶対に守る原則】
@@ -159,9 +171,21 @@ ${RUNNABLE_LIST}
 - 手順が複数あるとき（例：抽出してから資料集を出力）は、**最初の1つだけ**を run に入れ、
   続きは終わってから改めて勧めること
 - とくに誤字脱字は、会話で「ここが誤字では」と言っても網羅性も適用の導線もありません
-- 頼まれていないのに run を付けないこと
+- 頼まれていないのに run を付けないこと`;
 
-【この拡張機能の使い方を聞かれたとき】
+/**
+ * 使い方を聞かれたときの答え方。**目次を渡した回にだけ足す。**
+ *
+ * この節はまるごと「末尾に渡した目次と説明の使い方」の説明である。
+ * 目次を渡さない回に残すと**嘘になる**——「目次に無い機能は存在しません」と
+ * 書いてあるのに目次が無い状態は、「何も存在しない」と読まれかねない。
+ * 創作の相談では目次ごと外す（`core/chatTopic.ts`、設計書6.27.9）。
+ *
+ * 外した回には、代わりに末尾の資料側へ聞き返しの断りが入る
+ * （`features/featureGuide.ts` の `NO_INDEX_NOTICE`）。**切り替える条件は
+ * 1つにする**——2つに割れると、片方だけ直る日が来る。
+ */
+const FEATURE_GUIDE_SECTION = `【この拡張機能の使い方を聞かれたとき】
 末尾に**操作の目次**と、**質問に関係しそうな説明**を渡してあります。
 「どうやるの」「そんな機能ある？」と聞かれたら、**そこに書いてあることだけを使って**
 答えてください。
@@ -175,9 +199,10 @@ ${RUNNABLE_LIST}
   「詳細メニューでその操作にマウスを載せると説明が出ます」
   「ヘルプ→使い方（マニュアル）に全部の説明があります」と案内してください
 - AIを使う操作は、料金がかかることを添えること
-- 作品の内容について聞かれているときは、この目次に触れないこと
+- 作品の内容について聞かれているときは、この目次に触れないこと`;
 
-【本文の場所を指すとき】
+/** システムの指示の後半（【本文の場所を指すとき】以降） */
+const SYSTEM_PROMPT_TAIL = `【本文の場所を指すとき】
 「ここが気になる」「この場面が」のように**特定の箇所を指して話すときは、locate を付けてください。**
 作者はボタンを押すだけで、その箇所を開いて光らせることができます。
 - text には、**本文にそのまま出てくる文字列**を写してください（言い換えない）。
@@ -212,6 +237,31 @@ ${RUNNABLE_LIST}
 {"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "locate": {"path": "...", "text": "...", "label": "..."}, "reloadRecord": {"kind": "character", "name": "${EXAMPLE_PERSON.fullName}", "notes": "他の登場人物『${EXAMPLE_OTHER.fullName}』の情報が混入しています。"}, "profileSignals": null}
 
 **profileSignals は、末尾に説明があるときだけ使ってください。** 説明が無ければ必ず null にしてください。`;
+
+/**
+ * システムの指示を組み立てる。
+ *
+ * **目次を渡さない回では、使い方の節を外す**（2026-09-13）。作者の指摘
+ * 「不要な記事の内容まで一括で乗っていそうな気配を感じています」に対する
+ * 節約の後半である（前半は目次そのものを外すこと）。外れるのはこの1節だけで、
+ * 出力の欄（edit・run・reloadRecord）の歯止めになっている節は必ず残す。
+ *
+ * 目次を渡す回では、これまでと**1文字も変わらない**（`workChat.test.ts`／
+ * `chatTopic.test.ts` が字数で見張る）。
+ */
+export function buildWorkChatSystemPrompt(options?: {
+  /** 末尾に操作の目次を渡す回か。既定は渡す */
+  featureIndex?: boolean;
+}): string {
+  const sections = [SYSTEM_PROMPT_HEAD];
+  if (options?.featureIndex !== false) sections.push(FEATURE_GUIDE_SECTION);
+  sections.push(SYSTEM_PROMPT_TAIL);
+  // 節の区切りは空行1つ。元の1つながりの文と同じ形になる
+  return sections.join("\n\n");
+}
+
+/** これまでどおりの、すべての節が入ったシステムの指示 */
+export const WORK_CHAT_SYSTEM_PROMPT = buildWorkChatSystemPrompt();
 
 export interface WorkChatTurn {
   role: "author" | "assistant";

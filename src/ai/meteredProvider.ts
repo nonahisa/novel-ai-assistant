@@ -21,6 +21,7 @@ import { outputTokensPerSecond } from "../core/tuningStats";
 import {
   MIN_CHARS_PER_TOKEN_SAMPLES,
   TOKENS_PER_CHAR,
+  mergeCharsPerToken,
   roundCharsPerToken,
 } from "../core/sizeBudget";
 
@@ -483,17 +484,15 @@ export class MeteredProvider implements AIProvider {
     if (!Number.isFinite(sample) || sample <= 0) return;
 
     /*
-      **平均しない。これまでの最小値を覚える**（作者の裁定）。
-
-      内容によって変わる値である——指示やJSONが多い回は字/トークンが
-      大きく出て、日本語の地の文だけの回は小さい。本文を多く送る回ほど
-      小さい側になるので、平均を使うと**本文の見積りがいちばん甘くなる。**
-      最小値なら単純で、外れ値に強く、必ず安全側へ倒れる。
+      **平均しない。これまでの最小値を覚える**（作者の裁定）。理由と式は
+      `core/sizeBudget.ts` の `mergeCharsPerToken` にまとめてある——
+      読める長さの測定（`features/measureContext.ts`）も同じ欄へ書くので、
+      約束は1か所にしか置かない。
     */
     const current = modelTuning(this.inner.id, params.model);
     const previous = current?.charsPerToken;
     const samples = current?.charsPerTokenSamples ?? 0;
-    const next = previous === undefined ? sample : Math.min(previous, sample);
+    const next = mergeCharsPerToken(previous, sample);
 
     /*
       **書き込みを抑える**（速度と同じ理由。台帳はVS Codeの設定ファイル
