@@ -402,7 +402,7 @@ describe("日時の見せ方", () => {
 
 describe("モデル選択の説明", () => {
   test("速度が分かっていれば添える", () => {
-    expect(modelPickDetail(["tools"], 12.3)).toBe(
+    expect(modelPickDetail(["tools"], { outputTokensPerSecond: 12.3 })).toBe(
       "対応: tools ／ 実測 12.3 トークン/秒"
     );
   });
@@ -410,9 +410,83 @@ describe("モデル選択の説明", () => {
   test("速度が無ければ、これまでどおり", () => {
     expect(modelPickDetail(["tools"], undefined)).toBe("対応: tools");
     expect(modelPickDetail([], undefined)).toBeUndefined();
+    expect(modelPickDetail([], {})).toBeUndefined();
   });
 
   test("対応が無くても、速度だけは見せる", () => {
-    expect(modelPickDetail([], 12.3)).toBe("実測 12.3 トークン/秒");
+    expect(modelPickDetail([], { outputTokensPerSecond: 12.3 })).toBe(
+      "実測 12.3 トークン/秒"
+    );
+  });
+
+  /*
+    **読める長さと書ける長さを、選ぶ場にも出す**（作者の依頼、2026-09-13
+    「モデルの一覧ですが、書ける文字数追加もやることリストに入れておいて
+    ください」）。
+
+    表と違って、ここは1行しかない。**断りは「以上」の二文字へ畳む**——
+    理由まで書くと、対応している機能も速さも押し出されて読めなくなる。
+    畳んでも「弱い数字だ」と分かることは落とさない。
+  */
+  test("**読める長さを出す**", () => {
+    expect(modelPickDetail([], { measuredChars: 50209 })).toBe(
+      "読める 50,209字"
+    );
+  });
+
+  test("**天井で止まった値には「以上」を付ける**", () => {
+    expect(
+      modelPickDetail([], { measuredChars: 50209, contextHitCeiling: true })
+    ).toBe("読める 50,209字以上");
+  });
+
+  test("**書ける長さは、実測の換算があれば字で出す**", () => {
+    expect(
+      modelPickDetail([], { measuredOutputTokens: 5235, charsPerToken: 1.511 })
+    ).toBe("書ける 約7,910字");
+  });
+
+  test("換算が無ければ、トークンのまま出す（当て推量で割らない）", () => {
+    expect(modelPickDetail([], { measuredOutputTokens: 2865 })).toBe(
+      "書ける 2,865トークン"
+    );
+  });
+
+  test("時間切れで打ち切った測定にも「以上」を付ける", () => {
+    expect(
+      modelPickDetail([], {
+        measuredOutputTokens: 4290,
+        charsPerToken: 1.383,
+        outputMeasureTimedOut: true,
+      })
+    ).toBe("書ける 約5,933字以上");
+  });
+
+  test("壊れた換算では、字を出さない", () => {
+    for (const ratio of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(
+        modelPickDetail([], {
+          measuredOutputTokens: 1000,
+          charsPerToken: ratio,
+        }),
+        String(ratio)
+      ).toBe("書ける 1,000トークン");
+    }
+  });
+
+  test("**全部そろうと、この並びになる**", () => {
+    expect(
+      modelPickDetail(["completion", "tools"], {
+        outputTokensPerSecond: 11.4,
+        measuredChars: 50209,
+        contextHitCeiling: true,
+        measuredOutputTokens: 2865,
+        charsPerToken: 1.234,
+        outputMeasureTimedOut: true,
+      })
+    ).toBe(
+      "対応: completion, tools ／ 実測 11.4 トークン/秒 ／ " +
+        "読める 50,209字以上 ／ 書ける 約3,535字以上"
+    );
   });
 });

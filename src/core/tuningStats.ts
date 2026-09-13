@@ -333,17 +333,64 @@ export function formatMeasuredAt(iso: string | undefined): string {
  * 対応している機能より「自分の機械でどれだけ速いか」のほうが大きい。
  * 測っていなければ、これまでどおりの一文だけにする——測っていないことを
  * わざわざ書くと、選ぶ画面が注意書きで埋まる。
+ *
+ * **読める長さと書ける長さも、ここへ出す**（作者の依頼、2026-09-13）。
+ * この2つは一覧（`buildTuningStatsMarkdown`）にしか無かったが、モデルを
+ * 選ぶのはこの画面である。**選んだあとで一覧を開き直して確かめる**のは、
+ * 手順が1つ多い。台帳に入っている値だけを出すので、測っていないモデルの
+ * 行はこれまでと変わらない。
  */
 export function modelPickDetail(
   capabilities: readonly string[],
-  tokensPerSecond: number | undefined
+  tuning: ModelTuning | undefined
 ): string | undefined {
   const parts: string[] = [];
   if (capabilities.length > 0) parts.push(`対応: ${capabilities.join(", ")}`);
-  if (tokensPerSecond !== undefined) {
-    parts.push(`実測 ${tokensPerSecond.toFixed(1)} トークン/秒`);
+  if (tuning?.outputTokensPerSecond !== undefined) {
+    parts.push(`実測 ${tuning.outputTokensPerSecond.toFixed(1)} トークン/秒`);
   }
+  const read = pickReadLength(tuning);
+  if (read) parts.push(read);
+  const write = pickWriteLength(tuning);
+  if (write) parts.push(write);
   return parts.length > 0 ? parts.join(" ／ ") : undefined;
+}
+
+/**
+ * 選ぶ場に出す「読める長さ」（作者の依頼、2026-09-13
+ * 「モデルの一覧ですが、書ける文字数追加もやることリストに入れておいて
+ * ください」）。
+ *
+ * **一覧の断りは、ここでは「以上」の二文字に畳む。** 表（`readCell`）は
+ * 「これ以上は試していません」と書ける広さがあるが、ここは選ぶ画面の
+ * 1行である。理由まで書くと、対応している機能も速さも押し出されて
+ * 読めなくなる。**弱い数字だと分かることだけは落とさない。**
+ */
+function pickReadLength(tuning: ModelTuning | undefined): string | undefined {
+  const chars = tuning?.measuredChars;
+  if (chars === undefined) return undefined;
+  const suffix = tuning?.contextHitCeiling ? "字以上" : "字";
+  return `読める ${chars.toLocaleString("ja-JP")}${suffix}`;
+}
+
+/**
+ * 選ぶ場に出す「書ける長さ」。
+ *
+ * **字で出せるのは、そのモデルの換算を実測しているときだけ**（`outputChars`
+ * と同じ約束）。無ければトークンのまま出す——当て推量で割った字数を
+ * 見せるくらいなら、単位が揃っていないほうがましである。
+ *
+ * 時間切れで打ち切った測定は、その先まで書けたかもしれない。読める長さの
+ * 天井と同じく「以上」を添える。
+ */
+function pickWriteLength(tuning: ModelTuning | undefined): string | undefined {
+  const tokens = tuning?.measuredOutputTokens;
+  if (tokens === undefined || tuning === undefined) return undefined;
+  const suffix = tuning.outputMeasureTimedOut ? "以上" : "";
+  const chars = outputChars(tuning);
+  return chars === undefined
+    ? `書ける ${tokens.toLocaleString("ja-JP")}トークン${suffix}`
+    : `書ける 約${chars.toLocaleString("ja-JP")}字${suffix}`;
 }
 
 /** 表の中で縦棒が区切りに化けないようにする（`features/diagnoseWeb.ts` と同じ手） */

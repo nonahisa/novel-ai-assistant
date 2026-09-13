@@ -496,7 +496,6 @@ export async function pickProviderAndModel(
         detail: modelPickDetail(
           m.capabilities,
           tuningTable.get(modelTuningKey(providerPick.providerId, m.id))
-            ?.outputTokensPerSecond
         ),
         model: m,
       })),
