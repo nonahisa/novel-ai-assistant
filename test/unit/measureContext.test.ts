@@ -5,7 +5,10 @@ import {
   estimateProbeTokens,
 } from "../../src/features/measureContext";
 import { AIError } from "../../src/ai/types";
-import { MAX_TIMEOUT_SECONDS } from "../../src/core/modelTuning";
+import {
+  MAX_TIMEOUT_SECONDS,
+  PROBE_MAX_TIMEOUT_SECONDS,
+} from "../../src/core/modelTuning";
 import {
   probeCharsToTokens,
   worstCaseProbeChars,
@@ -52,9 +55,24 @@ describe("エラーを「入らなかった」と数えてよいか", () => {
   test("種別を問わず数える（種別の当て推量をしない）", () => {
     // どの種別で返すかはAI側の都合で変わる。通ったあとに落ちたという
     // 事実のほうを信じる（CLAUDE.md 規則5「エラー文から原因を当てにいかない」）
-    for (const kind of ["bad_response", "timeout", "unknown"] as const) {
+    for (const kind of ["bad_response", "rate_limited", "unknown"] as const) {
       expect(countErrorAsTooLong(true, new AIError("失敗", kind))).toBe(true);
     }
+  });
+
+  /**
+   * **時間切れだけは別**（作者の依頼、2026-09-13）。
+   *
+   * 時間切れが言っているのは「待っているあいだに返らなかった」であって、
+   * 「入らなかった」ではない。**遅いのか長すぎるのかが区別できていない。**
+   * 数えてしまうと、遅いだけのモデルで実効の上限が実際より短く出る——
+   * 実機の gemma4:12b は4回の時間切れを「入らない」と数えられ、
+   * 実効の上限が 194,288字（天井は 362,191字）で止まった。
+   */
+  test("時間切れは数えない（測れなかっただけで、読めないとは限らない）", () => {
+    const timeout = new AIError("時間切れです。", "timeout");
+
+    expect(countErrorAsTooLong(true, timeout)).toBe(false);
   });
 });
 
@@ -89,6 +107,41 @@ describe("測り直すときに延ばす待ち時間", () => {
     for (const seconds of [0, -1, Number.NaN]) {
       expect(doubledTimeoutSeconds(seconds), String(seconds)).toBeUndefined();
     }
+  });
+
+  /**
+   * **測定のあいだだけ、上限が別にある**（作者の依頼、2026-09-13）。
+   *
+   * 0.60.1 で天井が倍近くへ広がり、1回に送る量が増えた。実機の
+   * gemma4:12b は**台帳が既に600秒**だったので、ふだんの上限で挟むと
+   * **1秒も延ばせず**、時間切れがそのまま結果に化けていた。
+   *
+   * ふだんの呼び出しの上限（600秒）は動かさない。測定は1回きりで作者が
+   * 結果を待っている場面、ふだんの呼び出しは何十回も走って止まると作業が
+   * 詰まる場面——同じ上限でよい理由が無い。
+   */
+  test("測定用の上限を渡せば、600秒からでも延ばせる", () => {
+    // これが実機で詰まっていたところ。引数が無いと undefined のままだった
+    expect(doubledTimeoutSeconds(600, PROBE_MAX_TIMEOUT_SECONDS)).toBe(1200);
+    expect(doubledTimeoutSeconds(900, PROBE_MAX_TIMEOUT_SECONDS)).toBe(
+      PROBE_MAX_TIMEOUT_SECONDS
+    );
+  });
+
+  test("測定用の上限も、超えては延ばさない", () => {
+    expect(
+      doubledTimeoutSeconds(
+        PROBE_MAX_TIMEOUT_SECONDS,
+        PROBE_MAX_TIMEOUT_SECONDS
+      )
+    ).toBeUndefined();
+  });
+
+  test("**ふだんの上限は600秒のまま**（測定用の線を持ち込まない）", () => {
+    // 引数を省いたときの動きは、これまでと1秒も変わらない
+    expect(MAX_TIMEOUT_SECONDS).toBe(600);
+    expect(doubledTimeoutSeconds(600)).toBeUndefined();
+    expect(doubledTimeoutSeconds(400)).toBe(600);
   });
 });
 

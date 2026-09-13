@@ -3,7 +3,7 @@ import {
   buildTuningStatsMarkdown,
   type TuningStatsEntry,
 } from "../../src/core/tuningStats";
-import type { ModelTuning } from "../../src/core/modelTuning";
+import { parseModelTuning, type ModelTuning } from "../../src/core/modelTuning";
 
 /**
  * **実測と「そこまでは確かめた」を、一覧で見分けられるようにする**
@@ -145,5 +145,69 @@ describe("断りの書き方を揃える", () => {
     const row = rowOf(markdown, "gemma4:12b");
     expect(row).toContain("183,239（これ以上は試していません）");
     expect(row).toContain("4,290（時間切れあり）");
+  });
+});
+
+/**
+ * **`false` が、設定から表まで届くこと**（作者の指摘、2026-09-13）。
+ *
+ * この欄は測るたびに必ず書くようになった。届かなかったときは `false` が
+ * 台帳に入るので、**読む側が `false` を読めていなければ、直したことを
+ * 確かめられない。**
+ *
+ * 0.58.0 で**保存側だけ直して読む側を足し忘れた**実績がある（印を書いて
+ * いたのに `parseModelTuning` が読み落とし、一覧には一度も出なかった）。
+ * 手本は `tuningOutputChars.test.ts` の「台帳から表まで、値が届く」。
+ */
+describe("天井の印が、設定から表まで届く", () => {
+  const raw = {
+    "ollama/gemma4:12b": {
+      measuredChars: 194288,
+      contextHitCeiling: false,
+      contextMeasuredBy: "tokens",
+    },
+    "ollama/gemma4:26b": {
+      measuredChars: 160834,
+      contextHitCeiling: true,
+    },
+  };
+
+  test("**`false` が読める**（`undefined` へ潰さない）", () => {
+    const tuning = parseModelTuning(raw).get("ollama/gemma4:12b");
+    expect(tuning?.contextHitCeiling).toBe(false);
+  });
+
+  test("`true` はこれまでどおり読める", () => {
+    const tuning = parseModelTuning(raw).get("ollama/gemma4:26b");
+    expect(tuning?.contextHitCeiling).toBe(true);
+  });
+
+  test("**`false` の行には「これ以上は試していません」を出さない**", () => {
+    const tuning = parseModelTuning(raw).get("ollama/gemma4:12b");
+    if (!tuning) throw new Error("読めていない");
+    const row = rowOf(
+      buildTuningStatsMarkdown([entry("Ollama", "gemma4:12b", tuning)]),
+      "gemma4:12b"
+    );
+    expect(row).toContain("194,288");
+    expect(row).not.toContain("これ以上は試していません");
+  });
+
+  test("`true` の行には、これまでどおり出る", () => {
+    const tuning = parseModelTuning(raw).get("ollama/gemma4:26b");
+    if (!tuning) throw new Error("読めていない");
+    const row = rowOf(
+      buildTuningStatsMarkdown([entry("Ollama", "gemma4:26b", tuning)]),
+      "gemma4:26b"
+    );
+    expect(row).toContain("これ以上は試していません");
+  });
+
+  test("真偽値でない値は、これまでどおり読まない", () => {
+    // 作者が手で `"true"` と書いても、生の値を表へ漏らさない
+    const tuning = parseModelTuning({
+      "ollama/x": { measuredChars: 100, contextHitCeiling: "true" },
+    }).get("ollama/x");
+    expect(tuning?.contextHitCeiling).toBeUndefined();
   });
 });

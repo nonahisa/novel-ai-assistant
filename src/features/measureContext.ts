@@ -53,8 +53,10 @@ import {
 } from "../core/outputProbe";
 import {
   MAX_TIMEOUT_SECONDS,
+  PROBE_MAX_TIMEOUT_SECONDS,
   modelTuning,
   modelTuningKey,
+  raiseTimeoutCeilingForProbe,
   recommendTimeoutSeconds,
   resolveTimeoutSeconds,
   saveModelTuning,
@@ -188,6 +190,14 @@ type RoundOutcome =
  * 「実効の上限は0字です」のような無意味な結果を出してしまう。
  *
  * 作者が止めたとき（`aborted`）は、当然ながら数えない。
+ *
+ * **時間切れ（`timeout`）も数えない**（作者の依頼、2026-09-13）。
+ * 時間切れが言っているのは「待っているあいだに返らなかった」であって、
+ * 「入らなかった」ではない——**遅いのか長すぎるのかが区別できていない。**
+ * 数えてしまうと、遅いだけのモデルで実効の上限が実際より短く出る。
+ * 待ち時間を延ばして測り直す道（`doubledTimeoutSeconds`）が先にあり、
+ * それでも切れたときは**探索を打ち切って、そこまでの結果で終える**
+ * （`runMeasurement` の中。「測れなかった」を「読めなかった」と言い換えない）。
  */
 export function countErrorAsTooLong(
   hadSuccessBelow: boolean,
@@ -195,6 +205,7 @@ export function countErrorAsTooLong(
 ): boolean {
   if (!(error instanceof AIError)) return false;
   if (error.kind === "aborted") return false;
+  if (error.kind === "timeout") return false;
   return hadSuccessBelow;
 }
 
@@ -206,13 +217,20 @@ export function countErrorAsTooLong(
  * 当て推量の刻みを持ち込まない（CLAUDE.md 規則5）。上限を超えるぶんは
  * 切り詰める——それ以上待たせるくらいなら、モデルかチャンクの大きさを
  * 見直すほうが作者のためになる。
+ *
+ * @param maxSeconds 延ばしてよい上限。**測定は `PROBE_MAX_TIMEOUT_SECONDS`
+ *   を渡す**（作者の依頼、2026-09-13）。ふだんの上限（600秒）のままだと、
+ *   台帳が既に600秒のモデル——実機の gemma4:12b がそうだった——では
+ *   1秒も延ばせず、時間切れがそのまま結果に化けていた。
+ *   省略するとふだんの上限（これまでの動き）。
  */
 export function doubledTimeoutSeconds(
-  currentSeconds: number
+  currentSeconds: number,
+  maxSeconds: number = MAX_TIMEOUT_SECONDS
 ): number | undefined {
   if (!Number.isFinite(currentSeconds) || currentSeconds <= 0) return undefined;
-  if (currentSeconds >= MAX_TIMEOUT_SECONDS) return undefined;
-  return Math.min(MAX_TIMEOUT_SECONDS, currentSeconds * 2);
+  if (currentSeconds >= maxSeconds) return undefined;
+  return Math.min(maxSeconds, currentSeconds * 2);
 }
 
 /**
@@ -375,6 +393,18 @@ export async function measureContext(
   if (workFolderPath) useLogFile(workFolderPath);
 
   const cleanup: TuningCleanup = {};
+  /*
+    **測定のあいだだけ、待ち時間の上限を上げる**（作者の依頼、2026-09-13）。
+
+    上げるのは**読む側の線**である（`tunedTimeoutSeconds`）。台帳へ
+    1,200秒と書いても、読む側が600秒で挟んでいてはプロバイダは600秒しか
+    待たない——書いたのに効かない状態になる。
+
+    ここで上げたぶんは `finally` が必ず戻す。台帳のほうは、反映しても
+    `recommendTimeoutSeconds` が600秒で挟み、反映しなければ元の値へ戻すので、
+    **測定のあいだ延ばした値がふだんの呼び出しへ持ち込まれることはない。**
+  */
+  const restoreTimeoutCeiling = raiseTimeoutCeilingForProbe();
   try {
     await runMeasurement(registry, feature, cleanup, scope);
   } catch (error) {
@@ -382,6 +412,9 @@ export async function measureContext(
     // 通知や設定の書き込みが投げたとき——黙って消さず、ログと通知へ出す
     reportFailure(error);
   } finally {
+    // **台帳より先に上限を戻す。** 戻す書き込み（`restoreTimeout`）が
+    // 何秒を読むかは、線が元へ戻ってからのほうが素直である
+    restoreTimeoutCeiling();
     await cleanup.restoreTimeout?.();
   }
 }
@@ -572,6 +605,16 @@ async function runMeasurement(
   let longestResponseSeconds = 0;
   /** 測定の途中で待ち時間を延ばしたなら、その秒数。延ばしたのは1回だけ */
   let raisedTimeoutSeconds: number | undefined;
+  /**
+   * 時間切れで探索を**打ち切った**ときの、その回の字数と待った秒数
+   * （作者の依頼、2026-09-13）。
+   *
+   * **時間切れは「入らなかった」ではない。** 延ばして測り直しても切れた
+   * なら、それ以上の長さは**測れていない**だけであって、読めないと決まった
+   * わけではない。そこで探索をやめ、ここまでの `low` を生かして終える。
+   * 何字で切れたのかは、結果の文面で必ず言う。
+   */
+  let timeoutStop: { chars: number; seconds: number } | undefined;
   /**
    * 延ばす前に台帳へ入っていた待ち時間。**`undefined` は「欄が無かった」。**
    *
@@ -894,27 +937,54 @@ async function runMeasurement(
             // **台帳へ先に書いてから測り直す**——`generate` に待ち時間を
             // 渡す口が無いので、プロバイダが読む値を変えるしかない。
             // 台帳はモデルごとなので、ほかのモデルには影響しない
-            if (
-              error instanceof AIError &&
-              error.kind === "timeout" &&
-              raisedTimeoutSeconds === undefined
-            ) {
-              const raised = doubledTimeoutSeconds(
-                resolveTimeoutSeconds(resolved.provider.id, resolved.model)
+            if (error instanceof AIError && error.kind === "timeout") {
+              const waited = resolveTimeoutSeconds(
+                resolved.provider.id,
+                resolved.model
               );
-              if (raised !== undefined && (await raiseTimeout(raised))) {
-                raisedTimeoutSeconds = raised;
-                logStep(
-                  `読める長さの測定：${size}字 → ${seconds}秒で時間切れ。` +
-                    `${tuningKey} の待ち時間を ${raised} 秒へ延ばして測り直します。`
+              if (raisedTimeoutSeconds === undefined) {
+                /*
+                  **延ばしてよい線は、測定用の上限まで**（作者の依頼、
+                  2026-09-13）。ふだんの上限（600秒）で挟むと、台帳が既に
+                  600秒のモデルでは1秒も延ばせず、時間切れがそのまま
+                  「入らない」に化けていた（実機の gemma4:12b）。
+                */
+                const raised = doubledTimeoutSeconds(
+                  waited,
+                  PROBE_MAX_TIMEOUT_SECONDS
                 );
-                progress.report({
-                  message:
-                    `${size.toLocaleString("ja-JP")} 字を送り直しています` +
-                    `（待ち時間を ${raised} 秒へ延ばしました）…`,
-                });
-                continue;
+                if (raised !== undefined && (await raiseTimeout(raised))) {
+                  raisedTimeoutSeconds = raised;
+                  logStep(
+                    `読める長さの測定：${size}字 → ${seconds}秒で時間切れ。` +
+                      `${tuningKey} の待ち時間を ${raised} 秒へ延ばして測り直します。`
+                  );
+                  progress.report({
+                    message:
+                      `${size.toLocaleString("ja-JP")} 字を送り直しています` +
+                      `（待ち時間を ${raised} 秒へ延ばしました）…`,
+                  });
+                  continue;
+                }
               }
+
+              /*
+                **延ばしても切れた（あるいは延ばせなかった）。ここで探索を
+                やめる**（作者の依頼、2026-09-13）。
+
+                「入らない」と数えて探索を続けると、遅いだけのモデルでは
+                実効の上限が実際より短く出る——**遅いのか長すぎるのかが
+                区別できていない。** ここまでの `low` は生かしたまま抜け、
+                「これより長い長さは測れていない」と作者へ言う。
+                **「測れなかった」を「読めなかった」と言い換えない。**
+              */
+              timeoutStop = { chars: size, seconds: waited };
+              logStep(
+                `読める長さの測定：${size}字 → ${seconds}秒で時間切れ` +
+                  `（待ち時間 ${waited} 秒）。これより長い長さは測れないので、` +
+                  "ここで探索を打ち切ります（「入らない」とは数えません）。"
+              );
+              return;
             }
 
             // **関所（6.27.10）は、この測定のときだけ素通りする**ので、
@@ -1037,6 +1107,19 @@ async function runMeasurement(
       // 同じ「読める長さ」の数字が2つ並ぶ
       measured: measuredAfter,
     }) +
+    /*
+      **打ち切ったことと、その理由を必ず出す**（作者の依頼、2026-09-13）。
+
+      ここを黙ると、作者には「このモデルはここまでしか読めない」と読める。
+      実際に分かったのは「この待ち時間では返ってこなかった」だけである。
+      **「測れなかった」を「読めなかった」と言い換えない**——待ち時間を
+      延ばすか、速いモデルにすれば、もっと長く読める見込みがある。
+    */
+    (timeoutStop !== undefined
+      ? `${timeoutStop.chars.toLocaleString("ja-JP")} 字で時間切れになりました` +
+        `（待ち時間 ${timeoutStop.seconds} 秒）。` +
+        "これより長い長さは測れていません。実際にはもっと読める可能性があります。"
+      : "") +
     ratioSummary +
     (longestResponseSeconds > 0
       ? `いちばん時間がかかった回は ${longestResponseSeconds} 秒でした。`
@@ -1729,9 +1812,22 @@ async function offerToSave(input: {
     ...(writesContext ? { contextWindow: tokens } : {}),
     timeoutSeconds,
     measuredChars: input.low,
-    // **天井まで通ったときだけ印を残す。** 付けないときは項目ごと
-    // 持たない（無い台帳＝これまでどおり、を壊さない）
-    ...(input.low >= input.ceilingChars ? { contextHitCeiling: true } : {}),
+    /*
+      **天井に届いたかどうかにかかわらず、毎回書く**（作者の指摘、
+      2026-09-13）。
+
+      届かなかったときに項目ごと省いていたが、`saveModelTuning` は台帳へ
+      **差分で書く**——省いた欄は消えるのではなく、**前回の印が残る。**
+      実機では前回 183,234字で天井に届いており、今回 194,288字（天井は
+      362,191字）で届かなかったのに `contextHitCeiling: true` が残り、
+      一覧に「これ以上は試していません」と出た。**強い測定が、弱い印を
+      着たままになる。**
+
+      「印が無い＝これまでどおり」を守るために省いていたのだが、この欄では
+      裏目に出た。`contextMeasuredBy` が既に毎回書いているのと同じ理由で、
+      こちらも毎回書く（古い台帳の `undefined` とは、これで意味が分かれる）。
+    */
+    contextHitCeiling: input.low >= input.ceilingChars,
     // **測り方は、どちらでも書く。** 天井の印と違って「印が無い＝強い
     // ほう」ではない——古い台帳（この欄が入る前）と、今回トークンで
     // 測った値を、一覧が取り違えないようにする

@@ -53,6 +53,13 @@ export interface ModelTuning {
   /**
    * その測定が**測れる上限まで届いてしまった**か（作者の指摘、2026-09-13）。
    *
+   * **`false` は「測ったが、天井には届かなかった」である。** 測るたびに
+   * 必ず書く欄なので、`undefined`（＝印が付く前の古い台帳）とは意味が違う。
+   * 省いて書いていた頃は、前の測定で立った `true` が差分の書き込みをすり
+   * 抜けて残り続け、**天井に届かなかった強い測定が、前回の弱い印を着たまま
+   * 一覧に並んでいた**（実機、2026-09-13。gemma4:12b が 194,288字・天井
+   * 362,191字なのに「これ以上は試していません」と出た）。
+   *
    * 二分探索には天井がある（申告の文脈長か、既定の上限）。そこまで全部
    * 通ってしまったときの `measuredChars` は、**そのモデルの限界ではなく
    * 検査の限界**である。「ここまでは確かめた」という下限値でしかない。
@@ -200,6 +207,55 @@ export const MIN_TIMEOUT_SECONDS = 180;
 export const MAX_TIMEOUT_SECONDS = 600;
 
 /**
+ * **測定のあいだだけ**使う、待ち時間の上限（作者の依頼、2026-09-13）。
+ *
+ * **ふだんの呼び出しと同じ上限でよい理由が無い。**
+ *
+ * - 測定は**1回きり**で、作者はその場で結果を待っている。長く待つのは
+ *   「もっと読めるかもしれない」を確かめるための待ち時間である
+ * - ふだんの呼び出しは**何十回も走る**（チャンクごとに1回）。途中で
+ *   ハングすると、その回数ぶん作者の作業が詰まる
+ *
+ * 0.60.1 で測定の天井が倍近くへ広がり、1回に送る量が増えた。実機の
+ * gemma4:12b はいちばん遅い回が273秒で、`recommendTimeoutSeconds` の
+ * ×3が **600秒に頭打ち**になっていた——測定の側だけが窮屈になっている。
+ *
+ * **`MAX_TIMEOUT_SECONDS` のほうは動かさない。** 台帳へ書く待ち時間
+ * （`recommendTimeoutSeconds`）は従来どおり600秒止まりで、ここで延ばした
+ * 値がふだんの呼び出しへ持ち込まれることはない。
+ */
+export const PROBE_MAX_TIMEOUT_SECONDS = 1800;
+
+/**
+ * いま、台帳の待ち時間を読むときに掛ける上限。
+ *
+ * **ふだんは `MAX_TIMEOUT_SECONDS`。** 測定のあいだだけ
+ * `PROBE_MAX_TIMEOUT_SECONDS` へ上げる（`raiseTimeoutCeilingForProbe`）。
+ */
+let timeoutCeilingSeconds: number = MAX_TIMEOUT_SECONDS;
+
+/**
+ * 測定のあいだだけ、待ち時間の読み出し上限を上げる。返った関数で元へ戻す。
+ *
+ * **これが無いと、延ばした待ち時間が効かない。** 測り直しのために台帳へ
+ * 1,200秒と書いても、読む側（`tunedTimeoutSeconds`）が600秒で挟むので、
+ * プロバイダは600秒しか待たない。**書いたのに効かない**——「ビルドが
+ * 通った」と「動く」が違う、この作品でくり返した失敗の6番そのものになる。
+ *
+ * 上げるのは測定のあいだだけで、`measureContext` の `finally` が必ず戻す。
+ * 戻し忘れても、台帳のほうは600秒を超える値を持たない（反映は
+ * `recommendTimeoutSeconds` が挟み、反映しなければ元の値へ戻す）ので、
+ * ふだんの呼び出しが長く待つようにはならない。
+ */
+export function raiseTimeoutCeilingForProbe(): () => void {
+  const before = timeoutCeilingSeconds;
+  timeoutCeilingSeconds = PROBE_MAX_TIMEOUT_SECONDS;
+  return () => {
+    timeoutCeilingSeconds = before;
+  };
+}
+
+/**
  * これを下回るコンテキスト長は、台帳に入っていても使わない。
  *
  * **`novelai.modelTuning` は `object` の設定なので、`minimum` が効かない**
@@ -283,9 +339,17 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
       `features/measureContext.ts` の `offerToSave` は天井の印を書いて
       いたのに、ここで読み落としていたため、一覧（`core/tuningStats.ts`）
       には一度も出なかった。書き手と読み手が揃って初めて印になる。
+
+      **`false` も読む**（作者の依頼、2026-09-13）。この欄は測るたびに
+      必ず書かれるので、`false` は「測ったが天井には届かなかった」という
+      れっきとした中身である。`undefined` へ潰すと、表の見た目こそ同じでも
+      「読めているか」を確かめられなくなる——0.58.0 の読み落としは、まさに
+      そこを見ていなかったせいで半年ぶん気づかれなかった。
     */
     const contextHitCeiling =
-      entry.contextHitCeiling === true ? true : undefined;
+      typeof entry.contextHitCeiling === "boolean"
+        ? entry.contextHitCeiling
+        : undefined;
     // **知らない測り方は読まない**（`speedSource` と同じ理由）。一覧は
     // 決まった2つしか言葉へ直せないので、読むと生の値が表に出る
     const contextMeasuredBy = MEASURE_METHODS.find(
@@ -434,6 +498,9 @@ export function tunedContextWindow(
  * **上限で挟む。** 手で `100000` と書くと、1回の呼び出しが27時間待つ。
  * 上限は書き込み側（`recommendTimeoutSeconds`）でしか守られていないので、
  * 読む側でも同じ線を引く。
+ *
+ * 挟む線は、ふだんは `MAX_TIMEOUT_SECONDS`。**測定のあいだだけ
+ * `PROBE_MAX_TIMEOUT_SECONDS` まで上がる**（`raiseTimeoutCeilingForProbe`）。
  */
 export function tunedTimeoutSeconds(
   providerId: string,
@@ -441,12 +508,13 @@ export function tunedTimeoutSeconds(
 ): number | undefined {
   const tuned = modelTuning(providerId, model)?.timeoutSeconds;
   if (tuned === undefined) return undefined;
-  if (tuned > MAX_TIMEOUT_SECONDS) {
+  const ceiling = timeoutCeilingSeconds;
+  if (tuned > ceiling) {
     noteOnce(
       `AIチューニング：${modelTuningKey(providerId, model)} の待ち時間 ` +
-        `${tuned} 秒は長すぎるため、${MAX_TIMEOUT_SECONDS} 秒までに抑えます。`
+        `${tuned} 秒は長すぎるため、${ceiling} 秒までに抑えます。`
     );
-    return MAX_TIMEOUT_SECONDS;
+    return ceiling;
   }
   return tuned;
 }
