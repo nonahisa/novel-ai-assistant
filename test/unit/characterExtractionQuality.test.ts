@@ -138,7 +138,7 @@ describe("登場人物抽出の品質ゲート", () => {
     // **この規則は実接続では効かなかった**ので、敬称違いはコードで寄せる
     // （設計書6.5.9「敬称違いは機械で寄せる」）。
     // 版が変わるとキャッシュが無効になり、次回の抽出でAIを呼び直す
-    expect(CHARACTER_EXTRACT_VERSION).toBe("5.3");
+    expect(CHARACTER_EXTRACT_VERSION).toBe("5.4");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.properties)
       .toHaveProperty("entityType");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.required)
@@ -177,7 +177,7 @@ describe("登場人物抽出の品質ゲート", () => {
   test("上限を足してもプロンプトの版は上げない", () => {
     // 版を上げるとキャッシュが全部無効になり、作品全体を再処理させる。
     // スキーマの上限はプロンプトの文言を変えていないので、上げる理由が無い
-    expect(CHARACTER_EXTRACT_VERSION).toBe("5.3");
+    expect(CHARACTER_EXTRACT_VERSION).toBe("5.4");
   });
 
   test("関係を必須にして、名前や外見から分からない結びつきを残せるようにする", () => {

@@ -1,4 +1,5 @@
 import type { ChatContextKind } from "../core/chatContext";
+import { EXAMPLE_OTHER, EXAMPLE_PERSON } from "../core/exampleNames";
 import { runnableFeatureList } from "../core/chatEdit";
 import {
   parseProfileSignals,
@@ -39,7 +40,7 @@ import {
 //      と言われた。判断を求められたら見立てだけを返させる。
 //      ②同じ返答の中で、reply は「明確に描かれています」なのに reloadRecord の
 //      留意点は「不十分に描写されている」と正反対だった。結論と食い違わせない
-export const WORK_CHAT_VERSION = "3.7";
+export const WORK_CHAT_VERSION = "3.8";
 
 /**
  * 起動できる機能の一覧。**実装（chatEdit.ts）から作る。**
@@ -195,7 +196,7 @@ ${RUNNABLE_LIST}
 - name は**資料に実在する名前をそのまま**書くこと。言い換えたり敬称を足したり
   しないこと。**実在しない名前を書くと、ボタンは出ません**
 - notes には作者の訴えを短くまとめて書くこと
-  （例:「他の登場人物『殿下』の情報が混入しています。」）。
+  （例:「他の登場人物『${EXAMPLE_OTHER.fullName}』の情報が混入しています。」）。
   読み直すAIへの申し送りになるので、**何が混ざっているか**を具体的に書くこと
 - **作者が資料の誤りを訴えたときだけ**付けること。あなたが本文の描写の
   不足を感じただけでは付けないこと
@@ -208,7 +209,7 @@ ${RUNNABLE_LIST}
   提案として並び、作者が選んだものだけが反映されます
 
 【出力形式】JSONのみ。前置き・後書き・コードフェンスを含めないこと。
-{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "locate": {"path": "...", "text": "...", "label": "..."}, "reloadRecord": {"kind": "character", "name": "アジャーノ", "notes": "他の登場人物『殿下』の情報が混入しています。"}, "profileSignals": null}
+{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "locate": {"path": "...", "text": "...", "label": "..."}, "reloadRecord": {"kind": "character", "name": "${EXAMPLE_PERSON.fullName}", "notes": "他の登場人物『${EXAMPLE_OTHER.fullName}』の情報が混入しています。"}, "profileSignals": null}
 
 **profileSignals は、末尾に説明があるときだけ使ってください。** 説明が無ければ必ず null にしてください。`;
 

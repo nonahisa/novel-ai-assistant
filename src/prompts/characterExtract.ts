@@ -1,4 +1,9 @@
 import { SUMMARY_MAX_CHARS } from "../core/summaryLimit";
+import {
+  EXAMPLE_OTHER,
+  EXAMPLE_PERSON,
+  EXAMPLE_SUMMARY,
+} from "../core/exampleNames";
 
 /**
  * P-04a 設定抽出（チャンク単位）
@@ -23,7 +28,7 @@ import { SUMMARY_MAX_CHARS } from "../core/summaryLimit";
 //      まっさらからの抽出（既知の名前が無い）では 46人全員の aliases が空だった
 //      （実機 2026-09-08。qwen3:8b・gemma4:e4b とも、required や説明文では直らず、
 //      規則の不在が原因）
-export const CHARACTER_EXTRACT_VERSION = "5.3";
+export const CHARACTER_EXTRACT_VERSION = "5.4";
 
 export const BASE_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 
@@ -129,19 +134,19 @@ ${knownWorld}
 - **新しく見つけた人物でも、この本文の中で複数の呼び方があれば、name にいちばん正式な
   呼び方（フルネーム）を置き、それ以外の呼び方（姓だけ・名だけ・敬称つき・あだ名・役職）を
   すべて aliases に入れること。** 既知の人物でなくても同じである。
-  例：本文に「三門太志」「太志」「三門くん」が出るなら、name: "三門太志"、
-  aliases: ["太志", "三門くん"]。**aliases を空にしてよいのは、呼び方が本当に1つしか無いときだけ**である。
+  例：本文に「${EXAMPLE_PERSON.fullName}」「${EXAMPLE_PERSON.givenName}」「${EXAMPLE_PERSON.familiar}」が出るなら、name: "${EXAMPLE_PERSON.fullName}"、
+  aliases: ["${EXAMPLE_PERSON.givenName}", "${EXAMPLE_PERSON.familiar}"]。**aliases を空にしてよいのは、呼び方が本当に1つしか無いときだけ**である。
   同じく、その人物が相手を呼ぶ言い方は addressTerms に入れること（【呼称の抽出ルール】）。
 - **体を共有していても人格が別なら、別の人物として扱うこと。**
   憑依・入れ替わり・転生・成り代わり・変装・偽名がこれに当たる。
   **相手の名前・呼び名を aliases に入れてはならない。** それぞれを別のレコードにし、
   2人の結びつきは relations に書くこと（【関係の抽出ルール】4番）。
-  例：太志が文佳の身体に憑依している場合、
-  「太志」と「文佳」は別のレコードであり、文佳の aliases に「太志」を入れてはならない。
-  relations に name: "文佳", relation: "憑依している" と書くのが正しい。
+  例：${EXAMPLE_PERSON.givenName}が${EXAMPLE_OTHER.givenName}の身体に憑依している場合、
+  「${EXAMPLE_PERSON.givenName}」と「${EXAMPLE_OTHER.givenName}」は別のレコードであり、${EXAMPLE_OTHER.givenName}の aliases に「${EXAMPLE_PERSON.givenName}」を入れてはならない。
+  relations に name: "${EXAMPLE_OTHER.givenName}", relation: "憑依している" と書くのが正しい。
 - summary には、その人物が何者かが一目で分かる紹介を**${SUMMARY_MAX_CHARS}字以内**で書くこと。
   一覧で名前の下に並べる短い説明なので、役割と立場が分かれば十分である。
-  例：「冒険者ギルドの生活保護課ケースワーカー。転移者で制度の考案者。」
+  例：「${EXAMPLE_SUMMARY}」
   **余った字数を埋めるために、本文に無いことを足してはならない。** 上限であって目安ではない。
   ${SUMMARY_MAX_CHARS}字を超える場合は削ること。詳しい内容は role / personality / appearance に分けて書く。
 - gender（性別）は、**本文から確認できる場合だけ**書くこと。根拠になるのは
@@ -218,7 +223,7 @@ ${knownWorld}
    指示語や、人物名の分からない相手は書かないこと。
 4. **「見た目と中身が食い違う」状態も関係として必ず書くこと。**
    憑依・入れ替わり・変装・二重人格・偽名・成り代わりなどが該当します。
-   例：name: "文佳", relation: "憑依している"
+   例：name: "${EXAMPLE_OTHER.givenName}", relation: "憑依している"
    例：name: "エレナ", relation: "入れ替わっている"
    例：name: "リド", relation: "その名を騙っている"
    **これらは名前や外見からは分かりません。** 本文でそう書かれているのに
