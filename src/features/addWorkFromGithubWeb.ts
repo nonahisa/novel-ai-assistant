@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { EXAMPLE_REPO } from "../core/exampleNames";
 import {
   describeRepoRef,
   describeRepoRefProblem,
@@ -31,7 +32,7 @@ export async function resolveGithubRepoFolder(): Promise<string | undefined> {
   const input = await askText({
     title: "GitHubのリポジトリを開く",
     prompt: "リポジトリを入力してください（URLを貼っても構いません）",
-    placeHolder: "nonahisa/HisasNovels",
+    placeHolder: EXAMPLE_REPO,
     ignoreFocusOut: true,
     validateInput: (value) => describeRepoRefProblem(value) ?? null,
   });

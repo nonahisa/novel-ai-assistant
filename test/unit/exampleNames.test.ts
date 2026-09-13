@@ -4,6 +4,7 @@ import { resolve, sep } from "node:path";
 import {
   EXAMPLE_OTHER,
   EXAMPLE_PERSON,
+  EXAMPLE_REPO,
   EXAMPLE_SUMMARY,
 } from "../../src/core/exampleNames";
 
@@ -118,6 +119,47 @@ describe("例に出す人物", () => {
  * 抽出のプロンプト（P-04a）は「姓名・名だけ・敬称つきを1人にまとめる」
  * ことを例で示す。3通りが揃っていないと、例が例にならない。
  */
+/**
+ * **作者のアカウントと書庫の名前も、例に出さない**（作者の裁定、2026-09-13）。
+ *
+ * 人物名と事情は同じである——ほかの人の入力欄に、知らない誰かの
+ * アカウント名が例として出る。
+ *
+ * **`package.json` の publisher と repository は別**である。あれは例ではなく、
+ * この拡張機能そのものの出どころで、無いと配れない。
+ */
+describe("GitHubの入力例", () => {
+  test("**画面に、作者のアカウントと書庫の名前が出ない**", () => {
+    const hits: string[] = [];
+    for (const file of sources(resolve(__dirname, "../../src"))) {
+      const rel = file.slice(file.indexOf(`src${sep}`)).split(sep).join("/");
+      readFileSync(file, "utf8")
+        .split("\n")
+        .forEach((line, index) => {
+          if (isComment(line)) return;
+          if (line.includes("HisasNovels")) hits.push(`${rel}:${index + 1}`);
+        });
+    }
+    expect(hits, "EXAMPLE_REPO を使ってください").toEqual([]);
+  });
+
+  test("例は「ここへ自分のものを書く」と読める形になっている", () => {
+    // 実在しそうな名前だと、そのまま入れてしまう人が出る
+    expect(EXAMPLE_REPO.split("/")).toHaveLength(2);
+    expect(EXAMPLE_REPO).toMatch(/your|my|example|sample/);
+  });
+
+  test("使うところは、取り込んで使っている", () => {
+    for (const file of [
+      "src/core/githubRepoRef.ts",
+      "src/features/addWorkFromGithubWeb.ts",
+    ]) {
+      const text = readFileSync(resolve(__dirname, "../..", file), "utf8");
+      expect(text, file).toContain("EXAMPLE_REPO");
+    }
+  });
+});
+
 describe("架空の人物の作り", () => {
   test("姓名・名だけ・敬称つきの3通りがある", () => {
     for (const person of [EXAMPLE_PERSON, EXAMPLE_OTHER]) {
