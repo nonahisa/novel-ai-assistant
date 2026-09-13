@@ -307,6 +307,7 @@ import {
   PROOFREADING_SUITE_COMMAND,
   checkSkipped,
   isSuiteConfirmed,
+  isSuiteHoldingRun,
   type CheckCommandOutcome,
   type CheckRunOptions,
 } from "./core/proofreadingSuite";
@@ -3280,11 +3281,17 @@ export async function activate(
         if (unsaved) return unsaved;
 
         const suiteConfirmed = isSuiteConfirmed(options);
+        // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
+        const suiteHoldsRun = isSuiteHoldingRun(options);
         const result = await withPanelProgress(
           work,
           "伏線を検知",
           (onProgress) =>
-            checkForeshadows(work, aiRegistry, { onProgress, suiteConfirmed })
+            checkForeshadows(work, aiRegistry, {
+              onProgress,
+              suiteConfirmed,
+              suiteHoldsRun,
+            })
         );
         if (!result || result.cancelled) return CHECK_CANCELLED;
 
@@ -3412,6 +3419,8 @@ export async function activate(
         // 聞く意味があるときだけ聞く（一度も検知していない・全部が対象・
         // 1件も無い、のいずれでも聞かない）
         const suiteConfirmed = isSuiteConfirmed(options);
+        // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
+        const suiteHoldsRun = isSuiteHoldingRun(options);
         const scope = await resolveTypoScope(work, { suiteConfirmed });
         if (!scope) return CHECK_CANCELLED;
 
@@ -3423,6 +3432,7 @@ export async function activate(
               filePaths: scope.filePaths,
               onProgress,
               suiteConfirmed,
+              suiteHoldsRun,
             })
         );
         if (!result) return CHECK_CANCELLED;
@@ -3646,6 +3656,8 @@ export async function activate(
         let missing = "";
         let missingReason = "";
         const suiteConfirmed = isSuiteConfirmed(options);
+        // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
+        const suiteHoldsRun = isSuiteHoldingRun(options);
         const result = await withPanelProgress(
           work,
           "プロット逸脱を検知",
@@ -3653,6 +3665,7 @@ export async function activate(
             checkDeviations(work, aiRegistry, {
               onProgress,
               suiteConfirmed,
+              suiteHoldsRun,
               noteMissing: (note, reason) => {
                 missing = note;
                 missingReason = reason ?? "";
@@ -3837,8 +3850,14 @@ export async function activate(
         if (unsaved) return unsaved;
 
         const suiteConfirmed = isSuiteConfirmed(options);
+        // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
+        const suiteHoldsRun = isSuiteHoldingRun(options);
         const result = await withPanelProgress(work, "推敲", (onProgress) =>
-          checkProofread(work, aiRegistry, { onProgress, suiteConfirmed })
+          checkProofread(work, aiRegistry, {
+            onProgress,
+            suiteConfirmed,
+            suiteHoldsRun,
+          })
         );
         if (!result || result.cancelled) return CHECK_CANCELLED;
 
@@ -3949,6 +3968,8 @@ export async function activate(
         let missing = "";
         let missingReason = "";
         const suiteConfirmed = isSuiteConfirmed(options);
+        // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
+        const suiteHoldsRun = isSuiteHoldingRun(options);
         const result = await withPanelProgress(
           work,
           "矛盾を検知",
@@ -3958,6 +3979,7 @@ export async function activate(
               // 検証はAIを1件ずつ呼ぶので、別の札で件数を流す
               onVerifyProgress: stage("検出した矛盾を検証", "件"),
               suiteConfirmed,
+              suiteHoldsRun,
               noteMissing: (note, reason) => {
                 missing = note;
                 missingReason = reason ?? "";
@@ -4040,6 +4062,7 @@ export async function activate(
               // 判定はAIを1件ずつ呼ぶので、別の札で件数を流す
               onVerifyProgress: stage("見つかった候補を確かめ", "件"),
               suiteConfirmed: isSuiteConfirmed(options),
+              suiteHoldsRun: isSuiteHoldingRun(options),
             })
         );
         if (!result || result.cancelled) return CHECK_CANCELLED;

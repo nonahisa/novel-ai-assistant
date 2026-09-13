@@ -288,7 +288,14 @@ export async function checkForeshadows(
   // モデルの読み込み直しが往復する
   await withAiTurnProgress(
     "伏線になりそうな記述を探しています",
-    { label: "伏線の検知", onCancelled: () => (cancelled = true) },
+    {
+      label: "伏線の検知",
+      onCancelled: () => (cancelled = true),
+      // **まとめ実行から呼ばれたら、札は取らない**（設計書6.76・6.80）。
+      // まとめ実行のほうが丸ごと持っているので、ここで取ると自分の札を
+      // 自分で待つ形になり、永久に進まない
+      alreadyHeld: options.suiteHoldsRun,
+    },
     async (progress, token) => {
       const controller = new AbortController();
       token.onCancellationRequested(() => {

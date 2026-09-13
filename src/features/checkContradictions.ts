@@ -450,7 +450,14 @@ export async function checkContradictions(
   // モデルの読み込み直しが往復する。検証だけ別の札にすると、
   // 本文を読む段と検証の段のあいだに別の機能が割り込む
   await withAiTurn(
-    { label: "矛盾の検知", onCancelled: () => (cancelled = true) },
+    {
+      label: "矛盾の検知",
+      onCancelled: () => (cancelled = true),
+      // **まとめ実行から呼ばれたら、札は取らない**（設計書6.76・6.80）。
+      // まとめ実行のほうが丸ごと持っているので、ここで取ると自分の札を
+      // 自分で待つ形になり、永久に進まない
+      alreadyHeld: options.suiteHoldsRun,
+    },
     async () => {
       await withCancellableProgress("矛盾を検知しています", async (progress, token) => {
         const controller = new AbortController();

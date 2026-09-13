@@ -345,6 +345,10 @@ export async function checkDeviations(
     "プロットとの食い違いを見ています",
     {
       label: "プロットからの逸脱の検知",
+      // **まとめ実行から呼ばれたら、札は取らない**（設計書6.76・6.80）。
+      // まとめ実行のほうが丸ごと持っているので、ここで取ると自分の札を
+      // 自分で待つ形になり、永久に進まない
+      alreadyHeld: options.suiteHoldsRun,
       onCancelled: () => (cancelled = true),
     },
     async (progress, token) => {

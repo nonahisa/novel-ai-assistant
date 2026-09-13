@@ -53,6 +53,17 @@ export interface AiTurnOptions {
    * と読んで完了の知らせを出してしまう。
    */
   readonly onCancelled?: () => void;
+  /**
+   * **呼び出し元が、すでに札を持っている。**
+   *
+   * 校正のまとめ実行（設計書6.80）が7つの機能を順に呼ぶとき、
+   * まとめ実行のほうが丸ごと札を持つ。ここで各機能がもう一度取ると、
+   * **自分の持つ札を自分で待つ**ことになって永久に進まない。
+   *
+   * 作者の報告（2026-09-13）：まとめ実行の工程と工程のあいだで札が
+   * 空き、あとから押した「まとめて抽出」がそこへ入り込んだ。
+   */
+  readonly alreadyHeld?: boolean;
 }
 
 /**
@@ -99,6 +110,11 @@ export async function withAiTurnProgress(
   ) => Promise<void>
 ): Promise<void> {
   await withCancellableProgress(title, async (progress, token) => {
+    // **もう持っているなら、取りにいかない**（自分の札を自分で待つ形を作らない）
+    if (options.alreadyHeld) {
+      await task(progress, token);
+      return;
+    }
     const release = await takeTurn(options.label, signalOf(token), (message) =>
       progress.report({ message })
     );
@@ -127,6 +143,9 @@ export async function withAiTurn<T>(
   options: AiTurnOptions,
   run: () => Promise<T>
 ): Promise<T | undefined> {
+  // **もう持っているなら、取りにいかない**（上と同じ理由）
+  if (options.alreadyHeld) return await run();
+
   const holder = currentRunLabel();
   const release =
     holder === undefined

@@ -270,7 +270,14 @@ export async function checkProofread(
   // モデルの読み込み直しが往復する
   await withAiTurnProgress(
     "推敲しています",
-    { label: "推敲", onCancelled: () => (cancelled = true) },
+    {
+      label: "推敲",
+      onCancelled: () => (cancelled = true),
+      // **まとめ実行から呼ばれたら、札は取らない**（設計書6.76・6.80）。
+      // まとめ実行のほうが丸ごと持っているので、ここで取ると自分の札を
+      // 自分で待つ形になり、永久に進まない
+      alreadyHeld: options.suiteHoldsRun,
+    },
     async (progress, token) => {
       const controller = new AbortController();
       token.onCancellationRequested(() => {

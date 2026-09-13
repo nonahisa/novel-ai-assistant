@@ -218,11 +218,11 @@ describe("有料の確認は、最初に1回だけ", () => {
     // AIを使うのは誤字脱字と推敲の2つ（表記ゆれは機械判定）。
     // **並べた名前の数（3つ）と食い違わせない**（作者の指摘、2026-09-06）
     expect(confirmed[0]).toContain("選んだ3件のうち、AIを使う2機能が本文を");
-    expect(passed).toEqual([
-      { suite: { confirmed: true } },
-      { suite: { confirmed: true } },
-      { suite: { confirmed: true } },
-    ]);
+    // **実行の札は、まとめ実行が丸ごと持つ**（0.56.0。作者の報告、2026-09-13）。
+    // 機能ごとに取らせると、工程と工程のあいだで札が空き、あとから押した
+    // 一括処理がそこへ入り込む
+    const held = { suite: { confirmed: true, holdsRun: true } };
+    expect(passed).toEqual([held, held, held]);
   });
 
   test("確認で取りやめたら、1つも走らせない", async () => {
