@@ -109,6 +109,12 @@ describe("エラーを「入らなかった」と数えてよいか", () => {
    *
    * 待てば回復するものを「このモデルはここまでしか読めない」という記録に
    * 化けさせてはいけない。回復を試みる道は `runMeasurement` の中にある。
+   *
+   * **60秒待ってもなお通らない長さは、そこで短いほうへ降りる**（作者の
+   * 裁定、2026-09-13夜）。ただし**それはこの関数の仕事ではない。**
+   * `runMeasurement` の別の経路で降り、降りた回数を数えて台帳へ印
+   * （`contextLimitedByRate`）を残す。ここを `true` にして済ませると、
+   * **「長すぎた」と「枠を使い切った」が同じ数に混ざって理由が消える。**
    */
   test("分あたりの上限は数えない（待てば回復するものを上限にしない）", () => {
     const limited = new AIError("レート上限です。", "rate_limited");
@@ -269,12 +275,27 @@ describe("打ち切った理由の文面", () => {
     expect(text).toContain("もっと読める可能性があります");
   });
 
-  test("分あたりの上限は、「待てば伸びるかもしれない」と言う", () => {
-    const text = describeProbeStop({ chars: 186_434, reason: "rate_limited" });
+  /*
+    **分あたりの上限に当たっただけでは打ち切らない**（作者の裁定、
+    2026-09-13夜）。降りて探索を続ける。打ち切るのは**降りた回数が蓋に
+    届いたとき**だけで、そのとき作者へ言うべきことも違う——
+    「待てば伸びる」ではなく「**これ以上は待たない。時間を置いてやり直して**」
+    である。
+  */
+  test("降りきれなかったときは、「これ以上は待たない」と言う", () => {
+    const text = describeProbeStop({
+      chars: 20_803,
+      reason: "rate_limit_floor",
+      seconds: 300,
+    });
 
     expect(text).toContain("分あたりの上限");
-    expect(text).toContain("これより長い長さは測れていません");
-    expect(text).toContain("しばらく待ってから測り直す");
+    expect(text).toContain("300 秒待ちました");
+    expect(text).toContain("これ以上は待たずに、ここまでの結果を出しています");
+    expect(text).toContain("時間を置いてから測り直す");
+    // **「これより長い長さは測れていません」とは言わない。**
+    // 降りながら測ったので、その下は実際に測ってある
+    expect(text).not.toContain("これより長い長さは測れていません");
   });
 
   test("そのほかの止まり方は、返ってきた本文をそのまま見せる", () => {
@@ -294,7 +315,7 @@ describe("打ち切った理由の文面", () => {
   test("**どの理由でも「読めない」とは言わない**", () => {
     const texts = [
       describeProbeStop({ chars: 100, reason: "timeout", seconds: 60 }),
-      describeProbeStop({ chars: 100, reason: "rate_limited" }),
+      describeProbeStop({ chars: 100, reason: "rate_limit_floor", seconds: 300 }),
       describeProbeStop({ chars: 100, reason: "fatal", detail: "残高不足" }),
     ];
 
@@ -303,7 +324,31 @@ describe("打ち切った理由の文面", () => {
       expect(text, text).not.toContain("読めません");
       expect(text, text).not.toContain("読めない");
       expect(text, text).not.toContain("読めませんでした");
-      expect(text, text).toContain("測れていません");
     }
+  });
+
+  /*
+    **「測れていません」と言ってよいのは、本当に測っていないときだけ。**
+
+    時間切れと致命的な失敗は、その長さで止まってその先を試していない。
+    一方、蓋まで降りた測定は**降りながら二分探索で詰めている**ので、
+    下の範囲は実際に測ってある。ここで「測れていません」と言うと、
+    測った値を自分で否定することになる。
+  */
+  test("止めた理由によって、「測れていません」と言うかどうかが変わる", () => {
+    expect(
+      describeProbeStop({ chars: 100, reason: "timeout", seconds: 60 })
+    ).toContain("測れていません");
+    expect(
+      describeProbeStop({ chars: 100, reason: "fatal", detail: "残高不足" })
+    ).toContain("測れていません");
+
+    const floor = describeProbeStop({
+      chars: 100,
+      reason: "rate_limit_floor",
+      seconds: 300,
+    });
+    expect(floor).not.toContain("測れていません");
+    expect(floor).toContain("ここまでの結果を出しています");
   });
 });

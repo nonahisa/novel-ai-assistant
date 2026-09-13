@@ -566,7 +566,15 @@ describe("分あたりの上限に当たったとき", () => {
     );
   });
 
-  test("**測り直してもまた上限なら、そこで打ち切る**", async () => {
+  /*
+    **測り直してもまた上限なら、その長さは「送れなかった」として降りる**
+    （作者の裁定、2026-09-13夜）。
+
+    0.61.1 はここで探索を打ち切っていた。断り方は正しかったが、2回目は
+    いきなり天井へ跳ぶ作りなので（設計書6.59）、**天井で当たると1回目の
+    4,000字 しか残らない。** 降りて探索を続け、降りたことを印で言う。
+  */
+  test("**測り直してもまた上限なら、そこは送れないものとして降りる**", async () => {
     state.limitChars = 1_000_000;
     state.failKind = "rate_limited";
     state.failAboveChars = 20_000;
@@ -575,17 +583,49 @@ describe("分あたりの上限に当たったとき", () => {
 
     const { tuning, notice, error } = await measure();
 
-    expect(notice).toContain("分あたりの上限に当たりました");
-    expect(notice).toContain("これより長い長さは測れていません");
+    // **打ち切りの文は出ない。** 測れなかったのではなく、降りて測り切った
+    expect(notice).not.toContain("これより長い長さは測れていません");
+    // **降りたことは必ず言う**（この結果は窓の広さで決まっているかもしれない）
+    expect(notice).toContain("AIの分あたりの上限に当たりました");
+    expect(notice).toContain("1分のあいだに送れる量");
     expect(notice).toContain("しばらく待ってから測り直す");
-    // **そこまでの `low` は捨てない。** 測れたぶんは測れたのである
-    expect(tuning.measuredChars as number).toBeGreaterThan(0);
+    // 窓の手前まで詰めた値が出る。**4,000字で終わらない**
+    expect(tuning.measuredChars as number).toBeGreaterThan(4_000);
     expect(tuning.measuredChars as number).toBeLessThanOrEqual(20_000);
     // 結果は出せるのだから、丸ごと失敗にはしない
     expect(error).toBe("");
+    // **「入らない」とは数えない**（理由の違う2つを混ぜない）
+    expect(notice).not.toContain("入らないものとして数えました");
   });
 
-  test("同じ長さで2回までしか粘らない（窓が分単位とは限らない）", async () => {
+  test("降りた測定には、台帳に印が残る", async () => {
+    state.limitChars = 1_000_000;
+    state.failKind = "rate_limited";
+    state.failAboveChars = 20_000;
+    state.failTimes = Number.POSITIVE_INFINITY;
+
+    const { tuning } = await measure();
+
+    expect(tuning.contextLimitedByRate).toBe(true);
+  });
+
+  test("**一度も降りていなければ、印は `false` に書き直される**", async () => {
+    // 前回は上限に当たって降りた。今回はどこにも当たらない
+    const { tuning, notice } = await measure({
+      before: { measuredChars: 4_000, contextLimitedByRate: true },
+    });
+
+    /*
+      **`undefined` ではなく `false`。** 差分で書く台帳では、省いた欄は
+      消えずに前回の印が残る——**上限に当たらなかった強い測定が、弱い印を
+      着たまま一覧に並ぶ**（0.61.0 で天井の印を省いて踏んだ穴と同じ）。
+    */
+    expect(tuning.contextLimitedByRate).toBe(false);
+    // 当たっていないのだから、件数の文も出ない
+    expect(notice).not.toContain("AIの分あたりの上限に当たりました");
+  });
+
+  test("同じ長さでは2回までしか粘らない（窓が分単位とは限らない）", async () => {
     state.limitChars = 1_000_000;
     state.failKind = "rate_limited";
     state.failAboveChars = 20_000;
@@ -593,17 +633,31 @@ describe("分あたりの上限に当たったとき", () => {
 
     await measure();
 
-    // 1回目＋測り直しの1回。3回目を送るのは「粘り」であって測定ではない
-    expect(state.failCount).toBe(2);
+    /*
+      **長さごとに数える。** 降りるようにしたので、上限に当たる回自体は
+      探索の回数ぶん積み上がる。守るべきなのは「**同じ長さ**へ3回目を
+      送らない」ことである——3回目は測定ではなく粘りであり、有料AIでは
+      そのぶん払うことになる（合言葉は毎回違うが、長さが同じなら
+      プロンプト全体の字数も同じになる）。
+    */
+    const sent = new Map<number, number>();
+    for (const call of state.calls) {
+      const chars = call.systemPrompt.length + call.userPrompt.length;
+      sent.set(chars, (sent.get(chars) ?? 0) + 1);
+    }
+    expect(Math.max(...sent.values())).toBeLessThanOrEqual(2);
   });
 
-  test("**実機の再現：6回積み上がって上限が固定されない**", async () => {
+  test("**実機の再現：天井で当たっても、4,000字では終わらない**", async () => {
     /*
-      0.61.0 までは、当たるたびに「入らない」と数えて探索を続けたので、
-      二分探索が窓の手前（186,434字）へ収束し、それが**実効の上限**として
-      台帳に入った。いまは2回目で打ち切り、測れていないことを言う。
+      実機（2026-09-13夜、`gemini/gemini-flash-lite-latest`）の再現。
+
+      申告は 1,024k トークンなので、天井は 1,449,826字（約2.9MB）になる。
+      無料枠が1分の枠内でこれを受け取れるはずがなく、60秒待って測り直しても
+      同じだった。0.61.1 はそこで打ち切ったので、**通っていたのは1回目の
+      4,000字 だけ**——「実効の上限は約4,000字」という使いものにならない
+      結果が出た。いまは降りて、窓の手前まで詰める。
     */
-    // 実機と同じく、申告は 1,024k トークン。**窓は天井のはるか手前にある**
     state.declaredTokens = 1_024 * 1_024;
     state.limitChars = 10_000_000;
     state.failKind = "rate_limited";
@@ -612,15 +666,34 @@ describe("分あたりの上限に当たったとき", () => {
 
     const { tuning, notice } = await measure();
 
-    // 6回も当たらない（数えて詰めにいっていない証拠）
-    expect(state.failCount).toBeLessThanOrEqual(2);
-    // **窓の字数を「このモデルの上限」として名乗らない**
-    expect(notice).not.toContain("入らないものとして数えました");
-    expect(notice).toContain("これより長い長さは測れていません");
-    // 窓の手前で止まったこと自体は変わらない。**変わったのは名乗り方である**
+    // **ここが今回の眼目。** 1回目の 4,000字 で終わらない
+    expect(tuning.measuredChars as number).toBeGreaterThan(100_000);
     expect(tuning.measuredChars as number).toBeLessThanOrEqual(GEMINI_WALL);
-    // 天井まで測れていないのだから、天井の印も立たない
+    // **窓の広さを「このモデルの実力」として黙って名乗らない**
+    expect(notice).toContain("AIの分あたりの上限に当たりました");
+    expect(notice).toContain("1分のあいだに送れる量");
+    expect(tuning.contextLimitedByRate).toBe(true);
+    // **「入らない」とは数えない**（理由の違う2つを混ぜない）
+    expect(notice).not.toContain("入らないものとして数えました");
+    // 天井まで測れていないのだから、天井の印は立たない
     expect(tuning.contextHitCeiling).toBe(false);
+  });
+
+  test("降りた回数が、そのまま文面に出る", async () => {
+    state.declaredTokens = 1_024 * 1_024;
+    state.limitChars = 10_000_000;
+    state.failKind = "rate_limited";
+    state.failAboveChars = GEMINI_WALL;
+    state.failTimes = Number.POSITIVE_INFINITY;
+
+    const { notice } = await measure();
+
+    /*
+      **数えた回数を隠さない。** 何回当たったかは「この結果がどれだけ
+      窓に削られているか」の目安になる。1回と8回では、測り直す価値が違う。
+      当たった回は1回ずつ測り直しているので、送った回数の半分が降りた回数。
+    */
+    expect(notice).toContain(`途中で ${state.failCount / 2} 回、`);
   });
 
   test("待っている途中で中止できる", async () => {
@@ -723,5 +796,134 @@ describe("待っても直らない失敗に当たったとき", () => {
     expect(error).toBe("");
     expect(notice).not.toContain("入らないものとして数えました");
     expect(notice).toContain("これより長い長さは測れていません");
+  });
+});
+
+/**
+ * **打ち切った測定の結果で、台帳を下書きしない**（作者の裁定、2026-09-13夜）。
+ *
+ * 実機（Gemini、無料枠）では天井の回で分あたりの上限に当たって打ち切り、
+ * **通っていたのは1回目の 4,000字 だけ**だった。それでも確認ダイアログは
+ * その 4,000字 を勧めてきた——**押すと台帳の 186,435字 が 4,000字 に化ける。**
+ *
+ * 打ち切った測定の `low` は「**そこまでは通った**」でしかなく、
+ * 「そこまでしか通らない」ではない。上限の情報としては、前回**最後まで
+ * 測り切った**値のほうが強い。
+ *
+ * **歯止めを掛けすぎない。** モデルを別の量子化へ差し替えれば、本当に
+ * 短くなることはある。掛けるのは**打ち切ったときだけ**である。
+ */
+describe("打ち切った測定が、台帳より小さいとき", () => {
+  /** 前に測り切ってあった値（実機と同じ字数） */
+  const before = { measuredChars: 186_435 };
+
+  /** 時間切れで打ち切らせる。天井の回が返ってこない、という筋 */
+  function stopByTimeout(): void {
+    state.limitChars = 10_000_000;
+    state.timeoutAboveChars = 20_000;
+    // 延ばして測り直しても切れる＝打ち切りになる
+    state.timeoutTimes = Number.POSITIVE_INFINITY;
+  }
+
+  test("**「設定に反映」を出さない**", async () => {
+    stopByTimeout();
+    const { notice } = await measure({ before });
+
+    // 選択肢そのものを出さない。押せる形で見せた時点で、事故は起こりうる
+    expect(notice).not.toContain("設定に反映");
+    expect(notice).not.toContain("そのままにする");
+  });
+
+  test("**いまの記録のほうが大きいことを言って終える**", async () => {
+    stopByTimeout();
+    const { notice } = await measure({ before });
+
+    expect(notice).toContain(
+      "いまの記録（186,435字）のほうが大きいので、置き換えません"
+    );
+    // 測れたところまでは、これまでどおり見せる（黙って終えない）
+    expect(notice).toContain("実効の上限");
+  });
+
+  test("**台帳の値は、そのまま残る**", async () => {
+    stopByTimeout();
+    const { tuning } = await measure({ before });
+
+    expect(tuning.measuredChars).toBe(186_435);
+  });
+
+  test("打ち切った結果のほうが大きければ、これまでどおり反映を訊く", async () => {
+    // 前に測ってあったのは 1,000字 だけ。今回のほうが確かに大きい
+    stopByTimeout();
+    const { notice, tuning } = await measure({
+      before: { measuredChars: 1_000 },
+    });
+
+    expect(notice).toContain("設定に反映");
+    expect(tuning.measuredChars as number).toBeGreaterThan(1_000);
+  });
+
+  test("**最後まで測り切ったなら、小さくても反映を訊く**", async () => {
+    /*
+      **歯止めを掛けすぎない。** モデルを別の量子化へ差し替えたときのように、
+      本当に短くなることはある。そのときに小さい値で上書きできなければ、
+      台帳は古い値のまま永久に直せない。
+    */
+    // 打ち切らずに測り切る。読めるのは 30,000字 まで（前回より短い）
+    const { notice, tuning } = await measure({ before });
+
+    expect(notice).toContain("設定に反映");
+    expect(tuning.measuredChars as number).toBeLessThanOrEqual(30_000);
+    expect(notice).not.toContain("置き換えません");
+  });
+
+  test("**分あたりの上限で降りた測定にも掛からない**（打ち切りではない）", async () => {
+    /*
+      降りた測定は最後まで測り切っている——「そこまでしか通らない」を
+      二分探索で詰めた値である。打ち切りと同じ歯止めを掛けると、
+      **無料枠のAIでは台帳が永久に直せなくなる。**
+
+      **蓋（`MAX_RATE_LIMIT_DESCENTS`）に届かない筋にしてある。** 届くと
+      それは打ち切りであり、歯止めが掛かるのが正しい（次のテストで見る）。
+      壁を天井の近くへ置けば、降りるのは1〜2段で済む。
+    */
+    state.limitChars = 10_000_000;
+    state.declaredTokens = 40_960;
+    state.failKind = "rate_limited";
+    state.failAboveChars = 20_000;
+    state.failTimes = Number.POSITIVE_INFINITY;
+
+    const { notice } = await measure({ before });
+
+    expect(notice).toContain("設定に反映");
+    expect(notice).not.toContain("置き換えません");
+  });
+
+  /*
+    **蓋に届いたら、それは打ち切りである**（作者の裁定、2026-09-13夜）。
+
+    1段ごとに60秒待つので、降りる段が増えるほど作者の待ち時間が積み上がる。
+    蓋で止めたときの `low` は「そこまでは通った」でしかないので、
+    台帳に大きい値があるならそちらを残す。
+  */
+  test("蓋まで降りきったときは、台帳を守る", async () => {
+    state.limitChars = 10_000_000;
+    state.declaredTokens = 262_144;
+    state.failKind = "rate_limited";
+    state.failAboveChars = 20_000;
+    state.failTimes = Number.POSITIVE_INFINITY;
+
+    const { notice } = await measure({ before });
+
+    expect(notice).toContain("これ以上は待たずに");
+    expect(notice).toContain("置き換えません");
+    expect(notice).not.toContain("設定に反映");
+  });
+
+  test("台帳が空なら、これまでどおり反映を訊く（比べる相手が無い）", async () => {
+    stopByTimeout();
+    const { notice } = await measure();
+
+    expect(notice).toContain("設定に反映");
   });
 });

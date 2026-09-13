@@ -204,6 +204,13 @@ function readCell(tuning: ModelTuning): string {
   */
   const notes: string[] = [];
   if (tuning.contextHitCeiling) notes.push("これ以上は試していません");
+  /*
+    **分あたりの上限で降りた測定にも断りを付ける**（作者の裁定、
+    2026-09-13夜）。天井の印とは弱さの向きが逆で、こちらは**低めに出て
+    いる**——待ってから測り直せば伸びることがある。並べて出すのは、
+    どちらも「この数字は弱い」の別々の理由だからである。
+  */
+  if (tuning.contextLimitedByRate) notes.push("分あたりの上限で決まった値");
   // 入力トークン数で測った行には何も足さない——それが本来の測り方で、
   // 断りが要るのは弱いほうだけである（作者の依頼、2026-09-13）
   if (tuning.contextMeasuredBy === "words") notes.push("合言葉で測定");
@@ -369,6 +376,19 @@ export function modelPickDetail(
 function pickReadLength(tuning: ModelTuning | undefined): string | undefined {
   const chars = tuning?.measuredChars;
   if (chars === undefined) return undefined;
+  /*
+    **分あたりの上限で降りた値には「以上」を付けない**（作者の裁定、
+    2026-09-13夜）。天井の印は「本当はもっと読めるかもしれない」なので
+    「以上」でよいが、こちらは**その逆で、値そのものが低く出ている。**
+    同じ「以上」を付けると、待てば伸びる数字を**強い実測だと誤解させる。**
+
+    天井の印と重なることは、まず無い（天井の回で降りたのなら、通った
+    最大の字数は天井へ届かない）。それでも重なったときは、**弱いほうを
+    出す**——強く見せて外すより、弱く見せて外すほうが害が小さい。
+  */
+  if (tuning?.contextLimitedByRate) {
+    return `読める ${chars.toLocaleString("ja-JP")}字（分あたりの上限で頭打ち）`;
+  }
   const suffix = tuning?.contextHitCeiling ? "字以上" : "字";
   return `読める ${chars.toLocaleString("ja-JP")}${suffix}`;
 }

@@ -8,6 +8,7 @@ import {
   tuningStatsEntries,
   type TuningStatsEntry,
 } from "../../src/core/tuningStats";
+import { parseModelTuning } from "../../src/core/modelTuning";
 
 /**
  * AIチューニングの実測一覧（作者の要望、2026-09-06
@@ -487,6 +488,145 @@ describe("モデル選択の説明", () => {
     ).toBe(
       "対応: completion, tools ／ 実測 11.4 トークン/秒 ／ " +
         "読める 50,209字以上 ／ 書ける 約3,535字以上"
+    );
+  });
+});
+
+/**
+ * **分あたりの上限で頭打ちになった値には、印を付ける**（作者の裁定、
+ * 2026-09-13夜）。
+ *
+ * 実機の Gemini（無料枠）は、60秒待って送り直してもなお上限に当たる長さが
+ * あった。そこは「その長さでは送れない」として降りるので、**出てくる値は
+ * そのモデルの実力より低い**——待ってから測り直せば伸びることがある。
+ *
+ * **天井の印（`contextHitCeiling`）とは弱さの向きが逆である。** あちらは
+ * 「本当はもっと読めるかもしれない（下限値）」、こちらは「低めに出ている」。
+ * どちらも数字が弱いことを言うが、理由が違うので別の言葉で出す。
+ */
+describe("分あたりの上限で決まった読める長さ", () => {
+  test("表に断りが出る", () => {
+    const markdown = buildTuningStatsMarkdown([
+      entry("Gemini", "gemini-flash-lite-latest", {
+        measuredChars: 186_435,
+        contextLimitedByRate: true,
+      }),
+    ]);
+    expect(rows(markdown)[0][6]).toBe("186,435（分あたりの上限で決まった値）");
+  });
+
+  test("**当たっていなければ、断りは出ない**（`false` を書いた台帳）", () => {
+    const markdown = buildTuningStatsMarkdown([
+      entry("Gemini", "gemini-flash-lite-latest", {
+        measuredChars: 186_435,
+        contextLimitedByRate: false,
+      }),
+    ]);
+    expect(rows(markdown)[0][6]).toBe("186,435");
+  });
+
+  test("天井・合言葉の断りと、同じ列に並ぶ", () => {
+    // **弱さの理由は重なる。** 片方だけ出すと、もう片方の弱さが隠れる
+    const markdown = buildTuningStatsMarkdown([
+      entry("Gemini", "x", {
+        measuredChars: 1000,
+        contextHitCeiling: true,
+        contextLimitedByRate: true,
+        contextMeasuredBy: "words",
+      }),
+    ]);
+    expect(rows(markdown)[0][6]).toBe(
+      "1,000（これ以上は試していません。分あたりの上限で決まった値。合言葉で測定）"
+    );
+  });
+
+  test("**選ぶ画面では「以上」を付けない**（印の意味が逆である）", () => {
+    /*
+      天井の印なら「以上」でよい——本当はもっと読めるかもしれないからで
+      ある。こちらは逆で、値そのものが低く出ている。同じ「以上」を付けると、
+      待てば伸びる数字を**強い実測だと誤解させる。**
+    */
+    const detail = modelPickDetail([], {
+      measuredChars: 186_435,
+      contextLimitedByRate: true,
+    });
+    expect(detail).toBe("読める 186,435字（分あたりの上限で頭打ち）");
+    expect(detail).not.toContain("字以上");
+  });
+
+  test("当たっていなければ、選ぶ画面もこれまでどおり", () => {
+    expect(
+      modelPickDetail([], {
+        measuredChars: 186_435,
+        contextLimitedByRate: false,
+      })
+    ).toBe("読める 186,435字");
+  });
+
+  test("天井の印と重なったときは、弱いほうを出す", () => {
+    // 強く見せて外すより、弱く見せて外すほうが害が小さい
+    expect(
+      modelPickDetail([], {
+        measuredChars: 1000,
+        contextHitCeiling: true,
+        contextLimitedByRate: true,
+      })
+    ).toBe("読める 1,000字（分あたりの上限で頭打ち）");
+  });
+});
+
+/**
+ * **設定の生の値から、表と選ぶ画面まで届くこと**（作者の依頼、
+ * 2026-09-13夜）。
+ *
+ * 0.58.0 で天井の印を足したとき、**`parseModelTuning` に読む側を足し忘れた。**
+ * 表のテストは組み立てたレコードを直に渡していたので通ってしまい、
+ * **実際には一度も画面に出ていなかった。** 同じ取りこぼしを繰り返さない
+ * ために、設定 → `parseModelTuning` → 表 の道を通して見る。
+ */
+describe("分あたりの上限の印が、設定から表まで届く", () => {
+  const raw = {
+    "gemini/gemini-flash-lite-latest": {
+      measuredChars: 186_435,
+      contextLimitedByRate: true,
+    },
+    // **`false` も中身である。** 「測ったが、上限では降りなかった」
+    "ollama/gemma4:12b": {
+      measuredChars: 30_000,
+      contextLimitedByRate: false,
+    },
+    // 印の付く前の古い台帳。これまでどおりの扱いのまま
+    "ollama/qwen3:8b": { measuredChars: 20_000 },
+  };
+
+  test("`true` が読めている", () => {
+    const tuning = parseModelTuning(raw).get("gemini/gemini-flash-lite-latest");
+    expect(tuning?.contextLimitedByRate).toBe(true);
+  });
+
+  test("**`false` も読めている**（`undefined` へ潰さない）", () => {
+    const tuning = parseModelTuning(raw).get("ollama/gemma4:12b");
+    expect(tuning?.contextLimitedByRate).toBe(false);
+  });
+
+  test("古い台帳には印が無いまま", () => {
+    const tuning = parseModelTuning(raw).get("ollama/qwen3:8b");
+    expect(tuning?.contextLimitedByRate).toBeUndefined();
+  });
+
+  test("**設定から読んだものを表にすると、断りが出る**", () => {
+    const tuning = parseModelTuning(raw).get("gemini/gemini-flash-lite-latest");
+    if (!tuning) throw new Error("読めていない");
+    const markdown = buildTuningStatsMarkdown([
+      entry("Gemini", "gemini-flash-lite-latest", tuning),
+    ]);
+    expect(rows(markdown)[0][6]).toBe("186,435（分あたりの上限で決まった値）");
+  });
+
+  test("**設定から読んだものを選ぶ画面に出しても、断りが出る**", () => {
+    const tuning = parseModelTuning(raw).get("gemini/gemini-flash-lite-latest");
+    expect(modelPickDetail([], tuning)).toBe(
+      "読める 186,435字（分あたりの上限で頭打ち）"
     );
   });
 });

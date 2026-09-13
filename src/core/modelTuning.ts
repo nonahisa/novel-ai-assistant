@@ -93,6 +93,25 @@ export interface ModelTuning {
    */
   readonly contextMeasuredBy?: ProbeMeasureMethod;
   /**
+   * 読める長さが、**分あたりの上限（`rate_limited`）で頭打ちになったか**
+   * （作者の裁定、2026-09-13夜）。
+   *
+   * 実機の Gemini（無料枠）は、60秒待って送り直してもなお上限に当たる長さが
+   * あった。そこは「その長さでは送れない」として探索を降りる——**長さの
+   * 限界ではなく、1分のあいだに送れる量の限界である。** 印を付けずに
+   * 降りていたのが 0.61.1 以前の問題だったので、降りた測定には必ず印を残す。
+   *
+   * **`contextHitCeiling` とは印の意味が逆である。** 天井の印は「本当は
+   * もっと読めるかもしれない（下限値）」、こちらは「待てばもっと長くなる
+   * かもしれない（低めに出ている）」——どちらも数字が弱いことを言うが、
+   * 弱い理由が違うので、一覧でも選ぶ画面でも別の言葉で出す。
+   *
+   * **測るたびに必ず書く**（`contextHitCeiling` と同じ約束）。台帳は差分で
+   * 書かれるので、省くと前回の `true` が残り、**上限に当たらなかった強い
+   * 測定が弱い印を着たまま並ぶ**（0.61.0 で天井の印を省いて踏んだ穴）。
+   */
+  readonly contextLimitedByRate?: boolean;
+  /**
    * 1回の応答で書けた、実測の出力トークン数（設計書6.65.14の1）。
    *
    * **読める長さ（`measuredChars`）と違い、確認なしで自動的に保存される**
@@ -350,6 +369,19 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
       typeof entry.contextHitCeiling === "boolean"
         ? entry.contextHitCeiling
         : undefined;
+    /*
+      **こちらも `false` を読む**（`contextHitCeiling` と同じ理由）。
+
+      測るたびに必ず書かれる欄なので、`false` は「測ったが、分あたりの
+      上限では降りなかった」というれっきとした中身である。ここで
+      `undefined` へ潰すと、表の見た目は同じでも「読めているか」を
+      確かめられなくなる——0.58.0 で天井の印を**書いているのに読んで
+      いなかった**のは、まさにそこを見ていなかったせいである。
+    */
+    const contextLimitedByRate =
+      typeof entry.contextLimitedByRate === "boolean"
+        ? entry.contextLimitedByRate
+        : undefined;
     // **知らない測り方は読まない**（`speedSource` と同じ理由）。一覧は
     // 決まった2つしか言葉へ直せないので、読むと生の値が表に出る
     const contextMeasuredBy = MEASURE_METHODS.find(
@@ -371,6 +403,7 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
       ...(charsPerTokenSamples !== undefined ? { charsPerTokenSamples } : {}),
       ...(outputMeasureTimedOut !== undefined ? { outputMeasureTimedOut } : {}),
       ...(contextHitCeiling !== undefined ? { contextHitCeiling } : {}),
+      ...(contextLimitedByRate !== undefined ? { contextLimitedByRate } : {}),
       ...(contextMeasuredBy !== undefined ? { contextMeasuredBy } : {}),
       ...(measuredAt !== undefined ? { measuredAt } : {}),
     };
