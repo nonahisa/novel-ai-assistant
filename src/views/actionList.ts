@@ -1516,9 +1516,20 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           "文字数の数え方、執筆目標、AIの応答待ち時間などの設定を開きます。" +
           "この拡張機能の設定だけを絞り込んで表示します。",
       },
+      /*
+        **設定管理へしまう**（作者の指定、2026-09-13。設計書6.56.3）。
+
+        「訊かないことにした確認を見直す」は、押す機会がめったに無い
+        後始末である。表に出しておくと、日々使う操作の中に混ざって
+        目が滑る（4つの設定を移したときと同じ判断）。
+
+        **消さずに、しまう。** コマンドパレットからは今までどおり呼べ、
+        設定管理の `novelai.confirm.remembered` の説明からも押せる。
+      */
       {
         kind: "action",
         command: "novelai.manageConfirmSkips",
+        hiddenFromActionList: true,
         label: "訊かないことにした確認を見直す",
         icon: "question",
         requiresWork: false,

@@ -14,7 +14,7 @@
  * 版を上げるときは、CLAUDE.md の「版は5つの文書で揃える」の表に加えて
  * **ここも直す**（忘れても `npm run check` が落ちる）。
  */
-export const SERVER_VERSION = "0.52.1";
+export const SERVER_VERSION = "0.52.2";
 
 /** MCP のクライアントに見せる名前。`.mcp.json` の登録名と揃える */
 export const SERVER_NAME = "novel-ai-assistant";
