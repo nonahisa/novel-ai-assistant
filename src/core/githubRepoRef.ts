@@ -1,3 +1,5 @@
+import { EXAMPLE_REPO } from "./exampleNames";
+
 /**
  * GitHubのリポジトリの指し方を1つにそろえる（設計書5.8.12）。
  *
@@ -90,7 +92,7 @@ function pickSegments(value: string): [string, string] | undefined {
 /** 入力欄に出す、直し方の分かる言い方。問題なければ `undefined` */
 export function describeRepoRefProblem(input: string): string | undefined {
   if (input.trim().length === 0) {
-    return "リポジトリを入力してください（例：nonahisa/HisasNovels）";
+    return `リポジトリを入力してください（例：${EXAMPLE_REPO}）`;
   }
   if (parseGithubRepoRef(input)) return undefined;
   return "「持ち主/リポジトリ名」か、GitHubのURLを入力してください";

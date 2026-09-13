@@ -17,6 +17,11 @@ import {
 } from "./nameHonorific";
 import { KINSHIP_WORDS, PRONOUN_WORDS } from "./genericPersonWords";
 import {
+  HAS_KANJI,
+  MAX_FAMILY_NAME_LENGTH,
+  isFamilyNameForm,
+} from "./familyName";
+import {
   hasChange,
   recordChangeChapters,
   recordObservation,
@@ -1469,42 +1474,11 @@ export function isSuffixCallOf(shorter: string, longer: string): boolean {
   return bare.length >= 3 && bare !== left && right.endsWith(bare);
 }
 
-/** 漢字を1文字でも含むか */
-const HAS_KANJI = /[一-鿿㐀-䶿]/u;
-
-/** 姓とみなせる長さ。「密倉」「三門」「春原」「長谷川」まで */
-const MAX_FAMILY_NAME_LENGTH = 3;
-
-/**
- * 姓名を繋げた名前と、名だけの名前か（「密倉文佳」と「文佳」）。
- *
- * **日本語の名前は空白で区切られないことが多い。** `splitNameParts` は
- * 空白・中黒がある場合しか分解しないので、「密倉文佳」からは何も取り出せず、
- * 後から「文佳」が出てきても別人として登録される（実データで起きた）。
- *
- * `isSuffixCallOf` は3字以上しか見ない。日本語の名は2字が多いので、
- * 「文佳」「月夜」「太志」はそこを通れない。3字の下限は
- * 「先生」「さん」のような語で候補が溢れるのを防ぐためだった。
- * そこでこちらは**漢字であること**を条件にして、2字から拾えるようにする。
- *
- * **統合はしない。候補として出すだけ。** 「太郎」と「金太郎」のように
- * 別人の可能性は残るので、判断は作者に委ねる（`findMergeCandidates` の方針）。
- */
-export function isFamilyNameForm(shorter: string, longer: string): boolean {
-  const left = shorter.trim();
-  const right = longer.trim();
-
-  // 1字だと「子」「郎」のような字で無関係な組が大量に並ぶ
-  if (left.length < 2) return false;
-  if (!right.endsWith(left)) return false;
-
-  const family = right.slice(0, right.length - left.length);
-  if (family.length < 1 || family.length > MAX_FAMILY_NAME_LENGTH) return false;
-
-  // 姓と名の両方が漢字であること。カタカナ名の省略は isAbbreviationOf が見る。
-  // ひらがなだけの語（「ちゃん」「さん」）を姓とみなさないためでもある
-  return HAS_KANJI.test(left) && HAS_KANJI.test(family);
-}
+// 姓の判定（`HAS_KANJI` / `MAX_FAMILY_NAME_LENGTH` / `isFamilyNameForm`）は
+// `core/familyName.ts` へ出した。抽出の検算も同じ判定を要るためで、
+// **写しを作らない**ようにここからは呼ぶだけにしてある。
+// これまでの呼び出し元のために、名前はここからも出しておく。
+export { isFamilyNameForm } from "./familyName";
 
 /**
  * 頭に付く丁寧の「お」「御」を落とす。

@@ -46,9 +46,9 @@ import {
 } from "../core/chatContext";
 import {
   buildWorkChatPrompt,
+  buildWorkChatSystemPrompt,
   parseWorkChatAnswer,
   WORK_CHAT_SCHEMA,
-  WORK_CHAT_SYSTEM_PROMPT,
   WORK_CHAT_VERSION,
   type WorkChatTurn,
 } from "../prompts/workChat";
@@ -426,17 +426,27 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 助言方針は**該当するタイプの文章だけ**を足す（全タイプを毎回送ると
    * 数千字が積み上がり、しかも他のタイプの記述に引きずられる）。
    * 診断していなければ、素のプロンプトをそのまま返す。
+   *
+   * **使い方の節は、目次を渡す回にだけ入る**（`featureIndex`）。目次を
+   * 渡さないのに「目次に無い機能は存在しません」と書いてあると嘘になる。
    */
-  private buildSystemPrompt(work: WorkEntry | undefined): string {
-    if (!work || !this.advicePolicies) return WORK_CHAT_SYSTEM_PROMPT;
+  private buildSystemPrompt(
+    work: WorkEntry | undefined,
+    featureIndex: boolean
+  ): string {
+    const base = buildWorkChatSystemPrompt({ featureIndex });
+    if (!work || !this.advicePolicies) return base;
 
-    const profile = this.advicePolicies.get(work.id);
-    if (!profile) return WORK_CHAT_SYSTEM_PROMPT;
+    // **作品に無ければ、作者の既定を使う**（0.51.1。設計書6.90.2）。
+    // 使用開始時の診断で答えた9問は、まだ作品が無いところで答えるので
+    // 作者ごとに置いてある。ここで拾わないと、はじめの1作で効かない
+    const profile = this.advicePolicies.getEffective(work.id);
+    if (!profile) return base;
 
     const now = new Date();
     // 何を残すかは `core/advicePolicy.ts` が決める（文言を試験から見るため）
     for (const line of advicePolicyLogLines(profile, now)) logStep(line);
-    return `${WORK_CHAT_SYSTEM_PROMPT}\n\n${buildAdvicePolicyPrompt(profile, now)}`;
+    return `${base}\n\n${buildAdvicePolicyPrompt(profile, now)}`;
   }
 
   /**
@@ -454,8 +464,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   ): Promise<void> {
     if (!work || !signals || !this.advicePolicies) return;
 
-    const before = this.advicePolicies.get(work.id);
-    if (!before) return; // 診断していない作品では推定も持たない
+    // **既定から始まった作品でも、推定は効かせる。** ここで書き写され、
+    // 以後その作品が自分の値として持つ（作者の既定は動かない）
+    const before = this.advicePolicies.getEffective(work.id);
+    if (!before) return; // どこにも方針が無ければ推定も持たない
 
     const now = new Date();
     const after = applyProfileSignals(before, signals, now);
@@ -803,8 +815,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
       // 何を渡したかを残す。答えがおかしいときに、説明が届いていたのかを
       // 後から確かめられないと切り分けられない
+      // 話題（創作か操作か）も残す。目次を落とした回に「そんな機能はない」と
+      // 答えていたら、まずここを見て判定の外れを疑う
       logStep(
-        `相談: 使い方の説明 ${guide.reason} / ${guide.text.length}字` +
+        `相談: 使い方の説明 ${guide.topic}/${guide.reason} / ${guide.text.length}字` +
           (guide.selected.length > 0 ? ` / ${guide.selected.join("、")}` : "")
       );
 
@@ -812,7 +826,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 診断していない作品では何も足さない（これまでどおりの相談になる）。
       // 足したことを必ず記録する——**方針が効いているかを作者が確かめる
       // 唯一の手掛かり**で、答えの調子が変わった理由がここにしか無い
-      const systemPrompt = this.buildSystemPrompt(context?.work);
+      // 目次を渡さない回（創作の相談）は、使い方の節も外す。
+      // **切り替えは1つの条件で**——2つに割れると、片方だけ直る日が来る
+      const withFeatureIndex = guide.topic !== "craft";
+      const systemPrompt = this.buildSystemPrompt(
+        context?.work,
+        withFeatureIndex
+      );
 
       // **上限と、その出どころを一度に取る。** 切り詰められたときの案内は
       // 出どころで変わる（実測が効いているのに「設定を大きくして」と言うのは
@@ -839,9 +859,12 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           .reduce((sum, block) => sum + block.length, 0);
       // 助言方針はシステムプロンプト側に足している。診断していない作品では
       // 素のプロンプトなので0になる
+      // 引く相手は、この回に組んだ素のプロンプト。使い方の節を外した回に
+      // 全部入りの長さを引くと、方針のぶんが打ち消されて0に見える
       const policyChars = Math.max(
         0,
-        systemPrompt.length - WORK_CHAT_SYSTEM_PROMPT.length
+        systemPrompt.length -
+          buildWorkChatSystemPrompt({ featureIndex: withFeatureIndex }).length
       );
 
       const call = (
@@ -865,18 +888,28 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         return resolved.provider.generate({
           systemPrompt,
           /*
-            **考えている中身を画面へ流す**（設計書6.63.2）。
+            **相談でも思考モードを切る**（作者の裁定、2026-09-13）。
 
-            大きく開いた画面で長い相談をすると、答えが返るまで何も
-            起きない時間が続く。思考を流せば、少なくとも「動いている」
-            ことと「何を考えているか」が見える。
+            CLAUDE.md の実装ルール6は「`think: false` で思考モードを
+            無効化する」と定めており、**この製品のAI呼び出しは、相談を
+            除いて全部それに従っていた。**
 
-            **流して受け取る道でしか呼ばれない**（いまは開発ビルド限定）。
-            まとめて受け取る形では、応答が全部そろってから届くので
-            流す余地が無い——呼ばれなければ、画面はこれまでどおり
-            「考えています…」のままである。
+            残していた理由は「考えている中身を画面へ流す」ため
+            （設計書6.63.2）だったが、**流して受け取る道は開発ビルド限定**
+            である。配布版はまとめて受け取るので、思考は走っているのに
+            画面には届かない——**時間と出力の枠だけを食っていた。**
+
+            出力の枠は考えごとと答えで分け合う。実測（qwen3:8b、2026-09-13）
+            では、思考を切ると答えが9トークンで済むところ、切らないと
+            考えごとだけで202トークンを使った。切れば、その枠が全部
+            答えに回る。
+
+            **`disableThinking: true` は、もともと下に置いてある。**
+            効いていなかったのは流す道だけで、`thinkOptionFor`
+            （`ai/ollamaProvider.ts`）が「流す相手がいるなら切らない」を
+            優先していたためである。流す相手（`onThinking`）を外したので、
+            どちらの道でも切れる。
           */
-          onThinking: (delta) => this.postAll({ type: "thought", delta }),
           // 作品の外のファイルについての相談は、どの作品にも属さないので
           // 記録しない（`workFolder` が無ければ記録されない）
           meta: {

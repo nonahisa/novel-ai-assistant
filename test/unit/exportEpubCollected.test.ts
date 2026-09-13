@@ -350,7 +350,12 @@ const GOLDEN: Record<string, string> = {
     // 0.37.2：飾りに二重罫を足した（.ornament-double-rule。設計書6.65.17）。
     //   **CSSだけが変わり、面のXHTMLは1バイトも変わっていない**
     //   ——飾りを選んでいない本の見た目は同じである
-    "5310b9fb9779724dc0f224121a727a146879aa9375b186c40e3c1069475dfa1a",
+    // 0.57.0：人物紹介の紹介文を一段下げた（作者の指定、2026-09-13
+    //   「人物紹介の解説は一段下げて」）。`.character-summary` に
+    //   `padding-inline-start: 1em` が増えた。**これは見た目を変える
+    //   と決めた変更**なので、金型のほうを更新する。ここを直さずに
+    //   済ませると、次に誰かが見た目を変えたときに気づけない
+    "f311500002027ae65542018dc766b5898c69eaec63a8f3b8acfae9f41c485ac9",
   "OEBPS/cover.xhtml":
     "57c976846884228c05723713693b3112cba591ce48021a884c7ad902cbdf15e5",
   "OEBPS/titlepage.xhtml":

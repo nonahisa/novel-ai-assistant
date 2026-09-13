@@ -102,8 +102,8 @@ vi.mock("../../src/ai/registry", () => ({
         }
 
         // 入力の測定：合言葉を書き写す
-        const head = /最初の合言葉は『(.+?)』/.exec(params.userPrompt)?.[1] ?? "";
-        const tail = /最後の合言葉は『(.+?)』/.exec(params.userPrompt)?.[1] ?? "";
+        const head = /ひとつ目の合言葉は『(.+?)』/.exec(params.userPrompt)?.[1] ?? "";
+        const tail = /ふたつ目の合言葉は『(.+?)』/.exec(params.userPrompt)?.[1] ?? "";
         return {
           text: `${head} ${tail}`,
           usage: { inputTokens: 0, outputTokens: 0 },

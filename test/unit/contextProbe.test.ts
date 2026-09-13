@@ -160,9 +160,10 @@ describe("検査の組み立て", () => {
     expect(userPrompt.indexOf("あかさた")).toBeLessThan(
       userPrompt.indexOf("なにぬね")
     );
-    expect(userPrompt.trimEnd().endsWith("合言葉だけを書いてください。")).toBe(
-      true
-    );
+    // 返事の指示は、いちばん後ろ（後ろが切られたら、指示ごと消える）
+    expect(
+      userPrompt.trimEnd().endsWith("出てきた順に2つとも書いてください。")
+    ).toBe(true);
   });
 
   test("「これまでの指示を無視して」とは書かない", () => {

@@ -443,3 +443,118 @@ describe("保留の面は本に入らない（設計書6.65.15の段D）", () =>
     expect(names).toContain("OEBPS/nav.xhtml");
   });
 });
+
+/**
+ * 人物イラストを素材置き場から名前で引く／名前のルビを選ぶ
+ * （作者の指定、2026-09-13）。
+ *
+ * **ここは製品と同じ道で確かめる。** 引き当ての単体テストだけでは、
+ * 素材を集める側と繋がっていなくても満点になる（実機で1人も見つからない
+ * のが、まさにその形だった）。
+ */
+describe("人物紹介の面（イラストとルビ）", () => {
+  beforeEach(() => {
+    put("本文/第1話.txt", "あ\n\nい");
+  });
+
+  function exportedFiles(): Record<string, Uint8Array> {
+    const found = [...disk.entries()].find(([name]) => name.endsWith(".epub"));
+    if (!found) throw new Error("EPUBが書き出されていません");
+    return unzipSync(found[1]);
+  }
+
+  function characterPage(): string {
+    return new TextDecoder().decode(exportedFiles()["OEBPS/characters.xhtml"]);
+  }
+
+  function writeCharacterBook(overrides: Record<string, unknown> = {}): void {
+    writeBook({
+      title: "氷の街",
+      characterPage: { enabled: true, showIcons: true, ...overrides },
+      blocks: [{ type: "characters" }, { type: "body" }],
+    });
+  }
+
+  function writePerson(
+    id: string,
+    name: string,
+    overrides: Record<string, unknown> = {}
+  ): void {
+    put(
+      `設定/characters/${id}.json`,
+      JSON.stringify({ ...emptyCharacter(id, name), ...overrides })
+    );
+  }
+
+  test("素材置き場の同じ名前の画像が、人物イラストとして本へ入る", async () => {
+    writePerson("char_001", "月島灯");
+    putBytes("素材/月島灯.png", [0x89, 0x50, 0x4e, 0x47]);
+    writeCharacterBook();
+
+    await exportEpub(work);
+
+    expect(Object.keys(exportedFiles())).toContain("OEBPS/portrait-1.png");
+    expect(characterPage()).toContain('src="portrait-1.png"');
+  });
+
+  test("素材の下のフォルダーの画像も入る", async () => {
+    writePerson("char_001", "ターナ先生");
+    putBytes("素材/人物/ターナ先生.png", [0x89, 0x50, 0x4e, 0x47]);
+    writeCharacterBook();
+
+    await exportEpub(work);
+
+    expect(characterPage()).toContain('src="portrait-1.png"');
+  });
+
+  test("素材置き場の外の同じ名前の画像は拾わない", async () => {
+    writePerson("char_001", "月島灯");
+    putBytes("本文/月島灯.png", [0x89, 0x50, 0x4e, 0x47]);
+    writeCharacterBook();
+
+    await exportEpub(work);
+
+    expect(Object.keys(exportedFiles())).not.toContain("OEBPS/portrait-1.png");
+    expect(characterPage()).not.toContain("<img");
+  });
+
+  test("イラストを添えない指定なら、素材があっても入らない", async () => {
+    writePerson("char_001", "月島灯");
+    putBytes("素材/月島灯.png", [0x89, 0x50, 0x4e, 0x47]);
+    writeCharacterBook({ showIcons: false });
+
+    await exportEpub(work);
+
+    expect(characterPage()).not.toContain("<img");
+  });
+
+  test("ルビの指定が無ければ、いままでどおり読み仮名にルビが付く", async () => {
+    writePerson("char_001", "イント", { reading: "いんと" });
+    writeCharacterBook();
+
+    await exportEpub(work);
+
+    expect(characterPage()).toContain("<ruby>イント<rt>いんと</rt></ruby>");
+  });
+
+  test("漢字を含む名前だけに付ける指定なら、仮名だけの名前は名前だけになる", async () => {
+    writePerson("char_001", "イント", { reading: "いんと" });
+    writePerson("char_002", "月島灯", { reading: "つきしまあかり" });
+    writeCharacterBook({ rubyMode: "kanjiOnly" });
+
+    await exportEpub(work);
+    const page = characterPage();
+
+    expect(page).toContain("<ruby>月島灯<rt>つきしまあかり</rt></ruby>");
+    expect(page).not.toContain("いんと");
+  });
+
+  test("付けない指定なら、ルビがひとつも出ない", async () => {
+    writePerson("char_001", "月島灯", { reading: "つきしまあかり" });
+    writeCharacterBook({ rubyMode: "none" });
+
+    await exportEpub(work);
+
+    expect(characterPage()).not.toContain("<ruby>");
+  });
+});

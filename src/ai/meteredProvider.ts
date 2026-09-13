@@ -12,9 +12,18 @@ import { contextOverflow, skipsContextGuard } from "./contextGuard";
 import { resolveMaxOutputTokens } from "./outputLimit";
 import { logStep } from "../core/logger";
 import { AiQueueAbortError, acquireCall } from "../core/aiSequence";
-import { type SpeedSource, saveModelTuning } from "../core/modelTuning";
+import {
+  type SpeedSource,
+  modelTuning,
+  saveModelTuning,
+} from "../core/modelTuning";
 import { outputTokensPerSecond } from "../core/tuningStats";
-import { TOKENS_PER_CHAR } from "../core/sizeBudget";
+import {
+  MIN_CHARS_PER_TOKEN_SAMPLES,
+  TOKENS_PER_CHAR,
+  mergeCharsPerToken,
+  roundCharsPerToken,
+} from "../core/sizeBudget";
 
 /**
  * これに満たない応答からは速さを採らない（トークン）。
@@ -57,6 +66,23 @@ const SPEED_WRITE_CHANGE_RATIO = 0.2;
  * なる——レビューの指摘、2026-09-06。見せるための参考値なので即時性は要らない）。
  */
 const SPEED_WRITE_CHANGE_MIN_INTERVAL_MS = 30_000;
+
+/**
+ * これに満たない字数の回からは、字/トークンを採らない。
+ *
+ * **チャット定型文のぶんが支配的になる。** どのプロバイダも、送った
+ * プロンプトの前後に役割の印（`<|im_start|>` のようなもの）を付けてから
+ * 数える。数十トークンの固定費なので、短い回で割ると「そのモデルの
+ * 字/トークン」ではなく**定型文の重さ**を測ることになる。
+ *
+ * しかもこの実装は最小値を覚えるので、接続確認のような数十字の回が
+ * 1度混ざると、**その値に張り付いたまま二度と動かない。**
+ * 2,000字あれば固定費の影響は数%に収まり、実際の機能のプロンプト
+ * （指示だけで数千字ある）はすべてこの線を越える。
+ *
+ * 速度のほうに `MIN_SPEED_SAMPLE_TOKENS` を置いたのと同じ理由である。
+ */
+const MIN_RATIO_SAMPLE_CHARS = 2000;
 
 /**
  * AI呼び出しの送信量を記録するために、プロバイダを包む。
@@ -159,6 +185,9 @@ export class MeteredProvider implements AIProvider {
           userChars: params.userPrompt.length,
           outputTokens: this.outputTokensFor(params),
           contextWindow: await this.contextWindowOf(params.model),
+          // **チャンクを決めたのと同じ台帳を見る**（設計書6.77）。
+          // 実測が無ければ `resolveTokensPerChar` が従来の 0.7 を返す
+          measured: modelTuning(this.inner.id, params.model),
         });
     if (overflow) {
       // **送らなかったことも記録に残す。** 記録に何も出ないと、作者からは
@@ -201,6 +230,7 @@ export class MeteredProvider implements AIProvider {
       // **うまくいった回からだけ速さを採る**（下のコメントに理由）。
       // 台帳への書き込みは抑えてあるので、たいていは何もせずに戻る
       await this.recordSpeed(params.model, result);
+      await this.recordCharsPerToken(params, result);
       return result;
     } catch (error) {
       this.record(params, {
@@ -402,6 +432,98 @@ export class MeteredProvider implements AIProvider {
       Math.abs(tokensPerSecond - previous.tokensPerSecond) /
       previous.tokensPerSecond;
     return change >= SPEED_WRITE_CHANGE_RATIO;
+  }
+
+  /** 字/トークンを台帳へ書けなかったことを言うのは、同じモデルで一度だけ */
+  private readonly loggedRatioFailure = new Set<string>();
+
+  /**
+   * 応答から**字/トークンの実測**を採って、台帳へ残す（設計書6.77）。
+   *
+   * 製品は字↔トークンを当て推量（0.7字/トークン）で見ているが、作者の
+   * 送信量の記録437件で突き合わせると**実測はその倍**だった。見積りが
+   * 小さすぎると、入るのに入らないと判断して本文を細かく切る。
+   * **この製品は既にこの数字を1回ずつ記録している**（`core/usageLog.ts` の
+   * `systemChars`・`userChars` と `usage.inputTokens`）。使っていなかっただけである。
+   *
+   * 採らない回が3つある。**どれも「測ったことにならない」回である。**
+   *
+   * - `inputTokens` を返さないAI……見積りで割ると、見積りを見積りで
+   *   検算することになって意味がない
+   * - キャッシュが効いた回……`inputTokens` が実際より小さく出るので、
+   *   字/トークンが**実際より大きく**（＝危ない側へ）見える
+   * - 短すぎる回……下の定数に理由
+   *
+   * **スキーマの字数は足さない。** プロンプトとは別枠で送られ、入力
+   * トークンに乗るかがプロバイダによって違う（`core/usageLog.ts` の
+   * `schemaChars` の説明）。足すと、乗らないプロバイダで字/トークンが
+   * 大きく出る。
+   */
+  private async recordCharsPerToken(
+    params: GenerateParams,
+    result: GenerateResult
+  ): Promise<void> {
+    const usage = result.usage;
+    const inputTokens = usage?.inputTokens;
+    if (
+      typeof inputTokens !== "number" ||
+      !Number.isFinite(inputTokens) ||
+      inputTokens <= 0
+    ) {
+      return;
+    }
+    // **0と undefined を分ける。** 0は「数えたうえで効かなかった」なので
+    // 捨てる理由が無い（`ai/types.ts` の `cachedInputTokens`）
+    const cached = usage?.cachedInputTokens;
+    if (typeof cached === "number" && cached > 0) return;
+
+    const chars = params.systemPrompt.length + params.userPrompt.length;
+    if (chars < MIN_RATIO_SAMPLE_CHARS) return;
+
+    const sample = roundCharsPerToken(chars / inputTokens);
+    if (!Number.isFinite(sample) || sample <= 0) return;
+
+    /*
+      **平均しない。これまでの最小値を覚える**（作者の裁定）。理由と式は
+      `core/sizeBudget.ts` の `mergeCharsPerToken` にまとめてある——
+      読める長さの測定（`features/measureContext.ts`）も同じ欄へ書くので、
+      約束は1か所にしか置かない。
+    */
+    const current = modelTuning(this.inner.id, params.model);
+    const previous = current?.charsPerToken;
+    const samples = current?.charsPerTokenSamples ?? 0;
+    const next = mergeCharsPerToken(previous, sample);
+
+    /*
+      **書き込みを抑える**（速度と同じ理由。台帳はVS Codeの設定ファイル
+      なので、書けばディスクへ書き込みが走る）。書くのは2つの場合だけ。
+
+      1. 最小値が下がった……覚える値が変わったのだから書く
+      2. 件数がしきい値に届いていない……そこまでは毎回書いて、
+         早く「信じてよい」状態まで持っていく
+
+      しきい値を越えたあとは、下がった回しか数えない。だから
+      `charsPerTokenSamples` は**呼び出し回数そのものではない**
+      （台帳側のコメントに書いた）。少なめに出るぶんには安全側である。
+    */
+    const improved = previous === undefined || next < previous;
+    if (!improved && samples >= MIN_CHARS_PER_TOKEN_SAMPLES) return;
+
+    try {
+      await saveModelTuning(this.inner.id, params.model, {
+        charsPerToken: next,
+        charsPerTokenSamples: samples + 1,
+      });
+    } catch (error) {
+      // **残せなかっただけで、AIの応答は返す。** ただしエラーの本文は
+      // 捨てない（CLAUDE.md 規則5）。速度のときと同じ扱い
+      if (this.loggedRatioFailure.has(params.model)) return;
+      this.loggedRatioFailure.add(params.model);
+      logStep(
+        `モデル「${params.model}」の字/トークンを台帳へ保存できませんでした` +
+          `（${error instanceof Error ? error.message : String(error)}）。`
+      );
+    }
   }
 
   /**

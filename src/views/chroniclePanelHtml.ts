@@ -97,13 +97,18 @@ h3 {
   color: var(--vscode-descriptionForeground);
 }
 table { border-collapse: collapse; width: 100%; margin-bottom: 8px; }
+/* **狭いときは横へ送る。** 窓を小さくしたまま開くと編集領域が600画素ほどになり、
+   見出しが折れて「時期」が「時／期」、「あらすじ」が「あらす／じ」と2行になっていた
+   （2026-09-12、9巡目に実機で確認）。見出しを折らせない代わりに、
+   入りきらないぶんはこの入れ物の中だけで横に送る（画面全体は横に伸びない） */
+#sections { overflow-x: auto; }
 th, td {
   text-align: left;
   vertical-align: top;
   padding: 4px 8px;
   border-bottom: 1px solid var(--vscode-panel-border);
 }
-th { font-weight: 600; color: var(--vscode-descriptionForeground); }
+th { font-weight: 600; color: var(--vscode-descriptionForeground); white-space: nowrap; }
 td.when { white-space: nowrap; color: var(--vscode-descriptionForeground); }
 td.who, td.what { width: 22%; }
 .link {

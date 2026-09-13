@@ -70,6 +70,12 @@ const MARKDOWN_ALLOWED = new Set([
   "src/core/chatNote.ts",
   // 使い方のマニュアルをMarkdownの文書として開く
   "src/features/openManual.ts",
+  // はじめの案内をMarkdownの文書として開く（設計書6.90）。
+  // **選択肢より前に読ませる紙**なので、見出しと強調が要る
+  "src/core/writerGuideDoc.ts",
+  // ターゲット読者診断の紙をMarkdownの文書として開く（設計書6.91）。
+  // **作家タイプ診断の紙と対で読ませる**ので、同じ見出しと強調が要る
+  "src/core/readerTargetDoc.ts",
   /*
     MCPサーバーのツールの説明文（設計書6.87.8）。
 

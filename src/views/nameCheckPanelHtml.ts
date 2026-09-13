@@ -338,7 +338,11 @@ function bindPeopleEvents(host) {
       vscode.postMessage({
         type: 'jump',
         filePath: target.filePath,
-        line: target.line
+        line: target.line,
+        // **行番号は古くなる。** 本文を1か所直すと、そこから先の行が
+        // ずれる（作者の報告、2026-09-12。推敲で同じことが起きた）。
+        // 引用を添えて、飛ぶ直前に探し直させる
+        quote: (target.before || '') + target.name + (target.after || '')
       });
     });
   }

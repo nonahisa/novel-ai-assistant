@@ -6,6 +6,7 @@ import { convertFolder, convertOne } from "./markdownConvert";
 import {
   describeSiteNotation,
   findRubyAt,
+  RUBY_MULTILINE_NOTE,
   fromSiteNotation,
   rubyEditReplacement,
   validateEmphasis,
@@ -85,9 +86,13 @@ async function requireMarkdown(): Promise<vscode.TextEditor | undefined> {
       detail:
         "テキスト（.txt）は投稿サイトから持ってきた形をそのまま保つため、" +
         "ルビの対象外にしています。\n\n" +
-        "中身は1文字も変えず、名前だけを .md に変えます。" +
-        "文字コードも改行も、書いた本文もそのままです。\n" +
-        "取り消したくなったら、名前を .txt に戻すだけで元どおりです。",
+        // **できない約束をしない**（0.51.6）。0.16.0 から、MD化は
+        // 投稿サイトの書き方のルビ・傍点を直すようになっている（設計書6.12.4）。
+        // 「中身は1文字も変えず」「名前を .txt に戻すだけで元どおり」は、
+        // どちらも事実と違っていた（作者の実機報告、2026-09-08）
+        "名前を .md に変えます。文字コードも改行も、書いた字もそのままです。\n" +
+        "投稿サイトの書き方のルビ・傍点があれば、この拡張機能の書き方へ直します" +
+        "（直す前の本文は控えが残ります）。",
     },
     "このファイルを .md にする",
     "このフォルダーの .txt をまとめて .md にする"
@@ -124,22 +129,32 @@ export async function addRuby(): Promise<void> {
   let range: vscode.Range = editor.selection;
 
   /*
+    **行をまたいだ選択は、読みを聞く前に断る**（0.51.4。0.47.7 の積み残し⑥）。
+
+    記法（`{漢字|かんじ}`）は行をまたげない。これまでは、読みを入力させた
+    あとで `validateRuby` が弾いていた。しかも理由が「使えない記号が
+    入っています」——改行を記号の一組に混ぜていたためで、選んだところに
+    そんな記号は無い。**待たせたうえに、何を直せばよいのか分からない
+    断り方**になっていた。
+  */
+  if (range.start.line !== range.end.line) {
+    void vscode.window.showInformationMessage(RUBY_MULTILINE_NOTE);
+    return;
+  }
+
+  /*
     **すでにルビがあるところで押されたら、重ねるのではなく直す**
     （設計書6.34.2）。判定は `findRubyAt` の1か所で、組んで書く面と同じ。
-    記法は行をまたがないので、選択が1行に収まっているときだけ見る。
 
     **編集にするのは、選択が記法の内側に収まっているときだけ。**
     はみ出して選ぶと、編集にすれば選んだ平文が黙って落ち、新規に振れば
     記法が入れ子になる。どちらも原稿を壊すので、そこは何もせずに断る。
   */
-  const nearby =
-    range.start.line === range.end.line
-      ? findRubyAt(
-          document.lineAt(range.start.line).text,
-          range.start.character,
-          range.end.character
-        )
-      : undefined;
+  const nearby = findRubyAt(
+    document.lineAt(range.start.line).text,
+    range.start.character,
+    range.end.character
+  );
   if (nearby && !nearby.contained) {
     void vscode.window.showInformationMessage(
       "ルビの上には重ねられません。ルビを1つだけ選ぶと読みを直せます。"

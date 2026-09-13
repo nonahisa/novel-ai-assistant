@@ -708,3 +708,134 @@ describe("漢字ひらきへの常用漢字表の注記", () => {
     );
   });
 });
+
+/**
+ * 音読みで普通に読める熟語をひらかない（作者の報告、2026-09-12）。
+ *
+ * 実データで、こう出た。
+ *
+ *   基礎学力六十点、人物適性百点、遺伝適性百点、実技加点八十点。
+ *   → きそがくりょく六十点、じんぶつてきせい百点、…
+ *
+ * 作者の言葉は「『基礎学力』などをひらく意味がわかりません」である。
+ * **音読みをつないだだけの熟語は、かなにしても読みやすくならない。**
+ */
+describe("音読みの熟語はひらかない", () => {
+  function resultOf(original: string, suggestion: string) {
+    return validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 1,
+            original,
+            suggestion,
+            reason: "漢字ひらき",
+            explanation: "漢字が続いていて読みに詰まります",
+            confidence: "high",
+          },
+        ],
+      },
+      { text: original, startLine: 0, chapterStart: 1, chapterEnd: 1 } as never
+    );
+  }
+
+  test("作者の報告そのもの——4語まとめてひらく案は落ちる", () => {
+    const result = resultOf(
+      "基礎学力六十点、人物適性百点、遺伝適性百点、実技加点八十点。",
+      "きそがくりょく六十点、じんぶつてきせい百点、いでんてきせい百点、じつぎかてん八十点。"
+    );
+
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected[0].reason).toBe("onyomi_compound");
+  });
+
+  test("1語だけでも落ちる", () => {
+    const result = resultOf("基礎学力の試験だった。", "きそがくりょくの試験だった。");
+
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected[0].reason).toBe("onyomi_compound");
+  });
+
+  /**
+   * **本当のひらきを巻き込まない。** 音読みをつないだ形と一致しないので、
+   * 関門は素通りする（表外字を含むものは、そもそも読みを組めない）。
+   */
+  test.each([
+    ["出来る", "できる"],
+    ["所謂、彼は強い。", "いわゆる、彼は強い。"],
+    ["殆ど眠れなかった。", "ほとんど眠れなかった。"],
+    // 1字は対象外（「然」に許された音は「ゼン」「ネン」だけで、
+    // 「しかし」は表の範囲外の読みである）
+    ["然し彼は歩いた。", "しかし彼は歩いた。"],
+  ])("本当のひらき（%s）は通る", (original, suggestion) => {
+    const result = resultOf(original, suggestion);
+
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toHaveLength(1);
+  });
+
+  /**
+   * **当て字は、音読みで一致しても落とさない**（作者の裁定、2026-09-12）。
+   *
+   * 丁（チョウ）＋度（ド）＝ちょうど、沢（タク）＋山（サン）＝たくさん、
+   * 是（ゼ）＋非（ヒ）＝ぜひ。音読みをつなぐと読みと一致してしまうが、
+   * どれも**常用漢字表に無い使い方**なので、ひらくよう勧めたい語である。
+   *
+   * 見分けには**表記ゆれの一覧**（`KANA_KANJI_PAIRS`）を使う。作者が既に
+   * 「ひらくことを勧める」と決めた一覧なので、例外の一覧を別に作らない。
+   *
+   * **表記ゆれの側では代われない。** あちらは漢字とかなの両方が本文に
+   * あるときしか出ない（揺れを見る仕組み）ので、漢字で通している箇所は
+   * ここで落とすとどこからも届かなくなる（9巡目に測って分かった）。
+   */
+  test.each([
+    ["丁度そのとき、鐘が鳴った。", "ちょうどそのとき、鐘が鳴った。"],
+    ["沢山の人がいた。", "たくさんの人がいた。"],
+    ["素敵な帽子だ。", "すてきな帽子だ。"],
+    ["是非とも来てほしい。", "ぜひとも来てほしい。"],
+    ["大丈夫だと言った。", "だいじょうぶだと言った。"],
+    ["折角の休みだった。", "せっかくの休みだった。"],
+  ])(
+    "当て字（%s）は、音読みで一致しても通る",
+    (original, suggestion) => {
+      const result = resultOf(original, suggestion);
+
+      expect(result.rejected).toEqual([]);
+      expect(result.accepted).toHaveLength(1);
+    }
+  );
+
+  test("勧めていない熟語は、これまでどおり落ちる（例外を広げすぎていない）", () => {
+    // 「基礎学力」は表記ゆれの一覧に無いので、関門がそのまま効く
+    const result = resultOf("基礎学力の試験だった。", "きそがくりょくの試験だった。");
+
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected[0].reason).toBe("onyomi_compound");
+  });
+
+  test("「漢字ひらき」以外の札には、この関門をかけない", () => {
+    // 同じ置き換えでも、札が違えば見ない（観点ごとの検算を混ぜない）
+    const result = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 1,
+            original: "基礎学力基礎学力",
+            suggestion: "きそがくりょく",
+            reason: "同語反復",
+            explanation: "同じ語が並んでいます",
+            confidence: "high",
+          },
+        ],
+      },
+      {
+        text: "基礎学力基礎学力",
+        startLine: 0,
+        chapterStart: 1,
+        chapterEnd: 1,
+      } as never
+    );
+
+    expect(result.accepted).toHaveLength(1);
+  });
+});

@@ -5,6 +5,7 @@ import {
   type GuideBundle,
   type GuideSelection,
 } from "../core/guideSelect";
+import { detectChatTopic, type ChatTopic } from "../core/chatTopic";
 
 /**
  * 「この拡張機能の使い方」をAIへ渡すための説明を組み立てる。
@@ -329,23 +330,62 @@ export function buildGuideBundles(): GuideBundle[] {
 }
 
 /**
+ * 目次を渡さなかった回に、代わりに渡す断り。
+ *
+ * **知らないものを、知っている風に書かせない。** 目次を落とした回のAIは、
+ * この拡張機能の操作名を1つも持っていない。それでも「どこから？」と
+ * 聞かれれば、それらしい画面名とメニュー名を作って答えてしまう
+ * （この製品には実在しないコマンドIDを指した実績がある。設計書6.90.6）。
+ *
+ * 作者の指定（2026-09-13）：「迷ったら操作も問い合わせさせたらいいのでは
+ * ないでしょうか？」——作り話をさせるくらいなら、聞き返させる。
+ *
+ * **短く書く。** 2,800字（目次2,293＋使い方の節507）を削って戻す断りが
+ * 長ければ、削った意味が薄れる。
+ * 要るのは「推測で書かない」ことと、聞き返しの一文だけである。
+ */
+export const NO_INDEX_NOTICE = `【操作の一覧は渡していません】
+操作の名前・場所・手順を推測で書かないこと。使い方を聞かれたら、
+答えを作らずに「操作のことでしたら、もう一度そう言ってお尋ねください」と返してください。`;
+
+/**
  * 相談1回ぶんの「使い方の説明」を組み立てる。
  *
- * 目次（全操作の名前）は常に、説明は質問に関係しそうな束だけ。
+ * 説明は質問に関係しそうな束だけ。**目次は、創作の相談のときだけ落とす**
+ * （`core/chatTopic.ts`。2026-09-13）——創作の相談では目次2,293字が
+ * まるごと無駄になっていた。落とした回は代わりに `NO_INDEX_NOTICE` を渡し、
+ * 操作を推測で答えさせない。
+ *
  * `selected` は何を渡したかの記録用（`label` の並び）。
  */
 export function buildFeatureGuideForQuestion(input: {
   question: string;
   /** 直前の作者の発言。「それはどこ？」のような追い質問で話題を引き継ぐ */
   recentAuthorTurns?: string[];
-}): { text: string; selected: string[]; reason: GuideSelection["reason"] } {
+}): {
+  text: string;
+  selected: string[];
+  reason: GuideSelection["reason"];
+  topic: ChatTopic;
+} {
+  const bundles = buildGuideBundles();
   const selection = selectGuideBundles({
     question: input.question,
     recentAuthorTurns: input.recentAuthorTurns,
-    bundles: buildGuideBundles(),
+    bundles,
+  });
+  // 束選びをもう一度走らせることになるが、**判定の規則は1か所に置く**ほうが
+  // 大事である（「選ばれたら howto」をここへ書くと、`chatTopic.ts` と
+  // 同じ規則を2か所で持つことになる）。突き合わせは文字列の包含だけなので軽い
+  const topic = detectChatTopic({
+    question: input.question,
+    recentAuthorTurns: input.recentAuthorTurns,
+    bundles,
   });
 
-  const blocks = [buildFeatureIndex()];
+  // 迷ったとき（`unknown`）は渡す側へ倒す。落として答えられなくなるより、
+  // 載せて無駄になるほうがよい
+  const blocks = [topic === "craft" ? NO_INDEX_NOTICE : buildFeatureIndex()];
   if (selection.selected.length > 0) {
     // **目次と説明を見出しで分ける。** どちらも「■ 分類」で始まるので、
     // 見出しが無いと「説明のある操作だけが全部」と読まれかねない
@@ -361,6 +401,7 @@ export function buildFeatureGuideForQuestion(input: {
     text: blocks.join("\n\n"),
     selected: selection.selected.map((bundle) => bundle.label),
     reason: selection.reason,
+    topic,
   };
 }
 

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { withAiTurn } from "./aiTurn";
 import type { WorkEntry } from "../models/types";
 import { withProgress } from "../views/progress";
 import { logFailure, useLogFile } from "../core/logger";
@@ -160,13 +161,32 @@ export async function runProofreadingSuite(
    * 各機能へ渡す印。**「確認は済んでいる」だけを伝える。**
    * 何を確認したかは伝えない——機能ごとに文面が違うので、写すと必ずずれる
    */
-  const runOptions: CheckRunOptions = { suite: { confirmed: true } };
+  const runOptions: CheckRunOptions = {
+    suite: { confirmed: true, holdsRun: true },
+  };
   const done: SuiteStepResult[] = [];
   /** 中止で走らせなかったものの、先頭の位置。走り切ったら -1 */
   let stoppedAt = -1;
 
   try {
-    await withProgress("校正をまとめて実行", async (progress) => {
+    /*
+      **実行の札（設計書6.76）を、まとめ実行が丸ごと持つ**（作者の報告、
+      2026-09-13「校正をまとめて実行と、資料生成のまとめて抽出を時間差で
+      実行したところ、途中で差し込まれたように見えます」）。
+
+      それまでは札を取らず、**各機能に順に取らせていた**。機能と機能の
+      あいだで札がいったん空くので、あとから押した「まとめて抽出」が
+      そこへ入り、7工程のまとめ実行が3工程目で止まって待った。
+      **作者は時間差で押したのだから、あとのものは後ろに並ぶはずである。**
+
+      札を取れずに中止されたときは、走らせずに戻る（`withAiTurn` が
+      `undefined` を返す）。相談や単発の生成はもともと札を取らないので、
+      まとめ実行の最中でも今までどおり割り込める。
+    */
+    await withAiTurn(
+      { label: "校正をまとめて実行", onCancelled: () => (stoppedAt = 0) },
+      async () =>
+        await withProgress("校正をまとめて実行", async (progress) => {
       for (const [index, check] of checks.entries()) {
         progress.report({
           message: describeStep(index + 1, checks.length, check.label),
@@ -223,7 +243,8 @@ export async function runProofreadingSuite(
 
         done.push(countOf(check, deps));
       }
-    });
+        })
+    );
   } finally {
     // **知らせは必ず出す。** ここまでに何が走ったかは、途中で何が起きても
     // 作者へ伝える値がある

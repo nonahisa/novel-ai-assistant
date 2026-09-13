@@ -18,6 +18,7 @@ import {
 } from "../core/textFile";
 import { countSiteNotation, fromSiteNotation } from "../core/ruby";
 import { cancelItem, isCancelItem } from "../views/dialogs";
+import { carryAppearanceToRenamed } from "./manuscriptEditor";
 
 /**
  * 本文の `.txt` を `.md` にする（設計書6.12.1）。
@@ -150,6 +151,19 @@ export async function convertFolder(
 export async function renamePreservingContent(
   plan: ConversionPlan
 ): Promise<void> {
+  /*
+    **開いている画面の見た目を、新しい名前のほうへ持って行く**
+    （0.51.5。0.47.9 の積み残し⑦。設計書6.25.5）。
+
+    見た目（縦横・大きさ・組んで書く）は原稿ごとに覚える値なので、
+    名前が変わると宛先も変わり、開き直したときに設定の既定へ戻る。
+    中身は同じ原稿なのに縦書きが横書きになるので、作者から見れば壊れている。
+
+    **名前を変える前に呼ぶ。** 変えたあとでは、元の名前の画面はもう閉じている。
+    ここは変換の唯一の口なので、1件でもフォルダーまるごとでもここを通る。
+  */
+  carryAppearanceToRenamed(plan.from, plan.to);
+
   await vscode.workspace.fs.rename(path.toUri(plan.from), path.toUri(plan.to), {
     // **上書きしない。** 既にあるなら planConversion が止めているが、
     // その後に作られている場合もある
@@ -312,7 +326,7 @@ export async function convertToMarkdown(work: WorkEntry): Promise<boolean> {
     vscode.QuickPickItem & { choice?: "folder" | "one" }
   >([...items, cancelItem()], {
     title: "本文を .md にする",
-    placeHolder: "中身は変えず、名前だけを .md に変えます",
+    placeHolder: "名前を .md に変え、ルビ・傍点の書き方を直します",
     ignoreFocusOut: true,
   });
   if (!picked || isCancelItem(picked) || !picked.choice) return false;
@@ -329,8 +343,16 @@ export async function convertToMarkdown(work: WorkEntry): Promise<boolean> {
     {
       modal: true,
       detail: [
-        "中身は1文字も変えません。文字コードも改行もそのままです。",
-        "戻したくなったら、名前を .txt に戻すだけで元どおりです。",
+        // **できない約束をしない**（0.51.6。作者の実機報告 2026-09-08）。
+        // ここは以前「中身は1文字も変えません」「名前を .txt に戻すだけで
+        // 元どおりです」と言っていたが、**どちらも事実と違う**——
+        // 0.16.0 から、投稿サイトの書き方のルビ・傍点を直すようになっている
+        // （設計書6.12.4）。名前を戻しても記法は戻らない。
+        // **作者の原稿についての約束**なので、実際の動きに合わせる。
+        "名前を .md に変えます。文字コードと改行はそのままです。",
+        "本文に投稿サイトの書き方のルビ・傍点（｜漢字《かんじ》・《《強調》》）が" +
+          "あれば、この拡張機能の書き方へ直します（字そのものは変えません）。",
+        "直す前の本文は、同じ場所の .novelai-recovery に控えが残ります。",
         "",
         "同じ名前の .md がすでにあるものは、上書きせずに飛ばします。",
       ].join("\n"),

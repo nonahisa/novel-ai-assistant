@@ -8,10 +8,120 @@ import type { CustomFieldDefinition } from "../models/customField";
  * JSONを並べて見比べさせるのは酷なので、変わる項目だけを日本語で示す。
  */
 
+/**
+ * 更新案の中の、1つだけ落とせる値（作者の依頼、2026-09-12）。
+ *
+ * 「呼称にハヤブサ先生があり、これが間違いです。この画面でここだけ
+ * 消したりできないでしょうか？」——項目ごと文字列へ潰していたので、
+ * レコードまるごと見送るか、間違ったまま反映するかの二択になっていた。
+ */
+export interface DiffEntry {
+  /** その値を指す鍵。画面から返ってきたときに引き当てる */
+  key: string;
+  /** 画面に出す文字列 */
+  text: string;
+  /** 足される値か、消える値か、そのままか */
+  state: "added" | "removed" | "kept";
+}
+
 export interface FieldChange {
   label: string;
   before: string;
   after: string;
+  /**
+   * 1つずつ落とせる値（設計書6.32）。
+   *
+   * **名前の並ぶ3項目（呼称・関係・別名）だけが持つ。** AIの読み違いが
+   * 集まるのがここで、しかも「1つだけ違う」が起きやすい。紹介文のような
+   * 地の文は、1つずつに分けようがないので持たない（画面は今までどおり）。
+   */
+  entries?: DiffEntry[];
+}
+
+/**
+ * 葉を指す鍵。**作る側と落とす側で同じ関数を使う**——
+ * 文字列を組み直すと、区切りの扱いが片方だけずれる。
+ */
+export function addressEntryKey(targetName: string, term: string): string {
+  return `address:${targetName}:${term}`;
+}
+
+export function relationEntryKey(name: string, relation: string): string {
+  return `relation:${name}:${relation}`;
+}
+
+export function aliasEntryKey(alias: string): string {
+  return `alias:${alias}`;
+}
+
+/** 葉1つ分の素材。`state` は前後を突き合わせてから決める */
+interface Leaf {
+  key: string;
+  text: string;
+  /** 作者が固定した呼称か。固定されていれば落とせる葉にしない */
+  locked: boolean;
+}
+
+function addressLeaves(character: Character): Leaf[] {
+  return character.addressTerms.flatMap((term) =>
+    term.forms.map((form) => ({
+      key: addressEntryKey(term.targetName, form.term),
+      text: `${term.targetName}→${form.term}`,
+      locked: term.authorLocked,
+    }))
+  );
+}
+
+function relationLeaves(character: Character): Leaf[] {
+  return character.relations.map((relation) => ({
+    key: relationEntryKey(relation.name, relation.relation),
+    text: `${relation.name}=${relation.relation}`,
+    locked: false,
+  }));
+}
+
+function aliasLeaves(character: Character): Leaf[] {
+  return character.aliases.map((alias) => ({
+    key: aliasEntryKey(alias),
+    text: alias,
+    locked: false,
+  }));
+}
+
+/**
+ * 葉ごとの変化を並べる。
+ *
+ * 更新案の側（after）の並びをそのまま出し、消える値を末尾へ添える。
+ * **消える値も出す**——落とせるのは追加だけだが、何が消えるのかを
+ * 隠すと、作者は一覧を見て「全部入る」と読む。
+ */
+function diffEntries(
+  before: Character,
+  after: Character,
+  read: (character: Character) => Leaf[]
+): DiffEntry[] {
+  const beforeLeaves = read(before);
+  const beforeKeys = new Set(beforeLeaves.map((leaf) => leaf.key));
+  const entries: DiffEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const leaf of read(after)) {
+    if (seen.has(leaf.key)) continue;
+    seen.add(leaf.key);
+    entries.push({
+      key: leaf.key,
+      text: leaf.text,
+      // 作者が固定した呼称は、そもそも抽出のマージが触らない（CLAUDE.md 規則2）。
+      // 「そのまま」に倒して、落とせる葉から外す
+      state: leaf.locked || beforeKeys.has(leaf.key) ? "kept" : "added",
+    });
+  }
+  for (const leaf of beforeLeaves) {
+    if (seen.has(leaf.key)) continue;
+    seen.add(leaf.key);
+    entries.push({ key: leaf.key, text: leaf.text, state: "removed" });
+  }
+  return entries;
 }
 
 export interface CharacterDiff {
@@ -24,13 +134,15 @@ export interface CharacterDiff {
 const TEXT_FIELDS: Array<{
   label: string;
   read: (character: Character) => string;
+  /** 1つずつ落とせる項目だけが持つ（呼称・関係・別名） */
+  leaves?: (character: Character) => Leaf[];
 }> = [
   { label: "名前", read: (c) => c.name },
   { label: "紹介", read: (c) => c.summary ?? "" },
   { label: "性別", read: (c) => c.gender ?? "" },
   { label: "所属", read: (c) => c.affiliation ?? "" },
   { label: "読み", read: (c) => c.reading ?? "" },
-  { label: "別名", read: (c) => c.aliases.join("、") },
+  { label: "別名", read: (c) => c.aliases.join("、"), leaves: aliasLeaves },
   { label: "役割", read: (c) => c.role ?? "" },
   { label: "性格", read: (c) => c.personality ?? "" },
   { label: "外見", read: (c) => c.appearance ?? "" },
@@ -38,6 +150,7 @@ const TEXT_FIELDS: Array<{
   {
     label: "関係",
     read: (c) => c.relations.map((r) => `${r.name}=${r.relation}`).join("、"),
+    leaves: relationLeaves,
   },
   {
     label: "能力",
@@ -56,6 +169,8 @@ const TEXT_FIELDS: Array<{
             `${term.targetName}→${term.forms.map((f) => f.term).join("・")}`
         )
         .join("、"),
+    // 作者が困っているのはここ。**呼び方1つずつ**に分ける
+    leaves: addressLeaves,
   },
   // モブ扱いになると一覧の下へ回り、用語ハイライトとIME辞書からも外れる。
   // 反映すると見え方が変わるので、黙って適用せず差分に出す
@@ -76,7 +191,10 @@ export function diffCharacter(
     const left = field.read(before);
     const right = field.read(after);
     if (left === right) continue;
-    changes.push({ label: field.label, before: left, after: right });
+    const change: FieldChange = { label: field.label, before: left, after: right };
+    // 1つずつ落とせる項目だけ、葉に分けたものも添える
+    if (field.leaves) change.entries = diffEntries(before, after, field.leaves);
+    changes.push(change);
   }
 
   changes.push(...customFieldChanges(before, after, customFields));

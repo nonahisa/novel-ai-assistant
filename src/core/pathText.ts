@@ -21,8 +21,18 @@ import * as nodePath from "path";
  *
  * **Windowsのドライブ文字（`C:`）と見分ける必要がある。** 仕組みの名前を
  * 2文字以上とすることで分けている（1文字の仕組み名は実在しない）。
+ *
+ * **場所（authority）が無い形も認める**（0.51.3。0.47.4 の積み残し④）。
+ * `vscode-vfs://github/…` は斜線2本だが、**拡張機能の保管庫は
+ * `vscode-userdata:/User/…` で斜線が1本**である（authority が空）。
+ * 2本を必須にしていたので、ブラウザ版では保管庫の道が「OSのパス」として
+ * 扱われ、`join` が `\` で繋いで別の場所を指していた。その結果、
+ * 生成文書（使い方・はじめの案内など）が必ず無題文書へ落ちていた。
+ *
+ * 斜線1本を認めても、ドライブ文字とは取り違えない——`C:/x` の仕組み名は
+ * 1文字なので、上の「2文字以上」で先に弾かれる。
  */
-const URI_LIKE = /^[a-zA-Z][a-zA-Z0-9+.-]+:\/\//;
+const URI_LIKE = /^[a-zA-Z][a-zA-Z0-9+.-]+:\/\/?/;
 
 export function isUriString(value: string): boolean {
   return URI_LIKE.test(value);
@@ -39,7 +49,11 @@ export function isUriString(value: string): boolean {
  * 道の終わりとして扱う。
  */
 function splitUri(location: string): { head: string; body: string } {
-  const match = /^([a-zA-Z][a-zA-Z0-9+.-]+:\/\/[^/?#]*)([^?#]*)/.exec(location);
+  // **場所（authority）は在ることも無いこともある。**
+  //   vscode-vfs://github/owner/repo/x → 頭 `vscode-vfs://github` ／ 道 `/owner/repo/x`
+  //   vscode-userdata:/User/x          → 頭 `vscode-userdata:`    ／ 道 `/User/x`
+  const match =
+    /^([a-zA-Z][a-zA-Z0-9+.-]+:(?:\/\/[^/?#]*)?)([^?#]*)/.exec(location);
   if (!match) return { head: "", body: location };
   return { head: match[1], body: match[2] || "/" };
 }

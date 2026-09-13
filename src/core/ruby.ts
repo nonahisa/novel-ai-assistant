@@ -403,7 +403,8 @@ export function stripRuby(text: string): string {
  */
 export function validateEmphasis(base: string): string | null {
   if (!base.trim()) return "傍点を付ける文字がありません。";
-  if (/[{}|｜《》#\r\n]/u.test(base)) {
+  if (spansLines(base)) return EMPHASIS_MULTILINE_NOTE;
+  if (/[{}|｜《》#]/u.test(base)) {
     return "傍点に使えない記号（{ } | ｜ 《 》 #）が入っています。";
   }
   if (Array.from(base).length > 30) {
@@ -427,12 +428,39 @@ export function describeSiteNotation(text: string): string {
 }
 
 /**
+ * 選ばれた文字が、行をまたいでいるか。
+ *
+ * **記法は行をまたげない。** `{漢字|かんじ}` も `{{強調}}` も、途中に改行が
+ * 入ると記法として読めなくなる。
+ */
+function spansLines(text: string): boolean {
+  return /[\r\n]/u.test(text);
+}
+
+/**
+ * 行をまたいで選ばれたときの断り（0.51.4。0.47.7 の積み残し⑥）。
+ *
+ * **理由を取り違えて伝えていた。** これまでは改行も「使えない記号」の
+ * 一組に混ぜて弾いていたので、複数行を選んだ作者に
+ * 「ルビに使えない記号（{ } | ｜ 《 》 #）が入っています」と出ていた。
+ * 選んだところにそんな記号は無いので、何を直せばよいのか分からない。
+ */
+export const RUBY_MULTILINE_NOTE =
+  "行をまたいで選ばれています。ルビは1行の中にしか振れません" +
+  "（記法が行をまたげないためです）。";
+
+export const EMPHASIS_MULTILINE_NOTE =
+  "行をまたいで選ばれています。傍点は1行の中にしか付けられません" +
+  "（記法が行をまたげないためです）。";
+
+/**
  * ルビとして正しい形か。理由が分かる文字列を返す（問題なければ null）。
  */
 export function validateRuby(base: string, reading: string): string | null {
   if (!base.trim()) return "ルビを振る文字がありません。";
   if (!reading.trim()) return "読み仮名がありません。";
-  if (/[{}|｜《》#\r\n]/u.test(base) || /[{}|｜《》#\r\n]/u.test(reading)) {
+  if (spansLines(base) || spansLines(reading)) return RUBY_MULTILINE_NOTE;
+  if (/[{}|｜《》#]/u.test(base) || /[{}|｜《》#]/u.test(reading)) {
     return "ルビに使えない記号（{ } | ｜ 《 》 #）が入っています。";
   }
   if (base.length > 30) return "ルビを振る文字が長すぎます（30文字まで）。";

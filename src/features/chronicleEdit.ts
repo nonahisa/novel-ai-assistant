@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { EXAMPLE_OTHER, EXAMPLE_PERSON } from "../core/exampleNames";
 import type { WorkEntry } from "../models/types";
 import {
   findLine,
@@ -346,7 +347,7 @@ function lineDetail(timeline: Timeline, lineId: string): string {
 async function runAddLine(context: EditContext): Promise<void> {
   const label = await askText({
     title: "系統を作る（1/3）",
-    placeHolder: "例: IF・もし文佳が生きていたら / 太志の夢",
+    placeHolder: `例: IF・もし${EXAMPLE_OTHER.givenName}が生きていたら / ${EXAMPLE_PERSON.givenName}の夢`,
     prompt: "本編とは別の筋に名前を付けてください。",
     validateInput: (value) =>
       value.trim().length === 0 ? "名前を入れてください。" : undefined,

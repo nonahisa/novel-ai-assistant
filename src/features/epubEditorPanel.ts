@@ -17,6 +17,7 @@ import {
   isBookBlockSuspended,
   isBookImageBlock,
   moveBookBlock,
+  pageLayoutVertical,
   parseBookConfig,
   removeBookBlockAt,
   resolveBookBlocks,
@@ -26,6 +27,7 @@ import {
   type BookBodyPosition,
   type BookConfig,
   type BookImageBlock,
+  type PageLayoutBlockType,
 } from "../models/book";
 import {
   BookStore,
@@ -52,6 +54,17 @@ import {
   saveBakedCover,
   type CoverSide,
 } from "../core/coverBake";
+import {
+  IMAGE_DIALOG_FILTERS,
+  MATERIALS_DIR,
+  imageChoiceItem,
+  imageUsageLabels,
+  isImageFileName,
+  pickImportName,
+  sortImageChoices,
+  workRelativePath,
+} from "../core/epubImagePick";
+import { notifyDone } from "../views/notify";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import { bookChapterBodies, bookChaptersOf } from "../core/bookChapters";
@@ -91,10 +104,15 @@ import {
 } from "../core/epubPackage";
 import {
   buildCharacterPageFragment,
-  characterIconPath,
   selectBookCharacters,
   toCharacterEntry,
 } from "../core/epubCharacterPage";
+import {
+  buildCharacterIconIndex,
+  characterIconNotice,
+  resolveCharacterIconPath,
+} from "../core/characterIconLookup";
+import { collectMaterialImages } from "./materialImages";
 import { CharacterStore } from "../core/characterStore";
 import {
   collectOrnamentCatalogue,
@@ -416,6 +434,9 @@ export async function openEpubEditorPanel(
       blockType?: string;
       imagePath?: string;
       caption?: string;
+      /** 画像の投入口・選択画面（設計書6.65.15）。どの面へ、どちらの道で */
+      target?: string;
+      mode?: string;
       /** 保留の切り替え（設計書6.65.15の段D）。真なら保留、偽なら解除 */
       suspended?: boolean;
     };
@@ -530,6 +551,18 @@ export async function openEpubEditorPanel(
         imagePath: parsed.imagePath ?? "",
         caption: parsed.caption ?? "",
       });
+      return;
+    }
+
+    if (parsed.type === "pickImage") {
+      // 画像の投入口と選択画面（作者の依頼、2026-09-13）。
+      // **4つの面が同じ道を通る**（表紙・裏表紙・口絵・扉絵）
+      await pickImageInto(
+        state,
+        parsed.target ?? "",
+        parsed.mode === "choose" ? "choose" : "import",
+        parsed.index ?? -1
+      );
       return;
     }
 
@@ -814,6 +847,349 @@ async function editImageBlock(
       : entry
   );
   await applyBlocks(state, next);
+}
+
+/* ---- 画像の投入口と選択画面（作者の依頼、2026-09-13） --------------- */
+
+/**
+ * 画像を入れる先。
+ *
+ * **4つの面（表紙・裏表紙・口絵・扉絵）が同じ2つのボタンから入る。**
+ * それまでは表紙が文字欄、口絵・扉絵は入力ダイアログと道が割れており、
+ * どちらも作品フォルダからの相対パスを手で打つしかなかった。
+ */
+type ImageTarget = "cover" | "backCover" | "block";
+
+/** 画面から届いた行き先。知らない値は受け取らない（別の面へ入れない） */
+function imageTargetOf(raw: string): ImageTarget | null {
+  return raw === "cover" || raw === "backCover" || raw === "block" ? raw : null;
+}
+
+/** 一覧に出す画像の上限。**作品フォルダが写真置き場でも画面が固まらないように** */
+const MAX_LISTED_IMAGES = 300;
+
+/** 走査で入らないフォルダー。隠しフォルダー（`.git` など）は名前で外す */
+const SKIP_IMAGE_DIRS = new Set(["node_modules", "exports"]);
+
+/**
+ * 選んだ画像を、指された面へ入れる。
+ *
+ * **取りやめたら何も起きない。** 選ぶのを止めた（Escや「取りやめる」）
+ * ときは相対パスが返ってこないので、設計図にも画面にも触れずに戻る。
+ */
+async function pickImageInto(
+  state: PanelState,
+  rawTarget: string,
+  mode: "import" | "choose",
+  index: number
+): Promise<void> {
+  const target = imageTargetOf(rawTarget);
+  if (!target) return;
+
+  // 口絵・扉絵は、選んでいる行がまだ画像の面であることを先に確かめる
+  // （並びを触ったあとの古い index で、別の面を書き換えないため）
+  if (target === "block") {
+    const block = resolveBookBlocks(state.current)[index];
+    if (!block || !isBookImageBlock(block)) return;
+  }
+
+  const picked =
+    mode === "choose"
+      ? await chooseWorkImage(state)
+      : await importImage(state);
+  if (!picked) return;
+
+  await applyPickedImage(state, target, index, picked);
+}
+
+/** 入れた先の呼び名。**通知にも画面にも同じ言葉を出す**（`BOOK_BLOCK_LABELS`） */
+function imageTargetLabel(
+  state: PanelState,
+  target: ImageTarget,
+  index: number
+): string {
+  if (target === "cover") return BOOK_BLOCK_LABELS.cover;
+  if (target === "backCover") return BOOK_BLOCK_LABELS.backCover;
+  const block = resolveBookBlocks(state.current)[index];
+  return block ? BOOK_BLOCK_LABELS[block.type] : "画像の面";
+}
+
+/**
+ * 決まった相対パスを、設計図と画面へ入れる。
+ *
+ * **保存はしない。** ほかの欄と同じで、book.json へ残るのは「保存」を
+ * 押したときである（画像を選んだだけで台帳が変わると、見比べている
+ * 途中の案が確定してしまう）。
+ */
+async function applyPickedImage(
+  state: PanelState,
+  target: ImageTarget,
+  index: number,
+  relativePath: string
+): Promise<void> {
+  const label = imageTargetLabel(state, target, index);
+
+  if (target === "block") {
+    const block = resolveBookBlocks(state.current)[index];
+    if (!block || !isBookImageBlock(block)) return;
+    // **解説文はそのまま残す。** 絵を差し替えただけで文が消えると、
+    // 書き直しになる
+    await editImageBlock(state, index, {
+      imagePath: relativePath,
+      caption: block.caption,
+    });
+  } else {
+    const key =
+      target === "cover" ? "coverImagePath" : "backCoverImagePath";
+    const merged = mergeConfig(
+      state.current,
+      { [key]: relativePath },
+      state.work.title
+    );
+    if (merged.error) {
+      status(state, merged.error, true);
+      return;
+    }
+    state.current = merged.config;
+
+    // 文字欄の中身は画面が持っているので、決まった場所を書き戻す。
+    // **面を出し直してから status を送る**（先に送ると出し直しが消す）
+    state.panel.webview.postMessage({
+      type: "imagePicked",
+      field: key,
+      imagePath: relativePath,
+    });
+    state.panel.webview.postMessage({
+      type: "preview",
+      data: await previewData(state),
+    });
+  }
+
+  status(
+    state,
+    `${label}に ${relativePath} を入れました（「保存」を押すと book.json に残ります）`
+  );
+}
+
+/**
+ * 画像を取り込む（投入口）。
+ *
+ * **作品フォルダの外を選んだら `素材/` へ写す。** 元のファイルは消さないし
+ * 動かさない——作者の絵の置き場所を拡張機能が決めてよいものではない。
+ * それでも写すのは、本に要る画像が作品フォルダの中で揃っていないと、
+ * GitHubへ送った先やほかの端末で本が組めなくなるためである。
+ *
+ * **中を選んだときは写さない。** 同じ絵が2つになると、どちらを直せば本が
+ * 変わるのか分からなくなる。
+ */
+async function importImage(state: PanelState): Promise<string | null> {
+  const picked = await vscode.window.showOpenDialog({
+    title: "本に入れる画像を選ぶ",
+    openLabel: "この画像を使う",
+    canSelectMany: false,
+    canSelectFolders: false,
+    filters: IMAGE_DIALOG_FILTERS,
+    // 作品フォルダから開く（たいていは作品の近くに置いてある）
+    defaultUri: path.toUri(state.work.folderPath),
+  });
+
+  const source = picked?.[0];
+  if (!source) return null;
+
+  const sourcePath = path.fromUri(source);
+  // 絞り込みは画面の都合であって、約束ではない（名前を打てば何でも選べる）
+  if (!isImageFileName(sourcePath)) {
+    await vscode.window.showWarningMessage(
+      `${path.basename(sourcePath)} は画像として扱えません。` +
+        "png・jpg・jpeg・gif・webp のどれかを選んでください。"
+    );
+    return null;
+  }
+
+  const inside = workRelativePath(state.work.folderPath, sourcePath);
+  if (inside) {
+    notifyDone(`作品フォルダの中の画像なので、写さずにそのまま使います：${inside}`);
+    return inside;
+  }
+
+  return await copyIntoMaterials(state, source, sourcePath);
+}
+
+/**
+ * 外の画像を `素材/` へ写す。
+ *
+ * **同じ名前があっても上書きしない**（CLAUDE.md 実装ルール2）。書き込みは
+ * 新規作成の経路（`mode: "create"`）だけを使い、名前は
+ * `timestampedFileName.ts` の規則で避ける——作者が置いた絵を、取り込みの
+ * ついでに消さないためである。
+ */
+async function copyIntoMaterials(
+  state: PanelState,
+  source: vscode.Uri,
+  sourcePath: string
+): Promise<string | null> {
+  const folder = path.join(state.work.folderPath, MATERIALS_DIR);
+
+  let bytes: Uint8Array;
+  try {
+    bytes = await vscode.workspace.fs.readFile(source);
+  } catch (error) {
+    await reportImageFailure(state, "画像の読み込み", sourcePath, error);
+    return null;
+  }
+
+  const name = pickImportName(
+    path.basename(sourcePath),
+    await fileNamesIn(folder),
+    new Date()
+  );
+  if (!name) {
+    status(state, "写し先の名前を決められませんでした。", true);
+    return null;
+  }
+
+  try {
+    await vscode.workspace.fs.createDirectory(path.toUri(folder));
+    await atomicWriteFile(path.join(folder, name), bytes, { mode: "create" });
+  } catch (error) {
+    await reportImageFailure(state, "画像の取り込み", sourcePath, error);
+    return null;
+  }
+
+  const relative = `${MATERIALS_DIR}/${name}`;
+  // **写した先は通知に残す**（`views/notify.ts` の分け方の3）。
+  // 名前が変わったときに、どこへ入ったのかを追えないと困る
+  void vscode.window.showInformationMessage(
+    `画像を作品フォルダへ写しました。\n${relative}\n` +
+      "選んだ元のファイルは、そのまま残っています。"
+  );
+  return relative;
+}
+
+/** そのフォルダーにある名前。**無いフォルダーは「空」と同じ扱い**でよい */
+async function fileNamesIn(folder: string): Promise<Set<string>> {
+  try {
+    const entries = await vscode.workspace.fs.readDirectory(
+      path.toUri(folder)
+    );
+    // フォルダーの名前も入れる。同じ名前のフォルダーがあれば作成は失敗する
+    return new Set(entries.map(([name]) => name));
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * 作品フォルダに入っている画像から選ぶ（選択画面）。
+ *
+ * **`素材/` に限らず走査する。** どこへ置くかは作者が決めることなので、
+ * 決め打ちにすると「置いたのに出てこない」になる。
+ */
+async function chooseWorkImage(state: PanelState): Promise<string | null> {
+  const found = await collectWorkImages(state.work.folderPath);
+
+  if (found.length === 0) {
+    // **行き止まりにしない。** 1枚も無いなら、取り込む道へそのまま渡す
+    const importLabel = "画像を取り込む…";
+    const answer = await vscode.window.showInformationMessage(
+      "作品フォルダには画像がまだありません。" +
+        "ほかの場所にある画像は「画像を取り込む…」から入れられます。",
+      importLabel
+    );
+    return answer === importLabel ? await importImage(state) : null;
+  }
+
+  const usage = imageUsageLabels(state.current);
+  const items = sortImageChoices(
+    found.map((relativePath) => ({
+      relativePath,
+      usedBy: usage.get(relativePath) ?? [],
+    }))
+  ).map((choice) => ({
+    ...imageChoiceItem(choice),
+    relativePath: choice.relativePath,
+  }));
+
+  const picked = await vscode.window.showQuickPick(
+    [...items, cancelItem("取りやめる")],
+    {
+      title:
+        found.length >= MAX_LISTED_IMAGES
+          ? `入っている画像から選ぶ（先頭${MAX_LISTED_IMAGES}件）`
+          : "入っている画像から選ぶ",
+      placeHolder: "どの画像を入れますか？",
+      // 場所でも探せるようにする（同じ名前の絵がフォルダー違いで並ぶため）
+      matchOnDescription: true,
+      ignoreFocusOut: true,
+    }
+  );
+  if (!picked || isCancelItem(picked)) return null;
+
+  return (picked as { relativePath?: string }).relativePath ?? null;
+}
+
+/**
+ * 作品フォルダの中の画像を集める。
+ *
+ * 走る深さは原稿の走査（`core/scanner.ts`）と同じにする。作品の並べ方は
+ * 作者ごとに違うので、浅いと見つからず、際限が無いと戻ってこない。
+ */
+async function collectWorkImages(workFolder: string): Promise<string[]> {
+  const found: string[] = [];
+  // 焼いた表紙は合成の結果であって、作者が選ぶ絵ではない（設計書6.65.8）
+  const baked = new Set(Object.values(BAKED_COVER_FILES));
+
+  const walk = async (current: string, depth: number): Promise<void> => {
+    if (depth > 5 || found.length >= MAX_LISTED_IMAGES) return;
+
+    let entries: [string, vscode.FileType][];
+    try {
+      entries = await vscode.workspace.fs.readDirectory(path.toUri(current));
+    } catch {
+      return;
+    }
+
+    for (const [name, type] of entries) {
+      if (found.length >= MAX_LISTED_IMAGES) return;
+      // 隠しフォルダー（`.git`・`.novelai-recovery`）には作者の絵は無い
+      if (name.startsWith(".")) continue;
+
+      if (type === vscode.FileType.Directory) {
+        if (SKIP_IMAGE_DIRS.has(name)) continue;
+        await walk(path.join(current, name), depth + 1);
+        continue;
+      }
+      if (type !== vscode.FileType.File) continue;
+      if (!isImageFileName(name) || baked.has(name)) continue;
+
+      const relative = workRelativePath(
+        workFolder,
+        path.join(current, name)
+      );
+      if (relative) found.push(relative);
+    }
+  };
+
+  await walk(workFolder, 0);
+  return found;
+}
+
+/** 取り込みの失敗。**理由を捨てない**（記録の書き先を作品へ向けてから残す） */
+async function reportImageFailure(
+  state: PanelState,
+  what: string,
+  sourcePath: string,
+  error: unknown
+): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  useLogFile(state.work.folderPath);
+  logFailure(what, {
+    作品: state.work.title,
+    場所: sourcePath,
+    内容: message,
+  });
+  status(state, `${what}に失敗しました。${message}`, true);
+  await vscode.window.showErrorMessage(`${what}に失敗しました。${message}`);
 }
 
 /**
@@ -1223,10 +1599,16 @@ async function previewData(state: PanelState) {
     // 同梱する書体も当てる（設計書6.65.11）——本と同じ字面で確かめられ
     // ないと、書体を選ぶ意味が無い
     css: scopeCssForPreview(
-      buildEpubCss(vertical, {
-        bodyHref: fontUri(state, state.current.fonts.body),
-        headingHref: fontUri(state, state.current.fonts.heading),
-      }),
+      buildEpubCss(
+        vertical,
+        {
+          bodyHref: fontUri(state, state.current.fonts.body),
+          headingHref: fontUri(state, state.current.fonts.heading),
+        },
+        // 面ごとの体裁（作者の依頼、2026-09-13）。**書き出しと同じCSS**を
+        // 通す——ここで渡し忘れると、選んだ体裁が画面にだけ出ない
+        state.current.pageLayouts ?? {}
+      ),
       ".epub-page"
     ),
     pages: buildPages(state, vertical, baked, missingFaces),
@@ -1816,7 +2198,9 @@ function buildPages(
           label: "タイトルページ",
           html: buildTitlePageFragment(config, ornaments(state)),
           note: null,
-          vertical,
+          // 面ごとに向きを選べる（作者の依頼、2026-09-13）。**書き出しと
+          // 同じ決め方**（選んでいなければ本の綴じ方向のまま）
+          vertical: faceVertical(config, "halfTitle", vertical),
         });
         break;
       case "toc":
@@ -1825,7 +2209,11 @@ function buildPages(
       // **保留でも、載る人が居れば面は出す**（比較のため。段D）。目次の
       // 行に出るかどうかは `hasCharacters`（本に入る面だけ）が決める
       case "characters":
-        add(source.characters.length > 0 ? charactersPage(state, vertical) : null);
+        add(
+          source.characters.length > 0
+            ? charactersPage(state, faceVertical(config, "characters", vertical))
+            : null
+        );
         break;
       case "frontIllustration":
       case "sectionArt":
@@ -1835,16 +2223,19 @@ function buildPages(
         add(bodyPage(state, vertical));
         break;
       case "afterword":
-        add(afterwordPage(state, vertical));
+        add(afterwordPage(state, faceVertical(config, "afterword", vertical)));
         break;
-      case "colophon":
+      case "colophon": {
+        // 縦中横も面の向きで決める（横組みの面で数字を潰さない）
+        const faceOrientation = faceVertical(config, "colophon", vertical);
         add({
           label: "奥付",
-          html: buildColophonFragment(config, vertical, ornaments(state)),
+          html: buildColophonFragment(config, faceOrientation, ornaments(state)),
           note: null,
-          vertical,
+          vertical: faceOrientation,
         });
         break;
+      }
       case "backCover":
         add(backCoverPage(state, vertical, baked.back));
         break;
@@ -1852,6 +2243,20 @@ function buildPages(
   }
 
   return pages;
+}
+
+/**
+ * その面が縦書きになるか（作者の依頼、2026-09-13）。
+ *
+ * **書き出しと同じ決め方**（`pageLayoutVertical`）を通す。ここで別の
+ * 決め方をすると、画面と本の向きが食い違う。
+ */
+function faceVertical(
+  config: BookConfig,
+  type: PageLayoutBlockType,
+  bookVertical: boolean
+): boolean {
+  return pageLayoutVertical(type, config.pageLayouts, bookVertical);
 }
 
 /**
@@ -1940,6 +2345,8 @@ function tocPage(
         // プレビューだけ無い（あるいはその逆）ことになる
         charactersHref: hasCharacters ? "#" : null,
         afterwordHref: state.source.afterword ? "#" : null,
+        // 面ごとの体裁（作者の依頼、2026-09-13）。書き出しと同じものを渡す
+        pageLayouts: config.pageLayouts,
       }
     ),
     note: tocNote(source.episodes.length, dropped),
@@ -1961,7 +2368,11 @@ function charactersPage(state: PanelState, vertical: boolean): PreviewPage {
           config.characterPage.showIcons && character.iconPath
             ? imageUri(state, character.iconPath)
             : null,
-      }))
+      })),
+      // 面ごとの体裁（作者の依頼、2026-09-13）。書き出しと同じものを渡す
+      config.pageLayouts,
+      // ルビの範囲も書き出しと同じ（画面と本の見え方を揃える）
+      config.characterPage.rubyMode
     ),
     note:
       "設定資料から組んだ面です（名前と紹介文だけが入ります）。" +
@@ -2047,6 +2458,7 @@ function afterwordPage(
     html: buildAfterwordFragment(afterword, {
       collapseBlankLines: state.current.collapseBlankLines,
       vertical,
+      pageLayouts: state.current.pageLayouts,
     }),
     note:
       `設定/${BOOK_DIR}/${AFTERWORD_FILE} を組んだ面です。` +
@@ -2186,14 +2598,17 @@ function characterNotice(state: PanelState): string | null {
     );
   }
 
-  const missing = state.current.characterPage.showIcons
-    ? characters.filter((character) => character.iconPath === null).length
-    : 0;
   const base = `${characters.length}人が載ります。`;
-  // イラストが無い人物は名前だけになる。**黙って名前だけにしない**
-  return missing > 0
-    ? `${base}うち${missing}人はイラストが見つからないので、名前だけになります。`
-    : base;
+  // イラストを添えない本で絵の話をしても仕方がない
+  if (!state.current.characterPage.showIcons) return base;
+
+  // **黙って名前だけにしない。** 誰に付かなかったかと、どうすれば付くかを
+  // 言う（作者の指定、2026-09-13。前は「見つかりません」で終わっており、
+  // `icon` 欄を埋める画面が無いので打つ手が分からなかった）
+  const missing = characters
+    .filter((character) => character.iconPath === null)
+    .map((character) => character.name);
+  return `${base}${characterIconNotice(characters.length, missing)}`;
 }
 
 /**
@@ -2490,10 +2905,15 @@ async function collectCharacters(
     return [];
   }
 
+  // 素材置き場の索引（作者の指定、2026-09-13）。画面と本で同じ引き方をする
+  const iconIndex = buildCharacterIconIndex(
+    await collectMaterialImages(work.folderPath)
+  );
+
   const out: PreviewCharacter[] = [];
   for (const character of selectBookCharacters(characters)) {
     const entry = toCharacterEntry(character);
-    const iconPath = characterIconPath(character.icon);
+    const iconPath = resolveCharacterIconPath(character, iconIndex);
     out.push({
       name: entry.name,
       reading: entry.reading,

@@ -18,6 +18,7 @@ import {
   type WriteTextFileResult,
 } from "../core/textFile";
 import { logFailure, logStep, useLogFile } from "../core/logger";
+import { manualActor, recordEdit } from "../core/actorContext";
 import { withCancellableProgress } from "../views/progress";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 
@@ -181,8 +182,34 @@ async function convertAll(
           // そのまま置くので、本文が同じままだと1バイトも変わらない
           { rewriteEol: true }
         );
-        if (result.ok) done.push(filePath);
-        else failed.push({ filePath, reason: describeWriteFailure(result) });
+        if (result.ok) {
+          done.push(filePath);
+          /*
+            **編集履歴に残す**（0.47.8 の積み残し。設計書5.6）。
+
+            改行の揃えは**ファイルの全行を書き換える**。残さないと、
+            あとで差分を見た人（編集部・別の環境の自分）が「全行が変わって
+            いるが誰が何をしたのか分からない」ことになる。口述の整文
+            （`dictationClean.ts`、0.40.8）と同じ形にそろえた。
+
+            **1件ずつ残す。** まとめて1行にすると、どのファイルを
+            触ったのかが履歴から読めない。
+          */
+          await recordEdit(work, {
+            actor: manualActor(),
+            action: "改行コードを揃えた",
+            file: path.basename(filePath),
+            // **元の値は `content` から取る。** 書き込みの指定が持つ改行は
+            // 揃えた**あと**の値なので、そちらを使うと「LF → LF」になる
+            detail:
+              (content.hasMixedEol
+                ? "混在"
+                : eolLabel(content.eol)) +
+              ` → ${eolLabel(target)}`,
+          });
+        } else {
+          failed.push({ filePath, reason: describeWriteFailure(result) });
+        }
       }
     }
   );

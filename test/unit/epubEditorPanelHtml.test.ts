@@ -384,9 +384,13 @@ describe("左の設定の欄", () => {
     ]) {
       expect(html).toContain(`<select id="${id}"></select>`);
     }
-    // 組み込みの飾りの id も呼び名も、画面には書かない
+    // 組み込みの飾りの id も呼び名も、画面には書かない。
+    // **`value="center"` は見ない**——面の寄せの欄（作者の依頼、
+    // 2026-09-13）が同じ綴りを使うので、飾りの見張りにならない。
+    // 飾りの id は、ほかの2つと呼び名のほうで見る
     expect(html).not.toContain('value="rule"');
-    expect(html).not.toContain('value="center"');
+    expect(html).not.toContain('value="double-rule"');
+    expect(html).not.toContain('value="asterism"');
     expect(html).not.toContain("中央飾り");
     expect(script).toContain("function fillOrnamentChoices");
     expect(script).toContain("data.ornamentChoices");

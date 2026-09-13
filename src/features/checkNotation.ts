@@ -16,6 +16,14 @@ import {
   createOrganizationStore,
 } from "../core/abilityStore";
 import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
+import {
+  DIGIT_WIDTH_FULL,
+  DIGIT_WIDTH_HALF,
+  digitWidthReplacement,
+  isDigitWidthTarget,
+  isFullWidthDigit,
+  isHalfWidthDigit,
+} from "../core/digitWidth";
 import { describeCheckRunCounts } from "../core/checkRunCounts";
 import type { IncomingCount } from "../core/proposalBuckets";
 import { type TypoCheckIssue } from "./checkTypos";
@@ -90,15 +98,21 @@ export interface NotationCheckRunResult {
  *
  * これまでの案内は「同じ語が2通り以上の書き方で本文に出ている場合だけを
  * 対象にしています」だった。**作者には「どんな2通りでも拾う」と読める。**
- * 実際に見ているのは、固有名詞の**ひらがな⇄カタカナの入れ替えだけ**
- * （`switchKanaScript`）と、決まった語の一覧（`KANA_KANJI_PAIRS`・
- * `OKURIGANA_GROUPS`）である。「おばあさん／お婆さん」は登録済みの人物名でも
- * 拾えない——仕様どおりだが、書いていなければ不具合に見える。
+ * 実際に見ているのは、固有名詞の**ひらがな⇄カタカナの入れ替え**
+ * （`switchKanaScript`）、決まった語の一覧（`KANA_KANJI_PAIRS`・
+ * `OKURIGANA_GROUPS`）、そして**数字の全角半角**（`digitWidth.ts`）である。
+ * 「おばあさん／お婆さん」は登録済みの人物名でも拾えない——仕様どおりだが、
+ * 書いていなければ不具合に見える。
+ *
+ * **数字のことも書く**（0.51.2。0.49.4 の積み残し⑤）。0.49.4 で数字の組を
+ * 足したのに、この断りには入っていなかった。案内に無いものが指摘に出ると、
+ * 作者は「なぜこれが出たのか」を調べることになる。80字に収めるため、
+ * 「同じ語の」「全般」のような詰め物を落とした。
  */
 export const NOTATION_SCOPE_NOTE =
-  "拾えるのは、同じ語のひらがな・カタカナの違いと、" +
-  "決まった語の漢字／かな・送り仮名です" +
-  "（「おばあさん／お婆さん」のような漢字の開き閉じ全般は対象外）。";
+  "拾えるのは、ひらがな・カタカナの違い、決まった語の漢字／かな・送り仮名、" +
+  "数字の全角半角です" +
+  "（「おばあさん／お婆さん」など漢字の開き閉じは対象外）。";
 
 /**
  * 走った量の控え。**終了ログを1か所で書くため**にある。
@@ -268,9 +282,10 @@ async function runNotationCheck(
     // **組ごとに1度だけ組み立てる。** 同じ材料を出現の数だけ作り直さない
     const material = notationMaterial(group);
     for (const form of group.forms) {
-      if (form.surface === keep) continue;
+      const to = replacementFor(group, form.surface, keep);
+      if (to === undefined) continue;
       for (const occurrence of form.occurrences) {
-        const issue = buildIssue(group, occurrence, form.surface, keep, material);
+        const issue = buildIssue(group, occurrence, form.surface, to, material);
         if (dismissed.has(dismissKey(issue.filePath, issue))) {
           dismissedCount++;
           continue;
@@ -320,9 +335,7 @@ async function pickGroups(
 ): Promise<NotationVariantGroup[] | undefined> {
   const items = groups.map((group) => ({
     label: group.label,
-    description: group.forms
-      .map((form) => `${form.surface} ${form.occurrences.length}回`)
-      .join(" / "),
+    description: describeForms(group),
     detail: exampleOf(group),
     group,
   }));
@@ -347,6 +360,23 @@ async function pickGroups(
     return [];
   }
   return picked.map((item) => item.group);
+}
+
+/**
+ * 一覧に出す、その組の内訳。
+ *
+ * 数字の組（0〜9をまとめた1組）だけは**幅でまとめて**出す。表記ごとに
+ * 並べると「3 4回 / 5 2回 / ３ 1回…」と最大20個になって読めない。
+ * 作者が知りたいのは「直す箇所がどれだけあるか」である。
+ */
+function describeForms(group: NotationVariantGroup): string {
+  if (group.kind === "digit_width") {
+    const { half, full } = digitWidthCounts(group);
+    return `半角 ${half}件／全角 ${full}件`;
+  }
+  return group.forms
+    .map((form) => `${form.surface} ${form.occurrences.length}回`)
+    .join(" / ");
 }
 
 /**
@@ -390,7 +420,42 @@ async function pickDecisionMode(
 
 /** 出現の多い表記。`forms` は多い順に並んでいる */
 function majorityForm(group: NotationVariantGroup): string | null {
+  // 数字の組（0〜9をまとめた1組）は「多い方」で決められない——数字ごとに
+  // 置換先が違うからである。この組は全角へ促すためにあるので、全角を採る
+  if (group.kind === "digit_width") return DIGIT_WIDTH_FULL;
   return group.forms[0]?.surface ?? null;
+}
+
+/**
+ * その表記を、選んだ揃え先へ直した形。**直すものが無ければ `undefined`。**
+ *
+ * ふつうの組は「選んだ表記そのもの」へ揃えるので、選んだ表記自身だけを
+ * 飛ばせばよい。数字の組だけは `keep` が幅の印なので、**出現ごとに
+ * 置換先を計算する**（3→３、5→５）。元からその幅の表記は候補に出さない。
+ */
+function replacementFor(
+  group: NotationVariantGroup,
+  surface: string,
+  keep: string
+): string | undefined {
+  if (group.kind === "digit_width" && isDigitWidthTarget(keep)) {
+    return digitWidthReplacement(surface, keep);
+  }
+  return surface === keep ? undefined : keep;
+}
+
+/** 半角・全角それぞれの出現数（数字の組の見せ方に使う） */
+function digitWidthCounts(group: NotationVariantGroup): {
+  half: number;
+  full: number;
+} {
+  let half = 0;
+  let full = 0;
+  for (const form of group.forms) {
+    if (isHalfWidthDigit(form.surface)) half += form.occurrences.length;
+    if (isFullWidthDigit(form.surface)) full += form.occurrences.length;
+  }
+  return { half, full };
 }
 
 /**
@@ -409,13 +474,15 @@ async function pickTargetForm(
   );
 
   const items: Array<{ label: string; description: string; keep: string | null }> =
-    group.forms.map((form) => ({
-      label: `「${form.surface}」に揃える`,
-      description: `${form.surface} は ${form.occurrences.length}回。他の ${
-        total - form.occurrences.length
-      }箇所を書き換える候補として出します`,
-      keep: form.surface,
-    }));
+    group.kind === "digit_width"
+      ? digitWidthItems(group)
+      : group.forms.map((form) => ({
+          label: `「${form.surface}」に揃える`,
+          description: `${form.surface} は ${form.occurrences.length}回。他の ${
+            total - form.occurrences.length
+          }箇所を書き換える候補として出します`,
+          keep: form.surface,
+        }));
   items.push({
     label: "$(close) この組は揃えない",
     description: "意図して使い分けている場合",
@@ -430,6 +497,33 @@ async function pickTargetForm(
   // 取りやめ（undefined）は「残りも見ない」。「この組は揃えない」（null）とは別
   if (!picked || !("keep" in picked)) return undefined;
   return picked.keep;
+}
+
+/**
+ * 数字の組の選択肢は、**表記ではなく幅で出す**（作者の指示、2026-09-12）。
+ *
+ * 0〜9を1組にまとめたので「『3』に揃える」を数字ごとに並べると、
+ * 選択肢が最大20個になる。どちらの幅へ寄せるかは1回で決まる話である。
+ */
+function digitWidthItems(
+  group: NotationVariantGroup
+): Array<{ label: string; description: string; keep: string | null }> {
+  const { half, full } = digitWidthCounts(group);
+  return [
+    {
+      label: "$(arrow-right) 全角に揃える（１２３…）",
+      description: `半角の ${half}箇所を、それぞれの全角へ書き換える候補として出します（縦書きで寝ません）`,
+      keep: DIGIT_WIDTH_FULL,
+    },
+    {
+      label: "$(arrow-left) 半角に揃える（123…）",
+      description:
+        full > 0
+          ? `全角の ${full}箇所を、それぞれの半角へ書き換える候補として出します`
+          : "全角の箇所がないので、書き換える候補は出ません",
+      keep: DIGIT_WIDTH_HALF,
+    },
+  ];
 }
 
 function exampleOf(group: NotationVariantGroup): string {

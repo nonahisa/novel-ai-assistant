@@ -18,6 +18,7 @@ import type { DeviationIssue } from "./checkDeviations";
 import { FACT_CONTRADICTION_CATEGORY } from "../core/factContradiction";
 import { buildProposalPanelHtml } from "../views/proposalPanelHtml";
 import { diffChars, type DiffSegment } from "../core/inlineDiff";
+import type { DiffEntry } from "../core/characterDiff";
 import { KeepWordStore } from "../core/keepWordStore";
 import { validateKeepWord } from "../models/keepWord";
 import { explainProofreadReason } from "../core/proofreadValidation";
@@ -48,13 +49,15 @@ import {
   type RecheckItem,
   type RecheckOutcome,
 } from "./recheckProposal";
-import { logFailure, logLine, useLogFile } from "../core/logger";
+import { logFailure, logLine, logStep, useLogFile } from "../core/logger";
 import {
   askNotationAdvice,
   describeNotationAdvice,
 } from "./notationAdvice";
 import type { NotationAdviceGroup } from "../prompts/notationAdvice";
 import { locateAppliedSuggestion } from "../core/proposalUndo";
+// 飛び先の行は、指摘が持つ行番号ではなく引用から決め直す（設計書6.11）
+import { relocateQuote } from "../core/relocateQuote";
 import { revealTextLocation } from "./revealLocation";
 import { openInDefaultEditor } from "../views/openDocument";
 import { notifyDone } from "../views/notify";
@@ -368,6 +371,15 @@ export interface RecordChangePart {
   after: string;
   /** 違うところ。`before` を `after` にするための区間の並び */
   diff: DiffSegment[];
+  /**
+   * 1つずつ落とせる値（作者の依頼、2026-09-12）。
+   *
+   * **名前の並ぶ3項目（呼称・関係・別名）だけが持つ。** 「中神隼人→
+   * ハヤブサ先生・先生・センパイ」のうち1つだけが違うとき、レコードごと
+   * 見送るか間違ったまま反映するかの二択になっていた。
+   * 無ければ、更新案の側はこれまでどおり塗り分けて出す。
+   */
+  entries?: DiffEntry[];
 }
 
 export interface RecordUpdateViewItem {
@@ -474,9 +486,42 @@ type IssuesMessage = {
   works: WorkSummary[];
 };
 
+/**
+ * レコードごとの「落とす葉の鍵」（設計書6.32）。
+ *
+ * **まとめて適用のときに、画面から届く。** 1件ずつの「反映する」は
+ * `apply` の `dropKeys` で1レコード分だけを運ぶが、まとめて適用は
+ * 画面に出ている全レコードぶんを一度に運ぶ必要がある。
+ */
+interface RecordDropKeys {
+  id: string;
+  dropKeys: string[];
+}
+
+/**
+ * 更新を1件反映した結果。
+ *
+ * `dropped` は**実際に落とした葉の数**。鍵の数ではない——作者が付けた印が
+ * レコード側に見つからないこともあるので、数えるのは保存する側である。
+ * **黙って落としたことにしない**（CLAUDE.md 規則2）ために、
+ * まとめて適用の完了の知らせへも出す。
+ */
+interface RecordApplyOutcome {
+  ok: boolean;
+  reason?: string;
+  dropped?: number;
+}
+
 type IncomingMessage =
   | { type: "jump"; id: string }
-  | { type: "apply"; id: string }
+  /**
+   * 反映する。
+   *
+   * `dropKeys` は、設定資料の更新で作者が ✕ を付けた葉の鍵
+   * （設計書6.32）。**承認待ちのファイルは書き換えず**、保存の直前に
+   * メモリの上で落とす。
+   */
+  | { type: "apply"; id: string; dropKeys?: string[] }
   | { type: "undo"; id: string }
   | { type: "dismiss"; id: string }
   | { type: "keepWord"; id: string }
@@ -487,7 +532,13 @@ type IncomingMessage =
   | { type: "askNotation"; id: string }
   /** 作者が本文を手で書き直したあと、その指摘が解消したかを確かめる */
   | { type: "recheck"; id: string }
-  | { type: "applyAll" }
+  /**
+   * まとめて適用する。
+   *
+   * **`drops` を欠かさない。** 添えなかったころ、作者が ✕ を付けたあと
+   * まとめて押すと印が効かず、落としたはずの値が黙って入った（0.50.1）
+   */
+  | { type: "applyAll"; drops?: RecordDropKeys[] }
   /** 別の分類へ切り替える */
   | { type: "selectCategory"; category: string }
   /** 別の作品へ切り替える（適用・見送りは表示中の作品にしか効かないため） */
@@ -514,7 +565,11 @@ interface CategoryBucket {
   items: ProposalViewItem[];
   contradictions: ContradictionViewItem[];
   recordUpdates: RecordUpdateViewItem[];
-  applyRecordUpdate?: (id: string) => Promise<{ ok: boolean; reason?: string }>;
+  applyRecordUpdate?: (
+    id: string,
+    /** 作者が ✕ を付けた葉の鍵（設計書6.32） */
+    dropKeys?: string[]
+  ) => Promise<RecordApplyOutcome>;
   /**
    * 更新を見送る処理（承認待ちから片付ける）。**apply と必ず対にする。**
    * これが無かったころ、「見送る」は押しても黙って何も起きなかった
@@ -591,7 +646,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   private recordUpdates: RecordUpdateViewItem[] = [];
   /** 更新を反映する処理。呼び出し側から渡してもらう */
   private applyRecordUpdate:
-    | ((id: string) => Promise<{ ok: boolean; reason?: string }>)
+    | ((id: string, dropKeys?: string[]) => Promise<RecordApplyOutcome>)
     | undefined;
   /** 更新を見送る処理（承認待ちから片付ける）。apply と対 */
   private dismissRecordUpdate:
@@ -719,8 +774,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       contradictions?: ContradictionViewItem[];
       recordUpdates?: RecordUpdateViewItem[];
       applyRecordUpdate?: (
-        id: string
-      ) => Promise<{ ok: boolean; reason?: string }>;
+        id: string,
+        dropKeys?: string[]
+      ) => Promise<RecordApplyOutcome>;
       dismissRecordUpdate?: (
         id: string
       ) => Promise<{ ok: boolean; reason?: string }>;
@@ -1311,7 +1367,11 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   showRecordUpdates(
     work: WorkEntry,
     items: RecordUpdateViewItem[],
-    apply: (id: string) => Promise<{ ok: boolean; reason?: string }>,
+    apply: (
+      id: string,
+      /** 作者が ✕ を付けた葉の鍵（設計書6.32） */
+      dropKeys?: string[]
+    ) => Promise<RecordApplyOutcome>,
     /** 見送る（承認待ちから片付ける）。渡さないと「見送る」は押せても効かない */
     dismiss: (id: string) => Promise<{ ok: boolean; reason?: string }>,
     /**
@@ -1693,7 +1753,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         await this.jumpTo(message.id);
         return;
       case "apply":
-        await this.applyIssue(message.id);
+        await this.applyIssue(message.id, message.dropKeys);
         return;
       case "undo":
         await this.undoIssue(message.id);
@@ -1717,7 +1777,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         await this.recheckIssue(message.id);
         return;
       case "applyAll":
-        await this.applyVisible();
+        await this.applyVisible(message.drops);
         return;
       case "selectCategory":
         this.switchTo(message.category);
@@ -1798,9 +1858,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
 
   private async jumpTo(id: string): Promise<void> {
     // 矛盾も同じ「その行へ飛ぶ」を使う。**両方から探す**
+    const proposal = this.items.find((entry) => entry.id === id);
+    const contradiction = this.contradictions.find((entry) => entry.id === id);
     const item: { filePath: string; line: number } | undefined =
-      this.items.find((entry) => entry.id === id) ??
-      this.contradictions.find((entry) => entry.id === id);
+      proposal ?? contradiction;
     if (!item) {
       // **押しても何も起きない、を黙って起こさない**（作者の報告、2026-08-29）。
       // 一覧の描き直しと押した瞬間がすれ違うと、ここへ来ることがある
@@ -1821,7 +1882,15 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     */
     await revealTextLocation(
       item.filePath,
-      item.line,
+      // **行番号は、1件当てた瞬間に古くなる**（作者の報告、2026-09-12）。
+      // 飛ぶ直前に、いまの本文から引用を探し直す
+      await this.lineToReveal(
+        item.filePath,
+        item.line,
+        // 引用の在り処は種類で違う（推敲・誤字脱字は `original`、矛盾は
+        // `excerpt`）。どちらも「本文に実在する逐語引用」である
+        proposal?.original ?? contradiction?.excerpt ?? ""
+      ),
       this.revealInManuscript,
       "提案パネル",
       this.work
@@ -1829,15 +1898,58 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   }
 
   /**
+   * 飛び先の行を決める（設計書6.11）。
+   *
+   * **引用が見つからなくても飛べなくならない。** 記録された行へ落として
+   * ログに1行残す——黙って落とすと「押しても違う所へ行く」の手がかりが消える。
+   *
+   * @param recordedLine 検知したときの行番号（1始まり）
+   * @param quote 本文に実在するはずの引用。空なら探さない
+   */
+  private async lineToReveal(
+    filePath: string,
+    recordedLine: number,
+    quote: string
+  ): Promise<number> {
+    // 引用を持たない指摘（プロット逸脱の一部など）は、これまでどおり
+    if (!quote.trim()) return recordedLine;
+
+    // **記録の直前に書き先を向ける**（`revealLocation.ts` と同じ）。ほかの
+    // 機能が別の作品へ向け直していることがあるので、覚えずに毎回向ける
+    if (this.work) useLogFile(this.work.folderPath);
+
+    try {
+      // **生の `fs` を使わない。** 文字コードと改行の判定を通さないと、
+      // Shift_JIS の原稿で行がずれる（CLAUDE.md 規則1・7）
+      const file = await readTextFile(filePath);
+      const found = relocateQuote(file.text, quote, recordedLine);
+      if (found !== undefined) return found;
+      logStep(
+        `提案パネル：引用が見つからないので、記録された行へ飛びました（${filePath} ${recordedLine}行目）。`
+      );
+    } catch (error) {
+      logStep(
+        `提案パネル：本文を読めなかったので、記録された行へ飛びました（${filePath} ${recordedLine}行目：${
+          error instanceof Error ? error.message : String(error)
+        }）。`
+      );
+    }
+    return recordedLine;
+  }
+
+  /**
    * 表示中（無視・失敗以外）の指摘のうち、high/medium confidence のものだけを
    * まとめて適用する。既定では画面に出さず、作者が確認ダイアログを経てから呼ぶ。
    */
-  private async applyVisible(): Promise<void> {
+  private async applyVisible(
+    /** 画面で ✕ を付けた葉（レコードごと。設計書6.32） */
+    drops?: readonly RecordDropKeys[]
+  ): Promise<void> {
     // **設定資料の更新も「まとめて」の対象である。**
     // ここを見ていなかったため、更新の一覧で押しても何も起きなかった
     // （2026-08-19、作者が実機で発見）
     if (this.recordUpdates.length > 0) {
-      await this.applyAllRecordUpdates();
+      await this.applyAllRecordUpdates(drops);
       return;
     }
 
@@ -1910,8 +2022,17 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     );
   }
 
-  /** 設定資料の更新をまとめて反映する */
-  private async applyAllRecordUpdates(): Promise<void> {
+  /**
+   * 設定資料の更新をまとめて反映する。
+   *
+   * **1件ずつの「反映する」と同じく、✕ の印を見る**（0.50.1）。
+   * 見ていなかったころ、作者が印を付けたあとまとめて押すと、
+   * 落としたはずの値が黙って入った（CLAUDE.md 規則2に反する）。
+   */
+  private async applyAllRecordUpdates(
+    /** 画面で ✕ を付けた葉（レコードごと。設計書6.32） */
+    drops?: readonly RecordDropKeys[]
+  ): Promise<void> {
     const targets = this.recordUpdates.filter(
       (entry) => entry.status === "pending" || entry.status === "failed"
     );
@@ -1939,32 +2060,68 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     );
     if (confirm !== label) return;
 
+    // **落とした件数を数えながら反映する。** 鍵の数ではなく、
+    // 保存の直前に実際に落ちた数を積む（レコード側に見つからない鍵もある）
+    let dropped = 0;
     for (const target of targets) {
-      await this.applyIssue(target.id);
+      const keys = drops?.find((entry) => entry.id === target.id)?.dropKeys;
+      const outcome = await this.applyRecordUpdateById(target.id, keys);
+      dropped += outcome.dropped;
     }
     const applied = this.recordUpdates.filter(
       (entry) => entry.status === "applied"
     ).length;
+    // **黙って落としたことにしない**（CLAUDE.md 規則2）。
+    // 1件ずつのときと同じ「◯ 件を落と…」の形で添える
     void vscode.window.showInformationMessage(
-      `${applied}件を${conjugate(label, "しました")}。`
+      `${applied}件を${conjugate(label, "しました")}` +
+        (dropped > 0 ? `（${dropped} 件を落としました）` : "") +
+        "。"
     );
   }
 
-  private async applyIssue(id: string): Promise<void> {
-    // 設定資料の更新は、本文ではなくレコードを書き換える
+  /**
+   * 設定資料の更新を1件反映する。
+   *
+   * **1件ずつの「反映する」もまとめて適用も、ここを通す。** 別々に書いて
+   * いたころ、まとめて適用だけが ✕ の印を素通りさせていた（0.50.1）。
+   *
+   * `handled` は「設定資料の更新として扱った」の意味。本文の指摘は
+   * ここでは扱わないので、`applyIssue` が続きを引き受ける。
+   */
+  private async applyRecordUpdateById(
+    id: string,
+    dropKeys?: string[]
+  ): Promise<{ handled: boolean; dropped: number }> {
     const update = this.recordUpdates.find((entry) => entry.id === id);
-    if (update && this.applyRecordUpdate) {
-      if (update.status === "applied") return;
-      const outcome = await this.applyRecordUpdate(id);
-      this.markStatus(
-        id,
-        outcome.ok ? "applied" : "failed",
-        outcome.ok ? undefined : outcome.reason
-      );
-      // 承認待ちが1件減ったので、メニューの印を数え直してもらう
-      if (outcome.ok) this.onCountsChanged?.();
-      return;
+    if (!update || !this.applyRecordUpdate) {
+      return { handled: false, dropped: 0 };
     }
+    if (update.status === "applied") return { handled: true, dropped: 0 };
+
+    const outcome = await this.applyRecordUpdate(id, dropKeys);
+    this.markStatus(
+      id,
+      outcome.ok ? "applied" : "failed",
+      outcome.ok ? undefined : outcome.reason
+    );
+    // 承認待ちが1件減ったので、メニューの印を数え直してもらう
+    if (outcome.ok) this.onCountsChanged?.();
+    return { handled: true, dropped: outcome.dropped ?? 0 };
+  }
+
+  private async applyIssue(
+    id: string,
+    /**
+     * 設定資料の更新で、作者が ✕ を付けた葉の鍵（設計書6.32）。
+     *
+     * **まとめて適用のときも渡る**（0.50.1）。画面がレコードごとの鍵を
+     * 添えて送り、`applyAllRecordUpdates` が取り出して同じ道へ流す
+     */
+    dropKeys?: string[]
+  ): Promise<void> {
+    // 設定資料の更新は、本文ではなくレコードを書き換える
+    if ((await this.applyRecordUpdateById(id, dropKeys)).handled) return;
 
     const item = this.items.find((i) => i.id === id);
     if (!item || !this.work) return;

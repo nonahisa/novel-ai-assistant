@@ -33,23 +33,31 @@ export const BOOK_WRITING_MODES: readonly BookWritingMode[] = [
 ];
 
 /**
- * 目次ページの並べ方（設計書6.65.6）。
+ * 目次ページの**並べ方**（設計書6.65.6）。
  *
- * - `vertical`：**本文と同じ流れ**の一覧（縦組みの本なら縦に並ぶ）。既定
- * - `horizontal`：目次だけ横組みにする（縦組みの本でもここは横に読む）
+ * - `list`：一覧。既定
  * - `chapters`：章ごとに区切り、章の見出しを立てる
  *
- * **`vertical` を「必ず縦組み」にしていない。** 横組みの本で既定のまま
- * 目次だけ縦になると、作者が何も選んでいないのに見た目が変わる。
- * 既定は「いままでどおり」でなければならない（0.29.18の実装で決めた）。
+ * **向きはここが持たない**（作者の指摘、2026-09-13「目次のダブりも解消
+ * されてないです」）。かつては `vertical`／`horizontal`／`chapters` の
+ * 3択で、前の2つは**並べ方が同じで向きだけが違った**。面ごとの「文字の
+ * 向き」の欄ができたことで、目次だけ向きの出どころが2つになったので、
+ * ここからは向きの意味を外してある。目次の向きは、ほかの4面と同じ
+ * `pageLayouts.toc.vertical` だけが決める。
+ *
+ * 古い値は読み込みで読み替える（`migrateTocPattern`）。
  */
-export type TocPattern = "vertical" | "horizontal" | "chapters";
+export type TocPattern = "list" | "chapters";
 
-export const TOC_PATTERNS: readonly TocPattern[] = [
-  "vertical",
-  "horizontal",
-  "chapters",
-];
+export const TOC_PATTERNS: readonly TocPattern[] = ["list", "chapters"];
+
+/**
+ * 0.55.x までの `tocPattern`。**読み込みでだけ受け取る。**
+ *
+ * 弾いてしまうと、いままで書き出せていた本の設計図が版を上げただけで
+ * 開けなくなる（作者は本を直す入口にもたどり着けない）。
+ */
+const LEGACY_TOC_PATTERNS = ["vertical", "horizontal"] as const;
 
 /**
  * 目次の1行に出す見出しの形（設計書6.65.15）。
@@ -224,9 +232,45 @@ export interface BookCharacterPage {
    * 同じ扱いで、画面からは書き換えない。
    */
   enabled: boolean;
-  /** 人物イラスト（台帳の `icon`）を添えるか。読めない人物は名前だけ */
+  /**
+   * 人物イラストを添えるか。読めない人物は名前だけ。
+   *
+   * 絵の在りかは台帳の `icon` 欄と、`素材/` の中の名前が同じ画像から引く
+   * （`core/characterIconLookup.ts`）。
+   */
   showIcons: boolean;
+  /**
+   * 名前のルビ（作者の指定、2026-09-13「人物紹介もルビは選べるように
+   * したほうが良いかも」）。
+   *
+   * **省略＝`all`**（すべてに付ける）。いままでの本と同じ見た目なので、
+   * ここを書いていない book.json の本は1文字も変わらない。既定のときは
+   * 保存でも書き足さない（`pageLayouts` と同じ約束）。
+   */
+  rubyMode?: CharacterRubyMode;
 }
+
+/**
+ * 人物紹介の名前へルビを振る範囲（作者の指定、2026-09-13）。
+ *
+ * 読み仮名があれば必ずルビが付いていたため、実機では「イント→いんと」
+ * 「ターナ先生→たーなせんせい」のような、読みの助けにならないルビが
+ * 並んでいた。仮名だけの名前に仮名を振っても読者は何も得ない。
+ *
+ * - `all`：すべてに付ける（**既定**。いままでと同じ）
+ * - `kanjiOnly`：漢字を含む名前だけに付ける
+ * - `none`：付けない
+ */
+export type CharacterRubyMode = "all" | "kanjiOnly" | "none";
+
+export const CHARACTER_RUBY_MODES: readonly CharacterRubyMode[] = [
+  "all",
+  "kanjiOnly",
+  "none",
+];
+
+/** 何も選んでいない本の振る舞い。**既存の本の見た目を変えない** */
+export const DEFAULT_CHARACTER_RUBY_MODE: CharacterRubyMode = "all";
 
 /**
  * 同梱する書体（設計書6.65.11）。
@@ -308,6 +352,257 @@ export const BOOK_BLOCK_LABELS: Record<BookBlockType, string> = {
 };
 
 /**
+ * 面の中の文字の体裁（作者の依頼、2026-09-13
+ * 「本文以外の表紙等の文字について、縦書き横書き、上寄せ下寄せ、右寄せ左寄せ、
+ * 等選べるようにしてください」）。
+ *
+ * 表紙・裏表紙は canvas へ焼く合成なので別の仕組み（`CoverTextStyle`）が
+ * 持っている。ここは**それ以外の面**——中表紙・目次・人物紹介・あとがき・
+ * 奥付——のためのものである。
+ *
+ * ## 寄せは論理の方向で持つ（`top`／`left` ではない）
+ *
+ * 縦書きと横書きで「上下」と「左右」の意味が入れ替わるので、`top` のような
+ * 名前で持つと、向きを変えたとたんに指定の意味が変わる。ここは CSS の論理
+ * プロパティと同じ `start`／`center`／`end` で持ち、**画面に出す言葉だけを
+ * 向きに合わせて出し分ける**（`pageAlignLabels`）。
+ *
+ * ## 省略が既定である
+ *
+ * どの項目も省略できる。省略＝**いままでどおり**（本の綴じ方向に従い、
+ * 寄せの指定も出さない）で、何も選んでいない面の見た目は1ピクセルも
+ * 変わらない。`suspended` と同じ約束で、選んでいない面には項目そのものを
+ * 書かない——`false` や `"start"` を書き足すと、いままでの book.json が
+ * 保存のたびに既定値だらけになってGitの差分が読めなくなる。
+ */
+export type PageTextAlign = "start" | "center" | "end";
+
+export const PAGE_TEXT_ALIGNS: readonly PageTextAlign[] = [
+  "start",
+  "center",
+  "end",
+];
+
+export interface PageTextLayout {
+  /** 縦書きか。省略時は本の綴じ方向に従う（いまの見た目を変えない） */
+  vertical?: boolean;
+  /** 上下の寄せ（横書きのとき）。縦書きでは左右の寄せになる */
+  block?: PageTextAlign;
+  /** 左右の寄せ（横書きのとき）。縦書きでは上下の寄せになる */
+  inline?: PageTextAlign;
+}
+
+/**
+ * 体裁を選べる面。**面の種類を鍵にした1つの表**で持つ（設計書6.65.15）。
+ *
+ * 面ごとに別々の欄を5つ作ると、面が増えるたびに台帳・画面・CSSの3か所へ
+ * 同じ形の項目を足すことになる。
+ *
+ * 表紙・裏表紙（`cover`・`backCover`）はここに無い——本へ入るのは合成して
+ * 焼いた画像1枚なので、XHTML の体裁という概念が無い。本文（`body`）も
+ * 無い：本文の組み方は本そのものの綴じ方向である。口絵・扉絵は画像1枚で、
+ * 文字を持たない。
+ */
+export const PAGE_LAYOUT_BLOCK_TYPES = [
+  "halfTitle",
+  "toc",
+  "characters",
+  "afterword",
+  "colophon",
+] as const;
+
+export type PageLayoutBlockType = (typeof PAGE_LAYOUT_BLOCK_TYPES)[number];
+
+export type BookPageLayouts = Partial<
+  Record<PageLayoutBlockType, PageTextLayout>
+>;
+
+/**
+ * 向きが**面ぜんぶには効かない**面。目次だけである。
+ *
+ * **向きは5面とも選べる**（作者の指摘、2026-09-13）。ただし目次の向きが
+ * 変えるのは中の一覧（`<ol class="toc-horizontal">`）だけで、面そのもの
+ * （`<nav>`）は本の綴じ方向のままにしてある——ここを面ぜんぶへ広げると、
+ * 「目次だけ横組み」を選んでいた**既にある本の見た目が変わる**。
+ *
+ * この表を見るのは2か所。CSSに面ぜんぶの `writing-mode` を出すかどうか
+ * （`pageLayoutForCss`）と、寄せの呼び名を縦横どちらで出すか
+ * （`pageLayoutVertical`）である。寄せが効くのは面そのものなので、
+ * 呼び名も面の向き＝本の綴じ方向で出す。
+ */
+export const PAGE_LAYOUT_LIST_ONLY_ORIENTATION: readonly PageLayoutBlockType[] =
+  ["toc"];
+
+/** その面の向きが、面ぜんぶ（`writing-mode` と寄せの意味）に効くか */
+export function pageOrientationAffectsWholePage(
+  type: PageLayoutBlockType
+): boolean {
+  return !PAGE_LAYOUT_LIST_ONLY_ORIENTATION.includes(type);
+}
+
+/**
+ * 目次の一覧の向き。**選んでいなければ undefined（本に従う）。**
+ *
+ * 書き出しとプレビューが同じ判断をするための1か所である（`epubPackage.ts`
+ * の `buildTocFragment`）。`true`／`false` を返したときだけ、一覧に向きの
+ * クラスを付ける——`undefined` のときは、いままでどおり何も足さない。
+ */
+export function tocListOrientation(
+  layouts: BookPageLayouts | undefined
+): boolean | undefined {
+  return layouts?.toc?.vertical;
+}
+
+/**
+ * 面ごとのCSSクラス。**XHTMLもCSSも画面も、必ずここから作る。**
+ *
+ * 書き出しの断片（`core/epubPackage.ts`）とCSS（`buildEpubCss`）が別々に
+ * 名前を組み立てると、片方を直した日から体裁が当たらなくなる。
+ */
+export function pageLayoutClass(type: PageLayoutBlockType): string {
+  return `page-${type}`;
+}
+
+/**
+ * その面に体裁が選ばれていれば、当てるためのクラス。**無ければ空文字。**
+ *
+ * **選んでいない面には、クラスも付けない。** 当てるCSSが無ければ見た目は
+ * 変わらないが、いままで出ていた本のXHTMLが1バイトも変わらないほうが
+ * 確かめやすい（`exportEpubCollected.test.ts` は本の中身をハッシュで
+ * 固定している）。
+ */
+export function pageLayoutClassFor(
+  type: PageLayoutBlockType,
+  layouts: BookPageLayouts | undefined
+): string {
+  return pageLayoutForCss(type, layouts) ? pageLayoutClass(type) : "";
+}
+
+/**
+ * その面のCSSに出す体裁。**出すものが無ければ undefined。**
+ *
+ * 目次だけは**向きを落とす**——目次の向きが変えるのは中の一覧だけで、
+ * 面ぜんぶの `writing-mode` にはしない（`PAGE_LAYOUT_LIST_ONLY_ORIENTATION`
+ * の説明を参照）。向きしか選んでいない目次は、ここで undefined になるので
+ * クラスも規則も出ない——「目次だけ横組み」を選んでいた既にある本の
+ * XHTMLもCSSも1バイトも変わらない。
+ */
+export function pageLayoutForCss(
+  type: PageLayoutBlockType,
+  layouts: BookPageLayouts | undefined
+): PageTextLayout | undefined {
+  const layout = layouts?.[type];
+  if (!layout) return undefined;
+  if (pageOrientationAffectsWholePage(type)) return layout;
+
+  const rest: PageTextLayout = {};
+  if (layout.block) rest.block = layout.block;
+  if (layout.inline) rest.inline = layout.inline;
+  return Object.keys(rest).length > 0 ? rest : undefined;
+}
+
+/** クラスを `class="…"` の中へ足すときの書き方（前の空白を忘れない） */
+export function pageLayoutClassSuffix(
+  type: PageLayoutBlockType,
+  layouts: BookPageLayouts | undefined
+): string {
+  const name = pageLayoutClassFor(type, layouts);
+  return name ? ` ${name}` : "";
+}
+
+/** 寄せの軸。`block` が行の進む向き、`inline` が字の進む向き */
+export type PageTextAxis = "block" | "inline";
+
+export interface PageAlignChoice {
+  value: PageTextAlign;
+  label: string;
+}
+
+export interface PageAlignLabels {
+  /** 欄の見出し（「上下の寄せ」「左右の寄せ」） */
+  axis: string;
+  options: readonly PageAlignChoice[];
+}
+
+/** 何も選んでいないときの選択肢の呼び名（いままでどおりの見た目） */
+export const PAGE_ALIGN_UNSET_LABEL = "既定のまま";
+
+/** 縦横を選ぶ欄の選択肢。**空文字が「本に従う」**（省略＝既定） */
+export const PAGE_ORIENTATION_OPTIONS: ReadonlyArray<{
+  value: string;
+  label: string;
+}> = [
+  { value: "", label: "本に従う" },
+  { value: "vertical", label: "縦書き" },
+  { value: "horizontal", label: "横書き" },
+];
+
+/** 上から下（横書きの行送り／縦書きの字の進む向き） */
+const ALIGN_TOP_BOTTOM: PageAlignLabels = {
+  axis: "上下の寄せ",
+  options: [
+    { value: "start", label: "上寄せ" },
+    { value: "center", label: "中央" },
+    { value: "end", label: "下寄せ" },
+  ],
+};
+
+/** 左から右（横書きの字の進む向き） */
+const ALIGN_LEFT_RIGHT: PageAlignLabels = {
+  axis: "左右の寄せ",
+  options: [
+    { value: "start", label: "左寄せ" },
+    { value: "center", label: "中央" },
+    { value: "end", label: "右寄せ" },
+  ],
+};
+
+/** 右から左（縦書きの行送り）。**`start` が「右寄せ」になる** */
+const ALIGN_RIGHT_LEFT: PageAlignLabels = {
+  axis: "左右の寄せ",
+  options: [
+    { value: "start", label: "右寄せ" },
+    { value: "center", label: "中央" },
+    { value: "end", label: "左寄せ" },
+  ],
+};
+
+/**
+ * 画面に出す寄せの呼び名（作者の依頼、2026-09-13）。
+ *
+ * **縦書きでは上下と左右の意味が入れ替わる。** 縦組みの面で `block: "start"`
+ * は「右寄せ」であり、ここを間違えると作者は毎回逆を選ぶことになる。
+ * 呼び名を1か所に置いて、画面はここから受け取るだけにする。
+ */
+export function pageAlignLabels(
+  axis: PageTextAxis,
+  vertical: boolean
+): PageAlignLabels {
+  if (axis === "block") {
+    // 行の進む向き。横書きは上→下、縦書きは右→左
+    return vertical ? ALIGN_RIGHT_LEFT : ALIGN_TOP_BOTTOM;
+  }
+  // 字の進む向き。横書きは左→右、縦書きは上→下
+  return vertical ? ALIGN_TOP_BOTTOM : ALIGN_LEFT_RIGHT;
+}
+
+/**
+ * その面が縦書きになるか（画面の呼び名と、寄せの意味を決める）。
+ *
+ * **目次の面は本の綴じ方向に従う。** 目次で選んだ向きが変えるのは中の
+ * 一覧（`<ol>`）だけで、面そのもの（`<nav>`）の向きは本のままである
+ * ——寄せが効くのは面そのものなので、呼び名も面の向きで出す。
+ */
+export function pageLayoutVertical(
+  type: PageLayoutBlockType,
+  layouts: BookPageLayouts | undefined,
+  bookVertical: boolean
+): boolean {
+  if (!pageOrientationAffectsWholePage(type)) return bookVertical;
+  return layouts?.[type]?.vertical ?? bookVertical;
+}
+
+/**
  * どの面にも付く印（設計書6.65.15の段D。作者の依頼、2026-09-04）。
  *
  * **保留は「消さずに本から外す」印である。** あとがきや口絵を、消さずに
@@ -387,7 +682,11 @@ export interface BookConfig {
    * 値を、並びの編集のついでに塗り替えないため）。
    */
   tocEnabled: boolean;
-  /** 目次ページの並べ方。`tocEnabled` が false なら見た目に影響しない */
+  /**
+   * 目次ページの**並べ方**。`tocEnabled` が false なら見た目に影響しない。
+   *
+   * 向きはここが持たない（`pageLayouts.toc.vertical` が持つ）。
+   */
   tocPattern: TocPattern;
   /** 目次の1行に出す見出しの形（設計書6.65.15）。既定は番号＋題 */
   tocEntryStyle: TocEntryStyle;
@@ -452,6 +751,14 @@ export interface BookConfig {
    * 目次・人物紹介の設定に追従させない。
    */
   blocks?: BookBlock[];
+  /**
+   * 面ごとの文字の体裁（作者の依頼、2026-09-13）。**省略できる。**
+   *
+   * 書いていない面は、いままでとまったく同じ見た目で組まれる。選んで
+   * いない面の項目は**書かない**ので、既にある book.json はこの版でも
+   * 1文字も増えない（`PageTextLayout` の説明を参照）。
+   */
+  pageLayouts?: BookPageLayouts;
 }
 
 export const BOOK_SCHEMA_VERSION = "0.1";
@@ -808,8 +1115,9 @@ export function defaultBookConfig(title: string): BookConfig {
     writingMode: "vertical",
     tocEnabled: true,
     // **既定は「いままでどおりの見た目」。** 第1段で書き出した本と
-    // 同じものが出ないと、版を上げただけで本の体裁が変わる
-    tocPattern: "vertical",
+    // 同じものが出ないと、版を上げただけで本の体裁が変わる（旧 `vertical`
+    // ＝「本文と同じ流れの一覧」と同じもの。向きは選ばない＝本に従う）
+    tocPattern: "list",
     // **既定は「番号＋題」**（いままでどおりの見た目。重複除去のあとの形）
     tocEntryStyle: "numberAndTitle",
     tocOrnament: "none",
@@ -862,7 +1170,12 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
   optionalString(value.label, "label");
   optionalEnum(value.writingMode, "writingMode", BOOK_WRITING_MODES);
   optionalBoolean(value.tocEnabled, "tocEnabled");
-  optionalEnum(value.tocPattern, "tocPattern", TOC_PATTERNS);
+  // **古い綴りも受け取る**（`LEGACY_TOC_PATTERNS`）。読み替えは下の
+  // `migrateTocPattern` が行う——知らない綴りは、いままでどおり断る
+  optionalEnum(value.tocPattern, "tocPattern", [
+    ...TOC_PATTERNS,
+    ...LEGACY_TOC_PATTERNS,
+  ]);
   optionalEnum(value.tocEntryStyle, "tocEntryStyle", TOC_ENTRY_STYLES);
   // **飾りの id は文字列として受け取る**（設計書6.65.17）。図録に無い id を
   // ここで弾くと、共通フォルダーを外した端末で設計図そのものが読めなくなる
@@ -880,6 +1193,12 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
   optionalNullableString(value.backCoverImagePath, "backCoverImagePath");
 
   const title = ((value.title as string | undefined) ?? "").trim();
+  // 並べ方と向きは、古い設計図の読み替えで**一緒に決まる**（下の説明を参照）
+  const toc = migrateTocPattern(
+    value.tocPattern,
+    parsePageLayouts(value.pageLayouts),
+    defaults.tocPattern
+  );
 
   return {
     schemaVersion:
@@ -896,8 +1215,7 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
       defaults.writingMode,
     tocEnabled:
       (value.tocEnabled as boolean | undefined) ?? defaults.tocEnabled,
-    tocPattern:
-      (value.tocPattern as TocPattern | undefined) ?? defaults.tocPattern,
+    tocPattern: toc.pattern,
     tocEntryStyle:
       (value.tocEntryStyle as TocEntryStyle | undefined) ??
       defaults.tocEntryStyle,
@@ -948,7 +1266,110 @@ export function parseBookConfig(raw: unknown, workTitle: string): BookConfig {
       defaults.characterPage
     ),
     fonts: parseFonts(value.fonts),
+    // 面ごとの体裁（作者の依頼、2026-09-13）。**何も選んでいなければ
+    // 項目ごと持たない**——book.json にも出ないので、いままでの本の
+    // ファイルは1文字も変わらない
+    pageLayouts: toc.pageLayouts,
   };
+}
+
+/**
+ * 古い `tocPattern` を、いまの「並べ方」と「文字の向き」へ読み替える
+ * （作者の指摘、2026-09-13「目次のダブりも解消されてないです」）。
+ *
+ * | 古い値 | 並べ方 | 向き |
+ * |---|---|---|
+ * | `vertical` | `list` | 触らない（本に従う） |
+ * | `horizontal` | `list` | 未設定のときだけ横書き |
+ * | `chapters` | `chapters` | 触らない |
+ *
+ * **作者が既に向きを選んでいたら、そちらを勝たせる。** 読み替えは古い
+ * 設計図を今の形で読むためのものであって、作者の選択を上書きする権限は
+ * 無い（「作者が書いたデータを上書きしない」と同じ約束）。
+ *
+ * **`vertical` で向きを入れないのは、それが「本に従う」だったから**である
+ * ——横組みの本で目次だけ縦になっては、作者が何も選んでいないのに見た目が
+ * 変わる（0.29.18で決めたとおり）。
+ *
+ * ここで読み替えてもファイルは書き換わらない。保存して初めて新しい綴りで
+ * book.json に入る（`blocks` の補いと同じ）。
+ */
+function migrateTocPattern(
+  raw: unknown,
+  layouts: BookPageLayouts | undefined,
+  fallback: TocPattern
+): { pattern: TocPattern; pageLayouts: BookPageLayouts | undefined } {
+  if (raw === "chapters") return { pattern: "chapters", pageLayouts: layouts };
+  if (raw === "vertical") return { pattern: "list", pageLayouts: layouts };
+  if (raw === "horizontal") {
+    // 既に選ばれていれば触らない（作者の選択が勝つ）
+    if (layouts?.toc?.vertical !== undefined) {
+      return { pattern: "list", pageLayouts: layouts };
+    }
+    return {
+      pattern: "list",
+      pageLayouts: {
+        ...layouts,
+        toc: { ...layouts?.toc, vertical: false },
+      },
+    };
+  }
+  return {
+    pattern: (raw as TocPattern | undefined) ?? fallback,
+    pageLayouts: layouts,
+  };
+}
+
+/**
+ * 面ごとの文字の体裁を読む（作者の依頼、2026-09-13）。
+ *
+ * **知らない値は落とす。** ほかの項目（飾りの置き場所・面の種類）は例外に
+ * しているが、ここだけは扱いを変えてある——体裁は**無くても本は組める**
+ * 飾りの指定であり、綴じ方向や面の並びのように本の骨格を決めるものでは
+ * ない。1つの綴りの間違いで設計図そのものが開けなくなると、作者は本を
+ * 直す入口（エディター画面）にもたどり着けない。
+ *
+ * 落とすのは**読めなかった軸だけ**で、同じ面のほかの軸は残す。面ごと
+ * 捨てると、`block` の綴りを間違えただけで `inline` の指定まで消える。
+ *
+ * 空（どの面も何も選んでいない）なら undefined を返す。`{}` を返すと
+ * book.json に空の `pageLayouts` が書かれ、何も選んでいない本のファイルが
+ * 保存のたびに増えてしまう。
+ */
+function parsePageLayouts(raw: unknown): BookPageLayouts | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const value = objectValue(raw, "pageLayouts");
+
+  const out: BookPageLayouts = {};
+  for (const type of PAGE_LAYOUT_BLOCK_TYPES) {
+    const entry = value[type];
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const layout: PageTextLayout = {};
+
+    // **目次の向きもここが受け取る**（作者の指摘、2026-09-13）。向きの
+    // 出どころは5面とも1つだけ——目次で効く範囲だけが違う
+    // （`PAGE_LAYOUT_LIST_ONLY_ORIENTATION`）
+    if (typeof record.vertical === "boolean") layout.vertical = record.vertical;
+    const block = pageAlignValue(record.block);
+    if (block) layout.block = block;
+    const inline = pageAlignValue(record.inline);
+    if (inline) layout.inline = inline;
+
+    if (Object.keys(layout).length > 0) out[type] = layout;
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** 寄せの値。知らない綴りは「選んでいない」と同じに扱う（上の説明を参照） */
+function pageAlignValue(raw: unknown): PageTextAlign | undefined {
+  return typeof raw === "string" &&
+    (PAGE_TEXT_ALIGNS as readonly string[]).includes(raw)
+    ? (raw as PageTextAlign)
+    : undefined;
 }
 
 /**
@@ -1060,10 +1481,34 @@ function parseCharacterPage(
   optionalBoolean(value.enabled, "characterPage.enabled");
   optionalBoolean(value.showIcons, "characterPage.showIcons");
 
+  const rubyMode =
+    value.rubyMode === undefined
+      ? defaults.rubyMode
+      : parseCharacterRubyMode(value.rubyMode);
+
   return {
     enabled: (value.enabled as boolean | undefined) ?? defaults.enabled,
     showIcons: (value.showIcons as boolean | undefined) ?? defaults.showIcons,
+    // **既定（すべてに付ける）は項目ごと持たない。** `{}` を書く体裁と
+    // 同じ理由で、何も選んでいない本の book.json が保存のたびに太る
+    ...(rubyMode && rubyMode !== DEFAULT_CHARACTER_RUBY_MODE
+      ? { rubyMode }
+      : {}),
   };
+}
+
+/**
+ * ルビの選択（作者の指定、2026-09-13）。**知らない値は既定へ落とす。**
+ *
+ * 面ごとの体裁と同じ扱いにしてある——ルビの有無は飾りであって本の骨格
+ * ではなく、綴りを1つ間違えただけで設計図が開けなくなると、作者は本を
+ * 直す入口（エディター画面）にもたどり着けない。
+ */
+function parseCharacterRubyMode(raw: unknown): CharacterRubyMode | undefined {
+  return typeof raw === "string" &&
+    (CHARACTER_RUBY_MODES as readonly string[]).includes(raw)
+    ? (raw as CharacterRubyMode)
+    : undefined;
 }
 
 /** 同梱する書体（設計書6.65.11）。表紙と同じ検証に、拡張子の確認を足す */

@@ -362,7 +362,14 @@ export async function checkFactContradictions(
   // 別の札にすると、あいだに他の一括処理が割り込んでモデルの読み込み直しが
   // 往復する
   await withAiTurn(
-    { label: "矛盾の検知（事実の照合）", onCancelled: () => (cancelled = true) },
+    {
+      label: "矛盾の検知（事実の照合）",
+      onCancelled: () => (cancelled = true),
+      // **まとめ実行から呼ばれたら、札は取らない**（設計書6.76・6.80）。
+      // まとめ実行のほうが丸ごと持っているので、ここで取ると自分の札を
+      // 自分で待つ形になり、永久に進まない
+      alreadyHeld: options.suiteHoldsRun,
+    },
     async () => {
       await withCancellableProgress(
         "本文から事実を取り出しています",

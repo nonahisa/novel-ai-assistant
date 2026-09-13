@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import {
   countSiteNotation,
+  EMPHASIS_MULTILINE_NOTE,
+  RUBY_MULTILINE_NOTE,
   describeSiteNotation,
   findRuby,
   findRubyAt,
@@ -477,5 +479,53 @@ describe("直したあとの記法", () => {
   test("空ならルビを外す", () => {
     expect(rubyEditReplacement("朝", "")).toBe("朝");
     expect(rubyEditReplacement("朝", "   ")).toBe("朝");
+  });
+});
+
+/**
+ * **行をまたいで選んだときの断り方**（0.51.4。0.47.7 の積み残し⑥）。
+ *
+ * 記法（`{漢字|かんじ}`・`{{強調}}`）は行をまたげない。これまでも改行は
+ * 弾いていたが、**「使えない記号（{ } | ｜ 《 》 #）が入っています」**と
+ * 出していた——改行を記号の一組に混ぜていたためである。
+ * 選んだところにそんな記号は無いので、何を直せばよいのか分からない。
+ *
+ * 壊れはしないが、**理由を取り違えて伝えるのは断っていないのと同じ**である。
+ */
+describe("行をまたいだ選択", () => {
+  test("**ルビは、改行だと分かる言い方で断る**", () => {
+    const problem = validateRuby("漢字\n熟語", "かんじ");
+    expect(problem).toBe(RUBY_MULTILINE_NOTE);
+    expect(problem).toContain("行をまたいで");
+    // 記号のせいにしない
+    expect(problem).not.toContain("使えない記号");
+  });
+
+  test("**傍点も、改行だと分かる言い方で断る**", () => {
+    const problem = validateEmphasis("強調\n部分");
+    expect(problem).toBe(EMPHASIS_MULTILINE_NOTE);
+    expect(problem).toContain("行をまたいで");
+    expect(problem).not.toContain("使えない記号");
+  });
+
+  test("読み仮名に改行が混ざったときも同じ", () => {
+    expect(validateRuby("漢字", "かん\nじ")).toBe(RUBY_MULTILINE_NOTE);
+  });
+
+  test("CR だけの改行も見る（古い原稿）", () => {
+    expect(validateRuby("漢字\r熟語", "かんじ")).toBe(RUBY_MULTILINE_NOTE);
+    expect(validateEmphasis("強調\r部分")).toBe(EMPHASIS_MULTILINE_NOTE);
+  });
+
+  test("記号のほうは、これまでどおり記号として断る", () => {
+    // 改行を別扱いにしたせいで、記号の検算が緩んでいないこと
+    expect(validateRuby("漢{字", "かんじ")).toContain("使えない記号");
+    expect(validateRuby("漢字", "かん|じ")).toContain("使えない記号");
+    expect(validateEmphasis("強《調")).toContain("使えない記号");
+  });
+
+  test("1行に収まっていれば、これまでどおり通る", () => {
+    expect(validateRuby("漢字", "かんじ")).toBeNull();
+    expect(validateEmphasis("強調")).toBeNull();
   });
 });

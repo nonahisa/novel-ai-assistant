@@ -203,6 +203,16 @@ const openManuscripts = new Map<
      * 知らせてくるまでは `undefined`**（開いた直後の一瞬だけ）。
      */
     appearance(): ManuscriptAppearance | undefined;
+    /**
+     * 前の話から持って来た見た目を、**この画面へ直に当てる**（設計書6.25.5）。
+     *
+     * 開くときの見た目は `pendingAppearance` に置き、画面側が立ち上がりに
+     * 1回だけ取り出す。**既に生きている画面は取りに来ない**——`openWith` は
+     * そのタブを前に出すだけだからである。タブが開いているかどうかで
+     * 引き継ぎが効いたり効かなかったりすると、作者には壊れて見える
+     * （2026-09-12、9巡目に実機で確認）。
+     */
+    applyAppearance(next: ManuscriptAppearance): void;
   }
 >();
 
@@ -243,6 +253,24 @@ export function lastManuscriptCaret():
  */
 export function refreshManuscriptCounts(filePath: string): void {
   openManuscripts.get(manuscriptLedgerKey(filePath))?.refreshCounts();
+}
+
+/**
+ * 名前が変わる原稿の見た目を、**新しい名前のほうへ持って行く**
+ * （0.51.5。0.47.9 の積み残し⑦。設計書6.25.5）。
+ *
+ * `.txt` を `.md` にすると、**ファイルの名前が変わる**。見た目（縦横・
+ * 大きさ・組んで書く）は原稿ごとに画面が覚えている値なので、名前が変われば
+ * 覚えていた値の宛先も変わり、**開き直したときに設定の既定へ戻る**。
+ * 中身は同じ原稿なのに縦書きが横書きになるので、作者から見れば壊れている。
+ *
+ * **名前を変える前に呼ぶ。** 変えたあとでは、元の名前の画面はもう閉じている。
+ * 開いていなければ何もしない（覚えている値が無いので、持って行くものも無い）。
+ */
+export function carryAppearanceToRenamed(from: string, to: string): void {
+  const now = openManuscripts.get(manuscriptLedgerKey(from))?.appearance();
+  if (!now) return;
+  pendingAppearance.set(manuscriptLedgerKey(to), now);
 }
 
 /** 「← 前の話」「次の話 →」を押したときに、次に何をするか */
@@ -386,12 +414,36 @@ export async function openManuscriptForReading(work: WorkEntry): Promise<void> {
     // **ここで別の決め方をしない**——作品一覧から開いたときと同じ入口にする
     manuscriptViewTypeFor(await formatOf(work))
   );
-  // **台帳に載るまで待つ**（`revealLine` と同じ事情。開いた直後はまだ載らない）
-  const opened = await waitFor(() => openManuscripts.get(key));
+  /*
+    **台帳に載るまで待つ**（`revealLine` と同じ事情。開いた直後はまだ載らない）。
+
+    **ここは長めに待つ**（0.51.7。作者の報告、2026-09-08）。既定の1.5秒は、
+    その原稿をこの起動ではじめて開くとき——画面の組み立てと本文の読み込みが
+    同時に走るとき——に足りないことがある。`openWith` は既に返っているので、
+    **作者の目にはもう原稿が開いて見えている。** 足りないのは読み上げの列だけ
+    なので、数秒待つほうが「押しても何も起きない」より良い。
+  */
+  const opened = await waitFor(
+    () => openManuscripts.get(key),
+    READ_ALOUD_LEDGER_WAIT_MS
+  );
   if (!opened) {
-    // **黙って終わらない。** 押しても何も起きなかったときの手がかりを残す
+    /*
+      **画面に出す**（0.51.7。作者の依頼、2026-09-08
+      「空振りしたときは、ログではなく画面に出してください。
+      『押しても何も起きない』は作者がいちばん困る形です」）。
+
+      それまではログ1行だけだった。作者から見ると完全に沈黙する——
+      作品を選んだのに何も開かず、知らせも出ない。
+      **次にできることまで書く。** 読み上げは原稿エディタの中にもあるので、
+      そちらから押せば同じことができる。
+    */
     logLine(
       `読み上げ：${filePath} を開けなかったため、読み上げの列を出せませんでした。`
+    );
+    void vscode.window.showWarningMessage(
+      `「${paths.basename(filePath)}」の読み上げを始められませんでした。` +
+        "作品一覧からこの話を開いて、上のバーの「読み上げ」を押してください。"
     );
     return;
   }
@@ -514,6 +566,15 @@ export async function removeMemoLineInOpenManuscript(
   }
   return { kind: "removed" };
 }
+
+/**
+ * 読み上げのために開くときの、待つ上限（0.51.7）。
+ *
+ * **既定より長くする。** その原稿をこの起動ではじめて開くときは、
+ * 画面の組み立てと本文の読み込みが同時に走るので1.5秒では足りないことがある。
+ * ここで諦めると、作者には「押しても何も起きない」ように見える。
+ */
+const READ_ALOUD_LEDGER_WAIT_MS = 5000;
 
 /** 台帳に載るのを待つ上限。これを過ぎたら「開けなかった」とみなす */
 const LEDGER_WAIT_MS = 1500;
@@ -1116,6 +1177,11 @@ export class ManuscriptEditorProvider
     const showReadingNow = (): void => {
       void panel.webview.postMessage({ type: "showReading" });
     };
+    /** 前の話から持って来た見た目。画面が動き出す前に頼まれたら覚えておく */
+    let pendingApply: ManuscriptAppearance | undefined;
+    const applyAppearanceNow = (next: ManuscriptAppearance): void => {
+      void panel.webview.postMessage({ type: "applyAppearance", appearance: next });
+    };
     const key = manuscriptLedgerKey(document.uri);
     const entry = {
       panel,
@@ -1138,6 +1204,14 @@ export class ManuscriptEditorProvider
       },
       document,
       appearance: (): ManuscriptAppearance | undefined => appearanceNow,
+      applyAppearance: (next: ManuscriptAppearance): void => {
+        // **`revealLine` と同じで、`ready` を待ってから送る**
+        if (!webviewReady) {
+          pendingApply = next;
+          return;
+        }
+        applyAppearanceNow(next);
+      },
     };
     openManuscripts.set(key, entry);
     panel.onDidDispose(() => {
@@ -1297,6 +1371,12 @@ export class ManuscriptEditorProvider
             const line = pendingReveal;
             pendingReveal = undefined;
             revealLineNow(line);
+          }
+          // 待ってもらっていた「前の話の見た目を当てる」を、ここで出す
+          if (pendingApply) {
+            const next = pendingApply;
+            pendingApply = undefined;
+            applyAppearanceNow(next);
           }
           // 開くのと同時に頼まれていた「読み上げの列」を、ここで出す
           if (pendingReading) {
@@ -1914,8 +1994,13 @@ export class ManuscriptEditorProvider
           detail:
             "テキスト（.txt）は投稿サイトから持ってきた形をそのまま保つため、" +
             "対象外にしています。\n\n" +
+            // **できない約束をしない**（0.51.8。作者の報告、2026-09-08）。
+            // ここは「中身は1文字も変わりません」と言っていたが、MD化は
+            // 投稿サイトの書き方のルビ・傍点を直す（設計書6.12.4）。
+            // 言い方は `core/markdownConversion.ts` の促しと揃える
             "詳細メニューの「執筆AI支援 → 原稿づくり → 本文を .md にする」で" +
-            "変えられます（中身は1文字も変わりません）。",
+            "変えられます（変わるのは読み仮名の書き方だけで、" +
+            "本文の言葉は1文字も変わりません）。",
         }
       );
       return;
@@ -2317,14 +2402,22 @@ export class ManuscriptEditorProvider
     if (!now) return;
     const to = manuscriptLedgerKey(toFilePath);
     /*
-      **既に開いている原稿には置かない。** そのときの `openWith` は
-      そのタブを前に出すだけで、新しい画面は立ち上がらない＝誰も
-      取りに来ない。置いたままにすると、**ずっとあとでその原稿を
-      開いたときに、いつのものとも知れない見た目が当たる**
-      （取り出しが1回きりなのと同じ理由）。前に出たタブは、自分が
-      覚えている見た目のままで、それはいま画面に映っているものである。
+      **既に開いている原稿には、置かずに直に当てる。** そのときの
+      `openWith` はそのタブを前に出すだけで、新しい画面は立ち上がらない
+      ＝置いても誰も取りに来ない（取り出しは立ち上がりの1回きり）。
+
+      **0.50.3 まではここで素通りしていた。** そのため、いちど開いた
+      タブへ移ると縦横・大きさ・面が引き継がれず、作者から見ると
+      「効いたり効かなかったりする」状態だった（2026-09-12、9巡目に
+      実機で確認——0018 を縦書きにして「次の話 →」を押すと、既に
+      開いていた 9901 が横書きで出た）。生きている画面には送る口
+      （`applyAppearance`）があるので、置き去りにせずそちらへ渡す。
     */
-    if (openManuscripts.has(to)) return;
+    const live = openManuscripts.get(to);
+    if (live) {
+      live.applyAppearance(now);
+      return;
+    }
     pendingAppearance.set(to, now);
   }
 

@@ -2194,6 +2194,20 @@ ruby > rt {
       // 記録を止めている作者には届かない。そのときは出さない（0と書かない）
       footToday = typeof message.today === "number" ? message.today : null;
       paintCounts();
+    } else if (message.type === "applyAppearance") {
+      /*
+        **前の話から持って来た見た目を当てる**（設計書6.25.5）。
+        開くときの initialAppearance は立ち上がりに1回しか取れないので、
+        既に開いている画面にはこちらから送ってもらう。規則は持たない
+        ——決めるのは拡張機能側で、ここは当てるだけである。
+      */
+      vertical = message.appearance.vertical;
+      size = message.appearance.size;
+      paint();
+      if (message.appearance.compose && !composeOn) composeEnter();
+      else if (!message.appearance.compose && composeOn) composeLeave();
+      // 当てた見た目は、この原稿の覚えにする（開き直しても残す）
+      remember();
     } else if (message.type === "revealLine") {
       revealLine(message.line);
     } else if (message.type === "select" && composeOn) {

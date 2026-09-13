@@ -2,12 +2,22 @@ import { zipSync, type Zippable } from "fflate";
 import {
   BOOK_BLOCK_LABELS,
   BOOK_FONT_EXTENSIONS,
+  PAGE_LAYOUT_BLOCK_TYPES,
   activeBookBlocks,
   isBookImageBlock,
+  pageLayoutClass,
+  pageLayoutClassFor,
+  pageLayoutClassSuffix,
+  pageLayoutForCss,
+  pageLayoutVertical,
   resolveBookBlocks,
+  tocListOrientation,
   type BookBlockType,
   type BookConfig,
   type BookOrnamentId,
+  type BookPageLayouts,
+  type PageTextAlign,
+  type PageTextLayout,
   type TocEntryStyle,
   type TocPattern,
 } from "../models/book";
@@ -413,10 +423,15 @@ export function buildEpub(book: EpubBook): Uint8Array {
     "META-INF/container.xml": encode(containerXml()),
     [`${ROOT}/content.opf`]: encode(contentOpf(packaged)),
     [`${ROOT}/${CSS_NAME}`]: encode(
-      buildEpubCss(vertical, {
-        bodyHref: fonts.body?.packagedName ?? null,
-        headingHref: fonts.heading?.packagedName ?? null,
-      })
+      buildEpubCss(
+        vertical,
+        {
+          bodyHref: fonts.body?.packagedName ?? null,
+          headingHref: fonts.heading?.packagedName ?? null,
+        },
+        // 面ごとの体裁（作者の依頼、2026-09-13）。選んでいなければ何も増えない
+        config.pageLayouts ?? {}
+      )
     ),
     // **`nav.xhtml` は並びに目次が無くても作る**（EPUB3で必須。第1段からの
     // 約束）。並びが決めるのは「読む順路へ入れるか」だけである
@@ -446,8 +461,15 @@ export function buildEpub(book: EpubBook): Uint8Array {
       buildXhtmlDocument({
         title: "登場人物",
         cssHref: CSS_NAME,
-        vertical,
-        body: buildCharacterPageFragment(characters.map((item) => item.entry)),
+        vertical: pageLayoutVertical("characters", config.pageLayouts, vertical),
+        // 上下の寄せに要る（`buildXhtmlDocument` の `pageClass` を参照）
+        pageClass: pageLayoutClassFor("characters", config.pageLayouts),
+        body: buildCharacterPageFragment(
+          characters.map((item) => item.entry),
+          config.pageLayouts,
+          // 名前のルビの範囲（作者の指定、2026-09-13）。省略＝すべてに付ける
+          config.characterPage.rubyMode
+        ),
       })
     );
     for (const portrait of uniquePortraits(characters)) {
@@ -474,14 +496,22 @@ export function buildEpub(book: EpubBook): Uint8Array {
   }
 
   if (packaged.afterword) {
+    // 面ごとの向き（作者の依頼、2026-09-13）。縦中横も面の向きで決める
+    const afterwordVertical = pageLayoutVertical(
+      "afterword",
+      config.pageLayouts,
+      vertical
+    );
     files[`${ROOT}/${AFTERWORD_NAME}`] = encode(
       buildXhtmlDocument({
         title: AFTERWORD_HEADING,
         cssHref: CSS_NAME,
-        vertical,
+        vertical: afterwordVertical,
+        pageClass: pageLayoutClassFor("afterword", config.pageLayouts),
         body: buildAfterwordFragment(packaged.afterword, {
           collapseBlankLines: config.collapseBlankLines,
-          vertical,
+          vertical: afterwordVertical,
+          pageLayouts: config.pageLayouts,
         }),
       })
     );
@@ -1076,6 +1106,7 @@ function navXhtml(packaged: PackagedBook): string {
     title: "目次",
     cssHref: CSS_NAME,
     vertical,
+    pageClass: pageLayoutClassFor("toc", config.pageLayouts),
     body: buildTocFragment(
       chapters.map((chapter) => ({
         href: chapter.fileName,
@@ -1091,6 +1122,7 @@ function navXhtml(packaged: PackagedBook): string {
           packaged.characters.length > 0 ? CHARACTERS_NAME : null,
         afterwordHref: packaged.afterword ? AFTERWORD_NAME : null,
         vertical,
+        pageLayouts: config.pageLayouts,
       }
     ),
   });
@@ -1132,6 +1164,22 @@ export function buildTocLabel(
     .join("　");
   return joined || chapter.heading.trim() || chapter.fileName;
 }
+
+/**
+ * 目次の一覧を横組みにする印（設計書6.65.6）。**CSSは常に出ている**
+ * ——0.29.18から本のCSSに入っている行なので、条件付きにすると既にある
+ * 本のCSSが変わる。
+ */
+const TOC_HORIZONTAL_CLASS = "toc-horizontal";
+
+/**
+ * 目次の一覧を縦組みにする印。**選んだときだけCSSが出る。**
+ *
+ * `toc-vertical` を使い回していない。あちらは「本に従う」の印として、
+ * 何も選んでいない本にもずっと付いてきた名前で、当たるCSSを持たない
+ * ——そこへ規則を足すと、選んでいない本の見た目まで変わる。
+ */
+const TOC_VERTICAL_CLASS = "toc-vertical-rl";
 
 /** 目次に並べる1行 */
 export interface EpubTocEntry {
@@ -1175,6 +1223,14 @@ export interface EpubTocOptions {
    * 目次の行の半角の数字・「!」「?」は、縦書きの本のときだけ縦中横にする。
    */
   vertical?: boolean;
+  /**
+   * 面ごとの文字の体裁（作者の依頼、2026-09-13）。**目次のぶんだけを見る。**
+   *
+   * 設計図をまるごと受け取るのは、面の種類とクラスの結び付きを
+   * `pageLayoutClassFor` の1か所に閉じ込めるためである（呼び出し側で
+   * クラス名を組み立てると、書き出しと画面で食い違う）。
+   */
+  pageLayouts?: BookPageLayouts;
 }
 
 /**
@@ -1191,20 +1247,42 @@ export interface EpubTocOptions {
  *
  * 束ね名が1つも無ければ一覧のまま出す。話数しか分からない作品に
  * 「本編」だけの見出しを立てても、作者に伝わるものが増えない。
+ *
+ * ## 向きが変えるのは一覧だけ
+ *
+ * 目次で「横書き」を選んでも、変わるのは中の `<ol>` である（面ぜんぶの
+ * `writing-mode` は出さない。`PAGE_LAYOUT_LIST_ONLY_ORIENTATION`）。
+ * 旧 `tocPattern: "horizontal"` と同じ描き方をそのまま使うので、
+ * 「目次だけ横組み」を選んでいた**既にある本のZIPは1バイトも変わらない**。
  */
 export function buildTocFragment(
   entries: readonly EpubTocEntry[],
   options: EpubTocOptions
 ): string {
   const vertical = options.vertical ?? false;
+  // 面の体裁（作者の依頼、2026-09-13）。選んでいなければ空文字
+  const tocClass = pageLayoutClassFor("toc", options.pageLayouts);
   const grouped =
     options.pattern === "chapters" &&
     entries.some((entry) => (entry.group ?? "").trim() !== "");
 
+  // 目次の向き（作者の指摘、2026-09-13）。**選んでいなければ本に従う**
+  // ——そのときは、いままでどおり `toc-vertical` の印だけを付ける
+  // （当たるCSSは無い。既にある本の中身を1バイトも変えないため）
+  const orientation = tocListOrientation(options.pageLayouts);
+  const orientationClass =
+    orientation === false
+      ? TOC_HORIZONTAL_CLASS
+      : orientation === true
+        ? TOC_VERTICAL_CLASS
+        : "";
+
   const listClass = grouped
-    ? "nav-list toc-chapters"
-    : options.pattern === "horizontal"
-      ? "nav-list toc-horizontal"
+    ? ["nav-list", "toc-chapters", orientationClass]
+        .filter((name) => name !== "")
+        .join(" ")
+    : orientationClass
+      ? `nav-list ${orientationClass}`
       : "nav-list toc-vertical";
 
   const colophon =
@@ -1232,7 +1310,10 @@ export function buildTocFragment(
         ];
 
   return [
-    '<nav epub:type="toc" id="toc">',
+    // 体裁を選んでいなければ、いままでどおり属性ごと出さない
+    `<nav epub:type="toc" id="toc"${
+      tocClass ? ` class="${tocClass}"` : ""
+    }>`,
     `<h1 class="nav-heading">目次${buildOrnamentFragment(
       options.ornament,
       options.ornaments ?? BUILTIN_ORNAMENTS
@@ -1396,7 +1477,12 @@ export function buildPlateFragment(
  */
 export function buildAfterwordFragment(
   afterword: { text: string; notation: NotationMode },
-  options: { collapseBlankLines: boolean; vertical: boolean }
+  options: {
+    collapseBlankLines: boolean;
+    vertical: boolean;
+    /** 面ごとの文字の体裁（作者の依頼、2026-09-13）。あとがきのぶんを見る */
+    pageLayouts?: BookPageLayouts;
+  }
 ): string {
   return buildChapterFragment(
     {
@@ -1407,6 +1493,9 @@ export function buildAfterwordFragment(
     {
       collapseBlankLines: options.collapseBlankLines,
       vertical: options.vertical,
+      // **本文の話には付かない印**。あとがきの面だけに体裁を当てる
+      // （選んでいなければ空文字＝いままでと同じ `<section class="chapter">`）
+      sectionClass: pageLayoutClassFor("afterword", options.pageLayouts),
     }
   );
 }
@@ -1440,7 +1529,9 @@ function titlePageXhtml(
   return buildXhtmlDocument({
     title: config.title || "無題",
     cssHref: CSS_NAME,
-    vertical,
+    // 面ごとに向きを選べる（作者の依頼、2026-09-13）。選んでいなければ本のまま
+    vertical: pageLayoutVertical("halfTitle", config.pageLayouts, vertical),
+    pageClass: pageLayoutClassFor("halfTitle", config.pageLayouts),
     body: buildTitlePageFragment(config, ornaments),
   });
 }
@@ -1466,7 +1557,12 @@ export function buildTitlePageFragment(
   const below = fragment && place !== "above" ? [fragment] : [];
 
   return [
-    '<div class="title-page">',
+    // 面ごとの体裁（作者の依頼、2026-09-13）を当てる手がかり。
+    // **選んでいなければクラスも付かない**（いままでの本と1バイトも変わらない）
+    `<div class="title-page${pageLayoutClassSuffix(
+      "halfTitle",
+      config.pageLayouts
+    )}">`,
     ...above,
     `<h1 class="book-title">${escapeXml(config.title || "無題")}</h1>`,
     ...below,
@@ -1493,11 +1589,15 @@ function colophonXhtml(
   vertical: boolean,
   ornaments: readonly OrnamentDef[]
 ): string {
+  // **縦中横は面の向きで決める**（作者の依頼、2026-09-13）。横組みにした面で
+  // 数字を寝かせない指定が残ると、1桁の数字だけが四角く潰れて出る
+  const faceVertical = pageLayoutVertical("colophon", config.pageLayouts, vertical);
   return buildXhtmlDocument({
     title: "奥付",
     cssHref: CSS_NAME,
-    vertical,
-    body: buildColophonFragment(config, vertical, ornaments),
+    vertical: faceVertical,
+    pageClass: pageLayoutClassFor("colophon", config.pageLayouts),
+    body: buildColophonFragment(config, faceVertical, ornaments),
   });
 }
 
@@ -1520,7 +1620,10 @@ export function buildColophonFragment(
   ].filter(([, value]) => value);
 
   return [
-    '<div class="colophon">',
+    `<div class="colophon${pageLayoutClassSuffix(
+      "colophon",
+      config.pageLayouts
+    )}">`,
     `<h1 class="colophon-heading">奥付${buildOrnamentFragment(
       config.colophonOrnament,
       ornaments
@@ -1554,7 +1657,8 @@ export interface EpubCssFonts {
 
 export function buildEpubCss(
   vertical: boolean,
-  fonts: EpubCssFonts = {}
+  fonts: EpubCssFonts = {},
+  pageLayouts: BookPageLayouts = {}
 ): string {
   const direction = vertical
     ? [
@@ -1654,14 +1758,31 @@ export function buildEpubCss(
     ".character-portrait { text-align: center; margin-block-end: 0.6em; }",
     ".character-portrait img { max-inline-size: 40%; max-block-size: 40%; }",
     ".character-name { font-size: 1.2em; letter-spacing: 0.05em; }",
-    ".character-summary { margin-block-start: 0.5em; font-size: 0.95em; }",
+    /*
+      紹介文は名前より一段下げる（作者の指定、2026-09-13「人物紹介の解説は
+      一段下げて」）。
+
+      **論理プロパティで書く。** 縦組みでは「下げる」が下方向、横組みでは
+      右方向になる。`padding-inline-start` なら、どちらでも作者の言う
+      「一段下げ」になる（`margin-left` と書くと縦組みで横へずれる）。
+
+      **行頭だけでなく、まわり込んだ先も下げる。** `text-indent` にすると
+      2行目以降が名前と同じ高さに戻り、どこまでが1人ぶんか読めなくなる。
+    */
+    ".character-summary {",
+    "  margin-block-start: 0.5em;",
+    "  padding-inline-start: 1em;",
+    "  font-size: 0.95em;",
+    "}",
     // 目次だけ横組みにする配置（設計書6.65.6）。**縦組みへの上書きは
-    // 持たない**——本文が横組みの本のCSSに縦組みの指定が現れると、
-    // 何も選んでいない作者の本の見た目が版で変わる
-    ".toc-horizontal {",
+    // 常には出さない**——本文が横組みの本のCSSに縦組みの指定が現れると、
+    // 何も選んでいない作者の本の見た目が版で変わる。縦組みを選んだ
+    // ときだけ、下の `tocVerticalRules` が1つ足す
+    `.${TOC_HORIZONTAL_CLASS} {`,
     "  -epub-writing-mode: horizontal-tb;",
     "  writing-mode: horizontal-tb;",
     "}",
+    ...tocVerticalRules(pageLayouts),
     // 章で束ねた並び。章の見出しは行頭に立て、話は一段下げる
     ".toc-chapters { list-style: none; padding-inline-start: 0; }",
     ".toc-chapters ol { list-style: none; padding-inline-start: 1.5em; }",
@@ -1683,8 +1804,123 @@ export function buildEpubCss(
     "}",
     ".ornament-center svg { fill: currentColor; }",
     ".colophon-list dt { margin-block-start: 1em; font-size: 0.9em; }",
+    // 面ごとの体裁（作者の依頼、2026-09-13）。**選んでいなければ1行も出ない**
+    ...pageLayoutRules(pageLayouts),
     "",
   ].join("\n");
+}
+
+/**
+ * 面ごとの文字の体裁（作者の依頼、2026-09-13）。
+ *
+ * **何も選んでいなければ1行も出さない。** 既にある本のCSSが版を上げただけで
+ * 増えると、同じ設計図から出した本の中身が変わる（飾り・書体と同じ約束）。
+ *
+ * ## 寄せは論理プロパティで書く
+ *
+ * `text-align: left` や `top` で書くと、縦組みの面で意味が入れ替わる。
+ * `start`／`center`／`end` と flex の論理方向で書けば、縦でも横でも
+ * 同じ指定がそのまま「作者が選んだ寄せ」になる。
+ *
+ * ## 上下の寄せだけは、面の高さが要る
+ *
+ * 文字の分しか高さの無い箱の中では、上寄せも下寄せも同じ場所である。
+ * そこで**その面の文書だけ**に高さを与える（`html.page-colophon` の形。
+ * `buildXhtmlDocument` の `pageClass` が付ける）。`html` へ素で書くと
+ * 本文の面まで高さが固定され、長い話が切れるリーダーが出る。
+ *
+ * プレビュー（`scopeCssForPreview`）では `html.page-…` の行は当たらないが、
+ * 画面の枠（`.epub-page`）が端末の形で高さを持っているので、面の
+ * `min-block-size: 100%` はそのまま働く。
+ */
+function pageLayoutRules(layouts: BookPageLayouts): string[] {
+  const out: string[] = [];
+
+  for (const type of PAGE_LAYOUT_BLOCK_TYPES) {
+    // **目次は向きを落としたものが届く**（`pageLayoutForCss`）。面ぜんぶの
+    // `writing-mode` を出すと、「目次だけ横組み」の本の見た目が変わる
+    const layout = pageLayoutForCss(type, layouts);
+    if (!layout) continue;
+    const selector = `.${pageLayoutClass(type)}`;
+    const body = pageLayoutDeclarations(layout);
+    if (body.length === 0) continue;
+
+    if (layout.block) {
+      // 面の文書だけに高さを与える（上の説明を参照）
+      const root = `html.${pageLayoutClass(type)}`;
+      out.push(`${root}, ${root} body {`, "  block-size: 100%;", "}");
+    }
+    out.push(`${selector} {`, ...body, "}");
+  }
+
+  return out;
+}
+
+/**
+ * 目次の一覧を縦組みにする規則。**選んだときだけ1つ出す。**
+ *
+ * 横組み（`.toc-horizontal`）は常に出ているのに、こちらを条件付きに
+ * してあるのは**既にある本のCSSを増やさない**ためである——横組みの行は
+ * 0.29.18からどの本にも入っており、縦組みの行はどの本にも無かった。
+ */
+function tocVerticalRules(layouts: BookPageLayouts): string[] {
+  if (tocListOrientation(layouts) !== true) return [];
+  return [
+    `.${TOC_VERTICAL_CLASS} {`,
+    // **古い書き方も並べる**（本全体の綴じ方向と同じ理由）
+    "  -epub-writing-mode: vertical-rl;",
+    "  writing-mode: vertical-rl;",
+    "  -epub-text-orientation: mixed;",
+    "  text-orientation: mixed;",
+    "}",
+  ];
+}
+
+/** その面の宣言。**選ばれた軸のものしか出さない** */
+function pageLayoutDeclarations(layout: PageTextLayout): string[] {
+  const out: string[] = [];
+
+  if (layout.vertical !== undefined) {
+    const mode = layout.vertical ? "vertical-rl" : "horizontal-tb";
+    // **古い書き方も並べる**（本全体の綴じ方向と同じ理由。`-epub-` しか
+    // 見ないリーダーが現役で、片方だけだと向きが変わらない）
+    out.push(`  -epub-writing-mode: ${mode};`, `  writing-mode: ${mode};`);
+    if (layout.vertical) {
+      out.push("  -epub-text-orientation: mixed;", "  text-orientation: mixed;");
+    }
+  }
+
+  // 字の進む向きの寄せ。**flex を使わなくても効く**ので、こちらは
+  // `text-align` で当てる（面の組み方をできるだけ変えない）
+  if (layout.inline) out.push(`  text-align: ${layout.inline};`);
+
+  if (layout.block) {
+    out.push(
+      "  display: flex;",
+      // 行の進む向きに積む。flex は書字方向を見るので、縦組みなら
+      // `column` はそのまま「右から左」になる
+      "  flex-direction: column;",
+      `  justify-content: ${flexAlign(layout.block)};`,
+      "  min-block-size: 100%;",
+      // 中表紙の `margin-block-start: 20%` を打ち消す。上寄せを選んだのに
+      // 面の2割が空いたままでは、指定が効いていないようにしか見えない
+      "  margin-block: 0;"
+    );
+  }
+
+  return out;
+}
+
+/**
+ * flex の寄せの言い方。**`start`／`end` ではなく `flex-start`／`flex-end`**。
+ *
+ * 論理の寄せとしてはどちらも同じ意味だが、`start` を知らないリーダーが
+ * 現役である（縦書き・圏点と同じ理由）。
+ */
+function flexAlign(align: PageTextAlign): string {
+  if (align === "start") return "flex-start";
+  if (align === "end") return "flex-end";
+  return "center";
 }
 
 /**

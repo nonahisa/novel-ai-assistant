@@ -1,4 +1,10 @@
 import type { Character } from "../models/character";
+import {
+  DEFAULT_CHARACTER_RUBY_MODE,
+  pageLayoutClassSuffix,
+  type BookPageLayouts,
+  type CharacterRubyMode,
+} from "../models/book";
 import { escapeXml } from "./epubXhtml";
 
 /**
@@ -119,19 +125,30 @@ export function characterIconPath(icon: string | null): string | null {
  * 空の枠は出ない）。
  */
 export function buildCharacterPageFragment(
-  entries: readonly EpubCharacterEntry[]
+  entries: readonly EpubCharacterEntry[],
+  /** 面ごとの文字の体裁（作者の依頼、2026-09-13）。人物紹介のぶんを見る */
+  pageLayouts?: BookPageLayouts,
+  /** 名前のルビの範囲（作者の指定、2026-09-13）。**省略＝すべてに付ける** */
+  rubyMode?: CharacterRubyMode
 ): string {
   return [
-    '<section class="characters">',
+    // 面ごとの体裁を当てる手がかり。**選んでいなければクラスも付かない**
+    `<section class="characters${pageLayoutClassSuffix(
+      "characters",
+      pageLayouts
+    )}">`,
     '<h1 class="characters-heading">登場人物</h1>',
     ...entries
       .filter((entry) => entry.name.trim() !== "")
-      .flatMap((entry) => characterFragment(entry)),
+      .flatMap((entry) => characterFragment(entry, rubyMode)),
     "</section>",
   ].join("\n");
 }
 
-function characterFragment(entry: EpubCharacterEntry): string[] {
+function characterFragment(
+  entry: EpubCharacterEntry,
+  rubyMode: CharacterRubyMode | undefined
+): string[] {
   const summary = entry.summary.trim();
   return [
     '<div class="character">',
@@ -145,7 +162,7 @@ function characterFragment(entry: EpubCharacterEntry): string[] {
           "</div>",
         ]
       : []),
-    `<p class="character-name">${nameFragment(entry)}</p>`,
+    `<p class="character-name">${nameFragment(entry, rubyMode)}</p>`,
     ...(summary
       ? [`<p class="character-summary">${escapeXml(summary)}</p>`]
       : []),
@@ -154,15 +171,43 @@ function characterFragment(entry: EpubCharacterEntry): string[] {
 }
 
 /**
- * 名前。読み仮名があればルビにする。
+ * 名前。読み仮名があり、**選んだ範囲に当てはまれば**ルビにする。
  *
  * **どの経路も `escapeXml` を通る。** XHTMLはXMLなので、人名の `&` が
  * 生のまま出ると本ごと開けなくなる（本文の組み方と同じ約束）。
  */
-function nameFragment(entry: EpubCharacterEntry): string {
+function nameFragment(
+  entry: EpubCharacterEntry,
+  rubyMode: CharacterRubyMode | undefined
+): string {
   const name = escapeXml(entry.name);
   const reading = (entry.reading ?? "").trim();
-  return reading
+  return reading && shouldRubyName(entry.name, rubyMode)
     ? `<ruby>${name}<rt>${escapeXml(reading)}</rt></ruby>`
     : name;
+}
+
+/**
+ * 漢字が1文字でもあるか。
+ *
+ * `\p{Script=Han}` にしてあるのは、範囲を手で並べると常用外の漢字や
+ * 異体字を取りこぼすためである（「髙」「琲」のような字が名前に入る）。
+ */
+const HAS_KANJI = /\p{Script=Han}/u;
+
+/**
+ * この名前にルビを振るか（作者の指定、2026-09-13）。
+ *
+ * **省略は `all`**（いままでと同じ）。`kanjiOnly` は**漢字が1文字でも
+ * あれば付ける**——「ターナ先生」のように仮名と漢字が混ざる名前は、
+ * 漢字の側の読みが要るので落とさない。
+ */
+export function shouldRubyName(
+  name: string,
+  mode: CharacterRubyMode | undefined
+): boolean {
+  const resolved = mode ?? DEFAULT_CHARACTER_RUBY_MODE;
+  if (resolved === "none") return false;
+  if (resolved === "kanjiOnly") return HAS_KANJI.test(name);
+  return true;
 }

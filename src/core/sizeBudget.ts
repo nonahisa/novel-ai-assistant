@@ -32,6 +32,7 @@
  * | 場所 | 何の上限か | 種類 |
  * |---|---|---|
  * | `core/sizeBudget.ts` | 字↔トークン換算 | 換算（**ここだけ**） |
+ * | `core/sizeBudget.ts` | 実測の字↔トークン換算（`resolveCharsPerToken`） | 実測＋余白＋下限 |
  * | `core/sizeBudget.ts` | 参照資料の予算（`referenceBudgetChars`） | モデル比＋頭打ち |
  * | `core/worldviewSelect.ts` | 矛盾検知へ渡す世界観の字数 | モデル比＋頭打ち |
  * | `core/pastSceneSelect.ts` | 矛盾検知へ渡す過去場面の字数 | モデル比＋頭打ち |
@@ -134,6 +135,111 @@ export const CHARS_PER_TOKEN = 0.7;
  * 送信直前の関所・コンテキストの実測）が使う。
  */
 export const TOKENS_PER_CHAR = 1 / CHARS_PER_TOKEN;
+
+/**
+ * 実測の字/トークンを、信じ始める件数（設計書6.77）。
+ *
+ * **1回や2回では、その回の内容を測っただけである。** 指示とJSONばかりの
+ * 回と、地の文ばかりの回では字/トークンが倍近く違う。少ないうちは
+ * 当て推量（`CHARS_PER_TOKEN`）のままにしておくほうが安全である。
+ */
+export const MIN_CHARS_PER_TOKEN_SAMPLES = 5;
+
+/**
+ * 実測に掛ける余白。
+ *
+ * **測った回と、次に送る回は違う内容である。** 実測1.46をそのまま
+ * 使うと、少しでも詰まった内容を送ったときに見積りが足りなくなる。
+ * 1割引いておけば、その分は素通りする。
+ */
+export const CHARS_PER_TOKEN_MARGIN = 0.9;
+
+/**
+ * 台帳（`core/modelTuning.ts` の `ModelTuning`）のうち、換算に要る欄だけ。
+ *
+ * **型をここで名乗る**——`sizeBudget` は葉のモジュールなので、
+ * `modelTuning.ts`（VS Code に触る）を引き込めない。`ModelTuning` は
+ * この形をそのまま満たすので、呼ぶ側は台帳をそのまま渡せばよい。
+ */
+export interface CharsPerTokenMeasurement {
+  readonly charsPerToken?: number;
+  readonly charsPerTokenSamples?: number;
+}
+
+/**
+ * 台帳に実測があればそれを、無ければ当て推量（0.7）を返す（設計書6.77）。
+ *
+ * **実測は当て推量の倍あった。** 作者の送信量の記録437件で、いちばん悪い
+ * モデルでも1.277字/トークン、全体では1.461字/トークン——製品が0.7と
+ * 見ていた見積りの1.8倍が実際には入っていた。見積りが小さすぎると、
+ * チャンクを必要以上に細かく切り、呼び出し回数と指示の送り直しが増える。
+ *
+ * ただし**実測をそのまま信じない。** 3つの歯止めを置く。
+ *
+ * 1. 件数が `MIN_CHARS_PER_TOKEN_SAMPLES` に満たなければ使わない
+ * 2. `CHARS_PER_TOKEN_MARGIN` を掛けて余白を取る
+ * 3. **0.7 を下回ったら 0.7 を使う**——実測のほうが悪いモデルでも、
+ *    これまでより不利にしない（いまの値で動いてきた実績がある）
+ *
+ * **渡されなければ、いまと1バイトも同じ値を返す。** 実測が入るまでは、
+ * チャンクの大きさも `num_ctx` も関所の判断も従来どおりである。
+ */
+export function resolveCharsPerToken(
+  measured?: CharsPerTokenMeasurement
+): number {
+  const value = measured?.charsPerToken;
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return CHARS_PER_TOKEN;
+  }
+  const samples = measured?.charsPerTokenSamples ?? 0;
+  if (!Number.isFinite(samples) || samples < MIN_CHARS_PER_TOKEN_SAMPLES) {
+    return CHARS_PER_TOKEN;
+  }
+  // **下回らせない**（上の3）。実測が悪いモデルでも従来の値で送る
+  return Math.max(CHARS_PER_TOKEN, value * CHARS_PER_TOKEN_MARGIN);
+}
+
+/**
+ * `resolveCharsPerToken` の逆数。字数からトークン数を見積もる側が使う。
+ *
+ * **逆数をここで作る。** 使う側が `1 / resolveCharsPerToken(...)` と
+ * 書き始めると、`TOKENS_PER_CHAR` を置いたときと同じ形で写しが増える。
+ */
+export function resolveTokensPerChar(
+  measured?: CharsPerTokenMeasurement
+): number {
+  return 1 / resolveCharsPerToken(measured);
+}
+
+/**
+ * 台帳へ書くときの丸め（小数3桁）。
+ *
+ * 桁を落とすのは、設定ファイルを開いた作者が読める形にするため。
+ * **切り捨てる**——丸め上げると、実測よりわずかに大きい（危ない側の）
+ * 値が台帳に残る。
+ */
+export function roundCharsPerToken(value: number): number {
+  return Math.floor(value * 1000) / 1000;
+}
+
+/**
+ * すでに覚えている実測と、新しく採れた値から、**覚え直す値**を決める。
+ *
+ * **平均しない。これまでの最小値を覚える**（作者の裁定）。内容によって
+ * 変わる値なので——指示やJSONが多い回は大きく、地の文だけの回は小さい
+ * ——平均を採ると、本文を多く送る回（まさに見積りが要る回）で甘くなる。
+ * 最小値なら単純で、外れ値に強く、必ず安全側へ倒れる。
+ *
+ * **ここに1つだけ置く。** 書き手は2つある（普段の呼び出しの関所
+ * `ai/meteredProvider.ts` と、読める長さの測定 `features/measureContext.ts`）。
+ * 片方に書いて片方が写すと、「最小値を覚える」という約束が静かに割れる。
+ */
+export function mergeCharsPerToken(
+  previous: number | undefined,
+  sample: number
+): number {
+  return previous === undefined ? sample : Math.min(previous, sample);
+}
 
 /**
  * 「モデルの上限の◯%」と「固定の頭打ち◯字」の小さいほうを取る

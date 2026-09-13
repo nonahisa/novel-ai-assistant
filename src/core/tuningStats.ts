@@ -1,4 +1,9 @@
 import type { ModelTuning, SpeedSource } from "./modelTuning";
+import {
+  CHARS_PER_TOKEN,
+  MIN_CHARS_PER_TOKEN_SAMPLES,
+  resolveCharsPerToken,
+} from "./sizeBudget";
 
 /**
  * AIチューニングの実測を、1枚の表にして見せる（作者の要望、2026-09-06
@@ -93,9 +98,14 @@ export function buildTuningStatsMarkdown(
     "速度は出力の実測（トークン/秒）です。普段のAI呼び出しからも記録します。" +
       "同じモデルでも機械の負荷で変わるので目安です。",
     "",
+    "字/トークンも普段の呼び出しから記録します（送った字数 ÷ 応答が申告した" +
+      "入力トークン数の、これまでの最小値）。この値が入ると本文の分割が" +
+      "変わるので、実際にいくつで見積もっているかを欄の中に併記します。",
+    "",
     "| AI | モデル | 出力速度（トークン/秒） | 速度の出どころ | 速度を測った日時 | " +
-      "文脈の実効長（トークン） | 読める長さ（字） | 書ける長さ（トークン） | 測った日時 |",
-    "|---|---|---|---|---|---|---|---|---|"
+      "文脈の実効長（トークン） | 読める長さ（字） | 書ける長さ（トークン） | 測った日時 | " +
+      "字/トークン（実測） |",
+    "|---|---|---|---|---|---|---|---|---|---|"
   );
 
   const sorted = sortBySpeed(entries);
@@ -113,9 +123,10 @@ export function buildTuningStatsMarkdown(
           speedSourceCell(entry.tuning.speedSource),
           formatMeasuredAt(entry.tuning.speedMeasuredAt),
           countCell(entry.tuning.contextWindow),
-          countCell(entry.tuning.measuredChars),
+          readCell(entry.tuning),
           outputCell(entry.tuning),
           formatMeasuredAt(entry.tuning.measuredAt),
+          charsPerTokenCell(entry.tuning),
         ].join(" | ") +
         " |"
     );
@@ -176,10 +187,70 @@ function speedCell(
 }
 
 /** 書ける長さ。**時間切れ混じりの実測には印を残す**（設計書6.77の第2段） */
+/**
+ * 読める長さ（作者の指摘、2026-09-13）。
+ *
+ * **天井まで通った行は、実測ではなく下限値である。** 同じ列に混ぜたままだと
+ * 「これ以上は試していない」ことが読めず、小さいモデルのほうが多く読める
+ * ように見える。印を付けて分ける。
+ */
+function readCell(tuning: ModelTuning): string {
+  const chars = countCell(tuning.measuredChars);
+  if (tuning.measuredChars === undefined) return chars;
+  /*
+    **断りは重なる。** 天井で止まった値が、さらに合言葉で測ったもので
+    あることもある（どちらも「この数字は弱い」の別々の理由なので、
+    片方だけ出すと、もう片方の弱さが隠れる）。
+  */
+  const notes: string[] = [];
+  if (tuning.contextHitCeiling) notes.push("これ以上は試していません");
+  // 入力トークン数で測った行には何も足さない——それが本来の測り方で、
+  // 断りが要るのは弱いほうだけである（作者の依頼、2026-09-13）
+  if (tuning.contextMeasuredBy === "words") notes.push("合言葉で測定");
+  return notes.length > 0 ? `${chars}（${notes.join("。")}）` : chars;
+}
+
+/**
+ * 書ける長さ（作者の依頼、2026-09-13「書ける長さの文字数は出せないでしょうか？」）。
+ *
+ * **読める長さは字、書ける長さはトークンで出していた。** 単位が揃って
+ * いないと、作者は頭の中で換算しながら読むことになる。作者が数えるのは
+ * 字である（原稿も投稿サイトも字で数える）。
+ *
+ * **字を添えるのは、そのモデルの換算を実測しているときだけ。** かつての
+ * 当て推量（0.7字/トークン）で割ると、実測の半分以下の字数が出る——
+ * 今日その食い違いを直したばかりなのに、表で古い当て推量を使っては
+ * 意味が無い。実測が無い行は、これまでどおりトークンだけを出す。
+ *
+ * **余白（×0.9）は掛けない。** あれは「送る量を決める」ための安全側で
+ * あって、ここは「どれだけ書けたか」を伝えるだけである。安全側へ寄せた
+ * 数字を実績として見せると、作者は実際より書けないと受け取る。
+ */
 function outputCell(tuning: ModelTuning): string {
   const tokens = countCell(tuning.measuredOutputTokens);
   if (tuning.measuredOutputTokens === undefined) return tokens;
-  return tuning.outputMeasureTimedOut ? `${tokens}（時間切れあり）` : tokens;
+
+  const notes: string[] = [];
+  const chars = outputChars(tuning);
+  if (chars !== undefined) notes.push(`約${chars.toLocaleString("ja-JP")}字`);
+  if (tuning.outputMeasureTimedOut) notes.push("時間切れあり");
+  return notes.length > 0 ? `${tokens}（${notes.join("。")}）` : tokens;
+}
+
+/**
+ * 書けたトークン数を字へ直す。実測の換算が無ければ出さない。
+ *
+ * **入力から測った換算を、出力にも当てる。** 同じモデル・同じ言語なので
+ * 字とトークンの関係は変わらない（入力側でしか測れないのは、AIが返す
+ * のが「読んだトークン数」だからである）。**近い値であって、実測では
+ * ない**ので「約」を付ける。
+ */
+function outputChars(tuning: ModelTuning): number | undefined {
+  const tokens = tuning.measuredOutputTokens;
+  const ratio = tuning.charsPerToken;
+  if (tokens === undefined || ratio === undefined) return undefined;
+  if (!Number.isFinite(ratio) || ratio <= 0) return undefined;
+  return Math.round(tokens * ratio);
 }
 
 /**
@@ -201,6 +272,35 @@ function speedSourceCell(source: SpeedSource | undefined): string {
     default:
       return UNKNOWN;
   }
+}
+
+/**
+ * 字/トークンの実測（設計書6.77）。
+ *
+ * **実際に見積もりへ使う値まで書く。** 台帳の値をそのまま出すだけだと、
+ * 「1.461と出ているのにチャンクが増えない」（件数が足りない・余白を
+ * 掛けた・0.7を下回って据え置いた）の理由が読めない。**数字が変わったのに
+ * なぜ変わったかが読めないのが、いちばん困る。**
+ */
+function charsPerTokenCell(tuning: ModelTuning): string {
+  const measured = tuning.charsPerToken;
+  if (measured === undefined) return `${UNKNOWN}（次の呼び出しから記録）`;
+
+  const samples = tuning.charsPerTokenSamples ?? 0;
+  const used = resolveCharsPerToken(tuning);
+  const count = `${samples.toLocaleString("ja-JP")}回`;
+  if (samples < MIN_CHARS_PER_TOKEN_SAMPLES) {
+    return (
+      `${measured.toFixed(3)}（${count}。` +
+      `${MIN_CHARS_PER_TOKEN_SAMPLES}回に満たないため ` +
+      `${CHARS_PER_TOKEN} で見積もります）`
+    );
+  }
+  if (used === CHARS_PER_TOKEN) {
+    // 実測のほうが悪いモデル。**これまでより不利にしない**ので据え置き
+    return `${measured.toFixed(3)}（${count}。低いため ${CHARS_PER_TOKEN} のまま）`;
+  }
+  return `${measured.toFixed(3)}（${count}。余白を取って ${used.toFixed(3)} で見積もり）`;
 }
 
 function countCell(value: number | undefined): string {

@@ -133,6 +133,38 @@ describe("メニューから作る（手で書き写さない）", () => {
   });
 });
 
+/**
+ * 実機確認 F-88：「メニューに出ないボタンと振る舞い」の節が載っているか。
+ *
+ * **画面で確かめようとして2巡続けて届かなかった**（2026-09-12）。
+ * マニュアルは `manualHeader → stepChapter → actionChapter → guideChapter` の順で、
+ * この節は最後の「画面と考え方」章にある。送る回数が多すぎて、
+ * クリックだけの巡ではそこまで辿り着けない。**組み立てた文字列を見れば済む。**
+ */
+describe("画面と考え方の章（実機確認 F-88）", () => {
+  test("**「メニューに出ないボタンと振る舞い」の節が載っている**", () => {
+    expect(MANUAL).toContain("メニューに出ないボタンと振る舞い");
+  });
+
+  test("その節は、操作の一覧より後ろにある", () => {
+    // 章の順（手順 → 操作の一覧 → 画面と考え方）が崩れていないこと。
+    // 巡がここまで送りきれなかった理由でもある
+    const guide = MANUAL.indexOf("メニューに出ないボタンと振る舞い");
+    const actions = MANUAL.indexOf("操作の一覧");
+
+    expect(actions).toBeGreaterThan(-1);
+    expect(guide).toBeGreaterThan(actions);
+  });
+
+  test("節の中身が空でない", () => {
+    // 見出しだけ載っていても、読む人には何も分からない
+    const at = MANUAL.indexOf("メニューに出ないボタンと振る舞い");
+    const after = MANUAL.slice(at, at + 400);
+
+    expect(after.length).toBeGreaterThan(200);
+  });
+});
+
 describe("読み物として整っている", () => {
   test("強調の記号が本文に残らない", () => {
     // メニューのホバーは Markdown の強調が効くが、そのまま持ってくると

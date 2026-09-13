@@ -101,8 +101,15 @@ function writeBook(config: Record<string, unknown>): void {
 }
 
 /** 公開・登場済み・モブでない人物（本へ載る人。設計書6.65.11） */
-function writeCharacter(id: string, name: string): void {
-  put(`設定/characters/${id}.json`, JSON.stringify(emptyCharacter(id, name)));
+function writeCharacter(
+  id: string,
+  name: string,
+  overrides: Record<string, unknown> = {}
+): void {
+  put(
+    `設定/characters/${id}.json`,
+    JSON.stringify({ ...emptyCharacter(id, name), ...overrides })
+  );
 }
 
 function installDisk(): void {
@@ -1563,5 +1570,68 @@ describe("面の保留（設計書6.65.15の段D）", () => {
     await open();
 
     expect(latest().characterNotice).toContain("1人");
+  });
+
+  /**
+   * 人物イラストを素材置き場から名前で引く（作者の指定、2026-09-13）。
+   *
+   * **台帳の `icon` 欄を埋める画面はどこにも無い。** ここを製品と同じ道
+   * （パネルを開いて画面へ送られたもの）で確かめないと、索引の単体テスト
+   * だけが通って実機では1人も見つからない、をくり返す。
+   */
+  test("素材置き場に名前と同じ画像があれば、イラストが付く", async () => {
+    writeCharacter("char_001", "月島灯");
+    putBytes("素材/月島灯.png", [1, 2, 3]);
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "characters" }, { type: "body" }],
+    });
+
+    await open();
+
+    expect(latest().characterNotice).toContain("全員にイラストが付きます");
+  });
+
+  test("素材置き場の下のフォルダーの画像も当たる", async () => {
+    writeCharacter("char_001", "ターナ先生");
+    putBytes("素材/人物/ターナ先生.png", [1, 2, 3]);
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "characters" }, { type: "body" }],
+    });
+
+    await open();
+
+    expect(latest().characterNotice).toContain("全員にイラストが付きます");
+  });
+
+  test("別名と同じ名前の画像でも当たる", async () => {
+    writeCharacter("char_001", "月島灯", { aliases: ["あかり"] });
+    putBytes("素材/あかり.png", [1, 2, 3]);
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "characters" }, { type: "body" }],
+    });
+
+    await open();
+
+    expect(latest().characterNotice).toContain("全員にイラストが付きます");
+  });
+
+  /** 素材置き場の外の絵を顔として拾わない（原稿に添えた図など） */
+  test("素材置き場の外に同じ名前の画像があっても、拾わない", async () => {
+    writeCharacter("char_001", "月島灯");
+    putBytes("本文/月島灯.png", [1, 2, 3]);
+    writeBook({
+      title: "氷の街",
+      blocks: [{ type: "characters" }, { type: "body" }],
+    });
+
+    await open();
+
+    const notice = latest().characterNotice ?? "";
+    expect(notice).toContain("まだ1人も見つかりません");
+    // どうすれば付くのかを言う（前は「見つかりません」で終わっていた）
+    expect(notice).toContain("素材フォルダー");
   });
 });

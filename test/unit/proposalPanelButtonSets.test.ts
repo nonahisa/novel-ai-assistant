@@ -55,6 +55,12 @@ const { renderItem } = ((): { renderItem: Render } => {
     extractFunction(html, "escapeHtml"),
     extractFunction(html, "diffSide"),
     extractFunction(html, "renderDiff"),
+    // 更新案の葉を1つずつ落とす仕掛け（0.50.0）。`renderRecordUpdate` が
+    // 「反映する」を押せるかの判定に使うので、一緒に取り出す
+    extractConst(html, "droppedEntries"),
+    extractFunction(html, "dropSetOf"),
+    extractFunction(html, "renderEntries"),
+    extractFunction(html, "canApplyRecordUpdate"),
     extractFunction(html, "renderRecordChanges"),
     extractFunction(html, "doneLabel"),
     extractFunction(html, "renderRecordUpdate"),

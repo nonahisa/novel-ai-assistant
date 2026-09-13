@@ -1,6 +1,11 @@
 import { hashText } from "./hash";
 import { blankMemoLines } from "./sceneMemo";
-import { CHARS_PER_TOKEN, TOKENS_PER_CHAR } from "./sizeBudget";
+import {
+  TOKENS_PER_CHAR,
+  resolveCharsPerToken,
+  resolveTokensPerChar,
+  type CharsPerTokenMeasurement,
+} from "./sizeBudget";
 
 /**
  * チャンクに含まれる話の内訳。
@@ -189,11 +194,17 @@ export function capUntunedChunkChars(
  * **ここは「指示や資料がどれくらいあるか」を知らない。** 35%という割合で
  * 残りをまとめて見込んでいるだけなので、指示や参照資料が育つと足りなくなる。
  * 実際の固定費を差し引くのは `planChunkBudget` の仕事である（設計書6.27.10）。
+ *
+ * @param measured 台帳（`core/modelTuning.ts`）に入っている、字/トークンの
+ *   実測。**渡さなければ当て推量（0.7）のまま**で、従来と同じ字数になる
  */
-export function decideChunkSize(contextWindow: number): number {
+export function decideChunkSize(
+  contextWindow: number,
+  measured?: CharsPerTokenMeasurement
+): number {
   // 入力本文に割り当てる割合。残りはプロンプト・参照設定・出力に使う
   const usableTokens = Math.floor(contextWindow * 0.35);
-  const chars = Math.floor(usableTokens * CHARS_PER_TOKEN);
+  const chars = Math.floor(usableTokens * resolveCharsPerToken(measured));
   // 極端な値を避けるため上下限を設ける
   return Math.max(MIN_CHUNK_CHARS, Math.min(chars, MAX_CHUNK_CHARS));
 }
@@ -231,12 +242,24 @@ export function planChunkBudget(options: {
   outputTokens: number;
   /** 望みの字数（設定またはモデルからの自動） */
   requestedChars: number;
+  /**
+   * 字/トークンの実測（`core/modelTuning.ts` の台帳）。
+   * **渡さなければ当て推量（0.7）のまま**で、従来と同じ字数になる。
+   */
+  measured?: CharsPerTokenMeasurement;
 }): ChunkBudget {
-  const overheadTokens = Math.ceil(options.overheadChars * TOKENS_PER_CHAR);
+  // **行きと帰りで同じ実測から引く。** 固定費をトークンへ直すときと、
+  // 残りを字へ戻すときで別の換算を使うと、二重にずれる。
+  // 逆数は `sizeBudget` に作らせる（`x / charsPerToken` と書くと、
+  // 実測が無いときに従来の `x * TOKENS_PER_CHAR` と丸めがずれうる）
+  const charsPerToken = resolveCharsPerToken(options.measured);
+  const overheadTokens = Math.ceil(
+    options.overheadChars * resolveTokensPerChar(options.measured)
+  );
   const forBody = options.contextWindow - overheadTokens - options.outputTokens;
   // 見積りは外れることがあるので1割の余裕を持たせる（`contextSizeForPrompt` と同じ）
   const usableTokens = Math.floor(forBody / 1.1);
-  const fits = Math.floor(usableTokens * CHARS_PER_TOKEN);
+  const fits = Math.floor(usableTokens * charsPerToken);
 
   if (fits >= options.requestedChars) {
     return { chunkChars: options.requestedChars, reason: "requested" };
@@ -296,8 +319,13 @@ export function resolveChunkChars(options: {
   mode: ChunkSizeMode;
   configured: number | undefined;
   contextWindow: number;
+  /**
+   * 字/トークンの実測（`core/modelTuning.ts` の台帳）。自動モードのときだけ
+   * 効く——手動で字数を指定しているなら、作者の指定がそのまま正である。
+   */
+  measured?: CharsPerTokenMeasurement;
 }): ResolvedChunkSize {
-  const fromModel = decideChunkSize(options.contextWindow);
+  const fromModel = decideChunkSize(options.contextWindow, options.measured);
   if (options.mode === "auto") return { chars: fromModel, from: "model" };
 
   const configured = options.configured;
@@ -420,8 +448,19 @@ export function contextSizeForPrompt(options: {
   outputTokens: number;
   /** モデルが扱える上限 */
   contextWindow: number;
+  /**
+   * 字/トークンの実測（`core/modelTuning.ts` の台帳）。
+   *
+   * **チャンクの大きさと同じ係数で見積もる。** 片方だけ実測にすると、
+   * 「送る量は実測で決めたのに、確保する長さは当て推量」という、
+   * 以前まさに直した形の食い違いに戻る（設計書6.27.10）。
+   * 渡さなければ当て推量（0.7）のままで、従来と同じ長さを確保する。
+   */
+  measured?: CharsPerTokenMeasurement;
 }): number {
-  const inputTokens = Math.ceil(options.promptChars * TOKENS_PER_CHAR);
+  const inputTokens = Math.ceil(
+    options.promptChars * resolveTokensPerChar(options.measured)
+  );
   // 見積りは外れることがあるので1割の余裕を持たせる（`planChunkBudget` と同じ）
   const needed = Math.ceil((inputTokens + options.outputTokens) * 1.1);
   // **段に丸めて、チャンクごとに値が動かないようにする**（設計書6.53）。

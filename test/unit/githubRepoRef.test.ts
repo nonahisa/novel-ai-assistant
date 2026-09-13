@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { EXAMPLE_REPO } from "../../src/core/exampleNames";
 import {
   describeRepoRef,
   describeRepoRefProblem,
@@ -103,9 +104,11 @@ describe("リポジトリの指し方を読む", () => {
 
 describe("入力欄に出す言い方", () => {
   it("空のときは、書き方の例を出す", () => {
+    // **例は架空のもの**（作者の裁定、2026-09-13）。作者の実際の
+    // アカウント名が、ほかの人の入力欄に出ないようにする
     const text = describeRepoRefProblem("");
     expect(text).toBeDefined();
-    expect(text).toContain("nonahisa/HisasNovels");
+    expect(text).toContain(EXAMPLE_REPO);
   });
 
   it("読めたときは何も言わない", () => {

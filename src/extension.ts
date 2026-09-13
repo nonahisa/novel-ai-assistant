@@ -180,6 +180,8 @@ import {
 import { NullGitSyncMonitor, type GitSyncMonitorLike } from "./features/gitSyncStub";
 import { canRunProcesses } from "./core/runtime";
 import { describeProcessesBlocked } from "./core/processAvailability";
+import { exclusiveLabelOf } from "./core/exclusiveCommands";
+import { beginCommand, endCommand } from "./core/runningCommands";
 // nextSetupStep, runSetupStep も core/git.ts 経由。動的importする
 
 import { resolveDeviceId } from "./core/device";
@@ -275,6 +277,8 @@ import { askText, cancelItem } from "./views/dialogs";
 import { manageKeepWords } from "./features/manageKeepWords";
 import { manageConfirmSkips } from "./features/manageConfirmSkips";
 import { AdvicePolicyStore } from "./core/advicePolicyStore";
+import { WriterProfileStore } from "./core/writerProfileStore";
+import type { AdviceProfile } from "./core/advicePolicy";
 import { setAdvicePolicy } from "./features/advicePolicyDiagnosis";
 import {
   addForeshadowByHand,
@@ -303,6 +307,7 @@ import {
   PROOFREADING_SUITE_COMMAND,
   checkSkipped,
   isSuiteConfirmed,
+  isSuiteHoldingRun,
   type CheckCommandOutcome,
   type CheckRunOptions,
 } from "./core/proofreadingSuite";
@@ -462,6 +467,14 @@ export async function activate(
   context: vscode.ExtensionContext
 ): Promise<{ extendMarkdownIt<T extends MarkdownItLike>(md: T): T }> {
   /**
+   * いま走っている操作（設計書6.17.4の末尾）。
+   *
+   * **`activate` のスコープに置く。** 拡張機能ホストが再読み込みされれば
+   * 箱ごと作り直されるので、解けないまま残ることがない。
+   */
+  const runningCommands = new Set<string>();
+
+  /**
    * コマンド登録の入口。**登録の口を1つにまとめておく。**
    *
    * 0.45.0 まではここで押した操作を記録していた（F5の開発ホスト限定。
@@ -469,12 +482,34 @@ export async function activate(
    * 登録が1か所であることに検査が拠っており（`contributesShape.test.ts` は
    * この関数へ渡すコマンドIDを読んで、宣言と突き合わせる）、
    * 80か所を素の `vscode.commands.registerCommand` へ散らす理由も無い。
+   *
+   * 0.49.3 から、**同じ操作の2本目をここで断る**（作者の報告 2026-09-12
+   * 「すべて同期を2回押してしまうことがあったが、複数立ちあがった」）。
+   * 対象は `exclusiveCommands.ts` に並べてあり、画面を開くだけのものは
+   * 入っていない。**断りはモーダルにしない**——作者は誤って2回押しただけで、
+   * 手を止めさせる場面ではない。
    */
   const registerCommand: typeof vscode.commands.registerCommand = (
     command,
     callback,
     thisArg
-  ) => vscode.commands.registerCommand(command, callback, thisArg);
+  ) =>
+    vscode.commands.registerCommand(command, async (...args: unknown[]) => {
+      if (!beginCommand(runningCommands, command)) {
+        const label = exclusiveLabelOf(command) ?? command;
+        vscode.window.showInformationMessage(
+          `「${label}」はいま動いています。終わるまでお待ちください。`
+        );
+        return undefined;
+      }
+      try {
+        return await callback.apply(thisArg, args);
+      } finally {
+        // **失敗しても、途中で止めても必ず解く。** 解き忘れると、その操作が
+        // 二度と押せなくなる（重複起動より重い壊れ方）
+        endCommand(runningCommands, command);
+      }
+    });
 
   /**
    * 作品に属さない生成文書（使い方・診断・セットアップの内訳・IME辞書の
@@ -1250,6 +1285,9 @@ export async function activate(
   // 作者のタイプ別の助言方針（設計書6.86）。**`globalState` に置く**——
   // 受容度や自信度は、GitHubで編集部と共有してよい情報ではない
   const advicePolicies = new AdvicePolicyStore(context.globalState);
+  // 作家タイプ診断（設計書6.90）。**作者ごとに1つ**——段取りや出し先は
+  // 作品を変えても大きくは変わらない癖なので、作品ごとに聞き直さない
+  const writerProfiles = new WriterProfileStore(context.globalState);
 
   const workChatPanel = new WorkChatPanel(registry, aiRegistry, {
     run: async (work, kind, filePath) => {
@@ -2659,14 +2697,22 @@ export async function activate(
     // 割当先（設計書6.28.9）を測らないと、測ったAIと切れたAIが別物になる。
     // コマンドパレットからは引数なしで来るので、そのときは既定を測る
     registerCommand("novelai.measureContext", async (feature?: unknown) => {
-      const { measureContext } = await import("./features/measureContext.js");
+      const { askTuningScope, measureContext } = await import(
+        "./features/measureContext.js"
+      );
+      // **何を測るかを先に訊く**（作者の依頼、2026-09-13）。読める長さは
+      // 数分だが、書ける長さは遅いモデルで1時間以上かかる。押した瞬間に
+      // 両方始まる形だと、数分で済ませたい作者が1時間付き合わされる
+      const scope = await askTuningScope();
+      if (!scope) return;
       await measureContext(
         aiRegistry,
         isAssignableFeature(feature) ? feature : "default",
         // **測定に作品は要らないが、ログの置き場所には要る**（設計書6.53）。
         // 出力パネルはVS Codeを閉じると消えるので、点滅や時間切れの原因を
         // 作者が後から追えるよう、作品フォルダの `actions.log` にも残す
-        logTargetWorkFolder(registry)
+        logTargetWorkFolder(registry),
+        scope
       );
     })
   );
@@ -3147,6 +3193,42 @@ export async function activate(
     )
   );
 
+  /*
+    作家タイプ診断と、はじめの案内（設計書6.90。作者の依頼 2026-09-13）。
+
+    **6.86 とは別の診断である。** あちらは人柄（AIの言い方を変える）、
+    こちらはやり方（はじめに案内する操作を変える）。AIは呼ばない——
+    はじめて使う日に、AIの準備ができていなくても最後まで通れるようにしてある。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.runWriterDiagnosis", async () => {
+      const { runWriterDiagnosis } = await import(
+        "./features/writerDiagnosis.js"
+      );
+      await runWriterDiagnosis(writerDiagnosisDeps());
+    })
+  );
+
+  /**
+   * 診断の画面へ渡すもの。**押せない案内を並べないため**に、
+   * 作品があるかと、いまの助言方針を見せる
+   */
+  function writerDiagnosisDeps() {
+    return {
+      profiles: writerProfiles,
+      hasWork: () => registry.list().length > 0,
+      /*
+        **9問の答えは、作者ごとの既定へ置く**（設計書6.90.2）。
+        使用開始時にはまだ作品が1つも無いので、作品ごとの置き場には書けない。
+        作品ができたら相談がここから始まる（`getEffective`）。
+      */
+      adviceDefault: {
+        get: () => advicePolicies.getDefault(),
+        set: (profile: AdviceProfile) => advicePolicies.setDefault(profile),
+      },
+    };
+  }
+
   // 相談の助言方針（設計書6.86）。AIは呼ばない——答えるのは作者本人だけで、
   // 会話ログからの推定はしない
   context.subscriptions.push(
@@ -3207,11 +3289,17 @@ export async function activate(
         if (unsaved) return unsaved;
 
         const suiteConfirmed = isSuiteConfirmed(options);
+        // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
+        const suiteHoldsRun = isSuiteHoldingRun(options);
         const result = await withPanelProgress(
           work,
           "伏線を検知",
           (onProgress) =>
-            checkForeshadows(work, aiRegistry, { onProgress, suiteConfirmed })
+            checkForeshadows(work, aiRegistry, {
+              onProgress,
+              suiteConfirmed,
+              suiteHoldsRun,
+            })
         );
         if (!result || result.cancelled) return CHECK_CANCELLED;
 
@@ -3339,6 +3427,8 @@ export async function activate(
         // 聞く意味があるときだけ聞く（一度も検知していない・全部が対象・
         // 1件も無い、のいずれでも聞かない）
         const suiteConfirmed = isSuiteConfirmed(options);
+        // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
+        const suiteHoldsRun = isSuiteHoldingRun(options);
         const scope = await resolveTypoScope(work, { suiteConfirmed });
         if (!scope) return CHECK_CANCELLED;
 
@@ -3350,6 +3440,7 @@ export async function activate(
               filePaths: scope.filePaths,
               onProgress,
               suiteConfirmed,
+              suiteHoldsRun,
             })
         );
         if (!result) return CHECK_CANCELLED;
@@ -3573,6 +3664,8 @@ export async function activate(
         let missing = "";
         let missingReason = "";
         const suiteConfirmed = isSuiteConfirmed(options);
+        // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
+        const suiteHoldsRun = isSuiteHoldingRun(options);
         const result = await withPanelProgress(
           work,
           "プロット逸脱を検知",
@@ -3580,6 +3673,7 @@ export async function activate(
             checkDeviations(work, aiRegistry, {
               onProgress,
               suiteConfirmed,
+              suiteHoldsRun,
               noteMissing: (note, reason) => {
                 missing = note;
                 missingReason = reason ?? "";
@@ -3764,8 +3858,14 @@ export async function activate(
         if (unsaved) return unsaved;
 
         const suiteConfirmed = isSuiteConfirmed(options);
+        // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
+        const suiteHoldsRun = isSuiteHoldingRun(options);
         const result = await withPanelProgress(work, "推敲", (onProgress) =>
-          checkProofread(work, aiRegistry, { onProgress, suiteConfirmed })
+          checkProofread(work, aiRegistry, {
+            onProgress,
+            suiteConfirmed,
+            suiteHoldsRun,
+          })
         );
         if (!result || result.cancelled) return CHECK_CANCELLED;
 
@@ -3773,26 +3873,36 @@ export async function activate(
 
         // **誤字脱字と同じ数え方にする**（設計書6.8）。前に適用済み・
         // 解消済みだったものを「指摘」に数えると、パネルの見出しと食い違う。
-        // **捨てたぶんはここでは言わない**——推敲は「絞り込み」「語尾の
-        // 数え違い」と、より細かい内訳を下で出しており、総数を重ねると
-        // 同じものを二度数えたように見える
         const parts = describeCheckRunCounts({
           shown: shown.remaining,
           alreadyHandled: shown.handled,
           rejected: 0,
         });
+        /*
+          **落とした総数を1行だけ出す**（作者の裁定、2026-09-12）。
+
+          以前はここで黙っていた——下に「絞り込み」「語尾の数え違い」と
+          細かい内訳が並ぶので、総数を重ねると二度数えたように見えたためである。
+          だが黙ると、**製品が何件捨てたのかを作者が知る手立てが無い**
+          （操作ログには出ているが、そこまで見に行かない）。
+          総数を先に出し、下の3行は「うち」を付けて**内数だと分かる**ようにした。
+          理由の内訳までは出さない（作者の裁定。調べたいときは操作ログにある）。
+        */
+        if (result.rejectedCount > 0) {
+          parts.push(`AIの指摘のうち ${result.rejectedCount}件を落とした`);
+        }
         if (result.overBudgetCount > 0) {
           // 黙って絞ると「これで全部」と受け取られる
-          parts.push(`多すぎたぶん ${result.overBudgetCount}件を絞り込み`);
+          parts.push(`うち多すぎたぶん ${result.overBudgetCount}件を絞り込み`);
         }
         if (result.monotonyDroppedCount > 0) {
           // AIの「〜た。が5連続」を数え直して外したぶん（2026-09-04）
-          parts.push(`語尾の数え違い ${result.monotonyDroppedCount}件を除外`);
+          parts.push(`うち語尾の数え違い ${result.monotonyDroppedCount}件`);
         }
         if (result.monotonyMergedCount > 0) {
           // 同じ並びに何枚も出ていたぶん（2026-09-05）。黙って減らさない
           parts.push(
-            `語尾単調：同じ連続の重複${result.monotonyMergedCount}件をまとめた`
+            `うち語尾単調の同じ連続 ${result.monotonyMergedCount}件をまとめた`
           );
         }
         if (result.failedChunks > 0) {
@@ -3804,6 +3914,29 @@ export async function activate(
           failedCount: result.failedChunks,
         });
         return CHECK_COMPLETED;
+      }
+    )
+  );
+
+  /*
+    ターゲット読者診断（設計書6.91。作者の依頼、2026-09-13）。
+
+    **作家タイプ診断（6.90）と対になる。** あちらは作者ごと・AIなし、
+    こちらは**作品ごと**で、宣言（9問・AIなし）と実像（本文から読む・
+    AIを使う）の2階建てである。作品を選ばせるので、作品一覧の節点からも
+    詳細メニューからも入れる。
+  */
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.runReaderTargetDiagnosis",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+
+        const { runReaderTargetDiagnosis } = await import(
+          "./features/readerTargetDiagnosis.js"
+        );
+        await runReaderTargetDiagnosis(work, aiRegistry);
       }
     )
   );
@@ -3843,6 +3976,8 @@ export async function activate(
         let missing = "";
         let missingReason = "";
         const suiteConfirmed = isSuiteConfirmed(options);
+        // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
+        const suiteHoldsRun = isSuiteHoldingRun(options);
         const result = await withPanelProgress(
           work,
           "矛盾を検知",
@@ -3852,6 +3987,7 @@ export async function activate(
               // 検証はAIを1件ずつ呼ぶので、別の札で件数を流す
               onVerifyProgress: stage("検出した矛盾を検証", "件"),
               suiteConfirmed,
+              suiteHoldsRun,
               noteMissing: (note, reason) => {
                 missing = note;
                 missingReason = reason ?? "";
@@ -3934,6 +4070,7 @@ export async function activate(
               // 判定はAIを1件ずつ呼ぶので、別の札で件数を流す
               onVerifyProgress: stage("見つかった候補を確かめ", "件"),
               suiteConfirmed: isSuiteConfirmed(options),
+              suiteHoldsRun: isSuiteHoldingRun(options),
             })
         );
         if (!result || result.cancelled) return CHECK_CANCELLED;
@@ -4688,9 +4825,29 @@ export async function activate(
   // fetchは取得のみなので、途中で終わってもローカルには何も起きない
   void gitSync.refreshAll({ fetch: true });
 
-  // **はじめて開いたときだけ、使うAIを選んでもらう**（作者の指示、2026-08-19）。
-  // await しないのは、選び終わるまで拡張機能の初期化が止まるのを避けるため
-  void offerFirstRunSetupInVsCode(context, aiRegistry);
+  /*
+    **はじめて開いたときの声かけは、2つを続けて出す**（設計書6.90.3）。
+
+      1. 作家タイプ診断（作者の依頼、2026-09-13「使用開始時に…」）
+      2. 使うAIを選ぶ（作者の指示、2026-08-19）
+
+    **診断を先にする。** 何をしたいかが決まる前にAIを選ばせても、
+    何のために要るのかが分からない。診断の案内は**AIを使わない**ので、
+    「いまある原稿を取り込む」「編集・校閲で使う」だけなら最後まで通る。
+
+    **同時に2つ出さない。** 通知が2枚並ぶと、どちらに答えたのか分からなくなる。
+    診断の声かけが片付いてから、AIの声かけを出す。
+
+    どちらも await しないのは、選び終わるまで拡張機能の初期化が
+    止まるのを避けるためである。
+  */
+  void (async () => {
+    const { offerWriterDiagnosis } = await import(
+      "./features/writerDiagnosis.js"
+    );
+    await offerWriterDiagnosis(writerDiagnosisDeps());
+    await offerFirstRunSetupInVsCode(context, aiRegistry);
+  })();
 
   // **VS Code 標準のMarkdownプレビューへ差し込む**（設計書6.12）。
   // 独自のプレビュー画面を作らないのは、作者が既に使っている

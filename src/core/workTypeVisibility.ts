@@ -356,6 +356,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.openExtensionSettings": "allTypes",
   "novelai.manageConfirmSkips": "allTypes",
   "novelai.setupVectorSearch": "allTypes",
+  "novelai.runReaderTargetDiagnosis": "allTypes",
   "novelai.buildVectorIndex": "allTypes",
   "novelai.clearVectorIndex": "allTypes",
 
@@ -366,6 +367,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.soloChat": "allTypes",
   "novelai.showAllViews": "allTypes",
   "novelai.exitChatFocus": "allTypes",
+  "novelai.runWriterDiagnosis": "allTypes",
   "novelai.openManual": "allTypes",
   "novelai.showLog": "allTypes",
   "novelai.openChatLog": "allTypes",
