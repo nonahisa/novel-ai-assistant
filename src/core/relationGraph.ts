@@ -1,5 +1,8 @@
 import type { Character } from "../models/character";
-import { expandNameVariants } from "./termIndex";
+import {
+  createNameResolver,
+  type UnresolvedReason,
+} from "./characterNameResolve";
 
 /**
  * 人物相関図の材料を組み立てる（設計書6.38.1）。
@@ -56,17 +59,8 @@ export interface RelationEdge {
   labels: RelationLabel[];
 }
 
-/**
- * なぜ資料に結べなかったか。
- *
- * - `notFound`：その名前の人物が資料に居ない（抽出漏れか、脇役）
- * - `ambiguous`：同じ名前の人物が複数居て、どちらか決められない
- *
- * **2つを分ける。** 前者は抽出すれば消えるが、後者は別名の重複を
- * 直さないと消えない。同じ「資料に無い」で括ると、作者は抽出をやり直して
- * 何も変わらない、を繰り返すことになる。
- */
-export type UnresolvedReason = "notFound" | "ambiguous";
+/** 結べなかった理由。**呼び合い（`addressPairs.ts`）と分け合う** */
+export type { UnresolvedReason };
 
 /** 資料に当たらなかった相手（件数を画面の隅に出す） */
 export interface UnresolvedTarget {
@@ -215,53 +209,6 @@ export function buildRelationGraph(characters: Character[]): RelationGraph {
 }
 
 /** 名前を引いた結果。結べなかったときは、その理由を添える */
-interface NameResolution {
-  id: string | null;
-  reason: UnresolvedReason | null;
-}
-
-/**
- * 名前・別名から人物を引く（設計書6.38.1）。
- *
- * 名前の広げ方は `termIndex.ts` の `expandNameVariants` を借りる。姓だけ・
- * 名だけで呼ぶ小説の書き方に合わせた規則が既にそこにあり、ここへ写しを
- * 作ると片方だけ直る日が来る。
- *
- * **当てるのは全体が一致したときだけ。** `TermIndex.find` は本文の中から
- * 用語を探す道具なので、部分文字列にも当たる。相関図でそれを使うと、
- * 資料に無い「アリシア」が登録済みの「リシア」に化けて、**どこにも無い線**が
- * 図に引かれる（気づきようがない）。名前どうしを突き合わせるここでは、
- * 索引ではなく名前の対応表で引く。
- *
- * **同じ名前が複数の人物に当たるときは結ばない。** 先に見つかったほうへ
- * 線を引くと、別名が重なっているだけで別人が繋がる。図には点線の仮ノードを
- * 残し、`ambiguous` として件数に出す（黙って落とさない・黙って繋がない）。
- */
-function createNameResolver(
-  characters: Character[]
-): (name: string) => NameResolution {
-  const idsByName = new Map<string, Set<string>>();
-  for (const character of characters) {
-    const names = expandNameVariants([
-      character.name,
-      ...(character.aliases ?? []),
-    ]);
-    for (const text of names) {
-      const key = text.trim();
-      if (!key) continue;
-      const ids = idsByName.get(key);
-      if (ids) ids.add(character.id);
-      else idsByName.set(key, new Set([character.id]));
-    }
-  }
-
-  return (name: string): NameResolution => {
-    const ids = idsByName.get(name.trim());
-    if (!ids || ids.size === 0) return { id: null, reason: "notFound" };
-    if (ids.size > 1) return { id: null, reason: "ambiguous" };
-    return { id: [...ids][0], reason: null };
-  };
-}
 
 /** どの環に居るか。0が中心、1が1次、2が2次 */
 export type EgoRing = 0 | 1 | 2;
