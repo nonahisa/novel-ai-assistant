@@ -5,6 +5,10 @@ import {
   parseProfileSignals,
   type AdviceProfileSignals,
 } from "../core/advicePolicy";
+import {
+  parseWriterStyleSignals,
+  type WriterStyleSignals,
+} from "../core/writerStyle";
 
 /**
  * P-21 いま開いている画面について相談する（相談パネル）
@@ -46,7 +50,7 @@ import {
 //      話題の見分けは `core/chatTopic.ts`。目次を渡さない回は、代わりに
 //      「操作のことでしたら、もう一度そう言ってお尋ねください」と聞き返させる
 //      （`features/featureGuide.ts` の NO_INDEX_NOTICE）
-export const WORK_CHAT_VERSION = "3.9";
+export const WORK_CHAT_VERSION = "3.10";
 
 /**
  * 起動できる機能の一覧。**実装（chatEdit.ts）から作る。**
@@ -443,6 +447,23 @@ export const WORK_CHAT_SCHEMA = {
         confidence: { type: ["string", "null"] },
       },
     },
+    /*
+      直す時期（S2）の読み取り（P-39、設計書6.90.1）。
+
+      **`profileSignals` と欄を分ける。** あちらは助言方針の点数を
+      少しずつ動かす推定で、こちらは**作者が5問で答えた値**の書き換えである。
+      重みが違うものを同じ欄に混ぜると、片方の歯止め（2回続けて／必ず見せる）
+      を外した日に、もう片方まで一緒に緩む。
+
+      **頼む文は P-39 の側にある**（`prompts/writerStyle.ts`）。
+      診断していない作者には頼みが送られないので、その回は null が返る。
+    */
+    writerStyleSignals: {
+      type: ["object", "null"],
+      properties: {
+        revise: { type: ["string", "null"] },
+      },
+    },
   },
   required: [
     "reply",
@@ -453,6 +474,7 @@ export const WORK_CHAT_SCHEMA = {
     "locate",
     "reloadRecord",
     "profileSignals",
+    "writerStyleSignals",
   ],
 } as const;
 
@@ -480,6 +502,14 @@ export interface WorkChatAnswer {
    * 通すと、作者の方針が壊れたまま気づけない。
    */
   profileSignals: AdviceProfileSignals | undefined;
+  /**
+   * 直す時期（S2）の読み取り（P-39、設計書6.90.1）。
+   *
+   * **ここでも形を絞ってから返す。** 通ると**作者自身が答えた値**が
+   * 書き換わる（2回続けて同じに読めたとき）ので、指示語がそのまま
+   * 返ってきた値を通してはいけない。
+   */
+  writerStyleSignals: WriterStyleSignals | undefined;
 }
 
 /**
@@ -513,6 +543,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
           locate?: unknown;
           reloadRecord?: unknown;
           profileSignals?: unknown;
+          writerStyleSignals?: unknown;
         };
         return {
           reply: record.reply.trim(),
@@ -529,6 +560,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
           locate: record.locate,
           reloadRecord: record.reloadRecord,
           profileSignals: parseProfileSignals(record.profileSignals),
+          writerStyleSignals: parseWriterStyleSignals(record.writerStyleSignals),
         };
       }
     } catch {
@@ -545,6 +577,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
     locate: undefined,
     reloadRecord: undefined,
     profileSignals: undefined,
+    writerStyleSignals: undefined,
   };
 }
 

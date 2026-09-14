@@ -11,14 +11,24 @@
  * | | 6.86 相談の助言方針 | 6.90 執筆スタイル（ここ） |
  * |---|---|---|
  * | 何を測るか | 人柄（読者志向・自分志向・嗜好志向） | **やり方**（段取り・直す時期・資料・出す場所） |
- * | 点数にするか | する（0〜6・推定で動く） | **しない**（答えがそのまま事実） |
- * | 何が変わるか | AIの助言の言い方 | **はじめに案内する操作** |
+ * | 点数にするか | する（0〜6・推定で動く） | **しない**（答えがそのまま事実。S2 だけ例外） |
+ * | 何が変わるか | AIの助言の言い方 | **はじめに案内する操作**と、相談での助言の渡し方 |
  * | どこに持つか | 作品ごと | **作者ごと**（作品をまたぐ癖である） |
+ *
+ * **相談へ渡すのは S1（段取り）と S2（直す時期）だけ**（作者の裁定、
+ * 2026-09-14。文章は `prompts/writerStyle.ts`）。S3（資料の置き場）は
+ * 勧める操作しか変えず、S4（出し先）はターゲット読者診断（6.91）と
+ * 中身が重なるため渡さない。
  *
  * **点数にしないのは、やり方に良し悪しが無いからである。** 「決めずに書く」は
  * 「決めてから書く」より低い点ではない。点にすると順序が生まれ、順序が
  * 生まれると「上を目指すもの」に見える。ここで欲しいのは**勧める操作を
  * 選ぶための事実**だけなので、選んだ答えをそのまま持つ。
+ *
+ * **例外は S2（直す時期）だけ**（作者の裁定、2026-09-14）。相談の応答から
+ * 読み取れたときに動く——ただし**点数にはしない**（3つの選択肢のあいだを
+ * 動くだけ）。歯止めと理由は、このファイル後半の
+ * 「相談の応答から、直す時期（S2）だけを読み直す」に書いた。
  *
  * **呼び名を付けるのは段取りの軸だけ**（設計派・折衷派・即興派）。4軸すべてに
  * 名前を付けると 3×3×3×4＝108 通りになり、名前が何も言わなくなる。
@@ -28,6 +38,10 @@
  * VS Code にも AI にも依存しない。画面（`features/writerDiagnosis.ts`）は
  * ここが返した結果を出すだけで、**勧める操作を選ぶ規則を写し持たない**。
  */
+
+// **型だけを借りる。** `writerProfileStore.ts` はこちらを実行時に読むので、
+// 値を借りると輪になる（`import type` は実行時には消える）
+import type { WriterProfile } from "./writerProfileStore";
 
 /** いまの状況。**点数にしない**——案内を分けるための事実である */
 export type WriterSituation =
@@ -298,6 +312,197 @@ export function buildWriterStyle(
     material: picked.material as WriterMaterialHabit,
     outlet: picked.outlet as WriterOutlet,
   };
+}
+
+/**
+ * 相談へ渡した執筆スタイルを、操作ログの1行にする（設計書6.90.1）。
+ *
+ * **渡した2軸だけを書く。** 相談へ送るのは段取り（S1）と直す時期（S2）
+ * だけなので、資料の置き場（S3）・出し先（S4）をここに混ぜると、
+ * 何を送ったのか記録から分からなくなる。
+ *
+ * **文言をここに置くのは `advicePolicyLogLines` と同じ理由**——
+ * 試験から見るためである（`features` の中に書くと確かめられない）。
+ * 診断していなければ空配列を返す。**相談は止めない。**
+ */
+export function writerStyleChatLogLines(
+  style: WriterStyle | undefined
+): string[] {
+  if (!style) return [];
+  return [
+    `相談: 執筆スタイル ${WRITER_PLAN_TYPES[style.plan].label}` +
+      `／直すのは${WRITER_REVISE_LABELS[style.revise]}`,
+  ];
+}
+
+/* ───────────────────────────────────────────────────────────────
+   相談の応答から、直す時期（S2）だけを読み直す（設計書6.90.1）
+
+   **ここは 6.90.1 の唯一の例外である。** ほかの3軸（S1 段取り・
+   S3 資料の置き場・S4 出し先）は「答えがそのまま事実」のままで、
+   相談の読み取りでは動かさない。
+
+   S2 だけを動かすのは、直す時期が**会話の中で作者が自分から語りやすく**
+   （「いつも書き終えてから直す」）、かつ**推敲の助言をいつ出すかに直結する**
+   ためである（作者の裁定、2026-09-14）。
+
+   **歯止めは2つ。**
+
+   1. **2回続けて同じに読めたときだけ動かす**（`WRITER_REVISE_STREAK_NEEDED`）。
+      作者は5問に答えてその値を選んでいる。会話の一言で上書きするなら、
+      診断そのものが意味を失う。手本は助言方針の受容度「低」
+      （`advicePolicy.ts` の `lowStreak`）で、考え方も書き方もそちらに揃えた
+   2. **変わったら必ず作者に見せる**（`describeWriterStyleChange`）。
+      助言方針の点数と違い、これは**作者自身が答えた値**の書き換えである
+   ─────────────────────────────────────────────────────────────── */
+
+/**
+ * 相談の答えから読み取った、執筆スタイルの傾向（P-39）。
+ *
+ * **いまは直す時期（S2）だけ。** ほかの軸を足すときは、
+ * 上のコメントの前提（なぜ S2 だけが例外なのか）から考え直すこと。
+ */
+export interface WriterStyleSignals {
+  revise?: WriterReviseTiming;
+}
+
+/** 同じ値が何回続けて読み取れたら反映するか */
+export const WRITER_REVISE_STREAK_NEEDED = 2;
+
+/**
+ * 直す時期が続けて読み取れた回数。
+ *
+ * **反映した時点と、別の値が読み取れた時点で消える。** 「いつ何回読めたか」
+ * ではなく「いま何が何回続いているか」だけを持つ——積み上げると、
+ * 半年前の1回が今日の1回と足し合わさって動いてしまう。
+ */
+export interface WriterReviseStreak {
+  value: WriterReviseTiming;
+  count: number;
+}
+
+function isReviseTiming(value: unknown): value is WriterReviseTiming {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(WRITER_REVISE_LABELS, value)
+  );
+}
+
+/**
+ * AIが返した `writerStyleSignals` を、使える形に絞る。
+ *
+ * **知らない値は捨てる。** AIは指示語をそのまま返すことがあり
+ * （`"revise": "inline|per_episode|after_all"`）、通すと作者の答えが
+ * 意味の無い値で置き換わる（CLAUDE.md「繰り返し起きた失敗」3番）。
+ */
+export function parseWriterStyleSignals(
+  value: unknown
+): WriterStyleSignals | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const raw = (value as Record<string, unknown>).revise;
+  return isReviseTiming(raw) ? { revise: raw } : undefined;
+}
+
+/** 保存してあった連続の数えを読み直す。壊れていれば「数えていない」に戻す */
+export function parseWriterReviseStreak(
+  value: unknown
+): WriterReviseStreak | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const raw = value as { value?: unknown; count?: unknown };
+  if (!isReviseTiming(raw.value)) return undefined;
+  if (typeof raw.count !== "number" || !Number.isFinite(raw.count)) {
+    return undefined;
+  }
+  const count = Math.floor(raw.count);
+  return count > 0 ? { value: raw.value, count } : undefined;
+}
+
+/**
+ * 読み取りを反映する（**2回続けて同じときだけ動く**）。
+ *
+ * 何も変わらないときは、渡された `profile` をそのまま返す
+ * （`applyProfileSignals` と同じ約束。呼び出し側は同一性で見分けて、
+ * 同じ内容を書き戻さない）。
+ *
+ * **`updatedAt` は動かさない。** ここは「作者が5問に答えたのはいつか」で
+ * あって、最後に触った日時ではない（助言方針の `updatedAt` と同じ扱い）。
+ * 動かすと、相談のたびに診断日が今日へ書き換わる。
+ */
+export function applyWriterStyleSignals(
+  profile: WriterProfile,
+  signals: WriterStyleSignals | undefined
+): WriterProfile {
+  const read = signals?.revise;
+  if (!read) return profile;
+
+  // いまの答えと同じなら、数えを消すだけ。別の値を数えている途中なら、
+  // そこで途切れる（**途中に別の値が挟まったら数え直す**）
+  if (read === profile.style.revise) {
+    return profile.reviseStreak ? stripStreak(profile) : profile;
+  }
+
+  const streak = profile.reviseStreak;
+  const count = streak?.value === read ? streak.count + 1 : 1;
+  if (count < WRITER_REVISE_STREAK_NEEDED) {
+    return { ...profile, reviseStreak: { value: read, count } };
+  }
+
+  // **動かすのは S2 だけ。** ほかの軸は作者の答えのまま写す
+  return {
+    ...stripStreak(profile),
+    style: { ...profile.style, revise: read },
+  };
+}
+
+function stripStreak(profile: WriterProfile): WriterProfile {
+  const { reviseStreak: _dropped, ...rest } = profile;
+  return rest;
+}
+
+/**
+ * 直す時期が変わったことを、作者へ知らせる一言。
+ *
+ * **黙って変えてはいけない。** これは推定値ではなく、**作者自身が5問で
+ * 答えた値**の書き換えである（助言方針の点数より重い）。だから
+ * **何が何に変わったか・なぜ・どう戻すか**の3つを必ず入れる。
+ * 変わっていなければ `undefined`。
+ */
+export function describeWriterStyleChange(
+  before: WriterProfile,
+  after: WriterProfile
+): string | undefined {
+  if (before.style.revise === after.style.revise) return undefined;
+  return (
+    `相談の中でそう読み取れたため、「直す時期」を` +
+    `『${WRITER_REVISE_LABELS[before.style.revise]}』から` +
+    `『${WRITER_REVISE_LABELS[after.style.revise]}』へ変えました。` +
+    `違っていれば、「作家タイプ診断」で答え直せます。`
+  );
+}
+
+/**
+ * 読み取りを反映したときの、操作ログの1行。
+ *
+ * **まだ動いていない回も残す。** 「1回読めたが、反映は次に同じ値が
+ * 読めたとき」という状態が記録に無いと、作者には突然変わったように見える。
+ */
+export function writerStyleUpdateLogLine(
+  before: WriterProfile,
+  after: WriterProfile
+): string | undefined {
+  if (before.style.revise !== after.style.revise) {
+    return (
+      `相談: 執筆スタイルの直す時期を更新 ` +
+      `${WRITER_REVISE_LABELS[before.style.revise]}→` +
+      `${WRITER_REVISE_LABELS[after.style.revise]}`
+    );
+  }
+  const streak = after.reviseStreak;
+  if (!streak) return undefined;
+  return (
+    `相談: 直す時期を「${WRITER_REVISE_LABELS[streak.value]}」と読み取りました` +
+    `（${streak.count}回目／${WRITER_REVISE_STREAK_NEEDED}回続けて読み取れたら反映）`
+  );
 }
 
 /** スタイルを1行で言う。結果の画面と操作ログで同じ言い方を使う */

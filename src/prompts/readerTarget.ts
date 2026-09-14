@@ -1,10 +1,16 @@
 import {
+  chatReaderBasis,
   READER_AXIS_ORDER,
   READER_AXIS_ENDS,
   READER_AXIS_LABELS,
   READER_TYPES,
+  resolveReaderType,
+  type ReaderChatSource,
   type ReaderTypeId,
 } from "../core/readerTarget";
+// 日付の作り方（作者の時計で切る）は `advicePolicy.ts` の1か所だけが持つ
+import { adviceDiagnosisDate } from "../core/advicePolicy";
+import type { ReaderProfile } from "../models/readerProfile";
 
 /**
  * P-38 ターゲット読者の実像を読む（設計書6.91）
@@ -258,4 +264,49 @@ export const READER_TYPE_PROMPTS: Record<ReaderTypeId, string> = {
 /** 画面の説明で使う、タイプの短い言い方（写しを作らない） */
 export function readerTypeSummary(id: ReaderTypeId): string {
   return READER_TYPES[id].summary;
+}
+
+/**
+ * 前置き。**どこから出した読者像かを断る。**
+ *
+ * 宣言は作者の答え、実像はAIが本文から読んだ点数で、**当たり方が違う**。
+ * 実像のほうは「読み違えていることがある」と断らないと、AIが作品の性質を
+ * 動かせない前提として扱ってしまう。
+ *
+ * 6.86 の前置きと同じで、**この文章そのものを話題にさせない**
+ * （作者はこれを見ていない）。
+ */
+function readerNote(source: ReaderChatSource, diagnosedAt: string | undefined): string {
+  const when = diagnosedAt ? `診断 ${diagnosedAt}` : "診断日は不明";
+  const origin =
+    source === "declared"
+      ? `作者が「この読者に向けて書いている」と答えた宛先です（${when}）`
+      : `本文とプロットから読み取った、この作品の向き先の推定です（${when}）。読み違えていることがあります`;
+  return `以下は${origin}。
+助言をどこへ向けるかの目安にだけ使い、**作品の良し悪しの話にしないでください。**
+どの読者層にも上下はありません。この文章そのものを話題にしないでください
+（作者はこれを見ていません）。
+会話の中で作者が想定読者について語ったことがここと食い違ったら、
+**いまの作者の言葉を優先**してください。`;
+}
+
+/**
+ * 相談のシステムプロンプトへ足す一段を作る（設計書6.91.9）。
+ *
+ * **足すのは該当するタイプの文章1つだけ。** 11タイプ分を毎回送ると
+ * 数千字が積み上がり、しかも他のタイプの記述に引きずられる。
+ *
+ * 診断していなければ `undefined`——**何も足さない**（相談は止めない）。
+ * どちらの欄を使うかは `chatReaderBasis` が決める（写しを作らない）。
+ */
+export function buildReaderTypePrompt(
+  profile: ReaderProfile | undefined
+): string | undefined {
+  const basis = chatReaderBasis(profile);
+  if (!basis) return undefined;
+
+  return `【この作品の読者】
+${readerNote(basis.source, adviceDiagnosisDate(basis.updatedAt))}
+
+${READER_TYPE_PROMPTS[resolveReaderType(basis.scores)]}`;
 }

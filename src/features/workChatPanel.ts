@@ -36,8 +36,21 @@ import {
   type AdviceProfileSignals,
 } from "../core/advicePolicy";
 import type { AdvicePolicyStore } from "../core/advicePolicyStore";
+import {
+  applyWriterStyleSignals,
+  describeWriterStyleChange,
+  writerStyleChatLogLines,
+  writerStyleUpdateLogLine,
+  type WriterStyleSignals,
+} from "../core/writerStyle";
+import type { WriterProfileStore } from "../core/writerProfileStore";
+import { readerTypeChatLogLines } from "../core/readerTarget";
+import { ReaderTargetStore } from "../core/readerTargetStore";
+import type { ReaderProfile } from "../models/readerProfile";
 import { confirmRun, notifyDone } from "../views/notify";
 import { buildAdvicePolicyPrompt } from "../prompts/advicePolicy";
+import { buildWriterStylePrompt } from "../prompts/writerStyle";
+import { buildReaderTypePrompt } from "../prompts/readerTarget";
 import {
   buildExcerpt,
   classifyChatContext,
@@ -412,7 +425,14 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
      * **省略できる。** 試験や、まだ診断していない作品では
      * 何も足さず、これまでどおりの相談になる。
      */
-    private readonly advicePolicies?: AdvicePolicyStore
+    private readonly advicePolicies?: AdvicePolicyStore,
+    /**
+     * 作家タイプ診断の執筆スタイル（設計書6.90）。
+     *
+     * **作者ごと**なので、作品を特定できない相談にも足せる。
+     * 省略できる（試験や、まだ診断していない作者では何も足さない）。
+     */
+    private readonly writerProfiles?: WriterProfileStore
   ) {
     this.lastEditor = vscode.window.activeTextEditor;
     this.selectionListener = this.ai.onDidChangeSelection(
@@ -421,32 +441,115 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   }
 
   /**
+   * 相談へ渡す読者像の控え（設計書6.91.9）。
+   *
+   * **毎回ファイルを読まない。** 読者像は作品ごとのファイル
+   * （`設定/読者像.json`）にあり、相談のたびに開くとディスクを触る回数が
+   * 質問の数だけ増える。中身は診断し直すまで変わらないので、**パネルが
+   * 開いているあいだだけ持ち、作品が変わったら捨てる**。会話を「最初から」
+   * にしたときも捨てる——診断し直した直後に、それがすぐ効くようにするため。
+   *
+   * **読めなかったことも覚える**（`profile` が undefined）。壊れた台帳を
+   * 質問のたびに読み直しても、同じ失敗がログに並ぶだけである。
+   */
+  private readerProfileCache:
+    | { workId: string; profile: ReaderProfile | undefined }
+    | undefined;
+
+  /**
+   * 読者像を1回だけ読む。
+   *
+   * **読めなければ黙って諦める。** 台帳が無い・壊れている・まだ診断して
+   * いない——どれも「これまでどおりの相談」になるだけで、相談は止めない
+   * （助言方針が未診断のときに何も足さないのと同じ扱い）。
+   * 原因は操作ログにだけ残す（作者の画面には出さない）。
+   */
+  private async readerProfileFor(
+    work: WorkEntry
+  ): Promise<ReaderProfile | undefined> {
+    if (this.readerProfileCache?.workId === work.id) {
+      return this.readerProfileCache.profile;
+    }
+
+    let profile: ReaderProfile | undefined;
+    try {
+      profile = await new ReaderTargetStore(work).load();
+    } catch (error) {
+      logFailure("相談: 読者像の台帳を読めませんでした", {
+        作品: work.title,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    }
+    this.readerProfileCache = { workId: work.id, profile };
+    return profile;
+  }
+
+  /**
    * 相談へ送るシステムプロンプト。
    *
-   * 助言方針は**該当するタイプの文章だけ**を足す（全タイプを毎回送ると
-   * 数千字が積み上がり、しかも他のタイプの記述に引きずられる）。
-   * 診断していなければ、素のプロンプトをそのまま返す。
+   * 診断の結果を**3つまで**足す。どれも**該当する1つだけ**を送る
+   * （全部を毎回送ると数千字が積み上がり、しかも他のタイプの記述に
+   * 引きずられる）。診断していなければ、素のプロンプトをそのまま返す。
+   *
+   * | 足すもの | 見出し | どこから |
+   * |---|---|---|
+   * | 助言方針（6.86） | `【この作者への助言の方針】` | `globalState`（作品ごと・既定） |
+   * | 執筆スタイル（6.90） | `【この作者の書き方】` | `globalState`（作者ごと） |
+   * | ターゲット読者（6.91） | `【この作品の読者】` | **作品ごとのファイル**（非同期） |
+   *
+   * **どれも創作の相談・操作の相談の両方へ送る**（作者の裁定、2026-09-14）。
+   * 話題で出し分けないのは、作者の人柄・やり方・宛先が「どちらの話か」で
+   * 変わるものではないためである。
    *
    * **使い方の節は、目次を渡す回にだけ入る**（`featureIndex`）。目次を
    * 渡さないのに「目次に無い機能は存在しません」と書いてあると嘘になる。
    */
-  private buildSystemPrompt(
+  private async buildSystemPrompt(
     work: WorkEntry | undefined,
     featureIndex: boolean
-  ): string {
+  ): Promise<string> {
     const base = buildWorkChatSystemPrompt({ featureIndex });
-    if (!work || !this.advicePolicies) return base;
-
-    // **作品に無ければ、作者の既定を使う**（0.51.1。設計書6.90.2）。
-    // 使用開始時の診断で答えた9問は、まだ作品が無いところで答えるので
-    // 作者ごとに置いてある。ここで拾わないと、はじめの1作で効かない
-    const profile = this.advicePolicies.getEffective(work.id);
-    if (!profile) return base;
-
+    const blocks: string[] = [];
     const now = new Date();
-    // 何を残すかは `core/advicePolicy.ts` が決める（文言を試験から見るため）
-    for (const line of advicePolicyLogLines(profile, now)) logStep(line);
-    return `${base}\n\n${buildAdvicePolicyPrompt(profile, now)}`;
+
+    // **何を足したかを必ず記録する**——方針が効いているかを作者が確かめる
+    // 唯一の手掛かりで、答えの調子が変わった理由がここにしか無い。
+    // 文言はどれも core 側が持つ（features の中に書くと試験から見られない）
+
+    if (work && this.advicePolicies) {
+      // **作品に無ければ、作者の既定を使う**（0.51.1。設計書6.90.2）。
+      // 使用開始時の診断で答えた9問は、まだ作品が無いところで答えるので
+      // 作者ごとに置いてある。ここで拾わないと、はじめの1作で効かない
+      const profile = this.advicePolicies.getEffective(work.id);
+      if (profile) {
+        for (const line of advicePolicyLogLines(profile, now)) logStep(line);
+        blocks.push(buildAdvicePolicyPrompt(profile, now));
+      }
+    }
+
+    // 執筆スタイル（設計書6.90）。**作者ごとに持つので、作品が
+    // 特定できない相談にも足せる。** 渡すのは段取り（S1）と直す時期（S2）
+    // だけで、資料の置き場（S3）・出し先（S4）は渡さない
+    const writerProfile = this.writerProfiles?.get();
+    if (writerProfile) {
+      for (const line of writerStyleChatLogLines(writerProfile.style)) {
+        logStep(line);
+      }
+      blocks.push(buildWriterStylePrompt(writerProfile));
+    }
+
+    // ターゲット読者（設計書6.91.9）。**作品ごとのファイルにあるので
+    // 非同期**。読めなければ何も足さない
+    if (work) {
+      const readerProfile = await this.readerProfileFor(work);
+      const readerBlock = buildReaderTypePrompt(readerProfile);
+      if (readerBlock) {
+        for (const line of readerTypeChatLogLines(readerProfile)) logStep(line);
+        blocks.push(readerBlock);
+      }
+    }
+
+    return blocks.length === 0 ? base : `${base}\n\n${blocks.join("\n\n")}`;
   }
 
   /**
@@ -483,6 +586,45 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     // **タイプが変わったら、その場で作者に見せる。** 黙って変えると、
     // 助言の調子が変わった理由が作者に分からない
     const message = describeAdviceTypeChange(before, after);
+    if (message) {
+      notifyDone(message);
+      this.postAll({ type: "note", message });
+    }
+  }
+
+  /**
+   * 相談の答えから読み取った「直す時期」を、執筆スタイルへ反映する
+   * （設計書6.90.1）。
+   *
+   * **助言方針（6.86）の推定とは重みが違う。** あちらは作者が直接
+   * 答えていない推定値を0.5ずつ動かすが、こちらは**作者が5問で選んだ値**
+   * である。だから歯止めを2つ置く——**2回続けて同じに読めたときだけ動かし**
+   * （数えは `applyWriterStyleSignals` が持つ）、**変わったら必ず見せる**。
+   *
+   * **作品は要らない。** 執筆スタイルは作者ごとなので、作品を特定できない
+   * 相談からでも反映できる（渡すときと同じ扱い）。
+   */
+  private async updateWriterStyle(
+    signals: WriterStyleSignals | undefined
+  ): Promise<void> {
+    if (!signals?.revise || !this.writerProfiles) return;
+
+    // **送る直前に読んだ値ではなく、保存庫から読み直す**（助言方針と同じ）。
+    // 答えを待っているあいだに、作者が診断し直していることがある
+    const before = this.writerProfiles.get();
+    if (!before) return; // 診断していない人の値は、推定で作らない
+
+    const after = applyWriterStyleSignals(before, signals);
+    if (after === before) return;
+
+    await this.writerProfiles.update(after);
+
+    // **まだ動いていない回（1回目）も記録する。** 記録が無いと、
+    // 2回目で変わったときに作者には突然変わったように見える
+    const line = writerStyleUpdateLogLine(before, after);
+    if (line) logStep(line);
+
+    const message = describeWriterStyleChange(before, after);
     if (message) {
       notifyDone(message);
       this.postAll({ type: "note", message });
@@ -630,6 +772,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       this.historyWorkId = undefined;
       // 会話をやり直すなら、料金の確認も取り直す
       this.paidConfirmedFor = undefined;
+      // 読者像の控えも捨てる。**診断し直した直後に、それが効く道を残す**
+      // （開いたままのパネルで一度読んだきりだと、古い読者像で助言し続ける）
+      this.readerProfileCache = undefined;
       // もう片方の画面にも、消えたことを伝える
       this.postOthers(source, { type: "cleared" });
       return;
@@ -822,14 +967,18 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           (guide.selected.length > 0 ? ` / ${guide.selected.join("、")}` : "")
       );
 
-      // **助言の方針を、該当するタイプのぶんだけ足す**（設計書6.86）。
-      // 診断していない作品では何も足さない（これまでどおりの相談になる）。
-      // 足したことを必ず記録する——**方針が効いているかを作者が確かめる
-      // 唯一の手掛かり**で、答えの調子が変わった理由がここにしか無い
+      // **診断の結果を、該当するぶんだけ足す**（設計書6.86・6.90・6.91）。
+      // 助言方針・執筆スタイル・ターゲット読者の3つで、どれも該当する
+      // 文章1つだけを送る。診断していなければ何も足さない（これまでどおりの
+      // 相談になる）。足したことを必ず記録する——**方針が効いているかを
+      // 作者が確かめる唯一の手掛かり**で、答えの調子が変わった理由が
+      // ここにしか無い
       // 目次を渡さない回（創作の相談）は、使い方の節も外す。
       // **切り替えは1つの条件で**——2つに割れると、片方だけ直る日が来る
       const withFeatureIndex = guide.topic !== "craft";
-      const systemPrompt = this.buildSystemPrompt(
+      // 読者像だけは作品ごとのファイルにあるので待つ（開いているあいだは
+      // 控えを使い回すので、読むのは作品ごとに1回きり）
+      const systemPrompt = await this.buildSystemPrompt(
         context?.work,
         withFeatureIndex
       );
@@ -857,8 +1006,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         (context?.reference ?? [])
           .filter((block) => block.startsWith(heading))
           .reduce((sum, block) => sum + block.length, 0);
-      // 助言方針はシステムプロンプト側に足している。診断していない作品では
-      // 素のプロンプトなので0になる
+      // 診断の3つ（助言方針・執筆スタイル・読者タイプ）はシステムプロンプト
+      // 側に足している。どれも診断していなければ素のプロンプトなので0になる
       // 引く相手は、この回に組んだ素のプロンプト。使い方の節を外した回に
       // 全部入りの長さを引くと、方針のぶんが打ち消されて0に見える
       const policyChars = Math.max(
@@ -1041,6 +1190,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // **答えを見せたあとに反映する。** 保存の失敗で相談の答えが
       // 消えないよう、順番を先にしない（推定は次回に持ち越せる）
       await this.updateAdvicePolicy(context?.work, answer.profileSignals);
+      await this.updateWriterStyle(answer.writerStyleSignals);
     } catch (error) {
       const message =
         error instanceof AIError

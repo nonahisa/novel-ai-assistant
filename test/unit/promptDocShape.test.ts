@@ -102,6 +102,12 @@ describe("プロンプト設計書の形", () => {
     ["P-35", "src/prompts/dictationClean.ts", "DICTATION_CLEAN_VERSION"],
     ["P-36", "src/prompts/advicePolicy.ts", "ADVICE_POLICY_VERSION"],
     ["P-37", "src/prompts/storyFactExtract.ts", "STORY_FACT_EXTRACT_VERSION"],
+    // P-38 は 6.91 を足したとき、ここへの登録だけ漏れていた（作者の裁定、
+    // 2026-09-14 に登録）。**相談へ繋がった今は、版が動いたら気づける形で
+    // ないと困る**——プロンプトを直したのに版が据え置かれると、
+    // チャンクキャッシュが古い結果を返す（CLAUDE.md 規則4）
+    ["P-38", "src/prompts/readerTarget.ts", "READER_TARGET_VERSION"],
+    ["P-39", "src/prompts/writerStyle.ts", "WRITER_STYLE_PROMPT_VERSION"],
   ];
 
   test.each(IMPLEMENTED)(

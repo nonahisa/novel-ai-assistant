@@ -1,5 +1,10 @@
 import type * as vscode from "vscode";
-import { buildWriterStyle, type WriterStyle } from "./writerStyle";
+import {
+  buildWriterStyle,
+  parseWriterReviseStreak,
+  type WriterReviseStreak,
+  type WriterStyle,
+} from "./writerStyle";
 
 /**
  * 作家タイプ診断の保存先（設計書6.90）。
@@ -30,6 +35,18 @@ export interface WriterProfile {
   style: WriterStyle;
   /** 診断した日時（ISO） */
   updatedAt: string;
+  /**
+   * 直す時期（S2）が続けて読み取れた回数（設計書6.90.1）。
+   *
+   * **数えをここ（保存の中）に置くのは、相談が日をまたぐからである。**
+   * パネルの中や実行中のメモリに置くと、VS Code を閉じた時点で消える
+   * ——「2回続けて」が実質成立しなくなり、歯止めが歯止めでなくなる。
+   * 逆に、ここに置けば端末をまたがない（`globalState`）ことも都合がよい：
+   * 別の端末での読み取りと足し合わさらない。
+   *
+   * **無くても読める形にする**（この項目が入る前に保存した記録がある）。
+   */
+  reviseStreak?: WriterReviseStreak;
 }
 
 export class WriterProfileStore {
@@ -43,26 +60,50 @@ export class WriterProfileStore {
    * として扱う——半端な値で案内を組み立てるより、聞き直すほうがよい。
    */
   get(): WriterProfile | undefined {
-    const raw = this.state.get<{ style?: unknown; updatedAt?: unknown }>(
-      WRITER_PROFILE_KEY
-    );
+    const raw = this.state.get<{
+      style?: unknown;
+      updatedAt?: unknown;
+      reviseStreak?: unknown;
+    }>(WRITER_PROFILE_KEY);
     if (!raw || typeof raw.style !== "object" || raw.style === null) {
       return undefined;
     }
     const style = buildWriterStyle(raw.style as Record<string, unknown>);
     if (!style) return undefined;
+    // **数えが壊れていても、答えは捨てない。** 数えは途中経過にすぎないので、
+    // 読めなければ「数えていない」に戻せばよい（診断の答えのほうは残す）
+    const reviseStreak = parseWriterReviseStreak(raw.reviseStreak);
     return {
       style,
       updatedAt:
         typeof raw.updatedAt === "string" ? raw.updatedAt : new Date(0).toISOString(),
+      ...(reviseStreak ? { reviseStreak } : {}),
     };
   }
 
+  /**
+   * 診断の答えを入れ直す。
+   *
+   * **相談からの読み取りの数えは持ち越さない。** 作者がいま5問に答えた
+   * のだから、その前の会話から数えていた途中経過は用済みである
+   * （持ち越すと、答え直した直後に1回の読み取りで書き換わる）。
+   */
   async set(style: WriterStyle): Promise<void> {
     const profile: WriterProfile = {
       style,
       updatedAt: new Date().toISOString(),
     };
+    await this.state.update(WRITER_PROFILE_KEY, profile);
+  }
+
+  /**
+   * 相談からの読み取りを反映した記録を、そのまま書く（設計書6.90.1）。
+   *
+   * **`set` と分ける。** あちらは作者が答えた瞬間で、診断日（`updatedAt`）を
+   * 今日にする。こちらは推定の反映なので、**診断日を動かしてはいけない**
+   * ——動かすと、相談のたびに「作者が答えた日」が今日へ書き換わる。
+   */
+  async update(profile: WriterProfile): Promise<void> {
     await this.state.update(WRITER_PROFILE_KEY, profile);
   }
 

@@ -1298,6 +1298,9 @@ export async function activate(
   // 作品を変えても大きくは変わらない癖なので、作品ごとに聞き直さない
   const writerProfiles = new WriterProfileStore(context.globalState);
 
+  // 執筆スタイル（6.90）も相談へ渡す。渡すのは段取り（S1）と直す時期（S2）
+  // だけで、資料の置き場・出し先は渡さない（作者の裁定、2026-09-14）。
+  // ターゲット読者（6.91）は作品ごとのファイルにあるので、パネルが自分で読む
   const workChatPanel = new WorkChatPanel(registry, aiRegistry, {
     run: async (work, kind, filePath) => {
       // 既にコマンドとして登録されているものへ渡す。
@@ -1357,7 +1360,7 @@ export async function activate(
       const panel = await openSettingsPanel(context, work, aiRegistry);
       await panel.reloadRecordFromChat(kind, recordId, notes);
     },
-  }, advicePolicies);
+  }, advicePolicies, writerProfiles);
   context.subscriptions.push(
     workChatPanel,
     vscode.window.registerWebviewViewProvider(WORK_CHAT_VIEW_ID, workChatPanel, {

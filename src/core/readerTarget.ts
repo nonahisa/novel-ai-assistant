@@ -7,7 +7,13 @@ import {
   type ThreeAxisPick,
   type ThreeAxisQuestion,
 } from "./threeAxis";
-import type { ReaderAxis, ReaderScores } from "../models/readerProfile";
+import type {
+  ReaderAxis,
+  ReaderProfile,
+  ReaderScores,
+} from "../models/readerProfile";
+// 日付の作り方（作者の時計で切る）は `advicePolicy.ts` の1か所だけが持つ
+import { adviceDiagnosisDate } from "./advicePolicy";
 
 export type { ReaderAxis, ReaderScores };
 
@@ -369,6 +375,79 @@ export function resolveReaderType(scores: ReaderScores): ReaderTypeId {
 /** 記録と画面に出す一行（「考察層」） */
 export function readerTypeLabel(scores: ReaderScores): string {
   return READER_TYPES[resolveReaderType(scores)].label;
+}
+
+/* ───────────────────────────────────────────────────────────────
+   相談へ渡す読者像（設計書6.91.9）
+   ─────────────────────────────────────────────────────────────── */
+
+/** 相談へ渡した読者像の出どころ */
+export type ReaderChatSource = "declared" | "actual";
+
+export interface ReaderChatBasis {
+  scores: ReaderScores;
+  source: ReaderChatSource;
+  /** その欄を書いた日時（ISO）。記録に出す */
+  updatedAt: string;
+}
+
+export const READER_CHAT_SOURCE_LABELS: Record<ReaderChatSource, string> = {
+  declared: "宣言",
+  actual: "実像",
+};
+
+/**
+ * 相談へ渡す読者像を1つ選ぶ。
+ *
+ * **宣言（作者が答えた宛先）を優先し、無ければ実像を使う。**
+ * 助言は作者が向かおうとしている先へ添えるものであり、書けているものが
+ * たまたま届いた先へ寄せて助言すると、ズレを固定してしまう。ズレそのものは
+ * `readerGaps` が別に出す仕組みがあるので、ここで混ぜない。
+ *
+ * **選ぶ規則をここ1か所に置く。** プロンプトの組み立てと操作ログの両方が
+ * これを呼ぶので、写しを作ると「送ったもの」と「記録したもの」が食い違う。
+ *
+ * どちらも無ければ `undefined`——**何も足さない**（相談は止めない）。
+ */
+export function chatReaderBasis(
+  profile: ReaderProfile | undefined
+): ReaderChatBasis | undefined {
+  if (!profile) return undefined;
+  if (profile.declared) {
+    return {
+      scores: profile.declared.scores,
+      source: "declared",
+      updatedAt: profile.declared.updatedAt,
+    };
+  }
+  if (profile.actual) {
+    return {
+      scores: profile.actual.scores,
+      source: "actual",
+      updatedAt: profile.actual.updatedAt,
+    };
+  }
+  return undefined;
+}
+
+/**
+ * 相談へ渡した読者タイプを、操作ログの1行にする。
+ *
+ * **文言をここに置くのは `advicePolicyLogLines` と同じ理由**——
+ * 試験から見るためである。**出どころ（宣言か実像か）まで残す**：
+ * 助言の当たり外れを見るとき、どちらを基準にしたかが分かれ目になる。
+ *
+ * 診断していなければ空配列。
+ */
+export function readerTypeChatLogLines(
+  profile: ReaderProfile | undefined
+): string[] {
+  const basis = chatReaderBasis(profile);
+  if (!basis) return [];
+  const when = adviceDiagnosisDate(basis.updatedAt);
+  const source =
+    READER_CHAT_SOURCE_LABELS[basis.source] + (when ? ` ${when}` : "");
+  return [`相談: 読者タイプ ${readerTypeLabel(basis.scores)}（${source}）`];
 }
 
 /**
