@@ -227,6 +227,78 @@ describe("日本語入力を壊さない", () => {
     expect(code).toContain("setSelectionRange");
   });
 
+  /**
+   * **取り消しで、カーソルが後ろへずれていた**（作者の実機報告、2026-09-15。
+   * 設計書6.25.8）。
+   *
+   * 作者の言葉：「カーソルが復元する箇所より後ろでだけ起きています。
+   * 復元で増えた文字数分、後ろにうごいている印象です」。
+   *
+   * 差分でずらす式（共通部分より後ろなら増減分を足す）は、**別の窓で前に
+   * 文字が足された**ときには正しい。しかし**取り消しでは二重に動く**
+   * ——戻した時点でカーソルは既に正しい場所にあるからである。
+   *
+   * **ファイルの大きさとは関係がない**（作者は100字でも再現させた）。
+   * だからここも短い本文で確かめる。
+   */
+  describe("取り消しで戻ったときのカーソル", () => {
+    /** 画面の関数を切り出して、実際に動かす */
+    function runReplace(
+      before: string,
+      after: string,
+      caret: number,
+      undoCaret?: number
+    ): { start: number; end: number } {
+      const start = code.indexOf("function replaceKeepingCaret(");
+      const end = code.indexOf("function updateCount()");
+      expect(start).toBeGreaterThan(0);
+      expect(end).toBeGreaterThan(start);
+      const placed: { start: number; end: number } = { start: -1, end: -1 };
+      const write = {
+        value: before,
+        selectionStart: caret,
+        selectionEnd: caret,
+        scrollLeft: 0,
+        scrollTop: 0,
+        setSelectionRange(from: number, to: number) {
+          placed.start = from;
+          placed.end = to;
+        },
+      };
+      const run = new Function(
+        "write",
+        code.slice(start, end) + "return replaceKeepingCaret;"
+      )(write) as (text: string, undoCaret?: number) => void;
+      run(after, undoCaret);
+      return placed;
+    }
+
+    it("**戻した箇所へ置く。増えた分だけ後ろへずらさない**", () => {
+      // 「あいえお」→ 取り消しで「う」が戻って「あいうえお」（1字増える）
+      // カーソルは戻った「う」のうしろ（3）にあるべき
+      const placed = runReplace("あいえお", "あいうえお", 3, 3);
+      expect(placed.start).toBe(3);
+      expect(placed.end).toBe(3);
+    });
+
+    it("置く場所が無ければ、今までどおり差分でずらす", () => {
+      // **別の窓で前に文字が足された**ときは、同じ文字を指し続けるのが正しい
+      const placed = runReplace("あいえお", "あいうえお", 3);
+      expect(placed.start).toBe(4);
+    });
+
+    it("共通部分より前のカーソルは、取り消しでなくても動かない", () => {
+      const placed = runReplace("あいえお", "あいうえお", 1);
+      expect(placed.start).toBe(1);
+    });
+
+    it("本文の外は指さない", () => {
+      // 添えられた位置が本文より後ろでも、末尾で止める
+      const placed = runReplace("あい", "あ", 2, 99);
+      expect(placed.start).toBe(1);
+    });
+  });
+
 });
 
 /**

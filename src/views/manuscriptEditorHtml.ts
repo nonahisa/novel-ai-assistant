@@ -1558,7 +1558,7 @@ ruby > rt {
    *    カーソルが飛ぶ
    * 3. すでに同じ中身のとき
    */
-  function takeIncoming(text) {
+  function takeIncoming(text, undoCaret) {
     // 自分の書き換えの返事は、いつ届いても触らない（変換中なら溜めもしない）
     if (isOwnEcho(text)) return;
     if (composing) {
@@ -1569,7 +1569,7 @@ ruby > rt {
     if (write.value === text) return;
     logRebuildFromIncoming("打つ", text, write.value.length);
     forgetSent();
-    replaceKeepingCaret(text);
+    replaceKeepingCaret(text, undoCaret);
   }
 
   /**
@@ -1693,7 +1693,7 @@ ruby > rt {
    * 前から一致する長さを見て、カーソルがそれより前なら動かさない。
    * 後ろなら、増えた（減った）ぶんだけずらす。
    */
-  function replaceKeepingCaret(text) {
+  function replaceKeepingCaret(text, undoCaret) {
     const before = write.value;
     const start = write.selectionStart;
     const end = write.selectionEnd;
@@ -1701,7 +1701,28 @@ ruby > rt {
     const max = Math.min(before.length, text.length);
     while (common < max && before[common] === text[common]) common++;
     const delta = text.length - before.length;
+    /*
+      **取り消し・やり直しなら、戻した箇所へ置く**（設計書6.25.8。
+      作者の実機報告、2026-09-15）。
+
+      下の差分でずらす式（at + delta）は、**別の窓で前に文字が足された**
+      ときには正しい——同じ文字を指し続けるからである。しかし
+      **取り消しでは二重に動く**：ブラウザ／VS Code が戻した時点で
+      カーソルは既に正しい場所にあり、そこへさらに増減分を足してしまう。
+
+      作者の言葉：「カーソルが復元する箇所より後ろでだけ起きています。
+      復元で増えた文字数分、後ろにうごいている印象です」——
+      **共通部分より前なら動かないことと、後ろなら増減分を足すことが、
+      そのまま観察と一致する。**
+
+      **ファイルの大きさとは関係がない**（100字でも起きた）。
+    */
+    const place =
+      typeof undoCaret === "number"
+        ? Math.max(0, Math.min(text.length, undoCaret))
+        : null;
     const move = function (at) {
+      if (place !== null) return place;
       if (at <= common) return at;
       return Math.max(common, Math.min(text.length, at + delta));
     };
@@ -2149,12 +2170,20 @@ ruby > rt {
         typeof message.notation === "string" ? message.notation : "curly";
       const notationChanged = notation !== composeNotation;
       composeNotation = notation;
+      /*
+        **取り消し・やり直しで戻ったときは、置く場所が添えてある**
+        （設計書6.25.8）。添えてあれば差分からずらすのをやめ、そこへ置く
+        ——**取り消しは「外からの書き換え」ではない。** 戻した箇所へ
+        カーソルが行くのが、ふつうのエディタと同じ振る舞いである。
+      */
+      const undoCaret =
+        typeof message.undoCaret === "number" ? message.undoCaret : null;
       if (composeOn) {
         // 記法そのものが変わったときは、本文が同じでも組み直す
         // （面を開いたまま原稿の種類が変わるのは稀だが、変わったら組みも変わる）
         if (notationChanged) composeApplyText(message.text);
-        else composeTakeIncoming(message.text);
-      } else takeIncoming(message.text);
+        else composeTakeIncoming(message.text, undoCaret);
+      } else takeIncoming(message.text, undoCaret);
       // 覚えていた「組んで書く」は、本文が届いてから開く。
       // **一度きりにする**——安全弁で断られたときに、届くたび試し直さない
       if (composeWanted && !composeOn) {
@@ -3186,7 +3215,7 @@ ruby > rt {
    * **自分の書き換えが返ってきたら触らない。** 組み直すとカーソルが飛び、
    * ブラウザの取り消し履歴（Ctrl+Z）まで壊れる。
    */
-  function composeTakeIncoming(text) {
+  function composeTakeIncoming(text, undoCaret) {
     // 自分の書き換えの返事は、いつ届いても触らない（打つ面と同じ理由。
     // 変換中に溜めると、確定のあとに古い本文で組み直して確定した語が消える）
     if (isOwnEcho(text)) return;
@@ -3200,6 +3229,15 @@ ruby > rt {
     logRebuildFromIncoming("組んで書く", text, shown.length);
     forgetSent();
     write.value = text;
+    /*
+      **取り消し・やり直しなら、戻した箇所へ置く**（設計書6.25.8）。
+      この面は組み直すたびにカーソルを置き直すので、置く先を指定できる。
+      指定しなければ今までどおり（いまの選択をそのまま戻す）。
+    */
+    if (typeof undoCaret === "number") {
+      const at = Math.max(0, Math.min(text.length, undoCaret));
+      composeWantSelect = { start: at, end: at };
+    }
     composeApplyText(text);
   }
 

@@ -1171,9 +1171,16 @@ export class ManuscriptEditorProvider
         // 読み上げの声は設定ではなく**端末の覚え**なので、deps から取る
         // （設計書6.42）。覚えていなければ画面が最初の声を選ぶ
         readAloudVoice: this.deps.readAloudVoice?.(),
+        /*
+          **取り消し・やり直しで戻ったときだけ添える**（設計書6.25.8）。
+          添えてあれば、画面は差分からカーソルをずらすのをやめ、
+          ここへ置く。添えなければ今までどおり。
+        */
+        ...(undoCaret === undefined ? {} : { undoCaret }),
       });
       // 添えるのは最初の1回だけ（送り直すたびに当て直させない）
       initialAppearance = undefined;
+      undoCaret = undefined;
       await this.sendCount(panel, text, document);
     };
 
@@ -1256,14 +1263,51 @@ export class ManuscriptEditorProvider
       }, 120);
     };
 
+    /**
+     * 取り消し・やり直しで戻ったとき、カーソルを置く場所（LF空間の位置）。
+     *
+     * **取り消しは「外からの書き換え」ではない**（作者の実機報告、2026-09-15。
+     * 設計書6.25.8）。画面は届いた本文と手元の本文の差を見て、
+     * **共通部分より後ろのカーソルを増減分だけずらす**——別の窓で前に文字が
+     * 足されたときは正しいが、**取り消しでは二重に動く**。
+     *
+     * 作者の言葉：「カーソルが復元する箇所より後ろでだけ起きています。
+     * 復元で増えた文字数分、後ろにうごいている印象です」——これは
+     * まさにその式（`at + delta`）そのものである。
+     *
+     * そこで、取り消し・やり直しのときだけ**置くべき位置を添えて送る**。
+     * ふつうのエディタと同じで、**戻した箇所へカーソルが行く**のが正しい。
+     */
+    let undoCaret: number | undefined;
+
     subscriptions.push(
       vscode.workspace.onDidChangeTextDocument((event) => {
         if (event.document.uri.toString() !== document.uri.toString()) return;
+        /*
+          **取り消し・やり直しは、外からの書き換えと分ける**（設計書6.25.8）。
+          戻した箇所の**うしろの端**へカーソルを置く（ふつうのエディタと同じ）。
+          複数の変更がまとまって届くので、**いちばん後ろの変更**を採る。
+        */
+        const undone =
+          event.reason === vscode.TextDocumentChangeReason.Undo ||
+          event.reason === vscode.TextDocumentChangeReason.Redo;
+        if (undone && event.contentChanges.length > 0) {
+          const last = event.contentChanges[event.contentChanges.length - 1];
+          // **LF空間で数える**（画面へはLFで渡すため。core/eolSpace.ts）
+          undoCaret = toLfOffset(
+            document.getText(),
+            last.rangeOffset + last.text.length
+          );
+          void this.logForDocument(
+            document,
+            `原稿エディタ：${event.reason === vscode.TextDocumentChangeReason.Undo ? "取り消し" : "やり直し"}で戻ったので、カーソルを戻した箇所（${undoCaret}文字目）へ置きます`
+          );
+        }
         // **外からの変更は、送った事実をログに残す**（実機確認 A-20）。
         // 画面が古いままという報告があり、こちらが送っていないのか、
         // 画面が捨てているのかを切り分ける手がかりが無かった。
         // 自分の applyEdit による変更は毎打鍵で起きるので残さない
-        if (!selfEditing && event.contentChanges.length > 0) {
+        if (!selfEditing && !undone && event.contentChanges.length > 0) {
           void this.logForDocument(
             document,
             `原稿エディタ：${paths.basename(fromUri(document.uri))} が外で変わったので画面へ送り直します（${event.contentChanges.length}か所）`

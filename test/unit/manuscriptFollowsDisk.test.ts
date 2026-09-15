@@ -38,10 +38,18 @@ describe("原稿エディタが外の変更に追いつく", () => {
     expect(code).toMatch(/event\.webviewPanel\.visible\) void send\(\)/);
   });
 
-  test("外からの変更を送った事実をログに残す（自分の書き換えは除く）", () => {
+  test("外からの変更を送った事実をログに残す（自分の書き換えと取り消しは除く）", () => {
     const code = body();
     expect(code).toContain("外で変わったので画面へ送り直します");
-    expect(code).toMatch(/if \(!selfEditing && event\.contentChanges\.length > 0\)/);
+    /*
+      **自分の書き換えと取り消しは「外からの変更」ではない。**
+      `!undone` は 0.64.7 で足した（設計書6.25.8）——取り消しをここに
+      混ぜると、Ctrl+Z のたびに「外で変わった」と記録され、**本当に外で
+      変わった回が埋もれる**。
+    */
+    expect(code).toMatch(
+      /if \(!selfEditing && !undone && event\.contentChanges\.length > 0\)/
+    );
     // 自分の applyEdit のあいだだけ selfEditing が立つ
     expect(code).toMatch(/selfEditing = true;[\s\S]*?await this\.applyEdit\(document, text\);[\s\S]*?selfEditing = false;/);
   });
