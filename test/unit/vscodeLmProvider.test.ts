@@ -423,3 +423,33 @@ describe("作者の実環境の23件を絞る", () => {
     expect(auto?.contextWindow).toBe(935793);
   });
 });
+
+/**
+ * **モデルの格は、読める長さで決める**（作者の実機、2026-09-16）。
+ *
+ * 一覧に3件とも「高性能」と出ていたが、GPT-4o mini は**文脈 12k** である。
+ * この印は**プロンプトとチャンクの大きさを決める**のに使うので、
+ * 12k を高性能と扱うと**送る量を見誤る**。
+ *
+ * ほかのクラウドは一律「高性能」でよい（大きい文脈が当たり前）が、
+ * **この口には小さいモデルが混ざる**ので、分かる値で決める。
+ */
+describe("モデルの格", () => {
+  async function tierOf(maxInputTokens: number): Promise<string> {
+    setStubChatModels([stubModel({ maxInputTokens })]);
+    const [model] = await new VsCodeLmProvider().listModels();
+    return model.tier;
+  }
+
+  test("**文脈 12k は軽量**（作者の環境の GPT-4o mini）", async () => {
+    expect(await tierOf(12078)).toBe("light");
+  });
+
+  test("文脈 125k は標準（GPT-5 mini）", async () => {
+    expect(await tierOf(127790)).toBe("standard");
+  });
+
+  test("文脈 914k は高性能（Auto）", async () => {
+    expect(await tierOf(935793)).toBe("high");
+  });
+});

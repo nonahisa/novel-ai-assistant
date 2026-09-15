@@ -5,7 +5,7 @@ import {
   type ConnectionTestResult,
   type GenerateParams,
   type GenerateResult,
-  inferTier,
+  type CapabilityTier,
   type ModelInfo,
 } from "./types";
 import { withAiWork } from "../core/aiActivity";
@@ -68,6 +68,23 @@ const CONSENT_NOTE =
  */
 function describeModel(model: vscode.LanguageModelChat): string {
   return `${model.name}（${model.vendor}）`;
+}
+
+/**
+ * 読める長さから、モデルの格を決める。
+ *
+ * **この口にはパラメータ数が来ない**ので、分かる値で決めるしかない。
+ * 境目は Ollama 側（`inferTier`）と同じ考え方——**小説の本文を分けて
+ * 送れるか**で分ける。
+ *
+ * - 32k 未満：**1チャンクに入る量が少ない**。軽量として扱う
+ * - 200k 未満：ふつうに使える
+ * - それ以上：まとめて読ませられる
+ */
+function tierForContextWindow(contextWindow: number): CapabilityTier {
+  if (contextWindow < 32_000) return "light";
+  if (contextWindow < 200_000) return "standard";
+  return "high";
 }
 
 /**
@@ -447,8 +464,18 @@ export class VsCodeLmProvider implements AIProvider {
       parameterSize: null,
       // 何ができるかは向こうが教えてくれない。分かるのは提供元と家系だけ
       capabilities: [model.vendor, model.family].filter(Boolean),
-      // パラメータ数は分からない。クラウドの主力と同じ扱いにする
-      tier: inferTier(null, this.id),
+      /*
+        **読める長さで決める**（作者の実機、2026-09-16）。
+
+        ほかのクラウドは一律「高性能」でよいが、**この口には文脈 12k の
+        モデルが混ざる**（GPT-4o mini）。印は**プロンプトとチャンクの
+        大きさを決める**のに使うので、12k を高性能と扱うと送る量を見誤る。
+
+        パラメータ数は教えてもらえないので、**分かる値で決める**。
+        長さと能力は別物だが、この口に並ぶ顔ぶれでは概ね揃っている
+        （小さいモデルほど文脈も短い）。
+      */
+      tier: tierForContextWindow(contextWindow),
     };
   }
 }
