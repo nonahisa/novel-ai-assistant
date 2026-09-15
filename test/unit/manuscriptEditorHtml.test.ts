@@ -134,7 +134,10 @@ describe("日本語入力を壊さない", () => {
     expect(end).toBeGreaterThan(start);
     const block = code.slice(start, end);
     const run = new Function(
-      "let lastSent = null;" +
+      // 記録の口（0.64.5 で isOwnEcho が使うようになった）。**本番と同じ形**を
+      // 渡す——実装に「テストのときは記録しない」分岐を足すと、本番で記録が
+      // 出ないまま通ってしまう
+      "let lastSent = null; const vscode = { postMessage() {} };" +
         block +
         "return { rememberSent, isOwnEcho, forgetSent, history: sentHistory, last: () => lastSent };"
     )() as {
@@ -169,7 +172,10 @@ describe("日本語入力を壊さない", () => {
     const end = code.indexOf("/** 変換中に外から届いた本文");
     const block = code.slice(start, end);
     const run = new Function(
-      "let lastSent = null;" +
+      // 記録の口（0.64.5 で isOwnEcho が使うようになった）。**本番と同じ形**を
+      // 渡す——実装に「テストのときは記録しない」分岐を足すと、本番で記録が
+      // 出ないまま通ってしまう
+      "let lastSent = null; const vscode = { postMessage() {} };" +
         block +
         "return { rememberSent, isOwnEcho, forgetSent, history: sentHistory };"
     )() as {

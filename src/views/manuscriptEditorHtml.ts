@@ -900,12 +900,62 @@ ruby > rt {
   function isOwnEcho(text) {
     const at = sentHistory.indexOf(text);
     if (at === -1) return false;
+    /*
+      **先頭より後ろに当たったら記録する**（実機の再現用、0.64.5）。
+
+      Ctrl+Z は「**過去と同じ本文**」を送り返すので、中身だけで照合する
+      ここでは**新しいほうに当たり**、splice が古い控えを全部捨てる。
+      捨てたあとに届く正当な返事は「外から来た」と誤判定され、画面を
+      組み直す——**組み直せばカーソルは飛ぶ**。
+
+      作者の「大きい作品で Ctrl+Z を押すとカーソルが飛ぶ」が、この経路かを
+      確かめるために入れた。**これが出た直後に組み直しの記録が続いていれば、
+      経路が確定する。**
+    */
+    if (at > 0) {
+      vscode.postMessage({
+        type: "log",
+        text:
+          "原稿エディタ：送った控えの" +
+          (at + 1) +
+          "件目に当たったので、それより古い" +
+          (sentHistory.length - at) +
+          "件を捨てます（控えは" +
+          sentHistory.length +
+          "件ありました）。取り消し（Ctrl+Z）で同じ本文が戻ったときに起きます",
+      });
+    }
     sentHistory.splice(at);
     return true;
   }
   /** 外からの本文を受け入れたら、以後の返事の照合はやり直す */
   function forgetSent() {
     sentHistory.length = 0;
+  }
+  /**
+   * 外から届いた本文で画面を組み直す直前に記録する（実機の再現用、0.64.5）。
+   *
+   * **カーソルが飛ぶのは組み直したときだけ**なので、飛んだ瞬間にこれが
+   * 出ていれば経路が確定する。出ていなければ、飛ばしているのは別の場所である。
+   *
+   * **控えが0件なら、isOwnEcho が捨てた直後**という筋が濃い
+   * （上の断り書き）。届いた字数と画面の字数を添えるのは、
+   * 「1打鍵ぶんの差」なのか「まったく別の本文」なのかを分けるためである。
+   */
+  function logRebuildFromIncoming(where, text, currentLength) {
+    vscode.postMessage({
+      type: "log",
+      text:
+        "原稿エディタ（" +
+        where +
+        "）：外から届いた本文で組み直します。届いた字数=" +
+        text.length +
+        "／画面の字数=" +
+        currentLength +
+        "／送った控え=" +
+        sentHistory.length +
+        "件",
+    });
   }
   /** 変換中に外から届いた本文。確定してから片づける */
   let pending = null;
@@ -1517,6 +1567,7 @@ ruby > rt {
       return;
     }
     if (write.value === text) return;
+    logRebuildFromIncoming("打つ", text, write.value.length);
     forgetSent();
     replaceKeepingCaret(text);
   }
@@ -3144,7 +3195,9 @@ ruby > rt {
       composePending = text;
       return;
     }
-    if (composeNormalizeNewlines(text) === composeDomToNotation(compose)) return;
+    const shown = composeDomToNotation(compose);
+    if (composeNormalizeNewlines(text) === shown) return;
+    logRebuildFromIncoming("組んで書く", text, shown.length);
     forgetSent();
     write.value = text;
     composeApplyText(text);
