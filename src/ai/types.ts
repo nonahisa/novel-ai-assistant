@@ -6,7 +6,14 @@ export type ProviderId =
   | "gemini"
   | "claude"
   | "openai"
-  | "sakura";
+  | "sakura"
+  /**
+   * VS Code のエディタが持っているAI（設計書6.87.11）。
+   *
+   * **この製品は鍵を持たない。** VS Code 側の契約（Copilot など）を
+   * `vscode.lm` 経由で借りる。内側から外部AIへ回す道。
+   */
+  | "vscode-lm";
 
 /** モデルの能力ティア。プロンプトとチャンクサイズの自動調整に使う */
 export type CapabilityTier = "high" | "standard" | "light";

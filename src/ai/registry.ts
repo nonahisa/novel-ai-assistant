@@ -9,6 +9,7 @@ import {
 import { MeteredProvider } from "./meteredProvider";
 import { OllamaProvider } from "./ollamaProvider";
 import { ClaudeProvider } from "./claudeProvider";
+import { VsCodeLmProvider } from "./vscodeLmProvider";
 import { OpenAIProvider } from "./openaiProvider";
 import { SakuraProvider } from "./sakuraProvider";
 import { LmStudioProvider } from "./lmstudioProvider";
@@ -160,6 +161,13 @@ export class AIRegistry {
       new OpenAIProvider(context),
       new SakuraProvider(context),
       new ClaudeProvider(context),
+      /*
+        **VS Code 経由**（作者の指示、2026-09-16）。この製品は鍵を持たず、
+        VS Code 側に繋いであるAIを借りる（設計書6.87.11）。**末尾に置く**
+        ——使えるかどうかが作者の VS Code の状態次第なので、
+        まず確実に使えるものを上に並べる。
+      */
+      new VsCodeLmProvider(),
     ] as AIProvider[]) {
       this.providers.set(provider.id, provider);
     }
@@ -380,6 +388,12 @@ export async function pickProviderAndModel(
     openai: "実行するたびに課金される",
     sakura: "国内のサービス。無料枠あり。超えると課金される",
     claude: "高精度だが実行するたびに課金される",
+    /*
+      **鍵はこの製品が持たない**（設計書6.87.11）。VS Code へ繋いである
+      AI（Copilot にサインイン、または VS Code 側へ入れた各社の鍵）を借りる。
+      **枠は契約次第**なので、無料とも課金とも言い切らない。
+    */
+    "vscode-lm": "VS Code に繋いであるAIを借りる。枠は契約による",
   };
 
   const providerPick = await vscode.window.showQuickPick(
@@ -435,6 +449,38 @@ export async function pickProviderAndModel(
       if (action === "セットアップを始める") {
         // コマンド経由で呼ぶ。直接 import すると読み込みが循環する
         await vscode.commands.executeCommand("novelai.setupOllama");
+      }
+      return undefined;
+    }
+
+    /*
+      **VS Code 経由は、開くべき設定がこの製品の側に無い**（設計書6.87.11）。
+      鍵もサインインも VS Code が持っているので、`novelai.vscode-lm` を
+      開いても空の画面が出るだけである。**繋ぎ方を案内する**。
+    */
+    if (providerPick.providerId === "vscode-lm") {
+      const action = await vscode.window.showWarningMessage(
+        "VS Code に繋がっているAIが見つかりませんでした。",
+        {
+          modal: true,
+          detail:
+            test.message +
+            "\n\nこの接続先は、VS Code 側に繋いであるAIを借ります。" +
+            "GitHub Copilot にサインインするか、VS Code の設定で各社の鍵を入れると使えるようになります。\n" +
+            "手元のAI（Ollama）なら、繋ぐ先を用意しなくても無料で使えます。",
+        },
+        "Copilot にサインインする",
+        "VS Code の設定を開く"
+      );
+      if (action === "Copilot にサインインする") {
+        // **押せる先を示す。** 「サインインしてください」だけでは、
+        // どこを押せばよいのか分からない
+        await vscode.commands.executeCommand("workbench.action.chat.open");
+      } else if (action === "VS Code の設定を開く") {
+        await vscode.commands.executeCommand(
+          "workbench.action.openSettings",
+          "github.copilot.chat"
+        );
       }
       return undefined;
     }

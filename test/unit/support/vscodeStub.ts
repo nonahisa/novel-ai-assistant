@@ -367,3 +367,90 @@ export enum FileType {
   File = 1,
   Directory = 2,
 }
+
+/**
+ * 言語モデルの口（`vscode.lm`。設計書6.87.11）。
+ *
+ * **作り物でも持つ。** 本物の VS Code には 1.90 から在るので、
+ * 無いことにすると「作り物でだけ落ちる／作り物でだけ通る」が生まれる。
+ *
+ * 既定は**1つも見えない**（＝サインインも鍵も無い環境）。テストは
+ * `setStubChatModels` で顔ぶれを差し替える。
+ */
+let stubChatModels: StubChatModel[] = [];
+
+export interface StubChatModel {
+  id: string;
+  name: string;
+  vendor: string;
+  family: string;
+  version: string;
+  maxInputTokens: number;
+  sendRequest(
+    messages: unknown[],
+    options?: unknown,
+    token?: unknown
+  ): Promise<{ text: AsyncIterable<string> }>;
+  countTokens(text: string): Promise<number>;
+}
+
+/** テストから顔ぶれを差し替える */
+export function setStubChatModels(models: StubChatModel[]): void {
+  stubChatModels = models;
+}
+
+export const lm = {
+  selectChatModels: async (): Promise<StubChatModel[]> => stubChatModels,
+  onDidChangeChatModels: (_listener: () => void): { dispose(): void } => ({
+    dispose: () => undefined,
+  }),
+};
+
+/**
+ * 言語モデルの失敗。**`code` で種別を見分ける**のが本物と同じ形。
+ */
+export class LanguageModelError extends Error {
+  constructor(
+    message: string,
+    readonly code: string
+  ) {
+    super(message);
+    this.name = "LanguageModelError";
+  }
+
+  static NoPermissions(message = "no permissions"): LanguageModelError {
+    return new LanguageModelError(message, "NoPermissions");
+  }
+  static Blocked(message = "blocked"): LanguageModelError {
+    return new LanguageModelError(message, "Blocked");
+  }
+  static NotFound(message = "not found"): LanguageModelError {
+    return new LanguageModelError(message, "NotFound");
+  }
+}
+
+/** 中止。本物と同じく `Error` の一種 */
+export class CancellationError extends Error {
+  constructor() {
+    super("Canceled");
+    this.name = "Canceled";
+  }
+}
+
+/**
+ * 送るメッセージ。**本物には System が無い**（User と Assistant だけ）ので、
+ * 作り物にも足さない——足すと、実際には送れない形でテストが通ってしまう。
+ */
+export class LanguageModelChatMessage {
+  private constructor(
+    readonly role: "user" | "assistant",
+    readonly content: string
+  ) {}
+
+  static User(content: string): LanguageModelChatMessage {
+    return new LanguageModelChatMessage("user", content);
+  }
+  static Assistant(content: string): LanguageModelChatMessage {
+    return new LanguageModelChatMessage("assistant", content);
+  }
+}
