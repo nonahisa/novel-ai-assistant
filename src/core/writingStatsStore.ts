@@ -12,6 +12,7 @@ import {
   parseDeviceWritingStats,
   recordMeasurement,
   rebaseline,
+  sameBaseline,
   shouldPersist,
   type RecordResult,
 } from "./writingStats";
@@ -105,7 +106,22 @@ export class WritingStatsStore {
     at: Date = new Date()
   ): Promise<void> {
     const current = await this.loadOwn();
-    await this.save(rebaseline(current, measurement, at));
+    const next = rebaseline(current, measurement, at);
+    /*
+      **中身が変わらないなら書かない**（作者の実機報告、2026-09-15。
+      設計書5.5.8）。基準は字数が1文字も変わっていなくても**測った時刻**を
+      持つので、そのまま保存すると同期のたびにファイルが変わる。
+
+      変わればGitの差分になり、「1か所の更新」として記録・送信され、
+      別の機械で取り込むとそこでも同じことが起きる——**止まらない循環**に
+      なっていた。作者のリポジトリには、本文を1文字も触っていないのに
+      「◯◯の執筆（13件）」というコミットが積み上がっていた。
+
+      `record` の側は前から `shouldPersist` で同じ守りをしている。
+      こちらにだけ無かった。
+    */
+    if (sameBaseline(current.baseline, next.baseline)) return;
+    await this.save(next);
   }
 
   private async save(stats: DeviceWritingStats): Promise<void> {

@@ -328,6 +328,48 @@ export function rebaseline(
   return { ...stats, baseline: toBaseline(measurement, at) };
 }
 
+/**
+ * 基準が実質同じか（**測った時刻は見ない**）。
+ *
+ * **同期のたびにファイルが変わるのを止めるため**（作者の実機報告、
+ * 2026-09-15。設計書5.5.8）。`rebaseline` は字数が1文字も変わっていなくても
+ * **新しい時刻**の基準を返すので、そのまま保存すると
+ *
+ * 1. 同期のたびに `stats/<環境名>.json` が変わる
+ * 2. 変わったので「1か所の更新」として記録・送信される
+ * 3. 別の機械で取り込むと、そこでも同じことが起きる
+ *
+ * という**止まらない循環**になる。作者のリポジトリでは、本文を1文字も
+ * 触っていないのに「◯◯の執筆（13件）」というコミットが積み上がっていた。
+ *
+ * **時刻を見ないのは、字数が同じなら時刻が古くても計算が変わらないから。**
+ * 増減は「基準の字数」との差で出すので、基準が同じなら答えも同じである。
+ */
+export function sameBaseline(
+  left: WritingBaseline | undefined,
+  right: WritingBaseline | undefined
+): boolean {
+  if (!left || !right) return false;
+  if (
+    left.net !== right.net ||
+    left.gross !== right.gross ||
+    left.fileCount !== right.fileCount ||
+    left.conflictedCount !== right.conflictedCount
+  ) {
+    return false;
+  }
+  // **内訳は「持たない」と「空」を分ける**（toBaseline の断り書きと同じ理由）
+  if (!left.files || !right.files) return !left.files && !right.files;
+  const names = new Set([...Object.keys(left.files), ...Object.keys(right.files)]);
+  for (const name of names) {
+    const a = left.files[name];
+    const b = right.files[name];
+    if (!a || !b) return false;
+    if (a.net !== b.net || a.gross !== b.gross) return false;
+  }
+  return true;
+}
+
 function toBaseline(
   measurement: WritingMeasurement,
   at: Date

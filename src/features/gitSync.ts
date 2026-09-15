@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
+import { bodyChangePaths } from "../core/manuscriptChangePaths";
 import {
   changedFilesBetween,
   fetchRemote,
@@ -446,12 +447,22 @@ export class GitSyncMonitor implements vscode.Disposable {
     // 初回は比較相手がいない。ここで通知すると起動のたびに出てしまう
     if (!previous || previous === head) return;
 
-    const files = await changedFilesBetween(
+    const changed = await changedFilesBetween(
       work.folderPath,
       previous,
       head,
       this.options.run
     );
+    /*
+      **本文だけを数える**（作者の実機報告、2026-09-15。設計書5.5.8）。
+      それまでは `git diff` の全ファイルを数えており、**執筆量の記録
+      （`.aiwriter/stats/`）まで「本文」と呼んでいた**——何も触っていないのに
+      「13作品で本文が更新されました（合計169件）」と出る原因のひとつ。
+
+      この知らせは「抽出をやり直すと増えた内容を取り込める」と続くので、
+      **本文が増えたときにだけ意味がある。**
+    */
+    const files = bodyChangePaths(changed);
     if (files.length === 0) return;
 
     this.filesChanged.fire({ work, files });
