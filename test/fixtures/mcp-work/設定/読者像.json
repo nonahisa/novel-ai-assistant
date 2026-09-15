@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1",
+  "declared": {
+    "scores": {
+      "familiarity": 4,
+      "posture": 2,
+      "craving": 5
+    },
+    "answers": [1, 0, 2, 1, 0, 2, 1, 1, 2],
+    "updatedAt": "2026-09-12T00:00:00.000Z"
+  }
+}

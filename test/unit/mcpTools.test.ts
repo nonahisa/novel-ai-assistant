@@ -15,6 +15,13 @@ import {
   typoValidate,
 } from "../../src/mcp/tools/typo";
 import { TYPO_CHECK_VERSION } from "../../src/prompts/typoCheck";
+import {
+  CHAT_RUN_INPUT,
+  chatPrompt,
+  chatRun,
+  chatValidate,
+} from "../../src/mcp/tools/chat";
+import { WORK_CHAT_VERSION } from "../../src/prompts/workChat";
 import { contradictionMaterial } from "../../src/mcp/tools/contradiction";
 import { foreshadowPrompt } from "../../src/mcp/tools/foreshadow";
 import { ollamaGenerate } from "../../src/mcp/tools/ollama";
@@ -396,6 +403,170 @@ describe("typo", () => {
         runner: "ollama",
       })
     ).rejects.toThrow(/model/);
+  });
+});
+
+/**
+ * 相談（P-21）を外から呼ぶ（0.64.2）。
+ *
+ * **ほかの機能と違って、チャンクが無い**（1つの問いに1つの答え）。
+ * 見るのは、**3つの診断をどう扱うか**である——
+ *
+ * | 診断 | どこに在るか | ここでの扱い |
+ * |---|---|---|
+ * | ターゲット読者 | 作品の `設定/読者像.json` | **読める**ので、渡さなくても足す |
+ * | 助言方針 | `globalState` | 答え（9問）を渡せば足す |
+ * | 執筆スタイル | `globalState` | 答え（5問）を渡せば足す |
+ *
+ * **渡さない軸は1字も送らない**（製品の決まり。未診断の作者と同じ）。
+ */
+describe("chat", () => {
+  test("問いとシステムの指示を組む", () => {
+    const result = chatPrompt({ folder: WORK, question: "第4話の続きに迷っています" });
+
+    expect(result.promptVersion).toBe(WORK_CHAT_VERSION);
+    expect(result.validateWith).toBe("chat.validate");
+    expect(result.userPrompt).toContain("第4話の続きに迷っています");
+    // 材料に、作品の登場人物が入る
+    expect(result.reference.join("\n")).toContain("少年");
+  });
+
+  /**
+   * **読者診断だけは、渡さなくても足せる。** 作品フォルダーの中に在るからで、
+   * ここが「MCPから読める診断」と「読めない診断」の分かれ目である。
+   */
+  test("読者診断は、作品のファイルから読んで足す", () => {
+    const result = chatPrompt({ folder: WORK, question: "どう思いますか" });
+
+    expect(result.diagnoses.readerType).toBe(true);
+    expect(result.systemPrompt).toContain("【この作品の読者】");
+  });
+
+  test("助言方針と執筆スタイルは、渡さなければ1字も送らない", () => {
+    const result = chatPrompt({ folder: WORK, question: "どう思いますか" });
+
+    expect(result.diagnoses.advicePolicy).toBe(false);
+    expect(result.diagnoses.writerStyle).toBe(false);
+    // **足さなかったことを、理由ごと知らせる**
+    expect(result.diagnoses.omitted.join("\n")).toContain("adviceAnswers");
+    expect(result.diagnoses.omitted.join("\n")).toContain("writerStyle");
+    expect(result.systemPrompt).not.toContain("【この作者の書き方】");
+  });
+
+  test("診断の答えを渡すと、製品の関数が組み立てて足す", () => {
+    const result = chatPrompt({
+      folder: WORK,
+      question: "どう思いますか",
+      adviceAnswers: [2, 1, 2, 0, 2, 0, 2, 1, 2],
+      // **即興派で、書き終えてから直す作者**。相談へ渡すのはこの2軸だけ
+      writerStyle: {
+        situation: "posted",
+        plan: "improviser",
+        revise: "after_all",
+        material: "memo",
+        outlet: "serial",
+      },
+    });
+
+    expect(result.diagnoses.advicePolicy).toBe(true);
+    expect(result.diagnoses.writerStyle).toBe(true);
+    expect(result.systemPrompt).toContain("【この作者の書き方】");
+    expect(result.diagnoses.omitted).toEqual([]);
+  });
+
+  /**
+   * **知らない値は受け取らない**（`buildWriterStyle` の約束）。
+   * 黙って既定へ倒すと、答えていない値で助言の調子が決まる。
+   */
+  test("執筆スタイルに知らない値が混ざれば、足さずに理由を言う", () => {
+    const result = chatPrompt({
+      folder: WORK,
+      question: "どう思いますか",
+      writerStyle: {
+        situation: "posted",
+        plan: "そんな段取りは無い",
+        revise: "after_all",
+        material: "memo",
+        outlet: "serial",
+      },
+    });
+
+    expect(result.diagnoses.writerStyle).toBe(false);
+    expect(result.diagnoses.omitted.join("\n")).toContain("選択肢に無い値");
+  });
+
+  test("本文を指すと、抜粋を材料に添える", () => {
+    const result = chatPrompt({
+      folder: WORK,
+      question: "この書き出しはどうでしょう",
+      filePath: "本文/004_よあけ.txt",
+    });
+
+    expect(result.userPrompt).toContain("まず最初に");
+  });
+
+  test("作品フォルダーの外は読めない", () => {
+    expect(() =>
+      chatPrompt({
+        folder: WORK,
+        question: "これは",
+        filePath: path.join("..", "..", "..", "package.json"),
+      })
+    ).toThrow(/作品フォルダーの外/);
+  });
+
+  test("応答を読み解き、提案が入っていたかを知らせる", () => {
+    const response = JSON.stringify({
+      reply: "第4話の書き出しは、静かで良いと思います。",
+      options: ["続きを書く", "別の入り方を考える"],
+      edit: { target: "plot", text: "夜明けから始める" },
+    });
+
+    const result = chatValidate({ response });
+
+    expect(result.answer.reply).toContain("静かで良い");
+    expect(result.answer.options).toHaveLength(2);
+    // **MCPは実行しない。** 入っていたことだけを知らせる
+    expect(result.proposals.edit).toBe(true);
+    expect(result.proposals.run).toBe(false);
+  });
+
+  /**
+   * **JSONとして読めなくても、答えを捨てない**（製品の `parseWorkChatAnswer`）。
+   * 相談は「形が合っているか」より「作者に答えが届くか」が大事な機能で、
+   * AIが素の文で返したときは、それをそのまま答えとして扱う。
+   *
+   * **ここで自前の門番を足さない。** 足すと「製品では読める応答が
+   * MCPでは捨てられる」という差ができる。
+   */
+  test("JSONでない応答は、本文がそのまま答えになる（製品と同じ）", () => {
+    const result = chatValidate({ response: "書き出しは静かでよいと思います。" });
+
+    expect(result.answer.reply).toBe("書き出しは静かでよいと思います。");
+    expect(result.answer.options).toEqual([]);
+    expect(result.proposals.edit).toBe(false);
+  });
+
+  test("runner を省くと、転送層で断られる", () => {
+    const schema = z.object(CHAT_RUN_INPUT);
+    expect(
+      schema.safeParse({ folder: WORK, question: "どう思いますか" }).success
+    ).toBe(false);
+  });
+
+  test("runner が claude なら、プロンプトと戻し先だけを返す", async () => {
+    const result = await chatRun({
+      folder: WORK,
+      question: "どう思いますか",
+      runner: "claude",
+    });
+
+    expect(result.runner).toBe("claude");
+    if (result.runner !== "claude") throw new Error("claude のはず");
+    expect(result.validateWith).toBe("chat.validate");
+    expect(result.note).toContain("validate");
+    // 何を足したかは、この道でも分かる
+    expect(result.diagnoses.readerType).toBe(true);
   });
 });
 

@@ -44,6 +44,14 @@ import {
   foreshadowRun,
   foreshadowValidate,
 } from "./tools/foreshadow";
+import {
+  CHAT_PROMPT_INPUT,
+  CHAT_RUN_INPUT,
+  CHAT_VALIDATE_INPUT,
+  chatPrompt,
+  chatRun,
+  chatValidate,
+} from "./tools/chat";
 
 /**
  * Claude Code から、製品のプロンプトと検算をツールとして呼ぶ（設計書6.87.8）。
@@ -272,6 +280,49 @@ server.registerTool(
     inputSchema: FORESHADOW_RUN_INPUT,
   },
   tool(foreshadowRun)
+);
+
+server.registerTool(
+  "chat.prompt",
+  {
+    title: "相談のプロンプトを組む",
+    description:
+      "AIへの相談（P-21）のシステムの指示と問いを、製品と同じ順で組みます。" +
+      "**3つの診断のうち、読めるのはターゲット読者だけです**" +
+      "（作品の `設定/読者像.json` にあるため）。助言方針と執筆スタイルは" +
+      "VS Code の globalState にあってMCPからは読めないので、" +
+      "診断の答え（adviceAnswers / writerStyle）を渡すと足します。" +
+      `**渡さない軸は1字も送りません**（未診断の作者と同じ扱い）。${VALIDATE_NOTE}`,
+    inputSchema: CHAT_PROMPT_INPUT,
+  },
+  tool(chatPrompt)
+);
+
+server.registerTool(
+  "chat.validate",
+  {
+    title: "相談の応答を読み解く",
+    description:
+      "AIの応答を製品の解析（`parseWorkChatAnswer`）に通し、答えと選択肢を返します。" +
+      "**書き込みや実行の提案が入っていたかも知らせますが、MCPは実行しません**" +
+      `（読む・測る・提案するまで）。${VALIDATE_NOTE}`,
+    inputSchema: CHAT_VALIDATE_INPUT,
+  },
+  tool(chatValidate)
+);
+
+server.registerTool(
+  "chat.run",
+  {
+    title: "相談を通す",
+    description:
+      "runner が ollama なら、手元の Ollama で問い → 応答 → 解析まで通します" +
+      "（原稿はこの機械から出ません）。claude ならプロンプトだけを返すので、" +
+      "読んだ応答を chat.validate へ戻してください（本文が Anthropic へ渡ります）。" +
+      "**runner は省略できません。** 原稿も台帳も書き換えません。",
+    inputSchema: CHAT_RUN_INPUT,
+  },
+  tool(chatRun)
 );
 
 server.registerTool(

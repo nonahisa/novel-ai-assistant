@@ -35,6 +35,15 @@ export const CORE_ENTRY_NAMES = [
   "textDecode",
   // 作品の書き方（文体メモ）。**渡さないと文語体で指摘が乱発する**（F-21）
   "workStyleFacts",
+  /*
+    相談（0.64.2）。**3つの診断のうち、読めるのは読者診断だけ**——
+    作品の `設定/読者像.json` に在るからである。助言方針と執筆スタイルは
+    `globalState`（VS Code の持ち物）に在るので、答えを渡してもらって
+    製品の関数（`scoreAnswers`・`buildWriterStyle`）で組み立てる。
+  */
+  "advicePolicy",
+  "writerStyle",
+  "readerProfileParse",
 ];
 
 /**
