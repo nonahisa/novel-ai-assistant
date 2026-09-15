@@ -34,10 +34,10 @@ import { collectStyle, type WorkStyle } from "./proofread";
 import { ollamaGenerate } from "./ollama";
 import {
   chunkIdInput,
-  claudeNote,
   responseInput,
-  runChunks,
+  runByRunner,
   type RunOutcome,
+  type RunnerKind,
 } from "./run";
 
 /**
@@ -273,7 +273,7 @@ function validateAgainst(
 }
 
 export interface TypoRunInput extends TypoPromptInput {
-  runner: "ollama" | "claude";
+  runner: RunnerKind;
   endpoint?: string;
   model?: string;
   allowRemote?: boolean;
@@ -282,46 +282,27 @@ export interface TypoRunInput extends TypoPromptInput {
 export async function typoRun(
   input: TypoRunInput
 ): Promise<RunOutcome<TypoChunkPrompt, TypoValidateResult>> {
-  // **省略を既定で埋めない**（設計書6.87.8 の5）。手元へ投げるのと
-  // Anthropic へ本文を渡すのとでは、作者にとっての意味がまるで違う
-  if (input.runner !== "ollama" && input.runner !== "claude") {
-    throw new McpToolError(
-      "runner を ollama（手元で検算まで通す）か claude（プロンプトだけ返す）で指定してください。既定はありません。"
-    );
-  }
   const prompts = typoPrompt(input);
-  if (input.runner === "claude") {
-    return {
-      runner: "claude",
-      note: claudeNote(VALIDATE_WITH),
-      systemPrompt: prompts.systemPrompt,
-      schema: prompts.schema,
-      validateWith: VALIDATE_WITH,
-      chunks: prompts.chunks,
-    };
-  }
-
-  const model = input.model;
-  if (!model) {
-    throw new McpToolError("runner が ollama のときは model が要ります。");
-  }
+  // **材料は1回だけ集める。** チャンクごとに集め直すと、辞書と作法を
+  // チャンクの数だけ読むことになる
   const context = collectContext(input.folder);
 
-  return runChunks(model, prompts.chunks, async (item) => {
-    const response = await ollamaGenerate({
-      endpoint: input.endpoint,
-      model,
-      systemPrompt: prompts.systemPrompt,
-      userPrompt: item.userPrompt,
-      schema: prompts.schema,
-      numCtx: input.numCtx,
-      allowRemote: input.allowRemote,
-    });
-    return validateAgainst(
-      item.chunkId,
-      chunkFromId(input.folder, item.chunkId),
-      response.text,
-      context
-    );
-  });
+  /*
+    **行き先ごとの分岐は `runByRunner` が持つ**（設計書6.87.12）。
+    同じ分岐が8つの道具に写されていたので、1か所へ寄せた。
+    ここが渡すのは「この道具の検算」だけである。
+  */
+  return runByRunner(
+    input,
+    prompts,
+    VALIDATE_WITH,
+    (chunkId, responseText) =>
+      validateAgainst(
+        chunkId,
+        chunkFromId(input.folder, chunkId),
+        responseText,
+        context
+      ),
+    ollamaGenerate
+  );
 }

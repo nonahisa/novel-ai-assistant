@@ -30,7 +30,13 @@ import {
   readSettingsRecords,
 } from "./shared";
 import { ollamaGenerate } from "./ollama";
-import { claudeNote, responseInput } from "./run";
+import { askSampling } from "./sampling";
+import {
+  assertRunner,
+  claudeNote,
+  responseInput,
+  type RunnerKind,
+} from "./run";
 
 /**
  * 表記ゆれ（P-10の一部、設計書6.9）を外から呼ぶ（6.87.8 の4）。
@@ -236,7 +242,7 @@ export function notationValidate(input: {
 }
 
 export interface NotationRunInput extends NotationPromptInput {
-  runner: "ollama" | "claude";
+  runner: RunnerKind;
   endpoint?: string;
   model?: string;
   allowRemote?: boolean;
@@ -245,11 +251,7 @@ export interface NotationRunInput extends NotationPromptInput {
 
 export async function notationRun(input: NotationRunInput) {
   // **省略を既定で埋めない**（設計書6.87.8 の5）
-  if (input.runner !== "ollama" && input.runner !== "claude") {
-    throw new McpToolError(
-      "runner を ollama（手元で通す）か claude（プロンプトだけ返す）で指定してください。既定はありません。"
-    );
-  }
+  assertRunner(input.runner);
   const prompt = notationPrompt(input);
   if (input.runner === "claude") {
     return {
@@ -261,6 +263,25 @@ export async function notationRun(input: NotationRunInput) {
       validateWith: VALIDATE_WITH,
     };
   }
+
+  if (input.runner === "sampling") {
+    // **呼び出し元に考えてもらい、検算まで通す**（設計書6.87.12）
+    const reply = await askSampling({
+      folder: input.folder,
+      systemPrompt: prompt.systemPrompt,
+      userPrompt: prompt.userPrompt,
+    });
+    return {
+      runner: "sampling" as const,
+      model: reply.model,
+      result: notationValidate({
+        folder: input.folder,
+        group: input.group,
+        response: reply.text,
+      }),
+    };
+  }
+
   const model = input.model;
   if (!model) {
     throw new McpToolError("runner が ollama のときは model が要ります。");

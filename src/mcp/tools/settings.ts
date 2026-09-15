@@ -32,7 +32,16 @@ import {
   selectChunks,
 } from "./shared";
 import { ollamaGenerate } from "./ollama";
-import { chunkIdInput, claudeNote, responseInput, runChunks } from "./run";
+import { askSampling } from "./sampling";
+import {
+  assertRunner,
+  chunkIdInput,
+  claudeNote,
+  responseInput,
+  runChunks,
+  runChunksBySampling,
+  type RunnerKind,
+} from "./run";
 import type { RunOutcome } from "./run";
 
 /**
@@ -389,7 +398,7 @@ export function settingsValidate(input: {
 }
 
 export interface SettingsRunInput extends SettingsPromptInput {
-  runner: "ollama" | "claude";
+  runner: RunnerKind;
   endpoint?: string;
   model?: string;
   allowRemote?: boolean;
@@ -399,11 +408,7 @@ export async function settingsRun(
   input: SettingsRunInput
 ): Promise<RunOutcome<SettingsChunkPrompt, SettingsValidateResult>> {
   // **省略を既定で埋めない**（設計書6.87.8 の5）
-  if (input.runner !== "ollama" && input.runner !== "claude") {
-    throw new McpToolError(
-      "runner を ollama（手元で検算まで通す）か claude（プロンプトだけ返す）で指定してください。既定はありません。"
-    );
-  }
+  assertRunner(input.runner);
   const prompts = settingsPrompt(input);
   if (input.runner === "claude") {
     return {
@@ -417,7 +422,7 @@ export async function settingsRun(
   }
 
   const model = input.model;
-  if (!model) {
+  if (input.runner === "ollama" && !model) {
     throw new McpToolError("runner が ollama のときは model が要ります。");
   }
 
@@ -448,7 +453,33 @@ export async function settingsRun(
     chunk,
   }));
 
-  return runChunks(model, items, async ({ chunk }) => {
+  /** 答えたモデル。**sampling では呼び出し元が選ぶ**ので集めて返す */
+  const answeredBy = new Set<string>();
+
+  const callAI = async (
+    userPrompt: string
+  ): Promise<{ text: string; model: string }> => {
+    if (input.runner === "sampling") {
+      const reply = await askSampling({
+        folder: input.folder,
+        systemPrompt: prompts.systemPrompt,
+        userPrompt,
+      });
+      return { text: reply.text, model: reply.model };
+    }
+    const response = await ollamaGenerate({
+      endpoint: input.endpoint,
+      model: model as string,
+      systemPrompt: prompts.systemPrompt,
+      userPrompt,
+      schema: prompts.schema,
+      numCtx: input.numCtx,
+      allowRemote: input.allowRemote,
+    });
+    return { text: response.text, model: model as string };
+  };
+
+  const step = async ({ chunk }: { chunk: Chunk }) => {
     const gathered = accumulator.candidates();
     const item = promptForChunk(
       input.filePath,
@@ -464,17 +495,14 @@ export async function settingsRun(
       }
     );
 
-    const response = await ollamaGenerate({
-      endpoint: input.endpoint,
-      model,
-      systemPrompt: prompts.systemPrompt,
-      userPrompt: item.userPrompt,
-      schema: prompts.schema,
-      numCtx: input.numCtx,
-      allowRemote: input.allowRemote,
-    });
+    /*
+      **AIの呼び方だけを差し替える**（設計書6.87.12）。輪の作り——
+      既知名を育てながらチャンクを回すところ——は両方で同じである。
+    */
+    const reply = await callAI(item.userPrompt);
+    answeredBy.add(reply.model);
 
-    const parsed = parseResult(response.text);
+    const parsed = parseResult(reply.text);
     if (!parsed) {
       throw new McpToolError(
         "応答を読み取れませんでした（設定資料の抽出のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
@@ -497,5 +525,14 @@ export async function settingsRun(
       }
     }
     return result;
-  });
+  };
+
+  if (input.runner === "sampling") {
+    return runChunksBySampling(items, async (item) => ({
+      result: await step(item),
+      // **輪の中で答えたモデルを拾う**（呼び出し元が選ぶので、こちらは知らない）
+      model: [...answeredBy].pop() ?? "（不明）",
+    }));
+  }
+  return runChunks(model as string, items, step);
 }

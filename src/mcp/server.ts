@@ -9,6 +9,7 @@ import {
   setExternalClientName,
 } from "./tools/accessLog";
 import { assertExternalAccessAllowed } from "./tools/permission";
+import { setSamplingHost } from "./tools/sampling";
 import { WORK_SCAN_INPUT, workScan } from "./tools/workScan";
 import {
   OLLAMA_GENERATE_INPUT,
@@ -247,7 +248,7 @@ server.registerTool(
       "runner が ollama なら、手元の Ollama でプロンプト → 応答 → 検算まで通し、" +
       "**検算済みの結果だけ**を返します（原稿はこの機械から出ません）。" +
       "runner が claude ならプロンプトだけを返すので、読んだ応答を proofread.validate へ戻してください" +
-      "（このとき本文は Anthropic へ渡ります）。**runner は省略できません。**",
+      "（このとき本文は Anthropic へ渡ります）。runner が sampling なら、**呼び出し元に考えてもらって検算まで通します**（往復が要らず、検算を飛ばせません。対応していない呼び出し元では使えません）。**runner は省略できません。**",
     inputSchema: PROOFREAD_RUN_INPUT,
   },
   tool("proofread.run", proofreadRun)
@@ -287,7 +288,7 @@ server.registerTool(
       "runner が ollama なら、手元の Ollama でプロンプト → 応答 → 検算まで通し、" +
       "**検算済みの結果だけ**を返します（原稿はこの機械から出ません）。" +
       "runner が claude ならプロンプトだけを返すので、読んだ応答を typo.validate へ戻してください" +
-      "（このとき本文は Anthropic へ渡ります）。**runner は省略できません。**",
+      "（このとき本文は Anthropic へ渡ります）。runner が sampling なら、**呼び出し元に考えてもらって検算まで通します**（往復が要らず、検算を飛ばせません。対応していない呼び出し元では使えません）。**runner は省略できません。**",
     inputSchema: TYPO_RUN_INPUT,
   },
   tool("typo.run", typoRun)
@@ -335,7 +336,7 @@ server.registerTool(
     description:
       "runner が ollama なら手元の Ollama で検算まで通します（原稿は外へ出ません）。" +
       "claude ならプロンプトだけを返します（本文が Anthropic へ渡ります）。" +
-      "**runner は省略できません。**",
+      "runner が sampling なら、**呼び出し元に考えてもらって検算まで通します**（往復が要らず、検算を飛ばせません。対応していない呼び出し元では使えません）。**runner は省略できません。**",
     inputSchema: CONTRADICTION_RUN_INPUT,
   },
   tool("contradiction.run", contradictionRun)
@@ -373,7 +374,7 @@ server.registerTool(
     description:
       "runner が ollama なら手元の Ollama で検算まで通します（原稿は外へ出ません）。" +
       "claude ならプロンプトだけを返します（本文が Anthropic へ渡ります）。" +
-      "**runner は省略できません。** 台帳は書き換えません。",
+      "runner が sampling なら、**呼び出し元に考えてもらって検算まで通します**（往復が要らず、検算を飛ばせません。対応していない呼び出し元では使えません）。**runner は省略できません。** 台帳は書き換えません。",
     inputSchema: FORESHADOW_RUN_INPUT,
   },
   tool("foreshadow.run", foreshadowRun)
@@ -416,7 +417,7 @@ server.registerTool(
       "runner が ollama なら、手元の Ollama で問い → 応答 → 解析まで通します" +
       "（原稿はこの機械から出ません）。claude ならプロンプトだけを返すので、" +
       "読んだ応答を chat.validate へ戻してください（本文が Anthropic へ渡ります）。" +
-      "**runner は省略できません。** 原稿も台帳も書き換えません。",
+      "runner が sampling なら、**呼び出し元に考えてもらって検算まで通します**（往復が要らず、検算を飛ばせません。対応していない呼び出し元では使えません）。**runner は省略できません。** 原稿も台帳も書き換えません。",
     inputSchema: CHAT_RUN_INPUT,
   },
   tool("chat.run", chatRun)
@@ -456,6 +457,7 @@ server.registerTool(
     description:
       "runner が ollama なら、手元の Ollama でチャンクを順に回し、前のチャンクで見つけた名前を " +
       "次の既知へ足しながら検算まで通します（製品と同じ）。claude ならプロンプトだけを返します。" +
+      "sampling なら呼び出し元に考えてもらい、同じように既知名を育てながら検算まで通します。" +
       "runner は省略できません。マージと保存は行いません。",
     inputSchema: SETTINGS_RUN_INPUT,
   },
@@ -491,6 +493,7 @@ server.registerTool(
     title: "各話あらすじを通す",
     description: "runner が ollama なら手元の Ollama で検算まで通します（原稿は外へ出ません）。" +
       "claude ならプロンプトだけを返します（本文が Anthropic へ渡ります）。" +
+      "sampling なら呼び出し元に考えてもらい、検算まで通します。" +
       "runner は省略できません。",
     inputSchema: SYNOPSIS_RUN_INPUT,
   },
@@ -528,6 +531,7 @@ server.registerTool(
     title: "プロット逸脱を通す",
     description: "runner が ollama なら手元の Ollama で検算まで通します（原稿は外へ出ません）。" +
       "claude ならプロンプトだけを返します（本文が Anthropic へ渡ります）。" +
+      "sampling なら呼び出し元に考えてもらい、検算まで通します。" +
       "runner は省略できません。",
     inputSchema: DEVIATION_RUN_INPUT,
   },
@@ -565,6 +569,7 @@ server.registerTool(
     title: "単話プロットの緩みを通す",
     description: "runner が ollama なら手元の Ollama で検算まで通します（原稿は外へ出ません）。" +
       "claude ならプロンプトだけを返します（本文が Anthropic へ渡ります）。" +
+      "sampling なら呼び出し元に考えてもらい、検算まで通します。" +
       "runner は省略できません。",
     inputSchema: EPISODE_PLOT_RUN_INPUT,
   },
@@ -613,6 +618,7 @@ server.registerTool(
     title: "表記ゆれの揃え先を通す",
     description: "runner が ollama なら手元の Ollama で検算まで通します（原稿は外へ出ません）。" +
       "claude ならプロンプトだけを返します（本文が Anthropic へ渡ります）。" +
+      "sampling なら呼び出し元に考えてもらい、検算まで通します。" +
       "runner は省略できません。",
     inputSchema: NOTATION_RUN_INPUT,
   },
@@ -643,6 +649,14 @@ async function main(): Promise<void> {
     const client = server.server.getClientVersion();
     if (client?.name) setExternalClientName(client.name);
   };
+
+  /*
+    **呼び出し元に考えてもらう道**（設計書6.87.12）を使えるようにする。
+    ここから渡すのは、`tools/sampling.ts` から `server.ts` を参照すると
+    読み込みが循環するためである。**対応しているかは向こうの宣言次第**なので、
+    渡すだけで使えるとは限らない（使う側が毎回確かめる）。
+  */
+  setSamplingHost(server.server);
 
   // stdio。VS Code が起動していなくても動く（設計書6.87.8 の3）
   await server.connect(new StdioServerTransport());

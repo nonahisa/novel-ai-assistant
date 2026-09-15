@@ -43,19 +43,29 @@ export class ExternalAccessPermissionStore {
   /**
    * 決めたことを書く。
    *
-   * @param allowed 許可するか
-   * @param note 作者の覚え書き（無くてよい）
+   * @param allowed 読ませることを許すか
+   * @param options.sampling **考えさせることまで許すか**（設計書6.87.12）。
+   *   読ませるのを断れば、こちらも自動で閉じる
+   * @param options.note 作者の覚え書き（無くてよい）
    */
-  async save(allowed: boolean, note = ""): Promise<void> {
+  async save(
+    allowed: boolean,
+    options: { sampling?: boolean; note?: string } = {}
+  ): Promise<void> {
     const target = this.filePath;
     await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
     const permission: ExternalAccessPermission = {
       allowed,
+      /*
+        **読ませるのをやめたら、考えさせるのもやめる**（設計書6.87.12）。
+        片方だけ残ると、「拒否したはずなのに本文が外のAIへ渡る」形になる。
+      */
+      sampling: allowed && options.sampling === true,
       decidedAt: new Date().toISOString(),
       // **どの機械で決めたかを残す。** この印は同期しないので、
       // 別の機械の印と取り違えることは無いが、作者が後で読んで分かるように
       decidedOn: await safeHostName(),
-      note,
+      note: options.note ?? "",
     };
     await vscode.workspace.fs.writeFile(
       path.toUri(target),

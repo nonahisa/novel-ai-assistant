@@ -55,7 +55,13 @@ import {
   resolveInsideFolder,
 } from "./shared";
 import { ollamaGenerate } from "./ollama";
-import { claudeNote, responseInput } from "./run";
+import { askSampling } from "./sampling";
+import {
+  assertRunner,
+  claudeNote,
+  responseInput,
+  type RunnerKind,
+} from "./run";
 
 /**
  * 話ごとに見る3つ——**各話あらすじ（P-06）・プロット逸脱（P-11）・
@@ -447,20 +453,15 @@ export function episodePlotValidate(
 /* ── runner（3つとも同じ形）────────────────────────── */
 
 interface RunnerInput {
-  runner: "ollama" | "claude";
+  runner: RunnerKind;
+  /** どの作品か。**考えさせる許可を確かめるために要る**（設計書6.87.12） */
+  folder?: string;
   endpoint?: string;
   model?: string;
   allowRemote?: boolean;
   numCtx?: number;
 }
 
-function assertRunner(runner: unknown): void {
-  if (runner !== "ollama" && runner !== "claude") {
-    throw new McpToolError(
-      "runner を ollama（手元で検算まで通す）か claude（プロンプトだけ返す）で指定してください。既定はありません。"
-    );
-  }
-}
 
 /**
  * 1話ぶんを通す。3つの機能で形が同じなので、ここへ寄せてある。
@@ -486,6 +487,7 @@ async function runOnce<T>(
       validateWith: string;
     }
   | { runner: "ollama"; model: string; result: T }
+  | { runner: "sampling"; model: string; result: T }
 > {
   assertRunner(input.runner);
   if (input.runner === "claude") {
@@ -498,6 +500,23 @@ async function runOnce<T>(
       validateWith: prompt.validateWith,
     };
   }
+  if (input.runner === "sampling") {
+    /*
+      **呼び出し元に考えてもらい、検算まで通す**（設計書6.87.12）。
+      ここも `claude` と違って往復が要らず、**検算を迂回する道が無い**。
+    */
+    const reply = await askSampling({
+      folder: input.folder,
+      systemPrompt: prompt.systemPrompt,
+      userPrompt: prompt.userPrompt,
+    });
+    return {
+      runner: "sampling",
+      model: reply.model,
+      result: validate(reply.text),
+    };
+  }
+
   const model = input.model;
   if (!model) {
     throw new McpToolError("runner が ollama のときは model が要ります。");

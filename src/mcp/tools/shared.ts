@@ -101,10 +101,12 @@ export const CHUNK_INPUT = {
  */
 export const RUNNER_INPUT = {
   runner: z
-    .enum(["ollama", "claude"])
+    .enum(["ollama", "claude", "sampling"])
     .describe(
       "本文の行き先。ollama＝手元のOllamaで検算まで通す（原稿は外へ出ない）／" +
-        "claude＝プロンプトだけ返す（本文がAnthropicへ渡る）。省略できません"
+        "claude＝プロンプトだけ返す（本文がAnthropicへ渡る）／" +
+        "sampling＝呼び出し元に考えてもらい、検算まで通す" +
+        "（本文は呼び出し元へ渡る。対応していない呼び出し元では使えません）。省略できません"
     ),
 };
 

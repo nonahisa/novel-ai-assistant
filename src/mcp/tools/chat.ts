@@ -29,7 +29,13 @@ import {
   readSettingsRecords,
 } from "./shared";
 import { ollamaGenerate } from "./ollama";
-import { claudeNote, responseInput } from "./run";
+import { askSampling } from "./sampling";
+import {
+  assertRunner,
+  claudeNote,
+  responseInput,
+  type RunnerKind,
+} from "./run";
 
 /**
  * AIへの相談（P-21、設計書6.19）を外から呼ぶ。
@@ -344,7 +350,7 @@ export function chatValidate(input: { response: string }): ChatValidateResult {
 }
 
 export interface ChatRunInput extends ChatPromptInput {
-  runner: "ollama" | "claude";
+  runner: RunnerKind;
   endpoint?: string;
   model?: string;
   allowRemote?: boolean;
@@ -366,15 +372,19 @@ export type ChatRunResult =
       model: string;
       diagnoses: ChatDiagnosisReport;
       result: ChatValidateResult;
+    }
+  | {
+      /** 呼び出し元に考えてもらった（設計書6.87.12） */
+      runner: "sampling";
+      /** 答えたモデル。**こちらでは選べない** */
+      model: string;
+      diagnoses: ChatDiagnosisReport;
+      result: ChatValidateResult;
     };
 
 export async function chatRun(input: ChatRunInput): Promise<ChatRunResult> {
   // **省略を既定で埋めない**（設計書6.87.8 の5）
-  if (input.runner !== "ollama" && input.runner !== "claude") {
-    throw new McpToolError(
-      "runner を ollama（手元で答えまで出す）か claude（プロンプトだけ返す）で指定してください。既定はありません。"
-    );
-  }
+  assertRunner(input.runner);
   const prompt = chatPrompt(input);
 
   if (input.runner === "claude") {
@@ -386,6 +396,21 @@ export async function chatRun(input: ChatRunInput): Promise<ChatRunResult> {
       schema: prompt.schema,
       validateWith: VALIDATE_WITH,
       diagnoses: prompt.diagnoses,
+    };
+  }
+
+  if (input.runner === "sampling") {
+    // **呼び出し元に考えてもらい、検算まで通す**（設計書6.87.12）
+    const reply = await askSampling({
+      folder: input.folder,
+      systemPrompt: prompt.systemPrompt,
+      userPrompt: prompt.userPrompt,
+    });
+    return {
+      runner: "sampling",
+      model: reply.model,
+      diagnoses: prompt.diagnoses,
+      result: chatValidate({ response: reply.text }),
     };
   }
 

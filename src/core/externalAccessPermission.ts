@@ -31,6 +31,20 @@ export const EXTERNAL_PERMISSION_FILE = "external-access.json";
 export interface ExternalAccessPermission {
   /** 許可されているか。**印が無い・読めないときは false** */
   allowed: boolean;
+  /**
+   * **呼び出し元のAIに考えさせることを許すか**（sampling。設計書6.87.12）。
+   *
+   * **読ませることとは、別の危険である**（作者の指示、2026-09-16
+   * 「ここでも、初期は閉鎖で解放するときは外部に情報を出す旨警告を表示」）。
+   *
+   * | | 本文の行き先 |
+   * |---|---|
+   * | 読ませる（`allowed`） | 呼び出し元まで |
+   * | 考えさせる（`sampling`） | **呼び出し元が選んだAIまで。こちらでは選べない** |
+   *
+   * だから**別に許す**。`allowed` を許しても、こちらは閉じたままである。
+   */
+  sampling: boolean;
   /** いつ決めたか（ISO 8601）。分からなければ空 */
   decidedAt: string;
   /** どの機械で決めたか。作者が複数の機械を使うので残す */
@@ -41,6 +55,8 @@ export interface ExternalAccessPermission {
 
 export const DENIED: ExternalAccessPermission = {
   allowed: false,
+  // **考えさせる側も閉じたまま**（作者の指示、2026-09-16）
+  sampling: false,
   decidedAt: "",
   decidedOn: "",
   note: "",
@@ -59,6 +75,20 @@ export const EXTERNAL_ACCESS_DENIED_MESSAGE =
   "許可すると、この作品の本文と設定資料を外部AIが読めるようになります" +
   "（読むだけで、書き換えはしません）。" +
   "許可はいつでも取り消せます。ノックがあったことは記録に残しました。";
+
+/**
+ * 考えさせることを断るときの返事（設計書6.87.12）。
+ *
+ * **読ませる許可とは別に断る。** 読ませてよいと決めた作者が、
+ * **呼び出し元の選んだAIへ本文を渡すことまで許したとは限らない。**
+ */
+export const SAMPLING_NOT_PERMITTED =
+  "この作品は、呼び出し元のAIに考えさせること（sampling）をまだ許可していません" +
+  "（既定では拒否しています）。読むことを許可していても、こちらは別に許可が要ります" +
+  "——考えさせると、本文が呼び出し元の選んだAIへ渡るためです。" +
+  "許可するには、VS Code でこの作品を開き、詳細メニューの" +
+  "「外部AIの利用を許可する／取り消す」から「考えさせることも許可」を選んでください。" +
+  "許可しないまま使うなら、runner を ollama（手元で完結）にしてください。";
 
 /**
  * 印を読む。
@@ -85,6 +115,8 @@ export function parseExternalAccessPermission(
 
   return {
     allowed: true,
+    // **ここも `true` そのものだけを許可と読む**（書き損じを許可にしない）
+    sampling: raw.sampling === true,
     decidedAt: typeof raw.decidedAt === "string" ? raw.decidedAt : "",
     decidedOn: typeof raw.decidedOn === "string" ? raw.decidedOn : "",
     note: typeof raw.note === "string" ? raw.note : "",
@@ -103,8 +135,11 @@ export function formatExternalAccessPermission(
       _説明:
         "外部AI（MCPサーバー）にこの作品を読ませてよいかの印です。" +
         "allowed を false にするか、このファイルを消せば拒否に戻ります。" +
+        "sampling は、呼び出し元のAIに考えさせてよいかです" +
+        "（本文が、呼び出し元の選んだAIへ渡ります）。" +
         "このファイルは同期されません（機械ごとの判断です）。",
       allowed: permission.allowed,
+      sampling: permission.sampling,
       decidedAt: permission.decidedAt,
       decidedOn: permission.decidedOn,
       note: permission.note,
@@ -124,5 +159,12 @@ export function describeExternalAccessPermission(
   const where = permission.decidedOn ? `${permission.decidedOn} で` : "";
   const when = permission.decidedAt ? `${permission.decidedAt} に` : "";
   const decided = [when, where].filter(Boolean).join("");
-  return `外部AI（MCP）の利用：許可（${decided || "決めた日時は不明"}）。この作品の本文と設定資料を外から読めます。`;
+  /*
+    **考えさせる許可は別に出す。** 「許可」とだけ書くと、本文が
+    呼び出し元の選んだAIへ渡る状態かどうかが読み取れない。
+  */
+  const thinking = permission.sampling
+    ? "呼び出し元のAIに考えさせることも許可しています（本文がそのAIへ渡ります）。"
+    : "考えさせること（sampling）は拒否のままです。";
+  return `外部AI（MCP）の利用：許可（${decided || "決めた日時は不明"}）。この作品の本文と設定資料を外から読めます。${thinking}`;
 }

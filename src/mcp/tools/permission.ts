@@ -5,6 +5,7 @@ import {
   DENIED,
   EXTERNAL_ACCESS_DENIED_MESSAGE,
   EXTERNAL_PERMISSION_FILE,
+  SAMPLING_NOT_PERMITTED,
   parseExternalAccessPermission,
   type ExternalAccessPermission,
 } from "../../core/externalAccessPermission";
@@ -69,4 +70,24 @@ export function folderOf(args: unknown): string | undefined {
   }
   const folder = (args as Record<string, unknown>).folder;
   return typeof folder === "string" && folder.trim() ? folder : undefined;
+}
+
+/**
+ * 考えさせること（sampling）が許されているか（設計書6.87.12）。
+ *
+ * **読ませる許可とは別に確かめる**（作者の指示、2026-09-16
+ * 「ここでも、初期は閉鎖で解放するときは外部に情報を出す旨警告を表示」）。
+ *
+ * **作品が分からない呼び出しは断る。** どの作品への許可かを確かめようが
+ * ないので、**迷ったら断る**側に倒す。
+ */
+export function assertSamplingAllowed(folder: string | undefined): void {
+  if (!folder) {
+    throw new McpToolError(
+      "どの作品への操作か分からないため、考えさせること（sampling）は断りました。folder を渡してください。"
+    );
+  }
+  if (!readExternalAccessPermission(folder).sampling) {
+    throw new McpToolError(SAMPLING_NOT_PERMITTED);
+  }
 }
