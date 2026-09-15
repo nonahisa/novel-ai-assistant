@@ -42,6 +42,14 @@ vi.mock("../../src/core/modelTuning", async (importOriginal) => {
   return {
     ...actual,
     modelTuning: () => ledger,
+    /*
+      **素の読み出し口も同じ台帳を返す**（0.64.0）。同梱の初期値を入れた
+      とき、書き込み側は `modelTuningRaw` を読むようにした——同梱の値を
+      土台にすると、最小値を覚える決まりのせいで同梱が作者の実測に勝ち、
+      添えた回数が数え始めになるため。ここで差し替えないと、
+      書き込み側が「前回の値が無い」と見て最小値を覚えられない
+    */
+    modelTuningRaw: () => ledger,
     saveModelTuning: async (
       providerId: string,
       model: string,

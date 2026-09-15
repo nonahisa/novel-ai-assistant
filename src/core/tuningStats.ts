@@ -214,6 +214,15 @@ function readCell(tuning: ModelTuning): string {
   // 入力トークン数で測った行には何も足さない——それが本来の測り方で、
   // 断りが要るのは弱いほうだけである（作者の依頼、2026-09-13）
   if (tuning.contextMeasuredBy === "words") notes.push("合言葉で測定");
+  /*
+    **同梱の初期値なら、そう言う**（作者の守り3、2026-09-13）。
+    測ったのは作者ではないので、自分の実測として読ませない。
+    載せているのはクラウドのモデルだけで、値は向こうのサーバーで
+    決まるため、作者の機械が変わっても動かない。
+  */
+  if (fromBundle(tuning, "measuredChars")) {
+    notes.push(`同梱の初期値${bundledDateNote(tuning)}`);
+  }
   return notes.length > 0 ? `${chars}（${notes.join("。")}）` : chars;
 }
 
@@ -293,6 +302,19 @@ function charsPerTokenCell(tuning: ModelTuning): string {
   const measured = tuning.charsPerToken;
   if (measured === undefined) return `${UNKNOWN}（次の呼び出しから記録）`;
 
+  /*
+    **同梱の初期値は、回数の話をしない**（作者の守り3、2026-09-13）。
+    「5回」と出すと作者が5回測ったように読めるが、測ったのはこちらである。
+    出すのは値と、同梱であることと、測った日の3つ。
+  */
+  if (fromBundle(tuning, "charsPerToken")) {
+    const used = resolveCharsPerToken(tuning);
+    return (
+      `${measured.toFixed(3)}（同梱${bundledDateNote(tuning)}。` +
+      `余白を取って ${used.toFixed(3)} で見積もり）`
+    );
+  }
+
   const samples = tuning.charsPerTokenSamples ?? 0;
   const used = resolveCharsPerToken(tuning);
   const count = `${samples.toLocaleString("ja-JP")}回`;
@@ -312,6 +334,22 @@ function charsPerTokenCell(tuning: ModelTuning): string {
 
 function countCell(value: number | undefined): string {
   return value === undefined ? UNKNOWN : value.toLocaleString("ja-JP");
+}
+
+/**
+ * その欄が**同梱の初期値から来たか**（`core/bundledTuning.ts`）。
+ *
+ * 行の印（`bundled`）だけでは足りない——同じ行に、作者が測った速さと
+ * 同梱の字/トークンが混ざる。**どの数字が誰のものか**を欄ごとに読めるよう、
+ * 埋めた欄の名前で持たせてある。
+ */
+function fromBundle(tuning: ModelTuning, field: string): boolean {
+  return tuning.bundledFields?.includes(field) === true;
+}
+
+/** 「（2026-09-13 実測）」の断り。日付が無ければ何も付けない */
+function bundledDateNote(tuning: ModelTuning): string {
+  return tuning.bundledAt ? `・${tuning.bundledAt} 実測` : "";
 }
 
 /**
@@ -360,6 +398,17 @@ export function modelPickDetail(
   if (read) parts.push(read);
   const write = pickWriteLength(tuning);
   if (write) parts.push(write);
+  /*
+    **同梱の初期値が混ざっているなら、必ず言う**（作者の守り3、2026-09-13）。
+    測ったのは作者ではないので、黙って自分の実測のように見せない。
+    日付まで出すのは、`preview/` の付くモデルが**同じ名前で中身ごと
+    入れ替わる**ためである（作者の守り4「古くなったら黙って使わない」）。
+  */
+  if (tuning?.bundled) {
+    parts.push(
+      tuning.bundledAt ? `同梱の初期値（${tuning.bundledAt} 実測）` : "同梱の初期値"
+    );
+  }
   return parts.length > 0 ? parts.join(" ／ ") : undefined;
 }
 

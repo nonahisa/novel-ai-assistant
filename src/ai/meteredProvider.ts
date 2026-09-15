@@ -15,6 +15,7 @@ import { AiQueueAbortError, acquireCall } from "../core/aiSequence";
 import {
   type SpeedSource,
   modelTuning,
+  modelTuningRaw,
   saveModelTuning,
 } from "../core/modelTuning";
 import { outputTokensPerSecond } from "../core/tuningStats";
@@ -489,7 +490,13 @@ export class MeteredProvider implements AIProvider {
       読める長さの測定（`features/measureContext.ts`）も同じ欄へ書くので、
       約束は1か所にしか置かない。
     */
-    const current = modelTuning(this.inner.id, params.model);
+    /*
+      **素の台帳を読む**（`modelTuningRaw`）。ここは作者自身の実測を
+      積む側で、同梱の初期値（`core/bundledTuning.ts`）を previous に
+      すると、最小値を覚える決まりのせいで**同梱の値が作者の実測に
+      勝ち続ける。** 添えてある回数も数え始めになってしまう。
+    */
+    const current = modelTuningRaw(this.inner.id, params.model);
     const previous = current?.charsPerToken;
     const samples = current?.charsPerTokenSamples ?? 0;
     const next = mergeCharsPerToken(previous, sample);

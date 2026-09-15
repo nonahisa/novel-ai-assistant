@@ -299,15 +299,30 @@ describe("台帳を丸ごと読む", () => {
 
     const table = allModelTuning();
 
-    expect([...table.keys()].sort()).toEqual(
-      ["ollama/gemma4:e4b", "sakura/gpt-oss-120b"].sort()
-    );
+    /*
+      **同梱の初期値も並ぶ**（0.64.0、`core/bundledTuning.ts`）。台帳に
+      行が無いモデルでも、選ぶ画面と実測の一覧に出さないと
+      「効いているのに見えない値」になる。だから件数では突き合わせない
+      ——ここで見たいのは**台帳の行が読めていること**である。
+    */
+    expect(table.has("ollama/gemma4:e4b")).toBe(true);
+    expect(table.has("sakura/gpt-oss-120b")).toBe(true);
     expect(table.get("ollama/gemma4:e4b")?.outputTokensPerSecond).toBe(12.3);
+    expect(table.get("sakura/gpt-oss-120b")?.contextWindow).toBe(131072);
+    // 壊れた行は落ちる（同梱にも無いので、一覧に出てこない）
+    expect(table.has("ollama/壊れ")).toBe(false);
+    // 台帳に無いモデルは、同梱に在るものだけが足される
+    expect(table.has("ollama/gemma4:12b")).toBe(true);
+    expect(table.get("ollama/gemma4:12b")?.bundled).toBe(true);
   });
 
-  test("台帳が無ければ空", () => {
+  test("台帳が無ければ、同梱の初期値だけが並ぶ", () => {
     withSettings({});
 
-    expect(allModelTuning().size).toBe(0);
+    const table = allModelTuning();
+    // 台帳から読めた行は1つも無い
+    expect([...table.values()].every((tuning) => tuning.bundled)).toBe(true);
+    // 同梱の行は出る（0.64.0。ここが空だと、初期値が効いていても見えない）
+    expect(table.get("sakura/gpt-oss-120b")?.charsPerToken).toBe(1.065);
   });
 });

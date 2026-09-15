@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { logLine } from "./logger";
+import { bundledTuningByKey, bundledTuningKeys } from "./bundledTuning";
 // **型だけを借りる。** 実体は引き込まない（`import type` は消える）ので、
 // 台帳が測定の仕組みを抱え込むことにはならない。それでも写しは作らない
 // ——「tokens か words か」の定義は `core/contextProbe.ts` の1つだけ
@@ -208,7 +209,95 @@ export interface ModelTuning {
   readonly speedMeasuredAt?: string;
   /** 測った時刻（ISO 8601）。古い測定だと分かるように残す */
   readonly measuredAt?: string;
+  /**
+   * この行に**同梱の初期値が混ざっている**か（`core/bundledTuning.ts`）。
+   *
+   * **読むときにだけ付く印で、台帳には書かない。** `writeModelTuning` が
+   * `BUNDLED_MARKS` を弾くので、読んだ行をそのまま保存へ回しても
+   * 設定ファイルへは入らない（作者の守り1「台帳へ書き写さない」）。
+   */
+  readonly bundled?: true;
+  /** 同梱の値を測った日（`bundled` が立っているときだけ） */
+  readonly bundledAt?: string;
+  /**
+   * **どの欄が同梱から来たか**（`bundled` が立っているときだけ）。
+   *
+   * 行の印だけでは足りない——同じ行に、作者が測った速さと、同梱の
+   * 字/トークンが混ざることがある。一覧でどの数字が誰のものか読めるよう、
+   * 欄の名前で持つ。
+   */
+  readonly bundledFields?: readonly string[];
 }
+
+/**
+ * 読むときにだけ付ける印。**保存へは回さない。**
+ *
+ * 台帳へ書き写さないことを、書き込み側で機械的に守る
+ * （`core/bundledTuning.ts` の表を参照）。
+ */
+const BUNDLED_MARKS: readonly string[] = [
+  "bundled",
+  "bundledAt",
+  "bundledFields",
+];
+
+/**
+ * 台帳の行へ、同梱の初期値を**欄ごとに**混ぜる。
+ *
+ * **作者の実測が常に勝つ**（作者の守り2）。埋めるのは、その欄が台帳に
+ * 無いときだけである。行ごと差し替えないのは、台帳の欄が別々に育つ
+ * ため——速さは普段の呼び出しから、読める長さは測定から入る。
+ * 行単位で判断すると「速さだけ測ってある」モデルが同梱の字/トークンを
+ * 受け取れない。
+ */
+function mergeBundledTuning(
+  key: string,
+  entry: ModelTuning | undefined
+): ModelTuning | undefined {
+  const seed = bundledTuningByKey(key);
+  if (!seed) return entry;
+
+  const filled: Record<string, unknown> = { ...(entry ?? {}) };
+  const fields: string[] = [];
+  const fill = (name: string, value: number | boolean | undefined): void => {
+    if (value === undefined) return;
+    if (filled[name] !== undefined) return;
+    filled[name] = value;
+    fields.push(name);
+  };
+
+  fill("charsPerToken", seed.charsPerToken);
+  fill("measuredChars", seed.measuredChars);
+  fill("contextHitCeiling", seed.contextHitCeiling);
+  /*
+    **`charsPerTokenSamples` も添える。** 読む側（`probeCharsPerToken` /
+    `resolveCharsPerToken`）は「何回ぶんから採ったか」で信じるかを決めるので、
+    回数が無いと同梱の値は使われないまま終わる。安全側の
+    `resolveCharsPerToken` が求める件数（5件）を満たす数を入れる——
+    **同梱しているのは、その件数より多くの実測から決めた値である。**
+  */
+  if (seed.charsPerToken !== undefined) {
+    fill("charsPerTokenSamples", BUNDLED_CHARS_PER_TOKEN_SAMPLES);
+  }
+
+  if (fields.length === 0) return entry;
+  return {
+    ...(filled as ModelTuning),
+    bundled: true,
+    bundledAt: seed.measuredAt,
+    bundledFields: fields,
+  };
+}
+
+/**
+ * 同梱の字/トークンに添える「何回ぶん」。
+ *
+ * 安全側の `resolveCharsPerToken`（`core/sizeBudget.ts`）は5件貯まるまで
+ * 実測を使わない。**同梱の値はその件数より多くの呼び出しから決めている**
+ * ので、しきい値を満たす数を添える。添えないと、同梱しても
+ * チャンクの大きさは当て推量（0.7）のままで、**入れた意味が無い。**
+ */
+const BUNDLED_CHARS_PER_TOKEN_SAMPLES = 5;
 
 /**
  * 待ち時間の下限。**いまの既定（180秒）を下回らせない。**
@@ -474,11 +563,50 @@ function readTuningTable(): Map<string, ModelTuning> {
  * `parseModelTuning` の写しがそこにでき、壊れた欄の扱いが2か所に散る。
  */
 export function allModelTuning(): Map<string, ModelTuning> {
-  return readTuningTable();
+  const table = readTuningTable();
+  /*
+    **同梱の初期値も並べる**（`core/bundledTuning.ts`）。台帳に行が無い
+    モデルでも、選ぶ画面と実測の一覧に「読める ◯字（同梱）」と出す——
+    出さないと、**効いているのに見えない値**になる（作者の守り3）。
+  */
+  for (const key of bundledTuningKeys()) {
+    const merged = mergeBundledTuning(key, table.get(key));
+    if (merged) table.set(key, merged);
+  }
+  return table;
 }
 
 /** そのモデルの調整値。**測っていなければ undefined**（従来の設定へ落とす） */
 export function modelTuning(
+  providerId: string,
+  model: string
+): ModelTuning | undefined {
+  const key = modelTuningKey(providerId, model);
+  return mergeBundledTuning(key, readTuningTable().get(key));
+}
+
+/**
+ * **同梱の初期値を混ぜずに**、台帳そのものを引く。
+ *
+ * 使うのは、**作者自身の実測を作る側**だけである（読める長さの測定
+ * `features/measureContext.ts`、普段の呼び出しから字/トークンを採る
+ * `ai/meteredProvider.ts` の書き込み）。
+ *
+ * **混ぜたものを土台にすると、同梱の値が作者の測定を汚す。**
+ *
+ * - **回数が水増しされる**……同梱に添えた5回を数え始めの値にすると、
+ *   1回測っただけで「6回ぶん」になる
+ * - **最小値が作者の実測に勝ってしまう**……字/トークンは最小値を覚える
+ *   決まりなので、同梱の 1.065 を previous として渡すと、作者が
+ *   1.5 と測っても同梱の値が残る。**これは「作者の実測が常に勝つ」
+ *   （作者の守り2、2026-09-13）を真正面から破る**
+ * - **測り直しの起点がずれる**……クラウドの同梱値（339,804字）を
+ *   「前回の測定」として読むと、まだ一度も測っていない機械で
+ *   そこから降り始める
+ *
+ * 使うほう（チャンクの大きさ・一覧の表示）は `modelTuning` でよい。
+ */
+export function modelTuningRaw(
   providerId: string,
   model: string
 ): ModelTuning | undefined {
@@ -724,6 +852,13 @@ async function writeModelTuning(
   const key = modelTuningKey(providerId, model);
   const entry = asRecord(table[key]);
   for (const [name, value] of Object.entries(tuning)) {
+    /*
+      **同梱の印は書かない**（作者の守り1「台帳へ書き写さない」）。
+      読んだ行には `bundled` / `bundledAt` が付いていることがあり、
+      それをそのまま保存へ回すと、同梱の値が台帳へ焼き付いて
+      **次の版で表を直しても古い値が生き残る。**
+    */
+    if (BUNDLED_MARKS.includes(name)) continue;
     if (value === undefined) delete entry[name];
     else entry[name] = value;
   }

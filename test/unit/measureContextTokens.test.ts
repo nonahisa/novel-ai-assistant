@@ -104,7 +104,7 @@ vi.mock("../../src/ai/registry", () => ({
           次に何を確認したことになるのかを問う」）。
         */
         state.timeoutSecondsSeen.push(
-          resolveTimeoutSeconds("ollama", "gemma4:12b")
+          resolveTimeoutSeconds("ollama", "gemma4:e4b")
         );
         if (
           state.timeoutAboveChars !== undefined &&
@@ -159,7 +159,19 @@ vi.mock("../../src/ai/registry", () => ({
         };
       },
     },
-    model: "gemma4:12b",
+    /*
+      **同梱の初期値（`core/bundledTuning.ts`）が無いモデルを使う**（0.64.0）。
+
+      ここで見たいのは**測り方そのもの**——天井へ跳ぶ・降りる・打ち切る、の
+      道筋である。同梱の字/トークンがあるモデルにすると、天井の換算が
+      変わって刻み幅ごと動くので、測り方を直していないのに期待値が動く。
+
+      なお、**換算が良くなると天井は広がる**。分あたりの上限に当たり続ける
+      相手では、決められた回数（`MAX_RATE_LIMIT_DESCENTS`）の降下で
+      通る長さまで届かないことがありうる——同梱したクラウドのモデルは
+      どれも上限に当たっていないので、いまは実害が無い（引継ぎ書に記録）。
+    */
+    model: "gemma4:e4b",
   })),
 }));
 
@@ -219,7 +231,7 @@ function installSettings(values: Record<string, unknown>): void {
 
 function ledger(values: Record<string, unknown>): Record<string, unknown> {
   return ((values.modelTuning as Record<string, unknown> | undefined)?.[
-    "ollama/gemma4:12b"
+    "ollama/gemma4:e4b"
   ] ?? {}) as Record<string, unknown>;
 }
 
@@ -241,7 +253,7 @@ async function measure(options?: {
   error: string;
 }> {
   const values: Record<string, unknown> = options?.before
-    ? { modelTuning: { "ollama/gemma4:12b": { ...options.before } } }
+    ? { modelTuning: { "ollama/gemma4:e4b": { ...options.before } } }
     : {};
   installSettings(values);
   const showInformationMessage = vi.fn(
@@ -389,7 +401,7 @@ describe("トークン数を返さないAIへの備え", () => {
  * 台帳は**差分で書く**ので、書かなかった欄は消えずに残る。天井へ届かな
  * かったときに項目ごと省いていたため、**前回の測定で立った印が残り続けた。**
  *
- * 実機の gemma4:12b：前回 183,234字で天井に届き `contextHitCeiling: true`。
+ * 実機の gemma4:e4b：前回 183,234字で天井に届き `contextHitCeiling: true`。
  * 0.60.1 で天井が 362,191字へ広がったあと測り直すと 194,288字——天井には
  * まるで届いていないのに、一覧には「これ以上は試していません」と出た。
  * **強い測定が、弱い印を着たままになる。**
@@ -421,7 +433,7 @@ describe("天井の印を、毎回書き直す", () => {
  *
  * 時間切れが言っているのは「待っているあいだに返らなかった」であって、
  * 「入らなかった」ではない——**遅いのか長すぎるのかが区別できていない。**
- * 実機の gemma4:12b は4回の時間切れを「入らない」と数えられ、実効の上限が
+ * 実機の gemma4:e4b は4回の時間切れを「入らない」と数えられ、実効の上限が
  * 194,288字で止まった（天井は 362,191字）。
  *
  * **「測れなかった」を「読めなかった」と言い換えない。** ここがいちばん
@@ -464,14 +476,14 @@ describe("時間切れの扱い", () => {
  * **測定のあいだだけ、待ち時間の上限を別にする**（作者の依頼、2026-09-13）。
  *
  * `MAX_TIMEOUT_SECONDS`（600）は天井が半分だった頃の数字である。実機の
- * gemma4:12b は**台帳が既に600秒**だったので、ふだんの上限で挟むと1秒も
+ * gemma4:e4b は**台帳が既に600秒**だったので、ふだんの上限で挟むと1秒も
  * 延ばせず、時間切れがそのまま結果に化けていた。
  *
  * **ふだんの呼び出しへは持ち込まない。** 測定は1回きりで作者が結果を待って
  * いる場面、ふだんの呼び出しは何十回も走って止まると作業が詰まる場面である。
  */
 describe("測定のあいだの待ち時間", () => {
-  /** 台帳が既に600秒のモデル（実機の gemma4:12b と同じ状態） */
+  /** 台帳が既に600秒のモデル（実機の gemma4:e4b と同じ状態） */
   const before = { timeoutSeconds: 600 };
 
   test("**600秒からでも延ばせて、その値が実際に効く**", async () => {
@@ -515,9 +527,9 @@ describe("測定のあいだの待ち時間", () => {
 
     // 測ったあとに1,200秒が台帳に居座っても、ふだんの呼び出しは600秒で挟む
     installSettings({
-      modelTuning: { "ollama/gemma4:12b": { timeoutSeconds: 1200 } },
+      modelTuning: { "ollama/gemma4:e4b": { timeoutSeconds: 1200 } },
     });
-    expect(resolveTimeoutSeconds("ollama", "gemma4:12b")).toBe(600);
+    expect(resolveTimeoutSeconds("ollama", "gemma4:e4b")).toBe(600);
   });
 });
 

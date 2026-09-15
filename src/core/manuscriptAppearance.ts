@@ -39,13 +39,28 @@ const SIZE_MAX = 40;
 /**
  * この原稿を、どの見た目で開くかを決める。
  *
- * 向きの優先順位は **入口 ＞ 引き継ぎ ＞ 覚えていた値 ＞ 設定の既定**。
- * 入口をいちばん強くするのは、メニューで「縦書きで開く」「横書きで開く」と
- * 選んだのに別の向きで開いたら、選んだ意味が無いためである。
+ * 向きの優先順位は **引き継ぎ ＞ 入口 ＞ 覚えていた値 ＞ 設定の既定**。
  * 大きさと組んで書くには入口が無いので、**引き継ぎ ＞ 覚えていた値 ＞ 既定**。
  *
+ * **0.63.1 まで、入口が引き継ぎより強かった**（2026-09-15に直した）。
+ * 入口を強くしたのは「メニューで『縦書きで開く』『横書きで開く』と選んだのに
+ * 別の向きで開いたら、選んだ意味が無い」ためで、狙いとしては正しい。
+ * だが**「次の話 →」「最新話を書く」で開くときの入口は、作者が選び直した
+ * ものではない**——前のタブの viewType がそのまま引き継がれるだけである。
+ *
+ * そして**本文を開くときの既定は横書きの入口**（`manuscriptViewTypeFor`）で、
+ * 横書きの入口だけが `forceVertical: false` を立てる。結果として、
+ * **横書きの入口で開いた原稿を「縦書きにする」で縦にしてから次の話へ進むと、
+ * 受け継いだ入口が引き継ぎを黙って上書きして横書きに戻っていた**
+ * （実機、2026-09-15。A-13の項目20）。
+ *
+ * **`carry` が入っているのは、作者が入口を選び直していないときだけである。**
+ * メニューの「縦書きで開く」（`novelai.openVertical`）は `vscode.openWith` を
+ * 呼ぶだけで引き継ぎを置かない。だから「引き継ぎがあるなら、それが
+ * 作者のいま見ている向きだ」と読んでよい。
+ *
  * @param carry 前の話から持って来た見た目（設計書6.25.5）。
- *   前後の話を行き来したときだけ入る
+ *   前後の話・最新話・MD化で開き直したときだけ入る
  * @param forceVertical 入口で向きが決まっているなら、その向き
  */
 export function resolveInitialAppearance(input: {
@@ -58,14 +73,13 @@ export function resolveInitialAppearance(input: {
   const { saved, carry, forceVertical, verticalDefault } = input;
   const sizeDefault = clampSize(input.sizeDefault, MANUSCRIPT_SIZE_DEFAULT);
   return {
-    vertical:
-      typeof forceVertical === "boolean"
+    vertical: carry
+      ? carry.vertical
+      : typeof forceVertical === "boolean"
         ? forceVertical
-        : carry
-          ? carry.vertical
-          : typeof saved?.vertical === "boolean"
-            ? saved.vertical
-            : verticalDefault,
+        : typeof saved?.vertical === "boolean"
+          ? saved.vertical
+          : verticalDefault,
     size: clampSize(carry ? carry.size : saved?.size, sizeDefault),
     /*
       **組んで書くが標準**（作者の指定、2026-08-29）。覚えていないなら

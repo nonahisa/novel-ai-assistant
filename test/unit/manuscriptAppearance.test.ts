@@ -57,27 +57,51 @@ describe("resolveInitialAppearance", () => {
     });
   });
 
-  it("入口で向きが決まっていれば、持って来た向きより強い", () => {
-    // メニューの「原稿（横書）で開く」。選んで開いたのに前の話の向きが
-    // 勝つと、選んだ意味が無い。**大きさと面は持って来たものを使う**
+  /**
+   * **0.63.1 まで、ここは逆だった**（入口 ＞ 引き継ぎ）。2026-09-15に直した。
+   *
+   * 「次の話 →」「最新話を書く」で開くときの入口は、**作者が選び直した
+   * ものではない**——前のタブの viewType がそのまま渡るだけである。
+   * 本文を開くときの既定は横書きの入口なので、**横書きで開いた原稿を
+   * 「縦書きにする」で縦にしてから次へ進むと、毎回横書きに戻っていた**
+   * （実機、2026-09-15。A-13の項目20）。
+   *
+   * メニューの「縦書きで開く」は引き継ぎを置かない（`vscode.openWith` を
+   * 呼ぶだけ）ので、**引き継ぎが在る＝作者は入口を選び直していない**と読める。
+   */
+  it("持って来た向きは、受け継いだだけの入口より強い", () => {
+    expect(
+      resolveInitialAppearance({
+        saved: { vertical: false, size: 16, compose: true },
+        // 縦書きで見ていた原稿から「次の話 →」を押した
+        carry: { vertical: true, size: 20, compose: false },
+        // 受け継いだ入口は横書き（本文を開くときの既定）
+        forceVertical: false,
+        verticalDefault: false,
+      })
+    ).toEqual({ vertical: true, size: 20, compose: false });
+  });
+
+  it("持って来た向きが横書きなら、横書きのまま開く", () => {
     expect(
       resolveInitialAppearance({
         saved: { vertical: true, size: 16, compose: true },
-        carry: { vertical: true, size: 20, compose: false },
+        carry: { vertical: false, size: 20, compose: false },
         forceVertical: false,
         verticalDefault: true,
       })
     ).toEqual({ vertical: false, size: 20, compose: false });
   });
 
-  it("入口で縦書きが決まっていれば、横書きを持って来ても縦で開く", () => {
+  it("引き継ぎが無いときは、入口が覚えていた値より強い", () => {
+    // メニューで「原稿（横書）で開く」を選んだとき。ここは変えていない
     expect(
       resolveInitialAppearance({
-        carry: carried,
-        forceVertical: true,
-        verticalDefault: false,
+        saved: { vertical: true, size: 16, compose: true },
+        forceVertical: false,
+        verticalDefault: true,
       })
-    ).toEqual({ vertical: true, size: 20, compose: true });
+    ).toEqual({ vertical: false, size: 16, compose: true });
   });
 
   it("古い覚えに欠けがあっても、欠けたところだけ既定で埋める", () => {

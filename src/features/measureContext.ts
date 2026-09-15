@@ -57,6 +57,7 @@ import {
   PROBE_MAX_TIMEOUT_SECONDS,
   modelTuning,
   modelTuningKey,
+  modelTuningRaw,
   raiseTimeoutCeilingForProbe,
   recommendTimeoutSeconds,
   resolveTimeoutSeconds,
@@ -791,7 +792,9 @@ async function runMeasurement(
    * 読めない欄まで巻き添えで消える。
    */
   const raiseTimeout = async (seconds: number): Promise<boolean> => {
-    const current = modelTuning(resolved.provider.id, resolved.model);
+    // **素の台帳を読む。** ここで読むのは「元へ戻す値」であり、
+    // 同梱の初期値が混ざると、作者が書いていない値へ戻すことになる
+    const current = modelTuningRaw(resolved.provider.id, resolved.model);
     try {
       await saveModelTuning(resolved.provider.id, resolved.model, {
         timeoutSeconds: seconds,
@@ -1378,6 +1381,19 @@ async function runMeasurement(
     決める）で換算が違うと、二重にずれる（`probeCharsToTokens`）。
   */
   const measuredAfter = modelTuning(resolved.provider.id, resolved.model);
+  /*
+    **「前に測り切った値」は、素の台帳から読む。**
+
+    同梱の初期値（`core/bundledTuning.ts`）を混ぜたほうを使うと、
+    **一度も測っていない機械で、クラウドの同梱値（339,804字）が
+    「前回の測定」として出てくる。** 打ち切った今回の結果はまず
+    それより小さいので、反映を勧めない判断が毎回立ち、
+    作者は測ったのに保存を勧められないことになる。
+
+    換算（`measured`）のほうは混ぜたままでよい——あちらはチャンクを
+    決める側と同じ値であることが要件で、同梱はまさにそのために入れた。
+  */
+  const ledgerAfter = modelTuningRaw(resolved.provider.id, resolved.model);
 
   // **数え方を隠さない。** エラーを「入らない」と読み替えた回があるなら、
   // 何回そうしたかを結果に添える（黙って読み替えると、作者は
@@ -1495,7 +1511,7 @@ async function runMeasurement(
       ときは反映を勧めない——理由は `offerToSave` の中に書いた。
     */
     probeStop,
-    previousChars: measuredAfter?.measuredChars,
+    previousChars: ledgerAfter?.measuredChars,
     // **台帳の `contextWindow` は、チャンクを決める側と同じ換算で書く**
     measured: measuredAfter,
   });
@@ -1898,7 +1914,13 @@ async function saveMeasuredCharsPerToken(
   const sample = charsPerTokenFromProbe(fittingReadings);
   if (sample === undefined) return "";
 
-  const current = modelTuning(providerId, model);
+  /*
+    **素の台帳を読む。** 同梱の初期値を土台にすると、字/トークンは
+    最小値を覚える決まりなので**同梱の値が作者の実測に勝ってしまう**し、
+    添えてある回数（5回）が数え始めになって1回目から「6回ぶん」になる。
+    どちらも「作者の実測が常に勝つ」（作者の守り2）を破る。
+  */
+  const current = modelTuningRaw(providerId, model);
   const next = mergeCharsPerToken(current?.charsPerToken, sample);
   const samples = (current?.charsPerTokenSamples ?? 0) + 1;
   try {
