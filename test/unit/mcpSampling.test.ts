@@ -226,6 +226,39 @@ describe("チャンクごとに回す", () => {
     expect(result.model).toBe("a / b");
   });
 
+  test("**1件も通らなかったら「通しました」と言わない**", async () => {
+    /*
+      **2026-09-16、実機で見つけた。** 全件が許可で断られた回にも
+      「呼び出し元に考えてもらい、検算まで通しました」と返しており、
+      **呼んだ側からは成功したように見えていた。**
+
+      **行き先の断りも消える**——1件も呼んでいないのだから、
+      本文はどこへも渡っていない。
+    */
+    const result = await runChunksBySampling(
+      [{ chunkId: "a" }, { chunkId: "b" }],
+      async () => {
+        throw new Error("許可していません");
+      }
+    );
+    expect(result.note).not.toContain("通しました");
+    expect(result.note).not.toContain("本文は呼び出し元へ渡って");
+    expect(result.note).toContain("2件");
+    expect(result.note).toContain("failures");
+  });
+
+  test("一部だけ通ったら、通った数と落ちた数を両方出す", async () => {
+    const result = await runChunksBySampling(
+      [{ chunkId: "a" }, { chunkId: "b" }, { chunkId: "c" }],
+      async (item) => {
+        if (item.chunkId === "b") throw new Error("途中で切れました");
+        return { result: item.chunkId, model: "M" };
+      }
+    );
+    expect(result.note).toContain("2件");
+    expect(result.note).toContain("1件");
+  });
+
   test("**原稿の行き先を約束しない**", async () => {
     const result = await runChunksBySampling([], async () => ({
       result: 1,

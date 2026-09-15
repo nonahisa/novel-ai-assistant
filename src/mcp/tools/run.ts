@@ -237,11 +237,47 @@ export async function runChunks<P extends { chunkId: string }, R>(
   }
   return {
     runner: "ollama",
-    note: `手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。${VALIDATE_NOTE}`,
+    note: describeOutcome({
+      done: results.length,
+      failed: failures.length,
+      where: "手元の Ollama で",
+      aside: "原稿はこの機械から出ていません",
+    }),
     model,
     results,
     failures,
   };
+}
+
+/**
+ * 何が起きたかを、起きたとおりに書く（2026-09-16、実機で見つけた）。
+ *
+ * **通していないのに「通しました」と書かない。** 全件が許可で断られた回にも
+ * 「検算まで通しました」と返しており、**呼んだ側からは成功したように
+ * 見えていた**——結果は空なので害は出ないが、失敗を数えない報告は報告ではない。
+ *
+ * **行き先の断りは、1件でも呼んだときだけ添える。** 1件も通っていないときに
+ * 「本文は呼び出し元へ渡っており」と書くと、**渡っていないのに渡ったこと**に
+ * なる（許可で断れば、本文はどこへも出ていない）。
+ */
+export function describeOutcome(options: {
+  done: number;
+  failed: number;
+  /** どこで通したか（「手元の Ollama で」「呼び出し元に考えてもらい、」） */
+  where: string;
+  /** 本文の行き先についての断り */
+  aside: string;
+}): string {
+  if (options.failed === 0) {
+    return `${options.where}検算まで通しました（${options.aside}）。${VALIDATE_NOTE}`;
+  }
+  if (options.done === 0) {
+    return `1件も通せませんでした（${options.failed}件すべて失敗）。理由は failures にあります。`;
+  }
+  return (
+    `${options.where}${options.done}件を検算まで通しました（${options.aside}）。` +
+    `${options.failed}件は失敗しています（理由は failures）。${VALIDATE_NOTE}`
+  );
 }
 
 /**
@@ -280,10 +316,12 @@ export async function runChunksBySampling<
       申告された名前をそのまま返す（複数あれば並べる）。
       **原稿の行き先も約束できない**ので、そこも断る。
     */
-    note:
-      "呼び出し元に考えてもらい、検算まで通しました" +
-      "（本文は呼び出し元へ渡っており、その先は呼び出し元の設定によります）。" +
-      VALIDATE_NOTE,
+    note: describeOutcome({
+      done: results.length,
+      failed: failures.length,
+      where: "呼び出し元に考えてもらい、",
+      aside: "本文は呼び出し元へ渡っており、その先は呼び出し元の設定によります",
+    }),
     model: models.size > 0 ? [...models].join(" / ") : "（不明）",
     results,
     failures,
