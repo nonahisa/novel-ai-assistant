@@ -31,9 +31,7 @@ import {
   CATCHPHRASE_SCHEMA,
   buildBlurbPrompt,
   buildCatchphrasePrompt,
-  type CatchphraseCandidate,
 } from "../prompts/blurb";
-import { stripCodeFence } from "../core/synopsisValidation";
 import { withCancellableProgress } from "../views/progress";
 import { reportAIError } from "./reportAIError";
 import {
@@ -620,48 +618,17 @@ async function writeSynopsisDoc(
   }
 }
 
-export function parseBlurbResponse(
-  text: string
-): { blurb: string; spoilerCheck: string | null } | null {
-  const value = parseJson(text);
-  if (!value || typeof value.blurb !== "string") return null;
-  const blurb = value.blurb.trim();
-  if (!blurb) return null;
-  return {
-    blurb,
-    spoilerCheck:
-      typeof value.spoilerCheck === "string" ? value.spoilerCheck : null,
-  };
-}
+import {
+  parseBlurbResponse,
+  parseCatchphraseResponse,
+} from "../core/blurbValidation";
 
-export function parseCatchphraseResponse(text: string): CatchphraseCandidate[] {
-  const value = parseJson(text);
-  if (!value || !Array.isArray(value.catchphrases)) return [];
-  return value.catchphrases
-    .filter(
-      (entry): entry is Record<string, unknown> =>
-        typeof entry === "object" && entry !== null && !Array.isArray(entry)
-    )
-    .filter((entry) => typeof entry.text === "string")
-    .map((entry) => ({
-      text: (entry.text as string).trim().replace(/\s+/g, " "),
-      kind: typeof entry.kind === "string" ? entry.kind : "",
-      intent: typeof entry.intent === "string" ? entry.intent : null,
-    }));
-}
-
-function parseJson(text: string): Record<string, unknown> | null {
-  try {
-    const value: unknown = JSON.parse(stripCodeFence(text));
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-      return null;
-    }
-    return value as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
+// **解析は core へ移した**（0.66.0。MCP の束から使うため。設計書6.87.3）。
+// 使う側の書き方は今までどおりでよい
+export {
+  parseBlurbResponse,
+  parseCatchphraseResponse,
+} from "../core/blurbValidation";
 
 async function exists(filePath: string): Promise<boolean> {
   try {

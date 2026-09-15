@@ -1,3 +1,4 @@
+import type { Character } from "../models/character";
 import { deriveReading } from "./reading";
 import { NAME_PART_SEPARATOR } from "./termIndex";
 
@@ -544,4 +545,43 @@ function buildReason(hit: RuleHit, a: NameUnit, b: NameUnit): string {
   if (other) notes.push(`相手は${KIND_LABEL[other]}です`);
 
   return notes.length > 0 ? `${head}。${notes.join("。")}` : head;
+}
+
+/** 資料のレコードを、衝突判定が読める形へ揃える（純粋関数：テストの対象） */
+export function buildNameEntries(source: {
+  characters: Array<Pick<Character, "id" | "name" | "reading" | "aliases">>;
+  abilities: Array<{ id: string; name: string; reading: string | null; aliases: string[] }>;
+  locations: Array<{ id: string; name: string; reading: string | null; aliases: string[] }>;
+  organizations: Array<{ id: string; name: string; reading: string | null; aliases: string[] }>;
+}): NameEntry[] {
+  const of = (
+    kind: NameEntry["kind"],
+    records: Array<{
+      id: string;
+      name: string;
+      reading: string | null;
+      aliases: string[];
+    }>
+  ): NameEntry[] =>
+    records
+      .filter((record) => record.name.trim())
+      .map((record) => ({
+        id: record.id,
+        kind,
+        name: record.name,
+        reading: record.reading,
+        aliases: record.aliases,
+      }));
+
+  return [
+    ...of("character", source.characters as Array<{
+      id: string;
+      name: string;
+      reading: string | null;
+      aliases: string[];
+    }>),
+    ...of("ability", source.abilities),
+    ...of("location", source.locations),
+    ...of("organization", source.organizations),
+  ];
 }

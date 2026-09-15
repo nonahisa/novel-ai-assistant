@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { McpToolError, describeError } from "./shared";
 import { askSampling } from "./sampling";
+import { ollamaGenerate } from "./ollama";
 
 /**
  * `run` ツールの返し方（設計書6.87.8 の5・6）。
@@ -213,6 +214,100 @@ export async function runByRunner<
     });
     return validate(item.chunkId, response.text);
   });
+}
+
+/**
+ * 1回で1つの答えを出す道具の入力（チャンクに切らないもの）。
+ *
+ * **作品を丸ごと見て1つ答える機能**——各話あらすじ・逸脱・単話プロット
+ * （6.87.8）と、0.66.0 で足した冒頭診断・名前の候補・プロット逆算・
+ * 章立て・紹介文がこれにあたる。
+ */
+export interface RunnerInput {
+  runner: RunnerKind;
+  /** どの作品か。**考えさせる許可を確かめるために要る**（設計書6.87.12） */
+  folder?: string;
+  endpoint?: string;
+  model?: string;
+  allowRemote?: boolean;
+  numCtx?: number;
+}
+
+export type OnceOutcome<T> =
+  | {
+      runner: "claude";
+      note: string;
+      systemPrompt: string;
+      userPrompt: string;
+      schema: unknown;
+      validateWith: string;
+    }
+  | { runner: "ollama"; model: string; result: T }
+  | { runner: "sampling"; model: string; result: T };
+
+/** `runOnce` が `ollama` のときに使う読み込み長さ */
+const ONCE_DEFAULT_NUM_CTX = 16384;
+
+/**
+ * 1回だけ通す（設計書6.87.8）。
+ *
+ * **チャンクが無いので `runChunks` は使わない**（1回で1つの答え）。
+ * 8つの機能が同じ形なので、ここへ寄せてある——**写しのままだと、行き先を
+ * 1つ足すたびに全部を直すことになる**（`sampling` を足したときに実際、
+ * 直し漏れそうになった）。
+ */
+export async function runOnce<T>(
+  input: RunnerInput,
+  prompt: {
+    systemPrompt: string;
+    schema: unknown;
+    userPrompt: string;
+    validateWith: string;
+  },
+  validate: (response: string) => T
+): Promise<OnceOutcome<T>> {
+  assertRunner(input.runner);
+  if (input.runner === "claude") {
+    return {
+      runner: "claude",
+      note: claudeNote(prompt.validateWith),
+      systemPrompt: prompt.systemPrompt,
+      userPrompt: prompt.userPrompt,
+      schema: prompt.schema,
+      validateWith: prompt.validateWith,
+    };
+  }
+  if (input.runner === "sampling") {
+    /*
+      **呼び出し元に考えてもらい、検算まで通す**（設計書6.87.12）。
+      ここも `claude` と違って往復が要らず、**検算を迂回する道が無い**。
+    */
+    const reply = await askSampling({
+      folder: input.folder,
+      systemPrompt: prompt.systemPrompt,
+      userPrompt: prompt.userPrompt,
+    });
+    return {
+      runner: "sampling",
+      model: reply.model,
+      result: validate(reply.text),
+    };
+  }
+
+  const model = input.model;
+  if (!model) {
+    throw new McpToolError("runner が ollama のときは model が要ります。");
+  }
+  const response = await ollamaGenerate({
+    endpoint: input.endpoint,
+    model,
+    systemPrompt: prompt.systemPrompt,
+    userPrompt: prompt.userPrompt,
+    schema: prompt.schema,
+    numCtx: input.numCtx ?? ONCE_DEFAULT_NUM_CTX,
+    allowRemote: input.allowRemote,
+  });
+  return { runner: "ollama", model, result: validate(response.text) };
 }
 
 /**

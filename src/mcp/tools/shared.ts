@@ -151,10 +151,87 @@ export function bodyDirOf(folder: string): string {
   return fs.existsSync(manuscripts) ? manuscripts : base;
 }
 
+/**
+ * 作品の名前。**フォルダーの名前を使う。**
+ *
+ * 台帳（`workRegistry.ts`）は `vscode` を引き込むので束へ持ち込めない。
+ * プロンプトでの使い道は「どの作品の話か」を伝えることなので、
+ * フォルダー名で足りる。**2か所が別々に書いていたのをここへ寄せた**
+ * （0.66.0。片方が末尾の区切りを落とさない書き方だった）。
+ */
+export function workTitleOf(folder: string): string {
+  return (
+    nodePath
+      .resolve(folder)
+      .split(/[\\/]/)
+      .filter(Boolean)
+      .pop() ?? ""
+  );
+}
+
 /** 設定資料の置き場所（`設定/`）。無ければ undefined */
 export function settingsDirOf(folder: string): string | undefined {
   const dir = nodePath.join(nodePath.resolve(folder), DEFAULT_SETTINGS_DIR);
   return fs.existsSync(dir) ? dir : undefined;
+}
+
+export interface OrderedEpisodeBody {
+  /** 作品フォルダーからの相対パス */
+  filePath: string;
+  /** 話数。読み取れなければ null */
+  chapter: number | null;
+  body: string;
+}
+
+/**
+ * 本文を**話数の順**に取り出す（0.66.0）。
+ *
+ * **名前順では足りない。** カクヨムからダウンロードした作品には
+ * `about.txt`（作品情報）が入っており、名前順では先頭に来る——
+ * **冒頭診断が、第1話ではなく作品説明を診断していた**
+ * （2026-09-16、作者の実データで見つけた。単体テストでは出なかった）。
+ *
+ * **製品の走査と同じ考えで並べる**（`core/scanner.ts` の `compareEpisodes`）。
+ * 話数の読めるものを先に、小さい順。読めないものは後ろへ置く——捨てはしない
+ * （話数の無い形で書いている作品もある）。
+ *
+ * 合本は中の話ごとに分ける（`episodeBodySources`）ので、**1ファイルに
+ * 全話が入っていても第1話を取り出せる。**
+ */
+export function orderedEpisodeBodies(folder: string): OrderedEpisodeBody[] {
+  const found: OrderedEpisodeBody[] = [];
+  for (const filePath of listBodyFiles(folder)) {
+    let text: string;
+    try {
+      text = readBody(folder, filePath);
+    } catch {
+      // 読めないファイルで止めない（競合マーカーのあるものもここ）
+      continue;
+    }
+    const parsed = parseEpisodeFileName(nodePath.basename(filePath));
+    for (const source of episodeBodySources(filePath, text, {
+      chapterStart: parsed.chapterStart,
+      chapterEnd: parsed.chapterEnd,
+    })) {
+      if (!source.body.trim()) continue;
+      found.push({
+        filePath,
+        chapter: source.chapterStart ?? null,
+        body: source.body,
+      });
+    }
+  }
+
+  return found.sort((left, right) => {
+    // **話数の読めないものは後ろへ**（製品の `compareEpisodes` と同じ）
+    if (left.chapter === null && right.chapter === null) {
+      return left.filePath.localeCompare(right.filePath, "ja");
+    }
+    if (left.chapter === null) return 1;
+    if (right.chapter === null) return -1;
+    if (left.chapter !== right.chapter) return left.chapter - right.chapter;
+    return left.filePath.localeCompare(right.filePath, "ja");
+  });
 }
 
 /** 本文フォルダーの `.txt`/`.md` を、名前順に並べて返す（作品フォルダーからの相対） */

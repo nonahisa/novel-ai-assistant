@@ -55,6 +55,16 @@ export const CORE_ENTRY_NAMES = [
   "notationAdviceValidation",
   "notationVariants",
   "knownCharacterNames",
+  /*
+    外から呼びたい「判断」を足した（0.66.0。作者の指示「ありそう部分を
+    実装してください」）。冒頭診断・名前の候補・プロット逆算・章立て・
+    紹介文——**どれも判断がAIの外に在る**（字数・衝突・実在する話数）。
+  */
+  "plotDoc",
+  "plotReverseValidation",
+  "chapterProposalValidation",
+  "blurbValidation",
+  "nameCollision",
 ];
 
 /**

@@ -54,13 +54,10 @@ import {
   readSettingsRecords,
   resolveInsideFolder,
 } from "./shared";
-import { ollamaGenerate } from "./ollama";
-import { askSampling } from "./sampling";
 import {
-  assertRunner,
-  claudeNote,
   responseInput,
-  type RunnerKind,
+  runOnce,
+  type RunnerInput,
 } from "./run";
 
 /**
@@ -452,86 +449,6 @@ export function episodePlotValidate(
 
 /* ── runner（3つとも同じ形）────────────────────────── */
 
-interface RunnerInput {
-  runner: RunnerKind;
-  /** どの作品か。**考えさせる許可を確かめるために要る**（設計書6.87.12） */
-  folder?: string;
-  endpoint?: string;
-  model?: string;
-  allowRemote?: boolean;
-  numCtx?: number;
-}
-
-
-/**
- * 1話ぶんを通す。3つの機能で形が同じなので、ここへ寄せてある。
- *
- * **チャンクが無いので `runChunks` は使わない**（1回で1つの答え）。
- */
-async function runOnce<T>(
-  input: RunnerInput,
-  prompt: {
-    systemPrompt: string;
-    schema: unknown;
-    userPrompt: string;
-    validateWith: string;
-  },
-  validate: (response: string) => T
-): Promise<
-  | {
-      runner: "claude";
-      note: string;
-      systemPrompt: string;
-      userPrompt: string;
-      schema: unknown;
-      validateWith: string;
-    }
-  | { runner: "ollama"; model: string; result: T }
-  | { runner: "sampling"; model: string; result: T }
-> {
-  assertRunner(input.runner);
-  if (input.runner === "claude") {
-    return {
-      runner: "claude",
-      note: claudeNote(prompt.validateWith),
-      systemPrompt: prompt.systemPrompt,
-      userPrompt: prompt.userPrompt,
-      schema: prompt.schema,
-      validateWith: prompt.validateWith,
-    };
-  }
-  if (input.runner === "sampling") {
-    /*
-      **呼び出し元に考えてもらい、検算まで通す**（設計書6.87.12）。
-      ここも `claude` と違って往復が要らず、**検算を迂回する道が無い**。
-    */
-    const reply = await askSampling({
-      folder: input.folder,
-      systemPrompt: prompt.systemPrompt,
-      userPrompt: prompt.userPrompt,
-    });
-    return {
-      runner: "sampling",
-      model: reply.model,
-      result: validate(reply.text),
-    };
-  }
-
-  const model = input.model;
-  if (!model) {
-    throw new McpToolError("runner が ollama のときは model が要ります。");
-  }
-  const response = await ollamaGenerate({
-    endpoint: input.endpoint,
-    model,
-    systemPrompt: prompt.systemPrompt,
-    userPrompt: prompt.userPrompt,
-    schema: prompt.schema,
-    numCtx: input.numCtx ?? 16384,
-    allowRemote: input.allowRemote,
-  });
-  return { runner: "ollama", model, result: validate(response.text) };
-}
 
 export async function synopsisRun(input: EpisodePromptInput & RunnerInput) {
   return runOnce(input, synopsisPrompt(input), (response) =>

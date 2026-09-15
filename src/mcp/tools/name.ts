@@ -1,0 +1,229 @@
+import { z } from "zod";
+import {
+  NAME_ORIGINS,
+  NAME_SUGGEST_COUNT,
+  NAME_SUGGEST_SCHEMA,
+  NAME_SUGGEST_SYSTEM_PROMPT,
+  NAME_SUGGEST_VERSION,
+  buildNameSuggestPrompt,
+  parseNameSuggest,
+  type NameOrigin,
+} from "../../prompts/nameSuggest";
+import { parseCharacter } from "../../models/character";
+import { parseAbility } from "../../models/ability";
+import { parseLocation } from "../../models/location";
+import { parseOrganization } from "../../models/organization";
+import {
+  buildNameEntries,
+  findNameCollisions,
+  screenNameCandidates,
+} from "../../core/nameCollision";
+import { isBlankPlotSection, parsePlotMarkdown } from "../../core/plotDoc";
+import {
+  FOLDER_INPUT,
+  McpToolError,
+  OLLAMA_INPUT,
+  RUNNER_INPUT,
+  SETTINGS_SUBDIRS,
+  readPlotMarkdown,
+  readSettingsRecords,
+  workTitleOf,
+} from "./shared";
+import { responseInput, runOnce, type RunnerInput } from "./run";
+
+/**
+ * 響きが重ならない名前の候補（P-29。設計書6.37）を外から呼ぶ（0.66.0）。
+ *
+ * **本文を送らない機能である。** 送るのは既にある名前の一覧と、
+ * プロットの世界観・舞台の節だけ——だから `runner` がどれでも、
+ * 原稿そのものは外へ出ない。**それでも `runner` は省略させない**
+ * （6.87.8 の5。名前と世界観も作品の中身である）。
+ *
+ * **判定はAIの仕事ではない。** どの候補が既存の名前と衝突するかは
+ * `screenNameCandidates`（読みと表記の規則だけ）が決める——**AIには
+ * 案を出させるだけ**で、通すかどうかはコードが決める（規則3）。
+ */
+
+const VALIDATE_WITH = "name.validate";
+
+const TARGET_INPUT = {
+  ...FOLDER_INPUT,
+  characterName: z
+    .string()
+    .describe("付け替えたい人物の、いまの名前（設定資料に在るとおり）"),
+  origin: z
+    .enum(NAME_ORIGINS as unknown as [string, ...string[]])
+    .optional()
+    .describe(
+      "名前の系統。省略すると、既にある名前から1つ推定させます（混ぜさせません）"
+    ),
+};
+
+export const NAME_PROMPT_INPUT = { ...TARGET_INPUT };
+
+export const NAME_VALIDATE_INPUT = {
+  ...TARGET_INPUT,
+  response: responseInput(),
+};
+
+export const NAME_RUN_INPUT = {
+  ...TARGET_INPUT,
+  ...RUNNER_INPUT,
+  ...OLLAMA_INPUT,
+};
+
+export interface NamePromptInput {
+  folder: string;
+  characterName: string;
+  origin?: string;
+}
+
+/** 資料をぜんぶ読んで、名前の一覧にする（人物・能力・場所・組織） */
+function readNameEntries(folder: string) {
+  return buildNameEntries({
+    characters: readSettingsRecords(
+      folder,
+      SETTINGS_SUBDIRS.characters,
+      parseCharacter
+    ).records,
+    abilities: readSettingsRecords(
+      folder,
+      SETTINGS_SUBDIRS.abilities,
+      parseAbility
+    ).records,
+    locations: readSettingsRecords(
+      folder,
+      SETTINGS_SUBDIRS.locations,
+      parseLocation
+    ).records,
+    organizations: readSettingsRecords(
+      folder,
+      SETTINGS_SUBDIRS.organizations,
+      parseOrganization
+    ).records,
+  });
+}
+
+/**
+ * 世界観と舞台の節。
+ *
+ * **名前の系統は、世界の作りから決まる。** ここが空だと、和風の作品に
+ * 西洋風の名前が並ぶことがある（`features/nameCheck.ts` と同じ材料）。
+ */
+function readSetting(folder: string): string {
+  const plot = readPlotMarkdown(folder);
+  if (!plot) return "";
+  const sections = parsePlotMarkdown(plot).sections;
+  return [sections.worldview, sections.setting]
+    .filter((body) => body && !isBlankPlotSection(body))
+    .map((body) => body.trim())
+    .join("\n");
+}
+
+export function namePrompt(input: NamePromptInput) {
+  const entries = readNameEntries(input.folder);
+  const target = entries.find(
+    (entry) => entry.kind === "character" && entry.name === input.characterName
+  );
+  if (!target) {
+    throw new McpToolError(
+      `「${input.characterName}」という人物が設定資料に見つかりません` +
+        `（居るのは ${entries
+          .filter((entry) => entry.kind === "character")
+          .map((entry) => entry.name)
+          .slice(0, 10)
+          .join("・")} などです）。`
+    );
+  }
+
+  const character = readSettingsRecords(
+    input.folder,
+    SETTINGS_SUBDIRS.characters,
+    parseCharacter
+  ).records.find((record) => record.name === input.characterName);
+
+  return {
+    promptVersion: NAME_SUGGEST_VERSION,
+    systemPrompt: NAME_SUGGEST_SYSTEM_PROMPT,
+    schema: NAME_SUGGEST_SCHEMA,
+    validateWith: VALIDATE_WITH,
+    /** 何件を避ける相手として渡したか。**材料の厚みを返り値に残す** */
+    existingCount: entries.length - 1,
+    hasSetting: readSetting(input.folder).length > 0,
+    userPrompt: buildNameSuggestPrompt({
+      workTitle: workTitleOf(input.folder),
+      currentName: input.characterName,
+      gender: character?.gender ?? "",
+      role: character?.role ?? "",
+      affiliation: character?.affiliation ?? "",
+      // **付け替える本人は「避ける相手」ではない**
+      existingNames: entries
+        .filter((entry) => entry.id !== target.id)
+        .map((entry) =>
+          entry.reading ? `${entry.name}（${entry.reading}）` : entry.name
+        ),
+      setting: readSetting(input.folder),
+      origin: input.origin as NameOrigin | undefined,
+    }),
+  };
+}
+
+export function nameValidate(input: NamePromptInput & { response: string }) {
+  const candidates = parseNameSuggest(input.response);
+  if (candidates.length === 0) {
+    throw new McpToolError(
+      "応答から候補を読み取れませんでした（名前の候補のスキーマに沿っていません）。"
+    );
+  }
+
+  /*
+    **通すかどうかはコードが決める**（CLAUDE.md 規則3）。AIは
+    「既にある名前と似ていないか」を当てにできない——`screenNameCandidates`
+    が読みと表記の規則だけで弾く。
+  */
+  const entries = readNameEntries(input.folder);
+  const target = entries.find(
+    (entry) => entry.kind === "character" && entry.name === input.characterName
+  );
+  const others = entries.filter((entry) => entry.id !== target?.id);
+  const screened = screenNameCandidates(candidates, others);
+
+  return {
+    /** 通った候補。**これが答えである** */
+    accepted: screened.kept,
+    /** 弾いた候補と、その理由。**黙って減らさない** */
+    rejected: screened.dropped,
+    asked: NAME_SUGGEST_COUNT,
+    note:
+      "通したかどうかはAIではなくコードが決めています" +
+      "（読みと表記の規則だけで、既にある名前と衝突しないかを見ました）。" +
+      "ここでは何も書き換えていません——付け替えは作者の操作で行います。",
+  };
+}
+
+export async function nameRun(input: NamePromptInput & RunnerInput) {
+  return runOnce(input, namePrompt(input), (response) =>
+    nameValidate({ ...input, response })
+  );
+}
+
+/**
+ * いま衝突している名前を、AIを使わずに挙げる（設計書6.37）。
+ *
+ * **AIが要らない判断は、AIに訊かない。** 読みと表記の規則だけで決まるので、
+ * こちらは `prompt`・`validate` を持たない1本の道具にしてある
+ * （表記ゆれの `detect` と同じ形。6.87.8）。
+ */
+export const NAME_COLLISIONS_INPUT = { ...FOLDER_INPUT };
+
+export function nameCollisions(input: { folder: string }) {
+  const found = findNameCollisions(readNameEntries(input.folder));
+  return {
+    collisions: found.collisions,
+    /** 読みが取れなかったもの。**判定の外に置いたことを隠さない** */
+    unreadable: found.unreadable,
+    note:
+      "判定はAIを使わず、読みと表記の規則だけで行っています。" +
+      "何も書き換えていません。",
+  };
+}

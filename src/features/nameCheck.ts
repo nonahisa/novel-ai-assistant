@@ -13,10 +13,14 @@ import {
 import { expandNameVariants } from "../core/termIndex";
 import { findNameOccurrences } from "../core/nameOccurrences";
 import {
+  buildNameEntries,
   findNameCollisions,
   screenNameCandidates,
   type NameEntry,
 } from "../core/nameCollision";
+// **切り出した先を再輸出する**（0.66.0。MCP の束から使うため core へ移した）。
+// 使う側（テスト・画面）の書き方は今までどおりでよい
+export { buildNameEntries } from "../core/nameCollision";
 import { readPlotText } from "../core/plotFile";
 import { isBlankPlotSection, parsePlotMarkdown } from "../core/plotDoc";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
@@ -240,44 +244,6 @@ async function buildNameCheckData(work: WorkEntry) {
   };
 }
 
-/** 資料のレコードを、衝突判定が読める形へ揃える（純粋関数：テストの対象） */
-export function buildNameEntries(source: {
-  characters: Array<Pick<Character, "id" | "name" | "reading" | "aliases">>;
-  abilities: Array<{ id: string; name: string; reading: string | null; aliases: string[] }>;
-  locations: Array<{ id: string; name: string; reading: string | null; aliases: string[] }>;
-  organizations: Array<{ id: string; name: string; reading: string | null; aliases: string[] }>;
-}): NameEntry[] {
-  const of = (
-    kind: NameEntry["kind"],
-    records: Array<{
-      id: string;
-      name: string;
-      reading: string | null;
-      aliases: string[];
-    }>
-  ): NameEntry[] =>
-    records
-      .filter((record) => record.name.trim())
-      .map((record) => ({
-        id: record.id,
-        kind,
-        name: record.name,
-        reading: record.reading,
-        aliases: record.aliases,
-      }));
-
-  return [
-    ...of("character", source.characters as Array<{
-      id: string;
-      name: string;
-      reading: string | null;
-      aliases: string[];
-    }>),
-    ...of("ability", source.abilities),
-    ...of("location", source.locations),
-    ...of("organization", source.organizations),
-  ];
-}
 
 /**
  * 本文のどこに誰が出ているかを数える。

@@ -12,6 +12,54 @@ import { assertExternalAccessAllowed } from "./tools/permission";
 import { setSamplingHost } from "./tools/sampling";
 import { WORK_SCAN_INPUT, workScan } from "./tools/workScan";
 import {
+  OPENING_PROMPT_INPUT,
+  OPENING_RUN_INPUT,
+  OPENING_VALIDATE_INPUT,
+  openingPrompt,
+  openingRun,
+  openingValidate,
+} from "./tools/opening";
+import {
+  NAME_COLLISIONS_INPUT,
+  NAME_PROMPT_INPUT,
+  NAME_RUN_INPUT,
+  NAME_VALIDATE_INPUT,
+  nameCollisions,
+  namePrompt,
+  nameRun,
+  nameValidate,
+} from "./tools/name";
+import {
+  PLOT_REVERSE_PROMPT_INPUT,
+  PLOT_REVERSE_RUN_INPUT,
+  PLOT_REVERSE_VALIDATE_INPUT,
+  plotReversePrompt,
+  plotReverseRun,
+  plotReverseValidate,
+} from "./tools/plot";
+import {
+  CHAPTER_PROMPT_INPUT,
+  CHAPTER_RUN_INPUT,
+  CHAPTER_VALIDATE_INPUT,
+  chapterPrompt,
+  chapterRun,
+  chapterValidate,
+} from "./tools/chapter";
+import {
+  BLURB_PROMPT_INPUT,
+  BLURB_RUN_INPUT,
+  BLURB_VALIDATE_INPUT,
+  CATCHPHRASE_PROMPT_INPUT,
+  CATCHPHRASE_RUN_INPUT,
+  CATCHPHRASE_VALIDATE_INPUT,
+  blurbPrompt,
+  blurbRun,
+  blurbValidate,
+  catchphrasePrompt,
+  catchphraseRun,
+  catchphraseValidate,
+} from "./tools/blurb";
+import {
   OLLAMA_GENERATE_INPUT,
   ollamaGenerate,
   type OllamaGenerateInput,
@@ -623,6 +671,247 @@ server.registerTool(
     inputSchema: NOTATION_RUN_INPUT,
   },
   tool("notation.run", notationRun)
+);
+
+/* ── 外から呼びたい「判断」（0.66.0。作者の指示） ──────────── */
+
+server.registerTool(
+  "opening.prompt",
+  {
+    title: "冒頭診断のプロンプトを組む",
+    description:
+      "第1話の冒頭（先頭3000字）と、プロットのジャンル・ログラインから、" +
+      "「読者に何が伝わるか」を診断するプロンプトを組みます。" +
+      `応答は opening.validate へ戻してください。${VALIDATE_NOTE}`,
+    inputSchema: OPENING_PROMPT_INPUT,
+  },
+  tool("opening.prompt", openingPrompt)
+);
+
+server.registerTool(
+  "opening.validate",
+  {
+    title: "冒頭診断の応答を検算する",
+    description: `製品と同じ解析を通します。${VALIDATE_NOTE}`,
+    inputSchema: OPENING_VALIDATE_INPUT,
+  },
+  tool("opening.validate", openingValidate)
+);
+
+server.registerTool(
+  "opening.run",
+  {
+    title: "冒頭診断を通す",
+    description:
+      "runner が ollama なら手元の Ollama で検算まで通します（原稿は外へ出ません）。" +
+      "claude ならプロンプトだけを返します（本文が Anthropic へ渡ります）。" +
+      "sampling なら呼び出し元に考えてもらい、検算まで通します。" +
+      "runner は省略できません。プロットが無くても診断できます（材料が1つ減るだけです）。",
+    inputSchema: OPENING_RUN_INPUT,
+  },
+  tool("opening.run", openingRun)
+);
+
+server.registerTool(
+  "name.collisions",
+  {
+    title: "響きの重なっている名前を挙げる",
+    description:
+      "AIを使いません。人物・能力・場所・組織の名前を読みと表記の規則だけで突き合わせ、" +
+      "紛らわしい組を返します。何も書き換えません。",
+    inputSchema: NAME_COLLISIONS_INPUT,
+  },
+  tool("name.collisions", nameCollisions)
+);
+
+server.registerTool(
+  "name.prompt",
+  {
+    title: "名前の候補のプロンプトを組む",
+    description:
+      "既にある名前の一覧（読みつき）と、プロットの世界観・舞台の節から、" +
+      "響きの重ならない名前の候補を出させるプロンプトを組みます。**本文は送りません。**" +
+      `応答は name.validate へ戻してください。${VALIDATE_NOTE}`,
+    inputSchema: NAME_PROMPT_INPUT,
+  },
+  tool("name.prompt", namePrompt)
+);
+
+server.registerTool(
+  "name.validate",
+  {
+    title: "名前の候補を検算する",
+    description:
+      "AIが出した候補のうち、既にある名前と衝突しないものだけを残します。" +
+      `判定は読みと表記の規則だけで行い、AIの自己申告は使いません。${VALIDATE_NOTE}`,
+    inputSchema: NAME_VALIDATE_INPUT,
+  },
+  tool("name.validate", nameValidate)
+);
+
+server.registerTool(
+  "name.run",
+  {
+    title: "名前の候補を通す",
+    description:
+      "runner が ollama なら手元の Ollama で検算まで通します。claude ならプロンプトだけを返します。" +
+      "sampling なら呼び出し元に考えてもらい、検算まで通します。runner は省略できません。" +
+      "**送るのは名前の一覧と世界観の節だけで、本文は送りません。** 付け替えは行いません。",
+    inputSchema: NAME_RUN_INPUT,
+  },
+  tool("name.run", nameRun)
+);
+
+server.registerTool(
+  "plot.reversePrompt",
+  {
+    title: "プロット逆算のプロンプトを組む",
+    description:
+      "各話あらすじ・冒頭の本文・登場人物・世界観・場所から、書かれた本文を読んで" +
+      "プロットを起こし直すプロンプトを組みます。**各話あらすじが無ければ断ります**" +
+      "（冒頭だけで中盤以降を推測すると、本文に無い筋書きが混ざるため）。" +
+      `応答は plot.reverseValidate へ戻してください。${VALIDATE_NOTE}`,
+    inputSchema: PLOT_REVERSE_PROMPT_INPUT,
+  },
+  tool("plot.reversePrompt", plotReversePrompt)
+);
+
+server.registerTool(
+  "plot.reverseValidate",
+  {
+    title: "プロット逆算の応答を検算する",
+    description:
+      "節ごとに取り出し、目安の字数を超えたものを知らせます（捨てません）。" +
+      `設定/plot.md は書き換えません。${VALIDATE_NOTE}`,
+    inputSchema: PLOT_REVERSE_VALIDATE_INPUT,
+  },
+  tool("plot.reverseValidate", plotReverseValidate)
+);
+
+server.registerTool(
+  "plot.reverseRun",
+  {
+    title: "プロット逆算を通す",
+    description:
+      "runner が ollama なら手元の Ollama で検算まで通します（原稿は外へ出ません）。" +
+      "claude ならプロンプトだけを返します（本文が Anthropic へ渡ります）。" +
+      "sampling なら呼び出し元に考えてもらい、検算まで通します。" +
+      "runner は省略できません。設定/plot.md は書き換えません。",
+    inputSchema: PLOT_REVERSE_RUN_INPUT,
+  },
+  tool("plot.reverseRun", plotReverseRun)
+);
+
+server.registerTool(
+  "chapter.proposePrompt",
+  {
+    title: "章立てのプロンプトを組む",
+    description:
+      "話数・サブタイトル・各話あらすじを話数順に並べて、章の区切りと名前を提案させます" +
+      "（合本は中の話を1話ずつ並べます）。nameOnly を渡すと、区切りを動かさず名前だけ出させます。" +
+      `応答は chapter.proposeValidate へ戻してください。${VALIDATE_NOTE}`,
+    inputSchema: CHAPTER_PROMPT_INPUT,
+  },
+  tool("chapter.proposePrompt", chapterPrompt)
+);
+
+server.registerTool(
+  "chapter.proposeValidate",
+  {
+    title: "章立ての応答を検算する",
+    description:
+      "実在する話数だけを区切りとして通します（AIが出した番号をそのままには使いません）。" +
+      `設定/章立て.json は書き換えません。${VALIDATE_NOTE}`,
+    inputSchema: CHAPTER_VALIDATE_INPUT,
+  },
+  tool("chapter.proposeValidate", chapterValidate)
+);
+
+server.registerTool(
+  "chapter.proposeRun",
+  {
+    title: "章立ての提案を通す",
+    description:
+      "runner が ollama なら手元の Ollama で検算まで通します。claude ならプロンプトだけを返します。" +
+      "sampling なら呼び出し元に考えてもらい、検算まで通します。runner は省略できません。" +
+      "設定/章立て.json は書き換えません。",
+    inputSchema: CHAPTER_RUN_INPUT,
+  },
+  tool("chapter.proposeRun", chapterRun)
+);
+
+server.registerTool(
+  "blurb.prompt",
+  {
+    title: "作品紹介文のプロンプトを組む",
+    description:
+      "プロット・冒頭の本文・各話あらすじ（前半）から、投稿サイトに貼る紹介文を書かせます。" +
+      `応答は blurb.validate へ戻してください。${VALIDATE_NOTE}`,
+    inputSchema: BLURB_PROMPT_INPUT,
+  },
+  tool("blurb.prompt", blurbPrompt)
+);
+
+server.registerTool(
+  "blurb.validate",
+  {
+    title: "作品紹介文を検算する",
+    description:
+      "字数をコードで測り直します（短すぎ・長すぎの両方）。**捨てずに、外れたことを知らせます**" +
+      `——投稿サイトによって上限が違うためです。${VALIDATE_NOTE}`,
+    inputSchema: BLURB_VALIDATE_INPUT,
+  },
+  tool("blurb.validate", blurbValidate)
+);
+
+server.registerTool(
+  "blurb.run",
+  {
+    title: "作品紹介文を通す",
+    description:
+      "runner が ollama なら手元の Ollama で検算まで通します（原稿は外へ出ません）。" +
+      "claude ならプロンプトだけを返します（本文が Anthropic へ渡ります）。" +
+      "sampling なら呼び出し元に考えてもらい、検算まで通します。runner は省略できません。",
+    inputSchema: BLURB_RUN_INPUT,
+  },
+  tool("blurb.run", blurbRun)
+);
+
+server.registerTool(
+  "blurb.catchphrasePrompt",
+  {
+    title: "キャッチコピーのプロンプトを組む",
+    description:
+      "方向性の違う3案を出させます（謎・引き／感情・関係性／世界観・スケール）。" +
+      "前に採用しなかった案を rejected で渡すと、同じものを避けます。" +
+      `応答は blurb.catchphraseValidate へ戻してください。${VALIDATE_NOTE}`,
+    inputSchema: CATCHPHRASE_PROMPT_INPUT,
+  },
+  tool("blurb.catchphrasePrompt", catchphrasePrompt)
+);
+
+server.registerTool(
+  "blurb.catchphraseValidate",
+  {
+    title: "キャッチコピーを検算する",
+    description:
+      "字数に収まる案だけを残し、落としたものは理由とともに返します。" +
+      `${VALIDATE_NOTE}`,
+    inputSchema: CATCHPHRASE_VALIDATE_INPUT,
+  },
+  tool("blurb.catchphraseValidate", catchphraseValidate)
+);
+
+server.registerTool(
+  "blurb.catchphraseRun",
+  {
+    title: "キャッチコピーを通す",
+    description:
+      "runner が ollama なら手元の Ollama で検算まで通します。claude ならプロンプトだけを返します。" +
+      "sampling なら呼び出し元に考えてもらい、検算まで通します。runner は省略できません。",
+    inputSchema: CATCHPHRASE_RUN_INPUT,
+  },
+  tool("blurb.catchphraseRun", catchphraseRun)
 );
 
 server.registerTool(
