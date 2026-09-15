@@ -34,7 +34,12 @@ function stubModel(
     name: overrides.name ?? "GPT-X",
     vendor: overrides.vendor ?? "copilot",
     family: overrides.family ?? "gpt",
-    version: overrides.version ?? "1",
+    /*
+      **既定は id ごとに別にする。** 同じ `version` は「同じ実体の別名」
+      として畳まれる（実装の `usableModels`）ので、作り物で共有すると
+      **関係ないモデルまで1つにまとまり、テストが実物と違う形になる。**
+    */
+    version: overrides.version ?? `v-${overrides.id ?? "gpt-x"}`,
     maxInputTokens: overrides.maxInputTokens ?? 128000,
     sent,
     async sendRequest(messages: unknown[]) {
@@ -279,5 +284,142 @@ describe("ブラウザ版でも選べる", () => {
     const provider = new VsCodeLmProvider();
     const kept = filterProvidersForRuntime([provider], false);
     expect(kept).toHaveLength(1);
+  });
+});
+
+/**
+ * **選択肢が多い**（作者の実機、2026-09-16：23件返った）。
+ *
+ * 作者の指摘：「選択肢が多すぎる印象です。無料か有料かを判断して、
+ * オート等使えるものだけ出したほうが良いかもしれません」。
+ *
+ * **落とさずに、順番だけ変える。** どれが使えるかを機械で見分ける手立てが
+ * （VS Code 1.90 の型には）無いので、**当て推量で選択肢を消さない**。
+ * Copilot の無料枠は**自動選択しか使えない**ので、先頭に置く値打ちは高い。
+ */
+describe("選択肢の並び", () => {
+  test("**自動選択を先頭に置く**", async () => {
+    setStubChatModels([
+      stubModel({ id: "gpt-4o-mini", name: "GPT-4o mini", family: "gpt-4o-mini" }),
+      stubModel({ id: "auto", name: "Auto", family: "auto" }),
+      stubModel({ id: "claude", name: "Claude", family: "claude" }),
+    ]);
+    const models = await new VsCodeLmProvider().listModels();
+    expect(models[0].displayName).toContain("Auto");
+  });
+
+  test("落とさない（件数は変わらない）", async () => {
+    // **当て推量で消すと、使えるものまで落とす**
+    setStubChatModels([
+      stubModel({ id: "auto" }),
+      stubModel({ id: "a" }),
+      stubModel({ id: "b" }),
+    ]);
+    const models = await new VsCodeLmProvider().listModels();
+    expect(models).toHaveLength(3);
+  });
+
+  test("自動選択が無ければ、並びはそのまま", async () => {
+    setStubChatModels([
+      stubModel({ id: "a", name: "A" }),
+      stubModel({ id: "b", name: "B" }),
+    ]);
+    const models = await new VsCodeLmProvider().listModels();
+    expect(models.map((m) => m.displayName)).toEqual([
+      "A（copilot）",
+      "B（copilot）",
+    ]);
+  });
+
+  test("automatic のような別の語を、自動選択と読み違えない", async () => {
+    // `\bauto\b` で見るので、語の一部には当たらない
+    setStubChatModels([
+      stubModel({ id: "autobots", name: "Autobots", family: "x" }),
+      stubModel({ id: "plain", name: "Plain", family: "y" }),
+    ]);
+    const models = await new VsCodeLmProvider().listModels();
+    expect(models[0].displayName).toContain("Autobots");
+  });
+});
+
+/**
+ * **作者の環境で実際に返った23件**（2026-09-16 のログ）を、そのまま通す。
+ *
+ * > 選択肢が多すぎる印象です。無料か有料かを判断して、オート等使えるものだけ
+ * > 出したほうが良いかもしれません
+ *
+ * 23件の正体は、**16件が手元の Ollama の二重掲載**だった
+ * （`ollama` と `ollama-models` で同じ8つ）。ほかに、本文を1文字も送れない
+ * もの（`maxInputTokens: 0`）と、同じ実体の別名が混ざっていた。
+ *
+ * **作り物の数字ではなく、実物で確かめる。** ここが緩むと、次に顔ぶれが
+ * 変わったときに「なぜこの規則なのか」が分からなくなる。
+ */
+describe("作者の実環境の23件を絞る", () => {
+  /** ログから起こした実物（`sendRequest` だけ足す） */
+  const REAL = [
+    { id: "gpt-4o-mini", vendor: "copilot", family: "gpt-4o-mini", version: "gpt-4o-mini-2024-07-18", name: "GPT-4o mini", maxInputTokens: 12078 },
+    { id: "auto", vendor: "copilot", family: "claude-fable-5.1", version: "claude-fable-5.1", name: "Auto", maxInputTokens: 935793 },
+    { id: "copilot-utility-small", vendor: "copilot", family: "copilot-utility-small", version: "gpt-4o-mini-2024-07-18", name: "GPT-4o mini", maxInputTokens: 12078 },
+    { id: "copilot-utility", vendor: "copilot", family: "copilot-utility", version: "gpt-5-mini", name: "GPT-5 mini", maxInputTokens: 127790 },
+    { id: "copilot-dictation-cleanup-luna", vendor: "copilot", family: "copilot-dictation-cleanup-luna", version: "gpt-5.6-luna", name: "GPT-5.6 Luna", maxInputTokens: 921793 },
+    { id: "gpt-5.6-luna", vendor: "copilot", family: "gpt-5.6-luna", version: "gpt-5.6-luna", name: "GPT-5.6 Luna", maxInputTokens: 921793 },
+    { id: "auto", vendor: "copilotcli", family: "", version: "", name: "Auto", maxInputTokens: 0 },
+    ...["gemma4:26b", "qwen3:8b", "qwen3.8:latest", "bge-m3:latest", "gemma4:12b", "gemma4:e4b", "gemma4:latest", "gemma3:12b"].map(
+      (id) => ({ id, vendor: "ollama", family: id, version: "1.0.0", name: id, maxInputTokens: 126976 })
+    ),
+    ...["gemma4:26b", "qwen3:8b", "qwen3.8:latest", "bge-m3:latest", "gemma4:12b", "gemma4:e4b", "gemma4:latest", "gemma3:12b"].map(
+      (id) => ({ id, vendor: "ollama-models", family: "gemma4", version: "1.0", name: id, maxInputTokens: 126976 })
+    ),
+  ].map((one) => stubModel(one));
+
+  test("23件が4件になる", async () => {
+    expect(REAL).toHaveLength(23);
+    setStubChatModels(REAL);
+    const models = await new VsCodeLmProvider().listModels();
+    expect(models.map((m) => m.displayName)).toEqual([
+      // **Auto が先頭**（Copilot の無料枠は自動選択しか使えない）
+      "Auto（copilot）",
+      "GPT-4o mini（copilot）",
+      "GPT-5 mini（copilot）",
+      "GPT-5.6 Luna（copilot）",
+    ]);
+  });
+
+  test("**手元の Ollama の又借りを落とす**（16件ぶん）", async () => {
+    setStubChatModels(REAL);
+    const models = await new VsCodeLmProvider().listModels();
+    /*
+      この製品は Ollama を直に繋げる。又借りすると `num_ctx` も
+      JSONスキーマも渡せず、**明確に劣る**（CLAUDE.md 規則6）。
+    */
+    expect(models.some((m) => m.displayName.includes("gemma"))).toBe(false);
+    expect(models.some((m) => m.displayName.includes("qwen"))).toBe(false);
+  });
+
+  test("**本文を1文字も送れないものを落とす**", async () => {
+    setStubChatModels(REAL);
+    const models = await new VsCodeLmProvider().listModels();
+    // copilotcli の Auto は maxInputTokens が 0 だった
+    expect(models.some((m) => m.displayName.includes("copilotcli"))).toBe(false);
+  });
+
+  test("**同じ実体の別名を畳み、素直な名前を残す**", async () => {
+    setStubChatModels(REAL);
+    const models = await new VsCodeLmProvider().listModels();
+    const ids = models.map((m) => m.id);
+    // gpt-4o-mini と copilot-utility-small は同じ version
+    expect(ids).toContain("gpt-4o-mini");
+    expect(ids).not.toContain("copilot-utility-small");
+    // gpt-5.6-luna と copilot-dictation-cleanup-luna も同じ version
+    expect(ids).toContain("gpt-5.6-luna");
+    expect(ids).not.toContain("copilot-dictation-cleanup-luna");
+  });
+
+  test("読める長さは、そのまま引き継ぐ", async () => {
+    setStubChatModels(REAL);
+    const models = await new VsCodeLmProvider().listModels();
+    const auto = models.find((m) => m.id === "auto");
+    expect(auto?.contextWindow).toBe(935793);
   });
 });

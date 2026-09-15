@@ -71,6 +71,82 @@ function describeModel(model: vscode.LanguageModelChat): string {
 }
 
 /**
+ * 手元のAIを、VS Code 経由で又借りしている提供元。
+ *
+ * **落とす。** この製品は Ollama を**直に繋げる**（`OllamaProvider`）。
+ * 又借りすると遠回りなうえ、**`num_ctx` を渡せず、JSONスキーマも渡せない**
+ * ——CLAUDE.md 規則6の「`num_ctx` を必ず明示する」を満たせないので、
+ * 入力が黙って切り捨てられる。**明確に劣る道を選択肢に残さない。**
+ *
+ * 作者の環境では、この2つで**16件**を占めていた（同じ8つが二重に出る）。
+ */
+const RELAYED_LOCAL_VENDORS = new Set(["ollama", "ollama-models"]);
+
+/**
+ * 本文を送れる最低限の長さ。
+ *
+ * **0 を返す提供元が実在する**（作者の環境の `copilotcli` の Auto）。
+ * そこへ本文を送っても1文字も入らない。**選ばせてはいけない。**
+ */
+const MIN_USABLE_INPUT_TOKENS = 1000;
+
+/**
+ * 選ばせてよいモデルだけにする（作者の指摘、2026-09-16「選択肢が多すぎる」）。
+ *
+ * **落とす根拠は、全部ログの実物にある**——当て推量で消していない。
+ *
+ * 1. **本文が入らないもの**（`maxInputTokens` が極端に小さい）
+ * 2. **手元のAIの又借り**（上の断り書き）
+ * 3. **同じ実体の別名**——`version` が同じものは同じモデルである。
+ *    作者の環境では `gpt-4o-mini` と `copilot-utility-small` が
+ *    同じ `gpt-4o-mini-2024-07-18`、`gpt-5.6-luna` と
+ *    `copilot-dictation-cleanup-luna` が同じ `gpt-5.6-luna` だった。
+ *    **素直な名前のほうを残す**（`id` が短いほう）
+ */
+export function usableModels(
+  models: readonly vscode.LanguageModelChat[]
+): vscode.LanguageModelChat[] {
+  const kept = models.filter(
+    (model) =>
+      !RELAYED_LOCAL_VENDORS.has(model.vendor) &&
+      (model.maxInputTokens ?? 0) >= MIN_USABLE_INPUT_TOKENS
+  );
+
+  /*
+    **同じ実体を畳む。** `version` が空のものは畳まない——
+    空どうしを同じと見なすと、無関係なモデルまでまとめてしまう。
+  */
+  const byVersion = new Map<string, vscode.LanguageModelChat>();
+  const noVersion: vscode.LanguageModelChat[] = [];
+  for (const model of kept) {
+    const version = model.version?.trim();
+    if (!version) {
+      noVersion.push(model);
+      continue;
+    }
+    const found = byVersion.get(version);
+    if (!found || model.id.length < found.id.length) {
+      byVersion.set(version, model);
+    }
+  }
+
+  // **元の並びを保つ**（提供元が意味のある順で返しているかもしれない）
+  const survivors = new Set([...byVersion.values(), ...noVersion]);
+  return kept.filter((model) => survivors.has(model));
+}
+
+/**
+ * 提供元にまかせる「自動選択」か。
+ *
+ * **名前で見分ける。** 型（VS Code 1.90）には、そうと分かる欄が無い。
+ * 外しても**順番が変わらないだけ**で、選択肢は落とさないので害は小さい
+ * ——落とす判断に名前を使うのは危ういが、並べ替えなら許される。
+ */
+function isAutoModel(model: vscode.LanguageModelChat): boolean {
+  return /\bauto\b/i.test(model.id) || /\bauto\b/i.test(model.family ?? "");
+}
+
+/**
  * 記録に出すための、そのままの姿。
  *
  * **型（VS Code 1.90 の定義）に無い欄も拾う。** 作者の VS Code は 1.137 で、
@@ -237,7 +313,24 @@ export class VsCodeLmProvider implements AIProvider {
   }
 
   async listModels(): Promise<ModelInfo[]> {
-    return (await this.chatModels()).map((model) => this.toModelInfo(model));
+    /*
+      **自動選択を先頭に置く**（作者の指摘、2026-09-16「選択肢が多すぎる」
+      「オート等使えるものだけ出したほうが良い」）。
+
+      作者の環境では**23件**返った。その中の「Auto」は、**提供元が
+      そのとき使えるモデルを選んでくれる**ので、契約や枠が変わっても
+      外れにくい——Copilot の無料枠は**自動選択しか使えない**ので、
+      個別のモデルを選ばせると枠を持たない作者が必ず失敗する。
+
+      **落とさずに、順番だけ変える。** どれが使えるかを機械で見分ける
+      手立てが（VS Code 1.90 の型には）無いので、**こちらの当て推量で
+      選択肢を消さない**。読める長さや提供元は一覧に出るので、
+      作者が選べる状態は保つ。
+    */
+    const usable = usableModels(await this.chatModels());
+    const auto = usable.filter((model) => isAutoModel(model));
+    const rest = usable.filter((model) => !isAutoModel(model));
+    return [...auto, ...rest].map((model) => this.toModelInfo(model));
   }
 
   async getModel(id: string): Promise<ModelInfo | undefined> {

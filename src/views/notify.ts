@@ -51,10 +51,29 @@ export const DONE_MESSAGE_TIMEOUT_MS = 6000;
  *
  * ステータスバーは数秒で消えるので、**同じ文言を操作ログにも残す。**
  * 「さっき何をしたか」をあとから追えるようにするため（`showLog`）。
+ *
+ * **ステータスバーへは1行しか渡さない**（作者の実機報告、2026-09-16
+ * 「最下部の青い帯部分に２行表示されましたが、はみ出していて読めません
+ * でした」）。ステータスバーは1行で、右側にほかの項目（Git・文字数・
+ * 起動中の印）が並ぶので、**長い文はそこで切れる。**
+ *
+ * **読ませたい注意ほど、ステータスバーに置いてはいけない。** 課金の断りが
+ * まさにそれで、いちばん読んでほしいものが読めなくなっていた。
+ * 添える注意は `notes` で渡す——**通知（右下）で出す**ので消えても
+ * 読み返せるし、ログにも残る。
  */
-export function notifyDone(text: string): void {
-  vscode.window.setStatusBarMessage(`$(check) ${text}`, DONE_MESSAGE_TIMEOUT_MS);
-  logStep(text);
+export function notifyDone(text: string, notes: readonly string[] = []): void {
+  // **1行だけ。** 渡された文に改行があれば、そこから先は落とす
+  const headline = text.split("\n")[0];
+  vscode.window.setStatusBarMessage(
+    `$(check) ${headline}`,
+    DONE_MESSAGE_TIMEOUT_MS
+  );
+  // ログには全部残す（あとから追えるように）
+  logStep([text, ...notes].join("\n"));
+  if (notes.length > 0) {
+    void vscode.window.showInformationMessage(notes.join("\n"));
+  }
 }
 
 /**

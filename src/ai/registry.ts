@@ -626,11 +626,12 @@ export async function runSetupWizard(
     );
   }
 
-  notifyDone(
-    `${provider.displayName} / ${m.displayName} を設定しました。${
-      notes.length > 0 ? "\n" + notes.join("\n") : ""
-    }`
-  );
+  /*
+    **注意はステータスバーへ混ぜない**（作者の実機報告、2026-09-16）。
+    混ぜると1行に収まらず、**いちばん読んでほしい課金の断りが切れる。**
+    短い結果だけを帯に出し、注意は通知で出す（`notifyDone`）。
+  */
+  notifyDone(`${provider.displayName} / ${m.displayName} を設定しました。`, notes);
   return true;
 }
 
