@@ -182,7 +182,23 @@ server.registerTool(
       "このMCPサーバー（＝統合小説執筆環境の束）の版を返します。" +
       "拡張機能の版と一致しているはずで、ずれていたら束ね直し（npm run build）が要ります。",
   },
-  tool("mcp.version", () => ({ version: SERVER_VERSION, name: SERVER_NAME }))
+  tool("mcp.version", () => ({
+    version: SERVER_VERSION,
+    name: SERVER_NAME,
+    /*
+      **呼んでいる相手が何をできるかを返す**（0.64.9）。
+
+      使い道は2つ。①記録（6.87.9）に残る名乗りと突き合わせられる
+      ②**`sampling` を名乗るかが分かる**——サーバーからクライアントへ
+      「これを考えてほしい」と頼めるかどうかは、**実際に繋いで訊くまで
+      分からない**（対応は実装ごとに違う）。外の状態を文書だけで判断しない
+      （CLAUDE.md の「繰り返し起きた失敗」4）。
+
+      **名乗りは自己申告**なので、身元の証明ではない。
+    */
+    client: server.server.getClientVersion() ?? null,
+    clientCapabilities: server.server.getClientCapabilities() ?? null,
+  }))
 );
 
 server.registerTool(
