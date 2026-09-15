@@ -1,4 +1,8 @@
 import { ACTOR_MARKS, ACTOR_STYLES, ACTOR_KINDS } from "../models/actor";
+import {
+  EXTERNAL_EXPOSURE_LABELS,
+  EXTERNAL_EXPOSURE_MARKS,
+} from "../core/externalAccessLog";
 
 /**
  * 編集履歴の画面（設計書5.6）。
@@ -79,6 +83,43 @@ ${colorRules}
 
 .empty { color: var(--vscode-descriptionForeground); padding: 20px 0; }
 .hidden { display: none; }
+
+/*
+  外部AIの欄は、編集履歴と**見た目から分ける**。
+  同じ形で並べると、外部AIが原稿を直したように読める。
+*/
+.section {
+  margin-top: 26px;
+  border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+  padding-top: 14px;
+}
+.section h2 { font-size: 14px; margin: 0 0 4px; }
+.access {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 0 5px 10px;
+  border-left: 3px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+  margin-bottom: 4px;
+}
+/* **本文が外へ出た回だけは目立たせる。** そこだけは見落とされては困る */
+.access.body { border-left-color: var(--vscode-errorForeground); }
+.access.body .exposure { color: var(--vscode-errorForeground); font-weight: 600; }
+.access .tool { font-family: var(--vscode-editor-font-family); }
+.access .exposure { font-size: 12px; }
+.access .meta { color: var(--vscode-descriptionForeground); font-size: 11px; }
+.access .time { color: var(--vscode-descriptionForeground); font-size: 11px; margin-left: auto; }
+.access.failed .tool { text-decoration: line-through; opacity: 0.7; }
+
+/* いまの許可の状態。**記録より先に目に入る位置に置く** */
+.permission {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--vscode-charts-green, #6a8f3d);
+  font-weight: 600;
+}
+.permission.allowed { border-left-color: var(--vscode-errorForeground); }
 </style>
 </head>
 <body>
@@ -95,6 +136,13 @@ ${ACTOR_KINDS.map(
 </div>
 
 <div id="list"></div>
+
+<div class="section" id="external-section">
+<h2>外部AIが読んだ記録</h2>
+<p class="permission" id="permission"></p>
+<p class="subtitle">MCPサーバー経由で、外部のAIがこの作品を読んだ記録です。<strong>外部AIは原稿を書き換えません。</strong>いちばん大事なのは、本文がこの機械の外へ出たかどうかです。</p>
+<div id="external-list"></div>
+</div>
 
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
@@ -149,10 +197,48 @@ function render() {
   ).join('');
 }
 
+const externalListEl = document.getElementById('external-list');
+const EXPOSURE_MARKS = ${JSON.stringify(EXTERNAL_EXPOSURE_MARKS)};
+const EXPOSURE_LABELS = ${JSON.stringify(EXTERNAL_EXPOSURE_LABELS)};
+let externalEntries = [];
+
+function renderExternal() {
+  if (externalEntries.length === 0) {
+    externalListEl.innerHTML =
+      '<p class="empty">外部AIがこの作品を読んだ記録はありません。</p>';
+    return;
+  }
+  externalListEl.innerHTML = externalEntries.map((entry) => {
+    const exposure = EXPOSURE_LABELS[entry.exposure] ? entry.exposure : 'body';
+    const meta = [
+      entry.client,
+      entry.file,
+      entry.model,
+      entry.detail,
+    ].filter(Boolean).map(escapeHtml).join(' / ');
+    return '<div class="access ' + exposure + (entry.ok ? '' : ' failed') + '">' +
+      '<span class="tool">' + escapeHtml(entry.tool) + '</span>' +
+      '<span class="exposure">' + EXPOSURE_MARKS[exposure] + ' ' +
+        escapeHtml(EXPOSURE_LABELS[exposure]) + '</span>' +
+      (entry.ok ? '' : '<span class="meta">失敗</span>') +
+      (meta ? '<span class="meta">' + meta + '</span>' : '') +
+      '<span class="time">' + formatTime(entry.time) + '</span>' +
+    '</div>';
+  }).join('');
+}
+
+const permissionEl = document.getElementById('permission');
+
 window.addEventListener('message', (event) => {
   if (event.data.type === 'history') {
     entries = event.data.entries;
+    externalEntries = event.data.external ?? [];
+    permissionEl.textContent = event.data.permission ?? '';
+    // **許可されているときに目立たせる。** 拒否は既定なので、
+    // 知らせるべきは「いま読まれうる」ほうである
+    permissionEl.className = 'permission' + (event.data.allowed ? ' allowed' : '');
     render();
+    renderExternal();
   }
 });
 

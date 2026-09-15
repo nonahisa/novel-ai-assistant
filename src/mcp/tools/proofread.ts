@@ -243,7 +243,7 @@ function validateAgainst(
   const parsed = parseProofreadResult(response);
   if (!parsed) {
     throw new McpToolError(
-      "応答をJSONとして読めませんでした（推敲のスキーマに沿っていません）。"
+      "応答を読み取れませんでした（推敲のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
     );
   }
   // **作者が「直さない」と決めた語を渡す。** 推敲は原文まるごとを

@@ -337,6 +337,7 @@ import {
 import { warnManuscriptNotOpen } from "./features/manuscriptTab";
 import { registeredPostingSites } from "./features/postingCopyRegistered";
 import { showEditHistory } from "./features/editHistoryPanel";
+import { toggleExternalAccessPermission } from "./features/externalAccessPermission";
 import {
   reviewProposals,
   toggleReviewLock,
@@ -4491,6 +4492,17 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         await showEditHistory(context, work);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.toggleExternalAccess",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await toggleExternalAccessPermission(work);
       }
     )
   );

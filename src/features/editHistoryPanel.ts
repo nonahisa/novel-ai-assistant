@@ -1,6 +1,9 @@
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { EditHistory } from "../core/editHistory";
+import { ExternalAccessLog } from "../core/externalAccessStore";
+import { ExternalAccessPermissionStore } from "../core/externalAccessPermissionStore";
+import { describeExternalAccessPermission } from "../core/externalAccessPermission";
 import { buildEditHistoryHtml } from "../views/editHistoryPanelHtml";
 
 /**
@@ -51,8 +54,25 @@ async function postHistory(
   panel: vscode.WebviewPanel,
   work: WorkEntry
 ): Promise<void> {
-  const entries = await new EditHistory(work).load();
-  void panel.webview.postMessage({ type: "history", entries });
+  /*
+    **編集履歴と外部AIの記録を、同じ画面で別の欄に出す**（設計書6.87.9）。
+    混ぜないのは、外部AIが原稿を書き換えないからである——同じ流れに
+    並べると、作者は「外部AIが直した」と読み違える。
+  */
+  const [entries, external, permission] = await Promise.all([
+    new EditHistory(work).load(),
+    new ExternalAccessLog(work).load(),
+    new ExternalAccessPermissionStore(work).load(),
+  ]);
+  void panel.webview.postMessage({
+    type: "history",
+    entries,
+    external,
+    // **いま許可されているかを、記録の上に出す**（設計書6.87.10）。
+    // 記録だけを見せると、作者は「いま読まれうるのか」を判断できない
+    permission: describeExternalAccessPermission(permission),
+    allowed: permission.allowed,
+  });
 }
 
 function createNonce(): string {

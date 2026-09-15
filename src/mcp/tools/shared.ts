@@ -293,16 +293,23 @@ export function chunksOfWorkFile(
   };
 }
 
-/** `chunkIndex` が指定されていれば、そのチャンクだけに絞る */
+/**
+ * `chunkIndex` が指定されていれば、そのチャンクだけに絞る。
+ *
+ * **数えるのは、切り終えた並びの何番目か**（`chunk.index` ではない）。
+ * `chunk.index` は**話ごとに0から振り直される**ので、合本（1ファイルに
+ * 何話も入っている）で `chunkIndex: 0` と言われると、**3話ぶんが返っていた**
+ * （0.64.3で直した。それまでは「1つに絞ったつもりが絞れていない」）。
+ */
 export function selectChunks(chunks: Chunk[], chunkIndex?: number): Chunk[] {
   if (chunkIndex === undefined) return chunks;
-  const found = chunks.filter((chunk) => chunk.index === chunkIndex);
-  if (found.length === 0) {
+  const found = chunks[chunkIndex];
+  if (!found) {
     throw new McpToolError(
       `チャンク ${chunkIndex} がありません（このファイルは ${chunks.length} チャンクです）`
     );
   }
-  return found;
+  return [found];
 }
 
 /**
@@ -311,17 +318,28 @@ export function selectChunks(chunks: Chunk[], chunkIndex?: number): Chunk[] {
  * **切り方が変われば名前も変わる**ように、切った大きさまで入れてある。
  * `prompt` を取ったときと違う `numCtx` で `validate` を呼ぶと、別の本文を
  * 相手に検算することになるので、そこで気づけるようにする。
+ *
+ * **話数も入れる**（0.64.3で足した）。`chunk.index` は**話ごとに0から
+ * 振り直される**ので、合本（1ファイルに何話も入っている）で各話が1つの
+ * チャンクに収まると、**3話とも同じ名前になっていた**。`chunkFromId` は
+ * 最初に当たったものを返すので、**第2話を検算したつもりで第1話の本文と
+ * 照合していた**——根拠照合（本文に実在するか）が誤り、
+ * 「何も指摘しない」か「全部が本文に無い」に倒れる。
+ *
+ * 話数が読めないファイルは `x`。
  */
 export function chunkIdOf(
   relative: string,
   chunk: Chunk,
   maxChars: number
 ): string {
-  return `${relative}#${chunk.index}@${maxChars}`;
+  return `${relative}#${chunk.chapterStart ?? "x"}-${chunk.index}@${maxChars}`;
 }
 
 export interface ParsedChunkId {
   filePath: string;
+  /** 話数。読めないファイルなら null */
+  chapter: number | null;
   index: number;
   maxChars: number;
 }
@@ -334,12 +352,27 @@ export function parseChunkId(chunkId: string): ParsedChunkId {
       `chunkId の形が違います: ${chunkId}（prompt か run が返したものをそのまま渡してください）`
     );
   }
-  const index = Number(chunkId.slice(hash + 1, at));
+  const body = chunkId.slice(hash + 1, at);
+  const dash = body.lastIndexOf("-");
+  if (dash < 0) {
+    // **古い形（話数の無いもの）は受け取らない。** 受け取ると、合本で
+    // 別の話と照合していた頃の鍵がそのまま通ってしまう
+    throw new McpToolError(
+      `chunkId の形が違います: ${chunkId}（0.64.3 で話数が入る形に変わりました。prompt を取り直してください）`
+    );
+  }
+  const chapterText = body.slice(0, dash);
+  const chapter = chapterText === "x" ? null : Number(chapterText);
+  const index = Number(body.slice(dash + 1));
   const maxChars = Number(chunkId.slice(at + 1));
-  if (!Number.isInteger(index) || !Number.isInteger(maxChars)) {
+  if (
+    (chapter !== null && !Number.isInteger(chapter)) ||
+    !Number.isInteger(index) ||
+    !Number.isInteger(maxChars)
+  ) {
     throw new McpToolError(`chunkId の形が違います: ${chunkId}`);
   }
-  return { filePath: chunkId.slice(0, hash), index, maxChars };
+  return { filePath: chunkId.slice(0, hash), chapter, index, maxChars };
 }
 
 /**
@@ -358,7 +391,13 @@ export function chunkFromId(folder: string, chunkId: string): Chunk {
     chapterEnd: name.chapterEnd,
   });
   const chunks = chunksOfSources(sources, { maxChars: parsed.maxChars });
-  const chunk = chunks.find((item) => item.index === parsed.index);
+  // **話数まで見て引く。** `index` だけで引くと、合本では最初の話の
+  // チャンクが当たる（0.64.3で直した。`chunkIdOf` の断り書き）
+  const chunk = chunks.find(
+    (item) =>
+      item.index === parsed.index &&
+      (item.chapterStart ?? null) === parsed.chapter
+  );
   if (!chunk) {
     throw new McpToolError(
       `${chunkId} に当たるチャンクがありません（本文が変わっていませんか）`

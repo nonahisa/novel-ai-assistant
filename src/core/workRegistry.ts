@@ -212,6 +212,12 @@ export const IGNORED_PATHS = [
   // 同期すると追加と削除の差分が出続ける。**`.aiwriter/` 全体は除外して
   // いない**（承認待ち等は同期する）ので、置き場を足すたびにここへ書く
   ".aiwriter/generated/",
+  /*
+    外部AIの利用許可の印（設計書6.87.10）。**同期しない**——同期すると、
+    リポジトリを共有した編集部の機械でも許可済みになる。
+    **許可は作者がその機械で与えるもの**である。
+  */
+  ".aiwriter/external-access.json",
   ".novelai-recovery/",
   "exports/",
 ] as const;

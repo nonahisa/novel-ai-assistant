@@ -252,7 +252,7 @@ function validateAgainst(
   const parsed = parseTypoCheckResult(response);
   if (!parsed) {
     throw new McpToolError(
-      "応答をJSONとして読めませんでした（誤字脱字のスキーマに沿っていません）。"
+      "応答を読み取れませんでした（誤字脱字のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
     );
   }
   const result = validateTypoIssues(

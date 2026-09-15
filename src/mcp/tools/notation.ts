@@ -1,0 +1,286 @@
+import { z } from "zod";
+import * as nodePath from "node:path";
+import {
+  NOTATION_ADVICE_SYSTEM_PROMPT,
+  NOTATION_ADVICE_VERSION,
+  buildNotationAdvicePrompt,
+  buildNotationAdviceSchema,
+  type NotationAdviceGroup,
+} from "../../prompts/notationAdvice";
+import { parseNotationAdvice } from "../../core/notationAdviceValidation";
+import {
+  detectNotationVariants,
+  foldSubsumedGroups,
+  type NotationSource,
+} from "../../core/notationVariants";
+import { parseEpisodeFileName } from "../../core/episodeParser";
+import { episodeBodySources } from "../../core/episodeChunks";
+import { parseCharacter } from "../../models/character";
+import { parseAbility } from "../../models/ability";
+import { parseLocation } from "../../models/location";
+import { parseOrganization } from "../../models/organization";
+import {
+  FOLDER_INPUT,
+  McpToolError,
+  OLLAMA_INPUT,
+  RUNNER_INPUT,
+  SETTINGS_SUBDIRS,
+  listBodyFiles,
+  readBody,
+  readSettingsRecords,
+} from "./shared";
+import { ollamaGenerate } from "./ollama";
+import { claudeNote, responseInput } from "./run";
+
+/**
+ * 表記ゆれ（P-10の一部、設計書6.9）を外から呼ぶ（6.87.8 の4）。
+ *
+ * **ほかの機能といちばん違うのは、AIが探すのではないところ。**
+ * 揺れている組を見つけるのは**コードの仕事**（`detectNotationVariants`）で、
+ * AIに聞くのは「どちらへ揃えるのがよいか」だけである。
+ *
+ * だから道具が3つではなく**4つ**になる。
+ *
+ * | 道具 | 何をするか | AIを使うか |
+ * |---|---|---|
+ * | `notation.detect` | 作品ぜんたいから揺れている組を探す | **使わない**（コードだけ） |
+ * | `notation.prompt` | 1つの組について、揃え先を問うプロンプトを組む | — |
+ * | `notation.validate` | 応答を製品の解析へ通す | — |
+ * | `notation.run` | 1つの組を通す | 使う |
+ *
+ * **2つ以上の表記が実際に本文へ出ている組だけを返す**（`detectNotationVariants`）。
+ * 片方しか無い語を「揺れ」と呼ぶと、作者の選んだ表記を直せと言うことになる。
+ */
+
+const VALIDATE_WITH = "notation.validate";
+
+export const NOTATION_DETECT_INPUT = {
+  ...FOLDER_INPUT,
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("返す組の上限（既定は50）"),
+};
+
+/** 1つの組。`notation.detect` が返したものを、そのまま渡す */
+const GROUP_INPUT = z
+  .object({
+    label: z.string(),
+    forms: z
+      .array(
+        z.object({
+          surface: z.string(),
+          count: z.number().int(),
+          excerpts: z.array(z.string()),
+        })
+      )
+      .min(2),
+  })
+  .describe(
+    "揺れている組。notation.detect が返した groups の1件をそのまま渡します"
+  );
+
+export const NOTATION_PROMPT_INPUT = {
+  ...FOLDER_INPUT,
+  group: GROUP_INPUT,
+};
+
+export const NOTATION_VALIDATE_INPUT = {
+  /*
+    **検算そのものには使わない**（組と応答だけで足りる）。それでも要るのは、
+    **どの作品への操作だったかを記録するため**である（設計書6.87.9）。
+    ここだけ `folder` を省けると、外から測った跡がこの道具のときだけ残らない。
+  */
+  ...FOLDER_INPUT,
+  group: GROUP_INPUT,
+  response: responseInput(),
+};
+
+export const NOTATION_RUN_INPUT = {
+  ...NOTATION_PROMPT_INPUT,
+  ...RUNNER_INPUT,
+  ...OLLAMA_INPUT,
+};
+
+const DEFAULT_LIMIT = 50;
+
+/** 1つの表記につき、出現例を何件添えるか */
+const EXCERPT_LIMIT = 3;
+
+/** 作品ぜんたいの本文を、検出へ渡せる形で集める */
+function collectSources(folder: string): NotationSource[] {
+  const sources: NotationSource[] = [];
+  for (const relative of listBodyFiles(folder)) {
+    let text: string;
+    try {
+      text = readBody(folder, relative);
+    } catch {
+      // 競合マーカーのあるファイル・読めないファイルは材料から外す。
+      // **ここで止めない**——1つ読めなくても、ほかの揺れは探せる
+      continue;
+    }
+    const parsed = parseEpisodeFileName(nodePath.basename(relative));
+    for (const source of episodeBodySources(relative, text, {
+      chapterStart: parsed.chapterStart,
+      chapterEnd: parsed.chapterEnd,
+    })) {
+      sources.push({
+        filePath: relative,
+        body: source.body,
+        // **頭書きを剥がしたぶんを戻す。** 戻さないと、指摘の行番号が
+        // 元ファイルとずれる（誤字脱字で踏んだのと同じ落とし穴）
+        startLine: source.lineOffset + 1,
+      });
+    }
+  }
+  return sources;
+}
+
+/** 登録済みの固有名詞。**これが無いと、人物名の揺れを拾えない** */
+function collectProperNouns(folder: string): string[] {
+  const of = <T extends { name: string; aliases: string[] }>(
+    subdir: string,
+    parse: (raw: unknown) => T
+  ): string[] =>
+    readSettingsRecords(folder, subdir, parse).records.flatMap((record) => [
+      record.name,
+      ...record.aliases,
+    ]);
+
+  return [
+    ...of(SETTINGS_SUBDIRS.characters, parseCharacter),
+    ...of(SETTINGS_SUBDIRS.abilities, parseAbility),
+    ...of(SETTINGS_SUBDIRS.locations, parseLocation),
+    ...of(SETTINGS_SUBDIRS.organizations, parseOrganization),
+  ]
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+export function notationDetect(input: { folder: string; limit?: number }) {
+  const groups = foldSubsumedGroups(
+    detectNotationVariants(collectSources(input.folder), {
+      properNouns: collectProperNouns(input.folder),
+    })
+  );
+
+  return {
+    note:
+      "揺れを探したのはコードで、AIは使っていません。" +
+      "どちらへ揃えるかを問うときは notation.prompt / notation.run へ、" +
+      "この groups の1件をそのまま渡してください。",
+    total: groups.length,
+    groups: groups.slice(0, input.limit ?? DEFAULT_LIMIT).map((group) => ({
+      kind: group.kind,
+      key: group.key,
+      label: group.label,
+      forms: group.forms.map((form) => ({
+        surface: form.surface,
+        count: form.occurrences.length,
+        // **出現例は少しだけ。** 全部渡すと、組が多い作品で
+        // 返りが本文より大きくなる
+        excerpts: form.occurrences
+          .slice(0, EXCERPT_LIMIT)
+          .map((occurrence) => occurrence.lineText.trim()),
+      })),
+    })),
+  };
+}
+
+export interface NotationPromptInput {
+  folder: string;
+  group: NotationAdviceGroup;
+}
+
+export function notationPrompt(input: NotationPromptInput) {
+  if (input.group.forms.length < 2) {
+    // **1つしか無いものは「揺れ」ではない。** 問えば、作者が選んだ
+    // 表記を直せと言うことになる
+    throw new McpToolError(
+      "表記が1つしかありません。揺れている組（2つ以上）を渡してください。"
+    );
+  }
+  return {
+    promptVersion: NOTATION_ADVICE_VERSION,
+    systemPrompt: NOTATION_ADVICE_SYSTEM_PROMPT,
+    // **スキーマは組ごとに作る**（選べる表記をその場で列挙するため）
+    schema: buildNotationAdviceSchema(input.group),
+    validateWith: VALIDATE_WITH,
+    label: input.group.label,
+    userPrompt: buildNotationAdvicePrompt({
+      workTitle: nodePath.basename(input.folder),
+      group: input.group,
+    }),
+  };
+}
+
+export function notationValidate(input: {
+  /** 記録のためだけに要る（設計書6.87.9）。検算には使わない */
+  folder?: string;
+  group: NotationAdviceGroup;
+  response: string;
+}) {
+  const surfaces = input.group.forms.map((form) => form.surface);
+  const advice = parseNotationAdvice(input.response, surfaces);
+  if (!advice) {
+    // **本文に無い表記を選ばれたら受け取らない。** 揃え先は
+    // 「いま出ている表記のどれか」でなければ、置き換えられない
+    throw new McpToolError(
+      "応答から揃え先を読み取れませんでした（渡した表記のどれかを選ばせてください）。"
+    );
+  }
+  return { label: input.group.label, advice };
+}
+
+export interface NotationRunInput extends NotationPromptInput {
+  runner: "ollama" | "claude";
+  endpoint?: string;
+  model?: string;
+  allowRemote?: boolean;
+  numCtx?: number;
+}
+
+export async function notationRun(input: NotationRunInput) {
+  // **省略を既定で埋めない**（設計書6.87.8 の5）
+  if (input.runner !== "ollama" && input.runner !== "claude") {
+    throw new McpToolError(
+      "runner を ollama（手元で通す）か claude（プロンプトだけ返す）で指定してください。既定はありません。"
+    );
+  }
+  const prompt = notationPrompt(input);
+  if (input.runner === "claude") {
+    return {
+      runner: "claude" as const,
+      note: claudeNote(VALIDATE_WITH),
+      systemPrompt: prompt.systemPrompt,
+      userPrompt: prompt.userPrompt,
+      schema: prompt.schema,
+      validateWith: VALIDATE_WITH,
+    };
+  }
+  const model = input.model;
+  if (!model) {
+    throw new McpToolError("runner が ollama のときは model が要ります。");
+  }
+  const response = await ollamaGenerate({
+    endpoint: input.endpoint,
+    model,
+    systemPrompt: prompt.systemPrompt,
+    userPrompt: prompt.userPrompt,
+    schema: prompt.schema,
+    numCtx: input.numCtx ?? 8192,
+    allowRemote: input.allowRemote,
+  });
+  return {
+    runner: "ollama" as const,
+    model,
+    result: notationValidate({
+      folder: input.folder,
+      group: input.group,
+      response: response.text,
+    }),
+  };
+}

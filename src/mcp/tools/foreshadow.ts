@@ -271,7 +271,7 @@ function validateAgainst(
     const parsed = parseForeshadowDetectResult(response);
     if (!parsed) {
       throw new McpToolError(
-        "応答をJSONとして読めませんでした（伏線の検知のスキーマに沿っていません）。"
+        "応答を読み取れませんでした（伏線の検知のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
       );
     }
     const known: KnownForeshadow[] = ledger.records.map((record) => ({
@@ -291,7 +291,7 @@ function validateAgainst(
   const parsed = parseForeshadowResolveResult(response);
   if (!parsed) {
     throw new McpToolError(
-      "応答をJSONとして読めませんでした（伏線の回収のスキーマに沿っていません）。"
+      "応答を読み取れませんでした（伏線の回収のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
     );
   }
   // **返ってきた id が台帳に実在するかを見る**（設計書6.35）。一覧に無い

@@ -349,7 +349,7 @@ function validateAgainst(
   const parsed = parseContradictionResult(response);
   if (!parsed) {
     throw new McpToolError(
-      "応答をJSONとして読めませんでした（矛盾検知のスキーマに沿っていません）。"
+      "応答を読み取れませんでした（矛盾検知のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
     );
   }
   const result = validateContradictions(parsed, chunk);

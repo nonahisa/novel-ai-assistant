@@ -44,6 +44,17 @@ export const CORE_ENTRY_NAMES = [
   "advicePolicy",
   "writerStyle",
   "readerProfileParse",
+  /*
+    残りの機能（0.64.3で一気に足した）。設定資料の抽出・各話あらすじ・
+    プロット逸脱・単話プロットの緩み・表記ゆれ。**どれも検算は core に在り、
+    vscode に依存していない**ことを mcpReach.test.ts が見張る。
+  */
+  "synopsisValidation",
+  "episodePlotValidation",
+  "episodePlotDoc",
+  "notationAdviceValidation",
+  "notationVariants",
+  "knownCharacterNames",
 ];
 
 /**

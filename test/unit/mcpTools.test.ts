@@ -1,4 +1,6 @@
 import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { workScan } from "../../src/mcp/tools/workScan";
@@ -25,6 +27,20 @@ import { WORK_CHAT_VERSION } from "../../src/prompts/workChat";
 import { contradictionMaterial } from "../../src/mcp/tools/contradiction";
 import { foreshadowPrompt } from "../../src/mcp/tools/foreshadow";
 import { ollamaGenerate } from "../../src/mcp/tools/ollama";
+import { settingsPrompt, settingsValidate } from "../../src/mcp/tools/settings";
+import {
+  synopsisPrompt,
+  synopsisValidate,
+  deviationPrompt,
+  deviationValidate,
+  episodePlotPrompt,
+  episodePlotValidate,
+} from "../../src/mcp/tools/episode";
+import {
+  notationDetect,
+  notationPrompt,
+  notationValidate,
+} from "../../src/mcp/tools/notation";
 
 /**
  * 外から呼ぶ口（MCPのツール）を、**転送層を通さずに**確かめる（設計書6.87.8）。
@@ -630,5 +646,498 @@ describe("ollama.generate", () => {
         numCtx: 4096,
       })
     ).rejects.toThrow(/allowRemote/);
+  });
+});
+
+/**
+ * 設定資料の抽出（P-04a）を外から呼ぶ（0.64.3）。
+ *
+ * 0.64.1で「単体テストは件数しか見ておらず、実起動では検算が3件とも
+ * 落ちた」という失敗をしたので、ここでも**通るものが通ることも、
+ * 落ちるものが理由まで正しく落ちることも**、両方を見る。
+ */
+describe("settings.prompt", () => {
+  test("チャンクごとにプロンプトを返し、既知の人物を数える", () => {
+    const result = settingsPrompt({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      numCtx: NUM_CTX,
+    });
+
+    expect(result.validateWith).toBe("settings.validate");
+    expect(result.chunks.length).toBeGreaterThan(0);
+    // 本文が入っている
+    expect(result.chunks[0].userPrompt).toContain("まず最初に");
+    // `設定/characters/char_0001.json`（少年・別名「灯の子」）が数えられている
+    expect(result.chunks[0].knownCounts.characters).toBeGreaterThan(0);
+  });
+});
+
+describe("settings.validate", () => {
+  test("本文に根拠のある人物は characters.accepted に、値そのものが出る", () => {
+    // **「少年」は使えない。** `characterExtractionValidation.ts` の
+    // `GENERIC_ROLES` に載っている呼び名（「少年」「少女」「先生」等）は、
+    // 呼び名ではなく役割語として、grounded かどうかに関わらず
+    // 必ず `non_person` で落ちる。ここでは `collected.txt` 第1話にある
+    // 「灯」（「港の灯が消えた夜」）を、根拠付きの候補として使う
+    const prompts = settingsPrompt({
+      folder: WORK,
+      filePath: "本文/collected.txt",
+      numCtx: NUM_CTX,
+    });
+    const chunkId = prompts.chunks[0].chunkId;
+
+    const response = JSON.stringify({
+      characters: [
+        {
+          name: "灯",
+          aliases: [],
+          entityType: "person",
+          evidence: "灯が消えた",
+        },
+      ],
+    });
+
+    const result = settingsValidate({ folder: WORK, chunkId, response });
+
+    // **件数だけでなく、取り出せた値そのものを見る**
+    expect(result.characters.accepted).toHaveLength(1);
+    const accepted = result.characters.accepted[0] as { data: { name: string } };
+    expect(accepted.data.name).toBe("灯");
+    expect(result.characters.rejected).toEqual([]);
+  });
+
+  test("本文に根拠の無い名前は characters.rejected に理由付きで落ちる", () => {
+    const prompts = settingsPrompt({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      numCtx: NUM_CTX,
+    });
+    const chunkId = prompts.chunks[0].chunkId;
+
+    const response = JSON.stringify({
+      characters: [
+        {
+          // 本文のどこにも出てこない人物
+          name: "谷村修一",
+          aliases: [],
+          entityType: "person",
+          evidence: "谷村がやってきた",
+        },
+      ],
+    });
+
+    const result = settingsValidate({ folder: WORK, chunkId, response });
+
+    expect(result.characters.accepted).toEqual([]);
+    expect(result.characters.rejected).toHaveLength(1);
+    const rejected = result.characters.rejected[0] as {
+      name: string | null;
+      reason: string;
+    };
+    expect(rejected.name).toBe("谷村修一");
+    // **理由まで見る**（件数だけでは「形が違って落ちた」のか
+    // 「根拠が無くて落ちた」のか区別が付かない）
+    expect(rejected.reason).toBe("ungrounded");
+  });
+
+  test("応答がJSONとして読めなければ、そこで止まる", () => {
+    const prompts = settingsPrompt({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      numCtx: NUM_CTX,
+    });
+    expect(() =>
+      settingsValidate({
+        folder: WORK,
+        chunkId: prompts.chunks[0].chunkId,
+        response: "これはJSONではありません",
+      })
+    ).toThrow(/JSON/);
+  });
+});
+
+/**
+ * 各話あらすじ（P-06）を外から呼ぶ（0.64.3）。
+ */
+describe("episode.synopsisPrompt", () => {
+  test("本文がプロンプトに入る", () => {
+    const result = synopsisPrompt({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+    });
+
+    expect(result.validateWith).toBe("episode.synopsisValidate");
+    expect(result.userPrompt).toContain("まず最初に");
+  });
+
+  test("needsSubtitle を立てたときだけ、サブタイトルを求める文言が入る", () => {
+    const without = synopsisPrompt({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+    });
+    expect(without.userPrompt).not.toContain("3案提案してください");
+    expect(without.userPrompt).toContain("空配列にしてください");
+
+    const withSubtitle = synopsisPrompt({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      needsSubtitle: true,
+    });
+    expect(withSubtitle.userPrompt).toContain("3案提案してください");
+  });
+});
+
+describe("episode.synopsisValidate", () => {
+  test("{synopsis: ...} が通る（キーは summary ではなく synopsis）", () => {
+    const response = JSON.stringify({
+      synopsis: "少年が窓を開け、便りを読み返した。",
+      subtitles: [],
+      confidence: "high",
+    });
+
+    const result = synopsisValidate({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      response,
+    });
+
+    expect(result.synopsis).toBe("少年が窓を開け、便りを読み返した。");
+  });
+
+  test("字数の上限（150字）を超えたあらすじは切られる", () => {
+    const long = "あ".repeat(200);
+    const response = JSON.stringify({
+      synopsis: long,
+      subtitles: [],
+      confidence: "high",
+    });
+
+    const result = synopsisValidate({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      response,
+    });
+
+    // 句読点が無いので、上限の150字でぶつ切りになる
+    expect(result.synopsis.length).toBe(150);
+  });
+
+  test("サブタイトルが長すぎる・重複するときは rejectedSubtitles へ落ちる", () => {
+    const response = JSON.stringify({
+      synopsis: "少年が窓を開けた。",
+      subtitles: [
+        { text: "灯台", kind: "象徴型", reason: "象徴的" },
+        { text: "灯台", kind: "象徴型", reason: "重複" },
+        { text: "あ".repeat(20), kind: "出来事型", reason: "長い" },
+      ],
+      confidence: "high",
+    });
+
+    const result = synopsisValidate({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      response,
+    });
+
+    expect(result.subtitles).toHaveLength(1);
+    expect(result.subtitles[0].text).toBe("灯台");
+    const reasons = result.rejectedSubtitles.map((entry) => entry.reason);
+    expect(reasons).toContain("duplicate");
+    expect(reasons).toContain("too_long");
+  });
+});
+
+/**
+ * プロット逸脱（P-11）を外から呼ぶ（0.64.3）。
+ */
+describe("episode.deviationPrompt", () => {
+  test("fixture には設定/plot.mdがあるので通る", () => {
+    const result = deviationPrompt({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+    });
+
+    expect(result.validateWith).toBe("episode.deviationValidate");
+    expect(result.userPrompt).toContain("まず最初に");
+  });
+
+  test("プロットの無い作品では例外になる", () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "novelai-mcp-no-plot-")
+    );
+    try {
+      expect(() =>
+        deviationPrompt({ folder: tmp, filePath: "本文/どこか.txt" })
+      ).toThrow(/plot\.md/);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("episode.deviationValidate", () => {
+  test("本文に実在する引用を含む応答は通る", () => {
+    const response = JSON.stringify({
+      deviations: [
+        {
+          lineStart: 2,
+          lineEnd: 2,
+          excerpt: "まず最初に",
+          type: "逸脱",
+          reason: "プロットに書かれていない朝の行動",
+          // plot.md の「世界観」節に実在する語句
+          plotReference: "海辺の小さな港町",
+          severity: "low",
+          confidence: "high",
+        },
+      ],
+    });
+
+    const result = deviationValidate({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      response,
+    });
+
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].excerpt).toBe("まず最初に");
+    expect(result.rejected).toEqual([]);
+  });
+
+  test("本文に無い引用は落ちる", () => {
+    const response = JSON.stringify({
+      deviations: [
+        {
+          lineStart: 2,
+          lineEnd: 2,
+          excerpt: "この引用は本文のどこにも無い",
+          type: "逸脱",
+          reason: "プロットに書かれていない行動",
+          plotReference: "海辺の小さな港町",
+          severity: "low",
+          confidence: "high",
+        },
+      ],
+    });
+
+    const result = deviationValidate({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      response,
+    });
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0].reason).toBe("excerpt_not_found");
+  });
+});
+
+/**
+ * 単話プロットの緩み（P-27）を外から呼ぶ（0.64.3）。
+ *
+ * fixture に単話プロットのファイルが無いので、一時フォルダーへ作る
+ * （`test/fixtures/` は触らない）。
+ */
+describe("episode.episodePlotPrompt / episodePlotValidate", () => {
+  function writeEpisodePlot(body: string): { tmp: string; plotPath: string } {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "novelai-mcp-episode-plot-")
+    );
+    const plotPath = "plot_ep1.md";
+    fs.writeFileSync(path.join(tmp, plotPath), body, "utf8");
+    return { tmp, plotPath };
+  }
+
+  test("展開の箇条書きがあれば通り、指摘は実在の行を指す", () => {
+    const { tmp, plotPath } = writeEpisodePlot(
+      [
+        "## 視点",
+        "少年の視点",
+        "",
+        "## この話の目標",
+        "父の帰りを待つ",
+        "",
+        "## 展開（箇条書き）",
+        "- 少年が防波堤に立つ",
+        "- 父の船を探す",
+        "- 便りが届く",
+      ].join("\n")
+    );
+    try {
+      const prompt = episodePlotPrompt({
+        folder: tmp,
+        plotPath,
+        chapterLabel: "第1話",
+      });
+      expect(prompt.validateWith).toBe("episode.plotValidate");
+      expect(prompt.itemCount).toBe(3);
+      expect(prompt.userPrompt).toContain("父の船を探す");
+
+      const response = JSON.stringify({
+        findings: [
+          {
+            item: "父の船を探す",
+            kind: "目標に向かっていない",
+            reason: "目標との関わりが薄いように読める",
+          },
+        ],
+      });
+      const result = episodePlotValidate({ folder: tmp, plotPath, response });
+      expect(result.accepted).toHaveLength(1);
+      expect(result.accepted[0].item).toBe("父の船を探す");
+      expect(result.rejected).toEqual([]);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test("展開が空のプロットでは例外になる", () => {
+    const { tmp, plotPath } = writeEpisodePlot(
+      ["## 視点", "少年の視点", "", "## この話の目標", "父の帰りを待つ"].join(
+        "\n"
+      )
+    );
+    try {
+      expect(() => episodePlotPrompt({ folder: tmp, plotPath })).toThrow(
+        /展開/
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * 表記ゆれ（P-13）を外から呼ぶ（0.64.3）。
+ *
+ * `notation.detect` はコードだけで揺れを探すので、**fixture にたまたま
+ * 揺れが含まれているかに頼らず**、一時フォルダーへ意図的な揺れを書く。
+ */
+describe("notation.detect", () => {
+  function writeWork(body: string): string {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "novelai-mcp-notation-")
+    );
+    fs.mkdirSync(path.join(tmp, "本文"));
+    fs.writeFileSync(path.join(tmp, "本文", "001_test.txt"), body, "utf8");
+    return tmp;
+  }
+
+  test("2通り以上が実際に出ている組だけを返す。片方しか無い語は返らない", () => {
+    const tmp = writeWork(
+      [
+        "彼はとても良い人だ。",
+        "でも、よいこともあれば悪いこともある。",
+        "出来ることは全部やった。",
+        "できる範囲で頑張るしかない。",
+        // 「すべて」は一度も出てこない。「全て」は揺れていない
+        "全てを話した。",
+      ].join("\n")
+    );
+    try {
+      const result = notationDetect({ folder: tmp });
+
+      expect(result.total).toBeGreaterThanOrEqual(2);
+      const labels = result.groups.map((group) => group.label);
+      expect(labels).toContain("良い ↔ よい");
+      expect(labels).toContain("出来る ↔ できる");
+      // 「全て」は「すべて」が出てこないので、揺れている組として出ない
+      expect(labels.some((label) => label.includes("全て"))).toBe(false);
+
+      // 出た組は、両方の表記が実際に本文へ出ていることを裏付けと一緒に返す
+      const yoi = result.groups.find((group) => group.label === "良い ↔ よい");
+      expect(yoi?.forms.map((form) => form.surface).sort()).toEqual(
+        ["よい", "良い"].sort()
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test("limit が効く", () => {
+    const tmp = writeWork(
+      [
+        "彼はとても良い人だ。",
+        "でも、よいこともあれば悪いこともある。",
+        "出来ることは全部やった。",
+        "できる範囲で頑張るしかない。",
+      ].join("\n")
+    );
+    try {
+      const full = notationDetect({ folder: tmp });
+      expect(full.groups.length).toBeGreaterThanOrEqual(2);
+
+      const limited = notationDetect({ folder: tmp, limit: 1 });
+      expect(limited.groups).toHaveLength(1);
+      // limit で切っても、見つかった総数（total）は変わらない
+      expect(limited.total).toBe(full.total);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("notation.prompt", () => {
+  test("表記が1つしかない組を渡すと例外になる", () => {
+    expect(() =>
+      notationPrompt({
+        folder: WORK,
+        group: {
+          label: "良い",
+          forms: [{ surface: "良い", count: 1, excerpts: [] }],
+        },
+      })
+    ).toThrow(/表記が1つ/);
+  });
+
+  test("2つ以上の組なら、プロンプトが組める", () => {
+    const result = notationPrompt({
+      folder: WORK,
+      group: {
+        label: "良い ↔ よい",
+        forms: [
+          { surface: "良い", count: 2, excerpts: ["彼はとても良い人だ。"] },
+          { surface: "よい", count: 1, excerpts: ["よいこともある。"] },
+        ],
+      },
+    });
+
+    expect(result.validateWith).toBe("notation.validate");
+    expect(result.userPrompt).toContain("良い");
+    expect(result.userPrompt).toContain("よい");
+  });
+});
+
+describe("notation.validate", () => {
+  const group = {
+    label: "良い ↔ よい",
+    forms: [
+      { surface: "良い", count: 2, excerpts: ["彼はとても良い人だ。"] },
+      { surface: "よい", count: 1, excerpts: ["よいこともある。"] },
+    ],
+  };
+
+  test("キーは choice と reason。渡した表記のどれかを選んだ応答は通る", () => {
+    const response = JSON.stringify({
+      choice: "良い",
+      reason: "出現数が多く、地の文の基調に合う",
+    });
+
+    const result = notationValidate({ group, response });
+
+    expect(result.advice.choice).toBe("良い");
+    expect(result.advice.reason).toContain("出現数");
+  });
+
+  test("本文に無い表記を選んだ応答は例外になる", () => {
+    const response = JSON.stringify({
+      choice: "引っ越し",
+      reason: "新しい書き方のほうが読みやすい",
+    });
+
+    expect(() => notationValidate({ group, response })).toThrow(
+      /渡した表記/
+    );
   });
 });

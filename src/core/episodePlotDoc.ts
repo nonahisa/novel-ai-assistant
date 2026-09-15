@@ -13,7 +13,7 @@
  * VS Code APIに依存しない（画面もファイルも触らない純粋な読み取り）。
  */
 
-import * as path from "./paths";
+import * as path from "./pathText";
 import {
   EPISODE_PLOTS_DIR,
   episodePlotChapterFromFileName,

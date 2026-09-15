@@ -190,6 +190,19 @@ export const ACTION_TREE: readonly ActionGroup[] = [
       },
       {
         kind: "action",
+        command: "novelai.toggleExternalAccess",
+        label: "外部AIの利用を許可する／取り消す",
+        icon: "shield",
+        requiresWork: true,
+        note: "MCPサーバー経由",
+        detail:
+          "外部のAI（Claude Code など）が、この作品を読めるようにするかを決めます。" +
+          "既定は拒否で、許可するまで外からは1文字も読めません。" +
+          "許可はこの機械だけに効き、いつでも取り消せます。" +
+          "読まれた記録は「編集履歴を見る」で確認できます。",
+      },
+      {
+        kind: "action",
         command: "novelai.showEditHistory",
         label: "編集履歴を見る",
         icon: "history",
