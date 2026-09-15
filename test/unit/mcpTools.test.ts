@@ -8,6 +8,13 @@ import {
   proofreadRun,
   proofreadValidate,
 } from "../../src/mcp/tools/proofread";
+import {
+  TYPO_RUN_INPUT,
+  typoPrompt,
+  typoRun,
+  typoValidate,
+} from "../../src/mcp/tools/typo";
+import { TYPO_CHECK_VERSION } from "../../src/prompts/typoCheck";
 import { contradictionMaterial } from "../../src/mcp/tools/contradiction";
 import { foreshadowPrompt } from "../../src/mcp/tools/foreshadow";
 import { ollamaGenerate } from "../../src/mcp/tools/ollama";
@@ -187,6 +194,208 @@ describe("proofread", () => {
         response: "{}",
       })
     ).toThrow(/chunkId/);
+  });
+});
+
+/**
+ * 誤字脱字（P-08）を外から呼ぶ（0.64.1）。
+ *
+ * 作者の指定「まずはテストに利用できる部分を優先したい」に対して、
+ * **いちばん測り直したいのがここ**である。見るのは4つ——
+ * プロンプトに辞書と作法が載ること、検算が製品と同じに効くこと、
+ * **辞書はプロンプトでだけ切って検算では切らないこと**、`runner` の必須。
+ */
+describe("typo", () => {
+  test("チャンクごとにプロンプトを返す", () => {
+    const result = typoPrompt({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      numCtx: NUM_CTX,
+    });
+
+    expect(result.promptVersion).toBe(TYPO_CHECK_VERSION);
+    expect(result.validateWith).toBe("typo.validate");
+    expect(result.chunks).toHaveLength(1);
+    expect(result.chunks[0].chunkId).toContain("004_よあけ.txt");
+    expect(result.chunks[0].userPrompt).toContain("まず最初に");
+  });
+
+  test("固有名詞の辞書と、作品の書き方をプロンプトへ載せる", () => {
+    const result = typoPrompt({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      numCtx: NUM_CTX,
+    });
+
+    // `設定/characters/` の name と aliases が辞書に入る
+    expect(result.chunks[0].userPrompt).toContain("少年");
+    expect(result.chunks[0].userPrompt).toContain("灯の子");
+    expect(result.dictionaryCount).toBeGreaterThan(0);
+    // **空のまま投げない**（設計書6.8.14。文語体で漢字ひらきが乱発する）
+    expect(result.styleNote).toContain("掠れて");
+    expect(result.chunks[0].userPrompt).toContain("掠れて");
+  });
+
+  /**
+   * **通るものが通ることも見る。** 落ちる側だけを見ていると、
+   * 何もかも落とす実装が満点になる（CLAUDE.md「見逃しと誤検出の
+   * 両方を測ること」）。
+   */
+  test("本文にある語の指摘は、検算を通る", () => {
+    const prompts = typoPrompt({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      numCtx: NUM_CTX,
+    });
+    const chunkId = prompts.chunks[0].chunkId;
+
+    const response = JSON.stringify({
+      issues: [
+        {
+          line: 2,
+          original: "まず最初に、少年は窓を開けた。",
+          target: "窓を開けた",
+          suggestion: "窓を空けた",
+          reason: "誤変換",
+          confidence: "high",
+        },
+      ],
+    });
+
+    const result = typoValidate({ folder: WORK, chunkId, response });
+
+    expect(result.accepted.map((issue) => issue.target)).toEqual(["窓を開けた"]);
+    expect(result.rejected).toEqual([]);
+  });
+
+  test("固有名詞を誤字だと言われても、検算で落ちる", () => {
+    const prompts = typoPrompt({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      numCtx: NUM_CTX,
+    });
+    const chunkId = prompts.chunks[0].chunkId;
+
+    const response = JSON.stringify({
+      issues: [
+        {
+          line: 2,
+          // **original（前後を含む箇所）と target（誤っている語）は別の欄で、
+          // どちらも必須である。** 片方だけでは `parseIssue` が形として弾き、
+          // 「固有名詞だから落ちた」のか「形が違って落ちた」のか区別が付かない。
+          // **実際に束を起動して踏んだ**（0.64.1）——単体テストは件数しか
+          // 見ていなかったので、3件とも invalid_shape で落ちていても通っていた
+          original: "まず最初に、少年は窓を開けた。",
+          target: "少年",
+          suggestion: "少女",
+          reason: "変換ミス",
+          confidence: "high",
+        },
+      ],
+    });
+
+    const result = typoValidate({ folder: WORK, chunkId, response });
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toHaveLength(1);
+    // **理由まで見る。** 件数だけだと、形が違って落ちた回も通ってしまう
+    expect(result.rejected[0].reason).toBe("protected_term");
+  });
+
+  test("本文に実在しない語の指摘は、検算で落ちる", () => {
+    const prompts = typoPrompt({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      numCtx: NUM_CTX,
+    });
+    const chunkId = prompts.chunks[0].chunkId;
+
+    const response = JSON.stringify({
+      issues: [
+        {
+          line: 2,
+          original: "この語は本文のどこにもない",
+          target: "この語は本文のどこにもない",
+          suggestion: "なおす",
+          reason: "脱字",
+          confidence: "high",
+        },
+      ],
+    });
+
+    const result = typoValidate({ folder: WORK, chunkId, response });
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0].reason).not.toBe("invalid_shape");
+  });
+
+  test("応答がJSONとして読めなければ、そこで止まる", () => {
+    const prompts = typoPrompt({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      numCtx: NUM_CTX,
+    });
+    expect(() =>
+      typoValidate({
+        folder: WORK,
+        chunkId: prompts.chunks[0].chunkId,
+        response: "これはJSONではありません",
+      })
+    ).toThrow(/JSON/);
+  });
+
+  test("chunkId の形が違えば、そこで止まる", () => {
+    expect(() =>
+      typoValidate({
+        folder: WORK,
+        chunkId: "本文/004_よあけ.txt",
+        response: "{}",
+      })
+    ).toThrow(/chunkId/);
+  });
+
+  /**
+   * **runner に既定を作らない**（設計書6.87.8 の5）。手元へ投げるのと
+   * Anthropic へ本文を渡すのとでは、作者にとっての意味がまるで違う。
+   * 転送層の zod と、ハンドラの中の両方で断る。
+   */
+  test("runner を省くと、転送層で断られる", () => {
+    const schema = z.object(TYPO_RUN_INPUT);
+    expect(
+      schema.safeParse({
+        folder: WORK,
+        filePath: "本文/004_よあけ.txt",
+        numCtx: NUM_CTX,
+      }).success
+    ).toBe(false);
+  });
+
+  test("runner が claude なら、プロンプトと戻し先だけを返す", async () => {
+    const result = await typoRun({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      numCtx: NUM_CTX,
+      runner: "claude",
+    });
+
+    expect(result.runner).toBe("claude");
+    if (result.runner !== "claude") throw new Error("claude のはず");
+    expect(result.validateWith).toBe("typo.validate");
+    // **検算を通していないものは製品の結果ではない**、と必ず言う
+    expect(result.note).toContain("validate");
+    expect(result.chunks[0].userPrompt).toContain("まず最初に");
+  });
+
+  test("runner が ollama なのに model が無ければ、そこで止まる", async () => {
+    await expect(
+      typoRun({
+        folder: WORK,
+        filePath: "本文/004_よあけ.txt",
+        numCtx: NUM_CTX,
+        runner: "ollama",
+      })
+    ).rejects.toThrow(/model/);
   });
 });
 

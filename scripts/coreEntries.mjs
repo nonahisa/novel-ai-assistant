@@ -14,6 +14,9 @@ import path from "node:path";
  */
 export const CORE_ENTRY_NAMES = [
   "proofreadValidation",
+  // 誤字脱字の検算（0.64.1）。**外から測り直したい筆頭**——実データでの
+  // 測定は「64件中62件が素通り」から始まり、何度も直してきた
+  "typoCheckValidation",
   "contradictionValidation",
   "contradictionMaterial",
   "foreshadowValidation",

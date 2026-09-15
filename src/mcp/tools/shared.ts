@@ -45,6 +45,14 @@ export const SETTINGS_SUBDIRS = {
   locations: "locations",
   world: "world",
   foreshadows: "foreshadows",
+  /*
+    **能力と組織**（0.64.1、誤字脱字を出すときに足した）。
+    どちらも `core/abilityStore.ts` の `directoryName` と同じ名前である。
+    固有名詞の辞書は人物・能力・場所・組織の4つで組む決まりなので、
+    2つだけでは製品と違う辞書を作ることになる。
+  */
+  abilities: "abilities",
+  organizations: "organizations",
 } as const;
 
 /** 各話あらすじ（`core/synopsisStore.ts` の `CHAPTER_SYNOPSES_FILE`） */

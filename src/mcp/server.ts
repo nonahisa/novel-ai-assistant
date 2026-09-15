@@ -19,6 +19,14 @@ import {
   proofreadValidate,
 } from "./tools/proofread";
 import {
+  TYPO_PROMPT_INPUT,
+  TYPO_RUN_INPUT,
+  TYPO_VALIDATE_INPUT,
+  typoPrompt,
+  typoRun,
+  typoValidate,
+} from "./tools/typo";
+import {
   CONTRADICTION_MATERIAL_INPUT,
   CONTRADICTION_PROMPT_INPUT,
   CONTRADICTION_RUN_INPUT,
@@ -138,6 +146,46 @@ server.registerTool(
     inputSchema: PROOFREAD_RUN_INPUT,
   },
   tool(proofreadRun)
+);
+
+server.registerTool(
+  "typo.prompt",
+  {
+    title: "誤字脱字のプロンプトを組む",
+    description:
+      "製品と同じ手順（固有名詞の辞書と作品の書き方をまとめる → プロンプトを組む）で、" +
+      "誤字脱字の検知（P-08）のプロンプトをチャンクごとに返します。" +
+      `応答は typo.validate へ戻してください。${VALIDATE_NOTE}`,
+    inputSchema: TYPO_PROMPT_INPUT,
+  },
+  tool(typoPrompt)
+);
+
+server.registerTool(
+  "typo.validate",
+  {
+    title: "誤字脱字の応答を検算する",
+    description:
+      "AIの応答を製品の検算（原文が本文に実在するか・固有名詞を誤字と言っていないか・" +
+      "助詞の範囲・代名詞の入れ替え・文語の言い換えでないか・" +
+      `作者が「直さない」と決めた語を巻き込んでいないか）に通します。${VALIDATE_NOTE}`,
+    inputSchema: TYPO_VALIDATE_INPUT,
+  },
+  tool(typoValidate)
+);
+
+server.registerTool(
+  "typo.run",
+  {
+    title: "誤字脱字の検知を通す",
+    description:
+      "runner が ollama なら、手元の Ollama でプロンプト → 応答 → 検算まで通し、" +
+      "**検算済みの結果だけ**を返します（原稿はこの機械から出ません）。" +
+      "runner が claude ならプロンプトだけを返すので、読んだ応答を typo.validate へ戻してください" +
+      "（このとき本文は Anthropic へ渡ります）。**runner は省略できません。**",
+    inputSchema: TYPO_RUN_INPUT,
+  },
+  tool(typoRun)
 );
 
 server.registerTool(

@@ -33,6 +33,7 @@ import {
 } from "./chunkSettings";
 import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
 import {
+  TYPO_DICTIONARY_LIMIT,
   TYPO_CHECK_SCHEMA,
   TYPO_CHECK_SYSTEM_PROMPT,
   TYPO_CHECK_VERSION,
@@ -150,13 +151,6 @@ export interface TypoCheckRunResult {
  */
 type SplitSource = EpisodeBodySource;
 
-/**
- * 辞書へ載せる固有名詞の件数。
- *
- * **固定費の測定と、実際に送るときで同じ値を使う。** 別々に書くと、
- * 片方を直したときに見込みと実物がずれる（それがこの改修で塞いだ穴である）。
- */
-const DICTIONARY_LIMIT = 200;
 
 export interface CheckTyposOptions extends SuiteAwareOptions {
   /**
@@ -340,7 +334,7 @@ export async function checkTypos(
     TYPO_CHECK_SYSTEM_PROMPT.length +
     buildTypoCheckPrompt({
       chunkTextWithLineNumbers: "",
-      properNounDictionary: protectedNames.slice(0, DICTIONARY_LIMIT),
+      properNounDictionary: protectedNames.slice(0, TYPO_DICTIONARY_LIMIT),
       styleNote,
     }).length;
 
@@ -560,7 +554,7 @@ export async function checkTypos(
         // 200語で切っていたため、固有名詞が多い作品では
         // **作者が名指しで守った語が1つも届かなかった**（2026-08-21）。
         // 作法の枠（styleNote）へ独立して出す
-        const dictionary = protectedNames.slice(0, DICTIONARY_LIMIT);
+        const dictionary = protectedNames.slice(0, TYPO_DICTIONARY_LIMIT);
         const userPrompt = buildTypoCheckPrompt({
           chunkTextWithLineNumbers: bodyWithLines,
           properNounDictionary: dictionary,

@@ -84,6 +84,20 @@ ${input.styleNote ? `\n${input.styleNote}\n` : ""}
 }`;
 }
 
+/**
+ * 辞書へ載せる固有名詞の件数。
+ *
+ * **固定費の測定と、実際に送るときで同じ値を使う。** 別々に書くと、
+ * 片方を直したときに見込みと実物がずれる。
+ *
+ * **`features/checkTypos.ts` から、ここへ移した**（0.64.1）。MCP から
+ * 同じプロンプトを組むとき、`features` は `vscode` に依存していて
+ * 届かない。写しを置けば、片方だけが直る日が必ず来る——
+ * `MAX_ISSUES_PER_1000_CHARS` を `prompts/proofread.ts` に置いたのと
+ * 同じ考えで、**プロンプトの形を決める値はプロンプトの側に置く。**
+ */
+export const TYPO_DICTIONARY_LIMIT = 200;
+
 /** Ollamaの構造化出力に渡すJSONスキーマ */
 export const TYPO_CHECK_SCHEMA = {
   type: "object",
