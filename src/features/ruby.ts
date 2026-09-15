@@ -9,6 +9,7 @@ import {
   RUBY_MULTILINE_NOTE,
   fromSiteNotation,
   rubyEditReplacement,
+  rubyNotationFor,
   validateEmphasis,
   validateRuby,
 } from "../core/ruby";
@@ -35,9 +36,14 @@ import { warnManuscriptNotOpen } from "./manuscriptTab";
 /**
  * ルビの操作（設計書6.12）。
  *
- * **対象は `.md` だけ。** txtはルビ機能の対象外と決まっている（要求仕様）。
- * 投稿サイトのダウンロード形式をそのまま置いている作者が多く、そこへ
- * 独自記法を混ぜると、元の場所へ戻せなくなる。
+ * **ルビは `.md` でも `.txt` でも振れる**（作者の裁定、2026-09-15。0.64.6）。
+ * **書き方をファイルに合わせる**ことで、元の懸念（投稿サイトの形をそのまま
+ * 置いている原稿へ独自記法を混ぜると、元の場所へ戻せなくなる）は消える
+ * ——`.txt` には投稿サイトの書き方（`｜漢字《かんじ》`）で入るので、
+ * そのまま貼れば今までどおりルビになる。
+ *
+ * **傍点と「サイトのルビを取り込む」は `.md` だけ**（`requireMarkdown`）。
+ * 傍点の書き方がサイトごとに違い、どちらで書くかを決められないためである。
  *
  * **本文を書き換えるのは「ルビを振る」だけ。** それも作者自身の編集操作で、
  * `editor.edit` を通すので取り消し（Ctrl+Z）が効く。
@@ -45,12 +51,18 @@ import { warnManuscriptNotOpen } from "./manuscriptTab";
  */
 
 /**
- * `.md` を編集中かを確かめる。
+ * 本文を編集中かを確かめる。
  *
- * **`.txt` なら、断るだけで終わらせない。** 作者は「ルビを振りたい」と
- * 思って押している。使えない理由と、使えるようにする道を同時に出す。
+ * **`.txt` でも振れる**（作者の裁定、2026-09-15。0.64.6）。
+ * それまでは `.md` へ変換するよう促していたが、**`.txt` のまま書いている
+ * 作者には、ルビを直す道が無かった**——既にあるルビ（`｜漢字《かんじ》`）を
+ * 選んでも「重ねられません」と断られ、投稿サイトから持ってきた原稿を
+ * 手直しできなかった。
+ *
+ * **`.txt` には投稿サイトの書き方で振る**（`rubyNotationFor`）。
+ * 内部記法を混ぜると、投稿サイトへ貼ったときに波括弧がそのまま出る。
  */
-async function requireMarkdown(): Promise<vscode.TextEditor | undefined> {
+async function requireManuscript(): Promise<vscode.TextEditor | undefined> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
     /*
@@ -72,20 +84,54 @@ async function requireMarkdown(): Promise<vscode.TextEditor | undefined> {
   const filePath = fromUri(editor.document.uri);
   if (filePath.toLowerCase().endsWith(".md")) return editor;
 
+  // **本文でないファイルは断る。** 設定資料のJSONや、関係のないファイルへ
+  // ルビを入れても意味が無い
   if (!isPlainTextManuscript(filePath)) {
     void vscode.window.showWarningMessage(
-      "ルビはMarkdown（.md）のファイルで使えます。"
+      "ルビは本文のファイル（.md / .txt）で使えます。"
     );
     return undefined;
   }
 
+  /*
+    **勧誘のダイアログは出さない**（0.64.6）。以前はここで「.md にしませんか」
+    と問い、断ると操作そのものが終わっていた。`.txt` のままでも振れるように
+    した以上、**押すたびに手を止めさせる理由が無い。** `.md` を勧める話は
+    README と「本文を .md にする」の操作に残してある。
+  */
+  return editor;
+}
+
+/**
+ * `.md` を編集中かを確かめる。`.txt` なら変換を勧める。
+ *
+ * **`.md` でなければ意味を成さない操作だけが、こちらを通る**（0.64.6で
+ * `requireManuscript` と分けた）。
+ *
+ * - **傍点**：`.txt` の傍点はサイトごとに書き方が違う（カクヨムは
+ *   `《《強調》》`、なろうは `｜強調《・・》`）。どちらで書くかを決められない
+ * - **投稿サイトのルビを取り込む**：サイトの書き方を**この拡張機能の
+ *   書き方へ直す**操作である。`.txt` へ行うと、直した先がまた
+ *   `.txt` に合わない書き方になる
+ *
+ * **`.txt` なら、断るだけで終わらせない。** 作者は使いたくて押している。
+ * 使えない理由と、使えるようにする道を同時に出す。
+ */
+async function requireMarkdown(): Promise<vscode.TextEditor | undefined> {
+  const editor = await requireManuscript();
+  if (!editor) return undefined;
+
+  const filePath = fromUri(editor.document.uri);
+  if (filePath.toLowerCase().endsWith(".md")) return editor;
+
   const answer = await vscode.window.showWarningMessage(
-    "ルビはMarkdown（.md）でしか使えません。",
+    "この操作はMarkdown（.md）でだけ使えます。",
     {
       modal: true,
       detail:
-        "テキスト（.txt）は投稿サイトから持ってきた形をそのまま保つため、" +
-        "ルビの対象外にしています。\n\n" +
+        "テキスト（.txt）では、傍点の書き方が投稿サイトごとに違うため、" +
+        "どちらで書くかを決められません。\n" +
+        "（ルビを振る・直すのは .txt のままでもできます）\n\n" +
         // **できない約束をしない**（0.51.6）。0.16.0 から、MD化は
         // 投稿サイトの書き方のルビ・傍点を直すようになっている（設計書6.12.4）。
         // 「中身は1文字も変えず」「名前を .txt に戻すだけで元どおり」は、
@@ -122,7 +168,8 @@ async function requireMarkdown(): Promise<vscode.TextEditor | undefined> {
  * **いちいち選択させない。** 書いている流れの中で使うものなので。
  */
 export async function addRuby(): Promise<void> {
-  const editor = await requireMarkdown();
+  // **.txt でも振れる**（0.64.6）。書き方はファイルの種類で分ける
+  const editor = await requireManuscript();
   if (!editor) return;
 
   const document = editor.document;
@@ -184,7 +231,12 @@ export async function addRuby(): Promise<void> {
     // Esc（undefined）は何もしない。空文字は「外す」なので通す
     if (reading === undefined) return;
     await editor.edit((builder) => {
-      builder.replace(target, rubyEditReplacement(editing.base, reading));
+      builder.replace(
+        target,
+        // **元の書き方のまま戻す**（0.64.6）。`.txt` の `｜漢字《かんじ》` を
+        // `{漢字|かんじ}` に変えると、投稿サイトへ貼ってもルビにならない
+        rubyEditReplacement(editing.base, reading, editing.notation)
+      );
     });
     return;
   }
@@ -219,7 +271,16 @@ export async function addRuby(): Promise<void> {
   if (!reading) return;
 
   await editor.edit((builder) => {
-    builder.replace(range, `{${base}|${reading.trim()}}`);
+    builder.replace(
+      range,
+      // **書き方はファイルの種類で決める**（0.64.6）。`.md` はこの拡張機能の
+      // 書き方、`.txt` は投稿サイトの書き方（`rubyNotationFor`）
+      rubyEditReplacement(
+        base,
+        reading,
+        rubyNotationFor(fromUri(document.uri))
+      )
+    );
   });
 }
 
@@ -238,7 +299,8 @@ export async function copyForPosting(
   /** 見出しの数え方（「第◯話」「◯本目」）。引けなければ渡さない */
   format?: WorkFormatKey
 ): Promise<void> {
-  const editor = await requireMarkdown();
+  // **読むだけなので .txt も通す**（0.64.6）。原稿には触らない
+  const editor = await requireManuscript();
   if (!editor) return;
 
   const target = await pickPostingTarget(registered);

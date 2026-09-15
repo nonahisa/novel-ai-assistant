@@ -9,6 +9,7 @@ import {
   fromSiteNotation,
   hasEmphasis,
   rubyEditReplacement,
+  rubyNotationFor,
   rubyToHtml,
   RUBY_STYLES,
   stripRuby,
@@ -391,6 +392,7 @@ describe("その場所のルビを見つける", () => {
       end: to,
       base: "魔導書庫",
       reading: "まどうしょこ",
+      notation: "internal",
       contained: true,
     });
   });
@@ -492,6 +494,86 @@ describe("直したあとの記法", () => {
  *
  * 壊れはしないが、**理由を取り違えて伝えるのは断っていないのと同じ**である。
  */
+/**
+ * **`.txt` の既存ルビを、見つけて直せること**（作者の裁定、2026-09-15。0.64.6）。
+ *
+ * 作者の実機報告（2026-09-15）：`episode_9902_カクヨム記法の確認.txt` の
+ * 既存ルビ「三門太志｜みかどたいし」を選んで「ルビを振る」と、
+ * **「重ねられません」で断られた**。原因は `findRubyAt` が内部記法
+ * （`{漢字|かんじ}`）しか見ていなかったこと。
+ *
+ * **いちばん見張りたいのは「元の書き方のまま戻すこと」。**
+ * `.txt` の `｜漢字《かんじ》` を `{漢字|かんじ}` へ書き換えると、
+ * **投稿サイトへ貼ってもルビにならない**——直したつもりで壊している、
+ * といういちばん困る形になる。
+ */
+describe(".txt のルビ（投稿サイトの書き方）", () => {
+  const line = "その時、｜三門太志《みかどたいし》は振り返った。";
+  const from = line.indexOf("｜");
+  const to = line.indexOf("》") + 1;
+
+  test("縦線ありの既存ルビを見つける", () => {
+    const found = findRubyAt(line, from + 2, from + 4);
+    expect(found).toEqual({
+      start: from,
+      end: to,
+      base: "三門太志",
+      reading: "みかどたいし",
+      notation: "site-bar",
+      contained: true,
+    });
+  });
+
+  test("縦線を省いた形も見つける", () => {
+    const bare = "彼は魔導書庫《まどうしょこ》へ入った。";
+    const at = bare.indexOf("魔");
+    const found = findRubyAt(bare, at + 1, at + 2);
+    expect(found?.base).toBe("魔導書庫");
+    expect(found?.reading).toBe("まどうしょこ");
+    expect(found?.notation).toBe("site-bare");
+  });
+
+  test("カクヨムの傍点はルビとして拾わない", () => {
+    // `《《強調》》` を `《強調》` というルビに読むと、傍点が壊れる
+    const emphasis = "これは《《大事》》な話だ。";
+    const at = emphasis.indexOf("大");
+    expect(findRubyAt(emphasis, at, at + 2)).toBeUndefined();
+  });
+
+  test("直すときは、元の書き方のまま戻す", () => {
+    // **ここが壊れると、投稿サイトへ貼ってもルビにならない**
+    expect(rubyEditReplacement("三門太志", "みかどふとし", "site-bar")).toBe(
+      "｜三門太志《みかどふとし》"
+    );
+  });
+
+  test("縦線を省いた形は、縦線を足して戻す", () => {
+    /*
+      省けるのは親文字が漢字だけのときで、読みを直すうちに条件を外れる
+      ことがある。縦線があれば、どのサイトでも必ずルビになる。
+    */
+    expect(rubyEditReplacement("魔導書庫", "まどうしょこ", "site-bare")).toBe(
+      "｜魔導書庫《まどうしょこ》"
+    );
+  });
+
+  test("サイトの書き方でも、空ならルビを外す", () => {
+    expect(rubyEditReplacement("三門太志", "", "site-bar")).toBe("三門太志");
+  });
+
+  test("書き方はファイルの種類で決める", () => {
+    expect(rubyNotationFor("本文/001.md")).toBe("internal");
+    expect(rubyNotationFor("本文/001.txt")).toBe("site-bar");
+    // 大文字でも同じ
+    expect(rubyNotationFor("本文/001.MD")).toBe("internal");
+  });
+
+  test("既定は今までどおり（内部記法）", () => {
+    // 引数を足したことで、呼ぶ側の既定が変わっていないこと
+    expect(rubyEditReplacement("朝", "あさ")).toBe("{朝|あさ}");
+  });
+});
+
 describe("行をまたいだ選択", () => {
   test("**ルビは、改行だと分かる言い方で断る**", () => {
     const problem = validateRuby("漢字\n熟語", "かんじ");

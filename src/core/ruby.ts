@@ -169,21 +169,52 @@ export const RUBY_STYLES: RubyStyle[] = [
  * 規則にも当たるので、後回しにすると `{強調}` というルビに読めてしまう
  * （`manuscriptRender.ts` の `NOTATION_PATTERN` と同じ並びの理由）。
  *
- * 捕獲は［1=傍点の中身, 2=親文字, 3=読み］。
+ * **投稿サイトの記法も見る**（作者の裁定、2026-09-15。0.64.6）。
+ * `.txt` の本文には `｜漢字《かんじ》` で振ってあるので、内部記法だけを
+ * 見ていると**既にあるルビを見つけられず、「重ねられません」と断って
+ * しまう**。`《《強調》》`（カクヨムの傍点）を先に置くのは、内部の傍点と
+ * 同じ理由——後回しにすると `《強調》` というルビに読めてしまう。
+ *
+ * 捕獲は［1=傍点の中身, 2=親文字, 3=読み, 4=サイト傍点の中身,
+ * 5=サイト親文字(縦線あり), 6=サイト読み, 7=サイト親文字(縦線なし),
+ * 8=サイト読み］。
  */
 const NOTATION_EITHER = new RegExp(
-  `${EMPHASIS_INTERNAL.source}|${INTERNAL.source}`,
+  [
+    EMPHASIS_INTERNAL.source,
+    INTERNAL.source,
+    EMPHASIS_KAKUYOMU.source,
+    SITE_BAR.source,
+    SITE_BARE.source,
+  ].join("|"),
   "g"
 );
 
+/** どの書き方で振ってあるか。**直すときは、元の書き方のまま戻す** */
+export type RubyNotation =
+  /** `{漢字|かんじ}`（`.md`） */
+  | "internal"
+  /** `｜漢字《かんじ》`（投稿サイト。`.txt` の既定） */
+  | "site-bar"
+  /** `漢字《かんじ》`（縦線を省いた形） */
+  | "site-bare";
+
 /** その場所にあるルビ（記法そのものの範囲と中身） */
 export interface RubyAt {
-  /** `{` の位置 */
+  /** 記法の始まりの位置 */
   start: number;
-  /** `}` の次の位置 */
+  /** 記法の終わりの次の位置 */
   end: number;
   base: string;
   reading: string;
+  /**
+   * どの書き方で振ってあったか。
+   *
+   * **直すときは、元の書き方のまま戻す**（`rubyEditReplacement`）。
+   * `.txt` の `｜漢字《かんじ》` を `{漢字|かんじ}` へ書き換えると、
+   * **投稿サイトへ貼ったときにルビにならない**（作者の原稿が壊れる）。
+   */
+  notation: RubyNotation;
   /**
    * 選択がこの記法の内側に収まっているか（両端を含む）。
    *
@@ -226,8 +257,9 @@ export function findRubyAt(
   let found: RubyAt | undefined;
   NOTATION_EITHER.lastIndex = 0;
   for (const match of text.matchAll(NOTATION_EITHER)) {
+    const hit = rubyCaptureOf(match);
     // 傍点に当たったぶんは飛ばす（親文字の捕獲が無い）
-    if (match[2] === undefined) continue;
+    if (!hit) continue;
     const at = match.index ?? 0;
     const stop = at + match[0].length;
     const touches =
@@ -237,8 +269,9 @@ export function findRubyAt(
     found = {
       start: at,
       end: stop,
-      base: match[2],
-      reading: match[3] ?? "",
+      base: hit.base,
+      reading: hit.reading,
+      notation: hit.notation,
       // 空の選択が端にあるとき（`at` の直前・`stop` の直後）も内側と数える
       contained: at <= from && to <= stop,
     };
@@ -247,15 +280,66 @@ export function findRubyAt(
 }
 
 /**
+ * 当たった1件が、どの書き方のルビか。
+ *
+ * **捕獲の番号で見分ける。** `NOTATION_EITHER` は5つの規則を `|` で
+ * つないでいるので、どの規則に当たったかは「どの捕獲が埋まっているか」で
+ * しか分からない。**順番を変えたら、ここも直す**（番号の対応が崩れる）。
+ *
+ * 傍点（内部・カクヨム）は親文字の捕獲が無いので undefined を返す。
+ */
+function rubyCaptureOf(
+  match: RegExpMatchArray
+): { base: string; reading: string; notation: RubyNotation } | undefined {
+  if (match[2] !== undefined) {
+    return { base: match[2], reading: match[3] ?? "", notation: "internal" };
+  }
+  if (match[5] !== undefined) {
+    return { base: match[5], reading: match[6] ?? "", notation: "site-bar" };
+  }
+  if (match[7] !== undefined) {
+    return { base: match[7], reading: match[8] ?? "", notation: "site-bare" };
+  }
+  return undefined;
+}
+
+/**
  * ルビを直したあとの文字列。
  *
  * **読みを空にして確定したら、ルビを外す**（親文字だけを残す）。
  * 「ルビを消す」という別の操作を覚えなくてよいし、記法だけが消えて
  * 本文の字は残るので、取り消しの見当もつきやすい。
+ *
+ * **元の書き方のまま戻す**（作者の裁定、2026-09-15。0.64.6）。
+ * `.txt` の `｜漢字《かんじ》` を `{漢字|かんじ}` へ書き換えると、
+ * **投稿サイトへ貼ったときにルビにならない**。直したつもりが壊している、
+ * といういちばん困る形になる。
+ *
+ * **縦線を省いた形（`漢字《かんじ》`）は、縦線を足して戻す。** 省けるのは
+ * 親文字が漢字だけのときで、読みを直すうちに条件を外れることがある
+ * （ひらがなを足す等）。縦線があれば、どのサイトでも必ずルビになる。
  */
-export function rubyEditReplacement(base: string, reading: string): string {
+export function rubyEditReplacement(
+  base: string,
+  reading: string,
+  notation: RubyNotation = "internal"
+): string {
   const trimmed = reading.trim();
-  return trimmed ? `{${base}|${trimmed}}` : base;
+  if (!trimmed) return base;
+  return notation === "internal"
+    ? `{${base}|${trimmed}}`
+    : `｜${base}《${trimmed}》`;
+}
+
+/**
+ * 新しくルビを振るとき、どの書き方で書くか。
+ *
+ * **ファイルの種類で決める**（作者の裁定、2026-09-15）。`.md` は
+ * この拡張機能の書き方、`.txt` は投稿サイトの書き方——`.txt` へ
+ * 内部記法を混ぜると、**投稿サイトへ貼ったときにそのまま波括弧が出る**。
+ */
+export function rubyNotationFor(filePath: string): RubyNotation {
+  return filePath.toLowerCase().endsWith(".md") ? "internal" : "site-bar";
 }
 
 /** ルビの中身を1件ずつ取り出す */

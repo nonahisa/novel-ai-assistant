@@ -1023,6 +1023,9 @@ describe("記法の位置とDOMの位置", () => {
       end: chunks[0].end,
       base: "漢字",
       reading: "かんじ",
+      // 0.64.6 で、どの書き方かを持つようになった（.txt のサイト記法も
+      // 見るようになったため。直すときは元の書き方のまま戻す）
+      notation: "internal",
       contained: true,
     });
 

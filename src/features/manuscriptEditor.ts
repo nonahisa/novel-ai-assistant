@@ -59,6 +59,7 @@ import {
 import {
   findRubyAt,
   rubyEditReplacement,
+  rubyNotationFor,
   validateEmphasis,
   validateRuby,
 } from "../core/ruby";
@@ -2002,18 +2003,28 @@ export class ManuscriptEditorProvider
     kind: "ruby" | "emphasis"
   ): Promise<void> {
     const label = kind === "ruby" ? "ルビ" : "傍点";
+    const filePath = fromUri(document.uri);
 
-    // **`.txt` へは入れない**（設計書6.12）。投稿サイトから持ってきた形を
-    // そのまま保つため、txtはルビ・傍点の対象外と決めてある。この画面は
-    // txtも開けるので、ここで断る
-    if (!fromUri(document.uri).toLowerCase().endsWith(".md")) {
+    /*
+      **ルビは `.txt` でも入れられる**（作者の裁定、2026-09-15。0.64.6）。
+      `.txt` には投稿サイトの書き方（`｜漢字《かんじ》`）で入るので、
+      そのまま貼れば今までどおりルビになる——**書き方をファイルに合わせる**
+      ことで、「投稿サイトから持ってきた形をそのまま保つ」という元の狙いは
+      保たれる。
+
+      **傍点だけは `.md` のまま。** `.txt` の傍点はサイトごとに書き方が違い
+      （カクヨムは `《《強調》》`、なろうは `｜強調《・・》`）、
+      どちらで書くかを決められない。
+    */
+    if (kind === "emphasis" && !filePath.toLowerCase().endsWith(".md")) {
       void vscode.window.showWarningMessage(
         `${label}はMarkdown（.md）のファイルで使えます。`,
         {
           modal: true,
           detail:
-            "テキスト（.txt）は投稿サイトから持ってきた形をそのまま保つため、" +
-            "対象外にしています。\n\n" +
+            "テキスト（.txt）では、傍点の書き方が投稿サイトごとに違うため、" +
+            "どちらで書くかを決められません。\n" +
+            "（ルビを振る・直すのは .txt のままでもできます）\n\n" +
             // **できない約束をしない**（0.51.8。作者の報告、2026-09-08）。
             // ここは「中身は1文字も変わりません」と言っていたが、MD化は
             // 投稿サイトの書き方のルビ・傍点を直す（設計書6.12.4）。
@@ -2107,7 +2118,9 @@ export class ManuscriptEditorProvider
       });
       // Esc（undefined）は何もしない。空文字は「外す」なので通す
       if (reading === undefined) return;
-      inserted = rubyEditReplacement(editing.base, reading);
+      // **元の書き方のまま戻す**（0.64.6）。`.txt` の `｜漢字《かんじ》` を
+      // `{漢字|かんじ}` に変えると、投稿サイトへ貼ってもルビにならない
+      inserted = rubyEditReplacement(editing.base, reading, editing.notation);
     } else if (kind === "ruby") {
       const reading = await askText({
         title: `「${base}」の読み`,
@@ -2116,7 +2129,12 @@ export class ManuscriptEditorProvider
         validateInput: (value) => validateRuby(base, value) ?? undefined,
       });
       if (!reading) return;
-      inserted = `{${base}|${reading.trim()}}`;
+      // **書き方はファイルの種類で決める**（0.64.6）
+      inserted = rubyEditReplacement(
+        base,
+        reading,
+        rubyNotationFor(filePath)
+      );
     } else {
       const problem = validateEmphasis(base);
       if (problem) {
