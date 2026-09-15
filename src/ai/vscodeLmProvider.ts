@@ -9,6 +9,7 @@ import {
   type ModelInfo,
 } from "./types";
 import { withAiWork } from "../core/aiActivity";
+import { logLine } from "../core/logger";
 
 /**
  * VS Code のエディタが持っているAI（設計書6.87.11）。
@@ -67,6 +68,30 @@ const CONSENT_NOTE =
  */
 function describeModel(model: vscode.LanguageModelChat): string {
   return `${model.name}（${model.vendor}）`;
+}
+
+/**
+ * 記録に出すための、そのままの姿。
+ *
+ * **型（VS Code 1.90 の定義）に無い欄も拾う。** 作者の VS Code は 1.137 で、
+ * **新しい欄が増えている可能性がある**——「無料か有料か」「自動選択か」を
+ * 見分ける手がかりがそこに在るかもしれない。無いと決めつけない
+ * （CLAUDE.md「外の状態を文書だけで判断しない」）。
+ *
+ * **関数は落とす**（`sendRequest` などは記録にならない）。
+ */
+function plainModel(model: vscode.LanguageModelChat): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  // 自分の欄と、継いでいる欄の両方を見る
+  for (const key of new Set([
+    ...Object.keys(model),
+    ...Object.keys(Object.getPrototypeOf(model) ?? {}),
+  ])) {
+    const value = (model as unknown as Record<string, unknown>)[key];
+    if (typeof value === "function") continue;
+    out[key] = value;
+  }
+  return out;
 }
 
 /**
@@ -182,6 +207,20 @@ export class VsCodeLmProvider implements AIProvider {
 
   async testConnection(): Promise<ConnectionTestResult> {
     const models = await this.chatModels();
+    /*
+      **見えたものを、そのまま記録へ出す**（作者の指摘、2026-09-16
+      「選択肢が多すぎる」）。どう絞るかを決めるには、**いま何が返って
+      いるのかを知る必要がある**——推測で絞ると、使えるものまで落とす。
+
+      押したときの1回だけなので溜まらない。型（1.90）に無い欄も
+      拾えるよう、そのまま並べる。
+    */
+    logLine(
+      `VS Code 経由：${models.length}件のモデルが見えています\n` +
+        models
+          .map((model) => `  ${JSON.stringify(plainModel(model))}`)
+          .join("\n")
+    );
     if (models.length === 0) {
       return {
         ok: false,
