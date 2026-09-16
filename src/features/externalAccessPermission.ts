@@ -101,7 +101,8 @@ export async function askAboutKnock(
   const store = new ExternalAccessPermissionStore(work);
   if (answer === "この道具だけ許可") {
     await store.allowTool(knock.client, knock.tool);
-    void vscode.window.showInformationMessage(
+    await offerReview(
+      work,
       `${who} の「${knock.tool}」を許可しました。ほかの道具はまだ拒否のままです。`
     );
     return true;
@@ -124,10 +125,26 @@ export async function askAboutKnock(
   );
   if (sure !== "全部許可する") return false;
   await store.allowTool(knock.client, ALL_TOOLS);
-  void vscode.window.showInformationMessage(
-    `${who} に全部の道具を許可しました。取り消しは詳細メニューの「外部AI（MCP）の利用を許可する」から。`
-  );
+  await offerReview(work, `${who} に全部の道具を許可しました。`);
   return true;
+}
+
+/**
+ * 許可したことを知らせ、**その場で見直せるようにする**。
+ *
+ * **作者の実機確認（2026-09-16）**：「どこに表示されるかわからなかった」。
+ * 「詳細メニューの◯◯から取り消せます」と文章で書いても、**探すのは作者**
+ * である。押せるものとして出せば、探さなくてよい（views/dialogs.ts の
+ * 「Escでも閉じられるが、出口は見せる」と同じ考え）。
+ */
+async function offerReview(work: WorkEntry, message: string): Promise<void> {
+  const next = await vscode.window.showInformationMessage(
+    message,
+    "いまの許可を見る"
+  );
+  if (next === "いまの許可を見る") {
+    await toggleExternalAccessPermission(work);
+  }
 }
 
 /**

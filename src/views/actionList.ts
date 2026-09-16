@@ -190,19 +190,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
       },
       {
         kind: "action",
-        command: "novelai.toggleExternalAccess",
-        label: "外部AIの利用を許可する／取り消す",
-        icon: "shield",
-        requiresWork: true,
-        note: "MCPサーバー経由",
-        detail:
-          "外部のAI（Claude Code など）が、この作品を読めるようにするかを決めます。" +
-          "既定は拒否で、許可するまで外からは1文字も読めません。" +
-          "許可はこの機械だけに効き、いつでも取り消せます。" +
-          "読まれた記録は「編集履歴を見る」で確認できます。",
-      },
-      {
-        kind: "action",
         command: "novelai.showEditHistory",
         label: "編集履歴を見る",
         icon: "history",
@@ -1585,6 +1572,28 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         label: "作品ごとの設定",
         icon: "settings-gear",
         items: [
+
+          /*
+            **「執筆データ」から移した**（0.66.2。作者の実機確認、2026-09-16
+            「どこに表示されるかわからなかった」）。執筆統計や年表と並んでいて、
+            **安全の設定を探している人の目には入らなかった。**
+
+            **許可は作品ごとに決めるもの**なので、ここが置き場所として正しい。
+          */
+          {
+            kind: "action",
+            command: "novelai.toggleExternalAccess",
+            label: "外部AIの利用を許可する／取り消す",
+            icon: "shield",
+            requiresWork: true,
+            note: "MCPサーバー経由",
+            detail:
+              "外部のAI（Claude Code など）が、この作品を読めるようにするかを決めます。" +
+              "**既定は拒否**で、許可するまで外からは1文字も読めません。" +
+              "許可は**接続元ごと・道具ごと**で、外部AIが使おうとしたときに画面でお尋ねします。" +
+              "ここからは、いま許可しているものを見て取り消せます。" +
+              "読まれた記録は「編集履歴を見る」で確認できます。",
+          },
           {
             kind: "action",
             command: "novelai.setWorkGoals",

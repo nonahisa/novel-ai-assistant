@@ -89,7 +89,7 @@ describe("画面に出る詳細メニュー（道順を書く人はここを読�
     ]);
   });
 
-  test("「作品ごとの設定」は4つ", () => {
+  test("「作品ごとの設定」は5つ", () => {
     const group = ACTION_TREE.find((g) => g.label === "拡張機能の設定");
     const section = shownEntries(group!.entries, true).find(
       (e) => e.kind === "section" && e.label === "作品ごとの設定"
@@ -97,6 +97,9 @@ describe("画面に出る詳細メニュー（道順を書く人はここを読�
     if (section?.kind !== "section") throw new Error("見つからない");
 
     expect(shownEntries(section.items, true).map((i) => i.label)).toEqual([
+      // **「執筆データ」から移した**（0.66.2。作者が探して見つけられなかった）。
+      // 許可は作品ごとに決めるものなので、ここが正しい置き場所である
+      "外部AIの利用を許可する／取り消す",
       "この作品の目標を決める",
       "形式とジャンルを決める",
       "一覧に項目を増やす",
