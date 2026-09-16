@@ -338,6 +338,7 @@ import { warnManuscriptNotOpen } from "./features/manuscriptTab";
 import { registeredPostingSites } from "./features/postingCopyRegistered";
 import { showEditHistory } from "./features/editHistoryPanel";
 import { toggleExternalAccessPermission } from "./features/externalAccessPermission";
+import { ExternalAccessWatcher } from "./features/externalAccessWatcher";
 import {
   reviewProposals,
   toggleReviewLock,
@@ -1102,6 +1103,26 @@ export async function activate(
   context.subscriptions.push(
     folderWatchers,
     registry.onDidChange(() => folderWatchers.sync(registry.list()))
+  );
+
+  /*
+    **外部AIのノックを見つけて、その場で作者に尋ねる**（設計書6.87.14。
+    作者の指示、2026-09-16「MCP承認を検知した場合は、拡張機能の画面上に
+    ポップアップさせてください」）。
+
+    MCPサーバーは別プロセスで、**VS Code が起動していなくても動く**ので、
+    サーバーの側から画面は出せない。断った記録を見張って知らせる形にする
+    ——起動したときにも一度読むので、**閉じている間のノックも出る。**
+  */
+  const externalAccessWatcher = new ExternalAccessWatcher(
+    context,
+    () => registry.list(),
+    () => refreshActionBadges()
+  );
+  externalAccessWatcher.refresh();
+  context.subscriptions.push(
+    externalAccessWatcher,
+    registry.onDidChange(() => externalAccessWatcher.refresh())
   );
 
   // 設定資料パネルからの保存を、本文の色分けと一覧へ届ける。

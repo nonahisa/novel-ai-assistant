@@ -1,210 +1,278 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
 import {
+  ALL_TOOLS,
+  ANONYMOUS_CLIENT,
   DENIED,
-  EXTERNAL_ACCESS_DENIED_MESSAGE,
+  clientKeyOf,
   describeExternalAccessPermission,
+  externalAccessDeniedMessage,
   formatExternalAccessPermission,
+  isSamplingAllowed,
+  isToolAllowed,
   parseExternalAccessPermission,
+  samplingNotPermittedMessage,
 } from "../../src/core/externalAccessPermission";
 import {
   assertExternalAccessAllowed,
   readExternalAccessPermission,
 } from "../../src/mcp/tools/permission";
+import { setExternalClientName } from "../../src/mcp/tools/accessLog";
 import { IGNORED_PATHS } from "../../src/core/workRegistry";
 
 /**
- * 外部AIの利用は**既定で拒否**（設計書6.87.10。作者の指示、2026-09-15）。
+ * 外部AIの利用は**既定で拒否**（設計書6.87.10・6.87.14。
+ * 作者の指示、2026-09-15／16）。
  *
- * **ここで守りたいのは1つ。** 意思確認をしていない作品の原稿が、
- * 外から1文字も読めないこと。**迷ったら断る**側に倒っていることを、
- * あらゆる入り方で確かめる。
+ * **ここで守りたいのは2つ。**
+ *
+ * 1. 意思確認をしていない作品の原稿が、外から1文字も読めないこと
+ * 2. **許可しても全開放にならないこと**——許したのは「この接続元が、
+ *    この道具を」であって、「この作品を外部AIに」ではない
+ *
+ * **迷ったら断る**側に倒っていることを、あらゆる入り方で確かめる。
  */
+
+const temporary: string[] = [];
+
+afterEach(() => {
+  setExternalClientName("");
+  for (const folder of temporary.splice(0)) {
+    fs.rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+/** 印を置いた作品を、一時に作る */
+function workWith(permission: unknown): string {
+  const folder = fs.mkdtempSync(nodePath.join(os.tmpdir(), "novelai-perm-"));
+  fs.mkdirSync(nodePath.join(folder, ".aiwriter"), { recursive: true });
+  fs.writeFileSync(
+    nodePath.join(folder, ".aiwriter", "external-access.json"),
+    JSON.stringify(permission),
+    "utf8"
+  );
+  temporary.push(folder);
+  return folder;
+}
+
+function allowing(
+  client: string,
+  tools: string[],
+  sampling = false
+): Record<string, unknown> {
+  return {
+    clients: [
+      {
+        name: client,
+        tools,
+        sampling,
+        decidedAt: "2026-09-16T00:00:00.000Z",
+        decidedOn: "テスト",
+        note: "",
+      },
+    ],
+  };
+}
 
 describe("印の読み方——迷ったら断る", () => {
   it("印が無ければ拒否", () => {
     const folder = fs.mkdtempSync(nodePath.join(os.tmpdir(), "novelai-perm-"));
-    try {
-      expect(readExternalAccessPermission(folder).allowed).toBe(false);
-    } finally {
-      fs.rmSync(folder, { recursive: true, force: true });
-    }
+    temporary.push(folder);
+    expect(readExternalAccessPermission(folder).clients).toEqual([]);
   });
 
   it("壊れたJSONは拒否", () => {
-    expect(parseExternalAccessPermission("{壊れている").allowed).toBe(false);
+    expect(parseExternalAccessPermission("{壊れている")).toEqual(DENIED);
   });
 
   it("配列や文字列は拒否", () => {
-    expect(parseExternalAccessPermission("[]").allowed).toBe(false);
-    expect(parseExternalAccessPermission('"はい"').allowed).toBe(false);
-    expect(parseExternalAccessPermission("null").allowed).toBe(false);
+    expect(parseExternalAccessPermission("[]")).toEqual(DENIED);
+    expect(parseExternalAccessPermission('"はい"')).toEqual(DENIED);
   });
 
-  it("allowed が true そのものでなければ拒否", () => {
-    // **書き損じを許可にしない**
-    expect(parseExternalAccessPermission('{"allowed":"true"}').allowed).toBe(
-      false
+  it("**古い形（allowed: true）は許可と読まない**", () => {
+    /*
+      0.66.1 で、許可は接続元ごと・道具ごとになった（作者の指示）。
+      古い印は**作品ぜんたいを一括で許す**もので、いまの決まりと
+      噛み合わない——**黙って通さず、決め直してもらう。**
+    */
+    const permission = parseExternalAccessPermission(
+      JSON.stringify({ allowed: true, sampling: true })
     );
-    expect(parseExternalAccessPermission('{"allowed":1}').allowed).toBe(false);
-    expect(parseExternalAccessPermission('{"allowed":"yes"}').allowed).toBe(
-      false
-    );
+    expect(permission.clients).toEqual([]);
+    expect(isToolAllowed(permission, "claude-code", "typo.run")).toBe(false);
+    // **古い印だと分かるようにする**（断り文句で決め直しを促すため）
+    expect(permission.legacy).toBe(true);
   });
 
-  it("allowed が true なら許可", () => {
-    const parsed = parseExternalAccessPermission(
-      '{"allowed":true,"decidedAt":"2026-09-15T04:00:00.000Z","decidedOn":"机の上"}'
+  it("名前の無い接続元は読み飛ばす", () => {
+    const permission = parseExternalAccessPermission(
+      JSON.stringify({ clients: [{ name: "  ", tools: [ALL_TOOLS] }] })
     );
-    expect(parsed.allowed).toBe(true);
-    expect(parsed.decidedOn).toBe("机の上");
+    expect(permission.clients).toEqual([]);
   });
 
-  it("取り消しは false を書く（消さない）", () => {
-    // 消すと「一度も決めていない」のか「取り消した」のか分からなくなる
-    const text = formatExternalAccessPermission({
-      allowed: false,
-      decidedAt: "2026-09-15T04:00:00.000Z",
-      decidedOn: "机の上",
-      note: "",
-    });
-    expect(parseExternalAccessPermission(text).allowed).toBe(false);
-    expect(text).toContain("decidedAt");
+  it("道具に文字列でないものが混ざっていても、そこだけ落とす", () => {
+    const permission = parseExternalAccessPermission(
+      JSON.stringify({
+        clients: [{ name: "x", tools: ["typo.run", 1, null, "work.scan"] }],
+      })
+    );
+    expect(permission.clients[0].tools).toEqual(["typo.run", "work.scan"]);
+  });
+
+  it("sampling は true そのものでなければ拒否", () => {
+    const permission = parseExternalAccessPermission(
+      JSON.stringify({ clients: [{ name: "x", tools: ["a"], sampling: "yes" }] })
+    );
+    expect(isSamplingAllowed(permission, "x")).toBe(false);
   });
 
   it("書いたものが、そのまま読める", () => {
-    const text = formatExternalAccessPermission({
-      allowed: true,
-      decidedAt: "2026-09-15T04:00:00.000Z",
-      decidedOn: "机の上",
-      note: "テスト用",
-    });
-    const parsed = parseExternalAccessPermission(text);
-    expect(parsed.allowed).toBe(true);
-    expect(parsed.note).toBe("テスト用");
+    const original = parseExternalAccessPermission(
+      JSON.stringify(allowing("claude-code", ["typo.run"], true))
+    );
+    const again = parseExternalAccessPermission(
+      formatExternalAccessPermission(original)
+    );
+    expect(again.clients).toEqual(original.clients);
+  });
+});
+
+describe("許しても全開放にしない", () => {
+  it("**許した道具だけが通る**", () => {
+    const permission = parseExternalAccessPermission(
+      JSON.stringify(allowing("claude-code", ["typo.run"]))
+    );
+    expect(isToolAllowed(permission, "claude-code", "typo.run")).toBe(true);
+    // ほかの道具は別に許可が要る
+    expect(isToolAllowed(permission, "claude-code", "settings.run")).toBe(false);
   });
 
-  it("作者が開いて読めるよう、説明が入っている", () => {
-    // 作者はプログラマではない。何のファイルか分かる必要がある
-    const text = formatExternalAccessPermission(DENIED);
-    expect(text).toContain("外部AI");
-    expect(text).toContain("拒否");
+  it("**別の接続元には効かない**", () => {
+    const permission = parseExternalAccessPermission(
+      JSON.stringify(allowing("claude-code", [ALL_TOOLS]))
+    );
+    expect(isToolAllowed(permission, "claude-code", "typo.run")).toBe(true);
+    expect(isToolAllowed(permission, "別のなにか", "typo.run")).toBe(false);
+  });
+
+  it("`*` を許していれば、その接続元には全部通る", () => {
+    const permission = parseExternalAccessPermission(
+      JSON.stringify(allowing("claude-code", [ALL_TOOLS]))
+    );
+    expect(isToolAllowed(permission, "claude-code", "これから足す道具")).toBe(
+      true
+    );
+  });
+
+  it("名乗らなかった相手は「名乗りなし」として扱う", () => {
+    const permission = parseExternalAccessPermission(
+      JSON.stringify(allowing(ANONYMOUS_CLIENT, ["work.scan"]))
+    );
+    expect(isToolAllowed(permission, "", "work.scan")).toBe(true);
+    expect(isToolAllowed(permission, undefined, "work.scan")).toBe(true);
+    expect(clientKeyOf("  ")).toBe(ANONYMOUS_CLIENT);
+  });
+
+  it("**考えさせる許可は、道具の許可とは別**", () => {
+    const permission = parseExternalAccessPermission(
+      JSON.stringify(allowing("claude-code", [ALL_TOOLS], false))
+    );
+    expect(isToolAllowed(permission, "claude-code", "typo.run")).toBe(true);
+    // 全部の道具を許しても、考えさせるのは閉じたまま
+    expect(isSamplingAllowed(permission, "claude-code")).toBe(false);
   });
 });
 
 describe("門番——道具が動く前に断る", () => {
-  let folder: string;
-
-  beforeEach(() => {
-    folder = fs.mkdtempSync(nodePath.join(os.tmpdir(), "novelai-perm-"));
+  it("許していない道具は断る", () => {
+    setExternalClientName("claude-code");
+    const folder = workWith(allowing("claude-code", ["work.scan"]));
+    expect(() =>
+      assertExternalAccessAllowed({ folder }, "typo.run")
+    ).toThrow(/typo\.run/);
   });
 
-  afterEach(() => {
-    fs.rmSync(folder, { recursive: true, force: true });
+  it("許した道具は通る", () => {
+    setExternalClientName("claude-code");
+    const folder = workWith(allowing("claude-code", ["typo.run"]));
+    expect(() =>
+      assertExternalAccessAllowed({ folder }, "typo.run")
+    ).not.toThrow();
   });
 
-  function allow(): void {
-    const dir = nodePath.join(folder, ".aiwriter");
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(
-      nodePath.join(dir, "external-access.json"),
-      formatExternalAccessPermission({
-        allowed: true,
-        decidedAt: "2026-09-15T04:00:00.000Z",
-        decidedOn: "机の上",
-        note: "",
-      }),
-      "utf8"
-    );
-  }
-
-  it("許可が無ければ投げる", () => {
-    expect(() => assertExternalAccessAllowed({ folder })).toThrow(
-      /許可されていません/
-    );
+  it("**同じ道具でも、別の接続元なら断る**", () => {
+    setExternalClientName("別のなにか");
+    const folder = workWith(allowing("claude-code", [ALL_TOOLS]));
+    expect(() =>
+      assertExternalAccessAllowed({ folder }, "typo.run")
+    ).toThrow();
   });
 
-  it("断る返事に、どうすれば使えるかが書いてある", () => {
-    // **断っただけでは、呼んだ側は不具合と区別が付かない**
-    expect(EXTERNAL_ACCESS_DENIED_MESSAGE).toContain("VS Code");
-    expect(EXTERNAL_ACCESS_DENIED_MESSAGE).toContain("許可");
-    expect(EXTERNAL_ACCESS_DENIED_MESSAGE).toContain("記録");
+  it("作品を指していない呼び出しは素通り（許可の対象が無い）", () => {
+    expect(() => assertExternalAccessAllowed({}, "mcp.version")).not.toThrow();
   });
 
-  it("許可してあれば通る", () => {
-    allow();
-    expect(() => assertExternalAccessAllowed({ folder })).not.toThrow();
+  it("断る返事に、**どうすれば使えるか**が書いてある", () => {
+    const message = externalAccessDeniedMessage({
+      client: "claude-code",
+      tool: "typo.run",
+      legacy: false,
+    });
+    // 誰が・何を
+    expect(message).toContain("claude-code");
+    expect(message).toContain("typo.run");
+    // どうすれば
+    expect(message).toContain("VS Code");
+    // なぜ既定が拒否か
+    expect(message).toContain("道具ごと");
   });
 
-  it("作品を指していない呼び出しは素通り", () => {
-    // `mcp.version`・`ollama.generate` は原稿を読まないので、許可の対象が無い
-    expect(() => assertExternalAccessAllowed({})).not.toThrow();
-    expect(() => assertExternalAccessAllowed(undefined)).not.toThrow();
-    expect(() => assertExternalAccessAllowed({ folder: "   " })).not.toThrow();
+  it("古い印が残っていれば、決め直しが要ると書く", () => {
+    const message = externalAccessDeniedMessage({
+      client: "claude-code",
+      tool: "typo.run",
+      legacy: true,
+    });
+    expect(message).toContain("決め直");
   });
 
-  it("別の作品の許可では通らない", () => {
-    allow();
-    const other = fs.mkdtempSync(nodePath.join(os.tmpdir(), "novelai-perm2-"));
-    try {
-      expect(() => assertExternalAccessAllowed({ folder: other })).toThrow(
-        /許可されていません/
-      );
-    } finally {
-      fs.rmSync(other, { recursive: true, force: true });
-    }
-  });
-});
-
-describe("転送層で、どの道具も門番を抜けられない", () => {
-  const source = fs.readFileSync(
-    nodePath.join(__dirname, "../../src/mcp/server.ts"),
-    "utf8"
-  );
-
-  it("門番は tool() の中にあり、道具ごとに書かれていない", () => {
-    /*
-      **1か所でなければならない。** 道具ごとに書くと、新しい道具を
-      足した人が忘れる——そして**忘れた道具は、許可なしで原稿を読む**。
-    */
-    const calls = [...source.matchAll(/assertExternalAccessAllowed\(/g)];
-    expect(calls).toHaveLength(1);
-  });
-
-  it("門番は、道具の中身より先に呼ばれる", () => {
-    const gate = source.indexOf("assertExternalAccessAllowed(args)");
-    const handler = source.indexOf("await handler(args)");
-    expect(gate).toBeGreaterThan(0);
-    expect(handler).toBeGreaterThan(0);
-    // **先に断るので、断られた呼び出しではファイルを開かない**
-    expect(gate).toBeLessThan(handler);
-  });
-});
-
-describe("印は同期しない", () => {
-  it("除外の一覧に入っている", () => {
-    // 同期すると、リポジトリを共有した編集部の機械でも許可済みになる
-    expect(IGNORED_PATHS).toContain(".aiwriter/external-access.json");
+  it("考えさせるのを断る返事に、代わりの道が書いてある", () => {
+    const message = samplingNotPermittedMessage("claude-code");
+    expect(message).toContain("claude-code");
+    expect(message).toContain("ollama");
   });
 });
 
 describe("画面に出す一文", () => {
-  it("拒否のときは、既定であることまで言う", () => {
-    const text = describeExternalAccessPermission(DENIED);
-    expect(text).toContain("拒否");
-    expect(text).toContain("既定");
+  it("何も許していなければ、そう言う", () => {
+    expect(describeExternalAccessPermission(DENIED)).toContain("拒否");
   });
 
-  it("許可のときは、いつ決めたかを言う", () => {
-    const text = describeExternalAccessPermission({
-      allowed: true,
-      decidedAt: "2026-09-15T04:00:00.000Z",
-      decidedOn: "机の上",
-      note: "",
-    });
-    expect(text).toContain("許可");
-    expect(text).toContain("机の上");
+  it("**誰に・どれだけ許したかを言う**", () => {
+    const permission = parseExternalAccessPermission(
+      JSON.stringify(allowing("claude-code", ["typo.run", "work.scan"]))
+    );
+    const text = describeExternalAccessPermission(permission);
+    expect(text).toContain("claude-code");
+    expect(text).toContain("2個の道具");
+    // **ほかは拒否**であることも言う（許可＝全開放と読ませない）
+    expect(text).toContain("拒否");
+  });
+
+  it("考えさせる許可は、別に出す", () => {
+    const permission = parseExternalAccessPermission(
+      JSON.stringify(allowing("claude-code", [ALL_TOOLS], true))
+    );
+    expect(describeExternalAccessPermission(permission)).toContain("考えさせる");
+  });
+});
+
+describe("置き場所", () => {
+  it("**同期しない**（許可は、その機械で作者が与えるもの）", () => {
+    expect(IGNORED_PATHS).toContain(".aiwriter/external-access.json");
   });
 });

@@ -3,6 +3,7 @@ import nodePath from "node:path";
 import { AIWRITER_DIR } from "../../models/types";
 import {
   EXTERNAL_ACCESS_DIRECTORY,
+  EXTERNAL_ACCESS_DENIED_DETAIL,
   EXTERNAL_ACCESS_FILE,
   formatExternalAccessLine,
   type ExternalAccessEntry,
@@ -32,6 +33,11 @@ let clientName = "";
 
 export function setExternalClientName(name: string): void {
   clientName = name.trim().slice(0, 80);
+}
+
+/** いま繋いでいる相手の名乗り。**許可の見分けにも使う**（設計書6.87.14） */
+export function getExternalClientName(): string {
+  return clientName;
 }
 
 /**
@@ -167,7 +173,7 @@ export function recordExternalAccess(input: RecordAccessInput): boolean {
     model: modelOf(args),
     ok: input.ok,
     detail: input.denied
-      ? "許可が無いので断りました"
+      ? EXTERNAL_ACCESS_DENIED_DETAIL
       : detailOf(args, input.failure),
   };
 

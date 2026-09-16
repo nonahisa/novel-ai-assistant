@@ -71,7 +71,8 @@ async function postHistory(
     // **いま許可されているかを、記録の上に出す**（設計書6.87.10）。
     // 記録だけを見せると、作者は「いま読まれうるのか」を判断できない
     permission: describeExternalAccessPermission(permission),
-    allowed: permission.allowed,
+    // **1つでも許可している接続元があるか**（画面の印の出し分けに使う）
+    allowed: permission.clients.length > 0,
   });
 }
 

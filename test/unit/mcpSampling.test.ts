@@ -16,6 +16,10 @@ import {
 } from "../../src/mcp/tools/run";
 import { RUNNER_INPUT } from "../../src/mcp/tools/shared";
 import { typoRun } from "../../src/mcp/tools/typo";
+import { setExternalClientName } from "../../src/mcp/tools/accessLog";
+
+/** この試験での接続元の名乗り。**許可と門番が同じ相手を見る** */
+const TEST_CLIENT = "試験のクライアント";
 
 /**
  * 呼び出し元に考えてもらう道（MCP の sampling。設計書6.87.12）。
@@ -78,11 +82,18 @@ function allowedWork(options: { sampling?: boolean } = {}): string {
   fs.writeFileSync(
     nodePath.join(folder, ".aiwriter", "external-access.json"),
     JSON.stringify({
-      allowed: true,
-      sampling: options.sampling !== false,
-      decidedAt: "2026-09-16T00:00:00.000Z",
-      decidedOn: "テスト",
-      note: "",
+      clients: [
+        {
+          // **接続元ごと・道具ごとの許可**（0.66.1、設計書6.87.14）。
+          // この試験は sampling の可否だけを見たいので、道具は全部許す
+          name: TEST_CLIENT,
+          tools: ["*"],
+          sampling: options.sampling !== false,
+          decidedAt: "2026-09-16T00:00:00.000Z",
+          decidedOn: "テスト",
+          note: "",
+        },
+      ],
     }),
     "utf8"
   );
@@ -92,7 +103,12 @@ function allowedWork(options: { sampling?: boolean } = {}): string {
 
 const temporary: string[] = [];
 
+beforeEach(() => {
+  setExternalClientName(TEST_CLIENT);
+});
+
 afterEach(() => {
+  setExternalClientName("");
   clearSamplingHost();
   for (const folder of temporary.splice(0)) {
     fs.rmSync(folder, { recursive: true, force: true });

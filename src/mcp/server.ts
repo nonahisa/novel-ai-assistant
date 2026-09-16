@@ -193,12 +193,14 @@ function tool<Args>(
 ): (args: Args) => Promise<CallToolResult> {
   return async (args: Args) => {
     /*
-      **まず許可を確かめる**（設計書6.87.10。作者の指示、2026-09-15）。
+      **まず許可を確かめる**（設計書6.87.10・6.87.14。作者の指示、2026-09-15／16）。
       既定は拒否で、作者が意思確認をしていない作品は1文字も読ませない。
+      **許可は接続元ごと・道具ごと**なので、道具の名前を渡す——ほかの道具を
+      許していても、この道具は別に許可が要る。
       **道具が動く前に断る**ので、断られた呼び出しではファイルを開かない。
     */
     try {
-      assertExternalAccessAllowed(args);
+      assertExternalAccessAllowed(args, name);
     } catch (error) {
       // **ノックされたことを残す。** 許可した回より、作者が知りたいこと
       recordExternalAccess({ tool: name, args, ok: false, denied: true });

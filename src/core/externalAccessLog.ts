@@ -139,6 +139,59 @@ export function parseExternalAccessLine(
   };
 }
 
+/**
+ * 許可が無くて断った回の印（設計書6.87.10、6.87.14）。
+ *
+ * **ここが唯一の定義。** MCP 側が書き、拡張機能側が「ノックされた」と
+ * 読み取る——**文字列を写すと、片方を直したときに検知が黙って止まる。**
+ */
+export const EXTERNAL_ACCESS_DENIED_DETAIL = "許可が無いので断りました";
+
+/**
+ * その行が「断ったノック」か。
+ *
+ * **作者に知らせるのはこれだけ。** 許可済みの呼び出しまでポップアップに
+ * すると、作者は画面を閉じることを覚えてしまい、**本当に知らせたい回まで
+ * 閉じられる。**
+ */
+export function isExternalAccessKnock(entry: ExternalAccessEntry): boolean {
+  return !entry.ok && entry.detail === EXTERNAL_ACCESS_DENIED_DETAIL;
+}
+
+export interface ExternalAccessKnock {
+  client: string;
+  tool: string;
+  at: string;
+}
+
+/**
+ * まだ知らせていないノックを、新しい順に選ぶ（設計書6.87.14）。
+ *
+ * **接続元と道具の組ごとに1つへ畳む。** 外部AIは同じ道具を続けて呼ぶ
+ * （チャンクごとに1回）ので、畳まないと**数十回のポップアップ**になる。
+ * 同じ組なら作者の判断も同じなので、まとめて1回尋ねれば足りる。
+ *
+ * @param since この時刻より後のものだけ。空なら全部（初めて見るとき）
+ */
+export function pendingExternalAccessKnocks(
+  entries: readonly ExternalAccessEntry[],
+  since: string
+): ExternalAccessKnock[] {
+  const knocks: ExternalAccessKnock[] = [];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (!isExternalAccessKnock(entry)) continue;
+    if (since && entry.time <= since) continue;
+    // **鍵は `JSON.stringify` で作る。** 区切り文字を挟むと、
+    // 名前にその文字が入っている組と衝突する
+    const pair = JSON.stringify([entry.client, entry.tool]);
+    if (seen.has(pair)) continue;
+    seen.add(pair);
+    knocks.push({ client: entry.client, tool: entry.tool, at: entry.time });
+  }
+  return knocks;
+}
+
 /** 読めない値は「本文が外へ出た」に倒す。**軽いほうへ倒すと見落とす** */
 function parseExposure(value: unknown): ExternalExposure {
   return value === "none" ||
