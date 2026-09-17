@@ -26,47 +26,9 @@
 
 特に設計書の **5.4節（外部ツールとの共存）** と **5.5節（GitHub同期）** は、実装時に必ず守るべき制約が書かれている。
 
-### 設計書を直したら、その場で整合性を取る
+**設計書・引継ぎ書を直すとき、版を上げるときは、スキル `docs-sync` を読むこと**（章番号の整合の手順、引継ぎ書の書き方、版を揃える6か所と見張っているテスト）。
 
-**設計書の章立て・番号を変えたら、参照している側も同じ作業の中で直すこと。** 章番号はコード注釈・引継ぎ書・プロンプト設計書・CLAUDE.mdから70か所以上参照されており、放置すると**別の節を指したまま気づかれない**。次の順で確かめる。
-
-1. 参照の書き方は3通りある。**すべてを対象にする**
-   - `設計書5.5.1` のように「設計書」が付く形
-   - `5.5.1節` のように「節」で終わる形
-   - `（5.5.1）` `5.4.1のハッシュ検証` のように、括弧や助詞だけの形（**見落としやすい**）
-2. 変換は**元の状態から1回だけ**行う。2回に分けると、1回目で直した番号を2回目がもう一度変換する（旧5.5.1と新5.5.1は別の節を指すため、実際に壊した）
-3. 版番号（`1.90.0`）や計算式（`* 1.1`）を巻き込まないよう、**旧設計書に実在した見出し番号と一致するものだけ**を置き換える
-4. 直したあと、**全参照が実在する節を指し、内容も合っているか**を見出し一覧と突き合わせて確認する。番号が通っていても、指し先の内容が違っていることがある（実際に3件あった）
-5. **節を足したら、冒頭の「## 目次」も作り直す。** 目次には章（`##`）と節（`###`）を、リンク付きで並べる。リンク先は VS Code のプレビューが見出しから作る規則に合わせる（全角の約物を落として空白をハイフンにする）
-
-**番号の重複と、目次の抜け・切れたリンクは `test/unit/designDocToc.test.ts` が止める**（設計書と引継ぎ書の両方）。2つのセッションが同時に節を足して `6.18` が2つできたことがあり、両方がコードから番号で参照されていた。目視では見つからない。
-
-### 引継ぎ書は、冒頭だけで現状が掴めるようにする
-
-`docs/進捗と引継ぎ.md` は**次のセッションが最初に読む文書**である。冒頭に「いまの状態」（版・テスト数・動くもの・触るときの注意）と目次を置き、そこだけで現状が掴めるようにしてある。
-
-**日付順の作業記録は「8. 作業の記録」へ書き足す。** 前は「実装済み・未検証」という節に積んでおり、2,776行中2,151行がそこに入って「次にやること」が2,614行目まで押し下げられていた。新しい記録は8章の末尾へ足し、**1〜7章は現状を映すように直す**（記録を足すだけで済ませない）。
-
-**節を足したら `node scripts/handoverToc.mjs` で目次を作り直す。** このスクリプトは**目次だけ**を差し替える。文章には触らない。
-
-**文書の文章を、スクリプトで組み立て直さないこと。** 以前は冒頭の「いまの状態」の表ごと組み立てるスクリプトを使い捨てで書いていた。表の中身（版・テスト数）がスクリプト側に固定されていたため、**走らせるたびに版が 0.6.9 へ巻き戻り**、5回分の修正のあいだ気づかれなかった。機械が触ってよいのは、機械にしか作れないもの（見出しから作る目次）だけである。
-
-### 版は5つの文書で揃える
-
-`package.json` の版に、次を合わせる。
-
-| 文書 | 直す場所 | 見張っているテスト |
-|---|---|---|
-| `CHANGELOG.md` | 先頭の見出し | `showVersion.test.ts` |
-| `README.md` | 「このリポジトリの版」（1か所。VSIX手順は動的取得なので触らない） | 同上 |
-| `docs/設計書.md` | 冒頭の `version` 行 | 同上 |
-| `docs/進捗と引継ぎ.md` | 「いまの状態」の表 | 同上 |
-| **`docs/プロンプト設計書.md`** | 冒頭の `version` 行と**「（対象：…）」の行** | **`promptDocShape.test.ts`**（別のテスト） |
-| **`src/mcp/version.ts`** | `SERVER_VERSION`（MCP サーバーが名乗る版。0.49.0〜） | **`mcpVersion.test.ts`** |
-
-**プロンプト設計書は忘れやすい。** 見張っているのが `showVersion.test.ts` ではなく別のテストなので、ほかの4つを直して安心していると落ちる（2026-08-27に実際に落ちた）。`npm run check` は両方を走らせる。
-
-設計書はかつて文書だけの通し番号（0.9）を振っていたが、拡張機能が 0.6.x を名乗っているのにどちらが新しいのか読んだ人に分からないため、拡張機能の版に合わせた。
+作業の手順は `.claude/skills/` にスキルとして置いてある（`team`・`docs-sync`・`release`・`shell-safety`・`field-check`・`codebase-map`）。**必要なときだけ読まれるので、ここには写さない。**
 
 ---
 
@@ -85,156 +47,11 @@ npm run typecheck    # 型チェックのみ
 
 ## アーキテクチャ
 
-**下の一覧は「主なもの」であって、全部ではない。** `src/core` だけで150以上のファイルがあり、
-全件を書くと読めないうえ、次の変更ですぐ古くなる（実際、一度は130件以上が抜けた状態になった）。
-
-**ここへ書き足すのは、土台になるものだけでよい**——「新しく書く人がその存在を知らないと、
-同じ失敗をくり返すもの」が基準である（例：`atomicWrite.ts` の上書き禁止、
-`paths.ts` の場所の扱い）。個別の機能ファイルは、書かなくてよい。
-
-```
-src/
-├─ extension.ts          エントリポイント。コマンド登録とステータスバー
-│
-├─ models/               データ型の定義のみ。VSCode APIに依存しない
-│  ├─ types.ts           作品・ファイル・文字数
-│  ├─ character.ts       登場人物
-│  ├─ ability.ts         能力・能力体系
-│  ├─ location.ts        場所
-│  ├─ customField.ts     作者が定義する追加項目
-│  ├─ aiNote.ts          AIの掘り下げメモ
-│  ├─ jsonValidation.ts  作者が手編集するJSONの検証部品
-│  ├─ keepWord.ts       作者が「直さない」と決めた語（方言・口癖）
-│  ├─ actor.ts          誰の操作か（作者・編集者・AI）
-│  ├─ proposal.ts       編集部からの提案と、その承認・却下
-│  └─ fileLock.ts       校閲中のファイルのロック（ファイル単位）
-│
-├─ core/                 ドメインロジック
-│  【どこでも動かす土台】手元のVS Codeとブラウザ版の両方で動かすための部品（設計書5.8）
-│  ├─ runtime.ts         いまブラウザか。外部プロセスを起動できるか
-│  ├─ paths.ts           場所の扱い。**`path` の代わりにこれを使う**
-│  ├─ pathText.ts        paths.ts の純粋な部分（vscode 不要）。既定は paths のまま。core の純粋な部品だけが直に指す
-│  ├─ hash.ts            SHA-1/256。ブラウザには node:crypto が無いので自前
-│  ├─ processAvailability.ts ブラウザで使えない操作と、その理由
-│  ├─ gitAttribution.ts  誰が編集したか（git.ts を巻き込まずに取る）
-│  └─ gitSyncStatusText.ts 同期状態の短い印（型だけを見る純粋関数）
-│
-│  【原稿を読む】
-│  ├─ textFile.ts        文字コード・改行を保持した安全な読み書き
-│  ├─ textEdit.ts        変わった1か所だけを取り出す（全文差し替えを避ける）
-│  ├─ eolSpace.ts        画面は常にLF空間で持つ（CRLFの変換は境界だけ。守らないと打鍵のたびに改行が書き換わる）
-│  ├─ fileSystem.ts      ファイル操作の薄い層
-│  ├─ atomicWrite.ts     既存ファイルを壊さない書き込み（後述の制約あり）
-│  ├─ timestampedFileName.ts 上書き禁止の世界で衝突しない別名を作る（秒→連番。回避策はここへ寄せる）
-│  ├─ scanner.ts         作品フォルダの走査
-│  ├─ episodeParser.ts   ファイル名から話数を解析
-│  ├─ metadataParser.ts  投稿サイトのDLファイルのヘッダー解析
-│  ├─ charCount.ts       文字数計測
-│  ├─ episodeLabel.ts    話数の見出しとタイトル（一覧と統計で共用）
-│  ├─ plotTemplate.ts    プロットの初期テンプレート
-│  ├─ gitHistory.ts      過去の版の一覧と復元（履歴は消さない）
-│  ├─ gitClone.ts        GitHubから作品を取り寄せる
-│  ├─ writingStats.ts    執筆量の集計（日次・週次・月次・年次、目標）
-│  ├─ writingStatsStore.ts 執筆量の記録（端末ごとに1ファイル）
-│  ├─ episodeCharTable.ts 話ごとの文字数一覧（長さの偏り）
-│  ├─ chunker.ts         本文のチャンク分割（大きさはモデルの上限から決める）
-│  ├─ chunkCache.ts      処理済みチャンクのキャッシュ
-│  ├─ manuscriptSources.ts / mentionExcerpts.ts  本文からの場面抜粋
-│  【設定資料を持つ】
-│  ├─ workRegistry.ts    作品の登録管理
-│  ├─ characterStore.ts  登場人物の永続化（1人1ファイル）
-│  ├─ abilityStore.ts / settingsStore.ts  能力・場所の永続化
-│  ├─ customFieldStore.ts 追加項目の定義の永続化
-│  ├─ pendingUpdates.ts  承認待ちの更新
-│  【設定資料を組み立てる】
-│  ├─ characterMerge.ts / settingsMerge.ts  抽出結果のマージ
-│  ├─ characterUnify.ts  同一人物のまとめ
-│  ├─ characterDiff.ts   更新内容の差分
-│  ├─ settingsEdit.ts    作者による書き換え（名前と別名の入れ替えを含む）
-│  ├─ settingsAsOf.ts    その話の時点での設定（先の話で判明した値を巻き戻す）
-│  ├─ gender.ts          性別の表記を揃える
-│  ├─ reading.ts         読み仮名の生成
-│  ├─ summaryLimit.ts    紹介文の字数制限
-│  ├─ characterExtractionValidation.ts / settingsExtractionValidation.ts
-│  ├─ groundedEvidence.ts 抽出根拠が本文に実在するかの照合
-│  【外に出す】
-│  ├─ settingsMarkdown.ts 設定資料集のMarkdown
-│  ├─ settingsSummary.ts  AIへ渡す「現在の設定」
-│  ├─ markdownLite.ts     パネル表示用のMarkdown整形
-│  ├─ manuscriptRender.ts 原稿エディタの表示（ルビ・傍点・用語の色分け）
-│  ├─ manuscriptViewTypes.ts 原稿エディタのviewType定数。views→featuresの逆流を防ぐためcoreに置く
-│  ├─ termColors.ts       用語の色の唯一の定義（写しを作らない。3か所が参照し、写しが無いことをテストが見る）
-│  ├─ imeDictionary.ts    IME辞書
-│  ├─ termIndex.ts        用語の索引（ハイライト用）
-│  ├─ logger.ts           失敗の記録（APIキーは伏せる）
-│  ├─ ruby.ts            ルビと傍点の変換（投稿サイト↔{漢字|かんじ}・{{強調}}）
-│  ├─ markdownItRuby.ts  標準のMarkdownプレビューへルビを差し込む
-│  └─ markdownConversion.ts .txt を .md へ（名前だけ変える）
-│  【AIの出力から原稿を守る】
-│  ├─ placeholderText.ts 「空文字」など、中身の無い言葉を修正案にしない
-│  ├─ keepWordStore.ts   直さない語の永続化
-│  └─ protectExternalEdits.ts 外で直された資料をAIから守る印
-│  【編集部と一緒に書く】
-│  ├─ editorMode.ts      編集者モードで使える操作（許すものを並べる）
-│  ├─ actorContext.ts    いまの環境が誰として動いているか
-│  ├─ editHistory.ts     編集履歴（同期される。追記だけ）
-│  ├─ proposalStore.ts   編集部からの提案（同期される。追記だけ）
-│  └─ fileLockStore.ts   校閲ロック（同期される。追記だけ）
-│
-├─ ai/                   AIプロバイダ抽象化
-│  ├─ types.ts           AIProvider インターフェース、AIError
-│  ├─ registry.ts        プロバイダ選択・セットアップウィザード
-│  ├─ ollamaProvider.ts / ollamaLauncher.ts
-│  ├─ claudeProvider.ts / openaiProvider.ts / geminiProvider.ts
-│  ├─ sakuraProvider.ts  さくらのAI（クラウド・OpenAI互換。無料枠あり）
-│  ├─ lmstudioProvider.ts LM Studio（手元・OpenAI互換。鍵が要らない）
-│  ├─ httpClient.ts      共通のHTTP・再試行
-│  ├─ jsonSchema.ts      プロバイダ方言へのスキーマ変換
-│  └─ outputLimit.ts     出力トークン上限
-│
-├─ prompts/              プロンプト定義（バージョン管理あり。17ファイル）
-│  └─ 一覧はプロンプト設計書の1.1にある（ここへ写すと二重管理になる）
-│     例：characterExtract.ts（P-04a 一括抽出）、foreshadowDetect.ts（P-25 伏線検知）
-│
-├─ features/             機能単位のオーケストレーション
-│  ├─ chunkSettings.ts     チャンクの大きさの設定を読む（**AI機能はここを通す**）
-│  ├─ extractSettings.ts / extractCharacters.ts
-│  ├─ applyPendingUpdates.ts / unifyCharacters.ts
-│  ├─ settingsPanel.ts      設定資料パネル
-│  ├─ manageCustomFields.ts 追加項目の管理
-│  ├─ generateSettingsDocs.ts / exportImeDictionary.ts
-│  ├─ startWork.ts          新規作品の始め方（プロット／本文）の選択
-│  ├─ gitRestore.ts         過去の版に戻す
-│  ├─ addWorkFromGithub.ts  GitHubから作品を追加
-│  ├─ setupOllama.ts        Ollamaの導入・起動・モデル取得の案内
-│  ├─ writingProgress.ts    保存時の執筆量の記録・ステータスバー
-│  ├─ writingStatsPanel.ts  執筆量パネル（グラフ・話ごとの一覧）
-│  ├─ selectOllamaExecutable.ts
-│  ├─ proposalPanel.ts     提案パネル（旧「AI指摘」。作者への提案は全部ここ）
-│  ├─ reviewProposals.ts   編集部の提案の確認と、校閲ロックの開始・終了
-│  ├─ editHistoryPanel.ts  編集履歴（作者・編集者・AIで色分け）
-│  ├─ manageKeepWords.ts   直さない語の管理
-│  ├─ protectExternalEdits.ts 外で直された資料を守る
-│  ├─ manuscriptEditor.ts  原稿エディタ（既定は横書き。縦横2つの入口。**本文はVS Codeに保存させる**）
-│  ├─ ruby.ts              ルビ・傍点を振る／投稿サイト用に変換／取り込む
-│  └─ mergeIntoLibrary.ts  別々の作品を1つの書庫へまとめ直す（写すだけ。元は消さない）
-│
-└─ views/                VSCode UI
-   ├─ workTree.ts          作品一覧
-   ├─ actionList.ts        詳細メニュー（分類→小分類→操作の3階層）
-   ├─ actionDecorations.ts 詳細メニュー末尾の印（AI・未反映の件数）
-   ├─ stepMenu.ts          簡単ステップメニュー。操作の実体はACTION_TREEだけが持ち、こちらはコマンドIDで参照する（写し禁止）
-   ├─ openDocument.ts      ファイルの開き方の共通口。openTextDocument+showTextDocumentは関連付けを無視して素のエディタで開く
-   ├─ settingsPanelHtml.ts パネルのWebView
-   ├─ writingStatsPanelHtml.ts 執筆量パネル（グラフは自前のSVG）
-   ├─ manuscriptEditorHtml.ts 原稿エディタの画面（縦横・面は4つで既定は「組んで書く」）
-   ├─ termHighlight.ts     用語ハイライト
-   ├─ progress.ts          進捗表示（中止ボタン付き）
-   ├─ proposalPanelHtml.ts 提案パネルのWebView
-   └─ editHistoryPanelHtml.ts 編集履歴のWebView
-```
+**ファイルの配置と土台の部品の一覧は、スキル `codebase-map` にある**（`src/` の木と、`paths.ts`・`atomicWrite.ts`・`eolSpace.ts` のような「知らないと同じ失敗を繰り返す」土台）。ここに残すのは方向だけ。
 
 **依存の方向**：`views` / `features` → `core` → `models`。逆流させない。`models` は VSCode API に依存させない（テストしやすくするため）。
+
+**`path` の代わりに `core/paths.ts`、`vscode.Uri.file()` の代わりに `paths.toUri()` を使う**（ブラウザ版で壊れる。規則7）。
 
 ---
 
@@ -328,34 +145,9 @@ src/
 
 ---
 
-## モデルの使い分け（本体がFableのとき）
+## 役割分担
 
-**本体（この会話を進めているモデル）が Fable のときは、次の分業で自走する**（作者の指定、2026-08-27）。本体が Opus や Sonnet のときは、この節は適用しない——自分で実装してよい。
-
-| 役割 | 担当 | 具体的に |
-|---|---|---|
-| 全体計画・判断・**デバッグ**・コミット | **本体（Fable）** | 何を作るかの設計、作業の分割と順序、エージェントの結果の**最終確認**、**原因の分からない不具合の調査**、版上げとコミット |
-| 実装 | **implementer（Opus）** | 固まった計画のコード化。新規実装・修正・リファクタリング。**実装で決まった細部を設計書の該当節へ追記する**ところまで（本体が確認する） |
-| レビュー（バグ探し・簡素化） | **general-purpose を `model: "opus"` で** | 観点ごとに1エージェント。**`/code-review` スキルは使わない**——中の検出エージェントは Fable で動き、1回で200万トークン超を食う（2026-08-29に実測） |
-| 走査・調査 | **Explore／general-purpose を `model: "sonnet"` で** | 文書の総点検、コードの横断検索、ログの読み取り。**`model` を省くと親（Fable）を継承する** |
-| 文書の機械的な更新 | **light-tester（Sonnet）** | 版の揃え（6文書）・CHANGELOG・引継ぎ書の記録・実機確認リストの項目・`handoverToc` の再生成。**本体は箇条書きの材料を渡し、最終確認だけ行う** |
-| 軽いテスト | **light-tester（Sonnet）** | テストの実行と結果整理、期待値の更新、既存パターンを写した追加ケース、**実装の差分と報告の照合** |
-
-エージェントの定義は `.claude/agents/` にある。
-
-**Fable の使用量が偏らないようにする**（作者の指摘、2026-08-29。週の上限で Fable だけ79%）。本体が自分で読む・書くのは「設計」「判断」「最終確認」「コミット」に絞り、**読む量の多い仕事（レビュー・走査）と書く量の多い仕事（文書の機械的更新）は Sonnet／Opus へ**。検収は implementer に**自己点検の要約と差分の要点**を報告させ、本体は要約と要所だけ読む。loop の待つだけの間隔は最大（60分）にする。
-
-### 投げ方
-
-- **エージェントは会話の文脈を持たない。** 指示には「触るファイル・直し方・確かめ方・やらないこと」まで書く。「さっきの方針で」は通じない
-- implementer へ投げるのは**方針が固まってから**。原因調査の途中で投げると、エージェントが独自の推測で直し始める
-- 互いに独立な作業は並行して投げてよい。**同じファイルを触る作業は並行させない**（後勝ちで消える）
-- 結果は検収する。「できました」の報告を鵜呑みにせず、検査の実行結果（件数）が報告に入っているかを見る。入っていなければ本体が走らせ直す
-- **版上げの采配とコミットは本体が行う**（版の整合は `showVersion.test.ts` が見るが、采配は1か所に置く）。**文書の書き込みそのものは light-tester に渡してよい**——本体は「何を・どこに・どう書くか」を箇条書きで指定し、結果を確認する。設計の判断（設計書の新節・方針の変更）は本体が書く
-
-### 本体が自分でやってよいもの
-
-数行の修正、設定値の変更、短い文書の編集、1〜2回の `grep`/`Read` は、エージェントを経由するほうが高くつく。**分業は「まとまった実装」「テストの往復」「読む量・書く量の多い仕事」のためのもの**であり、儀式ではない。目安：本体が**5ファイル以上を読む／300行以上を書く**ならエージェントへ。
+**まとまった実装・レビュー・走査・文書の機械的更新・テストの往復は、エージェントへ任せる。** 分担の表と投げ方は**スキル `team`** にある——**リーダー（本体）が Fable でも Opus でも同じ分担**で、違うのは「リーダーが自分でやってよい大きさ」だけ。エージェントの定義は `.claude/agents/` にある。
 
 ## テスト
 
@@ -372,16 +164,7 @@ npm run check            # 型検査＋単体テスト＋本番ビルド
 
 ### 版を上げる
 
-**変更を入れたら、同じ作業の中で版を上げる。**
-
-| 変更 | 上げる桁 |
-|---|---|
-| **VSIX化を伴わない**（不具合修正・小さな追加） | **最下位（パッチ）** 0.6.0 → 0.6.1 |
-| VSIX化を伴う配布（説明文の書き換え・機能のまとまり） | マイナー 0.6.1 → 0.7.0 |
-
-版番号の散らばり先は上の「版は5つの文書で揃える」の表が正である。**揃え忘れると `test/unit/showVersion.test.ts`（プロンプト設計書は `promptDocShape.test.ts`）が落ちる**ので、`npm run check` で気づける。
-
-版が動かないまま修正が積み上がると、作者が「ヘルプ → バージョンを確認」で見た版と実際の中身がずれる。
+**変更を入れたら、同じ作業の中で版を上げる**（VSIX化を伴わなければパッチ、伴えばマイナー）。揃える6か所と手順はスキル `docs-sync`。**揃え忘れは `showVersion.test.ts` と `promptDocShape.test.ts` が止める。**
 
 ---
 
