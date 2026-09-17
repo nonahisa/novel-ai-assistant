@@ -1,13 +1,22 @@
 // AIの出来を、手で数えずに測る（設計書6.87.15 の柱3）。
 //
 //   node scripts/measure.mjs <feature> [--work <作品フォルダー>] --model <モデル>
+//                            [--runner ollama|sakura]
 //                            [--repeat N] [--num-ctx 32768] [--endpoint URL]
+//                            [--timeout 180]
 //                            [--compare <前回のJSON>] [--out docs/measurements]
 //                            [--option 名前=値 ...]
 //
-// **製品と同じ経路を通す**（`runner: "ollama"` で `<feature>.run`）。
-// `prompt` だけ呼んで `validate` を飛ばす測り方は、**製品に無い不具合を
-// 見つけたことになる**（CLAUDE.md の「繰り返し起きた失敗」5）。
+// **製品と同じ経路を通す。** 行き先は2つある。
+//   - `--runner ollama`（既定）：`novel.run` が検算まで通す（1段）
+//   - `--runner sakura`：`novel.prompt` → こちらから さくらへ投げる →
+//     `novel.validate`（3段。MCP の `claude` 経路と同じ形）
+// どちらも**製品の検算を通る**。`prompt` だけ呼んで `validate` を飛ばす
+// 測り方は、**製品に無い不具合を見つけたことになる**（CLAUDE.md の
+// 「繰り返し起きた失敗」5）。
+//
+// **さくらの鍵は環境変数 `SAKURA_AI_ACCOUNT_TOKEN` からだけ読む**
+// （引数でもファイルでも対話でも受け取らない）。**記録にもログにも出さない。**
 //
 // **数えるのは `measureScoring.mjs`**（純粋関数）。ここは束を起こして
 // 返り値を集め、置き場所を決めて、日本語で並べるだけである。
@@ -18,6 +27,8 @@ import path from "node:path";
 import { connect, REPO_ROOT } from "./mcpClient.mjs";
 import {
   FILE_TARGET_FEATURES,
+  PROMPT_TOOL,
+  VALIDATE_TOOL,
   assertFeature,
   assertToolRegistered,
   formatCompareLines,
@@ -30,6 +41,22 @@ import {
   spreadOfRuns,
   toolNameOf,
 } from "./measureScoring.mjs";
+import {
+  DEFAULT_SAKURA_TIMEOUT_MS,
+  SAKURA_ENDPOINT,
+  askSakura,
+  readSakuraToken,
+  runSakuraChunks,
+} from "./measureSakura.mjs";
+
+/**
+ * 測れる行き先。
+ *
+ * **`sakura` を束（製品）の `runner` に足したのではない。** 製品の `runner` は
+ * `ollama`／`claude`／`sampling` のままで、これは**測定の台本が3段を
+ * 自分で回す**ための名前である。
+ */
+const RUNNERS = ["ollama", "sakura"];
 
 /** 接続元の名乗り。**許可の印もこの名前で置く** */
 const CLIENT_NAME = "measure";
@@ -58,9 +85,14 @@ function parseArgs(argv) {
     feature,
     work: null,
     model: null,
+    // **既定は今までどおり手元の Ollama。** クラウドは課金されるので、
+    // 指定しないかぎり外へ出さない
+    runner: "ollama",
     repeat: 1,
     numCtx: DEFAULT_NUM_CTX,
     endpoint: null,
+    /** さくらへ1チャンク投げたときに待つミリ秒（`--timeout` は秒で受ける） */
+    timeoutMs: DEFAULT_SAKURA_TIMEOUT_MS,
     compare: null,
     out: path.join(REPO_ROOT, "docs", "measurements"),
     // feature ごとの追加の指定（`novel.run` の `options`）。**空なら渡さない**
@@ -82,6 +114,13 @@ function parseArgs(argv) {
         break;
       case "--model":
         options.model = needsValue();
+        break;
+      case "--runner":
+        options.runner = needsValue();
+        break;
+      case "--timeout":
+        // **秒で受けて、ミリ秒で持つ。** 作者が打つのは秒である
+        options.timeoutMs = Number(needsValue()) * 1000;
         break;
       case "--repeat":
         options.repeat = Number(needsValue());
@@ -119,11 +158,19 @@ function parseArgs(argv) {
     }
   }
   if (!options.model) throw new Error("--model を指定してください。");
+  if (!RUNNERS.includes(options.runner)) {
+    throw new Error(
+      `知らない --runner です: ${options.runner}（選べるのは ${RUNNERS.join("・")}）`
+    );
+  }
   if (!Number.isInteger(options.repeat) || options.repeat < 1) {
     throw new Error("--repeat は1以上の整数です。");
   }
   if (!Number.isInteger(options.numCtx) || options.numCtx < 1) {
     throw new Error("--num-ctx は1以上の整数です。");
+  }
+  if (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 1000) {
+    throw new Error("--timeout は1以上の秒数です。");
   }
   return options;
 }
@@ -226,10 +273,18 @@ function planCalls(schema, context) {
   if ("folder" in properties) base.folder = context.work;
   if ("feature" in properties) base.feature = context.feature;
   if ("numCtx" in properties) base.numCtx = context.numCtx;
-  if ("runner" in properties) base.runner = "ollama";
-  if ("model" in properties) base.model = context.model;
-  if ("endpoint" in properties && context.endpoint) {
-    base.endpoint = context.endpoint;
+  /*
+    **束へ渡す `runner` は、測定の `--runner` とは別物である。**
+    `--runner sakura` のときは `novel.prompt`／`novel.validate` を呼ぶので、
+    束へ渡す行き先は無い（`bundleRunner` は null）。ここで既定の "ollama" を
+    埋めると、**さくらで測ったつもりで手元の Ollama が回る。**
+  */
+  if ("runner" in properties && context.bundleRunner) {
+    base.runner = context.bundleRunner;
+    if ("model" in properties) base.model = context.model;
+    if ("endpoint" in properties && context.endpoint) {
+      base.endpoint = context.endpoint;
+    }
   }
   // **空なら渡さない。** `options: {}` を渡すと、記録の上では
   // 「何か指定して測った」ように見える
@@ -282,7 +337,7 @@ function planCalls(schema, context) {
  * **1件失敗しても止めない**（製品と同じ）。理由を `failures` に残して次の
  * ファイルへ進む——ここで止めると、1話目のモデル落ちだけで測定が丸ごと消える。
  */
-async function runOnce(client, toolName, calls) {
+async function runOnce(calls, ask) {
   const startedAt = Date.now();
   const raw = [];
   const results = [];
@@ -295,19 +350,13 @@ async function runOnce(client, toolName, calls) {
   let staleNote = null;
   for (const call of calls) {
     try {
-      const value = await client.call(toolName, call.args);
-      raw.push({ target: call.label, response: value });
-      /*
-        **返り値の形は道具によって2つある**（`measureScoring.mjs` の
-        `resultsOfResponse`）。話まるごとを1回で見る道具（逸脱・各話あらすじ）は
-        `results[]` ではなく `result` を1つ返すので、ここで `results[]` だけを
-        拾っていたときは**何件出ても0件として記録していた**。
-      */
-      for (const item of resultsOfResponse(value, call.label)) results.push(item);
-      for (const item of value?.failures ?? []) failures.push(item);
-      if (value?.bundleStale === true) {
+      const outcome = await ask(call);
+      for (const item of outcome.raw ?? []) raw.push(item);
+      for (const item of outcome.results ?? []) results.push(item);
+      for (const item of outcome.failures ?? []) failures.push(item);
+      if (outcome.staleNote) {
         // **見つけたら黙らない。** 古い束のまま測ると、直したはずのものを測る
-        staleNote ??= value.note?.split("\n")[0] ?? "束が古いようです";
+        staleNote ??= outcome.staleNote;
         console.warn(`  ※ ${staleNote}`);
       }
     } catch (error) {
@@ -317,6 +366,72 @@ async function runOnce(client, toolName, calls) {
     }
   }
   return { elapsedMs: Date.now() - startedAt, raw, results, failures, staleNote };
+}
+
+/** 束が「古い」と言っていたら、その1行だけを取り出す */
+function staleNoteOf(value) {
+  if (value?.bundleStale !== true) return null;
+  return value.note?.split("\n")[0] ?? "束が古いようです";
+}
+
+/**
+ * 手元の Ollama で回す（1段）。**検算は束の中で通る。**
+ */
+function askByRun(client, toolName) {
+  return async (call) => {
+    const value = await client.call(toolName, call.args);
+    return {
+      raw: [{ target: call.label, response: value }],
+      /*
+        **返り値の形は道具によって2つある**（`measureScoring.mjs` の
+        `resultsOfResponse`）。話まるごとを1回で見る道具（逸脱・各話あらすじ）は
+        `results[]` ではなく `result` を1つ返すので、ここで `results[]` だけを
+        拾っていたときは**何件出ても0件として記録していた**。
+      */
+      results: resultsOfResponse(value, call.label),
+      failures: value?.failures ?? [],
+      staleNote: staleNoteOf(value),
+    };
+  };
+}
+
+/**
+ * さくらのAI（クラウド）で回す（3段）。
+ *
+ * `novel.prompt` → こちらから さくらへ投げる → `novel.validate`。
+ * **チャンクごとに投げる**（推敲は話ごとにチャンクへ切れる）ので、
+ * 1チャンクの失敗では止まらない——理由は `failures` に残る。
+ *
+ * **鍵はここで受け取ったものを、`Authorization` ヘッダへ渡すだけ。**
+ * 記録（`raw`）へ入るのは、プロンプトの応答と検算の結果だけである。
+ */
+function askBySakura(client, options, token) {
+  return async (call) => {
+    const promptResponse = await client.call(PROMPT_TOOL, call.args);
+    const outcome = await runSakuraChunks({
+      promptResponse,
+      baseArgs: call.args,
+      // **`token` などを後ろに置く。** 前に置くと、呼ぶ側の指定で
+      // 鍵や宛先が差し替えられる形になる
+      ask: (params) =>
+        askSakura({
+          ...params,
+          token,
+          model: options.model,
+          endpoint: options.endpoint ?? SAKURA_ENDPOINT,
+          timeoutMs: options.timeoutMs,
+          log: (line) => console.log(`    ${line}`),
+        }),
+      validate: (args) => client.call(VALIDATE_TOOL, args),
+      log: (line) => console.warn(line),
+    });
+    return {
+      raw: [{ target: call.label, chunks: outcome.raw }],
+      results: outcome.results,
+      failures: outcome.failures,
+      staleNote: staleNoteOf(promptResponse),
+    };
+  };
 }
 
 /* ── 本体 ─────────────────────────────────────────────── */
@@ -339,13 +454,30 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
 
   assertFeature(options.feature);
+  const sakura = options.runner === "sakura";
   const toolName = toolNameOf(options.feature);
-  // **表に書いた名前が、本当に登録されているか**を束のもとで確かめる
-  assertToolRegistered(
-    fs.readFileSync(path.join(REPO_ROOT, "src", "mcp", "server.ts"), "utf8"),
-    toolName
+  /*
+    **どの道具の形で引数を組むかは、行き先で変わる。**
+    Ollama は `novel.run` の1本、さくらは `novel.prompt` → `novel.validate`。
+    引数の形は**呼ぶ道具に訊く**（台本の中に書き写さない）。
+  */
+  const planTool = sakura ? PROMPT_TOOL : toolName;
+  const serverSource = fs.readFileSync(
+    path.join(REPO_ROOT, "src", "mcp", "server.ts"),
+    "utf8"
   );
+  // **表に書いた名前が、本当に登録されているか**を束のもとで確かめる
+  for (const name of sakura ? [PROMPT_TOOL, VALIDATE_TOOL] : [toolName]) {
+    assertToolRegistered(serverSource, name);
+  }
   const promptTool = promptToolOf(toolName);
+
+  /*
+    **鍵が無ければ、測らずに止める**（作者へ尋ねない）。ここで止めるのは、
+    作品を写す前・束を起こす前である——鍵が無いと分かっているのに
+    一時フォルダーを作って許可の印を置く意味は無い。
+  */
+  const sakuraToken = sakura ? readSakuraToken() : null;
 
   const source =
     options.work ??
@@ -379,9 +511,9 @@ async function main() {
     }
 
     const tools = await client.listTools();
-    const schema = tools.find((tool) => tool.name === toolName)?.inputSchema;
+    const schema = tools.find((tool) => tool.name === planTool)?.inputSchema;
     if (!schema) {
-      throw new Error(`${toolName} が tools/list にありません。`);
+      throw new Error(`${planTool} が tools/list にありません。`);
     }
     const calls = planCalls(schema, {
       work,
@@ -390,6 +522,8 @@ async function main() {
       numCtx: options.numCtx,
       endpoint: options.endpoint,
       options: options.options,
+      // さくらのときは、束へ渡す行き先が無い（3段をこちらで回す）
+      bundleRunner: sakura ? null : "ollama",
     });
 
     // プロンプト版は束に訊く（`*.run` は返さない）。**訊けなければ空のまま残す**
@@ -403,15 +537,31 @@ async function main() {
       }
     }
 
+    const endpoint = sakura
+      ? (options.endpoint ?? SAKURA_ENDPOINT)
+      : options.endpoint;
+    const route = sakura
+      ? `${PROMPT_TOOL} → さくらのAI → ${VALIDATE_TOOL}`
+      : toolName;
     console.log(
-      `${options.feature}（${toolName}）を ${options.model} で ${options.repeat} 回まわします` +
+      `${options.feature}（${route}）を ${options.model} で ${options.repeat} 回まわします` +
         `（num_ctx ${options.numCtx}、対象 ${calls.length} 件）。`
     );
+    if (sakura) {
+      // **鍵は出さない。** 宛先と待ち時間だけを断る（課金の目安になる）
+      console.log(
+        `  宛先 ${endpoint}（1チャンクあたり ${Math.round(options.timeoutMs / 1000)}秒まで待ちます）。`
+      );
+    }
+
+    const ask = sakura
+      ? askBySakura(client, { ...options, endpoint }, sakuraToken)
+      : askByRun(client, toolName);
 
     const runs = [];
     for (let round = 1; round <= options.repeat; round += 1) {
       console.log(`  ${round}回目…`);
-      const run = await runOnce(client, toolName, calls);
+      const run = await runOnce(calls, ask);
       const scored = metricsOfRun(options.feature, answers, run);
       runs.push({
         round,
@@ -434,10 +584,16 @@ async function main() {
     const record = {
       measuredAt: new Date().toISOString(),
       feature: options.feature,
-      tool: toolName,
+      /*
+        **どの経路で測ったかを残す**（あとから数字だけを見ても分かるように）。
+        `runner` が違えば、通った道具も、原稿の行き先も違う。
+        **`endpoint` は書くが、鍵は書かない**（`Authorization` はここへ来ない）。
+      */
+      runner: options.runner,
+      tool: sakura ? `${PROMPT_TOOL} → ${VALIDATE_TOOL}` : toolName,
       model: options.model,
       numCtx: options.numCtx,
-      endpoint: options.endpoint,
+      endpoint,
       // **何を指定して測ったかを残す。** 同じ日に `categories` を変えて
       // 2度回すと、記録は `-2.json` になるだけで中身の違いが読めない
       options: options.options,

@@ -24,6 +24,14 @@ export const KANJI_REASON = "漢字ひらき";
  */
 export const RUN_TOOL = "novel.run";
 export const PROMPT_TOOL = "novel.prompt";
+/**
+ * 検算の道具。**クラウドで測るときに要る**（`--runner sakura`）。
+ *
+ * 手元の Ollama は `novel.run` の中で検算まで通るが、クラウドへは
+ * こちらから投げるので、**戻し先を自分で呼ぶ**。`prompt` だけ呼んで
+ * ここを飛ばす測り方は、製品に無い不具合を見つけたことになる。
+ */
+export const VALIDATE_TOOL = "novel.validate";
 
 export const FEATURES = [
   "proofread",
