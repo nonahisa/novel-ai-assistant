@@ -67,6 +67,11 @@ const MACHINE_SCOPED_KEYS = [
   "novelai.lmstudio.cliPath",
   "novelai.lmstudio.endpoint",
   "novelai.mode",
+  // **引っ越しの材料になるので、作品リポジトリから仕込ませない**（0.66.6）。
+  // 台帳は保管庫のファイルへ移り、設定はファイルがまだ無いときに1回だけ
+  // 読まれる。共有リポジトリの `.vscode/settings.json` に書けると、
+  // **でたらめな読める長さ・待ち時間を最初の一度で焼き付けられる**
+  "novelai.modelTuning",
   "novelai.ollama.endpoint",
   "novelai.ollama.executablePath",
   "novelai.openai.endpoint",

@@ -275,7 +275,7 @@ async function showModel(endpoint: string, model: string): Promise<ShowDetail> {
 }
 
 const MODELS_NOTE = [
-  "読める長さの台帳（作者の実測 `novelai.modelTuning`）は VS Code の設定の中にあり、この束からは読めません。ここに出る実測は同梱の値（bundled）だけです。",
+  "読める長さの台帳（作者の実測。もとの設定名は `novelai.modelTuning`、0.66.6 からは拡張機能の保管庫のファイル）は、この束からは読めません。ここに出る実測は同梱の値（bundled）だけです。",
   "`capabilities` に `completion` が無いモデル（埋め込み用など）は `run` に使えません。",
   "`numCtx` は `contextLength` 以下にしてください。実際に VRAM へ載る範囲は、測るまで分かりません。",
 ].join("\n");

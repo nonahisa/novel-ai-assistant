@@ -381,6 +381,7 @@ import {
   setGeneratedStorageRoot,
 } from "./views/openDocument";
 import { GENERATED_DIR } from "./core/generatedFiles";
+import { setTuningStoreRoot } from "./core/modelTuningStore";
 import { formatDayTime } from "./core/timestampedFileName";
 import { notifyDone } from "./views/notify";
 
@@ -524,6 +525,15 @@ export async function activate(
   setGeneratedStorageRoot(
     vscode.Uri.joinPath(context.globalStorageUri, GENERATED_DIR)
   );
+
+  /**
+   * AIチューニングの台帳の置き場も、ここで一度だけ渡す（設計書6.49）。
+   *
+   * **待つ。** 台帳は最初のAI呼び出しから引かれる（待ち時間・読める長さ）
+   * ので、読み込みを待たずに進むと、起動直後の1回だけ測った値が
+   * 効かないことになる。読むのは小さなJSONひとつである。
+   */
+  await setTuningStoreRoot(context.globalStorageUri);
 
   /*
     **左のビューを、素の状態から始める**（作者の報告、2026-09-03
@@ -2757,6 +2767,16 @@ export async function activate(
     registerCommand("novelai.showTuningStats", async () => {
       const { showTuningStats } = await import("./features/showTuningStats.js");
       await showTuningStats(aiRegistry);
+    })
+  );
+
+  context.subscriptions.push(
+    // 測った記録を、モデルごとに消す（作者の裁定、2026-09-18）。
+    // 台帳を設定から保管庫のファイルへ移したぶん、**設定画面から
+    // 消せなくなった**ので、消す口をこちらで持つ
+    registerCommand("novelai.forgetTuning", async () => {
+      const { forgetTuning } = await import("./features/forgetTuning.js");
+      await forgetTuning(aiRegistry);
     })
   );
 

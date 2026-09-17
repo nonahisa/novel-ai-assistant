@@ -352,6 +352,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.testAI": "allTypes",
   "novelai.measureContext": "allTypes",
   "novelai.showTuningStats": "allTypes",
+  "novelai.forgetTuning": "allTypes",
   "novelai.setupOllama": "allTypes",
   "novelai.setupLmStudio": "allTypes",
   "novelai.selectOllamaExecutable": "allTypes",

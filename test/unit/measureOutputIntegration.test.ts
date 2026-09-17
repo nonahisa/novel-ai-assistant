@@ -144,6 +144,22 @@ vi.mock("../../src/views/progress", () => ({
 }));
 
 import { measureContext } from "../../src/features/measureContext";
+import {
+  tuningStoreContents,
+  useMemoryTuningStore,
+} from "./support/tuningStore";
+
+/**
+ * いまの台帳（`<保管庫>/model-tuning.json`）の、そのモデルの行。
+ *
+ * 0.66.5 までは設定 `novelai.modelTuning` だった（0.66.6 で移した）。
+ */
+function ledger(): Record<string, unknown> {
+  return (tuningStoreContents()["ollama/gemma4:12b"] ?? {}) as Record<
+    string,
+    unknown
+  >;
+}
 
 /** `novelai.*` の設定を持つ入れ物 */
 function installSettings(values: Record<string, unknown>): void {
@@ -207,8 +223,8 @@ beforeEach(() => {
 
 describe("手元のAIでは、読める長さのあとに書ける量も測る", () => {
   test("入力の測定に続けて出力の測定が走り、結果を同じ通知で見せる", async () => {
-    const values: Record<string, unknown> = {};
-    installSettings(values);
+    installSettings({});
+    await useMemoryTuningStore({});
     const { showInformationMessage } = answerWith("そのままにする");
 
     await measureContext(registry);
@@ -265,9 +281,7 @@ describe("手元のAIでは、読める長さのあとに書ける量も測る",
       「参考値の報告だけ」（6.61）から、実際に繋がるところへ進んだ核心
       なので、通知の文言だけでなく台帳の中身そのものを確かめる。
     */
-    const tuning = (values.modelTuning as Record<string, unknown> | undefined)?.[
-      "ollama/gemma4:12b"
-    ] as Record<string, unknown> | undefined;
+    const tuning = ledger();
     expect(tuning?.measuredOutputTokens).toBeGreaterThan(0);
 
     /*
@@ -282,8 +296,8 @@ describe("手元のAIでは、読める長さのあとに書ける量も測る",
 
   test("書ける量が少ない相手では、その近くの値を報告する", async () => {
     state.trueLimit = 300;
-    const values: Record<string, unknown> = {};
-    installSettings(values);
+    installSettings({});
+    await useMemoryTuningStore({});
     const { showInformationMessage } = answerWith("そのままにする");
 
     await measureContext(registry);
@@ -310,9 +324,7 @@ describe("手元のAIでは、読める長さのあとに書ける量も測る",
       この場面の実測（300行前後 ≈ 900トークン以下）から出る上限は
       ずっと小さいので、「絞った」ことを言う一文が出るはずである。
     */
-    const tuning = (values.modelTuning as Record<string, unknown> | undefined)?.[
-      "ollama/gemma4:12b"
-    ] as Record<string, unknown> | undefined;
+    const tuning = ledger();
     expect(tuning?.measuredOutputTokens).toBeGreaterThan(0);
     expect(tuning?.measuredOutputTokens).toBeLessThan(1000);
     expect(text).toContain("まとめ送信の上限を");
@@ -346,18 +358,16 @@ describe("手元のAIでは、読める長さのあとに書ける量も測る",
     state.outputErrors = {
       2: new AIError("処理が中止されました。", "aborted"),
     };
-    const values: Record<string, unknown> = {
-      // 前回の実測が既にある、という場面を再現する
-      modelTuning: { "ollama/gemma4:12b": { measuredOutputTokens: 12345 } },
-    };
-    installSettings(values);
+    installSettings({});
+    // 前回の実測が既にある、という場面を再現する
+    await useMemoryTuningStore({
+      "ollama/gemma4:12b": { measuredOutputTokens: 12345 },
+    });
     const { showInformationMessage } = answerWith("そのままにする");
 
     await measureContext(registry);
 
-    const tuning = (values.modelTuning as Record<string, unknown>)[
-      "ollama/gemma4:12b"
-    ] as Record<string, unknown>;
+    const tuning = ledger();
     // 新しい値で上書きされていない。古い実測がそのまま残る
     expect(tuning.measuredOutputTokens).toBe(12345);
     // 出力側は「途中で終わった」ことを言う（新しい値を覚えたとは言わない）
@@ -385,8 +395,8 @@ describe("書ける量と一緒に、出力の速度を測る", () => {
 
   test("いちばん長く書けた回から、トークン/秒を出して台帳へ書く", async () => {
     state.outputMs = 4000;
-    const values: Record<string, unknown> = {};
-    installSettings(values);
+    installSettings({});
+    await useMemoryTuningStore({});
     answerWith("そのままにする");
     const restore = freezeClock();
 
@@ -396,9 +406,7 @@ describe("書ける量と一緒に、出力の速度を測る", () => {
       restore();
     }
 
-    const tuning = (values.modelTuning as Record<string, unknown>)[
-      "ollama/gemma4:12b"
-    ] as Record<string, unknown>;
+    const tuning = ledger();
     const tokens = tuning.measuredOutputTokens as number;
     expect(tokens).toBeGreaterThan(0);
     // 4秒かかったことにしてあるので、速度は「トークン数 ÷ 4」
@@ -415,8 +423,8 @@ describe("書ける量と一緒に、出力の速度を測る", () => {
     // いないのだから、分子（書けたトークン数）が無い
     state.outputErrors = { 1: new AIError("時間切れです。", "timeout") };
     state.outputMs = 4000;
-    const values: Record<string, unknown> = {};
-    installSettings(values);
+    installSettings({});
+    await useMemoryTuningStore({});
     answerWith("そのままにする");
     const restore = freezeClock();
 
@@ -426,9 +434,7 @@ describe("書ける量と一緒に、出力の速度を測る", () => {
       restore();
     }
 
-    const tuning = (values.modelTuning as Record<string, unknown>)[
-      "ollama/gemma4:12b"
-    ] as Record<string, unknown>;
+    const tuning = ledger();
     expect(tuning.outputTokensPerSecond).toBe(
       Math.round(((tuning.measuredOutputTokens as number) / 4) * 10) / 10
     );
@@ -438,16 +444,14 @@ describe("書ける量と一緒に、出力の速度を測る", () => {
     // 所要0ミリ秒は「無限に速い」ではなく「測れていない」である。
     // 前回の速度が残っていると、新しい実測と食い違ったまま一覧に出る
     state.outputMs = 0;
-    const values: Record<string, unknown> = {
-      modelTuning: {
-        "ollama/gemma4:12b": {
-          outputTokensPerSecond: 99.9,
-          speedSource: "call",
-          speedMeasuredAt: "2026-09-05T00:00:00.000Z",
-        },
+    installSettings({});
+    await useMemoryTuningStore({
+      "ollama/gemma4:12b": {
+        outputTokensPerSecond: 99.9,
+        speedSource: "call",
+        speedMeasuredAt: "2026-09-05T00:00:00.000Z",
       },
-    };
-    installSettings(values);
+    });
     answerWith("そのままにする");
     const restore = freezeClock();
 
@@ -457,9 +461,7 @@ describe("書ける量と一緒に、出力の速度を測る", () => {
       restore();
     }
 
-    const tuning = (values.modelTuning as Record<string, unknown>)[
-      "ollama/gemma4:12b"
-    ] as Record<string, unknown>;
+    const tuning = ledger();
     expect(tuning.measuredOutputTokens).toBeGreaterThan(0);
     expect(tuning.outputTokensPerSecond).toBeUndefined();
     // **出どころと日時も道連れにする。** 速度が消えたのに「普段の

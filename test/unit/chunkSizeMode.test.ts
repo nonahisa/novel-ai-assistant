@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -19,6 +19,7 @@ import {
 import { workspace } from "./support/vscodeStub";
 import { readChunkSettings } from "../../src/features/chunkSettings";
 import { saveModelTuning } from "../../src/core/modelTuning";
+import { useMemoryTuningStore } from "./support/tuningStore";
 
 /**
  * チャンクの大きさの決め方（設計書6.23）。
@@ -29,6 +30,12 @@ import { saveModelTuning } from "../../src/core/modelTuning";
  * **既定は自動。** 131,072受けられるモデルへ2,000字ずつ送るのは、
  * 呼び出し回数の面でも指示の使い回しの面でも損である。
  */
+
+// 台帳は 0.66.6 で保管庫のファイルへ移った（`core/modelTuningStore.ts`）。
+// **毎回、空のファイルから始める**——置き場を渡さないと保存が素通りする
+beforeEach(async () => {
+  await useMemoryTuningStore({});
+});
 
 describe("設定の言葉を読む", () => {
   it("既定は自動", () => {

@@ -49,13 +49,28 @@ export function tuningStatsEntries(
   providerLabel: (providerId: string) => string
 ): TuningStatsEntry[] {
   return [...table.entries()].map(([key, tuning]) => {
-    const separator = key.indexOf("/");
-    // **割れない鍵も落とさない。** 作者が手で書いた覚え書きが混ざって
-    // いても、一覧そのものが消えるよりは、そのまま見せるほうがよい
-    const providerId = separator < 0 ? key : key.slice(0, separator);
-    const model = separator < 0 ? "" : key.slice(separator + 1);
+    const { providerId, model } = splitTuningKey(key);
     return { providerLabel: providerLabel(providerId), model, tuning };
   });
+}
+
+/**
+ * 台帳の鍵を、AIのIDとモデル名に割る。
+ *
+ * **写しを作らない**——記録を消す画面（`features/forgetTuning.ts`）も
+ * 同じ割り方をする必要がある。片方だけ直すと、一覧に出ている行と
+ * 消せる行の顔ぶれが食い違う。
+ */
+export function splitTuningKey(key: string): {
+  providerId: string;
+  model: string;
+} {
+  const separator = key.indexOf("/");
+  // **割れない鍵も落とさない。** 作者が手で書いた覚え書きが混ざって
+  // いても、一覧そのものが消えるよりは、そのまま見せるほうがよい
+  return separator < 0
+    ? { providerId: key, model: "" }
+    : { providerId: key.slice(0, separator), model: key.slice(separator + 1) };
 }
 
 /**

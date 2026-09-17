@@ -1,8 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { workspace } from "vscode";
 import { resolveContextWindow } from "../../src/core/modelTuning";
+import { useMemoryTuningStore } from "./support/tuningStore";
 import { LMSTUDIO_CONTEXT_WINDOW } from "../../src/ai/lmstudioProvider";
 import { OPENAI_CONTEXT_WINDOW } from "../../src/ai/openaiProvider";
 import { SAKURA_CONTEXT_WINDOW } from "../../src/ai/sakuraProvider";
@@ -21,6 +22,11 @@ const original = workspace.getConfiguration;
 
 afterEach(() => {
   workspace.getConfiguration = original;
+});
+
+// 台帳は 0.66.6 で保管庫のファイルへ移った。**毎回、空から始める**
+beforeEach(async () => {
+  await useMemoryTuningStore({});
 });
 
 function withSettings(values: Record<string, unknown>): void {
@@ -54,10 +60,10 @@ const PROVIDERS = [
 ] as const;
 
 describe("台帳 → 設定 → 既定 の順（3社とも同じ）", () => {
-  test.each(PROVIDERS)("$id：台帳にあれば台帳", ({ id, source, configured }) => {
-    withSettings({
-      [source.settingKey]: configured,
-      modelTuning: { [`${id}/測ったモデル`]: { contextWindow: 131072 } },
+  test.each(PROVIDERS)("$id：台帳にあれば台帳", async ({ id, source, configured }) => {
+    withSettings({ [source.settingKey]: configured });
+    await useMemoryTuningStore({
+      [`${id}/測ったモデル`]: { contextWindow: 131072 },
     });
 
     expect(resolveContextWindow(id, "測ったモデル", source)).toBe(131072);
@@ -111,11 +117,11 @@ describe("台帳 → 設定 → 既定 の順（3社とも同じ）", () => {
     );
   });
 
-  test("台帳の小さすぎる値は使わない（従来どおり設定へ落ちる）", () => {
-    // `modelTuning` は `object` の設定なので、VS Code側の `minimum` が効かない
-    withSettings({
-      [SAKURA_CONTEXT_WINDOW.settingKey]: 32000,
-      modelTuning: { "sakura/gpt-oss-120b": { contextWindow: 5 } },
+  test("台帳の小さすぎる値は使わない（従来どおり設定へ落ちる）", async () => {
+    // 台帳は作者が手で開けるJSONなので、設定のような `minimum` が効かない
+    withSettings({ [SAKURA_CONTEXT_WINDOW.settingKey]: 32000 });
+    await useMemoryTuningStore({
+      "sakura/gpt-oss-120b": { contextWindow: 5 },
     });
     expect(
       resolveContextWindow("sakura", "gpt-oss-120b", SAKURA_CONTEXT_WINDOW)

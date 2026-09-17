@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { logLine } from "./logger";
 import { bundledTuningByKey, bundledTuningKeys } from "./bundledTuning";
+import { tuningStoreTable, writeTuningEntry } from "./modelTuningStore";
 // **型だけを借りる。** 実体は引き込まない（`import type` は消える）ので、
 // 台帳が測定の仕組みを抱え込むことにはならない。それでも写しは作らない
 // ——「tokens か words か」の定義は `core/contextProbe.ts` の1つだけ
@@ -18,9 +19,11 @@ import type { ProbeMeasureMethod } from "./contextProbe";
  * 「モデルを変更したら切り替わる」ことを求めたが、**切り替えの仕組みは要らない**
  * ——引くときの鍵にモデル名が入っているので、モデルを変えれば自然に別の値を引く。
  *
- * **VS Codeの設定（`novelai.modelTuning`）に置く。** `globalState` だと
- * 作者からは存在すら見えず、おかしくなっても消せない。設定なら一覧に出て、
- * 手で直せて、要らなければ丸ごと消せば測る前の状態へ戻る。
+ * **置き場は拡張機能の保管庫のファイル**（`core/modelTuningStore.ts`。
+ * 0.66.6 から）。0.66.5 までは設定 `novelai.modelTuning` に置いていたが、
+ * 設定1つぶんの塊を読んで書き戻す形だったため、**2つの窓を同時に開くと
+ * 片方の測定が痕跡なく消えた**（作者の報告、2026-09-18）。設定同期が
+ * 機械ごとに違うはずの値を運ぶ害もあった。理由の全文はストア側にある。
  */
 
 /**
@@ -543,17 +546,20 @@ export function recommendTimeoutSeconds(longestResponseSeconds: number): number 
 }
 
 const CONFIG_SECTION = "novelai";
-const TUNING_SETTING = "modelTuning";
 
 /** プロバイダごとの待ち時間の設定名。6つとも同じ形をしている */
 export function timeoutSettingKey(providerId: string): string {
   return `${providerId}.timeoutSeconds`;
 }
 
+/**
+ * 台帳の中身。**保管庫のファイルだけを見る**（0.66.6〜）。
+ *
+ * 設定 `novelai.modelTuning` はもう読まない。引っ越しのときに1回だけ
+ * 材料として読み、以後は触らない（`core/modelTuningStore.ts`）。
+ */
 function readTuningTable(): Map<string, ModelTuning> {
-  return parseModelTuning(
-    vscode.workspace.getConfiguration(CONFIG_SECTION).get<unknown>(TUNING_SETTING)
-  );
+  return parseModelTuning(tuningStoreTable());
 }
 
 /**
@@ -792,130 +798,24 @@ export function resolveTimeoutMs(
  * 並ぶと、作者には「測ったのに何も入っていない」と読める。
  */
 /**
- * 台帳への書き込みを、順番に1つずつ通す（作者の実機、2026-09-13）。
+ * 台帳へ、そのモデルぶんを書く。
  *
- * ## 何が起きたか
- *
- * `ollama/qwen3.8:latest` の測定結果（`measuredChars: 76815`）が、
- * **保存を確認したあとで台帳から消えた。** ほかの7件は残っていた。
- *
- * 書き込みは「全体を読む → その1件を差し替える → 全体を書き戻す」で、
- * **読んだときと同じ中身がまだそこにあるかを確かめていなかった。**
- * 書き手は複数ある——測定の終わり（`offerToSave`）、普段の呼び出しごとの
- * 速度（`recordSpeed`）、同じく字/トークン（`recordCharsPerToken`）。
- * 読む瞬間と書く瞬間のあいだに別の書き込みが挟まれば、**挟まれたほうが
- * まるごと消える。**
- *
- * ## ほかの台帳は、みな守りを持っている
- *
- * 人物・設定資料・章立て・本の設計図は、読み込み時のハッシュ照合や
- * `assertSaveAllowed` を持つ（CLAUDE.mdの実装ルール2）。
- * **モデルの調整値だけが素通しだった。**
- *
- * ## 直し方は2段
- *
- * 1. **順番に通す**（この待ち行列）。同じ拡張機能ホストの中での競合を塞ぐ。
- *    手本は `core/logger.ts` の `writeQueue`
- * 2. **書く直前に読み直す**（`saveModelTuning` の中）。待っているあいだに
- *    外から変わっていることがある——作者が手で直す、別の窓、同期
+ * **中身の守り（待ち行列・書いたあとの確かめ・やり直し）は置き場の側が
+ * 持つ**（`core/modelTuningStore.ts`）。ここが受け持つのは、**同梱の印を
+ * 保存へ回さない**ことだけである——読んだ行には `bundled` / `bundledAt` が
+ * 付いていることがあり、そのまま保存へ流すと同梱の値が台帳へ焼き付いて、
+ * **次の版で表を直しても古い値が生き残る**（作者の守り1
+ * 「台帳へ書き写さない」）。
  */
-let tuningWriteQueue: Promise<void> = Promise.resolve();
-
 export async function saveModelTuning(
   providerId: string,
   model: string,
   tuning: ModelTuning
 ): Promise<void> {
-  // **並んでから触る。** 読む→直す→書くのあいだに、別の書き込みを
-  // 挟ませない（挟まると、挟まれたほうの鍵がまるごと消える）
-  const done = tuningWriteQueue.then(() =>
-    writeModelTuning(providerId, model, tuning)
-  );
-  // 1つ失敗しても、次を止めない。列そのものは常に進める
-  tuningWriteQueue = done.catch(() => undefined);
-  return done;
-}
-
-async function writeModelTuning(
-  providerId: string,
-  model: string,
-  tuning: ModelTuning
-): Promise<void> {
-  /*
-    **待ってから、もう一度読む。** 列に並んでいるあいだに設定が
-    変わっていることがある（作者が手で直す・別の窓・同期）。
-    並ぶ前に読んだ表で書き戻すと、そのあいだの変更を巻き戻す。
-  */
-  const configuration = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const table = asRecord(configuration.get<unknown>(TUNING_SETTING));
-
-  const key = modelTuningKey(providerId, model);
-  const entry = asRecord(table[key]);
+  const fields: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(tuning)) {
-    /*
-      **同梱の印は書かない**（作者の守り1「台帳へ書き写さない」）。
-      読んだ行には `bundled` / `bundledAt` が付いていることがあり、
-      それをそのまま保存へ回すと、同梱の値が台帳へ焼き付いて
-      **次の版で表を直しても古い値が生き残る。**
-    */
     if (BUNDLED_MARKS.includes(name)) continue;
-    if (value === undefined) delete entry[name];
-    else entry[name] = value;
+    fields[name] = value;
   }
-  if (Object.keys(entry).length === 0) {
-    delete table[key];
-  } else {
-    table[key] = entry;
-  }
-
-  // **読まれる場所へ書く。** `get` は作品フォルダ（ワークスペース）の値を
-  // 優先するのに、`update` を必ず機械全体へ向けると、書いても読まれない。
-  // 作者からは「反映を押したのに何も変わらない」としか見えず、
-  // 無言で効かない状態になる。
-  //
-  // 作品フォルダ側に値が無いときは、これまでどおり機械全体へ書く——
-  // 読み込み方も契約も、作品ではなく環境の側の事情で決まる
-  const hasWorkspaceValue =
-    configuration.inspect(TUNING_SETTING)?.workspaceValue !== undefined;
-  await configuration.update(
-    TUNING_SETTING,
-    table,
-    hasWorkspaceValue
-      ? vscode.ConfigurationTarget.Workspace
-      : vscode.ConfigurationTarget.Global
-  );
-
-  /*
-    **入ったかを確かめる。** 列に並べても、外から同時に書かれることは
-    まだありうる（別の窓、同期、作者の手）。黙って諦めない
-    （CLAUDE.md「エラーは握りつぶさない」）。
-
-    **例外は投げない。** 測定の結果を作者へ見せる流れを、台帳の都合で
-    止めない——見せるものは既に手元にあり、台帳はその控えである。
-  */
-  const saved = asRecord(
-    asRecord(
-      vscode.workspace
-        .getConfiguration(CONFIG_SECTION)
-        .get<unknown>(TUNING_SETTING)
-    )[key]
-  );
-  const missing = Object.entries(tuning)
-    .filter(([name, value]) =>
-      value === undefined ? name in saved : saved[name] !== value
-    )
-    .map(([name]) => name);
-  if (missing.length > 0) {
-    logLine(
-      `モデルの調整値：${key} の ${missing.join("・")} が書けませんでした` +
-        "（別の窓か同期が同時に書いた可能性があります）。"
-    );
-  }
-}
-
-/** 素の物なら浅い写しを、そうでなければ空の物を返す（元は書き換えない） */
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? { ...(value as Record<string, unknown>) }
-    : {};
+  await writeTuningEntry(modelTuningKey(providerId, model), fields);
 }

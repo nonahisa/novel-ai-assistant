@@ -4,6 +4,10 @@ import type { AIRegistry } from "../../src/ai/registry";
 import { AIError } from "../../src/ai/types";
 import type { GenerateParams, GenerateResult } from "../../src/ai/types";
 import { resolveTimeoutSeconds } from "../../src/core/modelTuning";
+import {
+  tuningStoreContents,
+  useMemoryTuningStore,
+} from "./support/tuningStore";
 
 /**
  * 「読める長さ」を入力トークン数で測る道を、**送るところまで通して**見る
@@ -229,10 +233,16 @@ function installSettings(values: Record<string, unknown>): void {
     }) as unknown as ReturnType<typeof workspace.getConfiguration>;
 }
 
-function ledger(values: Record<string, unknown>): Record<string, unknown> {
-  return ((values.modelTuning as Record<string, unknown> | undefined)?.[
-    "ollama/gemma4:e4b"
-  ] ?? {}) as Record<string, unknown>;
+/**
+ * いまの台帳（`<保管庫>/model-tuning.json`）の、そのモデルの行。
+ *
+ * 0.66.5 までは設定 `novelai.modelTuning` だった（0.66.6 で移した）。
+ */
+function ledger(): Record<string, unknown> {
+  return (tuningStoreContents()["ollama/gemma4:e4b"] ?? {}) as Record<
+    string,
+    unknown
+  >;
 }
 
 /** 測って、結果を台帳へ反映させる。返すのは台帳と、作者が読んだ通知 */
@@ -252,10 +262,10 @@ async function measure(options?: {
   /** 作者が読んだ「失敗しました」の文。出ていなければ空 */
   error: string;
 }> {
-  const values: Record<string, unknown> = options?.before
-    ? { modelTuning: { "ollama/gemma4:e4b": { ...options.before } } }
-    : {};
-  installSettings(values);
+  installSettings({});
+  await useMemoryTuningStore(
+    options?.before ? { "ollama/gemma4:e4b": { ...options.before } } : {}
+  );
   const showInformationMessage = vi.fn(
     async () => options?.answer ?? "設定に反映"
   );
@@ -272,7 +282,7 @@ async function measure(options?: {
   await measureContext(registry, "default", undefined, "input");
 
   return {
-    tuning: ledger(values),
+    tuning: ledger(),
     notice: showInformationMessage.mock.calls
       .map((call) => call.map(String).join(" / "))
       .join("\n"),
@@ -526,8 +536,8 @@ describe("測定のあいだの待ち時間", () => {
     await measure({ before });
 
     // 測ったあとに1,200秒が台帳に居座っても、ふだんの呼び出しは600秒で挟む
-    installSettings({
-      modelTuning: { "ollama/gemma4:e4b": { timeoutSeconds: 1200 } },
+    await useMemoryTuningStore({
+      "ollama/gemma4:e4b": { timeoutSeconds: 1200 },
     });
     expect(resolveTimeoutSeconds("ollama", "gemma4:e4b")).toBe(600);
   });

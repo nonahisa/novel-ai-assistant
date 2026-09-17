@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { ConfigurationTarget, workspace } from "vscode";
+import { workspace } from "vscode";
 import {
   allModelTuning,
   resolveTimeoutMs,
@@ -10,6 +10,11 @@ import {
   timeoutSettingKey,
   tunedContextWindow,
 } from "../../src/core/modelTuning";
+import {
+  tuningStoreContents,
+  useBrokenTuningStore,
+  useMemoryTuningStore,
+} from "./support/tuningStore";
 
 /**
  * 台帳（AIチューニング、設計書6.49）を、プロバイダが**先に**見ること。
@@ -18,6 +23,10 @@ import {
  *
  * 1. 台帳に値があれば、プロバイダ単位の設定より台帳が勝つ
  * 2. 台帳に無ければ、これまでどおりの設定へ落ちる（**悪くならない**）
+ *
+ * 台帳そのものは 0.66.6 で設定から**拡張機能の保管庫のファイル**へ移った
+ * （`core/modelTuningStore.ts`）。プロバイダ単位の設定（`ollama.timeoutSeconds`
+ * など）は設定のままなので、ここは両方を用意して確かめる。
  */
 
 const original = workspace.getConfiguration;
@@ -29,13 +38,11 @@ afterEach(() => {
 /**
  * `novelai.*` の設定を、渡した表のとおりに答えるようにする。
  *
- * `workspaceValue` を渡すと、その設定に**作品フォルダ側の値がある**状態を
- * 作る（`inspect` が答える）。書き込み先の判断を確かめるために要る。
+ * **台帳はもうここに無い。** 台帳を仕込むのは `useMemoryTuningStore`。
  */
-function withSettings(
-  values: Record<string, unknown>,
-  workspaceValues: Record<string, unknown> = {}
-): { updated: Array<{ key: string; value: unknown; target: unknown }> } {
+function withSettings(values: Record<string, unknown>): {
+  updated: Array<{ key: string; value: unknown; target: unknown }>;
+} {
   const updated: Array<{ key: string; value: unknown; target: unknown }> = [];
   workspace.getConfiguration = () =>
     ({
@@ -43,7 +50,7 @@ function withSettings(
         (key in values ? values[key] : defaultValue) as T,
       inspect: (key: string) => ({
         key: `novelai.${key}`,
-        workspaceValue: workspaceValues[key],
+        workspaceValue: undefined,
       }),
       update: async (key: string, value: unknown, target: unknown) => {
         updated.push({ key, value, target });
@@ -54,35 +61,38 @@ function withSettings(
 }
 
 describe("待ち時間の取り方", () => {
-  test("台帳にあれば、プロバイダ単位の設定より台帳を使う", () => {
-    withSettings({
-      "ollama.timeoutSeconds": 180,
-      modelTuning: { "ollama/gemma4:26b": { timeoutSeconds: 480 } },
+  test("台帳にあれば、プロバイダ単位の設定より台帳を使う", async () => {
+    withSettings({ "ollama.timeoutSeconds": 180 });
+    await useMemoryTuningStore({
+      "ollama/gemma4:26b": { timeoutSeconds: 480 },
     });
 
     expect(resolveTimeoutSeconds("ollama", "gemma4:26b", 180)).toBe(480);
     expect(resolveTimeoutMs("ollama", "gemma4:26b", 180)).toBe(480_000);
   });
 
-  test("同じプロバイダでも、測っていないモデルは従来の設定へ落ちる", () => {
+  test("同じプロバイダでも、測っていないモデルは従来の設定へ落ちる", async () => {
     // **ここが要点。** 大きいモデルのために480秒と測っても、
     // 小さいモデルまで480秒待つ必要はない
-    withSettings({
-      "ollama.timeoutSeconds": 180,
-      modelTuning: { "ollama/gemma4:26b": { timeoutSeconds: 480 } },
+    withSettings({ "ollama.timeoutSeconds": 180 });
+    await useMemoryTuningStore({
+      "ollama/gemma4:26b": { timeoutSeconds: 480 },
     });
 
     expect(resolveTimeoutSeconds("ollama", "gemma4:e4b", 180)).toBe(180);
   });
 
-  test("台帳が壊れていても、従来の設定で動く", () => {
-    // 手で編集できる設定なので、読めない形は「無かったこと」にして続ける
-    withSettings({ "ollama.timeoutSeconds": 240, modelTuning: "壊れている" });
+  test("台帳のファイルが壊れていても、従来の設定で動く", async () => {
+    // 作者が開いて直せるファイルなので、読めない形は「無かったこと」に
+    // して続ける（**書き込みのほうは断る**。上書きで実測を消さないため）
+    withSettings({ "ollama.timeoutSeconds": 240 });
+    await useBrokenTuningStore();
 
     expect(resolveTimeoutSeconds("ollama", "gemma4:e4b", 180)).toBe(240);
   });
 
-  test("設定が0や負でも、即座に切れる待ち時間にはしない", () => {
+  test("設定が0や負でも、即座に切れる待ち時間にはしない", async () => {
+    await useMemoryTuningStore({});
     // 手で `0` を入れた settings.json で全呼び出しが失敗する状態を作らせない
     for (const broken of [0, -5, Number.NaN]) {
       withSettings({ "claude.timeoutSeconds": broken });
@@ -94,27 +104,29 @@ describe("待ち時間の取り方", () => {
 });
 
 describe("上限の取り方", () => {
-  test("台帳にあればそれを使い、無ければ undefined（呼び出し側が従来へ落ちる）", () => {
-    withSettings({
-      modelTuning: { "sakura/gpt-oss-120b": { contextWindow: 131072 } },
+  test("台帳にあればそれを使い、無ければ undefined（呼び出し側が従来へ落ちる）", async () => {
+    withSettings({});
+    await useMemoryTuningStore({
+      "sakura/gpt-oss-120b": { contextWindow: 131072 },
     });
 
     expect(tunedContextWindow("sakura", "gpt-oss-120b")).toBe(131072);
     // 同じさくらでも、測っていないモデルには当てない。
     // 当てると、31Bのモデルへ131,072を渡して入力が黙って切り捨てられる
-    expect(tunedContextWindow("sakura", "preview/gemma-4-31B-it")).toBeUndefined();
+    expect(
+      tunedContextWindow("sakura", "preview/gemma-4-31B-it")
+    ).toBeUndefined();
   });
 });
 
 describe("台帳への書き込み", () => {
   test("ほかのモデルの項目を消さない", async () => {
-    const { updated } = withSettings({
-      modelTuning: {
-        "ollama/gemma4:e4b": { timeoutSeconds: 180 },
-        // こちらは読めない形。**それでも消さない**——作者が手で書いた
-        // ものかもしれず、こちらが読めないだけで捨ててよいものではない
-        "ollama/手書き": "あとで直す",
-      },
+    withSettings({});
+    await useMemoryTuningStore({
+      "ollama/gemma4:e4b": { timeoutSeconds: 180 },
+      // こちらは読めない形。**それでも消さない**——作者が手で書いた
+      // ものかもしれず、こちらが読めないだけで捨ててよいものではない
+      "ollama/手書き": "あとで直す",
     });
 
     await saveModelTuning("sakura", "gpt-oss-120b", {
@@ -122,8 +134,7 @@ describe("台帳への書き込み", () => {
       timeoutSeconds: 390,
     });
 
-    const written = (updated.at(-1) as { key: string; value: unknown }).value as
-      Record<string, unknown>;
+    const written = tuningStoreContents();
     expect(Object.keys(written).sort()).toEqual(
       ["ollama/gemma4:e4b", "ollama/手書き", "sakura/gpt-oss-120b"].sort()
     );
@@ -133,50 +144,40 @@ describe("台帳への書き込み", () => {
     });
   });
 
-  test("既定では機械全体の設定として書く（作品ごとにしない）", async () => {
-    // 読み込み方も契約も、作品ではなく環境の側の事情で決まる
+  /**
+   * **設定へは、もう1文字も書かない**（0.66.6）。
+   *
+   * 設定は同期で機械をまたいで運ばれるうえ、2つの窓が同じ塊を読んで
+   * 書き戻すので、片方の測定が痕跡なく消えた（作者の報告、2026-09-18）。
+   */
+  test("保管庫のファイルへ書き、設定 `novelai.modelTuning` は触らない", async () => {
     const { updated } = withSettings({});
+    await useMemoryTuningStore({});
 
     await saveModelTuning("ollama", "gemma4:e4b", { timeoutSeconds: 300 });
 
-    expect(updated.at(-1)).toMatchObject({
-      key: "modelTuning",
-      target: ConfigurationTarget.Global,
+    expect(tuningStoreContents()["ollama/gemma4:e4b"]).toEqual({
+      timeoutSeconds: 300,
     });
-  });
-
-  test("作品フォルダ側に設定があれば、そちらへ書く", async () => {
-    // **`get` は作品フォルダの値を優先するのに、`update` を必ず機械全体へ
-    // 向けると、書いても読まれない。** 作者からは「反映を押したのに
-    // 何も変わらない」としか見えず、原因にたどり着けない
-    const { updated } = withSettings(
-      { modelTuning: { "ollama/gemma4:e4b": { timeoutSeconds: 200 } } },
-      { modelTuning: { "ollama/gemma4:e4b": { timeoutSeconds: 200 } } }
-    );
-
-    await saveModelTuning("ollama", "gemma4:e4b", { timeoutSeconds: 300 });
-
-    expect(updated.at(-1)?.target).toBe(ConfigurationTarget.Workspace);
+    expect(updated.filter((entry) => entry.key === "modelTuning")).toEqual([]);
   });
 
   test("作者が手で書いた、読めない欄・知らない欄を落とさない", async () => {
-    // **土台にするのは生の設定値である。** 読み取り（`parseModelTuning`）を
+    // **土台にするのは生の中身である。** 読み取り（`parseModelTuning`）を
     // 通したものを書き戻すと、こちらが解釈できなかった欄が黙って消える。
     // 作者にとっては、自分で書いたメモが測定のたびに消えることになる
-    const { updated } = withSettings({
-      modelTuning: {
-        "ollama/gemma4:e4b": {
-          contextWindow: "131072",
-          timeoutSeconds: 200,
-          memo: "26Bはこれ",
-        },
+    withSettings({});
+    await useMemoryTuningStore({
+      "ollama/gemma4:e4b": {
+        contextWindow: "131072",
+        timeoutSeconds: 200,
+        memo: "26Bはこれ",
       },
     });
 
     await saveModelTuning("ollama", "gemma4:e4b", { timeoutSeconds: 400 });
 
-    const written = updated.at(-1)?.value as Record<string, unknown>;
-    expect(written["ollama/gemma4:e4b"]).toEqual({
+    expect(tuningStoreContents()["ollama/gemma4:e4b"]).toEqual({
       contextWindow: "131072",
       timeoutSeconds: 400,
       memo: "26Bはこれ",
@@ -184,58 +185,62 @@ describe("台帳への書き込み", () => {
   });
 
   test("欄を消しても、ほかの欄は残る", async () => {
-    const { updated } = withSettings({
-      modelTuning: {
-        "ollama/gemma4:e4b": { timeoutSeconds: 400, memo: "26Bはこれ" },
-      },
+    withSettings({});
+    await useMemoryTuningStore({
+      "ollama/gemma4:e4b": { timeoutSeconds: 400, memo: "26Bはこれ" },
     });
 
-    await saveModelTuning("ollama", "gemma4:e4b", { timeoutSeconds: undefined });
+    await saveModelTuning("ollama", "gemma4:e4b", {
+      timeoutSeconds: undefined,
+    });
 
-    const written = updated.at(-1)?.value as Record<string, unknown>;
-    expect(written["ollama/gemma4:e4b"]).toEqual({ memo: "26Bはこれ" });
+    expect(tuningStoreContents()["ollama/gemma4:e4b"]).toEqual({
+      memo: "26Bはこれ",
+    });
   });
 });
 
 /**
- * 台帳は `object` 型の設定なので、`minimum` のような検査が効かない
+ * 台帳は作者が手で開けるJSONなので、`minimum` のような検査が効かない
  * （プロバイダごとの `timeoutSeconds` には効いている）。**読む側で挟む。**
  *
  * 手で `{"timeoutSeconds": 100000}` と書くと、1回の呼び出しが27時間待つ。
  * 上限は書き込み側（`recommendTimeoutSeconds`）でしか守られていなかった。
  */
 describe("台帳の値を、読むときに挟む", () => {
-  test("待ち時間は上限を超えさせない", () => {
-    withSettings({
-      "ollama.timeoutSeconds": 180,
-      modelTuning: { "ollama/gemma4:e4b": { timeoutSeconds: 100_000 } },
+  test("待ち時間は上限を超えさせない", async () => {
+    withSettings({ "ollama.timeoutSeconds": 180 });
+    await useMemoryTuningStore({
+      "ollama/gemma4:e4b": { timeoutSeconds: 100_000 },
     });
 
     expect(resolveTimeoutSeconds("ollama", "gemma4:e4b", 180)).toBe(600);
   });
 
-  test("上限の内側なら、そのまま使う", () => {
-    withSettings({
-      modelTuning: { "ollama/gemma4:e4b": { timeoutSeconds: 480 } },
+  test("上限の内側なら、そのまま使う", async () => {
+    withSettings({});
+    await useMemoryTuningStore({
+      "ollama/gemma4:e4b": { timeoutSeconds: 480 },
     });
 
     expect(resolveTimeoutSeconds("ollama", "gemma4:e4b", 180)).toBe(480);
   });
 
-  test("上限が小さすぎる値は無視して、従来の設定へ落ちる", () => {
+  test("上限が小さすぎる値は無視して、従来の設定へ落ちる", async () => {
     // **`0` に近い上限は、送る前から失敗が決まっている。** 台帳の値を
     // そのまま信じると、手の滑りでその機能が丸ごと使えなくなる
-    withSettings({
-      "sakura.contextWindow": 32000,
-      modelTuning: { "sakura/gpt-oss-120b": { contextWindow: 5 } },
+    withSettings({ "sakura.contextWindow": 32000 });
+    await useMemoryTuningStore({
+      "sakura/gpt-oss-120b": { contextWindow: 5 },
     });
 
     expect(tunedContextWindow("sakura", "gpt-oss-120b")).toBeUndefined();
   });
 
-  test("上限が下限ちょうどなら使う", () => {
-    withSettings({
-      modelTuning: { "sakura/gpt-oss-120b": { contextWindow: 1024 } },
+  test("上限が下限ちょうどなら使う", async () => {
+    withSettings({});
+    await useMemoryTuningStore({
+      "sakura/gpt-oss-120b": { contextWindow: 1024 },
     });
 
     expect(tunedContextWindow("sakura", "gpt-oss-120b")).toBe(1024);
@@ -284,17 +289,16 @@ describe("6つのプロバイダが台帳を通る", () => {
  * 一覧（`core/tuningStats.ts`）は台帳の**全部**を読む。
  *
  * 引く側（`modelTuning`）は鍵1つぶんしか返さないので、モデルの数だけ
- * 設定を読み直すことになる。読み取りの口をここへ1つ足して、
+ * 台帳を読み直すことになる。読み取りの口をここへ1つ足して、
  * **解釈の仕方（`parseModelTuning`）を一覧側へ写さない。**
  */
 describe("台帳を丸ごと読む", () => {
-  test("設定にある項目を、解釈したうえで全部返す", () => {
-    withSettings({
-      modelTuning: {
-        "ollama/gemma4:e4b": { outputTokensPerSecond: 12.3 },
-        "sakura/gpt-oss-120b": { contextWindow: 131072 },
-        "ollama/壊れ": { contextWindow: 0 },
-      },
+  test("ファイルにある項目を、解釈したうえで全部返す", async () => {
+    withSettings({});
+    await useMemoryTuningStore({
+      "ollama/gemma4:e4b": { outputTokensPerSecond: 12.3 },
+      "sakura/gpt-oss-120b": { contextWindow: 131072 },
+      "ollama/壊れ": { contextWindow: 0 },
     });
 
     const table = allModelTuning();
@@ -316,8 +320,9 @@ describe("台帳を丸ごと読む", () => {
     expect(table.get("ollama/gemma4:12b")?.bundled).toBe(true);
   });
 
-  test("台帳が無ければ、同梱の初期値だけが並ぶ", () => {
+  test("台帳が無ければ、同梱の初期値だけが並ぶ", async () => {
     withSettings({});
+    await useMemoryTuningStore({});
 
     const table = allModelTuning();
     // 台帳から読めた行は1つも無い

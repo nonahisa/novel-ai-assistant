@@ -89,6 +89,12 @@ vi.mock("../../src/views/progress", () => ({
 
 import { measureContext } from "../../src/features/measureContext";
 import { recommendTimeoutSeconds } from "../../src/core/modelTuning";
+import {
+  fsTiming,
+  tuningStoreContents,
+  tuningWrites,
+  useMemoryTuningStore,
+} from "./support/tuningStore";
 
 const OLLAMA = { providerId: "ollama", model: "gemma4:26b", isPaid: false };
 const SAKURA = { providerId: "sakura", model: "gpt-oss-120b", isPaid: true };
@@ -97,39 +103,40 @@ const KEY = "ollama/gemma4:26b";
 /**
  * `novelai.*` の設定を持つ入れ物。`update` はそのまま書き換える。
  *
- * 台帳へ書かれた履歴も残す——**「一度は延ばした」ことを確かめたい**。
- * 最後の状態だけを見ると、そもそも延ばさなかった場合と区別が付かず、
- * 「戻せている」テストが空振りしていても気づけない。
+ * **台帳はここに無い**（0.66.6 で拡張機能の保管庫のファイルへ移った）。
+ * 台帳を仕込むのも読み出すのも `support/tuningStore.ts` である。
  */
-function installSettings(
-  values: Record<string, unknown>,
-  options: { failTuningWriteAt?: number } = {}
-): { tuningWrites: Record<string, unknown>[] } {
-  const tuningWrites: Record<string, unknown>[] = [];
-  let tuningWriteCount = 0;
+function installSettings(values: Record<string, unknown>): void {
   workspace.getConfiguration = () =>
     ({
       get: <T>(key: string, defaultValue?: T): T =>
         (key in values ? values[key] : defaultValue) as T,
       inspect: () => ({ workspaceValue: undefined }),
       update: async (key: string, value: unknown) => {
-        if (key === "modelTuning") {
-          tuningWriteCount += 1;
-          // 指定された順番の書き込みだけを失敗させる（設定が書けない環境の再現）
-          if (tuningWriteCount === options.failTuningWriteAt) {
-            throw new Error("設定を書き込めませんでした");
-          }
-          tuningWrites.push(value as Record<string, unknown>);
-        }
         values[key] = value;
       },
     }) as unknown as ReturnType<typeof workspace.getConfiguration>;
-  return { tuningWrites };
 }
 
-/** いまの台帳（`novelai.modelTuning`）を読み出す */
-function tuningTable(values: Record<string, unknown>): Record<string, unknown> {
-  return (values.modelTuning ?? {}) as Record<string, unknown>;
+/**
+ * 台帳を、記憶の中のファイルで用意する。
+ *
+ * 台帳へ書かれた**履歴**（`tuningWrites`）も残る——「一度は延ばした」ことを
+ * 確かめたい。最後の状態だけを見ると、そもそも延ばさなかった場合と区別が
+ * 付かず、「戻せている」テストが空振りしていても気づけない。
+ */
+async function installTuning(
+  initial: Record<string, unknown> = {},
+  options: { failTuningWriteAt?: number } = {}
+): Promise<void> {
+  await useMemoryTuningStore(initial);
+  // 指定された順番の書き込みだけを失敗させる（書けない置き場の再現）
+  fsTiming.failWriteAt = options.failTuningWriteAt;
+}
+
+/** いまの台帳（`<保管庫>/model-tuning.json`）を読み出す */
+function tuningTable(): Record<string, unknown> {
+  return tuningStoreContents();
 }
 
 /** 台帳へ書かれた履歴のどこかで、この鍵の待ち時間が延びていたか */
@@ -178,34 +185,34 @@ beforeEach(() => {
 describe("どのAIを測るか", () => {
   test("機能キーを渡すと、その機能の割当先を測る", async () => {
     state.assignments = { default: OLLAMA, typo: SAKURA };
-    const values: Record<string, unknown> = {};
-    installSettings(values);
+    installSettings({});
+    await installTuning();
     answerWith("設定に反映");
 
     await measureContext(registry, "typo");
 
     expect(state.requestedFeatures).toEqual(["typo"]);
     // 台帳の鍵も、その機能の割当先のものになる
-    expect(Object.keys(tuningTable(values))).toEqual(["sakura/gpt-oss-120b"]);
+    expect(Object.keys(tuningTable())).toEqual(["sakura/gpt-oss-120b"]);
   });
 
   test("機能キーを渡さなければ、これまでどおり既定を測る", async () => {
     state.assignments = { default: OLLAMA, typo: SAKURA };
-    const values: Record<string, unknown> = {};
-    installSettings(values);
+    installSettings({});
+    await installTuning();
     answerWith("設定に反映");
 
     await measureContext(registry);
 
     expect(state.requestedFeatures).toEqual(["default"]);
-    expect(Object.keys(tuningTable(values))).toEqual([KEY]);
+    expect(Object.keys(tuningTable())).toEqual([KEY]);
   });
 });
 
 describe("測り直しのために延ばした待ち時間", () => {
   test("反映しなければ、元から欄が無かった台帳は元どおり空に戻る", async () => {
-    const values: Record<string, unknown> = { "ollama.timeoutSeconds": 180 };
-    const { tuningWrites } = installSettings(values);
+    installSettings({ "ollama.timeoutSeconds": 180 });
+    await installTuning();
     // 作者が「そのままにする」を選んだ場面
     answerWith("そのままにする");
 
@@ -216,19 +223,16 @@ describe("測り直しのために延ばした待ち時間", () => {
     expect(raisedTo(tuningWrites, KEY, 360)).toBe(true);
     // **そのうえで、鍵ごと消えていること。** 中身の無い項目を残すと、
     // 作者には「測ったのに何も入っていない」と読める
-    expect(tuningTable(values)[KEY]).toBeUndefined();
+    expect(tuningTable()[KEY]).toBeUndefined();
   });
 
   test("反映しなければ、元の待ち時間へ戻す（ほかの欄は残す）", async () => {
-    const values: Record<string, unknown> = {
-      "ollama.timeoutSeconds": 180,
-      modelTuning: {
-        [KEY]: { contextWindow: 8192, timeoutSeconds: 200, memo: "作者の覚書" },
-        // ほかのモデルの項目は、いかなる場合も触らない
-        "ollama/gemma4:e4b": { timeoutSeconds: 240 },
-      },
-    };
-    const { tuningWrites } = installSettings(values);
+    installSettings({ "ollama.timeoutSeconds": 180 });
+    await installTuning({
+      [KEY]: { contextWindow: 8192, timeoutSeconds: 200, memo: "作者の覚書" },
+      // ほかのモデルの項目は、いかなる場合も触らない
+      "ollama/gemma4:e4b": { timeoutSeconds: 240 },
+    });
     answerWith("そのままにする");
 
     await measureContext(registry);
@@ -236,25 +240,25 @@ describe("測り直しのために延ばした待ち時間", () => {
     // **台帳の200秒のほうを倍にする**（設定の180秒ではない）。
     // 台帳が設定に勝つのだから、延ばす元も台帳の値でなければ辻褄が合わない
     expect(raisedTo(tuningWrites, KEY, 400)).toBe(true);
-    expect(tuningTable(values)[KEY]).toEqual({
+    expect(tuningTable()[KEY]).toEqual({
       contextWindow: 8192,
       timeoutSeconds: 200,
       memo: "作者の覚書",
     });
-    expect(tuningTable(values)["ollama/gemma4:e4b"]).toEqual({
+    expect(tuningTable()["ollama/gemma4:e4b"]).toEqual({
       timeoutSeconds: 240,
     });
   });
 
   test("反映すれば、見立てた秒数が入る（倍にした値は残さない）", async () => {
-    const values: Record<string, unknown> = { "ollama.timeoutSeconds": 180 };
-    const { tuningWrites } = installSettings(values);
+    installSettings({ "ollama.timeoutSeconds": 180 });
+    await installTuning();
     answerWith("設定に反映");
 
     await measureContext(registry);
 
     expect(raisedTo(tuningWrites, KEY, 360)).toBe(true);
-    const entry = tuningTable(values)[KEY] as Record<string, unknown>;
+    const entry = tuningTable()[KEY] as Record<string, unknown>;
     // 応答は一瞬で返る作りなので、見立ては下限（180秒）に落ち着く。
     // **測り直しのために書いた360秒が残っていないこと**が要点である
     expect(entry.timeoutSeconds).toBe(recommendTimeoutSeconds(0));
@@ -273,14 +277,14 @@ describe("測り直しのために延ばした待ち時間", () => {
    * 360秒待つようになり、しかも理由がどこにも残らない。
    */
   test("反映の書き込みが失敗しても、待ち時間は元へ戻り、失敗が報告される", async () => {
-    const values: Record<string, unknown> = { "ollama.timeoutSeconds": 180 };
+    installSettings({ "ollama.timeoutSeconds": 180 });
     // 1回目＝測り直しのために延ばす書き込み、2回目＝反映の書き込み
-    installSettings(values, { failTuningWriteAt: 2 });
+    await installTuning({}, { failTuningWriteAt: 2 });
     const { showErrorMessage } = answerWith("設定に反映");
 
     await measureContext(registry);
 
     expect(showErrorMessage).toHaveBeenCalled();
-    expect(tuningTable(values)[KEY]).toBeUndefined();
+    expect(tuningTable()[KEY]).toBeUndefined();
   });
 });

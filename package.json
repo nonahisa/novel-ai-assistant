@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを引き受けるVSCode拡張機能で、AIは提案するだけで原稿は書き換えません（無料の手元AIだけでも使えます）。※現在テスト中です。",
-  "version": "0.66.5",
+  "version": "0.66.6",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -49,7 +49,8 @@
         "novelai.openai.endpoint",
         "novelai.gemini.endpoint",
         "novelai.sakura.endpoint",
-        "novelai.confirm.remembered"
+        "novelai.confirm.remembered",
+        "novelai.modelTuning"
       ]
     }
   },
@@ -316,6 +317,11 @@
       {
         "command": "novelai.showTuningStats",
         "title": "AIチューニングの実測一覧を表示",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.forgetTuning",
+        "title": "AIチューニングの記録を消す",
         "category": "小説執筆"
       },
       {
@@ -1675,7 +1681,8 @@
         "novelai.modelTuning": {
           "type": "object",
           "default": {},
-          "markdownDescription": "AIチューニングで測った、モデルごとの上限と待ち時間。「AIチューニング」を実行して「設定に反映」を押すと書き込まれます。手で消せば測る前の状態に戻ります。\n\n**AIの用意**\n\n[セットアップ（必要なものを入れる）…](command:novelai.runFullSetup)\n\n[機能ごとにAIを割り当てる…](command:novelai.assignFeatureAI)"
+          "scope": "machine",
+          "markdownDescription": "AIチューニングで測った、モデルごとの上限と待ち時間。\n\n**0.66.6 から、測った値は拡張機能の保管庫のファイルに入ります。ここに値が残っていても使われません**（初回の引っ越しの材料としてだけ読みました）。記録を消すには、詳細メニューの「AIチューニングの記録を消す」を使ってください。\n\n**AIの用意**\n\n[セットアップ（必要なものを入れる）…](command:novelai.runFullSetup)\n\n[機能ごとにAIを割り当てる…](command:novelai.assignFeatureAI)"
         },
         "novelai.mergeChunkChars": {
           "type": "number",

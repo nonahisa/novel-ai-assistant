@@ -127,6 +127,10 @@ import {
   askTuningScope,
   measureContext,
 } from "../../src/features/measureContext";
+import {
+  tuningStoreContents,
+  useMemoryTuningStore,
+} from "./support/tuningStore";
 
 /** `novelai.*` の設定を持つ入れ物 */
 function installSettings(values: Record<string, unknown>): void {
@@ -172,18 +176,25 @@ function inputCalls(): GenerateParams[] {
   return state.calls.filter((call) => call.userPrompt.includes("合言葉"));
 }
 
-/** その鍵の台帳 */
-function ledger(values: Record<string, unknown>): Record<string, unknown> {
-  return ((values.modelTuning as Record<string, unknown> | undefined)?.[
-    "ollama/gemma4:12b"
-  ] ?? {}) as Record<string, unknown>;
+/**
+ * その鍵の台帳（`<保管庫>/model-tuning.json`）。
+ *
+ * 0.66.5 までは設定 `novelai.modelTuning` だった（0.66.6 で移した）。
+ */
+function ledger(): Record<string, unknown> {
+  return (tuningStoreContents()["ollama/gemma4:12b"] ?? {}) as Record<
+    string,
+    unknown
+  >;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   state.providerId = "ollama";
   state.trueLimit = 9999;
   state.calls = [];
   log.steps = [];
+  // 台帳は 0.66.6 で保管庫のファイルへ移った。**毎回、空から始める**
+  await useMemoryTuningStore({});
 });
 
 describe("何を測るかを選ぶ", () => {
@@ -268,21 +279,19 @@ describe("読める長さだけ測る", () => {
   });
 
   test("前に測った書ける長さは、台帳に残る", async () => {
-    const values: Record<string, unknown> = {
-      modelTuning: {
-        "ollama/gemma4:12b": {
-          measuredOutputTokens: 4321,
-          outputTokensPerSecond: 12.5,
-          speedSource: "tuning",
-        },
+    installSettings({});
+    await useMemoryTuningStore({
+      "ollama/gemma4:12b": {
+        measuredOutputTokens: 4321,
+        outputTokensPerSecond: 12.5,
+        speedSource: "tuning",
       },
-    };
-    installSettings(values);
+    });
     answerWith("設定に反映");
 
     await measureContext(registry, "default", undefined, "input");
 
-    const tuning = ledger(values);
+    const tuning = ledger();
     // 読める長さの結果は入る
     expect(tuning.measuredChars).toBeGreaterThan(0);
     expect(tuning.timeoutSeconds).toBeGreaterThan(0);
@@ -312,20 +321,18 @@ describe("書ける長さだけ測る", () => {
   });
 
   test("前に測った読める長さは、台帳に残る", async () => {
-    const values: Record<string, unknown> = {
-      modelTuning: {
-        "ollama/gemma4:12b": {
-          measuredChars: 123456,
-          timeoutSeconds: 240,
-        },
+    installSettings({});
+    await useMemoryTuningStore({
+      "ollama/gemma4:12b": {
+        measuredChars: 123456,
+        timeoutSeconds: 240,
       },
-    };
-    installSettings(values);
+    });
     answerWith("そのままにする");
 
     await measureContext(registry, "default", undefined, "output");
 
-    const tuning = ledger(values);
+    const tuning = ledger();
     expect(tuning.measuredOutputTokens).toBeGreaterThan(0);
     // **測っていない欄は、そのまま残る**
     expect(tuning.measuredChars).toBe(123456);

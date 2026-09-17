@@ -162,8 +162,10 @@ export function truncatedOutputAdvice(limit: OutputTokenLimit): string {
     return (
       "応答が出力上限で切り詰められました。上限は、AIチューニングで測った" +
       `「書ける量」の実測（約${limit.tokens.toLocaleString("ja-JP")}トークン）です。` +
-      "質問を短くするか、AIチューニングで測り直す（または設定 " +
-      "novelai.modelTuning からこのモデルの measuredOutputTokens を消す）と広がります。"
+      // **消し方は、いまある道で言う**（0.66.6）。台帳は設定から保管庫の
+      // ファイルへ移ったので、設定画面を開いても該当の欄はもう無い
+      "質問を短くするか、AIチューニングで測り直す（または詳細メニューの" +
+      "「AIチューニングの記録を消す」でこのモデルの記録を消す）と広がります。"
     );
   }
   return (

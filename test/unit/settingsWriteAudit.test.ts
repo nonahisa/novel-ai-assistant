@@ -48,6 +48,9 @@ const OVERWRITE_ALLOWED: Record<string, string> = {
     "最終編集環境の記録（5.5.2）。端末ごとに分けてあり、次に開いたときに書き直される",
   "coverBake.ts": "焼いた表紙。素材から作り直せる",
   "pendingUpdates.ts": "承認待ち。まだ資料になっていない（5.5.18）",
+  "modelTuningStore.ts":
+    "AIチューニングの台帳（6.49）。書いたあとに読み直して、" +
+    "入れた欄と読んだときの鍵が残っているかを確かめ、消えていればやり直す",
 
   // 追記型の記録（1行1件。畳まない）
   "announcementHistory.ts":

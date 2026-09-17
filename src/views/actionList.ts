@@ -1713,6 +1713,18 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.forgetTuning",
+            label: "AIチューニングの記録を消す",
+            icon: "trash",
+            requiresWork: false,
+            // 記録を消すだけで、AIは呼ばない
+            usesAI: false,
+            detail:
+              "測った記録をモデルごとに消します。" +
+              "**同梱の値は消せません**（測り直すと上書きされます）。",
+          },
+          {
+            kind: "action",
             // **詳細メニューには出さない**（設定管理へ移した。設計書6.56.3）
             hiddenFromActionList: true,
             command: "novelai.selectOllamaExecutable",

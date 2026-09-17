@@ -1,7 +1,8 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { workspace } from "./support/vscodeStub";
+import { useMemoryTuningStore } from "./support/tuningStore";
 import {
   MINIMUM_OUTPUT_TOKENS,
   resolveOutputLimitForSend,
@@ -21,6 +22,12 @@ import { readChunkSettings } from "../../src/features/chunkSettings";
  * 要らないぶんまで num_ctx として確保してしまう。実測があれば
  * `min(設定, 実測)`、無ければ `min(設定, 8,192)` に抑える。
  */
+
+// 台帳は 0.66.6 で保管庫のファイルへ移った（`core/modelTuningStore.ts`）。
+// **毎回、空のファイルから始める**——置き場を渡さないと保存が素通りする
+beforeEach(async () => {
+  await useMemoryTuningStore({});
+});
 
 function installSettings(values: Record<string, unknown>): void {
   workspace.getConfiguration = () =>
