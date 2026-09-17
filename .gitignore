@@ -8,7 +8,10 @@ coverage/
 .vscode-test/
 # ブラウザのVS Code（`npm run test:web` が取り寄せる。数十MB）
 .vscode-test-web/
-release/
+# **先頭のスラッシュを外さない。** `release/` と書くと、どの階層の `release`
+# という名前のフォルダーも無視する——実際 `.claude/skills/release/` が巻き添えで
+# 無視され、手順書が一度も追跡されていなかった（2026-09-18 に気づいた）
+/release/
 # 検証用の使い捨てスクリプト（アンダースコア始まり）
 _test_*
 _diag*
