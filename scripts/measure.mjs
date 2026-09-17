@@ -3,6 +3,7 @@
 //   node scripts/measure.mjs <feature> [--work <作品フォルダー>] --model <モデル>
 //                            [--repeat N] [--num-ctx 32768] [--endpoint URL]
 //                            [--compare <前回のJSON>] [--out docs/measurements]
+//                            [--option 名前=値 ...]
 //
 // **製品と同じ経路を通す**（`runner: "ollama"` で `<feature>.run`）。
 // `prompt` だけ呼んで `validate` を飛ばす測り方は、**製品に無い不具合を
@@ -62,6 +63,8 @@ function parseArgs(argv) {
     endpoint: null,
     compare: null,
     out: path.join(REPO_ROOT, "docs", "measurements"),
+    // feature ごとの追加の指定（`novel.run` の `options`）。**空なら渡さない**
+    options: {},
   };
   for (let at = 1; at < argv.length; at += 1) {
     const flag = argv[at];
@@ -95,6 +98,22 @@ function parseArgs(argv) {
       case "--out":
         options.out = path.resolve(needsValue());
         break;
+      /*
+        **`--option 名前=値` を繰り返す形にしてある**（JSON をまるごと渡さない）。
+        PowerShell から JSON を渡すと引用符の扱いで壊れやすく、しかも壊れたことに
+        気づかないまま「既定で測った」記録が残る（スキル `shell-safety`）。
+        いま要るのは `categories=light|all` のような短い値だけなので、
+        **値は文字列のまま**渡す——形の検証は束の `options` が行う。
+      */
+      case "--option": {
+        const pair = needsValue();
+        const at = pair.indexOf("=");
+        if (at <= 0) {
+          throw new Error(`--option は 名前=値 の形で指定してください: ${pair}`);
+        }
+        options.options[pair.slice(0, at)] = pair.slice(at + 1);
+        break;
+      }
       default:
         throw new Error(`知らない指定です: ${flag}`);
     }
@@ -211,6 +230,11 @@ function planCalls(schema, context) {
   if ("model" in properties) base.model = context.model;
   if ("endpoint" in properties && context.endpoint) {
     base.endpoint = context.endpoint;
+  }
+  // **空なら渡さない。** `options: {}` を渡すと、記録の上では
+  // 「何か指定して測った」ように見える
+  if ("options" in properties && Object.keys(context.options ?? {}).length > 0) {
+    base.options = context.options;
   }
 
   // 埋められる名前。**optional は埋めなくてよい**ので、必須だけを見る
@@ -365,6 +389,7 @@ async function main() {
       model: options.model,
       numCtx: options.numCtx,
       endpoint: options.endpoint,
+      options: options.options,
     });
 
     // プロンプト版は束に訊く（`*.run` は返さない）。**訊けなければ空のまま残す**
@@ -413,6 +438,9 @@ async function main() {
       model: options.model,
       numCtx: options.numCtx,
       endpoint: options.endpoint,
+      // **何を指定して測ったかを残す。** 同じ日に `categories` を変えて
+      // 2度回すと、記録は `-2.json` になるだけで中身の違いが読めない
+      options: options.options,
       repeat: options.repeat,
       bundle,
       promptVersion,

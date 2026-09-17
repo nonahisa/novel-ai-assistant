@@ -15,6 +15,7 @@ import {
   promptToolOf,
   registeredToolNames,
   resultsOfResponse,
+  scoreContradiction,
   scoreDeviation,
   scoreProofread,
   spreadOfRuns,
@@ -413,6 +414,342 @@ describe("逸脱の測定台（答えと本文が食い違っていないか）"
       );
       expect(episode).toBeTruthy();
       expect(episode.seeded).toHaveLength(0);
+    }
+  });
+});
+
+/* ── 矛盾（P-12）─────────────────────────────────────── */
+
+/** 答え（`test/fixtures/seeded/contradiction/answers.json` の形を小さく写したもの） */
+const CONTRADICTION_ANSWERS = {
+  mustNotFlag: [
+    // `where` が無い＝その話まるごと
+    { file: "本文/001_九月の終わりの坂.txt" },
+    // `where` がある＝その箇所だけ（罠）
+    {
+      file: "本文/004_ギプスが外れた日.txt",
+      where: "今日から乗る",
+      lines: { start: 12, end: 18 },
+    },
+  ],
+  episodes: [
+    { file: "本文/001_九月の終わりの坂.txt", seeded: [] },
+    {
+      file: "本文/003_窓口の椅子.txt",
+      seeded: [
+        {
+          kind: "人物",
+          where: "僕は判子を押す手を止めた",
+          lines: { start: 39, end: 39 },
+        },
+      ],
+    },
+    {
+      file: "本文/004_ギプスが外れた日.txt",
+      seeded: [
+        {
+          kind: "状態",
+          where: "右足のギプスが外れたのは",
+          lines: { start: 1, end: 1 },
+        },
+      ],
+    },
+  ],
+};
+
+/** 1件の指摘（`core/contradictionValidation.ts` の `AcceptedContradiction` の形） */
+function contradiction(
+  excerpt: string,
+  category = "人物",
+  line = 1
+): Record<string, unknown> {
+  return {
+    line,
+    excerpt,
+    category,
+    settingSays: "設定ではこうなっている",
+    textSays: "本文ではこうなっている",
+    note: "",
+    severity: "medium",
+    confidence: "high",
+  };
+}
+
+describe("矛盾の答え合わせ", () => {
+  it("引用が重なれば拾えたと数える（鉤括弧の有無は問わない）", () => {
+    const results = [
+      {
+        chunkId: "本文\\003_窓口の椅子.txt#3-0@8027",
+        accepted: [contradiction("「僕は判子を押す手を止めた」", "人物", 39)],
+        rejected: [],
+      },
+    ];
+    const scored = scoreContradiction(CONTRADICTION_ANSWERS, results);
+    expect(scored.seeds).toMatchObject({ found: 1, total: 2 });
+    expect(scored.seeds.byKind["人物"]).toEqual({ found: 1, total: 1 });
+    expect(scored.missed).toHaveLength(1);
+    expect(scored.missed[0].kind).toBe("状態");
+  });
+
+  it("引用がずれていても、行が仕込みの範囲に入れば拾えたと数える", () => {
+    // 矛盾の指摘は `line` を1つしか持たない。点が範囲に入るかで見る
+    const results = [
+      {
+        chunkId: "本文/003_窓口の椅子.txt#3-0@8027",
+        accepted: [contradiction("一人称が食い違っている", "人物", 39)],
+        rejected: [],
+      },
+    ];
+    expect(scoreContradiction(CONTRADICTION_ANSWERS, results).seeds.found).toBe(1);
+  });
+
+  it("場所も行も外していれば見逃し（誤検出ではなく仕込み以外）", () => {
+    const results = [
+      {
+        chunkId: "本文/003_窓口の椅子.txt#3-0@8027",
+        accepted: [contradiction("栗だ。丘のは町のより甘い", "人物", 44)],
+        rejected: [],
+      },
+    ];
+    const scored = scoreContradiction(CONTRADICTION_ANSWERS, results);
+    expect(scored.seeds.found).toBe(0);
+    expect(scored.falsePositives.count).toBe(0);
+    expect(scored.otherFlags).toBe(1);
+  });
+
+  it("矛盾の無い話に付いた指摘は、すべて誤検出", () => {
+    const results = [
+      {
+        chunkId: "本文/001_九月の終わりの坂.txt#1-0@8027",
+        accepted: [
+          contradiction("俺は右目の下を手の甲でこすった", "人物", 23),
+          contradiction("四十分。いつもそれくらいかかる", "時系列", 3),
+        ],
+        rejected: [],
+      },
+    ];
+    const scored = scoreContradiction(CONTRADICTION_ANSWERS, results);
+    expect(scored.falsePositives.count).toBe(2);
+    expect(scored.falsePositives.byFile["本文/001_九月の終わりの坂.txt"]).toBe(2);
+    expect(scored.otherFlags).toBe(0);
+  });
+
+  it("罠（変わってよい箇所）に付いた指摘は誤検出、同じ話の仕込みは拾えたまま", () => {
+    // 1つの話に仕込みと罠が同居する。片方だけを数えてはいけない
+    const results = [
+      {
+        chunkId: "本文/004_ギプスが外れた日.txt#4-0@8027",
+        accepted: [
+          contradiction("右足のギプスが外れたのは", "状態", 1),
+          contradiction("今日から乗る", "状態", 14),
+        ],
+        rejected: [],
+      },
+    ];
+    const scored = scoreContradiction(CONTRADICTION_ANSWERS, results);
+    expect(scored.seeds.found).toBe(1);
+    expect(scored.falsePositives.count).toBe(1);
+    expect(scored.falsePositives.byFile["本文/004_ギプスが外れた日.txt"]).toBe(1);
+    expect(scored.otherFlags).toBe(0);
+  });
+
+  it("同じ指摘を2つの仕込みに使い回さない", () => {
+    const answers = {
+      mustNotFlag: [],
+      episodes: [
+        {
+          file: "本文/005_初雪の窓口.txt",
+          seeded: [
+            { kind: "人物", where: "左目の下のほくろ", lines: { start: 7, end: 11 } },
+            { kind: "時系列", where: "ちょうど二週間が過ぎた", lines: { start: 7, end: 11 } },
+          ],
+        },
+      ],
+    };
+    const results = [
+      {
+        chunkId: "本文/005_初雪の窓口.txt#5-0@8027",
+        accepted: [contradiction("左目の下のほくろ", "人物", 7)],
+        rejected: [],
+      },
+    ];
+    expect(scoreContradiction(answers, results).seeds).toMatchObject({
+      found: 1,
+      total: 2,
+    });
+  });
+
+  it("場所は当てて区分を取り違えたものは、拾えたに数えたうえで別に出す", () => {
+    const results = [
+      {
+        chunkId: "本文/004_ギプスが外れた日.txt#4-0@8027",
+        accepted: [contradiction("右足のギプスが外れたのは", "時系列", 1)],
+        rejected: [],
+      },
+    ];
+    const scored = scoreContradiction(CONTRADICTION_ANSWERS, results);
+    expect(scored.seeds.found).toBe(1);
+    expect(scored.kindMismatch).toBe(1);
+  });
+
+  it("短すぎる引用は、偶然重なっても拾えたと数えない", () => {
+    const results = [
+      {
+        chunkId: "本文/003_窓口の椅子.txt#3-0@8027",
+        accepted: [contradiction("判子", "人物", 55)],
+        rejected: [],
+      },
+    ];
+    expect(scoreContradiction(CONTRADICTION_ANSWERS, results).seeds.found).toBe(0);
+  });
+
+  it("指標の表に、拾えた・見逃し・誤検出が並ぶ（逸脱の見出しと混ざらない）", () => {
+    const results = [
+      {
+        chunkId: "本文/003_窓口の椅子.txt#3-0@8027",
+        accepted: [contradiction("僕は判子を押す手を止めた", "人物", 39)],
+        rejected: [{ raw: {}, reason: "excerpt_not_found" }],
+      },
+      {
+        chunkId: "本文/001_九月の終わりの坂.txt#1-0@8027",
+        accepted: [contradiction("俺は右目の下を手の甲でこすった", "人物", 23)],
+        rejected: [],
+      },
+    ];
+    const { metrics } = metricsOfRun("contradiction", CONTRADICTION_ANSWERS, {
+      results,
+      failures: [],
+      elapsedMs: 60_000,
+    });
+    expect(metrics).toMatchObject({
+      seededContradictions: 1,
+      seededContradictionsTotal: 2,
+      missedContradictions: 1,
+      falseFlagsContradiction: 1,
+      categoryMismatch: 0,
+      otherFlagsContradiction: 0,
+      accepted: 2,
+      "rejected.excerpt_not_found": 1,
+    });
+    const lines = formatSpreadLines(spreadOfRuns([{ metrics }]));
+    expect(lines).toContain("仕込んだ矛盾を拾えた: 1/2");
+    expect(lines).toContain("見逃し（拾えなかった仕込み）: 1");
+    expect(lines).toContain("誤検出（罠と、矛盾の無い話に付いた指摘）: 1");
+    // 逸脱の見出しが混ざらない（指標の名前を分けてある理由）
+    expect(lines.some((line: string) => line.includes("逸脱"))).toBe(false);
+    expect(metrics.noSuggestion).toBeUndefined();
+  });
+});
+
+describe("矛盾の測定台（答えと本文が食い違っていないか）", () => {
+  const root = path.join(__dirname, "..", "fixtures", "seeded", "contradiction");
+  const answers = JSON.parse(
+    fs.readFileSync(path.join(root, "answers.json"), "utf8")
+  );
+  const bodyOf = (file: string) =>
+    fs.readFileSync(path.join(root, file), "utf8");
+
+  it("仕込みの引用は、その話の本文にそのまま実在する", () => {
+    for (const episode of answers.episodes) {
+      const text = bodyOf(episode.file);
+      for (const seed of episode.seeded) expect(text).toContain(seed.where);
+    }
+  });
+
+  it("罠の引用も、その話の本文にそのまま実在する", () => {
+    for (const entry of answers.mustNotFlag) {
+      if (!entry.where) continue;
+      expect(bodyOf(entry.file)).toContain(entry.where);
+    }
+  });
+
+  it("仕込みと罠の行の範囲は、その話の行数に収まっている", () => {
+    const ranges: Array<{ file: string; lines: { start: number; end: number } }> =
+      [];
+    for (const episode of answers.episodes) {
+      for (const seed of episode.seeded) {
+        ranges.push({ file: episode.file, lines: seed.lines });
+      }
+    }
+    for (const entry of answers.mustNotFlag) {
+      if (entry.lines) ranges.push({ file: entry.file, lines: entry.lines });
+    }
+    for (const range of ranges) {
+      const lastLine = bodyOf(range.file).split("\n").length;
+      expect(range.lines.start).toBeGreaterThanOrEqual(1);
+      expect(range.lines.end).toBeLessThanOrEqual(lastLine);
+      expect(range.lines.end).toBeGreaterThanOrEqual(range.lines.start);
+    }
+  });
+
+  it("区分は、light の観点の語だけ（人物・状態・時系列）", () => {
+    // **all でしか見ない観点を混ぜない。** 混ぜると light で測ったときに
+    // 「観点の外だから出なかったもの」が見逃しとして積まれる
+    const source = fs.readFileSync(
+      path.join(__dirname, "..", "..", "src", "prompts", "contradictionCheck.ts"),
+      "utf8"
+    );
+    const light = source
+      .match(/LIGHT_CATEGORIES[^=]*=\s*\[([^\]]+)\]/)?.[1]
+      .match(/"([^"]+)"/g)
+      ?.map((quoted: string) => quoted.replace(/"/g, ""));
+    expect(light).toEqual(["人物", "状態", "時系列"]);
+    for (const episode of answers.episodes) {
+      for (const seed of episode.seeded) expect(light).toContain(seed.kind);
+    }
+    for (const entry of answers.mustNotFlag) {
+      if (entry.kind) expect(light).toContain(entry.kind);
+    }
+  });
+
+  it("話まるごとの mustNotFlag には、仕込みが無い", () => {
+    for (const entry of answers.mustNotFlag) {
+      if (entry.where) continue;
+      const episode = answers.episodes.find(
+        (item: { file: string }) => item.file === entry.file
+      );
+      expect(episode).toBeTruthy();
+      expect(episode.seeded).toHaveLength(0);
+    }
+  });
+
+  it("仕込みと罠の行の範囲は、同じ話の中で重なっていない", () => {
+    // 重なると、どちらに当たった指摘なのかを機械が決められない
+    for (const episode of answers.episodes) {
+      const traps = answers.mustNotFlag.filter(
+        (entry: { file: string; where?: string }) =>
+          entry.file === episode.file && entry.where
+      );
+      for (const seed of episode.seeded) {
+        for (const trap of traps) {
+          const apart =
+            seed.lines.end < trap.lines.start || seed.lines.start > trap.lines.end;
+          expect(apart).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("どの話も各話あらすじに載っている（載っていないと材料が渡らない）", () => {
+    const synopses = JSON.parse(
+      fs.readFileSync(
+        path.join(root, "設定", "chapter_synopses.json"),
+        "utf8"
+      )
+    );
+    const chapters = new Set(
+      synopses.episodes.map((item: { chapter: number }) => item.chapter)
+    );
+    for (const episode of answers.episodes) {
+      expect(chapters.has(episode.chapter)).toBe(true);
+    }
+  });
+
+  it("各話は 1,200〜1,500字に収まっている", () => {
+    for (const episode of answers.episodes) {
+      const chars = bodyOf(episode.file).length;
+      expect(chars).toBeGreaterThanOrEqual(1200);
+      expect(chars).toBeLessThanOrEqual(1500);
     }
   });
 });

@@ -407,6 +407,132 @@ export function scoreDeviation(answers, results) {
   return { seeds, missed, falsePositives, kindMismatch, otherFlags };
 }
 
+/* ── 矛盾（P-12）の答え合わせ ──────────────────────────── */
+
+/**
+ * 指摘の行が、仕込みの行の範囲に入るか。
+ *
+ * **逸脱と形が違う。** 逸脱の指摘は `lineStart`〜`lineEnd` の範囲を持つが、
+ * 矛盾の指摘（`core/contradictionValidation.ts` の `AcceptedContradiction`）は
+ * `line` を**1つだけ**持つ。範囲どうしの重なりではなく、点が範囲に入るかで見る。
+ */
+export function lineWithin(issue, lines) {
+  const line = Number(issue?.line);
+  if (!Number.isFinite(line)) return false;
+  const from = Number(lines?.start);
+  const to = Number(lines?.end);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return false;
+  return line >= from && line <= to;
+}
+
+/** その指摘が、仕込み（または罠）の場所を指しているか */
+function pointsAt(issue, target) {
+  return (
+    quotesOverlap(issue?.excerpt, target?.where) ||
+    lineWithin(issue, target?.lines)
+  );
+}
+
+/**
+ * 矛盾検知（P-12）の答え合わせ
+ * （`test/fixtures/seeded/contradiction/README.md` の数え方）。
+ *
+ * - **拾えた**：同じ話の `accepted[]` に、仕込みの `where` と重なる `excerpt` が
+ *   あるか、`line` が仕込みの `lines` に入る指摘があるもの
+ * - **見逃し**：拾えなかった仕込み
+ * - **誤検出**：`mustNotFlag` に当たった指摘。`where` のある項目（罠）は
+ *   **その箇所を指した指摘**、`where` の無い項目は**その話に付いた指摘すべて**
+ * - **区分ちがい**：場所は当てたが `category` が仕込みの `kind` と違うもの
+ *
+ * **`mustNotFlag` の形が逸脱と違う。** あちらはファイル名の配列で足りたが、
+ * 矛盾の罠は「作中で変わってよい箇所」なので、**変化が起きた話の中の一点**を
+ * 指す必要がある——その話には仕込みも同居するため、話まるごとでは数えられない。
+ *
+ * **1つの指摘は1つの仕込みにしか当たらない**（逸脱と同じ）。仕込みを先に、
+ * 罠をあとに当てる——順序を逆にすると、範囲が隣り合ったときに罠が仕込みの
+ * 指摘を横取りし、**拾えているのに誤検出として数える**ことになる。
+ */
+export function scoreContradiction(answers, results) {
+  const byFile = acceptedByFile(results);
+
+  // 話まるごと（`where` なし）と、箇所ごと（`where` あり）に分ける
+  const wholeFiles = new Set();
+  const trapsByFile = new Map();
+  for (const entry of answers?.mustNotFlag ?? []) {
+    const file = normalizePath(entry?.file ?? "");
+    if (!file) continue;
+    if (!entry?.where) {
+      wholeFiles.add(file);
+      continue;
+    }
+    const list = trapsByFile.get(file) ?? [];
+    list.push(entry);
+    trapsByFile.set(file, list);
+  }
+
+  const seeds = { found: 0, total: 0, byKind: {} };
+  const missed = [];
+  const falsePositives = { count: 0, byFile: {} };
+  let kindMismatch = 0;
+  let otherFlags = 0;
+
+  const addFalsePositive = (file, count) => {
+    if (count <= 0) return;
+    falsePositives.count += count;
+    falsePositives.byFile[file] = (falsePositives.byFile[file] ?? 0) + count;
+  };
+
+  for (const episode of answers?.episodes ?? []) {
+    const file = normalizePath(episode?.file ?? "");
+    const issues = byFile.get(file) ?? [];
+
+    if (wholeFiles.has(file)) {
+      // **設定と1つも食い違っていない話。ここに出たものは、中身を問わず誤検出**
+      addFalsePositive(file, issues.length);
+      continue;
+    }
+
+    const used = new Set();
+    for (const seed of episode?.seeded ?? []) {
+      const kind = textOf(seed?.kind) || "（区分なし）";
+      const bucket = seeds.byKind[kind] ?? { found: 0, total: 0 };
+      bucket.total += 1;
+      seeds.total += 1;
+
+      const hit = issues.findIndex(
+        (issue, at) => !used.has(at) && pointsAt(issue, seed)
+      );
+      if (hit >= 0) {
+        used.add(hit);
+        bucket.found += 1;
+        seeds.found += 1;
+        // 区分は `category`（逸脱の `type` ではない）
+        if (textOf(issues[hit]?.category) !== kind) kindMismatch += 1;
+      } else {
+        missed.push({ file, kind, where: textOf(seed?.where) });
+      }
+      seeds.byKind[kind] = bucket;
+    }
+
+    // **罠に付いた指摘は誤検出。** 仕込みを当て終えてから数える
+    for (const trap of trapsByFile.get(file) ?? []) {
+      let hits = 0;
+      issues.forEach((issue, at) => {
+        if (used.has(at) || !pointsAt(issue, trap)) return;
+        used.add(at);
+        hits += 1;
+      });
+      addFalsePositive(file, hits);
+    }
+
+    // **仕込みにも罠にも当たらなかった指摘。** 誤検出とは別に数える——
+    // 作り物とはいえ他にも読める食い違いがありえて、機械には正否を決められない
+    otherFlags += issues.length - used.size;
+  }
+
+  return { seeds, missed, falsePositives, kindMismatch, otherFlags };
+}
+
 /**
  * どの feature でも数えられるもの（件数・落とした理由・失敗）。
  *
@@ -480,6 +606,23 @@ export function metricsOfRun(feature, answers, run) {
   }
 
   /*
+    **指標の名前を逸脱と分ける。** 見出し（`LABELS`）は指標の名前から引くので、
+    同じ `seeded` を使い回すと、矛盾を測っても「仕込んだ逸脱を拾えた」と出る。
+  */
+  if (feature === "contradiction" && answers) {
+    const scored = scoreContradiction(answers, results);
+    metrics.seededContradictions = scored.seeds.found;
+    metrics.seededContradictionsTotal = scored.seeds.total;
+    metrics.missedContradictions = scored.seeds.total - scored.seeds.found;
+    metrics.falseFlagsContradiction = scored.falsePositives.count;
+    metrics.categoryMismatch = scored.kindMismatch;
+    metrics.otherFlagsContradiction = scored.otherFlags;
+    detail.seededContradictions = scored.seeds.byKind;
+    detail.missedContradictions = scored.missed;
+    detail.falseFlagsContradiction = scored.falsePositives.byFile;
+  }
+
+  /*
     **その機能に関係のある指標だけを出す。** 「提案なし（漢字ひらきなのに
     修正案が空）」は推敲だけの話で、`countGeneric` は「漢字ひらき」の札しか
     数えないから他の機能では必ず 0 になる。**必ず 0 と分かっている行を
@@ -535,6 +678,11 @@ const LABELS = {
   falseFlags: "誤検出（プロットどおりの話に付いた指摘）",
   kindMismatch: "種別ちがい（場所は当てたが 逸脱／間延び を取り違えた）",
   otherFlags: "仕込み以外の箇所への指摘",
+  seededContradictions: "仕込んだ矛盾を拾えた",
+  missedContradictions: "見逃し（拾えなかった仕込み）",
+  falseFlagsContradiction: "誤検出（罠と、矛盾の無い話に付いた指摘）",
+  categoryMismatch: "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）",
+  otherFlagsContradiction: "仕込み以外の箇所への指摘",
   accepted: "指摘（検算を通ったもの）",
   rejected: "落とした（検算で弾いたもの）",
   failures: "失敗（チャンクごと通らなかったもの）",
@@ -546,6 +694,7 @@ const DENOMINATORS = {
   ateji: "atejiTotal",
   mustOpen: "mustOpenTotal",
   seeded: "seededTotal",
+  seededContradictions: "seededContradictionsTotal",
 };
 
 /** 分母そのものは行にしない（分子の行に出るため） */
@@ -560,6 +709,11 @@ const ORDER = [
   "falseFlags",
   "kindMismatch",
   "otherFlags",
+  "seededContradictions",
+  "missedContradictions",
+  "falseFlagsContradiction",
+  "categoryMismatch",
+  "otherFlagsContradiction",
   "noSuggestion",
   "accepted",
   "rejected",
