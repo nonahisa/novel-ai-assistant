@@ -1,0 +1,284 @@
+{
+  "measuredAt": "2026-09-17T18:29:32.903Z",
+  "feature": "deviation",
+  "tool": "novel.run",
+  "model": "gemma4:26b",
+  "numCtx": 32768,
+  "endpoint": null,
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.66.8",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.1",
+  "work": {
+    "source": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\801248a2-fa0a-4df0-a47c-f9e80717029a\\scratchpad\\f86-deviation",
+    "targets": [
+      "本文\\001_灯が消えた朝.txt",
+      "本文\\002_灯台へ.txt",
+      "本文\\003_灯台守の話.txt",
+      "本文\\004_もう一度、灯をともす.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\801248a2-fa0a-4df0-a47c-f9e80717029a\\scratchpad\\f86-deviation\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 187416,
+      "staleNote": null,
+      "metrics": {
+        "seeded": 2,
+        "seededTotal": 3,
+        "missed": 1,
+        "falseFlags": 0,
+        "kindMismatch": 1,
+        "otherFlags": 0,
+        "accepted": 2,
+        "rejected": 2,
+        "rejected.over_budget": 1,
+        "rejected.plot_reference_not_found": 1,
+        "failures": 0,
+        "elapsedMs": 187416
+      },
+      "detail": {
+        "rejectedReasons": {
+          "over_budget": 1,
+          "plot_reference_not_found": 1
+        },
+        "failures": [],
+        "seeded": {
+          "逸脱": {
+            "found": 2,
+            "total": 2
+          },
+          "間延び": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missed": [
+          {
+            "file": "本文/004_もう一度、灯をともす.txt",
+            "kind": "間延び",
+            "where": "本当に点くのかな"
+          }
+        ],
+        "falseFlags": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_灯が消えた朝.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "result": {
+              "accepted": [],
+              "rejected": []
+            },
+            "plotChars": 34014,
+            "usedPlotChars": 29974,
+            "plotTrimmed": true,
+            "note": "プロットが長いため先頭 29,974字だけを使いました（全体 34,014字）"
+          }
+        },
+        {
+          "target": "本文\\002_灯台へ.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 1,
+                  "lineEnd": 43,
+                  "excerpt": "朝の会で、転校生が紹介された。",
+                  "type": "逸脱",
+                  "reason": "プロットの第2話は「防波堤を歩いて灯台の下まで行く」内容ですが、本作ではバンド結成の描写が中心となっており、主筋との関連性が不明確に見える可能性があります。",
+                  "plotReference": "放課後、海斗は陽菜と防波堤を歩いて灯台の下まで行く。",
+                  "severity": "medium",
+                  "confidence": "medium"
+                }
+              ],
+              "rejected": []
+            },
+            "plotChars": 34014,
+            "usedPlotChars": 29974,
+            "plotTrimmed": true,
+            "note": "プロットが長いため先頭 29,974字だけを使いました（全体 34,014字）"
+          }
+        },
+        {
+          "target": "本文\\003_灯台守の話.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 3,
+                  "lineEnd": 31,
+                  "excerpt": "港の広場を横切ろうとしたとき、見慣れない白いテントが目に入った。",
+                  "type": "間延び",
+                  "reason": "占いの描写や石の授受が、灯台守に会うという目的や父の行方を探す主筋にどう関わるのか、現時点では判断が難しい箇所です。",
+                  "plotReference": "海斗と陽菜は町はずれの家を訪ね、灯台守の老人に会う。",
+                  "severity": "low",
+                  "confidence": "medium"
+                }
+              ],
+              "rejected": [
+                {
+                  "raw": {
+                    "lineStart": 37,
+                    "lineEnd": 43,
+                    "excerpt": "「飼われてた子だ。紐の跡がある」",
+                    "type": "間延び",
+                    "reason": "子猫の保護と世話の描写が、灯台守への訪問や灯台の謎解きという物語の進行に対して、どの程度寄与しているのか検討の余地があります。",
+                    "plotReference": "海斗と陽菜は町はずれの家を訪ね、灯台守の老人に会う。",
+                    "severity": "low",
+                    "confidence": "medium"
+                  },
+                  "reason": "over_budget"
+                }
+              ]
+            },
+            "plotChars": 34014,
+            "usedPlotChars": 29974,
+            "plotTrimmed": true,
+            "note": "プロットが長いため先頭 29,974字だけを使いました（全体 34,014字）"
+          }
+        },
+        {
+          "target": "本文\\004_もう一度、灯をともす.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "result": {
+              "accepted": [],
+              "rejected": [
+                {
+                  "raw": {
+                    "lineStart": 11,
+                    "lineEnd": 41,
+                    "excerpt": "海斗は歩きながら、父の船のことを考えた。父の船はまだ戻らない。",
+                    "type": "間延び",
+                    "reason": "陽菜の問いかけと海斗の返答、父への思考が三度繰り返されており、物語の進行を停滞させている可能性があるため。",
+                    "plotReference": "海斗は父の船が帰る道しるべになるはずの灯台がなぜ消えたのかを確かめ、もう一度灯をともすことを目指す。",
+                    "severity": "low",
+                    "confidence": "medium"
+                  },
+                  "reason": "plot_reference_not_found"
+                }
+              ]
+            },
+            "plotChars": 34014,
+            "usedPlotChars": 29974,
+            "plotTrimmed": true,
+            "note": "プロットが長いため先頭 29,974字だけを使いました（全体 34,014字）"
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seeded": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "seededTotal": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "missed": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "falseFlags": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "kindMismatch": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "otherFlags": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "rejected": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "rejected.over_budget": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "rejected.plot_reference_not_found": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        187416
+      ],
+      "min": 187416,
+      "max": 187416
+    }
+  },
+  "lines": [
+    "仕込んだ逸脱を拾えた: 2/3",
+    "見逃し（拾えなかった仕込み）: 1",
+    "誤検出（プロットどおりの話に付いた指摘）: 0",
+    "種別ちがい（場所は当てたが 逸脱／間延び を取り違えた）: 1",
+    "仕込み以外の箇所への指摘: 0",
+    "指摘（検算を通ったもの）: 2",
+    "落とした（検算で弾いたもの）: 2",
+    "　└ 落とした理由：over_budget: 1",
+    "　└ 落とした理由：plot_reference_not_found: 1",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 187.4秒"
+  ]
+}
