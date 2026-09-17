@@ -210,9 +210,16 @@ afterEach(() => {
 
 // 本物のgitを子プロセスで何度も起動するので、既定の5秒では足りない
 describe("全部、新しいほうを採る", { timeout: 30_000 }, () => {
+  /*
+    **フックにも別に猶予が要る**（2026-09-18）。`describe` に与えた
+    `timeout` は**テスト本体にしか効かない**——フックは `hookTimeout`
+    （既定10秒）で動く。`setUpConflict()` は git を子プロセスで7回起こすので、
+    **手元では通るのにCIの遅い機械で並列に走ると超える。**
+    `resolveDivergence.test.ts` が同じ形で実際に落ちた。
+  */
   beforeEach(() => {
     setUpConflict();
-  });
+  }, 30_000);
 
   test("設定資料は一度に片づき、原稿だけ見比べに回る", async () => {
     answers.push("全部、新しいほうを採る");

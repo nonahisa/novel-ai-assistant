@@ -186,11 +186,23 @@ function status(): string {
   return git(root, "status", "-sb").split("\n")[0];
 }
 
+/*
+  **フックにも猶予が要る**（2026-09-18、CIで落ちた）。
+
+  `setUp()` は本物のgitを子プロセスで何度も起動して、作業用の倉庫を
+  2つ作り直す。下の `describe` には 30 秒を与えてあるが、**`describe` の外に
+  書いたフックには効かない**——`beforeEach` の既定は 10 秒で、**手元では
+  通るのにCIの遅い機械で並列に走ると超える**（実際 `Hook timed out in
+  10000ms` で落ちた。手元は全体40秒、CIは99秒かかる）。
+
+  下のテスト本体と同じ理由・同じ値にしてある。**処理が遅いのではなく
+  起動が重いので、待ちだけ伸ばす。**
+*/
 beforeEach(() => {
   answers.length = 0;
   shown.length = 0;
   setUp();
-});
+}, 30_000);
 
 afterEach(() => {
   vi.restoreAllMocks();
