@@ -1,0 +1,82 @@
+{
+  "note": "推敲P-10の測定台。数は本文へ grep -o で数えて合わせてある（README参照）。",
+  "episodes": [
+    {
+      "file": "本文/001_あさ.txt",
+      "ateji": [
+        { "word": "丁度", "reading": "ちょうど", "count": 1 },
+        { "word": "沢山", "reading": "たくさん", "count": 1 }
+      ],
+      "mustOpen": [
+        { "word": "然し", "reading": "しかし", "count": 1 },
+        { "word": "殆ど", "reading": "ほとんど", "count": 1 },
+        { "word": "出来る", "reading": "できる", "count": 1 }
+      ],
+      "mustNotOpen": [
+        { "word": "素敵", "count": 1 },
+        { "word": "大丈夫", "count": 1 }
+      ],
+      "verbTraps": [{ "word": "置く", "count": 1 }]
+    },
+    {
+      "file": "本文/002_ひる.txt",
+      "ateji": [
+        { "word": "丁度", "reading": "ちょうど", "count": 1 },
+        { "word": "是非", "reading": "ぜひ", "count": 1 },
+        { "word": "折角", "reading": "せっかく", "count": 1 }
+      ],
+      "mustOpen": [
+        { "word": "所謂", "reading": "いわゆる", "count": 1 },
+        { "word": "尚", "reading": "なお", "count": 1 },
+        { "word": "出来る", "reading": "できる", "count": 1 }
+      ],
+      "mustNotOpen": [
+        { "word": "基礎学力", "count": 1 },
+        { "word": "時計台", "count": 1 },
+        { "word": "大丈夫", "count": 1 }
+      ],
+      "verbTraps": [{ "word": "見る", "count": 1 }]
+    },
+    {
+      "file": "本文/003_よる.txt",
+      "ateji": [
+        { "word": "沢山", "reading": "たくさん", "count": 1 },
+        { "word": "是非", "reading": "ぜひ", "count": 1 },
+        { "word": "折角", "reading": "せっかく", "count": 1 }
+      ],
+      "mustOpen": [
+        { "word": "然し", "reading": "しかし", "count": 1 },
+        { "word": "殆ど", "reading": "ほとんど", "count": 1 },
+        { "word": "但し", "reading": "ただし", "count": 1 },
+        { "word": "或いは", "reading": "あるいは", "count": 1 }
+      ],
+      "mustNotOpen": [
+        { "word": "素敵", "count": 1 },
+        { "word": "事件", "count": 1 },
+        { "word": "物語", "count": 1 }
+      ],
+      "verbTraps": [{ "word": "置く", "count": 1 }]
+    }
+  ],
+  "totals": {
+    "ateji": { "丁度": 2, "沢山": 2, "是非": 2, "折角": 2 },
+    "mustOpen": {
+      "然し": 2,
+      "所謂": 1,
+      "殆ど": 2,
+      "出来る": 2,
+      "尚": 1,
+      "但し": 1,
+      "或いは": 1
+    },
+    "mustNotOpen": {
+      "基礎学力": 1,
+      "素敵": 2,
+      "大丈夫": 2,
+      "事件": 1,
+      "物語": 1,
+      "時計台": 1
+    },
+    "verbTraps": { "置く": 2, "見る": 1 }
+  }
+}
