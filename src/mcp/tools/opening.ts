@@ -9,14 +9,15 @@ import {
 import { isBlankPlotSection, parsePlotMarkdown } from "../../core/plotDoc";
 import {
   McpToolError,
-  OLLAMA_INPUT,
-  RUNNER_INPUT,
   orderedEpisodeBodies,
   readPlotMarkdown,
   workTitleOf,
-  FOLDER_INPUT,
 } from "./shared";
-import { responseInput, runOnce, type RunnerInput } from "./run";
+import {
+  runOnce,
+  validateWith,
+  type RunnerInput,
+} from "./run";
 
 /**
  * 冒頭診断（P-24。設計書6.59）を外から呼ぶ（0.66.0）。
@@ -33,20 +34,7 @@ import { responseInput, runOnce, type RunnerInput } from "./run";
  * プロット無しでは測れないのとは、そこが違う。
  */
 
-const VALIDATE_WITH = "opening.validate";
-
-export const OPENING_PROMPT_INPUT = { ...FOLDER_INPUT };
-
-export const OPENING_VALIDATE_INPUT = {
-  ...FOLDER_INPUT,
-  response: responseInput(),
-};
-
-export const OPENING_RUN_INPUT = {
-  ...FOLDER_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
+const VALIDATE_WITH = validateWith("opening");
 
 export interface OpeningPromptInput {
   folder: string;

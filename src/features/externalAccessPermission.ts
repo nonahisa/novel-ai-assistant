@@ -7,6 +7,7 @@ import {
   clientKeyOf,
   type ExternalClientPermission,
 } from "../core/externalAccessPermission";
+import { FEATURE_LABELS, type FeatureName } from "../core/mcpFeatures";
 
 /**
  * 外部AI（MCP）の利用を許可する／取り消す（設計書6.87.10、6.87.14）。
@@ -72,19 +73,23 @@ const WHAT_SAMPLING_MEANS =
  * **作者の指示（2026-09-16）**：「MCP承認を検知した場合は、拡張機能の
  * 画面上にポップアップさせてください」。
  *
- * **1件ずつ決める形にした。** 56本を最初に並べて選ばせるより、
- * **使われた道具が来たときに1つ許す**ほうが、作者は何を許したのかを
+ * **1件ずつ決める形にした。** 機能を最初に並べて選ばせるより、
+ * **使われたものが来たときに1つ許す**ほうが、作者は何を許したのかを
  * 分かったまま進められる。
+ *
+ * **許すのは「鍵」であって、道具の名前ではない**（0.66.7）。道具は
+ * `novel.run` の1本に束ねられたので、名前で許すと16の機能が全部通る。
  *
  * @returns 何か決めたか（画面を更新するかの判断に使う）
  */
 export async function askAboutKnock(
   work: WorkEntry,
-  knock: { client: string; tool: string; at: string }
+  knock: { client: string; tool: string; key: string; at: string }
 ): Promise<boolean> {
   const who = clientKeyOf(knock.client);
+  const what = describeAccessKey(knock.key);
   const answer = await vscode.window.showWarningMessage(
-    `外部AI（${who}）が「${work.title}」で「${knock.tool}」を使おうとしました。`,
+    `外部AI（${who}）が「${work.title}」で「${what}」を使おうとしました。`,
     {
       modal: true,
       detail:
@@ -100,10 +105,10 @@ export async function askAboutKnock(
 
   const store = new ExternalAccessPermissionStore(work);
   if (answer === "この道具だけ許可") {
-    await store.allowTool(knock.client, knock.tool);
+    await store.allowTool(knock.client, knock.key);
     await offerReview(
       work,
-      `${who} の「${knock.tool}」を許可しました。ほかの道具はまだ拒否のままです。`
+      `${who} の「${what}」を許可しました。ほかの道具はまだ拒否のままです。`
     );
     return true;
   }
@@ -202,6 +207,18 @@ export async function toggleExternalAccessPermission(
   await editClient(work, store, picked.client);
 }
 
+/**
+ * 許可の鍵を、作者が読める呼び名にする（0.66.7）。
+ *
+ * **`typo` だけでは、作者は何を許すのか分からない。** 表は
+ * `core/mcpFeatures.ts` に1つだけ置いてある（MCP側の断り文句も同じ表を見る）。
+ * 0.66.6 までの古い名前（`typo.run`）は表に無いので、そのまま出す。
+ */
+function describeAccessKey(key: string): string {
+  const label = FEATURE_LABELS[key as FeatureName];
+  return label ? `${label}（${key}）` : key;
+}
+
 function describeScope(client: ExternalClientPermission): string {
   const scope = client.tools.includes(ALL_TOOLS)
     ? "全部の道具"
@@ -235,7 +252,10 @@ async function editClient(
   if (answer.label === "道具を1つ取り消す") {
     const tool = await vscode.window.showQuickPick(
       [
-        ...[...client.tools].sort().map((label) => ({ label })),
+        // **取り消す値は印に書かれているものそのまま。** 見出しだけ日本語にする
+        ...[...client.tools]
+          .sort()
+          .map((key) => ({ label: key, description: describeAccessKey(key) })),
         cancelItem(),
       ],
       {

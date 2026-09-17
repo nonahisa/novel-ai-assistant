@@ -16,6 +16,8 @@ import path from "node:path";
 
 import { connect, REPO_ROOT } from "./mcpClient.mjs";
 import {
+  FILE_TARGET_FEATURES,
+  assertFeature,
   assertToolRegistered,
   formatCompareLines,
   formatSpreadLines,
@@ -203,6 +205,7 @@ function planCalls(schema, context) {
   const required = new Set(schema?.required ?? []);
   const base = {};
   if ("folder" in properties) base.folder = context.work;
+  if ("feature" in properties) base.feature = context.feature;
   if ("numCtx" in properties) base.numCtx = context.numCtx;
   if ("runner" in properties) base.runner = "ollama";
   if ("model" in properties) base.model = context.model;
@@ -216,6 +219,7 @@ function planCalls(schema, context) {
     "filePath",
     "chunkIndex",
     "allowRemote",
+    "options",
   ]);
   const missing = [...required].filter((name) => !fillable.has(name));
   if (missing.length > 0) {
@@ -225,6 +229,15 @@ function planCalls(schema, context) {
     );
   }
 
+  /*
+    **話ごとに回すかは feature で決める**（0.66.7）。道具を束ねたので、
+    `filePath` はどの feature でも受け取れる形になった——形だけを見て
+    「渡せるなら話数ぶん回す」とすると、**作品ぜんたいを1回見る機能
+    （紹介文・章立てなど）を話数ぶん回す**ことになる。
+  */
+  if (!FILE_TARGET_FEATURES.includes(context.feature)) {
+    return [{ label: "（作品ぜんたい）", args: base }];
+  }
   if (!("filePath" in properties)) return [{ label: "（作品ぜんたい）", args: base }];
 
   const files = listBodyFiles(context.work);
@@ -301,6 +314,7 @@ function today() {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
 
+  assertFeature(options.feature);
   const toolName = toolNameOf(options.feature);
   // **表に書いた名前が、本当に登録されているか**を束のもとで確かめる
   assertToolRegistered(
@@ -315,8 +329,13 @@ async function main() {
   const answers = readJsonIfExists(path.join(source, "answers.json"));
 
   const { temp, work } = copyWorkToTemp(source);
-  // 測る道具と、プロンプト版を訊く道具だけ許す（`"*"` は置かない）
-  writePermission(work, promptTool ? [toolName, promptTool] : [toolName]);
+  /*
+    **許可の鍵は `feature`**（0.66.7、設計書6.87.15 の柱1）。道具の名前で
+    置くと、いまの束はそれを鍵として見ないので**全部断られる**。
+    測る feature だけを許す——ここで `"*"` を置くと、測定の台が
+    「全部許した作品」の見本になってしまう。
+  */
+  writePermission(work, [options.feature]);
 
   let client = null;
   try {
@@ -342,6 +361,7 @@ async function main() {
     }
     const calls = planCalls(schema, {
       work,
+      feature: options.feature,
       model: options.model,
       numCtx: options.numCtx,
       endpoint: options.endpoint,

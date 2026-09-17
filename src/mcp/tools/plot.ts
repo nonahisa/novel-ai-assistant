@@ -14,10 +14,7 @@ import { parseCharacter } from "../../models/character";
 import { parseLocation } from "../../models/location";
 import { parseWorldItem } from "../../models/world";
 import {
-  FOLDER_INPUT,
   McpToolError,
-  OLLAMA_INPUT,
-  RUNNER_INPUT,
   SETTINGS_SUBDIRS,
   SYNOPSES_FILE,
   orderedEpisodeBodies,
@@ -25,7 +22,11 @@ import {
   readSettingsRecords,
   workTitleOf,
 } from "./shared";
-import { responseInput, runOnce, type RunnerInput } from "./run";
+import {
+  runOnce,
+  validateWith,
+  type RunnerInput,
+} from "./run";
 
 /**
  * プロット逆算（P-02。設計書6.7）を外から呼ぶ（0.66.0）。
@@ -43,23 +44,10 @@ import { responseInput, runOnce, type RunnerInput } from "./run";
  * それは製品の画面の仕事である。
  */
 
-const VALIDATE_WITH = "plot.reverseValidate";
+const VALIDATE_WITH = validateWith("plotReverse");
 
 /** 冒頭に渡す字数（`features/generatePlot.ts` の `PLOT_OPENING_EXCERPT_CHARS` と同じ） */
 const OPENING_EXCERPT_CHARS = 3_000;
-
-export const PLOT_REVERSE_PROMPT_INPUT = { ...FOLDER_INPUT };
-
-export const PLOT_REVERSE_VALIDATE_INPUT = {
-  ...FOLDER_INPUT,
-  response: responseInput(),
-};
-
-export const PLOT_REVERSE_RUN_INPUT = {
-  ...FOLDER_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
 
 export interface PlotReversePromptInput {
   folder: string;

@@ -99,7 +99,7 @@ afterEach(() => {
   }
 });
 
-describe("settings.propose——既存人物への更新案", () => {
+describe("novel.propose——既存人物への更新案", () => {
   it("承認待ちへ置く。台帳は1バイトも変わらない", () => {
     const folder = workCopy();
     const before = ledgerFingerprint(folder);
@@ -173,7 +173,7 @@ describe("settings.propose——既存人物への更新案", () => {
   });
 });
 
-describe("settings.propose——断りどころ", () => {
+describe("novel.propose——断りどころ", () => {
   it("白名簿に無い鍵は断る。断り文句に鍵の名前が出る", () => {
     const folder = workCopy();
     expect(() =>
@@ -281,7 +281,7 @@ describe("settings.propose——断りどころ", () => {
   });
 });
 
-describe("settings.propose——台帳に無い名前", () => {
+describe("novel.propose——台帳に無い名前", () => {
   it("creation として new_… に置き、IDは仮のまま", () => {
     const folder = workCopy();
     const before = ledgerFingerprint(folder);
@@ -310,10 +310,10 @@ describe("settings.propose——台帳に無い名前", () => {
   });
 });
 
-describe("settings.propose——記録と門番", () => {
+describe("novel.propose——記録と門番", () => {
   it("原稿は外へ出ないので、記録の段階は none", () => {
     // 呼び出し元が持ち込んだ内容を置くだけで、こちらからは何も返さない
-    expect(exposureOf("settings.propose", { folder: "x", name: "少年" })).toBe(
+    expect(exposureOf("novel.propose", { folder: "x", name: "少年" })).toBe(
       "none"
     );
   });
@@ -325,7 +325,7 @@ describe("settings.propose——記録と門番", () => {
     temporary.push(folder);
     // 印が無い＝まだ意思確認していない＝拒否
     expect(() =>
-      assertExternalAccessAllowed({ folder }, "settings.propose")
+      assertExternalAccessAllowed({ folder }, "novel.propose")
     ).toThrow();
   });
 });

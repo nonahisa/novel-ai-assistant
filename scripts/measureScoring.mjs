@@ -14,52 +14,77 @@ export const KANJI_REASON = "漢字ひらき";
 /* ── 道具名の対応表 ───────────────────────────────────── */
 
 /**
- * `feature` から、束の道具の名前へ。**対応表はここ1か所だけ**。
+ * 測れる `feature`（0.66.7 で道具を束ねたので、**行き先はどれも `novel.run`**）。
  *
- * **写しを持たない。** `measure.mjs` の中にも書くと、道具の名前が変わったとき
- * 片方だけ直して「動くけれど別の道具を測っている」が起きる。**書いた名前が
- * 本当に登録されているか**は `assertToolRegistered` が `src/mcp/server.ts` の
- * 中身と突き合わせて確かめる——表だけでは、こちらの思い込みが残る。
+ * **写しを持たない。** `measure.mjs` の中にも書くと、名前が変わったとき
+ * 片方だけ直して「動くけれど別のものを測っている」が起きる。**この並びが
+ * 束の feature と揃っているか**は `test/unit/mcpBundledTools.test.ts` が
+ * `src/core/mcpFeatures.ts` と突き合わせて確かめる——表だけでは、
+ * こちらの思い込みが残る。
  */
-export const FEATURE_TOOLS = {
-  proofread: "proofread.run",
-  typo: "typo.run",
-  notation: "notation.run",
-  contradiction: "contradiction.run",
-  foreshadow: "foreshadow.run",
-  deviation: "episode.deviationRun",
-  synopsis: "episode.synopsisRun",
-  episodePlot: "episode.plotRun",
-  settings: "settings.run",
-  opening: "opening.run",
-  name: "name.run",
-  plotReverse: "plot.reverseRun",
-  chapter: "chapter.proposeRun",
-  blurb: "blurb.run",
-  catchphrase: "blurb.catchphraseRun",
-  chat: "chat.run",
-};
+export const RUN_TOOL = "novel.run";
+export const PROMPT_TOOL = "novel.prompt";
 
-/** `feature` に対応する道具の名前。知らない名前なら、選べるものを並べて断る */
-export function toolNameOf(feature) {
-  const name = FEATURE_TOOLS[feature];
-  if (name) return name;
+export const FEATURES = [
+  "proofread",
+  "typo",
+  "notation",
+  "contradiction",
+  "foreshadow",
+  "deviation",
+  "synopsis",
+  "episodePlot",
+  "settings",
+  "opening",
+  "name",
+  "plotReverse",
+  "chapter",
+  "blurb",
+  "catchphrase",
+  "chat",
+];
+
+/**
+ * 本文を1話ずつ見る feature。**`filePath` を話数ぶん渡す。**
+ *
+ * `src/core/mcpFeatures.ts` の `FILE_TARGET_FEATURES` と同じ並びで、
+ * ずれていないことをテストが見張る——**ずれると、作品ぜんたいを1回見る
+ * 機能を話数ぶん回す**ことになる（同じ答えを何度も測って平均する形になり、
+ * 数字は出るが意味が変わる）。
+ */
+export const FILE_TARGET_FEATURES = [
+  "typo",
+  "proofread",
+  "contradiction",
+  "foreshadow",
+  "settings",
+  "synopsis",
+  "deviation",
+];
+
+/** その feature が測れるか確かめる。知らない名前なら、選べるものを並べて断る */
+export function assertFeature(feature) {
+  if (FEATURES.includes(feature)) return feature;
   throw new Error(
-    `知らない feature です: ${feature}（選べるのは ${Object.keys(FEATURE_TOOLS).join("・")}）`
+    `知らない feature です: ${feature}（選べるのは ${FEATURES.join("・")}）`
   );
 }
 
+/** `feature` を回す道具の名前（束ねたので1つだけ） */
+export function toolNameOf(feature) {
+  assertFeature(feature);
+  return RUN_TOOL;
+}
+
 /**
- * 同じ機能の「プロンプトを組むだけ」の道具。**プロンプト版を訊くために要る**。
+ * 「プロンプトを組むだけ」の道具。**プロンプト版を訊くために要る**。
  *
- * `*.run` は検算まで通した結果しか返さず、**何版のプロンプトで測ったかを
+ * `novel.run` は検算まで通した結果しか返さず、**何版のプロンプトで測ったかを
  * 返さない**。記録に版が無いと、あとから「前 → 後」を並べても
  * **何が変わったのかが分からない**ので、束に直接訊く。
  */
 export function promptToolOf(runTool) {
-  if (runTool.endsWith(".run")) return `${runTool.slice(0, -4)}.prompt`;
-  if (runTool.endsWith("Run")) return `${runTool.slice(0, -3)}Prompt`;
-  return null;
+  return runTool === RUN_TOOL ? PROMPT_TOOL : null;
 }
 
 /** `src/mcp/server.ts` に登録されている道具の名前を読む */

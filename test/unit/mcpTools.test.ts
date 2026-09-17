@@ -4,21 +4,20 @@ import * as os from "node:os";
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { workScan } from "../../src/mcp/tools/workScan";
+import { NOVEL_RUN_INPUT } from "../../src/mcp/tools/features";
+import { validateWith } from "../../src/mcp/tools/run";
 import {
-  PROOFREAD_RUN_INPUT,
   proofreadPrompt,
   proofreadRun,
   proofreadValidate,
 } from "../../src/mcp/tools/proofread";
 import {
-  TYPO_RUN_INPUT,
   typoPrompt,
   typoRun,
   typoValidate,
 } from "../../src/mcp/tools/typo";
 import { TYPO_CHECK_VERSION } from "../../src/prompts/typoCheck";
 import {
-  CHAT_RUN_INPUT,
   chatPrompt,
   chatRun,
   chatValidate,
@@ -97,9 +96,10 @@ describe("work.scan", () => {
 describe("proofread", () => {
   test("runner を省くとエラーになる（既定を作らない）", async () => {
     // 転送層は zod で弾く。**`runner` は必須**
-    const shape = z.object(PROOFREAD_RUN_INPUT);
+    const shape = z.object(NOVEL_RUN_INPUT);
     const parsed = shape.safeParse({
       folder: WORK,
+      feature: "proofread",
       filePath: "本文/004_よあけ.txt",
       numCtx: NUM_CTX,
     });
@@ -125,7 +125,7 @@ describe("proofread", () => {
 
     expect(result.runner).toBe("claude");
     if (result.runner !== "claude") throw new Error("claude のはず");
-    expect(result.validateWith).toBe("proofread.validate");
+    expect(result.validateWith).toBe(validateWith("proofread"));
     expect(result.systemPrompt.length).toBeGreaterThan(0);
     expect(result.chunks).toHaveLength(1);
     expect(result.chunks[0].chunkId).toContain("004_よあけ.txt");
@@ -237,7 +237,7 @@ describe("typo", () => {
     });
 
     expect(result.promptVersion).toBe(TYPO_CHECK_VERSION);
-    expect(result.validateWith).toBe("typo.validate");
+    expect(result.validateWith).toBe(validateWith("typo"));
     expect(result.chunks).toHaveLength(1);
     expect(result.chunks[0].chunkId).toContain("004_よあけ.txt");
     expect(result.chunks[0].userPrompt).toContain("まず最初に");
@@ -384,10 +384,11 @@ describe("typo", () => {
    * 転送層の zod と、ハンドラの中の両方で断る。
    */
   test("runner を省くと、転送層で断られる", () => {
-    const schema = z.object(TYPO_RUN_INPUT);
+    const schema = z.object(NOVEL_RUN_INPUT);
     expect(
       schema.safeParse({
         folder: WORK,
+        feature: "typo",
         filePath: "本文/004_よあけ.txt",
         numCtx: NUM_CTX,
       }).success
@@ -404,7 +405,7 @@ describe("typo", () => {
 
     expect(result.runner).toBe("claude");
     if (result.runner !== "claude") throw new Error("claude のはず");
-    expect(result.validateWith).toBe("typo.validate");
+    expect(result.validateWith).toBe(validateWith("typo"));
     // **検算を通していないものは製品の結果ではない**、と必ず言う
     expect(result.note).toContain("validate");
     expect(result.chunks[0].userPrompt).toContain("まず最初に");
@@ -441,7 +442,7 @@ describe("chat", () => {
     const result = chatPrompt({ folder: WORK, question: "第4話の続きに迷っています" });
 
     expect(result.promptVersion).toBe(WORK_CHAT_VERSION);
-    expect(result.validateWith).toBe("chat.validate");
+    expect(result.validateWith).toBe(validateWith("chat"));
     expect(result.userPrompt).toContain("第4話の続きに迷っています");
     // 材料に、作品の登場人物が入る
     expect(result.reference.join("\n")).toContain("少年");
@@ -564,9 +565,13 @@ describe("chat", () => {
   });
 
   test("runner を省くと、転送層で断られる", () => {
-    const schema = z.object(CHAT_RUN_INPUT);
+    const schema = z.object(NOVEL_RUN_INPUT);
     expect(
-      schema.safeParse({ folder: WORK, question: "どう思いますか" }).success
+      schema.safeParse({
+        folder: WORK,
+        feature: "chat",
+        options: { question: "どう思いますか" },
+      }).success
     ).toBe(false);
   });
 
@@ -579,7 +584,7 @@ describe("chat", () => {
 
     expect(result.runner).toBe("claude");
     if (result.runner !== "claude") throw new Error("claude のはず");
-    expect(result.validateWith).toBe("chat.validate");
+    expect(result.validateWith).toBe(validateWith("chat"));
     expect(result.note).toContain("validate");
     // 何を足したかは、この道でも分かる
     expect(result.diagnoses.readerType).toBe(true);
@@ -664,7 +669,7 @@ describe("settings.prompt", () => {
       numCtx: NUM_CTX,
     });
 
-    expect(result.validateWith).toBe("settings.validate");
+    expect(result.validateWith).toBe(validateWith("settings"));
     expect(result.chunks.length).toBeGreaterThan(0);
     // 本文が入っている
     expect(result.chunks[0].userPrompt).toContain("まず最初に");
@@ -767,7 +772,7 @@ describe("episode.synopsisPrompt", () => {
       filePath: "本文/004_よあけ.txt",
     });
 
-    expect(result.validateWith).toBe("episode.synopsisValidate");
+    expect(result.validateWith).toBe(validateWith("synopsis"));
     expect(result.userPrompt).toContain("まず最初に");
   });
 
@@ -858,7 +863,7 @@ describe("episode.deviationPrompt", () => {
       filePath: "本文/004_よあけ.txt",
     });
 
-    expect(result.validateWith).toBe("episode.deviationValidate");
+    expect(result.validateWith).toBe(validateWith("deviation"));
     expect(result.userPrompt).toContain("まず最初に");
   });
 
@@ -970,7 +975,7 @@ describe("episode.episodePlotPrompt / episodePlotValidate", () => {
         plotPath,
         chapterLabel: "第1話",
       });
-      expect(prompt.validateWith).toBe("episode.plotValidate");
+      expect(prompt.validateWith).toBe(validateWith("episodePlot"));
       expect(prompt.itemCount).toBe(3);
       expect(prompt.userPrompt).toContain("父の船を探す");
 
@@ -1103,7 +1108,7 @@ describe("notation.prompt", () => {
       },
     });
 
-    expect(result.validateWith).toBe("notation.validate");
+    expect(result.validateWith).toBe(validateWith("notation"));
     expect(result.userPrompt).toContain("良い");
     expect(result.userPrompt).toContain("よい");
   });

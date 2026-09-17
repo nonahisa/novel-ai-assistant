@@ -51,6 +51,118 @@ export const ANONYMOUS_CLIENT = "（名乗りなし）";
 /** 「この接続元の道具は全部」を表す印 */
 export const ALL_TOOLS = "*";
 
+/**
+ * 許可の鍵（0.66.7）。
+ *
+ * **道具を束ねても、作者が選んだ粒度は変えない**（設計書6.87.15 の柱1）。
+ * 0.66.6 までは道具ごと（`typo.run`）だったが、いまは道具が
+ * `novel.prompt`／`novel.validate`／`novel.run` の3本に束ねられ、
+ * **何をするかは `feature` が決める**。だから鍵も `feature` にする
+ * ——`prompt`／`validate`／`run` の別は鍵に含めない（同じ feature なら、
+ * 本文がどこまで出るかは `runner` で決まる）。
+ *
+ * **作者が既に置いた印を無効にしない。** 作品の `.aiwriter/external-access.json`
+ * には古い道具名（`typo.run`）で書かれた許可が実在する。**印のファイルは
+ * 書き換えず、読むときに読み替える**——書き換えると、作者が見ていないところで
+ * 許可の中身が変わることになる。
+ *
+ * **読み替えは広げない。** `typo.run` は `typo` だけを許す。`settings.propose`
+ * は `novel.propose` だけで、設定資料の抽出（`settings`）には届かない
+ * ——ここを取り違えると、**許していない作品の原稿が外へ出る。**
+ */
+export const LEGACY_TOOL_KEYS: Readonly<Record<string, string>> = {
+  "work.scan": "novel.scan",
+  // **提案の道具は feature ではない。** `settings` へ寄せると、
+  // 承認待ちへ置くことだけを許した印が、設定資料の抽出まで許してしまう
+  "settings.propose": "novel.propose",
+  "typo.prompt": "typo",
+  "typo.validate": "typo",
+  "typo.run": "typo",
+  "proofread.prompt": "proofread",
+  "proofread.validate": "proofread",
+  "proofread.run": "proofread",
+  "contradiction.material": "contradiction",
+  "contradiction.prompt": "contradiction",
+  "contradiction.validate": "contradiction",
+  "contradiction.run": "contradiction",
+  "foreshadow.prompt": "foreshadow",
+  "foreshadow.validate": "foreshadow",
+  "foreshadow.run": "foreshadow",
+  "settings.prompt": "settings",
+  "settings.validate": "settings",
+  "settings.run": "settings",
+  "chat.prompt": "chat",
+  "chat.validate": "chat",
+  "chat.run": "chat",
+  "notation.detect": "notation",
+  "notation.prompt": "notation",
+  "notation.validate": "notation",
+  "notation.run": "notation",
+  "episode.synopsisPrompt": "synopsis",
+  "episode.synopsisValidate": "synopsis",
+  "episode.synopsisRun": "synopsis",
+  "episode.deviationPrompt": "deviation",
+  "episode.deviationValidate": "deviation",
+  "episode.deviationRun": "deviation",
+  "episode.plotPrompt": "episodePlot",
+  "episode.plotValidate": "episodePlot",
+  "episode.plotRun": "episodePlot",
+  "opening.prompt": "opening",
+  "opening.validate": "opening",
+  "opening.run": "opening",
+  "name.collisions": "name",
+  "name.prompt": "name",
+  "name.validate": "name",
+  "name.run": "name",
+  "plot.reversePrompt": "plotReverse",
+  "plot.reverseValidate": "plotReverse",
+  "plot.reverseRun": "plotReverse",
+  "chapter.proposePrompt": "chapter",
+  "chapter.proposeValidate": "chapter",
+  "chapter.proposeRun": "chapter",
+  "blurb.prompt": "blurb",
+  "blurb.validate": "blurb",
+  "blurb.run": "blurb",
+  "blurb.catchphrasePrompt": "catchphrase",
+  "blurb.catchphraseValidate": "catchphrase",
+  "blurb.catchphraseRun": "catchphrase",
+};
+
+/** 鍵から、その鍵に読み替わる古い道具名。**印を読むときだけ使う** */
+const LEGACY_NAMES_BY_KEY = new Map<string, string[]>();
+for (const [legacy, key] of Object.entries(LEGACY_TOOL_KEYS)) {
+  LEGACY_NAMES_BY_KEY.set(key, [...(LEGACY_NAMES_BY_KEY.get(key) ?? []), legacy]);
+}
+
+/**
+ * `feature` を引数で受ける道具（0.66.7 で束ねたもの）。
+ *
+ * **この道具たちの鍵は `feature` のほう**である。道具の名前で鍵を作ると、
+ * `novel.run` を1度許しただけで16の機能が全部通ってしまう。
+ */
+const FEATURE_KEYED_TOOLS = new Set([
+  "novel.prompt",
+  "novel.validate",
+  "novel.run",
+  "novel.detect",
+  "novel.material",
+]);
+
+/**
+ * その呼び出しの許可の鍵。
+ *
+ * **ここが唯一の決め方。** 許可を確かめる側（`mcp/tools/permission.ts`）と
+ * 記録する側（`mcp/tools/accessLog.ts`）が別々に決めると、**断られた鍵と
+ * 作者が許可する鍵がずれて、いくら許可しても通らない**という形になる。
+ *
+ * @param feature 引数の `feature`。文字列でなければ道具の名前を鍵にする
+ *   （＝許可されていない鍵になり、断る側に倒れる）
+ */
+export function permissionKeyOf(tool: string, feature: unknown): string {
+  if (!FEATURE_KEYED_TOOLS.has(tool)) return tool;
+  return typeof feature === "string" && feature.trim() ? feature : tool;
+}
+
 export interface ExternalClientPermission {
   /**
    * 接続元の名乗り（`claude-code` など）。
@@ -60,7 +172,11 @@ export interface ExternalClientPermission {
    */
   name: string;
   /**
-   * 許した道具の名前（`typo.run` など）。**ここに無い道具は断る。**
+   * 許した鍵（`typo`・`novel.scan` など）。**ここに無い鍵は断る。**
+   *
+   * 0.66.6 までの印には古い道具名（`typo.run`）が入っている。
+   * **そのまま読める**（`LEGACY_TOOL_KEYS` で読み替える）ので、
+   * 作者が置き直す必要はない。
    *
    * `ALL_TOOLS`（`"*"`）が入っていれば、この接続元には全部許した
    * ——作者が明示的にそう選んだときだけ入る。
@@ -112,19 +228,26 @@ export function clientKeyOf(client: string | undefined): string {
 }
 
 /**
- * その接続元が、その道具を使ってよいか。
+ * その接続元が、その鍵を使ってよいか。
  *
  * **道具ごとに見る**（作者の指示、2026-09-16）。許可したのは
- * 「この相手が、この道具を」であって、「この相手が何でも」ではない。
+ * 「この相手が、これを」であって、「この相手が何でも」ではない。
+ *
+ * **古い道具名で書かれた印も、そのまま効く**（0.66.7）。`typo.run` と
+ * 書いてあれば `typo` を許したものとして読む——**印のファイルは
+ * 書き換えない**（読むときに読み替えるだけ）。
  */
 export function isToolAllowed(
   permission: ExternalAccessPermission,
   client: string | undefined,
-  tool: string
+  key: string
 ): boolean {
   const entry = clientPermissionOf(permission, clientKeyOf(client));
   if (!entry) return false;
-  return entry.tools.includes(ALL_TOOLS) || entry.tools.includes(tool);
+  if (entry.tools.includes(ALL_TOOLS) || entry.tools.includes(key)) return true;
+  return (LEGACY_NAMES_BY_KEY.get(key) ?? []).some((legacy) =>
+    entry.tools.includes(legacy)
+  );
 }
 
 /**

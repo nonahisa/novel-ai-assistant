@@ -69,8 +69,19 @@ export const EXTERNAL_EXPOSURE_MARKS: Record<ExternalExposure, string> = {
 export interface ExternalAccessEntry {
   /** ISO 8601。**並べ替えは読むときに行う**ので、書く側は素直に今の時刻 */
   time: string;
-  /** 道具の名前（`settings.run` など）。**転送層が入れる**ので取り違えない */
+  /** 道具の名前（`novel.run` など）。**転送層が入れる**ので取り違えない */
   tool: string;
+  /**
+   * 許可の鍵（`typo`・`novel.scan` など。0.66.7）。
+   *
+   * **道具の名前とは別に持つ。** 道具が `novel.run` の1本に束ねられたので、
+   * 名前だけでは**作者が何を許可すればよいか決められない**（`novel.run` を
+   * 許すと16の機能が全部通ってしまう）。
+   *
+   * **古い行には無い。** 読む側は `tool` へ落とす——古い名前は
+   * `LEGACY_TOOL_KEYS` が読み替えるので、そのまま許可の鍵として使える。
+   */
+  key?: string;
   /** 呼んだ相手。MCPの `initialize` が名乗った名前。分からなければ空 */
   client: string;
   /** どのファイルか。作品フォルダーからの相対パス。無ければ空 */
@@ -129,6 +140,8 @@ export function parseExternalAccessLine(
   return {
     time,
     tool,
+    // **古い行には無い**（0.66.6 まで）。無ければ落とさずに undefined のまま
+    ...(typeof raw.key === "string" && raw.key ? { key: raw.key } : {}),
     client: typeof raw.client === "string" ? raw.client : "",
     file: typeof raw.file === "string" ? raw.file : "",
     exposure: parseExposure(raw.exposure),
@@ -160,7 +173,16 @@ export function isExternalAccessKnock(entry: ExternalAccessEntry): boolean {
 
 export interface ExternalAccessKnock {
   client: string;
+  /** 作者に見せる呼び名（道具の名前） */
   tool: string;
+  /**
+   * 許可するときの鍵（0.66.7）。
+   *
+   * **古い記録には無いので、そのときは道具の名前を鍵にする**——
+   * 0.66.6 までの名前（`typo.run`）は `LEGACY_TOOL_KEYS` が読み替えるので、
+   * そのまま許可として効く。
+   */
+  key: string;
   at: string;
 }
 
@@ -182,12 +204,18 @@ export function pendingExternalAccessKnocks(
   for (const entry of entries) {
     if (!isExternalAccessKnock(entry)) continue;
     if (since && entry.time <= since) continue;
-    // **鍵は `JSON.stringify` で作る。** 区切り文字を挟むと、
-    // 名前にその文字が入っている組と衝突する
-    const pair = JSON.stringify([entry.client, entry.tool]);
+    /*
+      **畳む単位は許可の鍵**（0.66.7）。道具の名前で畳むと、`novel.run` の
+      feature 違いが1件にまとまり、**作者は最初の1つしか許可できない。**
+
+      鍵の作り方は `JSON.stringify`。区切り文字を挟むと、名前にその文字が
+      入っている組と衝突する。
+    */
+    const key = entry.key || entry.tool;
+    const pair = JSON.stringify([entry.client, key]);
     if (seen.has(pair)) continue;
     seen.add(pair);
-    knocks.push({ client: entry.client, tool: entry.tool, at: entry.time });
+    knocks.push({ client: entry.client, tool: entry.tool, key, at: entry.time });
   }
   return knocks;
 }

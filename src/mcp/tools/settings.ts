@@ -18,11 +18,7 @@ import { parseLocation } from "../../models/location";
 import { parseOrganization } from "../../models/organization";
 import { parseWorldItem } from "../../models/world";
 import {
-  CHUNK_INPUT,
-  FOLDER_INPUT,
   McpToolError,
-  OLLAMA_INPUT,
-  RUNNER_INPUT,
   SETTINGS_SUBDIRS,
   chapterLabelOf,
   chunkFromId,
@@ -35,12 +31,11 @@ import { ollamaGenerate } from "./ollama";
 import { askSampling } from "./sampling";
 import {
   assertRunner,
-  chunkIdInput,
   claudeNote,
-  responseInput,
   runChunks,
   runChunksBySampling,
   type RunnerKind,
+  validateWith,
 } from "./run";
 import type { RunOutcome } from "./run";
 
@@ -77,27 +72,12 @@ import type { RunOutcome } from "./run";
  * 作品全体の出来ばえを測るなら `run` を使う。
  */
 
-const VALIDATE_WITH = "settings.validate";
+const VALIDATE_WITH = validateWith("settings");
 
 /** 既知名の上限。**製品と同じところで切る**（`features/extractCharacters.ts`） */
 const KNOWN_LIMIT = 50;
 /** 世界観の見出しだけ多く渡す（同じ事柄が別の見出しで増えるのを防ぐため） */
 const KNOWN_WORLD_LIMIT = 150;
-
-export const SETTINGS_PROMPT_INPUT = { ...FOLDER_INPUT, ...CHUNK_INPUT };
-
-export const SETTINGS_VALIDATE_INPUT = {
-  ...FOLDER_INPUT,
-  chunkId: chunkIdInput(),
-  response: responseInput(),
-};
-
-export const SETTINGS_RUN_INPUT = {
-  ...FOLDER_INPUT,
-  ...CHUNK_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
 
 /** `設定/` に保存済みのもの。プロンプトにも検算にも要る */
 interface StoredSettings {
@@ -210,7 +190,7 @@ export interface SettingsPromptInput {
 const ACROSS_CHUNKS_NOTE =
   "prompt は1回ごとに独立しています。製品は前のチャンクで見つけた名前を" +
   "次の「既知」へ足していくので、作品全体の出来ばえを測るなら" +
-  "settings.run を使ってください。";
+  "novel.run（feature: settings）を使ってください。";
 
 function promptForChunk(
   relative: string,

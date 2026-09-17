@@ -1,4 +1,3 @@
-import { z } from "zod";
 import {
   CONTRADICTION_CATEGORIES,
   CONTRADICTION_CHECK_SCHEMA,
@@ -26,11 +25,7 @@ import { parseLocation, type Location } from "../../models/location";
 import { parseWorldItem, type WorldItem } from "../../models/world";
 import { parseSynopsisSet } from "../../models/synopsis";
 import {
-  CHUNK_INPUT,
-  FOLDER_INPUT,
   McpToolError,
-  OLLAMA_INPUT,
-  RUNNER_INPUT,
   SETTINGS_SUBDIRS,
   SYNOPSES_FILE,
   chapterLabelOf,
@@ -43,11 +38,10 @@ import {
 } from "./shared";
 import { ollamaGenerate } from "./ollama";
 import {
-  chunkIdInput,
-  responseInput,
   runByRunner,
   type RunOutcome,
   type RunnerKind,
+  validateWith,
 } from "./run";
 
 /**
@@ -62,7 +56,7 @@ import {
  * 無いまま問うと、本文だけを見て矛盾を作り出す。
  */
 
-const VALIDATE_WITH = "contradiction.validate";
+const VALIDATE_WITH = validateWith("contradiction");
 
 /**
  * 観点の絞り方。
@@ -71,34 +65,6 @@ const VALIDATE_WITH = "contradiction.validate";
  * 相手のモデルの素性を知らない**ので、呼ぶ側に選ばせる。既定は `light`
  * （小さいモデルで観点を広げると、1回の負荷が上がって検出漏れが増える）。
  */
-const CATEGORIES_INPUT = {
-  categories: z
-    .enum(["light", "all"])
-    .optional()
-    .describe(
-      `見る観点。light＝${LIGHT_CATEGORIES.join("・")}（既定。小さいモデル向け）／all＝${CONTRADICTION_CATEGORIES.join("・")}`
-    ),
-};
-
-export const CONTRADICTION_MATERIAL_INPUT = { ...FOLDER_INPUT, ...CHUNK_INPUT };
-export const CONTRADICTION_PROMPT_INPUT = {
-  ...FOLDER_INPUT,
-  ...CHUNK_INPUT,
-  ...CATEGORIES_INPUT,
-};
-export const CONTRADICTION_VALIDATE_INPUT = {
-  ...FOLDER_INPUT,
-  chunkId: chunkIdInput(),
-  response: responseInput(),
-};
-export const CONTRADICTION_RUN_INPUT = {
-  ...FOLDER_INPUT,
-  ...CHUNK_INPUT,
-  ...CATEGORIES_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
-
 interface Settings {
   people: Character[];
   places: Location[];

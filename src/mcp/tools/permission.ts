@@ -8,9 +8,11 @@ import {
   isSamplingAllowed,
   isToolAllowed,
   parseExternalAccessPermission,
+  permissionKeyOf,
   samplingNotPermittedMessage,
   type ExternalAccessPermission,
 } from "../../core/externalAccessPermission";
+import { FEATURE_LABELS, type FeatureName } from "../../core/mcpFeatures";
 import { getExternalClientName } from "./accessLog";
 import { McpToolError } from "./shared";
 
@@ -60,7 +62,8 @@ export class ExternalAccessDeniedError extends McpToolError {
 /**
  * 作品を触る道具かどうかを見て、触るなら許可を確かめる。
  *
- * @param tool 道具の名前。**許可は道具ごとなので、必ず要る**
+ * @param tool 道具の名前。**鍵はここと `feature` から決まる**
+ *   （`permissionKeyOf`。0.66.7 で道具を束ねたため）
  */
 export function assertExternalAccessAllowed(args: unknown, tool: string): void {
   const folder = folderOf(args);
@@ -68,23 +71,44 @@ export function assertExternalAccessAllowed(args: unknown, tool: string): void {
   // **原稿を読まないので、許可の対象が無い**
   if (!folder) return;
 
+  const key = accessKeyOf(args, tool);
   const permission = readExternalAccessPermission(folder);
   const client = getExternalClientName();
-  if (!isToolAllowed(permission, client, tool)) {
+  if (!isToolAllowed(permission, client, key)) {
     throw new ExternalAccessDeniedError({
       client,
-      tool,
+      tool: describeKey(key),
       legacy: permission.legacy,
     });
   }
 }
 
+/**
+ * その呼び出しの許可の鍵（0.66.7）。
+ *
+ * **記録する側（`accessLog.ts`）も同じものを使う。** 別々に決めると、
+ * **断られた鍵と作者が許可する鍵がずれて、いくら許可しても通らない。**
+ */
+export function accessKeyOf(args: unknown, tool: string): string {
+  return permissionKeyOf(tool, fieldOf(args, "feature"));
+}
+
+/** 断り文句と画面に出す呼び名。`feature` は日本語を添える */
+export function describeKey(key: string): string {
+  const label = FEATURE_LABELS[key as FeatureName];
+  return label ? `${label}（feature: ${key}）` : key;
+}
+
 export function folderOf(args: unknown): string | undefined {
+  const folder = fieldOf(args, "folder");
+  return typeof folder === "string" && folder.trim() ? folder : undefined;
+}
+
+function fieldOf(args: unknown, name: string): unknown {
   if (typeof args !== "object" || args === null || Array.isArray(args)) {
     return undefined;
   }
-  const folder = (args as Record<string, unknown>).folder;
-  return typeof folder === "string" && folder.trim() ? folder : undefined;
+  return (args as Record<string, unknown>)[name];
 }
 
 /**

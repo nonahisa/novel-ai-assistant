@@ -1,4 +1,3 @@
-import { z } from "zod";
 import {
   BLURB_MAX_CHARS,
   BLURB_MIN_CHARS,
@@ -19,17 +18,18 @@ import {
 } from "../../core/blurbValidation";
 import { parseSynopsisSet } from "../../models/synopsis";
 import {
-  FOLDER_INPUT,
   McpToolError,
-  OLLAMA_INPUT,
-  RUNNER_INPUT,
   SYNOPSES_FILE,
   orderedEpisodeBodies,
   readPlotMarkdown,
   readSettingsFile,
   workTitleOf,
 } from "./shared";
-import { responseInput, runOnce, type RunnerInput } from "./run";
+import {
+  runOnce,
+  validateWith,
+  type RunnerInput,
+} from "./run";
 
 /**
  * 作品紹介文（P-06）とキャッチコピー（P-08）を外から呼ぶ（0.66.0）。
@@ -49,44 +49,6 @@ import { responseInput, runOnce, type RunnerInput } from "./run";
 const OPENING_EXCERPT_CHARS = 6_000;
 /** 渡すあらすじの件数（多いと本文が入らない） */
 const SYNOPSES_LIMIT = 30;
-
-export const BLURB_PROMPT_INPUT = { ...FOLDER_INPUT };
-
-export const BLURB_VALIDATE_INPUT = {
-  ...FOLDER_INPUT,
-  response: responseInput(),
-};
-
-export const BLURB_RUN_INPUT = {
-  ...FOLDER_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
-
-const CATCHPHRASE_TARGET_INPUT = {
-  ...FOLDER_INPUT,
-  blurb: z
-    .string()
-    .optional()
-    .describe("いまの作品紹介文。あれば渡すと、そこから離れない案が出ます"),
-  rejected: z
-    .array(z.string())
-    .optional()
-    .describe("前に出して採用しなかった案。同じものを出させないために渡します"),
-};
-
-export const CATCHPHRASE_PROMPT_INPUT = { ...CATCHPHRASE_TARGET_INPUT };
-
-export const CATCHPHRASE_VALIDATE_INPUT = {
-  ...CATCHPHRASE_TARGET_INPUT,
-  response: responseInput(),
-};
-
-export const CATCHPHRASE_RUN_INPUT = {
-  ...CATCHPHRASE_TARGET_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
 
 export interface BlurbPromptInput {
   folder: string;
@@ -140,7 +102,7 @@ export function blurbPrompt(input: BlurbPromptInput) {
     promptVersion: BLURB_VERSION,
     systemPrompt: BLURB_SYSTEM_PROMPT,
     schema: BLURB_SCHEMA,
-    validateWith: "blurb.validate",
+    validateWith: validateWith("blurb"),
     synopsisCount: synopses.length,
     /** 何字で書かせるか。**呼ぶ側にも見せる**（検算と同じ数字である） */
     targetChars: { min: BLURB_MIN_CHARS, max: BLURB_MAX_CHARS },
@@ -191,7 +153,7 @@ export function catchphrasePrompt(input: CatchphrasePromptInput) {
     promptVersion: BLURB_VERSION,
     systemPrompt: BLURB_SYSTEM_PROMPT,
     schema: CATCHPHRASE_SCHEMA,
-    validateWith: "blurb.catchphraseValidate",
+    validateWith: validateWith("catchphrase"),
     asked: CATCHPHRASE_COUNT,
     maxChars: CATCHPHRASE_MAX_CHARS,
     userPrompt: buildCatchphrasePrompt({

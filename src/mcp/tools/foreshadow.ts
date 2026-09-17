@@ -1,5 +1,4 @@
 import { targetsFor, toBrief } from "../../core/foreshadowTargets";
-import { z } from "zod";
 import {
   FORESHADOW_DETECT_SCHEMA,
   FORESHADOW_DETECT_SYSTEM_PROMPT,
@@ -26,11 +25,7 @@ import {
 import { type Chunk } from "../../core/chunker";
 import { parseForeshadow, type Foreshadow } from "../../models/foreshadow";
 import {
-  CHUNK_INPUT,
-  FOLDER_INPUT,
   McpToolError,
-  OLLAMA_INPUT,
-  RUNNER_INPUT,
   SETTINGS_SUBDIRS,
   chapterLabelOf,
   chunkFromId,
@@ -41,11 +36,10 @@ import {
 } from "./shared";
 import { ollamaGenerate } from "./ollama";
 import {
-  chunkIdInput,
-  responseInput,
   runByRunner,
   type RunOutcome,
   type RunnerKind,
+  validateWith,
 } from "./run";
 
 /**
@@ -58,39 +52,10 @@ import {
  * 「既存と同じか」を判断させると、別の伏線を1つに畳んでくる（設計書6.35.2）。
  */
 
-const DETECT_VALIDATE_WITH = "foreshadow.validate";
+const DETECT_VALIDATE_WITH = validateWith("foreshadow");
 
 /** 既に台帳にある名前を、1回にいくつまで渡すか（`checkForeshadows.ts` と同じ） */
 const KNOWN_LABEL_LIMIT = 60;
-
-const MODE_INPUT = {
-  mode: z
-    .enum(["detect", "resolve"])
-    .optional()
-    .describe(
-      "detect＝本文から伏線の配置を拾う（既定）／resolve＝台帳の未回収分が" +
-        "この本文で回収されたかを見る"
-    ),
-};
-
-export const FORESHADOW_PROMPT_INPUT = {
-  ...FOLDER_INPUT,
-  ...CHUNK_INPUT,
-  ...MODE_INPUT,
-};
-export const FORESHADOW_VALIDATE_INPUT = {
-  ...FOLDER_INPUT,
-  ...MODE_INPUT,
-  chunkId: chunkIdInput(),
-  response: responseInput(),
-};
-export const FORESHADOW_RUN_INPUT = {
-  ...FOLDER_INPUT,
-  ...CHUNK_INPUT,
-  ...MODE_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
 
 export type ForeshadowMode = "detect" | "resolve";
 

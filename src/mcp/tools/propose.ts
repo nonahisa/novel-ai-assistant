@@ -91,7 +91,8 @@ export const SETTINGS_PROPOSE_INPUT = {
       "人物の名前。台帳にその名前の人物が居れば更新案、居なければ新規案になります（別名では引き当てません）"
     ),
   changes: CHANGES_SCHEMA.describe(
-    `変えたい欄だけを入れます。受け付けるのは ${ALLOWED_FIELDS.join("・")} で、ほかの鍵は断ります`
+    // 受け付ける欄は下に並んでいるので、ここでは繰り返さない（一覧を小さく保つ）
+    "変えたい欄だけを入れます。ここに無い鍵は断ります"
   ),
   reason: z
     .string()

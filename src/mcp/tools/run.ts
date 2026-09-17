@@ -55,6 +55,21 @@ export function assertRunner(runner: unknown): asserts runner is RunnerKind {
 export const VALIDATE_NOTE =
   "検算（validate）を通していない結果は、製品の結果ではありません。";
 
+/**
+ * 応答をどこへ戻すか（0.66.7、設計書6.87.15 の柱1）。
+ *
+ * **道具が束ねられたので、戻し先は `novel.validate` の1つだけ**になった。
+ * ただ「novel.validate へ」と言うだけでは、**どの feature で戻すのかが
+ * 抜ける**——feature を取り違えると、別の検算に掛かる。
+ *
+ * **組み立てはここ1か所。** 道具ごとに書き写すと、名前を変えたときに
+ * 直し漏れた機能だけが「もう無い道具」を案内し続ける（0.66.6 まで
+ * 実際に `typo.validate` のような名前を14か所が書いていた）。
+ */
+export function validateWith(feature: string): string {
+  return `novel.validate（feature: ${feature}）`;
+}
+
 export function claudeNote(validateWith: string): string {
   return `プロンプトだけを返しました。AIの応答は ${validateWith} へ戻してください。${VALIDATE_NOTE}`;
 }

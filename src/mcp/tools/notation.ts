@@ -20,10 +20,7 @@ import { parseAbility } from "../../models/ability";
 import { parseLocation } from "../../models/location";
 import { parseOrganization } from "../../models/organization";
 import {
-  FOLDER_INPUT,
   McpToolError,
-  OLLAMA_INPUT,
-  RUNNER_INPUT,
   SETTINGS_SUBDIRS,
   listBodyFiles,
   readBody,
@@ -34,8 +31,8 @@ import { askSampling } from "./sampling";
 import {
   assertRunner,
   claudeNote,
-  responseInput,
   type RunnerKind,
+  validateWith,
 } from "./run";
 
 /**
@@ -49,30 +46,24 @@ import {
  *
  * | 道具 | 何をするか | AIを使うか |
  * |---|---|---|
- * | `notation.detect` | 作品ぜんたいから揺れている組を探す | **使わない**（コードだけ） |
- * | `notation.prompt` | 1つの組について、揃え先を問うプロンプトを組む | — |
- * | `notation.validate` | 応答を製品の解析へ通す | — |
- * | `notation.run` | 1つの組を通す | 使う |
+ * | `novel.detect` | 作品ぜんたいから揺れている組を探す | **使わない**（コードだけ） |
+ * | `novel.prompt` | 1つの組について、揃え先を問うプロンプトを組む | — |
+ * | `novel.validate` | 応答を製品の解析へ通す | — |
+ * | `novel.run` | 1つの組を通す | 使う |
  *
  * **2つ以上の表記が実際に本文へ出ている組だけを返す**（`detectNotationVariants`）。
  * 片方しか無い語を「揺れ」と呼ぶと、作者の選んだ表記を直せと言うことになる。
  */
 
-const VALIDATE_WITH = "notation.validate";
+const VALIDATE_WITH = validateWith("notation");
 
-export const NOTATION_DETECT_INPUT = {
-  ...FOLDER_INPUT,
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(200)
-    .optional()
-    .describe("返す組の上限（既定は50）"),
-};
-
-/** 1つの組。`notation.detect` が返したものを、そのまま渡す */
-const GROUP_INPUT = z
+/**
+ * 1つの組。`novel.detect`（feature: notation）が返したものを、そのまま渡す。
+ *
+ * **形の定義はここ1か所。** 束ねた道具（`features.ts`）は `options.group` を
+ * `z.unknown()` で受けるので、奥へ入れる前にこの形で確かめ直す。
+ */
+export const NOTATION_GROUP_SCHEMA = z
   .object({
     label: z.string(),
     forms: z
@@ -86,30 +77,8 @@ const GROUP_INPUT = z
       .min(2),
   })
   .describe(
-    "揺れている組。notation.detect が返した groups の1件をそのまま渡します"
+    "揺れている組。novel.detect（feature: notation）が返した groups の1件をそのまま渡します"
   );
-
-export const NOTATION_PROMPT_INPUT = {
-  ...FOLDER_INPUT,
-  group: GROUP_INPUT,
-};
-
-export const NOTATION_VALIDATE_INPUT = {
-  /*
-    **検算そのものには使わない**（組と応答だけで足りる）。それでも要るのは、
-    **どの作品への操作だったかを記録するため**である（設計書6.87.9）。
-    ここだけ `folder` を省けると、外から測った跡がこの道具のときだけ残らない。
-  */
-  ...FOLDER_INPUT,
-  group: GROUP_INPUT,
-  response: responseInput(),
-};
-
-export const NOTATION_RUN_INPUT = {
-  ...NOTATION_PROMPT_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
 
 const DEFAULT_LIMIT = 50;
 
@@ -176,7 +145,7 @@ export function notationDetect(input: { folder: string; limit?: number }) {
   return {
     note:
       "揺れを探したのはコードで、AIは使っていません。" +
-      "どちらへ揃えるかを問うときは notation.prompt / notation.run へ、" +
+      "どちらへ揃えるかを問うときは novel.prompt / novel.run（feature: notation）へ、" +
       "この groups の1件をそのまま渡してください。",
     total: groups.length,
     groups: groups.slice(0, input.limit ?? DEFAULT_LIMIT).map((group) => ({

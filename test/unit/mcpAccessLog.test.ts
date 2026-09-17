@@ -46,7 +46,8 @@ describe("転送層が、全部の道具の記録を取る", () => {
       (match) => match[1]
     );
 
-    expect(registered.length).toBeGreaterThan(30);
+    // **0.66.7 で束ねて10本になった**（それまでは56本）
+    expect(registered.length).toBeGreaterThanOrEqual(8);
     expect(logged).toEqual(registered);
   });
 
@@ -59,17 +60,22 @@ describe("転送層が、全部の道具の記録を取る", () => {
 
 describe("exposureOf——原稿がどこまで外へ出たか", () => {
   it("手元の Ollama で通したものは、この機械から出ていない", () => {
-    expect(exposureOf("typo.run", { runner: "ollama", model: "x" })).toBe(
-      "local"
-    );
     expect(
-      exposureOf("episode.synopsisRun", { runner: "ollama", model: "x" })
+      exposureOf("novel.run", { feature: "typo", runner: "ollama", model: "x" })
+    ).toBe("local");
+    expect(
+      exposureOf("novel.run", {
+        feature: "synopsis",
+        runner: "ollama",
+        model: "x",
+      })
     ).toBe("local");
   });
 
   it("遠くの Ollama を指していれば、出ていると数える", () => {
     expect(
-      exposureOf("typo.run", {
+      exposureOf("novel.run", {
+        feature: "typo",
         runner: "ollama",
         model: "x",
         endpoint: "http://192.168.0.9:11434",
@@ -79,21 +85,29 @@ describe("exposureOf——原稿がどこまで外へ出たか", () => {
   });
 
   it("runner が claude なら、本文が外へ出る", () => {
-    expect(exposureOf("typo.run", { runner: "claude" })).toBe("body");
+    expect(exposureOf("novel.run", { feature: "typo", runner: "claude" })).toBe(
+      "body"
+    );
   });
 
   it("プロンプトを組む道具は、本文が外へ出る", () => {
-    expect(exposureOf("typo.prompt", {})).toBe("body");
-    expect(exposureOf("episode.synopsisPrompt", {})).toBe("body");
-    expect(exposureOf("notation.prompt", {})).toBe("body");
+    expect(exposureOf("novel.prompt", { feature: "typo" })).toBe("body");
+    expect(exposureOf("novel.prompt", { feature: "synopsis" })).toBe("body");
+    expect(exposureOf("novel.prompt", { feature: "notation" })).toBe("body");
   });
 
-  it("走査・検算・検出は抜粋どまり", () => {
-    expect(exposureOf("work.scan", {})).toBe("excerpt");
-    expect(exposureOf("typo.validate", {})).toBe("excerpt");
-    expect(exposureOf("episode.synopsisValidate", {})).toBe("excerpt");
-    expect(exposureOf("notation.detect", {})).toBe("excerpt");
-    expect(exposureOf("contradiction.material", {})).toBe("excerpt");
+  it("走査・検算・検出・材料は抜粋どまり", () => {
+    expect(exposureOf("novel.scan", {})).toBe("excerpt");
+    expect(exposureOf("novel.validate", { feature: "typo" })).toBe("excerpt");
+    expect(exposureOf("novel.detect", { feature: "notation" })).toBe("excerpt");
+    expect(exposureOf("novel.material", { feature: "contradiction" })).toBe(
+      "excerpt"
+    );
+  });
+
+  it("承認待ちへ置く道具は、原稿を外へ出さない", () => {
+    // 呼び出し元が持ち込んだ案を置くだけで、こちらから本文も資料も返さない
+    expect(exposureOf("novel.propose", { name: "誰か" })).toBe("none");
   });
 
   it("版の確認は原稿に触れない", () => {
@@ -113,7 +127,7 @@ describe("exposureOf——原稿がどこまで外へ出たか", () => {
 
   it("runner を省いた run は、重いほうへ倒す", () => {
     // 製品は runner の省略を断るが、断る前に記録が走ることがある
-    expect(exposureOf("typo.run", {})).toBe("body");
+    expect(exposureOf("novel.run", { feature: "typo" })).toBe("body");
   });
 });
 
@@ -287,9 +301,10 @@ describe("recordExternalAccess——実際に書く", () => {
 
   it("手元で通した回は、モデル名まで残す", () => {
     recordExternalAccess({
-      tool: "typo.run",
+      tool: "novel.run",
       args: {
         folder,
+        feature: "typo",
         filePath: "episode_0001.md",
         runner: "ollama",
         model: "gemma4:e4b",
@@ -300,7 +315,27 @@ describe("recordExternalAccess——実際に書く", () => {
     const entry = readLog()[0];
     expect(entry.exposure).toBe("local");
     expect(entry.model).toBe("gemma4:e4b");
+    // **どの機能だったかが残る**（道具の名前は novel.run の1つしかない）
+    expect(entry.detail).toContain("typo");
     expect(entry.detail).toContain("チャンク2");
+    // **許可の鍵も残る**（作者はこれを見て、その機能だけを許す）
+    expect(entry.key).toBe("typo");
+  });
+
+  it("単話プロットは options の中にあるが、対象として残る", () => {
+    // **見落とすと、その機能のときだけ記録に対象が残らない**
+    recordExternalAccess({
+      tool: "novel.run",
+      args: {
+        folder,
+        feature: "episodePlot",
+        options: { plotPath: "プロット/第3話.md" },
+        runner: "ollama",
+        model: "gemma4:e4b",
+      },
+      ok: true,
+    });
+    expect(readLog()[0].file).toBe("プロット/第3話.md");
   });
 
   it("書けなくても、呼んだ側を止めない", () => {

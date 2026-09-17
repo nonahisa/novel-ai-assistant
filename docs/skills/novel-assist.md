@@ -16,7 +16,7 @@
 
 ## 本文をどこへ出すか（`runner`）
 
-`*.run` の道具は `runner` を必ず指定する（既定は無い）。
+`novel.run` は `runner` を必ず指定する（既定は無い）。
 
 | `runner` | 本文の行き先 | いつ使うか |
 |---|---|---|
@@ -28,36 +28,35 @@
 
 ## 許可の仕組み（断られたら、作者に伝える）
 
-道具は**作者が許可した相手・許可した道具しか通らない**（既定は拒否）。断られたら、返事に「どうすれば許可できるか」が書いてある。**それをそのまま作者に伝える。** 自分で許可の印（`.aiwriter/external-access.json`）を書き換えない——それは作者が VS Code の画面で決めるものである。
+道具は**作者が許可した相手・許可した機能（`feature`）しか通らない**（既定は拒否）。断られたら、返事に「どうすれば許可できるか」が書いてある。**それをそのまま作者に伝える。** 自分で許可の印（`.aiwriter/external-access.json`）を書き換えない——それは作者が VS Code の画面で決めるものである。
 
 同じ道具を続けて呼んで断られても、作者の画面には1回しか出ない。断られたら止まって、作者の判断を待つ。
 
 ## 設定資料を直したいとき
 
-**台帳（`設定/characters/*.json` など）を直接書き換えない。** 人物の更新案は `settings.propose` で**承認待ちへ置く**——作者が VS Code の「更新分を反映」で採否を決める。`reason`（なぜそう提案するか）を必ず添える。受け付けられない欄（作者の覚え書き、固定された呼称など）は道具が断るので、そのまま作者に伝える。
+**台帳（`設定/characters/*.json` など）を直接書き換えない。** 人物の更新案は `novel.propose` で**承認待ちへ置く**——作者が VS Code の「更新分を反映」で採否を決める。`reason`（なぜそう提案するか）を必ず添える。受け付けられない欄（作者の覚え書き、固定された呼称など）は道具が断るので、そのまま作者に伝える。
 
 本文（`.txt`／`.md`）は**書き換えない**。直したい箇所があれば、道具の指摘として作者に見せる。
 
 ## 道具の早見表
 
+**道具は10本で、何をするかは `feature` の引数で決まる**（0.66.7）。ほとんどの用は `novel.run` に `feature` を渡せば足りる。
+
 | したいこと | 道具 |
 |---|---|
-| 作品の構造を知る | `work.scan` |
-| 誤字脱字 | `typo.run`（`prompt`／`validate` もある） |
-| 推敲 | `proofread.run` |
-| 矛盾 | `contradiction.material` → `contradiction.run` |
-| 伏線（配置・回収） | `foreshadow.run`（`mode`） |
-| 設定資料の抽出（人物・世界観・場所） | `settings.run` |
-| 各話あらすじ／プロット逸脱／単話プロット | `episode.synopsisRun`／`episode.deviationRun`／`episode.plotRun` |
-| 表記ゆれ | `notation.detect` → `notation.run` |
-| 作品について相談 | `chat.run` |
-| 冒頭診断 | `opening.run` |
-| 名前の衝突／候補 | `name.collisions`／`name.run` |
-| プロット逆算 | `plot.reverseRun`（各話あらすじが要る） |
-| 章立て | `chapter.proposeRun` |
-| 紹介文／キャッチコピー | `blurb.run`／`blurb.catchphraseRun` |
-| 人物の更新案を置く | `settings.propose` |
+| 作品の構造を知る（話数・字数・相対パス） | `novel.scan` |
+| 誤字脱字／推敲／設定資料の抽出／矛盾／伏線 | `novel.run`（`feature: typo`／`proofread`／`settings`／`contradiction`／`foreshadow`。**`filePath` と `numCtx` が要る**） |
+| 各話あらすじ／プロット逸脱／単話プロット | `novel.run`（`feature: synopsis`／`deviation`／`episodePlot`） |
+| 表記ゆれ | `novel.detect`（`feature: notation`）→ 返った組の1件を `novel.run` の `options.group` へ |
+| 名前の衝突／候補 | `novel.detect`（`feature: name`）／`novel.run`（`feature: name`） |
+| 矛盾の材料だけを見る | `novel.material`（`feature: contradiction`） |
+| 相談／冒頭診断／プロット逆算／章立て／紹介文／キャッチコピー | `novel.run`（`feature: chat`／`opening`／`plotReverse`／`chapter`／`blurb`／`catchphrase`） |
+| プロンプトだけ・検算だけ | `novel.prompt`／`novel.validate`（同じ `feature` で） |
+| 人物の更新案を置く | `novel.propose` |
+| 手元の Ollama のモデルを知る | `ollama.models` |
 | サーバーの版と、あなたの名乗り | `mcp.version` |
+
+feature ごとの追加の指定（`mode`・`group`・`plotPath`・`question`・`characterName` など）は `options` に入れる。**一覧は `novel.run` の説明にある。**
 
 道具の細かい引数は、道具の説明文にある。**`mcp.version` が「束が古い」と言ったら、作者に Claude Code（またはあなたの基盤）を開き直してもらう。**
 

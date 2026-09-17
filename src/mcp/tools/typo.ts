@@ -17,11 +17,7 @@ import { parseAbility } from "../../models/ability";
 import { parseLocation } from "../../models/location";
 import { parseOrganization } from "../../models/organization";
 import {
-  CHUNK_INPUT,
-  FOLDER_INPUT,
   McpToolError,
-  OLLAMA_INPUT,
-  RUNNER_INPUT,
   SETTINGS_SUBDIRS,
   chapterLabelOf,
   chunkFromId,
@@ -33,11 +29,10 @@ import {
 import { collectStyle, type WorkStyle } from "./proofread";
 import { ollamaGenerate } from "./ollama";
 import {
-  chunkIdInput,
-  responseInput,
   runByRunner,
   type RunOutcome,
   type RunnerKind,
+  validateWith,
 } from "./run";
 
 /**
@@ -66,22 +61,7 @@ import {
  * 同じものを使う（`collectStyle`）——**写しを置かない。**
  */
 
-const VALIDATE_WITH = "typo.validate";
-
-export const TYPO_PROMPT_INPUT = { ...FOLDER_INPUT, ...CHUNK_INPUT };
-
-export const TYPO_VALIDATE_INPUT = {
-  ...FOLDER_INPUT,
-  chunkId: chunkIdInput(),
-  response: responseInput(),
-};
-
-export const TYPO_RUN_INPUT = {
-  ...FOLDER_INPUT,
-  ...CHUNK_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
+const VALIDATE_WITH = validateWith("typo");
 
 /**
  * 固有名詞の辞書（人物・能力・場所・組織の name と aliases）。

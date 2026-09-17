@@ -9,6 +9,7 @@ import {
   type ExternalAccessEntry,
   type ExternalExposure,
 } from "../../core/externalAccessLog";
+import { permissionKeyOf } from "../../core/externalAccessPermission";
 
 /**
  * 外部AIが作品を触ったことを1行残す（設計書6.87.9）。
@@ -43,10 +44,14 @@ export function getExternalClientName(): string {
 /**
  * その道具が、原稿をどこまで外へ出すか。
  *
- * **道具の名前だけで決める。** 引数の中身で判断すると、新しい道具が
- * 増えたときに「どれにも当てはまらないから記録しない」が起きる。
- * ここは**知らない道具を `body`（いちばん重い）に倒す**——
+ * **道具の名前だけで決める**（`run` の行き先だけは引数を見る）。引数の中身で
+ * 判断すると、新しい道具が増えたときに「どれにも当てはまらないから記録しない」
+ * が起きる。ここは**知らない道具を `body`（いちばん重い）に倒す**——
  * 軽いほうへ倒すと、本当に本文が出た回を見落とす。
+ *
+ * **0.66.7 で道具を束ねたので、名前は10個しか無い。** 末尾で見分けていた
+ * （`.run`／`Run`）のをやめ、**名前をそのまま並べる**——見分けの規則より、
+ * 並んでいるほうが取りこぼしを見つけやすい。
  */
 export function exposureOf(
   tool: string,
@@ -55,18 +60,19 @@ export function exposureOf(
   /*
     作品に触れないもの。`ollama.models` は**手元に何が入っているかを読むだけ**
     （設計書6.87.15 の柱2の2）で、こちらから本文も資料も送らない。
+    `novel.propose`（設計書6.87.16）も**原稿は1文字も外へ出ない**——
+    呼び出し元が持ち込んだ内容を置くだけで、こちらから本文も資料も返さない。
   */
-  if (tool === "mcp.version" || tool === "ollama.models") return "none";
-
-  /*
-    更新案を承認待ちへ置く道具（設計書6.87.16）。**原稿は1文字も外へ出ない**
-    ——呼び出し元が持ち込んだ内容を置くだけで、こちらから本文も資料も返さない
-    （返すのは置いた場所と、作者が次にすることだけ）。
-  */
-  if (tool === "settings.propose") return "none";
+  if (
+    tool === "mcp.version" ||
+    tool === "ollama.models" ||
+    tool === "novel.propose"
+  ) {
+    return "none";
+  }
 
   // `run` は runner で分かれる。**手元の Ollama なら、この機械から出ない**
-  if (tool.endsWith("Run") || tool.endsWith(".run")) {
+  if (tool === "novel.run") {
     const runner = args?.runner;
     if (runner === "ollama") {
       // ただし遠くの Ollama を指していれば、出ている
@@ -78,15 +84,14 @@ export function exposureOf(
   }
 
   // プロンプトを組んで返すもの——**本文がまとまって呼び出し元へ渡る**
-  if (tool.endsWith("Prompt") || tool.endsWith(".prompt")) return "body";
+  if (tool === "novel.prompt") return "body";
 
   // 走査・検算・検出・材料——抜粋と名前と件数が渡る
   if (
-    tool === "work.scan" ||
-    tool.endsWith("Validate") ||
-    tool.endsWith(".validate") ||
-    tool.endsWith(".detect") ||
-    tool.endsWith(".material")
+    tool === "novel.scan" ||
+    tool === "novel.validate" ||
+    tool === "novel.detect" ||
+    tool === "novel.material"
   ) {
     return "excerpt";
   }
@@ -97,9 +102,19 @@ export function exposureOf(
   return "body";
 }
 
-/** 記録する対象のファイル。**無い道具もある**（表記ゆれは作品ぜんたい） */
+/**
+ * 記録する対象のファイル。**無い道具もある**（表記ゆれは作品ぜんたい）。
+ *
+ * 単話プロット（`plotPath`）は `options` の中に入る（0.66.7 で束ねたため）。
+ * **ここを見落とすと、その機能のときだけ記録に対象が残らない。**
+ */
 function fileOf(args: Record<string, unknown> | undefined): string {
-  const candidate = args?.filePath ?? args?.plotPath;
+  const options = args?.options;
+  const inOptions =
+    typeof options === "object" && options !== null && !Array.isArray(options)
+      ? (options as Record<string, unknown>).plotPath
+      : undefined;
+  const candidate = args?.filePath ?? args?.plotPath ?? inOptions;
   return typeof candidate === "string" ? candidate : "";
 }
 
@@ -125,11 +140,16 @@ function detailOf(
     人物の名前までは入れるが、**`changes` の中身は入れない**——記録が
     資料の写しになると、同期先に同じ文が二重に載る。
   */
-  if (tool === "settings.propose") {
+  if (tool === "novel.propose") {
     const name = typeof args?.name === "string" ? args.name : "";
     return name ? `承認待ちへ置いた（${name}）` : "承認待ちへ置いた";
   }
   const parts: string[] = [];
+  /*
+    **どの機能だったかを残す**（0.66.7）。道具の名前は `novel.run` の1つに
+    なったので、`feature` が無いと作者には「何をされたか」が見えない。
+  */
+  if (typeof args?.feature === "string") parts.push(args.feature);
   if (typeof args?.chunkIndex === "number") {
     parts.push(`チャンク${args.chunkIndex}`);
   }
@@ -186,6 +206,13 @@ export function recordExternalAccess(input: RecordAccessInput): boolean {
   const entry: ExternalAccessEntry = {
     time: new Date().toISOString(),
     tool: input.tool,
+    /*
+      **許可の鍵も残す**（0.66.7）。道具の名前は `novel.run` の1本に
+      束ねられたので、名前だけでは作者が何を許可すればよいか決められない
+      ——ノックの画面（6.87.14）はここを見て、その機能だけを許す。
+      決め方は `permissionKeyOf` に1つだけ（許可を確かめる側と同じもの）。
+    */
+    key: permissionKeyOf(input.tool, args?.feature),
     client: clientName,
     file: fileOf(args),
     // 断った回は原稿が1文字も出ていないので `none`

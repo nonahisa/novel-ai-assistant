@@ -88,8 +88,18 @@ try {
   const list = await send(2, "tools/list", {});
   const tools = list.result?.tools ?? [];
   if (tools.length === 0) throw new Error("tools/list が空です。");
-  console.log(`tools/list: ${tools.length}件`);
-  for (const tool of tools) console.log(`  ${tool.name}`);
+  /*
+    **大きさも出す**（設計書6.87.15 の柱1）。AI は繋いだ瞬間にこの一覧を
+    読むので、**一覧そのものが会話のたびに払う費用**である。数字を出しておかないと、
+    道具を足すたびに少しずつ膨らんでいることに誰も気づかない
+    （0.66.6 の時点で 44,882字・56本だった）。
+  */
+  const chars = JSON.stringify(list.result).length;
+  console.log(`tools/list: ${tools.length}件・${chars.toLocaleString("ja")}字`);
+  for (const tool of tools) {
+    const size = JSON.stringify(tool).length;
+    console.log(`  ${tool.name}（${size.toLocaleString("ja")}字）`);
+  }
 
   const version = await send(3, "tools/call", {
     name: "mcp.version",

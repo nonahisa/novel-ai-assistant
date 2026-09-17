@@ -19,10 +19,7 @@ import type { ReaderProfile } from "../../models/readerProfile";
 import { parseCharacter } from "../../models/character";
 import { parseLocation } from "../../models/location";
 import {
-  FOLDER_INPUT,
   McpToolError,
-  OLLAMA_INPUT,
-  RUNNER_INPUT,
   SETTINGS_SUBDIRS,
   readBody,
   readSettingsFile,
@@ -33,8 +30,8 @@ import { askSampling } from "./sampling";
 import {
   assertRunner,
   claudeNote,
-  responseInput,
   type RunnerKind,
+  validateWith,
 } from "./run";
 
 /**
@@ -67,7 +64,7 @@ import {
  * （設計書6.90.1）、未診断の作者はまさにその状態である。
  */
 
-const VALIDATE_WITH = "chat.validate";
+const VALIDATE_WITH = validateWith("chat");
 
 /** 相談で渡す材料の上限。**長い作品で本文が押し出されないように** */
 const REFERENCE_LIMIT = 60;
@@ -75,68 +72,29 @@ const REFERENCE_LIMIT = 60;
 /** 本文の抜粋の上限（字）。製品の相談も、開いている画面の一部だけを渡す */
 const EXCERPT_LIMIT = 4000;
 
-const ADVICE_ANSWERS_INPUT = z
-  .array(z.number().int().min(0).max(2))
-  .length(9)
-  .optional()
-  .describe(
-    "助言方針の診断（9問）の答え。各0/1/2。" +
-      "省くと、その軸は1字も送りません（未診断の作者と同じ扱い）。" +
-      "globalState にあるため、MCPからは読めません"
-  );
-
-const WRITER_STYLE_INPUT = z
-  .object({
-    situation: z.string(),
-    plan: z.string(),
-    revise: z.string(),
-    material: z.string(),
-    outlet: z.string(),
+/*
+  **形の定義はここ1か所。** 束ねた道具（`features.ts`）は `options` の中身を
+  `z.unknown()` で受けるので、奥へ入れる前にこの形で確かめ直す
+  ——写しを持つと、片方だけ緩んだときに**製品では通らない形が MCP では通る。**
+*/
+export const CHAT_HISTORY_SCHEMA = z.array(
+  z.object({
+    role: z.enum(["author", "assistant"]),
+    text: z.string(),
   })
-  .optional()
-  .describe(
-    "執筆スタイルの診断の答え（5問）。相談へ渡すのは段取り（plan）と" +
-      "直す時期（revise）だけです。省くと1字も送りません"
-  );
+);
 
-export const CHAT_PROMPT_INPUT = {
-  ...FOLDER_INPUT,
-  question: z.string().min(1).describe("作者からの問い"),
-  filePath: z
-    .string()
-    .optional()
-    .describe(
-      "いま開いている想定の本文（作品フォルダーからの相対パス）。渡すと抜粋を材料に添えます"
-    ),
-  history: z
-    .array(
-      z.object({
-        role: z.enum(["author", "assistant"]),
-        text: z.string(),
-      })
-    )
-    .optional()
-    .describe("これまでのやり取り。古いものから順に"),
-  adviceAnswers: ADVICE_ANSWERS_INPUT,
-  writerStyle: WRITER_STYLE_INPUT,
-  featureIndex: z
-    .boolean()
-    .optional()
-    .describe(
-      "操作の目次をシステムの指示へ入れるか（既定は入れない）。" +
-        "作品の相談を測るときは入れないほうが、答えが操作の話へ逸れません"
-    ),
-};
+export const CHAT_ADVICE_ANSWERS_SCHEMA = z
+  .array(z.number().int().min(0).max(2))
+  .length(9);
 
-export const CHAT_VALIDATE_INPUT = {
-  response: responseInput(),
-};
-
-export const CHAT_RUN_INPUT = {
-  ...CHAT_PROMPT_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
+export const CHAT_WRITER_STYLE_SCHEMA = z.object({
+  situation: z.string(),
+  plan: z.string(),
+  revise: z.string(),
+  material: z.string(),
+  outlet: z.string(),
+});
 
 /** 相談へ足した診断の内訳。**何を送ったのかを、呼ぶ側が読めるように** */
 export interface ChatDiagnosisReport {

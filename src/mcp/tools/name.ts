@@ -20,16 +20,17 @@ import {
 } from "../../core/nameCollision";
 import { isBlankPlotSection, parsePlotMarkdown } from "../../core/plotDoc";
 import {
-  FOLDER_INPUT,
   McpToolError,
-  OLLAMA_INPUT,
-  RUNNER_INPUT,
   SETTINGS_SUBDIRS,
   readPlotMarkdown,
   readSettingsRecords,
   workTitleOf,
 } from "./shared";
-import { responseInput, runOnce, type RunnerInput } from "./run";
+import {
+  runOnce,
+  validateWith,
+  type RunnerInput,
+} from "./run";
 
 /**
  * 響きが重ならない名前の候補（P-29。設計書6.37）を外から呼ぶ（0.66.0）。
@@ -44,33 +45,17 @@ import { responseInput, runOnce, type RunnerInput } from "./run";
  * 案を出させるだけ**で、通すかどうかはコードが決める（規則3）。
  */
 
-const VALIDATE_WITH = "name.validate";
+const VALIDATE_WITH = validateWith("name");
 
-const TARGET_INPUT = {
-  ...FOLDER_INPUT,
-  characterName: z
-    .string()
-    .describe("付け替えたい人物の、いまの名前（設定資料に在るとおり）"),
-  origin: z
-    .enum(NAME_ORIGINS as unknown as [string, ...string[]])
-    .optional()
-    .describe(
-      "名前の系統。省略すると、既にある名前から1つ推定させます（混ぜさせません）"
-    ),
-};
-
-export const NAME_PROMPT_INPUT = { ...TARGET_INPUT };
-
-export const NAME_VALIDATE_INPUT = {
-  ...TARGET_INPUT,
-  response: responseInput(),
-};
-
-export const NAME_RUN_INPUT = {
-  ...TARGET_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
+/**
+ * 名前の系統。**形の定義はここ1か所。**
+ *
+ * 束ねた道具（`features.ts`）は `options.origin` を `z.unknown()` で
+ * 受けるので、奥へ入れる前にこの形で確かめ直す。
+ */
+export const NAME_ORIGIN_SCHEMA = z.enum(
+  NAME_ORIGINS as unknown as [string, ...string[]]
+);
 
 export interface NamePromptInput {
   folder: string;
@@ -214,8 +199,6 @@ export async function nameRun(input: NamePromptInput & RunnerInput) {
  * こちらは `prompt`・`validate` を持たない1本の道具にしてある
  * （表記ゆれの `detect` と同じ形。6.87.8）。
  */
-export const NAME_COLLISIONS_INPUT = { ...FOLDER_INPUT };
-
 export function nameCollisions(input: { folder: string }) {
   const found = findNameCollisions(readNameEntries(input.folder));
   return {

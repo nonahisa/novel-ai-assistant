@@ -1,4 +1,3 @@
-import { z } from "zod";
 import fs from "node:fs";
 import * as nodePath from "node:path";
 import {
@@ -46,10 +45,7 @@ import { withLineNumbers, type Chunk } from "../../core/chunker";
 import { episodeBodySources } from "../../core/episodeChunks";
 import { parseEpisodeFileName } from "../../core/episodeParser";
 import {
-  FOLDER_INPUT,
   McpToolError,
-  OLLAMA_INPUT,
-  RUNNER_INPUT,
   SETTINGS_SUBDIRS,
   SYNOPSES_FILE,
   readBody,
@@ -59,9 +55,9 @@ import {
   resolveInsideFolder,
 } from "./shared";
 import {
-  responseInput,
   runOnce,
   type RunnerInput,
+  validateWith,
 } from "./run";
 
 /**
@@ -79,20 +75,6 @@ import {
  * **書き戻さない**（6.87.7）。あらすじを台帳へ入れることも、
  * 単話プロットを直すこともしない。
  */
-
-const EPISODE_INPUT = {
-  ...FOLDER_INPUT,
-  filePath: z
-    .string()
-    .describe("その話の本文（作品フォルダーからの相対パス）"),
-  chapter: z
-    .number()
-    .int()
-    .optional()
-    .describe(
-      "合本（1ファイルに複数話）のときに、どの話かを指す話数。単話なら省略できます"
-    ),
-};
 
 /** 話をまるごと取り出す。**合本なら、指された話だけ** */
 function readEpisode(
@@ -170,26 +152,7 @@ function readCharacterNames(folder: string): string[] {
 
 /* ── 各話あらすじ（P-06）──────────────────────────── */
 
-const SYNOPSIS_VALIDATE_WITH = "episode.synopsisValidate";
-
-export const SYNOPSIS_PROMPT_INPUT = {
-  ...EPISODE_INPUT,
-  needsSubtitle: z
-    .boolean()
-    .optional()
-    .describe("サブタイトル案も出させるか（既定は出させない）"),
-};
-
-export const SYNOPSIS_VALIDATE_INPUT = {
-  ...EPISODE_INPUT,
-  response: responseInput(),
-};
-
-export const SYNOPSIS_RUN_INPUT = {
-  ...SYNOPSIS_PROMPT_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
+const SYNOPSIS_VALIDATE_WITH = validateWith("synopsis");
 
 /** 前話までのあらすじを、何件まで渡すか（多すぎると本文が入らない） */
 const PREVIOUS_SYNOPSIS_LIMIT = 10;
@@ -255,23 +218,10 @@ export function synopsisValidate(input: {
 
 /* ── プロット逸脱（P-11）────────────────────────────── */
 
-const DEVIATION_VALIDATE_WITH = "episode.deviationValidate";
+const DEVIATION_VALIDATE_WITH = validateWith("deviation");
 
 /** 1話で挙げてよい件数。**製品と同じ考え方で、多すぎると読まれない** */
 const DEVIATION_MAX_ISSUES = 5;
-
-export const DEVIATION_PROMPT_INPUT = { ...EPISODE_INPUT };
-
-export const DEVIATION_VALIDATE_INPUT = {
-  ...EPISODE_INPUT,
-  response: responseInput(),
-};
-
-export const DEVIATION_RUN_INPUT = {
-  ...EPISODE_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
 
 export function deviationPrompt(input: EpisodePromptInput) {
   const plot = readPlotMarkdown(input.folder);
@@ -385,32 +335,10 @@ export function deviationValidate(input: {
 
 /* ── 単話プロットの緩み（P-27）───────────────────────── */
 
-const EPISODE_PLOT_VALIDATE_WITH = "episode.plotValidate";
+const EPISODE_PLOT_VALIDATE_WITH = validateWith("episodePlot");
 
 /** 1話で挙げてよい件数 */
 const EPISODE_PLOT_MAX_FINDINGS = 5;
-
-export const EPISODE_PLOT_PROMPT_INPUT = {
-  ...FOLDER_INPUT,
-  plotPath: z
-    .string()
-    .describe("単話プロットのファイル（作品フォルダーからの相対パス）"),
-  chapterLabel: z
-    .string()
-    .optional()
-    .describe("その話の見出し（「第3話」など）。省くとファイル名を使います"),
-};
-
-export const EPISODE_PLOT_VALIDATE_INPUT = {
-  ...EPISODE_PLOT_PROMPT_INPUT,
-  response: responseInput(),
-};
-
-export const EPISODE_PLOT_RUN_INPUT = {
-  ...EPISODE_PLOT_PROMPT_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
 
 export interface EpisodePlotPromptInput {
   folder: string;

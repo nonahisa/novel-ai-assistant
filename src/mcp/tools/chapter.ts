@@ -1,5 +1,4 @@
 import * as nodePath from "node:path";
-import { z } from "zod";
 import {
   CHAPTER_PROPOSE_SCHEMA,
   CHAPTER_PROPOSE_SYSTEM_PROMPT,
@@ -19,16 +18,17 @@ import {
 } from "../../models/chapter";
 import { findSynopsis, parseSynopsisSet } from "../../models/synopsis";
 import {
-  FOLDER_INPUT,
   McpToolError,
-  OLLAMA_INPUT,
-  RUNNER_INPUT,
   SYNOPSES_FILE,
   readSettingsFile,
   workTitleOf,
 } from "./shared";
 import { workScan } from "./workScan";
-import { responseInput, runOnce, type RunnerInput } from "./run";
+import {
+  runOnce,
+  validateWith,
+  type RunnerInput,
+} from "./run";
 
 /**
  * 章立ての提案（P-31。設計書6.66.4）を外から呼ぶ（0.66.0）。
@@ -46,32 +46,7 @@ import { responseInput, runOnce, type RunnerInput } from "./run";
  * 作者の操作で行う。
  */
 
-const VALIDATE_WITH = "chapter.proposeValidate";
-
-const CHAPTER_INPUT = {
-  ...FOLDER_INPUT,
-  nameOnly: z
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .describe(
-      "章名だけを、この件数ぶん出させる（区切りは動かしません）。省略すると区切りから提案します"
-    ),
-};
-
-export const CHAPTER_PROMPT_INPUT = { ...CHAPTER_INPUT };
-
-export const CHAPTER_VALIDATE_INPUT = {
-  ...CHAPTER_INPUT,
-  response: responseInput(),
-};
-
-export const CHAPTER_RUN_INPUT = {
-  ...CHAPTER_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
+const VALIDATE_WITH = validateWith("chapter");
 
 export interface ChapterPromptInput {
   folder: string;

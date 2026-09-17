@@ -21,12 +21,8 @@ import { parsePlotMarkdown } from "../../core/plotDoc";
 import { buildStyleNote, collectWorkStyle } from "../../core/workStyleFacts";
 import { parseKeepWordSet, type KeepWord } from "../../models/keepWord";
 import {
-  CHUNK_INPUT,
-  FOLDER_INPUT,
   KEEP_WORDS_FILE,
   McpToolError,
-  OLLAMA_INPUT,
-  RUNNER_INPUT,
   chapterLabelOf,
   chunkFromId,
   chunkIdOf,
@@ -39,11 +35,10 @@ import {
 } from "./shared";
 import { ollamaGenerate } from "./ollama";
 import {
-  chunkIdInput,
-  responseInput,
   runByRunner,
   type RunOutcome,
   type RunnerKind,
+  validateWith,
 } from "./run";
 
 /**
@@ -58,22 +53,7 @@ import {
  * 原稿へ入れないのはコードの仕事で、**両方いる。**
  */
 
-const VALIDATE_WITH = "proofread.validate";
-
-export const PROOFREAD_PROMPT_INPUT = { ...FOLDER_INPUT, ...CHUNK_INPUT };
-
-export const PROOFREAD_VALIDATE_INPUT = {
-  ...FOLDER_INPUT,
-  chunkId: chunkIdInput(),
-  response: responseInput(),
-};
-
-export const PROOFREAD_RUN_INPUT = {
-  ...FOLDER_INPUT,
-  ...CHUNK_INPUT,
-  ...RUNNER_INPUT,
-  ...OLLAMA_INPUT,
-};
+const VALIDATE_WITH = validateWith("proofread");
 
 /** 作品の書き方。プロンプトにも検算にも要る */
 export interface WorkStyle {

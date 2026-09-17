@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import {
-  FEATURE_TOOLS,
+  FEATURES,
+  RUN_TOOL,
+  PROMPT_TOOL,
   assertToolRegistered,
   countGeneric,
   formatCompareLines,
@@ -517,10 +519,14 @@ describe("道具名の対応表", () => {
     "utf8"
   );
 
-  it("表に書いた道具は、すべて server.ts に登録されている", () => {
+  it("台本が呼ぶ道具は、すべて server.ts に登録されている", () => {
     const registered = registeredToolNames(serverSource);
-    for (const name of Object.values(FEATURE_TOOLS)) {
+    for (const name of [RUN_TOOL, PROMPT_TOOL]) {
       expect(registered).toContain(name);
+    }
+    // **束ねたので、どの feature も同じ道具へ行く**（0.66.7）
+    for (const feature of FEATURES) {
+      expect(toolNameOf(feature)).toBe(RUN_TOOL);
     }
   });
 
@@ -534,9 +540,10 @@ describe("道具名の対応表", () => {
 
   it("プロンプト版を訊く道具の名前も、登録名と合う", () => {
     const registered = registeredToolNames(serverSource);
-    expect(promptToolOf("proofread.run")).toBe("proofread.prompt");
-    expect(promptToolOf("episode.deviationRun")).toBe("episode.deviationPrompt");
-    expect(registered).toContain(promptToolOf("episode.deviationRun"));
+    expect(promptToolOf(RUN_TOOL)).toBe(PROMPT_TOOL);
+    expect(registered).toContain(promptToolOf(RUN_TOOL));
+    // 知らない道具には、訊く先が無い
+    expect(promptToolOf("ollama.models")).toBe(null);
   });
 });
 
