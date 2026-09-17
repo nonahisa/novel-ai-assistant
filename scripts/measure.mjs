@@ -33,6 +33,7 @@ import {
   assertToolRegistered,
   formatCompareLines,
   formatSpreadLines,
+  maxIssuesPer1000CharsOf,
   measurementFileName,
   metricsOfRun,
   pickFreeName,
@@ -526,16 +527,49 @@ async function main() {
       bundleRunner: sakura ? null : "ollama",
     });
 
-    // プロンプト版は束に訊く（`*.run` は返さない）。**訊けなければ空のまま残す**
+    /*
+      プロンプト版と、**チャンクごとの枠**を束に訊く（`*.run` は返さない）。
+      **AIは呼ばない**——`novel.prompt` はプロンプトを組んで返すだけである。
+
+      枠（`maxIssues`）を訊くのは、**点数の天井を知るため**。推敲は
+      「字数/1000×3件」しか通さないので、これを出さないと
+      「12/18 までしか行けない台」の 12 を満点と読み違える
+      （2026-09-18 に実際に読み違えた）。**訊けなければ空のまま残す。**
+    */
     let promptVersion = null;
+    const plans = [];
     if (promptTool && tools.some((tool) => tool.name === promptTool)) {
-      try {
-        const asked = await client.call(promptTool, calls[0].args);
-        promptVersion = asked?.promptVersion ?? null;
-      } catch (error) {
-        promptVersion = `（訊けませんでした: ${error instanceof Error ? error.message : String(error)}）`;
+      for (const call of calls) {
+        try {
+          const asked = await client.call(promptTool, call.args);
+          promptVersion ??= asked?.promptVersion ?? null;
+          for (const chunk of asked?.chunks ?? []) {
+            plans.push({
+              chunkId: chunk?.chunkId ?? call.label,
+              chars: chunk?.chars ?? null,
+              maxIssues: chunk?.maxIssues ?? null,
+            });
+          }
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          promptVersion ??= `（訊けませんでした: ${reason}）`;
+        }
       }
     }
+    /*
+      枠を返さない道具のために、**1000字あたりの上限を源から読んでおく**
+      （`scripts/measureScoring.mjs` の `maxIssuesPer1000CharsOf`）。
+      値は写さず、`src/prompts/proofread.ts` から取り出す。
+    */
+    const maxIssuesPer1000Chars =
+      options.feature === "proofread"
+        ? maxIssuesPer1000CharsOf(
+            fs.readFileSync(
+              path.join(REPO_ROOT, "src", "prompts", "proofread.ts"),
+              "utf8"
+            )
+          )
+        : null;
 
     const endpoint = sakura
       ? (options.endpoint ?? SAKURA_ENDPOINT)
@@ -562,7 +596,11 @@ async function main() {
     for (let round = 1; round <= options.repeat; round += 1) {
       console.log(`  ${round}回目…`);
       const run = await runOnce(calls, ask);
-      const scored = metricsOfRun(options.feature, answers, run);
+      const scored = metricsOfRun(options.feature, answers, {
+        ...run,
+        plans,
+        maxIssuesPer1000Chars,
+      });
       runs.push({
         round,
         elapsedMs: run.elapsedMs,
@@ -600,6 +638,12 @@ async function main() {
       repeat: options.repeat,
       bundle,
       promptVersion,
+      /*
+        **測ったチャンクの枠を残す。** あとから記録だけを見て集計をかけ直す
+        とき、字数と上限が無いと天井を再現できない。
+      */
+      plans,
+      maxIssuesPer1000Chars,
       work: { source, targets: calls.map((call) => call.label) },
       answers: answers ? path.join(source, "answers.json") : null,
       runs,

@@ -87,6 +87,15 @@ const MARKDOWN_ALLOWED = new Set([
   */
   "src/mcp/server.ts",
   "src/mcp/tools/ollama.ts",
+  /*
+    AI用の指示書（`.md`）を組む（設計書6.87.15 柱5、6.87.14 の末尾）。
+
+    **読む相手は VS Code の画面ではなく、繋いだAIである。** 強調は
+    「作品の原稿はここには無い」という、外されると困る事実に付く。
+    **画面に出す文言は `src/core/aiInstructionUsage.ts` に分けてある**
+    ので、そちらはこの検査の網に掛かったままである。
+  */
+  "src/core/aiInstructions.ts",
 ]);
 
 function collectSources(dir: string, out: string[] = []): string[] {

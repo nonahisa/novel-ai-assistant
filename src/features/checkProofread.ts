@@ -38,6 +38,7 @@ import type { KeepWord } from "../models/keepWord";
 import {
   buildProofreadPrompt,
   issueBudget,
+  MAX_ISSUES_PER_1000_CHARS,
   PROOFREAD_SCHEMA,
   PROOFREAD_SYSTEM_PROMPT,
   PROOFREAD_VERSION,
@@ -77,8 +78,8 @@ import {
  * （後ろの2つはプロンプト1.5で追加。**実モデルでの見逃し・誤検出は未計測**）。
  *
  * **いちばん危ないのは出しすぎること。** 誤字脱字には正解があるが
- * 推敲には無く、AIはどの文にも何かしら言える。1000字あたり3件で切る
- * （`core/proofreadValidation.ts`）。
+ * 推敲には無く、AIはどの文にも何かしら言える。`MAX_ISSUES_PER_1000_CHARS`
+ * で切る（`core/proofreadValidation.ts`）。
  *
  * 指摘の形は誤字脱字と同じ（`original`/`target`/`suggestion`）なので、
  * **提案パネルの適用の仕組みをそのまま使う。**
@@ -204,7 +205,9 @@ export async function checkProofread(
       "見るのは6つだけです（冗長・同語反復・係り受け・長すぎる文・" +
         "読みに詰まる漢字・語尾の単調さ）。",
       "語彙や文体、描写の増減には触れません。",
-      `指摘は多くても ${maxIssues}件までに絞ります（1000字あたり3件）。`,
+      // **上限の値を書き写さない。** 定数を変えたときに、画面だけが
+      // 古い数字を言い続ける（2026-09-18 に 3 → 5 へ変えて気づいた）
+      `指摘は多くても ${maxIssues}件までに絞ります（1000字あたり${MAX_ISSUES_PER_1000_CHARS}件）。`,
       "",
       "本文は書き換えません。 指摘を1件ずつ確認して適用します。",
       resolved.provider.isPaid

@@ -1,0 +1,320 @@
+{
+  "measuredAt": "2026-09-17T21:59:09.210Z",
+  "feature": "contradiction",
+  "runner": "sakura",
+  "tool": "novel.prompt → novel.validate",
+  "model": "preview/gemma-4-31B-it",
+  "numCtx": 32768,
+  "endpoint": "https://api.ai.sakura.ad.jp/v1/chat/completions",
+  "options": {},
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.66.8",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.5",
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction",
+    "targets": [
+      "本文\\001_九月の終わりの坂.txt",
+      "本文\\002_十月三日の坂.txt",
+      "本文\\003_窓口の椅子.txt",
+      "本文\\004_ギプスが外れた日.txt",
+      "本文\\005_初雪の窓口.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 8387,
+      "staleNote": null,
+      "metrics": {
+        "seededContradictions": 3,
+        "seededContradictionsTotal": 4,
+        "missedContradictions": 1,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 1,
+        "accepted": 4,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 8387
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "seededContradictions": {
+          "人物": {
+            "found": 2,
+            "total": 2
+          },
+          "状態": {
+            "found": 0,
+            "total": 1
+          },
+          "時系列": {
+            "found": 1,
+            "total": 1
+          }
+        },
+        "missedContradictions": [
+          {
+            "file": "本文/004_ギプスが外れた日.txt",
+            "kind": "状態",
+            "where": "右足のギプスが外れたのは"
+          }
+        ],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_九月の終わりの坂.txt",
+          "chunks": [
+            {
+              "target": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+              "aiText": "{\n  \"contradictions\": []\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 2651,
+                "total_tokens": 2662,
+                "completion_tokens": 11,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": []
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\002_十月三日の坂.txt",
+          "chunks": [
+            {
+              "target": "本文\\002_十月三日の坂.txt#2-0@8027",
+              "aiText": "{\n  \"contradictions\": []\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 2579,
+                "total_tokens": 2590,
+                "completion_tokens": 11,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\002_十月三日の坂.txt#2-0@8027",
+                "chapterLabel": "第2話",
+                "accepted": [],
+                "rejected": []
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\003_窓口の椅子.txt",
+          "chunks": [
+            {
+              "target": "本文\\003_窓口の椅子.txt#3-0@8027",
+              "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"僕は判子を押す手を止めた。\",\n      \"line\": 39,\n      \"note\": \"\",\n      \"settingSays\": \"一人称は「俺」となっている。\",\n      \"severity\": \"medium\",\n      \"textSays\": \"一人称が「僕」になっている。\"\n    }\n  ]\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 2710,
+                "total_tokens": 2814,
+                "completion_tokens": 104,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\003_窓口の椅子.txt#3-0@8027",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 39,
+                    "excerpt": "僕は判子を押す手を止めた。",
+                    "category": "人物",
+                    "settingSays": "一人称は「俺」となっている。",
+                    "textSays": "一人称が「僕」になっている。",
+                    "note": "",
+                    "severity": "medium",
+                    "confidence": "high",
+                    "filePath": "本文\\003_窓口の椅子.txt",
+                    "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                  }
+                ],
+                "rejected": []
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\004_ギプスが外れた日.txt",
+          "chunks": [
+            {
+              "target": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+              "aiText": "{\n  \"contradictions\": []\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 2733,
+                "total_tokens": 2744,
+                "completion_tokens": 11,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+                "chapterLabel": "第4話",
+                "accepted": [],
+                "rejected": []
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\005_初雪の窓口.txt",
+          "chunks": [
+            {
+              "target": "本文\\005_初雪の窓口.txt#5-0@8027",
+              "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"左目の下のほくろが\",\n      \"line\": 7,\n      \"note\": \"\",\n      \"settingSays\": \"相沢春人の外見設定では「右目の下に小さなほくろがある」となっている。\",\n      \"severity\": \"medium\",\n      \"textSays\": \"本文では「左目の下のほくろ」と描写されている。\"\n    },\n    {\n      \"category\": \"時系列\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"足を折ってから、ちょうど二週間が過ぎた。\",\n      \"line\": 11,\n      \"note\": \"\",\n      \"settingSays\": \"これまでの経緯では、10月3日に足を折り、11月の最初の月曜（約1ヶ月後）にギプスが外れている。\",\n      \"severity\": \"high\",\n      \"textSays\": \"12月8日の時点で「足を折ってから、ちょうど二週間が過ぎた」と記述されている。\"\n    },\n    {\n      \"category\": \"時系列\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"十二月八日、この冬の初雪が降った。\",\n      \"line\": 1,\n      \"note\": \"\",\n      \"settingSays\": \"世界観設定では「物語は九月の終わりから十二月の初めまでの、およそ二か月半のあいだに起きる」となっている。\",\n      \"severity\": \"low\",\n      \"textSays\": \"本文の舞台は「十二月八日」となっている。\"\n    }\n  ]\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 2941,
+                "total_tokens": 3317,
+                "completion_tokens": 376,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\005_初雪の窓口.txt#5-0@8027",
+                "chapterLabel": "第5話",
+                "accepted": [
+                  {
+                    "line": 7,
+                    "excerpt": "左目の下のほくろが",
+                    "category": "人物",
+                    "settingSays": "相沢春人の外見設定では「右目の下に小さなほくろがある」となっている。",
+                    "textSays": "本文では「左目の下のほくろ」と描写されている。",
+                    "note": "",
+                    "severity": "medium",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "c0716844893b3ccff4ff26f2790b4ee47ae3963bc15481798ae58a4e2f692428"
+                  },
+                  {
+                    "line": 11,
+                    "excerpt": "足を折ってから、ちょうど二週間が過ぎた。",
+                    "category": "時系列",
+                    "settingSays": "これまでの経緯では、10月3日に足を折り、11月の最初の月曜（約1ヶ月後）にギプスが外れている。",
+                    "textSays": "12月8日の時点で「足を折ってから、ちょうど二週間が過ぎた」と記述されている。",
+                    "note": "",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "c0716844893b3ccff4ff26f2790b4ee47ae3963bc15481798ae58a4e2f692428"
+                  },
+                  {
+                    "line": 1,
+                    "excerpt": "十二月八日、この冬の初雪が降った。",
+                    "category": "時系列",
+                    "settingSays": "世界観設定では「物語は九月の終わりから十二月の初めまでの、およそ二か月半のあいだに起きる」となっている。",
+                    "textSays": "本文の舞台は「十二月八日」となっている。",
+                    "note": "",
+                    "severity": "low",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "c0716844893b3ccff4ff26f2790b4ee47ae3963bc15481798ae58a4e2f692428"
+                  }
+                ],
+                "rejected": []
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seededContradictions": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "seededContradictionsTotal": {
+      "values": [
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "missedContradictions": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "falseFlagsContradiction": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "categoryMismatch": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "otherFlagsContradiction": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "accepted": {
+      "values": [
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "rejected": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        8387
+      ],
+      "min": 8387,
+      "max": 8387
+    }
+  },
+  "lines": [
+    "仕込んだ矛盾を拾えた: 3/4",
+    "見逃し（拾えなかった仕込み）: 1",
+    "誤検出（罠と、矛盾の無い話に付いた指摘）: 0",
+    "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）: 0",
+    "仕込み以外の箇所への指摘: 1",
+    "指摘（検算を通ったもの）: 4",
+    "落とした（検算で弾いたもの）: 0",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 8.4秒"
+  ]
+}

@@ -14,6 +14,8 @@ import {
   PROCESSES_BLOCKED_HINT,
 } from "../core/processAvailability";
 import { canRunProcesses } from "../core/runtime";
+// 上限の値は**定数から引く**（説明文に書き写すと、変えたときに画面だけ古くなる）
+import { MAX_ISSUES_PER_1000_CHARS } from "../prompts/proofread";
 
 /**
  * 操作メニュー。
@@ -604,7 +606,8 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "読みに詰まる漢字・語尾の単調さ）。" +
               "**語彙や文体、描写の増減には触れません。**" +
               "体言止めや短文の連続といった書き方の癖も、直す対象にしません。" +
-              "指摘は1000字あたり3件までに絞ります。",
+              // **上限の値を書き写さない**（2026-09-18 に 3 → 5 へ変えた）
+              `指摘は1000字あたり${MAX_ISSUES_PER_1000_CHARS}件までに絞ります。`,
           },
           {
             kind: "action",

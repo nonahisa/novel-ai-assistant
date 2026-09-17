@@ -12,13 +12,17 @@ import {
   AI_INSTRUCTION_TARGETS,
   AI_INSTRUCTION_TEMPLATE_PATH,
   AiInstructionFormatError,
+  applyUsageToInstructionBody,
   buildAiInstructionDocument,
   mergeCodexToml,
   mergeMcpServersJson,
   type AiInstructionTarget,
   type McpRegistration,
 } from "../core/aiInstructions";
+import type { AiInstructionUsage } from "../core/aiInstructionUsage";
+import { AiInstructionUsageStore } from "../core/aiInstructionUsageStore";
 import { SERVER_NAME } from "../mcp/version";
+import { cancelItem } from "../views/dialogs";
 import { notifyDone } from "../views/notify";
 
 /**
@@ -29,6 +33,10 @@ import { notifyDone } from "../views/notify";
  *
  * **相手は複数選べる。** 同じ作品を Claude Code でも Gemini CLI でも
  * 開くことがあり、どちらか一方しか置けない理由が無い。
+ *
+ * **使い方も選べる**（設計書6.87.14 の末尾、作者の指示 2026-09-18）。
+ * 作品フォルダーを開いて使うか、開かずに使うか——置き先と、指示書の頭の
+ * 数行が変わる。**本文は1つのまま。**
  */
 
 /** 束（MCPサーバー）の場所を覚えておく鍵（`globalState`。作品をまたいで共通） */
@@ -48,18 +56,30 @@ export async function writeAiInstructions(
   context: vscode.ExtensionContext,
   work: WorkEntry
 ): Promise<void> {
-  const body = await readTemplate(context);
-  if (body === undefined) return;
+  const template = await readTemplate(context);
+  if (template === undefined) return;
 
   const targets = await pickTargets();
   if (!targets) return;
+
+  const usage = await pickUsage();
+  if (!usage) return;
+
+  // **置き先は使い方で変わる。** 開かずに使うなら、作品とは別の
+  // フォルダー（AIに開かせる場所）へ置く
+  const root =
+    usage === "open-work" ? work.folderPath : await pickDetachedRoot(work);
+  if (!root) return;
+
+  // 開かずに使うときだけ、頭に「作品はここにある」の数行を足す
+  const body = applyUsageToInstructionBody(template, usage, work.folderPath);
 
   const registration = await resolveRegistration(context, targets);
   // 束が見つからなかったときも指示書は置く（登録は作者が後から足せる）。
   // ここで全部やめると、**指示書という文章そのものは置けるのに**
   // 「MCPが無いから何もできない」と読める行き止まりになる
 
-  const existing = await findExistingInstructions(work, targets);
+  const existing = await findExistingInstructions(root, targets);
   const keepBackup = await askAboutExisting(existing);
   if (keepBackup === undefined) return;
 
@@ -67,7 +87,7 @@ export async function writeAiInstructions(
   const failures: string[] = [];
 
   for (const target of targets) {
-    const instructionPath = path.join(work.folderPath, target.instructionPath);
+    const instructionPath = path.join(root, target.instructionPath);
     const document = buildAiInstructionDocument(target, body);
     try {
       const note = await placeDocument(instructionPath, document, keepBackup);
@@ -75,7 +95,7 @@ export async function writeAiInstructions(
         target,
         instruction: target.instructionPath,
         instructionNote: note,
-        ...(await placeRegistration(work, target, registration)),
+        ...(await placeRegistration(root, target, registration)),
       };
       outcomes.push(outcome);
     } catch (error) {
@@ -86,7 +106,22 @@ export async function writeAiInstructions(
     }
   }
 
-  report(work, outcomes, failures, registration);
+  /*
+    **選んだことを覚える。** 編集履歴の画面（設計書6.87.9）で
+    「直接読んだぶんは記録に残らない」と断るために要る——覚えないと、
+    記録が実態より少なく見えることを作者に伝えられない。
+
+    置けたものが1つも無ければ覚えない（何も起きていないため）。
+  */
+  if (outcomes.length > 0) {
+    try {
+      await new AiInstructionUsageStore(work).save(usage);
+    } catch {
+      // 控えが書けなくても、指示書は置けている。**報告を止めない**
+    }
+  }
+
+  report(work, root, usage, outcomes, failures, registration);
 }
 
 /**
@@ -137,6 +172,89 @@ async function pickTargets(): Promise<AiInstructionTarget[] | undefined> {
   );
   if (!picked || picked.length === 0) return undefined;
   return picked.map((item) => item.target);
+}
+
+/**
+ * 使い方を選ぶ（設計書6.87.14 の末尾）。
+ *
+ * **選ばせる前に、違いをその場で見せる。** 「MCP を通すか通さないか」では
+ * 作者に伝わらない——**原稿が黙って読まれるかどうか**の言葉で書く。
+ */
+async function pickUsage(): Promise<AiInstructionUsage | undefined> {
+  const picked = await vscode.window.showQuickPick(
+    [
+      {
+        label: "作品フォルダーを開いて使う",
+        description: "いまのやり方。手軽",
+        detail:
+          "AIに作品フォルダーそのものを開かせます。手引きは自動で効きますが、" +
+          "開いたAIは原稿を直接読めます——そのときは許可をお尋ねできず、編集履歴にも残りません。",
+        usage: "open-work" as const,
+      },
+      {
+        label: "作品を開かずに使う",
+        description: "原稿を黙って読ませない",
+        detail:
+          "AIには別のフォルダーを開かせ、手引きに作品の場所を書きます。" +
+          "原稿は道具（MCP）を通してしか読めないので、読むたびに許可をお尋ねし、編集履歴に残ります。",
+        usage: "keep-closed" as const,
+      },
+      // Escでも閉じられるが、それを知らない人には出口が無いように見える
+      cancelItem(),
+    ],
+    {
+      title: "AIに、この作品をどう使わせますか",
+      placeHolder: "原稿が黙って読まれるかどうかが変わります",
+      ignoreFocusOut: true,
+    }
+  );
+  return picked && "usage" in picked ? picked.usage : undefined;
+}
+
+/**
+ * 「作品を開かずに使う」ときの置き先を選んでもらう。
+ *
+ * **作品フォルダー（とその親）を選んだら、選び直してもらう。** そこへ置くと
+ * AIは結局その作品を開くことになり、前者と同じになる——**選んだつもりの
+ * 守りが無い状態**がいちばん悪い。
+ */
+async function pickDetachedRoot(work: WorkEntry): Promise<string | undefined> {
+  for (;;) {
+    const selected = await vscode.window.showOpenDialog({
+      title: "AIに開かせるフォルダーを選んでください（作品フォルダー以外）",
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      openLabel: "ここへ手引きを置く",
+    });
+    if (!selected || selected.length === 0) return undefined;
+
+    const chosen = fromUri(selected[0]);
+    if (!reachesWork(chosen, work.folderPath)) return chosen;
+
+    const again = "選び直す";
+    const answer = await vscode.window.showWarningMessage(
+      "そのフォルダーからは、作品の原稿がそのまま見えます。",
+      {
+        modal: true,
+        detail:
+          `選ばれたのは「${chosen}」で、作品（${work.folderPath}）そのもの、` +
+          "またはその作品を含む場所です。\n\n" +
+          "ここへ置くと「作品フォルダーを開いて使う」と同じことになり、" +
+          "AIは原稿を直接読めます（許可も記録もありません）。\n\n" +
+          "作品の外に、AI用のフォルダーを選んでください。",
+      },
+      again
+    );
+    if (answer !== again) return undefined;
+  }
+}
+
+/** 選んだフォルダーを開くと、作品の中まで見えるか */
+function reachesWork(chosen: string, workFolder: string): boolean {
+  const relative = path.relative(chosen, workFolder);
+  // 空文字＝同じ場所。外を指していなければ、作品は選んだ場所の中にある
+  return relative === "" || !path.goesOutside(chosen, relative);
 }
 
 /**
@@ -208,12 +326,12 @@ function registrationFor(bundlePath: string): McpRegistration {
 
 /** 既に指示書があるものを挙げる（同じ中身かどうかはここでは見ない） */
 async function findExistingInstructions(
-  work: WorkEntry,
+  root: string,
   targets: readonly AiInstructionTarget[]
 ): Promise<string[]> {
   const found: string[] = [];
   for (const target of targets) {
-    if (await exists(path.join(work.folderPath, target.instructionPath))) {
+    if (await exists(path.join(root, target.instructionPath))) {
       found.push(target.instructionPath);
     }
   }
@@ -285,7 +403,7 @@ async function placeDocument(
  * 入っていることがあり、こちらの読み違いで消えたときに戻せる道を残す。
  */
 async function placeRegistration(
-  work: WorkEntry,
+  root: string,
   target: AiInstructionTarget,
   registration: McpRegistration | undefined
 ): Promise<{ registration?: string; registrationNote?: string }> {
@@ -297,7 +415,7 @@ async function placeRegistration(
     };
   }
 
-  const file = path.join(work.folderPath, target.registrationPath);
+  const file = path.join(root, target.registrationPath);
   const current = await readIfExists(file);
   const next =
     target.registrationFormat === "json"
@@ -352,6 +470,8 @@ async function replaceFile(
  */
 function report(
   work: WorkEntry,
+  root: string,
+  usage: AiInstructionUsage,
   outcomes: readonly WriteOutcome[],
   failures: readonly string[],
   registration: McpRegistration | undefined
@@ -370,6 +490,13 @@ function report(
     .filter((name): name is string => Boolean(name));
 
   const notes = [
+    // **使い方の結果を、置いた直後に言う**（設計書6.87.14 の末尾）。
+    // 開いて使う作品では、記録が実態より少なく見える
+    usage === "open-work"
+      ? "この作品は「作品フォルダーを開いて使う」設定にしました。開いたAIは原稿を直接読めます——" +
+        "そのぶんは許可をお尋ねできず、編集履歴にも残りません（編集履歴の画面にも同じ断りが出ます）。"
+      : `この作品は「作品を開かずに使う」設定にしました。手引きは「${root}」へ置き、` +
+        "作品の場所を書き添えてあります。原稿は道具を通してだけ読まれ、すべて編集履歴に残ります。",
     "許可は、外部AIが実際に使おうとしたときに画面でお尋ねします（既定は拒否です）。",
     clients.length > 1
       ? `許可は接続元ごとに分かれます（${clients.join("・")}）。` +
@@ -386,7 +513,9 @@ function report(
   }
 
   void vscode.window.showInformationMessage(
-    `「${work.title}」にAI用の指示書を置きました。`,
+    usage === "open-work"
+      ? `「${work.title}」にAI用の指示書を置きました。`
+      : `「${work.title}」のためのAI用の指示書を、作品の外へ置きました。`,
     { modal: true, detail: [...lines, "", ...notes].join("\n") }
   );
   notifyDone(`AI用の指示書を置きました（${outcomes.length}件）`);

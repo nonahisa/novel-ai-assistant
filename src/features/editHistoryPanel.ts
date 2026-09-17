@@ -4,6 +4,8 @@ import { EditHistory } from "../core/editHistory";
 import { ExternalAccessLog } from "../core/externalAccessStore";
 import { ExternalAccessPermissionStore } from "../core/externalAccessPermissionStore";
 import { describeExternalAccessPermission } from "../core/externalAccessPermission";
+import { describeAiInstructionUsage } from "../core/aiInstructionUsage";
+import { AiInstructionUsageStore } from "../core/aiInstructionUsageStore";
 import { buildEditHistoryHtml } from "../views/editHistoryPanelHtml";
 
 /**
@@ -59,15 +61,25 @@ async function postHistory(
     混ぜないのは、外部AIが原稿を書き換えないからである——同じ流れに
     並べると、作者は「外部AIが直した」と読み違える。
   */
-  const [entries, external, permission] = await Promise.all([
+  const [entries, external, permission, usage] = await Promise.all([
     new EditHistory(work).load(),
     new ExternalAccessLog(work).load(),
     new ExternalAccessPermissionStore(work).load(),
+    new AiInstructionUsageStore(work).load(),
   ]);
+  /*
+    **記録が実態より少なく見えることを、ここで断る**（設計書6.87.14 の末尾）。
+    作品フォルダーを開いて使う設定なら、開いた側が直接読んだぶんは
+    MCP を通らないので記録に残らない。黙っていると、作者はこの一覧を見て
+    「AIはこれだけしか見ていない」と読む。
+  */
+  const usageNote = describeAiInstructionUsage(usage);
   void panel.webview.postMessage({
     type: "history",
     entries,
     external,
+    usageNote: usageNote?.text ?? "",
+    usageWarn: usageNote?.warn ?? false,
     // **いま許可されているかを、記録の上に出す**（設計書6.87.10）。
     // 記録だけを見せると、作者は「いま読まれうるのか」を判断できない
     permission: describeExternalAccessPermission(permission),

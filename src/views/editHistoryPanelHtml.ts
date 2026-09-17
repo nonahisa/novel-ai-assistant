@@ -120,6 +120,23 @@ ${colorRules}
   font-weight: 600;
 }
 .permission.allowed { border-left-color: var(--vscode-errorForeground); }
+
+/*
+  使い方の断り（設計書6.87.14 の末尾）。**記録より先に読ませる。**
+  作品フォルダーを開いて使う設定では、直接読まれたぶんが記録に残らない
+  ——これを知らずに一覧を見ると「AIはこれだけしか見ていない」と読む。
+*/
+.usage-note {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+  color: var(--vscode-descriptionForeground);
+}
+.usage-note.warn {
+  border-left-color: var(--vscode-errorForeground);
+  color: var(--vscode-foreground);
+  font-weight: 600;
+}
 </style>
 </head>
 <body>
@@ -140,6 +157,7 @@ ${ACTOR_KINDS.map(
 <div class="section" id="external-section">
 <h2>外部AIが読んだ記録</h2>
 <p class="permission" id="permission"></p>
+<p class="usage-note hidden" id="usage-note"></p>
 <p class="subtitle">MCPサーバー経由で、外部のAIがこの作品を読んだ記録です。<strong>外部AIは原稿を書き換えません。</strong>いちばん大事なのは、本文がこの機械の外へ出たかどうかです。</p>
 <div id="external-list"></div>
 </div>
@@ -228,6 +246,7 @@ function renderExternal() {
 }
 
 const permissionEl = document.getElementById('permission');
+const usageNoteEl = document.getElementById('usage-note');
 
 window.addEventListener('message', (event) => {
   if (event.data.type === 'history') {
@@ -237,6 +256,12 @@ window.addEventListener('message', (event) => {
     // **許可されているときに目立たせる。** 拒否は既定なので、
     // 知らせるべきは「いま読まれうる」ほうである
     permissionEl.className = 'permission' + (event.data.allowed ? ' allowed' : '');
+    // 使い方を選んでいない作品では何も言わない（どちらとも言い切れない）
+    const usageNote = event.data.usageNote ?? '';
+    usageNoteEl.textContent = usageNote;
+    usageNoteEl.className = 'usage-note'
+      + (usageNote ? '' : ' hidden')
+      + (event.data.usageWarn ? ' warn' : '');
     render();
     renderExternal();
   }

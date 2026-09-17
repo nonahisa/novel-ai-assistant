@@ -79,6 +79,12 @@ node scripts/measure.mjs contradiction --model gemma4:12b --option categories=al
 
 一人称の回数（`grep -o` で数えた）：第3話は「俺」10回に対して「僕」1回。
 
+## 上限について
+
+**矛盾検知には件数の上限が無い**（`core/contradictionValidation.ts` に `over_budget` の経路が無く、`src/prompts/contradictionCheck.ts` にも枠の式が無い。推敲の `issueBudget()`・逸脱の `deviationBudget()` に当たるものが無い）。したがって**仕込み4件は、上限に阻まれずに全部拾える**——推敲の台のような「満点が取れない」欠陥はここには無い。
+
+**1件に複数を詰めても点は伸びない。** `scoreContradiction()` が「1つの指摘は1つの仕込みにしか当たらない」と決めているため。
+
 ## この台について
 
 `test/fixtures/seeded/proofread/`・`../deviation/` とは**別の作品**にしてある（あちらは海辺の町、こちらは山あいの町の郵便局）。矛盾検知は設定資料を材料にするので、資料の作り込みかたが逸脱の台と大きく違い、混ぜると両方が読みにくくなる。

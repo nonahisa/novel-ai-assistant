@@ -541,6 +541,130 @@ export function scoreContradiction(answers, results) {
   return { seeds, missed, falsePositives, kindMismatch, otherFlags };
 }
 
+/* ── 指摘の枠（上限）と、枠の抜け道 ──────────────────── */
+
+/**
+ * `src/prompts/proofread.ts` から `MAX_ISSUES_PER_1000_CHARS` を読む。
+ *
+ * **写しを持たない。** `.mjs` からは `.ts` を import できないので、
+ * `registeredToolNames()` と同じやり方で**源のファイルから取り出す**。
+ * ここに `3` と書いてしまうと、製品の上限を変えたときに測定だけが
+ * 古い上限で「満点」を出す。
+ */
+export function maxIssuesPer1000CharsOf(promptSource) {
+  const match = /MAX_ISSUES_PER_1000_CHARS\s*=\s*(\d+)/.exec(
+    String(promptSource)
+  );
+  if (!match) {
+    throw new Error(
+      "src/prompts/proofread.ts に MAX_ISSUES_PER_1000_CHARS が見つかりません（製品の上限の書き方が変わったなら、数え方も直してください）。"
+    );
+  }
+  return Number(match[1]);
+}
+
+/**
+ * その字数のチャンクで挙げてよい件数。
+ *
+ * **`src/prompts/proofread.ts` の `issueBudget()` と同じ式**である。
+ * 値（1000字あたり何件か）は `maxIssuesPer1000CharsOf()` で源から読むので
+ * 写していないが、**式の形だけはここにある**——`.mjs` から `.ts` を
+ * import できないため。**式がずれていないことは
+ * `test/unit/measureScoring.test.ts` が製品の `issueBudget()` と
+ * 突き合わせて確かめる**（表だけでは、こちらの思い込みが残る）。
+ */
+export function issueBudgetOf(chars, perThousand) {
+  // 短いチャンクでも1件は挙げられるようにする（製品と同じ）
+  return Math.max(1, Math.round(((Number(chars) || 0) / 1000) * perThousand));
+}
+
+/**
+ * そのチャンクたちの上限の合計（＝**そのモデルが出せる指摘の最大数**）。
+ *
+ * **これを出さないと、点数を読み違える。** 2026-09-18 に さくらの31Bが
+ * 「当て字7/8・ひらくべき5/10」＝ちょうど12語を当てたのを、
+ * 「ひらくべき語は半分しか拾えない」と読んだ。実際は12件の枠を
+ * 使い切っていて、**それ以上は出しようがなかった**。
+ *
+ * @param plans `[{ chunkId, chars, maxIssues }]`。`maxIssues` があれば
+ *   **製品（`novel.prompt`）がそのチャンクへ渡した枠そのもの**なので優先する。
+ *   無ければ `chars` と `perThousand` から同じ式で出す
+ * @returns 1つも分からなければ null（分からないものを 0 と出さない）
+ */
+export function budgetCeilingOf(plans, perThousand) {
+  let total = 0;
+  let known = 0;
+  for (const plan of plans ?? []) {
+    const given = Number(plan?.maxIssues);
+    if (Number.isFinite(given) && given > 0) {
+      total += given;
+      known += 1;
+      continue;
+    }
+    const chars = Number(plan?.chars);
+    if (!Number.isFinite(chars) || !Number.isFinite(Number(perThousand))) {
+      continue;
+    }
+    total += issueBudgetOf(chars, Number(perThousand));
+    known += 1;
+  }
+  return known > 0 ? total : null;
+}
+
+/**
+ * 台に仕込んである語の数（当て字＋ひらくべき語）。**分母ではなく分子の天井**
+ * を読むために要る——仕込みが上限を超えていれば、満点は取れない。
+ */
+export function seededWordCount(answers) {
+  let total = 0;
+  for (const episode of answers?.episodes ?? []) {
+    for (const item of [
+      ...(episode?.ateji ?? []),
+      ...(episode?.mustOpen ?? []),
+    ]) {
+      total += Number(item?.count) || 0;
+    }
+  }
+  return total;
+}
+
+/**
+ * **1件に複数語を詰めた指摘**を数える。
+ *
+ * `original` に「然し、諦めるにはまだ早いでしょう。あなたなら出来ることを」と
+ * 2語まとめて書くと、**1件の枠で2語ぶん当たる**。実測で Opus は12件中4件を
+ * 詰めて、12件の枠で16語を当てた。素直に1語1件で答えるモデルほど損をするので、
+ * **点数と並べて出さないと比べられない**。
+ *
+ * 数えるのは「漢字ひらき」の札だけ（答え合わせがその札しか見ないため）。
+ * **同じ語が2回出ても1語**と数える——枠を回避できるのは、別の語が
+ * 2つ以上入っているときだけである。
+ */
+export function countPackedItems(answers, results) {
+  const byFile = acceptedByFile(results);
+  const examples = [];
+  let count = 0;
+
+  for (const episode of answers?.episodes ?? []) {
+    const file = normalizePath(episode?.file ?? "");
+    const words = [...(episode?.ateji ?? []), ...(episode?.mustOpen ?? [])]
+      .map((item) => textOf(item?.word))
+      .filter((word) => word !== "");
+    const issues = (byFile.get(file) ?? []).filter(
+      (issue) => issue?.reason === KANJI_REASON
+    );
+    for (const issue of issues) {
+      const original = textOf(issue?.original);
+      const hit = new Set(words.filter((word) => original.includes(word)));
+      if (hit.size < 2) continue;
+      count += 1;
+      examples.push({ file, original, words: [...hit] });
+    }
+  }
+
+  return { count, examples };
+}
+
 /**
  * どの feature でも数えられるもの（件数・落とした理由・失敗）。
  *
@@ -578,7 +702,9 @@ export function countGeneric(results) {
  * @param feature どの機能か。答えのある機能（`proofread`・`deviation`）だけ
  *   答え合わせが付く
  * @param answers `answers.json`（無ければ null）
- * @param run `{ results, failures, elapsedMs }`
+ * @param run `{ results, failures, elapsedMs, plans, maxIssuesPer1000Chars }`。
+ *   `plans` は測ったチャンクの `{ chunkId, chars, maxIssues }`（`novel.prompt`
+ *   が返すもの）。**あれば指摘の上限を出す**——無ければ上限の行は出さない
  */
 export function metricsOfRun(feature, answers, run) {
   const results = run?.results ?? [];
@@ -598,6 +724,18 @@ export function metricsOfRun(feature, answers, run) {
     detail.ateji = scored.ateji.byWord;
     detail.mustOpen = scored.mustOpen.byWord;
     detail.falsePositives = scored.falsePositives.byWord;
+
+    /*
+      **枠と抜け道を、点数と一緒に出す。** どちらも書かないと、
+      「12/18 までしか行けない台」で測った 12 を満点と読み違えるし、
+      2語まとめて答えたモデルの 16 を素直なモデルの 12 と並べてしまう。
+    */
+    metrics.seededWords = seededWordCount(answers);
+    const ceiling = budgetCeilingOf(run?.plans, run?.maxIssuesPer1000Chars);
+    if (ceiling !== null) metrics.budgetCeiling = ceiling;
+    const packed = countPackedItems(answers, results);
+    metrics.packedItems = packed.count;
+    detail.packedItems = packed.examples;
   }
 
   if (feature === "deviation" && answers) {
@@ -677,6 +815,10 @@ export function spreadOfRuns(runs) {
 
 /** 画面に出すときの日本語。**指標の名前をそのまま出さない**（作者が読む） */
 const LABELS = {
+  budgetCeiling: "指摘の上限",
+  // 上限が分からなかったときだけ、単独の行として出る
+  seededWords: "仕込み（当て字＋ひらくべき語）",
+  packedItems: "1件に複数語を詰めた指摘",
   ateji: "当て字を拾えた",
   mustOpen: "ひらくべき語を拾えた",
   falsePositives: "誤検出（ひらいてはいけない語をひらいた）",
@@ -709,9 +851,13 @@ const DENOMINATORS = {
 const HIDDEN = new Set(Object.values(DENOMINATORS));
 
 const ORDER = [
+  // **上限を先に出す。** これを見ないと、その下の点数の天井が分からない
+  "budgetCeiling",
+  "seededWords",
   "ateji",
   "mustOpen",
   "falsePositives",
+  "packedItems",
   "seeded",
   "missed",
   "falseFlags",
@@ -737,7 +883,14 @@ export function labelOf(key) {
 
 /** 表に出す順番。**答え合わせを先、内訳を後ろ**（読む順に合わせる） */
 export function orderedKeys(spread) {
-  const keys = Object.keys(spread).filter((key) => !HIDDEN.has(key));
+  const hidden = new Set(HIDDEN);
+  /*
+    **仕込みの語数は、上限の行の中に出す**（「12件（仕込みは18語）」）。
+    上限が分からないときだけ単独の行にする——上限と並べて初めて
+    「満点が取れるか」が読めるので、片方だけ出しても意味が薄い。
+  */
+  if ("budgetCeiling" in (spread ?? {})) hidden.add("seededWords");
+  const keys = Object.keys(spread).filter((key) => !hidden.has(key));
   const rejected = keys.filter((key) => key.startsWith("rejected.")).sort();
   const rest = keys.filter(
     (key) =>
@@ -757,6 +910,18 @@ export function orderedKeys(spread) {
 
 function formatValue(key, value, spread) {
   if (key === "elapsedMs") return `${(value / 1000).toFixed(1)}秒`;
+  /*
+    **上限の行に、仕込みの語数を並べて書く。** 「12件」だけでは
+    多いのか少ないのか分からず、「18語」だけでは天井が分からない。
+  */
+  if (key === "budgetCeiling") {
+    const seeded = Number(spread?.seededWords?.max);
+    return Number.isFinite(seeded) && seeded > 0
+      ? `${value}件（仕込みは${seeded}語）`
+      : `${value}件`;
+  }
+  if (key === "seededWords") return `${value}語`;
+  if (key === "packedItems") return `${value}件`;
   const denominator = DENOMINATORS[key];
   if (denominator && spread?.[denominator]) {
     return `${value}/${spread[denominator].max}`;
@@ -777,11 +942,45 @@ function formatSpread(key, entry, spread) {
   return `${head}（各回：${each}）`;
 }
 
-/** 画面に出す行（1指標につき1行、日本語） */
+/**
+ * 数字だけでは読み違える行に添える断り。
+ *
+ * **測り方の欠陥は、数字の隣に書かないと伝わらない。** 記録を読み返す人は
+ * `lines` しか見ないことがあるので、README ではなくここに出す。
+ */
+export function notesFor(key, spread) {
+  const notes = [];
+
+  if (key === "budgetCeiling") {
+    const ceiling = Number(spread?.budgetCeiling?.max) || 0;
+    const seeded = Number(spread?.seededWords?.max) || 0;
+    if (seeded > ceiling) {
+      notes.push(
+        `　※ 仕込みが上限を超えているので、満点は取れません（上限${ceiling}件に対して仕込み${seeded}語）。`
+      );
+    }
+  }
+
+  if (key === "packedItems") {
+    const packed = Number(spread?.packedItems?.max) || 0;
+    if (packed > 0) {
+      notes.push(
+        `　※ 1件に複数語を詰めた指摘が ${packed} 件あります（枠の上限を回避できるため、他のモデルと比べるときは注意）。`
+      );
+    }
+  }
+
+  return notes;
+}
+
+/** 画面に出す行（1指標につき1行、日本語）。断りはその行のすぐ下に置く */
 export function formatSpreadLines(spread) {
-  return orderedKeys(spread).map(
-    (key) => `${labelOf(key)}: ${formatSpread(key, spread[key], spread)}`
-  );
+  const lines = [];
+  for (const key of orderedKeys(spread)) {
+    lines.push(`${labelOf(key)}: ${formatSpread(key, spread[key], spread)}`);
+    for (const note of notesFor(key, spread)) lines.push(note);
+  }
+  return lines;
 }
 
 /**

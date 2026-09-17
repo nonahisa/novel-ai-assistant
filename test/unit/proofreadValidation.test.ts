@@ -12,7 +12,11 @@ import {
   validateProofreadIssues,
   type AcceptedProofreadIssue,
 } from "../../src/core/proofreadValidation";
-import { issueBudget, PROOFREAD_REASONS } from "../../src/prompts/proofread";
+import {
+  issueBudget,
+  MAX_ISSUES_PER_1000_CHARS,
+  PROOFREAD_REASONS,
+} from "../../src/prompts/proofread";
 import type { Chunk } from "../../src/core/chunker";
 
 /**
@@ -429,9 +433,11 @@ describe("修正案が無い提案", () => {
 });
 
 describe("出しすぎを切る", () => {
-  test("1000字あたり3件まで", () => {
-    expect(issueBudget(1000)).toBe(3);
-    expect(issueBudget(4000)).toBe(12);
+  // **上限の値を書き写さない**（2026-09-18 に 3 → 5 へ変えて、ここが落ちた）。
+  // 確かめたいのは「1000字あたりの件数に比例すること」であって、値そのものではない
+  test("1000字あたり、決めた件数まで", () => {
+    expect(issueBudget(1000)).toBe(MAX_ISSUES_PER_1000_CHARS);
+    expect(issueBudget(4000)).toBe(MAX_ISSUES_PER_1000_CHARS * 4);
   });
 
   test("短い本文でも1件は挙げられる", () => {
@@ -443,7 +449,9 @@ describe("出しすぎを切る", () => {
   test("上限を超えたぶんを弾く", () => {
     // **ここが無いと、全部の文に提案が付いた状態が作者へ届く**
     const text = "あ".repeat(1000);
-    const many = Array.from({ length: 10 }, (_, index) => ({
+    // 上限より必ず多く送る（上限の値が変わっても、弾かれることを確かめられる）
+    const sent = MAX_ISSUES_PER_1000_CHARS + 7;
+    const many = Array.from({ length: sent }, (_, index) => ({
       line: 11,
       original: "あ".repeat(index + 2),
       suggestion: `直し${index}`,
@@ -454,15 +462,17 @@ describe("出しすぎを切る", () => {
 
     const result = validateProofreadIssues({ issues: many }, chunkOf(text));
 
-    expect(result.accepted).toHaveLength(3);
+    expect(result.accepted).toHaveLength(MAX_ISSUES_PER_1000_CHARS);
     expect(
       result.rejected.filter((entry) => entry.reason === "over_budget")
-    ).toHaveLength(7);
+    ).toHaveLength(sent - MAX_ISSUES_PER_1000_CHARS);
   });
 
   test("切るときは確信度の高いものを残す", () => {
     // 迷っている提案だけが手元に来ては、質の低いものを読まされる
-    const text = "あ".repeat(400); // 上限1件
+    // **上限がちょうど1件になる長さを、定数から出す**（400字と書き写すと、
+    // 1000字あたりの件数を変えたときに上限が2件になって落ちる。実際に落ちた）
+    const text = "あ".repeat(Math.round(1000 / MAX_ISSUES_PER_1000_CHARS));
     const issues = [
       {
         line: 11,

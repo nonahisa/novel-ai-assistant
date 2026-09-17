@@ -15,12 +15,23 @@ import {
   promptToolOf,
   registeredToolNames,
   resultsOfResponse,
+  budgetCeilingOf,
+  countPackedItems,
+  issueBudgetOf,
+  maxIssuesPer1000CharsOf,
   scoreContradiction,
   scoreDeviation,
   scoreProofread,
+  seededWordCount,
   spreadOfRuns,
   toolNameOf,
 } from "../../scripts/measureScoring.mjs";
+// **製品の式そのもの**（写しがずれていないことを、ここで突き合わせる）
+import {
+  MAX_ISSUES_PER_1000_CHARS,
+  issueBudget,
+} from "../../src/prompts/proofread";
+import { deviationBudget } from "../../src/prompts/deviationCheck";
 
 /*
   測定台（`scripts/measure.mjs`）の**数え方**だけを確かめる（設計書6.87.15 の柱3）。
@@ -122,6 +133,209 @@ describe("推敲の答え合わせ", () => {
       },
     ];
     expect(scoreProofread(ANSWERS, results).falsePositives.count).toBe(0);
+  });
+});
+
+/* ── 指摘の枠（上限）と、枠の抜け道 ──────────────────── */
+
+/*
+  **測り方の欠陥を、見えるようにするための数え方**（2026-09-18）。
+  推敲は「字数/1000×3件」しか通さないので、**仕込みが上限を超えていれば
+  どんなモデルでも満点は取れない**。また `original` に2語まとめて書くと
+  1件の枠で2語ぶん当たるので、素直に1語1件で答えるモデルほど損をする。
+*/
+describe("指摘の上限（枠）", () => {
+  const promptSource = fs.readFileSync(
+    path.join(__dirname, "..", "..", "src", "prompts", "proofread.ts"),
+    "utf8"
+  );
+
+  it("1000字あたりの上限は、製品の源から読む（写しを持たない）", () => {
+    expect(maxIssuesPer1000CharsOf(promptSource)).toBe(
+      MAX_ISSUES_PER_1000_CHARS
+    );
+  });
+
+  it("上限が見つからなければ止める（古い上限のまま測らないように）", () => {
+    expect(() => maxIssuesPer1000CharsOf("const なにもない = 1;")).toThrow(
+      /MAX_ISSUES_PER_1000_CHARS/
+    );
+  });
+
+  it("枠の式は、製品の issueBudget と同じ答えを返す", () => {
+    // `.mjs` から `.ts` を import できないので式だけ写している。
+    // **ずれていないことを、ここで製品と突き合わせる**
+    for (const chars of [
+      0, 1, 100, 499, 500, 999, 1000, 1400, 1464, 1478, 1500, 3000, 8000,
+    ]) {
+      expect(issueBudgetOf(chars, MAX_ISSUES_PER_1000_CHARS)).toBe(
+        issueBudget(chars)
+      );
+    }
+  });
+
+  it("製品が渡した maxIssues があれば、それを合計する", () => {
+    expect(
+      budgetCeilingOf([{ maxIssues: 4 }, { maxIssues: 4 }, { maxIssues: 4 }], 3)
+    ).toBe(12);
+  });
+
+  it("maxIssues が無ければ、字数から同じ式で出す", () => {
+    // **1000字あたりの件数は引数で受ける**（製品の値を写さない）。ここは
+    // 式だけを確かめるので、製品が上限を変えても落ちない
+    expect(
+      budgetCeilingOf([{ chars: 1464 }, { chars: 1478 }, { chars: 1402 }], 3)
+    ).toBe(12);
+  });
+
+  it("字数も上限も分からなければ null（分からないものを 0 と出さない）", () => {
+    expect(budgetCeilingOf([{ chunkId: "本文/001_あさ.txt" }], null)).toBeNull();
+    expect(budgetCeilingOf([], MAX_ISSUES_PER_1000_CHARS)).toBeNull();
+  });
+});
+
+describe("推敲の台（上限と仕込みの釣り合い）", () => {
+  const root = path.join(__dirname, "..", "fixtures", "seeded", "proofread");
+  const answers = JSON.parse(
+    fs.readFileSync(path.join(root, "answers.json"), "utf8")
+  );
+  // この台は1話が1チャンクに収まる（`numCtx` 32,768 でおよそ8,000字）
+  const plans = answers.episodes.map((episode: { file: string }) => ({
+    chunkId: episode.file,
+    chars: fs.readFileSync(path.join(root, episode.file), "utf8").length,
+  }));
+
+  it("仕込みの語数と上限を、どちらも数えられる", () => {
+    // 台に仕込んである語（当て字8＋ひらくべき10）。**台を変えないかぎり動かない**
+    expect(seededWordCount(answers)).toBe(18);
+    // 上限は**製品の式そのまま**（この台は1話が1チャンクに収まる）
+    expect(budgetCeilingOf(plans, MAX_ISSUES_PER_1000_CHARS)).toBe(
+      plans.reduce(
+        (sum: number, plan: { chars: number }) => sum + issueBudget(plan.chars),
+        0
+      )
+    );
+  });
+
+  it("1000字あたり3件のころは12件で、18語には届かなかった", () => {
+    // **この釣り合いが、この直しの発端である**（上限12件の台で12語当てた
+    // モデルを「半分しか拾えない」と読み違えた）。製品の上限が上がれば
+    // 天井も上がるが、**式と数え方が変わっていないこと**をここで留める
+    expect(budgetCeilingOf(plans, 3)).toBe(12);
+    expect(seededWordCount(answers)).toBeGreaterThan(12);
+  });
+
+  it("仕込みが上限を超えていれば、表に断りが出る", () => {
+    const lines = formatSpreadLines(
+      spreadOfRuns([
+        { metrics: { budgetCeiling: 12, seededWords: 18, ateji: 7, atejiTotal: 8 } },
+      ])
+    );
+    expect(lines[0]).toBe("指摘の上限: 12件（仕込みは18語）");
+    expect(lines.some((line: string) => line.includes("満点は取れません"))).toBe(
+      true
+    );
+    // 仕込みの語数は上限の行の中に出すので、単独の行にはしない
+    expect(lines.some((line: string) => line.startsWith("仕込み（"))).toBe(false);
+  });
+
+  it("上限のほうが多ければ、断りは出ない", () => {
+    const lines = formatSpreadLines(
+      spreadOfRuns([{ metrics: { budgetCeiling: 30, seededWords: 18 } }])
+    );
+    expect(lines).toContain("指摘の上限: 30件（仕込みは18語）");
+    expect(lines.some((line: string) => line.includes("満点は取れません"))).toBe(
+      false
+    );
+  });
+
+  it("上限を渡さなければ、上限の行は出ない（仕込みだけを出す）", () => {
+    const { metrics } = metricsOfRun("proofread", ANSWERS, RUN);
+    expect(metrics.budgetCeiling).toBeUndefined();
+    expect(metrics.seededWords).toBe(4);
+    const lines = formatSpreadLines(spreadOfRuns([{ metrics }]));
+    expect(lines).toContain("仕込み（当て字＋ひらくべき語）: 4語");
+  });
+});
+
+describe("1件に複数語を詰めた指摘", () => {
+  it("答えの語を2つ含む指摘を1件と数える", () => {
+    // 1件の枠で2語ぶん当たるので、素直に1語1件で答えるモデルほど損をする
+    const results = [
+      {
+        chunkId: "本文/001_あさ.txt#1-0@2000",
+        accepted: [accepted("然し丁度そのとき", "しかしちょうどそのとき")],
+        rejected: [],
+      },
+    ];
+    const packed = countPackedItems(ANSWERS, results);
+    expect(packed.count).toBe(1);
+    expect(packed.examples[0].words.sort()).toEqual(["丁度", "然し"]);
+  });
+
+  it("1語だけの指摘は数えない", () => {
+    expect(countPackedItems(ANSWERS, RESULTS).count).toBe(0);
+  });
+
+  it("同じ語が2回出ても1語と数える（枠を回避できるのは別の語のときだけ）", () => {
+    const results = [
+      {
+        chunkId: "本文/001_あさ.txt#1-0@2000",
+        accepted: [accepted("丁度、丁度六時に", "ちょうど、ちょうど六時に")],
+        rejected: [],
+      },
+    ];
+    expect(countPackedItems(ANSWERS, results).count).toBe(0);
+  });
+
+  it("「漢字ひらき」以外の札は数えない（答え合わせがその札しか見ないため）", () => {
+    const results = [
+      {
+        chunkId: "本文/001_あさ.txt#1-0@2000",
+        accepted: [accepted("然し丁度そのとき", "しかし、ちょうど", "長文")],
+        rejected: [],
+      },
+    ];
+    expect(countPackedItems(ANSWERS, results).count).toBe(0);
+  });
+
+  it("表に出て、0件でなければ断りが添う", () => {
+    const results = [
+      {
+        chunkId: "本文/001_あさ.txt#1-0@2000",
+        accepted: [accepted("然し丁度そのとき", "しかしちょうどそのとき")],
+        rejected: [],
+      },
+    ];
+    const { metrics, detail } = metricsOfRun("proofread", ANSWERS, {
+      results,
+      failures: [],
+      elapsedMs: 1_000,
+    });
+    expect(metrics.packedItems).toBe(1);
+    expect(detail.packedItems[0].original).toBe("然し丁度そのとき");
+    const lines = formatSpreadLines(spreadOfRuns([{ metrics }]));
+    expect(lines).toContain("1件に複数語を詰めた指摘: 1件");
+    expect(
+      lines.some((line: string) => line.includes("他のモデルと比べるときは注意"))
+    ).toBe(true);
+  });
+
+  it("0件なら断りは添わない", () => {
+    const { metrics } = metricsOfRun("proofread", ANSWERS, RUN);
+    expect(metrics.packedItems).toBe(0);
+    const lines = formatSpreadLines(spreadOfRuns([{ metrics }]));
+    expect(lines).toContain("1件に複数語を詰めた指摘: 0件");
+    expect(
+      lines.some((line: string) => line.includes("他のモデルと比べるときは注意"))
+    ).toBe(false);
+  });
+
+  it("推敲以外の機能には、上限も詰め込みも出ない", () => {
+    const { metrics } = metricsOfRun("typo", null, RUN);
+    expect(metrics.budgetCeiling).toBeUndefined();
+    expect(metrics.seededWords).toBeUndefined();
+    expect(metrics.packedItems).toBeUndefined();
   });
 });
 
@@ -405,6 +619,23 @@ describe("逸脱の測定台（答えと本文が食い違っていないか）"
     for (const episode of answers.episodes) {
       expect(episode.seeded.length).toBeLessThanOrEqual(1);
     }
+  });
+
+  it("上限と仕込みが釣り合っている（推敲の台と違い、ちょうど）", () => {
+    // 推敲の台は上限12件に18語を仕込んであり満点が取れない。**ここは同じ形の
+    // 欠陥が無いことを確かめる**——1話1件の枠に、仕込みも1話1つ
+    let ceiling = 0;
+    let seeded = 0;
+    for (const episode of answers.episodes) {
+      const text = fs.readFileSync(path.join(root, episode.file), "utf8");
+      ceiling += deviationBudget(text.length);
+      seeded += episode.seeded.length;
+      expect(episode.seeded.length).toBeLessThanOrEqual(
+        deviationBudget(text.length)
+      );
+    }
+    expect(seeded).toBe(3);
+    expect(ceiling).toBe(4); // 4話ぶん（仕込みの無い第1話にも枠が1つある）
   });
 
   it("指摘が出てはいけない話には、仕込みが無い", () => {

@@ -17,6 +17,8 @@
  * VS Code API に依存しない（書き込みは `features/writeAiInstructions.ts`）。
  */
 
+import type { AiInstructionUsage } from "./aiInstructionUsage";
+
 /** 指示書を置く相手 */
 export type AiInstructionTargetId =
   | "claude-code"
@@ -138,6 +140,42 @@ export function buildAiInstructionDocument(
   if (!target.frontMatter) return text;
   // フロントマターの直後は1行あける（Markdown の見出しと続けて読ませない）
   return `${target.frontMatter}\n${text}`;
+}
+
+/**
+ * 「作品を開かずに使う」ときだけ、指示書の頭に足す数行
+ * （設計書6.87.14 の末尾）。
+ *
+ * **本文は1つのまま。** 写しを2つ持つと、使い方によって言うことが違う
+ * 指示書ができる。足すのは「作品はここにある」という事実だけで、
+ * 決まりは足さない。引用（`>`）で書くのは、**本文の決まりと
+ * 混ざらないようにする**ため。
+ */
+export function buildWorkLocationPreamble(workFolderPath: string): string {
+  return (
+    "> **この作品の原稿は、あなたがいま開いているフォルダーにはありません。**\n" +
+    ">\n" +
+    `> 作品の場所：\`${workFolderPath}\`\n` +
+    ">\n" +
+    "> 道具（MCP）を呼ぶときは、`folder` にこの場所をそのまま渡す。\n" +
+    "> このフォルダーの外を自分で探しに行かない——原稿は道具を通してだけ読む。\n"
+  );
+}
+
+/**
+ * 指示書の本文に、使い方に応じた頭を付ける。
+ *
+ * 「開いて使う」なら**何も足さない**（0.66.8 までの動きのまま）。
+ * フロントマターはこのあと `buildAiInstructionDocument` が付けるので、
+ * **頭の数行より前**に来る（順を入れ替えると、スキルとして読まれなくなる）。
+ */
+export function applyUsageToInstructionBody(
+  body: string,
+  usage: AiInstructionUsage,
+  workFolderPath: string
+): string {
+  if (usage === "open-work") return body;
+  return `${buildWorkLocationPreamble(workFolderPath)}\n${body}`;
 }
 
 /**

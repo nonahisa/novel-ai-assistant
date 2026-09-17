@@ -218,6 +218,12 @@ export const IGNORED_PATHS = [
     **許可は作者がその機械で与えるもの**である。
   */
   ".aiwriter/external-access.json",
+  /*
+    AI用の指示書を「開いて使うか、開かずに使うか」の控え（設計書6.87.14
+    の末尾）。**同期しない**——その機械でどう使うかの話なので、
+    リポジトリを共有した相手の機械へ持ち越さない。
+  */
+  ".aiwriter/ai-instruction-usage.json",
   ".novelai-recovery/",
   "exports/",
 ] as const;

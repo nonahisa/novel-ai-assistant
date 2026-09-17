@@ -4,6 +4,7 @@ import * as path from "node:path";
 import {
   buildProofreadPrompt,
   issueBudget,
+  MAX_ISSUES_PER_1000_CHARS,
   PROOFREAD_SCHEMA,
   PROOFREAD_SYSTEM_PROMPT,
 } from "../../src/prompts/proofread";
@@ -135,8 +136,16 @@ describe.skipIf(WORK === undefined)(
           );
         }
 
-        // **1000字あたり3件を超えて残ってはいけない。** 上限の効きを見る
-        expect(Number(per1000(kept.length))).toBeLessThanOrEqual(3.5);
+        /*
+          **上限を超えて残ってはいけない。** 上限の効きを見る。
+
+          **値を書き写さない**（2026-09-18 に 3 → 5 へ変えた）。0.5 の
+          上乗せは、チャンクごとの丸め（`issueBudget` の `Math.round`）で
+          全体の割合がわずかに上振れするぶんの余裕である。
+        */
+        expect(Number(per1000(kept.length))).toBeLessThanOrEqual(
+          MAX_ISSUES_PER_1000_CHARS + 0.5
+        );
       },
       20 * 60 * 1000
     );

@@ -1,0 +1,497 @@
+{
+  "measuredAt": "2026-09-17T22:26:22.174Z",
+  "feature": "proofread",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:26b",
+  "numCtx": 32768,
+  "endpoint": null,
+  "options": {},
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.66.9",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.9",
+  "plans": [
+    {
+      "chunkId": "本文\\001_あさ.txt#1-0@8027",
+      "chars": 1464,
+      "maxIssues": 7
+    },
+    {
+      "chunkId": "本文\\002_ひる.txt#2-0@8027",
+      "chars": 1478,
+      "maxIssues": 7
+    },
+    {
+      "chunkId": "本文\\003_よる.txt#3-0@8027",
+      "chars": 1402,
+      "maxIssues": 7
+    }
+  ],
+  "maxIssuesPer1000Chars": 5,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\proofread",
+    "targets": [
+      "本文\\001_あさ.txt",
+      "本文\\002_ひる.txt",
+      "本文\\003_よる.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\proofread\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 64229,
+      "staleNote": null,
+      "metrics": {
+        "ateji": 6,
+        "atejiTotal": 8,
+        "mustOpen": 7,
+        "mustOpenTotal": 10,
+        "falsePositives": 0,
+        "seededWords": 18,
+        "budgetCeiling": 21,
+        "packedItems": 0,
+        "noSuggestion": 0,
+        "accepted": 15,
+        "rejected": 2,
+        "rejected.not_long": 2,
+        "failures": 0,
+        "elapsedMs": 64229
+      },
+      "detail": {
+        "rejectedReasons": {
+          "not_long": 2
+        },
+        "failures": [],
+        "ateji": {
+          "丁度": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "沢山": {
+            "found": 2,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "是非": {
+            "found": 2,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "折角": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          }
+        },
+        "mustOpen": {
+          "然し": {
+            "found": 2,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "殆ど": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "出来る": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "所謂": {
+            "found": 1,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "尚": {
+            "found": 1,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "但し": {
+            "found": 1,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "或いは": {
+            "found": 1,
+            "total": 1,
+            "noSuggestion": 0
+          }
+        },
+        "falsePositives": {},
+        "packedItems": []
+      },
+      "raw": [
+        {
+          "target": "本文\\001_あさ.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "results": [
+              {
+                "chunkId": "本文\\001_あさ.txt#1-0@8027",
+                "chapterLabel": "第1話",
+                "accepted": [
+                  {
+                    "line": 1,
+                    "original": "丁度六時だった",
+                    "target": "丁度六時だった",
+                    "suggestion": "ちょうど六時だった",
+                    "reason": "漢字ひらき",
+                    "explanation": "「丁度（ちょうど）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 1,
+                    "original": "沢山差し込んでいて",
+                    "target": "沢山差し込んでいて",
+                    "suggestion": "たくさん差し込んでいて",
+                    "reason": "漢字ひらき",
+                    "explanation": "「沢山（たくさん）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 13,
+                    "original": "殆ど自信がないんだ",
+                    "target": "殆ど自信がないんだ",
+                    "suggestion": "ほとんど自信がないんだ",
+                    "reason": "漢字ひらき",
+                    "explanation": "「殆ど（ほとんど）」で読みが詰まります（参考：「殆」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 15,
+                    "original": "然し、諦めるには",
+                    "target": "然し、諦めるには",
+                    "suggestion": "しかし、諦めるには",
+                    "reason": "漢字ひらき",
+                    "explanation": "「然し（しかし）」で読みが詰まります",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "raw": {
+                      "line": 45,
+                      "original": "「午後から数学のテストがあります。復習しておいてください」その一言に、教室がざわめいた。海斗は隣の席の友人と顔を見合わせ、小さくため息をついた。窓の外では、白い雲がゆっくりと流れていた。港町の朝は騒がしくも穏やかで、今日もいつもと変わらない一日が始まろうとしていた。",
+                      "suggestion": "",
+                      "reason": "長文",
+                      "explanation": "138字・読点4個で、一文が長く情報が詰まっています",
+                      "confidence": "medium"
+                    },
+                    "reason": "not_long"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\002_ひる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "results": [
+              {
+                "chunkId": "本文\\002_ひる.txt#2-0@8027",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 3,
+                    "original": "是非この鯵を",
+                    "target": "是非この鯵を",
+                    "suggestion": "ぜひこの鯵を",
+                    "reason": "漢字ひらき",
+                    "explanation": "「是非（ぜひ）」で読みが詰まります（参考：「鯵」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 13,
+                    "original": "折角だから海を見ていかない",
+                    "target": "折角だから海を見ていかない",
+                    "suggestion": "せっかくだから海を見ていかない",
+                    "reason": "漢字ひらき",
+                    "explanation": "「折角（せっかく）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "所謂、応用問題ってやつが",
+                    "target": "所謂、応用問題ってやつが",
+                    "suggestion": "いわゆる、応用問題ってやつが",
+                    "reason": "漢字ひらき",
+                    "explanation": "「所謂（いわゆる）」で読みが詰まります（参考：「謂」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "尚、基礎学力はあるつもりなんだけどな",
+                    "target": "尚、基礎学力はあるつもりなんだけどな",
+                    "suggestion": "なお、基礎学力はあるつもりなんだけどな",
+                    "reason": "漢字ひらき",
+                    "explanation": "「尚（なお）」で読みが詰まります",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "raw": {
+                      "line": 47,
+                      "original": "今日も一日、大きな騒ぎもなく過ぎていったことに、海斗は少しほっとした。台所から聞こえる包丁の音を聞きながら、海斗は自分の部屋で鞄の中身を片付け始めた。",
+                      "suggestion": "",
+                      "reason": "長文",
+                      "explanation": "83字・読点3個で、一文が長く情報が詰まっています",
+                      "confidence": "medium"
+                    },
+                    "reason": "not_long"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\003_よる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "results": [
+              {
+                "chunkId": "本文\\003_よる.txt#3-0@8027",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 3,
+                    "original": "沢山撮った写真",
+                    "target": "沢山撮った写真",
+                    "suggestion": "たくさん撮った写真",
+                    "reason": "漢字ひらき",
+                    "explanation": "「沢山（たくさん）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 15,
+                    "original": "是非聞いてみたいな",
+                    "target": "是非聞いてみたいな",
+                    "suggestion": "ぜひ聞いてみたいな",
+                    "reason": "漢字ひらき",
+                    "explanation": "「是非（ぜひ）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 15,
+                    "original": "但し、今夜だけよ",
+                    "target": "但し、今夜だけよ",
+                    "suggestion": "ただし、今夜だけよ",
+                    "reason": "漢字ひらき",
+                    "explanation": "「但し（ただし）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 15,
+                    "original": "或いは、続きは",
+                    "target": "或いは、続きは",
+                    "suggestion": "あるいは、続きは",
+                    "reason": "漢字ひらき",
+                    "explanation": "「或いは（あるいは）」で読みが詰まります（参考：「或」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "然し、昔の写真って",
+                    "target": "然し、昔の写真って",
+                    "suggestion": "しかし、昔の写真って",
+                    "reason": "漢字ひらき",
+                    "explanation": "「然し（しかし）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 5,
+                    "original": "写真には、若い頃の母と、見知らぬ港の風景が写っていた。",
+                    "target": "写真には、若い頃の母と、見知らぬ港の風景が写っていた。",
+                    "suggestion": "",
+                    "reason": "語尾単調",
+                    "explanation": "",
+                    "confidence": "medium",
+                    "monotony": {
+                      "ending": "た。",
+                      "count": 8,
+                      "first": "写真には、若い頃の母と、見知らぬ港の風景が写っていた。",
+                      "startLine": 5,
+                      "endLine": 23,
+                      "heads": [
+                        "写真には、若い頃の母と、…",
+                        "今よりも古い漁船が並び、…",
+                        "母は写真を一枚ずつめくり…",
+                        "海斗は箸を止めて、その話…",
+                        "母はそう言って笑った。",
+                        "海斗は素敵な話だと思いな…",
+                        "窓の外では、波の音が静か…",
+                        "遠くで漁船のエンジン音が…"
+                      ]
+                    }
+                  },
+                  {
+                    "line": 27,
+                    "original": "壁の時計の音だけが、静かな部屋に響いていた。",
+                    "target": "壁の時計の音だけが、静かな部屋に響いていた。",
+                    "suggestion": "",
+                    "reason": "語尾単調",
+                    "explanation": "",
+                    "confidence": "medium",
+                    "monotony": {
+                      "ending": "た。",
+                      "count": 7,
+                      "first": "壁の時計の音だけが、静かな部屋に響いていた。",
+                      "startLine": 27,
+                      "endLine": 45,
+                      "heads": [
+                        "壁の時計の音だけが、静か…",
+                        "海斗は少し不満そうな顔を…",
+                        "母は素敵な微笑みを浮かべ…",
+                        "海斗は湯呑みを両手で包み…",
+                        "窓の外では、波の音がいつ…",
+                        "母は片付けを終えると、海…",
+                        "海斗は布団の中で、天井の…"
+                      ]
+                    }
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "ateji": {
+      "values": [
+        6
+      ],
+      "min": 6,
+      "max": 6
+    },
+    "atejiTotal": {
+      "values": [
+        8
+      ],
+      "min": 8,
+      "max": 8
+    },
+    "mustOpen": {
+      "values": [
+        7
+      ],
+      "min": 7,
+      "max": 7
+    },
+    "mustOpenTotal": {
+      "values": [
+        10
+      ],
+      "min": 10,
+      "max": 10
+    },
+    "falsePositives": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "seededWords": {
+      "values": [
+        18
+      ],
+      "min": 18,
+      "max": 18
+    },
+    "budgetCeiling": {
+      "values": [
+        21
+      ],
+      "min": 21,
+      "max": 21
+    },
+    "packedItems": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "noSuggestion": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        15
+      ],
+      "min": 15,
+      "max": 15
+    },
+    "rejected": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "rejected.not_long": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        64229
+      ],
+      "min": 64229,
+      "max": 64229
+    }
+  },
+  "lines": [
+    "指摘の上限: 21件（仕込みは18語）",
+    "当て字を拾えた: 6/8",
+    "ひらくべき語を拾えた: 7/10",
+    "誤検出（ひらいてはいけない語をひらいた）: 0",
+    "1件に複数語を詰めた指摘: 0件",
+    "提案なし（漢字ひらきなのに修正案が空）: 0",
+    "指摘（検算を通ったもの）: 15",
+    "落とした（検算で弾いたもの）: 2",
+    "　└ 落とした理由：not_long: 2",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 64.2秒"
+  ]
+}

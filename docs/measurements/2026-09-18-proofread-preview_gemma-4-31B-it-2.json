@@ -1,0 +1,487 @@
+{
+  "measuredAt": "2026-09-17T22:24:34.216Z",
+  "feature": "proofread",
+  "runner": "sakura",
+  "tool": "novel.prompt → novel.validate",
+  "model": "preview/gemma-4-31B-it",
+  "numCtx": 32768,
+  "endpoint": "https://api.ai.sakura.ad.jp/v1/chat/completions",
+  "options": {},
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.66.9",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.9",
+  "plans": [
+    {
+      "chunkId": "本文\\001_あさ.txt#1-0@8027",
+      "chars": 1464,
+      "maxIssues": 7
+    },
+    {
+      "chunkId": "本文\\002_ひる.txt#2-0@8027",
+      "chars": 1478,
+      "maxIssues": 7
+    },
+    {
+      "chunkId": "本文\\003_よる.txt#3-0@8027",
+      "chars": 1402,
+      "maxIssues": 7
+    }
+  ],
+  "maxIssuesPer1000Chars": 5,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\proofread",
+    "targets": [
+      "本文\\001_あさ.txt",
+      "本文\\002_ひる.txt",
+      "本文\\003_よる.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\proofread\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 20494,
+      "staleNote": null,
+      "metrics": {
+        "ateji": 8,
+        "atejiTotal": 8,
+        "mustOpen": 6,
+        "mustOpenTotal": 10,
+        "falsePositives": 0,
+        "seededWords": 18,
+        "budgetCeiling": 21,
+        "packedItems": 0,
+        "noSuggestion": 0,
+        "accepted": 15,
+        "rejected": 1,
+        "rejected.not_repeated": 1,
+        "failures": 0,
+        "elapsedMs": 20494
+      },
+      "detail": {
+        "rejectedReasons": {
+          "not_repeated": 1
+        },
+        "failures": [],
+        "ateji": {
+          "丁度": {
+            "found": 2,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "沢山": {
+            "found": 2,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "是非": {
+            "found": 2,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "折角": {
+            "found": 2,
+            "total": 2,
+            "noSuggestion": 0
+          }
+        },
+        "mustOpen": {
+          "然し": {
+            "found": 2,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "殆ど": {
+            "found": 2,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "出来る": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "所謂": {
+            "found": 1,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "尚": {
+            "found": 1,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "但し": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "或いは": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          }
+        },
+        "falsePositives": {},
+        "packedItems": []
+      },
+      "raw": [
+        {
+          "target": "本文\\001_あさ.txt",
+          "chunks": [
+            {
+              "target": "本文\\001_あさ.txt#1-0@8027",
+              "aiText": "{\n  \"issues\": [\n    {\n      \"confidence\": \"high\",\n      \"explanation\": \"「丁度（ちょうど）」で読みが詰まります\",\n      \"line\": 1,\n      \"original\": \"丁度六時だった\",\n      \"reason\": \"漢字ひらき\",\n      \"suggestion\": \"ちょうど六時だった\"\n    },\n    {\n      \"confidence\": \"high\",\n      \"explanation\": \"「沢山（たくさん）」で読みが詰まります\",\n      \"line\": 1,\n      \"original\": \"光が沢山差し込んでいて\",\n      \"reason\": \"漢字ひらき\",\n      \"suggestion\": \"光がたくさん差し込んでいて\"\n    },\n    {\n      \"confidence\": \"high\",\n      \"explanation\": \"「殆ど（ほとんど）」で読みが詰まります\",\n      \"line\": 13,\n      \"original\": \"殆ど自信がないんだ\",\n      \"reason\": \"漢字ひらき\",\n      \"suggestion\": \"ほとんど自信がないんだ\"\n    },\n    {\n      \"confidence\": \"high\",\n      \"explanation\": \"「然し（しかし）」で読みが詰まります\",\n      \"line\": 15,\n      \"original\": \"然し、諦めるには\",\n      \"reason\": \"漢字ひらき\",\n      \"suggestion\": \"しかし、諦めるには\"\n    },\n    {\n      \"confidence\": \"medium\",\n      \"explanation\": \"「〜た。」で終わる文が5連続しています\",\n      \"line\": 21,\n      \"original\": \"安心した。……始めている。……なでた。\",\n      \"reason\": \"語尾単調\",\n      \"suggestion\": \"\"\n    }\n  ]\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 2944,
+                "total_tokens": 3335,
+                "completion_tokens": 391,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\001_あさ.txt#1-0@8027",
+                "chapterLabel": "第1話",
+                "accepted": [
+                  {
+                    "line": 1,
+                    "original": "丁度六時だった",
+                    "target": "丁度六時だった",
+                    "suggestion": "ちょうど六時だった",
+                    "reason": "漢字ひらき",
+                    "explanation": "「丁度（ちょうど）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 1,
+                    "original": "光が沢山差し込んでいて",
+                    "target": "光が沢山差し込んでいて",
+                    "suggestion": "光がたくさん差し込んでいて",
+                    "reason": "漢字ひらき",
+                    "explanation": "「沢山（たくさん）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 13,
+                    "original": "殆ど自信がないんだ",
+                    "target": "殆ど自信がないんだ",
+                    "suggestion": "ほとんど自信がないんだ",
+                    "reason": "漢字ひらき",
+                    "explanation": "「殆ど（ほとんど）」で読みが詰まります（参考：「殆」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 15,
+                    "original": "然し、諦めるには",
+                    "target": "然し、諦めるには",
+                    "suggestion": "しかし、諦めるには",
+                    "reason": "漢字ひらき",
+                    "explanation": "「然し（しかし）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 23,
+                    "original": "海斗は毎朝この音を聞きながら学校へ向かうのが好きだった。",
+                    "target": "海斗は毎朝この音を聞きながら学校へ向かうのが好きだった。",
+                    "suggestion": "",
+                    "reason": "語尾単調",
+                    "explanation": "",
+                    "confidence": "medium",
+                    "monotony": {
+                      "ending": "た。",
+                      "count": 11,
+                      "first": "海斗は毎朝この音を聞きながら学校へ向かうのが好きだった。",
+                      "startLine": 23,
+                      "endLine": 41,
+                      "heads": [
+                        "海斗は毎朝この音を聞きな…",
+                        "海斗は玄関で靴を履き、港…",
+                        "途中で顔なじみの漁師に挨…",
+                        "潮の匂いが、いつもより濃…",
+                        "坂を下りきったところで、…",
+                        "二人は並んで歩きながら、…",
+                        "陽菜は笑いながら、海斗の…",
+                        "港沿いの道を歩いていくと…",
+                        "潮風に髪をなびかせながら…",
+                        "二人は坂道を上り、学校の…",
+                        "教室に入ると、担任の先生…"
+                      ]
+                    }
+                  }
+                ],
+                "rejected": []
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\002_ひる.txt",
+          "chunks": [
+            {
+              "target": "本文\\002_ひる.txt#2-0@8027",
+              "aiText": "{\n  \"issues\": [\n    {\n      \"confidence\": \"high\",\n      \"explanation\": \"「是非（ぜひ）」で読みが詰まります\",\n      \"line\": 3,\n      \"original\": \"是非この鯵を持っていきなさい\",\n      \"reason\": \"漢字ひらき\",\n      \"suggestion\": \"ぜひこの鯵を持っていきなさい\"\n    },\n    {\n      \"confidence\": \"high\",\n      \"explanation\": \"「丁度（ちょうど）」で読みが詰まります\",\n      \"line\": 9,\n      \"original\": \"丁度正午を指した針が\",\n      \"reason\": \"漢字ひらき\",\n      \"suggestion\": \"ちょうど正午を指した針が\"\n    },\n    {\n      \"confidence\": \"high\",\n      \"explanation\": \"「折角（せっかく）」で読みが詰まります\",\n      \"line\": 13,\n      \"original\": \"折角だから海を見ていかない\",\n      \"reason\": \"漢字ひらき\",\n      \"suggestion\": \"せっかくだから海を見ていかない\"\n    },\n    {\n      \"confidence\": \"high\",\n      \"explanation\": \"「所謂（いわゆる）」で読みが詰まります\",\n      \"line\": 19,\n      \"original\": \"所謂、応用問題ってやつが\",\n      \"reason\": \"漢字ひらき\",\n      \"suggestion\": \"いわゆる、応用問題ってやつが\"\n    },\n    {\n      \"confidence\": \"high\",\n      \"explanation\": \"「尚（なお）」で読みが詰まります\",\n      \"line\": 19,\n      \"original\": \"尚、基礎学力はあるつもり\",\n      \"reason\": \"漢字ひらき\",\n      \"suggestion\": \"なお、基礎学力はあるつもり\"\n    }\n  ]\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3016,
+                "total_tokens": 3434,
+                "completion_tokens": 418,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\002_ひる.txt#2-0@8027",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 3,
+                    "original": "是非この鯵を持っていきなさい",
+                    "target": "是非この鯵を持っていきなさい",
+                    "suggestion": "ぜひこの鯵を持っていきなさい",
+                    "reason": "漢字ひらき",
+                    "explanation": "「是非（ぜひ）」で読みが詰まります（参考：「鯵」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 9,
+                    "original": "丁度正午を指した針が",
+                    "target": "丁度正午を指した針が",
+                    "suggestion": "ちょうど正午を指した針が",
+                    "reason": "漢字ひらき",
+                    "explanation": "「丁度（ちょうど）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 13,
+                    "original": "折角だから海を見ていかない",
+                    "target": "折角だから海を見ていかない",
+                    "suggestion": "せっかくだから海を見ていかない",
+                    "reason": "漢字ひらき",
+                    "explanation": "「折角（せっかく）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "所謂、応用問題ってやつが",
+                    "target": "所謂、応用問題ってやつが",
+                    "suggestion": "いわゆる、応用問題ってやつが",
+                    "reason": "漢字ひらき",
+                    "explanation": "「所謂（いわゆる）」で読みが詰まります（参考：「謂」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "尚、基礎学力はあるつもり",
+                    "target": "尚、基礎学力はあるつもり",
+                    "suggestion": "なお、基礎学力はあるつもり",
+                    "reason": "漢字ひらき",
+                    "explanation": "「尚（なお）」で読みが詰まります",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\003_よる.txt",
+          "chunks": [
+            {
+              "target": "本文\\003_よる.txt#3-0@8027",
+              "aiText": "{\n  \"issues\": [\n    {\n      \"confidence\": \"high\",\n      \"explanation\": \"「沢山（たくさん）」で読みが詰まります\",\n      \"line\": 3,\n      \"original\": \"沢山撮った写真\",\n      \"reason\": \"漢字ひらき\",\n      \"suggestion\": \"たくさん撮った写真\"\n    },\n    {\n      \"confidence\": \"high\",\n      \"explanation\": \"「折角（せっかく）」で読みが詰まります\",\n      \"line\": 3,\n      \"original\": \"折角だから見せてあげる\",\n      \"reason\": \"漢字ひらき\",\n      \"suggestion\": \"せっかくだから見せてあげる\"\n    },\n    {\n      \"confidence\": \"high\",\n      \"explanation\": \"「是非（ぜひ）」で読みが詰まります\",\n      \"line\": 13,\n      \"original\": \"是非聞いてみたいな\",\n      \"reason\": \"漢字ひらき\",\n      \"suggestion\": \"ぜひ聞いてみたいな\"\n    },\n    {\n      \"confidence\": \"high\",\n      \"explanation\": \"「殆ど（ほとんど）」で読みが詰まります\",\n      \"line\": 15,\n      \"original\": \"殆ど忘れてしまったけど\",\n      \"reason\": \"漢字ひらき\",\n      \"suggestion\": \"ほとんど忘れてしまったけど\"\n    },\n    {\n      \"confidence\": \"high\",\n      \"explanation\": \"「然し（しかし）」で読みが詰まります\",\n      \"line\": 19,\n      \"original\": \"然し、昔の写真って\",\n      \"reason\": \"漢字ひらき\",\n      \"suggestion\": \"しかし、昔の写真って\"\n    },\n    {\n      \"confidence\": \"medium\",\n      \"explanation\": \"「お茶を一口飲み」が25行目と27行目で繰り返されています\",\n      \"line\": 27,\n      \"original\": \"母はお茶を一口飲み\",\n      \"reason\": \"同語反復\",\n      \"suggestion\": \"\"\n    }\n  ]\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 2896,
+                "total_tokens": 3367,
+                "completion_tokens": 471,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\003_よる.txt#3-0@8027",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 3,
+                    "original": "沢山撮った写真",
+                    "target": "沢山撮った写真",
+                    "suggestion": "たくさん撮った写真",
+                    "reason": "漢字ひらき",
+                    "explanation": "「沢山（たくさん）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 3,
+                    "original": "折角だから見せてあげる",
+                    "target": "折角だから見せてあげる",
+                    "suggestion": "せっかくだから見せてあげる",
+                    "reason": "漢字ひらき",
+                    "explanation": "「折角（せっかく）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 13,
+                    "original": "是非聞いてみたいな",
+                    "target": "是非聞いてみたいな",
+                    "suggestion": "ぜひ聞いてみたいな",
+                    "reason": "漢字ひらき",
+                    "explanation": "「是非（ぜひ）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 15,
+                    "original": "殆ど忘れてしまったけど",
+                    "target": "殆ど忘れてしまったけど",
+                    "suggestion": "ほとんど忘れてしまったけど",
+                    "reason": "漢字ひらき",
+                    "explanation": "「殆ど（ほとんど）」で読みが詰まります（参考：「殆」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "然し、昔の写真って",
+                    "target": "然し、昔の写真って",
+                    "suggestion": "しかし、昔の写真って",
+                    "reason": "漢字ひらき",
+                    "explanation": "「然し（しかし）」で読みが詰まります",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "raw": {
+                      "confidence": "medium",
+                      "explanation": "「お茶を一口飲み」が25行目と27行目で繰り返されています",
+                      "line": 27,
+                      "original": "母はお茶を一口飲み",
+                      "reason": "同語反復",
+                      "suggestion": ""
+                    },
+                    "reason": "not_repeated"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "ateji": {
+      "values": [
+        8
+      ],
+      "min": 8,
+      "max": 8
+    },
+    "atejiTotal": {
+      "values": [
+        8
+      ],
+      "min": 8,
+      "max": 8
+    },
+    "mustOpen": {
+      "values": [
+        6
+      ],
+      "min": 6,
+      "max": 6
+    },
+    "mustOpenTotal": {
+      "values": [
+        10
+      ],
+      "min": 10,
+      "max": 10
+    },
+    "falsePositives": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "seededWords": {
+      "values": [
+        18
+      ],
+      "min": 18,
+      "max": 18
+    },
+    "budgetCeiling": {
+      "values": [
+        21
+      ],
+      "min": 21,
+      "max": 21
+    },
+    "packedItems": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "noSuggestion": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        15
+      ],
+      "min": 15,
+      "max": 15
+    },
+    "rejected": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "rejected.not_repeated": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        20494
+      ],
+      "min": 20494,
+      "max": 20494
+    }
+  },
+  "lines": [
+    "指摘の上限: 21件（仕込みは18語）",
+    "当て字を拾えた: 8/8",
+    "ひらくべき語を拾えた: 6/10",
+    "誤検出（ひらいてはいけない語をひらいた）: 0",
+    "1件に複数語を詰めた指摘: 0件",
+    "提案なし（漢字ひらきなのに修正案が空）: 0",
+    "指摘（検算を通ったもの）: 15",
+    "落とした（検算で弾いたもの）: 1",
+    "　└ 落とした理由：not_repeated: 1",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 20.5秒"
+  ]
+}

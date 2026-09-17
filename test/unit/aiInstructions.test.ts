@@ -14,12 +14,21 @@ import {
   AI_INSTRUCTION_TARGETS,
   AI_INSTRUCTION_TEMPLATE_PATH,
   AiInstructionFormatError,
+  applyUsageToInstructionBody,
   buildAiInstructionDocument,
   findAiInstructionTarget,
   mergeCodexToml,
   mergeMcpServersJson,
 } from "../../src/core/aiInstructions";
 import { RECOVERY_DIRECTORY_NAME } from "../../src/core/atomicWrite";
+import {
+  AI_INSTRUCTION_USAGE_FILE,
+  DIRECT_READ_CAVEAT,
+  VIA_TOOLS_ONLY_NOTE,
+  describeAiInstructionUsage,
+} from "../../src/core/aiInstructionUsage";
+import { AiInstructionUsageStore } from "../../src/core/aiInstructionUsageStore";
+import { IGNORED_PATHS } from "../../src/core/workRegistry";
 import { SERVER_NAME } from "../../src/mcp/version";
 
 /**
@@ -132,6 +141,23 @@ describe("指示書の中身（VS Code に触らない部分）", () => {
         line.startsWith(`[mcp_servers.${SERVER_NAME}]`)
       )
     ).toHaveLength(1);
+  });
+
+  test("**使い方の頭は、本文を1文字も変えない**", () => {
+    const opened = applyUsageToInstructionBody(body, "open-work", "C:\\作品");
+    const closed = applyUsageToInstructionBody(body, "keep-closed", "C:\\作品");
+    // 開いて使うなら、0.66.8 までと同じ（何も足さない）
+    expect(opened).toBe(body);
+    // 開かずに使うときだけ、頭に作品の場所が付く
+    expect(closed.endsWith(body)).toBe(true);
+    expect(closed).toContain("C:\\作品");
+    // フロントマターは、そのさらに前（順が入れ替わると読まれない）
+    const skill = buildAiInstructionDocument(
+      findAiInstructionTarget("claude-code"),
+      closed
+    );
+    expect(skill.startsWith("---\n")).toBe(true);
+    expect(skill.endsWith(body)).toBe(true);
   });
 
   test("節が無ければ末尾へ足す（前の節の値として読まれない）", () => {
@@ -258,7 +284,12 @@ describe("作品へ書き出す", () => {
     } as unknown as typeof workspace.fs;
 
     Object.assign(window, {
-      showQuickPick: vi.fn(async (items: unknown) => items),
+      // **相手選び（複数可）と使い方選び（1つ）の両方を通す。**
+      // 使い方は先頭＝「作品フォルダーを開いて使う」＝0.66.8 までの動き
+      showQuickPick: vi.fn(
+        async (items: unknown, options?: { canPickMany?: boolean }) =>
+          options?.canPickMany ? items : (items as unknown[])[0]
+      ),
       showInformationMessage: vi.fn(async () => undefined),
       showWarningMessage: vi.fn(async () => undefined),
       showOpenDialog: vi.fn(async () => undefined),
@@ -407,6 +438,143 @@ describe("作品へ書き出す", () => {
     expect(after.mtimeMs).toBe(before.mtimeMs);
     // 同じなので退避も作らない
     expect(await exists(RECOVERY_DIRECTORY_NAME)).toBe(false);
+  });
+
+  /*
+    **作品フォルダーを開いて使うか、開かずに使うか**（設計書6.87.14 の末尾、
+    作者の指示 2026-09-18）。ここで確かめたいのは4つ。
+
+    1. 置き先が選択で変わる
+    2. 「開かずに使う」のときだけ、頭に作品の絶対パスが付く
+    3. 本文は1つで、違いは頭だけ（写しを2つ持たない）
+    4. 選んだことが覚えられ、読み戻せる（編集履歴の断りに要る）
+  */
+  describe("使い方を選ぶ", () => {
+    /** 「作品を開かずに使う」を選び、置き先として `destination` を返す */
+    const chooseKeepClosed = (destination: string): void => {
+      (window.showQuickPick as unknown as ReturnType<typeof vi.fn>) = vi.fn(
+        async (items: unknown, options?: { canPickMany?: boolean }) =>
+          options?.canPickMany
+            ? items
+            : (items as Array<{ usage?: string }>).find(
+                (item) => item.usage === "keep-closed"
+              )
+      );
+      (window.showOpenDialog as unknown as ReturnType<typeof vi.fn>) = vi.fn(
+        async () => [Uri.file(destination)]
+      );
+    };
+
+    let outside = "";
+
+    beforeEach(async () => {
+      outside = nodePath.join(base, "AI作業場");
+      await fsp.mkdir(outside, { recursive: true });
+    });
+
+    const readOutside = (relative: string): Promise<string> =>
+      fsp.readFile(nodePath.join(outside, relative), "utf8");
+
+    test("**「開かずに使う」と、作品の外へ置き、頭に作品の場所が付く**", async () => {
+      chooseKeepClosed(outside);
+
+      await writeAiInstructions(context(), work());
+
+      // 作品フォルダーには指示書も登録も置かれない
+      expect(await exists("GEMINI.md")).toBe(false);
+      expect(await exists(".mcp.json")).toBe(false);
+      expect(await exists(".claude/skills/novel-assist/SKILL.md")).toBe(false);
+
+      const placed = await readOutside("GEMINI.md");
+      // **作品の絶対パスが頭にある**（道具へ渡す場所）
+      expect(placed).toContain(root);
+      // **本文は1つのまま**——違うのは頭だけ
+      expect(placed.endsWith(TEMPLATE)).toBe(true);
+      expect(placed).not.toBe(TEMPLATE);
+
+      // Claude Code のフロントマターは先頭のまま（崩れると読まれない）
+      const skill = await readOutside(".claude/skills/novel-assist/SKILL.md");
+      expect(skill.startsWith("---\nname: novel-assist\n")).toBe(true);
+      expect(skill).toContain(root);
+      expect(skill.endsWith(TEMPLATE)).toBe(true);
+
+      // MCP の登録も、AIが開くほうのフォルダーへ置く
+      const registration = JSON.parse(await readOutside(".mcp.json"));
+      expect(registration.mcpServers[SERVER_NAME]).toBeDefined();
+    });
+
+    test("「開いて使う」の本文は、頭が付かない（違いは頭だけ）", async () => {
+      await writeAiInstructions(context(), work());
+      const opened = await read("GEMINI.md");
+
+      chooseKeepClosed(outside);
+      await writeAiInstructions(context(), work());
+      const closed = await readOutside("GEMINI.md");
+
+      expect(opened).toBe(TEMPLATE);
+      expect(closed.slice(closed.length - opened.length)).toBe(opened);
+    });
+
+    test("**作品フォルダーそのものを選んだら、選び直してもらう**", async () => {
+      chooseKeepClosed(outside);
+      const dialog = vi
+        .fn()
+        .mockResolvedValueOnce([Uri.file(root)])
+        .mockResolvedValueOnce([Uri.file(outside)]);
+      (window.showOpenDialog as unknown as ReturnType<typeof vi.fn>) = dialog;
+      (window.showWarningMessage as unknown as ReturnType<typeof vi.fn>) =
+        vi.fn(async () => "選び直す");
+
+      await writeAiInstructions(context(), work());
+
+      expect(dialog).toHaveBeenCalledTimes(2);
+      expect(await exists("GEMINI.md")).toBe(false);
+      expect(await readOutside("GEMINI.md")).toContain(root);
+    });
+
+    test("選び直さずにやめれば、1文字も置かれない", async () => {
+      chooseKeepClosed(outside);
+      (window.showOpenDialog as unknown as ReturnType<typeof vi.fn>) = vi.fn(
+        async () => [Uri.file(root)]
+      );
+      (window.showWarningMessage as unknown as ReturnType<typeof vi.fn>) =
+        vi.fn(async () => undefined);
+
+      await writeAiInstructions(context(), work());
+
+      expect(await exists("GEMINI.md")).toBe(false);
+      expect(await exists(`.aiwriter/${AI_INSTRUCTION_USAGE_FILE}`)).toBe(false);
+    });
+
+    test("**選んだ使い方を覚えていて、読み戻せる**", async () => {
+      await writeAiInstructions(context(), work());
+      const opened = await new AiInstructionUsageStore(work()).load();
+      expect(opened?.usage).toBe("open-work");
+      expect(opened?.decidedAt).not.toBe("");
+      // 編集履歴に出す1行（記録が実態より少なく見えることを断る）
+      expect(describeAiInstructionUsage(opened)).toEqual({
+        text: DIRECT_READ_CAVEAT,
+        warn: true,
+      });
+
+      chooseKeepClosed(outside);
+      await writeAiInstructions(context(), work());
+      const closed = await new AiInstructionUsageStore(work()).load();
+      expect(closed?.usage).toBe("keep-closed");
+      expect(describeAiInstructionUsage(closed)).toEqual({
+        text: VIA_TOOLS_ONLY_NOTE,
+        warn: false,
+      });
+    });
+
+    test("覚え書きは同期しない（許可の印と同じ）", () => {
+      expect(IGNORED_PATHS).toContain(`.aiwriter/${AI_INSTRUCTION_USAGE_FILE}`);
+    });
+
+    test("選んでいない作品では、何も言わない", () => {
+      // どちらとも言い切れないので、断りも出さない
+      expect(describeAiInstructionUsage(undefined)).toBeUndefined();
+    });
   });
 });
 
