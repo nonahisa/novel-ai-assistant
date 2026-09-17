@@ -65,6 +65,12 @@ export const CORE_ENTRY_NAMES = [
   "chapterProposalValidation",
   "blurbValidation",
   "nameCollision",
+  /*
+    承認待ちの形（0.66.3。設計書6.87.16）。`settings.propose` が同じ形の
+    ファイルを置くので、**`pendingUpdates.ts`（`vscode` を import している）
+    とは別に、純粋な部分だけ**をここから起点にする。
+  */
+  "pendingUpdateFormat",
 ];
 
 /**

@@ -3,6 +3,18 @@ import * as path from "./paths";
 import { AIWRITER_DIR, WorkEntry } from "../models/types";
 import { parseCharacter, type Character } from "../models/character";
 import { atomicWriteFile } from "./atomicWrite";
+import {
+  PENDING_DIR,
+  buildPendingPayload,
+  pendingFileName,
+  // `pendingSourceLabel` はこの中では使わないので、下の再輸出だけで渡す
+  readKind,
+  readReason,
+  readSource,
+  unwrapPendingCharacter,
+  type PendingUpdateKind,
+  type PendingUpdateSource,
+} from "./pendingUpdateFormat";
 
 /**
  * 抽出で作られた「既存人物の更新案」の置き場。
@@ -16,43 +28,33 @@ import { atomicWriteFile } from "./atomicWrite";
  *
  * `.aiwriter` の下に置くのは、作者が読む「設定」フォルダーを
  * 未確定のファイルで散らかさないため。
+ *
+ * ---
+ *
+ * **形そのものは `pendingUpdateFormat.ts` が持つ**（0.66.3）。
+ * 外から呼ぶ束（MCPサーバー。設計書6.87.16 の `settings.propose`）が
+ * 同じ形のファイルを置くのに、このファイルは `vscode` を import している
+ * ので使えない。**写しを作らずに済ませる**ため、純粋な部分を切り出して
+ * ここから再輸出している（`export { X } from` だけではこの中で `X` を
+ * 使えないので、`import` を併記する）。
  */
 
-const PENDING_DIR = "pending-characters";
-
-/**
- * その更新案がどこから来たか（設計書6.4.9）。
- *
- * 省略（`undefined`）は**AIの抽出**である。出どころを持たせる前に積まれた
- * ファイルがそう読まれるので、既定を変えてはいけない。
- *
- * plot: 作者が plot.md の「主要登場人物」へ書いたもの。AIの読みではなく
- *   作者の文なので、承認するときの見方が変わる
- * chat: 相談の中で作者が決めたこと（設計書6.72）。AIが拾い出してはいるが、
- *   出どころは**作者自身の発言**である（根拠の引用を会話と照合している）
- */
-export type PendingUpdateSource = "plot" | "chat";
-
-/** 出どころの短い呼び名。画面に出す文言はここだけが持つ */
-export function pendingSourceLabel(
-  source: PendingUpdateSource | undefined
-): string {
-  if (source === "plot") return "プロットから";
-  if (source === "chat") return "相談から";
-  return "";
-}
-
-/**
- * 何の案か（設計書6.4.9）。
- *
- * 省略（`undefined`）は**既存レコードの更新**である。これまで積まれた
- * ものはすべてそれなので、既定を変えてはいけない。
- *
- * creation: まだ台帳に無い人物を作る案。**IDは仮**（`PENDING_CREATION_ID`）で、
- *   本当の採番は承認したときに行う——積んだ時点で採ると、別の作品操作で
- *   同じ番号が先に使われる
- */
-export type PendingUpdateKind = "creation";
+export {
+  PENDING_DIR,
+  buildPendingPayload,
+  pendingFileName,
+  pendingSourceLabel,
+  readKind,
+  readReason,
+  readSource,
+  unwrapPendingCharacter,
+  PENDING_CREATION_ID,
+} from "./pendingUpdateFormat";
+export type {
+  PendingUpdateKind,
+  PendingUpdateSource,
+  PendingPayload,
+} from "./pendingUpdateFormat";
 
 export interface PendingUpdate {
   /** 更新案。既存レコードと同じID（新規案では仮のID） */
@@ -63,13 +65,20 @@ export interface PendingUpdate {
   source?: PendingUpdateSource;
   /** 何の案か。古いファイルには無い（＝既存レコードの更新） */
   kind?: PendingUpdateKind;
+  /**
+   * なぜそう提案するか（設計書6.87.16）。
+   *
+   * いまのところ外部AIの案だけが持つ。**作者が採否を決める材料**なので、
+   * 承認の画面へそのまま出す。製品の抽出は根拠を `evidence` に入れるので、
+   * ここは空のままでよい。
+   */
+  reason?: string;
 }
 
 /**
- * 新規案のIDは仮である（`core/plotCharacterSync.ts` の
- * `PENDING_CREATION_ID`）。`parseCharacter` がIDの形（`char_数字`）を
- * 確かめるので空にはできないが、**その番号のまま台帳へ入れてはいけない**
- * ——`applyPendingUpdates` が承認のときに採り直す。
+ * 新規案のIDは仮である（`PENDING_CREATION_ID`）。`parseCharacter` が
+ * IDの形（`char_数字`）を確かめるので空にはできないが、**その番号のまま
+ * 台帳へ入れてはいけない**——`applyPendingUpdates` が承認のときに採り直す。
  */
 
 export class PendingUpdateStore {
@@ -105,12 +114,10 @@ export class PendingUpdateStore {
         pendingFileName(character, options.kind)
       );
       const source = options.source ?? (await this.sourceOf(target));
-      // 何も伝えることが無いものは、**これまでどおり人物のJSONそのもの**を
-      // 書く。包みを増やすのは、出どころか種別があるときだけでよい
-      const payload =
-        source || options.kind
-          ? { ...(options.kind ? { kind: options.kind } : {}), ...(source ? { source } : {}), character }
-          : character;
+      const payload = buildPendingPayload(character, {
+        kind: options.kind,
+        source,
+      });
       const body = `${JSON.stringify(payload, null, 2)}\n`;
       // 保留ファイルは作者の原稿ではないので、上書きしてよい。
       // 同じ人物の更新案が2つ並んでも作者が困るだけ
@@ -164,10 +171,11 @@ export class PendingUpdateStore {
         );
         const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
         updates.push({
-          character: parseCharacter(unwrap(parsed)),
+          character: parseCharacter(unwrapPendingCharacter(parsed)),
           filePath,
           source: readSource(parsed),
           kind: readKind(parsed),
+          reason: readReason(parsed),
         });
       } catch (error) {
         errors.push({
@@ -193,54 +201,4 @@ export class PendingUpdateStore {
   async count(): Promise<number> {
     return (await this.loadAll()).updates.length;
   }
-}
-
-/**
- * 保留ファイルの中身から人物を取り出す。
- *
- * **2つの形がある。** 出どころを持たせる前（設計書6.4.9より前）に
- * 積まれたものは人物のJSONそのもので、作者の環境にはそれが残っている。
- * 読めなくすると、確認を待っている提案が黙って消える。
- */
-function unwrap(parsed: unknown): unknown {
-  if (
-    typeof parsed === "object" &&
-    parsed !== null &&
-    !Array.isArray(parsed) &&
-    "character" in parsed
-  ) {
-    return (parsed as { character: unknown }).character;
-  }
-  return parsed;
-}
-
-function readSource(parsed: unknown): PendingUpdateSource | undefined {
-  if (typeof parsed !== "object" || parsed === null) return undefined;
-  const source = (parsed as { source?: unknown }).source;
-  // 知らない値は「出どころ無し」として読む。**捨てずに残す**のではなく
-  // 落とすのは、画面に出す文言を持たないものを表示できないため
-  return source === "plot" || source === "chat" ? source : undefined;
-}
-
-function readKind(parsed: unknown): PendingUpdateKind | undefined {
-  if (typeof parsed !== "object" || parsed === null) return undefined;
-  const kind = (parsed as { kind?: unknown }).kind;
-  return kind === "creation" ? "creation" : undefined;
-}
-
-/**
- * 保留ファイルの名前。
- *
- * 更新案はこれまでどおりレコードのID。新規案は**名前**で付ける
- * （IDが仮であるため。同じ名前を積み直したときだけ上書きされる）。
- */
-function pendingFileName(
-  character: Character,
-  kind: PendingUpdateKind | undefined
-): string {
-  if (kind !== "creation") return `${character.id}.json`;
-  const safeName = character.name
-    .replace(/[/\\:*?"<>|\s]/g, "")
-    .slice(0, 30);
-  return `new_${safeName || character.id}.json`;
 }

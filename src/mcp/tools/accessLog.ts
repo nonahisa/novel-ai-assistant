@@ -55,6 +55,13 @@ export function exposureOf(
   // 作品に触れないもの
   if (tool === "mcp.version") return "none";
 
+  /*
+    更新案を承認待ちへ置く道具（設計書6.87.16）。**原稿は1文字も外へ出ない**
+    ——呼び出し元が持ち込んだ内容を置くだけで、こちらから本文も資料も返さない
+    （返すのは置いた場所と、作者が次にすることだけ）。
+  */
+  if (tool === "settings.propose") return "none";
+
   // `run` は runner で分かれる。**手元の Ollama なら、この機械から出ない**
   if (tool.endsWith("Run") || tool.endsWith(".run")) {
     const runner = args?.runner;
@@ -105,10 +112,20 @@ function modelOf(args: Record<string, unknown> | undefined): string {
  * 本文・抜粋は入れない（記録が原稿の写しになると、同期先に原稿が二重に載る）。
  */
 function detailOf(
+  tool: string,
   args: Record<string, unknown> | undefined,
   failure: string | undefined
 ): string {
   if (failure) return failure;
+  /*
+    承認待ちへ置いた回は、**何をしたかが一目で分かる形**で残す（6.87.16）。
+    人物の名前までは入れるが、**`changes` の中身は入れない**——記録が
+    資料の写しになると、同期先に同じ文が二重に載る。
+  */
+  if (tool === "settings.propose") {
+    const name = typeof args?.name === "string" ? args.name : "";
+    return name ? `承認待ちへ置いた（${name}）` : "承認待ちへ置いた";
+  }
   const parts: string[] = [];
   if (typeof args?.chunkIndex === "number") {
     parts.push(`チャンク${args.chunkIndex}`);
@@ -174,7 +191,7 @@ export function recordExternalAccess(input: RecordAccessInput): boolean {
     ok: input.ok,
     detail: input.denied
       ? EXTERNAL_ACCESS_DENIED_DETAIL
-      : detailOf(args, input.failure),
+      : detailOf(input.tool, args, input.failure),
   };
 
   try {

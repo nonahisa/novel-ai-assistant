@@ -1,4 +1,7 @@
 import { emptyCharacter, type Character } from "../models/character";
+// 再輸出だけでは、このファイルの中で名前を使えない（`buildNewCharacterRecords`
+// が使う）。`export { X } from` とは別に import も要る
+import { PENDING_CREATION_ID } from "./pendingUpdateFormat";
 import { normalizeName } from "./characterMerge";
 import { sha256Text } from "./hash";
 import { clampSummary } from "./summaryLimit";
@@ -263,8 +266,13 @@ export function buildPlotCharacterUpdates(
  * **この番号のまま台帳へ入れてはいけない**——承認したときに
  * `applyPendingUpdates` が採り直す。積んだ時点で本番の番号を採ると、
  * 承認までのあいだに別の操作が同じ番号を使う。
+ *
+ * **実体は `pendingUpdateFormat.ts` へ移した**（0.66.3）。このファイルは
+ * `characterMerge` 経由で重い系を引き込むので、外から呼ぶ束（MCPサーバー。
+ * 設計書6.87.16）から指すには重すぎる。ここからは再輸出するだけなので、
+ * 今までどおりこのファイルから読んでよい。
  */
-export const PENDING_CREATION_ID = "char_000";
+export { PENDING_CREATION_ID } from "./pendingUpdateFormat";
 
 /**
  * 新規の人物案のレコードを作る。

@@ -79,7 +79,25 @@ export function describePendingUpdatesConfirm(
 function describeChange(item: ReviewItem): string {
   const label = pendingSourceLabel(item.update.source);
   const summary = isCreation(item) ? "新規の人物" : summarizeDiff(item.diff);
-  return label ? `${label}：${summary}` : summary;
+  /*
+    **理由があれば、出どころの隣に出す**（設計書6.87.16）。外部AIの案は
+    本文の根拠（`evidence`）を持たないことがあるので、**なぜそう提案したか
+    だけが作者の判断材料**になる。確認文は1行なので、ここは短く切る
+    （長い理由は差分の文書側に全部出る）。
+  */
+  const base = label ? `${label}：${summary}` : summary;
+  const reason = item.update.reason?.trim();
+  return reason ? `${base}（理由：${clampReason(reason)}）` : base;
+}
+
+/** 確認文へ入れる理由の長さ。長いと一覧が読めなくなる */
+const REASON_PREVIEW_MAX = 40;
+
+function clampReason(reason: string): string {
+  const oneLine = reason.replace(/\s+/g, " ").trim();
+  return oneLine.length > REASON_PREVIEW_MAX
+    ? `${oneLine.slice(0, REASON_PREVIEW_MAX)}…`
+    : oneLine;
 }
 
 /**
@@ -540,10 +558,16 @@ async function showDiffDocument(
     // どこから来た提案かは、中身より先に知りたい
     ...items.map((item) => {
       const label = pendingSourceLabel(item.update.source);
+      // 理由（設計書6.87.16）は**切らずに全部出す**。確認のダイアログは
+      // 1行しか出せないので、判断の材料はこちらで読ませる
+      const reason = item.update.reason?.trim();
       const body = formatDiff(item.diff);
-      if (!label) return body;
+      if (!label && !reason) return body;
       const [heading, ...rest] = body.split("\n");
-      return [heading, "", `出どころ: ${label}`, ...rest].join("\n");
+      const notes: string[] = [];
+      if (label) notes.push(`出どころ: ${label}`);
+      if (reason) notes.push(`提案の理由: ${reason}`);
+      return [heading, "", ...notes, ...rest].join("\n");
     }),
   ].join("\n");
 
