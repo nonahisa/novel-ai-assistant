@@ -839,3 +839,67 @@ describe("音読みの熟語はひらかない", () => {
     expect(result.accepted).toHaveLength(1);
   });
 });
+
+/**
+ * **指示に書いた語が、答えの中身として返ってくる**（CLAUDE.md の
+ * 「繰り返し起きた失敗」3番。`"suggestion": "空文字"` がその実例）。
+ *
+ * P-10 の 1.7 で、漢字ひらきの規則へ「副詞の当て字（丁度・沢山・是非・折角
+ * など）」という一行を足した。**「当て字」という語が修正案として返ってくる
+ * 前提で検査を書く。** 原文が短いと `dropsOriginalTail`（半分以上が消える）
+ * も効かないので、「丁度」が「当て字」に置き換わって本文へ入りうる。
+ *
+ * **落とすのは修正案だけで、指摘は残す**（「空文字」と同じ扱い）。
+ * どの語をひらくかという指摘そのものは正しいことが多く、
+ * **原稿を壊すより、直し方を作者に委ねるほうがよい。**
+ */
+describe("漢字ひらきの修正案に、指示の言葉が紛れ込んだとき", () => {
+  function openingIssue(original: string, suggestion: string) {
+    return validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 1,
+            original,
+            suggestion,
+            reason: "漢字ひらき",
+            explanation: `「${original}」で読みが詰まります`,
+            confidence: "high",
+          },
+        ],
+      },
+      { text: original, startLine: 0, chapterStart: 1, chapterEnd: 1 } as never
+    );
+  }
+
+  test.each([
+    ["丁度", "当て字"],
+    ["沢山", "副詞"],
+    ["是非", "難読"],
+    ["折角", "連体詞"],
+  ])(
+    "原文（%s）に無い漢字が入った修正案（%s）は、修正案だけ空にする",
+    (original, suggestion) => {
+      const result = openingIssue(original, suggestion);
+
+      // 指摘は残す（どこを見ればよいかは正しい情報である）
+      expect(result.accepted).toHaveLength(1);
+      // **本文へ当てられる形では残さない**
+      expect(result.accepted[0].suggestion).toBe("");
+    }
+  );
+
+  test.each([
+    ["丁度そのとき、鐘が鳴った。", "ちょうどそのとき、鐘が鳴った。"],
+    ["沢山の人がいた。", "たくさんの人がいた。"],
+    ["是非とも来てほしい。", "ぜひとも来てほしい。"],
+    ["折角の休みだった。", "せっかくの休みだった。"],
+    // 漢字が残るひらき方（補助動詞だけをひらく）も巻き込まない
+    ["置いて見る。", "置いてみる。"],
+  ])("本当にひらいた修正案（%s）は、そのまま残る", (original, suggestion) => {
+    const result = openingIssue(original, suggestion);
+
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].suggestion).toBe(suggestion);
+  });
+});

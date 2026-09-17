@@ -527,6 +527,38 @@ export function dropsOriginalTail(
   return !to.includes(tail);
 }
 
+/**
+ * 漢字ひらきの修正案が、**本当に「ひらいた形」か**（P-10 1.7）。
+ *
+ * **指示に書いた語は、答えの中身として返ってくる**（この作品で繰り返し
+ * 起きた失敗。`"suggestion": "空文字"` がその実例）。1.7 で漢字ひらきの
+ * 規則へ「副詞の当て字（丁度・沢山・是非・折角 など）」を足したので、
+ * **「当て字」「副詞」「連体詞」といった説明の語が修正案として返る**道が
+ * できた。原文が「丁度」のように短いと `dropsOriginalTail`（半分以上が
+ * 消える）にも掛からず、**本文の「丁度」が「当て字」に置き換わる。**
+ *
+ * 見分け方は観点の定義そのものから取る——**ひらくとは漢字をかなにする
+ * ことなので、原文に無い漢字が修正案に現れることはない。** 語の一覧を
+ * 持たずに済むので、プロンプトの言い回しを変えても効き続ける。
+ *
+ * **落とすのは修正案だけで、指摘は残す**（「空文字」と同じ扱い。
+ * どの語をひらくかという指摘自体は正しいことが多い）。
+ */
+export function introducesNewKanji(
+  original: string,
+  suggestion: string
+): boolean {
+  if (!suggestion) return false;
+  // 範囲を手で並べると常用外の字を取りこぼすので、字種で見る
+  const kanji = /\p{Script=Han}/u;
+  const inOriginal = new Set(
+    Array.from(original).filter((char) => kanji.test(char))
+  );
+  return Array.from(suggestion).some(
+    (char) => kanji.test(char) && !inOriginal.has(char)
+  );
+}
+
 export function hasRepetition(text: string): boolean {
   const body = text.replace(/\s/g, "");
   for (let start = 0; start + REPEAT_MIN_LENGTH <= body.length; start++) {
@@ -786,10 +818,13 @@ export function validateProofreadIssues(
     // **原文のうしろを落とした修正案は使わない**（設計書6.60）。
     // 推敲は原文まるごとを置き換えるので、直した断片だけを返されると
     // 残りが消える。指摘は残し、直し方は作者に委ねる
+    // **漢字ひらきの修正案に、原文に無い漢字が入っていたらひらきではない**
+    // （P-10 1.7。「丁度」→「当て字」のように、指示の語がそのまま返る）
     const usableSuggestion =
       reason === "語尾単調" ||
       isPlaceholderText(suggestion, true) ||
-      dropsOriginalTail(original, suggestion)
+      dropsOriginalTail(original, suggestion) ||
+      (reason === "漢字ひらき" && introducesNewKanji(original, suggestion))
         ? ""
         : suggestion;
     // 原文と同じものを「修正案」として返してくる。押しても何も起きない。

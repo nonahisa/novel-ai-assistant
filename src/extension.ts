@@ -3942,10 +3942,27 @@ export async function activate(
         if (result.failedChunks > 0) {
           parts.push(`読み取れなかった ${result.failedChunks}件`);
         }
+        /*
+          **ひらいた語は、作品の中でゆらぐ**（作者の裁定、2026-09-17）。
+
+          推敲は箇所ごとの提案なので、同じ「丁度」でも採った箇所だけが
+          ひらがなになる。その受け皿が表記ゆれ検知で、あちらは
+          **漢字とかなの2通りが本文に出ている組だけ**を拾う——つまり
+          推敲で1件でも採った時点で、作品全体を揃えられる状態になる。
+
+          知らせるのは漢字ひらきの指摘が出たときだけ。無いときに出すと、
+          関係のない案内が毎回付いてくることになる。
+        */
+        const openedKanji = result.issues.some(
+          (issue) => issue.reason === "漢字ひらき"
+        );
         notifyRunCompletion({
           headline: "推敲",
           parts,
           failedCount: result.failedChunks,
+          tail: openedKanji
+            ? "ひらいた語は、表記ゆれ検知で作品全体を揃えられます。"
+            : "",
         });
         return CHECK_COMPLETED;
       }
