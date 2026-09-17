@@ -71,6 +71,12 @@ export const CORE_ENTRY_NAMES = [
     とは別に、純粋な部分だけ**をここから起点にする。
   */
   "pendingUpdateFormat",
+  /*
+    逸脱へ渡すプロットの切り詰め（0.66.4）。**製品（`checkDeviations.ts`）と
+    MCP の道具が同じものを通るように core へ寄せた**——MCP 側はプロットの
+    全文を送っており、切ったことも知らせていなかった（MCP で測って分かった）。
+  */
+  "plotForDeviation",
 ];
 
 /**

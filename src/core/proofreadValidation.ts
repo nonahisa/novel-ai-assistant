@@ -559,6 +559,34 @@ export function introducesNewKanji(
   );
 }
 
+/**
+ * 原文が、その行の中で**2か所以上に当たる**か（P-10 1.8）。
+ *
+ * **適用は行の中の最初の一致へ当たる**（`features/proposalPanel.ts` の
+ * `lineText.indexOf(item.original)`）。1.8 で `original` を短い範囲
+ * （5〜30字）にしてよいと書いたので、「丁度」のような語が1行に2回ある本文で、
+ * **AIが2つ目を指しているのに1つ目が書き換わる**道ができた。
+ * 作者の原稿が、指摘と違う場所で変わることになる。
+ *
+ * **落とすのは修正案だけで、指摘は残す**（`dropsOriginalTail`・
+ * `introducesNewKanji` と同じ扱い。作者の裁定、2026-09-17）。空の修正案は
+ * 押せないので原稿は動かず、**「この行に直す語がある」は正しい情報**である。
+ * 作者が本文を見れば、どちらの「丁度」かはすぐ分かる。
+ *
+ * **数えるのは素の文字列で**（照合用の正規化を通さない）。適用が見るのが
+ * 素の行だからで、ここだけ別の見方をすると「曖昧でないと判断したのに
+ * 適用は別の場所へ当たる」が起きる。
+ *
+ * 重なる出現（「あああ」の中の「ああ」）も2か所と数える。**始まりが
+ * 2通りある時点で、どちらを指しているか決められない**ことに変わりはない。
+ */
+export function isAmbiguousInLine(lineText: string, original: string): boolean {
+  if (!original) return false;
+  const first = lineText.indexOf(original);
+  if (first < 0) return false;
+  return lineText.indexOf(original, first + 1) >= 0;
+}
+
 export function hasRepetition(text: string): boolean {
   const body = text.replace(/\s/g, "");
   for (let start = 0; start + REPEAT_MIN_LENGTH <= body.length; start++) {
@@ -692,9 +720,10 @@ export function validateProofreadIssues(
 
   const list = isRecord(raw) && Array.isArray(raw.issues) ? raw.issues : [];
   const normalizedChunk = normalizeForComparison(chunk.text);
-  const lineCount = chunk.text.split("\n").length;
+  // 行ごとに持つ。**原文がその行で一意かを見る**のに要る（P-10 1.8）
+  const chunkLines = chunk.text.split("\n");
   const firstLine = chunk.startLine + 1;
-  const lastLine = chunk.startLine + lineCount;
+  const lastLine = chunk.startLine + chunkLines.length;
 
   // **語尾の連続はチャンクごとに1回だけ数える。** 指摘の数だけ数え直しても
   // 答えは同じで、長いチャンクでは無駄が積み上がる
@@ -820,10 +849,15 @@ export function validateProofreadIssues(
     // 残りが消える。指摘は残し、直し方は作者に委ねる
     // **漢字ひらきの修正案に、原文に無い漢字が入っていたらひらきではない**
     // （P-10 1.7。「丁度」→「当て字」のように、指示の語がそのまま返る）
+    // **原文がその行に2か所以上あるなら、どこへ当てるのか決められない**
+    // （P-10 1.8）。適用は行の中の最初の一致へ当たるので、AIが2つ目の
+    // つもりで挙げていると**1つ目が黙って書き換わる。** ここも同じ扱いで、
+    // 修正案だけ空にして「この行に直す語がある」は残す
     const usableSuggestion =
       reason === "語尾単調" ||
       isPlaceholderText(suggestion, true) ||
       dropsOriginalTail(original, suggestion) ||
+      isAmbiguousInLine(chunkLines[line - firstLine] ?? "", original) ||
       (reason === "漢字ひらき" && introducesNewKanji(original, suggestion))
         ? ""
         : suggestion;

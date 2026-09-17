@@ -13,10 +13,11 @@
         { "word": "出来る", "reading": "できる", "count": 1 }
       ],
       "mustNotOpen": [
-        { "word": "素敵", "count": 1 },
-        { "word": "大丈夫", "count": 1 }
+        { "word": "素敵", "count": 2 },
+        { "word": "大丈夫", "count": 2 },
+        { "word": "事件", "count": 1 }
       ],
-      "verbTraps": [{ "word": "置く", "count": 1 }]
+      "verbTraps": [{ "word": "置く", "count": 2 }]
     },
     {
       "file": "本文/002_ひる.txt",
@@ -32,10 +33,11 @@
       ],
       "mustNotOpen": [
         { "word": "基礎学力", "count": 1 },
-        { "word": "時計台", "count": 1 },
-        { "word": "大丈夫", "count": 1 }
+        { "word": "時計台", "count": 3 },
+        { "word": "大丈夫", "count": 3 },
+        { "word": "素敵", "count": 1 }
       ],
-      "verbTraps": [{ "word": "見る", "count": 1 }]
+      "verbTraps": [{ "word": "見る", "count": 2 }]
     },
     {
       "file": "本文/003_よる.txt",
@@ -51,11 +53,12 @@
         { "word": "或いは", "reading": "あるいは", "count": 1 }
       ],
       "mustNotOpen": [
-        { "word": "素敵", "count": 1 },
-        { "word": "事件", "count": 1 },
-        { "word": "物語", "count": 1 }
+        { "word": "素敵", "count": 2 },
+        { "word": "事件", "count": 2 },
+        { "word": "物語", "count": 2 },
+        { "word": "大丈夫", "count": 1 }
       ],
-      "verbTraps": [{ "word": "置く", "count": 1 }]
+      "verbTraps": [{ "word": "置く", "count": 2 }]
     }
   ],
   "totals": {
@@ -71,12 +74,12 @@
     },
     "mustNotOpen": {
       "基礎学力": 1,
-      "素敵": 2,
-      "大丈夫": 2,
-      "事件": 1,
-      "物語": 1,
-      "時計台": 1
+      "素敵": 5,
+      "大丈夫": 6,
+      "事件": 3,
+      "物語": 2,
+      "時計台": 3
     },
-    "verbTraps": { "置く": 2, "見る": 1 }
+    "verbTraps": { "置く": 4, "見る": 2 }
   }
 }

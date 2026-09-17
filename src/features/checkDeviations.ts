@@ -19,6 +19,14 @@ import {
 } from "../ai/capability";
 import { SynopsisStore } from "../core/synopsisStore";
 import { referenceBudgetChars } from "../core/sizeBudget";
+// **切り詰めは `core` に1つだけ置く**（0.66.4）。ここと MCP の道具
+// （`mcp/tools/episode.ts`）が別々に持っていると、外から測ったときに
+// 製品と違う量を送ることになる
+import {
+  PLOT_MAX_CHARS,
+  describePlotTrim,
+  trimPlotForDeviation,
+} from "../core/plotForDeviation";
 import { readPlotText } from "../core/plotFile";
 import { isBlankPlotSection, parsePlotMarkdown } from "../core/plotDoc";
 import {
@@ -102,8 +110,7 @@ export interface DeviationRunResult {
 const MAX_CHAPTER_CHARS = 12_000;
 
 /**
- * プロットにまわしてよい、モデルの上限に対する割合と、固定の頭打ち
- * （設計書6.77の第2段、6.27.4）。
+ * プロットにまわしてよい、モデルの上限に対する割合（設計書6.77の第2段、6.27.4）。
  *
  * **世界観と同じ扱いにする**——プロットも「参照資料」であり、逸脱検知に
  * とっては最重要の資料なので、資料の中では最大の枠（25%・30,000字）を与える。
@@ -111,11 +118,12 @@ const MAX_CHAPTER_CHARS = 12_000;
  * どれだけまわしてよいかは用途ごとの判断であり、片方の都合でもう片方が
  * 動くのを避ける（`sizeBudget.ts` が寄せるのは式だけ）。
  *
- * **ここだけ上限が無かった。** プロットは話の数だけ繰り返し送られるので、
- * 長いプロットの作品では、送る量が話数ぶんに膨らむ。
+ * 頭打ちと切り方そのものは `core/plotForDeviation.ts` に置いてある。
+ * **外から呼ぶ口（MCP）が同じものを通れるようにするため**で、
+ * ここからは再輸出するだけにしてある（0.66.4）。
  */
 const PLOT_CONTEXT_RATIO = 0.25;
-export const PLOT_MAX_CHARS = 30_000;
+export { PLOT_MAX_CHARS, describePlotTrim, trimPlotForDeviation };
 
 /**
  * そのモデルでプロットに使ってよい字数。
@@ -128,45 +136,6 @@ export function plotMaxChars(contextWindow: number | undefined): number {
     contextWindow,
     PLOT_CONTEXT_RATIO,
     PLOT_MAX_CHARS
-  );
-}
-
-/**
- * プロットを上限まで切る。
- *
- * **切るのは末尾から**（＝残すのは先頭）。プロットは冒頭に設定・あらすじの
- * 骨子が来る書式（`plotTemplate.ts`）で、末尾ほど細部になる。逸脱の判定に
- * 効くのは骨格のほうである。
- *
- * **行の途中では切らない。** 切れ端の一行が残ると、AIはそれを完結した
- * 一文として読み、書かれていない筋を読み取る。最後の改行まで戻す。
- * ただし改行が一つも無いプロットでは戻れないので、そのときは素直に
- * 上限で切る（空を返すと、照らし合わせる相手が消える）。
- *
- * **上限内なら1バイトも変えない。** ここが1文字でも変わると、大多数の
- * 作品で送る内容が変わってしまう。
- */
-export function trimPlotForDeviation(
-  plot: string,
-  maxChars: number
-): { text: string; trimmed: boolean } {
-  if (plot.length <= maxChars) return { text: plot, trimmed: false };
-  const head = plot.slice(0, maxChars);
-  const lastBreak = head.lastIndexOf("\n");
-  return {
-    text: lastBreak > 0 ? head.slice(0, lastBreak) : head,
-    trimmed: true,
-  };
-}
-
-/** 切ったことを伝える一文（完了報告とログで同じ言い方をする） */
-export function describePlotTrim(
-  usedChars: number,
-  totalChars: number
-): string {
-  return (
-    `プロットが長いため先頭 ${usedChars.toLocaleString("ja-JP")}字だけを使いました` +
-    `（全体 ${totalChars.toLocaleString("ja-JP")}字）`
   );
 }
 

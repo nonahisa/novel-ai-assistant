@@ -23,6 +23,10 @@ import {
   validateDeviations,
 } from "../../core/deviationValidation";
 import {
+  describePlotTrim,
+  trimPlotForDeviation,
+} from "../../core/plotForDeviation";
+import {
   EPISODE_PLOT_CHECK_SCHEMA,
   EPISODE_PLOT_CHECK_SYSTEM_PROMPT,
   EPISODE_PLOT_CHECK_VERSION,
@@ -295,6 +299,19 @@ export function deviationPrompt(input: EpisodePromptInput) {
           .map((item) => `第${item.chapter}話：${item.synopsis}`)
           .join("\n");
 
+  /*
+    **プロットも製品と同じところで切る**（`core/plotForDeviation.ts`、0.66.4）。
+    ここは `readPlotMarkdown` の全文をそのまま渡しており、76,471字の
+    プロットでも切らず、切ったことも知らせていなかった——**製品の経路を
+    迂回していた**（CLAUDE.md の「繰り返し起きた失敗」5番）。
+
+    **コンテキスト長は使わない。** モデル比で縮める側（`plotMaxChars`）は
+    送り先のモデルが分かって初めて決まるもので、この口では行き先が
+    `ollama`／`claude`／`sampling` のどれにもなりうる。頭打ち
+    （`PLOT_MAX_CHARS`）だけを効かせ、**切ったことは返り値で知らせる**。
+  */
+  const plotTrim = trimPlotForDeviation(plot);
+
   return {
     promptVersion: DEVIATION_CHECK_VERSION,
     systemPrompt: DEVIATION_CHECK_SYSTEM_PROMPT,
@@ -302,9 +319,19 @@ export function deviationPrompt(input: EpisodePromptInput) {
     validateWith: DEVIATION_VALIDATE_WITH,
     chapterLabel: episode.label,
     maxIssues: DEVIATION_MAX_ISSUES,
+    /** プロットの全体の字数（切る前） */
+    plotChars: plot.length,
+    /** 実際に送った字数 */
+    usedPlotChars: plotTrim.usedChars,
+    plotTrimmed: plotTrim.trimmed,
+    // **切ったときだけ言う。** 切っていないのに断ると、毎回の返り値が
+    // 案内文で埋まって読まれなくなる
+    ...(plotTrim.trimmed
+      ? { note: describePlotTrim(plotTrim.usedChars, plot.length) }
+      : {}),
     userPrompt: buildDeviationCheckPrompt({
       chapterLabel: episode.label,
-      plot,
+      plot: plotTrim.text,
       chapterTextWithLineNumbers: withLineNumbers(
         chunkOfEpisode(input.filePath, episode.body)
       ),
@@ -346,7 +373,13 @@ export function deviationValidate(input: {
   }
   return validateDeviations(parsed, {
     text: episode.body,
-    plot,
+    /*
+      **照らすのは「送ったプロット」である**（製品の `checkDeviations.ts` と
+      同じ）。全文で照らすと、切り落とした先の一節を引いた指摘まで通ってしまい、
+      **AIが見ていない箇所を当てた**ことになる。`deviationPrompt` が切るように
+      なった以上、こちらも同じ相手を見る（0.66.4）。
+    */
+    plot: trimPlotForDeviation(plot).text,
   });
 }
 
@@ -457,9 +490,29 @@ export async function synopsisRun(input: EpisodePromptInput & RunnerInput) {
 }
 
 export async function deviationRun(input: EpisodePromptInput & RunnerInput) {
-  return runOnce(input, deviationPrompt(input), (response) =>
+  const prompt = deviationPrompt(input);
+  const outcome = await runOnce(input, prompt, (response) =>
     deviationValidate({ ...input, response })
   );
+  /*
+    **切ったことは `run` でも知らせる**（0.66.4）。`prompt` だけが知っていると、
+    `run` で回した人には「プロットを全部見たうえでの0件」に見える。
+    `runOnce` の返り値の形は壊さず、プロット側の情報を足すだけにしてある。
+  */
+  const plotInfo = {
+    plotChars: prompt.plotChars,
+    usedPlotChars: prompt.usedPlotChars,
+    plotTrimmed: prompt.plotTrimmed,
+  };
+  if (!prompt.note) return { ...outcome, ...plotInfo };
+  // `claude` の道は `runOnce` が案内文（`note`）を持っている。
+  // **上書きしない**——応答をどこへ戻すかの案内が消える
+  const runnerNote = "note" in outcome ? outcome.note : undefined;
+  return {
+    ...outcome,
+    ...plotInfo,
+    note: runnerNote ? `${runnerNote}\n${prompt.note}` : prompt.note,
+  };
 }
 
 export async function episodePlotRun(

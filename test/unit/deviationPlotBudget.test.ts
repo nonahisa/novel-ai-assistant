@@ -160,8 +160,21 @@ describe("案内は一度だけ（配線）", () => {
 
   test("プロットを切るのは、話ごとの送信の外で一度だけ", () => {
     const calls = source.match(/trimPlotForDeviation\(/g) ?? [];
-    // 宣言（`export function`）を除いた呼び出しが1つだけ
-    expect(calls.length).toBe(2);
+    // 宣言は `core/plotForDeviation.ts` へ移したので（0.66.4）、
+    // ここに残るのは呼び出し1つだけ
+    expect(calls.length).toBe(1);
+  });
+
+  test("切り方の定義は core に1つだけ（MCP も同じものを通る）", () => {
+    // **写しを作らせない。** 製品と MCP が別々に持つと、外から測ったときに
+    // 製品と違う量を送ることになる（2026-09-17、MCP で測って見つけた）
+    expect(source).toContain('from "../core/plotForDeviation"');
+
+    const mcp = fs.readFileSync(
+      nodePath.join(__dirname, "..", "..", "src", "mcp", "tools", "episode.ts"),
+      "utf8"
+    );
+    expect(mcp).toContain('from "../../core/plotForDeviation"');
   });
 
   test("案内は結果に載せて、完了報告へ渡す", () => {

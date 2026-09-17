@@ -903,3 +903,146 @@ describe("漢字ひらきの修正案に、指示の言葉が紛れ込んだと�
     expect(result.accepted[0].suggestion).toBe(suggestion);
   });
 });
+
+/**
+ * 原文が行の中で一意でないとき（P-10 1.8）。
+ *
+ * 1.8 で **`original` を「直す語を含む短い範囲（5〜30字）」にしてよい**と
+ * 書いた。短いほど `suggestion` が同じ範囲の書き換えになりやすい一方で、
+ * **同じ語が1行に2回ある**ことが現実に起きる。
+ *
+ * 適用は**行の中の最初の一致**へ当たる（`features/proposalPanel.ts` の
+ * `lineText.indexOf(item.original)`）。AIが2つ目のつもりで挙げていても
+ * **黙って1つ目が書き換わる**——作者の原稿が、指摘と違う場所で変わる。
+ *
+ * **落とすのは修正案だけで、指摘は残す**（作者の裁定、2026-09-17。
+ * `dropsOriginalTail`・`introducesNewKanji` と同じ形）。空の修正案は
+ * 押せないので原稿は動かず、「この行に直す語がある」は正しい情報である。
+ */
+describe("行の中で一意でない原文", () => {
+  function openingIssue(text: string, original: string) {
+    return validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 11,
+            original,
+            suggestion: "ちょうど",
+            reason: "漢字ひらき",
+            explanation: `「${original}（ちょうど）」で読みが詰まります`,
+            confidence: "high",
+          },
+        ],
+      },
+      chunkOf(text)
+    );
+  }
+
+  test("同じ行に2回出る原文は、修正案だけ空にする", () => {
+    const result = openingIssue(
+      "彼は丁度そこにいた。彼は丁度そこで待っていた。",
+      "丁度"
+    );
+
+    // 指摘は残す（「この行に直す語がある」は正しい情報である）
+    expect(result.accepted).toHaveLength(1);
+    // **本文へ当てられる形では残さない**（押しても原稿は動かない）
+    expect(result.accepted[0].suggestion).toBe("");
+    expect(result.rejected).toHaveLength(0);
+  });
+
+  test("行の中で一度しか出ない原文は、これまでどおり通る", () => {
+    const result = openingIssue("彼は丁度そこにいた。", "丁度");
+
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].suggestion).toBe("ちょうど");
+  });
+
+  test("同じ語でも、行が違えば一意である", () => {
+    // 行をまたいで2回出るのは曖昧ではない（適用はその行の中だけを見る）
+    const result = openingIssue("彼は丁度そこにいた。\n丁度そのとき。", "丁度");
+
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].suggestion).toBe("ちょうど");
+  });
+
+  test("語尾単調は、錨が行に何度も出ていても指摘として残る", () => {
+    // 連続の先頭の文（`run.first`）は本文から数えて選んでいる。
+    // AIの言い値ではないので、同じ文が並んでいても取り違えは起きない
+    // （修正案はもともとコードで空にしている）
+    const result = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 11,
+            original: "彼は走った。",
+            suggestion: "",
+            reason: "語尾単調",
+            explanation: "同じ語尾が続いています",
+            confidence: "high",
+          },
+        ],
+      },
+      chunkOf("彼は走った。彼は走った。彼は走った。彼は走った。")
+    );
+
+    expect(result.accepted).toHaveLength(1);
+  });
+});
+
+/**
+ * 出力例に書いた語が、そのまま答えとして返ってきたとき（P-10 1.8）。
+ *
+ * **指示の言葉は答えの中身として返ってくる**（この作品で繰り返し起きた
+ * 失敗の3番。`"suggestion": "空文字"` がその実例）。1.8 で
+ * 【出力形式】の例へ漢字ひらきの1件（「是非この鯵を持って」→
+ * 「ぜひこの鯵を持って」）を足したので、**例の一文がそのまま返る**道ができた。
+ *
+ * 受けるのは既にある関門である——**原文が本文に実在しなければ出さない**
+ * （`original_not_found`）。例の一文は別の作品の本文には無いので、
+ * ここで止まる。
+ */
+describe("出力例の語がそのまま返ってきたとき", () => {
+  test("例の一文は、本文に無いので落ちる", () => {
+    const result = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 11,
+            original: "是非この鯵を持って",
+            suggestion: "ぜひこの鯵を持って",
+            reason: "漢字ひらき",
+            explanation: "「是非（ぜひ）」で読みが詰まります",
+            confidence: "high",
+          },
+        ],
+      },
+      chunk
+    );
+
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected[0].reason).toBe("original_not_found");
+  });
+
+  test("本文に実在すれば、当て字の指摘として通る", () => {
+    // 例と同じ語でも、本文にあるなら正しい指摘である
+    const result = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 11,
+            original: "是非この鯵を持って",
+            suggestion: "ぜひこの鯵を持って",
+            reason: "漢字ひらき",
+            explanation: "「是非（ぜひ）」で読みが詰まります",
+            confidence: "high",
+          },
+        ],
+      },
+      chunkOf("是非この鯵を持って帰ってほしい。")
+    );
+
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].suggestion).toBe("ぜひこの鯵を持って");
+  });
+});
