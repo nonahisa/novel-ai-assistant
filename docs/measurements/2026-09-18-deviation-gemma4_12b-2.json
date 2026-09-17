@@ -1,0 +1,266 @@
+{
+  "measuredAt": "2026-09-17T23:10:01.443Z",
+  "feature": "deviation",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:12b",
+  "numCtx": 32768,
+  "endpoint": null,
+  "options": {},
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.67.0",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束（dist/mcp-server.mjs）が起動後に作り直された）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+  },
+  "promptVersion": "1.1",
+  "plans": [],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\deviation",
+    "targets": [
+      "本文\\001_灯が消えた朝.txt",
+      "本文\\002_灯台へ.txt",
+      "本文\\003_灯台守の話.txt",
+      "本文\\004_もう一度、灯をともす.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\deviation\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 53095,
+      "staleNote": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束（dist/mcp-server.mjs）が起動後に作り直された）。Claude Code を開き直して、新しい束で繋ぎ直してください",
+      "metrics": {
+        "seeded": 2,
+        "seededTotal": 3,
+        "missed": 1,
+        "falseFlags": 0,
+        "kindMismatch": 0,
+        "otherFlags": 0,
+        "accepted": 2,
+        "rejected": 1,
+        "rejected.over_budget": 1,
+        "failures": 0,
+        "elapsedMs": 53095
+      },
+      "detail": {
+        "rejectedReasons": {
+          "over_budget": 1
+        },
+        "failures": [],
+        "seeded": {
+          "逸脱": {
+            "found": 2,
+            "total": 2
+          },
+          "間延び": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missed": [
+          {
+            "file": "本文/004_もう一度、灯をともす.txt",
+            "kind": "間延び",
+            "where": "本当に点くのかな"
+          }
+        ],
+        "falseFlags": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_灯が消えた朝.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\002_灯台へ.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 1,
+                  "lineEnd": 44,
+                  "excerpt": "朝の会で、転校生が紹介された。",
+                  "type": "逸脱",
+                  "reason": "バンド活動や文化祭に向けた準備の描写は、プロットの主筋（灯台の謎の解明と父の船への想い）に直接関わっているか判断が難しいため、意図的なものか確認が必要です。",
+                  "plotReference": "第2話　灯台へ",
+                  "severity": "medium",
+                  "confidence": "medium"
+                }
+              ],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false,
+            "bundleStale": true,
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束（dist/mcp-server.mjs）が起動後に作り直された）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+          }
+        },
+        {
+          "target": "本文\\003_灯台守の話.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 3,
+                  "lineEnd": 31,
+                  "excerpt": "見慣れない白いテントが目に入った。入口に「手相・星占い」",
+                  "type": "逸脱",
+                  "reason": "占い師とのやり取りは、海斗の目的である「灯台の謎の解明」や「父の捜索」に直接関わっているか判断が難しいため、意図的なものか確認が必要です。",
+                  "plotReference": "海斗と陽菜は町はずれの家を訪ね、灯台守の老人に会う。",
+                  "severity": "medium",
+                  "confidence": "medium"
+                }
+              ],
+              "rejected": [
+                {
+                  "raw": {
+                    "lineStart": 37,
+                    "lineEnd": 43,
+                    "excerpt": "広場の隅で、茶色の子猫が段ボールの陰から出てきた。",
+                    "type": "逸脱",
+                    "reason": "子猫の保護と世話の描写は、物語の主筋である灯台の謎や父への想いとは直接関係がないため、意図的な伏線か、あるいは不要な描写かの判断が必要です。",
+                    "plotReference": "海斗と陽菜は町はずれの家を訪ね、灯台守の老人に会う。",
+                    "severity": "medium",
+                    "confidence": "medium"
+                  },
+                  "reason": "over_budget"
+                }
+              ]
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false,
+            "bundleStale": true,
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束（dist/mcp-server.mjs）が起動後に作り直された）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+          }
+        },
+        {
+          "target": "本文\\004_もう一度、灯をともす.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false,
+            "bundleStale": true,
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束（dist/mcp-server.mjs）が起動後に作り直された）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seeded": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "seededTotal": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "missed": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "falseFlags": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "kindMismatch": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "otherFlags": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "rejected": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "rejected.over_budget": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        53095
+      ],
+      "min": 53095,
+      "max": 53095
+    }
+  },
+  "lines": [
+    "仕込んだ逸脱を拾えた: 2/3",
+    "見逃し（拾えなかった仕込み）: 1",
+    "誤検出（プロットどおりの話に付いた指摘）: 0",
+    "種別ちがい（場所は当てたが 逸脱／間延び を取り違えた）: 0",
+    "仕込み以外の箇所への指摘: 0",
+    "指摘（検算を通ったもの）: 2",
+    "落とした（検算で弾いたもの）: 1",
+    "　└ 落とした理由：over_budget: 1",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 53.1秒"
+  ]
+}

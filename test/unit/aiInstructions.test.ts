@@ -216,7 +216,7 @@ describe("作品へ書き出す", () => {
     extensionRoot = nodePath.join(base, "拡張機能");
     await fsp.mkdir(root, { recursive: true });
 
-    // 同梱の雛形と、同梱の束（配布物には入らないが、開発ホストには在る）
+    // 同梱の雛形と、同梱の束（どちらも配布物に入る。2026-09-18 に束も同梱へ）
     const template = nodePath.join(extensionRoot, AI_INSTRUCTION_TEMPLATE_PATH);
     await fsp.mkdir(nodePath.dirname(template), { recursive: true });
     await fsp.writeFile(template, TEMPLATE, "utf8");

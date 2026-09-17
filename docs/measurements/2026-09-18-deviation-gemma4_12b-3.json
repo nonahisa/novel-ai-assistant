@@ -1,0 +1,554 @@
+{
+  "measuredAt": "2026-09-17T23:13:30.693Z",
+  "feature": "deviation",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:12b",
+  "numCtx": 32768,
+  "endpoint": null,
+  "options": {},
+  "repeat": 3,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.67.0",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.1",
+  "plans": [],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\deviation",
+    "targets": [
+      "本文\\001_灯が消えた朝.txt",
+      "本文\\002_灯台へ.txt",
+      "本文\\003_灯台守の話.txt",
+      "本文\\004_もう一度、灯をともす.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\deviation\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 53678,
+      "staleNote": null,
+      "metrics": {
+        "seeded": 2,
+        "seededTotal": 3,
+        "missed": 1,
+        "falseFlags": 0,
+        "kindMismatch": 0,
+        "otherFlags": 0,
+        "accepted": 2,
+        "rejected": 1,
+        "rejected.over_budget": 1,
+        "failures": 0,
+        "elapsedMs": 53678
+      },
+      "detail": {
+        "rejectedReasons": {
+          "over_budget": 1
+        },
+        "failures": [],
+        "seeded": {
+          "逸脱": {
+            "found": 2,
+            "total": 2
+          },
+          "間延び": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missed": [
+          {
+            "file": "本文/004_もう一度、灯をともす.txt",
+            "kind": "間延び",
+            "where": "本当に点くのかな"
+          }
+        ],
+        "falseFlags": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_灯が消えた朝.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\002_灯台へ.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 1,
+                  "lineEnd": 44,
+                  "excerpt": "朝の会で、転校生が紹介された。",
+                  "type": "逸脱",
+                  "reason": "バンド活動や文化祭に向けた準備の描写は、プロットの主筋（灯台の謎の解明と父の船への想い）とは直接関係のない展開に見受けられます。",
+                  "plotReference": "海斗は、父の船が帰る道しるべになるはずの灯台がなぜ消えたのかを確かめ、もう一度灯をともすことを目指す。",
+                  "severity": "high",
+                  "confidence": "high"
+                }
+              ],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\003_灯台守の話.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 3,
+                  "lineEnd": 31,
+                  "excerpt": "見慣れない白いテントが目に入った。入口に「手相・星占い」",
+                  "type": "逸脱",
+                  "reason": "占い師とのやり取りは、海斗の目的である「灯台の謎の解明」や「父の捜索」に直接関わっていないため、意図的な描写であれば検討の余地がありますが、プロットの構成からは外れています。",
+                  "plotReference": "海斗と陽菜は町はずれの家を訪ね、灯台守の老人に会う。",
+                  "severity": "medium",
+                  "confidence": "medium"
+                }
+              ],
+              "rejected": [
+                {
+                  "raw": {
+                    "lineStart": 37,
+                    "lineEnd": 43,
+                    "excerpt": "広場の隅で、茶色の子猫が段ボールの陰から出てきた。",
+                    "type": "逸脱",
+                    "reason": "子猫の保護と世話の描写は、物語の主筋である灯台の謎や父の不在というテーマに直接寄与していないため、意図的な伏線でない限りは逸脱の可能性があります。",
+                    "plotReference": "海斗と陽菜は町はずれの家を訪ね、灯台守の老人に会う。",
+                    "severity": "medium",
+                    "confidence": "medium"
+                  },
+                  "reason": "over_budget"
+                }
+              ]
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\004_もう一度、灯をともす.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "elapsedMs": 37341,
+      "staleNote": null,
+      "metrics": {
+        "seeded": 2,
+        "seededTotal": 3,
+        "missed": 1,
+        "falseFlags": 0,
+        "kindMismatch": 0,
+        "otherFlags": 0,
+        "accepted": 2,
+        "rejected": 1,
+        "rejected.over_budget": 1,
+        "failures": 0,
+        "elapsedMs": 37341
+      },
+      "detail": {
+        "rejectedReasons": {
+          "over_budget": 1
+        },
+        "failures": [],
+        "seeded": {
+          "逸脱": {
+            "found": 2,
+            "total": 2
+          },
+          "間延び": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missed": [
+          {
+            "file": "本文/004_もう一度、灯をともす.txt",
+            "kind": "間延び",
+            "where": "本当に点くのかな"
+          }
+        ],
+        "falseFlags": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_灯が消えた朝.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\002_灯台へ.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 1,
+                  "lineEnd": 44,
+                  "excerpt": "朝の会で、転校生が紹介された。",
+                  "type": "逸脱",
+                  "reason": "バンド活動や文化祭に向けた準備の描写は、プロットの主筋（灯台の謎の解明と父の船への想い）に直接関わっているか判断が難しいため、意図的な伏線かどうかの確認が必要です。",
+                  "plotReference": "海斗は、父の船が帰る道しるべになるはずの灯台がなぜ消えたのかを確かめ、もう一度灯をともすことを目指す。",
+                  "severity": "medium",
+                  "confidence": "medium"
+                }
+              ],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\003_灯台守の話.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 3,
+                  "lineEnd": 31,
+                  "excerpt": "見慣れない白いテントが目に入った。入口に「手相・星占い」",
+                  "type": "逸脱",
+                  "reason": "占い師とのやり取りや石の授受は、父の船や灯台の謎に迫る主筋とは直接関係がないため、意図的な演出か判断が必要です。",
+                  "plotReference": "海斗と陽菜は町はずれの家を訪ね、灯台守の老人に会う。",
+                  "severity": "medium",
+                  "confidence": "medium"
+                }
+              ],
+              "rejected": [
+                {
+                  "raw": {
+                    "lineStart": 37,
+                    "lineEnd": 43,
+                    "excerpt": "広場の隅で、茶色の子猫が段ボールの陰から出てきた。",
+                    "type": "逸脱",
+                    "reason": "子猫の保護と世話の描写は、灯台の謎を解き明かそうとする海斗の目的から逸脱している可能性があります。",
+                    "plotReference": "海斗と陽菜は町はずれの家を訪ね、灯台守の老人に会う。",
+                    "severity": "medium",
+                    "confidence": "medium"
+                  },
+                  "reason": "over_budget"
+                }
+              ]
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\004_もう一度、灯をともす.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        }
+      ]
+    },
+    {
+      "round": 3,
+      "elapsedMs": 39219,
+      "staleNote": null,
+      "metrics": {
+        "seeded": 2,
+        "seededTotal": 3,
+        "missed": 1,
+        "falseFlags": 0,
+        "kindMismatch": 0,
+        "otherFlags": 0,
+        "accepted": 2,
+        "rejected": 1,
+        "rejected.over_budget": 1,
+        "failures": 0,
+        "elapsedMs": 39219
+      },
+      "detail": {
+        "rejectedReasons": {
+          "over_budget": 1
+        },
+        "failures": [],
+        "seeded": {
+          "逸脱": {
+            "found": 2,
+            "total": 2
+          },
+          "間延び": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missed": [
+          {
+            "file": "本文/004_もう一度、灯をともす.txt",
+            "kind": "間延び",
+            "where": "本当に点くのかな"
+          }
+        ],
+        "falseFlags": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_灯が消えた朝.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\002_灯台へ.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 1,
+                  "lineEnd": 44,
+                  "excerpt": "朝の会で、転校生が紹介された。",
+                  "type": "逸脱",
+                  "reason": "バンド活動や文化祭に向けた準備の描写は、プロットの主筋（灯台の謎の解明と父への想い）に直接関わっているか判断が難しいため、意図的な伏線かどうかの確認が必要です。",
+                  "plotReference": "海斗は、父の船が帰る道しるべになるはずの灯台がなぜ消えたのかを確かめ、もう一度灯をともすことを目指す。",
+                  "severity": "medium",
+                  "confidence": "medium"
+                }
+              ],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\003_灯台守の話.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 3,
+                  "lineEnd": 31,
+                  "excerpt": "見慣れない白いテントが目に入った。入口に「手相・星占い」",
+                  "type": "逸脱",
+                  "reason": "占い師とのやり取りは、海斗の目的である「灯台の謎の解明」や「父の捜索」に直接関わっているか判断が難しいため、意図的な描写か確認が必要です。",
+                  "plotReference": "海斗と陽菜は町はずれの家を訪ね、灯台守の老人に会う。",
+                  "severity": "medium",
+                  "confidence": "medium"
+                }
+              ],
+              "rejected": [
+                {
+                  "raw": {
+                    "lineStart": 37,
+                    "lineEnd": 43,
+                    "excerpt": "広場の隅で、茶色の子猫が段ボールの陰から出てきた。",
+                    "type": "逸脱",
+                    "reason": "子猫の保護と世話の描写は、海斗の目的や物語のテーマである「灯台」や「父の不在」とは直接の関連が見当たらないため、意図的なものか確認が必要です。",
+                    "plotReference": "海斗と陽菜は町はずれの家を訪ね、灯台守の老人に会う。",
+                    "severity": "medium",
+                    "confidence": "medium"
+                  },
+                  "reason": "over_budget"
+                }
+              ]
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\004_もう一度、灯をともす.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:12b",
+            "result": {
+              "accepted": [],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seeded": {
+      "values": [
+        2,
+        2,
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "seededTotal": {
+      "values": [
+        3,
+        3,
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "missed": {
+      "values": [
+        1,
+        1,
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "falseFlags": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "kindMismatch": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "otherFlags": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        2,
+        2,
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "rejected": {
+      "values": [
+        1,
+        1,
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "rejected.over_budget": {
+      "values": [
+        1,
+        1,
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "failures": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        53678,
+        37341,
+        39219
+      ],
+      "min": 37341,
+      "max": 53678
+    }
+  },
+  "lines": [
+    "仕込んだ逸脱を拾えた: 2/3（各回：2/3、2/3、2/3）",
+    "見逃し（拾えなかった仕込み）: 1（各回：1、1、1）",
+    "誤検出（プロットどおりの話に付いた指摘）: 0（各回：0、0、0）",
+    "種別ちがい（場所は当てたが 逸脱／間延び を取り違えた）: 0（各回：0、0、0）",
+    "仕込み以外の箇所への指摘: 0（各回：0、0、0）",
+    "指摘（検算を通ったもの）: 2（各回：2、2、2）",
+    "落とした（検算で弾いたもの）: 1（各回：1、1、1）",
+    "　└ 落とした理由：over_budget: 1（各回：1、1、1）",
+    "失敗（チャンクごと通らなかったもの）: 0（各回：0、0、0）",
+    "所要時間: 37.3秒〜53.7秒（各回：53.7秒、37.3秒、39.2秒）"
+  ]
+}

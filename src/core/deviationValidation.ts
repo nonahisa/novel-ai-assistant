@@ -65,22 +65,109 @@ const TYPE_SET = new Set<string>(DEVIATION_TYPES);
 export const MAX_EXCERPT_CHARS = 80;
 
 /**
+ * 「これは逸脱ではない」と**言い切っている**言い回し。
+ * 打ち消しの形そのものなので、後ろに「ない」が来ても打ち消しとは見ない。
+ */
+const DENIED_OUTRIGHT =
+  /(逸脱で(は)?(あり)?(ませ|ない)|問題(は)?(あり)?(ませ|ない))/;
+
+/**
+ * 「プロットどおりだ」と**肯定で**書いている言い回し。
+ * 「沿っていません」のように打ち消されていれば、それは逸脱の指摘である。
+ */
+const AGREES_WITH_PLOT = /(カバーして|網羅して|沿って(い|お)|一致して)/;
+
+/**
+ * 「逸脱ではない正当な狙い」として説明している言い回し。
+ *
+ * プロンプト（P-11）が「伏線・掘り下げ・テーマの補強・背景の説明は逸脱では
+ * ない」と言っているので、AIはこの言葉をそのまま使って返してくる。
+ *
+ * **語が出たことだけでは落とさない。** 以前は「伏線」という語が理由文に
+ * 現れただけで弾いており、**「意図的な伏線かどうかの確認が必要です」まで
+ * 落としていた**（2026-09-18 の測定で gemma4:12b が 0/3 になった原因の1つ）。
+ * AIは作者に確かめてほしいと言っただけで、自分では否定していない。
+ * そこで**「〜として」「〜である」のように、その狙いだと決めつけている形**
+ * のときだけ否定と読む。「伏線が回収されていません」は通る。
+ */
+const LEGITIMATE_PURPOSE =
+  /(伏線|掘り下げ|補強|背景(の)?説明|描写)(として|である|です|だと|と(考え|見な|思わ|判断|解釈|捉え))/;
+
+/**
+ * 作者に判断を預けている言い回し（問いかけ・保留）。
+ *
+ * **これが混じっていたら、AIは否定していない。** 「意図的な伏線かどうか」
+ * 「確認が必要です」は、逸脱かどうかを作者に決めてほしいという意味であって、
+ * 自分で「逸脱ではない」と言ったのではない。
+ *
+ * 「〜の可能性があります」は**入れていない**。「描写として追加された可能性が
+ * あります」のように、柔らかく言っているだけで中身は否定、という形が
+ * 実データで出ているため（2026-08-30 の測定）。
+ */
+const DEFERS_TO_AUTHOR =
+  /(かどうか|か否か|かもしれ|確認が必要|確認をお|要確認|ご確認|確認して|確かめ|検討が必要|判断が(難し|つ)|判断(でき|し(かね|きれ))|判断を(委ね|お願い)|意図的か|不明で|(分|わ)かりませ)/;
+
+/** 肯定の言い回しが、すぐ後ろで打ち消されているか */
+const NEGATED_AFTER = /^.{0,12}?(ない|ませ|ぬ)/su;
+
+/**
  * 「これは逸脱ではない」と自分で書いている指摘を見分ける。
  *
  * **実データで返ってきた。**「プロットの…事象自体は**カバーしています**」
  * と書きながら指摘として並べる。矛盾検知で「矛盾していません」を弾いたのと
  * 同じことが、ここでも起きる。
  *
- * **「背景説明」「描写として追加」も落とす。** プロンプトで
- * 「伏線・掘り下げ・テーマの補強・背景の説明は逸脱ではない」と言っており、
- * **自分でそう書いているものは、自分で否定している。**
+ * **落としすぎるほうが害が大きい**（作者の裁定、2026-09-18）。誤検出は測って
+ * 0だったのに、小さいモデルほどここで全部落ちていた。迷ったら通す。
  */
-const NOT_A_DEVIATION =
-  /(カバーして|網羅して|沿って(い|お)|一致して|逸脱で(は)?(あり)?(ませ|ない)|問題(は)?(あり)?ませ|背景(の)?説明|描写として(追加|補)|掘り下げ|補強|伏線)/;
-
 export function deniesDeviation(reason: string): boolean {
-  return NOT_A_DEVIATION.test(reason);
+  // 作者へ預けている一言がどこかに在れば、その指摘は否定ではない。
+  // 節ごとに見るより緩いが、「迷ったら通す」側へ倒すためにこうしている
+  if (DEFERS_TO_AUTHOR.test(reason)) return false;
+
+  // 「AはプロットB、しかしCは逸脱」のように向きが混ざるので、節ごとに見る
+  for (const clause of reason.split(/[。、．，\n！？!?]+/u)) {
+    if (DENIED_OUTRIGHT.test(clause)) return true;
+    if (assertsWithout(clause, AGREES_WITH_PLOT)) return true;
+    if (assertsWithout(clause, LEGITIMATE_PURPOSE)) return true;
+  }
+  return false;
 }
+
+/** その言い回しが節に在り、かつ打ち消されていないか */
+function assertsWithout(clause: string, pattern: RegExp): boolean {
+  const match = pattern.exec(clause);
+  if (!match) return false;
+  return !NEGATED_AFTER.test(clause.slice(match.index + match[0].length));
+}
+
+/**
+ * 照合用の正規化。空白に加えて**約物も落とす**。
+ *
+ * 読点ひとつ、鉤括弧ひとつの違いで根拠が消えるのを防ぐ。
+ */
+function normalizeForPlotMatch(text: string): string {
+  return normalizeForComparison(text).replace(
+    /[、。，．・…「」『』（）()〈〉《》【】\[\]"'“”‘’!?！？:：;；]/gu,
+    ""
+  );
+}
+
+/**
+ * 言い換えを許す下限。**引用の7割が、プロットの同じあたりに在れば通す。**
+ *
+ * 「町はずれの家を**訪れ**」と「町はずれの家を**訪ね**」で 0.91。
+ * まったく別の文は 0.1 前後にしかならない（テストで固定してある）。
+ */
+export const PLOT_REFERENCE_MATCH_RATIO = 0.7;
+
+/**
+ * 言い換えとして扱う最短の長さ。
+ *
+ * 短い語は、たまたま重なっただけで通ってしまう。短いものは今までどおり
+ * 逐語一致か見出し名でしか認めない。
+ */
+const MIN_PARAPHRASE_CHARS = 8;
 
 /**
  * 照らした先が、プロットに実在するか。
@@ -90,21 +177,73 @@ export function deniesDeviation(reason: string): boolean {
  *
  * ただし**語句そのままとは限らない**（プロットの「あらすじ」節を指して
  * 「あらすじ」と書くなど）。**見出しの名前も実在として認める。**
+ *
+ * さらに**一文字の言い換えも認める**（作者の裁定、2026-09-18）。
+ * 「町はずれの家を**訪れ**」と書いたせいで、プロットの「**訪ね**」に届かず
+ * 場所を当てていた指摘が2件とも消えた。丸写しを求めるのは厳しすぎる。
+ * でっち上げは重なりが低いので、これでも落ちる。
  */
 export function referencesPlot(plotReference: string, plot: string): boolean {
-  const reference = normalizeForComparison(plotReference);
+  const reference = normalizeForPlotMatch(plotReference);
   if (!reference) return false;
-  const normalizedPlot = normalizeForComparison(plot);
+  const normalizedPlot = normalizeForPlotMatch(plot);
   if (normalizedPlot.includes(reference)) return true;
 
   // 「## あらすじ」のような見出しを指しているだけの場合も通す。
   // 引用ではないが、照らした先としては特定できている
   const headings = [...plot.matchAll(/^#{1,6}\s*(.+?)\s*$/gm)].map((match) =>
-    normalizeForComparison(match[1])
+    normalizeForPlotMatch(match[1])
   );
-  return headings.some(
-    (heading) => heading && (reference.includes(heading) || heading === reference)
-  );
+  if (
+    headings.some(
+      (heading) =>
+        heading && (reference.includes(heading) || heading === reference)
+    )
+  ) {
+    return true;
+  }
+
+  if (reference.length < MIN_PARAPHRASE_CHARS) return false;
+  return bestPlotOverlap(reference, plot) >= PLOT_REFERENCE_MATCH_RATIO;
+}
+
+/**
+ * 引用とプロットの、いちばん重なっている場所の割合を返す。
+ *
+ * **プロット全体とまとめて比べない。** 全体と比べると、あちこちから2文字ずつ
+ * 拾い集めただけの文が通ってしまう。プロットを文で切り、引用と同じくらいの
+ * 長さの窓（引用の2倍まで）に区切って、その中での重なりを見る。
+ */
+function bestPlotOverlap(reference: string, plot: string): number {
+  const bigrams = bigramsOf(reference);
+  if (bigrams.length === 0) return 0;
+
+  const pieces = plot
+    .split(/[。\n]+/u)
+    .map(normalizeForPlotMatch)
+    .filter((piece) => piece.length > 0);
+  const limit = reference.length * 2;
+
+  let best = 0;
+  for (let start = 0; start < pieces.length; start += 1) {
+    let window = "";
+    for (let end = start; end < pieces.length; end += 1) {
+      window += pieces[end];
+      const hits = bigrams.filter((bigram) => window.includes(bigram)).length;
+      best = Math.max(best, hits / bigrams.length);
+      if (window.length >= limit) break;
+    }
+  }
+  return best;
+}
+
+/** 2文字ずつに切り出す（重複は除く） */
+function bigramsOf(text: string): string[] {
+  const found = new Set<string>();
+  for (let index = 0; index + 1 < text.length; index += 1) {
+    found.add(text.slice(index, index + 2));
+  }
+  return [...found];
 }
 
 export function parseDeviationResult(

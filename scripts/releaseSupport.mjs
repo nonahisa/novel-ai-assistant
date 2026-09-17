@@ -17,6 +17,10 @@ export const EXPECTED_ARCHIVE_FILES = [
   "extension/dist/extension.js",
   // ブラウザ版VSCode（vscode.dev / github.dev）向けの束（設計書5.8）
   "extension/dist/browser-extension.js",
+  // MCPサーバーの束（設計書6.87.8）。拡張機能は読み込まないが、
+  // 「AI用の指示書を作品に置く」が書き出す登録の中身が `node <この束>` なので、
+  // **入っていないと配布版では繋がらない**（2026-09-18 に同梱へ方針を変えた）
+  "extension/dist/mcp-server.mjs",
   "extension/media/icon.svg",
   // AI用の指示書の雛形（設計書6.87.15 柱5）。拡張機能が作品フォルダーへ
   // 書き出すときに読む。**`docs/` は丸ごと除外しているので、
