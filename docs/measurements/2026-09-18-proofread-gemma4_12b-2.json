@@ -1,0 +1,766 @@
+{
+  "measuredAt": "2026-09-17T15:50:37.703Z",
+  "feature": "proofread",
+  "tool": "proofread.run",
+  "model": "gemma4:12b",
+  "numCtx": 32768,
+  "endpoint": null,
+  "repeat": 3,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.66.4",
+    "stale": true,
+    "reason": "束は 0.66.4、リポジトリは 0.66.5",
+    "staleDuringRun": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.66.4、リポジトリは 0.66.5）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+  },
+  "promptVersion": "1.8",
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\proofread",
+    "targets": [
+      "本文\\001_あさ.txt",
+      "本文\\002_ひる.txt",
+      "本文\\003_よる.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\proofread\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 47880,
+      "staleNote": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.66.4、リポジトリは 0.66.5）。Claude Code を開き直して、新しい束で繋ぎ直してください",
+      "metrics": {
+        "ateji": 3,
+        "atejiTotal": 8,
+        "mustOpen": 3,
+        "mustOpenTotal": 10,
+        "falsePositives": 0,
+        "noSuggestion": 2,
+        "accepted": 8,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 47880
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "ateji": {
+          "丁度": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "沢山": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "是非": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "折角": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          }
+        },
+        "mustOpen": {
+          "然し": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 2
+          },
+          "殆ど": {
+            "found": 2,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "出来る": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "所謂": {
+            "found": 1,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "尚": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "但し": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "或いは": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          }
+        },
+        "falsePositives": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_あさ.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.66.4、リポジトリは 0.66.5）。Claude Code を開き直して、新しい束で繋ぎ直してください\n手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:12b",
+            "results": [
+              {
+                "chunkId": "本文\\001_あさ.txt#1-0@8027",
+                "chapterLabel": "第1話",
+                "accepted": [
+                  {
+                    "line": 1,
+                    "original": "丁度六時",
+                    "target": "丁度六時",
+                    "suggestion": "ちょうど六時",
+                    "reason": "漢字ひらき",
+                    "explanation": "「丁度（ちょうど）」が漢字のため、読みが詰まります。",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 1,
+                    "original": "沢山差し込んでいて",
+                    "target": "沢山差し込んでいて",
+                    "suggestion": "たくさん差し込んでいて",
+                    "reason": "漢字ひらき",
+                    "explanation": "「沢山（たくさん）」が漢字のため、読みが詰まります。",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 13,
+                    "original": "殆ど自信がない",
+                    "target": "殆ど自信がない",
+                    "suggestion": "ほとんど自信がない",
+                    "reason": "漢字ひらき",
+                    "explanation": "「殆ど（ほとんど）」が漢字のため、読みが詰まります。（参考：「殆」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 15,
+                    "original": "然し、諦めるには",
+                    "target": "然し、諦めるには",
+                    "suggestion": "",
+                    "reason": "漢字ひらき",
+                    "explanation": "「然し（しかし）」が漢字のため、読みが詰まります。",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "bundleStale": true
+          }
+        },
+        {
+          "target": "本文\\002_ひる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.66.4、リポジトリは 0.66.5）。Claude Code を開き直して、新しい束で繋ぎ直してください\n手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:12b",
+            "results": [
+              {
+                "chunkId": "本文\\002_ひる.txt#2-0@8027",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 3,
+                    "original": "是非この鯵を持っていきなさい。",
+                    "target": "是非この鯵を持っていきなさい。",
+                    "suggestion": "ぜひこの鯵を持っていきなさい。",
+                    "reason": "漢字ひらき",
+                    "explanation": "「是非（ぜひ）」が漢字のままです。（参考：「鯵」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "所謂、応用問題ってやつが",
+                    "target": "所謂、応用問題ってやつが",
+                    "suggestion": "いわゆる、応用問題ってやつが",
+                    "reason": "漢字ひらき",
+                    "explanation": "「所謂（いわゆる）」が漢字のままです。（参考：「謂」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "bundleStale": true
+          }
+        },
+        {
+          "target": "本文\\003_よる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.66.4、リポジトリは 0.66.5）。Claude Code を開き直して、新しい束で繋ぎ直してください\n手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:12b",
+            "results": [
+              {
+                "chunkId": "本文\\003_よる.txt#3-0@8027",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 15,
+                    "original": "殆ど忘れてしまったけど",
+                    "target": "殆ど忘れてしまったけど",
+                    "suggestion": "ほとんど忘れてしまったけど",
+                    "reason": "漢字ひらき",
+                    "explanation": "「殆ど（ほとんど）」がひらがなの方がスムーズです。（参考：「殆」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "然し、昔の写真って",
+                    "target": "然し、昔の写真って",
+                    "suggestion": "",
+                    "reason": "漢字ひらき",
+                    "explanation": "「然し（しかし）」がひらがなの方が読みやすくなります。",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "bundleStale": true
+          }
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "elapsedMs": 52988,
+      "staleNote": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.66.4、リポジトリは 0.66.5）。Claude Code を開き直して、新しい束で繋ぎ直してください",
+      "metrics": {
+        "ateji": 3,
+        "atejiTotal": 8,
+        "mustOpen": 3,
+        "mustOpenTotal": 10,
+        "falsePositives": 0,
+        "noSuggestion": 2,
+        "accepted": 8,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 52988
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "ateji": {
+          "丁度": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "沢山": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "是非": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "折角": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          }
+        },
+        "mustOpen": {
+          "然し": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 2
+          },
+          "殆ど": {
+            "found": 2,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "出来る": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "所謂": {
+            "found": 1,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "尚": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "但し": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "或いは": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          }
+        },
+        "falsePositives": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_あさ.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.66.4、リポジトリは 0.66.5）。Claude Code を開き直して、新しい束で繋ぎ直してください\n手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:12b",
+            "results": [
+              {
+                "chunkId": "本文\\001_あさ.txt#1-0@8027",
+                "chapterLabel": "第1話",
+                "accepted": [
+                  {
+                    "line": 1,
+                    "original": "丁度六時",
+                    "target": "丁度六時",
+                    "suggestion": "ちょうど六時",
+                    "reason": "漢字ひらき",
+                    "explanation": "「丁度（ちょうど）」が漢字のため、読みが詰まります。",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 1,
+                    "original": "沢山差し込んでいて",
+                    "target": "沢山差し込んでいて",
+                    "suggestion": "たくさん差し込んでいて",
+                    "reason": "漢字ひらき",
+                    "explanation": "「沢山（たくさん）」が漢字のため、読みが詰まります。",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 13,
+                    "original": "殆ど自信がない",
+                    "target": "殆ど自信がない",
+                    "suggestion": "ほとんど自信がない",
+                    "reason": "漢字ひらき",
+                    "explanation": "「殆ど（ほとんど）」が漢字のため、読みが詰まります。（参考：「殆」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 15,
+                    "original": "然し、諦めるには",
+                    "target": "然し、諦めるには",
+                    "suggestion": "",
+                    "reason": "漢字ひらき",
+                    "explanation": "「然し（しかし）」が漢字のため、読みが詰まります。",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "bundleStale": true
+          }
+        },
+        {
+          "target": "本文\\002_ひる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.66.4、リポジトリは 0.66.5）。Claude Code を開き直して、新しい束で繋ぎ直してください\n手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:12b",
+            "results": [
+              {
+                "chunkId": "本文\\002_ひる.txt#2-0@8027",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 3,
+                    "original": "是非この鯵を持っていきなさい",
+                    "target": "是非この鯵を持っていきなさい",
+                    "suggestion": "ぜひこの鯵を持っていきなさい",
+                    "reason": "漢字ひらき",
+                    "explanation": "「是非（ぜひ）」が漢字のままです。（参考：「鯵」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "所謂、応用問題ってやつが",
+                    "target": "所謂、応用問題ってやつが",
+                    "suggestion": "いわゆる、応用問題ってやつが",
+                    "reason": "漢字ひらき",
+                    "explanation": "「所謂（いわゆる）」が漢字のままです。（参考：「謂」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "bundleStale": true
+          }
+        },
+        {
+          "target": "本文\\003_よる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.66.4、リポジトリは 0.66.5）。Claude Code を開き直して、新しい束で繋ぎ直してください\n手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:12b",
+            "results": [
+              {
+                "chunkId": "本文\\003_よる.txt#3-0@8027",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 15,
+                    "original": "殆ど忘れてしまったけど",
+                    "target": "殆ど忘れてしまったけど",
+                    "suggestion": "ほとんど忘れてしまったけど",
+                    "reason": "漢字ひらき",
+                    "explanation": "「殆ど（ほとんど）」をひらがなにすることでスムーズに読めます。（参考：「殆」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "然し、昔の写真って",
+                    "target": "然し、昔の写真って",
+                    "suggestion": "",
+                    "reason": "漢字ひらき",
+                    "explanation": "「然し（しかし）」をひらがなにするか、より平易な語への置き換えが検討できます。",
+                    "confidence": "medium"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "bundleStale": true
+          }
+        }
+      ]
+    },
+    {
+      "round": 3,
+      "elapsedMs": 47945,
+      "staleNote": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.66.4、リポジトリは 0.66.5）。Claude Code を開き直して、新しい束で繋ぎ直してください",
+      "metrics": {
+        "ateji": 3,
+        "atejiTotal": 8,
+        "mustOpen": 3,
+        "mustOpenTotal": 10,
+        "falsePositives": 0,
+        "noSuggestion": 2,
+        "accepted": 8,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 47945
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "ateji": {
+          "丁度": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "沢山": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "是非": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "折角": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          }
+        },
+        "mustOpen": {
+          "然し": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 2
+          },
+          "殆ど": {
+            "found": 2,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "出来る": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "所謂": {
+            "found": 1,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "尚": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "但し": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "或いは": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          }
+        },
+        "falsePositives": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_あさ.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.66.4、リポジトリは 0.66.5）。Claude Code を開き直して、新しい束で繋ぎ直してください\n手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:12b",
+            "results": [
+              {
+                "chunkId": "本文\\001_あさ.txt#1-0@8027",
+                "chapterLabel": "第1話",
+                "accepted": [
+                  {
+                    "line": 1,
+                    "original": "丁度六時",
+                    "target": "丁度六時",
+                    "suggestion": "ちょうど六時",
+                    "reason": "漢字ひらき",
+                    "explanation": "「丁度（ちょうど）」が漢字のため、読みが詰まります。",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 1,
+                    "original": "沢山差し込んでいて",
+                    "target": "沢山差し込んでいて",
+                    "suggestion": "たくさん差し込んでいて",
+                    "reason": "漢字ひらき",
+                    "explanation": "「沢山（たくさん）」が漢字のため、読みが詰まります。",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 13,
+                    "original": "殆ど自信がない",
+                    "target": "殆ど自信がない",
+                    "suggestion": "ほとんど自信がない",
+                    "reason": "漢字ひらき",
+                    "explanation": "「殆ど（ほとんど）」が漢字のため、読みが詰まります。（参考：「殆」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 15,
+                    "original": "然し、諦めるには",
+                    "target": "然し、諦めるには",
+                    "suggestion": "",
+                    "reason": "漢字ひらき",
+                    "explanation": "「然し（しかし）」が漢字のため、読みが詰まります。",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "bundleStale": true
+          }
+        },
+        {
+          "target": "本文\\002_ひる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.66.4、リポジトリは 0.66.5）。Claude Code を開き直して、新しい束で繋ぎ直してください\n手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:12b",
+            "results": [
+              {
+                "chunkId": "本文\\002_ひる.txt#2-0@8027",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 3,
+                    "original": "是非この鯵を持っていきなさい",
+                    "target": "是非この鯵を持っていきなさい",
+                    "suggestion": "ぜひこの鯵を持っていきなさい",
+                    "reason": "漢字ひらき",
+                    "explanation": "「是非（ぜひ）」が漢字のままです。（参考：「鯵」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "所謂、応用問題ってやつ",
+                    "target": "所謂、応用問題ってやつ",
+                    "suggestion": "いわゆる、応用問題ってやつ",
+                    "reason": "漢字ひらき",
+                    "explanation": "「所謂（いわゆる）」が漢字のままです。（参考：「謂」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "bundleStale": true
+          }
+        },
+        {
+          "target": "本文\\003_よる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.66.4、リポジトリは 0.66.5）。Claude Code を開き直して、新しい束で繋ぎ直してください\n手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:12b",
+            "results": [
+              {
+                "chunkId": "本文\\003_よる.txt#3-0@8027",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 15,
+                    "original": "殆ど忘れてしまったけど",
+                    "target": "殆ど忘れてしまったけど",
+                    "suggestion": "ほとんど忘れてしまったけど",
+                    "reason": "漢字ひらき",
+                    "explanation": "「殆ど（ほとんど）」がひらがなの方がスムーズです。（参考：「殆」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "然し、昔の写真って",
+                    "target": "然し、昔の写真って",
+                    "suggestion": "",
+                    "reason": "漢字ひらき",
+                    "explanation": "「然し（しかし）」がひらがなの方が読みやすくなります。",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "bundleStale": true
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "ateji": {
+      "values": [
+        3,
+        3,
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "atejiTotal": {
+      "values": [
+        8,
+        8,
+        8
+      ],
+      "min": 8,
+      "max": 8
+    },
+    "mustOpen": {
+      "values": [
+        3,
+        3,
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "mustOpenTotal": {
+      "values": [
+        10,
+        10,
+        10
+      ],
+      "min": 10,
+      "max": 10
+    },
+    "falsePositives": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "noSuggestion": {
+      "values": [
+        2,
+        2,
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "accepted": {
+      "values": [
+        8,
+        8,
+        8
+      ],
+      "min": 8,
+      "max": 8
+    },
+    "rejected": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        47880,
+        52988,
+        47945
+      ],
+      "min": 47880,
+      "max": 52988
+    }
+  },
+  "lines": [
+    "当て字を拾えた: 3/8（各回：3/8、3/8、3/8）",
+    "ひらくべき語を拾えた: 3/10（各回：3/10、3/10、3/10）",
+    "誤検出（ひらいてはいけない語をひらいた）: 0（各回：0、0、0）",
+    "提案なし（漢字ひらきなのに修正案が空）: 2（各回：2、2、2）",
+    "指摘（検算を通ったもの）: 8（各回：8、8、8）",
+    "落とした（検算で弾いたもの）: 0（各回：0、0、0）",
+    "失敗（チャンクごと通らなかったもの）: 0（各回：0、0、0）",
+    "所要時間: 47.9秒〜53.0秒（各回：47.9秒、53.0秒、47.9秒）"
+  ]
+}

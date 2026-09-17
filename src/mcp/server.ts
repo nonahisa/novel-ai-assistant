@@ -2,6 +2,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { SERVER_NAME, SERVER_VERSION } from "./version";
+import {
+  checkBundleStaleness,
+  rememberBundleAtStartup,
+  staleBundleLine,
+  withStaleNote,
+  type BundleStaleness,
+} from "./staleness";
 import { McpToolError, describeError } from "./tools/shared";
 import { VALIDATE_NOTE } from "./tools/run";
 import {
@@ -61,8 +68,11 @@ import {
 } from "./tools/blurb";
 import {
   OLLAMA_GENERATE_INPUT,
+  OLLAMA_MODELS_INPUT,
   ollamaGenerate,
+  ollamaModels,
   type OllamaGenerateInput,
+  type OllamaModelsInput,
 } from "./tools/ollama";
 import {
   PROOFREAD_PROMPT_INPUT,
@@ -164,15 +174,30 @@ import {
 
 const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
 
+/*
+  **起動したときの束の姿を控える**（設計書6.87.15 の柱2の1）。ここで一度
+  控えておかないと、あとから「この束は作り直されたか」を問えない。
+  `main()` ではなくここで呼ぶのは、**繋ぐ前の状態を控えたい**からである。
+*/
+rememberBundleAtStartup();
+
 /** 結果をそのまま JSON で返す。失敗は作者に読める日本語で */
 function ok(value: unknown): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
 }
 
-function fail(error: unknown): CallToolResult {
+function fail(error: unknown, staleness?: BundleStaleness): CallToolResult {
   // **握りつぶさない。** 予期しない失敗でも、何が起きたかは必ず返す
-  const message =
+  const base =
     error instanceof McpToolError ? error.message : describeError(error);
+  /*
+    失敗の返事には `note` を足す先が無いので、断り書きは本文の末尾へ付ける。
+    **古い束のまま直したはずの不具合を踏んでいる**ことがあり、そのときは
+    失敗の理由より先に、束を繋ぎ直すことのほうが効く。
+  */
+  const message = staleness?.stale
+    ? `${base}\n${staleBundleLine(staleness.reason)}`
+    : base;
   return { content: [{ type: "text", text: message }], isError: true };
 }
 
@@ -184,6 +209,8 @@ function fail(error: unknown): CallToolResult {
  * 0. **許可を確かめる**（設計書6.87.10）。**既定は拒否**で、作者が意思確認を
  *    していない作品は1文字も読ませない。道具が動く前に断る
  * 1. **失敗の返し方を揃える**
+ * 1.5 **束が古ければ、返事に1行足す**（設計書6.87.15 の柱2の1）。
+ *    道具ごとに書かないのは、記録や許可と同じ理由である
  * 2. **外から触られたことを1行残す**（設計書6.87.9）。道具ごとに書くと
  *    新しい道具を足した人が忘れ、**忘れたことは作者には見えない**。
  *    名前をここへ渡しているのはそのためで、渡し忘れは
@@ -208,15 +235,15 @@ function tool<Args>(
     } catch (error) {
       // **ノックされたことを残す。** 許可した回より、作者が知りたいこと
       recordExternalAccess({ tool: name, args, ok: false, denied: true });
-      return fail(error);
+      return fail(error, checkBundleStaleness());
     }
 
     try {
       const value = await handler(args);
       recordExternalAccess({ tool: name, args, ok: true });
-      return ok(value);
+      return ok(withStaleNote(value, checkBundleStaleness()));
     } catch (error) {
-      const result = fail(error);
+      const result = fail(error, checkBundleStaleness());
       recordExternalAccess({
         tool: name,
         args,
@@ -253,6 +280,12 @@ server.registerTool(
     */
     client: server.server.getClientVersion() ?? null,
     clientCapabilities: server.server.getClientCapabilities() ?? null,
+    /*
+      **走っている束が古くないか**（設計書6.87.15 の柱2の1）。`version` は
+      束に焼き込まれた写しなので、それ自体では古さが分からない——
+      リポジトリの `package.json` と束の更新時刻を突き合わせて初めて分かる。
+    */
+    bundle: checkBundleStaleness(),
   }))
 );
 
@@ -949,6 +982,21 @@ server.registerTool(
     inputSchema: OLLAMA_GENERATE_INPUT,
   },
   tool("ollama.generate", (args: OllamaGenerateInput) => ollamaGenerate(args))
+);
+
+server.registerTool(
+  "ollama.models",
+  {
+    title: "手元の Ollama のモデル一覧",
+    description:
+      "`runner: \"ollama\"` の `model` を選ぶために使います。" +
+      "手元の Ollama に入っているモデルと、申告している読める長さ（contextLength）・" +
+      "対応機能（capabilities）・同梱の実測（bundled）を返します。" +
+      "**一覧を読むだけで、作者の原稿は1文字も送りません**（allowRemote は要りません）。" +
+      "詳細の取れなかったモデルは failures に残し、名前は返します。",
+    inputSchema: OLLAMA_MODELS_INPUT,
+  },
+  tool("ollama.models", (args: OllamaModelsInput) => ollamaModels(args))
 );
 
 async function main(): Promise<void> {

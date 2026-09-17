@@ -587,6 +587,69 @@ export function isAmbiguousInLine(lineText: string, original: string): boolean {
   return lineText.indexOf(original, first + 1) >= 0;
 }
 
+/**
+ * 漢字ひらきの修正案が、**ひらいた形ではなく言い換え**か（P-10 1.8）。
+ *
+ * 1.8 の測定で gemma4:12b が「然し」→「でも」を返した。意味は近いが、
+ * **これはひらきではなく言い換えである。** 押すと本文の「然し」が「でも」に
+ * なり、**作者の文体がモデルの語彙で置き換わる。** 手前の関門はどれも
+ * 効かない——漢字は増えていないので `introducesNewKanji` は通し、原文が
+ * 2字では `dropsOriginalTail`（半分以上が消える）にも掛からない。
+ *
+ * **読みの辞書は使わない。** 常用漢字表の音訓で見ると「然し（しかし）」は
+ * **表外の読み**なので、表で判定する規則は**正しい指摘まで落とす**
+ * （作者が 2026-09-12 に取り下げさせた規則そのものである。下の
+ * `usableSuggestion` の長いコメントに経緯がある）。代わりに、
+ * **「ひらく」の定義から機械的に決まることだけ**を見る。ひらくとは漢字を
+ * かなにすることなので、
+ *
+ * 1. 修正案の字は、**かなか、原文にある字**のどちらかに限られる
+ * 2. 原文の漢字以外の字（送り仮名・助詞・句読点など）は、**同じ順で残る**
+ * 3. 漢字1字の読みは1音以上なので、**修正案が原文より短くなることはない**
+ *
+ * 「然し」→「でも」は 2 で落ちる（原文の「し」が残らない）。
+ * 「然し」→「しかし」「出来る」→「できる」「丁度」→「ちょうど」は通る。
+ *
+ * **知っていて通す取りこぼしが2つある。** 「出来る」→「やれる」のように
+ * **送り仮名が同じ言い換え**と、「丁度」→「まさに」のように**原文にかなが
+ * 無い語の言い換え**は、ここでは見分けられない。読みの辞書なしに
+ * 「出来→やれ」と「然→しか」は区別できないためである。
+ * **見分けられない側は通す**——正しいひらきを落とすほうが害が大きい。
+ *
+ * **落とすのは修正案だけで、指摘は残す**（`introducesNewKanji`・
+ * `isAmbiguousInLine` と同じ扱い。作者の裁定、2026-09-17）。
+ */
+export function paraphrasesInsteadOfOpening(
+  original: string,
+  suggestion: string
+): boolean {
+  if (!suggestion) return false;
+  const kanji = /\p{Script=Han}/u;
+  // 長音符は Script=Common なので、かなの字種だけでは拾えない
+  const kana = /[\p{Script=Hiragana}\p{Script=Katakana}ー]/u;
+  const originalChars = Array.from(original);
+  const suggestionChars = Array.from(suggestion);
+
+  // 1. かなでも原文の字でもない字が入っていれば、別の語に置き換えている
+  const inOriginal = new Set(originalChars);
+  if (
+    suggestionChars.some((char) => !kana.test(char) && !inOriginal.has(char))
+  ) {
+    return true;
+  }
+  // 2. 原文の漢字以外は、ひらいても順序ごと残るはずである
+  //    （「然し」→「でも」はここで落ちる。送り仮名の「し」が消えている）
+  let at = 0;
+  for (const char of originalChars) {
+    if (kanji.test(char)) continue;
+    const found = suggestion.indexOf(char, at);
+    if (found < 0) return true;
+    at = found + char.length;
+  }
+  // 3. 漢字をかなにして短くなることはない（1字の読みは1音以上ある）
+  return suggestionChars.length < originalChars.length;
+}
+
 export function hasRepetition(text: string): boolean {
   const body = text.replace(/\s/g, "");
   for (let start = 0; start + REPEAT_MIN_LENGTH <= body.length; start++) {
@@ -853,12 +916,18 @@ export function validateProofreadIssues(
     // （P-10 1.8）。適用は行の中の最初の一致へ当たるので、AIが2つ目の
     // つもりで挙げていると**1つ目が黙って書き換わる。** ここも同じ扱いで、
     // 修正案だけ空にして「この行に直す語がある」は残す
+    // **漢字ひらきの修正案が、ひらきではなく言い換えのことがある**
+    // （P-10 1.8 の測定で gemma4:12b が「然し」→「でも」を返した）。
+    // 押すと作者の文体がモデルの語彙で置き換わるので、ここも同じ扱いで
+    // 修正案だけ空にする（作者の裁定、2026-09-17）
     const usableSuggestion =
       reason === "語尾単調" ||
       isPlaceholderText(suggestion, true) ||
       dropsOriginalTail(original, suggestion) ||
       isAmbiguousInLine(chunkLines[line - firstLine] ?? "", original) ||
-      (reason === "漢字ひらき" && introducesNewKanji(original, suggestion))
+      (reason === "漢字ひらき" && introducesNewKanji(original, suggestion)) ||
+      (reason === "漢字ひらき" &&
+        paraphrasesInsteadOfOpening(original, suggestion))
         ? ""
         : suggestion;
     // 原文と同じものを「修正案」として返してくる。押しても何も起きない。

@@ -6,6 +6,7 @@ import {
   isDialogueOnly,
   mentionsForbiddenAspect,
   normalizeReason,
+  paraphrasesInsteadOfOpening,
   parseProofreadResult,
   sortProofreadIssues,
   validateProofreadIssues,
@@ -1044,5 +1045,81 @@ describe("出力例の語がそのまま返ってきたとき", () => {
 
     expect(result.accepted).toHaveLength(1);
     expect(result.accepted[0].suggestion).toBe("ぜひこの鯵を持って");
+  });
+});
+
+/**
+ * 漢字ひらきの修正案が、**ひらきではなく言い換え**だったとき（P-10 1.8）。
+ *
+ * 1.8 の測定で gemma4:12b が「然し」→「でも」を返した。意味は近いが
+ * **ひらいた形ではない**——押すと本文の「然し」が「でも」になり、
+ * **作者の文体がモデルの語彙で置き換わる。** 漢字は増えていないので
+ * `introducesNewKanji` は通し、原文が2字では `dropsOriginalTail` も効かない。
+ *
+ * **読みの辞書は使わない。** 常用漢字表の音訓で見ると「然し（しかし）」は
+ * 表外の読みで、表で判定する規則は**正しい指摘まで落とす**
+ * （作者が 2026-09-12 に取り下げさせた規則そのもの）。見るのは
+ * 「ひらく＝漢字をかなにする」という定義から機械的に決まることだけである。
+ *
+ * **落とすのは修正案だけで、指摘は残す**（作者の裁定、2026-09-17。
+ * `introducesNewKanji`・`isAmbiguousInLine` と同じ形）。
+ */
+describe("漢字ひらきの修正案が言い換えだったとき", () => {
+  test.each([
+    ["然し", "でも"],
+    ["殆ど", "ほぼ"],
+    ["然し、私は帰った", "だが、私は帰った"],
+    // 短すぎる修正案（漢字1字の読みは1音以上あるので、縮むことはない）
+    ["然し", "し"],
+    // 原文に無い漢字は `introducesNewKanji` の担当だが、ここでも落ちる
+    ["然し", "然し乍ら"],
+  ])("「%s」→「%s」は言い換えとみなす", (original, suggestion) => {
+    expect(paraphrasesInsteadOfOpening(original, suggestion)).toBe(true);
+  });
+
+  test.each([
+    ["然し", "しかし"],
+    ["出来る", "できる"],
+    ["丁度", "ちょうど"],
+    ["殆ど", "ほとんど"],
+    // 原文にある漢字は、そのまま残っていてよい
+    ["基礎学力は出来る", "基礎学力はできる"],
+  ])("本当にひらいた「%s」→「%s」は通す", (original, suggestion) => {
+    expect(paraphrasesInsteadOfOpening(original, suggestion)).toBe(false);
+  });
+
+  test("空の修正案は、この関門では扱わない", () => {
+    // 空は別の扱い（指摘だけ残す形として、既に通っている）
+    expect(paraphrasesInsteadOfOpening("然し", "")).toBe(false);
+  });
+
+  test("送り仮名が同じ言い換えは、知っていて通す取りこぼしである", () => {
+    // 読みの辞書なしに「出来→やれ」と「然→しか」は区別できない。
+    // **正しいひらきを落とす側には倒さない**ので、ここは通る。
+    // 見分けられるようになったら、このテストが落ちて気づける
+    expect(paraphrasesInsteadOfOpening("出来る", "やれる")).toBe(false);
+  });
+
+  test("検証を通すと、指摘は残り修正案だけが空になる", () => {
+    const result = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 1,
+            original: "然し",
+            suggestion: "でも",
+            reason: "漢字ひらき",
+            explanation: "「然し」で読みが詰まります",
+            confidence: "high",
+          },
+        ],
+      },
+      { text: "然し", startLine: 0, chapterStart: 1, chapterEnd: 1 } as never
+    );
+
+    // 指摘は残す（「ここはひらいたほうがよい」は正しい情報である）
+    expect(result.accepted).toHaveLength(1);
+    // **本文へ当てられる形では残さない**
+    expect(result.accepted[0].suggestion).toBe("");
   });
 });

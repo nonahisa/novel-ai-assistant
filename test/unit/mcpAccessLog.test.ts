@@ -100,6 +100,12 @@ describe("exposureOf——原稿がどこまで外へ出たか", () => {
     expect(exposureOf("mcp.version", undefined)).toBe("none");
   });
 
+  it("手元のモデル一覧は原稿に触れない", () => {
+    // **読むのは Ollama に何が入っているかだけ**（設計書6.87.15 の柱2の2）。
+    // こちらから本文も資料も送らない
+    expect(exposureOf("ollama.models", {})).toBe("none");
+  });
+
   it("知らない道具は、重いほうへ倒す", () => {
     // **軽いほうへ倒すと、本当に本文が出た回を見落とす**
     expect(exposureOf("future.somethingNew", {})).toBe("body");

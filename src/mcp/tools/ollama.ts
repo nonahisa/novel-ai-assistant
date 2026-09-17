@@ -1,8 +1,10 @@
 import { z } from "zod";
+import { bundledTuningByKey, type BundledTuning } from "../../core/bundledTuning";
 import { McpToolError, describeError } from "./shared";
 
 /**
- * 手元の Ollama へ投げる（設計書6.87.8 の4）。
+ * 手元の Ollama へ投げる（設計書6.87.8 の4）／何が入っているかを見る
+ * （6.87.15 の柱2の2）。
  *
  * **`num_ctx` を必ず明示する**（CLAUDE.md 規則6）。指定しないと既定の短い
  * コンテキストで動き、**入力が黙って切り捨てられる。** 128k対応のモデルでも
@@ -13,6 +15,10 @@ import { McpToolError, describeError } from "./shared";
  *
  * **宛先が手元でなければ断る**（6.87.6 の2）。原稿が機械の外へ出るのは、
  * 作者が `allowRemote` で明示したときだけにする。
+ *
+ * **ただし `ollama.models` に `allowRemote` は要らない。** 何が入っているかを
+ * 読むだけで、**作者の原稿は1文字も送らない**——送るものが無いのだから、
+ * 作者に「外へ出してよいか」を問う筋が無い。
  */
 
 export const DEFAULT_ENDPOINT = "http://localhost:11434";
@@ -146,4 +152,207 @@ export async function ollamaGenerate(
     endpoint,
     elapsedMs: Date.now() - startedAt,
   };
+}
+
+/* ── 手元に何が入っているか（設計書6.87.15 の柱2の2）───────────── */
+
+export const OLLAMA_MODELS_INPUT = {
+  endpoint: z
+    .string()
+    .optional()
+    .describe(`Ollama の場所。既定は ${DEFAULT_ENDPOINT}`),
+};
+
+export interface OllamaModelsInput {
+  endpoint?: string;
+}
+
+export interface OllamaModelSummary {
+  /** `run` の `model` へそのまま渡せる名前 */
+  name: string;
+  sizeBytes: number | null;
+  parameterSize: string | null;
+  family: string | null;
+  quantization: string | null;
+  modifiedAt: string | null;
+  /** そのモデルが申告する読める長さ（トークン）。取れなければ null */
+  contextLength: number | null;
+  /** `completion` が無ければ、文章を書かせても返らない（埋め込み用など） */
+  capabilities: string[];
+  /** 同梱の実測（`core/bundledTuning.ts`）。無ければ null */
+  bundled: BundledTuning | null;
+}
+
+export interface OllamaModelsResult {
+  endpoint: string;
+  models: OllamaModelSummary[];
+  /** 詳細を取れなかったモデル。**1つの失敗で全体を止めない** */
+  failures: Array<{ model: string; reason: string }>;
+  note: string;
+}
+
+interface TagsEntry {
+  name?: unknown;
+  size?: unknown;
+  modified_at?: unknown;
+  details?: {
+    family?: unknown;
+    parameter_size?: unknown;
+    quantization_level?: unknown;
+  };
+}
+
+interface ShowDetail {
+  contextLength: number | null;
+  capabilities: string[];
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value ? value : null;
+}
+
+/**
+ * `/api/show` から読める長さと対応機能を取る。
+ *
+ * **`ollamaProvider.ts` の同じ読み取りは借りられない**——あちらは `vscode` を
+ * 静的に import しているので、この束へ持ち込むと**読み込んだ瞬間に落ちる**
+ * （`test/unit/mcpReach.test.ts` が見張っている）。純粋な部分だけを切り出す
+ * にはあのファイルを割る必要があり、それは今回の範囲を越えるので、
+ * ここでは小さく書いた。
+ */
+async function showModel(endpoint: string, model: string): Promise<ShowDetail> {
+  let response: Response;
+  try {
+    response = await fetch(`${endpoint}/api/show`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    });
+  } catch (error) {
+    throw new McpToolError(describeError(error));
+  }
+  if (!response.ok) {
+    // **本文を捨てない**（CLAUDE.md 規則5）
+    const detail = await response.text().catch(() => "");
+    throw new McpToolError(`HTTP ${response.status}: ${detail.slice(0, 200)}`);
+  }
+
+  const payload = (await response.json()) as {
+    capabilities?: unknown;
+    model_info?: Record<string, unknown>;
+  };
+  const info = payload.model_info ?? {};
+
+  /*
+    読める長さの鍵は `<アーキテクチャ>.context_length`（`gemma4.context_length`）
+    である。**アーキ名はモデルごとに違う**ので、まず `general.architecture` を
+    読んで組み立てる。取れなければ末尾一致で拾う——古い版の Ollama は
+    `general.architecture` を返さないことがあり、そこで諦めると
+    「読める長さが分からない」に倒れる（製品の `showModel` も末尾一致で拾う）。
+  */
+  let contextLength: number | null = null;
+  const architecture = info["general.architecture"];
+  if (typeof architecture === "string") {
+    const value = info[`${architecture}.context_length`];
+    if (typeof value === "number") contextLength = value;
+  }
+  if (contextLength === null) {
+    for (const [key, value] of Object.entries(info)) {
+      if (key.endsWith(".context_length") && typeof value === "number") {
+        contextLength = value;
+        break;
+      }
+    }
+  }
+
+  const capabilities = Array.isArray(payload.capabilities)
+    ? payload.capabilities.filter(
+        (item): item is string => typeof item === "string"
+      )
+    : [];
+
+  return { contextLength, capabilities };
+}
+
+const MODELS_NOTE = [
+  "読める長さの台帳（作者の実測 `novelai.modelTuning`）は VS Code の設定の中にあり、この束からは読めません。ここに出る実測は同梱の値（bundled）だけです。",
+  "`capabilities` に `completion` が無いモデル（埋め込み用など）は `run` に使えません。",
+  "`numCtx` は `contextLength` 以下にしてください。実際に VRAM へ載る範囲は、測るまで分かりません。",
+].join("\n");
+
+/**
+ * 手元の Ollama に入っているモデルを返す。
+ *
+ * **モデル名を同梱の一覧から当てにいかない**（CLAUDE.md 規則6）。
+ * `/api/tags` と `/api/show` が言うことだけを返し、同梱の実測は
+ * `bundled` として**出どころが分かる形**で添える。
+ */
+export async function ollamaModels(
+  input: OllamaModelsInput
+): Promise<OllamaModelsResult> {
+  const endpoint = (input.endpoint ?? DEFAULT_ENDPOINT).replace(/\/+$/, "");
+
+  let response: Response;
+  try {
+    response = await fetch(`${endpoint}/api/tags`);
+  } catch (error) {
+    throw new McpToolError(
+      `Ollama へ繋がりませんでした（${endpoint}）: ${describeError(error)}`
+    );
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new McpToolError(
+      `Ollama がエラーを返しました（HTTP ${response.status}）: ${detail.slice(0, 500)}`
+    );
+  }
+
+  const payload = (await response.json()) as { models?: unknown };
+  const entries: TagsEntry[] = Array.isArray(payload.models)
+    ? (payload.models as TagsEntry[])
+    : [];
+
+  /*
+    **並行で問い合わせる。** モデルが10個あれば `/api/show` も10回で、
+    順に待つと一覧を出すだけで何秒もかかる。
+    **1つの失敗で全体を止めない**（チャンク単位の失敗と同じ作法）
+    ——詳細が取れなくても、名前だけは返せば `run` には使える。
+  */
+  const gathered = await Promise.all(
+    entries.map(async (entry) => {
+      const name = stringOrNull(entry?.name);
+      if (!name) return null;
+
+      let detail: ShowDetail = { contextLength: null, capabilities: [] };
+      let failure: { model: string; reason: string } | null = null;
+      try {
+        detail = await showModel(endpoint, name);
+      } catch (error) {
+        failure = { model: name, reason: describeError(error) };
+      }
+
+      const summary: OllamaModelSummary = {
+        name,
+        sizeBytes: typeof entry.size === "number" ? entry.size : null,
+        parameterSize: stringOrNull(entry.details?.parameter_size),
+        family: stringOrNull(entry.details?.family),
+        quantization: stringOrNull(entry.details?.quantization_level),
+        modifiedAt: stringOrNull(entry.modified_at),
+        contextLength: detail.contextLength,
+        capabilities: detail.capabilities,
+        bundled: bundledTuningByKey(`ollama/${name}`) ?? null,
+      };
+      return { summary, failure };
+    })
+  );
+
+  const models: OllamaModelSummary[] = [];
+  const failures: Array<{ model: string; reason: string }> = [];
+  for (const item of gathered) {
+    if (!item) continue;
+    models.push(item.summary);
+    if (item.failure) failures.push(item.failure);
+  }
+
+  return { endpoint, models, failures, note: MODELS_NOTE };
 }

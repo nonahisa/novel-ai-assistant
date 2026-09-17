@@ -52,8 +52,11 @@ export function exposureOf(
   tool: string,
   args: Record<string, unknown> | undefined
 ): ExternalExposure {
-  // 作品に触れないもの
-  if (tool === "mcp.version") return "none";
+  /*
+    作品に触れないもの。`ollama.models` は**手元に何が入っているかを読むだけ**
+    （設計書6.87.15 の柱2の2）で、こちらから本文も資料も送らない。
+  */
+  if (tool === "mcp.version" || tool === "ollama.models") return "none";
 
   /*
     更新案を承認待ちへ置く道具（設計書6.87.16）。**原稿は1文字も外へ出ない**
