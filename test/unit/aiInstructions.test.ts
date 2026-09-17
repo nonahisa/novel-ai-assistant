@@ -1,0 +1,414 @@
+import * as fsp from "node:fs/promises";
+import * as nodePath from "node:path";
+import * as os from "node:os";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  FileSystemError,
+  FileType,
+  Uri,
+  window,
+  workspace,
+} from "./support/vscodeStub";
+import type { WorkEntry } from "../../src/models/types";
+import {
+  AI_INSTRUCTION_TARGETS,
+  AI_INSTRUCTION_TEMPLATE_PATH,
+  AiInstructionFormatError,
+  buildAiInstructionDocument,
+  findAiInstructionTarget,
+  mergeCodexToml,
+  mergeMcpServersJson,
+} from "../../src/core/aiInstructions";
+import { RECOVERY_DIRECTORY_NAME } from "../../src/core/atomicWrite";
+import { SERVER_NAME } from "../../src/mcp/version";
+
+/**
+ * AI用の指示書を作品へ置く（設計書6.87.15 柱5）。
+ *
+ * **ここで守りたいのは4つ。**
+ *
+ * 1. **本文は1つ**——4つの置き先で、頭の数行以外が一致すること
+ *    （写しを4つ持つと、相手によって言うことが違う指示書ができる）
+ * 2. MCP の登録が、相手ごとの正しい形で書かれること
+ *    （指示書だけ置いても、道具に届かなければ意味が無い）
+ * 3. **既にあるファイルを黙って壊さないこと**（`AGENTS.md`・`GEMINI.md` は
+ *    作者や別の道具が既に置いている可能性が高い）
+ * 4. `.mcp.json` に別の登録があっても消えないこと
+ *
+ * **本物のファイルシステムで走らせる**——確かめたいのは「何がファイルに
+ * 書かれたか」なので、作り物の円盤では確かめたことにならない。
+ */
+
+const { writeAiInstructions } = await import(
+  "../../src/features/writeAiInstructions"
+);
+
+const REGISTRATION = {
+  name: SERVER_NAME,
+  command: "node",
+  args: ["C:\\repo\\dist\\mcp-server.mjs"],
+};
+
+describe("指示書の中身（VS Code に触らない部分）", () => {
+  const body = "# 見出し\n\n本文です。\n";
+
+  test("**本文は1つで、違うのは頭の数行だけ**", () => {
+    const documents = AI_INSTRUCTION_TARGETS.map((target) =>
+      buildAiInstructionDocument(target, body)
+    );
+    // どれも本文で終わる（本文へ差し込みを始めたら、ここで落ちる）
+    for (const document of documents) expect(document.endsWith(body)).toBe(true);
+    // フロントマターを持つのは Claude Code だけ
+    const withFrontMatter = documents.filter((text) => text.startsWith("---\n"));
+    expect(withFrontMatter).toHaveLength(1);
+  });
+
+  test("Claude Code のフロントマターは name と description を持つ", () => {
+    const text = buildAiInstructionDocument(
+      findAiInstructionTarget("claude-code"),
+      body
+    );
+    expect(text).toMatch(/^---\nname: novel-assist\n/);
+    expect(text).toContain("description: ");
+    // フロントマターの終わりと本文のあいだは1行あける
+    expect(text).toContain("---\n\n# 見出し");
+  });
+
+  test("JSON の登録は、ほかの登録を消さずに足す", () => {
+    const existing = JSON.stringify(
+      {
+        mcpServers: { "別の道具": { command: "node", args: ["other.mjs"] } },
+        そのほかの設定: { 保つ: true },
+      },
+      null,
+      2
+    );
+    const merged = JSON.parse(
+      mergeMcpServersJson(existing, REGISTRATION, ".mcp.json")
+    );
+    expect(merged.mcpServers["別の道具"]).toEqual({
+      command: "node",
+      args: ["other.mjs"],
+    });
+    expect(merged.mcpServers[SERVER_NAME]).toEqual({
+      command: "node",
+      args: REGISTRATION.args,
+    });
+    expect(merged["そのほかの設定"]).toEqual({ 保つ: true });
+  });
+
+  test("**読めない JSON は直さずに止める**", () => {
+    expect(() =>
+      mergeMcpServersJson("{ これは JSON ではない", REGISTRATION, ".mcp.json")
+    ).toThrow(AiInstructionFormatError);
+    // 波かっこで始まらない形も、勝手に包み直さない
+    expect(() =>
+      mergeMcpServersJson("[1, 2, 3]", REGISTRATION, ".mcp.json")
+    ).toThrow(AiInstructionFormatError);
+  });
+
+  test("TOML は、この節だけを差し替える", () => {
+    const existing =
+      "# 作者の覚え書き\n" +
+      "model = \"gpt-5\"\n" +
+      "\n" +
+      "[mcp_servers.別の道具]\n" +
+      "command = \"node\"\n" +
+      "args = [\"other.mjs\"]\n" +
+      "\n" +
+      `[mcp_servers.${SERVER_NAME}]\n` +
+      "command = \"node\"\n" +
+      "args = [\"古い場所.mjs\"]\n";
+    const merged = mergeCodexToml(existing, REGISTRATION);
+    expect(merged).toContain("# 作者の覚え書き");
+    expect(merged).toContain("[mcp_servers.別の道具]");
+    expect(merged).toContain("other.mjs");
+    expect(merged).not.toContain("古い場所.mjs");
+    // **Windows の区切りを逃がす**（逃がさないと別の場所を指す）
+    expect(merged).toContain('args = ["C:\\\\repo\\\\dist\\\\mcp-server.mjs"]');
+    // 節が2つ並ばない
+    expect(
+      merged.split("\n").filter((line) =>
+        line.startsWith(`[mcp_servers.${SERVER_NAME}]`)
+      )
+    ).toHaveLength(1);
+  });
+
+  test("節が無ければ末尾へ足す（前の節の値として読まれない）", () => {
+    const merged = mergeCodexToml("model = \"gpt-5\"\n", REGISTRATION);
+    expect(merged).toContain("model = \"gpt-5\"\n\n[mcp_servers.");
+  });
+});
+
+describe("作品へ書き出す", () => {
+  let base = "";
+  let root = "";
+  let extensionRoot = "";
+  const globalStore = new Map<string, unknown>();
+
+  const work = (): WorkEntry => ({
+    id: "work_test",
+    title: "氷の街",
+    folderPath: root,
+    registeredAt: "2026-09-18T00:00:00.000Z",
+  });
+
+  /** 拡張機能の文脈の作り物（使うのは extensionUri と globalState だけ） */
+  const context = () =>
+    ({
+      extensionUri: Uri.file(extensionRoot),
+      globalState: {
+        get: <T>(key: string): T | undefined => globalStore.get(key) as T,
+        update: async (key: string, value: unknown) => {
+          globalStore.set(key, value);
+        },
+      },
+    }) as never;
+
+  const read = (relative: string): Promise<string> =>
+    fsp.readFile(nodePath.join(root, relative), "utf8");
+
+  const put = async (relative: string, text: string) => {
+    const target = nodePath.join(root, relative);
+    await fsp.mkdir(nodePath.dirname(target), { recursive: true });
+    await fsp.writeFile(target, text, "utf8");
+  };
+
+  const exists = async (relative: string): Promise<boolean> => {
+    try {
+      await fsp.stat(nodePath.join(root, relative));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  beforeEach(async () => {
+    globalStore.clear();
+    base = await fsp.mkdtemp(nodePath.join(os.tmpdir(), "novelai-skill-"));
+    root = nodePath.join(base, "氷の街");
+    extensionRoot = nodePath.join(base, "拡張機能");
+    await fsp.mkdir(root, { recursive: true });
+
+    // 同梱の雛形と、同梱の束（配布物には入らないが、開発ホストには在る）
+    const template = nodePath.join(extensionRoot, AI_INSTRUCTION_TEMPLATE_PATH);
+    await fsp.mkdir(nodePath.dirname(template), { recursive: true });
+    await fsp.writeFile(template, TEMPLATE, "utf8");
+    await fsp.mkdir(nodePath.join(extensionRoot, "dist"), { recursive: true });
+    await fsp.writeFile(
+      nodePath.join(extensionRoot, "dist", "mcp-server.mjs"),
+      "// 束",
+      "utf8"
+    );
+
+    workspace.fs = {
+      createDirectory: async (uri: { fsPath: string }) => {
+        await fsp.mkdir(uri.fsPath, { recursive: true });
+      },
+      stat: async (uri: { fsPath: string }) => {
+        const stat = await fsp.stat(uri.fsPath);
+        return {
+          type: stat.isDirectory() ? FileType.Directory : FileType.File,
+          size: stat.size,
+        };
+      },
+      readFile: async (uri: { fsPath: string }) => {
+        try {
+          return new Uint8Array(await fsp.readFile(uri.fsPath));
+        } catch {
+          // **本物と同じ形で断る**（素の ENOENT では見分けが効かない）
+          throw new FileSystemError(uri.fsPath, "FileNotFound");
+        }
+      },
+      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
+        await fsp.mkdir(nodePath.dirname(uri.fsPath), { recursive: true });
+        await fsp.writeFile(uri.fsPath, bytes);
+      },
+      readDirectory: async (uri: { fsPath: string }) => {
+        const entries = await fsp.readdir(uri.fsPath, { withFileTypes: true });
+        return entries.map((entry) => [
+          entry.name,
+          entry.isDirectory() ? FileType.Directory : FileType.File,
+        ]);
+      },
+      delete: async (
+        uri: { fsPath: string },
+        options?: { recursive?: boolean }
+      ) => {
+        await fsp.rm(uri.fsPath, {
+          recursive: options?.recursive ?? false,
+          force: true,
+        });
+      },
+      rename: async (
+        from: { fsPath: string },
+        to: { fsPath: string },
+        options?: { overwrite?: boolean }
+      ) => {
+        if (!options?.overwrite) {
+          try {
+            await fsp.stat(to.fsPath);
+            throw new FileSystemError(to.fsPath, "FileExists");
+          } catch (error) {
+            if (error instanceof FileSystemError) throw error;
+          }
+        }
+        await fsp.rename(from.fsPath, to.fsPath);
+      },
+    } as unknown as typeof workspace.fs;
+
+    Object.assign(window, {
+      showQuickPick: vi.fn(async (items: unknown) => items),
+      showInformationMessage: vi.fn(async () => undefined),
+      showWarningMessage: vi.fn(async () => undefined),
+      showOpenDialog: vi.fn(async () => undefined),
+      setStatusBarMessage: vi.fn(() => undefined),
+      createOutputChannel: () => ({
+        appendLine() {},
+        show() {},
+        dispose() {},
+      }),
+    });
+  });
+
+  afterEach(async () => {
+    workspace.fs = {} as typeof workspace.fs;
+    try {
+      await fsp.rm(base, { recursive: true, force: true });
+    } catch {
+      // 一時フォルダーなので、消せなくても結果に関わらない
+    }
+  });
+
+  test("**4つの相手ぶんを置くと、本文は同じで頭の数行だけが違う**", async () => {
+    await writeAiInstructions(context(), work());
+
+    const documents = await Promise.all(
+      AI_INSTRUCTION_TARGETS.map((target) => read(target.instructionPath))
+    );
+    for (const document of documents) {
+      expect(document.endsWith(TEMPLATE)).toBe(true);
+    }
+    // 素のMarkdownで置く3つは、雛形そのもの
+    expect(documents.filter((text) => text === TEMPLATE)).toHaveLength(3);
+    expect(documents.filter((text) => text.startsWith("---\n"))).toHaveLength(1);
+  });
+
+  test("MCP の登録が、相手ごとの形で書かれる", async () => {
+    await writeAiInstructions(context(), work());
+
+    // ドライブ名の大小はスタブの都合で変わるので、そこは見ない
+    const bundle = nodePath
+      .join(extensionRoot, "dist", "mcp-server.mjs")
+      .toLowerCase();
+
+    const claude = JSON.parse(await read(".mcp.json"));
+    expect(claude.mcpServers[SERVER_NAME].command).toBe("node");
+    expect(claude.mcpServers[SERVER_NAME].args[0].toLowerCase()).toBe(bundle);
+
+    const gemini = JSON.parse(await read(".gemini/settings.json"));
+    expect(gemini.mcpServers[SERVER_NAME].command).toBe("node");
+    expect(gemini.mcpServers[SERVER_NAME].args[0].toLowerCase()).toBe(bundle);
+
+    const codex = await read(".codex/config.toml");
+    expect(codex).toContain(`[mcp_servers.${SERVER_NAME}]`);
+    expect(codex).toContain('command = "node"');
+
+    // ローカルLLM向けには登録の口が無いので、勝手なファイルを作らない
+    expect(await exists(".aiwriter/novel-assist.md")).toBe(true);
+  });
+
+  test("**既にある AGENTS.md は、訊かずに壊さない**（やめると1文字も変わらない）", async () => {
+    await put("AGENTS.md", "作者が書いた決まり\n");
+    // 「取りやめる」＝どちらのボタンも押さない
+    (window.showWarningMessage as unknown as ReturnType<typeof vi.fn>) = vi.fn(
+      async () => undefined
+    );
+
+    await writeAiInstructions(context(), work());
+
+    expect(await read("AGENTS.md")).toBe("作者が書いた決まり\n");
+    // ほかの置き先にも手を付けない（全部まとめて取りやめる）
+    expect(await exists("GEMINI.md")).toBe(false);
+    expect(await exists(".mcp.json")).toBe(false);
+  });
+
+  test("退避を選ぶと、元の中身が .novelai-recovery に残る", async () => {
+    await put("GEMINI.md", "前からある中身\n");
+    (window.showWarningMessage as unknown as ReturnType<typeof vi.fn>) = vi.fn(
+      async () => "退避してから置く"
+    );
+
+    await writeAiInstructions(context(), work());
+
+    expect(await read("GEMINI.md")).toBe(TEMPLATE);
+    const backups = await fsp.readdir(
+      nodePath.join(root, RECOVERY_DIRECTORY_NAME)
+    );
+    expect(backups.length).toBeGreaterThan(0);
+    const saved = await Promise.all(
+      backups.map((name) =>
+        fsp.readFile(nodePath.join(root, RECOVERY_DIRECTORY_NAME, name), "utf8")
+      )
+    );
+    expect(saved).toContain("前からある中身\n");
+  });
+
+  test("**`.mcp.json` に別の登録があっても消えない**", async () => {
+    await put(
+      ".mcp.json",
+      JSON.stringify(
+        { mcpServers: { "別の道具": { command: "node", args: ["other.mjs"] } } },
+        null,
+        2
+      )
+    );
+    (window.showWarningMessage as unknown as ReturnType<typeof vi.fn>) = vi.fn(
+      async () => "退避してから置く"
+    );
+
+    await writeAiInstructions(context(), work());
+
+    const merged = JSON.parse(await read(".mcp.json"));
+    expect(merged.mcpServers["別の道具"]).toEqual({
+      command: "node",
+      args: ["other.mjs"],
+    });
+    expect(merged.mcpServers[SERVER_NAME]).toBeDefined();
+  });
+
+  test("読めない `.mcp.json` は直さずに止め、ほかの相手は置き終える", async () => {
+    await put(".mcp.json", "{ 壊れている");
+    (window.showWarningMessage as unknown as ReturnType<typeof vi.fn>) = vi.fn(
+      async () => "退避してから置く"
+    );
+
+    await writeAiInstructions(context(), work());
+
+    // 壊れたファイルには触っていない
+    expect(await read(".mcp.json")).toBe("{ 壊れている");
+    // Claude Code の指示書は、登録に失敗した時点で止まる
+    expect(await exists(".claude/skills/novel-assist/SKILL.md")).toBe(true);
+    // ほかの相手は最後まで進む
+    expect(await read("GEMINI.md")).toBe(TEMPLATE);
+    expect(await exists(".gemini/settings.json")).toBe(true);
+  });
+
+  test("同じ中身が置いてあれば、二度目は触らない", async () => {
+    await writeAiInstructions(context(), work());
+    const before = await fsp.stat(nodePath.join(root, "GEMINI.md"));
+
+    (window.showWarningMessage as unknown as ReturnType<typeof vi.fn>) = vi.fn(
+      async () => "退避してから置く"
+    );
+    await writeAiInstructions(context(), work());
+
+    const after = await fsp.stat(nodePath.join(root, "GEMINI.md"));
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+    // 同じなので退避も作らない
+    expect(await exists(RECOVERY_DIRECTORY_NAME)).toBe(false);
+  });
+});
+
+/** 雛形の代わり（本物の中身はここでは問わない。**そのまま置かれるか**を見る） */
+const TEMPLATE = "# この作品を扱うAIへの指示書\n\n決まりを書く。\n";

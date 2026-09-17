@@ -252,6 +252,9 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   // 外部AIの利用許可（設計書6.87.10）。**どのタイプの作品でも要る**——
   // 外から読まれうることに、作品の種類は関係ない
   "novelai.toggleExternalAccess": "allTypes",
+  // AI用の指示書（設計書6.87.15 柱5）。**どのタイプの作品でも要る**——
+  // 外部AIに扱わせるときの決まりに、作品の種類は関係ない
+  "novelai.writeAiInstructions": "allTypes",
   // 年表と時期・系統は「作中の時間」を並べるもの。
   // 続きものでない作品には並べる筋が無い
   "novelai.openChronicle": "story",

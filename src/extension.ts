@@ -339,6 +339,7 @@ import { registeredPostingSites } from "./features/postingCopyRegistered";
 import { showEditHistory } from "./features/editHistoryPanel";
 import { toggleExternalAccessPermission } from "./features/externalAccessPermission";
 import { ExternalAccessWatcher } from "./features/externalAccessWatcher";
+import { writeAiInstructions } from "./features/writeAiInstructions";
 import {
   reviewProposals,
   toggleReviewLock,
@@ -4561,6 +4562,17 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         await toggleExternalAccessPermission(work);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.writeAiInstructions",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await writeAiInstructions(context, work);
       }
     )
   );

@@ -18,6 +18,10 @@ export const EXPECTED_ARCHIVE_FILES = [
   // ブラウザ版VSCode（vscode.dev / github.dev）向けの束（設計書5.8）
   "extension/dist/browser-extension.js",
   "extension/media/icon.svg",
+  // AI用の指示書の雛形（設計書6.87.15 柱5）。拡張機能が作品フォルダーへ
+  // 書き出すときに読む。**`docs/` は丸ごと除外しているので、
+  // `.vscodeignore` 側の `!` と対で見ること**
+  "extension/docs/skills/novel-assist.md",
 ];
 
 /**
