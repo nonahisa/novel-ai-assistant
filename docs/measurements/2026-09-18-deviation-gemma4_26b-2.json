@@ -1,0 +1,146 @@
+{
+  "measuredAt": "2026-09-17T16:01:06.083Z",
+  "feature": "deviation",
+  "tool": "episode.deviationRun",
+  "model": "gemma4:26b",
+  "numCtx": 32768,
+  "endpoint": null,
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.66.5",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.1",
+  "work": {
+    "source": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\801248a2-fa0a-4df0-a47c-f9e80717029a\\scratchpad\\f86-work",
+    "targets": [
+      "本文\\001_あさ.txt",
+      "本文\\002_ひる.txt",
+      "本文\\003_よる.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\801248a2-fa0a-4df0-a47c-f9e80717029a\\scratchpad\\f86-work\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 42513,
+      "staleNote": null,
+      "metrics": {
+        "noSuggestion": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 42513
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": []
+      },
+      "raw": [
+        {
+          "target": "本文\\001_あさ.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "result": {
+              "accepted": [],
+              "rejected": []
+            },
+            "plotChars": 34013,
+            "usedPlotChars": 29973,
+            "plotTrimmed": true,
+            "note": "プロットが長いため先頭 29,973字だけを使いました（全体 34,013字）"
+          }
+        },
+        {
+          "target": "本文\\002_ひる.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 1,
+                  "lineEnd": 47,
+                  "excerpt": "昼、海斗は港の市場で母に頼まれた買い物をしていた。",
+                  "type": "逸脱",
+                  "reason": "プロットでは「朝の教室で出来事に出会い」とあるが、本文は昼の市場から始まっており、朝の出来事や教室の描写が欠落している可能性があるため。",
+                  "plotReference": "主人公は朝の教室で出来事に出会い",
+                  "severity": "medium",
+                  "confidence": "high"
+                }
+              ],
+              "rejected": []
+            },
+            "plotChars": 34013,
+            "usedPlotChars": 29973,
+            "plotTrimmed": true,
+            "note": "プロットが長いため先頭 29,973字だけを使いました（全体 34,013字）"
+          }
+        },
+        {
+          "target": "本文\\003_よる.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "result": {
+              "accepted": [],
+              "rejected": []
+            },
+            "plotChars": 34013,
+            "usedPlotChars": 29973,
+            "plotTrimmed": true,
+            "note": "プロットが長いため先頭 29,973字だけを使いました（全体 34,013字）"
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "noSuggestion": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "rejected": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        42513
+      ],
+      "min": 42513,
+      "max": 42513
+    }
+  },
+  "lines": [
+    "提案なし（漢字ひらきなのに修正案が空）: 0",
+    "指摘（検算を通ったもの）: 0",
+    "落とした（検算で弾いたもの）: 0",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 42.5秒"
+  ]
+}

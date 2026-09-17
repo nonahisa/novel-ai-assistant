@@ -1,0 +1,236 @@
+{
+  "measuredAt": "2026-09-17T16:11:39.316Z",
+  "feature": "deviation",
+  "tool": "episode.deviationRun",
+  "model": "gemma4:26b",
+  "numCtx": 32768,
+  "endpoint": null,
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.66.6",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.1",
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\deviation",
+    "targets": [
+      "本文\\001_灯が消えた朝.txt",
+      "本文\\002_灯台へ.txt",
+      "本文\\003_灯台守の話.txt",
+      "本文\\004_もう一度、灯をともす.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\deviation\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 44182,
+      "staleNote": null,
+      "metrics": {
+        "seeded": 3,
+        "seededTotal": 3,
+        "missed": 0,
+        "falseFlags": 0,
+        "kindMismatch": 1,
+        "otherFlags": 0,
+        "accepted": 3,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 44182
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "seeded": {
+          "逸脱": {
+            "found": 2,
+            "total": 2
+          },
+          "間延び": {
+            "found": 1,
+            "total": 1
+          }
+        },
+        "missed": [],
+        "falseFlags": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_灯が消えた朝.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "result": {
+              "accepted": [],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\002_灯台へ.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 1,
+                  "lineEnd": 43,
+                  "excerpt": "朝の会で、転校生が紹介された。",
+                  "type": "逸脱",
+                  "reason": "プロットには記載のない「バンド活動」の描写が大部分を占めており、灯台を巡る主筋との関連性が現時点では不明確に見える可能性があるため。",
+                  "plotReference": "放課後、海斗は陽菜と防波堤を歩いて灯台の下まで行く。",
+                  "severity": "medium",
+                  "confidence": "medium"
+                }
+              ],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\003_灯台守の話.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 37,
+                  "lineEnd": 43,
+                  "excerpt": "広場の隅で、茶色の子猫が段ボールの陰から出てきた。",
+                  "type": "間延び",
+                  "reason": "子猫の保護と世話の描写が、海斗の目的である灯台の謎解きや父の捜索に直接関わっているようには見受けられません。",
+                  "plotReference": "海斗は、父の船が帰る道しるべになるはずの灯台がなぜ消えたのかを確かめ、もう一度灯をともすことを目指す。",
+                  "severity": "low",
+                  "confidence": "medium"
+                }
+              ],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\004_もう一度、灯をともす.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 13,
+                  "lineEnd": 43,
+                  "excerpt": "「本当に点くのかな」",
+                  "type": "間延び",
+                  "reason": "陽菜の問いかけと海斗の答え、父への思考が三度繰り返されており、物語の進行や情報の更新が停滞しているように見受けられます。",
+                  "plotReference": "海斗は、父の船が帰る道しるべになるはずの灯台がなぜ消えたのかを確かめ、もう一度灯をともすことを目指す。",
+                  "severity": "low",
+                  "confidence": "medium"
+                }
+              ],
+              "rejected": []
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seeded": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "seededTotal": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "missed": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "falseFlags": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "kindMismatch": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "otherFlags": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "rejected": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        44182
+      ],
+      "min": 44182,
+      "max": 44182
+    }
+  },
+  "lines": [
+    "仕込んだ逸脱を拾えた: 3/3",
+    "見逃し（拾えなかった仕込み）: 0",
+    "誤検出（プロットどおりの話に付いた指摘）: 0",
+    "種別ちがい（場所は当てたが 逸脱／間延び を取り違えた）: 1",
+    "仕込み以外の箇所への指摘: 0",
+    "指摘（検算を通ったもの）: 3",
+    "落とした（検算で弾いたもの）: 0",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 44.2秒"
+  ]
+}

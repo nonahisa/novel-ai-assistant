@@ -1,0 +1,369 @@
+{
+  "measuredAt": "2026-09-17T15:58:46.393Z",
+  "feature": "proofread",
+  "tool": "proofread.run",
+  "model": "gemma4:26b",
+  "numCtx": 32768,
+  "endpoint": null,
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.66.5",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.8",
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\proofread",
+    "targets": [
+      "本文\\001_あさ.txt",
+      "本文\\002_ひる.txt",
+      "本文\\003_よる.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\proofread\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 22842,
+      "staleNote": null,
+      "metrics": {
+        "ateji": 6,
+        "atejiTotal": 8,
+        "mustOpen": 5,
+        "mustOpenTotal": 10,
+        "falsePositives": 0,
+        "noSuggestion": 0,
+        "accepted": 11,
+        "rejected": 1,
+        "rejected.not_long": 1,
+        "failures": 0,
+        "elapsedMs": 22842
+      },
+      "detail": {
+        "rejectedReasons": {
+          "not_long": 1
+        },
+        "failures": [],
+        "ateji": {
+          "丁度": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "沢山": {
+            "found": 2,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "是非": {
+            "found": 2,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "折角": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          }
+        },
+        "mustOpen": {
+          "然し": {
+            "found": 2,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "殆ど": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "出来る": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "所謂": {
+            "found": 1,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "尚": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "但し": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "或いは": {
+            "found": 1,
+            "total": 1,
+            "noSuggestion": 0
+          }
+        },
+        "falsePositives": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_あさ.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "results": [
+              {
+                "chunkId": "本文\\001_あさ.txt#1-0@8027",
+                "chapterLabel": "第1話",
+                "accepted": [
+                  {
+                    "line": 1,
+                    "original": "丁度六時だった",
+                    "target": "丁度六時だった",
+                    "suggestion": "ちょうど六時だった",
+                    "reason": "漢字ひらき",
+                    "explanation": "「丁度（ちょうど）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 1,
+                    "original": "沢山差し込んでいて",
+                    "target": "沢山差し込んでいて",
+                    "suggestion": "たくさん差し込んでいて",
+                    "reason": "漢字ひらき",
+                    "explanation": "「沢山（たくさん）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 13,
+                    "original": "殆ど自信がないんだ",
+                    "target": "殆ど自信がないんだ",
+                    "suggestion": "ほとんど自信がないんだ",
+                    "reason": "漢字ひらき",
+                    "explanation": "「殆ど（ほとんど）」で読みが詰まります（参考：「殆」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 15,
+                    "original": "然し、諦めるには",
+                    "target": "然し、諦めるには",
+                    "suggestion": "しかし、諦めるには",
+                    "reason": "漢字ひらき",
+                    "explanation": "「然し（しかし）」で読みが詰まります",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\002_ひる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "results": [
+              {
+                "chunkId": "本文\\002_ひる.txt#2-0@8027",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 3,
+                    "original": "是非この鯵を",
+                    "target": "是非この鯵を",
+                    "suggestion": "ぜひこの鯵を",
+                    "reason": "漢字ひらき",
+                    "explanation": "「是非（ぜひ）」で読みが詰まります（参考：「鯵」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 13,
+                    "original": "折角だから海を",
+                    "target": "折角だから海を",
+                    "suggestion": "せっかくだから海を",
+                    "reason": "漢字ひらき",
+                    "explanation": "「折角（せっかく）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "所謂、応用問題",
+                    "target": "所謂、応用問題",
+                    "suggestion": "いわゆる、応用問題",
+                    "reason": "漢字ひらき",
+                    "explanation": "「所謂（いわゆる）」で読みが詰まります（参考：「謂」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "raw": {
+                      "line": 47,
+                      "original": "海斗は買ってきた鯵を渡し、手を洗いに洗面所へ向かった。居間のテレビでは、夕方のニュースが港の様子を映し出していた。今日も一日、大きな騒ぎもなく過ぎていったことに、海斗は少しほっとした。台所から聞こえる包丁の音を聞きながら、海斗は自分の部屋で鞄の中身を片付け始めた。",
+                      "suggestion": "",
+                      "reason": "長文",
+                      "explanation": "136字・読点6個で、一文が長く情報が詰まっています",
+                      "confidence": "medium"
+                    },
+                    "reason": "not_long"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\003_よる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "results": [
+              {
+                "chunkId": "本文\\003_よる.txt#3-0@8027",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 3,
+                    "original": "沢山撮った写真",
+                    "target": "沢山撮った写真",
+                    "suggestion": "たくさん撮った写真",
+                    "reason": "漢字ひらき",
+                    "explanation": "「沢山（たくさん）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 15,
+                    "original": "是非聞いてみたいな",
+                    "target": "是非聞いてみたいな",
+                    "suggestion": "ぜひ聞いてみたいな",
+                    "reason": "漢字ひらき",
+                    "explanation": "「是非（ぜひ）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 15,
+                    "original": "或いは、続きは今度にするかもしれないけれど",
+                    "target": "或いは、続きは今度にするかもしれないけれど",
+                    "suggestion": "あるいは、続きは今度にするかもしれないけれど",
+                    "reason": "漢字ひらき",
+                    "explanation": "「或いは（あるいは）」で読みが詰まります（参考：「或」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "然し、昔の写真って",
+                    "target": "然し、昔の写真って",
+                    "suggestion": "しかし、昔の写真って",
+                    "reason": "漢字ひらき",
+                    "explanation": "「然し（しかし）」で読みが詰まります",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "ateji": {
+      "values": [
+        6
+      ],
+      "min": 6,
+      "max": 6
+    },
+    "atejiTotal": {
+      "values": [
+        8
+      ],
+      "min": 8,
+      "max": 8
+    },
+    "mustOpen": {
+      "values": [
+        5
+      ],
+      "min": 5,
+      "max": 5
+    },
+    "mustOpenTotal": {
+      "values": [
+        10
+      ],
+      "min": 10,
+      "max": 10
+    },
+    "falsePositives": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "noSuggestion": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        11
+      ],
+      "min": 11,
+      "max": 11
+    },
+    "rejected": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "rejected.not_long": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        22842
+      ],
+      "min": 22842,
+      "max": 22842
+    }
+  },
+  "lines": [
+    "当て字を拾えた: 6/8",
+    "ひらくべき語を拾えた: 5/10",
+    "誤検出（ひらいてはいけない語をひらいた）: 0",
+    "提案なし（漢字ひらきなのに修正案が空）: 0",
+    "指摘（検算を通ったもの）: 11",
+    "落とした（検算で弾いたもの）: 1",
+    "　└ 落とした理由：not_long: 1",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 22.8秒"
+  ]
+}

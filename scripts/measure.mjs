@@ -23,6 +23,7 @@ import {
   metricsOfRun,
   pickFreeName,
   promptToolOf,
+  resultsOfResponse,
   spreadOfRuns,
   toolNameOf,
 } from "./measureScoring.mjs";
@@ -259,7 +260,13 @@ async function runOnce(client, toolName, calls) {
     try {
       const value = await client.call(toolName, call.args);
       raw.push({ target: call.label, response: value });
-      for (const item of value?.results ?? []) results.push(item);
+      /*
+        **返り値の形は道具によって2つある**（`measureScoring.mjs` の
+        `resultsOfResponse`）。話まるごとを1回で見る道具（逸脱・各話あらすじ）は
+        `results[]` ではなく `result` を1つ返すので、ここで `results[]` だけを
+        拾っていたときは**何件出ても0件として記録していた**。
+      */
+      for (const item of resultsOfResponse(value, call.label)) results.push(item);
       for (const item of value?.failures ?? []) failures.push(item);
       if (value?.bundleStale === true) {
         // **見つけたら黙らない。** 古い束のまま測ると、直したはずのものを測る

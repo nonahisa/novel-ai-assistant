@@ -1,0 +1,146 @@
+{
+  "measuredAt": "2026-09-17T16:00:04.087Z",
+  "feature": "deviation",
+  "tool": "episode.deviationRun",
+  "model": "gemma4:26b",
+  "numCtx": 32768,
+  "endpoint": null,
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.66.5",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.1",
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\proofread",
+    "targets": [
+      "本文\\001_あさ.txt",
+      "本文\\002_ひる.txt",
+      "本文\\003_よる.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\proofread\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 34086,
+      "staleNote": null,
+      "metrics": {
+        "noSuggestion": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 34086
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": []
+      },
+      "raw": [
+        {
+          "target": "本文\\001_あさ.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "result": {
+              "accepted": [],
+              "rejected": []
+            },
+            "plotChars": 80,
+            "usedPlotChars": 80,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\002_ひる.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "result": {
+              "accepted": [],
+              "rejected": []
+            },
+            "plotChars": 80,
+            "usedPlotChars": 80,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\003_よる.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "result": {
+              "accepted": [],
+              "rejected": [
+                {
+                  "raw": {
+                    "lineStart": 45,
+                    "lineEnd": 49,
+                    "excerpt": "海斗は布団の中で、天井の木目をぼんやり見つめながら",
+                    "type": "間延び",
+                    "reason": "海斗が眠りに落ちるまでの描写が、45行目から49行目にかけて重複して繰り返されている印象を受ける可能性があるため。",
+                    "plotReference": "",
+                    "severity": "low",
+                    "confidence": "medium"
+                  },
+                  "reason": "plot_reference_not_found"
+                }
+              ]
+            },
+            "plotChars": 80,
+            "usedPlotChars": 80,
+            "plotTrimmed": false
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "noSuggestion": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "rejected": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        34086
+      ],
+      "min": 34086,
+      "max": 34086
+    }
+  },
+  "lines": [
+    "提案なし（漢字ひらきなのに修正案が空）: 0",
+    "指摘（検算を通ったもの）: 0",
+    "落とした（検算で弾いたもの）: 0",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 34.1秒"
+  ]
+}
