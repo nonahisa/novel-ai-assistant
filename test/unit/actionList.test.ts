@@ -281,14 +281,52 @@ describe("操作メニューの構成", () => {
 
     // 「GitHubで作品管理」は作品が要るが、**消さずに出して押せなくする**
     //
-    // **並び順も見る。** 「編集部とやり取り」は作者の指示で末尾へ移した
-    // （2026-08-31）。編集部と組まない作者には出番が無く、毎日使う
-    // 「新作開始」「既存作追加」より上にあると目が滑る
+    // **並び順も見る。** 作品の入口3つを先頭に置いた（設計書6.97.4）。
+    // 初めて開いた人がまず目を落とすのは分類の先頭で、そこに入口が
+    // 無ければ「まず何をするのか」が分からない。
+    //
+    // 「編集部とやり取り」は作者の指示で末尾のまま（2026-08-31）。
+    // 編集部と組まない作者には出番が無く、毎日使う入口より上にあると
+    // 目が滑る
     expect(sections.map((section) => section.label)).toEqual([
+      "新しく書き始める",
+      "すでにある原稿を入れる",
+      "別の環境から取り寄せる",
       "GitHubで作品管理",
-      "新作開始",
-      "既存作追加",
       "編集部とやり取り",
+    ]);
+  });
+
+  /**
+   * 書庫を既定にする（設計書6.97.4）。
+   *
+   * **入口を畳んだことが、名前だけの言い換えで終わっていないか見る。**
+   * 「新作開始／既存作追加」は始め方（プロット／本文）と置き場
+   * （フォルダー／GitHub）という別の軸が混ざっていた。畳み直した線は
+   * 「作者が何をしたいか」なので、どの操作がどこに入るかまで見ないと
+   * 意味がない。
+   */
+  test("作品の入口3つに、コマンドIDがそのまま並ぶ", () => {
+    const 作品管理 = ACTION_TREE.find((group) => group.label === "作品管理");
+    const commandsIn = (label: string): string[] => {
+      const section = (作品管理?.entries ?? []).find(
+        (entry) => entry.kind === "section" && entry.label === label
+      );
+      if (!section || section.kind !== "section") {
+        throw new Error(`小分類「${label}」がありません`);
+      }
+      return section.items.map((item) => item.command);
+    };
+
+    // **コマンドIDは変えない。** 変えると、作者のキーバインド・手順書き
+    // （`core/procedures.ts`）・相談の案内が一斉にずれる
+    expect(commandsIn("新しく書き始める")).toEqual([
+      "novelai.createWorkWithPlot",
+      "novelai.createWorkFromManuscript",
+    ]);
+    expect(commandsIn("すでにある原稿を入れる")).toEqual(["novelai.addWork"]);
+    expect(commandsIn("別の環境から取り寄せる")).toEqual([
+      "novelai.addWorkFromGithub",
     ]);
   });
 });
@@ -540,15 +578,15 @@ describe("開閉を覚える", () => {
   });
 
   test("小分類も分類とは別に覚える", () => {
-    // 「作品管理」を開いても「新作開始」まで開いた状態にはしない
+    // 「作品管理」を開いても「新しく書き始める」まで開いた状態にはしない
     const store = memoryStore();
     const provider = new ActionListProvider(fakeRegistry(), store);
 
-    provider.setExpanded("作品管理/新作開始", true);
+    provider.setExpanded("作品管理/新しく書き始める", true);
 
-    expect(store.saved).toEqual(["作品管理/新作開始"]);
+    expect(store.saved).toEqual(["作品管理/新しく書き始める"]);
     expect([...restoreExpandedGroups(store.saved)]).toEqual([
-      "作品管理/新作開始",
+      "作品管理/新しく書き始める",
     ]);
   });
 
@@ -691,7 +729,7 @@ describe("メニュー名とコマンドパレットの名前", () => {
    * **揃えない項目と、その理由。**
    *
    * ほとんどは「小分類が文脈を持っているので、メニュー側は短くしてある」
-   * ——「作品管理 › 既存作追加 › フォルダから追加」の行に
+   * ——「作品管理 › すでにある原稿を入れる › フォルダから追加」の行に
    * 「フォルダから作品を追加」と書くと、同じ語が2回出る。コマンド
    * パレットには小分類が無いので、あちらは長いままでよい。
    *
@@ -703,12 +741,12 @@ describe("メニュー名とコマンドパレットの名前", () => {
     "novelai.gitSync": "小分類「GitHubで作品管理」の下。「GitHubと」は文脈で分かる",
     "novelai.gitRestore": "小分類「GitHubで作品管理」の下。並びの短さを揃えている",
     "novelai.createWorkWithPlot":
-      "小分類「新作開始」の下で「〜から開始」と揃えてある",
+      "小分類「新しく書き始める」の下で「〜から開始」と揃えてある",
     "novelai.createWorkFromManuscript":
-      "小分類「新作開始」の下で「〜から開始」と揃えてある",
-    "novelai.addWork": "小分類「既存作追加」の下で「〜から追加」と揃えてある",
+      "小分類「新しく書き始める」の下で「〜から開始」と揃えてある",
+    "novelai.addWork": "小分類「すでにある原稿を入れる」の下で「〜から追加」と揃えてある",
     "novelai.addWorkFromGithub":
-      "小分類「既存作追加」の下で「〜から追加」と揃えてある",
+      "小分類「別の環境から取り寄せる」の下で「〜から追加」と揃えてある",
     "novelai.extractSettings":
       "小分類「資料抽出」の下。「設定資料を」は文脈で分かる",
     "novelai.setupVectorSearch":

@@ -249,6 +249,87 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           "**フォルダー名は変えません**（GitHubの置き場や登録がつながらなくなるためです）。" +
           "プロットの見出しをご自分で書き換えていた場合は、そこは触りません。",
       },
+      /*
+        **作品の入口を3つに畳む**（設計書6.97.4）。作者の言葉
+        （2026-09-19）「メニュー構造も自然とそうなるようにできればよい」。
+
+        以前は「新作開始」「既存作追加」の2つで、始め方（プロット／本文）と
+        置き場（フォルダー／GitHub）という**別の軸**が混ざっていた。
+        分け直す線は**作者が何をしたいか**である——これから書くのか、
+        もう書いてあるものを入れるのか、別の環境から取り寄せるのか。
+
+        **どれも行き先は書庫になる**（6.97.2）。そこは画面では訊かず、
+        `features/newWorkHome.ts` が黙って決めて一行で伝える。
+
+        **コマンドIDは変えていない。** 変えると、作者のキーバインド・
+        手順書き（`core/procedures.ts`）・相談の案内が一斉にずれる。
+      */
+      {
+        kind: "section",
+        label: "新しく書き始める",
+        icon: "new-folder",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.createWorkWithPlot",
+            label: "プロットから開始",
+            icon: "list-tree",
+            requiresWork: false,
+            detail:
+              "作品フォルダーを作り、設定/plot.md に" +
+              "ログライン・テーマ・世界観・あらすじの見出しを用意して開きます。" +
+              "**作品は、これまでの作品と同じフォルダーの中に作ります**" +
+              "（まとめておくと、GitHubとのやり取りが1回で済みます）。",
+          },
+          {
+            kind: "action",
+            command: "novelai.createWorkFromManuscript",
+            label: "本文から開始",
+            icon: "edit",
+            requiresWork: false,
+            detail:
+              "作品フォルダーを作り、第1話のファイルを作って開きます。" +
+              "プロットは作りません（あとから「プロットをつくる」で足せます）。" +
+              "**作品は、これまでの作品と同じフォルダーの中に作ります。**",
+          },
+        ],
+      },
+      {
+        kind: "section",
+        label: "すでにある原稿を入れる",
+        icon: "folder-opened",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.addWork",
+            label: "フォルダから追加",
+            icon: "folder-opened",
+            requiresWork: false,
+            detail:
+              "すでに原稿があるフォルダーを作品として登録します。" +
+              "投稿サイトからダウンロードしたファイルを入れたフォルダーでも構いません。" +
+              "**中に作品が並んでいるフォルダー（書庫）を選べば、まとめて登録します。**",
+          },
+        ],
+      },
+      {
+        kind: "section",
+        label: "別の環境から取り寄せる",
+        icon: "cloud-download",
+        items: [
+          {
+            kind: "action",
+            command: "novelai.addWorkFromGithub",
+            label: "GitHubから追加",
+            icon: "cloud-download",
+            requiresWork: false,
+            detail:
+              "別の環境で書いている作品を、GitHubから取り寄せて登録します。" +
+              "新しいPCで続きを書き始めるときに使います。" +
+              "**複数の作品が入ったリポジトリなら、まとめて登録します。**",
+          },
+        ],
+      },
       {
         kind: "section",
         label: "GitHubで作品管理",
@@ -345,60 +426,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             detail:
               "GitHubに送った過去の版から、原稿を今の場所へ戻します。" +
               "戻す前に今の内容を退避するので、やり直せます。",
-          },
-        ],
-      },
-      {
-        kind: "section",
-        label: "新作開始",
-        icon: "new-folder",
-        items: [
-          {
-            kind: "action",
-            command: "novelai.createWorkWithPlot",
-            label: "プロットから開始",
-            icon: "list-tree",
-            requiresWork: false,
-            detail:
-              "作品フォルダーを作り、設定/plot.md に" +
-              "ログライン・テーマ・世界観・あらすじの見出しを用意して開きます。",
-          },
-          {
-            kind: "action",
-            command: "novelai.createWorkFromManuscript",
-            label: "本文から開始",
-            icon: "edit",
-            requiresWork: false,
-            detail:
-              "作品フォルダーを作り、第1話のファイルを作って開きます。" +
-              "プロットは作りません（あとから「プロットをつくる」で足せます）。",
-          },
-        ],
-      },
-      {
-        kind: "section",
-        label: "既存作追加",
-        icon: "folder-opened",
-        items: [
-          {
-            kind: "action",
-            command: "novelai.addWork",
-            label: "フォルダから追加",
-            icon: "folder-opened",
-            requiresWork: false,
-            detail:
-              "すでに原稿があるフォルダーを作品として登録します。" +
-              "投稿サイトからダウンロードしたファイルを入れたフォルダーでも構いません。",
-          },
-          {
-            kind: "action",
-            command: "novelai.addWorkFromGithub",
-            label: "GitHubから追加",
-            icon: "cloud-download",
-            requiresWork: false,
-            detail:
-              "別の環境で書いている作品を、GitHubから取り寄せて登録します。" +
-              "新しいPCで続きを書き始めるときに使います。",
           },
         ],
       },

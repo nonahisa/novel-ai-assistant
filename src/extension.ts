@@ -1946,6 +1946,33 @@ export async function activate(
     }
     treeProvider.refresh();
     highlighter.invalidate();
+
+    /*
+      **2作目を書庫の外へ登録したときだけ、1度だけ、まとめるかを訊く**
+      （設計書6.97.3）。判断は `core/libraryHome.ts` にあるので、ここでは
+      登録が済んだことだけを伝える。1作目・3作目以降・すでに同じ書庫の中、
+      のいずれかなら、この呼び出しは何もせずに戻る。
+
+      **登録の終わりを、この案内で待たせない**（`firstRun.ts` と同じ形）。
+      ボタンの付いた案内は押されるまで消えないので、await すると
+      「登録できた」が返るのがそこまで遅れる——ブラウザ版の実動テスト
+      （画面を押せない）が止まってしまう。失敗はログへ残すだけにして、
+      登録そのものは巻き添えにしない
+    */
+    const registered = registry.list();
+    const added = entry;
+    void (async () => {
+      try {
+        const { offerLibraryMergeInVsCode } = await import(
+          "./features/offerLibraryMerge.js"
+        );
+        await offerLibraryMergeInVsCode(context, registered, added);
+      } catch (error) {
+        logFailure("書庫へまとめる案内", {
+          詳細: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
     return entry;
   }
 
@@ -1992,14 +2019,22 @@ export async function activate(
    *   （コマンドパレットの「新規作品を作成」から来た場合）
    */
   async function createNewWork(mode?: WorkStartMode): Promise<void> {
-    // ブラウザ版では、開いているフォルダーから選ぶ（設計書5.8.8）
-    const parentPath = await pickFolder(
-      "作品フォルダを作成する場所を選択",
-      "ここに作品フォルダを作成"
-    );
-    if (!parentPath) return;
+    /*
+      **行き先は書庫にする**（設計書6.97.2）。「書庫を作りますか」とは
+      訊かない——初めて使う人は、書庫が何の役に立つのかをまだ知らない。
+      すでに書庫があれば訊かずにそこへ入れ、分かれているときだけ訊く。
+      決まった行き先は、下の入力画面に一行で添える。
+
+      ブラウザ版でフォルダーを選ぶ道（開いているフォルダーから選ぶ。
+      設計書5.8.8）は、この中の `pickFolder` がこれまでどおり受け持つ。
+    */
+    const { resolveNewWorkHome } = await import("./features/newWorkHome.js");
+    const home = await resolveNewWorkHome(registry.list());
+    if (!home) return;
+    const parentPath = home.folderPath;
 
     const title = await askText({
+      title: home.note,
       prompt: "作品名を入力してください（フォルダ名になります）",
       validateInput: (v) => {
         const t = v.trim();

@@ -182,6 +182,59 @@ describe("簡単ステップメニューの構成", () => {
     ]);
   });
 
+  /**
+   * 書庫を既定にする（設計書6.97.4）——「簡単ステップメニューの
+   * 『1. 作品登録』が、そのまま入口になる」。
+   *
+   * **入口が散っていると、初めての人は最初の一歩で迷う。** 新規作成の2つは
+   * 「2. 新作構想」「3. 作品執筆」に分かれていた。作品を作るのは登録そのもの
+   * なので、4つとも1段目へ寄せる。
+   */
+  test("「1. 作品登録」に、作品の入口が4つとも並ぶ", () => {
+    const step = STEP_MENU.find((entry) => entry.label === "1. 作品登録");
+    expect(step).toBeDefined();
+    if (!step) return;
+
+    // 詳細メニューの「新しく書き始める／すでにある原稿を入れる／
+    // 別の環境から取り寄せる」と同じ順
+    const commands = step.entries.flatMap((entry) =>
+      entry.kind === "action" ? [entry.command] : []
+    );
+    expect(commands).toEqual([
+      "novelai.createWorkWithPlot",
+      "novelai.createWorkFromManuscript",
+      "novelai.addWork",
+      "novelai.addWorkFromGithub",
+    ]);
+  });
+
+  test("作品を作る操作が、2か所に出ない", () => {
+    // **同じ操作が2か所に出ると、初めての人はどちらを押すか決められない。**
+    // 1段目へ寄せたぶん、元の段からは外してある
+    const places = STEP_MENU.flatMap((step) =>
+      step.entries.flatMap((entry) => {
+        const items =
+          entry.kind === "section"
+            ? entry.items
+            : entry.kind === "action"
+              ? [entry]
+              : [];
+        return items
+          .filter(
+            (item) =>
+              item.command === "novelai.createWorkWithPlot" ||
+              item.command === "novelai.createWorkFromManuscript"
+          )
+          .map((item) => `${step.label}/${item.command}`);
+      })
+    );
+
+    expect(places).toEqual([
+      "1. 作品登録/novelai.createWorkWithPlot",
+      "1. 作品登録/novelai.createWorkFromManuscript",
+    ]);
+  });
+
   test("段階には、何をする段階かの説明が付く", () => {
     for (const step of STEP_MENU) {
       expect(step.detail.length, step.label).toBeGreaterThan(0);

@@ -100,8 +100,24 @@ const STEP_DEFS: readonly StepDef[] = [
     icon: "folder-opened",
     detail:
       "書く作品を、この拡張機能に覚えさせる段階です。" +
-      "すでに原稿があるフォルダーでも、別のPCで書いている作品でも登録できます。",
-    entries: ["novelai.addWork", "novelai.addWorkFromGithub"],
+      "これから書く作品でも、すでに原稿があるフォルダーでも、" +
+      "別のPCで書いている作品でも、ここから始められます。",
+    /*
+      **作品の入口を、ここへ寄せる**（設計書6.97.4）。詳細メニューの
+      「新しく書き始める／すでにある原稿を入れる／別の環境から取り寄せる」と
+      同じ4つを、同じ順で並べる。
+
+      新規作成の2つは、以前は「2. 新作構想」と「3. 作品執筆」に散っていた。
+      だが**作品を作るのは登録そのもの**であり、構想を練る前・書き始める前に
+      通る段である。ここへ移したぶん、あちらからは外す——同じ操作が
+      2か所に出ると、初めての人はどちらを押せばよいか決められない。
+    */
+    entries: [
+      "novelai.createWorkWithPlot",
+      "novelai.createWorkFromManuscript",
+      "novelai.addWork",
+      "novelai.addWorkFromGithub",
+    ],
   },
   {
     label: "2. 新作構想",
@@ -110,7 +126,7 @@ const STEP_DEFS: readonly StepDef[] = [
       "何を書くかを決める段階です。" +
       "ログライン・テーマ・世界観・あらすじをプロットに書き留めます。",
     entries: [
-      "novelai.createWorkWithPlot",
+      // 新規作成（プロットから開始）は「1. 作品登録」へ移した（設計書6.97.4）
       "novelai.createPlot",
       // プロットを書く場（設計書6.4.8）。目次と話の見取り図を横に並べる
       "novelai.openPlotMode",
@@ -140,7 +156,7 @@ const STEP_DEFS: readonly StepDef[] = [
           "novelai.createEpisodePlot",
           // 本文の付箋を横に並べる画面（設計書6.40.4）。書きながら見るもの
           "novelai.openSceneMemos",
-          "novelai.createWorkFromManuscript",
+          // 新規作成（本文から開始）は「1. 作品登録」へ移した（設計書6.97.4）
           "novelai.openVertical",
           // 大きく開くほう。**横のパネルは本文の右クリックだけにある**（0.29.23）
           "novelai.openChatPanel",
