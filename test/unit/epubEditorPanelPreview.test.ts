@@ -1635,3 +1635,201 @@ describe("面の保留（設計書6.65.15の段D）", () => {
     expect(notice).toContain("素材フォルダー");
   });
 });
+
+/**
+ * 左の欄を動かして、プレビューが追従するか（実機確認リストF-55）。
+ *
+ * **ここまでの試験は、開いたときの book.json だけを変えていた。** 開いた
+ * あとに `{ type: "change" }` を送る道（画面で欄を打つのと同じ道）を、
+ * このファイルは1度も通していなかった。`mergeConfig` と `previewData` は
+ * 開いたときと同じ関数だが、**呼ぶ道そのものを確かめないと、画面から
+ * 送る形（`config` が部分差分であること等）の思い違いは見つからない**。
+ */
+describe("左の欄を動かすと、プレビューが追従する（設計書6.65.6・6.65.15）", () => {
+  beforeEach(() => {
+    put("本文/第1話.txt", "あ\n\nい");
+  });
+
+  test("題名を変えると、表紙（画像なし）と奥付の両方に新しい題名が出る", async () => {
+    writeBook({ title: "氷の街" });
+    await open();
+    expect(page("表紙").html).toContain("氷の街");
+    expect(page("奥付").html).toContain("氷の街");
+
+    await send({ type: "change", config: { title: "新しい街" } });
+
+    expect(page("表紙").html).toContain("新しい街");
+    expect(page("表紙").html).not.toContain("氷の街");
+    expect(page("奥付").html).toContain("新しい街");
+  });
+
+  test("綴じ方向を変えると、共通CSSの向きが入れ替わる", async () => {
+    writeBook({ title: "氷の街", writingMode: "horizontal" });
+    await open();
+    expect(latest().css).not.toContain("vertical-rl");
+
+    await send({ type: "change", config: { writingMode: "vertical" } });
+
+    expect(latest().css).toContain("vertical-rl");
+  });
+
+  test("目次の並べ方（配置パターン）を変えると、目次のプレビューが追従する", async () => {
+    writeBook({ title: "氷の街" });
+    await open();
+    // 既定（list）では章の束ねの印を持たない
+    expect(page("目次").html).not.toContain("toc-group");
+
+    await send({ type: "change", config: { tocPattern: "chapters" } });
+
+    // 台帳が無い作品では、ファイル名由来の束ね（「本編」）が現れる
+    expect(page("目次").html).toContain('<span class="toc-group">本編</span>');
+  });
+
+  test("目次の飾りを変えると、目次の見出しに飾りが出る", async () => {
+    writeBook({ title: "氷の街" });
+    await open();
+    expect(page("目次").html).not.toContain("ornament-rule");
+
+    await send({ type: "change", config: { tocOrnament: "rule" } });
+
+    expect(page("目次").html).toContain("ornament-rule");
+  });
+
+  test("奥付の飾りを変えると、奥付の見出しに飾りが出る", async () => {
+    writeBook({ title: "氷の街" });
+    await open();
+    expect(page("奥付").html).not.toContain("ornament-rule");
+
+    await send({ type: "change", config: { colophonOrnament: "rule" } });
+
+    expect(page("奥付").html).toContain("ornament-rule");
+  });
+
+  test("本文用の書体を指定すると、プレビューのCSSに@font-faceが入る", async () => {
+    // ファイルを実際に読むのは書き出しのときだけ（`imageUri` はURIを
+    // 組むだけでディスクを読まない）ので、置かなくても確かめられる
+    writeBook({ title: "氷の街" });
+    await open();
+    expect(latest().css).not.toContain("@font-face");
+
+    await send({ type: "change", config: { fonts: { body: "素材/本文.ttf", heading: null } } });
+
+    expect(latest().css).toContain("@font-face");
+  });
+});
+
+/**
+ * 「表紙を焼く」の書き込み（実機確認リストF-56）。
+ *
+ * 既存の試験は「焼いた画像が既にディスクにある」状態から始めていて、
+ * `{ type: "bake" }` を送ってファイルができる瞬間そのものは通っていなかった。
+ */
+describe("表紙を焼く操作（設計書6.65.8）", () => {
+  const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+  function toBase64(bytes: number[]): string {
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+
+  function pngDataUrl(): string {
+    return `data:image/png;base64,${toBase64([
+      ...PNG_MAGIC,
+      ...new Array<number>(16).fill(0x00),
+    ])}`;
+  }
+
+  test("「表紙を焼く」で 表紙_合成済み.png ができ、プレビューが同じ画像を指す", async () => {
+    put("本文/第1話.txt", "あ\n\nい");
+    putBytes("素材/表紙.png", [0x89, 0x50]);
+    writeBook({ title: "氷の街", coverImagePath: "素材/表紙.png" });
+
+    await open();
+    expect(page("表紙").compose).toBe("front");
+
+    await send({ type: "bake", side: "front", dataUrl: pngDataUrl(), config: {} });
+
+    const target = diskPath(
+      path.join(work.folderPath, "設定", "書籍", BAKED_COVER_FILES.front)
+    );
+    expect(disk.has(target)).toBe(true);
+    // 開き直したとき（F-56の別項目）と同じ道を通って、同じ画像を指す
+    expect(page("表紙").html).toContain(BAKED_COVER_FILES.front);
+    expect(page("表紙").compose).toBeUndefined();
+  });
+});
+
+/**
+ * 段落一覧・挿絵・改ページのプレビュー追従（実機確認リストF-57）。
+ */
+describe("挿絵とページ分割のプレビュー（設計書6.65.10）", () => {
+  /** 最後に届いた段落の一覧 */
+  function latestParagraphs(): string[] {
+    for (let index = posted.length - 1; index >= 0; index--) {
+      const message = posted[index] as { type?: string; items?: string[] };
+      if (message.type === "paragraphs") return message.items ?? [];
+    }
+    throw new Error("段落の一覧が1度も渡っていません");
+  }
+
+  test("20字を超える段落は、20字で切って「…」を付ける（冒頭20字の欄）", async () => {
+    const long = "あ".repeat(25);
+    put("本文/第1話.txt", `${long}\n\nい`);
+    writeBook({ title: "氷の街" });
+
+    await open();
+    await send({ type: "episode", episodePath: "本文/第1話.txt" });
+
+    expect(latestParagraphs()[0]).toBe(`${"あ".repeat(20)}…`);
+  });
+
+  test("20字以内の段落は、そのまま出る（切らない）", async () => {
+    put("本文/第1話.txt", "あ\n\nい");
+    writeBook({ title: "氷の街" });
+
+    await open();
+    await send({ type: "episode", episodePath: "本文/第1話.txt" });
+
+    expect(latestParagraphs()).toEqual(["あ", "い"]);
+  });
+
+  test("挿絵を指定すると、本文の冒頭プレビューのその段落の直後に画像と解説文が出る", async () => {
+    put("本文/第1話.txt", "あ\n\nい");
+    putBytes("素材/絵.png", [0x89, 0x50]);
+    writeBook({
+      title: "氷の街",
+      illustrations: [
+        {
+          episodePath: "本文/第1話.txt",
+          afterParagraph: 1,
+          imagePath: "素材/絵.png",
+          caption: "出会い",
+        },
+      ],
+    });
+
+    await open();
+    const body = page("本文の冒頭").html;
+
+    expect(body).toContain("絵.png");
+    expect(body).toContain("<figcaption>出会い</figcaption>");
+    // 「あ」の直後・「い」の前に挟まる
+    expect(body.indexOf("<p>あ</p>")).toBeLessThan(body.indexOf("<figure"));
+    expect(body.indexOf("<figure")).toBeLessThan(body.indexOf("<p>い</p>"));
+  });
+
+  test("改ページを指定すると、本文の冒頭プレビューに改ページの印が出る", async () => {
+    put("本文/第1話.txt", "あ\n\nい\n\nう");
+    writeBook({
+      title: "氷の街",
+      pageBreaks: [{ episodePath: "本文/第1話.txt", afterParagraph: 1 }],
+    });
+
+    await open();
+    const body = page("本文の冒頭").html;
+
+    expect(body).toContain('<div class="page-break-mark">');
+    expect(body).toContain("ここで改ページ");
+  });
+});
