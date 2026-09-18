@@ -203,6 +203,39 @@ describe("話数を指している台帳の追従", () => {
     expect(characters[0].appearedChapters).toEqual([1, 4, 6]);
   });
 
+  /**
+   * 完了通知が「章立てN件・挿絵…N件・登場人物の話数N件を付け替えました。」の
+   * ように**複数の台帳をまとめて1文にする**か（実機確認リスト F-61）。
+   * 個々の件数は上のテストで見ているので、ここでは**同時に複数台帳が動いた
+   * ときの文面**を見る——1種類だけでは「・」で繋ぐ処理が抜けていても
+   * 気づけない。
+   */
+  test("複数の台帳が同時に動くと、件数が「・」で1文にまとまる", async () => {
+    const chapterStore = new ChapterStore(work);
+    const set = await chapterStore.load();
+    await chapterStore.save({
+      ...set,
+      chapters: [{ name: "第一章", startEpisodePath: "本文/003.txt" }],
+    });
+
+    const characterStore = new CharacterStore(work);
+    const person = emptyCharacter("char_001", "月島灯");
+    person.appearedChapters = [3];
+    await characterStore.save(person);
+
+    const summary = await followEpisodeLedgers(work, [
+      rename("003.txt", "004.txt"),
+    ]);
+
+    expect(summary.chapters).toBe(1);
+    expect(summary.characters).toBeGreaterThan(0);
+    const message = describeLedgerFollowSummary(summary);
+    expect(message).toContain("章立て1件");
+    expect(message).toContain("登場人物の話数");
+    expect(message).toContain("・");
+    expect(message).toContain("を付け替えました。");
+  });
+
   test("能力の話数も付いてくる（設定資料は4種とも同じ形）", async () => {
     const abilityStore = createAbilityStore(work);
     const ability = emptyAbility("abil_001", "光の刃");
@@ -419,6 +452,10 @@ describe("話数を指している台帳の追従", () => {
     expect(after.chapters).toEqual([
       { name: "第三章", startEpisodePath: "本文/003.txt" },
     ]);
+    // 章の開始話が削除されたとき、完了通知に「外しました」が出るか（F-61）
+    expect(describeLedgerFollowSummary(summary)).toContain(
+      "「第二章」は中身が空になったため外しました"
+    );
   });
 
   test("設定資料は1件ずつ数える。1件書けなくても、書けたぶんは数に出る（B-2）", async () => {

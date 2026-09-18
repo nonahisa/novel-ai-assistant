@@ -8,6 +8,7 @@ import {
   buildEpubCss,
   buildTitlePageFragment,
   buildTocFragment,
+  buildTocLabel,
   fontMediaType,
   imageMediaType,
   scopeCssForPreview,
@@ -1693,5 +1694,69 @@ describe("あとがきの面（設計書6.65.15）", () => {
       expect(files["OEBPS/content.opf"]).not.toContain("afterword.xhtml");
       expect(files["OEBPS/nav.xhtml"]).not.toContain("あとがき");
     }
+  });
+});
+
+/**
+ * 目次の見出しの形（番号＋題・題だけ・番号だけ、設計書6.65.15）。
+ *
+ * **プレビューと書き出しの両方が `buildTocLabel` を通る**
+ * （`features/epubEditorPanel.ts` のプレビューも `core/epubPackage.ts` の
+ * 書き出しも、同じこの関数を呼ぶ）。ここで純関数として確かめておけば、
+ * 「切り替えが両方に効くか」のうち、組み立ての中身は機械で見たことになる
+ * ——実際に画面とファイルの両方を見比べるところ（F-62）は実機に残る。
+ */
+describe("目次の見出しの形", () => {
+  const chapter = {
+    heading: "第1話　出会い",
+    fileName: "001.txt",
+    numberLabel: "第1話",
+    title: "出会い",
+  };
+
+  test("既定（番号＋題）は、番号と題を全角スペースでつなぐ", () => {
+    expect(buildTocLabel(chapter, "numberAndTitle")).toBe(
+      "第1話　出会い"
+    );
+  });
+
+  test("題だけを選ぶと、番号を落とす", () => {
+    expect(buildTocLabel(chapter, "titleOnly")).toBe("出会い");
+  });
+
+  test("番号だけを選ぶと、題を落とす", () => {
+    expect(buildTocLabel(chapter, "numberOnly")).toBe("第1話");
+  });
+
+  test("選んだ形（番号だけ）の中身が空なら、heading へ落ちる（題を出さず、空の目次行も作らない）", () => {
+    expect(
+      buildTocLabel(
+        {
+          heading: "特別編（heading）",
+          fileName: "999.txt",
+          numberLabel: "",
+          title: "特別編（title）",
+        },
+        "numberOnly"
+      )
+    ).toBe("特別編（heading）");
+  });
+
+  test("呼び出し側が numberLabel・title を渡さなければ、従来どおり heading を出す", () => {
+    expect(
+      buildTocLabel(
+        { heading: "第1話　出会い", fileName: "001.txt" },
+        "titleOnly"
+      )
+    ).toBe("第1話　出会い");
+  });
+
+  test("番号も題も空なら、ファイル名へ倒す（空の目次行を作らない）", () => {
+    expect(
+      buildTocLabel(
+        { heading: "", fileName: "001.txt", numberLabel: "", title: "" },
+        "numberAndTitle"
+      )
+    ).toBe("001.txt");
   });
 });
