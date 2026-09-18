@@ -11,6 +11,7 @@ import {
   createWorldStore,
 } from "../core/abilityStore";
 import { atomicWriteFile } from "../core/atomicWrite";
+import { loadSeriesTerms } from "../core/seriesSettings";
 import {
   DICTIONARY_FORMATS,
   buildDictionary,
@@ -71,6 +72,9 @@ export async function exportImeDictionary(
     locations: loadedLocations.records,
     organizations: loadedOrganizations.records,
     worldItems: loadedWorld.records,
+    // シリーズでつないだ作品の名前も辞書に入れる（設計書6.95.3）。
+    // つないでいなければ空なので、これまでと何も変わらない
+    seriesTerms: await loadSeriesTerms(work),
   });
 
   if (built.entries.length === 0) {

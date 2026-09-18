@@ -15,6 +15,7 @@ import { atomicWriteFile } from "./atomicWrite";
 import { buildPlotTemplate } from "./plotTemplate";
 import { canRegisterWork, describeWorkLimit } from "./editorMode";
 import { currentMode } from "./actorContext";
+import { parseSeriesConfig } from "./seriesLink";
 
 const STORAGE_KEY = "novelai.works";
 
@@ -439,6 +440,9 @@ export function parseWorkConfig(raw: unknown): WorkConfig {
   }
 
   const announce = parseAnnounceConfig(value.announce);
+  // シリーズの連結（設計書6.95）。**壊れていても投げない**——`announce` と
+  // 同じ理由で、手で書き間違えたせいで作品そのものが開けなくなるのは困る
+  const series = parseSeriesConfig(value.series);
 
   return {
     schemaVersion: (value.schemaVersion as string).trim(),
@@ -449,6 +453,7 @@ export function parseWorkConfig(raw: unknown): WorkConfig {
     // **持っているときだけ入れる。** `announce: undefined` を常に置くと、
     // 書き戻したJSONに欄が現れたり消えたりして、Gitの差分が毎回濁る
     ...(announce ? { announce } : {}),
+    ...(series ? { series } : {}),
   };
 }
 

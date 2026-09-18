@@ -16,6 +16,7 @@ import {
   type TermKind,
 } from "../core/termIndex";
 import { TERM_COLORS } from "../core/termColors";
+import { clearSeriesCache, loadSeriesTerms } from "../core/seriesSettings";
 import { TERM_LABELS } from "../core/manuscriptRender";
 import { SUPPORTED_EXTENSIONS, type WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
@@ -90,6 +91,8 @@ export class TermHighlighter implements vscode.Disposable {
   /** 抽出後など、設定が変わったときに呼ぶ */
   invalidate(): void {
     this.cache.clear();
+    // つないだ作品から借りた語も控えてあるので、一緒に捨てる（設計書6.95）
+    clearSeriesCache();
     this.scheduleRefresh();
   }
 
@@ -295,6 +298,27 @@ export class TermHighlighter implements vscode.Disposable {
         }
       }
 
+      /*
+        **シリーズでつないだ作品の語も色を付ける**（設計書6.95.3）。
+
+        借りるのは名前と読み仮名だけなので、ホバーに出す紹介は無い。
+        代わりに「どの作品から借りたか」を1行だけ添える——相手の中身では
+        なく、こちらが組み立てた文なので、ネタバレにならない。
+
+        **自分の資料より後ろに積む。** `TermIndex` は同じ位置なら先に
+        入ったほうを残すので、同じ名前があれば自分の資料が勝つ。
+      */
+      for (const term of await loadSeriesTerms(work)) {
+        entries.push({
+          text: term.text,
+          kind: term.kind,
+          // 自分のレコードのidと混ざらない形にする（ホバーで本体を引かせない）
+          id: `series:${term.kind}:${term.canonicalName}`,
+          canonicalName: term.canonicalName,
+          summary: `${term.sourceTitle}にも出てきます`,
+        });
+      }
+
       const settings: WorkSettings = {
         index: new TermIndex(entries),
         characters: new Map(characters.map((c) => [c.id, c])),
@@ -360,7 +384,15 @@ export function buildHover(
   }
 
   const record = findRecord(entry, settings);
-  if (!record) return md;
+  if (!record) {
+    /*
+      **シリーズでつないだ作品から借りた語**（設計書6.95.3）。こちらの
+      作品にはレコードが無いので、出せるのは「どの作品の語か」だけである
+      ——相手の中身は読んでいない（`entry.summary` はこちらが組み立てた文）。
+    */
+    if (entry.summary) md.appendMarkdown(`${escapeMarkdown(entry.summary)}\n\n`);
+    return md;
+  }
 
   md.appendMarkdown(`${escapeMarkdown(introOf(record))}\n\n`);
   md.appendMarkdown(`_右クリック →「設定情報を表示」で詳しく見られます_\n`);

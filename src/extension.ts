@@ -1972,6 +1972,22 @@ export async function activate(
           詳細: error instanceof Error ? error.message : String(error),
         });
       }
+      /*
+        **書庫に作品が並んだときだけ、1度だけ、シリーズをつなぐかを訊く**
+        （設計書6.95.4）。まとめる案内の**あと**に置くのは、2つの案内が
+        同時に出ると、どちらに答えたのか分からなくなるためである。
+        書庫の外の2作目なら上が出て、こちらは（隣が無いので）何もしない。
+      */
+      try {
+        const { offerSeriesLinkInVsCode } = await import(
+          "./features/offerSeriesLink.js"
+        );
+        await offerSeriesLinkInVsCode(context, registered, added);
+      } catch (error) {
+        logFailure("シリーズをつなぐ案内", {
+          詳細: error instanceof Error ? error.message : String(error),
+        });
+      }
     })();
     return entry;
   }
@@ -2527,6 +2543,30 @@ export async function activate(
       if (!work) return;
       // 一覧の更新は `registry.onDidChange` が受け持つ（登録・解除と同じ）
       await renameWork(registry, work);
+    })
+  );
+
+  context.subscriptions.push(
+    /*
+      **シリーズとしてつなぐ**（設計書6.95）。登録時の案内からも、
+      作品を引数で受け取れるようにしてある（`WorkEntry` がそのまま渡る）。
+
+      動的importにしているのは、隣のフォルダーを読むところまで抱えており、
+      つながない作品では一度も要らないためである（`mergeIntoLibrary` と同じ）。
+    */
+    registerCommand("novelai.setSeries", async (node?: WorkNode | WorkEntry) => {
+      const work =
+        node && "folderPath" in node
+          ? (node as WorkEntry)
+          : await resolveWork(node as WorkNode | undefined, registry, {
+              title: "シリーズをつなぐ作品を選択",
+            });
+      if (!work) return;
+      const { setSeries } = await import("./features/setSeries.js");
+      if (await setSeries(work)) {
+        // 借りた語が変わるので、色分けの索引を作り直す
+        highlighter.invalidate();
+      }
     })
   );
 

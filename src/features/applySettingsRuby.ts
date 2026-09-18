@@ -263,9 +263,14 @@ export function collectRubyTerms(
   return [...byText.values()];
 }
 
-/** ルビの対象にできる資料の種類（設定資料パネルの4種） */
+/**
+ * ルビの対象にできる資料の種類（設定資料パネルの4種と、シリーズの作品）。
+ *
+ * `series` は、つないだ作品から借りた名前と読み仮名（設計書6.95.3）。
+ * **既定では選ばれない**（下の `pickRubyRecordKinds` を参照）。
+ */
 export interface RubyRecordGroup {
-  kind: "character" | "ability" | "location" | "organization";
+  kind: "character" | "ability" | "location" | "organization" | "series";
   label: string;
   records: ReadonlyArray<{ name: string; reading: string | null }>;
 }

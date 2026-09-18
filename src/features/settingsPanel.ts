@@ -1093,11 +1093,25 @@ export class SettingsPanel {
     // **どの種類の資料に振るかを先に選ばせる**（作者の裁定、2026-09-08）。
     // 場所「教室」にまで {教室|きょうしつ} が付いた。読みが要るのは
     // ほぼ人名なので、既定は人物だけにし、ほかは選べば入る
+    /*
+      **シリーズでつないだ作品の読み仮名も選べる**（設計書6.95.3）。
+
+      既定では選ばれない。振るかどうかは作品ごとの判断で、別視点の作品に
+      本編と同じルビを一律で振りたいとは限らないためである。
+      つないでいなければ0語なので、これまでと同じ4つの並びに見える。
+    */
+    const { loadSeriesTerms } = await import("../core/seriesSettings.js");
+    const seriesRecords = (await loadSeriesTerms(this.work)).map((term) => ({
+      name: term.text,
+      reading: term.reading,
+    }));
+
     const chosen = await pickRubyRecordKinds([
       { kind: "character", label: "人物", records: this.characters },
       { kind: "ability", label: "能力", records: this.abilities },
       { kind: "location", label: "場所", records: this.locations },
       { kind: "organization", label: "組織", records: this.organizations },
+      { kind: "series", label: "シリーズの作品", records: seriesRecords },
     ]);
     if (!chosen) return;
     const terms = collectRubyTerms(chosen);

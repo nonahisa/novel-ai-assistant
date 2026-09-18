@@ -15,6 +15,7 @@ import {
   createLocationStore,
   createOrganizationStore,
 } from "../core/abilityStore";
+import { loadSeriesTerms } from "../core/seriesSettings";
 import { isDismissed, TypoDismissedHistory } from "../core/typoIssueHistory";
 import {
   DIGIT_WIDTH_FULL,
@@ -600,11 +601,17 @@ async function loadProperNouns(work: WorkEntry): Promise<string[]> {
     createOrganizationStore(work).loadAll(),
   ]);
 
+  // シリーズでつないだ作品の名前も固有名詞として扱う（設計書6.95.3）。
+  // **名前だけを借りる。** 表記が作品をまたいで揃うようにするためで、
+  // 相手の中身は読んでいない
+  const seriesTerms = await loadSeriesTerms(work);
+
   return [
     ...characters.characters.flatMap((record) => [record.name, ...record.aliases]),
     ...abilities.records.flatMap((record) => [record.name, ...record.aliases]),
     ...locations.records.flatMap((record) => [record.name, ...record.aliases]),
     ...organizations.records.flatMap((record) => [record.name, ...record.aliases]),
+    ...seriesTerms.map((term) => term.text),
   ]
     .map((name) => name.trim())
     .filter(Boolean);

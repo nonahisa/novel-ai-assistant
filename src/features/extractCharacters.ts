@@ -938,6 +938,27 @@ export async function extractCharacters(
     try {
       await store.saveAll(newCharacters);
       baseCounts.saved = newCharacters.length;
+      /*
+        **シリーズの作品に同じ名前があれば、候補として並べる**（6.95.3）。
+
+        保存が終わってから訊くのは、写す先のレコードが要るためである。
+        **自動では合体しない**——既定は「別人として扱う」で、作者が選んだ
+        ものだけ紹介・読み仮名・別名を写す。つないでいなければ何も起きない。
+
+        ここで失敗しても抽出は成功させる。つながりは味付けであって、
+        設定資料を作るための前提ではない（設計書6.95.2）
+      */
+      try {
+        const { offerSeriesCharacterMatches } = await import(
+          "./seriesCharacterCandidates.js"
+        );
+        await offerSeriesCharacterMatches(work, newCharacters);
+      } catch (error) {
+        logStep(
+          "シリーズの人物候補を出せませんでした: " +
+            (error instanceof Error ? error.message : String(error))
+        );
+      }
     } catch (error) {
       if (!(error instanceof CharacterStoreError)) throw error;
       const persistence = persistenceCountsForSaveError(

@@ -140,6 +140,20 @@ export interface WorkAnnounceConfig {
   workUrl: string;
 }
 
+/**
+ * シリーズ作品のつながり（設計書6.95）。
+ *
+ * **絶対パスで持たない。** `config.json` は同期されるので、
+ * `C:\Users\…` と書くと別の機械で必ず壊れる。**書庫の中の隣り合わせ**
+ * （同じ親フォルダーの子）として名前だけで持ち、読むときに自分の親から辿る。
+ */
+export interface SeriesConfig {
+  /** シリーズの呼び名。作者がつける（機械が推測して書き込まない） */
+  name: string;
+  /** つなぐ相手の**フォルダー名**。パスではない */
+  related: string[];
+}
+
 /** .aiwriter/config.json の内容（フェーズ0で使う範囲） */
 export interface WorkConfig {
   schemaVersion: string;
@@ -156,6 +170,13 @@ export interface WorkConfig {
    * 必須にすると、既にある `config.json` がすべて読めなくなる。
    */
   announce?: WorkAnnounceConfig;
+  /**
+   * シリーズのつながり（設計書6.95）。**省略できる。**
+   *
+   * `announce` と同じ理由で任意にしてある——必須にすると、
+   * いま在るすべての `config.json` が読めなくなる。
+   */
+  series?: SeriesConfig;
 }
 
 export const CONFIG_SCHEMA_VERSION = "0.1";

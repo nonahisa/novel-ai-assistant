@@ -5,6 +5,7 @@ import type { Location } from "../models/location";
 import type { Organization } from "../models/organization";
 import type { WorldItem } from "../models/world";
 import { deriveReading, toDictionaryReading } from "./reading";
+import type { SeriesTerm } from "./seriesLink";
 
 /**
  * IMEのユーザー辞書に取り込むデータを作る。
@@ -72,6 +73,14 @@ export interface DictionaryBuildInput {
   organizations?: Organization[];
   /** 世界観。このうち「固有の用語」だけを辞書に入れる（下記の理由） */
   worldItems?: WorldItem[];
+  /**
+   * シリーズでつないだ作品から借りた語（設計書6.95.3）。
+   *
+   * **名前と読み仮名しか無い。** 解説の欄には、相手の紹介ではなく
+   * 「どの作品の語か」を入れる——同じ辞書に並んだとき、こちらの作品の
+   * 語と見分けが付かないと、作者が外す判断をできない。
+   */
+  seriesTerms?: SeriesTerm[];
 }
 
 export interface DictionaryBuildResult {
@@ -218,6 +227,30 @@ export function buildDictionary(
     add(item.name, item.reading, "名詞", "term", note);
     // 別名は名前の読みを流用できない。カタカナなら作れる
     for (const alias of item.aliases) add(alias, null, "名詞", "term", note);
+  }
+
+  /*
+    シリーズでつないだ作品の語（設計書6.95.3）。
+
+    **最後に足す。** `add` は先に入った同じ組を残すので、こちらの作品に
+    同じ名前があれば、そちらの品詞と解説が勝つ。借りた語は「まだこちらの
+    資料には無いが、打つことはある名前」を埋めるためのものである。
+  */
+  for (const term of input.seriesTerms ?? []) {
+    const partOfSpeech =
+      term.kind === "character"
+        ? "人名"
+        : term.kind === "location"
+          ? "地名"
+          : "名詞";
+    add(
+      term.text,
+      term.reading,
+      partOfSpeech,
+      term.kind,
+      // 相手の紹介は読んでいない。出せるのは出どころだけ
+      summarizeForComment(`${term.sourceTitle}の語`)
+    );
   }
 
   entries.sort(
