@@ -279,6 +279,9 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.manageKeepWords": "allTypes",
   "novelai.checkNotation": "allTypes",
   "novelai.checkProofread": "allTypes",
+  // 古い指摘の片づけ（設計書6.96.4）。どの検知の指摘も同じ置き場に
+  // 溜まるので、物語向けの検知しか使わないタイプでも要る
+  "novelai.pruneFindings": "allTypes",
   // 冒頭の掴みは、記事にもメモの書き出しにも効く（全タイプに倒した）
   "novelai.checkOpening": "allTypes",
   // 筋・設定と突き合わせる検知は、物語のあるタイプだけ

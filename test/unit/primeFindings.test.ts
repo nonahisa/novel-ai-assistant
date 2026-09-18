@@ -72,7 +72,10 @@ vi.mock("../../src/core/textFile", () => ({
   writeTextFilePreservingFormat: vi.fn(async () => ({ ok: true })),
 }));
 
-import { primeSavedFindings } from "../../src/features/primeFindings";
+import {
+  handOverFinding,
+  primeSavedFindings,
+} from "../../src/features/primeFindings";
 import { FindingStore } from "../../src/features/findingStore";
 import { findingFilePath } from "../../src/core/findingSource";
 import type {
@@ -108,6 +111,8 @@ function finding(overrides: Partial<Finding> = {}): Finding {
     after: "　窓の外で鐘が鳴る。",
     message: "送り仮名が他の箇所と揃っていません",
     category: "typo",
+    // **分類名を残す**（設計書6.88.9）。戻し先はこれで決まる
+    label: "誤字脱字",
     ...overrides,
   };
 }
@@ -244,6 +249,7 @@ describe("残っている指摘を戻す", () => {
       finding({
         id: "f2",
         category: "contradiction",
+        label: "矛盾",
         target: "",
         suggestion: "",
         message: "設定では：必ず振り返る／本文では：振り返らなかった",
@@ -269,7 +275,13 @@ describe("残っている指摘を戻す", () => {
   test("種類ごとに分けて戻す（誤字脱字と矛盾が同じ段に混ざらない）", async () => {
     await seed([
       finding(),
-      finding({ id: "f2", category: "contradiction", target: "", suggestion: "" }),
+      finding({
+        id: "f2",
+        category: "contradiction",
+        label: "矛盾",
+        target: "",
+        suggestion: "",
+      }),
     ]);
     const restored: Restored[] = [];
 
@@ -288,6 +300,158 @@ describe("残っている指摘を戻す", () => {
   test("何も残っていなければ、画面へは何も渡さない", async () => {
     const restored: Restored[] = [];
     expect(await primeSavedFindings(work, fakePanel(restored))).toBe(0);
+    expect(restored).toEqual([]);
+  });
+});
+
+/**
+ * 分類名を残す（設計書6.88.9）。
+ *
+ * 「矛盾」と「矛盾（事実の照合）」は、どちらも種類が `contradiction` である。
+ * 出どころの種類しか残していなかったころ、**事実の照合で出た指摘が
+ * 「矛盾」のタブへ入っていた**——2つを並行させて見比べるという決めと
+ * 正面からぶつかる。
+ */
+describe("戻す先は、記録したときの分類名で決まる", () => {
+  test("事実の照合で出た指摘は、事実の照合のタブへ戻る", async () => {
+    await seed([
+      finding({
+        id: "f9",
+        category: "contradiction",
+        label: "矛盾（事実の照合）",
+        target: "",
+        suggestion: "",
+      }),
+    ]);
+    const restored: Restored[] = [];
+
+    await primeSavedFindings(work, fakePanel(restored));
+
+    expect(restored[0].category).toBe("矛盾（事実の照合）");
+    expect(restored[0].contradictions[0].category).toBe("矛盾（事実の照合）");
+  });
+
+  test("同じ分類の指摘でも、2つのタブが混ざらない", async () => {
+    await seed([
+      finding({
+        id: "f10",
+        category: "contradiction",
+        label: "矛盾",
+        target: "",
+        suggestion: "",
+      }),
+      finding({
+        id: "f11",
+        category: "contradiction",
+        label: "矛盾（事実の照合）",
+        target: "",
+        suggestion: "",
+      }),
+    ]);
+    const restored: Restored[] = [];
+
+    expect(await primeSavedFindings(work, fakePanel(restored))).toBe(2);
+    expect(restored.map((entry) => entry.category).sort()).toEqual([
+      "矛盾",
+      "矛盾（事実の照合）",
+    ]);
+  });
+
+  test("左右の見出しを残してあれば、そのまま並べて戻る", async () => {
+    await seed([
+      finding({
+        id: "f12",
+        category: "deviation",
+        label: "プロット逸脱",
+        target: "",
+        suggestion: "",
+        message: "プロットでは：告白する／この話では：黙って帰る",
+        compared: {
+          leftLabel: "プロットでは",
+          left: "告白する",
+          rightLabel: "この話では",
+          right: "黙って帰る",
+          note: "12〜18行",
+        },
+      }),
+    ]);
+    const restored: Restored[] = [];
+
+    await primeSavedFindings(work, fakePanel(restored));
+
+    // **「設定では」と決め打ちしない**（逸脱は言葉が違う）
+    expect(restored[0].contradictions[0]).toMatchObject({
+      leftLabel: "プロットでは",
+      settingSays: "告白する",
+      rightLabel: "この話では",
+      textSays: "黙って帰る",
+      note: "12〜18行",
+    });
+  });
+
+  test("分類名の無い古い記録も、種類から決めて戻す", async () => {
+    await seed([
+      finding({
+        id: "f13",
+        category: "contradiction",
+        label: "",
+        target: "",
+        suggestion: "",
+      }),
+    ]);
+    const restored: Restored[] = [];
+
+    expect(await primeSavedFindings(work, fakePanel(restored))).toBe(1);
+    expect(restored[0].category).toBe("矛盾");
+  });
+});
+
+/**
+ * シーンメモの「直す」の行き先（設計書6.96.5）。
+ *
+ * **1件だけを、同じ道で渡す。** 組み立ての写しを置くと、戻し方が片方だけ
+ * 直る日が来る。位置は**探し直した行**を使う（保存してある `hintLine` では
+ * ない。6.96.3）。
+ */
+describe("1件だけを提案パネルへ渡す", () => {
+  test("探し直した行で渡る（保存してある行ではない）", () => {
+    const restored: Restored[] = [];
+    const ok = handOverFinding(work, fakePanel(restored), {
+      ...finding({ hintLine: 3 }),
+      line: 47,
+    });
+
+    expect(ok).toBe(true);
+    expect(restored[0].category).toBe("誤字脱字");
+    expect(restored[0].items[0].line).toBe(47);
+  });
+
+  test("矛盾は食い違いの形で渡る", () => {
+    const restored: Restored[] = [];
+    const ok = handOverFinding(work, fakePanel(restored), {
+      ...finding({
+        category: "contradiction",
+        label: "矛盾",
+        target: "",
+        suggestion: "",
+      }),
+      line: 3,
+    });
+
+    expect(ok).toBe(true);
+    expect(restored[0].contradictions).toHaveLength(1);
+    expect(restored[0].items).toEqual([]);
+  });
+
+  test("戻し方の決まっていない種類は渡さない", () => {
+    const restored: Restored[] = [];
+    const ok = handOverFinding(work, fakePanel(restored), {
+      ...finding({ category: "other", label: "" }),
+      line: 3,
+    });
+
+    // **押しても何も起きない口を作らない**——渡せなければ呼んだ側が断る
+    expect(ok).toBe(false);
     expect(restored).toEqual([]);
   });
 });

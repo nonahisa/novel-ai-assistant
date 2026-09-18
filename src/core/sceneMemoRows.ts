@@ -95,21 +95,79 @@ export function mergeNoteRows(
     })),
   ];
 
+  // **届いた順を最後の決め手にする。** 同じ行に同じ種類が2件来たとき、
+  // 並べ直すたびに上下が入れ替わると、押そうとした行が逃げる
+  return markSameLine(sortNoteRows(rows, fileOrder));
+}
+
+/** 位置の前後。負なら a が前（`core/sceneMemo.ts` の並べ方と同じ） */
+function comparePlace(
+  rank: (filePath: string) => number,
+  a: { filePath: string; line: number },
+  b: { filePath: string; line: number }
+): number {
+  return rank(a.filePath) - rank(b.filePath) || a.line - b.line;
+}
+
+/**
+ * 「次へ」「戻る」で回る先（設計書6.96.5）。
+ *
+ * **付箋だけでなく、AIの指摘も回る。** 作者が直したい順は、付箋と指摘を
+ * 分けた順ではなく**本文の順**である——一覧を位置順に混ぜておきながら、
+ * 飛ぶときだけ付箋しか止まらないのでは、混ぜた意味が半分になる。
+ *
+ * **末尾なら先頭へ回る**（付箋だけのころと同じ。`nextMemo`）。起点が
+ * 無い（どこも開いていない）ときは先頭を返す。
+ *
+ * @param rows `mergeNoteRows` を通したもの（並べ替えはここでもう一度する
+ *   ——パネルは「いま開いている話を先頭へ」入れ替えたものを持っており、
+ *   その並びで飛ぶと話をまたいだ順序が狂う）
+ */
+export function nextNoteRow(
+  rows: readonly NoteRow[],
+  current: { filePath: string; line: number } | null,
+  fileOrder?: readonly string[]
+): NoteRow | undefined {
+  const sorted = sortNoteRows(rows, fileOrder);
+  if (sorted.length === 0) return undefined;
+  if (!current) return sorted[0];
   const rank = fileRanker(rows, fileOrder);
-  const sorted = rows
-    // **届いた順を最後の決め手にする。** 同じ行に同じ種類が2件来たとき、
-    // 並べ直すたびに上下が入れ替わると、押そうとした行が逃げる
+  return (
+    sorted.find((row) => comparePlace(rank, row, current) > 0) ?? sorted[0]
+  );
+}
+
+/** いまの位置の前の1件。**先頭なら末尾へ回る** */
+export function prevNoteRow(
+  rows: readonly NoteRow[],
+  current: { filePath: string; line: number } | null,
+  fileOrder?: readonly string[]
+): NoteRow | undefined {
+  const sorted = sortNoteRows(rows, fileOrder);
+  if (sorted.length === 0) return undefined;
+  if (!current) return sorted[sorted.length - 1];
+  const rank = fileRanker(rows, fileOrder);
+  const before = sorted.filter((row) => comparePlace(rank, row, current) < 0);
+  return before.length > 0
+    ? before[before.length - 1]
+    : sorted[sorted.length - 1];
+}
+
+/** 話数 → 行の順（同じ行なら付箋が先）。**飛ぶ順序はいつもこれ** */
+function sortNoteRows(
+  rows: readonly NoteRow[],
+  fileOrder?: readonly string[]
+): NoteRow[] {
+  const rank = fileRanker(rows, fileOrder);
+  return rows
     .map((row, index) => ({ row, index }))
     .sort(
       (a, b) =>
-        rank(a.row.filePath) - rank(b.row.filePath) ||
-        a.row.line - b.row.line ||
+        comparePlace(rank, a.row, b.row) ||
         kindRank(a.row) - kindRank(b.row) ||
         a.index - b.index
     )
     .map((entry) => entry.row);
-
-  return markSameLine(sorted);
 }
 
 /**
@@ -152,6 +210,20 @@ export const FINDING_CATEGORY_LABELS: Record<FindingCategory, string> = {
 
 export function findingCategoryLabel(category: FindingCategory): string {
   return FINDING_CATEGORY_LABELS[category] ?? FINDING_CATEGORY_LABELS.other;
+}
+
+/**
+ * その指摘の呼び名。**記録してある分類名を先に使う**（設計書6.88.9）。
+ *
+ * 「矛盾」と「矛盾（事実の照合）」はどちらも種類が `contradiction` だが、
+ * 作者はこの2つを並行させて見比べる。種類の呼び名だけで出すと、画面の上で
+ * 一緒くたになる。古い記録（分類名を残していなかったころ）は種類から決める。
+ */
+export function findingLabelOf(finding: {
+  category: FindingCategory;
+  label?: string;
+}): string {
+  return finding.label || findingCategoryLabel(finding.category);
 }
 
 /**

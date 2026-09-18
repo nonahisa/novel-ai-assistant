@@ -35,15 +35,21 @@ import { acceptProposal, rejectProposal } from "./reviewProposals";
 // 記録を忘れる形になる
 import {
   findingCategoryOf,
+  findingIdOf,
   type FindingDraft,
 } from "../core/findingSource";
 import {
   recordFindingDecision,
   recordFindings,
 } from "./findingRecorder";
+// **判断のあと、シーンメモの横の一覧にも効かせる**（設計書6.96.5）。
+// あちらは本文の保存でしか読み直さないので、知らせないと片方だけ残る
+import { refreshSceneMemoFindings } from "./sceneMemoPanel";
+import type { FindingStatus } from "../models/finding";
 import {
   countIncoming,
   describeBadgeTooltip,
+  foldSameFindings,
   isRemaining,
   mergeProposals,
   summarizeCategories,
@@ -198,6 +204,17 @@ export interface ProposalViewItem {
    */
   proposalId?: string;
   /**
+   * 数日残す置き場（設計書6.96）での番号。**置き場から戻したものだけが持つ。**
+   *
+   * 検知が出した指摘の番号は `チャンク:行:並び` なので、置き場の番号は
+   * 中身から作り直せる（`findingIdOf`）。ところが**戻したものは、作られた
+   * ときの決まりで番号が付いている**——番号の作り方をあとから変えると、
+   * 作り直した番号が置き場の行と噛み合わず、**採った・退けたがどこにも
+   * 効かなくなる**（画面では静かに元へ戻るだけなので、気づけない）。
+   * 分かっているなら、それを使う。
+   */
+  findingId?: string;
+  /**
    * どの表記ゆれの組から出た指摘か（設計書6.73）。
    *
    * **表記ゆれの指摘だけが持つ。** 「AIに訊く」を出すかどうかも、AIへ
@@ -235,6 +252,17 @@ export interface ProposalViewItem {
  */
 export interface ContradictionViewItem {
   id: string;
+  /**
+   * 数日残す置き場（設計書6.96）での番号。**置き場から戻したものだけが持つ。**
+   *
+   * 検知が出した指摘の番号は `チャンク:行:並び` なので、置き場の番号は
+   * 中身から作り直せる（`findingIdOf`）。ところが**戻したものは、作られた
+   * ときの決まりで番号が付いている**——番号の作り方をあとから変えると、
+   * 作り直した番号が置き場の行と噛み合わず、**採った・退けたがどこにも
+   * 効かなくなる**（画面では静かに元へ戻るだけなので、気づけない）。
+   * 分かっているなら、それを使う。
+   */
+  findingId?: string;
   filePath: string;
   fileName: string;
   chunkHash: string;
@@ -830,10 +858,43 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
 
     const entry = this.workBucketsOf(work);
     const bucket = entry.categories.get(category) ?? emptyBucket();
-    bucket.items = mergeProposals(bucket.items, contents.items ?? []);
-    bucket.contradictions = mergeProposals(
+
+    /*
+      **番号の作り方が違うだけの同じ指摘を、先に畳む**（設計書6.96.4）。
+
+      置き場から戻した指摘の番号は中身から作った `f…`、検知が出す番号は
+      `チャンク:行:並び` である。`mergeProposals` は番号で突き合わせるので、
+      このままだと**戻した指摘ともう一度検知した指摘が二重に並ぶ**。
+
+      見分けの拠り所は「置き場での番号」1つだけにする（`findingIdOf`）。
+      **残すのは検知したてのほう**——戻した指摘はチャンクのハッシュを
+      持たず、再チェックへ渡せない。逆に置き場から戻す側（`restored`）が
+      呼んだときは、既に画面にある検知の結果を守る。
+    */
+    const identityOf = (
+      item: ProposalViewItem | ContradictionViewItem
+    ): string[] => identitiesOfRow(work.folderPath, category, item);
+    const foldOptions = { keepIncoming: !options.restored };
+    const foldedItems = foldSameFindings(
+      bucket.items,
+      contents.items ?? [],
+      identityOf,
+      foldOptions
+    );
+    const foldedContradictions = foldSameFindings(
       bucket.contradictions,
-      contents.contradictions ?? []
+      contents.contradictions ?? [],
+      identityOf,
+      foldOptions
+    );
+    /** 畳んだあとに残った、今回届いたぶん（件数もこちらで数える） */
+    const arrivedItems = foldedItems.incoming;
+    const arrivedContradictions = foldedContradictions.incoming;
+
+    bucket.items = mergeProposals(foldedItems.existing, foldedItems.incoming);
+    bucket.contradictions = mergeProposals(
+      foldedContradictions.existing,
+      foldedContradictions.incoming
     );
     bucket.recordUpdates = mergeProposals(
       bucket.recordUpdates,
@@ -844,8 +905,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     // 言うと、前に適用済み・解消済みだったものまで数えて、パネルの
     // 見出しと食い違う（2026-09-06、作者の報告）
     const arrivedCount = [
-      countIncoming(bucket.items, contents.items ?? []),
-      countIncoming(bucket.contradictions, contents.contradictions ?? []),
+      countIncoming(bucket.items, arrivedItems),
+      countIncoming(bucket.contradictions, arrivedContradictions),
       countIncoming(bucket.recordUpdates, contents.recordUpdates ?? []),
     ].reduce(
       (sum, count) => ({
@@ -1004,6 +1065,40 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       dismissRecordUpdate: this.dismissRecordUpdate,
       registerForeshadow: this.registerForeshadow,
     });
+  }
+
+  /**
+   * シーンメモの横で見送られた指摘を、この一覧からも下げる（設計書6.96.5）。
+   *
+   * **同じ指摘は2つの画面に出る。** 片方で片付けたものがもう片方に残ると、
+   * 作者は同じものを二度読む。**置き場への追記は呼んだ側が済ませている**
+   * ので、ここは画面の印を付け替えるだけである（本文にも置き場にも触らない）。
+   *
+   * 見分けは**置き場での番号**（`findingIdOf`）でする。画面の番号は検知が
+   * 付けた `チャンク:行:並び` で、置き場の番号とは別物だからである。
+   *
+   * **作者の判断が入っている行は触らない。** 適用済みを見送りにすると、
+   * 戻す（undo）先が消える。
+   */
+  noteFindingDismissed(work: WorkEntry, findingId: string): void {
+    this.stashCurrent();
+    const entry = this.buckets.get(this.keyOf(work));
+    if (!entry) return;
+    let changed = false;
+    for (const [category, bucket] of entry.categories) {
+      const rows: Array<ProposalViewItem | ContradictionViewItem> = [
+        ...bucket.items,
+        ...bucket.contradictions,
+      ];
+      for (const row of rows) {
+        if (row.status !== "pending") continue;
+        const identities = identitiesOfRow(work.folderPath, category, row);
+        if (!identities.includes(findingId)) continue;
+        row.status = "dismissed";
+        changed = true;
+      }
+    }
+    if (changed) this.postItems();
   }
 
   /** その分類を画面に出す（表示中の作品の中で） */
@@ -2315,12 +2410,16 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   private async rememberDecision(
     work: WorkEntry,
     item: ProposalViewItem | ContradictionViewItem,
-    status: "accepted" | "dismissed",
+    /** **`pending` は「戻した」** ——判断そのものを取り消す（6.96.4） */
+    status: FindingStatus,
     note = ""
   ): Promise<void> {
     const draft = findingDraftOf(this.category, item);
     if (!draft) return;
-    await recordFindingDecision(work, draft, status, note);
+    await recordFindingDecision(work, draft, status, note, item.findingId);
+    // **もう片方の画面にも効かせる**（設計書6.96.5）。同じ指摘はシーンメモの
+    // 横にも並んでおり、判断してもあちらは本文の保存でしか読み直さない
+    await refreshSceneMemoFindings(work.id);
   }
 
   /**
@@ -2403,6 +2502,14 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     // 適用の記録は、もう当てにならないので落とす
     item.appliedAt = undefined;
     this.markStatus(id, "pending");
+
+    /*
+      **置き場の「採った」も取り消す**（設計書6.96.4）。ここを書かないと、
+      本文は元へ戻っているのに置き場には「採った」が残り、その指摘は
+      シーンメモの横にも提案の一覧にも二度と出てこない。追記しかしない
+      作りなので、**打ち消す行を足す**（前の行は書き換えない）。
+    */
+    await this.rememberDecision(work, item, "pending", "適用を戻した");
 
     await recordEdit(work, {
       actor: "author",
@@ -3028,6 +3135,33 @@ function describeContradiction(item: ContradictionViewItem): string {
  * 指摘の番号は中身から決まる（`findingIdOf`）。適用したあとに別の形で
  * 組み直すと**同じ指摘に別の番号が付き、採った記録がどこにも効かない**。
  */
+/**
+ * 画面に並ぶ1件の、**置き場での番号**（設計書6.96.4）。
+ *
+ * 画面の番号（`id`）は検知が付けた `チャンク:行:並び` で、置き場の番号
+ * （`f…`）とは別物である。**同じ指摘かどうかを見分けるのは、いつもこちら。**
+ *
+ * **2つ返ることがある。** 置き場から戻した行は残っていた番号を持ち、
+ * 検知の結果は中身から作り直した番号を名乗る。番号の作り方をあとから
+ * 変えると、しばらくは同じ指摘が2通りの番号で呼ばれる——どちらで呼ばれても
+ * 同じものと分かるように、両方を出す。残さない種類（設定資料の更新など）は
+ * 空になる。
+ */
+function identitiesOfRow(
+  workFolder: string,
+  category: string,
+  item: ProposalViewItem | ContradictionViewItem
+): string[] {
+  const identities: string[] = [];
+  if (item.findingId) identities.push(item.findingId);
+  const draft = findingDraftOf(category, item);
+  if (draft) {
+    const recomputed = findingIdOf(workFolder, draft);
+    if (!identities.includes(recomputed)) identities.push(recomputed);
+  }
+  return identities;
+}
+
 function findingDraftOf(
   category: string,
   item: ProposalViewItem | ContradictionViewItem
@@ -3054,6 +3188,7 @@ function findingDraftOf(
       // 説明があれば添える（画面に出ているものと同じ材料にする）
       message: [item.reason, item.detail].filter(Boolean).join("："),
       category: kind,
+      label: category,
     };
   }
 
@@ -3066,6 +3201,19 @@ function findingDraftOf(
     suggestion: "",
     message: describeContradiction(item),
     category: kind,
+    label: category,
+    /*
+      **左右を分けたまま残す**（設計書6.88.9）。見出しは分類ごとに違い
+      （「設定では／本文では」と「プロットでは／この話では」）、組み上がった
+      1文からは割り戻せない——本文に「／」が現れると割れ方が狂う。
+    */
+    compared: {
+      leftLabel: item.leftLabel,
+      left: item.settingSays,
+      rightLabel: item.rightLabel,
+      right: item.textSays,
+      note: item.note,
+    },
   };
 }
 

@@ -63,7 +63,40 @@ export interface Finding {
   message: string;
   /** どの検知から出たか */
   category: FindingCategory;
+  /**
+   * 記録したときの**分類名**（提案パネルのタブの名前。「矛盾（事実の照合）」など）。
+   *
+   * **`category` だけでは足りない**（設計書6.88.9）。「矛盾」と
+   * 「矛盾（事実の照合）」はどちらも `contradiction` だが、作者はこの2つを
+   * **並行させて見比べる**と決めてある。種類しか残さないと、戻したときに
+   * 片方のタブへ混ざり、比べるという目的そのものが成り立たない。
+   *
+   * 古い記録には無いので空のこともある（そのときは種類から決める）。
+   */
+  label: string;
+  /**
+   * 左右に並べて見せる指摘（矛盾・プロット逸脱）。置き換えの指摘には無い。
+   *
+   * **見出しごと残す。** 矛盾は「設定では／本文では」、逸脱は
+   * 「プロットでは／この話では」で言葉が違う。決め打ちで組み直すと、
+   * 逸脱の指摘が「設定では」と読める形で戻ってしまう。
+   */
+  compared?: FindingComparison;
 }
+
+/** 左右に並べる指摘の中身（`Finding.compared`） */
+export interface FindingComparison {
+  /** 左の見出し（「設定では」「プロットでは」） */
+  leftLabel: string;
+  left: string;
+  /** 右の見出し（「本文では」「この話では」） */
+  rightLabel: string;
+  right: string;
+  /** 補足（逸脱の行範囲など）。無ければ空 */
+  note: string;
+}
+
+export type FindingStatus = "pending" | "accepted" | "dismissed";
 
 /**
  * 作者の判断。
@@ -74,8 +107,16 @@ export interface Finding {
 export interface FindingDecision {
   findingId: string;
   time: string;
-  /** `accepted`＝採った（本文へ当てた） / `dismissed`＝退けた */
-  status: "accepted" | "dismissed";
+  /**
+   * `accepted`＝採った（本文へ当てた） / `dismissed`＝退けた /
+   * **`pending`＝戻した**（判断そのものを取り消した）。
+   *
+   * **3つ目が要る。** 適用を「戻す」と本文は元へ返るのに、置き場には
+   * 「採った」が残ったままになり、その指摘は二度と一覧へ出てこなかった。
+   * 追記しかしない作りなので、取り消しも**打ち消す行を足す**形でしか
+   * 書けない（前の行を書き換えると、そこが同期の衝突点になる）。
+   */
+  status: FindingStatus;
   /** 作者の覚え書き。無ければ空 */
   note: string;
 }
@@ -83,8 +124,6 @@ export interface FindingDecision {
 export type FindingLine =
   | ({ kind: "finding" } & Finding)
   | ({ kind: "decision" } & FindingDecision);
-
-export type FindingStatus = "pending" | "accepted" | "dismissed";
 
 /** 指摘と判断を突き合わせた、いまの状態 */
 export interface FindingView extends Finding {
@@ -109,18 +148,23 @@ const CATEGORIES: ReadonlySet<string> = new Set<FindingCategory>([
  *
  * **行番号を含めない**（6.96.3）。含めると、本文を1行足しただけで
  * 同じ指摘が別の番号になり、退けた記録が効かなくなる。
+ *
+ * **分類名（`label`）は含める。** 「矛盾」と「矛盾（事実の照合）」は
+ * 同じ本文の同じ箇所を、別の根拠で挙げることがある。種類だけで番号を
+ * 作ると2つが1件に潰れ、**並行して見比べる**（6.88.9）ができなくなる。
  */
 export function findingId(
   file: string,
   original: string,
   target: string,
   suggestion: string,
-  category: string
+  category: string,
+  label = ""
 ): string {
   // 絶対パスと相対パスが混ざって来るので、ファイル名だけで揃える
   // （`dismissKey` と同じ理由。同じ作品の中で名前は重ならない）
   const fileName = file.split(/[\\/]/).pop() ?? file;
-  const source = `${fileName}|${original}|${target}|${suggestion}|${category}`;
+  const source = `${fileName}|${original}|${target}|${suggestion}|${category}|${label}`;
   // 短い決定的な番号。暗号用途ではないので簡単な畳み込みで足りる
   let hash = 0;
   for (const char of source) {
@@ -178,13 +222,15 @@ function toFindingLine(value: unknown): FindingLine | undefined {
       after: str(record.after),
       message: str(record.message),
       category: toCategory(record.category),
+      label: str(record.label),
+      compared: toComparison(record.compared),
     };
   }
 
   if (record.kind === "decision") {
     const findingId = str(record.findingId);
     const status = record.status;
-    if (!findingId || (status !== "accepted" && status !== "dismissed")) {
+    if (!findingId || !isStatus(status)) {
       return undefined;
     }
     return {
@@ -220,7 +266,14 @@ export function resolveFindings(lines: FindingLine[]): FindingView[] {
       continue;
     }
     const existing = decisions.get(line.findingId);
-    if (!existing || isNewer(line.time, existing.time)) {
+    /*
+      **同じ時刻なら、後から書かれた行が勝つ。** 時刻はミリ秒までしか無く、
+      「適用してすぐ戻す」は同じミリ秒に収まる——古いほうを残す作りだと、
+      本文は元へ戻っているのに置き場は「採った」のままになり、その指摘は
+      二度と一覧へ出てこない（追記しかしないので、**ファイルの並びが
+      そのまま起きた順**である）。
+    */
+    if (!existing || !isNewer(existing.time, line.time)) {
       decisions.set(line.findingId, line);
     }
   }
@@ -262,12 +315,64 @@ export function isFindingExpired(
   return elapsed > retentionDays * 24 * 60 * 60 * 1000;
 }
 
+/**
+ * 片づける（＝置き場から本当に消す）対象の番号（設計書6.96.4）。
+ *
+ * **同じ番号が2度書かれていることがある**（記録は追記のみで、前の行を
+ * 探さない）。**1行でも期限内のものがあれば残す**——`resolveFindings` は
+ * 後から来たほうを採るので、期限内の行があればそれがいまの中身である。
+ * 古い行だけを見て消すと、**まだ3日経っていない指摘が消える。**
+ */
+export function expiredFindingIds(
+  lines: readonly FindingLine[],
+  retentionDays: number,
+  now: Date
+): Set<string> {
+  const doomed = new Set<string>();
+  const alive = new Set<string>();
+  for (const line of lines) {
+    if (line.kind !== "finding") continue;
+    if (isFindingExpired(line.time, retentionDays, now)) doomed.add(line.id);
+    else alive.add(line.id);
+  }
+  for (const id of alive) doomed.delete(id);
+  return doomed;
+}
+
 function isNewer(candidate: string, current: string): boolean {
   const left = Date.parse(candidate);
   const right = Date.parse(current);
   if (Number.isNaN(left)) return false;
   if (Number.isNaN(right)) return true;
   return left > right;
+}
+
+/** 判断の印。**知らない値は読まない**（勝手に「退けた」ことにしない） */
+function isStatus(value: unknown): value is FindingStatus {
+  return value === "accepted" || value === "dismissed" || value === "pending";
+}
+
+/**
+ * 左右に並べる指摘（`Finding.compared`）を読む。
+ *
+ * **無い記録のほうが多い。** 置き換えの指摘（誤字脱字など）は持たないし、
+ * 0.68.2 までに残した矛盾の記録にも入っていない。読めなければ
+ * `undefined` を返し、戻す側が従来どおり1文で出す。
+ */
+function toComparison(value: unknown): FindingComparison | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const left = str(record.left);
+  const right = str(record.right);
+  // 左右のどちらも空なら、並べて見せる意味が無い
+  if (!left && !right) return undefined;
+  return {
+    leftLabel: str(record.leftLabel),
+    left,
+    rightLabel: str(record.rightLabel),
+    right,
+    note: str(record.note),
+  };
 }
 
 function toCategory(value: unknown): FindingCategory {

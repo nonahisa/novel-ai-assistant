@@ -1,6 +1,6 @@
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
-import type { FindingView } from "../models/finding";
+import type { Finding, FindingView } from "../models/finding";
 import { readTextFile } from "../core/textFile";
 import { locateFindings } from "../core/findingLocation";
 import { findingFilePath, findingRestoreOf } from "../core/findingSource";
@@ -58,7 +58,7 @@ export async function primeSavedFindings(
   const items = new Map<string, ProposalViewItem[]>();
   const contradictions = new Map<string, ContradictionViewItem[]>();
   for (const finding of located) {
-    const restore = findingRestoreOf(finding.category);
+    const restore = findingRestoreOf(finding);
     // 戻し方の決まっていない種類（`other`）は出さない。
     // **押しても何も起きない口を作らない**のと同じ考え方である
     if (!restore) continue;
@@ -84,6 +84,43 @@ export async function primeSavedFindings(
     restored += list.length;
   }
   return restored;
+}
+
+/**
+ * 1件だけを提案パネルへ渡す（設計書6.96.5）。
+ *
+ * シーンメモの「直す」の行き先である。**この画面は本文を書き換えない**ので、
+ * 当てるのは提案パネルの既存の処理に任せ、ここでするのは
+ * 「いまの位置に直した1件を、元の分類へ置く」ことだけである。
+ *
+ * **中身は `primeSavedFindings` のループ本体と同じもの**を通す。写しを
+ * 置くと、戻し方が片方だけ直る日が来る（`core/findingSource.ts` の表が
+ * 1つしか無いのと同じ理由）。
+ *
+ * **位置は保存してある `hintLine` ではなく、探し直した `line` を使う**
+ * （6.96.3）。シーンメモは開くたびに位置を決め直しており、渡す相手は
+ * その行を本文の行番号として扱う。
+ *
+ * @returns 渡せたか。戻し方の決まっていない種類は `false`
+ */
+export function handOverFinding(
+  work: WorkEntry,
+  panel: ProposalPanel,
+  finding: Finding & { line: number }
+): boolean {
+  const restore = findingRestoreOf(finding);
+  if (!restore) return false;
+  const filePath = findingFilePath(work.folderPath, finding.file);
+  if (restore.shape === "item") {
+    panel.showRestoredFindings(work, restore.panelCategory, {
+      items: [toItem(finding, filePath, restore.panelCategory)],
+    });
+  } else {
+    panel.showRestoredFindings(work, restore.panelCategory, {
+      contradictions: [toContradiction(finding, filePath, restore.panelCategory)],
+    });
+  }
+  return true;
 }
 
 /**
@@ -119,12 +156,15 @@ async function readTexts(
  * 区別が付かなくなる。
  */
 function toItem(
-  finding: FindingView & { line: number },
+  finding: Finding & { line: number },
   filePath: string,
   label: string
 ): ProposalViewItem {
   return {
     id: finding.id,
+    // **置き場での番号を持ったまま渡す。** 番号の作り方をあとから変えても、
+    // この1件の判断が置き場の行と噛み合い続ける
+    findingId: finding.id,
     filePath,
     fileName: path.basename(filePath),
     // 検知のときのチャンクは残していない。**見送りの鍵はファイル名と
@@ -148,27 +188,32 @@ function toItem(
  * 照らす相手（設定資料のどのレコードか、プロットのどの行か）も、
  * 再チェックへ渡す材料も残していない。出すと**押しても何も起きない口**に
  * なるので、「本文を見る」と「無視」だけにする。
+ *
+ * **左右の見出しは残してあるものを使う**（`compared`）。矛盾は
+ * 「設定では／本文では」、逸脱は「プロットでは／この話では」で言葉が
+ * 違うので、決め打ちにすると逸脱が「設定では」と読める形で戻る。
+ * 古い記録（0.68.2 まで）は持っていないので、組み上がった1文で出す。
  */
 function toContradiction(
-  finding: FindingView & { line: number },
+  finding: Finding & { line: number },
   filePath: string,
   label: string
 ): ContradictionViewItem {
+  const compared = finding.compared;
   return {
     id: finding.id,
+    findingId: finding.id,
     filePath,
     fileName: path.basename(filePath),
     chunkHash: "",
     line: finding.line,
     excerpt: finding.original,
     category: label,
-    // **並べる2つに分けずに残してある**（`message` は組み上がった1文）。
-    // 「／」で分け直す形にすると、本文に「／」が現れたときに割れ方が狂う
-    leftLabel: "指摘",
-    settingSays: finding.message,
-    rightLabel: "",
-    textSays: "",
-    note: "",
+    leftLabel: compared?.leftLabel ?? "指摘",
+    settingSays: compared?.left ?? finding.message,
+    rightLabel: compared?.rightLabel ?? "",
+    textSays: compared?.right ?? "",
+    note: compared?.note ?? "",
     confidence: "medium",
     status: "pending",
     openTarget: "none",

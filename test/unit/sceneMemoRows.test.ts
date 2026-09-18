@@ -4,9 +4,12 @@ import { parseMemos } from "../../src/core/sceneMemo";
 import {
   findingCategoryLabel,
   findingHeadline,
+  findingLabelOf,
   findingNote,
   markSameLine,
   mergeNoteRows,
+  nextNoteRow,
+  prevNoteRow,
   type NoteRow,
   type PlacedFinding,
 } from "../../src/core/sceneMemoRows";
@@ -60,6 +63,7 @@ function finding(overrides: Partial<Finding> = {}): Finding {
     after: "",
     message: "送り仮名が抜けています",
     category: "typo",
+    label: "誤字脱字",
   };
   return { ...base, ...overrides };
 }
@@ -321,5 +325,79 @@ describe("1件に出す文", () => {
     expect(findingCategoryLabel("typo")).toBe("誤字");
     expect(findingCategoryLabel("contradiction")).toBe("矛盾");
     expect(findingCategoryLabel("other")).toBe("指摘");
+  });
+});
+
+/**
+ * 「次へ」「戻る」（設計書6.96.5）。
+ *
+ * **付箋だけを回っていた。** 作者が直したい順は、付箋とAIの指摘を分けた
+ * 順ではなく本文の順である——一覧を位置順に混ぜておきながら、飛ぶときだけ
+ * 付箋しか止まらないのでは、混ぜた意味が半分になる。
+ */
+describe("次へ・戻るは、付箋と指摘の両方を回る", () => {
+  const order = [EPISODE_1, EPISODE_2];
+
+  function rows(): NoteRow[] {
+    return mergeNoteRows(memosOf(), place([finding()]), order);
+  }
+
+  test("付箋の次に、AIの指摘で止まる", () => {
+    // 第1話：12行目に付箋、18行目に指摘
+    const target = nextNoteRow(rows(), { filePath: EPISODE_1, line: 12 }, order);
+
+    expect(target?.kind).toBe("finding");
+    expect(target?.line).toBe(18);
+  });
+
+  test("指摘の前に戻ると、手前の付箋で止まる", () => {
+    const target = prevNoteRow(rows(), { filePath: EPISODE_1, line: 18 }, order);
+
+    expect(target?.kind).toBe("memo");
+    expect(target?.line).toBe(12);
+  });
+
+  test("話をまたいで進み、末尾なら先頭へ回る", () => {
+    // 第2話の3行目が最後。そこから次へ進むと先頭（第1話12行目）へ
+    const target = nextNoteRow(rows(), { filePath: EPISODE_2, line: 3 }, order);
+
+    expect(target?.filePath).toBe(EPISODE_1);
+    expect(target?.line).toBe(12);
+  });
+
+  test("先頭より前から戻ると、末尾へ回る", () => {
+    const target = prevNoteRow(rows(), { filePath: EPISODE_1, line: 1 }, order);
+
+    expect(target?.filePath).toBe(EPISODE_2);
+    expect(target?.line).toBe(3);
+  });
+
+  test("起点が無ければ、次へは先頭・戻るは末尾", () => {
+    expect(nextNoteRow(rows(), null, order)?.line).toBe(12);
+    expect(prevNoteRow(rows(), null, order)?.filePath).toBe(EPISODE_2);
+  });
+
+  test("1件も無ければ、どこへも飛ばない", () => {
+    expect(nextNoteRow([], null, order)).toBeUndefined();
+    expect(prevNoteRow([], null, order)).toBeUndefined();
+  });
+});
+
+/**
+ * 呼び名は、記録してある分類名を先に使う（設計書6.88.9）。
+ *
+ * 「矛盾」と「矛盾（事実の照合）」はどちらも種類が `contradiction` だが、
+ * 作者はこの2つを並行させて見比べる。
+ */
+describe("指摘の呼び名", () => {
+  test("分類名があれば、そのまま出す", () => {
+    expect(
+      findingLabelOf({ category: "contradiction", label: "矛盾（事実の照合）" })
+    ).toBe("矛盾（事実の照合）");
+  });
+
+  test("分類名の無い古い記録は、種類から決める", () => {
+    expect(findingLabelOf({ category: "contradiction", label: "" })).toBe("矛盾");
+    expect(findingLabelOf({ category: "typo" })).toBe("誤字");
   });
 });

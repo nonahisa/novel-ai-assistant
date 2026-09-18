@@ -5,6 +5,7 @@ import {
   findingId,
   type Finding,
   type FindingCategory,
+  type FindingComparison,
 } from "../models/finding";
 
 /**
@@ -49,27 +50,30 @@ export type FindingShape =
  * **検知を足したら、ここへ1行足す。** 足し忘れると記録されないので、
  * `test/unit/findingRecording.test.ts` が実際の検知の口を通して見張る。
  */
-const RECORDED: ReadonlyMap<string, FindingCategory> = new Map<
+const RECORDED: ReadonlyMap<
   string,
-  FindingCategory
->([
-  ["誤字脱字", "typo"],
-  ["表記ゆれ", "notation"],
-  ["推敲", "proofread"],
-  ["矛盾", "contradiction"],
-  [FACT_CONTRADICTION_CATEGORY, "contradiction"],
-  ["プロット逸脱", "deviation"],
+  { category: FindingCategory; shape: FindingShape }
+> = new Map<string, { category: FindingCategory; shape: FindingShape }>([
+  ["誤字脱字", { category: "typo", shape: "item" }],
+  ["表記ゆれ", { category: "notation", shape: "item" }],
+  ["推敲", { category: "proofread", shape: "item" }],
+  ["矛盾", { category: "contradiction", shape: "contradiction" }],
+  [
+    FACT_CONTRADICTION_CATEGORY,
+    { category: "contradiction", shape: "contradiction" },
+  ],
+  ["プロット逸脱", { category: "deviation", shape: "contradiction" }],
 ]);
 
 /**
- * 残すときの種類 → 戻し方。
+ * 分類名を残していなかった記録の、戻し先（種類 → 分類名）。
  *
- * **記録した分類名は残していない**（`Finding` が持つのは出どころの種類
- * だけである。`models/finding.ts`）。そのため「矛盾（事実の照合）」で
- * 出た指摘は、戻すと「矛盾」のタブへ入る。**種類は画面を分けるための
- * ものではない**という決め（6.96.5）に合わせてある。
+ * **0.68.2 までの記録のためだけにある。** いまは分類名（`Finding.label`）を
+ * そのまま残すので、ここは通らない。古い記録を黙って捨てないために置く
+ * ——「矛盾（事実の照合）」で出たものは「矛盾」のタブへ入るが、
+ * 出ないよりはよい。
  */
-const RESTORED: ReadonlyMap<
+const LEGACY_RESTORED: ReadonlyMap<
   FindingCategory,
   { shape: FindingShape; panelCategory: string }
 > = new Map<FindingCategory, { shape: FindingShape; panelCategory: string }>([
@@ -84,14 +88,23 @@ const RESTORED: ReadonlyMap<
 export function findingCategoryOf(
   panelCategory: string
 ): FindingCategory | undefined {
-  return RECORDED.get(panelCategory);
+  return RECORDED.get(panelCategory)?.category;
 }
 
-/** その種類をどう戻すか。**戻し方の無い種類（`other`）は `undefined`** */
+/**
+ * その指摘をどう戻すか。**戻し方の無い種類（`other`）は `undefined`**。
+ *
+ * **分類名（`label`）を先に見る**（設計書6.88.9）。「矛盾」と
+ * 「矛盾（事実の照合）」は同じ種類だが別のタブで、作者はこの2つを
+ * 並行させて見比べる。種類から決めると片方へ混ざる。
+ */
 export function findingRestoreOf(
-  category: FindingCategory
+  finding: { category: FindingCategory; label?: string }
 ): { shape: FindingShape; panelCategory: string } | undefined {
-  return RESTORED.get(category);
+  const label = finding.label ?? "";
+  const recorded = label ? RECORDED.get(label) : undefined;
+  if (recorded) return { shape: recorded.shape, panelCategory: label };
+  return LEGACY_RESTORED.get(finding.category);
 }
 
 /**
@@ -115,6 +128,10 @@ export interface FindingDraft {
   /** なぜ挙げたか */
   message: string;
   category: FindingCategory;
+  /** 記録したときの分類名（提案パネルのタブ名）。**戻し先はこれで決まる** */
+  label: string;
+  /** 左右に並べる指摘（矛盾・逸脱）。置き換えの指摘は持たない */
+  compared?: FindingComparison;
 }
 
 /**
@@ -151,7 +168,8 @@ export function findingIdOf(workFolder: string, draft: FindingDraft): string {
     draft.original,
     draft.target,
     draft.suggestion,
-    draft.category
+    draft.category,
+    draft.label
   );
 }
 
@@ -178,13 +196,7 @@ export function buildFinding(
   if (line === undefined) return undefined;
   const file = findingFileKey(workFolder, draft.filePath);
   return {
-    id: findingId(
-      file,
-      draft.original,
-      draft.target,
-      draft.suggestion,
-      draft.category
-    ),
+    id: findingIdOf(workFolder, draft),
     time,
     file,
     hintLine: line,
@@ -195,6 +207,8 @@ export function buildFinding(
     after: neighborOf(text, line, +1),
     message: draft.message,
     category: draft.category,
+    label: draft.label,
+    compared: draft.compared,
   };
 }
 

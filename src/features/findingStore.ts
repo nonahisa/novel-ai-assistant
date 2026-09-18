@@ -3,6 +3,7 @@ import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "../core/workRegistry";
 import {
+  expiredFindingIds,
   isFindingExpired,
   parseFindingLines,
   resolveFindings,
@@ -98,6 +99,84 @@ export class FindingStore {
       // 無い・読めないなら「まだ何も残っていない」。検知そのものは動く
       return [];
     }
+  }
+
+  /**
+   * 期限切れの指摘を、置き場から**本当に消す**（設計書6.96.4）。
+   *
+   * **`findings.jsonl` を書き直すのは、ここだけである。** ほかはすべて
+   * 追記しかしない——追記だけなら同じ行を両方の機械が書き換えることが
+   * 無く、同期の衝突が起きにくいからである。その前提を崩さないために、
+   * 丸ごと書き直すのは**作者が「古い指摘を片づける」を押したときだけ**に
+   * 限る（機械は勝手に消さない。時計のずれや、ノートPCを久しぶりに
+   * 開いたときに、**作者が見る前に消える**のを防ぐため）。
+   *
+   * 消すのは**期限を過ぎた指摘**と、それに付いている判断の行である。
+   *
+   * **判断だけを残さない。** 指摘を消して判断を残すと、同じものを検知し
+   * 直したときに**出た瞬間に「判断済み」として隠れる**——期限切れとして
+   * 片付けたはずのものが、二度と見られなくなる。
+   *
+   * **指す先の見当たらない判断は残す。** 同期の衝突で指摘の行だけが
+   * 落ちたときに、退けた記録まで一緒に消すと、次の検知で退けたはずの
+   * ものが戻ってくる。増えても1行ずつなので、残すほうが害が小さい。
+   *
+   * @returns 消した指摘の件数（判断の行は数えない。作者が見るのは指摘の数）
+   */
+  async prune(retentionDays: number, now: Date = new Date()): Promise<number> {
+    const lines = await this.loadLines();
+    const doomed = expiredFindingIds(lines, retentionDays, now);
+    const kept = lines.filter((line) =>
+      line.kind === "finding"
+        ? !doomed.has(line.id)
+        : !doomed.has(line.findingId)
+    );
+    if (kept.length === lines.length) return 0;
+    await this.rewrite(kept);
+    return doomed.size;
+  }
+
+  /**
+   * 片づけると何件消えるかを、**押す前に**数える。
+   *
+   * 消してから件数を告げても、作者は取り消せない。
+   */
+  async countExpired(
+    retentionDays: number,
+    now: Date = new Date()
+  ): Promise<number> {
+    return expiredFindingIds(await this.loadLines(), retentionDays, now).size;
+  }
+
+  /** 生の行をそのまま読む（畳む前）。**片づけだけが要る** */
+  private async loadLines(): Promise<FindingLine[]> {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(
+        path.toUri(this.filePath)
+      );
+      return parseFindingLines(new TextDecoder().decode(bytes));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * 置き場を丸ごと書き直す。**`prune` からしか呼ばない。**
+   *
+   * 壊れた行・競合マーカーの行は `parseFindingLines` が落とすので、
+   * ここを通ると一緒に消える。**それでよい**——どちらも読めない行であり、
+   * 作者が「片づける」と決めたときにだけ通る道である。
+   */
+  private async rewrite(lines: readonly FindingLine[]): Promise<void> {
+    const uri = path.toUri(this.filePath);
+    await vscode.workspace.fs.createDirectory(
+      path.toUri(path.dirname(this.filePath))
+    );
+    const text =
+      lines.length === 0
+        ? ""
+        : lines.map((line) => JSON.stringify(line)).join("\n") + "\n";
+    await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(text));
   }
 
   private async appendLines(lines: readonly FindingLine[]): Promise<void> {

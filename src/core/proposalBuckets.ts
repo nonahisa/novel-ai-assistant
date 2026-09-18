@@ -150,6 +150,81 @@ export function mergeProposals<T extends ProposalLike & ProposalContent>(
   return merged;
 }
 
+/**
+ * 番号（id）の作り方が違うだけの、同じ指摘を畳む（設計書6.96.4）。
+ *
+ * ## なぜ `mergeProposals` では畳めないのか
+ *
+ * 置き場から戻した指摘の番号は**中身から作った `f…`**、検知が出す番号は
+ * **`チャンク:行:並び`** で、別物である。`mergeProposals` は番号で突き合わせる
+ * ので、戻した指摘ともう一度検知した指摘が**二重に並ぶ**。作者は必ず踏む。
+ *
+ * **内容鍵（`contentKeyOf`）では足りない。** 鍵に行番号が入っているうえ、
+ * 矛盾・逸脱は置き換える文字列を持たないので鍵そのものが作れない
+ * （＝二重のまま残る）。そこで「置き場と同じ番号」を両側で作り、それを
+ * 見分けの拠り所にする。番号の作り方は `core/findingSource.ts` の1か所に
+ * あるので、ここが二つ目の見分け方になることはない。
+ *
+ * ## どちらを残すか
+ *
+ * **検知したてのほうを残す**（`keepIncoming`）。戻した指摘はチャンクの
+ * ハッシュを持たず、再チェックへ渡せない。逆に、置き場から戻す側が呼ぶ
+ * ときは `keepIncoming: false` で、**既に画面にある検知の結果を守る**。
+ *
+ * **作者の判断が入っている行は落とさない。** 落とすのは `pending` だけ
+ * である——適用済みを消すと、戻す（undo）先が画面から消える。
+ *
+ * @param identitiesOf その行の、置き場での番号。**複数返してよい**——
+ *   置き場から戻した行は残っていた番号を、検知の結果は中身から作り直した
+ *   番号を名乗る。番号の作り方をあとから変えると、同じ指摘が2通りの番号で
+ *   呼ばれる時期ができるので、**どちらで呼ばれても同じものと分かる**
+ *   ようにしておく。作れないものは空でよい
+ */
+export function foldSameFindings<T extends ProposalLike>(
+  existing: readonly T[],
+  incoming: readonly T[],
+  identitiesOf: (item: T) => readonly string[],
+  options: { keepIncoming: boolean }
+): { existing: T[]; incoming: T[] } {
+  // 既にある「まだ手を付けていない」行だけを引けるようにする
+  const pendingByIdentity = new Map<string, string>();
+  for (const item of existing) {
+    if (item.status !== "pending") continue;
+    for (const identity of identitiesOf(item)) {
+      if (!pendingByIdentity.has(identity)) pendingByIdentity.set(identity, item.id);
+    }
+  }
+  if (pendingByIdentity.size === 0) {
+    return { existing: [...existing], incoming: [...incoming] };
+  }
+
+  /** 落とす側の印（番号で引く。同じ番号のものは `mergeProposals` が畳む） */
+  const dropExisting = new Set<string>();
+  const keptIncoming: T[] = [];
+  for (const item of incoming) {
+    let twin: string | undefined;
+    for (const identity of identitiesOf(item)) {
+      twin = pendingByIdentity.get(identity);
+      if (twin !== undefined) break;
+    }
+    // 番号まで同じなら `mergeProposals` が畳むので、ここでは何もしない
+    if (twin === undefined || twin === item.id) {
+      keptIncoming.push(item);
+      continue;
+    }
+    if (options.keepIncoming) {
+      dropExisting.add(twin);
+      keptIncoming.push(item);
+    }
+    // `keepIncoming` でなければ、届いたほうを捨てる（画面の側を守る）
+  }
+
+  return {
+    existing: existing.filter((item) => !dropExisting.has(item.id)),
+    incoming: keptIncoming,
+  };
+}
+
 /** 今回届いた結果が、一覧でどう扱われたか */
 export interface IncomingCount {
   /** 一覧に残った（まだ作者の手が要る）件数 */

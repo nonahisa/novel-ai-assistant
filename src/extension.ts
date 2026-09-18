@@ -87,6 +87,7 @@ import {
   noteSceneMemoCaret,
   openSceneMemoPanel,
   refreshSceneMemos,
+  type SceneMemoDeps,
 } from "./features/sceneMemoPanel";
 import { editTimeline } from "./features/chronicleEdit";
 import { unifyCharacterRecords } from "./features/unifyCharacters";
@@ -98,7 +99,12 @@ import {
   primePendingRecordUpdates,
 } from "./features/applyPendingUpdates";
 // 数日残してある指摘を、開いたときに提案パネルへ戻す（設計書6.96.4）
-import { primeSavedFindings } from "./features/primeFindings";
+import {
+  handOverFinding,
+  primeSavedFindings,
+} from "./features/primeFindings";
+// 古い指摘を片づける（設計書6.96.4）。**findings.jsonl を書き直す唯一の道**
+import { pruneFindings } from "./features/pruneFindings";
 import { renameWork } from "./features/renameWork";
 import { exportImeDictionary } from "./features/exportImeDictionary";
 import { exportPdf } from "./features/exportPdf";
@@ -1273,9 +1279,29 @@ export async function activate(
    * 飛び先は1本の経路だけ（`revealLocation.ts`）。原稿エディタで書いて
    * いればその画面のまま示し、素のエディタなら素のまま開く。
    */
-  const sceneMemoDeps = {
+  const sceneMemoDeps: SceneMemoDeps = {
     revealInManuscript: (filePath: string, line: number) =>
       manuscriptProvider.revealLine(filePath, line),
+    /*
+      「直す」——AIの指摘を**種類ごとの道**（提案パネル）へ渡す（設計書6.96.5）。
+
+      **シーンメモの側は本文を書き換えない。** 当てるのは提案パネルの既存の
+      処理で、ここがするのは受け渡しだけである。組み立てはそちらと同じ
+      `features/primeFindings.ts` を通す——写しを作ると、戻し方が片方だけ
+      直る日が来る。
+
+      **渡したら提案パネルを前へ出す。** 静かに置くだけだと、押しても何も
+      起きなかったようにしか見えない（提案パネルは下段にあり、ほかのタブへ
+      切り替えていると見えない）。
+    */
+    handOverFinding: async (work, finding) => {
+      if (!handOverFinding(work, proposalPanel, finding)) return false;
+      await vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
+      return true;
+    },
+    // シーンメモで見送ったものを、提案の一覧からも下げる（6.96.5）
+    noteFindingDismissed: (work, findingId) =>
+      proposalPanel.noteFindingDismissed(work, findingId),
   };
 
   const showSceneMemos = async (
@@ -3110,6 +3136,18 @@ export async function activate(
       const work = await resolveWork(node, registry);
       if (!work) return;
       await showSceneMemos(work);
+    }),
+    /*
+      古い指摘を片づける（設計書6.96.4）。
+
+      **期限切れは隠れているだけで、ファイルには在る。** 消えるのはここを
+      押したときだけで、機械は勝手に消さない——時計のずれや、ノートPCを
+      久しぶりに開いたときに、**作者が見る前に消える**のを防ぐため。
+    */
+    registerCommand("novelai.pruneFindings", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await pruneFindings(work);
     }),
     registerCommand("novelai.nextSceneMemo", async (node?: WorkNode) => {
       const work = await resolveWork(node, registry);

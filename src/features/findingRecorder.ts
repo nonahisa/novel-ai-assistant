@@ -1,5 +1,5 @@
 import type { WorkEntry } from "../models/types";
-import type { Finding } from "../models/finding";
+import type { Finding, FindingStatus } from "../models/finding";
 import { readTextFile } from "../core/textFile";
 import { logFailure, useLogFile } from "../core/logger";
 import {
@@ -80,13 +80,26 @@ export async function recordFindings(
 export async function recordFindingDecision(
   work: WorkEntry,
   draft: FindingDraft,
-  status: "accepted" | "dismissed",
-  note = ""
+  /**
+   * **`pending` は「戻した」**（判断そのものの取り消し。6.96.4）。
+   * 適用を戻したのに置き場が「採った」のままだと、その指摘は二度と
+   * 一覧へ出てこない。
+   */
+  status: FindingStatus,
+  note = "",
+  /**
+   * 分かっているなら、その番号（置き場から戻した指摘だけが持つ）。
+   *
+   * **番号の作り方をあとから変えたときに効く。** 中身から作り直すと、
+   * 前の決まりで書かれた行と噛み合わず、**採った・退けたがどこにも
+   * 効かなくなる**——しかも画面では静かに元へ戻るだけで、気づけない。
+   */
+  findingId?: string
 ): Promise<void> {
   try {
     await new FindingStore(work).decide([
       {
-        findingId: findingIdOf(work.folderPath, draft),
+        findingId: findingId ?? findingIdOf(work.folderPath, draft),
         time: new Date().toISOString(),
         status,
         note,

@@ -17,9 +17,7 @@ import {
   memoColorVars,
   memoTagClass,
   nearestMemo,
-  nextMemo,
   parseMemos,
-  prevMemo,
   removeMemoLine,
   sortMemos,
   type MemoPosition,
@@ -30,13 +28,15 @@ import {
   sceneMemoToMarkdown,
 } from "../core/sceneMemoMarkdown";
 import {
-  findingCategoryLabel,
   findingColorVars,
   findingHeadline,
+  findingLabelOf,
   findingNote,
   FINDING_DOT_CLASS,
   markSameLine,
   mergeNoteRows,
+  nextNoteRow,
+  prevNoteRow,
   type NoteRow,
   type PlacedFinding,
 } from "../core/sceneMemoRows";
@@ -121,6 +121,17 @@ export interface SceneMemoDeps {
     work: WorkEntry,
     finding: PlacedFinding
   ) => Promise<boolean> | boolean;
+  /**
+   * この画面で退けたことを、提案パネルへ伝える口（設計書6.96.5）。
+   *
+   * **同じ指摘は2つの画面に出る。** こちらで見送っても、向こうの一覧に
+   * 残っていると、作者は同じものを二度読むことになる。
+   *
+   * **呼ぶのは知らせるためだけ**——本文にも置き場にも触らない（置き場への
+   * 追記はこの画面が済ませている）。渡されなければ、ただ知らせないだけで
+   * 見送りそのものは効く。
+   */
+  noteFindingDismissed?: (work: WorkEntry, findingId: string) => void;
 }
 
 export async function openSceneMemoPanel(
@@ -161,6 +172,20 @@ export async function refreshSceneMemos(filePath: string): Promise<void> {
 }
 
 /**
+ * 指摘の判断が済んだことを、開いているパネルへ伝える（設計書6.96.5）。
+ *
+ * **同じ指摘は2つの画面に出る。** 提案パネルで採る・退けると置き場には
+ * 追記されるが、こちらは**本文の保存でしか読み直さない**ため、片付けた
+ * はずの指摘が横に残り続けていた。
+ *
+ * 開いていなければ何もしない（見ていない画面のために本文を読み直さない）。
+ */
+export async function refreshSceneMemoFindings(workId: string): Promise<void> {
+  const panel = openPanels.get(workId);
+  if (panel) await panel.reload();
+}
+
+/**
  * 次の／前のメモへ飛ぶ（コマンド。設計書6.40.4）。
  *
  * **パネルが開いていなくても飛べる。** 作者がキー割当だけで使う道である。
@@ -173,7 +198,17 @@ export async function jumpSceneMemo(
   deps: SceneMemoDeps
 ): Promise<void> {
   const collected = await collectMemos(work);
-  if (collected.memos.length === 0) {
+  /*
+    **指摘も回る**（設計書6.96.5）。作者が直したい順は、付箋とAIの指摘を
+    分けた順ではなく本文の順である。一覧では位置順に混ぜておきながら、
+    飛ぶときだけ付箋しか止まらないのでは、混ぜた意味が半分になる。
+  */
+  const rows = mergeNoteRows(
+    collected.memos,
+    collected.findings,
+    collected.order
+  );
+  if (rows.length === 0) {
     void vscode.window.showInformationMessage(
       `「${work.title}」の本文にシーンメモはありません。` +
         `${MEMO_HINT}。`
@@ -184,8 +219,8 @@ export async function jumpSceneMemo(
   const current = currentPosition(collected.files);
   const target =
     direction === "next"
-      ? nextMemo(collected.memos, current, collected.order)
-      : prevMemo(collected.memos, current, collected.order);
+      ? nextNoteRow(rows, current, collected.order)
+      : prevNoteRow(rows, current, collected.order);
   if (!target) return;
 
   await revealTextLocation(
@@ -570,16 +605,32 @@ class SceneMemoPanel {
     }
   }
 
+  /**
+   * 「次へ」「戻る」（設計書6.96.5）。
+   *
+   * **付箋だけでなく、AIの指摘にも止まる。** 直したい順は本文の順であって、
+   * 誰が書いたかの順ではない。
+   *
+   * **絞り込みは効かせる。** 「この話だけ」にしているのに話をまたいで
+   * 飛ぶと、一覧に無い行へ連れて行かれる。
+   */
   private async jump(direction: "next" | "prev"): Promise<void> {
+    const rows = mergeNoteRows(
+      this.matchedMemos(),
+      this.matchedFindings(),
+      this.order
+    );
     const current = currentPosition(this.files);
     const target =
       direction === "next"
-        ? nextMemo(this.memos, current, this.order)
-        : prevMemo(this.memos, current, this.order);
+        ? nextNoteRow(rows, current, this.order)
+        : prevNoteRow(rows, current, this.order);
     if (!target) return;
     // **光る行は先に付け替える。** 本文が動いてカーソルの知らせが返るまで
     // 少し間があり、その間だけ前の行が光っていると押した手応えが無い
-    this.activeKey = memoKey(target);
+    // （光らせるのは付箋だけ——指摘は開くたびに位置が決まり直すので、
+    // `nearestMemo` の付け直しと噛み合わない）
+    this.activeKey = target.kind === "memo" ? memoKey(target.memo) : "";
     this.currentFile = target.filePath;
     this.post();
     await this.reveal(target.filePath, target.line);
@@ -699,6 +750,9 @@ class SceneMemoPanel {
         note: "",
       },
     ]);
+    // **向こうの一覧からも下げる**（6.96.5）。置き場への追記は済んでいるので、
+    // ここは知らせるだけである
+    this.deps.noteFindingDismissed?.(this.work, findingId);
     await this.load();
   }
 
@@ -772,7 +826,7 @@ class SceneMemoPanel {
     return this.findings.filter((finding) => {
       const key = paths.normalizeForComparison(finding.filePath);
       if (this.onlyCurrent && currentKey && key !== currentKey) return false;
-      const label = findingCategoryLabel(finding.category);
+      const label = findingLabelOf(finding);
       if (this.tag && label !== this.tag) return false;
       if (
         query &&
@@ -890,7 +944,7 @@ class SceneMemoPanel {
   ): string[] {
     const choices = byTag.map((entry) => entry.tag);
     for (const finding of this.findings) {
-      const label = findingCategoryLabel(finding.category);
+      const label = findingLabelOf(finding);
       if (!choices.includes(label)) choices.push(label);
     }
     return choices;
@@ -938,7 +992,7 @@ class SceneMemoPanel {
       filePath: finding.filePath,
       line: finding.line,
       sameLine: row.sameLine,
-      tag: findingCategoryLabel(finding.category),
+      tag: findingLabelOf(finding),
       tagClass: FINDING_DOT_CLASS,
       text: findingHeadline(finding),
       note: findingNote(finding),
