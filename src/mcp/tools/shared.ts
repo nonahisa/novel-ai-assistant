@@ -9,6 +9,7 @@ import {
 import { goesOutside } from "../../core/pathText";
 import { decodeBytes } from "../../core/textDecode";
 import { parseEpisodeFileName } from "../../core/episodeParser";
+import { isWorkInfoFile } from "../../core/workInfoFile";
 import {
   chunksOfSources,
   episodeBodySources,
@@ -208,7 +209,18 @@ export function orderedEpisodeBodies(folder: string): OrderedEpisodeBody[] {
       // 読めないファイルで止めない（競合マーカーのあるものもここ）
       continue;
     }
-    const parsed = parseEpisodeFileName(nodePath.basename(filePath));
+    const fileName = nodePath.basename(filePath);
+
+    /*
+      **作品情報（`about.txt`）は材料から外す**（作者の実データ、2026-09-19）。
+
+      並べ替え（下の `sort`）だけでは「先頭に来ない」だけで、材料には
+      残っていた——冒頭診断は助かるが、プロット逆算や紹介文には
+      **作品説明が1話として混ざったまま**だった。
+    */
+    if (isWorkInfoFile(fileName, text)) continue;
+
+    const parsed = parseEpisodeFileName(fileName);
     for (const source of episodeBodySources(filePath, text, {
       chapterStart: parsed.chapterStart,
       chapterEnd: parsed.chapterEnd,

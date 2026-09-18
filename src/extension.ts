@@ -312,6 +312,13 @@ import {
   type CheckCommandOutcome,
   type CheckRunOptions,
 } from "./core/proofreadingSuite";
+// 新しい作品を、ひと通り仕上げる。**まとめ実行と同じ決まり**で作ってあり、
+// ここでも処理は持たない（走らせるのは既にあるコマンド）
+import {
+  collectFinishEstimate,
+  runFinishNewWork,
+} from "./features/finishNewWork";
+import { FINISH_NEW_WORK_COMMAND } from "./core/finishNewWork";
 import {
   extendMarkdownItWithRuby,
   type MarkdownItLike,
@@ -3525,6 +3532,27 @@ export async function activate(
         });
       }
     )
+  );
+
+  /*
+    新しい作品を、ひと通り仕上げる（作者の指示、2026-09-19）。
+
+    **まとめ実行と同じで、ここでは処理を持たない。** 走らせるのは既にある
+    コマンドで、確認・見積もり・札・通知は各機能のものをそのまま通す。
+    まとめ側が持つのは「どの段を・どの順で」「既にある段を飛ばす判断」
+    「終わったあとの1枚」だけである。
+  */
+  context.subscriptions.push(
+    registerCommand(FINISH_NEW_WORK_COMMAND, async (node?: WorkRef) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await runFinishNewWork(work, {
+        // 内訳は提案パネルの残り件数から数える（設計書6.37.3）
+        remainingIn: (category) => proposalPanel.remainingIn(work, category),
+        // 確認に出す量の見積もり。**取れなくても確認は出す**
+        estimate: (steps) => collectFinishEstimate(work, aiRegistry, steps),
+      });
+    })
   );
 
   context.subscriptions.push(

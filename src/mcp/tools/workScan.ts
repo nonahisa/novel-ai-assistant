@@ -2,6 +2,7 @@ import * as nodePath from "node:path";
 import { parseCollectedFile } from "../../core/collectedFile";
 import { parseEpisodeFileName } from "../../core/episodeParser";
 import { parseEpisodeMetadata } from "../../core/metadataParser";
+import { isWorkInfoFile } from "../../core/workInfoFile";
 import {
   PREREQUISITE_KINDS,
   prerequisiteStatuses,
@@ -37,11 +38,19 @@ export interface ScannedEpisode {
 export interface WorkScanResult {
   /** 本文の置き場所（`本文/` が無ければ作品フォルダーの直下） */
   bodyDir: string;
-  /** 読んだファイルの数（合本は1つと数える） */
+  /** 読んだ本文ファイルの数（合本は1つと数える。作品情報は入らない） */
   fileCount: number;
   episodes: ScannedEpisode[];
   /** 読めなかったファイル（競合マーカーを含むものもここ） */
   skipped: Array<{ filePath: string; reason: string }>;
+  /**
+   * 作品情報のファイル（カクヨムの `about.txt`）。**話には数えない。**
+   *
+   * **落としたことは知らせる。** 題・キャッチコピー・紹介文・タグが
+   * 書いてあるので、呼ぶ側が「作品の情報が要る」と判断したときに
+   * 名指しで読めばよい。黙って消すと、無いものとして扱われる。
+   */
+  workInfoFiles: string[];
   /**
    * いま何が揃っているか（設計書6.94、0.67.3）。
    *
@@ -59,6 +68,7 @@ export function workScan(input: { folder: string }): WorkScanResult {
   const files = listBodyFiles(input.folder);
   const episodes: ScannedEpisode[] = [];
   const skipped: Array<{ filePath: string; reason: string }> = [];
+  const workInfoFiles: string[] = [];
 
   for (const relative of files) {
     let text: string;
@@ -91,23 +101,37 @@ export function workScan(input: { folder: string }): WorkScanResult {
       continue;
     }
 
-    const parsed = parseEpisodeFileName(nodePath.basename(relative));
-    const body = parseEpisodeMetadata(text).body;
-    if (!body.trim()) continue;
+    const fileName = nodePath.basename(relative);
+
+    // **作品情報（カクヨムの `about.txt`）は話ではない**（`workInfoFile.ts`）。
+    // 数えると、外から見て「話数の無い話が1つ多い」状態になる
+    if (isWorkInfoFile(fileName, text)) {
+      workInfoFiles.push(relative);
+      continue;
+    }
+
+    const parsed = parseEpisodeFileName(fileName);
+    const meta = parseEpisodeMetadata(text);
+    if (!meta.body.trim()) continue;
     episodes.push({
       filePath: relative,
       chapter: parsed.chapterStart,
-      title: parsed.subtitle,
-      chars: body.length,
+      // **ファイル名に題が無ければ頭書きの題を使う**（製品の `scanner.ts` が
+      // `parsed.subtitle ?? meta.title` でそうしている）。揃えないと、
+      // `episode_0001.txt` のような名前の作品は全話の題が null になる
+      title: parsed.subtitle ?? meta.title,
+      chars: meta.body.length,
       insideCollected: false,
     });
   }
 
   return {
     bodyDir,
-    fileCount: files.length,
+    // **作品情報は数えない。** 読んだ本文のファイル数を返す
+    fileCount: files.length - workInfoFiles.length,
     episodes,
     skipped,
+    workInfoFiles,
     prerequisites: prerequisiteStatuses(
       presentPrerequisites(input.folder, PREREQUISITE_KINDS)
     ),

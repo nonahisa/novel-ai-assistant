@@ -25,12 +25,17 @@ import {
  */
 
 // 書き出したファイルを既定のアプリで開くところは、テストでは動かさない
-// （`cmd /c start` が実際に走ってブラウザが開いてしまう）
+// （`cmd /c start` が実際に走ってブラウザが開いてしまう）。
+// 「開けなかった」ときの案内（F-25）も確かめたいので、成否を差し替えられるようにする
+const openExternalFileState = { succeeds: true };
 vi.mock("../../src/core/openExternalFile", () => ({
-  openInDefaultApp: async () => true,
+  openInDefaultApp: async () => openExternalFileState.succeeds,
 }));
+const revealedFolders: string[] = [];
 vi.mock("../../src/views/openDocument", () => ({
-  revealFolder: async () => undefined,
+  revealFolder: async (target: string) => {
+    revealedFolders.push(target);
+  },
 }));
 
 const { exportPdf } = await import("../../src/features/exportPdf");
@@ -130,6 +135,8 @@ function answerQuickPicks(): void {
 beforeEach(() => {
   disk.clear();
   shown.length = 0;
+  openExternalFileState.succeeds = true;
+  revealedFolders.length = 0;
   installDisk();
   answerQuickPicks();
 
@@ -288,6 +295,118 @@ describe("単話だけの作品の紙は変わらない（回帰の固定）", (
       .digest("hex");
 
     expect(digest).toBe(GOLDEN);
+  });
+});
+
+/**
+ * 未解決の競合マーカーを含む話は、組まずに外す（実機確認リスト F-25 の代わり）。
+ *
+ * `exportPdf.ts` の「競合マーカーが残っている話。組んでも読めない紙になる
+ * ので外す」という判断を、実際に `exportPdf` を走らせて確かめる。
+ */
+describe("未解決の競合は外す（設計書のとおり。実機確認リスト F-25 の代わり）", () => {
+  test("競合マーカーを含む話は外され、その旨が案内に出る", async () => {
+    put("本文/第1話.txt", "　朝が来た。");
+    put(
+      "本文/第2話.txt",
+      [
+        "<<<<<<< HEAD",
+        "　昼が来た。",
+        "=======",
+        "　昼になった。",
+        ">>>>>>> branch",
+      ].join("\n")
+    );
+
+    await exportPdf(work);
+
+    const text = plain(exportedHtml());
+    expect(text).toContain("朝が来た。");
+    expect(text).not.toContain("昼が来た。");
+    expect(text).not.toContain("昼になった。");
+
+    // 開けた側（成功）の案内に、外した理由とファイル名が添わる
+    expect(
+      shown.some((message) =>
+        message.includes("未解決の競合を含む1件は外しました（第2話.txt）")
+      )
+    ).toBe(true);
+  });
+
+  test("全部が競合していれば、書き出さずに理由だけ言う", async () => {
+    put(
+      "本文/第1話.txt",
+      ["<<<<<<< HEAD", "　朝が来た。", "=======", "　朝になった。", ">>>>>>> branch"].join(
+        "\n"
+      )
+    );
+
+    await exportPdf(work);
+
+    expect(
+      shown.some((message) => message.includes("すべて未解決の競合を含んでいる"))
+    ).toBe(true);
+    expect([...disk.entries()].some(([name]) => name.endsWith(".html"))).toBe(
+      false
+    );
+  });
+});
+
+/**
+ * ブラウザを開けなかったときの案内（実機確認リスト F-25 の代わり）。
+ *
+ * 以前は戻り値を見ずに「ブラウザで開きました」と告げていた不具合の直し
+ * （0.24.5、作者の報告 2026-08-30）。開けなかったときは、成功したことに
+ * せず、フォルダーを手で開く道を示す。
+ */
+describe("ブラウザを開けなかったとき（実機確認リスト F-25 の代わり）", () => {
+  test("フォルダーの中の.htmlをダブルクリックしてくださいと案内する", async () => {
+    openExternalFileState.succeeds = false;
+    put("本文/第1話.txt", "　朝が来た。");
+
+    await exportPdf(work);
+
+    expect(
+      shown.some((message) =>
+        message.includes(
+          "フォルダーの中の .html をダブルクリックすると開きます"
+        )
+      )
+    ).toBe(true);
+    // 開けなかったのに「開きました」と言っていないこと
+    expect(shown.some((message) => message.includes("ブラウザで開きました"))).toBe(
+      false
+    );
+  });
+
+  test("「フォルダーを開く」を押すと、書き出し先が開く", async () => {
+    openExternalFileState.succeeds = false;
+    put("本文/第1話.txt", "　朝が来た。");
+    window.showWarningMessage = async () => "フォルダーを開く";
+
+    await exportPdf(work);
+
+    expect(revealedFolders.length).toBe(1);
+  });
+});
+
+/**
+ * .md と .txt が混ざった作品でも両方組まれるか（実機確認リスト F-34 の代わり）。
+ *
+ * 実データに「DLした話（.txt）と、こちらで書き足した話（.md）」が混ざる
+ * ことがあると `exportPdf.ts` のコメントにある。拡張子違いで片方が
+ * 落ちないことを固定する。
+ */
+describe(".mdと.txtが混ざっても両方組まれる（実機確認リスト F-34 の代わり）", () => {
+  test("拡張子が違っても、どちらの本文も紙に出る", async () => {
+    put("本文/第1話.txt", "　朝が来た。");
+    put("本文/第2話.md", "　夜になった。");
+
+    await exportPdf(work);
+    const text = plain(exportedHtml());
+
+    expect(text).toContain("朝が来た。");
+    expect(text).toContain("夜になった。");
   });
 });
 

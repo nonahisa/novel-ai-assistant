@@ -71,7 +71,10 @@ describe("コマンドは、宣言と実体が揃っている", () => {
     // ② 定数で渡している：registerCommand(PROOFREADING_SUITE_COMMAND, …)
     //    定数の中身は宣言している側（core）から引く
     const constants = new Map<string, string>();
-    for (const file of ["src/core/proofreadingSuite.ts"]) {
+    for (const file of [
+      "src/core/proofreadingSuite.ts",
+      "src/core/finishNewWork.ts",
+    ]) {
       const body = readFileSync(file, "utf8");
       for (const match of body.matchAll(
         /export const ([A-Z0-9_]+) = "(novelai\.[^"]+)"/g

@@ -260,6 +260,15 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.openChronicle": "story",
   "novelai.editTimeline": "story",
 
+  /*
+    新しい作品を、ひと通り仕上げる（作者の指示、2026-09-19）。
+
+    **まとめ実行と違って「story」に置く。** 走らせる段に各話あらすじ・
+    プロットの逆算・章立て・プロット逸脱が入っており、話の連なりが無い
+    作品（メモ集・SNS記事）では、その半分が走らないか的外れになる。
+  */
+  "novelai.finishNewWork": "story",
+
   // ── 校正・校閲。書いた文字がある限り、どのタイプでも効く ──
   // まとめ実行（設計書6.80）は、走らせるものを選ぶ画面である。
   // 物語向けの検知も選べるが、**選ばなければ走らない**ので、

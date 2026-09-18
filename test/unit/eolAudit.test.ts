@@ -113,6 +113,20 @@ describe("多数派と違うもの", () => {
 
     expect(audit.differing).toEqual([]);
   });
+
+  /**
+   * 実機確認リスト F-28 の代わり。
+   * 全部が同じ改行コードの作品では `differing` が空になり、
+   * `eolUnify.ts` は「この作品の改行コードは揃っています」で終わる
+   * （揃える計画を立てずに済む）。
+   */
+  test("全部が同じ改行コードなら、揃っていて対象が無い", () => {
+    const entries = [lf("1.txt"), lf("2.txt"), lf("3.txt")];
+    const audit = auditEol(entries);
+
+    expect(audit.differing).toEqual([]);
+    expect(planEolUnify(entries, "\n")).toEqual([]);
+  });
 });
 
 describe("揃える計画", () => {

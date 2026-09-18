@@ -387,7 +387,7 @@ export function suiteContextOf(
  * と同じ値である。**新しい換算を作らない**——ここだけ別の数字にすると、
  * 単独で走らせたときとまとめ実行で目安が食い違う。
  */
-const SECONDS_PER_CHUNK = 15;
+export const SECONDS_PER_CHUNK = 15;
 
 /** まとめ実行の確認に出す、送る量とAIの見積もり */
 export interface SuiteEstimate {

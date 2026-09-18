@@ -109,6 +109,62 @@ describe("本文フォルダの選択", () => {
     ).not.toContain("設定");
   });
 
+  test("カクヨムの about.txt は話に数えない（作者の実データ、2026-09-19）", async () => {
+    /*
+      カクヨムのバックアップをそのまま登録すると、`about.txt`
+      （**作品情報**。題・キャッチコピー・紹介文・タグ）が1話として
+      並び、その字数が作品の総字数に足されていた。
+
+      **総字数が減るが、執筆量にはマイナスが残らない**——ファイル数も
+      同時に減るので、`recordMeasurement` の「ファイルが増減した回は
+      数えない」に乗る（`kakuyomuBackup.test.ts` で押さえている）。
+    */
+    const about = [
+      "【タイトル】",
+      "灯をたどる",
+      "",
+      "【キャッチコピー】",
+      "その灯は、まだ消えていない。",
+      "",
+      "【紹介文（1行）】",
+      "　夜の川べりを歩く話です。",
+      "",
+    ].join("\n");
+    const readDirectory = vi.fn(async () => [
+      ["about.txt", FileType.File],
+      ["episode_0001.txt", FileType.File],
+    ]);
+    workspace.fs = {
+      readFile: vi.fn(async (uri: { fsPath: string }) => {
+        if (uri.fsPath.endsWith(".json")) {
+          throw new FileSystemError("設定なし", "FileNotFound");
+        }
+        if (uri.fsPath.endsWith("about.txt")) {
+          return new TextEncoder().encode(about);
+        }
+        return new TextEncoder().encode(
+          "【タイトル】\n第1話　灯\n\n【本文（1行）】\n灯が歩いた。\n"
+        );
+      }),
+      stat: vi.fn(async () => {
+        throw new FileSystemError("本文なし", "FileNotFound");
+      }),
+      readDirectory,
+    };
+
+    const result = await scanWork(work);
+
+    expect(result.episodes.map((episode) => episode.fileName)).toEqual([
+      "episode_0001.txt",
+    ]);
+    expect(result.stats.fileCount).toBe(1);
+    // 紹介文もキャッチコピーも作品の字数に入らない
+    expect(result.stats.totals.net).toBe("灯が歩いた。".length);
+    // **落としたことは返す**（画面に出すかは使う側の判断）
+    expect(result.workInfoFiles).toHaveLength(1);
+    expect(result.workInfoFiles[0].endsWith("about.txt")).toBe(true);
+  });
+
   test.each(["NoPermissions", "Unknown"])(
     "本文フォルダのstatが%sなら作品ルートへフォールバックせず伝播する",
     async (code) => {

@@ -278,7 +278,7 @@ function countOf(
  * 2つ以上のAIが並ぶ。1つに丸めると、有料のAIが混ざっていることを
  * 隠すことになる。
  */
-const ASSIGNED_FEATURE: Record<string, AssignableFeature> = {
+export const ASSIGNED_FEATURE: Record<string, AssignableFeature> = {
   typos: "typo",
   proofread: "proofread",
   opening: "generate",
@@ -303,13 +303,31 @@ export async function collectSuiteEstimate(
   registry: AIRegistry,
   checks: readonly ProofreadingCheck[]
 ): Promise<SuiteEstimate | undefined> {
-  const features = [
-    ...new Set(
-      checks
-        .map((check) => ASSIGNED_FEATURE[check.id])
-        .filter((feature): feature is AssignableFeature => Boolean(feature))
-    ),
-  ];
+  return await collectEstimateForFeatures(
+    work,
+    registry,
+    checks
+      .map((check) => ASSIGNED_FEATURE[check.id])
+      .filter((feature): feature is AssignableFeature => Boolean(feature))
+  );
+}
+
+/**
+ * 割り当てられたAIと本文の量から、確認に出す見積もりを組む。
+ *
+ * **「新しい作品を、ひと通り仕上げる」と共用する。** あちらは校正以外の段
+ * （資料抽出・あらすじ・紹介文）も走らせるので、校正の機能の並びでは
+ * 表せない。**写しを作らない**ために、機能の種類だけを受け取る形へ
+ * 開いてある。
+ *
+ * @param assigned 使う機能の割当（重複していてもよい）
+ */
+export async function collectEstimateForFeatures(
+  work: WorkEntry,
+  registry: AIRegistry,
+  assigned: readonly AssignableFeature[]
+): Promise<SuiteEstimate | undefined> {
+  const features = [...new Set(assigned)];
   if (features.length === 0) return undefined;
 
   const providerNames: string[] = [];

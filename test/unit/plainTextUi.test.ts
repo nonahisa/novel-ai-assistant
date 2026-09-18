@@ -66,6 +66,14 @@ const MARKDOWN_ALLOWED = new Set([
   "src/features/diagnoseWeb.ts",
   // 冒頭診断のレポートをMarkdownの文書として開く（P-24）
   "src/features/checkOpening.ts",
+  /*
+    「ひと通り仕上げる」の結果の1枚をMarkdownの文書として開く。
+
+    **確認のダイアログは `src/core/finishNewWork.ts` に分けてある**ので、
+    そちらはこの検査の網に掛かったままである（同じファイルに置くと、
+    ファイルごと外れて、確認の文言に記号が混ざっても気づけない）。
+  */
+  "src/core/finishReportDoc.ts",
   // 相談の会話を、読み返せるMarkdownのメモとして残す
   "src/core/chatNote.ts",
   // 使い方のマニュアルをMarkdownの文書として開く

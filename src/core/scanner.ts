@@ -12,6 +12,7 @@ import { parseEpisodeFileName } from "./episodeParser";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { parseEpisodeMetadata } from "./metadataParser";
 import { isConflictSideFile } from "./conflictFile";
+import { isWorkInfoFile } from "./workInfoFile";
 import { parseCollectedFile, type CollectedEpisode } from "./collectedFile";
 import { memoBadgeText, parseMemos } from "./sceneMemo";
 import { pathExists } from "./fileSystem";
@@ -29,6 +30,13 @@ export async function scanWork(work: WorkEntry): Promise<{
   episodes: EpisodeFile[];
   stats: WorkStats;
   manuscriptDir: string;
+  /**
+   * 作品情報のファイル（絶対パス）。**話には数えない**（`workInfoFile.ts`）。
+   *
+   * 落としたことが分かるように返す。画面に「作品情報」として見せるかは
+   * 使う側の判断だが、**黙って消したことにはしない。**
+   */
+  workInfoFiles: string[];
 }> {
   const config = await readWorkConfig(work);
   const p = workPaths(work, config);
@@ -37,6 +45,7 @@ export async function scanWork(work: WorkEntry): Promise<{
   const files = await collectTextFiles(targetDir);
 
   const episodes: EpisodeFile[] = [];
+  const workInfoFiles: string[] = [];
   const excludeRuby = vscode.workspace
     .getConfiguration("novelai")
     .get<boolean>("excludeRubyFromCount", true);
@@ -69,6 +78,14 @@ export async function scanWork(work: WorkEntry): Promise<{
         path.toUri(filePath)
       );
       const text = decodeText(bytes);
+
+      // **作品情報（`about.txt`）はここで抜ける。** 中身を見ないと
+      // 見分けられないので、読んだ直後のこの位置にしか置けない
+      if (isWorkInfoFile(fileName, text)) {
+        workInfoFiles.push(filePath);
+        continue;
+      }
+
       // **改行の判定は正規化前の本文で行う**（`decodeText` は改行を
       // そのまま残す）。LFへ揃えたあとでは、もう見分けられない
       ({ eol, hasMixedEol } = detectEol(text));
@@ -162,6 +179,7 @@ export async function scanWork(work: WorkEntry): Promise<{
     episodes,
     stats: { fileCount: episodes.length, totals, conflictedCount },
     manuscriptDir: targetDir,
+    workInfoFiles,
   };
 }
 
