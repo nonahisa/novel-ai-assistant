@@ -1,7 +1,10 @@
 import type { Character } from "../models/character";
 import type { RecordChange } from "../models/jsonValidation";
 import type { FactKind, StoryFact } from "../models/storyFact";
-import { CHARACTER_FIELD_LABELS } from "./chronicle";
+// **`chronicle.ts` からではなく、表そのものから引く**（0.67.2）。年表は
+// `timelineEdit.ts` 経由で `vscode` まで届くので、外から呼ぶ束（MCP）が
+// この1行のために丸ごと `vscode` 依存になる（`mcpReach.test.ts`）
+import { CHARACTER_FIELD_LABELS } from "./characterFieldLabels";
 import { CHARACTER_AS_OF_FIELDS } from "./contradictionMaterial";
 
 /**

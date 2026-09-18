@@ -38,6 +38,7 @@ export const FEATURES = [
   "typo",
   "notation",
   "contradiction",
+  "factContradiction",
   "foreshadow",
   "deviation",
   "synopsis",
@@ -69,6 +70,25 @@ export const FILE_TARGET_FEATURES = [
   "synopsis",
   "deviation",
 ];
+
+/**
+ * 同じ答え付きの台（`test/fixtures/seeded/contradiction/`）で測る feature。
+ *
+ * **古い道（P-12）と新しい道（6.88 の事実の照合）を、同じ仕込みで比べる**
+ * ためにある。台を分けると、点差が「道の違い」なのか「台の違い」なのかが
+ * 分からなくなる——それでは並べて読む意味が無い。
+ */
+export const CONTRADICTION_FEATURES = ["contradiction", "factContradiction"];
+
+/**
+ * その feature の答え付きの台があるフォルダー名。
+ *
+ * 既定は feature と同じ名前（`test/fixtures/seeded/<feature>`）で、
+ * **台を共有するものだけここに書く。**
+ */
+export function fixtureDirOf(feature) {
+  return CONTRADICTION_FEATURES.includes(feature) ? "contradiction" : feature;
+}
 
 /** その feature が測れるか確かめる。知らない名前なら、選べるものを並べて断る */
 export function assertFeature(feature) {
@@ -755,7 +775,7 @@ export function metricsOfRun(feature, answers, run) {
     **指標の名前を逸脱と分ける。** 見出し（`LABELS`）は指標の名前から引くので、
     同じ `seeded` を使い回すと、矛盾を測っても「仕込んだ逸脱を拾えた」と出る。
   */
-  if (feature === "contradiction" && answers) {
+  if (CONTRADICTION_FEATURES.includes(feature) && answers) {
     const scored = scoreContradiction(answers, results);
     metrics.seededContradictions = scored.seeds.found;
     metrics.seededContradictionsTotal = scored.seeds.total;

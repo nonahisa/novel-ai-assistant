@@ -5,6 +5,9 @@ import { findSynopsis } from "../models/synopsis";
 import type { EpisodeFile } from "../models/types";
 import type { Timeline, TimelineLineKind } from "../models/timeline";
 import { findLine, lineOfEpisode, timepointOfEpisode } from "../models/timeline";
+// **`import` も併記する。** `export { X } from "…"` だけではローカル束縛が
+// 作られず、このファイルの中で使っている箇所が「Cannot find name」になる
+import { CHARACTER_FIELD_LABELS } from "./characterFieldLabels";
 import { episodeTitle, formatChapterLabel } from "./episodeLabel";
 import { toTimelineEpisodePath } from "./timelineEdit";
 import type { WorkFormatKey } from "./workFormat";
@@ -176,32 +179,12 @@ export interface ChronicleOptions {
 /**
  * 人物の項目名を、作者が読める言葉にする。
  *
- * **キーから引ける表はここにしか無い。** `characterDiff.ts` にも似た一覧が
- * あるが、あちらは「値の取り出し方」と組で持っており、項目のキーから引けない。
- * 知らないキー（作者が足した項目）はそのまま出す——推測で言い換えると、
- * 作者が付けた名前と画面の言葉が食い違う。
- *
- * **年表の外からも使う**（`core/factsFromRecords.ts`。0.46.1）。写しを作ると、
- * 同じ項目が年表では「外見」、矛盾の候補では「appearance」と出る。
+ * **中身は `core/characterFieldLabels.ts` にある**（0.67.2 で出した）。
+ * ここは年表の都合で `vscode` まで届く道を持っており、外から呼ぶ束（MCP）へ
+ * 表ひとつのためにそれを引き込むわけにいかない。**ここから引く呼び出し側は
+ * そのままでよい**ように、名前は通しておく。
  */
-export const CHARACTER_FIELD_LABELS: Record<string, string> = {
-  name: "名前",
-  summary: "紹介",
-  gender: "性別",
-  affiliation: "所属",
-  reading: "読み",
-  role: "役割",
-  personality: "性格",
-  appearance: "外見",
-  age: "年齢",
-  height: "身長",
-  build: "体格",
-  hair: "髪",
-  eyes: "目",
-  skin: "肌",
-  distinctive: "特徴",
-  clothing: "服装",
-};
+export { CHARACTER_FIELD_LABELS };
 
 /**
  * 話ごとに材料を束ねる。並びは**話数順**（既定の並び）。

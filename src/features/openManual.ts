@@ -1,4 +1,9 @@
-import { ACTION_TREE, visibleEntries, type ActionItem } from "../views/actionList";
+import {
+  ACTION_TREE,
+  prerequisiteNoteOf,
+  visibleEntries,
+  type ActionItem,
+} from "../views/actionList";
 import { STEP_MENU, STEP_REFERENCED_COMMANDS } from "../views/stepMenu";
 import { canRunProcesses } from "../core/runtime";
 import { EXTRA_GUIDE } from "./featureGuide";
@@ -151,7 +156,11 @@ function actionLine(action: ActionItem, noteLocation = true): string {
   // ビューは幅が狭いので短くしたが、マニュアルは幅で困らないうえ、
   // 名前だけでは何の操作か分からないものがある（「使い方」「セットアップ」）
   const note = action.note ? `（${action.note}）` : "";
-  return `- ${action.label}${note}${mark}${noteLocation ? whereToFind(action) : ""}: ${plain(action.detail)}`;
+  // 前提と代わりの道も、同じ出どころ（`ACTION_TREE` の `needs`・`insteadOf`）
+  // から出す。手で書くと、足したときにマニュアルだけが古いままになる
+  const needs = prerequisiteNoteOf(action);
+  const tail = needs ? ` ${needs}` : "";
+  return `- ${action.label}${note}${mark}${noteLocation ? whereToFind(action) : ""}: ${plain(action.detail)}${tail}`;
 }
 
 /**

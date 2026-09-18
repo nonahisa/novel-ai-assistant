@@ -1,7 +1,7 @@
 import * as path from "path";
 import * as fs from "node:fs";
 import * as os from "node:os";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import { z } from "zod";
 import { workScan } from "../../src/mcp/tools/workScan";
 import { NOVEL_RUN_INPUT } from "../../src/mcp/tools/features";
@@ -651,6 +651,95 @@ describe("ollama.generate", () => {
         numCtx: 4096,
       })
     ).rejects.toThrow(/allowRemote/);
+  });
+
+  /**
+   * **流しながら受け取る**（0.67.2。設計書6.63.1）。
+   *
+   * `stream: false` だと応答ヘッダーが生成の終わりまで届かず、Node の
+   * 通信部品が**既定300秒で切る**。2026-09-18 に事実の照合を測ろうとして
+   * **5チャンクすべてがこれで落ち、25分待って0件という記録が残った**
+   * ——しかも表に出た理由は「Ollama へ繋がりませんでした」で、
+   * 繋がっていたことが分からなかった。
+   */
+  describe("流しながら受け取る（0.67.2）", () => {
+    const realFetch = globalThis.fetch;
+    let sentBody: Record<string, unknown> = {};
+
+    function streamOf(lines: string[]): Response {
+      const encoder = new TextEncoder();
+      // **1行の途中で切れて届く**ことを再現する（日本語が半分に割れる形）
+      const whole = encoder.encode(lines.join(""));
+      let at = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (at >= whole.length) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(whole.slice(at, at + 5));
+          at += 5;
+        },
+      });
+      return new Response(body, { status: 200 });
+    }
+
+    function stub(lines: string[]): void {
+      globalThis.fetch = (async (_url: string, init: RequestInit) => {
+        sentBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return streamOf(lines);
+      }) as typeof fetch;
+    }
+
+    afterEach(() => {
+      globalThis.fetch = realFetch;
+    });
+
+    test("NDJSON を組み立てて、まとめて受け取ったのと同じ形で返す", async () => {
+      stub([
+        '{"message":{"content":"{\\"facts\\""},"done":false}\n',
+        '{"message":{"content":":[]}"},"done":false}\n',
+        '{"done":true,"eval_count":12}\n',
+      ]);
+      const result = await ollamaGenerate({
+        model: "dummy",
+        systemPrompt: "s",
+        userPrompt: "u",
+        numCtx: 4096,
+      });
+      expect(result.text).toBe('{"facts":[]}');
+      // **`num_ctx` は必ず明示する**（CLAUDE.md 規則6）。流す形でも変わらない
+      expect(sentBody.stream).toBe(true);
+      expect((sentBody.options as { num_ctx: number }).num_ctx).toBe(4096);
+    });
+
+    test("思考は本文に混ぜない（混ぜるとJSONの解析が丸ごと失敗する）", async () => {
+      stub([
+        '{"message":{"thinking":"ええと"},"done":false}\n',
+        '{"message":{"content":"{}"},"done":false}\n',
+        '{"done":true}\n',
+      ]);
+      const result = await ollamaGenerate({
+        model: "dummy",
+        systemPrompt: "s",
+        userPrompt: "u",
+        numCtx: 4096,
+      });
+      expect(result.text).toBe("{}");
+    });
+
+    test("本文の中で知らされた失敗を、捨てずに断る", async () => {
+      // 流す形では HTTP 200 のまま本文で失敗を知らせてくることがある
+      stub(['{"error":"model not found"}\n']);
+      await expect(
+        ollamaGenerate({
+          model: "dummy",
+          systemPrompt: "s",
+          userPrompt: "u",
+          numCtx: 4096,
+        })
+      ).rejects.toThrow(/model not found/);
+    });
   });
 });
 

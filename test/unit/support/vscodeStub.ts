@@ -80,6 +80,16 @@ export const window = {
   showWarningMessage: (async () => undefined) as StubMessage,
   showErrorMessage: (async () => undefined) as StubMessage,
   /**
+   * 選択画面。**既定は「何も選ばずに閉じた」**。
+   *
+   * 何が並んだかを見るテストは、渡された項目を覗く形へ差し替える
+   * （前提の関門が出す3つの道は、並び自体が確かめたいものである）。
+   */
+  showQuickPick: (async (_items: unknown) => undefined) as (
+    items: unknown,
+    options?: unknown
+  ) => Promise<unknown>,
+  /**
    * 入力欄（`views/dialogs.ts` の `askText` が通す唯一の窓口）。
    *
    * 既定は「入力欄の初期値をそのまま確定した」体にする——`askText` は
@@ -125,7 +135,16 @@ export const window = {
   /** いま開いている本文。**既定は「開いていない」** */
   activeTextEditor: undefined as unknown,
 };
-export const commands = {};
+export const commands = {
+  /**
+   * コマンドの呼び出し。**既定は何もせずに返る。**
+   *
+   * 「押したら何が走ったか」を確かめるテストは、呼ばれたIDを積む形へ
+   * 差し替える（前提の関門は、代わりの操作をその場で走らせるのが要件）。
+   */
+  executeCommand: (async (_command: string, ..._args: unknown[]) =>
+    undefined) as (command: string, ...args: unknown[]) => Promise<unknown>,
+};
 
 /**
  * 外の世界へ出る2つの道（クリップボードと、ブラウザで開くこと）。

@@ -14,6 +14,11 @@ import {
   PROCESSES_BLOCKED_HINT,
 } from "../core/processAvailability";
 import { canRunProcesses } from "../core/runtime";
+import {
+  prerequisiteNote,
+  type Prerequisite,
+  type PrerequisiteAlternative,
+} from "../core/prerequisites";
 // 上限の値は**定数から引く**（説明文に書き写すと、変えたときに画面だけ古くなる）
 import { MAX_ISSUES_PER_1000_CHARS } from "../prompts/proofread";
 
@@ -101,6 +106,25 @@ export interface ActionItem {
    * `browserOnly` の「動くが出番が無い」）。
    */
   hiddenFromActionList?: boolean;
+  /**
+   * この操作が動くために先に要るもの（設計書6.94／`core/prerequisites.ts`）。
+   *
+   * **文章ではなくデータで持つ。** 前提はこれまで `detail` の中の一文に
+   * しか書かれておらず、117操作のうち4つだけだった。しかも相談へ渡す
+   * ときの切り詰めで落ちていたので、AIは前提を知らないまま答えていた。
+   *
+   * **推測で増やさない。** `detail` に根拠が書いてあるものだけを足す。
+   * 当て推量で並べると、実際には動く操作の前で作者の手が止まる。
+   */
+  needs?: readonly Prerequisite[];
+  /**
+   * 前提が無くても同じ目的にたどり着ける、代わりの操作。
+   *
+   * 作者の指示（2026-09-18）「代替で実行できるようにもしてください」。
+   * **名前を出すだけで終わらせない**——足りないと分かった場面から、
+   * その場で代わりの操作へ移れるようにする。
+   */
+  insteadOf?: PrerequisiteAlternative;
 }
 
 export interface ActionSection {
@@ -526,6 +550,9 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         icon: "sparkle",
         requiresWork: true,
         usesAI: true,
+        // 前提は説明文の最後の一文（「各話あらすじを材料にするため…」）が
+        // 根拠。文はそのまま残す——画面のホバーで読めるほうが親切である
+        needs: ["synopsis"],
         detail:
           "既に書いた本文から、ログライン・テーマ・世界観・あらすじなどを" +
           "組み立て直して プロットへ書き込みます。" +
@@ -647,6 +674,8 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             icon: "compass",
             requiresWork: true,
             usesAI: true,
+            // 根拠は説明文の「先にプロットを書いておいてください」
+            needs: ["plot"],
             detail:
               "書いたプロットと本文を照らし合わせ、**プロットに無い展開**や" +
               "**物語が前へ進んでいない箇所**を探します。" +
@@ -665,6 +694,8 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             icon: "check-all",
             requiresWork: true,
             usesAI: true,
+            // 根拠は説明文の「先に『単話プロットを作る』で展開を書いて…」
+            needs: ["episodePlot"],
             detail:
               "その話の単話プロット（視点・目標・展開）を見て、" +
               "**目標に向かっていない展開**や**停滞・重複**を指摘します。" +
@@ -680,6 +711,15 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             icon: "warning",
             requiresWork: true,
             usesAI: true,
+            // 根拠は説明文の「先に設定資料を抽出しておいてください」
+            needs: ["settings"],
+            // **代わりの道が実際にある唯一の組**（設計書6.88）。
+            // 下の「矛盾検知（事実の照合）」は、説明文に
+            // 「設定資料が無くても実行できます」と書いてある
+            insteadOf: {
+              command: "novelai.checkFactContradictions",
+              why: "設定資料が無くても、本文どうしの食い違いを見られます。",
+            },
             detail:
               "設定資料と本文が食い違っている箇所を探します。" +
               "**本文は書き換えません。**「設定ではこう／本文ではこう」を並べるだけで、" +
@@ -2133,6 +2173,35 @@ export function allActions(): ActionItem[] {
       entry.kind === "section" ? entry.items : [entry]
     )
   );
+}
+
+/** コマンドIDから操作を引く。木に無ければ undefined */
+export function findAction(command: string): ActionItem | undefined {
+  return allActions().find((item) => item.command === command);
+}
+
+/**
+ * 前提の1行（相談・マニュアル・画面で同じ文を使う）。
+ *
+ * **代わりの道の名前は、木から引く。** ここで書き写すと、あちらの名前を
+ * 変えたときにこの1行だけが古くなる（`stepMenu.ts` と同じ考え方）。
+ */
+export function prerequisiteNoteOf(item: ActionItem): string {
+  const alternative = item.insteadOf
+    ? findAction(item.insteadOf.command)
+    : undefined;
+  return prerequisiteNote({
+    needs: item.needs,
+    // 名前から外した補足（「事実の照合」）も戻す。名前だけでは
+    // 「矛盾検知」が2つ並んで見分けられない
+    ...(alternative
+      ? {
+          alternativeLabel: alternative.note
+            ? `${alternative.label}（${alternative.note}）`
+            : alternative.label,
+        }
+      : {}),
+  });
 }
 
 /** ツリーの節点 */

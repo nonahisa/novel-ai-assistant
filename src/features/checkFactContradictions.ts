@@ -14,8 +14,6 @@ import {
 } from "../ai/outputLimit";
 import {
   describeChunkScope,
-  locateChunkLine,
-  segmentAtLine,
   splitMergedChunk,
   withLineNumbers,
   type Chunk,
@@ -35,7 +33,6 @@ import {
 } from "../core/contradictionMatch";
 import {
   describeStoryFactRejections,
-  validateStoryFactResult,
   type StoryFactRejection,
 } from "../core/storyFactValidation";
 import {
@@ -46,6 +43,22 @@ import {
   factExtractCacheKey,
   linesAround,
 } from "../core/factContradiction";
+/*
+  **道筋そのものは `core/` にある**（0.67.2）。ここに閉じていたころは
+  外から一度も測れず、6.88 が効くのかどうかが分からなかった。
+  MCP の口（`mcp/tools/factContradiction.ts`）と**同じ判定を通す**。
+*/
+import {
+  buildFactContradictionIssue,
+  candidateSidesOf,
+  collectFactsFromChunk,
+  lineTextOf,
+  parseFactJsonObject,
+  TOPIC_CARRY_LIMIT,
+  VERIFY_CONTEXT_LINES,
+  type FactContradictionIssue,
+  type FactPlace,
+} from "../core/factContradictionFlow";
 import {
   buildStoryFactExtractPrompt,
   STORY_FACT_EXTRACT_SCHEMA,
@@ -116,35 +129,12 @@ import {
 const RETRY_SMALLER = Symbol("retry-smaller");
 
 /**
- * 次のチャンクへ引き継ぐ topic の上限。
+ * 提案パネルへ渡す1件。**形は `core/factContradictionFlow.ts` にある。**
  *
- * **際限なく足すと、チャンクが進むほど指示だけが太る。** topic は
- * 「同じ事柄に同じ語を付けさせる」ための助けなので、直近のものが効けばよい。
+ * 呼ぶ側（`extension.ts`・提案パネル）がここから取れるように、
+ * 名前だけ通しておく（写しは作らない）。
  */
-const TOPIC_CARRY_LIMIT = 60;
-
-/** 検証へ渡す前後の行数（設計書6.88の第4段。作者への指示どおり±5行） */
-const VERIFY_CONTEXT_LINES = 5;
-
-/**
- * 提案パネルへ渡す1件。
- *
- * **既存の矛盾の項目と同じ並びにしてある。** パネル側は
- * `ContradictionViewItem` へ写すだけで、描画も操作も使い回せる。
- */
-export interface FactContradictionIssue {
-  filePath: string;
-  /** 元のファイルでの行（1始まり）。まとめたチャンクは戻してある */
-  line: number;
-  chunkHash: string;
-  excerpt: string;
-  /** 候補の型（設定・時系列・状態・知識・視点・規則） */
-  category: string;
-  settingSays: string;
-  textSays: string;
-  note: string;
-  confidence: "high" | "medium" | "low";
-}
+export type { FactContradictionIssue };
 
 export interface FactContradictionRunResult {
   issues: FactContradictionIssue[];
@@ -435,49 +425,26 @@ export async function checkFactContradictions(
             processedChunks++;
           }
 
-          /** 応答を検算して、本文の場所まで確定させる */
+          /** 応答を検算して、本文の場所まで確定させる（判定は `core/` にある） */
           function collect(raw: unknown, chunk: Chunk): void {
-            const lineCount = chunk.text.split("\n").length;
-            const validated = validateStoryFactResult(raw, {
-              chunkLineStart: chunk.startLine + 1,
-              chunkLineEnd: chunk.startLine + lineCount,
-              chapter: chunk.chapterStart,
-              knownCharacterIds: table.ids,
-              knownNames: table.names,
+            const got = collectFactsFromChunk({
+              raw,
+              chunk,
+              table,
+              chapterOfFile: (filePath) => chapterByFile.get(filePath) ?? null,
             });
-            rejections.push(...validated.rejected);
-
-            for (const fact of validated.accepted) {
-              // **まとめたチャンクの行番号は、元のファイルへ戻す。**
-              // 戻さずに使うと、2話目以降の事実が1話目の行を指す
-              const at = locateChunkLine(chunk, fact.lineRange[0]);
-              if (!at) {
-                // 戻せない行は捨てる。どこの話か決められない。
-                // **黙って落とさない**（設計書6.8）
-                unlocatable++;
-                logStep(
-                  `矛盾検知（事実の照合）：行番号 ${fact.lineRange[0]} を元のファイルへ戻せず除外`
-                );
-                continue;
-              }
-              const end = locateChunkLine(chunk, fact.lineRange[1]);
-              // **話数はチャンクの内訳から引く。** ファイル単位で引くと、
-              // 合本（全話が1ファイル）では走査が返す先頭の話数になり、
-              // どの話の事実も全部「第1話」になる。内訳が無いときだけ
-              // ファイルへ退く。読めなければ null のまま——推測で埋めない
-              const chapter =
-                segmentAtLine(chunk, fact.lineRange[0])?.chapterStart ??
-                chapterByFile.get(at.filePath) ??
-                null;
-              facts.push({
-                ...fact,
-                chapter,
-                lineRange: [at.line, end?.line ?? at.line],
-              });
-              factPlaces.set(fact.id, { filePath: at.filePath, line: at.line });
-              if (fact.topic && !knownTopics.includes(fact.topic)) {
-                knownTopics.push(fact.topic);
-              }
+            rejections.push(...got.rejected);
+            facts.push(...got.accepted);
+            for (const [id, place] of got.places) factPlaces.set(id, place);
+            for (const topic of got.topics) {
+              if (!knownTopics.includes(topic)) knownTopics.push(topic);
+            }
+            for (const line of got.unlocatableLines) {
+              // **黙って落とさない**（設計書6.8）
+              unlocatable++;
+              logStep(
+                `矛盾検知（事実の照合）：行番号 ${line} を元のファイルへ戻せず除外`
+              );
             }
           }
 
@@ -531,7 +498,7 @@ export async function checkFactContradictions(
                 return RETRY_SMALLER;
               }
 
-              const parsed = parseJsonObject(response.text);
+              const parsed = parseFactJsonObject(response.text);
               if (!parsed) {
                 failedChunks++;
                 logFailure("矛盾検知（事実の照合）", {
@@ -715,12 +682,12 @@ export async function checkFactContradictions(
     candidateNote,
   };
 
-  /** 候補の両側と、本文のどこを指すか */
-  interface CandidateSides {
+  /** 候補の両側と、本文から読み取った引用・前後 */
+  interface ResolvedSides {
     left: StoryFact;
     right: StoryFact;
-    /** 作者が飛ぶ先。**後ろ側の事実のもの**（無ければ前側へ落とす） */
-    place: { filePath: string; line: number };
+    place: FactPlace;
+    rightInBody: boolean;
     /** 後ろ側の事実が書かれている本文の行。資料由来なら undefined */
     rightLineText?: string;
     /** その行の前後（行番号つき）。本文が読めなければ空文字 */
@@ -730,22 +697,18 @@ export async function checkFactContradictions(
   /**
    * 候補から、判定と提案パネルが要るものを一度に引く。
    *
-   * **判定とパネルで別々に引かない。** 別々に組むと、AIへ見せた引用と
-   * 作者の画面に出る引用が食い違い、「AIは何を見て採用したのか」が
-   * 追えなくなる。
+   * **どちらを指すかの判断は `core/` にある**（`candidateSidesOf`）。
+   * ここがするのは本文を読むことだけ——判定とパネルで別々に組むと、
+   * AIへ見せた引用と作者の画面に出る引用が食い違い、
+   * 「AIは何を見て採用したのか」が追えなくなる。
    */
   async function resolveSides(
     candidate: ContradictionCandidate,
     factById: Map<string, StoryFact>
-  ): Promise<CandidateSides | undefined> {
-    const left = factById.get(candidate.left);
-    const right = factById.get(candidate.right);
-    if (!left || !right) return undefined;
-
-    const rightPlace = factPlaces.get(right.id);
-    const place = rightPlace ?? factPlaces.get(left.id);
-    if (!place) {
-      // どちらも資料由来。**本文の飛び先が無い**ので、いまは出せない
+  ): Promise<ResolvedSides | undefined> {
+    const sides = candidateSidesOf({ candidate, factById, places: factPlaces });
+    if (!sides) {
+      // 両側とも資料由来なら**本文の飛び先が無い**ので、いまは出せない
       // （資料どうしの食い違いは `conflicts` が既に作者へ回している）
       logStep(
         `矛盾検知（事実の照合）：本文の場所が無い候補を除外（${candidate.fingerprint}）`
@@ -753,16 +716,16 @@ export async function checkFactContradictions(
       return undefined;
     }
 
-    const source = await readSource(place.filePath);
+    const source = await readSource(sides.place.filePath);
     return {
-      left,
-      right,
-      place,
+      ...sides,
       // **前側の行を「後ろ側の引用」にしない。** 後ろ側が資料由来のときは
       // ここが前側の場所になっているので、行の本文は渡さない
-      rightLineText: rightPlace ? lineTextOf(source, place.line) : undefined,
+      rightLineText: sides.rightInBody
+        ? lineTextOf(source, sides.place.line)
+        : undefined,
       context: source
-        ? linesAround(source, place.line, VERIFY_CONTEXT_LINES)
+        ? linesAround(source, sides.place.line, VERIFY_CONTEXT_LINES)
         : "",
     };
   }
@@ -770,29 +733,15 @@ export async function checkFactContradictions(
   /** 候補を提案パネルの1件に写す */
   function toIssue(
     candidate: ContradictionCandidate,
-    sides: CandidateSides,
+    sides: ResolvedSides,
     explanation: string | undefined
   ): FactContradictionIssue {
-    const issue = buildFactVerifyIssue({
+    return buildFactContradictionIssue({
       candidate,
-      left: sides.left,
-      right: sides.right,
+      sides,
       rightLineText: sides.rightLineText,
+      explanation,
     });
-    return {
-      filePath: sides.place.filePath,
-      line: sides.place.line,
-      // 本文のチャンクを跨いで組んだ候補なので、チャンクの指紋は持てない。
-      // 代わりに**容認リストの鍵（6.88.8）**を入れておく——第5段で
-      // 「これは意図的」を登録するときに、この値がそのまま鍵になる
-      chunkHash: candidate.fingerprint,
-      excerpt: issue.excerpt,
-      category: issue.category,
-      settingSays: issue.settingSays,
-      textSays: issue.textSays,
-      note: appendNote(issue.note, explanation ?? ""),
-      confidence: candidate.confidence,
-    };
   }
 
   /** 1件だけを見て、本当に矛盾かを問い直す（既存の P-12b をそのまま使う） */
@@ -908,31 +857,4 @@ function createSourceReader(): (
   };
 }
 
-/** その行の本文。範囲の外なら undefined */
-function lineTextOf(text: string | undefined, line: number): string | undefined {
-  if (text === undefined) return undefined;
-  return text.split("\n")[line - 1];
-}
-
-/** 判定で分かったことを、もとの補足へ足す */
-function appendNote(note: string, explanation: string): string {
-  const extra = explanation.trim();
-  if (!extra) return note;
-  return note.trim() ? `${note.trim()}（判定: ${extra}）` : `判定: ${extra}`;
-}
-
-/** 応答からJSONの本体を取り出す。読めなければ undefined */
-function parseJsonObject(text: string): Record<string, unknown> | undefined {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) return undefined;
-  try {
-    const parsed: unknown = JSON.parse(text.slice(start, end + 1));
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
 

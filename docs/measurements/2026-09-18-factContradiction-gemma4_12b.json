@@ -1,0 +1,264 @@
+{
+  "measuredAt": "2026-09-18T01:05:31.424Z",
+  "feature": "factContradiction",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:12b",
+  "numCtx": 32768,
+  "endpoint": null,
+  "options": {},
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.67.1",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.67.1、リポジトリは 0.67.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+  },
+  "promptVersion": "1.0",
+  "plans": [
+    {
+      "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+      "chars": 1235,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\002_十月三日の坂.txt#2-0@8027",
+      "chars": 1218,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\003_窓口の椅子.txt#3-0@8027",
+      "chars": 1211,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+      "chars": 1246,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\005_初雪の窓口.txt#5-0@8027",
+      "chars": 1216,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction",
+    "targets": [
+      "（作品ぜんたい）"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 1534352,
+      "staleNote": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.67.1、リポジトリは 0.67.2）。Claude Code を開き直して、新しい束で繋ぎ直してください",
+      "metrics": {
+        "seededContradictions": 0,
+        "seededContradictionsTotal": 4,
+        "missedContradictions": 4,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "failures": 5,
+        "elapsedMs": 1534352
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [
+          {
+            "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+            "reason": "Ollama へ繋がりませんでした（http://localhost:11434）: fetch failed"
+          },
+          {
+            "chunkId": "本文\\002_十月三日の坂.txt#2-0@8027",
+            "reason": "Ollama へ繋がりませんでした（http://localhost:11434）: fetch failed"
+          },
+          {
+            "chunkId": "本文\\003_窓口の椅子.txt#3-0@8027",
+            "reason": "Ollama へ繋がりませんでした（http://localhost:11434）: fetch failed"
+          },
+          {
+            "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+            "reason": "Ollama へ繋がりませんでした（http://localhost:11434）: fetch failed"
+          },
+          {
+            "chunkId": "本文\\005_初雪の窓口.txt#5-0@8027",
+            "reason": "Ollama へ繋がりませんでした（http://localhost:11434）: fetch failed"
+          }
+        ],
+        "seededContradictions": {
+          "人物": {
+            "found": 0,
+            "total": 2
+          },
+          "状態": {
+            "found": 0,
+            "total": 1
+          },
+          "時系列": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missedContradictions": [
+          {
+            "file": "本文/003_窓口の椅子.txt",
+            "kind": "人物",
+            "where": "僕は判子を押す手を止めた"
+          },
+          {
+            "file": "本文/004_ギプスが外れた日.txt",
+            "kind": "状態",
+            "where": "右足のギプスが外れたのは"
+          },
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "人物",
+            "where": "左目の下のほくろが、鏡の中で滲んだ"
+          },
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "時系列",
+            "where": "足を折ってから、ちょうど二週間が過ぎた"
+          }
+        ],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "（作品ぜんたい）",
+          "response": {
+            "runner": "ollama",
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.67.1、リポジトリは 0.67.2）。Claude Code を開き直して、新しい束で繋ぎ直してください\n1件も通せませんでした（5件すべて失敗）。理由は failures にあります。 矛盾検知（事実の照合）を終了: 0/5（事実 0件 / 設定資料から 12件 / 候補 0件 / 読み取れなかった 5件）",
+            "model": "gemma4:12b",
+            "results": [],
+            "failures": [
+              {
+                "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+                "reason": "Ollama へ繋がりませんでした（http://localhost:11434）: fetch failed"
+              },
+              {
+                "chunkId": "本文\\002_十月三日の坂.txt#2-0@8027",
+                "reason": "Ollama へ繋がりませんでした（http://localhost:11434）: fetch failed"
+              },
+              {
+                "chunkId": "本文\\003_窓口の椅子.txt#3-0@8027",
+                "reason": "Ollama へ繋がりませんでした（http://localhost:11434）: fetch failed"
+              },
+              {
+                "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+                "reason": "Ollama へ繋がりませんでした（http://localhost:11434）: fetch failed"
+              },
+              {
+                "chunkId": "本文\\005_初雪の窓口.txt#5-0@8027",
+                "reason": "Ollama へ繋がりませんでした（http://localhost:11434）: fetch failed"
+              }
+            ],
+            "stages": {
+              "chunks": 5,
+              "acceptedFacts": 0,
+              "recordFacts": 12,
+              "rejectedFacts": 0,
+              "rejectionNote": "",
+              "candidates": 0,
+              "candidateNote": "",
+              "kept": 0,
+              "verifyNote": ""
+            },
+            "unreadableFiles": [],
+            "bundleStale": true
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seededContradictions": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "seededContradictionsTotal": {
+      "values": [
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "missedContradictions": {
+      "values": [
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "falseFlagsContradiction": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "categoryMismatch": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "otherFlagsContradiction": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "rejected": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        5
+      ],
+      "min": 5,
+      "max": 5
+    },
+    "elapsedMs": {
+      "values": [
+        1534352
+      ],
+      "min": 1534352,
+      "max": 1534352
+    }
+  },
+  "lines": [
+    "仕込んだ矛盾を拾えた: 0/4",
+    "見逃し（拾えなかった仕込み）: 4",
+    "誤検出（罠と、矛盾の無い話に付いた指摘）: 0",
+    "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）: 0",
+    "仕込み以外の箇所への指摘: 0",
+    "指摘（検算を通ったもの）: 0",
+    "落とした（検算で弾いたもの）: 0",
+    "失敗（チャンクごと通らなかったもの）: 5",
+    "所要時間: 1534.4秒"
+  ]
+}

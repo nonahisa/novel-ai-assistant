@@ -81,6 +81,38 @@ describe("許可の鍵——古い印をそのまま読む", () => {
     );
   });
 
+  it("**矛盾検知の許可は、事実の照合へ漏れない**（別の機能だから別に要る）", () => {
+    /*
+      0.67.2 で足した `factContradiction`（設計書6.88）は、P-12 とは
+      **通るプロンプトも、本文が出る回数も違う**。`contradiction` を
+      許したことが、こちらを許したことになってはいけない。
+
+      古い道具名（`contradiction.run`）の読み替えにも足していない
+      ——**そんな道具は存在しなかった**ので、それを許した印もありえない。
+    */
+    const old = permissionWith(["contradiction.run"]);
+    expect(isToolAllowed(old, "claude-code", "contradiction")).toBe(true);
+    expect(isToolAllowed(old, "claude-code", "factContradiction")).toBe(false);
+
+    const now = permissionWith(["contradiction"]);
+    expect(isToolAllowed(now, "claude-code", "factContradiction")).toBe(false);
+
+    // 逆も同じ。事実の照合を許しても、P-12 は通らない
+    const fact = permissionWith(["factContradiction"]);
+    expect(isToolAllowed(fact, "claude-code", "factContradiction")).toBe(true);
+    expect(isToolAllowed(fact, "claude-code", "contradiction")).toBe(false);
+  });
+
+  it("読み替え表に factContradiction へ向かう行は無い", () => {
+    // **無かった道具の名前を読み替えない。** 足すと、古い印のどれかが
+    // 知らないうちにこの feature を許すことになる
+    expect(
+      Object.entries(LEGACY_TOOL_KEYS).filter(
+        ([, key]) => key === "factContradiction"
+      )
+    ).toEqual([]);
+  });
+
   it("承認待ちへ置く道具は、設定資料の抽出を許したことにならない", () => {
     // **ここを取り違えると、置くだけを許した印で資料を読み出せる**
     const permission = permissionWith(["settings.propose"]);
@@ -164,6 +196,22 @@ describe("門番——feature ごとに断る", () => {
     expect(() =>
       assertExternalAccessAllowed({ folder, feature: "settings" }, "novel.run")
     ).toThrow(/許可されていません/);
+  });
+
+  it("矛盾検知を許した作品でも、事実の照合は門番が断る", () => {
+    const folder = workWith(["contradiction"]);
+    expect(() =>
+      assertExternalAccessAllowed(
+        { folder, feature: "contradiction" },
+        "novel.run"
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertExternalAccessAllowed(
+        { folder, feature: "factContradiction" },
+        "novel.run"
+      )
+    ).toThrow(/矛盾検知（事実の照合）/);
   });
 
   it("断り文句に、何を使おうとしたかが日本語で出る", () => {

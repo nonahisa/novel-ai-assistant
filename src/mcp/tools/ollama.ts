@@ -1,5 +1,10 @@
 import { z } from "zod";
 import { bundledTuningByKey, type BundledTuning } from "../../core/bundledTuning";
+import {
+  applyStreamLine,
+  emptyStreamedChat,
+  takeCompleteLines,
+} from "../../ai/ollamaStream";
 import { McpToolError, describeError } from "./shared";
 
 /**
@@ -108,7 +113,21 @@ export async function ollamaGenerate(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: input.model,
-        stream: false,
+        /*
+          **流しながら受け取る**（設計書6.63.1。0.67.2 でここも揃えた）。
+
+          `stream: false` だと、**応答ヘッダーは生成が全部終わってから届く**。
+          Node の通信部品は「ヘッダーを待つ上限」を既定300秒で持っているので、
+          生成が300秒を超えると**こちらが待つ前に切られる**——しかも
+          `fetch failed` としか分からないので、**「Ollama へ繋がりませんでした」
+          と出る**（2026-09-18、事実の照合を測ろうとして5件すべてがこれで落ちた。
+          25分待って0件という記録が残った）。
+
+          流す形ならヘッダーは即座に届くので、この上限に当たらない。
+          組み立ては製品と同じ部品（`ai/ollamaStream.ts`）を通すので、
+          呼ぶ側から見た形は `stream: false` のときと変わらない。
+        */
+        stream: true,
         // 抽出の仕事に思考モードは要らない（遅くなるだけ）
         think: false,
         ...(input.schema === undefined ? {} : { format: input.schema }),
@@ -138,20 +157,58 @@ export async function ollamaGenerate(
     );
   }
 
-  const payload = (await response.json()) as {
-    message?: { content?: unknown };
-  };
-  const content = payload.message?.content;
-  if (typeof content !== "string") {
+  const streamed = await readStream(response);
+  // **Ollama が返したエラー文を捨てない**（CLAUDE.md 規則5）。
+  // 流す形では HTTP 200 のまま本文の中で失敗を知らせてくることがある
+  if (streamed.error) {
+    throw new McpToolError(`Ollama がエラーを返しました: ${streamed.error}`);
+  }
+  if (!streamed.content) {
     throw new McpToolError("Ollama の応答に本文がありません。");
   }
 
   return {
-    text: content,
+    text: streamed.content,
     model: input.model,
     endpoint,
     elapsedMs: Date.now() - startedAt,
   };
+}
+
+/**
+ * NDJSON を1行ずつ取り込む。
+ *
+ * **行の途中で切れて届く**ので、改行までを溜めてから解く。ここを手を抜くと、
+ * 日本語が半分に割れた行で JSON の解析に失敗する（`ai/ollamaStream.ts`）。
+ */
+async function readStream(
+  response: Response
+): Promise<ReturnType<typeof emptyStreamedChat>> {
+  const result = emptyStreamedChat();
+  const reader = response.body?.getReader();
+  if (!reader) throw new McpToolError("Ollama の応答を読み取れません。");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      // **多バイト文字の途中で切れた断片を持ち越す**（`{ stream: true }`）
+      buffer += decoder.decode(value, { stream: true });
+      const taken = takeCompleteLines(buffer);
+      buffer = taken.rest;
+      for (const line of taken.lines) applyStreamLine(result, line);
+    }
+  } catch (error) {
+    throw new McpToolError(
+      `Ollama の応答が途中で切れました: ${describeError(error)}`
+    );
+  }
+  // 最後の行に改行が付かないことがある
+  buffer += decoder.decode();
+  applyStreamLine(result, buffer);
+  return result;
 }
 
 /* ── 手元に何が入っているか（設計書6.87.15 の柱2の2）───────────── */

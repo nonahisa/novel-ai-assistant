@@ -1,4 +1,9 @@
-import { ACTION_TREE, visibleEntries, type ActionItem } from "../views/actionList";
+import {
+  ACTION_TREE,
+  prerequisiteNoteOf,
+  visibleEntries,
+  type ActionItem,
+} from "../views/actionList";
 import { canRunProcesses } from "../core/runtime";
 import {
   selectGuideBundles,
@@ -504,17 +509,25 @@ function nameOnly(
  * `buildFeatureGuide()` と一緒に消した（0.25.2）——束はどれも
  * 相談へ渡すためのものなので、全文が要る場面が無い。
  */
-function describeAction(
-  action: { label: string; note?: string; detail: string; usesAI?: boolean },
-  indent: string
-): string {
+function describeAction(action: ActionItem, indent: string): string {
   // 強調の記号は画面用なので落とす。AIへの指示と混ざると読みにくい。
   // 記号そのものを文字列に書かない（画面に出す文字を見張る試験に引っかかる）
   const emphasis = "*".repeat(2);
   const detail = shorten(action.detail.split(emphasis).join(""));
   const mark = action.usesAI ? "（AIを使う）" : "";
   const note = action.note ? `（${action.note}）` : "";
-  return `${indent}  - ${action.label}${note}${mark}: ${detail}`;
+  /*
+    **前提は、切り詰めたあとに足す**（設計書6.94）。
+
+    `shorten` は1文目と「〜ません」で終わる文しか残さないので、説明文の
+    途中に書いた前提（「先に設定資料を抽出しておいてください」）は必ず
+    落ちる。実際、前提の書いてある4操作すべてで落ちていた——AIは前提を
+    一度も知らないまま順路を答えていたことになる。
+    データ（`needs`・`insteadOf`）から組み直して、確実に届ける。
+  */
+  const needs = prerequisiteNoteOf(action);
+  const tail = needs ? ` ${needs}` : "";
+  return `${indent}  - ${action.label}${note}${mark}: ${detail}${tail}`;
 }
 
 /**

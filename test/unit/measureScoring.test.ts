@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  CONTRADICTION_FEATURES,
   FEATURES,
   RUN_TOOL,
   PROMPT_TOOL,
   assertToolRegistered,
+  fixtureDirOf,
   countGeneric,
   formatCompareLines,
   formatSpreadLines,
@@ -1104,6 +1106,51 @@ describe("道具名の対応表", () => {
 
   it("知らない feature は、選べるものを並べて断る", () => {
     expect(() => toolNameOf("むかしばなし")).toThrow(/proofread/);
+  });
+
+  it("矛盾の2つの道は、**同じ答え付きの台**で測る", () => {
+    /*
+      台を分けると、点差が「道の違い」なのか「台の違い」なのかが読めなくなる
+      ——並べて読むためにここを共有している（設計書6.88.10 の第5段）。
+    */
+    expect(fixtureDirOf("contradiction")).toBe("contradiction");
+    expect(fixtureDirOf("factContradiction")).toBe("contradiction");
+    // ほかの feature は、これまでどおり自分の名前のフォルダー
+    expect(fixtureDirOf("proofread")).toBe("proofread");
+    for (const feature of CONTRADICTION_FEATURES) {
+      expect(FEATURES).toContain(feature);
+    }
+  });
+
+  it("事実の照合も、同じ数え方で採点される", () => {
+    // **`contradiction` にしか効かない書き方をしていないか**を見る
+    const answers = {
+      mustNotFlag: [],
+      episodes: [
+        {
+          file: "本文/004.txt",
+          seeded: [{ kind: "状態", where: "右足のギプスが外れたのは" }],
+        },
+      ],
+    };
+    const results = [
+      {
+        // 事実の照合はファイルごとにまとめて返す（`chunkId` にファイルを置く）
+        chunkId: "本文\\004.txt",
+        accepted: [
+          {
+            line: 1,
+            excerpt: "右足のギプスが外れたのは",
+            category: "状態",
+          },
+        ],
+        rejected: [],
+      },
+    ];
+    const scored = metricsOfRun("factContradiction", answers, { results });
+    expect(scored.metrics.seededContradictions).toBe(1);
+    expect(scored.metrics.missedContradictions).toBe(0);
+    expect(scored.metrics.falseFlagsContradiction).toBe(0);
   });
 
   it("プロンプト版を訊く道具の名前も、登録名と合う", () => {

@@ -31,6 +31,7 @@ import {
   VALIDATE_TOOL,
   assertFeature,
   assertToolRegistered,
+  fixtureDirOf,
   formatCompareLines,
   formatSpreadLines,
   maxIssuesPer1000CharsOf,
@@ -61,6 +62,15 @@ const RUNNERS = ["ollama", "sakura"];
 
 /** 接続元の名乗り。**許可の印もこの名前で置く** */
 const CLIENT_NAME = "measure";
+
+/**
+ * 1回の呼び出しで作品ぜんたいを通す feature。**長く待つ。**
+ *
+ * ここに書くのは「話数ぶんのAI呼び出しが、1回の `novel.run` の中で起きる」
+ * ものだけである。話ごとに回す feature（`FILE_TARGET_FEATURES`）は
+ * 1話ぶんずつ返ってくるので、既定の待ち時間で足りる。
+ */
+const WHOLE_WORK_FEATURES = ["factContradiction"];
 
 /** 読み込む長さの既定。**必ず明示する**（CLAUDE.md 規則6） */
 const DEFAULT_NUM_CTX = 32768;
@@ -480,9 +490,20 @@ async function main() {
   */
   const sakuraToken = sakura ? readSakuraToken() : null;
 
+  /*
+    **台が feature と同じ名前とは限らない**（`fixtureDirOf`）。矛盾検知は
+    古い道（P-12）と新しい道（事実の照合）で**同じ仕込みを使う**
+    ——台を分けると、点差が道の違いなのか台の違いなのか読めなくなる。
+  */
   const source =
     options.work ??
-    path.join(REPO_ROOT, "test", "fixtures", "seeded", options.feature);
+    path.join(
+      REPO_ROOT,
+      "test",
+      "fixtures",
+      "seeded",
+      fixtureDirOf(options.feature)
+    );
   const answers = readJsonIfExists(path.join(source, "answers.json"));
 
   const { temp, work } = copyWorkToTemp(source);
@@ -496,7 +517,21 @@ async function main() {
 
   let client = null;
   try {
-    client = await connect({ clientName: CLIENT_NAME });
+    /*
+      **1回の `novel.run` で何段回すかは feature によって違う。**
+
+      事実の照合（`factContradiction`）は、作品ぜんたいから事実を抜いて
+      （話数ぶん）→ 機械で突き合わせ → 候補を1件ずつ確かめる、までを
+      **1回の呼び出しの中**で通す。手元の12Bで5話の台でも30分を超える。
+      既定（30分）のままだと、**答えが出る直前に打ち切って「応答が
+      ありません」と記録される**——測れていないのに測った形で残る。
+    */
+    client = await connect({
+      clientName: CLIENT_NAME,
+      timeoutMs: WHOLE_WORK_FEATURES.includes(options.feature)
+        ? 3 * 60 * 60 * 1000
+        : undefined,
+    });
 
     const version = await client.call("mcp.version", {});
     const bundle = {
@@ -537,12 +572,19 @@ async function main() {
       （2026-09-18 に実際に読み違えた）。**訊けなければ空のまま残す。**
     */
     let promptVersion = null;
+    /*
+      **2つのプロンプトを通る道がある**（事実の照合は P-37 で抜いて P-12b で
+      判定する）。片方の版しか残さないと、あとから「前 → 後」を並べても
+      何が変わったのかが分からない。返してこない道具では null のまま。
+    */
+    let verifyPromptVersion = null;
     const plans = [];
     if (promptTool && tools.some((tool) => tool.name === promptTool)) {
       for (const call of calls) {
         try {
           const asked = await client.call(promptTool, call.args);
           promptVersion ??= asked?.promptVersion ?? null;
+          verifyPromptVersion ??= asked?.verifyPromptVersion ?? null;
           for (const chunk of asked?.chunks ?? []) {
             plans.push({
               chunkId: chunk?.chunkId ?? call.label,
@@ -638,6 +680,7 @@ async function main() {
       repeat: options.repeat,
       bundle,
       promptVersion,
+      verifyPromptVersion,
       /*
         **測ったチャンクの枠を残す。** あとから記録だけを見て集計をかけ直す
         とき、字数と上限が無いと天井を再現できない。

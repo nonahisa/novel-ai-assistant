@@ -104,7 +104,8 @@ import { exportEpub } from "./features/exportEpub";
 import { openEpubEditorPanel } from "./features/epubEditorPanel";
 import { manageCustomFields } from "./features/manageCustomFields";
 import { TermHighlighter } from "./views/termHighlight";
-import { ActionListProvider, nodeKey } from "./views/actionList";
+import { ActionListProvider, findAction, nodeKey } from "./views/actionList";
+import { checkPrerequisites } from "./features/prerequisiteGate";
 import {
   StepMenuProvider,
   stepNodeKey,
@@ -479,6 +480,59 @@ export async function activate(
   const runningCommands = new Set<string>();
 
   /**
+   * 前提（設定資料・あらすじ・プロット・単話プロット）の関門（設計書6.94）。
+   *
+   * **登録の口が1つなので、ここに置けば入口を選ばない。** 詳細メニュー・
+   * 簡単ステップメニュー・コマンドパレット・右クリックのどこから押しても
+   * 同じ案内になる。
+   *
+   * **実行の札を取る前に通す。** 関門は代わりの操作や前提を作る操作を
+   * その場で走らせるので、札を握ったまま入ると自分の札を自分で待つ。
+   *
+   * @returns 走らせるなら、コマンドへ渡す引数（作品を解決したら差し替える）
+   */
+  const guardPrerequisites = async (
+    command: string,
+    args: unknown[]
+  ): Promise<{ run: false } | { run: true; args: unknown[] }> => {
+    const item = findAction(command);
+    if (!item?.needs || item.needs.length === 0) return { run: true, args };
+    // まとめ実行では作者を止めない（設計書6.80）。飛ばした理由は
+    // 機能の側が最後のまとめへ並べる
+    if (isSuiteConfirmed(args[1])) return { run: true, args };
+    // 右クリックでファイルを指して呼ばれたなら、前提はその1件が担っている
+    if (args[0] instanceof vscode.Uri) return { run: true, args };
+    // 作品が1つも無いのは、この関門の話ではない（コマンドの側が案内する）
+    if (registry.list().length === 0) return { run: true, args };
+
+    const given = args[0] as WorkRef | undefined;
+    /*
+      **開いているファイルの作品を先に見る。** 「単話プロットを検査」は
+      開いている単話プロットから作品と話数を割り出す作りなので、ここで
+      いきなり「作品を選択」を出すと、これまで出ていなかった問いが
+      増える（しかも関門と機能で別の作品を見かねない）。
+    */
+    const openedPath = vscode.window.activeTextEditor
+      ? fromUri(vscode.window.activeTextEditor.document.uri)
+      : undefined;
+    const work =
+      given?.work ??
+      (openedPath ? findWorkForPath(registry, openedPath) : undefined) ??
+      (await resolveWork(undefined, registry));
+    // 選ばずに閉じたなら、そこで終わり。もう一度選ばせない
+    if (!work) return { run: false };
+
+    if ((await checkPrerequisites(item, work)) !== "proceed") {
+      return { run: false };
+    }
+    // **解決した作品を渡す。** そのままだと、コマンドの側でもう一度
+    // 作品を選ばされる（同じことを2度聞かれる）
+    const forwarded = [...args];
+    if (!given) forwarded[0] = { type: "work", work } satisfies WorkRef;
+    return { run: true, args: forwarded };
+  };
+
+  /**
    * コマンド登録の入口。**登録の口を1つにまとめておく。**
    *
    * 0.45.0 まではここで押した操作を記録していた（F5の開発ホスト限定。
@@ -492,6 +546,8 @@ export async function activate(
    * 対象は `exclusiveCommands.ts` に並べてあり、画面を開くだけのものは
    * 入っていない。**断りはモーダルにしない**——作者は誤って2回押しただけで、
    * 手を止めさせる場面ではない。
+   *
+   * さらに、**前提の関門をここで通す**（上の `guardPrerequisites`）。
    */
   const registerCommand: typeof vscode.commands.registerCommand = (
     command,
@@ -499,6 +555,10 @@ export async function activate(
     thisArg
   ) =>
     vscode.commands.registerCommand(command, async (...args: unknown[]) => {
+      const gate = await guardPrerequisites(command, args);
+      if (!gate.run) return undefined;
+      args = gate.args;
+
       if (!beginCommand(runningCommands, command)) {
         const label = exclusiveLabelOf(command) ?? command;
         vscode.window.showInformationMessage(

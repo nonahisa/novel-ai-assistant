@@ -26,6 +26,7 @@ export const FEATURE_NAMES = [
   "proofread",
   "notation",
   "contradiction",
+  "factContradiction",
   "foreshadow",
   "deviation",
   "episodePlot",
@@ -53,6 +54,9 @@ export const FEATURE_LABELS: Record<FeatureName, string> = {
   proofread: "推敲",
   notation: "表記ゆれ",
   contradiction: "矛盾検知",
+  // **P-12 とは別の道である**（設計書6.88）。作者の裁定でしばらく並行させる
+  // ので、呼び名も分ける——同じ「矛盾検知」だと、どちらを許すのか分からない
+  factContradiction: "矛盾検知（事実の照合）",
   foreshadow: "伏線",
   deviation: "プロット逸脱",
   episodePlot: "単話プロットの緩み",
@@ -89,6 +93,10 @@ export const CHUNKED_FEATURES: readonly FeatureName[] = [
   "typo",
   "proofread",
   "contradiction",
+  // **`FILE_TARGET_FEATURES` には入れない。** 事実の照合は話をまたいで
+  // 事実を追うところに値打ちがあり（第2話で折った足が、第4話でどちらか）、
+  // 1話ずつ回すとその型は原理的に拾えない。切るのはチャンクだけ
+  "factContradiction",
   "foreshadow",
   "settings",
 ];

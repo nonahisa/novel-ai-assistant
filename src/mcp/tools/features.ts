@@ -32,6 +32,11 @@ import {
   contradictionValidate,
 } from "./contradiction";
 import {
+  factContradictionPrompt,
+  factContradictionRun,
+  factContradictionValidate,
+} from "./factContradiction";
+import {
   foreshadowPrompt,
   foreshadowRun,
   foreshadowValidate,
@@ -369,6 +374,26 @@ function chunkArgs(input: FeatureCallInput): {
   };
 }
 
+/**
+ * 事実の照合の引数。**`filePath` は任意である。**
+ *
+ * ほかのチャンク機能と違い、省略すると作品ぜんたいを見る——6.88 の値打ちは
+ * **話をまたいで事実を追う**ところにあり、1話ずつ絞るとその型は拾えない。
+ */
+function factArgs(input: FeatureCallInput): {
+  folder: string;
+  filePath?: string;
+  numCtx: number;
+  chunkIndex?: number;
+} {
+  return {
+    folder: input.folder,
+    filePath: input.filePath,
+    numCtx: needNumCtx(input),
+    chunkIndex: input.chunkIndex,
+  };
+}
+
 /** 話を丸ごと1回で見る機能の共通の引数 */
 function episodeArgs(input: FeatureCallInput): {
   folder: string;
@@ -487,6 +512,17 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
         categories: option(input, "categories", CATEGORIES_SCHEMA),
         ...runnerArgs(input),
       }),
+  },
+  factContradiction: {
+    prompt: (input) => factContradictionPrompt(factArgs(input)),
+    validate: (input) =>
+      factContradictionValidate({
+        folder: input.folder,
+        chunkId: needChunkId(input),
+        response: needResponse(input),
+      }),
+    run: (input) =>
+      factContradictionRun({ ...factArgs(input), ...runnerArgs(input) }),
   },
   foreshadow: {
     prompt: (input) =>
