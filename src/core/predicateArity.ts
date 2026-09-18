@@ -165,6 +165,60 @@ const MULTIPLE_PREDICATES: readonly string[] = [
   "苦手なこと",
 ];
 
+/**
+ * 同じものを指す項目名を、**人物レコードの項目名**（`characterFieldLabels.ts`）へ
+ * 寄せる表（0.67.5）。
+ *
+ * ## なぜ要るのか
+ *
+ * 資料から組んだ事実（`factsFromRecords.ts`）は人物レコードの項目名を
+ * そのまま使い、本文から抜いた事実（P-37）の項目名は**AIが自由に付ける**。
+ * 突き合わせは項目名がそのまま一致したときだけ起きるので、
+ * **資料が「外見」・本文が「身体的特徴」だと、一度も突き合わされない。**
+ * 2026-09-18 の測定では、資料から出た事実12件のうち照合に当たっていたのは
+ * 「役割」だけだった。
+ *
+ * ## 実際に出てきた語だけを入れる
+ *
+ * **「たぶん同じ意味だろう」で足さない。** 言い換えを足すほど、
+ * 意味の違うものが同じ棚に並んで誤検出が増える。足すときは、
+ * **どこで見た語か**をコメントに残す。
+ *
+ * 寄せ先（右側）は必ず人物レコードの項目名にする——資料の側は
+ * その名前しか出さないので、そこへ寄せないと結局出会わない。
+ *
+ * ## 「性質」→「性格」は入れなかった
+ *
+ * 語としては同じ測定台に出ている（第1話34行「人と向き合って話すのは、
+ * どうにも苦手だった」）。それでも入れないのは、**資料の「性格」が
+ * 自由文だから**である——「人見知りで、窓口に立つと客と目を合わせられない。」と
+ * 突き合わせても、出るのは言い回しの違いだけだった。実測でも、
+ * これを入れると候補が14→15件に増え、増えた1件は**指摘が出てはいけない話**
+ * （第1話）に付いた（2026-09-18）。「紹介」を外したのと同じ理由である。
+ */
+const PREDICATE_SYNONYMS: ReadonlyMap<string, string> = new Map([
+  // 「外見」は人物レコードの項目名（`appearance`）。「身体的特徴」は
+  // 矛盾の測定台（`test/fixtures/seeded/contradiction/`）で抽出が返した名前
+  // ——第1話24行「右目の下に小さなほくろがある」、第5話7行「左目の下のほくろ」
+  // （2026-09-18、gemma4:26b）
+  ["身体的特徴", "外見"],
+]);
+
+/**
+ * 項目名を、突き合わせに使う正式名へ寄せる。
+ *
+ * **候補の項目名にもこれを使う。** 生の名前を使うと、どちらの事実が
+ * 前側になったかで「外見」と「身体的特徴」が入れ替わり、
+ * **容認リスト（6.88.8）の指紋が変わって、一度「意図的」と登録した
+ * ものが次回また出てくる。**
+ */
+export function canonicalPredicate(predicate: string): string {
+  const name = predicate.trim();
+  // **素の連想配列ではなく `Map`。** 「constructor」や「toString」という
+  // 項目名が来たときに、原型の持ち物を引き当ててしまう（`ARITY_TABLE` も同じ理由）
+  return PREDICATE_SYNONYMS.get(name) ?? name;
+}
+
 const ARITY_TABLE: ReadonlyMap<string, PredicateArity> = new Map([
   ...EXCLUSIVE_PREDICATES.map(
     (name) => [name, "exclusive"] as [string, PredicateArity]
@@ -181,9 +235,13 @@ const ARITY_TABLE: ReadonlyMap<string, PredicateArity> = new Map([
  * 部分一致は見ない）。「怪我の状態」が「状態」に当たるのか「怪我」に
  * 当たるのかを機械が決めると、表を読んだ人の予想と食い違う。
  * 名前が増えたらこの表へ足す。
+ *
+ * **言い換え（`canonicalPredicate`）だけは先に当てる。** 寄せたあとの名前で
+ * 照合されるので、寄せる前の名前で排他性を決めると、表に両方を書かない
+ * かぎり食い違う。
  */
 export function arityOf(predicate: string): PredicateArity {
-  return ARITY_TABLE.get(predicate.trim()) ?? "multiple";
+  return ARITY_TABLE.get(canonicalPredicate(predicate)) ?? "multiple";
 }
 
 /** 候補にしてよい項目か（同時に複数成り立つものは候補にしない） */

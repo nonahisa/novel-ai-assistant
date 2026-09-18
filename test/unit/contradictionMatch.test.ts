@@ -176,6 +176,38 @@ describe("区間の重なり", () => {
     });
     expect(findIntervalConflicts(buildAttributeIntervals(facts))).toEqual([]);
   });
+
+  /**
+   * 言い回しの違いを食い違いにしない歯止め（0.67.5）。
+   *
+   * 出来事から導いた状態の照合には最初から入っていたのに、区間どうしには
+   * 無かった。資料の「背が高い。右目の下に小さなほくろがある。」と本文の
+   * 「右目の下に小さなほくろがある」が、そのまま食い違いとして出ていた。
+   */
+  it("一方が他方を含む書き分けは食い違いにしない（区間どうしでも）", () => {
+    const facts = hairFacts({
+      left: {
+        predicate: "外見",
+        value: "背が高い。右目の下に小さなほくろがある。",
+      },
+      right: { predicate: "外見", value: "右目の下に小さなほくろがある" },
+    });
+    expect(findIntervalConflicts(buildAttributeIntervals(facts))).toEqual([]);
+  });
+
+  it("含んでいなければ、これまでどおり候補にする", () => {
+    // 左右が入れ替わった書き落とし。歯止めを付けても、ここは落としてはいけない
+    const facts = hairFacts({
+      left: {
+        predicate: "外見",
+        value: "背が高い。右目の下に小さなほくろがある。",
+      },
+      right: { predicate: "外見", value: "左目の下のほくろ" },
+    });
+    const candidates = findIntervalConflicts(buildAttributeIntervals(facts));
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].predicate).toBe("外見");
+  });
 });
 
 /**
@@ -578,6 +610,66 @@ describe("まとめて照合する", () => {
 
   it("事実が無ければ候補も出ない", () => {
     expect(findContradictionCandidates({ facts: [] })).toEqual([]);
+  });
+});
+
+/**
+ * 資料と本文で項目名が違うと、一度も突き合わされない（0.67.5）。
+ *
+ * 資料から組んだ事実は人物レコードの項目名（「外見」）を使い、本文の抽出は
+ * AIが付けた名前（「身体的特徴」）を返す。2026-09-18 の測定では、資料から
+ * 出た事実12件のうち照合に当たっていたのは「役割」だけだった。
+ */
+describe("項目名の言い換えを寄せる", () => {
+  /** 資料の「外見」（第1話）と、本文の「身体的特徴」（第5話） */
+  const moleFacts: StoryFact[] = [
+    fact({
+      id: "record",
+      chapter: 1,
+      lineRange: [0, 0],
+      predicate: "外見",
+      value: "背が高い。右目の下に小さなほくろがある。",
+    }),
+    fact({
+      id: "body",
+      chapter: 5,
+      lineRange: [7, 7],
+      predicate: "身体的特徴",
+      value: "左目の下のほくろ",
+    }),
+  ];
+
+  it("資料の「外見」と本文の「身体的特徴」は突き合わされる", () => {
+    const candidates = findContradictionCandidates({ facts: moleFacts });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({ left: "record", right: "body" });
+  });
+
+  /**
+   * **指紋は寄せたあとの名前で作る。** 生の名前を使うと、どちらが前側に
+   * なったかで「外見」と「身体的特徴」が入れ替わり、一度「意図的」と
+   * 登録した候補が次回また出てくる（容認リスト、6.88.8）。
+   */
+  it("候補の項目名は、寄せたあとの名前になる", () => {
+    const candidates = findContradictionCandidates({ facts: moleFacts });
+    expect(candidates[0].predicate).toBe("外見");
+    const swapped = findContradictionCandidates({
+      facts: [
+        { ...moleFacts[0], predicate: "身体的特徴" },
+        { ...moleFacts[1], predicate: "外見" },
+      ],
+    });
+    expect(swapped[0].fingerprint).toBe(candidates[0].fingerprint);
+  });
+
+  it("寄せたうえで、言い回しの違いなら候補にしない", () => {
+    const candidates = findContradictionCandidates({
+      facts: [
+        moleFacts[0],
+        { ...moleFacts[1], value: "右目の下に小さなほくろがある" },
+      ],
+    });
+    expect(candidates).toEqual([]);
   });
 });
 

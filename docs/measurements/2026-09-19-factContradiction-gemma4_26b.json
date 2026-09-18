@@ -1,0 +1,359 @@
+{
+  "measuredAt": "2026-09-18T15:00:58.410Z",
+  "feature": "factContradiction",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:26b",
+  "numCtx": 32768,
+  "endpoint": null,
+  "options": {},
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.67.5",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束（dist/mcp-server.mjs）が起動後に作り直された）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+  },
+  "promptVersion": "1.0",
+  "verifyPromptVersion": "1.0",
+  "plans": [
+    {
+      "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+      "chars": 1235,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\002_十月三日の坂.txt#2-0@8027",
+      "chars": 1218,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\003_窓口の椅子.txt#3-0@8027",
+      "chars": 1211,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+      "chars": 1246,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\005_初雪の窓口.txt#5-0@8027",
+      "chars": 1216,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction",
+    "targets": [
+      "（作品ぜんたい）"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 506098,
+      "staleNote": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束（dist/mcp-server.mjs）が起動後に作り直された）。Claude Code を開き直して、新しい束で繋ぎ直してください",
+      "metrics": {
+        "seededContradictions": 2,
+        "seededContradictionsTotal": 4,
+        "missedContradictions": 2,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 1,
+        "otherFlagsContradiction": 1,
+        "accepted": 3,
+        "rejected": 11,
+        "rejected.そもそも食い違っていない": 9,
+        "rejected.作中の変化": 2,
+        "failures": 0,
+        "elapsedMs": 506098
+      },
+      "detail": {
+        "rejectedReasons": {
+          "そもそも食い違っていない": 9,
+          "作中の変化": 2
+        },
+        "failures": [],
+        "seededContradictions": {
+          "人物": {
+            "found": 1,
+            "total": 2
+          },
+          "状態": {
+            "found": 1,
+            "total": 1
+          },
+          "時系列": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missedContradictions": [
+          {
+            "file": "本文/003_窓口の椅子.txt",
+            "kind": "人物",
+            "where": "僕は判子を押す手を止めた"
+          },
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "時系列",
+            "where": "足を折ってから、ちょうど二週間が過ぎた"
+          }
+        ],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "（作品ぜんたい）",
+          "response": {
+            "runner": "ollama",
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束（dist/mcp-server.mjs）が起動後に作り直された）。Claude Code を開き直して、新しい束で繋ぎ直してください\n手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。 矛盾検知（事実の照合）を終了: 5/5（事実 166件 / 設定資料から 12件 / 候補 14件（状態 9件、設定 5件） / 採用 3件 / 検証で 11件を取り下げ（そもそも食い違っていない 9件、作中の変化 2件））",
+            "model": "gemma4:26b",
+            "results": [
+              {
+                "chunkId": "本文\\001_九月の終わりの坂.txt",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "千夏は俺と同じ年に局へ入った。窓口に立つのが千夏の仕事で、坂を上るのが俺の仕事だ。",
+                    "explanation": "「坂を上る」ことは配達員としての業務内容（鳶ヶ丘へ行くこと）と一致しており、矛盾していない。"
+                  },
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "人と向き合って話すのは、どうにも苦手だった。",
+                    "explanation": "設定資料の内容と本文の内容が一致しており、矛盾はありません。"
+                  },
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "千夏は俺と同じ年に局へ入った。窓口に立つのが千夏の仕事で、坂を上るのが俺の仕事だ。",
+                    "explanation": "設定の「配達員が出られないときは代わりに回る」は例外規定であり、基本業務の記述と矛盾しないため。"
+                  }
+                ]
+              },
+              {
+                "chunkId": "本文\\002_十月三日の坂.txt",
+                "chapterLabel": "第2話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "鳶ヶ丘は一人で受け持つ。やめるという選択肢を、俺は持っていなかった。",
+                    "explanation": "設定の「配達員」と本文の「鳶ヶ丘（地域名）を一人で受け持つ」は、役割の範囲を示す表現として両立します。"
+                  },
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "鳶ヶ丘は一人で受け持つ。やめるという選択肢を、俺は持っていなかった。",
+                    "explanation": "「坂を上る」という動作と「一人で受け持つ」という役割は両立するため、矛盾ではありません。"
+                  },
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "人の顔を正面から見るのが苦手だから、坂を選んだようなところがある。",
+                    "explanation": "設定の「客と目を合わせられない」と本文の「顔を正面から見るのが苦手」は、同一の性質を指しており矛盾しない。"
+                  },
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "人の顔を正面から見るのが苦手だから、坂を選んだようなところがある。",
+                    "explanation": "「人と向き合って話すのが苦手」と「人の顔を正面から見るのが苦手」は、性格の同一性を表す表現であり矛盾しない。"
+                  },
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "その日から、鳶ヶ丘の袋は千夏が運ぶことになった。",
+                    "explanation": "設定の「窓口が代わりに回る」と本文の「千夏が運ぶ」は、役割の代行として整合しており矛盾しません。"
+                  },
+                  {
+                    "reason": "作中の変化",
+                    "excerpt": "その日から、鳶ヶ丘の袋は千夏が運ぶことになった。",
+                    "explanation": "主人公が負傷（松葉杖）したことで、役割が千夏へ交代したという時間の経過・状況の変化を表しているため。"
+                  }
+                ]
+              },
+              {
+                "chunkId": "本文\\003_窓口の椅子.txt",
+                "chapterLabel": "第3話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "俺の足首は、まだギプスの中にある。",
+                    "explanation": "第2話の設定（左の足首）と第3話の記述（足首）は一致しており、矛盾はありません。"
+                  }
+                ]
+              },
+              {
+                "chunkId": "本文\\004_ギプスが外れた日.txt",
+                "chapterLabel": "第4話",
+                "accepted": [
+                  {
+                    "filePath": "本文\\004_ギプスが外れた日.txt",
+                    "line": 1,
+                    "chunkHash": "4cc59dd36ae1bffc7bca9d558483ffe23de56f2d",
+                    "excerpt": "右足のギプスが外れたのは、十一月の最初の月曜だった。",
+                    "category": "状態",
+                    "settingSays": "第2話 29行目・台詞：怪我＝左の足首",
+                    "textSays": "第4話 1行目・地の文：怪我＝右足のギプスが外れた",
+                    "note": "第2話 29行目に『左の足首』。第4話 1行目の『右足のギプスが外れた』から、それ以前は『右足のギプス』だったと読める（確信度: 中）（判定: 第2話の地の文（設定）で左足とされている怪我が、第4話の地の文で右足となっており、記述が食い違っている。）",
+                    "confidence": "medium"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "reason": "作中の変化",
+                    "excerpt": "右足のギプスが外れたのは、十一月の最初の月曜だった。",
+                    "explanation": "第3話から第4話にかけて時間が経過しており、ギプスが外れるという状態の変化は矛盾ではないため。"
+                  }
+                ]
+              },
+              {
+                "chunkId": "本文\\005_初雪の窓口.txt",
+                "chapterLabel": "第5話",
+                "accepted": [
+                  {
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "line": 7,
+                    "chunkHash": "35a2b5925a901d4e2bca2a62ef59142d5793b94d",
+                    "excerpt": "左目の下のほくろが、鏡の中で滲んだ。",
+                    "category": "設定",
+                    "settingSays": "設定資料では『外見＝背が高い。右目の下に小さなほくろがある。』",
+                    "textSays": "第5話 7行目・地の文：身体的特徴＝左目の下のほくろ",
+                    "note": "第1話 0行目に『背が高い。右目の下に小さなほくろがある。』、第5話 7行目に『左目の下のほくろ』。あいだに変化の記録が無い（確信度: 高）（判定: 設定資料の「右目」と本文の「左目」が明確に食い違っており、作中の変化や誤認の理由も記述されていないため。）",
+                    "confidence": "high"
+                  },
+                  {
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "line": 7,
+                    "chunkHash": "213c4b5c7d224aff6e04b79205c8d01cc1b80a26",
+                    "excerpt": "左目の下のほくろが、鏡の中で滲んだ。",
+                    "category": "設定",
+                    "settingSays": "第1話 24行目・地の文：身体的特徴＝右目の下に小さなほくろがある",
+                    "textSays": "第5話 7行目・地の文：身体的特徴＝左目の下のほくろ",
+                    "note": "第1話 24行目に『右目の下に小さなほくろがある』、第5話 7行目に『左目の下のほくろ』。あいだに変化の記録が無い（確信度: 高）（判定: 第1話の地の文（右目）と第5話の地の文（左目）が食い違っており、作中の変化や発言者の誤りとも判断できないため。）",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "stages": {
+              "chunks": 5,
+              "acceptedFacts": 166,
+              "recordFacts": 12,
+              "rejectedFacts": 0,
+              "rejectionNote": "",
+              "candidates": 14,
+              "candidateNote": "状態 9件、設定 5件",
+              "kept": 3,
+              "verifyNote": "検証で 11件を取り下げ（そもそも食い違っていない 9件、作中の変化 2件）"
+            },
+            "unreadableFiles": [],
+            "bundleStale": true
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seededContradictions": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "seededContradictionsTotal": {
+      "values": [
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "missedContradictions": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "falseFlagsContradiction": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "categoryMismatch": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "otherFlagsContradiction": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "accepted": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "rejected": {
+      "values": [
+        11
+      ],
+      "min": 11,
+      "max": 11
+    },
+    "rejected.そもそも食い違っていない": {
+      "values": [
+        9
+      ],
+      "min": 9,
+      "max": 9
+    },
+    "rejected.作中の変化": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        506098
+      ],
+      "min": 506098,
+      "max": 506098
+    }
+  },
+  "lines": [
+    "仕込んだ矛盾を拾えた: 2/4",
+    "見逃し（拾えなかった仕込み）: 2",
+    "誤検出（罠と、矛盾の無い話に付いた指摘）: 0",
+    "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）: 1",
+    "仕込み以外の箇所への指摘: 1",
+    "指摘（検算を通ったもの）: 3",
+    "落とした（検算で弾いたもの）: 11",
+    "　└ 落とした理由：そもそも食い違っていない: 9",
+    "　└ 落とした理由：作中の変化: 2",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 506.1秒"
+  ]
+}

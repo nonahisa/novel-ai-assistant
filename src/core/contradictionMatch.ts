@@ -17,7 +17,7 @@ import {
   type AttributeInterval,
 } from "./attributeIntervals";
 import { sha1Text } from "./hash";
-import { isExclusivePredicate } from "./predicateArity";
+import { canonicalPredicate, isExclusivePredicate } from "./predicateArity";
 import { formatRelativeTime } from "./relativeTime";
 import { statesBeforeEvents } from "./stateFromEvent";
 
@@ -131,13 +131,22 @@ const CONFIDENCE_ORDER: readonly CandidateConfidence[] = [
 export function findContradictionCandidates(
   input: MatchInput
 ): ContradictionCandidate[] {
-  const intervals = buildAttributeIntervals(input.facts);
+  // **項目名を寄せるのはここ1か所**（`canonicalPredicate`）。照合器ごとに
+  // 寄せると、区間を切る出来事だけ生の名前のまま残る、といったずれが出る。
+  // 事実そのものは書き換えず、写しの項目名だけを差し替える——
+  // 呼ぶ側は `left`/`right` の id から元の事実を引き、作者には抽出が
+  // 付けた名前のまま見せられる
+  const facts = input.facts.map((fact) => {
+    const predicate = canonicalPredicate(fact.predicate);
+    return predicate === fact.predicate ? fact : { ...fact, predicate };
+  });
+  const intervals = buildAttributeIntervals(facts);
   const all = [
     ...findIntervalConflicts(intervals),
-    ...findEventImpliedConflicts(input.facts, intervals),
-    ...findPostDeathAppearances(input.facts, input.transitions ?? []),
-    ...findKnowledgeViolations(input.facts),
-    ...findTravelImpossibilities(input.facts, input.travelTimes ?? []),
+    ...findEventImpliedConflicts(facts, intervals),
+    ...findPostDeathAppearances(facts, input.transitions ?? []),
+    ...findKnowledgeViolations(facts),
+    ...findTravelImpossibilities(facts, input.travelTimes ?? []),
     ...findIdentityDrift(input.scenes ?? [], input.transitions ?? []),
   ];
 
@@ -182,7 +191,12 @@ export function findIntervalConflicts(
       for (let j = i + 1; j < group.length; j += 1) {
         const a = group[i];
         const b = group[j];
-        if (a.value === b.value) continue;
+        // **言い回しの違いは食い違いにしない**（`overlapsInMeaning`）。
+        // 値が同じ場合もここで落ちる。出来事から導いた側には同じ歯止めが
+        // 最初から入っていたのに、区間どうしの照合には無かった——
+        // 資料の「背が高い。右目の下に小さなほくろがある。」と本文の
+        // 「右目の下に小さなほくろがある」が食い違いとして出ていた（0.67.5）
+        if (overlapsInMeaning(a.value, b.value)) continue;
         if (!overlaps(a, b)) continue;
 
         const [left, right] =
@@ -761,6 +775,10 @@ function covers(interval: AttributeInterval, at: FactPosition): boolean {
  * **一方が他方を含んでいたら、食い違いとしない。**「右足のギプス」と
  * 「右足のギプスの中にある足首」のような書き分けを食い違いとして出すと、
  * 作者は言い回しを直しに行くことになる。**迷ったら出さない。**
+ *
+ * **区間どうしの照合（`findIntervalConflicts`）と、出来事から導いた状態の
+ * 照合（`findEventImpliedConflicts`）の両方がここを通る。** 同じ判断を
+ * 2か所に書くと、片方だけ緩んで「どちらの経路で出たか」で結果が変わる。
  */
 function overlapsInMeaning(left: string, right: string): boolean {
   const a = left.trim();
