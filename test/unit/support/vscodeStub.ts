@@ -102,6 +102,31 @@ export const window = {
     [key: string]: unknown;
   }) => Promise<string | undefined>,
   /**
+   * ファイル・フォルダーを選ぶダイアログ。**既定は「何も選ばずに閉じた」**。
+   *
+   * 選んだ体にするテストは、`Uri` の配列を返す形へ差し替える。
+   */
+  showOpenDialog: (async (_options?: unknown) => undefined) as (
+    options?: unknown
+  ) => Promise<readonly unknown[] | undefined>,
+  /**
+   * 進捗つきの処理（`views/progress.ts` が通す唯一の窓口）。
+   *
+   * **本物と同じく、渡された処理をそのまま走らせて結果を返す。**
+   * 進捗の見え方はテストの関心事ではないので、報告は捨てる。
+   */
+  withProgress: (async <T>(
+    _options: unknown,
+    task: (
+      progress: { report(value: unknown): void },
+      token: { isCancellationRequested: boolean }
+    ) => Thenable<T>
+  ): Promise<T> =>
+    task({ report() {} }, { isCancellationRequested: false })) as (
+    options: unknown,
+    task: (progress: never, token: never) => unknown
+  ) => Promise<unknown>,
+  /**
    * WebViewパネル。**既定は作らずに断る。**
    *
    * パネルを開くテストは、受け取った postMessage を覗ける作り物へ

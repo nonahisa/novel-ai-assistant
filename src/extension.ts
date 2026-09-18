@@ -1992,6 +1992,20 @@ export async function activate(
   );
 
   context.subscriptions.push(
+    registerCommand("novelai.importWorkFromZip", async () => {
+      // **登録は「フォルダから追加」と同じ道を通す。** 取り込み側は
+      // 場所と題を決めるところまでで、そこから先（書庫の見分け・集計・
+      // 一覧の更新）は写さない（設計書6.98）
+      const { importWorkFromZip } = await import(
+        "./features/importWorkFromZip.js"
+      );
+      await importWorkFromZip(registry.list(), (folderPath, title) =>
+        registerFolderAsWork(folderPath, title)
+      );
+    })
+  );
+
+  context.subscriptions.push(
     registerCommand("novelai.createWork", async () => {
       await createNewWork();
     })

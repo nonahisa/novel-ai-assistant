@@ -324,7 +324,12 @@ describe("操作メニューの構成", () => {
       "novelai.createWorkWithPlot",
       "novelai.createWorkFromManuscript",
     ]);
-    expect(commandsIn("すでにある原稿を入れる")).toEqual(["novelai.addWork"]);
+    // ZIPの取り込み（設計書6.98）も「すでにある原稿を入れる」に入る。
+    // フォルダーを選ぶか、ZIPのまま渡すかの違いだけで、したいことは同じ
+    expect(commandsIn("すでにある原稿を入れる")).toEqual([
+      "novelai.addWork",
+      "novelai.importWorkFromZip",
+    ]);
     expect(commandsIn("別の環境から取り寄せる")).toEqual([
       "novelai.addWorkFromGithub",
     ]);

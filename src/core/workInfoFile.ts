@@ -1,3 +1,5 @@
+import { parseLabeledBlocks } from "./workInfoParse";
+
 /**
  * 投稿サイトのバックアップに入っている「作品情報」のファイルを見分ける。
  *
@@ -75,17 +77,11 @@ export function isWorkInfoFile(fileName: string, text: string): boolean {
 /**
  * 行頭に単独で置かれた【見出し】を拾う。
  *
- * 【紹介文（9行）】のように件数が付くので、括弧の部分は落とす
- * （`metadataParser.ts` の `normalizeLabel` と同じ落とし方）。
- * **行の途中にある【】は拾わない**——本文の「看板には【立入禁止】と
- * 書かれていた」を見出しと取り違えないため。
+ * **区切り方は `workInfoParse.ts` の1つを通す。** 見分ける側（ここ）と
+ * 読み取る側で別の正規表現を持つと、見出しの書き方が増えたときに
+ * 片方だけが古くなる——「作品情報だと分かっているのに中身が空」という、
+ * 追いにくい噛み合わなさになる。
  */
 function headerLabels(text: string): string[] {
-  const labels: string[] = [];
-  for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
-    const matched = line.match(/^【([^】]+)】\s*$/);
-    if (!matched) continue;
-    labels.push(matched[1].replace(/[（(].*?[）)]\s*$/, "").trim());
-  }
-  return labels;
+  return parseLabeledBlocks(text).map((block) => block.label);
 }
