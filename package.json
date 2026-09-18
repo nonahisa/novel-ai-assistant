@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを引き受けるVSCode拡張機能で、AIは提案するだけで原稿は書き換えません（無料の手元AIだけでも使えます）。※現在テスト中です。",
-  "version": "0.68.0",
+  "version": "0.68.1",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -1597,6 +1597,12 @@
           "default": 7,
           "minimum": 0,
           "markdownDescription": "ログ（`.aiwriter/logs/`）に残す日数です。これより古い行は、VS Codeを起動したときに自動で消えます。**ログには原稿の一部が入ります**（相談の内容、AIの応答）。`0` にすると消しません。"
+        },
+        "novelai.findings.retentionDays": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "markdownDescription": "AIの指摘（`.aiwriter/findings.jsonl`）を並べ続ける日数です。これより古い指摘は**表示から外れるだけで、ファイルからは消えません**（消えるのは「古い指摘を片づける」を押したときだけです）。`0` にすると、いつまでも並べます。"
         },
         "novelai.chatter.enabled": {
           "type": "boolean",

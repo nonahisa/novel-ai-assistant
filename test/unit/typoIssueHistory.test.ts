@@ -4,6 +4,8 @@ import {
   appendAiActionLog,
   appliedFixKey,
   dismissKey,
+  isDismissed,
+  legacyDismissKey,
   loadAppliedFixKeys,
   TypoDismissedHistory,
 } from "../../src/core/typoIssueHistory";
@@ -47,16 +49,75 @@ describe("無視した指摘のキー", () => {
     );
   });
 
-  test("行・語・修正案のいずれが違っても別のキーになる", () => {
-    expect(dismissKey("a.txt", issue)).not.toBe(
-      dismissKey("a.txt", { ...issue, line: 6 })
-    );
+  test("語・修正案のいずれが違えば別のキーになる", () => {
     expect(dismissKey("a.txt", issue)).not.toBe(
       dismissKey("a.txt", { ...issue, target: "以外" })
     );
     expect(dismissKey("a.txt", issue)).not.toBe(
       dismissKey("a.txt", { ...issue, suggestion: "意外" })
     );
+  });
+
+  /**
+   * **鍵から行番号を外した**（設計書6.96.3）。以前は
+   * `ファイル名｜行｜原文｜修正案` だったので、本文を1行足しただけで
+   * 鍵が変わり、**見送ったはずの指摘がまた出てきた**。
+   */
+  test("行が動いてもキーは変わらない（古い不具合の再現）", () => {
+    expect(dismissKey("a.txt", issue)).toBe(
+      dismissKey("a.txt", { ...issue, line: 6 })
+    );
+    expect(dismissKey("a.txt", issue)).toBe(
+      dismissKey("a.txt", { ...issue, line: 999 })
+    );
+  });
+});
+
+/**
+ * 既にある `typo_dismissed.json` には**古い形の鍵**が入っている。
+ * 作者のファイルを書き換えて移行しない（実装ルール2）ので、
+ * **読むときに両方の形で照らす**——`externalAccessPermission.ts` の
+ * `LEGACY_TOOL_KEYS` と同じ作法である。
+ */
+describe("古い形の鍵も読める", () => {
+  const issue = { line: 5, target: "意外", suggestion: "以外" };
+
+  test("新しい形で覚えてあれば、行が動いても効く", () => {
+    const dismissed = new Set([dismissKey("a.txt", issue)]);
+
+    expect(isDismissed(dismissed, "a.txt", issue)).toBe(true);
+    expect(isDismissed(dismissed, "a.txt", { ...issue, line: 40 })).toBe(true);
+  });
+
+  test("古い形で覚えてあっても、同じ行なら効く", () => {
+    // 作者の `typo_dismissed.json` に既に入っている形
+    const dismissed = new Set([legacyDismissKey("a.txt", issue)]);
+
+    expect(isDismissed(dismissed, "a.txt", issue)).toBe(true);
+  });
+
+  /**
+   * 古い鍵は行を含むので、動いたあとは当たらない。**それは元の不具合
+   * そのもの**で、ここで直せるものではない。一度だけまた出てくるが、
+   * そこで見送れば新しい形で覚え直される。
+   */
+  test("古い形は、行が動くと当たらない（覚え直しで回復する）", () => {
+    const dismissed = new Set([legacyDismissKey("a.txt", issue)]);
+    const moved = { ...issue, line: 40 };
+
+    expect(isDismissed(dismissed, "a.txt", moved)).toBe(false);
+
+    dismissed.add(dismissKey("a.txt", moved));
+    expect(isDismissed(dismissed, "a.txt", { ...issue, line: 77 })).toBe(true);
+  });
+
+  test("覚えていない指摘は、当然当たらない", () => {
+    const dismissed = new Set([dismissKey("a.txt", issue)]);
+
+    expect(isDismissed(dismissed, "b.txt", issue)).toBe(false);
+    expect(
+      isDismissed(dismissed, "a.txt", { ...issue, suggestion: "意外" })
+    ).toBe(false);
   });
 });
 

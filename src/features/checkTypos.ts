@@ -48,7 +48,7 @@ import {
 } from "../core/typoCheckValidation";
 import {
   appliedFixKey,
-  dismissKey,
+  isDismissed,
   loadAppliedFixKeys,
   TypoDismissedHistory,
 } from "../core/typoIssueHistory";
@@ -387,8 +387,7 @@ export async function checkTypos(
       const at = locateChunkLine(chunk, issue.line);
       if (!at) continue;
       const located = { ...issue, line: at.line };
-      const key = dismissKey(at.filePath, located);
-      if (dismissed.has(key)) continue;
+      if (isDismissed(dismissed, at.filePath, located)) continue;
       issues.push({ ...located, filePath: at.filePath, chunkHash: chunk.hash });
     }
   }
@@ -839,7 +838,7 @@ export function collectIssues(
     const located = { ...issue, line: at.line };
     const fileName = path.basename(at.filePath);
 
-    if (dismissed.has(dismissKey(at.filePath, located))) continue;
+    if (isDismissed(dismissed, at.filePath, located)) continue;
 
     if (
       appliedFixKeys.has(

@@ -15,7 +15,7 @@ import {
   createLocationStore,
   createOrganizationStore,
 } from "../core/abilityStore";
-import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
+import { isDismissed, TypoDismissedHistory } from "../core/typoIssueHistory";
 import {
   DIGIT_WIDTH_FULL,
   DIGIT_WIDTH_HALF,
@@ -286,7 +286,7 @@ async function runNotationCheck(
       if (to === undefined) continue;
       for (const occurrence of form.occurrences) {
         const issue = buildIssue(group, occurrence, form.surface, to, material);
-        if (dismissed.has(dismissKey(issue.filePath, issue))) {
+        if (isDismissed(dismissed, issue.filePath, issue)) {
           dismissedCount++;
           continue;
         }

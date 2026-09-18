@@ -21,7 +21,18 @@ const DISMISSED_FILE = "typo_dismissed.json";
 /** 覚えておく件数。増やしすぎても意味が薄く、ファイルが際限なく育つのを防ぐ */
 const MAX_DISMISSED = 500;
 
-/** 無視した指摘を識別するキー */
+/**
+ * 無視した指摘を識別するキー。
+ *
+ * **行番号を鍵にしない**（設計書6.96.3、0.68.x で外した）。以前は
+ * `ファイル名｜行｜原文｜修正案` だったので、**本文を1行足しただけで
+ * 鍵が変わり、見送ったはずの指摘がまた出てきた**。同じ語・同じ直しなら
+ * 何行目に在っても同じ指摘である、と読むほうが作者の感覚に合う。
+ *
+ * 副作用として、同じファイルの中に同じ誤りが2か所あるとき、片方を
+ * 見送るともう片方も消える。**それでよい**——同じ語を同じように直さない
+ * と判断したのだから、2か所目だけ出し続けても押し直させるだけである。
+ */
 export function dismissKey(
   /**
    * どのファイルの指摘か。
@@ -32,14 +43,56 @@ export function dismissKey(
    * ファイルを基準にすれば、まとめ方に左右されない。
    */
   filePath: string,
+  issue: Pick<AcceptedTypoIssue, "target" | "suggestion">
+): string {
+  return sha1Text(
+    `${fileNameOf(filePath)}|${issue.target}|${issue.suggestion}`
+  ).slice(0, 24);
+}
+
+/**
+ * 0.68.x より前に書かれた鍵（`ファイル名｜行｜原文｜修正案`）。
+ *
+ * **作者の `typo_dismissed.json` を書き換えて移行しない**（実装ルール2）。
+ * 既に置かれている印はそのままにして、**読むときに古い形でも照らす**。
+ * `core/externalAccessPermission.ts` の `LEGACY_TOOL_KEYS` と同じ作法で
+ * ある——印のファイルは書き換えず、読み替えるほうを足す。
+ *
+ * **古い鍵は行を含むので、当時と同じ行に在るときしか当たらない。**
+ * それは元の不具合そのものであって、ここで直せるものではない。
+ * 当たらなかった指摘は一度だけまた出てくるが、そこで見送れば
+ * **新しい形の鍵で覚え直される**ので、次からは行が動いても効く。
+ */
+export function legacyDismissKey(
+  filePath: string,
   issue: Pick<AcceptedTypoIssue, "line" | "target" | "suggestion">
 ): string {
-  // 絶対パスと相対パスが混ざるので、ファイル名だけで揃える。
-  // 同じ作品の中で名前が重なることはない
-  const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
   return sha1Text(
-    `${fileName}|${issue.line}|${issue.target}|${issue.suggestion}`
+    `${fileNameOf(filePath)}|${issue.line}|${issue.target}|${issue.suggestion}`
   ).slice(0, 24);
+}
+
+/**
+ * その指摘を見送ってあるか。**照らすときは必ずこれを通す**
+ * （新しい鍵と古い鍵の両方で見る）。
+ */
+export function isDismissed(
+  dismissed: ReadonlySet<string>,
+  filePath: string,
+  issue: Pick<AcceptedTypoIssue, "line" | "target" | "suggestion">
+): boolean {
+  return (
+    dismissed.has(dismissKey(filePath, issue)) ||
+    dismissed.has(legacyDismissKey(filePath, issue))
+  );
+}
+
+/**
+ * 絶対パスと相対パスが混ざるので、ファイル名だけで揃える。
+ * 同じ作品の中で名前が重なることはない
+ */
+function fileNameOf(filePath: string): string {
+  return filePath.split(/[\\/]/).pop() ?? filePath;
 }
 
 export class TypoDismissedHistory {

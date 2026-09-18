@@ -4,7 +4,7 @@
 
 > **※現在テスト中です。** 動作の確認（実機テスト）が済んでいない機能が含まれます。大切な原稿は、必ずバックアップ（GitHub同期など）を取ったうえでお使いください。
 
-このリポジトリの版：**0.68.0**（配布版は 0.66.4）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.68.1**（配布版は 0.66.4）。Marketplace に出ている版はこれより遅れることがあります。
 
 - 原稿を書き換えるAIはいません。提案を適用するのは、いつもあなたです。
 - 手元AI（Ollama / LM Studio）なら無料で使えます。クラウドAIも、鍵を入れれば機能ごとに選べます。
@@ -373,6 +373,7 @@ code --install-extension ".\novel-ai-assistant-$($v.TrimStart('v')).vsix" --forc
 | `novelai.chatLog.enabled` | `true` | 相談のやり取りを `.aiwriter/logs/chat.md` に残す（**原稿の一部を含みます**） |
 | `novelai.usageLog.enabled` | `true` | 送った量を `.aiwriter/logs/usage.md` に1行残す（字数だけ） |
 | `novelai.logs.retentionDays` | `7` | ログに残す日数（`0`で消さない） |
+| `novelai.findings.retentionDays` | `3` | AIの指摘を並べ続ける日数（`0`でずっと並べる） |
 
 `novelai.modelTuning` は「AIが実際に読める長さを測る」が書き込む台帳です（手で書く項目ではありません）。`novelai.claude.maxOutputTokens` は旧設定で、`novelai.maxOutputTokens` に置き換わりました。
 
