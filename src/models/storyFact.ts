@@ -89,6 +89,23 @@ export interface StoryFact {
   speaker: string | null;
   /** 知識の照合鍵。同じ事柄には同じ語を付ける */
   topic: string | null;
+  /**
+   * 出来事から機械が導いた状態であることの印（設計書6.88.6）。
+   *
+   * **`parseStoryFact` は決してこれを設定しない。** AIが返した事実に
+   * この欄は付かず、付いているものは `core/stateFromEvent.ts` が
+   * 作ったものだけである——「本文にそう書いてある」のと
+   * 「こちらが読み取った」のを、作者にも後の工程にも取り違えさせない。
+   */
+  derivedFrom?: DerivedFromEvent;
+}
+
+/** 導いたもとの出来事と、導いた根拠になった言い回し */
+export interface DerivedFromEvent {
+  /** 元の `event` の事実の id */
+  eventId: string;
+  /** どの言い回しから導いたか（「が外れた」など）。作者への説明に使う */
+  rule: string;
 }
 
 /** 組が変わる出来事の種類（6.88.5） */

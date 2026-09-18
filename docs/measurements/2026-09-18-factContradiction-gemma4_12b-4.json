@@ -1,0 +1,289 @@
+{
+  "measuredAt": "2026-09-18T05:17:23.361Z",
+  "feature": "factContradiction",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:12b",
+  "numCtx": 32768,
+  "endpoint": null,
+  "options": {},
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.67.3",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.67.3、リポジトリは 0.67.4）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+  },
+  "promptVersion": "1.0",
+  "verifyPromptVersion": "1.0",
+  "plans": [
+    {
+      "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+      "chars": 1235,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\002_十月三日の坂.txt#2-0@8027",
+      "chars": 1218,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\003_窓口の椅子.txt#3-0@8027",
+      "chars": 1211,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+      "chars": 1246,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\005_初雪の窓口.txt#5-0@8027",
+      "chars": 1216,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction",
+    "targets": [
+      "（作品ぜんたい）"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 2538081,
+      "staleNote": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.67.3、リポジトリは 0.67.4）。Claude Code を開き直して、新しい束で繋ぎ直してください",
+      "metrics": {
+        "seededContradictions": 0,
+        "seededContradictionsTotal": 4,
+        "missedContradictions": 4,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 0,
+        "accepted": 0,
+        "rejected": 8,
+        "rejected.そもそも食い違っていない": 8,
+        "failures": 0,
+        "elapsedMs": 2538081
+      },
+      "detail": {
+        "rejectedReasons": {
+          "そもそも食い違っていない": 8
+        },
+        "failures": [],
+        "seededContradictions": {
+          "人物": {
+            "found": 0,
+            "total": 2
+          },
+          "状態": {
+            "found": 0,
+            "total": 1
+          },
+          "時系列": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missedContradictions": [
+          {
+            "file": "本文/003_窓口の椅子.txt",
+            "kind": "人物",
+            "where": "僕は判子を押す手を止めた"
+          },
+          {
+            "file": "本文/004_ギプスが外れた日.txt",
+            "kind": "状態",
+            "where": "右足のギプスが外れたのは"
+          },
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "人物",
+            "where": "左目の下のほくろが、鏡の中で滲んだ"
+          },
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "時系列",
+            "where": "足を折ってから、ちょうど二週間が過ぎた"
+          }
+        ],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "（作品ぜんたい）",
+          "response": {
+            "runner": "ollama",
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.67.3、リポジトリは 0.67.4）。Claude Code を開き直して、新しい束で繋ぎ直してください\n手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。 矛盾検知（事実の照合）を終了: 5/5（事実 277件 / 設定資料から 12件 / 候補 8件（状態 7件、設定 1件） / 採用 0件 / 検証で 8件を取り下げ（そもそも食い違っていない 8件））",
+            "model": "gemma4:12b",
+            "results": [
+              {
+                "chunkId": "本文\\001_九月の終わりの坂.txt",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "千夏は俺と同じ年に局へ入った。窓口に立つのが千夏の仕事で、坂を上るのが俺の仕事だ。",
+                    "explanation": "「配達員」という役割と「坂を上るのが仕事」という描写は内容が一致しており、矛盾していないため。"
+                  },
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "鳶ヶ丘は一人で受け持つ。それが立花郵便局のきまりだった。",
+                    "explanation": "「一人で受け持つ」と「一人で（袋を持って）出る」は内容が一致しており、矛盾していないため。"
+                  },
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "鳶ヶ丘は一人で受け持つ。それが立花郵便局のきまりだった。",
+                    "explanation": "「坂を上る」という動作と「鳶ヶ丘を一人で受け持つ」という役割は両立するため矛盾ではない。"
+                  },
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "千夏は俺と同じ年に局へ入った。窓口に立つのが千夏の仕事で、坂を上るのが俺の仕事だ。",
+                    "explanation": "「窓口係」という役割と「窓口に立つのが仕事」という記述は内容が一致しており、矛盾していないため。"
+                  },
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "紺の半纏を着た白髪の老人が、縁側で新聞をひろげていた。",
+                    "explanation": "設定と本文の内容が完全に一致しており、矛盾は発生していません。"
+                  }
+                ]
+              },
+              {
+                "chunkId": "本文\\002_十月三日の坂.txt",
+                "chapterLabel": "第2話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "人の顔を正面から見るのが苦手だから、坂を選んだようなところがある。",
+                    "explanation": "設定の「目を見られない」と本文の「顔を見るのが苦手」は内容が一致しており、矛盾しません。"
+                  },
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "それを言えるほど、俺は自分のことを言葉にするのが得意ではない。",
+                    "explanation": "「人見知りで目を合わせられない」ことと「自己分析を言葉にするのが苦手」なことは両立するため矛盾ではない。"
+                  },
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "それを言えるほど、俺は自分のことを言葉にするのが得意ではない。",
+                    "explanation": "「顔を見るのが苦手」という内面と「言葉にするのが苦手」という能力は両立するため、矛盾ではない。"
+                  }
+                ]
+              }
+            ],
+            "failures": [],
+            "stages": {
+              "chunks": 5,
+              "acceptedFacts": 277,
+              "recordFacts": 12,
+              "rejectedFacts": 0,
+              "rejectionNote": "",
+              "candidates": 8,
+              "candidateNote": "状態 7件、設定 1件",
+              "kept": 0,
+              "verifyNote": "検証で 8件を取り下げ（そもそも食い違っていない 8件）"
+            },
+            "unreadableFiles": [],
+            "bundleStale": true
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seededContradictions": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "seededContradictionsTotal": {
+      "values": [
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "missedContradictions": {
+      "values": [
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "falseFlagsContradiction": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "categoryMismatch": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "otherFlagsContradiction": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "rejected": {
+      "values": [
+        8
+      ],
+      "min": 8,
+      "max": 8
+    },
+    "rejected.そもそも食い違っていない": {
+      "values": [
+        8
+      ],
+      "min": 8,
+      "max": 8
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        2538081
+      ],
+      "min": 2538081,
+      "max": 2538081
+    }
+  },
+  "lines": [
+    "仕込んだ矛盾を拾えた: 0/4",
+    "見逃し（拾えなかった仕込み）: 4",
+    "誤検出（罠と、矛盾の無い話に付いた指摘）: 0",
+    "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）: 0",
+    "仕込み以外の箇所への指摘: 0",
+    "指摘（検算を通ったもの）: 0",
+    "落とした（検算で弾いたもの）: 8",
+    "　└ 落とした理由：そもそも食い違っていない: 8",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 2538.1秒"
+  ]
+}

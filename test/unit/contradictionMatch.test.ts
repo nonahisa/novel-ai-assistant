@@ -153,6 +153,105 @@ describe("区間の重なり", () => {
     expect(candidates[0].confidence).toBe("medium");
     expect(candidates[0].reason).toContain("同じ日で前後が読めない");
   });
+
+  /**
+   * 同時にいくつも成り立つ項目（設計書6.88.6・`predicateArity.ts`）。
+   *
+   * 合羽も郵便も松葉杖も、同じ日に同時に持っている。排他として
+   * 突き合わせると互いに矛盾したことになる——2026-09-18 の測定では
+   * **候補の全部がこれ**だった。
+   */
+  it("所持品は同時にいくつも成り立つので候補にしない", () => {
+    const facts = hairFacts({
+      left: { predicate: "所持品", value: "合羽", kind: "state" },
+      right: { predicate: "所持品", value: "松葉杖", kind: "state" },
+    });
+    expect(findIntervalConflicts(buildAttributeIntervals(facts))).toEqual([]);
+  });
+
+  it("表に無い項目も候補にしない（迷ったら出さない）", () => {
+    const facts = hairFacts({
+      left: { predicate: "台詞", value: "おはよう", kind: "static" },
+      right: { predicate: "台詞", value: "こんばんは", kind: "static" },
+    });
+    expect(findIntervalConflicts(buildAttributeIntervals(facts))).toEqual([]);
+  });
+});
+
+/**
+ * 出来事から導いた「それ以前の状態」（設計書6.88.6）。
+ *
+ * `event` は区間を**切る**側なので、`state` の値とは比べられない。
+ * 2026-09-18 の測定は、そこで目当ての食い違いを落としていた。
+ */
+describe("出来事から導いた状態との食い違い", () => {
+  /** 第3話「足首はまだギプスの中」→ 第4話「右足のギプスが外れた」 */
+  const castFacts: StoryFact[] = [
+    fact({
+      id: "f1",
+      chapter: 3,
+      lineRange: [55, 55],
+      predicate: "怪我",
+      value: "左足のギプス",
+      kind: "state",
+    }),
+    fact({
+      id: "e1",
+      chapter: 4,
+      lineRange: [1, 1],
+      predicate: "怪我",
+      value: "右足のギプスが外れた",
+      kind: "event",
+    }),
+  ];
+
+  it("項目名が揃っていれば、出来事の直前の状態と突き合わせる", () => {
+    const candidates = findContradictionCandidates({ facts: castFacts });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      type: "状態",
+      subject: "char_001",
+      predicate: "怪我",
+      left: "f1",
+      // **作者が飛ぶ先は本文の行**なので、導いた状態ではなく元の出来事を指す
+      right: "e1",
+    });
+    expect(candidates[0].reason).toContain("それ以前は『右足のギプス』だった");
+  });
+
+  it("一方が他方を含む書き分けは食い違いにしない", () => {
+    const candidates = findContradictionCandidates({
+      facts: [
+        { ...castFacts[0], value: "右足のギプスの中にある足首" },
+        castFacts[1],
+      ],
+    });
+    expect(candidates).toEqual([]);
+  });
+
+  it("同時にいくつも成り立つ項目では導いた状態も突き合わせない", () => {
+    const candidates = findContradictionCandidates({
+      facts: castFacts.map((item) => ({ ...item, predicate: "所持品" })),
+    });
+    expect(candidates).toEqual([]);
+  });
+
+  it("出来事より後の状態とは突き合わせない（そこで区間が切れている）", () => {
+    const candidates = findContradictionCandidates({
+      facts: [
+        castFacts[1],
+        fact({
+          id: "f2",
+          chapter: 4,
+          lineRange: [53, 53],
+          predicate: "怪我",
+          value: "足首の外側が熱を持っていた",
+          kind: "state",
+        }),
+      ],
+    });
+    expect(candidates).toEqual([]);
+  });
 });
 
 describe("死亡後の登場", () => {

@@ -17,7 +17,9 @@ import {
   type AttributeInterval,
 } from "./attributeIntervals";
 import { sha1Text } from "./hash";
+import { isExclusivePredicate } from "./predicateArity";
 import { formatRelativeTime } from "./relativeTime";
+import { statesBeforeEvents } from "./stateFromEvent";
 
 /**
  * 矛盾の候補を機械だけで挙げる（設計書6.88.6。**LLMを使わない**）。
@@ -132,6 +134,7 @@ export function findContradictionCandidates(
   const intervals = buildAttributeIntervals(input.facts);
   const all = [
     ...findIntervalConflicts(intervals),
+    ...findEventImpliedConflicts(input.facts, intervals),
     ...findPostDeathAppearances(input.facts, input.transitions ?? []),
     ...findKnowledgeViolations(input.facts),
     ...findTravelImpossibilities(input.facts, input.travelTimes ?? []),
@@ -162,6 +165,10 @@ export function findIntervalConflicts(
     // 候補を大量に吐く。所在は移動可能性の照合（`findTravelImpossibilities`）
     // だけが見る——所要時間の表が無ければ何も言わない側へ倒す
     if (interval.predicate === WHEREABOUTS) continue;
+    // **同時にいくつも成り立つ項目は候補にしない**（`predicateArity.ts`）。
+    // 所持品のようなものを排他として突き合わせると、合羽と郵便と松葉杖が
+    // 互いに矛盾したことになる（2026-09-18 の測定では候補の全部がこれだった）
+    if (!isExclusivePredicate(interval.predicate)) continue;
     const key = JSON.stringify([interval.subject, interval.predicate]);
     const bucket = groups.get(key);
     if (bucket) bucket.push(interval);
@@ -202,6 +209,69 @@ export function findIntervalConflicts(
           })
         );
       }
+    }
+  }
+  return candidates;
+}
+
+/**
+ * 出来事から導いた「それ以前の状態」が、その時点の状態と食い違う。
+ *
+ * **`event` は区間を切る側なので、`state` の値とは比べられない。** 項目名が
+ * 揃っていても、片方が出来事として書かれているだけで照合から漏れる——
+ * 2026-09-18 の測定は、まさにそこで目当ての食い違いを落としていた
+ * （第2話「怪我＝左の足首」は `state`、第4話「怪我＝右足のギプスが外れた」は
+ * `event`）。
+ *
+ * ここは `stateFromEvent.ts` に**出来事から直前の状態を導かせ**、その値を、
+ * 出来事の時点で成り立っていた区間と突き合わせる。
+ *
+ * **作者が飛ぶ先は、導いた状態ではなく元の出来事の行にする。** 導いた状態は
+ * 本文のどこにも書かれていないので、引用も行番号も持たない。
+ */
+export function findEventImpliedConflicts(
+  facts: readonly StoryFact[],
+  intervals: readonly AttributeInterval[]
+): ContradictionCandidate[] {
+  const candidates: ContradictionCandidate[] = [];
+
+  for (const derived of statesBeforeEvents(orderFacts(facts))) {
+    // 所在は移動可能性の照合だけが見る（区間の重なりと同じ扱い）
+    if (derived.predicate === WHEREABOUTS) continue;
+    if (!isExclusivePredicate(derived.predicate)) continue;
+
+    const at = positionOf(derived);
+    for (const interval of intervals) {
+      if (interval.subject !== derived.subject) continue;
+      if (interval.predicate !== derived.predicate) continue;
+      if (!covers(interval, at)) continue;
+      if (overlapsInMeaning(interval.value, derived.value)) continue;
+
+      const unknownOrder = isFactOrderUnknown(interval.start, at);
+      candidates.push(
+        buildCandidate({
+          type: TIME_PREDICATES.some((word) =>
+            derived.predicate.includes(word)
+          )
+            ? "時系列"
+            : "状態",
+          subject: derived.subject,
+          predicate: derived.predicate,
+          values: [interval.value, derived.value],
+          left: interval.sources[0],
+          // **元の出来事を指す**（導いた状態には本文の行が無い）
+          right: derived.derivedFrom?.eventId ?? derived.id,
+          confidence: lowerConfidence(
+            confidenceFromModality(interval.modality),
+            confidenceFromModality(derived.modality)
+          ),
+          unknownOrder,
+          reason:
+            `${formatPosition(interval.start)}に『${interval.value}』。` +
+            `${formatPosition(at)}の『${derived.value}${derived.derivedFrom?.rule ?? ""}』から、` +
+            `それ以前は『${derived.value}』だったと読める`,
+        })
+      );
     }
   }
   return candidates;
@@ -671,6 +741,32 @@ function overlaps(a: AttributeInterval, b: AttributeInterval): boolean {
 function startsBeforeEnd(start: FactPosition, end: FactPosition | null): boolean {
   if (end === null) return true;
   return compareFactPosition(start, end) < 0;
+}
+
+/**
+ * その時点で、この区間は成り立っているか。
+ *
+ * **両端を含める。** 出来事はそこで区間を閉じるので、閉じた区間の `end` は
+ * 出来事とちょうど同じ位置になる——ここを開区間にすると、
+ * 「切られた直前の状態」が1つも取れなくなる。
+ */
+function covers(interval: AttributeInterval, at: FactPosition): boolean {
+  if (compareFactPosition(interval.start, at) > 0) return false;
+  return interval.end === null || compareFactPosition(at, interval.end) <= 0;
+}
+
+/**
+ * 2つの値は同じことを指していそうか。
+ *
+ * **一方が他方を含んでいたら、食い違いとしない。**「右足のギプス」と
+ * 「右足のギプスの中にある足首」のような書き分けを食い違いとして出すと、
+ * 作者は言い回しを直しに行くことになる。**迷ったら出さない。**
+ */
+function overlapsInMeaning(left: string, right: string): boolean {
+  const a = left.trim();
+  const b = right.trim();
+  if (!a || !b) return true;
+  return a.includes(b) || b.includes(a);
 }
 
 /** 作者に見せる場所の書き方。時期が読めなければ本文の位置で示す */
