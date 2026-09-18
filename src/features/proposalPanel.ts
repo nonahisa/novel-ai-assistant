@@ -30,6 +30,17 @@ import { FileLockStore } from "../core/fileLockStore";
 import { describeLock, normalizeFile } from "../models/fileLock";
 import { tryGitUserName } from "../core/gitAttribution";
 import { acceptProposal, rejectProposal } from "./reviewProposals";
+// 指摘を数日残す（設計書6.96）。**配線はこのファイルの1か所だけ**
+// （`replaceContents`）。検知ごとに写しを作ると、検知を足した人が
+// 記録を忘れる形になる
+import {
+  findingCategoryOf,
+  type FindingDraft,
+} from "../core/findingSource";
+import {
+  recordFindingDecision,
+  recordFindings,
+} from "./findingRecorder";
 import {
   countIncoming,
   describeBadgeTooltip,
@@ -785,9 +796,35 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     /**
      * `quiet` なら、前面化も「届きました」の知らせも出さない（0.45.0）。
      * **置き場へ入れて描き直すところまでは同じ**——出し方だけが違う
+     *
+     * `restored` は、置き場から読み直したものを戻しただけという印
+     * （設計書6.96.4）。**残し直さない**——残し直すと `time` が今日に
+     * なって期限が数え直され、**三日で消えるはずの指摘が永久に残る。**
      */
-    options: { quiet?: boolean } = {}
+    options: { quiet?: boolean; restored?: boolean } = {}
   ): IncomingCount {
+    /*
+      **指摘を残すのは、ここ1か所だけ**（設計書6.96）。
+
+      検知の口は6つ以上あり、増え続ける。各 `check*.ts` へ同じ記録処理を
+      写すと、**検知を足した人が記録を忘れる**——しかも忘れたことは
+      画面に出ない（残らないだけ）。提案パネルへ渡る道はここ1本に
+      絞れているので、ここで残す。
+
+      **待たない。** ディスクを読み書きするあいだ、作者が見ている指摘の
+      表示を止める理由がない。失敗しても検知は止めない（記録側が
+      受け止めて記録へ落とす）。
+    */
+    if (!options.restored) {
+      const drafts = [
+        ...(contents.items ?? []),
+        ...(contents.contradictions ?? []),
+      ]
+        .map((item) => findingDraftOf(category, item))
+        .filter((draft): draft is FindingDraft => draft !== undefined);
+      void recordFindings(work, drafts);
+    }
+
     // **表示中の作品の作業を、先に控えへ戻す。** 届いたのがどちらの作品でも通す
     this.stashCurrent();
 
@@ -1359,6 +1396,33 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   }
 
   /**
+   * 置き場に残っていた指摘を戻す（設計書6.96.4）。
+   *
+   * **残し直さない。** `time` を今日に書き換えると期限が数え直され、
+   * 三日で消えるはずの指摘が開くたびに延命してしまう。
+   *
+   * **静かに出す。** 作者が押した操作ではないので、前面化も
+   * 「届きました」の知らせも出さない（`primePendingRecordUpdates` と
+   * 同じ作法）。
+   *
+   * 組み立てそのものは `features/primeFindings.ts` が持つ——パネルは
+   * 置き場のことを知らないままにしておく（承認待ちの読み込みと同じ形）。
+   */
+  showRestoredFindings(
+    work: WorkEntry,
+    category: string,
+    contents: {
+      items?: ProposalViewItem[];
+      contradictions?: ContradictionViewItem[];
+    }
+  ): void {
+    this.replaceContents(work, category, contents, {
+      quiet: true,
+      restored: true,
+    });
+  }
+
+  /**
    * 設定資料の更新を表示する（設計書5.6）。
    *
    * **提案の窓口を1つにする。** 本文の直しは提案パネル、設定資料の更新は
@@ -1590,6 +1654,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       // 「設定」と記録されてしまう（見出しは leftLabel/rightLabel が正しい）
       suggestion: describeContradiction(item),
     });
+    await this.rememberDecision(work, item, "dismissed");
   }
 
   /**
@@ -1645,6 +1710,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       target: item.excerpt,
       suggestion: describeContradiction(item),
     });
+    // **片付いたことは残す。** 残さないと、次に開いたときに置き場から
+    // 同じ食い違いが戻ってきて、伏線へ移したはずのものをまた見ることになる
+    await this.rememberDecision(work, item, "dismissed", "伏線として登録した");
 
     notifyDone("伏線として登録しました（伏線の一覧で見られます）。");
   }
@@ -2231,6 +2299,28 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       target: item.target,
       suggestion: item.suggestion,
     });
+    // **本文へ当てたあとに残す**（設計書6.96.4）。記録は本文に触らないので、
+    // 先に書くと「採った」と残っているのに本文が直っていない形ができる
+    await this.rememberDecision(work, item, "accepted");
+  }
+
+  /**
+   * 作者の判断を、数日残す置き場へ足す（設計書6.96.4）。
+   *
+   * **追記するだけで、本文にも台帳にも触らない。** 採る・退けるの中身は
+   * 種類ごとの道（本文の書き換え・見送りの記録・承認待ちの片付け）が
+   * 既に済ませており、ここはその結末を控えるだけである（6.11.1 の
+   * 「3つの形を同じ道へ流さない」を壊さないため）。
+   */
+  private async rememberDecision(
+    work: WorkEntry,
+    item: ProposalViewItem | ContradictionViewItem,
+    status: "accepted" | "dismissed",
+    note = ""
+  ): Promise<void> {
+    const draft = findingDraftOf(this.category, item);
+    if (!draft) return;
+    await recordFindingDecision(work, draft, status, note);
   }
 
   /**
@@ -2729,6 +2819,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       target: item.target,
       suggestion: item.suggestion,
     });
+    await this.rememberDecision(work, item, "dismissed");
   }
 
   private markStatus(
@@ -2924,6 +3015,58 @@ function describeRecheckNote(
 function describeContradiction(item: ContradictionViewItem): string {
   const compared = `${item.leftLabel}：${item.settingSays}／${item.rightLabel}：${item.textSays}`;
   return item.note ? `${compared}（補足：${item.note}）` : compared;
+}
+
+/**
+ * 画面に並ぶ1件を、数日残す形へ写す（設計書6.96）。
+ *
+ * **残さないものは `undefined` を返す。** 何を残さないかと、その理由は
+ * `core/findingSource.ts` の表が持つ。
+ *
+ * ## 記録するときと、判断を足すときで同じものを通す
+ *
+ * 指摘の番号は中身から決まる（`findingIdOf`）。適用したあとに別の形で
+ * 組み直すと**同じ指摘に別の番号が付き、採った記録がどこにも効かない**。
+ */
+function findingDraftOf(
+  category: string,
+  item: ProposalViewItem | ContradictionViewItem
+): FindingDraft | undefined {
+  const kind = findingCategoryOf(category);
+  if (!kind) return undefined;
+
+  // 誤字脱字の形は `original` を、矛盾の形は `excerpt` を持つ
+  if ("original" in item) {
+    /*
+      **編集部からの提案は残さない**（設計書5.6.1.1）。あれは
+      `proposals.jsonl` に既に永続しており、採った・見送ったの記録も
+      そちらへ書き戻す。ここでもう1つ置き場を持つと、2つの記録が
+      食い違ったときにどちらが正しいのか決められない。
+    */
+    if (item.proposalId) return undefined;
+    return {
+      filePath: item.filePath,
+      line: item.line,
+      original: item.original,
+      target: item.target,
+      suggestion: item.suggestion,
+      // **`reason` は種類の一語しか入っていない**（冗長・係り受けなど）。
+      // 説明があれば添える（画面に出ているものと同じ材料にする）
+      message: [item.reason, item.detail].filter(Boolean).join("："),
+      category: kind,
+    };
+  }
+
+  return {
+    filePath: item.filePath,
+    line: item.line,
+    original: item.excerpt,
+    // 矛盾・逸脱は直し方を出さない。**空のまま残す**（無い値を作らない）
+    target: "",
+    suggestion: "",
+    message: describeContradiction(item),
+    category: kind,
+  };
 }
 
 /** 伏線の短い名に使う長さ。一覧の見出しになるので、長いと折り返す */

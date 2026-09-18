@@ -762,8 +762,15 @@ function renderContradiction(item) {
     '<div class="details">' +
     '<div class="quote">' + escapeHtml(item.excerpt) + '</div>' +
     '<div class="compare">' +
-    '<div><span class="side">' + escapeHtml(item.leftLabel || '設定では') + '</span>' + escapeHtml(item.settingSays) + '</div>' +
-    '<div><span class="side">' + escapeHtml(item.rightLabel || '本文では') + '</span>' + escapeHtml(item.textSays) + '</div>' +
+    // **中身の無い側は、見出しごと出さない。** 置き場から戻した指摘
+    // （設計書6.96.4）は、並べる2つに分けずに1文で残してあるので
+    // 片側が空になる。見出しだけが浮くと、読めない何かが欠けたように見える
+    (item.settingSays
+      ? '<div><span class="side">' + escapeHtml(item.leftLabel || '設定では') + '</span>' + escapeHtml(item.settingSays) + '</div>'
+      : '') +
+    (item.textSays
+      ? '<div><span class="side">' + escapeHtml(item.rightLabel || '本文では') + '</span>' + escapeHtml(item.textSays) + '</div>'
+      : '') +
     '</div>' +
     note +
     recheckNote +

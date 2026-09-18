@@ -373,9 +373,14 @@ export function memoBadgeText(memos: readonly SceneMemo[]): string {
  * ファイルの順を知っているのは走査の結果を持つ側なので、`fileOrder` で
  * 受け取る。渡されなければ `memos` に出てきた順を、そのままファイルの
  * 順とみなす（1ファイル分だけを扱うときはこれで足りる）。
+ *
+ * **公開しているのは、AIの指摘を同じ順で並べるためである**
+ * （`core/sceneMemoRows.ts`、設計書6.96.5）。付箋と指摘が別々の順序で
+ * 並ぶと、混ぜた一覧が本文の順にならない。**写しを作らない。**
+ * 場所しか見ないので、受け取る型は `filePath` を持つものまで広げてある。
  */
-function fileRanker(
-  memos: readonly SceneMemo[],
+export function fileRanker(
+  memos: readonly { filePath: string }[],
   fileOrder?: readonly string[]
 ): (filePath: string) => number {
   const index = new Map<string, number>();

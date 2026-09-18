@@ -12,6 +12,14 @@
  * **この画面は本文を直に書き換えない。** 「済みにする」も拡張機能へ頼み、
  * 向こうが既存の書き換え経路（原稿エディタの WorkspaceEdit か
  * `writeTextFilePreservingFormat`）を通す（6.40.6）。
+ *
+ * ## 作者の付箋とAIの指摘が、同じ一覧に並ぶ（設計書6.96.5）
+ *
+ * 並びは**話数 → 行**で、種類では分けない。**同じ行に何件来ても、
+ * 場所は1度だけ出す**（`sameLine`）。どちらの行かは `kind` で分かれ、
+ * 押せるものも分かれる——付箋は「済み」（本文から消す）、指摘は
+ * 「直す」（種類ごとの道へ渡す）と「見送る」（記録を足す）である。
+ * **指摘を本文へ当てる口は、この画面には無い。**
  */
 export function buildSceneMemoPanelHtml(
   nonce: string,
@@ -114,7 +122,23 @@ h2 {
 .dot.memo-check { background: var(--novelai-memo-check, #9a6700); }
 .dot.memo-foreshadow { background: var(--novelai-memo-foreshadow, #1a5fb4); }
 .dot.memo-idea { background: var(--novelai-memo-idea, #1c7c3c); }
+/* AIの指摘（設計書6.96.5）。**種類では分けず、1色**——分けるのは
+   「作者が書いたか、機械が挙げたか」だけである */
+.dot.memo-ai { background: var(--novelai-memo-ai, #6b4fbb); }
+/* 同じ行に続く2件目から。場所を繰り返さないので、**区切り線も引かない**
+   ——線が入ると別の場所の指摘に見える（設計書6.96.5） */
+.memo.same-line { padding-top: 0; }
+.memo:has(+ .memo.same-line) { border-bottom: none; padding-bottom: 1px; }
 .main { flex: 1 1 auto; min-width: 0; }
+/* 指摘の理由。主文（直し方）より控えめに */
+.note {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
 .go {
   display: block;
   width: 100%;
@@ -149,6 +173,14 @@ h2 {
   padding: 2px 8px;
   font-size: 11px;
 }
+/* 押せるものは縦に積む。**幅を取らない**のが作者の指定なので、
+   横へ並べると一覧の文が細くなる（設計書6.96.5） */
+.acts {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
 </style>
 </head>
 <body>
@@ -159,7 +191,7 @@ h2 {
     <button id="prev" title="ひとつ前のメモへ飛びます（話をまたぎます）">← 戻る</button>
     <button id="next" title="次のメモへ飛びます（話をまたぎます）">次へ →</button>
     <button id="onlyCurrent" title="いま開いている話のメモだけを出します">この話だけ</button>
-    <select id="tag" title="タグで絞り込みます"></select>
+    <select id="tag" title="付箋のタグやAIの指摘の種類で絞り込みます"></select>
     <input type="search" id="query" placeholder="文字で探す">
     <button id="export" title="いま出ているメモをMarkdownで書き出します">書き出す</button>
   </div>
@@ -245,10 +277,20 @@ el.list.addEventListener("click", function (event) {
   if (!target) return;
   const row = findRow(target.dataset.key);
   if (!row) return;
-  if (target.classList.contains("done")) {
+  const act = target.dataset.act;
+  if (act === "done") {
     // **1件ずつ確認しない**（設計書6.40.4）。付箋が消えても原稿は無傷で、
     // 取り消しは原稿エディタの Ctrl+Z か Git の復元でできる
     post("done", { filePath: row.filePath, line: row.line, raw: row.raw });
+    return;
+  }
+  if (act === "fix") {
+    // **本文はここでは書き換えない**（設計書6.96.5）。種類ごとの道へ渡す
+    post("fix", { findingId: row.findingId });
+    return;
+  }
+  if (act === "dismiss") {
+    post("dismissFinding", { findingId: row.findingId });
     return;
   }
   post("reveal", { filePath: row.filePath, line: row.line });
@@ -267,7 +309,8 @@ function renderTags() {
   if (el.tag.dataset.signature === signature) return;
   el.tag.dataset.signature = signature;
 
-  const options = ['<option value="">すべてのタグ</option>'];
+  // 付箋のタグと、AIの指摘の種類が同じ一覧に並ぶ（設計書6.96.5）
+  const options = ['<option value="">すべて</option>'];
   for (const tag of data.tags) {
     options.push(
       '<option value="' + escapeHtml(tag) + '"' +
@@ -278,21 +321,52 @@ function renderTags() {
   el.tag.innerHTML = options.join("");
 }
 
+/**
+ * 押せるものを組む。**付箋と指摘で違う**（設計書6.96.5）。
+ *
+ * 付箋は本文から消せる。指摘は本文へ触らず、種類ごとの道へ渡すか、
+ * 見送ったことを記録に足すかの2つしかない。
+ */
+function renderActions(row) {
+  const key = escapeHtml(row.key);
+  if (row.kind === "finding") {
+    const buttons = [];
+    // 渡す先が無ければ出さない（押しても何も起きない口を作らない）
+    if (row.canFix) {
+      buttons.push(
+        '<button class="done" data-act="fix" data-key="' + key +
+          '" title="この指摘を提案の一覧へ渡します（本文はまだ変わりません）">直す</button>'
+      );
+    }
+    buttons.push(
+      '<button class="done" data-act="dismiss" data-key="' + key +
+        '" title="この指摘を見送ります（本文は変わりません）">見送る</button>'
+    );
+    return '<span class="acts">' + buttons.join("") + "</span>";
+  }
+  return '<button class="done" data-act="done" data-key="' + key +
+    '" title="この行を本文から消します">済み</button>';
+}
+
 function renderRow(row) {
   const active = row.key === data.activeKey ? " active" : "";
+  // **同じ行に続く2件目からは、場所を出さない**（設計書6.96.5）
+  const same = row.sameLine ? " same-line" : "";
   const where = row.chapterLabel +
     (row.title ? " " + row.title : "") + "　" + row.line + "行目";
-  return '<div class="memo' + active + '">' +
+  return '<div class="memo' + active + same + '">' +
     '<span class="dot ' + escapeHtml(row.tagClass) + '"></span>' +
     '<span class="main">' +
-      '<button class="go" data-key="' + escapeHtml(row.key) + '">' +
+      '<button class="go" data-act="go" data-key="' + escapeHtml(row.key) + '">' +
         '<span class="tag">' + escapeHtml(row.tag) + "</span>" +
         escapeHtml(row.text || "（中身がありません）") +
-        '<span class="where">' + escapeHtml(where) + "</span>" +
+        (row.note ? '<span class="note">' + escapeHtml(row.note) + "</span>" : "") +
+        (row.sameLine
+          ? ""
+          : '<span class="where">' + escapeHtml(where) + "</span>") +
       "</button>" +
     "</span>" +
-    '<button class="done" data-key="' + escapeHtml(row.key) +
-      '" title="この行を本文から消します">済み</button>' +
+    renderActions(row) +
     "</div>";
 }
 
@@ -305,7 +379,9 @@ function render() {
   el.onlyCurrent.disabled = !data.hasCurrent;
   el.prev.disabled = data.totalCount === 0;
   el.next.disabled = data.totalCount === 0;
-  el.exportMd.disabled = data.rows.length === 0;
+  // **書き出すのは付箋だけ**（AIの指摘は作者が書いたものではない）。
+  // 指摘しか出ていないときに押せると、空の1枚が開く
+  el.exportMd.disabled = !data.hasMemosToExport;
   if (el.query.value !== data.query) el.query.value = data.query;
 
   renderTags();

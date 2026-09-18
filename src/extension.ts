@@ -97,6 +97,8 @@ import {
   applyPendingCharacterUpdates,
   primePendingRecordUpdates,
 } from "./features/applyPendingUpdates";
+// 数日残してある指摘を、開いたときに提案パネルへ戻す（設計書6.96.4）
+import { primeSavedFindings } from "./features/primeFindings";
 import { renameWork } from "./features/renameWork";
 import { exportImeDictionary } from "./features/exportImeDictionary";
 import { exportPdf } from "./features/exportPdf";
@@ -1327,6 +1329,17 @@ export async function activate(
           // 開いただけの場面なので、ダイアログは出さず記録に残す
           useLogFile(work.folderPath);
           logFailure("承認待ちの読み込みに失敗", {
+            作品: work.title,
+            詳細: error instanceof Error ? error.message : String(error),
+          });
+        }
+        try {
+          // **数日残してある指摘も戻す**（設計書6.96.4）。承認待ちとは
+          // 置き場も期限も違うので、片方が読めなくても他方は出す
+          await primeSavedFindings(work, panel);
+        } catch (error) {
+          useLogFile(work.folderPath);
+          logFailure("残っている指摘の読み込みに失敗", {
             作品: work.title,
             詳細: error instanceof Error ? error.message : String(error),
           });

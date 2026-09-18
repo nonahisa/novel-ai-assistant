@@ -29,6 +29,24 @@ import {
   SCENE_MEMO_TITLE,
   sceneMemoToMarkdown,
 } from "../core/sceneMemoMarkdown";
+import {
+  findingCategoryLabel,
+  findingColorVars,
+  findingHeadline,
+  findingNote,
+  FINDING_DOT_CLASS,
+  markSameLine,
+  mergeNoteRows,
+  type NoteRow,
+  type PlacedFinding,
+} from "../core/sceneMemoRows";
+import { locateFindings } from "../core/findingLocation";
+import { findingFileKey } from "../core/findingSource";
+import {
+  FindingStore,
+  findingsRetentionDays,
+  visibleFindings,
+} from "./findingStore";
 import { buildSceneMemoPanelHtml } from "../views/sceneMemoPanelHtml";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import { revealTextLocation, type RevealInManuscript } from "./revealLocation";
@@ -45,7 +63,17 @@ import {
  * 戻る機能を付けてください」。
  *
  * **原稿エディタの横**（`ViewColumn.Beside`）に開く。作品ごとに1枚。
- * AIは使わない——材料は本文の中の付箋だけである。
+ *
+ * ## AIの指摘も、ここへ位置順で混ぜる（設計書6.96.5）
+ *
+ * 作者の指示（2026-09-19）：「ファイルを開いたら、そのファイルに関係する
+ * 提案を種類にこだわらず、該当位置順でまとめて右側に幅を取らない感じで
+ * 並べる機能が欲しい」。置き場の裁定は「シーンメモに統合してください」。
+ *
+ * **混ぜるのは画面の上だけである。** 付箋は本文の中、指摘は
+ * `.aiwriter/findings.jsonl`。並べ方（話数 → 行、同じ行はまとめる）は
+ * `core/sceneMemoRows.ts` が決め、ここは**本文を読んで渡す**のと
+ * **押されたものを受ける**のを受け持つ（`core` から `vscode` を触らない）。
  *
  * ## 本文の書き換えは、既存の経路だけを通る
  *
@@ -53,6 +81,11 @@ import {
  * その文書へ `WorkspaceEdit`、開いていなければ
  * `writeTextFilePreservingFormat`**（ハッシュ照合つき）。
  * `atomicWriteFile` を直に呼ぶ道は作らない（規則1・6.40.6）。
+ *
+ * **AIの指摘を本文へ当てる口は、この画面には無い**（6.96.5）。適用は
+ * 種類ごとの道（提案パネル）を通す——6.11.1 の「3つの形を同じ配列へ
+ * 混ぜない」は、本文の適用処理が設定資料の更新を掴んで壊れるのを防ぐため
+ * にある。ここで本文へ書く道を作ると、その線を画面の側から破ることになる。
  */
 
 const openPanels = new Map<string, SceneMemoPanel>();
@@ -73,6 +106,21 @@ export interface SceneMemoDeps {
    * 引き受けられなければ素のエディタで開く。
    */
   revealInManuscript?: RevealInManuscript;
+  /**
+   * AIの指摘を、**種類ごとの道**（提案パネル）へ渡す口（設計書6.96.5）。
+   *
+   * **この画面は本文を書き換えない。** 「直す」は指摘を提案パネルへ
+   * 送るだけで、当てるのは向こうの既存の処理である——本文への適用を
+   * ここへ書き直すと、6.11.1 で分けたはずの3つの形が画面の側で
+   * また1つになる。
+   *
+   * **渡されなければ「直す」を出さない。** 押しても何も起きない口を
+   * 作らない（この作品の決まり）。
+   */
+  handOverFinding?: (
+    work: WorkEntry,
+    finding: PlacedFinding
+  ) => Promise<boolean> | boolean;
 }
 
 export async function openSceneMemoPanel(
@@ -153,6 +201,13 @@ export async function jumpSceneMemo(
 
 interface CollectedMemos {
   memos: SceneMemo[];
+  /**
+   * いまの本文の位置まで決まったAIの指摘（設計書6.96.3）。
+   *
+   * **「消えた」ものはもう入っていない**——`locateFindings` が落とす。
+   * ここで捨て直す処理を書くと、捨て方が2か所に分かれる。
+   */
+  findings: PlacedFinding[];
   files: EpisodeFile[];
   /** 話数順のファイルの並び（次へ・戻るの順序の元） */
   order: string[];
@@ -167,15 +222,47 @@ interface CollectedMemos {
   collectedTexts: Map<string, string>;
 }
 
+/**
+ * `Finding.file`（作品フォルダーからの相対パス）と、走査で得た絶対パスを
+ * **同じ表記へ揃える**ための鍵。
+ *
+ * **ここがずれると、指摘が1件も出ない。** `locateFindings` は
+ * 「ファイル表記 → 全文」の Map を `Finding.file` そのままで引くので、
+ * 区切り文字が食い違うだけで全件が黙って消える（エラーにもならない）。
+ * **表記を決めるのは `core/findingSource.ts` の1か所**で、記録する側も
+ * ここも同じ関数を通す——写しを置くと、片方だけが直る日が来る。
+ */
+function fileKeyOf(work: WorkEntry, filePath: string): string {
+  return findingFileKey(work.folderPath, filePath);
+}
+
+/**
+ * 付箋と指摘を集める。
+ *
+ * **本文を読むのはここだけ**である。位置の探し直し
+ * （`core/findingLocation.ts`）は `vscode` に触れないので、本文は
+ * こちらが渡す。読み終えたら手放す——合本は70万字あり、指摘の数だけ
+ * 抱え続けると開いている間ずっと居座る。
+ */
 async function collectMemos(work: WorkEntry): Promise<CollectedMemos> {
+  // **先に指摘を読む。** どのファイルの全文が要るかは、指摘が決める
+  const stored = await loadVisibleFindings(work);
+  const wanted = new Set(stored.map((finding) => fileKeyOf(work, finding.file)));
+
   const scan = await scanWork(work);
   const memos: SceneMemo[] = [];
   const notices: string[] = [];
   const order: string[] = [];
   const collectedTexts = new Map<string, string>();
+  /** 指摘の位置を探し直すための本文（鍵 → 全文）。使い終えたら捨てる */
+  const findingTexts = new Map<string, string>();
+  /** 鍵 → 絶対パス。指摘は相対パスしか持たないので、開くために要る */
+  const absolutePaths = new Map<string, string>();
 
   for (const episode of scan.episodes) {
     order.push(episode.filePath);
+    const key = fileKeyOf(work, episode.filePath);
+    absolutePaths.set(key, episode.filePath);
     if (episode.hasConflictMarkers) {
       // どちらが本文か決められないファイルは触らない（原稿を壊さない）
       notices.push(`${episode.fileName} は未解決の競合を含むため読みません。`);
@@ -190,6 +277,7 @@ async function collectMemos(work: WorkEntry): Promise<CollectedMemos> {
           content.text
         );
       }
+      if (wanted.has(key)) findingTexts.set(key, content.text);
     } catch (error) {
       // **数えて残す。** 黙って落とすと、その話のメモが無いことにされる
       notices.push(`${episode.fileName} を読めませんでした。`);
@@ -200,13 +288,40 @@ async function collectMemos(work: WorkEntry): Promise<CollectedMemos> {
     }
   }
 
+  const located = locateFindings(
+    // 鍵の表記を揃えてから渡す（`fileKeyOf` の言い分）
+    stored.map((finding) => ({ ...finding, file: fileKeyOf(work, finding.file) })),
+    findingTexts
+  );
+  findingTexts.clear();
+
+  const findings: PlacedFinding[] = [];
+  for (const finding of located) {
+    const filePath = absolutePaths.get(finding.file);
+    // 走査に無いファイルの指摘は、開く先が無いので出さない
+    if (!filePath) continue;
+    findings.push({ ...finding, filePath });
+  }
+
   return {
     memos: sortMemos(memos, order),
+    findings,
     files: scan.episodes,
     order,
     notices,
     collectedTexts,
   };
+}
+
+/**
+ * 残してある指摘のうち、**並べてよいもの**だけを読む（設計書6.96.4）。
+ *
+ * 期限切れと、判断の済んだものは `visibleFindings` が落とす。
+ * **ファイルからは消さない**——消えるのは作者が明示の操作をしたときだけ。
+ */
+async function loadVisibleFindings(work: WorkEntry) {
+  const store = new FindingStore(work);
+  return visibleFindings(await store.load(), findingsRetentionDays());
 }
 
 /**
@@ -249,6 +364,10 @@ type PanelMessage =
   | { type: "prev" }
   | { type: "reveal"; filePath: string; line: number }
   | { type: "done"; filePath: string; line: number; raw: string }
+  /** AIの指摘を、種類ごとの道（提案パネル）へ渡す（設計書6.96.5） */
+  | { type: "fix"; findingId: string }
+  /** AIの指摘を退ける。**追記で残す**だけで、指摘の行は書き換えない */
+  | { type: "dismissFinding"; findingId: string }
   | { type: "filter"; onlyCurrent: boolean; tag: string; query: string }
   | { type: "export" };
 
@@ -256,6 +375,8 @@ class SceneMemoPanel {
   private readonly panel: vscode.WebviewPanel;
 
   private memos: SceneMemo[] = [];
+  /** いまの本文の位置まで決まったAIの指摘（設計書6.96.5） */
+  private findings: PlacedFinding[] = [];
   private files: EpisodeFile[] = [];
   private order: string[] = [];
   private notices: string[] = [];
@@ -352,6 +473,7 @@ class SceneMemoPanel {
     try {
       const collected = await collectMemos(this.work);
       this.memos = collected.memos;
+      this.findings = collected.findings;
       this.files = collected.files;
       this.order = collected.order;
       this.notices = collected.notices;
@@ -422,6 +544,12 @@ class SceneMemoPanel {
           return;
         case "done":
           await this.markDone(message.filePath, message.line, message.raw);
+          return;
+        case "fix":
+          await this.handOver(message.findingId);
+          return;
+        case "dismissFinding":
+          await this.dismissFinding(message.findingId);
           return;
         case "filter":
           this.onlyCurrent = message.onlyCurrent;
@@ -527,6 +655,54 @@ class SceneMemoPanel {
   }
 
   /**
+   * 「直す」——AIの指摘を、**種類ごとの道**へ渡す（設計書6.96.5）。
+   *
+   * **ここでは本文へ1文字も書かない。** 当てるのは提案パネルの既存の
+   * 処理で、こちらがするのは「いまの位置に直した1件を手渡す」ことだけ
+   * である。位置は開くたびに探し直しているので、**保存してある
+   * `hintLine` ではなく、いまの行**を渡す（6.96.3）。
+   *
+   * 「採った」の記録は、**本文へ当てた側が残す**。ここで先に書くと、
+   * 作者が提案パネルで見送っても「採った」ことになる。
+   */
+  private async handOver(findingId: string): Promise<void> {
+    const finding = this.findings.find((item) => item.id === findingId);
+    if (!finding) return;
+    const handOverFinding = this.deps.handOverFinding;
+    if (!handOverFinding) return;
+
+    const accepted = await handOverFinding(this.work, finding);
+    if (accepted) return;
+    void vscode.window.showWarningMessage(
+      "この指摘を提案の一覧へ渡せませんでした。" +
+        "もう一度、検知をやり直してください。"
+    );
+  }
+
+  /**
+   * 「見送る」——退けたことを追記で残す（設計書6.96.4）。
+   *
+   * **指摘の行は書き換えない。** 追記だけの作りなので、同期の衝突で
+   * どちらかの記録が消えることがない。片方の機械で退けたものは、
+   * もう片方でも退く。
+   */
+  private async dismissFinding(findingId: string): Promise<void> {
+    const finding = this.findings.find((item) => item.id === findingId);
+    if (!finding) return;
+    await new FindingStore(this.work).decide([
+      {
+        findingId,
+        time: new Date().toISOString(),
+        status: "dismissed",
+        // 覚え書きを訊かない。1件ずつ理由を求めると、見送りが面倒になって
+        // 指摘が溜まる（溜まった指摘は結局読まれない）
+        note: "",
+      },
+    ]);
+    await this.load();
+  }
+
+  /**
    * 書き出す1枚。**いま絞り込んで出ているものだけ**を、話ごとに並べる。
    *
    * **Markdownの組み立ては `core/sceneMemoMarkdown.ts` が持つ。**
@@ -563,38 +739,100 @@ class SceneMemoPanel {
     );
   }
 
-  /** 絞り込んだあとの一覧。**並びは「この話 → その他」** */
-  private visibleMemos(): SceneMemo[] {
-    const currentKey = this.currentFile
+  /** いま開いている話（比べるための表記） */
+  private get currentKey(): string | null {
+    return this.currentFile
       ? paths.normalizeForComparison(this.currentFile)
       : null;
-    const query = this.query.trim();
+  }
 
-    const matched = this.memos.filter((memo) => {
+  /** 絞り込みに当てはまる付箋（並べ替えはしない） */
+  private matchedMemos(): SceneMemo[] {
+    const currentKey = this.currentKey;
+    const query = this.query.trim();
+    return this.memos.filter((memo) => {
       const key = paths.normalizeForComparison(memo.filePath);
       if (this.onlyCurrent && currentKey && key !== currentKey) return false;
       if (this.tag && memo.tag !== this.tag) return false;
       if (query && !`${memo.tag} ${memo.text}`.includes(query)) return false;
       return true;
     });
+  }
 
-    if (!currentKey) return matched;
-    // **いま開いている話を先頭へ。** 書いている場面の付箋が
-    // 下のほうにあると、横に並べた意味が薄れる
-    const here = matched.filter(
-      (memo) => paths.normalizeForComparison(memo.filePath) === currentKey
+  /**
+   * 絞り込みに当てはまるAIの指摘。
+   *
+   * **タグの絞り込みは、指摘にも同じ言葉で効かせる**（種類の呼び名を
+   * タグの代わりに見る）。片方にしか効かないと、絞り込んだ瞬間に
+   * 指摘だけが消えて、消えた理由が画面から読み取れない。
+   */
+  private matchedFindings(): PlacedFinding[] {
+    const currentKey = this.currentKey;
+    const query = this.query.trim();
+    return this.findings.filter((finding) => {
+      const key = paths.normalizeForComparison(finding.filePath);
+      if (this.onlyCurrent && currentKey && key !== currentKey) return false;
+      const label = findingCategoryLabel(finding.category);
+      if (this.tag && label !== this.tag) return false;
+      if (
+        query &&
+        !`${label} ${findingHeadline(finding)} ${finding.message} ${finding.original}`.includes(
+          query
+        )
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  /** 書き出す1枚の材料。**並びは「この話 → その他」**（付箋だけ） */
+  private visibleMemos(): SceneMemo[] {
+    return this.currentFirst(sortMemos(this.matchedMemos(), this.order));
+  }
+
+  /**
+   * 画面へ出す一覧。**付箋とAIの指摘を、話数 → 行の順に混ぜたもの**
+   * （設計書6.96.5）。
+   *
+   * 並べ方そのものは `core/sceneMemoRows.ts` が決める。ここでするのは
+   * 「いま開いている話を先頭へ」の入れ替えだけである。
+   */
+  private visibleRows(): NoteRow[] {
+    const merged = mergeNoteRows(
+      this.matchedMemos(),
+      this.matchedFindings(),
+      this.order
     );
-    const rest = matched.filter(
-      (memo) => paths.normalizeForComparison(memo.filePath) !== currentKey
+    if (!this.currentKey) return merged;
+    /*
+      **入れ替えても、同じ場所の行は離れない。** 並びはファイル単位で
+      切れているので、動くのはファイルごとの塊である。ただし
+      「直前と同じ場所」の印は先頭でも立ったままになるので、付け直す。
+    */
+    return markSameLine(this.currentFirst(merged));
+  }
+
+  /**
+   * いま開いている話を先頭へ寄せる。
+   *
+   * 書いている場面のものが下のほうにあると、横に並べた意味が薄れる。
+   */
+  private currentFirst<T extends { filePath: string }>(rows: T[]): T[] {
+    const currentKey = this.currentKey;
+    if (!currentKey) return rows;
+    const here = rows.filter(
+      (row) => paths.normalizeForComparison(row.filePath) === currentKey
+    );
+    const rest = rows.filter(
+      (row) => paths.normalizeForComparison(row.filePath) !== currentKey
     );
     return [...here, ...rest];
   }
 
   private post(): void {
-    const rows = this.visibleMemos();
-    const currentKey = this.currentFile
-      ? paths.normalizeForComparison(this.currentFile)
-      : null;
+    const rows = this.visibleRows();
+    const currentKey = this.currentKey;
     const currentCount = currentKey
       ? this.memos.filter(
           (memo) => paths.normalizeForComparison(memo.filePath) === currentKey
@@ -605,6 +843,7 @@ class SceneMemoPanel {
     const breakdown = byTag
       .map((entry) => `${entry.tag} ${entry.count}`)
       .join("／");
+    const total = this.memos.length + this.findings.length;
 
     void this.panel.webview.postMessage({
       type: "memos",
@@ -613,52 +852,120 @@ class SceneMemoPanel {
         countsLabel:
           (currentKey ? `この話 ${currentCount}件／` : "") +
           `作品 ${this.memos.length}件` +
-          (breakdown ? `　（${breakdown}）` : ""),
-        rows: rows.map((memo) => this.toRow(memo, currentKey)),
+          (breakdown ? `　（${breakdown}）` : "") +
+          // **指摘は付箋と別に数える。** 作者が書いた件数と機械が挙げた
+          // 件数が1つの数字に溶けると、どちらが増えたのか分からない
+          (this.findings.length > 0
+            ? `　AIの指摘 ${this.findings.length}件`
+            : ""),
+        rows: rows.map((row) => this.toRow(row, currentKey)),
         hasCurrent: currentKey !== null,
+        // 書き出すのは付箋だけなので、指摘しか出ていないときは押せない
+        hasMemosToExport: rows.some((row) => row.kind === "memo"),
         onlyCurrent: this.onlyCurrent,
         tag: this.tag,
-        tags: byTag.map((entry) => entry.tag),
+        tags: this.tagChoices(byTag),
         query: this.query,
         activeKey: this.activeKey,
         totalCount: this.memos.length,
         notice: this.notices.join(" "),
         emptyMessage:
-          this.memos.length === 0
+          total === 0
             ? `この作品にシーンメモはありません。${MEMO_HINT}（読者向けの出力とAIには渡りません）。`
-            : "絞り込みに当てはまるメモがありません。",
-        colors: colorsFor(),
+            : "絞り込みに当てはまるものがありません。",
+        colors: { ...colorsFor(), ...findingColorVars(isDarkTheme()) },
       },
     });
   }
 
-  private toRow(
-    memo: SceneMemo,
-    currentKey: string | null
-  ): Record<string, unknown> {
-    const where = this.labelOf(memo);
+  /**
+   * 絞り込みの選択肢。**付箋のタグと、AIの指摘の種類を同じ一覧に並べる。**
+   *
+   * 並べ替えは種類で分けないが（6.96.5）、**探すときは種類で絞れたほうが
+   * よい**——「矛盾だけ見たい」は直す順序ではなく探し方の話である。
+   * いま在るものだけを出す（無い種類を選べても空になるだけ）。
+   */
+  private tagChoices(
+    byTag: ReadonlyArray<{ tag: string; count: number }>
+  ): string[] {
+    const choices = byTag.map((entry) => entry.tag);
+    for (const finding of this.findings) {
+      const label = findingCategoryLabel(finding.category);
+      if (!choices.includes(label)) choices.push(label);
+    }
+    return choices;
+  }
+
+  private toRow(row: NoteRow, currentKey: string | null): Record<string, unknown> {
     const isCurrent =
       currentKey !== null &&
-      paths.normalizeForComparison(memo.filePath) === currentKey;
+      paths.normalizeForComparison(row.filePath) === currentKey;
+    // どの話を書いているか分からないうちは、「その他」と書かない
+    // （何に対する「その他」なのかが伝わらない）
+    const section =
+      currentKey === null
+        ? "この作品のメモ"
+        : isCurrent
+          ? "いま開いている話"
+          : "その他の話";
+
+    if (row.kind === "memo") {
+      const memo = row.memo;
+      const where = this.labelOf(memo);
+      return {
+        kind: "memo",
+        key: memoKey(memo),
+        filePath: memo.filePath,
+        line: memo.line,
+        sameLine: row.sameLine,
+        tag: memo.tag,
+        tagClass: memoTagClass(memo.tag),
+        text: memo.text,
+        note: "",
+        raw: memo.raw,
+        chapterLabel: where.label,
+        title: where.title,
+        section,
+      };
+    }
+
+    const finding = row.finding;
     return {
-      key: memoKey(memo),
-      filePath: memo.filePath,
-      line: memo.line,
-      tag: memo.tag,
-      tagClass: memoTagClass(memo.tag),
-      text: memo.text,
-      raw: memo.raw,
-      chapterLabel: where.label,
-      title: where.title,
-      // どの話を書いているか分からないうちは、「その他」と書かない
-      // （何に対する「その他」なのかが伝わらない）
-      section:
-        currentKey === null
-          ? "この作品のメモ"
-          : isCurrent
-            ? "いま開いている話"
-            : "その他の話",
+      kind: "finding",
+      // 付箋の鍵（`行:道`）と重ならない形にする。同じ一覧で引くため
+      key: `f:${finding.id}`,
+      findingId: finding.id,
+      filePath: finding.filePath,
+      line: finding.line,
+      sameLine: row.sameLine,
+      tag: findingCategoryLabel(finding.category),
+      tagClass: FINDING_DOT_CLASS,
+      text: findingHeadline(finding),
+      note: findingNote(finding),
+      raw: "",
+      chapterLabel: this.labelAt(finding.filePath).label,
+      title: this.labelAt(finding.filePath).title,
+      // **渡す先が無ければ「直す」を出さない**（押しても何も起きない口を
+      // 作らない）。見送りはこの画面だけで完結するので、常に出る
+      canFix: this.deps.handOverFinding !== undefined,
+      section,
     };
+  }
+
+  /**
+   * その場所の呼び名（AIの指摘用）。
+   *
+   * **付箋のように1件ずつの索引を持たない。** 指摘は開くたびに位置が
+   * 決まり直すので、ファイル単位の見出しで引く。合本では範囲表記に
+   * なるが、行番号は正しいので飛び先は変わらない。
+   */
+  private labelAt(filePath: string): { label: string; title: string } {
+    return (
+      this.chapterLabels.get(paths.normalizeForComparison(filePath)) ?? {
+        label: paths.basename(filePath),
+        title: "",
+      }
+    );
   }
 }
 
@@ -702,10 +1009,15 @@ function describeWriteFailure(reason: string): string {
  * 明るい配色と暗い配色のどちらか、だけである。
  */
 function colorsFor(): Record<string, string> {
-  const dark =
+  return memoColorVars(isDarkTheme());
+}
+
+/** いま暗い配色か。**色の選び方は `core` にあり、ここは明暗を見るだけ** */
+function isDarkTheme(): boolean {
+  return (
     vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark ||
-    vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast;
-  return memoColorVars(dark);
+    vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast
+  );
 }
 
 function messageOf(error: unknown): string {

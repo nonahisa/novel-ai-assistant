@@ -87,4 +87,46 @@ describe("シーンメモのパネルのHTML", () => {
     expect(html).not.toContain("parseMemos");
     expect(html).not.toContain("readTextFile");
   });
+
+  /* ── AIの指摘を混ぜる（設計書6.96.5） ───────────────── */
+
+  /**
+   * 作者の指示（2026-09-19）「提案を種類にこだわらず、該当位置順で
+   * まとめて並べる」。**指摘に付く口は2つだけ**——種類ごとの道へ渡す
+   * 「直す」と、記録を足す「見送る」である。
+   */
+  it("AIの指摘には、直すと見送るの口がある", () => {
+    expect(html).toContain('post("fix"');
+    expect(html).toContain('post("dismissFinding"');
+    expect(html).toContain("直す");
+    expect(html).toContain("見送る");
+  });
+
+  /**
+   * **本文を書き換える口を、この画面に持たせない**（6.96.5・6.96.6）。
+   * 「直す」は指摘を渡すだけで、当てるのは提案パネルの既存の処理である。
+   */
+  it("指摘を本文へ当てる口は無い", () => {
+    expect(html).not.toContain("writeTextFile");
+    expect(html).not.toContain('post("apply"');
+  });
+
+  /** 渡す先が無ければ「直す」を出さない（押しても何も起きない口を作らない） */
+  it("直すは、渡す先があるときだけ出る", () => {
+    expect(html).toContain("row.canFix");
+  });
+
+  /** **同じ行に複数来たら、その行にまとめて出す**（6.96.5） */
+  it("同じ行の2件目からは、場所を繰り返さない", () => {
+    expect(html).toContain("row.sameLine");
+    expect(html).toContain("same-line");
+  });
+
+  /**
+   * **指摘の印は1色**（種類で分けない。色の値は `core/sceneMemoRows.ts`）。
+   * 分けたいのは「作者が書いたか、機械が挙げたか」だけである。
+   */
+  it("AIの指摘の色もCSS変数で受ける", () => {
+    expect(html).toContain("var(--novelai-memo-ai");
+  });
 });
