@@ -8,11 +8,16 @@ import {
   type Prerequisite,
   type PrerequisiteInfo,
 } from "../core/prerequisites";
+import {
+  hasEpisodePlotFile,
+  hasSettingsRecords,
+  hasSynopsisEpisodes,
+  hasWrittenPlot,
+} from "../core/prerequisiteCheck";
 import { CharacterStore } from "../core/characterStore";
 import { createLocationStore, createWorldStore } from "../core/abilityStore";
 import { SynopsisStore } from "../core/synopsisStore";
 import { readPlotText } from "../core/plotFile";
-import { isBlankPlotSection, parsePlotMarkdown } from "../core/plotDoc";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { EPISODE_PLOTS_DIR } from "../core/resumeSheet";
 import { cancelItem, isCancelItem } from "../views/dialogs";
@@ -75,7 +80,9 @@ async function hasPrerequisite(
   try {
     if (kind === "settings") return await hasSettings(work);
     if (kind === "synopsis") {
-      return (await new SynopsisStore(work).load()).episodes.length > 0;
+      return hasSynopsisEpisodes(
+        (await new SynopsisStore(work).load()).episodes.length
+      );
     }
     if (kind === "plot") return hasWrittenPlot(await readPlotText(work));
     return await hasEpisodePlot(work);
@@ -93,12 +100,9 @@ async function hasPrerequisite(
 }
 
 /**
- * 設定資料があるか。
- *
- * **矛盾検知と同じ数え方にする**（`checkContradictions.ts` の
- * `collectSettings`）。あちらは人物（モブを除く）・場所・世界観のどれかが
- * あれば走る。関門だけ別の数え方をすると、「関門は通ったのに機能が
- * 走らない」「関門で止められたのに機能なら走れた」が起きる。
+ * 設定資料があるか。**読むのがここの仕事で、数え方は
+ * `core/prerequisiteCheck.ts` が持つ**——同じ規則を外部AIの口（MCP）も
+ * 使うので、写しを作らない。
  */
 async function hasSettings(work: WorkEntry): Promise<boolean> {
   const [characters, locations, world] = await Promise.all([
@@ -106,22 +110,11 @@ async function hasSettings(work: WorkEntry): Promise<boolean> {
     createLocationStore(work).loadAll(),
     createWorldStore(work).loadAll(),
   ]);
-  return (
-    characters.characters.some((character) => !character.isMob) ||
-    locations.records.length > 0 ||
-    world.records.length > 0
-  );
-}
-
-/**
- * プロットに中身があるか。
- *
- * **見出しだけの雛形は「無い」と数える**（`checkDeviations.ts` の
- * `loadPlot` と同じ）。照らし合わせる相手にならないからである。
- */
-function hasWrittenPlot(text: string): boolean {
-  const sections = parsePlotMarkdown(text).sections;
-  return Object.values(sections).some((body) => !isBlankPlotSection(body));
+  return hasSettingsRecords({
+    characters: characters.characters,
+    locationCount: locations.records.length,
+    worldCount: world.records.length,
+  });
 }
 
 /**
@@ -151,8 +144,10 @@ async function hasEpisodePlot(work: WorkEntry): Promise<boolean> {
     // 置き場そのものが無い＝1つも作っていない。記録には残さない
     return false;
   }
-  return entries.some(
-    ([name, type]) => type === vscode.FileType.File && name.endsWith(".md")
+  return hasEpisodePlotFile(
+    entries
+      .filter(([, type]) => type === vscode.FileType.File)
+      .map(([name]) => name)
   );
 }
 

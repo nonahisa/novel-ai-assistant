@@ -2,6 +2,12 @@ import * as nodePath from "node:path";
 import { parseCollectedFile } from "../../core/collectedFile";
 import { parseEpisodeFileName } from "../../core/episodeParser";
 import { parseEpisodeMetadata } from "../../core/metadataParser";
+import {
+  PREREQUISITE_KINDS,
+  prerequisiteStatuses,
+  type PrerequisiteStatus,
+} from "../../core/featurePrerequisites";
+import { presentPrerequisites } from "./prerequisiteState";
 import { FOLDER_INPUT, bodyDirOf, listBodyFiles, readBody } from "./shared";
 
 /**
@@ -36,6 +42,16 @@ export interface WorkScanResult {
   episodes: ScannedEpisode[];
   /** 読めなかったファイル（競合マーカーを含むものもここ） */
   skipped: Array<{ filePath: string; reason: string }>;
+  /**
+   * いま何が揃っているか（設計書6.94、0.67.3）。
+   *
+   * **道具を増やさずにここへ足した。** 一覧（`tools/list`）は繋いだ瞬間に
+   * 読まれるので、道具を1本増やすたびに会話のたびの費用が増える。走査は
+   * どのみち最初に呼ばれるので、そのついでに返すのがいちばん安い。
+   *
+   * `ready: false` の feature を呼ぶと、`novel.run` などは**実行せずに断る**。
+   */
+  prerequisites: readonly PrerequisiteStatus[];
 }
 
 export function workScan(input: { folder: string }): WorkScanResult {
@@ -87,5 +103,13 @@ export function workScan(input: { folder: string }): WorkScanResult {
     });
   }
 
-  return { bodyDir, fileCount: files.length, episodes, skipped };
+  return {
+    bodyDir,
+    fileCount: files.length,
+    episodes,
+    skipped,
+    prerequisites: prerequisiteStatuses(
+      presentPrerequisites(input.folder, PREREQUISITE_KINDS)
+    ),
+  };
 }

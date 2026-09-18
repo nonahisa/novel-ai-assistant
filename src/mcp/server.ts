@@ -193,7 +193,13 @@ server.registerTool(
     description:
       "本文（`本文/` が無ければ直下）の .txt / .md を読み、話数・サブタイトル・字数を返します。" +
       "合本（1ファイルに複数話）は話ごとに分けます。**読むだけ**です。" +
-      "ここで返る相対パスを filePath に使います。",
+      "ここで返る相対パスを filePath に使います。" +
+      /*
+        **前提はここで返す**（設計書6.94、0.67.3）。道具を増やすと一覧が
+        太り、繋ぐたびの費用になる。走査はどのみち最初に呼ばれる
+      */
+      "設定資料・各話あらすじ・プロット・単話プロットが揃っているかも返します" +
+      "（prerequisites）。",
     inputSchema: WORK_SCAN_INPUT,
   },
   tool("novel.scan", workScan)
@@ -235,7 +241,12 @@ server.registerTool(
     description:
       "その機能を、指定した行き先（runner）で通します。ollama なら**検算済みの結果だけ**を" +
       "返します（model が要ります）。claude は応答を novel.validate へ戻してください。" +
-      "原稿も台帳も書き換えません。",
+      "原稿も台帳も書き換えません。" +
+      /*
+        **前提の一覧はここへ書かない**（novel.scan が返す）。feature ごとに
+        書くと同じ表が一覧に載り、繋ぐたびに読まれる
+      */
+      "前提（設定資料など）の要る feature は、足りなければ実行せずに断ります。",
     inputSchema: NOVEL_RUN_INPUT,
   },
   tool("novel.run", (args: FeatureCallInput) => novelRun(args))

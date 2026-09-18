@@ -10,11 +10,17 @@ import {
   type FeatureName,
 } from "../../core/mcpFeatures";
 import {
+  featureNeeds,
+  featurePrerequisiteRefusal,
+  missingFeaturePrerequisites,
+} from "../../core/featurePrerequisites";
+import {
   FOLDER_INPUT,
   McpToolError,
   OLLAMA_INPUT,
   RUNNER_INPUT,
 } from "./shared";
+import { presentPrerequisites } from "./prerequisiteState";
 import { assertRunner, responseInput, type RunnerKind } from "./run";
 import { typoPrompt, typoRun, typoValidate } from "./typo";
 import { proofreadPrompt, proofreadRun, proofreadValidate } from "./proofread";
@@ -696,7 +702,35 @@ function chatArgs(input: FeatureCallInput): {
 
 /* ── 転送層から呼ばれる入口 ─────────────────────────────── */
 
+/**
+ * 前提が揃っていなければ、**実行せずに断る**（設計書6.94、0.67.3）。
+ *
+ * 作者の指示（2026-09-18）「外部AIでも同様です」。画面には関門が立ったが、
+ * 外部AIは前提を知らないまま呼び、**材料の無いまま答えを受け取っていた**
+ * ——設定資料の無い作品で矛盾検知を回すと、AIは本文だけを見て矛盾を作り出す。
+ *
+ * **代わりの道は勝手に走らせない。** 名前を返して、呼び直してもらう
+ * （`core/featurePrerequisites.ts` の断り書き）。
+ *
+ * **`novel.validate` には掛けない。** そこまで来ているということは、AIが
+ * もう答えているということである。答えを捨てさせる理由は無いし、材料を
+ * 組む側（`prompt`・`run`・`material`）で既に断っている。
+ */
+function assertPrerequisites(input: FeatureCallInput): void {
+  const needs = featureNeeds(input.feature);
+  if (needs.length === 0) return;
+  const missing = missingFeaturePrerequisites(
+    input.feature,
+    presentPrerequisites(input.folder, needs)
+  );
+  if (missing.length === 0) return;
+  throw new McpToolError(
+    featurePrerequisiteRefusal({ feature: input.feature, missing })
+  );
+}
+
 export function novelPrompt(input: FeatureCallInput): unknown {
+  assertPrerequisites(input);
   return FEATURES[input.feature].prompt(input);
 }
 
@@ -710,6 +744,7 @@ export function novelValidate(input: FeatureCallInput): unknown {
  * 2通りの受け止め方をしなくて済むように、ここで揃える。
  */
 export async function novelRun(input: FeatureCallInput): Promise<unknown> {
+  assertPrerequisites(input);
   return FEATURES[input.feature].run(input);
 }
 
@@ -730,5 +765,6 @@ export function novelMaterial(input: FeatureCallInput): unknown {
       `${who(input)} には novel.material がありません（材料を組めるのは ${MATERIAL_FEATURES.join("・")} だけです）。`
     );
   }
+  assertPrerequisites(input);
   return material(input);
 }

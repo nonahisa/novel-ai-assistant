@@ -176,6 +176,65 @@ export interface PrerequisiteAlternative {
   readonly why: string;
 }
 
+/** 1つの操作に付く前提と、代わりの道 */
+export interface ActionPrerequisite {
+  readonly needs: readonly Prerequisite[];
+  readonly insteadOf?: PrerequisiteAlternative;
+}
+
+/**
+ * どの操作に何が要るか。**唯一の表**（0.67.3）。
+ *
+ * **もとは `views/actionList.ts` の項目の中に直に書いてあった。** 画面
+ * （`ActionItem.needs`）はいまもそこから読むが、**外部AIの口（MCPの束）は
+ * `actionList.ts` を読めない**——あれは `vscode` を import しているので、
+ * 束に混ぜると読み込んだ瞬間に落ちる（`mcpReach.test.ts`）。
+ *
+ * かといってMCP側に写しの表を置くと、**片方だけが古くなる**。画面では
+ * 止まるのにMCPでは通る、あるいはその逆が起きて、しかも**どちらが正しいのか
+ * 分からない**。だから表はここに1つだけ置き、画面もMCPもここを読む。
+ *
+ * **推測で増やさない**（6.94.2）。入っているのは、操作の説明文（`detail`）に
+ * 前提が文章として書いてある4件だけである。
+ */
+export const ACTION_PREREQUISITES: Readonly<
+  Record<string, ActionPrerequisite>
+> = {
+  // 根拠は説明文の「各話あらすじを材料にするため、先にあらすじを…」
+  "novelai.generatePlot": { needs: ["synopsis"] },
+  // 根拠は説明文の「先にプロットを書いておいてください」
+  "novelai.checkDeviations": { needs: ["plot"] },
+  // 根拠は説明文の「先に『単話プロットを作る』で展開を書いて…」
+  "novelai.checkEpisodePlot": { needs: ["episodePlot"] },
+  "novelai.checkContradictions": {
+    // 根拠は説明文の「先に設定資料を抽出しておいてください」
+    needs: ["settings"],
+    // **代わりの道が実際にある唯一の組**（設計書6.88）。「矛盾検知
+    // （事実の照合）」は、説明文に「設定資料が無くても実行できます」とある
+    insteadOf: {
+      command: "novelai.checkFactContradictions",
+      why: "設定資料が無くても、本文どうしの食い違いを見られます。",
+    },
+  },
+};
+
+/**
+ * その操作の前提。無ければ空（`ActionItem` へ展開して使う）。
+ *
+ * **戻り値を `ActionItem` の形に合わせてある**——`{ ...prerequisiteOf(command) }`
+ * と書けば、前提の無い操作では何も足されない。
+ */
+export function prerequisiteOf(command: string): {
+  needs?: readonly Prerequisite[];
+  insteadOf?: PrerequisiteAlternative;
+} {
+  const found = ACTION_PREREQUISITES[command];
+  if (!found) return {};
+  return found.insteadOf
+    ? { needs: found.needs, insteadOf: found.insteadOf }
+    : { needs: found.needs };
+}
+
 /**
  * 相談とマニュアルへ出す、前提の1行。
  *

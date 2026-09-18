@@ -1,5 +1,7 @@
 import {
   ACTION_TREE,
+  findAction,
+  isItemVisibleInRuntime,
   prerequisiteNoteOf,
   visibleEntries,
   type ActionItem,
@@ -7,10 +9,16 @@ import {
 import { canRunProcesses } from "../core/runtime";
 import {
   selectGuideBundles,
+  DEFAULT_BUNDLE_BUDGET,
   type GuideBundle,
   type GuideSelection,
 } from "../core/guideSelect";
 import { detectChatTopic, type ChatTopic } from "../core/chatTopic";
+import {
+  renderProcedure,
+  selectProcedure,
+  type ProcedureActionInfo,
+} from "../core/procedures";
 
 /**
  * 「この拡張機能の使い方」をAIへ渡すための説明を組み立てる。
@@ -58,6 +66,14 @@ import { detectChatTopic, type ChatTopic } from "../core/chatTopic";
  * 比べるより確かである。**
  * 作者が読むマニュアル（`openManual.ts`）は `EXTRA_GUIDE` だけを使い、
  * 操作の説明は `ACTION_TREE` から独自に（全文で）組み立てている。
+ *
+ * ## 説明だけでは順路にならなかった（2026-09-18）
+ *
+ * 目次と束が渡すのは「何ができるか」だけで、**どういう順でやるか、
+ * 途中で何を見て決めるか**が無い。作者はプログラマではないので、
+ * 操作の一覧を渡されても順路が分からない。そこで**手順書き**
+ * （`core/procedures.ts`）を足した。質問に合うものが1本だけあれば渡し、
+ * 無ければこれまでどおり説明だけを渡す。
  */
 
 /**
@@ -372,13 +388,10 @@ export function buildFeatureGuideForQuestion(input: {
   selected: string[];
   reason: GuideSelection["reason"];
   topic: ChatTopic;
+  /** 渡した手順書きの題。渡さなかった回は undefined（記録用） */
+  procedure?: string;
 } {
   const bundles = buildGuideBundles();
-  const selection = selectGuideBundles({
-    question: input.question,
-    recentAuthorTurns: input.recentAuthorTurns,
-    bundles,
-  });
   // 束選びをもう一度走らせることになるが、**判定の規則は1か所に置く**ほうが
   // 大事である（「選ばれたら howto」をここへ書くと、`chatTopic.ts` と
   // 同じ規則を2か所で持つことになる）。突き合わせは文字列の包含だけなので軽い
@@ -388,9 +401,51 @@ export function buildFeatureGuideForQuestion(input: {
     bundles,
   });
 
+  /*
+    **手順書きは、創作の相談には渡さない**（`core/procedures.ts`）。
+
+    目次を落とす回（`craft`）は、操作の名前を1つも渡さないと決めた回である。
+    そこへ順路だけを置くと、名前の出どころが手順書きしか無くなり、
+    「目次に無い機能は存在しません」という約束と食い違う。
+  */
+  const procedure =
+    topic === "craft"
+      ? undefined
+      : selectProcedure({
+          question: input.question,
+          recentAuthorTurns: input.recentAuthorTurns,
+        });
+  const procedureText = procedure
+    ? renderProcedure(procedure, procedureActionLookup)
+    : "";
+
+  /*
+    **手順書きを渡した分だけ、説明の予算を減らす。**
+
+    手順書きは操作の名前を並べるので、同じ話題の束とは必ず一部が重なる。
+    両方を満額で渡すと、同じことに二度払うことになる。予算を分け合えば、
+    重なった分は自然と説明の側が削れる（当たりの薄い束から落ちる）。
+  */
+  const selection = selectGuideBundles({
+    question: input.question,
+    recentAuthorTurns: input.recentAuthorTurns,
+    bundles,
+    budget: DEFAULT_BUNDLE_BUDGET - procedureText.length,
+  });
+
   // 迷ったとき（`unknown`）は渡す側へ倒す。落として答えられなくなるより、
   // 載せて無駄になるほうがよい
   const blocks = [topic === "craft" ? NO_INDEX_NOTICE : buildFeatureIndex()];
+  if (procedureText) {
+    // **順路を、説明より先に置く。** 作者が知りたいのは「どの順でやるか」で、
+    // 操作ごとの説明はその裏づけである
+    blocks.push(
+      [
+        "【この仕事の手順（この順で通ります。押す場所は目次から探してください）】",
+        procedureText,
+      ].join("\n")
+    );
+  }
   if (selection.selected.length > 0) {
     // **目次と説明を見出しで分ける。** どちらも「■ 分類」で始まるので、
     // 見出しが無いと「説明のある操作だけが全部」と読まれかねない
@@ -407,6 +462,33 @@ export function buildFeatureGuideForQuestion(input: {
     selected: selection.selected.map((bundle) => bundle.label),
     reason: selection.reason,
     topic,
+    ...(procedureText && procedure ? { procedure: procedure.title } : {}),
+  };
+}
+
+/**
+ * 手順書きの段が指す操作を、`ACTION_TREE` から引く。
+ *
+ * **名前も補足も前提も、木にあるものをそのまま渡す。** 手順書き
+ * （`core/procedures.ts`）はコマンドIDしか持っていないので、写しが
+ * 生まれる余地はここで塞いである。
+ *
+ * この環境の画面に出ない操作（`browserOnly`）は引かない。目次と束を
+ * 絞る規則と揃える——手順書きだけが、探しても見つからない操作を
+ * 案内してしまうことのないように。
+ */
+function procedureActionLookup(
+  command: string
+): ProcedureActionInfo | undefined {
+  const action = findAction(command);
+  if (!action) return undefined;
+  if (!isItemVisibleInRuntime(action, canRunProcesses())) return undefined;
+
+  const needs = prerequisiteNoteOf(action);
+  return {
+    label: action.label,
+    ...(action.note ? { note: action.note } : {}),
+    ...(needs ? { prerequisiteNote: needs } : {}),
   };
 }
 

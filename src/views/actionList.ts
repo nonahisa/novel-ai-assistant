@@ -16,6 +16,7 @@ import {
 import { canRunProcesses } from "../core/runtime";
 import {
   prerequisiteNote,
+  prerequisiteOf,
   type Prerequisite,
   type PrerequisiteAlternative,
 } from "../core/prerequisites";
@@ -551,8 +552,9 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         requiresWork: true,
         usesAI: true,
         // 前提は説明文の最後の一文（「各話あらすじを材料にするため…」）が
-        // 根拠。文はそのまま残す——画面のホバーで読めるほうが親切である
-        needs: ["synopsis"],
+        // 根拠。文はそのまま残す——画面のホバーで読めるほうが親切である。
+        // 中身は `core/prerequisites.ts` の表（外部AIの口と共用する）
+        ...prerequisiteOf("novelai.generatePlot"),
         detail:
           "既に書いた本文から、ログライン・テーマ・世界観・あらすじなどを" +
           "組み立て直して プロットへ書き込みます。" +
@@ -675,7 +677,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             requiresWork: true,
             usesAI: true,
             // 根拠は説明文の「先にプロットを書いておいてください」
-            needs: ["plot"],
+            ...prerequisiteOf("novelai.checkDeviations"),
             detail:
               "書いたプロットと本文を照らし合わせ、**プロットに無い展開**や" +
               "**物語が前へ進んでいない箇所**を探します。" +
@@ -695,7 +697,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             requiresWork: true,
             usesAI: true,
             // 根拠は説明文の「先に『単話プロットを作る』で展開を書いて…」
-            needs: ["episodePlot"],
+            ...prerequisiteOf("novelai.checkEpisodePlot"),
             detail:
               "その話の単話プロット（視点・目標・展開）を見て、" +
               "**目標に向かっていない展開**や**停滞・重複**を指摘します。" +
@@ -711,15 +713,10 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             icon: "warning",
             requiresWork: true,
             usesAI: true,
-            // 根拠は説明文の「先に設定資料を抽出しておいてください」
-            needs: ["settings"],
+            // 前提（設定資料）と、代わりの道（下の「矛盾検知（事実の照合）」）。
             // **代わりの道が実際にある唯一の組**（設計書6.88）。
-            // 下の「矛盾検知（事実の照合）」は、説明文に
-            // 「設定資料が無くても実行できます」と書いてある
-            insteadOf: {
-              command: "novelai.checkFactContradictions",
-              why: "設定資料が無くても、本文どうしの食い違いを見られます。",
-            },
+            // 中身は `core/prerequisites.ts` の表（外部AIの口と共用する）
+            ...prerequisiteOf("novelai.checkContradictions"),
             detail:
               "設定資料と本文が食い違っている箇所を探します。" +
               "**本文は書き換えません。**「設定ではこう／本文ではこう」を並べるだけで、" +

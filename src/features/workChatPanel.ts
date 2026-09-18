@@ -962,9 +962,12 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 後から確かめられないと切り分けられない
       // 話題（創作か操作か）も残す。目次を落とした回に「そんな機能はない」と
       // 答えていたら、まずここを見て判定の外れを疑う
+      // 手順書き（`core/procedures.ts`）を渡したかも残す。順路を教えたのに
+      // 見当違いの答えが返ったとき、まずどの手順書きが当たったかを見る
       logStep(
         `相談: 使い方の説明 ${guide.topic}/${guide.reason} / ${guide.text.length}字` +
-          (guide.selected.length > 0 ? ` / ${guide.selected.join("、")}` : "")
+          (guide.selected.length > 0 ? ` / ${guide.selected.join("、")}` : "") +
+          (guide.procedure ? ` / 手順書き: ${guide.procedure}` : "")
       );
 
       // **診断の結果を、該当するぶんだけ足す**（設計書6.86・6.90・6.91）。

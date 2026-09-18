@@ -49,17 +49,27 @@ export interface GuideSelection {
   reason: "matched" | "none";
 }
 
-/** 選んだ束の合計字数の上限。目次と合わせても、以前の全文より短く収まる幅 */
-const DEFAULT_BUDGET = 3000;
+/**
+ * 選んだ束の合計字数の上限。目次と合わせても、以前の全文より短く収まる幅。
+ *
+ * **外へ出してあるのは、手順書き（`core/procedures.ts`）と分け合うため。**
+ * 手順書きを渡した回は、その字数だけ差し引いた予算で束を選ぶ——
+ * 両方を満額で渡すと、節約したはずの量が元に戻る。
+ */
+export const DEFAULT_BUNDLE_BUDGET = 3000;
 
 /**
- * 束を採るのに要る当たりの数。
+ * 話題に当たったと見なすのに要る、2文字組みの数。
  *
  * 1個で採っていたため、点が同じ束がメニュー順に上限まで詰め込まれていた
  * （作品の相談に3,000字近い説明が付いた）。機能名は2文字より長いので、
  * 本当に機能を指している質問は2組み以上当たる（「誤字」「字脱」「脱字」）。
+ *
+ * **手順書きの選び手（`core/procedures.ts`）も同じ数を使う。** 束と手順書きで
+ * 当たりの厳しさが違うと、「説明は付くのに手順書きは付かない」（またはその逆）が
+ * 起き、どちらの規則が効いたのかを後から説明できない。
  */
-const MIN_HITS = 2;
+export const MIN_EVIDENCE_HITS = 2;
 
 /**
  * 質問に関係しそうな束を選ぶ。
@@ -75,28 +85,21 @@ export function selectGuideBundles(input: {
   /** 選んだ束の合計字数の上限。既定 3000 */
   budget?: number;
 }): GuideSelection {
-  const budget = input.budget ?? DEFAULT_BUDGET;
-  const sources = [input.question, ...(input.recentAuthorTurns ?? [])];
-
-  // **文ごとに割ってから混ぜる。** つないでから割ると、質問の末尾と
-  // 直前の発言の先頭にまたがる、どこにも無い組みができる
-  const grams = new Set<string>();
-  for (const source of sources) {
-    for (const gram of bigrams(source)) {
-      if (!isEvidenceGram(gram)) continue;
-      grams.add(gram);
-    }
-  }
+  const budget = input.budget ?? DEFAULT_BUNDLE_BUDGET;
+  const grams = evidenceGrams([
+    input.question,
+    ...(input.recentAuthorTurns ?? []),
+  ]);
 
   const scored = input.bundles
     .map((bundle) => ({
       bundle,
-      score: countHits(bundle.text, grams),
+      score: countGramHits(bundle.text, grams),
     }))
     // **1個では偶然と区別できない。** 束はどれも数百字あるので、
     // 当たりが1つなら「その話題の説明がある」根拠にならない
     // （実データでは「描写」1個で校正の説明が付いていた）
-    .filter((entry) => entry.score >= MIN_HITS);
+    .filter((entry) => entry.score >= MIN_EVIDENCE_HITS);
 
   if (scored.length > 0) {
     // 点の高い順。同点は元の並び（メニュー順）のまま——`sort` は安定なので、
@@ -138,8 +141,32 @@ function isEvidenceGram(gram: string): boolean {
   return /^\p{Script=Han}{2}$/u.test(gram) || /^[A-Za-z]{2}$/.test(gram);
 }
 
-/** 質問側の組みのうち、束の中に現れるものの数 */
-function countHits(text: string, grams: ReadonlySet<string>): number {
+/**
+ * 質問（と直前の発言）から、話題の証拠になる2文字組みを集める。
+ *
+ * **文ごとに割ってから混ぜる。** つないでから割ると、質問の末尾と
+ * 直前の発言の先頭にまたがる、どこにも無い組みができる。
+ *
+ * **手順書きの選び手（`core/procedures.ts`）もここを呼ぶ。** 採る組みの
+ * 規則（漢字だけ・英字だけ）は上の `isEvidenceGram` の説明にある長い経緯の
+ * 結果なので、写しを作ると片方だけ古くなる。
+ */
+export function evidenceGrams(sources: readonly string[]): Set<string> {
+  const grams = new Set<string>();
+  for (const source of sources) {
+    for (const gram of bigrams(source)) {
+      if (!isEvidenceGram(gram)) continue;
+      grams.add(gram);
+    }
+  }
+  return grams;
+}
+
+/** 質問側の組みのうち、渡した文の中に現れるものの数 */
+export function countGramHits(
+  text: string,
+  grams: ReadonlySet<string>
+): number {
   let hits = 0;
   for (const gram of grams) {
     if (text.includes(gram)) hits++;
