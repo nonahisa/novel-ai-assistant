@@ -16,6 +16,7 @@ import { buildPlotTemplate } from "./plotTemplate";
 import { canRegisterWork, describeWorkLimit } from "./editorMode";
 import { currentMode } from "./actorContext";
 import { parseSeriesConfig } from "./seriesLink";
+import { isDirectory } from "./fileSystem";
 
 const STORAGE_KEY = "novelai.works";
 
@@ -32,16 +33,43 @@ export class WorkRegistry {
   /** 旧版ですでに登録済みの作品にも、起動時の安全な冪等migrationを適用する。 */
   async initialize(): Promise<void> {
     const failedTitles: string[] = [];
+    const missingTitles: string[] = [];
     // キャッシュを同期するかは設定で変えられる。起動のたびに突き合わせ、
     // 切り替えられていれば `.gitignore` へ打ち消し行を足す（設計書5.5.7）
     const syncCache = isCacheSyncEnabled();
     for (const work of this.list()) {
+      /*
+        **フォルダーが無い作品は、触らずに飛ばす。**
+
+        ここの整備は「あるものを整える」仕事であって、**無いものを作る仕事では
+        ない**。`vscode.workspace.fs.writeFile` は親フォルダーを作るので、
+        無い作品へ `.gitignore` を書きにいくと**空の作品フォルダーができあがる**。
+
+        2026-09-19、作者の `Documents` が OneDrive に丸ごと別の場所へ移された
+        直後の起動で、**登録済み全作品ぶんの空フォルダーが元の場所に作られた**。
+        作者から見ると「作品を開いたら全部空になっていた」という形になり、
+        **データが消えた場合と見分けがつかない。**
+
+        登録簿からは**消さない**。外付けドライブが繋がっていないだけ、
+        同期がまだ終わっていないだけ、ということがある。判断は作者に委ねる。
+      */
+      if (!(await isDirectory(work.folderPath))) {
+        missingTitles.push(work.title);
+        continue;
+      }
       try {
         await ensureRecoveryIgnoreRule(work.folderPath, { syncCache });
       } catch {
         // 作品登録や起動を壊さず、次回起動でも同じmigrationを再試行する。
         failedTitles.push(work.title);
       }
+    }
+    if (missingTitles.length > 0) {
+      void vscode.window.showWarningMessage(
+        `作品フォルダーが見つかりません: ${missingTitles.join("、")}。` +
+          `移動・改名されたか、ドライブが繋がっていない可能性があります。` +
+          `登録はそのまま残してあります（フォルダーを作り直してはいません）。`
+      );
     }
     if (failedTitles.length > 0) {
       await vscode.window.showWarningMessage(

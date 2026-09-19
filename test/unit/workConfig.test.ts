@@ -10,7 +10,13 @@ import {
 import { describe, expect, test, vi } from "vitest";
 import * as workRegistry from "../../src/core/workRegistry";
 import type { WorkConfig, WorkEntry } from "../../src/models/types";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
+import {
+  FileSystemError,
+  FileType,
+  Uri,
+  window,
+  workspace,
+} from "./support/vscodeStub";
 
 const parseWorkConfig = (
   workRegistry as unknown as {
@@ -270,6 +276,8 @@ describe("作品設定", () => {
       );
       await writeHostFile(gitignorePath, authorBytes);
       workspace.fs = {
+        // 起動時の整備は**フォルダーがあることを確かめてから**動く
+        stat: async () => ({ type: FileType.Directory }),
         readFile: async (uri: { fsPath: string }) =>
           new Uint8Array(await readHostFile(uri.fsPath)),
       };
@@ -298,6 +306,96 @@ describe("作品設定", () => {
       expect(update).not.toHaveBeenCalled();
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("作品フォルダーが無くなっていたら、作り直さずに知らせる", async () => {
+    /*
+      **2026-09-19の実害。** OneDrive が作者の `Documents` を丸ごと別の場所へ
+      移した直後に VS Code を起動したところ、起動7秒後に**登録済み全作品ぶんの
+      空フォルダーと `.gitignore` が、空になった元の場所に作られた**。
+
+      作者から見ると「作品を開いたら全部空になっていた」という形で出る。
+      **データが消えた場合と見分けがつかない。**
+
+      起動時の整備は「あるものを整える」仕事であって、**無いものを作る仕事では
+      ない**。フォルダーが見つからないなら、黙って作らずに知らせる。
+    */
+    const parent = await mkdtemp(path.join(os.tmpdir(), "novelai-missing-work-"));
+    const missing = path.join(parent, "消えた作品");
+    const warnings: string[] = [];
+    try {
+      workspace.fs = {
+        stat: async (uri: { fsPath: string }) => {
+          const { stat } = await import("node:fs/promises");
+          return await stat(uri.fsPath);
+        },
+        /*
+          **無いファイルには `FileSystemError`（FileNotFound）を投げる。**
+          素の `node:fs` の ENOENT のままだと、製品側は「知らない種類の失敗」と
+          見なして投げ直すので、**作り直しの経路に入らない**。
+        */
+        readFile: async (uri: { fsPath: string }) => {
+          try {
+            return new Uint8Array(await readHostFile(uri.fsPath));
+          } catch {
+            throw new FileSystemError(uri.fsPath, "FileNotFound");
+          }
+        },
+        createDirectory: async (uri: { fsPath: string }) => {
+          await mkdir(uri.fsPath, { recursive: true });
+        },
+        /*
+          **VS Code の `workspace.fs.writeFile` は、親フォルダーが無ければ作る。**
+          素の `node:fs` は作らずに ENOENT を投げるので、素のまま書くと
+          「エラーになって何も起きなかった」という**本物と違う落ち方**になり、
+          作り直しの再現にならない。
+        */
+        writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
+          await mkdir(path.dirname(uri.fsPath), { recursive: true });
+          await writeHostFile(uri.fsPath, bytes);
+        },
+        rename: async (from: { fsPath: string }, to: { fsPath: string }) => {
+          const { rename: renameHost } = await import("node:fs/promises");
+          await renameHost(from.fsPath, to.fsPath);
+        },
+      };
+      const previousWarn = window.showWarningMessage;
+      window.showWarningMessage = (async (message: string) => {
+        warnings.push(message);
+        return undefined;
+      }) as typeof window.showWarningMessage;
+
+      const context = {
+        globalState: {
+          get: <T>(_key: string, _defaultValue: T): T =>
+            [
+              {
+                id: "work_missing",
+                title: "消えた作品",
+                folderPath: missing,
+                registeredAt: "2026-09-01T00:00:00.000Z",
+              },
+            ] as T,
+          update: vi.fn(async () => undefined),
+        },
+      };
+
+      try {
+        await new workRegistry.WorkRegistry(context as never).initialize();
+      } finally {
+        window.showWarningMessage = previousWarn;
+      }
+
+      // **作り直していないこと。** ここが本題である
+      const { access } = await import("node:fs/promises");
+      await expect(access(missing)).rejects.toThrow();
+
+      // **黙っていないこと。** 見つからない作品の題を出す
+      expect(warnings.join("\n")).toContain("消えた作品");
+      expect(warnings.join("\n")).toContain("見つかりません");
+    } finally {
+      await rm(parent, { recursive: true, force: true });
     }
   });
 });

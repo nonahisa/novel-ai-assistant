@@ -1,0 +1,218 @@
+{
+ "measuredAt": "2026-09-19T08:10:35.896Z",
+ "feature": "typo",
+ "runner": "external",
+ "tool": "novel.prompt → 外で答える → novel.validate",
+ "model": "claude-sonnet",
+ "numCtx": 16384,
+ "work": {
+  "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\typo",
+  "targets": [
+   "本文\\001_霧の朝.txt",
+   "本文\\002_風の午後.txt",
+   "本文\\003_星待ちの夜.txt"
+  ]
+ },
+ "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\typo\\answers.json",
+ "plans": [
+  {
+   "filePath": "本文\\001_霧の朝.txt",
+   "chunkId": "本文\\001_霧の朝.txt#1-0@4013",
+   "chars": 1318
+  },
+  {
+   "filePath": "本文\\002_風の午後.txt",
+   "chunkId": "本文\\002_風の午後.txt#2-0@4013",
+   "chars": 1291
+  },
+  {
+   "filePath": "本文\\003_星待ちの夜.txt",
+   "chunkId": "本文\\003_星待ちの夜.txt#3-0@4013",
+   "chars": 1347
+  }
+ ],
+ "runs": [
+  {
+   "round": 1,
+   "scored": {
+    "seeds": {
+     "found": 12,
+     "total": 12,
+     "byKind": {
+      "変換ミス": {
+       "found": 3,
+       "total": 3
+      },
+      "打ちかけの字": {
+       "found": 2,
+       "total": 2
+      },
+      "助詞の重なり": {
+       "found": 1,
+       "total": 1
+      },
+      "送り仮名": {
+       "found": 2,
+       "total": 2
+      },
+      "助詞の抜け": {
+       "found": 1,
+       "total": 1
+      },
+      "衍字": {
+       "found": 2,
+       "total": 2
+      },
+      "入力ミス": {
+       "found": 1,
+       "total": 1
+      }
+     }
+    },
+    "missed": [],
+    "wrongFix": {
+     "count": 0,
+     "items": []
+    },
+    "falsePositives": {
+     "count": 0,
+     "byWord": {},
+     "byKind": {},
+     "items": []
+    },
+    "otherFlags": 0
+   },
+   "raw": [
+    {
+     "target": "本文\\001_霧の朝.txt#1-0@4013",
+     "aiText": "{\n  \"issues\": [\n    {\n      \"line\": 7,\n      \"original\": \"新らしい頁に日付を書いた\",\n      \"target\": \"新らしい\",\n      \"suggestion\": \"新しい\",\n      \"reason\": \"送り仮名の誤り\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"line\": 25,\n      \"original\": \"源治の見立ては以外とよく当たる\",\n      \"target\": \"以外\",\n      \"suggestion\": \"意外\",\n      \"reason\": \"誤変換\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"line\": 27,\n      \"original\": \"稜線が、ｈっきりと見えてくる\",\n      \"target\": \"ｈっきり\",\n      \"suggestion\": \"はっきり\",\n      \"reason\": \"入力ミス（全角英字の混入）\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"line\": 39,\n      \"original\": \"昼前には霧がが晴れて\",\n      \"target\": \"霧がが\",\n      \"suggestion\": \"霧が\",\n      \"reason\": \"衍字（助詞の重複）\",\n      \"confidence\": \"high\"\n    }\n  ]\n}\n",
+     "validated": {
+      "chunkId": "本文\\001_霧の朝.txt#1-0@4013",
+      "chapterLabel": "第1話",
+      "accepted": [
+       {
+        "line": 7,
+        "original": "新らしい頁に日付を書いた",
+        "target": "新らしい",
+        "suggestion": "新しい",
+        "reason": "送り仮名の誤り",
+        "confidence": "high"
+       },
+       {
+        "line": 25,
+        "original": "源治の見立ては以外とよく当たる",
+        "target": "以外",
+        "suggestion": "意外",
+        "reason": "誤変換",
+        "confidence": "high"
+       },
+       {
+        "line": 27,
+        "original": "稜線が、ｈっきりと見えてくる",
+        "target": "ｈっきり",
+        "suggestion": "はっきり",
+        "reason": "入力ミス（全角英字の混入）",
+        "confidence": "high"
+       },
+       {
+        "line": 39,
+        "original": "昼前には霧がが晴れて",
+        "target": "霧がが",
+        "suggestion": "霧が",
+        "reason": "衍字（助詞の重複）",
+        "confidence": "high"
+       }
+      ],
+      "rejected": []
+     }
+    },
+    {
+     "target": "本文\\002_風の午後.txt#2-0@4013",
+     "aiText": "{\n  \"issues\": [\n    {\n      \"line\": 1,\n      \"original\": \"風強くなりはじめた\",\n      \"target\": \"風強く\",\n      \"suggestion\": \"風が強く\",\n      \"reason\": \"脱字（助詞抜け）\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"line\": 5,\n      \"original\": \"今日の観測の対称は\",\n      \"target\": \"対称\",\n      \"suggestion\": \"対象\",\n      \"reason\": \"誤変換\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"line\": 7,\n      \"original\": \"空は朝からずっと曇っていている\",\n      \"target\": \"曇っていている\",\n      \"suggestion\": \"曇っている\",\n      \"reason\": \"衍字（重複入力）\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"line\": 33,\n      \"original\": \"源治なら知っているかもしれあい\",\n      \"target\": \"しれあい\",\n      \"suggestion\": \"しれない\",\n      \"reason\": \"入力ミス\",\n      \"confidence\": \"high\"\n    }\n  ]\n}\n",
+     "validated": {
+      "chunkId": "本文\\002_風の午後.txt#2-0@4013",
+      "chapterLabel": "第2話",
+      "accepted": [
+       {
+        "line": 1,
+        "original": "風強くなりはじめた",
+        "target": "風強く",
+        "suggestion": "風が強く",
+        "reason": "脱字（助詞抜け）",
+        "confidence": "high"
+       },
+       {
+        "line": 5,
+        "original": "今日の観測の対称は",
+        "target": "対称",
+        "suggestion": "対象",
+        "reason": "誤変換",
+        "confidence": "high"
+       },
+       {
+        "line": 7,
+        "original": "空は朝からずっと曇っていている",
+        "target": "曇っていている",
+        "suggestion": "曇っている",
+        "reason": "衍字（重複入力）",
+        "confidence": "high"
+       },
+       {
+        "line": 33,
+        "original": "源治なら知っているかもしれあい",
+        "target": "しれあい",
+        "suggestion": "しれない",
+        "reason": "入力ミス",
+        "confidence": "high"
+       }
+      ],
+      "rejected": []
+     }
+    },
+    {
+     "target": "本文\\003_星待ちの夜.txt#3-0@4013",
+     "aiText": "{\n  \"issues\": [\n    {\n      \"line\": 5,\n      \"original\": \"律は暑いお茶を両手で包んだ\",\n      \"target\": \"暑いお茶\",\n      \"suggestion\": \"熱いお茶\",\n      \"reason\": \"誤変換\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"line\": 27,\n      \"original\": \"律はｓっと立ち上がり\",\n      \"target\": \"ｓっと\",\n      \"suggestion\": \"すっと\",\n      \"reason\": \"入力ミス（全角英字の混入）\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"line\": 43,\n      \"original\": \"手をついて、ゆっくりりと立ち上がった\",\n      \"target\": \"ゆっくりり\",\n      \"suggestion\": \"ゆっくり\",\n      \"reason\": \"衍字（重複入力）\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"line\": 53,\n      \"original\": \"欄外に短かい一行を足した\",\n      \"target\": \"短かい\",\n      \"suggestion\": \"短い\",\n      \"reason\": \"送り仮名の誤り\",\n      \"confidence\": \"high\"\n    }\n  ]\n}\n",
+     "validated": {
+      "chunkId": "本文\\003_星待ちの夜.txt#3-0@4013",
+      "chapterLabel": "第3話",
+      "accepted": [
+       {
+        "line": 5,
+        "original": "律は暑いお茶を両手で包んだ",
+        "target": "暑いお茶",
+        "suggestion": "熱いお茶",
+        "reason": "誤変換",
+        "confidence": "high"
+       },
+       {
+        "line": 27,
+        "original": "律はｓっと立ち上がり",
+        "target": "ｓっと",
+        "suggestion": "すっと",
+        "reason": "入力ミス（全角英字の混入）",
+        "confidence": "high"
+       },
+       {
+        "line": 43,
+        "original": "手をついて、ゆっくりりと立ち上がった",
+        "target": "ゆっくりり",
+        "suggestion": "ゆっくり",
+        "reason": "衍字（重複入力）",
+        "confidence": "high"
+       },
+       {
+        "line": 53,
+        "original": "欄外に短かい一行を足した",
+        "target": "短かい",
+        "suggestion": "短い",
+        "reason": "送り仮名の誤り",
+        "confidence": "high"
+       }
+      ],
+      "rejected": []
+     }
+    }
+   ]
+  }
+ ]
+}
