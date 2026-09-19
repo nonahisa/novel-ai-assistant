@@ -617,6 +617,49 @@ export function dropInstructionEcho(
   return { kept, dropped };
 }
 
+/** 保存されている決まりと、今回読み取った決まりを合わせた結果 */
+export interface AbilitySystemRulesMerge {
+  /** `設定/ability_system.json` へ書く決まり */
+  rules: string[];
+  /**
+   * **既に保存されていたほうから外した指示文。**
+   *
+   * 今回のAIの答えから落とした分（`instruction_echo` の除外）とは分けて
+   * 持つ。作者から見れば「いま混ざりかけたものを止めた」と「前に混ざって
+   * しまったものを掃除した」は別の出来事で、同じ件数にまとめると
+   * **何度抽出しても同じ件数が出続ける**ように見える。
+   */
+  droppedFromSaved: string[];
+}
+
+/**
+ * 保存済みの決まりへ、今回の決まりを足す。
+ *
+ * **積み増すだけでは、過去に混ざった指示文が永久に残る**（作者の裁定、
+ * 2026-09-19）。0.69.2 で入れた検算は「これから保存するもの」しか見ないので、
+ * 実機で既に `設定/ability_system.json` へ入ってしまった6文は、何度抽出し直
+ * しても消えなかった。**保存のたびに、保存済みのほうも同じ物差しに通す。**
+ *
+ * `rules` はAIが埋める欄（`authorNotes` のような作者の欄ではない）なので、
+ * 機械が掃除してよい。判定は `isInstructionEcho` ——**送った文面の7割が
+ * 書き写しで説明できる文**だけが落ちるので、作者が自分で書いた決まりが
+ * 巻き込まれることはない。
+ *
+ * @param abilityTerm その回に使っていた能力の総称（文面が差し替わるため）
+ */
+export function mergeAbilitySystemRules(
+  saved: readonly string[],
+  extracted: readonly string[],
+  abilityTerm?: string | null
+): AbilitySystemRulesMerge {
+  const cleaned = dropInstructionEcho(saved, abilityTerm);
+  return {
+    // 並びは保存済みが先。作者が画面で見慣れた順を、掃除で入れ替えない
+    rules: [...new Set([...cleaned.kept, ...extracted])],
+    droppedFromSaved: cleaned.dropped,
+  };
+}
+
 /** 能力体系の総称。空文字や記号だけの値を弾く */
 export function normalizeExtractedAbilitySystem(
   raw: unknown

@@ -7,6 +7,7 @@ import {
 import {
   dropInstructionEcho,
   isInstructionEcho,
+  mergeAbilitySystemRules,
 } from "../../src/core/settingsExtractionValidation";
 import { SettingsExtractionCollector } from "../../src/core/settingsExtractionCollect";
 import type { Chunk } from "../../src/core/chunker";
@@ -163,6 +164,59 @@ describe("見逃しと誤検出を測る", () => {
     );
     expect(prose.length).toBeGreaterThan(100);
     expect(prose.filter((line) => isInstructionEcho(line))).toEqual([]);
+  });
+});
+
+describe("保存のときに、古い指示文も落とす", () => {
+  /*
+    0.69.2 の検算は「これから保存するもの」しか見ていなかったので、**実機で
+    既に `設定/ability_system.json` へ入ってしまった6文は、何度抽出し直しても
+    残った**（`persistAbilitySystem` が `rules` を積み増すだけだったため）。
+
+    作者の裁定は「保存のときに落とす」。ここで確かめるのは、
+    **作者の作品にいま入っている6文が、次の抽出で消えること**である。
+  */
+
+  /** 作者の作品の、いまの `設定/ability_system.json`（6文＋本物2文） */
+  const SAVED = [...LEAKED, ...GENUINE];
+
+  test("作者の作品に入っている6文は、次の抽出で消える", () => {
+    const merged = mergeAbilitySystemRules(SAVED, [], "聖紋");
+    for (const rule of LEAKED) {
+      expect(merged.rules, rule).not.toContain(rule);
+    }
+    expect(merged.droppedFromSaved).toEqual(LEAKED);
+  });
+
+  test("本文から読み取った決まりは、保存済みのぶんも残る", () => {
+    const merged = mergeAbilitySystemRules(SAVED, [], "聖紋");
+    expect(merged.rules).toEqual(GENUINE);
+  });
+
+  test("今回読み取った決まりを足す。並びは保存済みが先", () => {
+    const fresh = "聖紋は水に触れると消える。";
+    const merged = mergeAbilitySystemRules(SAVED, [fresh], "聖紋");
+    expect(merged.rules).toEqual([...GENUINE, fresh]);
+  });
+
+  test("同じ決まりを二重に持たない", () => {
+    const merged = mergeAbilitySystemRules(GENUINE, [...GENUINE], "聖紋");
+    expect(merged.rules).toEqual(GENUINE);
+    expect(merged.droppedFromSaved).toEqual([]);
+  });
+
+  test("掃除するものが無ければ、件数は0のまま", () => {
+    // **毎回「N件外しました」と出ないこと。** 直ったことが伝わらなくなる
+    const merged = mergeAbilitySystemRules(GENUINE, [], "聖紋");
+    expect(merged.droppedFromSaved).toEqual([]);
+  });
+
+  test("総称が決まっている回の言い回しも、保存済みから落とす", () => {
+    const withTerm =
+      "この作品では能力を「聖紋」と総称します。abilitySystem.abilityTerm には同じ語を使ってください。";
+    const merged = mergeAbilitySystemRules([withTerm, ...GENUINE], [], "聖紋");
+    expect(merged.droppedFromSaved).toEqual([withTerm]);
+    expect(merged.rules).toEqual(GENUINE);
   });
 });
 

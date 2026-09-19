@@ -1029,12 +1029,15 @@ export async function extractCharacters(
   let settingsNotice = settingsNoticePrefix;
   /** 指示文として落とした決まり。**中身は操作ログにだけ残す**（下の logStep） */
   let echoedRules: string[] = [];
+  /** 以前の抽出で保存されていた指示文。**今回落とした分とは分けて記録する** */
+  let staleRules: string[] = [];
   try {
     const persisted = await settings.persist(work, saveKinds);
     settingsNotice = describeSettingsResult(persisted);
     echoedRules = persisted.counts.rejected
       .filter((item) => item.reason === "instruction_echo")
       .map((item) => item.name ?? "");
+    staleRules = persisted.counts.staleRules;
   } catch (error) {
     // 設定の保存に失敗しても、人物の抽出結果は保存済みである。
     // 何が保存されなかったかを伝えて続行する。
@@ -1077,6 +1080,18 @@ export async function extractCharacters(
     logStep(
       `能力の決まりから、AIへの指示文がそのまま返ってきた ${echoedRules.length}件を外しました:\n` +
         echoedRules.map((rule) => `  ${rule}`).join("\n")
+    );
+  }
+  /*
+    **以前の抽出で保存されてしまった指示文も、ここに全文が残る。**
+
+    上の行とは分けて出す——同じ見出しにまとめると、作者には「毎回同じ
+    件数が出ている」ようにしか見えず、掃除が済んだのかどうかが分からない。
+  */
+  if (staleRules.length > 0) {
+    logStep(
+      `能力の決まりに前から入っていた指示文 ${staleRules.length}件を、保存のときに外しました:\n` +
+        staleRules.map((rule) => `  ${rule}`).join("\n")
     );
   }
 
@@ -1370,6 +1385,20 @@ function describeSettingsResult(result: SettingsPersistResult): string {
   if (echoedRules > 0) {
     lines.push(
       `AIへの指示文がそのまま返ってきた ${echoedRules}件を、能力の決まりから外しました（操作ログに残してあります）。`
+    );
+  }
+
+  /*
+    **以前の抽出で保存されてしまった指示文の掃除**（作者の裁定、2026-09-19）。
+
+    上の行と分けるのは、作者にとって別の出来事だからである。あちらは
+    「いま混ざりかけたものを止めた」、こちらは「前に混ざってしまったものを
+    片づけた」。まとめると、**掃除が終わった回も同じ件数が出続ける**ように
+    見えて、直ったことが伝わらない。
+  */
+  if (counts.staleRules.length > 0) {
+    lines.push(
+      `古い指示文を ${counts.staleRules.length}件、能力の決まりから外しました（前の抽出で混ざったものです。操作ログに残してあります）。`
     );
   }
 

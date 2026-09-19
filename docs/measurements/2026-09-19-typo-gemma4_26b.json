@@ -1,0 +1,360 @@
+{
+  "measuredAt": "2026-09-19T03:41:09.953Z",
+  "feature": "typo",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:26b",
+  "numCtx": 16384,
+  "numCtxDecision": {
+    "numCtx": 16384,
+    "source": "プロンプトの長さから（製品と同じ道）",
+    "promptChars": 2436,
+    "outputTokens": 8192,
+    "contextWindow": 262144,
+    "charsPerToken": null
+  },
+  "temperature": 0,
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 262144,
+    "bundled": null,
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 18772,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": null,
+  "options": {},
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.69.2",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.1",
+  "verifyPromptVersion": null,
+  "plans": [
+    {
+      "chunkId": "本文\\001_霧の朝.txt#1-0@4013",
+      "chars": 1318,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\002_風の午後.txt#2-0@4013",
+      "chars": 1291,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\003_星待ちの夜.txt#3-0@4013",
+      "chars": 1347,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\typo",
+    "targets": [
+      "本文\\001_霧の朝.txt",
+      "本文\\002_風の午後.txt",
+      "本文\\003_星待ちの夜.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\typo\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 19686,
+      "temperature": 0,
+      "staleNote": null,
+      "metrics": {
+        "typoFound": 8,
+        "typoFoundTotal": 12,
+        "typoMissed": 4,
+        "typoWrongFix": 0,
+        "typoFalsePositives": 0,
+        "typoOtherFlags": 0,
+        "accepted": 8,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 19686
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "typoFound": {
+          "変換ミス": {
+            "found": 2,
+            "total": 3
+          },
+          "打ちかけの字": {
+            "found": 2,
+            "total": 2
+          },
+          "助詞の重なり": {
+            "found": 1,
+            "total": 1
+          },
+          "送り仮名": {
+            "found": 1,
+            "total": 2
+          },
+          "助詞の抜け": {
+            "found": 0,
+            "total": 1
+          },
+          "衍字": {
+            "found": 1,
+            "total": 2
+          },
+          "入力ミス": {
+            "found": 1,
+            "total": 1
+          }
+        },
+        "typoMissed": [
+          {
+            "file": "本文/002_風の午後.txt",
+            "kind": "助詞の抜け",
+            "wrong": "風強く",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/003_星待ちの夜.txt",
+            "kind": "変換ミス",
+            "wrong": "暑い",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/003_星待ちの夜.txt",
+            "kind": "送り仮名",
+            "wrong": "短かい",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/003_星待ちの夜.txt",
+            "kind": "衍字",
+            "wrong": "ゆっくりりと",
+            "note": "指摘が出なかった"
+          }
+        ],
+        "typoWrongFix": [],
+        "typoFalsePositives": [],
+        "typoFalsePositivesByWord": {},
+        "typoFalsePositivesByKind": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_霧の朝.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\001_霧の朝.txt#1-0@4013",
+                "chapterLabel": "第1話",
+                "accepted": [
+                  {
+                    "line": 7,
+                    "original": "新らしい頁に日付を書いた",
+                    "target": "新らしい",
+                    "suggestion": "新しい",
+                    "reason": "送り仮名",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 25,
+                    "original": "源治の見立ては以外とよく当たる",
+                    "target": "以外",
+                    "suggestion": "意外",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 27,
+                    "original": "ｈっきりと見えてくる",
+                    "target": "ｈっきりと",
+                    "suggestion": "はっきりと",
+                    "reason": "入力ミス",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 39,
+                    "original": "昼前には霧がが晴れて",
+                    "target": "霧がが",
+                    "suggestion": "霧が",
+                    "reason": "衍字",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\002_風の午後.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\002_風の午後.txt#2-0@4013",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 5,
+                    "original": "今日の観測の対称は",
+                    "target": "対称",
+                    "suggestion": "対象",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 7,
+                    "original": "ずっと曇っていている",
+                    "target": "曇っていている",
+                    "suggestion": "曇っている",
+                    "reason": "衍字",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 33,
+                    "original": "源治なら知っているかもしれあい",
+                    "target": "かもしれあい",
+                    "suggestion": "かもしれない",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\003_星待ちの夜.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\003_星待ちの夜.txt#3-0@4013",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 27,
+                    "original": "律はｓっと立ち上がり",
+                    "target": "ｓっと",
+                    "suggestion": "すっと",
+                    "reason": "入力ミス",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "typoFound": {
+      "values": [
+        8
+      ],
+      "min": 8,
+      "max": 8
+    },
+    "typoFoundTotal": {
+      "values": [
+        12
+      ],
+      "min": 12,
+      "max": 12
+    },
+    "typoMissed": {
+      "values": [
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "typoWrongFix": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "typoFalsePositives": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "typoOtherFlags": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        8
+      ],
+      "min": 8,
+      "max": 8
+    },
+    "rejected": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        19686
+      ],
+      "min": 19686,
+      "max": 19686
+    }
+  },
+  "lines": [
+    "仕込んだ誤字を拾えた（当てると本文が直るもの）: 8/12",
+    "見逃し（拾えなかった仕込み）: 4",
+    "直し方が違う（場所は当てたが、当てても直らない）: 0",
+    "誤検出（罠に付いた指摘。造語・方言・ルビ・正しい同音異義語）: 0",
+    "仕込み以外の箇所への指摘: 0",
+    "指摘（検算を通ったもの）: 8",
+    "落とした（検算で弾いたもの）: 0",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 19.7秒",
+    "num_ctx: 16384（プロンプトの長さから（製品と同じ道））",
+    "temperature: 0（製品と同じ（束が返した値））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 18.8秒"
+  ]
+}

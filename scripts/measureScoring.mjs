@@ -573,6 +573,142 @@ export function scoreContradiction(answers, results) {
   return { seeds, missed, falsePositives, kindMismatch, otherFlags };
 }
 
+/* ── 誤字脱字（P-09）の答え合わせ ──────────────────────── */
+
+/**
+ * その指摘を当てたあとの本文（の抜粋）。
+ *
+ * **製品の当て方をそのまま真似る。** AI指摘パネルは `original` の中の
+ * `target` を `suggestion` へ置き換える（`core/typoCheckValidation.ts` が
+ * 「`target` が `original` に含まれること」を検算で保証している）。
+ *
+ * **語の一致ではなく、当てた結果で測る**のには理由がある。モデルは同じ
+ * 直しを違う切り方で返してくる——「ゆっくりりと」→「ゆっくりと」と返す
+ * モデルもいれば、「りり」→「り」と返すモデルもいる。**どちらも本文は
+ * 正しく直る**のに、語だけを見比べると後者を「直し方が違う」と数えて
+ * しまう。当てた結果で見れば、切り方の好みで点が動かない。
+ */
+export function applyTypoFix(issue) {
+  const original = textOf(issue?.original);
+  const target = textOf(issue?.target);
+  const suggestion = textOf(issue?.suggestion);
+  if (!target || !original.includes(target)) return original;
+  return original.replace(target, suggestion);
+}
+
+/**
+ * 誤字脱字検知（P-09）の答え合わせ
+ * （`test/fixtures/seeded/typo/README.md` の数え方）。
+ *
+ * - **拾えた**：同じ話の `accepted[]` に、仕込みの `wrong` を引用に含み、
+ *   かつ**当てると `right` になって `wrong` が消える**指摘があるもの
+ * - **直し方が違う**：場所は当てたが、当てても直らないもの。
+ *   **拾えたには数えない**——押しても本文が正しくならない指摘である
+ * - **見逃し**：拾えなかった仕込み
+ * - **誤検出**：罠の語を引用に含み、**当てるとその語が変わってしまう**指摘。
+ *   同じ窓の中に罠があるだけで、直す先が別の語なら数えない
+ * - **仕込み以外の指摘**：どちらにも当たらなかったもの
+ *
+ * **1つの指摘は1つの仕込みにしか当たらない**（逸脱・矛盾と同じ）。
+ * 仕込みを先に、罠をあとに当てる——順序を逆にすると、仕込みと罠が
+ * 近い行にあるとき、**拾えているのに誤検出として数える**ことになる。
+ *
+ * **誤検出は「語」ではなく「指摘」で数える。** 作者が消して回るのは
+ * 指摘の件数だからである（推敲の台は語の出現数で頭打ちにしているが、
+ * あちらは「その語を何回ひらいたか」を測っている）。1つの指摘が罠の語を
+ * 2つ含むことはありうるので、`byWord` の合計は `count` より大きくなる。
+ */
+export function scoreTypo(answers, results) {
+  const byFile = acceptedByFile(results);
+
+  const seeds = { found: 0, total: 0, byKind: {} };
+  const missed = [];
+  const wrongFix = { count: 0, items: [] };
+  const falsePositives = { count: 0, byWord: {}, byKind: {}, items: [] };
+  let otherFlags = 0;
+
+  for (const episode of answers?.episodes ?? []) {
+    const file = normalizePath(episode?.file ?? "");
+    const issues = byFile.get(file) ?? [];
+    const fixed = issues.map((issue) => applyTypoFix(issue));
+    // 当たった指摘を控えておく（1つの指摘を2つの仕込みに使い回さない）
+    const used = new Set();
+
+    for (const seed of episode?.seeded ?? []) {
+      const kind = textOf(seed?.kind) || "（種別なし）";
+      const wrong = textOf(seed?.wrong);
+      const right = textOf(seed?.right);
+      const bucket = seeds.byKind[kind] ?? { found: 0, total: 0 };
+      bucket.total += 1;
+      seeds.total += 1;
+
+      const pointed = issues
+        .map((issue, at) => at)
+        .filter(
+          (at) =>
+            !used.has(at) &&
+            (textOf(issues[at]?.original).includes(wrong) ||
+              textOf(issues[at]?.target).includes(wrong))
+        );
+      const hit = pointed.find(
+        (at) => fixed[at].includes(right) && !fixed[at].includes(wrong)
+      );
+
+      if (hit !== undefined) {
+        used.add(hit);
+        bucket.found += 1;
+        seeds.found += 1;
+      } else if (pointed.length > 0) {
+        // **場所は当てている。** 直し方だけが違うので、見逃しとは分けて出す
+        used.add(pointed[0]);
+        wrongFix.count += 1;
+        wrongFix.items.push({
+          file,
+          kind,
+          wrong,
+          suggestion: textOf(issues[pointed[0]]?.suggestion),
+        });
+        missed.push({ file, kind, wrong, note: "場所は当てたが直らない" });
+      } else {
+        missed.push({ file, kind, wrong, note: "指摘が出なかった" });
+      }
+      seeds.byKind[kind] = bucket;
+    }
+
+    for (const trap of episode?.mustNotFlag ?? []) {
+      const word = textOf(trap?.word);
+      const kind = textOf(trap?.kind) || "（種別なし）";
+      for (let at = 0; at < issues.length; at += 1) {
+        if (used.has(at)) continue;
+        if (!textOf(issues[at]?.original).includes(word)) continue;
+        // **その語が変わらないなら、直す先は別の語である**
+        if (fixed[at].includes(word)) continue;
+        falsePositives.count += 1;
+        falsePositives.byWord[word] = (falsePositives.byWord[word] ?? 0) + 1;
+        falsePositives.byKind[kind] = (falsePositives.byKind[kind] ?? 0) + 1;
+        falsePositives.items.push({
+          file,
+          kind,
+          word,
+          target: textOf(issues[at]?.target),
+          suggestion: textOf(issues[at]?.suggestion),
+        });
+        // 1つの指摘を2つの罠で二重に数えない（`byWord` は語ごとに出す）
+        used.add(at);
+      }
+    }
+
+    /*
+      **仕込みにも罠にも当たらなかった指摘。** 作り物なので誤検出である
+      公算は高いが、機械には正否を決められない（書いた側が見落とした
+      誤字がありうる）。逸脱・設定資料の台と同じく、別に数える。
+    */
+    otherFlags += issues.length - used.size;
+  }
+
+  return { seeds, missed, wrongFix, falsePositives, otherFlags };
+}
+
 /* ── 設定資料の抽出（P-04a）の答え合わせ ───────────────── */
 
 /**
@@ -1254,6 +1390,28 @@ export function metricsOfRun(feature, answers, run) {
     detail.packedItems = packed.examples;
   }
 
+  /*
+    **誤字脱字（P-09）。** この作品でいちばん重い失敗が起きた場所である
+    （64件中62件が素通り）。**拾えた数と、でっち上げた数を必ず並べる**——
+    片方だけ見ると、**何も指摘しない実装が満点**になる。
+  */
+  if (feature === "typo" && answers) {
+    const scored = scoreTypo(answers, results);
+    metrics.typoFound = scored.seeds.found;
+    metrics.typoFoundTotal = scored.seeds.total;
+    metrics.typoMissed = scored.seeds.total - scored.seeds.found;
+    metrics.typoWrongFix = scored.wrongFix.count;
+    metrics.typoFalsePositives = scored.falsePositives.count;
+    metrics.typoOtherFlags = scored.otherFlags;
+
+    detail.typoFound = scored.seeds.byKind;
+    detail.typoMissed = scored.missed;
+    detail.typoWrongFix = scored.wrongFix.items;
+    detail.typoFalsePositives = scored.falsePositives.items;
+    detail.typoFalsePositivesByWord = scored.falsePositives.byWord;
+    detail.typoFalsePositivesByKind = scored.falsePositives.byKind;
+  }
+
   if (feature === "deviation" && answers) {
     const scored = scoreDeviation(answers, results);
     metrics.seeded = scored.seeds.found;
@@ -1383,6 +1541,11 @@ const LABELS = {
   mustOpen: "ひらくべき語を拾えた",
   falsePositives: "誤検出（ひらいてはいけない語をひらいた）",
   noSuggestion: "提案なし（漢字ひらきなのに修正案が空）",
+  typoFound: "仕込んだ誤字を拾えた（当てると本文が直るもの）",
+  typoMissed: "見逃し（拾えなかった仕込み）",
+  typoWrongFix: "直し方が違う（場所は当てたが、当てても直らない）",
+  typoFalsePositives: "誤検出（罠に付いた指摘。造語・方言・ルビ・正しい同音異義語）",
+  typoOtherFlags: "仕込み以外の箇所への指摘",
   seeded: "仕込んだ逸脱を拾えた",
   missed: "見逃し（拾えなかった仕込み）",
   falseFlags: "誤検出（プロットどおりの話に付いた指摘）",
@@ -1413,6 +1576,7 @@ const LABELS = {
 const DENOMINATORS = {
   ateji: "atejiTotal",
   mustOpen: "mustOpenTotal",
+  typoFound: "typoFoundTotal",
   seeded: "seededTotal",
   seededContradictions: "seededContradictionsTotal",
   settingsFound: "settingsFoundTotal",
@@ -1432,6 +1596,12 @@ const ORDER = [
   "mustOpen",
   "falsePositives",
   "packedItems",
+  // 誤字脱字。**拾えた → 見逃し → 誤検出**の順に読ませる
+  "typoFound",
+  "typoMissed",
+  "typoWrongFix",
+  "typoFalsePositives",
+  "typoOtherFlags",
   "seeded",
   "missed",
   "falseFlags",
@@ -1590,6 +1760,32 @@ export function notesFor(key, spread) {
         `　※ 1件に複数語を詰めた指摘が ${packed} 件あります（枠の上限を回避できるため、他のモデルと比べるときは注意）。`
       );
     }
+  }
+
+  /*
+    **誤字脱字は、片方だけ見ると壊れたまま満点になる。**
+
+    「何も指摘しない実装」は誤検出0で満点に見えるし、「片端から指摘する
+    実装」は拾えた数だけなら満点に見える。**両方の断りを数字の隣に置く。**
+  */
+  if (key === "typoFound") {
+    const found = Number(spread?.typoFound?.max) || 0;
+    const total = Number(spread?.typoFoundTotal?.max) || 0;
+    if (total > 0 && found === 0) {
+      notes.push(
+        "　※ 1件も拾えていません。誤検出が0でも、これは「動いている」ではありません。"
+      );
+    }
+  }
+  if (key === "typoFalsePositives" && (Number(spread?.typoFalsePositives?.max) || 0) > 0) {
+    notes.push(
+      "　※ 造語・方言・ルビ・正しい同音異義語を直そうとしています。種別ごとの内訳は記録の detail.typoFalsePositivesByKind にあります。"
+    );
+  }
+  if (key === "typoWrongFix" && (Number(spread?.typoWrongFix?.max) || 0) > 0) {
+    notes.push(
+      "　※ 場所は当てたのに、当てても本文が直らない指摘があります（押しても直らない＝作者の手間だけが増える）。"
+    );
   }
 
   /*

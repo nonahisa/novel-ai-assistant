@@ -1,5 +1,8 @@
 import { WorkEntry } from "../models/types";
-import type { RejectedSettingCandidate } from "../core/settingsExtractionValidation";
+import {
+  mergeAbilitySystemRules,
+  type RejectedSettingCandidate,
+} from "../core/settingsExtractionValidation";
 import {
   mergeExtractedAbilities,
   mergeExtractedLocations,
@@ -51,6 +54,14 @@ export interface SettingsExtractionCounts {
   mergeCandidates: SettingMergeCandidate[];
   /** 読み取れた能力の総称。読み取れなければ null */
   abilityTerm: string | null;
+  /**
+   * **以前の抽出で `設定/ability_system.json` へ入っていた指示文**のうち、
+   * 今回の保存で外したもの。
+   *
+   * `rejected` の `instruction_echo`（今回のAIの答えから落とした分）とは
+   * 分けて出す。混ぜると、掃除が済んだ回も同じ件数が出ているように見える。
+   */
+  staleRules: string[];
 }
 
 export interface SettingsPersistResult {
@@ -167,11 +178,12 @@ export class SettingsExtractionAccumulator extends SettingsExtractionCollector {
     }
 
     // 総称や規則が読み取れた場合だけ体系の設定を書く
+    let staleRules: string[] = [];
     if (
       saves("abilities") &&
       (this.abilityTerm || this.abilityDescription || this.rules.size > 0)
     ) {
-      await this.persistAbilitySystem(work);
+      staleRules = await this.persistAbilitySystem(work);
     }
 
     // 保存しなかった種別は、件数も0で返す。
@@ -206,6 +218,7 @@ export class SettingsExtractionAccumulator extends SettingsExtractionCollector {
           ...(saves("world") ? worldMerge.mergeCandidates : []),
         ],
         abilityTerm: this.abilityTerm,
+        staleRules,
       },
       savedAbilities: saves("abilities") ? changedAbilities.length : 0,
       savedLocations: saves("locations") ? changedLocations.length : 0,
@@ -216,9 +229,27 @@ export class SettingsExtractionAccumulator extends SettingsExtractionCollector {
     };
   }
 
-  private async persistAbilitySystem(work: WorkEntry): Promise<void> {
+  /**
+   * 能力体系を保存する。
+   *
+   * @returns 既に保存されていた決まりから外した指示文（黙って捨てないので
+   *   呼び出し側が件数を出せる）
+   */
+  private async persistAbilitySystem(work: WorkEntry): Promise<string[]> {
     const store = new AbilitySystemStore(work);
     const current = await store.load();
+
+    /*
+      **保存済みの決まりも、同じ物差しに通す**（作者の裁定、2026-09-19）。
+      積み増すだけだと、実機で既に入ってしまった指示文6文は再実行しても
+      残り続ける。総称は今回読み取ったものを優先する——プロンプトの文面は
+      総称で差し替わるので、送ったときの語に近いほうが当たる。
+    */
+    const merged = mergeAbilitySystemRules(
+      current.rules,
+      [...this.rules],
+      this.abilityTerm ?? current.abilityTerm
+    );
 
     // 作者が書いた総称・メモは上書きしない
     const next: AbilitySystem = {
@@ -228,8 +259,9 @@ export class SettingsExtractionAccumulator extends SettingsExtractionCollector {
           ? this.abilityTerm
           : current.abilityTerm,
       description: current.description ?? this.abilityDescription,
-      rules: [...new Set([...current.rules, ...this.rules])],
+      rules: merged.rules,
     };
     await store.save(next);
+    return merged.droppedFromSaved;
   }
 }
