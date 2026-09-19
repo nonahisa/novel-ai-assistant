@@ -449,7 +449,21 @@ function zipEpisodeEntries(
       : null;
     if (episodes) {
       return episodes.map((episode) => ({
-        number: episode.chapter,
+        /*
+          **題から話数を読めなければ、区切り行の番号を使う**（0.70.1）。
+
+          実データで確かめた（2026-09-19、作者のなろう作品2つ）。
+          `N2600GO` は「１話　転生」で219話すべて読めるが、`N4190FX` は
+          「１　自殺の後始末」と**「話」を伴わない**ので1つも読めず、
+          取り込むたびに「話数を読み取れなかった話が4件あります」と
+          出ていた——**題の付け方の癖であって、作者の落ち度ではない。**
+
+          区切り行の「エピソードN開始」のNは**なろう自身が書いた掲載順**で、
+          必ず入っている（`narouBackup.ts` に同じ理由が書いてある）。
+          ファイルの並び順で埋めるのとは違う——あちらは当てにならないので
+          下の枝では null のままにしてある。
+        */
+        number: episode.chapter ?? episode.order,
         label: episode.title ?? `${episode.order}番目の話`,
         body: episode.body,
       }));

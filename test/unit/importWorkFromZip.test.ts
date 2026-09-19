@@ -272,6 +272,21 @@ function workEntry(
   };
 }
 
+/**
+ * 書き出された「取り込みの記録」（`.aiwriter/generated/`）の中身。
+ *
+ * **通知に入れなかった詳しい話は、ここで確かめる**（0.70.1）。通知は1行で
+ * しか出せないので、重複・欠番・文字コードの説明はこの記録へ回している。
+ */
+function importRecord(fs: MemoryFs, folder: string): string {
+  const prefix = paths.join(folder, ".aiwriter", "generated", "取り込みの記録");
+  const found = fs
+    .placed()
+    .filter((name) => name.startsWith(prefix) && name.endsWith(".md"));
+  expect(found.length, "取り込みの記録が書き出されていない").toBe(1);
+  return fs.text(found[0]);
+}
+
 /** 書庫が1つに決まる形（`decideNewWorkHome` が訊かずに決める） */
 const WORKS = [{ folderPath: paths.join(LIBRARY, "既にある作品") }];
 
@@ -434,7 +449,11 @@ describe("ZIPから作品を取り込む", () => {
     expect(done.message).toContain("手入力");
     // **封筒を受け取らないサイトで「貼り付け」と言わない**（6.79.7の判定）
     expect(done.message).not.toContain("貼り付け");
-    expect(done.buttons).toEqual(["フォルダーを開く", "手入力する"]);
+    expect(done.buttons).toEqual([
+      "取り込みの記録を開く",
+      "フォルダーを開く",
+      "手入力する",
+    ]);
   });
 
   /*
@@ -492,10 +511,16 @@ describe("ZIPから作品を取り込む", () => {
       **何を書き留めたかは言うが、件数は言わない**（0.69.9、作者の指摘）。
       話ごとに1件ずつ積むので、500話なら501件になる——「501件記録しました」は
       知らせではなく驚きになる。内訳は台帳と執筆量パネルで見られる。
+
+      **言う場所は取り込みの記録に移した**（0.70.1）。終わったことの内訳は、
+      通知ではなく記録に書く。通知には短い「下ごしらえしました」だけを出す。
     */
-    const last = notices[notices.length - 1].message;
-    expect(last).toContain("作品全体と各話の読者の反応を記録しました");
-    expect(last).not.toContain("3件");
+    const record = importRecord(fs, NAROU_WORK_FOLDER);
+    expect(record).toContain("作品全体と各話の読者の反応を記録しました");
+    expect(record).not.toContain("3件");
+    expect(notices[notices.length - 1].message).toContain(
+      "小説家になろうの作品として下ごしらえしました"
+    );
   });
 
   /*
@@ -542,6 +567,7 @@ describe("ZIPから作品を取り込む", () => {
     const done = notices[notices.length - 1];
     expect(done.message).toContain("読者の反応");
     expect(done.buttons).toEqual([
+      "取り込みの記録を開く",
       "フォルダーを開く",
       "貼り付けて取り込む",
       "手入力する",
@@ -557,7 +583,7 @@ describe("ZIPから作品を取り込む", () => {
 
     const done = notices[notices.length - 1];
     expect(done.message).not.toContain("読者の反応");
-    expect(done.buttons).toEqual(["フォルダーを開く"]);
+    expect(done.buttons).toEqual(["取り込みの記録を開く", "フォルダーを開く"]);
   });
 
   it("同じ名前のフォルダーがすでにあれば、理由を出して止まる", async () => {
@@ -697,13 +723,21 @@ describe("アルファポリスのバックアップ（.txt）から取り込む
     expect(confirm.detail).toContain("中身まで同じ");
     expect(confirm.detail).toContain("3話が見当たりません");
 
-    // 完了のお知らせ。**読み飛ばされても、もう一度言う**
+    /*
+      **読み飛ばされても、もう一度言う。** ただし言う場所は分けた（0.70.1）
+      ——通知には見出しだけを出し、詳しい話は取り込みの記録に残す。
+      1行に繋がった通知は、実機で読めなかった（作者の報告、2026-09-19）。
+    */
     const done = notices[notices.length - 1];
-    expect(done.message).toContain("中身まで同じ");
-    expect(done.message).toContain("1つだけ取り込みます");
-    expect(done.message).toContain("3話が見当たりません");
+    expect(done.message).toContain("同じ話番号");
+    expect(done.message).toContain("番号の抜け");
     // 止めない——3話を取り込み終えている
     expect(done.message).toContain("3話を取り込みました");
+
+    const record = importRecord(fs, ALPHAPOLIS_FOLDER);
+    expect(record).toContain("中身まで同じ");
+    expect(record).toContain("1つだけ取り込みます");
+    expect(record).toContain("3話が見当たりません");
   });
 
   /*
@@ -738,10 +772,13 @@ describe("アルファポリスのバックアップ（.txt）から取り込む
     expect(confirm.detail).toContain("半角の ? が2個");
     expect(confirm.detail).toContain("取りやめ");
 
-    // 完了のお知らせ。読み飛ばされても、もう一度言う
+    // 完了のお知らせ。**見出しだけ**を出し、中身は取り込みの記録に残す
     const done = notices[notices.length - 1];
-    expect(done.message).toContain("Shift_JIS");
-    expect(done.message).toContain("UTF-8");
+    expect(done.message).toContain("文字コード");
+
+    const record = importRecord(fs, ALPHAPOLIS_FOLDER);
+    expect(record).toContain("Shift_JIS");
+    expect(record).toContain("UTF-8");
   });
 
   it("UTF-8 で読めたときは、文字コードの話をしない", async () => {
@@ -776,5 +813,138 @@ describe("アルファポリスのバックアップ（.txt）から取り込む
     expect(warnings.join("\n")).toContain("取り込める形のバックアップ");
     expect(registered).toBe(0);
     expect(fs.placed()).toEqual([ALPHAPOLIS_PATH]);
+  });
+});
+
+/**
+ * 完了のお知らせと、取り込みの記録（作者の実機報告、2026-09-19）。
+ *
+ * アルファポリスの Shift_JIS 版を取り込んだとき、通知が**1行に連結された
+ * 壁のような文章**になった（重複・欠番・文字コードの助言・読者の反応が
+ * ぜんぶ入って280字あまり）。VS Code の通知は行を分けられないので、
+ * **詳しい話は通知に入れない**——取り込みの記録として書き出し、通知は
+ * 「終わったこと」と「次にできること」だけにする。
+ *
+ * 記録を実ファイルにするのは、**通知を閉じても読めるようにする**ためである。
+ * 閉じたら二度と見られない形では、書いていないのとほとんど変わらない。
+ */
+describe("完了のお知らせは短く、詳しい話は記録へ", () => {
+  afterEach(() => {
+    window.showOpenDialog = original.showOpenDialog;
+    window.showInformationMessage = original.showInformationMessage;
+    window.showWarningMessage = original.showWarningMessage;
+    workspace.fs = original.fs;
+  });
+
+  /** 書き出された取り込みの記録の中身（既定はアルファポリスの作品） */
+  function record(fs: MemoryFs, folder: string = ALPHAPOLIS_FOLDER): string {
+    return importRecord(fs, folder);
+  }
+
+  it("通知には、重複・欠番・文字コードの長い説明を入れない", async () => {
+    const sjis = new Uint8Array(iconv.encode(ALPHAPOLIS_TEXT, "shift_jis"));
+    const fs = new MemoryFs({ [ALPHAPOLIS_PATH]: sjis });
+    fs.install();
+    stubWindow(ALPHAPOLIS_PATH);
+
+    await importWorkFromZip(WORKS, async () =>
+      workEntry(ALPHAPOLIS_FOLDER, ALPHAPOLIS_TITLE)
+    );
+
+    const done = notices[notices.length - 1].message;
+    // 実機で出た壁の中身を、1つずつ名指しで締め出す
+    expect(done).not.toContain("中身まで同じでした");
+    expect(done).not.toContain("下書きや非公開の話があると番号は飛びます");
+    expect(done).not.toContain("丸数字");
+    expect(done).not.toContain("半角の ?");
+    expect(done).not.toContain("書き出したときに");
+    // 通知は1行で出る。**読める長さに収める**（実機の壁は280字あまり）
+    expect(done.length, `長すぎる：${done}`).toBeLessThanOrEqual(120);
+  });
+
+  it("通知は、終わったことと、気をつけたいことの見出しだけを言う", async () => {
+    const sjis = new Uint8Array(iconv.encode(ALPHAPOLIS_TEXT, "shift_jis"));
+    const fs = new MemoryFs({ [ALPHAPOLIS_PATH]: sjis });
+    fs.install();
+    stubWindow(ALPHAPOLIS_PATH);
+
+    await importWorkFromZip(WORKS, async () =>
+      workEntry(ALPHAPOLIS_FOLDER, ALPHAPOLIS_TITLE)
+    );
+
+    const done = notices[notices.length - 1];
+    expect(done.message).toContain("3話を取り込みました");
+    // 何があったかは見出しだけ。中身は記録にある
+    expect(done.message).toContain("同じ話番号");
+    expect(done.message).toContain("文字コード");
+    expect(done.message).toContain("取り込みの記録");
+    expect(done.buttons).toContain("取り込みの記録を開く");
+  });
+
+  it("重複・欠番・文字コードの詳しい話は、記録に残る", async () => {
+    const sjis = new Uint8Array(iconv.encode(ALPHAPOLIS_TEXT, "shift_jis"));
+    const fs = new MemoryFs({ [ALPHAPOLIS_PATH]: sjis });
+    fs.install();
+    stubWindow(ALPHAPOLIS_PATH);
+
+    await importWorkFromZip(WORKS, async () =>
+      workEntry(ALPHAPOLIS_FOLDER, ALPHAPOLIS_TITLE)
+    );
+
+    const text = record(fs);
+    expect(text).toContain("中身まで同じ");
+    expect(text).toContain("1つだけ取り込みます");
+    expect(text).toContain("3話が見当たりません");
+    expect(text).toContain("Shift_JIS");
+    expect(text).toContain("UTF-8");
+    // 取り込んだ元と話数も、あとから確かめられる
+    expect(text).toContain(ALPHAPOLIS_TITLE);
+    expect(text).toContain("3話");
+  });
+
+  /*
+    **記録を置けなかったときは、黙って落とさない。**
+
+    置き場に書けない（権限・容量・ブラウザ版の保管庫）ことは起こりうる。
+    そのときまで通知を短くすると、重複も文字コードの助言も**どこにも
+    残らない**——読みにくい通知のほうが、消えてしまうよりましである。
+  */
+  it("記録を書けなかったら、読みにくくても通知で全部言う", async () => {
+    const sjis = new Uint8Array(iconv.encode(ALPHAPOLIS_TEXT, "shift_jis"));
+    const fs = new MemoryFs({ [ALPHAPOLIS_PATH]: sjis });
+    fs.install();
+    const writable = workspace.fs.writeFile;
+    workspace.fs = {
+      ...workspace.fs,
+      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
+        if (uri.fsPath.includes("generated")) throw new Error("書けません");
+        await writable(uri as never, bytes);
+      },
+    } as unknown as typeof workspace.fs;
+    stubWindow(ALPHAPOLIS_PATH);
+
+    await importWorkFromZip(WORKS, async () =>
+      workEntry(ALPHAPOLIS_FOLDER, ALPHAPOLIS_TITLE)
+    );
+
+    const done = notices[notices.length - 1];
+    expect(done.message).toContain("中身まで同じ");
+    expect(done.message).toContain("Shift_JIS");
+    // 開く先が無いので、記録のボタンは出さない（押して空振りさせない）
+    expect(done.buttons).not.toContain("取り込みの記録を開く");
+  });
+
+  it("気をつけたいことが無ければ、通知でも記録でも騒がない", async () => {
+    const fs = new MemoryFs({ [ZIP_PATH]: ZIP_BYTES });
+    fs.install();
+    stubWindow();
+
+    await importWorkFromZip(WORKS, async () => workEntry());
+
+    const done = notices[notices.length - 1];
+    expect(done.message).toContain("1話を取り込みました");
+    expect(done.message).not.toContain("気をつけたいこと");
+    // **記録はいつでも書く。** 何を取り込んだかは、問題が無くても残す
+    expect(record(fs, WORK_FOLDER)).toContain("星を継ぐ者たち");
   });
 });

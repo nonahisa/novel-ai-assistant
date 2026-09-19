@@ -191,7 +191,7 @@ describe("簡単ステップメニューの構成", () => {
    * 「2. 新作構想」「3. 作品執筆」に分かれていた。作品を作るのは登録そのもの
    * なので、4つとも1段目へ寄せる。
    */
-  test("「1. 作品登録」に、作品の入口が4つとも並ぶ", () => {
+  test("「1. 作品登録」に、作品の入口が5つとも並ぶ", () => {
     const step = STEP_MENU.find((entry) => entry.label === "1. 作品登録");
     expect(step).toBeDefined();
     if (!step) return;
@@ -204,6 +204,9 @@ describe("簡単ステップメニューの構成", () => {
     expect(commands).toEqual([
       "novelai.createWorkWithPlot",
       "novelai.createWorkFromManuscript",
+      // **バックアップからの取り込みは、フォルダから追加より前**（0.70.1）。
+      // 投稿サイトで書いてきた人には、こちらのほうが近道である
+      "novelai.importWorkFromZip",
       "novelai.addWork",
       "novelai.addWorkFromGithub",
     ]);

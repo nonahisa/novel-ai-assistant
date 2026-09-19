@@ -146,6 +146,64 @@ describe("小説に見えないZIPは断る", () => {
   });
 });
 
+/**
+ * なろうの合本の話数（0.70.1）。
+ *
+ * **作者の実物2つで、題の付け方が割れていた**（2026-09-19）。
+ * `N2600GO` は「１話　転生」で219話すべて読めるが、`N4190FX` は
+ * 「１　自殺の後始末」で**1つも読めない**——同じなろうの、同じ形式の
+ * バックアップである。読めないほうを取り込むと、毎回「話数を
+ * 読み取れなかった話が4件あります」と出ていた。
+ */
+describe("なろうの合本は、題に「話」が無くても話数が分かる", () => {
+  /** 題に「話」を伴わないなろうの合本（実物の `N4190FX` と同じ形） */
+  const NAROU_BACKUP = [
+    "【Nコード】",
+    "N4190FX",
+    "",
+    "【タイトル】",
+    "肉片とラジオと心霊現象",
+    "",
+    "------------------------- エピソード1開始 -------------------------",
+    "【エピソードタイトル】",
+    "１　自殺の後始末",
+    "",
+    "【本文】",
+    "　あれは、確か中学３年生の頃。",
+    "",
+    "------------------------- エピソード2開始 -------------------------",
+    "【エピソードタイトル】",
+    "２　供養と軋轢",
+    "",
+    "【本文】",
+    "　線香の煙が、まっすぐに立った。",
+    "",
+    "【免責事項】",
+    "本作品の著作権は作者に帰属します。",
+    "",
+  ].join("\n");
+
+  it("区切り行の番号で埋めるので、読み取れない話が出ない", () => {
+    const zip = zipOf({ "N4190FX.txt": utf8(NAROU_BACKUP) });
+
+    const result = inspectWorkZip(zip, "N4190FX.zip");
+
+    expect(result.episodeNumbers.unnumbered).toBe(0);
+    expect(result.episodeNumbers.missing).toEqual([]);
+    expect(result.episodeNumbers.duplicates).toEqual([]);
+  });
+
+  it("題から読めるときは、そちらを使う（「１話　転生」）", () => {
+    const withKanji = NAROU_BACKUP.replace("１　自殺の後始末", "１話　自殺の後始末");
+    const zip = zipOf({ "N4190FX.txt": utf8(withKanji) });
+
+    const result = inspectWorkZip(zip, "N4190FX.zip");
+
+    expect(result.episodeNumbers.unnumbered).toBe(0);
+    expect(result.episodeNumbers.missing).toEqual([]);
+  });
+});
+
 describe("作品名の採り方", () => {
   it("about.txt のタイトルから採る", () => {
     const result = inspectWorkZip(backupZip(), "作品_20260919.zip");

@@ -158,3 +158,99 @@ describe("ファイルの右クリックに出すもの", () => {
     }
   });
 });
+
+/**
+ * 作品が1件も無いときに出る案内文（`viewsWelcome`）。
+ *
+ * **初めて使う人が、いちばん最初に見る画面である。** ここに無い入口は、
+ * 「無い」のと同じになる——作者は作品一覧の `+` からバックアップの
+ * 取り込みを探して見つけられなかった（2026-09-19、実機）。
+ * `novelai.importWorkFromZip` は 0.68.5 で入れたときから、ここにも
+ * 上のボタンにも載せ忘れていた。
+ */
+describe("作品が0件のときの案内文", () => {
+  const welcome = (
+    manifest.contributes.viewsWelcome as Array<{
+      view: string;
+      contents: string;
+    }>
+  ).filter((entry) => entry.view === "novelai.works");
+
+  /** 案内文に並ぶ入口を、書いてある順に取り出す */
+  function entries(): Array<{ label: string; command: string }> {
+    return welcome.flatMap((entry) =>
+      [...entry.contents.matchAll(/\[([^\]]+)\]\(command:([^)]+)\)/g)].map(
+        (match) => ({ label: match[1], command: match[2] })
+      )
+    );
+  }
+
+  test("バックアップからの取り込みが載っている", () => {
+    expect(entries().map((item) => item.command)).toContain(
+      "novelai.importWorkFromZip"
+    );
+  });
+
+  /*
+    **バックアップを持っている人がいちばん多い。** 投稿サイトで書いてきた
+    人が、打鍵ゼロで始められる道である（設計書6.99）。フォルダを自分で
+    作ってから登録する道より先に見えていないと、遠回りのほうを選ばせる。
+  */
+  test("取り込みが、フォルダから追加より先に出る", () => {
+    const commands = entries().map((item) => item.command);
+    const zip = commands.indexOf("novelai.importWorkFromZip");
+    const folder = commands.indexOf("novelai.addWork");
+    // **両方あることから確かめる。** 無い（-1）ほうが小さくなるので、
+    // 並び順だけを見ると「載っていない」状態でも通ってしまう
+    expect(zip, "取り込みが載っていない").toBeGreaterThanOrEqual(0);
+    expect(folder, "フォルダから追加が載っていない").toBeGreaterThanOrEqual(0);
+    expect(zip).toBeLessThan(folder);
+  });
+
+  test("案内文の入口は、すべて宣言済みのコマンドである", () => {
+    const declared = new Set(
+      manifest.contributes.commands.map((entry) => entry.command)
+    );
+    const unknown = entries()
+      .map((item) => item.command)
+      .filter((command) => !declared.has(command));
+
+    expect(unknown, "案内文に書いたコマンドが宣言されていない").toEqual([]);
+  });
+});
+
+/**
+ * 作品一覧の上に並ぶボタン（`view/title`）。
+ *
+ * **作者はここから取り込みを探して、見つけられなかった**（2026-09-19、実機）。
+ * 案内文（`viewsWelcome`）が出るのは作品が0件のときだけなので、1作品でも
+ * 登録したあとは、ここか各メニューにしか入口が無い。
+ *
+ * 数が増えると、VS Code は入りきらないぶんを「…」の中へ送る。**送られても
+ * 名前で探せる**ので、アイコンが並ばないことより、どこにも無いことのほうが悪い。
+ */
+describe("作品一覧の上のボタン", () => {
+  const menus = manifest.contributes.menus as Record<
+    string,
+    Array<{ command: string; when?: string; group?: string }>
+  >;
+
+  function worksTitleCommands(): string[] {
+    return (menus["view/title"] ?? [])
+      .filter((entry) => entry.when === "view == novelai.works")
+      .sort((a, b) => (a.group ?? "").localeCompare(b.group ?? ""))
+      .map((entry) => entry.command);
+  }
+
+  test("バックアップからの取り込みが載っている", () => {
+    expect(worksTitleCommands()).toContain("novelai.importWorkFromZip");
+  });
+
+  test("並びの番号が重なっていない（重なると順序が決まらない）", () => {
+    const groups = (menus["view/title"] ?? [])
+      .filter((entry) => entry.when === "view == novelai.works")
+      .map((entry) => entry.group);
+
+    expect(groups.length).toBe(new Set(groups).size);
+  });
+});

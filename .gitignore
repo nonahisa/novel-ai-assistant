@@ -37,3 +37,8 @@ _peek*
 # 同期しない。測定用の台（test/fixtures/seeded/*）にも同じ規則を効かせる
 **/.aiwriter/external-access.json
 **/.aiwriter/ai-instruction-usage.json
+
+# 外部AIのノックと利用の記録（`.aiwriter/history/external.jsonl` ほか）。
+# **その機械で何を撃ったかの記録**で、作品の中身でも設計でもない。
+# 測定の台（test/fixtures/seeded/*）で撃つと勝手に増えるので、同期しない
+**/.aiwriter/history/

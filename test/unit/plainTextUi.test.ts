@@ -47,6 +47,9 @@ const MARKDOWN_ALLOWED = new Set([
   "src/core/resumeSheet.ts",
   // 更新告知文をMarkdownの文書として開く（P-30）
   "src/core/announcement.ts",
+  // 取り込みの記録をMarkdownの文書として書き出す（設計書6.99）。
+  // **通知に入りきらない話を回す先**なので、見出しと箇条書きで組む
+  "src/core/importRecordMarkdown.ts",
   // .gitignore に書き込む注釈。Markdownではないが「#」で始まる
   "src/core/workRegistry.ts",
   // MarkdownString（ツールチップ）として渡す

@@ -15,6 +15,10 @@ import {
   synopsisDraftFromWorkInfo,
 } from "../core/workInfoDraft";
 import { formatCount } from "../core/charCount";
+import {
+  buildImportRecord,
+  IMPORT_RECORD_KIND,
+} from "../core/importRecordMarkdown";
 import { readWorkConfig, scaffoldWorkFolder, workPaths } from "../core/workRegistry";
 import { PostingStore } from "../core/postingStore";
 import { supportsReaderStatsHelper } from "../core/readerStatsEnvelope";
@@ -42,7 +46,11 @@ import type { WorkLocation } from "../core/libraryHome";
 import type { CollectionOptions } from "./addCollection";
 import { askText } from "../views/dialogs";
 import { confirmRun } from "../views/notify";
-import { revealFolder } from "../views/openDocument";
+import {
+  openInDefaultEditor,
+  revealFolder,
+  saveGeneratedMarkdown,
+} from "../views/openDocument";
 import { withProgress } from "../views/progress";
 import { resolveNewWorkHome } from "./newWorkHome";
 
@@ -161,7 +169,7 @@ export async function importWorkFromZip(
     ? await notePostingSite(entry, inspection.site, inspection)
     : NOTHING_RECORDED;
 
-  await reportResult(entry, inspection, placed, recorded);
+  await reportResult(entry, zipPath, inspection, placed, recorded);
 }
 
 /**
@@ -618,43 +626,95 @@ function withBackupReaderStats(
   return next;
 }
 
+/** 通知に並べる「気をつけたいこと」の見出しの上限。超えたら「ほか」 */
+const LISTED_CONCERNS = 3;
+
 /**
  * 結果を伝える（設計書6.81の規則3）。
  *
- * **登録できたことは `registerFolderAsWork` が既に伝えている**ので、
- * ここで言うのは「`about.txt` から何を下書きにしたか」である。
- * 作者が次に確かめる場所が変わる。
+ * ## 通知に全部入れない（作者の実機報告、2026-09-19）
+ *
+ * アルファポリスの Shift_JIS 版（188話）を取り込んだとき、重複・欠番・
+ * 文字コードの助言・読者の反応がぜんぶ繋がって**280字あまりの1行**になった。
+ * **VS Code の通知は行を分けられない**ので、長い説明を入れた時点で読めなく
+ * なる（確認の画面はモーダルなので `\n` が効く。あちらは今のままでよい）。
+ *
+ * そこで、**通知は「終わったこと」と「次にできること」だけ**にする。
+ * 気をつけたいことは**見出しだけ**を並べ、中身は記録へ回す。
+ *
+ * ## 記録は、通知より先に書く
+ *
+ * `.aiwriter/generated/` へ「取り込みの記録」として書き出してから通知を出す。
+ * **通知を閉じても読める**ことがこの直しの肝で、押されたときに初めて作ると、
+ * 閉じた人には結局残らない。書けなかったときだけ、従来どおり通知へ全部入れる
+ * ——読めない通知のほうが、消えてしまうよりはましである。
  */
 async function reportResult(
   work: WorkEntry,
+  /** 取り込んだ元。記録に残す（あとから「どれを入れたか」を辿れるように） */
+  zipPath: string,
   inspection: WorkZipInspection,
   placed: readonly string[],
   /** 台帳へ積んだ読者の反応の内訳（バックアップに入っていたぶん） */
   recorded: RecordedReaderStats
 ): Promise<void> {
-  const notes = [
-    `${inspection.episodeCount}話を取り込みました。`,
-    placed.length > 0
-      ? `作品情報から ${placed.join("・")} を下書きとして置きました（設定フォルダーにあります）。`
-      : "",
-    inspection.skipped.length > 0
-      ? `原稿ではないファイル${inspection.skipped.length}件は入れていません。`
-      : "",
-    // **確認の画面で言ったことを、済んだあとでもう一度言う**（作者の指示）。
-    // 確認は読み飛ばされることがあるが、重複と欠番はあとから直すものなので、
-    // 終わったところにも残しておかないと気づかれないまま埋もれる
-    ...describeEpisodeNumbers(inspection.episodeNumbers, inspection.dropped),
-    // **文字コードの助言も、済んだあとにもう一度言う**（作者の指示）。
-    // 取りやめの案内はしない——もう取り込んである（`describeBackupEncoding`）
-    ...describeBackupEncoding(inspection.encodingNotice, "after"),
-  ].filter((note) => note !== "");
-
   const invite = readerStatsInvite(inspection.site, recorded);
+  // **確認の画面で言ったことを、済んだあとでもう一度言う**（作者の指示）。
+  // 確認は読み飛ばされることがあり、重複と欠番はあとから直すものなので、
+  // 終わったところにも残しておかないと気づかれないまま埋もれる。
+  // 取りやめの案内はしない——もう取り込んである（`describeBackupEncoding`）
+  const episodeNotes = describeEpisodeNumbers(
+    inspection.episodeNumbers,
+    inspection.dropped
+  );
+  const encodingNotes = describeBackupEncoding(
+    inspection.encodingNotice,
+    "after"
+  );
+  const concerns = [...episodeNotes, ...encodingNotes];
+
+  const recordPath = await saveGeneratedMarkdown(
+    IMPORT_RECORD_KIND,
+    buildImportRecord({
+      title: work.title,
+      sourceName: path.basename(zipPath),
+      episodeCount: inspection.episodeCount,
+      collected: inspection.collected,
+      totalChars: inspection.totalChars,
+      placed,
+      skipped: inspection.skipped,
+      episodeNotes,
+      encodingNotes,
+      noted: invite?.noted,
+    }),
+    work
+  );
+
+  const message = recordPath
+    ? shortSummary(inspection, concerns, invite)
+    : // 記録を置けなかった（権限・容量・ブラウザ版の保管庫）。
+      // **黙って落とさない**——読みにくくても、この場で全部言う
+      [
+        `${inspection.episodeCount}話を取り込みました。`,
+        invite?.noted ?? "",
+        ...concerns,
+        invite?.line ?? "",
+      ]
+        .filter((note) => note !== "")
+        .join(" ");
+
   const action = await vscode.window.showInformationMessage(
-    [...notes, ...(invite ? [invite.line] : [])].join(" "),
+    message,
+    // **記録を先頭に置く。** 気をつけたいことがあるときは、ここが次の一歩
+    ...(recordPath ? [`${IMPORT_RECORD_KIND}を開く`] : []),
     "フォルダーを開く",
     ...(invite?.buttons ?? [])
   );
+
+  if (recordPath && action === `${IMPORT_RECORD_KIND}を開く`) {
+    await openInDefaultEditor(recordPath);
+    return;
+  }
   if (action === "フォルダーを開く") {
     await revealFolder(work.folderPath);
     return;
@@ -668,6 +728,65 @@ async function reportResult(
 }
 
 /**
+ * 通知に出す短い文（1行で読み切れる長さに収める）。
+ *
+ * 気をつけたいことは**見出しだけ**にする。「同じ話番号」とだけ言えば、
+ * 記録を開くかどうかを作者が決められる——中身まで通知に書くと、
+ * 決める前に読まされることになる。
+ */
+function shortSummary(
+  inspection: WorkZipInspection,
+  concerns: readonly string[],
+  invite: ReaderStatsInvite | undefined
+): string {
+  const topics = concernTopics(inspection);
+  const listed = topics.slice(0, LISTED_CONCERNS).join("・");
+  const heading =
+    concerns.length === 0
+      ? `取り込んだ内容は「${IMPORT_RECORD_KIND}」に残しました。`
+      : `気をつけたいこと（${listed}${
+          topics.length > LISTED_CONCERNS ? " ほか" : ""
+        }）を「${IMPORT_RECORD_KIND}」に残しました。`;
+
+  return [
+    `${inspection.episodeCount}話を取り込みました。`,
+    invite?.short ?? "",
+    heading,
+    invite?.line ?? "",
+  ]
+    .filter((part) => part !== "")
+    .join("");
+}
+
+/**
+ * 気をつけたいことの見出し。**短い言葉にする**（通知は1行に並ぶ）。
+ *
+ * 文面そのもの（`describeEpisodeNumbers`）から作らないのは、あちらが
+ * 助言を含む長い文だからである。**見出しは見出しとして持つ。**
+ */
+function concernTopics(inspection: WorkZipInspection): string[] {
+  const numbers = inspection.episodeNumbers;
+  return [
+    numbers.duplicates.length > 0 ? "同じ話番号" : "",
+    numbers.missing.length > 0 ? "番号の抜け" : "",
+    numbers.unnumbered > 0 ? "読み取れない話数" : "",
+    inspection.encodingNotice.shiftJis ? "文字コード" : "",
+  ].filter((topic) => topic !== "");
+}
+
+/** 読者の反応の誘い（`readerStatsInvite` が返すもの） */
+interface ReaderStatsInvite {
+  /** 通知に出す短い一言（「アルファポリスの作品として下ごしらえしました。」） */
+  short: string;
+  /** 記録に残す、何をしたかの全文 */
+  noted: string;
+  /** 通知に出す「次にできること」 */
+  line: string;
+  buttons: string[];
+  commands: Record<string, string>;
+}
+
+/**
  * 読者の反応の口へ誘う1行（設計書6.79.7）。
  *
  * **サイトによって書き分ける。** 貼り付けでの取り込みに対応しているのは
@@ -675,18 +794,17 @@ async function reportResult(
  * （規約の判断。`readerStatsEnvelope.ts`）。なろうで「貼り付け」を案内すると、
  * 押した先で断られる——できないことを誘わない。
  *
+ * **何を記録したかは、通知ではなく記録へ書く**（0.70.1）。「バックアップに
+ * あった作品全体と各話の読者の反応を記録しました」は、終わったことの内訳
+ * なので、通知には短い `short` だけを出す。黙るわけではない（`noted` が
+ * 取り込みの記録に載る）。
+ *
  * @returns 誘わないなら undefined（出どころが分からなかったとき）
  */
 function readerStatsInvite(
   site: PostingSiteId | null,
   recorded: RecordedReaderStats
-):
-  | {
-      line: string;
-      buttons: string[];
-      commands: Record<string, string>;
-    }
-  | undefined {
+): ReaderStatsInvite | undefined {
   if (!site) return undefined;
   const label = postingSiteInfo(site).label;
   /*
@@ -703,13 +821,16 @@ function readerStatsInvite(
   ]
     .filter((part) => part !== "")
     .join("と");
+  const short = `${label}の作品として下ごしらえしました。`;
   const noted = scope
     ? `${label}の作品として下ごしらえし、バックアップにあった${scope}の読者の反応を記録しました。`
-    : `${label}の作品として下ごしらえしました。`;
+    : short;
 
   if (supportsReaderStatsHelper(site)) {
     return {
-      line: `${noted}読者の反応（PV・応援など）は、貼り付けか手入力で足せます。`,
+      short,
+      noted,
+      line: "読者の反応（PV・応援など）は、貼り付けか手入力で足せます。",
       buttons: ["貼り付けて取り込む", "手入力する"],
       commands: {
         貼り付けて取り込む: "novelai.importReaderStats",
@@ -719,7 +840,9 @@ function readerStatsInvite(
   }
 
   return {
-    line: `${noted}この先の読者の反応は、手入力で足せます。`,
+    short,
+    noted,
+    line: "この先の読者の反応は、手入力で足せます。",
     buttons: ["手入力する"],
     commands: { 手入力する: "novelai.recordReaderStats" },
   };

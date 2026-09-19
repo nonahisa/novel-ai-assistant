@@ -148,6 +148,44 @@ export async function openGeneratedMarkdown(
   await openUntitledMarkdown(displayName, content, options);
 }
 
+/**
+ * 生成文書を**書くだけ**にして、置き場所を返す（開かない）。
+ *
+ * `openGeneratedMarkdown` は書いてすぐ開く。だが「取り込みの記録」
+ * （`features/importWorkFromZip.ts`）のように、**書いておいて、読むかどうかは
+ * 作者に決めさせたい**ものがある。取り込みの直後に文書が開くと、作者が
+ * 見たいのは作品一覧なのに読み物が前に出る。
+ *
+ * それでも**先に書いておく**ことに意味がある——通知を閉じたあとでも
+ * 読めるからである。返した場所を `openInDefaultEditor` へ渡せば、
+ * ボタン1つで開ける。
+ *
+ * @returns 書けた場所。**書けなければ undefined**（無題文書へは落ちない。
+ *   開かないものを無題文書で出しても、作者の画面に理由の分からないタブが
+ *   増えるだけである）。呼び出し側は、書けなかったときの伝え方を自分で持つ
+ */
+export async function saveGeneratedMarkdown(
+  displayName: string,
+  content: string,
+  work?: WorkEntry
+): Promise<string | undefined> {
+  const directory = generatedDirectoryFor(work);
+  if (!directory) return undefined;
+
+  try {
+    const target = await writeGeneratedFile(directory, displayName, content);
+    await pruneGeneratedFilesQuietly(directory, displayName);
+    return target;
+  } catch (error) {
+    logFailure("生成文書の書き出し", {
+      種類: displayName,
+      置き場: directory,
+      理由: messageOf(error),
+    });
+    return undefined;
+  }
+}
+
 /** 生成文書の置き場。作品が分かればその中、分からなければ保管庫 */
 function generatedDirectoryFor(work?: WorkEntry): string | undefined {
   if (work) return path.join(workPaths(work).aiwriter, GENERATED_DIR);
