@@ -487,6 +487,35 @@ function normalizeForEcho(text: string): string {
     .toLowerCase();
 }
 
+/**
+ * **過去に実機で混入した指示文の、凍結した控え**（2026-09-19）。
+ *
+ * 見張りの照合元は「いま組み立てたプロンプト」である。素直だが弱点があって、
+ * **プロンプトからその文を消すと、その文はもう捕まらなくなる**。
+ *
+ * ところが**消えるのはプロンプトからだけで、作者の `設定/ability_system.json`
+ * には入ったままである**（`mergeAbilitySystemRules` が抽出のたびに落として
+ * いるので見えていないだけ）。プロンプトを縮めた瞬間に落とせなくなり、
+ * 次の抽出で資料へ復活する。
+ *
+ * **だから、漏れた実績のある文は文面のほうに凍結して持つ。** これで
+ * プロンプトは自由に縮められる。
+ *
+ * ここへ足してよいのは「**実機で実際に保存されたもの**」だけである。
+ * 思いつきで増やすと照合元が太り、本物の決まりに手が届きはじめる
+ * （`settingsRuleEcho.test.ts` が本文573文で誤検出0を見張っている）。
+ */
+const KNOWN_LEAKED_INSTRUCTIONS = [
+  // さくらのAI（preview/Qwen3.6-35B-A3B）で `ability_system.json` へ入った6文。
+  // 作者の作品で実際に保存された（2026-09-19）
+  "能力体系を創作したり、本文にない能力を補ったりしないこと。",
+  "能力名は本文の表記をそのまま使うこと。",
+  "効果・代償・制約は本文から読み取れる範囲だけを書くこと。",
+  "誰が使ったか分かる場合は userNames に人物名を入れること。",
+  "剣術・話術のような一般的な技量は、作品世界で特別な力として扱われている場合にのみ抽出すること。",
+  "abilitySystem.abilityTerm には、作品世界の中で能力を総称している語を、本文の表記のまま入れてください。",
+] as const;
+
 /** 組み立て直しは高くつく（プロンプト2本ぶん）ので、総称ごとに控える */
 const instructionTextCache = new Map<string, string>();
 
@@ -517,6 +546,8 @@ function instructionText(abilityTerm?: string | null): string {
         // 分かっているなら同じ語で組み立てないと、一致が語の前後で切れる
         abilityTerm: abilityTerm || "＿",
       }),
+      // **プロンプトから消えても捕まえ続ける**（上の凍結した控え）
+      ...KNOWN_LEAKED_INSTRUCTIONS,
     ].join("\n")
   );
   instructionTextCache.set(abilityTerm ?? "", built);
