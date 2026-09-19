@@ -1,0 +1,713 @@
+{
+  "measuredAt": "2026-09-19T15:52:44.259Z",
+  "feature": "proofread",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "granite4.2:30b",
+  "numCtx": 20480,
+  "numCtxDecision": {
+    "numCtx": 20480,
+    "source": "プロンプトの長さから（製品と同じ道）",
+    "promptChars": 4725,
+    "outputTokens": 8192,
+    "contextWindow": 131072,
+    "charsPerToken": null
+  },
+  "temperature": 0.2,
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 131072,
+    "bundled": null,
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 13526,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": null,
+  "options": {},
+  "repeat": 3,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.70.4",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.9",
+  "verifyPromptVersion": null,
+  "plans": [
+    {
+      "chunkId": "本文\\001_あさ.txt#1-0@5017",
+      "chars": 1464,
+      "maxIssues": 7
+    },
+    {
+      "chunkId": "本文\\002_ひる.txt#2-0@5017",
+      "chars": 1478,
+      "maxIssues": 7
+    },
+    {
+      "chunkId": "本文\\003_よる.txt#3-0@5017",
+      "chars": 1402,
+      "maxIssues": 7
+    }
+  ],
+  "maxIssuesPer1000Chars": 5,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\proofread",
+    "targets": [
+      "本文\\001_あさ.txt",
+      "本文\\002_ひる.txt",
+      "本文\\003_よる.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\proofread\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 204145,
+      "temperature": 0.2,
+      "staleNote": null,
+      "metrics": {
+        "ateji": 2,
+        "atejiTotal": 8,
+        "mustOpen": 1,
+        "mustOpenTotal": 10,
+        "falsePositives": 0,
+        "seededWords": 18,
+        "budgetCeiling": 21,
+        "packedItems": 0,
+        "noSuggestion": 0,
+        "accepted": 3,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 204145
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "ateji": {
+          "丁度": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "沢山": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "是非": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "折角": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          }
+        },
+        "mustOpen": {
+          "然し": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "殆ど": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "出来る": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "所謂": {
+            "found": 1,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "尚": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "但し": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "或いは": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          }
+        },
+        "falsePositives": {},
+        "packedItems": []
+      },
+      "raw": [
+        {
+          "target": "本文\\001_あさ.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "granite4.2:30b",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "本文\\001_あさ.txt#1-0@5017",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\002_ひる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "granite4.2:30b",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "本文\\002_ひる.txt#2-0@5017",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 3,
+                    "original": "「是非この鯵を持っていきなさい。新鮮だから」",
+                    "target": "「是非この鯵を持っていきなさい。新鮮だから」",
+                    "suggestion": "「ぜひこの鯵を持っていきなさい。新鮮だから」",
+                    "reason": "漢字ひらき",
+                    "explanation": "「是非（ぜひ）」で読みが詰まります（参考：「鯵」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 13,
+                    "original": "「海斗、折角だから海を見ていかない",
+                    "target": "「海斗、折角だから海を見ていかない",
+                    "suggestion": "「海斗、せっかくだから海を見ていかない",
+                    "reason": "漢字ひらき",
+                    "explanation": "「折角（せっかく）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "所謂、応用問題ってやつが苦手なんだ。",
+                    "target": "所謂、応用問題ってやつが苦手なんだ。",
+                    "suggestion": "いわゆる、応用問題ってやつが苦手なんだ。",
+                    "reason": "漢字ひらき",
+                    "explanation": "「所謂（いわゆる）」で読みが詰まります（参考：「謂」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\003_よる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "granite4.2:30b",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "本文\\003_よる.txt#3-0@5017",
+                "chapterLabel": "第3話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "elapsedMs": 23,
+      "temperature": 0.2,
+      "staleNote": null,
+      "metrics": {
+        "ateji": 2,
+        "atejiTotal": 8,
+        "mustOpen": 1,
+        "mustOpenTotal": 10,
+        "falsePositives": 0,
+        "seededWords": 18,
+        "budgetCeiling": 21,
+        "packedItems": 0,
+        "noSuggestion": 0,
+        "accepted": 3,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 23
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "ateji": {
+          "丁度": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "沢山": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "是非": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "折角": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          }
+        },
+        "mustOpen": {
+          "然し": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "殆ど": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "出来る": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "所謂": {
+            "found": 1,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "尚": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "但し": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "或いは": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          }
+        },
+        "falsePositives": {},
+        "packedItems": []
+      },
+      "raw": [
+        {
+          "target": "本文\\001_あさ.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "granite4.2:30b",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "本文\\001_あさ.txt#1-0@5017",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\002_ひる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "granite4.2:30b",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "本文\\002_ひる.txt#2-0@5017",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 3,
+                    "original": "「是非この鯵を持っていきなさい。新鮮だから」",
+                    "target": "「是非この鯵を持っていきなさい。新鮮だから」",
+                    "suggestion": "「ぜひこの鯵を持っていきなさい。新鮮だから」",
+                    "reason": "漢字ひらき",
+                    "explanation": "「是非（ぜひ）」で読みが詰まります（参考：「鯵」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 13,
+                    "original": "「海斗、折角だから海を見ていかない",
+                    "target": "「海斗、折角だから海を見ていかない",
+                    "suggestion": "「海斗、せっかくだから海を見ていかない",
+                    "reason": "漢字ひらき",
+                    "explanation": "「折角（せっかく）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "所謂、応用問題ってやつが苦手なんだ。",
+                    "target": "所謂、応用問題ってやつが苦手なんだ。",
+                    "suggestion": "いわゆる、応用問題ってやつが苦手なんだ。",
+                    "reason": "漢字ひらき",
+                    "explanation": "「所謂（いわゆる）」で読みが詰まります（参考：「謂」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\003_よる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "granite4.2:30b",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "本文\\003_よる.txt#3-0@5017",
+                "chapterLabel": "第3話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    },
+    {
+      "round": 3,
+      "elapsedMs": 22,
+      "temperature": 0.2,
+      "staleNote": null,
+      "metrics": {
+        "ateji": 2,
+        "atejiTotal": 8,
+        "mustOpen": 1,
+        "mustOpenTotal": 10,
+        "falsePositives": 0,
+        "seededWords": 18,
+        "budgetCeiling": 21,
+        "packedItems": 0,
+        "noSuggestion": 0,
+        "accepted": 3,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 22
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "ateji": {
+          "丁度": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "沢山": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "是非": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "折角": {
+            "found": 1,
+            "total": 2,
+            "noSuggestion": 0
+          }
+        },
+        "mustOpen": {
+          "然し": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "殆ど": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "出来る": {
+            "found": 0,
+            "total": 2,
+            "noSuggestion": 0
+          },
+          "所謂": {
+            "found": 1,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "尚": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "但し": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          },
+          "或いは": {
+            "found": 0,
+            "total": 1,
+            "noSuggestion": 0
+          }
+        },
+        "falsePositives": {},
+        "packedItems": []
+      },
+      "raw": [
+        {
+          "target": "本文\\001_あさ.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "granite4.2:30b",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "本文\\001_あさ.txt#1-0@5017",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\002_ひる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "granite4.2:30b",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "本文\\002_ひる.txt#2-0@5017",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 3,
+                    "original": "「是非この鯵を持っていきなさい。新鮮だから」",
+                    "target": "「是非この鯵を持っていきなさい。新鮮だから」",
+                    "suggestion": "「ぜひこの鯵を持っていきなさい。新鮮だから」",
+                    "reason": "漢字ひらき",
+                    "explanation": "「是非（ぜひ）」で読みが詰まります（参考：「鯵」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 13,
+                    "original": "「海斗、折角だから海を見ていかない",
+                    "target": "「海斗、折角だから海を見ていかない",
+                    "suggestion": "「海斗、せっかくだから海を見ていかない",
+                    "reason": "漢字ひらき",
+                    "explanation": "「折角（せっかく）」で読みが詰まります",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 19,
+                    "original": "所謂、応用問題ってやつが苦手なんだ。",
+                    "target": "所謂、応用問題ってやつが苦手なんだ。",
+                    "suggestion": "いわゆる、応用問題ってやつが苦手なんだ。",
+                    "reason": "漢字ひらき",
+                    "explanation": "「所謂（いわゆる）」で読みが詰まります（参考：「謂」は常用漢字表（平成22年内閣告示第2号）に無い字です）",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\003_よる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "granite4.2:30b",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "本文\\003_よる.txt#3-0@5017",
+                "chapterLabel": "第3話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "ateji": {
+      "values": [
+        2,
+        2,
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "atejiTotal": {
+      "values": [
+        8,
+        8,
+        8
+      ],
+      "min": 8,
+      "max": 8
+    },
+    "mustOpen": {
+      "values": [
+        1,
+        1,
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "mustOpenTotal": {
+      "values": [
+        10,
+        10,
+        10
+      ],
+      "min": 10,
+      "max": 10
+    },
+    "falsePositives": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "seededWords": {
+      "values": [
+        18,
+        18,
+        18
+      ],
+      "min": 18,
+      "max": 18
+    },
+    "budgetCeiling": {
+      "values": [
+        21,
+        21,
+        21
+      ],
+      "min": 21,
+      "max": 21
+    },
+    "packedItems": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "noSuggestion": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        3,
+        3,
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "rejected": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        204145,
+        23,
+        22
+      ],
+      "min": 22,
+      "max": 204145
+    }
+  },
+  "lines": [
+    "指摘の上限: 21件（仕込みは18語）（各回：21件（仕込みは18語）、21件（仕込みは18語）、21件（仕込みは18語））",
+    "当て字を拾えた: 2/8（各回：2/8、2/8、2/8）",
+    "ひらくべき語を拾えた: 1/10（各回：1/10、1/10、1/10）",
+    "誤検出（ひらいてはいけない語をひらいた）: 0（各回：0、0、0）",
+    "1件に複数語を詰めた指摘: 0件（各回：0件、0件、0件）",
+    "提案なし（漢字ひらきなのに修正案が空）: 0（各回：0、0、0）",
+    "指摘（検算を通ったもの）: 3（各回：3、3、3）",
+    "落とした（検算で弾いたもの）: 0（各回：0、0、0）",
+    "失敗（チャンクごと通らなかったもの）: 0（各回：0、0、0）",
+    "所要時間: 0.0秒〜204.1秒（各回：204.1秒、0.0秒、0.0秒）",
+    "num_ctx: 20480（プロンプトの長さから（製品と同じ道））",
+    "temperature: 0.2（製品と同じ（束が返した値））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 13.5秒"
+  ]
+}
