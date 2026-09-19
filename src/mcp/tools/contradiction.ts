@@ -142,10 +142,48 @@ function loadSettings(folder: string, numCtx: number): Settings {
   };
 }
 
+/**
+ * 問う区分を決める。
+ *
+ * **`light`・`all` のほかに、区分名そのものを受ける**（0.70.3）。
+ * 作者の案（2026-09-19）：「クラウドの高位AIは節約、手元で動くローカルLLMでは
+ * **手数を意識して組む**と良さそうですね」。手元では呼び出しが電気代だけなので、
+ * **7区分を減らすのではなく、1区分ずつ分けて問う**道があり得る。
+ * それを**測れるようにする**ための口である（既定は `light` のまま変えない）。
+ *
+ * 受ける形は3つ——1つの名前（`"状態"`）、並び（`["人物","状態"]`）、
+ * 区切り文字でつないだもの（`"人物,状態"`）。**測定の台本から
+ * `--option categories=状態` と打てる**ことを優先した。
+ */
 function categoriesOf(
-  choice: "light" | "all" | undefined
+  choice: string | readonly string[] | undefined
 ): readonly ContradictionCategory[] {
-  return choice === "all" ? CONTRADICTION_CATEGORIES : LIGHT_CATEGORIES;
+  if (choice === undefined) return LIGHT_CATEGORIES;
+  if (choice === "all") return CONTRADICTION_CATEGORIES;
+  if (choice === "light") return LIGHT_CATEGORIES;
+
+  const names = (Array.isArray(choice) ? choice : String(choice).split(/[,、・]/))
+    .map((name) => name.trim())
+    .filter((name) => name !== "");
+  // 空文字だけを渡されたときは、黙って既定へ倒す（打ち間違いで止めない）
+  if (names.length === 0) return LIGHT_CATEGORIES;
+
+  const unknown = names.filter(
+    (name) => !CONTRADICTION_CATEGORIES.includes(name as ContradictionCategory)
+  );
+  if (unknown.length > 0) {
+    // **知らない名前は黙って捨てない。** 捨てると、打ち間違いに気づかないまま
+    // 「その区分を測った」ことになる
+    throw new McpToolError(
+      `知らない矛盾の区分です: ${unknown.join("・")}` +
+        `（選べるのは ${CONTRADICTION_CATEGORIES.join("・")}、` +
+        `まとめて指す light・all）`
+    );
+  }
+
+  // **並びは表の順に揃える。** 打った順で検証項目の並びが変わると、
+  // 同じ組み合わせなのに違う結果が出て、測り比べられなくなる
+  return CONTRADICTION_CATEGORIES.filter((name) => names.includes(name));
 }
 
 export interface ContradictionChunkMaterial {
@@ -229,7 +267,8 @@ export interface ContradictionChunkPrompt {
 }
 
 export interface ContradictionPromptInput extends ContradictionMaterialInput {
-  categories?: "light" | "all";
+  /** `light`（既定）・`all`・区分名（1つ／並び／区切り文字つなぎ）。`categoriesOf` */
+  categories?: string | readonly string[];
 }
 
 export function contradictionPrompt(input: ContradictionPromptInput): {

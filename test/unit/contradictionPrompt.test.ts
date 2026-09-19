@@ -7,6 +7,7 @@ import {
   LIGHT_CATEGORIES,
 } from "../../src/prompts/contradictionCheck";
 import { buildProposalPanelHtml } from "../../src/views/proposalPanelHtml";
+import { contradictionPrompt } from "../../src/mcp/tools/contradiction";
 
 /**
  * 矛盾検知のプロンプトと画面（設計書6.10.1）。
@@ -286,5 +287,82 @@ describe("画面", () => {
 
   test("矛盾では「まとめて適用」を隠す", () => {
     expect(script()).toContain("message.canApplyAll === false");
+  });
+});
+
+/*
+  矛盾の区分を、名前で直に指せるか（0.70.3）。
+
+  作者の案（2026-09-19）：「クラウドの高位AIは節約、手元で動くローカルLLMでは
+  **手数を意識して組む**と良さそうですね」。手元では呼び出しが電気代だけなので、
+  **7区分を減らすのではなく、1区分ずつ分けて問う**道があり得る。
+  その測り比べをするための口である。**既定（light）は変えていない。**
+*/
+describe("矛盾の区分を、名前で指す", () => {
+  const folder = "test/fixtures/seeded/contradiction";
+  const file = "本文/004_ギプスが外れた日.txt";
+
+  function categoriesFor(categories?: string | readonly string[]) {
+    return contradictionPrompt({ folder, filePath: file, numCtx: 16384, categories })
+      .categories;
+  }
+
+  test("指定しなければ、これまでどおり light の3つ", () => {
+    expect(categoriesFor()).toEqual(["人物", "状態", "時系列"]);
+  });
+
+  test("light と all は、これまでどおり", () => {
+    expect(categoriesFor("light")).toEqual(["人物", "状態", "時系列"]);
+    expect(categoriesFor("all")).toHaveLength(7);
+  });
+
+  test("区分名を1つだけ指せる", () => {
+    expect(categoriesFor("状態")).toEqual(["状態"]);
+  });
+
+  test("並びでも、区切り文字つなぎでも指せる", () => {
+    expect(categoriesFor(["人物", "時系列"])).toEqual(["人物", "時系列"]);
+    expect(categoriesFor("人物,時系列")).toEqual(["人物", "時系列"]);
+    expect(categoriesFor("人物、時系列")).toEqual(["人物", "時系列"]);
+  });
+
+  /*
+    **打った順で並びが変わらない。** 変わると、同じ組み合わせなのに
+    検証項目の並びが違い、測り比べられなくなる。
+  */
+  test("並びは表の順に揃う（打った順ではない）", () => {
+    expect(categoriesFor("時系列,人物")).toEqual(["人物", "時系列"]);
+  });
+
+  /*
+    **知らない名前は黙って捨てない。** 捨てると、打ち間違いに気づかないまま
+    「その区分を測った」ことになる。
+  */
+  test("知らない名前は、選べるものを並べて断る", () => {
+    expect(() => categoriesFor("状態,天気")).toThrow(/天気/);
+    expect(() => categoriesFor("状態,天気")).toThrow(/世界法則/);
+  });
+
+  test("空を渡されたら、黙って既定へ倒す", () => {
+    expect(categoriesFor("")).toEqual(["人物", "状態", "時系列"]);
+    expect(categoriesFor("  ,  ")).toEqual(["人物", "状態", "時系列"]);
+  });
+
+  /*
+    **1区分だけを問うと、検証項目もその1つだけになる。**
+    「手数を分ける」ことに意味があるのは、注意の向け先が絞られるからである。
+  */
+  test("1区分だけを問うと、検証項目もその1つだけになる", () => {
+    const built = contradictionPrompt({
+      folder,
+      filePath: file,
+      numCtx: 16384,
+      categories: "状態",
+    });
+    const user = String(
+      (built.chunks[0] as unknown as Record<string, unknown>).userPrompt ?? ""
+    );
+    expect(user).toContain("負傷や状態変化が引き継がれているか");
+    expect(user).not.toContain("一人称、口調、性格、外見");
   });
 });

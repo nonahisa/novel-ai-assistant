@@ -218,7 +218,8 @@ const TEMPERATURE_INPUT = {
 const OPTIONS_TABLE =
   "feature ごとの追加の指定（※は要るもの）。" +
   "foreshadow: mode（detect＝配置を拾う〈既定〉／resolve＝回収を見る）。" +
-  "contradiction: categories（light〈既定〉／all）。" +
+  "contradiction: categories（light〈既定〉／all／区分名そのもの。" +
+  "「状態」「人物,時系列」のように1つでも並びでも指せる）。" +
   "notation: group※（novel.detect が返した組の1件）・limit（detect の上限）。" +
   "synopsis: needsSubtitle。" +
   "episodePlot: plotPath※（単話プロットの相対パス）・chapterLabel。" +
@@ -480,7 +481,16 @@ interface FeatureEntry {
   material?: (input: FeatureCallInput) => unknown;
 }
 
-const CATEGORIES_SCHEMA = z.enum(["light", "all"]);
+/**
+ * 矛盾の区分の指定。**まとめ名（light・all）のほかに、区分名そのものを受ける**
+ * （0.70.3）。ここは形だけを見て通し、**知らない名前かどうかは
+ * `categoriesOf`（`tools/contradiction.ts`）が見る**——選べる名前の表は
+ * あちらが持っているので、こちらに写しを作らない。
+ */
+const CATEGORIES_SCHEMA = z.union([
+  z.string(),
+  z.array(z.string()).min(1),
+]);
 const MODE_SCHEMA: z.ZodType<ForeshadowMode> = z.enum(["detect", "resolve"]);
 
 /**
