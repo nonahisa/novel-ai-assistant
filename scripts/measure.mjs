@@ -309,6 +309,22 @@ function writePermission(work, tools) {
 }
 
 /**
+ * 貯めたチャンクを捨てる（`mcp/tools/chunkCacheFile.ts` の置き場所）。
+ *
+ * **写しの中だけを消す。** 元の台にも作者の作品にも触らない——この道具は
+ * 一時フォルダーへ写してから測るので、消すのはその写しのぶんである。
+ *
+ * **鍵を渡す道具（推敲・誤字脱字）だけが貯める。** 矛盾検知と伏線は
+ * 製品の鍵に材料の指紋が混ざるため、束が鍵を渡していない（`mcp/tools/run.ts`）。
+ */
+function clearChunkCache(work) {
+  fs.rmSync(path.join(work, AIWRITER_DIR, "cache"), {
+    recursive: true,
+    force: true,
+  });
+}
+
+/**
  * 本文のファイルを並べる（`mcp/tools/shared.ts` の `listBodyFiles` と同じ切り方）。
  *
  * **束へは訊かない。** 訊くには `work.scan` の許可が要り、測る道具以外を
@@ -995,6 +1011,16 @@ async function main() {
 
     const runs = [];
     for (let round = 1; round <= options.repeat; round += 1) {
+      // **毎回、貯めたぶんを捨ててから測る**（2026-09-20）。
+      //
+      // `--repeat` は**揺れ幅を見るため**にある。ところが推敲と誤字脱字は
+      // 束がチャンクキャッシュへ貯めるので、**2回目以降は1回目の答えを
+      // 読み直すだけ**になっていた（0.0秒）。3回測ったつもりで、
+      // **1回の結果を3回見ていた。**
+      //
+      // 実際に消して測り直すと、推敲は「ひらくべき語」が 7/10・8/10・7/10 と
+      // 揺れた（キャッシュありでは 6/10 で固定）。**温度0でも揺れる。**
+      clearChunkCache(work);
       console.log(`  ${round}回目…`);
       const run = await runOnce(calls, ask);
       const scored = metricsOfRun(options.feature, answers, {
