@@ -30,7 +30,7 @@ const AXIS = "#3a3a3a";
  */
 const TYPES = [
   { no: "①", name: "絶対書籍化タイプ", q: "br", color: "#a8761f" },
-  { no: "②", name: "自己実現追及タイプ", q: "tr", color: "#2f6f4f" },
+  { no: "②", name: "自己実現追求タイプ", q: "tr", color: "#2f6f4f" },
   { no: "③", name: "自己陶酔自爆タイプ", q: "tl", color: "#a33a3a" },
   { no: "④", name: "精神世界潜航タイプ", q: "bl", color: "#4a5a8f" },
   { no: "⑤", name: "性癖趣味人タイプ", q: "c", color: "#7a4a8f" },
