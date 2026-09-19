@@ -252,7 +252,19 @@ export function narouAnalysisUrl(
   workUrl?: string | null
 ): string | undefined {
   const ncode = narouNcode(workId, workUrl);
-  return ncode ? `https://db.narou.fun/works/${ncode}` : undefined;
+  /*
+    **Nコードは大文字で渡す**（作者の指摘、2026-09-20。ブラウザで確かめた）。
+
+    小文字（`.../works/n2600go`）を開くと、**なろう本体
+    （`ncode.syosetu.com`）へ飛ばされる**——分析ページが出ない。
+    作者の言葉では「両方なろうのページに飛びます」。
+
+    **なろう本体のURLは小文字のままでよい**ので、`narouNcode` の正規化
+    （小文字に揃える）は変えない。**大文字が要るのはこのリンクだけ**である。
+  */
+  return ncode
+    ? `https://db.narou.fun/works/${ncode.toUpperCase()}`
+    : undefined;
 }
 
 /**
