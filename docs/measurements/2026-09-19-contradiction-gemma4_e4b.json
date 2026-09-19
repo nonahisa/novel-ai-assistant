@@ -1,0 +1,873 @@
+{
+  "measuredAt": "2026-09-19T14:19:20.547Z",
+  "feature": "contradiction",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:e4b",
+  "numCtx": 16384,
+  "numCtxDecision": {
+    "numCtx": 16384,
+    "source": "プロンプトの長さから（製品と同じ道）",
+    "promptChars": 4255,
+    "outputTokens": 8192,
+    "contextWindow": 131072,
+    "charsPerToken": null
+  },
+  "temperature": 0,
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 131072,
+    "bundled": null,
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 5402,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": null,
+  "options": {},
+  "repeat": 3,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.70.2",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.5",
+  "verifyPromptVersion": null,
+  "plans": [
+    {
+      "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@4013",
+      "chars": 1235,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\002_十月三日の坂.txt#2-0@4013",
+      "chars": 1218,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\003_窓口の椅子.txt#3-0@4013",
+      "chars": 1211,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@4013",
+      "chars": 1246,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\005_初雪の窓口.txt#5-0@4013",
+      "chars": 1216,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction",
+    "targets": [
+      "本文\\001_九月の終わりの坂.txt",
+      "本文\\002_十月三日の坂.txt",
+      "本文\\003_窓口の椅子.txt",
+      "本文\\004_ギプスが外れた日.txt",
+      "本文\\005_初雪の窓口.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 18228,
+      "temperature": 0,
+      "staleNote": null,
+      "metrics": {
+        "seededContradictions": 0,
+        "seededContradictionsTotal": 4,
+        "missedContradictions": 4,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 1,
+        "accepted": 1,
+        "rejected": 5,
+        "rejected.self_denied": 5,
+        "failures": 0,
+        "elapsedMs": 18228
+      },
+      "detail": {
+        "rejectedReasons": {
+          "self_denied": 5
+        },
+        "failures": [],
+        "seededContradictions": {
+          "人物": {
+            "found": 0,
+            "total": 2
+          },
+          "状態": {
+            "found": 0,
+            "total": 1
+          },
+          "時系列": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missedContradictions": [
+          {
+            "file": "本文/003_窓口の椅子.txt",
+            "kind": "人物",
+            "where": "僕は判子を押す手を止めた"
+          },
+          {
+            "file": "本文/004_ギプスが外れた日.txt",
+            "kind": "状態",
+            "where": "右足のギプスが外れたのは"
+          },
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "人物",
+            "where": "左目の下のほくろが、鏡の中で滲んだ"
+          },
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "時系列",
+            "where": "足を折ってから、ちょうど二週間が過ぎた"
+          }
+        ],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_九月の終わりの坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@4013",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\002_十月三日の坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\002_十月三日の坂.txt#2-0@4013",
+                "chapterLabel": "第2話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "raw": {
+                      "line": 30,
+                      "excerpt": "「鳶ヶ丘は一人で受け持つのが、きまりだから」",
+                      "category": "人物",
+                      "settingSays": "配達のきまり：鳶ヶ丘は一人で受け持つのがきまり。",
+                      "textSays": "千夏が「鳶ヶ丘は一人で受け持つのが、きまりだから」と発言している。",
+                      "note": "設定上の「きまり」の再確認であり、矛盾ではない。ただし、千夏がこの「きまり」を根拠に発言している点に留意。",
+                      "severity": "low",
+                      "confidence": "high"
+                    },
+                    "reason": "self_denied"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\003_窓口の椅子.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\003_窓口の椅子.txt#3-0@4013",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 16,
+                    "excerpt": "その千夏は、毎朝八時に鳶ヶ丘の袋を持って出ていく。",
+                    "category": "人物",
+                    "settingSays": "黒瀬千夏は窓口係であり、配達員が出られないときは代わりに鳶ヶ丘を回る。",
+                    "textSays": "千夏が毎朝八時に鳶ヶ丘の袋を持って出ていく。",
+                    "note": "設定上、千夏が代行するのは「配達員が出られないとき」とされています。本文では「毎朝」と記述されており、これは設定の範囲内か、あるいは設定の補足情報が必要な可能性があります。",
+                    "severity": "low",
+                    "confidence": "medium",
+                    "filePath": "本文\\003_窓口の椅子.txt",
+                    "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "raw": {
+                      "line": 18,
+                      "excerpt": "俺の区域を、この二週間、一度も落としていない。",
+                      "category": "状態",
+                      "settingSays": "第2話で、春人は左足首を折り、医者から「二週間は自転車に乗るな」と言われている。",
+                      "textSays": "春人の区域を、この二週間、一度も落としていない。",
+                      "note": "「二週間」という期間の記述は、第2話の負傷からの経過日数と一致しています。これは矛盾ではありませんが、状況の確認として指摘します。",
+                      "severity": "low",
+                      "confidence": "high"
+                    },
+                    "reason": "self_denied"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\004_ギプスが外れた日.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@4013",
+                "chapterLabel": "第4話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "raw": {
+                      "line": 1,
+                      "excerpt": "右足のギプスが外れたのは、十一月の最初の月曜だった。",
+                      "category": "時系列",
+                      "settingSays": "物語は九月の終わりから十二月の初めまでの、およそ二か月半のあいだに起きる。季節は秋から冬へ一方向に進み、遡ることはない。",
+                      "textSays": "十一月の最初の月曜",
+                      "note": "本文では「十一月の最初の月曜」と具体的な日付が示されています。これは物語の進行（秋→冬）と矛盾しませんが、物語の開始時期（九月の終わり）から見て、この時点での季節の進行は自然です。",
+                      "severity": "low",
+                      "confidence": "low"
+                    },
+                    "reason": "self_denied"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\005_初雪の窓口.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\005_初雪の窓口.txt#5-0@4013",
+                "chapterLabel": "第5話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "raw": {
+                      "line": 11,
+                      "excerpt": "足を折ってから、ちょうど二週間が過ぎた。",
+                      "category": "時系列",
+                      "settingSays": "第2話で左足首を折り、全治一か月、ギプスは三週間ほど、二週間は自転車に乗れないと医師から言われている。",
+                      "textSays": "足を折ってから、ちょうど二週間が過ぎた。",
+                      "note": "第2話の負傷からの経過日数と本文の記述は一致している。",
+                      "severity": "low",
+                      "confidence": "high"
+                    },
+                    "reason": "self_denied"
+                  },
+                  {
+                    "raw": {
+                      "line": 14,
+                      "excerpt": "長靴の底で雪を押さえながら、四十分の坂を一時間かけて上る。",
+                      "category": "時系列",
+                      "settingSays": "鳶ヶ丘は自転車で四十分の上り坂である。",
+                      "textSays": "長靴の底で雪を押さえながら、四十分の坂を一時間かけて上る。",
+                      "note": "坂の距離（四十分）は設定と一致しているが、移動手段が「自転車」から「徒歩（長靴）」に変化している。これは雪による状況変化として矛盾ではない。",
+                      "severity": "low",
+                      "confidence": "high"
+                    },
+                    "reason": "self_denied"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "elapsedMs": 13837,
+      "temperature": 0,
+      "staleNote": null,
+      "metrics": {
+        "seededContradictions": 0,
+        "seededContradictionsTotal": 4,
+        "missedContradictions": 4,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 3,
+        "accepted": 3,
+        "rejected": 2,
+        "rejected.self_denied": 2,
+        "failures": 0,
+        "elapsedMs": 13837
+      },
+      "detail": {
+        "rejectedReasons": {
+          "self_denied": 2
+        },
+        "failures": [],
+        "seededContradictions": {
+          "人物": {
+            "found": 0,
+            "total": 2
+          },
+          "状態": {
+            "found": 0,
+            "total": 1
+          },
+          "時系列": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missedContradictions": [
+          {
+            "file": "本文/003_窓口の椅子.txt",
+            "kind": "人物",
+            "where": "僕は判子を押す手を止めた"
+          },
+          {
+            "file": "本文/004_ギプスが外れた日.txt",
+            "kind": "状態",
+            "where": "右足のギプスが外れたのは"
+          },
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "人物",
+            "where": "左目の下のほくろが、鏡の中で滲んだ"
+          },
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "時系列",
+            "where": "足を折ってから、ちょうど二週間が過ぎた"
+          }
+        ],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_九月の終わりの坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@4013",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\002_十月三日の坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\002_十月三日の坂.txt#2-0@4013",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 31,
+                    "excerpt": "千夏は俺の松葉杖を見て、それから外の雨を見た。",
+                    "category": "人物",
+                    "settingSays": "相沢春人は人見知りで、窓口に立つと客と目を合わせられない。",
+                    "textSays": "千夏は俺の松葉杖を見て、それから外の雨を見た。",
+                    "note": "春人が他者（千夏）の視線や行動に対して、過度に意識的であるという描写は、人見知りという性格設定と矛盾するわけではないが、視線が「松葉杖」と「雨」という無生物に向けられている点に留意が必要。",
+                    "severity": "low",
+                    "confidence": "medium",
+                    "filePath": "本文\\002_十月三日の坂.txt",
+                    "chunkHash": "5312595c9a7fbd6b5e5b5c7e98c1535bf1ff84854c2927d86df29fc2f5c7ee41"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\003_窓口の椅子.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\003_窓口の椅子.txt#3-0@4013",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 16,
+                    "excerpt": "その千夏は、毎朝八時に鳶ヶ丘の袋を持って出ていく。",
+                    "category": "人物",
+                    "settingSays": "黒瀬千夏：役割：窓口係。配達員が出られないときは、代わりに鳶ヶ丘を回る。",
+                    "textSays": "千夏が毎朝八時に鳶ヶ丘の袋を持って出ていく。",
+                    "note": "設定上、千夏は「配達員が出られないとき」に代わり回る、という記述に留まっている。本文では「毎朝八時に」と具体的な時間と行動が示されているが、これは設定の補足情報として矛盾とは断定できない。",
+                    "severity": "low",
+                    "confidence": "medium",
+                    "filePath": "本文\\003_窓口の椅子.txt",
+                    "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                  },
+                  {
+                    "line": 18,
+                    "excerpt": "俺の区域を、この二週間、一度も落としていない。",
+                    "category": "状態",
+                    "settingSays": "第2話：その日から、鳶ヶ丘の袋は黒瀬千夏が代わりに運ぶことになり、春人は局の奥の椅子で松葉杖をついて過ごす。",
+                    "textSays": "この二週間、千夏が春人の区域を回っている。",
+                    "note": "第2話の経緯から、春人は負傷し、千夏が代行している状況である。本文の「二週間」という期間は、第2話の負傷から経過した期間と整合している。",
+                    "severity": "low",
+                    "confidence": "high",
+                    "filePath": "本文\\003_窓口の椅子.txt",
+                    "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\004_ギプスが外れた日.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@4013",
+                "chapterLabel": "第4話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "raw": {
+                      "line": 1,
+                      "excerpt": "右足のギプスが外れたのは、十一月の最初の月曜だった。",
+                      "category": "時系列",
+                      "settingSays": "物語は九月の終わりから十二月の初めまでの、およそ二か月半のあいだに起きる。季節は秋から冬へ一方向に進み、遡ることはない。",
+                      "textSays": "十一月の最初の月曜",
+                      "note": "本文では「十一月の最初の月曜」と具体的な日付が示されています。これは物語の進行（秋→冬）と矛盾しませんが、物語の開始時期（九月の終わり）から見て、この時点での季節の進行は自然です。",
+                      "severity": "low",
+                      "confidence": "low"
+                    },
+                    "reason": "self_denied"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\005_初雪の窓口.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\005_初雪の窓口.txt#5-0@4013",
+                "chapterLabel": "第5話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "raw": {
+                      "line": 11,
+                      "excerpt": "足を折ってから、ちょうど二週間が過ぎた。",
+                      "category": "時系列",
+                      "settingSays": "第2話で左足首を折り、全治一か月、ギプスは三週間ほど、二週間は自転車に乗れないと医師から言われている。",
+                      "textSays": "足を折ってから、ちょうど二週間が過ぎた。",
+                      "note": "第2話の負傷からの経過日数と本文の記述は一致している。",
+                      "severity": "low",
+                      "confidence": "high"
+                    },
+                    "reason": "self_denied"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    },
+    {
+      "round": 3,
+      "elapsedMs": 13910,
+      "temperature": 0,
+      "staleNote": null,
+      "metrics": {
+        "seededContradictions": 0,
+        "seededContradictionsTotal": 4,
+        "missedContradictions": 4,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 3,
+        "accepted": 3,
+        "rejected": 2,
+        "rejected.self_denied": 2,
+        "failures": 0,
+        "elapsedMs": 13910
+      },
+      "detail": {
+        "rejectedReasons": {
+          "self_denied": 2
+        },
+        "failures": [],
+        "seededContradictions": {
+          "人物": {
+            "found": 0,
+            "total": 2
+          },
+          "状態": {
+            "found": 0,
+            "total": 1
+          },
+          "時系列": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missedContradictions": [
+          {
+            "file": "本文/003_窓口の椅子.txt",
+            "kind": "人物",
+            "where": "僕は判子を押す手を止めた"
+          },
+          {
+            "file": "本文/004_ギプスが外れた日.txt",
+            "kind": "状態",
+            "where": "右足のギプスが外れたのは"
+          },
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "人物",
+            "where": "左目の下のほくろが、鏡の中で滲んだ"
+          },
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "時系列",
+            "where": "足を折ってから、ちょうど二週間が過ぎた"
+          }
+        ],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_九月の終わりの坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@4013",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\002_十月三日の坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\002_十月三日の坂.txt#2-0@4013",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 31,
+                    "excerpt": "千夏は俺の松葉杖を見て、それから外の雨を見た。",
+                    "category": "人物",
+                    "settingSays": "相沢春人は人見知りで、窓口に立つと客と目を合わせられない。",
+                    "textSays": "千夏は俺の松葉杖を見て、それから外の雨を見た。",
+                    "note": "春人が他者（千夏）の視線や行動に対して、過度に意識的であるという描写は、人見知りという性格設定と矛盾するわけではないが、視線が「松葉杖」と「雨」という無生物に向けられている点に留意が必要。",
+                    "severity": "low",
+                    "confidence": "medium",
+                    "filePath": "本文\\002_十月三日の坂.txt",
+                    "chunkHash": "5312595c9a7fbd6b5e5b5c7e98c1535bf1ff84854c2927d86df29fc2f5c7ee41"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\003_窓口の椅子.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\003_窓口の椅子.txt#3-0@4013",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 16,
+                    "excerpt": "その千夏は、毎朝八時に鳶ヶ丘の袋を持って出ていく。",
+                    "category": "人物",
+                    "settingSays": "黒瀬千夏：役割：窓口係。配達員が出られないときは、代わりに鳶ヶ丘を回る。",
+                    "textSays": "千夏が毎朝八時に鳶ヶ丘の袋を持って出ていく。",
+                    "note": "設定上、千夏は「配達員が出られないとき」に代わり回る、という記述に留まっている。本文では「毎朝八時に」と具体的な時間と行動が示されているが、これは設定の補足情報として矛盾とは断定できない。",
+                    "severity": "low",
+                    "confidence": "medium",
+                    "filePath": "本文\\003_窓口の椅子.txt",
+                    "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                  },
+                  {
+                    "line": 18,
+                    "excerpt": "俺の区域を、この二週間、一度も落としていない。",
+                    "category": "状態",
+                    "settingSays": "第2話：その日から、鳶ヶ丘の袋は黒瀬千夏が代わりに運ぶことになり、春人は局の奥の椅子で松葉杖をついて過ごす。",
+                    "textSays": "この二週間、千夏が春人の区域を回っている。",
+                    "note": "第2話の経緯から、春人は負傷し、千夏が代行している状況である。本文の「二週間」という期間は、第2話の負傷から経過した期間と整合している。",
+                    "severity": "low",
+                    "confidence": "high",
+                    "filePath": "本文\\003_窓口の椅子.txt",
+                    "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\004_ギプスが外れた日.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@4013",
+                "chapterLabel": "第4話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "raw": {
+                      "line": 1,
+                      "excerpt": "右足のギプスが外れたのは、十一月の最初の月曜だった。",
+                      "category": "時系列",
+                      "settingSays": "物語は九月の終わりから十二月の初めまでの、およそ二か月半のあいだに起きる。季節は秋から冬へ一方向に進み、遡ることはない。",
+                      "textSays": "十一月の最初の月曜",
+                      "note": "本文では「十一月の最初の月曜」と具体的な日付が示されています。これは物語の進行（秋→冬）と矛盾しませんが、物語の開始時期（九月の終わり）から見て、この時点での季節の進行は自然です。",
+                      "severity": "low",
+                      "confidence": "low"
+                    },
+                    "reason": "self_denied"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\005_初雪の窓口.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\005_初雪の窓口.txt#5-0@4013",
+                "chapterLabel": "第5話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "raw": {
+                      "line": 11,
+                      "excerpt": "足を折ってから、ちょうど二週間が過ぎた。",
+                      "category": "時系列",
+                      "settingSays": "第2話で左足首を折り、全治一か月、ギプスは三週間ほど、二週間は自転車に乗れないと医師から言われている。",
+                      "textSays": "足を折ってから、ちょうど二週間が過ぎた。",
+                      "note": "第2話の負傷からの経過日数と本文の記述は一致している。",
+                      "severity": "low",
+                      "confidence": "high"
+                    },
+                    "reason": "self_denied"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seededContradictions": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "seededContradictionsTotal": {
+      "values": [
+        4,
+        4,
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "missedContradictions": {
+      "values": [
+        4,
+        4,
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "falseFlagsContradiction": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "categoryMismatch": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "otherFlagsContradiction": {
+      "values": [
+        1,
+        3,
+        3
+      ],
+      "min": 1,
+      "max": 3
+    },
+    "accepted": {
+      "values": [
+        1,
+        3,
+        3
+      ],
+      "min": 1,
+      "max": 3
+    },
+    "rejected": {
+      "values": [
+        5,
+        2,
+        2
+      ],
+      "min": 2,
+      "max": 5
+    },
+    "rejected.self_denied": {
+      "values": [
+        5,
+        2,
+        2
+      ],
+      "min": 2,
+      "max": 5
+    },
+    "failures": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        18228,
+        13837,
+        13910
+      ],
+      "min": 13837,
+      "max": 18228
+    }
+  },
+  "lines": [
+    "仕込んだ矛盾を拾えた: 0/4（各回：0/4、0/4、0/4）",
+    "見逃し（拾えなかった仕込み）: 4（各回：4、4、4）",
+    "誤検出（罠と、矛盾の無い話に付いた指摘）: 0（各回：0、0、0）",
+    "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）: 0（各回：0、0、0）",
+    "仕込み以外の箇所への指摘: 1〜3（各回：1、3、3）",
+    "指摘（検算を通ったもの）: 1〜3（各回：1、3、3）",
+    "落とした（検算で弾いたもの）: 2〜5（各回：5、2、2）",
+    "　└ 落とした理由：self_denied: 2〜5（各回：5、2、2）",
+    "失敗（チャンクごと通らなかったもの）: 0（各回：0、0、0）",
+    "所要時間: 13.8秒〜18.2秒（各回：18.2秒、13.8秒、13.9秒）",
+    "num_ctx: 16384（プロンプトの長さから（製品と同じ道））",
+    "temperature: 0（製品と同じ（束が返した値））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 5.4秒"
+  ]
+}
