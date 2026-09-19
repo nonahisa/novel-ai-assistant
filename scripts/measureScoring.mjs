@@ -33,6 +33,18 @@ export const PROMPT_TOOL = "novel.prompt";
  */
 export const VALIDATE_TOOL = "novel.validate";
 
+/**
+ * 手元の Ollama を直に触る道具。**測定台は2つのことに使う。**
+ *
+ * - `ollama.models` … モデルが申告する読める長さと、同梱の実測を訊く
+ *   （`num_ctx` を製品と同じ道で決めるのに要る。`measureNumCtx.mjs`）
+ * - `ollama.generate` … **測る前に空打ちして温める。** これをしないと、
+ *   最後に使ったモデルだけが「読み込み済み」で有利になる
+ *   （2026-09-19 に、26bだけ載ったまま測って165秒／12bは349秒と出た）
+ */
+export const MODELS_TOOL = "ollama.models";
+export const GENERATE_TOOL = "ollama.generate";
+
 export const FEATURES = [
   "proofread",
   "typo",

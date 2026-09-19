@@ -9,6 +9,7 @@ import {
   inferTier,
 } from "./types";
 import { countByteFallback, decodeByteFallback } from "../core/byteFallback";
+import { readExpertCounts, type ModelExperts } from "../core/modelExperts";
 import { contextSizeForPrompt } from "../core/chunker";
 import { describeFetchFailure, isFetchTimeout } from "./httpClient";
 import {
@@ -343,6 +344,15 @@ export class OllamaProvider implements AIProvider {
 
     const parameterSize = res.details?.parameter_size ?? null;
 
+    /*
+      **「大きいけれど速い型」かどうかも、ここで拾う**（`core/modelExperts.ts`）。
+
+      同じ `model_info` に入っている（`gemma4.expert_count` など）ので、
+      往復は増えない。取れないモデルでは undefined のままにする——
+      **「部品を分けていない」と言い切らない**（分からないのとは違う）。
+    */
+    const experts = readExpertCounts(modelInfo);
+
     return {
       id: name,
       displayName: name,
@@ -363,6 +373,9 @@ export class OllamaProvider implements AIProvider {
       parameterSize,
       capabilities: res.capabilities ?? [],
       tier: inferTier(parameterSize, "ollama"),
+      // 取れた行にだけ置く。`undefined` を常に置くと、写しを作る側
+      // （LM Studioの `describe`）が「持っている」と読み違える
+      ...(experts !== undefined ? { experts } : {}),
     };
   }
 
@@ -376,6 +389,17 @@ export class OllamaProvider implements AIProvider {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * そのモデルの部品の内訳。**Ollamaだけが答えられる**（設計書の実測、
+   * 2026-09-19）。
+   *
+   * `getModel` は失敗を undefined へ畳むので、Ollamaが止まっていても
+   * ここは例外を投げない——一覧の欄が空のままになるだけである。
+   */
+  async describeExperts(model: string): Promise<ModelExperts | undefined> {
+    return (await this.getModel(model))?.experts;
   }
 
   /**

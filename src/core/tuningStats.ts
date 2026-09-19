@@ -1,5 +1,10 @@
 import type { ModelTuning, SpeedSource } from "./modelTuning";
 import {
+  expertsCellText,
+  expertsPickText,
+  type ModelExperts,
+} from "./modelExperts";
+import {
   CHARS_PER_TOKEN,
   MIN_CHARS_PER_TOKEN_SAMPLES,
   resolveCharsPerToken,
@@ -32,6 +37,14 @@ export interface TuningStatsEntry {
   /** モデル名（台帳の鍵の後半） */
   readonly model: string;
   readonly tuning: ModelTuning;
+  /**
+   * 部品の内訳（`core/modelExperts.ts`）。**分からなければ undefined。**
+   *
+   * **台帳には入っていない。** 部品の数はモデルの性質であって作者が
+   * 測った値ではないので、書き写さずにAIへそのつど訊く（CLAUDE.md 規則6）。
+   * 訊けるのはOllamaだけで、ほかは undefined のまま並ぶ。
+   */
+  readonly experts?: ModelExperts;
 }
 
 /**
@@ -43,14 +56,25 @@ export interface TuningStatsEntry {
  * @param providerLabel プロバイダIDを表示名へ直す手。表示名を知っているのは
  *   `AIRegistry` だけなので、こちらは受け取るだけにする（この層から
  *   VS Codeへは触らない）
+ * @param experts 部品の内訳を引く手。**渡さなくてよい**——訊ける相手
+ *   （いまは Ollama だけ）がいないときは、欄が空のまま並ぶ
  */
 export function tuningStatsEntries(
   table: ReadonlyMap<string, ModelTuning>,
-  providerLabel: (providerId: string) => string
+  providerLabel: (providerId: string) => string,
+  experts?: (providerId: string, model: string) => ModelExperts | undefined
 ): TuningStatsEntry[] {
   return [...table.entries()].map(([key, tuning]) => {
     const { providerId, model } = splitTuningKey(key);
-    return { providerLabel: providerLabel(providerId), model, tuning };
+    const parts = experts?.(providerId, model);
+    return {
+      providerLabel: providerLabel(providerId),
+      model,
+      tuning,
+      // 分からない行に欄そのものを作らない（`undefined` を置くのと同じだが、
+      // 書き出す側で「持っているか」を素直に読めるようにしておく）
+      ...(parts !== undefined ? { experts: parts } : {}),
+    };
   });
 }
 
@@ -117,10 +141,25 @@ export function buildTuningStatsMarkdown(
       "入力トークン数の、これまでの最小値）。この値が入ると本文の分割が" +
       "変わるので、実際にいくつで見積もっているかを欄の中に併記します。",
     "",
+    /*
+      **部品の使い方は、速さの理由になる**（作者の指示、2026-09-19）。
+
+      作者の機械では、VRAMに入らない17.3GBのモデルが、入る7.0GBのモデルの
+      2倍速かった。部品を分けて持ち、一度に一部だけを使うモデルだったから
+      である。速さの列だけを見ても理由が読めないので、同じ表に並べる。
+
+      **「—」は分からないという意味である。** 訊ける相手はいまのところ
+      Ollamaだけなので、そう断っておかないと「部品を分けていない」と
+      読まれる（分からないのと、分かっていて分けていないのは違う）。
+    */
+    "部品の使い方は、答えてくれるAIのぶんだけ出しています。" +
+      "この欄の「—」は、部品を分けていないという意味ではなく、分からない" +
+      "という意味です。",
+    "",
     "| AI | モデル | 出力速度（トークン/秒） | 速度の出どころ | 速度を測った日時 | " +
       "文脈の実効長（トークン） | 読める長さ（字） | 書ける長さ（トークン） | 測った日時 | " +
-      "字/トークン（実測） |",
-    "|---|---|---|---|---|---|---|---|---|---|"
+      "字/トークン（実測） | 部品の使い方 |",
+    "|---|---|---|---|---|---|---|---|---|---|---|"
   );
 
   const sorted = sortBySpeed(entries);
@@ -142,6 +181,7 @@ export function buildTuningStatsMarkdown(
           outputCell(entry.tuning),
           formatMeasuredAt(entry.tuning.measuredAt),
           charsPerTokenCell(entry.tuning),
+          entry.experts ? expertsCellText(entry.experts) : UNKNOWN,
         ].join(" | ") +
         " |"
     );
@@ -402,10 +442,19 @@ export function formatMeasuredAt(iso: string | undefined): string {
  */
 export function modelPickDetail(
   capabilities: readonly string[],
-  tuning: ModelTuning | undefined
+  tuning: ModelTuning | undefined,
+  experts?: ModelExperts
 ): string | undefined {
   const parts: string[] = [];
   if (capabilities.length > 0) parts.push(`対応: ${capabilities.join(", ")}`);
+  /*
+    **部品の使い方は、対応機能のすぐ隣に置く**（作者の指示、2026-09-19）。
+
+    速さや読める長さと違って、これは**測る前から分かっている**——測って
+    いないモデルでも出せる、選ぶときのいちばん早い手がかりである。だから
+    台帳の値（速さ・長さ）より前に置く。分からないモデルでは何も足さない。
+  */
+  if (experts) parts.push(expertsPickText(experts));
   if (tuning?.outputTokensPerSecond !== undefined) {
     parts.push(`実測 ${tuning.outputTokensPerSecond.toFixed(1)} トークン/秒`);
   }

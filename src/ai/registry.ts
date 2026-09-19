@@ -21,6 +21,7 @@ import { askText, cancelItem } from "../views/dialogs";
 import { canRunProcesses } from "../core/runtime";
 import { allModelTuning, modelTuningKey } from "../core/modelTuning";
 import { modelPickDetail } from "../core/tuningStats";
+import { EXPERTS_BADGE } from "../core/modelExperts";
 import { notifyDone } from "../views/notify";
 
 const KEY_PROVIDER = "novelai.ai.provider";
@@ -536,12 +537,24 @@ export async function pickProviderAndModel(
           m.parameterSize ?? "",
           formatModelContext(m),
           tierLabel[m.tier],
+          /*
+            **「大きいけれど速い型」も、文脈長と並べて出す**（作者の指示、
+            2026-09-19）。実測では、VRAMに入らない17.3GBのモデルが、入る
+            7.0GBのモデルの2倍速かった——大きさだけを見せていると、作者は
+            「大きい＝重い」と読んで選択肢から外してしまう。
+
+            分からないモデルでは空文字になり、`filter(Boolean)` が落とす。
+            **「ふつうの型」とは書かない**（分からないのと、分かっていて
+            部品を分けていないのは違う）。
+          */
+          m.experts ? EXPERTS_BADGE : "",
         ]
           .filter(Boolean)
           .join(" / "),
         detail: modelPickDetail(
           m.capabilities,
-          tuningTable.get(modelTuningKey(providerPick.providerId, m.id))
+          tuningTable.get(modelTuningKey(providerPick.providerId, m.id)),
+          m.experts
         ),
         model: m,
       })),

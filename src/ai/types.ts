@@ -1,3 +1,5 @@
+import type { ModelExperts } from "../core/modelExperts";
+
 /** 対応プロバイダ */
 export type ProviderId =
   | "ollama"
@@ -49,6 +51,18 @@ export interface ModelInfo {
    * 「これから読み込む」ことを選ぶ前に伝えたい。
    */
   loaded?: boolean;
+  /**
+   * 部品の内訳（`core/modelExperts.ts`）。**分からなければ undefined。**
+   *
+   * 「大きいけれど速い型」かどうかは、モデルを選ぶときの手がかりとして
+   * 文脈長や有料かと同じくらい効く——実測で、VRAMに入らない17.3GBの
+   * モデルが7.0GBのモデルの2倍速かった。
+   *
+   * **答えてくれるのは Ollama だけである**（実測、2026-09-19）。LM Studio の
+   * `/api/v0/models` にも、クラウドの4社にも、この項目は無い。
+   * **undefined は「分からない」であって「部品を分けていない」ではない。**
+   */
+  experts?: ModelExperts;
 }
 
 export interface GenerateParams {
@@ -261,6 +275,20 @@ export interface AIProvider {
    * 未実装なら呼び出し側が listModels から探す。
    */
   getModel?(id: string): Promise<ModelInfo | undefined>;
+  /**
+   * そのモデルの部品の内訳（`core/modelExperts.ts`）。**分かるものだけが持つ。**
+   *
+   * 実測の一覧（`features/showTuningStats.ts`）が、台帳に並んだ行へ後から
+   * 添えるために呼ぶ。**台帳へは書き写さない**——部品の数はモデルの性質で
+   * あって作者が測った値ではなく、APIが答えるものをそのつど訊けばよい
+   * （CLAUDE.md 規則6）。
+   *
+   * **持たないプロバイダは実装しない。** 「分からない」を undefined で
+   * 返せばよいように見えるが、それでは「訊いたが答えが無かった」のか
+   * 「訊く口が無い」のかが呼び出し側から同じに見える。いまの実装は
+   * Ollama だけで、失敗しても例外にはしない（何も出さないだけ）。
+   */
+  describeExperts?(model: string): Promise<ModelExperts | undefined>;
 }
 
 /** APIキーの入力欄に出す案内。プロバイダごとに発行元が違うため各自で持つ */

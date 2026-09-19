@@ -1,0 +1,917 @@
+{
+  "measuredAt": "2026-09-19T02:40:22.045Z",
+  "feature": "settings",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "qwen3:8b",
+  "numCtx": 32768,
+  "endpoint": null,
+  "options": {},
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.68.10",
+    "stale": true,
+    "reason": "束は 0.68.10、リポジトリは 0.69.0",
+    "staleDuringRun": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.68.10、リポジトリは 0.69.0）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+  },
+  "promptVersion": "5.4",
+  "verifyPromptVersion": null,
+  "plans": [
+    {
+      "chunkId": "本文\\001_水路の朝.txt#1-0@8027",
+      "chars": 1360,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\002_石の館.txt#2-0@8027",
+      "chars": 1275,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\003_灯替えの夜.txt#3-0@8027",
+      "chars": 1264,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\settings",
+    "targets": [
+      "本文\\001_水路の朝.txt",
+      "本文\\002_石の館.txt",
+      "本文\\003_灯替えの夜.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\settings\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 410888,
+      "staleNote": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.68.10、リポジトリは 0.69.0）。Claude Code を開き直して、新しい束で繋ぎ直してください",
+      "metrics": {
+        "settingsFound": 12,
+        "settingsFoundTotal": 16,
+        "settingsMissed": 4,
+        "settingsAliases": 0,
+        "settingsAliasesTotal": 4,
+        "settingsFabricated": 0,
+        "settingsWrongMerge": 0,
+        "settingsWrongMergeTotal": 3,
+        "settingsWrongSplit": 0,
+        "settingsWrongSplitTotal": 2,
+        "settingsFakeRelations": 0,
+        "settingsAbilityTerm": 1,
+        "settingsRuleLeak": 0,
+        "settingsOtherRecords": 1,
+        "accepted": 14,
+        "rejected": 6,
+        "rejected.pronoun_name": 2,
+        "rejected.ungrounded": 3,
+        "rejected.not_an_ability": 1,
+        "failures": 0,
+        "elapsedMs": 410888
+      },
+      "detail": {
+        "rejectedReasons": {
+          "pronoun_name": 2,
+          "ungrounded": 3,
+          "not_an_ability": 1
+        },
+        "failures": [],
+        "settingsFound": {
+          "人物": {
+            "found": 3,
+            "total": 5
+          },
+          "能力": {
+            "found": 2,
+            "total": 2
+          },
+          "場所": {
+            "found": 3,
+            "total": 3
+          },
+          "組織": {
+            "found": 2,
+            "total": 2
+          },
+          "世界観": {
+            "found": 2,
+            "total": 4
+          }
+        },
+        "settingsMissed": [
+          {
+            "kind": "人物",
+            "name": "セルド・ヴェイル"
+          },
+          {
+            "kind": "人物",
+            "name": "ガーロ"
+          },
+          {
+            "kind": "世界観",
+            "name": "神術の代償（使い手の体が冷える）"
+          },
+          {
+            "kind": "世界観",
+            "name": "ヴェイル家がカルネラを代々治める"
+          }
+        ],
+        "settingsAliasesMissed": [
+          {
+            "name": "ヨナ",
+            "alias": "ヨナ君"
+          },
+          {
+            "name": "ヨナ",
+            "alias": "ヨナ様"
+          },
+          {
+            "name": "リーナ・ヴェイル",
+            "alias": "リーナ"
+          },
+          {
+            "name": "セルド・ヴェイル",
+            "alias": "セルド"
+          }
+        ],
+        "settingsFabricated": [],
+        "settingsWrongMerge": [],
+        "settingsWrongSplit": [],
+        "settingsFakeRelations": [],
+        "settingsAbilityTerm": {
+          "expected": "神術",
+          "actual": "神術",
+          "ok": true
+        },
+        "settingsRuleLeak": [],
+        "settingsOtherRecords": [
+          {
+            "kind": "人物",
+            "name": "リーナ"
+          }
+        ]
+      },
+      "raw": [
+        {
+          "target": "本文\\001_水路の朝.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.68.10、リポジトリは 0.69.0）。Claude Code を開き直して、新しい束で繋ぎ直してください\n手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3:8b",
+            "results": [
+              {
+                "chunkId": "本文\\001_水路の朝.txt#1-0@8027",
+                "chapterLabel": "第1話",
+                "characters": {
+                  "accepted": [
+                    {
+                      "data": {
+                        "name": "リーナ・ヴェイル",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "灯替えの日取りを告げる娘。",
+                        "affiliation": "なし",
+                        "gender": "女性",
+                        "role": "灯替えの日取りを告げる人物",
+                        "personality": "明るく前向き（早急に行動する）",
+                        "appearance": "髪は赤みが強く、肩に切りそろえられている",
+                        "evidence": "「リーナ・ヴェイル」ヨナ君が急に名前を呼んだので、わたしは驚いて顔を上げた。",
+                        "relations": [
+                          {
+                            "name": "ヨナ",
+                            "relation": "話す相手"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        1
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "ヨナ",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "灯守り組合の若い灯守り。",
+                        "affiliation": "灯守り組合",
+                        "gender": "男性",
+                        "role": "灯守り",
+                        "personality": "責任感があり、灯継ぎを丁寧に実行（ただし決まりを破る）",
+                        "appearance": "背丈は普通、外套を着ている",
+                        "evidence": "「ヨナ君が顔を出した。」「ヨナ君は答えて、また指を浸す。」",
+                        "relations": [
+                          {
+                            "name": "リーナ・ヴェイル",
+                            "relation": "話す相手"
+                          },
+                          {
+                            "name": "リーナ・ヴェイル",
+                            "relation": "灯替えの日取りを知っている"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        1
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "リーナ",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "灯替えの日取りを告げる人物。",
+                        "affiliation": "なし",
+                        "gender": "女性",
+                        "role": "灯替えの日取りを告げる人物",
+                        "personality": "明るく前向き（早急に行動する）",
+                        "appearance": "髪は赤みが強く、肩に切りそろえられている",
+                        "evidence": "「リーナ・ヴェイル」ヨナ君が急に名前を呼んだので、わたしは驚いて顔を上げた。",
+                        "relations": [
+                          {
+                            "name": "ヨナ",
+                            "relation": "話す相手"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        1
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "リーナ・ヴェイル",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "灯替えの日取りを告げる娘。",
+                        "affiliation": "なし",
+                        "gender": "女性",
+                        "role": "灯替えの日命",
+                        "personality": "明るく前向き（早急に行動する）",
+                        "appearance": "髪は赤みが強く、肩に切りそろえられている",
+                        "evidence": "「リーナ・ヴェイル」ヨナ君が急に名前を呼んだので、わたしは驚いて顔を上げた。",
+                        "relations": [
+                          {
+                            "name": "ヨナ",
+                            "relation": "話す相手"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        1
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "リーナ",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "灯替えの日取りを告げる人物。",
+                        "affiliation": "なし",
+                        "gender": "女性",
+                        "role": "灯替えの日取りを告げる人物",
+                        "personality": "明るく前向き（早急に行動する）",
+                        "appearance": "髪は赤みが強く、肩に切りそろえられている",
+                        "evidence": "「リーナ・ヴェイル」ヨナ君が急に名前を呼んだので、わたしは驚いて顔を上げた。",
+                        "relations": [
+                          {
+                            "name": "ヨナ",
+                            "relation": "話す相手"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        1
+                      ]
+                    }
+                  ],
+                  "rejected": [],
+                  "droppedSharedBodyAliases": [],
+                  "droppedTruncatedAliases": [],
+                  "droppedSharedFamilyNameAliases": [],
+                  "droppedRelativeAliases": [],
+                  "droppedRelations": [],
+                  "correctedRelations": []
+                },
+                "settings": {
+                  "abilities": [
+                    {
+                      "data": {
+                        "name": "灯継ぎ",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "水路の灯を継ぐ神術。",
+                        "category": null,
+                        "description": "水路の灯を継ぐ神術。水に宿る力をまとめて神術と呼ぶ。",
+                        "cost": null,
+                        "limitation": null,
+                        "userNames": [],
+                        "evidence": "「灯継ぎ。神術のなかでいちばん地味で、いちばん切らせないものだ。」"
+                      },
+                      "chapters": [
+                        1
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "水読み",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "水の濁りから灯の残りを読み取る技術。",
+                        "category": null,
+                        "description": "水の濁りから灯の残りを読み取る技術。",
+                        "cost": null,
+                        "limitation": null,
+                        "userNames": [],
+                        "evidence": "「水読みという。灯の残りが濃いか薄いかを、水の濁りから読み取る技だ。」"
+                      },
+                      "chapters": [
+                        1
+                      ]
+                    }
+                  ],
+                  "locations": [
+                    {
+                      "data": {
+                        "name": "カルネラ",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "丘の上に石を積んで作られた街。",
+                        "region": null,
+                        "description": "丘の上に石を積んで作られた街。",
+                        "evidence": "「カルネラは丘の上に石を積んで作られた街で、外から水を引き上げてくる術がない。」"
+                      },
+                      "chapters": [
+                        1
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "中央水路",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "カルネラの水を運ぶ水路。",
+                        "region": null,
+                        "description": "カルネラの水を運ぶ水路。",
+                        "evidence": "「中央水路の縁を、ヨナ君は迷いなく歩く。」"
+                      },
+                      "chapters": [
+                        1
+                      ]
+                    }
+                  ],
+                  "organizations": [
+                    {
+                      "data": {
+                        "name": "灯守り組合",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "カルネラの灯を管理する組織。",
+                        "parent": null,
+                        "category": null,
+                        "description": "カルネラの灯を管理する組織。",
+                        "evidence": "「灯守り組合の見習いになって二年。」"
+                      },
+                      "chapters": [
+                        1
+                      ]
+                    }
+                  ],
+                  "worldItems": [
+                    {
+                      "data": {
+                        "name": "神術の種類",
+                        "category": "rule",
+                        "description": "水に宿る力をまとめて神術と呼ぶ。",
+                        "evidence": "「カルネラでは、水に宿る力をまとめて神術と呼ぶ。火にも風にも土にも宿らない。水だけだ。」"
+                      },
+                      "category": "rule",
+                      "chapters": [
+                        1
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "灯替えの日",
+                        "category": "rule",
+                        "description": "年に一度だけ訪れる。街じゅうの灯をいちどに落とし、新しい灯を継ぎ直す。",
+                        "evidence": "「灯替えの夜は、年に一度だけ訪れる。街じゅうの灯をいちどに落とし、新しい灯を継ぎ直す。」"
+                      },
+                      "category": "rule",
+                      "chapters": [
+                        1
+                      ]
+                    }
+                  ],
+                  "affiliations": [
+                    "なし",
+                    "灯守り組合"
+                  ],
+                  "rejected": [],
+                  "abilityTerm": "神術",
+                  "rules": []
+                },
+                "note": "マージ（既存の資料との突き合わせ）と保存は行っていません。これは取り出して検算したところまでの結果です。"
+              }
+            ],
+            "failures": [],
+            "bundleStale": true
+          }
+        },
+        {
+          "target": "本文\\002_石の館.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.68.10、リポジトリは 0.69.0）。Claude Code を開き直して、新しい束で繋ぎ直してください\n手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3:8b",
+            "results": [
+              {
+                "chunkId": "本文\\002_石の館.txt#2-0@8027",
+                "chapterLabel": "第2話",
+                "characters": {
+                  "accepted": [
+                    {
+                      "data": {
+                        "name": "ヴェイル子爵",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "ヴェイル家の家長。灯替えの決定権を持つ。",
+                        "affiliation": "ヴェイル家",
+                        "gender": "男性",
+                        "role": "家長",
+                        "personality": "権威的で命令を出すが、相手の意見を聞く（ヨナ君の答えを聞き、笑う）",
+                        "appearance": "白い髪を後ろに撫でつけ、机の上に紙束を置いている",
+                        "evidence": "「組合の若いのが来たか」「灯替えは十日後だ。水路を全部落とす。継ぎ直しに何人要る」",
+                        "relations": [
+                          {
+                            "name": "リーナ・ヴェイル",
+                            "relation": "子"
+                          },
+                          {
+                            "name": "セルド・ヴェイル",
+                            "relation": "子"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        2
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "ヨナ",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "灯守り組合のメンバー。ヴェイル家と交渉する。",
+                        "affiliation": "灯守り組合",
+                        "gender": "男性",
+                        "role": "組合員",
+                        "personality": "忠実で、命令を守る（ヴェイル子爵の指示に従う）",
+                        "appearance": "無記述",
+                        "evidence": "「灯替えは十日後だ。水路を全部落とす。継ぎ直しに何人要る」「六人です」",
+                        "relations": [
+                          {
+                            "name": "ガーロ",
+                            "relation": "所属"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        2
+                      ]
+                    }
+                  ],
+                  "rejected": [
+                    {
+                      "name": "わたし",
+                      "reason": "pronoun_name"
+                    },
+                    {
+                      "name": "リーナ・ヴェイル",
+                      "reason": "ungrounded"
+                    },
+                    {
+                      "name": "セルド・ヴェイル",
+                      "reason": "ungrounded"
+                    },
+                    {
+                      "name": "ガーロ",
+                      "reason": "ungrounded"
+                    }
+                  ],
+                  "droppedSharedBodyAliases": [],
+                  "droppedTruncatedAliases": [],
+                  "droppedSharedFamilyNameAliases": [],
+                  "droppedRelativeAliases": [],
+                  "droppedRelations": [],
+                  "correctedRelations": []
+                },
+                "settings": {
+                  "abilities": [],
+                  "locations": [
+                    {
+                      "data": {
+                        "name": "石の館",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "ヴェイル家の館。水路の権利を持つ。",
+                        "region": null,
+                        "description": "中央水路がいちばん高くなるところに建っている。黒っぽい石を三段に積んだ古い建物。",
+                        "evidence": "「石の館は、中央水路がいちばん高くなるところに建っている。黒っぽい石を三段に積んだ古い建物で、窓が少ない」"
+                      },
+                      "chapters": [
+                        2
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "カルネラ",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "ヴェイル家の治める街。",
+                        "region": null,
+                        "description": "水路の権利を持つ街。",
+                        "evidence": "「ヴェイル家はカルネラを代々治めてきた家で、街の水路の権利もこの家が持っている」"
+                      },
+                      "chapters": [
+                        2
+                      ]
+                    }
+                  ],
+                  "organizations": [
+                    {
+                      "data": {
+                        "name": "ヴェイル家",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "水路の権利を持つ家。灯替えの決定権を持つ。",
+                        "parent": null,
+                        "category": null,
+                        "description": "水路を掘ったとされる家。灯替えの決定権を持つ。",
+                        "evidence": "「ヴェイル家の館だ。ヴェイル家はカルネラを代々治めてきた家で、街の水路の権利もこの家が持っている」"
+                      },
+                      "chapters": [
+                        2
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "灯守り組合",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "灯替えを実行する組織。",
+                        "parent": null,
+                        "category": null,
+                        "description": "水路の権利をヴェイル家が持つが、灯替えはこの組合が実行する。",
+                        "evidence": "「灯替えの段取りを決めるため、わたしとヨナ君は灯守り組合の使いで石の館へ上がった」"
+                      },
+                      "chapters": [
+                        2
+                      ]
+                    }
+                  ],
+                  "worldItems": [],
+                  "affiliations": [
+                    "ヴェイル家",
+                    "灯守り組合"
+                  ],
+                  "rejected": [],
+                  "abilityTerm": null,
+                  "rules": []
+                },
+                "note": "マージ（既存の資料との突き合わせ）と保存は行っていません。これは取り出して検算したところまでの結果です。"
+              }
+            ],
+            "failures": [],
+            "bundleStale": true
+          }
+        },
+        {
+          "target": "本文\\003_灯替えの夜.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.68.10、リポジトリは 0.69.0）。Claude Code を開き直して、新しい束で繋ぎ直してください\n手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3:8b",
+            "results": [
+              {
+                "chunkId": "本文\\003_灯替えの夜.txt#3-0@8027",
+                "chapterLabel": "第3話",
+                "characters": {
+                  "accepted": [
+                    {
+                      "data": {
+                        "name": "ヨナ",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "灯守り組合の先頭。神術を使うが体に負担をかける。",
+                        "affiliation": "灯守り組合",
+                        "gender": "男性",
+                        "role": "灯守り組合の先頭",
+                        "personality": "責任感が強く、体を犠牲にしても灯を継ぐ（手が冷たくなっても我慢する）",
+                        "appearance": "体が白くなり、指が冷たい",
+                        "evidence": "「ヨナ君は先頭だった。『始める』合図と同時に、六人が同時に指を水へ入れた。」",
+                        "relations": [
+                          {
+                            "name": "リーナ・ヴェイル",
+                            "relation": "手を包み、灯を継ぐのを手伝う"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        3
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "リーナ・ヴェイル",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "ヨナの手を包み、灯を継ぐのを手伝う人物。",
+                        "affiliation": "なし",
+                        "gender": "女性",
+                        "role": "灯継ぎの支援者",
+                        "personality": "冷静で、ヨナの手を包みながらも優しく接する（冷たい手を包む）",
+                        "appearance": "夜の色の外套と履き物",
+                        "evidence": "「リーナ・ヴェイルだった。外套も履き物も夜の色で、それでも走ってきたのが分かった。」",
+                        "relations": [
+                          {
+                            "name": "ヨナ",
+                            "relation": "手を包み、灯を継ぐのを手伝う"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        3
+                      ]
+                    }
+                  ],
+                  "rejected": [
+                    {
+                      "name": "わたし",
+                      "reason": "pronoun_name"
+                    }
+                  ],
+                  "droppedSharedBodyAliases": [],
+                  "droppedTruncatedAliases": [],
+                  "droppedSharedFamilyNameAliases": [],
+                  "droppedRelativeAliases": [],
+                  "droppedRelations": [],
+                  "correctedRelations": []
+                },
+                "settings": {
+                  "abilities": [],
+                  "locations": [
+                    {
+                      "data": {
+                        "name": "カルネラ",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "灯替えの夜に真っ暗になる街。",
+                        "region": null,
+                        "description": "年に一度、灯が消え、真っ暗になる街。灯替えの夜に灯を継ぐ。",
+                        "evidence": "「灯替えの夜、カルネラの灯がいちどに落ちた。」"
+                      },
+                      "chapters": [
+                        3
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "中央水路",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "カルネラの水路で、灯が継がれる場所。",
+                        "region": null,
+                        "description": "カルネラの水路で、灯が継がれる場所。灯が消え、真っ暗になる。",
+                        "evidence": "「中央水路の底から光が抜けていき、あとには黒い水だけが残った。」"
+                      },
+                      "chapters": [
+                        3
+                      ]
+                    }
+                  ],
+                  "organizations": [
+                    {
+                      "data": {
+                        "name": "灯守り組合",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "灯替えの夜に灯を継ぐための組織。",
+                        "parent": null,
+                        "category": null,
+                        "description": "灯替えの夜に灯を継ぐための組織。六人の役割をもつ。",
+                        "evidence": "「灯守り組合の六人は、水路の上流から順に並んだ。」"
+                      },
+                      "chapters": [
+                        3
+                      ]
+                    }
+                  ],
+                  "worldItems": [
+                    {
+                      "data": {
+                        "name": "灯継ぎの法則",
+                        "category": "rule",
+                        "description": "水路の灯が消えているあいだに別の灯を点けると、継ぎ直した灯が薄くなる。",
+                        "evidence": "「水の灯が消えているあいだに別の灯を点けると、継ぎ直した灯が薄くなると言われている。」"
+                      },
+                      "category": "rule",
+                      "chapters": [
+                        3
+                      ]
+                    }
+                  ],
+                  "affiliations": [
+                    "灯守り組合",
+                    "なし"
+                  ],
+                  "rejected": [
+                    {
+                      "name": "神術",
+                      "reason": "not_an_ability"
+                    }
+                  ],
+                  "abilityTerm": "神術",
+                  "rules": []
+                },
+                "note": "マージ（既存の資料との突き合わせ）と保存は行っていません。これは取り出して検算したところまでの結果です。"
+              }
+            ],
+            "failures": [],
+            "bundleStale": true
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "settingsFound": {
+      "values": [
+        12
+      ],
+      "min": 12,
+      "max": 12
+    },
+    "settingsFoundTotal": {
+      "values": [
+        16
+      ],
+      "min": 16,
+      "max": 16
+    },
+    "settingsMissed": {
+      "values": [
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "settingsAliases": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsAliasesTotal": {
+      "values": [
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "settingsFabricated": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsWrongMerge": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsWrongMergeTotal": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "settingsWrongSplit": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsWrongSplitTotal": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "settingsFakeRelations": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsAbilityTerm": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "settingsRuleLeak": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsOtherRecords": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "accepted": {
+      "values": [
+        14
+      ],
+      "min": 14,
+      "max": 14
+    },
+    "rejected": {
+      "values": [
+        6
+      ],
+      "min": 6,
+      "max": 6
+    },
+    "rejected.pronoun_name": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "rejected.ungrounded": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "rejected.not_an_ability": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        410888
+      ],
+      "min": 410888,
+      "max": 410888
+    }
+  },
+  "lines": [
+    "出るべきものを拾えた（人物・能力・場所・組織・世界観）: 12/16",
+    "見逃し（出るべきなのに出なかった）: 4",
+    "あるべき別名を拾えた: 0/4",
+    "でっち上げ（出てはいけないものが出た）: 0",
+    "誤って統合した組（別人を1件にまとめた）: 0/3",
+    "誤って分けた組（同じ人物を別レコードにした）: 0/2",
+    "でっち上げの関係（本文に無い血縁などを書いた）: 0",
+    "能力の総称が合っている（1＝合っている）: 1",
+    "指示文の混入（rules にプロンプトの文が入った）: 0",
+    "仕込み以外に出たレコード: 1",
+    "指摘（検算を通ったもの）: 14",
+    "落とした（検算で弾いたもの）: 6",
+    "　└ 落とした理由：not_an_ability（能力ではない）: 1",
+    "　└ 落とした理由：pronoun_name（代名詞の名前）: 2",
+    "　└ 落とした理由：ungrounded（本文根拠なし）: 3",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 410.9秒"
+  ]
+}
