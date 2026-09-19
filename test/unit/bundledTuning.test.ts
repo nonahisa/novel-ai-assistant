@@ -40,17 +40,32 @@ describe("同梱する実測の一覧", () => {
     for (const key of bundledTuningKeys()) {
       if (!/^(ollama|lmstudio)\//.test(key)) continue;
       expect(bundledTuningByKey(key)?.measuredChars).toBeUndefined();
+      // トークン数で言い直しただけの同じ値なので、こちらも同じ理由で載せない
+      expect(bundledTuningByKey(key)?.contextWindow).toBeUndefined();
     }
   });
 
   /**
    * **APIが教えてくれる値はAPIを優先する**（作者の守り5）。
-   * 申告のコンテキスト長（`contextWindow`）を同梱表で上書きしない。
+   *
+   * 2026-09-19 に例外が1つ開いた——**さくらのAIはモデル一覧APIが
+   * コンテキスト長を返さない**ので、上書きされる申告がそもそも無い。
+   * 既定の 32,000 は申告ではなく製品の当て推量で、31Bの実測は
+   * 273,001トークンだった。載せてよいのは**申告しないプロバイダの行だけ**で、
+   * その線引きは `contextWindowResolve.test.ts` がソースを読んで見張る
+   * （共通の読み順 `resolveContextWindow` を通るか、で判る）。
+   *
+   * ここで固定するのは、**載せてよい測定の強さ**である。
    */
-  it("文脈の実効長（contextWindow）を、どの行にも載せていない", () => {
+  it("文脈の実効長を載せた行は、天井で止まっていない測定である", () => {
     for (const key of bundledTuningKeys()) {
-      const seed = bundledTuningByKey(key) as Record<string, unknown>;
-      expect(seed.contextWindow).toBeUndefined();
+      const seed = bundledTuningByKey(key);
+      if (seed?.contextWindow === undefined) continue;
+      // 天井に当たった測定の値は「そこまでは確かめた」下限でしかない。
+      // それを上限として配ると、**実際より大きい値**になりうる
+      expect(seed.contextHitCeiling, key).toBe(false);
+      // どこから来た数字かを辿れるように、測った字数も添える
+      expect(seed.measuredChars, key).toBeGreaterThan(0);
     }
   });
 
@@ -86,10 +101,14 @@ describe("同梱する実測の一覧", () => {
     expect(bundledTuning("sakura", "preview/gemma-4-31B-it")).toEqual({
       charsPerToken: 1.383,
       measuredChars: 339_804,
+      // 測った字数を、台帳へ書くときと同じ換算でトークンへ直した値
+      // （339,804 ÷ (1.383 × 0.9)）。作者の台帳の値と一致する
+      contextWindow: 273_001,
       contextHitCeiling: false,
       measuredAt: "2026-09-13",
     });
     expect(bundledTuning("sakura", "gpt-oss-120b")?.charsPerToken).toBe(1.065);
+    expect(bundledTuning("sakura", "gpt-oss-120b")?.contextWindow).toBe(138_597);
     expect(bundledTuning("ollama", "qwen3:8b")?.charsPerToken).toBe(1.234);
     // gemma-4 系は 12B でも 31B でも、手元でもさくらでも同じ値
     expect(bundledTuning("ollama", "gemma4:12b")?.charsPerToken).toBe(1.383);

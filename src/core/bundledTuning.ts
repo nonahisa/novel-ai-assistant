@@ -26,7 +26,31 @@
  * | 作者の実測が常に勝つ | `mergeBundledTuning` は**欄ごとに、台帳に無いところだけ**埋める |
  * | 出どころを見せる | 混ぜた行に `bundled` と `bundledAt` が付き、一覧と選ぶ画面に「同梱」と出る |
  * | 分あたりの上限で頭打ちの測定は載せない | `gemini/*` を**載せていない**（`contextLimitedByRate` が立っていた） |
- * | APIが教えてくれる値はAPIを優先 | **`contextWindow` を載せない。** 申告のコンテキスト長を同梱表で上書きしない |
+ * | APIが教えてくれる値はAPIを優先 | `contextWindow` を載せるのは、**APIが申告しないプロバイダの行だけ**（下の例外） |
+ *
+ * ---
+ *
+ * ## 守り5の例外——申告が存在しないプロバイダ（作者の裁定、2026-09-19）
+ *
+ * 守り5の元の形は「**`contextWindow` を載せない**」だった。守ろうとして
+ * いたのは「申告のコンテキスト長を同梱表で上書きしない」ことである。
+ * **ところが、さくらのAI・ChatGPT・LM Studio には、その申告が存在しない**
+ * ——モデル一覧APIがコンテキスト長を返さない（`ai/sakuraProvider.ts` に
+ * 明記がある）。上書きされる相手が居ないのに載せないでいた結果、
+ * **さくらは全モデルが既定の 32,000 で動いていた。** 31B の実測は
+ * 273,001トークンなので、8分の1しか読ませていなかったことになる。
+ * しかも 32,000 は申告ではなく、**製品が置いた当て推量**である。
+ *
+ * だから例外を1つだけ開ける。**同梱の `contextWindow` を見るのは、
+ * 共通の読み順（`core/modelTuning.ts` の `resolveContextWindow`）を通る
+ * プロバイダだけ**で、それはそのまま「APIが申告しないプロバイダ」の
+ * 一覧である（さくら・ChatGPT・LM Studio）。Gemini・Claude・Ollama は
+ * そもそもこの読み順を通らず、APIの申告を直に使う——そこは守り5の
+ * 元の形のままで、同梱表が申告を上書きすることはない。
+ *
+ * **読む順は「台帳 → 設定 → 同梱 → 既定」。** 作者の実測（台帳）と
+ * 作者が設定に書いた値は、これまでどおり同梱より常に先に来る（守り2）。
+ * 同梱が割り込むのは、**これまで当て推量の既定へ落ちていた場所だけ**である。
  *
  * VS Code APIに依存しない。
  */
@@ -45,6 +69,26 @@ export interface BundledTuning {
    * ローカルは VRAM 次第で、同じモデルでも機械が変われば別の値になる。
    */
   readonly measuredChars?: number;
+  /**
+   * 実効のコンテキスト長（**トークン**。`ModelTuning.contextWindow` と同じ
+   * 単位・同じ意味）。**APIが申告しないプロバイダの行だけ**（上の例外）。
+   *
+   * **`measuredChars`（字）とは単位が違う。** 同じ測定から出た値だが、
+   * 測定が数えるのは通った字数で、チャンク分割が要るのはトークン数である。
+   * 製品が台帳へ書くときの換算は
+   * `measuredChars ÷ (charsPerToken × 0.9)`（`contextProbe.ts` の
+   * `probeCharsToTokens`。0.9 は `sizeBudget.ts` の
+   * `CHARS_PER_TOKEN_MARGIN`＝安全側に1割引く余白）。
+   * 31B は 339,804字 ÷ (1.383 × 0.9) ＝ 273,001トークンで、台帳の値と
+   * 一致する。**ここに入れるのは、その換算まで済んだ台帳の値そのもの**
+   * ——読む側で掛け算をすると、換算の写しが増えて行きと帰りでずれる。
+   *
+   * **実際より大きい値は入れない。** チャンク分割の基準なので、大きすぎると
+   * 入力が黙って切り捨てられる（`ai/sakuraProvider.ts` の警告）。載せるのは
+   * `contextHitCeiling: false`（＝探索の天井ではなく本当の限界まで測れた）
+   * の測定だけである。
+   */
+  readonly contextWindow?: number;
   /**
    * その測定が天井に当たったか（`ModelTuning.contextHitCeiling` と同じ意味）。
    *
@@ -71,18 +115,37 @@ export interface BundledTuning {
  */
 const BUNDLED: Readonly<Record<string, BundledTuning>> = {
   /* ── さくらのAI（クラウド）───────────────────────── */
+  /*
+    `preview/` の付くモデルは、**同じ名前で中身が入れ替わる。** だから
+    `measuredAt` を見て古くなったら使わない——その扱いは変えていない。
+  */
   "sakura/preview/gemma-4-31B-it": {
     charsPerToken: 1.383,
     measuredChars: 339_804,
+    contextWindow: 273_001,
     contextHitCeiling: false,
     measuredAt: "2026-09-13",
   },
   "sakura/gpt-oss-120b": {
     charsPerToken: 1.065,
     measuredChars: 138_425,
+    /*
+      **この行だけ、文脈長は 2026-09-17 の測り直しから採っている**
+      （作者の台帳の値）。同じ日の `measuredChars`（132,845字）で数えた
+      トークン数なので、上の 138,425字 とは別の回の測定である。
+      **新しいほうの測定は 09-13 より小さい**ので、こちらを載せるほうが
+      安全側になる（09-13 の字数から換算すると 144,418トークンになり、
+      作者が実際に測った上限を超える）。
+    */
+    contextWindow: 138_597,
     contextHitCeiling: false,
     measuredAt: "2026-09-13",
   },
+  /*
+    `sakura/preview/Qwen3.6-35B-A3B` は**読める長さを測っていない**ので、
+    行ごと置いていない。「同じさくらの preview だから 31B と同じはず」は
+    推測であり、この表の約束（実測だけ）を外れる。
+  */
 
   /* ── Ollama（手元）。字/トークンだけ ──────────────────
      読める長さは載せない——VRAM 次第で、機械が変われば別の値になる。 */
@@ -102,6 +165,21 @@ export function bundledTuning(
   model: string
 ): BundledTuning | undefined {
   return BUNDLED[`${providerId}/${model}`];
+}
+
+/**
+ * 同梱の実効コンテキスト長（トークン）。無ければ undefined。
+ *
+ * **呼ぶのは `resolveContextWindow` だけである**（`core/modelTuning.ts`）。
+ * あの読み順を通るのは、APIがコンテキスト長を申告しないプロバイダだけ
+ * なので、**呼び出し口を1つに絞ることが、そのまま守り5の例外の線になる**
+ * ——プロバイダ名の一覧をここへ写すと、片方だけ直したときに静かにずれる。
+ */
+export function bundledContextWindow(
+  providerId: string,
+  model: string
+): number | undefined {
+  return bundledTuning(providerId, model)?.contextWindow;
 }
 
 /** 同梱の一覧そのもの（テストと、一覧の組み立てが使う） */

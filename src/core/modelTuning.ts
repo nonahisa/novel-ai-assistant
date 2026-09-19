@@ -1,6 +1,10 @@
 import * as vscode from "vscode";
 import { logLine } from "./logger";
-import { bundledTuningByKey, bundledTuningKeys } from "./bundledTuning";
+import {
+  bundledContextWindow,
+  bundledTuningByKey,
+  bundledTuningKeys,
+} from "./bundledTuning";
 import { tuningStoreTable, writeTuningEntry } from "./modelTuningStore";
 // **型だけを借りる。** 実体は引き込まない（`import type` は消える）ので、
 // 台帳が測定の仕組みを抱え込むことにはならない。それでも写しは作らない
@@ -282,6 +286,15 @@ function mergeBundledTuning(
   if (seed.charsPerToken !== undefined) {
     fill("charsPerTokenSamples", BUNDLED_CHARS_PER_TOKEN_SAMPLES);
   }
+
+  /*
+    **`contextWindow` は、ここでは混ぜない**（作者の裁定、2026-09-19）。
+
+    混ぜると `tunedContextWindow` がこの行から拾い、読み順の先頭
+    （＝**設定より前**）に立ってしまう。同梱は「作者が設定にも台帳にも
+    何も書いていないときの、当て推量の代わり」でしかないので、
+    割り込んでよいのは既定の直前だけである（`resolveContextWindow`）。
+  */
 
   if (fields.length === 0) return entry;
   return {
@@ -733,8 +746,46 @@ export interface ContextWindowSource {
 }
 
 /**
+ * 作者が**設定に書いた**コンテキスト長。書いていなければ undefined。
+ *
+ * **`get` では「書いた」かどうかが分からない。** `package.json` に
+ * `"default": 32000` と宣言してあるので、作者が何も触っていなくても
+ * `get` はその 32,000 を返す。同梱の実測（下）を既定より先に使うには、
+ * **既定が返っただけの回と、作者が 32,000 と書いた回を見分ける**必要が
+ * あるので、`inspect` で作者が書いた値だけを見る。
+ *
+ * 見る順は VS Code の優先順位と同じ（フォルダー → ワークスペース → 全体）。
+ *
+ * **`inspect` を持たない相手（試験の差し替え）では、従来どおり `get` を
+ * 使う。** 見分けられない以上「作者が書いた」と読むほうが安全である
+ * ——作者が書いた値が同梱に負けることだけは、あってはならない。
+ */
+function writtenContextWindow(source: ContextWindowSource): number | undefined {
+  const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const written =
+    typeof config.inspect === "function"
+      ? (() => {
+          const seen = config.inspect<number>(source.settingKey);
+          return (
+            seen?.workspaceFolderValue ??
+            seen?.workspaceValue ??
+            seen?.globalValue
+          );
+        })()
+      : config.get<number>(source.settingKey, source.fallback);
+  if (written === undefined) return undefined;
+  // 壊れた値・小さすぎる値は「書いていない」と同じ扱い（従来どおり先へ落とす）
+  return Number.isFinite(written) &&
+    written > 0 &&
+    written >= source.minimum
+    ? written
+    : undefined;
+}
+
+/**
  * そのモデルが読める長さ（トークン）。
- * **台帳（AIチューニング）→ プロバイダごとの設定 → 既定** の順で決める。
+ * **台帳（AIチューニング）→ プロバイダごとの設定 → 同梱の実測 → 既定**
+ * の順で決める。
  *
  * ## 台帳を見るのは、申告しないプロバイダだけ
  *
@@ -753,6 +804,20 @@ export interface ContextWindowSource {
  * 読み順・下限・落とし先が3か所に写されており、片方だけ直すと
  * 「ChatGPTでは効くのにさくらでは効かない」が静かに生まれる
  * （待ち時間の `resolveTimeoutSeconds` と同じ理由。設計書6.77の第2段）。
+ *
+ * ## 既定の前に、同梱の実測を見る（作者の裁定、2026-09-19）
+ *
+ * ここの既定（さくらなら 32,000）は、**申告ではなく製品が置いた
+ * 当て推量**である。申告しないプロバイダなのだから当然で、実測の
+ * 273,001トークンに対して8分の1しか読ませていなかった。測ってある
+ * モデルなら、当て推量より実測のほうが必ず良い。
+ *
+ * **この関数を通るのは、申告しないプロバイダだけである。** だから
+ * ここへ同梱を挟むことは、そのまま「申告するプロバイダでは同梱を
+ * 使わない」を意味する（`core/bundledTuning.ts` の守り5の例外）。
+ *
+ * 台帳と設定はこれまでどおり同梱より先で、同梱が割り込むのは
+ * **これまで当て推量の既定へ落ちていた場所だけ**である。
  */
 export function resolveContextWindow(
   providerId: string,
@@ -761,14 +826,15 @@ export function resolveContextWindow(
 ): number {
   const tuned = tunedContextWindow(providerId, model);
   if (tuned !== undefined) return tuned;
-  const configured = vscode.workspace
-    .getConfiguration(CONFIG_SECTION)
-    .get<number>(source.settingKey, source.fallback);
-  return Number.isFinite(configured) &&
-    configured > 0 &&
-    configured >= source.minimum
-    ? configured
-    : source.fallback;
+
+  const written = writtenContextWindow(source);
+  if (written !== undefined) return written;
+
+  const bundled = bundledContextWindow(providerId, model);
+  // 同梱の値にも下限を当てる（台帳と同じ扱い。表の写し間違いを通さない）
+  if (bundled !== undefined && bundled >= source.minimum) return bundled;
+
+  return source.fallback;
 }
 
 /** `resolveTimeoutSeconds` のミリ秒版。プロバイダはこちらを使う */

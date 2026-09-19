@@ -2,7 +2,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { workspace } from "vscode";
-import { resolveContextWindow } from "../../src/core/modelTuning";
+import { modelTuning, resolveContextWindow } from "../../src/core/modelTuning";
+import {
+  bundledTuningByKey,
+  bundledTuningKeys,
+} from "../../src/core/bundledTuning";
 import { useMemoryTuningStore } from "./support/tuningStore";
 import { LMSTUDIO_CONTEXT_WINDOW } from "../../src/ai/lmstudioProvider";
 import { OPENAI_CONTEXT_WINDOW } from "../../src/ai/openaiProvider";
@@ -155,5 +159,104 @@ describe("台帳を見るのは、申告しないプロバイダだけ", () => {
       expect(code, id).not.toContain("tunedContextWindow");
       expect(code, id).not.toContain("resolveContextWindow");
     }
+  });
+});
+
+/**
+ * 同梱の実測（`core/bundledTuning.ts`）を、既定より先に使う（作者の裁定、
+ * 2026-09-19「測った値を同梱する」）。
+ *
+ * **さくらのAIは、モデル一覧APIがコンテキスト長を返さない。** だから
+ * 既定の 32,000 は「申告」ではなく製品が置いた当て推量で、チューニングを
+ * するまで全モデルがその値で動いていた（31Bは実測 273,001トークン）。
+ */
+describe("申告しないプロバイダは、同梱の実測を既定より先に使う", () => {
+  const root = path.join(__dirname, "..", "..");
+
+  /**
+   * **本物に近い設定のスタブ。** `package.json` に既定のある設定は、
+   * 作者が何も書いていなくても `get` がその既定を返す。だから
+   * 「作者が書いたか」は `inspect` でしか分からない。
+   */
+  function withWrittenSettings(values: Record<string, unknown>): void {
+    workspace.getConfiguration = () =>
+      ({
+        get: <T>(key: string, defaultValue?: T): T =>
+          (key in values ? values[key] : defaultValue) as T,
+        inspect: <T>(key: string) => ({
+          key,
+          globalValue: (key in values ? values[key] : undefined) as
+            | T
+            | undefined,
+        }),
+      }) as unknown as ReturnType<typeof workspace.getConfiguration>;
+  }
+
+  const 三十一B = "preview/gemma-4-31B-it";
+
+  test("未チューニングのさくらの31Bは、32,000ではなく測った値", () => {
+    withWrittenSettings({});
+    expect(resolveContextWindow("sakura", 三十一B, SAKURA_CONTEXT_WINDOW)).toBe(
+      273001
+    );
+  });
+
+  test("gpt-oss-120b も同じ", () => {
+    withWrittenSettings({});
+    expect(
+      resolveContextWindow("sakura", "gpt-oss-120b", SAKURA_CONTEXT_WINDOW)
+    ).toBe(138597);
+  });
+
+  test("作者の台帳があれば、そちらが勝つ", async () => {
+    withWrittenSettings({});
+    await useMemoryTuningStore({
+      [`sakura/${三十一B}`]: { contextWindow: 100000 },
+    });
+    expect(resolveContextWindow("sakura", 三十一B, SAKURA_CONTEXT_WINDOW)).toBe(
+      100000
+    );
+  });
+
+  test("作者が設定に書いていれば、そちらが勝つ", () => {
+    withWrittenSettings({ [SAKURA_CONTEXT_WINDOW.settingKey]: 64000 });
+    expect(resolveContextWindow("sakura", 三十一B, SAKURA_CONTEXT_WINDOW)).toBe(
+      64000
+    );
+  });
+
+  test("測っていないモデルは、これまでどおり既定", () => {
+    // 同じさくらでも、Qwen3.6 は読める長さを測っていない。
+    // **「同じ系統だから同じはず」で当てない**（同梱表の約束）
+    withWrittenSettings({});
+    expect(
+      resolveContextWindow(
+        "sakura",
+        "preview/Qwen3.6-35B-A3B",
+        SAKURA_CONTEXT_WINDOW
+      )
+    ).toBe(32000);
+  });
+
+  test("同梱の文脈長を持つのは、申告しないプロバイダの行だけ", () => {
+    // **Gemini・Claude・Ollama はAPIが申告する。** そこへ同梱を混ぜると、
+    // 古い実測が正しい申告を静かに上書きする（上の describe と同じ理由）
+    for (const key of bundledTuningKeys()) {
+      if (bundledTuningByKey(key)?.contextWindow === undefined) continue;
+      const providerId = key.split("/")[0];
+      const code = fs.readFileSync(
+        path.join(root, "src", "ai", `${providerId}Provider.ts`),
+        "utf8"
+      );
+      expect(code, key).toContain("resolveContextWindow");
+    }
+  });
+
+  test("同梱の文脈長は、台帳の行としては混ざらない", () => {
+    // 混ぜると `tunedContextWindow` が拾い、**設定より先に**効いてしまう。
+    // 作者が設定に書いた値が、同梱に負けることがあってはならない
+    const merged = modelTuning("sakura", 三十一B);
+    expect(merged?.contextWindow).toBeUndefined();
+    expect(merged?.bundledFields ?? []).not.toContain("contextWindow");
   });
 });
