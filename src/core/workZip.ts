@@ -1,8 +1,11 @@
 import { unzipSync } from "fflate";
+import { detectBackupSite } from "./backupSite";
 import { countEpisodeChars } from "./episodeCharCount";
+import { parseNarouBackup, type NarouBackup } from "./narouBackup";
 import { decodeBytes, type Encoding } from "./textDecode";
 import { isWorkInfoFile } from "./workInfoFile";
 import { parseWorkInfo, type WorkInfo } from "./workInfoParse";
+import type { PostingSiteId } from "../models/posting";
 import type { Eol } from "../models/types";
 
 /**
@@ -66,14 +69,41 @@ export interface ZipTextFile {
 export interface WorkZipInspection {
   /** 書き出すファイル */
   readonly files: readonly ZipTextFile[];
-  /** 話として数えたファイル数 */
+  /**
+   * 取り込む話の数。
+   *
+   * **ファイルの数ではない。** なろうのバックアップは全話が1ファイルに
+   * 入った合本なので、ファイルを数えると4話の作品でも「1話を取り込みました」
+   * と出る（2026-09-19、実データで確認）。合本と分かったときは、
+   * **中の区切りの数**を使う（`narouBackup.ts` の `episodeCount`）。
+   */
   readonly episodeCount: number;
+  /**
+   * 全話が1ファイルに入っているか（合本）。
+   *
+   * 作者への説明を変えるために持つ——「4話」と言いながら原稿のファイルが
+   * 1つしか無いと、取り込んだあとで数が合わないように見える。
+   */
+  readonly collected: boolean;
   /** 合計の純文字数 */
   readonly totalChars: number;
   /** 入れなかったファイルの名前（画像など） */
   readonly skipped: readonly string[];
   /** `about.txt` から読み取った作品情報。無ければ null */
   readonly info: WorkInfo | null;
+  /**
+   * なろうのバックアップから読めたもの（`narouBackup.ts`）。無ければ null。
+   *
+   * **カクヨムのバックアップには対応するものが無い**（数字が入っていない）。
+   */
+  readonly narou: NarouBackup | null;
+  /**
+   * どの投稿サイトのバックアップか（設計書6.99）。**見分けられなければ null。**
+   *
+   * 「この作品はもうそのサイトに載っている」ことだけを指す。作品IDもURLも
+   * バックアップには入っていないので、ここから分かるのはサイトだけである。
+   */
+  readonly site: PostingSiteId | null;
   /** 採った作品名 */
   readonly title: string;
   /** 題をどこから採ったか。作者への説明に使う */
@@ -144,9 +174,17 @@ export function inspectWorkZip(
   }
 
   const aboutFile = files.find((file) => file.isWorkInfo);
-  const info = aboutFile
-    ? parseWorkInfo(decodeBytes(aboutFile.bytes).text)
-    : null;
+  const workInfoText = aboutFile ? decodeBytes(aboutFile.bytes).text : null;
+  const narou = findNarouBackup(files);
+  /*
+    **作品情報は `about.txt`、無ければなろうの合本の頭から読む。**
+
+    なろうのバックアップには `about.txt` が無く、題も作者名もあらすじも
+    キーワードも**合本の頭**に入っている。ここを繋がないと、作品名がZIPの
+    名前（Nコード）になり、書いてある紹介文もタグも下書きに置かれない。
+  */
+  const infoText = workInfoText ?? narou?.head ?? null;
+  const info = infoText === null ? null : parseWorkInfo(infoText);
 
   const fromAbout = info?.title ? sanitizeWorkFolderName(info.title) : "";
   const title = fromAbout || workTitleFromZipFileName(zipFileName);
@@ -155,15 +193,61 @@ export function inspectWorkZip(
   // 確認の画面に並ぶ順が作者の見慣れた話順にならない
   files.sort((a, b) => a.name.localeCompare(b.name, "ja"));
 
+  const fileEpisodes = files.filter((file) => !file.isWorkInfo).length;
+
   return {
     files,
-    episodeCount: files.filter((file) => !file.isWorkInfo).length,
+    /*
+      **合本は、中の区切りを数える**（0.69.9）。ZIPに入っているファイルは
+      1つでも、作者にとっては4話である——「1話を取り込みました」と出ると、
+      3話がどこかへ消えたように見える。
+
+      合本の話が0と読めたとき（区切りが1つも無いなど）はファイルの数へ
+      戻す。**0話と言い切らない**のは、原稿は現に入っているからである。
+    */
+    episodeCount: narou?.episodeCount || fileEpisodes,
+    collected: (narou?.episodeCount ?? 0) > fileEpisodes,
     totalChars: files.reduce((total, file) => total + file.charCount, 0),
     skipped,
     info,
+    narou,
+    // **見分けられたときだけ入る**（`backupSite.ts`）。読むだけで、ここでも
+    // まだ1文字も書かない——書き留めるかどうかは取り込む側が決める
+    site: detectBackupSite({
+      zipFileName,
+      workInfoText,
+      narouHeader: narou !== null,
+    }),
     title,
     titleSource: fromAbout ? "about" : "zipName",
   };
+}
+
+/**
+ * なろうのバックアップの頭を探す。
+ *
+ * **頭だけを読む。** 合本は全話が1ファイルに入っているので、丸ごと文字へ
+ * 直すと大きい作品では無駄が大きい——【Nコード】は必ずファイルの先頭に
+ * 並ぶ欄の中にある（`narouBackup.ts` が最初の区切り行で読むのをやめる）。
+ */
+function findNarouBackup(files: readonly ZipTextFile[]): NarouBackup | null {
+  for (const file of files) {
+    /*
+      **丸ごと文字へ直してから読む。**
+
+      はじめは「頭の8KBだけ見れば速い」と書いたが、**実データで読めなかった**
+      （2026-09-19、作者の `N4190FX.zip`）。バイト列を途中で切ると、最後の
+      1文字が欠けた並びになり、**文字コードの見分け（`textDecode.ts`）が
+      UTF-8ではないほうへ倒れる**——全文が化けるので、見出しが1つも見つからない。
+      速さのために切った数キロバイトが、機能そのものを黙って止めていた。
+
+      読むところ（`parseNarouBackup`）は最初の区切り行で止まるので、
+      大きい合本でも余計に見るのは文字コードの変換だけである。
+    */
+    const parsed = parseNarouBackup(decodeBytes(file.bytes).text);
+    if (parsed) return parsed;
+  }
+  return null;
 }
 
 /**

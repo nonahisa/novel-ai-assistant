@@ -316,6 +316,23 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         label: "すでにある原稿を入れる",
         icon: "folder-opened",
         items: [
+          // **書庫の中にある作品は、選ばせずに拾う**（設計書6.97.4）。
+          // OSのフォルダー選びを開くと、目的のフォルダーへ辿り着くまでに
+          // 何度も潜ることになる（2026-09-19、実機で6回）。別の機械で
+          // `git pull` したあとも、ファイルはあるのに登録だけが無い状態になる。
+          // **既定の道にしたいので、「フォルダから追加」より上に置く**
+          {
+            kind: "action",
+            command: "novelai.collectUnregisteredWorks",
+            label: "書庫から未登録の作品を拾う",
+            icon: "library",
+            requiresWork: false,
+            detail:
+              "作品を並べてあるフォルダー（書庫）の中から、**まだ登録していない作品を探して一覧にします。**" +
+              "フォルダーを選ぶ画面は開きません（書庫の場所は、登録済みの作品から分かります）。" +
+              "**選んだものだけを登録します**——書庫に置いてあるだけのフォルダー（下書き置き場など）は、" +
+              "チェックを外せば登録されません。",
+          },
           {
             kind: "action",
             command: "novelai.addWork",

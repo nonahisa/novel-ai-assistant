@@ -74,19 +74,17 @@ describe("サイトの記録の読み込み", () => {
   });
 
   test("読めなければ、理由を返す（グラフは従来どおり出す）", async () => {
-    // 数値が数値でない台帳。直さずに止めるのが台帳の約束である
+    /*
+      投稿先のURLが別のサイトを指している台帳。直さずに止めるのが台帳の
+      約束である（正しいURLはこちらには分からない）。
+
+      **読者の反応の行では測れなくなった**（0.69.9）。あちらは行ごとに
+      飛ばして読むようになったので、1行壊しても台帳は読めてしまう
+      ——ここで見たいのは「読めなかった理由が画面へ届くか」である。
+    */
     writeLedger({
       schemaVersion: "1",
-      sites: [{ site: "narou", newEpisodeUrl: narouUrl }],
-      readerStats: [
-        {
-          site: "narou",
-          readAt: "2026-09-05T00:00:00.000Z",
-          scope: "work",
-          metrics: { pv: "1234" },
-          source: "manual",
-        },
-      ],
+      sites: [{ site: "narou", newEpisodeUrl: "https://kakuyomu.jp/my/works/1" }],
     });
 
     const result = await readSiteRecords(work);

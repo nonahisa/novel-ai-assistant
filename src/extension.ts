@@ -658,7 +658,25 @@ export async function activate(
   );
 
   const registry = new WorkRegistry(context);
-  await registry.initialize();
+  /*
+    **書庫にあるのに登録されていない作品を、1行だけ知らせる**（設計書6.97.4）。
+    知らせるのは `features` の仕事なので、`core` の登録簿へは口だけを渡す。
+    動的に読むのは、起動の道に載せないため（押されたときに要るものである）。
+  */
+  await registry.initialize((works) => {
+    void (async () => {
+      try {
+        const { noticeUnregisteredWorksSafely } = await import(
+          "./features/collectUnregisteredWorks.js"
+        );
+        noticeUnregisteredWorksSafely(context, works);
+      } catch (error) {
+        logFailure("書庫の未登録作品の確認", {
+          詳細: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
+  });
 
   // GitHub同期の見張り。自動で走るのはfetch（取得のみ）だけで、
   // 取り込み・送信は作者がボタンを押したときにしか実行しない（設計書5.5.1）。
@@ -2046,6 +2064,25 @@ export async function activate(
       if (!folderPath) return undefined;
       // 登録できた作品を返す。呼んだ側（テスト）が結果を確かめられる
       return await registerFolderAsWork(folderPath, given?.title);
+    })
+  );
+
+  /*
+    **書庫にあるのに登録されていない作品を拾う**（設計書6.97.4）。
+
+    OSのフォルダー選びを通さない道である。書庫の場所は登録済み作品から
+    割り出せるので、作者に選ばせる必要が無い。「フォルダから追加」は
+    **書庫の外**から入れる道として残してある。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.collectUnregisteredWorks", async () => {
+      const { collectUnregisteredWorks } = await import(
+        "./features/collectUnregisteredWorks.js"
+      );
+      await collectUnregisteredWorks(registry, () => {
+        treeProvider.refresh();
+        highlighter.invalidate();
+      });
     })
   );
 

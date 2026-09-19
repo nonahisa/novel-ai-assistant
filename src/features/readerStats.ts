@@ -1,13 +1,14 @@
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import {
+  knownPostingSites,
   latestReaderStats,
-  parseReaderStatsCount,
   parseReaderStatsEpisode,
+  parseReaderStatsValue,
   postingSiteInfo,
-  READER_STATS_METRICS,
-  validateReaderStatsCount,
+  readerStatsMetricsFor,
   validateReaderStatsEpisode,
+  validateReaderStatsValue,
   validateReaderStatsPeriodKey,
   withReaderStats,
   type PostingLedger,
@@ -128,11 +129,16 @@ export async function recordReaderStats(
   if (!ledger) return UNCHANGED;
 
   /*
-    **サイトが1つも登録されていなければ、そこへ誘導する**
+    **どのサイトに載っているかが1つも分からなければ、そこへ誘導する**
     （「ランキングを記録する」と同じ入口の作り）。どのサイトの数字かを
     訊いても答えようがないので、選択画面すら出さない。
+
+    見るのは投稿先の登録だけではない（0.69.9。`knownPostingSites`）。
+    ZIPから取り込んだ作品は `siteProfiles` にしか印が無く、ここで
+    断っていると**取り込んだ直後は手入力すらできなかった。**
   */
-  if (ledger.sites.length === 0) {
+  const sites = knownPostingSites(ledger);
+  if (sites.length === 0) {
     const answer = await vscode.window.showWarningMessage(
       `${work.title} には投稿サイトが登録されていません。` +
         "「投稿サイトの設定」でサイトを登録すると、そのサイトの反応を記録できます。",
@@ -145,7 +151,7 @@ export async function recordReaderStats(
     return UNCHANGED;
   }
 
-  const site = await askSite(work, ledger);
+  const site = await askSite(work, ledger, sites);
   if (!site) return UNCHANGED;
   const info = postingSiteInfo(site);
 
@@ -190,7 +196,7 @@ export async function recordReaderStats(
 
   // **数値の段のEscは「入力おわり」**（0.33.9）。取りやめの出口は、
   // ここより前の3つの選択画面にある（`askSite`・`askScope`・`askPeriod`）
-  const metrics = await askMetrics(info.label);
+  const metrics = await askMetrics(site);
 
   if (Object.keys(metrics).length === 0) {
     void vscode.window.showInformationMessage(
@@ -218,23 +224,24 @@ export async function recordReaderStats(
   return { changed: true };
 }
 
-/** どのサイトの数字か。**登録してあるサイトの中から選ぶ** */
+/** どのサイトの数字か。**載っていると分かっているサイトの中から選ぶ** */
 async function askSite(
   work: WorkEntry,
-  ledger: PostingLedger
+  ledger: PostingLedger,
+  sites: readonly PostingSiteId[]
 ): Promise<PostingSiteId | undefined> {
   const picked = await vscode.window.showQuickPick(
     [
-      ...ledger.sites.map((entry) => {
-        const info = postingSiteInfo(entry.site);
-        const latest = latestReaderStats(ledger, entry.site);
+      ...sites.map((site) => {
+        const info = postingSiteInfo(site);
+        const latest = latestReaderStats(ledger, site);
         return {
           label: info.label,
           // 前回の値を添える。「前より増えたか」がこの操作の関心である
           description: latest
             ? `前回 ${formatReaderStatsMetrics(latest.metrics)}`
             : "記録はまだありません",
-          site: entry.site,
+          site,
         };
       }),
       cancelItem(),
@@ -318,7 +325,12 @@ async function askPeriod(
 /**
  * 数値を順に訊く。**空欄は飛ばせる。**
  *
- * **Escは「入力おわり」として扱う**（0.33.9のレビュー）。7問あって読めるのは
+ * **訊く順と項目は `readerStatsMetricsFor(site)` が決める**（0.69.9）。
+ * 共通の7つのあとに、そのサイト固有の指標が続く——なろうなら評価者数・
+ * 評価ポイント・評価平均である。**サイトごとの表はここに写さない**
+ * （写しを作ると、片方だけ増えて欄が消える）。
+ *
+ * **Escは「入力おわり」として扱う**（0.33.9のレビュー）。何問もあって読めるのは
  * 2つか3つ、というのが普通なので、残りをEscで抜けるのは自然な操作である。
  * ここで捨てると、**打った値が黙って消える**——取りやめの出口は、この前の
  * 3つの選択画面（サイト・範囲・粒度）の「取りやめる」にある。順位のメモの
@@ -326,9 +338,10 @@ async function askPeriod(
  *
  * @returns 入れてもらった数値。1つも入らなければ空（呼ぶ側が知らせる）
  */
-async function askMetrics(siteLabel: string): Promise<ReaderStatsMetrics> {
+async function askMetrics(site: PostingSiteId): Promise<ReaderStatsMetrics> {
+  const siteLabel = postingSiteInfo(site).label;
   const metrics: ReaderStatsMetrics = {};
-  for (const info of READER_STATS_METRICS) {
+  for (const info of readerStatsMetricsFor(site)) {
     const text = await askText({
       title: `${siteLabel} の${info.label}`,
       prompt:
@@ -337,10 +350,11 @@ async function askMetrics(siteLabel: string): Promise<ReaderStatsMetrics> {
         "Escを押すと、ここまでの値で記録します）",
       placeHolder: info.example,
       ignoreFocusOut: true,
-      validateInput: (value) => validateReaderStatsCount(value) ?? undefined,
+      validateInput: (value) =>
+        validateReaderStatsValue(value, info) ?? undefined,
     });
     if (text === undefined) break;
-    const value = parseReaderStatsCount(text);
+    const value = parseReaderStatsValue(text, info);
     // 空欄は「読めなかった」。0で埋めると、次に読んだとき減ったように見える
     if (value !== null) metrics[info.key] = value;
   }

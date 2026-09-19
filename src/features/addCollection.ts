@@ -176,8 +176,12 @@ async function askWhichToRegister(
  *
  * **1件失敗しても残りを続ける。** 途中で止めると、どこまで登録できたのかが
  * 作者に分からなくなる。失敗は集めて最後にまとめて報告する。
+ *
+ * **外へ出してある**（0.69.x）。「書庫から未登録の作品を拾う」
+ * （`collectUnregisteredWorks.ts`、設計書6.97.4）も同じ登録の仕方を通す
+ * ——**写しを作ると、失敗の報告の仕方が2通りになる。**
  */
-async function registerAll(
+export async function registerAll(
   registry: WorkRegistry,
   works: WorkCandidate[]
 ): Promise<WorkEntry[]> {

@@ -163,54 +163,56 @@ describe("読者の反応の台帳", () => {
     expect(round.readerStats).toEqual(written.readerStats);
   });
 
-  test("壊れた記録は直さずに止める", () => {
+  /*
+    **壊れた行は、その行だけを飛ばす**（0.69.9。作者の裁定「読みを寛容に
+    する」）。以前はここで台帳ぜんぶを止めていたが、`設定/` は同期するので
+    **書いた版より古い版が読む**ことが現実に起きる——1行のために投稿系の
+    機能が丸ごと止まるほうが害が大きい。
+
+    **数字は1つも消えない。** 飛ばした行は生のまま控え、保存でそのまま
+    書き戻す（`skippedReaderStatsRows`）。書き側の関所は緩めていない。
+  */
+  test("壊れた記録は、その行だけ飛ばして生のまま控える", () => {
     const base = {
       schemaVersion: "1",
       sites: [{ site: "narou", newEpisodeUrl: url.narou }],
     };
-    // 数値でない
+    const good = {
+      site: "narou",
+      readAt: "2026-09-05T00:00:00.000Z",
+      scope: "work",
+      metrics: { pv: 10 },
+      source: "manual",
+    };
+    const broken = [
+      // 数値でない（文字列を数として書き込まない）
+      { ...good, metrics: { pv: "1234" } },
+      // 知らないサイト
+      { ...good, site: "pixiv" },
+      // 範囲が読めない
+      { ...good, scope: "chapter" },
+      // 知らない出どころ（未来の版が足したもの）
+      { ...good, source: "未来の出どころ" },
+    ];
+
+    for (const row of broken) {
+      const read = readPostingLedger({ ...base, readerStats: [good, row] });
+      expect(read.ledger.readerStats).toHaveLength(1);
+      expect(read.ledger.readerStats[0].metrics).toEqual({ pv: 10 });
+      expect(read.skippedReaderStatsRows).toEqual([row]);
+      // 台帳そのものは読めている（投稿系の機能が止まらない）
+      expect(read.ledger.sites).toHaveLength(1);
+    }
+  });
+
+  test("入れ物の形が違えば、これまでどおり止める", () => {
+    // 寛容にしたのは**行の中身まで**である。ここまで黙って通すと、
+    // 「読めた」と「読めなかった」の区別が台帳から消える
     expect(() =>
       parsePostingLedger({
-        ...base,
-        readerStats: [
-          {
-            site: "narou",
-            readAt: "2026-09-05T00:00:00.000Z",
-            scope: "work",
-            metrics: { pv: "1234" },
-            source: "manual",
-          },
-        ],
-      })
-    ).toThrow();
-    // 知らないサイト
-    expect(() =>
-      parsePostingLedger({
-        ...base,
-        readerStats: [
-          {
-            site: "pixiv",
-            readAt: "2026-09-05T00:00:00.000Z",
-            scope: "work",
-            metrics: { pv: 1 },
-            source: "manual",
-          },
-        ],
-      })
-    ).toThrow();
-    // 範囲が読めない
-    expect(() =>
-      parsePostingLedger({
-        ...base,
-        readerStats: [
-          {
-            site: "narou",
-            readAt: "2026-09-05T00:00:00.000Z",
-            scope: "chapter",
-            metrics: { pv: 1 },
-            source: "manual",
-          },
-        ],
+        schemaVersion: "1",
+        sites: [{ site: "narou", newEpisodeUrl: url.narou }],
+        readerStats: "壊れています",
       })
     ).toThrow();
   });
@@ -275,10 +277,15 @@ describe("知らない指標だけの行", () => {
     expect(ledger.readerStats[0].metrics).toEqual({ pv: 10 });
   });
 
-  test("欄がひとつも無い行は、直さずに止める（手で消した跡は読み飛ばさない）", () => {
-    expect(() =>
-      parsePostingLedger({ ...base, readerStats: [{ ...known, metrics: {} }] })
-    ).toThrow();
+  test("欄がひとつも無い行も、その行だけ飛ばして控える（0.69.9）", () => {
+    // 手で消した跡も、未来の版の行も、**読めないことに変わりはない**。
+    // 以前はここだけ「直さずに止める」と分けていたが、行ごとに飛ばす
+    // 仕組みができたので、控えて書き戻すほうが失うものが少ない
+    const empty = { ...known, metrics: {} };
+    const read = readPostingLedger({ ...base, readerStats: [known, empty] });
+
+    expect(read.ledger.readerStats).toHaveLength(1);
+    expect(read.skippedReaderStatsRows).toEqual([empty]);
   });
 
   test("書き側は従来どおり拒否する（読みだけを緩める）", () => {

@@ -1,15 +1,16 @@
 import {
+  ALL_READER_STATS_METRICS,
   POSTING_SITES,
   postingSiteInfo,
   rankingsForSite,
   readerStatsForSite,
-  READER_STATS_METRICS,
   siteProfile,
   type PostingLedger,
   type PostingRankingRecord,
   type PostingSiteId,
   type ReaderStatsMetrics,
   type ReaderStatsRecord,
+  type ReaderStatsSource,
 } from "../models/posting";
 
 /**
@@ -152,13 +153,26 @@ function toRow(record: PostingRankingRecord): PostingRankingRow {
   };
 }
 
+/**
+ * 出どころの呼び名（設計書6.79.7／6.99）。
+ *
+ * **「バックアップ」を「手入力」と書かない。** 作者が打った数字と、
+ * ダウンロードしたファイルに入っていた数字は、**いつの数字か**が違う
+ * （バックアップはダウンロードした時点のもの）。
+ */
+const READER_SOURCE_LABELS: Record<ReaderStatsSource, string> = {
+  helper: "貼り付け",
+  manual: "手入力",
+  backup: "バックアップ",
+};
+
 function toReaderRow(record: ReaderStatsRecord): ReaderStatsRow {
   return {
     readAt: record.readAt,
     scope: readerScopeLabel(record),
     period: readerPeriodLabel(record),
     metrics: formatReaderStatsMetrics(record.metrics),
-    source: record.source === "helper" ? "貼り付け" : "手入力",
+    source: READER_SOURCE_LABELS[record.source] ?? "手入力",
     note: record.note ?? null,
   };
 }
@@ -189,17 +203,26 @@ function readerPeriodLabel(record: ReaderStatsRecord): string {
 /**
  * 数字を1行に組む（設計書6.79.7）。**読めた欄だけを、決まった順で並べる。**
  *
- * 並びは `READER_STATS_METRICS` が唯一の置き場である（手入力で訊く順・
- * 封筒の読み取り・ここが同じ順になる）。
+ * 並びは `READER_STATS_METRICS`＋`SITE_READER_STATS_METRICS` が唯一の置き場
+ * である（手入力で訊く順・封筒の読み取り・ここが同じ順になる）。
+ *
+ * **サイトを受け取らない。** 1件の記録が持つのは自分のサイトの欄だけなので、
+ * 全部の表を順に見れば、共通の7つのあとにそのサイト固有の欄が並ぶ。
+ * サイトを渡す形にすると、渡し忘れた呼び出し先で欄が黙って消える。
  */
 export function formatReaderStatsMetrics(metrics: ReaderStatsMetrics): string {
-  return READER_STATS_METRICS.filter(
+  return ALL_READER_STATS_METRICS.filter(
     (info) => metrics[info.key] !== undefined
   )
     .map((info) => {
       const value = metrics[info.key] as number;
-      // 3桁区切りは、サイトの画面と同じ読み方に揃えるため
-      return `${info.label} ${value.toLocaleString("ja-JP")}${info.unit ?? ""}`;
+      // 3桁区切りは、サイトの画面と同じ読み方に揃えるため。
+      // 小数の欄（評価平均）は、桁を落とさずサイトの表記に揃える
+      const shown = value.toLocaleString("ja-JP", {
+        minimumFractionDigits: info.fractionDigits ?? 0,
+        maximumFractionDigits: info.fractionDigits ?? 0,
+      });
+      return `${info.label} ${shown}${info.unit ?? ""}`;
     })
     .join("／");
 }

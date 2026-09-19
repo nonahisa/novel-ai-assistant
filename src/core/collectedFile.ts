@@ -49,6 +49,15 @@ export interface CollectedEpisode {
   body: string;
   /** 直前に置かれていた章題（【第1章】の値）。無ければ null */
   part: string | null;
+  /**
+   * 【リアクション】の中身（`0件`／`いいね: 19件`）。無ければ null。
+   *
+   * **本文には入れない**（従来どおり）。ここに出すのは、なろうの
+   * バックアップを取り込むときに**話ごとの読者の反応**として台帳へ
+   * 記録するためである（設計書6.99。作者の確認：2026-09-19
+   * 「リアクションは各話での読者の反応です」）。
+   */
+  reaction: string | null;
 }
 
 /** 区切り行。「------- エピソード12開始 -------」 */
@@ -107,6 +116,9 @@ export function parseCollectedFile(rawText: string): CollectedEpisode[] | null {
       title: parsed.title,
       body: body.replace(/^\n+/, "").replace(/\n+$/, ""),
       part: firstLine(blocks.get(partLabelIn(blocks))),
+      // **1行目だけを見る。** 最終話のリアクションのうしろには【免責事項】が
+      // 続くが、あれは知らない見出しなのでこの塊に混ざっている
+      reaction: firstLine(blocks.get("リアクション")),
     });
   }
 

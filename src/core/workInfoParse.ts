@@ -83,6 +83,14 @@ export interface WorkInfo {
 /** 紹介文が入る見出し。**先に書いてあるほうを採る** */
 const BLURB_LABELS = ["紹介文", "あらすじ"];
 
+/**
+ * タグが入る見出し。**サイトによって呼び方が違う。**
+ *
+ * カクヨムは【タグ】、なろうは【キーワード】である（実物：`怪談 実体験 飛び降り`）。
+ * 見出しの名前が違うだけで、中身はどちらもタグの並びなので、同じ欄へ入れる。
+ */
+const TAG_LABELS = ["タグ", "キーワード"];
+
 export function parseWorkInfo(rawText: string): WorkInfo {
   const blocks = parseLabeledBlocks(rawText);
 
@@ -109,7 +117,7 @@ export function parseWorkInfo(rawText: string): WorkInfo {
     genre: oneLine(find("ジャンル")),
     catchphrase: oneLine(find("キャッチコピー")),
     blurb: findAny(BLURB_LABELS),
-    tags: parseTagList(find("タグ")),
+    tags: parseTagList(findAny(TAG_LABELS)),
   };
 }
 

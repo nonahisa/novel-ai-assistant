@@ -1,9 +1,10 @@
 import {
+  ALL_READER_STATS_METRICS,
   hasReaderStatsMetrics,
+  isKnownPostingSite,
   isReaderStatsPeriodKey,
   postingSiteInfo,
   POSTING_SITES,
-  READER_STATS_METRICS,
   READER_STATS_PERIODS,
   siteProfile,
   type PostingLedger,
@@ -298,11 +299,19 @@ function parseMetrics(raw: unknown): ReaderStatsMetrics | undefined {
   }
   const value = raw as Record<string, unknown>;
   const metrics: ReaderStatsMetrics = {};
-  for (const info of READER_STATS_METRICS) {
+  // **サイト固有の欄も受ける**（0.69.9）。並び・名前は台帳と同じ表を見る
+  for (const info of ALL_READER_STATS_METRICS) {
     const entry = value[info.key];
     if (entry === undefined) continue;
-    if (!Number.isSafeInteger(entry) || (entry as number) < 0) return undefined;
-    metrics[info.key] = entry as number;
+    if (typeof entry !== "number" || !Number.isFinite(entry) || entry < 0) {
+      return undefined;
+    }
+    // **小数を受けるのは小数の欄だけ**（台帳の `isReaderStatsValue` と同じ線）
+    if (info.fractionDigits === undefined && !Number.isSafeInteger(entry)) {
+      return undefined;
+    }
+    if (entry > Number.MAX_SAFE_INTEGER) return undefined;
+    metrics[info.key] = entry;
   }
   // 中身の無い行は受け取らない（台帳の側と同じ基準）
   return hasReaderStatsMetrics(metrics) ? metrics : undefined;
@@ -323,11 +332,18 @@ export function matchReaderStatsEnvelope(
 ): string | null {
   const info = postingSiteInfo(envelope.site);
 
-  // **登録してあるサイトだけを受ける。** 出していない作品の台帳へ
-  // 数字が入ると、どの作品のものか台帳からは分からなくなる
-  if (!ledger.sites.some((entry) => entry.site === envelope.site)) {
+  /*
+    **載っていると分かっているサイトだけを受ける。** 出していない作品の
+    台帳へ数字が入ると、どの作品のものか台帳からは分からなくなる。
+
+    証拠は**投稿先の登録（`sites`）だけではない**（0.69.9。作者の裁定
+    「siteProfiles も証拠と見る」）。ZIPから取り込んだ作品は、すでに
+    そのサイトに載っているのに、バックアップに投稿ページのURLが無くて
+    `sites` を作れない——そこで口が塞がっていた（設計書6.99）。
+  */
+  if (!isKnownPostingSite(ledger, envelope.site)) {
     return (
-      `この作品には${info.label}が投稿先として登録されていません。` +
+      `この作品は${info.label}に載っていることが分かっていません。` +
       "「投稿サイトの設定」で登録してから取り込んでください。"
     );
   }

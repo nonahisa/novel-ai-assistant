@@ -203,47 +203,78 @@ export interface PostingRankingRecord {
 }
 
 /**
+ * **サイトをまたいで比べられる軸**（設計書6.79.7）。
+ *
+ * カクヨムのPVとなろうのPVは、呼び方が違っても同じものを数えている。
+ * ここに載るのは**どのサイトでも意味が同じ**と言い切れるものだけである。
+ */
+export type ReaderStatsCommonMetric =
+  | "pv"
+  | "unique"
+  | "bookmarks"
+  | "points"
+  | "likes"
+  | "comments"
+  | "reviews";
+
+/**
  * 読者の反応の数値（設計書6.79.7）。
  *
  * **読めた欄だけを持つ。** 「読めなかった」を0で埋めると、次に読んだときに
  * 減ったように見える——PVが0の日と、PVを読めなかった日は別のことである。
+ *
+ * **共通の7つに加えて、サイト固有の欄も入る**（0.69.9。作者の裁定：
+ * 「投稿サイトごとに持ってください」）。固有の欄の名前は
+ * `SITE_READER_STATS_METRICS` が決め、**サイトIDで始まる**ので共通の欄と
+ * ぶつからない（`narou_raters` など）。
+ *
+ * 添字の型が `number | undefined` なのは、**小数を受ける欄があるため**
+ * （なろうの評価平均）。整数しか受けない欄との線引きは
+ * `ReaderStatsMetricInfo.fractionDigits` が持つ——型では分けられない。
  */
-export interface ReaderStatsMetrics {
-  /** 閲覧数（PV） */
-  pv?: number;
-  /** ユニークの閲覧者数 */
-  unique?: number;
-  /** ブックマーク・フォロー・お気に入りの数（サイトによって呼び方が違う） */
-  bookmarks?: number;
-  /** 評価ポイント */
-  points?: number;
-  /** いいね・星の数 */
-  likes?: number;
-  comments?: number;
-  reviews?: number;
+export interface ReaderStatsMetrics
+  extends Partial<Record<ReaderStatsCommonMetric, number>> {
+  [key: string]: number | undefined;
 }
 
 export interface ReaderStatsMetricInfo {
-  key: keyof ReaderStatsMetrics;
-  /** 画面と入力欄に出す名前 */
+  /**
+   * 台帳に書く欄の名前。
+   *
+   * **サイト固有のものは、必ずサイトIDで始める**（`narou_raters`）。
+   * 共通の7つとぶつかると、別のサイトの数字が同じ軸に乗ってしまう。
+   */
+  key: string;
+  /** 画面と入力欄に出す名前。**そのサイトの呼び方のまま** */
   label: string;
   /** 数のあとに付ける単位（評価の「pt」）。無ければ付けない */
   unit?: string;
   /** 入力欄に出す例 */
   example: string;
+  /**
+   * 小数を受ける欄なら、画面に出す小数の桁数。
+   *
+   * **無い欄は整数しか受けない**（既定）。PVやブックマークに小数が
+   * 入ることは無く、そこを緩めると打ち間違いが黙って台帳へ入る。
+   * なろうの「評価平均」だけが小数になるので、欄ごとに分ける。
+   */
+  fractionDigits?: number;
 }
 
 /**
- * 扱う数値と、その並び（設計書6.79.7）。
+ * サイトをまたいで比べられる指標と、その並び（設計書6.79.7）。
  *
- * **一覧はここ1つだけが持つ。** 手入力の訊く順・封筒の読み取り・画面の
- * 並びが同じ順になるようにする（写しを作ると、片方だけ増えて欄が消える）。
+ * **共通の一覧はここ1つだけが持つ。** 手入力の訊く順・封筒の読み取り・
+ * 画面の並びが同じ順になるようにする（写しを作ると、片方だけ増えて欄が消える）。
  *
- * **サイトごとに出し分けない。** カクヨムに「レビュー」、アルファポリスに
- * 「ブックマーク」が無いとしても、空欄で飛ばせる以上、サイトごとの表を
- * 持つ理由が無い——表を持てば、サイトが仕様を変えるたびに直す羽目になる。
+ * サイト固有のものは `SITE_READER_STATS_METRICS` にある。**両方を順に
+ * 並べたものが欲しいときは `readerStatsMetricsFor(site)` を呼ぶ**——
+ * 呼ぶ側で連結すると、並びがそのつど変わる。
  */
-export const READER_STATS_METRICS: readonly ReaderStatsMetricInfo[] = [
+export const READER_STATS_METRICS: readonly (ReaderStatsMetricInfo & {
+  // 共通の欄は**打ち間違えたらビルドで止まる**ようにしておく
+  key: ReaderStatsCommonMetric;
+})[] = [
   { key: "pv", label: "PV", example: "1234" },
   { key: "unique", label: "ユニーク", example: "567" },
   { key: "bookmarks", label: "ブックマーク", example: "89" },
@@ -252,6 +283,88 @@ export const READER_STATS_METRICS: readonly ReaderStatsMetricInfo[] = [
   { key: "comments", label: "コメント", example: "3" },
   { key: "reviews", label: "レビュー", example: "1" },
 ];
+
+/**
+ * **サイト固有の指標**（0.69.9。設計書6.79.7／6.99）。
+ *
+ * ## ここが唯一の置き場である
+ *
+ * 次のサイトの指標を足す人は、**この表に1行足すだけで済む**ようにしてある。
+ * 手入力の訊く順（`features/readerStats.ts`）・封筒の読み取り
+ * （`core/readerStatsEnvelope.ts`）・画面の並び
+ * （`core/postingSiteRecords.ts`）は、どれもこの表を見る。
+ *
+ * ## 共通の7つに混ぜない理由
+ *
+ * なろうの「評価者数」は人数、「評価ポイント」は素点、「評価平均」は平均で、
+ * **どれも共通の欄とは意味が一致しない。** 無理に `points` や `bookmarks`
+ * へ当てはめると、あとから見た人には区別が付かない——カクヨムの数字と
+ * 並べたときに、同じ軸に乗っていないものが同じ軸に見える。
+ *
+ * ## 決まりごと
+ *
+ * 1. **`key` はサイトIDで始める**（共通の欄・別のサイトの欄とぶつからない）
+ * 2. **`label` はサイトの呼び方のまま**（管理画面と見比べられるように）
+ * 3. 小数になる欄には `fractionDigits` を付ける（付けない欄は整数だけ）
+ *
+ * ## 古い版が読むとどうなるか
+ *
+ * `設定/` はGitで同期するので、**この表を知らない版がこの台帳を読む**。
+ * 古い版は知らない欄を落として書き戻すので、**共通の欄も一緒に入っている
+ * 行では、固有の欄だけが静かに消える**（固有の欄しか無い行は、行ごと
+ * 生のまま持ち回されるので消えない）。0.69.9 以降の版どうしでは起きない。
+ * **この限界は消せない**——古い版はもう配ってあり、直せない。
+ */
+export const SITE_READER_STATS_METRICS: Readonly<
+  Record<PostingSiteId, readonly ReaderStatsMetricInfo[]>
+> = {
+  narou: [
+    { key: "narou_raters", label: "評価者数", unit: "人", example: "12" },
+    { key: "narou_ratingPoints", label: "評価ポイント", unit: "pt", example: "120" },
+    {
+      key: "narou_ratingAverage",
+      label: "評価平均",
+      unit: "pt",
+      example: "4.50",
+      // 「0pt」とも「4.50pt」とも書かれる（実データ、2026-09-19）
+      fractionDigits: 2,
+    },
+  ],
+  kakuyomu: [],
+  alphapolis: [],
+  note: [],
+};
+
+/**
+ * そのサイトで扱う指標を、訊く順・並べる順で返す。
+ *
+ * **共通が先、固有があと。** サイトをまたいで比べる軸を先に見せたい
+ * （固有のものは、そのサイトを知っている人にしか意味が分からない）。
+ */
+export function readerStatsMetricsFor(
+  site: PostingSiteId
+): readonly ReaderStatsMetricInfo[] {
+  return [...READER_STATS_METRICS, ...SITE_READER_STATS_METRICS[site]];
+}
+
+/**
+ * 台帳に現れうる指標の全部（共通＋全サイトの固有）。
+ *
+ * **読み書きはサイトで絞らない。** 絞ると、作者がサイトを選び直したり
+ * 台帳を手で直したりしたときに、**書いてある数字が読めなくなって消える**
+ * ——読むときは寛容に、訊くときだけサイトで絞る。
+ */
+export const ALL_READER_STATS_METRICS: readonly ReaderStatsMetricInfo[] = [
+  ...READER_STATS_METRICS,
+  ...POSTING_SITES.flatMap((info) => SITE_READER_STATS_METRICS[info.id]),
+];
+
+/** 欄の名前から定義を引く。知らない欄は `undefined`（呼ぶ側が飛ばす） */
+export function readerStatsMetricInfo(
+  key: string
+): ReaderStatsMetricInfo | undefined {
+  return ALL_READER_STATS_METRICS.find((info) => info.key === key);
+}
 
 /** 作品全体の数字か、1話ぶんの数字か */
 export type ReaderStatsScope = "work" | "episode";
@@ -268,8 +381,32 @@ export const READER_STATS_PERIODS: readonly ReaderStatsPeriod[] = [
   "total",
 ];
 
-/** 手で打ったのか、貼り込み係の封筒から来たのか */
-export type ReaderStatsSource = "helper" | "manual";
+/**
+ * その数字がどこから来たか。
+ *
+ * - `manual`：作者が打った
+ * - `helper`：作者が開いた管理画面を、貼り込み係が読んだ封筒（6.79.7）
+ * - `backup`：**作者がダウンロードしたバックアップに入っていた**（6.99）
+ *
+ * **`backup` を `helper` や `manual` に紛れ込ませない。** 出どころが違えば
+ * 「いつの数字か」の意味も違う（バックアップの数字は、作者がダウンロード
+ * した時点のもので、取り込んだ日のものではない）。あとから見た人が
+ * 区別できなくなる畳み方はしない。
+ */
+export type ReaderStatsSource = "helper" | "manual" | "backup";
+
+/**
+ * 受け付ける出どころの一覧。**一覧はここ1つだけが持つ**（指標と同じ流儀）。
+ *
+ * **古い版はこの一覧を知らない。** `設定/` はGitで同期するので、`backup` を
+ * 知らない版が読むと、**台帳ごと読めなくなる**（行を飛ばす仕組みは指標に
+ * しか無い）。増やすときは、その影響を承知のうえで増やすこと。
+ */
+export const READER_STATS_SOURCES: readonly ReaderStatsSource[] = [
+  "helper",
+  "manual",
+  "backup",
+];
 
 /**
  * 読者の反応の記録（設計書6.79.7）。
@@ -454,7 +591,12 @@ function validateSiteUrl(site: PostingSiteId, trimmed: string): string | null {
  */
 export interface PostingLedgerReadResult {
   ledger: PostingLedger;
-  /** 知らない指標しか無かったので読み飛ばした、読者の反応の行数 */
+  /**
+   * 読み飛ばした、読者の反応の行数。
+   *
+   * 知らない指標しか無かった行（0.33.9）と、**この版が読めなかった行**
+   * （0.69.9。知らない出どころ・知らないサイト・壊れた値）の合計である。
+   */
   skippedReaderStats: number;
   /**
    * 読み飛ばした行そのもの（**JSONそのままの形**）。
@@ -601,6 +743,48 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
       value.readerStats,
       "readerStats",
       (entry, entryPath) => {
+        /*
+          **1行が読めなくても、台帳ごと死なせない**（0.69.9。作者の裁定
+          「読みを寛容にする」）。
+
+          この台帳は `設定/` に置いてGitで同期する。**書いた版より古い版が
+          読むことがある**ので、知らない出どころ（`source: "backup"`）や
+          知らないサイトが書いてあるだけで例外を投げると、投稿系の機能が
+          丸ごと止まり、執筆量パネルの「サイトの記録」が無言で消える。
+          知らない指標を飛ばすのと同じ扱いを、**行ごとにも広げる。**
+
+          **飛ばした行は生のまま控えて、保存でそのまま書き戻す**ので、
+          数字は1つも消えない（`skippedReaderStatsRows`）。
+
+          **これは古い版を直すものではない。** すでに配ってある版
+          （0.67.1 以前）は行ごとの寛容さを持たないので、`backup` の行が
+          入った台帳を開くと、これまでどおり台帳ぜんぶが読めなくなる。
+          直せるのは、これ以降の版が読むときだけである。
+
+          寛容にするのは**行の中身まで**で、入れ物の形（`readerStats` が
+          配列か、要素がオブジェクトか）は従来どおり止める——そこまで
+          黙って通すと「読めた」と「読めなかった」の区別が消える。
+        */
+        try {
+          return readReaderStatsRow(entry, entryPath);
+        } catch {
+          skippedReaderStatsRows.push(entry);
+          return null;
+        }
+      }
+    ) ?? [];
+
+  /**
+   * 1行ぶんを読む。**読めなければ例外**（呼ぶ側がその行だけを飛ばす）。
+   *
+   * `null` は「読めたが、控えて飛ばすと決めた行」——知らない指標しか
+   * 無かった行（0.33.9）である。例外と分けているのは、控える処理を
+   * ここで済ませているためで、意味はどちらも「その行は台帳に載せない」。
+   */
+  function readReaderStatsRow(
+    entry: Record<string, unknown>,
+    entryPath: string
+  ): ReaderStatsRecord | null {
         const site = requireSiteId(entry.site, `${entryPath}.site`);
         requireNonEmptyString(entry.readAt, `${entryPath}.readAt`);
         optionalString(entry.periodKey, `${entryPath}.periodKey`);
@@ -649,8 +833,7 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
         };
         assertReaderStatsRecord(record, entryPath);
         return record;
-      }
-    ) ?? [];
+  }
 
   const readerStats = parsedReaderStats.filter(
     (record): record is ReaderStatsRecord => record !== null
@@ -687,13 +870,16 @@ function parseReaderStatsMetrics(
 ): { metrics: ReaderStatsMetrics; sawUnknown: boolean } {
   const value = objectValue(raw, path);
   const metrics: ReaderStatsMetrics = {};
-  for (const info of READER_STATS_METRICS) {
+  // **サイトで絞らない**（`ALL_READER_STATS_METRICS` の理由そのまま）
+  for (const info of ALL_READER_STATS_METRICS) {
     const entry = value[info.key];
     if (entry === undefined) continue;
-    if (!isReaderStatsCount(entry)) invalid(`${path}.${info.key}`);
+    if (!isReaderStatsValue(entry, info)) invalid(`${path}.${info.key}`);
     metrics[info.key] = entry;
   }
-  const known = new Set<string>(READER_STATS_METRICS.map((info) => info.key));
+  const known = new Set<string>(
+    ALL_READER_STATS_METRICS.map((info) => info.key)
+  );
   const sawUnknown = Object.keys(value).some((key) => !known.has(key));
   return { metrics, sawUnknown };
 }
@@ -749,6 +935,42 @@ export function normalizeSiteProfile(
 function hasSiteProfile(profile: PostingSiteProfile): boolean {
   return Boolean(
     profile.workId || profile.workUrl || profile.genre || profile.note
+  );
+}
+
+/**
+ * **その作品が載っていると分かっているサイト**（0.69.9）。
+ *
+ * ## `sites` だけでは足りない
+ *
+ * `sites[]` が意味するのは「新規エピソード投稿ページのURLを貼ってある」
+ * ことだけである。ZIPから取り込んだ作品は**すでにそのサイトに載っている**
+ * のに、バックアップに投稿ページのURLが入っていないので `sites` を作れない
+ * （設計書6.99）。**そこで口が塞がった**——作者の裁定（2026-09-19）：
+ * 「siteProfiles も証拠と見る」。
+ *
+ * ## 何に使うか
+ *
+ * 読者の反応の口（貼り付け・手入力）が「どのサイトの数字を受けてよいか」を
+ * 決めるのに使う。**取り違えを止める線は動かしていない**——載っていると
+ * 分かっていないサイトの数字は、これまでどおり受けない。
+ *
+ * 並びは `POSTING_SITES` に揃える（画面ごとに順番が変わらないように）。
+ */
+export function knownPostingSites(ledger: PostingLedger): PostingSiteId[] {
+  return POSTING_SITES.map((info) => info.id).filter((site) =>
+    isKnownPostingSite(ledger, site)
+  );
+}
+
+/** そのサイトに載っていると分かっているか（`knownPostingSites` の1件版） */
+export function isKnownPostingSite(
+  ledger: PostingLedger,
+  site: PostingSiteId
+): boolean {
+  return (
+    ledger.sites.some((entry) => entry.site === site) ||
+    ledger.siteProfiles.some((entry) => entry.site === site)
   );
 }
 
@@ -1168,15 +1390,28 @@ export function validateRankInput(value: string): string | null {
   「作品全体か1話か」「どの期間か」を一緒に持つことだけである。
 */
 
-/** 読者の反応の数として受けられる値か。**0以上の整数だけ** */
-function isReaderStatsCount(value: unknown): value is number {
-  // 0は「読んだが0だった」という意味を持つので受ける（順位の1以上とは違う）
-  return Number.isSafeInteger(value) && (value as number) >= 0;
+/**
+ * その欄の値として受けられるか。
+ *
+ * **小数を受けるのは、小数の欄だけ**（`fractionDigits` を持つ欄）。
+ * PVやブックマークまで緩めると、打ち間違いの「1.234」が黙って入る。
+ * 0は「読んだが0だった」という意味を持つので受ける（順位の1以上とは違う）。
+ */
+function isReaderStatsValue(
+  value: unknown,
+  info: ReaderStatsMetricInfo
+): value is number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return false;
+  }
+  if (info.fractionDigits === undefined) return Number.isSafeInteger(value);
+  // 小数の欄でも、桁が溢れた値は「読めた」と言えない
+  return value <= Number.MAX_SAFE_INTEGER;
 }
 
-/** 数値が1つでも入っているか */
+/** 数値が1つでも入っているか（共通・サイト固有のどちらでもよい） */
 export function hasReaderStatsMetrics(metrics: ReaderStatsMetrics): boolean {
-  return READER_STATS_METRICS.some(
+  return ALL_READER_STATS_METRICS.some(
     (info) => metrics[info.key] !== undefined
   );
 }
@@ -1295,16 +1530,16 @@ export function assertReaderStatsRecord(
   } else if (record.periodKey !== undefined) {
     invalid(`${path}.periodKey`);
   }
-  for (const info of READER_STATS_METRICS) {
+  for (const info of ALL_READER_STATS_METRICS) {
     const value = record.metrics[info.key];
-    if (value !== undefined && !isReaderStatsCount(value)) {
+    if (value !== undefined && !isReaderStatsValue(value, info)) {
       invalid(`${path}.metrics.${info.key}`);
     }
   }
   // **中身の無い記録は残さない。** 「読んだ」という事実だけの行が並んでも、
   // あとから見て何も分からない
   if (!hasReaderStatsMetrics(record.metrics)) invalid(`${path}.metrics`);
-  if (record.source !== "helper" && record.source !== "manual") {
+  if (!READER_STATS_SOURCES.includes(record.source)) {
     invalid(`${path}.source`);
   }
 }
@@ -1330,7 +1565,8 @@ export function withReaderStats(
 ): PostingLedger {
   const note = (record.note ?? "").trim();
   const metrics: ReaderStatsMetrics = {};
-  for (const info of READER_STATS_METRICS) {
+  // **知っている欄だけを写す**（呼ぶ側が足した見覚えのない欄は持ち歩かない）
+  for (const info of ALL_READER_STATS_METRICS) {
     const value = record.metrics[info.key];
     if (value !== undefined) metrics[info.key] = value;
   }
@@ -1437,7 +1673,8 @@ export function parseReaderStatsCount(value: string): number | null {
     .replace(/[,，]/g, "");
   if (!/^\d+$/.test(normalized)) return null;
   const count = Number(normalized);
-  return isReaderStatsCount(count) ? count : null;
+  // 0以上の整数であること（欄を問わない共通の下限。桁溢れもここで落ちる）
+  return Number.isSafeInteger(count) && count >= 0 ? count : null;
 }
 
 /** 数の入力を断るときの言い方。**空欄は飛ばせる**ので、空は断らない */
@@ -1445,6 +1682,51 @@ export function validateReaderStatsCount(value: string): string | null {
   if (!value.trim()) return null;
   return parseReaderStatsCount(value) === null
     ? "0以上の整数で入力してください（読めなければ空のままで構いません）。"
+    : null;
+}
+
+/**
+ * 欄に合わせて数を読む（0.69.9）。**小数を受けるのは小数の欄だけ。**
+ *
+ * なろうの「評価平均」は 4.50 のような小数になる。整数しか受けない
+ * ままだと、**読めた数字を捨てるか、切り捨てて別の値を残すか**しか
+ * なくなる——どちらも台帳の流儀に反する。
+ *
+ * **文字列を数として書き込まない**（0.33.9の戒め）。「1,234」は区切りを
+ * 落として `1234` という**数**にしてから返す。ここが `null` を返した値は、
+ * 呼ぶ側が欄ごと持たない（0で埋めない）。
+ *
+ * @returns 読めた数。読めなければ null
+ */
+export function parseReaderStatsValue(
+  value: string,
+  info: ReaderStatsMetricInfo
+): number | null {
+  if (info.fractionDigits === undefined) return parseReaderStatsCount(value);
+
+  const normalized = value
+    .trim()
+    // 全角数字・全角の小数点を半角へ
+    .replace(/[０-９]/g, (char) =>
+      String.fromCharCode(char.charCodeAt(0) - 0xfee0)
+    )
+    .replace(/．/g, ".")
+    .replace(/[,，]/g, "");
+  // 小数点は1つまで。符号も指数も受けない（打ち間違いを通さない）
+  if (!/^\d+(\.\d+)?$/.test(normalized)) return null;
+  const parsed = Number(normalized);
+  return isReaderStatsValue(parsed, info) ? parsed : null;
+}
+
+/** 欄に合わせた入力を断るときの言い方。**空欄は飛ばせる**ので、空は断らない */
+export function validateReaderStatsValue(
+  value: string,
+  info: ReaderStatsMetricInfo
+): string | null {
+  if (!value.trim()) return null;
+  if (info.fractionDigits === undefined) return validateReaderStatsCount(value);
+  return parseReaderStatsValue(value, info) === null
+    ? "0以上の数で入力してください（小数も入れられます。読めなければ空のままで構いません）。"
     : null;
 }
 

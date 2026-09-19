@@ -30,8 +30,18 @@ export class WorkRegistry {
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
-  /** 旧版ですでに登録済みの作品にも、起動時の安全な冪等migrationを適用する。 */
-  async initialize(): Promise<void> {
+  /**
+   * 旧版ですでに登録済みの作品にも、起動時の安全な冪等migrationを適用する。
+   *
+   * @param noticeUnregistered 整備のあとに呼ぶ。**書庫にあるのに登録されて
+   *   いない作品を知らせる口**（設計書6.97.4）。すぐ下の「フォルダーが
+   *   見つかりません」のちょうど裏返しなので隣に置いてあるが、**画面を出すのは
+   *   `features` の仕事**なので、`core` から呼ばずに外から渡してもらう
+   *   （依存の向きを逆流させない）。
+   */
+  async initialize(
+    noticeUnregistered?: (works: readonly WorkEntry[]) => void
+  ): Promise<void> {
     const failedTitles: string[] = [];
     const missingTitles: string[] = [];
     // キャッシュを同期するかは設定で変えられる。起動のたびに突き合わせ、
@@ -76,6 +86,17 @@ export class WorkRegistry {
         `回復ファイルの除外設定を更新できない作品があります。次回起動時に再試行します: ${failedTitles.join("、")}`
       );
     }
+
+    /*
+      **登録されているのにフォルダが無い**のが上。**フォルダはあるのに
+      登録されていない**のがこちら（設計書6.97.4）。別の機械で作品を足して
+      `git pull` したときに起きる。
+
+      **待たない。** 書庫の走査はフォルダーの中を読むので、起動の完了を
+      そのぶん遅らせてしまう。知らせは1行で、押さなければ何も起きない
+      ので、遅れて出ても困らない
+    */
+    noticeUnregistered?.(this.list());
   }
 
   list(): WorkEntry[] {

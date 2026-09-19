@@ -136,24 +136,73 @@ async function hasEpisodeFiles(folderPath: string): Promise<boolean> {
 
   for (const [name, kind] of entries) {
     if (kind !== vscode.FileType.File) continue;
-    const extension = path.extname(name).toLowerCase();
-    if (extension !== ".txt" && extension !== ".md") continue;
-    const parsed = parseEpisodeFileName(name);
-
-    // 話数が読めれば本文
-    if (parsed.chapterStart !== null) return true;
-    // 話数は無くても、種別が読めれば本文（`プロローグ.txt` など）
-    //
-    // **「本編以外」で通してはいけない。** 読み取れなかったものは `不明` に
-    // なるので、`README.md` や `プロンプト雛形.txt` まで本文として数えて
-    // しまい、**書庫そのものを作品と誤認する**（テストが捕まえた）
-    if (NAMED_KINDS.has(parsed.kind)) return true;
+    if (isEpisodeFileName(name)) return true;
   }
   return false;
 }
 
+/**
+ * その名前が本文（話数のファイル）に見えるか。
+ *
+ * **「本編以外」で通してはいけない。** 読み取れなかったものは `不明` に
+ * なるので、`README.md` や `プロンプト雛形.txt` まで本文として数えて
+ * しまい、**書庫そのものを作品と誤認する**（テストが捕まえた）。
+ */
+function isEpisodeFileName(name: string): boolean {
+  const extension = path.extname(name).toLowerCase();
+  if (extension !== ".txt" && extension !== ".md") return false;
+  const parsed = parseEpisodeFileName(name);
+
+  // 話数が読めれば本文
+  if (parsed.chapterStart !== null) return true;
+  // 話数は無くても、種別が読めれば本文（`プロローグ.txt` など）
+  return NAMED_KINDS.has(parsed.kind);
+}
+
 /** 話数が無くても本文と分かる種別。`不明` と `本編` は含めない */
 const NAMED_KINDS = new Set<EpisodeKind>(["プロローグ", "エピローグ", "幕間"]);
+
+/**
+ * その作品フォルダーに、本文のファイルがいくつあるか。
+ *
+ * **登録する前に、どれくらいの分量かを見せるためだけのもの**（設計書6.97.4）。
+ * 作品として登録すれば `scanner.ts` がきちんと数えるので、ここは
+ * **設定ファイルを読まずに済ませる**（まだ登録していない＝設定ファイルが
+ * 無いこともある相手なので、読めることを当てにできない）。
+ *
+ * 見るのは「作品フォルダーの直下」と「既定の本文フォルダーの中（章ごとの
+ * フォルダーに分けてある形も1階層だけ）」。**数えられなければ 0 を返す**
+ * ——数えられないことを理由に、拾う候補から外してはいけない。
+ */
+export async function countEpisodeFiles(folderPath: string): Promise<number> {
+  const manuscript = path.join(folderPath, DEFAULT_MANUSCRIPT_DIR);
+  // 直下に話数を並べる形と、本文フォルダーを使う形の両方がある
+  const direct = await countIn(folderPath, false);
+  const inside = await countIn(manuscript, true);
+  return direct + inside;
+}
+
+/** そのフォルダーの中の本文を数える。`descend` なら章フォルダーも1階層見る */
+async function countIn(folderPath: string, descend: boolean): Promise<number> {
+  let entries: [string, vscode.FileType][];
+  try {
+    entries = await vscode.workspace.fs.readDirectory(path.toUri(folderPath));
+  } catch {
+    return 0;
+  }
+
+  let count = 0;
+  for (const [name, kind] of entries) {
+    if (kind === vscode.FileType.File) {
+      if (isEpisodeFileName(name)) count += 1;
+      continue;
+    }
+    if (!descend) continue;
+    if (SKIPPED_DIRS.has(name) || name.startsWith(".")) continue;
+    count += await countIn(path.join(folderPath, name), false);
+  }
+  return count;
+}
 
 /**
  * 書庫の中の作品を探す。

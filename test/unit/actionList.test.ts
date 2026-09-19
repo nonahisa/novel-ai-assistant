@@ -325,8 +325,13 @@ describe("操作メニューの構成", () => {
       "novelai.createWorkFromManuscript",
     ]);
     // ZIPの取り込み（設計書6.98）も「すでにある原稿を入れる」に入る。
-    // フォルダーを選ぶか、ZIPのまま渡すかの違いだけで、したいことは同じ
+    // フォルダーを選ぶか、ZIPのまま渡すかの違いだけで、したいことは同じ。
+    //
+    // **先頭は「書庫から未登録の作品を拾う」**（設計書6.97.4）。OSの
+    // フォルダー選びを開かない道なので、こちらを既定にする。
+    // 「フォルダから追加」は書庫の外から入れる道として残す
     expect(commandsIn("すでにある原稿を入れる")).toEqual([
+      "novelai.collectUnregisteredWorks",
       "novelai.addWork",
       "novelai.importWorkFromZip",
     ]);

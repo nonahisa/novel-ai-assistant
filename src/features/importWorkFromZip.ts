@@ -16,6 +16,18 @@ import {
 } from "../core/workInfoDraft";
 import { formatCount } from "../core/charCount";
 import { readWorkConfig, scaffoldWorkFolder, workPaths } from "../core/workRegistry";
+import { PostingStore } from "../core/postingStore";
+import { supportsReaderStatsHelper } from "../core/readerStatsEnvelope";
+import {
+  hasReaderStatsMetrics,
+  postingSiteInfo,
+  siteProfile,
+  withReaderStats,
+  withSiteProfile,
+  type PostingLedger,
+  type PostingSiteId,
+  type PostingSiteProfile,
+} from "../models/posting";
 import {
   inspectWorkZip,
   WorkZipError,
@@ -128,7 +140,13 @@ export async function importWorkFromZip(
     ? await applyWorkInfo(entry, inspection.info)
     : [];
 
-  await reportResult(entry, inspection, placed);
+  // **訊かずに下ごしらえする。** 出どころが分かったときだけ、投稿状態の
+  // 台帳へ「このサイトに載っている」ことを書き留める（6.99の「打鍵ゼロ」）
+  const recorded = inspection.site
+    ? await notePostingSite(entry, inspection.site, inspection)
+    : NOTHING_RECORDED;
+
+  await reportResult(entry, inspection, placed, recorded);
 }
 
 /**
@@ -199,7 +217,12 @@ async function confirmImport(
         ? "（作品情報から採りました。次の画面で直せます）"
         : "（ZIPの名前から採りました。次の画面で直せます）"),
     "",
-    `話のファイル：${inspection.episodeCount}件`,
+    // **話の数であって、ファイルの数ではない**（`workZip.ts` の `episodeCount`）。
+    // 合本は1ファイルに全話が入っているので、そのことも書き添える
+    `取り込む話：${inspection.episodeCount}話` +
+      (inspection.collected
+        ? "（1つのファイルに全話が入っています）"
+        : ""),
     `合計の文字数：${formatCount(inspection.totalChars)}字`,
   ];
 
@@ -391,6 +414,168 @@ async function writePlotFromInfo(
 }
 
 /**
+ * 「この作品は、そのサイトに載っている」ことを台帳へ書き留める（設計書6.99）。
+ *
+ * ## 訊かない
+ *
+ * 取り込みの途中で「どのサイトに出していますか」と訊くと、いちばん最初の
+ * 体験に問いが1つ増える。**分かったことだけを黙って書く**——書かれたものは
+ * 「投稿サイトの設定」からいつでも直せる。
+ *
+ * ## 読めなかった欄は持たない（6.68.5）
+ *
+ * バックアップに入っているのは、サイトの名前と【ジャンル】までである。
+ * **作品IDも作品ページのURLも入っていない**ので、書かない。紹介文に
+ * 「10万PV達成記念」と書いてあっても、そこから数字を拾わない——作者が
+ * 書いた文章であって、いまの数字ではない（AIに事実を作らせるのと同じ）。
+ *
+ * ジャンルすら読めなかったときは**台帳そのものを作らない。** 中身の無い
+ * 行は `withSiteProfile` が置かない決まりで、空の台帳だけが残ると、
+ * 使っていない作品のフォルダーにファイルが1つ増えるだけになる。
+ *
+ * ## すでにある記述は壊さない（実装ルール2）
+ *
+ * 同じサイトの作品情報がすでにあれば、**何もしない。** 作者が書いた
+ * メモやジャンルを、取り込みの下ごしらえで押し流さない。
+ */
+async function notePostingSite(
+  work: WorkEntry,
+  site: PostingSiteId,
+  inspection: WorkZipInspection
+): Promise<RecordedReaderStats> {
+  try {
+    const store = new PostingStore(work);
+    const ledger = await store.load();
+
+    const profile = backupSiteProfile(inspection);
+    let next = ledger;
+    // **すでに作品情報があれば触らない。** 作者が書いたメモやジャンルを、
+    // 取り込みの下ごしらえで押し流さない（実装ルール2）
+    if (profile && !siteProfile(ledger, site)) {
+      next = withSiteProfile(ledger, site, profile);
+    }
+
+    const before = next.readerStats ?? [];
+    next = withBackupReaderStats(next, inspection);
+    const added = (next.readerStats ?? []).slice(before.length);
+
+    // 何も足すものが無ければ、台帳そのものを作らない（空の入れ物を置かない）
+    if (next === ledger) return NOTHING_RECORDED;
+    await store.save(next);
+    return {
+      work: added.some((record) => record.scope === "work"),
+      episodes: added.filter((record) => record.scope === "episode").length,
+    };
+  } catch (error) {
+    // **書けなくても、取り込みそのものは成り立っている**（下書きと同じ扱い）。
+    // ここで止めると、原稿は入っているのに失敗したように見える
+    logFailure("投稿状態の下ごしらえ", {
+      作品: work.title,
+      サイト: site,
+      詳細: error instanceof Error ? error.message : String(error),
+    });
+    return NOTHING_RECORDED;
+  }
+}
+
+/**
+ * 台帳へ積んだ読者の反応の内訳（設計書6.99）。
+ *
+ * **件数をそのまま伝えないために、範囲で持つ。** 話ごとに1件ずつ積むので、
+ * 500話の作品では501件になる——「読者の反応を501件記録しました」は、
+ * 何が起きたのか分からないまま作者を驚かせる（作者の指摘、2026-09-19）。
+ * 内訳は台帳と執筆量パネルの「サイトの記録」で見られる。
+ */
+interface RecordedReaderStats {
+  /** 作品全体の数字（【評価】）を積んだか */
+  readonly work: boolean;
+  /** 話ごとの数字（【リアクション】）を積んだ話数 */
+  readonly episodes: number;
+}
+
+const NOTHING_RECORDED: RecordedReaderStats = { work: false, episodes: 0 };
+
+/**
+ * 台帳へ書く作品情報を組み立てる（設計書6.68.5）。**読めた欄だけを持つ。**
+ *
+ * - カクヨム：バックアップに作品IDもURLも入っていないので、ジャンルだけ
+ * - なろう：**Nコードが入っている**ので、作品IDと作品ページのURLも入る
+ *   （URLはNコードから一意に決まる形を合成する。読みにはいかない）
+ */
+function backupSiteProfile(
+  inspection: WorkZipInspection
+): PostingSiteProfile | undefined {
+  const genre = (inspection.narou?.header.genre ?? inspection.info?.genre ?? "")
+    .trim();
+  const narou = inspection.narou?.header;
+
+  const profile: PostingSiteProfile = {
+    // **小文字で持つ。** URLの中も、貼り込み係が管理画面から読む作品IDも
+    // 小文字なので、照合（`matchReaderStatsEnvelope`）が素直に通る
+    ...(narou ? { workId: narou.ncode, workUrl: narou.workUrl } : {}),
+    ...(genre ? { genre } : {}),
+  };
+  return Object.keys(profile).length > 0 ? profile : undefined;
+}
+
+/**
+ * バックアップに入っていた読者の反応を積む（設計書6.99）。
+ *
+ * ## なろうのバックアップからは読んでよい
+ *
+ * 設計書6.79.7の「なろうは手入力のみ」は**サイトを機械で読むこと**に
+ * ついての判断であって、**作者が自分でダウンロードしたファイルを読むこと
+ * とは別**である（作者の裁定、2026-09-19）。ここでもHTTPは1本も発しない。
+ *
+ * ## カクヨムには数字が無い
+ *
+ * カクヨムのバックアップに入っているのは作品情報だけである。紹介文に
+ * 「10万PV達成記念」と書いてあっても**そこから数字を拾わない**——作者が
+ * 書いた文章であって、いまのPVではない（AIに事実を作らせるのと同じ）。
+ *
+ * ## 読み取った日時
+ *
+ * `readAt` は取り込んだ日時にする。バックアップがいつの数字かは
+ * ファイルに書かれていないので、**分かる時刻だけを書く**。
+ */
+function withBackupReaderStats(
+  ledger: PostingLedger,
+  inspection: WorkZipInspection
+): PostingLedger {
+  const narou = inspection.narou;
+  if (!narou) return ledger;
+
+  const readAt = new Date().toISOString();
+  let next = ledger;
+
+  // 作品全体（【評価】）。読めた欄が1つも無ければ記録しない
+  if (hasReaderStatsMetrics(narou.header.metrics)) {
+    next = withReaderStats(next, {
+      site: "narou",
+      readAt,
+      scope: "work",
+      metrics: narou.header.metrics,
+      source: "backup",
+    });
+  }
+
+  // 話ごと（【リアクション】）。**作者の確認：各話での読者の反応である**
+  for (const episode of narou.episodes) {
+    if (!hasReaderStatsMetrics(episode.metrics)) continue;
+    next = withReaderStats(next, {
+      site: "narou",
+      readAt,
+      scope: "episode",
+      episode: episode.episode,
+      metrics: episode.metrics,
+      source: "backup",
+    });
+  }
+
+  return next;
+}
+
+/**
  * 結果を伝える（設計書6.81の規則3）。
  *
  * **登録できたことは `registerFolderAsWork` が既に伝えている**ので、
@@ -400,7 +585,9 @@ async function writePlotFromInfo(
 async function reportResult(
   work: WorkEntry,
   inspection: WorkZipInspection,
-  placed: readonly string[]
+  placed: readonly string[],
+  /** 台帳へ積んだ読者の反応の内訳（バックアップに入っていたぶん） */
+  recorded: RecordedReaderStats
 ): Promise<void> {
   const notes = [
     `${inspection.episodeCount}話を取り込みました。`,
@@ -412,9 +599,78 @@ async function reportResult(
       : "",
   ].filter((note) => note !== "");
 
+  const invite = readerStatsInvite(inspection.site, recorded);
   const action = await vscode.window.showInformationMessage(
-    notes.join(" "),
-    "フォルダーを開く"
+    [...notes, ...(invite ? [invite.line] : [])].join(" "),
+    "フォルダーを開く",
+    ...(invite?.buttons ?? [])
   );
-  if (action === "フォルダーを開く") await revealFolder(work.folderPath);
+  if (action === "フォルダーを開く") {
+    await revealFolder(work.folderPath);
+    return;
+  }
+
+  const command = invite?.commands[action ?? ""];
+  // **押さなければ何も起きない。** 誘いであって、取り込みの続きではない
+  if (command) {
+    await vscode.commands.executeCommand(command, { type: "work", work });
+  }
+}
+
+/**
+ * 読者の反応の口へ誘う1行（設計書6.79.7）。
+ *
+ * **サイトによって書き分ける。** 貼り付けでの取り込みに対応しているのは
+ * カクヨムとアルファポリスだけで、**なろうの封筒は受け取らない**
+ * （規約の判断。`readerStatsEnvelope.ts`）。なろうで「貼り付け」を案内すると、
+ * 押した先で断られる——できないことを誘わない。
+ *
+ * @returns 誘わないなら undefined（出どころが分からなかったとき）
+ */
+function readerStatsInvite(
+  site: PostingSiteId | null,
+  recorded: RecordedReaderStats
+):
+  | {
+      line: string;
+      buttons: string[];
+      commands: Record<string, string>;
+    }
+  | undefined {
+  if (!site) return undefined;
+  const label = postingSiteInfo(site).label;
+  /*
+    **書き留めたことを黙っていない。** 訊かずに書いたものこそ、何を書いたかを
+    伝える（設計書6.81の規則3）。
+
+    **ただし件数は言わない**（0.69.9、作者の指摘）。話ごとに1件ずつ積むので
+    500話なら501件になり、「501件記録しました」は知らせではなく驚きになる。
+    どこに何が入ったかは、執筆量パネルの「サイトの記録」と台帳で見られる。
+  */
+  const scope = [
+    recorded.work ? "作品全体" : "",
+    recorded.episodes > 0 ? "各話" : "",
+  ]
+    .filter((part) => part !== "")
+    .join("と");
+  const noted = scope
+    ? `${label}の作品として下ごしらえし、バックアップにあった${scope}の読者の反応を記録しました。`
+    : `${label}の作品として下ごしらえしました。`;
+
+  if (supportsReaderStatsHelper(site)) {
+    return {
+      line: `${noted}読者の反応（PV・応援など）は、貼り付けか手入力で足せます。`,
+      buttons: ["貼り付けて取り込む", "手入力する"],
+      commands: {
+        貼り付けて取り込む: "novelai.importReaderStats",
+        手入力する: "novelai.recordReaderStats",
+      },
+    };
+  }
+
+  return {
+    line: `${noted}この先の読者の反応は、手入力で足せます。`,
+    buttons: ["手入力する"],
+    commands: { 手入力する: "novelai.recordReaderStats" },
+  };
 }
