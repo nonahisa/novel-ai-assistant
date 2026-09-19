@@ -313,6 +313,25 @@ export async function foreshadowRun(
         chunkFromId(input.folder, chunkId),
         responseText
       ),
-    ollamaGenerate
+    ollamaGenerate,
+    /*
+      **検知（detect）だけ貯める。**
+
+      製品（`features/checkForeshadows.ts`）の鍵は、回収判定（resolve）の
+      ほうだけ**未回収の伏線の指紋**をプロンプト版へ混ぜている（設計書
+      6.35.3）——台帳が変われば同じ本文でも判定が変わるためで、こちらは
+      その指紋を組み立てていない。指紋抜きの鍵で貯めると、**拡張機能とは
+      永久に当たらない鍵**がファイルへ積み上がるだけになる。
+    */
+    prompts.mode === "detect"
+      ? {
+          folder: input.folder,
+          // **製品と同じ鍵**（`features/checkForeshadows.ts` の `cacheKeyBase`）
+          feature: "foreshadow_detect",
+          promptVersion: FORESHADOW_DETECT_VERSION,
+          hashOf: (chunkId) => chunkFromId(input.folder, chunkId).hash,
+          parse: (responseText) => parseForeshadowDetectResult(responseText),
+        }
+      : undefined
   );
 }

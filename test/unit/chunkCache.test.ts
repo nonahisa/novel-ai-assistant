@@ -457,6 +457,81 @@ describe("チャンク処理キャッシュ", () => {
     expect(cache.size).toBe(2);
   });
 
+  /**
+   * **MCPサーバーは拡張機能とは別のプロセス**で走る（設計書6.87.8）。
+   * VS Code が動いていなくても動くので、同じ `chunks.json` を2つのプロセスが
+   * 持つ。素直に上書きすると、**もう一方が貯めたぶんを丸ごと失う**——
+   * しかも保存時には間引き（180日・4000件）も掛かるので、古い内容を握ったまま
+   * 上書きすると被害が大きい。だから書く直前に読み直して混ぜる。
+   */
+  test("別のプロセスが後から書いた項目を、こちらの保存で消さない", async () => {
+    const mine = new ChunkCache(work);
+    await mine.load();
+    await mine.set("mine", base, { from: "こちら" });
+
+    // こちらが握っているあいだに、別のプロセス（MCPサーバー）が書いた
+    const theirs = new ChunkCache(work);
+    await theirs.load();
+    await theirs.set("theirs", base, { from: "あちら" });
+    await theirs.save();
+
+    await mine.save();
+
+    expect(entriesOnDisk()).toHaveLength(2);
+    const reloaded = new ChunkCache(work);
+    await reloaded.load();
+    expect(reloaded.get("mine", base)).toEqual({ from: "こちら" });
+    expect(reloaded.get("theirs", base)).toEqual({ from: "あちら" });
+  });
+
+  /**
+   * 同じ鍵が両方にあるときの決め方。
+   *
+   * **値はどちらでも同じはず**（鍵に内容ハッシュ・プロバイダ・モデル・版が
+   * 入っているため）だが、**最後に使った日は違う**。新しいほうを残さないと、
+   * 掃除の基準になる日付が巻き戻って、現役の鍵が期限で落ちる。
+   */
+  test("同じ鍵が両方にあるときは、最後に使った日が新しいほうを残す", async () => {
+    // あちらが8月5日に書いたものが、こちらの8月1日のものより新しい場合
+    const mine = new ChunkCache(work, {
+      now: () => new Date("2026-08-01T00:00:00.000Z"),
+    });
+    await mine.set("同じ鍵", base, { from: "こちら（古い）" });
+    const theirs = new ChunkCache(work, {
+      now: () => new Date("2026-08-05T00:00:00.000Z"),
+    });
+    await theirs.set("同じ鍵", base, { from: "あちら（新しい）" });
+    await theirs.save();
+
+    await mine.save();
+
+    const reloaded = new ChunkCache(work, {
+      now: () => new Date("2026-08-06T00:00:00.000Z"),
+    });
+    await reloaded.load();
+    expect(reloaded.get("同じ鍵", base)).toEqual({ from: "あちら（新しい）" });
+
+    // 逆に、こちらのほうが新しければこちらが残る（片方に寄せていないこと）
+    disk.clear();
+    const older = new ChunkCache(work, {
+      now: () => new Date("2026-08-01T00:00:00.000Z"),
+    });
+    await older.set("同じ鍵", base, { from: "あちら（古い）" });
+    await older.save();
+    const newer = new ChunkCache(work, {
+      now: () => new Date("2026-08-05T00:00:00.000Z"),
+    });
+    await newer.set("同じ鍵", base, { from: "こちら（新しい）" });
+
+    await newer.save();
+
+    const again = new ChunkCache(work, {
+      now: () => new Date("2026-08-06T00:00:00.000Z"),
+    });
+    await again.load();
+    expect(again.get("同じ鍵", base)).toEqual({ from: "こちら（新しい）" });
+  });
+
   test("未変更のキャッシュは保存しない", async () => {
     const cache = new ChunkCache(work);
     const writeFile = workspace.fs.writeFile as ReturnType<typeof vi.fn>;

@@ -2,6 +2,8 @@ import { z } from "zod";
 import { McpToolError, describeError } from "./shared";
 import { askSampling } from "./sampling";
 import { ollamaGenerate } from "./ollama";
+import { openChunkCache } from "./chunkCacheFile";
+import type { CacheKeyBase } from "../../core/chunkCacheStore";
 
 /**
  * `run` ツールの返し方（設計書6.87.8 の5・6）。
@@ -172,6 +174,40 @@ export interface RunnerContext {
   temperature?: number;
 }
 
+/**
+ * どこへ貯めるか（作者の裁定 2026-09-19「読み書き両方使う」、設計書6.87.17）。
+ *
+ * **拡張機能とまったく同じ鍵で読み書きする。** 鍵がずれると、拡張機能が
+ * 貯めたぶんを外部AIが使えない（逆も同じ）——同じ本文を同じモデルへ二度
+ * 送ることになり、実装ルール4（処理量を節約する）に反する。
+ *
+ * **渡すのは道具ごとに違うところだけ。** feature 名と版は製品（`features/*.ts`）
+ * の `cacheKeyBase` と揃える。**製品の鍵に材料の指紋や台帳の指紋が混ざって
+ * いる機能は、ここを渡さない**（矛盾検知・伏線の回収判定）——こちらでは
+ * 同じ指紋を組み立てていないので、渡すと「当たらない鍵」を貯めるだけになる。
+ */
+export interface RunChunkCache {
+  /** 作品フォルダー（`.aiwriter/cache/chunks.json` の置き場所） */
+  folder: string;
+  /** 製品と同じ feature 名（`features/checkTypos.ts` なら `typo_check`） */
+  feature: string;
+  /** 製品と同じプロンプト版（`prompts/*.ts` の `_VERSION`） */
+  promptVersion: string;
+  /** chunkId から、そのチャンクの内容ハッシュを引く（鍵の一部） */
+  hashOf: (chunkId: string) => string;
+  /**
+   * 応答を、**製品がキャッシュへ入れるのと同じ形**へ変える。
+   *
+   * 製品が入れているのは生の応答ではなく、読み取ったあとの形
+   * （`parseTypoCheckResult` などの返り値）である。ここで生の文字列を
+   * 入れると、拡張機能が当てたときに別の形が返って壊れる。
+   */
+  parse: (responseText: string) => unknown;
+}
+
+/** キャッシュの鍵に入れるプロバイダID。`runner: ollama` は手元のOllama */
+const OLLAMA_PROVIDER_ID = "ollama";
+
 /** `run` が組み立てたプロンプト一式 */
 export interface RunnerPrompts<P> {
   systemPrompt: string;
@@ -217,7 +253,12 @@ export async function runByRunner<
     numCtx: number;
     temperature: number;
     allowRemote?: boolean;
-  }) => Promise<{ text: string }>
+  }) => Promise<{ text: string }>,
+  /**
+   * 結果を貯める先。**省略できる**（製品の鍵を組み立てられない機能がある）。
+   * 詳しくは `RunChunkCache` の断り書き。
+   */
+  cache?: RunChunkCache
 ): Promise<RunOutcome<P, R>> {
   // **省略を既定で埋めない。** 行き先で作者にとっての意味がまるで違う
   assertRunner(context.runner);
@@ -242,6 +283,12 @@ export async function runByRunner<
   }
 
   if (context.runner === "sampling") {
+    /*
+      **ここではキャッシュを使わない。** 鍵にはモデル名が要るが、
+      考えるのは呼び出し元で、**どのモデルが答えるかは聞いてみるまで
+      分からない**（`reply.model` は答えたあとの申告である）。読むときに
+      鍵を作れない以上、書いても二度と当たらない。
+    */
     return runChunksBySampling(prompts.chunks, temperature, async (item) => {
       const reply = await askSampling({
         folder: context.folder,
@@ -260,19 +307,77 @@ export async function runByRunner<
   if (!model) {
     throw new McpToolError("runner が ollama のときは model が要ります。");
   }
-  return runChunks(model, temperature, prompts.chunks, async (item) => {
-    const response = await ask({
-      endpoint: context.endpoint,
+
+  /*
+    **手元のOllamaで回すときだけ、キャッシュが効く**（設計書6.87.17）。
+    鍵に要るもの（プロバイダIDとモデル名）が、投げる前に揃うのはこの道だけ
+    である。`claude` はプロンプトを返すだけで結果を持たず、`sampling` は
+    答えるモデルが聞いてみるまで分からない。
+  */
+  const store = cache ? openChunkCache(cache.folder) : undefined;
+  const keyBase: CacheKeyBase | undefined =
+    cache && {
+      feature: cache.feature,
+      promptVersion: cache.promptVersion,
+      providerId: OLLAMA_PROVIDER_ID,
       model,
-      systemPrompt: prompts.systemPrompt,
-      userPrompt: item.userPrompt,
-      schema: prompts.schema,
-      numCtx: context.numCtx,
-      temperature,
-      allowRemote: context.allowRemote,
-    });
-    return validate(item.chunkId, response.text);
-  });
+    };
+  if (store) await store.load();
+
+  const outcome = await runChunks(
+    model,
+    temperature,
+    prompts.chunks,
+    async (item) => {
+      const chunkHash =
+        store && cache ? cache.hashOf(item.chunkId) : undefined;
+      if (store && keyBase && chunkHash !== undefined) {
+        const hit = store.get(chunkHash, keyBase);
+        if (hit !== undefined) {
+          // **貯めてあるのは「読み取ったあとの形」**なので、文字列へ戻して
+          // 製品と同じ検算へ通す。迂回すると、製品に無い不具合を見つけた
+          // ことになる（CLAUDE.md の「繰り返し起きた失敗」5番）
+          return validate(item.chunkId, JSON.stringify(hit));
+        }
+      }
+      const response = await ask({
+        endpoint: context.endpoint,
+        model,
+        systemPrompt: prompts.systemPrompt,
+        userPrompt: item.userPrompt,
+        schema: prompts.schema,
+        numCtx: context.numCtx,
+        temperature,
+        allowRemote: context.allowRemote,
+      });
+      // **検算が通ってから貯める。** 読み取れない応答を貯めると、
+      // 次からその壊れた答えが返り続ける
+      const result = validate(item.chunkId, response.text);
+      if (store && cache && keyBase && chunkHash !== undefined) {
+        const parsed = cache.parse(response.text);
+        if (parsed !== undefined && parsed !== null) {
+          await store.set(chunkHash, keyBase, parsed);
+        }
+      }
+      return result;
+    }
+  );
+
+  if (store) {
+    try {
+      await store.save();
+    } catch (error) {
+      /*
+        **貯められなくても、出た結果は返す。** ここで投げると、AIを回した
+        ぶんが丸ごと無かったことになる（次に回せば同じ時間がまた要る）。
+        黙って捨てはしない——理由は標準エラーへ残す。
+      */
+      process.stderr.write(
+        `チャンクキャッシュを保存できませんでした: ${describeError(error)}\n`
+      );
+    }
+  }
+  return outcome;
 }
 
 /**

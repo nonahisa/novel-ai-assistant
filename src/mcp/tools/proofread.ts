@@ -268,6 +268,14 @@ export async function proofreadRun(
         responseText,
         style
       ),
-    ollamaGenerate
+    ollamaGenerate,
+    {
+      folder: input.folder,
+      // **製品と同じ鍵**（`features/checkProofread.ts` の `cacheKeyBase`）
+      feature: "proofread",
+      promptVersion: PROOFREAD_VERSION,
+      hashOf: (chunkId) => chunkFromId(input.folder, chunkId).hash,
+      parse: (responseText) => parseProofreadResult(responseText),
+    }
   );
 }

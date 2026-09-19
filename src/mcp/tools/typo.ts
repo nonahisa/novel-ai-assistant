@@ -288,6 +288,16 @@ export async function typoRun(
         responseText,
         context
       ),
-    ollamaGenerate
+    ollamaGenerate,
+    {
+      folder: input.folder,
+      // **製品と同じ鍵**（`features/checkTypos.ts` の `cacheKeyBase`）。
+      // ずらすと、拡張機能が貯めたぶんをこちらが使えない
+      feature: "typo_check",
+      promptVersion: TYPO_CHECK_VERSION,
+      hashOf: (chunkId) => chunkFromId(input.folder, chunkId).hash,
+      // 製品が貯めているのは読み取ったあとの形（`parseTypoCheckResult`）
+      parse: (responseText) => parseTypoCheckResult(responseText),
+    }
   );
 }

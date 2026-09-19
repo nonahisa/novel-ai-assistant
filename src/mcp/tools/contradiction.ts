@@ -344,6 +344,16 @@ export async function contradictionRun(
 ): Promise<RunOutcome<ContradictionChunkPrompt, ContradictionValidateResult>> {
   const prompts = contradictionPrompt(input);
 
+  /*
+    **ここはチャンクキャッシュを渡さない**（設計書6.87.17）。
+
+    製品（`features/checkContradictions.ts`）の鍵には、材料の指紋・モデルの
+    地力の印・**チャンクごとに渡す過去場面の抜粋**まで混ざっている。こちらは
+    過去場面を送っていないので**プロンプトそのものが製品と違う**——同じ鍵で
+    貯めると、製品が「過去場面つきで出した答え」と取り違える。指紋抜きの鍵で
+    貯めれば取り違えはしないが、今度は拡張機能と永久に当たらない鍵が積み上がる。
+    どちらも良くないので、揃えられるようになるまで貯めない。
+  */
   // 行き先ごとの分岐は `runByRunner` が持つ（設計書6.87.12）
   return runByRunner(
     input,
