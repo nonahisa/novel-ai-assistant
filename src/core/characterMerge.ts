@@ -13,9 +13,14 @@ import { isMeaningfulValue } from "./characterExtractionValidation";
 import {
   HONORIFIC_SUFFIX_SOURCE,
   HONORIFIC_SUFFIXES,
+  NOBILITY_TITLE_SOURCE,
   stripHonorific,
 } from "./nameHonorific";
-import { KINSHIP_WORDS, PRONOUN_WORDS } from "./genericPersonWords";
+import {
+  GENERIC_ROLE_WORDS,
+  KINSHIP_WORDS,
+  PRONOUN_WORDS,
+} from "./genericPersonWords";
 import {
   HAS_KANJI,
   MAX_FAMILY_NAME_LENGTH,
@@ -951,6 +956,28 @@ interface CharacterLookup {
   ambiguous: Character[];
 }
 
+/**
+ * 一致したその呼び名は、同一人物の根拠になるか（設計書6.5.9）。
+ *
+ * **誰にでも使う呼び方（「御子息」「お母さん」「執事」）は根拠にしない。**
+ * 実データで、AIが正しく分けて返した兄と妹が、両方の別名に入っていた
+ * 「御子息」だけを頼りに1人へまとめられた（2026-09-19の実機確認。
+ * 主人公が妹のレコードへ吸収された）。**これは作者の資料を壊す。**
+ *
+ * ただし、その語を**主たる名前にしている側があるなら寄せてよい。**
+ * 「執事」としか呼ばれない人物のレコードは、名前の分かっている
+ * 「パッケ」へ寄せたい——塞ぐと同じ人物が毎回2件に割れる。
+ * 「御子息」はどちらにとっても添え物の呼び方なので、ここで落ちる。
+ */
+function isIdentifyingMatch(
+  matched: string,
+  recordPrimary: string,
+  incomingPrimary: string
+): boolean {
+  if (!isGenericAppellation(matched)) return true;
+  return matched === recordPrimary || matched === incomingPrimary;
+}
+
 function findCharacter(
   list: Character[],
   name: string,
@@ -967,14 +994,20 @@ function findCharacter(
   // そのレコードは候補から外す。
   const usable = list.filter((c) => !distinctKeys(c).has(normalizeName(name)));
 
+  const incomingPrimary = normalizeName(name);
   const exactMatches = usable.filter((c) => {
     // レコード側が別人だと決めた呼び名は、そのレコードの呼び名として使わない。
     // 作者が手でJSONを直したときなど、別名に残ったままのことがある
     const blocked = distinctKeys(c);
+    const primary = normalizeName(c.name);
     const candidates = [c.name, ...c.aliases]
       .map(normalizeName)
       .filter((candidate) => !blocked.has(candidate));
-    return candidates.some((candidate) => keys.has(candidate));
+    return candidates.some(
+      (candidate) =>
+        keys.has(candidate) &&
+        isIdentifyingMatch(candidate, primary, incomingPrimary)
+    );
   });
   if (exactMatches.length === 1) return { match: exactMatches[0], ambiguous: [] };
   if (exactMatches.length > 1) {
@@ -1016,10 +1049,12 @@ function findCharacter(
   // という1件へまとめられた。姓だけのレコードが先にできると、家族が
   // 1人ずつ「候補が一人に決まる」判定を通ってしまい、次々に吸収される。
   const shared = sharedNameParts(list);
+  const usablePart = (part: string): boolean =>
+    !shared.has(part) && !isGenericAppellation(part);
   const incomingParts = new Set(
-    incomingNames.flatMap(splitNameParts).filter((part) => !shared.has(part))
+    incomingNames.flatMap(splitNameParts).filter(usablePart)
   );
-  const usableKeys = new Set([...keys].filter((key) => !shared.has(key)));
+  const usableKeys = new Set([...keys].filter(usablePart));
 
   const partMatches = usable.filter((character) =>
     [character.name, ...character.aliases].some((candidate) =>
@@ -1076,8 +1111,50 @@ export function sharedNameParts(characters: readonly Character[]): Set<string> {
     // 1種類だけなら、その相手との組でしか出てこない＝名とみなす
     if (others.size >= 2) shared.add(part);
   }
+
+  // 爵位だけで呼ばれる名前（「シーゲン子爵」）は、**家名＋爵位**である。
+  //
+  // 実データで「シーゲン子爵」が娘の「ユニィ・シーゲン」を吸収した
+  // （2026-09-19の実機確認。紹介文まで娘のものへ書き換わった）。
+  // `normalizeName` が爵位を落として「シーゲン」にし、それが娘の
+  // フルネームの一部と一致したためである。**上の数え方では拾えない**——
+  // 家の最初の1人が登録された時点では、まだ誰とも部分を共有していない。
+  //
+  // フルネームに爵位が付いた形（「ヴォイド・コンストラクタ男爵」）は
+  // 個人を指すので対象にしない。区切りの有無で分ける。
+  for (const character of characters) {
+    for (const full of [character.name, ...character.aliases]) {
+      const family = nobilityFamilyName(full);
+      if (family) shared.add(family);
+    }
+  }
   return shared;
 }
+
+/**
+ * 爵位だけが付いた、区切りの無い呼び名から家名を取り出す。
+ * 当てはまらなければ undefined。
+ */
+function nobilityFamilyName(name: string): string | undefined {
+  // 区切りがあれば姓名が書かれている＝個人を指す呼び名である
+  if (/[\s　・･]/u.test(name)) return undefined;
+  const bare = normalizeSpacing(name.trim());
+  for (const title of NOBILITY_TITLES) {
+    if (!bare.endsWith(title)) continue;
+    const family = normalizeName(bare.slice(0, bare.length - title.length));
+    // 1字だけ残る形は、家名ではなく爵位の言い換えとみる
+    return family.length >= 2 ? family : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * 貴族の称号。一覧は `nameHonorific.ts` が1か所で持つ。
+ * 長い称号から順に照合する（理由は `HONORIFIC_SUFFIXES` と同じ）。
+ */
+const NOBILITY_TITLES = [...NOBILITY_TITLE_SOURCE].sort(
+  (a, b) => b.length - a.length
+);
 
 // 省略はカタカナ語で起きやすい。漢字を含む名前の部分一致は
 // 別人（「田中」と「田中村」等）の可能性が高いため対象にしない。
@@ -1140,16 +1217,13 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
       // **本当の重複を直す手立てが無くなる**（別名の一致では拾えず、
       // 長さが同じなので suffix・name_part にも掛からない）。
       // 根拠としては弱いので、確信度を落として断りを添える
-      if (
-        isGenericAppellation(a.name) &&
-        normalizeName(a.name) &&
-        normalizeName(a.name) === normalizeName(b.name)
-      ) {
+      const genericName = genericPrimaryNameMatch(a, b);
+      if (genericName) {
         candidates.push({
           names: [a.name, b.name],
           ids: [a.id, b.id],
           reason: "same_name",
-          matchedName: a.name,
+          matchedName: genericName,
           confidence: "weak",
           weakNote: WEAK_GENERIC_WORD_NOTE,
         });
@@ -1211,6 +1285,36 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
     }
   }
   return candidates;
+}
+
+/**
+ * 片方が**誰にでも使う呼び方を主たる名前にしていて**、
+ * もう一方もその呼び方で呼ばれている組か。当てはまればその呼び方を返す。
+ *
+ * **`isIdentifyingMatch` で自動統合を止めた分の受け皿である。**
+ * 「執事」というレコードと「パッケ〔執事さん〕」は同じ人かもしれないが、
+ * 屋敷に執事が2人いれば別人でもある。機械には決められないので、
+ * 確信度を落として作者へ回す——**黙って別々のまま残さない。**
+ *
+ * 双方にとって添え物の呼び方でしかないとき（兄と妹の「御子息」）は
+ * 出さない。出すと「同じ人かも」と毎回聞かれ、作者は候補を読まなくなる。
+ */
+function genericPrimaryNameMatch(
+  a: Character,
+  b: Character
+): string | undefined {
+  for (const [owner, other] of [
+    [a, b],
+    [b, a],
+  ] as const) {
+    const key = normalizeName(owner.name);
+    if (!key || !isGenericAppellation(owner.name)) continue;
+    const called = [other.name, ...other.aliases].some(
+      (name) => normalizeName(name) === key
+    );
+    if (called) return owner.name;
+  }
+  return undefined;
 }
 
 /**
@@ -1300,7 +1404,13 @@ function readingMatchPair(
     // 「読み仮名と同じ音です」になり、省略形という本当の手掛かりを覆い隠す。
     // 音が丸ごと同じ組（「フミカ」と「ふみか」）だけは、
     // カタカナとひらがなをまたいで比べる判定が他に無いので拾う
-    const ownerIsKana = KANA_ONLY.test(normalizeSpacing(owner.name));
+    // **中黒は名前の一部ではなく区切りである。** 落とさずに見ていたため
+    // 「ユニィ・シーゲン」がかな名と判定されず、読みの末尾が父の
+    // 「シーゲン子爵」と重なるだけで「同じ人かも」と出ていた
+    // （2026-09-19。中黒区切りは「名・姓」なので、末尾は姓である）
+    const ownerIsKana = KANA_ONLY.test(
+      normalizeSpacing(owner.name).replace(/[・･]/gu, "")
+    );
 
     for (const appellation of appellations.get(kana.id) ?? []) {
       const bare = stripHonorific(normalizeSpacing(appellation));
@@ -1554,7 +1664,15 @@ function isGenericAppellation(term: string): boolean {
   if (!normalized) return true;
   // 「姫」「殿下」のように敬称そのもの1語だけの呼び方
   if (HONORIFIC_SUFFIX_SOURCE.includes(normalized)) return true;
-  return TITLE_WORDS.has(normalized) || GENERIC_APPELLATIONS.has(normalized);
+  if (TITLE_WORDS.has(normalized) || GENERIC_APPELLATIONS.has(normalized)) {
+    return true;
+  }
+  // 丁寧の「お」「ご」「御」を外した形でも見る。
+  // 一覧に「ご子息」「御子息」を並べても、次は「お子息」が来る——
+  // 語の頭に付くだけの丁寧語で、**同じ語を指している**ためである
+  const bare = normalized.replace(/^[おご御]/u, "");
+  if (bare === normalized || !bare) return false;
+  return TITLE_WORDS.has(bare) || GENERIC_APPELLATIONS.has(bare);
 }
 
 /**
@@ -1576,11 +1694,14 @@ const TITLE_WORD_SOURCE = [
 const TITLE_WORDS = new Set(TITLE_WORD_SOURCE.map(normalizeName));
 
 /**
- * 代名詞と家族関係語（`core/genericPersonWords.ts`）。
+ * 代名詞・家族関係語・役割語（`core/genericPersonWords.ts`）。
  * こちらも照合と同じ形へ通してから持つ（理由は `TITLE_WORD_SOURCE` と同じ）。
+ *
+ * **役割語は2026-09-19に足した。** 抽出の門番だけが持っていたので、
+ * 名寄せからは見えず、「御子息」を別名に持つ兄と妹が1人へまとまった。
  */
 const GENERIC_APPELLATIONS = new Set(
-  [...PRONOUN_WORDS, ...KINSHIP_WORDS].map(normalizeName)
+  [...PRONOUN_WORDS, ...KINSHIP_WORDS, ...GENERIC_ROLE_WORDS].map(normalizeName)
 );
 
 /** 2人の呼称の総当たりを、短い方・長い方の順で返す */

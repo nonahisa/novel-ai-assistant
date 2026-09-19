@@ -139,7 +139,10 @@ import {
   sortByPickOrder,
 } from "./core/workPickNotes";
 // gitコマンドが要る。動的importする（設計書5.8.5）
-import { tryRegisterAsCollection } from "./features/addCollection";
+import {
+  tryRegisterAsCollection,
+  type CollectionOptions,
+} from "./features/addCollection";
 import {
   currentCountMode,
   countModeLabel,
@@ -1888,11 +1891,24 @@ export async function activate(
      * 添えて呼ぶ。作者が押したときは `undefined` のままで、これまでと
      * 同じ画面が出る
      */
-    givenTitle?: string
+    givenTitle?: string,
+    /**
+     * 呼び出し側が知っていること。
+     *
+     * **自分で作った作品フォルダーを登録するとき**（ZIPからの取り込み）は
+     * `knownSingleWork` を立てる。渡さなければこれまでどおり、書庫かどうかを
+     * 中身から見分ける
+     */
+    options: CollectionOptions = {}
   ): Promise<WorkEntry | undefined> {
     // **書庫かもしれない。** 中に作品フォルダーが並んでいたら、
-    // まとめて登録する（設計書5.7）。作品そのものならこれまで通り進む
-    const collection = await tryRegisterAsCollection(registry, folderPath);
+    // まとめて登録する（設計書5.7）。作品そのものならこれまで通り進む。
+    // ただし呼び出し側が1作品だと知っているときは、訊かずに進む
+    const collection = await tryRegisterAsCollection(
+      registry,
+      folderPath,
+      options
+    );
     if (collection.handled) {
       if (collection.added.length > 0) {
         treeProvider.refresh();
@@ -2010,13 +2026,15 @@ export async function activate(
   context.subscriptions.push(
     registerCommand("novelai.importWorkFromZip", async () => {
       // **登録は「フォルダから追加」と同じ道を通す。** 取り込み側は
-      // 場所と題を決めるところまでで、そこから先（書庫の見分け・集計・
-      // 一覧の更新）は写さない（設計書6.98）
+      // 場所と題を決めるところまでで、そこから先（集計・一覧の更新）は
+      // 写さない（設計書6.98）。**書庫の見分けだけは通らない**——
+      // その作品フォルダーを作ったのは取り込み自身なので、
+      // 「書庫かもしれない」と訊く相手がいない（6.99）
       const { importWorkFromZip } = await import(
         "./features/importWorkFromZip.js"
       );
-      await importWorkFromZip(registry.list(), (folderPath, title) =>
-        registerFolderAsWork(folderPath, title)
+      await importWorkFromZip(registry.list(), (folderPath, title, options) =>
+        registerFolderAsWork(folderPath, title, options)
       );
     })
   );

@@ -1,6 +1,7 @@
 import type { Chunk } from "./chunker";
 import {
   DESCRIPTIVE_ROLE_WORDS,
+  GENERIC_ROLE_WORDS,
   KINSHIP_WORDS,
   PRONOUN_WORDS,
 } from "./genericPersonWords";
@@ -192,40 +193,13 @@ const DESCRIPTIVE_ROLES = new Set(DESCRIPTIVE_ROLE_WORDS);
  */
 const KINSHIP = new Set(KINSHIP_WORDS);
 
-const GENERIC_ROLES = new Set([
-  "先生",
-  "教師",
-  "医師",
-  "医者",
-  "看護師",
-  "警官",
-  "店員",
-  "店主",
-  "主人",
-  "夫",
-  "妻",
-  "母",
-  "母親",
-  "父",
-  "父親",
-  "姉",
-  "兄",
-  "妹",
-  "弟",
-  "少年",
-  "少女",
-  "男",
-  "女",
-  "老人",
-  "客",
-  "門番",
-  "衛兵",
-  "兵士",
-  "騎士",
-  "冒険者",
-  "取調官",
-  "村人",
-]);
+/**
+ * 職業・立場を指すだけの語。一覧は `genericPersonWords.ts` が1か所で持つ。
+ *
+ * **名寄せ（`characterMerge.ts`）も同じ一覧を見る。** 写しを持っていた頃は、
+ * 抽出では弾く語が名寄せでは同一人物の根拠になっていた（設計書6.5.9）。
+ */
+const GENERIC_ROLES = new Set(GENERIC_ROLE_WORDS);
 const ENTITY_TYPES = new Set(["person", "group", "location", "unknown"]);
 
 /**

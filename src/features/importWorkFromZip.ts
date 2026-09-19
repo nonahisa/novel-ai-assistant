@@ -24,6 +24,7 @@ import {
 import type { WorkInfo } from "../core/workInfoParse";
 import { DEFAULT_MANUSCRIPT_DIR, type WorkEntry } from "../models/types";
 import type { WorkLocation } from "../core/libraryHome";
+import type { CollectionOptions } from "./addCollection";
 import { askText } from "../views/dialogs";
 import { confirmRun } from "../views/notify";
 import { revealFolder } from "../views/openDocument";
@@ -60,7 +61,8 @@ import { resolveNewWorkHome } from "./newWorkHome";
 /** 作品として登録する道。`extension.ts` の `registerFolderAsWork` を渡す */
 export type RegisterWork = (
   folderPath: string,
-  title: string
+  title: string,
+  options: CollectionOptions
 ) => Promise<WorkEntry | undefined>;
 
 export async function importWorkFromZip(
@@ -110,8 +112,16 @@ export async function importWorkFromZip(
   const extracted = await extractInto(folderPath, title, inspection);
   if (!extracted) return;
 
-  // 登録は「フォルダから追加」と同じ道を通る（写しを作らない）
-  const entry = await register(folderPath, title);
+  /*
+    登録は「フォルダから追加」と同じ道を通る（写しを作らない）。
+
+    **ただし「書庫かもしれない」の見分けだけは通さない**（`knownSingleWork`）。
+    いま作ったのはこの作品フォルダー1つで、`本文/` と `設定/` を置いたのも
+    ここである。それを見分けの道へ入れると、`設定/` があるせいで
+    「作品にも書庫にも見えます」と訊かれ、**しかも既定は書庫のほう**を
+    指す（2026-09-19、作者の実機確認）。知っていることを訊かない。
+  */
+  const entry = await register(folderPath, title, { knownSingleWork: true });
   if (!entry) return;
 
   const placed = inspection.info

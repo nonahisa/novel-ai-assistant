@@ -188,6 +188,22 @@ describe("ZIPから作品を取り込む", () => {
     expect(fs.text(paths.join(MANUSCRIPT, "episode_0001.txt"))).toBe(EPISODE_TEXT);
   });
 
+  it("「1作品だと分かっている」と伝えて登録を頼む（書庫か訊かせない）", async () => {
+    const fs = new MemoryFs({ [ZIP_PATH]: ZIP_BYTES });
+    fs.install();
+    stubWindow();
+    const options: unknown[] = [];
+
+    await importWorkFromZip(WORKS, async (_folderPath, _title, given) => {
+      options.push(given);
+      return workEntry();
+    });
+
+    // **作ったのは取り込み自身である**（`本文/` と `設定/` を置いた）。
+    // 書庫かもしれないと見に行かせると、作者に間違った既定の選択が出る
+    expect(options).toEqual([{ knownSingleWork: true }]);
+  });
+
   it("about.txt のキャッチコピーと紹介文を、紹介文の文書へ下書きする", async () => {
     const fs = new MemoryFs({ [ZIP_PATH]: ZIP_BYTES });
     fs.install();

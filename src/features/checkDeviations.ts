@@ -28,7 +28,7 @@ import {
   trimPlotForDeviation,
 } from "../core/plotForDeviation";
 import { readPlotText } from "../core/plotFile";
-import { isBlankPlotSection, parsePlotMarkdown } from "../core/plotDoc";
+import { parsePlotMarkdown, writtenPlotSections } from "../core/plotDoc";
 import {
   collectedChapterLabel,
   formatChapterLabel,
@@ -488,7 +488,8 @@ export async function checkDeviations(
  * プロットを読む。
  *
  * **中身が空なら実行しない。** 見出しだけのテンプレートを渡しても、
- * 照らし合わせる相手にはならない。
+ * 照らし合わせる相手にはならない。**ジャンル・モチーフ・形式・タイトル
+ * だけが書かれている状態も同じ**（分類の覚書であって、筋書きではない）。
  */
 async function loadPlot(
   work: WorkEntry,
@@ -496,10 +497,11 @@ async function loadPlot(
   suite: SuiteAwareOptions
 ): Promise<string | undefined> {
   const text = await readPlotText(work);
-  const sections = parsePlotMarkdown(text).sections;
-  const written = Object.values(sections).filter(
-    (body) => !isBlankPlotSection(body)
-  );
+  // **数え方は前提の判定（6.94の関門）と同じ口を通す**（`writtenPlotSections`）。
+  // 別々に数えると、「関門は通ったのに機能が走らない」「関門で止められたのに
+  // 機能なら走れた」が起きる。ジャンルやモチーフだけの `plot.md` は
+  // ここでも「無い」——タグの一覧に本文を突き合わせても逸脱は見つからない
+  const written = writtenPlotSections(parsePlotMarkdown(text).sections);
 
   if (written.length === 0) {
     // **まとめ実行では、ここで作者を止めない**（設計書6.80）。プロットが

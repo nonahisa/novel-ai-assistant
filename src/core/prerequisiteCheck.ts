@@ -18,7 +18,7 @@
  * ここに `vscode` を持ち込まない。
  */
 
-import { isBlankPlotSection, parsePlotMarkdown } from "./plotDoc";
+import { parsePlotMarkdown, writtenPlotSections } from "./plotDoc";
 
 /**
  * 設定資料があるか。
@@ -52,12 +52,17 @@ export function hasSynopsisEpisodes(count: number): boolean {
  * **見出しだけの雛形は「無い」と数える**（`features/checkDeviations.ts` の
  * `loadPlot` と同じ）。照らし合わせる相手にならないからである。
  *
+ * **分類の覚書だけ（ジャンル・モチーフ・形式・タイトル）も「無い」と数える**
+ * （2026-09-19。数え方そのものは `plotDoc.ts` の `writtenPlotSections` が
+ * 持つ——逸脱検知と食い違わせないため）。ZIPから取り込んだ直後の作品は
+ * 必ずその形になるので、ここで「ある」と読むと**プロットを起こす段が
+ * 飛ばされ、空のまま先へ進む。**
+ *
  * @param text `設定/plot.md` の中身。ファイルが無ければ `undefined`
  */
 export function hasWrittenPlot(text: string | undefined): boolean {
   if (text === undefined) return false;
-  const sections = parsePlotMarkdown(text).sections;
-  return Object.values(sections).some((body) => !isBlankPlotSection(body));
+  return writtenPlotSections(parsePlotMarkdown(text).sections).length > 0;
 }
 
 /**

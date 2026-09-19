@@ -178,6 +178,45 @@ export function isBlankPlotSection(body: string): boolean {
 }
 
 /**
+ * **作品の分類を書き留めるだけの節。** ここが埋まっていても、
+ * 「プロットを書いた」ことにはならない。
+ *
+ * 2026-09-19、作者の実機確認で分かった。ZIPからの取り込み（6.99）は
+ * `about.txt` のジャンルとタグを `## ジャンル`・`## モチーフ` へ
+ * 下書きするので、**取り込んだ直後の作品は必ずこの形になる。**
+ * それを「プロットがある」と数えたために、「ひと通り仕上げる」が
+ * プロット逆算を飛ばした。「形式とジャンルを決める」（6.4.4）だけを
+ * 実行した作品と、新規作成でタイプだけ決めた作品（`## 形式`）も同じ形になる。
+ *
+ * どれも**照らし合わせる相手にならない**——ジャンル名とタグの一覧に
+ * 本文を突き合わせても、逸脱は見つからない。
+ */
+export const PLOT_CLASSIFICATION_KEYS: readonly PlotSectionKey[] = [
+  "title",
+  "format",
+  "genre",
+  "motif",
+];
+
+/**
+ * 「プロットとして書かれている」と数えてよい節を返す。
+ *
+ * 前提の判定（`core/prerequisiteCheck.ts`）とプロット逸脱検知
+ * （`features/checkDeviations.ts`）が**同じ数え方をするための1つの口**。
+ * 別々に持つと、「関門は通ったのに機能が走らない」「関門で止められたのに
+ * 機能なら走れた」が起きる。
+ */
+export function writtenPlotSections(
+  sections: PlotSections
+): PlotSectionKey[] {
+  return PLOT_SECTIONS.map((section) => section.key).filter(
+    (key) =>
+      !PLOT_CLASSIFICATION_KEYS.includes(key) &&
+      !isBlankPlotSection(sections[key] ?? "")
+  );
+}
+
+/**
  * 既にある `plot.md` へ書き足す。**作者の文書の形を変えない。**
  *
  * 以前は `parsePlotMarkdown` で節に分解し、`buildPlotMarkdown` で

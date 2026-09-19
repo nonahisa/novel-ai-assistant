@@ -39,6 +39,23 @@ export type CollectionResult =
   /** 書庫ではなかった。呼び出し側がこれまで通り1作品として扱う */
   | { handled: false };
 
+export interface CollectionOptions {
+  /**
+   * 呼び出し側が「これは1作品である」と知っているか。
+   *
+   * **知っているなら訊いてはいけない**（2026-09-19、作者の実機確認）。
+   * ZIPからの取り込み（6.99）は、その作品フォルダーを**自分で作っている**
+   * ——`本文/` と `設定/` を置いたのは取り込み自身である。それでも中を
+   * 見に行くと、`設定/` があるせいで「作品にも書庫にも見えます」の問いが
+   * 出る。しかも既定は「中の1件を登録する」のほうなので、そのままEnterを
+   * 押した作者は壊れた登録を受け取る。
+   *
+   * **知らない入口（フォルダーから追加・GitHubから追加）は渡さない。**
+   * あちらは本当に書庫かもしれないので、訊くのが正しい。
+   */
+  readonly knownSingleWork?: boolean;
+}
+
 /**
  * フォルダーが書庫なら、中の作品をまとめて登録する。
  *
@@ -48,8 +65,13 @@ export type CollectionResult =
  */
 export async function tryRegisterAsCollection(
   registry: WorkRegistry,
-  root: string
+  root: string,
+  options: CollectionOptions = {}
 ): Promise<CollectionResult> {
+  // **作品だと分かっているなら、探しに行かない。** 中を見て迷う余地を
+  // 作らないことが目的なので、走査（`scanCollection`）の前に返す
+  if (options.knownSingleWork) return { handled: false };
+
   // 編集者モードでは、複数作品を抱え込ませない
   if (isEditorMode()) return { handled: false };
 
