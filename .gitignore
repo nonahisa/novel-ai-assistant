@@ -32,3 +32,8 @@ _peek*
 .claude/*
 !.claude/agents/
 !.claude/skills/
+
+# 外部AIの利用許可の印（設計書6.87.10）。**その機械で作者が与えるもの**なので
+# 同期しない。測定用の台（test/fixtures/seeded/*）にも同じ規則を効かせる
+**/.aiwriter/external-access.json
+**/.aiwriter/ai-instruction-usage.json
