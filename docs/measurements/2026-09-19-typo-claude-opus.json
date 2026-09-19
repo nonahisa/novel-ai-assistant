@@ -1,107 +1,86 @@
 {
- "measuredAt": "2026-09-19T03:50:41.810Z",
+ "measuredAt": "2026-09-19T08:16:48.011Z",
  "feature": "typo",
- "runner": "claude-code",
- "tool": "novel.prompt → 会話の中で答える → novel.validate",
- "model": "claude-opus-5",
+ "runner": "external",
+ "tool": "novel.prompt → 外で答える → novel.validate",
+ "model": "claude-opus",
  "numCtx": 16384,
- "numCtxDecision": {
-  "numCtx": 16384,
-  "source": "novel.prompt に渡した値（26bの回と同じ）",
-  "promptChars": 2244
- },
- "temperature": null,
- "temperatureSource": "測れない。会話の中で答えているので、束が温度を指定する経路を通っていない",
- "elapsedNote": "秒数は載せない。1回のAPI呼び出しではなく、本文を読んで答えを書く会話1ターンぶんなので、ローカルLLMの所要時間と同じ物差しに乗らない",
- "bundle": {
-  "version": "0.69.3"
- },
- "promptVersion": "1.1",
- "plans": [
-  {
-   "chunkId": "本文\\001_霧の朝.txt#1-0@4013",
-   "chars": 1318
-  },
-  {
-   "chunkId": "本文\\002_風の午後.txt#2-0@4013",
-   "chars": 1291
-  },
-  {
-   "chunkId": "本文\\003_星待ちの夜.txt#3-0@4013",
-   "chars": 1347
-  }
- ],
  "work": {
-  "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\test\fixturesseeded\typo",
+  "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\typo",
   "targets": [
    "本文\\001_霧の朝.txt",
    "本文\\002_風の午後.txt",
    "本文\\003_星待ちの夜.txt"
   ]
  },
- "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\test\fixturesseeded\typoanswers.json",
+ "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\typo\\answers.json",
+ "plans": [
+  {
+   "filePath": "本文\\001_霧の朝.txt",
+   "chunkId": "本文\\001_霧の朝.txt#1-0@4013",
+   "chars": 1318
+  },
+  {
+   "filePath": "本文\\002_風の午後.txt",
+   "chunkId": "本文\\002_風の午後.txt#2-0@4013",
+   "chars": 1291
+  },
+  {
+   "filePath": "本文\\003_星待ちの夜.txt",
+   "chunkId": "本文\\003_星待ちの夜.txt#3-0@4013",
+   "chars": 1347
+  }
+ ],
  "runs": [
   {
    "round": 1,
-   "metrics": {
-    "typoFound": 11,
-    "typoFoundTotal": 12,
-    "typoMissed": 1,
-    "typoWrongFix": 1,
-    "typoFalsePositives": 0,
-    "typoOtherFlags": 0,
-    "accepted": 12,
-    "rejected": 0,
-    "failures": 0
-   },
-   "detail": {
-    "typoFound": {
-     "変換ミス": {
-      "found": 3,
-      "total": 3
-     },
-     "打ちかけの字": {
-      "found": 1,
-      "total": 2
-     },
-     "助詞の重なり": {
-      "found": 1,
-      "total": 1
-     },
-     "送り仮名": {
-      "found": 2,
-      "total": 2
-     },
-     "助詞の抜け": {
-      "found": 1,
-      "total": 1
-     },
-     "衍字": {
-      "found": 2,
-      "total": 2
-     },
-     "入力ミス": {
-      "found": 1,
-      "total": 1
+   "scored": {
+    "seeds": {
+     "found": 12,
+     "total": 12,
+     "byKind": {
+      "変換ミス": {
+       "found": 3,
+       "total": 3
+      },
+      "打ちかけの字": {
+       "found": 2,
+       "total": 2
+      },
+      "助詞の重なり": {
+       "found": 1,
+       "total": 1
+      },
+      "送り仮名": {
+       "found": 2,
+       "total": 2
+      },
+      "助詞の抜け": {
+       "found": 1,
+       "total": 1
+      },
+      "衍字": {
+       "found": 2,
+       "total": 2
+      },
+      "入力ミス": {
+       "found": 1,
+       "total": 1
+      }
      }
     },
-    "typoMissed": [
-     {
-      "file": "本文/003_星待ちの夜.txt",
-      "kind": "打ちかけの字",
-      "wrong": "ｓっと",
-      "note": "場所は当てたが直らない"
-     }
-    ],
-    "typoWrongFix": [
-     {
-      "file": "本文/003_星待ちの夜.txt",
-      "kind": "打ちかけの字",
-      "wrong": "ｓっと",
-      "suggestion": "さっと"
-     }
-    ],
-    "typoFalsePositives": []
+    "missed": [],
+    "wrongFix": {
+     "count": 0,
+     "items": []
+    },
+    "falsePositives": {
+     "count": 0,
+     "byWord": {},
+     "byKind": {},
+     "items": []
+    },
+    "otherFlags": 0
    },
    "raw": [
     {
@@ -144,7 +123,9 @@
         "confidence": "high"
        }
       ],
-      "rejected": []
+      "rejected": [],
+      "bundleStale": true,
+      "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.69.4、リポジトリは 0.69.5）。Claude Code を開き直して、新しい束で繋ぎ直してください"
      }
     },
     {
@@ -187,7 +168,9 @@
         "confidence": "high"
        }
       ],
-      "rejected": []
+      "rejected": [],
+      "bundleStale": true,
+      "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.69.4、リポジトリは 0.69.5）。Claude Code を開き直して、新しい束で繋ぎ直してください"
      }
     },
     {
@@ -230,14 +213,12 @@
         "confidence": "high"
        }
       ],
-      "rejected": []
+      "rejected": [],
+      "bundleStale": true,
+      "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.69.4、リポジトリは 0.69.5）。Claude Code を開き直して、新しい束で繋ぎ直してください"
      }
     }
    ]
   }
- ],
- "notes": [
-  "同じ台・同じプロンプト・同じ検算（novel.validate）を通した。答えだけが会話の中で作られている",
-  "「ｓっと」は答えの鍵が『すっと』、こちらの答えは『さっと』。どちらも本文としては正しくなるが、鍵と文字が違うので『場所は当てたが直らない』に数えられている"
  ]
 }

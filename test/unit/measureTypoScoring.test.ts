@@ -23,8 +23,17 @@ const ROOT = path.join(__dirname, "..", "fixtures", "seeded", "typo");
 interface Seed {
   kind: string;
   wrong: string;
-  right: string;
+  /**
+   * 正しい形。**1つに決まらない仕込みでは配列になる**
+   * （「ｓっと」は「すっと」でも「さっと」でも本文が正しくなる。2026-09-19）。
+   */
+  right: string | string[];
   where: string;
+}
+
+/** `right` を、文字列でも配列でも同じように扱う */
+function rightsOf(seed: Seed): string[] {
+  return Array.isArray(seed.right) ? seed.right : [seed.right];
 }
 
 interface Trap {
@@ -100,7 +109,9 @@ function resultsOf(byFile: Map<string, Issue[]>): unknown[] {
 function correctFix(seed: Seed): Issue {
   // 「霧がが」だけは、正しい形（「霧が晴れ」）が助詞の1字ぶん重なる。
   // 実際のモデルは「霧がが」→「霧が」と返すので、その形で組む
-  const suggestion = seed.wrong === "霧がが" ? "霧が" : seed.right;
+  // 正解が複数ある仕込みは、**先頭（台が想定している形）**で組む。
+  // どちらでも拾えることは `measureScoring.test.ts` が見張っている
+  const suggestion = seed.wrong === "霧がが" ? "霧が" : rightsOf(seed)[0];
   return issue(seed.where, seed.wrong, suggestion);
 }
 
@@ -338,9 +349,11 @@ describe("測定台そのものの健全さ", () => {
     for (const episode of ANSWERS.episodes) {
       const text = bodyOf(episode.file);
       for (const seed of episode.seeded) {
-        expect(countOf(text, seed.right), `${episode.file} ${seed.right}`).toBe(
-          0
-        );
+        // **正解が複数あるものは、そのすべてが本文に無いこと**を確かめる。
+        // 1つでも本文にあると、当てたのかどうかを見分けられなくなる
+        for (const right of rightsOf(seed)) {
+          expect(countOf(text, right), `${episode.file} ${right}`).toBe(0);
+        }
       }
     }
   });

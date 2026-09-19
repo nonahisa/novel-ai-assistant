@@ -1,5 +1,5 @@
 {
- "measuredAt": "2026-09-19T08:10:35.896Z",
+ "measuredAt": "2026-09-19T08:16:48.206Z",
  "feature": "typo",
  "runner": "external",
  "tool": "novel.prompt → 外で答える → novel.validate",
@@ -123,7 +123,9 @@
         "confidence": "high"
        }
       ],
-      "rejected": []
+      "rejected": [],
+      "bundleStale": true,
+      "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.69.4、リポジトリは 0.69.5）。Claude Code を開き直して、新しい束で繋ぎ直してください"
      }
     },
     {
@@ -166,7 +168,9 @@
         "confidence": "high"
        }
       ],
-      "rejected": []
+      "rejected": [],
+      "bundleStale": true,
+      "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.69.4、リポジトリは 0.69.5）。Claude Code を開き直して、新しい束で繋ぎ直してください"
      }
     },
     {
@@ -209,7 +213,9 @@
         "confidence": "high"
        }
       ],
-      "rejected": []
+      "rejected": [],
+      "bundleStale": true,
+      "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.69.4、リポジトリは 0.69.5）。Claude Code を開き直して、新しい束で繋ぎ直してください"
      }
     }
    ]

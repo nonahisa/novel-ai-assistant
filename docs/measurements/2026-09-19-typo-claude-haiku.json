@@ -1,5 +1,5 @@
 {
- "measuredAt": "2026-09-19T08:10:36.115Z",
+ "measuredAt": "2026-09-19T08:16:48.408Z",
  "feature": "typo",
  "runner": "external",
  "tool": "novel.prompt → 外で答える → novel.validate",
@@ -36,7 +36,7 @@
    "round": 1,
    "scored": {
     "seeds": {
-     "found": 10,
+     "found": 11,
      "total": 12,
      "byKind": {
       "変換ミス": {
@@ -44,7 +44,7 @@
        "total": 3
       },
       "打ちかけの字": {
-       "found": 1,
+       "found": 2,
        "total": 2
       },
       "助詞の重なり": {
@@ -75,24 +75,11 @@
       "kind": "衍字",
       "wrong": "曇っていている",
       "note": "指摘が出なかった"
-     },
-     {
-      "file": "本文/003_星待ちの夜.txt",
-      "kind": "打ちかけの字",
-      "wrong": "ｓっと",
-      "note": "場所は当てたが直らない"
      }
     ],
     "wrongFix": {
-     "count": 1,
-     "items": [
-      {
-       "file": "本文/003_星待ちの夜.txt",
-       "kind": "打ちかけの字",
-       "wrong": "ｓっと",
-       "suggestion": "さっと"
-      }
-     ]
+     "count": 0,
+     "items": []
     },
     "falsePositives": {
      "count": 0,
@@ -143,7 +130,9 @@
         "confidence": "high"
        }
       ],
-      "rejected": []
+      "rejected": [],
+      "bundleStale": true,
+      "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.69.4、リポジトリは 0.69.5）。Claude Code を開き直して、新しい束で繋ぎ直してください"
      }
     },
     {
@@ -178,7 +167,9 @@
         "confidence": "high"
        }
       ],
-      "rejected": []
+      "rejected": [],
+      "bundleStale": true,
+      "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.69.4、リポジトリは 0.69.5）。Claude Code を開き直して、新しい束で繋ぎ直してください"
      }
     },
     {
@@ -221,7 +212,9 @@
         "confidence": "high"
        }
       ],
-      "rejected": []
+      "rejected": [],
+      "bundleStale": true,
+      "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.69.4、リポジトリは 0.69.5）。Claude Code を開き直して、新しい束で繋ぎ直してください"
      }
     }
    ]

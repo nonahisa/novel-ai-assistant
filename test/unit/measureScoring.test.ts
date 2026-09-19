@@ -24,6 +24,7 @@ import {
   scoreContradiction,
   scoreDeviation,
   scoreProofread,
+  scoreTypo,
   seededWordCount,
   spreadOfRuns,
   toolNameOf,
@@ -135,6 +136,80 @@ describe("推敲の答え合わせ", () => {
       },
     ];
     expect(scoreProofread(ANSWERS, results).falsePositives.count).toBe(0);
+  });
+});
+
+/* ── 誤字脱字：正解が1つに決まらない仕込み ──────────────── */
+
+describe("誤字脱字の答え合わせ（正解が複数ある仕込み）", () => {
+  /*
+    **打ちかけの字は、正解が1つに決まらない。**「ｓっと」は「すっと」でも
+    「さっと」でも本文が正しくなる。台の README は「当てた結果で測る」と
+    書いてあるのに、実装は鍵の文字列1つとの一致を見ていたので、
+    **日本語として正しい直しを減点していた**（2026-09-19）。
+  */
+  const answers = {
+    episodes: [
+      {
+        file: "本文/003_星待ちの夜.txt",
+        seeded: [
+          {
+            kind: "打ちかけの字",
+            wrong: "ｓっと",
+            right: ["すっと", "さっと"],
+            where: "律はｓっと立ち上がり",
+          },
+        ],
+        mustNotFlag: [],
+      },
+    ],
+  };
+  const answerWith = (suggestion: string) => [
+    {
+      chunkId: "本文/003_星待ちの夜.txt#3-0@4013",
+      accepted: [
+        {
+          line: 27,
+          original: "律はｓっと立ち上がり",
+          target: "ｓっと",
+          suggestion,
+          reason: "明らかな入力ミス",
+        },
+      ],
+      rejected: [],
+    },
+  ];
+
+  it.each(["すっと", "さっと"])(
+    "どちらの直し方でも「拾えた」に数える（%s）",
+    (suggestion) => {
+      const scored = scoreTypo(answers, answerWith(suggestion));
+      expect(scored.seeds).toMatchObject({ found: 1, total: 1 });
+      expect(scored.wrongFix.count).toBe(0);
+    }
+  );
+
+  it("当てても直らない直し方は、これまでどおり「直し方が違う」に数える", () => {
+    // 広げたのは「正解が複数ある」だけで、**何でも通す**わけではない
+    const scored = scoreTypo(answers, answerWith("ｓっと"));
+    expect(scored.seeds).toMatchObject({ found: 0, total: 1 });
+    expect(scored.wrongFix.count).toBe(1);
+  });
+
+  it("`right` が文字列1つの書き方も、これまでどおり動く", () => {
+    const single = {
+      episodes: [
+        {
+          ...answers.episodes[0],
+          seeded: [{ ...answers.episodes[0].seeded[0], right: "すっと" }],
+        },
+      ],
+    };
+    expect(scoreTypo(single, answerWith("すっと")).seeds).toMatchObject({
+      found: 1,
+      total: 1,
+    });
+    expect(scoreTypo(single, answerWith("さっと")).wrongFix.count).toBe(1);
   });
 });
 

@@ -602,6 +602,12 @@ export function applyTypoFix(issue) {
  *
  * - **拾えた**：同じ話の `accepted[]` に、仕込みの `wrong` を引用に含み、
  *   かつ**当てると `right` になって `wrong` が消える**指摘があるもの
+ *
+ * **`right` は配列でもよい。** 打ちかけの字は正解が1つに決まらない——
+ * 「ｓっと」は「すっと」でも「さっと」でも本文が正しくなる。README は
+ * 「当てた結果で測る」と書いてあるのに、実装が鍵の文字列1つとの一致を
+ * 見ていたので、**日本語として正しい直しを減点していた**（2026-09-19。
+ * Opus と Haiku が「さっと」で減点され、Sonnet だけが満点になった）。
  * - **直し方が違う**：場所は当てたが、当てても直らないもの。
  *   **拾えたには数えない**——押しても本文が正しくならない指摘である
  * - **見逃し**：拾えなかった仕込み
@@ -637,7 +643,10 @@ export function scoreTypo(answers, results) {
     for (const seed of episode?.seeded ?? []) {
       const kind = textOf(seed?.kind) || "（種別なし）";
       const wrong = textOf(seed?.wrong);
-      const right = textOf(seed?.right);
+      // **正解は複数ありうる。** 文字列1つでも配列でも受ける
+      const rights = (Array.isArray(seed?.right) ? seed.right : [seed?.right])
+        .map((value) => textOf(value))
+        .filter((value) => value !== "");
       const bucket = seeds.byKind[kind] ?? { found: 0, total: 0 };
       bucket.total += 1;
       seeds.total += 1;
@@ -651,7 +660,9 @@ export function scoreTypo(answers, results) {
               textOf(issues[at]?.target).includes(wrong))
         );
       const hit = pointed.find(
-        (at) => fixed[at].includes(right) && !fixed[at].includes(wrong)
+        (at) =>
+          rights.some((right) => fixed[at].includes(right)) &&
+          !fixed[at].includes(wrong)
       );
 
       if (hit !== undefined) {
