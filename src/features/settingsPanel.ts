@@ -2002,11 +2002,13 @@ export class SettingsPanel {
         // 実測に従うという、外から見えない食い違いになる
         maxOutputTokens: resolveOutputTokensForSend(
           resolved.provider.id,
-          resolved.model
+          resolved.model,
+          "search_terms"
         ),
         plannedOutputTokens: resolveOutputTokensForPlanning(
           resolved.provider.id,
-          resolved.model
+          resolved.model,
+          "search_terms"
         ),
         jsonSchema: SEARCH_TERMS_SCHEMA,
         disableThinking: true,
@@ -2137,14 +2139,22 @@ export class SettingsPanel {
     // 設定から来たのか実測から来たのかで変わる（`truncatedOutputAdvice`）。
     // 実測で頭打ちなのに「設定を大きくして」と言うと、作者は直らない操作を
     // 繰り返すことになる
+    //
+    // **記録の名前は、下の `meta` と同じ式で出す**（設計書6.77の第3段）。
+    // 機能ごとの実測はその名前で引くので、こことあちらがずれると
+    // 「記録している名前と、見込みを引く名前が違う」という、動くけれど
+    // 一生学ばない状態になる
+    const usageFeature = jsonSchema ? "settings_enrich" : "settings_chat";
     const outputLimit = resolveOutputLimitForSend(
       resolved.provider.id,
-      resolved.model
+      resolved.model,
+      usageFeature
     );
     const maxOutputTokens = outputLimit.tokens;
     const plannedOutputTokens = resolveOutputTokensForPlanning(
       resolved.provider.id,
-      resolved.model
+      resolved.model,
+      usageFeature
     );
 
     this.setBusy(true, progressLabel);
@@ -2169,8 +2179,9 @@ export class SettingsPanel {
             signal: controller.signal,
             meta: {
               // スキーマの有無が、そのまま用途の違いになっている
-              // （相談は自由文、項目の充実はJSON）
-              feature: jsonSchema ? "settings_enrich" : "settings_chat",
+              // （相談は自由文、項目の充実はJSON）。**上の `usageFeature` と
+              // 同じもの**——見込みを引く名前と記録する名前は1つにする
+              feature: usageFeature,
               workFolder: this.work.folderPath,
             },
           });

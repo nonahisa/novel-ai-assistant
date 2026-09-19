@@ -153,14 +153,16 @@ export async function checkProofread(
   const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
   const plannedOutputTokens = resolveOutputTokensForPlanning(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "proofread"
   );
   // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
   // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
   // 半分になり、長い応答が途中で切れる
   const sendOutputTokens = resolveOutputTokensForSend(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "proofread"
   );
 
   const prepared = await collectChunks(work, info, options, outputTuning);
@@ -605,7 +607,8 @@ async function collectChunks(
       overheadChars,
       outputTokens: resolveOutputTokensForPlanning(
         outputTuning.providerId,
-        outputTuning.model
+        outputTuning.model,
+        "proofread"
       ),
     },
     outputTuning

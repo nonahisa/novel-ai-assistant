@@ -40,7 +40,9 @@ import {
   type CharacterValidationResult,
   type CorrectedRelationRecord,
   type DroppedAliasRecord,
+  type DroppedRelationRecord,
   type RejectedCharacterCandidate,
+  type RelationRejectionReason,
 } from "../core/characterExtractionValidation";
 import {
   BASE_SYSTEM_PROMPT,
@@ -108,6 +110,8 @@ interface ValidationFixCounts {
   droppedSharedFamilyNameAliases: DroppedAliasRecord[];
   /** 自分の身内を指す別名（息子のレコードの「三門の母」）として落としたもの */
   droppedRelativeAliases: DroppedAliasRecord[];
+  /** 推測・断りで、関係になっていなかった関係（「明記されていないが〜」） */
+  droppedRelations: DroppedRelationRecord[];
   /** 向きが逆だった親族関係を直したもの */
   correctedRelations: CorrectedRelationRecord[];
 }
@@ -122,6 +126,7 @@ function collectValidationFixes(
     ...validated.droppedSharedFamilyNameAliases
   );
   target.droppedRelativeAliases.push(...validated.droppedRelativeAliases);
+  target.droppedRelations.push(...validated.droppedRelations);
   target.correctedRelations.push(...validated.correctedRelations);
 }
 
@@ -273,7 +278,8 @@ export async function extractCharacters(
   const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
   const plannedOutputTokens = resolveOutputTokensForPlanning(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "character_extract"
   );
   // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
   // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
@@ -281,7 +287,8 @@ export async function extractCharacters(
   // 丸ごと捨てられる**（呼び出し1回ぶんが無駄になる）
   const sendOutputTokens = resolveOutputTokensForSend(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "character_extract"
   );
 
   // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
@@ -504,6 +511,7 @@ export async function extractCharacters(
     droppedTruncatedAliases: [],
     droppedSharedFamilyNameAliases: [],
     droppedRelativeAliases: [],
+    droppedRelations: [],
     correctedRelations: [],
   };
   /**
@@ -1385,6 +1393,32 @@ function describeValidationFixes(fixes: ValidationFixCounts): string {
         describeDroppedAliases(fixes.droppedRelativeAliases)
       }）`
     );
+  }
+  // **どの関係を捨てたかを見せる。** AIが「明記されていない」と断りながら
+  // 書いた関係なので、作者が「それは本当にあった繋がりだ」と思えば
+  // 手で足せるように、値をそのまま出す。
+  //
+  // **理由ごとに行を分ける**（作者の裁定、2026-09-19）。言い回しで落ちたのか
+  // 関係の欄に文が入っていたのかが分からないと、次にどちらの網を直せばよいか
+  // 決められない
+  const relationDropLabels: ReadonlyArray<[RelationRejectionReason, string]> = [
+    ["not_a_relation", "推測で書かれた関係"],
+    ["sentence_shaped", "関係ではなく文が書かれていた関係"],
+  ];
+  for (const [reason, label] of relationDropLabels) {
+    const entries = fixes.droppedRelations.filter(
+      (entry) => entry.reason === reason
+    );
+    if (entries.length === 0) continue;
+    const shown = entries
+      .slice(0, 3)
+      .map(
+        (entry) =>
+          `${entry.characterName} の「${entry.partner}」に付いた「${entry.relation}」`
+      )
+      .join("、");
+    const rest = entries.length > 3 ? ` ほか${entries.length - 3}件` : "";
+    lines.push(`${label}を ${entries.length}件 外しました（${shown}${rest}）`);
   }
   if (fixes.correctedRelations.length > 0) {
     const shown = fixes.correctedRelations

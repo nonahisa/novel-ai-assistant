@@ -290,11 +290,13 @@ export async function recheckProposal(
       // 1回呼ぶので、渡さないと押した回数だけ設定値ぶんの席を確保する
       maxOutputTokens: resolveOutputTokensForSend(
         request.provider.id,
-        request.model
+        request.model,
+        "recheck"
       ),
       plannedOutputTokens: resolveOutputTokensForPlanning(
         request.provider.id,
-        request.model
+        request.model,
+        "recheck"
       ),
       jsonSchema: RECHECK_SCHEMA as unknown as object,
       disableThinking: true,

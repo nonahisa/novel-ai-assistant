@@ -26,10 +26,34 @@ import { readFileSync } from "node:fs";
 /** `vscode.commands.executeCommand` に渡されたもの */
 const executed: Array<{ command: string; args: unknown[] }> = [];
 
+/**
+ * 画面の並び（作者の報告、2026-09-19）。
+ *
+ * **既定は「タブを読めない環境」**——既存の試験はここを見ておらず、
+ * 読めないときにこれまでどおり動くことも同時に確かめたい。
+ */
+const layout = vi.hoisted(() => {
+  class TabInputWebview {
+    constructor(readonly viewType: string) {}
+  }
+  return {
+    TabInputWebview,
+    groups: undefined as
+      | Array<{
+          viewColumn: number;
+          isActive: boolean;
+          activeTab?: { input: unknown };
+          tabs: Array<{ input: unknown }>;
+        }>
+      | undefined,
+  };
+});
+
 vi.mock("vscode", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
+    TabInputWebview: layout.TabInputWebview,
     commands: {
       executeCommand: (command: string, ...args: unknown[]) => {
         executed.push({ command, args });
@@ -40,6 +64,13 @@ vi.mock("vscode", async (importOriginal) => {
       ...(actual.window as Record<string, unknown>),
       // タブの種類を読めない環境として振る舞わせる（原稿エディタは非アクティブ）。
       // `activeManuscriptViewType` は読めなければ undefined を返す
+      get tabGroups() {
+        if (!layout.groups) throw new Error("タブを読めない環境");
+        return {
+          all: layout.groups,
+          activeTabGroup: layout.groups.find((group) => group.isActive),
+        };
+      },
       showWarningMessage: () => Promise.resolve(undefined),
       showInformationMessage: () => Promise.resolve(undefined),
     },
@@ -117,6 +148,7 @@ beforeEach(() => {
   belongsToWork = true;
   workFormat = undefined;
   episodes = [{ filePath: episodePath }];
+  layout.groups = undefined;
 });
 
 describe("台帳の鍵", () => {
@@ -202,6 +234,47 @@ describe("開いていないときの受け皿", () => {
   test("開けなかったら、素のエディタへ譲る", async () => {
     const taken = await makeProvider().revealLine(episodePath, 40);
     expect(taken).toBe(false);
+  });
+
+  /**
+   * シーンメモのパネルから、まだ開いていない話へ飛んだとき
+   * （作者の報告、2026-09-19）。
+   *
+   * パネルは `ViewColumn.Beside`（原稿の右）に住む。列を渡さないと
+   * VS Code は「いま前面の列」＝パネルの列へ原稿を開き、書いていた左の面が
+   * 置き去りになる。**避ける先を決めてから開く。**
+   */
+  test("パネルが前面なら、パネルの列を避けて開く", async () => {
+    const panel = { input: new layout.TabInputWebview("novelai.sceneMemos") };
+    const left = { input: {} };
+    layout.groups = [
+      { viewColumn: 1, isActive: false, activeTab: left, tabs: [left] },
+      { viewColumn: 2, isActive: true, activeTab: panel, tabs: [panel] },
+    ];
+
+    await makeProvider().revealLine(episodePath, 40);
+
+    expect(executed).toHaveLength(1);
+    expect(executed[0].args[2]).toBe(1);
+  });
+
+  /** 下段の提案パネルから飛ぶ道は、これまでどおり「前面の列」でよい */
+  test("前面が編集の面なら、列を指定しない", async () => {
+    const left = { input: {} };
+    layout.groups = [
+      { viewColumn: 1, isActive: true, activeTab: left, tabs: [left] },
+    ];
+
+    await makeProvider().revealLine(episodePath, 40);
+
+    expect(executed[0].args[2]).toBeUndefined();
+  });
+
+  test("タブを読めない環境でも、これまでどおり開ける", async () => {
+    await makeProvider().revealLine(episodePath, 40);
+
+    expect(executed).toHaveLength(1);
+    expect(executed[0].args[2]).toBeUndefined();
   });
 
   test("諦める前に、しばらく待つ", async () => {

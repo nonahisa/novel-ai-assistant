@@ -289,6 +289,8 @@ export interface SettingsValidateResult {
     droppedTruncatedAliases: unknown[];
     droppedSharedFamilyNameAliases: unknown[];
     droppedRelativeAliases: unknown[];
+    /** 推測・断りで、関係になっていなかった関係（測定台が数える） */
+    droppedRelations: unknown[];
     correctedRelations: unknown[];
   };
   /** 能力・場所・組織・世界観。**製品の集約が数えたそのまま** */
@@ -348,6 +350,7 @@ function validateAgainst(
       droppedTruncatedAliases: people.droppedTruncatedAliases,
       droppedSharedFamilyNameAliases: people.droppedSharedFamilyNameAliases,
       droppedRelativeAliases: people.droppedRelativeAliases,
+      droppedRelations: people.droppedRelations,
       correctedRelations: people.correctedRelations,
     },
     settings: {

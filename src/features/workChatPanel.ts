@@ -991,7 +991,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 嘘になる）。判定は `ai/outputLimit.ts` の1か所だけが持つ
       const outputLimit = resolveOutputLimitForSend(
         resolved.provider.id,
-        resolved.model
+        resolved.model,
+        "work_chat"
       );
 
       /*
@@ -1096,7 +1097,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           maxOutputTokens: outputLimit.tokens,
           plannedOutputTokens: resolveOutputTokensForPlanning(
             resolved.provider.id,
-            resolved.model
+            resolved.model,
+            "work_chat"
           ),
           jsonSchema: WORK_CHAT_SCHEMA as unknown as object,
           disableThinking: true,
@@ -2439,11 +2441,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         // 設定値のまま**という、外から見えない食い違いが残る
         maxOutputTokens: resolveOutputTokensForSend(
           resolved.provider.id,
-          resolved.model
+          resolved.model,
+          "search_terms"
         ),
         plannedOutputTokens: resolveOutputTokensForPlanning(
           resolved.provider.id,
-          resolved.model
+          resolved.model,
+          "search_terms"
         ),
         jsonSchema: SEARCH_TERMS_SCHEMA,
         disableThinking: true,

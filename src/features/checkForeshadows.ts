@@ -175,7 +175,8 @@ export async function checkForeshadows(
       overheadChars: detectOverheadChars,
       outputTokens: resolveOutputTokensForPlanning(
         outputTuning.providerId,
-        outputTuning.model
+        outputTuning.model,
+        "foreshadow_detect"
       ),
     },
     outputTuning
@@ -254,14 +255,16 @@ export async function checkForeshadows(
   // num_ctx の確保にも同じ見込みを使う（設計書6.65.16の2）
   const plannedOutputTokens = resolveOutputTokensForPlanning(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "foreshadow_detect"
   );
   // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
   // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
   // 半分になり、長い応答が途中で切れる
   const sendOutputTokens = resolveOutputTokensForSend(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "foreshadow_detect"
   );
   // **既に台帳にあるものは出さない**（設計書6.35.2）。処理しながら
   // 増やしていくので、同じ候補が隣のチャンクから二度出ることもなくなる
@@ -612,7 +615,8 @@ export async function checkForeshadowResolution(
       overheadChars: resolveOverheadChars,
       outputTokens: resolveOutputTokensForPlanning(
         outputTuning.providerId,
-        outputTuning.model
+        outputTuning.model,
+        "foreshadow_resolve"
       ),
     },
     outputTuning
@@ -701,12 +705,14 @@ export async function checkForeshadowResolution(
   // num_ctx の確保にも同じ見込みを使う（設計書6.65.16の2）
   const plannedOutputTokens = resolveOutputTokensForPlanning(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "foreshadow_resolve"
   );
   // 確保と上限は別物（設計書6.77の第2段。検知側と同じ理由）
   const sendOutputTokens = resolveOutputTokensForSend(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "foreshadow_resolve"
   );
   const byId = new Map(open.map((record) => [record.id, record]));
 

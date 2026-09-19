@@ -942,7 +942,8 @@ function buildPromptWithinBudget(input: {
     }).length;
   const outputTokens = resolveOutputTokensForPlanning(
     input.providerId,
-    input.model
+    input.model,
+    "chapter_propose"
   );
   const chunkSettings = readChunkSettings(
     input.contextWindow,
@@ -1006,11 +1007,13 @@ async function callAI(input: {
           // 送ると、測っていないモデルでは上限が設定値の半分になる
           maxOutputTokens: resolveOutputTokensForSend(
             input.provider.id,
-            input.model
+            input.model,
+            "chapter_propose"
           ),
           plannedOutputTokens: resolveOutputTokensForPlanning(
             input.provider.id,
-            input.model
+            input.model,
+            "chapter_propose"
           ),
           jsonSchema: CHAPTER_PROPOSE_SCHEMA as unknown as object,
           disableThinking: true,

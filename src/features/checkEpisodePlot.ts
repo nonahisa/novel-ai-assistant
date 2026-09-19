@@ -375,11 +375,13 @@ export async function checkEpisodePlotDesign(
           // 片方だけ直したときに気づけない
           maxOutputTokens: resolveOutputTokensForSend(
             resolved.provider.id,
-            resolved.model
+            resolved.model,
+            "episode_plot_check"
           ),
           plannedOutputTokens: resolveOutputTokensForPlanning(
             resolved.provider.id,
-            resolved.model
+            resolved.model,
+            "episode_plot_check"
           ),
           signal: controller.signal,
         }));
@@ -461,14 +463,16 @@ export async function contrastEpisodePlot(
   };
   const plannedOutputTokens = resolveOutputTokensForPlanning(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "episode_plot_contrast"
   );
   // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
   // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
   // 半分になり、長い応答が途中で切れる
   const sendOutputTokens = resolveOutputTokensForSend(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "episode_plot_contrast"
   );
   const chunkSettings = readChunkSettings(
     info.contextWindow,

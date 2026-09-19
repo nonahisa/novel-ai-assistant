@@ -217,7 +217,8 @@ export async function applyChatToSettings(
   */
   const outputLimit = resolveOutputLimitForSend(
     resolved.provider.id,
-    resolved.model
+    resolved.model,
+    "chat_settings_sync"
   );
 
   /**
@@ -264,7 +265,8 @@ export async function applyChatToSettings(
           maxOutputTokens: outputLimit.tokens,
           plannedOutputTokens: resolveOutputTokensForPlanning(
             resolved.provider.id,
-            resolved.model
+            resolved.model,
+            "chat_settings_sync"
           ),
           jsonSchema: CHAT_SETTINGS_SYNC_SCHEMA as unknown as object,
           disableThinking: true,

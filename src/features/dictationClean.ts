@@ -142,13 +142,15 @@ export async function runDictationClean(
 
   const plannedOutputTokens = resolveOutputTokensForPlanning(
     resolved.provider.id,
-    resolved.model
+    resolved.model,
+    "dictationClean"
   );
   // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77）。
   // 整文は入力とほぼ同じ長さを返すので、切り詰められると本文が途中で終わる
   const outputLimit = resolveOutputLimitForSend(
     resolved.provider.id,
-    resolved.model
+    resolved.model,
+    "dictationClean"
   );
 
   let response: { text: string; truncated?: boolean } | undefined;

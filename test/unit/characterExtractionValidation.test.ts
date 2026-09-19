@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import type { Chunk } from "../../src/core/chunker";
 import {
+  isSentenceShapedRelation,
+  isSpeculativeRelation,
   parseResult,
   validateCharacterExtractResult,
   type CharacterRejectionReason,
@@ -800,5 +802,319 @@ describe("関係の相手も、その姓を名乗る人として数える（本�
 
     const kept = result.accepted.find((e) => e.data.name === "中神 鷹人");
     expect(kept?.data.aliases).toContain("中神");
+  });
+});
+
+describe("関係ではないもの（推測・断り）を関係から落とす", () => {
+  /*
+    2026-09-19の測定（gemma4:26b、`docs/measurements/`）で、AI自身が
+    「明記されていない」と断りながら関係を書いてきた。プロンプトP-04aは
+    既に「推測で書かないこと」と禁じているので、**指示ではなくコードで落とす**。
+  */
+  const line = "リーナ・ヴェイルはヨナと並んで歩いた";
+  const relChunk: Chunk = { ...chunk, text: line };
+
+  test("実データで出た「関係性は明記されていないが〜」を関係から外す", () => {
+    const result = validate(
+      {
+        characters: [
+          {
+            name: "リーナ・ヴェイル",
+            relations: [
+              {
+                name: "ヨナ",
+                relation: "（関係性は明記されていないが、親密な様子が見られる）",
+              },
+            ],
+            evidence: line,
+          },
+        ],
+      },
+      relChunk
+    );
+
+    expect(result.accepted[0].data.relations).toEqual([]);
+    expect(result.droppedRelations).toEqual([
+      {
+        characterName: "リーナ・ヴェイル",
+        partner: "ヨナ",
+        relation: "（関係性は明記されていないが、親密な様子が見られる）",
+        reason: "not_a_relation",
+      },
+    ]);
+  });
+
+  test("落とすのは推測のものだけで、同じ人物の本当の関係は残る", () => {
+    const result = validate(
+      {
+        characters: [
+          {
+            name: "リーナ・ヴェイル",
+            relations: [
+              { name: "ヨナ", relation: "（関係性は明記されていない）" },
+              { name: "ヨナ", relation: "幼なじみ" },
+            ],
+            evidence: line,
+          },
+        ],
+      },
+      relChunk
+    );
+
+    expect(result.accepted[0].data.relations).toEqual([
+      { name: "ヨナ", relation: "幼なじみ" },
+    ]);
+    expect(result.droppedRelations).toHaveLength(1);
+  });
+
+  test.each([
+    ["（関係性は明記されていないが、親密な様子が見られる）"],
+    // 2026-09-19の測定で実際に返ってきた2通り。**同じ断りが言い換えられる**
+    ["（関係性は不明だが、リーナがヨナの名を呼ぶなど親密な様子が見える）"],
+    ["本文に書かれていない"],
+    ["記載がない"],
+    ["血縁関係の描写はありません"],
+    ["敵かもしれない"],
+    ["親友だと思われる"],
+    ["恋人である可能性がある"],
+    ["兄弟のようだ"],
+    ["姉妹のように見える"],
+    ["推測では従兄弟"],
+    ["おそらく上司"],
+    ["恋人だという噂"],
+    ["血縁かどうかは断定できない"],
+    ["仲が良さそう"],
+    ["険悪そうに見える"],
+    ["仲が良さそうな関係"],
+    ["不明"],
+    ["なし"],
+    ["（記述なし）"],
+  ])("推測・断りの関係「%s」は落とす", (relation) => {
+    expect(isSpeculativeRelation(relation)).toBe(true);
+  });
+
+  test.each([
+    ["兄"],
+    ["母"],
+    ["妹"],
+    ["幼なじみ"],
+    ["かつての婚約者"],
+    ["元恋人"],
+    ["上官"],
+    ["仇"],
+    ["師匠"],
+    ["弟子"],
+    ["同僚"],
+    ["双子の妹"],
+    ["相談役"],
+    // 不明なのは関係ではなく安否である。ここを落とすと本当の繋がりが消える
+    ["生死不明の兄"],
+    ["行方不明の妹"],
+    ["そうだん相手"],
+    ["仲が良い"],
+    // **ここを落とすと人物の同一性の仕組みが壊れる**（設計書6.95）。
+    // 別人判定（`SHARED_BODY_RELATION`）はこの語を手がかりにしている
+    ["憑依している"],
+    ["入れ替わっている"],
+    ["その名を騙っている"],
+    ["転生した先"],
+  ])("本当の関係「%s」は残す", (relation) => {
+    expect(isSpeculativeRelation(relation)).toBe(false);
+  });
+
+  test("相手の名前は、姓の検算の証拠として先に使われる（落とす順番）", () => {
+    // 関係の言い方が推測でも、**相手の名前は本文の呼び名**である。
+    // 先に関係ごと捨てると「中神が2人いる」証拠まで消え、姓の別名が残ってしまう
+    const familyLine = "中神鷹人は中神隼人と並んで歩いた";
+    const result = validate(
+      {
+        characters: [
+          {
+            name: "中神 鷹人",
+            aliases: ["ヨウト", "中神"],
+            relations: [
+              { name: "中神隼人", relation: "兄かもしれない" },
+            ],
+            evidence: familyLine,
+          },
+        ],
+      },
+      { ...chunk, text: familyLine }
+    );
+
+    const kept = result.accepted.find((e) => e.data.name === "中神 鷹人");
+    expect(kept?.data.aliases).toEqual(["ヨウト"]);
+    expect(result.droppedSharedFamilyNameAliases).toHaveLength(1);
+    expect(result.droppedRelations).toHaveLength(1);
+  });
+});
+
+describe("関係の欄に文が入っていたら、構造で落とす", () => {
+  /*
+    **言い回しの表は追いかけっこになる。** 2026-09-19に同じ条件で2回測ったら、
+    AIは同じ断りを「明記されていないが」と「不明だが」の2通りで書いてきた。
+    関係の欄に入るべきは「兄」「幼なじみ」のような**短い語**であって文ではない
+    ので、**文になっていること自体**を理由に落とす（作者の裁定、2026-09-19）。
+
+    線は推測ではなく実測で引いた。作者の設定資料13作品・157ファイルにある
+    本物の関係 508件を数えた結果：
+      - 長さ 最短1字／中央3字／p90 10字／p95 15字／p99 25字／最大34字
+      - 句読点（、。）を含む値は 15件（2.9%）。いずれも「同級生（引用）」の形で、
+        **括弧の外に関係語がある**
+      - **丸ごと括弧で囲まれた値は 508件中1件だけ**（「（間接的な関わり）」9字）で、
+        その1件に句読点は無い
+    この508件は、下の3つの線のどれにも当たらない（誤爆0件を確かめたうえで引いた）。
+  */
+  const line = "リーナ・ヴェイルはヨナと並んで歩いた";
+  const relChunk: Chunk = { ...chunk, text: line };
+
+  test.each([
+    // 2026-09-19の測定で実際に返ってきた2通り。どちらも丸ごと括弧＋句読点
+    ["（関係性は明記されていないが、親密な様子が見られる）"],
+    ["（関係性は不明だが、リーナがヨナの名を呼ぶなど親密な様子が見える）"],
+    // 言い回しの表に無い断り方をされても、形で落ちる
+    ["（互いの名を呼び合う程度の間柄にとどまり、それ以上の情報は与えられていない）"],
+    ["（並んで歩く場面があるだけで、二人がどういう間柄なのかは書かれていません）"],
+    // 丸ごと括弧で、句読点は無いが中身が15字以上（実測の唯一例は中身7字）
+    ["（二人の間柄について読み取れる材料が本文中に見当たらず）"],
+    // 括弧が無くても、40字を超えれば文である（実測の最大は34字）
+    [
+      "本文中では二人の間柄について特に説明されておらず、ただ並んで歩いていたと書かれているだけである",
+    ],
+  ])("文の形をした関係「%s」は落とす", (relation) => {
+    expect(isSentenceShapedRelation(relation)).toBe(true);
+  });
+
+  test.each([
+    // **別人判定の手がかり（設計書6.95）。長くても括弧つきでも落とさない**
+    ["憑依している"],
+    ["入れ替わっている"],
+    ["その名を騙っている"],
+    ["転生した先"],
+    // 実データにある、長めだが本物の関係（引用が括弧で付いた形）。
+    // **括弧の外に関係語がある**ので、関係として読める
+    ["憑依されている（文佳の身体に憑依されたということだ）"],
+    ["身体を共有している（太志くん、あれ祓える？）"],
+    ["案内役（霊媒師のばあさんと、背筋がピンと伸びた羽織袴姿の老人だった）"],
+    ["直属の上司（斉藤さんが会長に頭を下げながら、声をかける）"],
+    ["将来の伴侶・婚約者（王女としての義務を共にする）"],
+    // 実データにある、句読点を含む本物の関係（p99 25字の内側）
+    ["前世でのいじめ被害仲間、自殺未遂を助けた相手"],
+    ["保護者的な霊能者、恩人"],
+    ["友人。かつて自分の代わりにイジメられた"],
+    ["指導している少女、依頼者的立場"],
+    // 実データで唯一の「丸ごと括弧」。句読点が無く、中身も7字
+    ["（間接的な関わり）"],
+    ["（過去の）友人"],
+    // 実データにある、長めで括弧も句読点も無い関係
+    ["娘として同居していないが世話をされている母"],
+    ["パーティを組むことになっている"],
+    // ふつうの短い関係語
+    ["兄"],
+    ["幼なじみ"],
+    ["かつての婚約者"],
+    ["生死不明の兄"],
+  ])("本物の関係「%s」は構造では落とさない", (relation) => {
+    expect(isSentenceShapedRelation(relation)).toBe(false);
+  });
+
+  test("構造で落としたものは、言い回しで落としたものと理由を分けて記録する", () => {
+    const result = validate(
+      {
+        characters: [
+          {
+            name: "リーナ・ヴェイル",
+            relations: [
+              // 言い回しの表に無い断り方。構造でだけ落ちる
+              {
+                name: "ヨナ",
+                relation:
+                  "（互いの名を呼び合う程度の間柄にとどまり、それ以上の情報は与えられていない）",
+              },
+              // 言い回しの表が拾う
+              { name: "ヨナ", relation: "親友だと思われる" },
+              { name: "ヨナ", relation: "幼なじみ" },
+            ],
+            evidence: line,
+          },
+        ],
+      },
+      relChunk
+    );
+
+    expect(result.accepted[0].data.relations).toEqual([
+      { name: "ヨナ", relation: "幼なじみ" },
+    ]);
+    expect(result.droppedRelations.map((entry) => entry.reason)).toEqual([
+      "sentence_shaped",
+      "not_a_relation",
+    ]);
+  });
+
+  test("言い回しと構造の両方に当たるものは、言い回しの理由で1件だけ落ちる", () => {
+    // 記録の理由が測るたびに揺れると、既存の測定結果と突き合わせられない。
+    // **先に言い回しを見る**と決めてあることを、ここで固定する
+    const result = validate(
+      {
+        characters: [
+          {
+            name: "リーナ・ヴェイル",
+            relations: [
+              {
+                name: "ヨナ",
+                relation: "（関係性は明記されていないが、親密な様子が見られる）",
+              },
+            ],
+            evidence: line,
+          },
+        ],
+      },
+      relChunk
+    );
+
+    expect(result.droppedRelations).toEqual([
+      {
+        characterName: "リーナ・ヴェイル",
+        partner: "ヨナ",
+        relation: "（関係性は明記されていないが、親密な様子が見られる）",
+        reason: "not_a_relation",
+      },
+    ]);
+  });
+
+  test("体を共有している相手の関係は、構造でも落とさない（別人判定が壊れる）", () => {
+    // 落とすと `cleanSharedBodyAliases` の手がかりが消え、
+    // 憑依した側とされた側が同一人物として1つのレコードにまとまる
+    const bodyLine = "三門太志は密倉文佳の身体に憑依していた";
+    const result = validate(
+      {
+        characters: [
+          {
+            name: "三門太志",
+            relations: [
+              {
+                name: "密倉文佳",
+                relation:
+                  "憑依している（本文では太志の意識が文佳の身体の中にあると書かれており、二人は別人である）",
+              },
+            ],
+            evidence: bodyLine,
+          },
+        ],
+      },
+      { ...chunk, text: bodyLine }
+    );
+
+    expect(result.droppedRelations).toEqual([]);
+    const kept = result.accepted.find((entry) => entry.data.name === "三門太志");
+    // 別人判定（`cleanSharedBodyAliases`）が手がかりにする語が、
+    // 44字の括弧つきでも関係として残っている
+    expect(kept?.data.relations).toEqual([
+      {
+        name: "密倉文佳",
+        relation:
+          "憑依している（本文では太志の意識が文佳の身体の中にあると書かれており、二人は別人である）",
+      },
+    ]);
   });
 });

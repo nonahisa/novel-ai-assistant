@@ -472,10 +472,15 @@ export function buildSuiteConfirm(
     const total = n * estimate.chunkCount;
     // **かけ算を見せる。** 「36チャンク」とだけ書くと、1機能ぶんだと
     // 読まれる。機能の数だけ本文を送り直すことが、ここでいちばん重い
+    //
+    // **「最大」とは言わない**（2026-09-19の実機。`finishNewWork.ts` と
+    // 同じ理由）。この数は本文の量だけを割ったもので、指示や参照資料の
+    // ぶんは入っていない。上限に入らないチャンクは送る直前に分け直される
     lines.push(
       `${subject}本文をチャンクごとに送ります` +
-        `（最大 ${n}×${estimate.chunkCount}＝${total}チャンク。` +
-        "処理済みのチャンクは飛ばします）。"
+        `（およそ ${n}×${estimate.chunkCount}＝${total}チャンク。` +
+        "処理済みのチャンクは飛ばし、指示や参照資料が増えたぶんは" +
+        "分かれて数が増えることがあります）。"
     );
     if (estimate.isPaid) {
       lines.push("チャンクごとに課金されます。");

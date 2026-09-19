@@ -398,11 +398,13 @@ async function suggestNames(
           // 短いが、渡さないと設定値（既定16,384）ぶんの席を毎回確保する
           maxOutputTokens: resolveOutputTokensForSend(
             resolved.provider.id,
-            resolved.model
+            resolved.model,
+            "name_suggest"
           ),
           plannedOutputTokens: resolveOutputTokensForPlanning(
             resolved.provider.id,
-            resolved.model
+            resolved.model,
+            "name_suggest"
           ),
           jsonSchema: NAME_SUGGEST_SCHEMA as unknown as object,
           disableThinking: true,

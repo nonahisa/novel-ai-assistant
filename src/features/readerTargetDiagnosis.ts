@@ -324,11 +324,13 @@ async function readFromWork(
         temperature: 0.2,
         maxOutputTokens: resolveOutputTokensForSend(
           resolved.provider.id,
-          resolved.model
+          resolved.model,
+          "reader_target"
         ),
         plannedOutputTokens: resolveOutputTokensForPlanning(
           resolved.provider.id,
-          resolved.model
+          resolved.model,
+          "reader_target"
         ),
         jsonSchema: READER_TARGET_SCHEMA as unknown as object,
         disableThinking: true,

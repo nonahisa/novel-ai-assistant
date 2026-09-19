@@ -72,6 +72,8 @@ import { collectedEpisodeLabel } from "./pickCollectedEpisode";
 // 貼り付け先ごとの分岐は、入口ではなく変換の側に置く（設計書6.84）
 import { convertForPosting } from "../core/postingConvert";
 import { showPostingCopyNotice } from "./postingCopyNotice";
+// 開く列の決め方は素のエディタと1本にする（`editorColumn.ts`）
+import { columnForLocation } from "./editorColumn";
 import { MEMO_LINE_PREFIX, memoColorVars } from "../core/sceneMemo";
 import { READ_ALOUD_MEMO_TEXT, buildReadingPlan } from "../core/readAloud";
 import { pickPostingTarget } from "./ruby";
@@ -1685,7 +1687,22 @@ export class ManuscriptEditorProvider
       return false;
     }
 
-    await vscode.commands.executeCommand("vscode.openWith", uri, viewType);
+    /*
+      **開く列を決めてから開く**（作者の報告、2026-09-19）。ここも列を
+      渡しておらず、VS Code の既定どおり「いま前面の列」へ開いていた。
+      シーンメモのパネル（原稿の右）から、まだ開いていない話へ飛ぶと、
+      原稿がパネルの列へ飛び込んで左の面が置き去りになる。
+      **既に開いている面を前に出す道（上の `open`）は列を動かさない**ので、
+      直すのはこの「開き直す」枝だけでよい。
+    */
+    const choice = columnForLocation(filePath);
+    logLine(`原稿エディタ：${filePath} を開きます（${choice.reason}）。`);
+    await vscode.commands.executeCommand(
+      "vscode.openWith",
+      uri,
+      viewType,
+      choice.column
+    );
     /*
       **台帳に載るまで待つ。**
 

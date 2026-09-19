@@ -672,6 +672,152 @@ describe("入らなかったときの逃げ道", () => {
   });
 });
 
+/**
+ * 進むほど肥える設定資料（設計書6.27.10）。**2026-09-19の実機で起きた形**を
+ * そのまま置く。
+ *
+ * 5話・11,714字の作品を、さくらのAI（上限32,000トークン）で設定資料の抽出に
+ * かけたところ、**最後のチャンクだけ**が約32,342トークンになって落ちた。
+ * 342トークン——たった1%——の超過である。
+ *
+ * チャンクを切った時点では資料が空なので、計画は「入る」と見ていた。
+ * 抽出が進むと【既知の登場人物】【既知の能力】…が育ち、送る直前には
+ * 入らなくなる。**そこまでは設計どおりで、関所が正しく断った。**
+ * 問題はその先で、逃げ道（`chunkRetry.ts`）が「1,500字より小さくは
+ * 割らない」という底に当たって**割り直さずにそのチャンクを失った**
+ * ——最後の1話は2,343字しかなく、半分に割ると1,171字だったからである。
+ *
+ * **本文が小さいのに入らないのは、本文のせいではない。** 「このモデルでは
+ * 扱えない」と言うのは嘘であり、240字ぶん減らせば入ることは数字で分かる。
+ */
+describe("資料が肥えて上限を越えたとき（2026-09-19の実機）", () => {
+  /**
+   * 実機の数字。
+   *
+   * 指示（system 792字＋P-04a 7,503字）＋既知の資料 約919字＋
+   * 本文2,343字＝合わせて 11,170字。出力の見込みは設定値の16,384トークン。
+   */
+  const FIELD = {
+    systemChars: 792,
+    userChars: 10_378,
+    outputTokens: 16_384,
+    contextWindow: 32_000,
+  };
+
+  /** 実機で落ちた、最後に1話だけ残ったチャンク（2,343字・まとめていない） */
+  function lastEpisode(): Chunk {
+    const text = `${"あ".repeat(1171)}\n\n${"い".repeat(1170)}`;
+    return {
+      filePath: "005.txt",
+      index: 0,
+      text,
+      startLine: 0,
+      chapterStart: 5,
+      chapterEnd: 5,
+      hash: "episode-5",
+      wholeFile: true,
+    };
+  }
+
+  /** 実機と同じ断られ方をした失敗を作る */
+  function fieldOverflow(): AIError {
+    const error = contextOverflow(FIELD);
+    if (!error) throw new Error("この数字は関所を通ってはいけない");
+    return error;
+  }
+
+  test("実機と同じ数字で、関所が断る", () => {
+    expect(fieldOverflow().message).toContain("32,342");
+    expect(fieldOverflow().message).toContain("32,000");
+  });
+
+  test("下限より小さい本文でも、数字の裏付けがあれば割り直す", () => {
+    // **これが失われた1チャンクである。** 底（1,500字）に当たって
+    // 「このモデルには入りません」と言われ、第5話は誰にも読まれなかった
+    const retry = retryOnOverflow(lastEpisode(), fieldOverflow());
+
+    expect(retry.kind).toBe("split");
+    if (retry.kind !== "split") return;
+    expect(retry.parts).toHaveLength(2);
+    // 本文は1文字も落とさない
+    expect(retry.parts.map((part) => part.text).join("")).toBe(
+      lastEpisode().text
+    );
+  });
+
+  test("割った先は、ちゃんと入る大きさになっている", () => {
+    const retry = retryOnOverflow(lastEpisode(), fieldOverflow());
+    if (retry.kind !== "split") throw new Error("割られていない");
+
+    // 資料の量（＝本文以外）は変わらないので、本文のぶんだけ引いて数え直す
+    const others = FIELD.userChars - lastEpisode().text.length;
+    for (const part of retry.parts) {
+      expect(
+        checkContextFit({ ...FIELD, userChars: others + part.text.length }).fits
+      ).toBe(true);
+    }
+  });
+
+  test("必要なところだけ縮める（痩せすぎない）", () => {
+    // **片方だけを見ると、常に最小で送る実装が満点になる。**
+    // 240字ぶん超えただけで下限まで刻むと、AIが一度に見る範囲が
+    // 要らないところまで狭まり、出来ばえが落ちる（実機では、2つに
+    // 割れたさくらが第5話で人物を取り違えた）
+    const retry = retryOnOverflow(lastEpisode(), fieldOverflow());
+    if (retry.kind !== "split") throw new Error("割られていない");
+
+    expect(retry.parts).toHaveLength(2);
+    for (const part of retry.parts) {
+      expect(part.text.length).toBeGreaterThan(1000);
+    }
+  });
+
+  test("資料が小さいうちは、これまでどおり1回で送れる", () => {
+    // 資料が育つ前（＝抽出の1チャンク目）の形。ここで断られるようだと、
+    // 「入らないから縮める」が常時発動していることになる
+    const others = FIELD.userChars - lastEpisode().text.length - 900;
+    expect(
+      contextOverflow({
+        ...FIELD,
+        userChars: others + lastEpisode().text.length,
+      })
+    ).toBeUndefined();
+    // 計画のほうも、資料が小さいうちは望んだ字数のまま縮めない
+    expect(
+      planChunkBudget({
+        contextWindow: 32_000,
+        overheadChars: 8_295,
+        outputTokens: 8_192,
+        requestedChars: 6_000,
+      })
+    ).toEqual({ chunkChars: 6_000, reason: "requested" });
+  });
+
+  test("本文を1文字も送れないなら、刻まずに諦めて理由を言う", () => {
+    // 指示と資料だけで上限に届いている形。ここで割り続けても、
+    // 入らない呼び出しの回数が増えるだけである
+    const error = contextOverflow({ ...FIELD, userChars: 22_000 });
+    if (!error) throw new Error("この数字は関所を通ってはいけない");
+    const retry = retryOnOverflow(lastEpisode(), error);
+
+    expect(retry.kind).toBe("give_up");
+    // **本文のせいにしない。** 「本文を小さく分けて」とだけ言われた作者は、
+    // 何度分けても直らない操作を繰り返すことになる
+    expect(retry.note).toContain("指示と資料");
+  });
+
+  test("数字の裏付けが無い失敗では、これまでどおり下限で止まる", () => {
+    // 内訳を持たない失敗で底を下げると、**入るかどうか分からないまま
+    // 刻む**道ができる。降りてよいのは、入ると計算できたときだけである
+    const retry = retryOnOverflow(
+      lastEpisode(),
+      new AIError("入りません", "context_overflow")
+    );
+
+    expect(retry.kind).toBe("give_up");
+  });
+});
+
 describe("参照資料の上限は、モデルの大きさに合わせる", () => {
   test("32kのモデルでは、固定の30,000字より小さくなる", () => {
     // 30,000字は約43,000トークン。本文を1文字も足さないうちに上限を超える

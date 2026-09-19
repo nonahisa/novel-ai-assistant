@@ -221,12 +221,14 @@ export async function checkFactContradictions(
   const outputTuning = { providerId: provider.id, model };
   const plannedOutputTokens = resolveOutputTokensForPlanning(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "story_fact_extract"
   );
   // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77）
   const sendOutputTokens = resolveOutputTokensForSend(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "story_fact_extract"
   );
 
   const tasks = await collectManuscriptChunks({
@@ -780,11 +782,13 @@ export async function checkFactContradictions(
         temperature: 0.0,
         maxOutputTokens: resolveOutputTokensForSend(
           input.provider.id,
-          input.model
+          input.model,
+          "fact_contradiction_verify"
         ),
         plannedOutputTokens: resolveOutputTokensForPlanning(
           input.provider.id,
-          input.model
+          input.model,
+          "fact_contradiction_verify"
         ),
         jsonSchema: CONTRADICTION_VERIFY_SCHEMA as unknown as object,
         disableThinking: true,

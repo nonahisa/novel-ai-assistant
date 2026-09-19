@@ -141,11 +141,13 @@ export async function checkOpening(
         // 動く——6要素の判定と根拠なので、実際にはその何分の一も使わない
         maxOutputTokens: resolveOutputTokensForSend(
           resolved.provider.id,
-          resolved.model
+          resolved.model,
+          "opening_check"
         ),
         plannedOutputTokens: resolveOutputTokensForPlanning(
           resolved.provider.id,
-          resolved.model
+          resolved.model,
+          "opening_check"
         ),
         jsonSchema: OPENING_CHECK_SCHEMA as unknown as object,
         disableThinking: true,

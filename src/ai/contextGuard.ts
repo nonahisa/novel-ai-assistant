@@ -118,6 +118,12 @@ export function checkContextFit(input: ContextFitInput): ContextFitResult {
  * **数字を本文（message）に入れる。** 「入りません」だけでは、作者は
  * どれくらい減らせばよいのか分からない。内訳（detail）は、どこが膨らんで
  * いるか——本文なのか指示なのか——を切り分けるために残す。
+ *
+ * **同じ数字を、機械が読める形でも付ける**（`AIError.overflow`）。
+ * 逃げ道（`features/chunkRetry.ts`）は「あと何字減らせば入るのか」を
+ * 知らないと、本文が下限より小さいというだけで諦めてしまう
+ * ——2026-09-19の実機で、1%（342トークン）超えた最後の1話が
+ * まるごと失われた。
  */
 export function contextOverflowError(
   input: ContextFitInput,
@@ -131,7 +137,17 @@ export function contextOverflowError(
     "context_overflow",
     `指示 ${input.systemChars.toLocaleString("en-US")}字 / ` +
       `本文と資料 ${input.userChars.toLocaleString("en-US")}字 / ` +
-      `出力の見込み ${input.outputTokens.toLocaleString("en-US")}トークン`
+      `出力の見込み ${input.outputTokens.toLocaleString("en-US")}トークン`,
+    // 待ち時間とHTTPの状態番号は、上限超えには無い
+    undefined,
+    undefined,
+    {
+      needTokens: need,
+      limitTokens: input.contextWindow ?? 0,
+      // **判断に使ったのと同じ換算を渡す**（`checkContextFit` と同じ式）。
+      // 別の換算で字数へ戻すと、実測を入れた途端にずれる
+      tokensPerChar: resolveTokensPerChar(input.measured),
+    }
   );
 }
 

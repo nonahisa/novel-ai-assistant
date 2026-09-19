@@ -124,7 +124,10 @@ const PASSES_BOTH_TOKENS: Array<[file: string, marker: string]> = [
   // 配っても、相談1回のうち半分は設定値のままになる**
   ["workChatPanel.ts", '"search_terms"'],
   ["settingsPanel.ts", '"search_terms"'],
-  ["settingsPanel.ts", '"settings_enrich"'],
+  // 相談と項目の充実は同じ呼び出しで、記録の名前だけが分かれる。
+  // **見込みを引く名前と記録する名前を1つにした**ので（0.68.11。
+  // `usageFeature`）、印も変数名で指す（単話プロットと同じ形）
+  ["settingsPanel.ts", "feature: usageFeature"],
   // 0.33.9で残っていた1か所（設計書6.77の第2段その1）。相談の会話を丸ごと
   // 送るので、ここが設定値のままだと非力な機械で `num_ctx` がいちばん育つ
   ["chatSettingsSync.ts", '"chat_settings_sync"'],
@@ -168,6 +171,101 @@ describe("出力トークンの2つの欄の配り先", () => {
       ).toBe(true);
     }
   );
+});
+
+/**
+ * **どの呼び出しも、機能の名前まで渡す**（設計書6.77の第3段）。
+ *
+ * 出力に見込むトークン数は、機能ごとの実測から決まるようになった
+ * （`core/featureOutputTokens.ts`）。機能を渡さない呼び出しは、実測が
+ * 貯まっていても**当て推量の 8,192／設定値の 16,384 のまま**動く
+ * ——見た目には動くので、配り忘れに誰も気づけない（2つの欄を12機能に
+ * 配ったあと、残り9か所が半年ぶん放置されたのと同じ形）。
+ *
+ * **数えるのは「引数が2つのままの呼び出し」である。** 名前を文字列で
+ * 探すと、`feature: options.feature` のように変数で渡している呼び出しを
+ * 取りこぼす。
+ */
+describe("出力トークンの3つの口に、機能の名前を渡す", () => {
+  const NAMES = [
+    "resolveOutputTokensForPlanning",
+    "resolveOutputTokensForSend",
+    "resolveOutputLimitForSend",
+  ];
+
+  /** その範囲にある、いちばん外側のカンマの数 */
+  function topLevelCommas(text: string): number {
+    let depth = 0;
+    let count = 0;
+    for (const ch of text) {
+      if (ch === "(" || ch === "[" || ch === "{") depth += 1;
+      else if (ch === ")" || ch === "]" || ch === "}") depth -= 1;
+      else if (ch === "," && depth === 0) count += 1;
+    }
+    return count;
+  }
+
+  function twoArgumentCalls(file: string, source: string): string[] {
+    const found: string[] = [];
+    for (const name of NAMES) {
+      let from = 0;
+      for (;;) {
+        const at = source.indexOf(`${name}(`, from);
+        if (at < 0) break;
+        const open = at + name.length;
+        let depth = 0;
+        let end = open;
+        for (; end < source.length; end += 1) {
+          if (source[end] === "(") depth += 1;
+          else if (source[end] === ")") {
+            depth -= 1;
+            if (depth === 0) break;
+          }
+        }
+        if (topLevelCommas(source.slice(open + 1, end)) === 1) {
+          const line = source.slice(0, at).split("\n").length;
+          found.push(`${file}:${line} ${name}`);
+        }
+        from = end + 1;
+      }
+    }
+    return found;
+  }
+
+  function allSourceFiles(dir: string): string[] {
+    const out: string[] = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = nodePath.join(dir, entry.name);
+      if (entry.isDirectory()) out.push(...allSourceFiles(full));
+      else if (entry.name.endsWith(".ts")) out.push(full);
+    }
+    return out;
+  }
+
+  const SRC = nodePath.join(__dirname, "..", "..", "src");
+
+  test("機能を渡さない（引数2つの）呼び出しが1つも残っていない", () => {
+    const offenders: string[] = [];
+    for (const file of allSourceFiles(SRC)) {
+      // 決め方そのものを持つファイルは、既定の引数を宣言する側なので除く
+      if (file.endsWith(nodePath.join("ai", "outputLimit.ts"))) continue;
+      offenders.push(
+        ...twoArgumentCalls(nodePath.relative(SRC, file), fs.readFileSync(file, "utf8"))
+      );
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  test("検査が空振りしていない（呼び出しそのものは十分ある）", () => {
+    let calls = 0;
+    for (const file of allSourceFiles(SRC)) {
+      const source = fs.readFileSync(file, "utf8");
+      for (const name of NAMES) {
+        calls += source.split(`${name}(`).length - 1;
+      }
+    }
+    expect(calls).toBeGreaterThan(40);
+  });
 });
 
 /**

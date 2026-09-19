@@ -293,7 +293,11 @@ describe("先に出す確認", () => {
     );
     // かけ算を見せる（1段ぶんだと読まれないように）
     expect(confirm?.detail).toContain("本文 41,000字 / 12チャンク");
-    expect(confirm?.detail).toContain("最大 8×12＝96チャンク");
+    // **「最大」とは言わない**（2026-09-19の実機）。本文の量だけを割った
+    // 数なので、指示や資料が肥えると送る直前に分かれて増える
+    expect(confirm?.detail).toContain("およそ 8×12＝96チャンク");
+    expect(confirm?.detail).toContain("分かれて数が増えることがあります");
+    expect(confirm?.detail).not.toContain("最大");
     expect(confirm?.detail).toContain("目安 24分程度");
     expect(confirm?.detail).toContain("残りの4段は、1回ずつの短い呼び出しです。");
     expect(confirm?.detail).toContain("使うAI：Ollama");

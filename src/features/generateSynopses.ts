@@ -159,14 +159,16 @@ export async function generateSynopses(
   // 既定の8,192で確保される
   const plannedOutputTokens = resolveOutputTokensForPlanning(
     resolved.provider.id,
-    resolved.model
+    resolved.model,
+    "synopsis"
   );
   // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
   // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
   // 半分になり、長い応答が途中で切れる
   const sendOutputTokens = resolveOutputTokensForSend(
     resolved.provider.id,
-    resolved.model
+    resolved.model,
+    "synopsis"
   );
 
   const failures: Array<{ label: string; message: string }> = [];

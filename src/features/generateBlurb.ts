@@ -131,7 +131,8 @@ export async function generateWorkBlurb(
   // 既定の8,192で確保される
   const plannedOutputTokens = resolveOutputTokensForPlanning(
     resolved.provider.id,
-    resolved.model
+    resolved.model,
+    "blurb"
   );
   // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
   // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
@@ -142,7 +143,11 @@ export async function generateWorkBlurb(
   // 変わる（実測で頭打ちなのに「設定を大きくして」と言うのは嘘になる）
   const outputLimit = resolveOutputLimitForSend(
     resolved.provider.id,
-    resolved.model
+    resolved.model,
+    // **`blurb` には同梱の実測が無い**（`core/bundledTuning.ts`）。1件しか
+    // 無い実測が「上限で切り詰められた回」の 16,384 で、要った量ではない
+    // ため。測れるまでは、これまでどおり設定値がそのまま上限になる
+    "blurb"
   );
   const sendOutputTokens = outputLimit.tokens;
 
@@ -261,14 +266,16 @@ export async function generateCatchphrases(
   // 動き、ループを回すたびにその席を確保することになる
   const plannedOutputTokens = resolveOutputTokensForPlanning(
     resolved.provider.id,
-    resolved.model
+    resolved.model,
+    "catchphrase"
   );
   // **上限は出どころごと受け取る**（設計書6.77の第2段、0.33.9のレビュー）。
   // 切り詰められたときの直し方は、上限が設定から来たのか実測から来たのかで
   // 変わる（実測で頭打ちなのに「設定を大きくして」と言うのは嘘になる）
   const outputLimit = resolveOutputLimitForSend(
     resolved.provider.id,
-    resolved.model
+    resolved.model,
+    "catchphrase"
   );
   const sendOutputTokens = outputLimit.tokens;
 

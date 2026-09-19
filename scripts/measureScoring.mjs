@@ -633,6 +633,11 @@ export function settingsLedgerOf(results) {
     途中で切れた別名: 0,
     共有された姓: 0,
     身内を指す別名: 0,
+    // **落とした理由で分ける**（作者の裁定、2026-09-19「構造でも切る」）。
+    // 言い回しの表は言い換えられるたびに増えるので、構造だけで落ちた数が
+    // 見えないと、表を足す意味があったのかを測れない
+    言い回しで落とした関係: 0,
+    文の形で落とした関係: 0,
     向きを直した関係: 0,
   };
 
@@ -674,6 +679,14 @@ export function settingsLedgerOf(results) {
     dropped.途中で切れた別名 += (people.droppedTruncatedAliases ?? []).length;
     dropped.共有された姓 += (people.droppedSharedFamilyNameAliases ?? []).length;
     dropped.身内を指す別名 += (people.droppedRelativeAliases ?? []).length;
+    // 推測・断りを関係として書いたもの（「明記されていないが〜」）と、
+    // 関係の欄に文が入っていたもの。**でっち上げの関係が0になったのは
+    // 検算が効いたからだ**と読めるように、落とした数もここへ出す
+    for (const entry of people.droppedRelations ?? []) {
+      const reason = textOf(entry?.reason);
+      if (reason === "sentence_shaped") dropped.文の形で落とした関係 += 1;
+      else dropped.言い回しで落とした関係 += 1;
+    }
     dropped.向きを直した関係 += (people.correctedRelations ?? []).length;
   }
 
@@ -1463,7 +1476,12 @@ export function labelOf(key) {
   }
   // 別名を黙って落とした件数（設定資料の抽出だけ）。見出しは答えの側で日本語
   if (key.startsWith("dropped.")) {
-    return `　└ 落とした別名：${key.slice("dropped.".length)}`;
+    const what = key.slice("dropped.".length);
+    // 関係の検算は別名の話ではない。同じ見出しに混ぜると、記録を読んだとき
+    // 「別名を落とした」と取り違える
+    return what.endsWith("関係")
+      ? `　└ 関係の検算：${what}`
+      : `　└ 落とした別名：${what}`;
   }
   return key;
 }

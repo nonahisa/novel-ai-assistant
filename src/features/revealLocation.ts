@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { logStep, useLogFile } from "../core/logger";
+import { columnForLocation } from "./editorColumn";
 import type { WorkEntry } from "../models/types";
 
 /**
@@ -83,14 +84,26 @@ export async function revealTextLocation(
     // みなすので、ブラウザ上の作品（`vscode-vfs://github/...`）では
     // 開けない。場所の組み立ては `paths.ts` を通す（CLAUDE.md 規則7）
     const doc = await vscode.workspace.openTextDocument(path.toUri(filePath));
+    /*
+      **開く列を決めてから開く**（作者の報告、2026-09-19）。指定しないと
+      VS Code は「いま前面の列」に開く。シーンメモのパネルは原稿の右
+      （`ViewColumn.Beside`）に住むので、そこから押すと原稿が右の列へ
+      飛び込み、書いていた左の面が置き去りになっていた。
+    */
+    const choice = columnForLocation(filePath);
     const editor = await vscode.window.showTextDocument(doc, {
       preserveFocus: false,
+      viewColumn: choice.column,
     });
     const lineIndex = Math.min(Math.max(line - 1, 0), doc.lineCount - 1);
     const range = doc.lineAt(lineIndex).range;
     editor.selection = new vscode.Selection(range.start, range.end);
     editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-    logStep(`${source}：素のエディタで示しました（${filePath} ${line}行目）。`);
+    // **どの列を選んだかも残す。** 「右の画面が動く」のような訴えは、
+    // 選んだ列が記録に無いと画面側と拡張機能側のどちらの話か分からない
+    logStep(
+      `${source}：素のエディタで示しました（${filePath} ${line}行目／${choice.reason}）。`
+    );
   } catch (error) {
     // **例外の中身を捨てない。** 通知は一言で済ませても、原因（見つからない
     // のか、開けないのか）はログに残らないと作者も開発側もたどり着けない

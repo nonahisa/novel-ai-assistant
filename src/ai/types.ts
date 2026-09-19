@@ -331,6 +331,33 @@ export function inferTier(
   return "light";
 }
 
+/**
+ * 上限に入らなかったときの、**数字での内訳**（設計書6.27.10）。
+ *
+ * 逃げ道（`features/chunkRetry.ts`）が「あと何字減らせば入るのか」を
+ * 計算するために使う。
+ *
+ * **文面からは読み取らない。** `message` と `detail` は作者に見せる文で
+ * あって、機械が読む場所ではない——文言を直した瞬間に逃げ道が黙って
+ * 効かなくなる（`status` を欄として持たせたのと同じ理由。0.28.4）。
+ *
+ * **持つのはトークン数と換算だけで、「どう縮めるか」はここで決めない。**
+ * 何が本文で何が資料かを知っているのは呼び出し側であって、関所ではない。
+ */
+export interface ContextOverflowFacts {
+  /** この呼び出しに要ると見込んだトークン数 */
+  readonly needTokens: number;
+  /** モデルの上限（トークン） */
+  readonly limitTokens: number;
+  /**
+   * 見積もりに使った、1字あたりのトークン数。
+   *
+   * **超過トークンを字数へ戻すのに要る。** 別の換算で戻すと、
+   * 実測を入れた途端に「減らしたのに足りない」がまた起きる。
+   */
+  readonly tokensPerChar: number;
+}
+
 /** AI呼び出しの失敗を表す。UI側でメッセージを出し分けるために種別を持つ */
 export class AIError extends Error {
   constructor(
@@ -384,7 +411,16 @@ export class AIError extends Error {
      * （`openaiProvider.ts` の `asContextOverflowError`）が黙って
      * 効かなくなる（0.28.4）。
      */
-    readonly status?: number
+    readonly status?: number,
+    /**
+     * 上限に入らなかったときの数字の内訳。`context_overflow` のときだけ入る。
+     *
+     * **無いこともある前提で使う。** 上限超えは関所（`ai/contextGuard.ts`）
+     * だけでなく、サーバーが返した400からも作られる
+     * （`openaiProvider.ts` の `asContextOverflowError`）。あちらは
+     * 「何トークン要ったか」を教えてくれないので、ここは空のままになる。
+     */
+    readonly overflow?: ContextOverflowFacts
   ) {
     super(message);
     this.name = "AIError";

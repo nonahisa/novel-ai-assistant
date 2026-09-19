@@ -9,7 +9,8 @@ import {
 } from "./types";
 import { appendUsageLog } from "../core/usageLog";
 import { contextOverflow, skipsContextGuard } from "./contextGuard";
-import { resolveMaxOutputTokens } from "./outputLimit";
+import { resolveOutputTokensForSend } from "./outputLimit";
+import { recordFeatureOutputTokens } from "../core/featureOutputTokens";
 import { logStep } from "../core/logger";
 import { AiQueueAbortError, acquireCall } from "../core/aiSequence";
 import {
@@ -232,6 +233,7 @@ export class MeteredProvider implements AIProvider {
       // 台帳への書き込みは抑えてあるので、たいていは何もせずに戻る
       await this.recordSpeed(params.model, result);
       await this.recordCharsPerToken(params, result);
+      await this.recordFeatureOutput(params, result);
       return result;
     } catch (error) {
       this.record(params, {
@@ -289,7 +291,19 @@ export class MeteredProvider implements AIProvider {
       this.inner.capsOutput === false
         ? [params.plannedOutputTokens, params.maxOutputTokens]
         : [params.maxOutputTokens, params.plannedOutputTokens];
-    return first ?? second ?? resolveMaxOutputTokens();
+    /*
+      **落とし先も、呼び出し側と同じ出どころから引く**（設計書6.77の第3段）。
+
+      以前はここだけ `resolveMaxOutputTokens()`（設定値そのもの）だった。
+      渡してこない呼び出しでは、**機能の実測があっても関所だけが設定値で
+      数える**ことになる——値を1つの出どころへ寄せた意味が、ここで抜ける。
+      機能は記録（`meta.feature`）が既に持っているので、取りにいけばよい。
+    */
+    return (
+      first ??
+      second ??
+      resolveOutputTokensForSend(this.inner.id, params.model, params.meta?.feature)
+    );
   }
 
   /** 上限が分からないと記録したモデル。**同じモデルでは一度だけ書く** */
@@ -528,6 +542,55 @@ export class MeteredProvider implements AIProvider {
       this.loggedRatioFailure.add(params.model);
       logStep(
         `モデル「${params.model}」の字/トークンを台帳へ保存できませんでした` +
+          `（${error instanceof Error ? error.message : String(error)}）。`
+      );
+    }
+  }
+
+  /** 見込みを台帳へ書けなかったことを言うのは、同じ機能で一度だけ */
+  private readonly loggedFeatureOutputFailure = new Set<string>();
+
+  /**
+   * 応答から**機能ごとの出力トークン数**を採って、台帳へ残す
+   * （設計書6.77の第3段。`core/featureOutputTokens.ts`）。
+   *
+   * **速さ・字/トークンとまったく同じ流儀**である——普段の呼び出しから
+   * 自動で採り、確認なしで保存する。違うのは使い道で、こちらは
+   * **見込みそのもの**になる（計画・関所・実送信の上限が引く）。
+   *
+   * 採らない回が2つある。
+   *
+   * - `completion_tokens` を返さないAI……字数から換算すると、見込みを
+   *   見積りで決めることになって「実測から決める」ではなくなる
+   * - 読める長さの測定（`context_probe`）……あれは**わざと上限を試す**
+   *   呼び出しで、機能の仕事の大きさを表していない
+   *
+   * **切り詰められた回は、量ではなく印として渡す。** 切られた回の
+   * `completion_tokens` は上限そのものなので「要った量」ではない
+   * （紹介文の16,384がまさにそれだった）。
+   */
+  private async recordFeatureOutput(
+    params: GenerateParams,
+    result: GenerateResult
+  ): Promise<void> {
+    const feature = params.meta?.feature;
+    if (feature === undefined || feature.length === 0) return;
+    if (skipsContextGuard(feature)) return;
+
+    const tokens = result.usage?.outputTokens;
+    if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens <= 0) {
+      return;
+    }
+
+    try {
+      await recordFeatureOutputTokens(feature, tokens, result.truncated === true);
+    } catch (error) {
+      // **残せなかっただけで、AIの応答は返す**（速度・字/トークンと同じ扱い）。
+      // ただしエラーの本文は捨てない（CLAUDE.md 規則5）
+      if (this.loggedFeatureOutputFailure.has(feature)) return;
+      this.loggedFeatureOutputFailure.add(feature);
+      logStep(
+        `機能「${feature}」の出力トークン数を台帳へ保存できませんでした` +
           `（${error instanceof Error ? error.message : String(error)}）。`
       );
     }

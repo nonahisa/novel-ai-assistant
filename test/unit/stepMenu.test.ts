@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { abbreviateTitle } from "../../src/core/abbreviateTitle";
 import { TreeItemCollapsibleState } from "vscode";
+import { findAction } from "../../src/views/actionList";
 import {
   STEP_CHOOSE_WORK_LABEL,
   STEP_MENU,
@@ -873,5 +874,32 @@ describe("ステップ4の伏線の入口（実機確認 F-29）", () => {
     expect(at("novelai.setForeshadowStatus")).toBeGreaterThan(
       at("novelai.addForeshadow")
     );
+  });
+});
+
+describe("開いていないと断られる操作を、簡単ステップメニューへ置かない（作者の実機報告、2026-09-19）", () => {
+  /*
+    作者の報告：「簡単メニューで『縦書きで開く』がありますが、本文ファイルを
+    開いてくださいと出てうごきません」。
+
+    `novelai.openVertical` は `activeManuscriptUri()` を見る操作で、本文を
+    開いていないと断る。**簡単ステップメニューは「次に何をするか」の一覧**
+    なので、まだ何も開いていない人が押して必ず断られる操作を並べてはいけない。
+
+    同じことは原稿エディタの上のバーの「縦書き」でできて、しかも切り替えた
+    向きは原稿ごとに覚える。詳細メニュー（全操作の一覧）と本文の右クリックに
+    は残してある。
+  */
+  const OPENED_MANUSCRIPT_REQUIRED = ["novelai.openVertical"];
+
+  test("本文を開いていないと断る操作は、どの段にも並ばない", () => {
+    const all = STEP_MENU.flatMap((step) => commandsOf(step));
+    for (const id of OPENED_MANUSCRIPT_REQUIRED) {
+      expect(all, `${id} は簡単ステップメニューに置かない`).not.toContain(id);
+    }
+  });
+
+  test("詳細メニューには残っている（探した人が見つけられる）", () => {
+    expect(findAction("novelai.openVertical")).toBeDefined();
   });
 });

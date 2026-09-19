@@ -96,6 +96,7 @@ interface CharactersPart {
   accepted?: unknown[];
   rejected?: Array<{ name: string | null; reason: string }>;
   droppedSharedFamilyNameAliases?: unknown[];
+  droppedRelations?: unknown[];
 }
 
 function chunkResult(
@@ -114,6 +115,7 @@ function chunkResult(
       droppedTruncatedAliases: [],
       droppedSharedFamilyNameAliases: [],
       droppedRelativeAliases: [],
+      droppedRelations: [],
       correctedRelations: [],
       ...characters,
     },
@@ -687,6 +689,45 @@ describe("指標の表", () => {
     const lines = formatSpreadLines(spreadOfRuns([{ metrics }])).join("\n");
     expect(lines).toContain("落とした理由：pronoun_name（代名詞の名前）");
     expect(lines).toContain("落とした別名：共有された姓: 1");
+  });
+
+  it("落とした関係は、別名ではなく関係の見出しで、理由ごとに分けて出る", () => {
+    // でっち上げの関係が0になったとき、**検算が効いたのか、AIが最初から
+    // 書かなかったのか**は、この行が無いと読み分けられない。
+    // さらに**言い回しと構造のどちらが効いたのか**も分けて出す——
+    // 言い回しの表は言い換えられるたびに増えるので、構造だけで落ちた数が
+    // 見えないと、表を足す意味があったのかを測れない
+    const { metrics } = metricsOfRun("settings", ANSWERS, {
+      results: [
+        chunkResult(
+          "001_水路の朝.txt",
+          {
+            droppedRelations: [
+              {
+                characterName: "リーナ・ヴェイル",
+                partner: "ヨナ",
+                relation: "（関係性は明記されていない）",
+                reason: "not_a_relation",
+              },
+              {
+                characterName: "リーナ・ヴェイル",
+                partner: "ヨナ",
+                relation:
+                  "（互いの名を呼び合う程度の間柄にとどまり、それ以上の情報は与えられていない）",
+                reason: "sentence_shaped",
+              },
+            ],
+          },
+          {}
+        ),
+      ],
+      failures: [],
+      elapsedMs: 100,
+    });
+
+    const lines = formatSpreadLines(spreadOfRuns([{ metrics }])).join("\n");
+    expect(lines).toContain("関係の検算：言い回しで落とした関係: 1");
+    expect(lines).toContain("関係の検算：文の形で落とした関係: 1");
   });
 });
 

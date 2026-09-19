@@ -1,6 +1,11 @@
 import * as vscode from "vscode";
 import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
 import { modelTuning } from "../core/modelTuning";
+import {
+  featureOutputCeiling,
+  featureOutputTuning,
+} from "../core/featureOutputTokens";
+import { logLine } from "../core/logger";
 
 /**
  * 1回の応答で受け取る出力トークンの上限。
@@ -55,14 +60,26 @@ export function clampToModelLimit(
  * （`generate` へ渡す `maxOutputTokens`）に見込む出力トークン数
  * （設計書6.65.16の2）。
  *
- * 台帳（`core/modelTuning.ts`）に実測（`measuredOutputTokens`）があれば
- * `min(設定, 実測)`、無ければ `min(設定, OUTPUT_RESERVE_TOKENS)`。
+ * **実測から決める**（作者の裁定、2026-09-19。設計書6.77の第3段）。
+ * 見る実測は2つある。
+ *
+ * - **機能の実測**（`core/featureOutputTokens.ts`）……この仕事が1回に
+ *   何トークン書くか。普段の呼び出しから貯まる
+ * - **モデルの実測**（`measuredOutputTokens`）……このモデルが何トークン
+ *   書けるか。「書ける量」の測定から入る
+ *
+ * どちらも無ければ、これまでどおり `min(設定, OUTPUT_RESERVE_TOKENS)`。
  * gemma4:12bですら実測6,500トークンなのに、既定の16,384を常に見込むのは
  * 非力なマシンでは要らないぶんまで num_ctx として確保することになる。
  *
  * **決定はここ1か所に括る。** 呼び出し側ごとに `resolveMaxOutputTokens()`
  * をそのまま使うと、実測が付いても見込みが古いままになる
  * （`readChunkSettings` を1か所にしたのと同じ理由）。
+ *
+ * **関所（`ai/meteredProvider.ts`）と実送信の上限
+ * （`resolveOutputLimitForSend`）も、同じ機能の実測から引く。** ここだけが
+ * 当て推量の 8,192 だったころは、**計画いっぱいに詰めたチャンクを関所が
+ * 断って割る**のが常態だった（実機、2026-09-19）。
  *
  * **注意：測定そのもの（`features/measureContext.ts` の
  * `measureOutputLimit`）はこの丸めを通さない。** あちらは「設定値まで
@@ -71,16 +88,74 @@ export function clampToModelLimit(
  */
 export function resolveOutputTokensForPlanning(
   providerId: string,
-  model: string
+  model: string,
+  feature?: string
 ): number {
   const configured = resolveMaxOutputTokens();
   const measured = modelTuning(providerId, model)?.measuredOutputTokens;
-  const ceiling = measured !== undefined ? measured : OUTPUT_RESERVE_TOKENS;
+  /*
+    **機能ごとの実測**（`core/featureOutputTokens.ts`。設計書6.77の第3段）。
+
+    ここが 8,192 の当て推量だったせいで、関所（実送信の上限で数える）と
+    **同じ呼び出しについて別々の値**を持っていた。実測があるなら、
+    計画も関所も実送信の上限もそこから引く——それが割れの元を断つ。
+  */
+  const expected = featureOutputCeiling(feature);
+  /*
+    **2つの実測は、意味が違うので両方を見る。**
+
+    - `expected`……この**仕事**が何トークン書くか
+    - `measured`……この**モデル**が何トークン書けるか
+
+    要る量が15,360でも、モデルが6,500しか書けないなら確保すべきは6,500で
+    ある（それ以上を空けても書かれない）。逆に測っていない機能では、
+    これまでどおりモデル側の実測だけで決める——**渡していない呼び出しの
+    挙動は変えない。**
+  */
+  const ceiling =
+    expected !== undefined
+      ? Math.min(expected, measured ?? expected)
+      : (measured ?? OUTPUT_RESERVE_TOKENS);
+  if (expected !== undefined) noteFeatureCeiling(feature, expected);
   return Math.min(configured, ceiling);
 }
 
-/** 上限の出どころ。案内の文言を分けるためだけにある */
-export type OutputLimitSource = "設定" | "実測";
+/**
+ * 実測から見込んだことを、**一度だけ**記録に残す（同梱の守り3「出どころを
+ * 見せる」）。
+ *
+ * **効いているのに見えない値を作らない。** 見込みが変わるとチャンクの
+ * 大きさが変わるので、作者からは「急に細かく割られるようになった」と
+ * しか見えない。何を根拠にその数字になったのかを、`describeChunkSettings`
+ * の1行と同じ場所（操作ログ）へ出す。
+ *
+ * 呼び出しのたびに書くとログが埋まるので、同じ機能・同じ値なら一度きり
+ * （`core/modelTuning.ts` の `noteOnce` と同じ形）。
+ */
+const notedFeatureCeilings = new Set<string>();
+
+function noteFeatureCeiling(feature: string | undefined, tokens: number): void {
+  const tuning = featureOutputTuning(feature);
+  const note = `${feature}:${tokens}:${tuning?.bundled === true ? "同梱" : "実測"}`;
+  if (notedFeatureCeilings.has(note)) return;
+  notedFeatureCeilings.add(note);
+  logLine(
+    `出力の見込み：${feature} は ${tokens.toLocaleString("ja-JP")}トークン` +
+      `（${tuning?.bundled === true ? "同梱の初期値" : "この機械の実測"}` +
+      `${tuning?.outputTokens?.toLocaleString("ja-JP") ?? "?"}トークン × ` +
+      `${tuning?.outputTokenSamples ?? 0}回ぶん）。`
+  );
+}
+
+/**
+ * 上限の出どころ。案内の文言を分けるためだけにある。
+ *
+ * `機能の実測` は、その機能がこれまでに書いた量から見込んだ上限
+ * （`core/featureOutputTokens.ts`）。**直し方が「実測」とも「設定」とも
+ * 違う**ので分けてある——こちらは切り詰められたことが記録に残り、
+ * 次の回から自動で設定値へ戻る。
+ */
+export type OutputLimitSource = "設定" | "実測" | "機能の実測";
 
 /** 実際に送る上限と、その値がどこから来たか */
 export interface OutputTokenLimit {
@@ -129,25 +204,48 @@ export interface OutputTokenLimit {
  */
 export function resolveOutputLimitForSend(
   providerId: string,
-  model: string
+  model: string,
+  feature?: string
 ): OutputTokenLimit {
   const configured = resolveMaxOutputTokens();
   const tuning = modelTuning(providerId, model);
-  const measured = tuning?.measuredOutputTokens;
-  if (measured === undefined || tuning?.outputMeasureTimedOut === true) {
-    return { tokens: configured, source: "設定" };
-  }
-  const tokens = Math.max(MINIMUM, Math.min(configured, measured));
-  // 設定より下がっていないなら、効いているのは設定のほうである
-  return { tokens, source: tokens < configured ? "実測" : "設定" };
+  const measured =
+    tuning?.outputMeasureTimedOut === true
+      ? undefined
+      : tuning?.measuredOutputTokens;
+  /*
+    **機能ごとの実測も、ここで効かせる**（設計書6.77の第3段）。
+
+    実送信の上限は、上限を送るプロバイダ（クラウド5社）では**そのまま席を
+    食う**——関所はこの値で場所を数える。だから計画と食い違わせないために
+    は、計画が見るのと同じ実測をここでも見るしかない。
+
+    **切れる危険は、`resolveOutputTokensForPlanning` のときより重い**
+    （切れた応答のJSONは解析できず、そのチャンクが丸ごと捨てられる）。
+    だから見込みには余裕を上乗せしてあり、それでも足りなかったときは
+    切り詰められたことが台帳へ残って、**次の回から設定値へ戻る。**
+  */
+  const expected = featureOutputCeiling(feature);
+
+  // **いちばん小さい制約が効く。** 出どころを一緒に持ち回るのは、
+  // 切り詰めの案内で同じ判定をもう一度書かないため
+  const limits: Array<[number, OutputLimitSource]> = [[configured, "設定"]];
+  if (measured !== undefined) limits.push([measured, "実測"]);
+  if (expected !== undefined) limits.push([expected, "機能の実測"]);
+  const [smallest, from] = limits.reduce((a, b) => (b[0] < a[0] ? b : a));
+
+  const tokens = Math.max(MINIMUM, smallest);
+  // 床で押し上げた・設定より下がっていないなら、効いているのは設定のほう
+  return { tokens, source: tokens < configured ? from : "設定" };
 }
 
 /** 送る上限の値だけが要るとき（大半の呼び出し側） */
 export function resolveOutputTokensForSend(
   providerId: string,
-  model: string
+  model: string,
+  feature?: string
 ): number {
-  return resolveOutputLimitForSend(providerId, model).tokens;
+  return resolveOutputLimitForSend(providerId, model, feature).tokens;
 }
 
 /**
@@ -158,6 +256,17 @@ export function resolveOutputTokensForSend(
  * ——大きくしても実測で頭打ちのままで、作者は直らない操作を繰り返す。
  */
 export function truncatedOutputAdvice(limit: OutputTokenLimit): string {
+  if (limit.source === "機能の実測") {
+    return (
+      "応答が出力上限で切り詰められました。上限は、この機能がこれまでに" +
+      `書いた量から見込んだ値（約${limit.tokens.toLocaleString("ja-JP")}トークン）です。` +
+      // **切れたことは台帳に残る**（`recordFeatureOutputTokens`）ので、
+      // 作者がすべきことは「もう一度実行する」だけである。直らない操作を
+      // 案内しない（0.66.6 で「設定を大きくして」が嘘になっていたのと同じ形）
+      "見込みが足りなかったことは記録したので、次からは設定の上限まで送ります" +
+      "——そのままもう一度お試しください。"
+    );
+  }
   if (limit.source === "実測") {
     return (
       "応答が出力上限で切り詰められました。上限は、AIチューニングで測った" +

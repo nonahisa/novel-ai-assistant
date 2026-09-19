@@ -47,6 +47,32 @@ export interface DroppedAliasRecord {
   partner?: string;
 }
 
+/**
+ * 関係を落とした理由。**2通りを分けて持つ**（作者の裁定、2026-09-19）。
+ *
+ * - `not_a_relation`：**言い回し**で落としたもの。推測・伝聞・「本文に書かれて
+ *   いない」という断りを、関係の値として書いてきた（`not_an_ability`・
+ *   `not_a_place` と同じ作法）
+ * - `sentence_shaped`：**構造**で落としたもの。関係の欄に短い語ではなく
+ *   文が入っていた
+ *
+ * 分けて持つのは、**次にどちらの網を直せばよいかを記録から読むため**である。
+ * 言い回しの表は言い換えられるたびに増えるので、構造だけで落ちた件数が
+ * 見えないと、表を足す意味があったのか測れない。
+ */
+export type RelationRejectionReason = "not_a_relation" | "sentence_shaped";
+
+/** 関係を落としたことの記録。**黙って消さない**ので、報告に出すために持つ */
+export interface DroppedRelationRecord {
+  /** 落とした先の人物 */
+  characterName: string;
+  /** 関係の相手 */
+  partner: string;
+  /** AIが書いてきた関係（落とした値そのまま） */
+  relation: string;
+  reason: RelationRejectionReason;
+}
+
 /** 向きが逆だった関係を直した記録（設計書6.18） */
 export interface CorrectedRelationRecord {
   characterName: string;
@@ -78,6 +104,13 @@ export interface CharacterValidationResult {
    * AIが本人の別名として返してくるので、コードで検算する。
    */
   droppedRelativeAliases: DroppedAliasRecord[];
+  /**
+   * 関係ではないもの（推測・伝聞・「本文に書かれていない」という断り、
+   * および関係の欄に入った文）として落とした関係。AIが自分で
+   * 「明記されていない」と書きながら関係を立てるので、コードで検算する。
+   * どちらの網で落ちたかは `reason` に入る。
+   */
+  droppedRelations: DroppedRelationRecord[];
   /** 向きが逆だった親族関係を直したもの（相手「お母さん」に「息子」） */
   correctedRelations: CorrectedRelationRecord[];
 }
@@ -217,6 +250,7 @@ export function validateCharacterExtractResult(
   const droppedTruncatedAliases: DroppedAliasRecord[] = [];
   const droppedSharedFamilyNameAliases: DroppedAliasRecord[] = [];
   const droppedRelativeAliases: DroppedAliasRecord[] = [];
+  const droppedRelations: DroppedRelationRecord[] = [];
   const correctedRelations: CorrectedRelationRecord[] = [];
   const rawCharacters: unknown = result.characters;
 
@@ -228,6 +262,7 @@ export function validateCharacterExtractResult(
       droppedTruncatedAliases,
       droppedSharedFamilyNameAliases,
       droppedRelativeAliases,
+      droppedRelations,
       correctedRelations,
     };
   }
@@ -326,6 +361,10 @@ export function validateCharacterExtractResult(
     options.authorEditedNames ?? [],
     droppedSharedFamilyNameAliases
   );
+  // **姓の検算より後に置く。** 推測で書かれた関係でも「相手の名前」のほうは
+  // 本文の呼び名で、同じ姓の人が複数いることの証拠になる
+  // （`cleanSharedFamilyNameAliases`）。先に捨てるとその証拠まで消える
+  dropSpeculativeRelations(survived, droppedRelations);
   fixRelationDirections(survived, correctedRelations);
 
   for (const character of survived) {
@@ -355,6 +394,7 @@ export function validateCharacterExtractResult(
     droppedTruncatedAliases,
     droppedSharedFamilyNameAliases,
     droppedRelativeAliases,
+    droppedRelations,
     correctedRelations,
   };
 }
@@ -575,6 +615,179 @@ export function isTruncatedAlias(
   if (text.length < 2) return false;
   if (!TRUNCATED_ALIAS_TAILS.some((tail) => text.endsWith(tail))) return false;
   return known.has(normalizeSpacingOnly(`${text}ん`));
+}
+
+/**
+ * 「関係ではないもの」を関係から落とす（実装ルール3の検算）。
+ *
+ * **AIは自分で「明記されていない」と断りながら関係を書いてくる。**
+ * 実データ（gemma4:26b、2026-09-19の測定）で
+ * `{"from":"リーナ・ヴェイル","to":"ヨナ",
+ *   "relation":"（関係性は明記されていないが、親密な様子が見られる）"}`
+ * が出た。プロンプトP-04aは「推測で書かないこと。『仲が良さそう』
+ * 『敵かもしれない』は関係ではありません」と既に禁じているので、
+ * **指示ではなくコードで落とす**。
+ *
+ * 落とすのは**関係の言い方が推測・断りだったとき**だけで、相手の名前は見ない。
+ * 名前のほうは本文に出ている呼び名でありうる。
+ *
+ * **網は2つある。** 言い回し（`isSpeculativeRelation`）と、構造
+ * （`isSentenceShapedRelation`）。言い回しだけでは追いかけっこになるため
+ * （同じ断りが「明記されていないが」とも「不明だが」とも書かれた）、
+ * 「関係の欄に文が入っている」という形でも落とす。
+ */
+function dropSpeculativeRelations(
+  characters: ExtractedCharacter[],
+  dropped: DroppedRelationRecord[]
+): void {
+  for (const character of characters) {
+    if (!character.relations) continue;
+    const kept: NonNullable<ExtractedCharacter["relations"]> = [];
+    for (const relation of character.relations) {
+      const reason = relationRejectionReason(relation.relation);
+      if (reason !== null) {
+        dropped.push({
+          characterName: character.name,
+          partner: relation.name,
+          relation: relation.relation,
+          reason,
+        });
+        continue;
+      }
+      kept.push(relation);
+    }
+    character.relations = kept;
+  }
+}
+
+/**
+ * その関係を落とすか。落とすなら理由、残すなら null。
+ *
+ * **言い回しを先に見る。** 両方に当たる値（実測で出た
+ * 「（関係性は明記されていないが、〜）」は両方に当たる）の理由が、
+ * 網を足すたびに入れ替わると、前に取った測定結果と突き合わせられなくなる。
+ */
+function relationRejectionReason(
+  relation: string
+): RelationRejectionReason | null {
+  if (isSpeculativeRelation(relation)) return "not_a_relation";
+  if (isSentenceShapedRelation(relation)) return "sentence_shaped";
+  return null;
+}
+
+/**
+ * 関係の値が「関係」ではなく、推測・伝聞・不在の断りになっている言い方。
+ *
+ * **広げないことのほうが大事である。** 正しい関係を落とすと、資料から
+ * その繋がりが消えて二度と戻らない——とくに「憑依している」「入れ替わっている」
+ * 「その名を騙っている」は、**別人判定（`SHARED_BODY_RELATION`）の
+ * 手がかり**でもあるので、落とすと人物の同一性の仕組みごと壊れる。
+ * だから「言い切っていない印」がはっきり出ている形だけを並べる。
+ */
+const SPECULATIVE_RELATION_PATTERNS: readonly RegExp[] = [
+  // 1. 本文に無いと自分で断った形（「関係性は明記されていない」）。
+  //    「記載がない」「描写はありません」まで同じ形で拾う
+  /(?:明記|記載|記述|描写|言及)(?:は|が|も)?(?:されて)?(?:い)?(?:ない|ありません|ません|無い|なし)/u,
+  /書かれて(?:い)?(?:ない|ません)/u,
+  // 「（関係性は不明だが、親密な様子が見える）」。2026-09-19の測定で、同じ
+  // 断りが「明記されていない」とも「不明」とも書かれた——**同じ意味の
+  // 言い換えは何通りでも出てくる**ので、関係そのものを不明と言った形も見る。
+  // 「生死不明の兄」は落とさない（不明なのは関係ではなく安否である）
+  /(?:関係性|関係|続柄|間柄)(?:は|が|も)?(?:不明|不詳|わからない|分からない|明らかで(?:は)?ない|特定できない)/u,
+  // 「不明だが」「不明ながら」のように、断ったうえで様子を続ける形
+  /不明(?:だ|です)?(?:が|けど|けれど|ものの|ながら)/u,
+  // 2. 推量の助動詞・言い回し
+  /かも(?:しれ|知れ)(?:ない|ません|ず)/u,
+  /思われ(?:る|ます)/u,
+  /推測|推察/u,
+  /おそらく|恐らく/u,
+  // 「恋人である可能性がある」。関係語そのものに「可能性」は入らない
+  /可能性/u,
+  /よう(?:だ|です)|ように(?:見え|思え|感じ)/u,
+  /噂|うわさ/u,
+  /断定(?:は)?できない|定かで(?:は)?ない/u,
+  // 3. 様態の「〜そう」（「仲が良さそう」「険悪そうに見える」）。
+  //    **末尾か、関係を言い換える名詞の直前だけ**に限る——真ん中の「そう」まで
+  //    拾うと「そうだん相手」のような書き方を巻き込む
+  /そう(?:だ|です|に見える|に思える|に感じる)?$/u,
+  /そうな(?:関係|様子|雰囲気|仲|間柄)/u,
+];
+
+/**
+ * その関係は、関係ではなく推測・断りか。
+ *
+ * 純粋関数にしてあるのは、**どこまで落とすかの境界をテストで固定する**
+ * ためである（`correctRelationDirection` と同じ理由）。
+ */
+export function isSpeculativeRelation(relation: string): boolean {
+  const value = relation.trim();
+  if (!value) return false;
+  // 「なし」「不明」「（記述なし）」のような、値が無いことしか言っていない形。
+  // 判定は説明欄と1か所で持つ（同じものを2通りに書かない）
+  if (!isMeaningfulValue(value)) return true;
+  return SPECULATIVE_RELATION_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+/**
+ * 値が丸ごと括弧で囲まれている形。囲みの中身を取り出す。
+ *
+ * 中に別の括弧が入っている形は見ない（「（Aの（B））」のような入れ子は、
+ * どこまでが囲みなのか形からは決められないため、落とさない側へ倒す）。
+ */
+const WHOLLY_PARENTHESIZED_RELATION = /^[（(]([^（()）]*)[）)]$/u;
+/** 文の区切り。関係語には入らない */
+const RELATION_SENTENCE_PUNCTUATION = /[、。，．,.]/u;
+/**
+ * 関係の値の長さの上限（字）。**実測の最大が34字**だったので、
+ * 6字の余裕を足してここに置く。
+ */
+const RELATION_MAX_LENGTH = 40;
+/**
+ * 丸ごと括弧の中身の長さの上限（字）。**実データの唯一の例
+ * 「（間接的な関わり）」が中身7字**だったので、倍以上の余裕を取ってここに置く。
+ */
+const PARENTHESIZED_RELATION_MAX_INNER_LENGTH = 15;
+
+/**
+ * その関係の値は、**関係語ではなく文**になっているか（構造で落とす網）。
+ *
+ * **言い回しの表だけでは追いかけっこになる。** 同じ条件で2回測っただけで、
+ * AIは同じ断りを「（関係性は明記されていないが、…）」と
+ * 「（関係性は不明だが、…）」の2通りで書いてきた（2026-09-19、gemma4:26b）。
+ * 関係の欄に入るべきは「兄」「幼なじみ」「憑依している」のような**短い語**
+ * であって文ではないので、**文であること自体**を理由に落とす
+ * （作者の裁定、2026-09-19「構造でも切る」）。
+ *
+ * **線は推測ではなく実測で引いた。** 作者の設定資料13作品・157ファイルにある
+ * 本物の関係 508件を数えた結果、
+ *   - 長さは 最短1字／中央3字／p90 10字／p95 15字／p99 25字／**最大34字**
+ *   - 句読点を含む値は15件（2.9%）で、**いずれも「同級生（引用）」の形**——
+ *     括弧の外に関係語がある
+ *   - **丸ごと括弧で囲まれた値は1件だけ**（「（間接的な関わり）」）で、
+ *     その1件に句読点は無い
+ * 下の3つの線は、この508件のどれにも当たらない（誤爆0件を確かめてから引いた）。
+ *
+ * **別人判定の手がかりは、構造では落とさない。** 「憑依している」
+ * 「入れ替わっている」は人物の同一性を決める語で（`SHARED_BODY_RELATION`、
+ * 設計書6.95）、実データにも括弧つき26字の形がある。落とすと、憑依した側と
+ * された側が1つのレコードにまとまる。言い回しの網はこれまでどおり効かせる
+ * （「憑依しているかもしれない」は推測なので落ちる）。
+ */
+export function isSentenceShapedRelation(relation: string): boolean {
+  const value = relation.trim();
+  if (!value) return false;
+  if (SHARED_BODY_RELATION.test(value)) return false;
+
+  // 1. 長すぎる。括弧を使わずに説明を書いてきた形を拾う
+  if ([...value].length > RELATION_MAX_LENGTH) return true;
+
+  // 2. 丸ごと括弧の断り書き。**関係語が1つも無く、注釈だけ**の形である。
+  //    「案内役（引用）」のように括弧の外に関係語があるものは、
+  //    関係として読めるのでここには入らない
+  const inner = WHOLLY_PARENTHESIZED_RELATION.exec(value)?.[1];
+  if (inner === undefined) return false;
+  if (RELATION_SENTENCE_PUNCTUATION.test(inner)) return true;
+  return [...inner].length >= PARENTHESIZED_RELATION_MAX_INNER_LENGTH;
 }
 
 /**

@@ -284,14 +284,16 @@ export async function checkDeviations(
   // 渡さないと、Ollamaの `num_ctx` が既定の8,192で確保される
   const plannedOutputTokens = resolveOutputTokensForPlanning(
     resolved.provider.id,
-    model
+    model,
+    "deviation_check"
   );
   // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
   // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
   // 半分になり、長い応答が途中で切れる
   const sendOutputTokens = resolveOutputTokensForSend(
     resolved.provider.id,
-    model
+    model,
+    "deviation_check"
   );
 
   const issues: DeviationIssue[] = [];

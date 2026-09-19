@@ -10,6 +10,9 @@ import {
   writeTuningEntry,
   type TuningWriteOutcome,
 } from "./modelTuningStore";
+// 機能ごとの行の印だけを借りる（実体は引き込まない）。同じファイルに
+// 住んでいるので、モデルの表を読むときに読み飛ばす必要がある
+import { FEATURE_OUTPUT_KEY_PREFIX } from "./featureOutputTokens";
 // **書けたかどうかの札は、ここから配る。** 台帳を使う側（測定・普段の
 // 呼び出し）は `modelTuning.ts` しか見ないので、置き場のファイル名まで
 // 知らせずに済ませる
@@ -434,6 +437,13 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
 
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (key.trim().length === 0) continue;
+    /*
+      **機能ごとの行は、モデルの表ではない**（`core/featureOutputTokens.ts`）。
+      同じファイルに住んでいるが、鍵の意味も欄の意味も別物なので、ここで
+      読み飛ばす。読み飛ばさないと `measuredAt` だけが読めてしまい、
+      実測の一覧に「出力見込み / typo_check」という架空のモデルが並ぶ。
+    */
+    if (key.startsWith(FEATURE_OUTPUT_KEY_PREFIX)) continue;
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
       continue;
     }

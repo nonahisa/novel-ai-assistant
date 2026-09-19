@@ -254,16 +254,43 @@ export async function checkContradictions(
 
   // **応答の見込みに実測を使う**（設計書6.65.16の2）
   const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
+  /*
+    **`contradiction_check` の実測で通す**（設計書6.77の第3段）。
+
+    この1組を、本体（過去向き）と未来向きの**両方**が使う——同じ
+    `generate` 呼び出しで、記録の名前だけが `mode` で変わるためである。
+    計画（チャンクの大きさ）は走り始めに1回しか決められないので、
+    ここで向きごとに変えると**計画と関所が食い違う**（まさに直している
+    ことをやり直すことになる）。実測では本体10,229・未来8,570で、
+    **大きいほうが本体**なので、本体で通せば未来側が足りなくなることは無い。
+  */
   const plannedOutputTokens = resolveOutputTokensForPlanning(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "contradiction_check"
   );
   // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
   // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
   // 半分になり、長い応答が途中で切れる
   const sendOutputTokens = resolveOutputTokensForSend(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "contradiction_check"
+  );
+  /*
+    **検証は別に見込む**（設計書6.77の第3段）。指摘1件ごとに1回呼ぶ短い
+    仕事で、実測は本体の4分の1（2,459 対 10,229）である。本体の見込みを
+    そのまま使うと、要らない席を4倍空けたまま何十回も呼ぶことになる。
+  */
+  const verifyPlannedOutputTokens = resolveOutputTokensForPlanning(
+    outputTuning.providerId,
+    outputTuning.model,
+    "contradiction_verify"
+  );
+  const verifySendOutputTokens = resolveOutputTokensForSend(
+    outputTuning.providerId,
+    outputTuning.model,
+    "contradiction_verify"
   );
   const tasks = await collectManuscriptChunks({
     work,
@@ -865,8 +892,8 @@ export async function checkContradictions(
         }),
         model,
         temperature: 0.0,
-        maxOutputTokens: sendOutputTokens,
-        plannedOutputTokens,
+        maxOutputTokens: verifySendOutputTokens,
+        plannedOutputTokens: verifyPlannedOutputTokens,
         jsonSchema: CONTRADICTION_VERIFY_SCHEMA as unknown as object,
         disableThinking: true,
         signal: controller.signal,

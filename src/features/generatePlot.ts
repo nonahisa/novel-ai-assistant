@@ -148,11 +148,13 @@ export async function generatePlot(
           // 測っていないモデルで途中から切れて丸ごと捨てることになる
           maxOutputTokens: resolveOutputTokensForSend(
             resolved.provider.id,
-            resolved.model
+            resolved.model,
+            "plot_reverse"
           ),
           plannedOutputTokens: resolveOutputTokensForPlanning(
             resolved.provider.id,
-            resolved.model
+            resolved.model,
+            "plot_reverse"
           ),
           jsonSchema: PLOT_REVERSE_SCHEMA as unknown as object,
           disableThinking: true,

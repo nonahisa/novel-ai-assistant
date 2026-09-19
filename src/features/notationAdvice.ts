@@ -149,11 +149,13 @@ export async function askNotationAdvice(
       // 設定値（既定16,384）で数える
       maxOutputTokens: resolveOutputTokensForSend(
         resolved.provider.id,
-        resolved.model
+        resolved.model,
+        "notation_advice"
       ),
       plannedOutputTokens: resolveOutputTokensForPlanning(
         resolved.provider.id,
-        resolved.model
+        resolved.model,
+        "notation_advice"
       ),
       jsonSchema: buildNotationAdviceSchema(group),
       disableThinking: true,

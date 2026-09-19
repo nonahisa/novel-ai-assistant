@@ -159,6 +159,98 @@ const BUNDLED: Readonly<Record<string, BundledTuning>> = {
   },
 };
 
+/**
+ * **機能ごと**の、1回の応答に要る出力トークン数（設計書6.77の第3段）。
+ *
+ * モデルごとの上の表とは、鍵も単位も別物である。載せる理由も違う。
+ *
+ * - 上の表……「このモデルは何字読めるか」。**機械とモデルの性質**
+ * - この表……「この機能は何トークン書くか」。**仕事の大きさ**
+ *
+ * 出力の量を決めているのは、モデルではなく**仕事のほう**である
+ * （誤字脱字の指摘は本文の誤字の数だけ返り、各話あらすじは話数だけ返る）。
+ * だから鍵は機能だけにしてある——`機能×プロバイダ×モデル` で分けると、
+ * 実測が散らばって**いつまでも件数がしきい値に届かない。**
+ */
+export interface BundledFeatureOutput {
+  /** 切り詰められていない回の、実測の**最大**トークン数 */
+  readonly outputTokens: number;
+  /**
+   * 何回ぶんの実測から採ったか。
+   *
+   * **回数ごと載せる。** 読む側（`core/featureOutputTokens.ts`）は
+   * 件数がしきい値に届いた機能だけを信じるので、少ない回数の機能は
+   * 同梱しても使われない——それでよい。**1回の実測を「これがこの機能の
+   * 要る量だ」と言い切るほうが危ない**（たまたま短かった回かもしれない）。
+   */
+  readonly samples: number;
+  /** 測った日（ISO 8601 の日付）。古くなったら黙って使わないための手がかり */
+  readonly measuredAt: string;
+}
+
+/**
+ * 同梱する、機能ごとの出力トークンの実測。
+ *
+ * 出どころは作者の作品の `.aiwriter/logs/usage.md`（2026-09-19に集計）。
+ * 各機能の `usage.completion_tokens` の**最大値**と、その件数である。
+ *
+ * ---
+ *
+ * **5つの守りは、モデルの表とまったく同じ形で守る。**
+ *
+ * | 守ること | どう守っているか |
+ * |---|---|
+ * | 台帳へ書き写さない | 読むときだけ混ぜる（`featureOutputTuning`）。書き込み（`recordFeatureOutputTokens`）は素の台帳だけを土台にする |
+ * | 作者の実測が常に勝つ | 台帳にその機能の行があれば、同梱は見ない |
+ * | 出どころを見せる | 混ぜた結果に `bundled` が付き、見込みを決めたときの記録（操作ログ）に「同梱」と出る |
+ * | 弱い測定は載せない | 件数がしきい値未満の機能も**数字ごと**載せるが、読む側が信じない。**切り詰められた回しか無い `blurb` は行ごと置かない** |
+ * | APIが教えてくれる値はAPIを優先 | 「この機能が何トークン書くか」を申告するAPIは**どこにも無い**。上書きする相手が居ないので、この守りは効く先が無い |
+ *
+ * ## `blurb`（紹介文）を載せていない理由
+ *
+ * 実測は1件で、その値は 16,384 ——**設定の上限ちょうど**である。実機で
+ * 「応答が出力上限で切り詰められました」が出た回なので、**そこで切られた
+ * 量**であって、要った量ではない。載せると「16,384 で足りる」と言い切る
+ * ことになるが、本当はもっと要ったのかもしれない。**要る量を知らない機能は
+ * 知らないままにして、設定値に任せる**（`sakura/preview/Qwen3.6-35B-A3B`
+ * を行ごと置いていないのと同じ約束）。
+ *
+ * 切り詰められた回は、普段の呼び出しでも記録に残る
+ * （`recordFeatureOutputTokens` の `truncated`）。要る量が分からない印が
+ * 付くので、以後その機能の上限は設定値のままになる。
+ */
+const BUNDLED_FEATURE_OUTPUT: Readonly<Record<string, BundledFeatureOutput>> = {
+  /* ── 件数がしきい値（3回）に届いているもの ───────────────── */
+  character_extract: { outputTokens: 12_023, samples: 6, measuredAt: "2026-09-19" },
+  deviation_check: { outputTokens: 9_758, samples: 5, measuredAt: "2026-09-19" },
+  typo_check: { outputTokens: 8_753, samples: 3, measuredAt: "2026-09-19" },
+  foreshadow_detect: { outputTokens: 5_728, samples: 3, measuredAt: "2026-09-19" },
+  synopsis: { outputTokens: 4_034, samples: 5, measuredAt: "2026-09-19" },
+  contradiction_verify: { outputTokens: 2_459, samples: 3, measuredAt: "2026-09-19" },
+
+  /* ── まだ届いていないもの。**数字は残すが、使われない** ──────
+     使わないのに載せるのは、次の1回で件数が足りたときに、その1回だけで
+     決まってしまうのを避けるため——同梱の件数が足し算の土台になる。 */
+  proofread: { outputTokens: 12_491, samples: 2, measuredAt: "2026-09-19" },
+  contradiction_check: { outputTokens: 10_229, samples: 2, measuredAt: "2026-09-19" },
+  contradiction_future: { outputTokens: 8_570, samples: 1, measuredAt: "2026-09-19" },
+  opening_check: { outputTokens: 5_771, samples: 1, measuredAt: "2026-09-19" },
+  catchphrase: { outputTokens: 4_740, samples: 1, measuredAt: "2026-09-19" },
+  chapter_propose: { outputTokens: 3_550, samples: 1, measuredAt: "2026-09-19" },
+};
+
+/** その機能の同梱の初期値。無ければ undefined */
+export function bundledFeatureOutput(
+  feature: string
+): BundledFeatureOutput | undefined {
+  return BUNDLED_FEATURE_OUTPUT[feature];
+}
+
+/** 同梱している機能の一覧（テストと、見込みの説明が使う） */
+export function bundledFeatureOutputKeys(): string[] {
+  return Object.keys(BUNDLED_FEATURE_OUTPUT);
+}
+
 /** そのモデルの同梱の初期値。無ければ undefined */
 export function bundledTuning(
   providerId: string,

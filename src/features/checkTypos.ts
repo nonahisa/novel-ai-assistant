@@ -221,7 +221,8 @@ export async function checkTypos(
   const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
   const plannedOutputTokens = resolveOutputTokensForPlanning(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "typo_check"
   );
   // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
   // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
@@ -229,7 +230,8 @@ export async function checkTypos(
   // そのチャンクが丸ごと捨てられる
   const sendOutputTokens = resolveOutputTokensForSend(
     outputTuning.providerId,
-    outputTuning.model
+    outputTuning.model,
+    "typo_check"
   );
 
   // 実際に使うコンテキスト長。**本文以外の量を見込まない**（設計書6.27.10）。
