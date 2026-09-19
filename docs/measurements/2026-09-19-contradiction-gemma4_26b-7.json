@@ -1,0 +1,712 @@
+{
+  "measuredAt": "2026-09-19T14:58:22.892Z",
+  "feature": "contradiction",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:26b",
+  "numCtx": 16384,
+  "numCtxDecision": {
+    "numCtx": 16384,
+    "source": "プロンプトの長さから（製品と同じ道）",
+    "promptChars": 4255,
+    "outputTokens": 8192,
+    "contextWindow": 262144,
+    "charsPerToken": null
+  },
+  "temperature": 0,
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 262144,
+    "bundled": null,
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 17043,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": null,
+  "options": {},
+  "repeat": 3,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.70.3",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.5",
+  "verifyPromptVersion": null,
+  "plans": [
+    {
+      "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@4013",
+      "chars": 1235,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\002_十月三日の坂.txt#2-0@4013",
+      "chars": 1218,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\003_窓口の椅子.txt#3-0@4013",
+      "chars": 1211,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@4013",
+      "chars": 1249,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\005_初雪の窓口.txt#5-0@4013",
+      "chars": 1216,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction-name",
+    "targets": [
+      "本文\\001_九月の終わりの坂.txt",
+      "本文\\002_十月三日の坂.txt",
+      "本文\\003_窓口の椅子.txt",
+      "本文\\004_ギプスが外れた日.txt",
+      "本文\\005_初雪の窓口.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction-name\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 34265,
+      "temperature": 0,
+      "staleNote": null,
+      "metrics": {
+        "seededContradictions": 3,
+        "seededContradictionsTotal": 4,
+        "missedContradictions": 1,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 0,
+        "accepted": 3,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 34265
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "seededContradictions": {
+          "人物": {
+            "found": 2,
+            "total": 2
+          },
+          "状態": {
+            "found": 1,
+            "total": 1
+          },
+          "時系列": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missedContradictions": [
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "時系列",
+            "where": "足を折ってから、ちょうど二週間が過ぎた"
+          }
+        ],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_九月の終わりの坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@4013",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\002_十月三日の坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\002_十月三日の坂.txt#2-0@4013",
+                "chapterLabel": "第2話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\003_窓口の椅子.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\003_窓口の椅子.txt#3-0@4013",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 39,
+                    "excerpt": "僕は判子を押す手を止めた。",
+                    "category": "人物",
+                    "settingSays": "一人称: 俺",
+                    "textSays": "僕は判子を押す手を止めた。",
+                    "note": "それまでの地の文では「俺」が使われているが、この一文のみ「僕」になっている。書き間違いか、意図的な心理描写の変化（あるいは視点の揺らぎ）の可能性がある。",
+                    "severity": "low",
+                    "confidence": "high",
+                    "filePath": "本文\\003_窓口の椅子.txt",
+                    "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\004_ギプスが外れた日.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@4013",
+                "chapterLabel": "第4話",
+                "accepted": [
+                  {
+                    "line": 1,
+                    "excerpt": "右足のギプスが外れたのは、十一月の最初の月曜だった。",
+                    "category": "状態",
+                    "settingSays": "第2話にて、左の足首を折る。",
+                    "textSays": "右足のギプスが外れた",
+                    "note": "第2話の経緯では「左の足首を折る」とあるが、本文では「右足のギプス」となっている。左右の取り違えの可能性がある。",
+                    "severity": "medium",
+                    "confidence": "high",
+                    "filePath": "本文\\004_ギプスが外れた日.txt",
+                    "chunkHash": "0887666d7471eac41e81f35ad8069b22c48b36bd26f8dcf30ac044134b32fef7"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\005_初雪の窓口.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\005_初雪の窓口.txt#5-0@4013",
+                "chapterLabel": "第5話",
+                "accepted": [
+                  {
+                    "line": 7,
+                    "excerpt": "左目の下のほくろが、鏡の中で滲んだ。",
+                    "category": "人物",
+                    "settingSays": "右目の下に小さなほくろがある。",
+                    "textSays": "左目の下のほくろが、鏡の中で滲んだ。",
+                    "note": "設定では右目、本文では左目となっている。",
+                    "severity": "medium",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "c0716844893b3ccff4ff26f2790b4ee47ae3963bc15481798ae58a4e2f692428"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "elapsedMs": 11446,
+      "temperature": 0,
+      "staleNote": null,
+      "metrics": {
+        "seededContradictions": 3,
+        "seededContradictionsTotal": 4,
+        "missedContradictions": 1,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 0,
+        "accepted": 3,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 11446
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "seededContradictions": {
+          "人物": {
+            "found": 2,
+            "total": 2
+          },
+          "状態": {
+            "found": 1,
+            "total": 1
+          },
+          "時系列": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missedContradictions": [
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "時系列",
+            "where": "足を折ってから、ちょうど二週間が過ぎた"
+          }
+        ],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_九月の終わりの坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@4013",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\002_十月三日の坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\002_十月三日の坂.txt#2-0@4013",
+                "chapterLabel": "第2話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\003_窓口の椅子.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\003_窓口の椅子.txt#3-0@4013",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 39,
+                    "excerpt": "僕は判子を押す手を止めた。",
+                    "category": "人物",
+                    "settingSays": "一人称: 俺",
+                    "textSays": "僕は判子を押す手を止めた。",
+                    "note": "直前まで「俺」を使用しているが、ここだけ「僕」に変化している。心理的な変化、あるいは記述ミス、あるいは意図的な使い分けの可能性がある。",
+                    "severity": "low",
+                    "confidence": "high",
+                    "filePath": "本文\\003_窓口の椅子.txt",
+                    "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\004_ギプスが外れた日.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@4013",
+                "chapterLabel": "第4話",
+                "accepted": [
+                  {
+                    "line": 1,
+                    "excerpt": "右足のギプスが外れたのは、十一月の最初の月曜だった。",
+                    "category": "状態",
+                    "settingSays": "第2話にて、春人は左の足首を折る。",
+                    "textSays": "右足のギプスが外れた",
+                    "note": "第2話の経緯では「左の足首を折る」とあるが、本文では「右足のギプス」となっている。左右の取り違えの可能性がある。",
+                    "severity": "medium",
+                    "confidence": "high",
+                    "filePath": "本文\\004_ギプスが外れた日.txt",
+                    "chunkHash": "0887666d7471eac41e81f35ad8069b22c48b36bd26f8dcf30ac044134b32fef7"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\005_初雪の窓口.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\005_初雪の窓口.txt#5-0@4013",
+                "chapterLabel": "第5話",
+                "accepted": [
+                  {
+                    "line": 7,
+                    "excerpt": "左目の下のほくろが、鏡の中で滲んだ。",
+                    "category": "人物",
+                    "settingSays": "右目の下に小さなほくろがある。",
+                    "textSays": "左目の下のほくろが、鏡の中で滲んだ。",
+                    "note": "設定では右目、本文では左目となっている。",
+                    "severity": "low",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "c0716844893b3ccff4ff26f2790b4ee47ae3963bc15481798ae58a4e2f692428"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    },
+    {
+      "round": 3,
+      "elapsedMs": 11409,
+      "temperature": 0,
+      "staleNote": null,
+      "metrics": {
+        "seededContradictions": 3,
+        "seededContradictionsTotal": 4,
+        "missedContradictions": 1,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 0,
+        "accepted": 3,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 11409
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "seededContradictions": {
+          "人物": {
+            "found": 2,
+            "total": 2
+          },
+          "状態": {
+            "found": 1,
+            "total": 1
+          },
+          "時系列": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missedContradictions": [
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "時系列",
+            "where": "足を折ってから、ちょうど二週間が過ぎた"
+          }
+        ],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_九月の終わりの坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@4013",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\002_十月三日の坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\002_十月三日の坂.txt#2-0@4013",
+                "chapterLabel": "第2話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\003_窓口の椅子.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\003_窓口の椅子.txt#3-0@4013",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 39,
+                    "excerpt": "僕は判子を押す手を止めた。",
+                    "category": "人物",
+                    "settingSays": "一人称: 俺",
+                    "textSays": "僕は判子を押す手を止めた。",
+                    "note": "直前まで「俺」を使用しているが、ここだけ「僕」に変化している。心理的な変化、あるいは記述ミス、あるいは意図的な使い分けの可能性がある。",
+                    "severity": "low",
+                    "confidence": "high",
+                    "filePath": "本文\\003_窓口の椅子.txt",
+                    "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\004_ギプスが外れた日.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@4013",
+                "chapterLabel": "第4話",
+                "accepted": [
+                  {
+                    "line": 1,
+                    "excerpt": "右足のギプスが外れたのは、十一月の最初の月曜だった。",
+                    "category": "状態",
+                    "settingSays": "第2話にて、春人は左の足首を折る。",
+                    "textSays": "右足のギプスが外れた",
+                    "note": "第2話の経緯では「左の足首を折る」とあるが、本文では「右足のギプス」となっている。左右の取り違えの可能性がある。",
+                    "severity": "medium",
+                    "confidence": "high",
+                    "filePath": "本文\\004_ギプスが外れた日.txt",
+                    "chunkHash": "0887666d7471eac41e81f35ad8069b22c48b36bd26f8dcf30ac044134b32fef7"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\005_初雪の窓口.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\005_初雪の窓口.txt#5-0@4013",
+                "chapterLabel": "第5話",
+                "accepted": [
+                  {
+                    "line": 7,
+                    "excerpt": "左目の下のほくろが、鏡の中で滲んだ。",
+                    "category": "人物",
+                    "settingSays": "右目の下に小さなほくろがある。",
+                    "textSays": "左目の下のほくろが、鏡の中で滲んだ。",
+                    "note": "設定では右目、本文では左目となっている。",
+                    "severity": "low",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "c0716844893b3ccff4ff26f2790b4ee47ae3963bc15481798ae58a4e2f692428"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seededContradictions": {
+      "values": [
+        3,
+        3,
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "seededContradictionsTotal": {
+      "values": [
+        4,
+        4,
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "missedContradictions": {
+      "values": [
+        1,
+        1,
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "falseFlagsContradiction": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "categoryMismatch": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "otherFlagsContradiction": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        3,
+        3,
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "rejected": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        34265,
+        11446,
+        11409
+      ],
+      "min": 11409,
+      "max": 34265
+    }
+  },
+  "lines": [
+    "仕込んだ矛盾を拾えた: 3/4（各回：3/4、3/4、3/4）",
+    "見逃し（拾えなかった仕込み）: 1（各回：1、1、1）",
+    "誤検出（罠と、矛盾の無い話に付いた指摘）: 0（各回：0、0、0）",
+    "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）: 0（各回：0、0、0）",
+    "仕込み以外の箇所への指摘: 0（各回：0、0、0）",
+    "指摘（検算を通ったもの）: 3（各回：3、3、3）",
+    "落とした（検算で弾いたもの）: 0（各回：0、0、0）",
+    "失敗（チャンクごと通らなかったもの）: 0（各回：0、0、0）",
+    "所要時間: 11.4秒〜34.3秒（各回：34.3秒、11.4秒、11.4秒）",
+    "num_ctx: 16384（プロンプトの長さから（製品と同じ道））",
+    "temperature: 0（製品と同じ（束が返した値））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 17.0秒"
+  ]
+}
