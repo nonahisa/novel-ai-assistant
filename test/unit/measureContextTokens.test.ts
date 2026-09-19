@@ -795,7 +795,14 @@ describe("待っても直らない失敗に当たったとき", () => {
     const { notice, error } = await measure();
 
     expect(error).toContain("残高が足りません");
-    expect(notice).toBe("");
+    /*
+      **「何も出していない」では確かめない**（0.68.10）。測る前に
+      「このAIは読める長さを申告するので、申告値を使い続けます」という
+      断りを出すようにしたので、通知そのものは出る。ここで見るべきは
+      **結果らしきものを見せていないこと**である。
+    */
+    expect(notice).not.toContain("実効の上限");
+    expect(notice).not.toContain("設定に反映");
   });
 
   /*

@@ -78,6 +78,24 @@ vi.mock("../../src/ai/registry", () => ({
   ),
 }));
 
+/**
+ * 記録（`core/logger.ts`）は本物を通さず、書かれた行だけを受け取る。
+ *
+ * **抽出が終わったことと件数の内訳は、知らせ（通知）だけでなく記録にも
+ * 残す**（作者の裁定、2026-09-19）。知らせは消えるので、「新規0名・
+ * 更新0名」で終わった回に、除外や失敗のせいなのか、本当に増えるものが
+ * 無かったのかを、あとから区別できなかった。
+ */
+const loggedSteps = vi.hoisted(() => ({ lines: [] as string[] }));
+
+vi.mock("../../src/core/logger", () => ({
+  logStep: vi.fn((message: string) => loggedSteps.lines.push(message)),
+  logLine: vi.fn((message: string) => loggedSteps.lines.push(message)),
+  logFailure: vi.fn(),
+  showLog: vi.fn(),
+  useLogFile: vi.fn(),
+}));
+
 vi.mock("../../src/core/scanner", () => ({
   scanWork: vi.fn(async () => ({
     episodes: [
@@ -1912,5 +1930,58 @@ describe("人物抽出フロー", () => {
     expect(confirmation).toContain("無料・手元で実行（API課金なし）");
     expect(confirmation).not.toContain("課金が発生します");
     expect(confirmation).not.toContain("Anthropic");
+  });
+
+  describe("終わったことと件数の内訳を、記録にも残す", () => {
+    /** 抽出をひと通り走らせる。返すのは記録に出た「設定資料の抽出」の行 */
+    async function runAndReadLog(): Promise<string | undefined> {
+      loggedSteps.lines = [];
+      Object.assign(window, {
+        showInformationMessage: vi.fn(
+          async (_message: string, ...actions: string[]) =>
+            actions.includes("実行") ? "実行" : undefined
+        ),
+        showWarningMessage: vi.fn(async () => undefined),
+        withProgress: vi.fn(async (_options, task) =>
+          task(
+            { report: vi.fn() },
+            { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+          )
+        ),
+      });
+      state.generate.mockResolvedValue({
+        text: JSON.stringify({ characters: [] }),
+        truncated: false,
+        elapsedMs: 1,
+      });
+
+      await extractCharacters(work, {
+        resolveModelInfo: vi.fn(async () => ({ contextWindow: 8192 })),
+      } as unknown as AIRegistry);
+
+      return loggedSteps.lines.find((line) =>
+        line.startsWith("設定資料の抽出 → ")
+      );
+    }
+
+    test("件数の内訳が1行で残る", async () => {
+      const line = await runAndReadLog();
+
+      expect(line).toBeDefined();
+      expect(line).toContain("新規 0名");
+      expect(line).toContain("更新 0名");
+      expect(line).toContain("除外 0件");
+      expect(line).toContain("失敗 0チャンク");
+    });
+
+    test("1件も増えなかった回は、その理由まで残す", async () => {
+      // **「できました」だけの記録では、今回の困りごとが解けない。**
+      // なぜ増えなかったのかが分からないと、作者は不具合を疑う
+      const line = await runAndReadLog();
+
+      expect(line).toContain("資料は増えていません");
+      // 出ないことの確認。増えていないのに「できました」とは書かない
+      expect(line).not.toContain("できました");
+    });
   });
 });

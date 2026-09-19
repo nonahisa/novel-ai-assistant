@@ -68,3 +68,16 @@ export function measuresInput(scope: TuningScope): boolean {
 export function measuresOutput(scope: TuningScope): boolean {
   return scope !== "input";
 }
+
+/**
+ * 記録に書く「何を測ったか」。
+ *
+ * **選ぶ画面の言葉をそのまま使う。** 別の言い回しを起こすと、作者が
+ * 押した項目と記録の行が結びつかない（片方だけ直したときにずれる）。
+ */
+export function describeTuningScope(scope: TuningScope): string {
+  return (
+    TUNING_SCOPE_CHOICES.find((choice) => choice.scope === scope)?.label ??
+    scope
+  );
+}

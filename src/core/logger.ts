@@ -26,11 +26,37 @@ let logFilePath: string | undefined;
 let writeQueue: Promise<void> = Promise.resolve();
 
 /**
+ * 作品が決まらない処理のログを置く場所（拡張機能の保管庫）。
+ *
+ * `extension.ts` の起動時に一度だけ登録する。**作品を選ばせない**
+ * ——AIチューニングのように作品をまたぐ処理で作品を訊くのは、答えが
+ * 結果に影響しないのに手を止めさせるだけである。
+ */
+let fallbackLogRoot: string | undefined;
+
+/** 作品が決まらない処理のログの置き場所。起動時に一度だけ呼ぶ */
+export function setFallbackLogRoot(rootPath: string): void {
+  fallbackLogRoot = rootPath;
+}
+
+/**
  * ログファイルの置き場所を決める。
  * 作品ごとに分けず1つにするのは、作品をまたいだ操作の順序も追いたいため。
+ *
+ * **作品が決まらないときは保管庫へ倒す**（作者の裁定、2026-09-19）。
+ * それまでは書き先が定まらず、**直前に別の作品を触っていればその作品の
+ * ログへ紛れ、触っていなければどこにも残らなかった。** 実機では書庫に
+ * 作品が複数あったためチューニングの記録が1行も残らず、12分かけて測った
+ * 結果も「反映待ちで止まっていること」も、通知が消えた時点で失われた。
+ *
+ * 置き場所の考え方は生成文書（`views/openDocument.ts`）と同じで、
+ * **作品が分かるなら作品の下、分からないなら拡張機能の保管庫**である。
  */
-export function useLogFile(workFolderPath: string): void {
-  logFilePath = path.join(workFolderPath, ".aiwriter", "logs", "actions.log");
+export function useLogFile(workFolderPath: string | undefined): void {
+  const root = workFolderPath ?? fallbackLogRoot;
+  logFilePath = root
+    ? path.join(root, ".aiwriter", "logs", "actions.log")
+    : undefined;
 }
 
 /**

@@ -1048,7 +1048,11 @@ function findCharacter(
   // 「イント・コンストラクタ」（母・父・息子）が、姓だけの「コンストラクタ」
   // という1件へまとめられた。姓だけのレコードが先にできると、家族が
   // 1人ずつ「候補が一人に決まる」判定を通ってしまい、次々に吸収される。
-  const shared = sharedNameParts(list);
+  //
+  // **入ってくる側の呼び名も一緒に渡す。** 既存レコードだけを見ていると、
+  // 「爵位で呼ばれる名前＝家名」の判定が片方向にしか効かない
+  // （2026-09-19の実機で、娘が先・父があとの順に返ったとき父が消えた）。
+  const shared = sharedNameParts(list, incomingNames);
   const usablePart = (part: string): boolean =>
     !shared.has(part) && !isGenericAppellation(part);
   const incomingParts = new Set(
@@ -1088,7 +1092,17 @@ function findCharacter(
  * 実データ84人で、コンストラクタ4・フォートラン4・シーゲン3（いずれも家名）と、
  * ヴォイド1・ポインタ1（いずれも名）がきれいに分かれた。
  */
-export function sharedNameParts(characters: readonly Character[]): Set<string> {
+export function sharedNameParts(
+  characters: readonly Character[],
+  /**
+   * まだレコードになっていない、これから照合する呼び名。
+   *
+   * **爵位の判定だけに使う**（下の「組んだ相手で数える」には混ぜない）。
+   * 入ってくる側の呼び名はすべて同一人物のものなので、
+   * 相手の種類として数えると自分自身の名を家名と誤判定しかねない。
+   */
+  incomingNames: readonly string[] = []
+): Set<string> {
   // 部分 → 一緒に並んでいた別の部分の種類
   const partners = new Map<string, Set<string>>();
 
@@ -1122,11 +1136,17 @@ export function sharedNameParts(characters: readonly Character[]): Set<string> {
   //
   // フルネームに爵位が付いた形（「ヴォイド・コンストラクタ男爵」）は
   // 個人を指すので対象にしない。区切りの有無で分ける。
-  for (const character of characters) {
-    for (const full of [character.name, ...character.aliases]) {
-      const family = nobilityFamilyName(full);
-      if (family) shared.add(family);
-    }
+  //
+  // **既存側と入ってくる側の両方を見る。** 2026-09-19 の直しは既存側しか
+  // 見ておらず、AIが娘を先・父をあとに返した並びでは、父の「シーゲン子爵」が
+  // まだどこにも無いため家名と分からず、娘のフルネームの一部と一致して
+  // 娘のレコードへ吸い込まれた。**どちらが先に来ても別人である。**
+  for (const full of [
+    ...characters.flatMap((character) => [character.name, ...character.aliases]),
+    ...incomingNames,
+  ]) {
+    const family = nobilityFamilyName(full);
+    if (family) shared.add(family);
   }
   return shared;
 }

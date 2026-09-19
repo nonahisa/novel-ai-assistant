@@ -42,6 +42,8 @@ import {
   type CharsPerTokenMeasurement,
 } from "../core/sizeBudget";
 import { logFailure, logStep, useLogFile } from "../core/logger";
+// 記録の文面だけを組む部品（設計書6.53）。**判定はここへ持ち込まない**
+import { describeTuningLog } from "../core/runLog";
 import {
   buildOutputProbePrompt,
   countOutputLines,
@@ -63,7 +65,9 @@ import {
   resolveTimeoutSeconds,
   saveModelTuning,
   type ModelTuning,
+  type TuningWriteOutcome,
 } from "../core/modelTuning";
+import { TUNING_STORE_FILE } from "../core/modelTuningStore";
 import { outputTokensPerSecond } from "../core/tuningStats";
 import {
   measuresOutput,
@@ -674,6 +678,41 @@ async function runMeasurement(
         : `（字/トークンの実測 ${probeRatio} を使用）`)
   );
 
+  /*
+    **測る前に、何が変わって何が変わらないかを言う**（作者の報告、
+    2026-09-19）。
+
+    Ollama は読める長さを自分で申告する（`/api/ps` が `context_length` を
+    返す）ので、測った長さで申告値を置き換えない
+    （`CONTEXT_TUNABLE_PROVIDERS`）。作者はそれを知らずに12分かけて測り、
+    申告より短い値が出て、**それが捨てられたように見えた。**
+
+    **選択肢は消さない。** この測定は無駄ではない——待ち時間の見立て、
+    字/トークンの実測、そしてチャンクの大きさの上限（測っていないモデルは
+    6,000字に抑えられる。`core/chunker.ts` の `capUntunedChunkChars`）が
+    ここで決まる。だから消さずに、**始まる前に断っておく。**
+
+    **止めない（押させない）。** 有料AIの確認とは別物で、ここで待たせる
+    ほどの話ではない。無料のローカルAIには確認そのものが出ないので、
+    伝える場所がここしか無い。
+  */
+  if (
+    !CONTEXT_TUNABLE_PROVIDERS.has(resolved.provider.id) &&
+    declaredTokens !== undefined
+  ) {
+    /*
+      **「置き換えません」とは書かない。** その言い回しは、打ち切った測定が
+      前の記録より小さいときの断り（`offerToSave`）で使っている。同じ言葉が
+      違う意味で2度出ると、作者はどちらの話か分からなくなる。
+    */
+    void vscode.window.showInformationMessage(
+      `${resolved.provider.displayName} は読める長さを自分で申告します` +
+        `（${declaredTokens.toLocaleString("ja-JP")}トークン）。` +
+        "この測定のあとも、読める長さはその申告値を使い続けます。" +
+        "ここで決まるのは、待ち時間・チャンクの大きさ・字/トークンの換算です。"
+    );
+  }
+
   /**
    * `num_ctx` の上限。**上限であって、固定値ではない**（設計書6.53.2）。
    *
@@ -796,9 +835,25 @@ async function runMeasurement(
     // 同梱の初期値が混ざると、作者が書いていない値へ戻すことになる
     const current = modelTuningRaw(resolved.provider.id, resolved.model);
     try {
-      await saveModelTuning(resolved.provider.id, resolved.model, {
-        timeoutSeconds: seconds,
-      });
+      const outcome = await saveModelTuning(
+        resolved.provider.id,
+        resolved.model,
+        { timeoutSeconds: seconds }
+      );
+      /*
+        **台帳が受け取らなかったなら、延ばせていない**（作者の報告、
+        2026-09-19）。書き込みは書けなくても例外を投げないので、
+        ここで札を見ないと「延ばした」ことにしてしまう——結果の文面に
+        「待ち時間を一時的に◯秒へ延ばして測り直しました」と出るのに、
+        プロバイダが読む値は1秒も変わっていない、という嘘になる。
+      */
+      if (outcome !== "written") {
+        logStep(
+          "読める長さの測定：待ち時間を延ばせませんでした" +
+            `（${describeTuningWriteFailure(outcome)}）。`
+        );
+        return false;
+      }
       // **書けたときだけ覚える。** 書けていないのに戻しにいくと、
       // 作者が自分で入れた値をこちらが消してしまう
       timeoutBeforeRaise = current?.timeoutSeconds;
@@ -1515,6 +1570,32 @@ async function runMeasurement(
     // **台帳の `contextWindow` は、チャンクを決める側と同じ換算で書く**
     measured: measuredAfter,
   });
+  /*
+    **測った値と、記録したかどうかを、1行に残す**（作者の裁定、2026-09-19）。
+
+    実機では 12 分かけて測ったのに、反映待ちで止まっていることも、
+    測れた長さも、どこにも残らなかった（通知は消える）。ここに書いて
+    おけば、待つ前に読める。
+
+    **判定をここでやり直さない。** 反映するかどうかを決めているのは
+    `offerToSave` なので、その条件を書き写すと片方だけ直したときに
+    記録と実際の動きが食い違う。ここは `applied`（結果）と、判断の
+    材料になった事実だけを `core/runLog.ts` へ渡している。
+  */
+  logStep(
+    describeTuningLog({
+      modelKey: modelTuningKey(resolved.provider.id, resolved.model),
+      measuredChars: low,
+      measuredTokens: probeCharsToTokens(low, measuredAfter),
+      recorded: applied,
+      recordsContextLength: CONTEXT_TUNABLE_PROVIDERS.has(resolved.provider.id),
+      hitCeiling: low > 0 && low >= ceilingChars,
+      stoppedBy: probeStop?.reason,
+      previousChars: ledgerAfter?.measuredChars,
+      cancelled,
+    })
+  );
+
   // 反映したなら、戻す相手がもう無い（見立てた秒数で上書きされている）。
   // 反映しなかったときは後始末を残したままにして、外側の `finally` に任せる
   if (applied) cleanup.restoreTimeout = undefined;
@@ -1809,7 +1890,7 @@ async function measureOutputLimit(
   const speed = outputTokensPerSecond(bestTokens, bestElapsedMs ?? 0);
   if (!stopped && bestTokens !== undefined) {
     try {
-      await saveModelTuning(provider.id, model, {
+      const outcome = await saveModelTuning(provider.id, model, {
         measuredOutputTokens: bestTokens,
         outputTokensPerSecond: speed,
         /*
@@ -1831,18 +1912,34 @@ async function measureOutputLimit(
         // 残って上限が広がらないままになるのを防ぐ
         outputMeasureTimedOut: timedOut ? true : undefined,
       });
-      // **保存した直後の台帳を読み直す。** まとめ送信の上限がどう変わったかは
-      // `chunkSettings.ts`（唯一の決め手）に訊かないと分からない——ここで
-      // 独自に計算すると、決め方が2か所に散る（設計書6.58.3と同じ理由）
-      const settings = readChunkSettings(contextWindow, undefined, {
-        providerId: provider.id,
-        model,
-      });
-      mergeCapMessage =
-        settings.mergeCharsBeforeOutputCap !== undefined
-          ? `この結果から、まとめ送信の上限を` +
-            `${settings.mergeChars.toLocaleString("ja-JP")}字にしました。`
-          : `上限はそのまま（${settings.mergeChars.toLocaleString("ja-JP")}字）です。`;
+      /*
+        **入らなかったなら、上限を変えたと言わない**（作者の報告、
+        2026-09-19）。台帳が受け取らなかったとき `readChunkSettings` は
+        古い（または無い）記録を読むので、下の文面は「上限はそのまま」に
+        なる——事実ではあるが、**書けなかったことが伝わらない。**
+      */
+      if (outcome !== "written") {
+        logStep(
+          "書ける量の測定：台帳へ保存できませんでした" +
+            `（${describeTuningWriteFailure(outcome)}）。`
+        );
+        mergeCapMessage =
+          "測った結果を記録できませんでした。" +
+          describeTuningWriteFailure(outcome);
+      } else {
+        // **保存した直後の台帳を読み直す。** まとめ送信の上限がどう変わったかは
+        // `chunkSettings.ts`（唯一の決め手）に訊かないと分からない——ここで
+        // 独自に計算すると、決め方が2か所に散る（設計書6.58.3と同じ理由）
+        const settings = readChunkSettings(contextWindow, undefined, {
+          providerId: provider.id,
+          model,
+        });
+        mergeCapMessage =
+          settings.mergeCharsBeforeOutputCap !== undefined
+            ? `この結果から、まとめ送信の上限を` +
+              `${settings.mergeChars.toLocaleString("ja-JP")}字にしました。`
+            : `上限はそのまま（${settings.mergeChars.toLocaleString("ja-JP")}字）です。`;
+      }
     } catch (error) {
       // **書けなくても測定そのものは落とさない**（`raiseTimeout` と同じ方針）。
       // エラーの本文は捨てない（CLAUDE.md 規則5）
@@ -1924,10 +2021,25 @@ async function saveMeasuredCharsPerToken(
   const next = mergeCharsPerToken(current?.charsPerToken, sample);
   const samples = (current?.charsPerTokenSamples ?? 0) + 1;
   try {
-    await saveModelTuning(providerId, model, {
+    const outcome = await saveModelTuning(providerId, model, {
       charsPerToken: next,
       charsPerTokenSamples: samples,
     });
+    /*
+      **入らなかったなら「覚えました」と言わない**（作者の報告、2026-09-19）。
+
+      台帳が書き込みを断ったときも、ここは例外を受け取らない。札を見ずに
+      文面を返していたので、**何も記録されていないのに「覚えました」と
+      結果に添えていた**——作者が「台帳が変わらない」に気づく唯一の手が
+      かりを、こちらが塞いでいたことになる。
+    */
+    if (outcome !== "written") {
+      logStep(
+        "読める長さの測定：字/トークンを台帳へ保存できませんでした" +
+          `（${describeTuningWriteFailure(outcome)}）。`
+      );
+      return "";
+    }
   } catch (error) {
     logStep(
       "読める長さの測定：字/トークンを台帳へ保存できませんでした" +
@@ -2160,15 +2272,35 @@ async function offerToSave(input: {
   // 上限を書いてよいのは、申告値を取れないプロバイダだけ
   const writesContext = CONTEXT_TUNABLE_PROVIDERS.has(input.providerId);
 
+  /*
+    **どこへ、何を書くのかを言う**（作者の報告、2026-09-19）。
+
+    これまでは「設定として覚えます」とだけ言っていた。作者は VS Code の
+    設定（`settings.json`）を見に行き、`novelai.ollama.timeoutSeconds` が
+    変わっていないので「何も起きていない」と受け取った。書き先は設定では
+    なく**拡張機能の保管庫の台帳**である（0.66.6 で移した）。名前で言う。
+
+    もう1つ、**Ollama のように読める長さを自分で申告する相手では、測った
+    長さで申告値を置き換えない**（`CONTEXT_TUNABLE_PROVIDERS`）。それを
+    黙って「設定として覚えます」と言うと、測った 138,714字 がそのまま効くと
+    読める。**記録する欄と、記録しても置き換えない値を、分けて言う。**
+  */
   const answer = await vscode.window.showInformationMessage(
     `${prefix}${input.summary}` +
-      `この結果は、いま選んでいるモデル（${key}）の設定として覚えます。` +
+      `この結果は、いま選んでいるモデル（${key}）のAIチューニングの記録として残します` +
+      `（VS Code の設定ではなく、拡張機能の保管庫の ${TUNING_STORE_FILE} です）。` +
       "ほかのモデルには影響しません——モデルを切り替えれば、そのモデルの値に変わります。" +
       "反映するのは、" +
       (writesContext
         ? `読める長さ 約${tokens.toLocaleString("ja-JP")}トークンと、`
         : "") +
-      `待ち時間 ${timeoutSeconds}秒 です。`,
+      `待ち時間 ${timeoutSeconds}秒 です。` +
+      `測った長さ ${input.low.toLocaleString("ja-JP")}字 も記録に残り、` +
+      "チャンクの大きさを決めるのに使います。" +
+      (writesContext
+        ? ""
+        : "読める長さそのものは、このAIが申告する値を使い続けます" +
+          "（測った長さは記録に残すだけです）。"),
     "設定に反映",
     "そのままにする"
   );
@@ -2212,18 +2344,79 @@ async function offerToSave(input: {
     contextMeasuredBy: input.measuredBy,
     measuredAt: new Date().toISOString(),
   };
-  await saveModelTuning(input.providerId, input.model, tuning);
+  const outcome = await saveModelTuning(input.providerId, input.model, tuning);
+
+  /*
+    **入ったことを確かめてから「覚えました」と言う**（作者の報告、
+    2026-09-19。この件の本体である）。
+
+    台帳への書き込みは、断ったとき（壊れている）も諦めたとき（別の窓と
+    取り合い）も**例外を投げずに戻る**（`core/modelTuningStore.ts`）。
+    ここはその戻りを見ずに言い切っていたので、12分かけて測った結果が
+    1バイトも入らなくても「覚えました」と出ていた。**作者が気づく手が
+    かりが、どこにも無い状態だった。**
+
+    書けなかったときは警告で出す。理由と、打つ手（台帳を直す・窓を1つに
+    する）を添えないと、作者は同じ12分をもう一度払うことになる。
+  */
+  if (outcome !== "written") {
+    logFailure("読める長さの測定", {
+      台帳: outcome,
+      対象: key,
+      本文: describeTuningWriteFailure(outcome),
+    });
+    void vscode.window.showWarningMessage(
+      `${key} の測定結果を記録できませんでした。` +
+        `${describeTuningWriteFailure(outcome)}` +
+        "測った値は残っていないので、直してから測り直してください。"
+    );
+    return false;
+  }
 
   logStep(
-    `読める長さの測定：${key} の設定を反映しました` +
+    `読める長さの測定：${key} の記録を反映しました` +
       `（${writesContext ? `上限 ${tokens} トークン / ` : ""}待ち時間 ${timeoutSeconds} 秒）。`
   );
   vscode.window.showInformationMessage(
-    `${key} の設定として覚えました` +
+    `${key} の記録として覚えました` +
       `（${writesContext ? `読める長さ 約${tokens.toLocaleString("ja-JP")}トークン / ` : ""}` +
-      `待ち時間 ${timeoutSeconds}秒）。ほかのモデルには影響しません。`
+      `待ち時間 ${timeoutSeconds}秒 / 測った長さ ${input.low.toLocaleString("ja-JP")}字）。` +
+      "ほかのモデルには影響しません。"
   );
   return true;
+}
+
+/**
+ * 台帳へ書けなかった理由を、作者の言葉にする（作者の報告、2026-09-19）。
+ *
+ * **札をそのまま出さない。** `unreadable` と `lost` では打つ手がまるで
+ * 違う——前者は台帳のファイルを直すまで何度測っても入らないし、後者は
+ * 開いている窓を1つにすれば入る。区別を伝えないと、作者は「また12分
+ * 測る」以外の手を思いつけない。
+ */
+function describeTuningWriteFailure(outcome: TuningWriteOutcome): string {
+  switch (outcome) {
+    case "written":
+      return "";
+    case "unreadable":
+      return (
+        `AIチューニングの台帳（拡張機能の保管庫の ${TUNING_STORE_FILE}）が` +
+        "読めない形になっているため、上書きせずに止めました。" +
+        "中身を直すか、詳細メニューの「AIチューニングの記録を消す」で" +
+        "作り直してから測り直してください。"
+      );
+    case "no_store":
+      return (
+        "AIチューニングの台帳の置き場が使えないため、書けませんでした。" +
+        "拡張機能を入れ直すか、VS Code を開き直してから測り直してください。"
+      );
+    case "lost":
+      return (
+        "台帳へ書いても残りませんでした。" +
+        "ほかの VS Code の窓が同じ台帳を書いている可能性があります。" +
+        "窓を1つにしてから測り直してください。"
+      );
+  }
 }
 
 function reportFailure(error: unknown): void {

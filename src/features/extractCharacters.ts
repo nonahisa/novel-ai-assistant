@@ -58,6 +58,10 @@ import {
   showLog,
   useLogFile,
 } from "../core/logger";
+import {
+  describeExtractionCancelled,
+  describeExtractionLog,
+} from "../core/runLog";
 import { writeExtractedIndex } from "../core/extractedIndexStore";
 import { readEpisodeContents } from "./extractionFreshness";
 import {
@@ -865,6 +869,10 @@ export async function extractCharacters(
   );
 
   if (cancelled) {
+    // **中止も記録に残す**（作者の裁定、2026-09-19）。知らせは消えるので、
+    // 「押したのに資料が増えていない」の理由が後から追えなくなる
+    useLogFile(work.folderPath);
+    logStep(describeExtractionCancelled());
     notifyDone(
       "設定資料の抽出を中止しました。完了済みの処理は次回再利用されます。"
     );
@@ -1021,6 +1029,30 @@ export async function extractCharacters(
       "\n能力・場所は保存できませんでした: " +
       (error instanceof Error ? error.message : String(error));
   }
+
+  /*
+    **終わったことと、件数の内訳を記録に残す**（作者の裁定、2026-09-19）。
+
+    知らせ（通知）は消えるので、「新規0名・更新0名」で終わった回に、
+    除外や失敗のせいなのか、本当に増えるものが無かったのかを区別できな
+    かった。`buildExtractionSummary` の文面をそのまま流さないのは、
+    あちらが**画面用**で、改行や案内文が混ざって1行に収まらないためで
+    ある（行で追えることが、ログでは効く）。
+  */
+  useLogFile(work.folderPath);
+  logStep(
+    describeExtractionLog({
+      added: baseCounts.added,
+      updated: baseCounts.updated,
+      rejected: baseCounts.rejected.length,
+      conflicts: baseCounts.conflicts,
+      folded: baseCounts.folded,
+      failedChunks: baseCounts.failedChunks,
+      saved: baseCounts.saved,
+      pendingUpdates: baseCounts.pendingUpdates,
+      cacheWarnings: baseCounts.cacheWarnings,
+    })
+  );
 
   const summary = buildExtractionSummary(baseCounts) + settingsNotice;
   const recovery = describeFailureRecoveries(failures);

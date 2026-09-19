@@ -2,7 +2,13 @@ import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { withProgress } from "../views/progress";
 import { openGeneratedMarkdown } from "../views/openDocument";
-import { logFailure, useLogFile } from "../core/logger";
+import { logFailure, logStep, useLogFile } from "../core/logger";
+import {
+  describeRunCancelledStep,
+  describeRunEnd,
+  describeRunStart,
+  describeRunStep,
+} from "../core/runLog";
 import {
   FINISH_PREREQUISITES,
   buildFinishConfirm,
@@ -73,6 +79,14 @@ interface FinishWorkRef {
   readonly work: WorkEntry;
 }
 
+/**
+ * 記録の行の先頭に置く名前。
+ *
+ * **画面に出す題（`withProgress` の見出し）と同じ文字にする。** 別の
+ * 言い回しにすると、作者が見た画面とログの行が結びつかない。
+ */
+const FINISH_LOG_LABEL = "新しい作品を、ひと通り仕上げる";
+
 export interface FinishNewWorkDeps {
   /** その分類で、提案パネルにまだ手を付けていない件数（設計書6.37.3） */
   remainingIn(category: string): number;
@@ -129,14 +143,62 @@ export async function runFinishNewWork(
   const runOptions: CheckRunOptions = { suite: { confirmed: true } };
 
   const done: FinishStepResult[] = [];
+
+  /*
+    **段ごとに1行を記録へ残す**（作者の裁定、2026-09-19）。
+
+    12段が終われば結果の紙は出るが、**途中の段が何をして何をしなかったか**
+    は紙が閉じられると追えない。とくに「飛ばした」は理由まで書く——黙って
+    飛ばしたのと同じに見えると、作られなかったことに気づけない。
+
+    **記録の直前に書き先を向ける。** 各段のコマンドが自分の作品へ向け
+    直すので、最初に一度だけ向けても、次の段までに動いていることがある
+  */
+  useLogFile(work.folderPath);
+  logStep(
+    describeRunStart({
+      runLabel: FINISH_LOG_LABEL,
+      workTitle: work.title,
+      total: steps.length,
+    })
+  );
+
+  const noteStep = (
+    index: number,
+    step: FinishStepResult,
+    /** 記録にだけ足す一言。`step.notes` は結果の紙にも出るので混ぜない */
+    logOnly?: string
+  ): void => {
+    done.push(step);
+    useLogFile(work.folderPath);
+    logStep(
+      describeRunStep({
+        runLabel: FINISH_LOG_LABEL,
+        done: index + 1,
+        total: steps.length,
+        step: logOnly
+          ? { ...step, notes: [...(step.notes ?? []), logOnly] }
+          : step,
+      })
+    );
+  };
+
   // 飛ばす段も、走らせた段と同じ並びで紙に載せる
   for (const entry of plan) {
     if (entry.skipReason === undefined) continue;
-    done.push({
+    const skipped: FinishStepResult = {
       label: entry.step.label,
       skipped: true,
       reason: entry.skipReason,
-    });
+    };
+    done.push(skipped);
+    // **走らせる前に決めた「飛ばす」も記録する。** ここを黙ると、紙を
+    // 閉じたあとに「なぜ作られなかったのか」を追う手がかりが消える。
+    // 番号は付けない——走らせる段の並び（1/12…）とは別の話である
+    logStep(
+      `${FINISH_LOG_LABEL} 走らせません ${entry.step.label} → ` +
+        `飛ばしました（${entry.skipReason}）`
+    );
   }
   /** 中止で走らせなかった段の、先頭の位置。走り切ったら -1 */
   let stoppedAt = -1;
@@ -164,7 +226,11 @@ export async function runFinishNewWork(
             段: step.label,
             詳細: error instanceof Error ? error.message : String(error),
           });
-          done.push({ label: step.label, failed: true });
+          noteStep(
+            index,
+            { label: step.label, failed: true },
+            error instanceof Error ? error.message : String(error)
+          );
           continue;
         }
 
@@ -172,12 +238,21 @@ export async function runFinishNewWork(
         // 各機能の中止（進捗の中止・確認での取りやめ・前提不足）で止める
         if (kind === "cancelled") {
           stoppedAt = index;
+          useLogFile(work.folderPath);
+          logStep(
+            describeRunCancelledStep({
+              runLabel: FINISH_LOG_LABEL,
+              done: index + 1,
+              total: steps.length,
+              label: step.label,
+            })
+          );
           return;
         }
         // **前提が足りなくて走らせなかったものは、失敗と呼ばない**
         // （設計書6.80と同じ。「失敗しました」を見た作者は不具合を疑う）
         if (kind === "skipped") {
-          done.push({
+          noteStep(index, {
             label: step.label,
             skipped: true,
             reason: outcomeReasonOf(outcome),
@@ -188,7 +263,7 @@ export async function runFinishNewWork(
         // **失敗は次へ進む。** レート上限も解析の失敗も、次の段では
         // 起きないことのほうが多い
         if (kind === "failed") {
-          done.push({
+          noteStep(index, {
             label: step.label,
             failed: true,
             notes: outcomeNotesOf(outcome),
@@ -196,7 +271,7 @@ export async function runFinishNewWork(
           continue;
         }
 
-        done.push(countOf(step, deps));
+        noteStep(index, countOf(step, deps));
       }
     });
   } finally {
@@ -207,12 +282,13 @@ export async function runFinishNewWork(
       1段も走っていないとき（1段目で中止した・飛ばす段しか無かった）は、
       表が空の紙を開いても読むものが無いので、1行の知らせに替える。
     */
-    const summary = {
-      workTitle: work.title,
-      done,
-      remaining:
-        stoppedAt < 0 ? [] : steps.slice(stoppedAt).map((step) => step.label),
-    };
+    const remaining =
+      stoppedAt < 0 ? [] : steps.slice(stoppedAt).map((step) => step.label);
+    const summary = { workTitle: work.title, done, remaining };
+    // **終わったことを、紙以外にも残す。** 紙は閉じれば無くなるので、
+    // 「いつ終わって、何段できたのか」を1行で残す
+    useLogFile(work.folderPath);
+    logStep(describeRunEnd({ runLabel: FINISH_LOG_LABEL, done, remaining }));
     if (done.length === 0) {
       void vscode.window.showInformationMessage(describeFinishHalted(summary));
     } else {

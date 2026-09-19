@@ -263,8 +263,19 @@ describe("モデルが載らなかったとき", () => {
 
     // **長さを変えて粘らない。** 直し方は「別のモデルを選ぶ」しかない
     expect(state.numCtxCalls.length).toBe(1);
-    // **「入らない」と数えて0字と報告しない。** 測れなかったことを言う
-    expect(showInformationMessage).not.toHaveBeenCalled();
+    /*
+      **「入らない」と数えて0字と報告しない。** 測れなかったことを言う。
+
+      **「通知を1度も出していない」では確かめない**（0.68.10）。測る前に
+      「このAIは読める長さを申告するので、申告値を使い続けます」という
+      断りを出すようにしたので、通知そのものは出る。見るべきは
+      **結果らしきものを見せていないこと**である。
+    */
+    const notices = showInformationMessage.mock.calls.map((call) =>
+      String(call[0])
+    );
+    expect(notices.some((notice) => notice.includes("実効の上限"))).toBe(false);
+    expect(notices.some((notice) => notice.includes("設定に反映"))).toBe(false);
     const message = String(showErrorMessage.mock.calls[0]?.[0] ?? "");
     expect(message).toContain("モデルを読み込めませんでした");
     expect(message).toContain("より小さいモデルをお試しください");

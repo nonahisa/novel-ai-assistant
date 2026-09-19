@@ -171,7 +171,15 @@ import {
   withProgress,
 } from "./views/progress";
 import { pathExists } from "./core/fileSystem";
-import { disposeLog, logFailure, showLog, useLogFile } from "./core/logger";
+import { describeTuningScope } from "./core/tuningScope";
+import {
+  disposeLog,
+  logFailure,
+  logStep,
+  setFallbackLogRoot,
+  showLog,
+  useLogFile,
+} from "./core/logger";
 import { probeGeneration } from "./ai/generationProbe";
 import {
   SettingsWatcher,
@@ -603,6 +611,24 @@ export async function activate(
    */
   setGeneratedStorageRoot(
     vscode.Uri.joinPath(context.globalStorageUri, GENERATED_DIR)
+  );
+
+  /*
+    **作品が決まらない処理のログも、ファイルに残す**（作者の裁定、
+    2026-09-19）。置き場は生成文書と同じ考え方で、拡張機能の保管庫である。
+
+    それまでは書庫に作品が2つ以上あると `logTargetWorkFolder` が
+    `undefined` を返し、AIチューニングの記録が**どこにも残らなかった。**
+    実機では12分かけて測った結果も、反映待ちで止まっていることも、
+    通知が消えた時点で失われている。
+
+    `vscode-userdata:` を OS のパスへ倒すのは `setGeneratedStorageRoot`
+    と同じ理由（拡張機能開発ホストではこの仕組みで渡ってくる）。
+  */
+  setFallbackLogRoot(
+    context.globalStorageUri.scheme === "vscode-userdata"
+      ? context.globalStorageUri.fsPath
+      : fromUri(context.globalStorageUri)
   );
 
   /**
@@ -2963,15 +2989,37 @@ export async function activate(
       // 両方始まる形だと、数分で済ませたい作者が1時間付き合わされる
       const scope = await askTuningScope();
       if (!scope) return;
-      await measureContext(
-        aiRegistry,
-        isAssignableFeature(feature) ? feature : "default",
-        // **測定に作品は要らないが、ログの置き場所には要る**（設計書6.53）。
-        // 出力パネルはVS Codeを閉じると消えるので、点滅や時間切れの原因を
-        // 作者が後から追えるよう、作品フォルダの `actions.log` にも残す
-        logTargetWorkFolder(registry),
-        scope
-      );
+      // **測定に作品は要らないが、ログの置き場所には要る**（設計書6.53）。
+      // 出力パネルはVS Codeを閉じると消えるので、点滅や時間切れの原因を
+      // 作者が後から追えるよう、`actions.log` にも残す。作品が決まらない
+      // ときは保管庫へ倒す（`setFallbackLogRoot`）——書庫に作品が複数ある
+      // 実機で、チューニングの記録が1行も残らなかった
+      const logFolder = logTargetWorkFolder(registry);
+      useLogFile(logFolder);
+      /*
+        **始まりと終わりを、呼ぶ側から残す。**
+
+        測定の中身（判定・保存）は `features/measureContext.ts` の持ち物
+        なので触らない。ここで要るのは「押したのに何も起きていないのか、
+        まだ測っているのか」を後から見分けられることで、それは外側から
+        1行ずつ書けば足りる。
+
+        終わりの行は `finally` に置く。失敗や中止で抜けたときこそ
+        「いつ終わったか」が要る（実機では反映待ちのダイアログに気づかず
+        10分待った）。
+      */
+      logStep(`AIチューニング 開始（${describeTuningScope(scope)}）`);
+      try {
+        await measureContext(
+          aiRegistry,
+          isAssignableFeature(feature) ? feature : "default",
+          logFolder,
+          scope
+        );
+      } finally {
+        useLogFile(logFolder);
+        logStep("AIチューニング 終了");
+      }
     })
   );
 

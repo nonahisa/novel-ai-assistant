@@ -146,6 +146,76 @@ describe("爵位で呼ばれる名前は家名である", () => {
 
     expect(result.characters).toHaveLength(2);
   });
+
+  // ここから逆順（2026-09-19の実機で再現）。
+  // 0.68.7 は「既存が爵位名・入ってくるのがフルネーム」だけを塞いでいた。
+  // AIが娘を先に返すと向きが逆になり、今度は父が娘へ吸い込まれる。
+  test("娘「ユニィ・シーゲン」が先でも、父「シーゲン子爵」を吸収しない", () => {
+    const result = mergeExtractedCharacters([], [
+      {
+        data: {
+          name: "ユニィ・シーゲン",
+          aliases: ["ユニィ様"],
+          summary: "シーゲン子爵の娘。",
+        },
+        chapters: [1],
+      },
+      {
+        data: {
+          name: "シーゲン子爵",
+          aliases: ["シーゲン子爵"],
+          summary: "この街の領主。",
+        },
+        chapters: [1],
+      },
+    ]);
+
+    expect(result.characters).toHaveLength(2);
+    const daughter = result.characters.find((c) => c.name === "ユニィ・シーゲン");
+    expect(daughter?.aliases ?? []).not.toContain("シーゲン子爵");
+    expect(daughter?.summary ?? "").not.toContain("領主");
+    // 「同じ人かも」とも出さない（父先の向きと同じ理由）
+    expect(result.mergeCandidates).toEqual([]);
+  });
+
+  test("フルネームが既にある状態でも、爵位名は別レコードになる", () => {
+    const seeded = mergeExtractedCharacters([], [
+      { data: { name: "ユニィ・シーゲン" }, chapters: [1] },
+    ]);
+    const result = mergeExtractedCharacters(seeded.characters, [
+      { data: { name: "シーゲン子爵" }, chapters: [2] },
+    ]);
+
+    expect(result.characters).toHaveLength(2);
+  });
+
+  test("実機で父が消えた並び（娘が3番目・父が7番目）をそのまま流す", () => {
+    // 手元の Ollama（gemma4:26b）が返した順。9人のはずが8人になり、
+    // 「シーゲン子爵」が娘の別名として吸い込まれていた
+    const result = mergeExtractedCharacters([], [
+      { data: { name: "マイナ", aliases: ["わたし"], summary: "算術を教える教師。" }, chapters: [1] },
+      { data: { name: "ターナ", aliases: ["母さん", "ターナ先生"], summary: "マイナの母。" }, chapters: [1] },
+      { data: { name: "ユニィ・シーゲン", aliases: ["ユニィ様"], summary: "シーゲン子爵の娘。" }, chapters: [1] },
+      { data: { name: "ヴォイド", aliases: ["ヴォイド様"], summary: "コンストラクタ村の領主。" }, chapters: [1] },
+      { data: { name: "イント", aliases: ["イント君", "イント様"], summary: "ヴォイドの息子。" }, chapters: [1] },
+      { data: { name: "リナ", aliases: ["リナちゃん", "リナ"], summary: "ヴォイドの娘でイントの妹。" }, chapters: [1] },
+      { data: { name: "シーゲン子爵", aliases: ["シーゲン子爵"], summary: "この街の領主。" }, chapters: [1] },
+      { data: { name: "ジェクティ", aliases: ["ジェクティ様"], summary: "コンストラクタ家の人間。" }, chapters: [1] },
+      { data: { name: "オバラ", aliases: ["オバラさん", "院長先生"], summary: "治療院の院長。" }, chapters: [1] },
+    ]);
+
+    expect(result.characters.map((c) => c.name)).toEqual([
+      "マイナ",
+      "ターナ",
+      "ユニィ・シーゲン",
+      "ヴォイド",
+      "イント",
+      "リナ",
+      "シーゲン子爵",
+      "ジェクティ",
+      "オバラ",
+    ]);
+  });
 });
 
 describe("同じ人は分裂させない", () => {

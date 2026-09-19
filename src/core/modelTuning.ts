@@ -5,7 +5,15 @@ import {
   bundledTuningByKey,
   bundledTuningKeys,
 } from "./bundledTuning";
-import { tuningStoreTable, writeTuningEntry } from "./modelTuningStore";
+import {
+  tuningStoreTable,
+  writeTuningEntry,
+  type TuningWriteOutcome,
+} from "./modelTuningStore";
+// **書けたかどうかの札は、ここから配る。** 台帳を使う側（測定・普段の
+// 呼び出し）は `modelTuning.ts` しか見ないので、置き場のファイル名まで
+// 知らせずに済ませる
+export type { TuningWriteOutcome };
 // **型だけを借りる。** 実体は引き込まない（`import type` は消える）ので、
 // 台帳が測定の仕組みを抱え込むことにはならない。それでも写しは作らない
 // ——「tokens か words か」の定義は `core/contextProbe.ts` の1つだけ
@@ -877,11 +885,13 @@ export async function saveModelTuning(
   providerId: string,
   model: string,
   tuning: ModelTuning
-): Promise<void> {
+): Promise<TuningWriteOutcome> {
   const fields: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(tuning)) {
     if (BUNDLED_MARKS.includes(name)) continue;
     fields[name] = value;
   }
-  await writeTuningEntry(modelTuningKey(providerId, model), fields);
+  // **入ったかどうかをそのまま返す**（作者の報告、2026-09-19）。
+  // 返さないと、呼び出し側は「書けなかった」を成功と区別できない
+  return writeTuningEntry(modelTuningKey(providerId, model), fields);
 }

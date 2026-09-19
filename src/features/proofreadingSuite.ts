@@ -2,7 +2,13 @@ import * as vscode from "vscode";
 import { withAiTurn } from "./aiTurn";
 import type { WorkEntry } from "../models/types";
 import { withProgress } from "../views/progress";
-import { logFailure, useLogFile } from "../core/logger";
+import { logFailure, logStep, useLogFile } from "../core/logger";
+import {
+  describeRunCancelledStep,
+  describeRunEnd,
+  describeRunStart,
+  describeRunStep,
+} from "../core/runLog";
 import {
   PROOFREADING_CHECKS,
   PROOFREADING_SUITE_SELECTION_KEY,
@@ -84,6 +90,14 @@ export interface ProofreadingSuiteDeps {
 interface CheckPick extends vscode.QuickPickItem {
   readonly id: ProofreadingCheckId;
 }
+
+/**
+ * 記録の行の先頭に置く名前。
+ *
+ * **画面に出す題（`withProgress` の見出し）と同じ文字にする。** 別の
+ * 言い回しにすると、作者が見た画面とログの行が結びつかない。
+ */
+const SUITE_LOG_LABEL = "校正をまとめて実行";
 
 /**
  * コマンドへ「この作品で」と伝える最小の形（`extension.ts` の `WorkRef`）。
@@ -168,6 +182,50 @@ export async function runProofreadingSuite(
   /** 中止で走らせなかったものの、先頭の位置。走り切ったら -1 */
   let stoppedAt = -1;
 
+  /*
+    **段ごとに1行を記録へ残す**（作者の裁定、2026-09-19）。
+
+    知らせ（通知）は終わったときの1つだけで、しかも消える。**途中の機能が
+    何をして何をしなかったかは、どこにも残らなかった。** 飛ばした理由が
+    残らないと、あとから「なぜ指摘が出ていないのか」を追えない。
+
+    **記録の直前に書き先を向ける。** 各機能も自分の作品へ向け直すので、
+    ここで一度だけ向けても、次の段までに別の場所を指していることがある
+  */
+  const noteStep = (
+    index: number,
+    step: SuiteStepResult,
+    /**
+     * 記録にだけ足す一言（例外の本文など）。
+     *
+     * **`step.notes` へ混ぜない。** あちらは終わったときの知らせにも出る
+     * ので、例外の本文を入れると作者の画面に生のエラーが並ぶ
+     */
+    logOnly?: string
+  ): void => {
+    done.push(step);
+    useLogFile(work.folderPath);
+    logStep(
+      describeRunStep({
+        runLabel: SUITE_LOG_LABEL,
+        done: index + 1,
+        total: checks.length,
+        step: logOnly
+          ? { ...step, notes: [...(step.notes ?? []), logOnly] }
+          : step,
+      })
+    );
+  };
+
+  useLogFile(work.folderPath);
+  logStep(
+    describeRunStart({
+      runLabel: SUITE_LOG_LABEL,
+      workTitle: work.title,
+      total: checks.length,
+    })
+  );
+
   try {
     /*
       **実行の札（設計書6.76）を、まとめ実行が丸ごと持つ**（作者の報告、
@@ -208,7 +266,13 @@ export async function runProofreadingSuite(
             機能: check.label,
             詳細: error instanceof Error ? error.message : String(error),
           });
-          done.push({ label: check.label, failed: true });
+          // **理由を落とさない。** 「失敗しました」だけの行では、
+          // 今回の困りごと（なぜそうなったかが残らない）が解けない
+          noteStep(
+            index,
+            { label: check.label, failed: true },
+            error instanceof Error ? error.message : String(error)
+          );
           continue;
         }
 
@@ -216,13 +280,22 @@ export async function runProofreadingSuite(
         // 各機能の中止（進捗の中止・確認での取りやめ・前提不足）で止める
         if (kind === "cancelled") {
           stoppedAt = index;
+          useLogFile(work.folderPath);
+          logStep(
+            describeRunCancelledStep({
+              runLabel: SUITE_LOG_LABEL,
+              done: index + 1,
+              total: checks.length,
+              label: check.label,
+            })
+          );
           return;
         }
         // **前提が足りなくて走らせなかったものは、失敗と呼ばない**
         // （作者の指摘、2026-09-06）。プロットの無い作品で
         // 「プロット逸脱は失敗しました」と出て、作者は不具合を疑った
         if (kind === "skipped") {
-          done.push({
+          noteStep(index, {
             label: check.label,
             skipped: true,
             reason: outcomeReasonOf(outcome),
@@ -233,7 +306,7 @@ export async function runProofreadingSuite(
         // **失敗は次へ進む。** レート上限も解析の失敗も、次の機能では
         // 起きないことのほうが多い
         if (kind === "failed") {
-          done.push({
+          noteStep(index, {
             label: check.label,
             failed: true,
             notes: outcomeNotesOf(outcome),
@@ -241,19 +314,21 @@ export async function runProofreadingSuite(
           continue;
         }
 
-        done.push(countOf(check, deps));
+        noteStep(index, countOf(check, deps));
       }
         })
     );
   } finally {
     // **知らせは必ず出す。** ここまでに何が走ったかは、途中で何が起きても
     // 作者へ伝える値がある
-    const message = describeSuiteResult({
-      done,
-      remaining:
-        stoppedAt < 0 ? [] : checks.slice(stoppedAt).map((check) => check.label),
-    });
+    const remaining =
+      stoppedAt < 0 ? [] : checks.slice(stoppedAt).map((check) => check.label);
+    const message = describeSuiteResult({ done, remaining });
     if (message) void vscode.window.showInformationMessage(message);
+    // **終わったことを、知らせ以外にも残す。** 知らせは消えるので、
+    // 「終わったのに気づかない」を繰り返さないための1行である
+    useLogFile(work.folderPath);
+    logStep(describeRunEnd({ runLabel: SUITE_LOG_LABEL, done, remaining }));
   }
 }
 

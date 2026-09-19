@@ -43,6 +43,30 @@ import * as path from "./paths";
 export const TUNING_STORE_FILE = "model-tuning.json";
 
 /**
+ * 書き込みが**実際に入ったか**（作者の報告、2026-09-19）。
+ *
+ * 手元の Ollama を12分かけて測り、「設定に反映」を押したのに台帳が
+ * 1バイトも変わらなかった。原因は書き込みそのものではなく、**書けなかった
+ * ことが呼び出し側へ伝わらない**ことである——下の `writeTuningEntry` は
+ * 断ったときも諦めたときも、ログへ1行残して静かに戻る。受け取った側は
+ * 成功と区別できないので、「覚えました」と言うしかなかった。
+ *
+ * **例外は投げないままにする。** 測った結果を作者へ見せる流れを台帳の
+ * 都合で止めないのは、これまでどおり正しい（見せるものは手元にある）。
+ * 変えるのは「黙って戻る」ところだけで、**結果を返して、言う言わないは
+ * 呼び出し側に決めさせる。**
+ */
+export type TuningWriteOutcome =
+  /** 台帳へ入った（書いたあとに読み直して確かめた） */
+  | "written"
+  /** 台帳が壊れていて、上書きせずに断った */
+  | "unreadable"
+  /** 置き場が渡っていないので、書く先が無い */
+  | "no_store"
+  /** 何度やり直しても残らなかった（別の窓が同じ台帳を書いている） */
+  | "lost";
+
+/**
  * 書き込みをやり直す回数。
  *
  * 1回目で入らないのは「読んでから書くまでのあいだに、別の窓が書いた」
@@ -275,12 +299,33 @@ function enqueue<T>(work: () => Promise<T>): Promise<T> {
  * 別の窓が、こちらが読んでから書くまでのあいだに書いていることがある。
  * そのときは**こちらの欄が消えている**ので、読み直してやり直す——
  * やり直しでは相手の書いたものを土台にするから、両方が残る。
+ *
+ * @returns 入ったかどうか（`TuningWriteOutcome`）。**呼び出し側は、これを
+ *   見てから作者へ報告すること**——見ないと、書けていないのに「覚えました」
+ *   と言うことになる（作者の報告、2026-09-19）
  */
 export async function writeTuningEntry(
   key: string,
   fields: Readonly<Record<string, unknown>>
-): Promise<void> {
-  await enqueue(async () => {
+): Promise<TuningWriteOutcome> {
+  return enqueue(async (): Promise<TuningWriteOutcome> => {
+    /*
+      **書く先が無いことを、先に見分ける。**
+
+      置き場が渡っていないと `readTuningFile` は空の表を返し、
+      `writeTuningFile` は何もせずに戻るので、下の確かめは「消えた」と
+      判定して3回やり直したうえで諦める。**理由がまるで違うものを同じ
+      札で返さない**——別の窓との取り合いなら窓を閉じれば直るが、
+      置き場が無いのは閉じても直らない。
+    */
+    if (storeFile() === undefined) {
+      logLine(
+        `AIチューニングの台帳の置き場が無いため、${key} の` +
+          `${Object.keys(fields).join("・")} を書きませんでした。`
+      );
+      return "no_store";
+    }
+
     for (let attempt = 1; attempt <= WRITE_TRIES; attempt += 1) {
       const before = await readTuningFile();
       if (before === undefined) {
@@ -291,7 +336,7 @@ export async function writeTuningEntry(
           `AIチューニングの台帳が読めないため、${key} の` +
             `${Object.keys(fields).join("・")} を書きませんでした。`
         );
-        return;
+        return "unreadable";
       }
 
       const next = { ...before };
@@ -306,12 +351,12 @@ export async function writeTuningEntry(
       await writeTuningFile(next);
 
       const after = await readTuningFile();
-      if (after === undefined) return;
+      if (after === undefined) return "unreadable";
       const lost = [
         ...missingFields(after[key], fields),
         ...vanishedKeys(before, after, [key]),
       ];
-      if (lost.length === 0) return;
+      if (lost.length === 0) return "written";
 
       if (attempt === WRITE_TRIES) {
         // **黙って諦めない**（CLAUDE.md「エラーは握りつぶさない」）。
@@ -324,6 +369,7 @@ export async function writeTuningEntry(
         );
       }
     }
+    return "lost";
   });
 }
 

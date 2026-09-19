@@ -279,6 +279,44 @@ describe("書けなかったら、記録に残す", () => {
 });
 
 /**
+ * **書けたかどうかを、呼び出し側へ返す**（作者の報告、2026-09-19）。
+ *
+ * 例外を投げないのは正しい——測った結果を作者へ見せる流れを、台帳の
+ * 都合で止めない。だが**黙って戻ってもいけない。** 実機では12分かけて
+ * 測り「設定に反映」を押したのに台帳が1バイトも変わらず、画面には
+ * 「覚えました」とだけ出ていた。呼び出し側が成功と失敗を区別できない
+ * 以上、そう言うしかなかったのである。
+ */
+describe("書けたかどうかを返す", () => {
+  test("入ったら written", async () => {
+    expect(await saveModelTuning("ollama", "a", { measuredChars: 1 })).toBe(
+      "written"
+    );
+  });
+
+  test("壊れていたら unreadable（打つ手が違うので lost と分ける）", async () => {
+    await useBrokenTuningStore();
+
+    expect(await saveModelTuning("ollama", "a", { measuredChars: 1 })).toBe(
+      "unreadable"
+    );
+  });
+
+  test("何度やっても残らなければ lost", async () => {
+    // 書き込みを黙って捨てる装置にする（外から同時に書かれ続ける状況）
+    const { workspace } = await import("vscode");
+    const fs = workspace.fs as { rename: unknown };
+    const original = fs.rename;
+    fs.rename = async (): Promise<void> => undefined;
+
+    const outcome = await saveModelTuning("ollama", "a", { measuredChars: 1 });
+
+    fs.rename = original;
+    expect(outcome).toBe("lost");
+  });
+});
+
+/**
  * 記録を消す口（詳細メニュー「AIチューニングの記録を消す」。0.66.6）。
  *
  * 台帳を設定から出したので、**設定画面から手で削る道が無くなった。**
