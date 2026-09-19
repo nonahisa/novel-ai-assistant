@@ -44,6 +44,7 @@ import {
   buildChapterProposePrompt,
   CHAPTER_PROPOSE_SCHEMA,
   CHAPTER_PROPOSE_SYSTEM_PROMPT,
+  CHAPTER_PROPOSE_TEMPERATURE,
   CHAPTER_PROPOSE_VERSION,
   type ChapterProposeEpisode,
 } from "../prompts/chapterPropose";
@@ -1002,7 +1003,7 @@ async function callAI(input: {
           model: input.model,
           // 構成の読み取りなので、抽出寄りに落ち着かせる（名前だけは少し揺らす
           // ほうが案が散るが、同じプロンプトで2つの役をこなすので中間に置く）
-          temperature: 0.4,
+          temperature: CHAPTER_PROPOSE_TEMPERATURE,
           // **上限と見込みは別物**（設計書6.77の第2段）。見込みを上限として
           // 送ると、測っていないモデルでは上限が設定値の半分になる
           maxOutputTokens: resolveOutputTokensForSend(

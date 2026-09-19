@@ -28,6 +28,7 @@ import {
   buildPlotReversePrompt,
   PLOT_REVERSE_SCHEMA,
   PLOT_REVERSE_SYSTEM_PROMPT,
+  PLOT_REVERSE_TEMPERATURE,
   PLOT_REVERSE_VERSION,
 } from "../prompts/plotReverse";
 import { confirmProviderReachable } from "./aiConnectivity";
@@ -142,7 +143,7 @@ export async function generatePlot(
           }),
           model: resolved.model,
           // 事実の再構成なので揺らす必要がない。ただし言い回しは要るので0にはしない
-          temperature: 0.3,
+          temperature: PLOT_REVERSE_TEMPERATURE,
           // **見込みと実上限を分けて渡す**（設計書6.77の第2段）。プロットは
           // 全節ぶん返るので応答が長い——見込みをそのまま上限にすると、
           // 測っていないモデルで途中から切れて丸ごと捨てることになる

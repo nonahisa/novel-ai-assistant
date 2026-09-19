@@ -39,6 +39,7 @@ import {
   deviationBudget,
   DEVIATION_CHECK_SCHEMA,
   DEVIATION_CHECK_SYSTEM_PROMPT,
+  DEVIATION_CHECK_TEMPERATURE,
   DEVIATION_CHECK_VERSION,
   DEVIATION_TYPES,
   LIGHT_DEVIATION_TYPES,
@@ -393,7 +394,7 @@ export async function checkDeviations(
             userPrompt,
             model,
             // 判断を伴うので、事実の突き合わせより少しだけ揺らす
-            temperature: 0.2,
+            temperature: DEVIATION_CHECK_TEMPERATURE,
             maxOutputTokens: sendOutputTokens,
             plannedOutputTokens,
             jsonSchema: DEVIATION_CHECK_SCHEMA as unknown as object,

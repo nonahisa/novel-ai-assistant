@@ -3,6 +3,7 @@ import * as nodePath from "node:path";
 import {
   SYNOPSIS_SCHEMA,
   SYNOPSIS_SYSTEM_PROMPT,
+  SYNOPSIS_TEMPERATURE,
   SYNOPSIS_VERSION,
   buildSynopsisPrompt,
 } from "../../prompts/synopsis";
@@ -13,6 +14,7 @@ import {
 import {
   DEVIATION_CHECK_SCHEMA,
   DEVIATION_CHECK_SYSTEM_PROMPT,
+  DEVIATION_CHECK_TEMPERATURE,
   DEVIATION_CHECK_VERSION,
   DEVIATION_TYPES,
   buildDeviationCheckPrompt,
@@ -28,6 +30,7 @@ import {
 import {
   EPISODE_PLOT_CHECK_SCHEMA,
   EPISODE_PLOT_CHECK_SYSTEM_PROMPT,
+  EPISODE_PLOT_CHECK_TEMPERATURE,
   EPISODE_PLOT_CHECK_VERSION,
   buildEpisodePlotCheckPrompt,
 } from "../../prompts/episodePlotCheck";
@@ -187,6 +190,7 @@ export function synopsisPrompt(input: EpisodePromptInput) {
     promptVersion: SYNOPSIS_VERSION,
     systemPrompt: SYNOPSIS_SYSTEM_PROMPT,
     schema: SYNOPSIS_SCHEMA,
+    temperature: SYNOPSIS_TEMPERATURE,
     validateWith: SYNOPSIS_VALIDATE_WITH,
     chapterLabel: episode.label,
     previousCount: previous.length,
@@ -266,6 +270,7 @@ export function deviationPrompt(input: EpisodePromptInput) {
     promptVersion: DEVIATION_CHECK_VERSION,
     systemPrompt: DEVIATION_CHECK_SYSTEM_PROMPT,
     schema: DEVIATION_CHECK_SCHEMA,
+    temperature: DEVIATION_CHECK_TEMPERATURE,
     validateWith: DEVIATION_VALIDATE_WITH,
     chapterLabel: episode.label,
     maxIssues: DEVIATION_MAX_ISSUES,
@@ -384,6 +389,7 @@ export function episodePlotPrompt(input: EpisodePlotPromptInput) {
     promptVersion: EPISODE_PLOT_CHECK_VERSION,
     systemPrompt: EPISODE_PLOT_CHECK_SYSTEM_PROMPT,
     schema: EPISODE_PLOT_CHECK_SCHEMA,
+    temperature: EPISODE_PLOT_CHECK_TEMPERATURE,
     validateWith: EPISODE_PLOT_VALIDATE_WITH,
     chapterLabel: label,
     itemCount: doc.items.length,

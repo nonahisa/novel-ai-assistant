@@ -35,6 +35,7 @@ import {
   NAME_SUGGEST_COUNT,
   NAME_SUGGEST_SCHEMA,
   NAME_SUGGEST_SYSTEM_PROMPT,
+  NAME_SUGGEST_TEMPERATURE,
   NAME_SUGGEST_VERSION,
   parseNameSuggest,
   type NameCandidate,
@@ -393,7 +394,7 @@ async function suggestNames(
           }),
           model: resolved.model,
           // 候補は広く出させる。当たり外れは作者が選ぶ（P-29）
-          temperature: 0.8,
+          temperature: NAME_SUGGEST_TEMPERATURE,
           // **見込みと実上限を分けて渡す**（設計書6.77の第2段）。名前の候補は
           // 短いが、渡さないと設定値（既定16,384）ぶんの席を毎回確保する
           maxOutputTokens: resolveOutputTokensForSend(

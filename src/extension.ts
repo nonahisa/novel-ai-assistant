@@ -4310,7 +4310,7 @@ export async function activate(
   context.subscriptions.push(
     registerCommand(
       "novelai.checkOpening",
-      async (node?: WorkNode) => {
+      async (node?: WorkNode, options?: CheckRunOptions) => {
         const work = await resolveWork(node, registry);
         if (!work) return CHECK_CANCELLED;
 
@@ -4318,9 +4318,15 @@ export async function activate(
         const unsaved = await saveBeforeCheck(work, "冒頭診断");
         if (unsaved) return unsaved;
 
+        // **まとめ実行の印を受け取る**（設計書6.80）。受けないと、
+        // 「校正の段では確認は出しません」と言った先で確認が出て、
+        // 画面を離れた作者を待たせたまま止まる（2026-09-19の実機）。
+        // 札は取らない機能なので `suiteHoldsRun` は渡さない
+        const suiteConfirmed = isSuiteConfirmed(options);
+
         // **完了の通知を出さない。** 結果そのものが文書として開くので、
         // 「できました」を重ねると画面の手前に確認が1枚増えるだけになる
-        return await checkOpening(work, aiRegistry);
+        return await checkOpening(work, aiRegistry, { suiteConfirmed });
       }
     )
   );

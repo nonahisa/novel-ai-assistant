@@ -36,6 +36,7 @@ import {
   CHECK_COMPLETED,
   CHECK_FAILED,
   type CheckCommandOutcome,
+  type SuiteAwareOptions,
 } from "../core/proofreadingSuite";
 import { reportAIError } from "./reportAIError";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
@@ -76,7 +77,16 @@ const INTENTIONAL_MARKER = "意図的";
 
 export async function checkOpening(
   work: WorkEntry,
-  registry: AIRegistry
+  registry: AIRegistry,
+  /*
+    まとめ実行から呼ばれているか（設計書6.80）。
+
+    **札（`suiteHoldsRun`）は受けない。** この機能は1回きりの呼び出しで
+    終わるので、そもそも札を取っていない（`suiteHoldsRun.test.ts` が
+    「取っていないこと」を見張っている）。受け取る形だけ作ると、
+    取っているように見えて紛らわしい。
+  */
+  options: Pick<SuiteAwareOptions, "suiteConfirmed"> = {}
 ): Promise<CheckCommandOutcome> {
   useLogFile(work.folderPath);
 
@@ -102,16 +112,32 @@ export async function checkOpening(
     return CHECK_CANCELLED;
   }
 
-  const ok = await confirmPaidUsage(resolved.provider, {
-    actionLabel: "冒頭診断",
-    remember: { id: "ai.paid.checkOpening" },
-    model: resolved.model,
-    calls: 1,
-    detail:
-      `送るのは第1話の冒頭 ${material.openingText.length}字だけです。\n` +
-      "本文は書き換えません。",
-  });
-  if (!ok) return CHECK_CANCELLED;
+  const detail =
+    `送るのは第1話の冒頭 ${material.openingText.length}字だけです。\n` +
+    "本文は書き換えません。";
+
+  /*
+    **まとめ実行では、自分の確認を出さない**（設計書6.80）。
+
+    2026-09-19の実機確認で、「ひと通り仕上げる」の8/12でここが止まり、
+    10分以上そのままだった。確認には「校正の段では確認は出しません」と
+    書いてあるので、作者は画面を離れている——止まっていることに気づけない。
+
+    **飛ばした中身はログへ残す。** 送る字数と課金の断りは、この確認の
+    中にしか書かれていない（ほかの校正の段と同じ扱い）。
+  */
+  if (options.suiteConfirmed) {
+    logStep(`冒頭診断：まとめ実行のため確認を省略\n${detail}`);
+  } else {
+    const ok = await confirmPaidUsage(resolved.provider, {
+      actionLabel: "冒頭診断",
+      remember: { id: "ai.paid.checkOpening" },
+      model: resolved.model,
+      calls: 1,
+      detail,
+    });
+    if (!ok) return CHECK_CANCELLED;
+  }
 
   let responseText: string | undefined;
   let failure: unknown;

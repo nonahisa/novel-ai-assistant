@@ -3,7 +3,7 @@
 //   node scripts/measure.mjs <feature> [--work <作品フォルダー>] --model <モデル>
 //                            [--runner ollama|sakura]
 //                            [--repeat N] [--num-ctx <値>] [--endpoint URL]
-//                            [--timeout 180]
+//                            [--temperature <値>] [--timeout 180]
 //                            [--compare <前回のJSON>] [--out docs/measurements]
 //                            [--option 名前=値 ...]
 //
@@ -19,6 +19,14 @@
 // （`contextSizeForPrompt`）で、**送るプロンプトの長さから決める**
 // ——詳しくは `scripts/measureNumCtx.mjs` の冒頭。`--num-ctx` を打てば
 // その値で固定できる（VRAM に載る上限を探るときのため）。
+//
+// **温度も決め打ちしない**（2026-09-19）。0.66 までは束の `ollama.generate` の
+// 既定（0.2）で回っており、**製品が 0.0 で回している誤字脱字を、揺れた条件で
+// 測っていた**（2026-09-18 の誤字脱字と推敲の記録がその状態）。いまは
+// **製品の値を束から受け取る**——機能ごとの温度は `src/prompts/*.ts` の
+// `*_TEMPERATURE` にあり、`novel.run` と `novel.prompt` がそこから返す。
+// 台本の中に数字を書き写さないので、**片方だけ直す日が来ない**。
+// `--temperature` を打てばその値で固定できる（揺らして出来の変わり方を見るため）。
 //
 // **測る前に空打ちして温める**（`ollama.generate`）。モデルの読み込みを
 // 所要時間から外さないと、**最後に使ったモデルが有利**になる。温めに
@@ -134,6 +142,12 @@ function parseArgs(argv) {
     repeat: 1,
     // **既定は「決めない」。** 打たれたときだけ、その値で固定する
     numCtx: null,
+    /**
+     * 温度。**既定は「決めない」**——省けば束が製品と同じ値を使う。
+     * 打つのは「揺らして出来の変わり方を見る」ときだけで、その回は
+     * **製品の条件ではない**ので、結果の行にも記録にもその旨が出る。
+     */
+    temperature: null,
     endpoint: null,
     /** さくらへ1チャンク投げたときに待つミリ秒（`--timeout` は秒で受ける） */
     timeoutMs: DEFAULT_SAKURA_TIMEOUT_MS,
@@ -171,6 +185,9 @@ function parseArgs(argv) {
         break;
       case "--num-ctx":
         options.numCtx = Number(needsValue());
+        break;
+      case "--temperature":
+        options.temperature = Number(needsValue());
         break;
       case "--endpoint":
         options.endpoint = needsValue();
@@ -216,6 +233,15 @@ function parseArgs(argv) {
     (!Number.isInteger(options.numCtx) || options.numCtx < 1)
   ) {
     throw new Error("--num-ctx は1以上の整数です。");
+  }
+  // **打たれたときだけ確かめる。** 打たれていなければ、束が製品の値を使う
+  if (
+    options.temperature !== null &&
+    (!Number.isFinite(options.temperature) ||
+      options.temperature < 0 ||
+      options.temperature > 2)
+  ) {
+    throw new Error("--temperature は 0〜2 の数です。");
   }
   if (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 1000) {
     throw new Error("--timeout は1以上の秒数です。");
@@ -322,6 +348,16 @@ function planCalls(schema, context) {
   if ("feature" in properties) base.feature = context.feature;
   if ("numCtx" in properties) base.numCtx = context.numCtx;
   /*
+    **温度は、打たれたときだけ渡す**（2026-09-19）。渡さなければ束が
+    製品と同じ値を使う——ここで「既定」を埋めると、**台本の中に製品の値の
+    写しができる**（片方だけ直る日が来る）。
+  */
+  // `!= null` で見る（`undefined` も「打たれていない」である。2026-09-19 に
+  // ここを `!== null` と書いて、**打った値が黙って落ちた**）
+  if ("temperature" in properties && context.temperature != null) {
+    base.temperature = context.temperature;
+  }
+  /*
     **束へ渡す `runner` は、測定の `--runner` とは別物である。**
     `--runner sakura` のときは `novel.prompt`／`novel.validate` を呼ぶので、
     束へ渡す行き先は無い（`bundleRunner` は null）。ここで既定の "ollama" を
@@ -346,6 +382,8 @@ function planCalls(schema, context) {
     "filePath",
     "chunkIndex",
     "allowRemote",
+    // 打たなければ束が製品の値を使うので、必須になっていても埋められる
+    "temperature",
     "options",
   ]);
   const missing = [...required].filter((name) => !fillable.has(name));
@@ -396,9 +434,16 @@ async function runOnce(calls, ask) {
     **始めに1回訊いただけの答えを記録に残すと、嘘になる。**
   */
   let staleNote = null;
+  /*
+    **束が「この温度で投げた」と言った値を控える**（2026-09-19）。
+    こちらが打った値ではなく、**向こうが実際に使った値**である
+    ——打たなかった回に何で回ったのかは、これでしか分からない。
+  */
+  let usedTemperature = null;
   for (const call of calls) {
     try {
       const outcome = await ask(call);
+      usedTemperature ??= outcome.temperature ?? null;
       for (const item of outcome.raw ?? []) raw.push(item);
       for (const item of outcome.results ?? []) results.push(item);
       for (const item of outcome.failures ?? []) failures.push(item);
@@ -413,7 +458,14 @@ async function runOnce(calls, ask) {
       failures.push({ chunkId: call.label, reason });
     }
   }
-  return { elapsedMs: Date.now() - startedAt, raw, results, failures, staleNote };
+  return {
+    elapsedMs: Date.now() - startedAt,
+    raw,
+    results,
+    failures,
+    staleNote,
+    usedTemperature,
+  };
 }
 
 /* ── 組ませて控える（AIは呼ばない） ───────────────────── */
@@ -432,12 +484,19 @@ async function collectPlans(client, promptTool, calls) {
   let promptVersion = null;
   let verifyPromptVersion = null;
   let promptChars = null;
+  /*
+    **製品の温度は束に訊く**（2026-09-19）。台本の中に「誤字脱字は0.0」と
+    書き写すと、**製品を直した日に測定だけが古い値のまま**になる。
+    `novel.prompt` は `src/prompts/*.ts` の `*_TEMPERATURE` を返す。
+  */
+  let temperature = null;
   const plans = [];
   for (const call of calls) {
     try {
       const asked = await client.call(promptTool, call.args);
       promptVersion ??= asked?.promptVersion ?? null;
       verifyPromptVersion ??= asked?.verifyPromptVersion ?? null;
+      temperature ??= asked?.temperature ?? null;
       const chars = promptCharsOf(asked);
       // **いちばん長いものに合わせる。** チャンクごとに `num_ctx` を変えると
       // Ollama がそのたびにモデルを読み込み直す（設計書6.53）
@@ -454,7 +513,25 @@ async function collectPlans(client, promptTool, calls) {
       promptVersion ??= `（訊けませんでした: ${reason}）`;
     }
   }
-  return { promptVersion, verifyPromptVersion, plans, promptChars };
+  return { promptVersion, verifyPromptVersion, temperature, plans, promptChars };
+}
+
+/**
+ * 温度を1行で書く。
+ *
+ * **形が2つある。** ふつうは数字1つだが、**2段のプロンプトを通る機能
+ * （事実の照合）は段ごとに持つ**——1つに丸めると、段ごとに変えたときに
+ * 記録から読めなくなる。
+ */
+function describeTemperature(value) {
+  if (value === null || value === undefined) return "（分かりません）";
+  if (typeof value === "number") return String(value);
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .map(([name, each]) => `${name} ${each}`)
+      .join("・");
+  }
+  return String(value);
 }
 
 /**
@@ -550,6 +627,8 @@ function askByRun(client, toolName) {
       results: resultsOfResponse(value, call.label),
       failures: value?.failures ?? [],
       staleNote: staleNoteOf(value),
+      // **束が実際に送った温度**（`novel.run` が返す。6.87.16）
+      temperature: value?.temperature ?? null,
     };
   };
 }
@@ -567,8 +646,15 @@ function askByRun(client, toolName) {
 function askBySakura(client, options, token) {
   return async (call) => {
     const promptResponse = await client.call(PROMPT_TOOL, call.args);
+    /*
+      **温度も束から受け取る**（2026-09-19）。ここで 0 を決め打ちしていたので、
+      **クラウドで測った回は製品と違う温度だった**（製品は機能ごとに違う）。
+      打たれていればそちらが勝つ。
+    */
+    const temperature = options.temperature ?? promptResponse?.temperature;
     const outcome = await runSakuraChunks({
       promptResponse,
+      temperature,
       baseArgs: call.args,
       // **`token` などを後ろに置く。** 前に置くと、呼ぶ側の指定で
       // 鍵や宛先が差し替えられる形になる
@@ -589,6 +675,7 @@ function askBySakura(client, options, token) {
       results: outcome.results,
       failures: outcome.failures,
       staleNote: staleNoteOf(promptResponse),
+      temperature: temperature ?? null,
     };
   };
 }
@@ -709,6 +796,8 @@ async function main() {
         model: options.model,
         numCtx,
         endpoint: options.endpoint,
+        // **打たれたときだけ渡る**（打たなければ束が製品の値を使う）
+        temperature: options.temperature,
         options: options.options,
         // さくらのときは、束へ渡す行き先が無い（3段をこちらで回す）
         bundleRunner: sakura ? null : "ollama",
@@ -830,6 +919,19 @@ async function main() {
       }
     }
     const { promptVersion, verifyPromptVersion, plans } = collected;
+
+    /*
+      **何の温度で測るのかを、測る前に決めて出す**（2026-09-19。6.87.16）。
+      打たれていなければ**束が返した製品の値**をそのまま使う——台本の中に
+      機能ごとの数字を書き写さないので、製品を直せばこちらも付いてくる。
+    */
+    const temperature = options.temperature ?? collected.temperature ?? null;
+    const temperatureSource =
+      options.temperature !== null
+        ? "--temperature で明示（製品の条件ではありません）"
+        : collected.temperature !== null && collected.temperature !== undefined
+          ? "製品と同じ（束が返した値）"
+          : "訊けませんでした";
     /*
       枠を返さない道具のために、**1000字あたりの上限を源から読んでおく**
       （`scripts/measureScoring.mjs` の `maxIssuesPer1000CharsOf`）。
@@ -854,6 +956,9 @@ async function main() {
     console.log(
       `${options.feature}（${route}）を ${options.model} で ${options.repeat} 回まわします` +
         `（${sakura ? "本文の切り方" : "num_ctx"} ${numCtx}／${decision.source}、対象 ${calls.length} 件）。`
+    );
+    console.log(
+      `  temperature ${describeTemperature(temperature)}（${temperatureSource}）`
     );
     if (sakura) {
       // **鍵は出さない。** 宛先と待ち時間だけを断る（課金の目安になる）
@@ -900,6 +1005,8 @@ async function main() {
       runs.push({
         round,
         elapsedMs: run.elapsedMs,
+        // **その回で実際に使われた温度**（束の返り値。打っていない回の確認になる）
+        temperature: run.usedTemperature,
         // **その回のあいだに束が古くなっていたか**（始めの1回の答えでは足りない）
         staleNote: run.staleNote,
         metrics: scored.metrics,
@@ -921,6 +1028,15 @@ async function main() {
     */
     lines.push(
       `${sakura ? "本文の切り方" : "num_ctx"}: ${numCtx}（${decision.source}）`
+    );
+    /*
+      **温度も結果の行に出す**（`num_ctx` と同じ理由）。0.2 と 0.0 では
+      指摘の数が変わるので、**この行が無いと前の記録と比べられない。**
+      束が言った値（実際に使われた値）があれば、そちらを書く。
+    */
+    const usedTemperature = runs.find((run) => run.temperature != null)?.temperature;
+    lines.push(
+      `temperature: ${describeTemperature(usedTemperature ?? temperature)}（${temperatureSource}）`
     );
     if (warmup) {
       lines.push(
@@ -949,6 +1065,13 @@ async function main() {
       */
       numCtx,
       numCtxDecision: decision,
+      /*
+        **実際に使った温度と、その出どころ**（2026-09-19）。`numCtx` と
+        同じ扱いにしてある——2026-09-18 までの記録にこの欄は無く、
+        **何の温度で測った数字なのかが後から読めない。**
+      */
+      temperature: usedTemperature ?? temperature,
+      temperatureSource,
       /** モデルが申告した読める長さと、同梱の実測（訊けた場合） */
       modelInfo,
       /** 読み込みぶん。**所要時間からは外してある** */

@@ -1,6 +1,7 @@
 import {
   BASE_SYSTEM_PROMPT,
   CHARACTER_EXTRACT_SCHEMA,
+  CHARACTER_EXTRACT_TEMPERATURE,
   CHARACTER_EXTRACT_VERSION,
   buildCharacterExtractPrompt,
   type CharacterExtractResult,
@@ -34,6 +35,7 @@ import {
   claudeNote,
   runChunks,
   runChunksBySampling,
+  temperatureFor,
   type RunnerKind,
   validateWith,
 } from "./run";
@@ -171,6 +173,8 @@ export interface SettingsPromptResult {
   promptVersion: string;
   systemPrompt: string;
   schema: unknown;
+  /** 製品がこのプロンプトで使う温度（`prompts/*.ts`）。**写しを持たない** */
+  temperature: number;
   validateWith: string;
   /**
    * **チャンクをまたいで既知名が育たない**ことの断り。
@@ -270,6 +274,7 @@ export function settingsPrompt(
     promptVersion: CHARACTER_EXTRACT_VERSION,
     systemPrompt: BASE_SYSTEM_PROMPT,
     schema: CHARACTER_EXTRACT_SCHEMA,
+    temperature: CHARACTER_EXTRACT_TEMPERATURE,
     validateWith: VALIDATE_WITH,
     note: ACROSS_CHUNKS_NOTE,
     chunks: selectChunks(chunks, input.chunkIndex).map((chunk) =>
@@ -392,6 +397,7 @@ export interface SettingsRunInput extends SettingsPromptInput {
   endpoint?: string;
   model?: string;
   allowRemote?: boolean;
+  temperature?: number;
 }
 
 export async function settingsRun(
@@ -400,12 +406,15 @@ export async function settingsRun(
   // **省略を既定で埋めない**（設計書6.87.8 の5）
   assertRunner(input.runner);
   const prompts = settingsPrompt(input);
+  // **明示が無ければ製品と同じ**（6.87.16）。決め方は `run.ts` に1つだけ
+  const temperature = temperatureFor(input, prompts.temperature);
   if (input.runner === "claude") {
     return {
       runner: "claude",
       note: `${claudeNote(VALIDATE_WITH)} ${ACROSS_CHUNKS_NOTE}`,
       systemPrompt: prompts.systemPrompt,
       schema: prompts.schema,
+      temperature,
       validateWith: VALIDATE_WITH,
       chunks: prompts.chunks,
     };
@@ -454,6 +463,7 @@ export async function settingsRun(
         folder: input.folder,
         systemPrompt: prompts.systemPrompt,
         userPrompt,
+        temperature,
       });
       return { text: reply.text, model: reply.model };
     }
@@ -464,6 +474,7 @@ export async function settingsRun(
       userPrompt,
       schema: prompts.schema,
       numCtx: input.numCtx,
+      temperature,
       allowRemote: input.allowRemote,
     });
     return { text: response.text, model: model as string };
@@ -518,11 +529,11 @@ export async function settingsRun(
   };
 
   if (input.runner === "sampling") {
-    return runChunksBySampling(items, async (item) => ({
+    return runChunksBySampling(items, temperature, async (item) => ({
       result: await step(item),
       // **輪の中で答えたモデルを拾う**（呼び出し元が選ぶので、こちらは知らない）
       model: [...answeredBy].pop() ?? "（不明）",
     }));
   }
-  return runChunks(model as string, items, step);
+  return runChunks(model as string, temperature, items, step);
 }

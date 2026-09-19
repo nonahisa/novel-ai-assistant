@@ -3,10 +3,12 @@ import {
   BLURB_MIN_CHARS,
   BLURB_SCHEMA,
   BLURB_SYSTEM_PROMPT,
+  BLURB_TEMPERATURE,
   BLURB_VERSION,
   CATCHPHRASE_COUNT,
   CATCHPHRASE_MAX_CHARS,
   CATCHPHRASE_SCHEMA,
+  CATCHPHRASE_TEMPERATURE,
   buildBlurbPrompt,
   buildCatchphrasePrompt,
 } from "../../prompts/blurb";
@@ -102,6 +104,7 @@ export function blurbPrompt(input: BlurbPromptInput) {
     promptVersion: BLURB_VERSION,
     systemPrompt: BLURB_SYSTEM_PROMPT,
     schema: BLURB_SCHEMA,
+    temperature: BLURB_TEMPERATURE,
     validateWith: validateWith("blurb"),
     synopsisCount: synopses.length,
     /** 何字で書かせるか。**呼ぶ側にも見せる**（検算と同じ数字である） */
@@ -153,6 +156,7 @@ export function catchphrasePrompt(input: CatchphrasePromptInput) {
     promptVersion: BLURB_VERSION,
     systemPrompt: BLURB_SYSTEM_PROMPT,
     schema: CATCHPHRASE_SCHEMA,
+    temperature: CATCHPHRASE_TEMPERATURE,
     validateWith: validateWith("catchphrase"),
     asked: CATCHPHRASE_COUNT,
     maxChars: CATCHPHRASE_MAX_CHARS,

@@ -62,6 +62,7 @@ import {
   buildWorkChatSystemPrompt,
   parseWorkChatAnswer,
   WORK_CHAT_SCHEMA,
+  WORK_CHAT_TEMPERATURE,
   WORK_CHAT_VERSION,
   type WorkChatTurn,
 } from "../prompts/workChat";
@@ -124,6 +125,7 @@ import {
   parseSearchTerms,
   SEARCH_TERMS_SCHEMA,
   SEARCH_TERMS_SYSTEM_PROMPT,
+  SEARCH_TERMS_TEMPERATURE,
 } from "../prompts/searchTerms";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { renderMarkdownLite } from "../core/markdownLite";
@@ -1089,8 +1091,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           },
           userPrompt,
           model: resolved.model,
-          // 相談は考えを広げる場なので、抽出よりは揺らす
-          temperature: 0.7,
+          temperature: WORK_CHAT_TEMPERATURE,
           // **上限と見込みは別物**（設計書6.77の第2段）。上限は実測が
           // あればそこまで、無ければ設定値。見込みはOllamaの `num_ctx` の
           // 確保に使う値で、上限として送ってはいけない
@@ -2435,7 +2436,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         systemPrompt: SEARCH_TERMS_SYSTEM_PROMPT,
         userPrompt: buildSearchTermsPrompt({ question, knownTerms: names }),
         model: resolved.model,
-        temperature: 0.2,
+        temperature: SEARCH_TERMS_TEMPERATURE,
         // **相談の本体と同じ2欄を渡す**（設計書6.77の第2段）。ここは相談1回に
         // 付随してもう1回呼ぶ道なので、本体だけに配ると**相談1回のうち半分は
         // 設定値のまま**という、外から見えない食い違いが残る

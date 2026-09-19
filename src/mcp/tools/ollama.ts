@@ -15,6 +15,11 @@ import { McpToolError, describeError } from "./shared";
  * コンテキストで動き、**入力が黙って切り捨てられる。** 128k対応のモデルでも
  * 同じで、切り捨てられたことは応答からは分からない。
  *
+ * **`temperature` も必ず明示する**（2026-09-19）。ここに既定（0.2）を置いて
+ * いたせいで、**製品が 0.0 で回している誤字脱字を、0.2 で測っていた。**
+ * 製品の値は `prompts/*.ts` の `*_TEMPERATURE` にあり、`novel.run` は
+ * そこから渡す——この道具は素の口なので、呼ぶ側が決める。
+ *
  * **`format` にスキーマを渡す**と形式が強制でき、パース失敗がほぼ無くなる。
  * **`think: false`** は、取り出すだけの仕事に思考モードが要らないため。
  *
@@ -50,8 +55,10 @@ export const OLLAMA_GENERATE_INPUT = {
     .describe("num_ctx。**省略できません**（既定値で動くと入力が黙って切れます）"),
   temperature: z
     .number()
-    .optional()
-    .describe("既定は 0.2（取り出す仕事なので揺らさない）"),
+    .describe(
+      "温度。**省略できません**" +
+        "（製品の機能を回すなら novel.run を使ってください。あちらは機能ごとの温度を自分で渡します）"
+    ),
   allowRemote: z
     .boolean()
     .optional()
@@ -65,7 +72,15 @@ export interface OllamaGenerateInput {
   userPrompt: string;
   schema?: unknown;
   numCtx: number;
-  temperature?: number;
+  /**
+   * 温度。**省略できない**（2026-09-19）。
+   *
+   * 0.66 までは既定 0.2 を噛ませていたが、**製品は機能ごとに違う値を渡して
+   * いる**（誤字脱字は 0.0）。ここに既定があると、`novel.run` が渡し忘れても
+   * 動いてしまい、**製品より揺れた条件で測ったことに誰も気づけない**
+   * ——実際 2026-09-18 の誤字脱字と推敲の測定がその状態だった。
+   */
+  temperature: number;
   allowRemote?: boolean;
 }
 
@@ -135,7 +150,9 @@ export async function ollamaGenerate(
           // **これを外さない。** 既定の短いコンテキストで動くと、
           // 入力が黙って切り捨てられる
           num_ctx: input.numCtx,
-          temperature: input.temperature ?? 0.2,
+          // **既定を持たない**（上の `temperature` の注記）。製品の値は
+          // `prompts/*.ts` にあり、呼ぶ側がそこから渡す
+          temperature: input.temperature,
         },
         messages: [
           { role: "system", content: input.systemPrompt },

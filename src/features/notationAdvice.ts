@@ -21,6 +21,7 @@ import {
   buildNotationAdvicePrompt,
   buildNotationAdviceSchema,
   NOTATION_ADVICE_SYSTEM_PROMPT,
+  NOTATION_ADVICE_TEMPERATURE,
   NOTATION_ADVICE_VERSION,
   type NotationAdviceGroup,
 } from "../prompts/notationAdvice";
@@ -143,7 +144,7 @@ export async function askNotationAdvice(
       }),
       model: resolved.model,
       // 判断であって創作ではない。揺らす理由がない
-      temperature: 0.0,
+      temperature: NOTATION_ADVICE_TEMPERATURE,
       // **見込みと実上限を分けて渡す**（設計書6.77の第2段）。返るのは
       // どちらに揃えるかと理由だけだが、渡さないと関所も `num_ctx` も
       // 設定値（既定16,384）で数える

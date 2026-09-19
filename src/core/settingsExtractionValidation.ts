@@ -6,6 +6,12 @@ import type {
   ExtractedOrganization,
   ExtractedWorldItem,
 } from "../prompts/characterExtract";
+// 送った指示文そのものが答えとして返ってくるので、**送った文面と突き合わせる**
+// （下の `isInstructionEcho`）。プロンプトは変えない——読むだけである
+import {
+  BASE_SYSTEM_PROMPT,
+  buildCharacterExtractPrompt,
+} from "../prompts/characterExtract";
 import {
   isGroundedInChunk,
   chaptersForCandidate,
@@ -30,7 +36,9 @@ export type SettingRejectionReason =
   | "not_an_ability"
   | "not_a_place"
   | "not_worldview"
-  | "ungrounded";
+  | "ungrounded"
+  /** 送ったプロンプトの指示文が、そのまま答えとして返ってきた */
+  | "instruction_echo";
 
 export interface RejectedSettingCandidate {
   name: string | null;
@@ -443,6 +451,170 @@ export function normalizeExtractedOrganization(
     description: nullableString(raw.description),
     evidence: nullableString(raw.evidence),
   };
+}
+
+/*
+  ───────────────────────────────────────────────────────────
+  指示文の混入（2026-09-19の実機確認。さくらのAI / Qwen3.6-35B-A3B）
+  ───────────────────────────────────────────────────────────
+
+  `設定/ability_system.json` の rules へ、**プロンプトの指示文がそのまま
+  6文**入って保存された。「指示の言葉が、答えの中身として返ってくる」のは
+  この作品で繰り返し起きていることである（CLAUDE.md）。
+
+  **言い回しの表では落とさない。** 「〜すること」「〜してください」を並べて
+  弾く手は、モデルを1つ替えるか、こちらがプロンプトを1文書き直すだけで
+  すり抜ける（関係の検算で実際に追いかけっこになった）。
+
+  **送った文面が手元にあるのだから、それと突き合わせる。** 返ってきた1行が
+  プロンプトの指示のところにほぼそのまま入っていれば、それは作品の設定では
+  なく、こちらが書いた文である。言い換えの余地がない。
+*/
+
+/**
+ * 比べる前に、体裁の違いだけを落とす。
+ *
+ * **改行と字下げを消すのが肝である。** プロンプトの指示は折り返して
+ * 書いてあり（「…特別な力として\n   扱われている場合にのみ…」）、AIは
+ * それを1行に繋げて返す。空白を残したままでは、いちばん長い一致が
+ * 折り返しのたびに切れてしまう。強調の記号を落とすのも同じ理由で、
+ * 実機の6文目は `**` だけを外した形で返ってきた。
+ */
+function normalizeForEcho(text: string): string {
+  return text
+    .replace(/[*＊_`#]/gu, "")
+    .replace(/\s+/gu, "")
+    .toLowerCase();
+}
+
+/** 組み立て直しは高くつく（プロンプト2本ぶん）ので、総称ごとに控える */
+const instructionTextCache = new Map<string, string>();
+
+/**
+ * プロンプトの「指示のところ」だけを組み立てる。
+ *
+ * **本文と既知の名前を空にして組み立てる。** 送った文面を丸ごと比べると、
+ * 本文から正しく読み取った決まりまで「プロンプトに入っていた」ことになり、
+ * **本物の設定を消してしまう**（プロンプトには本文がそのまま入っている）。
+ *
+ * 総称が決まっている回は文面自体が差し替わるので、両方の言い回しを含める。
+ */
+function instructionText(abilityTerm?: string | null): string {
+  const cached = instructionTextCache.get(abilityTerm ?? "");
+  if (cached !== undefined) return cached;
+  const base = {
+    chunkText: "",
+    chapterLabel: "",
+    knownCharacterNames: [],
+  };
+  const built = normalizeForEcho(
+    [
+      BASE_SYSTEM_PROMPT,
+      buildCharacterExtractPrompt(base),
+      buildCharacterExtractPrompt({
+        ...base,
+        // 総称が決まっている回の文面には作品の語が挟まる。
+        // 分かっているなら同じ語で組み立てないと、一致が語の前後で切れる
+        abilityTerm: abilityTerm || "＿",
+      }),
+    ].join("\n")
+  );
+  instructionTextCache.set(abilityTerm ?? "", built);
+  return built;
+}
+
+/**
+ * 「書き写された塊」と見る最小の長さ。
+ *
+ * **日本語の散文が、偶然8字も続けて一致することはまず無い。** 指示文と
+ * たまたま重なるのは「本文から」「〜すること。」のような5〜6字までである。
+ * ここを下げると、本物の決まりを消しはじめる。
+ */
+const ECHO_RUN_CHARS = 8;
+
+/**
+ * 「同じ」と見る近さ。**7割が書き写しで説明できること。**
+ *
+ * 一言一句の一致では足りない。実機の6文目は強調の記号を外し、2文目は
+ * 続きの一文を落として返ってきた。逆に、緩めて半分にすると本物の決まりに
+ * 手が届きはじめる。**落としそこねるより、本物を消すほうが害が大きい**ので、
+ * 迷う幅（0.5〜0.7）は残すほうへ倒してある。
+ */
+const ECHO_RATIO = 0.7;
+
+/**
+ * この長さに満たない決まりは、何があっても落とさない。
+ *
+ * 短い文は言い回しの持ち駒が少なく、偶然の一致が起きやすい。実機で
+ * 混入した中でいちばん短い文が19字だったので、その下に境目を置いた。
+ */
+const ECHO_MIN_CHARS = 16;
+
+/**
+ * 指示文からの書き写しで説明できる字数。
+ *
+ * **1本の長い一致では測らない。** AIは真ん中の一節を落として返すことが
+ * あり（「実際に使用された、または名指しで言及された能力」→「実際に
+ * 使用された能力」）、その場合いちばん長い一致は半分しか無いのに、
+ * 文そのものは端から端まで指示文である。**塊をいくつ拾えるかで見る。**
+ */
+function copiedLength(rule: string, source: string): number {
+  let copied = 0;
+  let cursor = 0;
+  while (cursor + ECHO_RUN_CHARS <= rule.length) {
+    if (!source.includes(rule.slice(cursor, cursor + ECHO_RUN_CHARS))) {
+      cursor++;
+      continue;
+    }
+    // 塊が見つかったら、伸ばせるだけ伸ばしてから次へ飛ぶ
+    let length = ECHO_RUN_CHARS;
+    while (
+      cursor + length < rule.length &&
+      source.includes(rule.slice(cursor, cursor + length + 1))
+    ) {
+      length++;
+    }
+    copied += length;
+    cursor += length;
+  }
+  return copied;
+}
+
+/**
+ * この1行は、送ったプロンプトの指示文がそのまま返ってきたものか。
+ *
+ * @param abilityTerm その回に使っていた能力の総称（分かるときだけ）
+ */
+export function isInstructionEcho(
+  rule: string,
+  abilityTerm?: string | null
+): boolean {
+  const normalized = normalizeForEcho(rule);
+  if (normalized.length < ECHO_MIN_CHARS) return false;
+  const copied = copiedLength(normalized, instructionText(abilityTerm));
+  return copied / normalized.length >= ECHO_RATIO;
+}
+
+/** 決まりの並びから、指示文の混入を取り除いた結果 */
+export interface InstructionEchoFilter {
+  /** 作品の設定として残すもの */
+  kept: string[];
+  /** 指示文として落としたもの。**黙って捨てないので件数を出せる** */
+  dropped: string[];
+}
+
+/** 能力体系の決まりから、プロンプトの指示文を取り除く */
+export function dropInstructionEcho(
+  rules: readonly string[],
+  abilityTerm?: string | null
+): InstructionEchoFilter {
+  const kept: string[] = [];
+  const dropped: string[] = [];
+  for (const rule of rules) {
+    if (isInstructionEcho(rule, abilityTerm)) dropped.push(rule);
+    else kept.push(rule);
+  }
+  return { kept, dropped };
 }
 
 /** 能力体系の総称。空文字や記号だけの値を弾く */

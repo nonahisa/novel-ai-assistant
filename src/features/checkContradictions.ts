@@ -58,6 +58,7 @@ import {
   CONTRADICTION_CATEGORIES,
   CONTRADICTION_CHECK_SCHEMA,
   CONTRADICTION_CHECK_SYSTEM_PROMPT,
+  CONTRADICTION_CHECK_TEMPERATURE,
   CONTRADICTION_CHECK_VERSION,
   LIGHT_CATEGORIES,
   type ContradictionCategory,
@@ -66,6 +67,7 @@ import {
   buildContradictionVerifyPrompt,
   CONTRADICTION_VERIFY_SCHEMA,
   CONTRADICTION_VERIFY_SYSTEM_PROMPT,
+  CONTRADICTION_VERIFY_TEMPERATURE,
   CONTRADICTION_VERIFY_VERSION,
   type VerifyRejectReason,
 } from "../prompts/contradictionVerify";
@@ -623,7 +625,7 @@ export async function checkContradictions(
               userPrompt,
               model,
               // 事実の突き合わせなので揺らさない
-              temperature: 0.0,
+              temperature: CONTRADICTION_CHECK_TEMPERATURE,
               maxOutputTokens: sendOutputTokens,
               plannedOutputTokens,
               jsonSchema: CONTRADICTION_CHECK_SCHEMA as unknown as object,
@@ -891,7 +893,7 @@ export async function checkContradictions(
           settingKnownAt: settings.knownAtFor(issue.settingSays),
         }),
         model,
-        temperature: 0.0,
+        temperature: CONTRADICTION_VERIFY_TEMPERATURE,
         maxOutputTokens: verifySendOutputTokens,
         plannedOutputTokens: verifyPlannedOutputTokens,
         jsonSchema: CONTRADICTION_VERIFY_SCHEMA as unknown as object,

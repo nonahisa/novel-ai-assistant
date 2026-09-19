@@ -4,6 +4,7 @@ import {
   NAME_SUGGEST_COUNT,
   NAME_SUGGEST_SCHEMA,
   NAME_SUGGEST_SYSTEM_PROMPT,
+  NAME_SUGGEST_TEMPERATURE,
   NAME_SUGGEST_VERSION,
   buildNameSuggestPrompt,
   parseNameSuggest,
@@ -131,6 +132,7 @@ export function namePrompt(input: NamePromptInput) {
     promptVersion: NAME_SUGGEST_VERSION,
     systemPrompt: NAME_SUGGEST_SYSTEM_PROMPT,
     schema: NAME_SUGGEST_SCHEMA,
+    temperature: NAME_SUGGEST_TEMPERATURE,
     validateWith: VALIDATE_WITH,
     /** 何件を避ける相手として渡したか。**材料の厚みを返り値に残す** */
     existingCount: entries.length - 1,

@@ -1,6 +1,7 @@
 import type { Chunk } from "./chunker";
 import type { CharacterExtractResult } from "../prompts/characterExtract";
 import {
+  dropInstructionEcho,
   normalizeExtractedAbilitySystem,
   validateExtractedAbilities,
   validateExtractedLocations,
@@ -171,7 +172,22 @@ export class SettingsExtractionCollector {
       if (!this.abilityDescription && system.description) {
         this.abilityDescription = system.description;
       }
-      for (const rule of system.rules ?? []) this.rules.add(rule);
+      /*
+        **送った指示文が、そのまま決まりとして返ってくる**（2026-09-19の
+        実機確認で6文が保存された）。総称を先に読んでから落とすのは、
+        総称が決まっている回のプロンプトには作品の語が挟まるためである
+        （`settingsExtractionValidation.ts` の `instructionText`）。
+
+        落とした分は黙って捨てず、除外として数える（抽出の完了報告に出る）。
+      */
+      const filtered = dropInstructionEcho(
+        system.rules ?? [],
+        this.abilityTerm
+      );
+      for (const rule of filtered.kept) this.rules.add(rule);
+      for (const rule of filtered.dropped) {
+        this.rejected.push({ name: rule, reason: "instruction_echo" });
+      }
     }
 
     const abilities = validateExtractedAbilities(

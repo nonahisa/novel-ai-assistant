@@ -1027,9 +1027,14 @@ export async function extractCharacters(
   // 能力・場所を保存する。人物の保存が終わってから行うのは、
   // 人物側で保存を中止した場合に設定だけ書き込まれるのを避けるため。
   let settingsNotice = settingsNoticePrefix;
+  /** 指示文として落とした決まり。**中身は操作ログにだけ残す**（下の logStep） */
+  let echoedRules: string[] = [];
   try {
     const persisted = await settings.persist(work, saveKinds);
     settingsNotice = describeSettingsResult(persisted);
+    echoedRules = persisted.counts.rejected
+      .filter((item) => item.reason === "instruction_echo")
+      .map((item) => item.name ?? "");
   } catch (error) {
     // 設定の保存に失敗しても、人物の抽出結果は保存済みである。
     // 何が保存されなかったかを伝えて続行する。
@@ -1061,6 +1066,19 @@ export async function extractCharacters(
       cacheWarnings: baseCounts.cacheWarnings,
     })
   );
+  /*
+    落とした指示文は、ここにだけ全文が残る。
+
+    **何を捨てたのかを確かめる手立てを作者に残す**（画面には件数しか
+    出さない）。検算が行きすぎて本物の決まりを消したとき、ログを見れば
+    すぐ分かる。
+  */
+  if (echoedRules.length > 0) {
+    logStep(
+      `能力の決まりから、AIへの指示文がそのまま返ってきた ${echoedRules.length}件を外しました:\n` +
+        echoedRules.map((rule) => `  ${rule}`).join("\n")
+    );
+  }
 
   const summary = buildExtractionSummary(baseCounts) + settingsNotice;
   const recovery = describeFailureRecoveries(failures);
@@ -1335,6 +1353,23 @@ function describeSettingsResult(result: SettingsPersistResult): string {
   if (worldTotal > 0) {
     lines.push(
       `世界観: 新規 ${counts.worldAdded}件 / 更新 ${counts.worldUpdated}件`
+    );
+  }
+
+  /*
+    AIへ送った指示文が、そのまま「能力の決まり」として返ってくることがある
+    （2026-09-19の実機確認。さくらのAIで6文が保存された）。
+
+    **黙って捨てない。** 件数だけをここへ出し、落とした文そのものは操作
+    ログへ残す（`extractCharacters` の logStep）。文が長いので、画面へ
+    並べると件数の行が読めなくなる。
+  */
+  const echoedRules = counts.rejected.filter(
+    (item) => item.reason === "instruction_echo"
+  ).length;
+  if (echoedRules > 0) {
+    lines.push(
+      `AIへの指示文がそのまま返ってきた ${echoedRules}件を、能力の決まりから外しました（操作ログに残してあります）。`
     );
   }
 

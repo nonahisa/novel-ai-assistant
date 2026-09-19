@@ -34,6 +34,13 @@
  */
 export const EPISODE_PLOT_CONTRAST_VERSION = "1.0";
 
+/**
+ * 送るときの温度。突き合わせだが判断を伴うので、単話プロットの緩み（P-11）と同じに置く。
+ *
+ * **製品も測定台もここを見る**（プロンプトと温度は一対なので、版と同じ場所に置く）。
+ */
+export const EPISODE_PLOT_CONTRAST_TEMPERATURE = 0.2;
+
 /** 見る観点は3つだけ（設計書6.36.3） */
 export const EPISODE_PLOT_CONTRAST_KINDS = [
   "箇条書きに無い",

@@ -48,6 +48,7 @@ import {
   episodePlotCheckBudget,
   EPISODE_PLOT_CHECK_SCHEMA,
   EPISODE_PLOT_CHECK_SYSTEM_PROMPT,
+  EPISODE_PLOT_CHECK_TEMPERATURE,
   EPISODE_PLOT_CHECK_VERSION,
 } from "../prompts/episodePlotCheck";
 import {
@@ -55,6 +56,7 @@ import {
   episodePlotContrastBudget,
   EPISODE_PLOT_CONTRAST_SCHEMA,
   EPISODE_PLOT_CONTRAST_SYSTEM_PROMPT,
+  EPISODE_PLOT_CONTRAST_TEMPERATURE,
   EPISODE_PLOT_CONTRAST_VERSION,
 } from "../prompts/episodePlotContrast";
 import {
@@ -364,6 +366,7 @@ export async function checkEpisodePlotDesign(
           model: resolved.model,
           systemPrompt: EPISODE_PLOT_CHECK_SYSTEM_PROMPT,
           userPrompt,
+          temperature: EPISODE_PLOT_CHECK_TEMPERATURE,
           schema: EPISODE_PLOT_CHECK_SCHEMA as unknown as object,
           feature: "episode_plot_check",
           workFolder: work.folderPath,
@@ -572,6 +575,7 @@ export async function contrastEpisodePlot(
           model: resolved.model,
           systemPrompt: EPISODE_PLOT_CONTRAST_SYSTEM_PROMPT,
           userPrompt,
+          temperature: EPISODE_PLOT_CONTRAST_TEMPERATURE,
           schema: EPISODE_PLOT_CONTRAST_SCHEMA as unknown as object,
           feature: "episode_plot_contrast",
           workFolder: work.folderPath,
@@ -806,6 +810,14 @@ async function ask(options: {
   label: string;
   chapterLabel: string;
   parts: Record<string, number>;
+  /**
+   * 送るときの温度。**呼び出し側から渡してもらう**（2026-09-19）。
+   *
+   * ここで決め打ちにすると、**2つのプロンプトの温度が1か所に埋まる**。
+   * 温度はプロンプトごとの指定なので、それぞれの `prompts/*.ts` に置いて
+   * 呼び出し側が渡す——測定台（MCP）も同じ定数を見る。
+   */
+  temperature: number;
   /** 実際に送る出力上限（設計書6.77の第2段） */
   maxOutputTokens?: number;
   /** 場所の確保に見込む量。**上限としては送らない**（同上） */
@@ -817,8 +829,7 @@ async function ask(options: {
       systemPrompt: options.systemPrompt,
       userPrompt: options.userPrompt,
       model: options.model,
-      // 判断を伴うので、事実の突き合わせより少しだけ揺らす（P-11と同じ）
-      temperature: 0.2,
+      temperature: options.temperature,
       // **未指定なら欄ごと落とす。** `undefined` を明示的に渡すと、
       // プロバイダ側の `?? 既定` が効かなくなる書き方が混ざりうる
       ...(options.maxOutputTokens === undefined

@@ -39,12 +39,14 @@ import {
   buildStoryFactExtractPrompt,
   STORY_FACT_EXTRACT_SCHEMA,
   STORY_FACT_EXTRACT_SYSTEM_PROMPT,
+  STORY_FACT_EXTRACT_TEMPERATURE,
   STORY_FACT_EXTRACT_VERSION,
 } from "../../prompts/storyFactExtract";
 import {
   buildContradictionVerifyPrompt,
   CONTRADICTION_VERIFY_SCHEMA,
   CONTRADICTION_VERIFY_SYSTEM_PROMPT,
+  CONTRADICTION_VERIFY_TEMPERATURE,
   CONTRADICTION_VERIFY_VERSION,
   type VerifyRejectReason,
 } from "../../prompts/contradictionVerify";
@@ -67,6 +69,7 @@ import {
   assertRunner,
   describeOutcome,
   claudeNote,
+  temperatureFor,
   validateWith,
   type RunnerKind,
 } from "./run";
@@ -232,6 +235,8 @@ export interface FactContradictionPromptResult {
   verifyPromptVersion: string;
   systemPrompt: string;
   schema: unknown;
+  /** 製品がこのプロンプトで使う温度（`prompts/*.ts`）。**写しを持たない** */
+  temperature: number;
   validateWith: string;
   /** 対応表に載せた人物の数。0なら本文の表記のまま扱う */
   knownCharacters: number;
@@ -261,6 +266,7 @@ export function factContradictionPrompt(
     verifyPromptVersion: CONTRADICTION_VERIFY_VERSION,
     systemPrompt: STORY_FACT_EXTRACT_SYSTEM_PROMPT,
     schema: STORY_FACT_EXTRACT_SCHEMA,
+    temperature: STORY_FACT_EXTRACT_TEMPERATURE,
     validateWith: VALIDATE_WITH,
     knownCharacters: context.table.entries.length,
     note:
@@ -360,6 +366,7 @@ export interface FactContradictionRunInput extends FactContradictionInput {
   endpoint?: string;
   model?: string;
   allowRemote?: boolean;
+  temperature?: number;
 }
 
 export type FactContradictionRunOutcome =
@@ -368,6 +375,7 @@ export type FactContradictionRunOutcome =
       note: string;
       systemPrompt: string;
       schema: unknown;
+      temperature: number;
       validateWith: string;
       chunks: FactExtractChunkPrompt[];
     }
@@ -375,6 +383,8 @@ export type FactContradictionRunOutcome =
       runner: "ollama" | "sampling";
       note: string;
       model: string;
+      /** 2段のどちらも同じ値で回す。**明示されたときはその値** */
+      temperature: { extract: number; verify: number };
       results: FactContradictionFileResult[];
       failures: Array<{ chunkId: string; reason: string }>;
       /** 工程ごとの数（どこで減ったのかが分からないと、直す場所が決まらない） */
@@ -406,6 +416,7 @@ export async function factContradictionRun(
       note: `${claudeNote(VALIDATE_WITH)} ${prompts.note}`,
       systemPrompt: prompts.systemPrompt,
       schema: prompts.schema,
+      temperature: temperatureFor(input, prompts.temperature),
       validateWith: VALIDATE_WITH,
       chunks: prompts.chunks,
     };
@@ -433,6 +444,7 @@ export async function factContradictionRun(
           knownTopics.slice(-TOPIC_CARRY_LIMIT)
         ),
         schema: STORY_FACT_EXTRACT_SCHEMA,
+        temperature: temperatureFor(input, STORY_FACT_EXTRACT_TEMPERATURE),
       });
       models.add(reply.model);
       const raw = parseFactJsonObject(reply.text);
@@ -510,6 +522,7 @@ export async function factContradictionRun(
             sides.left.chapter !== null ? `第${sides.left.chapter}話` : "",
         }),
         schema: CONTRADICTION_VERIFY_SCHEMA,
+        temperature: temperatureFor(input, CONTRADICTION_VERIFY_TEMPERATURE),
       });
       models.add(reply.model);
       outcome = parseVerifyOutcome(reply.text);
@@ -591,6 +604,11 @@ export async function factContradictionRun(
       verifyNote,
       cancelled: false,
     })}`,
+    // **何で回したかを残す**（`num_ctx` と同じ扱い。6.87.16）
+    temperature: {
+      extract: temperatureFor(input, STORY_FACT_EXTRACT_TEMPERATURE),
+      verify: temperatureFor(input, CONTRADICTION_VERIFY_TEMPERATURE),
+    },
     model:
       models.size > 0
         ? [...models].join(" / ")
@@ -619,6 +637,8 @@ function askerOf(
   systemPrompt: string;
   userPrompt: string;
   schema: unknown;
+  /** その段のプロンプトの温度。**段ごとに違いうる**ので、ここで決めない */
+  temperature: number;
 }) => Promise<{ text: string; model: string }> {
   if (input.runner === "sampling") {
     return async (params) => {
@@ -626,6 +646,7 @@ function askerOf(
         folder: input.folder,
         systemPrompt: params.systemPrompt,
         userPrompt: params.userPrompt,
+        temperature: params.temperature,
       });
       return { text: reply.text, model: reply.model };
     };
@@ -643,8 +664,8 @@ function askerOf(
       schema: params.schema,
       numCtx: input.numCtx,
       allowRemote: input.allowRemote,
-      // 事実の書き写しも判定も揺らさない（製品と同じ 0.0）
-      temperature: 0,
+      // **段ごとの値を、呼ぶ側から受け取る**（製品の `prompts/*.ts` の値）
+      temperature: params.temperature,
     });
     return { text: response.text, model: response.model };
   };

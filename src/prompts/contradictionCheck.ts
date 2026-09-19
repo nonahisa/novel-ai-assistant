@@ -21,6 +21,13 @@
 //      （版はキャッシュの鍵に入っており、この版で一度だけ全件が処理し直しになる）
 export const CONTRADICTION_CHECK_VERSION = "1.5";
 
+/**
+ * 送るときの温度。事実の突き合わせなので揺らさない。
+ *
+ * **製品も測定台もここを見る**（プロンプトと温度は一対なので、版と同じ場所に置く）。
+ */
+export const CONTRADICTION_CHECK_TEMPERATURE = 0.0;
+
 export const CONTRADICTION_CHECK_SYSTEM_PROMPT = `あなたは日本語の小説の設定矛盾だけを検出する編集アシスタントです。
 
 【絶対に守る原則】

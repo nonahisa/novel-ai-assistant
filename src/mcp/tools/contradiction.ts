@@ -2,6 +2,7 @@ import {
   CONTRADICTION_CATEGORIES,
   CONTRADICTION_CHECK_SCHEMA,
   CONTRADICTION_CHECK_SYSTEM_PROMPT,
+  CONTRADICTION_CHECK_TEMPERATURE,
   CONTRADICTION_CHECK_VERSION,
   LIGHT_CATEGORIES,
   buildContradictionCheckPrompt,
@@ -235,6 +236,8 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
   promptVersion: string;
   systemPrompt: string;
   schema: unknown;
+  /** 製品がこのプロンプトで使う温度（`prompts/*.ts`）。**写しを持たない** */
+  temperature: number;
   categories: readonly ContradictionCategory[];
   validateWith: string;
   chunks: ContradictionChunkPrompt[];
@@ -283,6 +286,7 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
     promptVersion: CONTRADICTION_CHECK_VERSION,
     systemPrompt: CONTRADICTION_CHECK_SYSTEM_PROMPT,
     schema: CONTRADICTION_CHECK_SCHEMA,
+    temperature: CONTRADICTION_CHECK_TEMPERATURE,
     categories,
     validateWith: VALIDATE_WITH,
     chunks: prompts,
@@ -332,6 +336,7 @@ export interface ContradictionRunInput extends ContradictionPromptInput {
   endpoint?: string;
   model?: string;
   allowRemote?: boolean;
+  temperature?: number;
 }
 
 export async function contradictionRun(

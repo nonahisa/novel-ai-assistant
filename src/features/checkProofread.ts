@@ -41,6 +41,7 @@ import {
   MAX_ISSUES_PER_1000_CHARS,
   PROOFREAD_SCHEMA,
   PROOFREAD_SYSTEM_PROMPT,
+  PROOFREAD_TEMPERATURE,
   PROOFREAD_VERSION,
 } from "../prompts/proofread";
 import {
@@ -394,7 +395,7 @@ export async function checkProofread(
             userPrompt,
             model,
             // 言い回しの提案なので、事実の突き合わせより少しだけ揺らす
-            temperature: 0.2,
+            temperature: PROOFREAD_TEMPERATURE,
             maxOutputTokens: sendOutputTokens,
             plannedOutputTokens,
             jsonSchema: PROOFREAD_SCHEMA as unknown as object,

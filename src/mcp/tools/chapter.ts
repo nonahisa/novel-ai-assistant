@@ -2,6 +2,7 @@ import * as nodePath from "node:path";
 import {
   CHAPTER_PROPOSE_SCHEMA,
   CHAPTER_PROPOSE_SYSTEM_PROMPT,
+  CHAPTER_PROPOSE_TEMPERATURE,
   CHAPTER_PROPOSE_VERSION,
   buildChapterProposePrompt,
   type ChapterProposeEpisode,
@@ -145,6 +146,7 @@ export function chapterPrompt(input: ChapterPromptInput) {
     promptVersion: CHAPTER_PROPOSE_VERSION,
     systemPrompt: CHAPTER_PROPOSE_SYSTEM_PROMPT,
     schema: CHAPTER_PROPOSE_SCHEMA,
+    temperature: CHAPTER_PROPOSE_TEMPERATURE,
     validateWith: VALIDATE_WITH,
     /** 何話を材料にしたか。**合本が痩せていないかを、ここで見られる** */
     episodeCount: episodes.length,

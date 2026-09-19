@@ -41,12 +41,14 @@ import {
   buildForeshadowDetectPrompt,
   FORESHADOW_DETECT_SCHEMA,
   FORESHADOW_DETECT_SYSTEM_PROMPT,
+  FORESHADOW_DETECT_TEMPERATURE,
   FORESHADOW_DETECT_VERSION,
 } from "../prompts/foreshadowDetect";
 import {
   buildForeshadowResolvePrompt,
   FORESHADOW_RESOLVE_SCHEMA,
   FORESHADOW_RESOLVE_SYSTEM_PROMPT,
+  FORESHADOW_RESOLVE_TEMPERATURE,
   FORESHADOW_RESOLVE_VERSION,
 } from "../prompts/foreshadowResolve";
 import {
@@ -404,7 +406,7 @@ export async function checkForeshadows(
             userPrompt,
             model,
             // 取り出すだけの仕事なので揺らさない
-            temperature: 0.0,
+            temperature: FORESHADOW_DETECT_TEMPERATURE,
             maxOutputTokens: sendOutputTokens,
             plannedOutputTokens,
             jsonSchema: FORESHADOW_DETECT_SCHEMA as unknown as object,
@@ -820,7 +822,7 @@ export async function checkForeshadowResolution(
             systemPrompt: FORESHADOW_RESOLVE_SYSTEM_PROMPT,
             userPrompt,
             model,
-            temperature: 0.0,
+            temperature: FORESHADOW_RESOLVE_TEMPERATURE,
             maxOutputTokens: sendOutputTokens,
             plannedOutputTokens,
             jsonSchema: FORESHADOW_RESOLVE_SCHEMA as unknown as object,

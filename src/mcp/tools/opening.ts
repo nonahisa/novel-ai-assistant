@@ -1,6 +1,7 @@
 import {
   OPENING_CHECK_SCHEMA,
   OPENING_CHECK_SYSTEM_PROMPT,
+  OPENING_CHECK_TEMPERATURE,
   OPENING_CHECK_VERSION,
   OPENING_EXCERPT_MAX_CHARS,
   buildOpeningCheckPrompt,
@@ -79,6 +80,7 @@ export function openingPrompt(input: OpeningPromptInput) {
     promptVersion: OPENING_CHECK_VERSION,
     systemPrompt: OPENING_CHECK_SYSTEM_PROMPT,
     schema: OPENING_CHECK_SCHEMA,
+    temperature: OPENING_CHECK_TEMPERATURE,
     validateWith: VALIDATE_WITH,
     /** どのファイルの、何字を見たか。**診断の前提を返り値に残す** */
     readFrom: opening.from,

@@ -12,6 +12,13 @@
 // 1.1: 作品の作法（一人称・文語体・直さない語）を渡すようにした（6.8.14）
 export const TYPO_CHECK_VERSION = "1.1";
 
+/**
+ * 送るときの温度。誤字脱字は事実の照合なので揺らさない。
+ *
+ * **製品も測定台もここを見る**（プロンプトと温度は一対なので、版と同じ場所に置く）。
+ */
+export const TYPO_CHECK_TEMPERATURE = 0.0;
+
 export const TYPO_CHECK_SYSTEM_PROMPT = `あなたは日本語の小説の誤字脱字だけを検出する校正アシスタントです。
 
 【絶対に守る原則】

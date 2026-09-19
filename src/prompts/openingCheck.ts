@@ -31,6 +31,13 @@ import { isPlaceholderText } from "../core/placeholderText";
 export const OPENING_CHECK_VERSION = "1.0";
 
 /**
+ * 送るときの温度。判定と根拠を出すだけなので揺らす理由が無い。0にしないのは、同じ言い回しが6要素に並ぶのを避けるため。
+ *
+ * **製品も測定台もここを見る**（プロンプトと温度は一対なので、版と同じ場所に置く）。
+ */
+export const OPENING_CHECK_TEMPERATURE = 0.2;
+
+/**
  * AIへ渡す冒頭本文の上限。
  *
  * 作者の創作論でいう「冒頭2,000〜3,000字」の上限に合わせてある。

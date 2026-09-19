@@ -2,12 +2,14 @@ import { targetsFor, toBrief } from "../../core/foreshadowTargets";
 import {
   FORESHADOW_DETECT_SCHEMA,
   FORESHADOW_DETECT_SYSTEM_PROMPT,
+  FORESHADOW_DETECT_TEMPERATURE,
   FORESHADOW_DETECT_VERSION,
   buildForeshadowDetectPrompt,
 } from "../../prompts/foreshadowDetect";
 import {
   FORESHADOW_RESOLVE_SCHEMA,
   FORESHADOW_RESOLVE_SYSTEM_PROMPT,
+  FORESHADOW_RESOLVE_TEMPERATURE,
   FORESHADOW_RESOLVE_VERSION,
   buildForeshadowResolvePrompt,
 } from "../../prompts/foreshadowResolve";
@@ -104,6 +106,8 @@ export interface ForeshadowPromptResult {
   promptVersion: string;
   systemPrompt: string;
   schema: unknown;
+  /** 製品がこのプロンプトで使う温度（`prompts/*.ts`）。**写しを持たない** */
+  temperature: number;
   validateWith: string;
   /** 台帳の件数（未回収／全体） */
   ledger: { open: number; total: number; unreadable: number };
@@ -188,6 +192,12 @@ export function foreshadowPrompt(
         : FORESHADOW_RESOLVE_SYSTEM_PROMPT,
     schema:
       mode === "detect" ? FORESHADOW_DETECT_SCHEMA : FORESHADOW_RESOLVE_SCHEMA,
+    // **版・プロンプトと同じように、温度も mode で分ける。** いまは両方 0.0 だが、
+    // 片方だけ変えたときに気づけない形にはしない
+    temperature:
+      mode === "detect"
+        ? FORESHADOW_DETECT_TEMPERATURE
+        : FORESHADOW_RESOLVE_TEMPERATURE,
     validateWith: DETECT_VALIDATE_WITH,
     ledger: {
       open: open.length,
@@ -279,6 +289,7 @@ export interface ForeshadowRunInput extends ForeshadowPromptInput {
   endpoint?: string;
   model?: string;
   allowRemote?: boolean;
+  temperature?: number;
 }
 
 export async function foreshadowRun(

@@ -222,6 +222,8 @@ describe("チャンクごとに回す", () => {
   test("1つ失敗しても止めず、理由を残して次へ進む", async () => {
     const result = await runChunksBySampling(
       [{ chunkId: "a" }, { chunkId: "b" }, { chunkId: "c" }],
+      // 温度は製品の値を呼ぶ側から渡す（6.87.16）
+      0,
       async (item) => {
         if (item.chunkId === "b") throw new Error("途中で切れました");
         return { result: item.chunkId, model: "M" };
@@ -237,6 +239,8 @@ describe("チャンクごとに回す", () => {
   test("答えたモデルを並べる", async () => {
     const result = await runChunksBySampling(
       [{ chunkId: "a" }, { chunkId: "b" }],
+      // 温度は製品の値を呼ぶ側から渡す（6.87.16）
+      0,
       async (item) => ({ result: item.chunkId, model: item.chunkId }),
     );
     expect(result.model).toBe("a / b");
@@ -253,6 +257,8 @@ describe("チャンクごとに回す", () => {
     */
     const result = await runChunksBySampling(
       [{ chunkId: "a" }, { chunkId: "b" }],
+      // 温度は製品の値を呼ぶ側から渡す（6.87.16）
+      0,
       async () => {
         throw new Error("許可していません");
       }
@@ -266,6 +272,8 @@ describe("チャンクごとに回す", () => {
   test("一部だけ通ったら、通った数と落ちた数を両方出す", async () => {
     const result = await runChunksBySampling(
       [{ chunkId: "a" }, { chunkId: "b" }, { chunkId: "c" }],
+      // 温度は製品の値を呼ぶ側から渡す（6.87.16）
+      0,
       async (item) => {
         if (item.chunkId === "b") throw new Error("途中で切れました");
         return { result: item.chunkId, model: "M" };
@@ -276,7 +284,7 @@ describe("チャンクごとに回す", () => {
   });
 
   test("**原稿の行き先を約束しない**", async () => {
-    const result = await runChunksBySampling([], async () => ({
+    const result = await runChunksBySampling([], 0, async () => ({
       result: 1,
       model: "M",
     }));

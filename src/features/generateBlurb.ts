@@ -27,8 +27,10 @@ import {
   BLURB_MAX_CHARS,
   BLURB_SCHEMA,
   BLURB_SYSTEM_PROMPT,
+  BLURB_TEMPERATURE,
   CATCHPHRASE_MAX_CHARS,
   CATCHPHRASE_SCHEMA,
+  CATCHPHRASE_TEMPERATURE,
   buildBlurbPrompt,
   buildCatchphrasePrompt,
 } from "../prompts/blurb";
@@ -169,7 +171,7 @@ export async function generateWorkBlurb(
           }),
           model: resolved.model,
           // 紹介文は読ませる文章なので、抽出より少し揺らす
-          temperature: 0.5,
+          temperature: BLURB_TEMPERATURE,
           maxOutputTokens: sendOutputTokens,
           plannedOutputTokens,
           jsonSchema: BLURB_SCHEMA as unknown as object,
@@ -311,7 +313,7 @@ export async function generateCatchphrases(
             }),
             model: resolved.model,
             // 案を出させるので、いちばん揺らす
-            temperature: 0.9,
+            temperature: CATCHPHRASE_TEMPERATURE,
             maxOutputTokens: sendOutputTokens,
             plannedOutputTokens,
             meta: { feature: "catchphrase", workFolder: work.folderPath },

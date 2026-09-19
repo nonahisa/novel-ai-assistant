@@ -23,6 +23,13 @@ import { FACT_KINDS, FACT_MODALITIES } from "../models/storyFact";
 export const STORY_FACT_EXTRACT_VERSION = "1.0";
 
 /**
+ * 送るときの温度。事実の書き写しなので揺らさない。
+ *
+ * **製品も測定台もここを見る**（プロンプトと温度は一対なので、版と同じ場所に置く）。
+ */
+export const STORY_FACT_EXTRACT_TEMPERATURE = 0.0;
+
+/**
  * 1チャンクから受け取る事実の上限。
  *
  * **小さいモデルは配列が止まらなくなる**（P-04a で実際に起きた）。

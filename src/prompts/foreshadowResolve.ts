@@ -20,6 +20,13 @@
 //      それを挙げるなとは書いていなかった（作者のログ、2026-08-30 22:54）
 export const FORESHADOW_RESOLVE_VERSION = "1.1";
 
+/**
+ * 送るときの温度。回収されたかを見るだけなので揺らさない。
+ *
+ * **製品も測定台もここを見る**（プロンプトと温度は一対なので、版と同じ場所に置く）。
+ */
+export const FORESHADOW_RESOLVE_TEMPERATURE = 0.0;
+
 export const FORESHADOW_RESOLVE_SYSTEM_PROMPT = `あなたは日本語の小説で、既に張られた伏線がこの話で回収されたかだけを見る編集アシスタントです。
 
 【絶対に守る原則】

@@ -3,6 +3,7 @@ import {
   MAX_ISSUES_PER_1000_CHARS,
   PROOFREAD_SCHEMA,
   PROOFREAD_SYSTEM_PROMPT,
+  PROOFREAD_TEMPERATURE,
   PROOFREAD_VERSION,
   buildProofreadPrompt,
   issueBudget,
@@ -129,6 +130,8 @@ export interface ProofreadPromptResult {
   promptVersion: string;
   systemPrompt: string;
   schema: unknown;
+  /** 製品がこのプロンプトで使う温度（`prompts/*.ts`）。**写しを持たない** */
+  temperature: number;
   /** AIへ渡す作品の書き方。**空のまま投げない**（F-21） */
   styleNote: string;
   narrativeStyle: string;
@@ -158,6 +161,7 @@ export function proofreadPrompt(
     promptVersion: PROOFREAD_VERSION,
     systemPrompt: PROOFREAD_SYSTEM_PROMPT,
     schema: PROOFREAD_SCHEMA,
+    temperature: PROOFREAD_TEMPERATURE,
     styleNote: style.styleNote,
     narrativeStyle: style.narrativeStyle,
     maxIssuesPer1000Chars: MAX_ISSUES_PER_1000_CHARS,
@@ -242,6 +246,7 @@ export interface ProofreadRunInput extends ProofreadPromptInput {
   endpoint?: string;
   model?: string;
   allowRemote?: boolean;
+  temperature?: number;
 }
 
 export async function proofreadRun(

@@ -92,6 +92,8 @@ describe("鍵が漏れないこと", () => {
       systemPrompt: "あなたは校正者です。",
       userPrompt: "本文",
       schema: PROOFREAD_SCHEMA,
+      // 製品の値を渡す（askSakura は既定を持たない。6.87.16）
+      temperature: 0.2,
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 
@@ -110,6 +112,8 @@ describe("鍵が漏れないこと", () => {
       systemPrompt: "s",
       userPrompt: "u",
       schema: PROOFREAD_SCHEMA,
+      // 製品の値を渡す（askSakura は既定を持たない。6.87.16）
+      temperature: 0.2,
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     expect(JSON.stringify(answered)).not.toContain(FAKE_TOKEN);
@@ -127,6 +131,8 @@ describe("鍵が漏れないこと", () => {
         systemPrompt: "s",
         userPrompt: "u",
         schema: PROOFREAD_SCHEMA,
+      // 製品の値を渡す（askSakura は既定を持たない。6.87.16）
+      temperature: 0.2,
         fetchImpl: fetchImpl as unknown as typeof fetch,
       });
     } catch (error) {
@@ -143,6 +149,8 @@ describe("鍵が漏れないこと", () => {
       promptResponse: {
         systemPrompt: "s",
         schema: PROOFREAD_SCHEMA,
+      // 製品の値を渡す（askSakura は既定を持たない。6.87.16）
+      temperature: 0.2,
         chunks: [
           { chunkId: "本文/001.txt#1-0@1400", userPrompt: "u1" },
           { chunkId: "本文/001.txt#1-1@1400", userPrompt: "u2" },
@@ -191,6 +199,8 @@ describe("さくらへ投げる形", () => {
       systemPrompt: "s",
       userPrompt: "u",
       schema: PROOFREAD_SCHEMA,
+      // 製品の値を渡す（askSakura は既定を持たない。6.87.16）
+      temperature: 0.2,
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 
@@ -213,6 +223,8 @@ describe("さくらへ投げる形", () => {
         systemPrompt: "s",
         userPrompt: "u",
         schema: PROOFREAD_SCHEMA,
+      // 製品の値を渡す（askSakura は既定を持たない。6.87.16）
+      temperature: 0.2,
         fetchImpl: fetchImpl as unknown as typeof fetch,
       })
     ).rejects.toThrow("500");
@@ -260,6 +272,8 @@ describe("novel.validate へ渡す形", () => {
       promptResponse: {
         systemPrompt: "s",
         schema: PROOFREAD_SCHEMA,
+      // 製品の値を渡す（askSakura は既定を持たない。6.87.16）
+      temperature: 0.2,
         chunks: [
           { chunkId: "本文/001.txt#1-0@1400", userPrompt: "u1" },
           { chunkId: "本文/001.txt#1-1@1400", userPrompt: "u2" },

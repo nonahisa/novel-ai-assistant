@@ -2,6 +2,7 @@ import { z } from "zod";
 import * as nodePath from "node:path";
 import {
   NOTATION_ADVICE_SYSTEM_PROMPT,
+  NOTATION_ADVICE_TEMPERATURE,
   NOTATION_ADVICE_VERSION,
   buildNotationAdvicePrompt,
   buildNotationAdviceSchema,
@@ -31,6 +32,7 @@ import { askSampling } from "./sampling";
 import {
   assertRunner,
   claudeNote,
+  temperatureFor,
   type RunnerKind,
   validateWith,
 } from "./run";
@@ -183,6 +185,7 @@ export function notationPrompt(input: NotationPromptInput) {
     systemPrompt: NOTATION_ADVICE_SYSTEM_PROMPT,
     // **スキーマは組ごとに作る**（選べる表記をその場で列挙するため）
     schema: buildNotationAdviceSchema(input.group),
+    temperature: NOTATION_ADVICE_TEMPERATURE,
     validateWith: VALIDATE_WITH,
     label: input.group.label,
     userPrompt: buildNotationAdvicePrompt({
@@ -215,6 +218,7 @@ export interface NotationRunInput extends NotationPromptInput {
   endpoint?: string;
   model?: string;
   allowRemote?: boolean;
+  temperature?: number;
   numCtx?: number;
 }
 
@@ -222,6 +226,8 @@ export async function notationRun(input: NotationRunInput) {
   // **省略を既定で埋めない**（設計書6.87.8 の5）
   assertRunner(input.runner);
   const prompt = notationPrompt(input);
+  // **明示が無ければ製品と同じ**（6.87.16）。決め方は `run.ts` に1つだけ
+  const temperature = temperatureFor(input, prompt.temperature);
   if (input.runner === "claude") {
     return {
       runner: "claude" as const,
@@ -229,6 +235,7 @@ export async function notationRun(input: NotationRunInput) {
       systemPrompt: prompt.systemPrompt,
       userPrompt: prompt.userPrompt,
       schema: prompt.schema,
+      temperature,
       validateWith: VALIDATE_WITH,
     };
   }
@@ -239,10 +246,12 @@ export async function notationRun(input: NotationRunInput) {
       folder: input.folder,
       systemPrompt: prompt.systemPrompt,
       userPrompt: prompt.userPrompt,
+      temperature,
     });
     return {
       runner: "sampling" as const,
       model: reply.model,
+      temperature,
       result: notationValidate({
         folder: input.folder,
         group: input.group,
@@ -262,11 +271,13 @@ export async function notationRun(input: NotationRunInput) {
     userPrompt: prompt.userPrompt,
     schema: prompt.schema,
     numCtx: input.numCtx ?? 8192,
+    temperature,
     allowRemote: input.allowRemote,
   });
   return {
     runner: "ollama" as const,
     model,
+    temperature,
     result: notationValidate({
       folder: input.folder,
       group: input.group,

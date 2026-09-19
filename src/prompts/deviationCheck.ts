@@ -16,6 +16,13 @@
  */
 export const DEVIATION_CHECK_VERSION = "1.1";
 
+/**
+ * 送るときの温度。判断を伴うので、事実の突き合わせより少しだけ揺らす。
+ *
+ * **製品も測定台もここを見る**（プロンプトと温度は一対なので、版と同じ場所に置く）。
+ */
+export const DEVIATION_CHECK_TEMPERATURE = 0.2;
+
 export const DEVIATION_CHECK_SYSTEM_PROMPT = `あなたは日本語の小説を読み、プロットとの食い違いを見つける編集アシスタントです。
 
 **プロットにない展開が、必ずしも悪いわけではありません。** 伏線、人物の掘り下げ、

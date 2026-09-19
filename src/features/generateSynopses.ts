@@ -29,6 +29,7 @@ import {
 import {
   SYNOPSIS_SCHEMA,
   SYNOPSIS_SYSTEM_PROMPT,
+  SYNOPSIS_TEMPERATURE,
   SYNOPSIS_VERSION,
   buildSynopsisPrompt,
   type SubtitleSuggestion,
@@ -213,7 +214,7 @@ export async function generateSynopses(
             }),
             model: resolved.model,
             // あらすじは事実を並べるだけなので、揺らす必要がない
-            temperature: 0.3,
+            temperature: SYNOPSIS_TEMPERATURE,
             maxOutputTokens: sendOutputTokens,
             plannedOutputTokens,
             jsonSchema: SYNOPSIS_SCHEMA as unknown as object,

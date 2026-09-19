@@ -36,6 +36,7 @@ import {
   TYPO_DICTIONARY_LIMIT,
   TYPO_CHECK_SCHEMA,
   TYPO_CHECK_SYSTEM_PROMPT,
+  TYPO_CHECK_TEMPERATURE,
   TYPO_CHECK_VERSION,
   buildTypoCheckPrompt,
   type TypoCheckResult,
@@ -567,7 +568,7 @@ export async function checkTypos(
             systemPrompt: TYPO_CHECK_SYSTEM_PROMPT,
             userPrompt,
             model: resolved.model,
-            temperature: 0.0,
+            temperature: TYPO_CHECK_TEMPERATURE,
 
             maxOutputTokens: sendOutputTokens,
             plannedOutputTokens,

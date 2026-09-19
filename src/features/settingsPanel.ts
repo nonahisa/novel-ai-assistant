@@ -105,6 +105,7 @@ import {
   parseSearchTerms,
   SEARCH_TERMS_SCHEMA,
   SEARCH_TERMS_SYSTEM_PROMPT,
+  SEARCH_TERMS_TEMPERATURE,
 } from "../prompts/searchTerms";
 import { AIError, recoveryForAIError } from "../ai/types";
 import {
@@ -1996,7 +1997,7 @@ export class SettingsPanel {
           knownTerms: this.characters.map((character) => character.name),
         }),
         model: resolved.model,
-        temperature: 0.2,
+        temperature: SEARCH_TERMS_TEMPERATURE,
         // **本体（設定の取り込み）と同じ2欄を渡す**（設計書6.77の第2段）。
         // 下ごしらえだけ設定値のままだと、相談1回のうち片方だけが
         // 実測に従うという、外から見えない食い違いになる

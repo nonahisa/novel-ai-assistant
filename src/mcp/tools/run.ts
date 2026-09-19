@@ -92,6 +92,8 @@ export interface ClaudeRunResult<P> {
   note: string;
   systemPrompt: string;
   schema: unknown;
+  /** 製品と同じ条件で投げてもらうための温度（`prompts/*.ts` の値） */
+  temperature: number;
   validateWith: string;
   chunks: P[];
 }
@@ -100,6 +102,15 @@ export interface OllamaRunResult<R> {
   runner: "ollama";
   note: string;
   model: string;
+  /**
+   * 実際に送った温度（2026-09-19）。
+   *
+   * **`num_ctx` と同じ扱いにする。** 何で測ったのかが結果に残っていないと、
+   * あとから数字を並べても比べられない——0.66 までは既定の 0.2 で回って
+   * おり、**誤字脱字（製品は 0.0）を製品より揺れた条件で測っていた**のに、
+   * 記録からはそれが読めなかった。
+   */
+  temperature: number;
   results: R[];
   /** 失敗したチャンク。**黙って飛ばさない**（件数だけでは何も分からない） */
   failures: Array<{ chunkId: string; reason: string }>;
@@ -117,6 +128,12 @@ export interface SamplingRunResult<R> {
   note: string;
   /** 答えたモデル（呼び出し元が選ぶ）。**こちらでは指定できない** */
   model: string;
+  /**
+   * **頼んだ**温度。`ollama` と違い「送った値」とは言い切れない
+   * ——仕様では任意の指定で、呼び出し元が無視することもある。
+   * それでも残すのは、**何を頼んで測ったのかが分からなくなるほうが困る**ため。
+   */
+  temperature: number;
   results: R[];
   failures: Array<{ chunkId: string; reason: string }>;
 }
@@ -145,12 +162,28 @@ export interface RunnerContext {
    * ここで埋めない——埋めると、**指定したつもりの値が黙って置き換わる**。
    */
   numCtx: number;
+  /**
+   * 温度を明示して測りたいとき（2026-09-19）。
+   *
+   * **省略すれば製品と同じ値になる**（`RunnerPrompts.temperature`）。
+   * ここを埋めるのは「揺らして測る」ためだけで、**埋めた回は製品の
+   * 条件ではない**——記録にもその旨が残るようにしてある。
+   */
+  temperature?: number;
 }
 
 /** `run` が組み立てたプロンプト一式 */
 export interface RunnerPrompts<P> {
   systemPrompt: string;
   schema: unknown;
+  /**
+   * 製品がそのプロンプトで使う温度（2026-09-19）。
+   *
+   * **写しを持たない。** 値は `prompts/*.ts` の `*_TEMPERATURE` にあり、
+   * 製品（`features/*.ts`）も測定台（ここ）も同じ定数を見る——ここへ
+   * 数字を書き並べると、**片方だけ直す日が来る。**
+   */
+  temperature: number;
   chunks: P[];
 }
 
@@ -182,11 +215,17 @@ export async function runByRunner<
     userPrompt: string;
     schema: unknown;
     numCtx: number;
+    temperature: number;
     allowRemote?: boolean;
   }) => Promise<{ text: string }>
 ): Promise<RunOutcome<P, R>> {
   // **省略を既定で埋めない。** 行き先で作者にとっての意味がまるで違う
   assertRunner(context.runner);
+
+  // **明示が無ければ製品と同じ**（2026-09-19）。ここで 0.2 のような
+  // 決め打ちを噛ませていたせいで、誤字脱字（製品は 0.0）を製品より
+  // 揺れた条件で測っていた
+  const temperature = temperatureFor(context, prompts.temperature);
 
   if (context.runner === "claude") {
     return {
@@ -194,17 +233,21 @@ export async function runByRunner<
       note: claudeNote(validateWith),
       systemPrompt: prompts.systemPrompt,
       schema: prompts.schema,
+      // **プロンプトだけ返す道でも温度は渡す。** 受け取った側が自分で
+      // 投げるので、ここを省くと**その側の既定で測られる**
+      temperature,
       validateWith,
       chunks: prompts.chunks,
     };
   }
 
   if (context.runner === "sampling") {
-    return runChunksBySampling(prompts.chunks, async (item) => {
+    return runChunksBySampling(prompts.chunks, temperature, async (item) => {
       const reply = await askSampling({
         folder: context.folder,
         systemPrompt: prompts.systemPrompt,
         userPrompt: item.userPrompt,
+        temperature,
       });
       return {
         model: reply.model,
@@ -217,7 +260,7 @@ export async function runByRunner<
   if (!model) {
     throw new McpToolError("runner が ollama のときは model が要ります。");
   }
-  return runChunks(model, prompts.chunks, async (item) => {
+  return runChunks(model, temperature, prompts.chunks, async (item) => {
     const response = await ask({
       endpoint: context.endpoint,
       model,
@@ -225,10 +268,28 @@ export async function runByRunner<
       userPrompt: item.userPrompt,
       schema: prompts.schema,
       numCtx: context.numCtx,
+      temperature,
       allowRemote: context.allowRemote,
     });
     return validate(item.chunkId, response.text);
   });
+}
+
+/**
+ * どの温度で投げるかを決める（設計書6.87.16）。
+ *
+ * **決め方はここ1か所。** 道具ごとに `?? 既定` を書くと、**直し漏れた
+ * 道具だけが別の温度で回る**——0.66 までの `ollama.generate` の既定
+ * （0.2）が、まさにその形で製品と食い違っていた。
+ *
+ * **明示は残す。** 温度を振って出来の変わり方を見たいことがあるためで、
+ * そのときは呼ぶ側が意図して打つ。省略すれば製品と同じ値になる。
+ */
+export function temperatureFor(
+  context: { temperature?: number },
+  productTemperature: number
+): number {
+  return context.temperature ?? productTemperature;
 }
 
 /**
@@ -246,6 +307,8 @@ export interface RunnerInput {
   model?: string;
   allowRemote?: boolean;
   numCtx?: number;
+  /** 温度を明示して測りたいとき。**省略すれば製品と同じ値**（6.87.16） */
+  temperature?: number;
 }
 
 export type OnceOutcome<T> =
@@ -255,10 +318,11 @@ export type OnceOutcome<T> =
       systemPrompt: string;
       userPrompt: string;
       schema: unknown;
+      temperature: number;
       validateWith: string;
     }
-  | { runner: "ollama"; model: string; result: T }
-  | { runner: "sampling"; model: string; result: T };
+  | { runner: "ollama"; model: string; temperature: number; result: T }
+  | { runner: "sampling"; model: string; temperature: number; result: T };
 
 /** `runOnce` が `ollama` のときに使う読み込み長さ */
 const ONCE_DEFAULT_NUM_CTX = 16384;
@@ -277,11 +341,14 @@ export async function runOnce<T>(
     systemPrompt: string;
     schema: unknown;
     userPrompt: string;
+    /** 製品がそのプロンプトで使う温度（`prompts/*.ts` の `*_TEMPERATURE`） */
+    temperature: number;
     validateWith: string;
   },
   validate: (response: string) => T
 ): Promise<OnceOutcome<T>> {
   assertRunner(input.runner);
+  const temperature = temperatureFor(input, prompt.temperature);
   if (input.runner === "claude") {
     return {
       runner: "claude",
@@ -289,6 +356,7 @@ export async function runOnce<T>(
       systemPrompt: prompt.systemPrompt,
       userPrompt: prompt.userPrompt,
       schema: prompt.schema,
+      temperature,
       validateWith: prompt.validateWith,
     };
   }
@@ -301,10 +369,12 @@ export async function runOnce<T>(
       folder: input.folder,
       systemPrompt: prompt.systemPrompt,
       userPrompt: prompt.userPrompt,
+      temperature,
     });
     return {
       runner: "sampling",
       model: reply.model,
+      temperature,
       result: validate(reply.text),
     };
   }
@@ -320,9 +390,15 @@ export async function runOnce<T>(
     userPrompt: prompt.userPrompt,
     schema: prompt.schema,
     numCtx: input.numCtx ?? ONCE_DEFAULT_NUM_CTX,
+    temperature,
     allowRemote: input.allowRemote,
   });
-  return { runner: "ollama", model, result: validate(response.text) };
+  return {
+    runner: "ollama",
+    model,
+    temperature,
+    result: validate(response.text),
+  };
 }
 
 /**
@@ -333,6 +409,7 @@ export async function runOnce<T>(
  */
 export async function runChunks<P extends { chunkId: string }, R>(
   model: string,
+  temperature: number,
   items: readonly P[],
   ask: (item: P) => Promise<R>
 ): Promise<OllamaRunResult<R>> {
@@ -354,6 +431,7 @@ export async function runChunks<P extends { chunkId: string }, R>(
       aside: "原稿はこの機械から出ていません",
     }),
     model,
+    temperature,
     results,
     failures,
   };
@@ -405,6 +483,7 @@ export async function runChunksBySampling<
   R,
 >(
   items: readonly P[],
+  temperature: number,
   ask: (item: P) => Promise<{ result: R; model: string }>
 ): Promise<SamplingRunResult<R>> {
   const results: R[] = [];
@@ -433,6 +512,7 @@ export async function runChunksBySampling<
       aside: "本文は呼び出し元へ渡っており、その先は呼び出し元の設定によります",
     }),
     model: models.size > 0 ? [...models].join(" / ") : "（不明）",
+    temperature,
     results,
     failures,
   };

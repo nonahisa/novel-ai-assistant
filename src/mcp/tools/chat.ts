@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   WORK_CHAT_SCHEMA,
+  WORK_CHAT_TEMPERATURE,
   WORK_CHAT_VERSION,
   buildWorkChatPrompt,
   buildWorkChatSystemPrompt,
@@ -30,6 +31,7 @@ import { askSampling } from "./sampling";
 import {
   assertRunner,
   claudeNote,
+  temperatureFor,
   type RunnerKind,
   validateWith,
 } from "./run";
@@ -109,6 +111,8 @@ export interface ChatPromptResult {
   promptVersion: string;
   systemPrompt: string;
   schema: unknown;
+  /** 製品が相談で使う温度（`prompts/workChat.ts`）。**写しを持たない** */
+  temperature: number;
   validateWith: string;
   userPrompt: string;
   /** 材料として添えた語（登場人物・場所の名前） */
@@ -254,6 +258,7 @@ export function chatPrompt(input: ChatPromptInput): ChatPromptResult {
     promptVersion: WORK_CHAT_VERSION,
     systemPrompt,
     schema: WORK_CHAT_SCHEMA,
+    temperature: WORK_CHAT_TEMPERATURE,
     validateWith: VALIDATE_WITH,
     userPrompt: buildWorkChatPrompt({
       workTitle: input.folder.split(/[\\/]/).filter(Boolean).pop() ?? "",
@@ -312,6 +317,7 @@ export interface ChatRunInput extends ChatPromptInput {
   endpoint?: string;
   model?: string;
   allowRemote?: boolean;
+  temperature?: number;
   numCtx?: number;
 }
 
@@ -322,12 +328,14 @@ export type ChatRunResult =
       systemPrompt: string;
       userPrompt: string;
       schema: unknown;
+      temperature: number;
       validateWith: string;
       diagnoses: ChatDiagnosisReport;
     }
   | {
       runner: "ollama";
       model: string;
+      temperature: number;
       diagnoses: ChatDiagnosisReport;
       result: ChatValidateResult;
     }
@@ -336,6 +344,7 @@ export type ChatRunResult =
       runner: "sampling";
       /** 答えたモデル。**こちらでは選べない** */
       model: string;
+      temperature: number;
       diagnoses: ChatDiagnosisReport;
       result: ChatValidateResult;
     };
@@ -344,6 +353,8 @@ export async function chatRun(input: ChatRunInput): Promise<ChatRunResult> {
   // **省略を既定で埋めない**（設計書6.87.8 の5）
   assertRunner(input.runner);
   const prompt = chatPrompt(input);
+  // **明示が無ければ製品と同じ**（6.87.16）。決め方は `run.ts` に1つだけ
+  const temperature = temperatureFor(input, prompt.temperature);
 
   if (input.runner === "claude") {
     return {
@@ -352,6 +363,7 @@ export async function chatRun(input: ChatRunInput): Promise<ChatRunResult> {
       systemPrompt: prompt.systemPrompt,
       userPrompt: prompt.userPrompt,
       schema: prompt.schema,
+      temperature,
       validateWith: VALIDATE_WITH,
       diagnoses: prompt.diagnoses,
     };
@@ -363,10 +375,12 @@ export async function chatRun(input: ChatRunInput): Promise<ChatRunResult> {
       folder: input.folder,
       systemPrompt: prompt.systemPrompt,
       userPrompt: prompt.userPrompt,
+      temperature,
     });
     return {
       runner: "sampling",
       model: reply.model,
+      temperature,
       diagnoses: prompt.diagnoses,
       result: chatValidate({ response: reply.text }),
     };
@@ -383,12 +397,14 @@ export async function chatRun(input: ChatRunInput): Promise<ChatRunResult> {
     userPrompt: prompt.userPrompt,
     schema: prompt.schema,
     numCtx: input.numCtx ?? 16384,
+    temperature,
     allowRemote: input.allowRemote,
   });
 
   return {
     runner: "ollama",
     model,
+    temperature,
     diagnoses: prompt.diagnoses,
     result: chatValidate({ response: response.text }),
   };

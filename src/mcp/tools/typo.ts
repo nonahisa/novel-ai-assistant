@@ -1,6 +1,7 @@
 import {
   TYPO_CHECK_SCHEMA,
   TYPO_CHECK_SYSTEM_PROMPT,
+  TYPO_CHECK_TEMPERATURE,
   TYPO_CHECK_VERSION,
   TYPO_DICTIONARY_LIMIT,
   buildTypoCheckPrompt,
@@ -130,6 +131,8 @@ export interface TypoPromptResult {
   promptVersion: string;
   systemPrompt: string;
   schema: unknown;
+  /** 製品がこのプロンプトで使う温度（`prompts/*.ts`）。**写しを持たない** */
+  temperature: number;
   /** AIへ渡す作品の書き方。**空のまま投げない**（設計書6.8.14） */
   styleNote: string;
   /** 辞書に載せた固有名詞の件数（上限で切ったかを、呼ぶ側が読めるように） */
@@ -158,6 +161,7 @@ export function typoPrompt(input: TypoPromptInput): TypoPromptResult {
     promptVersion: TYPO_CHECK_VERSION,
     systemPrompt: TYPO_CHECK_SYSTEM_PROMPT,
     schema: TYPO_CHECK_SCHEMA,
+    temperature: TYPO_CHECK_TEMPERATURE,
     styleNote: context.style.styleNote,
     dictionaryCount: Math.min(
       context.protectedNames.length,
@@ -257,6 +261,7 @@ export interface TypoRunInput extends TypoPromptInput {
   endpoint?: string;
   model?: string;
   allowRemote?: boolean;
+  temperature?: number;
 }
 
 export async function typoRun(

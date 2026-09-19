@@ -25,6 +25,13 @@
 // 1.0: 新設
 export const CONTRADICTION_VERIFY_VERSION = "1.0";
 
+/**
+ * 送るときの温度。指摘が本当に矛盾かを確かめるだけなので揺らさない。
+ *
+ * **製品も測定台もここを見る**（プロンプトと温度は一対なので、版と同じ場所に置く）。
+ */
+export const CONTRADICTION_VERIFY_TEMPERATURE = 0.0;
+
 export const CONTRADICTION_VERIFY_SYSTEM_PROMPT = `あなたは小説の設定と本文を突き合わせる校閲者です。
 
 **すでに挙がっている指摘が、本当に矛盾かどうかだけを判断します。**

@@ -16,6 +16,13 @@
 export const FORESHADOW_DETECT_VERSION = "1.0";
 
 /**
+ * 送るときの温度。取り出すだけの仕事なので揺らさない。
+ *
+ * **製品も測定台もここを見る**（プロンプトと温度は一対なので、版と同じ場所に置く）。
+ */
+export const FORESHADOW_DETECT_TEMPERATURE = 0.0;
+
+/**
  * 短い名の長さ。**一覧の見出しになる**ので、長いと折り返して読めなくなる。
  *
  * 検証側（`foreshadowValidation.ts`）はこれを超えた名前を捨てずに切り詰める。

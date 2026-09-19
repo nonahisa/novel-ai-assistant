@@ -30,6 +30,13 @@ import {
 //      規則の不在が原因）
 export const CHARACTER_EXTRACT_VERSION = "5.4";
 
+/**
+ * 送るときの温度。本文から拾うだけだが、書きぶりの揺れを少しだけ許す。
+ *
+ * **製品も測定台もここを見る**（プロンプトと温度は一対なので、版と同じ場所に置く）。
+ */
+export const CHARACTER_EXTRACT_TEMPERATURE = 0.2;
+
 export const BASE_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 
 【要約は推測ではない】

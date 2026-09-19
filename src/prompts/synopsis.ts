@@ -14,6 +14,13 @@
  */
 export const SYNOPSIS_VERSION = "2.0";
 
+/**
+ * 送るときの温度。あらすじは事実を並べるだけなので、揺らす必要がない。
+ *
+ * **製品も測定台もここを見る**（プロンプトと温度は一対なので、版と同じ場所に置く）。
+ */
+export const SYNOPSIS_TEMPERATURE = 0.3;
+
 /** あらすじの上限。コード側でも切り詰める */
 export const SYNOPSIS_MAX_CHARS = 150;
 /** サブタイトルの上限。ファイル名になるので厳守する */

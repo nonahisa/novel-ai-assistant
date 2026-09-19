@@ -183,6 +183,7 @@ export async function askSakura({
   systemPrompt,
   userPrompt,
   schema,
+  temperature,
   endpoint = SAKURA_ENDPOINT,
   fetchImpl = globalThis.fetch,
   timeoutMs = DEFAULT_SAKURA_TIMEOUT_MS,
@@ -195,6 +196,18 @@ export async function askSakura({
   if (typeof model !== "string" || model.trim() === "") {
     throw new Error("--model を指定してください（さくらのモデル名）。");
   }
+  /*
+    **既定を持たない**（2026-09-19）。ここは 0 を決め打ちしていたが、
+    **製品は機能ごとに違う温度で回す**（誤字脱字 0.0／推敲 0.2／
+    紹介文 0.5…）。既定があると、渡し忘れても動いてしまい、
+    **製品と違う条件で測ったことに誰も気づけない。**
+    値は `novel.prompt` が返す（`src/prompts/*.ts` の `*_TEMPERATURE`）。
+  */
+  if (typeof temperature !== "number" || !Number.isFinite(temperature)) {
+    throw new Error(
+      "temperature が渡されていません（novel.prompt が返した温度を渡してください。製品と違う条件では測れません）。"
+    );
+  }
 
   const body = {
     model,
@@ -202,8 +215,7 @@ export async function askSakura({
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    // **測定なので揺れを抑える**（同じ台で2度測ったときに比べられるように）
-    temperature: 0,
+    temperature,
     max_tokens: maxOutputTokens,
     stream: false,
   };
@@ -323,6 +335,11 @@ export function resultsOfValidated(validated, label) {
 export async function runSakuraChunks({
   promptResponse,
   baseArgs,
+  /**
+   * 何度で投げるか。**省けば `novel.prompt` が返した製品の値**。
+   * ここで数字を持たない（写しを作らない）のが要点である。
+   */
+  temperature,
   ask,
   validate,
   log,
@@ -339,6 +356,7 @@ export async function runSakuraChunks({
         systemPrompt: promptResponse.systemPrompt,
         userPrompt: chunk.userPrompt,
         schema: promptResponse.schema,
+        temperature: temperature ?? promptResponse.temperature,
       });
       const validated = await validate(
         validateArgsOf(baseArgs, {

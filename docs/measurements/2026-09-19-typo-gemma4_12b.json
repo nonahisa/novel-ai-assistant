@@ -1,0 +1,183 @@
+{
+  "measuredAt": "2026-09-19T03:27:39.597Z",
+  "feature": "typo",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:12b",
+  "numCtx": 12288,
+  "numCtxDecision": {
+    "numCtx": 12288,
+    "source": "プロンプトの長さから（製品と同じ道）",
+    "promptChars": 2545,
+    "outputTokens": 8192,
+    "contextWindow": 262144,
+    "charsPerToken": 1.383
+  },
+  "temperature": 0,
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 262144,
+    "bundled": {
+      "charsPerToken": 1.383,
+      "measuredAt": "2026-09-13"
+    },
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 5907,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": null,
+  "options": {},
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.69.1",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.1",
+  "verifyPromptVersion": null,
+  "plans": [
+    {
+      "chunkId": "本文\\001_あさ.txt#1-0@3010",
+      "chars": 1464,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\002_ひる.txt#2-0@3010",
+      "chars": 1478,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\003_よる.txt#3-0@3010",
+      "chars": 1402,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\proofread",
+    "targets": [
+      "本文\\001_あさ.txt",
+      "本文\\002_ひる.txt",
+      "本文\\003_よる.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\proofread\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 6103,
+      "temperature": 0,
+      "staleNote": null,
+      "metrics": {
+        "accepted": 0,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 6103
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": []
+      },
+      "raw": [
+        {
+          "target": "本文\\001_あさ.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:12b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\001_あさ.txt#1-0@3010",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\002_ひる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:12b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\002_ひる.txt#2-0@3010",
+                "chapterLabel": "第2話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\003_よる.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:12b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\003_よる.txt#3-0@3010",
+                "chapterLabel": "第3話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "accepted": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "rejected": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        6103
+      ],
+      "min": 6103,
+      "max": 6103
+    }
+  },
+  "lines": [
+    "指摘（検算を通ったもの）: 0",
+    "落とした（検算で弾いたもの）: 0",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 6.1秒",
+    "num_ctx: 12288（プロンプトの長さから（製品と同じ道））",
+    "temperature: 0（製品と同じ（束が返した値））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 5.9秒"
+  ]
+}

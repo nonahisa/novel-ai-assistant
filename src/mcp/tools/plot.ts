@@ -1,6 +1,7 @@
 import {
   PLOT_REVERSE_SCHEMA,
   PLOT_REVERSE_SYSTEM_PROMPT,
+  PLOT_REVERSE_TEMPERATURE,
   PLOT_REVERSE_VERSION,
   buildPlotReversePrompt,
 } from "../../prompts/plotReverse";
@@ -108,6 +109,7 @@ export function plotReversePrompt(input: PlotReversePromptInput) {
     promptVersion: PLOT_REVERSE_VERSION,
     systemPrompt: PLOT_REVERSE_SYSTEM_PROMPT,
     schema: PLOT_REVERSE_SCHEMA,
+    temperature: PLOT_REVERSE_TEMPERATURE,
     validateWith: VALIDATE_WITH,
     /** 何話ぶんのあらすじを渡したか。**材料の厚みを返り値に残す** */
     synopsisCount: chapterSynopses.length,

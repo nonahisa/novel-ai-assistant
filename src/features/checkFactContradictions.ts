@@ -63,12 +63,14 @@ import {
   buildStoryFactExtractPrompt,
   STORY_FACT_EXTRACT_SCHEMA,
   STORY_FACT_EXTRACT_SYSTEM_PROMPT,
+  STORY_FACT_EXTRACT_TEMPERATURE,
   STORY_FACT_EXTRACT_VERSION,
 } from "../prompts/storyFactExtract";
 import {
   buildContradictionVerifyPrompt,
   CONTRADICTION_VERIFY_SCHEMA,
   CONTRADICTION_VERIFY_SYSTEM_PROMPT,
+  CONTRADICTION_VERIFY_TEMPERATURE,
   CONTRADICTION_VERIFY_VERSION,
   type VerifyRejectReason,
 } from "../prompts/contradictionVerify";
@@ -473,7 +475,7 @@ export async function checkFactContradictions(
                 userPrompt,
                 model,
                 // 事実の書き写しなので揺らさない
-                temperature: 0.0,
+                temperature: STORY_FACT_EXTRACT_TEMPERATURE,
                 maxOutputTokens: sendOutputTokens,
                 plannedOutputTokens,
                 jsonSchema: STORY_FACT_EXTRACT_SCHEMA as unknown as object,
@@ -779,7 +781,7 @@ export async function checkFactContradictions(
           settingKnownAt: input.knownAt,
         }),
         model: input.model,
-        temperature: 0.0,
+        temperature: CONTRADICTION_VERIFY_TEMPERATURE,
         maxOutputTokens: resolveOutputTokensForSend(
           input.provider.id,
           input.model,

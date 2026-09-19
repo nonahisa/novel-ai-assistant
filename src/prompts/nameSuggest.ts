@@ -23,6 +23,13 @@ import { isPlaceholderText } from "../core/placeholderText";
  */
 export const NAME_SUGGEST_VERSION = "1.1";
 
+/**
+ * 送るときの温度。候補は広く出させる。当たり外れは作者が選ぶ（P-29）。
+ *
+ * **製品も測定台もここを見る**（プロンプトと温度は一対なので、版と同じ場所に置く）。
+ */
+export const NAME_SUGGEST_TEMPERATURE = 0.8;
+
 /** 一度に出させる候補の数。多すぎると系統が混ざり、少ないと選べない */
 export const NAME_SUGGEST_COUNT = 10;
 

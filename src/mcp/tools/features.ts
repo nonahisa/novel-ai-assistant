@@ -185,6 +185,29 @@ const TARGET_INPUT = {
 };
 
 /**
+ * 温度を明示する口（設計書6.87.16）。
+ *
+ * **省略するのが正しい使い方である。** 省くと、その機能を製品が回すときと
+ * 同じ温度になる（`prompts/*.ts` の `*_TEMPERATURE`）——0.66 までは
+ * `ollama.generate` の既定 0.2 で回っており、**製品が 0.0 で回している
+ * 誤字脱字を、揺れた条件で測っていた。**
+ *
+ * それでも口を残すのは、**温度を振って出来の変わり方を見たい**ことが
+ * あるため。打った回は製品の条件ではないので、返り値の `temperature` に
+ * 実際の値が出る。
+ */
+const TEMPERATURE_INPUT = {
+  temperature: z
+    .number()
+    .min(0)
+    .max(2)
+    .optional()
+    .describe(
+      "温度。省略すると製品と同じ値になります（機能ごとに違います）。揺らして測りたいときだけ指定してください"
+    ),
+};
+
+/**
  * feature ごとの追加の指定。
  *
  * **中身を書くのは `novel.run` の1本だけ**にしてある。ほかの道具は
@@ -244,6 +267,7 @@ export const NOVEL_RUN_INPUT = {
   ...RUNNER_INPUT,
   ...OLLAMA_INPUT,
   ...TARGET_INPUT,
+  ...TEMPERATURE_INPUT,
   ...optionsInput(OPTIONS_TABLE),
 };
 
@@ -285,6 +309,7 @@ export interface FeatureCallInput {
   endpoint?: string;
   model?: string;
   allowRemote?: boolean;
+  temperature?: number;
   options?: Record<string, unknown>;
 }
 
@@ -426,6 +451,7 @@ function runnerArgs(input: FeatureCallInput): {
   model?: string;
   allowRemote?: boolean;
   numCtx?: number;
+  temperature?: number;
 } {
   return {
     runner: needRunner(input),
@@ -433,6 +459,12 @@ function runnerArgs(input: FeatureCallInput): {
     model: input.model,
     allowRemote: input.allowRemote,
     numCtx: input.numCtx,
+    /*
+      **省略したら製品と同じ温度になる**（設計書6.87.16）。ここで既定を
+      埋めない——埋めた瞬間に、**製品の値と食い違う写しが1つできる。**
+      値は `prompts/*.ts` の `*_TEMPERATURE` にあり、道具がそこから引く。
+    */
+    temperature: input.temperature,
   };
 }
 
