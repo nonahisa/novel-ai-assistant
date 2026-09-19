@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "0.1",
+  "lines": [
+    {
+      "id": "ln_001",
+      "label": "本編",
+      "kind": "canonical",
+      "canonical": true,
+      "branchFromTimepointId": null,
+      "note": ""
+    }
+  ],
+  "timepoints": [
+    {
+      "id": "tp_001",
+      "lineId": "ln_001",
+      "label": "九月の終わり",
+      "absolute": "九月下旬",
+      "note": ""
+    },
+    {
+      "id": "tp_002",
+      "lineId": "ln_001",
+      "label": "転倒した日",
+      "absolute": "十月三日",
+      "note": ""
+    },
+    {
+      "id": "tp_003",
+      "lineId": "ln_001",
+      "label": "十月の半ば",
+      "absolute": "十月中旬",
+      "note": ""
+    },
+    {
+      "id": "tp_004",
+      "lineId": "ln_001",
+      "label": "ギプスが外れた日",
+      "absolute": "十一月の最初の月曜",
+      "note": ""
+    },
+    {
+      "id": "tp_005",
+      "lineId": "ln_001",
+      "label": "初雪の日",
+      "absolute": "十二月八日",
+      "note": ""
+    }
+  ],
+  "episodes": [
+    {
+      "filePath": "本文/001_九月の終わりの坂.txt",
+      "timepointId": "tp_001",
+      "note": ""
+    },
+    {
+      "filePath": "本文/002_十月三日の坂.txt",
+      "timepointId": "tp_002",
+      "note": ""
+    },
+    {
+      "filePath": "本文/003_窓口の椅子.txt",
+      "timepointId": "tp_003",
+      "note": ""
+    },
+    {
+      "filePath": "本文/004_ギプスが外れた日.txt",
+      "timepointId": "tp_004",
+      "note": ""
+    },
+    {
+      "filePath": "本文/005_初雪の窓口.txt",
+      "timepointId": "tp_005",
+      "note": ""
+    }
+  ]
+}
