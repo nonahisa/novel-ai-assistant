@@ -134,12 +134,61 @@ export const AI_INSTRUCTION_TEMPLATE_PATH = "docs/skills/novel-assist.md";
  */
 export function buildAiInstructionDocument(
   target: AiInstructionTarget,
-  body: string
+  body: string,
+  /**
+   * MCP の登録に使う値。**登録の口が無い置き先のときだけ**、頭に書き添える
+   * （`buildToolLocationPreamble`）。分からなければ省く
+   */
+  registration?: McpRegistration
 ): string {
   const text = body.replace(/^\uFEFF/, "");
-  if (!target.frontMatter) return text;
+  /*
+    **登録ファイルを書けない置き先には、束の場所を文章で渡す**
+    （作者の裁定、2026-09-19）。
+
+    Claude Code・Codex・Gemini CLI は登録ファイル（`.mcp.json` ほか）を
+    こちらで書くので、束の場所はそこに入る。だが「ローカルLLM・そのほか」は
+    **貼って使う**ので登録ファイルが無く、**束の場所がどこにも書かれない**
+    ままだった——作者が自分で拡張機能のフォルダーを探すことになる。
+
+    通知ではなくここへ書くのは、**通知は閉じると消える**からである
+    （「作品はここにある」を指示書へ書き添えているのと同じ考え方）。
+  */
+  const head =
+    !target.registrationPath && registration
+      ? `${buildToolLocationPreamble(registration)}\n`
+      : "";
+  const withHead = `${head}${text}`;
+  if (!target.frontMatter) return withHead;
   // フロントマターの直後は1行あける（Markdown の見出しと続けて読ませない）
-  return `${target.frontMatter}\n${text}`;
+  return `${target.frontMatter}\n${withHead}`;
+}
+
+/**
+ * 登録の口が無い置き先へ、**道具の在り処**を書き添える数行。
+ *
+ * **引用（`>`）で書く**のは、本文の決まりと混ざらないようにするため
+ * （`buildWorkLocationPreamble` と同じ作法）。この指示書は作者が
+ * システム指示へ貼って使うので、**作者が読んで登録できる形**にする。
+ *
+ * **登録の仕方までは書かない。** 相手ごとに違い、こちらでは確かめようが
+ * ない。当てずっぽうの手順を書くより、値だけを正確に渡すほうがよい。
+ */
+export function buildToolLocationPreamble(
+  registration: McpRegistration
+): string {
+  // 空白を含む道でも、貼ってそのまま使えるように引用符で囲う
+  const args = registration.args.map((arg) => `"${arg}"`).join(" ");
+  return (
+    "> **道具（MCPサーバー）の場所**\n" +
+    ">\n" +
+    `> - 登録名：\`${registration.name}\`\n` +
+    `> - 走らせるもの：\`${registration.command} ${args}\`\n` +
+    ">\n" +
+    "> この2つを、お使いの基盤のMCPの登録先へ入れてください" +
+    "（登録の仕方は基盤ごとに違うため、ここには書けません）。\n" +
+    "> **登録が済むまで、下に並ぶ道具は呼べません。**\n"
+  );
 }
 
 /**

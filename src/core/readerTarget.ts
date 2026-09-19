@@ -320,8 +320,12 @@ export const READER_TYPES: Record<ReaderTypeId, ReaderTypeInfo> = {
  *
  * 副軸が無いときは "none" を鍵にする。表を1か所に置いて、
  * 判定の関数のほうでは分岐を書かない（分岐で書くと表と食い違う）。
+ *
+ * **外へ出しているのは、隣り合い（`readerTypeNeighbors.ts`、設計書6.101）を
+ * ここから導くためである。** 「どの層とどの層が隣か」を手書きの表で
+ * もう1つ持つと、軸の組み合わせを変えたときに片方だけ直る日が来る。
  */
-const TYPE_TABLE: Record<string, ReaderTypeId> = {
+export const READER_TYPE_TABLE: Record<string, ReaderTypeId> = {
   "familiarity:none": "lore_flow",
   "familiarity:posture": "lore_deep",
   "familiarity:craving": "lore_crave",
@@ -369,7 +373,7 @@ export function resolveReaderType(scores: ReaderScores): ReaderTypeId {
       ? "light"
       : "omnivore";
   }
-  return TYPE_TABLE[`${main}:${sub ?? "none"}`];
+  return READER_TYPE_TABLE[`${main}:${sub ?? "none"}`];
 }
 
 /** 記録と画面に出す一行（「考察層」） */

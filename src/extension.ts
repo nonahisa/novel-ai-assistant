@@ -4383,6 +4383,28 @@ export async function activate(
     )
   );
 
+  /*
+    3つの輪（設計書6.101）。**AIを呼ばない**——材料はどれも既にある
+    台帳と実績から取る。**原稿も台帳も書き換えない**（書くのは
+    `.aiwriter/generated/` の紙1枚だけ）。
+
+    作家タイプ（6.86）と作者自身の読者タイプ（6.101の1）は保管庫にある
+    ので、ここで渡す。**未診断なら undefined** で、そのときは紙の側が
+    その行と辺をまるごと落とす（推測で埋めない）。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.showThreeCircles", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+
+      const { showThreeCircles } = await import("./features/threeCircles.js");
+      await showThreeCircles(work, deviceId, {
+        authorReader: authorReaderTypes.get(),
+        advice: advicePolicies.getEffective(work.id),
+      });
+    })
+  );
+
   context.subscriptions.push(
     registerCommand(
       "novelai.checkOpening",

@@ -88,7 +88,8 @@ export async function writeAiInstructions(
 
   for (const target of targets) {
     const instructionPath = path.join(root, target.instructionPath);
-    const document = buildAiInstructionDocument(target, body);
+    // 登録ファイルを書けない置き先には、束の場所を指示書の頭へ書き添える
+    const document = buildAiInstructionDocument(target, body, registration);
     try {
       const note = await placeDocument(instructionPath, document, keepBackup);
       const outcome: WriteOutcome = {
@@ -271,10 +272,23 @@ async function resolveRegistration(
   context: vscode.ExtensionContext,
   targets: readonly AiInstructionTarget[]
 ): Promise<McpRegistration | undefined> {
-  if (!targets.some((target) => target.registrationPath)) return undefined;
+  /*
+    **登録ファイルを書く置き先が1つも無くても、場所は突き止める**
+    （0.70.2）。「ローカルLLM・そのほか」は登録ファイルを持たないが、
+    **指示書の頭に束の場所を書き添える**ので値が要る
+    （`buildToolLocationPreamble`）。
+
+    ただし**そのために作者へ尋ねない。** 下の①②（同梱・前に選んだ場所）で
+    静かに決まらなければ、書き添えずに済ませる——文章の1行のために
+    ファイル選択の画面を出すのは、釣り合わない。
+  */
+  const needsFile = targets.some((target) => target.registrationPath);
 
   if (!canRunProcesses()) {
-    // ブラウザ版では `node` を起こせない。**消さずに理由を出す**（設計書5.8.5）
+    // ブラウザ版では `node` を起こせない。**消さずに理由を出す**（設計書5.8.5）。
+    // **断るのは、登録ファイルを書くつもりだったときだけ**——書く先が
+    // 無い置き先で「登録は書けません」と言っても、作者には何のことか分からない
+    if (!needsFile) return undefined;
     await vscode.window.showInformationMessage(
       "ブラウザ版では、MCPサーバーの登録は書けません（外部プロセスを起動できないためです）。",
       { modal: true, detail: "指示書だけを置きます。登録は手元のVS Codeからどうぞ。" }
@@ -293,6 +307,9 @@ async function resolveRegistration(
   if (remembered && (await exists(remembered))) {
     return registrationFor(remembered);
   }
+
+  // 登録ファイルを書かないなら、ここで静かに諦める（②の理由）
+  if (!needsFile) return undefined;
 
   const choose = "束の場所を選ぶ";
   const skip = "登録は書かずに、指示書だけ置く";

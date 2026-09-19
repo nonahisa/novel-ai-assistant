@@ -198,6 +198,58 @@ describe("表示を切り替えると、前の中身が消える", () => {
     expect(latest().items[0]).toMatchObject({ settingSays: "髪は黒" });
   });
 
+  test("設定資料の更新のあとにプロット逸脱を出すと、プロット逸脱が見える", () => {
+    // showContradictions と同じ経路（replaceContents）を通るので、
+    // 前の中身が残らないことは矛盾と同じ形で確かめられる
+    const panel = panelWithView();
+    panel.showRecordUpdates(work, [recordUpdate], async () => ({ ok: true }), async () => ({ ok: true }));
+    panel.showDeviations(work, [
+      {
+        filePath: "C:/小説/いじめられっ子/本文/001.txt",
+        chunkHash: "h1",
+        lineStart: 5,
+        lineEnd: 5,
+        excerpt: "唐突に恋に落ちた",
+        type: "逸脱",
+        reason: "伏線が無い",
+        plotReference: "主人公の成長",
+        severity: "medium",
+        confidence: "high",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any,
+    ]);
+
+    expect(latest().category).toBe("プロット逸脱");
+    expect(latest().items).toHaveLength(1);
+    expect(latest().items[0]).toMatchObject({ settingSays: "主人公の成長" });
+  });
+
+  test("設定資料の更新のあとに編集部からの提案を出すと、提案が見える", () => {
+    // showProposals も replaceContents を通る（設計書5.6）
+    const panel = panelWithView();
+    panel.showRecordUpdates(work, [recordUpdate], async () => ({ ok: true }), async () => ({ ok: true }));
+    panel.showProposals(work, [
+      {
+        id: "e1",
+        filePath: "本文/001.txt",
+        fileName: "001.txt",
+        chunkHash: "",
+        line: 3,
+        original: "彼は走つた",
+        target: "走つた",
+        suggestion: "走った",
+        reason: "促音の誤り",
+        confidence: "high",
+        status: "pending",
+        proposalId: "p1",
+      },
+    ]);
+
+    expect(latest().category).toBe("編集部からの提案");
+    expect(latest().items).toHaveLength(1);
+    expect(latest().items[0]).toMatchObject({ suggestion: "走った" });
+  });
+
   test("結果が0件なら、前の中身を残さず0件と出す", () => {
     // 「前回の結果が残っている」と「今回0件だった」を取り違えさせない
     const panel = panelWithView();

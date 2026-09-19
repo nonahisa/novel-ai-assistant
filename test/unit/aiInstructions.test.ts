@@ -16,6 +16,7 @@ import {
   AiInstructionFormatError,
   applyUsageToInstructionBody,
   buildAiInstructionDocument,
+  buildToolLocationPreamble,
   findAiInstructionTarget,
   mergeCodexToml,
   mergeMcpServersJson,
@@ -70,6 +71,72 @@ describe("指示書の中身（VS Code に触らない部分）", () => {
     // フロントマターを持つのは Claude Code だけ
     const withFrontMatter = documents.filter((text) => text.startsWith("---\n"));
     expect(withFrontMatter).toHaveLength(1);
+  });
+
+  /*
+    **登録ファイルの無い置き先には、束の場所を書き添える**（0.70.2）。
+
+    作者の指摘（2026-09-19）：「各ユーザー環境に応じたMCPサーバの位置は
+    指示されているでしょうか？」——**されていなかった。** Claude Code・
+    Codex・Gemini CLI は登録ファイルに絶対パスが入るが、「ローカルLLM・
+    そのほか」は登録ファイルを持たないので、**束の場所がどこにも
+    書かれていなかった**——作者が自分で拡張機能のフォルダーを探すことになる。
+  */
+  describe("道具の在り処を、登録ファイルの無い置き先へ書き添える", () => {
+    /** 空白を含む道。**囲っていなければ Program Files で切れる** */
+    const registration = {
+      name: "novel-ai-assistant",
+      command: "node",
+      args: ["C:\\Program Files\\ext\\dist\\mcp-server.mjs"],
+    };
+
+    test("ローカルLLM向けの指示書の頭に、登録名と走らせるものが出る", () => {
+      const text = buildAiInstructionDocument(
+        findAiInstructionTarget("plain"),
+        body,
+        registration
+      );
+
+      expect(text.startsWith("> **道具（MCPサーバー）の場所**")).toBe(true);
+      expect(text).toContain("novel-ai-assistant");
+      expect(text).toContain("mcp-server.mjs");
+      // **本文は1文字も変わらない**（頭に足すだけ）
+      expect(text.endsWith(body)).toBe(true);
+    });
+
+    test("空白を含む道は、引用符で囲って出す", () => {
+      const line = buildToolLocationPreamble(registration);
+
+      expect(line).toContain('"C:\\Program Files\\ext\\dist\\mcp-server.mjs"');
+    });
+
+    /*
+      **登録ファイルを書く置き先には足さない。** あちらは `.mcp.json` などに
+      絶対パスが入るので、同じことを2か所で言うことになる。
+    */
+    test("登録ファイルを書く置き先には、足さない", () => {
+      for (const id of ["claude-code", "codex", "gemini-cli"] as const) {
+        const text = buildAiInstructionDocument(
+          findAiInstructionTarget(id),
+          body,
+          registration
+        );
+        expect(text, id).not.toContain("道具（MCPサーバー）の場所");
+      }
+    });
+
+    /*
+      **場所が分からなければ、書かない。** 当てずっぽうの道を書くと、
+      作者はそれを登録して「繋がらない」で行き止まる。
+    */
+    test("場所が分からなければ、何も足さない", () => {
+      const text = buildAiInstructionDocument(
+        findAiInstructionTarget("plain"),
+        body
+      );
+
+      expect(text).toBe(body);
+    });
   });
 
   test("Claude Code のフロントマターは name と description を持つ", () => {
@@ -320,9 +387,16 @@ describe("作品へ書き出す", () => {
     for (const document of documents) {
       expect(document.endsWith(TEMPLATE)).toBe(true);
     }
-    // 素のMarkdownで置く3つは、雛形そのもの
-    expect(documents.filter((text) => text === TEMPLATE)).toHaveLength(3);
+    /*
+      **雛形そのままなのは2つだけ**（0.70.2）。Claude Code はフロントマター、
+      「ローカルLLM・そのほか」は**道具の在り処**が頭に付く——あちらだけは
+      登録ファイルを書かないので、束の場所をここでしか渡せない。
+    */
+    expect(documents.filter((text) => text === TEMPLATE)).toHaveLength(2);
     expect(documents.filter((text) => text.startsWith("---\n"))).toHaveLength(1);
+    const plain = await read(findAiInstructionTarget("plain").instructionPath);
+    expect(plain).toContain("道具（MCPサーバー）の場所");
+    expect(plain).toContain("mcp-server.mjs");
   });
 
   test("MCP の登録が、相手ごとの形で書かれる", async () => {
