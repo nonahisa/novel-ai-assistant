@@ -98,9 +98,15 @@ describe("プロンプト", () => {
     expect(buildContradictionCheckPrompt(input())).toContain("本文からそのまま写す");
   });
 
-  test("システムプロンプトで、迷ったら黙らせる", () => {
+  test("システムプロンプトで、迷っても挙げさせる（1.6）", () => {
+    // **2026-09-20 に向きを変えた**（作者の裁定。設計書6.10.8）。
+    // 黙らせていたころは、作者の作品10話で1件も指摘が出なかった。
+    // **判断は作者が行う**ので、疑わしいものは挙げさせる
     expect(CONTRADICTION_CHECK_SYSTEM_PROMPT).toContain(
-      "確信が持てないものは指摘しない"
+      "確信が持てなくても、疑わしい箇所は挙げること"
+    );
+    expect(CONTRADICTION_CHECK_SYSTEM_PROMPT).toContain(
+      "どちらが正しいかを決めるのは作者である"
     );
   });
 });
