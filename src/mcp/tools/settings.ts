@@ -300,6 +300,12 @@ export interface SettingsValidateResult {
     affiliations: string[];
     rejected: unknown[];
     abilityTerm: string | null;
+    /**
+     * 能力体系の決まり。**総称だけでは足りない**——実機確認（2026-09-19）で
+     * ここへプロンプトの指示文がそのまま入っており、外から読めないと
+     * 起きたことに気づけない（設定資料の測定台が見張る）。
+     */
+    rules: string[];
   };
   /**
    * **ここから先は返さない。** マージ（既存レコードとの突き合わせ）と
@@ -352,6 +358,7 @@ function validateAgainst(
       affiliations: gathered.affiliations,
       rejected: [...gathered.rejected],
       abilityTerm: gathered.abilityTerm,
+      rules: [...gathered.rules],
     },
     note: NOT_MERGED_NOTE,
   };

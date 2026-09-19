@@ -138,6 +138,12 @@ export class SettingsExtractionCollector {
     affiliations: string[];
     rejected: readonly RejectedSettingCandidate[];
     abilityTerm: string | null;
+    /**
+     * 能力体系の決まり。**総称と同じく、外から読めないと測れない**
+     * （2026-09-19の実機確認で、ここへプロンプトの指示文が6文そのまま
+     * 入っていた。保存されれば資料にその文言が載る）。
+     */
+    rules: string[];
   } {
     return {
       abilities: [...this.abilities],
@@ -147,6 +153,7 @@ export class SettingsExtractionCollector {
       affiliations: [...this.affiliations],
       rejected: [...this.rejected],
       abilityTerm: this.abilityTerm,
+      rules: [...this.rules],
     };
   }
 

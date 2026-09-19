@@ -561,6 +561,470 @@ export function scoreContradiction(answers, results) {
   return { seeds, missed, falsePositives, kindMismatch, otherFlags };
 }
 
+/* ── 設定資料の抽出（P-04a）の答え合わせ ───────────────── */
+
+/**
+ * 名前を突き合わせるための均し。
+ *
+ * **空白と区切り記号しか落とさない。** 「リーナ・ヴェイル」と
+ * 「リーナ ヴェイル」は同じ人だが、それ以上落とすと別人どうしが偶然そろう
+ * ——「ヴェイル子爵」と「ヴェイル家」を畳んでしまうと、**罠2（親子の家名）と
+ * 罠10（場所と組織）がどちらも測れなくなる**。
+ */
+export function normalizeEntityName(value) {
+  return String(value ?? "").replace(/[\s　・･=＝]/gu, "");
+}
+
+/** 答えの1項目が名乗ってよい形（正式名・別表記・あるべき別名） */
+function entityFormsOf(entry) {
+  return [
+    textOf(entry?.name),
+    ...(entry?.also ?? []),
+    ...(entry?.aliases ?? []),
+  ]
+    .map(normalizeEntityName)
+    .filter(Boolean);
+}
+
+/** 受け取ったレコードが名乗っている形（名前＋別名） */
+function recordFormsOf(record) {
+  return [textOf(record?.name), ...(record?.aliases ?? [])]
+    .map(normalizeEntityName)
+    .filter(Boolean);
+}
+
+/** 名前でも別名でも、どれかが重なるレコードを探す */
+function findByForms(records, forms, used) {
+  return records.find(
+    (record) =>
+      !used?.has(record) &&
+      recordFormsOf(record).some((form) => forms.includes(form))
+  );
+}
+
+/** `{ data: {...} }` でも生のレコードでも中身を取り出す */
+function dataOf(entry) {
+  const data = entry?.data;
+  return data && typeof data === "object" ? data : (entry ?? {});
+}
+
+/**
+ * 設定資料の抽出の返り値を、1つの台帳にほぐす。
+ *
+ * **種別によって、積もり方が違う**（`src/mcp/tools/settings.ts`）。
+ *
+ * - `characters` は**チャンクごと**の結果（`validateCharacterExtractResult`）
+ * - `settings`（能力・場所・組織・世界観・総称・落としたもの）は
+ *   `SettingsExtractionCollector` が**そのファイルの先頭から積み上げた**もの
+ *   （`candidates()` が集約の中身をまるごと返す）。全部足すと、チャンクが
+ *   2つある話で同じ場所を2回数えることになるので、**ファイルごとに
+ *   最後の結果だけ**を見る
+ *
+ * ファイルが変われば `novel.run` が別の呼び出しになり、集約もやり直される
+ * （`measure.mjs` は `filePath` を話数ぶん渡す）。だから**ファイルごとに
+ * 最後を取り、それらを名前で畳む**。
+ */
+export function settingsLedgerOf(results) {
+  const lastByFile = new Map();
+  const characters = new Map();
+  const characterRejected = [];
+  const dropped = {
+    別人の呼び名: 0,
+    途中で切れた別名: 0,
+    共有された姓: 0,
+    身内を指す別名: 0,
+    向きを直した関係: 0,
+  };
+
+  for (const result of results ?? []) {
+    lastByFile.set(filePathOfChunkId(result?.chunkId ?? ""), result);
+
+    const people = result?.characters ?? {};
+    for (const entry of people.accepted ?? []) {
+      const data = dataOf(entry);
+      const name = textOf(data?.name).trim();
+      if (!name) continue;
+      const key = normalizeEntityName(name);
+      const person = characters.get(key) ?? {
+        name,
+        aliases: [],
+        relations: [],
+      };
+      for (const alias of data?.aliases ?? []) {
+        const text = textOf(alias).trim();
+        if (text && !person.aliases.includes(text)) person.aliases.push(text);
+      }
+      for (const relation of data?.relations ?? []) {
+        person.relations.push({
+          name: textOf(relation?.name),
+          relation: textOf(relation?.relation),
+        });
+      }
+      characters.set(key, person);
+    }
+    for (const item of people.rejected ?? []) {
+      characterRejected.push({
+        name: textOf(item?.name),
+        reason: textOf(item?.reason) || "（理由なし）",
+      });
+    }
+    // **落とした別名も数える。** 罠1（兄妹が同じ一般語で呼ばれる）の
+    // 見張りが働いたかは、ここの数にしか出ない
+    dropped.別人の呼び名 += (people.droppedSharedBodyAliases ?? []).length;
+    dropped.途中で切れた別名 += (people.droppedTruncatedAliases ?? []).length;
+    dropped.共有された姓 += (people.droppedSharedFamilyNameAliases ?? []).length;
+    dropped.身内を指す別名 += (people.droppedRelativeAliases ?? []).length;
+    dropped.向きを直した関係 += (people.correctedRelations ?? []).length;
+  }
+
+  const named = (entries) => {
+    const byName = new Map();
+    for (const entry of entries ?? []) {
+      const data = dataOf(entry);
+      const name = textOf(data?.name).trim();
+      if (!name) continue;
+      const key = normalizeEntityName(name);
+      const record = byName.get(key) ?? { name, aliases: [] };
+      for (const alias of data?.aliases ?? []) {
+        const text = textOf(alias).trim();
+        if (text && !record.aliases.includes(text)) record.aliases.push(text);
+      }
+      byName.set(key, record);
+    }
+    return [...byName.values()];
+  };
+
+  const abilities = [];
+  const locations = [];
+  const organizations = [];
+  const worldItems = [];
+  const settingRejected = [];
+  const rules = [];
+  let abilityTerm = null;
+
+  for (const result of lastByFile.values()) {
+    const settings = result?.settings ?? {};
+    abilities.push(...(settings.abilities ?? []));
+    locations.push(...(settings.locations ?? []));
+    organizations.push(...(settings.organizations ?? []));
+    for (const entry of settings.worldItems ?? []) {
+      const data = dataOf(entry);
+      worldItems.push({
+        name: textOf(data?.name),
+        description: textOf(data?.description),
+        category: textOf(entry?.category ?? data?.category),
+      });
+    }
+    for (const item of settings.rejected ?? []) {
+      settingRejected.push({
+        name: textOf(item?.name),
+        reason: textOf(item?.reason) || "（理由なし）",
+      });
+    }
+    for (const rule of settings.rules ?? []) {
+      const text = textOf(rule).trim();
+      if (text && !rules.includes(text)) rules.push(text);
+    }
+    // **最初に読み取れた総称を使う**（製品の集約と同じ扱い）
+    abilityTerm ??= settings.abilityTerm ?? null;
+  }
+
+  return {
+    characters: [...characters.values()],
+    abilities: named(abilities),
+    locations: named(locations),
+    organizations: named(organizations),
+    worldItems,
+    abilityTerm,
+    rules,
+    rejected: [...characterRejected, ...settingRejected],
+    dropped,
+  };
+}
+
+/** 答えの `expected` と台帳をつなぐ並び（世界観だけ当て方が違うので外す） */
+const SETTINGS_NAMED_KINDS = [
+  ["characters", "人物"],
+  ["abilities", "能力"],
+  ["locations", "場所"],
+  ["organizations", "組織"],
+];
+
+/**
+ * 設定資料の抽出（P-04a）の答え合わせ
+ * （`test/fixtures/seeded/settings/README.md` の数え方）。
+ *
+ * **抽出は「何も出さない」が満点にならない代わりに、「でっち上げる」が
+ * 見えなくなる。** だから拾えた数だけでなく、**出てはいけないものが
+ * 出た数**を必ず並べて出す（CLAUDE.md の「繰り返し起きた失敗」2）。
+ *
+ * - **拾えた**：`expected` の1項目について、名前か別名のどれかが重なる
+ *   レコードがあるもの。**1つのレコードは1つの項目にしか当たらない**
+ * - **別名**：拾えた項目の `aliases` が、そのレコードの名前か別名にあるか
+ * - **でっち上げ**：`mustNotAppear` に挙げた名前・別名で出たもの
+ * - **誤って統合した組**：`mustStaySeparate` の2人が、1つのレコードの
+ *   名前と別名に同居しているもの
+ * - **誤って分けた組**：`mustMerge` の `forms` が、本人とは別の
+ *   レコードの名前になっているもの
+ * - **でっち上げの関係**：本文に無い関係語（血縁など）を書いたもの
+ * - **仕込み以外**：答えにも罠にも当たらなかったレコード。**でっち上げとは
+ *   別に数える**——作り物とはいえ他にも読める固有名詞がありえて、
+ *   機械には正否を決められない
+ */
+export function scoreSettings(answers, results) {
+  const ledger = settingsLedgerOf(results);
+  const expected = answers?.expected ?? {};
+
+  const entities = { found: 0, total: 0, byKind: {} };
+  const missed = [];
+  const aliases = { found: 0, total: 0, missed: [] };
+  /** 当てた項目 → そのレコード（誤統合・誤分割の判定に使い回す） */
+  const matched = new Map();
+  const usedByKind = new Map();
+
+  for (const [kind, label] of SETTINGS_NAMED_KINDS) {
+    const records = ledger[kind] ?? [];
+    const used = new Set();
+    usedByKind.set(kind, used);
+    const bucket = { found: 0, total: 0 };
+
+    for (const entry of expected[kind] ?? []) {
+      bucket.total += 1;
+      entities.total += 1;
+      const forms = entityFormsOf(entry);
+      const record = findByForms(records, forms, used);
+      if (record) {
+        used.add(record);
+        matched.set(entry, record);
+        bucket.found += 1;
+        entities.found += 1;
+      } else {
+        missed.push({ kind: label, name: textOf(entry?.name) });
+      }
+
+      // **別名は、項目が見つからなくても分母に数える。** 見つからなければ
+      // その別名も拾えていない（分母を減らすと、拾えなかったぶん点が上がる）
+      for (const alias of entry?.aliases ?? []) {
+        aliases.total += 1;
+        const has =
+          record !== undefined &&
+          recordFormsOf(record).includes(normalizeEntityName(alias));
+        if (has) aliases.found += 1;
+        else aliases.missed.push({ name: textOf(entry?.name), alias });
+      }
+    }
+    entities.byKind[label] = bucket;
+  }
+
+  // 世界観だけは、見出しをAIが付けるので名前では当てられない。
+  // **中身の語で当てる**（`keywords` は「すべて満たす」／内側は「どれか」）
+  const worldBucket = { found: 0, total: 0 };
+  const usedWorld = new Set();
+  for (const entry of expected.world ?? []) {
+    worldBucket.total += 1;
+    entities.total += 1;
+    const hit = (ledger.worldItems ?? []).find((candidate) => {
+      if (usedWorld.has(candidate)) return false;
+      const text = `${candidate.name} ${candidate.description}`;
+      return (entry?.keywords ?? []).every((group) =>
+        (Array.isArray(group) ? group : [group]).some((word) =>
+          text.includes(word)
+        )
+      );
+    });
+    if (hit) {
+      usedWorld.add(hit);
+      worldBucket.found += 1;
+      entities.found += 1;
+    } else {
+      missed.push({ kind: "世界観", name: textOf(entry?.label) });
+    }
+  }
+  entities.byKind["世界観"] = worldBucket;
+
+  /* ── でっち上げ（出てはいけないものが出た） ── */
+  const fabricated = { count: 0, items: [] };
+  const forbidden = answers?.mustNotAppear ?? {};
+  for (const [kind, label] of SETTINGS_NAMED_KINDS) {
+    for (const name of forbidden[kind] ?? []) {
+      const key = normalizeEntityName(name);
+      for (const record of ledger[kind] ?? []) {
+        if (normalizeEntityName(record.name) !== key) continue;
+        fabricated.count += 1;
+        fabricated.items.push({ kind: label, name: record.name });
+        usedByKind.get(kind)?.add(record);
+      }
+    }
+  }
+  // 一般語を別名にしたもの（「お子さま」「執事」）。**どの人物に付いたかを残す**
+  for (const alias of forbidden.aliases ?? []) {
+    const key = normalizeEntityName(alias);
+    for (const record of ledger.characters ?? []) {
+      if (!(record.aliases ?? []).some((a) => normalizeEntityName(a) === key)) {
+        continue;
+      }
+      fabricated.count += 1;
+      fabricated.items.push({ kind: "別名", name: record.name, alias });
+    }
+  }
+
+  /* ── 誤って統合した組 ── */
+  const wrongMerge = { count: 0, total: 0, items: [] };
+  for (const pair of answers?.mustStaySeparate ?? []) {
+    wrongMerge.total += 1;
+    const forms = (pair?.names ?? []).map((name) => {
+      const entry = (expected.characters ?? []).find(
+        (item) => textOf(item?.name) === name
+      );
+      return entry ? entityFormsOf(entry) : [normalizeEntityName(name)];
+    });
+    if (forms.length < 2) continue;
+    const merged = (ledger.characters ?? []).find((record) => {
+      const own = recordFormsOf(record);
+      return forms.every((group) => group.some((form) => own.includes(form)));
+    });
+    if (merged) {
+      wrongMerge.count += 1;
+      wrongMerge.items.push({
+        names: pair?.names ?? [],
+        mergedInto: merged.name,
+        aliases: merged.aliases,
+      });
+    }
+  }
+
+  /* ── 誤って分けた組 ── */
+  const wrongSplit = { count: 0, total: 0, items: [] };
+  for (const entry of answers?.mustMerge ?? []) {
+    wrongSplit.total += 1;
+    const main = normalizeEntityName(entry?.name);
+    const split = (ledger.characters ?? []).filter((record) => {
+      const own = normalizeEntityName(record.name);
+      if (own === main) return false;
+      return (entry?.forms ?? []).some(
+        (form) => normalizeEntityName(form) === own
+      );
+    });
+    if (split.length > 0) {
+      wrongSplit.count += 1;
+      wrongSplit.items.push({
+        name: textOf(entry?.name),
+        splitInto: split.map((record) => record.name),
+      });
+    }
+  }
+
+  /* ── でっち上げの関係（本文に無い血縁など） ── */
+  const relations = { count: 0, items: [] };
+  for (const rule of answers?.forbiddenRelations ?? []) {
+    const [left, right] = rule?.between ?? [];
+    const formsOf = (name) => {
+      const entry = (expected.characters ?? []).find(
+        (item) => textOf(item?.name) === name
+      );
+      return entry ? entityFormsOf(entry) : [normalizeEntityName(name)];
+    };
+    const sides = [
+      [formsOf(left), formsOf(right), right],
+      [formsOf(right), formsOf(left), left],
+    ];
+    for (const [ownForms, otherForms, otherName] of sides) {
+      for (const record of ledger.characters ?? []) {
+        if (!recordFormsOf(record).some((form) => ownForms.includes(form))) {
+          continue;
+        }
+        for (const relation of record.relations ?? []) {
+          if (!otherForms.includes(normalizeEntityName(relation.name))) continue;
+          const word = (rule?.words ?? []).find((item) =>
+            relation.relation.includes(item)
+          );
+          if (!word) continue;
+          relations.count += 1;
+          relations.items.push({
+            from: record.name,
+            to: otherName,
+            relation: relation.relation,
+          });
+        }
+      }
+    }
+  }
+
+  /* ── 能力の総称（罠8） ── */
+  const abilityTerm = {
+    expected: textOf(answers?.abilityTerm),
+    actual: ledger.abilityTerm,
+    ok:
+      normalizeEntityName(ledger.abilityTerm) ===
+      normalizeEntityName(answers?.abilityTerm),
+  };
+
+  /* ── 指示文の混入（罠9） ── */
+  const ruleLeak = { count: 0, items: [] };
+  for (const rule of ledger.rules ?? []) {
+    const marker = (answers?.rules?.mustNotContain ?? []).find((word) =>
+      rule.includes(word)
+    );
+    if (!marker) continue;
+    ruleLeak.count += 1;
+    ruleLeak.items.push({ rule, marker });
+  }
+
+  /* ── 仕込み以外のレコード ── */
+  const otherRecords = { count: 0, items: [] };
+  for (const [kind, label] of SETTINGS_NAMED_KINDS) {
+    const used = usedByKind.get(kind) ?? new Set();
+    for (const record of ledger[kind] ?? []) {
+      if (used.has(record)) continue;
+      otherRecords.count += 1;
+      otherRecords.items.push({ kind: label, name: record.name });
+    }
+  }
+
+  return {
+    entities,
+    missed,
+    aliases,
+    fabricated,
+    wrongMerge,
+    wrongSplit,
+    relations,
+    abilityTerm,
+    ruleLeak,
+    otherRecords,
+    ledger,
+  };
+}
+
+/**
+ * 設定資料の抽出で、件数と落とした理由を数える。
+ *
+ * **`countGeneric` は使えない。** あちらは `results[].accepted[]` を見るが、
+ * 設定資料の返り値は `characters` と `settings` に分かれていて、しかも
+ * `settings` はファイルの先頭から積み上がっている（`settingsLedgerOf`）。
+ * そのまま通すと、**指摘0件・落とした0件**という何も測っていない数字が出る。
+ */
+export function countSettingsGeneric(results) {
+  const ledger = settingsLedgerOf(results);
+  const accepted =
+    ledger.characters.length +
+    ledger.abilities.length +
+    ledger.locations.length +
+    ledger.organizations.length +
+    ledger.worldItems.length;
+  const rejectedReasons = {};
+  for (const item of ledger.rejected) {
+    rejectedReasons[item.reason] = (rejectedReasons[item.reason] ?? 0) + 1;
+  }
+  return {
+    accepted,
+    rejected: ledger.rejected.length,
+    rejectedReasons,
+    noSuggestion: 0,
+    dropped: ledger.dropped,
+  };
+}
+
 /* ── 指摘の枠（上限）と、枠の抜け道 ──────────────────── */
 
 /**
@@ -729,7 +1193,14 @@ export function countGeneric(results) {
 export function metricsOfRun(feature, answers, run) {
   const results = run?.results ?? [];
   const failures = run?.failures ?? [];
-  const generic = countGeneric(results);
+  /*
+    **設定資料の抽出だけ、返り値の形が違う**（`countSettingsGeneric`）。
+    `countGeneric` を通すと、何件出ていても「指摘0件・落とした0件」になる。
+  */
+  const generic =
+    feature === "settings"
+      ? countSettingsGeneric(results)
+      : countGeneric(results);
 
   const metrics = {};
   const detail = { rejectedReasons: generic.rejectedReasons, failures };
@@ -786,6 +1257,50 @@ export function metricsOfRun(feature, answers, run) {
     detail.seededContradictions = scored.seeds.byKind;
     detail.missedContradictions = scored.missed;
     detail.falseFlagsContradiction = scored.falsePositives.byFile;
+  }
+
+  /*
+    **設定資料の抽出（P-04a）。** 拾えた数だけを出さない——抽出は
+    「何も出さない」が満点にならない代わりに、**「でっち上げる」が
+    見えなくなる**。でっち上げ・誤統合・誤分割を必ず隣に並べる。
+  */
+  if (feature === "settings" && answers) {
+    const scored = scoreSettings(answers, results);
+    metrics.settingsFound = scored.entities.found;
+    metrics.settingsFoundTotal = scored.entities.total;
+    metrics.settingsMissed = scored.entities.total - scored.entities.found;
+    metrics.settingsAliases = scored.aliases.found;
+    metrics.settingsAliasesTotal = scored.aliases.total;
+    metrics.settingsFabricated = scored.fabricated.count;
+    metrics.settingsWrongMerge = scored.wrongMerge.count;
+    metrics.settingsWrongMergeTotal = scored.wrongMerge.total;
+    metrics.settingsWrongSplit = scored.wrongSplit.count;
+    metrics.settingsWrongSplitTotal = scored.wrongSplit.total;
+    metrics.settingsFakeRelations = scored.relations.count;
+    // **0か1で出す。** 合っているかどうかしか無い（罠8）
+    metrics.settingsAbilityTerm = scored.abilityTerm.ok ? 1 : 0;
+    metrics.settingsRuleLeak = scored.ruleLeak.count;
+    metrics.settingsOtherRecords = scored.otherRecords.count;
+
+    detail.settingsFound = scored.entities.byKind;
+    detail.settingsMissed = scored.missed;
+    detail.settingsAliasesMissed = scored.aliases.missed;
+    detail.settingsFabricated = scored.fabricated.items;
+    detail.settingsWrongMerge = scored.wrongMerge.items;
+    detail.settingsWrongSplit = scored.wrongSplit.items;
+    detail.settingsFakeRelations = scored.relations.items;
+    detail.settingsAbilityTerm = scored.abilityTerm;
+    detail.settingsRuleLeak = scored.ruleLeak.items;
+    detail.settingsOtherRecords = scored.otherRecords.items;
+
+    /*
+      **黙って落とした別名も数に出す**（`droppedSharedFamilyNameAliases` など）。
+      罠1・罠2の見張りが働いたかは、ここの数にしか現れない——0件のまま
+      誤統合が起きていれば、**見張りが素通りした**ということである。
+    */
+    for (const [kind, count] of Object.entries(generic.dropped ?? {})) {
+      if (count > 0) metrics[`dropped.${kind}`] = count;
+    }
   }
 
   /*
@@ -853,6 +1368,16 @@ const LABELS = {
   falseFlagsContradiction: "誤検出（罠と、矛盾の無い話に付いた指摘）",
   categoryMismatch: "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）",
   otherFlagsContradiction: "仕込み以外の箇所への指摘",
+  settingsFound: "出るべきものを拾えた（人物・能力・場所・組織・世界観）",
+  settingsMissed: "見逃し（出るべきなのに出なかった）",
+  settingsAliases: "あるべき別名を拾えた",
+  settingsFabricated: "でっち上げ（出てはいけないものが出た）",
+  settingsWrongMerge: "誤って統合した組（別人を1件にまとめた）",
+  settingsWrongSplit: "誤って分けた組（同じ人物を別レコードにした）",
+  settingsFakeRelations: "でっち上げの関係（本文に無い血縁などを書いた）",
+  settingsAbilityTerm: "能力の総称が合っている（1＝合っている）",
+  settingsRuleLeak: "指示文の混入（rules にプロンプトの文が入った）",
+  settingsOtherRecords: "仕込み以外に出たレコード",
   accepted: "指摘（検算を通ったもの）",
   rejected: "落とした（検算で弾いたもの）",
   failures: "失敗（チャンクごと通らなかったもの）",
@@ -865,6 +1390,10 @@ const DENOMINATORS = {
   mustOpen: "mustOpenTotal",
   seeded: "seededTotal",
   seededContradictions: "seededContradictionsTotal",
+  settingsFound: "settingsFoundTotal",
+  settingsAliases: "settingsAliasesTotal",
+  settingsWrongMerge: "settingsWrongMergeTotal",
+  settingsWrongSplit: "settingsWrongSplitTotal",
 };
 
 /** 分母そのものは行にしない（分子の行に出るため） */
@@ -888,15 +1417,53 @@ const ORDER = [
   "falseFlagsContradiction",
   "categoryMismatch",
   "otherFlagsContradiction",
+  // 設定資料の抽出。**拾えた → 見逃し → でっち上げ**の順に読ませる
+  "settingsFound",
+  "settingsMissed",
+  "settingsAliases",
+  "settingsFabricated",
+  "settingsWrongMerge",
+  "settingsWrongSplit",
+  "settingsFakeRelations",
+  "settingsAbilityTerm",
+  "settingsRuleLeak",
+  "settingsOtherRecords",
   "noSuggestion",
   "accepted",
   "rejected",
 ];
 
+/**
+ * 検算で落とした理由の日本語。**生の名前も残す**（記録の突き合わせに要る）。
+ *
+ * 語は製品の `describeRejectedCandidates`（`features/extractCharacters.ts`）と
+ * `settingsExtractionValidation.ts` から取った。**ここに無い理由は
+ * そのまま出す**——知らない理由を勝手に訳すと、製品が名前を変えたことに
+ * 気づけなくなる。
+ */
+const REJECT_REASON_JA = {
+  invalid_shape: "形式不正",
+  invalid_name: "名前が不正",
+  pronoun_name: "代名詞の名前",
+  descriptive_name: "説明的な名前",
+  non_person: "人物以外",
+  collective: "集団",
+  ungrounded: "本文根拠なし",
+  not_an_ability: "能力ではない",
+  not_a_place: "場所ではない",
+  not_worldview: "世界観ではない",
+};
+
 export function labelOf(key) {
   if (LABELS[key]) return LABELS[key];
   if (key.startsWith("rejected.")) {
-    return `　└ 落とした理由：${key.slice("rejected.".length)}`;
+    const reason = key.slice("rejected.".length);
+    const japanese = REJECT_REASON_JA[reason];
+    return `　└ 落とした理由：${reason}${japanese ? `（${japanese}）` : ""}`;
+  }
+  // 別名を黙って落とした件数（設定資料の抽出だけ）。見出しは答えの側で日本語
+  if (key.startsWith("dropped.")) {
+    return `　└ 落とした別名：${key.slice("dropped.".length)}`;
   }
   return key;
 }
@@ -912,9 +1479,13 @@ export function orderedKeys(spread) {
   if ("budgetCeiling" in (spread ?? {})) hidden.add("seededWords");
   const keys = Object.keys(spread).filter((key) => !hidden.has(key));
   const rejected = keys.filter((key) => key.startsWith("rejected.")).sort();
+  // **落とした別名は、落とした理由のすぐ後ろへ。** どちらも「黙って
+  // 捨てなかったこと」の内訳で、離れていると別の話に見える
+  const dropped = keys.filter((key) => key.startsWith("dropped.")).sort();
   const rest = keys.filter(
     (key) =>
       !key.startsWith("rejected.") &&
+      !key.startsWith("dropped.") &&
       !ORDER.includes(key) &&
       key !== "failures" &&
       key !== "elapsedMs"
@@ -922,6 +1493,7 @@ export function orderedKeys(spread) {
   return [
     ...ORDER.filter((key) => keys.includes(key)),
     ...rejected,
+    ...dropped,
     ...rest.sort(),
     ...(keys.includes("failures") ? ["failures"] : []),
     ...(keys.includes("elapsedMs") ? ["elapsedMs"] : []),
@@ -988,6 +1560,31 @@ export function notesFor(key, spread) {
         `　※ 1件に複数語を詰めた指摘が ${packed} 件あります（枠の上限を回避できるため、他のモデルと比べるときは注意）。`
       );
     }
+  }
+
+  /*
+    **設定資料の抽出は、拾えた数だけを見ると読み違える。** 数字の隣に
+    断りを置く——記録を読み返す人は `lines` しか見ないことがある。
+  */
+  if (key === "settingsFabricated" && (Number(spread?.settingsFabricated?.max) || 0) > 0) {
+    notes.push(
+      "　※ 本文に無いものが資料に載ります。拾えた数が多くても、ここが多ければ使えません。"
+    );
+  }
+  if (key === "settingsWrongMerge" && (Number(spread?.settingsWrongMerge?.max) || 0) > 0) {
+    notes.push(
+      "　※ 別人が1件に潰れています（罠1・罠2）。誰が誰に吸収されたかは記録の detail.settingsWrongMerge にあります。"
+    );
+  }
+  if (key === "settingsAbilityTerm" && (Number(spread?.settingsAbilityTerm?.min) || 0) === 0) {
+    notes.push(
+      "　※ 能力の総称が合っていません（罠8）。返ってきた語は記録の detail.settingsAbilityTerm にあります。"
+    );
+  }
+  if (key === "settingsRuleLeak" && (Number(spread?.settingsRuleLeak?.max) || 0) > 0) {
+    notes.push(
+      "　※ rules にプロンプトの指示文が混ざっています（罠9）。そのまま資料へ載る文言です。"
+    );
   }
 
   return notes;
