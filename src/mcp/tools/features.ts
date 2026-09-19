@@ -219,7 +219,8 @@ const OPTIONS_TABLE =
   "feature ごとの追加の指定（※は要るもの）。" +
   "foreshadow: mode（detect＝配置を拾う〈既定〉／resolve＝回収を見る）。" +
   "contradiction: categories（light〈既定〉／all／区分名そのもの。" +
-  "「状態」「人物,時系列」のように1つでも並びでも指せる）。" +
+  "「状態」「人物,時系列」のように1つでも並びでも指せる）・" +
+  "carryOver（前の話を何話ぶん引き継いで人物を探すか。0〈既定〉〜5）。" +
   "notation: group※（novel.detect が返した組の1件）・limit（detect の上限）。" +
   "synopsis: needsSubtitle。" +
   "episodePlot: plotPath※（単話プロットの相対パス）・chapterLabel。" +
@@ -294,6 +295,14 @@ export const NOVEL_MATERIAL_INPUT = {
     .max(MAX_NUM_CTX)
     .optional()
     .describe("モデルのコンテキスト長（要ります）"),
+  /*
+    **材料にも options が要る**（0.70.5）。矛盾の `carryOver`（前の話の
+    引き継ぎ）は、プロンプトを組む前に**材料の欄が変わったかどうか**で
+    測るものである。ここに口が無いと、渡した指定は転送層で黙って捨てられ、
+    **「効かなかった」ではなく「届いていなかった」**を測ることになる
+    （実際に束を起こして気づいた）。
+  */
+  ...optionsInput(OPTIONS_SEE_RUN),
 };
 
 /** 束ねた道具が受け取る引数。**形は1つ**（feature ごとに分けない） */
@@ -491,6 +500,16 @@ const CATEGORIES_SCHEMA = z.union([
   z.string(),
   z.array(z.string()).min(1),
 ]);
+
+/**
+ * 前の話の引き継ぎ（設計書6.10.6）。**ここも形だけを見る。**
+ *
+ * **文字列も通す。** 測定の台本は `--option carryOver=2` の値を文字列の
+ * まま渡す（`scripts/measure.mjs`）。数だけを受けると、台本から一度も
+ * 指定できない口になる。値の中身（0以上の整数・上限）は
+ * `carryOverOf`（`tools/contradiction.ts`）が見る。
+ */
+const CARRY_OVER_SCHEMA = z.union([z.number(), z.string()]);
 const MODE_SCHEMA: z.ZodType<ForeshadowMode> = z.enum(["detect", "resolve"]);
 
 /**
@@ -542,11 +561,16 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
       }),
   },
   contradiction: {
-    material: (input) => contradictionMaterial(chunkArgs(input)),
+    material: (input) =>
+      contradictionMaterial({
+        ...chunkArgs(input),
+        carryOver: option(input, "carryOver", CARRY_OVER_SCHEMA),
+      }),
     prompt: (input) =>
       contradictionPrompt({
         ...chunkArgs(input),
         categories: option(input, "categories", CATEGORIES_SCHEMA),
+        carryOver: option(input, "carryOver", CARRY_OVER_SCHEMA),
       }),
     validate: (input) =>
       contradictionValidate({
@@ -558,6 +582,7 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
       contradictionRun({
         ...chunkArgs(input),
         categories: option(input, "categories", CATEGORIES_SCHEMA),
+        carryOver: option(input, "carryOver", CARRY_OVER_SCHEMA),
         ...runnerArgs(input),
       }),
   },

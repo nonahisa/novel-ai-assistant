@@ -31,8 +31,13 @@ import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
 import { factsRevealedAfter } from "../core/settingsAsOf";
 import {
   buildContradictionTermIndex,
+  carryOverBodyText,
   createContradictionMaterial,
+  promptVersionWithCarryOver,
   CHARACTER_AS_OF_FIELDS,
+  type CarryOverBody,
+  type CarryOverResult,
+  type RelevantOptions,
   type RelevantSettings,
 } from "../core/contradictionMaterial";
 import { CharacterStore } from "../core/characterStore";
@@ -179,6 +184,16 @@ export interface CheckContradictionsOptions extends SuiteAwareOptions {
    * 別の札（「検出した矛盾を検証」）で件数を流す
    */
   onVerifyProgress?: CheckProgress;
+  /**
+   * 前の話を何話ぶん引き継いで人物を探すか（設計書6.10.6）。
+   *
+   * **既定は0＝引き継がない。** 一人称で語る主人公は自分の名前を言わない
+   * ので、その話では主人公の設定が材料に1つも載らない——直前の話の本文も
+   * 索引にかければ拾える見込みがある。ただし**効くと分かるまで既定は
+   * 変えない**（6.102「測ってから言う」）。いまは画面からの口を作らず、
+   * MCP の `options.carryOver` で測る。
+   */
+  carryOverChapters?: number;
 }
 
 export async function checkContradictions(
@@ -327,6 +342,18 @@ export async function checkContradictions(
   /** チャンクごとの抜粋。鍵を決めるときと送るときで、同じものを使う */
   const pastSceneByChunk = new Map<string, string>();
 
+  /*
+    **前の話に出た人物を引き継ぐための本文**（設計書6.10.6）。
+
+    既定（0話）では**1ファイルも余分に読まない**——これは測るための口で、
+    いまの既定の動きは1文字も変えない。
+  */
+  const carryOverChapters = options.carryOverChapters ?? 0;
+  const carryOverBodies =
+    carryOverChapters > 0 ? await collectCarryOverBodies(work) : [];
+  /** チャンクごとの引き継ぎ。鍵を決めるときと送るときで、同じものを使う */
+  const carryOverByChunk = new Map<string, CarryOverResult>();
+
   // **設定が変われば、同じ本文でも答えが変わる。**
   // 材料のハッシュをキャッシュの鍵へ入れないと、設定を直したのに
   // 古い指摘が出続ける
@@ -384,6 +411,12 @@ export async function checkContradictions(
       pastSceneIndex
         ? `前の話の本文からも、名前の出てくる場面を探して渡します` +
           `（${pastSceneIndex.size}か所から最大${pastSceneBudget}字）。`
+        : "",
+      // **引き継ぐことを黙らない**（設計書6.10.6）。本文は送らないが、
+      // 載る人物が増えるので、指摘の数も変わる
+      carryOverChapters > 0
+        ? `直前の${carryOverChapters}話に出てきた人物の設定も、` +
+          "名前が出ていない話へ引き継ぎます（前の話の本文は送りません）。"
         : "",
       "",
       "この機能は本文を書き換えません。 設定と食い違う箇所を並べるだけで、",
@@ -591,7 +624,12 @@ export async function checkContradictions(
           // **まとめたチャンクでは、いちばん前の話に合わせる。**
           // うしろに合わせると、前半の話にとって「まだ分かっていないこと」を
           // 材料に渡すことになる（設計書6.10.3）
-          const relevant = settings.relevantFor(chunk.text, chunk.chapterStart);
+          //
+          // **引き継ぎは人物を索引で見つけるためだけ**（設計書6.10.6）。
+          // 引き継いだ本文そのものはプロンプトへ入らない
+          const relevant = settings.relevantFor(chunk.text, chunk.chapterStart, {
+            carryOverText: carryOverFor(chunk).text,
+          });
           // **照らし合わせる相手が無いチャンクは飛ばす。**
           // 材料なしで問うと、本文だけを見て矛盾を作り出す
           if (!relevant.hasAnything) return undefined;
@@ -846,17 +884,43 @@ export async function checkContradictions(
   }
 
   /**
-   * 渡した抜粋の内容を鍵に混ぜる（設計書6.74）。
+   * そのチャンクへ引き継ぐ前の話の本文（設計書6.10.6）。無ければ空。
    *
-   * **0件のときは混ぜない。** 混ぜると、抜粋を渡していないチャンクの
+   * **同じチャンクを2度引かない**（`pastScenesFor` と同じ理由）。鍵を
+   * 決めるときと、実際に材料を組むときの2回要る。
+   */
+  function carryOverFor(chunk: Chunk): CarryOverResult {
+    const remembered = carryOverByChunk.get(chunk.hash);
+    if (remembered !== undefined) return remembered;
+
+    // **まとめたチャンクは、いちばん前の話に合わせる**（`relevantFor` へ渡す
+    // 話数と同じ）。うしろに合わせると、前半の話にとって「まだ分かって
+    // いないこと」を引き継ぐことになる
+    const carried = carryOverBodyText({
+      bodies: carryOverBodies,
+      chapter: chunk.chapterStart,
+      chapters: carryOverChapters,
+    });
+    carryOverByChunk.set(chunk.hash, carried);
+    return carried;
+  }
+
+  /**
+   * 渡した抜粋と、引き継いだ本文の内容を鍵に混ぜる（設計書6.74・6.10.6）。
+   *
+   * **どちらも0件のときは混ぜない。** 混ぜると、何も足していないチャンクの
    * 鍵まで変わり、これまで処理済みだったぶんが無駄に飛ぶ。
    */
   function keyWithPastScenes(base: CacheKeyBase, chunk: Chunk): CacheKeyBase {
     const scenes = pastScenesFor(chunk);
-    if (!scenes) return base;
+    const carried = carryOverFor(chunk);
+    if (!scenes && !carried.text) return base;
     return {
       ...base,
-      promptVersion: promptVersionWithPastScenes(base.promptVersion, scenes),
+      promptVersion: promptVersionWithCarryOver(
+        promptVersionWithPastScenes(base.promptVersion, scenes),
+        carried.text
+      ),
     };
   }
 
@@ -967,8 +1031,13 @@ interface SettingsMaterial {
   referenceBudgetChars: number;
   /**
    * @param chapter その本文が何話か。**その時点で分かっていることだけ**を返す
+   * @param options 引き継ぐ本文（設計書6.10.6）。省略すると従来どおり
    */
-  relevantFor(text: string, chapter: number | null): RelevantSettings;
+  relevantFor(
+    text: string,
+    chapter: number | null,
+    options?: RelevantOptions
+  ): RelevantSettings;
   /** その本文に出てくる、索引にある語（設計書6.74） */
   namesIn(text: string): string[];
   /**
@@ -1086,7 +1155,8 @@ async function collectSettings(
     worldCount: worldItems.length,
     fingerprint,
     referenceBudgetChars: material.referenceBudgetChars,
-    relevantFor: (text, chapter) => material.relevantFor(text, chapter),
+    relevantFor: (text, chapter, relevantOptions) =>
+      material.relevantFor(text, chapter, relevantOptions),
     namesIn: (text) => material.namesIn(text),
     futureFactsFor(text, chapter) {
       if (chapter === null) return "";
@@ -1145,6 +1215,35 @@ async function collectSettings(
  * どのチャンクにも「自分より前の話の場面」が存在しない。索引作り
  * （BM25）はそこそこ重く、確認ダイアログの一文も嘘になる。
  */
+/**
+ * 引き継ぎのもとになる本文を、話数つきで読む（設計書6.10.6）。
+ *
+ * **読むのは引き継ぐときだけ**（呼ぶ側が0話なら呼ばない）。既定の動きで
+ * 余分にファイルを読まないようにする。
+ *
+ * **読めなくても検知は続ける**（`collectPastScenes` と同じ）。引き継ぎは
+ * 補助で、無ければ従来どおりの材料に戻るだけである。
+ *
+ * 本文の読み方は既存の作法（`loadExcerptSources`）に合わせる——合本は
+ * 中の話ごとに分かれ、シーンメモは抜かれる。**写しを作らない。**
+ */
+async function collectCarryOverBodies(
+  work: WorkEntry
+): Promise<CarryOverBody[]> {
+  try {
+    const loaded = await loadExcerptSources(work);
+    return loaded.sources.map((source) => ({
+      chapter: source.chapter ?? null,
+      text: source.text,
+    }));
+  } catch (error) {
+    logFailure("矛盾検知：引き継ぐ本文の読み込み", {
+      詳細: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
 async function collectPastScenes(
   work: WorkEntry,
   /** チャンクの話数。**渡りうるかの判断に要る**（`anyPastSceneReachable`） */

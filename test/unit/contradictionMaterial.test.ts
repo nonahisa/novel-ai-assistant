@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest";
 import {
   buildContradictionTermIndex,
+  carryOverBodyText,
   createContradictionMaterial,
+  promptVersionWithCarryOver,
+  CARRY_OVER_MAX_CHAPTERS,
 } from "../../src/core/contradictionMaterial";
 import {
   describeCharacter,
@@ -327,5 +330,228 @@ describe("過去の場面を引く語（設計書6.74）", () => {
   test("名前が1つも出なければ空", () => {
     const akari = person({ id: "char_001", name: "月島 灯" });
     expect(material({ people: [akari] }).namesIn("雨が降っていた。")).toEqual([]);
+  });
+});
+
+/*
+  前の話に出た人物を引き継ぐ（設計書6.10.6）。
+
+  **一人称で語る主人公は自分の名前を言わない。** その話では主人公の設定が
+  材料に1つも載らず、AIは「照らし合わせる相手が無い」ので正しく黙る——
+  作者の219話で44話（20%）がこの形だった。落ちた44話のうち33話は直前の話に
+  載っていたので、**前の話の本文も一緒に索引へかければ拾える**見込みがある。
+
+  **これは測るための口である。** 既定（引き継がない）の動きは1文字も
+  変わらないことを、ここで見張る。
+*/
+describe("前の話に出た人物を引き継ぐ（設計書6.10.6）", () => {
+  const haruto = person({
+    id: "char_001",
+    name: "相沢 春人",
+    role: "配達員",
+    chapters: [1, 2, 3, 4, 5],
+  });
+  /** 一人称の地の文だけの話。**主人公の名前が1度も出ない** */
+  const narration = "俺は左の足首をかばいながら、坂を下りた。";
+
+  test("既定（引き継がない）では、これまでと1文字も変わらない", () => {
+    const built = material({ people: [haruto] });
+
+    const before = built.relevantFor(narration, 4);
+    // 省略したときと、空の指定を渡したときと、空文字を渡したときで揃う
+    expect(before.characters).toBe("");
+    expect(built.relevantFor(narration, 4, {})).toEqual(before);
+    expect(built.relevantFor(narration, 4, { carryOverText: "" })).toEqual(
+      before
+    );
+  });
+
+  test("前の話にだけ名前が出る人物が載る", () => {
+    const built = material({ people: [haruto] });
+
+    const relevant = built.relevantFor(narration, 4, {
+      carryOverText: "相沢はその朝も八時に局を出た。",
+    });
+
+    expect(relevant.characters).toContain("相沢 春人");
+    expect(relevant.characters).toContain("配達員");
+  });
+
+  test("その話までに登場していない人物は、引き継いでも載らない", () => {
+    // **`hasAppearedBy` は引き継ぎの後ろにある**（設計書6.10.3）。
+    // 引き継ぎで絞り込みを飛び越えると、あとの話で出てくる人物の設定が
+    // 前の話へ流れ込む
+    const later = person({
+      id: "char_002",
+      name: "黒瀬 千夏",
+      role: "窓口係",
+      chapters: [7],
+    });
+
+    const relevant = material({ people: [later] }).relevantFor(narration, 4, {
+      carryOverText: "黒瀬は窓口で判を押していた。",
+    });
+
+    expect(relevant.characters).toBe("");
+  });
+
+  test("引き継ぐ本文そのものは、材料のどの欄にも入らない", () => {
+    // 増えるのは【登場人物設定】だけ。前の話の本文をプロンプトへ入れない
+    const relevant = material({ people: [haruto] }).relevantFor(narration, 4, {
+      carryOverText: "相沢はその朝も八時に局を出た。",
+    });
+
+    expect(relevant.characters).not.toContain("八時に局を出た");
+    expect(relevant.locations).toBe("");
+    expect(relevant.worldview).toBe("");
+  });
+
+  /*
+    **場所は引き継がない**（0.70.5の判断）。場所は「その場面がどこか」を
+    言う材料なので、前の話の場所を足すと**もう居ない場所の設定**と本文を
+    突き合わせることになる。実測で穴が見つかっているのは人物だけである。
+  */
+  test("場所は引き継がない（人物だけ）", () => {
+    const tower = place({
+      id: "loc_001",
+      name: "立花郵便局",
+      description: "町の中心にある",
+      chapters: [1, 2, 3, 4],
+    });
+
+    const relevant = material({ places: [tower] }).relevantFor(narration, 4, {
+      carryOverText: "立花郵便局の窓口は朝から混んでいた。",
+    });
+
+    expect(relevant.locations).toBe("");
+  });
+});
+
+describe("引き継ぐ本文の選び方（`carryOverBodyText`）", () => {
+  const bodies = [
+    { chapter: 1, text: "一話の本文" },
+    { chapter: 2, text: "二話の本文" },
+    { chapter: 3, text: "三話の本文" },
+    { chapter: 4, text: "四話の本文" },
+  ];
+
+  test("直前の2話だけを、話の順に並べる", () => {
+    const carried = carryOverBodyText({ bodies, chapter: 4, chapters: 2 });
+
+    expect(carried.chapters).toEqual([2, 3]);
+    expect(carried.text).toBe("二話の本文\n\n三話の本文");
+  });
+
+  test("0話・負の数・小数以下は引き継がない", () => {
+    for (const chapters of [0, -1, -5, 0.5]) {
+      expect(carryOverBodyText({ bodies, chapter: 4, chapters })).toEqual({
+        chapters: [],
+        text: "",
+      });
+    }
+  });
+
+  test("小数は切り捨てる（1.9話は1話）", () => {
+    expect(
+      carryOverBodyText({ bodies, chapter: 4, chapters: 1.9 }).chapters
+    ).toEqual([3]);
+  });
+
+  /*
+    **大きすぎる値は上限で止める。** 遡るほど「いまの場面に居ない人物」の
+    設定が積み上がる。打ち間違いに気づかせるのは呼ぶ側の役目で、ここは
+    最後の守りである。
+  */
+  test("上限（5話）を超えては遡らない", () => {
+    const long = Array.from({ length: 20 }, (_, index) => ({
+      chapter: index + 1,
+      text: `第${index + 1}話`,
+    }));
+
+    expect(
+      carryOverBodyText({ bodies: long, chapter: 20, chapters: 99 }).chapters
+    ).toEqual([15, 16, 17, 18, 19]);
+    expect(CARRY_OVER_MAX_CHAPTERS).toBe(5);
+  });
+
+  test("知らない値（NaN・Infinity）でも落ちない", () => {
+    expect(
+      carryOverBodyText({ bodies, chapter: 4, chapters: Number.NaN }).text
+    ).toBe("");
+    expect(
+      carryOverBodyText({ bodies, chapter: 4, chapters: Number.POSITIVE_INFINITY })
+        .chapters
+    ).toEqual([]);
+  });
+
+  test("話数の読めないチャンクには引き継がない", () => {
+    // 前後を決められないものに「前の話」は無い
+    expect(carryOverBodyText({ bodies, chapter: null, chapters: 2 }).text).toBe(
+      ""
+    );
+  });
+
+  test("話数の読めない本文は、引き継ぐ側にも使わない", () => {
+    const mixed = [...bodies, { chapter: null, text: "話数の読めない本文" }];
+
+    expect(carryOverBodyText({ bodies: mixed, chapter: 4, chapters: 2 }).text)
+      .not.toContain("話数の読めない本文");
+  });
+
+  test("第1話には引き継ぐものが無い", () => {
+    expect(carryOverBodyText({ bodies, chapter: 1, chapters: 2 })).toEqual({
+      chapters: [],
+      text: "",
+    });
+  });
+
+  /*
+    **数えるのは話数であって、塊の数ではない。** 合本（1ファイルに何話も）は
+    呼ぶ側が話ごとに分けて渡すので、同じ話数のものが複数あればまとめて採る。
+  */
+  test("同じ話数の本文が複数あれば、まとめて採る", () => {
+    const split = [
+      { chapter: 2, text: "二話の前半" },
+      { chapter: 2, text: "二話の後半" },
+      { chapter: 3, text: "三話の本文" },
+    ];
+
+    const carried = carryOverBodyText({ bodies: split, chapter: 4, chapters: 1 });
+    expect(carried.chapters).toEqual([3]);
+
+    const two = carryOverBodyText({ bodies: split, chapter: 4, chapters: 2 });
+    expect(two.chapters).toEqual([2, 3]);
+    expect(two.text).toBe("二話の前半\n\n二話の後半\n\n三話の本文");
+  });
+
+  test("話数が飛んでいても、ある中の前の話を採る", () => {
+    const sparse = [
+      { chapter: 1, text: "一話" },
+      { chapter: 9, text: "九話" },
+      { chapter: 12, text: "十二話" },
+    ];
+
+    expect(
+      carryOverBodyText({ bodies: sparse, chapter: 12, chapters: 2 }).chapters
+    ).toEqual([1, 9]);
+  });
+});
+
+describe("引き継ぎをキャッシュの鍵へ混ぜる", () => {
+  test("引き継がないときは、鍵をこれまでと同じままにする", () => {
+    expect(promptVersionWithCarryOver("1.5:abc", "")).toBe("1.5:abc");
+  });
+
+  test("引き継いだ本文が変われば、鍵も変わる", () => {
+    // 前の話を書き直すと、引き継ぐ人物が変わりうる
+    expect(promptVersionWithCarryOver("1.5:abc", "相沢は坂を下りた")).not.toBe(
+      promptVersionWithCarryOver("1.5:abc", "黒瀬は坂を下りた")
+    );
+  });
+
+  test("同じ本文からは、同じ鍵が出る", () => {
+    expect(promptVersionWithCarryOver("1.5:abc", "相沢は坂を下りた")).toBe(
+      promptVersionWithCarryOver("1.5:abc", "相沢は坂を下りた")
+    );
   });
 });

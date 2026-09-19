@@ -7,7 +7,10 @@ import {
   LIGHT_CATEGORIES,
 } from "../../src/prompts/contradictionCheck";
 import { buildProposalPanelHtml } from "../../src/views/proposalPanelHtml";
-import { contradictionPrompt } from "../../src/mcp/tools/contradiction";
+import {
+  contradictionMaterial,
+  contradictionPrompt,
+} from "../../src/mcp/tools/contradiction";
 
 /**
  * 矛盾検知のプロンプトと画面（設計書6.10.1）。
@@ -364,5 +367,94 @@ describe("矛盾の区分を、名前で指す", () => {
     );
     expect(user).toContain("負傷や状態変化が引き継がれているか");
     expect(user).not.toContain("一人称、口調、性格、外見");
+  });
+});
+
+/*
+  前の話に出た人物を引き継ぐ（設計書6.10.6）。
+
+  答え付きの台（`seeded/contradiction`）の**第4話は、本文に主人公の名前が
+  1度も出ない**（地の文は全部「俺」）。そのため主人公の設定が材料に1つも
+  載らず、仕込んだ「左足を折ったのに右足のギプスが外れた」を5モデル15回で
+  一度も拾えなかった。
+
+  **既定は引き継がない。** 効くと分かってから既定を決めるので（6.102）、
+  ここでは「指定しなければこれまでどおり」も一緒に見張る。
+*/
+describe("前の話に出た人物を引き継ぐ（設計書6.10.6）", () => {
+  const folder = "test/fixtures/seeded/contradiction";
+  /** 主人公の名前が1度も出ない話 */
+  const fourth = "本文/004_ギプスが外れた日.txt";
+
+  function materialFor(carryOver?: number | string) {
+    return contradictionMaterial({
+      folder,
+      filePath: fourth,
+      numCtx: 16384,
+      carryOver,
+    }).chunks[0];
+  }
+
+  test("指定しなければ、第4話には主人公が載らないまま（これまでどおり）", () => {
+    const chunk = materialFor();
+
+    expect(chunk.characterDetails).not.toContain("相沢 春人");
+    expect(chunk.carriedOverChapters).toEqual([]);
+    // 0 と指定したときも、指定しないときと同じ
+    expect(materialFor(0)).toEqual(chunk);
+  });
+
+  test("carryOver: 2 で、第4話にも主人公の設定が載る", () => {
+    const chunk = materialFor(2);
+
+    expect(chunk.characterDetails).toContain("相沢 春人");
+    expect(chunk.carriedOverChapters).toEqual([2, 3]);
+  });
+
+  test("文字列で渡しても同じ（測定の台本は文字列で渡す）", () => {
+    // `scripts/measure.mjs` の `--option carryOver=2` は文字列のまま届く
+    expect(materialFor("2")).toEqual(materialFor(2));
+  });
+
+  test("引き継いだ本文そのものは、プロンプトへ入らない", () => {
+    const built = contradictionPrompt({
+      folder,
+      filePath: fourth,
+      numCtx: 16384,
+      carryOver: 2,
+    });
+    const user = built.chunks[0].userPrompt;
+
+    expect(user).toContain("相沢 春人");
+    expect(built.chunks[0].carriedOverChapters).toEqual([2, 3]);
+    // 第3話の書き出し（第4話の本文には無い）が混ざっていないこと
+    expect(user).not.toContain("窓口の椅子は");
+  });
+
+  test("過去の場面を引く語（names）は、引き継がない", () => {
+    // 検索語は「この本文に出た名前」であって、前の話に出た名前ではない
+    expect(materialFor(2).names).toEqual(materialFor().names);
+  });
+
+  /*
+    **知らない値は黙って丸めない。** 丸めると、打ち間違いに気づかないまま
+    「その話数で測った」記録が残る（区分の指定と同じ考え方）。
+  */
+  test("知らない値・大きすぎる値は断る", () => {
+    expect(() => materialFor(-1)).toThrow(/carryOver/);
+    expect(() => materialFor(1.5)).toThrow(/整数/);
+    expect(() => materialFor("たくさん")).toThrow(/carryOver/);
+    expect(() => materialFor(99)).toThrow(/5話まで/);
+  });
+
+  test("第1話には引き継ぐものが無い（断っても落ちない）", () => {
+    const first = contradictionMaterial({
+      folder,
+      filePath: "本文/001_九月の終わりの坂.txt",
+      numCtx: 16384,
+      carryOver: 2,
+    }).chunks[0];
+
+    expect(first.carriedOverChapters).toEqual([]);
   });
 });

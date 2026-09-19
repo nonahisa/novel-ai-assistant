@@ -1,6 +1,7 @@
 import type { Character } from "../models/character";
 import type { Location } from "../models/location";
 import type { WorldItem } from "../models/world";
+import { sha1Text } from "./hash";
 import { hasAppearedBy, isEmptyAfterRollback, recordAsOf } from "./settingsAsOf";
 import {
   describeCharacter,
@@ -61,6 +62,23 @@ export interface RelevantSettings {
   hasAnything: boolean;
 }
 
+/**
+ * 材料を組むときの、その回かぎりの指定。
+ *
+ * **状態は持たない。** MCP は1ファイルずつ呼ばれるので、話をまたいで
+ * 覚えておくことはできない——引き継ぐ本文は**呼ぶ側が用意して渡す**。
+ */
+export interface RelevantOptions {
+  /**
+   * 索引に**一緒にかける**文字列（設計書6.10.6の「前の話に出た人物を
+   * 引き継ぐ」）。ふつうは直前の数話の本文。
+   *
+   * **この文字列そのものはプロンプトへ入らない。** 人物を索引で見つける
+   * ためだけに見るので、増えるのは【登場人物設定】の欄だけである。
+   */
+  carryOverText?: string;
+}
+
 export interface ContradictionMaterial {
   /**
    * 参照資料に見込む字数（世界観）。チャンクの大きさを決めるのに使う。
@@ -71,8 +89,13 @@ export interface ContradictionMaterial {
   referenceBudgetChars: number;
   /**
    * @param chapter その本文が何話か。**その時点で分かっていることだけ**を返す
+   * @param options 引き継ぐ本文（`RelevantOptions`）。省略すると従来どおり
    */
-  relevantFor(text: string, chapter: number | null): RelevantSettings;
+  relevantFor(
+    text: string,
+    chapter: number | null,
+    options?: RelevantOptions
+  ): RelevantSettings;
   /**
    * その本文に出てくる、索引にある語（設計書6.74）。
    *
@@ -156,12 +179,33 @@ export function createContradictionMaterial(options: {
 
   return {
     referenceBudgetChars: Math.min(worldviewMax, worldviewWholeChars),
-    relevantFor(text, chapter) {
+    relevantFor(text, chapter, relevantOptions) {
       const seenCharacters = new Set<string>();
       const seenLocations = new Set<string>();
       for (const match of index.find(text)) {
         if (match.entry.kind === "character") seenCharacters.add(match.entry.id);
         if (match.entry.kind === "location") seenLocations.add(match.entry.id);
+      }
+
+      /*
+        **前の話に出た人物を引き継ぐ**（設計書6.10.6）。
+
+        一人称で語る主人公は自分の名前を言わないので、その話では
+        主人公の設定が1つも載らない（作者の219話で44話＝20%）。名前にも
+        一人称にも頼らずに拾うには、**直前の話の本文も一緒に索引へかける**
+        のがいちばん素直である（落ちた44話のうち33話は直前の話に載っていた）。
+
+        **人物だけを引き継ぐ。** 場所は「その場面がどこか」を言う材料で、
+        前の話の場所を足すと**もう居ない場所の設定**と本文を突き合わせる
+        ことになり、誤検出を増やしかねない。落ちる穴が実測で見つかって
+        いるのは人物（語り手）だけなので、測る対象もそこに絞る。
+      */
+      const carryOverText = relevantOptions?.carryOverText ?? "";
+      if (carryOverText) {
+        for (const match of index.find(carryOverText)) {
+          if (match.entry.kind !== "character") continue;
+          seenCharacters.add(match.entry.id);
+        }
       }
 
       // **その話の時点で分かっていることだけを渡す**（設計書6.10.3）。
@@ -216,4 +260,101 @@ export function createContradictionMaterial(options: {
       return names;
     },
   };
+}
+
+/**
+ * 前の話を引き継げる上限（話数）。
+ *
+ * **材料を際限なく膨らませない。** 引き継ぐのは人物を索引で見つけるため
+ * だけだが、遡るほど「いまの場面に居ない人物」の設定が積み上がる。実測
+ * （作者の219話、2026-09-19）では**落ちた44話のうち33話は直前の話に載って
+ * おり、連続して落ちるのは最長3話**だったので、5話あれば足りる。
+ */
+export const CARRY_OVER_MAX_CHAPTERS = 5;
+
+/** 引き継ぎのもとになる本文（話数の順に並べて渡す） */
+export interface CarryOverBody {
+  /** その本文の話数。読めなければ null（**引き継ぎには使わない**） */
+  chapter: number | null;
+  text: string;
+}
+
+export interface CarryOverResult {
+  /** 実際に引き継いだ話数（小さい順）。**黙って引き継がない** */
+  chapters: number[];
+  /** 索引に一緒にかける文字列。引き継ぐものが無ければ空文字 */
+  text: string;
+}
+
+/**
+ * いま見ている話より前の N 話ぶんの本文を、1つの文字列にまとめる
+ * （設計書6.10.6）。
+ *
+ * **VS Code にも `fs` にも触らない。** 本文を読むのは呼ぶ側の仕事で、
+ * ここは「どれを何話ぶん採るか」だけを決める——拡張機能（`loadExcerptSources`）と
+ * MCP（`orderedEpisodeBodies`）で読み方が違っても、**採り方は1か所**にする。
+ *
+ * **数えるのは話数であって、ファイルでも塊でもない。** 合本（1ファイルに
+ * 何話も入っている）は呼ぶ側が話ごとに分けて渡すので、同じ話数のものが
+ * 複数あればまとめて採る。
+ *
+ * **話数の読めないチャンクには引き継がない。** 前後を決められないものに
+ * 「前の話」は無い（`pastSceneSelect` が話数の読めない出典を落とすのと同じ）。
+ *
+ * 知らない値・大きすぎる値はここで丸める（負・小数・上限超え）。**丸める
+ * のは最後の守りで、打ち間違いに気づかせるのは呼ぶ側の役目**である
+ * （MCP は `carryOverOf` が断る）。
+ */
+export function carryOverBodyText(options: {
+  bodies: readonly CarryOverBody[];
+  /** いま見ている話。読めない（null）なら引き継がない */
+  chapter: number | null;
+  /** 何話ぶん遡るか。0以下なら引き継がない */
+  chapters: number;
+}): CarryOverResult {
+  const empty: CarryOverResult = { chapters: [], text: "" };
+  const requested = Math.floor(options.chapters);
+  if (!Number.isFinite(requested) || requested <= 0) return empty;
+  const count = Math.min(requested, CARRY_OVER_MAX_CHAPTERS);
+  const chapter = options.chapter;
+  if (chapter === null) return empty;
+
+  const before = new Set<number>();
+  for (const body of options.bodies) {
+    if (body.chapter === null || body.chapter >= chapter) continue;
+    before.add(body.chapter);
+  }
+  const picked = new Set(
+    [...before].sort((left, right) => right - left).slice(0, count)
+  );
+  if (picked.size === 0) return empty;
+
+  // **並びは渡された順のまま。** 呼ぶ側は話数の順に渡すので、
+  // 引き継ぐ本文も話の順に並ぶ（同じ入力から同じ文字列が出る）
+  const text = options.bodies
+    .filter((body) => body.chapter !== null && picked.has(body.chapter))
+    .map((body) => body.text)
+    .join("\n\n");
+  return {
+    chapters: [...picked].sort((left, right) => left - right),
+    text,
+  };
+}
+
+/**
+ * キャッシュの鍵（プロンプトの版）へ、引き継いだ本文の中身を混ぜる。
+ *
+ * **前の話を書き直すと、引き継ぐ人物が変わりうる。** 混ぜないと、
+ * 書き直す前の顔ぶれで出した指摘が出続ける（`promptVersionWithPastScenes`
+ * と同じ理屈）。
+ *
+ * **引き継がないときは混ぜない。** 既定（0話）の鍵はこれまでと同じままで、
+ * 処理済みのキャッシュが無駄に飛ばない。
+ */
+export function promptVersionWithCarryOver(
+  promptVersion: string,
+  carryOverText: string
+): string {
+  if (!carryOverText) return promptVersion;
+  return `${promptVersion}:carry${sha1Text(carryOverText).slice(0, 16)}`;
 }

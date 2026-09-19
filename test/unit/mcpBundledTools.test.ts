@@ -378,6 +378,27 @@ describe("入力の形", () => {
     ).toBe(false);
   });
 
+  /*
+    **material も options を受け取る**（0.70.5）。
+
+    矛盾の `carryOver`（前の話の引き継ぎ、設計書6.10.6）は、プロンプトを
+    組む前に**材料の欄が変わったか**で測るものである。ここに口が無いと、
+    渡した指定は転送層で**黙って捨てられ**、「効かなかった」ではなく
+    「届いていなかった」を測ることになる（束を起こして気づいた）。
+  */
+  it("material も options を受け取る（黙って捨てない）", () => {
+    const parsed = z.object(NOVEL_MATERIAL_INPUT).safeParse({
+      folder: WORK,
+      feature: "contradiction",
+      filePath: "本文/001.txt",
+      numCtx: 16384,
+      options: { carryOver: 2 },
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.options).toEqual({ carryOver: 2 });
+  });
+
   it("**一覧を小さく保つ**——入力の形は共通＋options だけ", () => {
     /*
       束ねた目的は、AI が繋いだ瞬間に読む量を減らすことだった

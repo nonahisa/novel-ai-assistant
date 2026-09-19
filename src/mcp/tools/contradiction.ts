@@ -16,7 +16,10 @@ import {
 } from "../../core/contradictionValidation";
 import {
   buildContradictionTermIndex,
+  carryOverBodyText,
   createContradictionMaterial,
+  CARRY_OVER_MAX_CHAPTERS,
+  type CarryOverResult,
   type ContradictionMaterial,
 } from "../../core/contradictionMaterial";
 import { worldviewMaxChars } from "../../core/worldviewSelect";
@@ -33,6 +36,7 @@ import {
   chunkFromId,
   chunkIdOf,
   chunksOfWorkFile,
+  orderedEpisodeBodies,
   readSettingsFile,
   readSettingsRecords,
   selectChunks,
@@ -186,6 +190,62 @@ function categoriesOf(
   return CONTRADICTION_CATEGORIES.filter((name) => names.includes(name));
 }
 
+/**
+ * 前の話を何話ぶん引き継ぐか（設計書6.10.6）。
+ *
+ * **既定は0＝いままでどおり引き継がない。** これは**測るための口**で、
+ * 効くと分かってから既定を決める（6.102「測ってから言う」）。
+ *
+ * **文字列でも受ける。** 測定の台本（`scripts/measure.mjs`）は
+ * `--option carryOver=2` の値を**文字列のまま**渡す——数だけを受けると、
+ * 台本から一度も指定できない口になる。
+ *
+ * **知らない値は黙って丸めない**（`categoriesOf` と同じ）。丸めると、
+ * 打ち間違いに気づかないまま「その話数で測った」記録が残る。
+ */
+function carryOverOf(choice: number | string | undefined): number {
+  if (choice === undefined) return 0;
+  const value = typeof choice === "number" ? choice : Number(String(choice).trim());
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+    throw new McpToolError(
+      `carryOver は0以上の整数です: ${String(choice)}` +
+        `（0＝引き継がない、${CARRY_OVER_MAX_CHAPTERS}まで）`
+    );
+  }
+  if (value > CARRY_OVER_MAX_CHAPTERS) {
+    throw new McpToolError(
+      `carryOver は${CARRY_OVER_MAX_CHAPTERS}話までです: ${value}` +
+        "（材料が膨らみすぎるため）"
+    );
+  }
+  return value;
+}
+
+/** 空の引き継ぎ。**同じ形を返す**（呼ぶ側に分岐を増やさない） */
+const NO_CARRY_OVER: CarryOverResult = { chapters: [], text: "" };
+
+/**
+ * チャンクの話数から、引き継ぐ本文を引く役を作る。
+ *
+ * **0話のときは1ファイルも余分に読まない。** 既定の呼び出しでは、
+ * これまでと同じだけしか読まないようにする。
+ *
+ * 本文の並べ方は既存の作法（`orderedEpisodeBodies`）に合わせる——**写しを
+ * 作らない**。合本（1ファイルに何話も）は中の話ごとに分かれて返るので、
+ * 「前の話」も合本の中から採れる。
+ */
+function carryOverReader(
+  folder: string,
+  chapters: number
+): (chapter: number | null) => CarryOverResult {
+  if (chapters <= 0) return () => NO_CARRY_OVER;
+  const bodies = orderedEpisodeBodies(folder).map((episode) => ({
+    chapter: episode.chapter,
+    text: episode.body,
+  }));
+  return (chapter) => carryOverBodyText({ bodies, chapter, chapters });
+}
+
 export interface ContradictionChunkMaterial {
   chunkId: string;
   index: number;
@@ -201,6 +261,13 @@ export interface ContradictionChunkMaterial {
   hasAnything: boolean;
   /** 本文に現れた、索引にある語（本文の表記そのまま） */
   names: string[];
+  /**
+   * 人物を探すために引き継いだ話数（設計書6.10.6）。`carryOver` が0なら空。
+   *
+   * **足したことを黙らない。** どの話を引き継いだのかが見えないと、
+   * 「載るようになった人物」がどこから来たのか測りようがない。
+   */
+  carriedOverChapters: number[];
 }
 
 export interface ContradictionMaterialInput {
@@ -208,6 +275,11 @@ export interface ContradictionMaterialInput {
   filePath: string;
   numCtx: number;
   chunkIndex?: number;
+  /**
+   * 前の話を何話ぶん引き継ぐか（設計書6.10.6）。既定0＝引き継がない。
+   * 文字列でも受ける（`carryOverOf`）
+   */
+  carryOver?: number | string;
 }
 
 export function contradictionMaterial(input: ContradictionMaterialInput): {
@@ -222,6 +294,7 @@ export function contradictionMaterial(input: ContradictionMaterialInput): {
     input.filePath,
     input.numCtx
   );
+  const carryOver = carryOverReader(input.folder, carryOverOf(input.carryOver));
 
   return {
     settingsCount: {
@@ -232,7 +305,7 @@ export function contradictionMaterial(input: ContradictionMaterialInput): {
     unreadableSettings: settings.unreadable,
     referenceBudgetChars: settings.material.referenceBudgetChars,
     chunks: selectChunks(chunks, input.chunkIndex).map((chunk) =>
-      materialForChunk(input.filePath, chunk, maxChars, settings)
+      materialForChunk(input.filePath, chunk, maxChars, settings, carryOver)
     ),
   };
 }
@@ -241,9 +314,17 @@ function materialForChunk(
   relative: string,
   chunk: Chunk,
   maxChars: number,
-  settings: Settings
+  settings: Settings,
+  carryOver: (chapter: number | null) => CarryOverResult
 ): ContradictionChunkMaterial {
-  const relevant = settings.material.relevantFor(chunk.text, chunk.chapterStart);
+  // **引き継ぐのは人物を索引で見つけるためだけ**（設計書6.10.6）。
+  // この本文そのものはプロンプトへ入らない
+  const carried = carryOver(chunk.chapterStart);
+  const relevant = settings.material.relevantFor(
+    chunk.text,
+    chunk.chapterStart,
+    { carryOverText: carried.text }
+  );
   return {
     chunkId: chunkIdOf(relative, chunk, maxChars),
     index: chunk.index,
@@ -254,7 +335,10 @@ function materialForChunk(
     worldviewSummary: relevant.worldview,
     previousSynopses: settings.synopsesBefore(chunk.chapterStart),
     hasAnything: relevant.hasAnything,
+    // **検索語は引き継がない**（設計書6.74）。過去の場面を引く語は
+    // 「この本文に出た名前」であって、前の話に出た名前ではない
     names: settings.material.namesIn(chunk.text),
+    carriedOverChapters: carried.chapters,
   };
 }
 
@@ -264,6 +348,13 @@ export interface ContradictionChunkPrompt {
   chapterLabel: string;
   chars: number;
   userPrompt: string;
+  /**
+   * 人物を探すために引き継いだ話数（設計書6.10.6）。`carryOver` が0なら空。
+   *
+   * **`run` の記録にも残す。** どの回が引き継ぎありだったのかが、
+   * あとから測り直す人に分からなくなる
+   */
+  carriedOverChapters: number[];
 }
 
 export interface ContradictionPromptInput extends ContradictionMaterialInput {
@@ -290,11 +381,18 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
     input.numCtx
   );
   const categories = categoriesOf(input.categories);
+  const carryOver = carryOverReader(input.folder, carryOverOf(input.carryOver));
 
   const prompts: ContradictionChunkPrompt[] = [];
   const skipped: Array<{ chunkId: string; reason: string }> = [];
   for (const chunk of selectChunks(chunks, input.chunkIndex)) {
-    const material = materialForChunk(input.filePath, chunk, maxChars, settings);
+    const material = materialForChunk(
+      input.filePath,
+      chunk,
+      maxChars,
+      settings,
+      carryOver
+    );
     if (!material.hasAnything) {
       // **材料なしで問わない。** 照らし合わせる相手が無いと、
       // 本文だけを見て矛盾を作り出す
@@ -309,6 +407,7 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
       index: chunk.index,
       chapterLabel: material.chapterLabel,
       chars: chunk.text.length,
+      carriedOverChapters: material.carriedOverChapters,
       userPrompt: buildContradictionCheckPrompt({
         chapterLabel: material.chapterLabel,
         chunkTextWithLineNumbers: withLineNumbers(chunk),
