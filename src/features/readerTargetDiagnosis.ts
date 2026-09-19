@@ -37,6 +37,7 @@ import {
   hasReaderProfile,
   type ReaderProfile,
 } from "../models/readerProfile";
+import type { AuthorReaderProfile } from "../core/authorReaderType";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import { withCancellableProgress } from "../views/progress";
@@ -83,7 +84,12 @@ type Step = "declare" | "read" | "both";
 
 export async function runReaderTargetDiagnosis(
   work: WorkEntry,
-  registry: AIRegistry
+  registry: AIRegistry,
+  /**
+   * 作者自身の読者タイプ（設計書6.101）。**未診断なら渡さなくてよい**
+   * ——紙の突き合わせの節がまるごと出なくなるだけである。
+   */
+  authorReader?: AuthorReaderProfile
 ): Promise<void> {
   useLogFile(work.folderPath);
 
@@ -151,7 +157,12 @@ export async function runReaderTargetDiagnosis(
 
   await openGeneratedMarkdown(
     READER_GUIDE_KIND,
-    buildReaderGuide({ workTitle: work.title, profile: next, unmeasured }),
+    buildReaderGuide({
+      workTitle: work.title,
+      profile: next,
+      unmeasured,
+      authorReader,
+    }),
     { preview: false },
     { work }
   );

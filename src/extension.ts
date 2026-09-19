@@ -300,6 +300,7 @@ import { AdvicePolicyStore } from "./core/advicePolicyStore";
 import { WriterProfileStore } from "./core/writerProfileStore";
 import type { AdviceProfile } from "./core/advicePolicy";
 import { setAdvicePolicy } from "./features/advicePolicyDiagnosis";
+import { AuthorReaderTypeStore } from "./core/authorReaderTypeStore";
 import {
   addForeshadowByHand,
   openForeshadows,
@@ -1483,6 +1484,10 @@ export async function activate(
   // 作家タイプ診断（設計書6.90）。**作者ごとに1つ**——段取りや出し先は
   // 作品を変えても大きくは変わらない癖なので、作品ごとに聞き直さない
   const writerProfiles = new WriterProfileStore(context.globalState);
+  // 作者自身の読者タイプ（設計書6.101）。**作品ではなく作者ごとに1つ**——
+  // 「この作品は誰に届けるか」（6.91、作品ごと）とは別物で、
+  // こちらは「あなた自身が読者として何を求めるか」である
+  const authorReaderTypes = new AuthorReaderTypeStore(context.globalState);
 
   // 執筆スタイル（6.90）も相談へ渡す。渡すのは段取り（S1）と直す時期（S2）
   // だけで、資料の置き場・出し先は渡さない（作者の裁定、2026-09-14）。
@@ -3607,6 +3612,34 @@ export async function activate(
     )
   );
 
+  /*
+    作者自身の読者タイプ（設計書6.101）。AIは呼ばない——答えるのは作者本人。
+
+    **作品を選ばせに行かない。** ここで保存するのは作者ごとの答えで、
+    作品の情報ではない。作品が一つに定まるとき（節点から呼ばれた／
+    登録が1作だけ）にだけ、その作品のターゲット読者と突き合わせて見せる。
+    作品ごとの見え方は、ターゲット読者診断の紙のほうに出る。
+  */
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.setAuthorReaderType",
+      async (node?: WorkRef) => {
+        const works = registry.list();
+        const work =
+          node && node.type === "work"
+            ? node.work
+            : works.length === 1
+              ? works[0]
+              : undefined;
+
+        const { setAuthorReaderType } = await import(
+          "./features/authorReaderTypeDiagnosis.js"
+        );
+        await setAuthorReaderType(authorReaderTypes, work);
+      }
+    )
+  );
+
   // 伏線追跡（設計書6.35）。台帳と一覧・手で足す口・矛盾からの転送に加え、
   // 配置と回収の自動検知（P-25/P-26）。**検知は何も自動で保存しない**
   context.subscriptions.push(
@@ -4339,7 +4372,13 @@ export async function activate(
         const { runReaderTargetDiagnosis } = await import(
           "./features/readerTargetDiagnosis.js"
         );
-        await runReaderTargetDiagnosis(work, aiRegistry);
+        // 作者自身の読者タイプ（6.101）を渡す。**未診断なら undefined** で、
+        // そのときは紙の突き合わせの節がまるごと出ない（推測で埋めない）
+        await runReaderTargetDiagnosis(
+          work,
+          aiRegistry,
+          authorReaderTypes.get()
+        );
       }
     )
   );

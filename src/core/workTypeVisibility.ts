@@ -251,6 +251,9 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.openChatPanel": "allTypes",
   "novelai.chooseChatWork": "allTypes",
   "novelai.setAdvicePolicy": "allTypes",
+  // 作者自身の読者タイプ（設計書6.101）。**作者ごとの答え**なので、
+  // 作品のタイプで出し分ける理由がない
+  "novelai.setAuthorReaderType": "allTypes",
   "novelai.chooseStepWork": "allTypes",
 
   // ── 執筆量・記録 ──

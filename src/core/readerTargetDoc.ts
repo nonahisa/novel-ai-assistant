@@ -12,6 +12,8 @@ import {
   type ReaderTypeId,
 } from "./readerTarget";
 import type { ReaderProfile, ReaderScores } from "../models/readerProfile";
+import { compareAuthorReader } from "./authorReaderGap";
+import type { AuthorReaderProfile } from "./authorReaderType";
 
 /**
  * ターゲット読者診断の紙（設計書6.91）。
@@ -129,6 +131,30 @@ function gapSection(profile: ReaderProfile): string[] {
   return lines;
 }
 
+/**
+ * あなた自身の読み方との突き合わせ（設計書6.101）。
+ *
+ * **作者の読者タイプが未診断なら、節ごと出さない。** 推測で埋めない
+ * （`compareAuthorReader` が黙るときは、こちらも黙る）。
+ *
+ * 本文の行は `authorReaderGap.ts` が持つ——**画面（プレーンテキスト）と
+ * ここで同じ文を使う**ためで、言い回しが2か所に分かれると、
+ * 上下を作らない書き方を片方だけ直す日が来る。
+ */
+function authorReaderSection(
+  profile: ReaderProfile,
+  authorReader: AuthorReaderProfile | undefined
+): string[] {
+  const comparison = compareAuthorReader(authorReader, profile);
+  if (!comparison) return [];
+
+  const heading =
+    comparison.kind === "overlap"
+      ? "## あなたが読みたいものと、この作品の宛先は**重なっています**"
+      : "## あなた自身の読み方と、この作品の宛先";
+  return [heading, "", ...comparison.lines, ""];
+}
+
 /** 根拠の節。**引用は本文に実在するものだけが来る**（検算済み） */
 function evidenceSection(profile: ReaderProfile): string[] {
   const evidence = profile.actual?.evidence ?? [];
@@ -164,6 +190,13 @@ export function buildReaderGuide(input: {
   profile: ReaderProfile;
   /** 実像を読めなかった軸の呼び名。**黙って埋めない** */
   unmeasured?: readonly string[];
+  /**
+   * 作者自身の読者タイプ（設計書6.101）。
+   *
+   * **無ければ突き合わせの節を出さない。** 未診断のまま推測で
+   * 「あなたはこう読む人でしょう」と書くと、それ自体が決めつけになる。
+   */
+  authorReader?: AuthorReaderProfile;
 }): string {
   const { workTitle, profile } = input;
   const parts: string[] = [`# ${READER_GUIDE_TITLE}`, "", `**${workTitle}**`, ""];
@@ -204,6 +237,10 @@ export function buildReaderGuide(input: {
   }
 
   parts.push(...gapSection(profile));
+  // **作者自身の読み方との突き合わせは、作品の中のズレのあとに置く。**
+  // 先に置くと、この紙の主役（この作品は誰に向いているか）が
+  // 作者自身の話にすり替わる
+  parts.push(...authorReaderSection(profile, input.authorReader));
   parts.push(...evidenceSection(profile));
 
   const current = profile.actual
