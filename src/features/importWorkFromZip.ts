@@ -29,10 +29,13 @@ import {
   type PostingSiteProfile,
 } from "../models/posting";
 import {
-  inspectWorkZip,
+  BACKUP_FILE_EXTENSIONS,
+  inspectWorkBackup,
   WorkZipError,
   type WorkZipInspection,
 } from "../core/workZip";
+import { describeBackupEncoding } from "../core/backupEncoding";
+import { describeEpisodeNumbers } from "../core/episodeNumberCheck";
 import type { WorkInfo } from "../core/workInfoParse";
 import { DEFAULT_MANUSCRIPT_DIR, type WorkEntry } from "../models/types";
 import type { WorkLocation } from "../core/libraryHome";
@@ -44,11 +47,23 @@ import { withProgress } from "../views/progress";
 import { resolveNewWorkHome } from "./newWorkHome";
 
 /**
- * ZIPから作品を取り込む（設計書6.99）。
+ * バックアップから作品を取り込む（設計書6.99）。
  *
  * 作者の指示（2026-09-19）：「初心者が初めて使うところを魅せたい」。
- * カクヨム・なろうからダウンロードしたバックアップのZIPを渡せば、
- * 展開・作品フォルダーの用意・登録までが一度に済む。
+ * カクヨム・なろう・アルファポリスからダウンロードしたバックアップを
+ * 渡せば、展開・作品フォルダーの用意・登録までが一度に済む。
+ *
+ * ## 入れ物はサイトによって違う（0.69.10）
+ *
+ * カクヨム・なろうは **ZIP**、アルファポリスは **`.txt` 直**である。
+ * 読み分けるのは `core/workZip.ts` の `inspectWorkBackup` で、ここから先の
+ * 手順（置き場・題・展開・登録）は**どちらでも同じ1本**を通る。
+ *
+ * ## 同じ話・飛んだ話は、必ず言う（作者の指示、2026-09-19）
+ *
+ * 話番号の重複と欠番を、**確認の画面と完了のお知らせの両方**で伝える。
+ * **止めない**——番号が飛ぶのは普通にあることなので、知らせてから進む。
+ * 中身まで同じ話は1つだけ取り込み、**落としたことも言う**（黙って捨てない）。
  *
  * ## 作品名を打たせない
  *
@@ -150,21 +165,25 @@ export async function importWorkFromZip(
 }
 
 /**
- * ZIPを選ぶ。
+ * バックアップのファイルを選ぶ。
  *
  * **フォルダー選択（`pickFolder.ts`）とは分ける。** あちらはブラウザ版で
- * 「開いているフォルダーから選ぶ」へ切り替える必要があるが、ZIPは
+ * 「開いているフォルダーから選ぶ」へ切り替える必要があるが、バックアップは
  * ワークスペースの中にあるとはかぎらない。ダイアログが出せない環境では
  * 何も選ばれずに戻るだけで、原稿には触れない。
+ *
+ * **`.txt` も選べる**（0.69.10）。アルファポリスのバックアップは ZIP では
+ * なく `.txt` 直で降りてくるので、絞り込みを `zip` だけにしておくと、
+ * 作者のファイルが選ぶ画面にそもそも出てこない。
  */
 async function pickZipFile(): Promise<string | undefined> {
   const picked = await vscode.window.showOpenDialog({
     canSelectFiles: true,
     canSelectFolders: false,
     canSelectMany: false,
-    openLabel: "このZIPを取り込む",
-    title: "取り込むZIPファイルを選ぶ",
-    filters: { "ZIPファイル": ["zip"] },
+    openLabel: "これを取り込む",
+    title: "取り込むバックアップを選ぶ（ZIP／テキスト）",
+    filters: { "バックアップ（ZIP／テキスト）": [...BACKUP_FILE_EXTENSIONS] },
   });
   if (!picked || picked.length === 0) return undefined;
   return path.fromUri(picked[0]);
@@ -178,7 +197,7 @@ async function inspectPickedZip(
     const bytes = await withProgress("ZIPの中を見ています…", async () =>
       vscode.workspace.fs.readFile(path.toUri(zipPath))
     );
-    return inspectWorkZip(bytes, path.basename(zipPath));
+    return inspectWorkBackup(bytes, path.basename(zipPath));
   } catch (error) {
     if (error instanceof WorkZipError) {
       await vscode.window.showWarningMessage(error.message, {
@@ -249,6 +268,30 @@ async function confirmImport(
         "（.txt と .md だけを取り込みます）。"
     );
   }
+
+  /*
+    **重複と欠番は、展開する前に言う**（作者の指示、2026-09-19）。
+
+    取り込んだあとで「同じ話が2つ入っていました」と言われても、作者は
+    フォルダーを開いて自分で探すしかない。**止めはしない**——番号が飛ぶのは
+    普通にあることなので、知らせてから進む。
+  */
+  const notices = describeEpisodeNumbers(
+    inspection.episodeNumbers,
+    inspection.dropped
+  );
+  if (notices.length > 0) lines.push("", ...notices);
+
+  /*
+    **文字コードの助言も、展開する前に言う**（作者の指示、2026-09-19）。
+
+    ここに出るのがいちばん大事である——**取り込む前なら、作者は投稿サイトから
+    UTF-8 で書き出し直して来られる。** 取り込んだあとで知っても、置き換わった
+    文字はもう戻らない（`backupEncoding.ts` に実測の数字がある）。
+    **止めはしない**——半角の `?` は作者が自分で書いていることもある。
+  */
+  const encoding = describeBackupEncoding(inspection.encodingNotice, "before");
+  if (encoding.length > 0) lines.push("", ...encoding);
 
   return confirmRun("この内容で作品を作りますか？", "取り込む", {
     detail: lines.join("\n"),
@@ -597,6 +640,13 @@ async function reportResult(
     inspection.skipped.length > 0
       ? `原稿ではないファイル${inspection.skipped.length}件は入れていません。`
       : "",
+    // **確認の画面で言ったことを、済んだあとでもう一度言う**（作者の指示）。
+    // 確認は読み飛ばされることがあるが、重複と欠番はあとから直すものなので、
+    // 終わったところにも残しておかないと気づかれないまま埋もれる
+    ...describeEpisodeNumbers(inspection.episodeNumbers, inspection.dropped),
+    // **文字コードの助言も、済んだあとにもう一度言う**（作者の指示）。
+    // 取りやめの案内はしない——もう取り込んである（`describeBackupEncoding`）
+    ...describeBackupEncoding(inspection.encodingNotice, "after"),
   ].filter((note) => note !== "");
 
   const invite = readerStatsInvite(inspection.site, recorded);

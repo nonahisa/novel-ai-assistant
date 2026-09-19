@@ -1,6 +1,23 @@
 import { unzipSync } from "fflate";
+import {
+  buildCollectedTextFromAlphapolis,
+  parseAlphapolisBackup,
+} from "./alphapolisBackup";
+import {
+  checkBackupEncoding,
+  type BackupEncodingEntry,
+  type BackupEncodingReport,
+} from "./backupEncoding";
 import { detectBackupSite } from "./backupSite";
+import { parseCollectedFile, parseEpisodeTitle } from "./collectedFile";
 import { countEpisodeChars } from "./episodeCharCount";
+import {
+  checkEpisodeNumbers,
+  type EpisodeNumberEntry,
+  type EpisodeNumberReport,
+} from "./episodeNumberCheck";
+import { parseEpisodeFileName } from "./episodeParser";
+import { parseEpisodeMetadata } from "./metadataParser";
 import { parseNarouBackup, type NarouBackup } from "./narouBackup";
 import { decodeBytes, type Encoding } from "./textDecode";
 import { isWorkInfoFile } from "./workInfoFile";
@@ -9,9 +26,13 @@ import type { PostingSiteId } from "../models/posting";
 import type { Eol } from "../models/types";
 
 /**
- * ZIPの中を確かめて、作品として取り込める形にする（設計書6.99）。
+ * バックアップの中を確かめて、作品として取り込める形にする（設計書6.99）。
  *
- * 投稿サイトのバックアップは ZIP で降ってくる。作者の言葉（2026-09-19）：
+ * **入れ物はサイトによって違う**（0.69.10）。カクヨム・なろうは ZIP、
+ * **アルファポリスは `.txt` 直**（`alphapolisBackup.ts`）。入口は
+ * `inspectWorkBackup` の1つで、どちらも同じ `WorkZipInspection` を返す。
+ *
+ * 作者の言葉（2026-09-19）：
  * 「初心者が初めて使うところを魅せたい」——**ダウンロードしたものを、
  * そのまま渡せば作品になる**のが、いちばん最初の体験である。
  *
@@ -40,6 +61,14 @@ import type { Eol } from "../models/types";
 
 /** 取り込む拡張子。これ以外は書き出さない */
 const TEXT_EXTENSIONS = [".txt", ".md"];
+
+/**
+ * 取り込める入れ物の拡張子（作者にファイルを選ばせるときの絞り込み）。
+ *
+ * **アルファポリスは ZIP ではなく `.txt` 直で降りてくる**（0.69.10）。
+ * ここを `zip` だけにしておくと、選ぶ画面にそもそも出てこない。
+ */
+export const BACKUP_FILE_EXTENSIONS = ["zip", "txt", "md"];
 
 export class WorkZipError extends Error {
   constructor(
@@ -108,6 +137,152 @@ export interface WorkZipInspection {
   readonly title: string;
   /** 題をどこから採ったか。作者への説明に使う */
   readonly titleSource: "about" | "zipName";
+  /**
+   * 話番号の点検——重複と欠番（作者の指示、2026-09-19。0.69.10）。
+   *
+   * **全サイト共通である。** アルファポリスの実物で見つけた問題だが、
+   * なろうの合本にもカクヨムの複数ファイルにも同じ点検を掛ける。
+   * **止めない**——飛んでいることを知らせるだけで、取り込みは続く。
+   */
+  readonly episodeNumbers: EpisodeNumberReport;
+  /**
+   * 文字コードの点検（作者の指示、2026-09-19。`backupEncoding.ts`）。
+   *
+   * **サイトに紐づけない。** 見ているのは「Shift_JIS で読んだ」という事実
+   * だけなので、アルファポリスの `.txt` でも、なろう・カクヨムの ZIP に
+   * Shift_JIS のファイルが混じっていても、同じ助言が出る。
+   */
+  readonly encodingNotice: BackupEncodingReport;
+  /**
+   * 中身まで同じだったので取り込みから落とした話の名前。
+   *
+   * **落としたことは必ず伝える**（作者の指示）。黙って捨てると、
+   * 188話のはずが187話になっていても誰も気づけない。
+   */
+  readonly dropped: readonly string[];
+}
+
+/**
+ * 選ばれたファイルを読んで、取り込める形にする。**読むだけで、1文字も書かない。**
+ *
+ * **入れ物はサイトによって違う**（0.69.10）。
+ *
+ * - カクヨム・なろう：**ZIP**（`inspectWorkZip`）
+ * - アルファポリス：**`.txt` 直**（`inspectWorkTextBackup`）
+ *
+ * どちらの道も同じ `WorkZipInspection` を返すので、取り込む側
+ * （`features/importWorkFromZip.ts`）は入れ物の違いを知らなくてよい。
+ *
+ * @param bytes 選ばれたファイルそのもの
+ * @param fileName 拡張子まで含むファイル名（題の予備として使う）
+ */
+export function inspectWorkBackup(
+  bytes: Uint8Array,
+  fileName: string
+): WorkZipInspection {
+  return extensionOf(fileName) === ".zip"
+    ? inspectWorkZip(bytes, fileName)
+    : inspectWorkTextBackup(bytes, fileName);
+}
+
+/**
+ * `.txt` 直のバックアップ（アルファポリス）を読む（0.69.10）。
+ *
+ * ## 丸ごと復号してから判定する
+ *
+ * **バイト列を切らない。** 頭だけ切って文字コードを見分けると、最後の
+ * 1文字が欠けた並びになって判定が外れ、**全文が化ける**——0.69.9 で
+ * なろうの合本を読めなくした穴と同じ形である。作者のアルファポリスの
+ * 書き出しは **Shift_JIS 版と UTF-8 版の両方**があるので、ここは特に効く。
+ *
+ * ## 題はファイル名から採るしかない
+ *
+ * **作品情報の見出しが1つも無い**（いきなり本文から始まる）。題も作者名も
+ * あらすじも書かれていないので、`about.txt` に当たるものが無い。
+ */
+export function inspectWorkTextBackup(
+  bytes: Uint8Array,
+  fileName: string
+): WorkZipInspection {
+  const decoded = decodeBytes(bytes);
+  const backup = parseAlphapolisBackup(decoded.text);
+  if (!backup) {
+    throw new WorkZipError(
+      "このファイルは、取り込める形のバックアップではありませんでした。",
+      [
+        "アルファポリスの書き出し（章と話の見出しで区切られた .txt）として読めませんでした。",
+        "",
+        "カクヨム・小説家になろうのバックアップは ZIP のまま選んでください。",
+      ].join("\n")
+    );
+  }
+
+  /*
+    **既存の合本の形へ載せ替えてから置く**（`alphapolisBackup.ts`）。
+
+    製品の中で「1ファイルに全話」を扱えるのはあの形だけなので、生のまま
+    置くと **188話がまるごと1話に見える。** 文字参照（実物に152件）も
+    ここでほどけているので、`&#x2014;` が原稿に残ることもない。
+
+    **文字コードは UTF-8 にする。** 載せ替えで全文を作り直している以上、
+    Shift_JIS のまま書き戻す意味はない（作者の元ファイルには触らない）。
+  */
+  const collected = buildCollectedTextFromAlphapolis(backup);
+  const title = workTitleFromBackupFileName(fileName);
+  const file: ZipTextFile = {
+    // **原稿の名前も、ダウンロードの印（`(2)`）を落としたものにする。**
+    // 元の名前のままだと `…(2).txt` が本文フォルダーに並ぶ
+    name: `${title}.txt`,
+    bytes: new TextEncoder().encode(collected),
+    encoding: decoded.encoding,
+    isWorkInfo: false,
+    charCount: countEpisodeChars(collected, {
+      ext: ".txt",
+      excludeRuby: false,
+    }).net,
+  };
+
+  return {
+    files: [file],
+    episodeCount: backup.episodes.length,
+    // 全話が1ファイルに入っている（作者への説明が変わる）
+    collected: true,
+    totalChars: file.charCount,
+    skipped: [],
+    // **作品情報が無いので、下書きにできるものも無い**（AIに作らせない）
+    info: null,
+    narou: null,
+    site: detectBackupSite({
+      zipFileName: fileName,
+      workInfoText: null,
+      alphapolisHeader: true,
+    }),
+    title,
+    titleSource: "zipName",
+    /*
+      **点検は「落とす前」の並びに掛ける**（`allEpisodes`）。落としたあとを
+      見ると重複そのものが消えてしまい、「同じ話が2回入っています」と
+      言えなくなる——作者の指示は「**必ず言う**」である。
+    */
+    episodeNumbers: checkEpisodeNumbers(
+      backup.allEpisodes.map((episode) => ({
+        number: episode.number,
+        label: episode.label,
+        body: episode.body,
+      }))
+    ),
+    /*
+      **数えるのは復号したそのままの全文**（`decoded.text`）である。
+
+      載せ替えたあと（`collected`）ではなく元の全文を見るのは、作者が
+      ファイルを開いて確かめる相手が**ダウンロードしたそのファイル**
+      だからである。件数が食い違うと、確かめようがなくなる。
+    */
+    encodingNotice: checkBackupEncoding([
+      { encoding: decoded.encoding, text: decoded.text },
+    ]),
+    dropped: backup.dropped,
+  };
 }
 
 /**
@@ -220,7 +395,83 @@ export function inspectWorkZip(
     }),
     title,
     titleSource: fromAbout ? "about" : "zipName",
+    /*
+      **点検はアルファポリス専用にしない**（作者の指示、2026-09-19）。
+      なろうの合本にも、カクヨムの複数ファイルにも同じ点検を掛ける。
+
+      **ZIPからは落とさない。** 中身まで同じ重複が見つかっても、落とす
+      単位が「ファイル1つ」か「区切り1つぶん」になり、そこには本文以外
+      （カクヨムの【公開日時】、なろうの【リアクション】）が付いている
+      ——本文が同じでも、落とせば作者の持っていたものが減る。
+      **言うだけにして、捨てるのは作者に任せる。**
+    */
+    episodeNumbers: checkEpisodeNumbers(zipEpisodeEntries(files, narou)),
+    encodingNotice: checkBackupEncoding(encodingEntries(files)),
+    dropped: [],
   };
+}
+
+/**
+ * 文字コードの点検（`backupEncoding.ts`）に渡す形にする。
+ *
+ * **UTF-8 のファイルは文字へ直さない。** 数えるのは Shift_JIS で読んだ
+ * ぶんだけなので、合本（実物で2MB近い）をもう一度復号する意味がない。
+ *
+ * Shift_JIS だったファイルの `bytes` は既に UTF-8 へ直してあるが
+ * （`readTextEntry`）、**本文そのものは1文字も変わっていない**ので、
+ * ここで読み直しても件数は同じである。
+ */
+function encodingEntries(
+  files: readonly ZipTextFile[]
+): BackupEncodingEntry[] {
+  return files.map((file) => ({
+    encoding: file.encoding,
+    text: file.encoding === "shift_jis" ? decodeBytes(file.bytes).text : "",
+  }));
+}
+
+/**
+ * ZIPの中身を、話番号の点検にかけられる形にする。
+ *
+ * **合本（なろう）と、話ごとのファイル（カクヨム）で読み方が違う。**
+ * 合本は中の区切りが1話ぶんで、ファイルは1つしか無い——ファイルを
+ * 数えると「1話」になってしまうのと同じ理由である（0.69.9）。
+ */
+function zipEpisodeEntries(
+  files: readonly ZipTextFile[],
+  narou: NarouBackup | null
+): EpisodeNumberEntry[] {
+  if (narou) {
+    // 合本は1つしか無いので、読むのもその1つだけでよい
+    const collectedFile = files.find((file) => !file.isWorkInfo);
+    const episodes = collectedFile
+      ? parseCollectedFile(decodeBytes(collectedFile.bytes).text)
+      : null;
+    if (episodes) {
+      return episodes.map((episode) => ({
+        number: episode.chapter,
+        label: episode.title ?? `${episode.order}番目の話`,
+        body: episode.body,
+      }));
+    }
+  }
+
+  return files
+    .filter((file) => !file.isWorkInfo)
+    .map((file) => {
+      const text = decodeBytes(file.bytes).text;
+      const metadata = parseEpisodeMetadata(text);
+      const fromTitle = parseEpisodeTitle(metadata.title);
+      return {
+        // 題に話数が無ければファイル名から採る（`episode_0012.txt`）。
+        // **どちらからも読めなければ null**——並び順では埋めない
+        number:
+          fromTitle.chapter ??
+          parseEpisodeFileName(file.name.replace(/^.*\//, "")).chapterStart,
+        label: metadata.title ?? file.name,
+        body: metadata.hasMetadata ? metadata.body : text,
+      };
+    });
 }
 
 /**
@@ -281,11 +532,31 @@ export function isUnsafeZipEntryName(rawName: string): boolean {
  * 取り出した日を付ける。**日付は作品名ではない**ので落とす。
  */
 export function workTitleFromZipFileName(fileName: string): string {
+  return workTitleFromBackupFileName(fileName);
+}
+
+/**
+ * バックアップのファイル名から作品名を採る（ZIPでも `.txt` でも同じ）。
+ *
+ * **アルファポリスは、ここが唯一の題の出どころである**——ファイルの中に
+ * 作品情報の見出しが1つも無い（`alphapolisBackup.ts`）。
+ *
+ * 落とすもの：
+ *
+ * - 拡張子（`.zip` / `.txt` / `.md`）
+ * - 末尾の日付（カクヨムの `作品名_20260919.zip`）
+ * - **末尾の `(2)`**（同じファイルを2度ダウンロードするとブラウザが付ける印。
+ *   作者の実物が `… (2).txt` だった）
+ */
+export function workTitleFromBackupFileName(fileName: string): string {
   const base = fileName
-    .replace(/\.zip$/i, "")
     // 入れ子のフォルダーごと渡されても、最後の名前だけを見る
     .replace(/^.*[/\\]/, "")
-    .replace(/[_-]\d{8}$/, "");
+    .replace(/\.(zip|txt|md)$/i, "")
+    .replace(/[_-]\d{8}$/, "")
+    // **半角の丸括弧に入った数字だけを落とす。** 作者が題に付けた
+    // 「（上）」「（2）」は全角なので残る——題の一部を削らないための線引き
+    .replace(/\s*\(\d{1,3}\)$/, "");
   return sanitizeWorkFolderName(base) || "取り込んだ作品";
 }
 

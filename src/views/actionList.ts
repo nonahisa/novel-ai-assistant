@@ -350,7 +350,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.importWorkFromZip",
-            label: "ZIPから作品を取り込む",
+            label: "バックアップから作品を取り込む",
             icon: "file-zip",
             requiresWork: false,
             detail:

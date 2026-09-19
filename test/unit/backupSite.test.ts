@@ -93,6 +93,33 @@ describe("バックアップの出どころを見分ける", () => {
     ).toBeNull();
   });
 
+  it("アルファポリスの .txt の形が読めれば、アルファポリスと読む", () => {
+    expect(
+      detectBackupSite({
+        zipFileName: "転生受験生の教科書チート生活 (2).txt",
+        workInfoText: null,
+        alphapolisHeader: true,
+      })
+    ).toBe("alphapolis");
+  });
+
+  it("アルファポリスの手がかりと他サイトの手がかりが揃ったら、どちらとも書かない", () => {
+    expect(
+      detectBackupSite({
+        zipFileName: "N1111IR.zip",
+        workInfoText: null,
+        alphapolisHeader: true,
+      })
+    ).toBeNull();
+    expect(
+      detectBackupSite({
+        zipFileName: "星を継ぐ者たち.zip",
+        workInfoText: KAKUYOMU_ABOUT,
+        alphapolisHeader: true,
+      })
+    ).toBeNull();
+  });
+
   it("Nコードに見えるだけの題を、なろうと読み違えない", () => {
     // 「N」で始まって数字が続くだけの題（Nコードは N＋4桁＋英字2文字）
     expect(

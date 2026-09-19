@@ -50,7 +50,7 @@ const NAROU_LABELS = ["Nコード", "ｎコード", "ncode", "NCODE", "Ncode"];
 const NCODE = /^[Nn]\d{4}[A-Za-z]{2}$/;
 
 export interface BackupSiteClues {
-  /** ZIPのファイル名（拡張子つき） */
+  /** ZIPのファイル名（拡張子つき）。アルファポリスは `.txt` の名前が入る */
   readonly zipFileName: string;
   /** 作品情報（`about.txt`）の中身。入っていなければ null */
   readonly workInfoText: string | null;
@@ -61,6 +61,14 @@ export interface BackupSiteClues {
    * 作品情報の欄だけを見ていると見分けられない。
    */
   readonly narouHeader?: boolean;
+  /**
+   * アルファポリスのバックアップとして読めたか（`alphapolisBackup.ts`）。
+   *
+   * アルファポリスは**作品情報の見出しを1つも持たない**（いきなり本文から
+   * 始まる `.txt` 直）。欄が無いので、ここへ渡せる手がかりは「あの形として
+   * 読めたか」しかない——**読めたことそのものが手がかり**である。
+   */
+  readonly alphapolisHeader?: boolean;
 }
 
 /**
@@ -73,18 +81,22 @@ export function detectBackupSite(
     ? parseLabeledBlocks(clues.workInfoText).map((block) => block.label)
     : [];
 
-  const kakuyomu = labels.some((label) =>
-    KAKUYOMU_ONLY_LABELS.includes(label)
-  );
-  const narou =
+  const found: PostingSiteId[] = [];
+  if (labels.some((label) => KAKUYOMU_ONLY_LABELS.includes(label))) {
+    found.push("kakuyomu");
+  }
+  if (
     clues.narouHeader === true ||
     labels.some((label) => NAROU_LABELS.includes(label)) ||
-    NCODE.test(zipBaseName(clues.zipFileName));
+    NCODE.test(zipBaseName(clues.zipFileName))
+  ) {
+    found.push("narou");
+  }
+  if (clues.alphapolisHeader === true) found.push("alphapolis");
 
-  // **両方の手がかりが出たら、どちらとも言わない。** 片方を優先する決まりを
+  // **複数の手がかりが出たら、どれとも言わない。** 片方を優先する決まりを
   // 置くと、そちらが常に勝つ——混ざった台帳はあとから分けられない
-  if (kakuyomu === narou) return null;
-  return kakuyomu ? "kakuyomu" : "narou";
+  return found.length === 1 ? found[0] : null;
 }
 
 /**

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { zipSync } from "fflate";
+import iconv from "iconv-lite";
 import { FileSystemError, Uri, window, workspace } from "vscode";
 import { importWorkFromZip } from "../../src/features/importWorkFromZip";
 // **期待する場所は、製品と同じ組み立て方で作る。** 区切り文字を手で
@@ -606,5 +607,174 @@ describe("ZIPから作品を取り込む", () => {
     expect(warnings.join("\n")).toContain("外を指すファイル名");
     expect(registered).toBe(0);
     expect(fs.placed()).toEqual([ZIP_PATH]);
+  });
+});
+
+/**
+ * アルファポリスのバックアップ（`.txt` 直）の取り込み（0.69.10）。
+ *
+ * **入れ物が ZIP ではない。** 作品情報の見出しも1つも無いので、題は
+ * ファイル名から採るしかない。ここで見るのは**どこへ何を置いたか**と、
+ * **重複・欠番を作者へ言っているか**（作者の指示、2026-09-19）である。
+ */
+const ALPHAPOLIS_PATH = "c:/Downloads/転生受験生の教科書チート生活 (2).txt";
+const ALPHAPOLIS_TITLE = "転生受験生の教科書チート生活";
+const ALPHAPOLIS_FOLDER = paths.join(LIBRARY, ALPHAPOLIS_TITLE);
+
+/** 実物と同じ形（章題→話の見出し→本文。重複1組と欠番1つを入れてある） */
+const ALPHAPOLIS_TEXT = [
+  "第一章『死の谷』",
+  "１話　転生",
+  "",
+  "　化学の先生が、無駄話をしていた&#x2014;&#x2014;。",
+  "",
+  "２話　てこの原理と救助",
+  "",
+  "　棒を渡して、支点を作る。",
+  "",
+  "４話　筋肉と電気",
+  "",
+  "　筋肉は電気で動く。",
+  "",
+  "４話　筋肉と電気",
+  "",
+  "　筋肉は電気で動く。",
+  "",
+].join("\r\n");
+
+describe("アルファポリスのバックアップ（.txt）から取り込む", () => {
+  afterEach(() => {
+    window.showOpenDialog = original.showOpenDialog;
+    window.showInformationMessage = original.showInformationMessage;
+    window.showWarningMessage = original.showWarningMessage;
+    workspace.fs = original.fs;
+  });
+
+  it("題をファイル名から採り、原稿を合本として本文フォルダーへ置く", async () => {
+    const fs = new MemoryFs({ [ALPHAPOLIS_PATH]: utf8(ALPHAPOLIS_TEXT) });
+    fs.install();
+    stubWindow(ALPHAPOLIS_PATH);
+    const registered: Array<{ folderPath: string; title: string }> = [];
+
+    await importWorkFromZip(WORKS, async (folderPath, title) => {
+      registered.push({ folderPath, title });
+      return workEntry(ALPHAPOLIS_FOLDER, ALPHAPOLIS_TITLE);
+    });
+
+    // 重複ダウンロードの印（(2)）は題にもフォルダー名にも残さない
+    expect(registered).toEqual([
+      { folderPath: ALPHAPOLIS_FOLDER, title: ALPHAPOLIS_TITLE },
+    ]);
+
+    const manuscript = paths.join(
+      ALPHAPOLIS_FOLDER,
+      "本文",
+      `${ALPHAPOLIS_TITLE}.txt`
+    );
+    expect(fs.placed()).toContain(manuscript);
+
+    const text = fs.text(manuscript);
+    // 文字参照はほどけている（`&#x2014;` が原稿に残らない）
+    expect(text).toContain("無駄話をしていた——。");
+    expect(/&#?[0-9A-Za-z]+;/.test(text)).toBe(false);
+    // 既存の合本の形に載っている（製品の他の機能が話を見つけられる）
+    expect(text).toContain("エピソード1開始");
+    expect(text).toContain("【第1章】");
+  });
+
+  it("重複と欠番を、確認の画面と完了のお知らせの両方で言う", async () => {
+    const fs = new MemoryFs({ [ALPHAPOLIS_PATH]: utf8(ALPHAPOLIS_TEXT) });
+    fs.install();
+    stubWindow(ALPHAPOLIS_PATH);
+
+    await importWorkFromZip(WORKS, async () =>
+      workEntry(ALPHAPOLIS_FOLDER, ALPHAPOLIS_TITLE)
+    );
+
+    // 確認の画面（モーダルの小さい字）
+    const confirm = notices[0];
+    expect(confirm.detail).toContain("4話");
+    expect(confirm.detail).toContain("中身まで同じ");
+    expect(confirm.detail).toContain("3話が見当たりません");
+
+    // 完了のお知らせ。**読み飛ばされても、もう一度言う**
+    const done = notices[notices.length - 1];
+    expect(done.message).toContain("中身まで同じ");
+    expect(done.message).toContain("1つだけ取り込みます");
+    expect(done.message).toContain("3話が見当たりません");
+    // 止めない——3話を取り込み終えている
+    expect(done.message).toContain("3話を取り込みました");
+  });
+
+  /*
+    **文字コードの助言は、製品でも出す**（作者の指示、2026-09-19）。
+
+    実物で測ると、同じ作品の Shift_JIS 版には半角 `?` が9個、UTF-8 版には
+    2個あった——差の7個は `①②③④⑤⑥` と `•`、**Shift_JIS に無い文字**である。
+    取り込む前に言えば、作者は取りやめて UTF-8 で書き出し直して来られる。
+  */
+  it("Shift_JIS で読んだら、確認の画面と完了のお知らせの両方で言う", async () => {
+    const sjis = new Uint8Array(
+      iconv.encode(
+        ALPHAPOLIS_TEXT.replace(
+          "　棒を渡して、支点を作る。",
+          "　棒を渡して、支点を作る? いや、作れる?"
+        ),
+        "shift_jis"
+      )
+    );
+    const fs = new MemoryFs({ [ALPHAPOLIS_PATH]: sjis });
+    fs.install();
+    stubWindow(ALPHAPOLIS_PATH);
+
+    await importWorkFromZip(WORKS, async () =>
+      workEntry(ALPHAPOLIS_FOLDER, ALPHAPOLIS_TITLE)
+    );
+
+    // 確認の画面（取り込む前）。**ここに出るのがいちばん大事**
+    const confirm = notices[0];
+    expect(confirm.detail).toContain("Shift_JIS");
+    expect(confirm.detail).toContain("UTF-8");
+    expect(confirm.detail).toContain("半角の ? が2個");
+    expect(confirm.detail).toContain("取りやめ");
+
+    // 完了のお知らせ。読み飛ばされても、もう一度言う
+    const done = notices[notices.length - 1];
+    expect(done.message).toContain("Shift_JIS");
+    expect(done.message).toContain("UTF-8");
+  });
+
+  it("UTF-8 で読めたときは、文字コードの話をしない", async () => {
+    const fs = new MemoryFs({ [ALPHAPOLIS_PATH]: utf8(ALPHAPOLIS_TEXT) });
+    fs.install();
+    stubWindow(ALPHAPOLIS_PATH);
+
+    await importWorkFromZip(WORKS, async () =>
+      workEntry(ALPHAPOLIS_FOLDER, ALPHAPOLIS_TITLE)
+    );
+
+    const said = notices
+      .map((entry) => `${entry.message}\n${entry.detail}`)
+      .join("\n");
+    expect(said).not.toContain("Shift_JIS");
+    expect(said).not.toContain("UTF-8");
+  });
+
+  it("アルファポリスの形でない .txt は、1件も置かずに断る", async () => {
+    const fs = new MemoryFs({
+      [ALPHAPOLIS_PATH]: utf8("　夜が更けていく。\n　少年は机に向かった。\n"),
+    });
+    fs.install();
+    stubWindow(ALPHAPOLIS_PATH);
+    let registered = 0;
+
+    await importWorkFromZip(WORKS, async () => {
+      registered += 1;
+      return undefined;
+    });
+
+    expect(warnings.join("\n")).toContain("取り込める形のバックアップ");
+    expect(registered).toBe(0);
+    expect(fs.placed()).toEqual([ALPHAPOLIS_PATH]);
   });
 });
