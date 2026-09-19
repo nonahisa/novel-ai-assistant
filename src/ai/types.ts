@@ -338,6 +338,27 @@ export function isApiKeyProvider(
   );
 }
 
+/**
+ * パラメータ数の表記（"8.0B"・"270M" など）を、**Bの数**に直す。
+ * 読み取れなければ undefined。
+ *
+ * **写しを作らないためにここへ出した**（0.70.8）。ティアの推定
+ * （`inferTier`）と、矛盾検知の抑制の切り替え（`ai/capability.ts`）が
+ * 同じ表記を読む——2か所で別々に書くと、片方だけが新しい表記
+ * （"26.4B" のような書き方）に付いていけなくなる。
+ */
+export function parameterSizeInBillions(
+  parameterSize: string | null | undefined
+): number | undefined {
+  if (!parameterSize) return undefined;
+  const m = parameterSize.match(/([\d.]+)\s*([BM])/i);
+  if (!m) return undefined;
+  const value = parseFloat(m[1]);
+  // "." だけのような表記では NaN になる。**0と混ぜない**
+  if (!Number.isFinite(value)) return undefined;
+  return m[2].toUpperCase() === "B" ? value : value / 1000;
+}
+
 /** パラメータ数からティアを推定する */
 export function inferTier(
   parameterSize: string | null,
@@ -346,12 +367,9 @@ export function inferTier(
   // クラウドの主力モデルは high 扱い
   if (providerId !== "ollama") return "high";
 
-
-  if (!parameterSize) return "light";
-  const m = parameterSize.match(/([\d.]+)\s*([BM])/i);
-  if (!m) return "light";
-  const value = parseFloat(m[1]);
-  const billions = m[2].toUpperCase() === "B" ? value : value / 1000;
+  const billions = parameterSizeInBillions(parameterSize);
+  // **取れないものを大きいとみなさない**（これまでどおり light へ落とす）
+  if (billions === undefined) return "light";
 
   // ローカルモデルは同じパラメータ数でもクラウドより控えめに見積もる
   if (billions >= 27) return "high";

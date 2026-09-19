@@ -207,7 +207,7 @@ export async function checkDeviations(
     // 印が空になるので、`high` のモデルの鍵はこれまでと同じままになる
     promptVersion:
       `${DEVIATION_CHECK_VERSION}:` +
-      `${capabilityCacheTag(capability)}${hashText(plotText).slice(0, 16)}`,
+      `${capabilityCacheTag(capability, "deviation")}${hashText(plotText).slice(0, 16)}`,
     providerId: resolved.provider.id,
     model: resolved.model,
   };

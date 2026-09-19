@@ -63,6 +63,15 @@ const MARKDOWN_ALLOWED = new Set([
   "src/prompts/workChat.ts",
   "src/prompts/settingsEnrich.ts",
   "src/prompts/chapterPropose.ts",
+  /*
+    矛盾検知のプロンプト（P-12）。**画面に出す文言は1つも持たない。**
+
+    原則1だけを1行の定数に切り出してあるため（抑制のあるなしで差し替える。
+    設計書6.10.8）、ほかのプロンプトのように「複数行の文字列」として
+    この網をすり抜けられない。**中身はAIへ渡すプロンプト本文**なので、
+    強調はそのまま「ここは外せない」という指示として効く。
+  */
+  "src/prompts/contradictionCheck.ts",
   // 記録ファイル（人が読む前提のログ）
   "src/core/logger.ts",
   // 診断の結果をMarkdownの文書として開く（作者がそのまま貼れるように）

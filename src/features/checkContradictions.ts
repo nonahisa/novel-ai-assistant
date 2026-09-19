@@ -63,6 +63,7 @@ import {
   CONTRADICTION_CATEGORIES,
   CONTRADICTION_CHECK_SCHEMA,
   CONTRADICTION_CHECK_SYSTEM_PROMPT,
+  CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT,
   CONTRADICTION_CHECK_TEMPERATURE,
   CONTRADICTION_CHECK_VERSION,
   LIGHT_CATEGORIES,
@@ -225,10 +226,25 @@ export async function checkContradictions(
   // 地力の足りないモデルには観点を絞って渡す（設計書6.28）。
   // **鍵より先に決める。** 観点が変われば答えも変わるので、
   // 鍵にも反映しなければ古い結果が再利用される
-  const capability = capabilityProfile({
+  //
+  // **パラメータ数も渡す**（設計書6.10.8）。矛盾検知の抑制は、観点の絞りとは
+  // 別の境目（20B）で決まる——ティアでは代わりにならない
+  const capabilityInput = {
     tier,
     providerId: resolved.provider.id,
-  });
+    parameterSize: info.parameterSize,
+  };
+  const capability = capabilityProfile(capabilityInput);
+  /*
+    **小さいモデルには、抑制を残した版を送る**（設計書6.10.8）。
+
+    1.6 でゆるめて得をしたのは 26b 以上だけで、`e4b` と `12b` では
+    当たりが増えないまま誤検出だけ増えた。**「疑わしい」の線引きは、
+    モデルの大きさと一対**なので、大きさで送り分ける。
+  */
+  const systemPrompt = capability.suppressUncertainContradictions
+    ? CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT
+    : CONTRADICTION_CHECK_SYSTEM_PROMPT;
   // 地力の足りないモデルでは観点を絞る。1回の負荷を下げないと検出漏れが増える
   const categories: readonly ContradictionCategory[] =
     capability.narrowContradictionCategories
@@ -256,7 +272,9 @@ export async function checkContradictions(
   // 測れない**。測れる分（指示＋世界観の見込み）をここで引き、測れない分は
   // 送る直前の関所（`ai/contextGuard.ts`）と、逃げ道（`chunkRetry.ts`）が受ける
   const overheadChars =
-    CONTRADICTION_CHECK_SYSTEM_PROMPT.length +
+    // **実際に送るほうで測る。** 抑制を残した版は少し短いので、
+    // 送らない版の長さで見込むと固定費が実際とずれる
+    systemPrompt.length +
     buildContradictionCheckPrompt({
       chapterLabel: "",
       chunkTextWithLineNumbers: "",
@@ -365,7 +383,7 @@ export async function checkContradictions(
     // 同じままになる（有料AIで処理済みのキャッシュを飛ばさない）
     promptVersion:
       `${CONTRADICTION_CHECK_VERSION}:` +
-      `${capabilityCacheTag(capability)}${material.fingerprint}`,
+      `${capabilityCacheTag(capability, "contradiction")}${material.fingerprint}`,
     providerId: resolved.provider.id,
     model: resolved.model,
   };
@@ -427,6 +445,15 @@ export async function checkContradictions(
         ? `\nこのモデルでは、見る観点を7つから3つ（人物・状態・時系列）へ絞ります。\n` +
           "一度にたくさん見せると、かえって見落としが増えるためです。"
         : "",
+      // **抑制の強さを変えたことも黙らない**（設計書6.10.8）。
+      // 大きいモデルでは指摘が増え、小さいモデルではこれまでどおりになる。
+      // **どちらも「モデルのせいで結果が違う」ので、理由を先に出す**
+      capability.suppressUncertainContradictions
+        ? "\nこのモデルでは、確信の持てない箇所は指摘しません。\n" +
+          "小さいモデルで疑わしい箇所まで挙げさせると、当たりは増えずに\n" +
+          "見当違いの指摘だけが増えるためです（実測）。"
+        : "\nこのモデルでは、確信が持てない箇所も挙げます。\n" +
+          "どちらが正しいかは作者が決めるので、黙って見逃すより出します。",
       // **観点を絞ると鍵が変わり、キャッシュが総入れ替えになる。**
       // 何も変えていないのに全件が対象になると、作者は不具合だと思う
       pending.length === chunks.length && chunks.length > 1
@@ -456,7 +483,7 @@ export async function checkContradictions(
 
   logStep(
     `矛盾検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
-      `${resolved.model}（${describeCapability({ tier, providerId: resolved.provider.id }, capability)}） / ` +
+      `${resolved.model}（${describeCapability(capabilityInput, capability)}） / ` +
       `${chunks.length}チャンク / ${chunkNote} / ` +
       `v${CONTRADICTION_CHECK_VERSION}`
   );
@@ -659,7 +686,7 @@ export async function checkContradictions(
             });
 
             const response = await provider.generate({
-              systemPrompt: CONTRADICTION_CHECK_SYSTEM_PROMPT,
+              systemPrompt,
               userPrompt,
               model,
               // 事実の突き合わせなので揺らさない

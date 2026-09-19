@@ -220,7 +220,9 @@ const OPTIONS_TABLE =
   "foreshadow: mode（detect＝配置を拾う〈既定〉／resolve＝回収を見る）。" +
   "contradiction: categories（light〈既定〉／all／区分名そのもの。" +
   "「状態」「人物,時系列」のように1つでも並びでも指せる）・" +
-  "carryOver（前の話を何話ぶん引き継いで人物を探すか。0〈既定〉〜5）。" +
+  "carryOver（前の話を何話ぶん引き継いで人物を探すか。0〈既定〉〜5）・" +
+  "suppression（loose〈既定〉＝疑わしい箇所も挙げさせる／" +
+  "strict＝確信の持てないものは挙げさせない）。" +
   "notation: group※（novel.detect が返した組の1件）・limit（detect の上限）。" +
   "synopsis: needsSubtitle。" +
   "episodePlot: plotPath※（単話プロットの相対パス）・chapterLabel。" +
@@ -510,6 +512,14 @@ const CATEGORIES_SCHEMA = z.union([
  * `carryOverOf`（`tools/contradiction.ts`）が見る。
  */
 const CARRY_OVER_SCHEMA = z.union([z.number(), z.string()]);
+
+/**
+ * 抑制の強さ（設計書6.10.8）。**ここも形だけを見る。**
+ *
+ * 選べる名前（loose・strict）の表は `suppressionOf`
+ * （`tools/contradiction.ts`）が持っている。**写しを作らない。**
+ */
+const SUPPRESSION_SCHEMA = z.string();
 const MODE_SCHEMA: z.ZodType<ForeshadowMode> = z.enum(["detect", "resolve"]);
 
 /**
@@ -571,6 +581,7 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
         ...chunkArgs(input),
         categories: option(input, "categories", CATEGORIES_SCHEMA),
         carryOver: option(input, "carryOver", CARRY_OVER_SCHEMA),
+        suppression: option(input, "suppression", SUPPRESSION_SCHEMA),
       }),
     validate: (input) =>
       contradictionValidate({
@@ -583,6 +594,7 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
         ...chunkArgs(input),
         categories: option(input, "categories", CATEGORIES_SCHEMA),
         carryOver: option(input, "carryOver", CARRY_OVER_SCHEMA),
+        suppression: option(input, "suppression", SUPPRESSION_SCHEMA),
         ...runnerArgs(input),
       }),
   },

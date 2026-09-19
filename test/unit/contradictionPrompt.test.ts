@@ -4,6 +4,7 @@ import {
   CONTRADICTION_CATEGORIES,
   CONTRADICTION_CHECK_SCHEMA,
   CONTRADICTION_CHECK_SYSTEM_PROMPT,
+  CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT,
   LIGHT_CATEGORIES,
 } from "../../src/prompts/contradictionCheck";
 import { buildProposalPanelHtml } from "../../src/views/proposalPanelHtml";
@@ -108,6 +109,98 @@ describe("プロンプト", () => {
     expect(CONTRADICTION_CHECK_SYSTEM_PROMPT).toContain(
       "どちらが正しいかを決めるのは作者である"
     );
+  });
+});
+
+/*
+  抑制を残した版（設計書6.10.8）。**小さいモデルへ送る。**
+
+  実測では `gemma4:e4b` が 0/4 のまま誤検出だけ増え、`12b` は罠に掛かった。
+  ゆるめて得をしたのは 26b 以上だけだったので、それ未満には 1.5 の抑制を残す。
+*/
+describe("抑制を残した版（6.10.8）", () => {
+  test("原則1だけが違う", () => {
+    // **2つを別々に書き下ろすと、片方を直したときにもう片方が取り残される。**
+    // 実装は `.replace()` で導いているので、ここでは「差が原則1の行だけ」で
+    // あることを、行ごとに突き合わせて確かめる
+    const loose = CONTRADICTION_CHECK_SYSTEM_PROMPT.split("\n");
+    const strict = CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT.split("\n");
+
+    // ゆるめた版の原則1は2行、抑制版は1行
+    expect(loose.slice(0, 3)).toEqual(strict.slice(0, 3));
+    expect(loose[3]).not.toBe(strict[3]);
+    // 原則2以降（＝原則1の次の行から末尾まで）は1文字も違わない
+    expect(loose.slice(5)).toEqual(strict.slice(4));
+  });
+
+  test("抑制版は 1.5 の文言に戻っている", () => {
+    expect(CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT).toContain(
+      "確信が持てないものは指摘しないこと"
+    );
+    expect(CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT).toContain(
+      "見逃しよりも誤検出の方が作者の作業を妨げる"
+    );
+    // ゆるめた側の言い回しは残っていない
+    expect(CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT).not.toContain(
+      "疑わしい箇所は挙げること"
+    );
+    expect(CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT).not.toContain(
+      "どちらが正しいかを決めるのは作者である"
+    );
+  });
+
+  test("導けていれば、2つは必ず違う", () => {
+    // `.replace()` が空振りすると、黙って同じ文字列になる
+    expect(CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT).not.toBe(
+      CONTRADICTION_CHECK_SYSTEM_PROMPT
+    );
+  });
+});
+
+/*
+  MCP から抑制を選ぶ（設計書6.10.8）。
+
+  **既定はゆるめた版である。** 製品はモデルの大きさから自動で決めるが、
+  MCP は外部AIが自分でモデルを選ぶので、こちらから大きさを当てにいかない。
+*/
+describe("MCP の options.suppression", () => {
+  const folder = "test/fixtures/seeded/contradiction";
+  const file = "本文/004_ギプスが外れた日.txt";
+
+  function promptFor(suppression?: string) {
+    return contradictionPrompt({
+      folder,
+      filePath: file,
+      numCtx: 16384,
+      suppression,
+    });
+  }
+
+  test("既定はゆるめた版（版に印は付かない）", () => {
+    const built = promptFor();
+
+    expect(built.systemPrompt).toBe(CONTRADICTION_CHECK_SYSTEM_PROMPT);
+    expect(built.promptVersion).toBe("1.6");
+    // 空文字は打ち間違いとみなさず、既定へ倒す
+    expect(promptFor("")).toEqual(built);
+  });
+
+  test("strict で抑制版になり、版にも出る", () => {
+    // **測り直す人が、どちらで測ったのか分かるように**版へ出す
+    const built = promptFor("strict");
+
+    expect(built.systemPrompt).toBe(CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT);
+    expect(built.promptVersion).toBe("1.6:strict");
+  });
+
+  test("loose と明示しても、既定と同じ", () => {
+    expect(promptFor("loose")).toEqual(promptFor());
+  });
+
+  test("知らない値は断る", () => {
+    // 丸めると、打ち間違いに気づかないまま「その抑制で測った」記録が残る
+    expect(() => promptFor("ゆるめ")).toThrow(/抑制/);
+    expect(() => promptFor("strictly")).toThrow(/loose/);
   });
 });
 

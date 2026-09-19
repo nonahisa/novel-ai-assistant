@@ -2,6 +2,7 @@ import {
   CONTRADICTION_CATEGORIES,
   CONTRADICTION_CHECK_SCHEMA,
   CONTRADICTION_CHECK_SYSTEM_PROMPT,
+  CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT,
   CONTRADICTION_CHECK_TEMPERATURE,
   CONTRADICTION_CHECK_VERSION,
   LIGHT_CATEGORIES,
@@ -221,6 +222,51 @@ function carryOverOf(choice: number | string | undefined): number {
   return value;
 }
 
+/**
+ * 抑制の強さ（設計書6.10.8）。`loose`＝ゆるめた 1.6 の既定、
+ * `strict`＝1.5 までの抑制を残した版。
+ */
+type Suppression = "loose" | "strict";
+
+/**
+ * 抑制の強さを決める。
+ *
+ * **MCP の既定はゆるめた版である。** 製品はモデルの大きさから自動で決める
+ * （`ai/capability.ts`）が、**MCP は外部AIが自分でモデルを選ぶ**ので、
+ * こちらから大きさを当てにいかない。呼ぶ側に選ばせる。
+ *
+ * **知らない値は黙って丸めない**（`categoriesOf`・`carryOverOf` と同じ）。
+ * 丸めると、打ち間違いに気づかないまま「その抑制で測った」記録が残る。
+ */
+function suppressionOf(choice: string | undefined): Suppression {
+  if (choice === undefined) return "loose";
+  const name = String(choice).trim();
+  // 空文字だけを渡されたときは、黙って既定へ倒す（打ち間違いで止めない）
+  if (name === "") return "loose";
+  if (name === "loose" || name === "strict") return name;
+  throw new McpToolError(
+    `知らない抑制の強さです: ${name}` +
+      "（選べるのは loose＝疑わしい箇所も挙げさせる・strict＝確信の持てないものは挙げさせない）"
+  );
+}
+
+/**
+ * 選んだ抑制を、版に出す（`promptVersionWithCarryOver` と同じ作法）。
+ *
+ * **測り直す人が、どちらで測ったのか分かるようにする。** 同じ 1.6 でも
+ * 送っている原則1が違うので、版が同じままだと記録を並べたときに
+ * 見分けられない。
+ *
+ * **ゆるめた側には印を付けない**——新しい既定なので、`1.6` はゆるめた版を
+ * 指す（キャッシュの鍵の印を `capabilityCacheTag` がそう決めているのと同じ）。
+ */
+function promptVersionWithSuppression(
+  promptVersion: string,
+  suppression: Suppression
+): string {
+  return suppression === "strict" ? `${promptVersion}:strict` : promptVersion;
+}
+
 /** 空の引き継ぎ。**同じ形を返す**（呼ぶ側に分岐を増やさない） */
 const NO_CARRY_OVER: CarryOverResult = { chapters: [], text: "" };
 
@@ -360,6 +406,14 @@ export interface ContradictionChunkPrompt {
 export interface ContradictionPromptInput extends ContradictionMaterialInput {
   /** `light`（既定）・`all`・区分名（1つ／並び／区切り文字つなぎ）。`categoriesOf` */
   categories?: string | readonly string[];
+  /**
+   * 抑制の強さ（設計書6.10.8）。`loose`（既定）・`strict`。`suppressionOf`
+   *
+   * **文字列で受ける**（`carryOver` と同じ理由）。測定の台本
+   * （`scripts/measure.mjs`）は `--option suppression=strict` の値を
+   * 文字列のまま渡す。
+   */
+  suppression?: string;
 }
 
 export function contradictionPrompt(input: ContradictionPromptInput): {
@@ -381,6 +435,7 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
     input.numCtx
   );
   const categories = categoriesOf(input.categories);
+  const suppression = suppressionOf(input.suppression);
   const carryOver = carryOverReader(input.folder, carryOverOf(input.carryOver));
 
   const prompts: ContradictionChunkPrompt[] = [];
@@ -421,8 +476,14 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
   }
 
   return {
-    promptVersion: CONTRADICTION_CHECK_VERSION,
-    systemPrompt: CONTRADICTION_CHECK_SYSTEM_PROMPT,
+    promptVersion: promptVersionWithSuppression(
+      CONTRADICTION_CHECK_VERSION,
+      suppression
+    ),
+    systemPrompt:
+      suppression === "strict"
+        ? CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT
+        : CONTRADICTION_CHECK_SYSTEM_PROMPT,
     schema: CONTRADICTION_CHECK_SCHEMA,
     temperature: CONTRADICTION_CHECK_TEMPERATURE,
     categories,
