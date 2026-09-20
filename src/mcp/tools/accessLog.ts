@@ -62,11 +62,14 @@ export function exposureOf(
     （設計書6.87.15 の柱2の2）で、こちらから本文も資料も送らない。
     `novel.propose`（設計書6.87.16）も**原稿は1文字も外へ出ない**——
     呼び出し元が持ち込んだ内容を置くだけで、こちらから本文も資料も返さない。
+    `novel.notice`（0.72.0）も同じで、**渡された申告から断りを組むだけ**
+    ——作品フォルダーは許可の鍵としてしか使わず、ファイルを1つも開かない。
   */
   if (
     tool === "mcp.version" ||
     tool === "ollama.models" ||
-    tool === "novel.propose"
+    tool === "novel.propose" ||
+    tool === "novel.notice"
   ) {
     return "none";
   }

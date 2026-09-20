@@ -81,11 +81,11 @@ import {
   type VerifyOutcome,
 } from "../core/contradictionVerifyValidation";
 import {
-  estimateRunTimeText,
   startRunEta,
   withCancellableProgress,
   type CheckProgress,
 } from "../views/progress";
+import { estimateRunTimeText } from "../ai/runTimeEstimate";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurn } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";

@@ -40,7 +40,7 @@
 
 ## 道具の早見表
 
-**道具は10本で、何をするかは `feature` の引数で決まる**（0.66.7）。ほとんどの用は `novel.run` に `feature` を渡せば足りる。
+**道具は11本で、何をするかは `feature` の引数で決まる**（0.66.7）。ほとんどの用は `novel.run` に `feature` を渡せば足りる。
 
 | したいこと | 道具 |
 |---|---|
@@ -53,6 +53,7 @@
 | 相談／冒頭診断／プロット逆算／章立て／紹介文／キャッチコピー | `novel.run`（`feature: chat`／`opening`／`plotReverse`／`chapter`／`blurb`／`catchphrase`） |
 | プロンプトだけ・検算だけ | `novel.prompt`／`novel.validate`（同じ `feature` で） |
 | 人物の更新案を置く | `novel.propose` |
+| **実行前に画面へ出る断りを、走らせずに読む** | `novel.notice`（`feature` とモデルを渡す。**AIは呼ばず、本文も読まない**。0.72.0） |
 | 手元の Ollama のモデルを知る | `ollama.models` |
 | サーバーの版と、あなたの名乗り | `mcp.version` |
 

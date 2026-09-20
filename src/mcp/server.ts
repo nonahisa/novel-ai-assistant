@@ -40,6 +40,11 @@ import {
   type OllamaModelsInput,
 } from "./tools/ollama";
 import { SETTINGS_PROPOSE_INPUT, settingsPropose } from "./tools/propose";
+import {
+  NOVEL_NOTICE_INPUT,
+  novelNotice,
+  type NoticeInput,
+} from "./tools/notice";
 
 /**
  * Claude Code から、製品のプロンプトと検算をツールとして呼ぶ（設計書6.87.8）。
@@ -48,7 +53,8 @@ import { SETTINGS_PROPOSE_INPUT, settingsPropose } from "./tools/propose";
  * そちらを直に呼ぶ（`test/unit/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は10本**（0.66.7、設計書6.87.15 の柱1）。56本あったものを
+ * **道具は11本**（0.72.0 で `novel.notice` を足した。0.66.7 の時点では10本）。
+ * 56本あったものを
  * `feature` を引数に取る形へ束ねた——**AI は繋いだ瞬間にこの一覧を読む**ので、
  * 一覧そのものが会話のたびに払う費用だった（44,882字）。
  * 何をするかは `feature`、どこまで原稿が出るかは `runner` が決める。
@@ -276,6 +282,21 @@ server.registerTool(
     inputSchema: NOVEL_MATERIAL_INPUT,
   },
   tool("novel.material", (args: FeatureCallInput) => novelMaterial(args))
+);
+
+server.registerTool(
+  "novel.notice",
+  {
+    title: "実行前に出る断りを、走らせずに読む",
+    description:
+      "そのモデルで矛盾検知／プロット逸脱検知を押したときに、" +
+      "**実行前の確認画面とログへ出る断り**を返します（設計書6.10.8・6.28）。" +
+      "断りはモデルの大きさで変わる（20B以上は「確信が持てない箇所も挙げます」、" +
+      "20B未満は「指摘しません」）ので、画面を押さずに確かめる口です。" +
+      "**AIは呼ばず、本文も設定資料も読みません。**",
+    inputSchema: NOVEL_NOTICE_INPUT,
+  },
+  tool("novel.notice", (args: NoticeInput) => novelNotice(args))
 );
 
 server.registerTool(

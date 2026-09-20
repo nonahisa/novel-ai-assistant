@@ -61,10 +61,10 @@ import {
   createOrganizationStore,
 } from "../core/abilityStore";
 import {
-  estimateRunTimeText,
   startRunEta,
   type CheckProgress,
 } from "../views/progress";
+import { estimateRunTimeText } from "../ai/runTimeEstimate";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import type { ScopeChoice } from "../core/typoCheckScope";
 import { resolveCheckScope } from "./typoCheckScope";

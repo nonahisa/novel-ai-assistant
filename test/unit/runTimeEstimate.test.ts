@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useMemoryTuningStore } from "./support/tuningStore";
-import { estimateRunTimeText } from "../../src/views/progress";
+// **0.72.0 で `views/progress.ts` から `ai/runTimeEstimate.ts` へ移した。**
+// この検査はそのままで、**読む場所だけを差し替えてある**——移設で文言が
+// 変わっていないことは、下の期待値がそっくり通ることで示す
+import { estimateRunTimeText } from "../../src/ai/runTimeEstimate";
 import { featureOutputKey } from "../../src/core/featureOutputTokens";
 import { modelTuningKey } from "../../src/core/modelTuning";
 
@@ -109,6 +112,27 @@ describe("所要時間は、平均があれば平均から出す", () => {
 
     // 件数が足りないので、そもそも数字を作らない
     expect(text).toContain("見当が付きません");
+  });
+
+  it("速さを一度も測っていないモデルでは、見当が付かないと言う", () => {
+    /*
+      **当てずっぽうを書かない**（`ai/runTimeEstimate.ts` の断り書き）。
+      速さの台帳（`outputTokensPerSecond`）は作者自身の呼び出しからしか
+      入らないので、無いということは本当に「この機械でこのモデルを
+      動かしたことがない」である。既定値を置くと、当てずっぽうが
+      実測の顔をして並ぶ。
+    */
+    const text = estimateRunTimeText({
+      providerId: PROVIDER,
+      // 台帳にも同梱表にも行の無いモデル
+      model: "まだ測っていないモデル",
+      feature: "deviation_check",
+      count: 10,
+      unit: "話",
+    });
+
+    expect(text).toContain("見当が付きません");
+    expect(text).not.toContain("およそ");
   });
 
   it("台帳が空なら同梱の目安。同梱だと分かり、多めだとも言う", () => {

@@ -52,10 +52,10 @@ import {
   type AcceptedProofreadIssue,
 } from "../core/proofreadValidation";
 import {
-  estimateRunTimeText,
   startRunEta,
   type CheckProgress,
 } from "../views/progress";
+import { estimateRunTimeText } from "../ai/runTimeEstimate";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
