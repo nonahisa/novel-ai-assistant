@@ -367,7 +367,10 @@ import { registeredPostingSites } from "./features/postingCopyRegistered";
 import { showEditHistory } from "./features/editHistoryPanel";
 import { toggleExternalAccessPermission } from "./features/externalAccessPermission";
 import { ExternalAccessWatcher } from "./features/externalAccessWatcher";
-import { writeAiInstructions } from "./features/writeAiInstructions";
+import {
+  refreshStableBundle,
+  writeAiInstructions,
+} from "./features/writeAiInstructions";
 import {
   reviewProposals,
   toggleReviewLock,
@@ -403,7 +406,11 @@ import {
   suggestChapterName,
 } from "./features/proposeChapters";
 import { countUnextractedEpisodes } from "./features/extractionFreshness";
-import { recordCheck } from "./features/typoCheckScope";
+import {
+  describeChosenScope,
+  recordCheck,
+  resolveCheckScope,
+} from "./features/typoCheckScope";
 import { switchMode } from "./features/switchMode";
 import {
   revealFolder,
@@ -1446,11 +1453,21 @@ export async function activate(
     work: WorkEntry,
     label: string,
     run: (
-      onProgress: (done: number, total: number, skipped?: number) => void,
+      onProgress: (
+        done: number,
+        total: number,
+        skipped?: number,
+        remaining?: string
+      ) => void,
       stage: (
         stageLabel: string,
         stageUnit: string
-      ) => (done: number, total: number, skipped?: number) => void
+      ) => (
+        done: number,
+        total: number,
+        skipped?: number,
+        remaining?: string
+      ) => void
     ) => Promise<T>,
     unit = "チャンク"
   ): Promise<T> {
@@ -1458,14 +1475,16 @@ export async function activate(
     // 代わりに、飛ばした件数を画面へ添える（作者の指摘、2026-09-06）
     const reporter =
       (stageLabel: string, stageUnit: string) =>
-      (done: number, total: number, skipped = 0) =>
+      (done: number, total: number, skipped = 0, remaining = "") =>
         proposalPanel.showRunning(
           work,
           stageLabel,
           done,
           total,
           stageUnit,
-          skipped
+          skipped,
+          // 残り時間の見当（設計書6.8.19）。まだ言えないうちは空文字
+          remaining
         );
     try {
       return await run(reporter(label, unit), reporter);
@@ -1683,6 +1702,15 @@ export async function activate(
   // 抽出のように何十回も書く処理が遅くなる。
   // 失敗しても何も言わない（整理できないことを知らせる必要はない）
   void pruneAllLogs(registry.list()).catch(() => undefined);
+
+  // ─── MCP の束の写しを作り直す（設計書6.87.15） ───
+  // **起動のたびに。** 作品へ書いた登録は、版に依らない場所へ写した束を
+  // 指している。写さないと、拡張機能を更新したあと作者が「AI用の指示書を
+  // 置く」を走らせるまで**古い束が静かに走り続ける**——道が切れるより
+  // 気づきにくい。写し直せば更新時刻が変わるので、`mcp/staleness.ts` の
+  // 判定2が拾って「開き直してください」と出る。
+  // 失敗しても何も言わない（次に指示書を置くときに写し直される）
+  void refreshStableBundle(context).catch(() => undefined);
 
   // ─── ステータスバー（現在開いているファイルの文字数） ───
   const statusBar = vscode.window.createStatusBarItem(
@@ -3689,17 +3717,26 @@ export async function activate(
         const suiteConfirmed = isSuiteConfirmed(options);
         // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
         const suiteHoldsRun = isSuiteHoldingRun(options);
+        // **範囲を選べるのは誤字脱字だけではない**（設計書6.8.7）
+        const scope = await resolveCheckScope(work, "foreshadow", {
+          suiteConfirmed,
+        });
+        if (!scope) return CHECK_CANCELLED;
         const result = await withPanelProgress(
           work,
           "伏線を検知",
           (onProgress) =>
             checkForeshadows(work, aiRegistry, {
+              filePaths: scope.filePaths,
               onProgress,
               suiteConfirmed,
               suiteHoldsRun,
             })
         );
         if (!result || result.cancelled) return CHECK_CANCELLED;
+
+        // **絞って見たときも「検知した」と記録する**（誤字脱字と同じ）
+        await recordCheck(work, "foreshadow");
 
         showForeshadowCandidates(proposalPanel, work, result.candidates);
 
@@ -3721,7 +3758,7 @@ export async function activate(
           parts.push(`読めなかった話 ${result.unreadableEpisodes}件（ログ参照）`);
         }
         notifyRunCompletion({
-          headline: "伏線の検知",
+          headline: `伏線の検知${describeChosenScope(scope.kind)}`,
           parts,
           failedCount: result.failedChunks,
           tail:
@@ -3866,11 +3903,11 @@ export async function activate(
 
         // **絞って見たときも「検知した」と記録する。**
         // 記録しないと、次回また同じ話が「前回から書いた分」に出る
-        await recordCheck(work);
+        await recordCheck(work, "typo");
 
         const shown = proposalPanel.showResults(work, result.issues);
         reportTypoCheckResult(
-          scope.kind === "changed" ? "誤字脱字検知（前回から書いた分）" : "誤字脱字検知",
+          `誤字脱字検知${describeChosenScope(scope.kind)}`,
           result,
           shown
         );
@@ -4085,11 +4122,17 @@ export async function activate(
         const suiteConfirmed = isSuiteConfirmed(options);
         // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
         const suiteHoldsRun = isSuiteHoldingRun(options);
+        // **範囲を選べるのは誤字脱字だけではない**（設計書6.8.7）
+        const scope = await resolveCheckScope(work, "deviation", {
+          suiteConfirmed,
+        });
+        if (!scope) return CHECK_CANCELLED;
         const result = await withPanelProgress(
           work,
           "プロット逸脱を検知",
           (onProgress) =>
             checkDeviations(work, aiRegistry, {
+              filePaths: scope.filePaths,
               onProgress,
               suiteConfirmed,
               suiteHoldsRun,
@@ -4125,8 +4168,12 @@ export async function activate(
         // 末尾を落として問うたのに、作者からは「そこには指摘が無かった」と
         // 見える。検知の中で**一度だけ**組み立てた案内をそのまま出す
         if (result.plotTrimmedNote) parts.push(result.plotTrimmedNote);
+
+        // **絞って見たときも「検知した」と記録する**（誤字脱字と同じ）
+        await recordCheck(work, "deviation");
+
         notifyRunCompletion({
-          headline: "プロット逸脱の検知",
+          headline: `プロット逸脱の検知${describeChosenScope(scope.kind)}`,
           parts,
           failedCount: result.failedChunks,
           tail:
@@ -4279,14 +4326,23 @@ export async function activate(
         const suiteConfirmed = isSuiteConfirmed(options);
         // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
         const suiteHoldsRun = isSuiteHoldingRun(options);
+        // **範囲を選べるのは誤字脱字だけではない**（設計書6.8.7）
+        const scope = await resolveCheckScope(work, "proofread", {
+          suiteConfirmed,
+        });
+        if (!scope) return CHECK_CANCELLED;
         const result = await withPanelProgress(work, "推敲", (onProgress) =>
           checkProofread(work, aiRegistry, {
+            filePaths: scope.filePaths,
             onProgress,
             suiteConfirmed,
             suiteHoldsRun,
           })
         );
         if (!result || result.cancelled) return CHECK_CANCELLED;
+
+        // **絞って見たときも「検知した」と記録する**（誤字脱字と同じ）
+        await recordCheck(work, "proofread");
 
         const shown = proposalPanel.showResults(work, result.issues, "推敲");
 
@@ -4342,7 +4398,7 @@ export async function activate(
           (issue) => issue.reason === "漢字ひらき"
         );
         notifyRunCompletion({
-          headline: "推敲",
+          headline: `推敲${describeChosenScope(scope.kind)}`,
           parts,
           failedCount: result.failedChunks,
           tail: openedKanji
@@ -4448,11 +4504,18 @@ export async function activate(
         const suiteConfirmed = isSuiteConfirmed(options);
         // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
         const suiteHoldsRun = isSuiteHoldingRun(options);
+        // **範囲を選べるのは誤字脱字だけではない**（設計書6.8.7）。
+        // 219話で6時間かかる検知こそ、「まず10話だけ試す」が要る
+        const scope = await resolveCheckScope(work, "contradiction", {
+          suiteConfirmed,
+        });
+        if (!scope) return CHECK_CANCELLED;
         const result = await withPanelProgress(
           work,
           "矛盾を検知",
           (onProgress, stage) =>
             checkContradictions(work, aiRegistry, {
+              filePaths: scope.filePaths,
               onProgress,
               // 検証はAIを1件ずつ呼ぶので、別の札で件数を流す
               onVerifyProgress: stage("検出した矛盾を検証", "件"),
@@ -4499,8 +4562,12 @@ export async function activate(
         if (result.unreadableEpisodes > 0) {
           parts.push(`読めなかった話 ${result.unreadableEpisodes}件（ログ参照）`);
         }
+        // **絞って見たときも「検知した」と記録する。** 記録しないと、
+        // 次回また同じ話が「前回から書いた分」に出る
+        await recordCheck(work, "contradiction");
+
         notifyRunCompletion({
-          headline: "矛盾検知",
+          headline: `矛盾検知${describeChosenScope(scope.kind)}`,
           parts,
           failedCount: result.failedChunks,
           // **突き合わせなかった人物があることを黙らない**（設計書6.10.6）。

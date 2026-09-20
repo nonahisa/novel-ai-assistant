@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { ExternalAccessPermissionStore } from "../core/externalAccessPermissionStore";
 import { cancelItem, isCancelItem } from "../views/dialogs";
@@ -7,6 +8,7 @@ import {
   clientKeyOf,
   type ExternalClientPermission,
 } from "../core/externalAccessPermission";
+import { AI_INSTRUCTION_TARGETS } from "../core/aiInstructions";
 import { FEATURE_LABELS, type FeatureName } from "../core/mcpFeatures";
 
 /**
@@ -169,20 +171,52 @@ export async function toggleExternalAccessPermission(
       **まだ誰にも許していないときは、ここから許可を作らない。**
       どの相手が来るのかも、どの道具を使うのかも、まだ分からない
       ——**ノックされたときに決める**のがいちばん確かである。
+
+      **ただし「待っていれば来る」のは、指示書を置いた作品だけである**
+      （作者が詰まった。2026-09-20）。指示書と MCP の登録が無ければ
+      外部AIは道具に繋がらないので、**お尋ねする機会そのものが永遠に
+      来ない**——「先に決めておく必要はありません」だけを出すと、
+      作者はここで行き止まる。
     */
-    await vscode.window.showInformationMessage(
-      `「${work.title}」は、外部AI（MCP）の利用をまだ誰にも許可していません（既定は拒否です）。`,
+    if (await hasAiInstructions(work)) {
+      await vscode.window.showInformationMessage(
+        `「${work.title}」は、外部AI（MCP）の利用をまだ誰にも許可していません（既定は拒否です）。`,
+        {
+          modal: true,
+          detail:
+            "許可は、外部AIが実際に使おうとしたときに画面でお尋ねします" +
+            "（そのとき「この道具だけ許可」を選べます）。\n\n" +
+            "先に決めておく必要はありません。" + legacyNote(permission.legacy),
+        }
+      );
+      return;
+    }
+
+    /*
+      **出口をその場に出す**（`offerReview` と同じ考え方）。「指示書を
+      置いてください」と文章で書いても、**どこから置くのかを探すのは作者**
+      である。押せるものとして出せば、探さなくてよい。
+    */
+    const write = "AI用の指示書を置く";
+    const answer = await vscode.window.showInformationMessage(
+      `「${work.title}」には、まだAI用の指示書を置いていません。`,
       {
         modal: true,
         detail:
-          "許可は、外部AIが実際に使おうとしたときに画面でお尋ねします" +
-          "（そのとき「この道具だけ許可」を選べます）。\n\n" +
-          "先に決めておく必要はありません。" +
-          (permission.legacy
-            ? "\n\nこの作品には古い形の許可が残っていますが、いまの版では使っていません。接続元ごとに決め直してください。"
-            : ""),
-      }
+          "指示書と MCP の登録が無いと、外部AIはこの拡張機能の道具に" +
+          "繋がらないので、お尋ねする機会そのものが来ません。\n\n" +
+          "指示書を置くと、外部AIが道具を使おうとしたときに、" +
+          "この画面で1件ずつ許可を決められるようになります（既定は拒否のままです）。" +
+          legacyNote(permission.legacy),
+      },
+      write,
+      "あとで"
     );
+    if (answer === write) {
+      // コマンド経由で呼ぶ（`features` → `extension.ts` の逆流を作らないため）
+      const ref: PermissionWorkRef = { type: "work", work };
+      await vscode.commands.executeCommand("novelai.writeAiInstructions", ref);
+    }
     return;
   }
 
@@ -205,6 +239,47 @@ export async function toggleExternalAccessPermission(
   );
   if (!picked || isCancelItem(picked) || !("client" in picked)) return;
   await editClient(work, store, picked.client);
+}
+
+/**
+ * コマンドへ「この作品で」と伝える最小の形（`extension.ts` の `WorkRef`）。
+ *
+ * **`extension.ts` から型を借りない**（`features` → `extension.ts` の
+ * 逆流になる）。`features/finishNewWork.ts` と同じ作法。
+ */
+interface PermissionWorkRef {
+  readonly type: "work";
+  readonly work: WorkEntry;
+}
+
+/**
+ * この作品に、AI用の指示書が1つでも置かれているか（設計書6.87.15 柱5）。
+ *
+ * **1つでもあれば「置いてある」と見る。** 相手は複数選べるので、
+ * どれが置かれているかは作者の選び方次第である——ここで問うているのは
+ * 「**外部AIがノックしに来る道があるか**」だけなので、1つで足りる。
+ *
+ * 置き先の表は `core/aiInstructions.ts` に1つだけある。写しを持つと、
+ * 置き先を足したときに片方だけ直す日が来る。
+ */
+async function hasAiInstructions(work: WorkEntry): Promise<boolean> {
+  for (const target of AI_INSTRUCTION_TARGETS) {
+    const file = path.join(work.folderPath, target.instructionPath);
+    try {
+      await vscode.workspace.fs.stat(path.toUri(file));
+      return true;
+    } catch {
+      // 無いだけ。ほかの置き先を見る
+    }
+  }
+  return false;
+}
+
+/** 古い形の許可が残っているときの断り（どちらの文面でも同じことを言う） */
+function legacyNote(legacy: boolean): string {
+  return legacy
+    ? "\n\nこの作品には古い形の許可が残っていますが、いまの版では使っていません。接続元ごとに決め直してください。"
+    : "";
 }
 
 /**

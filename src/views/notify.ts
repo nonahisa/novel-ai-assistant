@@ -235,6 +235,14 @@ export async function suggestAction(params: {
 /** `pickWithMemory` に並べる項目。`value` を持たないものは中止の項目 */
 export type MemorablePick<T extends string> = vscode.QuickPickItem & {
   value?: T;
+  /**
+   * **この項目だけは覚えない**（設計書6.8.7）。
+   *
+   * 「試す」ための選択肢を覚えてしまうと、以後すべての実行が黙って
+   * その範囲だけになる——**試したつもりが本番になり、見ていない話が
+   * 「指摘なし」として通る。** 覚えないので、次回はまた訊かれる。
+   */
+  noRemember?: boolean;
 };
 
 /**
@@ -260,7 +268,8 @@ export async function pickWithMemory<T extends string>(params: {
     const answer = rememberedAnswer(readConfirmMemory(), rememberId);
     // **いまも選べる値のときだけ**素通りさせる。選択肢が変わったら訊き直す
     const known = params.items.find((item) => item.value === answer);
-    if (known?.value !== undefined) {
+    // 覚えない項目は、覚えていても素通りさせない（古い記録が残っていた場合）
+    if (known?.value !== undefined && known.noRemember !== true) {
       logStep(`確認を省略（以降は訊かない）: ${rememberId} / ${known.value}`);
       return known.value;
     }
@@ -310,7 +319,7 @@ export async function pickWithMemory<T extends string>(params: {
 
     const value = picked?.value;
     if (value === undefined) return undefined;
-    if (canRemember && pinned && rememberId) {
+    if (canRemember && pinned && rememberId && picked?.noRemember !== true) {
       await rememberConfirmAnswer(rememberId, value);
     }
     return value;

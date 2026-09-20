@@ -62,7 +62,11 @@ import {
   type AcceptedForeshadowResolution,
   type KnownForeshadow,
 } from "../core/foreshadowValidation";
-import { type CheckProgress } from "../views/progress";
+import {
+  estimateRunTimeText,
+  startRunEta,
+  type CheckProgress,
+} from "../views/progress";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
@@ -123,6 +127,13 @@ export interface ForeshadowResolveRunResult {
 // ── 配置の検知（P-25）─────────────────────────────
 
 export interface CheckForeshadowsOptions extends SuiteAwareOptions {
+  /**
+   * 話を絞る（設計書6.8.7）。指定しなければ作品全体。
+   *
+   * **「はじめの10話だけ試す」ためにある。** モデルを替えて比べたい時期に、
+   * 比べるたび全話へ賭けるのでは試せない（作者の指摘、2026-09-20）。
+   */
+  filePaths?: string[];
   /**
    * 進み具合の届け先（作者の報告、2026-08-29）。
    * 提案パネルへ出すために使う。渡されなければ何もしない
@@ -185,7 +196,9 @@ export async function checkForeshadows(
   );
   const { chunks, chapterLabelByFile, unreadableEpisodes } = await collectChunks(
     work,
-    chunkSettings
+    chunkSettings,
+    // 範囲を絞ったときは、その話だけを読む（設計書6.8.7）
+    options.filePaths ? { filePaths: options.filePaths } : {}
   );
   if (chunks.length === 0) {
     vscode.window.showWarningMessage("検知できる本文がありませんでした。");
@@ -221,6 +234,13 @@ export async function checkForeshadows(
     const detail = [
       `${chunks.length}チャンク中 ${pending.length}件を処理します` +
         `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
+      // **どれくらいかかるかを先に出す**（設計書6.8.19）
+      estimateRunTimeText({
+        providerId: resolved.provider.id,
+        model: resolved.model,
+        feature: "foreshadow_detect",
+        count: pending.length,
+      }),
       `既に登録されている伏線: ${ledger.records.length}件`,
       "",
       "台帳へは何も自動で入りません。 候補を「提案」パネルへ並べますので、",
@@ -302,6 +322,8 @@ export async function checkForeshadows(
       alreadyHeld: options.suiteHoldsRun,
     },
     async (progress, token) => {
+      // **輪に入る直前に時計を作る**（設計書6.8.19）
+      const runEta = startRunEta();
       const controller = new AbortController();
       token.onCancellationRequested(() => {
         cancelled = true;
@@ -325,12 +347,13 @@ export async function checkForeshadows(
         const raw = cached ?? (await ask(chunk));
         if (cached === undefined) {
           done++;
+          const eta = runEta.step(done, total);
           progress.report({
-            message: `${done}/${total}`,
+            message: `${done}/${total}${eta.suffix}`,
             increment: 100 / Math.max(total, 1),
           });
           // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-          options.onProgress?.(done, total, skippedChunks);
+          options.onProgress?.(done, total, skippedChunks, eta.remaining);
         }
 
         if (raw === RETRY_SMALLER) {
@@ -735,6 +758,8 @@ export async function checkForeshadowResolution(
     "伏線が回収されたかを見ています",
     { label: "伏線の回収の確認", onCancelled: () => (cancelled = true) },
     async (progress, token) => {
+      // **輪に入る直前に時計を作る**（設計書6.8.19）
+      const runEta = startRunEta();
       const controller = new AbortController();
       token.onCancellationRequested(() => {
         cancelled = true;
@@ -756,12 +781,13 @@ export async function checkForeshadowResolution(
         const raw = cached ?? (await ask(entry.chunk, entry.targets));
         if (cached === undefined) {
           done++;
+          const eta = runEta.step(done, total);
           progress.report({
-            message: `${done}/${total}`,
+            message: `${done}/${total}${eta.suffix}`,
             increment: 100 / Math.max(total, 1),
           });
           // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-          options.onProgress?.(done, total, skippedChunks);
+          options.onProgress?.(done, total, skippedChunks, eta.remaining);
         }
         if (raw instanceof AIError) {
           const retry = retryOnOverflow(entry.chunk, raw);
@@ -1036,7 +1062,7 @@ interface CollectedChunks {
 async function collectChunks(
   work: WorkEntry,
   chunkSettings: ReturnType<typeof readChunkSettings>,
-  options: { merge?: boolean } = {}
+  options: { merge?: boolean; filePaths?: string[] } = {}
 ): Promise<CollectedChunks> {
   const scan = await scanWork(work);
   const format = await readWorkFormat(work);
@@ -1044,7 +1070,15 @@ async function collectChunks(
   const chapterLabelByFile = new Map<string, string>();
   let unreadableEpisodes = 0;
 
-  for (const episode of scan.episodes) {
+  // **絞り込みは読む前に掛ける**（設計書6.8.7）。読んでから捨てると、
+  // 対象外の話まで開くことになり、絞った意味が半分になる
+  const targets = options.filePaths
+    ? scan.episodes.filter((episode) =>
+        options.filePaths!.includes(episode.filePath)
+      )
+    : scan.episodes;
+
+  for (const episode of targets) {
     // 競合マーカーのあるファイルはAI処理をブロックする
     if (episode.hasConflictMarkers) continue;
     let text: string;

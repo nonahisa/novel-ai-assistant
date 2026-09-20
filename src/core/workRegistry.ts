@@ -266,6 +266,24 @@ const MCP_REGISTRATION_PATHS: readonly string[] = AI_INSTRUCTION_TARGETS.map(
   (target) => target.registrationPath
 ).filter((value): value is string => value !== undefined);
 
+/**
+ * **登録ファイルを書けない置き先の指示書**（いまは
+ * `.aiwriter/novel-assist.md` の1つ）。
+ *
+ * 指示書はふつう文章だけなので同期してよいのだが、**この1つだけは例外**
+ * である。登録ファイル（`.mcp.json` ほか）を置けない相手には、
+ * `buildToolLocationPreamble` が**本文として束の絶対パスを書き込む**
+ * ——中身が機械に依存する。同期すると、別の機械には存在しない場所を
+ * 指す手引きが届く（登録ファイルと同じ壊れ方）。
+ *
+ * ここも置き先の表から導く。「登録の口が無い＝束の場所を本文に書く」は
+ * `aiInstructions.ts` が決めていることなので、条件を写すと食い違う。
+ */
+const MACHINE_BOUND_INSTRUCTION_PATHS: readonly string[] =
+  AI_INSTRUCTION_TARGETS.filter((target) => !target.registrationPath).map(
+    (target) => target.instructionPath
+  );
+
 export const IGNORED_PATHS: readonly string[] = [
   ".aiwriter/cache/",
   ".aiwriter/logs/",
@@ -294,10 +312,14 @@ export const IGNORED_PATHS: readonly string[] = [
     登録**が届き、繋がらない（作者がこれで詰まった。2026-09-20。
     デスクトップで置いたつもりでノートPCへ同期されると思っていた）。
 
-    **指示書のほう（`SKILL.md`・`AGENTS.md` ほか）は同期してよい。**
-    あちらは文章だけで、機械に依存しない。
+    **指示書のほうは、1つを除いて同期してよい**（`SKILL.md`・`AGENTS.md`・
+    `GEMINI.md`）。あちらは文章だけで、機械に依存しない。**除く1つは
+    `.aiwriter/novel-assist.md`** で、あれだけは登録ファイルを置けない
+    相手向けなので、**本文に束の絶対パスが書き込まれる**
+    （`buildToolLocationPreamble`）。
   */
   ...MCP_REGISTRATION_PATHS,
+  ...MACHINE_BOUND_INSTRUCTION_PATHS,
   ".novelai-recovery/",
   "exports/",
 ];

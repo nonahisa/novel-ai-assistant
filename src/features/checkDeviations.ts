@@ -51,7 +51,11 @@ import {
   validateDeviations,
   type AcceptedDeviation,
 } from "../core/deviationValidation";
-import { type CheckProgress } from "../views/progress";
+import {
+  estimateRunTimeText,
+  startRunEta,
+  type CheckProgress,
+} from "../views/progress";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
@@ -142,6 +146,13 @@ export function plotMaxChars(contextWindow: number | undefined): number {
 
 export interface CheckDeviationsOptions extends SuiteAwareOptions {
   /**
+   * 話を絞る（設計書6.8.7）。指定しなければ作品全体。
+   *
+   * **「はじめの10話だけ試す」ためにある。** モデルを替えて比べたい時期に、
+   * 比べるたび全話へ賭けるのでは試せない（作者の指摘、2026-09-20）。
+   */
+  filePaths?: string[];
+  /**
    * 進み具合の届け先（作者の報告、2026-08-29）。
    *
    * **この検知は話ごとに送る。** 数えているのはチャンクではなく話数なので、
@@ -166,7 +177,10 @@ export async function checkDeviations(
   const resolved = await ensureConfigured(registry, "deviation");
   if (!resolved) return undefined;
 
-  const { episodes, unreadableEpisodes } = await collectEpisodes(work);
+  const { episodes, unreadableEpisodes } = await collectEpisodes(
+    work,
+    options.filePaths
+  );
   if (episodes.length === 0) {
     vscode.window.showWarningMessage("検知できる本文がありませんでした。");
     return undefined;
@@ -236,6 +250,14 @@ export async function checkDeviations(
     const detail = [
       `${episodes.length}話中 ${pending.length}話を処理します` +
         `（処理済み ${episodes.length - pending.length}話はスキップ）。`,
+      // **どれくらいかかるかを先に出す**（設計書6.8.19）
+      estimateRunTimeText({
+        providerId: resolved.provider.id,
+        model: resolved.model,
+        feature: "deviation_check",
+        count: pending.length,
+        unit: "話",
+      }),
       "",
       "本文は書き換えません。 プロットと違う箇所を並べるだけで、",
       "プロットのほうが古いこともあります。",
@@ -330,6 +352,9 @@ export async function checkDeviations(
       onCancelled: () => (cancelled = true),
     },
     async (progress, token) => {
+      // **輪に入る直前に時計を作る**（設計書6.8.19）。単位は「話」
+      // ——この検知だけはチャンクではなく話ごとに送る
+      const runEta = startRunEta("話");
       const controller = new AbortController();
       token.onCancellationRequested(() => {
         cancelled = true;
@@ -346,15 +371,17 @@ export async function checkDeviations(
         // 数字が動かないまま数分待たされ、止まったように見える
         if (cached === undefined) {
           episodesDone++;
+          const eta = runEta.step(episodesDone, pending.length);
           progress.report({
-            message: `${episodesDone}/${pending.length}`,
+            message: `${episodesDone}/${pending.length}${eta.suffix}`,
             increment: 100 / Math.max(pending.length, 1),
           });
           // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
           options.onProgress?.(
             episodesDone,
             pending.length,
-            episodes.length - pending.length
+            episodes.length - pending.length,
+            eta.remaining
           );
         }
         if (raw === undefined) continue;
@@ -566,14 +593,21 @@ interface Episode {
 }
 
 async function collectEpisodes(
-  work: WorkEntry
+  work: WorkEntry,
+  filePaths?: string[]
 ): Promise<{ episodes: Episode[]; unreadableEpisodes: number }> {
   const scan = await scanWork(work);
   const format = await readWorkFormat(work);
   const out: Episode[] = [];
   let unreadableEpisodes = 0;
 
-  for (const episode of scan.episodes) {
+  // **絞り込みは読む前に掛ける**（設計書6.8.7）。読んでから捨てると、
+  // 対象外の話まで開くことになり、絞った意味が半分になる
+  const targets = filePaths
+    ? scan.episodes.filter((episode) => filePaths.includes(episode.filePath))
+    : scan.episodes;
+
+  for (const episode of targets) {
     // 競合マーカーのあるファイルはAI処理をブロックする
     if (episode.hasConflictMarkers) continue;
     let text: string;

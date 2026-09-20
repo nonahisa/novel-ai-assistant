@@ -51,7 +51,11 @@ import {
   validateProofreadIssues,
   type AcceptedProofreadIssue,
 } from "../core/proofreadValidation";
-import { type CheckProgress } from "../views/progress";
+import {
+  estimateRunTimeText,
+  startRunEta,
+  type CheckProgress,
+} from "../views/progress";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
@@ -199,6 +203,13 @@ export async function checkProofread(
     const detail = [
       `${chunks.length}チャンク中 ${pending.length}件を処理します` +
         `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
+      // **どれくらいかかるかを先に出す**（設計書6.8.19）
+      estimateRunTimeText({
+        providerId: resolved.provider.id,
+        model: resolved.model,
+        feature: "proofread",
+        count: pending.length,
+      }),
       // **まとめ方を変えると、キャッシュが総入れ替えになる。** 何も
       // 変えていないのに全件が対象になると、作者は不具合だと思う
       pending.length === chunks.length && chunks.length > 1
@@ -285,6 +296,8 @@ export async function checkProofread(
       alreadyHeld: options.suiteHoldsRun,
     },
     async (progress, token) => {
+      // **輪に入る直前に時計を作る**（設計書6.8.19）
+      const runEta = startRunEta();
       const controller = new AbortController();
       token.onCancellationRequested(() => {
         cancelled = true;
@@ -332,12 +345,18 @@ export async function checkProofread(
         // 読めなくなるうえ、分子が分母（送る件数）を超える
         if (cached === undefined) {
           chunksDone++;
+          const eta = runEta.step(chunksDone, chunksTotal);
           progress.report({
-            message: `${chunksDone}/${chunksTotal}`,
+            message: `${chunksDone}/${chunksTotal}${eta.suffix}`,
             increment: 100 / Math.max(chunksTotal, 1),
           });
           // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-          options.onProgress?.(chunksDone, chunksTotal, skippedChunks);
+          options.onProgress?.(
+            chunksDone,
+            chunksTotal,
+            skippedChunks,
+            eta.remaining
+          );
         }
         if (raw === undefined) continue;
 

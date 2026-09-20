@@ -60,10 +60,14 @@ import {
   createLocationStore,
   createOrganizationStore,
 } from "../core/abilityStore";
-import { type CheckProgress } from "../views/progress";
+import {
+  estimateRunTimeText,
+  startRunEta,
+  type CheckProgress,
+} from "../views/progress";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import type { ScopeChoice } from "../core/typoCheckScope";
-import { chooseScope } from "./typoCheckScope";
+import { resolveCheckScope } from "./typoCheckScope";
 import { withAiTurnProgress } from "./aiTurn";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import {
@@ -169,15 +173,12 @@ export interface CheckTyposOptions extends SuiteAwareOptions {
 }
 
 /**
- * 対象範囲（「前回から書いた分だけ」か「全体」か）を決める。
+ * 対象範囲を決める。
  *
- * **まとめ実行では聞かない**（設計書6.80）。量と料金の確認を1枚へまとめた
- * のに、そのあと誤字脱字だけが選択画面を出すと、**作者はボタン1回で
- * 放置できない**——まとめ実行の目的そのものが果たせなくなる。
- *
- * 飛ばすときは**「全体」を選んだことにする。** 処理済みのチャンクは
- * キャッシュが飛ばすので送る量はほとんど変わらず、逆に「書いた分だけ」を
- * 勝手に選ぶと、まだ一度も見ていない話が黙って対象から外れる。
+ * **中身は機能に依らないので、共通の口（`features/typoCheckScope.ts` の
+ * `resolveCheckScope`）へ寄せた**（作者の指摘、2026-09-20）。ここに残す
+ * のは、誤字脱字の呼び名を渡す1行だけである——写しを置くと、まとめ実行の
+ * 扱いが機能ごとに食い違う。
  *
  * @returns 取りやめなら undefined（呼び出し側は検知へ進まない）
  */
@@ -185,16 +186,7 @@ export async function resolveTypoScope(
   work: WorkEntry,
   options: Pick<CheckTyposOptions, "suiteConfirmed"> = {}
 ): Promise<ScopeChoice | undefined> {
-  if (!options.suiteConfirmed) return chooseScope(work);
-
-  // **飛ばした判断はログへ残す**（確認を省略したときと同じ扱い）。
-  // 残さないと、あとから「なぜ全話ぶん走ったのか」を追えない
-  useLogFile(work.folderPath);
-  logStep(
-    "誤字脱字検知：まとめ実行のため対象は全体" +
-      "（「前回から書いた分だけ」は聞かず、処理済みはキャッシュで飛ばします）"
-  );
-  return { kind: "all" };
+  return resolveCheckScope(work, "typo", options);
 }
 
 export async function checkTypos(
@@ -423,7 +415,19 @@ export async function checkTypos(
     ) {
       return undefined;
     }
-    const estimateMinutes = Math.ceil((pending.length * 15) / 60);
+    /*
+      **当てずっぽうをやめた**（設計書6.8.19。作者の指摘、2026-09-20）。
+
+      ここは「1チャンク15秒」と決め打ちしていた。どのモデルでも15秒という
+      根拠はどこにも無く、手元の小さいモデルでは足りず、速いクラウドでは
+      多すぎる。**測った値があるならそれを使い、無いなら無いと言う。**
+    */
+    const timeNotice = estimateRunTimeText({
+      providerId: resolved.provider.id,
+      model: resolved.model,
+      feature: "typo_check",
+      count: pending.length,
+    });
     const costNotice = buildTypoCheckCostNotice(
       resolved.provider.id,
       resolved.provider.isPaid,
@@ -438,7 +442,7 @@ export async function checkTypos(
     const notice =
       `${chunks.length} チャンク中 ${pending.length} 件を処理します` +
       `（処理済み ${chunks.length - pending.length} 件はスキップ）。\n` +
-      `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度\n` +
+      `モデル: ${resolved.model}\n${timeNotice}\n` +
       costNotice +
       allPending;
     if (options.suiteConfirmed) {
@@ -489,6 +493,9 @@ export async function checkTypos(
       alreadyHeld: options.suiteHoldsRun,
     },
     async (progress, token) => {
+      // **輪に入る直前に時計を作る**（設計書6.8.19）。ここからの実時間を
+      // 済んだ件数で割って、残りの見当を出す
+      const runEta = startRunEta();
       const controller = new AbortController();
       token.onCancellationRequested(() => {
         cancelled = true;
@@ -542,12 +549,15 @@ export async function checkTypos(
         }
 
         const label = describeChunkFile(chunk.filePath, chunk);
+        // **見当は「済んだ数」で出す。** 表示は次に送る番号（`done + 1`）
+        // だが、実測が取れているのは終わったぶんだけである
+        const eta = runEta.step(done, total);
         progress.report({
-          message: `${done + 1}/${total}  ${label}`,
+          message: `${done + 1}/${total}${eta.suffix}  ${label}`,
           increment: 100 / Math.max(total, 1),
         });
         // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-        options.onProgress?.(done + 1, total, skipped);
+        options.onProgress?.(done + 1, total, skipped, eta.remaining);
         logStep(`AIへ送信: ${done + 1}/${total} ${label}`);
         const startedAt = Date.now();
 

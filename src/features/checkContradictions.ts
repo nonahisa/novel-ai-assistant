@@ -95,7 +95,12 @@ import { buildKnownAtIndex, lookupKnownAtValue,
   validateContradictions,
   type AcceptedContradiction,
 } from "../core/contradictionValidation";
-import { withCancellableProgress, type CheckProgress } from "../views/progress";
+import {
+  estimateRunTimeText,
+  startRunEta,
+  withCancellableProgress,
+  type CheckProgress,
+} from "../views/progress";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurn } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
@@ -447,6 +452,14 @@ export async function checkContradictions(
     const detail = [
       `${chunks.length}チャンク中 ${pending.length}件を処理します` +
         `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
+      // **どれくらいかかるかを先に出す**（設計書6.8.19）。219話では
+      // 6時間規模になるので、「夜に回すか、いま回すか」を決める材料が要る
+      estimateRunTimeText({
+        providerId: resolved.provider.id,
+        model: resolved.model,
+        feature: "contradiction_check",
+        count: pending.length,
+      }),
       `材料: 人物${material.characterCount}人 / 場所${material.locationCount}件 / ` +
         `世界観${material.worldCount}件`,
       // **送る量が増えることを黙らない**（設計書6.74）。過去の本文を
@@ -597,6 +610,9 @@ export async function checkContradictions(
     },
     async () => {
       await withCancellableProgress("矛盾を検知しています", async (progress, token) => {
+        // **輪に入る直前に時計を作る**（設計書6.8.19）。ここから先の
+        // 実時間を、済んだ件数で割って残りを見積もる
+        const runEta = startRunEta();
         const controller = new AbortController();
         token.onCancellationRequested(() => {
           cancelled = true;
@@ -619,12 +635,18 @@ export async function checkContradictions(
           // 読めなくなるうえ、分子が分母（送る件数）を超える
           if (cached === undefined) {
             chunksDone++;
+            const eta = runEta.step(chunksDone, chunksTotal);
             progress.report({
-              message: `${chunksDone}/${chunksTotal}`,
+              message: `${chunksDone}/${chunksTotal}${eta.suffix}`,
               increment: 100 / Math.max(chunksTotal, 1),
             });
             // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-            options.onProgress?.(chunksDone, chunksTotal, skippedChunks);
+            options.onProgress?.(
+              chunksDone,
+              chunksTotal,
+              skippedChunks,
+              eta.remaining
+            );
           }
 
           if (raw === RETRY_SMALLER) {

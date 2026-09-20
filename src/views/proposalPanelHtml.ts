@@ -386,10 +386,21 @@ function paintRunning() {
   const skippedText = runningState && runningState.skipped > 0
     ? '（処理済み ' + runningState.skipped + '件はスキップ）'
     : '';
+  /*
+    **残り時間の見当を添える**（設計書6.8.19。作者の指摘、2026-09-20）。
+
+    219話の矛盾検知は6時間規模になる。「42/210チャンク」だけでは、あと
+    10分なのか6時間なのかが読めない。**まだ言えないうちは空文字**——
+    数チャンク進むまでは実測が足りないので、当てずっぽうを出さない。
+  */
+  const remainingText = runningState && runningState.remaining
+    ? '（残り' + runningState.remaining + '）'
+    : '';
   const text = runningState
     ? (runningState.workTitle ? '〈' + runningState.workTitle + '〉' : '') +
       runningState.label + 'しています… ' +
       runningState.done + '/' + runningState.total + runningState.unit +
+      remainingText +
       skippedText
     : '';
 
@@ -975,6 +986,8 @@ window.addEventListener('message', (event) => {
       unit: message.unit || 'チャンク',
       // 処理済みで飛ばした数。分母がそのぶん小さくなっている断り
       skipped: message.skipped || 0,
+      // 残り時間の見当。まだ言えないうちは空文字（設計書6.8.19）
+      remaining: message.remaining || '',
       // 表示中の作品の検知なら空。別の作品なら題名が入る
       workTitle: message.workTitle || '',
     };

@@ -1,5 +1,16 @@
 import * as vscode from "vscode";
 import { cancelItem, isCancelItem } from "./dialogs";
+import {
+  MIN_ETA_SAMPLES,
+  describeDuration,
+  estimateRemainingMs,
+  estimateRunMs,
+} from "../core/etaEstimate";
+import { modelTuning } from "../core/modelTuning";
+import {
+  MIN_FEATURE_OUTPUT_SAMPLES,
+  featureOutputTuning,
+} from "../core/featureOutputTokens";
 
 /**
  * 進捗表示。
@@ -108,12 +119,111 @@ type ProgressReporter = vscode.Progress<{
  *   直後に「1/7」と出て、実際に動くのは1件なので3分間ずっと数字が
  *   変わらず、**止まったように見えていた**
  * @param skipped 処理済みで飛ばした数。0のときは何も添えない
+ * @param remaining 残り時間の見当（「およそ4時間30分」）。まだ言えない
+ *   ときは空文字。**作れないときに当てずっぽうを入れない**（設計書6.8.19）
  */
 export type CheckProgress = (
   done: number,
   total: number,
-  skipped?: number
+  skipped?: number,
+  remaining?: string
 ) => void;
+
+/**
+ * 進み具合に添える、残り時間の見当（設計書6.8.19）。
+ *
+ * **この口を1つだけ置く。** 検知は7つあり、それぞれが自前で残り時間を
+ * 数え始めると、丸め方も言い回しも7通りに散る（`core/termColors.ts` を
+ * 1か所へ寄せたのと同じ理由）。
+ */
+export interface EtaStep {
+  /**
+   * 数字のうしろへ足す文字列。`チャンク（残りおよそ4時間30分）`。
+   *
+   * **単位だけは必ず付く。** 見当が言えないうちも「42/210チャンク」に
+   * なるので、いまの表示より短くなることはない。
+   */
+  readonly suffix: string;
+  /** 見当だけ（`およそ4時間30分`）。まだ言えないときは空文字 */
+  readonly remaining: string;
+}
+
+/** 1回の実行ぶんの時計。**輪に入る直前に作る** */
+export interface RunEta {
+  step(done: number, total: number): EtaStep;
+}
+
+/**
+ * 残り時間の見当を数え始める。
+ *
+ * 見ているのは**実時間**である。AI1回ぶんの所要時間（`GenerateResult`
+ * の `elapsedMs`。記録は `ai/meteredProvider.ts` が取っている）を足し
+ * 上げる手もあるが、作者が待っているのは順番待ち・本文の読み込み・
+ * 検証まで含めた全部なので、**壁の時計のほうが実感に合う。**
+ *
+ * @param unit 数えているもの。話ごとに送る検知は「話」になる
+ * @param now 時計。試験で止められるように差し替えられる
+ */
+export function startRunEta(
+  unit = "チャンク",
+  now: () => number = Date.now
+): RunEta {
+  const startedAt = now();
+  return {
+    step(done: number, total: number): EtaStep {
+      const ms = estimateRemainingMs(done, total, now() - startedAt);
+      if (ms === undefined) return { suffix: unit, remaining: "" };
+      const remaining = describeDuration(ms);
+      return { suffix: `${unit}（残り${remaining}）`, remaining };
+    },
+  };
+}
+
+/**
+ * 押す前に「およそどれだけかかるか」を言う（設計書6.8.19）。
+ *
+ * **見当が付かないときは、正直にそう言う。** ここで既定値を置くと、
+ * 一度も測っていないモデルにも数字が出て、当てずっぽうが実測の顔をして
+ * 並ぶ。台帳（`core/modelTuning.ts` の `outputTokensPerSecond`）は作者
+ * 自身の呼び出しからしか入らないので、無いということは本当に「この機械で
+ * このモデルを動かしたことがない」である。
+ *
+ * **`speedMeasuredAt` はここでは見ない。** 古い測定でも、いまある唯一の
+ * 実測である——粒度は「およそ5時間」なので、多少古くても判断は変わらない。
+ * 黙って捨てると、代わりに出せるものが何も無くなる。
+ */
+export function estimateRunTimeText(params: {
+  /** AIのプロバイダID（速さの台帳の鍵） */
+  readonly providerId: string;
+  /** モデル名（同上） */
+  readonly model: string;
+  /** 出力量の実測を引く機能名（`meta.feature` と同じもの） */
+  readonly feature: string;
+  /** これからAIへ送る件数 */
+  readonly count: number;
+  /** 数えているもの。話ごとに送る検知は「話」 */
+  readonly unit?: string;
+}): string {
+  const unit = params.unit ?? "チャンク";
+  const speed = modelTuning(params.providerId, params.model)
+    ?.outputTokensPerSecond;
+  const output = featureOutputTuning(params.feature);
+  // **件数が足りない実測は使わない**（`core/featureOutputTokens.ts` の
+  // しきい値と同じ線を引く）。1回ぶんでは、たまたま短かった回と区別が付かない
+  const perCall =
+    (output?.outputTokenSamples ?? 0) >= MIN_FEATURE_OUTPUT_SAMPLES
+      ? output?.outputTokens
+      : undefined;
+
+  const ms = estimateRunMs(params.count, speed, perCall);
+  if (ms === undefined) {
+    return (
+      "このモデルでどれくらいかかるかは、まだ測っていないので見当が付きません。\n" +
+      `${MIN_ETA_SAMPLES}${unit}進んだところで、残り時間の目安を出します。`
+    );
+  }
+  return `${params.count}件 ≒ ${describeDuration(ms)}（これまでの実測から）`;
+}
 
 /**
  * ステータスバーに進捗を出す。中止ボタンは付かない。

@@ -80,7 +80,12 @@ import {
   undecidedOutcome,
   type VerifyOutcome,
 } from "../core/contradictionVerifyValidation";
-import { withCancellableProgress, type CheckProgress } from "../views/progress";
+import {
+  estimateRunTimeText,
+  startRunEta,
+  withCancellableProgress,
+  type CheckProgress,
+} from "../views/progress";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurn } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
@@ -275,6 +280,14 @@ export async function checkFactContradictions(
     const detail = [
       `${chunks.length}チャンク中 ${pending.length}件から事実を取り出します` +
         `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
+      // **どれくらいかかるかを先に出す**（設計書6.8.19）
+      estimateRunTimeText({
+        providerId: provider.id,
+        model,
+        // 台帳の鍵は `meta.feature` と同じものでなければ引けない
+        feature: "story_fact_extract",
+        count: pending.length,
+      }),
       table.entries.length > 0
         ? `人物 ${table.entries.length}人の対応表を渡します。`
         : "人物の登録がまだ無いので、人物は本文の表記のまま扱います。",
@@ -368,6 +381,8 @@ export async function checkFactContradictions(
       await withCancellableProgress(
         "本文から事実を取り出しています",
         async (progress, token) => {
+          // **輪に入る直前に時計を作る**（設計書6.8.19）
+          const runEta = startRunEta();
           const controller = new AbortController();
           token.onCancellationRequested(() => {
             cancelled = true;
@@ -387,11 +402,17 @@ export async function checkFactContradictions(
             const raw = cached ?? (await ask(chunk, controller));
             if (cached === undefined) {
               chunksDone++;
+              const eta = runEta.step(chunksDone, chunksTotal);
               progress.report({
-                message: `${chunksDone}/${chunksTotal}`,
+                message: `${chunksDone}/${chunksTotal}${eta.suffix}`,
                 increment: 100 / Math.max(chunksTotal, 1),
               });
-              options.onProgress?.(chunksDone, chunksTotal, skippedChunks);
+              options.onProgress?.(
+                chunksDone,
+                chunksTotal,
+                skippedChunks,
+                eta.remaining
+              );
             }
 
             if (raw === RETRY_SMALLER) {

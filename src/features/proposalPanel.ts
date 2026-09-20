@@ -480,6 +480,14 @@ type RunningMessage = {
    */
   skipped: number;
   /**
+   * 残り時間の見当（「およそ4時間30分」。設計書6.8.19）。
+   *
+   * **作者が見ているのは、結果が出る場所である。** ステータスバーだけに
+   * 出しても、パネルを見て待っている作者には届かない。まだ言えないうちは
+   * 空文字——**当てずっぽうは入れない。**
+   */
+  remaining: string;
+  /**
    * どの作品の検知か。
    *
    * **書庫では、いま見ているのと別の作品を走らせられる**（作品Aの結果を
@@ -1166,7 +1174,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     done: number,
     total: number,
     unit = "チャンク",
-    skipped = 0
+    skipped = 0,
+    remaining = ""
   ): void {
     this.post({
       type: "running",
@@ -1175,6 +1184,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       total,
       unit,
       skipped,
+      remaining,
       // **題名を出すのは、別の作品の結果を映しているときだけ。**
       // まだ何も出していないときや、同じ作品の検知では、何の数字かは
       // 見れば分かる——毎回題名が付くと、かえって読みにくい
@@ -1198,6 +1208,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       total: 0,
       unit: "",
       skipped: 0,
+      remaining: "",
       workTitle: "",
     });
   }

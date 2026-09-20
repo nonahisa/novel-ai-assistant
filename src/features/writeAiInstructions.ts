@@ -21,6 +21,8 @@ import {
 } from "../core/aiInstructions";
 import type { AiInstructionUsage } from "../core/aiInstructionUsage";
 import { AiInstructionUsageStore } from "../core/aiInstructionUsageStore";
+import { hashBytes } from "../core/hash";
+import { logLine, useLogFile } from "../core/logger";
 import { SERVER_NAME } from "../mcp/version";
 import { cancelItem } from "../views/dialogs";
 import { notifyDone } from "../views/notify";
@@ -41,6 +43,20 @@ import { notifyDone } from "../views/notify";
 
 /** 束（MCPサーバー）の場所を覚えておく鍵（`globalState`。作品をまたいで共通） */
 const KEY_BUNDLE_PATH = "novelai.mcpBundlePath";
+
+/**
+ * 版に依らない置き場へ写した束の名前と、写した中身の印。
+ *
+ * **拡張機能のフォルダー名には版が入る**
+ * （`…\extensions\nonahisa.novel-ai-assistant-0.70.11\dist\mcp-server.mjs`）。
+ * その道をそのまま `.mcp.json` へ書くと、**VS Code が拡張機能を更新した
+ * 瞬間に、存在しない場所を指す**——作者には「先週は動いていたのに、
+ * Claude Code が道具を見つけられなくなった」としか見えない。
+ * だから `globalStorageUri` の下（版が変わっても動かない場所）へ写してから
+ * 登録する。
+ */
+const STABLE_BUNDLE_NAME = "mcp-server.mjs";
+const STABLE_BUNDLE_STAMP = "mcp-server.stamp";
 
 /** 指示書を置いたときの結果（報告のために集める） */
 interface WriteOutcome {
@@ -63,6 +79,10 @@ export async function writeAiInstructions(
   context: vscode.ExtensionContext,
   work: WorkEntry
 ): Promise<void> {
+  // **記録は作品のログファイルへ**。束を写せなかったときの理由は、
+  // 出力チャンネルだけに出しても VS Code を閉じた時点で消える
+  useLogFile(work.folderPath);
+
   const template = await readTemplate(context);
   if (template === undefined) return;
 
@@ -308,7 +328,11 @@ async function resolveRegistration(
     "dist",
     "mcp-server.mjs"
   );
-  if (await exists(bundled)) return registrationFor(bundled);
+  // **同梱の束は、そのままの道を登録しない**（版が入ったフォルダーの中なので、
+  // 拡張機能を更新すると切れる）。版に依らない場所へ写してから登録する
+  if (await exists(bundled)) {
+    return registrationFor(await stableBundlePath(context, bundled));
+  }
 
   const remembered = context.globalState.get<string>(KEY_BUNDLE_PATH);
   if (remembered && (await exists(remembered))) {
@@ -350,6 +374,94 @@ async function resolveRegistration(
 
 function registrationFor(bundlePath: string): McpRegistration {
   return { name: SERVER_NAME, command: "node", args: [bundlePath] };
+}
+
+/**
+ * 同梱の束を、版に依らない場所（`globalStorageUri` の下）へ写す。
+ *
+ * **毎回は写さない。** 写し直すと束の更新時刻が変わり、走っている MCP
+ * サーバーが「起動後に束が作り直された＝古い」と言い続ける
+ * （`mcp/staleness.ts` の判定2）。中身の印（ハッシュ）を隣へ置いておき、
+ * **同じ中身なら1バイトも触らない**。
+ *
+ * **写せなかったときは、これまでどおり拡張機能の中の道を返す**
+ * （実装ルール5の「黙って失敗しない」）。版が変わると切れる道だが、
+ * いま何も登録されないよりはよい。理由はログへ残す。
+ *
+ * ブラウザ版は `resolveRegistration` の手前で折り返しているので、ここへは
+ * 来ない。それでも読み書きは `vscode.workspace.fs` だけで済ませてある
+ * （実装ルール7。`node:fs` を持ち込まない）。
+ */
+/**
+ * **同梱の束を、版に依らない場所へ写し直す**（0.71.0）。
+ *
+ * **起動のたびに呼ぶ。** 写さないと、拡張機能を更新したあと作者が
+ * 「AI用の指示書を置く」を走らせるまで、**古い束が静かに走り続ける**——
+ * しかも `mcp/staleness.ts` の版の突き合わせは、写し先に `package.json`
+ * が無いので効かない。**起動時に写し直せば、束の更新時刻が変わるので
+ * 判定2（起動後に束が作り直された）が拾う。**
+ *
+ * **静かに済ませる。** 作者に用のある話ではないので、画面には何も出さない
+ * （失敗しても、次に指示書を置くときに写し直される）。
+ */
+export async function refreshStableBundle(
+  context: vscode.ExtensionContext
+): Promise<void> {
+  if (!canRunProcesses()) return;
+  const bundled = path.join(
+    fromUri(context.extensionUri),
+    "dist",
+    "mcp-server.mjs"
+  );
+  if (!(await exists(bundled))) return;
+  await stableBundlePath(context, bundled);
+}
+
+async function stableBundlePath(
+  context: vscode.ExtensionContext,
+  source: string
+): Promise<string> {
+  try {
+    const root = globalStorageRoot(context);
+    const copy = path.join(root, STABLE_BUNDLE_NAME);
+    const stamp = path.join(root, STABLE_BUNDLE_STAMP);
+
+    const bytes = await vscode.workspace.fs.readFile(path.toUri(source));
+    const digest = hashBytes(bytes);
+    if ((await readIfExists(stamp)) === digest && (await exists(copy))) {
+      return copy;
+    }
+
+    await vscode.workspace.fs.createDirectory(path.toUri(root));
+    /*
+      **上書きの経路（指定なし）でよい。** ここは拡張機能の保管庫に置く
+      写しであって、作者が書いたデータではない——退避して残す値打ちが無い
+      （実装ルール2の「3経路」のうち①）。元は同梱物なので、いつでも作り直せる。
+    */
+    await atomicWriteFile(copy, bytes);
+    await atomicWriteFile(stamp, new TextEncoder().encode(digest));
+    return copy;
+  } catch (error) {
+    logLine(
+      "MCPサーバーの束を拡張機能の保管庫へ写せませんでした。" +
+        "拡張機能の中の場所を登録します（拡張機能を更新すると切れます）：" +
+        errorText(error)
+    );
+    return source;
+  }
+}
+
+/**
+ * 保管庫（`globalStorageUri`）の場所を、持ち回る文字列にする。
+ *
+ * **`vscode-userdata:` は手元に実体があるので OS のパスへ倒す**
+ * （`core/modelTuningStore.ts`・`views/openDocument.ts` と同じ。拡張機能
+ * 開発ホストではこの仕組みで渡ってくる）。`fromUri` の一般規則に任せると
+ * `C:\vscode-userdata:\…` という無い場所を指す。
+ */
+function globalStorageRoot(context: vscode.ExtensionContext): string {
+  const uri = context.globalStorageUri;
+  return uri.scheme === "vscode-userdata" ? uri.fsPath : fromUri(uri);
 }
 
 /** 既に指示書があるものを挙げる（同じ中身かどうかはここでは見ない） */

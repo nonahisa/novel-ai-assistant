@@ -237,6 +237,8 @@ describe("作品へ書き出す", () => {
   let base = "";
   let root = "";
   let extensionRoot = "";
+  /** 拡張機能の保管庫（`globalStorageUri`）。版に依らない束の置き場 */
+  let storageRoot = "";
   const globalStore = new Map<string, unknown>();
 
   const work = (): WorkEntry => ({
@@ -246,10 +248,14 @@ describe("作品へ書き出す", () => {
     registeredAt: "2026-09-18T00:00:00.000Z",
   });
 
-  /** 拡張機能の文脈の作り物（使うのは extensionUri と globalState だけ） */
+  /**
+   * 拡張機能の文脈の作り物（使うのは extensionUri・globalStorageUri・
+   * globalState だけ）。
+   */
   const context = () =>
     ({
       extensionUri: Uri.file(extensionRoot),
+      globalStorageUri: Uri.file(storageRoot),
       globalState: {
         get: <T>(key: string): T | undefined => globalStore.get(key) as T,
         update: async (key: string, value: unknown) => {
@@ -280,7 +286,9 @@ describe("作品へ書き出す", () => {
     globalStore.clear();
     base = await fsp.mkdtemp(nodePath.join(os.tmpdir(), "novelai-skill-"));
     root = nodePath.join(base, "氷の街");
-    extensionRoot = nodePath.join(base, "拡張機能");
+    // **版が入ったフォルダー名**。ここへの道を登録すると、更新で切れる
+    extensionRoot = nodePath.join(base, "nonahisa.novel-ai-assistant-0.70.11");
+    storageRoot = nodePath.join(base, "globalStorage", "nonahisa.novel-ai-assistant");
     await fsp.mkdir(root, { recursive: true });
 
     // 同梱の雛形と、同梱の束（どちらも配布物に入る。2026-09-18 に束も同梱へ）
@@ -402,9 +410,10 @@ describe("作品へ書き出す", () => {
   test("MCP の登録が、相手ごとの形で書かれる", async () => {
     await writeAiInstructions(context(), work());
 
-    // ドライブ名の大小はスタブの都合で変わるので、そこは見ない
+    // ドライブ名の大小はスタブの都合で変わるので、そこは見ない。
+    // **登録に書かれるのは保管庫の写し**（版に依らない場所。0.70.12 以降）
     const bundle = nodePath
-      .join(extensionRoot, "dist", "mcp-server.mjs")
+      .join(storageRoot, "mcp-server.mjs")
       .toLowerCase();
 
     const claude = JSON.parse(await read(".mcp.json"));
@@ -512,6 +521,114 @@ describe("作品へ書き出す", () => {
     expect(after.mtimeMs).toBe(before.mtimeMs);
     // 同じなので退避も作らない
     expect(await exists(RECOVERY_DIRECTORY_NAME)).toBe(false);
+  });
+
+  /*
+    **登録に書く束の道は、版に依らない場所を指す**（設計書6.87.15）。
+
+    拡張機能のフォルダー名には版が入る
+    （`…\extensions\nonahisa.novel-ai-assistant-0.70.11\dist\mcp-server.mjs`）。
+    その道をそのまま登録すると、**VS Code が拡張機能を更新した瞬間に、
+    存在しない場所を指す**——作者には「先週は動いていたのに、Claude Code が
+    道具を見つけられなくなった」としか見えない。
+  */
+  describe("束を、版に依らない場所へ写してから登録する", () => {
+    const storageBundle = (): string =>
+      nodePath.join(storageRoot, "mcp-server.mjs");
+
+    const registeredPath = async (): Promise<string> => {
+      const parsed = JSON.parse(await read(".mcp.json"));
+      return parsed.mcpServers[SERVER_NAME].args[0] as string;
+    };
+
+    test("**登録に書かれるのは保管庫の写しで、版の入ったフォルダーではない**", async () => {
+      await writeAiInstructions(context(), work());
+
+      const written = (await registeredPath()).toLowerCase();
+      expect(written).toBe(storageBundle().toLowerCase());
+      // 版が入った道が1文字も残っていないこと（更新で切れる道）
+      expect(written).not.toContain("0.70.11");
+      // 写しが実際に置かれ、中身も同じ
+      expect(await fsp.readFile(storageBundle(), "utf8")).toBe("// 束");
+    });
+
+    test("登録ファイルの無い置き先の頭にも、保管庫の写しの道が出る", async () => {
+      await writeAiInstructions(context(), work());
+
+      const plain = await read(findAiInstructionTarget("plain").instructionPath);
+      // 引用符で囲った道がそのまま出る（空白を含んでも貼って使える形）
+      expect(plain.toLowerCase()).toContain(storageBundle().toLowerCase());
+      expect(plain).not.toContain("0.70.11");
+    });
+
+    /*
+      **毎回は写さない。** 写し直すと束の更新時刻が変わり、走っている MCP
+      サーバーが「起動後に束が作り直された＝古い」と言い続ける
+      （`mcp/staleness.ts` の判定2）。
+    */
+    test("同じ束なら、二度目は1バイトも触らない（更新時刻が変わらない）", async () => {
+      await writeAiInstructions(context(), work());
+      const before = await fsp.stat(storageBundle());
+
+      await writeAiInstructions(context(), work());
+
+      const after = await fsp.stat(storageBundle());
+      expect(after.mtimeMs).toBe(before.mtimeMs);
+    });
+
+    test("束が入れ替われば、写し直す", async () => {
+      await writeAiInstructions(context(), work());
+      await fsp.writeFile(
+        nodePath.join(extensionRoot, "dist", "mcp-server.mjs"),
+        "// 新しい束",
+        "utf8"
+      );
+
+      await writeAiInstructions(context(), work());
+
+      expect(await fsp.readFile(storageBundle(), "utf8")).toBe("// 新しい束");
+    });
+
+    /*
+      **写せなかったときは、黙って諦めない**（実装ルール5）。これまでどおり
+      拡張機能の中の道を書く——更新で切れる道だが、何も登録されないよりはよい。
+    */
+    test("保管庫へ写せなくても、拡張機能の中の道で登録する", async () => {
+      const real = workspace.fs.createDirectory;
+      workspace.fs.createDirectory = (async (uri: { fsPath: string }) => {
+        if (uri.fsPath.includes("globalStorage")) {
+          throw new Error("保管庫を作れません");
+        }
+        await fsp.mkdir(uri.fsPath, { recursive: true });
+      }) as typeof workspace.fs.createDirectory;
+
+      try {
+        await writeAiInstructions(context(), work());
+      } finally {
+        workspace.fs.createDirectory = real;
+      }
+
+      const written = (await registeredPath()).toLowerCase();
+      expect(written).toBe(
+        nodePath.join(extensionRoot, "dist", "mcp-server.mjs").toLowerCase()
+      );
+    });
+  });
+
+  /*
+    **登録ファイルを置けない置き先の指示書は、同期しない**（0.70.12）。
+    あれだけは本文に束の絶対パスが入るので、機械に依存する。
+  */
+  test("`.aiwriter/novel-assist.md` は同期から外れている", () => {
+    expect(IGNORED_PATHS).toContain(
+      findAiInstructionTarget("plain").instructionPath
+    );
+    // **ほかの指示書は同期してよい**（文章だけで、機械に依存しない）
+    for (const id of ["claude-code", "codex", "gemini-cli"] as const) {
+      expect(IGNORED_PATHS, id).not.toContain(
+        findAiInstructionTarget(id).instructionPath
+      );
+    }
   });
 
   /*

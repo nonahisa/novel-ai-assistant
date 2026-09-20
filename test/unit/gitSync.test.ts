@@ -87,9 +87,27 @@ describe("同期対象から外す規則", () => {
   });
 
   test("指示書そのものは除外しない（文章なので機械に依存しない）", () => {
-    // 切り分けの要。登録だけを外し、手引きは同期する
+    // 切り分けの要。登録だけを外し、手引きは同期する。
+    // **ただし1つだけ例外がある**（下のテスト）
     for (const target of AI_INSTRUCTION_TARGETS) {
-      expect(IGNORED_PATHS).not.toContain(target.instructionPath);
+      if (!target.registrationPath) continue;
+      expect(IGNORED_PATHS, target.id).not.toContain(target.instructionPath);
+    }
+  });
+
+  test("**登録ファイルを置けない置き先の指示書だけは除外する**", () => {
+    /*
+      `.aiwriter/novel-assist.md`（0.70.12）。あの相手には登録ファイルを
+      書けないので、`buildToolLocationPreamble` が**本文として束の絶対パスを
+      書き込む**——中身が機械に依存する。同期すると、別の機械には存在しない
+      場所を指す手引きが届く（登録ファイルと同じ壊れ方）。
+    */
+    const machineBound = AI_INSTRUCTION_TARGETS.filter(
+      (target) => !target.registrationPath
+    );
+    expect(machineBound.length).toBeGreaterThan(0);
+    for (const target of machineBound) {
+      expect(IGNORED_PATHS, target.id).toContain(target.instructionPath);
     }
   });
 
@@ -156,6 +174,9 @@ describe("同期対象から外す規則", () => {
       ".mcp.json",
       ".codex/config.toml",
       ".gemini/settings.json",
+      // 登録ファイルを置けない置き先の指示書（0.70.12）。**あれだけは
+      // 本文に束の絶対パスが入る**ので、登録ファイルと同じ壊れ方をする
+      ".aiwriter/novel-assist.md",
       "exports/",
     ]);
   });
