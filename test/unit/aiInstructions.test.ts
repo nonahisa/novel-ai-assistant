@@ -49,7 +49,7 @@ import { SERVER_NAME } from "../../src/mcp/version";
  * 書かれたか」なので、作り物の円盤では確かめたことにならない。
  */
 
-const { writeAiInstructions } = await import(
+const { writeAiInstructions, REGISTRATION_IS_LOCAL_NOTE } = await import(
   "../../src/features/writeAiInstructions"
 );
 
@@ -512,6 +512,46 @@ describe("作品へ書き出す", () => {
     expect(after.mtimeMs).toBe(before.mtimeMs);
     // 同じなので退避も作らない
     expect(await exists(RECOVERY_DIRECTORY_NAME)).toBe(false);
+  });
+
+  /*
+    **登録は機械をまたげない**（設計書5.5.7・6.87.15、0.70.11）。
+    登録には束への絶対パスが入るので同期から外してあるが、**外して
+    あること自体を言わないと**、作者は「デスクトップで置いたから
+    ノートPCでも使えるはず」と読む（2026-09-20 に実際そうなった）。
+  */
+  describe("登録がこの機械だけのものだと断る", () => {
+    /** 完了の知らせ（`showInformationMessage`）に渡された詳細文 */
+    const reportDetail = (): string => {
+      const calls = (window.showInformationMessage as unknown as ReturnType<
+        typeof vi.fn
+      >).mock.calls;
+      const last = calls[calls.length - 1] as [string, { detail?: string }];
+      return last[1].detail ?? "";
+    };
+
+    test("登録を書いた回は、同期されないことを言う", async () => {
+      await writeAiInstructions(context(), work());
+
+      expect(reportDetail()).toContain(REGISTRATION_IS_LOCAL_NOTE);
+    });
+
+    test("登録を書かない回は言わない（「ローカルLLM・そのほか」だけ）", async () => {
+      // この置き先は登録ファイルを持たない。無い話をしても通じない
+      (window.showQuickPick as unknown as ReturnType<typeof vi.fn>) = vi.fn(
+        async (items: unknown, options?: { canPickMany?: boolean }) =>
+          options?.canPickMany
+            ? (items as Array<{ target?: { id?: string } }>).filter(
+                (item) => item.target?.id === "plain"
+              )
+            : (items as unknown[])[0]
+      );
+
+      await writeAiInstructions(context(), work());
+
+      expect(await exists(".mcp.json")).toBe(false);
+      expect(reportDetail()).not.toContain(REGISTRATION_IS_LOCAL_NOTE);
+    });
   });
 
   /*

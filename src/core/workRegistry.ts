@@ -17,6 +17,7 @@ import { canRegisterWork, describeWorkLimit } from "./editorMode";
 import { currentMode } from "./actorContext";
 import { parseSeriesConfig } from "./seriesLink";
 import { isDirectory } from "./fileSystem";
+import { AI_INSTRUCTION_TARGETS } from "./aiInstructions";
 
 const STORAGE_KEY = "novelai.works";
 
@@ -253,7 +254,19 @@ export class WorkRegistry {
  * 以前は登録時に `.novelai-recovery/` しか追記しておらず、
  * **キャッシュがGitに入ったままだった**（設計書5.5.7と食い違っていた）。
  */
-export const IGNORED_PATHS = [
+/**
+ * MCP の登録ファイルの置き先（`.mcp.json`・`.codex/config.toml`・
+ * `.gemini/settings.json`）。
+ *
+ * **置き先の表（`aiInstructions.ts`）から導く。** ここへ写しを書くと、
+ * 置き先を1つ足したときに片方だけ直す日が来て、**新しい登録だけが
+ * 同期される**という形で表に出る。
+ */
+const MCP_REGISTRATION_PATHS: readonly string[] = AI_INSTRUCTION_TARGETS.map(
+  (target) => target.registrationPath
+).filter((value): value is string => value !== undefined);
+
+export const IGNORED_PATHS: readonly string[] = [
   ".aiwriter/cache/",
   ".aiwriter/logs/",
   ".aiwriter/exports/",
@@ -274,9 +287,20 @@ export const IGNORED_PATHS = [
     リポジトリを共有した相手の機械へ持ち越さない。
   */
   ".aiwriter/ai-instruction-usage.json",
+  /*
+    MCP の登録（設計書6.87.15 柱5）。**同期しない**——登録には束
+    （`dist/mcp-server.mjs`）への**絶対パス**が入っており、束の場所は
+    その機械ごとに違う。同期すると、別の機械には**存在しないパスを指す
+    登録**が届き、繋がらない（作者がこれで詰まった。2026-09-20。
+    デスクトップで置いたつもりでノートPCへ同期されると思っていた）。
+
+    **指示書のほう（`SKILL.md`・`AGENTS.md` ほか）は同期してよい。**
+    あちらは文章だけで、機械に依存しない。
+  */
+  ...MCP_REGISTRATION_PATHS,
   ".novelai-recovery/",
   "exports/",
-] as const;
+];
 
 /** キャッシュの除外規則と、それを打ち消す規則（設計書5.5.7） */
 export const CACHE_IGNORE_RULE = ".aiwriter/cache/";

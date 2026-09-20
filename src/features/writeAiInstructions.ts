@@ -50,6 +50,13 @@ interface WriteOutcome {
   readonly instructionNote: string;
   readonly registration?: string;
   readonly registrationNote?: string;
+  /**
+   * 登録ファイルが**この機械に置かれた**か（書いた・既に同じものがあった、
+   * のどちらも真）。**「この登録は同期されない」と断るのは、実際に
+   * 登録がある回だけ**にするために持つ——置き先が「ローカルLLM・そのほか」
+   * だけの回に言っても、作者には何のことか分からない。
+   */
+  readonly registrationPresent?: boolean;
 }
 
 export async function writeAiInstructions(
@@ -427,12 +434,17 @@ async function placeRegistration(
   root: string,
   target: AiInstructionTarget,
   registration: McpRegistration | undefined
-): Promise<{ registration?: string; registrationNote?: string }> {
+): Promise<{
+  registration?: string;
+  registrationNote?: string;
+  registrationPresent?: boolean;
+}> {
   if (!target.registrationPath || !target.registrationFormat) return {};
   if (!registration) {
     return {
       registration: target.registrationPath,
       registrationNote: "束の場所が決まらなかったので、書いていません",
+      registrationPresent: false,
     };
   }
 
@@ -447,6 +459,7 @@ async function placeRegistration(
     return {
       registration: target.registrationPath,
       registrationNote: "同じ登録が入っていたので、触っていません",
+      registrationPresent: true,
     };
   }
 
@@ -456,12 +469,17 @@ async function placeRegistration(
     return {
       registration: target.registrationPath,
       registrationNote: "退避してから、この登録だけを足しました（他の登録はそのままです）",
+      registrationPresent: true,
     };
   }
 
   await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(file)));
   await atomicWriteFile(file, bytes, { mode: "create" });
-  return { registration: target.registrationPath, registrationNote: "登録を書きました" };
+  return {
+    registration: target.registrationPath,
+    registrationNote: "登録を書きました",
+    registrationPresent: true,
+  };
 }
 
 /** 既存ファイルの置き換え（退避 → 消す → 新規作成） */
@@ -481,6 +499,19 @@ async function replaceFile(
   await vscode.workspace.fs.delete(path.toUri(target), { useTrash: false });
   await atomicWriteFile(target, bytes, { mode: "create" });
 }
+
+/**
+ * 登録ファイルを置いた回にだけ出す断り（設計書5.5.7・6.87.15）。
+ *
+ * **登録には束への絶対パスが入るので、機械をまたげない。** 同期から
+ * 外してあるが、外してあること自体を言わないと、作者は「デスクトップで
+ * 置いたからノートPCでも使えるはず」と読む（2026-09-20 に実際そうなった）。
+ * **指示書のほうは同期される**ので、そこも同じ息で言う——でないと
+ * 「全部やり直し」と読まれる。
+ */
+export const REGISTRATION_IS_LOCAL_NOTE =
+  "登録（.mcp.json など）は、この機械だけのものです。" +
+  "別の機械では、その機械で一度この操作をしてください（指示書のほうは同期されます）。";
 
 /**
  * 何を置いたかを報告する。
@@ -524,6 +555,10 @@ function report(
         "同じ作品でも、Claude Code に許した機能は Gemini CLI には効きません（そういう作りです）。"
       : "許可は接続元ごとに分かれます。別のAIから繋ぐと、あらためてお尋ねします。",
   ];
+  // 登録ファイルが実際にあるときだけ。無い回に言っても通じない
+  if (outcomes.some((outcome) => outcome.registrationPresent)) {
+    notes.push(REGISTRATION_IS_LOCAL_NOTE);
+  }
   if (!registration) {
     notes.push(
       "MCPサーバーの登録は書いていません。指示書だけでは道具を呼べないので、登録は後から足してください。"

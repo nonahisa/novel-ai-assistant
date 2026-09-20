@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -25,6 +25,7 @@ import {
   RECORD_THEN_PULL,
 } from "../../src/features/gitSync";
 import { ACTION_TREE } from "../../src/views/actionList";
+import { AI_INSTRUCTION_TARGETS } from "../../src/core/aiInstructions";
 
 const encode = (text: string) => new TextEncoder().encode(text);
 
@@ -77,6 +78,58 @@ describe("同期対象から外す規則", () => {
     expect(IGNORED_PATHS.join("\n")).not.toContain("設定/");
   });
 
+  test("MCPの登録は除外する（束への絶対パスが入っているため）", () => {
+    // 設計書5.5.7・6.87.15。同期すると、別の機械には存在しないパスを
+    // 指す登録が届く（作者がこれで詰まった。2026-09-20）
+    expect(IGNORED_PATHS).toContain(".mcp.json");
+    expect(IGNORED_PATHS).toContain(".codex/config.toml");
+    expect(IGNORED_PATHS).toContain(".gemini/settings.json");
+  });
+
+  test("指示書そのものは除外しない（文章なので機械に依存しない）", () => {
+    // 切り分けの要。登録だけを外し、手引きは同期する
+    for (const target of AI_INSTRUCTION_TARGETS) {
+      expect(IGNORED_PATHS).not.toContain(target.instructionPath);
+    }
+  });
+
+  test("置き先を足したら、除外にも自動で入る（写しを持っていない）", async () => {
+    /*
+      **写しで書いていないことを確かめる。** 単に3つを数えるだけの検査は、
+      `IGNORED_PATHS` へ手で3行書いても通ってしまう。そこで置き先の表
+      （`AI_INSTRUCTION_TARGETS`）を差し替えたうえで読み込み直し、
+      **足した登録が勝手に現れる**ことを見る。
+    */
+    vi.resetModules();
+    vi.doMock("../../src/core/aiInstructions", async (importOriginal) => {
+      const actual =
+        await importOriginal<typeof import("../../src/core/aiInstructions")>();
+      return {
+        ...actual,
+        AI_INSTRUCTION_TARGETS: [
+          ...actual.AI_INSTRUCTION_TARGETS,
+          {
+            id: "plain",
+            label: "架空の相手（検査用）",
+            detail: "検査用",
+            instructionPath: "FAKE.md",
+            registrationPath: ".fake/registration.json",
+            registrationFormat: "json",
+          },
+        ],
+      };
+    });
+    try {
+      const reloaded = await import("../../src/core/workRegistry");
+      expect(reloaded.IGNORED_PATHS).toContain(".fake/registration.json");
+      // 手引きのほうは、足しても除外に入らない
+      expect(reloaded.IGNORED_PATHS).not.toContain("FAKE.md");
+    } finally {
+      vi.doUnmock("../../src/core/aiInstructions");
+      vi.resetModules();
+    }
+  });
+
   test("空の.gitignoreには全部足りない", () => {
     expect(missingIgnoreRules(encode(""))).toEqual([...IGNORED_PATHS]);
   });
@@ -97,6 +150,12 @@ describe("同期対象から外す規則", () => {
       // （設計書6.87.14 の末尾、0.66.9）。**その機械での決めごと**なので
       // 同期しない
       ".aiwriter/ai-instruction-usage.json",
+      // MCP の登録（設計書6.87.15 柱5、0.70.11）。束への絶対パスが
+      // 入っているので、同期すると別の機械には**存在しないパスを指す
+      // 登録**が届く
+      ".mcp.json",
+      ".codex/config.toml",
+      ".gemini/settings.json",
       "exports/",
     ]);
   });
