@@ -4,9 +4,11 @@ import {
   capabilityProfile,
   describeCapability,
   describeContradictionCapabilityForAuthor,
-  LOOSE_SUPPRESSION_MIN_BILLIONS,
   type CapabilityProfile,
 } from "../../src/ai/capability";
+// **境目は `types.ts` にある**（0.71.3で1つにまとめた）。`capability.ts` は
+// `types.ts` を import する側なので、逆向きには置けない
+import { inferTier, LARGE_MODEL_MIN_BILLIONS } from "../../src/ai/types";
 
 describe("モデルの地力で、機能の重さを決める", () => {
   test("高性能なモデルには、観点を全部渡す", () => {
@@ -95,7 +97,8 @@ describe("キャッシュの鍵に混ぜる印", () => {
   });
 
   test("観点だけを絞るときは、抑制の印を付けない", () => {
-    // 大きいモデルでも観点は絞られることがある（境目が違う）。
+    // **印の並びを見張るための組み合わせ**（`tier` を直に渡している。
+    // 0.71.3 で境目が1つになったので、大きさから推すとこうはならない）。
     // **並びは「絞り → 抑制」で固定する**——揺れると鍵が二重に積み上がる
     const profile = capabilityProfile({
       tier: "standard",
@@ -169,8 +172,8 @@ describe("矛盾検知の抑制は、モデルの大きさで決める（6.10.8�
   });
 
   test("20B以上の手元のモデルでは、ゆるめる", () => {
-    // 26b は 4/4・誤検出0。**ティアの境目（27B）を流用すると、
-    // 満点を出したこのモデルが抑制される側に入る**
+    // 26b は 4/4・誤検出0。**かつてのティアの境目（27B）を流用すると、
+    // 満点を出したこのモデルが抑制される側に入っていた**（0.71.3で一本化）
     const profile = capabilityProfile({
       tier: "standard",
       providerId: "ollama",
@@ -397,8 +400,8 @@ describe("矛盾検知の実行前に出す、地力の断り", () => {
 
   // **境目は定数から導く。** 20 を直書きすると、実測で線を引き直したときに
   // テストだけが古い境目を守り続ける
-  const BIG_MODEL = `${LOOSE_SUPPRESSION_MIN_BILLIONS + 6}.0B`; // 実測した gemma4:26b
-  const SMALL_MODEL = `${LOOSE_SUPPRESSION_MIN_BILLIONS - 8}.0B`; // 実測した gemma4:12b
+  const BIG_MODEL = `${LARGE_MODEL_MIN_BILLIONS + 6}.0B`; // gemma4:26b 相当（申告は25.2B）
+  const SMALL_MODEL = `${LARGE_MODEL_MIN_BILLIONS - 8}.0B`; // 実測した gemma4:12b
 
   test("大きいモデルでは、確信が持てない箇所も挙げると言う", () => {
     const profile = capabilityProfile({
@@ -432,7 +435,7 @@ describe("矛盾検知の実行前に出す、地力の断り", () => {
     const profile = capabilityProfile({
       tier: "standard",
       providerId: "ollama",
-      parameterSize: `${LOOSE_SUPPRESSION_MIN_BILLIONS}.0B`,
+      parameterSize: `${LARGE_MODEL_MIN_BILLIONS}.0B`,
     });
 
     expect(describeContradictionCapabilityForAuthor(profile)).toContain(
@@ -497,5 +500,75 @@ describe("矛盾検知の実行前に出す、地力の断り", () => {
         expect(text).not.toBe("");
       }
     }
+  });
+});
+
+/*
+  **大きさの境目は1つ**（0.71.3。作者の裁定）。
+
+  もとはティアの推定が27B、矛盾検知の抑制が20Bで、`gemma4:26b`——Ollama へ
+  申告する大きさは **25.2B** ——が**判定ごとに大小を行き来していた**。
+  抑制では大きい側なのにティアでは小さい側なので、プロット逸脱では
+  「ほとんど働きません」と断り、「間延び」も見ない設定で動いていた。
+
+  **ところが実測では 26b が 3回とも 3/3・誤検出0**（設計書6.10.2）。
+  27Bに乗せていた「ローカルは控えめに見積もる」という余裕を外す。
+*/
+describe("モデルの大きさの境目は1つ（LARGE_MODEL_MIN_BILLIONS）", () => {
+  /**
+   * `gemma4:26b` が Ollama へ申告する大きさ（実測）。
+   *
+   * **ここは境目から導かない。** 測って得た値そのものなので、境目を
+   * 動かしたらこのテストが落ちるのが正しい——落ちることで「26b を
+   * 小さい側へ落とす変更ですよ」と分かる。
+   */
+  const GEMMA4_26B = "25.2B";
+
+  test("25.2B は高性能として扱う（これが要）", () => {
+    expect(inferTier(GEMMA4_26B, "ollama")).toBe("high");
+  });
+
+  test("境目ちょうどは高性能の側", () => {
+    // **境目を直書きしない。** 実測で線を引き直したときに、
+    // テストだけが古い境目を守り続けることになる
+    expect(inferTier(`${LARGE_MODEL_MIN_BILLIONS}.0B`, "ollama")).toBe("high");
+  });
+
+  test("境目の手前は標準のまま", () => {
+    expect(inferTier(`${LARGE_MODEL_MIN_BILLIONS - 0.1}B`, "ollama")).toBe(
+      "standard"
+    );
+  });
+
+  test("25.2B では、逸脱検知を絞らず断りも出さない", () => {
+    // **これが直したかったことそのもの。** 3/3 当てているモデルに
+    // 「ほとんど働きません」と断り、「間延び」を見せないのは誤り
+    const profile = capabilityProfile({
+      tier: inferTier(GEMMA4_26B, "ollama"),
+      providerId: "ollama",
+      parameterSize: GEMMA4_26B,
+    });
+
+    expect(profile.narrowDeviationTypes).toBe(false);
+    expect(profile.warnDeviationIneffective).toBe(false);
+    // 矛盾検知も、観点を絞らず抑制もしない側へ揃う
+    expect(profile.narrowContradictionCategories).toBe(false);
+    expect(profile.suppressUncertainContradictions).toBe(false);
+  });
+
+  test("抑制の境目とティアの境目が一致している", () => {
+    // **食い違いが不具合の正体だった。** 2つの境目が別々に動けるうちは、
+    // 同じモデルが判定ごとに大小を行き来する
+    const atBoundary = `${LARGE_MODEL_MIN_BILLIONS}.0B`;
+    const profile = capabilityProfile({
+      tier: inferTier(atBoundary, "ollama"),
+      providerId: "ollama",
+      parameterSize: atBoundary,
+    });
+
+    expect(profile.narrowContradictionCategories).toBe(false);
+    expect(profile.suppressUncertainContradictions).toBe(false);
+    // 鍵の印も空になる（high のモデルと同じ扱い）
+    expect(capabilityCacheTag(profile, "contradiction")).toBe("");
   });
 });

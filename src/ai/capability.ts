@@ -1,4 +1,9 @@
-import { parameterSizeInBillions, type CapabilityTier, type ProviderId } from "./types";
+import {
+  LARGE_MODEL_MIN_BILLIONS,
+  parameterSizeInBillions,
+  type CapabilityTier,
+  type ProviderId,
+} from "./types";
 
 /**
  * モデルの地力に応じて、機能の重さを決める。
@@ -39,11 +44,13 @@ export interface CapabilityInput {
   /** モデル情報が取れなかったときの手掛かり */
   providerId: ProviderId;
   /**
-   * パラメータ数の表記（`ModelInfo.parameterSize`。"26.0B" など）。
+   * パラメータ数の表記（`ModelInfo.parameterSize`。"25.2B" など）。
    * **取れないことがある**（クラウドのモデルは答えない）。
    *
-   * ティア（`tier`）では代わりにならない。ティアの境目は27Bで、
-   * 矛盾検知の抑制の境目（20B）とは別の実測から決まっている。
+   * ティア（`tier`）では代わりにならない。境目は `LARGE_MODEL_MIN_BILLIONS`
+   * で共通になったが、**ティアは大きさが取れなくても付く**——プロバイダで
+   * 決まる high（Claude・ChatGPT・Gemini）と、取れなかったときの light が
+   * あるので、抑制の判定はここを直に見る必要がある。
    */
   parameterSize?: string | null;
 }
@@ -79,27 +86,6 @@ export interface CapabilityProfile {
  * 抑制はゆるめる」という、実測でいちばん出来の悪かった組み合わせが渡る。
  */
 const LOCAL_PROVIDERS: readonly ProviderId[] = ["ollama", "lmstudio"];
-
-/**
- * 矛盾検知の抑制をゆるめてよい、モデルの大きさ（パラメータ数・B）。
- *
- * **実測で決めた**（2026-09-20、製品の経路 `novel.run` で3回ずつ。設計書6.10.8）。
- *
- * | モデル | 1.5（抑制あり） | 1.6（ゆるめた） | 1.6 の誤検出 |
- * |---|---|---|---|
- * | `gemma4:e4b`（8B・いまの既定） | 0/4 | 0/4 | **1〜2件**（1.5では0） |
- * | `gemma4:12b` | 1/4 | 2/4 | **2件**（罠に掛かった） |
- * | `gemma4:26b` | 2/4 | **4/4** | **0件** |
- *
- * **12b と 26b のあいだに線を引く。** 12b はゆるめると当たりが増えた
- * 代わりに罠へ掛かり、26b だけが誤検出0で満点を出した。**小さいモデルは
- * 「疑わしい」の線引きごと失う。**
- *
- * **ティアの境目（27B）は流用しない。** あれはチャンクの重さと観点の
- * 絞りのために決めた値で、`gemma4:26b` は standard 側に落ちる——
- * 使い回すと、**満点を出したモデルが抑制される側に入る。**
- */
-export const LOOSE_SUPPRESSION_MIN_BILLIONS = 20;
 
 /**
  * このモデルで、重い判断をさせてよいか。
@@ -140,7 +126,7 @@ export function capabilityProfile(input: CapabilityInput): CapabilityProfile {
  */
 function suppressUncertain(input: CapabilityInput): boolean {
   const billions = parameterSizeInBillions(input.parameterSize);
-  if (billions !== undefined) return billions < LOOSE_SUPPRESSION_MIN_BILLIONS;
+  if (billions !== undefined) return billions < LARGE_MODEL_MIN_BILLIONS;
   return LOCAL_PROVIDERS.includes(input.providerId);
 }
 
