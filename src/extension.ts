@@ -4503,10 +4503,17 @@ export async function activate(
           headline: "矛盾検知",
           parts,
           failedCount: result.failedChunks,
-          tail:
+          // **突き合わせなかった人物があることを黙らない**（設計書6.10.6）。
+          // 結果は「矛盾なし」と出るので、これが無いと作者には
+          // 「見て問題が無かった」と区別が付かない。落ちた話が0なら空文字
+          tail: [
+            result.missedNote,
             result.issues.length > 0
               ? "本文は書き換えていません。 設定と本文のどちらを直すかは作者が決めてください。"
               : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
         });
         return CHECK_COMPLETED;
       }

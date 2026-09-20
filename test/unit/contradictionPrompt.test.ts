@@ -11,6 +11,7 @@ import { buildProposalPanelHtml } from "../../src/views/proposalPanelHtml";
 import {
   contradictionMaterial,
   contradictionPrompt,
+  contradictionRun,
 } from "../../src/mcp/tools/contradiction";
 
 /**
@@ -555,5 +556,103 @@ describe("前の話に出た人物を引き継ぐ（設計書6.10.6）", () => {
     }).chunks[0];
 
     expect(first.carriedOverChapters).toEqual([]);
+  });
+});
+
+/*
+  **落としたことを言う**（設計書6.10.6）。
+
+  材料に載るのは**本文に名前が出た人物だけ**なので、一人称で語る話では
+  主人公の設定が1つも載らない。それでも結果は「矛盾なし」と出るため、
+  作者には**突き合わせていないのか、突き合わせて問題が無かったのか**が
+  区別できない。**穴は塞がない。塞がずに、落としたことを言う。**
+
+  答え付きの台（`seeded/contradiction`）の第4話がまさにその形で、
+  地の文が全部「俺」のため主人公「相沢 春人」だけが落ちる。
+*/
+describe("落とした人物を言う（設計書6.10.6）", () => {
+  const folder = "test/fixtures/seeded/contradiction";
+
+  function missedIn(file: string, carryOver?: number): string[] {
+    return contradictionMaterial({
+      folder,
+      filePath: `本文/${file}`,
+      numCtx: 16384,
+      carryOver,
+    }).chunks[0].missedCharacters;
+  }
+
+  test("第4話では、主人公だけが落ちたと言う", () => {
+    // 直前（第3話）の本文には名前が出ているのに、第4話には1度も出ない
+    expect(missedIn("004_ギプスが外れた日.txt")).toEqual(["相沢 春人"]);
+  });
+
+  /*
+    **材料に載らなかった人物を全部挙げてはいけない。** 登場人物が40人いれば
+    1話に出るのは数人なので、毎回37人が並んで騒がしくなる。挙げるのは
+    「直前の1話には名前が出ているのに、この話では落ちた人」だけである。
+  */
+  test("名前が本文に出ている話では、何も言わない", () => {
+    expect(missedIn("003_窓口の椅子.txt")).toEqual([]);
+    expect(missedIn("005_初雪の窓口.txt")).toEqual([]);
+  });
+
+  test("第1話には直前の話が無いので、何も言わない", () => {
+    expect(missedIn("001_九月の終わりの坂.txt")).toEqual([]);
+  });
+
+  /*
+    **引き継ぎ（`carryOver`）が効いている回では空になる。** 引き継いだ人物は
+    材料に載るので、落ちていない——「穴を塞いだ」と「落としたと言う」が
+    二重に出ないことを見張る。
+  */
+  test("carryOver を効かせると、第4話でも空になる", () => {
+    expect(missedIn("004_ギプスが外れた日.txt", 1)).toEqual([]);
+    expect(missedIn("004_ギプスが外れた日.txt", 2)).toEqual([]);
+  });
+
+  test("prompt の返り値に出る", () => {
+    const built = contradictionPrompt({
+      folder,
+      filePath: "本文/004_ギプスが外れた日.txt",
+      numCtx: 16384,
+    });
+
+    expect(built.chunks[0].missedCharacters).toEqual(["相沢 春人"]);
+  });
+
+  /*
+    **外部AIにも同じことを伝える**（`skipped` と同じ考え方）。`run` の結果に
+    出さないと、`ollama`・`sampling` は検算した結果しか返さないので、
+    落ちたことが呼んだ側へ一切届かない。
+  */
+  test("run の結果にも出る（黙って落とさない）", async () => {
+    // `claude` はプロンプトを返すだけなので、AIを呼ばずに確かめられる
+    const outcome = await contradictionRun({
+      folder,
+      filePath: "本文/004_ギプスが外れた日.txt",
+      numCtx: 16384,
+      runner: "claude",
+    });
+
+    expect(outcome.missed).toEqual([
+      {
+        chunkId: outcome.missed[0]?.chunkId ?? "",
+        chapterLabel: "第4話",
+        missedCharacters: ["相沢 春人"],
+      },
+    ]);
+    expect(outcome.missed[0].chunkId).toContain("004_ギプスが外れた日");
+  });
+
+  test("落ちていない話では、run の結果も空", async () => {
+    const outcome = await contradictionRun({
+      folder,
+      filePath: "本文/003_窓口の椅子.txt",
+      numCtx: 16384,
+      runner: "claude",
+    });
+
+    expect(outcome.missed).toEqual([]);
   });
 });

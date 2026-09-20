@@ -33,10 +33,12 @@ import {
   buildContradictionTermIndex,
   carryOverBodyText,
   createContradictionMaterial,
+  describeMissedCharacters,
   promptVersionWithCarryOver,
   CHARACTER_AS_OF_FIELDS,
   type CarryOverBody,
   type CarryOverResult,
+  type MissedCharacters,
   type RelevantOptions,
   type RelevantSettings,
 } from "../core/contradictionMaterial";
@@ -58,6 +60,7 @@ import {
   PastSceneIndex,
 } from "../core/pastSceneSelect";
 import { loadExcerptSources } from "../core/manuscriptSources";
+import type { ExcerptSource } from "../core/mentionExcerpts";
 import {
   buildContradictionCheckPrompt,
   CONTRADICTION_CATEGORIES,
@@ -164,6 +167,16 @@ export interface ContradictionRunResult {
    * 「本当に無い」のか「消しすぎている」のか作者に分からない。
    */
   verifyNote: string;
+  /**
+   * **突き合わせなかった人物があることの断り**（設計書6.10.6）。
+   * 落ちた話が無ければ空文字。
+   *
+   * **穴は塞がない。塞がずに、落としたことを言う。** 材料が落ちても結果は
+   * 「矛盾なし」と出るので、これが無いと作者には**突き合わせていないのか、
+   * 突き合わせて問題が無かったのか**が区別できない。誰を落としたかの詳細は
+   * 操作ログ（`logStep`）にある。
+   */
+  missedNote: string;
 }
 
 export interface CheckContradictionsOptions extends SuiteAwareOptions {
@@ -350,27 +363,37 @@ export async function checkContradictions(
   // 逃げ道（`chunkRetry.ts`）が受ける——ここで見込みを足すと、抜粋が0件の
   // 作品まで本文の割当が痩せ、チャンクの切れ目が変わってキャッシュが飛ぶ
   const pastSceneBudget = pastSceneMaxChars(info.contextWindow);
+  // **全話の本文はここで1回だけ読む。** 過去の場面の索引（6.74）と、
+  // 前の話の本文（6.10.6）が同じものを見る
+  const episodeSources = await collectEpisodeSources(work);
   // **渡りうるときだけ組む**（0.32.6のレビュー）。合本（1ファイルに全話）の
   // 作品では、全チャンクが合本の最小話数を名乗るので抜粋は必ず0件になる。
   // それでも索引を組み、確認ダイアログでは「渡します」と告げていた
-  const pastSceneIndex = await collectPastScenes(
-    work,
+  const pastSceneIndex = collectPastScenes(
+    episodeSources,
     chunks.map((chunk) => chunk.chapterStart)
   );
   /** チャンクごとの抜粋。鍵を決めるときと送るときで、同じものを使う */
   const pastSceneByChunk = new Map<string, string>();
 
   /*
-    **前の話に出た人物を引き継ぐための本文**（設計書6.10.6）。
+    **前の話の本文**（設計書6.10.6）。2つの用途で使う。
 
-    既定（0話）では**1ファイルも余分に読まない**——これは測るための口で、
-    いまの既定の動きは1文字も変えない。
+    1. 引き継ぎ（`carryOverChapters`）——**材料へ人物を足す**。既定は0で、
+       いまの既定の動きは1文字も変えない
+    2. **落としたことを言う**——直前の1話だけを見て、「物語の流れでは居る
+       はずなのに、この話の材料から落ちた人物」を数える。**材料は変えない**
+
+    2 は既定でも要るので、本文は必ず要る。**読むのは1回だけ**——
+    `collectPastScenes` と同じものを見るので、分けて読むと話数ぶんの
+    ファイルを二度読むことになる。
   */
   const carryOverChapters = options.carryOverChapters ?? 0;
-  const carryOverBodies =
-    carryOverChapters > 0 ? await collectCarryOverBodies(work) : [];
+  const carryOverBodies = carryOverBodiesOf(episodeSources);
   /** チャンクごとの引き継ぎ。鍵を決めるときと送るときで、同じものを使う */
   const carryOverByChunk = new Map<string, CarryOverResult>();
+  /** チャンクごとの「直前の1話」。**材料には入らない**（数えるためだけ） */
+  const previousBodyByChunk = new Map<string, string>();
 
   // **設定が変われば、同じ本文でも答えが変わる。**
   // 材料のハッシュをキャッシュの鍵へ入れないと、設定を直したのに
@@ -487,6 +510,29 @@ export async function checkContradictions(
       `${chunks.length}チャンク / ${chunkNote} / ` +
       `v${CONTRADICTION_CHECK_VERSION}`
   );
+
+  /*
+    **落としたことを言う**（設計書6.10.6）。
+
+    材料に載るのは**本文に名前が出た人物だけ**なので、一人称で語る話では
+    主人公の設定が1つも載らない（作者の219話で44話＝20%）。それでも結果は
+    「矛盾なし」と出るため、作者には**突き合わせていないのか、突き合わせて
+    問題が無かったのか**が区別できない。**穴は塞がない。落としたことを言う。**
+
+    **AIを呼ぶ前に、全チャンクぶんを数える。** 処理済み（キャッシュ）の
+    チャンクでも落ちていることは変わらないので、送るチャンクだけを見ると
+    「2回目だけ何も言わない」ことになる。
+  */
+  const missedByChunk = missedCharactersByChunk();
+  for (const entry of missedByChunk) {
+    logStep(
+      `矛盾検知：${entry.label}は「${entry.names.join("」「")}」を` +
+        "突き合わせていません（直前の話には出ています。" +
+        "本文に名前が無いため材料に載りませんでした）"
+    );
+  }
+  // 完了の知らせへ出す1行。**落ちた話が0なら空**（毎回出る断りは読まれない）
+  const missedNote = describeMissedCharacters(missedByChunk);
 
   // 下の入れ子の関数では、上の `if (!resolved) return` による絞り込みが
   // 効かない（あとから書き換わりうるとみなされる）。ここで束ねておく
@@ -884,6 +930,7 @@ export async function checkContradictions(
     cancelled,
     processedChunks,
     verifyNote,
+    missedNote,
   };
 
   /**
@@ -930,6 +977,55 @@ export async function checkContradictions(
     });
     carryOverByChunk.set(chunk.hash, carried);
     return carried;
+  }
+
+  /**
+   * そのチャンクの**直前の1話**の本文（設計書6.10.6「落としたことを言う」）。
+   *
+   * **材料には入らないし、鍵にも混ぜない。** 見るのは「物語の流れでは
+   * 居るはずなのに落ちた人物」を数えるためだけなので、プロンプトは
+   * 1文字も変わらない——変えるとキャッシュが飛び、測り直しになる。
+   *
+   * **1話ぶんだけ**遡る。遡るほど「もう居ない人物」が並び、毎回騒がしくなる。
+   */
+  function previousBodyFor(chunk: Chunk): string {
+    const remembered = previousBodyByChunk.get(chunk.hash);
+    if (remembered !== undefined) return remembered;
+
+    const previous = carryOverBodyText({
+      bodies: carryOverBodies,
+      // まとめたチャンクは、いちばん前の話に合わせる（`carryOverFor` と同じ）
+      chapter: chunk.chapterStart,
+      chapters: 1,
+    }).text;
+    previousBodyByChunk.set(chunk.hash, previous);
+    return previous;
+  }
+
+  /**
+   * 話ごとに、**直前の話には名前が出ているのに、この話の材料へ載らなかった
+   * 人物**（設計書6.10.6）。落ちていないチャンクは並べない。
+   *
+   * **材料に載らなかった人物を全部は挙げない。** 登場人物が40人いれば
+   * 1話に出るのは数人なので、毎回37人が並んで騒がしくなる。
+   */
+  function missedCharactersByChunk(): MissedCharacters[] {
+    const entries: MissedCharacters[] = [];
+    for (const chunk of chunks) {
+      // **送るときと同じ材料で数える。** 引き継ぎ（`carryOver`）が効いて
+      // いれば、その人物は載っているので落ちていない
+      const names = settings.relevantFor(chunk.text, chunk.chapterStart, {
+        carryOverText: carryOverFor(chunk).text,
+        previousBodyText: previousBodyFor(chunk),
+      }).missedCharacters;
+      if (names.length === 0) continue;
+      const label = describeChunkScope(chunk, (filePath) =>
+        chapterLabelByFile.get(filePath)
+      );
+      // 話数の読めない本文でも、どこの話かは言う（ログで辿れるように）
+      entries.push({ label: label || `${chunk.index + 1}番目のまとまり`, names });
+    }
+    return entries;
   }
 
   /**
@@ -1228,64 +1324,58 @@ async function collectSettings(
 }
 
 /**
- * 過去の場面の索引を作る（設計書6.74）。
+ * 全話の本文を読む。**1回の検知で1回だけ**（設計書6.74・6.10.6）。
  *
- * **1回の検知で1回だけ呼ぶ。** 全話を読み直すので、チャンクごとに
- * 呼ぶと作品の大きさぶんだけ二乗で効く。
+ * 用途が2つある——過去の関連場面の索引（6.74）と、前の話の本文
+ * （6.10.6の引き継ぎ・落としたことを言う）。**別々に読んでいたのを
+ * ここへ寄せた**（0.70.10）。落としたことを言うのは既定でも要るので、
+ * 分けたままだと**毎回、話数ぶんのファイルを二度読む**ことになる。
  *
- * **読めなくても検知は続ける。** 過去の場面は補助の材料であり、
- * 無ければ従来どおりの入力に戻るだけである。ここで止めると、
- * 本文が1つ壊れているだけで矛盾検知そのものが使えなくなる。
- *
- * **1件も渡りようがない作品では、索引を組まない**（0.32.6のレビュー）。
- * 合本（1ファイルに全話）はチャンクの話数がファイル単位に決まるため、
- * どのチャンクにも「自分より前の話の場面」が存在しない。索引作り
- * （BM25）はそこそこ重く、確認ダイアログの一文も嘘になる。
- */
-/**
- * 引き継ぎのもとになる本文を、話数つきで読む（設計書6.10.6）。
- *
- * **読むのは引き継ぐときだけ**（呼ぶ側が0話なら呼ばない）。既定の動きで
- * 余分にファイルを読まないようにする。
- *
- * **読めなくても検知は続ける**（`collectPastScenes` と同じ）。引き継ぎは
- * 補助で、無ければ従来どおりの材料に戻るだけである。
+ * **読めなくても検知は続ける。** どちらも補助の材料であり、無ければ
+ * 従来どおりの入力に戻るだけである。ここで止めると、本文が1つ壊れて
+ * いるだけで矛盾検知そのものが使えなくなる。
  *
  * 本文の読み方は既存の作法（`loadExcerptSources`）に合わせる——合本は
  * 中の話ごとに分かれ、シーンメモは抜かれる。**写しを作らない。**
  */
-async function collectCarryOverBodies(
+async function collectEpisodeSources(
   work: WorkEntry
-): Promise<CarryOverBody[]> {
+): Promise<ExcerptSource[]> {
   try {
-    const loaded = await loadExcerptSources(work);
-    return loaded.sources.map((source) => ({
-      chapter: source.chapter ?? null,
-      text: source.text,
-    }));
+    return (await loadExcerptSources(work)).sources;
   } catch (error) {
-    logFailure("矛盾検知：引き継ぐ本文の読み込み", {
+    logFailure("矛盾検知：本文の読み込み（過去の場面・前の話）", {
       詳細: error instanceof Error ? error.message : String(error),
     });
     return [];
   }
 }
 
-async function collectPastScenes(
-  work: WorkEntry,
+/** 読んだ本文を、話数つきの形へ移す（設計書6.10.6） */
+function carryOverBodiesOf(
+  sources: readonly ExcerptSource[]
+): CarryOverBody[] {
+  return sources.map((source) => ({
+    chapter: source.chapter ?? null,
+    text: source.text,
+  }));
+}
+
+/**
+ * 過去の場面の索引を作る（設計書6.74）。
+ *
+ * **1件も渡りようがない作品では、索引を組まない**（0.32.6のレビュー）。
+ * 合本（1ファイルに全話）はチャンクの話数がファイル単位に決まるため、
+ * どのチャンクにも「自分より前の話の場面」が存在しない。索引作り
+ * （BM25）はそこそこ重く、確認ダイアログの一文も嘘になる。
+ */
+function collectPastScenes(
+  sources: readonly ExcerptSource[],
   /** チャンクの話数。**渡りうるかの判断に要る**（`anyPastSceneReachable`） */
   chunkChapters: readonly (number | null)[]
-): Promise<PastSceneIndex | undefined> {
-  try {
-    const loaded = await loadExcerptSources(work);
-    const scenes = buildPastScenes(loaded.sources);
-    if (scenes.length === 0) return undefined;
-    if (!anyPastSceneReachable(scenes, chunkChapters)) return undefined;
-    return new PastSceneIndex(scenes);
-  } catch (error) {
-    logFailure("矛盾検知：過去の場面の読み込み", {
-      詳細: error instanceof Error ? error.message : String(error),
-    });
-    return undefined;
-  }
+): PastSceneIndex | undefined {
+  const scenes = buildPastScenes(sources);
+  if (scenes.length === 0) return undefined;
+  if (!anyPastSceneReachable(scenes, chunkChapters)) return undefined;
+  return new PastSceneIndex(scenes);
 }

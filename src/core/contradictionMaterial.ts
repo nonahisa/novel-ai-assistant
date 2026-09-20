@@ -60,6 +60,22 @@ export interface RelevantSettings {
    * 矛盾を作り出す。
    */
   hasAnything: boolean;
+  /**
+   * **直前の話の本文には名前が出ているのに、この材料に載らなかった人物**
+   * （設計書6.10.6「落としたことを言う」）。正式名称で返す。
+   *
+   * **穴は塞がない。塞がずに、落としたことを言うためだけの欄**である
+   * ——`characters` にも `hasAnything` にも影響しない（プロンプトが1文字
+   * でも変わるとキャッシュが飛び、測り直しになる）。
+   *
+   * **材料に載らなかった人物を全部挙げはしない。** 登場人物が40人いれば、
+   * 1話に出るのは数人なので、毎回37人が並んで騒がしくなる。**物語の流れ
+   * では居るはずなのに落ちた人**＝直前の1話に名前が出ている人だけを挙げる。
+   *
+   * **話数で外れた人は入れない**（6.10.3）。その話の時点でまだ分かって
+   * いないから外したのであって、名前が出ないせいで落ちたのではない。
+   */
+  missedCharacters: string[];
 }
 
 /**
@@ -77,6 +93,17 @@ export interface RelevantOptions {
    * ためだけに見るので、増えるのは【登場人物設定】の欄だけである。
    */
   carryOverText?: string;
+  /**
+   * **直前の1話の本文**（設計書6.10.6の「落としたことを言う」）。
+   *
+   * **材料には1文字も入らないし、人物も増やさない。** ここを見るのは
+   * `missedCharacters` を数えるためだけである——プロンプトが変わると
+   * キャッシュの鍵に対して別の材料で得た答えが入る。
+   *
+   * **1話ぶんでよい。** 「物語の流れでは居るはずなのに落ちた人」を言う
+   * のが目的なので、遡るほど**もう居ない人**が並んで騒がしくなる。
+   */
+  previousBodyText?: string;
 }
 
 export interface ContradictionMaterial {
@@ -219,6 +246,36 @@ export function createContradictionMaterial(options: {
         .filter((item) => !isEmptyAfterRollback(item, CHARACTER_AS_OF_FIELDS))
         .map((item) => describeCharacter(item, []))
         .join("\n\n");
+
+      /*
+        **落としたことを言う**（設計書6.10.6）。
+
+        材料の選び方はここまでで終わっており、以下は**数えるだけ**である
+        ——`characterText` も `hasAnything` も、もう変わらない。
+
+        挙げるのは「直前の1話には名前が出ているのに、この話の材料に載らな
+        かった人物」だけ。**引き継ぎ（`carryOverText`）が効いている回では
+        `seenCharacters` に入っているので、当然ここは空になる。**
+      */
+      const missedCharacters: string[] = [];
+      const previousBodyText = relevantOptions?.previousBodyText ?? "";
+      if (previousBodyText) {
+        for (const match of index.find(previousBodyText)) {
+          if (match.entry.kind !== "character") continue;
+          // 本文に名前が出ているなら落ちていない（時系列で外れた人は下で落ちる）
+          if (seenCharacters.has(match.entry.id)) continue;
+          const record = characterById.get(match.entry.id);
+          if (!record) continue;
+          // **話数で外した人は「落とした」と言わない**（6.10.3）。その話の
+          // 時点でまだ分かっていないから外したのであって、名前のせいではない
+          if (!hasAppearedBy(record.appearedChapters, chapter)) continue;
+          const asOf = recordAsOf(record, CHARACTER_AS_OF_FIELDS, chapter);
+          if (isEmptyAfterRollback(asOf, CHARACTER_AS_OF_FIELDS)) continue;
+          // 別名で何度も当たるので、正式名称で1回だけ
+          if (missedCharacters.includes(record.name)) continue;
+          missedCharacters.push(record.name);
+        }
+      }
       const locationText = [...seenLocations]
         .map((id) => locationById.get(id))
         .filter((item) => item !== undefined)
@@ -246,6 +303,7 @@ export function createContradictionMaterial(options: {
         hasAnything: Boolean(
           characterText || locationText || worldItems.length > 0
         ),
+        missedCharacters,
       };
     },
     namesIn(text) {
@@ -260,6 +318,40 @@ export function createContradictionMaterial(options: {
       return names;
     },
   };
+}
+
+/** 突き合わせなかった1話ぶん（設計書6.10.6「落としたことを言う」） */
+export interface MissedCharacters {
+  /** 話の名前（`describeChunkScope`）。まとめたチャンクは「第4〜5話」 */
+  label: string;
+  /** 直前の話には名前が出ているのに、材料へ載らなかった人物 */
+  names: string[];
+}
+
+/**
+ * 落としたことを、完了の知らせへ1行で書く（設計書6.10.6）。
+ *
+ * **落ちた話が0なら何も言わない。** 毎回出る断り書きは読まれなくなる。
+ *
+ * **原稿を直せとは言わない。** 名前を本文に出すかどうかは文章の都合で、
+ * こちらが決めることではない——**仕組みを説明して、作者に選ばせる。**
+ * 誰を落としたのかは操作ログにあるので、そこへ案内する。
+ *
+ * 文言を `features` ではなくここへ置くのは、**VS Code を通さずに測る**
+ * ためである（`core` は `vscode` に依存しない）。
+ */
+export function describeMissedCharacters(
+  entries: readonly MissedCharacters[]
+): string {
+  if (entries.length === 0) return "";
+  // まとめたチャンクは1つの札を名乗るので、札の数で数える
+  const labels = new Set(entries.map((entry) => entry.label));
+  return (
+    `${labels.size}話で、直前の話に出ていた人物を突き合わせていません` +
+    "（本文に名前が出ないため）。" +
+    "本文に名前が1度でも出れば、その回でも突き合わせます。" +
+    "詳しくは出力をご覧ください。"
+  );
 }
 
 /**

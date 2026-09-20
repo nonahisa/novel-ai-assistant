@@ -270,26 +270,50 @@ function promptVersionWithSuppression(
 /** 空の引き継ぎ。**同じ形を返す**（呼ぶ側に分岐を増やさない） */
 const NO_CARRY_OVER: CarryOverResult = { chapters: [], text: "" };
 
+/** 前の話の本文の引き方（材料へ載せる用と、落としたことを言う用） */
+interface CarryOverLookup {
+  /** 材料へ載せるために引き継ぐ本文。`carryOver` が0なら空 */
+  carried(chapter: number | null): CarryOverResult;
+  /**
+   * **直前の1話の本文**（設計書6.10.6の「落としたことを言う」）。
+   *
+   * **材料には入らない。** 落とした人物を数えるためだけに見るので、
+   * `carryOver` の指定に関わらず**必ず1話ぶん**を引く。
+   */
+  previous(chapter: number | null): string;
+}
+
 /**
- * チャンクの話数から、引き継ぐ本文を引く役を作る。
- *
- * **0話のときは1ファイルも余分に読まない。** 既定の呼び出しでは、
- * これまでと同じだけしか読まないようにする。
+ * チャンクの話数から、前の話の本文を引く役を作る。
  *
  * 本文の並べ方は既存の作法（`orderedEpisodeBodies`）に合わせる——**写しを
  * 作らない**。合本（1ファイルに何話も）は中の話ごとに分かれて返るので、
  * 「前の話」も合本の中から採れる。
+ *
+ * **本文は遅れて1回だけ読む。** 引き継ぎ（`carryOver`）と落とした人物の
+ * 検出が同じものを見るので、別々に読むと話数ぶんのファイルを二度読む。
  */
-function carryOverReader(
-  folder: string,
-  chapters: number
-): (chapter: number | null) => CarryOverResult {
-  if (chapters <= 0) return () => NO_CARRY_OVER;
-  const bodies = orderedEpisodeBodies(folder).map((episode) => ({
-    chapter: episode.chapter,
-    text: episode.body,
-  }));
-  return (chapter) => carryOverBodyText({ bodies, chapter, chapters });
+function carryOverReader(folder: string, chapters: number): CarryOverLookup {
+  let bodies: Array<{ chapter: number | null; text: string }> | undefined;
+  const bodiesOf = () => {
+    if (bodies === undefined) {
+      bodies = orderedEpisodeBodies(folder).map((episode) => ({
+        chapter: episode.chapter,
+        text: episode.body,
+      }));
+    }
+    return bodies;
+  };
+  return {
+    carried(chapter) {
+      if (chapters <= 0) return NO_CARRY_OVER;
+      return carryOverBodyText({ bodies: bodiesOf(), chapter, chapters });
+    },
+    previous(chapter) {
+      return carryOverBodyText({ bodies: bodiesOf(), chapter, chapters: 1 })
+        .text;
+    },
+  };
 }
 
 export interface ContradictionChunkMaterial {
@@ -314,6 +338,15 @@ export interface ContradictionChunkMaterial {
    * 「載るようになった人物」がどこから来たのか測りようがない。
    */
   carriedOverChapters: number[];
+  /**
+   * 直前の話には名前が出ているのに、この材料に載らなかった人物
+   * （設計書6.10.6「落としたことを言う」）。
+   *
+   * **落としたことを黙らない**（`skipped` と同じ考え方）。材料が落ちても
+   * 結果は「矛盾なし」と出るので、**突き合わせていないのか、突き合わせて
+   * 問題が無かったのか**が呼ぶ側に区別できない。
+   */
+  missedCharacters: string[];
 }
 
 export interface ContradictionMaterialInput {
@@ -361,15 +394,19 @@ function materialForChunk(
   chunk: Chunk,
   maxChars: number,
   settings: Settings,
-  carryOver: (chapter: number | null) => CarryOverResult
+  carryOver: CarryOverLookup
 ): ContradictionChunkMaterial {
   // **引き継ぐのは人物を索引で見つけるためだけ**（設計書6.10.6）。
   // この本文そのものはプロンプトへ入らない
-  const carried = carryOver(chunk.chapterStart);
+  const carried = carryOver.carried(chunk.chapterStart);
   const relevant = settings.material.relevantFor(
     chunk.text,
     chunk.chapterStart,
-    { carryOverText: carried.text }
+    {
+      carryOverText: carried.text,
+      // **落としたことを言うためだけに見る**（6.10.6）。材料は変わらない
+      previousBodyText: carryOver.previous(chunk.chapterStart),
+    }
   );
   return {
     chunkId: chunkIdOf(relative, chunk, maxChars),
@@ -385,6 +422,7 @@ function materialForChunk(
     // 「この本文に出た名前」であって、前の話に出た名前ではない
     names: settings.material.namesIn(chunk.text),
     carriedOverChapters: carried.chapters,
+    missedCharacters: relevant.missedCharacters,
   };
 }
 
@@ -401,6 +439,15 @@ export interface ContradictionChunkPrompt {
    * あとから測り直す人に分からなくなる
    */
   carriedOverChapters: number[];
+  /**
+   * 直前の話には名前が出ているのに、この材料に載らなかった人物
+   * （設計書6.10.6「落としたことを言う」）。
+   *
+   * **穴は塞がない。** ここが空でない回は、その人物を**突き合わせずに**
+   * 出した答えである——外部AIが「矛盾なし」をそのまま受け取らないよう、
+   * プロンプトと一緒に返す。
+   */
+  missedCharacters: string[];
 }
 
 export interface ContradictionPromptInput extends ContradictionMaterialInput {
@@ -463,6 +510,7 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
       chapterLabel: material.chapterLabel,
       chars: chunk.text.length,
       carriedOverChapters: material.carriedOverChapters,
+      missedCharacters: material.missedCharacters,
       userPrompt: buildContradictionCheckPrompt({
         chapterLabel: material.chapterLabel,
         chunkTextWithLineNumbers: withLineNumbers(chunk),
@@ -530,6 +578,20 @@ function validateAgainst(
   };
 }
 
+/**
+ * 突き合わせずに済ませたところ（設計書6.10.6「落としたことを言う」）。
+ *
+ * **`skipped` と同じ考え方で、`run` の結果にも出す。** `runner: claude` なら
+ * プロンプトに付いて返るが、`ollama`・`sampling` は検算した結果しか返さない
+ * ので、ここに出さないと**落ちたことが外部AIに一切届かない**。
+ */
+export interface ContradictionMissedChunk {
+  chunkId: string;
+  chapterLabel: string;
+  /** 直前の話には名前が出ているのに、材料へ載らなかった人物 */
+  missedCharacters: string[];
+}
+
 export interface ContradictionRunInput extends ContradictionPromptInput {
   runner: RunnerKind;
   endpoint?: string;
@@ -538,10 +600,28 @@ export interface ContradictionRunInput extends ContradictionPromptInput {
   temperature?: number;
 }
 
-export async function contradictionRun(
-  input: ContradictionRunInput
-): Promise<RunOutcome<ContradictionChunkPrompt, ContradictionValidateResult>> {
+export async function contradictionRun(input: ContradictionRunInput): Promise<
+  RunOutcome<ContradictionChunkPrompt, ContradictionValidateResult> & {
+    /** 突き合わせなかった人物。**空でも欄は出す**（黙って落とさない） */
+    missed: ContradictionMissedChunk[];
+  }
+> {
   const prompts = contradictionPrompt(input);
+
+  /*
+    **落としたことを言う**（設計書6.10.6）。
+
+    材料が落ちても結果は「矛盾なし」と出るので、受け取った側には
+    **突き合わせていないのか、突き合わせて問題が無かったのか**が区別
+    できない。AIを呼ぶ前に決まっている話なので、ここで数えて返す。
+  */
+  const missed: ContradictionMissedChunk[] = prompts.chunks
+    .filter((chunk) => chunk.missedCharacters.length > 0)
+    .map((chunk) => ({
+      chunkId: chunk.chunkId,
+      chapterLabel: chunk.chapterLabel,
+      missedCharacters: chunk.missedCharacters,
+    }));
 
   /*
     **ここはチャンクキャッシュを渡さない**（設計書6.87.17）。
@@ -554,7 +634,7 @@ export async function contradictionRun(
     どちらも良くないので、揃えられるようになるまで貯めない。
   */
   // 行き先ごとの分岐は `runByRunner` が持つ（設計書6.87.12）
-  return runByRunner(
+  const outcome = await runByRunner(
     input,
     prompts,
     VALIDATE_WITH,
@@ -566,4 +646,5 @@ export async function contradictionRun(
       ),
     ollamaGenerate
   );
+  return { ...outcome, missed };
 }

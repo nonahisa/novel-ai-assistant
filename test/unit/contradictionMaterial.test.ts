@@ -3,6 +3,7 @@ import {
   buildContradictionTermIndex,
   carryOverBodyText,
   createContradictionMaterial,
+  describeMissedCharacters,
   promptVersionWithCarryOver,
   CARRY_OVER_MAX_CHAPTERS,
 } from "../../src/core/contradictionMaterial";
@@ -553,5 +554,130 @@ describe("引き継ぎをキャッシュの鍵へ混ぜる", () => {
     expect(promptVersionWithCarryOver("1.5:abc", "相沢は坂を下りた")).toBe(
       promptVersionWithCarryOver("1.5:abc", "相沢は坂を下りた")
     );
+  });
+});
+
+/*
+  **落としたことを言う**（設計書6.10.6）。
+
+  材料に載るのは本文に名前が出た人物だけなので、一人称で語る話では主人公が
+  落ちる。**穴は塞がない。塞がずに、落としたことを言うだけ**である——
+  `characters` も `hasAnything` も、ここでは1文字も変わらない。
+*/
+describe("落とした人物を数える（設計書6.10.6）", () => {
+  const haruto = person({
+    id: "char_001",
+    name: "相沢 春人",
+    role: "窓口係",
+    chapters: [1, 2, 3, 4],
+  });
+  const rei = person({
+    id: "char_002",
+    name: "如月 玲",
+    role: "担任教師",
+    chapters: [1, 2, 3, 4],
+  });
+
+  test("直前の話には出ているのに、この話で落ちた人物を挙げる", () => {
+    const relevant = material({ people: [haruto, rei] }).relevantFor(
+      "俺は窓口の椅子に座っていた。",
+      4,
+      { previousBodyText: "相沢は坂を下りた。如月も一緒だった。" }
+    );
+
+    // 名前が出ていないので、材料には載らない（ここは従来どおり）
+    expect(relevant.characters).toBe("");
+    // 落としたことだけを言う
+    expect(relevant.missedCharacters).toEqual(["相沢 春人", "如月 玲"]);
+  });
+
+  test("本文に名前が出ていれば、落ちていない", () => {
+    const relevant = material({ people: [haruto, rei] }).relevantFor(
+      "相沢は窓口の椅子に座っていた。",
+      4,
+      { previousBodyText: "相沢は坂を下りた。" }
+    );
+
+    expect(relevant.characters).toBe(describeCharacter(haruto, []));
+    expect(relevant.missedCharacters).toEqual([]);
+  });
+
+  /*
+    **引き継ぎが効いている回では空になる。** 引き継いだ人物は材料に載るので
+    落ちていない——「穴を塞いだ」と「落としたと言う」が二重に出ない。
+  */
+  test("引き継いだ人物は、落としたとは言わない", () => {
+    const relevant = material({ people: [haruto] }).relevantFor(
+      "俺は窓口の椅子に座っていた。",
+      4,
+      {
+        carryOverText: "相沢は坂を下りた。",
+        previousBodyText: "相沢は坂を下りた。",
+      }
+    );
+
+    expect(relevant.characters).toBe(describeCharacter(haruto, []));
+    expect(relevant.missedCharacters).toEqual([]);
+  });
+
+  /*
+    **話数で外した人は「落とした」と言わない**（設計書6.10.3）。その話の
+    時点でまだ分かっていないから外したのであって、名前が出ないせいでは
+    ない。ここを緩めると、まだ登場していない人物が毎回並ぶ。
+  */
+  test("その話の時点でまだ登場していない人物は、数えない", () => {
+    const later = person({
+      id: "char_003",
+      name: "黒瀬 澪",
+      role: "転校生",
+      chapters: [9],
+    });
+
+    const relevant = material({ people: [later] }).relevantFor(
+      "俺は窓口の椅子に座っていた。",
+      4,
+      { previousBodyText: "黒瀬は坂を下りた。" }
+    );
+
+    expect(relevant.missedCharacters).toEqual([]);
+  });
+
+  test("直前の話を渡さなければ、何も言わない（既定の呼び方）", () => {
+    const relevant = material({ people: [haruto] }).relevantFor(
+      "俺は窓口の椅子に座っていた。",
+      4
+    );
+
+    expect(relevant.missedCharacters).toEqual([]);
+  });
+});
+
+describe("落としたことを、完了の知らせへ1行で書く（設計書6.10.6）", () => {
+  test("落ちた話が0なら、何も出さない", () => {
+    // **毎回出る断り書きは読まれなくなる。** 起きた回にだけ言う
+    expect(describeMissedCharacters([])).toBe("");
+  });
+
+  test("落ちた話の数と、作者にできることを言う", () => {
+    const note = describeMissedCharacters([
+      { label: "第4話", names: ["相沢 春人"] },
+      { label: "第9話", names: ["相沢 春人", "如月 玲"] },
+    ]);
+
+    expect(note).toContain("2話で");
+    expect(note).toContain("突き合わせていません");
+    // **原稿を直せとは言わない。** 仕組みを説明して、作者に選ばせる
+    expect(note).toContain("本文に名前が1度でも出れば、その回でも突き合わせます");
+    // 誰を落としたかは操作ログにある
+    expect(note).toContain("出力");
+  });
+
+  test("同じ話が2つのチャンクに分かれても、1話と数える", () => {
+    const note = describeMissedCharacters([
+      { label: "第4話", names: ["相沢 春人"] },
+      { label: "第4話", names: ["相沢 春人"] },
+    ]);
+
+    expect(note).toContain("1話で");
   });
 });
