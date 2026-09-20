@@ -372,6 +372,10 @@ import {
   writeAiInstructions,
 } from "./features/writeAiInstructions";
 import {
+  importAdviceProfileMirror,
+  refreshAdviceProfileMirror,
+} from "./features/adviceProfileMirror";
+import {
   reviewProposals,
   toggleReviewLock,
 } from "./features/reviewProposals";
@@ -1499,7 +1503,16 @@ export async function activate(
   // ことで、AIが返した文字列がコマンド名になる余地を無くしている
   // 作者のタイプ別の助言方針（設計書6.86）。**`globalState` に置く**——
   // 受容度や自信度は、GitHubで編集部と共有してよい情報ではない
-  const advicePolicies = new AdvicePolicyStore(context.globalState);
+  // **方針が変わったら、そのつど控えを書き直す**（設計書6.86.7）。
+  // 控えは `globalStorage` の下に置き、MCP サーバー（VS Code の外）が読む——
+  // 書き出さないと、**外部AI経由の相談だけタイプの方針も調子も効かない**
+  const advicePolicies = new AdvicePolicyStore(context.globalState, () => {
+    void refreshAdviceProfileMirror(
+      context,
+      advicePolicies,
+      registry.list()
+    ).catch(() => undefined);
+  });
   // 作家タイプ診断（設計書6.90）。**作者ごとに1つ**——段取りや出し先は
   // 作品を変えても大きくは変わらない癖なので、作品ごとに聞き直さない
   const writerProfiles = new WriterProfileStore(context.globalState);
@@ -1711,6 +1724,17 @@ export async function activate(
   // 判定2が拾って「開き直してください」と出る。
   // 失敗しても何も言わない（次に指示書を置くときに写し直される）
   void refreshStableBundle(context).catch(() => undefined);
+
+  // ─── 助言方針の控え（設計書6.86.7） ───
+  // **取り込んでから書き出す。** 外部AI経由の相談で動いた推定は
+  // `globalStorage` の控えにしか無いので、先に取り込まないと次の書き出しで
+  // 消える。取り込むのは「控えのほうが新しい」ときだけで、決められない
+  // ときは手元（`globalState`）を残す。
+  // 失敗しても何も言わない（画面に出すような話ではない。理由はログへ）
+  void (async () => {
+    await importAdviceProfileMirror(context, advicePolicies, registry.list());
+    await refreshAdviceProfileMirror(context, advicePolicies, registry.list());
+  })().catch(() => undefined);
 
   // ─── ステータスバー（現在開いているファイルの文字数） ───
   const statusBar = vscode.window.createStatusBarItem(

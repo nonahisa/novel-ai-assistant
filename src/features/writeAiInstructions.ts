@@ -22,6 +22,8 @@ import {
 import type { AiInstructionUsage } from "../core/aiInstructionUsage";
 import { AiInstructionUsageStore } from "../core/aiInstructionUsageStore";
 import { hashBytes } from "../core/hash";
+// **保管庫の場所は1か所で決める**（助言方針の控えも同じ場所へ置くため）
+import { globalStorageRoot } from "./globalStoragePath";
 import { logLine, useLogFile } from "../core/logger";
 import { SERVER_NAME } from "../mcp/version";
 import { cancelItem } from "../views/dialogs";
@@ -449,19 +451,6 @@ async function stableBundlePath(
     );
     return source;
   }
-}
-
-/**
- * 保管庫（`globalStorageUri`）の場所を、持ち回る文字列にする。
- *
- * **`vscode-userdata:` は手元に実体があるので OS のパスへ倒す**
- * （`core/modelTuningStore.ts`・`views/openDocument.ts` と同じ。拡張機能
- * 開発ホストではこの仕組みで渡ってくる）。`fromUri` の一般規則に任せると
- * `C:\vscode-userdata:\…` という無い場所を指す。
- */
-function globalStorageRoot(context: vscode.ExtensionContext): string {
-  const uri = context.globalStorageUri;
-  return uri.scheme === "vscode-userdata" ? uri.fsPath : fromUri(uri);
 }
 
 /** 既に指示書があるものを挙げる（同じ中身かどうかはここでは見ない） */

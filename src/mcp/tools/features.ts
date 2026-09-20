@@ -707,7 +707,10 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
   },
   chat: {
     prompt: (input) => chatPrompt(chatArgs(input)),
-    validate: (input) => chatValidate({ response: needResponse(input) }),
+    validate: (input) =>
+      // **`folder` を渡す。** 相談の答えに入っている推定（`profileSignals`）を
+      // 助言方針の控えへ書き戻す先が、ここでしか分からない（設計書6.86.7）
+      chatValidate({ folder: input.folder, response: needResponse(input) }),
     run: (input) => chatRun({ ...chatArgs(input), ...runnerArgs(input) }),
   },
 };

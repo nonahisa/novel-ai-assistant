@@ -13,6 +13,13 @@ import { buildAdvicePolicyPrompt } from "../../prompts/advicePolicy";
 import { buildWriterStylePrompt } from "../../prompts/writerStyle";
 import { buildReaderTypePrompt } from "../../prompts/readerTarget";
 import { scoreAnswers, type AdviceProfile } from "../../core/advicePolicy";
+import {
+  readAdviceProfile,
+  updateAdviceProfile,
+} from "../adviceProfileMirror";
+// **指紋は `core/hash.ts` から取る**（`core/textFile.ts` の `hashText` は
+// `vscode` を引くので、外から呼ぶ束には持ち込めない。設計書6.87.3）
+import { hashText } from "../../core/hash";
 import { buildWriterStyle } from "../../core/writerStyle";
 import { parseReaderProfile } from "../../core/readerProfileParse";
 import { READER_PROFILE_FILE } from "../../models/readerProfile";
@@ -50,12 +57,20 @@ import {
  * | 診断 | どこに在るか | MCPから |
  * |---|---|---|
  * | ターゲット読者（P-38） | 作品の `設定/読者像.json` | **読める**（製品と同じファイル） |
- * | 助言方針（P-21） | `globalState`（機械ごと） | 読めない → **答えを渡してもらう** |
- * | 執筆スタイル（P-39） | `globalState`（機械ごと） | 同上 |
+ * | 助言方針（P-21） | `globalState`（機械ごと） | **控えを読む**（下記）／答えを渡してもらう |
+ * | 執筆スタイル（P-39） | `globalState`（機械ごと） | 読めない → **答えを渡してもらう** |
  *
  * `globalState` は VS Code の持ち物で、作品フォルダーの外にある。
  * **MCPが読むのは渡された `folder` の配下だけ**（設計書6.87.8の守り③）なので、
  * そこを覗きにいくことはしない。
+ *
+ * **助言方針だけは、控えを読む**（0.71.x。設計書6.86.7）。答えを渡してもらう
+ * 形だと、**9問の点数までは組み立てられても「いまの調子」（受容度・自信度）が
+ * 永久に渡らない**——あれは作者に聞かずに相談から推定する値なので、
+ * 渡す口そのものが無い。拡張機能が `globalStorageUri` の下（作品フォルダーの
+ * 外。作者の目にも Git にも触れない）へ書き出した控えを
+ * `mcp/adviceProfileMirror.ts` が読む。**渡された答えのほうが優先**で、
+ * 控えも無ければこれまでどおり1字も送らない。
  *
  * **代わりに「作者が診断で答えたもの」を受け取る。** 内部の保存の形ではなく
  * 答えそのものを受け取り、**製品の関数**（`scoreAnswers`・`buildWriterStyle`）で
@@ -101,6 +116,15 @@ export const CHAT_WRITER_STYLE_SCHEMA = z.object({
 /** 相談へ足した診断の内訳。**何を送ったのかを、呼ぶ側が読めるように** */
 export interface ChatDiagnosisReport {
   advicePolicy: boolean;
+  /**
+   * 助言方針をどこから取ったか。
+   *
+   * **中身は返さない**（タイプの方針は systemPrompt に在るが、
+   * 受容度・自信度は作者にも見せないと決めたものである。6.86.2）。
+   * ここで言うのは出どころだけ——測るときに「渡した答えが効いたのか、
+   * 控えが効いたのか」を取り違えないために要る。
+   */
+  advicePolicySource?: "input" | "mirror";
   writerStyle: boolean;
   readerType: boolean;
   /** 送らなかった軸と、その理由 */
@@ -168,6 +192,8 @@ function buildDiagnosisBlocks(
   };
 
   if (input.adviceAnswers) {
+    // **明示が最優先。** 控えがあっても上書きしない——答えを差し替えて
+    // 測る道（「即興派だと答えが変わるか」）を潰さないため
     const profile: AdviceProfile = {
       scores: scoreAnswers(input.adviceAnswers),
       answers: [...input.adviceAnswers],
@@ -175,8 +201,22 @@ function buildDiagnosisBlocks(
     };
     blocks.push(buildAdvicePolicyPrompt(profile, now));
     report.advicePolicy = true;
+    report.advicePolicySource = "input";
   } else {
-    omitted.push("助言方針（adviceAnswers を渡すと足します）");
+    // **渡されなければ、拡張機能が書き出した控えを見る**（設計書6.86.7）。
+    // ここで初めて「いまの調子」（受容度・自信度）が外からの相談にも効く
+    const stored = readAdviceProfile(folder);
+    if (stored) {
+      blocks.push(buildAdvicePolicyPrompt(stored, now));
+      report.advicePolicy = true;
+      report.advicePolicySource = "mirror";
+    } else {
+      // **黙って省かない。** 診断していないのか、控えが届いていないのかは
+      // ここでは見分けられないので、両方の直し方を並べる
+      omitted.push(
+        "助言方針（adviceAnswers を渡すか、拡張機能で診断すると足します）"
+      );
+    }
   }
 
   if (input.writerStyle) {
@@ -285,6 +325,15 @@ export interface ChatValidateResult {
    * 入っていたことだけを知らせる——提案の中身は `answer` にそのまま在る。
    */
   proposals: { edit: boolean; run: boolean; reloadRecord: boolean };
+  /**
+   * 助言方針の控えを書き戻したときの一言。
+   *
+   * **黙って隠さない**（作者の機械の記録を、外からの相談が静かに書き換える
+   * ことになるため）。**ただし中身は言わない**——受容度・自信度は
+   * 作者にも操作ログにも出さないと決めたもの（6.86.2、`advicePolicyLogLines`）で、
+   * MCP の返事から漏れては意味がない。
+   */
+  adviceProfileNote?: string;
 }
 
 /**
@@ -298,10 +347,20 @@ export interface ChatValidateResult {
  * **ここで自前の門番を足さない。** 足すと「製品では読める応答が
  * MCPでは捨てられる」という差ができ、測ったものが製品の姿でなくなる
  * （設計書6.87.6 の3と同じ理由）。
+ *
+ * **`profileSignals` はここで拾う**（0.71.x。設計書6.86.7）。製品は
+ * `workChatPanel.updateAdvicePolicy` で拾っており、ここが拾わないと
+ * **外部AI経由の相談だけ、調子の推定が永久に更新されない。**
+ * 値の形を絞るのは `parseWorkChatAnswer`（`parseProfileSignals`）、
+ * 点数の動かし方は `applyProfileSignals` で、どちらも製品と同じものを通る。
  */
-export function chatValidate(input: { response: string }): ChatValidateResult {
+export function chatValidate(input: {
+  response: string;
+  /** 控えの書き戻し先。**省くと書き戻さない**（読み解くだけ） */
+  folder?: string;
+}): ChatValidateResult {
   const answer = parseWorkChatAnswer(input.response);
-  return {
+  const result: ChatValidateResult = {
     answer,
     proposals: {
       edit: answer.edit !== undefined && answer.edit !== null,
@@ -310,6 +369,33 @@ export function chatValidate(input: { response: string }): ChatValidateResult {
         answer.reloadRecord !== undefined && answer.reloadRecord !== null,
     },
   };
+
+  if (input.folder && answer.profileSignals) {
+    /*
+      方針がどこにも無ければ何も起きない（"absent"）。診断していない作者の
+      値を、推定で生やさないため（製品の `updateAdvicePolicy` と同じ）。
+
+      **応答の指紋を渡す。** 外部AIは `novel.validate` を撃ち直せるので、
+      渡さないと同じ答えで ±0.5 が2回効き、**「段階が1つ動くまでおおよそ
+      10回の相談が要る」という歯止めが撃ち直しで迂回できる。**
+    */
+    const outcome = updateAdviceProfile(
+      input.folder,
+      answer.profileSignals,
+      hashText(input.response)
+    );
+    if (outcome === "updated") {
+      result.adviceProfileNote =
+        "助言方針の推定を更新しました（内訳は出しません）。";
+    } else if (outcome === "duplicate") {
+      // **黙って無視しない。** 撃ち直したことを伝えないと、効かなかったのが
+      // 二重取りの歯止めなのか、別の失敗なのかが呼ぶ側に分からない
+      result.adviceProfileNote =
+        "この答えの推定は反映済みです（同じ答えは二度効かせません）。";
+    }
+  }
+
+  return result;
 }
 
 export interface ChatRunInput extends ChatPromptInput {
@@ -382,7 +468,7 @@ export async function chatRun(input: ChatRunInput): Promise<ChatRunResult> {
       model: reply.model,
       temperature,
       diagnoses: prompt.diagnoses,
-      result: chatValidate({ response: reply.text }),
+      result: chatValidate({ folder: input.folder, response: reply.text }),
     };
   }
 
@@ -406,6 +492,6 @@ export async function chatRun(input: ChatRunInput): Promise<ChatRunResult> {
     model,
     temperature,
     diagnoses: prompt.diagnoses,
-    result: chatValidate({ response: response.text }),
+    result: chatValidate({ folder: input.folder, response: response.text }),
   };
 }

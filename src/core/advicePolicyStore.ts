@@ -32,7 +32,17 @@ export function advicePolicyKey(workId: string): string {
 export const ADVICE_POLICY_DEFAULT_KEY = "novelai.advicePolicyDefault";
 
 export class AdvicePolicyStore {
-  constructor(private readonly state: vscode.Memento) {}
+  /**
+   * @param onChange 方針が変わったら呼ぶ（保存のあと）。**控えの書き出しに使う**
+   *   （`features/adviceProfileMirror.ts`。設計書6.86.7）。書き出しを
+   *   呼び出し側の各所へ足して回ると、**足し忘れた道からの変更だけが
+   *   外部AIへ届かない**——しかもそれは作者には見えない。ここへ1か所置く。
+   *   受け取る側で待たない（失敗しても方針の保存は成立している）。
+   */
+  constructor(
+    private readonly state: vscode.Memento,
+    private readonly onChange?: () => void
+  ) {}
 
   /** その作品だけの方針。**既定へは落ちない**（消したことを消したままにする） */
   get(workId: string): AdviceProfile | undefined {
@@ -46,6 +56,7 @@ export class AdvicePolicyStore {
 
   async setDefault(profile: AdviceProfile): Promise<void> {
     await this.state.update(ADVICE_POLICY_DEFAULT_KEY, profile);
+    this.onChange?.();
   }
 
   /**
@@ -62,9 +73,11 @@ export class AdvicePolicyStore {
 
   async set(workId: string, profile: AdviceProfile): Promise<void> {
     await this.state.update(advicePolicyKey(workId), profile);
+    this.onChange?.();
   }
 
   async clear(workId: string): Promise<void> {
     await this.state.update(advicePolicyKey(workId), undefined);
+    this.onChange?.();
   }
 }
