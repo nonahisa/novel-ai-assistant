@@ -50,14 +50,23 @@ interface Loaded {
   };
   /** 済んだレコードの印を片付ける */
   forgetDropsOf: (items: { id: string; status: string }[]) => void;
+  /** ✕ を押した／もう一度押した */
+  toggleDrop: (id: string, key: string) => void;
 }
 
 const loaded = ((): Loaded => {
   const body = [
     extractConst(html, "droppedEntries"),
+    // toggleDrop は末尾で画面全体の再描画（render）を呼ぶが、それは
+    // DOM が要るのでここでは追わない。往復を見たいのは droppedEntries の
+    // 中身だけなので、呼ばれる分の変数と関数を空で用意しておく
+    "let lastItems = [];",
+    "let lastWorkTitle = '';",
+    "function render() {}",
     extractFunction(html, "escapeHtml"),
     extractFunction(html, "diffSide"),
     extractFunction(html, "dropSetOf"),
+    extractFunction(html, "toggleDrop"),
     extractFunction(html, "forgetDropsOf"),
     extractFunction(html, "applyAllMessage"),
     extractFunction(html, "renderEntries"),
@@ -69,13 +78,19 @@ const loaded = ((): Loaded => {
       " renderRecordUpdate: renderRecordUpdate," +
       " droppedEntries: droppedEntries," +
       " applyAllMessage: applyAllMessage," +
-      " forgetDropsOf: forgetDropsOf };",
+      " forgetDropsOf: forgetDropsOf," +
+      " toggleDrop: toggleDrop };",
   ].join("\n");
   return new Function(body)() as Loaded;
 })();
 
-const { renderRecordUpdate, droppedEntries, applyAllMessage, forgetDropsOf } =
-  loaded;
+const {
+  renderRecordUpdate,
+  droppedEntries,
+  applyAllMessage,
+  forgetDropsOf,
+  toggleDrop,
+} = loaded;
 
 function entry(key: string, text: string, state: string) {
   return { key, text, state };
@@ -195,6 +210,37 @@ describe("印を付けた葉には取り消し線を引く", () => {
   test("取り消し線はCSSで引く", () => {
     expect(html).toContain(".entry.dropped");
     expect(html).toContain("text-decoration: line-through");
+  });
+});
+
+/**
+ * ✕ の付け外し（0.50.1のtoggleDropそのものを走らせる）。
+ *
+ * **もう一度押すと戻ることを確かめていなかった。** 付ける側しか
+ * テストが無く、押し間違えたときに元に戻せるかは実機任せだった。
+ */
+describe("✕はもう一度押すと元に戻る", () => {
+  test("付けて、もう一度押すと外れる（往復）", () => {
+    droppedEntries.clear();
+    const key = "address:中神隼人:ハヤブサ先生";
+    const leavesOf = (rendered: string) =>
+      [...rendered.matchAll(/<span class="entry ([^"]*)">([^<]*)/g)].map(
+        (found) => [found[1], found[2]]
+      );
+
+    toggleDrop("pending-1", key);
+    expect(leavesOf(renderRecordUpdate(addressUpdate()))).toContainEqual([
+      "added dropped",
+      "中神隼人→ハヤブサ先生",
+    ]);
+
+    // もう一度押す
+    toggleDrop("pending-1", key);
+    expect(leavesOf(renderRecordUpdate(addressUpdate()))).toContainEqual([
+      "added",
+      "中神隼人→ハヤブサ先生",
+    ]);
+    expect(droppedEntries.get("pending-1")?.has(key)).toBe(false);
   });
 });
 

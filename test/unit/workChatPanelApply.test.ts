@@ -255,3 +255,32 @@ describe("2つ目の画面から押されたとき", () => {
     expect(h.posted.map((m) => m.type)).toContain("applyToSettingsDone");
   });
 });
+
+/**
+ * 対話でプロットを作る（設計書6.4.7）の入口。
+ *
+ * **プロットがまだ無い作品で始めたときだけ、作る案内に切り替わる**
+ * （`startPlotInterview` の `if (!sections) { … run: "createPlot" }`）。
+ * 尋ねる項目を1つずつ出す道筋（`readPlotSections` が実際に何を返すか）は
+ * `plotInterview.test.ts` が核の関数（`nextQuestion` など）を見ているので、
+ * ここでは「無ければ案内へ回る」という分岐だけを、private な
+ * `readPlotSections` を差し替えて確かめる（`resolveContext` を harness で
+ * 差し替えているのと同じ手口）。
+ */
+describe("対話でプロットを作る（入口の分岐）", () => {
+  test("プロットがまだ無い作品では、作る案内が出る", async () => {
+    const h = harness();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (h.panel as any).readPlotSections = async () => undefined;
+
+    await h.panel.startPlotInterview(WORK_A);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chatters = (h.posted as any[]).filter((m) => m.type === "chatter");
+    const last = chatters[chatters.length - 1];
+    expect(last.run).toBe("createPlot");
+    expect(last.text).toContain("氷の街");
+    expect(last.text).toContain("プロットがありません");
+    expect(last.text).toContain("プロットをつくる");
+  });
+});

@@ -669,6 +669,32 @@ describe("作品へ書き出す", () => {
       expect(await exists(".mcp.json")).toBe(false);
       expect(reportDetail()).not.toContain(REGISTRATION_IS_LOCAL_NOTE);
     });
+
+    /*
+      **許可は接続元ごとに分かれる**（設計書6.87.14）。相手を1つしか
+      選ばなかった回に、複数選んだときの言い回し
+      （「許可は接続元ごとに分かれます（claude-code・…）」）を出すと、
+      1つしか繋いでいない作者には無い相手の名前が並んで見える。
+    */
+    test("相手を1つしか選ばなければ、名前を並べずに言う", async () => {
+      // 相手選び（複数可）を claude-code だけに絞る
+      (window.showQuickPick as unknown as ReturnType<typeof vi.fn>) = vi.fn(
+        async (items: unknown, options?: { canPickMany?: boolean }) =>
+          options?.canPickMany
+            ? (items as Array<{ target?: { id?: string } }>).filter(
+                (item) => item.target?.id === "claude-code"
+              )
+            : (items as unknown[])[0]
+      );
+
+      await writeAiInstructions(context(), work());
+
+      expect(reportDetail()).toContain(
+        "許可は接続元ごとに分かれます。別のAIから繋ぐと、あらためてお尋ねします。"
+      );
+      // 複数選んだときだけの言い回し（相手の名前を並べる）は出さない
+      expect(reportDetail()).not.toContain("同じ作品でも、Claude Code に許した機能は");
+    });
   });
 
   /*
