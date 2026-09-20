@@ -328,6 +328,65 @@ export interface MissedCharacters {
   names: string[];
 }
 
+/** 突き合わせなかった1チャンクぶん（`mergeMissedCharactersByEpisode` の入力） */
+export interface MissedCharactersInChunk extends MissedCharacters {
+  /**
+   * そのチャンクが名乗る話数（`Chunk.chapterStart`）。
+   *
+   * **読めなければ null。** どの話の一部なのかを決められないので、
+   * ほかのチャンクとまとめない（1つで1話ぶんとして扱う）。
+   */
+  chapter: number | null;
+}
+
+/**
+ * チャンクごとの「落とした人物」を、話ごとにまとめる（設計書6.10.6）。
+ *
+ * **判定はチャンク単位、断りは話単位である。** 1話がチャンクの上限を
+ * 超えて2つに割れ、人物Xが後半にだけ登場していると、前半のチャンクでは
+ * Xが落ちる——そのまま並べると、**その話では実際に突き合わせているのに
+ * 「突き合わせていません」と言う**（0.70.12で直した）。
+ *
+ * **その話のすべてのチャンクで落ちている人物だけ**を返す。1つのチャンクに
+ * でも載っていれば、その話では突き合わせている。
+ *
+ * **まとめる単位は話数であって、札（`describeChunkScope`）ではない。**
+ * 合本（1ファイルに全話）は札がファイル単位で決まるので、札でまとめると
+ * 作品まるごとの積になり、今度は**言うべき断りが消える**。
+ *
+ * **落ちた人物が1人も残らない話は返さない**（断りに出さない）。
+ */
+export function mergeMissedCharactersByEpisode(
+  chunks: readonly MissedCharactersInChunk[]
+): MissedCharacters[] {
+  /** 同じ話数を名乗るチャンクの束。**並びは渡された順のまま** */
+  const groups: Array<{ label: string; lists: string[][] }> = [];
+  const groupOfChapter = new Map<number, number>();
+
+  for (const chunk of chunks) {
+    const at =
+      chunk.chapter === null ? undefined : groupOfChapter.get(chunk.chapter);
+    if (at === undefined) {
+      if (chunk.chapter !== null) groupOfChapter.set(chunk.chapter, groups.length);
+      // 札は、その話で最初に出てきたチャンクのものを使う
+      groups.push({ label: chunk.label, lists: [[...chunk.names]] });
+      continue;
+    }
+    groups[at].lists.push([...chunk.names]);
+  }
+
+  const merged: MissedCharacters[] = [];
+  for (const group of groups) {
+    const [first, ...rest] = group.lists;
+    const names = first.filter((name) =>
+      rest.every((list) => list.includes(name))
+    );
+    if (names.length === 0) continue;
+    merged.push({ label: group.label, names });
+  }
+  return merged;
+}
+
 /**
  * 落としたことを、完了の知らせへ1行で書く（設計書6.10.6）。
  *
@@ -344,7 +403,8 @@ export function describeMissedCharacters(
   entries: readonly MissedCharacters[]
 ): string {
   if (entries.length === 0) return "";
-  // まとめたチャンクは1つの札を名乗るので、札の数で数える
+  // **入るのは話ごとにまとめたもの**（`mergeMissedCharactersByEpisode`）。
+  // 合本では隣り合う話が同じ札を名乗ることがあるので、なお札の数で数える
   const labels = new Set(entries.map((entry) => entry.label));
   return (
     `${labels.size}話で、直前の話に出ていた人物を突き合わせていません` +

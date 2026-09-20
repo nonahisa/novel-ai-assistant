@@ -217,13 +217,64 @@ describe("矛盾検知の抑制は、モデルの大きさで決める（6.10.8�
     ).toBe(true);
   });
 
-  test("クラウドではゆるめる（大きさを訊けない）", () => {
+  test("大きさが分からないクラウドではゆるめる", () => {
     // クラウドの主力は大きいモデルなので、`inferTier` が high 扱いに
     // しているのと同じ理由でゆるめる側に置く
     for (const providerId of ["claude", "openai", "gemini", "sakura"] as const) {
       expect(
         capabilityProfile({ providerId }).suppressUncertainContradictions
       ).toBe(false);
+    }
+  });
+
+  /*
+    **大きさが分かるなら、どこで動いていようと大きさで決める**（0.70.12）。
+
+    さくらのAIと LM Studio は公開されている重みを動かすので、モデルIDから
+    `parseParameterSize` が大きさを読める。名前で門を作っていたときは、
+    さくらの `12b` に「観点は絞るのに抑制はゆるめる」が渡っていた——
+    実測で「当たりが増えないまま誤検出だけ増える」と結論した組み合わせである。
+  */
+  test("さくらの小さいモデルにも、抑制を残す", () => {
+    const profile = capabilityProfile({
+      tier: "light",
+      providerId: "sakura",
+      parameterSize: "12.2B",
+    });
+
+    // 観点を絞るなら、抑制も残す。**片方だけは、いちばん出来が悪かった**
+    expect(profile.narrowContradictionCategories).toBe(true);
+    expect(profile.suppressUncertainContradictions).toBe(true);
+  });
+
+  test("さくらの大きいモデルでは、これまでどおりゆるめる", () => {
+    const profile = capabilityProfile({
+      tier: "high",
+      providerId: "sakura",
+      parameterSize: "32.0B",
+    });
+
+    expect(profile.suppressUncertainContradictions).toBe(false);
+  });
+
+  test("同じ大きさなら、手元でもクラウドでも同じ判定になる", () => {
+    // **名前で門を作らない。** 実測が見ていたのはモデルの大きさであって、
+    // どこで動いているかではない
+    for (const parameterSize of ["12.2B", "26.0B"]) {
+      const ollama = capabilityProfile({
+        tier: "standard",
+        providerId: "ollama",
+        parameterSize,
+      });
+      const sakura = capabilityProfile({
+        tier: "standard",
+        providerId: "sakura",
+        parameterSize,
+      });
+
+      expect(sakura.suppressUncertainContradictions).toBe(
+        ollama.suppressUncertainContradictions
+      );
     }
   });
 });
@@ -234,7 +285,11 @@ describe("作者へ見せる説明", () => {
     // **抑制を残したことも言う**（6.10.8）——同じモデル名でも送っている
     // 指示が違うので、出しておかないとログから読み取れない
     const input = { tier: "standard", providerId: "ollama" } as const;
-    const text = describeCapability(input, capabilityProfile(input));
+    const text = describeCapability(
+      input,
+      capabilityProfile(input),
+      "contradiction"
+    );
 
     expect(text).toBe("標準・観点を絞る・確信の持てない指摘は抑える");
   });
@@ -245,21 +300,70 @@ describe("作者へ見せる説明", () => {
       providerId: "ollama",
       parameterSize: "26.0B",
     } as const;
-    const text = describeCapability(input, capabilityProfile(input));
+    const text = describeCapability(
+      input,
+      capabilityProfile(input),
+      "contradiction"
+    );
 
     expect(text).toBe("標準・観点を絞る");
   });
 
+  /*
+    **プロット逸脱検知に抑制の仕組みは無い**（0.70.12で直した）。
+
+    機能を問わず1つの文へ畳んでいたため、Ollama / LM Studio で逸脱検知を
+    回すと**毎回・必ず**「確信の持てない指摘は抑える」と出ていた。
+    70B のモデルでも同じ文が出た（パラメータ数を渡していなかったため）。
+  */
+  test("プロット逸脱では、抑制のことを言わない", () => {
+    const input = {
+      tier: "standard",
+      providerId: "ollama",
+      parameterSize: "8.0B",
+    } as const;
+    const profile = capabilityProfile(input);
+
+    expect(profile.suppressUncertainContradictions).toBe(true);
+    expect(describeCapability(input, profile, "deviation")).toBe(
+      "標準・観点を絞る"
+    );
+    expect(describeCapability(input, profile, "contradiction")).toBe(
+      "標準・観点を絞る・確信の持てない指摘は抑える"
+    );
+  });
+
+  test("パラメータ数が取れなくても、逸脱では抑制を名乗らない", () => {
+    // 逸脱検知はパラメータ数を持たないことがある。取れないと抑制は
+    // 「残す」に落ちるので、機能で分けていないと必ずこの文が出る
+    const input = { tier: "high", providerId: "ollama" } as const;
+    const text = describeCapability(
+      input,
+      capabilityProfile(input),
+      "deviation"
+    );
+
+    expect(text).toBe("高性能");
+  });
+
   test("絞らないときは地力だけを言う", () => {
     const input = { tier: "high", providerId: "claude" } as const;
-    const text = describeCapability(input, capabilityProfile(input));
+    const text = describeCapability(
+      input,
+      capabilityProfile(input),
+      "contradiction"
+    );
 
     expect(text).toBe("高性能");
   });
 
   test("地力が分からないときは、そう言う", () => {
     const input = { providerId: "gemini" } as const;
-    const text = describeCapability(input, capabilityProfile(input));
+    const text = describeCapability(
+      input,
+      capabilityProfile(input),
+      "contradiction"
+    );
 
     expect(text).toBe("地力は不明");
   });

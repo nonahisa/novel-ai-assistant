@@ -4,6 +4,7 @@ import {
   carryOverBodyText,
   createContradictionMaterial,
   describeMissedCharacters,
+  mergeMissedCharactersByEpisode,
   promptVersionWithCarryOver,
   CARRY_OVER_MAX_CHAPTERS,
 } from "../../src/core/contradictionMaterial";
@@ -679,5 +680,103 @@ describe("落としたことを、完了の知らせへ1行で書く（設計書
     ]);
 
     expect(note).toContain("1話で");
+  });
+});
+
+/*
+  **判定はチャンク単位、断りは話単位**（設計書6.10.6）。
+
+  1話がチャンクの上限を超えて2つに割れ、人物が後半にだけ登場していると、
+  前半のチャンクではその人物が落ちる。そのまま並べると、**実際には
+  突き合わせているのに「突き合わせていません」と言う**（0.70.12で直した）。
+*/
+describe("チャンクごとの結果を、話ごとにまとめる（設計書6.10.6）", () => {
+  test("1つのチャンクにでも載っていれば、その話は断りに出さない", () => {
+    const merged = mergeMissedCharactersByEpisode([
+      // 第11話の前半：本文にXが無いので落ちた
+      { label: "第11話", chapter: 11, names: ["黒瀬 澪"] },
+      // 第11話の後半：本文にXがあるので落ちていない
+      { label: "第11話", chapter: 11, names: [] },
+    ]);
+
+    expect(merged).toEqual([]);
+  });
+
+  test("すべてのチャンクで落ちている人物だけを挙げる", () => {
+    const merged = mergeMissedCharactersByEpisode([
+      { label: "第11話", chapter: 11, names: ["黒瀬 澪", "相沢 春人"] },
+      { label: "第11話", chapter: 11, names: ["相沢 春人"] },
+    ]);
+
+    expect(merged).toEqual([{ label: "第11話", names: ["相沢 春人"] }]);
+  });
+
+  test("割れていない話は、これまでどおりそのまま出す", () => {
+    const merged = mergeMissedCharactersByEpisode([
+      { label: "第4話", chapter: 4, names: ["相沢 春人"] },
+      { label: "第5話", chapter: 5, names: [] },
+      { label: "第9話", chapter: 9, names: ["如月 玲"] },
+    ]);
+
+    expect(merged).toEqual([
+      { label: "第4話", names: ["相沢 春人"] },
+      { label: "第9話", names: ["如月 玲"] },
+    ]);
+  });
+
+  test("合本でも、話が違えばまとめない（札は同じでも別の話）", () => {
+    // **まとめる単位は話数であって札ではない。** 合本は札がファイル単位で
+    // 決まるので、札でまとめると作品まるごとの積になり、断りが消える
+    const merged = mergeMissedCharactersByEpisode([
+      { label: "第1〜19話", chapter: 4, names: ["相沢 春人"] },
+      { label: "第1〜19話", chapter: 5, names: ["如月 玲"] },
+    ]);
+
+    expect(merged).toEqual([
+      { label: "第1〜19話", names: ["相沢 春人"] },
+      { label: "第1〜19話", names: ["如月 玲"] },
+    ]);
+  });
+
+  test("話数の読めないチャンクは、ひとまとめにしない", () => {
+    // 前後を決められないものに「同じ話」は無い。積を取ると、
+    // 関係のないチャンクどうしで打ち消し合う
+    const merged = mergeMissedCharactersByEpisode([
+      { label: "1番目のまとまり", chapter: null, names: ["相沢 春人"] },
+      { label: "2番目のまとまり", chapter: null, names: [] },
+    ]);
+
+    expect(merged).toEqual([{ label: "1番目のまとまり", names: ["相沢 春人"] }]);
+  });
+
+  test("材料の組み立てと繋いでも、割れた話は断りに出ない", () => {
+    // **本番と同じ口（`relevantFor`）を通して確かめる。** 期待値だけを
+    // 手で置くと、材料の側が変わったときに気づけない
+    const rei = person({
+      id: "char_002",
+      name: "如月 玲",
+      role: "担任教師",
+      chapters: [1, 2, 3, 4, 11],
+    });
+    const settings = material({ people: [rei] });
+    const previous = "如月は職員室にいた。";
+    // 1話が2つのチャンクに割れ、名前は後半にだけ出る
+    const halves = ["俺は窓口の椅子に座っていた。", "如月が扉を開けた。"];
+
+    const merged = mergeMissedCharactersByEpisode(
+      halves.map((text) => ({
+        label: "第11話",
+        chapter: 11,
+        names: settings.relevantFor(text, 11, { previousBodyText: previous })
+          .missedCharacters,
+      }))
+    );
+
+    // 前半だけを見れば落ちている（＝直す前は誤警報が出ていた）
+    expect(
+      settings.relevantFor(halves[0], 11, { previousBodyText: previous })
+        .missedCharacters
+    ).toEqual(["如月 玲"]);
+    expect(merged).toEqual([]);
   });
 });

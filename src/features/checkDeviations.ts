@@ -178,10 +178,16 @@ export async function checkDeviations(
   // **この機能は話単位で送るので、コンテキスト長は要らない。**
   // モデル情報が取れなくても止めず、これまでと同じ判定へ落とす
   const modelInfo = await registry.resolveModelInfo("deviation");
-  const capability = capabilityProfile({
+  // **パラメータ数も渡す**（0.70.12）。この機能に抑制の仕組みは無いが、
+  // 渡さないと `suppressUncertainContradictions` が「取れなかった」扱いで
+  // 決まり、嘘の値が `CapabilityProfile` に載ったまま持ち回られる。
+  // 次に誰かがこの札を使ったときに同じ罠を踏む
+  const capabilityInput = {
     tier: modelInfo?.tier,
     providerId: resolved.provider.id,
-  });
+    parameterSize: modelInfo?.parameterSize,
+  };
+  const capability = capabilityProfile(capabilityInput);
 
   // **プロットにも上限を置く**（設計書6.77の第2段）。プロットは話の数だけ
   // 繰り返し送られるので、ここだけ無上限だと長いプロットの作品で送る量が
@@ -272,7 +278,7 @@ export async function checkDeviations(
 
   logStep(
     `プロット逸脱検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
-      `${resolved.model}（${describeCapability({ tier: modelInfo?.tier, providerId: resolved.provider.id }, capability)}） / ` +
+      `${resolved.model}（${describeCapability(capabilityInput, capability, "deviation")}） / ` +
       `${episodes.length}話 / v${DEVIATION_CHECK_VERSION}`
   );
 

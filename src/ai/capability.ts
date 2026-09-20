@@ -66,11 +66,17 @@ export interface CapabilityProfile {
 }
 
 /**
- * 手元で動かすAI。**どの大きさのモデルを載せるかは作者が選ぶ**ので、
- * 抑制の判断はパラメータ数で行う。
+ * 手元で動かすAI。**大きさが分からなかったときだけ**見る。
  *
- * クラウドの4社は主力が大きいモデルなので、`inferTier` が high 扱いに
- * しているのと同じ理由でゆるめる側に置く（パラメータ数も答えてくれない）。
+ * 手元は、作者がどの大きさのモデルを載せるかを選ぶので、分からなければ
+ * 小さいほうを想定して抑える。クラウドは主力が大きいモデルなので、
+ * `inferTier` が high 扱いにしているのと同じ理由でゆるめる側に置く。
+ *
+ * **「クラウドはパラメータ数を答えない」ではない**（0.70.12で直した誤り）。
+ * さくらのAIと LM Studio は公開されている重みを動かすので、モデルIDから
+ * `parseParameterSize` が大きさを読める。**読めたなら、どこで動いていようと
+ * 大きさで決める**——名前で門を作ると、さくらの `12b` に「観点は絞るのに
+ * 抑制はゆるめる」という、実測でいちばん出来の悪かった組み合わせが渡る。
  */
 const LOCAL_PROVIDERS: readonly ProviderId[] = ["ollama", "lmstudio"];
 
@@ -120,16 +126,22 @@ export function capabilityProfile(input: CapabilityInput): CapabilityProfile {
 /**
  * 矛盾検知の抑制を残すか（設計書6.10.8）。
  *
- * **パラメータ数が取れないときは抑える。** このファイルの作法どおり、
- * 分からないときはこれまでと同じ判定へ落とす——矛盾検知にとっての
- * 「これまで」は 1.5＝抑制ありである。取れないのに大きいモデルとみなすと、
- * **モデル情報が取れなかった日だけ誤検出が増える**ことになる。
+ * **大きさが分かるなら、どこで動いていようと大きさで決める。** 実測が
+ * 見ていたのはモデルの大きさであって、どこで動いているかではない。
+ * さくらのAIと LM Studio はモデルIDから大きさが読めるので、**判断材料が
+ * 手元にあるのに名前で門を作ると、さくらの `12b` に「観点は絞るのに抑制は
+ * ゆるめる」が渡る**——実測で「当たりが増えないまま誤検出だけ増える」と
+ * 結論した組み合わせそのものである（0.70.12で直した）。
+ *
+ * **大きさが取れないときだけ、プロバイダで分ける。** 分からないときは
+ * これまでと同じ判定へ落とす——手元にとっての「これまで」は 1.5＝抑制あり、
+ * クラウドにとっては 1.6＝ゆるめる、である。取れないのに大きいモデルと
+ * みなすと、**モデル情報が取れなかった日だけ誤検出が増える**ことになる。
  */
 function suppressUncertain(input: CapabilityInput): boolean {
-  if (!LOCAL_PROVIDERS.includes(input.providerId)) return false;
   const billions = parameterSizeInBillions(input.parameterSize);
-  if (billions === undefined) return true;
-  return billions < LOOSE_SUPPRESSION_MIN_BILLIONS;
+  if (billions !== undefined) return billions < LOOSE_SUPPRESSION_MIN_BILLIONS;
+  return LOCAL_PROVIDERS.includes(input.providerId);
 }
 
 /**
@@ -138,17 +150,25 @@ function suppressUncertain(input: CapabilityInput): boolean {
  * **絞ったことを黙って行わない。** LM Studio やさくらの小さいモデルを
  * 使っている作者は、この変更で指摘の件数が減る。理由が画面に出ていないと、
  * コードを読まない限り分からない。
+ *
+ * **機能を必ず渡す**（`capabilityCacheTag` とまったく同じ作法。0.70.12）。
+ * 抑制は矛盾検知にしか無いので、機能を問わず1つの文へ畳むと、**プロット
+ * 逸脱検知のログが、ありもしない抑制を毎回名乗る**。既定値を置かないのは、
+ * 新しい機能が増えたときに**呼び忘れを型で止める**ため。
  */
 export function describeCapability(
   input: CapabilityInput,
-  profile: CapabilityProfile
+  profile: CapabilityProfile,
+  feature: "contradiction" | "deviation"
 ): string {
   const tier = input.tier ? TIER_LABELS[input.tier] : "地力は不明";
   const notes: string[] = [];
   if (profile.narrowContradictionCategories) notes.push("観点を絞る");
   // **抑制を残したことも黙って行わない**（設計書6.10.8）。同じモデル名でも
   // 送っている指示が違うので、出しておかないとログから読み取れない
-  if (profile.suppressUncertainContradictions) notes.push("確信の持てない指摘は抑える");
+  if (feature === "contradiction" && profile.suppressUncertainContradictions) {
+    notes.push("確信の持てない指摘は抑える");
+  }
   return [tier, ...notes].join("・");
 }
 

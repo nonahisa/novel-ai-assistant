@@ -34,11 +34,13 @@ import {
   carryOverBodyText,
   createContradictionMaterial,
   describeMissedCharacters,
+  mergeMissedCharactersByEpisode,
   promptVersionWithCarryOver,
   CHARACTER_AS_OF_FIELDS,
   type CarryOverBody,
   type CarryOverResult,
   type MissedCharacters,
+  type MissedCharactersInChunk,
   type RelevantOptions,
   type RelevantSettings,
 } from "../core/contradictionMaterial";
@@ -506,7 +508,7 @@ export async function checkContradictions(
 
   logStep(
     `矛盾検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
-      `${resolved.model}（${describeCapability(capabilityInput, capability)}） / ` +
+      `${resolved.model}（${describeCapability(capabilityInput, capability, "contradiction")}） / ` +
       `${chunks.length}チャンク / ${chunkNote} / ` +
       `v${CONTRADICTION_CHECK_VERSION}`
   );
@@ -523,8 +525,8 @@ export async function checkContradictions(
     チャンクでも落ちていることは変わらないので、送るチャンクだけを見ると
     「2回目だけ何も言わない」ことになる。
   */
-  const missedByChunk = missedCharactersByChunk();
-  for (const entry of missedByChunk) {
+  const missedByEpisode = missedCharactersByEpisode();
+  for (const entry of missedByEpisode) {
     logStep(
       `矛盾検知：${entry.label}は「${entry.names.join("」「")}」を` +
         "突き合わせていません（直前の話には出ています。" +
@@ -532,7 +534,7 @@ export async function checkContradictions(
     );
   }
   // 完了の知らせへ出す1行。**落ちた話が0なら空**（毎回出る断りは読まれない）
-  const missedNote = describeMissedCharacters(missedByChunk);
+  const missedNote = describeMissedCharacters(missedByEpisode);
 
   // 下の入れ子の関数では、上の `if (!resolved) return` による絞り込みが
   // 効かない（あとから書き換わりうるとみなされる）。ここで束ねておく
@@ -1004,13 +1006,21 @@ export async function checkContradictions(
 
   /**
    * 話ごとに、**直前の話には名前が出ているのに、この話の材料へ載らなかった
-   * 人物**（設計書6.10.6）。落ちていないチャンクは並べない。
+   * 人物**（設計書6.10.6）。落ちていない話は並べない。
    *
    * **材料に載らなかった人物を全部は挙げない。** 登場人物が40人いれば
    * 1話に出るのは数人なので、毎回37人が並んで騒がしくなる。
+   *
+   * **数えるのはチャンク単位、言うのは話単位なので、最後にまとめる**
+   * （`mergeMissedCharactersByEpisode`。0.70.12）。1話が2つのチャンクへ
+   * 割れて、人物が後半にだけ登場している場合、前半だけを見て
+   * 「突き合わせていません」と言うと嘘になる。
+   *
+   * **落ちていないチャンクも渡す。** 積を取るのに要る（片方に載って
+   * いれば、その話では突き合わせている）。
    */
-  function missedCharactersByChunk(): MissedCharacters[] {
-    const entries: MissedCharacters[] = [];
+  function missedCharactersByEpisode(): MissedCharacters[] {
+    const perChunk: MissedCharactersInChunk[] = [];
     for (const chunk of chunks) {
       // **送るときと同じ材料で数える。** 引き継ぎ（`carryOver`）が効いて
       // いれば、その人物は載っているので落ちていない
@@ -1018,14 +1028,17 @@ export async function checkContradictions(
         carryOverText: carryOverFor(chunk).text,
         previousBodyText: previousBodyFor(chunk),
       }).missedCharacters;
-      if (names.length === 0) continue;
       const label = describeChunkScope(chunk, (filePath) =>
         chapterLabelByFile.get(filePath)
       );
-      // 話数の読めない本文でも、どこの話かは言う（ログで辿れるように）
-      entries.push({ label: label || `${chunk.index + 1}番目のまとまり`, names });
+      perChunk.push({
+        // 話数の読めない本文でも、どこの話かは言う（ログで辿れるように）
+        label: label || `${chunk.index + 1}番目のまとまり`,
+        names,
+        chapter: chunk.chapterStart,
+      });
     }
-    return entries;
+    return mergeMissedCharactersByEpisode(perChunk);
   }
 
   /**
@@ -1368,14 +1381,26 @@ function carryOverBodiesOf(
  * 合本（1ファイルに全話）はチャンクの話数がファイル単位に決まるため、
  * どのチャンクにも「自分より前の話の場面」が存在しない。索引作り
  * （BM25）はそこそこ重く、確認ダイアログの一文も嘘になる。
+ *
+ * **索引を組むところまでを守りで囲う**（0.70.12で戻した）。本文の読み込みを
+ * 1本化したときに、この3行が try/catch の外へ出ていた。過去の場面は補助の
+ * 材料なので、**組めなくても検知は続ける**——ここで投げると、本文が1つ
+ * 壊れているだけで矛盾検知そのものが使えなくなる。
  */
 function collectPastScenes(
   sources: readonly ExcerptSource[],
   /** チャンクの話数。**渡りうるかの判断に要る**（`anyPastSceneReachable`） */
   chunkChapters: readonly (number | null)[]
 ): PastSceneIndex | undefined {
-  const scenes = buildPastScenes(sources);
-  if (scenes.length === 0) return undefined;
-  if (!anyPastSceneReachable(scenes, chunkChapters)) return undefined;
-  return new PastSceneIndex(scenes);
+  try {
+    const scenes = buildPastScenes(sources);
+    if (scenes.length === 0) return undefined;
+    if (!anyPastSceneReachable(scenes, chunkChapters)) return undefined;
+    return new PastSceneIndex(scenes);
+  } catch (error) {
+    logFailure("矛盾検知：過去の場面の索引づくり", {
+      詳細: error instanceof Error ? error.message : String(error),
+    });
+    return undefined;
+  }
 }
