@@ -99,7 +99,7 @@ const LOCAL_PROVIDERS: readonly ProviderId[] = ["ollama", "lmstudio"];
  * 絞りのために決めた値で、`gemma4:26b` は standard 側に落ちる——
  * 使い回すと、**満点を出したモデルが抑制される側に入る。**
  */
-const LOOSE_SUPPRESSION_MIN_BILLIONS = 20;
+export const LOOSE_SUPPRESSION_MIN_BILLIONS = 20;
 
 /**
  * このモデルで、重い判断をさせてよいか。
@@ -177,6 +177,41 @@ const TIER_LABELS: Record<CapabilityTier, string> = {
   standard: "標準",
   light: "軽量",
 };
+
+/**
+ * 矛盾検知の**実行前の確認文**に出す、モデルの地力による断り。
+ *
+ * **`describeCapability` の隣に置く。** あちらはログ向けに同じ地力を一言で
+ * 言うもので、こちらは作者向けの説明文である。**同じ判断を2か所で言葉に
+ * しているので、離して置くと片方だけ直して食い違う。**
+ *
+ * 返すのは2つの断りを繋いだ文字列で、当てはまらない側は空になる。
+ * 呼び出し側は確認文の配列へそのまま並べる（`.filter(Boolean)` で
+ * 空なら消える形を保つ）。
+ */
+export function describeContradictionCapabilityForAuthor(
+  profile: CapabilityProfile
+): string {
+  return [
+    // **絞ったことを黙って行わない。** 指摘の件数が減るので、
+    // 理由が画面に出ていないと作者には分からない（設計書6.28）
+    profile.narrowContradictionCategories
+      ? `\nこのモデルでは、見る観点を7つから3つ（人物・状態・時系列）へ絞ります。\n` +
+        "一度にたくさん見せると、かえって見落としが増えるためです。"
+      : "",
+    // **抑制の強さを変えたことも黙らない**（設計書6.10.8）。
+    // 大きいモデルでは指摘が増え、小さいモデルではこれまでどおりになる。
+    // **どちらも「モデルのせいで結果が違う」ので、理由を先に出す**
+    profile.suppressUncertainContradictions
+      ? "\nこのモデルでは、確信の持てない箇所は指摘しません。\n" +
+        "小さいモデルで疑わしい箇所まで挙げさせると、当たりは増えずに\n" +
+        "見当違いの指摘だけが増えるためです（実測）。"
+      : "\nこのモデルでは、確信が持てない箇所も挙げます。\n" +
+        "どちらが正しいかは作者が決めるので、黙って見逃すより出します。",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
 
 /**
  * キャッシュの鍵に混ぜる印。

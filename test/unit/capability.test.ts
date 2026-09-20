@@ -3,6 +3,9 @@ import {
   capabilityCacheTag,
   capabilityProfile,
   describeCapability,
+  describeContradictionCapabilityForAuthor,
+  LOOSE_SUPPRESSION_MIN_BILLIONS,
+  type CapabilityProfile,
 } from "../../src/ai/capability";
 
 describe("モデルの地力で、機能の重さを決める", () => {
@@ -366,5 +369,133 @@ describe("作者へ見せる説明", () => {
     );
 
     expect(text).toBe("地力は不明");
+  });
+});
+
+/*
+  矛盾検知の**実行前の確認文**に出る断り。
+
+  この文言は `checkContradictions()` の中にあり、あの関数は設定資料の
+  ストアが5つ揃わないと「設定資料がまだありません」で引き返すので、
+  **いちばん手を入れた部分（0.70.8・0.70.12）なのにテストが無かった**。
+  純粋な関数へ切り出したので、ここで測る。
+*/
+describe("矛盾検知の実行前に出す、地力の断り", () => {
+  /** 観点を絞るときの断り（1文字も変えない） */
+  const NARROW_TEXT =
+    "\nこのモデルでは、見る観点を7つから3つ（人物・状態・時系列）へ絞ります。\n" +
+    "一度にたくさん見せると、かえって見落としが増えるためです。";
+  /** 抑制を残すときの断り */
+  const STRICT_TEXT =
+    "\nこのモデルでは、確信の持てない箇所は指摘しません。\n" +
+    "小さいモデルで疑わしい箇所まで挙げさせると、当たりは増えずに\n" +
+    "見当違いの指摘だけが増えるためです（実測）。";
+  /** 抑制をゆるめたときの断り */
+  const LOOSE_TEXT =
+    "\nこのモデルでは、確信が持てない箇所も挙げます。\n" +
+    "どちらが正しいかは作者が決めるので、黙って見逃すより出します。";
+
+  // **境目は定数から導く。** 20 を直書きすると、実測で線を引き直したときに
+  // テストだけが古い境目を守り続ける
+  const BIG_MODEL = `${LOOSE_SUPPRESSION_MIN_BILLIONS + 6}.0B`; // 実測した gemma4:26b
+  const SMALL_MODEL = `${LOOSE_SUPPRESSION_MIN_BILLIONS - 8}.0B`; // 実測した gemma4:12b
+
+  test("大きいモデルでは、確信が持てない箇所も挙げると言う", () => {
+    const profile = capabilityProfile({
+      tier: "high",
+      providerId: "ollama",
+      parameterSize: BIG_MODEL,
+    });
+
+    const text = describeContradictionCapabilityForAuthor(profile);
+
+    expect(text).toContain("確信が持てない箇所も挙げます");
+    expect(text).not.toContain("指摘しません");
+  });
+
+  test("小さいモデルでは、確信の持てない箇所は指摘しないと言う", () => {
+    const profile = capabilityProfile({
+      tier: "standard",
+      providerId: "ollama",
+      parameterSize: SMALL_MODEL,
+    });
+
+    const text = describeContradictionCapabilityForAuthor(profile);
+
+    expect(text).toContain("確信の持てない箇所は指摘しません");
+    expect(text).not.toContain("確信が持てない箇所も挙げます");
+  });
+
+  test("境目ちょうどの大きさは、ゆるめる側に入る", () => {
+    // `billions < 境目` で抑制するので、境目ちょうどはゆるめる側。
+    // **26b が抑制される側へ落ちると、実測で満点だった組み合わせを失う**
+    const profile = capabilityProfile({
+      tier: "standard",
+      providerId: "ollama",
+      parameterSize: `${LOOSE_SUPPRESSION_MIN_BILLIONS}.0B`,
+    });
+
+    expect(describeContradictionCapabilityForAuthor(profile)).toContain(
+      "確信が持てない箇所も挙げます"
+    );
+  });
+
+  test("観点を絞るときだけ、絞る旨の文が入る", () => {
+    const narrowed = describeContradictionCapabilityForAuthor({
+      narrowContradictionCategories: true,
+      suppressUncertainContradictions: true,
+      narrowDeviationTypes: true,
+      warnDeviationIneffective: true,
+    });
+    const full = describeContradictionCapabilityForAuthor({
+      narrowContradictionCategories: false,
+      suppressUncertainContradictions: true,
+      narrowDeviationTypes: false,
+      warnDeviationIneffective: false,
+    });
+
+    expect(narrowed).toBe(`${NARROW_TEXT}\n${STRICT_TEXT}`);
+    expect(full).toBe(STRICT_TEXT);
+  });
+
+  test("文言と並びを変えない（切り出しただけ）", () => {
+    // **これが本体。** 0.70.8・0.70.12 で足した断りは、作者の画面に
+    // そのまま出る。改行1つで見え方が変わるので、全文で見張る
+    const loose: CapabilityProfile = {
+      narrowContradictionCategories: true,
+      suppressUncertainContradictions: false,
+      narrowDeviationTypes: true,
+      warnDeviationIneffective: true,
+    };
+
+    expect(describeContradictionCapabilityForAuthor(loose)).toBe(
+      `${NARROW_TEXT}\n${LOOSE_TEXT}`
+    );
+  });
+
+  /*
+    **空文字は、いまの文言では出ない。**
+
+    抑制の断りは「指摘しません」か「挙げます」のどちらかを必ず返すので、
+    観点を絞らないときでも文は残る。`.filter(Boolean)` で消える形は
+    保ってあるが（切り出し前と同じ組み立て）、**消える組み合わせは
+    現時点では存在しない**ことを、ここへ書き留めておく。
+  */
+  test("どの組み合わせでも、確認文へ並べられる形になる", () => {
+    for (const narrow of [true, false]) {
+      for (const suppress of [true, false]) {
+        const text = describeContradictionCapabilityForAuthor({
+          narrowContradictionCategories: narrow,
+          suppressUncertainContradictions: suppress,
+          narrowDeviationTypes: narrow,
+          warnDeviationIneffective: narrow,
+        });
+
+        // 空なら `.filter(Boolean)` で消え、空でなければ確認文の
+        // 一要素として並ぶ。**余計な空行や末尾の区切りを作らない**
+        expect(text).toBe(text.trimEnd());
+        expect(text).not.toBe("");
+      }
+    }
   });
 });

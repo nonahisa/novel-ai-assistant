@@ -24,6 +24,7 @@ import {
   capabilityCacheTag,
   capabilityProfile,
   describeCapability,
+  describeContradictionCapabilityForAuthor,
 } from "../ai/capability";
 import { resolveModelInfoOrWarn } from "./chunkSettings";
 import { collectManuscriptChunks } from "./manuscriptChunks";
@@ -477,21 +478,10 @@ export async function checkContradictions(
       "",
       "この機能は本文を書き換えません。 設定と食い違う箇所を並べるだけで、",
       "どちらを直すかは作者が決めます（設定側が古いこともあります）。",
-      // **絞ったことを黙って行わない。** 指摘の件数が減るので、
-      // 理由が画面に出ていないと作者には分からない（設計書6.28）
-      capability.narrowContradictionCategories
-        ? `\nこのモデルでは、見る観点を7つから3つ（人物・状態・時系列）へ絞ります。\n` +
-          "一度にたくさん見せると、かえって見落としが増えるためです。"
-        : "",
-      // **抑制の強さを変えたことも黙らない**（設計書6.10.8）。
-      // 大きいモデルでは指摘が増え、小さいモデルではこれまでどおりになる。
-      // **どちらも「モデルのせいで結果が違う」ので、理由を先に出す**
-      capability.suppressUncertainContradictions
-        ? "\nこのモデルでは、確信の持てない箇所は指摘しません。\n" +
-          "小さいモデルで疑わしい箇所まで挙げさせると、当たりは増えずに\n" +
-          "見当違いの指摘だけが増えるためです（実測）。"
-        : "\nこのモデルでは、確信が持てない箇所も挙げます。\n" +
-          "どちらが正しいかは作者が決めるので、黙って見逃すより出します。",
+      // **モデルの地力で変わる断りは、1か所にまとめてある**
+      // （`ai/capability.ts`。ログ向けの `describeCapability` の隣）。
+      // 作者向けの文言とログの文言が食い違わないようにするため
+      describeContradictionCapabilityForAuthor(capability),
       // **観点を絞ると鍵が変わり、キャッシュが総入れ替えになる。**
       // 何も変えていないのに全件が対象になると、作者は不具合だと思う
       pending.length === chunks.length && chunks.length > 1
