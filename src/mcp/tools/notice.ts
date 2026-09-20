@@ -5,7 +5,7 @@ import {
   describeContradictionCapabilityForAuthor,
   type CapabilityProfile,
 } from "../../ai/capability";
-import type { CapabilityTier, ProviderId } from "../../ai/types";
+import { inferTier, type CapabilityTier, type ProviderId } from "../../ai/types";
 import { FOLDER_INPUT, McpToolError } from "./shared";
 
 /**
@@ -67,7 +67,11 @@ export const NOVEL_NOTICE_INPUT = {
   tier: z
     .enum(TIERS)
     .optional()
-    .describe("モデルの地力。省略＝取れなかった扱い（ollama だけを軽量とみなす）"),
+    .describe(
+      "モデルの地力。省略してよい——省略すると製品と同じ手（inferTier）で" +
+        "大きさから導きます。渡したときはそちらが優先されるので、" +
+        "作り物の組み合わせも試せます。どちらで動いたかは tierSource に出ます"
+    ),
   /*
     **時間の目安（`estimateRunTimeText`）はまだ返せない**（0.72.0）。口だけ
     先に開けない——受け取って捨てる `count` は、呼んだ側からは「効かなかった」
@@ -107,6 +111,20 @@ export interface NoticeResult {
   forLog: string;
   /** どの切り替えが立っているか（`capabilityProfile` の中身そのまま） */
   profile: CapabilityProfile;
+  /**
+   * **この断りを組むのに使った地力**（0.72.1）。
+   *
+   * 渡されなかったときは `inferTier` が導いたものが入る。
+   */
+  tier: CapabilityTier;
+  /**
+   * 地力を**渡されたのか、導いたのか**（0.72.1）。
+   *
+   * **どちらで動いたか分からないまま結果だけ見ると、また取り違える。**
+   * 実際に、大きさだけ渡して「地力は不明」の答えを製品の答えとして
+   * 記録しかけた（2026-09-21）。
+   */
+  tierSource: "given" | "inferred";
 }
 
 export function novelNotice(input: NoticeInput): NoticeResult {
@@ -122,13 +140,33 @@ export function novelNotice(input: NoticeInput): NoticeResult {
   }
 
   /*
+    **地力は、渡されなければ製品と同じ手で導く**（0.72.1）。
+
+    製品では、モデル情報を組み立てる時点で `inferTier` を通しているので
+    地力は必ず付いている（`ai/ollamaProvider.ts` ほか、各プロバイダ）。
+    ここで渡された `tier` をそのまま使うと、**大きさだけ渡した呼び出しが
+    「地力は不明」へ落ちて、製品なら立たない絞りが立つ**——`gemma4:26b`
+    （25.2B）で「地力は不明・観点を絞る」と返り、実際に取り違えが起きた。
+
+    これは**呼ぶ側に `inferTier` の規則の写しを強いる**形でもある。
+    20B・7B の境目やローカルとクラウドの違いを呼ぶ側が覚えていないと
+    製品と違う答えが返り、**写しは必ず古くなる**。だから写さずに呼ぶ。
+
+    **明示された `tier` は、これまでどおり優先する**——作り物の組み合わせ
+    （大きいのに標準、など）を試せる余地は道具として残しておきたい。
+  */
+  const tierSource = input.tier === undefined ? "inferred" : "given";
+  const tier =
+    input.tier ?? inferTier(input.parameterSize ?? null, input.providerId);
+
+  /*
     **製品と同じ形で渡す**（`features/checkContradictions.ts`・
     `checkDeviations.ts` がモデル情報から組んでいるものと同じ3つ）。
     `parameterSize` は「取れなかった」を `undefined` ではなく `null` で
     表す場面があるが、`capabilityProfile` はどちらも同じに扱う。
   */
   const capabilityInput = {
-    tier: input.tier,
+    tier,
     providerId: input.providerId,
     parameterSize: input.parameterSize,
   };
@@ -142,5 +180,7 @@ export function novelNotice(input: NoticeInput): NoticeResult {
         : "",
     forLog: describeCapability(capabilityInput, profile, input.feature),
     profile,
+    tier,
+    tierSource,
   };
 }
