@@ -43,7 +43,10 @@ async function withLedger(
       outputTokensPerSecond: TOKENS_PER_SECOND,
     },
     ...(feature !== undefined
-      ? { [featureOutputKey("deviation_check")]: feature }
+      ? {
+          // **出力量の実測もモデルごと**（0.71.6）。速さの台帳と同じ鍵で引く
+          [featureOutputKey("deviation_check", PROVIDER, MODEL)]: feature,
+        }
       : {}),
   });
 }

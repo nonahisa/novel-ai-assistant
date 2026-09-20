@@ -583,7 +583,15 @@ export class MeteredProvider implements AIProvider {
     }
 
     try {
-      await recordFeatureOutputTokens(feature, tokens, result.truncated === true);
+      // **どのモデルで測ったかまで残す**（0.71.6）。速さ・字/トークンの
+      // 台帳と同じ鍵の立て方である（`this.inner.id` がプロバイダID）
+      await recordFeatureOutputTokens(
+        feature,
+        this.inner.id,
+        params.model,
+        tokens,
+        result.truncated === true
+      );
     } catch (error) {
       // **残せなかっただけで、AIの応答は返す**（速度・字/トークンと同じ扱い）。
       // ただしエラーの本文は捨てない（CLAUDE.md 規則5）

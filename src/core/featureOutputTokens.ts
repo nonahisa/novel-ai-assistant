@@ -21,17 +21,37 @@ import { tuningStoreTable, writeTuningEntry } from "./modelTuningStore";
  * ここは「置いた値」を「測った値」に替えるための台帳で、
  * **計画・関所・実送信の上限が、そろってここから引く。**
  *
- * ## 鍵は機能だけ（モデルで分けない）
+ * ## 鍵は 機能×プロバイダ×モデル（0.71.6 で分けた）
  *
- * 出力の量を決めているのは、モデルではなく**仕事の大きさ**である
- * ——誤字脱字の指摘は本文の誤字の数だけ返り、各話あらすじは話数だけ返る。
- * `機能×プロバイダ×モデル` で分けると実測が散らばり、**いつまでも件数が
- * しきい値に届かない**（作者が使うプロバイダは6つ、モデルはその中で
- * さらに分かれる）。
+ * **0.71.5 までは機能だけを鍵にしていた。** 出力の量を決めているのは
+ * モデルではなく仕事の大きさだ——誤字脱字の指摘は本文の誤字の数だけ返り、
+ * 各話あらすじは話数だけ返る——という考えだった。
  *
- * **モデルの側の事情は、別の欄が既に持っている**——台帳の
+ * **その前提が、思考を吐く推論モデルで崩れた**（実機、2026-09-21）。
+ * さくらのAI（`gpt-oss-120b`）の矛盾検知が4秒で失敗し、「AIから空の応答が
+ * 返りました」と出た。台帳には `出力見込み/contradiction_check` に
+ * **714トークン×3回**が入っていたが、この714は**ローカルの `gemma4:26b`
+ * （`think: false` ＝ 思考を吐かない）で測った値**である。それが推論モデルの
+ * 上限（714 × 1.25 → 1,024）として使われ、**思考だけで使い切って本文が空**
+ * になった。
+ *
+ * 思考のぶんは「仕事の大きさ」ではなく**モデルの性質**なので、機能だけの
+ * 鍵では表せない。チャンクキャッシュの鍵（内容ハッシュ＋プロバイダID＋
+ * モデル名＋プロンプト版。CLAUDE.md 規則4）と同じ考え方で、**出どころの
+ * 違うものを混ぜない。**
+ *
+ * 分けたぶん実測は散らばり、しきい値に届くまで時間がかかる。**それでよい**
+ * ——届くまでは設定値で動く（悪くならない）のに対し、混ぜたときの失敗は
+ * 呼び出しが丸ごと無駄になる。天秤が釣り合っていなかった。
+ *
+ * **モデルの側の事情は、別の欄も持っている**——台帳の
  * `measuredOutputTokens`（そのモデルが書ける量の実測）である。
  * 見込みを決めるときは、両方の小さいほうを採る（`ai/outputLimit.ts`）。
+ *
+ * ## 同梱の表（`core/bundledTuning.ts`）は機能ごとのまま
+ *
+ * あちらは**複数モデルの集計**なので、モデル別には作れない。モデル別の
+ * 記録がまだ無いときの受け皿として、これまでどおり効かせる。
  *
  * ## 覚え方は `charsPerToken` をそのまま真似る
  *
@@ -63,9 +83,28 @@ import { tuningStoreTable, writeTuningEntry } from "./modelTuningStore";
  */
 export const FEATURE_OUTPUT_KEY_PREFIX = "出力見込み/";
 
-/** 台帳を引くときの鍵 */
-export function featureOutputKey(feature: string): string {
-  return `${FEATURE_OUTPUT_KEY_PREFIX}${feature}`;
+/**
+ * 台帳を引くときの鍵（`出力見込み/<プロバイダID>/<モデル名>/<機能名>`）。
+ *
+ * **0.71.5 までは `出力見込み/<機能名>` だった。** 古い行はこの関数が
+ * 作る鍵と一致しないので、**そのまま読まれなくなる**——それが狙いである
+ * （上の「鍵は 機能×プロバイダ×モデル」）。**どのモデルで測ったのか
+ * 分からない値を混ぜると、同じ事故がもう一度起きる。**
+ *
+ * 古い行を**消す処理は書いていない。** 消すのは作者の操作（詳細メニューの
+ * 「AIチューニングの記録を消す」）でできるし、黙って消すと、あとから
+ * 「何が入っていたか」を確かめる手立てが無くなる。読まれないだけで害はない。
+ *
+ * モデル名に `/` が入ること（Ollamaの `hf.co/作者/モデル:q4`）があるが、
+ * **この鍵を割って読む処理はどこにも無い**ので困らない。一覧
+ * （`core/tuningStats.ts`）はこの頭を持つ行を読み飛ばす。
+ */
+export function featureOutputKey(
+  feature: string,
+  providerId: string,
+  model: string
+): string {
+  return `${FEATURE_OUTPUT_KEY_PREFIX}${providerId}/${model}/${feature}`;
 }
 
 /**
@@ -162,11 +201,13 @@ export interface FeatureOutputTuning {
  * ない数字になる。
  */
 export function featureOutputTuning(
-  feature: string | undefined
+  feature: string | undefined,
+  providerId: string,
+  model: string
 ): FeatureOutputTuning | undefined {
   if (feature === undefined || feature.length === 0) return undefined;
 
-  const own = featureOutputTuningRaw(feature);
+  const own = featureOutputTuningRaw(feature, providerId, model);
   if (own !== undefined) return own;
 
   const seed = bundledFeatureOutput(feature);
@@ -189,9 +230,16 @@ export function featureOutputTuning(
  * 作者の実測に勝ち続ける——`modelTuningRaw` を分けたのと同じ理由。
  */
 export function featureOutputTuningRaw(
-  feature: string
+  feature: string,
+  providerId: string,
+  model: string
 ): FeatureOutputTuning | undefined {
-  const raw = tuningStoreTable()[featureOutputKey(feature)];
+  // **プロバイダかモデルが分からない呼び出しは、台帳を引かない。**
+  // 空文字で鍵を作ると `出力見込み///<機能名>` という行ができ、プロバイダも
+  // モデルも違う呼び出しがそこで合流する——分けた意味が無くなる。引かずに
+  // 同梱の受け皿へ落とすので、これまでより悪くはならない
+  if (providerId.length === 0 || model.length === 0) return undefined;
+  const raw = tuningStoreTable()[featureOutputKey(feature, providerId, model)];
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     return undefined;
   }
@@ -230,9 +278,11 @@ export function featureOutputTuningRaw(
  * ここで当て推量を返すと、測っていない機能の挙動まで静かに変わる。
  */
 export function featureOutputCeiling(
-  feature: string | undefined
+  feature: string | undefined,
+  providerId: string,
+  model: string
 ): number | undefined {
-  const tuning = featureOutputTuning(feature);
+  const tuning = featureOutputTuning(feature, providerId, model);
   if (!tuning) return undefined;
   // 上限に当たった実績がある機能は、要る量を知らない（上の `outputTruncated`）
   if (tuning.outputTruncated === true) return undefined;
@@ -274,19 +324,26 @@ export function featureOutputCeiling(
  */
 export async function recordFeatureOutputTokens(
   feature: string | undefined,
+  providerId: string,
+  model: string,
   tokens: number,
   truncated: boolean
 ): Promise<void> {
   if (feature === undefined || feature.length === 0) return;
+  // **どのモデルのぶんか分からない実測は、書かない**（読む側と同じ理由。
+  // 0.71.5 までの行がまさにこれで、ローカルで測った714が推論モデルの
+  // 上限として使われた）
+  if (providerId.length === 0 || model.length === 0) return;
   if (!Number.isFinite(tokens) || tokens <= 0) return;
 
-  const current = featureOutputTuningRaw(feature);
+  const current = featureOutputTuningRaw(feature, providerId, model);
   const now = new Date().toISOString();
+  const key = featureOutputKey(feature, providerId, model);
 
   if (truncated) {
     // 既に印が付いているなら、書き直す意味が無い
     if (current?.outputTruncated === true) return;
-    await writeTuningEntry(featureOutputKey(feature), {
+    await writeTuningEntry(key, {
       outputTruncated: true,
       measuredAt: now,
     });
@@ -311,7 +368,7 @@ export async function recordFeatureOutputTokens(
       ? tokens
       : (previousAverage * samples + tokens) / (samples + 1);
 
-  await writeTuningEntry(featureOutputKey(feature), {
+  await writeTuningEntry(key, {
     outputTokens: next,
     outputTokensAverage: Math.round(average),
     outputTokenSamples: samples + 1,

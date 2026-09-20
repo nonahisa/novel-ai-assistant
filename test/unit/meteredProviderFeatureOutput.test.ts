@@ -37,11 +37,15 @@ function fakeProvider(result: () => GenerateResult): AIProvider {
   };
 }
 
+/** 台帳の鍵になる、この試験のプロバイダとモデル（`fakeProvider` と揃える） */
+const PROVIDER = "sakura";
+const MODEL = "gpt-oss-120b";
+
 function params(feature: string): GenerateParams {
   return {
     systemPrompt: "あ".repeat(100),
     userPrompt: "い".repeat(1_000),
-    model: "gpt-oss-120b",
+    model: MODEL,
     temperature: 0,
     meta: { feature },
   };
@@ -56,9 +60,9 @@ function reply(outputTokens: number, truncated = false): GenerateResult {
   };
 }
 
-/** その機能の行（無ければ空） */
+/** その機能の行（無ければ空）。**鍵はモデルまで含む**（0.71.6） */
 function entryOf(feature: string): Record<string, unknown> {
-  const row = tuningStoreContents()[featureOutputKey(feature)];
+  const row = tuningStoreContents()[featureOutputKey(feature, PROVIDER, MODEL)];
   return typeof row === "object" && row !== null
     ? (row as Record<string, unknown>)
     : {};

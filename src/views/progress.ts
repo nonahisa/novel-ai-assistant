@@ -208,7 +208,13 @@ export function estimateRunTimeText(params: {
   const unit = params.unit ?? "チャンク";
   const speed = modelTuning(params.providerId, params.model)
     ?.outputTokensPerSecond;
-  const output = featureOutputTuning(params.feature);
+  // **出力量の実測もモデルごと**（0.71.6）。速さの台帳と同じ鍵で引く
+  // ——同じ機能でも、思考を吐くモデルは書く量が違う
+  const output = featureOutputTuning(
+    params.feature,
+    params.providerId,
+    params.model
+  );
   // **件数が足りない実測は使わない**（`core/featureOutputTokens.ts` の
   // しきい値と同じ線を引く）。1回ぶんでは、たまたま短かった回と区別が付かない
   const enough =

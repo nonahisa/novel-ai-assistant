@@ -100,7 +100,7 @@ export function resolveOutputTokensForPlanning(
     **同じ呼び出しについて別々の値**を持っていた。実測があるなら、
     計画も関所も実送信の上限もそこから引く——それが割れの元を断つ。
   */
-  const expected = featureOutputCeiling(feature);
+  const expected = featureOutputCeiling(feature, providerId, model);
   /*
     **2つの実測は、意味が違うので両方を見る。**
 
@@ -116,7 +116,9 @@ export function resolveOutputTokensForPlanning(
     expected !== undefined
       ? Math.min(expected, measured ?? expected)
       : (measured ?? OUTPUT_RESERVE_TOKENS);
-  if (expected !== undefined) noteFeatureCeiling(feature, expected);
+  if (expected !== undefined) {
+    noteFeatureCeiling(feature, providerId, model, expected);
+  }
   return Math.min(configured, ceiling);
 }
 
@@ -130,18 +132,31 @@ export function resolveOutputTokensForPlanning(
  * の1行と同じ場所（操作ログ）へ出す。
  *
  * 呼び出しのたびに書くとログが埋まるので、同じ機能・同じ値なら一度きり
- * （`core/modelTuning.ts` の `noteOnce` と同じ形）。
+ * （`core/modelTuning.ts` の `noteOnce` と同じ形）。**0.71.6 からは
+ * モデルも数え分ける**——実測がモデルごとに分かれたので、同じ機能でも
+ * モデルを替えれば違う値が出る。まとめて一度にすると、替えたあとの値が
+ * ログに出ない。
  */
 const notedFeatureCeilings = new Set<string>();
 
-function noteFeatureCeiling(feature: string | undefined, tokens: number): void {
-  const tuning = featureOutputTuning(feature);
-  const note = `${feature}:${tokens}:${tuning?.bundled === true ? "同梱" : "実測"}`;
+function noteFeatureCeiling(
+  feature: string | undefined,
+  providerId: string,
+  model: string,
+  tokens: number
+): void {
+  const tuning = featureOutputTuning(feature, providerId, model);
+  const note =
+    `${providerId}/${model}:${feature}:${tokens}:` +
+    `${tuning?.bundled === true ? "同梱" : "実測"}`;
   if (notedFeatureCeilings.has(note)) return;
   notedFeatureCeilings.add(note);
   logLine(
     `出力の見込み：${feature} は ${tokens.toLocaleString("ja-JP")}トークン` +
-      `（${tuning?.bundled === true ? "同梱の初期値" : "この機械の実測"}` +
+      // **どのモデルのぶんかを出す。** 同じ機能でもモデルごとに違う値に
+      // なったので、機械の実測としか書かないと、どの実測なのか読めない
+      `（${model} の` +
+      `${tuning?.bundled === true ? "同梱の初期値" : "この機械の実測"}` +
       `${tuning?.outputTokens?.toLocaleString("ja-JP") ?? "?"}トークン × ` +
       `${tuning?.outputTokenSamples ?? 0}回ぶん）。`
   );
@@ -225,7 +240,7 @@ export function resolveOutputLimitForSend(
     だから見込みには余裕を上乗せしてあり、それでも足りなかったときは
     切り詰められたことが台帳へ残って、**次の回から設定値へ戻る。**
   */
-  const expected = featureOutputCeiling(feature);
+  const expected = featureOutputCeiling(feature, providerId, model);
 
   // **いちばん小さい制約が効く。** 出どころを一緒に持ち回るのは、
   // 切り詰めの案内で同じ判定をもう一度書かないため

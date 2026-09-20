@@ -17,6 +17,7 @@ import {
   bundledFeatureOutput,
   bundledFeatureOutputKeys,
 } from "../../src/core/bundledTuning";
+import { OUTPUT_RESERVE_TOKENS } from "../../src/ai/contextGuard";
 
 /**
  * 出力に見込むトークン数を、**実測から決める**（作者の裁定、2026-09-19）。
@@ -69,10 +70,12 @@ function installSettings(values: Record<string, unknown>): void {
 async function recordSamples(
   feature: string,
   tokens: number,
-  times: number
+  times: number,
+  providerId: string = PROVIDER,
+  model: string = MODEL
 ): Promise<void> {
   for (let i = 0; i < times; i += 1) {
-    await recordFeatureOutputTokens(feature, tokens, false);
+    await recordFeatureOutputTokens(feature, providerId, model, tokens, false);
   }
 }
 
@@ -118,9 +121,9 @@ describe("計画と関所が、同じ出どころから引く", () => {
 describe("実測が貯まると、見込みが変わる", () => {
   it("しきい値に届くまでは、設定値のまま（1回では信じない）", async () => {
     installSettings({ maxOutputTokens: 16384 });
-    await recordFeatureOutputTokens("announce", 3000, false);
+    await recordFeatureOutputTokens("announce", PROVIDER, MODEL, 3000, false);
 
-    expect(featureOutputCeiling("announce")).toBeUndefined();
+    expect(featureOutputCeiling("announce", PROVIDER, MODEL)).toBeUndefined();
     expect(resolveOutputTokensForSend(PROVIDER, MODEL, "announce")).toBe(16384);
   });
 
@@ -128,7 +131,7 @@ describe("実測が貯まると、見込みが変わる", () => {
     installSettings({ maxOutputTokens: 16384 });
     await recordSamples("announce", 3000, MIN_FEATURE_OUTPUT_SAMPLES);
 
-    const ceiling = featureOutputCeiling("announce");
+    const ceiling = featureOutputCeiling("announce", PROVIDER, MODEL);
     expect(ceiling).toBeDefined();
     expect(ceiling!).toBeGreaterThanOrEqual(3000 * FEATURE_OUTPUT_MARGIN);
     expect(resolveOutputTokensForSend(PROVIDER, MODEL, "announce")).toBe(ceiling);
@@ -137,10 +140,10 @@ describe("実測が貯まると、見込みが変わる", () => {
   it("あとから大きく書いた回があれば、見込みは広がる（最小値ではなく最大値を覚える）", async () => {
     installSettings({ maxOutputTokens: 16384 });
     await recordSamples("announce", 3000, MIN_FEATURE_OUTPUT_SAMPLES);
-    const before = featureOutputCeiling("announce")!;
+    const before = featureOutputCeiling("announce", PROVIDER, MODEL)!;
 
-    await recordFeatureOutputTokens("announce", 7000, false);
-    const after = featureOutputCeiling("announce")!;
+    await recordFeatureOutputTokens("announce", PROVIDER, MODEL, 7000, false);
+    const after = featureOutputCeiling("announce", PROVIDER, MODEL)!;
 
     expect(after).toBeGreaterThan(before);
     expect(after).toBeGreaterThanOrEqual(7000);
@@ -151,14 +154,14 @@ describe("実測が貯まると、見込みが変わる", () => {
     // 「その機能が要る量」ではない。逆に「上限以上に要る」ことの印である
     installSettings({ maxOutputTokens: 16384 });
     await recordSamples("blurb", 4000, MIN_FEATURE_OUTPUT_SAMPLES);
-    expect(featureOutputCeiling("blurb")).toBeDefined();
+    expect(featureOutputCeiling("blurb", PROVIDER, MODEL)).toBeDefined();
 
-    await recordFeatureOutputTokens("blurb", 16384, true);
+    await recordFeatureOutputTokens("blurb", PROVIDER, MODEL, 16384, true);
 
-    expect(featureOutputCeiling("blurb")).toBeUndefined();
+    expect(featureOutputCeiling("blurb", PROVIDER, MODEL)).toBeUndefined();
     expect(resolveOutputTokensForSend(PROVIDER, MODEL, "blurb")).toBe(16384);
     // 切られた量を「実測」として書き込まない
-    const entry = tuningStoreContents()[featureOutputKey("blurb")] as Record<
+    const entry = tuningStoreContents()[featureOutputKey("blurb", PROVIDER, MODEL)] as Record<
       string,
       unknown
     >;
@@ -170,7 +173,7 @@ describe("実測が貯まると、見込みが変わる", () => {
     // 同梱は 12,023／6回。作者の台帳は 2,000／しきい値ぶん
     await recordSamples("character_extract", 2000, MIN_FEATURE_OUTPUT_SAMPLES);
 
-    const ceiling = featureOutputCeiling("character_extract")!;
+    const ceiling = featureOutputCeiling("character_extract", PROVIDER, MODEL)!;
     expect(ceiling).toBeLessThan(
       bundledFeatureOutput("character_extract")!.outputTokens
     );
@@ -182,9 +185,9 @@ describe("実測が無ければ、同梱の初期値", () => {
     installSettings({ maxOutputTokens: 16384 });
 
     // 6回ぶんの実測がある
-    expect(featureOutputCeiling("character_extract")).toBeDefined();
+    expect(featureOutputCeiling("character_extract", PROVIDER, MODEL)).toBeDefined();
     // 1回しか無い機能は信じない（設定値のまま）
-    expect(featureOutputCeiling("chapter_propose")).toBeUndefined();
+    expect(featureOutputCeiling("chapter_propose", PROVIDER, MODEL)).toBeUndefined();
   });
 
   it("紹介文（blurb）は同梱しない——切り詰められた回しか無いため", () => {
@@ -195,9 +198,9 @@ describe("実測が無ければ、同梱の初期値", () => {
 
   it("同梱の値は台帳へ書き写さない（読むときだけ混ぜる）", () => {
     installSettings({ maxOutputTokens: 16384 });
-    featureOutputCeiling("character_extract");
+    featureOutputCeiling("character_extract", PROVIDER, MODEL);
 
-    expect(tuningStoreContents()[featureOutputKey("character_extract")]).toBe(
+    expect(tuningStoreContents()[featureOutputKey("character_extract", PROVIDER, MODEL)]).toBe(
       undefined
     );
   });
@@ -258,9 +261,9 @@ describe("モデルの表と混ざらない", () => {
 
     // 置き場は同じファイルだが、鍵の意味も欄の意味も別物である。
     // 読み飛ばさないと「出力見込み / typo_check」という架空のモデルが並ぶ
-    expect(keys).not.toContain(featureOutputKey("typo_check"));
+    expect(keys).not.toContain(featureOutputKey("typo_check", PROVIDER, MODEL));
     // 台帳のファイルには、ちゃんと入っている（読み飛ばしが効いているだけ）
-    expect(tuningStoreContents()[featureOutputKey("typo_check")]).toBeDefined();
+    expect(tuningStoreContents()[featureOutputKey("typo_check", PROVIDER, MODEL)]).toBeDefined();
   });
 });
 
@@ -289,16 +292,16 @@ describe("切り詰められたときの案内", () => {
 describe("最大とは別に、平均も覚える", () => {
   /** 台帳のその機能の行（生のまま） */
   function entryOf(feature: string): Record<string, unknown> {
-    return tuningStoreContents()[featureOutputKey(feature)] as Record<
+    return tuningStoreContents()[featureOutputKey(feature, PROVIDER, MODEL)] as Record<
       string,
       unknown
     >;
   }
 
   it("最大は最大のまま、平均は平均になる", async () => {
-    await recordFeatureOutputTokens("deviation_check", 100, false);
-    await recordFeatureOutputTokens("deviation_check", 200, false);
-    await recordFeatureOutputTokens("deviation_check", 900, false);
+    await recordFeatureOutputTokens("deviation_check", PROVIDER, MODEL, 100, false);
+    await recordFeatureOutputTokens("deviation_check", PROVIDER, MODEL, 200, false);
+    await recordFeatureOutputTokens("deviation_check", PROVIDER, MODEL, 900, false);
 
     const entry = entryOf("deviation_check");
     // 容量の見積もりがぶら下がっているので、最大の決め方は変えない
@@ -312,9 +315,9 @@ describe("最大とは別に、平均も覚える", () => {
     // **平均は毎回動く**ので、「改善しないなら書かない」では追随できない。
     // 900 のあと 100 を3回書いても、抑えていた頃は4回目が落ちて
     // 件数が3のまま止まっていた
-    await recordFeatureOutputTokens("deviation_check", 900, false);
+    await recordFeatureOutputTokens("deviation_check", PROVIDER, MODEL, 900, false);
     for (let i = 0; i < 3; i += 1) {
-      await recordFeatureOutputTokens("deviation_check", 100, false);
+      await recordFeatureOutputTokens("deviation_check", PROVIDER, MODEL, 100, false);
     }
 
     const entry = entryOf("deviation_check");
@@ -325,25 +328,214 @@ describe("最大とは別に、平均も覚える", () => {
 
   it("平均を足しても、容量の見積もりは1ミリも変わらない", async () => {
     installSettings({ maxOutputTokens: 16384 });
-    await recordFeatureOutputTokens("announce", 100, false);
-    await recordFeatureOutputTokens("announce", 200, false);
-    await recordFeatureOutputTokens("announce", 900, false);
+    await recordFeatureOutputTokens("announce", PROVIDER, MODEL, 100, false);
+    await recordFeatureOutputTokens("announce", PROVIDER, MODEL, 200, false);
+    await recordFeatureOutputTokens("announce", PROVIDER, MODEL, 900, false);
 
     // 平均（400）ではなく**最大（900）**から、余裕と丸めを掛けた値である。
     // ここが平均に倒れると、足りなくて応答が切れる側へ落ちる
     const fromMax =
       Math.ceil((900 * FEATURE_OUTPUT_MARGIN) / 1024) * 1024;
-    expect(featureOutputCeiling("announce")).toBe(fromMax);
+    expect(featureOutputCeiling("announce", PROVIDER, MODEL)).toBe(fromMax);
     expect(resolveOutputTokensForSend(PROVIDER, MODEL, "announce")).toBe(fromMax);
   });
 
   it("切り詰められた回は、平均にも混ぜない", async () => {
     // 切られた回の量は「要った量」ではないので、平均の材料にもならない
     await recordSamples("blurb", 4000, MIN_FEATURE_OUTPUT_SAMPLES);
-    await recordFeatureOutputTokens("blurb", 16384, true);
+    await recordFeatureOutputTokens("blurb", PROVIDER, MODEL, 16384, true);
 
     const entry = entryOf("blurb");
     expect(entry.outputTokensAverage).toBe(4000);
     expect(entry.outputTruncated).toBe(true);
+  });
+});
+
+/**
+ * **仕事の量は、モデルにも依る**（実機、2026-09-21）。
+ *
+ * ## 何が起きたか
+ *
+ * さくらのAI（`gpt-oss-120b`）で矛盾検知を10話に掛けたら、**4秒で失敗**した
+ * ——「AIから空の応答が返りました」。
+ *
+ * 台帳を開くと、`出力見込み/contradiction_check` に **714トークン×3回**が
+ * 入っていた。この714は**ローカルの `gemma4:26b`（`think: false` ＝ 思考を
+ * 吐かない）で測った値**である。それが**思考を吐く推論モデル**の上限
+ * （714 × 1.25 → 1,024）として使われ、**思考だけで使い切って本文が空**に
+ * なった。
+ *
+ * ## なぜ起きたか
+ *
+ * 鍵が機能名だけ（`出力見込み/<機能名>`）で、**どのモデルで測った値なのかを
+ * 持っていなかった。** 「仕事の量はモデルに依らない」という前提が、
+ * 推論モデルで崩れた——思考のぶんは仕事の大きさではなくモデルの性質である。
+ *
+ * ## 直し方
+ *
+ * 鍵に**プロバイダとモデルを足す**（`出力見込み/<プロバイダ>/<モデル>/<機能>`）。
+ * チャンクキャッシュの鍵と同じ考え方で、**出どころの違うものを混ぜない。**
+ */
+describe("モデルの違う実測を混ぜない", () => {
+  /** 実機の台帳そのもの。ローカルの、思考を吐かないモデルで測った714 */
+  const LOCAL = { providerId: "ollama", model: "gemma4:26b", tokens: 714 };
+  /** 失敗したほう。思考を吐く推論モデル */
+  const REASONING = { providerId: "sakura", model: "gpt-oss-120b" };
+
+  it("モデルAで測った値が、モデルBの上限にならない（この不具合そのもの）", async () => {
+    installSettings({ maxOutputTokens: 16384 });
+    await recordSamples(
+      "contradiction_check",
+      LOCAL.tokens,
+      MIN_FEATURE_OUTPUT_SAMPLES,
+      LOCAL.providerId,
+      LOCAL.model
+    );
+
+    // 714 × 1.25 を 1,024 刻みで切り上げると 1,024。**この値が来てはいけない**
+    const ceiling = featureOutputCeiling(
+      "contradiction_check",
+      REASONING.providerId,
+      REASONING.model
+    );
+    expect(ceiling).not.toBe(1024);
+    /*
+      同梱の `contradiction_check` は標本2件で `MIN_FEATURE_OUTPUT_SAMPLES`
+      （3）に届かないので、受け皿としても効かない。**見込みは既定へ落ちる**
+      ——これが「鍵を替えるだけで、この失敗は自然に直る」ということ
+    */
+    expect(ceiling).toBeUndefined();
+    expect(
+      resolveOutputTokensForPlanning(
+        REASONING.providerId,
+        REASONING.model,
+        "contradiction_check"
+      )
+    ).toBe(OUTPUT_RESERVE_TOKENS);
+    expect(
+      resolveOutputTokensForSend(
+        REASONING.providerId,
+        REASONING.model,
+        "contradiction_check"
+      )
+    ).toBe(16384);
+  });
+
+  it("測ったモデル自身には、これまでどおり効く", async () => {
+    installSettings({ maxOutputTokens: 16384 });
+    await recordSamples(
+      "contradiction_check",
+      LOCAL.tokens,
+      MIN_FEATURE_OUTPUT_SAMPLES,
+      LOCAL.providerId,
+      LOCAL.model
+    );
+
+    expect(
+      featureOutputCeiling("contradiction_check", LOCAL.providerId, LOCAL.model)
+    ).toBe(1024);
+  });
+
+  it("同じプロバイダでもモデルが違えば、分かれる", async () => {
+    installSettings({ maxOutputTokens: 16384 });
+    await recordSamples(
+      "typo_check",
+      3000,
+      MIN_FEATURE_OUTPUT_SAMPLES,
+      "sakura",
+      "gpt-oss-120b"
+    );
+
+    // 3,000 × 1.25 ＝ 3,750 → 1,024刻みで 4,096
+    expect(featureOutputCeiling("typo_check", "sakura", "gpt-oss-120b")).toBe(
+      4096
+    );
+    /*
+      **同じさくらでも、別のモデルには効かない。** ただし `typo_check` には
+      同梱の受け皿があるので、undefined ではなく**同梱から出た値**へ落ちる
+      ——ここが「同梱は機能ごとのまま残す」ということ
+    */
+    const other = featureOutputCeiling(
+      "typo_check",
+      "sakura",
+      "preview/gemma-4-31B-it"
+    );
+    expect(other).not.toBe(4096);
+    expect(other).toBeGreaterThanOrEqual(
+      bundledFeatureOutput("typo_check")!.outputTokens
+    );
+  });
+
+  it("平均（所要時間の見積もり）も、モデルごとに分かれる", async () => {
+    await recordFeatureOutputTokens(
+      "deviation_check",
+      LOCAL.providerId,
+      LOCAL.model,
+      1000,
+      false
+    );
+
+    const mine = tuningStoreContents()[
+      featureOutputKey("deviation_check", LOCAL.providerId, LOCAL.model)
+    ] as Record<string, unknown>;
+    expect(mine.outputTokensAverage).toBe(1000);
+    // 別のモデルの行は、そもそも存在しない
+    expect(
+      tuningStoreContents()[
+        featureOutputKey(
+          "deviation_check",
+          REASONING.providerId,
+          REASONING.model
+        )
+      ]
+    ).toBeUndefined();
+  });
+
+  it("古い鍵（モデルの無い行）は読まない", async () => {
+    installSettings({ maxOutputTokens: 16384 });
+    /*
+      0.71.5 までの形の行を、そのまま台帳へ置く。**どのモデルで測ったのか
+      分からない**ので、読むと今回と同じ事故になる。消す処理は書いていない
+      （作者が「AIチューニングの記録を消す」で消せる）
+    */
+    await useMemoryTuningStore({
+      "出力見込み/contradiction_check": {
+        outputTokens: 714,
+        outputTokensAverage: 714,
+        outputTokenSamples: 3,
+        measuredAt: "2026-09-20T00:02:40",
+      },
+    });
+
+    expect(
+      featureOutputCeiling("contradiction_check", LOCAL.providerId, LOCAL.model)
+    ).toBeUndefined();
+    expect(
+      featureOutputCeiling(
+        "contradiction_check",
+        REASONING.providerId,
+        REASONING.model
+      )
+    ).toBeUndefined();
+  });
+
+  it("同梱の受け皿は、記録の無いモデルでもこれまでどおり効く", () => {
+    installSettings({ maxOutputTokens: 16384 });
+
+    // 同梱の `deviation_check` は 9,758／5回。モデル別には作れないので、
+    // どのプロバイダ・どのモデルから引いても同じ値が出る
+    const seed = bundledFeatureOutput("deviation_check")!.outputTokens;
+    for (const [providerId, model] of [
+      [LOCAL.providerId, LOCAL.model],
+      [REASONING.providerId, REASONING.model],
+    ]) {
+      const sent = resolveOutputTokensForSend(
+        providerId,
+        model,
+        "deviation_check"
+      );
+      expect(sent, `${providerId}/${model}`).toBeGreaterThanOrEqual(seed);
+      expect(sent, `${providerId}/${model}`).toBeLessThanOrEqual(16384);
+    }
   });
 });
