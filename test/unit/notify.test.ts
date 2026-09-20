@@ -4,9 +4,16 @@ import {
   confirmRun,
   errorWithLog,
   notifyDone,
+  pickWithMemory,
   warnWithLog,
 } from "../../src/views/notify";
-import { statusBarMessages, window } from "./support/vscodeStub";
+import {
+  lastQuickPick,
+  resetLastQuickPick,
+  statusBarMessages,
+  window,
+  workspace,
+} from "./support/vscodeStub";
 import * as logger from "../../src/core/logger";
 
 /**
@@ -239,6 +246,129 @@ describe("確認の顔つき", () => {
       expect(calls).toHaveLength(1);
     } finally {
       window.showInformationMessage = original;
+    }
+  });
+});
+
+/**
+ * 「以降は訊かない」の覚え書きを差し替える。
+ *
+ * 本物は `vscode.workspace.getConfiguration("novelai").get("confirm.remembered")`
+ * で読み、`.update(...)` で書く（`core/confirmMemoryStore.ts`）。テストは
+ * それぞれを差し替えて、初期状態と書き込まれた中身を覗く。
+ */
+function stubConfirmMemory(initial: Record<string, string>): {
+  updates: Array<Record<string, string>>;
+  restore: () => void;
+} {
+  const SECTION = "novelai";
+  const updates: Array<Record<string, string>> = [];
+  const original = workspace.getConfiguration;
+  workspace.getConfiguration = ((section?: string) => {
+    if (section !== SECTION) return original();
+    return {
+      get: (_key: string) => initial,
+      update: async (_key: string, value: Record<string, string>) => {
+        updates.push(value);
+      },
+    };
+  }) as typeof workspace.getConfiguration;
+  return {
+    updates,
+    restore: () => {
+      workspace.getConfiguration = original;
+    },
+  };
+}
+
+/**
+ * 「はじめの10話だけ試す」は覚えない（`noRemember`、設計書6.8.7）。
+ *
+ * 覚えると、以後すべての実行が黙って10話だけになり、見ていない話が
+ * 「指摘なし」として通る——**試したつもりが本番になる。** ここは
+ * `pickWithMemory`（`views/notify.ts` の272行・322行）を実際に動かして
+ * 確かめる（実機確認リストの項目を、機械で確かめられる形にする）。
+ */
+describe("pickWithMemory：noRemember の項目は覚えない", () => {
+  const items = [
+    {
+      label: "$(beaker) はじめの10話だけ（試す）",
+      value: "first" as const,
+      noRemember: true,
+    },
+    { label: "$(book) 作品全体", value: "all" as const },
+  ];
+
+  beforeEach(() => {
+    resetLastQuickPick();
+  });
+
+  test("noRemember の項目を選ぶと、ピンが入っていても覚え書きへ書かない", async () => {
+    const memory = stubConfirmMemory({});
+    try {
+      const promise = pickWithMemory({
+        items,
+        title: "どこまで見ますか",
+        remember: { id: "scope.typoCheck" },
+      });
+
+      // ピンを入れてから選ぶ（「以降はこの選択で進む」を入れた体にする）
+      expect(lastQuickPick).toBeDefined();
+      lastQuickPick!.triggerButton();
+      lastQuickPick!.accept(
+        lastQuickPick!.items.find((item) => item.value === "first")!
+      );
+
+      expect(await promise).toBe("first");
+      // ピンを入れて選んだのに、覚え書きへは1件も書かれない
+      expect(memory.updates).toEqual([]);
+    } finally {
+      memory.restore();
+    }
+  });
+
+  test("noRemember でない項目なら、ピンを入れて選ぶとこれまでどおり覚える", async () => {
+    // 上のテストが効きすぎて、覚える道そのものを塞いでいないことの裏
+    const memory = stubConfirmMemory({});
+    try {
+      const promise = pickWithMemory({
+        items,
+        title: "どこまで見ますか",
+        remember: { id: "scope.typoCheck" },
+      });
+
+      lastQuickPick!.triggerButton();
+      lastQuickPick!.accept(
+        lastQuickPick!.items.find((item) => item.value === "all")!
+      );
+
+      expect(await promise).toBe("all");
+      expect(memory.updates).toEqual([{ "scope.typoCheck": "all" }]);
+    } finally {
+      memory.restore();
+    }
+  });
+
+  test("覚え書きに noRemember の項目の値が残っていても、素通りさせずに訊き直す", async () => {
+    // 272行：古い記録（覚えられた時期があった場合）が残っていたケース
+    const memory = stubConfirmMemory({ "scope.typoCheck": "first" });
+    try {
+      const promise = pickWithMemory({
+        items,
+        title: "どこまで見ますか",
+        remember: { id: "scope.typoCheck" },
+      });
+
+      // 素通りしていれば選択画面は作られない。ここで作られていることが、
+      // 訊き直していることの証になる
+      expect(lastQuickPick).toBeDefined();
+      lastQuickPick!.accept(
+        lastQuickPick!.items.find((item) => item.value === "all")!
+      );
+
+      expect(await promise).toBe("all");
+    } finally {
+      memory.restore();
     }
   });
 });

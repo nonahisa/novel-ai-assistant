@@ -273,3 +273,77 @@ describe("切り詰められたときの案内", () => {
     expect(limit.source).toBe("機能の実測");
   });
 });
+
+/**
+ * **最大と平均は、用途が違う**（実機、2026-09-21）。
+ *
+ * プロット逸脱を10話に掛けると「10件 ≒ およそ15分」と出て、**実際は39秒**
+ * だった。原因は、**用途の違う2つを1つの数字で兼ねていた**ことである。
+ *
+ * - **容量**……足りなければ応答が切れて丸ごと捨てられるので、**最大**が正しい
+ * - **所要時間**……最大を使えば**必ず過大**になる。要るのは普段の量＝**平均**
+ *
+ * しかも覚える値が最大なので、**使うほど見積もりは伸びる。**放っておいて
+ * 直らない。ここで平均をもう1つ持たせ、時間の見積もりだけがそれを見る。
+ */
+describe("最大とは別に、平均も覚える", () => {
+  /** 台帳のその機能の行（生のまま） */
+  function entryOf(feature: string): Record<string, unknown> {
+    return tuningStoreContents()[featureOutputKey(feature)] as Record<
+      string,
+      unknown
+    >;
+  }
+
+  it("最大は最大のまま、平均は平均になる", async () => {
+    await recordFeatureOutputTokens("deviation_check", 100, false);
+    await recordFeatureOutputTokens("deviation_check", 200, false);
+    await recordFeatureOutputTokens("deviation_check", 900, false);
+
+    const entry = entryOf("deviation_check");
+    // 容量の見積もりがぶら下がっているので、最大の決め方は変えない
+    expect(entry.outputTokens).toBe(900);
+    // 時間の見積もりが見るのはこちら（100・200・900 の平均）
+    expect(entry.outputTokensAverage).toBe(400);
+    expect(entry.outputTokenSamples).toBe(3);
+  });
+
+  it("最大が伸びない回も数える（書き込みの抑制を外す）", async () => {
+    // **平均は毎回動く**ので、「改善しないなら書かない」では追随できない。
+    // 900 のあと 100 を3回書いても、抑えていた頃は4回目が落ちて
+    // 件数が3のまま止まっていた
+    await recordFeatureOutputTokens("deviation_check", 900, false);
+    for (let i = 0; i < 3; i += 1) {
+      await recordFeatureOutputTokens("deviation_check", 100, false);
+    }
+
+    const entry = entryOf("deviation_check");
+    expect(entry.outputTokenSamples).toBe(4);
+    expect(entry.outputTokens).toBe(900);
+    expect(entry.outputTokensAverage).toBe(300);
+  });
+
+  it("平均を足しても、容量の見積もりは1ミリも変わらない", async () => {
+    installSettings({ maxOutputTokens: 16384 });
+    await recordFeatureOutputTokens("announce", 100, false);
+    await recordFeatureOutputTokens("announce", 200, false);
+    await recordFeatureOutputTokens("announce", 900, false);
+
+    // 平均（400）ではなく**最大（900）**から、余裕と丸めを掛けた値である。
+    // ここが平均に倒れると、足りなくて応答が切れる側へ落ちる
+    const fromMax =
+      Math.ceil((900 * FEATURE_OUTPUT_MARGIN) / 1024) * 1024;
+    expect(featureOutputCeiling("announce")).toBe(fromMax);
+    expect(resolveOutputTokensForSend(PROVIDER, MODEL, "announce")).toBe(fromMax);
+  });
+
+  it("切り詰められた回は、平均にも混ぜない", async () => {
+    // 切られた回の量は「要った量」ではないので、平均の材料にもならない
+    await recordSamples("blurb", 4000, MIN_FEATURE_OUTPUT_SAMPLES);
+    await recordFeatureOutputTokens("blurb", 16384, true);
+
+    const entry = entryOf("blurb");
+    expect(entry.outputTokensAverage).toBe(4000);
+    expect(entry.outputTruncated).toBe(true);
+  });
+});

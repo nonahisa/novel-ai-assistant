@@ -110,17 +110,37 @@ describe("普段の呼び出しから、機能ごとの出力トークン数を�
     expect(entryOf(CONTEXT_GUARD_EXEMPT_FEATURE).outputTokens).toBeUndefined();
   });
 
-  test("しきい値に届いたあとは、最大値が上がった回しか書かない", async () => {
+  test("最大が上がらない回も数える（0.71.5 で書き込みの抑制を外した）", async () => {
+    // 0.71.4 までは「最大が上がらず、件数も足りているなら書かない」と
+    // 抑えていた。**平均は毎回動くので、それでは追随できない**
+    // ——短い回が何度続いても平均が下がらず、時間の目安が伸びたきり戻らない
     const metered = new MeteredProvider(fakeProvider(() => reply(9_100)));
     for (let i = 0; i < MIN_FEATURE_OUTPUT_SAMPLES + 5; i += 1) {
       await metered.generate(params("typo_check"));
     }
 
-    // 呼び出しの回数ではなく、**台帳へ書いた回数**が入る（少なめに出る
-    // ぶんには、信じ始めるのが遅れるだけで安全側）
+    // **呼び出しの回数そのもの**が入る
     expect(entryOf("typo_check").outputTokenSamples).toBe(
-      MIN_FEATURE_OUTPUT_SAMPLES
+      MIN_FEATURE_OUTPUT_SAMPLES + 5
     );
+  });
+
+  test("普段の量（平均）も覚える。最大に引っ張られない", async () => {
+    // 1回だけ長く書いて、あとは短い——という荒れ方が実際にある
+    // （逸脱検知は中央値3,518に対して最大9,758。`core/bundledTuning.ts`）
+    const long = new MeteredProvider(fakeProvider(() => reply(9_000)));
+    await long.generate(params("deviation_check"));
+
+    const short = new MeteredProvider(fakeProvider(() => reply(1_000)));
+    for (let i = 0; i < 3; i += 1) {
+      await short.generate(params("deviation_check"));
+    }
+
+    const entry = entryOf("deviation_check");
+    // 容量の見積もりが見る側は、これまでどおり最大
+    expect(entry.outputTokens).toBe(9_000);
+    // 時間の目安が見る側は、普段の量（(9,000 + 1,000×3) ÷ 4 = 3,000）
+    expect(entry.outputTokensAverage).toBe(3_000);
   });
 
   test("出力トークン数を返さないAIからは採らない（字数で見積もらない）", async () => {

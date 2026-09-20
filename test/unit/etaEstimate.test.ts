@@ -118,20 +118,39 @@ describe("押す前の見積もり（速さ × 1回に書く量）", () => {
  * あれは「切り詰められていない回の実測の**最大**」である。容量の見積もりには
  * 最大が正しい（足りないと落ちる）が、**所要時間に最大を使えば必ず過大になる。**
  *
- * **ここで直すのは名乗りだけ**——同梱の値を使ったときに、この機械の実測と
- * 同じ顔をさせない。数字そのもの（最大ではなく普段の量で見積もる）は別の話。
+ * **線を引く場所は「同梱かどうか」ではない**（0.71.5 で引き直した）。
+ * 台帳に溜まった最大も同じだけ過大なので、**最大を使ったなら同梱でなくても
+ * 「多め」と言う。** 割り引かずに読んでよいのは、普段の量＝**平均**だけ。
  */
 describe("見積もりの出どころを名乗る", () => {
-  test("この機械の実測から出したときは、そう名乗る", () => {
+  test("この機械の実測の**平均**から出したときだけ、そのまま名乗る", () => {
     const text = describeRunTimeEstimate({
       count: 10,
       unit: "話",
       ms: 39_000,
-      bundled: false,
+      basis: "average",
     });
 
     expect(text).toContain("これまでの実測から");
     expect(text).not.toContain("同梱");
+    // 普段の量なので、割り引いて読ませる必要が無い
+    expect(text).not.toContain("多め");
+  });
+
+  test("**台帳の最大から出したときは、多めだと言う**（実測でも）", () => {
+    const text = describeRunTimeEstimate({
+      count: 10,
+      unit: "話",
+      ms: 900_000,
+      basis: "max",
+    });
+
+    expect(text).toContain("多め");
+    // 実測ではあるので、同梱の顔もさせない
+    expect(text).toContain("実測");
+    expect(text).not.toContain("同梱");
+    // **普段の量から出したかのように名乗らせない。** ここが実機で外した点
+    expect(text).not.toContain("これまでの実測から）");
   });
 
   test("**同梱の値を使ったときは、同梱だと分かるようにする**", () => {
@@ -139,39 +158,28 @@ describe("見積もりの出どころを名乗る", () => {
       count: 10,
       unit: "話",
       ms: 900_000,
-      bundled: true,
+      basis: "bundled-max",
     });
 
     expect(text).toContain("同梱");
+    // 同梱の値も**最大**なので、時間は必ず多めに出る
+    expect(text).toContain("多め");
     // **「これまでの実測から」を名乗らせない。** ここが実機で外した点
     expect(text).not.toContain("これまでの実測から");
   });
 
-  test("同梱のときは、多めに見ていることも言う", () => {
-    // 同梱の値は**最大**なので、時間は必ず多めに出る。
-    // 数字を直すまでの間、読む側が割り引けるようにする
-    const text = describeRunTimeEstimate({
-      count: 10,
-      unit: "話",
-      ms: 900_000,
-      bundled: true,
-    });
-
-    expect(text).toContain("多め");
-  });
-
   test("見当が付かないときは、出どころに関わらず正直に言う", () => {
-    for (const bundled of [true, false]) {
+    for (const basis of ["average", "max", "bundled-max"] as const) {
       const text = describeRunTimeEstimate({
         count: 10,
         unit: "話",
         ms: undefined,
-        bundled,
+        basis,
       });
 
-      expect(text, String(bundled)).toContain("見当が付きません");
+      expect(text, basis).toContain("見当が付きません");
       // 走り出したあとに出す、という約束もそのまま残す
-      expect(text, String(bundled)).toContain(`${MIN_ETA_SAMPLES}話`);
+      expect(text, basis).toContain(`${MIN_ETA_SAMPLES}話`);
     }
   });
 });

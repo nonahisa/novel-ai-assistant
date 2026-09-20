@@ -112,6 +112,26 @@ export const MIN_FEATURE_OUTPUT_SAMPLES = 3;
 export interface FeatureOutputTuning {
   /** 切り詰められていない回の、実測の最大トークン数 */
   readonly outputTokens?: number;
+  /**
+   * 切り詰められていない回の、実測の**平均**トークン数（0.71.5 で追加）。
+   *
+   * **最大と用途が違う。** 上の `outputTokens` は容量の見積もり
+   * （`featureOutputCeiling`）のためのもので、**足りなければ応答が切れて
+   * そのチャンクが丸ごと捨てられる**から最大が正しい。だが
+   * **所要時間の見積もりに最大を使えば、必ず過大になる。**
+   *
+   * 2026-09-21、実機で外した——プロット逸脱を10話に掛けると
+   * 「10件 ≒ およそ15分」と出て、**実際は39秒**だった。しかも覚える値が
+   * 最大なので、**使うほど見積もりは伸びる。**放っておいて直らない。
+   *
+   * **見るのは時間の見積もり（`views/progress.ts`）だけ。** 容量の側は
+   * この欄を一切見ない（見たら、足りなくて落ちる側へ倒れる）。
+   *
+   * 整数に丸めて持つ。トークンは整数で、台帳は作者が開いて読めるファイル
+   * なので、`366.6666666666667` のような値を残す意味が無い。**丸めの誤差は
+   * 1回あたり0.5トークン未満**で、「およそ5分」の粒度には響かない。
+   */
+  readonly outputTokensAverage?: number;
   /** それを何回ぶんから採ったか（`charsPerTokenSamples` と同じ数え方） */
   readonly outputTokenSamples?: number;
   /**
@@ -151,6 +171,8 @@ export function featureOutputTuning(
 
   const seed = bundledFeatureOutput(feature);
   if (!seed) return undefined;
+  // **同梱の表に平均は無い**（集計したのが最大だけだった）。無いままにする
+  // ——ここで最大を平均として置くと、時間の見積もりが同梱の最大に戻る
   return {
     outputTokens: seed.outputTokens,
     outputTokenSamples: seed.samples,
@@ -175,6 +197,7 @@ export function featureOutputTuningRaw(
   }
   const entry = raw as Record<string, unknown>;
   const outputTokens = positiveNumber(entry.outputTokens);
+  const outputTokensAverage = positiveNumber(entry.outputTokensAverage);
   const outputTokenSamples = positiveNumber(entry.outputTokenSamples);
   const outputTruncated = entry.outputTruncated === true ? true : undefined;
   const measuredAt =
@@ -183,6 +206,7 @@ export function featureOutputTuningRaw(
       : undefined;
   if (
     outputTokens === undefined &&
+    outputTokensAverage === undefined &&
     outputTokenSamples === undefined &&
     outputTruncated === undefined
   ) {
@@ -191,6 +215,7 @@ export function featureOutputTuningRaw(
   }
   return {
     ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(outputTokensAverage !== undefined ? { outputTokensAverage } : {}),
     ...(outputTokenSamples !== undefined ? { outputTokenSamples } : {}),
     ...(outputTruncated !== undefined ? { outputTruncated } : {}),
     ...(measuredAt !== undefined ? { measuredAt } : {}),
@@ -223,18 +248,26 @@ export function featureOutputCeiling(
 /**
  * 1回の応答から、実測を台帳へ足す（`ai/meteredProvider.ts` の関所が呼ぶ）。
  *
- * **書き込みは抑える**（`charsPerToken` と同じ理由。台帳はファイルなので、
- * 書けばディスクへ書き込みが走る）。書くのは3つの場合だけ。
+ * **最大と平均の両方を覚える。** 最大は容量のため、平均は所要時間のため
+ * （上の `outputTokensAverage`）。**最大の決め方は0.71.5でも1文字も変えて
+ * いない**——容量の見積もりがそこにぶら下がっている。
  *
- * 1. 切り詰められた……印を付ける。**要る量が分からなくなったことは、
- *    すぐ映す**
- * 2. 最大値が上がった……覚える値が変わったのだから書く
- * 3. 件数がしきい値に届いていない……そこまでは毎回書いて、早く
- *    「信じてよい」状態まで持っていく
+ * ## 書き込みの抑制をやめた（0.71.5、リーダーの判断）
  *
- * しきい値を越えたあとは、上がった回しか数えない。だから
- * `outputTokenSamples` は**呼び出し回数そのものではない**（少なめに出る
- * ぶんには、信じ始めるのが遅れるだけで安全側である）。
+ * 0.71.4 までは「最大が上がらず、件数もしきい値に届いているなら書かない」
+ * と抑えていた。**平均は毎回動くので、そのままでは追随できない**
+ * ——短い回が何回続いても平均が下がらず、見積もりは伸びたきり戻らない。
+ *
+ * 抑制を外すぶん、呼び出しごとに小さなJSONが1回書かれる。**これに付随して
+ * いるのはAIの呼び出し（数秒〜数分）**なので、そこに1回の書き込みを足しても
+ * 作者には分からない（実装ルール4「処理量を節約する」は、**AIへ送る量**を
+ * 指している。ディスクの数キロバイトは同じ天秤に載らない）。
+ *
+ * おかげで `outputTokenSamples` は**呼び出し回数そのもの**になった
+ * （0.71.4 までは、上がった回しか数えていなかった）。
+ *
+ * **`outputTruncated` の扱いは変えない。** 切られた回の量は「要った量」
+ * ではないので、最大にも平均にも混ぜない。
  *
  * **投げない。** 見込みが更新できなかっただけで、AIの応答は作者へ返す。
  * 失敗の中身は呼び出し側が記録に残す（CLAUDE.md 規則5）。
@@ -264,11 +297,23 @@ export async function recordFeatureOutputTokens(
   const samples = current?.outputTokenSamples ?? 0;
   const next = previous === undefined ? tokens : Math.max(previous, tokens);
 
-  const improved = previous === undefined || next > previous;
-  if (!improved && samples >= MIN_FEATURE_OUTPUT_SAMPLES) return;
+  /*
+    移動平均。件数を重みにして、これまでの平均へ今回を1件ぶん混ぜる。
+
+    **平均がまだ無い行（0.71.4 以前に書かれた行）は、今回の値から始める。**
+    その行の件数は既にいくつか立っているので、次の1回では今回の値が重く
+    効く。厳密ではないが、**一度も測っていない機能に数字を作るよりはよい**
+    ——数回まわれば普段の量へ寄る。
+  */
+  const previousAverage = current?.outputTokensAverage;
+  const average =
+    previousAverage === undefined
+      ? tokens
+      : (previousAverage * samples + tokens) / (samples + 1);
 
   await writeTuningEntry(featureOutputKey(feature), {
     outputTokens: next,
+    outputTokensAverage: Math.round(average),
     outputTokenSamples: samples + 1,
     measuredAt: now,
   });

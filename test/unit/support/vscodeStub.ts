@@ -55,7 +55,97 @@ export type StubMessage = (
  */
 export const statusBarMessages: Array<{ text: string; timeout?: number }> = [];
 
+/**
+ * 選択画面（`createQuickPick`）の代役。
+ *
+ * 本物のQuickPickの全機能ではなく、`pickWithMemory`（`views/notify.ts`）が
+ * 使う操作だけを持つ——`createQuickPick` を直に使うのはそこだけである
+ * （`quickPickCancel.test.ts`）。本物と違って自動では何も起きない。
+ * テスト側が `accept` / `triggerButton` / `hide` を呼んで、選ぶ・ピンを押す・
+ * 閉じるを再現する。
+ *
+ * イベントの配線はここだけの小さな仕組みにしてある（下の `EventEmitter` は
+ * まだ定義されていない位置に置きたいため、あえて使わない）。
+ */
+export interface StubQuickPickItem {
+  label: string;
+  [key: string]: unknown;
+}
+
+class StubEmitter<T> {
+  private readonly listeners = new Set<(value: T) => void>();
+  readonly event = (listener: (value: T) => void): { dispose(): void } => {
+    this.listeners.add(listener);
+    return { dispose: () => this.listeners.delete(listener) };
+  };
+  fire(value?: T): void {
+    for (const listener of [...this.listeners]) listener(value as T);
+  }
+}
+
+export class StubQuickPick<T extends StubQuickPickItem = StubQuickPickItem> {
+  title = "";
+  placeholder: string | undefined;
+  ignoreFocusOut = false;
+  items: readonly T[] = [];
+  buttons: readonly unknown[] = [];
+  selectedItems: readonly T[] = [];
+  disposed = false;
+
+  private readonly acceptEmitter = new StubEmitter<void>();
+  private readonly hideEmitter = new StubEmitter<void>();
+  private readonly buttonEmitter = new StubEmitter<unknown>();
+
+  onDidAccept = this.acceptEmitter.event;
+  onDidHide = this.hideEmitter.event;
+  onDidTriggerButton = this.buttonEmitter.event;
+
+  // 本物は画面を出すだけ。テストは accept / hide / triggerButton を呼んで進める
+  show(): void {}
+
+  hide(): void {
+    this.hideEmitter.fire();
+  }
+
+  dispose(): void {
+    this.disposed = true;
+  }
+
+  /** テスト側から「この項目を選んで確定した」ことにする */
+  accept(item: T): void {
+    this.selectedItems = [item];
+    this.acceptEmitter.fire();
+  }
+
+  /** テスト側から「右上のピンのボタンを押した」ことにする */
+  triggerButton(): void {
+    this.buttonEmitter.fire(this.buttons[0]);
+  }
+}
+
+/**
+ * 直近に作られた選択画面。**既定は「まだ作られていない」**。
+ *
+ * `pickWithMemory` は呼ぶたびに新しく作るので、テストはここから拾って操作する。
+ * 溜まったままだと前のテストの分を拾うので、各テストで `resetLastQuickPick`
+ * を呼んで空にする。
+ */
+export let lastQuickPick: StubQuickPick<StubQuickPickItem> | undefined;
+
+/** テストの後始末用。`lastQuickPick` を初期状態へ戻す */
+export function resetLastQuickPick(): void {
+  lastQuickPick = undefined;
+}
+
+function createQuickPick<T extends StubQuickPickItem>(): StubQuickPick<T> {
+  const picker = new StubQuickPick<T>();
+  lastQuickPick = picker as unknown as StubQuickPick<StubQuickPickItem>;
+  return picker;
+}
+
 export const window = {
+  /** 選択画面。作るたびに `lastQuickPick` へ積む（上の `StubQuickPick`） */
+  createQuickPick,
   // 診断ログ。テストでは中身を読まないので、書き込めるだけでよい
   createOutputChannel: () => ({
     appendLine() {},

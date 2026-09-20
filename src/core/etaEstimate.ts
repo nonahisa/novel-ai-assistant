@@ -119,23 +119,35 @@ export function estimateRunMs(
 }
 
 /**
+ * 見積もりに使った、1回あたりの出力量の出どころ。
+ *
+ * **「同梱かどうか」ではなく「最大か平均か」で分ける**（0.71.5）。
+ * 0.71.4 では同梱かどうかで名乗りを分けたが、**台帳の最大も同じだけ
+ * 過大**なので、線を引く場所が違っていた。
+ */
+export type RunTimeEstimateBasis =
+  /** この機械の実測の**平均**。普段の量なので、そのまま読んでよい */
+  | "average"
+  /** この機械の実測の**最大**。実測ではあるが、必ず多めに出る */
+  | "max"
+  /** 同梱の表の**最大**（`core/bundledTuning.ts`）。この機械では測っていない */
+  | "bundled-max";
+
+/**
  * 押す前の見積もりを、**出どころつきで**言う（実装ルール6の例外条件3）。
  *
  * **2026-09-21、実機で外した。** プロット逸脱を10話に掛けると
  * 「10件 ≒ およそ15分（**これまでの実測から**）」と出たが、**実際は39秒**
  * だった。作者が「15分なら夜に回そう」と判断してもおかしくない差である。
  *
- * **数字が嘘だったのではない。** 1回あたりの出力量は同梱の表
- * （`core/bundledTuning.ts`）から来ており、あれは「切り詰められていない回の
- * 実測の**最大**」である。**容量の見積もりには最大が正しい**——足りなければ
- * 落ちるのだから。**だが所要時間に最大を使えば、必ず過大になる。**
+ * **数字が嘘だったのではない。** 1回あたりの出力量は「切り詰められていない
+ * 回の実測の**最大**」だった。**容量の見積もりには最大が正しい**——足りな
+ * ければ落ちるのだから。**だが所要時間に最大を使えば、必ず過大になる。**
  *
- * ここで直すのは**名乗りだけ**。同梱の値に、この機械の実測と同じ顔をさせない。
- * **数字そのもの**（最大ではなく普段の量で見積もる）は別の話で、
- * 実測が溜まれば台帳が同梱を上書きするので、使っているうちに当たるようになる。
- *
- * **「多めに見ています」まで言う。** 名乗りを変えるだけでは、作者は
- * 15分という数字をそのまま受け取る。割り引いて読めるようにしておく。
+ * 0.71.5 で、台帳が平均も覚えるようにした（`core/featureOutputTokens.ts`）。
+ * 平均が使えたときだけ「これまでの実測から」と名乗り、**最大へ落ちたときは、
+ * 同梱でなくても「多めに見ています」と言う。** 名乗りを変えるだけでは、
+ * 作者は15分という数字をそのまま受け取る。割り引いて読めるようにしておく。
  */
 export function describeRunTimeEstimate(params: {
   /** これからAIへ送る件数 */
@@ -144,8 +156,8 @@ export function describeRunTimeEstimate(params: {
   readonly unit: string;
   /** 見積もった所要時間。**見当が付かなければ `undefined`** */
   readonly ms: number | undefined;
-  /** 1回あたりの出力量が、同梱の表から来たか */
-  readonly bundled: boolean;
+  /** 1回あたりの出力量を、どこから採ったか */
+  readonly basis: RunTimeEstimateBasis;
 }): string {
   if (params.ms === undefined) {
     return (
@@ -153,8 +165,13 @@ export function describeRunTimeEstimate(params: {
       `${MIN_ETA_SAMPLES}${params.unit}進んだところで、残り時間の目安を出します。`
     );
   }
-  const source = params.bundled
-    ? "同梱の目安から。多めに見ています"
-    : "これまでの実測から";
+  const source = RUN_TIME_BASIS_LABEL[params.basis];
   return `${params.count}件 ≒ ${describeDuration(params.ms)}（${source}）`;
 }
+
+/** 出どころごとの名乗り。**最大を使ったなら、必ず「多め」と言う** */
+const RUN_TIME_BASIS_LABEL: Readonly<Record<RunTimeEstimateBasis, string>> = {
+  average: "これまでの実測から",
+  max: "これまでの実測の最大から。多めに見ています",
+  "bundled-max": "同梱の目安から。多めに見ています",
+};

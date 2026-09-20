@@ -5,6 +5,7 @@ import {
   describeRunTimeEstimate,
   estimateRemainingMs,
   estimateRunMs,
+  type RunTimeEstimateBasis,
 } from "../core/etaEstimate";
 import { modelTuning } from "../core/modelTuning";
 import {
@@ -210,20 +211,29 @@ export function estimateRunTimeText(params: {
   const output = featureOutputTuning(params.feature);
   // **件数が足りない実測は使わない**（`core/featureOutputTokens.ts` の
   // しきい値と同じ線を引く）。1回ぶんでは、たまたま短かった回と区別が付かない
-  const perCall =
-    (output?.outputTokenSamples ?? 0) >= MIN_FEATURE_OUTPUT_SAMPLES
-      ? output?.outputTokens
-      : undefined;
+  const enough =
+    (output?.outputTokenSamples ?? 0) >= MIN_FEATURE_OUTPUT_SAMPLES;
+  /*
+    **時間の見積もりは、平均を見る**（0.71.5。2026-09-21 に実機で外した）。
+
+    台帳が覚えている最大（`outputTokens`）は容量のための値で、**所要時間に
+    使えば必ず過大になる**——プロット逸脱10話で「およそ15分」と出て、実際は
+    39秒だった。平均が無い（同梱の表、または0.71.4以前の行）ときだけ最大へ
+    落ち、そのときは「多めに見ています」と名乗る。
+  */
+  const average = enough ? output?.outputTokensAverage : undefined;
+  const max = enough ? output?.outputTokens : undefined;
+  const perCall = average ?? max;
 
   const ms = estimateRunMs(params.count, speed, perCall);
-  // **出どころを渡す。** 同梱の値は「実測の最大」なので、この機械の実測と
-  // 同じ顔をさせると、作者は多めの数字を真に受ける（2026-09-21 に実機で外した）
-  return describeRunTimeEstimate({
-    count: params.count,
-    unit,
-    ms,
-    bundled: output?.bundled === true,
-  });
+  // **出どころを渡す。** 最大から出した数字に、普段の量と同じ顔をさせない
+  const basis: RunTimeEstimateBasis =
+    average !== undefined
+      ? "average"
+      : output?.bundled === true
+        ? "bundled-max"
+        : "max";
+  return describeRunTimeEstimate({ count: params.count, unit, ms, basis });
 }
 
 /**

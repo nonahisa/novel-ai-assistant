@@ -1,13 +1,37 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { window } from "./support/vscodeStub";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { window, workspace } from "./support/vscodeStub";
 import { disposeLog } from "../../src/core/logger";
 import type { WorkEntry } from "../../src/models/types";
 import {
+  chooseScope,
   resolveCheckScope,
   scopeFeatureSpec,
   describeChosenScope,
   type ScopeFeature,
 } from "../../src/features/typoCheckScope";
+
+/**
+ * `chooseScope` が並べる項目をのぞくための差し替え。
+ *
+ * `pickWithMemory`（`views/notify.ts`）を直に動かすと選択画面
+ * （`createQuickPick`）まで組み立てる必要が出るので、ここでは
+ * **渡された項目だけを覗いて `undefined`（取りやめ）を返す**形にする。
+ * 選択画面そのものの動きは `notify.test.ts` で見ている。
+ */
+const notifyMocks = vi.hoisted(() => ({
+  pickWithMemory: vi.fn(async () => undefined),
+  confirmRun: vi.fn(async () => true),
+}));
+vi.mock("../../src/views/notify", () => ({
+  pickWithMemory: notifyMocks.pickWithMemory,
+  confirmRun: notifyMocks.confirmRun,
+}));
+
+/** `chooseScope` が走査する話の一覧。中身は `scanWork` の結果を差し替える */
+const scannerMocks = vi.hoisted(() => ({ scanWork: vi.fn() }));
+vi.mock("../../src/core/scanner", () => ({
+  scanWork: scannerMocks.scanWork,
+}));
 
 /**
  * 範囲の選択は、**機能ごとに分かれていなければならない**
@@ -115,5 +139,68 @@ describe("絞ったことを、完了の知らせでも黙らない", () => {
     // 「10話しか見ていない」ことが知らせに出ていないと、
     // 少ない指摘を「作品全体で問題なし」と読んでしまう
     expect(describeChosenScope("first")).toContain("10話");
+  });
+});
+
+/**
+ * 「はじめの10話だけ（試す）」は覚えない印が付く（`noRemember`、設計書6.8.7）。
+ *
+ * 印そのものの効き目（覚え書きへ書かない・古い記録を素通りさせない）は
+ * `pickWithMemory` の試験（`notify.test.ts`）で見ている。ここで見るのは、
+ * `chooseScope`（`scopePick`、247〜257行）が**「試す」の項目にだけ**
+ * その印を付けていること——付け忘れると、実機確認リストの前提が崩れる。
+ */
+describe("「はじめの10話だけ（試す）」には noRemember が付く", () => {
+  beforeEach(() => {
+    notifyMocks.pickWithMemory.mockClear();
+    notifyMocks.pickWithMemory.mockResolvedValue(undefined);
+  });
+
+  test("試す・全体・前回から書いた分が並ぶとき、試すの項目にだけ付く", async () => {
+    // 20話中、末尾5話だけ「前回の検知のあとに書いた」ことにする。
+    // これで「差分」「試す」「全体」の3つがそろって並ぶ
+    const total = 20;
+    const changedFrom = 15; // 0始まりの添字。15〜19番目（5話）が対象
+    const episodes = Array.from({ length: total }, (_, i) => ({
+      filePath: `C:/works/試しの作品/原稿/${String(i + 1).padStart(3, "0")}.txt`,
+    }));
+    scannerMocks.scanWork.mockResolvedValue({ episodes });
+
+    const originalFs = workspace.fs;
+    workspace.fs = {
+      readFile: async () =>
+        new TextEncoder().encode(JSON.stringify({ checkedAt: 1000 })),
+      stat: async (uri: { fsPath: string }) => {
+        const index = episodes.findIndex((e) =>
+          uri.fsPath.endsWith(e.filePath.split("/").pop() as string)
+        );
+        return { mtime: index >= changedFrom ? 2000 : 500 };
+      },
+    };
+    try {
+      await chooseScope(work, "typo");
+    } finally {
+      workspace.fs = originalFs;
+    }
+
+    expect(notifyMocks.pickWithMemory).toHaveBeenCalledTimes(1);
+    const passedItems = notifyMocks.pickWithMemory.mock.calls[0][0].items as Array<{
+      label: string;
+      value?: string;
+      noRemember?: boolean;
+    }>;
+
+    // 並びには「取りやめる」（`value` を持たない）も混ざる（設計書6.17.2）。
+    // ここで見たいのは選べる3つだけなので、それは除く
+    const byValue = new Map(
+      passedItems
+        .filter((item): item is typeof item & { value: string } => item.value !== undefined)
+        .map((item) => [item.value, item])
+    );
+    expect([...byValue.keys()].sort()).toEqual(["all", "changed", "first"]);
+
+    expect(byValue.get("first")?.noRemember).toBe(true);
+    expect(byValue.get("all")?.noRemember).toBeUndefined();
+    expect(byValue.get("changed")?.noRemember).toBeUndefined();
   });
 });
