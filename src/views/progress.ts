@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
 import { cancelItem, isCancelItem } from "./dialogs";
 import {
-  MIN_ETA_SAMPLES,
   describeDuration,
+  describeRunTimeEstimate,
   estimateRemainingMs,
   estimateRunMs,
 } from "../core/etaEstimate";
@@ -216,13 +216,14 @@ export function estimateRunTimeText(params: {
       : undefined;
 
   const ms = estimateRunMs(params.count, speed, perCall);
-  if (ms === undefined) {
-    return (
-      "このモデルでどれくらいかかるかは、まだ測っていないので見当が付きません。\n" +
-      `${MIN_ETA_SAMPLES}${unit}進んだところで、残り時間の目安を出します。`
-    );
-  }
-  return `${params.count}件 ≒ ${describeDuration(ms)}（これまでの実測から）`;
+  // **出どころを渡す。** 同梱の値は「実測の最大」なので、この機械の実測と
+  // 同じ顔をさせると、作者は多めの数字を真に受ける（2026-09-21 に実機で外した）
+  return describeRunTimeEstimate({
+    count: params.count,
+    unit,
+    ms,
+    bundled: output?.bundled === true,
+  });
 }
 
 /**

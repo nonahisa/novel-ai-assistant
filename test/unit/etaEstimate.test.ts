@@ -4,6 +4,7 @@ import {
   describeDuration,
   estimateRemainingMs,
   estimateRunMs,
+  describeRunTimeEstimate,
 } from "../../src/core/etaEstimate";
 
 /**
@@ -103,5 +104,74 @@ describe("押す前の見積もり（速さ × 1回に書く量）", () => {
   test("壊れた値でも数字を作らない", () => {
     expect(estimateRunMs(180, 0, 1_000)).toBeUndefined();
     expect(estimateRunMs(180, 10, -5)).toBeUndefined();
+  });
+});
+
+/**
+ * **見積もりの出どころを名乗る**（実装ルール6の例外条件3。2026-09-21）。
+ *
+ * 実機で見つけた。プロット逸脱を10話に掛けると、押す前に
+ * 「10件 ≒ およそ15分（**これまでの実測から**）」と出たが、**実際は39秒**
+ * だった（23倍の過大）。
+ *
+ * **数字が嘘だったのではない。** 1回あたりの出力量は同梱の表から来ており、
+ * あれは「切り詰められていない回の実測の**最大**」である。容量の見積もりには
+ * 最大が正しい（足りないと落ちる）が、**所要時間に最大を使えば必ず過大になる。**
+ *
+ * **ここで直すのは名乗りだけ**——同梱の値を使ったときに、この機械の実測と
+ * 同じ顔をさせない。数字そのもの（最大ではなく普段の量で見積もる）は別の話。
+ */
+describe("見積もりの出どころを名乗る", () => {
+  test("この機械の実測から出したときは、そう名乗る", () => {
+    const text = describeRunTimeEstimate({
+      count: 10,
+      unit: "話",
+      ms: 39_000,
+      bundled: false,
+    });
+
+    expect(text).toContain("これまでの実測から");
+    expect(text).not.toContain("同梱");
+  });
+
+  test("**同梱の値を使ったときは、同梱だと分かるようにする**", () => {
+    const text = describeRunTimeEstimate({
+      count: 10,
+      unit: "話",
+      ms: 900_000,
+      bundled: true,
+    });
+
+    expect(text).toContain("同梱");
+    // **「これまでの実測から」を名乗らせない。** ここが実機で外した点
+    expect(text).not.toContain("これまでの実測から");
+  });
+
+  test("同梱のときは、多めに見ていることも言う", () => {
+    // 同梱の値は**最大**なので、時間は必ず多めに出る。
+    // 数字を直すまでの間、読む側が割り引けるようにする
+    const text = describeRunTimeEstimate({
+      count: 10,
+      unit: "話",
+      ms: 900_000,
+      bundled: true,
+    });
+
+    expect(text).toContain("多め");
+  });
+
+  test("見当が付かないときは、出どころに関わらず正直に言う", () => {
+    for (const bundled of [true, false]) {
+      const text = describeRunTimeEstimate({
+        count: 10,
+        unit: "話",
+        ms: undefined,
+        bundled,
+      });
+
+      expect(text, String(bundled)).toContain("見当が付きません");
+      // 走り出したあとに出す、という約束もそのまま残す
+      expect(text, String(bundled)).toContain(`${MIN_ETA_SAMPLES}話`);
+    }
   });
 });

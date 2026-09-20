@@ -117,3 +117,44 @@ export function estimateRunMs(
   }
   return (outputTokensPerCall / outputTokensPerSecond) * count * 1000;
 }
+
+/**
+ * 押す前の見積もりを、**出どころつきで**言う（実装ルール6の例外条件3）。
+ *
+ * **2026-09-21、実機で外した。** プロット逸脱を10話に掛けると
+ * 「10件 ≒ およそ15分（**これまでの実測から**）」と出たが、**実際は39秒**
+ * だった。作者が「15分なら夜に回そう」と判断してもおかしくない差である。
+ *
+ * **数字が嘘だったのではない。** 1回あたりの出力量は同梱の表
+ * （`core/bundledTuning.ts`）から来ており、あれは「切り詰められていない回の
+ * 実測の**最大**」である。**容量の見積もりには最大が正しい**——足りなければ
+ * 落ちるのだから。**だが所要時間に最大を使えば、必ず過大になる。**
+ *
+ * ここで直すのは**名乗りだけ**。同梱の値に、この機械の実測と同じ顔をさせない。
+ * **数字そのもの**（最大ではなく普段の量で見積もる）は別の話で、
+ * 実測が溜まれば台帳が同梱を上書きするので、使っているうちに当たるようになる。
+ *
+ * **「多めに見ています」まで言う。** 名乗りを変えるだけでは、作者は
+ * 15分という数字をそのまま受け取る。割り引いて読めるようにしておく。
+ */
+export function describeRunTimeEstimate(params: {
+  /** これからAIへ送る件数 */
+  readonly count: number;
+  /** 数えているもの。話ごとに送る検知は「話」 */
+  readonly unit: string;
+  /** 見積もった所要時間。**見当が付かなければ `undefined`** */
+  readonly ms: number | undefined;
+  /** 1回あたりの出力量が、同梱の表から来たか */
+  readonly bundled: boolean;
+}): string {
+  if (params.ms === undefined) {
+    return (
+      "このモデルでどれくらいかかるかは、まだ測っていないので見当が付きません。\n" +
+      `${MIN_ETA_SAMPLES}${params.unit}進んだところで、残り時間の目安を出します。`
+    );
+  }
+  const source = params.bundled
+    ? "同梱の目安から。多めに見ています"
+    : "これまでの実測から";
+  return `${params.count}件 ≒ ${describeDuration(params.ms)}（${source}）`;
+}
