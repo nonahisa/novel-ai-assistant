@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   fileReader,
   isNotFound,
+  readerKind,
   setFileReaderForTests,
   vscodeFileReaderForTests,
 } from "../../src/core/fileRead";
@@ -142,5 +143,42 @@ describe("`vscode.workspace.fs` で読む側（ブラウザ版）", () => {
     );
     expect(isNotFound(new Error("何か"))).toBe(false);
     expect(isNotFound(undefined)).toBe(false);
+  });
+});
+
+/**
+ * **どちらの読み口を選んだか**（設計書6.107。0.74.11）。
+ *
+ * 0.74.9 の計測で「読み 58,191ms」が出たとき、まず確かめるべきは
+ * **そもそも Node 側を通っているのか**だった。`isUriString("C:/…")` は
+ * 偽なので通っているはず、で止まっていた——「はず」を数字にしないと、
+ * ここから先はぜんぶ当てずっぽうになる。
+ */
+describe("選んだ読み口を名乗る", () => {
+  test("手元（`canRunProcesses()` が真）なら `node`", async () => {
+    vi.spyOn(runtime, "canRunProcesses").mockReturnValue(true);
+    setFileReaderForTests(undefined);
+
+    expect(await readerKind()).toBe("node");
+  });
+
+  test("ブラウザ版なら `vscode`", async () => {
+    vi.spyOn(runtime, "canRunProcesses").mockReturnValue(false);
+    setFileReaderForTests(undefined);
+
+    expect(await readerKind()).toBe("vscode");
+  });
+
+  test("まだ選んでいなくても、選ばせてから答える", async () => {
+    // **呼び手に順番を気にさせない。** 起動の1行を書く時点で読み口が
+    // 決まっていなければ、`fileReader()` を先に呼んだかどうかで
+    // 答えが変わってしまう
+    vi.spyOn(runtime, "canRunProcesses").mockReturnValue(true);
+    setFileReaderForTests(undefined);
+
+    const kind = await readerKind();
+
+    expect(kind).toBe("node");
+    expect(await fileReader()).toBeDefined();
   });
 });

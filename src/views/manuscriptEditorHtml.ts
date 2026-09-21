@@ -2359,6 +2359,14 @@ ruby > rt {
   /** 変換中に外から届いた本文。確定してから片づける */
   let composePending = null;
   /**
+   * 変換の始点（記法の位置。設計書6.34.5。0.74.11）。
+   *
+   * **compositionstart の時点でしか取れない。** 変換が進むとカーソルは
+   * 文節の途中や候補の位置へ動くので、あとからでは始点が分からない。
+   * 変換していないときは null。
+   */
+  let composeComposingStart = null;
+  /**
    * いま組んでいる記法（設計書6.12）。**拡張機能側が原稿の種類で決める**
    * （.md は "curly"、.txt は "site"）。最初の update で届く。
    *
@@ -2989,6 +2997,44 @@ ruby > rt {
     return composeEndPoint(lastAtom);
   }
 
+  /**
+   * 変換中（IME）の字が占めている範囲（設計書6.34.5。0.74.11）。
+   *
+   * **始点から前向きに数える。** 0.74.10 は「いまのカーソルから、変換中の
+   * 字の長さだけ手前」で作っていたが、**変換中のカーソルは末尾とは限らない**
+   * ——文節を選び直せば語の途中へ、候補を選べばその位置へ動く。そのため
+   * 塗りが途中で切れたり、変換していない手前の字まで余分に塗れていた
+   * （作者の実機報告、2026-09-21）。
+   *
+   * 始点は compositionstart の時点で控えてある（記法の位置）。そこから
+   * event.data.length 文字ぶん**前向き**に数えれば、カーソルがどこに
+   * あっても長さは変換中の字と必ず一致する。
+   *
+   * **かたまり（ルビ・傍点）と行の切れ目は跨がない。** 変換中の字が
+   * その向こうまで届くことは無く、跨いだ範囲を塗れば必ず見当違いになる
+   * （ずれた色は、無い色より分かりにくい）。素の span（三点リーダ）は
+   * 平文として数えられるので、**節点が変わっても続けて数える。**
+   *
+   * @param atoms composeAtoms(compose)
+   * @param start 変換の始点（記法の位置）
+   * @param length 変換中の字数（event.data.length）
+   * @returns start と end（どちらも DOM の位置）。数えられなければ null
+   */
+  function composeComposingSpan(atoms, start, length) {
+    if (start === null || start === undefined) return null;
+    if (!(length > 0)) return null;
+    const end = start + length;
+    for (const atom of atoms) {
+      // 重なっていない atom は関係ない
+      if (atom.end <= start || atom.start >= end) continue;
+      if (atom.kind !== "text") return null;
+    }
+    const from = composeOffsetToPoint(atoms, start);
+    const to = composeOffsetToPoint(atoms, end);
+    if (!from || !to) return null;
+    return { start: from, end: to };
+  }
+
   /** その節点を含んでいるか（親をたどれない偽のDOMでも動くように、子から探す） */
   function composeContains(ancestor, node) {
     if (ancestor === node) return true;
@@ -3558,6 +3604,12 @@ ruby > rt {
 
   compose.addEventListener("compositionstart", function (event) {
     composing = true;
+    /*
+      **始点は、ここでしか取れない**（設計書6.34.5。0.74.11）。変換が
+      進むとカーソルは文節の途中や候補の位置へ動く。範囲を選んだ上での
+      変換なら、その範囲の始まり（置き換わったあとの位置と同じ）である。
+    */
+    composeComposingStart = composeComposingStartOffset();
     composeMarkComposing(event.data);
   });
   /*
@@ -3570,6 +3622,7 @@ ruby > rt {
   compose.addEventListener("compositionend", function () {
     composing = false;
     // 変換が終われば塗る範囲は無い（確定した字は普通の本文）
+    composeComposingStart = null;
     composeClearComposing();
     // 確定ぶんが入るのは、この直後のことがある（打つ面と同じ理由）
     setTimeout(function () {
@@ -3862,44 +3915,61 @@ ruby > rt {
    * 壊れる（設計書6.34。この面の既存の決まり）。用語の色付けと同じ
    * CSS Custom Highlight API なら、色を置いても DOM は変わらない。
    *
-   * 範囲は「いまのカーソルから、変換中の字の長さだけ手前」で作る。
-   * compositionupdate の event.data が変換中の字そのものなので、
-   * 長さはそこから取れる。**節点をまたぐ範囲は作らない**——変換中の字は
-   * 1つのテキストノードに入るので、またいでいたら諦めて色を消す
-   * （ずれた色は、無い色より分かりにくい）。
+   * 範囲は**変換の始点から、変換中の字の長さだけ前向き**に作る
+   * （設計書6.34.5。0.74.11）。compositionupdate の event.data が
+   * 変換中の字そのものなので、長さはそこから取れる。
+   *
+   * **カーソルからは数えない。** 0.74.10 は「いまのカーソルから長さだけ
+   * 手前」で作っていたが、**変換中のカーソルは末尾とは限らない**
+   * ——文節を選び直せば語の途中へ動く。作者の実機では、塗りが途中で
+   * 切れたり余ったりしていた。始点は compositionstart で控える。
+   *
+   * 数え方そのものは composeComposingSpan（切り出せる側）にある。
    */
   function composeMarkComposing(data) {
     if (!composeHighlightsUsable()) return;
     try {
       const length = data ? data.length : 0;
-      if (length === 0) {
-        composeClearComposing();
-        return;
-      }
-      const selection = window.getSelection();
-      if (!selection || selection.rangeCount === 0) {
-        composeClearComposing();
-        return;
-      }
-      const caret = selection.getRangeAt(0);
-      const node = caret.endContainer;
-      if (node.nodeType !== 3 || !compose.contains(node)) {
-        composeClearComposing();
-        return;
-      }
-      const end = caret.endOffset;
-      const start = end - length;
-      if (start < 0 || start >= end) {
+      const span = composeComposingSpan(
+        composeAtoms(compose),
+        composeComposingStart,
+        length
+      );
+      if (!span) {
         composeClearComposing();
         return;
       }
       const range = document.createRange();
-      range.setStart(node, start);
-      range.setEnd(node, end);
+      range.setStart(span.start.node, span.start.offset);
+      range.setEnd(span.end.node, span.end.offset);
       CSS.highlights.set("novelai-composing", new Highlight(range));
     } catch (error) {
       // **色が出ないだけで、変換は動く。** ここで止めない
       composeClearComposing();
+    }
+  }
+
+  /**
+   * 変換の始点（記法の位置）を読む。**compositionstart の時点で呼ぶ。**
+   *
+   * 選択があってもその**始まり**を取る——範囲を選んだ上で変換すると、
+   * 選んだぶんは消えて始点の位置から新しい字が入るので、deleteContents
+   * のあとの位置と同じところである。
+   */
+  function composeComposingStartOffset() {
+    try {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) return null;
+      const range = selection.getRangeAt(0);
+      if (!compose.contains(range.startContainer)) return null;
+      return composePointToOffset(
+        composeAtoms(compose),
+        range.startContainer,
+        range.startOffset
+      );
+    } catch (error) {
+      // 読めなければ塗らない（見当違いの場所を塗るよりよい）
+      return null;
     }
   }
 

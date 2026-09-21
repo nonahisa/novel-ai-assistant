@@ -37,11 +37,21 @@ export interface ScanTiming {
   /** 走査したファイルの数（作品情報のファイルも含む） */
   readonly files: number;
   /**
-   * 読み口に費やしたミリ秒。
+   * 下ごしらえに費やしたミリ秒（0.74.11）。
+   *
+   * 作品設定の読み込み・本文フォルダーの有無・読み口の用意・フォルダーの
+   * 読み出し（`collectTextFiles`）まで。**1ファイルも読む前の時間**である。
+   *
+   * **`readMs` から割った。** 0.74.9 の計測は「読み 58,191ms」で、
+   * これが**573回の `readFile` なのか、その手前のフォルダー歩きなのか**が
+   * 分かれていなかった。直す場所が別なので、分けないと決まらない。
+   */
+  readonly prepMs: number;
+  /**
+   * 1ファイルずつ読むのに費やしたミリ秒。
    *
    * **バイトを本文にするまでを含める**（`readFile` と `decodeText`）。
-   * フォルダーの読み出し（`readDirectory`）と作品設定の読み込みも、
-   * 同じ読み口なのでここへ入れる。
+   * 下ごしらえ（`prepMs`）は**入らない**。
    */
   readonly readMs: number;
   /** 字数・ルビ・空白の数えに費やしたミリ秒（シーンメモの印も含む） */
@@ -84,6 +94,7 @@ export async function scanWork(work: WorkEntry): Promise<{
     **計測は数えるだけ**（設計書6.107）。`performance.now()` の差を
     足す以外のことはせず、走査の結果には触らない。
   */
+  let prepMs = 0;
   let readMs = 0;
   let countMs = 0;
   let parseMs = 0;
@@ -102,9 +113,13 @@ export async function scanWork(work: WorkEntry): Promise<{
   */
   const reader = await fileReader();
   const files = await collectTextFiles(targetDir, reader);
-  // **下ごしらえも読み口**（設計書6.107）。作品設定の読み込み・本文
-  // フォルダーの有無・フォルダーの読み出しは、すべてファイルへの往復である
-  readMs += performance.now() - scanStartedAt;
+  /*
+    **下ごしらえは、1ファイルずつの読みとは別に数える**（設計書6.107。0.74.11）。
+    作品設定の読み込み・本文フォルダーの有無・読み口の用意・フォルダーの
+    読み出しは、どれも「本文を読む前」の往復である。**直す場所が違う**ので、
+    573回の `readFile` と同じ袋に入れてしまうと、どちらが重いのか決まらない。
+  */
+  prepMs += performance.now() - scanStartedAt;
 
   const episodes: EpisodeFile[] = [];
   const workInfoFiles: string[] = [];
@@ -270,12 +285,13 @@ export async function scanWork(work: WorkEntry): Promise<{
     workInfoFiles,
     timing: {
       files: files.length,
+      prepMs,
       readMs,
       countMs,
       parseMs,
       // **残りは引き算で出す。** 足し忘れた区間があっても、合計と
       // 内訳の食い違いとしてではなく「その他が大きい」として現れる
-      otherMs: Math.max(0, totalMs - readMs - countMs - parseMs),
+      otherMs: Math.max(0, totalMs - prepMs - readMs - countMs - parseMs),
       totalMs,
       slowestFile,
       slowestMs,
@@ -296,6 +312,7 @@ export function summarizeScanTimings(
   timings: readonly ScanTiming[]
 ): ScanTiming {
   let files = 0;
+  let prepMs = 0;
   let readMs = 0;
   let countMs = 0;
   let parseMs = 0;
@@ -305,6 +322,7 @@ export function summarizeScanTimings(
   let slowestFile: string | undefined;
   for (const t of timings) {
     files += t.files;
+    prepMs += t.prepMs;
     readMs += t.readMs;
     countMs += t.countMs;
     parseMs += t.parseMs;
@@ -317,6 +335,7 @@ export function summarizeScanTimings(
   }
   return {
     files,
+    prepMs,
     readMs,
     countMs,
     parseMs,

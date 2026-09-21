@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { locateFindings } from "../../src/core/findingLocation";
 import { parseMemos } from "../../src/core/sceneMemo";
+import { normalizeForComparison } from "../../src/core/pathText";
 import {
+  arrangeRows,
   findingCategoryLabel,
   findingHeadline,
   findingLabelOf,
@@ -399,5 +401,96 @@ describe("指摘の呼び名", () => {
   test("分類名の無い古い記録は、種類から決める", () => {
     expect(findingLabelOf({ category: "contradiction", label: "" })).toBe("矛盾");
     expect(findingLabelOf({ category: "typo" })).toBe("誤字");
+  });
+});
+
+/**
+ * **いま開いている話を先頭へ寄せる**（設計書6.40。0.74.11）。
+ *
+ * この並べ方は作者への約束（書いている場面のものが下のほうにあると、
+ * 横に並べた意味が薄れる）なのに、0.74.10 まではパネルの private
+ * メソッドの中にあり、**画面を動かすまで崩れに気づけなかった。**
+ * `core` へ出して、ここで見張る。
+ */
+describe("いま開いている話を先頭へ", () => {
+  /** 比べるための表記。パネルは `currentFile` をこれに通して渡す */
+  const keyOf = (filePath: string) => normalizeForComparison(filePath);
+
+  test("話数の順に関係なく、開いている話が先頭へ来る", () => {
+    const rows = mergeNoteRows(memosOf(), place([finding()]), [
+      EPISODE_1,
+      EPISODE_2,
+    ]);
+
+    const arranged = arrangeRows(rows, keyOf(EPISODE_2));
+
+    expect(shape(arranged)).toEqual([
+      `${EPISODE_2}:3:memo`,
+      `${EPISODE_1}:12:memo`,
+      `${EPISODE_1}:18:finding`,
+    ]);
+  });
+
+  test("同じ話の行は、塊のまま動く（中の並びは変わらない）", () => {
+    // **第2話を先に並べた上で、第1話を開いている**という形。
+    // 第1話の2行（12行目の付箋と18行目の指摘）は順序を保ったまま頭へ来る
+    const rows = mergeNoteRows(memosOf(), place([finding()]), [
+      EPISODE_2,
+      EPISODE_1,
+    ]);
+
+    const arranged = arrangeRows(rows, keyOf(EPISODE_1));
+
+    expect(shape(arranged)).toEqual([
+      `${EPISODE_1}:12:memo`,
+      `${EPISODE_1}:18:finding`,
+      `${EPISODE_2}:3:memo`,
+    ]);
+  });
+
+  test("開いている話が無ければ、並びを変えない", () => {
+    // 原稿を開かずにパネルだけを出したとき。**勝手に並べ替えない**
+    const rows = mergeNoteRows(memosOf(), place([finding()]), [
+      EPISODE_1,
+      EPISODE_2,
+    ]);
+
+    expect(shape(arrangeRows(rows, null))).toEqual(shape(rows));
+  });
+
+  test("「直前と同じ場所」の印は、入れ替えの**あと**に付け直す", () => {
+    /*
+      **順番を取り違えると、印が入れ替え前のまま残る。**
+
+      それが見えるのは、同じ話の行が離れて並んでいるときである。下の
+      3行は、真ん中に第2話が挟まっているせいで**この並びでは「同じ場所」に
+      当たらない**。第1話を先頭へ寄せると18行目の2件が隣り合うので、
+      2件目に印が立たなければならない——**入れ替えのあとに数え直して
+      いなければ、ここは印が付かないまま出る。**
+    */
+    const placed = place([
+      finding(),
+      finding({
+        id: "f-proofread",
+        target: "",
+        suggestion: "",
+        message: "この段落は主語が2回変わります",
+        category: "proofread",
+      }),
+    ]);
+    const [memo2] = parseMemos(text2, EPISODE_2);
+    const split: NoteRow[] = [
+      { kind: "finding", filePath: EPISODE_1, line: 18, sameLine: false, finding: placed[0] },
+      { kind: "memo", filePath: EPISODE_2, line: 3, sameLine: false, memo: memo2 },
+      { kind: "finding", filePath: EPISODE_1, line: 18, sameLine: false, finding: placed[1] },
+    ];
+
+    const arranged = arrangeRows(split, keyOf(EPISODE_1));
+
+    expect(shape(arranged)).toEqual([
+      `${EPISODE_1}:18:finding`,
+      `${EPISODE_1}:18:finding:同じ行`,
+      `${EPISODE_2}:3:memo`,
+    ]);
   });
 });

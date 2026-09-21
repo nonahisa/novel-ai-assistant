@@ -164,16 +164,52 @@ let pending: Promise<FileReader> | undefined;
 let override: FileReader | undefined;
 
 /**
+ * どちらを選んだか（0.74.11）。
+ *
+ * `node` でも、**URI の場所は `vscode.workspace.fs` へ回る**
+ * （`createDispatchingReader`）。ここが言うのは「手元の道が使えるか」である。
+ */
+export type ReaderKind = "node" | "vscode";
+
+/** 選んだ結果。まだ選んでいなければ `undefined` */
+let chosenKind: ReaderKind | undefined;
+
+/**
  * 読み口を得る。**1回作って使い回す**（動的 import を毎回走らせない）。
  */
 export async function fileReader(): Promise<FileReader> {
   if (override !== undefined) return override;
   if (pending === undefined) {
-    pending = canRunProcesses()
-      ? createNodeReader().then(createDispatchingReader)
-      : Promise.resolve(vscodeReader);
+    if (canRunProcesses()) {
+      pending = createNodeReader().then((node) => {
+        // **作り終えてから印を付ける。** import が失敗したときに
+        // 「node を選んだ」と名乗ると、ログが実態とずれる
+        chosenKind = "node";
+        return createDispatchingReader(node);
+      });
+    } else {
+      chosenKind = "vscode";
+      pending = Promise.resolve(vscodeReader);
+    }
   }
   return pending;
+}
+
+/**
+ * どちらの読み口を選んだかを返す（設計書6.107。0.74.11）。
+ *
+ * **起動の1行へ出すために要る。** 0.74.9 の計測で「読み 58,191ms」が出た
+ * とき、まず確かめるべきは**そもそも Node 側を通っているのか**だった。
+ * `isUriString("C:/…")` は偽なので通っているはず、で止まっていた
+ * ——「はず」を数字にしないと、ここから先はぜんぶ当てずっぽうになる。
+ *
+ * **まだ選んでいなければ選ばせてから返す**（呼び手に順番を気にさせない）。
+ */
+export async function readerKind(): Promise<ReaderKind> {
+  // 試験の差し込みは `vscode.workspace.fs` 版なので、そう名乗る
+  if (override !== undefined) return "vscode";
+  await fileReader();
+  return chosenKind ?? "vscode";
 }
 
 /**
@@ -190,6 +226,8 @@ export async function fileReader(): Promise<FileReader> {
 export function setFileReaderForTests(reader: FileReader | undefined): void {
   override = reader;
   pending = undefined;
+  // 選び直しに戻すので、前に選んだ印も落とす
+  chosenKind = undefined;
 }
 
 /** 試験が差し込むための、`vscode.workspace.fs` 版の読み口 */

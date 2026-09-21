@@ -206,6 +206,9 @@ import {
   beginStartupTiming,
   formatStartupMillis,
 } from "./core/startupTiming";
+import { startLoopLagMeter, type LoopLagReport } from "./core/loopLag";
+import { startStartupProfile } from "./core/startupProfiler";
+import { readerKind, type ReaderKind } from "./core/fileRead";
 import { describeProcessesBlocked } from "./core/processAvailability";
 import { exclusiveLabelOf } from "./core/exclusiveCommands";
 import { beginCommand, endCommand } from "./core/runningCommands";
@@ -562,6 +565,65 @@ export async function activate(
   );
 
   /**
+   * イベントループの遅れの見張り（設計書6.107。0.74.11）。
+   *
+   * **「読み 58,191ms」の正体を決めるために要る。** 同じ機械で Node に
+   * 直接読ませれば698ファイルで255msなので、読み口そのものが遅いとは
+   * 考えにくい。**遅れの合計が読みの待ちと釣り合えば「握られている」、
+   * 釣り合わなければ「読み口が遅い」**と読める。
+   *
+   * **入口で始めて、作品一覧の初回描画で止める。** 走査が走っている
+   * あいだを丸ごと覆う必要があるので、ここより後ろには置けない。
+   */
+  const loopLagMeter = startLoopLagMeter();
+
+  /**
+   * どちらの読み口を選んだか（設計書6.107。0.74.11）。
+   *
+   * **「Node 側へ行っているはず」を数字にする。** 起動の1行へ添えるが、
+   * 決まるのは動的 import のあとなので、掴んでおいて書くときに読む。
+   * 走査より先に頼んでおけば、一覧が出るころには必ず入っている。
+   */
+  let startupReaderKind: ReaderKind | undefined;
+  void readerKind().then((kind) => {
+    startupReaderKind = kind;
+  });
+
+  /**
+   * 作品が決まらない処理のログの置き場所（保管庫）。
+   *
+   * **入口で決める。** 渡すのは下の `setFallbackLogRoot` だが、起動の
+   * プロファイル（下）も同じ場所へ書くので、値だけ先に作っておく。
+   * `vscode-userdata:` を OS のパスへ倒す理由は `setGeneratedStorageRoot`
+   * と同じ（拡張機能開発ホストではこの仕組みで渡ってくる）。
+   */
+  const fallbackLogRoot =
+    context.globalStorageUri.scheme === "vscode-userdata"
+      ? context.globalStorageUri.fsPath
+      : fromUri(context.globalStorageUri);
+
+  /**
+   * 起動のプロファイル（設計書6.107。0.74.11）。
+   *
+   * **環境変数 `NOVELAI_STARTUP_PROFILE` を立てたときだけ動く。**
+   * 立っていなければ `undefined` が返り、以降は何も起きない
+   * （作者の環境では立てない。ノートで測るための仕掛けである）。
+   */
+  const startupProfile = await startStartupProfile({
+    logRoot: fallbackLogRoot,
+    onSaved: (filePath) => {
+      // 起動は作品が決まらない処理なので、保管庫側のログへ書く
+      useLogFile(undefined);
+      logStep(`起動のプロファイルを書いた：${filePath}`);
+    },
+    onFailed: (error) => {
+      logFailure("起動のプロファイル", {
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    },
+  });
+
+  /**
    * いま走っている操作（設計書6.17.4の末尾）。
    *
    * **`activate` のスコープに置く。** 拡張機能ホストが再読み込みされれば
@@ -749,14 +811,12 @@ export async function activate(
     実機では12分かけて測った結果も、反映待ちで止まっていることも、
     通知が消えた時点で失われている。
 
-    `vscode-userdata:` を OS のパスへ倒すのは `setGeneratedStorageRoot`
-    と同じ理由（拡張機能開発ホストではこの仕組みで渡ってくる）。
+    値そのものは `activate` の入口で作ってある（起動のプロファイルも
+    同じ場所へ書くため）。`vscode-userdata:` を OS のパスへ倒すのは
+    `setGeneratedStorageRoot` と同じ理由（拡張機能開発ホストでは
+    この仕組みで渡ってくる）。
   */
-  setFallbackLogRoot(
-    context.globalStorageUri.scheme === "vscode-userdata"
-      ? context.globalStorageUri.fsPath
-      : fromUri(context.globalStorageUri)
-  );
+  setFallbackLogRoot(fallbackLogRoot);
 
   /**
    * AIチューニングの台帳の置き場も、ここで一度だけ渡す（設計書6.49）。
@@ -981,7 +1041,15 @@ export async function activate(
       `logStep` は出力チャンネルにも同じ行を出す。
     */
     useLogFile(undefined);
-    logStep(`${startupTiming.report()}（作品 ${registry.list().length}）`);
+    /*
+      **読み口も添える**（設計書6.107。0.74.11）。「Node 側へ行っている
+      はず」を数字にするためで、ここが `vscode` なら走査の読みが遅いのは
+      当たり前になる。まだ決まっていなければ書かない（嘘を書かない）。
+    */
+    const reader = startupReaderKind ? `／読み口 ${startupReaderKind}` : "";
+    logStep(
+      `${startupTiming.report()}（作品 ${registry.list().length}${reader}）`
+    );
   };
 
   const noteStartupHandoffDone = (label: string): void => {
@@ -992,7 +1060,17 @@ export async function activate(
 
   const noteFirstWorkListRender = (summary: ScanTiming): void => {
     try {
-      startupTiming.mark("作品一覧の初回描画", describeScanSummary(summary));
+      /*
+        **ここで見張りを止める**（設計書6.107。0.74.11）。走査が走って
+        いたあいだのイベントループの遅れが、この時点までの合計として出る。
+        起動のプロファイルも同じ区間なので、一緒に締める。
+      */
+      const lag = loopLagMeter.stop();
+      void startupProfile?.stop();
+      startupTiming.mark(
+        "作品一覧の初回描画",
+        describeScanSummary(summary, lag)
+      );
       firstRenderDone = true;
       if (!handoffPending) {
         writeStartupTiming();
@@ -6004,17 +6082,37 @@ function describeMaintainOrder(report: WorkRegistryInitReport): string {
  * 合計は**同時に走った4本ぶんの足し算**なので、壁時計の時間より大きくなる。
  * それでよい——読みたいのは「どの作業がどれだけ CPU を食ったか」である。
  *
- * ファイルを1つも読んでいなければ注記を付けない（`undefined` を返すと、
- * `mark` 側が括弧ごと落とす）。
+ * ファイルを1つも読んでいなければ、走査の部分は付けない（`undefined` を
+ * 返すと、`mark` 側が括弧ごと落とす）。
+ *
+ * 0.74.11 で2つ足した。**読みを「下ごしらえ」と「読み」に割った**のと、
+ * **イベントループの遅れ**（`core/loopLag.ts`）である。遅れの合計が読みの
+ * 待ちと釣り合えば「握られている」、釣り合わなければ「読み口が遅い」。
  */
-function describeScanSummary(summary: ScanTiming): string | undefined {
-  if (summary.files === 0) return undefined;
+function describeScanSummary(
+  summary: ScanTiming,
+  lag?: LoopLagReport
+): string | undefined {
+  /*
+    **遅れは、走査が0件でも出す**（設計書6.107。0.74.11）。作品が無くても
+    「起動と同時に誰かが握っている」なら、それは読み口の話ではない。
+  */
+  const lagPart = lag
+    ? [
+        `ループの遅れ 合計 ${formatStartupMillis(
+          lag.totalLagMs
+        )}ms／最大 ${formatStartupMillis(lag.maxLagMs)}ms`,
+      ]
+    : [];
+  if (summary.files === 0) {
+    return lagPart.length > 0 ? lagPart[0] : undefined;
+  }
   return [
-    `走査 合計 ${formatStartupMillis(summary.totalMs)}ms（読み ${
-      formatStartupMillis(summary.readMs)
-    }／数え ${formatStartupMillis(summary.countMs)}／解析 ${
-      formatStartupMillis(summary.parseMs)
-    }）`,
+    `走査 合計 ${formatStartupMillis(summary.totalMs)}ms（下ごしらえ ${
+      formatStartupMillis(summary.prepMs)
+    }／読み ${formatStartupMillis(summary.readMs)}／数え ${
+      formatStartupMillis(summary.countMs)
+    }／解析 ${formatStartupMillis(summary.parseMs)}）`,
     ...(summary.slowestFile
       ? [
           `最長 ${summary.slowestFile} ${formatStartupMillis(
@@ -6023,6 +6121,7 @@ function describeScanSummary(summary: ScanTiming): string | undefined {
         ]
       : []),
     `ファイル ${summary.files}`,
+    ...lagPart,
   ].join("／");
 }
 

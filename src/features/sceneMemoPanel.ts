@@ -28,12 +28,13 @@ import {
   sceneMemoToMarkdown,
 } from "../core/sceneMemoMarkdown";
 import {
+  arrangeRows,
+  currentFirst,
   findingColorVars,
   findingHeadline,
   findingLabelOf,
   findingNote,
   FINDING_DOT_CLASS,
-  markSameLine,
   mergeNoteRows,
   nextNoteRow,
   prevNoteRow,
@@ -842,7 +843,10 @@ class SceneMemoPanel {
 
   /** 書き出す1枚の材料。**並びは「この話 → その他」**（付箋だけ） */
   private visibleMemos(): SceneMemo[] {
-    return this.currentFirst(sortMemos(this.matchedMemos(), this.order));
+    return currentFirst(
+      sortMemos(this.matchedMemos(), this.order),
+      this.currentKey
+    );
   }
 
   /**
@@ -853,35 +857,15 @@ class SceneMemoPanel {
    * 「いま開いている話を先頭へ」の入れ替えだけである。
    */
   private visibleRows(): NoteRow[] {
-    const merged = mergeNoteRows(
-      this.matchedMemos(),
-      this.matchedFindings(),
-      this.order
-    );
-    if (!this.currentKey) return merged;
     /*
-      **入れ替えても、同じ場所の行は離れない。** 並びはファイル単位で
-      切れているので、動くのはファイルごとの塊である。ただし
-      「直前と同じ場所」の印は先頭でも立ったままになるので、付け直す。
+      **入れ替えと印の付け直しは、`core` が順番ごと持っている**
+      （`arrangeRows`。0.74.11）。ここで2つを呼び分けていたころは、
+      順番を取り違えても画面を動かすまで気づけなかった。
     */
-    return markSameLine(this.currentFirst(merged));
-  }
-
-  /**
-   * いま開いている話を先頭へ寄せる。
-   *
-   * 書いている場面のものが下のほうにあると、横に並べた意味が薄れる。
-   */
-  private currentFirst<T extends { filePath: string }>(rows: T[]): T[] {
-    const currentKey = this.currentKey;
-    if (!currentKey) return rows;
-    const here = rows.filter(
-      (row) => paths.normalizeForComparison(row.filePath) === currentKey
+    return arrangeRows(
+      mergeNoteRows(this.matchedMemos(), this.matchedFindings(), this.order),
+      this.currentKey
     );
-    const rest = rows.filter(
-      (row) => paths.normalizeForComparison(row.filePath) !== currentKey
-    );
-    return [...here, ...rest];
   }
 
   private post(): void {

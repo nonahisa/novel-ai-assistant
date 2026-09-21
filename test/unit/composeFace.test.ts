@@ -196,6 +196,15 @@ interface ComposeApi {
   memoClassFor(line: string): string;
   /** 字を揃えるための印が、規則から外れたか（作者の実機報告、2026-09-21） */
   composeMarkIsStale(name: string, value: string): boolean;
+  /** 変換中（IME）の字が占める範囲（設計書6.34.5。0.74.11） */
+  composeComposingSpan(
+    atoms: ComposeAtom[],
+    start: number | null,
+    length: number
+  ): {
+    start: { node: FakeNode; offset: number };
+    end: { node: FakeNode; offset: number };
+  } | null;
 }
 
 /** 用語の位置（`collectTermSpans` が渡してくるもののうち、判定が見る分だけ） */
@@ -214,7 +223,8 @@ const api = new Function(
     " composeChunkIsRuby, composeChunkAt, composeChunkBaseNode," +
     " composeChunkBaseRange, composeChunkCovering, composeSpanPoints," +
     " composeTermForOffset, pickMenuTerm," +
-    " memoIsLine, memoPartsOf, memoClassFor, composeMarkIsStale };"
+    " memoIsLine, memoPartsOf, memoClassFor, composeMarkIsStale," +
+    " composeComposingSpan };"
 )() as ComposeApi;
 
 /** 記法から組み立てたDOM（偽） */
@@ -1939,6 +1949,101 @@ describe("変換中の字に背景色を置く", () => {
     expect(body).not.toContain("insertBefore");
     expect(body).not.toContain("removeChild");
     expect(body).not.toContain("setAttribute");
+  });
+
+  /**
+   * **塗る長さが合わない**（作者の実機、0.74.10）。塗りが途中で切れたり
+   * 余ったりしていた。0.74.10 は「いまのカーソルから、変換中の字の長さだけ
+   * 手前」で範囲を作っていたが、**変換中のカーソルは末尾とは限らない**
+   * ——文節を選び直せば語の途中へ、候補を選べばその位置へ動く。
+   *
+   * 0.74.11 で、`compositionstart` の時点の**始点**を控え、そこから
+   * `event.data.length` 文字ぶん**前向き**に数えるように改めた。
+   */
+  describe("塗る範囲は、始点から前向きに数える", () => {
+    /** 範囲を作って、**記法の位置に戻して**測る */
+    function spanOf(
+      value: string,
+      start: number | null,
+      length: number,
+      mode?: Mode
+    ) {
+      const atoms = api.composeAtoms(build(value, mode));
+      const span = api.composeComposingSpan(atoms, start, length);
+      if (!span) return null;
+      return {
+        sameNode: span.start.node === span.end.node,
+        from: api.composePointToOffset(atoms, span.start.node, span.start.offset),
+        to: api.composePointToOffset(atoms, span.end.node, span.end.offset),
+      };
+    }
+
+    it("始点から前向きに数える（手前へ遡らない）", () => {
+      // 「あいうえお」の2文字目から2文字＝「いう」。**カーソルは見ない**
+      expect(spanOf("あいうえお", 1, 2)).toEqual({
+        sameNode: true,
+        from: 1,
+        to: 3,
+      });
+    });
+
+    it("節点をまたいでも数え続ける（三点リーダの span を越える）", () => {
+      /*
+        「あ……い」は、素の span（三点リーダ）が2つ挟まって
+        **4つの節点**に分かれる。変換中の字がこれをまたぐことはあるので、
+        1つの節点に収まらなければ諦める、では塗りが消える
+      */
+      expect(spanOf("あ……い", 0, 4)).toEqual({
+        sameNode: false,
+        from: 0,
+        to: 4,
+      });
+    });
+
+    it("カーソルが文節の途中にあっても、長さは `data` と一致する", () => {
+      /*
+        **範囲の作り方にカーソルが入っていないこと**を、2つの側から見る。
+        ①どの始点・長さでも、塗る長さは頼んだ長さと必ず一致する
+        ②関数がカーソル（`endOffset`）を読んでいない
+      */
+      for (const [start, length] of [
+        [0, 1],
+        [2, 3],
+        [3, 2],
+      ]) {
+        const span = spanOf("あいうえお", start, length);
+        expect(`${start}+${length}`).toBe(
+          `${span?.from}+${(span?.to ?? 0) - (span?.from ?? 0)}`
+        );
+      }
+
+      const paint = html.slice(html.indexOf("function composeMarkComposing("));
+      const body = paint.slice(0, paint.indexOf("function composeComposingStartOffset("));
+      expect(body).toContain("composeComposingStart");
+      expect(body).not.toContain("endOffset");
+    });
+
+    it("かたまり（ルビ）と行の切れ目は跨がない", () => {
+      // 跨いだ範囲を塗れば必ず見当違いになる。**ずれた色は、無い色より悪い**
+      expect(spanOf("あ｜漢字《かんじ》い", 0, 3, "site")).toBeNull();
+      expect(spanOf("あい\nうえ", 1, 2)).toBeNull();
+      // 長さが無い（変換中の字が消えた）ときも塗らない
+      expect(spanOf("あいうえお", 1, 0)).toBeNull();
+      expect(spanOf("あいうえお", null, 2)).toBeNull();
+    });
+
+    it("始点は `compositionstart` で控え、確定で捨てる", () => {
+      const start = html.slice(
+        html.indexOf('compose.addEventListener("compositionstart"')
+      );
+      expect(start.slice(0, 600)).toContain(
+        "composeComposingStart = composeComposingStartOffset();"
+      );
+      const end = html.slice(
+        html.indexOf('compose.addEventListener("compositionend"')
+      );
+      expect(end.slice(0, 400)).toContain("composeComposingStart = null;");
+    });
   });
 });
 

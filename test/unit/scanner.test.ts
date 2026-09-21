@@ -238,6 +238,7 @@ describe("走査の計測", () => {
     const { timing } = await scanWork(work);
 
     for (const [name, value] of Object.entries({
+      prepMs: timing.prepMs,
       readMs: timing.readMs,
       countMs: timing.countMs,
       parseMs: timing.parseMs,
@@ -251,15 +252,43 @@ describe("走査の計測", () => {
   });
 
   test("内訳の合計は、ぜんたいの時間と釣り合う", async () => {
-    // `otherMs` は引き算で出すので、4つ足せば必ず合計になる。
+    // `otherMs` は引き算で出すので、5つ足せば必ず合計になる。
     // ずれていれば、どこかの区間を二重に数えている
     stubThreeFiles();
 
     const { timing } = await scanWork(work);
 
     expect(
-      timing.readMs + timing.countMs + timing.parseMs + timing.otherMs
+      timing.prepMs +
+        timing.readMs +
+        timing.countMs +
+        timing.parseMs +
+        timing.otherMs
     ).toBeCloseTo(timing.totalMs, 5);
+  });
+
+  test("1ファイルも読まなければ、読みは0のまま（下ごしらえと混ぜない）", async () => {
+    /*
+      **0.74.11 で割った境目を、ここで見張る**（設計書6.107）。
+      0.74.10 までは作品設定の読み込みもフォルダーの歩きも `readMs` に
+      入っていたので、**1ファイルも読んでいないのに「読み」に数字が出た**。
+      「読み 58,191ms」が573回の `readFile` なのか、その手前なのかが
+      分からなかったのはこのためである。
+    */
+    workspace.fs = {
+      readFile: vi.fn(async () => {
+        throw new FileSystemError("設定なし", "FileNotFound");
+      }),
+      stat: vi.fn(async () => {
+        throw new FileSystemError("本文なし", "FileNotFound");
+      }),
+      readDirectory: vi.fn(async () => []),
+    };
+
+    const { timing } = await scanWork(work);
+
+    expect(timing.files).toBe(0);
+    expect(timing.readMs).toBe(0);
   });
 
   test("`files` は、話と作品情報を合わせた数と一致する", async () => {
@@ -310,6 +339,7 @@ describe("走査の計測をまとめる", () => {
     const summary = summarizeScanTimings([
       {
         files: 10,
+        prepMs: 30,
         readMs: 100,
         countMs: 200,
         parseMs: 50,
@@ -320,6 +350,7 @@ describe("走査の計測をまとめる", () => {
       },
       {
         files: 3,
+        prepMs: 7,
         readMs: 1,
         countMs: 2,
         parseMs: 3,
@@ -331,6 +362,9 @@ describe("走査の計測をまとめる", () => {
     ]);
 
     expect(summary.files).toBe(13);
+    // **下ごしらえも足す**（0.74.11）。足し忘れると、作品が増えるほど
+    // 内訳の合計がぜんたいから離れていく
+    expect(summary.prepMs).toBe(37);
     expect(summary.readMs).toBe(101);
     expect(summary.countMs).toBe(202);
     expect(summary.parseMs).toBe(53);

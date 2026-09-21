@@ -390,11 +390,12 @@ describe("初回の描画に走査の集計を添える", () => {
   function timing(files: number, readMs: number, countMs: number, slowest: string) {
     return {
       files,
+      prepMs: 2,
       readMs,
       countMs,
       parseMs: 5,
       otherMs: 1,
-      totalMs: readMs + countMs + 6,
+      totalMs: readMs + countMs + 8,
       slowestFile: slowest,
       slowestMs: readMs,
     };

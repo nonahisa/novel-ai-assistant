@@ -193,6 +193,56 @@ export function markSameLine(rows: readonly NoteRow[]): NoteRow[] {
 }
 
 /**
+ * いま開いている話の行を、先頭へ寄せる（設計書6.40。0.74.11）。
+ *
+ * 書いている場面のものが下のほうにあると、横に並べた意味が薄れる。
+ *
+ * **塊のまま動く。** 並びはファイル単位で切れているので、同じファイルの
+ * 行どうしの順番は変わらない（話数の順で下のほうにあった話でも、
+ * 中の並びはそのままで頭へ来る）。
+ *
+ * `currentKey` は **`normalizeForComparison` を通した**形で渡す
+ * （大文字小文字や区切りの違いで同じ話を別物にしないため）。
+ * 開いている話が無ければ、並びは1つも動かない。
+ *
+ * **パネルの private メソッドだった**ものを、0.74.11 で外へ出した。
+ * この並べ方は作者への約束（開いている話が先頭）なのに、画面を動かす
+ * まで崩れに気づけない場所にあった。
+ */
+export function currentFirst<T extends { filePath: string }>(
+  rows: readonly T[],
+  currentKey: string | null
+): T[] {
+  if (!currentKey) return [...rows];
+  const here = rows.filter(
+    (row) => paths.normalizeForComparison(row.filePath) === currentKey
+  );
+  const rest = rows.filter(
+    (row) => paths.normalizeForComparison(row.filePath) !== currentKey
+  );
+  return [...here, ...rest];
+}
+
+/**
+ * 画面へ出す並びを整える（設計書6.40。0.74.11）。
+ *
+ * **順番が決まっている。** 先に「いま開いている話を先頭へ」、そのあとで
+ * 「直前と同じ場所」の印を付け直す。逆にすると、**先頭へ来た行の印が
+ * 入れ替え前のまま残る**——下のほうで2件目だった行が先頭に立っても
+ * 「直前と同じ場所」を名乗り、場所の表示が消えたまま出る。
+ *
+ * `visibleRows()` が呼び分けていたこの順序を、1つの関数にまとめて
+ * 試験で見張る（画面を動かさないと崩れに気づけない場所から出した）。
+ */
+export function arrangeRows(
+  rows: readonly NoteRow[],
+  currentKey: string | null
+): NoteRow[] {
+  if (!currentKey) return [...rows];
+  return markSameLine(currentFirst(rows, currentKey));
+}
+
+/**
  * 指摘の種類の呼び名。
  *
  * **並べるためではなく、どこから来た指摘かを作者へ伝えるためにある**
