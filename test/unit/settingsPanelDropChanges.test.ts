@@ -227,6 +227,50 @@ describe("誤って記録された変化を落とす（設定資料パネル）"
     expect(shown[0][0].detail).toContain("ターナ先生。魔物の数が");
   });
 
+  /*
+    **短い記述を詳しい記述で置き換える道にも根拠を付ける**（0.75.4）。
+
+    0.75.3 で根拠を渡したのは `fillOrConflict` の3か所で、
+    **「短い記述が長い記述に含まれる」道（`refineValue`）だけが残っていた。**
+    この道は履歴を増やさず、**同じ記録の値だけを書き換える**——
+    根拠を渡さないと、値は詳しいほうなのに引用は短いほうを読んだときのまま
+    （または空のまま）になり、作者が取り違えを見抜く手掛かりが合わなくなる。
+  */
+  test("短い記述を詳しい記述で置き換えても、根拠は詳しいほうのものになる", () => {
+    const detailed = "短く切った黒髪に、色の薄い目。";
+    const merged = mergeExtractedCharacters(
+      [],
+      [
+        {
+          data: {
+            name: "ターナ先生",
+            // 詳しいほうに丸ごと含まれる書き方にする（句点まで入れると
+            // 「含む」と判定されず、別の値＝変化として記録される）
+            appearance: "短く切った黒髪",
+            evidence: "短く切った黒髪が、風に揺れた。",
+          },
+          chapters: [1],
+        },
+        {
+          data: {
+            name: "ターナ先生",
+            appearance: detailed,
+            evidence: "短く切った黒髪に、色の薄い目をしていた。",
+          },
+          chapters: [7],
+        },
+      ]
+    );
+
+    const changes = merged.characters[0].changes.filter(
+      (entry) => entry.field === "appearance"
+    );
+    // 詳しく書き直しただけなので、変化としては並べない（記録は1つのまま）
+    expect(changes).toHaveLength(1);
+    expect(changes[0].value).toBe(detailed);
+    expect(changes[0].evidence).toBe("短く切った黒髪に、色の薄い目をしていた。");
+  });
+
   test("何も選ばずに閉じたら、保存も作り直しもしない", async () => {
     const { inner, saved, notices } = panelWith(misread());
     choosing(() => undefined);

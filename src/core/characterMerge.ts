@@ -794,7 +794,9 @@ function fillOrConflict(
   // 読み違いで、詳しく書き直したものではない。作者に選ばせる
   if (foldable && value.includes(current)) {
     target[field] = value;
-    refineValue(target.changes, field, current, value, chapters);
+    // **この道にも根拠を渡す**（0.75.4）。`fillOrConflict` の他の3か所は
+    // 0.75.3 で渡すようにしたが、ここだけ残っていた
+    refineValue(target.changes, field, current, value, chapters, evidence);
     return true;
   }
   if (foldable && current.includes(value)) return false;

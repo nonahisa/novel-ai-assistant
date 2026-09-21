@@ -1,4 +1,6 @@
 import { describe, expect, test } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describeCheckRunCounts } from "../../src/core/checkRunCounts";
 
 /**
@@ -46,6 +48,31 @@ describe("完了通知の件数", () => {
     // 通知が長くなるだけである。追えるように場所だけ言う
     expect(parts[1]).toContain("除外 4件");
     expect(parts[1]).toContain("操作ログ");
+  });
+
+  /*
+    **推敲も同じ関数を通す**（0.75.4）。
+
+    推敲だけが `rejected: 0` を渡し、落とした件数を
+    「AIの指摘のうち ◯件を落とした」と直書きしていた。同じ出来事を
+    推敲だけ違う言い方で伝えるうえ、数え方を直すときにここが取り残される。
+    直したのは配線なので、**戻っていないこと**をソースの形で押さえる。
+  */
+  test("推敲の落とした件数も、この関数へ渡している", () => {
+    const source = readFileSync(
+      resolve(__dirname, "../../src/extension.ts"),
+      "utf8"
+    );
+    const start = source.indexOf('"novelai.checkProofread"');
+    const end = source.indexOf('"novelai.runReaderTargetDiagnosis"');
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const block = source.slice(start, end);
+
+    expect(block).toContain("describeCheckRunCounts({");
+    expect(block).toContain("rejected: result.rejectedCount,");
+    // 直書きの文言へ戻していない（「除外 ◯件（理由は操作ログ）」で言う）
+    expect(block).not.toContain("件を落とした`");
   });
 
   test("両方あるときは、指摘・除外の順に並べる", () => {

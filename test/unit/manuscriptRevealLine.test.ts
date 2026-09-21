@@ -336,14 +336,21 @@ describe(".md 化のあとの後片付け", () => {
     source.indexOf("private async insertRuby")
   );
 
-  test("変換に成功したら、元の面を閉じる", () => {
-    expect(suggest).toContain("panel.dispose()");
+  /*
+    **0.75.4 で、閉じる場所が変換の側へ移った。**
+
+    ここで閉じていたときは、**促しから変換したときだけ**面が閉じ、詳細メニューや
+    右クリックからの変換では残っていた。いまは変換の唯一の口
+    （`markdownConvert.renamePreservingContent`）が閉じる。
+    閉じ方・閉じる時点・未保存の扱いは `renameClosesManuscript.test.ts` が見る。
+  */
+  test("促しは変換を通す（そこで元の面が閉じる）", () => {
+    expect(suggest).toContain("this.deps.convertToMarkdown(filePath)");
+    // 断られた・失敗したときは、そもそも変換していないので面も残る
+    expect(suggest).toContain("if (!converted) return;");
   });
 
-  test("閉じるのは変換に成功したときだけ", () => {
-    // 断られた・失敗したときに閉じると、書きかけの面を勝手に消すことになる
-    const bail = suggest.indexOf("if (!converted) return;");
-    expect(bail).toBeGreaterThan(0);
-    expect(suggest.indexOf("panel.dispose()")).toBeGreaterThan(bail);
+  test("促し側に写しを残さない（始末は1か所）", () => {
+    expect(suggest).not.toContain("panel.dispose()");
   });
 });

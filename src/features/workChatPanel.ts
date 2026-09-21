@@ -2214,6 +2214,30 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   }
 
   /**
+   * **いま相談の対象にしている作品のID**（設計書6.104／6.68.2）。
+   *
+   * 相談から案内の札（ターゲット読者診断など）へ入ったとき、
+   * **いま画面に出ている作品をもう一度選ばせない**ために使う
+   * （作者の指摘。`resolveWork` の当てどころの1つ）。
+   *
+   * 順は `resolveContext` と同じ——**開いているファイルの作品が先**で、
+   * 無ければ選んである作品。画面の上部に出ている作品名と食い違わせない。
+   * どちらも無ければ `undefined`（当てどころが無いので、作者に訊く）。
+   *
+   * **軽い問い合わせにする。** `resolveContext` は走査までするので、
+   * 「どの作品か」を知りたいだけの呼び出しからは通せない。
+   */
+  currentWorkId(): string | undefined {
+    const editor = this.lastEditor;
+    const filePath =
+      editor && editor.document.uri.scheme === "file"
+        ? fromUri(editor.document.uri)
+        : undefined;
+    const opened = filePath ? this.findWork(filePath) : undefined;
+    return opened?.id ?? this.selectedWorkId;
+  }
+
+  /**
    * 相談する作品を選び直す。
    *
    * 作品を開いていないときの相談相手を、作者が決められるようにする。

@@ -18,7 +18,10 @@ import {
 } from "../core/textFile";
 import { countSiteNotation, fromSiteNotation } from "../core/ruby";
 import { cancelItem, isCancelItem } from "../views/dialogs";
-import { carryAppearanceToRenamed } from "./manuscriptEditor";
+import {
+  carryAppearanceToRenamed,
+  closeRenamedManuscript,
+} from "./manuscriptEditor";
 
 /**
  * 本文の `.txt` を `.md` にする（設計書6.12.1）。
@@ -169,6 +172,19 @@ export async function renamePreservingContent(
     // その後に作られている場合もある
     overwrite: false,
   });
+
+  /*
+    **名前が変わったら、元の名前で開いている面を閉じる**（0.75.4）。
+
+    これまでは**MD化の促し（6.12.6）だけ**が閉じており、詳細メニューや
+    右クリックからの変換では面が残っていた。残った面はもう無いファイルを
+    指しているので、そこへ打って保存すると**消えたはずの `.txt` が復活する**。
+
+    **変換が済んでから閉じる。** 名前を変える前に閉じると、`fs.rename` が
+    失敗したときに面だけが消える。**閉じるのは新しい `.md` を開く前**でよい
+    （促しもその順で、あとにすると開いた面が `dispose` に巻き込まれる）。
+  */
+  closeRenamedManuscript(plan.from);
 }
 
 /**

@@ -16,6 +16,12 @@ import {
   READER_PROFILE_SCHEMA_VERSION,
   type ReaderProfile,
 } from "../models/readerProfile";
+import {
+  POSTING_SITES,
+  readerStatsForSite,
+  type PostingLedger,
+} from "../models/posting";
+import { formatReaderStatsMetrics } from "./postingSiteRecords";
 
 /**
  * 3つの輪の1枚（設計書6.101、実装の順「3」と「4」）。
@@ -99,6 +105,44 @@ export interface ThreeCirclesReaction {
   metrics: string;
   /** 読み取った日（`YYYY-MM-DD`） */
   readAt: string;
+}
+
+/**
+ * 投稿の台帳から、**サイトごとに最新の1件**を選ぶ（設計書6.79.7／6.101）。
+ *
+ * **見るのは `scope: "work"`（作品全体）の行だけである。** 話ごとの数字を
+ * 混ぜると、「この作品はどれくらい読まれているか」に1話ぶんの数字が出て、
+ * 作品の勢いを読み違える。並びは `readerStatsForSite` が新しい順に揃えて
+ * いるので、**最初に見つかった作品全体の行**が最新である。
+ *
+ * **数字の言い方は `formatReaderStatsMetrics` に任せる**——サイトごとの
+ * 呼び名（なろうの「評価者数」など）を、ここで言い換えない。
+ *
+ * **欄が1つも読めなかった行は落とす。** 「（サイト名）：」だけの行を
+ * 出しても何も伝わらない。
+ *
+ * 台帳を読むのは呼び出し側（`features/threeCircles.ts`）の仕事で、
+ * ここは**渡された台帳から選ぶだけ**——0.75.4 に切り出した（それまでは
+ * 画面側の関数の中にあり、`vscode` を通さないと測れなかった）。
+ */
+export function collectReactions(
+  ledger: PostingLedger
+): ThreeCirclesReaction[] {
+  const reactions: ThreeCirclesReaction[] = [];
+  for (const info of POSTING_SITES) {
+    const latest = readerStatsForSite(ledger, info.id).find(
+      (record) => record.scope === "work"
+    );
+    if (!latest) continue;
+    const metrics = formatReaderStatsMetrics(latest.metrics);
+    if (!metrics) continue;
+    reactions.push({
+      site: info.label,
+      metrics,
+      readAt: latest.readAt.slice(0, 10),
+    });
+  }
+  return reactions;
 }
 
 export interface ThreeCirclesInput {

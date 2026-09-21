@@ -1,11 +1,17 @@
 import { describe, expect, test } from "vitest";
 import {
   buildThreeCirclesSheet,
+  collectReactions,
   needsBridge,
   threeCirclesEdges,
   THREE_CIRCLES_KIND,
   type ThreeCirclesInput,
 } from "../../src/core/threeCirclesSheet";
+import {
+  emptyPostingLedger,
+  type PostingLedger,
+  type ReaderStatsRecord,
+} from "../../src/models/posting";
 import { authorReaderProfileFromAnswers } from "../../src/core/authorReaderType";
 import type { AuthorReaderProfile } from "../../src/core/authorReaderType";
 import type { ReaderProfile, ReaderScores } from "../../src/models/readerProfile";
@@ -356,5 +362,65 @@ describe("上下を作らない", () => {
 
   test("品定めではないと、はじめに断る", () => {
     expect(buildThreeCirclesSheet(EMPTY)).toContain("この紙は品定めではありません");
+  });
+});
+
+/**
+ * 届いている反応を、台帳からどう選ぶか（設計書6.79.7／6.101）。
+ *
+ * **0.75.4 までは画面側（`features/threeCircles.ts`）の中にあり、測れなかった。**
+ * 前提（新しい順に並べ、`scope: "work"` の最初を採る）は
+ * `readerStats.test.ts` が台帳の側で押さえているが、**それを使う側**が
+ * 話ごとの行を拾っていないことは、どこでも見ていなかった。
+ */
+describe("届いている反応の選び方", () => {
+  function stats(patch: Partial<ReaderStatsRecord> = {}): ReaderStatsRecord {
+    return {
+      site: "kakuyomu",
+      readAt: "2026-09-05T00:00:00.000Z",
+      scope: "work",
+      metrics: { pv: 1234 },
+      source: "manual",
+      ...patch,
+    };
+  }
+
+  function ledgerWith(records: ReaderStatsRecord[]): PostingLedger {
+    return { ...emptyPostingLedger(), readerStats: records };
+  }
+
+  /**
+   * **話ごとの数字を混ぜない。** 混ぜると「この作品はどれくらい
+   * 読まれているか」の欄に1話ぶんの数字が出て、勢いを読み違える。
+   */
+  test("話ごとの記録のほうが新しくても、作品全体の最新を採る", () => {
+    const reactions = collectReactions(
+      ledgerWith([
+        stats({
+          readAt: "2026-09-20T00:00:00.000Z",
+          scope: "episode",
+          episode: 3,
+          metrics: { pv: 7 },
+        }),
+        stats({ readAt: "2026-09-10T00:00:00.000Z", metrics: { pv: 500 } }),
+        stats({ readAt: "2026-09-01T00:00:00.000Z", metrics: { pv: 100 } }),
+      ])
+    );
+
+    expect(reactions).toHaveLength(1);
+    expect(reactions[0].site).toBe("カクヨム");
+    expect(reactions[0].metrics).toContain("500");
+    // 日付だけを出す（読み取った時刻までは要らない）
+    expect(reactions[0].readAt).toBe("2026-09-10");
+  });
+
+  test("そのサイトの記録が無ければ、その行は出さない", () => {
+    expect(collectReactions(ledgerWith([]))).toEqual([]);
+    // 話ごとの記録しか無いサイトも、作品全体の数字が無いので出さない
+    expect(
+      collectReactions(
+        ledgerWith([stats({ scope: "episode", episode: 1 })])
+      )
+    ).toEqual([]);
   });
 });

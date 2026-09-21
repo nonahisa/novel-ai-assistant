@@ -27,12 +27,7 @@ import {
 } from "../core/writingStats";
 import { boundaryHour } from "./writingProgress";
 import { PostingStore } from "../core/postingStore";
-import { formatReaderStatsMetrics } from "../core/postingSiteRecords";
-import {
-  POSTING_SITES,
-  readerStatsForSite,
-  type PostingLedger,
-} from "../models/posting";
+import type { PostingLedger } from "../models/posting";
 import { ReaderTargetStore } from "../core/readerTargetStore";
 import type { ReaderProfile } from "../models/readerProfile";
 import { ADVICE_TYPES, resolveAdviceType } from "../core/advicePolicy";
@@ -40,6 +35,7 @@ import type { AdviceProfile } from "../core/advicePolicy";
 import type { AuthorReaderProfile } from "../core/authorReaderType";
 import {
   buildThreeCirclesSheet,
+  collectReactions,
   THREE_CIRCLES_KIND,
   type ThreeCirclesReaction,
   type ThreeCirclesWritten,
@@ -103,7 +99,7 @@ export async function showThreeCircles(
           motif: plot.motif,
         },
         profile,
-        reactions: await collectReactions(work, notices),
+        reactions: await readReactions(work, notices),
         authorReader: sources.authorReader,
         notices,
       });
@@ -342,13 +338,12 @@ async function loadReaderProfile(
 /**
  * 届いている反応（設計書6.79.7）。**サイトごとに最新の1件だけ。**
  *
- * 見るのは `scope: "work"`（作品全体）の行である。話ごとの数字を混ぜると、
- * 「この作品はどれくらい読まれているか」に1話ぶんの数字が出る。
- *
- * 数字の言い方は `formatReaderStatsMetrics` に任せる——サイトごとの
- * 呼び名（なろうの「評価者数」など）を、ここで言い換えない。
+ * **ここは台帳を読むだけ。** どの行を採るか（作品全体の最新1件、数字の
+ * 言い方、空の行を落とすこと）は `core/threeCirclesSheet.ts` の
+ * `collectReactions` が持つ——0.75.4 に切り出した。画面側に置いたままでは、
+ * `vscode` を通さないと選び方を測れなかった。
  */
-async function collectReactions(
+async function readReactions(
   work: WorkEntry,
   notices: string[]
 ): Promise<ThreeCirclesReaction[]> {
@@ -359,24 +354,7 @@ async function collectReactions(
     notices.push(`投稿の台帳を読めませんでした：${messageOf(error)}`);
     return [];
   }
-
-  const reactions: ThreeCirclesReaction[] = [];
-  for (const info of POSTING_SITES) {
-    const latest = readerStatsForSite(ledger, info.id).find(
-      (record) => record.scope === "work"
-    );
-    if (!latest) continue;
-    const metrics = formatReaderStatsMetrics(latest.metrics);
-    // 欄が1つも読めなかった行は、数字を1つも持っていない。
-    // 「（サイト名）：」だけの行を出しても何も伝わらない
-    if (!metrics) continue;
-    reactions.push({
-      site: info.label,
-      metrics,
-      readAt: latest.readAt.slice(0, 10),
-    });
-  }
-  return reactions;
+  return collectReactions(ledger);
 }
 
 function messageOf(error: unknown): string {

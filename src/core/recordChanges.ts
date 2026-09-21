@@ -141,15 +141,26 @@ export function refineValue(
   field: string,
   from: string,
   to: string,
-  chapters: number[]
+  chapters: number[],
+  /**
+   * 詳しいほうの値を読み取った本文の引用（P-01 の `evidence`）。
+   *
+   * **書き換えた値には、書き換えたほうの根拠を添える**（0.75.4）。
+   * 残っている記録の値は `to` になるので、`from` を読んだときの引用を
+   * そのまま置いておくと、**値と根拠が食い違ったまま**設定資料パネルの
+   * 「変化を落とす」に並ぶ。作者が取り違えを見抜く手掛かりは根拠しかない。
+   * 手で入れる経路には根拠が無いので既定は null（そのときは前の根拠を残す）
+   */
+  evidence: string | null = null
 ): void {
   const existing = findChange(changes, field, from);
   if (!existing) {
-    recordValue(changes, field, to, chapters);
+    recordValue(changes, field, to, chapters, evidence);
     return;
   }
   existing.value = to;
   existing.chapters = sortedChapters([...existing.chapters, ...chapters]);
+  if (evidence) existing.evidence = evidence;
 }
 
 /** その値がどの話のものか。履歴に無ければ undefined（判定できない） */

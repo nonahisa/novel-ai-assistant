@@ -230,6 +230,7 @@ import {
 } from "./features/checkTypos";
 // 完了通知の件数は、提案パネルの見出しと同じ数え方をする（設計書6.8）
 import { describeCheckRunCounts } from "./core/checkRunCounts";
+import { pickHintedWork } from "./core/workTarget";
 import type { IncomingCount } from "./core/proposalBuckets";
 import {
   checkNotation,
@@ -2022,6 +2023,25 @@ export async function activate(
     })
   );
   onCommandFinished = (command) => workChatPanel.notifyCommandRun(command);
+
+  /*
+    **画面で指している作品を、作品を訊く場面の当てどころにする**（0.75.4。
+    設計書6.68.2／6.104）。
+
+    **見えているものだけを渡す。** 畳んだツリーの選択や、閉じた相談の対象は
+    作者の目に入っていない——そこから当てると、作者から見れば
+    「関係のない作品が勝手に選ばれた」ことになる。
+  */
+  workTargetHints = () => ({
+    treeSelectedId: worksView?.visible
+      ? worksView.selection.find(
+          (item): item is WorkNode => item.type === "work"
+        )?.work.id
+      : undefined,
+    chatTargetId: workChatPanel.isVisible()
+      ? workChatPanel.currentWorkId()
+      : undefined,
+  });
 
   context.subscriptions.push(
     workChatPanel,
@@ -4860,24 +4880,25 @@ export async function activate(
 
         // **誤字脱字と同じ数え方にする**（設計書6.8）。前に適用済み・
         // 解消済みだったものを「指摘」に数えると、パネルの見出しと食い違う。
+        /*
+          **落とした総数も、誤字脱字と同じ関数に言わせる**（0.75.4）。
+
+          以前はここだけ `rejected: 0` を渡し、落とした件数を
+          「AIの指摘のうち ◯件を落とした」と直書きしていた。同じことを
+          言うのに**推敲だけ言い方が違う**うえ、数え方を直すときに
+          ここが取り残される（誤字脱字・矛盾・伏線は
+          `describeCheckRunCounts` を通る）。
+
+          落とした総数を出す理由は変わらない（作者の裁定、2026-09-12）
+          ——黙ると、**製品が何件捨てたのかを作者が知る手立てが無い**。
+          総数を先に出し、下の3行は「うち」を付けて**内数だと分かる**ようにする。
+          理由の内訳までは出さない（調べたいときは操作ログにある）。
+        */
         const parts = describeCheckRunCounts({
           shown: shown.remaining,
           alreadyHandled: shown.handled,
-          rejected: 0,
+          rejected: result.rejectedCount,
         });
-        /*
-          **落とした総数を1行だけ出す**（作者の裁定、2026-09-12）。
-
-          以前はここで黙っていた——下に「絞り込み」「語尾の数え違い」と
-          細かい内訳が並ぶので、総数を重ねると二度数えたように見えたためである。
-          だが黙ると、**製品が何件捨てたのかを作者が知る手立てが無い**
-          （操作ログには出ているが、そこまで見に行かない）。
-          総数を先に出し、下の3行は「うち」を付けて**内数だと分かる**ようにした。
-          理由の内訳までは出さない（作者の裁定。調べたいときは操作ログにある）。
-        */
-        if (result.rejectedCount > 0) {
-          parts.push(`AIの指摘のうち ${result.rejectedCount}件を落とした`);
-        }
         if (result.overBudgetCount > 0) {
           // 黙って絞ると「これで全部」と受け取られる
           parts.push(`うち多すぎたぶん ${result.overBudgetCount}件を絞り込み`);
@@ -6415,6 +6436,17 @@ function reportTypoCheckResult(
   });
 }
 
+/**
+ * いま画面で「この作品」と指しているものを訊く口（設計書6.68.2）。
+ *
+ * **`resolveWork` はモジュールの関数で、画面を持たない。** ツリーも相談
+ * パネルも `activate()` の中にしか無いので、起動のときにここへ訊き方だけを
+ * 預ける。預ける前（起動の途中）は `undefined` で、これまでどおり作者に訊く。
+ */
+let workTargetHints:
+  | (() => { treeSelectedId?: string; chatTargetId?: string })
+  | undefined;
+
 /** ツリーから呼ばれた場合はそのノード、コマンドパレットからは選択させる */
 interface ResolveWorkOptions {
   /**
@@ -6531,7 +6563,27 @@ async function resolveWork(
     vscode.window.showInformationMessage("作品が登録されていません。");
     return undefined;
   }
-  if (works.length === 1) return works[0];
+
+  /*
+    **画面で既に指している作品があれば、選び直させない**（0.75.4。
+    設計書6.68.2／6.104）。
+
+    作者の指摘：相談パネルから案内の札でターゲット読者診断へ入ると、
+    **いま相談している作品をもう一度選ばされる**。引数の無い呼び出しは
+    「作品が分からない」と決めつけていたが、画面には作品名が出ている。
+
+    順（引数 → ツリーの選択 → 相談の対象 → 訊く）は `pickHintedWork` が持つ。
+    **見えているものだけを当てにする**——畳んだままのツリーや、閉じた相談の
+    選択は、作者の目には入っていない。外すと別の作品の資料が書き換わる。
+  */
+  const hinted = pickHintedWork({
+    registeredIds: works.map((work) => work.id),
+    ...workTargetHints?.(),
+  });
+  if (hinted) {
+    const found = works.find((work) => work.id === hinted.workId);
+    if (found) return found;
+  }
 
   const title = options.title ?? "作品を選択";
   if (!options.annotate) {

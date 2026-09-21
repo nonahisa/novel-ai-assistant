@@ -274,6 +274,45 @@ export function carryAppearanceToRenamed(from: string, to: string): void {
   pendingAppearance.set(manuscriptLedgerKey(to), now);
 }
 
+/**
+ * 名前が変わって**無くなったほう**の原稿の面を閉じる（設計書6.12.1）。
+ *
+ * ## 閉じないと何が起きるか
+ *
+ * 残った面は、もう無いファイルを指している。作者がそこへ戻って打ち、
+ * 保存した瞬間に**消えたはずの `.txt` が復活する**（VS Code は無くなった
+ * ファイルへも保存できる）。同じ話が `.txt` と `.md` の2つになり、走査は
+ * 両方を話として数え、以後どちらが本物か分からなくなる。
+ *
+ * ## ここ1つに集める理由（0.75.4）
+ *
+ * **MD化の促し（6.12.6）だけがこの始末をしていた。** 詳細メニューや
+ * 右クリックから変換したときは面が開いたまま残り、同じ危なさが残っていた
+ * （0.75.3 の記録）。**入口は3つ、始末は1つ**にする。呼ぶのは変換の
+ * 唯一の口（`renamePreservingContent`）で、1件でもフォルダーまるごとでも通る。
+ *
+ * **未保存なら閉じない。** 打ちかけを巻き添えにするほうが重い
+ * （変換の前に保存を通しているので、ここへ来るのは保存できなかった場合だけ）。
+ */
+export function closeRenamedManuscript(from: string): void {
+  const open = openManuscripts.get(manuscriptLedgerKey(from));
+  if (!open) return;
+
+  const dirty = vscode.workspace.textDocuments.some(
+    (document) =>
+      document.isDirty && manuscriptLedgerKey(document.uri) === manuscriptLedgerKey(from)
+  );
+  if (dirty) {
+    logLine(
+      `原稿エディタ：${from} は未保存のため、面を閉じませんでした（打ちかけを消さない）。`
+    );
+    return;
+  }
+
+  logLine(`原稿エディタ：名前が変わったため ${from} の面を閉じます。`);
+  open.panel.dispose();
+}
+
 /** 「← 前の話」「次の話 →」を押したときに、次に何をするか */
 export type NeighborStep =
   /** その添字の話を開く */
@@ -1980,21 +2019,13 @@ export class ManuscriptEditorProvider
     if (!converted) return;
 
     /*
-      **変換に成功したときだけ、元の .txt の面を閉じる。**
+      **元の .txt の面は、変換そのものが閉じている**（0.75.4）。
 
-      閉じずに残すと、作者がそのタブへ戻って打ち、保存した瞬間に
-      **消えたはずの .txt が復活する**（VS Code は無くなったファイルへも
-      保存できる）。同じ話が .txt と .md の2つになり、走査は両方を話として
-      数え、以後どちらが本物か分からなくなる。
-
-      閉じるのは新しい .md を開く**前**にする。あとにすると、開いた面が
-      すぐ後ろの `dispose` に巻き込まれて見えることがある。
+      以前はここで閉じていたが、そうすると**促しから変換したときだけ**
+      面が閉じ、詳細メニューや右クリックからでは残っていた。始末は
+      変換の唯一の口（`renamePreservingContent` → `closeRenamedManuscript`）
+      へ移してある。閉じる時点は変わらない（新しい .md を開く前）。
     */
-    const stale = openManuscripts.get(manuscriptLedgerKey(filePath));
-    if (stale) {
-      logLine(`原稿エディタ：.md 化にともない ${filePath} の面を閉じます。`);
-      stale.panel.dispose();
-    }
 
     // 変換すると元のファイルは消える（名前が変わる）。同じ入口で開き直す
     await this.openAsManuscript(converted);
