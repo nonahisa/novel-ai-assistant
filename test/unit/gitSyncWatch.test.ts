@@ -5,6 +5,7 @@ import {
 } from "./support/vscodeStub";
 import { WorkRegistry } from "../../src/core/workRegistry";
 import { affectsSyncStatus, GitSyncMonitor } from "../../src/features/gitSync";
+import type { GitCommandResult, GitCommandRunner } from "../../src/core/git";
 import type { WorkEntry } from "../../src/models/types";
 
 /**
@@ -131,5 +132,168 @@ describe("その変化で送信待ちの数が変わりうるか", () => {
     // 同期から外してあるものでも、数え直しは `git status` に任せる。
     // ここで先回りして外すと、外し忘れた所が黙って効かなくなる
     expect(affectsSyncStatus("/novels/w1/.aiwriter/cache/a.json")).toBe(true);
+  });
+});
+
+/**
+ * 書庫（1つの置き場に複数の作品）でも印が変わるか（設計書6.15.1）。
+ *
+ * 実機（ノートPC、2026-09-21）で、0.74.1 を入れてもなお「未記録 1」の
+ * ままだった。**`dirty` は `git status` が置き場ぜんぶを数えた値**で、
+ * 同じ置き場の作品はみな同じ数を持つ。しかも表示側（`gitSyncStatusText.ts`
+ * の `uniqueByRoot`）は置き場ごとに**最初の作品の状態だけ**を見る。
+ * 末尾の作品だけ作り直しても、表示が見るのは古いままの先頭の作品になる。
+ */
+describe("書庫の見張り（置き場ごとにまとめて作り直す）", () => {
+  const LIBRARY = "C:\\novels\\書庫";
+  const WORK_A: WorkEntry = {
+    id: "lib-a",
+    title: "あかつきの記",
+    folderPath: `${LIBRARY}\\あかつきの記`,
+    registeredAt: "2026-09-21T00:00:00.000Z",
+  };
+  const WORK_B: WorkEntry = {
+    id: "lib-b",
+    title: "たゆたう鉛",
+    folderPath: `${LIBRARY}\\たゆたう鉛`,
+    registeredAt: "2026-09-21T00:00:00.000Z",
+  };
+
+  /**
+   * その作品フォルダーを見ている見張りを取り出す。
+   *
+   * **並び順で選ばない。** 登録簿はタイトル順に並べ替えるので、
+   * `fileSystemWatchers[0]` がどの作品かは題名しだいで入れ替わる。
+   */
+  function watcherFor(folderPath: string) {
+    const wanted = folderPath.toLowerCase();
+    const found = fileSystemWatchers.find((watcher) => {
+      const base = (watcher.pattern as { base?: { fsPath?: string } }).base;
+      return (base?.fsPath ?? "").toLowerCase() === wanted;
+    });
+    if (!found) throw new Error(`見張りが張られていない: ${folderPath}`);
+    return found;
+  }
+
+  /**
+   * 置き場の状態を返すだけの偽git。
+   *
+   * **どの作品から呼ばれても同じ `git status` を返す**——本物も置き場
+   * ぜんぶを数えるので、ここで作品ごとに変えると症状が再現しない。
+   */
+  function fakeGit(
+    state: { porcelain: string },
+    rootFor: (cwd: string) => string
+  ): { run: GitCommandRunner; calls: Array<{ key: string; cwd: string }> } {
+    const calls: Array<{ key: string; cwd: string }> = [];
+    const run: GitCommandRunner = async (args, cwd) => {
+      const key = args.join(" ");
+      calls.push({ key, cwd });
+      const reply = (stdout: string): GitCommandResult => ({
+        code: 0,
+        stdout,
+        stderr: "",
+      });
+      if (key === "rev-parse --is-inside-work-tree") return reply("true\n");
+      if (key === "rev-parse --show-toplevel") return reply(`${rootFor(cwd)}\n`);
+      if (key === "remote") return reply("origin\n");
+      if (key === "symbolic-ref --quiet --short HEAD") return reply("main\n");
+      if (key === "rev-parse --abbrev-ref --symbolic-full-name @{upstream}") {
+        return reply("origin/main\n");
+      }
+      if (key.startsWith("rev-list --left-right --count")) return reply("0\t0\n");
+      if (key.startsWith("status --porcelain")) return reply(state.porcelain);
+      return reply("");
+    };
+    return { run, calls };
+  }
+
+  /** 何件の `git status --porcelain` を、どの作品で走らせたか */
+  function statusRuns(
+    calls: Array<{ key: string; cwd: string }>,
+    folderPath: string
+  ): number {
+    return calls.filter(
+      (call) => call.key === "status --porcelain" && call.cwd === folderPath
+    ).length;
+  }
+
+  beforeEach(() => {
+    resetFileSystemWatchers();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("末尾の作品が変わっても、先頭の作品の未記録が増える", async () => {
+    const state = { porcelain: " M あかつきの記/001.txt\n" };
+    const git = fakeGit(state, () => LIBRARY);
+    const registry = new WorkRegistry(fakeContext([WORK_A, WORK_B]) as never);
+    const monitor = new GitSyncMonitor(registry, { run: git.run });
+    // 起動時と同じように、まず全作品の状態をそろえる
+    await monitor.refreshAll({ fetch: false });
+    // **表示が見るのは、置き場の中で最初に来る作品の状態**（`uniqueByRoot`）
+    const works = registry.list();
+    const head = works[0];
+    const tail = works[works.length - 1];
+    if (!head || !tail || head.id === tail.id) {
+      throw new Error("書庫に2作品そろっていない");
+    }
+    expect(monitor.statusFor(head.id)).toMatchObject({ dirty: 1 });
+
+    // 作者が**末尾の作品**の本文を保存した。置き場の未記録は2件になる
+    state.porcelain = " M あかつきの記/001.txt\n M たゆたう鉛/001.txt\n";
+    watcherFor(tail.folderPath).fireChange(`${tail.folderPath}\\001.txt`);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    // 先頭の作品の状態が古いままだと、画面の数字は変わらない
+    expect(monitor.statusFor(head.id)).toMatchObject({ dirty: 2 });
+    expect(monitor.statusFor(tail.id)).toMatchObject({ dirty: 2 });
+    monitor.dispose();
+  });
+
+  test("置き場が別なら、変わった置き場の作品だけ作り直す", async () => {
+    const OTHER: WorkEntry = {
+      id: "solo",
+      title: "ひとりだけの作品",
+      folderPath: "C:\\別の場所\\単独作品",
+      registeredAt: "2026-09-21T00:00:00.000Z",
+    };
+    const state = { porcelain: " M 001.txt\n" };
+    const git = fakeGit(state, (cwd) =>
+      cwd === OTHER.folderPath ? OTHER.folderPath : LIBRARY
+    );
+    const registry = new WorkRegistry(fakeContext([WORK_A, OTHER]) as never);
+    const monitor = new GitSyncMonitor(registry, { run: git.run });
+    await monitor.refreshAll({ fetch: false });
+    git.calls.length = 0;
+
+    watcherFor(OTHER.folderPath).fireChange(`${OTHER.folderPath}\\001.txt`);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(statusRuns(git.calls, OTHER.folderPath)).toBe(1);
+    expect(statusRuns(git.calls, WORK_A.folderPath)).toBe(0);
+    monitor.dispose();
+  });
+
+  test("同じ置き場で続けて保存しても、作り直しは各作品1回ずつ", async () => {
+    const state = { porcelain: " M あかつきの記/001.txt\n" };
+    const git = fakeGit(state, () => LIBRARY);
+    const registry = new WorkRegistry(fakeContext([WORK_A, WORK_B]) as never);
+    const monitor = new GitSyncMonitor(registry, { run: git.run });
+    await monitor.refreshAll({ fetch: false });
+    git.calls.length = 0;
+
+    watcherFor(WORK_A.folderPath).fireChange(`${WORK_A.folderPath}\\001.txt`);
+    await vi.advanceTimersByTimeAsync(1000);
+    watcherFor(WORK_B.folderPath).fireChange(`${WORK_B.folderPath}\\001.txt`);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    // 待ちは置き場ごとに1本なので、まとまって1回ぶんだけ走る
+    expect(statusRuns(git.calls, WORK_A.folderPath)).toBe(1);
+    expect(statusRuns(git.calls, WORK_B.folderPath)).toBe(1);
+    monitor.dispose();
   });
 });

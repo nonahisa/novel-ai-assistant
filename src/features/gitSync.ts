@@ -274,7 +274,22 @@ export class GitSyncMonitor implements vscode.Disposable {
    */
   private readonly folderWatchers = new Map<
     string,
-    { watcher: vscode.FileSystemWatcher; timer?: ReturnType<typeof setTimeout> }
+    vscode.FileSystemWatcher
+  >();
+
+  /**
+   * 作り直しを待っているタイマー。**置き場ごとに1本**（設計書6.15.1）。
+   *
+   * 0.74.1 では作品ごとに1本持っていたが、書庫（1つの置き場に複数の作品）
+   * では印が変わらなかった。**`dirty` は `git status` が置き場ぜんぶを
+   * 数えた値**なので、同じ置き場の作品はみな同じ数を持つ。しかも
+   * ステータスバーは `gitSyncStatusText.ts` の `uniqueByRoot` で
+   * **置き場ごとに最初に来る作品の状態だけ**を使う。末尾の作品だけ
+   * 作り直しても、表示が見ているのは古いままの先頭の作品になる。
+   */
+  private readonly folderRefreshTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
   >();
 
   /**
@@ -341,11 +356,10 @@ export class GitSyncMonitor implements vscode.Disposable {
 
   dispose(): void {
     for (const disposable of this.disposables) disposable.dispose();
-    for (const entry of this.folderWatchers.values()) {
-      entry.watcher.dispose();
-      if (entry.timer) clearTimeout(entry.timer);
-    }
+    for (const watcher of this.folderWatchers.values()) watcher.dispose();
     this.folderWatchers.clear();
+    for (const timer of this.folderRefreshTimers.values()) clearTimeout(timer);
+    this.folderRefreshTimers.clear();
     this.changed.dispose();
     this.filesChanged.dispose();
   }
@@ -362,10 +376,13 @@ export class GitSyncMonitor implements vscode.Disposable {
         .list()
         .map((work) => [path.normalizeForComparison(work.folderPath), work])
     );
-    for (const [key, entry] of this.folderWatchers) {
+    // **待ちのタイマーはここで消さない。** 置き場ごとに1本なので、
+    // 登録を外した作品のために消すと、同じ置き場の他の作品の待ちまで
+    // 止めてしまう。タイマーが切れたときに登録簿から取り直すので、
+    // 外れた作品は自然に対象から落ちる
+    for (const [key, watcher] of this.folderWatchers) {
       if (wanted.has(key)) continue;
-      entry.watcher.dispose();
-      if (entry.timer) clearTimeout(entry.timer);
+      watcher.dispose();
       this.folderWatchers.delete(key);
     }
     for (const [key, work] of wanted) {
@@ -380,41 +397,96 @@ export class GitSyncMonitor implements vscode.Disposable {
         // エディタの切り替え）だけで動く。印が遅れるだけで壊れはしない
         continue;
       }
-      const entry: {
-        watcher: vscode.FileSystemWatcher;
-        timer?: ReturnType<typeof setTimeout>;
-      } = { watcher };
       const schedule = (uri: vscode.Uri) => {
         if (!affectsSyncStatus(path.fromUri(uri))) return;
-        this.scheduleFolderRefresh(work.id, entry);
+        this.scheduleFolderRefresh(work.id);
       };
       watcher.onDidChange(schedule);
       watcher.onDidCreate(schedule);
       watcher.onDidDelete(schedule);
-      this.folderWatchers.set(key, entry);
+      this.folderWatchers.set(key, watcher);
     }
   }
 
-  /** ファイルの変化を受けて、少し待ってから状態を作り直す */
-  private scheduleFolderRefresh(
-    workId: string,
-    entry: { timer?: ReturnType<typeof setTimeout> }
-  ): void {
-    if (entry.timer) clearTimeout(entry.timer);
-    entry.timer = setTimeout(() => {
-      entry.timer = undefined;
-      // 登録簿から取り直す。題や場所が変わっていれば新しいほうで見る
-      const work = this.registry.get(workId);
-      if (!work) return;
-      // 取り込みや送信の最中なら重ねず、もう一度待ち直す。
-      // **この見張りはネットへ出ないし、知らせも出さない**——
-      // 印が変わるだけなので、作者の操作を邪魔しない
-      if (this.refreshing.has(workId)) {
-        this.scheduleFolderRefresh(workId, entry);
-        return;
+  /**
+   * ファイルの変化を受けて、少し待ってから状態を作り直す。
+   *
+   * **待ちは置き場ごとに1本**（`folderRefreshTimers` の理由）。書庫では
+   * 同じ置き場の作品が続けて保存されるので、作品ごとに待つとgitを
+   * 何本も同時に起こすことになる。
+   */
+  private scheduleFolderRefresh(workId: string): void {
+    // 登録簿から取り直す。題や場所が変わっていれば新しいほうで見る
+    const work = this.registry.get(workId);
+    if (!work) return;
+    const key = this.refreshGroupKey(work);
+    const waiting = this.folderRefreshTimers.get(key);
+    if (waiting) clearTimeout(waiting);
+    this.folderRefreshTimers.set(
+      key,
+      setTimeout(() => {
+        this.folderRefreshTimers.delete(key);
+        void this.refreshFolderGroup(key, workId);
+      }, FOLDER_REFRESH_DEBOUNCE_MS)
+    );
+  }
+
+  /**
+   * 同じ置き場の作品を、まとめて作り直す（設計書6.15.1）。
+   *
+   * **順に待ちながら回す。** 書庫には11作品が入ることがあり、まとめて
+   * `git status` を起こすと、書いている最中にgitが何本も並ぶ。
+   * `updateStatusBar` は `refresh` の中で呼ばれるので、ここでは触らない。
+   */
+  private async refreshFolderGroup(key: string, workId: string): Promise<void> {
+    const works = this.worksInRefreshGroup(key, workId);
+    const first = works[0];
+    if (!first) return;
+    // 取り込みや送信の最中なら重ねず、もう一度待ち直す。
+    // **この見張りはネットへ出ないし、知らせも出さない**——
+    // 印が変わるだけなので、作者の操作を邪魔しない
+    if (works.some((work) => this.refreshing.has(work.id))) {
+      this.scheduleFolderRefresh(first.id);
+      return;
+    }
+    for (const work of works) {
+      await this.refresh(work, { fetch: false, notify: false });
+    }
+  }
+
+  /**
+   * その作品の待ちをまとめる鍵。**置き場の根**を使う。
+   *
+   * 根は `uniqueByRoot`（表示側）が使っている鍵と同じものなので、
+   * これで揃えれば「表示が見ている作品」も必ず作り直される。
+   * **まだ状態が無い作品**（起動直後）は根が分からないので、作品
+   * フォルダーを鍵にしておく。あとで状態が付けば根で揃う。
+   */
+  private refreshGroupKey(work: WorkEntry): string {
+    const status = this.statuses.get(work.id);
+    if (status && "root" in status) return normalizeForComparison(status.root);
+    return normalizeForComparison(work.folderPath);
+  }
+
+  /** その鍵の置き場に属する、登録済みの作品 */
+  private worksInRefreshGroup(key: string, workId: string): WorkEntry[] {
+    const works = this.registry.list().filter((work) => {
+      const status = this.statuses.get(work.id);
+      // **状態があるなら、根がいちばん確かである。** 置き場の中に
+      // 別の置き場が入れ子になっていても取り違えない
+      if (status && "root" in status) {
+        return normalizeForComparison(status.root) === key;
       }
-      void this.refresh(work, { fetch: false, notify: false });
-    }, FOLDER_REFRESH_DEBOUNCE_MS);
+      // まだ状態が無い作品は、その置き場の下にあれば仲間とみなす
+      return (
+        normalizeForComparison(work.folderPath) === key ||
+        isPathInside(key, work.folderPath)
+      );
+    });
+    if (works.length > 0) return works;
+    // 置き場がまだ分からない段階。変わった作品だけを見る
+    const work = this.registry.get(workId);
+    return work ? [work] : [];
   }
 
   statusFor(workId: string): GitSyncStatus | undefined {
