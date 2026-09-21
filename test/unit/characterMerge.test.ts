@@ -446,6 +446,44 @@ describe("登場人物マージ", () => {
     expect(third.characters[0].appearance).toBe("銀髪");
   });
 
+  // role・appearance と同じ fillOrConflict を通るが、
+  // characterMerge.test.ts はこれまで role の欄でしか確かめていなかった。
+  // 紹介文（summary）は設定資料の顔に当たる項目なので、名指しで確かめる
+  test("紹介文（summary）も食い違う情報を上書きせず競合に残す", () => {
+    const existing = emptyCharacter("char_001", "灯");
+    existing.summary = "村の薬師";
+
+    const result = mergeExtractedCharacters([existing], [
+      { data: { name: "灯", summary: "旅の商人" }, chapters: [2] },
+    ]);
+
+    expect(result.characters[0].summary).toBe("村の薬師");
+    expect(result.conflicts).toEqual([
+      { characterName: "灯", field: "summary", values: ["村の薬師", "旅の商人"] },
+    ]);
+  });
+
+  test("紹介文（summary）は話数の分かる値が2つ揃うと作中の変化として畳み、最後の話の値になる", () => {
+    const existing = emptyCharacter("char_001", "灯");
+    existing.summary = "村の薬師";
+
+    const first = mergeExtractedCharacters([existing], [
+      { data: { name: "灯", summary: "旅の商人" }, chapters: [7] },
+    ]);
+    const second = mergeExtractedCharacters(first.characters, [
+      { data: { name: "灯", summary: "王都の騎士" }, chapters: [12] },
+    ]);
+
+    expect(second.characters[0].conflicts).toEqual([]);
+    expect(second.characters[0].changes.map((change) => change.value)).toEqual([
+      "村の薬師",
+      "旅の商人",
+      "王都の騎士",
+    ]);
+    expect(second.characters[0].summary).toBe("王都の騎士");
+    expect(second.folded).toEqual([{ characterName: "灯", field: "summary" }]);
+  });
+
   test("詳細な記述を採用し既存の競合候補を重複なく追加する", () => {
     const existing = emptyCharacter("char_001", "灯");
     existing.role = "騎士";
