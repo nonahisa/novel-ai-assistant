@@ -4,7 +4,10 @@ import {
   NOTATION_PATTERN,
   NOTATION_RULES,
   SITE_NOTATION_PATTERN,
+  collectTermSpans,
 } from "../../src/core/manuscriptRender";
+// 用語の位置は**製品と同じ道**で作る（写した位置で測ると、実機で外れる）
+import { TermIndex, type TermEntry } from "../../src/core/termIndex";
 // 面が送る位置が、拡張機能側の判定に当たるかを同じ本文で確かめる
 import { findRubyAt } from "../../src/core/ruby";
 import {
@@ -161,10 +164,31 @@ interface ComposeApi {
     end: number
   ): ComposeAtom[];
   composeChunkIsRuby(atom: ComposeAtom): boolean;
+  /** かたまりの中の用語（作者の実機報告、2026-09-21） */
+  composeChunkAt(atoms: ComposeAtom[], offset: number | null): ComposeAtom | null;
+  composeChunkBaseNode(atom: ComposeAtom): FakeNode | null;
+  composeChunkBaseRange(atom: ComposeAtom): { start: number; end: number };
+  composeChunkCovering(
+    atoms: ComposeAtom[],
+    span: { start: number; end: number }
+  ): ComposeAtom | null;
+  composeSpanPoints(
+    atoms: ComposeAtom[],
+    span: { start: number; end: number }
+  ): {
+    head: { node: FakeNode; offset: number };
+    tail: { node: FakeNode; offset: number };
+  } | null;
+  composeTermForOffset(
+    atoms: ComposeAtom[] | null,
+    offset: number | null,
+    spans: MenuSpan[]
+  ): MenuSpan | null;
   pickMenuTerm(
     clickOffset: number | null,
     selection: { start: number; end: number } | null,
-    spans: MenuSpan[]
+    spans: MenuSpan[],
+    atoms?: ComposeAtom[]
   ): MenuSpan | null;
   /** シーンメモ（設計書6.40.3） */
   memoIsLine(line: string): boolean;
@@ -185,7 +209,9 @@ const api = new Function(
     " composeNormalizeNewlines, composeBuildLine, composeBuildFragment," +
     " composeAtoms, composeDomToNotation, composeOffsetToPoint," +
     " composePointToOffset, composeSelectionHasChunk, composeSelectionChunks," +
-    " composeChunkIsRuby, pickMenuTerm," +
+    " composeChunkIsRuby, composeChunkAt, composeChunkBaseNode," +
+    " composeChunkBaseRange, composeChunkCovering, composeSpanPoints," +
+    " composeTermForOffset, pickMenuTerm," +
     " memoIsLine, memoPartsOf, memoClassFor };"
 )() as ComposeApi;
 
@@ -1447,6 +1473,150 @@ describe("右クリックが指す用語", () => {
 });
 
 /**
+ * ルビ・傍点の中にある用語（作者の実機報告、2026-09-21）。
+ *
+ * 「組んで書く面で、**ルビの付いた人物名**（`{三門太志|みかどたいし}`）は
+ * 色が付かず、右クリックしても設定資料が出ない。ホバーのチップも出ない」。
+ *
+ * 用語の位置（`collectTermSpans`）は**記法つきの本文**で数えてあるので、
+ * 「三門太志」は `{` の次から入っている。ところがこの面の位置の変換は
+ * かたまりの中へ入らない（編集できないので境目へ寄せる）ため、
+ *
+ * - 色 … head も tail も「かたまりの後ろ」になり、**潰れた範囲**で色が出ない
+ * - 右クリック … 押した位置が `{` の位置になり、**用語の外**で引けない
+ *
+ * という2つが同時に起きていた。**かたまりの中にある用語は、かたまりごと
+ * 扱う**（塗るのは親文字だけ。読み仮名までは塗らない）。
+ */
+describe("ルビの中にある用語", () => {
+  function entry(text: string, id: string): TermEntry {
+    return { text, kind: "character", id, canonicalName: text };
+  }
+
+  /** 製品と同じ道で位置を作る（親文字と、読み仮名にだけ当たる別名） */
+  const index = new TermIndex([
+    entry("三門太志", "char_001"),
+    entry("みかどたいし", "char_002"),
+    entry("結衣", "char_003"),
+  ]);
+
+  function spansOf(value: string) {
+    return collectTermSpans(value, index);
+  }
+
+  const curly = "そこへ{三門太志|みかどたいし}と結衣が来た。";
+  const site = "そこへ｜三門太志《みかどたいし》と結衣が来た。";
+
+  for (const [label, value, mode] of [
+    [".md（中括弧）", curly, "curly"],
+    [".txt（投稿サイトの記法）", site, "site"],
+  ] as [string, string, Mode][]) {
+    describe(label, () => {
+      const root = build(value, mode);
+      const atoms = api.composeAtoms(root);
+      const spans = spansOf(value);
+      const base = spans.find((span) => span.id === "char_001")!;
+      const reading = spans.find((span) => span.id === "char_002")!;
+      const outside = spans.find((span) => span.id === "char_003")!;
+
+      it("用語の位置は、記法の中を指している（不具合の前提）", () => {
+        expect(value.slice(base.start, base.end)).toBe("三門太志");
+        const chunk = atoms.find((atom) => atom.kind === "chunk")!;
+        expect(chunk.start).toBeLessThan(base.start);
+        expect(base.end).toBeLessThan(chunk.end);
+      });
+
+      it("色の範囲が、かたまりの親文字を包む（潰れていない）", () => {
+        const points = api.composeSpanPoints(atoms, base)!;
+        expect(points).not.toBeNull();
+        // 同じ節点の同じ位置＝潰れた範囲＝色が出ない、では困る
+        const collapsed =
+          points.head.node === points.tail.node &&
+          points.head.offset === points.tail.offset;
+        expect(collapsed).toBe(false);
+        // 親文字のテキスト節点だけを塗る（読み仮名は塗らない）
+        expect(points.head.node.nodeValue).toBe("三門太志");
+        expect(points.head.offset).toBe(0);
+        expect(points.tail.node).toBe(points.head.node);
+        expect(points.tail.offset).toBe(4);
+      });
+
+      it("かたまりの中を押したら、その用語を引く", () => {
+        // 親文字の上、読み仮名の上、記法の括弧の上——かたまりの中はどこでも
+        const chunk = api.composeChunkAt(atoms, base.start)!;
+        for (let at = chunk.start; at < chunk.end; at++) {
+          expect(api.pickMenuTerm(at, null, spans, atoms)?.id, "位置 " + at).toBe(
+            "char_001"
+          );
+        }
+      });
+
+      it("読み仮名にだけ当たる用語は引かないし、色も付けない", () => {
+        // 「みかどたいし」は読み仮名の側にしか無い＝本文には現れていない
+        expect(api.composeSpanPoints(atoms, reading)).toBeNull();
+        const only = spans.filter((span) => span.id === "char_002");
+        expect(api.pickMenuTerm(reading.start, null, only, atoms)).toBeNull();
+      });
+
+      it("かたまりの外の用語は、今までどおり", () => {
+        const points = api.composeSpanPoints(atoms, outside)!;
+        expect(points.head).toEqual(api.composeOffsetToPoint(atoms, outside.start));
+        expect(points.tail).toEqual(api.composeOffsetToPoint(atoms, outside.end));
+        expect(api.pickMenuTerm(outside.start, null, spans, atoms)?.id).toBe(
+          "char_003"
+        );
+        // かたまりの直後（用語のないところ）は、やはり何も指さない
+        const chunk = api.composeChunkAt(atoms, base.start)!;
+        expect(api.pickMenuTerm(chunk.end, null, spans, atoms)).toBeNull();
+      });
+
+      /**
+       * caretRangeFromPoint は、contenteditable="false" のルビの上でも
+       * **中の文字ノード**を返してくる。そこを拾えないと、本文の末尾へ
+       * 落ちて見当違いの場所を引く。
+       */
+      it("かたまりの中の文字ノードを指されたら、かたまりの頭へ寄せる", () => {
+        const chunk = api.composeChunkAt(atoms, base.start)!;
+        const baseNode = api.composeChunkBaseNode(chunk)!;
+        expect(api.composePointToOffset(atoms, baseNode, 2)).toBe(chunk.start);
+        // かたまりの要素そのものを指された場合も同じ
+        expect(api.composePointToOffset(atoms, chunk.node, 1)).toBe(chunk.start);
+      });
+    });
+  }
+
+  /** 傍点のかたまりも同じ扱い（親文字がそのまま本文に出る） */
+  it("傍点の中の用語も引ける", () => {
+    const value = "そこへ{{結衣}}が来た。";
+    const atoms = api.composeAtoms(build(value));
+    const spans = spansOf(value);
+    const span = spans.find((found) => found.id === "char_003")!;
+    const points = api.composeSpanPoints(atoms, span)!;
+    expect(points.head.node.nodeValue).toBe("結衣");
+    expect(points.tail.offset).toBe(2);
+    expect(api.pickMenuTerm(span.start, null, spans, atoms)?.id).toBe("char_003");
+  });
+
+  /**
+   * **ホバーのチップも同じ引き方にする。** 片方だけ直すと、色は付いて
+   * いるのに載せても何も出ない、という食い違いが残る。
+   */
+  it("ホバーのチップも、かたまりを見る同じ関数を通る", () => {
+    const at = code.slice(code.indexOf("function composeTermSpanAt("));
+    expect(at.slice(0, 400)).toContain(
+      "composeTermForOffset(composeCurrentAtoms(), offset, termSpans)"
+    );
+  });
+
+  /** 位置の一覧を渡さなければ、今までどおり位置だけで引く（後方互換） */
+  it("位置の一覧を渡さなければ、これまでの引き方のまま", () => {
+    const spans = [{ start: 2, end: 6, id: "char_001" }];
+    expect(api.pickMenuTerm(3, null, spans)?.id).toBe("char_001");
+    expect(api.pickMenuTerm(6, null, spans)).toBeNull();
+  });
+});
+
+/**
  * 位置を本文へ直せなかったことを記録する（縦書きの切り分け。実機の報告）。
  *
  * **正常なら1行も出ない。** 出るなら、その環境では座標→本文の位置の変換が
@@ -1463,10 +1633,12 @@ describe("右クリックの位置が取れなかったときの記録", () => {
     );
     // 縦書きかどうかが分からないと、切り分けにならない
     expect(at.slice(0, 900)).toContain("(vertical !== false)");
-    // 判定そのものは切り出した関数に任せる（ここで二重に持たない）
-    expect(at.slice(0, 900)).toContain(
-      "pickMenuTerm(clickOffset, composeMenuAt, termSpans)"
-    );
+    // 判定そのものは切り出した関数に任せる（ここで二重に持たない）。
+    // **位置の一覧も渡す**——かたまり（ルビ・傍点）の中の用語を引くため
+    expect(at.slice(0, 900)).toContain("pickMenuTerm(");
+    expect(at.slice(0, 900)).toContain("composeMenuAt,");
+    expect(at.slice(0, 900)).toContain("termSpans,");
+    expect(at.slice(0, 900)).toContain("composeCurrentAtoms()");
   });
 });
 

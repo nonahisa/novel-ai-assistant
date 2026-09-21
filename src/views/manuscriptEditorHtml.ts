@@ -2963,6 +2963,21 @@ ruby > rt {
         }
       }
     }
+    /*
+      かたまり（ルビ・傍点）そのもの、またはその中（親文字・読み仮名）を
+      指されている。**かたまりの頭へ寄せる。**
+
+      caretRangeFromPoint は、contenteditable="false" のルビの上でも
+      **中の文字ノード**を返してくる。そこを拾えないと、下の逃げ道
+      （入れ物の最後尾）まで落ちて**本文の末尾**が返り、右クリックも
+      チップも見当違いの場所を引いていた（作者の実機報告、2026-09-21
+      「ルビの付いた人物名で設定資料が出ない」）。
+    */
+    for (const atom of atoms) {
+      if (atom.kind !== "chunk") continue;
+      if (composeContains(atom.node, node)) return atom.start;
+    }
+
     // 要素の「何番目の子の手前か」で指されている
     const kids = node.childNodes;
     if (kids && offset < kids.length) {
@@ -3011,6 +3026,133 @@ ruby > rt {
     return !!atom && !!atom.node && atom.node.nodeName === "RUBY";
   }
 
+  /* ── かたまりの中にある用語（作者の実機報告、2026-09-21） ──
+     用語の位置（collectTermSpans）は**記法つきの本文**で数えてあるので、
+     ルビの記法の中に書かれた人物名も、記法の位置のまま入っている。
+     ところがこの面の位置の変換はかたまりの中へ入らない（編集できないため
+     手前か後ろの境目へ寄せる）ので、そのまま使うと色は潰れた範囲になって
+     出ず、右クリックは記法の括弧の位置＝用語の外を引いていた。
+     **かたまりの中にある用語は、かたまりごと扱う。** */
+
+  /** その位置を含むかたまり。端（終わりちょうど）は含めない */
+  function composeChunkAt(atoms, offset) {
+    if (offset === null || offset === undefined) return null;
+    for (const atom of atoms) {
+      if (atom.kind !== "chunk") continue;
+      if (offset >= atom.start && offset < atom.end) return atom;
+    }
+    return null;
+  }
+
+  /**
+   * かたまりの親文字（ルビなら漢字の側、傍点なら点を打つ字）のテキスト節点。
+   *
+   * **組んだ形で見る**——ルビは ruby の直下に親文字、その後ろに rt（読み
+   * 仮名）を置いてある（composeBuildLine）ので、**最初のテキスト節点**が
+   * 親文字である。記法の文字列から数えると、.md と .txt で数え方を2つ
+   * 持つことになる。
+   */
+  function composeChunkBaseNode(atom) {
+    if (!atom || !atom.node) return null;
+    const kids = atom.node.childNodes;
+    if (!kids) return null;
+    for (let i = 0; i < kids.length; i++) {
+      if (kids[i].nodeType === 3) return kids[i];
+    }
+    return null;
+  }
+
+  function composeNodeValue(node) {
+    if (!node) return "";
+    const raw = node.nodeValue;
+    return raw === undefined || raw === null ? "" : raw;
+  }
+
+  /**
+   * かたまりの記法のうち、親文字が占めている範囲。
+   *
+   * **読み仮名の側に当たった用語を引かない**ために使う（かな書きの別名が
+   * 登録されていると、読み仮名に当たってしまう）。記法の書き方の違い
+   * （.md の中括弧・.txt の投稿サイト記法）に耐えるよう、**記法の文字列の
+   * 中から親文字を探す**。見つからなければ、かたまり全体を親文字とみなす。
+   */
+  function composeChunkBaseRange(atom) {
+    const value = composeNodeValue(composeChunkBaseNode(atom));
+    const at = value === "" ? -1 : atom.text.indexOf(value);
+    if (at < 0) return { start: atom.start, end: atom.end };
+    return { start: atom.start + at, end: atom.start + at + value.length };
+  }
+
+  /** その用語をまるごと呑み込んでいるかたまり。無ければ null */
+  function composeChunkCovering(atoms, span) {
+    for (const atom of atoms) {
+      if (atom.kind !== "chunk") continue;
+      if (atom.start <= span.start && span.end <= atom.end) return atom;
+    }
+    return null;
+  }
+
+  /**
+   * 用語へ色を置く DOM の範囲（head・tail）。置けなければ null。
+   *
+   * かたまりの中の用語は、**親文字のテキスト節点だけ**を塗る——読み仮名まで
+   * 塗ると、色の付いた読み仮名が本文の一部のように見える。親文字が取れない
+   * ときだけ、かたまりを丸ごと囲む。
+   */
+  function composeSpanPoints(atoms, span) {
+    const chunk = composeChunkCovering(atoms, span);
+    if (chunk) {
+      const range = composeChunkBaseRange(chunk);
+      /*
+        **読み仮名にだけ当たった用語は塗らない**（かな書きの別名が
+        登録されていると起きる）。引けない（右クリックもチップも出ない）
+        のに色だけ付くと、押せるはずだと誤解させる
+      */
+      if (span.start >= range.end || span.end <= chunk.start) return null;
+      const base = composeChunkBaseNode(chunk);
+      if (base) {
+        return {
+          head: { node: base, offset: 0 },
+          tail: { node: base, offset: composeNodeValue(base).length },
+        };
+      }
+      return {
+        head: { node: chunk.parent, offset: chunk.index },
+        tail: { node: chunk.parent, offset: chunk.index + 1 },
+      };
+    }
+    const head = composeOffsetToPoint(atoms, span.start);
+    const tail = composeOffsetToPoint(atoms, span.end);
+    if (!head || !tail) return null;
+    return { head: head, tail: tail };
+  }
+
+  /**
+   * その位置にある用語。**かたまりの中なら、そのかたまりに当たる用語**。
+   *
+   * かたまりの中では位置が1点に定まらない（変換が境目へ寄せる）ので、
+   * かたまりの範囲に重なるかどうかで引く。ただし**親文字の終わりまで**で
+   * 見る——読み仮名にだけ当たった用語は、その字が本文に無いのと同じである。
+   *
+   * @param atoms 位置の一覧（渡さなければ、今までどおり位置だけで引く）
+   */
+  function composeTermForOffset(atoms, offset, spans) {
+    if (offset === null || offset === undefined) return null;
+    const chunk = atoms ? composeChunkAt(atoms, offset) : null;
+    if (chunk) {
+      const base = composeChunkBaseRange(chunk);
+      for (const span of spans) {
+        if (span.start < base.end && span.end > chunk.start) return span;
+      }
+      return null;
+    }
+    // **端は含めない。** 用語の直後で右クリックして隣の資料が開くと分かりにくい
+    for (const span of spans) {
+      if (offset >= span.start && offset < span.end) return span;
+    }
+    return null;
+  }
+
   /**
    * 右クリックで開く品書きが、どの用語を指すか。
    *
@@ -3043,8 +3185,10 @@ ruby > rt {
    * @param clickOffset 画面の座標から求めた本文の位置（求まらなければ null）
    * @param selection いまの選択（{ start, end }。無ければ null）
    * @param spans 用語の位置の一覧
+   * @param atoms 位置の一覧。**渡すと、かたまり（ルビ・傍点）の中の用語も
+   *   引ける**（2026-09-21）。3段の決め方そのものは変えていない
    */
-  function pickMenuTerm(clickOffset, selection, spans) {
+  function pickMenuTerm(clickOffset, selection, spans, atoms) {
     const hasRange =
       selection && typeof selection.end === "number" &&
       selection.end > selection.start;
@@ -3067,11 +3211,7 @@ ruby > rt {
     }
     if (offset === null) return null;
 
-    // **端は含めない。** 用語の直後で右クリックして隣の資料が開くと分かりにくい
-    for (const span of spans) {
-      if (offset >= span.start && offset < span.end) return span;
-    }
-    return null;
+    return composeTermForOffset(atoms, offset, spans);
   }
   /* compose:end */
 
@@ -3613,12 +3753,17 @@ ruby > rt {
       for (const span of termSpans) {
         const bucket = buckets[span.kind];
         if (!bucket) continue;
-        const head = composeOffsetToPoint(atoms, span.start);
-        const tail = composeOffsetToPoint(atoms, span.end);
-        if (!head || !tail) continue;
+        /*
+          **かたまりの中にある用語は、かたまり（できれば親文字）を塗る。**
+          位置をそのまま DOM へ直すと、かたまりの中へは入れないので
+          head も tail も「かたまりの後ろ」になり、潰れた範囲＝色なしに
+          なっていた（作者の実機報告、2026-09-21）
+        */
+        const points = composeSpanPoints(atoms, span);
+        if (!points) continue;
         const range = document.createRange();
-        range.setStart(head.node, head.offset);
-        range.setEnd(tail.node, tail.offset);
+        range.setStart(points.head.node, points.head.offset);
+        range.setEnd(points.tail.node, points.tail.offset);
         bucket.push(range);
       }
       for (const kind of COMPOSE_HIGHLIGHTS) {
@@ -3669,13 +3814,15 @@ ruby > rt {
     return composePointToOffset(composeCurrentAtoms(), node, offset);
   }
 
-  /** その位置にある用語（端は含めない。打つ面の termAtCaret と同じ扱い） */
+  /**
+   * その位置にある用語（端は含めない。打つ面の termAtCaret と同じ扱い）。
+   *
+   * **かたまりの中も引ける**ように、位置の一覧を渡す——ホバーのチップも
+   * 右クリックと同じ引き方にしておかないと、色は付いているのに載せても
+   * 何も出ない、という食い違いが起きる。
+   */
   function composeTermSpanAt(offset) {
-    if (offset === null) return null;
-    for (const span of termSpans) {
-      if (offset >= span.start && offset < span.end) return span;
-    }
-    return null;
+    return composeTermForOffset(composeCurrentAtoms(), offset, termSpans);
   }
 
   /**
@@ -3703,7 +3850,12 @@ ruby > rt {
           (vertical !== false) + "）",
       });
     }
-    return pickMenuTerm(clickOffset, composeMenuAt, termSpans);
+    return pickMenuTerm(
+      clickOffset,
+      composeMenuAt,
+      termSpans,
+      composeCurrentAtoms()
+    );
   }
 
   /**
