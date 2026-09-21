@@ -191,14 +191,27 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
    * @param syncTooltip その内訳（ホバーで読む）。
    *   **印は短くしか書けない。** 「記録待ち」と「送信待ち」が何を指すのかは
    *   言葉だけでは伝わりきらないので、ここで補う
+   * @param onFirstRender 作品一覧を**初めて描き終えた**ときに1回だけ呼ぶ。
+   *   起動の所要時間を計るために要る（設計書6.107）。**`core` へ
+   *   `vscode` を持ち込めない**ので、印を打つのは `extension.ts` 側にし、
+   *   ここは「描き終わった」ことだけを知らせる
    */
   constructor(
     private readonly registry: WorkRegistry,
     private readonly syncBadge?: (workId: string) => string | undefined,
-    private readonly syncTooltip?: (workId: string) => string[]
+    private readonly syncTooltip?: (workId: string) => string[],
+    private readonly onFirstRender?: () => void
   ) {
     registry.onDidChange(() => this.refresh());
   }
+
+  /**
+   * 初回の描画を知らせ終えたか。
+   *
+   * 一覧は折りたたみや作品の増減のたびに描き直されるので、
+   * **2回目以降は知らせない**（知らせると「初回」が上書きされる）。
+   */
+  private firstRenderNotified = false;
 
   refresh(workId?: string): void {
     if (workId) {
@@ -570,6 +583,23 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
               error instanceof Error ? error.message : String(error)
             )
           );
+        }
+      }
+      /*
+        **初回の描画が終わったことを、1回だけ知らせる**（設計書6.107）。
+
+        `return` の直前に置く——作品ごとの走査（`load`）が終わって
+        ノードが揃った時点が「作品一覧が出るまで」に当たる。
+
+        **計測のために一覧を壊さない。** 知らせ先が落ちても、
+        起動の数字が1行残らないだけで、作品一覧は出す。
+      */
+      if (!this.firstRenderNotified) {
+        this.firstRenderNotified = true;
+        try {
+          this.onFirstRender?.();
+        } catch {
+          // 知らせ先（extension.ts）で記録済み。ここでは一覧を優先する
         }
       }
       return nodes;

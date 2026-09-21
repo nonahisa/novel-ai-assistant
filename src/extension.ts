@@ -199,6 +199,7 @@ import {
 } from "./core/gitSyncStatusText";
 import { NullGitSyncMonitor, type GitSyncMonitorLike } from "./features/gitSyncStub";
 import { canRunProcesses } from "./core/runtime";
+import { beginStartupTiming } from "./core/startupTiming";
 import { describeProcessesBlocked } from "./core/processAvailability";
 import { exclusiveLabelOf } from "./core/exclusiveCommands";
 import { beginCommand, endCommand } from "./core/runningCommands";
@@ -449,6 +450,14 @@ const STEP_GROUPS_KEY = "novelai.steps.expandedGroups";
 const STEP_WORK_KEY = "novelai.stepMenu.selectedWorkId";
 
 /**
+ * 起動の数字を書き出すまでに、開いたときの点検を待つ上限（設計書6.107）。
+ *
+ * **点検は回線しだいでいつまでも終わらない。** 待ちきると、作者が
+ * いちばん知りたい「一覧が出るまで何秒か」が1行も残らなくなる。
+ */
+const STARTUP_HANDOFF_WAIT_MS = 10_000;
+
+/**
  * MD化の案内を「今はしない」と断られたファイルの記憶先
  * （作者の指示、2026-08-29）。
  *
@@ -517,6 +526,15 @@ async function saveBeforeCheck(
 export async function activate(
   context: vscode.ExtensionContext
 ): Promise<{ extendMarkdownIt<T extends MarkdownItLike>(md: T): T }> {
+  /**
+   * 起動の所要時間（設計書6.107）。
+   *
+   * 作者の機械ではメニューや作品一覧が出るまでに10秒以上かかるが、
+   * 母艦でデータ量を測っても説明がつかない。**当てずっぽうで直さず、
+   * 作者の機械で計る。** ここは入口なので、いちばん最初に作る。
+   */
+  const startupTiming = beginStartupTiming();
+
   /**
    * いま走っている操作（設計書6.17.4の末尾）。
    *
@@ -760,6 +778,7 @@ export async function activate(
       }
     })();
   });
+  startupTiming.mark("登録簿");
 
   // GitHub同期の見張り。自動で走るのはfetch（取得のみ）だけで、
   // 取り込み・送信は作者がボタンを押したときにしか実行しない（設計書5.5.1）。
@@ -790,10 +809,76 @@ export async function activate(
     return status?.kind === "tracked" ? status : undefined;
   };
 
+  /*
+    **起動の数字を書き出す仕掛け**（設計書6.107）。
+
+    出すのは「作品一覧の初回描画」と「開いたときの点検」の**遅いほう**が
+    来た時点で1回だけ。どちらか片方で出すと、実際に作者が待たされている
+    ほうが数字に入らない。
+
+    **知らせは出さない。** 作者を止めずに、あとから読めればよい。
+  */
+  let startupTimingWritten = false;
+  let firstRenderDone = false;
+  // ブラウザ版では点検を走らせない（gitの子プロセスが起こせない）ので、
+  // 最初から「待つものは無い」扱いにする
+  let handoffPending = canRunProcesses();
+  let handoffTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const writeStartupTiming = (): void => {
+    if (startupTimingWritten) return;
+    startupTimingWritten = true;
+    if (handoffTimer !== undefined) clearTimeout(handoffTimer);
+    /*
+      **保管庫側のログへ書く**（`useLogFile(undefined)`）。起動は作品が
+      決まらない処理なので、直前に触っていた作品のログへ紛れさせない。
+      `logStep` は出力チャンネルにも同じ行を出す。
+    */
+    useLogFile(undefined);
+    logStep(`${startupTiming.report()}（作品 ${registry.list().length}）`);
+  };
+
+  const noteStartupHandoffDone = (label: string): void => {
+    startupTiming.mark(label);
+    handoffPending = false;
+    if (firstRenderDone) writeStartupTiming();
+  };
+
+  const noteFirstWorkListRender = (): void => {
+    try {
+      startupTiming.mark("作品一覧の初回描画");
+      firstRenderDone = true;
+      if (!handoffPending) {
+        writeStartupTiming();
+        return;
+      }
+      /*
+        **点検の終わりを待ちきらない。** 回線が遅いと `runStartupHandoff`
+        は何十秒もかかることがあり、そのあいだ「一覧が出るまで何秒か」が
+        どこにも残らない。10秒で見切って「点検 未了」と書いて出す。
+      */
+      handoffTimer = setTimeout(() => {
+        startupTiming.mark("点検 未了");
+        writeStartupTiming();
+      }, STARTUP_HANDOFF_WAIT_MS);
+      context.subscriptions.push({
+        dispose: () => {
+          if (handoffTimer !== undefined) clearTimeout(handoffTimer);
+        },
+      });
+    } catch (error) {
+      // 計測で作品一覧を壊さない。数字が1行残らないだけに留める
+      logFailure("起動の所要時間の記録", {
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   const treeProvider = new WorkTreeProvider(
     registry,
     (workId) => describeSyncBadge(gitSync.statusFor(workId)),
-    (workId) => describeSyncTooltip(gitSync.statusFor(workId))
+    (workId) => describeSyncTooltip(gitSync.statusFor(workId)),
+    noteFirstWorkListRender
   );
   // 同期状態が変わっても本文は変わらないので、再走査はせず描き直すだけにする
   gitSync.onDidChange(() => treeProvider.redraw());
@@ -1742,6 +1827,9 @@ export async function activate(
     registerCommand("novelai.soloChat", () => setSoloView("chat")),
     registerCommand("novelai.showAllViews", () => setSoloView(undefined))
   );
+  // 3つのツリー（作品一覧・詳細メニュー・簡単ステップ）と、2つのパネル
+  // （提案・AIに相談）を登録し終えた所。ここまでが「画面の登録」（設計書6.107）
+  startupTiming.mark("画面の登録");
 
   /**
    * 相談に集中する表示にする／戻す（設計書6.21.2）。
@@ -5623,7 +5711,12 @@ export async function activate(
       // 動的importを待てないので、読み込み済みの関数を掴んでおく
       beforeClose = () => handoff.noticeBeforeClose(deps);
 
+      // 起動の所要時間（設計書6.107）。点検は回線の速さに左右されるので、
+      // 始まりと終わりの両方を残さないと「遅いのは点検か、その手前か」が
+      // 分からない
+      startupTiming.mark("点検 開始");
       await handoff.runStartupHandoff(deps);
+      noteStartupHandoffDone("点検 終了");
     })().catch((error) => {
       // 点検で落ちても拡張機能の起動は止めない
       logFailure("開いたときの点検", {
@@ -5657,6 +5750,10 @@ export async function activate(
     await offerWriterDiagnosis(writerDiagnosisDeps());
     await offerFirstRunSetupInVsCode(context, aiRegistry);
   })();
+
+  // ここまでが `activate` 本体（設計書6.107）。**画面が出るのはこのあと**
+  // ——VS Code が作品一覧の `getChildren` を呼ぶのは、ここを抜けてからである
+  startupTiming.mark("activate 終了");
 
   // **VS Code 標準のMarkdownプレビューへ差し込む**（設計書6.12）。
   // 独自のプレビュー画面を作らないのは、作者が既に使っている
